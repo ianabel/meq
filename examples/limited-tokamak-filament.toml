@@ -1,0 +1,229 @@
+# LIMITED-TOKAMAK-FILAMENT -- THE SAME MACHINE AS examples/limited-tokamak.toml
+# WITH ITS FOUR CONDUCTORS TAKEN OUT OF THE MESH AND EVALUATED ANALYTICALLY,
+# POSED AGAINST THE 513^2 REFERENCE, AND STARTED COLD.
+#
+#     ./build/meq-run examples/limited-tokamak-filament.toml
+#
+# WHY IT IS SHIPPED, AND IT IS NOT FOR THE GEOMETRY.  It is the one
+# configuration in examples/ that is FREE BOUNDARY, LIMITED and SUBTRACTING at
+# once, and each of those three is load bearing for a different consumer:
+#
+#   free boundary + subtracting   the combination where the split's consumers
+#                                 live -- the two borders, the axis
+#                                 constraint and the first plasma-support
+#                                 freeze.  examples/machine-f-diiid-filament
+#                                 .toml is the other one, and MEASUREMENTS.md
+#                                 M-159 and M-160 are what it cost to find
+#   limited                       the LCFS is a smooth closed flux surface
+#                                 with no X-point, so it is representable as
+#                                 a truncated Fourier series.  Every diverted
+#                                 case in this directory is not, and that is
+#                                 what puts DESC's free-boundary objective out
+#                                 of reach on them -- the same corner that
+#                                 forces examples/fixed-*.toml to psi_n = 0.95
+#   free boundary + limited +     the psi_bnd border at a PRESCRIBED contact,
+#   subtracting                   which no other file reaches: the diverted
+#                                 machines constrain psi_bnd at an X-point
+#                                 that is itself an unknown, and every other
+#                                 limited case meshes its conductors so the
+#                                 conductor term is identically zero.  That
+#                                 gap is MEASUREMENTS.md M-161, and this file
+#                                 is what found it
+#
+# AND THE FILAMENT MODEL IS NOT AN APPROXIMATION HERE, IT IS THE MATCH.
+# freegs4e's H_limited_circular is built from freegs4e.machine.Coil, an exact
+# point filament: controlPsi is Greens( R_c, z_c, R, z )*turns and the coil's
+# `area` only imposes a current-density limit.  examples/limited-tokamak.toml
+# gives MEQ's four conductors an extent instead -- 0.1 x 0.1 m rectangles
+# carrying a uniform current density -- so its agreement with this reference is
+# reached DESPITE a modelling difference whose leading term goes as ( w/d )^2,
+# about 1.6e-02 on the near field with the coils 0.4 m from the plasma edge.
+# [conductors] Model = "filament" closes that term for term rather than
+# bounding it.  tools/freegs4e-benchmark/fgsref.py's make_limited() is the
+# reference machine and I_limited_shaped is the other half of the experiment.
+#
+# THE REFERENCE IS ref-n513/ AND THAT CHOICE DRAGS THREE OTHER NUMBERS WITH IT.
+# freegs4e's coil currents are an OUTPUT of its control system rather than an
+# input, so they converge in the grid like everything else: P1 moves 1.4%
+# between 129^2 and 513^2 and P2 moves 14%.  Its psi_bndry is the maximum over
+# the innermost ring of cells inside the wall, so the contact point moves too
+# -- from ( 1.3375, -0.0125 ) at 129^2 to ( 0.8250, -0.3000 ) at 513^2, the
+# other side of the machine.  A file carrying one grid's currents and compared
+# against the other grid's answer is comparing two different machines.  So the
+# currents below, the limiter point below and the guess are all ref-n513/'s.
+# tools/freegs4e-benchmark/README.md, "Regenerating the fixture".
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#   psi_axis   9.308752051236113e-02   axis at ( 1.054988269, 0.000000000 )
+#   psi_bndry  2.622461848992344e-02   contact at ( 0.825000, -0.300000 )
+#   span       6.686290202243769e-02
+#   I_p        3.000000004538178e+05 A
+#   R0 1.0033  a 0.3413  A 2.940  kappa 1.0029  delta +0.0609
+#   no X-point anywhere in range -- vertical-field coils only
+#
+# THE PROFILE TABLES ARE THIS CASE'S OWN, AND REUSING THE SIBLING'S WAS TRIED
+# FIRST AND IS A TRAP.  Both profiles are exactly amplitude * Psi^2 at every
+# grid, so examples/limited-tokamak-{pprime,ggprime}.dat have the same SHAPE as
+# these -- and MEQ carries the profile scale as an unknown that [source]
+# PlasmaCurrent closes, so one common factor on both tables is absorbed exactly
+# and MEQ converges to the same equilibrium from either pair.  It costs nothing
+# to stop there and it is wrong.
+#
+# The amplitudes are 6.03% apart, not the 0.22% the span would explain.
+# freegs4e's profile amplitudes are an OUTPUT of its control system, exactly as
+# its coil currents are, so they converge in the grid with everything else: p
+# on the axis is 46791.95 Pa at 129^2 and 43969.09 Pa at 513^2.  DESC is handed
+# p( rho ) and I( rho ) as ABSOLUTE profiles and its toroidal flux depends on
+# g, so the sibling's pair poses it a 6% stronger plasma than the reference it
+# is being differenced against -- with MEQ's own run saying nothing, because
+# MEQ's answer is right either way.  tools/freegs4e-benchmark/
+# make_freeb_profiles.py writes this pair from ref-n513/ and asserts the shape
+# against the reference's own array to 5.9e-16 before writing.
+
+[mesh]
+File = "examples/limited-tokamak-filament.msh"
+
+# THE DISC IS NOT GAMMA.  D_h is cut from this mesh at [boundary.exterior]
+# Radius = 2.40, which has to fit strictly inside.  There is no CoilSize:
+# [conductors] Model takes the conductors out of the mesh, so the generator is
+# never told where they are and is refused the key.
+[mesh.generate]
+Tool = "halfdisc"
+Radius = 2.6
+Size = 0.16
+PlasmaRMin = 0.65
+PlasmaRMax = 1.35
+PlasmaZMin = -0.35
+PlasmaZMax = 0.35
+PlasmaSize = 0.048
+
+[discretisation]
+PolynomialDegree = 3
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+# The plasma support is a SET, so its derivative is a surface term the Jacobian
+# does not have: it is frozen within each solve and re-decided between them.
+# MEASUREMENTS.md M-82.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+
+# F = 0 wherever the normalised flux is non-positive, so the plasma edge is
+# found rather than prescribed.  The conductors are outside this support by
+# construction and, under Model = "filament", outside the mesh as well.
+ConfineToPlasma = true
+
+# THE STARTING VALUE OF AN UNKNOWN, AND IT IS A TOTAL.  psi_ax is a bordered
+# Newton row rather than data, and what it constrains is the TOTAL flux at the
+# magnetic axis -- psi_p + psi_c -- so this is the peak of the cold guess below
+# with both halves summed, which mkcoldguess.py prints when run WITHOUT
+# --remainder.  The guess file itself is the REMAINDER and peaks at
+# 1.271438e-01, which is the right diagnostic for the guess and the wrong
+# number for this key.  The reference converged to 9.308752e-02, 19% away:
+# this is a basin and not an answer.
+PsiAxis = 7.543374292e-02
+PlasmaCurrent = 3.0e5
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/limited-tokamak-filament-pprime.dat"
+GGPrimeFile = "examples/limited-tokamak-filament-ggprime.dat"
+
+# THE FOUR POLOIDAL FIELD COILS, AT ref-n513/'s CURRENTS.  Vertical field only,
+# placed so that no null exists anywhere in the box: with no divertor coils
+# there is no X-point for the boundary logic to find and the plasma can only be
+# bounded by the limiter.  The half-extents are the machine's geometry and are
+# kept, but Model = "filament" does not integrate over them -- a filament has
+# no cross-section, and its field is one closed-form evaluation.
+[[coils]]
+Name = "P1U"
+CentreR = 1.75
+CentreZ = 0.90
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -1.7989539962e+05
+
+[[coils]]
+Name = "P1L"
+CentreR = 1.75
+CentreZ = -0.90
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -1.7989540014e+05
+
+[[coils]]
+Name = "P2U"
+CentreR = 0.55
+CentreZ = 1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -5.2739899919e+04
+
+[[coils]]
+Name = "P2L"
+CentreR = 0.55
+CentreZ = -1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -5.2739898377e+04
+
+[boundary]
+Type = "zero"
+
+# THE LIMITER IS PRESCRIBED AS A POINT, AND IT IS THE 513^2 CONTACT.  Giving
+# both codes the same point takes the contact-finding out of the comparison;
+# taking it from the SAME run as the coil currents is what keeps them one
+# machine.  MEQ evaluates psi_h here rather than at the nearest dof --
+# LimiterConstraint::ExactPoint.
+[boundary.limiter]
+R = 0.825
+Z = -0.300
+
+# rho = 2.40 is inside the background mesh's 2.6, so Gamma_h is a staircase of
+# element faces strictly inside Gamma and the transfer has a band to cross.
+# Modes = 10 is converged on this machine: 4 costs 2.4%, 6 costs 0.3%, and
+# 10 -> 14 moves psi_ax by 0.02%.
+[boundary.exterior]
+Radius = 2.40
+CentreZ = 0.0
+Modes = 10
+
+# COLD, AND psi_p RATHER THAN psi.  Under [conductors] Model the unknown is
+# the REMAINDER, and converting a stored total is not a route to it: psi_c
+# diverges logarithmically at each filament while any stored psi cannot, so
+# psi - psi_c at a node near one is a large negative number where the true
+# psi_p is smooth.  tools/freegs4e-benchmark/mkcoldguess.py --remainder writes
+# the pair, and what it puts in is the DESIGN footprint carrying the target
+# current, shaped by the design PROFILES -- no converged field anywhere in it.
+# Its peak is 36.6% from the remainder's answer.
+#
+# examples/limited-tokamak.toml is handed mkexactguess.py's field instead, a
+# Green's-function sum over the reference's own converged Jtor, and its header
+# argues that the warm guess is this case's problem statement rather than an
+# optimisation because a cold BUMP start never converges here.  That is about
+# the bump: a cold DESIGN start, which knows the footprint, the profile shapes
+# and the target current, reaches psi_ax = 9.309076e-02 in 18 Newton
+# iterations over 4 support sweeps -- the SAME answer to every digit as the
+# exact guess, which takes 127.  The warm guess is slower here, which is worth
+# knowing before anybody reaches for one.
+#
+# BOTH OF THOSE NUMBERS ARE POST-FIX.  Before MEASUREMENTS.md M-161 neither
+# guess converged to the right equilibrium on this file: the psi_bnd border
+# read the remainder at the limiter contact, which is 0.50 of the span here,
+# so the cold run wandered to the iteration cap and the exact one converged in
+# 27 steps onto a branch with psi_bnd > psi_ax and no O-point at all.
+[initialguess]
+Type = "gridfunction"
+File = "examples/limited-tokamak-filament-guess.gf"
+MeshFile = "examples/limited-tokamak-filament-guess.mesh"
+
+[conductors]
+Model = "filament"
+
+[output]
+Prefix = "limited-tokamak-filament"
+GridNR = 129
+GridNZ = 129

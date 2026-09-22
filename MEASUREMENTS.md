@@ -7263,3 +7263,218 @@ wrong answer — the outer loop repaired it by sweep 1 — so it presented purel
 cost, and a profile rather than a disagreement is what found it. **A
 decomposition has as many consumers as the codebase has readers of the field, and
 the ones that cost time rather than correctness are the last to be found.**
+
+### M-161
+
+**A FOURTH CONSUMER OF THE COIL-SUBTRACTION SPLIT READS THE REMAINDER, AND THIS
+ONE IS THE `psi_bnd` BORDER AT A PRESCRIBED LIMITER CONTACT. IT DOES NOT
+PERTURB THE ANSWER — IT CONVERGES, CLEANLY, TO A DIFFERENT EQUILIBRIUM.**
+
+`GradShafranovSolver::solve()` builds two lambdas over the limiter contact and
+the split between them is deliberate and correct: `limiterValue()` is the border
+row as a **linear functional**, applied to backsolved directions in `rowDot()`
+where a constant would be poison, and `limiterTotal()` is the **physical flux**
+at the contact, applied only to states, where `psi_c` belongs. That much is
+[M-148](#m-148)'s lesson already learned and written down in the code.
+
+`limiterTotal()` enumerated **three** routes to the contact and there are
+**four**:
+
+| route | `LimiterConstraint` | how it knows the point | conductor term |
+|---|---|---|---|
+| nearest dof | `NearestDof` | an index into the potential block | `conductorPsiAtDof()` ✔ |
+| located contact | `LocatedContact` | `refreshLimiterContact()` at this iterate | `conductorPsi( r, z )` ✔ |
+| the X-point | `ExactPoint` + `xPointIsUnknown` | XP-3's own unknown | `conductorPsi( xR, xZ )` ✔ |
+| **a prescribed point** | **`ExactPoint`** | **`[boundary.limiter] R`, `Z` — given data** | **none** |
+
+The fourth is the **default**. `refreshLimiterContact()` returns early anywhere
+but `LocatedContact`, so `limiterContactLocatedValue` is false; on a limited
+machine `xPointIsUnknown` is false; every branch falls through and `psi_bnd` is
+constrained to `psi_p( r_L, z_L )`.
+
+**THE SIZE, WHICH IS WHY IT IS NOT A PERTURBATION.** `psi_c` at the contact, on
+the `freegs4e` limited machine, against that reference's own span:
+
+| reference | contact | `psi_c` | span | ratio |
+|---|---|---|---|---|
+| 129² | ( 1.3375, 0 ) | −7.904798e-02 | +6.701312e-02 | **1.18** |
+| 513² | ( 0.825, −0.300 ) | −3.368246e-02 | +6.686290e-02 | **0.50** |
+
+**WHAT THE DEFECTIVE RUN LOOKS LIKE, AND IT IS NOT A FAILURE.** On
+`examples/limited-tokamak-filament.toml` with the exact guess, 1823 elements at
+`k = 3`:
+
+| | defective | fixed | reference |
+|---|---|---|---|
+| Newton iterations | 27 | **2** | — |
+| support sweeps | 3, settled | 2, settled | — |
+| `psi_ax` | 2.732203e-03 | **9.309076e-02** | 9.308752051236113e-02 |
+| `psi_bnd` | 9.512147e-03 | **2.622480e-02** | 2.622461848992344e-02 |
+| span | **−6.78e-03** | +6.686596e-02 | +6.686290e-02 |
+| profile scale | **−2.146488e-04** | **0.9999423** | — |
+| `I_p` | 3.000000e+05 A | 3.000000e+05 A | 3.000000004538178e+05 A |
+| exit | 1, on the axis-source check | **0** | — |
+
+It converges, every border at machine zero, the plasma current met to seven
+figures — onto a branch with `psi_bnd > psi_ax`, a **negative** profile scale,
+no O-point anywhere and `r = 0` inside the plasma. The only thing that caught
+it is `apps/meq.cpp`'s source-on-the-axis refusal, which fires on the
+consequence rather than the cause and whose advice ("look at the limiter and
+the initial guess") is wrong here.
+
+**AND THE SAME ANSWER FROM TWO DIFFERENT PATHS IS WHAT SAID IT WAS THE POSING.**
+Re-run with `PlasmaSupportSweeps` deleted — the moving support rather than the
+freeze — it converges in 38 iterations to `psi_ax = 2.732203e-03` and
+`scale = -2.146488e-04`, **identical to the last digit**. A defect in a solve
+path gives two paths two answers; a defect in the problem gives them one.
+
+**THE COLD START WAS A SYMPTOM AND NOT A PROPERTY OF THE CASE.**
+`examples/limited-tokamak.toml`'s header records that a cold start does not
+converge here, and the cold **design** guess — `mkcoldguess.py --remainder`,
+the one that takes `examples/machine-f-diiid-filament.toml` from cold to the
+reference — behaved exactly as that predicted: `‖r‖` drifting around 2.4e-03
+with the line search taking negative and fifty-fold steps, 200 Newton
+iterations, then the bordered Picard-then-Newton to its own cap. With the
+border fixed the **same guess** converges:
+
+| guess | Newton iterations | support sweeps | `psi_ax` |
+|---|---|---|---|
+| cold design blob | **18** (11, 3, 2, 2) | 4, settled | 9.309076e-02 |
+| exact, from the reference's `Jtor` | **127** (125, 2) | 2, settled | 9.309076e-02 |
+
+Same answer to every digit, and **the warm guess is seven times the work** —
+its sweep 0 takes 125 iterations where the cold one takes 11. Worth knowing
+before anybody reaches for a warm start on this path.
+
+**WHY NOTHING FOUND IT.** It needs a case that is **free boundary, limited and
+subtracting at once**, and until `examples/limited-tokamak-filament.toml` there
+was none: every diverted machine takes the X-point branch, and every other
+limited case meshes its conductors, where `conductorPsi` is identically zero
+and all four routes agree. CS-3's acceptance is a conductor inside `Γ` with no
+plasma; CS-4's is a fixed-boundary box; XP-3's limited fixture is meshed.
+**Each acceptance is sharp and the cell where three features meet has none** —
+which is [M-148](#m-148)'s own lesson, now for the fourth time.
+
+**THE FIX IS ONE BRANCH AND ITS ORDER MATTERS.** `setXPointBoundary()` *requires*
+`ExactPoint` — it throws on anything else — so the diverted path satisfies the
+new test as well and the X-point branch has to be asked first; and
+`boundaryFluxR`/`boundaryFluxZ` are not filled on that path, because it skips the
+one-off `locatePotentialPoint()` and refills the same three variables from the
+X-point at every iterate. `DriverAcceptance` is 23 cases green afterwards with
+`machine-f-diiid-filament`'s X-point unmoved at **6.399e-04 m**, which is the
+reordering being bit-neutral.
+
+**AND THE SPLIT'S OWN DIAGNOSTIC IS `profile scale`.** It reads **0.9999423**
+on the fixed run and −2.1e-04 on the defective one. `scale` is the unknown that
+`[source] PlasmaCurrent` closes, so it lands on 1 exactly when the profile
+tables' amplitudes are the ones the reference converged to — a free check that
+the conversion, the tables and the branch are all right at once, and the one
+column that separates "converged" from "converged to the right thing".
+
+### M-162
+
+**MEQ, DESC AND `freegs4e` ON ONE **FREE-BOUNDARY** EQUILIBRIUM, WHICH IS THE
+FIRST TIME THE DESC COMPARISON HAS LEFT THE FIXED-BOUNDARY LADDER.**
+
+`examples/limited-tokamak-filament.toml` against `ref-n513/H_limited_circular`,
+`tools/desc-benchmark/descfreeb.py` at `M = 10`. Relative L2 of `psi` over the
+nodes both arms answer for, `compare.py`'s own norm with its band mask:
+
+| pair | rel L2 | rel Linf | nodes |
+|---|---|---|---|
+| DESC vs `freegs4e` 513² | **1.3329e-04** | 5.5778e-04 | 37,523 |
+| MEQ vs `freegs4e` 513² | **2.0379e-04** | 1.2602e-02 | 136,242 |
+| **MEQ vs DESC** | **1.2873e-04** | 4.0235e-04 | 19,296 |
+
+and the one scalar all three report, the flux span `psi_ax − psi_bnd`:
+
+| | span, Wb/rad | from the reference |
+|---|---|---|
+| `freegs4e` 513² | 6.686290202243769e-02 | — |
+| MEQ, 1823 el, `k = 3` | 6.686596e-02 | **+4.6e-05** |
+| DESC, `M = 10` | 6.686094e-02 | **−2.9e-05** |
+
+**THE MUTUAL FLOOR IS THE SAME SIZE AS EACH ARM'S OWN DISTANCE FROM THE
+REFERENCE**, exactly as the fixed-boundary race found, so nothing here resolves
+below about 1e-04 and a target under it is not a measurement.
+
+**THE CONDUCTOR MODEL IS EXACT ON ALL THREE ARMS AND THAT IS NEW.** `freegs4e`'s
+`H_limited_circular` is built from `freegs4e.machine.Coil`, a point filament;
+MEQ's `[conductors] Model = "filament"` is a point filament; and DESC's
+`FourierPlanarCoil` with one `r_n` is a circular loop, checked against
+`mu0 I R^2 / 2( R^2 + z^2 )^{3/2}` on the loop's own axis to **nine figures**.
+`examples/limited-tokamak.toml` cannot say this: its four conductors are
+0.1 × 0.1 m rectangles against the reference's filaments, a `( w/d )^2` term of
+about 1.6e-02 on the near field, and its 1.3e-04 agreement was reached despite
+that rather than because of it.
+
+**THE THREE ITEMS THE CONVERSION AUDITS ITSELF ON**, all against the reference
+by routes that do not use it:
+
+| | conversion | reference | apart |
+|---|---|---|---|
+| enclosed current at `rho = 1` | 2.999981e+05 A | 3.000000e+05 A | 6.3e-06 |
+| `g` on the axis, by integrating MEQ's `gg'` inward from `fvac` | 1.053805 | 1.0538056579795645 | 6e-07 |
+| `p` on the axis | 43968.75 Pa | 43969.085 Pa | 7.7e-06 |
+| MXH fit of the LCFS, 20 harmonics | — | — | 8.3304e-06 m, **2.44e-05** of the minor radius |
+
+**AND ALL FOUR READ 6% WRONG WHEN THE CASE REUSED ITS SIBLING'S PROFILE
+TABLES**, which is a trap worth the space because MEQ cannot see it.
+`examples/limited-tokamak-{pprime,ggprime}.dat` were converted from the 129²
+reference and both profiles are exactly `amplitude * Psi^2` at every grid, so
+the SHAPES are the same function — and MEQ carries a profile scale that
+`[source] PlasmaCurrent` closes, so one common factor on both tables is
+absorbed exactly and MEQ converges to the same equilibrium from either pair.
+The amplitudes are **6.03%** apart and not the 0.22% the span would explain:
+`freegs4e`'s profile amplitudes are an output of its control system exactly as
+its coil currents are, and `p` on the axis is 46791.95 Pa at 129² against
+43969.09 Pa at 513². DESC is handed `p( rho )` and `I( rho )` as **absolute**
+profiles, so it was being posed a 6% stronger plasma than the reference it was
+differenced against, and read `enclosed current 3.192583e+05 A` — while MEQ's
+run said nothing, because MEQ's answer is right either way.
+`tools/freegs4e-benchmark/make_freeb_profiles.py` writes the case its own pair.
+
+**THE EXTERNAL FIELD IS NOT THE `[[coils]]` BLOCKS, AND LEAVING OUT THE
+TOROIDAL FIELD DOES NOT FAIL — IT CONVERGES TO A DIFFERENT MACHINE.**
+`BoundaryError` enforces two residuals on the LCFS, `B_out·n = 0` and
+`B_out² − B_in² − 2 mu0 p = 0`, and `B_in` carries `B_phi = g/R` while a set of
+poloidal field coils produces none. A tokamak's toroidal field comes from a TF
+coil that no Grad–Shafranov input names, because GS sees `g` only through
+`g dg/dpsi` and MEQ's answer does not depend on the additive constant. Measured,
+PF coils alone against PF + `ToroidalMagneticField( B0 = g_Gamma, R0 = 1 )`:
+
+| | PF only | PF + TF |
+|---|---|---|
+| normal-field error at the start, normalised | 1.692e-03 | 1.692e-03 |
+| **magnetic-pressure error at the start, normalised** | **8.999e-01** | **1.855e-04** |
+| free-boundary iterations | 12 | 1 |
+| boundary moved | **8.0670e-01 m** | 6.1443e-05 m |
+| `psi_ax` against the reference | **92% out** | 2.9e-05 |
+
+The normal-field residual is small from the start either way — the reference's
+LCFS really is a free-boundary surface — and with no toroidal field the
+pressure residual is `B_phi²` entire, so the optimiser trades the good residual
+against the impossible one and walks the boundary **0.81 m on a plasma of minor
+radius 0.34**. `g_at_gamma` is the scalar that supplies it, and it is the same
+one the conversion already uses to fix the total toroidal flux — used a second
+time, for a different reason.
+
+**WHAT THE TWO CODES ARE GIVEN IS NOT THE SAME STATEMENT AND CANNOT BE MADE
+ONE.** MEQ is given the coil currents, `p'( Psi )`, `g g'( Psi )`, a target
+`I_p` and **a limiter contact**; DESC is given the coil currents, `p( rho )`,
+`I( rho )` and **the total toroidal flux `Psi`**, with no wall and no limiter in
+the formulation at all. Both are complete statements of one equilibrium and
+neither is the other's: the plasma's size is pinned by the contact in one and by
+`Psi` in the other. A disagreement can live there as well as in either
+discretisation.
+
+**AND DESC'S FREE-BOUNDARY PROBLEM HAS A SECOND BRANCH THAT ITS OWN OBJECTIVE
+PREFERS.** Started from a circle of the machine's design size rather than from
+the reference's LCFS — `--boundary circle`, the cold arm — it converges in 5
+iterations to a boundary **1.9163e-01 m** from the reference's, with `psi_ax`
+**15.1%** out, and a residual sum of squares of **4.760e-06 against the
+reference boundary's own 1.369e-05**. It is not under-converged: it found a
+better minimum of the objective as posed, at a different equilibrium. That is
+[M-26](#m-26)'s finding in DESC's coordinates — a free boundary has to be told
+which branch — and it means the honest matched posing hands both codes the same
+branch selection rather than letting either search.

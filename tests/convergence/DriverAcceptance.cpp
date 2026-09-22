@@ -3639,3 +3639,125 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedMachine )
 		"three solve routes landing on solutions 9.4% apart, so which one "
 		"answered decides which equilibrium is reported" );
 }
+
+/*
+ * THE SAME SPLIT ON THE OTHER TOPOLOGY, WHICH IS WHERE THE FOURTH REMAINDER
+ * DEFECT LIVED.
+ *
+ * theDriverSolvesACoilSubtractedMachine above is DIVERTED, so its psi_bnd
+ * border is constrained at an X-point that is itself an unknown and
+ * limiterTotal() takes XP-3's branch. This one is LIMITED and its contact is
+ * PRESCRIBED, which is a fourth route to the same point that had no conductor
+ * term at all -- MEASUREMENTS.md M-161. Nothing else in the tree is free
+ * boundary, limited and subtracting at once.
+ *
+ * IT ASSERTS THE ANSWER AND NOT AN ITERATION COUNT, for the reason the
+ * diverted case does: the defective run CONVERGED, in 27 Newton steps with
+ * every border at machine zero and the plasma current met to seven figures,
+ * and exited on a check of the source rather than of the solve.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
+{
+	std::string const config = "examples/limited-tokamak-filament.toml";
+	std::string const mesh = "examples/limited-tokamak-filament.msh";
+
+	// ref-n513/H_limited_circular's own answer, out of that file's header.
+	double const referencePsiAxis = 9.308752051236113e-02;   // Wb/rad
+	double const referencePsiBoundary = 2.622461848992344e-02;
+	double const referenceAxisR = 1.054988269;               // m
+	double const referenceAxisZ = 0.0;
+
+	int status = -1;
+	std::string const log = captureStdout(
+		std::string( wrapper() ) + " " + config, &status );
+
+	BOOST_TEST_REQUIRE( status == 0,
+	                    "the wrapper exited " << status << " on " << config
+	                    << ". captureStdout() discards stderr, so re-run it by "
+	                    "hand for the diagnosis. Its stdout was:\n" << log );
+	BOOST_TEST_REQUIRE( exists( mesh ), mesh << " was not made" );
+
+	std::string const header = ncdumpHeader( "limited-tokamak-filament.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(),
+	                    "limited-tokamak-filament.nc is unreadable" );
+	BOOST_TEST_REQUIRE( header.find( "filament" ) != std::string::npos,
+	                    "the run did not record a subtracting conductor model, "
+	                    "so whatever it solved is not what this case is about" );
+
+	double const psiAxis = headerAttribute( header, "psi_axis" );
+	double const psiBoundary = headerAttribute( header, "psi_boundary" );
+	double const axisR = headerAttribute( header, "axis_r" );
+	double const axisZ = headerAttribute( header, "axis_z" );
+	double const scale = headerAttribute( header, "profile_scale" );
+	double const settled = headerAttribute( header, "plasma_support_settled" );
+
+	double const axisError = std::fabs( psiAxis - referencePsiAxis )
+	                         /std::fabs( referencePsiAxis );
+	double const boundaryError = std::fabs( psiBoundary
+	                                        - referencePsiBoundary )
+	                             /std::fabs( referencePsiBoundary );
+	double const axisApart = std::hypot( axisR - referenceAxisR,
+	                                     axisZ - referenceAxisZ );
+
+	std::printf( "\n  A COLD, COIL-SUBTRACTED LIMITED MACHINE\n"
+	             "    psi_ax        %.9e  vs %.9e   rel %.3e\n"
+	             "    psi_bnd       %.9e  vs %.9e   rel %.3e\n"
+	             "    magnetic axis ( %.6f, %+.6f )   %.3e m apart\n"
+	             "    profile scale %.9f\n"
+	             "    support        settled %g\n",
+	             psiAxis, referencePsiAxis, axisError,
+	             psiBoundary, referencePsiBoundary, boundaryError,
+	             axisR, axisZ, axisApart, scale, settled );
+	std::fflush( stdout );
+
+	/*
+	 * THE SPAN'S SIGN IS THE ASSERTION WITH THE MOST TEETH AND IT IS NOT A
+	 * TOLERANCE. The defective run reported psi_ax = 2.73e-03 BELOW a psi_bnd
+	 * of 9.51e-03 -- a negative span, which is a plasma whose flux rises
+	 * outward and which contains r = 0. No bound on |psi_ax| catches that as
+	 * cleanly as asking which of the two is larger.
+	 */
+	BOOST_TEST( psiAxis > psiBoundary,
+		"psi_ax " << psiAxis << " is not above psi_bnd " << psiBoundary
+		<< ", so the span is negative and this is not a confined plasma. That "
+		"is the signature of the psi_bnd border reading psi_p at the limiter "
+		"contact where it wants psi_p + psi_c -- MEASUREMENTS.md M-161. On "
+		"this machine the missing term is 0.50 of the span" );
+
+	/*
+	 * 2.0e-04, against a run that reads 3.5e-05. The defective one was 97%
+	 * out, so anything at all would separate them; this bound is set by what
+	 * the discretisation delivers rather than by what the defect cost.
+	 */
+	BOOST_TEST( axisError < 2.0e-04,
+		"a cold, coil-subtracted limited tokamak reports psi_ax " << psiAxis
+		<< " against the reference's " << referencePsiAxis << ", relative "
+		<< axisError );
+	BOOST_TEST( boundaryError < 2.0e-04,
+		"psi_bnd is " << psiBoundary << " against the reference's "
+		<< referencePsiBoundary << ", relative " << boundaryError
+		<< ". This is the quantity the M-161 border constrains directly" );
+	BOOST_TEST( axisApart < 2.0e-03,
+		"the magnetic axis is " << axisApart << " m from the reference's" );
+
+	/*
+	 * AND THE PROFILE SCALE, WHICH IS THE SPLIT'S OWN FREE DIAGNOSTIC.
+	 * `scale` is the unknown [source] PlasmaCurrent closes, so it lands on 1
+	 * exactly when the profile tables carry the amplitudes the reference
+	 * converged to. It read -2.15e-04 on the defective run -- a NEGATIVE
+	 * current density with the prescribed I_p still met to seven figures,
+	 * because the span had gone negative too and the two signs cancelled.
+	 */
+	BOOST_TEST( std::fabs( scale - 1.0 ) < 1.0e-03,
+		"the profile scale is " << scale << " and not 1. Either the tables' "
+		"amplitudes are not this reference's -- examples/limited-tokamak-*.dat "
+		"are the 129^2 grid's and are 6.03% away, MEASUREMENTS.md M-162 -- or "
+		"the solve is on a branch where scale and the span are both negative" );
+
+	BOOST_TEST( settled == 1.0,
+		"the plasma support did not settle in the sweeps allowed" );
+	BOOST_TEST( log.find( "bordered-picard-then-newton" ) == std::string::npos,
+		"the bordered Newton failed and the run was rescued by the "
+		"Picard-then-Newton fallback, so which equilibrium is reported was "
+		"chosen by a globalisation -- M-26" );
+}

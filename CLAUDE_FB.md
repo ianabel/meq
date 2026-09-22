@@ -3489,3 +3489,94 @@ every cell along one diagonal, so a box symmetric in `z` has a triangulation
 that is not. `LimiterCurve.cpp` records the same fact from the other side. The
 QUADRILATERAL variant has no diagonal to choose and is what
 `tests/convergence/UpDownSymmetry.cpp` solves on.
+
+## The limiter border read the remainder, and the case that found it is the free-boundary DESC race
+
+**THE FOURTH CONSUMER OF `psi = psi_p + psi_c` TO READ THE REMAINDER, AND THE
+FIRST THAT COULD ONLY BE REACHED BY THREE FEATURES AT ONCE.**
+`GradShafranovSolver::solve()` splits the limiter contact into `limiterValue()`,
+the border row as a linear functional, and `limiterTotal()`, the physical flux —
+M-148's lesson, in the code, correctly. `limiterTotal()` then enumerated **three**
+routes to the contact and there are **four**, and the one left out is the
+default: a PRESCRIBED point, `[boundary.limiter] R` and `Z`, under
+`LimiterConstraint::ExactPoint` with no X-point unknown. Nothing sets
+`limiterContactLocatedValue` there and `xPointIsUnknown` is false, so every
+branch falls through.
+
+→ **[M-161](MEASUREMENTS.md#m-161)** — the four routes · `psi_c` at the contact
+against the span · the defective run's own numbers · the cold start that was a
+symptom
+
+**IT DOES NOT PERTURB THE ANSWER, IT CHOOSES A DIFFERENT ONE.** `psi_c` at the
+contact is **0.50** of the span on the 513² reference and **1.18** on the 129²
+one, so the run converges — 27 Newton steps, every border at machine zero, `I_p`
+to seven figures — onto a branch with `psi_bnd > psi_ax`, a negative profile
+scale, no O-point and `r = 0` inside the plasma. What caught it is the
+source-on-the-axis refusal, firing on the consequence.
+
+**THE `profile scale` COLUMN IS THE DIAGNOSTIC AND IT IS FREE.** It is the
+unknown `[source] PlasmaCurrent` closes, so it lands on **1** exactly when the
+profile tables carry the amplitudes the reference converged to. It reads
+0.9999423 on the repaired run and −2.1e-04 on the defective one. It is the one
+printed number that separates *converged* from *converged to the right thing*,
+and it is worth reading on every coil-subtracted run.
+
+**AND IT ALSO SAYS THE COLD START WAS NEVER THIS CASE'S PROPERTY.**
+`examples/limited-tokamak.toml`'s header records that a cold start does not
+converge here, and the cold DESIGN guess behaved exactly as predicted while the
+border was wrong. With it fixed the same guess converges in **18** Newton
+iterations over 4 sweeps, against **127** for the exact guess built from the
+reference's own `Jtor` — the same answer to every digit, and the warm start is
+seven times the work.
+
+## DESC on a free boundary: only a limited case reaches it, and three codes then agree to 1.3e-04
+
+**DESC's `BoundaryError` CONSTRAINS THE LCFS, AND THE LCFS IS A
+`FourierRZToroidalSurface` — A TRUNCATED FOURIER SERIES.** Every free-boundary
+machine in `examples/` but one is DIVERTED, so its LCFS is a separatrix through
+an X-point and has a **corner**, which no truncation turns. That is the same
+fact `CLAUDE.md` records from the other side as the reason the
+`examples/fixed-*.toml` ladder is posed at `psi_n = 0.95`. A LIMITED plasma's
+edge is the smooth flux surface tangent to the limiter and is representable, so
+`examples/limited-tokamak-filament.toml` is the case the free-boundary
+comparison exists on and `tools/desc-benchmark/descfreeb.py` is its runner.
+
+→ **[M-162](MEASUREMENTS.md#m-162)** — the three pairings · the span all three
+report · the conversion's four self-audits · the toroidal field · the second
+branch
+
+**THE CONDUCTOR MODEL IS EXACT ON ALL THREE ARMS, WHICH NO OTHER CASE CAN SAY.**
+`freegs4e`'s `H_limited_circular` is point filaments, MEQ's `Model = "filament"`
+is point filaments, and DESC's `FourierPlanarCoil` with one `r_n` is a circular
+loop — checked against the closed form on the loop's own axis to **nine
+figures**. `examples/limited-tokamak.toml` carries 0.1 × 0.1 m rectangles
+against the same filament reference, a `( w/d )^2` term of about 1.6e-02 on the
+near field, so its agreement is reached despite a modelling difference rather
+than because the models agree.
+
+**THE EXTERNAL FIELD IS NOT THE `[[coils]]` BLOCKS, AND THIS IS THE ITEM MOST
+LIKELY TO BE REDISCOVERED.** `BoundaryError`'s second residual is
+`B_out² − B_in² − 2 mu0 p = 0`, and `B_in` carries `B_phi = g/R` while poloidal
+field coils produce none. A tokamak's toroidal field comes from a TF coil that
+**no Grad–Shafranov input names**, because GS sees `g` only through `g dg/dpsi`
+and MEQ's answer does not depend on the constant. With the PF coils alone the
+pressure residual starts at **0.90 normalised** — `B_phi²` entire — the
+optimiser trades the good normal-field residual against the impossible one, and
+the boundary walks **0.81 m on a plasma of minor radius 0.34**. It does not
+fail; it converges to a different machine. `g_at_gamma` supplies it, and that is
+the same scalar the conversion already needs for the total toroidal flux.
+
+**AND THE TWO CODES ARE NOT GIVEN THE SAME STATEMENT.** MEQ is given the
+currents, `p'`, `g g'`, a target `I_p` and **a limiter contact**; DESC is given
+the currents, `p( rho )`, `I( rho )` and **the total toroidal flux**, with no
+wall and no limiter in the formulation at all. The plasma's size is pinned by
+the contact in one and by `Psi` in the other. Both are complete statements of
+one equilibrium and a disagreement can live in that difference as well as in
+either discretisation.
+
+**DESC'S FREE-BOUNDARY PROBLEM HAS A SECOND BRANCH ITS OWN OBJECTIVE PREFERS.**
+From a circle of the machine's design size rather than the reference's LCFS it
+converges to a boundary **0.19 m** away with `psi_ax` 15% out — at a residual
+**lower** than the reference boundary's. Not under-converged: a better minimum,
+at a different equilibrium. M-26 in DESC's coordinates, and the reason the
+matched posing hands both codes the branch rather than letting either search.

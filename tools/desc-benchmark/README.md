@@ -538,3 +538,121 @@ Both arms are pinned to the physical cores with `taskset`, which bounds them but
 does not deprioritise them. Prefix the whole race with `nice -n 10` when
 anything else is running — and then do not read the seconds, because the point
 of `--require-quiet` is that nothing else should be.
+
+---
+
+## The free-boundary race, which is a different comparison and only one case reaches it
+
+Everything above is the SIX FIXED-BOUNDARY machines, where MEQ is handed `Gamma`
+and DESC is handed a surface fitted to it. `descfreeb.py` is the other
+comparison: both codes solve for the plasma boundary, from a coil set.
+
+```sh
+./venv/bin/python convert_desc.py limited-tokamak-filament --check
+./venv/bin/python descfreeb.py limited-tokamak-filament -M 10 --boundary reference
+./venv/bin/python compare_desc.py limited-tokamak-filament \
+      --desc runs/limited-tokamak-filament-descfreeb-M10-reference.npz \
+      --meq ../../limited-tokamak-filament.nc
+```
+
+**ONE CASE, AND WHICH ONE IS NOT A CHOICE.** `BoundaryError` constrains the
+LCFS, and the LCFS is a `FourierRZToroidalSurface` — a truncated Fourier series
+in the poloidal angle. Every free-boundary machine in `examples/` but one is
+DIVERTED, so its LCFS is a separatrix through an X-point and has a corner no
+truncation turns; it is the same fact that forces the fixed ladder to
+`psi_n = 0.95` rather than the separatrix. `examples/limited-tokamak-filament
+.toml` is limited, so its edge is smooth, and it is the only free-boundary case
+here.
+
+**WHAT IT READS** → **[M-162](../../MEASUREMENTS.md#m-162)**:
+
+| pair | rel L2 | nodes |
+|---|---|---|
+| DESC vs `freegs4e` 513² | 1.3329e-04 | 37,523 |
+| MEQ vs `freegs4e` 513² | 2.0379e-04 | 136,242 |
+| **MEQ vs DESC** | **1.2873e-04** | 19,296 |
+
+**Same mutual floor as the fixed ladder**, and for the same reason: each
+pairing is the size of each arm's own distance from the reference, so nothing
+resolves below about 1e-04.
+
+### Three things this comparison needs that the fixed one does not
+
+**1. The toroidal field, and it is the one most likely to be rediscovered.**
+`BoundaryError` enforces `B_out . n = 0` **and**
+`B_out^2 - B_in^2 - 2 mu0 p = 0`, and `B_in` carries `B_phi = g/R` while a set
+of poloidal field coils produces none at all. A tokamak's toroidal field comes
+from a TF coil that **no Grad-Shafranov input names** — GS sees `g` only
+through `g dg/dpsi`, so MEQ's answer does not depend on the additive constant
+and `[[coils]]` is the whole machine for MEQ and is not the whole machine for
+DESC. With the PF coils alone the pressure residual starts at **0.90
+normalised**, which is `B_phi^2` entire; the optimiser trades the good
+normal-field residual against the impossible one and walks the boundary
+**0.81 m** on a plasma of minor radius 0.34, for a `psi_ax` 92% wrong. It does
+not fail. `g_at_gamma` supplies it, which is the same scalar §2 of *the three
+things the conversion needs* already uses for the total toroidal flux.
+
+**2. Profile amplitudes that are this reference's, not a sibling's.** Both this
+machine's profiles are exactly `amplitude * Psi^2` at every grid, and MEQ
+carries a profile scale that `[source] PlasmaCurrent` closes — so one common
+factor on both tables is absorbed exactly and MEQ converges to the same
+equilibrium from either pair. **The amplitudes are 6.03% apart**, not the 0.22%
+the span would explain, because `freegs4e`'s profile amplitudes are an output of
+its control system exactly as its coil currents are. DESC is handed `p( rho )`
+and `I( rho )` as ABSOLUTE profiles, so the sibling's tables pose it a 6%
+stronger plasma and it reads `enclosed current 3.192583e+05 A` against a target
+of 3.0e+05 — with MEQ's own run saying nothing.
+`tools/freegs4e-benchmark/make_freeb_profiles.py` writes the case its own pair,
+and `--check`'s enclosed-current line is what catches this.
+
+**3. A branch, because the objective has more than one minimum.** Started from
+a circle of the machine's design size rather than from the reference's LCFS,
+DESC converges in 5 iterations to a boundary **0.19 m** from the reference's
+with `psi_ax` **15%** out — at a residual sum of squares of 4.760e-06 against
+the reference boundary's own 1.369e-05. It is not under-converged: it found a
+better minimum, at a different equilibrium. `--boundary reference` is the
+matched default for that reason and `--boundary circle` is the cold number
+beside it. MEQ needs the same thing and gets it from `[boundary.xpoint]`,
+`[source] PsiAxis` and the initial guess; see `MEASUREMENTS.md` M-26.
+
+### What is asymmetric here, and it is not the same list as the fixed ladder's
+
+**The conductor model is EXACT on all three arms, which no fixed case can say.**
+`freegs4e`'s `H_limited_circular` is `freegs4e.machine.Coil`, a point filament;
+MEQ's `[conductors] Model = "filament"` is a point filament; DESC's
+`FourierPlanarCoil` with a single `r_n` is a circular loop, checked against
+`mu0 I R^2 / 2( R^2 + z^2 )^{3/2}` on the loop's own axis to nine figures. So
+the row that floors the meshed sibling — a `( w/d )^2` term of about 1.6e-02 on
+the near field — is absent.
+
+**The MXH fit is still DESC's alone but it is ten times smaller**, 8.3304e-06 m
+at 20 harmonics, **2.44e-05** of the minor radius, and it does not improve with
+more harmonics: the floor is the 512-point LCFS polygon the 513² reference
+writes, not the fit.
+
+**AND THE TWO CODES ARE NOT GIVEN THE SAME STATEMENT OF THE PROBLEM.** MEQ is
+given the coil currents, `p'( Psi )`, `g g'( Psi )`, a target `I_p` and **a
+limiter contact**; DESC is given the coil currents, `p( rho )`, `I( rho )` and
+**the total toroidal flux `Psi`** — there is no wall and no limiter in its
+formulation at all. The plasma's size is pinned by the contact in one and by
+`Psi` in the other. Both are complete statements of one equilibrium and neither
+is the other's, so a disagreement can live in that difference as well as in
+either code's discretisation. This is the row with no analogue above.
+
+### Two harness defects this case found, both in the gauge
+
+**`compare_desc.py` was applying the FIXED ladder's gauge shift to a
+free-boundary MEQ run.** `compare.py` already knows the difference and takes
+`free_boundary=` for it — a free-boundary MEQ run shares `freegs4e`'s gauge
+exactly, both solving `psi -> 0` at infinity — and `meq_pair()` was not passing
+it. Measured: **1.36e-01 with the shift against 1.4e-04 without**, on a case
+whose scalars agree to 4.6e-05. `meta["free_boundary"]` is what selects it now.
+
+**And a trap that is NOT a defect, recorded because it cost time here.** A MEQ
+`.nc` written under `[conductors] Model` carries
+`content = "remainder (psi - psi_c)"`, and the `psi( Z, R )` **grid variable is
+the TOTAL**: `apps/meq.cpp` says so at the attribute's own site — it describes
+*which field the coefficients are*. Under a split the lossy interchange format
+carries the physically exact field and the exact format, the `.gf`, carries the
+remainder. Adding `psi_c` back to the grid double-counts it, and on this machine
+that reads 4.9e-01.

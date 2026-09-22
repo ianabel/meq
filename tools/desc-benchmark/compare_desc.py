@@ -74,9 +74,21 @@ def grid_pair(npz_a, npz_b, meta, core=None):
 	            rel_linf=float(np.abs(d).max() / scale), scale=scale)
 
 
-def meq_pair(npz, nc, meta_path, core=None):
-	"""MEQ's .nc against any grid file, through compare.py's own norm."""
-	return meq_compare.compare(npz, nc, meta_path, core=core)
+def meq_pair(npz, nc, meta_path, core=None, free_boundary=False):
+	"""MEQ's .nc against any grid file, through compare.py's own norm.
+
+	`free_boundary` PICKS THE GAUGE AND IT IS NOT COSMETIC.  On the fixed
+	ladder MEQ is handed the reference's psi_n = 0.95 surface with psi = 0 on
+	it, so its psi is the reference's shifted by that surface's flux and
+	`compare.py` subtracts `psi_surface`.  A free-boundary MEQ run shares the
+	reference's gauge exactly -- both solve the same exterior problem, psi -> 0
+	at infinity -- so there is nothing to subtract, and subtracting anyway
+	offsets one arm of the difference by the whole boundary flux.  Measured on
+	the limited machine: 1.36e-01 with the shift applied against 1.4e-04
+	without, on a case whose scalars agree to 4.6e-05.
+	"""
+	return meq_compare.compare(npz, nc, None if free_boundary else meta_path,
+	                           free_boundary=free_boundary, core=core)
 
 
 def main():
@@ -92,18 +104,17 @@ def main():
 
 	meta = json.load(open(os.path.join(convert.MEQ, "examples",
 	                                   f"{args.stem}-meta.json")))
-	reference = os.path.join(convert.REFDIR, f"{convert.CASES[args.stem]}.npz")
+	reference = os.path.join(convert.REFDIRS.get(args.stem, convert.REFDIR), f"{convert.CASES[args.stem]}.npz")
 	out = {}
 	out["desc_vs_freegs4e"] = grid_pair(args.desc, reference, meta, args.core)
+	free = bool(meta.get("free_boundary"))
+	meta_path = os.path.join(convert.MEQ, "examples",
+	                         f"{args.stem}-meta.json")
 	if args.meq:
-		out["meq_vs_freegs4e"] = meq_pair(reference, args.meq,
-		                                  os.path.join(convert.MEQ, "examples",
-		                                               f"{args.stem}-meta.json"),
-		                                  core=args.core)
-		out["meq_vs_desc"] = meq_pair(args.desc, args.meq,
-		                              os.path.join(convert.MEQ, "examples",
-		                                           f"{args.stem}-meta.json"),
-		                              core=args.core)
+		out["meq_vs_freegs4e"] = meq_pair(reference, args.meq, meta_path,
+		                                  core=args.core, free_boundary=free)
+		out["meq_vs_desc"] = meq_pair(args.desc, args.meq, meta_path,
+		                              core=args.core, free_boundary=free)
 	print(f"  {args.stem}")
 	for key, row in out.items():
 		print(f"    {key:20s} nodes {row['nodes']:7d}  rel L2 {row['rel_l2']:.4e}"

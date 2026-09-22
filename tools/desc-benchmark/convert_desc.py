@@ -97,6 +97,31 @@ CASES = {
 	"fixed-d-tcv":         "D_tcv_conventional_shaped",
 	"fixed-g-mastu":       "G_mastu_simple_shaped",
 	"fixed-f-diiid":       "F_diiid_conventional_shaped",
+
+	# THE ONE FREE-BOUNDARY CASE, AND IT IS LIMITED FOR A REASON RATHER THAN
+	# BY CHANCE.  DESC's free-boundary objective constrains the LCFS, which it
+	# represents as a FourierRZToroidalSurface -- a truncated Fourier series.
+	# Every other free-boundary machine in examples/ is DIVERTED, so its LCFS
+	# is a separatrix through an X-point and has a corner no truncation turns;
+	# that is the same fact that forces the fixed ladder above to psi_n = 0.95
+	# rather than 1.0.  A LIMITED plasma's edge is the smooth flux surface
+	# tangent to the limiter, and is representable.
+	#
+	# ITS META IS make_freeb_meta.py's AND NOT make_case.py's, and it sits at
+	# level = 1.0.  descfreeb.py is the runner; descrun.py solves inside a
+	# prescribed Gamma and is the wrong entry point for it.
+	"limited-tokamak-filament": "H_limited_circular",
+}
+
+#: stem -> the reference DIRECTORY, where it is not REFDIR.  The 513^2 limited
+#: reference is a different grid from the fixed ladder's 257^2 ones, and the
+#: choice is not free: freegs4e's coil currents are an OUTPUT of its control
+#: system, so they converge in the grid like everything else -- P2 moves 14%
+#: between 129^2 and 513^2.  A case carrying one grid's currents against
+#: another grid's answer is two different machines.
+REFDIRS = {
+	"limited-tokamak-filament": os.path.join(MEQ, "tools",
+	                                         "freegs4e-benchmark", "ref-n513"),
 }
 
 
@@ -112,12 +137,23 @@ def read_profile_table(path):
 	return data[:, 0], data[:, 1]
 
 
-def load_case(stem, examples=None, refdir=REFDIR):
+def load_case(stem, examples=None, refdir=None):
 	"""Everything one shipped case carries: meta, both tables, the reference."""
 	examples = examples or os.path.join(MEQ, "examples")
+	refdir = refdir or REFDIRS.get(stem, REFDIR)
 	meta = json.load(open(os.path.join(examples, f"{stem}-meta.json")))
-	psi_p, dp = read_profile_table(os.path.join(examples, f"{stem}-pprime.dat"))
-	psi_g, gg = read_profile_table(os.path.join(examples, f"{stem}-ggprime.dat"))
+	# A CASE NEED NOT OWN ITS TABLES, so the meta names them where the stem
+	# does not.  make_case.py writes one pair per fixed case and the names
+	# follow the stem; a free-boundary case may share a pair with its meshed
+	# sibling, whose shapes are the same analytic functions and whose
+	# amplitudes [source] PlasmaCurrent absorbs.
+	pprime = (os.path.join(MEQ, meta["pprime_file"]) if meta.get("pprime_file")
+	          else os.path.join(examples, f"{stem}-pprime.dat"))
+	ggprime = (os.path.join(MEQ, meta["ggprime_file"])
+	           if meta.get("ggprime_file")
+	           else os.path.join(examples, f"{stem}-ggprime.dat"))
+	psi_p, dp = read_profile_table(pprime)
+	psi_g, gg = read_profile_table(ggprime)
 	ref = np.load(os.path.join(refdir, f"{CASES[stem]}.npz"), allow_pickle=True)
 	return dict(stem=stem, meta=meta, pprime=(psi_p, dp), ggprime=(psi_g, gg),
 	            ref=ref)

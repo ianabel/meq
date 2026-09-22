@@ -7345,14 +7345,39 @@ namespace
 		 * Under COIL-SUBTRACTION-PLAN.md's split the state holds psi_p, and a
 		 * limiter is a piece of metal near the conductors -- exactly where
 		 * psi_c is largest -- while an X-point of a machine sits in the middle
-		 * of them. Three routes reach the contact and each knows where it is
+		 * of them. FOUR routes reach the contact and each knows where it is
 		 * differently: the nearest-dof one indexes the potential block and
-		 * takes the per-dof cache; the located one has the contact's ( r, z )
-		 * in hand; and XP-3's is the X-point itself, which the limiter search
-		 * never locates -- `limiterContactLocatedValue` is
-		 * refreshLimiterContact()'s and that search does not run there.
+		 * takes the per-dof cache; XP-3's is the X-point itself, which the
+		 * limiter search never locates -- `limiterContactLocatedValue` is
+		 * refreshLimiterContact()'s and that search returns early anywhere but
+		 * LocatedContact; the PRESCRIBED point has its ( r, z ) as given data,
+		 * unmoving for the whole solve; and the located one has it in hand at
+		 * this iterate.
 		 *
-		 * Exactly zero without the split, on all three, so every existing path
+		 * **THE PRESCRIBED-POINT ROUTE WAS THE ONE LEFT OUT, AND IT IS THE
+		 * DEFAULT.** This enumerated three and there are four:
+		 * LimiterConstraint::ExactPoint is what `[boundary.limiter] R` and `Z`
+		 * select, it sets `limiterContactLocatedValue` nowhere, and on a
+		 * LIMITED machine `xPointIsUnknown` is false -- so every branch fell
+		 * through and psi_bnd was constrained to the REMAINDER at the contact.
+		 * Measured on the freegs4e limited machine, psi_c at the contact is
+		 * -7.90e-02 at the 129^2 reference's ( 1.3375, 0 ) against a span of
+		 * +6.70e-02, and -3.37e-02 at the 513^2 one's ( 0.825, -0.3 ) against
+		 * +6.69e-02: **1.18 and 0.50 times the span**, so the constraint does
+		 * not perturb the answer, it chooses a different equilibrium. The run
+		 * CONVERGES -- 27 Newton iterations, every border at machine zero, the
+		 * plasma current met to seven figures -- onto a branch with
+		 * psi_bnd > psi_ax, a negative profile scale and no O-point anywhere.
+		 *
+		 * IT COULD ONLY BE REACHED BY A CASE THAT IS FREE BOUNDARY, LIMITED
+		 * AND SUBTRACTING AT ONCE, and until examples/limited-tokamak-filament
+		 * .toml there was none: the diverted machines take the X-point branch
+		 * and every other limited case is meshed, where conductorPsi is zero.
+		 * Same shape as MEASUREMENTS.md M-148 and M-160, which is the fourth
+		 * and third time a consumer of the split read psi_p where it wanted
+		 * psi.
+		 *
+		 * Exactly zero without the split, on all four, so every existing path
 		 * is bit-identical.
 		 */
 		auto limiterTotal = [ & ]( mfem::Vector const &state )
@@ -7361,11 +7386,22 @@ namespace
 
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
 				total += conductorPsiAtDof( boundaryDof - blockOffsets[ 1 ] );
+			// XP-3 FIRST, because setXPointBoundary() REQUIRES ExactPoint --
+			// it throws on anything else -- so the diverted path satisfies the
+			// next test as well and would take the wrong point from it.
+			// `boundaryFluxR` and `boundaryFluxZ` are not filled there: that
+			// path skips the one-off location and fills the same three
+			// variables from the X-point at every iterate.
+			else if ( xPointIsUnknown )
+			{
+				if ( xR > 0.0 )
+					total += conductorPsi( xR, xZ );
+			}
+			else if ( limiterConstraintChoice == LimiterConstraint::ExactPoint )
+				total += conductorPsi( boundaryFluxR, boundaryFluxZ );
 			else if ( limiterContactLocatedValue )
 				total += conductorPsi( limiterContactRValue,
 				                       limiterContactZValue );
-			else if ( xPointIsUnknown && xR > 0.0 )
-				total += conductorPsi( xR, xZ );
 			return total;
 		};
 		/*

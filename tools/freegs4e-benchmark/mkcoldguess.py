@@ -59,6 +59,93 @@ from mkexactguess import greens
 from mkguess import write_guess
 
 
+class _Reference(dict):
+	"""A dict that also answers `.files`, as an NpzFile does."""
+
+	@property
+	def files(self):
+		return list(self.keys())
+
+
+def _case_design(name):
+	"""fgsref.py's own record for one case, by name, or None.
+
+	THE DESIGN IS INPUT AND IT LIVES IN ONE PLACE.  fgsref.py's CASES table is
+	what every `design_*` array in an .npz and every `design` block in a .json
+	was written FROM, so reading it here recovers the same numbers rather than
+	inferring anything from an answer.  Importing fgsref costs nothing: its
+	freegs4e imports are all inside the `make` lambdas.
+	"""
+	try:
+		import fgsref
+	except Exception:
+		return None
+	for case in fgsref.CASES:
+		if case["name"] == name:
+			return case
+	return None
+
+
+def with_design(d, npz_path):
+	"""The reference's arrays, plus the design fields it may not carry.
+
+	EVERY REFERENCE UNDER ref-n257/ AND ref-n513/ PREDATES THE `design_*`
+	BLOCK, which fgsref.py only started writing when make_diverted_case.py
+	needed it -- so the finer references, which are the ones a serious
+	comparison wants, are exactly the ones a cold guess could not be built
+	from.  Recovering the block from the case table rather than re-solving at
+	513^2 is free and is the same data.
+
+	Returns a dict carrying `.files` where anything is missing, because an
+	NpzFile is read BOTH ways in this directory -- `d[ key ]` here and
+	`key in d.files` in conductors.py -- and a plain dict answers only the
+	first.
+	"""
+	needed = ("design_xpoints", "design_isoflux", "design_R0", "design_Ip",
+	          "coil_R", "coil_Z")
+	if all(k in d for k in needed):
+		return d
+	name = os.path.splitext(os.path.basename(npz_path))[0]
+	case = _case_design(name)
+	if case is None:
+		raise SystemExit("%s carries no design_* arrays and fgsref.py has no "
+		                 "case called %r to recover them from; the design is "
+		                 "an INPUT and this script will not guess it"
+		                 % (npz_path, name))
+	merged = _Reference((k, d[k]) for k in d.files)
+	merged["design_xpoints"] = np.array(case["xpoints"], dtype=float).reshape(-1, 2)
+	merged["design_isoflux"] = np.array(case["isoflux"], dtype=float).reshape(-1, 4)
+	merged["design_R0"] = np.array(float(case["R0"]))
+	merged["design_Ip"] = np.array(float(case["Ip"]))
+	recovered = ["design_*"]
+
+	# THE COIL POSITIONS GO THE SAME WAY AND FOR THE SAME REASON, and getting
+	# them from the case's own `make` rather than from a table here is what
+	# makes the label order self-checking: mkexactguess.py's fallback records
+	# that TestTokamak's labels are ['P1L','P1U','P2L','P2U'] where the limited
+	# machine's are ['P1U','P1L','P2U','P2L'], so a positional table pairs
+	# every coil with its opposite number's current and produces a plausible,
+	# wrong guess.  A Machine answers by NAME.
+	if "coil_R" not in merged.files:
+		machine = case["make"]()
+		labels = [str(x) for x in merged["coil_labels"]]
+		try:
+			position = [(float(machine[lab].R), float(machine[lab].Z))
+			            for lab in labels]
+		except Exception as error:
+			raise SystemExit("%s predates coil_R/coil_Z and its labels %s "
+			                 "could not all be found in the machine "
+			                 "fgsref.CASES[%r] builds: %s"
+			                 % (npz_path, labels, name, error))
+		merged["coil_R"] = np.array([r for r, _ in position], dtype=float)
+		merged["coil_Z"] = np.array([z for _, z in position], dtype=float)
+		recovered.append("coil_R/coil_Z")
+
+	print("%s carries no %s; recovered from fgsref.CASES[%r]"
+	      % (os.path.basename(npz_path), " or ".join(recovered), name))
+	return merged
+
+
 def design_footprint(d, pad=0.15):
     """The plasma's refinement box, from what the run was ASKED for.
 
@@ -149,10 +236,17 @@ def _design_record(npz_path):
 	"""
 	import json
 	side = os.path.splitext(npz_path)[0] + ".json"
-	if not os.path.exists(side):
-		raise SystemExit("%s has no .json beside it; the profile design lives "
-		                 "there" % npz_path)
-	return json.load(open(side))["design"]
+	record = json.load(open(side)) if os.path.exists(side) else {}
+	if "design" in record:
+		return record["design"]
+	# Same fallback and same reason as with_design(): the older references
+	# have the .json but not the `design` block inside it.
+	case = _case_design(os.path.splitext(os.path.basename(npz_path))[0])
+	if case is None:
+		raise SystemExit("%s has no `design` block beside it and fgsref.py "
+		                 "has no case of that name; the profile design lives "
+		                 "in one or the other" % npz_path)
+	return case
 
 
 def plasma_filaments(d, npz_path, cells=61):
@@ -228,7 +322,7 @@ def main():
 	rho = float(argv[3]) if len(argv) > 3 else 2.60
 	n = int(argv[4]) if len(argv) > 4 else 32
 
-	d = np.load(npz)
+	d = with_design(np.load(npz), npz)
 
 	rs = np.linspace(0.0, rho, n + 1)
 	zs = np.linspace(-rho, rho, n + 1)
