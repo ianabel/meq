@@ -7801,11 +7801,29 @@ the flux surfaces and a geqdsk, reads **17.28 s** against the same grid's
 **NICE IS THE FASTEST CODE IN THIS COMPARISON AND MEQ IS NOT**, at every
 resolution NICE was run at. That is a change from [M-163](#m-163)'s verdict,
 which held against `freegs4e`, DESC and CHEASE and was not tested against
-either of these. NICE is P1 on an unstructured triangulation with a direct
-Newton and reports its own solve at 110 ms of its 0.44 s; MEQ is HDG at `k = 3`
-carrying 28x the unknowns, and its 4.11 s is the whole driver including gmsh
-and four output writers. **These are not the same work and the row is not a
-like-for-like efficiency claim** — which is exactly why section 3 matters.
+either of these.
+
+**WHERE MEQ'S WALL GOES, SINCE THE ROW ABOVE INVITES THE QUESTION.** MEQ prints
+its own split and on this case it reads
+
+```
+MEQ: wall 3.684 s = setup 0.030 + solve 2.915 + output 0.739
+```
+
+— the 4.11 s above being that plus `meq-run`'s mesh check. **The output is
+20%**, and what dominates it is `DarcyForm::Reconstruct()`, MFEM's and the
+largest single-threaded item in a MEQ run ([M-138](#m-138)). So the gap against
+NICE is not the output stage: it is the solve, and the solve is of a much larger
+discrete system.
+
+**AND PER UNKNOWN THE SOLVE IS NOT SLOWER, WHICH IS AS FAR AS THE COMPARISON CAN
+HONESTLY BE PUSHED.** MEQ's is 2.915 s over 54,690 dofs and NICE's finest is
+1.735 s over 26,166 — **53 against 66 µs per dof**. That is suggestive and it is
+not a like-for-like efficiency number: an HDG dof is a flux, potential or trace
+coefficient at `k = 3` and a P1 dof is a vertex value, so the two units are not
+the same thing and the ratio should not be quoted as one. What it does rule out
+is the reading that MEQ is doing the same work slowly. **These are not the same
+work** — which is also why section 3 matters.
 
 #### 3. The accuracy column compares solutions of at least two different problems, and MEQ is scored on data derived from its competitor's grid
 

@@ -27,15 +27,28 @@ it UMFPACK returns silent garbage and the Newton produces `-nan`. Debian's
 `libblas.so.3` is an alternatives symlink to `libmkl_rt.so` on this machine, so
 NICE gets MKL whether or not anybody asked for it.
 
-**IT IS BUILT WITH OpenMP OFF AND THAT IS NOT A MISTAKE WORTH FIXING.**
-`build/CMakeCache.txt` reads `CHOOSE_OPENMP:BOOL=OFF` while `src/` carries
-**270 `#pragma omp`** directives, which looks like the benchmark denying NICE
-its parallelism — and it measures as worth nothing. A build with it on
-(`build-omp/`) is within **1%** of the serial one at every resolution while
-burning 2.6 to 3.3 cores, and the *non*-OpenMP build is actively **slower** with
-eight MKL threads (1.51 s against 1.37 s at 6674 dofs). M-164 section 1.
+**THE OpenMP BUILD IS PREFERRED AND BUYS NOTHING, AND BOTH HALVES MATTER.**
+The stock `build/CMakeCache.txt` reads `CHOOSE_OPENMP:BOOL=OFF` while `src/`
+carries **270 `#pragma omp`** directives, which looks like the benchmark denying
+NICE its parallelism. It measures as worth nothing: `build-omp/` is within
+**1%** of the serial build at every resolution while burning 2.6 to 3.3 cores,
+and the *non*-OpenMP build is actively **slower** with eight MKL threads (1.51 s
+against 1.37 s at 6674 dofs). M-164 section 1.
 
-To rebuild it anyway, both flags are needed — the second is not optional and the
+`race.sh` therefore prefers `build-omp/nice_dir` when it exists and falls back to
+`build/nice_dir`, which answers identically; `NICE_BIN` overrides both. NICE is
+represented with its parallelism *available* rather than compiled out, and the
+conclusion does not depend on which is picked.
+
+**BUT AN OpenMP BUILD MUST BE GIVEN A THREAD COUNT, OR IT TAKES EVERY LOGICAL
+CPU.** Unset, OpenMP grabs all 16 here on 8 physical cores, SMT siblings share
+an FPU, and the solve goes from **108 ms to 387 ms** — so switching to the
+OpenMP build without pinning makes NICE look 3.6× worse than it is. `race.sh`
+defaults to the physical core count, which is also what MEQ is given;
+`NICE_THREADS` overrides it. At 6674 dofs it reads 412 ms at one thread against
+414 ms at eight, which is the finding above restated from the harness.
+
+To build the OpenMP one, both flags are needed — the second is not optional and the
 failure is `fatal error: Sparse: No such file or directory`:
 
 ```sh
