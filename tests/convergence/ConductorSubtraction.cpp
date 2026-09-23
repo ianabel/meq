@@ -26,7 +26,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <optional>
 #include <stdexcept>
+#include <string>
 
 #include "mfem.hpp"
 
@@ -681,6 +684,16 @@ BOOST_AUTO_TEST_CASE( aNormalisedSourceRunsUnderTheSplitAndReportsThePhysicalAxi
 	            "the total and the remainder peak at nearly the same value, so "
 	            "this case cannot tell which one psi_ax followed" );
 
+	/*
+	 * 1.0e-6 AND NOT A RATE, AND THE INTERPOLANT EXPERIMENT IS WHY IT STAYS.
+	 *
+	 * This reads 5.6e-17 at n = 8, 16 and 32 -- machine epsilon at every mesh,
+	 * because both sides evaluate psi_c exactly and the assertion is a
+	 * DEFINITION rather than an approximation. Rooting q_h + q_c on the
+	 * interpolated q_c instead makes it 7.5e-02, 1.6e-03 and 2.9e-02 on those
+	 * same three meshes: non-monotone, so not a converging perturbation, and
+	 * three to five orders outside this bound. MEASUREMENTS.md M-171.
+	 */
 	BOOST_TEST( std::fabs( reported - peakTotal ) < 1.0e-6,
 	            "psi_ax is not the peak of the PHYSICAL flux" );
 }
@@ -1850,4 +1863,292 @@ BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 	            "the two routes are not converging to each other: "
 	            << endToEnd << " across the sequence under an exterior "
 	            "coupling with a plasma" );
+}
+
+/*
+ * THE CACHE SURVIVES A ROUND TRIP THROUGH A FILE, BIT FOR BIT.
+ *
+ * `src/meq/ConductorStore.hpp` is a file-backed version of the two conductor
+ * caches, and it exists because `psi_c` is rebuilt once per mesh while a
+ * coupled run -- MaNTA moving `p'` and `g g'` over a machine that does not move
+ * -- poses the same mesh again and again. For a machine of rectangles that
+ * rebuild is of order 1e4 Carlson evaluations per field point,
+ * **[M-142](MEASUREMENTS.md#m-142)**.
+ *
+ * WHAT HAS TO BE ASSERTED IS EQUALITY AND NOT AGREEMENT. The reason this
+ * stores values at the solver's own points rather than sampling `psi_c` onto a
+ * grid, as VMEC's `mgrid` does, is that the cases above read `0.000e+00` and
+ * `< 1.0e-12*scale`; a cache that came back to within an interpolation error
+ * would quietly convert those into tolerances. So the comparison below is `==`
+ * on every double, and the solve driven from the loaded cache is required to
+ * reproduce the recomputed one to the last bit rather than to a rate.
+ */
+BOOST_AUTO_TEST_CASE( theConductorCacheSurvivesAFileBitForBit )
+{
+	meq::ConductorField const conductors = insideFilament();
+	VacuumSource const source;
+
+	mfem::FunctionCoefficient physicalDatum(
+		[ &conductors ]( mfem::Vector const &x )
+		{
+			return conductors.psi( x( 0 ), x( 1 ) );
+		} );
+
+	std::filesystem::path const cachePath
+		= std::filesystem::temp_directory_path() / "meq-cs-cache.nc";
+	std::error_code ignored;
+	std::filesystem::remove( cachePath, ignored );
+
+	int const degree = 2;
+
+	// (a) THE REFERENCE RUN: build the cache the ordinary way and write it.
+	mfem::Mesh reference = makeBox( 8 );
+	meq::GradShafranovSolver first( reference, degree );
+	first.setSource( source );
+	first.setBoundaryData( physicalDatum );
+	first.setConductorField( conductors );
+	first.solve();
+
+	meq::ConductorCache const built = first.conductorCacheSnapshot();
+	BOOST_TEST_REQUIRE( !built.empty(),
+	                    "the solver produced no conductor cache to store" );
+	BOOST_TEST_REQUIRE( built.consistent() );
+	BOOST_TEST_REQUIRE( !built.nodalPsi.empty() );
+	BOOST_TEST_REQUIRE( !built.quadraturePsi.empty(),
+	                    "the quadrature half is missing, so the expensive half "
+	                    "of the rebuild would still be paid" );
+
+	/*
+	 * q_c IS NOT ASSERTED PRESENT HERE, AND THE REASON IS THE FIXTURE.
+	 *
+	 * The q_c table is meq::CriticalPointFinder's, and this case is a
+	 * FIXED-boundary vacuum solve: no axis is located, no finder is built, and
+	 * there is nothing to cache. A machine case reaches it and this does not.
+	 * ConductorStoreTests covers the format's q_c half on synthetic data; what
+	 * is asserted below is that whatever this run DID build travels exactly.
+	 *
+	 * It matters because q_c is the half that dominates: measured on a machine
+	 * of rectangles, caching psi_c alone left `grad psi_c` at 61% of a warm
+	 * run's profile, since a gradient is a different quantity and no psi_c
+	 * cache covers it.
+	 */
+
+	meq::writeConductorCache( cachePath.string(), built );
+
+	double const referencePsi = maxAbs( first.potential() );
+
+	std::printf( "\n  CS: the conductor cache through a file\n" );
+	std::printf( "    %d nodal values, %d quadrature values over %d elements\n",
+	             static_cast< int >( built.nodalPsi.size() ),
+	             static_cast< int >( built.quadraturePsi.size() ),
+	             built.signature.elements );
+
+	// (b) A SECOND SOLVER ON THE SAME MESH ADOPTS IT.
+	std::optional< meq::ConductorCache > const loaded
+		= meq::readConductorCache( cachePath.string() );
+	BOOST_TEST_REQUIRE( loaded.has_value(), "the cache did not come back" );
+
+	mfem::Mesh again = makeBox( 8 );
+	meq::GradShafranovSolver second( again, degree );
+	second.setSource( source );
+	second.setBoundaryData( physicalDatum );
+	second.setConductorField( conductors );
+
+	std::string reason;
+	BOOST_TEST_REQUIRE( second.adoptConductorCache( *loaded, reason ),
+	                    "the cache this very configuration wrote was refused: "
+	                    << reason );
+
+	second.solve();
+
+	// AND IT WAS ACTUALLY USED. adoptConductorCache() accepting is not the
+	// same claim: the quadrature rule is invisible to the signature, so a
+	// cache can pass every check there and still be declined at buildForms().
+	// Without this the case would pass just as well with the file ignored.
+	BOOST_TEST( second.conductorCacheWasAdopted(),
+	            "the cache was accepted and then declined at buildForms(), so "
+	            "the rebuild it exists to avoid was paid anyway" );
+
+	// THE VALUES FIRST, which is the property the file has to have.
+	meq::ConductorCache const after = second.conductorCacheSnapshot();
+	BOOST_TEST_REQUIRE( after.nodalPsi.size() == built.nodalPsi.size() );
+	std::size_t nodalMismatches = 0;
+	for ( std::size_t i = 0; i < built.nodalPsi.size(); ++i )
+		if ( !( after.nodalPsi[ i ] == built.nodalPsi[ i ] ) )
+			++nodalMismatches;
+	BOOST_TEST( nodalMismatches == 0u,
+	            nodalMismatches << " of " << built.nodalPsi.size()
+	            << " nodal psi_c values came back different. This must be "
+	               "exact: the split's whole claim is that the conductors are "
+	               "resolved rather than discretised." );
+
+	// THE q_c TABLE TOO, and by the same exact comparison. A gradient that
+	// came back approximately would move the critical points, which is where
+	// psi_ax and the plasma edge come from.
+	BOOST_TEST_REQUIRE( loaded->criticalFluxQ.size()
+	                    == built.criticalFluxQ.size() );
+	std::size_t fluxMismatches = 0;  // zero-length when this fixture built none
+	for ( std::size_t i = 0; i < built.criticalFluxQ.size(); ++i )
+		if ( !( loaded->criticalFluxQ[ i ] == built.criticalFluxQ[ i ] ) )
+			++fluxMismatches;
+	BOOST_TEST( fluxMismatches == 0u,
+	            fluxMismatches << " of " << built.criticalFluxQ.size()
+	            << " q_c components came back different" );
+	BOOST_TEST( loaded->criticalFluxScale == built.criticalFluxScale );
+	BOOST_TEST( loaded->criticalFluxUsable == built.criticalFluxUsable,
+	            boost::test_tools::per_element() );
+
+	// AND THEN THE ANSWER, which is what a caller actually cares about.
+	BOOST_TEST( maxAbs( second.potential() ) == referencePsi,
+	            "a solve from the loaded cache reached max |psi_p| = "
+	            << maxAbs( second.potential() ) << " against the recomputed "
+	            << referencePsi << ". A cache is only a cache if the answer "
+	               "does not move." );
+
+	// (c) AND A STALE CACHE IS REFUSED RATHER THAN USED. Moving one coil is the
+	// failure with no symptom: psi_c from another machine is a plausible field,
+	// so the solve would converge to an equilibrium nobody posed.
+	meq::ConductorField moved;
+	moved.add( meq::CurrentFilament( 1.07, 0.017, 2.5e5 ) );
+
+	mfem::Mesh third = makeBox( 8 );
+	meq::GradShafranovSolver stale( third, degree );
+	stale.setSource( source );
+	stale.setBoundaryData( physicalDatum );
+	stale.setConductorField( moved );
+
+	reason.clear();
+	BOOST_TEST( !stale.adoptConductorCache( *loaded, reason ),
+	            "a cache built for a filament at R = 1.03 was accepted by a "
+	            "solve whose filament is at R = 1.07" );
+	BOOST_TEST( reason.find( "conductors" ) != std::string::npos,
+	            "the refusal does not say the conductors moved; it said: "
+	            << reason );
+
+	// AND A DIFFERENT DEGREE IS REFUSED TOO, because the dof positions are the
+	// element's nodes and those move with it.
+	mfem::Mesh fourth = makeBox( 8 );
+	meq::GradShafranovSolver otherDegree( fourth, degree + 1 );
+	otherDegree.setSource( source );
+	otherDegree.setBoundaryData( physicalDatum );
+	otherDegree.setConductorField( conductors );
+
+	reason.clear();
+	BOOST_TEST( !otherDegree.adoptConductorCache( *loaded, reason ),
+	            "a cache built at k = " << degree << " was accepted at k = "
+	            << degree + 1 );
+
+	std::printf( "    reload exact, stale refused: \"%s\"\n", reason.c_str() );
+	std::fflush( stdout );
+
+	std::filesystem::remove( cachePath, ignored );
+}
+
+/*
+ * `[conductors] InterpolatedFlux`: THE INDEX MAP IS EXACT, AND THE TRADE IS NOT
+ * WHERE A READER WOULD LOOK FOR IT.
+ *
+ * meq::CriticalPointFinder::setInterpolatedFlux() roots `q_h + q_c` with `q_c`
+ * read from a grid function in MEQ's own flux space instead of from
+ * meq::ConductorField per iterate. That space is a nodal
+ * `L2_FECollection( GaussLobatto )` and the nodal `q_c` table IS its dof
+ * vector, so building it is an index map rather than a fit.
+ *
+ * THIS CASE SEPARATES THE TWO WAYS IT CAN GO WRONG, which look alike in a solve
+ * and are completely different bugs: BETWEEN nodes the interpolant differs by
+ * the interpolation error, which is the trade the option exists to make; AT a
+ * node it must agree to round-off, and anything else is a transposed component,
+ * a vdof ordering or an element offset.
+ */
+BOOST_AUTO_TEST_CASE( theConductorInterpolantIsExactAtTheNodes )
+{
+	meq::ConductorField const conductors = insideFilament();
+	VacuumSource const source;
+
+	mfem::FunctionCoefficient physicalDatum(
+		[ &conductors ]( mfem::Vector const &x )
+		{
+			return conductors.psi( x( 0 ), x( 1 ) );
+		} );
+
+	mfem::Mesh mesh = makeBox( 8 );
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setSource( source );
+	solver.setBoundaryData( physicalDatum );
+	solver.setConductorField( conductors );
+	solver.solve();
+
+	meq::CriticalPointFinder finder( solver );
+	finder.setConductorField( &conductors );
+
+	// OFF BY DEFAULT, which is the half of this that keeps every existing
+	// answer where it was.
+	BOOST_TEST( !finder.interpolatedFlux() );
+	BOOST_TEST( finder.conductorFlux() == nullptr,
+	            "the interpolant was built without being asked for" );
+
+	finder.setInterpolatedFlux( true );
+	mfem::GridFunction const *flux = finder.conductorFlux();
+	BOOST_TEST_REQUIRE( flux != nullptr );
+
+	double worst = 0.0;
+	double scale = 0.0;
+	int axisNodes = 0;
+
+	thread_local mfem::IsoparametricTransformation transformation;
+	for ( int e = 0; e < mesh.GetNE(); ++e )
+	{
+		mesh.GetElementTransformation( e, &transformation );
+		mfem::IntegrationRule const &nodes
+			= flux->FESpace()->GetFE( e )->GetNodes();
+
+		for ( int n = 0; n < nodes.GetNPoints(); ++n )
+		{
+			mfem::IntegrationPoint const &ip = nodes.IntPoint( n );
+			transformation.SetIntPoint( &ip );
+			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+			mfem::Vector position( coordinates, 3 );
+			transformation.Transform( ip, position );
+
+			// The axis is where q_c is NaN and the interpolant takes
+			// poloidalField()'s limit instead, so it is not a node at which
+			// the two are meant to agree. This box does not reach R = 0, so
+			// the count below is a control on that rather than a skip.
+			if ( !( position( 0 ) > 0.0 ) )
+			{
+				++axisNodes;
+				continue;
+			}
+
+			double qR = 0.0;
+			double qZ = 0.0;
+			conductors.flux( position( 0 ), position( 1 ), qR, qZ );
+
+			double values[ 2 ] = { 0.0, 0.0 };
+			mfem::Vector got( values, 2 );
+			flux->GetVectorValue( e, ip, got );
+
+			worst = std::max( worst, std::max( std::fabs( got( 0 ) - qR ),
+			                                   std::fabs( got( 1 ) - qZ ) ) );
+			scale = std::max( scale, std::max( std::fabs( qR ),
+			                                   std::fabs( qZ ) ) );
+		}
+	}
+
+	std::printf( "\n  CS: the q_c interpolant at its own nodes\n" );
+	std::printf( "    worst %.3e against a scale of %.3e ( %d axis nodes )\n",
+	             worst, scale, axisNodes );
+	std::fflush( stdout );
+
+	BOOST_TEST( axisNodes == 0,
+	            "this box was not supposed to reach the axis, so the "
+	            "comparison above is skipping nodes it should be making" );
+
+	// ROUND-OFF AND NOT A TOLERANCE: a coefficient of a GaussLobatto nodal
+	// space IS the value at its node, so this is the index map being right.
+	BOOST_TEST( worst < 1.0e-12*scale,
+	            "the q_c interpolant disagrees with q_c AT a node, which is a "
+	            "wrong dof mapping rather than the interpolation error this "
+	            "option trades for -- suspect a transposed component or a vdof "
+	            "ordering" );
 }

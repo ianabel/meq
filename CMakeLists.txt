@@ -203,6 +203,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/BoundaryShape.cpp
 	src/meq/Coils.cpp
 	src/meq/ConductorField.cpp
+	src/meq/ConductorStore.cpp
 	src/meq/Config.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
@@ -301,6 +302,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # dependencies are independent: a tree with MFEM and no NetCDF builds everything
 # but the grid writer.
 set(MEQ_CORE_SOURCES_NEEDING_NETCDF
+	src/meq/ConductorStore.cpp
 	src/meq/Output.cpp)
 
 # Boost.Math, header only, for meq_core rather than only for the tests.
@@ -457,8 +459,10 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
 	endif()
 
-	# PRIVATE, unlike MFEM: netcdf appears only inside Output.cpp and in no
-	# header, so nothing that includes meq's headers needs it on its line.
+	# PRIVATE, unlike MFEM: netcdf appears only inside Output.cpp and
+	# ConductorStore.cpp and in no header -- ConductorStore.hpp deliberately
+	# takes plain vectors -- so nothing that includes meq's headers needs it
+	# on its line.
 	if(NETCDFCXX_FOUND)
 		target_link_libraries(meq_core PRIVATE PkgConfig::NETCDFCXX)
 		target_compile_definitions(meq_core PUBLIC MEQ_USE_NETCDF)

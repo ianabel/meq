@@ -8,6 +8,7 @@
 
 #include "mfem.hpp"
 
+#include "ConductorStore.hpp"
 #include "ExteriorDtN.hpp"
 #include "PlasmaComponent.hpp"
 #include "Source.hpp"
@@ -516,6 +517,29 @@ namespace meq
 			/// `psi_c` at one quadrature point, from that cache. Exactly zero
 			/// when the cache is empty.
 			double conductorShiftAt( int element, int quadraturePoint ) const;
+
+			/// buildConductorCache()'s two arrays, so that
+			/// meq::GradShafranovSolver can write them to a file and read them
+			/// back. Empty when the split is not in use.
+			std::vector< double > const &conductorCacheValues() const;
+			std::vector< int > const &conductorCacheOffsets() const;
+
+			/// Install a cache built elsewhere -- by a previous run, through
+			/// `src/meq/ConductorStore.hpp` -- in place of building one.
+			///
+			/// **THE OFFSETS ARE CHECKED AGAINST THE RULE THIS SPACE WOULD
+			/// USE**, element by element, and nothing is installed if any of
+			/// them differs. That check is not redundant with the cache's
+			/// signature: the quadrature order can be raised by
+			/// setExtensionQuadratureOrder() or by a source's own extra order
+			/// without the mesh, the degree or the conductors moving at all,
+			/// and the result would be `psi_c` read at the wrong points of the
+			/// right elements -- values that are individually plausible.
+			///
+			/// @return whether it was adopted.
+			bool adoptConductorCache( mfem::FiniteElementSpace const &space,
+			                          std::vector< double > const &values,
+			                          std::vector< int > const &offsets );
 
 			/**
 			 * NEWTON OR PICARD IN THE FIELD BLOCK -- see meq::FieldLinearisation
@@ -2542,7 +2566,86 @@ namespace meq
 			/// need not branch on whether the split is in use.
 			double conductorPsi( double radius, double z ) const;
 
+			/// THE CONDUCTOR CACHES AS DATA, so a coupled run can write them
+			/// once and read them back instead of rebuilding `psi_c` at every
+			/// point of every element on every solve. `src/meq/ConductorStore.hpp`
+			/// is the file format and says why this is a cache rather than a
+			/// field; `COIL-SUBTRACTION-PLAN.md` §1 is why the cache is
+			/// legitimate at all.
+			///
+			/// Empty, with a zero signature, when the split is not in use --
+			/// there is then nothing to store and nothing that would read it.
+			ConductorCache conductorCacheSnapshot() const;
+
+			/// The signature this solver's caches WOULD carry, without
+			/// building them. This is what a caller compares a file against
+			/// before deciding to trust it, and computing it costs a walk over
+			/// the mesh's vertices rather than a walk over its quadrature
+			/// points.
+			ConductorCacheSignature conductorCacheSignature() const;
+
+			/// Install `cache` in place of rebuilding it.
+			///
+			/// **REFUSES ON ANY MISMATCH AND CHANGES NOTHING WHEN IT DOES**, so
+			/// a caller may offer a file it is not sure of and fall through to
+			/// the ordinary precompute. `reason` receives the sentence naming
+			/// which field differed when the answer is false; it is left alone
+			/// when the answer is true.
+			///
+			/// The quadrature half is additionally checked against the rule
+			/// this mesh WOULD use, element by element, because the signature
+			/// cannot see a quadrature order that changed without the mesh or
+			/// the degree changing with it.
+			///
+			/// @return whether the cache was adopted.
+			bool adoptConductorCache( ConductorCache const &cache,
+			                          std::string &reason );
+
+			/// Whether the last prepare() USED an adopted quadrature cache
+			/// rather than rebuilding one.
+			///
+			/// This is a second question and not a restatement of
+			/// adoptConductorCache()'s answer: the quadrature RULE is invisible
+			/// to the signature, so a cache that passed every check there can
+			/// still be declined at buildForms() when the rule turns out to
+			/// differ -- which costs a rebuild and nothing else. A caller that
+			/// cares whether it actually saved the work asks this, after
+			/// solving.
+			bool conductorCacheWasAdopted() const;
+
+			/// Root the critical points on `q_c`'s INTERPOLANT rather than on
+			/// `q_c`. Off by default; meq::CriticalPointFinder::
+			/// setInterpolatedFlux() is where the trade is written down, and
+			/// the short form is that it is safe from a warm start and is not
+			/// safe from a cold one.
+			void setInterpolatedConductorFlux( bool interpolate );
+			bool interpolatedConductorFlux() const;
+
 		private:
+			/// The mesh's vertices, connectivity and attributes as one number.
+			/// Positions are what decide where `psi_c` was evaluated, so this
+			/// is the half of the signature the mesh owns.
+			std::uint64_t meshDigest() const;
+
+			/// Whether the held cache still belongs to THIS mesh, degree and
+			/// conductor set. Re-asked at every prepare() rather than trusted
+			/// from adoptConductorCache(), because an adaptive cycle refines
+			/// the mesh under a solver that is not rebuilt -- and a dof count
+			/// that happens to agree is not a mesh that agrees.
+			bool pendingConductorCacheStillApplies() const;
+
+			/// adoptConductorCache()'s cache, held until buildForms() and
+			/// buildConductorNodalCache() can consume it. Empty when none was
+			/// offered, which is what makes both of them unconditional.
+			ConductorCache pendingConductorCache;
+
+			/// Whether the last buildForms() took the pending quadrature cache
+			/// instead of building one.
+			bool conductorCacheAdopted = false;
+
+			/// setInterpolatedConductorFlux().
+			bool interpolateConductorFlux = false;
+
 			/// `psi_c` at every potential dof, built once per mesh —
 			/// `COIL-SUBTRACTION-PLAN.md` §1's precompute. Empty unless the
 			/// split is in use.

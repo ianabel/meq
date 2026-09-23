@@ -8535,3 +8535,137 @@ the placement that removes it costs 2.4x in mesh area and 32 modes.
 measured at one arbitrary value of a free parameter is a statement about that
 value. `ρ_Γ = 1.2` was never justified; it was carried from one exploratory run
 into a conclusion about achievable Mach numbers, and two tables were built on it.
+
+### M-170
+
+**THE FILE-BACKED CONDUCTOR CACHE, AND THE FIRST VERSION OF IT CACHED THE WRONG
+QUANTITY.** `src/meq/ConductorStore.hpp` stores the conductor field at exactly
+the points MEQ evaluates it at, so a run that finds a matching file skips the
+once-per-mesh precompute. Built to hold `psi_c` — the two caches
+[M-142](MEASUREMENTS.md#m-142) names — it was measured at 3.51× on a machine of
+subtracted rectangles, and **that was the wrong question answered well**: the
+warm arm still took 52 s against the filament arm's 3 s, and both were reading
+`psi_c` from the same file.
+
+**`perf` ON THE WARM RUN SETTLED IT IN ONE COMMAND.** `filamentGradKernel`,
+`ellint_rd` and `coilGradPsi` were **61%** of the profile. The remaining cost was
+never `psi_c` at all: it is **`q_c = ( 1/R ) grad_bar psi_c`**, which
+`meq::CriticalPointFinder` tabulates at every flux-space element node because
+the critical points are roots of the PHYSICAL flux while the solver holds the
+remainder. A gradient is a different quantity and no `psi_c` cache covers it.
+Its own header had said so all along — *"a finder built inside the Newton loop
+pays 13 s of threaded build per step"*.
+
+**WITH `q_c` IN THE CACHE**, `examples/limited-tokamak-filament.toml` at
+`k = 3`, 1823 elements, `build/meq --mesh-ready` wall clock:
+
+| | cold | warm | |
+|---|---|---|---|
+| `"subtracted"`, output grid 17² | 153.2 s | **18.2 s** | **8.4×** |
+| `"subtracted"`, output grid 129² | 166.2 s | **31.3 s** | **5.3×** |
+| `"filament"`, output grid 129² | 9.84 s | 9.37 s | 1.05× |
+
+**THE TWO SUBTRACTED ROWS DIFFER ONLY IN THE OUTPUT GRID, AND THAT GAP IS THE
+HONEST LIMIT OF THIS CACHE.** The `.nc` writer adds `psi_c` and `B_c` back at
+every located node — 16,641 of them at 129² — and those evaluations are not
+cached and cannot be, since the grid is not the mesh. They are **6.9 s of the
+warm run's 31.3**, which is 22% of it and is why the ratio falls from 8.4× to
+5.3× on the same solve.
+
+**THE FILAMENT ROW IS THE CONTROL AND IT IS ALSO A CORRECTION.** This entry
+first reported 1.15× there; that is not reproducible and the honest figure is
+**1.05×**, inside this machine's own spread. A filament's `psi_c` is one Carlson
+evaluation and its `q_c` one more, so there is nothing for a cache to save —
+exactly as M-142's table predicts, and the reason both rows are quoted.
+
+**AND THE COLD ARM GOT FASTER TOO**, from 183 s to 153, because the fix was not
+only a file: the `q_c` table is now held on the solver and handed to every
+finder built after the first, including the driver's own post-solve one. Within
+a single run it was being built more than once.
+
+**THE ANSWER DOES NOT MOVE, AND THAT IS THE ASSERTION RATHER THAN A TOLERANCE.**
+`psi_ax` reads `9.307558e-02` cold and warm on both subtracted rows and
+`9.309076e-02` on the filament row, and an earlier `diff` over every numeric
+token of the two logs reported **0** differing tokens. That is what storing
+values at the solver's own points buys against sampling them onto a grid as
+VMEC's `mgrid` does: a reload is the recompute.
+
+**THE FILE IS 1.0 MB** — 18,230 nodal `psi_c`, 45,575 quadrature `psi_c`,
+18,230 `psi_c` at potential nodes and 2 × 18,230 `q_c` components — written into
+the equilibrium `.nc` as a group whenever the split is in use, and additionally
+to `[conductors] CacheFile`.
+
+**The transferable part**: a cache named after a quantity gets tested against
+that quantity. The 3.51× was real, reproducible and reported with a control, and
+it measured `psi_c` while the run was spending its time on `grad psi_c`. What
+found it was profiling the WARM arm — the one that was supposed to be fast —
+rather than being satisfied that the ratio had improved.
+
+### M-171
+
+**`q_c`'s INTERPOLANT: THE IDEA IS SOUND, THE DROP-IN IS NOT, AND THE OPTION IS
+THE ANSWER.** MEQ's nodal `q_c` table is a table over the element nodes of the
+flux space, and that space is a nodal `L2_FECollection( GaussLobatto )` — so the
+table **is** a dof vector and a grid function built from it is an index map
+rather than a fit. `theConductorInterpolantIsExactAtTheNodes` asserts that and
+reads **0.000e+00** against a scale of 1.391, for both components, at every node.
+
+**WHY IT IS WORTH WANTING.** `meq::CriticalPointFinder`'s element-local Newton
+evaluates `q_c` per **iterate**, not per node, so the table could not serve it
+and `meq::ConductorField::flux()` was called instead — a cross-section
+quadrature of elliptic integrals per call for a rectangle. With the interpolant,
+`meq --profile` on the same warm run, same mesh, same 4 solves:
+
+| leg | pointwise `q_c` | interpolated `q_c` |
+|---|---|---|
+| constraint location | 9.512 s | **0.416 s** |
+| *of which axis* | 9.435 | **0.331** |
+| *of which cold full sweep* | 6.466 | **0.042** |
+| outside solve(), axis checks | 2.264 | ~0 |
+| **solve total** | 17.109 | **6.470** |
+
+**AND WHY IT CANNOT BE THE DEFAULT.** On `ConductorSubtraction`'s normalised
+split fixture, the gap between the reported `psi_ax` and the nodal peak of the
+total — an **identity**, not a tolerance, since both sides are nodal — reads:
+
+| n | exact `q_c` | interpolated `q_c` |
+|---|---|---|
+| 8 | 5.551115e-17 | 7.480961e-02 |
+| 16 | 5.551115e-17 | 1.557524e-03 |
+| 32 | 5.551115e-17 | 2.861852e-02 |
+
+**Non-monotone, so it is not a converging perturbation**, and `psi_ax` itself
+differs — 0.2741/0.3086/0.3217 exact against 0.3275/0.3097/0.3433. A normalised
+solve selects among **discrete** equilibria, [M-132](MEASUREMENTS.md#m-132), and
+the axis search feeds that selection.
+
+**TWO REPAIRS WERE TRIED AND BOTH FAILED, WHICH IS WHAT SETTLED THE DESIGN.**
+Polishing each accepted root with up to four **exact** Newton steps, and
+separately reporting the located point's `psi` from the exact `psi_c` rather
+than its interpolant, each left all three numbers above unchanged **to every
+digit**. What the interpolant moves is not where an accepted root sits but
+**which candidates exist and are accepted**, and no later correction restores a
+candidate set. `totalPotential()` is exact regardless and always was worth
+being: it is called once per located point, so there was never a cost to save
+there.
+
+**SO IT IS `[conductors] InterpolatedFlux`, OFF BY DEFAULT.** From a warm start
+the branch is already pinned by the guess — the search refines one root instead
+of choosing among several — which is the regime a transport code re-solving a
+fixed machine is always in. Measured on `examples/limited-tokamak-filament.toml`
+as subtracted rectangles, back to back on one machine:
+
+| | cold | warm |
+|---|---|---|
+| default | 179.9 s | 37.1 s |
+| `InterpolatedFlux = true` | 177.9 s | **24.9 s**, **1.49×** |
+
+`psi_ax` is `9.307558e-02` in **all four** runs — identical to every printed
+digit, cold and warm, with and without the option. The cold arm does not move
+because a cold run's cost is building the tables rather than searching with them.
+
+**The transferable part**: "the cache is a dof vector, so make it a grid
+function" is correct about the DATA and silent about the CONSUMER. The consumer
+here is a root finder feeding a solve with multiple solutions, and an
+`O( h^{k+1} )` perturbation of a search is not an `O( h^{k+1} )` perturbation of
+what the search selects.

@@ -27,6 +27,7 @@
 #include "meq/BoundaryShape.hpp"
 #include "meq/Coils.hpp"
 #include "meq/ConductorField.hpp"
+#include "meq/ConductorStore.hpp"
 #include "meq/Config.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
@@ -51,9 +52,11 @@
 #include <ctime>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <optional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -2595,7 +2598,56 @@ int main( int argc, char **argv )
 		 * is not a thing the coarse mesh can rule out.
 		 */
 		if ( conductorField )
+		{
 			fresh->setConductorField( *conductorField );
+			fresh->setInterpolatedConductorFlux(
+				config->getConductors().interpolatedFlux );
+
+			/*
+			 * AND THE CACHE, IF A FILE WAS NAMED AND HAS ONE FOR THIS MESH.
+			 *
+			 * HERE, not after the solve: adopting later would have paid for
+			 * the rebuild already. A file that is absent, stale or another
+			 * machine's costs a rebuild and changes no number -- every refusal
+			 * is reported and then ignored -- which is what lets a coupled
+			 * caller name one unconditionally. See src/meq/ConductorStore.hpp.
+			 */
+			std::string const &cachePath
+				= config->getConductors().cacheFile;
+			if ( !cachePath.empty()
+			     && std::filesystem::exists( cachePath ) )
+			{
+				try
+				{
+					std::optional< meq::ConductorCache > const cache
+						= meq::readConductorCache( cachePath );
+					std::string reason;
+					if ( !cache )
+						std::printf( "MEQ: [conductors] CacheFile = \"%s\" "
+						             "holds no psi_c cache; building one\n",
+						             cachePath.c_str() );
+					else if ( fresh->adoptConductorCache( *cache, reason ) )
+						std::printf( "MEQ: [conductors] psi_c read from %s\n",
+						             cachePath.c_str() );
+					else
+						std::printf( "MEQ: [conductors] %s does not apply to "
+						             "this run, so psi_c is rebuilt:\n"
+						             "     %s\n",
+						             cachePath.c_str(), reason.c_str() );
+				}
+				catch ( std::exception const &error )
+				{
+					// A CACHE MAY NEVER FAIL A RUN. The file is an
+					// optimisation and a corrupt one is a rebuild, not an
+					// exit -- but it is said out loud, because a run that
+					// silently stopped using its cache is a performance
+					// regression nobody can see.
+					std::printf( "MEQ: [conductors] %s could not be read, so "
+					             "psi_c is rebuilt:\n     %s\n",
+					             cachePath.c_str(), error.what() );
+				}
+			}
+		}
 
 		fresh->setBoundaryData( zero );
 		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
@@ -4360,6 +4412,19 @@ int main( int argc, char **argv )
 			{
 				meq::CriticalPointFinder finder( *solver );
 
+				// AND THE SOLVER'S q_c TABLE, which it has already built or
+				// read from a file. Without this the driver's own finder
+				// rebuilds `grad psi_c` at every flux node -- the single most
+				// expensive thing in a subtracted-rectangle run -- to answer a
+				// question the comment above calls cheap.
+				{
+					meq::ConductorCache const held
+						= solver->conductorCacheSnapshot();
+					if ( held.hasCriticalPointTable() )
+						finder.adoptNodalConductors(
+							meq::criticalTableFromCache( held ) );
+				}
+
 				// A PLASMA HAS NO MAGNETIC AXIS INSIDE A CONDUCTOR, and on a
 				// machine whose coils are meshed inside Omega one of them can
 				// carry a higher psi than the plasma does -- measured on the
@@ -5711,6 +5776,56 @@ int main( int argc, char **argv )
 		}
 
 		writer.close();
+
+		/*
+		 * ---- psi_c, AS A GROUP OF THE FILE JUST CLOSED AND AS ITS OWN ----
+		 *
+		 * AFTER close(), NOT BEFORE: meq::ConductorStore reopens the file to
+		 * add its group, and netCDF will not have two writers on one path.
+		 *
+		 * The equilibrium gets the group unconditionally when the split is in
+		 * use, which is the output half of this -- a consumer that has the
+		 * answer then also has the means to warm start from it, and MEQ's `.nc`
+		 * is already netCDF-4 so it costs no format change. [conductors]
+		 * CacheFile additionally gets a file of its own, written only when this
+		 * run did NOT adopt one, so naming the same path every solve writes it
+		 * once and reads it thereafter.
+		 *
+		 * NEITHER MAY FAIL THE RUN. The equilibrium is on disk and correct by
+		 * this point; a cache that cannot be written is a slower next run.
+		 */
+		if ( solver && conductorField )
+		{
+			meq::ConductorCache const cache = solver->conductorCacheSnapshot();
+			if ( !cache.empty() )
+			{
+				try
+				{
+					meq::writeConductorCache( stem + ".nc", cache,
+					                          meq::conductorCacheGroupName() );
+
+					std::string const &cachePath
+						= config->getConductors().cacheFile;
+					if ( !cachePath.empty()
+					     && !solver->conductorCacheWasAdopted() )
+					{
+						meq::writeConductorCache( cachePath, cache );
+						std::printf( "MEQ: [conductors] psi_c written to %s "
+						             "( %d nodal, %d quadrature )\n",
+						             cachePath.c_str(),
+						             static_cast< int >( cache.nodalPsi.size() ),
+						             static_cast< int >(
+						                 cache.quadraturePsi.size() ) );
+					}
+				}
+				catch ( std::exception const &error )
+				{
+					std::printf( "MEQ: warning: psi_c could not be stored, "
+					             "which costs the next run a rebuild and "
+					             "nothing else:\n     %s\n", error.what() );
+				}
+			}
+		}
 
 		/*
 		 * ---- the ( Psi, theta ) flux-surface file, INVERSION-PLAN.md IN-6 ----

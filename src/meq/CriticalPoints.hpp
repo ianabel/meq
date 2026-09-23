@@ -4,6 +4,9 @@
 #include <functional>
 #include <vector>
 
+#include <memory>
+
+#include "ConductorStore.hpp"
 #include "mfem.hpp"
 
 #include "GradShafranov.hpp"
@@ -1065,6 +1068,7 @@ namespace meq
 			 * different ones and MEQ does not require the spaces to share a
 			 * node set.
 			 */
+		public:
 			struct NodalConductors
 			{
 				/// Per ( element, local node ) of the potential space, laid out
@@ -1087,7 +1091,81 @@ namespace meq
 				bool built = false;
 			};
 
+			/// The table, BUILT if it is not already, so a caller that means
+			/// to store it gets a complete one. Empty with no conductor field.
+			///
+			/// This is the expensive half of the split on a machine of
+			/// rectangles: `q_c` at every flux node is a cross-section
+			/// quadrature of elliptic integrals per node, and it is `grad
+			/// psi_c` rather than `psi_c`, so the solver's own caches do not
+			/// cover it. `src/meq/ConductorStore.hpp` puts it in a file.
+			NodalConductors const &nodalConductorTable() const;
+
+			/// Install a table built elsewhere -- by a previous run, through
+			/// meq::ConductorCache -- in place of building one.
+			///
+			/// **THE CALLER OWNS THE CHECK.** Nothing here can tell whether
+			/// `table` belongs to this mesh: the offsets are per element and
+			/// the values are at nodes whose positions this class never sees
+			/// again. meq::GradShafranovSolver::adoptConductorCache() is where
+			/// the signature is compared, and this is only reachable through
+			/// it.
+			void adoptNodalConductors( NodalConductors table );
+
+			/// EVALUATE `q_c` THROUGH ITS INTERPOLANT RATHER THAN POINTWISE.
+			///
+			/// The nodal `q_c` table IS a dof vector of MEQ's own flux space --
+			/// both spaces are nodal `L2_FECollection( GaussLobatto )` -- so a
+			/// grid function built from it costs one polynomial evaluation
+			/// where meq::ConductorField::flux() costs a cross-section
+			/// quadrature of elliptic integrals per call. The element-local
+			/// Newton evaluates per ITERATE, so this is the difference between
+			/// a 9.5 s axis leg and a 0.4 s one on a machine of rectangles.
+			///
+			/// **OFF BY DEFAULT, AND THAT IS NOT CAUTION.** Measured on one
+			/// fixture at three mesh sizes, rooting the interpolated field
+			/// moves `psi_ax` away from the nodal peak of the total by
+			/// 7.5e-02, 1.6e-03 and 2.9e-02 where the exact field reads
+			/// 5.6e-17 at every mesh -- non-monotone, so not a converging
+			/// perturbation. What moves is WHICH candidate roots exist and are
+			/// accepted, and a normalised solve selects among DISCRETE
+			/// equilibria ( MEASUREMENTS.md M-132 ), so the search steers the
+			/// selection. Polishing an accepted root with exact Newton steps
+			/// does NOT recover it, which is what settles this as an option
+			/// rather than a default.
+			///
+			/// **WHAT MAKES IT SAFE IS A WARM START, AND THE CALLER OWNS
+			/// THAT.** From a guess already near the answer there is no branch
+			/// left to select: the search is refining one root rather than
+			/// choosing among several, and the interpolation error is then the
+			/// `O( h^k+1 )` perturbation it looks like. Turning this on for a
+			/// COLD solve is asking the search to choose, on a field that is
+			/// not the one being solved.
+			void setInterpolatedFlux( bool interpolate );
+			bool interpolatedFlux() const;
+
+			/// The interpolant itself, or null when it is off or there are no
+			/// conductors. Exposed so a test can assert it agrees with `q_c` AT
+			/// the nodes -- which separates an interpolation error, the trade
+			/// this makes, from a wrong dof mapping, which is a bug.
+			mfem::GridFunction const *conductorFlux() const;
+
+
+		private:
 			mutable NodalConductors nodal;
+
+			bool interpolateFlux = false;
+
+			/// Built from `nodal` on demand when interpolateFlux is set.
+			mutable std::unique_ptr< mfem::GridFunction > conductorFluxField;
+
+			/// Fills it. **The axis nodes are the one subtlety**: `q_c` is NaN
+			/// there and a NaN dof would poison the whole element's
+			/// polynomial, so those take the finite limit
+			/// meq::ConductorField::poloidalField() supplies -- `q_R = B_Z`,
+			/// `q_Z = -B_R = 0`.
+			void refreshConductorFields() const;
+
 
 			/// Fills nodal on the first call and returns it. A no-op returning
 			/// an empty table when no conductor field is set.
@@ -1117,6 +1195,20 @@ namespace meq
 			mutable long newtonSolveCount = 0;
 			mutable long elementCount = 0;
 	};
+
+	/// meq::CriticalPointFinder's `q_c` table to and from a stored cache.
+	///
+	/// FREE FUNCTIONS AND NOT MEMBERS because both ends need them and neither
+	/// owns the other: meq::GradShafranovSolver holds the table between solves
+	/// and `apps/meq.cpp` builds a finder of its own after the solve, and a
+	/// table built once has to reach both. The representations differ because
+	/// the finder screens its flux nodes with a `std::vector< bool >`, which
+	/// has no contiguous storage for netCDF to write.
+	CriticalPointFinder::NodalConductors
+	criticalTableFromCache( ConductorCache const &cache );
+
+	void criticalTableIntoCache( CriticalPointFinder::NodalConductors const &table,
+	                             ConductorCache &cache );
 
 }
 

@@ -789,6 +789,48 @@ namespace meq
 		/// a worse answer at more cost.
 		double filamentSize = 0.0;
 
+		/// `CacheFile` -- a netCDF file holding `psi_c` at this run's own
+		/// points, read if it is there and matches and written if it is not.
+		/// Empty is the default and means the cache is rebuilt every run.
+		///
+		/// **IT IS A CACHE AND THE RUN MUST NOT DEPEND ON IT.** A file that is
+		/// absent, stale or written for another machine costs a rebuild and
+		/// changes no number; `src/meq/ConductorStore.hpp` says why the values
+		/// are stored at the solver's own points rather than on a grid, and
+		/// why every mismatch is refused rather than adapted. What it buys is
+		/// the coupled case -- driven from MaNTA the profiles move and the
+		/// coils do not, so every solve after the first rebuilds a `psi_c`
+		/// that could not have changed, at of order 1e4 Carlson evaluations
+		/// per field point for a machine of rectangles.
+		///
+		/// Refused under `Model = "meshed"`, which subtracts nothing and has
+		/// no `psi_c` to cache -- accepted and ignored is the failure
+		/// `CLAUDE.md` records under the reserved profile keys.
+		std::string cacheFile;
+
+		/// `InterpolatedFlux` -- root the critical points on `q_c`'s
+		/// interpolant in MEQ's own flux space rather than on `q_c` itself.
+		///
+		/// **IT IS A SPEED KEY THAT CAN CHANGE THE ANSWER, WHICH IS WHY IT IS
+		/// OFF BY DEFAULT AND WHY IT IS DOCUMENTED RATHER THAN QUIET.** The
+		/// element-local Newton evaluates `q_c` per ITERATE, and for a
+		/// rectangle that is a cross-section quadrature of elliptic integrals
+		/// each time; the interpolant is one polynomial evaluation and takes
+		/// the axis leg of a warm subtracted run from 9.5 s to 0.4 s. What it
+		/// costs is measured and is not a tolerance: on a COLD normalised
+		/// solve it moves `psi_ax` by up to 7.5e-02 against 5.6e-17 for the
+		/// exact field, non-monotone in the mesh, because it perturbs WHICH
+		/// candidate roots are found and a normalised solve selects among
+		/// discrete equilibria.
+		///
+		/// **SET IT WHEN THE RUN IS WARM.** From a guess near the answer the
+		/// search is refining one root rather than choosing among several,
+		/// which is the regime it is for -- a transport code re-solving a
+		/// machine whose coils have not moved. `MEASUREMENTS.md` M-171.
+		///
+		/// Refused under `Model = "meshed"`, which has no `q_c`.
+		bool interpolatedFlux = false;
+
 		/// Does this configuration solve for a REMAINDER rather than for psi?
 		/// The one question every other part of MEQ asks of this table -- the
 		/// warm start's meaning, the output's, and whether the source may be

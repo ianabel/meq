@@ -891,6 +891,16 @@ default is what every file written before this table existed already means.
      - one per block
      - Target filament **cell** size in metres, for ``"filament"`` **only**.
        See below.
+   * - ``CacheFile``
+     - none
+     - A netCDF file holding :math:`\psi_c` at this run's own points, read if
+       it is there and matches and written if it is not. Refused under
+       ``"meshed"``, which subtracts nothing. See below.
+   * - ``InterpolatedFlux``
+     - ``false``
+     - Root the critical points on :math:`q_c`'s interpolant rather than on
+       :math:`q_c`. A large speedup on a **warm** run and not safe on a cold
+       one. See below.
 
 ``"meshed"``
    Each rectangle carries a uniform current density and enters as a **domain
@@ -942,6 +952,95 @@ default is what every file written before this table existed already means.
    outside the conductor — and :math:`6.9\times10^{-4}` beyond 0.40 m. Choose
    ``"filament"`` when the field near the conductors is not what you are asking
    about.
+
+.. _caching-psi-c:
+
+Reusing :math:`\psi_c`: ``CacheFile``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The subtracted conductors' flux is built once per mesh, at every potential
+degree of freedom and every source quadrature point. That is a precompute rather
+than a per-iteration cost, but it is paid again by every *run* — and a transport
+code driving MEQ changes the profiles while leaving the machine alone, so each
+of those runs rebuilds a :math:`\psi_c` that could not have changed.
+
+``CacheFile`` names a netCDF file to keep it in:
+
+.. code-block:: toml
+
+   [conductors]
+   Model = "subtracted"
+   CacheFile = "psi_c.nc"
+
+The first run writes it and later runs read it. The file holds two things:
+:math:`\psi_c` at every potential degree of freedom and every source quadrature
+point, and :math:`q_c = (1/R)\,\bar\nabla\psi_c` at every flux-space element
+node — the second being what the critical-point search needs, and the more
+expensive of the two.
+
+**What that is worth depends entirely on the conductor model**: for rectangles,
+where one field point costs a whole cross-section quadrature, it is a measured
+**8.4×** on the wall clock; for filaments, where a field point is one elliptic
+integral, **1.05×** — there is simply nothing to save.
+
+**The answer does not move.** Both fields are stored at exactly the points MEQ
+evaluates them at, not sampled onto a grid and interpolated back, so a reload
+*is* the recompute — every printed number is identical between a cold run and a
+warm one.
+
+**One thing is not cached**, and cannot be: writing the ``.nc`` grid adds
+:math:`\psi_c` and :math:`B_c` back at every grid node, and the grid is not the
+mesh. At ``GridNR = GridNZ = 129`` that is about a fifth of a warm run. Lower
+the grid if you are running many warm solves and do not need it.
+
+**A cache can only cost you time, never correctness.** It is bound to the mesh,
+the polynomial degree and the conductors it was built for, and any of those
+moving means the file is refused and rebuilt, with the reason printed. A file
+that is absent, stale or corrupt is likewise a rebuild and a message. If you
+change a coil current and forget to delete the file, MEQ notices.
+
+The same data is written into the equilibrium ``.nc`` as a ``psi_coil`` group
+whenever the split is in use, so a file that carries the answer also carries the
+means to warm start from it. See :doc:`output`.
+
+.. _interpolated-flux:
+
+Searching faster: ``InterpolatedFlux``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Finding the magnetic axis is an element-local Newton, and it evaluates
+:math:`q_c` at every **iterate**. For subtracted rectangles each of those is a
+cross-section quadrature of elliptic integrals, which makes the axis search the
+largest item in a warm run — larger than the solve it serves.
+
+MEQ already tabulates :math:`q_c` at the flux space's element nodes, and that
+space is nodal, so the table is exactly a finite-element field. Setting
+
+.. code-block:: toml
+
+   [conductors]
+   Model = "subtracted"
+   InterpolatedFlux = true
+
+roots that field instead: one polynomial evaluation per iterate. On a warm run
+of a rectangle machine it is worth about **1.5×** on the wall clock, and takes
+the axis leg from 9.5 s to 0.4 s.
+
+.. warning::
+
+   **This can change which equilibrium you get, and it is off by default for
+   that reason.** The interpolant differs from :math:`q_c` by the interpolation
+   error between nodes, which perturbs *which* candidate roots the search finds
+   — and a normalised solve selects among discrete equilibria. Measured on a
+   cold solve it moved :math:`\psi_{ax}` by up to 7.5e-02 where the exact field
+   is reproducible to 5.6e-17, and the discrepancy does **not** fall under mesh
+   refinement.
+
+   **Use it warm.** Starting from a guess near the answer there is no branch
+   left to select: the search refines one root rather than choosing among
+   several, which is the case for a transport code re-solving a machine whose
+   coils have not moved. In that regime it is measured to leave every printed
+   digit of :math:`\psi_{ax}` unchanged.
 
 .. _dividing-a-rectangle:
 

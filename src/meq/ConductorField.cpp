@@ -1,5 +1,7 @@
 #include "ConductorField.hpp"
 
+#include "ConductorStore.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -119,6 +121,50 @@ namespace meq
 	double ConductorField::mu0() const
 	{
 		return mu0Value;
+	}
+
+	std::uint64_t ConductorField::digest() const
+	{
+		/*
+		 * THE COUNTS GO IN AS WELL AS THE VALUES, which is not redundant: a
+		 * filament of zero current and no filament at all give the same psi_c
+		 * and must still give different digests, because the quadrature cache
+		 * is indexed by element and the SECOND of those can legitimately be
+		 * built on a different mesh. Mixing the count first is also what stops
+		 * a set of three filaments and a set of one with three times the data
+		 * colliding.
+		 */
+		std::uint64_t digest = digestSeed();
+
+		digest = digestAppend(
+			digest, static_cast< std::int64_t >( filaments().size() ) );
+		for ( CurrentFilament const &filament : filaments() )
+		{
+			digest = digestAppend( digest, filament.radius() );
+			digest = digestAppend( digest, filament.height() );
+			digest = digestAppend( digest, filament.current() );
+		}
+
+		digest = digestAppend(
+			digest, static_cast< std::int64_t >( coils().size() ) );
+		for ( std::size_t i = 0; i < coils().size(); ++i )
+		{
+			Coil const &conductor = coils().coil( i );
+			digest = digestAppend( digest, conductor.centreR() );
+			digest = digestAppend( digest, conductor.centreZ() );
+			digest = digestAppend( digest, conductor.halfWidth() );
+			digest = digestAppend( digest, conductor.halfHeight() );
+			digest = digestAppend( digest, conductor.current() );
+		}
+
+		digest = digestAppend( digest, mu0Value );
+
+		// The rectangles' cross-section rule changes psi_c by more than round
+		// off -- it is the model, not the arithmetic -- so it belongs here.
+		digest = digestAppend(
+			digest, static_cast< std::int64_t >( quadratureOrder() ) );
+
+		return digest;
 	}
 
 	double ConductorField::psi( double radius, double z ) const

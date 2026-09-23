@@ -573,6 +573,67 @@ namespace
 		}
 	}
 
+	std::vector< double > const &SourceIntegrator::conductorCacheValues() const
+	{
+		return conductorCache;
+	}
+
+	std::vector< int > const &SourceIntegrator::conductorCacheOffsets() const
+	{
+		return cacheOffset;
+	}
+
+	bool SourceIntegrator::adoptConductorCache(
+		mfem::FiniteElementSpace const &space,
+		std::vector< double > const &values,
+		std::vector< int > const &offsets )
+	{
+		/*
+		 * THE OFFSETS ARE THE CHECK, AND THEY ARE A STRONGER ONE THAN THE
+		 * SIGNATURE CAN BE.
+		 *
+		 * A cache's signature covers the mesh, the degree and the conductors,
+		 * which is everything that decides WHERE psi_c was evaluated -- except
+		 * the quadrature rule, which `rule()` derives from the element, the
+		 * transformation and this integrator's own extra order. Raise that
+		 * order and the points move while every field of the signature stays
+		 * put, so the values would be read at the wrong points of the right
+		 * elements: individually plausible numbers, and a solve that converges.
+		 *
+		 * Recomputing the offsets costs one table lookup per element, which is
+		 * nothing against the thing being avoided, so this is checked rather
+		 * than assumed.
+		 */
+		if ( !conductorFieldShift )
+			return false;
+
+		mfem::Mesh &mesh = *space.GetMesh();
+		int const elements = mesh.GetNE();
+
+		if ( offsets.size() != static_cast< std::size_t >( elements ) + 1 )
+			return false;
+
+		int running = 0;
+		for ( int e = 0; e < elements; ++e )
+		{
+			if ( offsets[ static_cast< std::size_t >( e ) ] != running )
+				return false;
+
+			mfem::FiniteElement const &el = *space.GetFE( e );
+			mfem::IsoparametricTransformation shapeOnly;
+			mesh.GetElementTransformation( e, &shapeOnly );
+			running += rule( el, shapeOnly ).GetNPoints();
+		}
+
+		if ( offsets.back() != running
+		     || values.size() != static_cast< std::size_t >( running ) )
+			return false;
+
+		conductorCache = values;
+		cacheOffset = offsets;
+		return true;
+	}
+
 	double SourceIntegrator::conductorShiftAt( int element,
 	                                           int quadraturePoint ) const
 	{
@@ -4650,8 +4711,28 @@ namespace
 			// AND THE CACHE HERE RATHER THAN IN prepare(), because this is
 			// where the integrator exists -- it is a local, owned by the form
 			// it is handed to. Empty and free unless the split is in use.
+			//
+			// AND A CACHE LOADED FROM A FILE IS CONSUMED HERE, which is the
+			// only place it can be: adoptConductorCache() is called BEFORE the
+			// first solve -- that is the whole point of it -- and the
+			// integrator does not exist until this line. A cache whose offsets
+			// disagree with the rule this space would use is declined by
+			// SourceIntegrator::adoptConductorCache() and the ordinary build
+			// runs, so a stale file costs a rebuild rather than an answer.
 			if ( potentialFes )
-				sourceTerm->buildConductorCache( *potentialFes );
+			{
+				bool adopted = false;
+				if ( !pendingConductorCache.quadraturePsi.empty()
+				     && pendingConductorCacheStillApplies() )
+					adopted = sourceTerm->adoptConductorCache(
+						*potentialFes, pendingConductorCache.quadraturePsi,
+						pendingConductorCache.quadratureOffset );
+
+				if ( !adopted )
+					sourceTerm->buildConductorCache( *potentialFes );
+
+				conductorCacheAdopted = adopted;
+			}
 
 			// THE SAME BORROWING, AND FOR THE SAME REASON. The bordered solve
 			// flips this between its Picard phase and its Newton phase without
@@ -5603,6 +5684,18 @@ namespace
 		if ( !conductorFieldSet || !potentialFes )
 			return;
 
+		// A LOADED CACHE SHORT-CIRCUITS THE WALK. prepare() calls this on every
+		// solve, so without this the file would be read, adopted, and then
+		// overwritten by the recompute it exists to avoid -- which would be
+		// invisible, the values being equal.
+		if ( pendingConductorCache.nodalPsi.size()
+		     == static_cast< std::size_t >( potentialFes->GetNDofs() )
+		     && pendingConductorCacheStillApplies() )
+		{
+			conductorNodalPsi = pendingConductorCache.nodalPsi;
+			return;
+		}
+
 		conductorNodalPsi.assign(
 			static_cast< std::size_t >( potentialFes->GetNDofs() ), 0.0 );
 
@@ -5644,6 +5737,225 @@ namespace
 
 		int const index = dof >= 0 ? dof : -1 - dof;
 		return conductorNodalPsi[ static_cast< std::size_t >( index ) ];
+	}
+
+	std::uint64_t GradShafranovSolver::meshDigest() const
+	{
+		/*
+		 * WHERE psi_c WAS EVALUATED, AS ONE NUMBER.
+		 *
+		 * The quadrature points and the dof positions are both images of
+		 * reference points under the element transformation, so what decides
+		 * them is the geometry: the vertices, which element owns which of
+		 * them, and -- on a curved mesh -- the nodal field that supersedes the
+		 * vertices entirely.
+		 *
+		 * THE NODES ARE NOT OPTIONAL AND THIS IS THE ONE EASY THING TO MISS.
+		 * A mesh whose Nodes have been deformed keeps its ORIGINAL vertices,
+		 * which CLAUDE.md records under `GridSampler`'s affine fast path: MFEM
+		 * lets a caller move the geometry through the nodes and leaves the
+		 * vertex array behind. Digesting the vertices alone would therefore
+		 * give one number for two different geometries, which is the exact
+		 * shape of a cache that is silently wrong.
+		 *
+		 * The attributes go in because they decide which elements a source is
+		 * restricted to, and the boundary attributes because they decide which
+		 * faces carry which datum. Neither moves a quadrature point, but both
+		 * are free and a cache is refused rather than adapted.
+		 */
+		std::uint64_t digest = digestSeed();
+
+		digest = digestAppend( digest,
+		                       static_cast< std::int64_t >( mesh.GetNV() ) );
+		digest = digestAppend( digest,
+		                       static_cast< std::int64_t >( mesh.GetNE() ) );
+		digest = digestAppend( digest,
+		                       static_cast< std::int64_t >( mesh.GetNBE() ) );
+		digest = digestAppend(
+			digest, static_cast< std::int64_t >( mesh.SpaceDimension() ) );
+
+		for ( int v = 0; v < mesh.GetNV(); ++v )
+		{
+			double const *vertex = mesh.GetVertex( v );
+			for ( int d = 0; d < mesh.SpaceDimension(); ++d )
+				digest = digestAppend( digest, vertex[ d ] );
+		}
+
+		mfem::Array< int > vertices;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mesh.GetElementVertices( e, vertices );
+			digest = digestAppend(
+				digest, static_cast< std::int64_t >( mesh.GetAttribute( e ) ) );
+			for ( int i = 0; i < vertices.Size(); ++i )
+				digest = digestAppend(
+					digest, static_cast< std::int64_t >( vertices[ i ] ) );
+		}
+
+		for ( int b = 0; b < mesh.GetNBE(); ++b )
+			digest = digestAppend(
+				digest,
+				static_cast< std::int64_t >( mesh.GetBdrAttribute( b ) ) );
+
+		if ( mfem::GridFunction const *nodes = mesh.GetNodes() )
+		{
+			digest = digestAppend(
+				digest, static_cast< std::int64_t >( nodes->Size() ) );
+			for ( int i = 0; i < nodes->Size(); ++i )
+				digest = digestAppend( digest, ( *nodes )( i ) );
+		}
+
+		return digest;
+	}
+
+	ConductorCacheSignature GradShafranovSolver::conductorCacheSignature() const
+	{
+		ConductorCacheSignature signature;
+		signature.meshDigest = meshDigest();
+		signature.conductorDigest
+			= conductorFieldSet ? conductorFieldSet->digest() : 0;
+		signature.polynomialDegree = orderValue;
+		signature.elements = mesh.GetNE();
+		signature.potentialDofs
+			= potentialFes ? potentialFes->GetNDofs() : 0;
+		return signature;
+	}
+
+	ConductorCache GradShafranovSolver::conductorCacheSnapshot() const
+	{
+		// Nothing to store without the split, and an empty cache is what the
+		// writer refuses to write -- so a run with no conductors produces no
+		// file rather than an empty one that a later run would have to
+		// interpret.
+		ConductorCache cache;
+		if ( !conductorFieldSet )
+			return cache;
+
+		cache.signature = conductorCacheSignature();
+		cache.nodalPsi = conductorNodalPsi;
+
+		// The critical-point table, whether it was loaded or built this run --
+		// it lives on pendingConductorCache either way, which is what lets a
+		// run that ADOPTED a cache still write an equivalent one out.
+		cache.criticalPotentialPsi = pendingConductorCache.criticalPotentialPsi;
+		cache.criticalPotentialOffset
+			= pendingConductorCache.criticalPotentialOffset;
+		cache.criticalFluxQ = pendingConductorCache.criticalFluxQ;
+		cache.criticalFluxUsable = pendingConductorCache.criticalFluxUsable;
+		cache.criticalFluxOffset = pendingConductorCache.criticalFluxOffset;
+		cache.criticalFluxScale = pendingConductorCache.criticalFluxScale;
+
+		if ( sourceIntegrator )
+		{
+			cache.quadraturePsi = sourceIntegrator->conductorCacheValues();
+			cache.quadratureOffset = sourceIntegrator->conductorCacheOffsets();
+		}
+
+		return cache;
+	}
+
+	bool GradShafranovSolver::adoptConductorCache( ConductorCache const &cache,
+	                                              std::string &reason )
+	{
+		/*
+		 * EVERY CHECK BEFORE ANY WRITE, which is what lets a caller offer a
+		 * file it is not sure of. A half-adopted cache -- the nodal values of
+		 * one machine beside the quadrature values of another -- is the worst
+		 * outcome available here and is the one this ordering forbids.
+		 */
+		if ( !conductorFieldSet )
+		{
+			reason = "this solve has no conductor field, so there is no psi_c "
+			         "to install. setConductorField() first, or drop the cache.";
+			return false;
+		}
+
+		if ( !potentialFes )
+		{
+			reason = "the potential space does not exist yet";
+			return false;
+		}
+
+		ConductorCacheSignature const mine = conductorCacheSignature();
+		std::string const difference = mine.difference( cache.signature );
+		if ( !difference.empty() )
+		{
+			reason = difference;
+			return false;
+		}
+
+		if ( !cache.consistent() )
+		{
+			reason = "the cache's arrays do not agree with its own attributes";
+			return false;
+		}
+
+		if ( !cache.nodalPsi.empty()
+		     && cache.nodalPsi.size()
+		        != static_cast< std::size_t >( potentialFes->GetNDofs() ) )
+		{
+			reason = "the cache carries "
+			         + std::to_string( cache.nodalPsi.size() )
+			         + " nodal values against this space's "
+			         + std::to_string( potentialFes->GetNDofs() ) + " dofs";
+			return false;
+		}
+
+		/*
+		 * THE CACHE IS HELD, NOT INSTALLED, AND THAT IS FORCED BY THE ORDERING.
+		 *
+		 * A caller adopts BEFORE the first solve -- adopting afterwards would
+		 * have paid for the rebuild already -- and meq::SourceIntegrator does
+		 * not exist until buildForms(), which prepare() runs. So the quadrature
+		 * half is stashed and consumed there, and the nodal half by
+		 * buildConductorNodalCache(), which prepare() also runs.
+		 *
+		 * The deferred half can still decline: the quadrature RULE is not
+		 * visible from any field of the signature, so buildForms() checks the
+		 * offsets against the rule this space would use and falls back to the
+		 * ordinary build when they differ. conductorCacheWasAdopted() is how a
+		 * caller finds out which happened, and it is a question about the last
+		 * prepare() rather than about this call.
+		 */
+		pendingConductorCache = cache;
+		conductorNodalPsi = cache.nodalPsi;
+
+		if ( sourceIntegrator && !cache.quadraturePsi.empty() )
+			conductorCacheAdopted = sourceIntegrator->adoptConductorCache(
+				*potentialFes, cache.quadraturePsi, cache.quadratureOffset );
+
+		return true;
+	}
+
+	bool GradShafranovSolver::conductorCacheWasAdopted() const
+	{
+		return conductorCacheAdopted;
+	}
+
+	void GradShafranovSolver::setInterpolatedConductorFlux( bool interpolate )
+	{
+		interpolateConductorFlux = interpolate;
+	}
+
+	bool GradShafranovSolver::interpolatedConductorFlux() const
+	{
+		return interpolateConductorFlux;
+	}
+
+	bool GradShafranovSolver::pendingConductorCacheStillApplies() const
+	{
+		if ( pendingConductorCache.empty() )
+			return false;
+
+		// The full signature, not the dof count. An adaptive run refines the
+		// mesh between cycles WITHOUT rebuilding the solver, so the cheap test
+		// would let a cache belonging to the coarse mesh through whenever the
+		// refined one happened to land on the same number of dofs -- psi_c at
+		// the right count of the wrong points, which is the one failure this
+		// whole file is built to make impossible. A digest is a walk over the
+		// vertices; the thing it guards is a walk over the quadrature points
+		// with an elliptic integral at each.
+		return conductorCacheSignature() == pendingConductorCache.signature;
 	}
 
 	void GradShafranovSolver::refreshPlasmaComponent( mfem::Vector const &state )
@@ -7965,6 +8277,39 @@ namespace
 			// remainder. Null unless the split is in use, and null shifts by
 			// exactly zero. COIL-SUBTRACTION-PLAN.md CS-4.
 			finder.setConductorField( conductorFieldSet );
+			finder.setInterpolatedFlux( interpolateConductorFlux );
+
+			/*
+			 * AND ITS q_c TABLE, WHICH IS THE EXPENSIVE ONE AND IS NOT psi_c.
+			 *
+			 * This finder is constructed per solve, and its table is `q_c` at
+			 * every flux node -- a cross-section quadrature of elliptic
+			 * integrals per node for a rectangle. Measured, caching `psi_c`
+			 * alone left this at 61% of a warm run's profile. So the table is
+			 * held on the SOLVER, built once and then handed to every finder
+			 * after it, and `src/meq/ConductorStore.hpp` carries it between
+			 * runs.
+			 */
+			if ( conductorFieldSet )
+			{
+				// THE SAME re-mesh GUARD THE OTHER TWO CACHES CARRY. An
+				// adaptive cycle refines without rebuilding this solver, and a
+				// q_c table indexed by element on the coarse mesh would be
+				// read against the refined one. Signature first, every time.
+				if ( pendingConductorCache.hasCriticalPointTable()
+				     && pendingConductorCacheStillApplies() )
+					finder.adoptNodalConductors(
+						criticalTableFromCache( pendingConductorCache ) );
+				else
+				{
+					criticalTableIntoCache( finder.nodalConductorTable(),
+					                        pendingConductorCache );
+					// Stamped with THIS mesh, so the guard above can pass on
+					// the next solve of the same problem and must fail on a
+					// refined one.
+					pendingConductorCache.signature = conductorCacheSignature();
+				}
+			}
 			AxisSense const sense = span >= 0.0 ? AxisSense::Maximum
 			                                    : AxisSense::Minimum;
 

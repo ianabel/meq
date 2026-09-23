@@ -1,5 +1,7 @@
 #include "CriticalPoints.hpp"
 
+#include <cstdlib>
+
 #include "ConductorField.hpp"
 #include "Threading.hpp"
 
@@ -317,6 +319,46 @@ namespace meq
 
 		fluxField.GetVectorValue( element, ip, out );
 
+		/*
+		 * EXACT, POINTWISE, AND THE INTERPOLANT WAS TRIED AND FALSIFIED HERE.
+		 *
+		 * The nodal q_c table IS a dof vector of MEQ's own flux space -- both
+		 * spaces are nodal `L2_FECollection( GaussLobatto )` -- so evaluating a
+		 * grid function built from it instead of calling
+		 * meq::ConductorField::flux() per iterate is a polynomial evaluation
+		 * against a cross-section quadrature of elliptic integrals, and it
+		 * takes the axis leg of a warm subtracted run from 9.5 s to 0.4 s.
+		 * The index map is exact: `theConductorInterpolantIsExactAtTheNodes`
+		 * reads 0.000e+00.
+		 *
+		 * **AND IT CHANGES WHICH EQUILIBRIUM A NORMALISED SOLVE FINDS.**
+		 * Measured against an exact control on the same fixture at three mesh
+		 * sizes: the gap between `psi_ax` and the nodal peak of the total is
+		 * 5.6e-17 at every mesh exactly, and 7.5e-02, 1.6e-03, 2.9e-02 with
+		 * the interpolant -- non-monotone, so not a converging perturbation.
+		 * A normalised solve selects among DISCRETE equilibria
+		 * ( MEASUREMENTS.md M-132 ) and the search feeds that selection.
+		 *
+		 * **POLISHING DOES NOT RECOVER IT**, which is what settles the design
+		 * rather than the size of the error: correcting an accepted root with
+		 * exact Newton steps, and reporting its psi exactly, both leave the
+		 * three numbers above unchanged to every digit. What the interpolant
+		 * moves is WHICH candidates exist and are accepted, and a candidate
+		 * set is not something a later correction can restore.
+		 */
+		if ( interpolateFlux )
+		{
+			if ( mfem::GridFunction const *interpolant = conductorFlux() )
+			{
+				double shift[ 2 ] = { 0.0, 0.0 };
+				mfem::Vector conductorPart( shift, 2 );
+				interpolant->GetVectorValue( element, ip, conductorPart );
+				out( 0 ) += conductorPart( 0 );
+				out( 1 ) += conductorPart( 1 );
+				return true;
+			}
+		}
+
 		double qR = 0.0;
 		double qZ = 0.0;
 		conductors->flux( radius, z, qR, qZ );
@@ -332,6 +374,16 @@ namespace meq
 		if ( !conductors )
 			return solved;
 
+		/*
+		 * EXACT, AND DELIBERATELY NOT THE INTERPOLANT.
+		 *
+		 * This is called ONCE per located critical point, to report its psi --
+		 * never per Newton iterate, which is what makes the FLUX side worth
+		 * interpolating. So there is no cost to save here and a real thing to
+		 * lose: `psi_ax` IS this number on the located-axis path, and the
+		 * conductors being resolved exactly rather than to the mesh's order is
+		 * the whole claim of COIL-SUBTRACTION-PLAN.md section 2(b).
+		 */
 		double radius = 0.0;
 		double z = 0.0;
 		pointOf( meshRef, element, ip, radius, z );
@@ -355,6 +407,149 @@ namespace meq
 			static_cast< std::size_t >(
 				table.potentialOffset[ static_cast< std::size_t >( element ) ] )
 			+ static_cast< std::size_t >( localDof ) ];
+	}
+
+	CriticalPointFinder::NodalConductors const &
+	CriticalPointFinder::nodalConductorTable() const
+	{
+		return nodalConductors();
+	}
+
+	CriticalPointFinder::NodalConductors
+	criticalTableFromCache( ConductorCache const &cache )
+	{
+		CriticalPointFinder::NodalConductors table;
+		table.potentialPsi = cache.criticalPotentialPsi;
+		table.potentialOffset = cache.criticalPotentialOffset;
+		table.fluxQ = cache.criticalFluxQ;
+		table.fluxOffset = cache.criticalFluxOffset;
+		table.scale = cache.criticalFluxScale;
+		table.fluxUsable.assign( cache.criticalFluxUsable.size(), false );
+		for ( std::size_t i = 0; i < cache.criticalFluxUsable.size(); ++i )
+			table.fluxUsable[ i ] = cache.criticalFluxUsable[ i ] != 0;
+		table.built = true;
+		return table;
+	}
+
+	void criticalTableIntoCache(
+		CriticalPointFinder::NodalConductors const &table,
+		ConductorCache &cache )
+	{
+		cache.criticalPotentialPsi = table.potentialPsi;
+		cache.criticalPotentialOffset = table.potentialOffset;
+		cache.criticalFluxQ = table.fluxQ;
+		cache.criticalFluxOffset = table.fluxOffset;
+		cache.criticalFluxScale = table.scale;
+		cache.criticalFluxUsable.assign( table.fluxUsable.size(), 0 );
+		for ( std::size_t i = 0; i < table.fluxUsable.size(); ++i )
+			cache.criticalFluxUsable[ i ] = table.fluxUsable[ i ] ? 1u : 0u;
+	}
+
+	void CriticalPointFinder::adoptNodalConductors( NodalConductors table )
+	{
+		// `built` is what stops nodalConductors() overwriting this on the next
+		// call, and it is set here rather than trusted from the caller: a
+		// table that came out of a file has no business deciding whether this
+		// finder considers itself built.
+		nodal = std::move( table );
+		nodal.built = true;
+		conductorFluxField.reset();
+	}
+
+	void CriticalPointFinder::setInterpolatedFlux( bool interpolate )
+	{
+		interpolateFlux = interpolate;
+		conductorFluxField.reset();
+	}
+
+	bool CriticalPointFinder::interpolatedFlux() const
+	{
+		return interpolateFlux;
+	}
+
+	mfem::GridFunction const *CriticalPointFinder::conductorFlux() const
+	{
+		if ( !interpolateFlux )
+			return nullptr;
+		nodalConductors();
+		if ( !conductorFluxField )
+			refreshConductorFields();
+		return conductorFluxField.get();
+	}
+
+	void CriticalPointFinder::refreshConductorFields() const
+	{
+		conductorFluxField.reset();
+		if ( !conductors || !interpolateFlux || nodal.fluxQ.empty() )
+			return;
+
+		/*
+		 * THE TABLE IS ALREADY A DOF VECTOR AND THIS ONLY RESHAPES IT.
+		 *
+		 * The flux space is a nodal `L2_FECollection( GaussLobatto )`, so a
+		 * coefficient IS the value at its node and every dof belongs to
+		 * exactly one element -- the same two facts
+		 * GradShafranovSolver::conductorPsiAtDof() rests on. Nothing here is
+		 * fitted, projected or resampled; the loop below is an index map, and
+		 * `theConductorInterpolantIsExactAtTheNodes` asserts that by reading
+		 * 0.000e+00 rather than a tolerance.
+		 */
+		auto *fluxSpace = const_cast< mfem::FiniteElementSpace * >(
+			fluxField.FESpace() );
+
+		conductorFluxField
+			= std::make_unique< mfem::GridFunction >( fluxSpace );
+		*conductorFluxField = 0.0;
+
+		mfem::Array< int > vdofs;
+		for ( int e = 0; e < meshRef.GetNE(); ++e )
+		{
+			std::size_t const qBase = static_cast< std::size_t >(
+				nodal.fluxOffset[ static_cast< std::size_t >( e ) ] );
+			fluxSpace->GetElementVDofs( e, vdofs );
+			int const nodesHere = vdofs.Size()/2;
+			mfem::IntegrationRule const &fluxNodes
+				= fluxSpace->GetFE( e )->GetNodes();
+
+			for ( int n = 0; n < nodesHere; ++n )
+			{
+				std::size_t const at = qBase + static_cast< std::size_t >( n );
+				double qR = nodal.fluxQ[ 2*at ];
+				double qZ = nodal.fluxQ[ 2*at + 1 ];
+
+				/*
+				 * THE AXIS, WHICH IS THE ONE PLACE THIS CANNOT JUST COPY.
+				 *
+				 * q_c is NaN on R = 0 -- meq::ConductorField::flux()'s own
+				 * contract -- and a single NaN dof makes the WHOLE element's
+				 * polynomial NaN, so the screen that serves a nodal reader
+				 * cannot serve this one. poloidalField() is finite there and
+				 * is the only entry point that takes the limit: B_R is exactly
+				 * zero and B_Z is the closed form, so q_R = B_Z and
+				 * q_Z = -B_R = 0. A half-disc machine's first column of
+				 * elements sits here.
+				 */
+				if ( !nodal.fluxUsable[ at ] )
+				{
+					double radius = 0.0;
+					double z = 0.0;
+					pointOf( meshRef, e, fluxNodes.IntPoint( n ), radius, z );
+					double bR = 0.0;
+					double bZ = 0.0;
+					conductors->poloidalField( radius, z, bR, bZ );
+					qR = bZ;
+					qZ = -bR;
+				}
+
+				int const dofR = vdofs[ n ] >= 0 ? vdofs[ n ]
+				                                 : -1 - vdofs[ n ];
+				int const dofZ = vdofs[ nodesHere + n ] >= 0
+					? vdofs[ nodesHere + n ]
+					: -1 - vdofs[ nodesHere + n ];
+				( *conductorFluxField )( dofR ) = qR;
+				( *conductorFluxField )( dofZ ) = qZ;
+			}
+		}
 	}
 
 	CriticalPointFinder::NodalConductors const &

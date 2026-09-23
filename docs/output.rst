@@ -576,3 +576,54 @@ node** over the surfaces it affects, the affected surfaces ringed on the profile
 panels, and the two cut regions shaded so that a family over :math:`\Psi_N \in
 [0.05, 0.95]` reads as a cut rather than as an answer that starts somewhere.
 ``tools/README.md`` has the options.
+
+.. _psi-coil-group:
+
+The ``psi_coil`` group
+----------------------
+
+A run that takes its conductors out of the mesh — ``[conductors] Model`` set to
+``"subtracted"`` or ``"filament"``, see :ref:`caching-psi-c` — writes one more
+thing into the gridded ``.nc``: a netCDF **group** named ``psi_coil`` holding
+:math:`\psi_c`, the flux those conductors contribute, and
+:math:`q_c = (1/R)\,\bar\nabla\psi_c`.
+
+.. code-block:: text
+
+   group: psi_coil {
+     dimensions:
+       potential_dof = 18230 ;
+       quadrature_point = 45575 ;
+       element_offset = 1824 ;
+     variables:
+       double psi_c_dof( potential_dof ) ;
+       double psi_c_quadrature( quadrature_point ) ;
+       int quadrature_offset( element_offset ) ;
+       double critical_q_c( critical_flux_node, component ) ;
+       byte critical_q_c_usable( critical_flux_node ) ;
+       double critical_psi_c( critical_potential_node ) ;
+     // :format = "meq-conductor-cache" ;
+     // :mesh_digest, :conductor_digest, :polynomial_degree, ... ;
+   }
+
+**It is not a field on a grid and must not be read as one.** Everything else in
+this file is sampled onto a uniform :math:`(R, Z)` lattice and is meant to be
+interpolated; this is the opposite. The values sit at exactly the points MEQ
+evaluated them at — one per potential degree of freedom, one per source
+quadrature point — in MEQ's own ordering, which is meaningless without the mesh
+that produced it. There is deliberately no ``R`` or ``Z`` beside them.
+
+``critical_q_c_usable`` is 0 where :math:`q_c` is NaN, which is the symmetry
+axis; the screen travels with the values rather than being re-derived from them,
+since deciding whether to read a NaN by reading it does not work.
+
+**What it is for** is handing the next run the expensive half of its setup. The
+attributes are the identity it is valid for, and MEQ refuses the data outright
+if any of them has moved, so the group is safe to carry around and impossible to
+apply to the wrong machine. ``[conductors] CacheFile`` writes the same group as
+the root of a file of its own when you want it separately from the equilibrium.
+
+If you want :math:`\psi_c` as a *field*, evaluate it: it is a sum of elliptic
+integrals over conductors whose geometry is in the configuration file, and
+:math:`\psi = \psi_c + \psi_p` holds everywhere, so the gridded ``psi`` in this
+file already includes it.

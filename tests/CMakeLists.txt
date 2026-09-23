@@ -18,6 +18,7 @@ set(MEQ_UNIT_TESTS
 	BoundaryShapeTests
 	CoilsTests
 	ConductorFieldTests
+	ConductorStoreTests
 	ConfigTests
 	ExteriorDtNTests
 	FluxFamilyTests

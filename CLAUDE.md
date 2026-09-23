@@ -2480,6 +2480,12 @@ path and notice none of it.
 src/meq/     the library. Config, Profiles, Source, SourceFactory,
              GradShafranov, BoundaryShape, Estimator, Field, Sampler,
              WarmStart, Output -- all ported and all under the naming check.
+             ConductorStore is psi_c ON DISK and is MFEM-free on purpose: it
+             takes plain vectors, so the format is unit-testable without the
+             library and netcdf stays inside two .cpp files. It is a CACHE and
+             not a field -- values at the solver's own points rather than an
+             mgrid-style grid -- and COIL-SUBTRACTION-PLAN.md CS-6 says why
+             that trade goes this way and what the refusal has to guard.
              CriticalPoints, FluxSurfaces, SurfaceAverage, SurfaceFit and
              Zernike are the solution-inversion work and were written here
              rather than ported; see that section.

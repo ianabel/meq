@@ -308,6 +308,7 @@ must.
 | **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9. **BUILT** → **[M-150](MEASUREMENTS.md#m-150)**: the `.nc` carries every `P_k` coefficient, the space, `content`, the conductor table and `mu0` beside its rasterization, and `theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom` rebuilds the physical field from the file's own columns to **3.6e-15**. The `.gf` is demoted to a viewing artefact and a fourth one, `<stem>_psi_total.gf`, is written under a split. **What is NOT built is the second half of §9.1** — `meq::Configuration` still has no serialiser, so the output carries the input VERBATIM and not the resolved configuration |
 | **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7. **BUILT** → **[M-149](MEASUREMENTS.md#m-149)**: clear of the conductors — the only regime a subtracted solve has — the shipped order 32 is **1.3e-12** against order 160, and the SOLVED split moves by **1.8e-11** when the order is raised to 96, against a discretisation error of 1.6e-04. §7.2's second acceptance, meshed against subtracted, was already built |
 | **CS-M** | **the mesh actually gets smaller, which is the whole of §2(a) and had never been reachable from a file.** **BUILT** → **[M-148](MEASUREMENTS.md#m-148)**: `apps/meq.cpp` omits every `--coil` under a subtracting `[conductors] Model` and refuses `[mesh.generate] CoilSize` beside it, so `examples/mastu-nke` drops from 9361 triangles to 4716 and `diverted-tokamak-generated` from 2854 to 2322 — [M-142](MEASUREMENTS.md#m-142)'s numbers, now reachable by editing one key. **The element count is not the finding**; see §13 for the three defects posing the first such case met |
+| **CS-C** | **`psi_c` AND `q_c` on disk, so a coupled run stops rebuilding fields that cannot have changed.** **BUILT** → **[M-170](MEASUREMENTS.md#m-170)**: `src/meq/ConductorStore.hpp` writes them at exactly the points they are used at — not an mgrid-style grid, because CS-2's identities read `0.000e+00` and an interpolated field would turn them into tolerances. **8.4× on the wall clock** for four conductors as subtracted rectangles, **5.3×** once the 129² output grid's own uncached add-back is in the run, and **1.05×** for the same four as filaments. **The first version cached `psi_c` alone and was worth 3.51×**; `perf` on the WARM arm showed `grad psi_c` at 61% of what was left. A netCDF **group**, 1.0 MB, written into the equilibrium `.nc` under any split and additionally to `[conductors] CacheFile`. §14 |
 
 ---
 
@@ -1251,3 +1252,104 @@ does is pose MAST-U free boundary with its conductors subtracted and divided,
 which is the pathway's own first rung. That wants MAST-U's cold start, which is
 [M-124](MEASUREMENTS.md#m-124)'s ellipse guess plus
 `setBorderRegularisation()`, and it is a fixture rather than a capability.
+
+## 14. CS-C, `psi_c` and `q_c` on disk, and why it is a cache rather than an mgrid
+
+**THE PRECOMPUTE IS PER MESH AND A COUPLED RUN PAYS IT PER SOLVE.** §1 licenses
+the caches — the conductors do not move during a forward solve — and M-142
+measures what they save. What neither says is that the licence is stronger than
+the implementation: driven from MaNTA, `p'` and `g g'` move and the machine does
+not, so `psi_c` is invariant across a whole sequence of solves and was being
+rebuilt for every one of them.
+
+`src/meq/ConductorStore.hpp` is the file that ends that, and
+→ **[M-170](MEASUREMENTS.md#m-170)** is what it is worth: **8.4× on the wall
+clock** for four conductors as subtracted rectangles and **1.05×** for the same
+four as filaments. The spread between those two rows is M-142's table and
+nothing else.
+
+**AND THE FIRST VERSION CACHED THE WRONG QUANTITY, WHICH IS THE PART WORTH
+KEEPING.** Built to hold `psi_c` — the two caches §1 licenses — it measured
+3.51×, reproducibly and with a control, while the warm arm still took 52 s
+against the filament arm's 3 s. `perf` on the WARM run put `filamentGradKernel`,
+`ellint_rd` and `coilGradPsi` at **61%**: the remaining cost was `q_c =
+( 1/R ) grad_bar psi_c`, which `meq::CriticalPointFinder` tabulates at every
+flux-space element node because the critical points are roots of the PHYSICAL
+flux. **A gradient is a different quantity and no `psi_c` cache covers it.** The
+table is now held on the solver, handed to every finder built after the first
+— including `apps/meq.cpp`'s own post-solve one, which was rebuilding it — and
+carried between runs in the file. *A cache named after a quantity gets tested
+against that quantity; profile the arm that is supposed to be fast.*
+
+**AND `q_c` AT POINTS THAT ARE NOT NODES IS A SEPARATE PROBLEM WITH A SEPARATE
+ANSWER.** The cache serves every consumer that reads `q_c` at a node; the
+element-local Newton that locates the critical points reads it at every
+**iterate**, so after the cache landed that search was still the largest item in
+a warm run — `constraint location` at 9.5 s of a 17 s solve.
+
+The nodal table IS a dof vector of MEQ's own flux space, both being nodal
+`L2_FECollection( GaussLobatto )`, so a grid function built from it is an index
+map — asserted at **0.000e+00** by
+`theConductorInterpolantIsExactAtTheNodes` — and rooting that instead takes the
+leg to **0.4 s**. **It cannot be the default** →
+**[M-171](MEASUREMENTS.md#m-171)**: on a cold normalised solve it moves `psi_ax`
+by up to 7.5e-02 against 5.6e-17 for the exact field, non-monotone in the mesh,
+because it perturbs WHICH candidate roots are accepted and a normalised solve
+selects among discrete equilibria. Polishing accepted roots with exact Newton
+steps and reporting their `psi` exactly both leave that unchanged to every
+digit; a candidate set is not something a later correction restores.
+
+So it is `[conductors] InterpolatedFlux`, **off by default**, worth **1.49×** on
+a warm subtracted run with every printed digit of `psi_ax` unmoved. The
+condition that makes it safe is the warm start itself: from a guess near the
+answer the search refines one root rather than choosing among several. *A claim
+about the DATA — "the cache is a dof vector" — was silent about the CONSUMER.*
+
+**WHAT IS STILL NOT CACHED IS THE OUTPUT GRID**, and it cannot be: the `.nc`
+writer adds `psi_c` and `B_c` back at every located node, and the grid is not
+the mesh. At 129² that is 6.9 s of a 31.3 s warm run — 22% — and is the whole
+difference between this campaign's 8.4× and 5.3× rows.
+
+**IT STORES VALUES AT MEQ's OWN POINTS, AND THAT IS THE DESIGN DECISION.** The
+obvious precedent is VMEC's `mgrid`, which samples the vacuum field on a uniform
+`( R, phi, Z )` grid and interpolates it back — mesh-free, reusable at any
+resolution, and **approximate**. This is the other trade, and CS-2 is why: the
+remainder of a vacuum filament is asserted at `< 1.0e-12*scale` and the view
+identities at `0.000e+00`, so a `psi_c` that came back to within an
+interpolation error would silently convert the whole campaign's exactness claims
+into tolerances. The cache therefore holds `psi_c` at every potential dof and
+every source quadrature point, and is **bound to one mesh, one degree and one
+quadrature rule**.
+
+**SO THE REFUSAL IS THE LOAD-BEARING PART, NOT THE READ.** A stale `psi_c` is
+not a slow run: it is a plausible field belonging to another machine, added to a
+solve that converges at the right rate to an equilibrium nobody posed. Three
+things guard it, and they are separate because they fail at different times:
+
+| | |
+|---|---|
+| the **signature** — mesh digest, conductor digest, degree, element and dof counts | compared before anything is installed; `ConductorCacheSignature::difference()` names the first field that moved, ordered so that "the conductors differ" comes first, since that means somebody edited the machine where "the mesh differs" means the run re-meshed |
+| the **offsets**, against the rule this space would use | checked at `buildForms()`, because the quadrature ORDER is invisible to every field of the signature — raise it and the points move while the mesh, the degree and the conductors all stay put |
+| the signature **again**, at every `prepare()` | an adaptive cycle refines the mesh without rebuilding the solver, so a held cache must not be trusted from the call that offered it |
+
+**AND A CACHE MAY NEVER FAIL A RUN.** Absent, stale, corrupt or another
+machine's, it costs a rebuild and changes no number — but every one of those is
+printed, because a run that silently stopped using its cache is a performance
+regression with no symptom.
+
+**Two deployments, one format.** The group goes into the equilibrium `.nc`
+whenever the split is in use, so a consumer holding the answer also holds the
+means to warm start from it; `[conductors] CacheFile` additionally writes a file
+of its own, and only when this run did not already adopt one, so naming the same
+path writes it once and reads it thereafter. `CacheFile` is **refused** under
+`Model = "meshed"`, which subtracts nothing and has no `psi_c` to cache —
+accepted-and-ignored being the failure `CLAUDE.md` records under the reserved
+profile keys and which has already recurred once in this tree.
+
+**Acceptance**: `ConductorStoreTests` for the format — nine cases, and the round
+trip asserts `==` on every double rather than a tolerance — and
+`ConductorSubtraction::theConductorCacheSurvivesAFileBitForBit` for the solver,
+which writes a cache, reloads it into a second solver, and requires that the
+nodal values come back exactly, that the solve reaches the same `max |psi_p|`,
+that the cache was actually **used** rather than merely accepted, and that
+moving one filament by 4 cm is refused with the conductors named.

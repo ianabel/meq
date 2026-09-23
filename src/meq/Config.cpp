@@ -1111,7 +1111,8 @@ namespace meq
 		{
 			Table conductors( document, "conductors", sourceName, false );
 			conductors.rejectUnknownKeys( { "Model", "QuadratureOrder",
-			                                "FilamentSize" } );
+			                                "FilamentSize", "CacheFile",
+			                                "InterpolatedFlux" } );
 
 			std::string const model = conductors.getStringOr( "Model", "meshed" );
 			if ( model == "meshed" )
@@ -1202,8 +1203,33 @@ namespace meq
 					                 + coilOptions.coils[ stackedBlock ].name
 					                 + ") names FilamentsR and FilamentsZ. Set Model = \"filament\" or remove the keys; written as it stands they would be accepted and do nothing" );
 			}
-			else if ( conductorOptions.filamentSize != 0.0
-			          && !( conductorOptions.filamentSize > 0.0 ) )
+			/*
+			 * REFUSED UNDER "meshed" RATHER THAN ACCEPTED AND IGNORED. A
+			 * meshed run subtracts nothing, so there is no psi_c to cache and
+			 * the key would name a file that is never written and never read
+			 * -- the accepted-and-ignored failure this file records under the
+			 * reserved profile keys, and which recurred once already with
+			 * ConfineToPlasma on the rotating source.
+			 */
+			conductorOptions.cacheFile =
+				conductors.getStringOr( "CacheFile",
+				                        conductorOptions.cacheFile );
+
+			conductorOptions.interpolatedFlux =
+				conductors.getBooleanOr( "InterpolatedFlux",
+				                      conductorOptions.interpolatedFlux );
+
+			if ( conductorOptions.interpolatedFlux
+			     && !conductorOptions.subtracts() )
+				conductors.fail( "InterpolatedFlux", "interpolates q_c, the field the SUBTRACTED conductors contribute, and Model = \"meshed\" puts the conductors in the mesh instead -- so there is no q_c for this run to interpolate. Set Model = \"subtracted\" or \"filament\", or remove the key" );
+
+			if ( !conductorOptions.cacheFile.empty()
+			     && !conductorOptions.subtracts() )
+				conductors.fail( "CacheFile", "caches psi_c, the field the SUBTRACTED conductors contribute, and Model = \"meshed\" puts the conductors in the mesh instead -- so there is no psi_c for this run to cache. Set Model = \"subtracted\" or \"filament\", or remove the key" );
+
+			if ( conductorOptions.model == ConductorModel::Filament
+			     && conductorOptions.filamentSize != 0.0
+			     && !( conductorOptions.filamentSize > 0.0 ) )
 				conductors.fail( "FilamentSize", "must be strictly positive, in metres: it is an upper bound on a filament cell's extent, so each block gets ceil( 2*HalfWidth/FilamentSize ) x ceil( 2*HalfHeight/FilamentSize ) filaments. Omit the key for one filament per block, which is what a file without it means" );
 		}
 

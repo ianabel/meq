@@ -2,6 +2,7 @@
 #define MEQ_CONDUCTORFIELD_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "Coils.hpp"
@@ -115,6 +116,21 @@ namespace meq
 			double totalCurrent() const;
 
 			double mu0() const;
+
+			/// EVERYTHING psi() IS A FUNCTION OF BESIDES THE FIELD POINT, as
+			/// one number: every conductor's geometry and current, the
+			/// permeability, and the cross-section quadrature order. It exists
+			/// so that meq::ConductorCache can be REFUSED when the machine has
+			/// moved -- a stale psi_c is not a slow run but a converged answer
+			/// to a different problem, and this is the only cheap thing a
+			/// caller can compare before paying for the cache it would save.
+			///
+			/// The order conductors were added in is part of it, deliberately:
+			/// psi_c is a sum and is therefore invariant under a reordering,
+			/// but the QUADRATURE cache is indexed by element and a reordering
+			/// that changes nothing physical still costs nothing to recompute.
+			/// Refusing is the cheap side of that trade.
+			std::uint64_t digest() const;
 
 			/// psi_c at a point: the sum over the filaments of
 			/// meq::filamentPsi() and over the rectangles of meq::coilPsi(),
