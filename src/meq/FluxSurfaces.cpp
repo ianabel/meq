@@ -556,13 +556,13 @@ namespace meq
 		// per tracer rather than per trace: potentialScale() is called at the
 		// head of every traceFrom() and every fitByAngle(), and a family is
 		// dozens of those.
-		double worst = 0.0;
+		mfem::real_t worst = 0.0;
 		for ( int v = 0; v < meshRef.GetNV(); ++v )
 		{
-			double const *x = meshRef.GetVertex( v );
+			auto const *x = meshRef.GetVertex( v );
 			double const value = conductors->psi( x[ 0 ], x[ 1 ] );
 			if ( std::isfinite( value ) )
-				worst = std::max( worst, std::abs( value ) );
+				worst = std::max( worst, mfem::real_t( std::abs( value ) ) );
 		}
 
 		conductorScaleCache = worst;
@@ -571,7 +571,7 @@ namespace meq
 
 	double ContourTracer::potentialScale() const
 	{
-		double worst = 0.0;
+		mfem::real_t worst = 0.0;
 		for ( int i = 0; i < potentialField.Size(); ++i )
 			worst = std::max( worst, std::abs( potentialField( i ) ) );
 

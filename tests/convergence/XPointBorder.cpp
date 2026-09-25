@@ -725,6 +725,27 @@ BOOST_AUTO_TEST_CASE( theXPointBorderRefusesASecondConstraintOnTheSameUnknown )
  * direction that cannot help -- the rows already count for little -- and it is
  * here because an invariant asserted only in the direction that pays is an
  * invariant half tested.
+ *
+ * AND A WEIGHT THAT DOES NOT SOLVE IS SKIPPED RATHER THAN REQUIRED, BECAUSE
+ * WHETHER IT SOLVES IS DECIDED BY ROUND-OFF AND NOT BY THE WEIGHT. Weight 4
+ * puts the bootstrap onto exactly the plateau the paragraph above describes:
+ * the residual sits near 1.8e-04 for sixty iterations, RISING to 4.3e-04, and
+ * then falls to 1e-12 in the last five. How many iterations that wandering
+ * costs is set by the last bits of the trace solve. Measured across
+ * MKL_NUM_THREADS 1, 2 and 4 -- which reassociates a blocked BLAS-3 and changes
+ * nothing else -- it is 81, 65 and 115 against a cap of 200, and on a second
+ * binary differing from the first only in round-off, one arm over the cap and
+ * two at 84 and 75. Every arm that converges reports `psi_ax` to eleven digits
+ * and the X-point to six decimals, which is the contract this case is for.
+ * MEASUREMENTS.md M-186.
+ *
+ * SO THE SWEEP IS FOUR WEIGHTS AND THREE OF THEM MUST COMPARE. A
+ * BOOST_TEST_REQUIRE on one weight's convergence abandons the whole case on a
+ * coin toss, which is what `pedestalConvergenceIsAResolutionThreshold` spends
+ * forty lines establishing must never be asserted on -- and in the more brittle
+ * direction, since a REQUIRE gives up the weights after it as well. Two
+ * dropouts is still a finding, and the agreement assertions below have not
+ * moved: what was relaxed is a precondition, not a tolerance.
  */
 BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
 {
@@ -734,14 +755,20 @@ BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
 	BOOST_TEST_REQUIRE( one.sweeps > 0,
 	                    "the reference weight must solve first" );
 
-	for ( double const weight : { 0.25, 4.0 } )
+	int compared = 0;
+	for ( double const weight : { 0.25, 0.5, 2.0, 4.0 } )
 	{
 		Machine other = buildMachine();
 		completeMachine( other );
 		Answer const got = runBorder( other, weight );
 
-		BOOST_TEST_REQUIRE( got.sweeps > 0,
-		                    "weight " << weight << " did not solve" );
+		if ( got.sweeps == 0 )
+		{
+			std::printf( "    weight %6.2f : did not solve inside the Newton "
+			             "cap -- SKIPPED, see this case's plateau note\n",
+			             weight );
+			continue;
+		}
 
 		// THE SADDLE AND THE AXIS, to the solve's own tolerance and not to a
 		// slack one: these are the same discrete problem reached by a different
@@ -758,11 +785,17 @@ BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
 		            "the X-point's Z moved with the merit weight: " << got.xZ
 		            << " against " << one.xZ << " at weight " << weight );
 
+		++compared;
 		std::printf( "    weight %6.2f : %2zu bootstrap iterations, "
 		             "psi_ax %.10e, X ( %.6f, %.6f )\n",
 		             weight, got.bootstrapIterations, got.psiAxis,
 		             got.xR, got.xZ );
 	}
+
+	BOOST_TEST_REQUIRE( compared >= 3,
+	                    "only " << compared << " of the four merit weights "
+	                    "solved inside the Newton cap, so this case has not "
+	                    "tested the invariant it exists for" );
 }
 
 /*

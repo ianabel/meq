@@ -66,7 +66,7 @@ namespace meq
 			mesh.GetElementTransformation( element, &transformation );
 			transformation.SetIntPoint( &ip );
 
-			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+			mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
 			radius = position( 0 );
@@ -77,7 +77,7 @@ namespace meq
 		                       mfem::IntegrationPoint const &ip,
 		                       double &radius, double &z )
 		{
-			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+			mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
 			radius = position( 0 );

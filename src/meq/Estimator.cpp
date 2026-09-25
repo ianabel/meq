@@ -19,7 +19,7 @@ namespace meq
 		double diameter( mfem::Mesh &mesh, mfem::Array<int> const &vertices )
 		{
 			int const dim = mesh.SpaceDimension();
-			double largest = 0.0;
+			mfem::real_t largest = 0.0;
 			for ( int i = 0; i < vertices.Size(); ++i )
 			{
 				for ( int j = i + 1; j < vertices.Size(); ++j )
@@ -569,7 +569,7 @@ namespace meq
 		if ( gamma < 0.0 || gamma > 1.0 )
 			throw std::invalid_argument( "meq::markMaximum: the marking parameter must lie in [ 0, 1 ]" );
 
-		double largest = 0.0;
+		mfem::real_t largest = 0.0;
 		for ( int e = 0; e < localErrors.Size(); ++e )
 			largest = std::max( largest, localErrors( e ) );
 
@@ -605,7 +605,7 @@ namespace meq
 			mesh.GetElementVertices( element, vertices );
 			for ( int v = 0; v < vertices.Size(); ++v )
 			{
-				double const *c = mesh.GetVertex( vertices[ v ] );
+				auto const *c = mesh.GetVertex( vertices[ v ] );
 				for ( int d = 0; d < dim; ++d )
 					x( d ) = c[ d ];
 				if ( phi( x ) <= 0.0 )
@@ -757,9 +757,9 @@ namespace meq
 
 	double AdaptiveDomain::largestElement() const
 	{
-		double largest = 0.0;
+		mfem::real_t largest = 0.0;
 		for ( int e = 0; e < computationalMesh->GetNE(); ++e )
-			largest = std::max( largest, elementDiameter( *computationalMesh, e ) );
+			largest = std::max( largest, mfem::real_t( elementDiameter( *computationalMesh, e ) ) );
 		return largest;
 	}
 

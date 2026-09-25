@@ -1738,6 +1738,93 @@ BOOST_AUTO_TEST_CASE( theDriverRefusesASolverItCannotHonour )
 }
 
 /*
+ * A DEVICE AND MEQ'S THREADED ASSEMBLY CANNOT BE COMBINED, AND THE ABORT THAT
+ * RESULTS NAMES NEITHER OF THEM.
+ *
+ * MFEM registers buffers lazily in its memory manager once an mfem::Device
+ * exists -- Memory<T>::MakeAlias(), SetDeviceMemoryType() and the device arms
+ * of Read/Write/ReadWrite -- into general/mem_manager.cpp's `maps->memories`
+ * and `maps->aliases`, two bare std::unordered_maps carrying no mutex, no
+ * critical section and no atomic. DarcyForm's assembly element loops are
+ * `#pragma omp parallel`, so with a Device configured those insertions arrive
+ * from every thread at once and the container corrupts. Without a Device those
+ * arms are never taken, which is why host threaded assembly has always been
+ * safe and why this refusal is device-only.
+ *
+ * MEASURED with a thread count and not argued: OMP_NUM_THREADS=1 solves
+ * machine-f-diiid and reproduces the host's own 7 / 3 / 2 Newton counts, and
+ * OMP_NUM_THREADS=8 aborts in MemoryManager::CheckHostMemoryType_ with "alias
+ * pointer is not registered". DEVICE-PLAN.md section 3.3, item 7.
+ *
+ * THE CASE ASSERTS THE PAIRING RATHER THAN THE REFUSAL, which is the standing
+ * lesson from the reserved profile keys: a test that checked only the refusal
+ * would pass equally against a driver that refused the combination everywhere,
+ * including the two cells that must still run.
+ *
+ * --device debug is used rather than --device cuda deliberately. It carries
+ * the device memory semantics that cause this and needs no GPU at all, so the
+ * case is portable to a machine that has never built CUDA -- and it is the
+ * same instrument section 4 of DEVICE-PLAN.md prescribes.
+ */
+BOOST_AUTO_TEST_CASE( theDriverRefusesThreadedAssemblyOnADevice )
+{
+	if ( !meq::GradShafranovSolver::assemblyModeAvailable(
+	         meq::GradShafranovSolver::AssemblyMode::Threaded ) )
+	{
+		// A stock MFEM has neither MFEM_USE_OPENMP nor MFEM_THREAD_SAFE, and
+		// then "threaded" is already refused for a different reason by the
+		// check above this one -- so every cell below would read 1 and the
+		// pairing would be untestable rather than failing.
+		BOOST_TEST_MESSAGE( "MFEM has no threaded assembly: SKIPPED" );
+		return;
+	}
+
+	{
+		std::ofstream file( "driver-acceptance-devthread.toml" );
+		file << "[mesh]\nRMin = 0.1\nRMax = 1.9\nZMin = -1.7\nZMax = 1.7\n"
+		     << "NR = 4\nNZ = 4\n\n[discretisation]\nPolynomialDegree = 1\n"
+		     << "\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		     << "\n[solver]\nAssemblyMode = \"threaded\"\n"
+		     << "\n[output]\nPrefix = \"driver-acceptance-devthread\"\n";
+	}
+
+	/*
+	 * EVERY CELL SETS OMP_NUM_THREADS ITSELF, and that is load bearing:
+	 * tests/CMakeLists.txt pins MKL_NUM_THREADS and deliberately does NOT pin
+	 * this one, so a single-core runner would otherwise turn the refusal cell
+	 * into the honoured cell and the case would pass having tested nothing.
+	 */
+	auto runWith = []( char const *threads, char const *extra )
+	{
+		std::string const command = "OMP_NUM_THREADS=" + std::string( threads )
+		                            + " " + std::string( driver() )
+		                            + " driver-acceptance-devthread.toml "
+		                            + extra + " > /dev/null 2>&1";
+		int const status = std::system( command.c_str() );
+		return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+	};
+
+	BOOST_TEST( runWith( "2", "--device debug" ) == 1,
+	            "AssemblyMode = \"threaded\" under --device above one thread "
+	            "must exit 1. If this passes, the driver has started accepting "
+	            "the combination -- and what follows is not a solve but an "
+	            "abort inside MFEM's memory manager, three frames down, with "
+	            "nothing in the message naming this key or --device" );
+
+	BOOST_TEST( runWith( "1", "--device debug" ) == 0,
+	            "one OpenMP thread is measured to be safe and must still run, "
+	            "or the refusal is broader than the defect it guards" );
+
+	BOOST_TEST( runWith( "2", "" ) == 0,
+	            "threaded assembly with no device must be untouched: the "
+	            "unguarded registrations only happen under a Device, and a "
+	            "refusal that reached the host path would cost MEQ its "
+	            "default assembly mode" );
+
+	std::remove( "driver-acceptance-devthread.toml" );
+}
+
+/*
  * --help and --version are the two things a user tries first, and a binary that
  * exits non-zero on --help is a binary that looks broken.
  */

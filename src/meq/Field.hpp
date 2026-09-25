@@ -72,7 +72,7 @@ namespace meq
 			PoloidalFieldCoefficient( mfem::GridFunction const &qIn, int componentIn );
 
 			/// MFEM's spelling, from mfem::Coefficient.
-			double Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
+			mfem::real_t Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
 			             mfem::IntegrationPoint const &ip ) override;
 
 		private:

@@ -112,7 +112,7 @@ namespace meq
 						// would be far too large for the first and far too
 						// small for the last.
 						double const step =
-							difference*std::max( std::abs( x( j ) ), 1.0 );
+							difference*std::max( std::abs( x( j ) ), mfem::real_t( 1.0 ) );
 
 						plus = x;
 						plus( j ) += step;
@@ -368,6 +368,7 @@ namespace meq
 			return out;
 		}
 
+#ifdef MFEM_USE_SUNDIALS
 		mfem::KINSolver newton( options.lineSearch ? KIN_LINESEARCH : KIN_NONE,
 		                        true );
 
@@ -420,6 +421,12 @@ namespace meq
 			          "coefficients stopped determining their own fixed point";
 		out.status = status.str();
 		return out;
+#else
+		(void)residual;
+		out.status = "meq::safetyFactorSolve: the q-driven outer Newton needs KINSOL, and MFEM was built without MFEM_USE_SUNDIALS";
+		out.converged = false;
+		return out;
+#endif
 	}
 
 }

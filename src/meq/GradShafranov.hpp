@@ -194,6 +194,38 @@ namespace meq
 	 * than the bookkeeping, and it cannot lose the contact to another lobe of
 	 * the curve the way a seeded search can.
 	 */
+	/**
+	 * The central-difference step for `mfem::ExtensionBoundaryQuadrature()` and
+	 * `mfem::ExtensionRegionQuadrature()`.
+	 *
+	 * `eps^(1/3)` is the optimum for a central difference; MFEM's historical
+	 * literal `1e-6` is the right order in double and is returned EXACTLY here
+	 * so that the double path is bit-unchanged, and single gets a step that
+	 * follows its own epsilon. M-182 is why the single arm exists: a
+	 * double-tuned step there puts the sweep's degeneracy floor above every
+	 * measure a real face can have, so EVERY quadrature point is skipped, the
+	 * callback never fires, and the exterior DtN coupling drops out of the
+	 * bordered Jacobian while staying in the residual.
+	 *
+	 * **IT IS PUBLIC SO THAT A CALLER COMPUTING THE SAME QUANTITY TWO WAYS CAN
+	 * GIVE BOTH HALVES THE SAME STEP.** A central difference's error is a
+	 * deterministic function of its step, so it is common to two sweeps that
+	 * share one and cancels exactly -- and appears in full the moment they do
+	 * not. That is what M-189 is: MFEM's default moved, MEQ's four production
+	 * sweeps passed this and did not, the reference inside
+	 * `theTransmissionRowIsTheBoundaryIntegralItClaims` took the default, and
+	 * the case reported 1.27e-06 against a row that had not moved by a bit.
+	 * **A test that contracts against a sweep must pass this too.**
+	 */
+	inline double extensionFdStep()
+	{
+#ifdef MFEM_USE_SINGLE
+		return 5.0e-3;
+#else
+		return 1.0e-6;   // MFEM's own default, kept exactly
+#endif
+	}
+
 	double limiterPolygonMaximum( mfem::FiniteElementSpace const &space,
 	                              std::vector<LimiterPolygonFace> const &polygon,
 	                              mfem::Vector const &values, int offset,
@@ -283,6 +315,12 @@ namespace meq
 
 			/// The shared support, ascending.
 			std::vector<int> const &support() const;
+
+			/// The compressed values, row major over support(), which is the
+			/// layout meq::DeviceRows::upload() takes. Exposed so a device
+			/// mirror can be built without a second copy of the rows; nothing
+			/// on the host path needs it, and it is const for that reason.
+			std::vector<double> const &values() const;
 
 			/// @a v restricted to the support, in support order. One gather
 			/// serves every row.
@@ -1054,6 +1092,38 @@ namespace meq
 			 *
 			 * Valid after prepare(). */
 			bool condensationCacheTaken() const;
+
+			/**
+			 * Whether upstream's caller-integrand batched local residual and
+			 * gradient apply to THIS problem, asked of the library rather than
+			 * inferred.
+			 *
+			 * **ASK AFTER A SOLVE, NOT BEFORE.** Upstream's own doxygen says
+			 * so for the gradient: `D` is allocated on first use, so asking
+			 * early reports the question rather than the answer.
+			 *
+			 * **AND `sourceRuleIsExplicit()` IS WHY, WHEN THE ANSWER IS NO.**
+			 * `CanBatchNonlinearResidual()` requires the integrator to carry an
+			 * explicit `IntegrationRule`, because the kernel must quadrature
+			 * exactly as `AssembleElementVector()` does or the two routes
+			 * differ by an amount no test states. `meq::SourceIntegrator`
+			 * chooses its rule PER ELEMENT from the element and its
+			 * transformation -- `2k + tr.OrderW() + extra` -- so it leaves
+			 * `GetIntRule()` null and is refused. That is a fact about MEQ and
+			 * not about the library, which is why it is reported separately:
+			 * a bare `no` would send a reader to upstream's predicate list.
+			 */
+			/// @{
+			bool batchedNonlinearResidualTaken() const;
+			bool batchedNonlinearGradientTaken() const;
+			bool sourceRuleIsExplicit() const;
+
+			/// Whether the NPC operator carrying MEQ's own device integrand was
+			/// constructed. **A route that falls back silently is one nobody
+			/// measures** -- upstream's stated reason for making their
+			/// predicates public, and it applies to MEQ's half the same way.
+			bool deviceIntegrandTaken() const;
+			/// @}
 
 			bool batchedPotFaceAssemblyTaken() const;
 			bool batchedLocalFactorTaken() const;
@@ -2383,7 +2453,24 @@ namespace meq
 				/// author's capitalisation, as UMFPack and Pardiso do above. The
 				/// rule this suppresses is house style, and house style does not
 				/// get to rename other people's products.
-				cuDSS // NOLINT(readability-identifier-naming)
+				cuDSS, // NOLINT(readability-identifier-naming)
+				/// GMRES with a Gauss-Seidel smoother -- native MFEM, so it is
+				/// available in every build and needs no package.
+				///
+				/// **IT IS HERE TO BE MEASURED, NOT BECAUSE IT IS RECOMMENDED.**
+				/// picardStep() has carried this exact configuration as its
+				/// no-direct-solver fallback all along, where no machine case ever
+				/// reached it. The number that decides whether an iterative trace
+				/// solve is worth pursuing on a device is how many Krylov
+				/// iterations MEQ's trace system needs, and nothing recorded it.
+				/// The solver reports its own counts on destruction for that
+				/// reason.
+				///
+				/// **It gives up the two things the direct solvers are chosen
+				/// for**: one factorisation amortised over the bordered step's
+				/// fourteen columns (M-98's 1.34x), and the symbolic reuse kept
+				/// across Newton steps.
+				GMRES
 			};
 
 			/// Choose it. Throws std::invalid_argument when the library was built
@@ -4731,7 +4818,8 @@ namespace meq
 			/// The iterate the frozen source reads, on the Picard paths. Lives in
 			/// the potential space, which is also the fixed point's unknown.
 			std::unique_ptr<mfem::GridFunction> picardIterate;
-#ifdef MFEM_USE_SUITESPARSE
+#if defined( MFEM_USE_SUITESPARSE ) || defined( MFEM_USE_MKL_PARDISO ) \
+	|| defined( MFEM_USE_CUDSS )
 			/// The Picard path's trace solver, held across iterations so that its
 			/// retained symbolic analysis has something to be reused by. Built on
 			/// first use; see picardStep().
@@ -4984,6 +5072,7 @@ namespace meq
 			LocalFactorMode localFactorChoice = LocalFactorMode::Serial;
 			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Batched;
 
+			bool deviceIntegrandInUse = false;
 			bool prepared;
 			bool postProcessed;
 	};

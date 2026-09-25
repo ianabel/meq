@@ -65,7 +65,7 @@ namespace meq
 			int const components = space->GetVDim();
 			for ( int v = 0; v < mesh.GetNV(); ++v )
 			{
-				double const *vertex = mesh.GetVertex( v );
+				auto const *vertex = mesh.GetVertex( v );
 				for ( int d = 0; d < components; ++d )
 					if ( ( *nodes )( space->DofToVDof( v, d ) ) != vertex[ d ] )
 						return false;
@@ -144,7 +144,7 @@ namespace meq
 			upper( 0 ) = upper( 1 ) = -1.0e300;
 			for ( int v = 0; v < vertices.Size(); ++v )
 			{
-				double const *coordinates = mesh.GetVertex( vertices[ v ] );
+				auto const *coordinates = mesh.GetVertex( vertices[ v ] );
 				for ( int d = 0; d < 2; ++d )
 				{
 					lower( d ) = std::min( lower( d ), coordinates[ d ] );
@@ -171,9 +171,9 @@ namespace meq
 			double inverse[ 4 ] = { 0.0, 0.0, 0.0, 0.0 };
 			if ( affine )
 			{
-				double const *p0 = mesh.GetVertex( vertices[ 0 ] );
-				double const *p1 = mesh.GetVertex( vertices[ 1 ] );
-				double const *p2 = mesh.GetVertex( vertices[ 2 ] );
+				auto const *p0 = mesh.GetVertex( vertices[ 0 ] );
+				auto const *p1 = mesh.GetVertex( vertices[ 1 ] );
+				auto const *p2 = mesh.GetVertex( vertices[ 2 ] );
 				double const j00 = p1[ 0 ] - p0[ 0 ], j01 = p2[ 0 ] - p0[ 0 ];
 				double const j10 = p1[ 1 ] - p0[ 1 ], j11 = p2[ 1 ] - p0[ 1 ];
 				double const determinant = j00*j11 - j01*j10;
@@ -472,8 +472,8 @@ namespace meq
 			if ( element < 0 )
 				continue;
 
-			double const *a = mesh.GetVertex( vertices[ 0 ] );
-			double const *c = mesh.GetVertex( vertices[ 1 ] );
+			auto const *a = mesh.GetVertex( vertices[ 0 ] );
+			auto const *c = mesh.GetVertex( vertices[ 1 ] );
 			double const length = std::hypot( c[ 0 ] - a[ 0 ], c[ 1 ] - a[ 1 ] );
 			faces.push_back( Face{ a[0], a[1], c[0], c[1], element, length } );
 		}

@@ -207,6 +207,12 @@ set(MEQ_CORE_SOURCES
 	src/meq/Config.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
+	src/meq/Crossings.cpp
+	src/meq/DeviceNPCDevice.cpp
+	src/meq/DeviceQuadrature.cpp
+	src/meq/DeviceQuadratureDevice.cpp
+	src/meq/DeviceRows.cpp
+	src/meq/DeviceRowsDevice.cpp
 	src/meq/ExteriorDtN.cpp
 	src/meq/Field.cpp
 	src/meq/FluxExtraction.cpp
@@ -215,6 +221,8 @@ set(MEQ_CORE_SOURCES
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
 	src/meq/PlasmaComponent.cpp
+	src/meq/PointLocator.cpp
+	src/meq/PointLocatorDevice.cpp
 	src/meq/Profiles.cpp
 	src/meq/RotatingSource.cpp
 	src/meq/SafetyFactor.cpp
@@ -222,6 +230,8 @@ set(MEQ_CORE_SOURCES
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp
+	src/meq/SourceView.cpp
+	src/meq/SourceViewDevice.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/SurfaceFit.cpp
 	src/meq/WarmStart.cpp
@@ -231,18 +241,28 @@ set(MEQ_CORE_SOURCES
 # see the find_package note above for why that case exists at all.
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/CriticalPoints.cpp
+	src/meq/Crossings.cpp
+	src/meq/DeviceNPCDevice.cpp
+	src/meq/DeviceQuadrature.cpp
+	src/meq/DeviceQuadratureDevice.cpp
+	src/meq/DeviceRows.cpp
+	src/meq/DeviceRowsDevice.cpp
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
 	src/meq/FluxExtraction.cpp
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
+	src/meq/PointLocator.cpp
+	src/meq/PointLocatorDevice.cpp
 	# The INVERSION is MFEM-free and CI gates it; the outer Newton around it is
 	# KINSOL through mfem::KINSolver and is not. The split is along the
 	# contract: g = 4 pi^2 q/( V' < R^-2 > ) is arithmetic a mesh cannot change,
 	# and the loop that closes it needs a solve per map evaluation.
 	src/meq/SafetyFactorSolve.cpp
 	src/meq/Sampler.cpp
+	src/meq/SourceView.cpp
+	src/meq/SourceViewDevice.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
 
@@ -457,6 +477,139 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# said everything was fine.
 	if(MFEM_FOUND)
 		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
+	endif()
+
+	# THE ONE FILE IN src/meq COMPILED BY A DEVICE COMPILER, AND WHY IT IS ONE
+	# FILE. mfem::forall does not compile under the host compiler at all:
+	# general/backends.hpp:134 turns the absence of MFEM_USE_CUDA_OR_HIP_LANG
+	# into a static_assert reading "The calling function needs to be compiled
+	# with CUDA/HIP language!". So a device kernel anywhere in MEQ's ordinary
+	# sources is a compile error rather than a slow path, and the whole of the
+	# rest of src/meq stays on the host compiler it has always used.
+	#
+	# THE BACKEND IS READ OUT OF MFEM RATHER THAN NAMED. FindMFEM.cmake sets
+	# MFEM_USE_<FEATURE> for every option in config.mk, so the language follows
+	# whichever device MFEM was actually built with. cuDSS restricts MEQ to
+	# CUDA today and the HIP arm is therefore untested -- it is written this way
+	# because it costs nothing over hard-coding CUDA and is the difference
+	# between a build that follows MFEM and one that has to be edited when MFEM
+	# moves.
+	#
+	# WITHOUT THIS BLOCK THE BUILD IS STILL CORRECT AND IS HOST ONLY:
+	# PointLocatorDevice.cpp compiles to a stub returning false and
+	# PointLocator::locate() runs its host loop unconditionally. That is the
+	# configuration CI builds and it is why the stub exists rather than the
+	# file being excluded.
+	# WHICH SOURCES A DEVICE COMPILER OWNS, FOR THE ONE CONSUMER THAT CANNOT
+	# READ THEM. clang-tidy takes each file's flags out of the compile database,
+	# and nvcc's flags are not clang's: `--expt-extended-lambda`,
+	# `-forward-unknown-to-host-compiler` and `--generate-code=...` are all
+	# `unknown argument` to it, and `__clang_cuda_runtime_wrapper.h` then fails
+	# to find `texture_fetch_functions.h`. Sixteen errors, and a file that does
+	# not parse has not been checked -- so the `naming` test must skip these two
+	# rather than report a pass it did not earn. EMPTY unless a device language
+	# was actually enabled, so the CI build checks them like anything else.
+	set(MEQ_CORE_SOURCES_DEVICE_LANGUAGE "")
+
+	if(MFEM_FOUND AND MFEM_USE_CUDA)
+		enable_language(CUDA)
+
+		# THE ARCHITECTURE IS READ OUT OF MFEM AND NOT GUESSED. CLAUDE.md
+		# records MFEM's own cache defaulting to sm_60 on a card that is
+		# compute 7.5, with nothing warning about it -- so MEQ picking its own
+		# default would be a second copy of the same silent mistake. config.mk
+		# carries the flag MFEM was actually compiled with, as
+		# `-gencode arch=compute_75,code=sm_75`, and FindMFEM.cmake already
+		# exposes that file's path. `native` is the fallback, which is right on
+		# a machine that has the card and fails loudly on one that does not.
+		set(_meq_cuda_arch "")
+		if(MFEM_CONFIG_MK AND EXISTS "${MFEM_CONFIG_MK}")
+			file(READ "${MFEM_CONFIG_MK}" _meq_mfem_cfg)
+			string(REGEX MATCH "code=sm_([0-9]+)" _meq_arch_match "${_meq_mfem_cfg}")
+			if(CMAKE_MATCH_1)
+				set(_meq_cuda_arch "${CMAKE_MATCH_1}")
+			endif()
+			unset(_meq_mfem_cfg)
+		endif()
+		if(NOT _meq_cuda_arch)
+			set(_meq_cuda_arch "native")
+		endif()
+
+		# THE TWO FLAGS MFEM'S OWN BUILD USES, AND mfem::forall DOES NOT
+		# COMPILE WITHOUT THEM. A MFEM_HOST_DEVICE lambda is an nvcc extension:
+		# without --expt-extended-lambda the error is "__host__ or __device__
+		# annotation on lambda requires --extended-lambda nvcc flag", which
+		# names a flag rather than the header that needs it. They are set on
+		# the one file rather than the target so that nothing else in meq_core
+		# inherits nvcc's opinions. config.mk shows MFEM compiling itself with
+		# exactly these.
+		set_source_files_properties(
+			src/meq/PointLocatorDevice.cpp
+			src/meq/SourceViewDevice.cpp
+			PROPERTIES
+				LANGUAGE CUDA
+				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
+		# DeviceRowsDevice.cpp TAKES ONE MORE FLAG, AND IT IS LOAD BEARING.
+		# -fmad=false stops nvcc contracting `total += a*b` into an FMA. The
+		# contraction is not an error -- it rounds ONCE where a separate
+		# multiply and add round twice, so it is the more accurate of the two --
+		# but meq::DeviceRows exists to reproduce meq::CompressedRows::dot()
+		# BIT FOR BIT, and MEQ's host build carries no -march, so baseline
+		# x86-64 has no FMA and the host rounds twice. Measured: with the
+		# contraction left on, the card gives 3037906131.2962995 where the host
+		# gives ...2999, and DeviceRowsTests fails 5 of its rows under
+		# MEQ_TEST_DEVICE=cuda while passing on the debug backend -- which is
+		# host arithmetic and therefore cannot see this at all.
+		#
+		# It is the right trade HERE and would not be everywhere: this kernel
+		# exists to avoid a 698 KB transfer, not to be fast, so an FMA it
+		# cannot use costs nothing measurable and buys the digit-for-digit
+		# comparison DEVICE-PLAN.md section 4 rests on. The other two device
+		# files keep the default deliberately; neither claims bit-identity.
+		set_source_files_properties(
+			src/meq/DeviceNPCDevice.cpp
+			PROPERTIES
+				LANGUAGE CUDA
+				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
+		set_source_files_properties(
+			src/meq/DeviceRowsDevice.cpp
+			PROPERTIES
+				LANGUAGE CUDA
+				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr;-fmad=false")
+		# DeviceQuadratureDevice.cpp keeps the DEFAULT contraction, which is the
+		# other side of the trade M-190 records. It is an element-loop
+		# quadrature, not a reduction whose job is to reproduce a host sum: the
+		# arithmetic IS the work, an FMA is the more accurate of the two
+		# roundings, and its acceptance is agreement to round-off against the
+		# host loop rather than equality to the bit. DEVICE-PLAN.md section 3.4a
+		# says to settle that per kernel before writing it, and this is the
+		# first kernel it was settled the other way for.
+		set_source_files_properties(
+			src/meq/DeviceQuadratureDevice.cpp
+			PROPERTIES
+				LANGUAGE CUDA
+				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
+		list(APPEND MEQ_CORE_SOURCES_DEVICE_LANGUAGE
+			src/meq/DeviceNPCDevice.cpp
+			src/meq/DeviceQuadratureDevice.cpp
+			src/meq/DeviceRowsDevice.cpp
+			src/meq/PointLocatorDevice.cpp
+			src/meq/SourceViewDevice.cpp)
+		set_target_properties(meq_core PROPERTIES
+			CUDA_SEPARABLE_COMPILATION ON
+			CUDA_ARCHITECTURES "${_meq_cuda_arch}")
+		message(STATUS
+			"meq: PointLocatorDevice.cpp compiles as CUDA, arch ${_meq_cuda_arch}")
+	elseif(MFEM_FOUND AND MFEM_USE_HIP)
+		enable_language(HIP)
+		set_source_files_properties(
+			src/meq/PointLocatorDevice.cpp
+			src/meq/SourceViewDevice.cpp
+			PROPERTIES LANGUAGE HIP)
+		list(APPEND MEQ_CORE_SOURCES_DEVICE_LANGUAGE
+			src/meq/PointLocatorDevice.cpp
+			src/meq/SourceViewDevice.cpp)
+		message(STATUS "meq: PointLocatorDevice.cpp compiles as HIP")
 	endif()
 
 	# PRIVATE, unlike MFEM: netcdf appears only inside Output.cpp and

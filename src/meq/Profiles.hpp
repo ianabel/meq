@@ -305,6 +305,47 @@ namespace meq
 			/// Write the table in the format fromStream() reads, at enough
 			/// precision to round-trip a double exactly, terminated by a blank
 			/// line.
+			/**
+			 * This profile resampled onto @a intervals uniform intervals over
+			 * its own range.
+			 *
+			 * **WHY YOU MIGHT WANT IT.** Interval lookup is `O( log n )` with
+			 * unpredictable branches on arbitrary knots and one multiply on
+			 * uniform ones -- which on a host is a mispredict per quadrature
+			 * point and on a device is warp divergence in the innermost loop of
+			 * the source kernel, where neighbouring points sit in different
+			 * intervals and the whole warp walks every branch. Every profile
+			 * MEQ ships is already uniform; this is for one that is not.
+			 *
+			 * **IT IS NOT THE SAME FUNCTION, AND THAT IS WHY IT IS A METHOD
+			 * RATHER THAN SOMETHING THE LOADER DOES.** The result interpolates
+			 * this profile's value AND derivative at each new knot, so it
+			 * agrees exactly there and is a *different cubic* between them.
+			 * Where a new interval sits inside an old one the two agree to
+			 * round-off; where a new interval STRADDLES an old knot, one cubic
+			 * is standing in for two and the error is the Hermite
+			 * interpolation error of a function whose third derivative jumps
+			 * inside the interval. `theResamplingErrorIsBoundedAndMeasured`
+			 * in ProfilesTests puts a number on it rather than leaving this
+			 * paragraph to be believed.
+			 *
+			 * **SO IT MUST BE DONE AT LOAD TIME AND TO THE PROFILE ITSELF**,
+			 * never to a device view of one. MEQ asserts its POD source view
+			 * against this class to the BIT; resampling one side and not the
+			 * other would break that agreement, and the agreement is the only
+			 * thing holding the two expressions of `F` together.
+			 *
+			 * @param intervals how many uniform intervals to use. More is
+			 *        closer and none is exact.
+			 * @throws std::invalid_argument if @a intervals is zero.
+			 */
+			SplineProfile resampledUniform( unsigned int intervals ) const;
+
+			/// Whether the knots are equally spaced, to a relative 1e-9 -- the
+			/// question resampledUniform() exists to turn from no into yes, and
+			/// the one a caller should ask before spending anything on it.
+			bool uniformKnots() const;
+
 			void write( std::ostream & os ) const;
 
 			/// The tabulated knots, in increasing psi.

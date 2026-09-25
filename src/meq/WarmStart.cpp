@@ -1,4 +1,5 @@
 #include "WarmStart.hpp"
+#include "Crossings.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -8,7 +9,8 @@ namespace meq
 {
 
 	FieldTransfer::FieldTransfer( mfem::Mesh &sourceMeshIn )
-		: sourceMesh( sourceMeshIn ), misses( 0 ), points( 0 ), worstDist( 0.0 )
+		: sourceMesh( sourceMeshIn ), locator( sourceMeshIn ), misses( 0 ),
+		  points( 0 ), worstDist( 0.0 )
 	{
 		if ( sourceMesh.Dimension() != 2 )
 			throw std::invalid_argument( "meq::FieldTransfer: the source mesh must be two dimensional ( R, z )" );
@@ -20,8 +22,19 @@ namespace meq
 		// for MEQ's straight-sided triangles is degree 1 and exact. This is why
 		// the constructor takes a non-const Mesh &: setting up the search
 		// modifies the mesh, and pretending otherwise would need a copy of it.
+		/*
+		 * EnsureNodes() IS KEPT THOUGH THE LOCATOR DOES NOT NEED IT, and the
+		 * reason is a measured trap rather than caution. gslib refused a mesh
+		 * without nodes, so this call was made for it; meq::PointLocator asks
+		 * the geometry's DEGREE instead and is happy either way. But the call
+		 * has a second effect nobody asked for -- it installs a nodal field on
+		 * the caller's mesh, permanently -- and meq::GridSampler's affine fast
+		 * path keys on that same question. Removing the call would therefore
+		 * change GridSampler's behaviour on every mesh a warm start has
+		 * touched, which is a 159x change in a component this file does not
+		 * own (M-93). It stays until that is deliberate rather than incidental.
+		 */
 		sourceMesh.EnsureNodes();
-		finder.Setup( sourceMesh );
 
 		/*
 		 * NONE, AND THAT IS THE DIFFERENCE BETWEEN AN EXACT TRANSFER AND A LOSSY
@@ -44,14 +57,17 @@ namespace meq
 		 * two meshes that are not nested -- picking one side of a jump is a
 		 * better guess than averaging across it, because the average belongs to
 		 * neither element's polynomial.
+		 *
+		 * MEQ'S OWN LOCATOR HAS NO SUCH MODE AND THAT IS THE POINT OF THE
+		 * PARAGRAPH SURVIVING THE SWITCH. meq::PointLocator returns the value
+		 * of the element it located the point in and never averages across a
+		 * face, so the behaviour above is the default rather than a setting --
+		 * and the measurement that justified choosing NONE is what says the
+		 * default is the right one.
 		 */
-		finder.SetL2AvgType( mfem::FindPointsGSLIB::NONE );
 	}
 
-	FieldTransfer::~FieldTransfer()
-	{
-		finder.FreeData();
-	}
+	FieldTransfer::~FieldTransfer() = default;
 
 	int FieldTransfer::transfer( mfem::GridFunction const &source,
 	                             mfem::Coefficient &fallback,
@@ -140,13 +156,13 @@ namespace meq
 			positions( points + i ) = z[ i ];
 		}
 
-		finder.FindPoints( positions, mfem::Ordering::byNODES );
+		locator.locate( positions );
 
 		mfem::Vector values;
-		finder.Interpolate( source, values );
+		locator.interpolate( source, values );
 
-		mfem::Array<unsigned int> const &code = finder.GetCode();
-		mfem::Vector const &distance = finder.GetDist();
+		mfem::Array<unsigned int> const &code = locator.codes();
+		mfem::Vector const &distance = locator.distances();
 
 		/*
 		 * THE THREE HOST READS THAT FOLLOW, MADE HOST READS EXPLICITLY.
@@ -176,9 +192,9 @@ namespace meq
 		 * reason: a contract MEQ never had to honour until a Device existed.
 		 * These calls are no-ops with none configured.
 		 */
-		values.HostRead();
-		code.HostRead();
-		distance.HostRead();
+		countedHostRead( values, __LINE__ );
+		countedHostRead( code, __LINE__ );
+		countedHostRead( distance, __LINE__ );
 
 		mfem::Array<int> elementDofs;
 		mfem::DenseMatrix mass;
@@ -220,7 +236,7 @@ namespace meq
 				else
 				{
 					value = values( point );
-					worstDist = std::max( worstDist, distance( point ) );
+					worstDist = std::max( worstDist, double( distance( point ) ) );
 				}
 
 				rhs.Add( weight*value, shape );
@@ -235,6 +251,7 @@ namespace meq
 		}
 
 		return misses;
+
 	}
 
 	int FieldTransfer::missed() const

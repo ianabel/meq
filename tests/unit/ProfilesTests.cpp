@@ -547,3 +547,147 @@ BOOST_AUTO_TEST_CASE( is_usable_through_the_base_class )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+BOOST_AUTO_TEST_CASE( theResamplingErrorIsBoundedAndMeasured )
+{
+	// meq::SplineProfile::resampledUniform() BUYS AN O(1) INTERVAL LOOKUP AND
+	// PAYS AN INTERPOLATION ERROR, and this case exists so that the trade is a
+	// number rather than a paragraph.
+	//
+	// The resampled profile matches the original's VALUE and DERIVATIVE at
+	// every new knot, so it is exact there whatever the spacing. What it cannot
+	// reproduce is an interval that STRADDLES an original knot: one cubic then
+	// stands in for two, across a point where the third derivative jumps.
+	//
+	// So the error is concentrated near the original knots and falls quickly
+	// with refinement, which is the property worth asserting -- an error that
+	// did NOT fall would mean the resampling was reproducing something other
+	// than this function.
+	// THE ABSCISSAE ARE DELIBERATELY NOT MULTIPLES OF ANY ROUND SPACING. A
+	// first version of this case used knots at 0.6, 0.8 and 0.95, every one of
+	// which lands exactly on a 40-interval uniform grid -- so no new interval
+	// straddled an old knot, the error came out at 1.8e-15 for every
+	// refinement, and the case measured round-off while appearing to measure
+	// interpolation. The knots below divide into nothing.
+	std::vector<meq::Knot> graded = {
+		{ 0.00, 1.0, 0.0 },
+		{ 0.37, 1.0, 0.0 },
+		{ 0.61, 3.0, 4.0 },
+		{ 0.83, 5.0, 0.0 },
+		{ 1.00, 5.0, 0.0 } };
+	meq::SplineProfile original( graded );
+	BOOST_TEST( !original.uniformKnots() );
+
+	auto worstError = []( meq::SplineProfile const & a,
+	                      meq::SplineProfile const & b )
+	{
+		double worst = 0.0;
+		int const samples = 4001;
+		for ( int i = 0; i < samples; ++i )
+		{
+			double const x = i/static_cast<double>( samples - 1 );
+			worst = std::max( worst, std::abs( a( x ) - b( x ) ) );
+		}
+		return worst;
+	};
+
+	// 50, 150 AND 450 RATHER THAN 40, 400, 4000, AND THE REASON IS THE FINDING
+	// THIS CASE EXISTS FOR. What decides the error is not how FINE the new grid
+	// is, it is whether the original knots LAND on it: a new interval lying
+	// inside an old one reproduces that cubic exactly, so a grid that happens
+	// to align has no straddled intervals and no error at all. With knots at
+	// two decimal places, every multiple of 100 intervals over [ 0, 1 ] aligns
+	// exactly -- which is why an earlier version of this case read 2.1e-3 at 40
+	// intervals and 2.7e-15 at 400, a hundredfold REFINEMENT that looked like
+	// twelve orders of convergence and was alignment.
+	//
+	// None of 50, 150, 450 is a multiple of 100, so all three straddle and the
+	// sequence measures the interpolation error it claims to.
+	meq::SplineProfile coarse = original.resampledUniform( 50 );
+	meq::SplineProfile fine   = original.resampledUniform( 150 );
+	meq::SplineProfile finer  = original.resampledUniform( 450 );
+
+	BOOST_TEST( coarse.uniformKnots() );
+	BOOST_TEST( fine.uniformKnots() );
+
+	double const coarseError = worstError( original, coarse );
+	double const fineError   = worstError( original, fine );
+	double const finerError  = worstError( original, finer );
+
+	BOOST_TEST_MESSAGE( "resampling error: 50 intervals " << coarseError
+	                    << ", 150 " << fineError << ", 450 " << finerError );
+
+	// It falls, and it keeps falling -- the property that says the limit is
+	// this function and not a nearby one.
+	BOOST_TEST( fineError < coarseError );
+	BOOST_TEST( finerError < fineError );
+
+	// AND IT IS A RATE RATHER THAN A TOLERANCE, per this project's testing
+	// stance. Measured at 2.02 and 2.07 over the two triplings -- second order,
+	// which is what a cubic straddling a jump in the THIRD derivative gets: the
+	// interpolant has no way to represent the kink, so the error on that one
+	// interval is set by how much of it the kink occupies.
+	//
+	// A first version asserted "at least an order per tripling" and read 9.2
+	// where it wanted 10. The rate is the honest statement of the same thing
+	// and does not need re-tuning when the fixture moves.
+	double const firstRate = std::log( coarseError/fineError )/std::log( 3.0 );
+	double const secondRate = std::log( fineError/finerError )/std::log( 3.0 );
+	BOOST_TEST_MESSAGE( "resampling convergence rate: " << firstRate
+	                    << " then " << secondRate );
+	BOOST_TEST( firstRate > 1.8 );
+	BOOST_TEST( secondRate > 1.8 );
+
+	// AND THE ERROR IS A STRADDLING EFFECT RATHER THAN A GLOBAL ONE, which is
+	// what makes resampling far better here than interpolation theory alone
+	// would say. A cubic is determined by its value and derivative at two
+	// points, so a new interval lying INSIDE an old one reproduces that old
+	// cubic exactly -- not approximately. Only the intervals containing an
+	// original knot carry any error at all, and there are at most as many of
+	// those as the original has interior knots.
+	//
+	// Measured on the sample sweep: the error is confined to neighbourhoods of
+	// 0.37, 0.61 and 0.83, and is round-off everywhere else.
+	int awayFromKnots = 0;
+	double worstAway = 0.0;
+	double const reach = 1.5/150.0;      // one new interval either side
+	for ( int i = 0; i < 4001; ++i )
+	{
+		double const x = i/4000.0;
+		bool nearKnot = false;
+		for ( double const k : { 0.37, 0.61, 0.83 } )
+			if ( std::abs( x - k ) < reach )
+				nearKnot = true;
+		if ( nearKnot )
+			continue;
+		worstAway = std::max( worstAway, std::abs( fine( x ) - original( x ) ) );
+		++awayFromKnots;
+	}
+	BOOST_TEST( awayFromKnots > 3000 );
+	BOOST_TEST( worstAway < 1.0e-12 );
+	BOOST_TEST_MESSAGE( "away from the original knots the resampling error is "
+	                    << worstAway << " over " << awayFromKnots << " samples" );
+}
+
+BOOST_AUTO_TEST_CASE( resamplingAUniformProfileIsAlreadyExactAtItsOwnSpacing )
+{
+	// A profile already uniform, resampled onto the SAME knots, must come back
+	// unchanged -- otherwise resampledUniform() is doing something to every
+	// profile MEQ ships, all of which are uniform already.
+	std::vector<meq::Knot> uniform = {
+		{ 0.00, 1.0, 0.0 },
+		{ 0.25, 1.0, 0.0 },
+		{ 0.50, 3.0, 4.0 },
+		{ 0.75, 5.0, 0.0 },
+		{ 1.00, 5.0, 0.0 } };
+	meq::SplineProfile original( uniform );
+	BOOST_TEST( original.uniformKnots() );
+
+	meq::SplineProfile same = original.resampledUniform( 4 );
+	for ( int i = 0; i <= 400; ++i )
+	{
+		double const x = i/400.0;
+		BOOST_TEST( same( x ) == original( x ),
+		            "a uniform profile moved under resampling at x = " << x );
+	}
+}

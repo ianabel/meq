@@ -6,6 +6,8 @@
 // includes this header, so the dependency goes one way and only through
 // the .cpp.
 #include "CriticalPoints.hpp"
+#include "Crossings.hpp"
+#include "DeviceNPC.hpp"
 
 // FB-7: conductors outside Gamma. The header forward-declares CoilSet so that it
 // does not pull in a file it needs only by reference; the definition is needed
@@ -68,9 +70,84 @@ namespace
 	 * The floor keeps the step finite at psi_bnd = 0, which is where a limited
 	 * equilibrium's boundary sits by construction.
 	 */
+	/**
+	 * The central-difference step mfem::ExtensionBoundaryQuadrature() takes for
+	 * `da/dxi`, scaled to real_t rather than left at MFEM's default.
+	 *
+	 * **WITHOUT THIS THE EXTENSION QUADRATURE YIELDS NO POINTS AT ALL IN SINGLE
+	 * PRECISION, AND SAYS NOTHING.** That routine rejects a quadrature point
+	 * whose measure falls below
+	 *
+	 *     floor = 100 * ( eps / fd_step ) * ||xbar||
+	 *
+	 * which correctly follows `eps` -- but `fd_step` defaults to a bare `1e-6`,
+	 * a constant right for double and nine orders wrong for single. `eps/fd_step`
+	 * is 2.2e-10 in double and **0.119 in single**, so the floor becomes
+	 * `11.9 ||xbar||`, larger than any measure a real face can have, and EVERY
+	 * point is skipped.
+	 *
+	 * **MEASURED: 21 points per face in double and 0 in single.** The callback
+	 * then never fires, meq::GradShafranovSolver::exteriorTransmissionRows()
+	 * returns rows that are identically zero, the exterior DtN coupling drops
+	 * out of the bordered Jacobian while staying in the residual, and the
+	 * bordered Newton converges -- to a different equilibrium. `psi_ax` came
+	 * back 4.148e-01 against the double build's 3.759851e-01. Nothing reported
+	 * a failure: `reached` stays true, because nothing was ever reached.
+	 * → M-182.
+	 *
+	 * A central difference is optimal at `eps^(1/3)`: 6.1e-6 in double, where
+	 * MFEM's 1e-6 is the right order and is therefore returned EXACTLY so the
+	 * double path is bit-unchanged, and 4.9e-3 in single.
+	 *
+	 * **This is MFEM's default to fix and MEQ passes its own meanwhile**, so
+	 * that MEQ is correct against a stock library rather than a patched one.
+	 *
+	 * **IT LIVES IN THE HEADER AND NOT HERE, AND THAT IS NOT TIDINESS.** It was
+	 * file-local, so a caller outside this translation unit could not share it
+	 * -- and `theTransmissionRowIsTheBoundaryIntegralItClaims` is exactly such
+	 * a caller: it builds a reference for the row this file assembles. It took
+	 * MFEM's default while the row took this one, the two diverged the moment
+	 * MFEM's default changed, and the case reported 1.27e-06 on a row that had
+	 * not moved at all. M-189. One expression that two readers share is the
+	 * repair, and meq::limiterPolygonMaximum() is the precedent: M-165 is the
+	 * same failure, a second reading of one quantity under the same words.
+	 */
+
 	double normalisationDifferenceStep( double value )
 	{
-		return 1.0e-5*std::max( std::abs( value ), 1.0e-10 );
+		/*
+		 * THE RELATIVE STEP FOLLOWS real_t's EPSILON, AND IT HAS TO.
+		 *
+		 * A central difference's total error is truncation O( h^2 ) plus
+		 * round-off O( eps/h ), minimised at h ~ eps^(1/3). That is **6.1e-6
+		 * in double**, so the 1e-5 this function has always returned is the
+		 * right order there and is kept EXACTLY -- the double path is the
+		 * verified one and nothing here may move it. It is **4.9e-3 in
+		 * single**, so the same 1e-5 is about five hundred times too small:
+		 * the differenced derivative is then round-off divided by the step,
+		 * about 1% wrong, and a border column that is 1% wrong is a Jacobian
+		 * Newton converges with, to somewhere else.
+		 *
+		 * MEASURED, and it is why this is not a precaution. Under
+		 * MFEM_PRECISION = single with the step left at 1e-5,
+		 * machine-f-diiid reached psi_ax = 4.148286e-01 against the double
+		 * build's 3.759851e-01 -- 10% out, and refused by checkAxis() as not
+		 * the flux at a magnetic axis -- while limited-tokamak needed 378
+		 * Picard-then-Newton iterations to reach 1.712266e+00 against
+		 * 9.484400e-02. Both are the WRONG EQUILIBRIUM reached at full
+		 * convergence, which is what *A wrong Jacobian is invisible to a
+		 * convergence table* describes.
+		 *
+		 * THE THIRD CONSTANT OF ITS KIND IN ONE DAY, after PointLocator's
+		 * insideTolerance and MFEM's own MFEM_VERIFY( err < 1e-10 ). **A
+		 * constant tuned for double is wrong in single and says so nowhere.**
+		 */
+#ifdef MFEM_USE_SINGLE
+		constexpr double relative = 8.0e-3;   // ~1.65 eps^(1/3) for float
+#else
+		constexpr double relative = 1.0e-5;   // the verified double value
+#endif
+		return relative*std::max( std::abs( value ), 1.0e-10 );
 	}
 
 	/*
@@ -221,6 +298,98 @@ namespace
 	}
 
 #ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
+	/**
+	 * GMRES with a Gauss-Seidel smoother, as a trace solver.
+	 *
+	 * **THIS IS NOT NEW CODE, IT IS AN EXISTING PATH MADE REACHABLE.**
+	 * picardStep() has carried exactly this -- GMRES, GSSmoother, rel_tol 1e-12,
+	 * 5000 iterations -- as the `#else` of MEQ_HAVE_DIRECT_TRACE_SOLVER since
+	 * there was a direct solver to be the `#if`, so it runs only in a build with
+	 * no direct package at all. Nobody has measured it on a machine case, and the
+	 * question it answers is the one that decides whether an iterative trace
+	 * solve is worth pursuing on a device: **how many Krylov iterations does
+	 * MEQ's trace system need.** Nothing in the tree records that number.
+	 *
+	 * **THE COUNTERS ARE THE POINT OF THE CLASS.** A direct solver has nothing
+	 * to report; an iterative one that is not reporting its iteration count is
+	 * not being measured, it is being hoped about. They are mutable because
+	 * Solver::Mult is const.
+	 *
+	 * **AND IT LOSES TWO THINGS THE DIRECT SOLVERS HAVE, WHICH IS THE TRADE THE
+	 * MEASUREMENT EXISTS TO PRICE.** MEQ's bordered step applies J^-1 to
+	 * FOURTEEN columns, and a direct solver factors once and back-solves
+	 * fourteen times -- M-98's 1.34x is exactly that blocking. An iterative
+	 * solver has no factorisation to amortise, so fourteen columns is fourteen
+	 * independent Krylov solves, and Operator::ArrayMult's base loop over Mult()
+	 * is then the RIGHT behaviour rather than the trap it is for the others. It
+	 * also loses the symbolic reuse that direct-solver-symbolic-reuse is a whole
+	 * branch of meq-integration for.
+	 */
+	class IterativeTraceSolver : public mfem::Solver
+	{
+		public:
+
+			IterativeTraceSolver()
+			{
+				gmres.SetRelTol( 1.0e-12 );
+				gmres.SetAbsTol( 0.0 );
+				gmres.SetMaxIter( 5000 );
+				gmres.SetKDim( 50 );
+				gmres.SetPrintLevel( -1 );
+			}
+
+			~IterativeTraceSolver() override
+			{
+				if ( solves > 0 )
+					mfem::out << "MEQ: trace GMRES -- " << solves << " solves, "
+					          << totalIterations << " iterations, mean "
+					          << ( static_cast<double>( totalIterations )/solves )
+					          << ", worst " << worst << ", " << failures
+					          << " did not converge\n";
+			}
+
+			void SetOperator( mfem::Operator const &op ) override
+			{
+				height = op.Height();
+				width = op.Width();
+
+				// The smoother needs the MATRIX, not an Operator, which is why
+				// this cannot simply be an mfem::GMRESSolver handed back by the
+				// factory the way the three direct solvers are.
+				auto const *matrix = dynamic_cast<mfem::SparseMatrix const *>( &op );
+				MFEM_VERIFY( matrix != nullptr,
+				             "meq::IterativeTraceSolver: the trace operator is not a "
+				             "SparseMatrix, so a Gauss-Seidel smoother cannot be built "
+				             "from it" );
+
+				smoother = std::make_unique<mfem::GSSmoother>(
+					const_cast<mfem::SparseMatrix &>( *matrix ) );
+				gmres.SetOperator( op );
+				gmres.SetPreconditioner( *smoother );
+			}
+
+			void Mult( mfem::Vector const &b, mfem::Vector &x ) const override
+			{
+				gmres.Mult( b, x );
+				++solves;
+				int const taken = gmres.GetNumIterations();
+				totalIterations += taken;
+				if ( taken > worst )
+					worst = taken;
+				if ( !gmres.GetConverged() )
+					++failures;
+			}
+
+		private:
+
+			mutable mfem::GMRESSolver gmres;
+			std::unique_ptr<mfem::GSSmoother> smoother;
+			mutable long solves = 0;
+			mutable long totalIterations = 0;
+			mutable int worst = 0;
+			mutable long failures = 0;
+	};
+
 	/*
 	 * Build the chosen direct solver, configured as MEQ wants it.
 	 *
@@ -274,6 +443,8 @@ namespace
 				break;
 #endif
 			}
+			case GradShafranovSolver::TraceSolver::GMRES:
+				return std::make_unique<IterativeTraceSolver>();
 			case GradShafranovSolver::TraceSolver::cuDSS:
 			{
 #ifdef MFEM_USE_CUDSS
@@ -336,7 +507,7 @@ namespace
 	{
 		// The vector may have been written by a device-aware operation; the loop
 		// below reads it raw. See rowDot()'s comment for the whole argument.
-		v.HostRead();
+		countedHostRead( v, __LINE__ );
 
 		// A merge rather than a search per entry: `support` is ascending, so one
 		// cursor into it walks alongside `i` and the check costs one pass.
@@ -371,7 +542,7 @@ namespace
 		for ( int rowIndex = 0; rowIndex < rows; ++rowIndex )
 		{
 			mfem::Vector const &row = rowsIn[ static_cast<std::size_t>( rowIndex ) ];
-			row.HostRead();
+			countedHostRead( row, __LINE__ );
 			std::size_t const base =
 				static_cast<std::size_t>( rowIndex )*supportIndices.size();
 			for ( std::size_t k = 0; k < supportIndices.size(); ++k )
@@ -385,7 +556,7 @@ namespace
 		supportIndices = support;
 		rows = 1;
 		rowValues.assign( supportIndices.size(), 0.0 );
-		row.HostRead();
+		countedHostRead( row, __LINE__ );
 		for ( std::size_t k = 0; k < supportIndices.size(); ++k )
 			rowValues[ k ] = row( supportIndices[ k ] );
 	}
@@ -403,10 +574,15 @@ namespace
 	void CompressedRows::gather( mfem::Vector const &v,
 	                             std::vector<double> &out ) const
 	{
-		v.HostRead();
+		countedHostRead( v, __LINE__ );
 		out.resize( supportIndices.size() );
 		for ( std::size_t k = 0; k < supportIndices.size(); ++k )
 			out[ k ] = v( supportIndices[ k ] );
+	}
+
+	std::vector<double> const &CompressedRows::values() const
+	{
+		return rowValues;
 	}
 
 	double CompressedRows::dot( int row,
@@ -547,7 +723,7 @@ namespace
 			static_cast< std::size_t >(
 				cacheOffset[ static_cast< std::size_t >( elements ) ] ), 0.0 );
 
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elements; ++e )
 		{
 			mfem::FiniteElement const &el = *space.GetFE( e );
@@ -677,6 +853,27 @@ namespace
 		// exp( -psi ). The residual and the Jacobian use this same rule, so
 		// whatever it costs in accuracy it costs consistently and Newton still
 		// converges quadratically to the answer the rule defines.
+		/*
+		 * AN EXPLICIT RULE WINS, AND IT IS SET ONLY WHERE IT IS THE SAME RULE.
+		 *
+		 * Upstream's caller-integrand batched residual REFUSES an integrator
+		 * whose GetIntRule() is null -- *"an integrator that leaves
+		 * Integrator::GetIntRule() null is choosing its rule per element from
+		 * the element itself. Refused rather than guessed."* -- and that
+		 * refusal is right: the kernel has to quadrature exactly as this
+		 * function does or the two routes differ by an amount no test states.
+		 *
+		 * So the solver sets one, and only when the order below is the same on
+		 * every element -- which is every straight-sided mesh, where OrderW()
+		 * is 0. Where it is not uniform nothing is set and this expression
+		 * still decides, so a curved mesh keeps the rule it always had and the
+		 * batched route declines rather than integrating on a rule nobody
+		 * asked for. **Where it IS set it is bit-identical by construction**,
+		 * being the same IntRules.Get() this line would have returned.
+		 */
+		if ( mfem::IntegrationRule const *const given = GetIntRule() )
+			return *given;
+
 		int const quadratureOrder = 2*el.GetOrder() + tr.OrderW() + extraOrder;
 		return mfem::IntRules.Get( el.GetGeomType(), quadratureOrder );
 	}
@@ -1134,7 +1331,7 @@ namespace
 			}
 
 			/// MFEM's spelling, from mfem::Coefficient.
-			double Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
+			mfem::real_t Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
 			             mfem::IntegrationPoint const &ip ) override
 			{
 				mfem::Vector x;
@@ -1862,6 +2059,9 @@ namespace
 #else
 				return false;
 #endif
+			case TraceSolver::GMRES:
+				// Native MFEM: no package to be missing.
+				return true;
 			case TraceSolver::cuDSS:
 #ifdef MFEM_USE_CUDSS
 				return true;
@@ -2037,11 +2237,11 @@ namespace
 		 * coordinates in decimal and a node at -1.0972 need not be the exact
 		 * negation of one at +1.0972.
 		 */
-		double extent = 0.0;
+		mfem::real_t extent = 0.0;
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 			extent = std::max( extent, std::abs( mesh.GetVertex( v )[ 0 ] )
 			                           + std::abs( mesh.GetVertex( v )[ 1 ] ) );
-		double const tolerance = 1.0e-9*std::max( extent, 1.0 );
+		double const tolerance = 1.0e-9*std::max( extent, mfem::real_t( 1.0 ) );
 
 		auto cell = [ & ]( double value )
 		{
@@ -2255,6 +2455,15 @@ namespace
 	{
 		if ( potentialMirror.empty() )
 			return;
+
+		// BOTH DIRECTIONS HERE, WHICH IS THE ONE PLACE IN THIS SWEEP THAT NEEDS
+		// MORE THAN A HostRead(). `unknown` is read raw through `copy` AND
+		// written raw below, so the host copy must be both current and the
+		// valid one afterwards -- HostRead() alone would leave the device copy
+		// marked valid and the writes would be overwritten by the next sync.
+		// DEVICE-PLAN.md section 1.2.
+		countedHostReadWrite( unknown, __LINE__ );
+
 		mfem::Vector copy( unknown );
 		auto average = [ & ]( int base, std::vector<int> const &map,
 		                      std::vector<double> const *sign )
@@ -2660,7 +2869,7 @@ namespace
 
 			for ( int v = 0; v < mesh.GetNV(); ++v )
 			{
-				double const *x = mesh.GetVertex( v );
+				auto const *x = mesh.GetVertex( v );
 				int const hit = conductors.indexAt( x[ 0 ], x[ 1 ] );
 				if ( hit >= 0 )
 					refuse( "vertex", v, x[ 0 ], x[ 1 ], hit );
@@ -2700,10 +2909,10 @@ namespace
 				{
 				}
 
-				double Eval( mfem::ElementTransformation &transformation,
+				mfem::real_t Eval( mfem::ElementTransformation &transformation,
 				             mfem::IntegrationPoint const &point ) override
 				{
-					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+					mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 					mfem::Vector position( coordinates, 3 );
 					transformation.Transform( point, position );
 					return physical.Eval( transformation, point )
@@ -3114,7 +3323,7 @@ namespace
 					}
 					// pt.weight is SIGNED and is used as it stands.
 					total += pt.weight*normalFlux( eip, pt.nu );
-				} );
+				}, extensionFdStep() );
 			}
 			else
 			{
@@ -3368,14 +3577,14 @@ namespace
 		double referenceOvershoot( mfem::Geometry::Type geom,
 		                           mfem::IntegrationPoint const &ip )
 		{
-			double overshoot = 0.0;
+			mfem::real_t overshoot = 0.0;
 			if ( geom == mfem::Geometry::TRIANGLE )
 				overshoot = std::max( std::max( -ip.x, -ip.y ),
-				                      ip.x + ip.y - 1.0 );
+				                      mfem::real_t( ip.x + ip.y - 1.0 ) );
 			else
-				overshoot = std::max( std::max( -ip.x, ip.x - 1.0 ),
-				                      std::max( -ip.y, ip.y - 1.0 ) );
-			return std::max( overshoot, 0.0 );
+				overshoot = std::max( std::max( -ip.x, mfem::real_t( ip.x - 1.0 ) ),
+				                      std::max( -ip.y, mfem::real_t( ip.y - 1.0 ) ) );
+			return std::max( overshoot, mfem::real_t( 0.0 ) );
 		}
 	}
 
@@ -3542,6 +3751,11 @@ namespace
 	{
 		mfem::Mesh &mesh = *space.GetMesh();
 
+		// valueAt() below indexes `values` raw, once per quadrature point of
+		// the golden-section search over every limiter face. One funnel here
+		// rather than one per read. DEVICE-PLAN.md section 1.2.
+		countedHostRead( values, __LINE__ );
+
 		element = -1;
 		double best = -std::numeric_limits<double>::infinity();
 
@@ -3604,7 +3818,7 @@ namespace
 					mfem::ElementTransformation &inner
 						= entry.second ? *faceScratch.Elem2
 						               : *faceScratch.Elem1;
-					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+					mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 					mfem::Vector position( coordinates, 3 );
 					inner.Transform( inside, position );
 					total += conductors->psi( position( 0 ), position( 1 ) );
@@ -4272,7 +4486,7 @@ namespace
 				// path family rather than of the error being measured.
 				double const d = interiorNormal - exteriorNormal;
 				accumulated += std::abs( pt.weight )*d*d;
-			} );
+			}, extensionFdStep() );
 
 			if ( !reached )
 				throw std::runtime_error(
@@ -4359,7 +4573,7 @@ namespace
 					outside[ static_cast< std::size_t >( m ) ] += weighted*beyond;
 					inside[ static_cast< std::size_t >( m ) ] += weighted*within;
 				}
-			} );
+			}, extensionFdStep() );
 		}
 	}
 
@@ -4526,7 +4740,7 @@ namespace
 							row( vdofs[ dof*d + j ] ) += weighted*shape( j );
 					}
 				}
-			} );
+			}, extensionFdStep() );
 
 			if ( !reached )
 				throw std::runtime_error(
@@ -4704,6 +4918,57 @@ namespace
 			// see psi_c + psi_p rather than the solved remainder. Null unless
 			// the split is in use, and null shifts by exactly zero.
 			sourceTerm->setConductorField( conductorFieldSet );
+			/*
+			 * THE EXPLICIT INTEGRATION RULE, WHERE ONE RULE SERVES THE MESH.
+			 *
+			 * This is what upstream's CanBatchNonlinearResidual() requires and
+			 * the ONLY condition of its list that MEQ was failing -- measured
+			 * on machine-f-diiid, limiter-halfdisc and fixed-f-diiid, all three
+			 * reporting "explicit source rule NO" and the predicate NO with it.
+			 * M-193.
+			 *
+			 * COMPUTED PER ELEMENT AND COMPARED, NOT ASSUMED. The order is
+			 * `2k + tr.OrderW() + extra`; OrderW() is 0 on a straight-sided
+			 * mesh and need not be on a curved one, and a mixed mesh has more
+			 * than one geometry. Either disagreement leaves the rule unset, and
+			 * SourceIntegrator::rule() then decides per element exactly as
+			 * before -- so this can only ever ADD the batched route, never
+			 * change a quadrature. Where it is set it is the same
+			 * IntRules.Get() that rule() would have returned, so the answer is
+			 * bit-identical by construction rather than by measurement.
+			 */
+			if ( potentialFes != nullptr && potentialFes->GetNE() > 0 )
+			{
+				mfem::Mesh &ruleMesh = *potentialFes->GetMesh();
+				mfem::FiniteElement const *firstEl = potentialFes->GetFE( 0 );
+				mfem::Geometry::Type const geometry = firstEl->GetGeomType();
+				int uniformOrder = -1;
+				bool uniform = true;
+
+				for ( int e = 0; e < potentialFes->GetNE() && uniform; ++e )
+				{
+					mfem::FiniteElement const *el = potentialFes->GetFE( e );
+					if ( el == nullptr || el->GetGeomType() != geometry )
+					{
+						uniform = false;
+						break;
+					}
+					mfem::IsoparametricTransformation ruleTransformation;
+					ruleMesh.GetElementTransformation( e, &ruleTransformation );
+					int const order = 2*el->GetOrder()
+					                  + ruleTransformation.OrderW()
+					                  + sourceQuadratureExtra;
+					if ( e == 0 )
+						uniformOrder = order;
+					else if ( order != uniformOrder )
+						uniform = false;
+				}
+
+				if ( uniform )
+					sourceTerm->SetIntRule(
+						&mfem::IntRules.Get( geometry, uniformOrder ) );
+			}
+
 			// Borrowed for conductorPsiAtQuadrature(), which is the five
 			// plasma-current assemblies reading the same cache rather than
 			// building a second one on the same points.
@@ -4814,17 +5079,27 @@ namespace
 		 * VectorMassIntegrator also rewrote `vdim` on every call, so two
 		 * threads raced on it even after it was set.
 		 *
-		 * WHAT IS NOT COVERED IS NOT REACHED, AND THAT IS CHECKED RATHER THAN
-		 * ASSUMED. mfem::HDGExtensionIntegrator -- the curved and free-boundary
-		 * path, which is to say every problem MEQ exists to solve -- carries
-		 * `shape, shape_ext, nor, x, xbar, m, y, CTm` and two DenseMatrix as
-		 * PLAIN members with no guard. It is safe here only because nothing
-		 * threaded evaluates it: it is a boundary-face integrator, the three
-		 * threaded assembly loops are domain loops, and
-		 * DarcyForm::ReconstructFluxAndPot() re-assembles the flux mass from
-		 * GetDBFI() alone. If upstream ever threads a boundary-face loop, this
-		 * promise stops being true and MEQ finds out by a wrong answer rather
-		 * than by an abort -- so it is written down here and reported there.
+		 * AND THE THIRD IS COVERED TOO, WHICH THIS COMMENT DENIED.
+		 * mfem::HDGExtensionIntegrator -- the curved and free-boundary path,
+		 * which is to say every problem MEQ exists to solve -- is guarded:
+		 * `shape, shape_ext, nor, x, xbar, m, y, CTm`, `Cmat`, `L` and `ext`
+		 * are inside `#ifndef MFEM_THREAD_SAFE` at extension_hdg.hpp:24, by
+		 * upstream's 26fccc9f3d, which `git merge-base --is-ancestor` confirms
+		 * is contained in the meq-integration MEQ links.
+		 *
+		 * WHAT THIS COMMENT USED TO SAY, AND WHY THE SHAPE OF THE ERROR IS
+		 * WORTH MORE THAN THE FACT. It described that class as carrying plain
+		 * unguarded members and argued the promise held anyway because nothing
+		 * threaded reaches a boundary-face loop -- a conclusion that was true,
+		 * resting on a premise that had stopped being true. The state it
+		 * describes is the window between the commit that put eight classes
+		 * behind that switch and the one that added this class to them. MEQ
+		 * reported the gap upstream and upstream closed it; the comment was
+		 * never re-read against the tree afterwards, so it went on justifying
+		 * a safe conclusion with a stale reason. **A claim about somebody
+		 * else's code is only as fresh as the last time it was checked**, and
+		 * this file's own standing rule -- read the header, do not remember it
+		 * -- is what would have caught it.
 		 */
 		darcy->GetHybridization()->SetIntegratorsThreadSafe();
 
@@ -5400,6 +5675,12 @@ namespace
 		 * recovery could find a different element.
 		 */
 		mfem::Vector const &potential = recoveryScratch.GetBlock( 1 );
+		// A BLOCK OF A BlockVector IS AN ALIAS, so it carries its own validity
+		// flags and a device write to the base leaves them stale. The element
+		// loop below indexes it raw. DEVICE-PLAN.md section 1.2, and M-130 for
+		// the alias family this belongs to.
+		countedHostRead( potential, __LINE__ );
+
 		double best = -std::numeric_limits<double>::infinity();
 		int bestElement = -1;
 		int bestDof = -1;
@@ -5715,7 +5996,7 @@ namespace
 				mfem::IntegrationPoint const &ip = nodes.IntPoint( i );
 				transformation.SetIntPoint( &ip );
 
-				double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+				mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 				mfem::Vector position( coordinates, 3 );
 				transformation.Transform( ip, position );
 
@@ -5776,7 +6057,7 @@ namespace
 
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 		{
-			double const *vertex = mesh.GetVertex( v );
+			auto const *vertex = mesh.GetVertex( v );
 			for ( int d = 0; d < mesh.SpaceDimension(); ++d )
 				digest = digestAppend( digest, vertex[ d ] );
 		}
@@ -5987,7 +6268,7 @@ namespace
 		 * READ and not read-write: the fill is a pure function of the state and
 		 * writes only its own membership array.
 		 */
-		state.HostRead();
+		countedHostRead( state, __LINE__ );
 
 		// THE SUPPORT EDGE AND NOT THE LIVE NORMALISATION, which are the same
 		// thing until freezePlasmaEdge() is on and must not diverge after it:
@@ -6452,7 +6733,7 @@ namespace
 
 		into.SetSpace( potentialFes.get() );
 		mfem::GridFunction const &solved = potential();
-		solved.HostRead();
+		countedHostRead( solved, __LINE__ );
 		into.HostWrite();
 
 		for ( int i = 0; i < solved.Size(); ++i )
@@ -6505,6 +6786,11 @@ namespace
 		if ( !normalisedSource )
 			return 0.0;
 
+		// The element loop below indexes `state` raw, and it runs inside an
+		// OpenMP region -- so the funnel has to be here, ahead of it, rather
+		// than at the read. DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
+
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
 		int const elementTotal = mesh.GetNE();
@@ -6539,7 +6825,7 @@ namespace
 			static_cast<std::size_t>( elementTotal ), 0.0 );
 		std::exception_ptr failure;
 
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elementTotal; ++e )
 		{
 			/*
@@ -6654,6 +6940,11 @@ namespace
 		if ( scale == 0.0 )
 			return;
 
+		// The loop below indexes the iterate raw. One funnel here rather than
+		// one per read, and it is unconditional: ordering is not a guard.
+		// DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
+
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
 		int const elementTotal = mesh.GetNE();
@@ -6672,7 +6963,7 @@ namespace
 		 * accumulators in assemblePlasmaCurrent(), where that second property
 		 * is not available.
 		 */
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elementTotal; ++e )
 		{
 			// The source may throw; see assemblePlasmaCurrent() for why the
@@ -6746,6 +7037,12 @@ namespace
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		againstAxis = 0.0;
 		againstBoundary = 0.0;
+
+		// The loop below indexes the iterate raw. One funnel here rather than
+		// one per read, and it is unconditional: ordering is not a guard.
+		// DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
+
 		if ( !normalisedSource )
 			return;
 
@@ -6835,7 +7132,7 @@ namespace
 			static_cast<std::size_t>( elementTotal ), 0.0 );
 		std::exception_ptr failure;
 
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elementTotal; ++e )
 		{
 			// The throw below is this function's own and is caught by the same
@@ -6930,6 +7227,12 @@ namespace
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
 		out = 0.0;
+
+		// The loop below indexes the iterate raw. One funnel here rather than
+		// one per read, and it is unconditional: ordering is not a guard.
+		// DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
+
 		if ( support )
 			support->clear();
 		if ( !normalisedSource )
@@ -6942,7 +7245,7 @@ namespace
 
 		// Disjoint L2 scatter, so bit-identical both across thread counts and
 		// against the serial loop; see assembleCurrentColumn().
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elementTotal; ++e )
 		{
 			try
@@ -7149,6 +7452,31 @@ namespace
 		return h != nullptr && h->CanCacheCondensation();
 	}
 
+	bool GradShafranovSolver::batchedNonlinearResidualTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchNonlinearResidual();
+	}
+
+	bool GradShafranovSolver::batchedNonlinearGradientTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchNonlinearGradient();
+	}
+
+	bool GradShafranovSolver::deviceIntegrandTaken() const
+	{
+		return deviceIntegrandInUse;
+	}
+
+	bool GradShafranovSolver::sourceRuleIsExplicit() const
+	{
+		return sourceIntegrator != nullptr
+		       && sourceIntegrator->GetIntRule() != nullptr;
+	}
+
 	bool GradShafranovSolver::batchedLocalFactorTaken() const
 	{
 		mfem::DarcyHybridization const *h =
@@ -7197,9 +7525,34 @@ namespace
 					return -dtn->basis( which, x( 0 ), x( 1 ) );
 				} );
 
+			/*
+			 * THIS WHOLE ASSEMBLY IS HOST ARITHMETIC AND MUST NOT ACQUIRE A
+			 * DEVICE COPY -- IT WAS 80% OF EVERY BYTE MEQ MOVED.
+			 *
+			 * mfem::LinearForm::Assemble() opens with `Vector::operator=(0.0)`
+			 * and its own comment says what that costs: *"The above operation
+			 * is executed on device because of UseDevice(). The first use of
+			 * AddElementVector() below will move it back to host"*. So the
+			 * form is zeroed on the card and dragged straight back, per mode
+			 * per sweep, for a buffer nothing on the device ever reads --
+			 * measured at 27 transfers and 12.0 MB of the run's 14.9,
+			 * MEASUREMENTS.md M-198.
+			 *
+			 * **BOTH FLAGS ARE NEEDED AND THAT IS WHY THE OBVIOUS FIX FAILED
+			 * BEFORE.** M-187 records trying `load.UseDevice( false )` alone;
+			 * it did not repair that defect, because `form` is a separate
+			 * mfem::Vector with its own flag and Assemble()'s zeroing consults
+			 * the FORM's, not the base's. The alias is where the device copy
+			 * was, so the alias is where the flag has to go too.
+			 *
+			 * Nothing here is arithmetic: the answer is the same host
+			 * assembly, and with no Device configured both calls are inert.
+			 */
+			load.UseDevice( false );
 			load = 0.0;
 			mfem::LinearForm form;
 			form.Update( fluxFes.get(), load, 0 );
+			form.UseDevice( false );
 			form.AddBdrFaceIntegrator(
 				new mfem::VectorBoundaryFluxLFIntegrator(
 					basis, 1.0,
@@ -7210,12 +7563,54 @@ namespace
 				gammaHMarker );
 			form.Assemble();
 
+			/*
+			 * THE FORM IS AN ALIAS OF `load` AND ASSEMBLE() WROTE THE ALIAS, SO
+			 * `load`'s OWN FLAGS STILL DESCRIBE THE ZEROING ABOVE.
+			 *
+			 * `load` is declared once, outside this loop, and `load = 0.0` is
+			 * device-aware -- Write() then a forall -- so from the second mode
+			 * onwards it leaves the BASE device-valid and the host copy
+			 * invalid. LinearForm::Update() then makes `form` a view onto that
+			 * same buffer with its own Memory, and Assemble() fills it ON THE
+			 * HOST. `load.HostRead()` below reads the base's flags, finds
+			 * device-valid, and copies the device's ZEROS over the rows
+			 * Assemble() just wrote.
+			 *
+			 * MODE 0 SURVIVES AND THE OTHERS DO NOT, WHICH IS WHAT MADE IT LOOK
+			 * LIKE PHYSICS: a freshly constructed Vector has UseDevice() false,
+			 * so the first `load = 0.0` runs on the host and the first column
+			 * is correct. Everything after it read exactly zero under
+			 * --device cuda and --device debug alike, so nine of the ten
+			 * exterior columns were missing from the bordered Jacobian --
+			 * which costs Newton its quadratic rate and no accuracy at all,
+			 * because the exterior coupling is still exact in the RESIDUAL.
+			 * MEASUREMENTS.md M-187.
+			 *
+			 * THE ASSEMBLED ROWS ARE ON THE ALIAS'S DEVICE COPY AND `load`'s HOST
+			 * BUFFER NEVER RECEIVES THEM, so SyncAliasMemory() is the repair
+			 * and it is MFEM's own: it brings the base up to date by moving
+			 * the ALIAS's data, which is the fresh side here, and it is the
+			 * same call formSystem() makes for the solution's three aliases.
+			 *
+			 * `load.UseDevice( false )` was tried first, on the theory that a
+			 * once-per-mesh host assembly should simply stay off the device.
+			 * It does NOT repair this -- measured, still 31 iterations -- which
+			 * is what established that the data is on the alias's device copy
+			 * rather than merely mismarked on the base.
+			 *
+			 * The HostRead() that follows is then a no-op on a host-valid
+			 * buffer, and both calls are inert with no Device configured.
+			 */
+			form.SyncAliasMemory( load );
+			countedHostRead( load, __LINE__ );
+
 			// THE RESIDUAL CARRIES THE LOAD NEGATED: R = G( x ) - b, so
 			// dr/da_m = -db/da_m and the flux block is the only one `a`
 			// reaches. The potential and trace blocks are exactly zero, which
 			// theExteriorColumnsAreExact asserts rather than assumes.
 			columns.emplace_back( n );
 			columns.back() = 0.0;
+			countedHostReadWrite( columns.back(), __LINE__ );
 			for ( int i = 0; i < load.Size(); ++i )
 				columns.back()( i ) = -load( i );
 		}
@@ -7247,6 +7642,11 @@ namespace
 		out.SetSize( state.Size() );
 		out = 0.0;
 
+		// The loop below indexes the iterate raw, and psi_ax is an unknown of
+		// every bordered solve, so this runs per step on the default path.
+		// DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
+
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
 		int const elementTotal = mesh.GetNE();
@@ -7273,7 +7673,7 @@ namespace
 
 		// Disjoint L2 scatter, so bit-identical both across thread counts and
 		// against the serial loop; see assembleCurrentColumn().
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elementTotal; ++e )
 		{
 			try
@@ -7465,9 +7865,65 @@ namespace
 		symbolicFactorisationCount = 0;
 		numericFactorisationCount = 0;
 
-		std::unique_ptr<mfem::DarcyNPCOperator> npc =
-			std::make_unique<mfem::DarcyNPCOperator>(
-				*darcy->GetHybridization(), blockOffsets, darcyRhs );
+		/*
+		 * THE DEVICE OPERATOR WHERE IT APPLIES, THE STOCK ONE OTHERWISE.
+		 *
+		 * meq::makeDeviceNPCOperator() returns null unless a Device is
+		 * configured AND the source has a POD form, so this is one branch at
+		 * CONSTRUCTION rather than a test per residual -- and a null is the
+		 * ordinary answer on every host run. Upstream's
+		 * CanBatchNonlinearResidual() then declines or not per call inside it,
+		 * which is a SECOND independent fallback: neither is a property of the
+		 * build, and the element loop is what happens when either says no.
+		 *
+		 * The flag vector is declared here so it outlives the operator that
+		 * borrows it. XP-2 freezes the plasma support for the duration of a
+		 * solve, so it is filled once; the operator is rebuilt by reprepare()
+		 * whenever the hybridization is re-finalised, which is where a moving
+		 * support would be picked up anyway.
+		 */
+		std::vector<int> npcPlasmaFlags;
+		auto buildNpc = [ & ]() -> std::unique_ptr<mfem::DarcyNPCOperator>
+		{
+			mfem::DarcyHybridization &hyb = *darcy->GetHybridization();
+
+			DeviceIntegrandInputs inputs;
+			inputs.source = nonlinearSource;
+
+			int const elementTotal = potentialFes ? potentialFes->GetNE() : 0;
+			npcPlasmaFlags.assign(
+				static_cast<std::size_t>( elementTotal ), 1 );
+			for ( int e = 0; e < elementTotal; ++e )
+				npcPlasmaFlags[ static_cast<std::size_t>( e ) ] =
+					plasmaComponentMask.holds( e ) ? 1 : 0;
+			inputs.elementInPlasma = npcPlasmaFlags.empty()
+				? nullptr : npcPlasmaFlags.data();
+			inputs.elementCount = elementTotal;
+
+			if ( sourceIntegrator != nullptr
+			     && !sourceIntegrator->conductorCacheValues().empty() )
+			{
+				inputs.conductorValues =
+					sourceIntegrator->conductorCacheValues().data();
+				inputs.conductorOffsets =
+					sourceIntegrator->conductorCacheOffsets().data();
+				inputs.conductorValueCount = static_cast<int>(
+					sourceIntegrator->conductorCacheValues().size() );
+			}
+
+			if ( auto device = makeDeviceNPCOperator( hyb, blockOffsets,
+			                                          darcyRhs, inputs ) )
+			{
+				deviceIntegrandInUse = true;
+				return device;
+			}
+
+			deviceIntegrandInUse = false;
+			return std::make_unique<mfem::DarcyNPCOperator>(
+				hyb, blockOffsets, darcyRhs );
+		};
+
+		std::unique_ptr<mfem::DarcyNPCOperator> npc = buildNpc();
 
 		/*
 		 * RE-ASSEMBLE THE RIGHT HAND SIDE AND REBUILD THE NPC OPERATOR.
@@ -7495,8 +7951,7 @@ namespace
 			// saved state on the next line, so seeding it here is computed and
 			// discarded -- see prepare( bool ).
 			prepare( false );
-			npc = std::make_unique<mfem::DarcyNPCOperator>(
-				*darcy->GetHybridization(), blockOffsets, darcyRhs );
+			npc = buildNpc();
 		};
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
@@ -7650,10 +8105,14 @@ namespace
 		 */
 		auto limiterValue = [ & ]( mfem::Vector const &v )
 		{
+			// Both arms index `v` raw, and this is the psi_bnd row -- it runs
+			// per step under any limiter. DEVICE-PLAN.md section 1.2.
+			countedHostRead( v, __LINE__ );
+
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
 				return v( boundaryDof );
 
-			double total = 0.0;
+			mfem::real_t total = 0.0;
 			for ( int i = 0; i < limiterDofs.Size() && i < limiterShape.Size(); ++i )
 				total += limiterShape( i )
 				         *v( blockOffsets[ 1 ] + limiterDofs[ i ] );
@@ -7781,6 +8240,33 @@ namespace
 			xFluxField.SetSpace( fluxFes.get() );
 			xPotentialField.SetSpace( potentialFes.get() );
 			xZeroColumn.SetSize( n );
+
+			/*
+			 * THESE TWO ARE HOST SCRATCH AND MUST NOT ACQUIRE A DEVICE COPY,
+			 * WHICH IS THE SAME TRADE assembleExteriorColumns()'s `load` MAKES.
+			 *
+			 * `= 0.0` is device-aware -- Write() then a forall -- so without
+			 * this each field is zeroed on the card once per support sweep and
+			 * the HostReadWrite() below drags it straight back. Measured at 3
+			 * transfers each and 2.0 MB of the run's 2.89 after M-200,
+			 * MEASUREMENTS.md M-202.
+			 *
+			 * **NOTHING ON THE DEVICE EVER READS THEM.** Every use is a host
+			 * GridFunction method -- GetVectorValue(), GetVectorGradient(),
+			 * GetGradient() -- or the raw element-dof writes below, and they
+			 * are local to this block: they are not columns, not a state and
+			 * not handed to any kernel. The read-modify-write is what the
+			 * comment above records and is unaffected; what goes is the round
+			 * trip that made the "read" half necessary in the first place.
+			 *
+			 * xZeroColumn is deliberately NOT included. It is returned by
+			 * columnZ() for an X-point row, so it IS a border column and a
+			 * resident bordered fill would want it on the device; it also
+			 * causes zero transfers today, so there is nothing to buy.
+			 */
+			xFluxField.UseDevice( false );
+			xPotentialField.UseDevice( false );
+
 			xFluxField = 0.0;
 			xPotentialField = 0.0;
 			xZeroColumn = 0.0;
@@ -7888,9 +8374,9 @@ namespace
 			 * each line-search trial, and the fallback step -- so a sync here
 			 * cannot be outgrown by a new caller, where a list of producers can.
 			 */
-			state.HostRead();
-			xFluxField.HostReadWrite();
-			xPotentialField.HostReadWrite();
+			countedHostRead( state, __LINE__ );
+			countedHostReadWrite( xFluxField, __LINE__ );
+			countedHostReadWrite( xPotentialField, __LINE__ );
 
 			for ( int i = 0; i < xFluxDofsR.Size(); ++i )
 				xFluxField( xFluxDofsR[ i ] ) = -state( xFluxDofsR[ i ] );
@@ -7968,7 +8454,16 @@ namespace
 				// machine is metres from them. A central difference at 1e-6
 				// of that leaves about ten digits in the derivative, where
 				// the row it fills is one Newton needs to a few.
-				double const step = 1.0e-6*std::max( 1.0, std::abs( xR ) );
+				// SCALED TO real_t's EPSILON, for the reason
+				// normalisationDifferenceStep() gives at length: "about ten digits
+				// in the derivative" is a statement about DOUBLE, and single has
+				// about seven in total, so 1e-6 there leaves none.
+#ifdef MFEM_USE_SINGLE
+				constexpr double relativeStep = 5.0e-3;
+#else
+				constexpr double relativeStep = 1.0e-6;
+#endif
+				double const step = relativeStep*std::max( 1.0, std::abs( xR ) );
 				if ( xR - step > 0.0 )
 				{
 					double aR = 0.0, aZ = 0.0, bR = 0.0, bZ = 0.0;
@@ -8246,6 +8741,16 @@ namespace
 			constraintShape.SetSize( 0 );
 			constraintFluxDofs.SetSize( 0 );
 			constraintFluxRow.SetSize( 0 );
+
+			// THE FUNNEL, AND IT IS NOT DECORATION HERE. The two loops below
+			// index the iterate raw, and this is the DEFAULT axis constraint --
+			// it runs every Newton step of every bordered solve. Ordering has
+			// protected it so far, because refreshXPoint() or
+			// refreshPlasmaComponent() happens to sync the same buffer first on
+			// the configurations that have been run; a limited machine with a
+			// frozen plasma support calls neither. See rowDot()'s comment for
+			// the whole argument, and DEVICE-PLAN.md section 1.2 for the sweep.
+			countedHostRead( state, __LINE__ );
 
 			// q, NOT the raw block. DarcyForm holds -q, and in even dimension
 			// index( -v ) = index( v ), so a finder handed the raw block puts
@@ -8703,6 +9208,11 @@ namespace
 				}
 			}
 
+			// The nodal fallback indexes the iterate raw. locateAxisPoint()
+			// syncs it too, but only when it RUNS -- this arm is reached
+			// precisely when it did not. DEVICE-PLAN.md section 1.2.
+			countedHostRead( state, __LINE__ );
+
 			double best = -std::numeric_limits<double>::infinity();
 			int bestIndex = -1;
 			for ( int i = blockOffsets[ 1 ]; i < blockOffsets[ 2 ]; ++i )
@@ -8780,7 +9290,7 @@ namespace
 		// Array<int>::operator[] is as raw an accessor as Vector's -- it neither
 		// syncs nor invalidates. Same obligation as rowDot()'s borderDofs and
 		// the X-point lambda's `state` below.
-		essentialTrace.HostRead();
+		countedHostRead( essentialTrace, __LINE__ );
 		for ( int i = 0; i < essentialTrace.Size(); ++i )
 			essential[ essentialTrace[ i ] ] = true;
 
@@ -9746,8 +10256,15 @@ namespace
 				profile.npcTraversalCpuSeconds += profileCpuNow() - c0
 					- ( profile.traceSolveCpuSeconds - traceCpuBefore );
 				++profile.npcTraversalCalls;
+				/*
+				 * THE BATCHED COLUMN SOLVE'S FLUSH, AND IT IS N + 4 CROSSINGS
+				 * PER STEP -- the largest single group the instrument sees,
+				 * and exactly what meq::DeviceRows::dotColumns() exists to
+				 * remove: with the bordered fill done device-side these
+				 * columns never need to be on the host at all.
+				 */
 				for ( int i = 0; i < borderOut.Size(); ++i )
-					borderOut[ i ]->HostRead();
+					countedHostRead( *borderOut[ i ], __LINE__ );
 				borderRhs.SetSize( 0 );
 				borderOut.SetSize( 0 );
 			};
@@ -9858,9 +10375,9 @@ namespace
 				 * Vector::operator(). With `v` and `border` both synced this
 				 * line still faulted, and `borderDofs[ j ]` was what was left.
 				 */
-				v.HostRead();
-				border.HostRead();
-				borderDofs.HostRead();
+				countedHostRead( v, __LINE__ );
+				countedHostRead( border, __LINE__ );
+				countedHostRead( borderDofs, __LINE__ );
 
 				if ( i == 0 )
 				{
@@ -9891,8 +10408,8 @@ namespace
 					 */
 					mfem::Array<int> const &dofs =
 						( i == xPointIndex ) ? xFluxDofsR : xFluxDofsZ;
-					dofs.HostRead();
-					xFluxShape.HostRead();
+					countedHostRead( dofs, __LINE__ );
+					countedHostRead( xFluxShape, __LINE__ );
 					double total = 0.0;
 					for ( int j = 0; j < dofs.Size() && j < xFluxShape.Size(); ++j )
 						total -= xFluxShape( j )*v( dofs[ j ] );

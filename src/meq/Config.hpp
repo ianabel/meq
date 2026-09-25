@@ -1076,7 +1076,11 @@ namespace meq
 		Pardiso,
 		// NVIDIA cuDSS. Correct, and not recommended on the strength of any
 		// timing taken on this machine. Needs MFEM_USE_CUDSS and an mfem::Device.
-		cuDSS // NOLINT(readability-identifier-naming)
+		cuDSS, // NOLINT(readability-identifier-naming)
+		// GMRES + Gauss-Seidel, native MFEM, so present in every build.
+		// Exposed to be MEASURED rather than recommended: see
+		// meq::GradShafranovSolver::TraceSolver::GMRES.
+		GMRES
 	};
 
 	// [solver] -- Newton on the outside, a linear solve on the inside.
@@ -1140,6 +1144,14 @@ namespace meq
 		// without oneMKL, which is most of them and is exactly what CI builds.
 		bool assemblyModeWasGiven = false;
 		bool traceSolverWasGiven = false;
+
+		// AND THE SAME QUESTION FOR LocalFactorMode, WHICH IS ASKED FOR A
+		// DIFFERENT REASON. That key is available on every build -- it needs
+		// no package -- so it is never refused. What it needs a flag for is
+		// the DEVICE default: apps/meq.cpp turns it on under --device, where
+		// the batched local factorisation is the route to GPUBlasBatchedLinAlg,
+		// and a file that named a mode must keep the one it named.
+		bool localFactorModeWasGiven = false;
 
 		// Newton stops when either ||r|| <= NewtonAbsoluteTolerance or
 		// ||r|| <= NewtonRelativeTolerance * ||R_0||, and fails after

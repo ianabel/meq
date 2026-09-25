@@ -350,6 +350,49 @@ namespace meq
 		return intervalAt( findInterval( psi ) ).doublePrime( psi );
 	}
 
+	bool SplineProfile::uniformKnots() const
+	{
+		if ( knotData.size() < 3 )
+			return true;
+
+		double const h = knotData[ 1 ].psi - knotData[ 0 ].psi;
+		if ( !( h > 0.0 ) )
+			return false;
+
+		for ( std::size_t i = 1; i + 1 < knotData.size(); ++i )
+			if ( std::abs( ( knotData[ i + 1 ].psi - knotData[ i ].psi ) - h )
+			     > 1.0e-9*std::abs( h ) )
+				return false;
+
+		return true;
+	}
+
+	SplineProfile SplineProfile::resampledUniform( unsigned int intervals ) const
+	{
+		if ( intervals == 0 )
+			throw std::invalid_argument(
+				"meq::SplineProfile::resampledUniform: need at least one interval" );
+
+		double const lower = knotData.front().psi;
+		double const upper = knotData.back().psi;
+		double const delta = ( upper - lower )/intervals;
+
+		std::vector<Knot> data;
+		data.reserve( intervals + 1 );
+		for ( unsigned int i = 0; i <= intervals; ++i )
+		{
+			// The last abscissa is written as the endpoint rather than
+			// accumulated, so the resampled range ENDS where this one does --
+			// lower + intervals*delta is the same number only in exact
+			// arithmetic, and a last knot a few ulps short moves the constant
+			// extension that operator() applies beyond it.
+			double const psi = ( i == intervals ) ? upper : lower + i*delta;
+			data.push_back( Knot{ psi, ( *this )( psi ), prime( psi ) } );
+		}
+
+		return SplineProfile( std::move( data ) );
+	}
+
 	void SplineProfile::write( std::ostream & os ) const
 	{
 		// max_digits10 so that write() followed by fromStream() is the identity.

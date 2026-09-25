@@ -421,7 +421,7 @@ namespace meq
 		while ( true )
 		{
 			visited.insert( current );
-			double const *point = mesh.GetVertex( current );
+			auto const *point = mesh.GetVertex( current );
 			radius.push_back( point[ 0 ] );
 			z.push_back( point[ 1 ] );
 

@@ -7,6 +7,9 @@
 #include <memory>
 
 #include "ConductorStore.hpp"
+#include <cmath>
+#include <limits>
+#include <algorithm>
 #include "mfem.hpp"
 
 #include "GradShafranov.hpp"
@@ -1176,9 +1179,37 @@ namespace meq
 			mfem::Mesh &meshRef;
 			ConductorField const *conductors = nullptr;
 
-			double tolerance = 1.0e-13;
+			/*
+			 * BOTH CONSTANTS FOLLOW real_t, AND THE DOUBLE VALUES ARE KEPT EXACTLY.
+			 *
+			 * `tolerance` is relative -- the Newton stops at
+			 * `tolerance*fluxScale()` -- and `1.0e-13` is **below FP32's epsilon of
+			 * 1.19e-07**, so under MFEM_PRECISION = single the root search can never
+			 * meet its own target however close it gets: it runs to maxIterations and
+			 * reports NO ROOT. Measured on examples/machine-f-diiid.toml, that is
+			 * checkAxis() refusing a perfectly good equilibrium with *"this solve
+			 * carries no closed flux surface around one"* -- the axis was there and
+			 * the search could not say so.
+			 *
+			 * `jacobianStep` is the central difference the reference Jacobian is
+			 * built with, optimal at `eps^(1/3)`: 6.1e-6 in double, where 1.0e-4 is
+			 * comfortably above the noise, and 4.9e-3 in single, where it is not.
+			 *
+			 * `std::max` against the historical value is what keeps double bit-for-bit
+			 * what it was: 100 eps is 2.2e-14 there and eps^(1/3) is 6.1e-6, both
+			 * under the constants they are maxed with. **The fifth constant of this
+			 * kind MEQ has found in one day** -- see M-183 for the list and for why
+			 * the silent ones are worse than the loud ones.
+			 */
+			double tolerance =
+				std::max( 1.0e-13,
+					  100.0*static_cast<double>(
+						    std::numeric_limits<mfem::real_t>::epsilon() ) );
 			int maxIterations = 50;
-			double jacobianStep = 1.0e-4;
+			double jacobianStep =
+				std::max( 1.0e-4,
+					  std::cbrt( static_cast<double>(
+						    std::numeric_limits<mfem::real_t>::epsilon() ) ) );
 			int boundarySamples = 16;
 			double separation = 1.0e-8;
 			double containment = 0.10;

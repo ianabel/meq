@@ -993,12 +993,34 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 			mfem::IntegrationRule const &faceRule =
 				mfem::IntRules.Get( ftr->GetGeometryType(), quadratureOrder );
 
+			/*
+			 * THE SAME STEP THE ROW WAS BUILT WITH, AND IT IS LOAD BEARING.
+			 *
+			 * This reference is contracted against a row that
+			 * exteriorTransmissionRows() assembled with meq::extensionFdStep().
+			 * A central difference's error is a deterministic function of its
+			 * step, so while both halves share one it is COMMON to them and
+			 * cancels exactly -- which is the only way this case could ever
+			 * have read 7.8e-16, a number orders below what a central
+			 * difference at 1e-6 can resolve. It was never a measurement of the
+			 * sweep's accuracy; it is a measurement of the contraction, the
+			 * vdof ordering, the sign and the measure, with everything else
+			 * cancelled. That is what it is FOR.
+			 *
+			 * Omit the step and MFEM's own default applies -- which changed
+			 * from a literal 1e-6 to cbrt( eps ) = 6.06e-6 in double, the two
+			 * halves stopped sharing it, and the whole finite-difference error
+			 * appeared at once as 1.27e-06 against a row that had not moved by
+			 * a single bit. M-189, and DO NOT "fix" a recurrence by widening
+			 * the tolerance below: a disagreement here means the two sweeps
+			 * differ in something, and the step is the first thing to check.
+			 */
 			mfem::ExtensionBoundaryQuadrature( *ftr, *c.path, faceRule,
 				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
 			{
 				total += pt.weight*integrand( pt.y, pt.nu )
 				         *dtn.basis( mode, pt.y( 0 ), pt.y( 1 ) );
-			} );
+			}, meq::extensionFdStep() );
 		}
 		return total;
 	};

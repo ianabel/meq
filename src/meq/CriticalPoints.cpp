@@ -1,4 +1,5 @@
 #include "CriticalPoints.hpp"
+#include "Crossings.hpp"
 
 #include <cstdlib>
 
@@ -158,8 +159,8 @@ namespace meq
 		 *
 		 * No-ops with no Device configured.
 		 */
-		fluxIn.HostRead();
-		potentialIn.HostRead();
+		countedHostRead( fluxIn, __LINE__ );
+		countedHostRead( potentialIn, __LINE__ );
 	}
 
 	void CriticalPointFinder::setExcluded(
@@ -288,7 +289,7 @@ namespace meq
 			mesh.GetElementTransformation( element, &transformation );
 			transformation.SetIntPoint( &ip );
 
-			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+			mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
 			radius = position( 0 );
@@ -350,7 +351,7 @@ namespace meq
 		{
 			if ( mfem::GridFunction const *interpolant = conductorFlux() )
 			{
-				double shift[ 2 ] = { 0.0, 0.0 };
+				mfem::real_t shift[ 2 ] = { 0.0, 0.0 };
 				mfem::Vector conductorPart( shift, 2 );
 				interpolant->GetVectorValue( element, ip, conductorPart );
 				out( 0 ) += conductorPart( 0 );
@@ -604,7 +605,7 @@ namespace meq
 		 * over one array pass of a few tens of thousands of doubles, which is
 		 * nothing beside the kernel evaluations above.
 		 */
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int e = 0; e < elements; ++e )
 		{
 			std::size_t const i = static_cast< std::size_t >( e );
@@ -669,12 +670,12 @@ namespace meq
 		mfem::FiniteElementSpace const &space = *fluxField.FESpace();
 		int const scalarDofs = space.GetNDofs();
 
-		double worst = 0.0;
+		mfem::real_t worst = 0.0;
 		for ( int i = 0; i < scalarDofs; ++i )
 		{
 			double const a = fluxField( space.DofToVDof( i, 0 ) );
 			double const b = fluxField( space.DofToVDof( i, 1 ) );
-			worst = std::max( worst, std::sqrt( a*a + b*b ) );
+			worst = std::max( worst, mfem::real_t( std::sqrt( a*a + b*b ) ) );
 		}
 
 		/*
@@ -696,7 +697,7 @@ namespace meq
 			// per RING of every seeded search and once per sweep, so the pass
 			// it replaces was 102 s of MAST-U per call -- see
 			// nodalConductors(), which reduces it at build time.
-			worst = std::max( worst, nodalConductors().scale );
+			worst = std::max( worst, mfem::real_t( nodalConductors().scale ) );
 		}
 
 		return worst > 0.0 ? worst : 1.0;
@@ -850,21 +851,21 @@ namespace meq
 		if ( !mfem::Geometry::CheckPoint( geom, ip, containment + 1.0e-9 ) )
 			return false;
 
-		double overshoot = 0.0;
+		mfem::real_t overshoot = 0.0;
 		if ( !mfem::Geometry::CheckPoint( geom, ip, 0.0 ) )
 		{
 			// How far outside, measured the way CheckPoint measures inside: the
 			// worst violated face of the reference element.
 			if ( geom == mfem::Geometry::TRIANGLE )
 			{
-				overshoot = std::max( std::max( -ip.x, -ip.y ), ip.x + ip.y - 1.0 );
+				overshoot = std::max( std::max( -ip.x, -ip.y ), mfem::real_t( ip.x + ip.y - 1.0 ) );
 			}
 			else
 			{
-				overshoot = std::max( std::max( -ip.x, ip.x - 1.0 ),
-				                      std::max( -ip.y, ip.y - 1.0 ) );
+				overshoot = std::max( std::max( -ip.x, mfem::real_t( ip.x - 1.0 ) ),
+				                      std::max( -ip.y, mfem::real_t( ip.y - 1.0 ) ) );
 			}
-			overshoot = std::max( overshoot, 0.0 );
+			overshoot = std::max( overshoot, mfem::real_t( 0.0 ) );
 		}
 
 		// THREAD LOCAL, NOT THE MESH'S SHARED SCRATCH.
@@ -1414,11 +1415,11 @@ namespace meq
 		double diameter = 0.0;
 		if ( meshRef.GetNV() > 0 )
 		{
-			double lo[ 2 ] = { meshRef.GetVertex( 0 )[ 0 ], meshRef.GetVertex( 0 )[ 1 ] };
-			double hi[ 2 ] = { lo[ 0 ], lo[ 1 ] };
+			mfem::real_t lo[ 2 ] = { meshRef.GetVertex( 0 )[ 0 ], meshRef.GetVertex( 0 )[ 1 ] };
+			mfem::real_t hi[ 2 ] = { lo[ 0 ], lo[ 1 ] };
 			for ( int v = 1; v < meshRef.GetNV(); ++v )
 			{
-				double const *vertex = meshRef.GetVertex( v );
+				auto const *vertex = meshRef.GetVertex( v );
 				for ( int d = 0; d < 2; ++d )
 				{
 					lo[ d ] = std::min( lo[ d ], vertex[ d ] );
@@ -1466,7 +1467,7 @@ namespace meq
 			static_cast<std::size_t>( elementTotal ) );
 		std::exception_ptr failure;
 
-		MEQ_OMP( parallel for schedule( dynamic ) )
+		MEQ_OMP_ELEMENT_LOOP
 		for ( int element = 0; element < elementTotal; ++element )
 		{
 			// Nothing on this path is documented to throw, but the region is
@@ -1813,9 +1814,9 @@ namespace meq
 			for ( std::size_t s = 0; s < loops[ l ].size(); ++s )
 			{
 				Segment const &segment = loops[ l ][ s ];
-				double const *from = meshRef.GetVertex(
+				auto const *from = meshRef.GetVertex(
 					endpoints[ segment.boundaryElement ][ segment.forward ? 0 : 1 ] );
-				double const *to = meshRef.GetVertex(
+				auto const *to = meshRef.GetVertex(
 					endpoints[ segment.boundaryElement ][ segment.forward ? 1 : 0 ] );
 				area += from[ 0 ]*to[ 1 ] - to[ 0 ]*from[ 1 ];
 			}
@@ -1873,7 +1874,7 @@ namespace meq
 				// rather than assumed of the vertex ordering, because the two are
 				// related by MFEM's face orientation bookkeeping and a wrong guess
 				// here reverses a segment silently.
-				double const *fromVertex = meshRef.GetVertex(
+				auto const *fromVertex = meshRef.GetVertex(
 					endpoints[ b ][ segment.forward ? 0 : 1 ] );
 
 				face->Transform( referencePoint( 0.0, 0.0 ), physical );
@@ -1884,7 +1885,7 @@ namespace meq
 				                     + std::abs( physical( 1 ) - fromVertex[ 1 ] );
 				bool const faceForward = ( atZero <= atOne );
 
-				double const *toVertex = meshRef.GetVertex(
+				auto const *toVertex = meshRef.GetVertex(
 					endpoints[ b ][ segment.forward ? 1 : 0 ] );
 				double tangent[ 2 ] = { toVertex[ 0 ] - fromVertex[ 0 ],
 				                        toVertex[ 1 ] - fromVertex[ 1 ] };

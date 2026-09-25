@@ -1,6 +1,8 @@
 #ifndef MEQ_WARMSTART_HPP
 #define MEQ_WARMSTART_HPP
 
+#include "PointLocator.hpp"
+
 #include "mfem.hpp"
 
 /*
@@ -105,7 +107,15 @@ namespace meq
 
 		private:
 			mfem::Mesh &sourceMesh;
-			mfem::FindPointsGSLIB finder;
+			/// MEQ'S OWN LOCATOR, NOT gslib. M-175 and PointLocator.hpp say
+			/// why: gslib has no floating-point abstraction, so it cannot be
+			/// built alongside MFEM_PRECISION = single; its simplex path
+			/// splits every triangle into three quads; and its device kernels
+			/// are gated on tensor-product elements, which MEQ never has. It
+			/// is used unconditionally rather than as a fallback so that the
+			/// path MEQ ships is the path MEQ tests -- SamplerConvergence
+			/// compares it against gslib wherever gslib is present.
+			PointLocator locator;
 			int misses;
 			int points;
 			double worstDist;

@@ -29,6 +29,7 @@
 #include "meq/ConductorField.hpp"
 #include "meq/ConductorStore.hpp"
 #include "meq/Config.hpp"
+#include "meq/Crossings.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
@@ -1609,18 +1610,31 @@ int main( int argc, char **argv )
 	 * already draws between an asked-for mode, which is refused when it cannot
 	 * be honoured, and an inherited one, which is downgraded.
 	 *
-	 * AND ONLY THIS AXIS, WHICH NOW MEANS SOMETHING DIFFERENT FOR EACH OF THE
-	 * OTHER TWO. LocalFactorMode stays off everywhere, and it is a TRADE rather
-	 * than a knob that does nothing: DarcyHybridization::CanCacheCondensation()
-	 * refuses outright under LocalFactorMode::Batched -- "the batched
-	 * factorisation owns AiBt and the Schur complement itself and handing them
-	 * in would be two owners of one buffer" -- so turning it on BUYS a batched
-	 * factorisation and PAYS the condensation cache, the six products A^-1 B^T,
-	 * B A^-1 B^T and their kin that would otherwise be held across a Newton
-	 * loop. Verified on the DIII-D machine case, which reports `condensation
-	 * cache yes` by default and `NO` with the mode on. That is why the axis
-	 * reads neutral-to-negative rather than free -- not something a run should
-	 * acquire by plugging in a GPU. TraceAssemblyMode is no longer off anywhere: it is ON BY DEFAULT,
+	 * AND TWO OF THE THREE AXES MOVE ON A DEVICE, NOT ONE. LocalFactorMode
+	 * joins it, and the argument that used to keep it off everywhere has
+	 * expired rather than been overruled: CanCacheCondensation() refused
+	 * outright under LocalFactorMode::Batched -- "the batched factorisation
+	 * owns AiBt and the Schur complement itself and handing them in would be
+	 * two owners of one buffer" -- so the key BOUGHT a batched factorisation
+	 * and PAID the condensation cache. Upstream has since handed
+	 * FactorElementsBatched() the cache's own buffer, and the DIII-D machine
+	 * case now reports `condensation cache yes` on both rows. The trade is
+	 * gone and what is left is the gain.
+	 *
+	 * ON A DEVICE IT IS ALSO THE ROUTE, WHICH THE HOST MEASUREMENT CANNOT SEE.
+	 * The batched local factorisation and the batched local solve are what
+	 * reach BatchedLinAlg, whose GPUBlas backend is the one linked here; with
+	 * the key off, CanBatchLocalSolve() refuses on lfac_mode alone and the
+	 * element-local dense algebra -- upstream's group 1 -- stays on the host
+	 * under --device. Measured on machine-f-diiid, ComputeH is 1.97x faster on
+	 * the host and 1.54x under CUDA with it on, and psi_ax does not move.
+	 * MEASUREMENTS.md M-185.
+	 *
+	 * THE HOST DEFAULT STAYS Serial, and that is not an inconsistency. The
+	 * whole-run gain there is about 1.5%, inside the spread of two runs of one
+	 * binary, and it is a mode this tree has never asserted bit-for-bit against
+	 * the other -- so it is not a reason to move a default a device run has a
+	 * reason to move. TraceAssemblyMode is no longer off anywhere: it is ON BY DEFAULT,
 	 * host and device alike, because it is the one axis of the three measured
 	 * to pay -- 7 to 9 per cent of the DIII-D solve at OMP = MKL = 8, in every
 	 * round of an interleaved cross, MEASUREMENTS.md M-99. It is still the one
@@ -1631,12 +1645,20 @@ int main( int argc, char **argv )
 	if ( onDevice && !config->getSolver().assemblyModeWasGiven )
 		assemblyMode = AM::Batched;
 
+	using LFM = meq::GradShafranovSolver::LocalFactorMode;
+	LFM localFactorMode =
+		( config->getSolver().localFactorMode == meq::LocalFactorModeType::Batched )
+			? LFM::Batched : LFM::Serial;
+	if ( onDevice && !config->getSolver().localFactorModeWasGiven )
+		localFactorMode = LFM::Batched;
+
 	TS traceSolver = TS::UMFPack;
 	switch ( config->getSolver().traceSolver )
 	{
 		case meq::TraceSolverType::UMFPack: traceSolver = TS::UMFPack; break;
 		case meq::TraceSolverType::Pardiso: traceSolver = TS::Pardiso; break;
 		case meq::TraceSolverType::cuDSS:   traceSolver = TS::cuDSS;   break;
+		case meq::TraceSolverType::GMRES:   traceSolver = TS::GMRES;   break;
 	}
 
 	if ( !meq::GradShafranovSolver::assemblyModeAvailable( assemblyMode ) )
@@ -1665,6 +1687,68 @@ int main( int argc, char **argv )
 			return ConfigurationError;
 		}
 		assemblyMode = AM::Serial;
+	}
+
+	/*
+	 * AND A DEVICE REFUSES "threaded" ABOVE ONE THREAD, BECAUSE MFEM'S MEMORY
+	 * MANAGER IS NOT THREAD SAFE AND THE FAILURE NAMES NOTHING.
+	 *
+	 * Under an mfem::Device the lazy registrations in Memory<T>::MakeAlias(),
+	 * SetDeviceMemoryType() and the device arms of Read/Write/ReadWrite insert
+	 * into general/mem_manager.cpp's `maps->memories` and `maps->aliases` --
+	 * two bare std::unordered_maps with no mutex, no critical section and no
+	 * atomic anywhere in the file. DarcyForm's assembly element loops are
+	 * `#pragma omp parallel`, so with a Device configured those insertions come
+	 * from every thread at once and the container corrupts. WITHOUT a Device
+	 * those arms are never taken at all, which is why host threaded assembly
+	 * has always been safe and why this is a device-only refusal.
+	 *
+	 * MEASURED with a thread count rather than argued, same binary and same
+	 * file: OMP_NUM_THREADS=1 exits 0 and reproduces the host's own 7 / 3 / 2
+	 * Newton counts, OMP_NUM_THREADS=8 aborts in
+	 * MemoryManager::CheckHostMemoryType_ with "alias pointer is not
+	 * registered". --device debug at 8 threads aborts identically with no GPU
+	 * arithmetic anywhere, which is what rules out the CUDA driver and names
+	 * the map. DEVICE-PLAN.md section 3.3, item 7.
+	 *
+	 * IT IS KEYED ON THE THREAD COUNT AND NOT ON THE MODE, because one thread
+	 * provably works and refusing it would refuse a configuration this project
+	 * has measured. Unset counts as unsafe: OpenMP then takes the core count.
+	 *
+	 * AND THE ABORT IT DESCRIBES IS A PROPERTY OF THE INSTALLED MFEM, NOT OF
+	 * MFEM. ../mfem/install predates DarcyHybridization::ThreadHostLoops(),
+	 * which meq-integration carries and which DECLINES this combination with a
+	 * one-time warning and runs the loops serially. Once the install is
+	 * refreshed the crash stops and this refusal rests on MEQ's own rule
+	 * instead -- a mode the FILE asked for and that cannot be honoured is
+	 * refused, where only an inherited default is silently downgraded, which is
+	 * exactly the asymmetry the check above this one implements. THE MESSAGE IS
+	 * WHAT WILL NEED REVISITING THEN, not the exit code. MEASUREMENTS.md M-188.
+	 *
+	 * AND IT IS A REFUSAL RATHER THAN A DOWNGRADE because reaching here with
+	 * Threaded means the FILE asked for it -- an inherited default was already
+	 * moved to Batched above, on a device. It costs residency nothing either
+	 * way: MFEM's own ThreadHostLoops() returns false whenever a Device is
+	 * configured, so the library turns its host threading off by design and
+	 * the collision is only ever with MEQ's own.
+	 */
+	if ( onDevice && assemblyMode == AM::Threaded )
+	{
+		char const *const ompEnv = std::getenv( "OMP_NUM_THREADS" );
+		int const ompCount = ompEnv ? std::atoi( ompEnv ) : 0;
+		if ( ompCount != 1 )
+		{
+			std::fprintf( stderr,
+				"MEQ: [solver] AssemblyMode = \"threaded\" cannot be combined with\n"
+				"     --device above one thread. MFEM registers buffers lazily in its\n"
+				"     memory manager once a device is configured, and those maps are\n"
+				"     not thread safe, so the threaded assembly loop corrupts them and\n"
+				"     the run aborts inside MemoryManager::CheckHostMemoryType_ with a\n"
+				"     message naming neither this key nor --device.\n"
+				"     Use AssemblyMode = \"batched\", which is the device route anyway,\n"
+				"     or drop --device. OMP_NUM_THREADS=1 is also honoured.\n" );
+			return ConfigurationError;
+		}
 	}
 
 	/*
@@ -2242,7 +2326,7 @@ int main( int argc, char **argv )
 						// documented as 0.0 bit exactly for both conductor
 						// kinds, so clamping is the value rather than a repair
 						// of one.
-						double const radius = std::max( 0.0, x( 0 ) );
+						double const radius = std::max( mfem::real_t( 0.0 ), x( 0 ) );
 						double total = 0.0;
 						if ( set )
 							for ( meq::Coil const &c : set->coils() )
@@ -2355,7 +2439,7 @@ int main( int argc, char **argv )
 							mfem::IntegrationPoint const &ip = nodes.IntPoint( i );
 							transformation.SetIntPoint( &ip );
 
-							double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+							mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 							mfem::Vector position( coordinates, 3 );
 							transformation.Transform( ip, position );
 							if ( position( 0 ) < 0.0 )
@@ -2665,10 +2749,7 @@ int main( int argc, char **argv )
 		// for the trace one -- different bit-exactness, so a run that turns one
 		// on can be told from a run that turned another on. Each falls back
 		// silently inside MFEM and the summary reports which were taken.
-		fresh->setLocalFactorMode(
-			config->getSolver().localFactorMode == meq::LocalFactorModeType::Batched
-				? meq::GradShafranovSolver::LocalFactorMode::Batched
-				: meq::GradShafranovSolver::LocalFactorMode::Serial );
+		fresh->setLocalFactorMode( localFactorMode );
 		fresh->setTraceAssemblyMode(
 			config->getSolver().traceAssemblyMode == meq::TraceAssemblyModeType::Batched
 				? meq::GradShafranovSolver::TraceAssemblyMode::Batched
@@ -3151,7 +3232,7 @@ int main( int argc, char **argv )
 					for ( int i = 0; i < dofs.Size(); ++i )
 						psi += shape( i )*field( dofs[ i ] );
 
-					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+					mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 					mfem::Vector here( coordinates, mesh.Dimension() );
 					map.Transform( point, here );
 					double const radius = here( 0 );
@@ -4124,14 +4205,13 @@ int main( int argc, char **argv )
 		 * Printed only when one was asked for: a run that wanted none should
 		 * not carry a line about them.
 		 */
-		// THE EFFECTIVE MODE AND NOT THE FILE'S, because on a device the
-		// assembly mode is Batched by default and the file will not have said
-		// so -- and an unreported default is exactly the silent fallback these
-		// four predicates exist to make visible.
+		// THE EFFECTIVE MODES AND NOT THE FILE'S, because on a device BOTH the
+		// assembly mode and the local factorisation are Batched by default and
+		// the file will not have said so -- and an unreported default is exactly
+		// the silent fallback these four predicates exist to make visible.
 		if ( solver
 		     && ( assemblyMode == AM::Batched
-		          || config->getSolver().localFactorMode
-		             == meq::LocalFactorModeType::Batched
+		          || localFactorMode == LFM::Batched
 		          || config->getSolver().traceAssemblyMode
 		             == meq::TraceAssemblyModeType::Batched ) )
 		{
@@ -4146,7 +4226,9 @@ int main( int argc, char **argv )
 			 * That misreading has already been made off this very line by a
 			 * reader outside this project, who concluded MEQ was on the
 			 * batched local factorisation and losing 2.6x on `ComputeH` --
-			 * where the default is `LocalFactorMode::Serial` and always was.
+			 * where the HOST default is `LocalFactorMode::Serial`. On a device
+			 * it is Batched, which is why the asked-for line is printed from
+			 * the resolved mode rather than from the file.
 			 *
 			 * So both halves are printed: what was asked for, and what the
 			 * predicates allow.
@@ -4155,8 +4237,7 @@ int main( int argc, char **argv )
 			std::printf( "MEQ: batched modes asked for: assembly %s, local "
 			             "factorisation %s, trace assembly %s\n",
 			             assemblyMode == AM::Batched ? "yes" : "no",
-			             sc.localFactorMode
-			                 == meq::LocalFactorModeType::Batched ? "yes" : "no",
+			             localFactorMode == LFM::Batched ? "yes" : "no",
 			             sc.traceAssemblyMode
 			                 == meq::TraceAssemblyModeType::Batched ? "yes" : "no" );
 			std::printf( "MEQ:   and what MFEM would ALLOW: face assembly %s, "
@@ -6335,6 +6416,79 @@ int main( int argc, char **argv )
 		             "cache %s\n",
 		             solver->fluxMassIsPrefactored() ? "yes" : "NO",
 		             solver->condensationCacheTaken() ? "yes" : "NO" );
+		/*
+		 * UPSTREAM'S CALLER-INTEGRAND ROUTE, ASKED OF THE LIBRARY AFTER THE
+		 * SOLVE RATHER THAN INFERRED FROM A PREDICATE LIST.
+		 *
+		 * A route that falls back silently is one nobody measures -- which is
+		 * upstream's own reason for making these public -- and MEQ has been
+		 * caught twice reasoning about which batched route it takes instead of
+		 * asking. The source rule is printed beside them because it is the one
+		 * condition MEQ itself controls and the likeliest reason for a NO.
+		 */
+		std::printf( "MEQ:   batched nonlinear residual %s, gradient %s, "
+		             "explicit source rule %s, device integrand %s\n",
+		             solver->batchedNonlinearResidualTaken() ? "yes" : "NO",
+		             solver->batchedNonlinearGradientTaken() ? "yes" : "NO",
+		             solver->sourceRuleIsExplicit() ? "yes" : "NO",
+		             solver->deviceIntegrandTaken() ? "yes" : "NO" );
+		std::printf( "MEQ:   batched local solve (NPCReduce/NPCRecover) %s\n",
+		             solver->batchedLocalSolveTaken() ? "yes" : "NO" );
+
+		/*
+		 * THE CROSSING COUNT -- DEVICE-PLAN.md §4 STAGE 4b.
+		 *
+		 * Correctness cannot tell a resident step from a partial one: M-187 is
+		 * a run that matched the host to every printed digit while doing 4x the
+		 * work. Nor can a clock on this card. So the number that says whether
+		 * residency is ARRIVING is how often the host takes a state the device
+		 * wrote, per Newton step -- and it needs no GPU, which is what makes it
+		 * the one throughput-shaped acceptance this machine can honour.
+		 *
+		 * READS and TRANSFERS are both printed because their RATIO is the
+		 * finding. A read is a funnel call; a transfer is a funnel call that
+		 * found the device holding the live copy. Reads far above transfers
+		 * means the funnels are redundant and the state is sitting on the host;
+		 * transfers approaching reads means the device is writing between them,
+		 * which is what a resident step looks like. With no --device the
+		 * transfer count is necessarily ZERO, and that is the instrument
+		 * working rather than a bug.
+		 */
+		meq::CrossingCount const &cross = meq::crossings();
+		double const steps = p.gradientCalls > 0
+			? static_cast<double>( p.gradientCalls ) : 1.0;
+		std::printf( "MEQ:   host reads of device-written state: %ld reads, "
+		             "%ld transfers, %.3g MB\n"
+		             "MEQ:     per Newton step: %.1f reads, %.1f transfers\n",
+		             cross.reads, cross.transfers,
+		             static_cast<double>( cross.entries )*sizeof( double )
+		                 /( 1024.0*1024.0 ),
+		             cross.reads/steps, cross.transfers/steps );
+
+		// AND WHERE THEY ARE, because a single number names nothing to do.
+		// The five busiest funnels, by GradShafranov.cpp line.
+		// SORTED BY TRANSFERS AND NOT BY READS. A read that moves nothing is
+		// free, so the site with the most reads is not the site to attack --
+		// M-196 published a table ordered the wrong way for exactly that
+		// reason. Reads are shown beside them because the RATIO is the finding.
+		std::vector<std::pair<long, int>> busiest;
+		for ( auto const &entry : meq::crossingSites() )
+			busiest.emplace_back( entry.second.transfers, entry.first );
+		std::sort( busiest.rbegin(), busiest.rend() );
+		for ( std::size_t k = 0; k < busiest.size() && k < 6; ++k )
+		{
+			meq::CrossingCount const &site =
+				meq::crossingSites()[ busiest[ k ].second ];
+			if ( site.transfers == 0 )
+				break;
+			std::printf( "MEQ:     line %d  %ld transfers (%.1f/step), "
+			             "%.3g MB, of %ld reads\n",
+			             busiest[ k ].second, site.transfers,
+			             site.transfers/steps,
+			             static_cast<double>( site.entries )
+			                 *sizeof( double )/( 1024.0*1024.0 ),
+			             site.reads );
+		}
 		std::fflush( stdout );
 	}
 

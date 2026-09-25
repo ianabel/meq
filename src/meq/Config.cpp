@@ -1980,6 +1980,7 @@ namespace meq
 				// different preconditions, different measured host costs, and
 				// -- for the trace one -- different bit-exactness, so one key
 				// covering all three would make a regression unattributable.
+				solverOptions.localFactorModeWasGiven = solver.has( "LocalFactorMode" );
 				std::string const local = solver.getStringOr( "LocalFactorMode", "serial" );
 				if ( local == "serial" )
 					solverOptions.localFactorMode = LocalFactorModeType::Serial;
@@ -2006,9 +2007,11 @@ namespace meq
 					solverOptions.traceSolver = TraceSolverType::Pardiso;
 				else if ( trace == "cudss" )
 					solverOptions.traceSolver = TraceSolverType::cuDSS;
+				else if ( trace == "gmres" )
+					solverOptions.traceSolver = TraceSolverType::GMRES;
 				else
-					solver.fail( "TraceSolver", "must be one of umfpack, pardiso, cudss, but is \""
-					             + trace + "\"" );
+					solver.fail( "TraceSolver", "must be one of umfpack, pardiso, cudss, gmres, "
+					             "but is \"" + trace + "\"" );
 			}
 
 			if ( solverOptions.newtonMaxIterations < 1 )

@@ -50,7 +50,7 @@ namespace meq
 			throw std::logic_error( "meq::PoloidalFieldCoefficient: the component must be 0 for B_R or 1 for B_Z" );
 	}
 
-	double PoloidalFieldCoefficient::Eval( mfem::ElementTransformation &tr,
+	mfem::real_t PoloidalFieldCoefficient::Eval( mfem::ElementTransformation &tr,
 	                                       mfem::IntegrationPoint const &ip )
 	{
 #ifdef MFEM_THREAD_SAFE

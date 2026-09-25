@@ -22,12 +22,15 @@ set(MEQ_UNIT_TESTS
 	ConfigTests
 	ExteriorDtNTests
 	FluxFamilyTests
+	DeviceQuadratureTests
+	DeviceRowsTests
 	PlasmaComponentTests
 	ProfilesTests
 	RotatingSourceTests
 	SafetyFactorTests
 	SourceTests
 	SourceFactoryTests
+	SourceViewTests
 	ZernikeTests)
 
 foreach(_test IN LISTS MEQ_UNIT_TESTS)
@@ -562,9 +565,23 @@ else()
 	# HeaderFilterRegex in ../.clang-tidy is what pulls src/meq/*.hpp into the
 	# check: a header is not a translation unit, so GradShafranov.hpp is seen
 	# only because GradShafranov.cpp includes it.
+	#
+	# AND A SOURCE A DEVICE COMPILER OWNS IS SKIPPED, BECAUSE clang-tidy CANNOT
+	# PARSE IT. The compile database is also what defeats it: a CUDA or HIP
+	# entry carries nvcc's flags, which clang rejects as unknown arguments
+	# before it reads a line of MEQ. The result is sixteen
+	# clang-diagnostic-errors and a check that has run on nothing, reported as
+	# a failure -- which is the right report and the wrong test. CMakeLists.txt
+	# fills MEQ_CORE_SOURCES_DEVICE_LANGUAGE only when a device language was
+	# enabled, so on a host build these two files ARE checked. The convention
+	# still applies to them; what is missing is an instrument, and the cost is
+	# recorded here rather than hidden by an exclusion with no comment.
 	set(_naming_sources "")
 	foreach(_source IN LISTS MEQ_CORE_SOURCES_PRESENT)
-		list(APPEND _naming_sources "${CMAKE_SOURCE_DIR}/${_source}")
+		list(FIND MEQ_CORE_SOURCES_DEVICE_LANGUAGE "${_source}" _is_device)
+		if(_is_device EQUAL -1)
+			list(APPEND _naming_sources "${CMAKE_SOURCE_DIR}/${_source}")
+		endif()
 	endforeach()
 
 	# --warnings-as-errors is what makes this a test rather than a report:
