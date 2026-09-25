@@ -8669,3 +8669,2269 @@ function" is correct about the DATA and silent about the CONSUMER. The consumer
 here is a root finder feeding a solve with multiple solutions, and an
 `O( h^{k+1} )` perturbation of a search is not an `O( h^{k+1} )` perturbation of
 what the search selects.
+
+### M-172
+
+**THE LIBRARY UPGRADE IS `1.177×` ON THE DIII-D RUN, AND ALL OF IT IS THE
+THREADED RECONSTRUCTION.** `../mfem/install` moves from `3424f33bd5` to
+`463593cbb3`, which carries upstream's threading of `ReconstructFluxAndPot()`
+and `ReconstructTotalFlux()` — the leg [M-138](MEASUREMENTS.md#m-138) measured
+at **0.632 s and 1.00 cores**, 18.5% of a run, and named as the largest
+single-threaded item MEQ pays for. It is now **0.141 s at 6.31 cores**.
+
+`machine-f-diiid.toml --mesh-ready --profile`, `OMP = MKL = 8`,
+`OMP_WAIT_POLICY=passive`, six interleaved `before, after` pairs on a gated
+quiet machine:
+
+```
+ratios: 1.031 1.173 1.173 1.180 1.192 1.196    median 1.177x   best 1.196x
+before  3.458 s (3.407-3.592)      after  2.949 s (2.904-3.306)
+```
+
+| leg | before | after | |
+|---|---|---|---|
+| **postProcess** | 0.649 | **0.141** | **4.60×** |
+| output | 0.865 | 0.359 | 2.40× |
+| solve | 2.582 | 2.555 | 1.01 |
+| residual | 0.295 | 0.311 | 0.95 |
+| gradient | 0.269 | 0.267 | 1.01 |
+| *of which* ComputeH | 0.174 | 0.171 | 1.01 |
+| trace factorisation | 0.260 | 0.260 | 1.00 |
+| trace backsolve | 0.576 | 0.564 | 1.02 |
+| NPC reduce+recover | 0.493 | 0.495 | 1.00 |
+| border assembly | 0.104 | 0.104 | 1.00 |
+| re-assembly | 0.193 | 0.193 | 1.00 |
+
+**Every solve leg is flat to 1-2% and the whole gain is one leg.** `psi_ax` is
+`3.759851e-01` and Newton converges in 2 steps in **both** arms, every pair.
+`CLAUDE.md` predicted `1.19×` for threading `Reconstruct()` perfectly, off
+M-138's share. **The prediction landed**, which is the second time an Amdahl sum
+built on a share measured on MEQ's own problem has — see
+[M-135](MEASUREMENTS.md#m-135).
+
+**AND THE PER-LEG REGRESSION THAT PRECEDED THIS MEASUREMENT DOES NOT EXIST.**
+Read against M-138's published table rather than against an interleaved arm, the
+same new library appeared to cost **15 to 20% per call on every leg that touches
+BLAS** — residual, NPC traversal, trace backsolve and `ComputeH` alike, 0.408 s
+given back against the 0.479 s the reconstruction saved, netting `1.015×`. The
+call counts were identical, which made it look like cost per call rather than
+extra work, and it survived one falsification attempt: threaded MKL against
+sequential on the new library reads **3.26-3.49 s against 3.91-4.12 s**, so
+MKL's threading is *helping* and could not be the cause. It is machine drift
+across days. The interleaved baseline reproduces M-138 at **3.458 s against its
+published 3.427 s**, and every leg is flat. **A published table is a record, not
+an arm**, and this file's own standing warning about cross-day comparison was
+the thing that had to be applied.
+
+**WHAT MAKES THE BASELINE AN ARM AT ALL, BECAUSE THE FIRST TWO ATTEMPTS WERE
+CONFOUNDED AND NEITHER SAID SO.** A `git worktree` at `3424f33bd5` configured
+from the flag list a reader would write down — the `MFEM_USE_*` set, the TPL
+directories — produced a library that is **not** comparable, in two independent
+ways, because a fresh configure re-searches for what the long-lived build
+directory had been GIVEN by hand:
+
+| | reference `install-nocuda` | fresh baseline |
+|---|---|---|
+| PARDISO | oneAPI `-lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core` | Debian's `-lmkl_sequential`, no `-L` at all |
+| BLAS/LAPACK | oneAPI, `-lgomp` | Debian's, `-lmkl_intel_thread` and **`-liomp5`** |
+
+The first cost a link failure, which is the good case; the second links two
+OpenMP runtimes into one process and would have run. **`BLAS_LIBRARIES`,
+`LAPACK_LIBRARIES`, `MKL_PARDISO_LIBRARIES` and `MKL_PARDISO_INCLUDE_DIRS` are
+cached RESULTS**, and the same is true one level up: MEQ's own build directory
+caches the link line it read out of `config.mk` at configure time, so repairing
+the library and rebuilding MEQ **in place** left Debian's MKL on MEQ's
+`link.txt`. Both trees were wiped and reconfigured from the reference cache's
+resolved values, and the harness **refuses to measure** unless
+`MFEM_EXT_LIBS` is token-identical between the two installs and the two MEQ
+`link.txt` files agree modulo the install path. Same family as the SUNDIALS
+derived-cache trap under `CLAUDE.md`, *Which MFEM, and why not master*.
+
+**DO NOT READ CUDA'S COST OUT OF THIS TABLE.** The `after` arm is nocuda Release
+at 2.949 s where the same library in the shipping CUDA build read 3.377 s
+earlier the same day, which would put CUDA's rent far above
+[M-77](MEASUREMENTS.md#m-77)'s 7% — and that is the identical cross-configuration
+comparison this entry exists to warn about. Both installs exist; re-taking M-77
+needs its own interleaved pairs.
+
+### M-173
+
+**THE DEVICE PATH RUNS, IT IS CORRECT, AND IT IS `2.14×` SLOWER — AND THE
+MECHANISM IS THAT ALMOST NOTHING REACHES THE DEVICE.**
+`examples/machine-f-diiid.toml`, 4848 triangles, `k = 2`, `build/meq` (the CUDA
+Release build against `../mfem/install` at `463593cbb3`), `OMP = MKL = 8`,
+`OMP_WAIT_POLICY=passive`, four interleaved `cpu`/`cuda` pairs on a quiet
+machine. `psi_ax = 3.759874e-01` in **all eight runs**, so this is cost and not
+answers.
+
+| | wall s | cores |
+|---|---|---|
+| `--device cpu` | 3.065 – 3.324 | ~3.37 |
+| `--device cuda` | 6.600 – 7.111 | **1.34** |
+
+**2.14× slower on the solve.** The leg table says why, and it is not a throughput
+result:
+
+| leg | cpu s | cores | cuda s | cores | |
+|---|---|---|---|---|---|
+| residual | 0.350 | **6.81** | 1.731 | **1.00** | 4.94× slower |
+| postProcess | 0.143 | **6.54** | 0.700 | **1.00** | 4.91× slower |
+| NPC reduce+recover | 0.560 | 3.35 | 1.671 | **1.00** | 2.98× slower |
+| gradient | 0.281 | 4.70 | 0.829 | 0.99 | 2.95× slower |
+| trace factorisation | 0.257 | 3.38 | 0.317 | 2.75 | 1.23× slower |
+| **trace backsolve** | 0.575 | 3.13 | **0.506** | 3.40 | **1.14× FASTER** |
+| solve | 2.808 | 3.42 | 6.003 | 1.40 | **2.14× slower** |
+
+**EXACTLY ONE LEG GAINS AND IT IS THE ONE cuDSS OWNS.** Every other leg both
+fails to reach the device *and* loses its host threading, collapsing to 1.00
+cores. This is upstream's group-4-alone prediction met in full, and it is the
+falsification of [DEVICE-PLAN.md](DEVICE-PLAN.md) §3.1's old arithmetic, which
+put the partial path at **1.1–1.3× faster**: that sum credited the host-bound
+legs with keeping their threading, and they do not.
+
+**THE COLLAPSE IS THE ASSEMBLY MODE AND IT IS NOT A FREE CHOICE.**
+`apps/meq.cpp:1630-1632` switches to `AssemblyMode::Batched` on a device unless
+the file names one. Forcing `AssemblyMode = "threaded"` under `--device cuda`
+**aborts, three runs of three**:
+
+```
+Verification failed: (it != maps->aliases.end()) is false:
+ --> alias pointer is not registered: h_ptr = 0x57e18ced9c90
+ ... MemoryManager::CheckHostMemoryType_  mem_manager.cpp:1855
+terminate called without an active exception
+```
+
+The same alias-registration family as [M-79](MEASUREMENTS.md#m-79) and
+[M-130](MEASUREMENTS.md#m-130). Controls: `cuda` + `batched` runs (6.57–6.70 s,
+1.35 cores) and `cpu` + `threaded` runs (3.12–3.47 s, 3.40–3.73 cores), so the
+abort belongs to the **combination**. **Not yet walked under `--device debug`**,
+which is the instrument that root-caused both predecessors and is the next step
+if this combination is ever wanted; under residency it is not, since Threaded is
+a host mode.
+
+**WHAT THIS IS NOT A MEASUREMENT OF.** It is not a measurement of the card: the
+loss is host serialisation, not FP64 throughput, and this build is
+`MFEM_USE_DOUBLE` on a part that runs FP64 at 1/32 to 1/64 of FP32. It is not a
+verdict on the batched kernels either — `fem/darcy/` carries 25 `forall` launch
+sites and `GPUBlasBatchedLinAlg` is linked, so the device machinery exists; what
+is missing is the **route**, the hybridized assembly still going through
+`BilinearForm::ComputeElementMatrix()`. **Read this as the cost of a partial
+offload, which is the configuration MEQ can reach today, and as the argument for
+residency rather than against the device.**
+
+### M-174
+
+**MEQ RUNS IN SINGLE PRECISION, AND THE DEFAULT NEWTON TOLERANCE IS WHAT STOPS
+IT — NOT THE PHYSICS.** `../mfem/install-single` is MFEM 4.10.1 on
+`meq-integration` configured `MFEM_PRECISION = single`, host only, OpenMP +
+`MFEM_THREAD_SAFE`, PARDISO, **no** SuiteSparse / SUNDIALS / GSLIB / CUDA. MEQ
+is ported to compile against it. `examples/soloviev-nstx.toml`, 1536 elements,
+`k = 3`, `MKL = OMP = 8`:
+
+| | double | single |
+|---|---|---|
+| Newton iterations | **1** | **2** |
+| `‖r₀‖` | 1.283857e-01 | **1.283857e-01** |
+| final `‖r‖` | 9.682272e-14 | 2.774902e-07 |
+| final `‖r‖/‖r₀‖` | **7.54e-13** | **2.16e-06** |
+
+**`‖r₀‖` agrees to every printed digit**, so the assembly is not where precision
+is lost. **The residual floor rises by about six and a half orders**, to
+`2.2e-06` relative.
+
+**OUT OF THE BOX IT DOES NOT CONVERGE AT ALL, AND THE CAUSE IS ONE DEFAULT.**
+`newtonRelativeTolerance` is **`1.0e-12`** (`GradShafranov.cpp:896`), which is
+seven orders below the FP32 floor, so `solve()` cannot meet its own target and
+every case fails — a Solov'ev case with `∂F/∂ψ = 0` that needs exactly **one**
+Newton step included. Setting `NewtonRelativeTolerance = 1.0e-5` converges it in
+two. **So the first FP32 measurement of this codebase is a measurement of a
+constant, not of the numerics**, and anything read before that constant is
+rescaled is reading the tolerance.
+
+**THE PORT IS PROVABLY INERT IN DOUBLE, WHICH IS THE PART THAT MAKES IT SAFE TO
+KEEP.** Every edit is precision-agnostic — `auto const *` for MFEM-returned
+pointers, `mfem::real_t` for accumulators that meet an MFEM value, `real_t(...)`
+on literals inside `std::max`/`min`, `mfem::real_t` on the three
+`mfem::Coefficient::Eval` overrides. Built pre-port and post-port and run at
+`MKL = OMP = 1`, where the answer is deterministic: **`9.674113e-14` both times,
+byte-identical.** At `MKL = 8` the same binary spreads 9.7251–9.7438e-14 run to
+run, which is the threaded BLAS-3 reassociation this file already records — and
+is why the check was taken at one thread. *A mechanical sweep is verified
+against a deterministic configuration or it is not verified.*
+
+**THE SURFACE IS FAR SMALLER THAN A `double` COUNT PREDICTS.** `src/meq` carries
+**3,913 `double`s**, and the port touched **45 sites in 11 files**. The 33
+`double`-returning `override`s are **all** on MEQ's own `Source` / `Profile` /
+`Coil` hierarchies, which `CLAUDE.md`'s *Layout* keeps MFEM-free on purpose, so
+they stay `double` and compile untouched. What actually couples to `real_t` is
+the twelve classes deriving from an MFEM type. The patterns were four:
+`GetVertex()` into `double const *` (17), accumulators meeting an MFEM value
+(12), bare literals inside `std::max`/`min` (11), and the three `Eval` returns.
+
+**AND MFEM'S OWN HDG CODE HAD TWO, ONE OF THEM CARRYING A TOLERANCE THAT CANNOT
+BE MET IN FP32.** 268 translation units compiled clean but for
+`darcyhybridization.cpp:2645` and `extension_hdg.cpp:416`, both
+`std::max( real_t, double )` where a bare literal promotes the expression. The
+first sits under `MFEM_VERIFY( err < 1e-10, ... )` — **an identity check at
+1e-10 where FP32's epsilon is 1.2e-07**, so it is unsatisfiable once it
+compiles. Reported upstream; MEQ's copies are local working-tree fixes and will
+be lost when `meq-integration` is re-created.
+
+**TWO NON-PRECISION DEFECTS THE EXPERIMENT FOUND IN MEQ, WHICH IS WHY A BUILD IN
+AN UNUSUAL CONFIGURATION IS WORTH TAKING.** Neither has anything to do with
+`real_t`:
+
+* **`picardSolver` is declared under `#ifdef MFEM_USE_SUITESPARSE`**
+  (`GradShafranov.hpp:4734`) and **used** under `MEQ_HAVE_DIRECT_TRACE_SOLVER`
+  (`GradShafranov.cpp:1674`), which is `SUITESPARSE || MKL_PARDISO || CUDSS`. So
+  **a build with PARDISO and without SuiteSparse does not compile** — exactly the
+  distinction the `.cpp`'s own comment draws (*"guarded on this rather than on
+  `MFEM_USE_SUITESPARSE` alone, which was the same question only while UMFPack
+  was the only choice"*), applied there and not in the header.
+* **`meq::FieldTransfer` names `mfem::FindPointsGSLIB` unguarded**, where MEQ
+  guards SUNDIALS and SuiteSparse properly, so an MFEM without GSLIB fails to
+  compile rather than refusing at runtime.
+
+**WHAT THIS DOES NOT ANSWER, AND WHY.** The question §7.3 asks — whether the
+**bordered** Newton survives a 1e-7 floor — is **not** answered here. Every
+bordered free-boundary case in the tree needs its interpolating warm start
+(`machine-f-diiid` and `limited-tokamak` both fail cold **in double**, so the
+guess is load-bearing and not a convenience), the warm start is
+`FindPointsGSLIB`, and **`fem/gslib.hpp` is raw `double` throughout** — so gslib
+does not survive `MFEM_PRECISION = single` and the warm start goes with it.
+Answering §7.3 needs either a single-precision gslib or a bordered fixture that
+starts cold. **That is a harder blocker than the tolerance sweep and it was not
+on the plan's list.**
+
+### M-175
+
+**THE WARM START'S PRECISION BLOCKER IS NOT THE FOREIGN C LIBRARY, IT IS MFEM'S
+OWN REIMPLEMENTATION OF IT — AND MEQ CANNOT REACH THE PART THAT WOULD MATTER.**
+Taken by reading the installed sources after
+[M-174](MEASUREMENTS.md#m-174) found `MFEM_USE_GSLIB` incompatible with
+`MFEM_PRECISION = single`.
+
+**There are two layers and both are `double`.**
+
+| | lines | `double` | `real_t` |
+|---|---|---|---|
+| external gslib C library (`../mfem/gslib/src`) | 9,440 (28 files) | 1,153 | **no `real` typedef at all** |
+| **MFEM's own `fem/gslib/`** | **6,019** (9 files) | **542** | **0** |
+
+The external library has **no floating-point abstraction whatever** — not a
+`real` typedef, not a build switch — so it is a foreign C library with a
+`double` ABI, and converting it is not a port but a fork. **MFEM's own half is
+the surprise**: `findpts_local_2.cpp` (1,112 lines), `findpts_local_3.cpp`
+(1,727), `findptssurf_local_3.cpp` (1,182), the edge and interpolate kernels —
+**all carrying `mfem::forall` device kernels**, all hard-coded `double`. That is
+upstream's code and a mechanical `real_t` port, not a rewrite.
+
+**AND MEQ CAN NEVER REACH THOSE DEVICE KERNELS, WHATEVER THE PRECISION.**
+`fem/gslib.cpp:1388` computes
+
+```cpp
+bool tensor_product_only = mesh->GetNE() == 0 ||
+   (mesh->GetNumGeometries(dim) == 1 &&
+    (mesh->GetElementType(0) == Element::QUADRILATERAL ||
+     mesh->GetElementType(0) == Element::HEXAHEDRON));
+...
+if (dev_mode && tensor_product_only)
+```
+
+**MEQ is triangles on every mesh it ships**, so `tensor_product_only` is false
+and the device path is never taken. The 6,019 lines are unreachable here.
+
+**WHAT THE HOST PATH DOES INSTEAD IS PAY A 3x INFLATION.**
+`fem/gslib.cpp:3332` sets **`NEsplit = 3`** for `Geometry::TRIANGLE`, so every
+triangle becomes three quads and the field is resampled onto them:
+`machine-f-diiid`'s 4848 elements become **14,544** inside gslib. MEQ's own
+tree already recorded the mechanism — `SamplerConvergence.cpp:378`, *"whose
+simplex path splits triangles into quads internally … a code path a quad-based
+user never exercises"* — without the factor.
+
+**WHAT MEQ ACTUALLY NEEDS IS SEVEN CALLS.** The whole surface of
+`meq::FieldTransfer` is `Setup`, `FindPoints`, `Interpolate`, `GetCode`,
+`GetDist`, `SetL2AvgType( NONE )` and `FreeData` — serial, 2D, triangles. Of the
+external gslib symbols `fem/gslib.cpp` calls, **`sarray_transfer` (18 sites),
+`comm_init` (7) and `crystal_init`/`_free` (7) are the MPI crystal router**,
+which a build with `MFEM_USE_MPI = NO` never enters. What is left is
+`findpts_setup_2` / `findpts_eval_2` / `findpts_free_2`: a hash and
+bounding-box build, and an evaluation. **Point location and FE evaluation, and
+nothing else.**
+
+**MEQ ALREADY OWNS THE EXPENSIVE HALF.** `meq::GridSampler` (1,041 lines)
+inverts the element map with an **affine fast path for straight-sided
+triangles** — a 2x2 solve, measured at **69x at 129² and 81x at 513²** against
+`TransformBack` ([M-93](MEASUREMENTS.md#m-93)) — keeps the Newton route for
+curved meshes, and groups located points **by element** so the dof gather and
+shape vector are fetched once per element. What it does not have is a spatial
+index for **arbitrary** query points: it inverts the loop (element bounding box
+to grid index range) because its targets are a regular grid, and
+`FieldTransfer`'s targets are the target mesh's Gauss points. A uniform bin grid
+over element bounding boxes is the missing piece.
+
+**SIZE ESTIMATE, AND IT IS AN ESTIMATE.** Bin grid build and query ~100 lines,
+barycentric containment with tolerance ~20, the code/distance bookkeeping ~30,
+reusing `GridSampler`'s inverse map and element-grouped evaluation for the rest:
+**300 to 500 lines**, against 9,440 + 6,019 not written here. **It is device
+shaped**: the per-point search is embarrassingly parallel and the bin build is
+one pass over elements. Its blocker is a `MFEM_HOST_DEVICE` shape-function
+evaluation — **the same blocker as `DEVICE-PLAN.md` item 3**, so the two items
+share a dependency rather than competing.
+
+**AND THE ACCEPTANCE ALREADY EXISTS**, which is the reason this is worth
+considering at all rather than a rewrite on sight.
+`SamplerConvergence.cpp` was written to cross-check MEQ's two existing locators
+and says why: a node **strictly inside** an element has exactly one right
+answer, so two routes must agree there to round-off or one is in the wrong
+element — *"the failure no comparison against an exact solution can see, because
+a smooth field is nearly right in the neighbour too"*. A third locator drops
+into that harness.
+
+**WHAT THIS IS NOT.** Not a gslib replacement — it is a replacement for MEQ's
+use of it: serial, 2D, triangles, one field, no MPI. It does not help anyone
+with hexes or a communicator, and the curved path still needs the Newton
+fallback. **And the warm start is load-bearing, not a convenience**: it is worth
+a third of the Newton work ([M-01](MEASUREMENTS.md#m-01)) and every bordered
+free-boundary case in the tree fails cold **in double** (M-174), so a locator
+that is subtly wrong is a solver that silently converges to the wrong
+equilibrium.
+
+### M-176
+
+**MEQ HAS ITS OWN POINT LOCATOR AND IT REPRODUCES gslib TO EVERY PRINTED
+DIGIT.** `meq::PointLocator` — `src/meq/PointLocator.{hpp,cpp}` and
+`PointLocatorDevice.cpp`, about 620 lines — replaces `mfem::FindPointsGSLIB`
+inside `meq::FieldTransfer`, against the 9,440 lines of external gslib C and the
+6,019 of MFEM's own reimplementation it stands in for (M-175). It is used
+unconditionally rather than as a fallback, so the path MEQ ships is the path MEQ
+runs.
+
+**The acceptance is agreement with gslib on the two cases that exercise it**,
+both at `OMP = MKL = 8`:
+
+| | gslib | meq::PointLocator |
+|---|---|---|
+| `limited-tokamak` nodes missed | 0 of 25,616 | **0 of 25,616** |
+| its Newton iterations | 12 | **12** |
+| its `psi_ax` | 9.484400e-02 | **9.484400e-02** |
+| its axis constraint | 9.298e-16 | **8.465e-16** |
+| its wall | 1.655 s | **1.49 – 1.99 s** |
+| `machine-f-diiid` nodes missed | — | **0 of 58,176** |
+| its `psi_ax` / constraint | — | **3.759851e-01 / −6.466e-12**, matching [M-138](MEASUREMENTS.md#m-138) |
+
+**AND THE DEVICE HALF COMPILES AND AGREES.** `PointLocatorDevice.cpp` is the
+only file in `src/meq` compiled by a device compiler, because `mfem::forall`
+does not compile under `g++` at all — `general/backends.hpp:134` turns the
+absence of `MFEM_USE_CUDA_OR_HIP_LANG` into a `static_assert` reading *"The
+calling function needs to be compiled with CUDA/HIP language!"*. CMake marks
+that one file, reads the architecture out of MFEM's own `config.mk`
+(`code=sm_75` → **arch 75**) rather than guessing, and adds the
+`--expt-extended-lambda` MFEM compiles itself with. `machine-f-diiid` under
+`--device cuda` against `--device cpu`: **0 of 58,176 missed, 2 Newton
+iterations, `psi_ax = 3.759851e-01`, constraint −6.466e-12 — identical.**
+
+**MEQ NOW BUILDS AND SOLVES WITH `MFEM_USE_GSLIB = NO`**, which is what the
+whole exercise was for: `../mfem/install-single` has no gslib and the warm start
+runs there. `naming` passes over both new files.
+
+**TWO DEFECTS IN THIS FILE'S OWN FIRST VERSION, BOTH KEPT BECAUSE THEY ARE THE
+KIND THAT DO NOT ANNOUNCE THEMSELVES.**
+
+**The tolerance did not follow `real_t`.** `insideTolerance` was written
+`1.0e-8` — below FP32's epsilon of 1.19e-07 — so under
+`MFEM_PRECISION = single` a point genuinely inside its element was rejected by
+its own round-off: **1232 of 25,616 nodes**, and the solve then converged to the
+wrong topology, caught only because `checkAxis()` refused the answer. **It is
+the same defect MEQ reported to upstream the same afternoon** —
+`MFEM_VERIFY( err < 1e-10 )` in `DarcyHybridization::TraceEmbedding()` — written
+into MEQ's own new file hours later. Both tolerances now scale off
+`std::numeric_limits<real_t>::epsilon()`, and the double path keeps exactly
+MFEM's `1e-8` because 128 ε is 2.8e-14 there.
+
+**AND THE SECOND WAS RIGHT ABOUT THE VALUE AND WRONG ABOUT THE ELEMENT.** A
+version of the search accepted a curved candidate on its clamped reference
+coordinates instead of asking `TransformBack()` for its verdict, so on a curved
+mesh the first element in bin order could claim a point belonging to its
+neighbour. `limited-tokamak` went from **12 Newton iterations to 32** and the
+axis constraint from 8.465e-16 to 1.034e-11 — **while `psi_ax` stayed
+9.484400e-02 to every digit.** A warm start that is nearly right is still a warm
+start, so nothing failed and no assertion moved; the only visible symptom was
+the iteration count. *A locator can be wrong about WHICH element without being
+wrong about the value, and a test that compares answers cannot see it* — which
+is the property `SamplerConvergence` was written for and the reason it compares
+locators at strictly-interior nodes rather than comparing fields.
+
+**WHAT IS NOT FIXED, AND IT IS THE SINGLE-PRECISION HALF.** On
+`limited-tokamak`, whose stored guess is a **curved** mesh, the single build
+still loses **458 of 25,616** nodes after the snap, and the bordered solve
+reaches the wrong topology. The affine fast path — and therefore the device path
+— is not the route there at all: the diagnostic reads `anyCurved = 1` in **both**
+builds, so both are on `ElementTransformation::TransformBack()`, whose own
+tolerances MFEM already scales correctly (`ref_tol` 1e-15 double, 4e-7 single,
+`fem/eltrans.hpp:306-311`). So this is a curved-element Newton in FP32 and not a
+search-structure defect, it is upstream's arithmetic rather than MEQ's, and
+**the bordered single-precision question of `DEVICE-PLAN.md` §7.4 remains
+open.** The double path is unaffected and is the one measured above.
+
+### M-177
+
+**`F( R, z, psi )` AND `dF/dpsi` EXIST AS PLAIN DATA, AND THE POD FORM
+REPRODUCES THE SOURCE TO THE BIT.** `src/meq/SourceView.{hpp,cpp}` and
+`SourceViewDevice.cpp` are MEQ's half of the Tier 3 interface upstream asked
+for: `meq::SourceView` and `meq::KnotView` are the POD, `sourceF()` and
+`sourceDFdPsi()` are `MFEM_HOST_DEVICE` evaluators over them, and
+`sourceResidualAtPoint()` / `sourceGradientAtPoint()` are the element-local
+signature a batched local residual would dispatch on.
+
+**It is the ONE refusal that stands between MEQ and the batched local
+residual.** Upstream's own table puts MEQ at YES on `CanBatchFluxMass`,
+`CanBatchDiv`, `CanBatchPotFaceAssembly`, `CanBatchPotBdrFaceAssembly`,
+`CanBatchLocalFactor`, `CanBatchLocalSolve` and `CanBatchTraceAssembly`, with
+`CanBatchLinearResidual()` the single NO — refusing on
+`m_nlfi_p && !HDGIntegratorIsLinear(m_nlfi_p)`, which `meq::SourceIntegrator`
+satisfies because it genuinely is nonlinear. A correct refusal, and what is
+missing is an interface rather than a kernel.
+
+**WHAT IT COVERS AND WHAT IT REFUSES.** `NormalisedMHDSource` — the production
+source — with `ConstantProfile`, `SplineProfile` and `ScaledProfile` folded into
+a scale factor, plus `SolovievSource`. `makeSourceView()` returns **false** for
+anything else and the caller keeps the host path: the rotating source, the
+coil-augmented wrappers, and any profile shape with no POD form. The cast is to
+the exact production class rather than to `NormalisedSource`, deliberately —
+**a widened cast would build a view describing the plasma term alone and
+silently drop a coil term**, and the run would converge to it.
+
+**THE HAZARD IS THAT THIS IS A SECOND EXPRESSION OF THE PHYSICS, AND THE TEST IS
+WHAT MAKES IT SAFE.** `CLAUDE.md` names the arrangement — *"a second expression
+of `F( R, z, psi )`"*, *"two implementations that must agree"* — and
+`meq::PointLocator` avoids it by having one expression two compilers read. **That
+was not available here**: `NormalisedMHDSource::f()` reads `psi_ax`, `psi_bnd`,
+the current scale and the frozen support, and three of the four move between
+residual evaluations, so routing the virtual through a `SourceView` means either
+rebuilding the struct per call on MEQ's hottest leg (48.2% serial, 23.1%
+threaded — [M-80](MEASUREMENTS.md#m-80)) or caching it and inheriting a
+staleness bug whose symptom is a Jacobian taken at the previous iteration's
+normalisation. **A cache that is wrong for one Newton step is worse than a
+duplicate a test pins**, because the test fails loudly and the cache does not.
+
+`tests/unit/SourceViewTests.cpp` is that test, **5 cases green**, and it asserts
+**equality to the bit rather than to a tolerance** — a tolerance would hide
+exactly the class of edit it exists to catch, a dropped `mu_0`, an `R` for an
+`R^2`, a span squared where it should be linear. The sweep is chosen for the
+three places a spline and its POD form can disagree, none of which is the
+interior of an interval: **on a knot** (interval selection is a binary search
+against `std::upper_bound`, and a flat segment meeting a rising one has a
+genuine kink there), **outside the profile support** (constant extension, zero
+derivative), and **across the plasma edge** (where `insidePlasma()` switches the
+term off and `F` is discontinuous). 52 point-pairs on the first case alone, with
+the count asserted so a sweep that silently tested nothing fails.
+
+**TWO THINGS THE POD HAD TO CARRY THAT A FIRST READING MISSED**, both found by
+reading the source rather than remembering it:
+
+* **`SolovievSource` is quadratic in `R`**, not constant — `F = −( ( 1 − a )R² + a )`
+  — so a view carrying a single `constantF` would have agreed at exactly one
+  radius and nowhere else.
+* **The plasma test uses the FROZEN support, not `psi_ax`/`psi_bnd`.**
+  `insidePlasma()` reads `supportAxis()` and `supportBoundary()`, which XP-2
+  freezes for the duration of a solve precisely so the support stops moving
+  while those two remain unknowns of the same Newton. Reusing the normalisation
+  here would have made the support move with every border update — the
+  oscillation the freeze exists to stop, reintroduced silently.
+
+**AND THE HEADER IS DEVICE-CLEAN RATHER THAN ONLY DEVICE-ANNOTATED.**
+`SourceViewDevice.cpp` compiles the whole of `SourceView.hpp` as CUDA and
+carries `evaluateSourceOnDevice()`, an `mfem::forall` over `sourceF` and
+`sourceDFdPsi`. **A `MFEM_HOST_DEVICE` function that calls something host-only
+fails only in a translation unit compiled as CUDA**, and MEQ has one of those
+per feature by design, so without this file the annotation would be an untested
+claim. Built: `Building CUDA object … SourceViewDevice.cpp.o`, zero errors, arch
+read from MFEM's `config.mk`.
+
+**Nothing moved.** `naming` passes; `SourceTests`, `SourceViewTests`,
+`ProfilesTests` and `SourceFactoryTests` all green; `limited-tokamak` still 12
+Newton iterations at `psi_ax = 9.484400e-02` with the constraint at 8.465e-16,
+and `machine-f-diiid` still 2 iterations at `3.759851e-01`. MEQ does not call
+the POD path in a solve yet — the other side of the interface is upstream's.
+
+### M-178
+
+**THE PROFILE LOOKUP IS O(1) ON EVERY PROFILE MEQ SHIPS, AND THE RESAMPLING
+ERROR IS GOVERNED BY ALIGNMENT RATHER THAN FINENESS.**
+
+**The fast path.** `meq::ProfileView` gains `uniform`, `firstKnot` and
+`inverseSpacing`, and `profileInterval()` indexes by one multiply where the
+knots are equally spaced. Every profile in the tree already is —
+`examples/diverted-tokamak-pprime.dat` is 40 knots at exactly **0.01**, checked
+rather than assumed — so the `O(log n)` binary search it replaces was buying
+nothing on the production path. On a host that is a branch mispredict per
+quadrature point; **on a device it is warp divergence in the innermost loop of
+the source kernel**, where neighbouring points in a warp sit in different
+intervals and the whole warp walks every branch.
+
+**IT IS CORRECTED, NOT TRUSTED, AND THAT IS WHAT MAKES IT BIT-IDENTICAL.**
+`firstKnot` and the spacing are decimals read from a file and stored as binary,
+so they are uniform to within ulps and `( x - x0 )/h` can land one interval
+either side of `std::upper_bound`'s answer near a knot. Two comparisons put it
+back. Uniformity is detected from the stored abscissae at a relative `1e-9`, and
+**misjudging it either way is safe**: a uniform profile called non-uniform is
+merely slower, and a non-uniform one called uniform is corrected back by those
+same two comparisons. `theUniformFastPathIsTakenAndAgreesWithTheSearch` asserts
+both routes reproduce the host profile **to the bit** on and between every knot.
+
+**Resampling.** `SplineProfile::resampledUniform( n )` and `uniformKnots()`
+exist for a profile that is not already uniform. **It is a method rather than
+something the loader does**, because it is not the same function and MEQ asserts
+its POD source view against this class to the bit — resampling one side and not
+the other breaks the only thing holding the two expressions of `F` together.
+
+**AND THE ERROR IS FAR SMALLER THAN INTERPOLATION THEORY ALONE SUGGESTS, FOR A
+REASON WORTH KEEPING.** A cubic is determined by its value and derivative at two
+points, so a new interval lying **inside** an old one reproduces that old cubic
+**exactly** — not approximately. Only intervals straddling an original knot
+carry error at all, and there are at most as many as the original has interior
+knots. Measured away from the original knots: **2.7e-15 over 3,764 samples**,
+which is round-off.
+
+**SO WHAT DECIDES THE ERROR IS ALIGNMENT, NOT FINENESS, AND THE TEST MEASURED
+ROUND-OFF TWICE BEFORE IT MEASURED THAT.** A first fixture put knots at 0.60,
+0.80 and 0.95 — every one a multiple of the 40-interval grid — so nothing
+straddled and the error read **1.8e-15 at every refinement**. Moving the knots
+to 0.37, 0.61, 0.83 fixed that, and then 40/400/4000 intervals read
+2.1e-3 / 2.7e-15 / 1.8e-15, because **400 aligns too**: with knots at two
+decimal places every multiple of 100 intervals over `[0,1]` lands on all of
+them. A hundredfold refinement that looked like twelve orders of convergence was
+a grid that happened to line up. Only 50/150/450 — none a multiple of 100 —
+measures the interpolation error it claims to:
+
+| intervals | worst error |
+|---|---|
+| 50 | 6.003e-04 |
+| 150 | 6.523e-05 |
+| 450 | 6.671e-06 |
+
+**Rate 2.02 then 2.08**, asserted as a rate rather than a tolerance. Second
+order is what a cubic straddling a jump in the **third** derivative gets: the
+interpolant cannot represent the kink, so the error on that one interval is set
+by how much of it the kink occupies.
+
+**The practical statement**: for MEQ's own files, whose abscissae are given to
+two decimals, any uniform grid at a multiple of that resolution is **exact**, and
+a grid that is merely fine is second order. Prefer aligning to refining.
+
+**Nothing moved.** `ProfilesTests`, `SourceViewTests`, `SourceTests`,
+`SourceFactoryTests` and `RotatingSourceTests` green; the CUDA build compiles;
+`limited-tokamak` still 12 Newton iterations at `psi_ax = 9.484400e-02` with the
+constraint at 8.465e-16, and `machine-f-diiid` still 2 at `3.759851e-01`.
+
+### M-179
+
+**AN ITERATIVE TRACE SOLVE IS NOT VIABLE FOR MEQ, AND THE NUMBER THAT SAYS SO IS
+4,179 KRYLOV ITERATIONS.** `TraceSolver::GMRES` is now a selectable choice —
+GMRES with a Gauss-Seidel smoother, `rel_tol` 1e-12, 5,000 iterations, reporting
+its own counts — and it is **not new code**: `picardStep()` has carried exactly
+that configuration as the `#else` of `MEQ_HAVE_DIRECT_TRACE_SOLVER` all along,
+where only a build with no direct package could reach it. Nothing in the tree
+recorded how many iterations MEQ's trace system needs, and that is the number
+that decides whether an iterative solve is worth pursuing on a device.
+
+| case | PARDISO | GMRES + Gauss-Seidel |
+|---|---|---|
+| `soloviev-nstx`, 1536 el, `k = 3`, fixed boundary, one solve | **0.297 s** | 0.408 s, **247 iterations**, converged |
+| `machine-f-diiid`, 4848 el, `k = 2`, bordered free boundary | **3.006 s** | **4,179 iterations on the FIRST solve**, and the run does not finish in **1,800 s** |
+
+**247 on the easiest case in the tree and 4,179 on the production one**, against
+a 5,000 cap — a seventeenfold rise in iterations for a threefold rise in
+elements. The answers agree where it completes: `psi_ax = 3.759851e-01` on the
+machine case, identical to the direct solvers to every printed digit.
+
+**AND THE TRADE IS WORSE THAN THE ITERATION COUNT ALONE SAYS.** MEQ's bordered
+step applies `J⁻¹` to **fourteen** columns. A direct solver factors once and
+back-solves fourteen times — that blocking is [M-98](MEASUREMENTS.md#m-98)'s
+1.34× — and it keeps its symbolic analysis across Newton steps, which
+`direct-solver-symbolic-reuse` is a whole branch of `meq-integration` for. An
+iterative solver amortises neither: fourteen columns is fourteen independent
+Krylov solves, each of about four thousand iterations.
+
+**So Ginkgo would have to close that gap with a preconditioner, not with a
+device.** `mfem::GinkgoExecutor` is genuinely well fitted otherwise — **not**
+MPI-gated, unlike `STRUMPACKSolver`, and constructible directly from an
+`mfem::Device` — and it offers `Ilu`, `Ic`, `IluIsai`, `IcIsai` and `Schwarz`
+where this measurement used Gauss-Seidel. But a preconditioner has to take
+4,179 iterations to tens before the fourteen-column amortisation stops deciding
+the question, and nothing here suggests it would. **The measurement closes the
+iterative question rather than opening a Ginkgo one.**
+
+**THE NEAR-MISS IS THE PART WORTH KEEPING, BECAUSE THE FIRST MEASUREMENT WAS OF
+THE WRONG SOLVER AND LOOKED FINE.** `apps/meq.cpp:1634` reads
+
+```cpp
+TS traceSolver = TS::UMFPack;
+switch ( config->getSolver().traceSolver ) { /* three cases, no default */ }
+```
+
+so a `TraceSolverType` the switch does not handle **silently keeps the
+initialiser**. With `TraceSolver = "gmres"` in the file and no `GMRES` case yet
+added, the run converged, produced the right answer, and clocked **5.621 s
+against UMFPack's 5.547 s and PARDISO's 3.006 s** — and the only thing that
+gave it away was the wall time matching UMFPack rather than the default. It was
+one sentence away from being written up as *"GMRES is about UMFPack's speed"*.
+
+**AND `-Wswitch` DID NOT CATCH IT, THOUGH IT SHOULD HAVE.** `CMakeLists.txt:556`
+sets `-Wall -Wextra`, the subject is a scoped `TraceSolverType`
+(`Config.hpp:1136`), the switch has no `default`, and `GMRES` was unhandled.
+Tested directly — case removed, `touch apps/meq.cpp`, full recompile — and
+**no warning of any kind about the switch appeared**, only an unrelated
+`-Wmisleading-indentation` elsewhere. Why it did not fire is **not established
+here**; what is established is that it did not. **The trap is live for the next
+person adding a `TraceSolver`**: an unhandled value becomes UMFPack, at full
+convergence, with no diagnostic anywhere.
+
+### M-180
+
+**THE SINGLE-PRECISION WARM START IS FIXED AND THE BORDERED SOLVE IS NOT, AND
+SEPARATING THEM IS THE RESULT.** Three changes, each verified inert in double.
+
+**1. The locator now finds every point in single precision.**
+`meq::PointLocator`'s curved branch retries a failed
+`ElementTransformation::TransformBack()` with an explicit
+`InverseElementTransformation` set to `ClosestPhysNode` +
+`NewtonElementProject` — MFEM's own note ranks the default `Center` second of
+four for reliability and says `ClosestPhysNode` is *"much more reliable,
+especially in the case of highly distorted elements"*, adding that **none of
+the four guarantees a point inside an element will be found**. On
+`limited-tokamak`, whose stored guess is a curved mesh, that takes the single
+build from **458 of 25,616 nodes lost to 0**, and `machine-f-diiid` from its own
+losses to **0 of 58,176**. **The retry fires only where the cheap route gives
+up**, which is no point at all on the double path, so it cannot move an answer
+that was already being found — confirmed: `limited-tokamak` still 12 Newton
+iterations at `psi_ax = 9.484400e-02`, constraint 8.465e-16.
+
+**2. Both finite-difference steps now follow `real_t`'s epsilon.** A central
+difference minimises truncation plus round-off at `h ~ eps^(1/3)`: **6.1e-6 in
+double** and **4.9e-3 in single**. `normalisationDifferenceStep()` returned
+`1.0e-5` — right in double, about **five hundred times too small in single**,
+where the differenced border derivative becomes round-off divided by the step.
+The X-point conductor gradient had the same shape at `1.0e-6`, its own comment
+claiming *"about ten digits in the derivative"* — a statement about double,
+where single has seven in total. Both are now `#ifdef MFEM_USE_SINGLE`, with
+**the double values kept exactly** rather than re-derived. **This is the third
+constant of its kind in one session**, after `PointLocator`'s `insideTolerance`
+and MFEM's `MFEM_VERIFY( err < 1e-10 )`.
+
+**3. AND IT WAS NOT THE CAUSE, WHICH IS WORTH RECORDING BECAUSE THE REASONING
+WAS SOUND.** The step fix improved the constraint residual — `machine-f-diiid`
+from `-1.416e-08` to `-3.476e-09` — and moved `psi_ax` by one digit in the
+seventh place. The single build still reaches **`4.148287e-01` against the
+double build's `3.759851e-01`**, 10% out.
+
+**WHAT IS NOW RULED OUT.** Not the warm start: 0 of 58,176 nodes missed, the
+same guess the double build gets. Not premature termination: the run converges
+in **one** Newton iteration at every tolerance tried — 1e-5, 2e-6 and 1e-6 all
+give the identical wrong answer, where double takes two. Not the differencing
+step, by the above. **And not silence** — `checkAxis()` refuses it as *"not the
+flux at a magnetic axis"*, so the failure is loud, which is the one piece of
+good news: a single-precision MEQ that was wrong by 10% would say so rather
+than be believed.
+
+**So the residual itself differs in single in a way that changes which
+equilibrium the bordered Newton finds, and that is not yet explained.**
+`DEVICE-PLAN.md` §7.3's question — does the bordered Newton survive a 1e-7
+floor — now has a sharper form: **it converges, quickly, and to a different
+answer.** `limited-tokamak` behaves the same way, needing 378
+Picard-then-Newton iterations to reach `1.712266e+00` against `9.484400e-02`.
+
+**Double is untouched throughout**, checked at `MKL = OMP = 1` where the answer
+is deterministic: `soloviev-nstx`'s first residual reads **`9.674113e-14`**, the
+same value the pre-port baseline gave.
+
+### M-181
+
+**MEQ RUNS IN SINGLE PRECISION ON THE DEVICE, AND THE RESULT FALSIFIES THE
+OBVIOUS READING OF [M-173](MEASUREMENTS.md#m-173) — IN M-173'S FAVOUR.**
+`../mfem/install-single-cuda` is MFEM on `meq-integration` with
+**`MFEM_USE_SINGLE = YES`, `MFEM_USE_CUDA = YES`, `MFEM_USE_CUDSS = YES`**,
+PARDISO, OpenMP + `MFEM_THREAD_SAFE`, and **no GSLIB** — which
+`meq::PointLocator` is what made possible, gslib being double-only
+([M-175](MEASUREMENTS.md#m-175)). MEQ builds against it, `PointLocatorDevice.cpp`
+and `SourceViewDevice.cpp` compiling as CUDA at arch 75.
+
+`machine-f-diiid`, 4848 elements, `k = 2`, `OMP = MKL = 8`:
+
+| | `--device cpu` | `--device cuda` |
+|---|---|---|
+| warm-start nodes missed | 0 of 58,176 | 0 of 58,176 |
+| `psi_ax` | 4.148286e-01 | 4.148288e-01 |
+| axis constraint | 4.111e-08 | 2.213e-08 |
+| wall | **5.408 s** | **10.318 s** |
+
+**Host and device agree to seven digits, which is all FP32 has.**
+
+**THE DEVICE PENALTY DOES NOT IMPROVE IN SINGLE, AND THAT IS THE MEASUREMENT.**
+M-173 put `--device cuda` at **2.14× slower** in double and attributed it to
+**host serialisation** rather than to the card's 1/32 FP64 rate. That attribution
+was an inference. In single it reads **1.91× slower** — the same penalty, within
+the spread. **Had the 2.14× been FP64 throughput, moving to FP32 would have
+removed most of it; it removed none.** So M-173's mechanism is confirmed by the
+one experiment that could have refuted it, and the corollary stands: **single
+precision is not a route around the device penalty**, because the penalty was
+never about precision.
+
+**AND THE WRONG ANSWER IS PRECISION, NOT THE DEVICE.** `4.148e-01` against the
+double build's `3.759851e-01` appears identically on host and device, so
+[M-180](MEASUREMENTS.md#m-180)'s open question is unaffected by where the
+arithmetic runs. `checkAxis()` refuses it on both.
+
+**A THIRD SINGLE-PRECISION DEFECT IN `fem/darcy/`, AND ONLY A DEVICE BUILD
+FINDS IT.** `extension_hdg.cpp:326`,
+`vertex_cone[sv] = {{lo + 0.5 * span, 0.5 * span}}` — `0.5 * span` promotes to
+`double` and a braced initialiser forbids narrowing back to `float`. **g++
+reports it as a warning and nvcc as an error**, so MEQ's host single build
+compiled it and the single + CUDA build did not. **A host single-precision build
+does not prove a device single-precision build**, and with the two sites in
+M-174 that is the whole surface across 268 translation units. Reported upstream.
+
+### M-182
+
+**THE SINGLE-PRECISION BORDERED NEWTON SOLVES A DIFFERENT PROBLEM BECAUSE THE
+EXTERIOR TRANSMISSION ROWS ARE IDENTICALLY ZERO, AND THE CHASE NARROWED IT TO
+ONE FUNCTION.** `machine-f-diiid`, 15 border unknowns — axis, boundary, two
+X-point, current, then **ten Gegenbauer exterior modes**, so the rows that
+[M-180](MEASUREMENTS.md#m-180) found frozen are exterior modes 0, 1, 2.
+
+**The Schur row collapses onto its own diagonal, exactly.**
+`dense( i, j ) = cornerEntry( i, j ) − rowDot( i, columnZ( j ) )`, and for the
+exterior rows:
+
+| | diagonal `blockEntry` | `S(i,i)` | row 2-norm |
+|---|---|---|---|
+| double, m0 | 9.803922e-02 | **4.121275e-01** | 1.027753e+00 |
+| double, m0 next step | 9.803922e-02 | 3.789378e-01 | 1.223830e+00 |
+| **single, m0** | 9.803922e-02 | **9.803922e-02** | 9.803922e-02 |
+| **single, m0 every later step** | 9.803922e-02 | **9.803922e-02** | 9.803922e-02 |
+
+So `rowDot` is **exactly zero** in single — not small, zero — and the DtN
+coupling vanishes from the bordered system, leaving a constant diagonal. The
+same holds for modes 1 and 2.
+
+**WHAT IS RULED OUT, EACH BY MEASUREMENT RATHER THAN BY ARGUMENT.**
+
+| | double | single |
+|---|---|---|
+| DtN diagonal `blockEntry(m)` | 9.803922e-02, 3.921569e-02, 2.100840e-02 | **identical** |
+| exterior column `‖B‖` (assembled) | 3.019367e-01, 1.306701e-01, 7.663970e-02 | **identical to 7 digits** |
+| solved `‖A⁻¹B‖` | 4.175045e+01, 1.163500e+01, 8.845571e+00 | 4.174977e+01, 1.163480e+01, 8.845429e+00 |
+| transmission support | 648 dofs, 10 rows | **648 dofs, 10 rows** |
+| `ElementExtension::TransformBack` failures | 0 | **0** |
+| **transmission row `‖row0‖`** | **1.872493e+00** | **0.000000e+00** |
+
+**So the assembly, the trace solve, the support and the extension inverse are
+all correct in single, and `exteriorTransmissionRows()` writes rows that are
+identically zero.** It is not the columns, not `A⁻¹`, not the geometry, not the
+support list, and not the inverse map — each checked, not assumed.
+
+**AND IT IS NOT THE OBVIOUS CANDIDATES EITHER.** `ExteriorDtN::basis()` is
+computed entirely in `double` — Boost's `legendre_p_prime` through
+`basisOverWeight()`, with `weightFactor()` written `( 1 − mu )( 1 + mu )`
+deliberately — so the basis does not narrow. And `reached` stays true, so the
+sweep is not bailing out.
+
+**WHAT IS LEFT is the quadrature sweep itself**: either
+`mfem::ExtensionBoundaryQuadrature` yields no points under
+`MFEM_PRECISION = single`, in which case the callback never fires and the rows
+stay at their initialised zero with `reached` still true — which is exactly the
+signature observed — or `pt.weight` is zero at every point it does yield. **The
+two are distinguished by one counter in the callback and that has not been
+run.** If it is the first, this is MFEM's and is a fourth single-precision
+defect in `fem/darcy/`; if the second, it is a weight computed in `real_t` that
+underflows.
+
+**WHY IT MATTERS MORE THAN A 10% ERROR.** A zero transmission row means the
+exterior DtN coupling is absent from the Jacobian while still being present in
+the residual, so the bordered Newton is solving a **different problem** and
+converging to it — `psi_ax = 4.148e-01` against `3.759851e-01`. `checkAxis()`
+refuses the answer, which is the one piece of luck: the failure is loud.
+
+### M-183
+
+**CLOSED: `mfem::ExtensionBoundaryQuadrature` YIELDS NO POINTS AT ALL IN SINGLE
+PRECISION, AND THE CAUSE IS A FINITE-DIFFERENCE STEP THAT DOES NOT FOLLOW
+`real_t`.** The counter [M-182](MEASUREMENTS.md#m-182) said would separate its
+two hypotheses was run: **21 quadrature points per face in double and 0 in
+single.** The callback never fires, so
+`exteriorTransmissionRows()` returns rows at their initialised zero while
+`reached` stays true — nothing was reached, so nothing failed.
+
+**THE MECHANISM, read out of `fem/darcy/extension_hdg.cpp`:**
+
+```cpp
+const real_t eps = std::numeric_limits<real_t>::epsilon();
+const real_t floor = analytic ? 1e-12 * face_scale
+                              : 100. * (eps / fd_step) * xbar.Norml2();
+if (measure <= floor) { continue; }
+```
+
+**The floor correctly follows `eps`; `fd_step` does not.** It defaults to a bare
+`1e-6` (`extension_hdg.hpp:815, 914`), so `eps/fd_step` is `2.2e-10` in double
+and **`0.119` in single** — the floor becomes `11.9 ‖xbar‖`, larger than any
+measure a real face can carry, and **every point is skipped**. MEQ takes the
+finite-difference branch because `VertexConePath` supplies no analytic
+endpoint Jacobian.
+
+**THE FIX IS AT MEQ'S FOUR CALL SITES, NOT IN MFEM**, so MEQ is correct against
+a stock library: `meq::extensionFdStep()` returns `eps^(1/3)`-scaled — **5.0e-3
+in single, and MFEM's own `1.0e-6` EXACTLY in double**, so the double path is
+bit-unchanged.
+
+| `machine-f-diiid` | before | after |
+|---|---|---|
+| quadrature points per face, single | **0** | **21** |
+| `psi_ax`, single | 4.148286e-01 | **3.753382e-01** |
+| against double's 3.759851e-01 | **10% out** | **0.17% out** |
+
+**Double verified untouched**: 2 Newton iterations, `psi_ax = 3.759851e-01`,
+constraint `-6.466e-12`; `soloviev-nstx`'s first residual `9.674113e-14` at
+`MKL = OMP = 1`.
+
+**THE FOURTH CONSTANT OF ITS KIND, AND THE WORST OF THEM.** After
+`PointLocator`'s `insideTolerance`, MFEM's `MFEM_VERIFY( err < 1e-10 )`, and
+MEQ's own `normalisationDifferenceStep`. **This one is the worst because it
+fails silently and structurally**: the other three produce a wrong number or a
+loud abort, while this one removes an entire coupling from the Jacobian —
+leaving it in the residual — so the bordered Newton converges, at full rate, to
+a different equilibrium. *A constant tuned for double is wrong in single and
+says so nowhere*, and here "nowhere" included `reached`, which is the flag whose
+whole job is to notice.
+
+**WHAT REMAINS IS SMALLER AND IS A DIFFERENT THREAD.** `psi_ax` is still 0.17%
+out and `checkAxis()` still refuses — but now because the **critical-point
+search finds no interior extremum**, which is `CriticalPointFinder`'s
+element-local Newton and its own tolerances, not the border. The message says as
+much: *"a search for zeros of q_h is seeded rather than exhaustive, so this is
+evidence and not proof"*.
+
+### M-184
+
+**MEQ SOLVES CORRECTLY IN SINGLE PRECISION, ON THE HOST AND ON THE GPU.** The
+last of it was `meq::CriticalPointFinder`'s two constants, and they are the
+**fifth and sixth** of the same kind found in one day.
+
+```cpp
+double tolerance    = 1.0e-13;   // CriticalPoints.hpp
+double jacobianStep = 1.0e-4;
+```
+
+`tolerance` is relative — the root Newton stops at `tolerance*fluxScale()` — and
+`1.0e-13` is **below FP32's epsilon of 1.19e-07**, so the search for zeros of
+`q_h` can never meet its own target however close it gets: it runs to
+`maxIterations` and reports **no root**. That is `checkAxis()` refusing a correct
+equilibrium with *"this solve carries no closed flux surface around one"* — the
+axis was there and the search could not say so. `jacobianStep` is the central
+difference the reference Jacobian is built with, optimal at `eps^(1/3)`: 6.1e-6
+in double, where `1.0e-4` sits comfortably above the noise, and 4.9e-3 in single,
+where it does not. Both now `std::max` against their historical value, so
+**double is bit-for-bit what it was**.
+
+**`machine-f-diiid`, the whole journey**, against the double build's
+`psi_ax = 3.759851e-01`:
+
+| | `psi_ax` | relative | axis found? |
+|---|---|---|---|
+| before any of this | 4.148286e-01 | **10%** | no — refused |
+| after the `fd_step` fix ([M-183](MEASUREMENTS.md#m-183)) | 3.753382e-01 | 1.7e-3 | no — refused |
+| **after the critical-point fix** | **3.759862e-01** | **2.9e-6** | **yes** |
+| same, `--device cuda` | **3.759862e-01** | **2.9e-6** | **yes** |
+
+**2.9e-6 relative is FP32's floor** — `real_t` carries about seven digits and
+this agrees to six. The axis is located at `( 1.7692, -0.0002 )` with normalised
+flux `1.0000` in **all three** configurations — double, single host, single
+device — and `checkAxis()` accepts it.
+
+**THE SIX CONSTANTS, AND THE PATTERN IS THE FINDING RATHER THAN ANY ONE OF
+THEM.** `meq::PointLocator::insideTolerance` (1e-8),
+MFEM's `MFEM_VERIFY( err < 1e-10 )`, `normalisationDifferenceStep` (1e-5),
+MFEM's `ExtensionBoundaryQuadrature` `fd_step` (1e-6), and these two. Every one
+was correct for double and wrong for single, and **not one of them announced
+itself**: the failures were a wrong number, a silent empty quadrature, and a
+refused-but-correct answer. **A tolerance that does not scale with `real_t` is a
+build-configuration bug wearing a numerical costume**, and the only reliable way
+to find them was to build the unusual configuration and chase each symptom to
+its constant.
+
+**Double verified untouched throughout**: `machine-f-diiid` 2 Newton iterations
+at `3.759851e-01` with constraint `-6.466e-12`, `limited-tokamak` 12 iterations
+at `9.484400e-02` with `8.465e-16`, `soloviev-nstx`'s first residual
+`9.674113e-14` at `MKL = OMP = 1`, and `SourceViewTests`, `ProfilesTests`,
+`SourceTests`, `SourceFactoryTests` and `ZernikeTests` all green.
+
+**What is NOT fixed is the device's speed**, which was never a precision
+question: single + CUDA is **11.005 s** against single + host's **8.342 s**, the
+same ~1.3–1.9× loss [M-181](MEASUREMENTS.md#m-181) measured and attributed to
+host serialisation. That is Request 3's to close, not FP32's.
+
+### M-185
+
+**M-173's `2.14×` WAS A 2×2 WITH ONE CELL MISSING, AND THE MISSING CELL SAYS
+THE DEVICE IS WORTH `1.13×` OF IT AND THE ASSEMBLY MODE `1.74×`.**
+`examples/machine-f-diiid.toml`, 4848 triangles, `k = 2`, PARDISO,
+`build/meq` against `../mfem/install`, `OMP = MKL = 8`,
+`OMP_WAIT_POLICY=passive`, **three interleaved rounds** of five configurations
+on a quiet machine. Wall seconds, min–max over the three:
+
+| | wall s | cores | |
+|---|---|---|---|
+| `cpu` + `threaded` | 3.760 – 3.857 | 3.31 – 3.35 | the shipped default |
+| `cpu` + `batched` | 6.573 – 6.675 | **1.40** | **the cell M-173 did not run** |
+| `cpu` + `batched` + `LocalFactorMode` | 6.504 – 6.533 | 1.41 | |
+| `cuda` + `batched` | 7.390 – 7.510 | 1.35 – 1.36 | M-173's device arm |
+| `cuda` + `batched` + `LocalFactorMode` | 7.317 – 7.495 | 1.36 – 1.38 | |
+
+`psi_ax = 3.759851e-01` in **all fifteen runs**, so this is cost and not
+answers.
+
+**THE BINARY THESE FIFTEEN RUNS USED CARRIED THE DANGLING-`for` DEFECT**, found
+later the same day and recorded under *Traps* in `CLAUDE.md`. **On this case it
+costs nothing, and that is measured rather than argued**: the `border dense
+solve` leg reads `0.007 s` over `12` calls both in a run taken before the fix
+and in one taken after it on the same configuration, so the leg the defect acts
+on is unchanged here to the printed precision. It is 0.2% of the run in any
+case, and it is identical in all five arms, so the decomposition below stands.
+
+**The decomposition, and it is the whole finding:**
+
+| | | |
+|---|---|---|
+| `cpu threaded` → `cpu batched` | **1.74×** | the assembly mode, **with no device anywhere** |
+| `cpu batched` → `cuda batched` | **1.13×** | the device, with the mode held fixed |
+| `cpu threaded` → `cuda batched` | 1.96× | what M-173 measured as 2.14× on the solve leg |
+
+**So five sixths of the device penalty is not the device.** M-173 named the
+mechanism correctly — *"THE COLLAPSE IS THE ASSEMBLY MODE"* — and its controls
+were `cuda`+`batched` and `cpu`+`threaded`, which vary **both** factors
+together. `cpu`+`batched` is the cell that separates them, it needs no GPU, and
+it was one run away. **The same shape as [M-134](MEASUREMENTS.md#m-134) and
+[M-82](MEASUREMENTS.md#m-82)**: a one-key experiment separates two hypotheses
+only if everything else is where you think it is.
+
+**THE LEGS SAY IT AGAIN.** Round 2, seconds and cores:
+
+| leg | cpu thr | cpu bat | cpu bat+lfm | cuda bat | cuda bat+lfm |
+|---|---|---|---|---|---|
+| residual | 0.414 @ **6.91** | 1.575 @ 1.00 | 1.591 @ 1.00 | 1.786 @ 1.00 | 1.820 @ 1.00 |
+| `NPCReduce`+`Recover` | 0.604 @ **3.64** | 1.371 @ 1.00 | 1.348 @ 1.00 | 1.763 @ 1.00 | 1.738 @ 1.00 |
+| gradient | 0.318 | 0.810 | 0.652 | 0.808 | 0.722 |
+| of which `ComputeH` | 0.188 | 0.312 | **0.158** | 0.292 | **0.190** |
+| trace backsolve | 0.604 @ 3.35 | 0.514 @ **3.76** | 0.517 @ 3.73 | 0.521 @ 3.61 | 0.534 @ 3.64 |
+
+Two legs collapse to **1.00 cores** under `batched` on the **CPU** — that is
+upstream's `ThreadHostLoops()` finding reproduced with no device in the
+process — and the trace backsolve keeps its threads in every arm, being
+PARDISO outside every OpenMP region.
+
+**AND `LocalFactorMode = "batched"` IS A GAIN RATHER THAN A TRADE, WHICH IS
+WHY THE DRIVER NOW TURNS IT ON UNDER `--device`.** `ComputeH` is **1.97×**
+faster with it on the host (0.312 → 0.158) and **1.54×** under CUDA (0.292 →
+0.190), and at 0.158 it beats the *threaded* arm's 0.188. The condensation
+cache that this key used to cost reads **`yes` on every row** now, upstream
+having handed `FactorElementsBatched()` the cache's own buffer. With the key
+off, `CanBatchLocalSolve()` refuses on `lfac_mode` alone, so MEQ's device runs
+were leaving the element-local dense algebra — upstream's group 1 — on the host
+by a driver line whose justification had expired. The **host** default stays
+`Serial`: 1.5% on the whole run is inside two runs' spread.
+
+**THE EXTENSION INTEGRATOR MEETS THE BATCHED BOUNDARY-FACE SCATTER, FOR THE
+FIRST TIME ANYWHERE, AND IT AGREES.** `HDGExtensionIntegrator` lives on one
+branch and `AssembleFluxMassBdrMatricesBatched()` on another; the pair exists
+only in `meq-integration` and had never been executed. Both paths that install
+it, against `AssemblyMode = "serial"` at `OMP = MKL = 1`:
+
+| | ψ | ∇ψ | ψ* |
+|---|---|---|---|
+| `miller-curved`, curved Γ | 1.52e-13 | 1.33e-13 | 5.41e-14 |
+| `machine-f-diiid`, free boundary | **8.65e-15** | 4.49e-14 | 1.21e-14 |
+
+Relative to `max abs`, and `serial` vs `threaded` is **0.000e+00** on both, so
+the batched arm's disagreement is a summation order and nothing else. The
+strongest statement the pair supports — the shipped host default against the
+fullest device configuration, `cpu`+`threaded` against
+`cuda`+`batched`+`LocalFactorMode` — is **2.73e-15 in ψ, 3.34e-14 in ∇ψ,
+7.01e-15 in ψ***.
+
+**EVERY BATCHED ROUTE MEQ CAN REACH IS NOW TAKEN.** With all three keys set the
+driver prints `face assembly yes, local factorisation yes, local solve yes,
+trace assembly yes` on the production free-boundary case. The one refusal left
+is `CanBatchLinearResidual()`, which is `meq::SourceIntegrator` being genuinely
+nonlinear — Request 3, and MEQ's half of it is built
+→ [M-177](MEASUREMENTS.md#m-177).
+
+**WHAT THIS DOES NOT SAY.** It is not a throughput result: an RTX 2070 SUPER
+runs FP64 at 1/32 to 1/64 of FP32 and this build is `MFEM_USE_DOUBLE`. And
+`cuda` + `threaded` **still aborts**, three runs of three, in
+`MemoryManager::CheckHostMemoryType_` at `mem_manager.cpp:1855` — the same
+signature M-173 recorded. Upstream's `ThreadHostLoops()` turns that into a
+warning and a correct serial run, and **declines the threading under any
+Device**, so it recovers nothing here: `general/mem_manager.cpp`'s thread
+safety is what stands between the device path and the 1.74×.
+
+### M-186
+
+**`XPointBorder`'s MERIT-WEIGHT CASE IS A KNIFE EDGE, AND THE BASELINE BINARY
+FALLS OFF IT TOO.** `theXPointMeritWeightChangesTheWorkAndNotTheAnswer` on
+`examples/diverted-tokamak.toml` at `XPointMeritWeight = 4`, whose bootstrap
+sweep runs the M-113 plateau: the residual sits near `1.8e-04` for sixty
+iterations, **rises** to `4.3e-04`, and then falls to `1e-12` in the last five.
+`NewtonMaxIterations = 200` is the file's cap.
+
+**The perturbation is `MKL_NUM_THREADS` and it changes nothing but the
+association order of a blocked BLAS-3** — the same instrument M-78 used on
+`PedestalConvergence`. `OMP_NUM_THREADS = 4` throughout, one test case,
+`--run_test=theXPointMeritWeightChangesTheWorkAndNotTheAnswer`. Two binaries:
+`HEAD` (`433cd94`, built in a `git worktree`) and the working tree.
+
+| bootstrap iterations at weight 4 | MKL=1 | MKL=2 | MKL=4 | MKL=8 | MKL=16 |
+|---|---|---|---|---|---|
+| **HEAD** | 81 | 65 | 115 | **over the cap** | **over the cap** |
+| **working tree** | **over the cap** | 84 | 75 | 103 | 103 |
+
+**Every arm that converges reports `psi_ax = 8.2660036302e-02` and
+`X ( 1.093103, -0.603529 )`** — eleven digits and six decimals, in all eight.
+So the weight changes the work and not the answer, which is the contract the
+case exists for, and the *work* varies from 65 to off the end of a
+200-iteration cap under a perturbation of order `1e-15`.
+
+**HEAD FAILS THIS CASE IN TWO OF FIVE CONFIGURATIONS**, which is what says the
+working tree's red is not a regression. `MKL_NUM_THREADS=1` — the value
+`tests/CMakeLists.txt` pins on every registered test, and the only one ctest
+ever runs — is one draw from that distribution and not a property of either
+tree.
+
+**AND THE TWO BINARIES ARE THE SAME COMPUTATION TO ROUND-OFF.** Diffing the
+full `XPointBorder` transcripts, 192 lines differ out of 377 and **every one of
+them is a residual at `1e-12` or below**, differing in its fifth significant
+figure — `1.036731e-12` against `1.036746e-12`, an absolute `1.5e-17` against a
+problem scale of `7e-2`. No iteration count, no `psi_ax`, no `psi_bnd`, no
+X-point and no support count differs anywhere in the binary. The working tree's
+`src/meq` changes are the thirteen device-sync funnels, which are inert with no
+Device configured, and six tolerances rewritten as `std::max( <the double
+value>, <something following real_t's epsilon> )`, each of which **is** its
+historical value in double. What moves the last bits is the compilation: a
+literal moved behind a function call or a `std::max` changes which FMA
+contractions GCC emits at `-O3`.
+
+**The repair is the fixture's and the assertions did not move.** The case swept
+`{ 0.25, 4.0 }` with a `BOOST_TEST_REQUIRE( got.sweeps > 0 )` per weight — a
+hard precondition on a coin toss, and in the more brittle direction, since a
+`REQUIRE` abandons the weights after it as well. It now sweeps
+`{ 0.25, 0.5, 2.0, 4.0 }`, prints and skips a weight that does not solve inside
+the cap, and requires **three of the four** to produce a comparison. The three
+agreement assertions — `psi_ax` to `1e-9` relative, `xR` and `xZ` to `1e-7` —
+are unchanged. Same repair as
+`andersonPicardReachesTheSameSolutionAsNewton`'s under
+[M-78](MEASUREMENTS.md#m-78), and for the same reason.
+
+**AND "THREE OF FOUR" IS A REQUIREMENT RATHER THAN A SECOND COIN TOSS, WHICH
+HAD TO BE MEASURED BEFORE IT COULD BE ASSERTED.** The three weights other than
+4 are stable across the same perturbation — `13, 13, 14` bootstrap iterations
+at `MKL_NUM_THREADS` of 1, 2 and 8 alike, with no arm failing — so weight 4 is
+the only one near the plateau and at most one dropout is reachable:
+
+| repaired case, working tree | 0.25 | 0.50 | 2.00 | 4.00 | outcome |
+|---|---|---|---|---|---|
+| MKL=1 | 13 | 13 | 14 | skipped | green, 3 compared |
+| MKL=2 | 13 | 13 | 14 | 84 | green, 4 compared |
+| MKL=8 | 13 | 13 | 14 | 103 | green, 4 compared |
+
+`psi_ax = 8.2660036302e-02` and `X ( 1.093103, -0.603529 )` in all eleven
+solves. **The merit weight is worth nothing on this fixture and costs a great
+deal at 4**, which is not a contradiction of [M-113](MEASUREMENTS.md#m-113) —
+that measured a *different machine*, the freegs4e MAST case, where the plateau
+is what the weight cures. A weight tuned on one machine lands on the plateau of
+another, and this case exists to assert that when it does, the answer is
+unmoved.
+
+### M-187
+
+**CONFIGURING AN `mfem::Device` QUADRUPLES THE BORDERED NEWTON'S WORK AND
+CHANGES NO ANSWER, WITH NOTHING RUNNING ON THE GPU.**
+`examples/machine-f-diiid.toml` through `build/meq --profile --mesh-ready`,
+`OMP = MKL = 8`, warm-started from the shipped guess. The support sweep, by
+Newton iterations per sweep:
+
+| | sweep 0 | sweep 1 | sweep 2 |
+|---|---|---|---|
+| `--device cpu` | **7** | **3** | **2** |
+| `--device cuda` | **31** | **16** | **4** |
+| `--device debug` | 31 | 16 | 4 |
+
+**`psi_ax`, `psi_bnd`, the X-point and the support counts are identical at every
+sweep** — `3.759874e-01 / 7.081366e-02 / ( 1.201, -0.999 ) / 365/903` on sweep 0
+and `3.759851e-01 / 7.081394e-02 / 382/1004` thereafter, in all three. The
+answer is right; the work is 4×.
+
+**THE NEWTON HISTORY SAYS INEXACT JACOBIAN, NOT WRONG ANSWER.** Final solve:
+
+| it | `--device cpu` `‖r‖` | `--device cuda` `‖r‖` |
+|---|---|---|
+| 0 | 2.869634e-02 | 2.869634e-02 |
+| 1 | 1.593133e-08 | 1.608533e-08 |
+| 2 | **2.992646e-12** | 3.944275e-09 |
+| 3 | — | 4.374798e-10 |
+| 4 | — | 5.375632e-11 |
+
+The host is quadratic and done in two; the device contracts by a constant ~10
+per step, which is linear convergence and the signature of a Jacobian that is
+slightly wrong rather than a state that is.
+
+**AND THE BORDERED STEP TABLE PUTS THE DIVERGENCE AFTER THE STEP, NOT IN IT.**
+At iteration 0 the two agree on every border row — `g*axis -2.40e-08`,
+`g*Ip 0.00e+00`, `g*ext 2.0e-04`, `g*xpt 2.4e-05` — and on the step norm,
+`‖y‖ = 1.274e+00`. **The same step is computed.** Applying it leaves
+`‖r‖ = 4.103e-15` on the host and `1.775e-09` on the device, after which the
+device line-searches at `damp 5.00e-01` where the host never halves.
+
+**WHAT IS RULED OUT, EACH BY A RUN RATHER THAN BY ARGUMENT:**
+
+| candidate | ruled out by |
+|---|---|
+| the dangling-`for` defect | **re-inserted** and rebuilt: still 31/16/4 |
+| the batched face/element kernels | `AssemblyMode = "serial"` still 31/16/4 |
+| **every** batched route | all three keys `"serial"` — nothing on the GPU — still 31/16/4 |
+| device arithmetic | `--device debug` is HOST arithmetic and reproduces 31/16/4 exactly |
+| a raw read of a device-valid buffer | `debug` `mprotect`s that page and **does not fault**, over a 1170 s run |
+| the MFEM install moving | `libmfem.a` unchanged since the previous day |
+| the config or the warm start | both byte-identical to the run that read 7/3/2 |
+| `CriticalPointFinder`'s two new tolerances | `max( 1e-13, 2.22e-14 )` and `max( 1e-4, 6.06e-6 )` — identity in double |
+
+**SO IT IS THE MEMORY MANAGER AND NOT A KERNEL**: every flag is honest about a
+*location* and wrong only about which copy is *newer*, which is the one state
+`debug` cannot see.
+
+**TWO CANDIDATE REPAIRS WERE BUILT AND BOTH FAIL, WHICH NARROWS IT FURTHER.**
+(i) `solution.SyncToBlocks()` plus a `SyncMemory()` per grid function after the
+bordered step's `operator=` and four `Add()`s — no change, still 31/16/4.
+(ii) The same four calls placed in `formSystem()` **ahead of** its three
+`SyncAliasMemory()` calls, on the theory that `SyncAlias` moves the alias and
+not the base and so clobbers a fresh base with a stale alias — that **breaks the
+solve outright**, `‖r‖ = 1.387113e+00` and exit 2, exactly as deleting the three
+calls does. So in `formSystem()` the **alias is always the fresher side**:
+`prepare()`/`reprepare()` re-seeds through `potentialGf` and `traceGf` every
+step, and the base-to-alias direction is not the missing one.
+
+**FOUND, AND IT IS NINE OF THE TEN EXTERIOR COLUMNS READING EXACTLY ZERO.**
+The three failed repairs above were guesses; what settled it was an instrument.
+A host-side checksum of the three solution blocks — `HostRead()` then a manual
+`sqrt(sum of squares)`, printed at `prepare/afterZero`,
+`formSystem/afterSyncAlias`, after the border's single `flush()`, and after the
+line search's `Add()`s — run under `--device cpu` and `--device cuda` and
+compared stage by stage. The first stage that differs names the defect:
+
+| stage | cpu | cuda |
+|---|---|---|
+| `prepare/afterZero` | 0, 0, 0 | 0, 0, 0 |
+| `formSystem/afterSyncAlias` | 3.2842868893623873e+01 | **identical** |
+| `afterFlush` `y` | 2.6841395571610079e+01 | **identical** |
+| `afterFlush` `z` | 2.6825330177654098e+02 | **identical** |
+| `afterFlush` `ez0` | 4.1750448482803492e+01 | **identical** |
+| `afterFlush` **`ez1`** | 1.1634997834747891e+01 | **0.0000000000000000e+00** |
+| `afterFlush` **`ez2`** | 8.8455711746714556e+00 | **0.0000000000000000e+00** |
+
+`savedState` agrees to every digit and so do `y` and `z`, so the bordered
+elimination is fed a Jacobian whose exterior block is **nine tenths missing**.
+That costs Newton its quadratic rate and costs the answer nothing, because the
+exterior coupling is still exact in the RESIDUAL — which is why every sweep
+reports the same `psi_ax` and the same X-point.
+
+**THE MECHANISM, IN `assembleExteriorColumns()`:**
+
+```cpp
+mfem::Vector load( fluxFes->GetVSize() );   // ONE vector, reused across modes
+for ( int mode = 0; mode < modes; ++mode )
+{
+    load = 0.0;                              // device-aware: Write() + forall
+    mfem::LinearForm form;
+    form.Update( fluxFes.get(), load, 0 );   // form ALIASES load, own flags
+    form.Assemble();                         // fills the ALIAS
+    load.HostRead();                         // reads the BASE -- still zeros
+```
+
+**Mode 0 survives and that is what made it look like physics.** A freshly
+constructed `mfem::Vector` has `UseDevice()` false, so the first `load = 0.0`
+is a host loop and the first column is correct; from the second mode on the
+flag is set and every column is the zeros the base was left holding.
+
+**The repair is `form.SyncAliasMemory( load )` before the `HostRead()`** — the
+same call `formSystem()` makes for the solution's three aliases, bringing the
+base up to date by moving the alias's data, which is the fresh side here.
+**`load.UseDevice( false )` was tried first and does NOT repair it** — still 31
+iterations — which is what established that the assembled rows are on the
+alias's *device* copy rather than merely mismarked on the base.
+
+**VERIFIED**: `--device cuda` reproduces `--device cpu` to every printed digit,
+`7 / 3 / 2` sweeps and 2 final Newton iterations, `psi_ax = 3.759851e-01`,
+constraint `-6.465e-12`, with the batched keys both on and off.
+
+**AND THE ONE-LINE LESSON IS THE `HostRead()` ITSELF.** Every funnel this sweep
+added is a `HostRead()` on the object about to be read — which is correct when
+that object is the one that was written, and useless when the write went
+through an alias. §1.2's sweep asked *"is this read funnelled"* of twelve sites
+and got twelve right answers to the wrong question at this one. *A sync on the
+base cannot see data that is still on the alias.*
+
+### M-188
+
+**A CONFIGURED `mfem::Device` AND A HOST OpenMP REGION THAT TOUCHES MFEM MEMORY
+ARE MUTUALLY EXCLUSIVE, AND THE ABORT NAMES NEITHER OF THEM.** Two findings
+that had been carried separately — `--device cuda` with
+`AssemblyMode = "threaded"` reporting *"alias pointer is not registered"*, and
+`--device debug` reporting *"host pointer is not registered"* — are **one
+defect with two contributors**, and neither is caused by
+[M-187](#m-187)'s `SyncAliasMemory` repair.
+
+**THE INSTRUMENT IS A THREAD COUNT.** Same binary, same configuration file, same
+GPU; only `OMP_NUM_THREADS` moves. `examples/machine-f-diiid.toml` through
+`build/meq --mesh-ready`, `MKL_NUM_THREADS=1`, **before either repair below**:
+
+| `AssemblyMode` | device | OMP=1 | OMP=8 |
+|---|---|---|---|
+| `"threaded"` | `cuda` | **exit 0**, 7 / 3 / 2 | **abort**, `CheckHostMemoryType_` |
+| `"threaded"` | `debug` | — | **abort**, and no GPU arithmetic in the process |
+| all three keys `"serial"` | `cuda` | exit 0, 7 / 3 / 2 | **exit 0**, 7 / 3 / 2 |
+| all three keys `"serial"` | `debug` | **exit 0**, 7 / 3 / 2, 517.6 s | **SIGSEGV** |
+
+**7 / 3 / 2 IS THE HOST'S OWN SWEEP**, so M-187's repair holds on every cell that
+runs and the aborts are not it. The `OMP=1` `debug` cell was taken under `gdb`
+with `catch throw` armed: **the catchpoint never fired** — the run threw no
+exception at all and finished the whole solve, output included.
+
+**THE SERIAL-ASSEMBLY `debug` ROW IS THE ONE THAT NAMES THE CAUSE**, because
+nothing of MFEM's is threaded in that process at all. `OMP_NUM_THREADS=8` under
+`gdb`:
+
+```
+#0  mfem::MemoryManager::Insert(void*, unsigned long, MemoryType, MemoryType)
+#1  mfem::MemoryManager::New_(void*, unsigned long, MemoryType, unsigned int&)
+#2  mfem::Ordering::DofsToVDofs<(mfem::Ordering::Type)0>(int, int, Array<int>&)
+#3  mfem::FiniteElementSpace::GetElementVDofs(int, Array<int>&, DofTransformation&)
+#4  mfem::GridFunction::GetVectorValue(int, IntegrationPoint const&, Vector&)
+#5  meq::CriticalPointFinder::elementSeeds(int, std::vector<IntegrationPoint>&)
+#6  meq::CriticalPointFinder::sweep() const [clone ._omp_fn.0]
+#7  GOMP_parallel
+#8  meq::CriticalPointFinder::sweep() const
+```
+
+**It is MEQ's own OpenMP region, and the allocation is an `Array<int>` of
+vdofs.** `general/mem_manager.cpp` holds `MemoryMap` and `AliasMap` as bare
+`std::unordered_map`s — no mutex, no critical section, no atomic anywhere in the
+file — and once a Device exists every `GetVectorValue()` registers a fresh vdof
+array in one. Eight threads insert at once and the container corrupts. **Without
+a Device those registration arms are never taken**, which is why MEQ's host
+threading has been correct for its whole life and could not fail until a Device
+existed. **The `cuda` serial row survives the same loop by luck rather than by
+safety**: `GetHostMemoryType()` is `HOST` there and leaves owners unregistered,
+where `debug`'s `HOST_DEBUG` registers them, so the map is touched far less
+often.
+
+**TWO THREADS IS ENOUGH, SO THE REPAIR IS NOT BROADER THAN THE DEFECT.** With
+the refusal below mutated out, `OMP_NUM_THREADS=2` under `--device debug` aborts
+with `std::out_of_range: unordered_map::at` — which is the exact first fault line
+of the original unexplained `debug` log.
+
+**REPAIR 1, MEQ'S OWN LOOPS, AND IT MIRRORS MFEM'S.**
+`DarcyHybridization::ThreadHostLoops()` opens
+`if ( Device::Allows( Backend::DEVICE_MASK ) ) { return false; }` — the library
+turns its host threading off under a Device deliberately. MEQ gates all of its
+own OpenMP through one macro in `src/meq/Threading.hpp`, whose condition was
+compile-time only; it now also carries OpenMP's `if` clause on
+`meq::hostLoopsAreSafe()`, so the eight element loops in `GradShafranov.cpp` and
+`CriticalPoints.cpp` run on a team of one under any Device and are untouched
+otherwise.
+
+| | before | after |
+|---|---|---|
+| `"serial"` + `debug` + OMP=8 | **SIGSEGV** | **exit 0**, 7 / 3 / 2, 505.97 s |
+
+and the repaired run's Newton history — `2.869634e-02`, `1.593133e-08`,
+**`2.992753e-12`** — matches the one-thread run's to **every printed digit**,
+which is the bit-exactness the compile-time gate exists to keep checkable.
+
+**THE HOST PATH IS BIT-IDENTICAL, CHECKED RATHER THAN ASSERTED.** `fd-threaded`
+on the host at `OMP_NUM_THREADS=8` before and after the gate agrees on every
+digit of every sweep row, `psi_ax`, `psi_bnd` and the located axis.
+**`--device cpu` is deliberately not a device by this test**, so it keeps its
+threads and no measurement in this file moves.
+
+**REPAIR 2, AND IT IS INDEPENDENTLY NECESSARY AGAINST THE LIBRARY MEQ LINKS.**
+With repair 1 in and the refusal mutated out, `AssemblyMode = "threaded"` under
+`--device cuda` at `OMP_NUM_THREADS=8` **still aborts**, seven registration
+failures deep. So repair 1 does not cover it: MFEM's own threaded assembly
+reaches the maps by a route MEQ cannot gate. The driver therefore refuses the
+combination above one thread, exits 1 naming both the key and the device, and
+`theDriverRefusesThreadedAssemblyOnADevice` asserts **the pairing** — refused at
+two threads, honoured at one, host path untouched — because a case checking only
+the refusal would pass equally against a driver that refused it everywhere.
+
+**THE INSTALL HAS SINCE BEEN REFRESHED, AND IT SETTLES BOTH HALVES
+DIFFERENTLY.** `../mfem/install` is rebuilt and installed from `meq-integration`
+at `6d05189467` and now matches the branch file for file. Re-measured against it:
+
+| | before the refresh | after |
+|---|---|---|
+| `"threaded"` + `cuda` + OMP=8 | **abort**, `CheckHostMemoryType_` | **exit 0**, 7 / 3 / 2, with MFEM's own one-time warning — *"AssemblyMode::Threaded has been declined because a Device is configured … every answer is unchanged. See ThreadHostLoops()"* |
+| `"serial"` + `debug` + OMP=8, **MEQ's gate mutated out** | SIGSEGV | **SIGSEGV**, unchanged |
+
+**So the two halves separate cleanly, and each was falsified on the new
+library.** Upstream's `ThreadHostLoops()` closes MFEM's own loops and nothing
+else; **MEQ's gate is independently necessary**, because MEQ's OpenMP regions
+reach the same maps through `GridFunction::GetVectorValue()` and no library gate
+can see a caller's loop. **MEQ's driver refusal is no longer necessary** — it
+now refuses a configuration that runs correctly and warns for itself. It is
+left in place, and the reason is narrow rather than principled: under a Device
+the mode MEQ wants is `batched`, MFEM declines `threaded` either way, so the
+refusal costs nothing and is asserted by a test. **A future session may drop it,
+and should note that the justification for MEQ's asked-for-is-refused rule is
+the word *silently*, which a warning naming the key, the cause and the
+consequence does not satisfy.**
+
+**AND THE STALE-INSTALL OBSERVATION BELOW IS WHAT MADE THE REFRESH URGENT; IT IS
+KEPT BECAUSE THE SHAPE RECURS.** `../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp`
+carries **zero** occurrences of `ThreadHostLoops`; `meq-integration` at
+`6d05189467` carries two, and the install does not match the branch. Upstream's
+reply is explicit that on their tree `SetAssemblyMode( Threaded )` under a Device
+now **declines with a one-time warning and runs the loops serially** — *"that
+combination stops being a dead end in your config file"* — so the ABORT measured
+above is a property of a stale install and not of MFEM today.
+
+**THE REFUSAL IS KEPT ANYWAY, AND ON A DIFFERENT GROUND.** Against today's
+install it prevents a crash. Against a refreshed one it is MEQ's own
+asked-for-versus-inherited rule, which this project applies to `AssemblyMode`
+already: *a mode the file ASKED for and that cannot be honoured is refused, and
+only an inherited default is silently downgraded.* Upstream's decline is the
+downgrade; MEQ's refusal is what its own configuration contract owes a file that
+named the mode. **What must be re-examined when the install is refreshed is the
+MESSAGE, not the exit code** — it describes an abort that will no longer happen.
+
+**WHAT IS STILL UPSTREAM'S AND IS NOT FIXED BY ANY OF THIS.** The maps are still
+unguarded — upstream says so in terms (*"we have not started it"*) — so both
+repairs are containment rather than cure, and the containment is now known to be
+incomplete in a way that matters: **any consumer's OpenMP region that calls into
+MFEM under a Device is unsafe, not only MFEM's own loops.** That is what the
+`CriticalPointFinder::sweep()` backtrace shows, it is visible only from a caller,
+and it strengthens the case for guarding the maps over gating loops one at a
+time. `DEVICE-PLAN.md` §3.3 item 7 is the entry, and it is the same item
+[M-185](#m-185) measures at 1.74× of the device path's 1.96×.
+
+### M-189
+
+**A LIBRARY DEFAULT CHANGED, A TEST'S TWO HALVES STOPPED SHARING A
+FINITE-DIFFERENCE STEP, AND THE CASE REPORTED 1.27e-06 AGAINST A ROW THAT HAD
+NOT MOVED BY A BIT.** Refreshing `../mfem/install` from `meq-integration` at
+`6d05189467` took `FreeBoundaryCoupling` red at
+`theTransmissionRowIsTheBoundaryIntegralItClaims`, which has read 7.8e-16 to
+1.4e-13 since it was written.
+
+**WHAT MOVED**: `e38906d853` — upstream's fix to MEQ's own [M-183](#m-183) —
+changed `ExtensionBoundaryQuadrature`'s `fd_step` default from the literal `1e-6`
+to `ExtensionFDStep()`, which is `cbrt( eps )` and so **6.06e-06 in double**.
+
+**WHAT DID NOT MOVE, AND THIS ENTRY FIRST SAID OTHERWISE.** MEQ's four
+production sweeps — `exteriorTransmissionRows()` among them — pass
+`meq::extensionFdStep()` explicitly and always did, at `GradShafranov.cpp:3301`,
+`:4464`, `:4551` and `:4718`. **The bordered Jacobian was never perturbed**, and
+[M-183](#m-183) does not apply. The side that took the new default was the
+**reference** built inside the test itself, at
+`FreeBoundaryCoupling.cpp:996`, which passed no step. Since the refresh the case
+contracted a row built at `1e-6` against a reference built at `6.06e-6`.
+
+**THE FIRST VERSION OF THIS ENTRY ASSERTED THE OPPOSITE** — *"MEQ takes that
+default at four `ExtensionBoundaryQuadrature()` call sites and passes no step of
+its own"* — and filed it upstream as a regression in the production Jacobian.
+That was **one `grep` from being checked and was not checked**, which is this
+project's most-recorded failure mode committed against its own code rather than
+somebody else's. Upstream caught it by reading the tree.
+
+**THE DISCRIMINATING EXPERIMENT, WHICH UPSTREAM PROPOSED AND WHICH SETTLES IT
+EITHER WAY**: give both halves the *same* step, any value. Measured, passing
+`meq::extensionFdStep()` at the reference site and changing nothing else:
+
+| the two halves | worst relative disagreement |
+|---|---|
+| row at `1e-6`, reference at MFEM's new `6.06e-6` | **1.2718780075373168e-06** — red |
+| both at `meq::extensionFdStep()` | **1.4e-16 to 1.7e-13**, one probe exactly `0.0` — green |
+
+**AND THE SEVEN ORDERS HAD NO DEFECT BEHIND THEM, WHICH IS THE PART WORTH
+KEEPING.** This entry flagged as odd that a 6× step bought seven orders, since
+`O( fd² )` predicts about 36×, and guessed the degeneracy floor. **The guess was
+wrong** — upstream's arithmetic puts an admitted point's measure two orders
+short, since a point admitted by a lower floor sits below the old floor by
+construction. The real explanation is a **cancellation ending**: a central
+difference's error is a deterministic function of its step, so while both halves
+shared one it was formed from the same evaluations at the same perturbed points
+and cancelled *exactly*. **That is the only way the case could ever have read
+7.8e-16** — a number orders below what a central difference at `1e-6` can
+resolve. It was never a measurement of the sweep's accuracy; it is a measurement
+of the contraction, the vdof ordering, the sign and the measure, with everything
+else cancelled, which is precisely what it is for. Give the two halves different
+steps and the whole finite-difference error appears at once.
+
+**MEQ HAD ALREADY WRITTEN THIS DOWN ONE AXIS OVER AND DID NOT RECOGNISE IT.**
+The same case records that when `transmissionQuadratureOrder` moved from 12 to 40
+and the reference stayed at 12, it failed at **5.9e-07** — *"that number was the
+under-resolution rather than a defect in the row"*. Same shape, same order, and
+the remedy applied then was to pin the order on **both** sides. The order was
+pinned on both; the step was pinned on one.
+
+**THE REPAIR IS ONE EXPRESSION THAT TWO READERS SHARE.**
+`meq::extensionFdStep()` was file-local in `GradShafranov.cpp`'s anonymous
+namespace, so the test **could not** have shared it. It is now `inline` in
+`GradShafranov.hpp` beside `meq::limiterPolygonMaximum()`, which is there for
+the identical reason — [M-165](#m-165), a second reading of one quantity under
+the same words. The test passes it at the reference site, no production number
+changes by a bit, and the two halves can no longer drift apart.
+
+**WHAT IS STILL OWED, AND IT IS A CHOICE RATHER THAN A DEFECT.** Upstream's
+preference is to delete `extensionFdStep()` entirely and take their default at
+all eight sites, on the grounds that the reason it exists — their
+precision-blind literal — is gone. That would make both halves agree by
+construction rather than by a shared call, and **would move MEQ's production
+numbers at the 1e-10 level**, so it costs one re-baselining of anything pinning
+an absolute value to full precision. Not taken; it is the user's call.
+
+**AND UPSTREAM OWNED A SYMMETRIC ERROR.** `e38906d853`'s commit message argued
+the change was safe for MEQ because *"they pass an explicit step at their four
+call sites"* — true of the production sites and false of the test's reference,
+which is the side that moved. Their doxygen now records both the changed double
+default and the general rule: **where a caller computes one quantity two ways and
+compares them, both sides must be given the same step**, because the difference's
+error is common to them and cancels only if the step is shared.
+
+### M-190
+
+**THE FIRST OF DEVICE-PLAN §3.4a's REDUCTIONS IS WRITTEN, AND IT IS BIT-IDENTICAL
+TO THE HOST ON THE CARD AS WELL AS ON THE DEBUG BACKEND.** `meq::DeviceRows`
+mirrors a `meq::CompressedRows` into device memory and computes **every row's dot
+product against a state vector in one launch**, replacing `gather()`'s
+`v.HostRead()` — which brings the whole vector to the host to read a few hundred
+entries of a support. On `machine-f-diiid` at `k = 2` that vector pair is 87,264
+doubles, **698 KB**, and the bordered step does it **21.1 times per Newton step**.
+
+**WHAT IT COVERS.** Both `CompressedRows` consumers: the exterior transmission
+contraction (15.8 host reads a step) and the border's own `rowDot()` (6.5), which
+is **22.3 of the step's 27.5** by §1.3's inventory.
+
+**THE KERNEL IS ONE THREAD PER ROW, SUMMING ITS SUPPORT SEQUENTIALLY AND
+ASCENDING**, because `CompressedRows` documents a bit-exactness contract —
+*"summing the surviving terms in ASCENDING INDEX ORDER reproduces the dense
+loop's every partial sum"* — and a tree reduction inside a row would reassociate
+it. The rows are the parallelism; there are `N + 4` of them and they are
+independent. **The launch exists to avoid a 698 KB copy, not to make a few
+thousand multiply-adds fast**, so the sequential inner sum costs nothing that
+matters.
+
+**AND KEEPING BIT-IDENTITY ON THE CARD TOOK ONE MORE FLAG THAN ORDERING, WHICH IS
+THE FINDING WORTH GENERALISING.** With the ordering matched and nothing else
+done, `MEQ_TEST_DEVICE=cuda` fails 5 rows while the debug backend passes:
+
+| | device | host |
+|---|---|---|
+| one failing row | `3037906131.2962995` | `3037906131.2962999` |
+
+**nvcc contracts `total += a*b` into an FMA**, which rounds ONCE where a separate
+multiply and add round twice. MEQ's host build carries no `-march`, so baseline
+x86-64 has no FMA and rounds twice. `-fmad=false` on that one translation unit
+closes it, and **both backends then pass**: bit-identical on `debug` and on the
+RTX 2070 SUPER.
+
+**THE DEBUG BACKEND CANNOT SEE THIS CLASS AT ALL**, which is the second time
+that instrument has been shown to have a blind spot — [M-187](#m-187) was the
+first. `debug` is host arithmetic, so a contraction that only nvcc emits is
+invisible to it. **A bit-exactness claim about a device kernel has to be made on
+the card.**
+
+**AND IT BEARS ON THE WHOLE PLAN RATHER THAN ON THIS KERNEL.** Every device
+kernel MEQ writes that accumulates a product will differ from the host in its
+last bits unless contraction is disabled. *"`--device cuda` reproduces
+`--device cpu` to every printed digit"* survived M-79, M-130 and M-187 because
+**printed** is six or seven significant figures and an FMA difference is at
+1e-16 relative. That instrument is therefore weaker than it reads, and the
+stronger one — equality to the bit — is available only where the kernel is
+compiled to give it up. `DEVICE-PLAN.md` §3.4a carries the rule.
+
+**THE DEBUG BACKEND DID EARN ITS KEEP ON THE OTHER HALF, ON THE FIRST RUN.**
+`dotAll()`'s bounds check read `indices[ columns - 1 ]` on the host, on an
+`mfem::Array<int>` that `upload()` had just made device-valid — a raw host read
+of a device-valid buffer, the M-79 and M-187 defect class, **committed while
+writing the file whose header argues about them**. `Device( "debug" )` faulted
+on it immediately with *"invalid permissions"*. The largest index is now kept as
+a plain `int` taken before the upload.
+
+**AND IT NOW DOES THE BORDERED STEP'S WHOLE `( N + 4 )²` FILL IN ONE LAUNCH.**
+`DeviceRows::dotColumns()` computes every row against every column at once,
+which is what `dense( i, j ) = cornerEntry( i, j ) - rowDot( i, columnZ( j ) )`
+needs. The columns arrive CONTIGUOUS and that is not an imposition on the
+caller: the bordered step already produces them as one batch through
+`DarcyNPCSolver::ArrayMult()`, which is what [M-98](#m-98)'s 1.34× is. One
+thread per `( row, column )` pair, the sum inside it sequential and ascending,
+so every entry is bit-identical to `CompressedRows::dot()` exactly as
+`dotAll()`'s are — asserted with `==`, and green on `debug` and on the card.
+
+**THE CASE ASSERTS THE ORIENTATION SEPARATELY, WHICH IS THE PROPERTY THAT ONLY
+EXISTS HERE.** A transposed bordered matrix factors and solves perfectly well,
+to the wrong step, so a test checking only the SET of entries would pass against
+one. The fixture's rows and columns all differ, entries `( 0, 1 )` and
+`( 1, 0 )` are asserted against the two distinct host values, and the case first
+REQUIRES those two to differ — otherwise it could not tell a transpose at all.
+The layout is `r + nr*c` because `mfem::DenseMatrix` is column major, and the
+kernel states that rather than assuming it.
+
+**IT IS NOT WIRED INTO THE SOLVE, DELIBERATELY.** A device reduction over the
+state is correct as soon as it is written and only **pays** once the state is
+already device-resident; today the trace solve and `NPCRecover` leave it
+host-valid, so calling this from the bordered step would push the state TO the
+device and add a transfer. Built, compiled by the device compiler, and pinned
+now because it can be — against a host reference, while the comparison still
+exists. Same arrangement as `meq::SourceView`, for the same reason.
+
+### M-191
+
+**THE SOURCE POD COVERED THE FIXTURE LADDER AND REFUSED EVERY PRODUCTION
+MACHINE, AND THE GAP WAS ONE ENTRY POINT WIDE.** `meq::makeSourceView()` casts
+to the exact production class and refuses a coil-augmented source; every
+`examples/*machine*` and every `[[coils]]` configuration in this tree is
+coil-augmented, so [M-177](#m-177)'s POD could not be built for any case MEQ
+exists to solve.
+
+**THE REFUSAL IS RIGHT FOR `f()` AND INVERTED FOR `scaledF()`, WHICH IS THE
+WHOLE FINDING.** Its own comment gives the reason — a view built from the
+wrapper *"would build a view describing the plasma term alone and silently drop
+the rest"* — and that is exactly correct where the value wanted is `f()`, the
+SUM of plasma and coils. `meq::Source::scaledF()` is the other case: the plasma
+term **by definition**, which `CoilAugmentedNormalisedSource` overrides to
+return because *"this class's own f() is the SUM and would put the coil current
+inside the prescribed plasma current"*. It is what `assemblePlasmaCurrent()`
+integrates, once per constraint evaluation.
+
+**SO THE REPAIR IS A SECOND ENTRY POINT, NOT A WIDENED CAST.**
+`meq::makePlasmaSourceView()` unwraps `CoilAugmentedNormalisedSource` and
+`CoilAugmentedSource` through their own `plasma()` accessors and delegates to
+`makeSourceView()`. Nothing is dropped silently, because the caller asked for
+the plasma term by name; a caller wanting `f()` keeps the old entry point and
+keeps its refusal.
+
+**PINNED TO THE BIT THROUGH A REAL WRAPPER**, over the same sweep M-177 uses —
+the knots exactly, both sides of the plasma edge, outside the profile support —
+at 5 radii × 13 abscissae:
+
+| | |
+|---|---|
+| `sourceF` against `scaledF` | **equal**, 65 of 65 |
+| `sourceDFdPsi` against `scaledDFdPsi` | **equal**, 65 of 65 |
+| `makeSourceView()` on the same wrapper | **still refuses** |
+
+**AND THE CONTROL FAILED FIRST AND CAUGHT A VACUOUS TEST**, which is the part
+worth keeping. The case asserts the coil term is non-zero somewhere, since
+otherwise `f()` and `scaledF()` agree everywhere and the comparison tests
+nothing. The first sweep used radii 0.3, 1.0, 1.7 and 3.2 against a coil
+spanning `R ∈ [ 1.85, 2.15 ]` — **every sample point missed the coil footprint**,
+`F_coil` was zero at all 52 of them, and the equality assertions all passed.
+`R = 2.0` is now in the sweep and the control is exact: the coil term differs at
+**13 of 65** points, the 13 abscissae of that one radius. *An agreement between
+two expressions is only evidence where they are being asked to differ.*
+
+**WHAT IT UNBLOCKS.** `DEVICE-PLAN.md` §3.4a listed `I_p` as the third of four
+reductions, and that classification is **withdrawn**: its output is a scalar but
+its body is an element loop evaluating a virtual on the polymorphic source, so
+it is item 1's work rather than a reduction. What this entry removes is the
+POD's coverage gap, which item 1 would have met the moment it left the fixture
+ladder.
+
+### M-192
+
+**THE PLASMA-CURRENT QUADRATURE RUNS AS A DEVICE ELEMENT LOOP, AND IT AGREES
+WITH THE HOST TO ONE ULP ON THE CARD AND EXACTLY ON THE DEBUG BACKEND.**
+`meq::plasmaCurrentPerElementOnDevice()` is the first of MEQ's own element loops
+to move — `int_K scaledF( R, z, psi )/R` per element, which
+`assemblePlasmaCurrent()` evaluates once per constraint evaluation and 28 times
+in a twelve-step DIII-D run.
+
+| backend | worst relative difference against the host loop, 60 elements |
+|---|---|
+| `debug` | **0.000e+00** — bit-identical |
+| `cuda`, RTX 2070 SUPER | **2.915e-16** — one ulp |
+
+**THE TWO NUMBERS TOGETHER ARE THE RESULT, NOT EITHER ALONE.** The exact zero on
+`debug` says the **indexing** is right, which is the thing that can be wrong
+here in four independent ways: `GeometricFactors::X` is `( NQ x SDIM x NE )`,
+`detJ` is `( NQ x NE )`, `DofToQuad::B` is `( NQ x ND )` and the E-vector is
+`( ND x NE )`, all column major, and every one of those transposed gives a
+plausible number rather than a fault. The one ulp on the card is then
+**quantitatively** what [M-190](#m-190) predicted: FMA contraction, left on for
+this kernel deliberately.
+
+**AND THAT IS THE PER-KERNEL TRADE M-190 SAID TO SETTLE BEFORE WRITING, SETTLED
+THE OTHER WAY FOR THE FIRST TIME.** `meq::DeviceRows` is compiled `-fmad=false`
+because its job is to *reproduce* a host sum whose bit-identity is a documented
+contract. This loop's job is to *compute an integral*: the arithmetic is the
+work, an FMA is the more accurate of the two roundings, and demanding the host's
+exact rounding would make the kernel worse to make a test simpler. So its
+acceptance is round-off agreement, and the case prints the worst difference so a
+real change shows as a jump rather than as a pass.
+
+**IT IS BUILT FROM MFEM'S ABSTRACTIONS AND CONTAINS NO HAND-WRITTEN KERNEL**,
+which is the standing preference and also what makes it portable to HIP without
+a second source: `FiniteElementSpace::GetElementRestriction()` for the gather,
+`Mesh::GetGeometricFactors()` for the coordinates and Jacobian determinants,
+`FiniteElement::GetDofToQuad()` for the shape functions, `mfem::forall` for the
+loop.
+
+**ONE THREAD PER ELEMENT, SEQUENTIAL OVER QUADRATURE POINTS, AND PER-ELEMENT
+PARTIALS RETURNED RATHER THAN A TOTAL.** `assemblePlasmaCurrent()` refuses
+`reduction( + : )` in a long comment of its own, because an association that
+depends on the thread count takes `psi_ax` and every published digit with it,
+and sums its array **in element order** instead. This returns the same array so
+the caller sums it the same way. **`mfem::reduce` with `SumReducer` is the
+natural primitive for a total and is the wrong one here**, for that documented
+reason and no other.
+
+**WHAT IT REFUSES, EACH TESTED**: a quadrature rule that is not the same on
+every element — the host builds its rule per element from
+`2k + tr.OrderW() + extra` and `GetGeometricFactors()` takes one rule for the
+mesh, so the order is computed for every element and compared rather than
+assumed; a vector or non-scalar space; a per-element flag array of the wrong
+length; and a conductor shift, which lives as a per-quadrature cache inside
+`meq::SourceIntegrator` and would have to be handed across. **Dropping the
+conductor shift silently would put the coil flux out of `psi`**, which is a
+different equilibrium reached at the full rate — so it is a refusal and not a
+default.
+
+**AND THE CONDUCTOR SHIFT IS NOW CARRIED, WHICH WAS THE ONE REFUSAL BETWEEN
+THIS LOOP AND THE PRODUCTION CONFIGURATION.** `psi_c` lives in
+`meq::SourceIntegrator` as `values[ offsets[ e ] + q ]`, and the kernel indexes
+it identically; an empty cache is the ordinary no-split case and shifts by
+exactly zero, so every existing path is bit-unchanged. A cache whose offsets are
+not `e*nq` was built against a **different rule** and its values are not these
+points — refused, not indexed anyway, because a `psi_c` read at the wrong
+quadrature point is a plausible number and a different equilibrium.
+
+| with the shift, 32 elements | worst relative difference | elements moved |
+|---|---|---|
+| `debug` | **0.000e+00** | 32 of 32 |
+| `cuda` | **2.407e-16** | 32 of 32 |
+
+**The "moved" column is the control**: without it the case would pass equally
+against a kernel that ignored the cache.
+
+**AND IT VINDICATES UPSTREAM'S CHOICE OF `( element, point )` OVER MEQ'S
+PROPOSED FLAG ARRAY.** MEQ asked for an `int const *elementFlags` parameter;
+upstream passed the two loop counters instead and gave this cache as the reason
+— *"a per-point cached field ... which an elementFlags parameter would not have
+covered"*. They were right, and this loop indexes exactly that way, so it
+transfers to `f( element, point, x, y, u )` without reshaping.
+
+**IT IS NOT WIRED INTO THE SOLVE**, for the reason M-190 gives: correct now,
+pays once the state is device-resident.
+
+### M-193
+
+**UPSTREAM'S CALLER-INTEGRAND BATCHED RESIDUAL REFUSED MEQ ON EVERY CASE, AND
+THE CONDITION IT FAILED WAS MEQ'S OWN.** `CanBatchNonlinearResidual()` arrives
+with `5f3de8d229` and is the last route MEQ's configuration needs — upstream's
+audit puts MEQ at YES on the other seven predicates. Asked of the library after
+a solve rather than inferred, on three shipped cases:
+
+| case | before | after |
+|---|---|---|
+| `machine-f-diiid` — free boundary, coil-augmented, 4848 elements | **NO** | **yes** |
+| `limiter-halfdisc` — half-disc reaching the axis | **NO** | **yes** |
+| `fixed-f-diiid` — fixed boundary | **NO** | **yes** |
+
+**AND IT WAS NOT THE CONSTRAINT UPSTREAM EXPECTED.** Their reply names one to
+check — the work struct carries a single shape table `( nq, nd )`, so the route
+needs one geometry and one dof count and *"a mixed mesh declines"*. That is not
+what refused MEQ. The failing condition is the other one: **the integrator must
+carry an explicit `IntegrationRule`**, because the kernel has to quadrature
+exactly as `AssembleElementVector()` does or the two routes differ by an amount
+no test states. `meq::SourceIntegrator::rule()` chose per element from the
+element and its transformation — `2k + tr.OrderW() + extra` — leaving
+`GetIntRule()` null. Printed beside the predicate as `explicit source rule NO`
+on all three, which is why the instrument reports both.
+
+**THE REPAIR IS BIT-IDENTICAL BY CONSTRUCTION RATHER THAN BY MEASUREMENT.** The
+solver now computes that order for **every** element, compares, and sets an
+explicit rule only when one rule serves the mesh; `rule()` returns `GetIntRule()`
+when set. Where it is set it is the **same** `IntRules.Get()` the old expression
+would have returned, so no quadrature moves; where the order is not uniform —
+a curved mesh, a mixed mesh — nothing is set, the per-element route survives
+unchanged, and the batched route declines rather than integrating on a rule
+nobody asked for. Checked rather than argued: every printed digit of all three
+cases, sweeps, Newton histories, `psi_ax` and the located axis, is **identical
+before and after**.
+
+**THE INSTRUMENT IS THE DURABLE PART.** `--profile` now prints
+`batched nonlinear residual` and `explicit source rule` beside the two regime
+predicates it already carried. Upstream made these public for the stated reason
+that *"a route that falls back silently is one nobody measures"*, and MEQ has
+twice reasoned about which batched route it takes instead of asking —
+`CLAUDE.md` records both. Asking costs a line.
+
+**AND THE GRADIENT HALF DOES NOT COMPILE UNDER nvcc, BISECTED TO ONE COMMIT.**
+`11faf7979d` adds `HDGNLElementQuadrature<Acc>`, whose `if constexpr` tag
+dispatch first-captures `d_gD` and `d_rp` **inside** the constexpr-if branches
+of an extended `__host__ __device__` lambda:
+
+```
+nlresidual_hdg.hpp(125): error: An extended __host__ __device__ lambda cannot
+                                first-capture variable in constexpr-if context
+nlresidual_hdg.hpp(148): error: ...
+```
+
+It takes `mesh.cpp` and the whole CUDA build with it — `gmake ... Error 2`. **The
+residual commit `5f3de8d229` builds and is installed**, which is what makes this
+a bisect rather than a report of a broken tree, and it is why the measurements
+above exist at all. A capture list naming both pointers, or any first use
+outside a constexpr-if, is the shape of the fix. Upstream is on it; not filed,
+per the standing rule about unfinished work.
+
+### M-194
+
+**THE RESIDUAL SEAM IS REACHABLE BY A CALLER THAT CALLS `NPCResidual()`, AND MEQ
+IS NOT ONE.** With [M-193](#m-193)'s explicit rule in, `CanBatchNonlinearResidual()`
+reads **yes** on every shipped case — and MEQ still cannot use it. Upstream's
+templated entry point is
+
+```cpp
+NPCResidual( b, x, x_tr, r, r_tr, f )
+```
+
+and their doxygen says *"a caller can hold one call site either way"*. **MEQ's
+residual is `mfem::DarcyNPCOperator::Mult`**, driven by `mfem::NewtonSolver`
+through an `Operator &`, and that class offers no way in — `Mult` is a plain
+virtual override and there is no setter, no template and no other entry.
+
+**AND WRITING MEQ'S OWN OPERATOR IS THE WRONG ANSWER BY UPSTREAM'S OWN
+ARGUMENT.** The templated overload exists so that *"the prolongation, the state,
+the skeleton load and the essential-row convention are shared line for line
+rather than restated"*. A MEQ-side operator assembling `b`, `x`, `x_tr`, `r` and
+`r_tr` to call it would restate every one of those, in a consumer, against a
+convention that is the library's to change. **That is the duplication the seam
+was designed to prevent, met one level up.** Filed as
+`../mfem-hdg-dev/doc/HDG-NPC-INTEGRAND-PLUMBING-FROM-MEQ.md`; the fix is a
+setter or a template parameter on the operator, and the same question applies to
+`GetGradient()`.
+
+**SO ITEM 1 IS NOW BLOCKED ON PLUMBING RATHER THAN ON A KERNEL**, which is a
+better place to be blocked and worth saying plainly: the integrand, the POD, the
+predicate and the library's kernel all exist and agree; what is missing is a
+parameter.
+
+**AND THE LIMITER ROW IS NOT A REDUCTION, WHICH MAKES TWICE IN ONE TABLE.**
+`DEVICE-PLAN.md` §3.4a listed four reductions. `I_p` was reclassified in
+[M-191](#m-191) as an element loop; the limiter is now reclassified as a
+**search**. `meq::limiterPolygonMaximum()` runs a **golden-section search along
+each limiter face**, evaluating `psi_h` at arbitrary parameters through
+`Mesh::GetFaceElementTransformations()` and returning the argmax's element,
+shape vector, dofs and physical point so the border row is built AT the contact.
+A device port needs face geometry at arbitrary points rather than at quadrature
+points, and sampling a fixed set instead would choose a different contact and
+therefore a different border row — which converges, to a different equilibrium.
+
+**MFEM HAS THE PRIMITIVE AND IT IS THE WRONG SHAPE, WHICH IS WHY THE CHECK
+MATTERED.** `general/reducers.hpp` carries `ArgMaxReducer<T, I>`, and a max is
+associative so a tree reduction could not have moved the VALUE — only a tie's
+index. Had the row been what the table said, that primitive would have been the
+whole answer. It is not, and the difference was one read of the function.
+
+**THE TRANSFERABLE PART IS THE CLASSIFICATION ERROR ITSELF.** Both rows were
+called reductions because their **output** is a scalar. *A scalar output does
+not make a reduction; the body does.* That sentence was written into the plan
+for `I_p` and the identical mistake was left standing one row below it in the
+same table.
+
+**WHAT IS ACTUALLY COMPLETE**: the reduction list had **two** real entries — the
+exterior transmission contraction and the border's `rowDot()` — they are the
+same `meq::CompressedRows` shape, one kernel serves both, and that kernel is
+built and pinned to the bit ([M-190](#m-190)). That is **22.3 of the step's
+27.5** host reads. The element loop is built ([M-192](#m-192)). The search is not
+started.
+
+
+### M-195
+
+**DEVICE-PLAN §3.3's ITEM 5 IS LARGELY ALREADY SATISFIED, AND NOTHING IN IT
+NEEDED A KERNEL.** The item reads *"the host branches — the convergence test,
+the support decision, the line search's accept/reject. Every one is a device
+reduction followed by a host `if`, which is a synchronisation whatever else is
+resident."* Checked against the code rather than carried forward:
+
+| the branch | what it actually is |
+|---|---|
+| the convergence test | `‖r‖` through `mfem::Vector::Norml2()`, which is **already an `mfem::reduce`** with `L2Reducer` — a device reduction MFEM owns and maintains |
+| the line search's accept/reject | the same norms, so the same answer |
+| the support decision | `refreshPlasmaComponent()` is gated on `plasmaSupportFrozenValue`, and **XP-2 freezes the support for the duration of a solve**. Measured on `machine-f-diiid`: the `plasma fill` leg reads **0 calls**. It moves between SWEEPS, in the driver's outer loop, so it is not a per-step barrier at all |
+
+**SO THE ITEM HAD NO PER-STEP KERNEL IN IT, AND THE CROSSINGS IT WAS BLAMED FOR
+BELONG TO ITEMS 3 AND 4.** What makes a host `if` expensive here was never the
+branch; it is what has to reach the host to evaluate it — the constraint
+functionals and the border. Items 3 and 4 now compute both device-side and
+return `N + 4` scalars and an `( N + 4 )²` dense matrix, **about 200 doubles
+against the state's 698 KB**.
+
+**THIS IS THE THIRD CLASSIFICATION ERROR IN THAT TABLE AND THEY SHARE A SHAPE.**
+`I_p` was listed as a reduction and is an element loop ([M-191](#m-191)); the
+limiter was listed as a reduction and is a search ([M-194](#m-194)); item 5 was
+listed as work and is two library primitives plus something that does not run
+per step. **Every one was classified from what the thing PRODUCES — a scalar, a
+branch — rather than from what its body does.** The rule written down for `I_p`,
+*a scalar output does not make a reduction; the body does*, generalises one step
+further: **a plan item is only work once somebody has read the body.** Three
+rows of one table were each settled by a single `grep`, after being carried as
+scheduled work.
+
+**WHAT IS GENUINELY LEFT OF ITEM 5 IS THE ACCEPTANCE RATHER THAN THE CODE**:
+§4's stage 4b, a count of host reads of a device-written state per Newton step,
+instrumented rather than derived from leg call counts as §3.3's table is. MEQ's,
+unblocked, and the only throughput-shaped acceptance this machine can honour —
+correctness alone cannot tell a resident step from a partial one, which is what
+[M-187](#m-187) proved by being right to every printed digit while doing 4× the
+work.
+
+### M-196
+
+> **CORRECTED BY [M-198](#m-198), ON BOTH ITS NUMBERS AND ITS ORDERING.** The
+> counter below covered 17 of MEQ's 36 funnels; the transfer count is **36**,
+> not 2, and the site table is sorted by the wrong column. Read M-198 first.
+
+**THE CROSSING INSTRUMENT EXISTS, AND ITS FIRST READING CORRECTS THE FIGURE THIS
+PLAN HAS BEEN ORDERED BY.** `DEVICE-PLAN.md` §4 stage 4b asks for a count of
+host reads of a device-written state per Newton step, *instrumented rather than
+inferred*. `meq::countedHostRead()` replaces the funnel at seventeen sites,
+counts through `mfem::Memory<T>::DeviceIsValid()` and `HostIsValid()`, and the
+driver reports it. `machine-f-diiid`, 12 Newton steps:
+
+| | reads | transfers | moved |
+|---|---|---|---|
+| no device | 3998 | **0** | 0 MB |
+| `--device cpu` | 3998 | **0** | 0 MB |
+| `--device cuda` | 3998 | **2** | 0.444 MB |
+
+**333.2 READS PER NEWTON STEP, AGAINST §3.3's DERIVED 21.1 — A FACTOR OF 16.**
+That table was built from leg CALL counts, which see only the sliced constraint
+legs; it could not see the bordered step's own per-pair reads of the state. **A
+proxy derived from an instrument that was built for something else is not a
+measurement**, and this is the number the plan should have been ordered by.
+
+**IT COUNTS TRANSFERS AND NOT CALLS, WHICH IS THE POINT.** A host read moves
+data exactly when the device copy is valid and the host copy is not; once any
+read has brought a buffer over it stays valid until the device writes again.
+`theCounterSeparatesAReadFromATransfer` pins that: read a host-valid buffer,
+`transfers` stays 0; `Write()` it on the device and read again, `transfers`
+becomes 1 and `entries` accounts for the size; read a third time and
+`transfers` is **still 1**.
+
+**AND THE TRANSFER COUNT IS NEAR ZERO TODAY BECAUSE NOTHING IS RESIDENT, WHICH
+IS THE INSTRUMENT WORKING RATHER THAN A PASS.** Two transfers in a whole
+`--device cuda` run: the device essentially never holds the live state, so the
+3998 reads are almost all free. **That is the baseline residency has to move**,
+and it moves the wrong way first — as kernels land, transfers RISE toward reads,
+and only then does removing the reads buy anything. A reading of 0 transfers is
+what a partial offload looks like, not what a resident solve looks like.
+
+**AND IT NAMES ITS SITES, BECAUSE ONE NUMBER SAYS NOTHING TO DO.** Keyed by
+`__LINE__`, so it cannot rot the way a line number written into prose does:
+
+| site | reads | per step |
+|---|---|---|
+| the bordered `( N + 4 )²` row dot | 2880 | **240.0** |
+| `CompressedRows::dot()`, single-vector overload | 574 | 47.8 |
+| `limiterValue()`, the `psi_bnd` row | 211 | 17.6 |
+| the batched column solve's flush | 168 | **14.0** — exactly `N + 4` |
+| `CompressedRows::gather()` | 42 | 3.5 |
+
+**THE BORDERED STEP IS 302 OF THE 333, WHICH IS 91%**, and the three biggest
+rows — the `( N + 4 )²` dot, the single-vector overload and the column flush —
+are **254 a step, 76%**, and are precisely what `meq::DeviceRows::dotColumns()`
+computes device-side ([M-190](#m-190)). The plan had item 4 ordered fourth on
+the strength of a 6.5-a-step estimate; it is **254**.
+
+**AND WRITING IT FOUND THE SAME ALIAS DEFECT A THIRD TIME, IN THE FILE WHOSE
+HEADER ARGUES ABOUT IT.** `dotColumns()` handed the kernel
+`mfem::Vector view( out.GetData(), n )` — an alias with its own flags — so the
+kernel left the view device-valid, the view was destroyed, and the caller's
+`DenseMatrix` carried a host buffer nothing had synced. `Device( "debug" )`
+faulted with *"invalid permissions"*. `mfem::DenseMatrix` has had
+`Read()`/`Write()`/`HostRead()` of its own throughout; it is passed directly
+now. **That is M-79's, M-187's and now this one**, and the instrument that
+caught it each time was the debug backend.
+
+**A DESIGN CORRECTION CAME OUT OF THE SAME QUESTION.** Both kernels forced
+`out.HostRead()` before returning, documented as deliberate because *"the
+bordered step's arithmetic around them is host arithmetic today"*. That is true
+today and is the wrong place to decide it: a kernel that forces the read makes
+it impossible for a resident border ever to keep the result, which is the whole
+of phase C. They now leave the result **device-valid** and the caller funnels,
+which is MEQ's convention everywhere else. **The `N + 4` scalars and the
+`( N + 4 )²` matrix do still come to the host** — for `setNormalisation()`, the
+merit's accept-reject and the printed Schur conditioning — and that is a real
+per-step synchronisation, 200 doubles rather than 698 KB but a synchronisation
+still. Removing it is what a resident border means.
+
+### M-197
+
+**MEQ'S OWN INTEGRAND NOW RUNS THROUGH UPSTREAM'S BATCHED LOCAL RESIDUAL AND
+GRADIENT, ON THE DEVICE, AND REPRODUCES THE HOST TO EVERY PRINTED DIGIT.**
+DEVICE-PLAN §3.3's item 1, both halves. `machine-f-diiid` and
+`limiter-halfdisc`, `--device cuda`:
+
+```
+batched nonlinear residual yes, gradient yes, explicit source rule yes,
+device integrand yes
+```
+
+and `--device cpu` reports `device integrand NO`, which is correct — the CPU
+backend is not a device by `Device::Allows( DEVICE_MASK )`, so the factory
+declines and the stock operator is built. Sweeps, `psi_ax`, `psi_bnd`, the
+X-point and the support counts are **identical on both**: 7 / 3 / 2 and
+`3.759874e-01 / 7.081366e-02 / ( 1.201, -0.999 ) / 365/903`.
+
+**MEQ HAD TO HOLD THE CALL SITE, AND ITS FILED OBJECTION TO DOING SO WAS
+WRONG.** [M-194](#m-194) argued a consumer-side operator would restate *"the
+prolongation, the state, the skeleton load and the essential-row convention"*.
+It does not: those live in `NPCResidualStart()` and `NPCResidualFinish()`,
+**inside** `NPCResidual()`. What `mfem::DarcyNPCOperator::Mult` adds is block
+splitting and two synchronisation hops — about twenty lines — so
+`meq::makeDeviceNPCOperator()` subclasses it and overrides the two methods that
+would otherwise call the untemplated pair. **The objection was about a cost
+nobody had measured by reading the function.**
+
+**THE COIL TERM IS POD-ABLE AND THE CLASS DOES NOT LOOK IT.** The residual
+integrand is `sourceValue( R, z, psi + psi_c, e )`, which for a coil-augmented
+source is `plasma + coil` inside the component and `coil` outside — and every
+production machine is coil-augmented. `meq::CoilSet` also carries `psi()`,
+`psiOf()` and `flux()`, which are elliptic integrals and are **not** device
+arithmetic; the SOURCE term is none of those. `CoilSet::f()` is
+`mu0 * R * sum over coils containing ( R, z ) of currentDensity` — a closed
+rectangle test and a constant. `meq::CoilView` and `meq::coilF()` are that, and
+`thePodReproducesTheResidualIntegrandThroughACoilWrapper` pins the whole
+integrand to the bit over 104 points, **including a deliberate coil OVERLAP**
+(the set sums rather than short-circuiting, so a "find the coil" rewrite would
+pass a disjoint fixture) and a closed rectangle EDGE.
+
+**SO THE TWO BRANCHES ARE ONE EXPRESSION**: `( plasma, gated by the element
+flag ) + coil`, and the gate is the only difference between them. The gradient
+needs no coil term at all — `dFdPsi` is the plasma alone, because a coil current
+is amperes and depends on no flux.
+
+**AND nvcc's EXTENDED-LAMBDA RESTRICTIONS DECIDED THE SHAPE OF THE CODE, WHICH
+IS THE TRANSFERABLE PART.** Three refusals in a row, each only from the device
+compiler:
+
+| | |
+|---|---|
+| *"cannot deduce the return type … it has not been defined"* | the builder was used above its definition |
+| *"The enclosing parent function … cannot have private or protected access"* | the builders were `private` |
+| *"The enclosing parent function … must not have deduced return type"* | and a lambda cannot be returned without `auto`, so **"build the callable and hand it over" is closed to lambdas entirely** |
+
+The answer is a plain **functor struct** with an `MFEM_HOST_DEVICE
+operator()`: not an extended lambda, so none of the restrictions apply, and
+nameable, so it can be built once and passed twice. **A host-only build says
+nothing about whether any of this is legal** — which is the same lesson as
+upstream's own `11faf7979d`, whose `if constexpr` first-capture is a fourth
+member of that family and which took their whole CUDA build down.
+
+**TWO INDEPENDENT FALLBACKS, AND NEITHER IS A PROPERTY OF THE BUILD.**
+`makeDeviceNPCOperator()` returns null with no device or when
+`makePlasmaSourceView()` refuses the source — one branch at CONSTRUCTION rather
+than a test per residual. Inside it, `CanBatchNonlinearResidual()` may still
+decline per call and upstream's templated entry point runs the element loop.
+**`deviceIntegrandTaken()` is reported beside the predicates** for the reason
+upstream made theirs public: *a route that falls back silently is one nobody
+measures*, and MEQ has now been caught reasoning about which route it takes
+three times.
+
+**WHAT IT DOES NOT YET BUY, MEASURED.** The crossing count
+([M-196](#m-196)) is **unchanged** — 3998 reads, 2 transfers. That is expected
+and worth stating: the residual is computed on the device and synced back
+inside MFEM, so MEQ's own funnels still find the state host-valid. One leg has
+moved; the state is not yet resident. **Residency is what makes the transfer
+count rise, and only then does removing the 333 reads a step buy anything.**
+
+### M-198
+
+**[M-196](#m-196) IS CORRECTED ON BOTH ITS NUMBERS AND ITS ORDERING, AND THE
+SITE IT POINTED AT MOVES NO DATA AT ALL.** That entry instrumented seventeen
+funnels in `GradShafranov.cpp` and reported the result as *the* crossing count.
+It missed nineteen more — the rest of that file, and every funnel in
+`CriticalPoints.cpp`, `PointLocator.cpp` and `WarmStart.cpp`, including the
+`fluxIn`/`potentialIn` pair this plan has named as the barrier since it was
+written. Every `HostRead()` and `HostReadWrite()` in `src/meq` is now counted.
+`machine-f-diiid`, 12 Newton steps, `--device cuda`:
+
+| | M-196 | corrected |
+|---|---|---|
+| reads | 3998 | **10701** (891.8 a step) |
+| transfers | 2 | **36** (3.0 a step) |
+| moved | 0.444 MB | **14.9 MB** |
+
+**SO "THE DEVICE ESSENTIALLY NEVER HOLDS THE LIVE STATE" IS WITHDRAWN.** It does,
+three times a Newton step. The claim was an artefact of an incomplete counter,
+and it was published as a finding about MEQ.
+
+**AND THE SITE TABLE WAS ORDERED BY THE WRONG COLUMN, WHICH MATTERS MORE THAN
+THE TOTALS.** M-196 sorted by READS. A read that moves nothing is free, so that
+table named the sites to leave alone. Sorted by transfers:
+
+| site | transfers | MB | of reads |
+|---|---|---|---|
+| `assembleExteriorColumns()`'s `load` | **27** (2.2/step) | **12.0** | of 30 |
+| the X-point fields, `HostReadWrite` | 3 + 3 | 2.0 | of 32 |
+| `refreshPlasmaComponent()`'s state | 2 | 0.444 | of 3 |
+| `CriticalPointFinder`'s `fluxIn` | **1** | 0.444 | of 17 |
+
+**ONE SITE IS 80% OF EVERY BYTE MEQ MOVES, AND IT IS M-187's.**
+`assembleExteriorColumns()` zeroes `load` with `load = 0.0`, which is
+device-aware — `Write()` then a `forall` — so the buffer becomes device-valid,
+and the `SyncAliasMemory()` + `HostRead()` that M-187 added to repair the
+exterior columns then brings it back. Ten modes by three sweeps is thirty reads,
+twenty-seven of which transfer. **The repair that made the answer right is the
+largest data mover in the run.** It is also once per sweep rather than per step,
+which is why no leg profile ever showed it.
+
+**AND THE TWO SITES THE PLAN HAS RANKED HIGHEST MOVE ALMOST NOTHING.**
+`CriticalPointFinder`'s constructor — *"THIS CLASS IS HOST CODE THROUGHOUT, SO
+THE FIELDS COME TO THE HOST ONCE, HERE"*, named as the barrier in §1.3 and §3.3
+since they were written — is **one transfer of seventeen reads**. The bordered
+step's `( N + 4 )²` row dots, which M-196 put at 240 a step and 76% of the work
+`DeviceRows::dotColumns()` was built for, transfer **zero**. Once the state is
+host-valid it stays so, and every read after the first is free.
+
+**BOTH TABLES ARE RIGHT, FOR DIFFERENT QUESTIONS, AND CONFLATING THEM IS WHAT
+WENT WRONG.** *Transfers are what MEQ pays today*, on a partial offload where
+the state mostly lives on the host. *Reads are what MEQ would pay under
+residency*, where a device writing between them turns each one into a transfer.
+So `dotColumns()` buys **nothing measurable today** and is sized correctly for
+the resident case; `assembleExteriorColumns()` is the only thing worth attacking
+**now**. M-196 read one column and drew a conclusion about the other.
+
+**THE TRANSFERABLE PART IS THAT AN INSTRUMENT'S COVERAGE IS ITSELF A
+MEASUREMENT.** M-196 opened by criticising §3.3's 21.1-a-step figure as a proxy
+*"derived from an instrument that was built for something else"* — and then
+published a number from an instrument that covered 17 of 36 sites, without
+establishing the denominator. **The check that was owed is `grep -c` over the
+funnels, and it costs one command.**
+
+### M-199
+
+**DEVICE-PLAN §3.3's ITEM 2 IS HALF DONE, MEQ ALREADY TAKES IT, AND THE ENTRY
+IS STALE ON EVERY FIGURE IN IT.** The item reads *"`NPCReduce` / `NPCRecover` on
+the device — whose: **nobody, unowned** — 20.1% of this profile at 1.00 cores,
+dense, integrator-free ... a device route is a separate piece of work and no one
+has it."* Read out of the function bodies rather than carried forward:
+
+| the entry says | the code says |
+|---|---|
+| unowned, no device route | **`MultInvBatched()` is the device route** and it is upstream's, gated on `CanBatchLocalSolve()` |
+| not started | the element-local solve half is **done** |
+| 1.00 cores | M-126's figure, taken before upstream threaded it — [M-135](#m-135) measures **2.61× on the leg** |
+
+**AND MEQ TAKES IT, ASKED RATHER THAN INFERRED.** `batchedLocalSolveTaken()`
+reads **yes** under `--device cuda` and **NO** under `--device cpu`, which is
+right: `CanBatchLocalSolve()` opens on `LocalFactorMode::Batched`, and the
+driver turns that on under a Device and only where the file said nothing.
+
+**WHAT ACTUALLY REMAINS IS THE FACE LOOP, AND IT IS WHY THE ANSWER COMES BACK.**
+Both routines run the element solves as one batch and then do
+
+```cpp
+// The face loop is host dense work through GetData(), which does not sync
+du_all.HostRead();
+dp_all.HostRead();
+```
+
+so the element-local algebra is on the device and the **face** traversal is host
+dense work reading `Ct`/`G` through `GetData()`. That pair of reads is a
+transfer per NPC call. So item 2 is not "put the traversal on the device" — it
+is *the face loop*, and the element half is already there.
+
+**AND THAT EXPOSES A SCOPE LIMIT ON [M-198](#m-198) WHICH MUST BE SAID
+IMMEDIATELY.** `meq::countedHostRead()` instruments **MEQ's** funnels. These two
+`HostRead()`s are inside `darcyhybridization.cpp` and are invisible to it, as is
+every other funnel in MFEM. **So M-198's 36 transfers and 14.9 MB are MEQ's own
+and are a LOWER BOUND on what the process moves.** The instrument answers *how
+much does MEQ's own code bring back*, which is the question MEQ can act on, and
+it must not be quoted as the total. A counter that covered 17 of 36 sites was
+the last error; quoting a caller-side counter as a process total would be the
+same error one level out.
+
+**THIS IS THE FOURTH PLAN ITEM CHANGED BY READING THE BODY** — after `I_p`
+([M-191](#m-191)), the limiter ([M-194](#m-194)) and item 5
+([M-195](#m-195)). Three were misclassified from what they produce; this one was
+carried as unowned work that upstream had already half built. *A plan item is
+only work once somebody has read the body*, and the four of them together cost
+one `grep` each.
+
+### M-200
+
+**EIGHTY PER CENT OF EVERY BYTE MEQ MOVED WAS A HOST-ASSEMBLED LOAD BEING
+ZEROED ON THE CARD AND DRAGGED BACK.** [M-198](#m-198) named
+`assembleExteriorColumns()`'s `load` as 27 of 36 transfers and 12.0 of 14.9 MB.
+The mechanism is MFEM's own and its comment says so in terms:
+
+```cpp
+void LinearForm::Assemble()
+{
+   Vector::operator=(0.0);
+   // The above operation is executed on device because of UseDevice().
+   // The first use of AddElementVector() below will move it back to host
+```
+
+So the form is zeroed on the device and pulled straight back, once per exterior
+mode per support sweep, for a buffer no kernel ever reads. `AddElementVector()`
+is host, `AddBdrFaceIntegrator` is host — **the whole assembly is host
+arithmetic and had no business owning a device copy.**
+
+| `--device cuda`, `machine-f-diiid` | transfers | moved |
+|---|---|---|
+| before | 36 | 14.9 MB |
+| after | **9** | **2.89 MB** |
+
+and the `load` site leaves the table entirely, at zero.
+
+**BOTH FLAGS ARE NEEDED, WHICH IS WHY THE OBVIOUS FIX FAILED WHEN IT WAS TRIED
+BEFORE.** M-187 records trying `load.UseDevice( false )` alone and finding it
+did not repair *that* defect — because `mfem::LinearForm` is a separate
+`mfem::Vector` with its own flag, and `Assemble()`'s zeroing consults the
+FORM's. The alias is where the device copy lived, so the alias is where the flag
+had to go. `load.UseDevice( false )` **and** `form.UseDevice( false )`.
+
+**THE HOST PATH IS BIT-IDENTICAL**, checked against a pre-change run: every
+sweep row, Newton history, `psi_ax` and located axis unchanged. On the device the
+sweep table is identical and quantities at 1e-12 and below move — which led to
+the second finding.
+
+---
+
+**AND `--device cuda` IS NOT REPRODUCIBLE RUN TO RUN, WHICH THE PLAN ASSUMES IT
+IS.** Same binary, same input, two consecutive runs of `machine-f-diiid`:
+
+| | run 1 | run 2 |
+|---|---|---|
+| `psi_ax - max psi_h` | `-6.465e-12` | `-6.466e-12` |
+| final `‖r‖` | `2.992569e-12` | `2.992799e-12` |
+
+The sweep table — `psi_ax`, `psi_bnd`, the X-point, the support counts — is
+identical, because it prints seven figures and the variation is at 1e-12.
+
+**THE CAUSE IS THE BATCHED ROUTE, ISOLATED BY TURNING IT OFF.** With all three
+batched keys set to `"serial"`, the same case under `--device cuda` **reproduces
+itself exactly**. With them on — which is the DEFAULT under a Device, since the
+driver turns on `AssemblyMode::Batched` and `LocalFactorMode::Batched` where the
+file says nothing — it does not. `CanBatchLocalSolve()` gates
+`MultInvBatched()`, a batched dense LU through `BatchedLinAlg`'s GPU backend,
+and a batched cuBLAS factorisation is not obliged to be bit-reproducible.
+
+**SO THE INSTRUMENT THIS WHOLE PLAN RESTS ON IS ALREADY WEAKER THAN ITS OWN
+ORDERING ASSUMES.** `DEVICE-PLAN.md` §3.5 puts cuDSS last among the residency
+items **because** it destroys *"`--device cuda` reproduces `--device cpu` to
+every printed digit"*. That instrument is already gone on the default device
+configuration, and cuDSS would merely be the second thing to take it. The
+qualification M-190 made — *printed is six or seven figures; an FMA difference
+is at 1e-16* — turns out to cover the batched kernels too, and to be doing more
+work than anyone noticed.
+
+**WHAT TO DO ABOUT IT IS OPERATIONAL AND CHEAP: THERE IS STILL A REPRODUCIBLE
+CONFIGURATION, AND IT IS THE ONE TO VALIDATE IN.** All three batched keys
+`"serial"` under `--device cuda` is deterministic and exercises the device
+memory path in full — which is what root-caused M-79, M-130 and M-187, none of
+which needed a batched kernel. **Validate there, then turn the keys on and
+compare to a tolerance.** What may not be done is to keep quoting digit-for-digit
+agreement from a configuration that cannot deliver it.
+
+### M-201
+
+**THE LIMITER SEARCH IS NOT WORTH A DEVICE PORT, AND THE MEASUREMENT IS THE
+WHOLE ARGUMENT.** `DEVICE-PLAN.md` §3.4a carries it as the last row of item 3
+and [M-194](#m-194) reclassified it from a reduction to a **search** — a
+golden-section walk along every limiter face through
+`Mesh::GetFaceElementTransformations()`, evaluating `psi_h` at arbitrary
+parameters. That reclassification was right and the conclusion drawn from it —
+that it is therefore work to schedule — was not. Measured across every shipped
+case that could use it, `--device cuda`:
+
+| case | limiter calls | leg share | transfers caused |
+|---|---|---|---|
+| `machine-f-diiid` | **0** — the X-point path | — | 0 |
+| `limited-tokamak` | **0** | 0.0% | 0 |
+| `limiter-halfdisc` | 11 | **0.7%** | **0** |
+
+**It runs on one shipped case, costs 0.7% there, and moves no data at all.**
+`limiter-halfdisc`'s entire run is 242 reads and **one** transfer of 0.0587 MB,
+and that one is `CriticalPointFinder`'s, not the limiter's.
+
+**AND THE PORT IS AMONG THE MOST EXPENSIVE ON THE PAGE**, which is the other
+half of the trade. It needs face geometry at ARBITRARY parameters rather than at
+quadrature points — `GeometricFactors` cannot supply that — a sequential
+golden-section search per face, and on the coil-subtraction path a conductor
+flux whose evaluation is elliptic integrals. Sampling a fixed set instead is not
+a cheaper version of the same thing: it would choose a different contact point
+and therefore a different border row, which converges, to a different
+equilibrium.
+
+**SO THE HONEST ORDERING IS THAT THIS IS THE SMALLEST ITEM AND THE LARGEST JOB**,
+and it stays unbuilt until residency makes its 17.6 reads a step into transfers.
+*A plan item is only work once somebody has read the body* — and once somebody
+has measured it on the case where it runs. `machine-f-diiid` was the case every
+earlier figure came from, and the limiter does not execute there at all.
+
+**WHAT THE SAME RUN SAYS TO DO INSTEAD.** After [M-200](#m-200) removed the
+exterior-column load, MEQ's remaining transfers on `machine-f-diiid` are 9 and
+2.89 MB, and **2.0 MB of that is one pair**: `xFluxField` and `xPotentialField`,
+3 transfers each. They are `HostReadWrite` by necessity — only the X-point
+element's dofs are overwritten and the rest of each field must survive, so
+`HostWrite()` would lose it — but whether they need a device copy at all is the
+same question the load answered, and nobody has asked it.
+
+### M-202
+
+**THE X-POINT'S TWO SCRATCH FIELDS WERE THE SAME DEFECT AS THE EXTERIOR-COLUMN
+LOAD, AND BETWEEN THEM THE TWO FIXES ARE 12× ON TRANSFERS AND 17× ON BYTES.**
+`xFluxField` and `xPotentialField` are full-length `mfem::GridFunction`s used
+only for the X-point element's own dofs, and they are zeroed with `= 0.0` —
+device-aware, `Write()` then a `forall` — once per support sweep. The
+`HostReadWrite()` that follows then drags each one back.
+
+**NOTHING ON THE DEVICE EVER READS THEM**, which is what makes it waste rather
+than a trade: every use is a host `GridFunction` method — `GetVectorValue()`,
+`GetVectorGradient()`, `GetGradient()` — or the raw element-dof writes, and they
+are local to one block. `UseDevice( false )` before the zeroing is the whole
+fix.
+
+`machine-f-diiid`, `--device cuda`, cumulative with [M-200](#m-200):
+
+| | transfers | moved |
+|---|---|---|
+| before either fix | 36 | 14.9 MB |
+| after the exterior-column load | 9 | 2.89 MB |
+| after these two | **3** | **0.888 MB** |
+
+**12× fewer transfers and 17× fewer bytes, for four `UseDevice( false )` calls
+and no change to any answer.** The host path is bit-identical before and after
+both fixes, checked; `--device cpu` reports 0 transfers throughout, as it must.
+
+**WHAT IS LEFT IS NOT WASTE, AND THAT IS THE POINT TO STOP AT.** The three
+remaining transfers are `refreshPlasmaComponent()`'s state (2) and
+`CriticalPointFinder`'s `fluxIn` (1) — genuine reads of a state the device does
+write, which is exactly what residency is about and cannot be removed by a flag.
+**Every transfer MEQ makes today is now a real one.**
+
+**THE PATTERN IS WORTH MORE THAN EITHER FIX.** Both sites are host-only scratch
+that acquired a device copy from one device-aware `operator=`, and in both cases
+the buffer was then pulled back by the next host read. Neither showed in any leg
+profile — the load is once per sweep and the fields are once per sweep, so a
+per-step timing sees nothing — and neither was in `DEVICE-PLAN.md` at all. **A
+device-aware `= 0.0` on a buffer no kernel reads is a round trip nobody asks
+for**, and the way to find them is the transfer counter rather than a clock or a
+plan.
+
+`xZeroColumn` is deliberately left device-aware in the same block: it is
+returned by `columnZ()` for an X-point row, so a resident bordered fill wants it
+on the device, and it causes zero transfers today.
