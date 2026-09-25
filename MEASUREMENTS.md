@@ -10935,3 +10935,266 @@ plan.
 `xZeroColumn` is deliberately left device-aware in the same block: it is
 returned by `columnZ()` for an X-point row, so a resident bordered fill wants it
 on the device, and it causes zero transfers today.
+
+### M-203
+
+**`mhd-rectangle`'s 9 DEVICE NEWTON STEPS AGAINST 5 ON THE HOST IS A CONFIGURED
+`mfem::Device` AND NOTHING ELSE, AND THE HISTORY NAMES THE SHAPE OF THE
+DEFECT.** `DEVICE-PLAN.md` §4 has carried this as *"unexplained, and nobody has
+walked it"* since [M-130](#m-130). Walked. It is not explained, but it is now
+cornered, and four of the five things it could have been are ruled out by
+measurement rather than by argument.
+
+**The two histories, `--device cpu` against `--device debug`, same binary, same
+file, `MKL = OMP = 1`:**
+
+| it | host `‖r‖` | device `‖r‖` |
+|---|---|---|
+| 0 | 2.423235e-02 | 2.423235e-02 |
+| 1 | 3.224650e-03 | 3.224650e-03 |
+| 2 | 2.701132e-04 | **3.238925e-03** |
+| 3 | 2.635792e-06 | 2.697748e-04 |
+| 4 | 2.534515e-10 | **2.710251e-04** |
+| 5 | 7.027890e-17 | 2.626584e-06 |
+| 6 | | **2.638841e-06** |
+| 7 | | 2.514280e-10 |
+| 8 | | **2.526029e-10** |
+| 9 | | 2.157812e-15 |
+
+**THE DEVICE RUN IS THE HOST RUN WITH A NO-OP STEP INTERLEAVED AFTER EVERY
+CONTRACTION**, and the no-op raises `‖r‖` by a **constant relative amount**:
++0.443%, +0.463%, +0.467%, +0.467%. That regularity is the finding. A Jacobian
+that is merely inexact contracts by a constant factor
+([M-187](#m-187)); a step that is *discarded* leaves `‖r‖` unchanged. Neither
+of those is a residual that comes back a fixed 0.47% **larger** at a state the
+solver believes it did not move from — which is what a residual re-evaluated
+against a state one side of the memory manager has and the other has not looks
+like.
+
+**FOUR THINGS IT IS NOT, EACH CROSSED RATHER THAN REASONED ABOUT.**
+
+| | |
+|---|---|
+| GPU arithmetic | `--device debug` — host arithmetic throughout — reproduces `--device cuda` to nine of ten printed residuals, the tenth differing in its third figure at 1e-15 |
+| `LocalFactorMode` | 2 × 2: `cpu` 5 / 5 and `debug` 9 / 9 across `serial` and `batched`, with the `batched local solve` predicate reading **NO, yes, NO, yes** down that same cross. Orthogonal |
+| `AssemblyMode` | `serial` on both arms gives 5 and 9 unchanged, so it is not the threaded element loop or `hostLoopsAreSafe()` |
+| the border | this case is `[boundary] Type = "zero"`, fixed, unnormalised — **no border at all**, so [M-187](#m-187)'s exterior-column mechanism cannot reach it and neither can [M-130](#m-130)'s |
+
+**AND EVERY ROUTE PREDICATE AGREES BETWEEN AN ARM THAT TAKES 5 AND AN ARM THAT
+TAKES 9.** `cpu` with `LocalFactorMode = "batched"` prints *flux mass
+prefactored yes, condensation cache yes, batched nonlinear residual yes,
+gradient yes, explicit source rule yes, device integrand NO, batched local solve
+yes* — character for character what `debug` prints on the same file. The routes
+are identical and the work is 1.8×.
+
+**THE ANSWER IS RIGHT, WHICH IS WHY IT SURVIVED.** `mhd-rectangle_psi.gf` from
+the two arms agrees to **1.05e-14 relative** (max |Δ| 1.53e-16 over
+max |ψ| 1.45e-02) — the same *the answer was right and the work was 4×* shape
+[M-187](#m-187) opens with, one level down and on a case with no border to hide
+in. The floor is the one other tell: the host reaches **7.03e-17** and the
+device stops at **2.16e-15**, thirty times higher, on a problem where both are
+solving the same 768 elements at degree 2.
+
+**WHAT IS LEFT IS THE INSTRUMENT M-187 PRESCRIBES AND IT HAS NOT BEEN RUN
+HERE**: a stage-by-stage host-side checksum of the three solution blocks under
+`cpu` and under `debug`, diffed, since the first stage that disagrees names the
+defect. `mfem::Device( "debug" )` itself is no use — it faults on a raw read of
+the **wrong location** and this is honest flags over a **stale copy**, which is
+exactly the class M-187 records it cannot see.
+
+### M-204
+
+**THE BORDERED NEWTON SURVIVES FP32, AND THE CONTROL THAT SAYS SO IS THE DOUBLE
+BUILD RUN TO THE SAME TOLERANCE.** `DEVICE-PLAN.md` §7 has carried *"does a
+bordered Newton closing `psi_ax` against `-6.466e-12` survive a 1e-7 floor at
+all"* as the one question a single-precision **host** build could answer without
+a GPU. Answered on `limited-tokamak` — 1601 elements, degree 3, `psi_ax`
+bordered at a limiter — against `../mfem/install-single` rebuilt from the
+current `meq-integration`.
+
+| | its | `psi_ax` | constraint `psi_ax − max psi_h` | `psi_bnd` |
+|---|---|---|---|---|
+| double, `RelTol = 1e-10` | 12 | 9.484400e-02 | **8.188e-16** | 2.782291e-02 |
+| double, `RelTol = 1e-6` | 10 | 9.484388e-02 | −1.333e-07 | 2.782288e-02 |
+| **single, `RelTol = 1e-6`** | **10** | **9.482965e-02** | **−1.240e-07** | 2.781218e-02 |
+| single, `RelTol = 1e-10` (the file's own) | **stalls at 400** | — | — | — |
+
+**THE BORDER CLOSES TO THE FLOOR, WHICH IS THE ANSWER.** `−1.240e-07` against
+FP32's epsilon of `1.19e-07` is the same statement as `8.188e-16` against
+double's `2.22e-16`: the bordered row is satisfied as tightly as the format
+permits. **A bordered Newton is not disqualified by a 1e-7 floor.**
+
+**AND THE PATH IS THE SAME PATH, ITERATION BY ITERATION.** `‖r‖/‖r₀‖` single
+against double, over all ten steps:
+
+| it | 1 | 3 | 4 | 7 | 9 | 10 |
+|---|---|---|---|---|---|---|
+| disagreement | 2.0e-04 | 2.9e-05 | 5.5e-03 | 1.4e-03 | 1.3e-02 | 5.5e-02 |
+
+**The agreement DEGRADES from four figures to two**, which is what an
+accumulating FP32 error does to a quantity that is itself falling by six orders
+— the absolute gap stays near the floor while the number it is quoted against
+shrinks. What does *not* degrade is the shape: the same 27.5 order jump at
+iteration 4, the same non-monotone stretch at 5 to 7, the same ten steps to the
+same stopping test. **Single precision does not take a different route to a
+nearby answer; it takes the same route and stops sooner.**
+
+**WHAT DOES NOT SURVIVE IS ONE CONSTANT PER FILE, AND IT FAILS EXPENSIVELY.**
+At the file's own `NewtonRelativeTolerance = 1.0e-10` the residual reaches
+`3.3e-07` relative and sits there: the Newton is declared failed, the driver's
+reactive ladder retries with `PicardThenNewton`, and the run burns **400
+iterations** and exits 2. [M-174](#m-174) found this on a one-step Solov'ev case
+and called it *the FIRST thing, not a clean-up afterwards*; it is the same
+constant, and on a bordered case it costs four hundred iterations rather than
+one.
+
+**THE ERROR IN `psi_ax` IS 1.5e-04 AND IT IS THE BORDER'S CONDITIONING, NOT THE
+STOPPING POINT — WHICH IS WHAT THE MIDDLE ROW EXISTS TO SEPARATE.** The obvious
+reading of a 1.5e-04 disagreement at a 1e-07 floor is *the single run stopped two
+Newton steps early*. It did not: the double build stopped at the **same**
+tolerance, in the **same** 10 iterations, and its `psi_ax` is within
+**1.27e-06** of its own fully converged value. So the two runs are compared at
+the same point on one trajectory, and what is left is FP32:
+
+| | relative |
+|---|---|
+| single vs double **at the same tolerance** | `psi_ax` **1.50e-04**, `psi_bnd` 3.85e-04 |
+| double at `1e-6` vs double at `1e-10` | `psi_ax` 1.27e-06 |
+| FP32 epsilon | 1.19e-07 |
+
+**`psi_ax` carries about 1,260 × `eps`**, where the constraint it is the root of
+carries 1. That amplification is the bordered system's condition number showing
+through, and it is the number a single-precision production run would have to
+live with on this case — a part in ten thousand on the axis flux.
+
+**AND IT IS A PROPERTY OF THE CASE RATHER THAN OF THE FORMAT, WHICH IS MEASURED
+HERE AND NOT INFERRED.** `machine-f-diiid` — 4848 elements, degree 2, bordered
+on `psi_ax` **and** `psi_bnd` **and** the X-point's two coordinates, so four
+border rows against `limited-tokamak`'s one — run in both builds at the same
+`RelTol = 1e-6`, both converging in **1** Newton iteration:
+
+| | `psi_ax` | constraint | `psi_bnd` | X-point |
+|---|---|---|---|---|
+| double | 3.759851e-01 | 3.433e-08 | 7.081394e-02 | ( 1.200929, −0.999491 ) |
+| **single** | **3.759852e-01** | **−1.863e-07** | 7.081403e-02 | ( 1.200930, −0.999491 ) |
+| relative | **2.7e-07** | | 1.3e-06 | 1e-06 m |
+
+**2.7e-07 is 2.2 × `eps`.** The harder machine — more border rows, a diverted
+topology, a moving plasma support — is **560 times more accurate in FP32** than
+the simple limited one. So the amplification belongs to a case's own
+conditioning, and *a single-precision equilibrium has to be qualified per
+problem rather than per build*. [M-184](#m-184)'s 2.9e-6 for this machine is the
+same run compared against a **fully converged** double answer at `1e-10` in two
+steps, which mixes the format's error with two Newton steps' worth of progress;
+compared at the same stopping point it is an order better.
+
+**AND THE SINGLE BUILD IS A DRIVER, NOT A SUITE.** `cmake --build build-single`
+fails in `tests/convergence/ConductorSubtraction.cpp` alone — eight errors, all
+`real_t *` against `double *` and `std::max( double, float )`, in a test written
+after [M-174](#m-174)'s 45-site port. `src/meq` and `apps` build clean. §7.2 said
+the tolerance sweep of the test tree is the single biggest cost in that section
+and it is still unpaid.
+
+### M-205
+
+**`examples/q-driven.toml` IS SILENTLY WRONG UNDER ANY CONFIGURED
+`mfem::Device`, BY A FACTOR OF TWO, WITH EVERY PRINTED HEALTH INDICATOR
+GREEN.** Found by running `mfem::Device( "debug" )` over the nonlinear
+fixed-boundary examples for a different reason — checking whether
+[M-203](#m-203)'s alternation is universal — and it is the first wrong ANSWER
+this project has met on the device path since [M-130](#m-130).
+
+| | outer loop | `psi_ax` | inner constraint | inner Newton |
+|---|---|---|---|---|
+| `--device cpu` | 12 KINSOL its, 43 map evaluations, final norm **1.95e-06** | **3.457380e-01** | 2.220e-16 | 4 its |
+| `--device cuda` | **0** KINSOL its, 8 map evaluations, final norm **0** | **1.723374e-01** | −8.327e-17 | 4 its |
+| `--device debug` | **0** KINSOL its, 8 map evaluations, final norm **0** | **1.723374e-01** | | |
+
+**`final norm 0` in `0` iterations is the [M-79](#m-79) signature**, and the
+inner solve is no help: it converges in the same 4 Newton steps and satisfies
+its own bordered constraint to 1e-16 both times. **A bordered row is satisfied
+by the state it was differenced at, so it certifies consistency and not
+correctness.** Nothing the driver prints is red on either side.
+
+**AND IT WAS FOUND BY LUCK RATHER THAN BY THE INSTRUMENT, WHICH IS THE
+UNCOMFORTABLE HALF.** What drew attention to this file was a `debug` SEGFAULT —
+and that fault turns out to be a different defect, the third link below. Remove
+the fault and the wrong answer is still there and still silent. *The instrument
+pointed at the right file for the wrong reason.*
+
+**THE CHAIN, AND EACH FIX MOVED THE FAULT FORWARD — WHICH IS THE ONLY THING
+THAT DISTINGUISHES A FIX FROM A COINCIDENCE.**
+
+1. **`mfem::Vector`'s COPY CONSTRUCTOR IS A RAW `memcpy` OF THE HOST POINTER.**
+   `solveWithNormalisation()` builds `mfem::Vector const savedIterate( unknown )`
+   and `mfem::Vector coldState( unknown )`, and under a Device `unknown`'s live
+   copy may be on the card. `Vector::Vector( Vector const & )` reads
+   `v.GetData()` and copies; nothing funnels. **Three** such copies live in
+   that one function and all three now take
+   `countedHostRead( unknown, __LINE__ )` first.
+2. **`DeviceNPCOperator` WRITES `xLoc`'s BLOCKS AND NEVER CARRIES THEM UP.**
+   `xLoc.GetBlock( 0 ) = ...; xLoc.GetBlock( 1 ) = ...;` leaves `xLoc` itself
+   believing its host copy is current, so `NPCGradient()` reading the base
+   computes `copy = !( flags & VALID_DEVICE )` and memcpys h2d out of the
+   protected page. `xLoc.SyncFromBlocks()` at both sites.
+   **UPSTREAM'S `DarcyNPCOperator` HAS THE SAME SHAPE AND SYNCS ONLY THE
+   OUTPUT**: `bf27f5a928` — MEQ's own earlier report — added `SyncFromBlocks()`
+   and `SyncAliasMemory()` to `Mult()`'s `yb` and left `x_loc` untouched in both
+   `Mult()` and `GetGradient()`. Reported.
+3. **A THIRD SITE IS LIVE AND IT IS `Df_data += Df_lin_data`, NAMED FROM A
+   `RelWithDebInfo` BUILD.** Without debug info gdb collapsed the inlined
+   template frames onto `GetGradient()` and attributed the call to
+   `Vector::operator+=` off the nearest preceding symbol; with it the chain
+   resolves to `DarcyHybridization::NonlinearGradientBatched()` at
+   `darcyhybridization.hpp:2674`, which is the call to
+   `NonlinearGradientFinish()`, whose entire body is that one `+=`.
+   `Vector::operator+=` is device-aware, so it faults in
+   `MemoryManager::GetDevicePtr()` doing an h2d memcpy out of a protected
+   page: one of the two arrays' flags disagree with where its live copy is.
+   **A line range would not have found this and a symbol name did not** — the
+   guess above named two statements in the wrong function. Reported as
+   `HDG-NPC-INPUT-SYNC-FROM-MEQ.md`.
+
+**AND THE FAULT IS NOT THE WRONG ANSWER, WHICH IS THE CORRECTION THIS ENTRY
+EXISTS TO CARRY.** The obvious reading — one device defect with two faces, as
+[M-130](#m-130) had — is wrong here, and the control that says so is a switch
+forcing `makeDeviceNPCOperator()` to return null so the same binary runs the
+same file with the caller-integrand route on and off:
+
+| | `debug` | `cuda` | `psi_ax` |
+|---|---|---|---|
+| route ON | **faults** | runs | 1.723374e-01 |
+| route OFF | runs clean | runs | **1.723374e-01** |
+
+**With no fault anywhere the answer is still wrong, to every digit.** So the
+fault belongs to upstream's new route and the wrong answer predates it,
+survives its removal, and is MEQ's to find. *Two defects reachable by one
+command are still two defects*, and the first draft of the upstream report
+claimed they were one — caught by running the control before sending it.
+
+**AND IT IS THE CLASS `debug` CANNOT SEE**, which is why it went unfound while
+the fault was loud: with the route off, `debug` — host arithmetic, every page
+protected — runs the whole 43-solve outer loop to completion and returns
+`1.723374e-01` without faulting once. [M-187](#m-187) records that instrument's
+limit exactly: it catches a raw access to the **wrong location** and is blind
+to honest flags over a **stale copy**. The stage-by-stage checksum is the
+instrument owed here too.
+
+**THE TRANSFERABLE PART IS THAT A COPY CONSTRUCTION IS A HOST READ WITH NO
+ACCESSOR IN IT.** This project's raw-read sweep asked *is this read funnelled*
+of every `operator()`, `GetData()` and `HostRead()` in `src/meq`, and
+`mfem::Vector v2( v1 )` contains none of those — it is a declaration. It is the
+same species as [M-187](#m-187)'s *a sync on the base cannot see data that is
+still on the alias*: the sweep's question was right and its **surface** was
+short. `grep -nE 'mfem::(Vector|Array<[^>]*>) (const )?[a-zA-Z]+\( *[a-zA-Z]'`
+over `src/meq` is the pattern that finds the rest; run today it reads four real
+copy constructions and **the fourth was already safe by accident** —
+`projectUpDown()`'s `mfem::Vector copy( unknown )` sits under a
+`countedHostReadWrite()` that is there because the function goes on to *write*
+`unknown`, not because anybody saw the copy.
+
+**AND THE CASE REACHED IT BECAUSE IT SOLVES 43 TIMES.** `q-driven` is the only
+example in the tree that drives `solve()` from an outer Newton, so the solver's
+long-lived state is re-entered dozens of times with a Device configured. Every
+other device run in this file solves once or a few times per support sweep.
+*A defect in re-entry needs a case that re-enters.*

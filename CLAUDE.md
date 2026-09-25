@@ -631,6 +631,48 @@ stable and reproducible is still a bug until something explains it, and the
 difference was one `gdb` session breaking on `mprotect` with the faulting page
 as the condition.
 
+**AND A SEVENTH LINK IS A COPY CONSTRUCTION, WHICH HAS NO ACCESSOR IN IT AT
+ALL.** `mfem::Vector v2( v1 )` is a raw `memcpy` of `v1`'s host pointer, and
+this project's raw-read sweep asked *is this read funnelled* of every
+`operator()`, `GetData()` and `HostRead()` in `src/meq` — a copy construction is
+a **declaration** and contains none of them. Three sites in
+`solveWithNormalisation()` copy the bordered `unknown`; all three now funnel
+first, and each fix moved `Device( "debug" )`'s fault forward, which is the only
+thing that separates a fix from a coincidence.
+`grep -nE 'mfem::(Vector|Array<[^>]*>) (const )?[a-zA-Z]+\( *[a-zA-Z]'` finds the
+rest. The lesson is M-187's one level out: **the sweep's question was right and
+its SURFACE was short.** → **[M-205](MEASUREMENTS.md#m-205)**.
+
+**AND UPSTREAM'S `DarcyNPCOperator` SYNCS THE OUTPUT AND NOT THE INPUT, IN BOTH
+ENTRY POINTS.** `Mult()` and `GetGradient()` write `x_loc`'s blocks in exactly
+the idiom `bf27f5a928` fixed for `yb` and carry nothing up; MEQ's own subclass
+had inherited it. **The fault that remains after all of it is
+`Df_data += Df_lin_data`** — `DarcyHybridization::NonlinearGradientFinish()`,
+reached only through the caller-integrand route, named from a `RelWithDebInfo`
+build because without debug info gdb collapses the inlined template frames onto
+`GetGradient()` and names the wrong function. Reported as
+`HDG-NPC-INPUT-SYNC-FROM-MEQ.md`.
+
+**AND `examples/q-driven.toml` IS WRONG UNDER ANY CONFIGURED DEVICE BY A FACTOR
+OF TWO, WHICH IS A SEPARATE DEFECT AND IS OPEN.** `psi_ax = 1.723374e-01`
+against the host's `3.457380e-01`, the outer loop reporting *"converged in 0
+KINSOL iterations … final norm 0"*, **and the inner bordered solve converging in
+the same 4 Newton steps and satisfying its own constraint to 1e-16 on both** —
+because a bordered row is satisfied by the state it was differenced at, so it
+**certifies consistency and not correctness**. Nothing printed is red.
+
+**IT IS NOT THE FAULT ABOVE, AND THAT IS THE CONTROL RATHER THAN THE READING.**
+Forcing `makeDeviceNPCOperator()` to return null removes the fault outright and
+leaves the answer wrong to every digit, so the two are two defects reachable by
+one command. **`Device( "debug" )` cannot see this one** — it runs the whole
+43-solve outer loop to completion without faulting — which is M-187's recorded
+limit: it catches a raw access to the **wrong location** and is blind to honest
+flags over a **stale copy**. The stage-by-stage checksum is what is owed.
+**And `q-driven` is the only example in the tree that drives `solve()` from an
+outer Newton**, so it is the only one that re-enters the solver's long-lived
+state dozens of times with a Device configured; *a defect in re-entry needs a
+case that re-enters.*
+
 **AND THE REFUSAL OF `TraceSolver = "cudss"` STANDS FOR THE PARTIAL PATH AND
 INVERTS FOR A RESIDENT ONE.** The trade argument is now measured rather than
 argued: `--device cuda` on `machine-f-diiid` is **2.14× slower** with correct
@@ -932,8 +974,25 @@ in 11 files**, byte-identical in double at `MKL = OMP = 1`. **The blocker is one
 nobody had listed**: `fem/gslib.hpp` is raw `double`, so `MFEM_USE_GSLIB` cannot
 coexist with `MFEM_PRECISION = single` — and every bordered free-boundary case
 in the tree fails cold **in double**, so the interpolating warm start is
-load-bearing physics rather than a convenience. The bordered question is
-therefore still open. `DEVICE-PLAN.md` §7.3 and §7.4.
+load-bearing physics rather than a convenience.
+
+**AND THE BORDERED QUESTION IS ANSWERED: THE BORDER CLOSES TO `eps`, AND WHAT
+DOES NOT SURVIVE IS ONE CONSTANT PER FILE** → **[M-204](MEASUREMENTS.md#m-204)**.
+The gslib blocker went away when `meq::PointLocator` replaced it, so a single
+install has the warm start. Against the **double build stopped at the same
+tolerance** — which is the control, since otherwise the format's error and two
+Newton steps' progress are added together — `limited-tokamak` closes its border
+at `-1.240e-07` and `machine-f-diiid` at `-1.863e-07`, both at FP32's
+`eps = 1.19e-07`, and the residual history follows double's over all ten
+steps — the same order jump, the same non-monotone stretch — with the
+disagreement widening from 2.0e-04 to 5.5e-02 as `‖r‖` itself falls by six
+orders. **`NewtonRelativeTolerance = 1.0e-10` is what fails**: the
+run stalls at `3.3e-07`, the reactive ladder retries, and it burns **400
+iterations** before exiting 2. **AND THE ACCURACY IS THE CASE'S, NOT THE
+FORMAT'S, OVER A RANGE OF 560×** — the four-border diverted machine is
+**2.2 × eps** in `psi_ax` and the one-border limited case is **1,260 × eps**, so
+a single-precision equilibrium is qualified per problem and not per build.
+`DEVICE-PLAN.md` §7.3, §7.4 and §7.5.
 
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by

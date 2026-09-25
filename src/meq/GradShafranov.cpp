@@ -9368,6 +9368,16 @@ namespace
 			for ( int mode = 0; mode < nModes; ++mode )
 				exteriorZ.emplace_back( n );
 
+			/*
+			 * `mfem::Vector`'s COPY CONSTRUCTOR IS A RAW `memcpy` OF THE HOST
+			 * POINTER, so copying a vector whose live copy is on the device
+			 * reads a page the memory manager has protected. Funnel first.
+			 * Found by `mfem::Device( "debug" )` on `examples/q-driven.toml`,
+			 * which faults in `Vector::Vector( Vector const & )` three frames
+			 * under here -- see MEASUREMENTS.md M-205. The read is counted
+			 * because every other funnel in this file is.
+			 */
+			countedHostRead( unknown, __LINE__ );
 			mfem::Vector const savedIterate( unknown );
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 
@@ -9596,6 +9606,9 @@ namespace
 		 */
 		double reference = 0.0;
 		{
+			// A COPY CONSTRUCTION IS A RAW HOST READ -- see the note at the
+			// other `mfem::Vector`-from-`unknown` in this function.
+			countedHostRead( unknown, __LINE__ );
 			mfem::Vector coldState( unknown );
 			int const traceBase = blockOffsets[ 2 ];
 			for ( int i = 0; i < traceBase; ++i )
@@ -10950,6 +10963,8 @@ namespace
 			 * because they are one vector -- which is the half of a line search a
 			 * trace-only operator cannot express.
 			 */
+			// A COPY CONSTRUCTION IS A RAW HOST READ -- MEASUREMENTS.md M-205.
+			countedHostRead( unknown, __LINE__ );
 			mfem::Vector const savedState( unknown );
 			double const savedS = s;
 			double const savedB = sB;

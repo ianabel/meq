@@ -218,6 +218,26 @@ namespace meq
 					xLoc.Update( locOffsets );
 					xLoc.GetBlock( 0 ) = xb.GetBlock( 0 );
 					xLoc.GetBlock( 1 ) = xb.GetBlock( 1 );
+					/*
+					 * THE INPUT NEEDS THE HOP AS MUCH AS THE OUTPUT DOES, AND
+					 * UPSTREAM MAKES IT ON NEITHER.
+					 *
+					 * `BlockVector::GetBlock()` hands back an alias with its
+					 * own validity flags, so writing the two blocks leaves
+					 * `xLoc` itself believing its host copy is current while
+					 * the live data sits on the blocks. `NPCGradient()` then
+					 * reads the base, computes `copy = !( flags & VALID_DEVICE )`
+					 * and memcpys h2d out of a page the memory manager has
+					 * protected. Under `Device( "debug" )` that is a named
+					 * fault in `MemoryManager::GetDevicePtr()`; under CUDA it
+					 * silently copies a stale host buffer over the right one.
+					 *
+					 * `DarcyNPCOperator::Mult()` and `::GetGradient()` write
+					 * `x_loc` in exactly this idiom and sync only the OUTPUT
+					 * -- the half `bf27f5a928` fixed. Reported; see
+					 * MEASUREMENTS.md M-205.
+					 */
+					xLoc.SyncFromBlocks();
 					rLoc.Update( locOffsets );
 
 					hyb->NPCResidual( *load, xLoc, xb.GetBlock( 2 ), rLoc, rTr,
@@ -249,6 +269,26 @@ namespace meq
 					xLoc.Update( locOffsets );
 					xLoc.GetBlock( 0 ) = xb.GetBlock( 0 );
 					xLoc.GetBlock( 1 ) = xb.GetBlock( 1 );
+					/*
+					 * THE INPUT NEEDS THE HOP AS MUCH AS THE OUTPUT DOES, AND
+					 * UPSTREAM MAKES IT ON NEITHER.
+					 *
+					 * `BlockVector::GetBlock()` hands back an alias with its
+					 * own validity flags, so writing the two blocks leaves
+					 * `xLoc` itself believing its host copy is current while
+					 * the live data sits on the blocks. `NPCGradient()` then
+					 * reads the base, computes `copy = !( flags & VALID_DEVICE )`
+					 * and memcpys h2d out of a page the memory manager has
+					 * protected. Under `Device( "debug" )` that is a named
+					 * fault in `MemoryManager::GetDevicePtr()`; under CUDA it
+					 * silently copies a stale host buffer over the right one.
+					 *
+					 * `DarcyNPCOperator::Mult()` and `::GetGradient()` write
+					 * `x_loc` in exactly this idiom and sync only the OUTPUT
+					 * -- the half `bf27f5a928` fixed. Reported; see
+					 * MEASUREMENTS.md M-205.
+					 */
+					xLoc.SyncFromBlocks();
 
 					mfem::Operator &s = hyb->NPCGradient(
 						xLoc, xb.GetBlock( 2 ), gradientIntegrand() );
