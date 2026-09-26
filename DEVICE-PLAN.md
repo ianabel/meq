@@ -1209,7 +1209,7 @@ exactly. Three things follow and they apply to every kernel after this one:
   convergence rates of §4 stage 3, not bit-equality, and that distinction
   should be settled before the kernel is written rather than after.
 
-### 3.5 What changes about the refusals, and what does not
+### 3.5 What changes about the refusals, and what "bit-exactness" is actually worth
 
 **`TraceSolver = "cudss"` — the refusal INVERTS under residency, and it is the
 one item on this page whose sign this reframing flips.** The refusal rests on
@@ -1221,40 +1221,89 @@ is gone: the integrators are on the device, nothing is copied per iteration,
 and cuDSS is the only trace solver that does not force a round trip. **cuDSS
 becomes the default on a device rather than a key that is withheld.**
 
-**AND THE PRICE OF THAT DEFAULT IS THE INSTRUMENT ITSELF, WHICH IS NEW AND IS
-MEASURED — upstream's numbers, on this box's own card.** cuDSS 0.8.0 leaves
-`CUDSS_CONFIG_DETERMINISTIC_MODE` at **0**, so a default cuDSS trace solve is
-not reproducible run to run: same matrix, same right-hand sides, fresh handle,
-five repeats, **4 of 4 differ** — at 6.7e-16, 1.8e-15 and 3.6e-15 for
-`K = 1, 4, 16`. So *"`--device cuda` reproduces `--device cpu` to every printed
-digit"* — the check that root-caused [M-79](MEASUREMENTS.md#m-79),
-[M-130](MEASUREMENTS.md#m-130) and [M-187](MEASUREMENTS.md#m-187) — **stops
-being available the moment cuDSS carries the trace solve.**
+#### The instrument this section was ordered around is weaker than it claimed
 
-**AND THAT ARGUMENT IS NOW HALF WRONG, WHICH CHANGES WHAT ORDERING IT
-JUSTIFIES** → **[M-200](MEASUREMENTS.md#m-200)**, **[M-209](MEASUREMENTS.md#m-209)**.
-The instrument this section protects is **gone on the DEFAULT device
-configuration** — though not, as M-200 said, on every batched one: upstream
-swept the keys one at a time and only `AssemblyMode::Batched`'s face kernels
-lose bit-reproducibility, so **`AssemblyMode` Serial with the other two batched
-reproduces exactly** while still moving the local factorisation, the NPC
-traversal and the trace assembly to the device. There are two good
-configurations, and cuDSS would take the instrument from both. Measured: two consecutive runs of
-`machine-f-diiid` under `--device cuda` give `psi_ax - max psi_h` as
-`-6.465e-12` then `-6.466e-12`, and with all three batched keys set to
-`"serial"` the same case **reproduces itself exactly**. `CanBatchLocalSolve()`
-gates `MultInvBatched()`, a batched dense LU, and a batched cuBLAS
-factorisation is not obliged to be bit-reproducible.
+**THIS SECTION SPENT ITS LENGTH PROTECTING *"`--device cuda` REPRODUCES
+`--device cpu` TO EVERY PRINTED DIGIT"*, AND THE RECORD DOES NOT SUPPORT THE
+WEIGHT PUT ON IT.** Every device-path defect either project has found was
+enormous:
 
-**SO THE OPERATIVE RULE IS ABOUT A CONFIGURATION AND NOT ABOUT AN ORDERING.**
-There is still a reproducible arm — **all three batched keys `"serial"` under
-`--device cuda`** — and it exercises the whole device memory path, which is what
-root-caused every device defect either project has found; none of them needed a
-batched kernel. **Validate there, then turn the keys on and compare to a
-tolerance.** What may not be done is to keep quoting digit-for-digit agreement
-from a configuration that cannot deliver it. Item 6 still goes last, but for
-its own reasons — the trade in the paragraphs above — rather than because it is
-uniquely destructive.
+| | the disagreement |
+|---|---|
+| [M-79](MEASUREMENTS.md#m-79) | the potential identically **zero**, 0/0 Newton iterations |
+| [M-130](MEASUREMENTS.md#m-130) | *"the bordered Jacobian is singular"* — a refusal, not a number |
+| [M-183](MEASUREMENTS.md#m-183) | the exterior coupling dropped; `psi_ax` **10%** wrong |
+| [M-205](MEASUREMENTS.md#m-205), [M-206](MEASUREMENTS.md#m-206) | **a factor of two** |
+| [M-189](MEASUREMENTS.md#m-189) | **1.27e-06** against a 7.8e-16 history — the tightest ever recorded |
+
+**A 1e-10 tolerance would have caught all of them, and the last twelve digits
+have never once been what fired.** Worse for the claim: the one defect
+digit-for-digit agreement demonstrably **could not** catch is
+[M-187](MEASUREMENTS.md#m-187), where every printed number was identical and
+the work was 4× — found by an iteration count, and root-caused by a probe on
+the Newton increment ([M-207](MEASUREMENTS.md#m-207)).
+
+**SO WHAT FINDS DEVICE DEFECTS IS A REFERENCE ARM YOU TRUST, AND THE TIGHTNESS
+OF THE COMPARISON HAS BEEN NEARLY IRRELEVANT.** This plan has been conflating
+two different things, and only the first is load bearing for debugging.
+
+#### What tightness genuinely buys, which is not defect-finding
+
+1. **INTERPRETABLE DIFFS, AND THIS IS THE STRONGEST ARGUMENT.**
+   [M-186](MEASUREMENTS.md#m-186) settled a red case by diffing two binaries'
+   full transcripts: 192 lines of 377 differed and **every one was a residual
+   at 1e-12 or below**, which is what said *no semantic cause to find, do not
+   bisect*. That conclusion is only available when both arms are
+   deterministic. Against a binary that varies run to run at 1e-15 the same
+   diff says nothing and the session goes to a bisect instead.
+2. **A TOLERANCE NOBODY CAN RENEGOTIATE.** `tests/unit/DeviceRowsTests.cpp`
+   asserts `==` on the double and `DeviceRows.hpp` says that if it is ever
+   relaxed to a tolerance the file has stopped being what it claims. A
+   tolerance is a number a later session under pressure widens; `==` is not.
+3. **PUBLISHED NUMBERS THAT ARE RE-DERIVABLE.** `assemblePlasmaCurrent()`
+   refuses `reduction( + : )` so the answer does not depend on a thread count.
+   That is about `MEASUREMENTS.md`'s digits being reproducible by somebody
+   else, and it is a different argument from debugging.
+
+**NONE OF THE THREE REQUIRES THE DEFAULT TO BE BIT-EXACT. ALL THREE REQUIRE
+THAT A REPRODUCIBLE CONFIGURATION EXIST.** That is the operative rule, and it
+is a much weaker constraint than the one this section has been enforcing.
+
+#### Two reproducible configurations exist, and that is measured
+
+→ **[M-200](MEASUREMENTS.md#m-200)**, **[M-209](MEASUREMENTS.md#m-209)**. Two
+consecutive `--device cuda` runs of `machine-f-diiid` give `psi_ax - max psi_h`
+as `-6.465e-12` then `-6.466e-12`. Upstream then swept the three batched keys
+**one at a time**, bitwise over four runs:
+
+| batched keys on | reproduces bitwise |
+|---|---|
+| none | **yes** |
+| `LocalFactorMode::Batched`, including the new traversal kernels | **yes** |
+| + `TraceAssemblyMode::Batched` | **yes** |
+| + `AssemblyMode::Batched` | **no** — 3.5e-16 to 4.7e-16 |
+
+**The batched LU is innocent** — M-200 named it and was wrong — and it is
+`AssemblyMode::Batched`'s face kernels, which accumulate `D` through
+`AtomicAdd` from three or four faces per element. So MEQ has an all-serial-keys
+arm that exercises the whole device **memory** path, which is what root-caused
+every defect in the table above, **and** a second arm that additionally
+exercises batched **arithmetic**. Validate in either; compare the default
+against them to a tolerance.
+
+**AND THE DRIVER'S OWN DEVICE DEFAULT IS WHAT LEAVES THE REPRODUCIBLE SET.**
+`apps/meq.cpp` turns on `AssemblyMode::Batched` under a Device where the file
+says nothing, which is the one key of the three that loses bit-reproducibility.
+Turning it back to `Serial` there would keep both arms and give up the face
+kernels alone. **Not changed, and it is a live decision rather than a defect** —
+the face kernels are a real part of the device route and this is a trade
+between two things MEQ wants.
+
+#### cuDSS, and why its own determinism cannot be bought back
+
+**cuDSS 0.8.0 leaves `CUDSS_CONFIG_DETERMINISTIC_MODE` at 0**: same matrix,
+same right-hand sides, fresh handle, five repeats, **4 of 4 differ**, at
+6.7e-16 / 1.8e-15 / 3.6e-15 for `K = 1 / 4 / 16`.
 
 **AND THE SWITCH THAT WOULD RESTORE IT IS UNUSABLE, FOR A REASON SPECIFIC TO
 MEQ.** Deterministic mode is supported for **one right-hand side only** on
@@ -1262,9 +1311,8 @@ MEQ.** Deterministic mode is supported for **one right-hand side only** on
 `CUDSS_STATUS_NOT_SUPPORTED`. MEQ's bordered Newton applies one factorisation to
 `N + 4` right-hand sides through `ArrayMult` — M-98's 1.34× — so **the one
 configuration MEQ would want determinism in is the one where it cannot have
-it.** Column-by-column `Mult()` buys it back and gives up the traversal saving.
-0.8.0 is the newest cuDSS NVIDIA ships, so this is the library as it stands
-rather than something about to be fixed.
+it.** 0.8.0 is the newest cuDSS NVIDIA ships, so this is the library as it
+stands rather than something about to be fixed.
 
 **DO NOT REACH FOR `SetDeterministic( true )`.** It does not work at `N + 4`
 columns; with `CUDSS_MTYPE_SYMMETRIC` it is additionally *silently wrong*, an
@@ -1278,21 +1326,27 @@ why rather than assuming**: it builds `NONSYMMETRIC` / `FULL`, and it calls
 upstream's own order-dependence defect requires and which a caller had no way to
 know was load bearing.
 
-**SO THE PLAN HAS TWO INSTRUMENT-DESTROYING STEPS AND THEY BELONG TOGETHER AT
-THE END.** Single precision (§7) was already last because it leaves every later
-disagreement ambiguous between a wrong kernel and a narrower format; a
-nondeterministic trace solve does the same thing one layer down. The rule that
-follows: **items 1 to 5 are validated digit for digit with the trace solve held
-on PARDISO, and only then does item 6 move the default** — after which the
-acceptance is a tolerance, and it has to be one loose enough to absorb a
-3.6e-15 solve that differs every run, on a bordered Newton that differences its
-constraints through it.
+#### What this changes about the ordering
+
+**ITEMS 6 AND 8 ARE NO LONGER "STRICTLY LAST BECAUSE THEY ARE UNIQUELY
+DESTRUCTIVE".** They were ordered that way on the premise that they alone take
+the digit-for-digit check away; that premise is gone, because the default
+device configuration already has and because the check was never the thing
+doing the work. **The constraint that replaces it is one sentence: a
+reproducible arm must survive every step, and a step that would leave MEQ with
+none of them does not go in.** cuDSS satisfies that — it is a *trace solver*
+choice, so a PARDISO arm remains available on the same build — and so does
+single precision, whose arm is the double install. What both still owe is
+§7.2's harder problem: an acceptance stated as a tolerance rather than as
+agreement, and a tolerance loose enough to absorb a 3.6e-15 solve that differs
+every run underneath a bordered Newton that differences its constraints through
+it.
 
 **The gate is already the right shape and needs no change today.** It is
 *refuse without a device*, not *refuse always* (`apps/meq.cpp:1480`), so a
 caller who has configured `--device cuda` already gets cuDSS and
 `theDriverRefusesASolverItCannotHonour` keeps the config-file-alone route
-closed. What changes at item 8 is the **default**, not the refusal.
+closed. What changes at item 6 is the **default**, not the refusal.
 
 **What does NOT change:**
 
