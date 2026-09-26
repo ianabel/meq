@@ -46,7 +46,28 @@ namespace meq
 		rows = rowCountIn;
 		columns = w;
 
+		/*
+		 * `HostWrite()` BEFORE EVERY FILL, AND THE FIRST CALL IS THE ONLY ONE
+		 * THAT WOULD SURVIVE WITHOUT IT.
+		 *
+		 * The mirror is refreshed once per Newton step, and the `Read()` at
+		 * the end of this function leaves both members DEVICE-valid. On the
+		 * next call `SetSize()` at an unchanged size reallocates nothing, so
+		 * the flags persist -- and `indices[ k ] = ...` is then a raw host
+		 * write into a page the memory manager has protected. Under
+		 * `Device( "debug" )` that is a named fault; under CUDA it writes the
+		 * host copy and the kernel goes on reading the STALE device one, which
+		 * is a wrong border row arriving as a plausible number. This file's
+		 * own comment above makes that argument about reading off the end of
+		 * the buffer; it applies here for a different reason.
+		 *
+		 * Found by `tests/convergence/DeviceParity.cpp` on its first run,
+		 * which is what that test exists for: no host build can see this, and
+		 * no CUDA run has yet, because `columnIsResident()` keeps the mirror
+		 * unread today. MEASUREMENTS.md M-211.
+		 */
 		indices.SetSize( w );
+		indices.HostWrite();
 		for ( int k = 0; k < w; ++k )
 			indices[ k ] = support[ static_cast<std::size_t>( k ) ];
 
@@ -55,6 +76,7 @@ namespace meq
 		largestIndex = indices[ w - 1 ];
 
 		values.SetSize( static_cast<int>( wanted ) );
+		values.HostWrite();
 		for ( std::size_t k = 0; k < wanted; ++k )
 			values( static_cast<int>( k ) ) = valuesIn[ k ];
 

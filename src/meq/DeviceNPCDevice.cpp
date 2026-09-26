@@ -219,23 +219,37 @@ namespace meq
 					xLoc.GetBlock( 0 ) = xb.GetBlock( 0 );
 					xLoc.GetBlock( 1 ) = xb.GetBlock( 1 );
 					/*
-					 * THE INPUT NEEDS THE HOP AS MUCH AS THE OUTPUT DOES, AND
-					 * UPSTREAM MAKES IT ON NEITHER.
+					 * HYGIENE, AND NOT LOAD BEARING -- WHICH THIS COMMENT
+					 * GOT WRONG AND UPSTREAM CAUGHT.
 					 *
-					 * `BlockVector::GetBlock()` hands back an alias with its
-					 * own validity flags, so writing the two blocks leaves
-					 * `xLoc` itself believing its host copy is current while
-					 * the live data sits on the blocks. `NPCGradient()` then
-					 * reads the base, computes `copy = !( flags & VALID_DEVICE )`
-					 * and memcpys h2d out of a page the memory manager has
-					 * protected. Under `Device( "debug" )` that is a named
-					 * fault in `MemoryManager::GetDevicePtr()`; under CUDA it
-					 * silently copies a stale host buffer over the right one.
+					 * This routine writes `xLoc`'s two blocks through aliases
+					 * with flags of their own, so `xLoc` itself is left
+					 * believing a host copy is current that is not. Carrying
+					 * them up is the right thing to do with a vector whose
+					 * flags would otherwise be a lie, and upstream keeps the
+					 * same call in their own copy on the same grounds.
 					 *
-					 * `DarcyNPCOperator::Mult()` and `::GetGradient()` write
-					 * `x_loc` in exactly this idiom and sync only the OUTPUT
-					 * -- the half `bf27f5a928` fixed. Reported; see
-					 * MEASUREMENTS.md M-205.
+					 * **WHAT IT DOES NOT DO IS FIX A READ, BECAUSE NOTHING
+					 * READS THE BASE.** `NPCResidual()` and both
+					 * `NPCGradient()` overloads take `x.GetBlock( 0 )` and
+					 * `x.GetBlock( 1 )` -- read out of
+					 * `fem/darcy/darcyhybridization.{hpp,cpp}` rather than
+					 * assumed -- so a sync that carries the blocks UP to the
+					 * base is inert for every consumer. The version of this
+					 * comment that stood here said `NPCGradient()` reads the
+					 * base and faults on it. It does not, and the fault MEQ
+					 * actually observed was `Df_data += Df_lin_data` several
+					 * frames further in: a different defect with a different
+					 * cause, and upstream's to fix.
+					 *
+					 * **AND THE STEP-COUNT DEFECT THIS WAS CREDITED WITH
+					 * CURING IS `b_tr`.** `DarcyNPCSolver` reuses it across
+					 * calls; `NPCReduce()`'s host route wrote it through an
+					 * alias and never carried that back, so from the second
+					 * Newton step on the reduced right-hand side was wrong.
+					 * Upstream reproduced it, added THIS sync, and the step
+					 * count did not move. Fixed at `ce744b84de`.
+					 * MEASUREMENTS.md M-207 and M-210.
 					 */
 					xLoc.SyncFromBlocks();
 					rLoc.Update( locOffsets );
@@ -270,23 +284,37 @@ namespace meq
 					xLoc.GetBlock( 0 ) = xb.GetBlock( 0 );
 					xLoc.GetBlock( 1 ) = xb.GetBlock( 1 );
 					/*
-					 * THE INPUT NEEDS THE HOP AS MUCH AS THE OUTPUT DOES, AND
-					 * UPSTREAM MAKES IT ON NEITHER.
+					 * HYGIENE, AND NOT LOAD BEARING -- WHICH THIS COMMENT
+					 * GOT WRONG AND UPSTREAM CAUGHT.
 					 *
-					 * `BlockVector::GetBlock()` hands back an alias with its
-					 * own validity flags, so writing the two blocks leaves
-					 * `xLoc` itself believing its host copy is current while
-					 * the live data sits on the blocks. `NPCGradient()` then
-					 * reads the base, computes `copy = !( flags & VALID_DEVICE )`
-					 * and memcpys h2d out of a page the memory manager has
-					 * protected. Under `Device( "debug" )` that is a named
-					 * fault in `MemoryManager::GetDevicePtr()`; under CUDA it
-					 * silently copies a stale host buffer over the right one.
+					 * This routine writes `xLoc`'s two blocks through aliases
+					 * with flags of their own, so `xLoc` itself is left
+					 * believing a host copy is current that is not. Carrying
+					 * them up is the right thing to do with a vector whose
+					 * flags would otherwise be a lie, and upstream keeps the
+					 * same call in their own copy on the same grounds.
 					 *
-					 * `DarcyNPCOperator::Mult()` and `::GetGradient()` write
-					 * `x_loc` in exactly this idiom and sync only the OUTPUT
-					 * -- the half `bf27f5a928` fixed. Reported; see
-					 * MEASUREMENTS.md M-205.
+					 * **WHAT IT DOES NOT DO IS FIX A READ, BECAUSE NOTHING
+					 * READS THE BASE.** `NPCResidual()` and both
+					 * `NPCGradient()` overloads take `x.GetBlock( 0 )` and
+					 * `x.GetBlock( 1 )` -- read out of
+					 * `fem/darcy/darcyhybridization.{hpp,cpp}` rather than
+					 * assumed -- so a sync that carries the blocks UP to the
+					 * base is inert for every consumer. The version of this
+					 * comment that stood here said `NPCGradient()` reads the
+					 * base and faults on it. It does not, and the fault MEQ
+					 * actually observed was `Df_data += Df_lin_data` several
+					 * frames further in: a different defect with a different
+					 * cause, and upstream's to fix.
+					 *
+					 * **AND THE STEP-COUNT DEFECT THIS WAS CREDITED WITH
+					 * CURING IS `b_tr`.** `DarcyNPCSolver` reuses it across
+					 * calls; `NPCReduce()`'s host route wrote it through an
+					 * alias and never carried that back, so from the second
+					 * Newton step on the reduced right-hand side was wrong.
+					 * Upstream reproduced it, added THIS sync, and the step
+					 * count did not move. Fixed at `ce744b84de`.
+					 * MEASUREMENTS.md M-207 and M-210.
 					 */
 					xLoc.SyncFromBlocks();
 

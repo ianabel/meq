@@ -382,3 +382,59 @@ BOOST_AUTO_TEST_CASE( theCounterSeparatesAReadFromATransfer )
 	meq::crossings().clear();
 	BOOST_TEST( meq::crossings().reads == 0 );
 }
+
+// THE MIRROR IS REFRESHED ONCE PER NEWTON STEP, SO upload() IS CALLED MANY
+// TIMES ON ONE OBJECT -- AND EVERY CALL AFTER THE FIRST WRITES INTO BUFFERS ITS
+// OWN PREVIOUS CALL LEFT DEVICE-VALID.
+//
+// The first upload is the easy case and the only one that survives a missing
+// HostWrite(): a freshly constructed mfem::Vector has UseDevice() false, so its
+// fill is an ordinary host loop. After the closing Read() both members are
+// device-valid, SetSize() at an unchanged size reallocates nothing, and the
+// next fill is a RAW HOST WRITE INTO A PROTECTED PAGE. Under a debug device
+// that aborts; under CUDA it writes the host copy while the kernel goes on
+// reading the stale device one, which is a wrong border row arriving as a
+// plausible number.
+//
+// It is exactly the shape of MEASUREMENTS.md M-187 one level down -- "mode 0
+// survives, every mode after it reads zero" -- and this case is here because
+// the first version of upload() had it and no single-upload test could tell.
+BOOST_AUTO_TEST_CASE( theMirrorSurvivesBeingRefreshed )
+{
+	deviceOnce();
+
+	Fixture const shape( 6, 50, 9, 512 );   // ( width - 1 )*stride = 441 < 512
+	meq::CompressedRows host;
+	host.compress( shape.dense(), shape.support );
+
+	mfem::Vector const v = probe( shape.length );
+
+	meq::DeviceRows device;
+	mfem::Vector first;
+	device.upload( host.support(), host.values(), host.rowCount() );
+	BOOST_TEST_REQUIRE( device.dotAll( v, first ) );
+	first.HostRead();
+
+	// FOUR MORE, as a bordered solve would do, with the SAME rows: the answer
+	// must not move, and the abort must not happen.
+	for ( int again = 0; again < 4; ++again )
+	{
+		device.upload( host.support(), host.values(), host.rowCount() );
+
+		mfem::Vector repeat;
+		BOOST_TEST_REQUIRE( device.dotAll( v, repeat ),
+		                    "the kernel refused on refresh " 
+		                        + std::to_string( again + 1 ) );
+		repeat.HostRead();
+
+		BOOST_TEST_REQUIRE( repeat.Size() == first.Size() );
+		for ( int r = 0; r < repeat.Size(); ++r )
+			BOOST_TEST( repeat( r ) == first( r ),
+			            "row " + std::to_string( r ) + " moved on refresh "
+			                + std::to_string( again + 1 ) + ": "
+			                + std::to_string( repeat( r ) ) + " against "
+			                + std::to_string( first( r ) )
+			                + " -- the mirror was refreshed into a buffer the "
+			                  "previous upload left device-valid" );
+	}
+}

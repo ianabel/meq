@@ -11332,15 +11332,24 @@ JACOBIAN and not a wrong residual, and `GetGradient()` is where the unsynced
 `x_loc` lives. The next solve, at a state that has barely moved, returns
 2.68697301897836338e+00 and is correct. That is the alternation.
 
-**WHAT IS PROVED AND WHAT IS INFERRED, KEPT APART.** Proved: MEQ's own operator
-had the defect and the sync cures it, on the case M-187 measured. Inferred:
-`mhd-rectangle` takes `mfem::DarcyNPCOperator` — `device integrand NO` on that
-case against `yes` on the machine — whose `Mult()` and `GetGradient()` write
-`x_loc`'s blocks in the identical idiom and sync nothing, reported as
-`HDG-NPC-INPUT-SYNC-FROM-MEQ.md`. The inference is a code reading of two
-functions MEQ carries a copy of; **it is not measured, because MEQ cannot fix
-upstream's operator to test it**, and the experiment that settles it is upstream
-taking the two lines.
+**WHAT IS PROVED AND WHAT IS INFERRED, KEPT APART.** Proved: with this session's
+round of fixes in, `machine-f-diiid` reads 7 / 3 / 2 where M-187 read 31 / 16 /
+4. Inferred: that the `xLoc` sync is what did it, and that `mhd-rectangle`'s
+alternation is the same defect in `mfem::DarcyNPCOperator`.
+
+> **THE INFERENCE IS WRONG AND UPSTREAM DISPROVED IT** → [M-210](#m-210). They
+> reproduced the step-count defect, **added this exact `x_loc` sync, and the
+> count did not move**. Nothing in `DarcyHybridization` reads `x_loc` as a
+> whole: `NPCResidual()` and both `NPCGradient()` overloads take
+> `x.GetBlock( 0 )` and `x.GetBlock( 1 )`, so a sync that carries the blocks UP
+> to the base is inert for every consumer — checkable by reading two functions,
+> and not checked here. The real defect is `DarcyNPCSolver`'s reused `b_tr`,
+> written through an alias in `NPCReduce()`'s host route and never carried
+> back. **What cured `machine-f-diiid` in this session is therefore
+> unattributed**, since three raw host reads of MEQ's own were fixed in the
+> same round; M-210 carries the 2 × 2 that settles it. *A cure measured after
+> changing four things attributes nothing, and this entry named one of the four
+> on a mechanism it had not read.*
 
 ### M-208
 
@@ -11457,3 +11466,254 @@ lands**, not assuming it does.
 bordered step once this is in `meq-integration` — the traversal should then
 contribute nothing between the columns going in and the answers coming out —
 and say whether MEQ's bordered configuration fails `CanBatchNPCTraversal()`.
+
+### M-210
+
+**[M-207](#m-207) ATTRIBUTED A CURE TO THE WRONG THING, AND THE 2 × 2 UPSTREAM
+ASKED FOR SAYS SO.** That entry credited `machine-f-diiid`'s 31 / 16 / 4 → 7 /
+3 / 2 to MEQ's `xLoc.SyncFromBlocks()`. Upstream reproduced the step-count
+defect in their own tree, **added that exact sync, and the count did not
+move**; they asked MEQ to re-measure with and without it. Re-measured at
+`meq-integration` `93952626e2`, which contains their fix `ce744b84de`,
+`--device cuda` on the shipped machine:
+
+| MEQ's `xLoc` sync | MEQ's three copy funnels | sweeps | `psi_ax` |
+|---|---|---|---|
+| on | on | **7 / 3 / 2** | 3.759851e-01 |
+| **off** | on | **7 / 3 / 2** | 3.759851e-01 |
+| on | **off** | **7 / 3 / 2** | 3.759851e-01 |
+| **off** | **off** | **7 / 3 / 2** | 3.759851e-01 |
+
+**Neither of MEQ's changes holds it, separately or together.** And in M-187's
+own configuration — all three batched keys `"serial"`, which is what that entry
+states and what none of this session's earlier runs used — `cpu` and `cuda`
+both read **7 / 3 / 2** with `psi_ax`, `psi_bnd`, the X-point and the support
+counts identical at every sweep.
+
+**THE DEFECT WAS `b_tr` AND IT IS UPSTREAM'S.** `DarcyNPCSolver` reuses that
+member across calls; `NPCReduce()`'s host route wrote it through an alias
+(`b_tr_l.MakeRef( b_tr, … )`) and never carried the alias back, while the
+previous call's `b_tr -= r_tr` had left `b_tr` device-valid — so the zeroing ran
+on the device, the scatter on the alias's host copy, and the closing subtraction
+read the device zeros. A wrong reduced right-hand side from the second Newton
+step on, hence a wrong correction, hence extra steps. **It fits MEQ's own
+`mhd-rectangle` probe exactly**: same right-hand side, an increment 36× too
+small, on the case that runs upstream's operator.
+
+**AND THE MECHANISM M-207 PUBLISHED IS FALSE, WHICH WAS CHECKABLE BY READING
+TWO FUNCTIONS.** The comment claimed `NPCGradient()` reads `x_loc` as a whole
+and faults on its stale base. It does not: `NPCResidual()` and **both**
+`NPCGradient()` overloads take `x.GetBlock( 0 )` and `x.GetBlock( 1 )` —
+`fem/darcy/darcyhybridization.{hpp,cpp}` — so a sync carrying the blocks UP to
+the base is inert for every consumer. **The sync stays**, as hygiene and as
+upstream keeps it: the routine writes those blocks, so the flags should not be a
+lie. Its comment now says it is not load bearing.
+
+**WHAT CANNOT BE RECOVERED, AND SAYING SO IS PART OF THE ANSWER.** Whether
+anything of MEQ's mattered at the OLD library is no longer measurable — the
+install was overwritten by the refresh, and rebuilding it is an hour to answer a
+question whose live version is already answered. So the honest statement is:
+**nothing of MEQ's is load bearing here**, and the earlier 7 / 3 / 2 was
+measured after four simultaneous changes and attributed to one of them.
+
+**THE LESSON IS THE ONE THIS FILE RECORDS TWICE ALREADY, MET FROM THE OTHER
+SIDE.** `CLAUDE.md` warns that a one-key experiment separates two hypotheses
+only if everything else is where you think it is; the failure here is the
+mirror of it — **four keys moved at once and one was credited**, on a mechanism
+nobody had read. *A cure measured after changing four things attributes
+nothing.* The 2 × 2 cost four builds and four ten-second runs.
+
+### M-211
+
+**THE PARITY TEST FOUND A WRONG-ANSWER DEFECT ON ITS FIRST PROPER RUN, AND IT
+WAS ONE THIS SESSION HAD COMMITTED THE DAY BEFORE.**
+`tests/convergence/DeviceParity.cpp` runs each shipped nonlinear example under
+`--device cpu` and again under `--device debug` and compares the printed fields
+and the Newton count. First run, after the library refresh:
+
+| case | cpu | debug |
+|---|---|---|
+| `mhd-rectangle` | 0.6 s, **5** Newton | 20.7 s, **5** Newton |
+| `machine-f-diiid` | 8.3 s, 2 Newton, `psi_ax = 3.759851e-01` | 161 s, **exit 134** |
+
+**[M-203](#m-203) IS CURED** — 5 against 5 where it was 9 against 5 — by
+upstream's `b_tr` fix ([M-210](#m-210)), which is where that entry's alternation
+came from after all.
+
+**AND `machine-f-diiid` ABORTS IN `meq::DeviceRows::upload()`, WHICH IS
+[M-208](#m-208)'s WIRING FROM THE PREVIOUS COMMIT.** The mirror is refreshed
+once per Newton step, so `upload()` is called many times on one object, and the
+`Read()` that ends it leaves both members **device-valid**. On the next call
+`SetSize()` at an unchanged size reallocates nothing, the flags persist, and
+`indices[ k ] = ...` is a raw host write into a page the manager has protected.
+
+**THE FIRST CALL IS THE ONLY ONE THAT SURVIVES IT**, because a freshly
+constructed `mfem::Vector` has `UseDevice()` false and its first fill is an
+ordinary host loop — *the same shape as [M-187](#m-187)'s "mode 0 survives,
+every mode after it reads zero"*, one level down and in MEQ's own code. The fix
+is `HostWrite()` before each fill.
+
+**UNDER CUDA IT IS NOT AN ABORT BUT A WRONG BORDER ROW**, written to the host
+copy while the kernel reads the stale device one — and it is latent today only
+because M-208's `columnIsResident()` gate keeps the mirror unread. So the defect
+was committed, shipped green through a 62-test suite, and would have surfaced as
+a plausible wrong equilibrium on the day residency turned the gate on. *A route
+that is built and dormant still has to be correct, and nothing that exercises
+the host can tell you whether it is.*
+
+**PINNED AND MUTATION-CHECKED.**
+`DeviceRowsTests::theMirrorSurvivesBeingRefreshed` uploads the same rows five
+times and asserts the dot products do not move. With the two `HostWrite()`
+calls commented out it aborts with *"invalid permissions"* — `SEGV_ACCERR`, the
+`mprotect` — so the case fails for the defect it names and not for something
+else.
+
+**AND THE TEST FOUND THREE OF ITS OWN FAULTS BEFORE IT FOUND THIS ONE**, which
+is worth recording because two of them look like failures of the code under
+test. It did not pin `OMP_NUM_THREADS`, so the driver's threaded-plus-device
+refusal fired and read as a parity failure; it `REQUIRE`d a `psi_ax` that a
+fixed-boundary case never prints; and its fixture asked for `( width − 1 )
+× stride = 540` inside a vector of length 512, which segfaults in the test's own
+helper. *A new instrument's first three reports are about the instrument.*
+
+### M-212
+
+**UPSTREAM'S TWO ASKS, ANSWERED ON THE REFRESHED LIBRARY.**
+`meq-integration` at `93952626e2`, `machine-f-diiid`, `--profile`:
+
+| | `--device cpu` | `--device cuda` |
+|---|---|---|
+| batched local solve (`CanBatchLocalSolve`) | NO | **yes** |
+| **whole NPC traversal (`CanBatchNPCTraversal`)** | NO | **yes** |
+| bordered row dots on device ([M-208](#m-208)) | NO | NO |
+| host reads of device-written state | 10,719 reads, **0** transfers | 10,719 reads, **3** transfers, 0.888 MB |
+| per Newton step | 893.2 reads, 0.0 transfers | 893.2 reads, **0.2** transfers |
+| `psi_ax` / constraint | 3.759851e-01 / −6.466e-12 | **identical** |
+
+**1. MEQ'S BORDERED CONFIGURATION PASSES `CanBatchNPCTraversal()`.** Upstream
+asked to hear if it did not — *"it shouldn't, but a mixed-geometry or
+nonconforming mesh would"* — and MEQ's production free-boundary case reads
+**yes**, so both legs and both overloads run as kernels, the blocked
+`ArrayMult()` path included. That is [M-209](#m-209)'s correction closing:
+`CanBatchLocalSolve()` reading yes was only ever about the single-column
+overloads, and this is the predicate that covers the route MEQ actually calls.
+
+**2. THE TRAVERSAL CONTRIBUTES NOTHING TO THE CROSSING COUNT, WHICH IS WHAT
+UPSTREAM PREDICTED AND IS A NULL RESULT WORTH STATING.** 3 transfers and
+0.888 MB, identical to [M-198](#m-198) before the refresh. MEQ's funnels see the
+columns going into `ArrayMult()` and the answers coming out; what happens
+between them is now kernels rather than a host traversal, and neither figure
+moved because **those crossings were already free**. *A leg moving to the device
+shows up in this instrument only if it was crossing before, and this one was
+not.*
+
+**AND THE PREDICATES ARE REPORTED RATHER THAN INFERRED**, which is the third
+time this page has had to say so. `borderDotsRanOnDevice()` and
+`batchedNpcTraversalTaken()` print beside the others on every `--profile` run,
+because M-209's correction came from MEQ believing a predicate that was
+answering about a different entry point.
+
+### M-213
+
+**A HYPOTHESIS THAT FITTED THE SHAPE AND WAS WRONG ABOUT THE BUFFER, KEPT
+BECAUSE RECORDING IT IS WHAT STOPS IT BEING RE-DERIVED.**
+[M-211](#m-211)'s fix moved `machine-f-diiid --device debug` from an abort
+before the first sweep to an abort **after the last Newton table**, with
+`psi_ax = 3.759851e-01` in 2 iterations — the host's answer and the host's
+work — then `SIGABRT` at 245 s in
+
+```
+#0  mfem::DenseMatrix::MultTranspose( double const *, double * ) const
+#1  mfem::DarcyHybridization::ReconstructTotalFlux(...) [._omp_fn.0]
+#2  GOMP_parallel
+#3  mfem::DarcyHybridization::ReconstructTotalFlux(...)
+#4  mfem::DarcyForm::ReconstructTotalFlux(...)
+#5  meq::GradShafranovSolver::postProcess()
+```
+
+**THE HYPOTHESIS.** `darcySolution` and `traceX` are a
+`BlockVector::Update()` and a `MakeRef()` over `solution`, built at
+`formSystem()` time and carrying `Memory` objects of their own; the solve then
+writes `solution` through a different set of aliases, and upstream had just
+warned in terms that *"the outputs are now left on the device … if your own
+BlockVectors carry `UseDevice(true)`, that sync is yours"*. `postProcess()` is
+reached from `main` rather than from `solve()`, so it never made the
+`SyncMemory()` / `SyncToBlocks()` calls `solve()` makes at its end. Everything
+about that fits.
+
+**FALSIFIED.** Four lines of sync were added and the run aborted in the same
+frame at the same time. A probe reporting each buffer's validity flags
+**before** reading it, run with the syncs and again without them, gives the
+same answer both times:
+
+| | with the syncs | without |
+|---|---|---|
+| `solution`, `darcySolution`, its two blocks, `traceX` | `H+ D-` | **`H+ D-`** |
+| `totalFluxGf`, `enrichedFluxGf` (outputs, never written) | `H- D-` | `H- D-` |
+
+**Every input was host-valid all along.** The views were never stale, the syncs
+were inert, and they are removed. The real cause is
+[M-214](#m-214)'s: the element-local blocks, which are upstream's and which no
+sync of MEQ's could have reached.
+
+**THE LESSON IS ABOUT WHICH HALF OF A WARNING FITS.** Upstream's note was right
+about the *phase* — a device leaves state behind and the next host reader meets
+it — and MEQ read that as naming the *buffer*. The two objects MEQ could see
+were the ones it had, so they were the ones suspected. *A mechanism that
+explains the symptom is not evidence that it is the mechanism*, and the thing
+that settled it in one run was a probe that reports flags **before** it reads:
+a checksum alone would have shown correct values on both arms and said nothing.
+
+**AND IT IS THE SECOND INFERENCE PUBLISHED THIS SESSION THAT MEASUREMENT
+CONTRADICTED**, after [M-210](#m-210). Both were written up before the control
+was run; both controls cost minutes. The rule this file already carries —
+*a cure measured after changing four things attributes nothing* — has a sibling:
+**a fix that does not change the symptom has not been shown to fix anything,
+and an entry claiming it did is a claim about code nobody re-read.**
+
+### M-214
+
+**`LocalFactorMode::Batched` LEAVES THE ELEMENT BLOCKS ON THE DEVICE AND
+`ReconstructTotalFlux()` READS THEM ON THE HOST. ONE KEY ISOLATES IT.**
+`machine-f-diiid`, `--device debug`, `OMP_NUM_THREADS=1`, MEQ's own defaults
+against one key changed and nothing else:
+
+| `LocalFactorMode` | outcome |
+|---|---|
+| `Batched` — MEQ's default under a Device | **SIGABRT** in `MmuError`, in post-processing |
+| `Serial` | **exit 0**, 2 Newton iterations, `psi_ax = 3.759851e-01`, constraint `-6.466e-12` |
+
+The second line is the host's answer to every printed digit, and **the solve is
+correct on both**: the abort comes after the last Newton table.
+
+**IT IS NOT MEQ'S INPUTS, AND THAT WAS MEASURED RATHER THAN ARGUED**
+→ [M-213](#m-213). A probe immediately before the call reports
+`darcySolution`, both of its blocks, `traceX` and `solution` all at **`H+ D-`**
+— host-valid — so the protected page the host loop meets belongs to the
+hybridization's own state. `FactorElementsBatched()` is what put it there and
+`SyncLocalBlocksToHost()` is the routine that exists to bring it back; upstream's
+own doxygen on it is emphatic that a *read* is not enough, calling the
+ownership distinction *"a defect that cost two device-only wrong answers"*.
+
+**UNDER CUDA IT IS NOT AN ABORT.** It is `ψ*` reconstructed from the element
+blocks as they stood **before** the batched factorisation — and `ψ*` is what the
+driver writes to the VTK and the `.nc`, and what `OutputConvergence` asserts is
+a post-processing of `ψ_h`. A case whose every printed scalar is right would
+ship a wrong field. That is the same species as [M-211](#m-211)'s stale mirror
+and it is upstream's rather than MEQ's.
+
+**MEQ CARRIES IT AS A RED TEST RATHER THAN HIDING IT.** Defaulting
+`LocalFactorMode` back to `Serial` under a Device would make
+`tests/convergence/DeviceParity.cpp` green and give up the one group
+`GPUBlasBatchedLinAlg` already owns outright. So the case stays red and its
+failure message names the cause, the one-key control, the upstream report and
+this anchor — which is what `CLAUDE.md`'s testing stance means by *a failing
+test must say what fixes it*. Reported as
+`HDG-RECONSTRUCT-LOCAL-BLOCKS-FROM-MEQ.md`.
+
+**AND IT IS A REPRODUCIBILITY CAVEAT AS WELL AS A CORRECTNESS ONE.**
+[M-209](#m-209) records upstream's key sweep: `AssemblyMode` Serial with
+`LocalFactorMode` and `TraceAssemblyMode` batched is the configuration that
+reproduces bitwise. One of those two keys is the one implicated here, so the
+recommended reproducible configuration is currently also the one that aborts
+under `debug` on this case.

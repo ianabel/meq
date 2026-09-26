@@ -7578,6 +7578,22 @@ namespace
 		return h != nullptr && h->CanBatchLocalSolve();
 	}
 
+	bool GradShafranovSolver::batchedNpcTraversalTaken() const
+	{
+		/*
+		 * UPSTREAM'S ASK, AND IT MUST BE ASKED AFTER A SOLVE.
+		 *
+		 * *"Ask the predicate after the first `NPCGradient()`, which is where
+		 * our tests ask it. It reads the local block storage, which does not
+		 * exist at full size before then."* So this reports what the LAST
+		 * solve did, like every other route predicate here, and reads false on
+		 * a solver that has not run.
+		 */
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchNPCTraversal();
+	}
+
 	bool GradShafranovSolver::batchedTraceAssemblyTaken() const
 	{
 		mfem::DarcyHybridization const *h =

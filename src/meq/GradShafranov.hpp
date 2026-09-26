@@ -1142,6 +1142,23 @@ namespace meq
 			bool batchedPotFaceAssemblyTaken() const;
 			bool batchedLocalFactorTaken() const;
 			bool batchedLocalSolveTaken() const;
+
+			/**
+			 * Whether the NPC traversal's own loops ran as kernels.
+			 *
+			 * Upstream's `CanBatchNPCTraversal()`, which puts `NPCReduce()`
+			 * and `NPCRecover()` -- both legs and both overloads -- entirely
+			 * on the device: the column gather, `MultInvBatched()` over all K
+			 * columns in one call, the face products and the scatter. **It is
+			 * the half of DEVICE-PLAN item 2 MEQ never had**, and
+			 * [M-209](../MEASUREMENTS.md) records that `CanBatchLocalSolve()`
+			 * reading yes was true only of the SINGLE-column overloads while
+			 * MEQ's bordered step takes the blocked ones.
+			 *
+			 * **Ask it after a solve.** It reads local block storage that does
+			 * not exist at full size until the first `NPCGradient()`.
+			 */
+			bool batchedNpcTraversalTaken() const;
 			bool batchedTraceAssemblyTaken() const;
 
 			/// Choose it. AxisConstraint::LocatedAxis is the default.

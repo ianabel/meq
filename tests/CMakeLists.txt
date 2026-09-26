@@ -484,6 +484,37 @@ endif()
 # IT IS A DRIVER TEST ON PURPOSE. What rots about an example is the FILE -- a
 # key renamed, a default moved, a table's path -- and a library-level fixture
 # would re-implement the curved path and then notice none of that.
+# DeviceParity runs the SHIPPED nonlinear examples under --device cpu and again
+# under --device debug and asserts the printed answers AND the Newton counts
+# agree. It needs the driver and no GPU: the debug backend is device memory
+# semantics with host arithmetic, which is where every defect it guards lived.
+#
+# IT IS SLOW BY THE STANDARDS OF THIS SUITE -- 387 s measured, against the
+# lint's 350 and FreeBoundaryCoupling's 1000 -- and that is the price of the
+# only check that can see M-187's class of defect, a right answer reached with
+# four times the work. It has found four in three runs (M-211, M-213, M-214)
+# on a path where the host suite is green. DEVICE-PLAN.md section 4, stage 4.
+#
+# IT IS EXPECTED RED on machine-f-diiid while M-214 stands: that is an upstream
+# defect MEQ has reported and will not hide by moving a default. The failure
+# message carries the one-key control.
+if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DeviceParity.cpp")
+	add_executable(DeviceParity "convergence/DeviceParity.cpp")
+	target_include_directories(DeviceParity PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(DeviceParity PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(DeviceParity PRIVATE
+		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
+	add_test(NAME DeviceParity COMMAND DeviceParity
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(DeviceParity PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: DeviceParity not registered (needs MEQ_BUILD_APP=ON)")
+endif()
+
 if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/MachineFixedBoundary.cpp")
 	add_executable(MachineFixedBoundary "convergence/MachineFixedBoundary.cpp")
 	target_include_directories(MachineFixedBoundary PRIVATE

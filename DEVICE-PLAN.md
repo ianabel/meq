@@ -776,19 +776,21 @@ file worth keeping*. What a reader needs first is the state:
 | item | |
 |---|---|
 | 1 · the element-local residual **and gradient** | **DONE**, both halves, through upstream's caller-integrand seam → [M-197](MEASUREMENTS.md#m-197) |
-| 2 · `NPCReduce` / `NPCRecover` | **BUILT UPSTREAM, awaiting the merge** → [M-209](MEASUREMENTS.md#m-209). `CanBatchNPCTraversal()` puts both legs and both overloads on the device, measured at **4.0× and 4.5×** on the blocked 14-column calls at MEQ's size. **And M-199 was wrong that MEQ already took half of it**: `CanBatchLocalSolve()` reads yes about the SINGLE-column overloads, and MEQ's bordered step uses the blocked ones, which ran on the host regardless |
+| 2 · `NPCReduce` / `NPCRecover` | **DONE, MERGED, AND MEQ TAKES IT** → [M-209](MEASUREMENTS.md#m-209), [M-212](MEASUREMENTS.md#m-212). `CanBatchNPCTraversal()` reads **yes** on MEQ's production bordered case under `--device cuda`, so both legs and both overloads run as kernels including the blocked `ArrayMult()` path; upstream measure **4.0× and 4.5×** on the 14-column calls at MEQ's size. The crossing count did not move — those crossings were already free. **And M-199 was wrong that MEQ already took half of it**: `CanBatchLocalSolve()` reads yes about the SINGLE-column overloads |
 | 3 · the constraint functionals | reductions **DONE** → [M-190](MEASUREMENTS.md#m-190); `I_p` **DONE** as an element loop → [M-192](MEASUREMENTS.md#m-192); the limiter is a search and is **measured not worth porting** → [M-201](MEASUREMENTS.md#m-201) |
 | 4 · the bordered border | **DONE AND WIRED** → [M-208](MEASUREMENTS.md#m-208), and wiring it measured the route as an **11× LOSS in transfers** on today's layout, because `flush()` brings the columns to the host. Gated on `Memory::DeviceIsValid()` of the columns, so it turns itself on under residency and is reported by `borderDotsRanOnDevice()` |
 | 5 · the host branches | **needed no kernel** → [M-195](MEASUREMENTS.md#m-195) |
 | 6 · cuDSS as the device default | after everything, and §3.5's reason for that has itself been corrected — see below |
-| 7 · `mem_manager` thread safety | upstream's, not started; MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188) |
+| 7 · `mem_manager` thread safety | upstream's, not started; MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188). **The only item of 1–5 with anything left in it** |
 | 8 · single precision | last — but **the one experiment that could run early HAS been run** → [M-204](MEASUREMENTS.md#m-204). The bordered Newton survives FP32 on both bordered machines; the cost is one tolerance per file and a per-case accuracy that ranges over 560× |
 
 **THE NUMBER THIS SECTION IS ORDERED BY HAS BEEN CORRECTED TWICE AND IS NOW
 INSTRUMENTED.** §3.3's 21.1 host reads a step was a proxy off leg call counts;
 [M-196](MEASUREMENTS.md#m-196) instrumented it at 333 and was itself wrong
 (17 of 36 funnels); [M-198](MEASUREMENTS.md#m-198) is the complete one at
-**891.8 reads and 3.0 transfers a step**. **Read the transfer column, not the
+**891.8 reads and 3.0 transfers a step**, and it reads **893.2 and 3.0** on the
+refreshed library with the NPC traversal on kernels
+→ [M-212](MEASUREMENTS.md#m-212). **Read the transfer column, not the
 read column**: a read of a host-valid buffer is free, and sorting by reads names
 the sites to leave alone — MEQ's busiest funnel is the bordered `( N + 4 )²` row
 dot at 240 reads a step and it transfers **zero**.

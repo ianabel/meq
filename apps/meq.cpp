@@ -6432,8 +6432,15 @@ int main( int argc, char **argv )
 		             solver->batchedNonlinearGradientTaken() ? "yes" : "NO",
 		             solver->sourceRuleIsExplicit() ? "yes" : "NO",
 		             solver->deviceIntegrandTaken() ? "yes" : "NO" );
-		std::printf( "MEQ:   batched local solve (NPCReduce/NPCRecover) %s\n",
-		             solver->batchedLocalSolveTaken() ? "yes" : "NO" );
+		// TWO PREDICATES ABOUT THE SAME PAIR OF LEGS, AND THEY ANSWER
+		// DIFFERENT QUESTIONS -- M-209. CanBatchLocalSolve() is about the
+		// SINGLE-column overloads' element solves; CanBatchNPCTraversal() is
+		// about the whole traversal, blocked overloads included, which is what
+		// MEQ's bordered step actually calls through ArrayMult().
+		std::printf( "MEQ:   batched local solve (NPCReduce/NPCRecover) %s, "
+		             "whole NPC traversal %s\n",
+		             solver->batchedLocalSolveTaken() ? "yes" : "NO",
+		             solver->batchedNpcTraversalTaken() ? "yes" : "NO" );
 		// DEVICE-PLAN.md section 3.3 item 4. Printed beside the other route
 		// predicates because it is one: the kernel is built and bit-identical,
 		// and whether it RUNS is decided by where the border's columns happen

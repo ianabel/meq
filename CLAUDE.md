@@ -642,6 +642,26 @@ stable and reproducible is still a bug until something explains it, and the
 difference was one `gdb` session breaking on `mprotect` with the faulting page
 as the condition.
 
+**AND AN EIGHTH IS A BUFFER REFRESHED IN PLACE, WHICH IS DEVICE-VALID FROM ITS
+OWN PREVIOUS USE** → **[M-211](MEASUREMENTS.md#m-211)**. `meq::DeviceRows`'
+mirror is re-uploaded once per Newton step and the `Read()` that ends the
+upload leaves it on the device; `SetSize()` at an unchanged size reallocates
+nothing, so the next fill is a raw host write into a protected page. **The
+FIRST call is the only one that survives**, a fresh `mfem::Vector` having
+`UseDevice()` false — M-187's *"mode 0 survives, every mode after it reads
+zero"* in MEQ's own code. `HostWrite()` before each fill, and
+`theMirrorSurvivesBeingRefreshed` pins it by uploading five times.
+
+**AND THE ELEMENT BLOCKS ARE THE NINTH, AND THAT ONE IS UPSTREAM'S** →
+**[M-214](MEASUREMENTS.md#m-214)**. `LocalFactorMode::Batched` — MEQ's own
+default under a Device — leaves them on the card and
+`DarcyHybridization::ReconstructTotalFlux()` reads them in a host `GOMP_parallel`
+loop. One key isolates it: `Serial` gives exit 0 and the host's answer to every
+digit, `Batched` aborts in post-processing with the solve already correct.
+**Under CUDA it is `ψ*` reconstructed from pre-factorisation blocks**, which is
+the field the driver writes to the VTK and the `.nc`. Reported; carried as a
+**red `DeviceParity` case** rather than hidden by moving the default.
+
 **AND A SEVENTH LINK IS A COPY CONSTRUCTION, WHICH HAS NO ACCESSOR IN IT AT
 ALL.** `mfem::Vector v2( v1 )` is a raw `memcpy` of `v1`'s host pointer, and
 this project's raw-read sweep asked *is this read funnelled* of every
@@ -1205,8 +1225,11 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **53 of 54 today**,
-the one red being `PlasmaEdgeConvergence` and deliberate —
+37/37 in every configuration when that table was taken, and **61 of 63 today**,
+the two reds both deliberate: `PlasmaEdgeConvergence` while the staircase
+`Γ_{p,h}` stands, and **`DeviceParity` on `machine-f-diiid`**, which names
+[M-214](MEASUREMENTS.md#m-214) — an upstream defect MEQ has reported and will
+not hide by moving a default. Its failure message carries the one-key control —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half.
@@ -1718,8 +1741,8 @@ the dev tree deliberately when testing a fix; otherwise leave it alone.
 
 ### `meq-integration`: the branch MEQ builds from, and why it is local only
 
-MEQ needs work from **ten branches**, nine of them `hdgdev`'s and one off MFEM
-master, and for as long as this section existed it named four. See the warning under the containment loop for how the
+MEQ needs work from **thirteen branches**, twelve of them `hdgdev`'s and one off
+MFEM master, and for as long as this section existed it named four. See the warning under the containment loop for how the
 other five were found and why no check built from this table could find them:
 
 | branch | what MEQ needs from it | |
@@ -1733,6 +1756,9 @@ other five were found and why no check built from this table could find them:
 | **`sundials-ida-integration`** | `mfem::IDASolver`, and the `IDAS` component that broke every MEQ test binary's link when the cache went stale — see the CUDA section's fourth bullet | merge 6 |
 | **`gf-hdg-p-adaptivity`** | upstream's own §2 work; MEQ calls nothing from it, and it is in this table because it is in the merge, which is the point of the table | merge 7 |
 | **`memory-manager-registration-refcount`** | **NOT an `hdgdev` branch — it is off MFEM master**, which is why a recipe built from the `hdgdev` list cannot see it. `internal::Memory` gains the reference count `internal::Alias` always had, so registering one address twice no longer lets the first holder's `Delete` evict the second's entry. Four routines register lazily and reach it: `MakeAlias` on an unregistered base, the device-class arms of `Read`/`Write`/`ReadWrite`, and `SetDeviceMemoryType`. MEQ proposed this shape after both projects' first mechanism proved wrong; see the `Reconstruct()` row above | merge 9 |
+| **`cmake-find-package-component-cache`** | the fix to the defect MEQ reported when `SUNDIALS_LIBRARIES` short-circuited on a stale cached list and `-lsundials_idas` never reached the link line — see the CUDA section's fourth bullet. **It is in the merge because MEQ asked for it**, and its absence is a link failure rather than a silent one | merge 10 |
+| **`cudss-solver-configuration`** | `CuDSSSolver`'s setters, including the one that refuses `CUDSS_MTYPE_SYMMETRIC` by name rather than returning an exactly zero solution every phase reports as success. MEQ does not call cuDSS from a config file and still wants this: `TraceSolverScaling` constructs one | merge 11 |
+| **`intrules-triangle-high-order`** | `c6693d5f09`, the simplex-rule ceiling. Triangle rules are tabulated to **order 25** and above that `GrundmannMollerSimplexRule()` returns partly NEGATIVE weights — correct in exact arithmetic, destructive in double, and returned with a one-time warning rather than refused. **MEQ is clear and it was checked rather than assumed**: `SourceIntegrator::rule()` asks for `2k + OrderW + 4`, which is 12 at the suite's `k = 4`, and `PlasmaEdgeConvergence`'s triangle rules are `2k + 14` over `k <= 3`, so 20. `setSourceQuadratureOrder()`'s doxygen already stated the bound | merge 12 |
 | **`gf-interp-hdg-dev`** | **CCSZ INTERPOLATORY HDG** — `fem/darcy/reaction_hdg.{hpp,cpp}` with `HDGInterpolatoryReactionIntegrator`, `NodalReactionFunction` and a quadrature control, plus `HDGPostprocessBlocks` in `postprocess_hdg.*` and `DarcyHybridization::Bg_data`. **15,024 insertions across `fem/darcy/`**, verified in `libmfem.a` by `nm`. MEQ does not call any of it yet; `INTERPOLATORY-HDG-PLAN.md` is the plan | merge 8 |
 
 **THE TOPOLOGY HAS NOW CHANGED THREE TIMES AND THIS ROW HAS BEEN WRONG TWICE.**
@@ -1787,7 +1813,9 @@ git merge memory-manager-registration-refcount   # NOT hdgdev's -- off master
 for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
          gf-hdg-linearise-first gf-hdg-dev pardiso-multi-rhs \
          pardiso-device-host-sync sundials-ida-integration \
-         gf-hdg-p-adaptivity gf-interp-hdg-dev; do
+         gf-hdg-p-adaptivity gf-interp-hdg-dev \
+         cmake-find-package-component-cache cudss-solver-configuration \
+         intrules-triangle-high-order; do
   git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained" \
                                               || echo "$b NOT CONTAINED"
 done
