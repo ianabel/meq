@@ -11805,3 +11805,57 @@ default has to be honourable in the configuration that inherits it.*
 LIVE.** That section's rule is *a reproducible arm must survive every step*;
 the driver was quietly failing it by default while the plan ordered cuDSS and
 single precision last to protect it.
+
+### M-216
+
+**DEVICE-PLAN §3.3's ITEM 7 IS OPTIONAL FOR MEQ, AND THE ARITHMETIC THAT SAYS
+SO WAS AVAILABLE THE WHOLE TIME.** A thread-safe
+`general/mem_manager.cpp` has sat on MEQ's upstream list since
+[M-188](#m-188) found that a Device and a host OpenMP region touching MFEM
+memory are mutually exclusive. The question nobody asked is *what does MEQ lose
+by the gate that answers it* — `meq::hostLoopsAreSafe()` serialising MEQ's
+eight element loops under a Device. Read off [M-137](#m-137)'s leg split
+against what now has a device route:
+
+| leg | threaded gain | cores after | device route |
+|---|---|---|---|
+| border dense solve | 41× | **1.00** | — it is **sparsity**, not threading |
+| border assembly | 2.2× | 2.60 | `meq::DeviceRows` — built ([M-190](#m-190)), wired ([M-208](#m-208)) |
+| `I_p` | 4.1× | 5.30 | `meq::DeviceQuadrature` — built ([M-192](#m-192)) |
+| cold full sweep + axis | 5.4× / 3.8× | 7.79 / 5.52 | **none** |
+
+**THREE THINGS FOLLOW AND ONLY THE THIRD IS A COST.**
+
+1. **Host runs are untouched.** `hostLoopsAreSafe()` is
+   `!Device::Allows( DEVICE_MASK )`, and `--device cpu` sets no device backend,
+   so every host measurement in this file and every host deployment keeps its
+   threading. Item 7 buys nothing there.
+2. **The largest item in M-137's `1.16×` is not threading at all.** The border
+   dense solve's 41× is the sparse row representation, at **1.00 cores before
+   and after** — the gate does not touch it. *A speedup table that mixes a
+   representation change with a threading change hides which of them a thread
+   gate can take away.*
+3. **Of what the gate does serialise, two of three already have kernels**, and
+   they are dormant only because the data is not resident yet — which is what
+   residency fixes. The residue is `CriticalPointFinder::sweep()`, an irregular
+   per-element Newton root find of `q_h` with no device route, worth about
+   **0.12 s of a 7.3 s run — under 2%**.
+
+**SO THE RULE IS THE ONE THAT MAKES THIS A TRANSITION COST RATHER THAN A
+REQUIREMENT**: *a host loop worth threading under a device is a loop that
+should be a kernel.* Item 7's value to MEQ is bounded by that 2% and falls
+toward zero as the routes wire up. **It is downgraded to optional and upstream
+is told**, because they had it on their list partly on MEQ's account and called
+it *"the cheapest large win on the device path"* — which is their assessment
+for their consumers and was never MEQ's measurement.
+
+**WHAT DOES NOT CHANGE, AND THE DISTINCTION IS THE POINT.** MEQ's own
+`hostLoopsAreSafe()` gate and the driver's threaded-assembly refusal stay
+exactly as they are. They are what make a device run **correct** — M-188's
+segfault in `MemoryManager::Insert()` at eight threads — and nothing here is
+about correctness. *Downgrading a performance ask says nothing about the
+safety measure that made it askable.*
+
+**AND THE SHARES ARE INDICATIVE RATHER THAN CURRENT.** M-137 was taken on an
+older binary against an older library; what is robust is the ORDERING — sparsity
+first, two covered legs next, one uncovered leg last — not the third digit.
