@@ -495,9 +495,10 @@ endif()
 # four times the work. It has found four in three runs (M-211, M-213, M-214)
 # on a path where the host suite is green. DEVICE-PLAN.md section 4, stage 4.
 #
-# IT IS EXPECTED RED on machine-f-diiid while M-214 stands: that is an upstream
-# defect MEQ has reported and will not hide by moving a default. The failure
-# message carries the one-key control.
+# IT WAS RED on machine-f-diiid for exactly as long as M-214 stood, and went
+# green when upstream fixed it. The failure message still carries that case's
+# one-key control, because the next defect of the same family will present the
+# same way and the control is what names it.
 if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DeviceParity.cpp")
 	add_executable(DeviceParity "convergence/DeviceParity.cpp")
 	target_include_directories(DeviceParity PRIVATE

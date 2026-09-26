@@ -1596,14 +1596,44 @@ int main( int argc, char **argv )
 		? AM::Threaded : AM::Serial;
 
 	/*
-	 * ON A DEVICE, AN UNSTATED ASSEMBLY MODE IS BATCHED.
+	 * ON A DEVICE, AN UNSTATED ASSEMBLY MODE IS **SERIAL**, AND THAT IS A
+	 * DECISION ABOUT AN INSTRUMENT RATHER THAN ABOUT SPEED.
 	 *
 	 * AssemblyMode::Batched puts the interior-face potential term through one
-	 * kernel instead of a host call per face, and MFEM's own note is that it
-	 * needs the storage to be device-resident to be worth anything -- its `D`
-	 * accumulation goes through AtomicAdd, which COSTS on a host where the
-	 * per-face loop's plain `+=` does not. So it is the right default exactly
-	 * when `--device` named one and the wrong one otherwise.
+	 * kernel instead of a host call per face, and it is the only one of the
+	 * three batched axes that LOSES bit-reproducibility: its `D` accumulation
+	 * goes through AtomicAdd from three or four faces per element, so the
+	 * arrival order shows in the last bit. Upstream swept the keys one at a
+	 * time, bitwise over four runs -- none, LocalFactorMode, + TraceAssembly
+	 * all reproduce; + AssemblyMode does not, at 3.5e-16 to 4.7e-16.
+	 * MEASUREMENTS.md M-209.
+	 *
+	 * **SO THIS DEFAULT WAS DESTROYING THE ONE CHECK THE DEVICE PATH IS BUILT
+	 * AROUND.** *"--device cuda reproduces --device cpu to every printed
+	 * digit"* is what root-caused M-79, M-130, M-187 and M-207, it is why
+	 * DEVICE-PLAN.md section 3.5 orders cuDSS and single precision last, and
+	 * it is the reason residency is built in double at all -- and the driver
+	 * was giving it away by default, for the one axis whose host measurement
+	 * is a 15 to 27 per cent LOSS anyway (M-99).
+	 *
+	 * **WHAT IS GIVEN UP IS THE FACE KERNELS AND NOTHING ELSE.** Serial here
+	 * still leaves LocalFactorMode and TraceAssemblyMode batched below, which
+	 * is upstream's group 1, the NPC traversal and the trace assembly -- three
+	 * of the four groups, all bit-reproducible. A caller who wants the face
+	 * kernels names `AssemblyMode = "batched"` and gets them, with the
+	 * reproducibility caveat that naming it implies.
+	 *
+	 * **AND SERIAL RATHER THAN THE HOST DEFAULT, WHICH IS Threaded.** A
+	 * Device and a host OpenMP region that touches MFEM memory are mutually
+	 * exclusive -- MEQ's own M-188 -- so `Threaded` under `--device` is
+	 * REFUSED above one thread a few lines down. Inheriting the host default
+	 * here would turn an unstated mode into a refusal on every multi-threaded
+	 * device run, which is the opposite of what an inherited default is for.
+	 *
+	 * ONLY WHERE THE FILE SAID NOTHING. A configuration that names a mode has a
+	 * reason and gets what it named -- the same line `[solver] AssemblyMode`
+	 * already draws between an asked-for mode, which is refused when it cannot
+	 * be honoured, and an inherited one, which is downgraded.
 	 *
 	 * ONLY WHERE THE FILE SAID NOTHING. A configuration that names a mode has a
 	 * reason and gets what it named -- the same line `[solver] AssemblyMode`
@@ -1643,7 +1673,7 @@ int main( int argc, char **argv )
 	 */
 	bool const onDevice = mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
 	if ( onDevice && !config->getSolver().assemblyModeWasGiven )
-		assemblyMode = AM::Batched;
+		assemblyMode = AM::Serial;
 
 	using LFM = meq::GradShafranovSolver::LocalFactorMode;
 	LFM localFactorMode =

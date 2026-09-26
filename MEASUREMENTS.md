@@ -11673,6 +11673,20 @@ and an entry claiming it did is a claim about code nobody re-read.**
 
 ### M-214
 
+> **CLOSED UPSTREAM AT `d720f02d62`, IN `meq-integration` AT `dfb5525a35`.**
+> With that install, `machine-f-diiid --device debug` completes with
+> `LocalFactorMode::Batched` **left on**: `psi_ax = 3.759851e-01` in 2 Newton
+> iterations, the host's to every printed digit, and
+> `tests/convergence/DeviceParity.cpp` is **green on both cases**.
+> **MEQ's guess was the right family and the wrong member** — upstream's
+> diagnosis is that `ReconstructTotalFlux()` needs `Ct_data` host-READABLE
+> rather than `SyncLocalBlocksToHost()`'s ownership, and that
+> `NPCReduceBatched()` / `NPCRecoverBatched()` were the two kernels reading it
+> on the device without the `HostRead()` every other such kernel is followed
+> by. `ComputeSolution()`, `ReduceRHS()` and `MarkEmptyTraceRows()` read `Ct`
+> raw on the host too and were exposed identically; one fix covers all four
+> because it restores the state rather than patching a reader.
+
 **`LocalFactorMode::Batched` LEAVES THE ELEMENT BLOCKS ON THE DEVICE AND
 `ReconstructTotalFlux()` READS THEM ON THE HOST. ONE KEY ISOLATES IT.**
 `machine-f-diiid`, `--device debug`, `OMP_NUM_THREADS=1`, MEQ's own defaults
@@ -11695,12 +11709,34 @@ hybridization's own state. `FactorElementsBatched()` is what put it there and
 own doxygen on it is emphatic that a *read* is not enough, calling the
 ownership distinction *"a defect that cost two device-only wrong answers"*.
 
-**UNDER CUDA IT IS NOT AN ABORT.** It is `ψ*` reconstructed from the element
-blocks as they stood **before** the batched factorisation — and `ψ*` is what the
-driver writes to the VTK and the `.nc`, and what `OutputConvergence` asserts is
-a post-processing of `ψ_h`. A case whose every printed scalar is right would
-ship a wrong field. That is the same species as [M-211](#m-211)'s stale mirror
-and it is upstream's rather than MEQ's.
+**UNDER CUDA IT IS NOT AN ABORT — AND THIS ENTRY SAID IT WAS A WRONG FIELD,
+WHICH IS FALSE AND IS NOW MEASURED FALSE.** The claim was that `ψ*` would come
+back reconstructed from the element blocks as they stood *before* the batched
+factorisation, which is what the driver writes to the VTK and the `.nc`.
+Upstream answered it from the code and MEQ then ran it, at the pre-fix install
+and on the case in the table:
+
+| | `_psistar.gf`, `--device cpu` against `--device cuda` |
+|---|---|
+| max abs difference | 2.609024e-15 |
+| over max abs `ψ*` | 3.759420e-01 |
+| **relative** | **6.940e-15** |
+
+**Round-off, not a wrong field.** The mechanism upstream gives is
+`MemoryManager::Read_()`: a device `Read()` only ever **adds** `VALID_DEVICE`
+and never clears `VALID_HOST`, so a kernel that only reads cannot make the host
+copy stale; `Ct_data` is built on the host in `ConstructC()` and written by no
+kernel at all, `AssemblyMode::Batched`'s face kernels writing E, G, H and D
+instead; and only the debug backend's `GetDevicePtr()` protects the page. **So
+the debug fault was the only symptom**, and the reproducibility caveat this
+entry drew from it does not follow either.
+
+**THE COST OF GETTING THAT WRONG WAS TWO RUNS AND A `cmp`.** It was checkable
+at the moment it was written, on the install it was written against, and it was
+not checked — the third inference published in this session that a control then
+contradicted, after [M-210](#m-210) and [M-213](#m-213). *An argument that a
+defect COULD corrupt something is not a measurement that it did, and the
+distance between them here was one diff.*
 
 **MEQ CARRIES IT AS A RED TEST RATHER THAN HIDING IT.** Defaulting
 `LocalFactorMode` back to `Serial` under a Device would make
@@ -11717,3 +11753,55 @@ test must say what fixes it*. Reported as
 reproduces bitwise. One of those two keys is the one implicated here, so the
 recommended reproducible configuration is currently also the one that aborts
 under `debug` on this case.
+
+### M-215
+
+**THE DRIVER'S OWN DEVICE DEFAULT WAS DESTROYING THE INSTRUMENT THE WHOLE
+DEVICE PLAN IS ORDERED AROUND, AND ONE LINE BUYS IT BACK.** `apps/meq.cpp` set
+`AssemblyMode::Batched` under a Device where the file said nothing —
+[M-209](#m-209) then measured that it is the one batched axis of three that
+loses bit-reproducibility, its `D` accumulating through `AtomicAdd` from three
+or four faces per element. It is now `Serial` there. `machine-f-diiid`,
+`--device cuda`, `OMP = MKL = 1`:
+
+| | before | after |
+|---|---|---|
+| two consecutive runs, `psi_ax − max psi_h` | `-6.465e-12`, `-6.466e-12` | **`-6.465e-12`, `-6.465e-12`** |
+| batched modes asked for | assembly yes, local factorisation yes, trace assembly yes | assembly **no**, local factorisation yes, trace assembly yes |
+
+**AND AGAINST THE HOST IT IS NOW IDENTICAL EXCEPT ONE RESIDUAL AT 5e-17.** With
+the three keys held **equal on both arms** — which is the control, because the
+driver otherwise turns `LocalFactorMode` on under a Device and leaves it off on
+the host, so an uncontrolled `cpu` against `cuda` compares two configurations —
+every printed line agrees except
+
+```
+    2     2.992567e-12   (cpu)
+    2     2.992620e-12   (cuda)
+```
+
+`psi_ax = 3.759851e-01` and the constraint `-6.465e-12` are identical. That
+residual difference is 5.3e-17 absolute against a problem scale of 7e-2, which
+is [M-186](#m-186)'s species exactly — *"every one is a residual at 1e-12 or
+below"* — and is FMA ordering rather than anything semantic.
+
+**WHAT IS GIVEN UP IS THE FACE KERNELS AND NOTHING ELSE.** `LocalFactorMode`
+and `TraceAssemblyMode` stay batched under a Device, which is upstream's group
+1, the NPC traversal and the trace assembly — **three of the four groups, all
+bit-reproducible** ([M-209](#m-209), [M-212](#m-212)). And
+`AssemblyMode::Batched`'s own host measurement is a **15 to 27 per cent loss**
+([M-99](#m-99)), so on this hardware the default was paying for nondeterminism
+and getting nothing. A caller who wants the face kernels names
+`AssemblyMode = "batched"` and gets them.
+
+**AND `Serial` RATHER THAN SIMPLY DROPPING THE OVERRIDE, WHICH WOULD HAVE BEEN
+THE OBVIOUS EDIT AND IS WRONG.** The host default is `Threaded`, and a Device
+and a host OpenMP region that touches MFEM memory are mutually exclusive
+([M-188](#m-188)) — so inheriting it would turn an unstated mode into the
+driver's own **refusal** on every multi-threaded device run. *An inherited
+default has to be honourable in the configuration that inherits it.*
+
+**THE DECISION THIS SETTLES IS ONE `DEVICE-PLAN.md` §3.5 HAD BEEN CARRYING AS
+LIVE.** That section's rule is *a reproducible arm must survive every step*;
+the driver was quietly failing it by default while the plan ordered cuDSS and
+single precision last to protect it.

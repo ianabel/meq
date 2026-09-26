@@ -652,15 +652,24 @@ FIRST call is the only one that survives**, a fresh `mfem::Vector` having
 zero"* in MEQ's own code. `HostWrite()` before each fill, and
 `theMirrorSurvivesBeingRefreshed` pins it by uploading five times.
 
-**AND THE ELEMENT BLOCKS ARE THE NINTH, AND THAT ONE IS UPSTREAM'S** →
-**[M-214](MEASUREMENTS.md#m-214)**. `LocalFactorMode::Batched` — MEQ's own
-default under a Device — leaves them on the card and
-`DarcyHybridization::ReconstructTotalFlux()` reads them in a host `GOMP_parallel`
-loop. One key isolates it: `Serial` gives exit 0 and the host's answer to every
-digit, `Batched` aborts in post-processing with the solve already correct.
-**Under CUDA it is `ψ*` reconstructed from pre-factorisation blocks**, which is
-the field the driver writes to the VTK and the `.nc`. Reported; carried as a
-**red `DeviceParity` case** rather than hidden by moving the default.
+**AND THE ELEMENT BLOCKS ARE THE NINTH, AND THAT ONE IS UPSTREAM'S AND IS
+FIXED** → **[M-214](MEASUREMENTS.md#m-214)**. `LocalFactorMode::Batched` — MEQ's
+own default under a Device — left `Ct_data` device-only and
+`DarcyHybridization::ReconstructTotalFlux()` reads it in a host `GOMP_parallel`
+loop. **One key isolated it**: `Serial` gave exit 0 and the host's answer to
+every digit, `Batched` aborted in post-processing with the solve already
+correct. Upstream's `d720f02d62` gives the two batched NPC traversal kernels the
+`HostRead()` every other kernel reading those blocks is followed by, and
+`DeviceParity` is green with the key left on.
+
+**AND MEQ'S REPORT CLAIMED CUDA WOULD SHIP A WRONG `ψ*`, WHICH IS FALSE AND WAS
+CHEAP TO CHECK.** `_psistar.gf` on `cpu` against `cuda`, at the pre-fix install,
+agrees to **6.94e-15** — round-off. A device `Read()` only ever ADDS
+`VALID_DEVICE` and never clears `VALID_HOST`, `Ct_data` is host-built and
+written by no kernel, and only the debug backend protects the page, so the
+fault was the only symptom. *An argument that a defect COULD corrupt something
+is not a measurement that it did*, and the distance between them was two runs
+and a `cmp`.
 
 **AND A SEVENTH LINK IS A COPY CONSTRUCTION, WHICH HAS NO ACCESSOR IN IT AT
 ALL.** `mfem::Vector v2( v1 )` is a raw `memcpy` of `v1`'s host pointer, and
@@ -929,18 +938,25 @@ condensation cache, had expired. `apps/meq.cpp` now turns it on under a Device
 exactly as it turns on `AssemblyMode::Batched`, and only where the file said
 nothing.
 
-**AND THAT PAIRING IS NOW A LIVE DECISION RATHER THAN A SETTING** →
-**[M-209](MEASUREMENTS.md#m-209)**. Upstream swept the three batched keys one at
+**AND THAT PAIRING IS SETTLED: `AssemblyMode` IS `Serial` UNDER A DEVICE** →
+**[M-215](MEASUREMENTS.md#m-215)**, **[M-209](MEASUREMENTS.md#m-209)**. Upstream swept the three batched keys one at
 a time, bitwise: `LocalFactorMode::Batched` and `TraceAssemblyMode::Batched`
 **reproduce exactly** and `AssemblyMode::Batched` does **not**, at 3.5e-16 to
 4.7e-16, because its face kernels accumulate `D` through `AtomicAdd` from three
 or four faces per element. So the driver's own device default is what destroys
 *"`--device cuda` reproduces `--device cpu`"* — the instrument `DEVICE-PLAN.md`
 §3.5 orders cuDSS last to protect, and the reason residency is built in double
-at all. Turning `AssemblyMode` back to `Serial` under a Device would keep the
-instrument and still move the local factorisation, the NPC traversal and the
-trace assembly; what it gives up is the face kernels. **Not changed**, because
-it is a trade between two things MEQ wants and not a defect. Worth **1.54× on `ComputeH` under CUDA** and 1.97× on the host, with
+at all. **It is `Serial` there now**, which keeps the instrument and still moves the
+local factorisation, the NPC traversal and the trace assembly — three of the
+four groups, all bit-reproducible. What it gives up is the face kernels alone,
+whose host measurement is a 15 to 27 per cent loss anyway. Two consecutive
+`--device cuda` runs of `machine-f-diiid` now agree exactly where they read
+`-6.465e-12` then `-6.466e-12`, and against the host with the keys held equal
+every printed line agrees but one residual, at 5.3e-17 absolute.
+**`Serial` and not simply dropping the override**: the host default is
+`Threaded`, which the driver REFUSES under a Device above one thread (M-188),
+so inheriting it would turn an unstated mode into a refusal. *An inherited
+default has to be honourable in the configuration that inherits it.* Worth **1.54× on `ComputeH` under CUDA** and 1.97× on the host, with
 `psi_ax` unmoved → **[M-185](MEASUREMENTS.md#m-185)**.
 → **[M-136](MEASUREMENTS.md#m-136)**.
 → **[M-99](MEASUREMENTS.md#m-99)** and **[M-101](MEASUREMENTS.md#m-101)**.
@@ -1225,11 +1241,13 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **61 of 63 today**,
-the two reds both deliberate: `PlasmaEdgeConvergence` while the staircase
-`Γ_{p,h}` stands, and **`DeviceParity` on `machine-f-diiid`**, which names
-[M-214](MEASUREMENTS.md#m-214) — an upstream defect MEQ has reported and will
-not hide by moving a default. Its failure message carries the one-key control —
+37/37 in every configuration when that table was taken, and **62 of 63 today**,
+the one red being `PlasmaEdgeConvergence` while the staircase `Γ_{p,h}` stands.
+**`DeviceParity` is the newest case and the slowest after
+`FreeBoundaryCoupling`** — 361 s, of which 329 s is `machine-f-diiid` under
+`--device debug` — and it went green when upstream fixed
+[M-214](MEASUREMENTS.md#m-214); it was red for exactly as long as that defect
+stood, which is the stance working —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half.
@@ -1911,6 +1929,29 @@ diff <( git -C ../mfem/mfem-src show meq-integration:fem/darcy/darcyhybridizatio
      ../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp \
   && echo "install is current"
 ```
+
+**AND THAT CHECK IS BLIND TO A `.cpp`-ONLY FIX, WHICH IS MOST OF THEM.** It
+diffs an installed HEADER, and only headers are installed — so a library that
+is a bug fix behind reports *current*. Measured: `meq-integration` moved from
+`93952626e2` to `dfb5525a35` carrying `d720f02d62`, the fix to MEQ's own
+M-214, and every installed header in `fem/darcy/` was byte-identical across it.
+The check passed on a library missing the fix MEQ had asked for.
+
+**Ask the TIMESTAMPS instead, which cannot miss a translation unit:**
+
+```sh
+test ../mfem/install/lib/libmfem.a -nt \
+     <( git -C ../mfem/mfem-src log -1 --format=%cd --date=iso meq-integration >/dev/null; \
+        echo ) 2>/dev/null
+# or, plainly:
+[ "$( date -r ../mfem/install/lib/libmfem.a +%s )" -ge \
+  "$( git -C ../mfem/mfem-src log -1 --format=%ct meq-integration )" ] \
+  && echo "install is newer than the branch tip" || echo "INSTALL IS STALE"
+```
+
+The header diff still earns its place — it catches a *layout* change, which is
+the case that silently produces an ODR violation rather than a missing fix — so
+run both. They fail in different directions.
 
 A branch that another agent re-creates is a branch that moves without MEQ doing
 anything, so this belongs beside the containment loop rather than in a rebuild
