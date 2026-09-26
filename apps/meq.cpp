@@ -6434,6 +6434,12 @@ int main( int argc, char **argv )
 		             solver->deviceIntegrandTaken() ? "yes" : "NO" );
 		std::printf( "MEQ:   batched local solve (NPCReduce/NPCRecover) %s\n",
 		             solver->batchedLocalSolveTaken() ? "yes" : "NO" );
+		// DEVICE-PLAN.md section 3.3 item 4. Printed beside the other route
+		// predicates because it is one: the kernel is built and bit-identical,
+		// and whether it RUNS is decided by where the border's columns happen
+		// to be when the fill reaches them. M-208.
+		std::printf( "MEQ:   bordered row dots on device %s\n",
+		             solver->borderDotsRanOnDevice() ? "yes" : "NO" );
 
 		/*
 		 * THE CROSSING COUNT -- DEVICE-PLAN.md §4 STAGE 4b.

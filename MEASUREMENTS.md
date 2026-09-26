@@ -10825,9 +10825,20 @@ identical, because it prints seven figures and the variation is at 1e-12.
 batched keys set to `"serial"`, the same case under `--device cuda` **reproduces
 itself exactly**. With them on — which is the DEFAULT under a Device, since the
 driver turns on `AssemblyMode::Batched` and `LocalFactorMode::Batched` where the
-file says nothing — it does not. `CanBatchLocalSolve()` gates
-`MultInvBatched()`, a batched dense LU through `BatchedLinAlg`'s GPU backend,
-and a batched cuBLAS factorisation is not obliged to be bit-reproducible.
+file says nothing — it does not.
+
+> **CORRECTED ON WHICH KEY, BY UPSTREAM, WHO SWEPT THEM ONE AT A TIME**
+> → [M-209](#m-209). This entry went on to name `MultInvBatched()` — *"a
+> batched cuBLAS factorisation is not obliged to be bit-reproducible"* — which
+> is a plausible mechanism and is **wrong**. Measured bitwise over four runs:
+> `LocalFactorMode::Batched` reproduces, `+ TraceAssemblyMode::Batched`
+> reproduces, and it is `AssemblyMode::Batched`'s **face kernels** that do not,
+> at 3.5e-16 to 4.7e-16 — they accumulate the element block `D` through
+> `AtomicAdd` from three or four faces, so arrival order shows in the last bit.
+> **The batched LU is innocent.** *Turning three keys off together isolates
+> "the batched route" and says nothing about which of the three*, which is the
+> same one-key-at-a-time discipline `CLAUDE.md` records twice elsewhere — and
+> the consequence is good news, since two of the three keys can be kept.
 
 **SO THE INSTRUMENT THIS WHOLE PLAN RESTS ON IS ALREADY WEAKER THAN ITS OWN
 ORDERING ASSUMES.** `DEVICE-PLAN.md` §3.5 puts cuDSS last among the residency
@@ -11198,3 +11209,251 @@ example in the tree that drives `solve()` from an outer Newton, so the solver's
 long-lived state is re-entered dozens of times with a Device configured. Every
 other device run in this file solves once or a few times per support sweep.
 *A defect in re-entry needs a case that re-enters.*
+
+### M-206
+
+**[M-205](#m-205)'s WRONG ANSWER IS FOUND AND FIXED, AND IT IS MEQ'S: A HOST
+FILL OF A VECTOR SUNDIALS READS ON THE DEVICE.** The stage walk that entry
+called for was built — `meq::stageChecksum()`, reporting each buffer's validity
+flags **before** it reads — and the first stage that disagreed named it in two
+probes.
+
+| | `outerResidual.y` flags | norm |
+|---|---|---|
+| `--device cpu` | `H+ D-` | 4.28221342560804352e+00 |
+| `--device cuda`, before | **`H- D+`** | **0.00000000000000000e+00** |
+| `--device cuda`, after | `H+ D+` | 4.28221342560804086e+00 |
+
+**`meq::FixedPointResidual::Mult()` FILLS `y` THROUGH `operator()`**, which
+writes the host copy and updates no flags. `y` is KINSOL's own work vector, and
+`mfem::SundialsNVector` binds **both** of SUNDIALS' arrays into one `Memory` —
+`data.Wrap( h_ptr, d_ptr, ... )`, `linalg/sundials.cpp:465` — with
+`N_VSetDeviceArrayPointer` handing the CUDA kernels the device one. So KINSOL
+read a fresh N_Vector, i.e. **zeros**, concluded `‖F‖ = 0`, and reported
+convergence at iteration 0. The q-driven outer loop then returned its starting
+coefficients and the driver printed `psi_ax = 1.723374e-01` against the host's
+`3.457380e-01`.
+
+**THE FIX IS TWO CALLS AND THE FIRST ONE ALONE DOES NOTHING**, which is the part
+worth keeping. `y.HostWrite()` before the fill makes the flags honest and
+changed **not one digit** of the run — because correct flags do not move data.
+What was needed as well is `y.Read()` *after* the fill, whose only purpose is
+the h2d copy into the array KINSOL will actually look at. *A sync fixes a lie
+about where the data is; it does not fix the data being in the wrong place.*
+
+**AND IT IS FIVE SEAMS, NOT ONE — EACH FOUND BY FIXING THE ONE BEFORE IT.**
+The whole of MEQ's outer-Newton plumbing hands SUNDIALS host-filled vectors,
+and every place it does had to be closed before the loop ran:
+
+| | what it does rawly | what it cost |
+|---|---|---|
+| `FixedPointResidual::Mult` | fills `y` through `operator()` | `‖F‖ = 0`, convergence at iteration 0 |
+| `FixedPointResidual::GetGradient` | `plus = x; plus( j ) += step;` | **`-nan` in three evaluations** |
+| `DenseJacobianSolver::Mult` | `x = 0.0` then fills `x` rawly | `-nan` at KINSOL's first step |
+| `FixedPointResidual::sameAs` | compares both iterates rawly | **an inexact Newton**: 30 iterations against 12, stopping at the cap |
+| `solveForToroidalField` | fills and reads `solution` rawly | the guess in and the answer out |
+
+**THE FOURTH IS THE ONE WITH NO SYMPTOM OF ITS OWN.** `sameAs()` decides
+whether the cached Jacobian is reused, so a stale comparison answers *same* at
+a point the gradient does not belong to — and the iteration then contracts
+linearly with every printed norm looking healthy. With the first three in and
+this one out, `psi_ax` was already right to **6.6e-06** and the loop took 30
+iterations to the host's 12 and stopped at its cap. *A raw read on a control
+decision costs convergence rate rather than correctness, which is the hardest
+kind to see.*
+
+**THE MIDDLE ROW IS THE ONE WORTH READING TWICE.** `plus = x` is device-aware,
+so under a Device `plus` comes out device-valid; `plus( j ) += step` then writes
+the HOST copy, and `Mult()`'s own funnel pulls the **unperturbed** device copy
+back over it. `forward` and `backward` come out equal, **every column of the
+finite-difference Jacobian is zero**, and the step that implies is infinite.
+Fixing only the first seam therefore replaced a wrong answer with `-nan` and
+730,196 spinning iterations — *a partial fix on this path does not look like
+progress, it looks like a new defect.*
+
+**AND THE READ SIDE HAD THE SAME HAZARD, BENIGNLY.** `evaluate()` takes `x( i )`
+just as rawly; the walk shows `outerResidual.x` at `H- D+` on the last
+iteration, and it was harmless only because the stale host copy happened to hold
+the same numbers. It is funnelled now.
+
+**WITH ALL FIVE IN, `--device cuda` REPRODUCES `--device cpu` TO EVERY PRINTED
+DIGIT.**
+
+| | `--device cpu` | `--device cuda` |
+|---|---|---|
+| outer loop | converged in **12** KINSOL iterations, **43** map evaluations | converged in **12**, **43** |
+| final norm | 1.94945e-06 | **1.94945e-06** |
+| equilibria solved / refused | 43 / 0 | 43 / 0 |
+| outer Jacobian conditioning | 1.386e-02 | **1.386e-02** |
+| `psi_ax` | 3.457380e-01 | **3.457380e-01** |
+| inner constraint | 2.220e-16 | 1.110e-16 |
+
+From an answer wrong by a factor of two to parity on every number the driver
+prints, with the inner constraint at round-off on both sides.
+
+**THE INNER SOLVES WERE NEVER WRONG, WHICH IS WHY NOTHING LOOKED RED.** The map
+probes agree between the two devices to **1e-15** at every evaluation —
+`toroidalMap.in` bit-identical, `toroidalMap.out` differing in the 15th digit —
+so every equilibrium in the loop was correct and only the loop's own arithmetic
+was not. With the fix, the residuals agree to fourteen digits: 4.28221342560804
+against 4.28221342560804, 4.28133016488959 against 4.28133016488961.
+
+### M-207
+
+**THE ALTERNATION OF [M-203](#m-203) AND THE 4× OF [M-187](#m-187) ARE ONE
+DEFECT, AND MEQ'S HALF OF IT IS CURED.** M-187 measured `machine-f-diiid` under
+a Device at **31 / 16 / 4** Newton iterations per support sweep against the
+host's 7 / 3 / 2 — right answers, four times the work — and M-203 found
+`mhd-rectangle` doing 9 steps against 5 with a no-op interleaved after every
+contraction. Re-measured with [M-205](#m-205)'s `xLoc.SyncFromBlocks()` in
+`meq::DeviceNPCOperator`:
+
+| | sweeps, host | sweeps, `--device cuda` |
+|---|---|---|
+| M-187, before the sync | 7 / 3 / 2 | **31 / 16 / 4** |
+| today | 7 / 3 / 2 | **7 / 3 / 2** |
+
+`psi_ax = 3.759851e-01`, constraint `-6.466e-12`, X-point `( 1.200929,
+-0.999491 )`, support `382/1004` — **every printed digit identical**, on both
+arms, at every sweep.
+
+**THE WALK NAMED THE MECHANISM BEFORE THE CURE CONFIRMED IT, AND A MONITOR
+COULD NOT HAVE.** `mfem::NewtonSolver` reports the residual and the iterate and
+keeps `c = J⁻¹r` to itself, so `meq::ProbedSolver` was put where `c` is
+produced. On `mhd-rectangle` under `debug`, with the **same** right-hand side:
+
+| | `jacobianSolve.rhs` | `jacobianSolve.increment` |
+|---|---|---|
+| host | 3.22464999931213738e-03 | **2.68548239713862591e+00** |
+| device | 3.22464999931187848e-03 | **7.39882988038810668e-02** |
+
+**36× too small, from an input that agrees to twelve digits** — which is a wrong
+JACOBIAN and not a wrong residual, and `GetGradient()` is where the unsynced
+`x_loc` lives. The next solve, at a state that has barely moved, returns
+2.68697301897836338e+00 and is correct. That is the alternation.
+
+**WHAT IS PROVED AND WHAT IS INFERRED, KEPT APART.** Proved: MEQ's own operator
+had the defect and the sync cures it, on the case M-187 measured. Inferred:
+`mhd-rectangle` takes `mfem::DarcyNPCOperator` — `device integrand NO` on that
+case against `yes` on the machine — whose `Mult()` and `GetGradient()` write
+`x_loc`'s blocks in the identical idiom and sync nothing, reported as
+`HDG-NPC-INPUT-SYNC-FROM-MEQ.md`. The inference is a code reading of two
+functions MEQ carries a copy of; **it is not measured, because MEQ cannot fix
+upstream's operator to test it**, and the experiment that settles it is upstream
+taking the two lines.
+
+### M-208
+
+**DEVICE-PLAN §3.3's ITEM 4 IS WIRED, AND WIRING IT MEASURED THE ROUTE AS A
+LOSS ON TODAY'S DATA LAYOUT — BY 11× IN TRANSFERS AND 62× IN BYTES.**
+`meq::DeviceRows::dotAll()` has been built and bit-identical since
+[M-190](#m-190) and the plan has carried item 4 as *"DONE, not wired"*. Wired,
+on `machine-f-diiid` under `--device cuda`, per Newton step:
+
+| the bordered fill's row contractions | transfers | bytes |
+|---|---|---|
+| host gathers, as shipped | **3.0** | **0.888 MB** |
+| device dots **in front of** the gathers | 17.7 | 15.1 MB |
+| device dots **instead of** the gathers | **33.1** | **55.1 MB** |
+
+**THE MIDDLE ROW IS THE OBVIOUS MISTAKE AND THE BOTTOM ROW IS THE FINDING.**
+Adding a device route in front of the host route it replaces pays both costs,
+which is not interesting. Removing the gathers and it got **worse again**:
+`flush()` deliberately brings every solved column to the **host**, because the
+dense elimination after it is host arithmetic, so each `dotAll()` pushes a
+698 KB column **back**. No kernel makes an h2d of the state cheaper than a
+gather from it. *The route is not wrong; the operand is in the wrong place.*
+
+**SO THE GATE IS A PREDICATE ABOUT THE DATA AND NOT A KEY ABOUT THE BUILD**, and
+that is the only form that can be right on both sides of residency:
+`Memory::DeviceIsValid() && !HostIsValid()` on the columns themselves. Today it
+is false, the host path runs, and `machine-f-diiid` reads **3 transfers and
+0.888 MB** — [M-198](#m-198)'s shipped figures to the byte — with `psi_ax`,
+the constraint and the X-point bit-identical between `cpu` and `cuda`. When the
+columns stop coming down, the same line turns the route on with nothing else
+changing.
+
+**AND IT IS REPORTED RATHER THAN INFERRED.** `borderDotsRanOnDevice()` prints
+beside the other route predicates and reads **NO** today on every configuration
+including CUDA, for the reason above — *a route that falls back silently is one
+nobody measures*, and this file has been caught twice reasoning about which
+route MEQ takes instead of asking.
+
+### M-209
+
+**UPSTREAM BUILT THE NPC FACE LOOP, AND THEIR REPLY CORRECTS TWO THINGS MEQ HAD
+WRITTEN DOWN — ONE OF THEM PUBLISHED THE SAME DAY.**
+`HDG-NPC-FACE-LOOP-REPLY-FROM-HDGDEV.md`. `CanBatchNPCTraversal()` is committed
+on `gf-hdg-linearise-first` (`21d7b2ce9f`, `3e0e5b46f1`) and is **not yet in
+`meq-integration`**, so nothing here is measured on MEQ's own build.
+
+**Measured by upstream on this machine's card at MEQ's size** — 4802 triangles,
+`k = 2`, 14 columns, which is MEQ's `N + 4` — per call, against the host route:
+
+| leg | host | kernels | |
+|---|---|---|---|
+| blocked `NPCReduce`, 14 columns | 0.0493 s | 0.0124 s | **4.0×** |
+| blocked `NPCRecover`, 14 columns | 0.0550 s | 0.0123 s | **4.5×** |
+| single-column `NPCReduce` | 0.0072 s | 0.0030 s | 2.4× |
+| single-column `NPCRecover` | 0.0080 s | 0.0036 s | 2.2× |
+
+The two routes agree to 6.5e-16, and the timings include uploading the inputs.
+
+**CORRECTION 1, AND IT IS [M-199](#m-199)'s: MEQ'S BORDERED STEP NEVER TOOK THE
+BATCHED LOCAL SOLVE AT ALL.** M-199 reads *"the element-local solves are already
+batched through `MultInvBatched()`, gated on `CanBatchLocalSolve()`, which reads
+**yes** under `--device cuda`"*. The predicate did read yes and it was **true
+only of the single-column overloads**. MEQ's bordered step goes through
+`DarcyNPCSolver::ArrayMult()`, which with more than one column takes the
+**blocked** `NPCReduce()`/`NPCRecover()` overloads — and those called
+`MultInvBlocked()` per element on the host whatever `SetLocalFactorMode()` said.
+So the whole traversal, element solves included, ran on the host on every
+bordered call. **MEQ asked a predicate and believed the answer, and the
+predicate was answering about a route MEQ's production step does not take** —
+upstream calls it their fault rather than MEQ's reading, and the transferable
+form is sharper than either: *a capability predicate is scoped to an entry
+point, and the one you call is not always the one it describes.*
+
+**CORRECTION 2, AND IT IS [M-200](#m-200)'s, PUBLISHED TODAY.** That entry
+isolated the device's run-to-run nondeterminism to "the batched route" by
+turning all three keys off together, then named `MultInvBatched()`'s cuBLAS
+factorisation as the mechanism. Upstream swept the keys **one at a time**,
+bitwise over four runs:
+
+| batched keys on | reproduces bitwise |
+|---|---|
+| none | yes |
+| `LocalFactorMode::Batched`, including the new traversal kernels | **yes** |
+| + `TraceAssemblyMode::Batched` | **yes** |
+| + `AssemblyMode::Batched` | **no** — 3.5e-16 to 4.7e-16 |
+
+**The batched LU is innocent**; it is `AssemblyMode::Batched`'s face kernels,
+whose `AtomicAdd` accumulates `D` from three or four faces per element so the
+arrival order shows in the last bit.
+
+**AND THE CONSEQUENCE IS THE OPPOSITE OF M-200's AND BETTER.** M-200 concluded
+the digit-for-digit instrument was already gone on the default device
+configuration and that cuDSS would merely be the second thing to take it. In
+fact **`AssemblyMode` Serial with the other two batched reproduces exactly**,
+and that configuration still moves the local factorisation, the NPC traversal
+and the trace assembly to the device. So there are **two** reproducible device
+configurations, not one: all-serial-keys stays the instrument for memory-path
+defects, and this one exercises batched arithmetic as well.
+
+**AND ONE WARNING IS ADDRESSED TO MEQ'S OWN CODE.** With the traversal's outputs
+left on the device and `UseDevice()` restored, an ordinary `x += dx` runs on the
+device — which updates a `BlockVector`'s monolithic flags and **not its blocks'**,
+since the blocks are aliases with flags of their own. The next `NPCResidual()`
+then reads `x.GetBlock( 0 )` from a stale host page: a fault under `debug`, and
+under CUDA the **previous Newton state** handed silently to the element loop.
+Three of upstream's own `[GPU]` cases went O(1) wrong on first hardware before
+they found it, and they are explicit that the library cannot fix it — the sync
+belongs to whoever wrote the side that changed. MEQ already calls
+`solution.SyncToBlocks()` in `solve()` ([M-79](#m-79)); **what is owed is
+checking it still sits after every whole-vector operation once the merge
+lands**, not assuming it does.
+
+**WHAT MEQ OWES BACK**, in upstream's words: re-take the crossing count on the
+bordered step once this is in `meq-integration` — the traversal should then
+contribute nothing between the columns going in and the answers coming out —
+and say whether MEQ's bordered configuration fails `CanBatchNPCTraversal()`.

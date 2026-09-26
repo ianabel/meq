@@ -1,5 +1,7 @@
 #include "meq/SafetyFactor.hpp"
 
+#include "meq/StageChecksum.hpp"
+
 #include <Eigen/Dense>
 
 #include <algorithm>
@@ -114,11 +116,18 @@ namespace meq
 		}
 
 		++solveCount;
+		// THE OUTERMOST SEAM OF THE q-DRIVEN LOOP, PROBED. `G( c ) - c` is what
+		// the outer Newton roots, so a device run reporting `final norm 0` in
+		// zero iterations is saying `G( c0 ) == c0` -- and these two lines say
+		// whether that is true of the map or of something upstream of it.
+		// MEASUREMENTS.md M-205.
+		stageChecksum( "toroidalMap.in", coefficients );
 		FluxSurfaceFamily const *family = solve( ggPrimeKnotsFromCoefficients(
 			coefficients, options.knotSamples, options.extension ) );
 		if ( family == nullptr || family->empty() )
 		{
 			++refusalCount;
+			stageChecksum( "toroidalMap.refusedEmptyFamily", coefficients );
 			return refuse( coefficients );
 		}
 
@@ -133,7 +142,10 @@ namespace meq
 			} );
 
 		lastGood = coefficients;
-		return fitToroidalFieldSquared( inverted, options.degree );
+		std::vector<double> const fitted =
+			fitToroidalFieldSquared( inverted, options.degree );
+		stageChecksum( "toroidalMap.out", fitted );
+		return fitted;
 	}
 
 	std::vector<double> monotoneSlopes( std::vector<double> const &x,

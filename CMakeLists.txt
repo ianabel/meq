@@ -232,6 +232,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/SourceFactory.cpp
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
+	src/meq/StageChecksum.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/SurfaceFit.cpp
 	src/meq/WarmStart.cpp
@@ -263,6 +264,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Sampler.cpp
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
+	src/meq/StageChecksum.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
 

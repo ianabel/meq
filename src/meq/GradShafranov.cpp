@@ -8,6 +8,8 @@
 #include "CriticalPoints.hpp"
 #include "Crossings.hpp"
 #include "DeviceNPC.hpp"
+#include "DeviceRows.hpp"
+#include "StageChecksum.hpp"
 
 // FB-7: conductors outside Gamma. The header forward-declares CoilSet so that it
 // does not pull in a file it needs only by reference; the definition is needed
@@ -1001,6 +1003,58 @@ namespace
 		/// stdout, but stage 4's acceptance criterion is an assertion on the
 		/// *order* of the convergence, so the history has to be a value rather
 		/// than a log line.
+		/**
+		 * The Jacobian solve's INPUT and OUTPUT, checksummed around it.
+		 *
+		 * **A MONITOR CANNOT SEE THE INCREMENT.** `mfem::NewtonSolver` reports
+		 * the residual and the iterate and keeps `c = J^-1 r` to itself, so a
+		 * run whose iterates alternate between a correct step and a step of
+		 * almost nothing -- MEASUREMENTS.md M-203 -- cannot be diagnosed from
+		 * the monitor alone. This sits where `c` is produced.
+		 *
+		 * **IT IS A DECORATOR, SO IT FORWARDS `ArrayMult` TOO.** `CLAUDE.md`'s
+		 * *Traps* records the cost of the alternative: `Operator::ArrayMult`
+		 * has a working base implementation that loops `Mult()`, so a
+		 * decorator that overrides only `Mult` silently un-blocks whatever it
+		 * wraps and nothing errors. This one is only installed under the
+		 * checksum environment variable, but a diagnostic that changes the
+		 * thing it measures is worthless.
+		 */
+		class ProbedSolver : public mfem::Solver
+		{
+			public:
+				explicit ProbedSolver( mfem::Solver &innerIn )
+					: mfem::Solver( innerIn.Height(), innerIn.Width() ),
+					  inner( innerIn )
+				{
+				}
+
+				void SetOperator( mfem::Operator const &op ) override // NOLINT(readability-identifier-naming)
+				{
+					inner.SetOperator( op );
+					height = inner.Height();
+					width = inner.Width();
+				}
+
+				void Mult( mfem::Vector const &b, // NOLINT(readability-identifier-naming)
+				           mfem::Vector &x ) const override
+				{
+					stageChecksum( "jacobianSolve.rhs", b );
+					inner.Mult( b, x );
+					stageChecksum( "jacobianSolve.increment", x );
+				}
+
+				void ArrayMult( // NOLINT(readability-identifier-naming)
+					mfem::Array<mfem::Vector const *> const &b,
+					mfem::Array<mfem::Vector *> &x ) const override
+				{
+					inner.ArrayMult( b, x );
+				}
+
+			private:
+				mfem::Solver &inner;
+		};
+
 		class ResidualRecorder : public mfem::IterativeSolverMonitor
 		{
 			public:
@@ -1026,12 +1080,40 @@ namespace
 				/// just reported. Keeping the copy would put a ratio of exactly one
 				/// on the end of the history and an observed order of zero with it,
 				/// which is a convergence failure that did not happen.
-				void MonitorResidual( int, mfem::real_t norm, // NOLINT(readability-identifier-naming)
-				                      mfem::Vector const &, bool isFinal ) override
+				void MonitorResidual( int it, mfem::real_t norm, // NOLINT(readability-identifier-naming)
+				                      mfem::Vector const &r, bool isFinal ) override
 				{
 					if ( !isFinal )
 						history.push_back( norm );
+					stage( "newton.residual", it, r );
 				}
+
+				/// MFEM's spelling, from IterativeSolverController. Carried only
+				/// for the stage walk -- the history above is norms and this is
+				/// the ITERATE, which is what a walk has to diff when two runs
+				/// agree on every norm and disagree on the work.
+				/// MEASUREMENTS.md M-203.
+				void MonitorSolution( int it, mfem::real_t, // NOLINT(readability-identifier-naming)
+				                      mfem::Vector const &x, bool ) override
+				{
+					stage( "newton.iterate", it, x );
+				}
+
+			private:
+
+				/// One probe, labelled with its iteration so two transcripts
+				/// line up even where they have different lengths -- which on
+				/// the case this was written for is the whole symptom.
+				static void stage( char const *what, int it,
+				                   mfem::Vector const &v )
+				{
+					if ( !stageChecksumWanted() ) { return; }
+					char label[ 64 ];
+					std::snprintf( label, sizeof( label ), "%s[%d]", what, it );
+					stageChecksum( label, v );
+				}
+
+			public:
 
 			private:
 				std::vector<double> &history;
@@ -7471,6 +7553,11 @@ namespace
 		return deviceIntegrandInUse;
 	}
 
+	bool GradShafranovSolver::borderDotsRanOnDevice() const
+	{
+		return borderDotsOnDevice;
+	}
+
 	bool GradShafranovSolver::sourceRuleIsExplicit() const
 	{
 		return sourceIntegrator != nullptr
@@ -7960,6 +8047,11 @@ namespace
 		/// elements the plasma fill reached. Rebuilt every Newton step, because
 		/// the support moves with the plasma. See meq::CompressedRows.
 		CompressedRows currentRows;
+		/// The same row on the device; see transmissionRowsDevice. Both sets
+		/// have to move together or neither wins: a gather left on the host
+		/// for ONE of them still brings the whole solution block over, and the
+		/// other's launches then cost a second traversal for nothing.
+		DeviceRows currentRowsDevice;
 		std::vector<int> currentRowSupport;
 		double currentIntegral = 0.0;
 		double constraintL = 0.0;
@@ -9348,6 +9440,26 @@ namespace
 		 * sum bit-unchanged; see meq::CompressedRows.
 		 */
 		CompressedRows transmissionRows;
+		/*
+		 * THE SAME ROWS ON THE DEVICE -- DEVICE-PLAN.md section 3.3, item 4.
+		 *
+		 * `CompressedRows::gather()` opens with `v.HostRead()`, so reading a
+		 * few hundred entries of a support brings the ENTIRE solution block to
+		 * the host: 698 KB on the shipped machine case, and O( elements ).
+		 * `meq::DeviceRows::dotAll()` does every row against one column in one
+		 * launch and leaves the answer device-side, so the crossing is
+		 * `rowCount()` doubles instead.
+		 *
+		 * **IT BUYS NOTHING MEASURABLE TODAY AND THAT IS EXPECTED**
+		 * -- [M-198](../MEASUREMENTS.md) puts these sites at ZERO transfers,
+		 * because by the time the border runs something earlier has already
+		 * brought the state over and the funnel is free. This is a ROUTE for a
+		 * resident step, the same shape as `AssemblyMode::Batched`: a cost is
+		 * a property of a target, not of a route. It refuses with no Device
+		 * configured, so the host path is what every host build runs and is
+		 * bit-identical either way by DeviceRows' own contract.
+		 */
+		DeviceRows transmissionRowsDevice;
 		std::vector<mfem::Vector> exteriorColumns, exteriorZ;
 		if ( nModes > 0 )
 		{
@@ -9364,6 +9476,14 @@ namespace
 			// again gives a border that is right in magnitude and wrong in
 			// sign -- which does not diverge, it just fails to converge.
 			transmissionRows.compress( rows, transmissionSupport );
+			// Uploaded here rather than lazily at the fill: this is the one
+			// place the rows change, and a mirror refreshed anywhere else is a
+			// mirror that can be stale without anything saying so.
+			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
+			     && transmissionRows.rowCount() > 0 )
+				transmissionRowsDevice.upload( transmissionRows.support(),
+				                               transmissionRows.values(),
+				                               transmissionRows.rowCount() );
 
 			for ( int mode = 0; mode < nModes; ++mode )
 				exteriorZ.emplace_back( n );
@@ -10358,7 +10478,9 @@ namespace
 
 			// b_i . v, for each border row.
 			auto rowDot = [ & ]( int i, mfem::Vector const &v,
-			                     BorderGather const *pre = nullptr )
+			                     BorderGather const *pre = nullptr,
+			                     mfem::Vector const *transmissionPre = nullptr,
+			                     mfem::Vector const *currentPre = nullptr )
 			{
 				/*
 				 * AND THE FUNNEL SYNCS TOO, WHICH IS BELT AND BRACES AND IS
@@ -10434,12 +10556,31 @@ namespace
 					// plasma fill reached and is exactly zero everywhere else,
 					// so the sum below has the same terms in the same ascending
 					// order as the walk over all n it replaces.
+					// The device route, at the one branch it belongs to;
+					// see the transmission arm below for why the dispatch is
+					// not duplicated in the caller.
+					if ( currentPre != nullptr )
+						return ( *currentPre )( 0 );
 					if ( pre )
 						return currentRows.dot( 0, pre->current );
 					return currentRows.dot( 0, v, rowGatherScratch );
 				}
 
 				int const mode = i - nBorders;
+				/*
+				 * THE DEVICE ROUTE, AND THE DISPATCH STAYS IN ONE PLACE.
+				 *
+				 * The caller cannot tell a transmission row from the four
+				 * others without re-implementing every branch above, and a
+				 * second copy of this dispatch is exactly the kind of thing
+				 * that goes wrong silently when a border row is added. So the
+				 * precomputed vector is passed IN and consulted here, at the
+				 * one branch it belongs to. It is bit-identical to the line
+				 * below it -- meq::DeviceRows' contract, asserted on the
+				 * double in tests/unit/DeviceRowsTests.cpp.
+				 */
+				if ( transmissionPre != nullptr )
+					return ( *transmissionPre )( mode );
 				if ( pre )
 					return transmissionRows.dot( mode, pre->transmission );
 				return transmissionRows.dot( mode, v, rowGatherScratch );
@@ -10565,6 +10706,11 @@ namespace
 				assembleCurrentColumn( unknown, columnL );
 				assembleCurrentRow( unknown, currentRow, &currentRowSupport );
 				currentRows.compress( currentRow, currentRowSupport );
+				if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
+				     && currentRows.rowCount() > 0 )
+					currentRowsDevice.upload( currentRows.support(),
+					                          currentRows.values(),
+					                          currentRows.rowCount() );
 				assembleCurrentNormalisationCorner( unknown, currentAgainstAxis,
 				                                    currentAgainstBoundary );
 				// Queued, not solved: the flush below takes it with the rest.
@@ -10667,9 +10813,120 @@ namespace
 				BorderGather gatheredY;
 				std::vector<BorderGather> gatheredZ(
 					static_cast<std::size_t>( nBorderTotal ) );
+
+				/*
+				 * THE COMPRESSED ROWS' DOTS, ON THE DEVICE, ONE LAUNCH PER
+				 * COLUMN PER ROW SET -- DEVICE-PLAN.md section 3.3, item 4.
+				 *
+				 * **BEFORE THE GATHERS AND NOT AFTER, WHICH IS THE WHOLE
+				 * POINT.** `CompressedRows::gather()` opens with
+				 * `v.HostRead()`, so a gather left in place brings the entire
+				 * solution block to the host -- 698 KB on the shipped machine
+				 * case -- and the launches below then buy nothing while
+				 * costing a second traversal. Measured with the gathers still
+				 * running: transfers per step went from 3.0 to 17.7 and bytes
+				 * from 0.888 MB to 15.1 MB. *A device route added in front of
+				 * the host route it replaces is strictly worse than either.*
+				 *
+				 * **AND BOTH ROW SETS MOVE TOGETHER OR NEITHER DOES.** They
+				 * have different supports and so need separate mirrors, but
+				 * they read the SAME columns: one gather left on the host for
+				 * either set pays the full crossing and takes the other's win
+				 * with it.
+				 *
+				 * All or nothing on refusals for the same reason, and the
+				 * results are funnelled once here so the dense arithmetic
+				 * below stays exactly the host arithmetic it was. The read is
+				 * `rowCount()` doubles against the block's 698 KB.
+				 */
+				std::vector<mfem::Vector> transmissionDots;
+				std::vector<mfem::Vector> currentDots;
+				mfem::Vector transmissionDotsY, currentDotsY;
+				bool const wantTransmission = transmissionRows.rowCount() > 0;
+				bool const wantCurrent = currentRows.rowCount() > 0;
+				/*
+				 * AND THE ROUTE SELECTS ITSELF ON WHERE THE COLUMNS ALREADY
+				 * ARE, WHICH IS THE MEASUREMENT AND NOT A PREFERENCE.
+				 *
+				 * A kernel wants its operand on the device. Today `flush()`
+				 * deliberately brings every solved column to the HOST -- the
+				 * dense elimination below it is host arithmetic -- so taking
+				 * this route unconditionally pushes each column BACK, 698 KB
+				 * at a time. Measured on `machine-f-diiid`, per Newton step:
+				 *
+				 *   host gathers, as shipped              3.0 transfers
+				 *   device dots in FRONT of the gathers  17.7 transfers
+				 *   device dots INSTEAD of the gathers   33.1 transfers
+				 *
+				 * -- 0.888 MB against 15.1 MB against 55.1 MB. The route is
+				 * not wrong; the operand is in the wrong place, and no amount
+				 * of kernel makes an h2d of the state cheaper than a gather
+				 * from it. [M-208](../MEASUREMENTS.md).
+				 *
+				 * So the gate is `DeviceIsValid()` on the columns themselves.
+				 * Today that is false and the host path runs, bit for bit as
+				 * before; under a resident step the columns never come down
+				 * and the same line turns the route on with nothing else
+				 * changing. **This is a predicate about the DATA and not a
+				 * key about the build**, which is the only form that can be
+				 * right both before and after residency arrives.
+				 */
+				auto columnIsResident = [ & ]( mfem::Vector const &v )
+				{
+					mfem::Memory<mfem::real_t> const &m = v.GetMemory();
+					return m.DeviceIsValid() && !m.HostIsValid();
+				};
+				bool deviceDots =
+					( !wantTransmission || transmissionRowsDevice.valid() )
+					&& ( !wantCurrent || currentRowsDevice.valid() )
+					&& ( wantTransmission || wantCurrent )
+					&& columnIsResident( y );
+				for ( int j = 0; deviceDots && j < nBorderTotal; ++j )
+					deviceDots = columnIsResident( columnZ( j ) );
+				borderDotsOnDevice = deviceDots;
+
+				auto dotColumn = [ & ]( mfem::Vector const &v,
+				                        mfem::Vector &tOut,
+				                        mfem::Vector &cOut )
+				{
+					if ( wantTransmission
+					     && !transmissionRowsDevice.dotAll( v, tOut ) )
+						return false;
+					if ( wantCurrent && !currentRowsDevice.dotAll( v, cOut ) )
+						return false;
+					return true;
+				};
+
+				if ( deviceDots )
+				{
+					transmissionDots.resize(
+						static_cast<std::size_t>( nBorderTotal ) );
+					currentDots.resize(
+						static_cast<std::size_t>( nBorderTotal ) );
+					deviceDots = dotColumn( y, transmissionDotsY, currentDotsY );
+					for ( int j = 0; deviceDots && j < nBorderTotal; ++j )
+						deviceDots = dotColumn(
+							columnZ( j ),
+							transmissionDots[ static_cast<std::size_t>( j ) ],
+							currentDots[ static_cast<std::size_t>( j ) ] );
+				}
+				if ( deviceDots )
+				{
+					countedHostRead( transmissionDotsY, __LINE__ );
+					countedHostRead( currentDotsY, __LINE__ );
+					for ( mfem::Vector const &d : transmissionDots )
+						countedHostRead( d, __LINE__ );
+					for ( mfem::Vector const &d : currentDots )
+						countedHostRead( d, __LINE__ );
+				}
+
 				auto gatherFor = [ & ]( mfem::Vector const &v,
 				                        BorderGather &out )
 				{
+					// Skipped entirely on the device route: every consumer of
+					// these gathers is a dot the launches above have already
+					// done, and the gather is the crossing.
+					if ( deviceDots ) { return; }
 					if ( transmissionRows.rowCount() > 0 )
 						transmissionRows.gather( v, out.transmission );
 					if ( currentRows.rowCount() > 0 )
@@ -10682,12 +10939,24 @@ namespace
 
 				for ( int i = 0; i < nBorderTotal; ++i )
 				{
-					right( i ) = rowDot( i, y, &gatheredY ) - constraintAt( i );
+					right( i ) = rowDot( i, y,
+					                     deviceDots ? nullptr : &gatheredY,
+					                     deviceDots ? &transmissionDotsY
+					                                : nullptr,
+					                     deviceDots ? &currentDotsY : nullptr )
+					             - constraintAt( i );
 					for ( int j = 0; j < nBorderTotal; ++j )
+					{
+						std::size_t const c = static_cast<std::size_t>( j );
 						dense( i, j ) =
 							cornerEntry( i, j )
 							- rowDot( i, columnZ( j ),
-							          &gatheredZ[ static_cast<std::size_t>( j ) ] );
+							          deviceDots ? nullptr : &gatheredZ[ c ],
+							          deviceDots ? &transmissionDots[ c ]
+							                     : nullptr,
+							          deviceDots ? &currentDots[ c ]
+							                     : nullptr );
+					}
 				}
 
 				/*
@@ -11771,7 +12040,20 @@ namespace
 			// them and its Mult() aborts. Handing the trace solver straight to
 			// Newton would fail loudly, which is upstream's design and better
 			// than the alternative.
-			nonlinear->SetSolver( *npcLinear );
+			// The probe is a decorator and is installed only when the stage
+			// walk is on, so an ordinary run has the solver Newton has always
+			// had. It must OUTLIVE the Newton solver, which is why it is held
+			// here rather than constructed in the call.
+			std::unique_ptr<ProbedSolver> probedLinear;
+			if ( stageChecksumWanted() )
+			{
+				probedLinear = std::make_unique<ProbedSolver>( *npcLinear );
+				nonlinear->SetSolver( *probedLinear );
+			}
+			else
+			{
+				nonlinear->SetSolver( *npcLinear );
+			}
 			nonlinear->SetMonitor( recorder );
 
 #ifdef MFEM_USE_SUNDIALS

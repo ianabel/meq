@@ -1,5 +1,8 @@
 #include "meq/SafetyFactorSolve.hpp"
 
+#include "meq/Crossings.hpp"
+#include "meq/StageChecksum.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -82,9 +85,44 @@ namespace meq
 
 				void Mult( mfem::Vector const &x, mfem::Vector &y ) const override
 				{
+					/*
+					 * `y` IS KINSOL'S OWN WORK VECTOR AND UNDER A DEVICE IT IS
+					 * DEVICE-VALID WHEN IT ARRIVES.
+					 *
+					 * Filling it through `operator()` writes the HOST copy and
+					 * updates no flags, so KINSOL reads back the device copy --
+					 * a fresh N_Vector, i.e. zeros -- decides `|| F || = 0` and
+					 * reports convergence at iteration 0 with the starting
+					 * coefficients. The whole q-driven outer loop then returns
+					 * its initial guess, and every printed number about the
+					 * INNER solve is correct, which is what made it survive.
+					 * MEASUREMENTS.md M-206.
+					 *
+					 * `HostWrite()` and not `HostReadWrite()`: every entry is
+					 * overwritten below, so there is nothing to bring down and
+					 * a read-write would pay a d2h copy for data about to be
+					 * discarded.
+					 *
+					 * **AND THE HOST WRITE ALONE IS NOT ENOUGH, WHICH IS THE
+					 * HALF ONLY THIS CALLER CAN DO.** `SundialsNVector` binds
+					 * SUNDIALS' HOST array and its DEVICE array into one
+					 * `Memory` -- `data.Wrap( h_ptr, d_ptr, ... )`,
+					 * `linalg/sundials.cpp` -- and KINSOL's `N_Vector_Cuda`
+					 * kernels read the device one. Correct flags do not move
+					 * data by themselves, so the trailing `Read()` is what
+					 * copies h2d into the array KINSOL will actually look at.
+					 * It leaves BOTH valid, which is right here because MFEM
+					 * cannot know which of the two pointers SUNDIALS will use
+					 * next. With no Device configured it returns the host
+					 * pointer and does nothing.
+					 */
+					stageChecksum( "outerResidual.x", x );
 					std::vector<double> const image = evaluate( x );
+					y.HostWrite();
 					for ( int i = 0; i < x.Size(); ++i )
 						y( i ) = image[ static_cast<std::size_t>( i ) ] - x( i );
+					y.Read();
+					stageChecksum( "outerResidual.y", y );
 				}
 
 				/// The conditioning of the last Jacobian formed, as
@@ -114,13 +152,36 @@ namespace meq
 						double const step =
 							difference*std::max( std::abs( x( j ) ), mfem::real_t( 1.0 ) );
 
+						/*
+						 * THE PERTURBATION HAS TO SURVIVE, AND UNDER A DEVICE
+						 * IT DOES NOT BY DEFAULT.
+						 *
+						 * `plus = x` is device-aware, so if `x`'s live copy is
+						 * the device's then `plus` becomes device-valid --
+						 * and `plus( j ) += step` writes the HOST copy and
+						 * updates nothing. `Mult()` then funnels `plus`,
+						 * which pulls the UNPERTURBED device copy back over
+						 * the step just written: `forward` and `backward`
+						 * come out equal, every column of the Jacobian is
+						 * zero, and the step it implies is infinite. Measured:
+						 * the q-driven outer loop reaches `-nan` in three map
+						 * evaluations and then spins.
+						 *
+						 * `HostReadWrite()` and not `HostWrite()`: the copy of
+						 * `x` is what is being perturbed, so the existing
+						 * contents are wanted. MEASUREMENTS.md M-206.
+						 */
 						plus = x;
+						plus.HostReadWrite();
 						plus( j ) += step;
 						minus = x;
+						minus.HostReadWrite();
 						minus( j ) -= step;
 						Mult( plus, forward );
 						Mult( minus, backward );
 
+						countedHostRead( forward, __LINE__ );
+						countedHostRead( backward, __LINE__ );
 						for ( int i = 0; i < n; ++i )
 							gradient( i, j ) =
 								( forward( i ) - backward( i ) )/( 2.0*step );
@@ -135,6 +196,17 @@ namespace meq
 			private:
 				static bool sameAs( mfem::Vector const &a, mfem::Vector const &b )
 				{
+					/*
+					 * THIS DECIDES WHETHER A JACOBIAN IS REUSED, SO A STALE
+					 * READ HERE IS AN INEXACT NEWTON RATHER THAN A WRONG
+					 * NUMBER. `a` is KINSOL's iterate; comparing its stale
+					 * host copy against the cached point can answer "same" at
+					 * a point the gradient does not belong to, and the
+					 * iteration then contracts linearly with every norm
+					 * looking healthy. MEASUREMENTS.md M-206.
+					 */
+					countedHostRead( a, __LINE__ );
+					countedHostRead( b, __LINE__ );
 					if ( a.Size() != b.Size() )
 						return false;
 					for ( int i = 0; i < a.Size(); ++i )
@@ -145,6 +217,14 @@ namespace meq
 
 				std::vector<double> evaluate( mfem::Vector const &x ) const
 				{
+					// THE READ SIDE OF THE SAME HAZARD. `x` is KINSOL's
+					// iterate, so under a Device the live copy can be the
+					// device's and `operator()` is as raw an accessor as the
+					// write above. It was benign on the case that found this
+					// only because the stale host copy happened to hold the
+					// same numbers -- which is not a property anything
+					// guarantees.
+					countedHostRead( x, __LINE__ );
 					std::vector<double> in( static_cast<std::size_t>( x.Size() ) );
 					for ( int i = 0; i < x.Size(); ++i )
 						in[ static_cast<std::size_t>( i ) ] = x( i );
@@ -221,9 +301,31 @@ namespace meq
 
 				void Mult( mfem::Vector const &b, mfem::Vector &x ) const override
 				{
-					x = 0.0;
+					/*
+					 * THE SAME SEAM AS FixedPointResidual::Mult, ONE LEVEL
+					 * DOWN, AND KINSOL OWNS BOTH VECTORS HERE TOO.
+					 *
+					 * `b` is KINSOL's residual and `x` the step it will apply,
+					 * so under a Device both are `SundialsNVector`s carrying a
+					 * host AND a device array. Eigen is host arithmetic, so
+					 * `b` is funnelled down and `x` is filled on the host and
+					 * pushed back up -- `HostWrite()` for the flags,
+					 * `Read()` for the copy, exactly as the residual does.
+					 *
+					 * `x = 0.0` is NOT the way to clear it: that operator is
+					 * device-aware and would leave the zeros device-valid,
+					 * after which the host fill below reaches nothing KINSOL
+					 * reads. MEASUREMENTS.md M-206.
+					 */
+					countedHostRead( b, __LINE__ );
+					x.HostWrite();
+					for ( int i = 0; i < x.Size(); ++i )
+						x( i ) = 0.0;
 					if ( jacobian == nullptr )
+					{
+						x.Read();
 						return;
+					}
 
 					Eigen::Index const n = jacobian->Height();
 					Eigen::MatrixXd a( n, n );
@@ -251,6 +353,8 @@ namespace meq
 
 					for ( Eigen::Index i = 0; i < n; ++i )
 						x( static_cast<int>( i ) ) = step( i );
+					// Into the array KINSOL will read; see the note above.
+					x.Read();
 
 					double const ratio =
 						largest > 0.0 ? sigma( n - 1 )/largest : 0.0;
@@ -292,6 +396,14 @@ namespace meq
 		mfem::Vector solution( n );
 		for ( int i = 0; i < n; ++i )
 			solution( i ) = start[ static_cast<std::size_t>( i ) ];
+		/*
+		 * AND THE STARTING POINT AND THE ANSWER CROSS THE SAME SEAM.
+		 * `solution` becomes a KINSOL N_Vector at `newton.Mult()` below --
+		 * `iterative_mode` is true, so it carries the guess IN and the answer
+		 * OUT -- and both ends are filled and read here through `operator()`.
+		 * Same obligation as FixedPointResidual::Mult; MEASUREMENTS.md M-206.
+		 */
+		solution.Read();
 
 		/*
 		 * THE RANK CHECK HAPPENS HERE AND NOT INSIDE KINSOL, AND IT IS NOT AN
@@ -391,6 +503,8 @@ namespace meq
 		newton.iterative_mode = true;
 		mfem::Vector const unused;
 		newton.Mult( unused, solution );
+		// The answer comes back wherever KINSOL last wrote it.
+		countedHostRead( solution, __LINE__ );
 
 		for ( int i = 0; i < n; ++i )
 			out.coefficients[ static_cast<std::size_t>( i ) ] = solution( i );

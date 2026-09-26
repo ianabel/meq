@@ -528,6 +528,17 @@ sweep against the host's **7 / 3 / 2**, and reported the same `psi_ax`, the same
 `psi_bnd`, the same X-point and the same support counts at every sweep. The
 answer was right and the work was 4×. → **[M-187](MEASUREMENTS.md#m-187)**.
 
+**AND IT IS CURED, BY THE `xLoc` SYNC OF THE SEVENTH LINK BELOW** →
+**[M-207](MEASUREMENTS.md#m-207)**. `machine-f-diiid` under `--device cuda` now
+reads **7 / 3 / 2**, the host's to every digit at every sweep. **The walk that
+proved it is the one M-187 itself prescribed and did not keep**:
+`meq::ProbedSolver` sits where `mfem::NewtonSolver` keeps `c = J⁻¹r` to itself,
+and on `mhd-rectangle` it reads the **same right-hand side to twelve digits
+returning an increment 36× too small** — a wrong Jacobian, not a wrong
+residual, which is what points at `GetGradient()`. **`mhd-rectangle` is still
+red because it takes `mfem::DarcyNPCOperator`**, which carries the same idiom
+unsynced; that half is upstream's and is reported.
+
 **THE SYMPTOM NAMES THE JACOBIAN AND NOT THE STATE**: the host is quadratic and
 done in two, the device contracts by a constant factor of about ten per step,
 and linear convergence at a fixed rate is what an inexact Jacobian looks like.
@@ -653,8 +664,9 @@ build because without debug info gdb collapses the inlined template frames onto
 `GetGradient()` and names the wrong function. Reported as
 `HDG-NPC-INPUT-SYNC-FROM-MEQ.md`.
 
-**AND `examples/q-driven.toml` IS WRONG UNDER ANY CONFIGURED DEVICE BY A FACTOR
-OF TWO, WHICH IS A SEPARATE DEFECT AND IS OPEN.** `psi_ax = 1.723374e-01`
+**AND `examples/q-driven.toml` WAS WRONG UNDER ANY CONFIGURED DEVICE BY A FACTOR
+OF TWO, WHICH IS A SEPARATE DEFECT AND IS NOW FOUND** →
+**[M-206](MEASUREMENTS.md#m-206)**. `psi_ax = 1.723374e-01`
 against the host's `3.457380e-01`, the outer loop reporting *"converged in 0
 KINSOL iterations … final norm 0"*, **and the inner bordered solve converging in
 the same 4 Newton steps and satisfying its own constraint to 1e-16 on both** —
@@ -667,7 +679,48 @@ leaves the answer wrong to every digit, so the two are two defects reachable by
 one command. **`Device( "debug" )` cannot see this one** — it runs the whole
 43-solve outer loop to completion without faulting — which is M-187's recorded
 limit: it catches a raw access to the **wrong location** and is blind to honest
-flags over a **stale copy**. The stage-by-stage checksum is what is owed.
+flags over a **stale copy**.
+
+**THE STAGE-BY-STAGE CHECKSUM IS WHAT FOUND IT, AND IT IS KEPT THIS TIME.**
+`meq::stageChecksum()` in `src/meq/StageChecksum.{hpp,cpp}` reports each
+buffer's **validity flags before it reads** — the half a plain checksum lacks,
+since a stage whose host copy is not live is the defect whether or not its
+value is wrong — and prints under `MEQ_STAGE_CHECKSUM`. It named
+`outerResidual.y` at `H- D+` with norm **0** where the host had 4.28.
+
+**MEQ HANDS SUNDIALS HOST-FILLED VECTORS AND SUNDIALS READS THE DEVICE ARRAY.**
+`mfem::SundialsNVector` binds BOTH of SUNDIALS' pointers into one `Memory`
+(`linalg/sundials.cpp:465`), and `N_VSetDeviceArrayPointer` is what KINSOL's
+CUDA kernels use. **Five seams, each hidden behind the one in front of it**:
+`FixedPointResidual::Mult` filling `y` rawly (`‖F‖ = 0`, converged at iteration
+0), `::GetGradient`'s `plus( j ) += step` after a device-aware `plus = x` (**a
+zero finite-difference Jacobian, so `-nan` in three evaluations**),
+`DenseJacobianSolver::Mult`'s `x = 0.0` plus a raw fill, `::sameAs`'s raw
+comparison of the two iterates, and the starting guess and answer in
+`solveForToroidalField`. *Fixing only the first replaced a wrong answer with
+730,196 spinning NaN iterations — a partial fix here does not look like
+progress, it looks like a new defect.*
+
+**AND THE FOURTH HAS NO SYMPTOM OF ITS OWN, WHICH MAKES IT THE HARDEST.**
+`sameAs()` decides whether the cached Jacobian is reused, so a stale comparison
+answers *same* at a point the gradient does not belong to and the iteration
+contracts **linearly with every printed norm looking healthy**. With the other
+four in and this one out, `psi_ax` was already right to 6.6e-06 and the loop
+took 30 iterations against the host's 12, stopping at its cap. *A raw read on a
+control decision costs convergence rate rather than correctness.*
+
+**`HostWrite()` IS NOT ENOUGH ON ITS OWN AND THAT IS THE DURABLE PART.** It
+makes the flags honest and moves nothing; what is also needed is a `Read()`
+*after* the fill, whose only job is the h2d copy into the array the consumer
+will actually look at. *A sync fixes a lie about where the data is; it does not
+fix the data being in the wrong place.*
+
+**AND `--device cuda` NOW REPRODUCES `--device cpu` TO EVERY PRINTED DIGIT** —
+12 KINSOL iterations, 43 map evaluations, final norm `1.94945e-06`, conditioning
+`1.386e-02`, `psi_ax = 3.457380e-01`, with the inner constraint at round-off on
+both sides. From an answer wrong by a factor of two to parity on every number
+the driver prints.
+
 **And `q-driven` is the only example in the tree that drives `solve()` from an
 outer Newton**, so it is the only one that re-enters the solver's long-lived
 state dozens of times with a Device configured; *a defect in re-entry needs a
@@ -854,7 +907,20 @@ already owns outright — **stays on the host under `--device`**. MEQ's device
 runs were leaving it there by a driver line whose stated justification, the
 condensation cache, had expired. `apps/meq.cpp` now turns it on under a Device
 exactly as it turns on `AssemblyMode::Batched`, and only where the file said
-nothing. Worth **1.54× on `ComputeH` under CUDA** and 1.97× on the host, with
+nothing.
+
+**AND THAT PAIRING IS NOW A LIVE DECISION RATHER THAN A SETTING** →
+**[M-209](MEASUREMENTS.md#m-209)**. Upstream swept the three batched keys one at
+a time, bitwise: `LocalFactorMode::Batched` and `TraceAssemblyMode::Batched`
+**reproduce exactly** and `AssemblyMode::Batched` does **not**, at 3.5e-16 to
+4.7e-16, because its face kernels accumulate `D` through `AtomicAdd` from three
+or four faces per element. So the driver's own device default is what destroys
+*"`--device cuda` reproduces `--device cpu`"* — the instrument `DEVICE-PLAN.md`
+§3.5 orders cuDSS last to protect, and the reason residency is built in double
+at all. Turning `AssemblyMode` back to `Serial` under a Device would keep the
+instrument and still move the local factorisation, the NPC traversal and the
+trace assembly; what it gives up is the face kernels. **Not changed**, because
+it is a trade between two things MEQ wants and not a defect. Worth **1.54× on `ComputeH` under CUDA** and 1.97× on the host, with
 `psi_ax` unmoved → **[M-185](MEASUREMENTS.md#m-185)**.
 → **[M-136](MEASUREMENTS.md#m-136)**.
 → **[M-99](MEASUREMENTS.md#m-99)** and **[M-101](MEASUREMENTS.md#m-101)**.
@@ -3066,6 +3132,16 @@ src/meq/     the library. Config, Profiles, Source, SourceFactory,
              CriticalPoints, FluxSurfaces, SurfaceAverage, SurfaceFit and
              Zernike are the solution-inversion work and were written here
              rather than ported; see that section.
+             Crossings and StageChecksum are the two DEVICE instruments and
+             neither is part of the solve. Crossings counts host reads of a
+             device-written state and, separately, how many of them MOVED
+             data -- read the transfer column, not the read column. Stage-
+             Checksum is the other half: it hashes a buffer at a named stage
+             and reports its VALIDITY FLAGS BEFORE the read, so `H- D+` names
+             a stage where anything not going through a funnel gets stale
+             data. It prints only under MEQ_STAGE_CHECKSUM, an environment
+             variable rather than a key because a walk has to be reachable on
+             a shipped examples/*.toml without editing it. M-206, M-207.
 apps/        drivers. meq.cpp, and MEQ_BUILD_APP defaults ON -- plus
              meq-run.in, the mesh-then-solve wrapper, which CMake
              configures and file(GENERATE)s into the build directory as

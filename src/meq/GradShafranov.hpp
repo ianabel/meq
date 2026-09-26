@@ -1123,6 +1123,20 @@ namespace meq
 			/// measures** -- upstream's stated reason for making their
 			/// predicates public, and it applies to MEQ's half the same way.
 			bool deviceIntegrandTaken() const;
+
+			/**
+			 * Whether the bordered fill's row contractions ran on the device.
+			 *
+			 * **FALSE ON EVERY HOST BUILD AND, TODAY, UNDER A DEVICE TOO.**
+			 * The route exists and is bit-identical; what gates it is whether
+			 * the border's COLUMNS are still device-resident when the fill
+			 * runs, and `flush()` currently brings them to the host for the
+			 * dense elimination. Reported rather than inferred for the reason
+			 * every other route predicate here is: *a route that falls back
+			 * silently is one nobody measures.*
+			 * [M-208](../MEASUREMENTS.md).
+			 */
+			bool borderDotsRanOnDevice() const;
 			/// @}
 
 			bool batchedPotFaceAssemblyTaken() const;
@@ -5073,6 +5087,11 @@ namespace meq
 			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Batched;
 
 			bool deviceIntegrandInUse = false;
+			/// DEVICE-PLAN.md section 3.3 item 4; see borderDotsRanOnDevice().
+			/// Mutable because the bordered step that sets it is const-correct
+			/// about everything else it touches and this is a report, not
+			/// state the solve reads back.
+			mutable bool borderDotsOnDevice = false;
 			bool prepared;
 			bool postProcessed;
 	};
