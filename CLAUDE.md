@@ -2771,6 +2771,22 @@ way.
   hours in one session on `until ! pgrep -f 'build/tests/PlasmaEdge...'`, every
   one of them matching its own command line.
 
+* **AND THE WRITER MAY NEVER WRITE AT ALL, WHICH NO PATTERN CAN FIX.** The
+  bullet above is about a waiter and a writer disagreeing on the marker; this
+  is the case where the writer is *gone* — killed mid-flight, timed out, or
+  restarted under a different filename because the first attempt was being
+  redone. The file then sits at its last byte forever and an unbounded waiter
+  sleeps on it for the life of the session. Measured here: **three waiters on
+  one such file, alive at 19.5 hours**, after the run producing it was killed
+  and restarted writing somewhere else. They cost nothing but a `sleep` each
+  and were invisible because every answer they were waiting for had already
+  arrived by another route.
+
+  **So give a waiter a BOUND**: `for i in $( seq 1 120 ); do <check> && break;
+  sleep 30; done` surfaces a dead producer as *gave up* rather than as
+  silence. **And when a long run is killed and restarted, kill its waiters
+  too** — they are not addressed to the run, they are addressed to a filename.
+
 **If a waiter is used, check it actually fired.**
 
 **AN ELEMENT-LOCAL NEWTON EVALUATES ITS POLYNOMIAL OUTSIDE ITS ELEMENT ON
