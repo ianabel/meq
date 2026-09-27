@@ -553,12 +553,16 @@ BOOST_AUTO_TEST_CASE( theReconstructionDefectDoesNotReachTheSolve )
 			mfem::Vector psiDifference( newton.potential() );
 			psiDifference -= linear.potential();
 			double const relativePsi =
-				psiDifference.Norml2()/std::max( 1.0e-300, linear.potential().Norml2() );
+				psiDifference.Norml2()
+			/std::max( 1.0e-300,
+			           static_cast<double>( linear.potential().Norml2() ) );
 
 			mfem::Vector fluxDifference( newton.flux() );
 			fluxDifference -= linear.flux();
 			double const relativeFlux =
-				fluxDifference.Norml2()/std::max( 1.0e-300, linear.flux().Norml2() );
+				fluxDifference.Norml2()
+			/std::max( 1.0e-300,
+			           static_cast<double>( linear.flux().Norml2() ) );
 
 			std::printf( "    %2d %4d %14.3e %14.3e %14.4e\n",
 			             order, n, relativePsi, relativeFlux,
@@ -770,7 +774,8 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 		solver.setPicardDamping( run.damping );
 		// Generous: the Picard paths need hundreds where Newton needs four, and
 		// the point here is where they land, not how fast.
-		solver.setNewtonControl( 1.0e-10, 1.0e-14, 500 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 500 );
 
 		BOOST_REQUIRE_NO_THROW( solver.solve() );
 
@@ -998,7 +1003,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes
 			mesh.GetElementCenter( e, centre );
 
 			double const ratio = starDofs.Normlinf()
-			                     /std::max( 1.0e-300, rawDofs.Normlinf() );
+			                     /std::max( 1.0e-300, static_cast<double>( rawDofs.Normlinf() ) );
 			if ( centre( 1 ) < threshold ) worstDead = std::max( worstDead, ratio );
 			else                           worstLive = std::max( worstLive, ratio );
 		}
@@ -1299,7 +1304,8 @@ BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
 	meq::GradShafranovSolver solver( mesh, 2 );
 	solver.setSource( source );
 	solver.setBoundaryData( psiCoeff );
-	solver.setNewtonControl( 1.0e-10, 1.0e-14, 60 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 60 );
 	solver.solve();
 
 	char const *which =

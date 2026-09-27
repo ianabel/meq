@@ -254,8 +254,8 @@ BOOST_AUTO_TEST_CASE( theLimiterPolygonIsClosedAndFittedToTheMesh )
 				"a face of a 2-D mesh has " << v.Size() << " vertices" );
 			for ( int i = 0; i < 2; ++i )
 				++uses[ v[ i ] ];
-			double const *a = mesh.GetVertex( v[ 0 ] );
-			double const *b = mesh.GetVertex( v[ 1 ] );
+			mfem::real_t const *a = mesh.GetVertex( v[ 0 ] );
+			mfem::real_t const *b = mesh.GetVertex( v[ 1 ] );
 			length += std::hypot( b[ 0 ] - a[ 0 ], b[ 1 ] - a[ 1 ] );
 		}
 
@@ -331,7 +331,8 @@ BOOST_AUTO_TEST_CASE( theContactIsFoundWhereTheFieldIsLargestOnThePolygon )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		solver.solve();
 
 		BOOST_TEST_REQUIRE( solver.limiterContactWasLocated(),
@@ -406,7 +407,8 @@ namespace
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		solver.solve();
 
 		Solved out;
@@ -715,7 +717,8 @@ BOOST_AUTO_TEST_CASE( theDriversOwnEstimateIsTheSameFunctionalAsTheBorder )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		solver.solve();
 
 		BOOST_TEST_REQUIRE( solver.limiterContactWasLocated(),
@@ -739,7 +742,8 @@ BOOST_AUTO_TEST_CASE( theDriversOwnEstimateIsTheSameFunctionalAsTheBorder )
 				continue;
 			space.GetElementDofs( e, dofs );
 			for ( int i = 0; i < dofs.Size(); ++i )
-				region = std::max( region, potential( dofs[ i ] ) );
+				region = std::max( region,
+				                   static_cast<double>( potential( dofs[ i ] ) ) );
 		}
 
 		std::printf( "    %5d %14.6e %14.6e %14.6e %14.6e\n",

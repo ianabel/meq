@@ -81,6 +81,27 @@ namespace
 
 BOOST_AUTO_TEST_CASE( umfpackAndPardisoAgreeOnTheTraceSystem )
 {
+#ifndef MFEM_USE_SUITESPARSE
+	/*
+	 * BOTH SIDES OF THIS COMPARISON HAVE TO EXIST, AND UMFPACK IS THE ONE
+	 * THAT DOES NOT HERE.
+	 *
+	 * The case already skips the PARDISO arm when `MFEM_USE_MKL_PARDISO` is
+	 * off; this is the other half, and it is the whole case rather than an
+	 * arm because UMFPACK is what everything is compared AGAINST. MFEM's
+	 * wrapper calls `umfpack_di_*` and `umfpack_dl_*` throughout -- the `d`
+	 * is double, and SuiteSparse ships no single-precision UMFPACK -- so a
+	 * `MFEM_PRECISION = single` install is built without it. DEVICE-PLAN.md
+	 * §7 records that as the right trade rather than a casualty: on a
+	 * resident run the trace solver is cuDSS and UMFPACK is the host
+	 * reference. MEASUREMENTS.md M-217.
+	 */
+	std::printf( "\n  the hybridized trace system: SKIPPED -- this build has no\n"
+	             "    SuiteSparse, so there is no UMFPACK to compare against.\n"
+	             "    MFEM's wrapper is umfpack_d*, which is double-only, so a\n"
+	             "    single-precision install cannot carry it. DEVICE-PLAN §7.\n" );
+	return;
+#else
 	meq::analytic::SolovievEquilibrium const eq = meq::analytic::SolovievEquilibrium::nstx();
 	mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
 	{
@@ -160,7 +181,7 @@ BOOST_AUTO_TEST_CASE( umfpackAndPardisoAgreeOnTheTraceSystem )
 				mfem::Vector difference( pardisoX );
 				difference -= umfpackX;
 				agreement = difference.Norml2()
-				            /std::max( 1.0e-300, umfpackX.Norml2() );
+				            /std::max( 1.0e-300, static_cast<double>( umfpackX.Norml2() ) );
 			}
 #endif
 
@@ -185,4 +206,5 @@ BOOST_AUTO_TEST_CASE( umfpackAndPardisoAgreeOnTheTraceSystem )
 #endif
 		}
 	}
+#endif
 }

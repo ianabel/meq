@@ -110,7 +110,8 @@ namespace
 		solver->setBoundaryData( datum );
 		solver->setInitialGuess( guess );
 		solver->setUpDownSymmetry( symmetric );
-		solver->setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		solver->solve();
 		return solver;
 	}
@@ -159,12 +160,14 @@ BOOST_AUTO_TEST_CASE( theSymmetryProjectionLeavesASymmetricSolutionAlone )
 			mfem::Vector fluxStep( plain->flux() );
 			fluxStep -= projected->flux();
 
-			double const scale = std::max( plain->potential().Normlinf(),
-			                               1.0e-300 );
+			double const scale =
+				std::max( static_cast<double>( plain->potential().Normlinf() ),
+				          1.0e-300 );
 			double const dPotential = potentialStep.Normlinf()/scale;
 			double const dFlux =
-				fluxStep.Normlinf()/std::max( plain->flux().Normlinf(),
-				                              1.0e-300 );
+				fluxStep.Normlinf()
+				/std::max( static_cast<double>( plain->flux().Normlinf() ),
+				           1.0e-300 );
 			double const dAxis =
 				std::abs( plain->psiAxis() - projected->psiAxis() )
 				/std::abs( plain->psiAxis() );

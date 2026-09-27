@@ -1,6 +1,7 @@
 #ifndef MEQ_GRADSHAFRANOV_HPP
 #define MEQ_GRADSHAFRANOV_HPP
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -224,6 +225,41 @@ namespace meq
 #else
 		return 1.0e-6;   // MFEM's own default, kept exactly
 #endif
+	}
+
+
+	/**
+	 * A Newton target this build's `real_t` can actually reach, floored from
+	 * the caller's own historical value.
+	 *
+	 * **A TOLERANCE THAT DOES NOT SCALE WITH `real_t` IS A BUILD-CONFIGURATION
+	 * BUG WEARING A NUMERICAL COSTUME**, which is M-184's sentence and this is
+	 * the seventh constant of that species -- the one M-174 NAMED and nobody
+	 * scaled. Single precision's residual floor is about **2.2e-06 relative**
+	 * (M-174), so a target of `1e-12` is seven orders under it and the solve
+	 * does not converge at all. The failure is a REFUSAL out of `solve()`
+	 * rather than a wrong number, so it reaches a test as *"the non-linear
+	 * iteration did not converge"* and never reaches the assertion the test
+	 * was written for. M-217's inventory puts **23 of 45** red single-precision
+	 * tests there.
+	 *
+	 * `10*eps` is **1.19e-6** in single, beside the `1e-6` M-204 measured
+	 * closing a bordered border at `-1.240e-07` -- FP32's own epsilon -- in the
+	 * same ten iterations as double, where `1e-10` stalls at `3.3e-07` and
+	 * burns 400. In double it is `2.2e-15`, under every historical value in
+	 * the tree, so **`std::max` returns the caller's own literal and the double
+	 * path is bit-for-bit unchanged.**
+	 *
+	 * **IT IS PUBLIC FOR THE REASON `extensionFdStep()` IS**: the tree sets
+	 * this through `setNewtonControl()` at **39 sites** carrying literals from
+	 * `1e-13` to `1e-8`, and a floor kept in step by hand across 39 sites is
+	 * the defect M-165 and M-189 both are. One expression, called at each.
+	 */
+	inline double newtonTolerance( double historical )
+	{
+		return std::max( historical,
+		                 10.0*static_cast<double>(
+			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
 	}
 
 	double limiterPolygonMaximum( mfem::FiniteElementSpace const &space,

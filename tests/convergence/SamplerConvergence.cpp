@@ -408,6 +408,31 @@ BOOST_AUTO_TEST_CASE( locatingIsLinearInTheNodeCount )
  */
 BOOST_AUTO_TEST_CASE( theTwoLocatorsAgreeAtTheSamePoints )
 {
+#ifndef MFEM_USE_GSLIB
+	/*
+	 * THE REFERENCE THIS CASE MEASURES AGAINST IS NOT IN EVERY BUILD, AND
+	 * SAYING SO IS THE POINT.
+	 *
+	 * `mfem::FindPointsGSLIB` is the SECOND locator here; MEQ's own
+	 * `meq::PointLocator` is the first, and [M-176](../MEASUREMENTS.md) is
+	 * their agreement to every printed digit. `fem/gslib.hpp` is raw `double`
+	 * throughout, so `MFEM_USE_GSLIB` cannot coexist with
+	 * `MFEM_PRECISION = single` -- [M-175](../MEASUREMENTS.md) -- and the
+	 * single-precision install is built without it.
+	 *
+	 * **SO THIS SKIPS RATHER THAN FAILS, AND IT ANNOUNCES THE SKIP.** A
+	 * cross-check against a reference the build does not carry is not a
+	 * failure of the thing under test, and a silent skip is how a suite
+	 * quietly stops checking something. MEQ's own locator is still exercised
+	 * by every other case in this file; what is unavailable is the
+	 * comparison, which is a property of the BUILD and not of the locator.
+	 */
+	std::printf( "\n  THE TWO LOCATORS: SKIPPED -- this build has no gslib, so\n"
+	             "    there is no second locator to agree with. MEQ's own is\n"
+	             "    still checked by every other case here; MEASUREMENTS.md\n"
+	             "    M-175 is why the two cannot coexist in single.\n" );
+	return;
+#else
 	meq::analytic::SolovievEquilibrium const &eq = equilibrium();
 	int const n = 32;
 	mfem::Mesh mesh = meq::tests::makeMesh( box(), n );
@@ -639,6 +664,7 @@ BOOST_AUTO_TEST_CASE( theTwoLocatorsAgreeAtTheSamePoints )
 	             100.0*generic.border/( generic.border + generic.interior ),
 	             aligned.border, aligned.border + aligned.interior );
 	std::fflush( stdout );
+#endif
 }
 
 BOOST_AUTO_TEST_SUITE_END()

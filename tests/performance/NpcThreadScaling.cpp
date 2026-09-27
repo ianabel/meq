@@ -121,7 +121,7 @@ namespace
 			b.maxRadius - b.minRadius, b.zMax - b.zMin );
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 		{
-			double *c = mesh.GetVertex( v );
+			mfem::real_t *c = mesh.GetVertex( v );
 			c[ 0 ] += b.minRadius;
 			c[ 1 ] += b.zMin;
 		}
@@ -421,7 +421,8 @@ namespace
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-10, 1.0e-14, 30 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 30 );
 
 		double const t0 = now();
 		solver.prepare();

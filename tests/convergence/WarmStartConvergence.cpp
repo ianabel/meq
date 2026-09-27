@@ -78,7 +78,7 @@ namespace
 				dZ = ( zMax - zMin )/( nZ - 1 );
 			}
 
-			double Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
+			mfem::real_t Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
 			             mfem::IntegrationPoint const &ip ) override
 			{
 				mfem::Vector x( 2 );

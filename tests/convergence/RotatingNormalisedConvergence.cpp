@@ -132,7 +132,8 @@ namespace
 		meq::GradShafranovSolver solver( mesh, order );
 		solver.setSource( *source, psiAxisGuess );
 		solver.setBoundaryData( zero );
-		solver.setNewtonControl( 1.0e-11, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-11 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 
 		Solved out{};
 		out.converged = true;

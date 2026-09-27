@@ -253,8 +253,10 @@ namespace meqtest
 		m.solver = std::make_unique<meq::GradShafranovSolver>(
 			*m.sub, m.config->getDiscretisation().polynomialDegree );
 		m.solver->setNewtonControl(
-			m.config->getSolver().newtonRelativeTolerance,
-			m.config->getSolver().newtonAbsoluteTolerance,
+			meq::newtonTolerance(
+				m.config->getSolver().newtonRelativeTolerance ),
+			meq::newtonTolerance(
+				m.config->getSolver().newtonAbsoluteTolerance ),
 			m.config->getSolver().newtonMaxIterations );
 		m.solver->setSource( *m.source, sourceConfig.psiAxisGuess() );
 		m.solver->setPlasmaCurrent( m.mu0

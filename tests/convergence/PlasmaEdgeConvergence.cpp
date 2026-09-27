@@ -133,7 +133,10 @@ namespace
 			mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 			                                                      mfem::Vector &v )
 			{
-				eq.flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) );
+				double fluxR = 0.0, fluxZ = 0.0;
+				eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+				v( 0 ) = fluxR;
+				v( 1 ) = fluxZ;
 			} );
 
 			meq::GradShafranovSolver solver( mesh, order );
@@ -395,7 +398,7 @@ BOOST_AUTO_TEST_CASE( theCutCapsTheOrderBeforeAnyMethodIsChosen )
 					double v[ 3 ][ 2 ];
 					for ( int i = 0; i < 3; ++i )
 					{
-						double const *p = mesh.GetVertex( verts[ i ] );
+						mfem::real_t const *p = mesh.GetVertex( verts[ i ] );
 						v[ i ][ 0 ] = p[ 0 ];
 						v[ i ][ 1 ] = p[ 1 ];
 					}
@@ -835,7 +838,8 @@ BOOST_AUTO_TEST_CASE( theLossIsTheRulesBlindnessAndNotItsResolution )
 			mfem::IntRules.Get( mfem::Geometry::TRIANGLE, order );
 		double least = 0.0;
 		for ( int i = 0; i < ir.GetNPoints(); ++i )
-			least = std::min( least, ir.IntPoint( i ).weight );
+			least = std::min( least,
+			                  static_cast<double>( ir.IntPoint( i ).weight ) );
 		if ( order <= 25 ) worstBelow = std::min( worstBelow, least );
 		else               worstAbove = std::min( worstAbove, least );
 	}
@@ -1343,7 +1347,7 @@ namespace
 				d.path->Endpoint( *ftr, ir.IntPoint( q ), xbar );
 				ftr->Transform( ir.IntPoint( q ), x );
 				xbar -= x;
-				largest = std::max( largest, xbar.Norml2() );
+				largest = std::max( largest, static_cast<double>( xbar.Norml2() ) );
 			}
 		}
 		return largest;
@@ -1420,7 +1424,7 @@ namespace
 			{ return eq.psi( x( 0 ), x( 1 ) ); } );
 		mfem::VectorFunctionCoefficient fluxCoeff( 2,
 			[ &eq ]( mfem::Vector const &x, mfem::Vector &v )
-			{ eq.flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) ); } );
+			{ double fluxR = 0.0, fluxZ = 0.0; eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ ); v( 0 ) = fluxR; v( 1 ) = fluxZ; } );
 		mfem::ConstantCoefficient zero( 0.0 );
 
 		meq::GradShafranovSolver solver( *d.sub, order );
@@ -1672,7 +1676,7 @@ namespace
 			{ return eq.psi( x( 0 ), x( 1 ) ); } );
 		mfem::VectorFunctionCoefficient fluxCoeff( 2,
 			[ &eq ]( mfem::Vector const &x, mfem::Vector &v )
-			{ eq.flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) ); } );
+			{ double fluxR = 0.0, fluxZ = 0.0; eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ ); v( 0 ) = fluxR; v( 1 ) = fluxZ; } );
 
 		std::vector<double> hs, ps, qs, ss;
 		for ( int n : meshes )

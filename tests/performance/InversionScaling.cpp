@@ -1912,7 +1912,8 @@ namespace
 			mfem::GridFunction const &b =
 				perThread[ t ]->theSolver().postProcessedPotential();
 			for ( int i = 0; i < a.Size(); ++i )
-				worstField = std::max( worstField, std::fabs( a( i ) - b( i ) ) );
+				worstField = std::max( worstField,
+				                       static_cast<double>( std::fabs( a( i ) - b( i ) ) ) );
 		}
 		std::printf( "    %d independent solves in %.2f s; they agree to %.3e"
 		             "%s\n", maximum, buildCost, worstField,

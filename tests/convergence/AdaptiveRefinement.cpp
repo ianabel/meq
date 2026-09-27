@@ -256,7 +256,7 @@ namespace
 		{
 			if ( !onGammaH[ v ] || local[ v ] <= 0.0 )
 				continue;
-			double const *x = mesh.GetVertex( v );
+			mfem::real_t const *x = mesh.GetVertex( v );
 			double const gap = distanceToGamma( x[ 0 ], x[ 1 ], searchLength );
 			worst.gap = std::max( worst.gap, gap );
 			worst.ratio = std::max( worst.ratio, gap/local[ v ] );
@@ -358,7 +358,10 @@ namespace
 		mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 		                                                       mfem::Vector &value )
 		{
-			eq.flux( x( 0 ), x( 1 ), value( 0 ), value( 1 ) );
+			double fluxR = 0.0, fluxZ = 0.0;
+			eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+			value( 0 ) = fluxR;
+			value( 1 ) = fluxZ;
 		} );
 
 		mfem::Mesh mesh = makeFittedMesh( start );
@@ -728,7 +731,10 @@ BOOST_AUTO_TEST_CASE( theAdaptiveLoopRunsOnTheCurvedBoundary )
 	mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 	                                                       mfem::Vector &value )
 	{
-		eq.flux( x( 0 ), x( 1 ), value( 0 ), value( 1 ) );
+		double fluxR = 0.0, fluxZ = 0.0;
+		eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+		value( 0 ) = fluxR;
+		value( 1 ) = fluxZ;
 	} );
 	mfem::ConstantCoefficient zero( 0.0 );
 

@@ -565,7 +565,8 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 	solver.setSource( source, estimate );
 	solver.setBoundaryData( zero );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( 1.0e-10, 1.0e-14, 40 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 	solver.solve();
 
 	// The bordered path drives || ( R, gamma G ) ||; the constraint itself is
@@ -699,7 +700,8 @@ BOOST_AUTO_TEST_CASE( theLocatedAxisConstraintPutsPsiAxisOnTheAxis )
 	solver.setSource( source, estimate );
 	solver.setBoundaryData( zero );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( 1.0e-10, 1.0e-14, 40 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 	solver.solve();
 
 	BOOST_REQUIRE( !solver.newtonResiduals().empty() );

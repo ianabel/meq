@@ -1682,6 +1682,45 @@ noisy; that is the point.
 
 ### 7.2 The convergence tests are the acceptance, and they will move
 
+**RUN, AND THE PREDICTION BELOW IS INVERTED** → **[M-217](MEASUREMENTS.md#m-217)**.
+The tree builds and runs against `install-single`: **38 files, 405 lines**, and
+the suite reads **44 red of 63** against the double build's 62/63 on the same
+working tree. What this section expected to dominate does not, and what does
+dominate is not an assertion at all.
+
+| class | count | |
+|---|---|---|
+| **A** the SOLVE did not converge | **5** (was 23) | one solver constant, not a tolerance |
+| **B** names an absent library | 6 | SUNDIALS and the device, absent from the install |
+| **C** a rate read as a failed rate | **8** | what this section predicted would dominate |
+| **D** a value assertion below the floor | **25** | what this section called the biggest cost |
+
+**THE BLOCKER WAS `newtonRelativeTolerance`, AND NO SWEEP OF THE ASSERTIONS
+WOULD HAVE FOUND IT.** At `1.0e-12` it is seven orders below single's residual
+floor, so `solve()` **refuses** and 23 of 45 tests failed before reaching the
+assertion they exist for. `meq::newtonTolerance()` floors it and 18 tests moved
+into a class that can be assessed — *the count moved by one and the inventory
+moved by eighteen.* **A tolerance tuned against a solve that did not converge is
+tuned against nothing**, so the sweep below could not have been done first.
+
+**AND THE INSTALL IS NOT THE DOUBLE ONE MINUS PRECISION.** It is missing
+SuiteSparse and gslib **structurally** — neither has a single-precision build —
+and CUDA, cuDSS and SUNDIALS **incidentally**, because they were not configured.
+Three of those are recoverable and two are not, and a red test cannot say which
+it met. **Bringing the install to parity on the three incidental ones is the
+next step**, before any tolerance is judged: a device-residency configuration
+that cannot construct an `mfem::Device` is not the configuration this section
+is about.
+
+**WHAT REMAINS IS THE SWEEP THIS SECTION DESCRIBES, AND IT IS NOW SIZED.**
+Class C is eight rate assertions, all at `k = 2` and the finest `h`, which is
+exactly the flattened tail described below. Class D is 25, of which several are
+class A's residue reaching a different test. Two are structural and will not
+yield to a tolerance: `SourceViewTests` pins the device POD to the **bit**
+against MEQ's MFEM-free `Source`, which is `real_t` against `double` by design;
+and `SolovievGeometryConvergence` says the floor is **per problem**, as
+[M-204](MEASUREMENTS.md#m-204) already found over a range of 560×.
+
 **THIS IS THE PART THAT IS NOT MECHANICAL.** MEQ's acceptance criteria are
 **measured convergence rates** — `k+1` for `ψ`, `k+2` for `ψ*` — asserted over
 dyadic refinements. Single precision has about **7 decimal digits**, so the

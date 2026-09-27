@@ -75,7 +75,7 @@ namespace
 		// Shift into [ 0.6, 1.4 ] x [ -0.4, 0.4 ].
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 		{
-			double *x = mesh.GetVertex( v );
+			mfem::real_t *x = mesh.GetVertex( v );
 			x[ 0 ] += 0.6;
 			x[ 1 ] -= 0.4;
 		}
@@ -97,7 +97,8 @@ namespace
 	{
 		double worst = 0.0;
 		for ( int i = 0; i < g.Size(); ++i )
-			worst = std::max( worst, std::fabs( g( i ) ) );
+			worst = std::max( worst,
+			                  static_cast<double>( std::fabs( g( i ) ) ) );
 		return worst;
 	}
 }
@@ -135,7 +136,7 @@ BOOST_AUTO_TEST_CASE( theRemainderOfAVacuumFilamentIsZero )
 		double scale = 0.0;
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 		{
-			double const *x = mesh.GetVertex( v );
+			mfem::real_t const *x = mesh.GetVertex( v );
 			scale = std::max( scale,
 			                  std::fabs( conductors.psi( x[ 0 ], x[ 1 ] ) ) );
 		}
@@ -304,9 +305,13 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 	double scale = 0.0;
 	for ( int i = 0; i < split.potential().Size(); ++i )
 	{
-		worst = std::max( worst, std::fabs( split.potential()( i )
-		                                    - control.potential()( i ) ) );
-		scale = std::max( scale, std::fabs( control.potential()( i ) ) );
+		worst = std::max( worst,
+		                  static_cast<double>(
+			                  std::fabs( split.potential()( i )
+			                             - control.potential()( i ) ) ) );
+		scale = std::max( scale,
+		                  static_cast<double>(
+			                  std::fabs( control.potential()( i ) ) ) );
 	}
 
 	std::printf( "\n  the source sees the total: |split - control| = %.3e "
@@ -1770,8 +1775,9 @@ BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 
 				double value = solver.potential().GetValue( element, ip );
 				if ( arm == 1 )
-					value += subtracted.psi( std::max( 0.0, point( 0 ) ),
-					                         point( 1 ) );
+					value += subtracted.psi(
+						std::max( 0.0, static_cast<double>( point( 0 ) ) ),
+						point( 1 ) );
 				total[ arm ].push_back( value );
 				at[ arm ].push_back( std::make_pair( point( 0 ),
 				                                     point( 1 ) ) );
@@ -2106,7 +2112,7 @@ BOOST_AUTO_TEST_CASE( theConductorInterpolantIsExactAtTheNodes )
 		{
 			mfem::IntegrationPoint const &ip = nodes.IntPoint( n );
 			transformation.SetIntPoint( &ip );
-			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+			mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
 
@@ -2124,7 +2130,7 @@ BOOST_AUTO_TEST_CASE( theConductorInterpolantIsExactAtTheNodes )
 			double qZ = 0.0;
 			conductors.flux( position( 0 ), position( 1 ), qR, qZ );
 
-			double values[ 2 ] = { 0.0, 0.0 };
+			mfem::real_t values[ 2 ] = { 0.0, 0.0 };
 			mfem::Vector got( values, 2 );
 			flux->GetVectorValue( e, ip, got );
 

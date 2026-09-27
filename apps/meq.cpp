@@ -2764,8 +2764,15 @@ int main( int argc, char **argv )
 		}
 
 		fresh->setBoundaryData( zero );
-		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
-		                         config->getSolver().newtonAbsoluteTolerance,
+		// FLOORED AT WHAT THIS BUILD'S real_t CAN REACH. A file written for a
+		// double build asks for 1e-12 and a single build cannot get within
+		// seven orders of it, so an unfloored key turns every shipped example
+		// into a refusal rather than a coarser answer. M-217.
+		fresh->setNewtonControl(
+			meq::newtonTolerance(
+				config->getSolver().newtonRelativeTolerance ),
+			meq::newtonTolerance(
+				config->getSolver().newtonAbsoluteTolerance ),
 		                         config->getSolver().newtonMaxIterations );
 
 		// The two performance keys. Availability was checked once at startup,
@@ -3503,7 +3510,9 @@ int main( int argc, char **argv )
 				 * more than a topological question needs.
 				 */
 				step->setNewtonControl(
-					1.0e-4, config->getSolver().newtonAbsoluteTolerance,
+					meq::newtonTolerance( 1.0e-4 ),
+					meq::newtonTolerance(
+						config->getSolver().newtonAbsoluteTolerance ),
 					std::min( 60, config->getSolver().newtonMaxIterations ) );
 				if ( confinedSource )
 				{

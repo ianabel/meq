@@ -427,7 +427,8 @@ BOOST_AUTO_TEST_CASE( theBorderAssemblersAreThreadSafe )
 		double worst = 0.0;
 		for ( int i = 0; i < one.serial->Size(); ++i )
 		{
-			magnitude = std::max( magnitude, std::abs( ( *one.serial )( i ) ) );
+			magnitude = std::max( magnitude,
+			                      static_cast<double>( std::abs( ( *one.serial )( i ) ) ) );
 			double const difference =
 				( *one.serial )( i ) - ( *one.threaded )( i );
 			if ( std::abs( difference ) > std::abs( worst ) )

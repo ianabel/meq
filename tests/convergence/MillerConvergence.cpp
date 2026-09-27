@@ -265,7 +265,8 @@ namespace
 		// failed. That is a stopping rule that does not fit the problem, not a
 		// convergence failure, and the residual histories printed below show it
 		// plainly. 1e-10 asks for 1.55e-13, comfortably above the floor.
-		solver.setNewtonControl( 1.0e-10, 1.0e-13, 30 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-13 ), 30 );
 
 		SelfMeasurement point;
 		point.converged = true;
@@ -280,7 +281,7 @@ namespace
 
 		double largest = 0.0;
 		for ( int e = 0; e < mesh.GetNE(); ++e )
-			largest = std::max( largest, mesh.GetElementSize( e, 1 ) );
+			largest = std::max( largest, static_cast<double>( mesh.GetElementSize( e, 1 ) ) );
 		point.h = largest;
 		point.traceDofs = solver.numTraceDofs();
 		point.newtonIterations = solver.newtonIterations();
@@ -463,7 +464,7 @@ BOOST_AUTO_TEST_CASE( theInscribedPolygonDoesNotMoveWithRefinement )
 
 		double largest = 0.0;
 		for ( int e = 0; e < mesh.GetNE(); ++e )
-			largest = std::max( largest, mesh.GetElementSize( e, 1 ) );
+			largest = std::max( largest, static_cast<double>( mesh.GetElementSize( e, 1 ) ) );
 
 		std::printf( "  level %d: %6d elements, %6d vertices, h = %.5f, area = %.10f\n",
 		             level, mesh.GetNE(), mesh.GetNV(), largest, area[ level ] );
@@ -479,7 +480,7 @@ BOOST_AUTO_TEST_CASE( theInscribedPolygonDoesNotMoveWithRefinement )
 				mesh.GetBdrElementVertices( be, v );
 				for ( int i = 0; i < v.Size(); ++i )
 				{
-					double const *x = mesh.GetVertex( v[ i ] );
+					mfem::real_t const *x = mesh.GetVertex( v[ i ] );
 					worst = std::max( worst, std::abs( shape().levelSet( x[ 0 ], x[ 1 ] ) ) );
 				}
 			}
@@ -667,7 +668,10 @@ BOOST_AUTO_TEST_CASE( diagnosticExactSolutionOnThePolygon )
 			mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 			                                                       mfem::Vector &v )
 			{
-				eq.flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) );
+				double fluxR = 0.0, fluxZ = 0.0;
+				eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+				v( 0 ) = fluxR;
+				v( 1 ) = fluxZ;
 			} );
 			meq::GradShafranovSolver solver( mesh, order );
 			solver.setSource( source );
@@ -730,7 +734,7 @@ BOOST_AUTO_TEST_CASE( diagnosticExactSolutionOnThePolygon )
 			            "more than that is not a stopping-rule artefact" );
 			double largest = 0.0;
 			for ( int e = 0; e < mesh.GetNE(); ++e )
-				largest = std::max( largest, mesh.GetElementSize( e, 1 ) );
+				largest = std::max( largest, static_cast<double>( mesh.GetElementSize( e, 1 ) ) );
 			double const ep = solver.potentialError( psiCoeff );
 			double const ef = solver.fluxError( fluxCoeff );
 			if ( level == 0 )

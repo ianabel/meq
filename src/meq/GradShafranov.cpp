@@ -1172,8 +1172,11 @@ namespace
 		  traceSolverChoice( defaultTraceSolver() ),
 		  andersonDepth( 1 ),
 		  picardDamping( 1.0 ),
-		  newtonRelativeTolerance( 1.0e-12 ),
-		  newtonAbsoluteTolerance( 1.0e-14 ),
+		  // BOTH TARGETS ARE FLOORED AT WHAT THIS BUILD'S real_t CAN REACH;
+		  // newtonTolerance() carries the argument and M-217 the measurement.
+		  // In double it returns these literals exactly.
+		  newtonRelativeTolerance( newtonTolerance( 1.0e-12 ) ),
+		  newtonAbsoluteTolerance( newtonTolerance( 1.0e-14 ) ),
 		  newtonMaxIterations( 30 ),
 		  newtonIterationCount( 0 ),
 		  built( false ),
@@ -10575,8 +10578,15 @@ namespace
 					// The device route, at the one branch it belongs to;
 					// see the transmission arm below for why the dispatch is
 					// not duplicated in the caller.
+					// WIDENED EXPLICITLY. `rowDot()`'s other arms return
+					// `double` -- CompressedRows::dot() is MEQ's own and is
+					// MFEM-free -- while an mfem::Vector yields `real_t`. In
+					// the double build those are the same type and the
+					// compiler says nothing; under MFEM_PRECISION = single the
+					// lambda's return type stops deducing. MEASUREMENTS.md
+					// M-217.
 					if ( currentPre != nullptr )
-						return ( *currentPre )( 0 );
+						return static_cast<double>( ( *currentPre )( 0 ) );
 					if ( pre )
 						return currentRows.dot( 0, pre->current );
 					return currentRows.dot( 0, v, rowGatherScratch );
@@ -10595,8 +10605,9 @@ namespace
 				 * below it -- meq::DeviceRows' contract, asserted on the
 				 * double in tests/unit/DeviceRowsTests.cpp.
 				 */
+				// Widened explicitly; see the current arm above.
 				if ( transmissionPre != nullptr )
-					return ( *transmissionPre )( mode );
+					return static_cast<double>( ( *transmissionPre )( mode ) );
 				if ( pre )
 					return transmissionRows.dot( mode, pre->transmission );
 				return transmissionRows.dot( mode, v, rowGatherScratch );

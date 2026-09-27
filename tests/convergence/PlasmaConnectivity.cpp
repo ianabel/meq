@@ -662,7 +662,7 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 			mesh.GetElementVertices( e, vertices );
 			for ( int i = 0; i < vertices.Size(); ++i )
 			{
-				double const *v = mesh.GetVertex( vertices[ i ] );
+				mfem::real_t const *v = mesh.GetVertex( vertices[ i ] );
 				double const psiN = ( equilibrium.psi( v[ 0 ], v[ 1 ] ) - psiBnd )/span;
 				if ( psiN > 0.0 )
 					carriesPlasma[ static_cast<std::size_t>( e ) ] = 1;
@@ -1037,7 +1037,8 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 	GradShafranovSolver solver( *d.sub, order );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 	solver.setSource( source, 0.1 );
 	solver.setBoundaryData( zero );
 	solver.setExtension( *d.path, d.gammaHMarker );
@@ -1319,7 +1320,8 @@ BOOST_AUTO_TEST_CASE( theConnectivityChangeIsNotAJumpAtTheSizeThatMatters )
 	meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, 1.0 );
 	GradShafranovSolver solver( *d.sub, order );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 	solver.setSource( source, 0.1 );
 	solver.setBoundaryData( zero );
 	solver.setExtension( *d.path, d.gammaHMarker );
@@ -1597,7 +1599,8 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			GradShafranovSolver solver( *d.sub, order );
 			solver.setPlasmaConnectivity( choice );
 			solver.setInitialGuess( guess );
-			solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 			solver.setSource( source, 0.1 );
 			solver.setBoundaryData( zero );
 			solver.setExtension( *d.path, d.gammaHMarker );
@@ -1671,7 +1674,8 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			GradShafranovSolver solver( mesh, order );
 			solver.setPlasmaConnectivity( choice );
 			solver.setInitialGuess( guess );
-			solver.setNewtonControl( 1.0e-9, 1.0e-12, 60 );
+			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 60 );
 			solver.setSource( source, 0.1 );
 			solver.setBoundaryData( zero );
 			solver.solve();
@@ -1855,7 +1859,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 
 		GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-9, 1.0e-12, cap );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), cap );
 		solver.setSource( source, 0.1 );
 		solver.setPlasmaCurrent( machineCurrent );
 		solver.setBoundaryData( zero );

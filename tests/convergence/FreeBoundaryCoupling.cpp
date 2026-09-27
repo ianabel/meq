@@ -1516,7 +1516,10 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheExteriorDatumOnTheHalfDisc )
 			mfem::VectorFunctionCoefficient exactFlux( 2,
 				[]( mfem::Vector const &x, mfem::Vector &v )
 			{
-				halfDiscField().flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) );
+				double fluxR = 0.0, fluxZ = 0.0;
+				halfDiscField().flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+				v( 0 ) = fluxR;
+				v( 1 ) = fluxZ;
 			} );
 
 			psiErrors.push_back( solver.potential().ComputeL2Error( exactPsi ) );
@@ -2573,7 +2576,10 @@ BOOST_AUTO_TEST_CASE( theCoupledSolveSurvivesTheAdaptiveLoop )
 	mfem::VectorFunctionCoefficient fluxCoeff( 2, []( mfem::Vector const &x,
 	                                                 mfem::Vector &v )
 	{
-		halfDiscField().flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) );
+		double fluxR = 0.0, fluxZ = 0.0;
+		halfDiscField().flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+		v( 0 ) = fluxR;
+		v( 1 ) = fluxZ;
 	} );
 	mfem::ConstantCoefficient zero( 0.0 );
 
@@ -2925,7 +2931,8 @@ BOOST_AUTO_TEST_CASE( theBorderedSystemClosesOnANonlinearSource )
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setBorderColumn( choice );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -3314,7 +3321,8 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 		// being snapped to a dof: the cold reference the target is scaled from
 		// includes psi_bnd's constraint, so changing that definition moved the
 		// target rather than the method.
-		solver.setNewtonControl( 1.0e-13, 1.0e-14, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-13 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -3422,7 +3430,8 @@ BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell )
 
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-13, 1.0e-14, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-13 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 150 );
 		solver.setSource( source, 0.1 );
 		if ( muZeroCurrent > 0.0 )
 			solver.setPlasmaCurrent( muZeroCurrent );
@@ -3586,7 +3595,8 @@ BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
 			meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 			meq::GradShafranovSolver solver( *d.sub, order );
 			solver.setInitialGuess( guess );
-			solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 			solver.setSource( source, 0.1 );
 			solver.setBoundaryData( zero );
 			solver.setExtension( *d.path, d.gammaHMarker );
@@ -3956,7 +3966,8 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 		solver.setSource( source, 0.1 );
 
 		// AND THE SECOND HALF OF THE REPAIR, WITHOUT WHICH THE FIRST DOES NOT
@@ -4226,7 +4237,8 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -4314,7 +4326,8 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -4781,8 +4794,9 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 	double scale = 0.0;
 	for ( int i = 0; i < psiA.Size(); ++i )
 	{
-		worst = std::max( worst, std::abs( psiA( i ) - psiB( i ) ) );
-		scale = std::max( scale, std::abs( psiA( i ) ) );
+		worst = std::max( worst,
+		                  static_cast<double>( std::abs( psiA( i ) - psiB( i ) ) ) );
+		scale = std::max( scale, static_cast<double>( std::abs( psiA( i ) ) ) );
 	}
 
 	std::printf( "    in the domain, k = %d, n = %d: worst %.4e against a peak "

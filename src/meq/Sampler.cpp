@@ -1,6 +1,7 @@
 #include "Sampler.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <stdexcept>
 
@@ -122,7 +123,19 @@ namespace meq
 		// InverseElementTransformation's own default, applied to the same test
 		// Geometry::CheckPoint() applies -- so the affine path accepts exactly
 		// the candidates TransformBack() accepts, rather than nearly them.
-		double const insideTolerance = 1.0e-8;
+		// AND IT FOLLOWS real_t's EPSILON, BECAUSE THE SIBLING OF THIS
+		// CONSTANT IN PointLocator.cpp DOES AND THIS ONE DID NOT. M-184
+		// scaled six constants and fixed the one there; this is the SAME
+		// NAME and the SAME VALUE in a second file, and M-217 found it by
+		// running the suite in single -- everyNodeIsFoundInAnElementThatCon-
+		// tainsIt reads a node 1.78e-07 outside the element that located it,
+		// which is round-off in FP32 and a real escape in double. 128*eps is
+		// 2.8e-14 in double, far below 1e-8, so the double path keeps
+		// MFEM's own number and is unchanged.
+		double const insideTolerance =
+			std::max( 1.0e-8,
+			          128.0*static_cast<double>(
+				          std::numeric_limits<mfem::real_t>::epsilon() ) );
 
 		// The reentrant overload, into a local. Mesh::GetElementTransformation(
 		// int ) hands out ONE shared member of the mesh, which CLAUDE.md

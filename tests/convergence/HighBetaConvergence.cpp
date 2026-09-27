@@ -598,7 +598,8 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-10, 1.0e-14, budget );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), budget );
 		if ( decoupled )
 			solver.setNormalisationCoupling(
 				meq::GradShafranovSolver::Normalisation::Decoupled );
@@ -675,7 +676,8 @@ BOOST_AUTO_TEST_CASE( theAxisSensitivityIsLocalToItsElement )
 	solver.setSource( source, estimate );
 	solver.setBoundaryData( zero );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( 1.0e-10, 1.0e-14, 40 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 	solver.solve();
 
 	mfem::Vector trace( solver.trace() );
@@ -701,7 +703,7 @@ BOOST_AUTO_TEST_CASE( theAxisSensitivityIsLocalToItsElement )
 		}
 	}
 
-	double const step = 1.0e-4*std::max( trace.Normlinf(), 1.0 );
+	double const step = 1.0e-4*std::max( static_cast<double>( trace.Normlinf() ), 1.0 );
 	double worstOn = 0.0;
 	double worstOff = 0.0;
 	int offSampled = 0;
@@ -813,7 +815,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		solver.solve();
 
 		double const axis = solver.psiAxis();
@@ -932,7 +935,8 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		solver.solve();
 
 		Result out;
@@ -1098,7 +1102,8 @@ BOOST_AUTO_TEST_CASE( theAnalyticCurrentCornerAgreesWithTheDifferencedOne )
 		solver.setPlasmaCurrent( 0.08 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 60 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 60 );
 		solver.solve();
 
 		Result out;

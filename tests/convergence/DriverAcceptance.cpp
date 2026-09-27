@@ -415,7 +415,7 @@ namespace
 	{
 		mfem::Vector difference( stored );
 		difference -= computed;
-		return difference.Norml2()/std::max( 1.0e-300, computed.Norml2() );
+		return difference.Norml2()/std::max( 1.0e-300, static_cast<double>( computed.Norml2() ) );
 	}
 
 }
@@ -465,7 +465,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesTheSolovievBenchmarkAndWritesIt )
 
 	mfem::Vector difference( stored );
 	difference -= solver.potential();
-	double const scale = std::max( 1.0e-300, solver.potential().Norml2() );
+	double const scale = std::max( 1.0e-300,
+	                               static_cast<double>( solver.potential().Norml2() ) );
 	double const relative = difference.Norml2()/scale;
 
 	std::printf( "\n  driver vs library: ||psi_driver - psi_library|| / ||psi|| "
@@ -606,7 +607,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 
 	mfem::Vector difference( stored );
 	difference -= solver.potential();
-	double const scale = std::max( 1.0e-300, solver.potential().Norml2() );
+	double const scale = std::max( 1.0e-300,
+	                               static_cast<double>( solver.potential().Norml2() ) );
 	double const relative = difference.Norml2()/scale;
 
 	std::printf( "\n  curved driver vs library: %.3e relative over %d dofs, "
@@ -827,7 +829,8 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 
 	mfem::Vector difference( stored );
 	difference -= solver->potential();
-	double const scale = std::max( 1.0e-300, solver->potential().Norml2() );
+	double const scale = std::max( 1.0e-300,
+	                               static_cast<double>( solver->potential().Norml2() ) );
 	double const relative = difference.Norml2()/scale;
 
 	std::printf( "  adaptive driver vs library: %.3e relative over %d dofs\n",
@@ -909,7 +912,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	meq::GradShafranovSolver solver( mesh, 2, 1.0 );
 	solver.setSource( source );
 	solver.setBoundaryData( zero );
-	solver.setNewtonControl( 1.0e-10, 1.0e-14, 20 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 20 );
 	solver.solve();
 
 	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size(),
@@ -953,7 +957,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	meq::GradShafranovSolver rest( mesh, 2, 1.0 );
 	rest.setSource( still );
 	rest.setBoundaryData( zero );
-	rest.setNewtonControl( 1.0e-10, 1.0e-14, 20 );
+	rest.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 20 );
 	rest.solve();
 
 	double const shift = relativeDifference( solver.potential(), rest.potential() );
@@ -1037,7 +1042,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	meq::GradShafranovSolver solver( mesh, 2, 1.0 );
 	solver.setSource( source, psiAxisGuess );
 	solver.setBoundaryData( zero );
-	solver.setNewtonControl( 1.0e-10, 1.0e-14, 20 );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 20 );
 	solver.solve();
 
 	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size() );
@@ -1339,7 +1345,8 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
 	mfem::FunctionCoefficient psiC(
 		[ &conductors ]( mfem::Vector const &x )
 		{
-			return conductors.psi( std::max( 0.0, x( 0 ) ), x( 1 ) );
+			return conductors.psi( std::max( 0.0, static_cast<double>( x( 0 ) ) ),
+			                        static_cast<double>( x( 1 ) ) );
 		} );
 	mfem::GridFunction analytic( remainder.FESpace() );
 	analytic.ProjectCoefficient( psiC );
@@ -1507,7 +1514,8 @@ BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 	// scaled to the field.
 	double biggest = 0.0;
 	for ( int i = 0; i < remainder.Size(); ++i )
-		biggest = std::max( biggest, std::fabs( remainder( i ) ) );
+		biggest = std::max( biggest,
+		                    static_cast<double>( std::fabs( remainder( i ) ) ) );
 	double const scale = std::max( 1.0e-300, biggest );
 	BOOST_TEST( worstCoefficient/scale < 1.0e-6,
 	            "the coefficients in the .nc are not the ones in the .gf: "
@@ -1521,7 +1529,8 @@ BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 	mfem::FunctionCoefficient psiC(
 		[ &fromFile ]( mfem::Vector const &x )
 		{
-			return fromFile.psi( std::max( 0.0, x( 0 ) ), x( 1 ) );
+			return fromFile.psi( std::max( 0.0, static_cast<double>( x( 0 ) ) ),
+			                     static_cast<double>( x( 1 ) ) );
 		} );
 	mfem::GridFunction rebuilt(
 		const_cast<mfem::FiniteElementSpace *>( remainder.FESpace() ) );
@@ -1992,7 +2001,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 		solver.setExtension( path, gammaHMarker );
 		if ( coupled )
 			solver.setExteriorCoupling( dtn );
-		solver.setNewtonControl( 1.0e-8, 1.0e-12, 150 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-8 ),
+		                  meq::newtonTolerance( 1.0e-12 ), 150 );
 		solver.solve();
 
 		Answer out;
@@ -2010,7 +2020,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 
 	mfem::Vector difference( stored );
 	difference -= coupled.potential;
-	double const scale = std::max( 1.0e-300, coupled.potential.Norml2() );
+	double const scale = std::max( 1.0e-300,
+	                               static_cast<double>( coupled.potential.Norml2() ) );
 	double const relative = difference.Norml2()/scale;
 
 	mfem::Vector control( coupled.potential );
@@ -3947,7 +3958,8 @@ BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
 		mfem::FunctionCoefficient psiC(
 			[ &conductors ]( mfem::Vector const &x )
 			{
-				return conductors.psi( std::max( 0.0, x( 0 ) ), x( 1 ) );
+				return conductors.psi( std::max( 0.0, static_cast<double>( x( 0 ) ) ),
+			                        static_cast<double>( x( 1 ) ) );
 			} );
 		mfem::GridFunction total( remainder.FESpace() );
 		total.ProjectCoefficient( psiC );

@@ -116,7 +116,10 @@ BOOST_AUTO_TEST_CASE( theMfemFilesRoundTripExactly )
 
 	double worst = 0.0;
 	for ( int i = 0; i < reloadedPsi.Size(); ++i )
-		worst = std::max( worst, std::abs( reloadedPsi( i ) - solver.potential()( i ) ) );
+		worst = std::max(
+			worst,
+			static_cast<double>( std::abs( reloadedPsi( i )
+			                               - solver.potential()( i ) ) ) );
 
 	std::printf( "\n  .gf round trip: worst coefficient difference %.3e\n", worst );
 	std::fflush( stdout );
@@ -507,7 +510,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 		mesh.GetBdrElementVertices( b, vertices );
 		for ( int n = 0; n < vertices.Size(); ++n )
 		{
-			double const *p = mesh.GetVertex( vertices[ n ] );
+			mfem::real_t const *p = mesh.GetVertex( vertices[ n ] );
 			worstBefore = std::max( worstBefore,
 				circleRadius - std::hypot( p[ 0 ] - centreR, p[ 1 ] - centreZ ) );
 		}

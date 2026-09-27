@@ -136,7 +136,8 @@ namespace
 			out.solver->setInitialGuess( *previous );
 		else
 			out.solver->setInitialGuess( guess );
-		out.solver->setNewtonControl( 1.0e-12, 1.0e-14, 60 );
+		out.solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 60 );
 
 		// THE REACTIVE LADDER IS NOT AVAILABLE HERE, which is a real constraint
 		// on this loop rather than an omission: psi_ax is a BORDER UNKNOWN, and

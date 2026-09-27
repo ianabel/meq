@@ -79,7 +79,7 @@ namespace
 			n, n, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin ) );
 		for ( int i = 0; i < out.mesh->GetNV(); ++i )
 		{
-			double *v = out.mesh->GetVertex( i );
+			mfem::real_t *v = out.mesh->GetVertex( i );
 			v[ 0 ] += minRadius;
 			v[ 1 ] += zMin;
 		}

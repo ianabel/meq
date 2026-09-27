@@ -137,8 +137,8 @@ namespace
 			return -1.0;
 
 		int const nnz = a.NumNonZeroElems();
-		double const *av = a.GetData();
-		double const *bv = b.GetData();
+		mfem::real_t const *av = a.GetData();
+		mfem::real_t const *bv = b.GetData();
 		int const *aj = a.GetJ();
 		int const *bj = b.GetJ();
 
@@ -147,7 +147,8 @@ namespace
 		{
 			if ( aj[ i ] != bj[ i ] )
 				return -1.0;
-			worst = std::max( worst, std::fabs( av[ i ] - bv[ i ] ) );
+			worst = std::max( worst,
+			                  static_cast<double>( std::fabs( av[ i ] - bv[ i ] ) ) );
 		}
 		return worst;
 	}
@@ -407,6 +408,7 @@ int main( int argc, char **argv )
 			mfem::Vector umfX( size );
 			umfX = 0.0;
 			double umfSetup = 0.0, umfSolve = 0.0;
+#ifdef MFEM_USE_SUITESPARSE
 			{
 				mfem::UMFPackSolver umf;
 				umf.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
@@ -424,6 +426,17 @@ int main( int argc, char **argv )
 				umfSetup = bestOf( repeats, [ & ]() { umf.SetOperator( *serial.matrix ); } );
 				umfSolve = bestOf( repeats, [ & ]() { umf.Mult( rhs, umfX ); } );
 			}
+#else
+			// SuiteSparse ships no single-precision UMFPACK, so MFEM_PRECISION =
+			// single cannot carry UMFPackSolver at all -- DEVICE-PLAN.md section 7
+			// records this as the right trade rather than a casualty, since a
+			// resident run's trace solver is cuDSS. The consequence HERE is that
+			// PARDISO loses its reference: the agreement column below is what
+			// says the two direct solvers agree to 1e-14, and with no UMFPACK
+			// there is nothing to agree WITH. M-217.
+			umfSetup = -1.0;
+			umfSolve = -1.0;
+#endif
 
 			double parSetup = -1.0, parSolve = -1.0, agreement = -1.0;
 #ifdef MFEM_USE_MKL_PARDISO
@@ -444,12 +457,16 @@ int main( int argc, char **argv )
 				parSetup = bestOf( repeats, [ & ]() { par.SetOperator( *serial.matrix ); } );
 				parSolve = bestOf( repeats, [ & ]() { par.Mult( rhs, parX ); } );
 
+#ifdef MFEM_USE_SUITESPARSE
 				mfem::Vector diff( parX );
 				diff -= umfX;
-				agreement = diff.Norml2()/std::max( 1.0e-300, umfX.Norml2() );
+				agreement = diff.Norml2()
+				            /std::max( 1.0e-300,
+				                       static_cast<double>( umfX.Norml2() ) );
 				worstSolverDiff = std::max( worstSolverDiff, agreement );
 				if ( agreement >= 1.0e-10 )
 					++agreementFailures;
+#endif
 			}
 #endif
 

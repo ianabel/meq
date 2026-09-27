@@ -137,7 +137,8 @@ namespace
 		m->solver->setSource( *m->source, 0.30 );
 		m->solver->setBoundaryData( *m->zero );
 		m->solver->setInitialGuess( *m->guess );
-		m->solver->setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		m->solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                  meq::newtonTolerance( 1.0e-14 ), 40 );
 		try
 		{
 			m->solver->solve();
@@ -459,7 +460,7 @@ BOOST_AUTO_TEST_CASE( theAxisConstraintJumpsWhenTheAxisCrossesAFace )
 		direction( i ) = normal( generator );
 	direction /= direction.Norml2();
 
-	double const scale = std::max( flux.Norml2(), 1.0e-30 );
+	double const scale = std::max( static_cast<double>( flux.Norml2() ), 1.0e-30 );
 
 	std::printf( "\n  THE AXIS CONSTRAINT UNDER A FLUX PERTURBATION\n" );
 	std::printf( "    %12s %16s %16s %10s %10s\n", "step", "numerator",

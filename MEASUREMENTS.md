@@ -11859,3 +11859,127 @@ safety measure that made it askable.*
 **AND THE SHARES ARE INDICATIVE RATHER THAN CURRENT.** M-137 was taken on an
 older binary against an older library; what is robust is the ORDERING — sparsity
 first, two covered legs next, one uncovered leg last — not the third digit.
+
+
+### M-217
+
+**THE TEST TREE BUILDS AND RUNS AGAINST `MFEM_PRECISION = single`, AND THE
+INVENTORY INVERTS WHAT `DEVICE-PLAN.md` §7.2 PREDICTED.** That section named the
+tolerance sweep of the test tree *"the single biggest cost in this section"* and
+framed the question as *which rate pairs are still above the floor at each `k`*.
+Measured, the rate class is **8 of 44** and the biggest single cause was one
+solver constant that no assertion sweep would have touched.
+
+**THE PORT IS 38 FILES AND 405 LINES, IN FOUR CLASSES, AND ONLY THREE ARE
+MECHANICAL.**
+
+| class | sites | what it is |
+|---|---|---|
+| widening at a `real_t` seam | 44 | `std::max( <double>, <mfem accessor> )`, `mfem::real_t *` out of `GetVertex()`/`GetData()`, `IntegrationPoint::weight` |
+| **the MFEM-free seam** | 17 | `meq::analytic::flux()` takes `double &` out-params **by design** — *Layout* keeps `Source` and `Profile` free of MFEM so they stay `double` in both builds. **No cast can fix a reference**: it needs local doubles and a copy back |
+| **absent references** | 4 guards | gslib ([M-175](#m-175): raw `double`, cannot coexist with single) and UMFPACK (`umfpack_d*` is double-only, so `MFEM_USE_SUITESPARSE` is off). Both now skip **loudly**, naming the reason |
+| the `real_t` override surface | 1 | one `mfem::Coefficient::Eval` returning `double`. **§7.1 predicted this would be small and it is** — twelve classes derive from an MFEM type and only one is in `tests/` |
+
+**AND A FIFTH IS A DEFECT THE DOUBLE BUILD STRUCTURALLY CANNOT SEE.** MEQ's own
+item-4 wiring gave `rowDot()`'s lambda two `return` statements of different
+types — one `mfem::real_t`, the others `double` — so return-type deduction
+fails. In double those **are** the same type and the code is well formed. *A
+single-precision build type-checks the `double`/`real_t` seam that the double
+build collapses*, and it is worth running for that alone.
+
+**THE `1.0e-300` DIVISION GUARDS ARE THE ONE WIDENING THAT IS NOT COSMETIC, AND
+THERE ARE 13 OF THEM ACROSS 6 FILES.** `std::max( 1.0e-300, ‖x‖ )` guards a
+division. `1e-300` is below float's smallest **subnormal** (~1.4e-45), so as a
+float comparison it is `max( x, 0 )` — the guard does not loosen, it
+**disappears**, and a zero norm divides by zero. Widening the `real_t` side
+keeps the literal. **`std::max`'s refusal to deduce a common type is what makes
+this a compile error rather than a silent flush**: every guard the compiler did
+*not* flag already had a `double` on both sides. M-184's sentence holds — *a
+tolerance that does not scale with `real_t` is a build-configuration bug wearing
+a numerical costume* — and this is the third shape of it in one day.
+
+**AND `install-single` IS NOT `install` MINUS PRECISION. IT IS MINUS SIX
+THINGS**, which is the attribution trap of [M-207](#m-207) and
+[M-210](#m-210) set up to fire again:
+
+| | double | single |
+|---|---|---|
+| `MFEM_USE_SUITESPARSE` | YES | **NO** — structural, SuiteSparse ships no single UMFPACK |
+| `MFEM_USE_GSLIB` | YES | **NO** — structural, [M-175](#m-175) |
+| `MFEM_USE_CUDA` / `MFEM_USE_CUDSS` | YES | **NO** — incidental, simply not configured |
+| `MFEM_USE_SUNDIALS` | YES | **NO** — incidental, SUNDIALS builds single |
+
+**Two are structural and three are incidental, and a red test cannot tell you
+which it met.** *A failure measured after changing six things attributes
+nothing*, so the inventory below classifies by **what each failure's message
+names**, not by what the build is.
+
+**THE INVENTORY, AND THE COLUMN THAT MATTERS IS THE COMPOSITION AND NOT THE
+COUNT.**
+
+| class | before | after | |
+|---|---|---|---|
+| **A** the SOLVE did not converge | **23** | **5** | never reaches the assertion the test was written for |
+| **B** names an absent library | 4 | 6 | SUNDIALS, and the device instrument |
+| **C** a rate read as a failed rate | 3 | **8** | §7.2's predicted class |
+| **D** a value assertion below the floor | 15 | **25** | §7.2's predicted *cost* |
+| total red of 63 | 45 | **44** | |
+
+**THE COUNT MOVED BY ONE AND THE INVENTORY MOVED BY EIGHTEEN.** One test went
+green (`MachineFixedBoundary`), none went red, and **18 left class A** for a
+class that can actually be assessed. *A suite count is not a measurement of a
+suite; the composition is* — counting reds says the repair did nothing.
+
+**WHAT CLASS A WAS IS ONE CONSTANT, AND [M-174](#m-174) NAMED IT WITHOUT
+SCALING IT.** `newtonRelativeTolerance` is `1.0e-12`, seven orders below single
+precision's residual floor of ~2.2e-06, so `solve()` **refuses** rather than
+returning a coarse answer — and a refusal reaches the test as *"the non-linear
+iteration did not converge"*, which is not a number anybody can sweep.
+`meq::newtonTolerance( historical )` is the repair, `10*eps` against the
+caller's own literal: **1.19e-6 in single**, beside the `1e-6`
+[M-204](#m-204) measured closing a bordered border at FP32's own epsilon in the
+same ten iterations as double, and **2.2e-15 in double**, under every historical
+value in the tree, so `std::max` returns the caller's literal and the double
+path is bit-for-bit unchanged.
+
+**AND FIXING THE DEFAULT ALONE WAS INERT, WHICH IS A FALSIFIED HYPOTHESIS AND
+STAYS RECORDED.** The first repair scaled the constructor's default and re-ran
+the suite: **23 → 21, nothing went green.** The cause is that `setNewtonControl()`
+is called at **39 sites** in `tests/` and `apps/` carrying their own literals,
+from `1e-13` to `1e-8` relative and `1e-14` to `1e-12` absolute — *a default is
+only a default on the paths that do not override it*, which is the reserved-key
+trap of `CLAUDE.md` in a second place. All 39 now call one expression, which is
+the [M-165](#m-165)/[M-189](#m-189) precedent: **a floor kept in step by hand
+across 39 sites is the defect, not the floor.**
+
+**AND A SECOND CONSTANT WAS FOUND THE SAME WAY, WITH THE SAME NAME AS ONE
+M-184 ALREADY FIXED.** `PointLocator.cpp`'s `insideTolerance` follows `real_t`;
+`Sampler.cpp` carries **the same identifier at the same `1.0e-8`** and did not.
+M-184 scaled six constants and this is a seventh sibling in a second file.
+*A constant that exists twice is fixed once.*
+
+**THE DOUBLE CONTROL IS 62 OF 63 AND THE RED IS THE STANDING ONE.** Both suites
+were run on the same working tree: single 44 red, double **62/63 green with
+`PlasmaEdgeConvergence` the deliberate red `CLAUDE.md` documents**. So 405 lines
+across 38 files, 40 tolerance sites and two solver constants moved **nothing** in
+double, which is what the `std::max` construction is for and was checked rather
+than assumed.
+
+**WHAT IS LEFT IS NOW A TRACTABLE LIST AND §7.2's QUESTION IS FINALLY ASKABLE.**
+Class C is eight rate assertions, every one of them `k = 2` at the finest `h` —
+`q converged at 1.93 / 1.95 / 2.56 / 2.69` against a wanted 2.85, which is the
+flattened tail §7.2 described, at the mesh where it should first appear. Class D
+is 25 value assertions and **several are consequences rather than findings** —
+`DeviceParity` reports *"`mhd-rectangle` does not solve on the host at all"*,
+which is class A's residue reaching a different test. **The two that are
+structural rather than numerical are worth naming now**: `SourceViewTests` pins
+`meq::SourceView` to the **bit** against `meq::Source`, and the POD is
+`mfem::real_t` because it runs on a device while `Source` is `double` because
+*Layout* keeps it MFEM-free — so **the pin is unsatisfiable by construction in
+single**, and the design decision that makes the port small is the one that puts
+a format boundary through MEQ's most load-bearing unit test. And
+`SolovievGeometryConvergence` reads *"Newton took 2 iterations on a source that
+does not depend on psi"*, which says `10*eps` is marginally **below** that
+problem's own floor — consistent with M-204's finding that a single-precision
+equilibrium is qualified **per problem** and not per build, over a range of
+560×. *A build-wide floor can only ever be a lower bound.*

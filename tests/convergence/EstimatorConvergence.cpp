@@ -282,7 +282,10 @@ namespace
 		mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 		                                                       mfem::Vector &value )
 		{
-			eq.flux( x( 0 ), x( 1 ), value( 0 ), value( 1 ) );
+			double fluxR = 0.0, fluxZ = 0.0;
+			eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+			value( 0 ) = fluxR;
+			value( 1 ) = fluxZ;
 		} );
 
 		meq::GradShafranovSolver solver( mesh, order );

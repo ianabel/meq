@@ -1096,6 +1096,41 @@ FORMAT'S, OVER A RANGE OF 560×** — the four-border diverted machine is
 a single-precision equilibrium is qualified per problem and not per build.
 `DEVICE-PLAN.md` §7.3, §7.4 and §7.5.
 
+**AND THE TEST TREE NOW BUILDS AND RUNS THERE, WHICH INVERTED WHAT THE PLAN
+PREDICTED** → **[M-217](MEASUREMENTS.md#m-217)**. The port is **38 files and 405
+lines** in four classes, and the double build is **62/63 — bit-for-bit
+unchanged** on the same working tree, which is what the `std::max` construction
+is for. Single reads **44 red of 63**, and the classification is the finding:
+`DEVICE-PLAN.md` §7.2 called the tolerance sweep *"the single biggest cost"* and
+named the flattened rate tail as the class to expect, and those are **25 and 8**
+of 44 — while **23 of the original 45 never reached an assertion at all**,
+because `newtonRelativeTolerance` is `1.0e-12`, seven orders below single's
+residual floor, so `solve()` REFUSES. **A tolerance tuned against a solve that
+did not converge is tuned against nothing**, so no assertion sweep could have
+run first, and none would have found this — it is a solver constant, not an
+assertion.
+
+**THREE THINGS FROM IT GENERALISE.** *A default is only a default on the paths
+that do not override it*: scaling the constructor's value alone moved 23 to 21
+and took nothing green, because `setNewtonControl()` is called at **39 sites**
+carrying their own literals — now one shared `meq::newtonTolerance()`, the
+`limiterPolygonMaximum()` and `extensionFdStep()` precedent again. *A suite
+count is not a measurement of a suite*: the repair moved the count by **one** and
+the inventory by **eighteen**. And **`install-single` is not `install` minus
+precision — it is minus six things**, two of them structural (SuiteSparse and
+gslib have no single build) and three incidental, so a red test there cannot say
+which it met; the attribution discipline of [M-210](MEASUREMENTS.md#m-210)
+applies to a failure exactly as it does to a cure.
+
+**AND A SINGLE BUILD TYPE-CHECKS A SEAM THE DOUBLE BUILD COLLAPSES.** `double`
+and `real_t` are the same type there, so a function returning both compiles;
+under `MFEM_PRECISION = single` it does not, and that is how MEQ's own item-4
+wiring defect was found. **`std::max`'s refusal to deduce a common type is the
+same instrument one level down** — it turned all 13 of the tree's
+`std::max( 1.0e-300, ‖x‖ )` division guards into compile errors, which matters
+because `1e-300` is below float's smallest SUBNORMAL, so as a float comparison
+the guard does not loosen, it disappears.
+
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by
 `--device cuda` reproducing `--device cpu` **to every printed digit** — that is

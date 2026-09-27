@@ -482,7 +482,18 @@ BOOST_AUTO_TEST_CASE( theReconstructedQuantitiesAreThereAndSigned )
 	mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 	                                                       mfem::Vector &value )
 	{
-		eq.flux( x( 0 ), x( 1 ), value( 0 ), value( 1 ) );
+		/*
+		 * THE MFEM-FREE SEAM, WRITTEN OUT. `meq::analytic`'s `flux()` takes
+		 * `double &` out-parameters because CLAUDE.md's *Layout* keeps the
+		 * Source and Profile hierarchies free of MFEM -- so they stay `double`
+		 * whatever `MFEM_PRECISION` says -- while `mfem::Vector::operator()`
+		 * yields `real_t &`. In the double build those bind; in single they do
+		 * not, and no cast can fix a REFERENCE. MEASUREMENTS.md M-217.
+		 */
+		double fluxR = 0.0, fluxZ = 0.0;
+		eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+		value( 0 ) = fluxR;
+		value( 1 ) = fluxZ;
 	} );
 
 	std::printf( "\n  the reconstructed quantities, Solov'ev on the linear path\n" );
@@ -639,8 +650,10 @@ BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyExactly )
 			{
 				if ( a->GetJ()[ i ] != b->GetJ()[ i ] )
 					++columnMismatches;
-				worst = std::max( worst,
-				                  std::fabs( a->GetData()[ i ] - b->GetData()[ i ] ) );
+				worst = std::max(
+					worst,
+					static_cast<double>( std::fabs( a->GetData()[ i ]
+					                                - b->GetData()[ i ] ) ) );
 			}
 
 			std::printf( "    k = %d, n = %2d : %6d entries, worst difference %.3e%s\n",
@@ -769,11 +782,13 @@ BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyOnANonlinearSource
 
 			double worstPsi = 0.0;
 			for ( int i = 0; i < a.Size(); ++i )
-				worstPsi = std::max( worstPsi, std::fabs( a( i ) - b( i ) ) );
+				worstPsi = std::max(
+			worstPsi, static_cast<double>( std::fabs( a( i ) - b( i ) ) ) );
 
 			double worstFlux = 0.0;
 			for ( int i = 0; i < qa.Size(); ++i )
-				worstFlux = std::max( worstFlux, std::fabs( qa( i ) - qb( i ) ) );
+				worstFlux = std::max(
+			worstFlux, static_cast<double>( std::fabs( qa( i ) - qb( i ) ) ) );
 
 			int const itsSerial = serialSolver->newtonIterations();
 			int const itsThreaded = threadedSolver->newtonIterations();
@@ -912,7 +927,9 @@ BOOST_AUTO_TEST_CASE( theTraceSolversAgree )
 		mfem::GridFunction difference( solver.potential() );
 		difference -= *reference;
 		double const relative =
-			difference.Norml2()/std::max( 1.0e-300, reference->Norml2() );
+			difference.Norml2()
+		       /std::max( 1.0e-300,
+		                  static_cast<double>( reference->Norml2() ) );
 
 		std::printf( "    %-8s : agrees with %s to %.3e\n",
 		             entry.name, referenceName, relative );

@@ -508,7 +508,18 @@ namespace tests
 		mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
 		                                                      mfem::Vector &value )
 		{
-			eq.flux( x( 0 ), x( 1 ), value( 0 ), value( 1 ) );
+			/*
+		 * THE MFEM-FREE SEAM, WRITTEN OUT. `meq::analytic`'s `flux()` takes
+		 * `double &` out-parameters because CLAUDE.md's *Layout* keeps the
+		 * Source and Profile hierarchies free of MFEM -- so they stay `double`
+		 * whatever `MFEM_PRECISION` says -- while `mfem::Vector::operator()`
+		 * yields `real_t &`. In the double build those bind; in single they do
+		 * not, and no cast can fix a REFERENCE. MEASUREMENTS.md M-217.
+		 */
+		double fluxR = 0.0, fluxZ = 0.0;
+		eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+		value( 0 ) = fluxR;
+		value( 1 ) = fluxZ;
 		} );
 
 		meq::GradShafranovSolver solver( mesh, order );
@@ -569,7 +580,9 @@ namespace tests
 		// and is reported as a failure that is not one. MillerConvergence.cpp
 		// carries the measurement: 1.9e-14 absolute against a first residual of
 		// 1.55e-3.
-		solver.setNewtonControl( relativeTolerance, 1.0e-14, maxNewtonIterations );
+		solver.setNewtonControl( meq::newtonTolerance( relativeTolerance ),
+		                         meq::newtonTolerance( 1.0e-14 ),
+		                         maxNewtonIterations );
 		if ( guess )
 			solver.setInitialGuess( *guess );
 		solver.setGlobalisation( glob );
@@ -648,7 +661,9 @@ namespace tests
 		solver.setSource( source, psiAxisGuess );
 		solver.setBoundaryData( boundaryCoeff );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( relativeTolerance, 1.0e-14, maxNewtonIterations );
+		solver.setNewtonControl( meq::newtonTolerance( relativeTolerance ),
+		                         meq::newtonTolerance( 1.0e-14 ),
+		                         maxNewtonIterations );
 
 		NormalisedMeasurement point;
 		point.h = box.width()/static_cast<double>( n );
@@ -821,7 +836,8 @@ namespace tests
 	/// The best observed Newton order over the triples that are above the
 	/// round-off floor. Below the floor the ratios are noise.
 	inline double bestNewtonOrder( std::vector<double> const &history,
-	                              double relativeFloor = 1.0e-12 )
+	                              double relativeFloor =
+	                                      meq::newtonTolerance( 1.0e-12 ) )
 	{
 		if ( history.size() < 3 )
 			return 0.0;
