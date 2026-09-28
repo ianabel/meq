@@ -1703,14 +1703,42 @@ into a class that can be assessed — *the count moved by one and the inventory
 moved by eighteen.* **A tolerance tuned against a solve that did not converge is
 tuned against nothing**, so the sweep below could not have been done first.
 
-**AND THE INSTALL IS NOT THE DOUBLE ONE MINUS PRECISION.** It is missing
-SuiteSparse and gslib **structurally** — neither has a single-precision build —
-and CUDA, cuDSS and SUNDIALS **incidentally**, because they were not configured.
-Three of those are recoverable and two are not, and a red test cannot say which
-it met. **Bringing the install to parity on the three incidental ones is the
-next step**, before any tolerance is judged: a device-residency configuration
-that cannot construct an `mfem::Device` is not the configuration this section
-is about.
+**AND THE INSTALL WAS NOT THE DOUBLE ONE MINUS PRECISION. IT IS NOW** →
+**[M-218](MEASUREMENTS.md#m-218)**. SuiteSparse and gslib are missing
+**structurally** — neither has a single-precision build — and CUDA, cuDSS and
+SUNDIALS were missing **incidentally**. All three incidental ones are restored,
+which cost a single-precision SUNDIALS (MFEM has no guard that
+`SUNDIALS_PRECISION` matches `real_t`) and **six `double`/`real_t` signatures in
+`linalg/sundials.{hpp,cpp}` that stop MFEM compiling in that pairing at all**,
+reported as `HDG-SUNDIALS-SINGLE-PRECISION-FROM-MEQ.md`.
+
+**AND IT TURNED UP A SEVENTH DIFFERENCE THAT NO LIST OF `MFEM_USE_*` FLAGS
+CONTAINS**: PARDISO was resolved against `libmkl_sequential` in
+`/opt/intel/.../lib/intel64` where the reference uses `libmkl_gnu_thread` in
+`.../lib`, and `CUDA_ARCH` sat at the cache default `sm_60` on a `sm_75` card.
+PARDISO is the default trace solver, so that is the knob
+[M-78](MEASUREMENTS.md#m-78) measured as deciding which problems converge.
+*A configuration stated in flags is not a configuration.*
+
+**THE SUITE READS 40 RED OF 63 AND THE DOUBLE CONTROL IS 62/63 THROUGHOUT.**
+Against the parity install it was 46, and the six that cleared are
+`SolovievConvergence`, `FieldConvergence`, `RotatingSolovievConvergence`,
+`RotatingSourceConvergence`, `MaschkePerrinConvergence` and `cuDSSTraceSolver`.
+**The count is the wrong instrument here for the third time**: restoring the
+install took the red count UP by two while every *"MFEM was built without
+`MFEM_USE_SUNDIALS`"* and *"no Device is configured"* disappeared, because a
+test that aborted at its first case now runs all of them —
+`SourceViewTests` went from 15 error lines to 436, `DeviceRowsTests` from 4 to
+272. Read the distinct failing CASES: **173 then, 157 now.**
+
+**AND THE RATE SWEEP THIS SECTION DESCRIBES IS ANSWERED, IN THE NEGATIVE.**
+Against the double build on the same tree, `Solov'ev NSTX` in the flux is
+1.09× contaminated at `k = 1` on the finest mesh, **203×** at `k = 2`, and
+**1.5× on the COARSEST mesh** at `k = 3`. So `k+1` above `k = 1` is a
+double-build acceptance: there is no mesh sequence a single build can measure it
+on, and three separate per-pair criteria were tried and each one provably fails.
+**MEQ's rate acceptance is not a thing single precision verifies; agreement with
+the double build is.** That is the finding this section was for.
 
 **WHAT REMAINS IS THE SWEEP THIS SECTION DESCRIBES, AND IT IS NOW SIZED.**
 Class C is eight rate assertions, all at `k = 2` and the finest `h`, which is

@@ -311,7 +311,11 @@ namespace meq
 	{
 		if ( !( toleranceIn > 0.0 ) )
 			throw std::invalid_argument( "ContourTracer: the tolerance must be positive" );
-		tolerance = toleranceIn;
+		// FLOORED HERE AND NOT ONLY AT THE DEFAULT. M-217's finding, one level
+		// down: a default is only a default on the paths that do not override
+		// it, and this one is overridden -- SolovievGeometryConvergence asks
+		// for 1.0e-13, a hundred times below what a `float` can hold at all.
+		tolerance = newtonTolerance( toleranceIn );
 	}
 
 	void ContourTracer::setMaxCorrectorIterations( int maxIterationsIn )

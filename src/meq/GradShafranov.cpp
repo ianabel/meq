@@ -12472,6 +12472,24 @@ namespace
 		return fluxGf.ComputeL2Error( exact, irs );
 	}
 
+	double GradShafranovSolver::exactPotentialNorm( mfem::Coefficient &exact ) const
+	{
+		mfem::IntegrationRule const *irs[ mfem::Geometry::NumGeom ];
+		errorRules( orderValue, irs );
+		mfem::GridFunction zero( potentialGf );
+		zero = 0.0;
+		return zero.ComputeL2Error( exact, irs );
+	}
+
+	double GradShafranovSolver::exactFluxNorm( mfem::VectorCoefficient &exact ) const
+	{
+		mfem::IntegrationRule const *irs[ mfem::Geometry::NumGeom ];
+		errorRules( orderValue, irs );
+		mfem::GridFunction zero( fluxGf );
+		zero = 0.0;
+		return zero.ComputeL2Error( exact, irs );
+	}
+
 	double GradShafranovSolver::postProcessedPotentialError( mfem::Coefficient &exact ) const
 	{
 		if ( !postProcessed )

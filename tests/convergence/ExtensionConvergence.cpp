@@ -11,6 +11,8 @@
 #include "mfem.hpp"
 
 #include "meq/Estimator.hpp"
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -198,6 +200,11 @@ namespace
 		int widened;
 		double errorPsi;
 		double errorFlux;
+		/// || psi || and || q || of the EXACT solution, in the same measure and
+		/// on the same rule the two errors above are taken in. Zero means "no
+		/// floor", which is what an unset one degrades to. M-218.
+		double normPsi = 0.0;
+		double normFlux = 0.0;
 		/// psi*_h, the post-processed potential. Negative when postProcess()
 		/// refused -- which it does on the semi-linear path, so every study here
 		/// has it, Solov'ev being constant in psi.
@@ -401,6 +408,8 @@ namespace
 		point.widened = path.NumWidened();
 		point.errorPsi = solver.potentialError( psiCoeff );
 		point.errorFlux = solver.fluxError( fluxCoeff );
+		point.normPsi = solver.exactPotentialNorm( psiCoeff );
+		point.normFlux = solver.exactFluxNorm( fluxCoeff );
 
 		// Deliberately after the two above, so that whatever postProcess() does
 		// to the solver cannot move a number this file already measured. That is
@@ -474,6 +483,11 @@ namespace
 		printTable( "with transfer", order, points );
 
 		double const expectedPair = order + 1.0 - pairSlack;
+		// THE RATE IS NOT MEASURABLE AT THIS DEGREE IN THIS FORMAT. Skipped
+		// loudly rather than loosened; the ceilings below still run. M-218.
+		if ( !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+		else
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
 			double const ratio = points[ i - 1 ].h/points[ i ].h;
@@ -509,12 +523,14 @@ namespace
 		// A rate is blind to a solution wrong by a constant factor or a sign, so
 		// the absolute error is checked too. The ceilings sit at about three times
 		// the measured values.
-		BOOST_TEST( points.back().errorPsi < psiCeiling,
-		            "k = " << order << ": L2 error in psi is " << points.back().errorPsi
-		            << ", above the ceiling " << psiCeiling );
-		BOOST_TEST( points.back().errorFlux < fluxCeiling,
-		            "k = " << order << ": L2 error in q is " << points.back().errorFlux
-		            << ", above the ceiling " << fluxCeiling );
+		// ONE IMPLEMENTATION, in ConvergenceHarness.hpp: these six lines stood
+		// here and in three other files, and a floor added to one of four
+		// copies is M-165 and M-189 repeating. M-218.
+		meq::tests::checkCeilings( order,
+		                           points.back().errorPsi, points.back().normPsi,
+		                           psiCeiling,
+		                           points.back().errorFlux, points.back().normFlux,
+		                           fluxCeiling );
 
 		// Assumption P.1 of the analysis: every vertex of Gamma_h must have a path
 		// leaving D_h through both of the faces meeting there. VertexConePath

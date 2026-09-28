@@ -9,6 +9,8 @@
 #include "mfem.hpp"
 
 #include "meq/Estimator.hpp"
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -153,6 +155,11 @@ namespace
 
 	struct Measurement
 	{
+		/// || psi || and || q || of the EXACT solution, in the same measure and
+		/// on the same rule the two errors above are taken in. Zero means "no
+		/// floor", which is what an unset one degrades to. M-218.
+		double normPsi = 0.0;
+		double normFlux = 0.0;
 		double h;
 		int elements;
 		double eta;
@@ -322,6 +329,8 @@ namespace
 
 		point.errorPsi = solver.potentialError( psiCoeff );
 		point.errorFlux = solver.fluxError( fluxCoeff );
+		point.normPsi = solver.exactPotentialNorm( psiCoeff );
+		point.normFlux = solver.exactFluxNorm( fluxCoeff );
 		point.errorStar = solver.postProcessedPotentialError( psiCoeff );
 		return point;
 	}

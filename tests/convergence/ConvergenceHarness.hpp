@@ -47,12 +47,16 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <boost/test/unit_test.hpp>
 
 #include "mfem.hpp"
+
+#include "RoundOffFloor.hpp"
 
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
@@ -62,6 +66,69 @@ namespace meq
 namespace tests
 {
 
+	/**
+	 * The step for a central difference of the assembled residual, floored at
+	 * what this build's `real_t` can actually resolve.
+	 *
+	 * **A CENTRAL DIFFERENCE HAS TWO ERROR TERMS AND THEY PULL OPPOSITE WAYS.**
+	 * Truncation is `O( step^2 )` and cancellation is `O( eps/step )`, so the
+	 * best step is `cbrt( eps )` and the best relative error it can buy is
+	 * `eps^(2/3)`. In double that is a step of 6.1e-06 reaching 3.7e-11, which
+	 * is why a literal `1.0e-5` has always been comfortable here. In single it
+	 * is a step of 4.9e-04 reaching 2.4e-05, and the SAME literal `1.0e-5`
+	 * leaves `eps/step = 1.2e-02`.
+	 *
+	 * **THAT NUMBER IS THE MEASUREMENT AND NOT AN ESTIMATE.** Against
+	 * `install-single`, `NewtonConvergence` and `RotatingNewtonConvergence`
+	 * reported their four directions at 1.52e-02, 2.00e-02, 2.37e-02 and
+	 * 1.71e-02 relative -- `eps/step` to the figure, from a Jacobian that had
+	 * not moved by a bit. **The differencing was the defect and the Jacobian
+	 * was the accused**, which is precisely the reading a fixed step invites:
+	 * a wrong Jacobian and an unresolvable difference produce the same line.
+	 *
+	 * `std::max` against the historical literal, so the double path is
+	 * bit-for-bit what it was. M-218.
+	 */
+	inline double jacobianDifferenceStep( double historical )
+	{
+		return std::max( historical,
+		                 std::cbrt( static_cast<double>(
+			                 std::numeric_limits<mfem::real_t>::epsilon() ) ) );
+	}
+
+	/// The tolerance that step can be held to: `eps^(2/3)` with a margin,
+	/// floored from the caller's own historical value so that double is
+	/// unchanged. The margin is 10, which is the usual allowance for the
+	/// constant in front of the third derivative.
+	///
+	/// It must be read together with [[jacobianDifferenceStep]] -- M-189's rule
+	/// that a caller computing one quantity two ways must give both sides the
+	/// same step applies here to the step and the tolerance it entitles: moving
+	/// one without the other is how a difference that cannot be resolved gets
+	/// asserted against a bound that assumed it could.
+	inline double jacobianDifferenceTolerance( double historical )
+	{
+		double const eps = static_cast<double>(
+			std::numeric_limits<mfem::real_t>::epsilon() );
+		return std::max( historical, 10.0*std::cbrt( eps*eps ) );
+	}
+
+	/**
+	 * The two absolute ceilings, floored at what this build's `real_t` can
+	 * reach, asserted, and reported when the floor is what carried them.
+	 *
+	 * **IT IS ONE IMPLEMENTATION BECAUSE IT WAS FOUR.** `checkOrder()` here,
+	 * `SolovievConvergence`, `ExtensionConvergence` and
+	 * `RotatingSourceConvergence` each carried the same six lines, which is the
+	 * shape M-165 and M-189 both closed: a constant -- or here a construction --
+	 * kept in step by hand across N sites IS the defect, and it fails by one
+	 * site being repaired and the others not. Floored in one place and missed in
+	 * three, the single build would have reported three tests limited by a
+	 * format and one by a method, with nothing saying which.
+	 *
+	 * Declared before [[Measurement]] is defined, so it takes the two values
+	 * rather than the struct.
+	 */
 	/// The axisymmetric box a benchmark is posed on. R must stay well away from
 	/// zero: the operator carries a 1/R and several of the closed forms carry a
 	/// log R.
@@ -222,6 +289,26 @@ namespace tests
 		double errorPsi;
 		double errorFlux;
 		int newtonIterations;
+		/// || psi || and || q || of the EXACT solution, in the measure and on
+		/// the rule the two errors above are taken in. The scale an absolute
+		/// ceiling is implicitly quoted in, and the denominator
+		/// [[roundOffFloor]] needs. See
+		/// meq::GradShafranovSolver::exactPotentialNorm.
+		///
+		/// **ZERO MEANS "NO FLOOR", AND THAT IS THE SAFE DEFAULT RATHER THAN A
+		/// SENTINEL.** Five files in this directory build their own
+		/// `Measurement` -- `SolovievConvergence`, `ExtensionConvergence`,
+		/// `EstimatorConvergence`, `RotatingSourceConvergence` and
+		/// `NewtonConvergence` all have a local `measure()` -- so a field added
+		/// here is a field they do not set. An uninitialised one would make
+		/// `roundOffFloor()` return whatever was on the stack, which is a
+		/// ceiling that moves between runs; initialised to zero it makes the
+		/// floor zero, `std::max` selects the caller's own ceiling, and the
+		/// assertion is exactly what it was before this field existed. *A
+		/// default that degrades to the previous behaviour is worth more than
+		/// one that is easy to notice.*
+		double normPsi = 0.0;
+		double normFlux = 0.0;
 	};
 
 	/// One point on a self-convergence curve: no errors, because there is
@@ -535,6 +622,8 @@ namespace tests
 		point.traceDofs = solver.numTraceDofs();
 		point.errorPsi = solver.potentialError( psiCoeff );
 		point.errorFlux = solver.fluxError( fluxCoeff );
+		point.normPsi = solver.exactPotentialNorm( psiCoeff );
+		point.normFlux = solver.exactFluxNorm( fluxCoeff );
 		point.newtonIterations = solver.newtonIterations();
 		return point;
 	}
@@ -883,6 +972,11 @@ namespace tests
 
 		double const expected = order + 1.0 - slack;
 
+		// THE RATE IS NOT MEASURABLE AT THIS DEGREE IN THIS FORMAT. Skipped
+		// loudly rather than loosened; the ceilings below still run. M-218.
+		if ( !rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( rateNotMeasurableNotice( order ) );
+		else
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
 			double const ratio = points[ i - 1 ].h/points[ i ].h;
@@ -899,12 +993,9 @@ namespace tests
 			            << ": q converged at " << rateFlux << ", wanted " << expected );
 		}
 
-		BOOST_TEST( points.back().errorPsi < psiCeiling,
-		            "k = " << order << ": L2 error in psi is " << points.back().errorPsi
-		            << ", above the ceiling " << psiCeiling );
-		BOOST_TEST( points.back().errorFlux < fluxCeiling,
-		            "k = " << order << ": L2 error in q is " << points.back().errorFlux
-		            << ", above the ceiling " << fluxCeiling );
+		checkCeilings( order, points.back().errorPsi, points.back().normPsi,
+		               psiCeiling, points.back().errorFlux, points.back().normFlux,
+		               fluxCeiling );
 	}
 
 	/// Measure a dyadic sequence with no exact solution to compare against, and

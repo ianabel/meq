@@ -1277,7 +1277,17 @@ namespace meq
 			double targetTurn = 0.15;
 			double minStepFraction = 0.02;
 			double localStepCeiling = 1.0;
-			double tolerance = 1.0e-12;
+			/// The corrector's target, RELATIVE: the residual it is compared
+			/// against is `tolerance*potentialScale()`, so this carries no
+			/// scale of its own and is a pure statement about how many digits
+			/// of psi the walk must reproduce. `1.0e-12` asks for twelve, which
+			/// a `float` does not have -- so it is floored at what this build's
+			/// `real_t` can reach, exactly as the solver's own Newton targets
+			/// are. Unfloored in single it does not merely loosen: the corrector
+			/// exhausts its iterations, `fitByAngle` falls through Newton to
+			/// bisection to "take the closest point", and the surface is
+			/// reported traced with `stalledRays` in the hundreds. M-218.
+			double tolerance = newtonTolerance( 1.0e-12 );
 			int maxCorrectorIterations = 30;
 			int maxPoints = 200000;
 			int circuits = 1;

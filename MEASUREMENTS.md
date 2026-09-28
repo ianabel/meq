@@ -11983,3 +11983,252 @@ does not depend on psi"*, which says `10*eps` is marginally **below** that
 problem's own floor — consistent with M-204's finding that a single-precision
 equilibrium is qualified **per problem** and not per build, over a range of
 560×. *A build-wide floor can only ever be a lower bound.*
+
+### M-218
+
+**`install-single` IS BROUGHT TO PARITY WITH `install`, AND WHAT THAT COST WAS
+NOT PRECISION: IT WAS SIX UPSTREAM SIGNATURES AND A THREADING LAYER NOBODY HAD
+COUNTED.** [M-217](#m-217) recorded that the single install differs from the
+double one in **six** ways, two structural and three incidental, and named
+closing the incidental three as the next step. Closing them found a **seventh**,
+and the seventh is the one that changes answers.
+
+**THE SEVENTH IS THAT PARDISO WAS ON A DIFFERENT MKL.** Read out of the two
+CMake caches rather than remembered:
+
+| | `install` | `install-single`, before |
+|---|---|---|
+| `MKL_PARDISO_LIBRARIES` | `/opt/intel/oneapi/mkl/latest/lib/` `libmkl_core` + `libmkl_intel_lp64` + **`libmkl_gnu_thread`** | `.../lib/intel64/` `libmkl_core` + `libmkl_intel_lp64` + **`libmkl_sequential`** |
+| `CUDA_ARCH` | `sm_75` | **`sm_60`**, the cache default, wrong for this card |
+
+PARDISO is the default trace solver, so this is not a build detail — it is the
+one [M-78](#m-78) measured as deciding *which problems converge* on a knife
+edge. **And no list of `MFEM_USE_*` flags contains it**, which is why it
+survived a section written entirely in terms of those flags. `CLAUDE.md`'s
+*Traps* entry predicted exactly this — *"a fresh configure re-searches for what
+a long-lived build directory was given by hand"* — and it is now a measurement
+rather than a warning.
+
+**THE REFERENCE'S `MKL_SEQUENTIAL` COMPONENT POINTS AT `libmkl_gnu_thread`,
+BY HAND.** `FindMKL_PARDISO.cmake` declares a component literally named
+`MKL_SEQUENTIAL`, and `install`'s cache carries
+`MKL_PARDISO_MKL_SEQUENTIAL_LIBRARY = .../libmkl_gnu_thread.so`. **That is not
+recoverable from any documented knob** — `MKL_PARDISO_DIR` and
+`MKL_LIBRARY_DIR` alone resolve `mkl_core` and `mkl_intel_lp64` out of Debian's
+`/usr/lib/x86_64-linux-gnu` and the component to `mkl_sequential`. Reaching the
+reference took pinning all three `FILEPATH` entries and `MKL_PARDISO_INCLUDE_DIR`
+explicitly. *A cache entry set by hand years ago is not a configuration anybody
+can re-derive; copy it, and diff it token by token afterwards.*
+
+**AND SUNDIALS HAS TO BE BUILT SINGLE TOO, WHICH MFEM DOES NOT CHECK.** There is
+no guard anywhere relating `SUNDIALS_PRECISION` to `real_t`;
+`mfem::SundialsNVector` simply fails much later where a `real_t *` meets a
+`sunrealtype *`. `../sundials/cuda-single-install` is 7.5.0 at
+`-DSUNDIALS_PRECISION=SINGLE`, otherwise matching `cuda-install`.
+
+**AND MFEM ITSELF DOES NOT COMPILE IN THAT PAIRING — SIX SIGNATURES, AND THE
+FIRST FILE TO MEET THEM IS `linalg/batched/native.cpp` AT 11%.** `CVODESolver::
+Step`, `CVODESSolver::Step` and `CVODESSolver::StepB` spell their time arguments
+`double` where `ODESolver::Step` spells them `real_t`, plus three definitions;
+then twelve more sites in `sundials.cpp` — `SundialsNVector`'s two constructors,
+`SetData`, `SetDataAndSize`, `EvalQuadIntegration`, its `B` sibling, the
+host/device array pointers and two `hinused, hlast, hcur, tcur` blocks. `ARKStep`
+and `IDA` already say `real_t`, so this is **two classes that were missed rather
+than a convention**. Reported as
+`../mfem-hdg-dev/doc/HDG-SUNDIALS-SINGLE-PRECISION-FROM-MEQ.md`.
+
+**THE SUITE READS 46 RED OF 63 AGAINST THE PARITY INSTALL, UP FROM 44, AND
+NOTHING WENT GREEN — WHICH IS THE THIRD TIME THIS CAMPAIGN THAT THE COUNT HAS
+BEEN THE WRONG INSTRUMENT.** What the install bought is visible only in the
+composition, because **a test that aborted at its first case now runs every
+case**:
+
+| | error lines, before | after |
+|---|---|---|
+| `SourceViewTests` | 15 | **436** |
+| `DeviceRowsTests` | 4 | **272** |
+| `NewtonConvergence` | 12 | **41** |
+| `FreeBoundaryCoupling` | 18 | **39** |
+| `HighBetaConvergence` | 1 | **19** |
+
+Every *"MFEM was built without `MFEM_USE_SUNDIALS`"* and every *"no Device is
+configured"* is gone; `DeviceRowsTests` now RUNS the kernel and reports
+`device 1.25095053e+09 against host 1250950355.6772461` — a real disagreement
+where it previously reported a refusal. **A suite that refuses is not a suite
+that fails, and a red count cannot tell them apart.**
+
+**THE TWO NEW REDS ARE NOT THE INSTALL BREAKING ANYTHING, AND BOTH WERE
+ATTRIBUTED RATHER THAN ASSUMED.**
+
+**`cuDSSTraceSolver` IS MEQ'S OWN PORT DEFECT, AND IT IS A LESSON ABOUT WHAT A
+SWEEP CAN SEE.** It reports `cuDSS vs UMFPACK: worst relative difference
+9.069e+300`, which is `‖x‖` over a `1.0e-300` guard against a reference of
+exactly zero. M-217 guarded the PARDISO-vs-UMFPACK contraction on
+`MFEM_USE_SUITESPARSE` and did not guard the cuDSS one — **because cuDSS was off
+in the single install of that day, so the block did not compile at all**. The
+same configuration hid the **fourteenth** of that session's thirteen
+`std::max( 1.0e-300, ‖x‖ )` division guards, at `TraceSolverScaling.cpp:503`.
+*A sweep of the compiled tree is a sweep of one configuration's preprocessor
+output*, and `std::max`'s type deduction found the fourteenth the moment the
+`#ifdef` opened.
+
+**`MachineFixedBoundary` IS A COIN TOSS, AND `MKL_NUM_THREADS=1` IS THE DRAW
+`ctest` PINS.** `examples/fixed-h-circular.toml` exits 2. Swept with the one
+perturbation that reassociates a blocked BLAS-3 and changes nothing else —
+[M-186](#m-186)'s instrument, applied to one binary rather than two:
+
+| `MKL_NUM_THREADS` | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| exit | **2** | 0 | 0 | 0 |
+| Newton steps | did not converge in 80 | 12 | 11 | 12 |
+| final `‖r‖/‖r₀‖` | 6.48e-01 | 1.28e-05 | 5.41e-05 | 1.28e-04 |
+
+Three of four converge, in 11 to 12 steps. So the case is **marginal in single
+and its success is decided by a summation order**, which is a property of the
+problem in this format and not of the install — and the same statement M-186
+made about `XPointBorder` and M-78 about `PedestalConvergence`, now for a third
+case and a third reason.
+
+**WHAT THE TOLERANCE WORK IS WORTH, AND THE FIRST ONE IS THE CLEANEST RESULT IN
+THIS SECTION.**
+
+**A CENTRAL DIFFERENCE AT A FIXED STEP ACCUSED THE JACOBIAN OF ITS OWN
+CANCELLATION.** `NewtonConvergence` and `RotatingNewtonConvergence` difference
+the assembled residual at `step = 1.0e-5` and assert agreement below `1.0e-8`.
+The two error terms are `O( step² )` truncation and `O( eps/step )`
+cancellation, so `eps/step` is **2.2e-11 in double and 1.2e-02 in single** — and
+the eight measured directions read:
+
+| | dir 0 | dir 1 | dir 2 | dir 3 |
+|---|---|---|---|---|
+| `NewtonConvergence`, before | 1.524e-02 | 1.999e-02 | 2.372e-02 | 1.705e-02 |
+| `RotatingNewtonConvergence`, before | 1.809e-02 | 1.656e-02 | 2.139e-02 | 1.568e-02 |
+| **after**, at `cbrt( eps )` | **5.292e-05** | **4.378e-05** | **4.719e-05** | **4.250e-05** |
+| **after**, rotating | **4.220e-05** | **3.708e-05** | **3.730e-05** | **4.768e-05** |
+
+`eps/step` to the figure before, and `eps^(2/3)` = 2.4e-05 to the figure after.
+**A factor of 400 on the measured quantity, and the Jacobian had not moved by a
+bit.** `meq::tests::jacobianDifferenceStep()` and
+`jacobianDifferenceTolerance()` are one shared pair, M-189's rule applied to a
+step and the tolerance it entitles: *moving one without the other is how a
+difference that cannot be resolved gets asserted against a bound that assumed it
+could.*
+
+**AND AN ABSOLUTE L2 CEILING IS A RELATIVE ONE WITH THE SCALE LEFT OUT.** Every
+ceiling in `tests/convergence/` was set at about three times a measured
+double-precision error, so each is `3C h^(k+1) |psi|` with the `|psi|` folded
+into the digits — fine while discretisation limits the error, and meaningless
+once it does not. `SolovievConvergence` reads 1.08e-05 at `k = 2` and 7.60e-06
+at `k = 3` against ceilings that fall by 340 between them. `checkOrder()` now
+floors both ceilings, and `meq::GradShafranovSolver::exactPotentialNorm()` /
+`exactFluxNorm()` supply the denominator **in the same measure and on the same
+quadrature rule** the errors are taken in.
+
+**AND THE CONSTANT IS 2048, MEASURED AGAINST THE DOUBLE BUILD ON THE SAME
+WORKING TREE** — the only control that separates a format's floor from a
+method's error. The worst `‖error‖ / ( eps ‖exact‖ )` over the sequences in this
+directory is **1412**, `Solov'ev NSTX` in the flux at `k = 3` on the finest
+mesh, so the margin is 1.45. Thin for a discriminator and ample for a ceiling:
+what a ceiling exists to catch is a solution wrong by a constant factor, a sign
+or a convention, and those are `O( ‖exact‖ )` errors, seven orders above this.
+**It cannot reach the double build**, which was checked: `2048 eps_double ‖q‖`
+is `1.1e-12` on the largest `‖q‖` in the directory (2.398) against a tightest
+historical ceiling of `6.6e-10`.
+
+**A RATE BETWEEN TWO ERRORS AT THE FLOOR IS NOT A RATE, AND `k+1` ABOVE
+`k = 1` IS A DOUBLE-BUILD ACCEPTANCE.** `FieldConvergence` reported `B converged
+at -1.06` and `-1.41`, `Solov'ev NSTX` at `k = 3` reports `-0.62`, `-1.67`,
+`-1.10`; those are solvers that have already arrived, not solvers converging
+badly. Against the double build, single divided by double, in the flux:
+
+| | `n = 4` | `n = 8` | `n = 16` | `n = 32` |
+|---|---|---|---|---|
+| `k = 1` | 1.00× | 1.00× | 1.00× | **1.09×** |
+| `k = 2` | 1.00× | 1.05× | **6.9×** | **203×** |
+| `k = 3` | **1.50×** | **36×** | **1793×** | **61,000×** |
+
+At `k = 1` every mesh is clean and every pair reports 1.87 to 1.99. At `k = 2`
+exactly one pair of three survives. At `k = 3` the **coarsest** mesh is already
+1.5× contaminated, so there is no window: coarsening leaves the asymptotic
+regime and refining goes deeper into round-off.
+
+**THREE PER-PAIR CRITERIA WERE TRIED AND MEASURED, AND ALL THREE FAILED — THAT
+IS THE FINDING.** A floor of `C · eps · ‖q‖ ·` (trace dofs) puts
+`k = 1, n = 32` — 9% contaminated, reporting a good 1.873 — at **0.277** and
+`k = 3, n = 8` — 36× contaminated — at **0.249**, and **no constant separates
+them**. A constant-free *"the error must at least halve"* is a weak necessary
+condition and correctly drops the flattened rows, but `MaschkePerrin` at
+`k = 3` has a pair that halves comfortably and still reports **3.03** against a
+wanted 3.85 — partially contaminated, genuinely converging, and not at `k+1`.
+Asserting on the **best** pair does not save it either, because that *is* the
+best pair. **The tail bends before it flattens**, so nothing local to a pair can
+tell a degraded rate from a measured one.
+
+**SO THE SKIP IS BY DEGREE, WHICH IS HONEST RATHER THAN TUNED.** A single build
+verifies `k+1` at `k = 1` and, above that, verifies the **absolute** error
+against a floored ceiling instead, saying in the run which degree it gave up on
+and why. Nothing is left unable to fail: a solution wrong by a constant factor,
+a sign or a convention is `O( ‖exact‖ )` and is exactly what the ceiling
+catches, with seven orders of margin.
+
+**THE ALTERNATIVE WOULD HAVE BEEN TO WIDEN `rateSlack` UNTIL THE TABLES
+PASSED**, and that is the vacuity `CLAUDE.md`'s testing stance forbids: it
+weakens the assertion on every mesh in **every** build — including the ones
+still measuring the method — to accommodate meshes that are not. *A build that
+cannot measure something should say so, not measure it loosely.*
+
+**AND THE FLOOR MACHINERY IS ITS OWN HEADER BECAUSE FOUR OF THE FIVE STUDIES
+THAT NEED IT DO NOT INCLUDE THE HARNESS.** `SolovievConvergence`,
+`ExtensionConvergence`, `EstimatorConvergence` and `RotatingSourceConvergence`
+each carry their own `Measurement`, their own `rate()`, their own `printTable()`
+and — until this section — **their own copy of the same six-line ceiling
+assertion**. A floor added where only `ConvergenceHarness.hpp` could reach it
+would have floored one of four call sites and left three reporting a format as a
+method. `tests/convergence/RoundOffFloor.hpp` is the one implementation, and
+`FloorCheck` is a POD rather than a `Measurement` for the same reason: a helper
+taking `meq::tests::Measurement const &` reaches exactly one of the five
+structs. **This is [M-165](#m-165) and [M-189](#m-189) for a third time**, and
+the tell was the same both previous times — a constant, or here a construction,
+kept in step by hand across N sites.
+
+**AND A BLANKET SWEEP OF SUB-EPSILON LITERALS WOULD HAVE BEEN WRONG 102 TIMES.**
+`tests/` carries **335** assertion literals below FP32's 1.19e-07. Split by
+whether the test is red in single:
+
+| | count |
+|---|---|
+| in tests that are RED | 233 |
+| **in tests that are GREEN** | **102** |
+
+The 102 are `SourceFactoryTests` (24), `ConfigTests` (20), `ExteriorDtNTests`
+(17), `CoilsTests` (11), `SafetyFactorTests` (8) and their kind — **the
+MFEM-free half**, where `Config`, `Profiles`, `Source`, `SourceFactory` and
+`Coil` stay `double` in both builds by the *Layout* decision. Their 1e-13
+assertions are correct as written and a sweep would have loosened every one.
+*The design decision that makes the port small is the same one that makes the
+mechanical sweep wrong*, and §7.2 proposed exactly that sweep.
+
+**THE RESULT, AND THE COUNT IS STILL THE WRONG INSTRUMENT.** Single reads
+**40 red of 63** against the parity install's 46, with **157** distinct failing
+cases against 173. Six tests cleared and none regressed:
+`SolovievConvergence`, `FieldConvergence`, `RotatingSolovievConvergence`,
+`RotatingSourceConvergence`, `MaschkePerrinConvergence` and `cuDSSTraceSolver`.
+
+**AND THE DOUBLE CONTROL IS 62/63 THROUGHOUT**, the one red being the standing
+deliberate `PlasmaEdgeConvergence` — checked after every change, not at the end:
+two new solver accessors, a shared FD step and its tolerance, a floored ceiling
+at five call sites, a rate skip at five more, and a floored tracer tolerance
+moved **nothing** in double. That is what the `std::max` and `#ifdef`
+construction is for, and it is the only reason any of this could be attempted on
+the shared tree rather than on a branch.
+
+**WHAT IS LEFT IS 157 CASES AND IT IS A CAMPAIGN, NOT A STEP.** The largest
+remaining groups are `FreeBoundaryCoupling` (17), `DriverAcceptance` (18) and
+`FluxSurfaceConvergence` (12), and they are not tolerance work: the first meets
+an `MFEM_VERIFY` on a geometric predicate inside MFEM, the second reads element
+counts that differ by one after a marking decision moved, and the third is the
+tracer and the fits. **`SourceViewTests` (7) cannot be repaired by a tolerance
+at all** — it pins the device POD to the **bit** against MEQ's MFEM-free
+`Source`, which is `real_t` against `double` **by design**, so the design
+decision that makes the port small is the one that puts a format boundary
+through MEQ's most load-bearing unit test.

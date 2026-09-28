@@ -4501,6 +4501,26 @@ namespace meq
 			double potentialError( mfem::Coefficient &exact ) const;
 			double fluxError( mfem::VectorCoefficient &exact ) const;
 
+			/// The L2 NORM of a closed form, in the same measure, on the same
+			/// space and under the same quadrature rule the two errors above are
+			/// reported in.
+			///
+			/// **IT EXISTS SO THAT AN ABSOLUTE CEILING CAN BE FLOORED AT WHAT
+			/// THE FORMAT CAN REACH.** An L2 error ceiling is a number with a
+			/// scale in it -- `5.8e-07` means one thing on a Solov'ev psi of
+			/// order 1 and another on an FRC whose psi is three orders smaller
+			/// -- so `std::max( historical, C*eps )` with a constant `C` is
+			/// wrong per problem in both directions. What is the same across
+			/// problems is `error/norm`, and this is the denominator.
+			///
+			/// Implemented as the error of the ZERO function against @a exact,
+			/// which is `|| exact ||` by definition and costs nothing beyond
+			/// reusing the quadrature the caller is already asserting in. That
+			/// matters more than it looks: a norm taken in a different measure
+			/// or on a different rule is a scale the ceiling was never set in.
+			double exactPotentialNorm( mfem::Coefficient &exact ) const;
+			double exactFluxNorm( mfem::VectorCoefficient &exact ) const;
+
 			/// The same for psi*_h, on a rule scaled to its own higher degree.
 			/// Valid after postProcess().
 			double postProcessedPotentialError( mfem::Coefficient &exact ) const;

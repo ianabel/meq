@@ -498,12 +498,39 @@ int main( int argc, char **argv )
 				} );
 				cudssSolve = bestOf( repeats, [ & ]() { cudss.Mult( rhs, cudssX ); } );
 
+#ifdef MFEM_USE_SUITESPARSE
+				/*
+				 * AGAINST UMFPACK, AND ONLY WHERE THERE IS ONE. `umfX` is the
+				 * reference and a build without SuiteSparse never fills it, so
+				 * this contraction has to go with the arm that produces it --
+				 * the same `#ifdef` the UMFPACK timings already carry.
+				 *
+				 * **IT WAS MISSED WHEN THAT ARM WAS GUARDED**, because cuDSS was
+				 * off in the single install of the day and this block did not
+				 * compile at all. Restoring cuDSS took the case red at
+				 * `worst relative difference 9.069e+300`, which is `|| x ||`
+				 * over the `1.0e-300` guard below -- a reference of exactly
+				 * zero, reported as a disagreement. *A guard verified against
+				 * one configuration's preprocessor output is verified against
+				 * one configuration.* M-218.
+				 */
 				mfem::Vector diff( cudssX );
 				diff -= umfX;
-				double const rel = diff.Norml2()/std::max( 1.0e-300, umfX.Norml2() );
+				// THE FOURTEENTH OF M-217'S DIVISION GUARDS, and the only one
+				// that sweep could not see, for the same reason.
+				double const rel =
+					diff.Norml2()/std::max( 1.0e-300,
+					                        static_cast<double>( umfX.Norml2() ) );
 				worstCudssDiff = std::max( worstCudssDiff, rel );
 				if ( rel >= 1.0e-10 )
 					++agreementFailures;
+#else
+				// No UMFPACK to contract against. cuDSS is still exercised and
+				// still timed; what is lost is the agreement check, and saying
+				// so is the point -- a skipped contraction that prints nothing
+				// reads as a passed one.
+				worstCudssDiff = -1.0;
+#endif
 			}
 #endif
 
@@ -532,14 +559,30 @@ int main( int argc, char **argv )
 		             worstAssemblyDiff == 0.0 ? "   (bit for bit, as documented)" : "" );
 	else
 		std::printf( "    threaded assembly           : unavailable in this build\n" );
+	/*
+	 * BOTH AGREEMENT LINES NAME UMFPACK, AND A BUILD WITHOUT SUITESPARSE HAS
+	 * NONE. Printing `0.000e+00` there is not a harmless default: it is the
+	 * exact string a reader is looking for as confirmation, produced by a
+	 * contraction that never ran. `MFEM_PRECISION = single` is such a build --
+	 * UMFPACK is double only, so this is a structural absence rather than a
+	 * missing option -- and the line has to say so. M-218.
+	 */
 #ifdef MFEM_USE_MKL_PARDISO
+#ifdef MFEM_USE_SUITESPARSE
 	std::printf( "    PARDISO vs UMFPACK          : worst relative difference %.3e\n",
 	             worstSolverDiff );
+#else
+	std::printf( "    PARDISO vs UMFPACK          : SKIPPED, this build has no "
+	             "SuiteSparse and so no reference\n" );
+#endif
 #endif
 #ifdef MFEM_USE_CUDSS
 	if ( worstCudssDiff >= 0.0 )
 		std::printf( "    cuDSS vs UMFPACK            : worst relative difference %.3e\n",
 		             worstCudssDiff );
+	else
+		std::printf( "    cuDSS vs UMFPACK            : SKIPPED, this build has no "
+		             "SuiteSparse and so no reference\n" );
 #endif
 
 	if ( structureFailures > 0 )
@@ -558,8 +601,11 @@ int main( int argc, char **argv )
 	}
 	if ( agreementFailures > 0 )
 	{
-		std::printf( "\n  *** %d case(s) where PARDISO and UMFPACK disagree. Check the "
-		             "matrix type before the timings.\n", agreementFailures );
+		// The counter is shared by the PARDISO and cuDSS contractions, so the
+		// message names both rather than the first one somebody wrote.
+		std::printf( "\n  *** %d case(s) where a direct solver disagrees with UMFPACK "
+		             "( PARDISO or cuDSS ). Check the matrix type before the "
+		             "timings.\n", agreementFailures );
 		return 1;
 	}
 

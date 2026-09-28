@@ -1131,6 +1131,39 @@ same instrument one level down** — it turned all 13 of the tree's
 because `1e-300` is below float's smallest SUBNORMAL, so as a float comparison
 the guard does not loosen, it disappears.
 
+**AND `install-single` IS NOW AT PARITY, WHICH ANSWERED THE RATE QUESTION IN
+THE NEGATIVE** → **[M-218](MEASUREMENTS.md#m-218)**. CUDA, cuDSS and SUNDIALS
+are restored; SuiteSparse and gslib stay structurally absent. It cost a
+single-precision SUNDIALS — MFEM has **no guard** that `SUNDIALS_PRECISION`
+matches `real_t` — and six `double`/`real_t` signatures in
+`linalg/sundials.{hpp,cpp}` without which **MFEM does not compile in that
+pairing at all**. And it turned up a **seventh** install difference that no list
+of `MFEM_USE_*` flags contains: PARDISO resolved against `libmkl_sequential`
+where the reference uses `libmkl_gnu_thread`, on the default trace solver.
+*A configuration stated in flags is not a configuration.*
+
+**`k+1` ABOVE `k = 1` IS A DOUBLE-BUILD ACCEPTANCE AND A SINGLE BUILD CANNOT
+CARRY IT.** Against the double build on the same tree, `Solov'ev NSTX` in the
+flux is 1.09× contaminated at `k = 1` on the finest mesh, **203×** at `k = 2`,
+and **1.5× on the COARSEST mesh** at `k = 3` — so coarsening leaves the
+asymptotic regime and refining goes deeper into round-off, and there is no
+window. **Three per-pair criteria were tried and each provably fails**: no
+constant separates a 9%-contaminated pair reporting a good 1.873 from a
+36%-contaminated one; *"the error must at least halve"* is necessary but lets
+through a pair that halves and still reads **3.03** against 3.85. The tail
+**bends before it flattens**. So the skip is by DEGREE, loudly, and the
+**absolute ceiling is still asserted** — widening `rateSlack` until the tables
+passed would weaken every mesh in every build to accommodate meshes that are
+not measuring anything, which is what *Testing stance* forbids.
+
+**AND THE COUNT WAS THE WRONG INSTRUMENT FOR THE THIRD TIME.** Restoring the
+install took the red count UP, 44 to 46, while every *"built without
+`MFEM_USE_SUNDIALS`"* and *"no Device is configured"* disappeared — because a
+test that aborted at its first case now runs all of them, `SourceViewTests`
+going from 15 error lines to 436. Read the distinct failing CASES. The suite is
+now **40 red of 63** at **157** cases, and the double control is **62/63 at
+every step**.
+
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by
 `--device cuda` reproducing `--device cpu` **to every printed digit** — that is

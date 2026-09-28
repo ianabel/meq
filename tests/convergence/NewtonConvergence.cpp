@@ -324,7 +324,7 @@ BOOST_AUTO_TEST_CASE( jacobianMatchesAFiniteDifferenceOfTheResidual )
 	// what does that, and is why this is two calls rather than one.
 	residual.GetGradient( state );
 
-	double const step = 1.0e-5;
+	double const step = meq::tests::jacobianDifferenceStep( 1.0e-5 );
 	int const numDirections = 4;
 
 	std::vector<mfem::Vector> directions( numDirections );
@@ -379,7 +379,7 @@ BOOST_AUTO_TEST_CASE( jacobianMatchesAFiniteDifferenceOfTheResidual )
 	}
 	std::fflush( stdout );
 
-	BOOST_TEST( worst < 1.0e-8,
+	BOOST_TEST( worst < meq::tests::jacobianDifferenceTolerance( 1.0e-8 ),
 	            "the assembled Jacobian differs from a central difference of the "
 	            "assembled residual by " << worst << " relative; Newton will still "
 	            "converge, but linearly" );
