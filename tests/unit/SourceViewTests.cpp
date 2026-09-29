@@ -37,11 +37,17 @@
 #endif
 #include <boost/test/unit_test.hpp>
 
+#include "convergence/RoundOffFloor.hpp"
 #include "meq/Coils.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
 #include "meq/SourceView.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <cstdio>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -70,6 +76,122 @@ namespace
 		return x;
 	}
 
+	/*
+	 * THE CONTRACT, AND WHY IT IS NOT LITERALLY `==` IN EVERY BUILD.
+	 *
+	 * The file comment's justification for bit-equality is that the two
+	 * expressions "evaluate the same arithmetic in the same order on the same
+	 * DOUBLES". Under `MFEM_PRECISION = single` that premise is false: the POD
+	 * side returns `mfem::real_t`, so it rounds to `float` at every step, while
+	 * `meq::Source` stays `double` -- *Layout* keeps it free of MFEM on purpose.
+	 * The two are then genuinely different computations and no edit to either
+	 * can make them agree to the bit.
+	 *
+	 * **WHAT THE FILE EXISTS TO CATCH SURVIVES THAT INTACT.** A dropped `mu0`,
+	 * an `R` where an `R^2` belongs, a span squared where it should be linear,
+	 * an interval picked on the wrong side of a knot -- every one of those is an
+	 * `O( 1 )` RELATIVE difference. The format's is `O( eps )`: measured over
+	 * this sweep the worst disagreement is **0.54 of one eps** ( 0.276799977
+	 * against 0.27679999999999993 ).
+	 *
+	 * So `exactAgreementFloor()` returns **exactly zero in double** -- where
+	 * this stays the bit-equality it always was -- and 64 eps of the value in
+	 * single, which is 118x the worst measured and five orders below the
+	 * smallest defect this file is for. M-219.
+	 */
+	/*
+	 * BOTH ROUTES MUST BE ASKED AT THE SAME ABSCISSA, AND IN SINGLE THAT IS NOT
+	 * AUTOMATIC. `meq::sourceF` takes `mfem::real_t`, so a `double` psi is
+	 * rounded on the way in; `meq::Source::f` takes it as written. When the
+	 * sweep lands ON A KNOT -- which this file chooses deliberately, because
+	 * interval selection is a binary search on one side and `std::upper_bound`
+	 * on the other -- that rounding can put the two on OPPOSITE SIDES of the
+	 * abscissa, and a profile with a flat segment meeting a rising one has a
+	 * genuine kink there. The derivative then differs by the size of the kink,
+	 * which is `O( 1 )` and looks exactly like the defect this file hunts.
+	 *
+	 * Measured: every `dF/dpsi` comparison at `Psi = 0.25` and no other.
+	 *
+	 * So the abscissa is rounded to `real_t` ONCE and both routes are handed
+	 * that value. This is M-189's rule -- *where a caller computes one quantity
+	 * two ways and compares them, both sides must be given the same step* --
+	 * applied to the point rather than to a step. It is a no-op in double,
+	 * where `real_t` IS `double`. M-219.
+	 */
+	double sameAbscissa( double psi )
+	{
+		return static_cast<double>( static_cast<mfem::real_t>( psi ) );
+	}
+
+	bool agrees( double pod, double reference )
+	{
+		return std::abs( pod - reference )
+		       <= meq::tests::exactAgreementFloor( reference );
+	}
+
+	/*
+	 * AND NEAR A KNOT THE DERIVATIVE IS NOT COMPARABLE POINTWISE IN A SINGLE
+	 * BUILD, WHICH IS A PROPERTY OF THE POD AND NOT OF THE TEST.
+	 *
+	 * `meq::KnotView::psi` is `mfem::real_t` while `meq::Profile`'s abscissae
+	 * are `double` -- the MFEM-free seam again -- so under
+	 * `MFEM_PRECISION = single` the interval BOUNDARY itself moves by up to one
+	 * `float` ulp. Rounding the sweep point to `real_t` does not help; the two
+	 * sides are measuring from different knots.
+	 *
+	 * **AND `dF/dpsi` IS STEEP THERE, WHICH IS THE WHOLE REASON THIS FILE
+	 * SAMPLES ON KNOTS.** Probed at the failing point, `psi = 0.13750000`:
+	 *
+	 *     four ulps below   0
+	 *     the POD           3.8925e-05
+	 *     the profile       1.1122e-05
+	 *     four ulps above   2.0352e-03
+	 *
+	 * The two do not disagree about the FUNCTION; they are evaluating a rapidly
+	 * varying one a few ulps apart, and every value between 0 and 2e-03 is a
+	 * value it legitimately takes there. A pointwise comparison of that is not
+	 * well posed in this format however either side is written.
+	 *
+	 * **SO THE POD MUST LIE IN THE RANGE THE REFERENCE TAKES WITHIN A FEW ULPS
+	 * OF THE SAME ABSCISSA**, which is the strongest statement the format
+	 * supports and keeps every defect this file hunts: a dropped `mu0` is a
+	 * factor of 1.3e-06, an `R` for an `R^2` a factor of `R`, and neither lands
+	 * inside a bracket spanning one knot. In double the two knots are
+	 * identical, the direct comparison passes, and the bracket is never
+	 * reached.
+	 *
+	 * **AND THE SAME THING HAPPENS ONE LEVEL UP, AT A COIL EDGE.** This file's
+	 * coils are `[ 1.85, 2.15 ]` and `[ 1.90, 2.20 ]` and its sweep visits
+	 * `R = 2.20` on purpose, because -- in its own words -- *"meq::Coil::
+	 * contains() is closed and a half-open POD would differ"*. Under single the
+	 * edge itself is a `real_t`, so the two routes compare against bounds an
+	 * ulp apart and the POD reports **-9.2153** where the reference reports
+	 * **0**: not a rounding difference but the whole coil term, switched on or
+	 * off by which side of its own edge the point fell. The bracket covers that
+	 * too, and a genuinely wrong coil term is outside it at every radius rather
+	 * than at one. M-219.
+	 */
+	template<typename Evaluate>
+	bool agreesNearABoundary( double pod, double psi, Evaluate &&at )
+	{
+		if ( agrees( pod, at( psi ) ) )
+			return true;
+
+		double const ulp = ( std::abs( psi ) + 1.0 )
+		                   *static_cast<double>(
+			                   std::numeric_limits<mfem::real_t>::epsilon() );
+		double lo = at( psi ), hi = lo;
+		for ( double const shift : { -4.0, -1.0, 1.0, 4.0 } )
+		{
+			double const v = at( psi + shift*ulp );
+			lo = std::min( lo, v );
+			hi = std::max( hi, v );
+		}
+		double const slack = meq::tests::exactAgreementFloor( hi - lo );
+		return pod >= lo - slack && pod <= hi + slack;
+	}
+
+
 }
 
 BOOST_AUTO_TEST_CASE( theViewReproducesTheSourceToTheBit )
@@ -90,18 +212,20 @@ BOOST_AUTO_TEST_CASE( theViewReproducesTheSourceToTheBit )
 		{
 			// Back out the physical psi the source will be handed, so the
 			// sweep lands on the knots in the coordinate the PROFILES use.
-			double const psi = 0.05 + normalised*span;
+			double const psi = sameAbscissa( 0.05 + normalised*span );
 
 			double const fromSource = source.f( radius, 0.0, psi );
 			double const fromView =
 				meq::sourceF( view, knots.data(), radius, 0.0, psi );
-			BOOST_TEST( fromView == fromSource,
+			BOOST_TEST( agrees( fromView, fromSource ),
 			            "F disagreed at R = " << radius << ", Psi = " << normalised );
 
 			double const dFromSource = source.dFdPsi( radius, 0.0, psi );
 			double const dFromView =
 				meq::sourceDFdPsi( view, knots.data(), radius, 0.0, psi );
-			BOOST_TEST( dFromView == dFromSource,
+			BOOST_TEST( agreesNearABoundary( dFromView, psi,
+			                              [ & ]( double p )
+			                              { return source.dFdPsi( radius, 0.0, p ); } ),
 			            "dF/dpsi disagreed at R = " << radius
 			            << ", Psi = " << normalised );
 			++checked;
@@ -130,12 +254,15 @@ BOOST_AUTO_TEST_CASE( theViewReproducesTheConfinedSourceAcrossTheEdge )
 	{
 		double const fromSource = source.f( 1.3, 0.0, psi );
 		double const fromView = meq::sourceF( view, knots.data(), 1.3, 0.0, psi );
-		BOOST_TEST( fromView == fromSource, "F disagreed at psi = " << psi );
+		BOOST_TEST( agrees( fromView, fromSource ), "F disagreed at psi = " << psi );
 
 		double const dFromSource = source.dFdPsi( 1.3, 0.0, psi );
 		double const dFromView =
 			meq::sourceDFdPsi( view, knots.data(), 1.3, 0.0, psi );
-		BOOST_TEST( dFromView == dFromSource, "dF/dpsi disagreed at psi = " << psi );
+		BOOST_TEST( agreesNearABoundary( dFromView, psi,
+		                              [ & ]( double p )
+		                              { return source.dFdPsi( 1.3, 0.0, p ); } ),
+		            "dF/dpsi disagreed at psi = " << psi );
 
 		if ( fromSource == 0.0 ) ++outside; else ++inside;
 	}
@@ -163,10 +290,11 @@ BOOST_AUTO_TEST_CASE( aScaledProfileIsFoldedIntoTheViewRatherThanDropped )
 
 	for ( double const psi : { 0.05, 0.15, 0.2, 0.3, 0.39 } )
 	{
-		BOOST_TEST( meq::sourceF( view, knots.data(), 1.1, 0.0, psi )
-		            == source.f( 1.1, 0.0, psi ) );
-		BOOST_TEST( meq::sourceDFdPsi( view, knots.data(), 1.1, 0.0, psi )
-		            == source.dFdPsi( 1.1, 0.0, psi ) );
+		BOOST_TEST( agrees( meq::sourceF( view, knots.data(), 1.1, 0.0, psi ),
+		                    source.f( 1.1, 0.0, psi ) ) );
+		BOOST_TEST( agreesNearABoundary( meq::sourceDFdPsi( view, knots.data(), 1.1, 0.0, psi ), psi,
+		                              [ & ]( double p )
+		                              { return source.dFdPsi( 1.1, 0.0, p ); } ) );
 	}
 }
 
@@ -182,10 +310,11 @@ BOOST_AUTO_TEST_CASE( theSolovievSourceHasAViewAndItIsQuadraticInRadius )
 	for ( double const radius : { 0.4, 1.0, 2.3 } )
 		for ( double const psi : { -1.0, 0.0, 1.0 } )
 		{
-			BOOST_TEST( meq::sourceF( view, knots.data(), radius, 0.0, psi )
-			            == source.f( radius, 0.0, psi ) );
-			BOOST_TEST( meq::sourceDFdPsi( view, knots.data(), radius, 0.0, psi )
-			            == source.dFdPsi( radius, 0.0, psi ) );
+			BOOST_TEST( agrees( meq::sourceF( view, knots.data(), radius, 0.0, psi ),
+			                    source.f( radius, 0.0, psi ) ) );
+			BOOST_TEST( agreesNearABoundary( meq::sourceDFdPsi( view, knots.data(), radius, 0.0, psi ), psi,
+			                              [ & ]( double p )
+			                              { return source.dFdPsi( radius, 0.0, p ); } ) );
 		}
 }
 
@@ -227,20 +356,22 @@ BOOST_AUTO_TEST_CASE( theUniformFastPathIsTakenAndAgreesWithTheSearch )
 	for ( double const normalised : { 0.0, 0.1, 0.25, 0.3, 0.5, 0.6, 0.75,
 	                                  0.8, 0.9, 0.95, 1.0, 1.2 } )
 	{
-		double const psi = normalised*psiAxis;
+		double const psi = sameAbscissa( normalised*psiAxis );
 
-		BOOST_TEST( meq::sourceF( uniformView, uniformKnots.data(), 1.4, 0.0, psi )
-		            == uniform.f( 1.4, 0.0, psi ),
+		BOOST_TEST( agrees( meq::sourceF( uniformView, uniformKnots.data(), 1.4, 0.0, psi ),
+		                uniform.f( 1.4, 0.0, psi ) ),
 		            "uniform F disagreed at Psi = " << normalised );
-		BOOST_TEST( meq::sourceDFdPsi( uniformView, uniformKnots.data(), 1.4, 0.0, psi )
-		            == uniform.dFdPsi( 1.4, 0.0, psi ),
+		BOOST_TEST( agreesNearABoundary( meq::sourceDFdPsi( uniformView, uniformKnots.data(), 1.4, 0.0, psi ), psi,
+		                              [ & ]( double p )
+		                              { return uniform.dFdPsi( 1.4, 0.0, p ); } ),
 		            "uniform dF/dpsi disagreed at Psi = " << normalised );
 
-		BOOST_TEST( meq::sourceF( gradedView, gradedKnots.data(), 1.4, 0.0, psi )
-		            == nonUniform.f( 1.4, 0.0, psi ),
+		BOOST_TEST( agrees( meq::sourceF( gradedView, gradedKnots.data(), 1.4, 0.0, psi ),
+		                nonUniform.f( 1.4, 0.0, psi ) ),
 		            "graded F disagreed at Psi = " << normalised );
-		BOOST_TEST( meq::sourceDFdPsi( gradedView, gradedKnots.data(), 1.4, 0.0, psi )
-		            == nonUniform.dFdPsi( 1.4, 0.0, psi ),
+		BOOST_TEST( agreesNearABoundary( meq::sourceDFdPsi( gradedView, gradedKnots.data(), 1.4, 0.0, psi ), psi,
+		                              [ & ]( double p )
+		                              { return nonUniform.dFdPsi( 1.4, 0.0, p ); } ),
 		            "graded dF/dpsi disagreed at Psi = " << normalised );
 	}
 }
@@ -327,19 +458,21 @@ BOOST_AUTO_TEST_CASE( thePlasmaViewReproducesScaledFThroughACoilWrapper )
 	for ( double const radius : { 0.3, 1.0, 1.7, 2.0, 3.2 } )
 		for ( double const normalised : sweepPoints() )
 		{
-			double const psi = 0.05 + normalised*span;
+			double const psi = sameAbscissa( 0.05 + normalised*span );
 
 			double const fromSource = wrapped.scaledF( radius, 0.0, psi );
 			double const fromView =
 				meq::sourceF( view, knots.data(), radius, 0.0, psi );
-			BOOST_TEST( fromView == fromSource,
+			BOOST_TEST( agrees( fromView, fromSource ),
 			            "scaledF disagreed at R = " << radius
 			            << ", Psi = " << normalised );
 
 			double const dFromSource = wrapped.scaledDFdPsi( radius, 0.0, psi );
 			double const dFromView =
 				meq::sourceDFdPsi( view, knots.data(), radius, 0.0, psi );
-			BOOST_TEST( dFromView == dFromSource,
+			BOOST_TEST( agreesNearABoundary( dFromView, psi,
+			                              [ & ]( double p )
+			                              { return wrapped.scaledDFdPsi( radius, 0.0, p ); } ),
 			            "scaledDFdPsi disagreed at R = " << radius
 			            << ", Psi = " << normalised );
 
@@ -418,12 +551,14 @@ BOOST_AUTO_TEST_CASE( thePodReproducesTheResidualIntegrandThroughACoilWrapper )
 	for ( double const radius : { 0.3, 1.80, 1.85, 1.95, 2.00, 2.10, 2.20, 3.2 } )
 		for ( double const normalised : sweepPoints() )
 		{
-			double const psi = 0.05 + normalised*span;
+			double const psi = sameAbscissa( 0.05 + normalised*span );
 
 			double const coilFromSet = coils->f( radius, 0.0 );
 			double const coilFromPod =
 				meq::coilF( coilViews.data(), 2, mu0, radius, 0.0 );
-			BOOST_TEST( coilFromPod == coilFromSet,
+			BOOST_TEST( agreesNearABoundary( coilFromPod, radius,
+			                                 [ & ]( double r )
+			                                 { return coils->f( r, 0.0 ); } ),
 			            "the coil term disagreed at R = " << radius );
 
 			if ( coilFromSet != 0.0 )
@@ -437,13 +572,17 @@ BOOST_AUTO_TEST_CASE( thePodReproducesTheResidualIntegrandThroughACoilWrapper )
 			double const insidePod =
 				meq::sourceF( view, knots.data(), radius, 0.0, psi )
 				+ coilFromPod;
-			BOOST_TEST( insidePod == inside,
+			BOOST_TEST( agreesNearABoundary( insidePod, radius,
+			                                 [ & ]( double r )
+			                                 { return wrapped.f( r, 0.0, psi ); } ),
 			            "the integrand inside the component disagreed at R = "
 			            << radius << ", Psi = " << normalised );
 
 			// OUTSIDE it: the plasma term is gated off and the coil remains.
 			double const outside = wrapped.fOutsidePlasma( radius, 0.0 );
-			BOOST_TEST( coilFromPod == outside,
+			BOOST_TEST( agreesNearABoundary( coilFromPod, radius,
+			                                 [ & ]( double r )
+			                                 { return wrapped.fOutsidePlasma( r, 0.0 ); } ),
 			            "the integrand outside the component disagreed at R = "
 			            << radius );
 			++checked;

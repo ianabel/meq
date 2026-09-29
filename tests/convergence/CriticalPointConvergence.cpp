@@ -666,7 +666,7 @@ BOOST_AUTO_TEST_CASE( theMagneticAxisConvergesAtTheFluxesOwnOrder )
 			// The residual is what says the returned point is a root at all. A
 			// point reported at |q| = 1e-3 is a place Newton gave up, and every
 			// rate below it would be meaningless.
-			BOOST_TEST( points[ i ].residual < 1.0e-10,
+			BOOST_TEST( points[ i ].residual < meq::tests::rootResidualFloor( 1.0e-10 ),
 			            "k = " << order << ", h = " << points[ i ].h
 			            << ": the located axis has |q_h| = " << points[ i ].residual
 			            << ", which is not a root" );
@@ -697,14 +697,6 @@ BOOST_AUTO_TEST_CASE( theMagneticAxisConvergesAtTheFluxesOwnOrder )
 			            << "nothing to the error of the field it roots" );
 		}
 
-		// Monotone decrease. A pointwise quantity does not converge smoothly, but
-		// it must converge.
-		for ( std::size_t i = 1; i < points.size(); ++i )
-			BOOST_TEST( points[ i ].distance < points[ i - 1 ].distance,
-			            "k = " << order << ": refining from h = " << points[ i - 1 ].h
-			            << " to " << points[ i ].h << " moved the axis error from "
-			            << points[ i - 1 ].distance << " to " << points[ i ].distance );
-
 		double const refinement = points.front().h/points.back().h;
 		double const measured = rate( points.front().distance,
 		                              points.back().distance, refinement );
@@ -713,6 +705,28 @@ BOOST_AUTO_TEST_CASE( theMagneticAxisConvergesAtTheFluxesOwnOrder )
 		std::printf( "  over the whole sequence: the axis position converges at "
 		             "%.3f, wanted %.2f\n", measured, expected );
 		std::fflush( stdout );
+
+		/*
+		 * THE POSITION OF A ROOT INHERITS THE ORDER OF THE FIELD IT ROOTS, so
+		 * this is a `k+1` assertion wearing a geometric costume and it goes the
+		 * way every other one in this directory does: skipped, loudly, at a
+		 * degree this build's `real_t` cannot measure. The root RESIDUAL above
+		 * is still asserted, and that is the half which says the returned point
+		 * is a root at all. M-219.
+		 */
+		if ( !meq::tests::rateIsMeasurable( order ) )
+		{
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+			return;
+		}
+
+		// Monotone decrease. A pointwise quantity does not converge smoothly, but
+		// it must converge.
+		for ( std::size_t i = 1; i < points.size(); ++i )
+			BOOST_TEST( points[ i ].distance < points[ i - 1 ].distance,
+			            "k = " << order << ": refining from h = " << points[ i - 1 ].h
+			            << " to " << points[ i ].h << " moved the axis error from "
+			            << points[ i - 1 ].distance << " to " << points[ i ].distance );
 
 		BOOST_TEST( measured >= expected,
 		            "k = " << order
@@ -889,7 +903,7 @@ BOOST_AUTO_TEST_CASE( theAuditSurvivesADeliberatelyUnderResolvedMesh )
 		// Whatever the sweep reports must be a genuine root, whether or not it
 		// found all of them.
 		for ( std::size_t j = 0; j < found.size(); ++j )
-			BOOST_TEST( found[ j ].fluxResidual < 1.0e-10,
+			BOOST_TEST( found[ j ].fluxResidual < meq::tests::rootResidualFloor( 1.0e-10 ),
 			            label << ": a reported critical point has |q_h| = "
 			            << found[ j ].fluxResidual << ", which is not a root" );
 
@@ -1192,7 +1206,18 @@ BOOST_AUTO_TEST_CASE( theCriticalPointIsNotTheExtremeNodalValue )
 		// rate for the reason set out above this test: the disagreement between
 		// the two readings dwarfs psi_h's own L2 error, and refinement makes it
 		// dwarf it by more. No amount of refinement makes them interchangeable.
-		if ( order >= 2 )
+		/*
+		 * THE CLAIM RESTS ON "psi_h CONVERGES AT k+1", so it is a rate assertion
+		 * with the rate divided out, and it goes the way the others do: the
+		 * ratio it watches is `gap / L2( psi_h )`, and once `L2( psi_h )` is at
+		 * the format's floor the denominator stops falling and the ratio
+		 * collapses -- measured, from 278 to 0.58 at `k = 3` in single, where it
+		 * is supposed to GROW. M-219.
+		 */
+		if ( order >= 2 && !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+
+		if ( order >= 2 && meq::tests::rateIsMeasurable( order ) )
 		{
 			double const coarsestRatio = valueGaps.front()/psiErrors.front();
 			double const finestRatio = valueGaps.back()/psiErrors.back();
@@ -1791,7 +1816,7 @@ BOOST_AUTO_TEST_CASE( theXPointConvergesAtTheFluxesOwnOrder )
 
 		for ( std::size_t i = 0; i < points.size(); ++i )
 		{
-			BOOST_TEST( points[ i ].residual < 1.0e-10,
+			BOOST_TEST( points[ i ].residual < meq::tests::rootResidualFloor( 1.0e-10 ),
 			            "k = " << order << ", h = " << points[ i ].h
 			            << ": the located X-point has |q_h| = "
 			            << points[ i ].residual << ", which is not a root" );
@@ -1815,21 +1840,26 @@ BOOST_AUTO_TEST_CASE( theXPointConvergesAtTheFluxesOwnOrder )
 			// it is a measurement that has stopped meaning what it says --
 			// typically a located point that is not the root of the field being
 			// differenced against.
-			BOOST_TEST( ratio > ratioFloor,
-			            "k = " << order << ", h = " << points[ i ].h
-			            << ": the position error is only " << ratio
-			            << " times the pointwise flux error, below the linearised "
-			            << "floor of " << 1.0/biggest
-			            << ". A symmetric dq/dx cannot do that" );
+			// The ratio is position error over pointwise flux error, and in
+			// single BOTH are at the format's floor on the finer meshes, so it
+			// stops being a statement about dq/dx's conditioning. M-219.
+			if ( meq::tests::rateIsMeasurable( order ) )
+				BOOST_TEST( ratio > ratioFloor,
+				            "k = " << order << ", h = " << points[ i ].h
+				            << ": the position error is only " << ratio
+				            << " times the pointwise flux error, below the linearised "
+				            << "floor of " << 1.0/biggest
+				            << ". A symmetric dq/dx cannot do that" );
 		}
 
-		for ( std::size_t i = 1; i < points.size(); ++i )
-			BOOST_TEST( points[ i ].distance < points[ i - 1 ].distance,
-			            "k = " << order << ": refining from h = "
-			            << points[ i - 1 ].h << " to " << points[ i ].h
-			            << " moved the X-point error from "
-			            << points[ i - 1 ].distance << " to "
-			            << points[ i ].distance );
+		if ( meq::tests::rateIsMeasurable( order ) )
+			for ( std::size_t i = 1; i < points.size(); ++i )
+				BOOST_TEST( points[ i ].distance < points[ i - 1 ].distance,
+				            "k = " << order << ": refining from h = "
+				            << points[ i - 1 ].h << " to " << points[ i ].h
+				            << " moved the X-point error from "
+				            << points[ i - 1 ].distance << " to "
+				            << points[ i ].distance );
 
 		double const refinement = points.front().h/points.back().h;
 		double const measured = rate( points.front().distance,
@@ -1858,6 +1888,20 @@ BOOST_AUTO_TEST_CASE( theXPointConvergesAtTheFluxesOwnOrder )
 		            << ". The located point is a root of q_h, so those are the "
 		            << "same number up to the conditioning of dq/dx; a gap means "
 		            << "the finder has stopped tracking the field it roots" );
+
+		/*
+		 * THE ROBUST HALF ABOVE SURVIVES THIS BUILD AND THE k+1 BELOW DOES NOT,
+		 * and keeping them apart is the point: `| measured - alsoTheField |`
+		 * compares the finder against the field it roots, so both sides degrade
+		 * together and the statement holds at any precision. `measured >=
+		 * expected` compares the field against k+1, which is what a single build
+		 * cannot reach above k = 1. M-219.
+		 */
+		if ( !meq::tests::rateIsMeasurable( order ) )
+		{
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+			return;
+		}
 
 		BOOST_TEST( measured >= expected,
 		            "k = " << order
@@ -1936,7 +1980,7 @@ BOOST_AUTO_TEST_CASE( theAuditReadsPlusOneAtTheAxisAndMinusOneAtTheXPoint )
 		{
 			sum += found[ i ].index;
 
-			BOOST_TEST( found[ i ].fluxResidual < 1.0e-10,
+			BOOST_TEST( found[ i ].fluxResidual < meq::tests::rootResidualFloor( 1.0e-10 ),
 			            label << ": a reported critical point has |q_h| = "
 			            << found[ i ].fluxResidual << ", which is not a root" );
 

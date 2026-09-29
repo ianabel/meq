@@ -7,6 +7,7 @@
 
 #include "mfem.hpp"
 
+#include "convergence/RoundOffFloor.hpp"
 #include "meq/GradShafranov.hpp"
 
 // omp_get_max_threads() and omp_set_num_threads(). Guarded on the same pair
@@ -190,8 +191,15 @@ BOOST_AUTO_TEST_CASE( theCompressedBorderRowsContractExactly )
 				                gathered );
 			worst = std::max( worst, std::abs( dense - sparse ) );
 
-			// ZERO, NOT A TOLERANCE. Exactness is the claim.
-			BOOST_TEST( dense - sparse == 0.0,
+			// ZERO, NOT A TOLERANCE -- and exactAgreementFloor() returns
+			// EXACTLY ZERO in double, so that is what this still is there.
+			// In single the two routes reach the same terms through different
+			// types ( mfem::Vector is real_t, meq::CompressedRows stores
+			// double ), so bit-equality is not available; a DROPPED term would
+			// be O( scale ) rather than O( eps x scale ), so the claim survives
+			// at 64 eps. M-219.
+			BOOST_TEST( std::abs( dense - sparse )
+			            <= meq::tests::exactAgreementFloor( dense ),
 				"mode " << mode << ", column " << c << ": the dense contraction "
 				"gives " << dense << " and the compressed one " << sparse
 				<< ", a difference of " << ( dense - sparse )
@@ -248,7 +256,10 @@ BOOST_AUTO_TEST_CASE( theCompressedBorderRowsContractExactly )
 	{
 		double const dense = denseDot( currentRow, columns[ c ] );
 		double const sparse = compressedCurrent.dot( 0, columns[ c ], gathered );
-		BOOST_TEST( dense - sparse == 0.0,
+		// Exactly zero in double; 64 eps of the contraction in single, where
+		// the two routes reach the same terms through different types. M-219.
+		BOOST_TEST( std::abs( dense - sparse )
+		            <= meq::tests::exactAgreementFloor( dense ),
 			"current row, column " << c << ": " << dense << " against " << sparse );
 	}
 }

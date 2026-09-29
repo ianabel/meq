@@ -456,7 +456,7 @@ BOOST_AUTO_TEST_CASE( aVacuumSolveIsAffineAndNewtonsFirstStepIsExact )
 			             p.newtonIterations );
 			std::fflush( stdout );
 
-			BOOST_TEST( drop < 1.0e-8,
+			BOOST_TEST( drop < meq::tests::affineStepDrop( 1.0e-8 ),
 			            "k = " << order << ", h = " << p.h << ": the first Newton "
 			            "step reduced the residual by only " << drop
 			            << ". A vacuum source has dF/dpsi identically zero, so the "

@@ -37,6 +37,7 @@
 #include <memory>
 #include <vector>
 
+#include "convergence/RoundOffFloor.hpp"
 #include "meq/ConductorField.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/Profiles.hpp"
@@ -1132,10 +1133,14 @@ BOOST_AUTO_TEST_CASE( theSplitReachesTheExteriorCoupling )
 		// ONE NEWTON STEP. With no plasma the residual is affine in ( x, a ) and
 		// psi_c enters as a constant, so more than one step would mean the
 		// conductor had got into the Jacobian.
-		BOOST_TEST( solver.newtonIterations() <= 1,
-			"the coupled vacuum solve under the split took "
-			<< solver.newtonIterations() << " Newton steps where the residual is "
-			"affine" );
+		// THE REDUCTION AND NOT THE COUNT -- whether a second step follows is
+		// decided by where solve()'s target sits, which is a property of the
+		// format. Measured, an exact step reaches ~500 x eps in both. M-219.
+		BOOST_TEST( meq::tests::oneExactStepReachedTheFloor( solver.newtonResiduals() ),
+			"the coupled vacuum solve under the split: "
+			<< meq::tests::stepReductionNotice( solver.newtonResiduals() )
+			<< ". The residual is affine in ( x, a ) here, so more than the floor "
+			   "means the conductor has got into the Jacobian" );
 	}
 
 	std::printf( "\n    worst modal-minus-psi_c on Gamma: %.4e   "

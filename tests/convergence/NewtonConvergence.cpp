@@ -672,9 +672,10 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
 	std::vector<int> const sizes = { 4, 8, 16, 32 };
 
 	std::vector<Measurement> points;
+	std::vector<std::vector<double>> histories( sizes.size() );
 	points.reserve( sizes.size() );
-	for ( int n : sizes )
-		points.push_back( measure( eq, order, n ) );
+	for ( std::size_t i = 0; i < sizes.size(); ++i )
+		points.push_back( measure( eq, order, sizes[ i ], &histories[ i ] ) );
 
 	printTable( "McCarthy ASDEX Upgrade", order, points );
 
@@ -682,11 +683,19 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
 
 	for ( std::size_t i = 0; i < points.size(); ++i )
 	{
-		BOOST_TEST( points[ i ].newtonIterations == 1,
-		            "h = " << points[ i ].h << ": Newton took "
-		            << points[ i ].newtonIterations << " iterations on a source that "
-		            "is affine in psi. One exact step should finish it; more than one "
-		            "means the Jacobian is not the derivative of the residual" );
+		/*
+		 * THE REDUCTION AND NOT THE COUNT. `dF/dpsi = T` identically, so the
+		 * discrete residual is affine and an exact Jacobian takes it to the
+		 * format's floor in ONE step -- but whether a second step follows is
+		 * decided by where `solve()`'s target sits, which is a property of the
+		 * format and not of the Jacobian. Measured, the reduction is ~500 x eps
+		 * in BOTH builds while the count is 1 in double and 2 in single. M-219.
+		 */
+		BOOST_TEST( meq::tests::oneExactStepReachedTheFloor( histories[ i ] ),
+		            "h = " << points[ i ].h << ": "
+		            << meq::tests::stepReductionNotice( histories[ i ] )
+		            << ". The source is affine in psi, so more than the floor means "
+		               "the Jacobian is not the derivative of the residual" );
 
 		if ( i == 0 )
 			continue;

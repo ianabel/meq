@@ -718,7 +718,7 @@ BOOST_AUTO_TEST_CASE( diagnosticExactSolutionOnThePolygon )
 			// What this has to separate is an exact step from an inexact one, and
 			// an inexact step on an affine system is O( 1 ), not O( 1e-10 ).
 			double const drop = history[ 1 ]/std::max( 1.0e-300, history[ 0 ] );
-			BOOST_TEST( drop < 1.0e-8,
+			BOOST_TEST( drop < meq::tests::affineStepDrop( 1.0e-8 ),
 			            "k = " << order << ", refinement level " << level
 			            << ": the first Newton step cut the residual only by "
 			            << drop << ". The Solov'ev source does not depend on psi, "

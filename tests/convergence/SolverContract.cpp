@@ -447,7 +447,11 @@ BOOST_AUTO_TEST_CASE( theEssentialTraceConditionImposesTheDatum )
 			             essential.Size(), worst );
 			std::fflush( stdout );
 
-			BOOST_TEST( worst < 1.0e-12,
+			// FLOORED AT ROUND-OFF ON THE DATUM'S OWN SIZE. In double this is
+			// the 1.0e-12 it always was; in single a dof sits 0.11 of one eps
+			// of a 0.37 datum away, which no scale-free bound can express.
+			// M-219.
+			BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, datumValue ),
 			            ( path == 0 ? "linear" : "Newton" ) << " path, k = " << order
 			            << ": an essential trace dof sits " << worst
 			            << " from the datum. A constant projects exactly onto the "

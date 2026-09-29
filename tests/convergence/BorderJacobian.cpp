@@ -253,7 +253,7 @@ BOOST_AUTO_TEST_CASE( theFluxAndThePotentialGradientAgreeOnlyWeaklyAtTheAxis )
 		// q_h IS ZERO THERE BY CONSTRUCTION and this is the control: if the
 		// root finder had not converged, everything below would be measuring
 		// its residual rather than the identity.
-		BOOST_TEST( axis.fluxResidual < 1.0e-9,
+		BOOST_TEST( axis.fluxResidual < meq::tests::rootResidualFloor( 1.0e-9 ),
 		            "the located axis is not a root of q_h at n = " << n
 		            << ": |q_h| = " << axis.fluxResidual );
 	}

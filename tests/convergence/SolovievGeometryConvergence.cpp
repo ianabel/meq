@@ -352,11 +352,27 @@ namespace
 {
 	void checkOneStep( SolovievEquilibrium const &eq, char const *label )
 	{
+		std::vector<double> history;
 		meq::tests::Measurement const point
-			= meq::tests::measure( eq, standardBox(), 2, 8 );
-		BOOST_TEST( point.newtonIterations <= 1,
-		            label << ": Newton took " << point.newtonIterations
-		            << " iterations on a source that does not depend on psi" );
+			= meq::tests::measure( eq, standardBox(), 2, 8, &history );
+		std::printf( "  %-24s Newton %d, residuals", label, point.newtonIterations );
+		for ( double r : history ) std::printf( " %.4e", r );
+		std::printf( "\n" );
+		std::fflush( stdout );
+
+		/*
+		 * THE REDUCTION AND NOT THE COUNT. `dF/dpsi` is identically zero here,
+		 * so the discrete residual is affine and an exact Jacobian takes it to
+		 * the format's floor in ONE step -- but whether a second step is then
+		 * taken is decided by where `solve()`'s target sits, which is a property
+		 * of the format. Measured, the reduction is ~500 x eps in BOTH builds
+		 * while the count is 1 in double and 2 in single. M-219.
+		 */
+		BOOST_TEST( meq::tests::oneExactStepReachedTheFloor( history ),
+		            label << ": " << meq::tests::stepReductionNotice( history )
+		            << ". More than the floor on a source that does not depend on "
+		               "psi means the Jacobian is not the derivative of the "
+		               "residual" );
 	}
 }
 
