@@ -1,4 +1,5 @@
 #define BOOST_TEST_MODULE HighBetaConvergence
+#include <limits>
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
@@ -485,7 +486,11 @@ BOOST_AUTO_TEST_CASE( theSelfConsistentNormalisation )
 		 * relative. A border that is NOT closing gives O( 1 ), so nine orders of
 		 * headroom costs the assertion nothing.
 		 */
-		BOOST_TEST( std::abs( point.constraint ) < 1.0e-9*point.psiAxis,
+		// The border closes to round-off, not to a fixed number of digits: measured
+		// at 1.3 eps of psi_ax in single against the 1.0e-09 this asks for. M-219.
+		BOOST_TEST( std::abs( point.constraint )
+		            < meq::tests::scalarAgreementFloor( 1.0e-9*point.psiAxis,
+		                                                point.psiAxis ),
 		            "nu = " << one.nu << ", amplitude = " << one.amplitude
 		            << ": the normalisation constraint reads " << point.constraint
 		            << " against psi_ax = " << point.psiAxis << ". It is the extra "
@@ -634,7 +639,16 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 			            "a control of" );
 	}
 
-	BOOST_TEST( reduction[ 0 ] > 1.0e8*reduction[ 1 ],
+	// The separation is between a bordered step that converges and one that
+	// barely moves; in single the converging arm can only reach the round-off
+	// floor, so it reduces by 1.1e6 rather than by 1e14 while the control still
+	// reduces by 1.047. The factor asked for is floored at what the format
+	// leaves: 1/eps is 8.4e6 in single and 4.5e15 in double, so this stays
+	// 1.0e8 there. M-219.
+	BOOST_TEST( reduction[ 0 ]
+	            > std::min( 1.0e8, 0.1/static_cast<double>(
+	                                     std::numeric_limits<mfem::real_t>::epsilon() ) )
+	              *reduction[ 1 ],
 	            "the bordered Newton reduced the augmented residual by a factor of "
 	            << reduction[ 0 ] << " and the same iteration WITHOUT the two "
 	            "non-local terms reduced it by " << reduction[ 1 ]
@@ -858,7 +872,9 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 		// from a root search and the residual bottoms out at that search's
 		// accuracy, not at machine zero. A border that is not closing gives
 		// O( 1 ), so the headroom costs nothing. See theSelfConsistentNormalisation.
-		BOOST_TEST( axisResidual/scale < 1.0e-9,
+		// The border closes to round-off on psi_ax, not to a digit count. M-219.
+		BOOST_TEST( axisResidual/scale
+		            < meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 ),
 		            "psi_ax does not close at n = " << n << ": "
 		            << axisResidual/scale << " relative" );
 
@@ -972,12 +988,15 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		double const boundaryGap =
 			std::abs( analytic.boundary - differenced.boundary );
 
-		BOOST_TEST( axisGap < 1.0e-10,
+		// Round-off on psi_ax itself: the two Jacobian routes agree to 0.5 eps in
+		// single, which no scale-free 1.0e-10 can express. M-219.
+		BOOST_TEST( axisGap < meq::tests::scalarAgreementFloor( 1.0e-10, analytic.axis ),
 		            "n = " << n << ": psi_ax came out " << analytic.axis
 		            << " with the assembled column and " << differenced.axis
 		            << " with the differenced one. Two Jacobians for the same "
 		            "residual must reach the same root" );
-		BOOST_TEST( boundaryGap < 1.0e-10,
+		BOOST_TEST( boundaryGap
+		            < meq::tests::scalarAgreementFloor( 1.0e-10, analytic.boundary ),
 		            "n = " << n << ": psi_bnd came out " << analytic.boundary
 		            << " against " << differenced.boundary );
 
@@ -1138,16 +1157,21 @@ BOOST_AUTO_TEST_CASE( theAnalyticCurrentCornerAgreesWithTheDifferencedOne )
 		// the work and not the answer -- and CLAUDE.md's *A wrong Jacobian is
 		// invisible to a convergence table* is exactly why this half of the
 		// assertion is the weak one.
+		// Two routes to the same Jacobian column agree to round-off on the
+		// quantity, not to a fixed digit count. M-219.
 		BOOST_TEST( std::abs( assembled.axis - differenced.axis )
-		            <= 1.0e-8*std::abs( assembled.axis ),
+		            <= meq::tests::differencedAgreementFloor( 1.0e-8 )
+		               *std::abs( assembled.axis ),
 		            "psi_ax moved with the corner route at n = " << n );
 		BOOST_TEST( std::abs( assembled.scale - differenced.scale )
-		            <= 1.0e-8*std::abs( assembled.scale ),
+		            <= meq::tests::differencedAgreementFloor( 1.0e-8 )
+		               *std::abs( assembled.scale ),
 		            "the profile scale moved with the corner route at n = " << n );
 
 		// Both must converge at all, which is a precondition rather than the
 		// finding: a route that did not would make the agreement above vacuous.
-		BOOST_TEST( differenced.residual <= 1.0e-10,
+		BOOST_TEST( differenced.residual
+		            <= meq::tests::scalarAgreementFloor( 1.0e-10, 1.0 ),
 		            "the differenced corner reached only "
 		            << differenced.residual << " at n = " << n );
 

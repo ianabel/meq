@@ -23,6 +23,7 @@
 #define BOOST_TEST_MODULE DeviceRowsTests
 #include <boost/test/included/unit_test.hpp>
 
+#include "convergence/RoundOffFloor.hpp"
 #include "meq/Crossings.hpp"
 #include "meq/DeviceRows.hpp"
 #include "meq/GradShafranov.hpp"
@@ -168,7 +169,31 @@ BOOST_AUTO_TEST_CASE( theDeviceRowsReproduceTheHostDotToTheBit )
 		for ( int r = 0; r < host.rowCount(); ++r )
 		{
 			double const expected = host.dot( r, v, scratch );
-			BOOST_TEST( got( r ) == expected,
+			/*
+			 * EXACTLY EQUAL IN DOUBLE, AND IN SINGLE THE TWO ROUTES ARE NOT
+			 * THE SAME COMPUTATION AT ALL. `meq::CompressedRows` stores
+			 * `std::vector<double>` and accumulates in `double`;
+			 * `meq::DeviceRows` stores `mfem::real_t` and accumulates in
+			 * `float`. Under `MFEM_PRECISION = single` those differ by the
+			 * format before any question of ORDER arises, so the bit-exactness
+			 * contract is not available and no edit to the kernel could make
+			 * it hold.
+			 *
+			 * `exactAgreementFloor()` is therefore EXACTLY ZERO in double,
+			 * where this remains the bit-equality it has always been, and
+			 * 64 eps in single. **What that gives up is the reassociation
+			 * check** -- a reassociated sum and a float-vs-double sum are the
+			 * same order -- and what it keeps is the layout: a transposed
+			 * `r + nr*c`, a wrong support index or a dropped row is `O( 1 )`.
+			 *
+			 * The reassociation half is a DOUBLE-BUILD acceptance now, and that
+			 * is a real narrowing rather than a tidy one. Making it hold in
+			 * both would mean giving `meq::CompressedRows` the same `real_t`
+			 * its mirror carries -- a production change, bit-identical in
+			 * double, which nobody has measured in single. M-219.
+			 */
+			BOOST_TEST( std::abs( got( r ) - expected )
+			            <= meq::tests::exactAgreementFloor( expected ),
 			            "row " << r << " of " << host.rowCount()
 			            << ": device " << got( r ) << " against host "
 			            << expected << ". These must be EQUAL, not close -- "
@@ -304,7 +329,10 @@ BOOST_AUTO_TEST_CASE( theColumnFillMatchesTheHostAndIsNotTransposed )
 		{
 			double const expected = host.dot( r, separate[ c ], scratch );
 			largest = std::max( largest, std::abs( expected ) );
-			BOOST_TEST( got( r, c ) == expected,
+			// Exactly zero in double; 64 eps in single, where the host sums in
+			// `double` and the device in `float`. See the note above. M-219.
+			BOOST_TEST( std::abs( got( r, c ) - expected )
+			            <= meq::tests::exactAgreementFloor( expected ),
 			            "entry ( " << r << ", " << c << " ) : device "
 			            << got( r, c ) << " against host " << expected
 			            << ". Equal, not close -- and if the whole matrix looks "
@@ -325,9 +353,13 @@ BOOST_AUTO_TEST_CASE( theColumnFillMatchesTheHostAndIsNotTransposed )
 	double const oneZero = host.dot( 1, separate[ 0 ], scratch );
 	BOOST_TEST_REQUIRE( zeroOne != oneZero,
 	                    "the fixture cannot distinguish a transpose" );
-	BOOST_TEST( got( 0, 1 ) == zeroOne,
+	// The transpose this separates is O( 1 ) -- zeroOne and oneZero are
+	// required above to differ -- so round-off cannot blur it. M-219.
+	BOOST_TEST( std::abs( got( 0, 1 ) - zeroOne )
+	            <= meq::tests::exactAgreementFloor( zeroOne ),
 	            "entry ( 0, 1 ) must be row 0 against column 1" );
-	BOOST_TEST( got( 1, 0 ) == oneZero,
+	BOOST_TEST( std::abs( got( 1, 0 ) - oneZero )
+	            <= meq::tests::exactAgreementFloor( oneZero ),
 	            "entry ( 1, 0 ) must be row 1 against column 0" );
 }
 

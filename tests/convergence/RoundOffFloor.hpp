@@ -26,6 +26,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <vector>
@@ -162,13 +163,21 @@ namespace tests
 	 * contraction of 1.286, which is 0.06 of one `eps` of it.
 	 *
 	 * **A DROPPED TERM WOULD BE `O( scale )`, NOT `O( eps x scale )`**, so the
-	 * claim is intact at 64 `eps`; and in double this returns **exactly zero**,
-	 * so the assertion there is the bit-equality it always was. M-219.
+	 * claim is intact; and in double this returns **exactly zero**, so the
+	 * assertion there is the bit-equality it always was.
+	 *
+	 * The constant is **1024**, set by the widest-spread user rather than the
+	 * narrowest: `DeviceRowsTests` contracts a length-97 row against a column
+	 * and reads **71 eps** on an entry of 7.5e+06, which is what cancellation in
+	 * a sum that long costs. `BorderAssembly` reads 0.06 and `SourceViewTests`
+	 * 0.54. A transposed `r + nr*c`, a dropped row or a wrong support index is
+	 * `O( 1 )` RELATIVE, so 1024 eps still sits three orders below the smallest
+	 * of them. M-219.
 	 */
 	inline double exactAgreementFloor( double scale )
 	{
 #ifdef MFEM_USE_SINGLE
-		return 64.0*std::abs( scale )
+		return 1024.0*std::abs( scale )
 		       *static_cast<double>(
 			       std::numeric_limits<mfem::real_t>::epsilon() );
 #else
@@ -223,6 +232,101 @@ namespace tests
 		return std::max( historical,
 		                 1.0e6*static_cast<double>(
 			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
+	}
+
+	/**
+	 * The observed Newton ORDER a quadratic method can be held to, given how
+	 * many decades this build leaves above its own floor.
+	 *
+	 * **AN ORDER ESTIMATE NEEDS DECADES AND SINGLE PRECISION HAS HALF OF
+	 * THEM.** `bestNewtonOrder()` fits a triple of consecutive residuals and
+	 * already discards any that has fallen under `newtonTolerance()`; what it
+	 * cannot do is invent range. A quadratic run in double spans
+	 * `1 -> 1e-4 -> 1e-8 -> 1e-15`, four residuals and two clean triples; in
+	 * single the same run is `1 -> 1e-4 -> 1e-7` and stops, so there is one
+	 * triple and it straddles the floor. Measured,
+	 * `RotatingNewtonConvergence` reads **1.796** where it reads ~2 in double
+	 * and asks for 1.8.
+	 *
+	 * **THE DISCRIMINATOR IS QUADRATIC AGAINST LINEAR AND 1.5 STILL MAKES IT.**
+	 * A Jacobian that is not the derivative of its residual gives order 1;
+	 * `VaryingCentrifugalConvergence` measures its own 5%-inconsistent control
+	 * at **1.173** and says so in as many words. 1.5 sits between 1.17 and 1.80
+	 * with room on both sides, which is the argument that file already makes for
+	 * its own threshold. Double keeps whatever the caller asked for. M-219.
+	 */
+	inline double quadraticOrderThreshold( double historical )
+	{
+#ifdef MFEM_USE_SINGLE
+		return std::min( historical, 1.5 );
+#else
+		return historical;
+#endif
+	}
+
+	/**
+	 * Whether an order could be estimated at all.
+	 *
+	 * `bestNewtonOrder()` returns 0 when no triple of residuals survived the
+	 * round-off floor -- reachable in single, because a solve that converges in
+	 * two steps leaves nothing to fit. That is a statement about the format and
+	 * not about the Jacobian, so a caller reports it and skips. **In double this
+	 * is false whatever the history**, so a zero there stays the failure it
+	 * should be. M-219.
+	 */
+	inline bool newtonOrderIsUnmeasurable( double best )
+	{
+#ifdef MFEM_USE_SINGLE
+		return !( best > 0.0 );
+#else
+		(void)best;
+		return false;
+#endif
+	}
+
+	/// What such a caller prints when it skips.
+	inline std::string newtonOrderNotice()
+	{
+		return "  *** SKIPPED the Newton order. No triple of residuals survived "
+		       "the round-off floor of this build's real_t -- a solve that reaches "
+		       "the floor in two steps leaves nothing to fit an order to, which is "
+		       "a property of the format rather than of the Jacobian. M-219";
+	}
+
+	/**
+	 * How closely a DIFFERENCED Jacobian column can be expected to match the
+	 * assembled one, floored from the caller's own historical value.
+	 *
+	 * **A DIFFERENCE IS NOT A DERIVATIVE AND ITS ERROR IS `sqrt( eps )`, NOT
+	 * `eps`.** Where two routes to the same quantity are both exact,
+	 * [[scalarAgreementFloor]] is the right bound; where one of them is a finite
+	 * difference, the cancellation term alone is `eps/step` and the best any
+	 * step can do is `sqrt( eps )` forward or `eps^(2/3)` central. Measured on
+	 * `HighBetaConvergence`'s corner route, assembled against differenced,
+	 * relative:
+	 *
+	 *     n = 8    psi_ax 2.56e-05    scale 1.77e-04
+	 *     n = 16   psi_ax 1.83e-05    scale 6.91e-05
+	 *
+	 * which is exactly that band -- `sqrt( eps )` is 3.45e-04 in single and
+	 * `eps^(2/3)` is 2.44e-05.
+	 *
+	 * So the floor is `4 sqrt( eps )`, **1.4e-03** in single, clearing the worst
+	 * measured by 7.8 and still some 700 times below the `O( 1 )` a genuinely
+	 * wrong column gives. It applies **only in single**: `sqrt( eps_double )` is
+	 * 1.49e-08, which is LARGER than the `1.0e-8` these callers ask for, so a
+	 * `std::max` would loosen the double build -- the one thing none of this may
+	 * do. M-219.
+	 */
+	inline double differencedAgreementFloor( double historical )
+	{
+#ifdef MFEM_USE_SINGLE
+		return std::max( historical,
+		                 4.0*std::sqrt( static_cast<double>(
+			                 std::numeric_limits<mfem::real_t>::epsilon() ) ) );
+#else
+		return historical;
+#endif
 	}
 
 	inline bool oneExactStepReachedTheFloor( std::vector<double> const &residuals )

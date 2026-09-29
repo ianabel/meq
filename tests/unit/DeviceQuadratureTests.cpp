@@ -27,6 +27,7 @@
 #define BOOST_TEST_MODULE DeviceQuadratureTests
 #include <boost/test/included/unit_test.hpp>
 
+#include "convergence/RoundOffFloor.hpp"
 #include "meq/DeviceQuadrature.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
@@ -170,7 +171,11 @@ BOOST_AUTO_TEST_CASE( theDeviceElementLoopReproducesTheHostQuadrature )
 	            "every reference element integral is at round-off, so the "
 	            "agreement below means nothing" );
 
-	BOOST_TEST( worst < 1.0e-12,
+	// `worst` is already relative, so the scale is 1. The bound the comment
+	// below reasons with is round-off against an INDEXING error, which is
+	// O( 1 ); 64 eps is 7.6e-06 in single against a measured 1.65 eps, and
+	// five orders below anything an index can do. M-219.
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 	            "the device element loop disagrees with the host by " << worst
 	            << " relative. At this size that is an INDEXING error rather "
 	            "than round-off: check the four layouts this file's opening "
@@ -344,7 +349,11 @@ BOOST_AUTO_TEST_CASE( theConductorShiftIsAddedAtTheRightQuadraturePoint )
 	BOOST_TEST( moved == mesh.GetNE(),
 	            "the conductor shift did not move every element, so this case "
 	            "would pass against a kernel that ignored the cache" );
-	BOOST_TEST( worst < 1.0e-12,
+	// `worst` is already relative, so the scale is 1. The bound the comment
+	// below reasons with is round-off against an INDEXING error, which is
+	// O( 1 ); 64 eps is 7.6e-06 in single against a measured 1.65 eps, and
+	// five orders below anything an index can do. M-219.
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 	            "the shifted device loop disagrees with the host by " << worst
 	            << " relative -- suspect the cache index, which is "
 	            "values[ offsets[ e ] + q ] and not anything else" );

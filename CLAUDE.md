@@ -1164,6 +1164,37 @@ going from 15 error lines to 436. Read the distinct failing CASES. The suite is
 now **40 red of 63** at **157** cases, and the double control is **62/63 at
 every step**.
 
+**AND ELEVEN OF THOSE TESTS ARE NOW GREEN, WITH THE SAME LESSON EACH TIME** →
+**[M-219](MEASUREMENTS.md#m-219)**. Single reads **29 red of 63** at 125 cases,
+against M-218's 40 and 157. **Every one of them was asserting something that is
+true in double and an ARTEFACT of double there** — an iteration count, a
+bit-equality, a threshold with no scale in it, an order estimate needing fifteen
+decades — and in every case the claim underneath survives the format. Asserting
+it directly is often a STRONGER test: *"Newton takes one step"* becomes
+*"one step reaches the round-off floor"*, which a merely-close Jacobian could
+pass under a loose target and cannot reach in one step. The reduction reads
+~500 `eps` in BOTH builds while the count reads 1 and 2.
+
+**THREE DISTINCTIONS FROM IT GENERALISE.** *A difference is not a derivative*:
+where two routes are both exact `eps` is the right floor, and where one is a
+finite difference the band is `eps^(2/3)` to `sqrt( eps )` — measured at
+1.8e-05 to 1.8e-04 on `HighBetaConvergence`'s corner route. *The robust half of
+a rate claim survives where the `k+1` half does not*: `theXPointConverges...`
+compares the finder against the FIELD it roots, which degrades on both sides and
+holds at any precision, and only the `k+1` half is skipped. And *a controlled
+experiment whose signal is below the floor is a double-build acceptance, not a
+tolerance to widen*: `aPerturbedJacobianCosts...` measures an order gap of 0.6
+that single reads as 0 on both arms, and loosening it would leave a case that
+cannot tell a 5% Jacobian error from an exact one, looking green.
+
+**AND TWO FAILURES IN `SourceViewTests` WERE NOT ROUND-OFF AT ALL.**
+`meq::KnotView::psi` is `real_t` where `meq::Profile`'s abscissae are `double`,
+so an interval BOUNDARY moves by an ulp and a `dF/dpsi` probed four ulps either
+side reads 0 and 2.04e-03 — the two routes evaluate a rapidly varying function a
+few ulps apart. The same thing at a coil edge switches **the whole coil term**,
+-9.2153 against 0. Neither is a tolerance; both are the MFEM-free seam reaching
+a boundary predicate.
+
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by
 `--device cuda` reproducing `--device cpu` **to every printed digit** — that is

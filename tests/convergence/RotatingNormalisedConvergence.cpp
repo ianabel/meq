@@ -226,7 +226,10 @@ BOOST_AUTO_TEST_CASE( theNormalisationIsSelfConsistent )
 		// LocatedAxis the constraint point comes from a root search, so G bottoms
 		// out at that search's accuracy. A border that is not closing gives
 		// O( 1 ), so the headroom costs the assertion nothing.
-		BOOST_TEST( std::fabs( s.constraint ) < 1.0e-9*std::fabs( s.psiAxis ),
+		// Round-off on psi_ax, not a fixed digit count: 2.8 eps measured. M-219.
+		BOOST_TEST( std::fabs( s.constraint )
+		            < meq::tests::scalarAgreementFloor( 1.0e-9*std::fabs( s.psiAxis ),
+		                                                s.psiAxis ),
 		            "n = " << n << ": the normalisation constraint reads "
 		            << s.constraint << " against psi_ax = " << s.psiAxis
 		            << ", so the border is not closing the system" );

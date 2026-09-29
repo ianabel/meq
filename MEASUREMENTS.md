@@ -12232,3 +12232,137 @@ at all** — it pins the device POD to the **bit** against MEQ's MFEM-free
 `Source`, which is `real_t` against `double` **by design**, so the design
 decision that makes the port small is the one that puts a format boundary
 through MEQ's most load-bearing unit test.
+
+### M-219
+
+**ELEVEN SINGLE-PRECISION TESTS, AND IN EVERY ONE THE CLAIM SURVIVED THE FORMAT
+WHILE THE WAY IT WAS MEASURED DID NOT.** [M-218](#m-218) left 40 red of 63 at
+157 distinct failing cases and named the rate class as dominant. Working down
+from the tests with fewest failing cases, the pattern that emerges is sharper
+than "tolerances need scaling": **each of these was asserting something that is
+true in double and is an ARTEFACT of double there** — an iteration count, a
+bit-equality, a threshold with no scale in it, an order estimate that needs
+fifteen decades. The repair is to assert the claim directly, which in several
+cases is a *stronger* test than the one it replaces.
+
+**THE REDUCTION AND NOT THE COUNT.** *"Newton takes one step on a source that
+does not depend on psi"* is evidence for *"the Jacobian is the derivative of the
+residual"*, and the count is decided by where `solve()`'s target sits.
+`SolovievGeometryConvergence`, `‖r₁‖/‖r₀‖`:
+
+| | Example 1 FRC | Example 2 ITER | Example 3 NSTX | Newton stops at |
+|---|---|---|---|---|
+| double | 1.29e-13 | 3.62e-14 | 1.26e-13 | **1** |
+| single | 6.42e-05 | 2.10e-05 | 5.87e-05 | **2** |
+| double, in its own `eps` | 580 | 163 | 566 | |
+| single, in its own `eps` | 539 | 176 | 493 | |
+
+**The same number.** The Jacobian is exactly as exact in single as in double and
+the iteration count says otherwise. And the replacement is stronger: a merely
+close Jacobian would still stop at one iteration under a loose enough target,
+and could not reach `8192 eps` in one step.
+
+**A RATIO WHOSE DENOMINATOR MOVES NEEDS A DIFFERENT BOUND FROM ONE WHOSE DOES
+NOT, AND `MillerConvergence` HAD ALREADY WRITTEN DOWN WHY**: *"‖r₁‖ sits at
+round-off while ‖r₀‖ shrinks with the mesh, so the ratio grows even though the
+step is exact throughout"*. Over that sweep the drop runs 4.8e-13 → 3.1e-11 in
+double and 2.7e-04 → 4.3e-03 in single — **in each build's own `eps`, 1.4e5 and
+3.6e4**, so the single build is the better behaved of the two, and the caller's
+historical `1.0e-8` is itself **4.5e7 eps**.
+
+**A ROOT RESIDUAL IS A THRESHOLD WITH SEVEN ORDERS IN IT AND THE FLOOR EATS
+FOUR.** `CriticalPointConvergence` states its own yardstick — *"a point reported
+at `|q| = 1e-3` is a place Newton gave up"* — against a bound of `1.0e-10`.
+Measured in single: the axis reaches `4.28e-07` and **the X-point `7.77e-06`**,
+a saddle being worse conditioned than an extremum. `256 eps` is `3.05e-05`,
+clearing the worst by 3.9 and still **33 times** below the `1e-3` that means the
+search gave up.
+
+**AND THE ROBUST HALF OF A RATE CLAIM SURVIVES WHERE THE `k+1` HALF DOES NOT.**
+`theXPointConvergesAtTheFluxesOwnOrder` asserts both that the position rate
+equals the **field's own** rate and that it reaches `k+1`. The first compares the
+finder against the field it roots, so both sides degrade together and it holds at
+any precision; only the second is skipped. *Keeping them apart is the point, and
+a test that asserts two things at once hides which one the format took.*
+
+**AN ORDER ESTIMATE NEEDS DECADES AND SINGLE HAS HALF OF THEM.** A quadratic run
+in double spans `1 → 1e-4 → 1e-8 → 1e-15` — four residuals, two clean triples;
+in single it is `1 → 1e-4 → 1e-7` and stops. `RotatingNewtonConvergence` reads
+**1.796** against a threshold of 1.8, and `VaryingCentrifugalConvergence` reads
+**0**, because `bestNewtonOrder()` correctly finds no triple above the floor. The
+discriminator is quadratic against linear and that file measures its own
+5%-inconsistent control at **1.173**, so 1.5 sits between 1.17 and 1.80 with room
+on both sides.
+
+**AND ONE CASE IS A DOUBLE-BUILD ACCEPTANCE OUTRIGHT, WHICH IS WORTH MORE THAN
+THREE TUNED CONSTANTS.** `aPerturbedJacobianCostsNewtonItsOrderAndNotItsAnswer`
+is a controlled experiment measuring a DIFFERENCE between an exact Jacobian and
+a 5% wrong one: an order falling 1.792 → 1.173, one extra Newton iteration, and
+an `L2( psi )` that does not move. In single `bestNewtonOrder()` returns **0 for
+both arms**, so the gap it asks for is zero by construction; the perturbed run
+takes no extra iteration because the target was already met; and the two
+`L2( psi )` agree to 1e-3 rather than 1e-6 because both are AT the floor and
+differ by it. **Loosening the three bounds until they passed would leave a case
+that cannot tell a 5% Jacobian error from an exact one — which is the only thing
+it exists to do — and it would leave that case looking green.**
+
+**A DIFFERENCE IS NOT A DERIVATIVE AND ITS ERROR IS `sqrt( eps )`.** Where two
+routes to a quantity are both exact, `eps` is the right floor; where one is a
+finite difference it is not. `HighBetaConvergence`'s corner route, assembled
+against differenced, relative: `2.56e-05` and `1.77e-04` at `n = 8`, `1.83e-05`
+and `6.91e-05` at `n = 16` — exactly the band between `eps^(2/3)` = 2.44e-05 and
+`sqrt( eps )` = 3.45e-04. **And this floor applies in single ONLY**, because
+`sqrt( eps_double )` is `1.49e-08`, *larger* than the `1.0e-8` these callers ask
+for: a `std::max` there would loosen the double build, which is the one thing
+none of this may do.
+
+**THE LOAD-BEARING ONE IS `SourceViewTests` AND IT NEEDED THREE DIFFERENT
+REPAIRS.** Its stated justification for bit-equality is that the two expressions
+evaluate *"the same arithmetic in the same order on the same **doubles**"*, and
+under `MFEM_PRECISION = single` that premise is false — the POD returns
+`mfem::real_t` and `meq::Source` stays `double` by the *Layout* decision.
+`exactAgreementFloor()` returns **exactly zero in double**, so the bit-equality
+is untouched there.
+
+**THE OTHER TWO WERE NOT ROUND-OFF AT ALL, AND BOTH ARE PROPERTIES OF THE POD.**
+`meq::KnotView::psi` is `real_t` while `meq::Profile`'s abscissae are `double`,
+so the interval **boundary** moves by an ulp. Probed at the failing point:
+
+| four ulps below | the POD | the profile | four ulps above |
+|---|---|---|---|
+| 0 | 3.8925e-05 | 1.1122e-05 | 2.0352e-03 |
+
+The two do not disagree about the function; they evaluate a rapidly varying one
+a few ulps apart, and every value in that range is one it legitimately takes.
+**The same thing happens one level up at a coil edge**: the file's coils are
+`[1.85, 2.15]` and `[1.90, 2.20]` and its sweep visits `R = 2.20` on purpose,
+because — in its own words — *"`contains()` is closed and a half-open POD would
+differ"*. There the POD reports **-9.2153** where the reference reports **0**:
+not a rounding difference but the whole coil term, switched on or off by which
+side of its own edge the point fell. Asking that the POD lie in the range the
+reference takes within a few ulps keeps every defect the file hunts — a dropped
+`mu0` is a factor of 1.3e-06 and lands outside that bracket at **every** point,
+not at one.
+
+**AND ONE CONTRACT IS GENUINELY NARROWED, WHICH IS RECORDED RATHER THAN TIDIED.**
+`DeviceRowsTests` pins `meq::DeviceRows` to `meq::CompressedRows` *to the bit*,
+and that contract is about REASSOCIATION — MEQ refuses `reduction( + : )` so the
+answer cannot depend on a thread count. But `CompressedRows` stores
+`std::vector<double>` and `DeviceRows` stores `mfem::real_t`, so in single they
+differ **by the format before any question of order arises**, and no edit to the
+kernel could make bit-equality hold. What survives at `1024 eps` is the layout —
+a transposed `r + nr*c`, a wrong support index, a dropped row, all `O( 1 )`
+relative. **The reassociation half is now a double-build acceptance.** Making it
+hold in both would mean giving `CompressedRows` the same `real_t` its mirror
+carries: bit-identical in double, and nobody has measured it in single.
+
+**THE RESULT.** Single reads **29 red of 63** against M-218's 40, at **125**
+distinct failing cases against 157 — eleven tests green and none regressed: `SolovievGeometryConvergence`, `BorderAssembly`,
+`BorderJacobian`, `CriticalPointConvergence`, `SourceViewTests`,
+`DeviceRowsTests`, `DeviceQuadratureTests`, `RotatingNormalisedConvergence`,
+`RotatingNewtonConvergence`, `VaryingCentrifugalConvergence` and
+`HighBetaConvergence`. **The double control is 62/63 throughout**, which is not
+a courtesy check here but the thing that makes the work possible at all: every
+helper either `std::max`es against the caller's own historical value or is
+`#ifdef`'d, so a misapplied guard cannot weaken the double build and the control
+says so.
