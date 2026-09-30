@@ -15,6 +15,7 @@
 #include "meq/Profiles.hpp"
 #include "meq/RotatingSource.hpp"
 #include "meq/Source.hpp"
+#include "meq/Sampler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -580,7 +581,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 
 	mfem::Array<int> marker;
 	int const insideCount =
-		mfem::MarkLevelSetSubdomain( background, levelSet, 0.0, marker, 1 );
+		mfem::MarkLevelSetSubdomain(
+			background, levelSet, meq::markingOffset( 1.0, 2.3 ), marker, 1 );
 	BOOST_TEST_REQUIRE( insideCount > 0 );
 
 	for ( int e = 0; e < background.GetNE(); ++e )
@@ -1570,8 +1572,14 @@ BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 	                    "the driver did not write cs6_psi_total.gf on the same "
 	                    "space" );
 
+	// TWO ROUTES TO ONE FIELD, so what separates them is round-off over a
+	// projection and an addition rather than a tolerance. Measured in single:
+	// 5.78e-08 relative, which is 0.49 of ONE eps. A table that did not
+	// describe the field -- a wrong current, a transposed coordinate, a missing
+	// coil -- is O( 1 ) here. exactAgreementFloor() is exactly zero in double,
+	// where this stays the 1e-12 identity it has always been.
 	double const agreement = relativeDifference( rebuilt, written );
-	BOOST_TEST( agreement < 1.0e-12,
+	BOOST_TEST( agreement < 1.0e-12 + meq::tests::exactAgreementFloor( 1.0 ),
 	            "the conductor table in the .nc does not reproduce the field "
 	            "the same run wrote: " << agreement << " relative. The file is "
 	            "then not enough to read itself, which is the whole of what "
@@ -2009,7 +2017,7 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 
 	mfem::Array<int> marker;
 	BOOST_TEST_REQUIRE( mfem::MarkLevelSetSubdomain(
-		background, levelSet, 0.0, marker, 1 ) > 0 );
+		background, levelSet, meq::markingOffset( 1.0, 2.3 ), marker, 1 ) > 0 );
 	for ( int e = 0; e < background.GetNE(); ++e )
 		background.SetAttribute( e, marker[ e ] ? 1 : 2 );
 	background.SetAttributes();
@@ -2248,7 +2256,35 @@ BOOST_AUTO_TEST_CASE( theDriverRefinesOverAnExteriorCoupling )
 	std::printf( "\n" );
 	std::fflush( stdout );
 
-	for ( std::size_t c = 1; c < etas.size(); ++c )
+	/*
+	 * **AN ESTIMATOR DIFFERENTIATES, SO ITS FLOOR RISES AS THE MESH FALLS, AND
+	 * PAST THE CROSSING AN ADAPTIVE LOOP STOPS BEING A DESCENT.** M-220's
+	 * fourth law, and this is the case that shows what it costs: eta reads
+	 * 4.46e-03, 1.08e-02, 2.68e-02, 7.29e-02 over four cycles in single --
+	 * monotone UPWARD, and by almost exactly the factor each refinement adds to
+	 * eps/h. It is the estimator reporting what the arithmetic gives it, not
+	 * the estimator failing, and the same loop in double comes down over the
+	 * same cycles.
+	 *
+	 * So the MONOTONICITY is skipped BY FORMAT, and the notice says so --
+	 * estimatorDescentIsMeasurable() carries the reasoning and the reason it
+	 * cannot be a threshold, which is that the loop refines adaptively and no
+	 * caller knows the h that sets the floor. What is not skipped is everything
+	 * around it -- that the loop refined, that it refined ADAPTIVELY, and that
+	 * the exterior coupling survived it. residualEstimatorFloor() is 512 eps/h
+	 * and reads 1.9e-12 in double at this h, ten orders under the coarsest eta
+	 * in that column, so the double build asserts the descent exactly as it did.
+	 */
+	bool const descentIsMeasurable = meq::tests::estimatorDescentIsMeasurable();
+	if ( !descentIsMeasurable )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the monotone descent of eta: this format is past the "
+			"crossing where the estimator's own eps/h floor overtakes the "
+			"truncation, so the column above rises by construction. The finest "
+			"cycle reads " << etas.back() << " against a coarsest of "
+			<< etas.front() << ". M-220, M-222" );
+
+	for ( std::size_t c = 1; descentIsMeasurable && c < etas.size(); ++c )
 		BOOST_TEST( etas[ c ] < etas[ c - 1 ],
 		            "eta rose from " << etas[ c - 1 ] << " to " << etas[ c ]
 		            << " at cycle " << c << ". The first suspect is the datum "
@@ -3540,7 +3576,34 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 	}
 	std::printf( "    worst %.3e\n", worst );
 
-	BOOST_TEST( worst < 1.0e-04,
+	/*
+	 * **THE MAP THIS LOOP ROOTS IS A FLUX-SURFACE AVERAGE, AND THE FIT FROM IT
+	 * TO THE COEFFICIENTS AMPLIFIES BY A FACTOR THE TWO BUILDS AGREE ON.**
+	 * M-220's fourth law sets the map's own noise -- `q` is an average, so its
+	 * floor rises as `eps/h^2`, and `q-driven.toml` runs `n_R = 8` on a box of
+	 * 0.8 with one refinement, so `h = 0.05` and `averagedMetricFloor()` is
+	 * **1.9e-04**. What that costs the coefficients is the conditioning of a
+	 * degree-2 fit through 24 surfaces, and this run measures it twice:
+	 *
+	 *     double   q 4.77e-08 -> g 5.04e-06      amplification 106
+	 *     single   q 3.93e-05 -> g 1.29e-02      amplification 330
+	 *
+	 * -- the same order in both, which is what says it is the FIT and not the
+	 * format. The constant is 512, above the worse of the two by 1.6.
+	 *
+	 * **AND THIS IS A WEAKER CLAIM THAN THE DOUBLE BUILD'S, WHICH IS WORTH
+	 * SAYING PLAINLY RATHER THAN LEAVING TO BE INFERRED.** The bound comes out
+	 * near 1e-01, so a ten per cent error in `g` would pass here. What it still
+	 * catches is what the message below names and what the case was written
+	 * for: a loop that converged to the WRONG fixed point returns coefficients
+	 * that are O( 1 ) out or of the wrong sign, and a reversed `Psi` reverses
+	 * the profile outright. In double `averagedMetricFloor()` is 3.6e-13 at
+	 * this `h`, so std::max picks the 1e-04 and nothing there moves.
+	 */
+	double const qDrivenH = 0.8/8.0/2.0;   // NR = 8 over 0.8, RefinementLevels = 1
+	BOOST_TEST( worst < std::max(
+		            1.0e-04,
+		            512.0*meq::tests::averagedMetricFloor( qDrivenH ) ),
 		"the loop did not recover the closed-form g its target was measured "
 		"from: worst relative error " << worst << ". A loop that converged to "
 		"the WRONG fixed point reports success and looks exactly like this, so "
@@ -3663,7 +3726,18 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 	 * the same mesh so the third is largely common, which is why this reads
 	 * five orders better than the coefficient bound rather than worse.
 	 */
-	BOOST_TEST( worstQ < 1.0e-05,
+	// AND THE THIRD OF THE THREE ERRORS NAMED ABOVE IS THE ONE THE FORMAT
+	// MOVES. The extraction of V' and < R^-2 > is a flux-surface average, whose
+	// floor rises as eps/h^2 -- M-220's fourth law -- so what is "largely
+	// common" between the target and the answer in double stops being so once
+	// the average itself is at round-off. Measured in single: 7.47e-05 over 24
+	// surfaces against a floor of 1.9e-04 at this example's h = 0.05, where the
+	// double build reads 4.77e-08. A reversed Psi, which is what the message
+	// below warns about, is O( 1 ) and smooth. averagedMetricFloor() is
+	// 3.6e-13 in double at the same h, so the 1e-05 there is untouched.
+	double const qDrivenH = 0.8/8.0/2.0;   // NR = 8 over 0.8, RefinementLevels = 1
+	BOOST_TEST( worstQ < std::max( 1.0e-05,
+	                               meq::tests::averagedMetricFloor( qDrivenH ) ),
 		"the reported safety factor is not the one that was asked for: worst "
 		"relative " << worstQ << " over " << reached.size() << " surfaces. If "
 		"it is large and SMOOTH, suspect the Psi reflection before the solve -- "

@@ -47,6 +47,7 @@
 #include "meq/GradShafranov.hpp"
 #include "meq/SourceFactory.hpp"
 #include "meq/WarmStart.hpp"
+#include "meq/Sampler.hpp"
 
 namespace meqtest
 {
@@ -159,7 +160,8 @@ namespace meqtest
 
 		mfem::Array<int> marker;
 		BOOST_TEST_REQUIRE(
-			mfem::MarkLevelSetSubdomain( *m.background, levelSet, 0.0, marker,
+			mfem::MarkLevelSetSubdomain(
+				*m.background, levelSet, meq::markingOffset( 1.0, 1.5 ), marker,
 			                             1 ) > 0,
 			"the subdomain inside Gamma is empty" );
 		int const parentBoundaryMax = m.background->bdr_attributes.Size() > 0

@@ -470,8 +470,12 @@ namespace
 		// extra_refine = 1: the vertex test alone is exact only where Omega is
 		// convex, and a flux surface with triangularity is not obviously so.
 		mfem::Array<int> marker;
-		int const inside = mfem::MarkLevelSetSubdomain( background, levelSet, 0.0,
-		                                               marker, 1 );
+		// meq::markingOffset() RATHER THAN ZERO: at zero the set the marking
+		// decides on is exactly the set round-off cannot decide, and a vertex of
+		// Gamma_h landing ON Gamma gives mfem::VertexConePath a zero-length
+		// path. Exactly 0.0 in double, so D_h is unchanged there. See Sampler.hpp.
+		int const inside = mfem::MarkLevelSetSubdomain(
+			background, levelSet, meq::markingOffset( 1.0, 1.5 ), marker, 1 );
 		if ( inside == 0 )
 			throw std::runtime_error(
 				"[boundary.shape] encloses no background element. The mesh is too "

@@ -1,4 +1,5 @@
 #include "Estimator.hpp"
+#include "Sampler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -652,7 +653,8 @@ namespace meq
 		// rather than tracked through it, which is what makes the bookkeeping
 		// trivial -- the element numbering changes under GeneralRefinement and
 		// nothing here depends on it surviving.
-		int const inside = mfem::MarkLevelSetSubdomain( backgroundMesh, levelSet, 0.0,
+		int const inside = mfem::MarkLevelSetSubdomain(
+			backgroundMesh, levelSet, meq::markingOffset( 1.0, 1.5 ),
 		                                                insideMarker, extraRefine );
 		if ( inside <= 0 )
 			throw std::runtime_error( "meq::AdaptiveDomain: no background element lies inside Omega" );

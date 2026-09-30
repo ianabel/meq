@@ -15,6 +15,7 @@
 
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
+#include "meq/Sampler.hpp"
 
 #include "analytic/Soloviev.hpp"
 
@@ -298,7 +299,8 @@ namespace
 		// same elements at every mesh in the study, so this surface is convex
 		// enough at every resolution used. Kept as the cheap insurance it is.
 		mfem::Array<int> marker;
-		int const inside = mfem::MarkLevelSetSubdomain( background, levelSet, 0.0,
+		int const inside = mfem::MarkLevelSetSubdomain(
+			background, levelSet, meq::markingOffset( 1.0, 1.5 ),
 		                                                marker, 1 );
 		BOOST_TEST_REQUIRE( inside > 0, "the subdomain is empty at n = " << n );
 		BOOST_TEST_REQUIRE( markedSetIsConnected( background, marker ),

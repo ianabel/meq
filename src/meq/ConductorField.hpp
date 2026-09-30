@@ -229,7 +229,8 @@ namespace meq
 			 * rectangle is an ordinary point -- and refusing one would reject
 			 * the configuration this plan exists to make cheap.
 			 */
-			bool coincides( double radius, double z ) const;
+			bool coincides( double radius, double z,
+			                double tolerance = -1.0 ) const;
 
 			/// The index of the FIRST filament this point coincides with, in
 			/// insertion order, or `-1`. The return type is signed so that -1
@@ -237,7 +238,24 @@ namespace meq
 			/// std::size_t and passed to filament(). Two filaments at one
 			/// location is a configuration error rather than an ambiguity, so
 			/// the first is the only one a caller needs to be told about.
-			int indexAt( double radius, double z ) const;
+			///
+			/// @param tolerance  negative, the default, uses this field's own
+			///        coincidenceTolerance(). **A CALLER THAT OWNS A MESH
+			///        SHOULD PASS ITS OWN**, because the question being asked
+			///        is whether a MESH POINT lies on the filament and a mesh
+			///        point is only anywhere to the precision its coordinates
+			///        are stored in. This class is MFEM-free by design -- see
+			///        the note above it -- so it cannot ask what `real_t` is,
+			///        and the caller that loops the vertices can. The default
+			///        `1e-12` is 4500 eps of a double and 0.00001 eps of a
+			///        float: under `MFEM_PRECISION = single` a vertex placed
+			///        ON a filament by construction sits one ulp off it,
+			///        `6.0e-08` away, and the refusal does not fire -- after
+			///        which `meq::filamentPsi()` throws from inside a solve
+			///        naming a field point, which is the arrival this check
+			///        exists to forestall. M-222.
+			int indexAt( double radius, double z,
+			             double tolerance = -1.0 ) const;
 
 			double coincidenceTolerance() const;
 

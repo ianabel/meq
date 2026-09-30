@@ -420,9 +420,29 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		"and a half elements, so repeated fallback is a statement about the "
 		"outer map rather than about the search." );
 
-	// ONE: IT IS A FIXED POINT, and it stops well inside an element -- a loop
-	// merely wandering within one would look converged on a coarser measure.
-	BOOST_TEST( last.step < 1.0e-8,
+	/*
+	 * ONE: IT IS A FIXED POINT, and it stops well inside an element -- a loop
+	 * merely wandering within one would look converged on a coarser measure.
+	 *
+	 * **AND AN X-POINT IS A STATIONARY POINT, SO ITS POSITION COSTS HALF THE
+	 * DIGITS.** M-220's third law: `psi` is flat at a saddle, so a perturbation
+	 * `dpsi` of round-off moves the located point by `sqrt( dpsi/|H| )` rather
+	 * than by `dpsi/|grad psi|` -- `sqrt( eps )` is 3.45e-04 in single against
+	 * 1.49e-08 in double. That is why `1.0e-08` is the right number in double
+	 * and is under the floor in single, where the loop comes to rest with the
+	 * point still moving by 1.55e-06 between sweeps.
+	 *
+	 * The claim does not change: the loop must still stop WELL INSIDE AN
+	 * ELEMENT, and h here is 5.0e-02, so a floor of 4 sqrt( eps ) on a
+	 * coordinate of 1.09 is 1.5e-03 -- a thirtieth of an element. What is given
+	 * up is the distinction between a loop that has settled to round-off and
+	 * one that has settled to a thirtieth of an element; what is kept is every
+	 * way this can fail loudly. The CONTRACTION below is untouched and is the
+	 * assertion with teeth: a loop that was not converging would not have come
+	 * down by a thousand. stationaryPositionFloor() is EXACTLY ZERO in double.
+	 */
+	BOOST_TEST( last.step < 1.0e-8
+	            + meq::tests::stationaryPositionFloor( last.radius ),
 		"the outer iteration left the X-point moving by " << last.step
 		<< " metres on its last sweep, so psi_bnd is whatever the loop happened "
 		"to stop at rather than the flux at the saddle." );
@@ -436,7 +456,17 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		"what the map looks like." );
 
 	// THREE: psi_bnd IS THE FLUX AT THE SADDLE.
-	BOOST_TEST( std::abs( last.pinResidual ) < 1.0e-10*span,
+	//
+	// AND THE SADDLE'S VALUE COSTS NOTHING WHERE ITS POSITION COSTS HALF THE
+	// DIGITS -- the other side of M-220's third law, and the reason this one
+	// needs only eps where the step above needs sqrt( eps ). The envelope
+	// argument that hides the position is what keeps the value: psi is flat
+	// there, so moving the point by sqrt( eps ) moves psi by eps. Measured in
+	// single: 1.07e-07 of the span, which is 0.9 of ONE eps, against a double
+	// bound of 1e-10. A psi_bnd read at a point that is not the saddle is wrong
+	// by O( h^2 |H| ) and nowhere near either.
+	BOOST_TEST( std::abs( last.pinResidual )
+	            < meq::tests::scalarAgreementFloor( 1.0e-10, 1.0 )*span,
 		"psi at the located saddle differs from the psi_bnd the solve returned "
 		"by " << last.pinResidual << ", which is "
 		<< std::abs( last.pinResidual )/span << " of the span. The loop has "
@@ -480,7 +510,15 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	double largest = -std::numeric_limits<double>::infinity();
 	for ( meq::CriticalPoint const &p : nulls )
 		largest = std::max( largest, p.psi );
-	BOOST_TEST( std::abs( largest - last.psiBoundary ) < 1.0e-8*span,
+	// TWO ROUTES TO THE FLUX AT ONE SADDLE -- the loop's own psi_bnd and an
+	// independent sweep of q_h -- and a saddle's VALUE costs no digits of its
+	// own, which is why eps and not sqrt( eps ) is the right floor here where
+	// the STEP above needs the other half. Measured in single: 5.36e-09 on a
+	// span, which is 1.4 eps. A loop that had settled on the WRONG null of a
+	// double-null machine is O( 1 ) of the span apart, which is what this
+	// guards and what it still catches. scalarAgreementFloor() keeps the 1e-8.
+	BOOST_TEST( std::abs( largest - last.psiBoundary )
+	            < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 )*span,
 		"the loop settled on a null carrying psi = " << last.psiBoundary
 		<< " where the field's largest off-axis saddle carries " << largest
 		<< ". The bounding surface is a MIN over candidates -- the null met "

@@ -2991,10 +2991,14 @@ namespace
 				throw std::invalid_argument( message.str() );
 			};
 
+			double const coincidence = meshCoincidenceTolerance(
+				conductors.coincidenceTolerance() );
+
 			for ( int v = 0; v < mesh.GetNV(); ++v )
 			{
 				auto const *x = mesh.GetVertex( v );
-				int const hit = conductors.indexAt( x[ 0 ], x[ 1 ] );
+				int const hit =
+					conductors.indexAt( x[ 0 ], x[ 1 ], coincidence );
 				if ( hit >= 0 )
 					refuse( "vertex", v, x[ 0 ], x[ 1 ], hit );
 			}
@@ -3008,7 +3012,7 @@ namespace
 			{
 				double const radius = ( *nodes )( nodeSpace->DofToVDof( i, 0 ) );
 				double const z = ( *nodes )( nodeSpace->DofToVDof( i, 1 ) );
-				int const hit = conductors.indexAt( radius, z );
+				int const hit = conductors.indexAt( radius, z, coincidence );
 				if ( hit >= 0 )
 					refuse( "node", i, radius, z, hit );
 			}
@@ -4424,7 +4428,8 @@ namespace
 			mesh.GetElementTransformation( e, &scratch );
 
 			mfem::IntegrationPoint reference;
-			int const verdict = scratch.TransformBack( point, reference );
+			int const verdict = scratch.TransformBack(
+				point, reference, inverseTransformTolerance() );
 			if ( verdict == mfem::InverseElementTransformation::Inside )
 			{
 				best = e;

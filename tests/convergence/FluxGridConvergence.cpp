@@ -54,6 +54,7 @@
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
 #include "meq/SurfaceAverage.hpp"
+#include "meq/Sampler.hpp"
 
 #include "analytic/FluxSurfaceReference.hpp"
 #include "analytic/Soloviev.hpp"
@@ -272,7 +273,8 @@ namespace
 
 		mfem::Array<int> marker;
 		int const inside = mfem::MarkLevelSetSubdomain( background,
-		                                                curvedLevelSet, 0.0,
+		                                                curvedLevelSet,
+		                                                meq::markingOffset( 1.0, 1.5 ),
 		                                                marker, 1 );
 		BOOST_TEST_REQUIRE( inside > 0, "the subdomain is empty at n = " << n );
 

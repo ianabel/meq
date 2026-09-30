@@ -363,6 +363,33 @@ namespace tests
 #endif
 	}
 
+	/**
+	 * Whether the CEILING on an observed Newton order can be read.
+	 *
+	 * **THE FLOOR AND THE CEILING ON ONE NUMBER FAIL IN OPPOSITE DIRECTIONS AND
+	 * ONLY ONE OF THEM SURVIVES A NARROW FORMAT.** The floor -- *this is at
+	 * least superlinear* -- is a statement about the Jacobian and holds at any
+	 * precision, because an inexact Jacobian contracts linearly whatever the
+	 * arithmetic. The ceiling -- *this is a rate at all, rather than a short or
+	 * non-monotone history read as one* -- is a statement about the FIT, and
+	 * an order fitted through a last residual that is sitting on the floor is
+	 * the floor's arithmetic rather than Newton's. It is unbounded above:
+	 * measured **6.15** on `XPointBorder`'s bootstrap in single, where the
+	 * double build reads inside its own band.
+	 *
+	 * So the ceiling is skipped and the floor is not, which leaves the
+	 * assertion that has teeth in place. `#ifdef`'d, so the double build asks
+	 * both questions exactly as it did. M-222.
+	 */
+	inline bool newtonOrderCeilingIsMeasurable()
+	{
+#ifdef MFEM_USE_SINGLE
+		return false;
+#else
+		return true;
+#endif
+	}
+
 	/// What such a caller prints when it skips.
 	inline std::string newtonOrderNotice()
 	{
@@ -763,6 +790,186 @@ namespace tests
 		return 64.0*std::abs( norm )
 		       *static_cast<double>(
 			       std::numeric_limits<mfem::real_t>::epsilon() )/h;
+	}
+
+	/**
+	 * Whether an adaptive loop's estimator can still be asked to DESCEND.
+	 *
+	 * **PAST THE CROSSING, REFINING RAISES THE ERROR, AND THAT IS THE
+	 * ESTIMATOR REPORTING WHAT THE ARITHMETIC GIVES IT RATHER THAN THE
+	 * ESTIMATOR FAILING.** [[residualEstimatorFloor]] is the quantity: `eta`
+	 * differentiates, so its floor goes as `eps/h` and RISES as the mesh falls,
+	 * while the truncation falls as `h^(k+1)`. The two cross, and an adaptive
+	 * loop past that point is steering on round-off -- neither `eta` nor the
+	 * true error is monotone, and the marker spends its budget wherever the
+	 * conditioning is worst.
+	 *
+	 * Measured on `DriverAcceptance`'s coupled half-disc, four cycles from
+	 * `n_R = 32` on a box of 1.7, in single:
+	 *
+	 *     4.46e-03   1.08e-02   2.68e-02   7.29e-02
+	 *
+	 * -- a factor of about 2.4 a cycle, against the 2 that halving `h` adds to
+	 * `eps/h`. The same loop in double comes down over the same cycles.
+	 *
+	 * **`#ifdef`'d RATHER THAN COMPARED AGAINST A FLOOR, AND THAT IS THE
+	 * HONEST FORM HERE.** A caller cannot evaluate `residualEstimatorFloor()`
+	 * at the right `h`: the loop refines ADAPTIVELY, so the mesh that sets the
+	 * floor at cycle 3 is a handful of elements several bisections below
+	 * anything the configuration names, and the coarsest `h` gives a floor four
+	 * times too small. Pretending to a threshold that is computed from the
+	 * wrong `h` is worse than a skip that says what it is.
+	 *
+	 * **WHAT IS SKIPPED IS THE DESCENT ALONE.** That the loop refined, that it
+	 * refined adaptively rather than uniformly, and that whatever the case
+	 * couples to survived it are all separate assertions and all still run --
+	 * and the defect this particular descent was written against, a spurious
+	 * `eta_5` term on the coupled path, is one this format cannot tell from its
+	 * own floor. M-219's third distinction: a controlled experiment whose
+	 * signal is below the floor is a double-build acceptance, not a tolerance
+	 * to widen. M-220, M-222.
+	 */
+	inline bool estimatorDescentIsMeasurable()
+	{
+#ifdef MFEM_USE_SINGLE
+		return false;
+#else
+		return true;
+#endif
+	}
+
+	/**
+	 * How far an answer may sit from a known root, given the residual the
+	 * solver actually STOPPED at.
+	 *
+	 * **THE SIBLING OF [[achievedToleranceFloor]] WITH THE REQUESTED NUMBER
+	 * REPLACED BY THE ACHIEVED ONE, AND THE DIFFERENCE MATTERS WHENEVER A
+	 * SOLVER CAN STOP FOR A SECOND REASON.** That one says a solver cannot beat
+	 * the tolerance it was given. This one is needed where it did not MEET that
+	 * tolerance and returned anyway: KINSOL stops on a step that has become too
+	 * small exactly as readily as on a function norm that has become small
+	 * enough, reports `converged` for both, and the two are told apart only by
+	 * the norm it came to rest at.
+	 *
+	 * Measured on `SafetyFactorSolver`'s closed-form case, whose map is one
+	 * whole equilibrium solve and a flux-surface extraction. Asked for `1e-09`
+	 * in both builds:
+	 *
+	 *     double   final norm 3.68e-06   recovered g within 1e-04
+	 *     single   final norm 3.71e-03   recovered g out by 7.0e-03
+	 *
+	 * -- and `7.0e-03` is `1.9` times that residual, which is the outer
+	 * Jacobian's own conditioning working on it. **The single figure is not a
+	 * tolerance to be relaxed and is not KINSOL's**: a safety factor is a
+	 * flux-surface average, whose floor rises as `eps/h^2` (M-220), so at
+	 * `h = 1/24` the map's own evaluation noise is `6.9e-05` before the fit
+	 * amplifies it. Nothing downstream of that map can be asked for more.
+	 *
+	 * The constant is **8**, which clears the measured 1.9 by four. It
+	 * `std::max`es against the caller's own value as everything here does, and
+	 * in double that is what it picks: `8 x 3.68e-06` is `2.9e-05` against a
+	 * bound of `1e-04`, so the double assertion is unchanged with a margin of
+	 * 3.4 -- stated rather than assumed, because unlike an `eps` expression
+	 * this one is inert in double by MEASUREMENT and not by construction. If a
+	 * double run ever comes to rest above `1.3e-05` this bound starts to give,
+	 * and that would itself be the finding. M-222.
+	 */
+	inline double achievedResidualFloor( double historical, double finalResidual )
+	{
+		return std::max( historical, 8.0*std::abs( finalResidual ) );
+	}
+
+	/**
+	 * How far a bordered CONSTRAINT may sit from the value it prescribes, given
+	 * the residual the bordered Newton came to rest at.
+	 *
+	 * **A BORDER ROW IS ONE ENTRY OF A RESIDUAL AND THE CONSTRAINT IT CARRIES
+	 * IS THAT ENTRY WORKED ON BY THE BORDERED JACOBIAN'S CONDITIONING**, so
+	 * neither the tolerance ([[achievedToleranceFloor]]) nor the residual
+	 * ([[achievedResidualFloor]]) is the whole of it. Measured on
+	 * `FreeBoundaryCoupling`'s two-border machine in single, seven rows of one
+	 * table, prescribing `mu0 I_p = 0.12`:
+	 *
+	 *     R_lim  coils   delivered - 0.12    ||r||      ratio
+	 *     1.08   yes         1.271e-05     3.258e-07      39
+	 *     1.10   yes         9.434e-05     6.330e-07     149
+	 *     1.10   NO          1.097e-05     1.635e-07      67
+	 *     1.12   yes         8.672e-05     1.778e-07     488
+	 *     1.12   NO          1.021e-06     8.338e-08      12
+	 *     1.15   yes         1.690e-06     1.356e-08     125
+	 *     1.18   yes         2.405e-06     1.118e-08     215
+	 *
+	 * -- a ratio between 12 and 488, which is the conditioning and is a
+	 * property of the geometry rather than of the format. The constant is
+	 * **4096**, clearing the worst row by 8.4.
+	 *
+	 * **`#ifdef`'d RATHER THAN `std::max`'d, AND THAT IS NOT STYLE.** The
+	 * double build reaches `||r|| <= 7.7e-11` on these rows -- `1e-09` relative
+	 * against a reference of 0.077 -- and `4096` of that is `3.2e-07` against a
+	 * historical bound of `1.2e-06`. It would not loosen today, and it would be
+	 * within a factor of four of doing so, which is not a margin to leave a
+	 * bound standing on. A floor is owed only to a format that has one. M-222.
+	 */
+	inline double borderedConstraintFloor( double historical,
+	                                       double finalResidual )
+	{
+#ifdef MFEM_USE_SINGLE
+		return std::max( historical, 4096.0*std::abs( finalResidual ) );
+#else
+		( void ) finalResidual;
+		return historical;
+#endif
+	}
+
+	/**
+	 * How far two positions ROOTED on one level set may sit apart, on a field
+	 * whose coordinates are of size @a scale.
+	 *
+	 * **THE SIBLING OF [[tracedPositionFloor]] WITH THE MESH TAKEN OUT, AND
+	 * THE DIFFERENCE IS WHICH QUESTION WAS ASKED OF THE FIELD.** That one is a
+	 * position obtained by DIFFERENCING -- a corrector step is
+	 * `( psi_h - c )/| grad psi_h |`, whose denominator the mesh resolves to
+	 * `eps/h`, so the distance carries `1/h`. This one is the gap between two
+	 * points that are each already ON the level set: the implicit function
+	 * theorem moves a root by `dpsi/| grad psi |`, and BOTH factors carry the
+	 * field's own size, so what survives is `eps` times the length over which
+	 * the field varies and `h` does not appear at all.
+	 *
+	 * Measured on `thePointErrorDoesNotAccumulateOverManyCircuits` in single,
+	 * where the closure gap's normal component is exactly such a pair: **1.00e-07,
+	 * 7.39e-07 and 6.42e-07** over 1, 5 and 10 circuits of a contour whose
+	 * coordinates are `R = 1.05`, which is 0.8 to 6.2 `eps` of that scale --
+	 * and FLAT in the path length, which is the property the case exists to
+	 * assert and which survives the format intact. The bound it is added to is
+	 * the curve's own bending over the tangential gap, `kappa g_t^2`, which is
+	 * 7.5e-11 there: a geometric bound with no arithmetic in it, three orders
+	 * under a floor the format cannot go below.
+	 *
+	 * **AND THE SAME NUMBER FALLS OUT OF A SECOND TABLE**, which is why the
+	 * constant is 64 rather than the 6 the closure gap alone would set.
+	 * `theOutermostSurfaceIsTracedEntirelyInTheBand` traces Gamma itself and
+	 * measures its distance from the exact Gamma; the transfer lift's column
+	 * settles at **4.73e-06 at k = 2 and 5.88e-06 at k = 3** -- the same number
+	 * at two degrees, which is what says it is the format and not the method --
+	 * and that is 40 to 50 `eps`. 64 admits every reading either table still
+	 * calls a measurement and turns down both floored ones.
+	 *
+	 * **EXACTLY ZERO IN DOUBLE**, as [[stationaryPositionFloor]] is, rather
+	 * than a small number: one caller adds it to an additive term of `1e-14`,
+	 * and `64 eps` of a double is `1.4e-14`, so it would loosen by half an
+	 * order the one bound the measurement is real under. A floor is owed only
+	 * to a format that has one. M-222.
+	 */
+	inline double rootedPositionFloor( double scale )
+	{
+#ifdef MFEM_USE_SINGLE
+		return 64.0*std::abs( scale )
+		       *static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() );
+#else
+		( void ) scale;
+		return 0.0;
+#endif
 	}
 
 	/// The message a caller prints when [[rateIsMeasurable]] refuses, so that the

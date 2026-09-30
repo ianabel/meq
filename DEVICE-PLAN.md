@@ -1767,6 +1767,26 @@ in the wrong place cannot weaken the double build — and the double control,
 62/63 at every step, says so. The risk this section named is closed by
 construction rather than by attention.
 
+**AND IT IS NOW DONE: THE SINGLE SUITE IS 1 RED OF 63 AND IT IS THE STANDING
+DELIBERATE ONE** → **[M-222](MEASUREMENTS.md#m-222)**, with the double control
+at 62/63 throughout. **What the last stretch cost was not tolerances**, which is
+the finding this section did not predict: the largest item was
+`ElementTransformation::TransformBack`'s default argument sitting at **0.84 of
+one `float` epsilon**, so the inverse map returned `Unknown` for the element a
+point was actually in and MEQ's element walk fell back on an `O(elements)` scan
+108, 240 and 95 times over three surfaces. The rest was `mfem::VertexConePath`
+differencing a displacement below one ulp, and **four cases of M-186's coin
+toss** — measured with `MKL_NUM_THREADS` rather than inferred, and every one
+repaired by relaxing a PRECONDITION rather than a tolerance.
+
+Three laws join the four above, each a sibling of one of them: *a position
+obtained by ROOTING carries `eps` where one obtained by DIFFERENCING carries
+`eps/h`*; *an answer is worth the residual the solver STOPPED at, which is not
+the one it was asked for*, since KINSOL rests on a step tolerance as readily as
+on a function norm and reports `converged` for both; and *the floor and the
+ceiling on one Newton order fail in opposite directions*, the floor being a
+statement about the Jacobian and the ceiling about the fit.
+
 **WHAT REMAINS IS THE SWEEP THIS SECTION DESCRIBES, AND IT IS NOW SIZED.**
 Class C is eight rate assertions, all at `k = 2` and the finest `h`, which is
 exactly the flattened tail described below. Class D is 25, of which several are

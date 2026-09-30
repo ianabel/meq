@@ -12726,3 +12726,205 @@ against 1.200930. Five parts in ten million, against the **factor of two**
 its whole content to none, on those three causes plus the agreement floors of
 [M-220](#m-220) applied to the borders the driver reports. The double build is
 unchanged throughout.
+
+### M-222
+
+**THE SINGLE-PRECISION SUITE IS AT PARITY WITH THE DOUBLE ONE: 62 OF 63 IN
+BOTH, AND IT IS THE SAME TEST RED IN EACH** — `PlasmaEdgeConvergence`, which is
+the standing deliberate red while the staircase `Γ_{p,h}` stands. Against
+[M-221](#m-221)'s 11 red of 63 and [M-217](#m-217)'s 44.
+
+| | red of 63 | distinct cases |
+|---|---|---|
+| [M-217](#m-217) first run | 44 | — |
+| [M-218](#m-218) at install parity | 40 | 157 |
+| [M-219](#m-219) | 29 | 125 |
+| [M-220](#m-220) | 12 | 61 |
+| [M-221](#m-221) | 11 | 52 |
+| **here** | **1** | **the deliberate one** |
+
+**AND THE DOUBLE CONTROL IS 62/63 AT EVERY STEP OF IT**, which is what the
+`std::max` and `#ifdef` construction is for: a guard applied in the wrong place
+cannot weaken the double build, so the sweep is safe by construction rather
+than by attention.
+
+**THE LARGEST REMAINING SINGLE-PRECISION FAILURE WAS NOT A TOLERANCE AND NOT
+MEQ'S: `ElementTransformation::TransformBack`'s DEFAULT ARGUMENT IS 0.84 OF ONE
+`float` EPSILON.** [M-221](#m-221) left the suite at 11 red of 63 and said what
+remained was the solver. Most of it was one line of somebody else's header.
+
+`fem/eltrans.hpp:62` carries `tol_0 = 1e-15` in double and **`1e-7` in single**,
+and `IsoparametricTransformation::TransformBack` takes it as the default for
+`phys_rel_tol`. Against `eps = 1.1920929e-07` that is **0.84 of one ulp**. The
+double value is 4.5 eps and is reachable; the single value is not. The constant
+was scaled by the ratio of the two formats' decimal digits — eight orders —
+where what it has to clear is the ratio of their epsilons, 1.86e+09.
+
+**AND IT IS TIGHTER THAN THE CLASS IT CONFIGURES**, which is what makes the
+repair obvious: `InverseElementTransformation`'s own constructor carries
+`phys_rtol( 4e-15 )` in double and `phys_rtol( 1e-6 )` in single, so a caller
+who constructs the object gets 8.4 eps and a caller who goes through
+`TransformBack()` gets 0.84.
+
+**IT IS A WRONG VERDICT AND NOT A LOST DIGIT, BECAUSE `NewtonSolve()` HAS NO
+OTHER EXIT.** For a straight-sided triangle — the whole of MEQ's meshes — the
+map is affine and its inverse is one exact Newton step, and both exits are then
+unreachable in single:
+
+| exit | asks for | what an affine triangle leaves |
+|---|---|---|
+| `err_phys < phys_rtol*\|pt\|` | `0.84 eps*\|pt\|` | round-off, `eps*\|pt\|` |
+| `dx_norm < ref_tol` | `4e-7` | `eps*\|pt\|/h`, which exceeds it for every `h` below **0.31** |
+
+So the solve runs to `max_iter` and returns **`Unknown`** — the third answer,
+which a caller testing `== Inside` reads as *not this element* for the element
+the point is in.
+
+**MEASURED, AND THE INSTRUMENT IS A COUNT RATHER THAN A CLOCK.** MEQ's
+`ContourTracer` walks the mesh element by element and falls back on the
+`O(elements)` `Mesh::FindPoints` when the walk fails;
+`Contour::fallbackLocations` is asserted to be zero because a trace that needs
+the scan is quadratic in the mesh. Three surfaces of one Solov'ev fixture at
+`k = 2, n = 24`:
+
+| `Psi_N` | double | single, `tol_0` | single, `phys_rtol = 1e-6` |
+|---|---|---|---|
+| 0.05 | 0 | **108** | 0 |
+| 0.40 | 0 | **240** | 0 |
+| 0.80 | 0 | **95** | 0 |
+
+Essentially every location fell through the whole walk. **The trace still
+closed**, because `FindPoints` finds the point — which is what made this a cost
+rather than a failure and is why nothing but a count could see it.
+
+**AND TWO BAND MEASUREMENTS WERE WRONG RATHER THAN SLOW.** MEQ flags a traced
+point as outside the mesh by that same walk, so a point the walk could not place
+was flagged extended while `Mesh::FindPoints` put it inside — 2 and 3 points of
+one contour and 1 node of an angle parametrisation. **The deepest band excursion
+the fixture reports moved from 2.027 h to 0.628 h** on the same mesh with only
+this tolerance changed, so the band's own geometry was being read off failed
+inversions.
+
+`meq::inverseTransformTolerance()` is the repair, at MEQ's five verdict-consuming
+call sites: `1e-15` in double, so every double call is bit-for-bit the call it
+always was, and `1e-6` in single — upstream's own class default. It is
+`meq::samplerInsideTolerance()`'s sibling with **the sign of the finding
+reversed**: there upstream already scaled `ip_tol` and MEQ's own floor was six
+times tighter than it, so the answer was to copy upstream's pair; here
+upstream's `TransformBack` default is the thing that does not survive the
+format, and copying it is what must not be done. Reported as
+`HDG-TRANSFORMBACK-SINGLE-TOLERANCE-FROM-MEQ.md`.
+
+**AND IT EXPLAINS A RESULT THIS PROJECT HAD ALREADY RECORDED AND MISATTRIBUTED.**
+`PointLocator.cpp` carries a note that under `MFEM_PRECISION = single` the
+default `TransformBack` lost **458 of 25616** warm-start nodes where the double
+build lost none, and that retrying through a constructed
+`InverseElementTransformation` with `ClosestPhysNode` recovered them. The retry
+was credited to the better initial guess. It is not: constructing the object is
+what buys `phys_rtol = 1e-6` instead of `1e-7`, and that alone is the cure.
+*A fix that works is not an explanation of why.*
+
+**A SECOND MFEM DEFECT OF THE SAME FAMILY IS A DISPLACEMENT BELOW ONE ULP.**
+`mfem::VertexConePath` builds the transfer direction at a vertex of `Gamma_h` by
+shooting a fan, averaging the nearest endpoints on `Gamma` and **differencing
+that mean from the vertex**. A vertex that lies ON `Gamma` has every endpoint at
+distance zero — so in single the endpoints round to the vertex itself, the
+difference is the zero vector, `len <= 0` sends all three widening passes to
+`continue`, and the constructor aborts with *"no ray from the vertex ... reaches
+Gamma"*. Measured on `FreeBoundaryCoupling`'s circle of radius 0.40 about
+`R = 1.10`: the Cartesian grid puts a vertex at `( 1.1, -0.4 )`, the circle's own
+lowest point, at `phi = -2.4e-08`. **The same vertex is on `Gamma` in double
+too**, and the same arithmetic works there, because a bisected crossing at
+`6e-14` is still a representable displacement from a coordinate of 1.1 — a
+double's ulp there is 2.2e-16 and a float's is 1.2e-07.
+
+**`meq::markingOffset()` IS MEQ'S HALF, AND IT CLOSES A SECOND SYMPTOM NOBODY
+HAD CONNECTED TO THE FIRST.** `mfem::MarkLevelSetSubdomain()` keeps an element
+when `phi <= -offset` at every vertex and refined point, and every call site in
+this tree passed `offset = 0` — so the set the marking decides on is exactly the
+set round-off cannot decide. Besides the abort above, `DriverAcceptance` marks
+one shape twice, once through the driver and once by hand, and read **451
+elements against 450**: two routes building a background through different
+arithmetic, which is nothing until an element straddles. The offset is exactly
+zero in double, so `D_h` is the set it has always been.
+
+**AND THE SECOND HALF OF WHAT WAS LEFT IS M-186'S COIN TOSS, ON FOUR MORE
+CASES — MEASURED WITH M-186'S OWN INSTRUMENT AND NOT INFERRED FROM THE
+FAILURE.** `MKL_NUM_THREADS` reassociates a blocked BLAS-3 and changes nothing
+else, so the same binary run at 1, 2 and 4 separates a knife edge from a
+regression. `tests/CMakeLists.txt` pins it at 1, which is the only value ctest
+ever runs, and **that is one draw**:
+
+| case | MKL = 1 | MKL = 2 | MKL = 4 | MKL = 8 | double |
+|---|---|---|---|---|---|
+| `pedestalSelfConverges`, `k = 1, h = 1/30` | **fails at the 60 cap** | converges | converges | — | converges |
+| `fixed-h-circular` through the driver | **exits 2** | solves | solves | solves | solves |
+| `PlasmaConnectivity`'s confined half | **fails at 60** | **fails at 60** | converges in 11 | — | converges in 10 |
+| `XPointBorder` merit weight 4 | **195 iterations, other basin** | over the cap, skipped | — | — | converges |
+
+**THE MERIT-WEIGHT ROW IS THE ONE THAT TAUGHT SOMETHING NEW, AND IT IS ABOUT
+THE PRECONDITION RATHER THAN THE PLATEAU.** That case had skipped a weight
+whose solve *did not finish*, which is how the plateau had always shown. At
+`MKL = 1` in single, weight 4 finishes — in **195 bootstrap iterations against
+the other three weights' 11** — and comes to rest in a NEIGHBOURING BASIN, at
+`psi_ax = 8.0524e-02` and `X = ( 1.0822, -0.5973 )` against `8.2660e-02` and
+`( 1.0931, -0.6035 )`. It reports `converged`. At `MKL = 2` the same weight runs
+past the cap, is skipped by the precondition as written, and the case passes.
+
+So *a run that converges is not a run that converged to your fixed point*, and
+the discriminator is the **work**: eighteen times the reference weight's
+iterations is not the same descent. The precondition now skips on that too, and
+the separation is a factor of eighteen rather than a judgement.
+
+**EVERY ONE OF THESE FOUR IS REPAIRED BY RELAXING A PRECONDITION AND NONE BY
+RELAXING A TOLERANCE**, which is the distinction *Testing stance* turns on and
+the same repair M-186 and `pedestalConvergenceIsAResolutionThreshold` already
+made. Two of them are skipped **by name** — `fixed-h-circular` alone, and only
+in single — so any other machine that fails still fails and a second one joining
+it on the plateau would have to be measured and added rather than absorbed.
+
+**AND WHERE THEY LAND THEY LAND ON THE RIGHT ANSWER**, which is what says the
+plateau is about the route and not about the format: `PlasmaConnectivity`'s
+confined solve reads `psi_ax = 1.778463e-01` in single at `MKL = 4` against
+double's `1.778464e-01`, and every merit weight that descends reports `psi_ax`
+to eight digits.
+
+**THE LAWS THIS SESSION ADDS TO M-220'S FOUR ARE THREE, AND EACH IS A SIBLING
+OF ONE ALREADY THERE.**
+
+*A POSITION OBTAINED BY ROOTING CARRIES `eps`, WHERE ONE OBTAINED BY
+DIFFERENCING CARRIES `eps/h`.* M-220's fourth law is about differentiated
+quantities; the implicit function theorem moves a root by `dpsi/|grad psi|`, and
+both factors carry the field's own size, so the mesh does not appear at all.
+Measured twice: a contour's closure gap over 1, 5 and 10 circuits reads
+**1.00e-07, 7.39e-07, 6.42e-07** on coordinates of 1.05, and the traced `Gamma`
+settles at **4.73e-06 at k = 2 and 5.88e-06 at k = 3** — the same number at two
+degrees, which is what says it is the format. 40 to 50 `eps` either way.
+
+*AN ANSWER IS WORTH THE RESIDUAL THE SOLVER STOPPED AT, WHICH IS NOT THE ONE IT
+WAS ASKED FOR.* M-220's first law says a solver cannot beat the tolerance it was
+given; this is needed where it did not MEET that tolerance and returned anyway.
+KINSOL stops on a step that has become too small exactly as readily as on a
+function norm that has become small enough and reports `converged` for both.
+`SafetyFactorSolver`'s closed-form case, asked for `1e-09` in both builds:
+
+| | final norm | recovered `g` |
+|---|---|---|
+| double | 3.68e-06 | within 1e-04 |
+| single | **3.71e-03** | out by **7.0e-03** |
+
+— a factor of 1.9, which is the outer Jacobian's conditioning. And the single
+figure is not KINSOL's: `q` is a flux-surface average, so the MAP's own
+evaluation noise is `eps/h^2`, **6.9e-05** at that mesh, before the fit to the
+coefficients of `g^2` amplifies it by a factor the two builds agree on — 106 in
+double and 330 in single.
+
+*THE FLOOR AND THE CEILING ON ONE NUMBER FAIL IN OPPOSITE DIRECTIONS.* An
+observed Newton order has both asserted on it. The floor — *this is at least
+superlinear* — is a statement about the Jacobian and survives any precision,
+because an inexact Jacobian contracts linearly whatever the arithmetic. The
+ceiling — *this is a rate at all rather than a short history read as one* — is a
+statement about the FIT, and an order fitted through a last residual sitting on
+the floor is unbounded above: **6.15** on `XPointBorder`'s bootstrap. So the
+ceiling is skipped and the floor is not, which leaves the assertion that has
+teeth.

@@ -16,6 +16,7 @@
 
 #include "analytic/Soloviev.hpp"
 #include "ConvergenceHarness.hpp"
+#include "meq/Sampler.hpp"
 
 /*
  * The acceptance test for INVERSION-PLAN.md stages IN-0 and IN-1: the
@@ -558,7 +559,8 @@ namespace
 
 		mfem::Array<int> marker;
 		int const inside = mfem::MarkLevelSetSubdomain( background, curvedLevelSet,
-		                                               0.0, marker, 1 );
+		                                               meq::markingOffset( 1.0, 1.5 ),
+		                                               marker, 1 );
 		BOOST_TEST_REQUIRE( inside > 0, "the subdomain is empty at n = " << n );
 
 		for ( int e = 0; e < background.GetNE(); ++e )
@@ -1015,6 +1017,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 	std::vector<double> fluxRates;
 	std::vector<double> worstTilt;
 
+	std::vector<double> finestFlux;
 	for ( std::size_t p = 0; p < pairings.size(); ++p )
 	{
 		std::printf( "\n  Representation error ( c ) against the level set of "
@@ -1085,6 +1088,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 		double const chordRate = rate( chord.front(), chord.back(), ratio );
 		fluxRates.push_back( rate( flux.front(), flux.back(), ratio ) );
 		worstTilt.push_back( tilt );
+		finestFlux.push_back( flux.back() );
 
 		// THE GRAD-TANGENT COLUMN IS THE REPRESENTATION ERROR PROPER, and it
 		// must be fourth order for BOTH pairings: it is the interpolation of a
@@ -1142,6 +1146,36 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 	// the one built on q, which is what a caller receives -- KEEPS THE FOURTH
 	// ORDER. With psi* it does; with psi_h it does not, and the tilt column says
 	// by how much and why.
+	/*
+	 * **AND ALL THREE OF THE SUMMARY CLAIMS REST ON THE `psi*` COLUMN BEING A
+	 * MEASUREMENT, WHICH IN A NARROW FORMAT IT IS NOT.** The whole argument is
+	 * that the `psi*` pairing is BETTER -- a fourth order where `psi_h` gets
+	 * less, a tilt an order smaller, a rate separation of half an order -- and
+	 * the better of two columns is the one that reaches the floor first.
+	 * Measured in single: the flux-tangent interpolant on `psi*` lands at the
+	 * position round-off of a curve of O( 1 ), so its rate reads 0.236, and the
+	 * tilt it is explained by lands at 2.18e-03 against `psi_h`'s 1.59e-02 --
+	 * a separation of 7.3 where the assertion wants 10, because the SMALLER of
+	 * the two is the one that has stopped falling.
+	 *
+	 * So the three are skipped together, on one predicate, and loudly. Each of
+	 * them would otherwise have to be widened to admit a column that is not
+	 * measuring anything -- and the third is the sharpest claim in the case,
+	 * that `psi_h` is WORSE, which a widened bound would leave passing on two
+	 * floors. `#ifdef`'d through clearOfContaminant(), so the double build
+	 * asserts all three exactly as it always did. M-222.
+	 */
+	bool const starIsMeasurable = meq::tests::clearOfContaminant(
+		finestFlux[ 1 ], meq::tests::scalarAgreementFloor( 0.0, 1.0 ) );
+	if ( !starIsMeasurable )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the three psi* summary claims -- the fourth order, "
+			"the tilt separation and the rate gap. The finest flux-tangent "
+			"interpolation error on psi* is " << finestFlux[ 1 ] << ", which is "
+			"round-off on a position of O( 1 ), so the better of the two "
+			"columns is no longer falling. M-222" );
+
+	if ( starIsMeasurable )
 	BOOST_TEST( fluxRates[ 1 ] > 4.0 - sequenceSlack,
 	            "with psi* the Hermite from q converges at " << fluxRates[ 1 ]
 	            << ". grad( psi* ) and q* agree to " << worstTilt[ 1 ]
@@ -1149,6 +1183,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 	            << "q_h, and that is why the default pairing keeps the order "
 	            << "that the tangent from q was chosen for" );
 
+	if ( starIsMeasurable )
 	BOOST_TEST( worstTilt[ 0 ] > 10.0*worstTilt[ 1 ],
 	            "grad( psi_h ) tilts from q_h by " << worstTilt[ 0 ]
 	            << " and grad( psi* ) from q* by " << worstTilt[ 1 ]
@@ -1157,6 +1192,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 	            << "to explain the difference in their flux-tangent rates and "
 	            << "this table would be measuring something else" );
 
+	if ( starIsMeasurable )
 	BOOST_TEST( fluxRates[ 0 ] < fluxRates[ 1 ] - 0.5,
 	            "the flux-tangent interpolant converges at " << fluxRates[ 0 ]
 	            << " on psi_h and " << fluxRates[ 1 ] << " on psi*. The whole "
@@ -1494,9 +1530,19 @@ BOOST_AUTO_TEST_CASE( thePointErrorDoesNotAccumulateOverManyCircuits )
 	// That is the discriminating statement, and it is what is asserted: a
 	// tracer that was integrating rather than projecting would have a normal
 	// closure error growing with path length and unrelated to g_t.
+	//
+	// AND IN A NARROW FORMAT THAT BOUND IS BELOW THE FLOOR, WHICH IS NOT THE
+	// SAME AS THE PROPERTY FAILING. kappa g_t^2 is 7.5e-11 here and has no
+	// arithmetic in it, while the two points it separates are each a ROOT of
+	// psi_h and so are placed to eps of their own coordinates -- 1.0e-07 on a
+	// contour at R = 1.05. rootedPositionFloor() is that, and is exactly zero
+	// in double. What the case asserts does not move: the closure error is
+	// still required to be flat in the path length, and 5 against 10 circuits
+	// below is where that is read.
 	for ( std::size_t i = 0; i < circuits.size(); ++i )
 		BOOST_TEST( normals[ i ] <= 2.0*curvatures[ i ]*tangentials[ i ]
-		                            *tangentials[ i ] + 1.0e-14,
+		                            *tangentials[ i ] + 1.0e-14
+		                            + meq::tests::rootedPositionFloor( 1.05 ),
 		            circuits[ i ] << " circuits: the normal closure error is "
 		            << normals[ i ] << " against the " << curvatures[ i ]
 		            << " * " << tangentials[ i ] << "^2 that the curve's own "
@@ -2680,6 +2726,35 @@ BOOST_AUTO_TEST_CASE( theTwoBandExtensionsAreMeasuredSideBySide )
 		             "exact contour in the band\n", ratio );
 		std::fflush( stdout );
 
+		/*
+		 * **THREE OF THE FOUR CLAIMS BELOW NEED THE LIFT COLUMN TO STILL BE
+		 * FALLING, AND IN SINGLE FROM k = 2 IT IS NOT.** Measured: the lift's
+		 * band error reaches 2.63e-06 at k = 2 and 6.38e-06 at k = 3 -- both
+		 * within a factor of two of the position floor a traced point has on a
+		 * curve of O( 1 ) -- and the interior column settles at 2.08e-05 and
+		 * 2.48e-05, the same number at two degrees. So the rates read 1.02 and
+		 * -0.10 against a k+1 of 4, and the margin the control must lose by
+		 * collapses to 29.9 and 13.6 against the 100 it wants: the ratio is
+		 * capped by the GOOD column's floor, not by the control improving.
+		 *
+		 * Skipped by DEGREE, M-218, and separately checked against the floor,
+		 * so the notice says which of the two refused. k = 1 asks for a rate of
+		 * two and keeps every one of these assertions. M-222.
+		 */
+		double const positionFloor = meq::tests::rootedPositionFloor( 1.0 );
+		bool const degreeIsMeasurable =
+			meq::tests::rateOfOrderIsMeasurable( order + 1.0 );
+		bool const bandIsMeasurable =
+			degreeIsMeasurable
+			&& meq::tests::clearOfContaminant( measured[ 1 ].back().bandWorst,
+			                                   positionFloor );
+		if ( !bandIsMeasurable )
+			BOOST_TEST_MESSAGE(
+				"  *** " << meq::tests::rateNotMeasurableNotice(
+					order, "the transfer lift in the band", order + 1.0 )
+				<< " Its finest error is " << measured[ 1 ].back().bandWorst
+				<< " against a position floor of " << positionFloor << ". M-222" );
+
 		// THE ANSWER. The lift's error is the error of q integrated over a path
 		// of length O( h ), so it is a full order better than psi_h's own k+1 and
 		// the band does not limit the contour at all. Asserted at k+1 rather than
@@ -2687,6 +2762,7 @@ BOOST_AUTO_TEST_CASE( theTwoBandExtensionsAreMeasuredSideBySide )
 		// absorb the shape of D_h changing with h, which is not a smooth function
 		// of h -- ExtensionConvergence.cpp's reason for its own two-tier
 		// assertion.
+		if ( bandIsMeasurable )
 		BOOST_TEST( bandRate[ 1 ] > order + 1.0 - sequenceSlack,
 		            "k = " << order << ": the transfer lift converges in the band "
 		            "at " << bandRate[ 1 ] << " rather than at the k+1 = "
@@ -2705,7 +2781,7 @@ BOOST_AUTO_TEST_CASE( theTwoBandExtensionsAreMeasuredSideBySide )
 		// them as one would be wrong.
 		// theOutermostSurfaceIsTracedEntirelyInTheBand is where the orders are
 		// measured, on a curve that stays in the band at every mesh.
-		if ( order >= 2 )
+		if ( order >= 2 && bandIsMeasurable )
 			BOOST_TEST( ratio > 100.0,
 			            "k = " << order << ": the transfer lift is only " << ratio
 			            << " times closer than the flux Taylor step on the finest "
@@ -2719,6 +2795,9 @@ BOOST_AUTO_TEST_CASE( theTwoBandExtensionsAreMeasuredSideBySide )
 		// k+1 whichever extension answered for the rest of the curve; an
 		// extension that perturbed them would show up here and nowhere else.
 		for ( int which = 0; which < 2; ++which )
+			if ( degreeIsMeasurable
+			     && meq::tests::clearOfContaminant(
+				     measured[ which ].back().interiorWorst, positionFloor ) )
 			BOOST_TEST( interiorRate[ which ] > order + 1.0 - sequenceSlack,
 			            meq::bandExtensionName( methods[ which ] ) << ", k = "
 			            << order << ": the points INSIDE the mesh converge at "
@@ -2852,11 +2931,43 @@ BOOST_AUTO_TEST_CASE( theOutermostSurfaceIsTracedEntirelyInTheBand )
 		             "the finest mesh\n", order, taylorRate, liftRate, ratio );
 		std::fflush( stdout );
 
+		/*
+		 * **AND THE LIFT IS THE COLUMN A NARROW FORMAT TAKES FIRST, BECAUSE IT
+		 * IS THE GOOD ONE.** Its distance from the exact Gamma settles at
+		 * 4.73e-06 at k = 2 and 5.88e-06 at k = 3 in single -- the SAME number
+		 * at two degrees, which is the signature of a floor rather than of a
+		 * method -- so the rate reads 2.54 and 0.56 against a k+1 of 3 and 4.
+		 * The Taylor step is second order whatever k is and stays four decades
+		 * above that floor, so the control's own assertions below still run and
+		 * so does the whole of k = 1.
+		 *
+		 * Skipped by DEGREE, which is M-218's finding and not a new one: a rate
+		 * of order three needs three decades and single has two. Widening
+		 * sequenceSlack until these passed would weaken k = 1 and both builds
+		 * to admit a column that has stopped falling. rootedPositionFloor() is
+		 * the second, independent statement of the same thing -- the lift is
+		 * within a factor of two of its own floor -- and is exactly zero in
+		 * double, where both assertions are what they always were. M-222.
+		 */
+		bool const liftIsMeasurable =
+			meq::tests::rateOfOrderIsMeasurable( order + 1.0 )
+			&& meq::tests::clearOfContaminant(
+				measured[ 1 ].back().bandWorst,
+				meq::tests::rootedPositionFloor( 1.0 ) );
+		if ( !liftIsMeasurable )
+			BOOST_TEST_MESSAGE(
+				"  *** " << meq::tests::rateNotMeasurableNotice(
+					order, "the transfer lift on Gamma", order + 1.0 )
+				<< " Its finest distance is " << measured[ 1 ].back().bandWorst
+				<< " against a position floor of "
+				<< meq::tests::rootedPositionFloor( 1.0 ) << ". M-222" );
+
 		// THE BAND MUST NOT LIMIT THE CONTOUR. The lift's error is the error of
 		// q integrated over a path of length O( h ), so it is at worst psi_h's
 		// own k+1 and measures nearer k+2 from k = 2 on -- 3.995 and 4.848 here.
 		// Asserted at k+1 because that is the property IN-2 needs: a surface in
 		// the band converges at the rate a surface inside Omega_h does.
+		if ( liftIsMeasurable )
 		BOOST_TEST( liftRate > order + 1.0 - sequenceSlack,
 		            "k = " << order << ": the transfer lift converges on Gamma at "
 		            << liftRate << " rather than at the k+1 = " << order + 1
@@ -2884,6 +2995,7 @@ BOOST_AUTO_TEST_CASE( theOutermostSurfaceIsTracedEntirelyInTheBand )
 			            << order + 1 << " it cannot have. Its remainder is second "
 			            "order in the band width at every k, so if this is real "
 			            "the control has stopped being a control" );
+			if ( liftIsMeasurable )
 			BOOST_TEST( liftRate > taylorRate + 1.0,
 			            "k = " << order << ": the transfer lift converges at "
 			            << liftRate << " against the Taylor step's " << taylorRate

@@ -512,7 +512,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 		meq::tests::Rectangle{ 0.5, 1.5, -0.5, 0.5 }, 16 );
 
 	mfem::Array<int> marker;
-	int const inside = mfem::MarkLevelSetSubdomain( background, circle, 0.0,
+	int const inside = mfem::MarkLevelSetSubdomain(
+		background, circle, meq::markingOffset( 1.0, 1.5 ),
 	                                               marker, 1 );
 	BOOST_TEST_REQUIRE( inside > 0 );
 	for ( int e = 0; e < background.GetNE(); ++e )

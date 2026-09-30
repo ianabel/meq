@@ -224,7 +224,8 @@ namespace meq
 					}
 
 					mfem::IntegrationPoint reference;
-					if ( transformation.TransformBack( physical, reference )
+					if ( transformation.TransformBack(
+					         physical, reference, inverseTransformTolerance() )
 					     == mfem::InverseElementTransformation::Inside )
 					{
 						element[ at ] = e;
@@ -558,7 +559,8 @@ namespace meq
 				// The reference triangle is 0 <= x, y and x + y <= 1, so a point
 				// within `slack` of it is at most that far outside in reference
 				// units. One half is generous for a band one face deep.
-				transformation.TransformBack( physical, reference );
+				transformation.TransformBack( physical, reference,
+				                              inverseTransformTolerance() );
 				// The foot is ON the element, so this should always pass; it is
 				// kept because a degenerate face could still defeat the inverse
 				// map, and a silent wild reference point is the failure this

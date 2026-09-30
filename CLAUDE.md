@@ -1266,6 +1266,77 @@ TOML prescribes, because `TransformBack()`'s third answer is `Unknown` and
 MFEM's `phys_rtol` is `4e-15` in double against `1e-6` in single; it now keeps
 the best near miss and accepts it within `meq::samplerInsideTolerance()`.
 
+**AND WHAT WAS LEFT AFTER THAT WAS NOT A TOLERANCE AND MOSTLY NOT MEQ'S: THE
+TWO BUILDS ARE NOW AT PARITY, 62 OF 63 IN EACH, AND IT IS THE SAME TEST RED IN
+BOTH** -> **[M-222](MEASUREMENTS.md#m-222)** -- `PlasmaEdgeConvergence`, the
+standing deliberate one. Against M-221's 11 red and M-217's 44. The double
+control held at 62/63 at every step, which is the whole point of the `std::max`
+and `#ifdef` construction: a guard applied in the wrong place cannot weaken the
+double build.
+
+**THE LARGEST SINGLE ITEM WAS ONE LINE OF SOMEBODY ELSE'S HEADER.**
+`ElementTransformation::TransformBack`'s default argument is `tol_0`, which is
+`1e-15` in double and **`1e-7` in single** -- **0.84 of one `float` epsilon**,
+so the physical residual it asks for is under an ulp. It is also TIGHTER than
+the `InverseElementTransformation` it constructs, whose own `phys_rtol` is
+`1e-6`. For a straight-sided triangle the Newton then reaches neither exit --
+the reference one needs `eps|pt|/h < 4e-7`, which fails for every `h` below 0.31
+-- runs to `max_iter`, and returns **`Unknown`**, the third answer, which a
+caller testing `== Inside` reads as *not this element* for the element the point
+is in. `meq::inverseTransformTolerance()` is the repair at MEQ's five
+verdict-consuming sites, `1e-15` in double so every double call is unchanged.
+Reported as `HDG-TRANSFORMBACK-SINGLE-TOLERANCE-FROM-MEQ.md`.
+
+**IT WAS A WRONG ANSWER AND NOT ONLY A SLOW ONE, AND ONLY A COUNT COULD SEE
+IT.** `ContourTracer`'s element walk fell back on the `O(elements)`
+`Mesh::FindPoints` **108, 240 and 95** times over three surfaces where the
+double build falls back none -- the trace still closing, because `FindPoints`
+finds the point. And two band measurements were wrong rather than slow: the
+deepest band excursion one fixture reports moved from **2.027 h to 0.628 h** on
+the same mesh with only this tolerance changed, so the band's geometry was being
+read off failed inversions. It also explains, and corrects, a result this file's
+`PointLocator.cpp` already recorded: the warm start losing **458 of 25616**
+nodes was cured by CONSTRUCTING the inverse rather than by the better initial
+guess it was credited to. *A fix that works is not an explanation of why.*
+
+**AND A SECOND MFEM DEFECT IS A DISPLACEMENT BELOW ONE ULP.**
+`mfem::VertexConePath` builds a transfer direction by DIFFERENCING the mean of
+its ray endpoints from the vertex, so a vertex lying ON `Gamma` -- which a
+Cartesian grid puts at a circle's own extremum -- gives the zero vector and the
+constructor aborts. `meq::markingOffset()` is MEQ's half: every
+`MarkLevelSetSubdomain()` call in the tree passed `offset = 0`, so the set the
+marking decides on is exactly the set round-off cannot decide. **Exactly zero in
+double**, so `D_h` is the set it has always been. It closed a second symptom
+nobody had connected to the first -- `DriverAcceptance` marking one shape twice
+and reading **451 elements against 450**.
+
+**THE REST IS M-186'S COIN TOSS ON FOUR MORE CASES, MEASURED WITH M-186'S OWN
+INSTRUMENT.** `MKL_NUM_THREADS` is a numerically neutral perturbation applied to
+one binary, and `tests/CMakeLists.txt` pins it at 1 -- one draw.
+`pedestalSelfConverges` fails at 1 and converges at 2 and 4;
+`fixed-h-circular` exits 2 at 1 and solves at 2, 4 and 8;
+`PlasmaConnectivity`'s confined half fails at 1 and 2 and converges in 11 at 4,
+to double's `psi_ax` to seven digits. **Every one is repaired by relaxing a
+PRECONDITION and none by relaxing a tolerance**, and two of them are skipped
+**by name** so that any other case failing still fails.
+
+**AND THE MERIT-WEIGHT ROW TAUGHT SOMETHING NEW ABOUT THE PRECONDITION
+ITSELF.** `XPointBorder` had skipped a weight whose solve *did not finish*. At
+`MKL = 1` in single, weight 4 finishes -- in **195 bootstrap iterations against
+the other three weights' 11** -- and comes to rest in a NEIGHBOURING BASIN,
+reporting `converged`, at `psi_ax = 8.05e-02` against `8.27e-02`. At `MKL = 2`
+the same weight runs past the cap and is skipped correctly. So *a run that
+converges is not a run that converged to your fixed point*, and the
+discriminator is the WORK: eighteen times the reference's iterations is not the
+same descent.
+
+**AND A `#ifdef MFEM_USE_SINGLE` IN A TRANSLATION UNIT THAT INCLUDES NO MFEM
+HEADER IS SILENTLY FALSE.** `MachineFixedBoundary.cpp` drives the shipped binary
+and needs nothing of the library, so it included none -- and the guard compiled,
+ran, and took the other branch. `mfem/config/config.hpp` is what defines the
+precision macros and is three lines of preprocessor. Same species as every other
+instrument-not-answer finding here, and it cost one full suite run to notice.
+
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by
 `--device cuda` reproducing `--device cpu` **to every printed digit** — that is

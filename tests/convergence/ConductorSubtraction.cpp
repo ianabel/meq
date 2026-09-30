@@ -47,6 +47,7 @@
 #include "meq/FluxSurfaces.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/SurfaceAverage.hpp"
+#include "meq/Sampler.hpp"
 
 namespace
 {
@@ -321,7 +322,13 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 	             "field, so it runs none of the new code )\n" );
 
 	BOOST_TEST( scale > 1.0e-3, "the control is trivial, so this proves nothing" );
-	BOOST_TEST( worst < 1.0e-11*scale,
+	// TWO SOLVE ROUTES TO ONE DISCRETE PROBLEM, so they agree to the
+	// arithmetic's own floor rather than to a tolerance -- and that floor is
+	// the format's. Measured in single: 2.98e-08 on a scale of 5.59e-02, which
+	// is 4.5 eps relative. A shift applied to f but not to dFdPsi, or applied
+	// twice, is O( 1 ) relative here. scalarAgreementFloor() keeps the 1e-11 in
+	// double.
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-11, 1.0 )*scale,
 	            "the split's source or Jacobian is not being evaluated at "
 	            "psi_c + psi_p" );
 }
@@ -1000,7 +1007,7 @@ namespace
 
 		mfem::Array<int> marker;
 		BOOST_TEST_REQUIRE( mfem::MarkLevelSetSubdomain(
-			*d.background, gammaLevelSet, 0.0, marker, 1 ) > 0,
+			*d.background, gammaLevelSet, meq::markingOffset( 1.0, 1.5 ), marker, 1 ) > 0,
 			"the half-disc is empty at n = " << n );
 		for ( int e = 0; e < d.background->GetNE(); ++e )
 			d.background->SetAttribute( e, marker[ e ] ? 1 : 2 );
@@ -2157,7 +2164,16 @@ BOOST_AUTO_TEST_CASE( theConductorInterpolantIsExactAtTheNodes )
 
 	// ROUND-OFF AND NOT A TOLERANCE: a coefficient of a GaussLobatto nodal
 	// space IS the value at its node, so this is the index map being right.
-	BOOST_TEST( worst < 1.0e-12*scale,
+	//
+	// AND ROUND-OFF IS THE FORMAT'S, WHICH IS THE WHOLE OF WHAT CHANGES HERE.
+	// The claim is an INDEX identity -- the same number reached twice -- and
+	// what a wrong map costs is O( 1 ) relative, so a floor at exactAgreement's
+	// 4096 eps ( 4.9e-04 ) still sits four orders under the smallest defect it
+	// guards. Measured in single: 5.78e-08 on a scale of 1.391, which is 0.35
+	// of ONE eps. Exactly zero in double, where this stays the 1e-12 identity
+	// it has always been.
+	BOOST_TEST( worst < 1.0e-12*scale
+	                    + meq::tests::exactAgreementFloor( scale ),
 	            "the q_c interpolant disagrees with q_c AT a node, which is a "
 	            "wrong dof mapping rather than the interpolation error this "
 	            "option trades for -- suspect a transposed component or a vdof "

@@ -301,6 +301,38 @@ namespace meq
 #endif
 	}
 
+	/**
+	 * The relative tolerance at which a MESH POINT counts as lying on a
+	 * filament, floored by what the mesh's own coordinates can resolve.
+	 *
+	 * **A COINCIDENCE TEST IS A TEST ABOUT TWO STORED NUMBERS, SO ITS
+	 * TOLERANCE BELONGS TO THE FORMAT THEY ARE STORED IN.** `psi_c` is
+	 * genuinely infinite on a line current, so a vertex ON one is a
+	 * configuration error that no tolerance makes valid -- and a vertex placed
+	 * there BY CONSTRUCTION is only there to an ulp. Measured: a box on
+	 * `[ 0.6, 1.4 ]` at `n = 8` puts a vertex at `R = 1.0` exactly, and under
+	 * `MFEM_PRECISION = single` the stored coordinate is one float ulp off it,
+	 * `6.0e-08` -- forty-five thousand times `meq::ConductorField`'s own
+	 * `1e-12` default, so the refusal does not fire and the error arrives
+	 * later from inside a solve, naming a field point instead of a vertex.
+	 *
+	 * `std::max`'d, and in double `64 eps` is `1.4e-14` against that `1e-12`,
+	 * so the double build refuses exactly what it always refused. The other
+	 * half of the policy is untouched and is what says this is a coincidence
+	 * test rather than a clearance test: a filament a millimetre off a vertex
+	 * is `1e-03` away, which clears even the single floor by a hundred and
+	 * thirty. `ConductorField` cannot express this itself -- it is MFEM-free
+	 * so that CI can build it, and therefore cannot ask what `real_t` is --
+	 * which is why it takes the number from the caller that owns the mesh.
+	 * M-222.
+	 */
+	inline double meshCoincidenceTolerance( double historical )
+	{
+		return std::max( historical,
+		                 64.0*static_cast<double>(
+			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
+	}
+
 	double limiterPolygonMaximum( mfem::FiniteElementSpace const &space,
 	                              std::vector<LimiterPolygonFace> const &polygon,
 	                              mfem::Vector const &values, int offset,

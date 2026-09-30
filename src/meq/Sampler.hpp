@@ -85,6 +85,110 @@ namespace meq
 #endif
 	}
 
+	/**
+	 * The physical relative tolerance to hand `TransformBack()`, because its
+	 * own default is BELOW ONE `float` EPSILON and therefore unreachable.
+	 *
+	 * **`ElementTransformation::TransformBack( v, ip, phys_rel_tol = tol_0 )`
+	 * DEFAULTS TO A TIGHTER NUMBER THAN THE CLASS IT CONSTRUCTS.**
+	 * `eltrans.hpp:62` carries `tol_0 = 1e-15` in double and `1e-7` in single,
+	 * while `InverseElementTransformation`'s own constructor carries
+	 * `phys_rtol( 4e-15 )` and `phys_rtol( 1e-6 )`. The two disagree in both
+	 * formats and only in one does the disagreement bite: `1e-15` is **4.5
+	 * eps** of a double and `1e-7` is **0.84 eps** of a float. `tol_0` was
+	 * scaled by the ratio of the two formats' decimal digits and not by the
+	 * ratio of their epsilons, and it landed under the floor.
+	 *
+	 * **WHAT THAT COSTS IS THE WHOLE VERDICT, NOT A DIGIT.** `NewtonSolve()`
+	 * exits on `err_phys < phys_rtol*|pt|_inf` or on `dx_norm < ref_tol`, and
+	 * in single an affine triangle reaches NEITHER. The physical residual of an
+	 * exactly-inverted affine map is round-off, `eps*|pt|`, which is not
+	 * strictly below `0.84 eps*|pt|`; the reference increment that round-off
+	 * then produces is `eps*|pt|/h`, which exceeds `ref_tol = 4e-7` for every
+	 * `h` below `0.31`. So the solve runs to `max_iter` and returns
+	 * **`Unknown`** -- the third answer, which a caller testing `== Inside`
+	 * reads as *not this element* for the element the point is actually in.
+	 * Measured on `ContourTracer`'s element walk: **108, 240 and 95** falls
+	 * back to `Mesh::FindPoints` over three surfaces where the double build
+	 * falls back none, which is the trace going quadratic in the mesh.
+	 *
+	 * So this is `samplerInsideTolerance()`'s sibling with the sign of the
+	 * finding reversed. There, MFEM already scaled `ip_tol` with the format and
+	 * MEQ's own floor was six times TIGHTER than upstream's; here upstream's
+	 * own default is the thing that does not survive the format, and copying it
+	 * is what must not be done. The class default is taken instead -- 8.4 eps,
+	 * comfortably reachable -- and the double arm is `tol_0` itself, so every
+	 * double call is the call it always was, to the bit. M-222.
+	 */
+	inline double inverseTransformTolerance()
+	{
+#ifdef MFEM_USE_SINGLE
+		return 1.0e-6;
+#else
+		return 1.0e-15;
+#endif
+	}
+
+
+
+	/**
+	 * The offset to hand `mfem::MarkLevelSetSubdomain()`, so that no vertex of
+	 * `Gamma_h` can land ON `Gamma` to within the format's own ability to place
+	 * it.
+	 *
+	 * @param gradient    the level set's magnitude of change per unit length.
+	 *                    **1 for a distance or a radial gap**, which is what
+	 *                    `meq::BoundaryShape::levelSet()` returns; `| grad psi |`
+	 *                    for a flux level set, because the offset is in the
+	 *                    level set's OWN units and those differ per caller.
+	 * @param coordinate  a representative coordinate magnitude, whose ulp is
+	 *                    what a vertex can be placed to.
+	 *
+	 * **THE MARKING IS A DISCRETE DECISION ON A CONTINUOUS PREDICATE, AND AT
+	 * `offset = 0` THE SET IT DECIDES ON IS EXACTLY THE SET ROUND-OFF CANNOT
+	 * DECIDE.** `MarkLevelSetSubdomain()` keeps an element when `phi <= -offset`
+	 * at every vertex and at every refined point, so with `offset` zero an
+	 * element whose closest approach to `Gamma` is under one ulp is admitted or
+	 * refused by the last bits of `phi`. Two things then go wrong, and both are
+	 * measured rather than feared.
+	 *
+	 * **A ZERO-LENGTH PATH.** `mfem::VertexConePath` builds the direction at a
+	 * vertex by shooting a fan, averaging the nearest endpoints and DIFFERENCING
+	 * that mean from the vertex. A vertex on `Gamma` has every endpoint at
+	 * distance zero, so in single the endpoints round to the vertex itself, the
+	 * difference is the zero vector, `len <= 0` sends all three widening passes
+	 * to `continue`, and the constructor aborts with *"no ray from the vertex
+	 * ... reaches Gamma"*. Measured on `FreeBoundaryCoupling`'s circle of radius
+	 * 0.40 about `R = 1.10`: the Cartesian grid puts a vertex at
+	 * `( 1.1, -0.4 )`, the circle's own lowest point, at `phi = -2.4e-08`. In
+	 * double the same vertex is on `Gamma` too and the same arithmetic works,
+	 * because a bisected crossing at `6e-14` is still representable as a
+	 * displacement from a coordinate of 1.1 -- a double's ulp there is
+	 * `2.2e-16` and a float's is `1.2e-07`.
+	 *
+	 * **AND TWO ROUTES TO ONE MARKING DISAGREE.** `DriverAcceptance` marks the
+	 * same shape twice -- once through the driver and once by hand -- and reads
+	 * **451 elements against 450**. The two build their background through
+	 * different arithmetic, so their vertices differ in the last bits, which is
+	 * nothing until an element straddles.
+	 *
+	 * **EXACTLY ZERO IN DOUBLE**, so `D_h` is the set it has always been and
+	 * every published table stands. In single it shrinks `Omega_h` by at most
+	 * the sliver that was undecidable, which is a direction the analysis
+	 * already assumes: `Gamma_h` is inscribed. M-222.
+	 */
+	inline double markingOffset( double gradient, double coordinate )
+	{
+#ifdef MFEM_USE_SINGLE
+		return 64.0*std::abs( gradient )*std::abs( coordinate )
+		       *static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
+#else
+		( void ) gradient;
+		( void ) coordinate;
+		return 0.0;
+#endif
+	}
+
 
 	/// A uniform ( R, Z ) grid, and where each of its nodes sits in a mesh.
 	///

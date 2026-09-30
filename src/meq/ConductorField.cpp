@@ -329,13 +329,17 @@ namespace meq
 			bZ += coilAxisFlux( one, z, coilList.quadratureOrder(), mu0Value );
 	}
 
-	bool ConductorField::coincides( double radius, double z ) const
+	bool ConductorField::coincides( double radius, double z,
+	                                double tolerance ) const
 	{
-		return indexAt( radius, z ) >= 0;
+		return indexAt( radius, z, tolerance ) >= 0;
 	}
 
-	int ConductorField::indexAt( double radius, double z ) const
+	int ConductorField::indexAt( double radius, double z,
+	                             double tolerance ) const
 	{
+		double const relative = tolerance < 0.0 ? toleranceValue : tolerance;
+
 		requireFinite( radius, "the field point radius",
 		               "meq::ConductorField::indexAt" );
 		requireFinite( z, "the field point height",
@@ -349,7 +353,7 @@ namespace meq
 			// std::hypot rather than sqrt( dr*dr + dz*dz ): the squares can
 			// underflow to zero for the very separations this test exists to
 			// resolve, which would report a coincidence that is not there.
-			if ( std::hypot( dr, dz ) <= toleranceValue*f.radius() )
+			if ( std::hypot( dr, dz ) <= relative*f.radius() )
 				return static_cast<int>( i );
 		}
 		return -1;

@@ -124,6 +124,22 @@ namespace meq
 		/// has, both of which are the caller's.
 		double jacobianConditioning = 1.0;
 
+		/// The residual norm KINSOL stopped at.
+		///
+		/// **THE ANSWER IS WORTH THE RESIDUAL IT STOPPED AT, DIVIDED BY THE
+		/// CONDITIONING BESIDE IT**, and a caller that wants to know whether
+		/// its recovered `g` means anything has no other way to ask. It is not
+		/// the tolerance that was REQUESTED: KINSOL stops on a step that has
+		/// become too small as readily as on a function norm that has become
+		/// small enough, reports `converged` either way, and the two cases are
+		/// told apart only by this number against @a status. Measured on
+		/// `SafetyFactorSolver`'s closed-form case, where the map is a whole
+		/// equilibrium solve and a surface extraction: **3.68e-06 in double
+		/// against a requested 1e-09, and 3.71e-03 in single** -- the second
+		/// being the flux-surface average's own `eps/h^2` carried through the
+		/// fit, and the reason the recovered `g` there is 7.0e-03 out.
+		double finalResidual = 0.0;
+
 		/// KINSOL's own account of how it stopped, for a caller that has to
 		/// report rather than only branch.
 		std::string status;

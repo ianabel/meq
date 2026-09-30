@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "ConductorField.hpp"
+#include "Sampler.hpp"
 
 /*
  * The implementation of INVERSION-PLAN.md stages IN-0 and IN-1.
@@ -646,7 +647,13 @@ namespace meq
 			if ( candidate < 0 || candidate >= elements )
 				return false;
 			meshRef.GetElementTransformation( candidate, &scratch );
-			return scratch.TransformBack( point, ip )
+			// inverseTransformTolerance() RATHER THAN THE DEFAULT ARGUMENT, and
+			// in single that is the difference between a walk and a full-mesh
+			// scan: TransformBack()'s own default is 0.84 float epsilons, so an
+			// affine triangle answers Unknown for the element the point is in
+			// and this lambda reads that as "not here". See Sampler.hpp.
+			return scratch.TransformBack( point, ip,
+			                              inverseTransformTolerance() )
 			       == mfem::InverseElementTransformation::Inside;
 		};
 

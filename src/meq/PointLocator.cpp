@@ -1,5 +1,6 @@
 #include "PointLocator.hpp"
 #include "Crossings.hpp"
+#include "Sampler.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -365,7 +366,9 @@ namespace meq
 									meshRef.GetElementTransformation( e, &transformation );
 									mfem::IntegrationPoint found;
 									int status =
-										transformation.TransformBack( physical, found );
+										transformation.TransformBack(
+											physical, found,
+											inverseTransformTolerance() );
 
 									/*
 									 * A SECOND, MORE ROBUST ATTEMPT WHERE THE

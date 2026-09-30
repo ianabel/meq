@@ -456,6 +456,7 @@ namespace meq
 			if ( atStart.Normlinf() <= options.functionTolerance )
 			{
 				out.converged = true;
+				out.finalResidual = atStart.Normlinf();
 				flat << "converged in 0 KINSOL iterations and "
 				     << out.mapEvaluations
 				     << " map evaluations: the starting coefficients are "
@@ -509,6 +510,7 @@ namespace meq
 		for ( int i = 0; i < n; ++i )
 			out.coefficients[ static_cast<std::size_t>( i ) ] = solution( i );
 		out.iterations = newton.GetNumIterations();
+		out.finalResidual = newton.GetFinalNorm();
 		out.jacobianConditioning = conditioning;
 
 		/*
