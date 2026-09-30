@@ -2860,12 +2860,25 @@ int main( int argc, char **argv )
 				int const missed = transfer.transfer( *guess, zero, *carried );
 				fresh->setInitialGuess( *carried );
 
+				// AND THE RANGE OF BOTH FIELDS, BECAUSE A TRANSFER THAT LOSES
+				// THE ANSWER LOOKS EXACTLY LIKE ONE THAT KEEPS IT IN THE LINE
+				// ABOVE. "0 of 31704 nodes fell outside" is a statement about
+				// the SEARCH; whether what was found is the stored field is a
+				// different question, and psi_ax is read off the guess so a
+				// wrong one poses the whole bordered solve at the wrong place.
+				// M-221.
 				std::printf( "MEQ: interpolating warm start from %s: %d elements "
 				             "to this run's %d, %d of %d nodes fell outside the "
-				             "stored mesh\n",
+				             "stored mesh\n"
+				             "     psi over the stored guess [ %.6e, %.6e ], "
+				             "over the transferred one [ %.6e, %.6e ]\n",
 				             config->getInitialGuess().meshFile.c_str(),
 				             guessMesh->GetNE(), mesh.GetNE(), missed,
-				             transfer.queried() );
+				             transfer.queried(),
+				             static_cast<double>( guess->Min() ),
+				             static_cast<double>( guess->Max() ),
+				             static_cast<double>( carried->Min() ),
+				             static_cast<double>( carried->Max() ) );
 			}
 		}
 

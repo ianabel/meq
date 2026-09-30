@@ -1106,11 +1106,24 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 
 	// The attribute is written at full precision, so this is the file round trip
 	// and not a tolerance.
+	// **THE FILE ROUND TRIP, NOT A TOLERANCE -- BUT THE RUN IS NOT THE SAME
+	// RUN.** The attribute is written by the DRIVER and compared against a
+	// library solve of the same configuration, so the two part by whatever the
+	// two assemblies' summation orders cost: 2.7e-05 relative in single,
+	// 1e-16 in double. exactAgreementFloor() is exactly zero there, so what
+	// runs in the double build is the round trip it always was. M-221.
 	BOOST_TEST( std::fabs( written - solver.psiAxis() )
-	                <= 1.0e-12*std::fabs( solver.psiAxis() ),
+	                <= std::max( 1.0e-12*std::fabs( solver.psiAxis() ),
+	                             meq::tests::exactAgreementFloor(
+		                             solver.psiAxis() ) ),
 	            "the file says psi_axis = " << written << " where the same run "
 	            "gives " << solver.psiAxis() );
-	BOOST_TEST( std::fabs( constraint ) <= 1.0e-8*std::fabs( solver.psiAxis() ),
+	// The border closes this to the format's own epsilon on psi_ax and no
+	// further -- M-204 measured -1.240e-07 and -1.863e-07 on the production
+	// cases in single against -6.466e-12 in double. M-220, M-221.
+	BOOST_TEST( std::fabs( constraint )
+	            <= meq::tests::scalarAgreementFloor(
+		            1.0e-8*std::fabs( solver.psiAxis() ), solver.psiAxis() ),
 	            "the driver reports a normalisation residual of " << constraint
 	            << " against psi_ax = " << solver.psiAxis()
 	            << ", so the constraint psi_ax = max psi_h is not satisfied and "
@@ -1759,12 +1772,44 @@ BOOST_AUTO_TEST_CASE( theDriverRefusesASolverItCannotHonour )
 	            "mfem::Device that is not a solve, it is a raw CUDA abort with "
 	            "nothing in the message about the key that caused it" );
 
-	// And the defaults, plus an explicit umfpack, must still SOLVE. A test that
-	// only checked refusals would pass with every value refused.
-	write( "driver-acceptance-ok.toml", "TraceSolver = \"umfpack\"\n" );
-	BOOST_TEST( run( "driver-acceptance-ok.toml" ) == 0,
-	            "an explicit TraceSolver = \"umfpack\" must solve, or the "
-	            "refusals above are testing nothing" );
+	/*
+	 * And the defaults, plus an explicit HONOURABLE choice, must still SOLVE.
+	 * A test that only checked refusals would pass with every value refused.
+	 *
+	 * **WHICH CHOICE IS HONOURABLE IS A PROPERTY OF THE BUILD, AND NAMING ONE
+	 * HERE MADE THIS CASE UNRUNNABLE IN HALF OF THEM.** It asked for
+	 * `"umfpack"`, and UMFPACK is DOUBLE ONLY -- SuiteSparse has no
+	 * single-precision build -- so under `MFEM_PRECISION = single` the driver
+	 * refused it, correctly, and the case read that refusal as the driver
+	 * refusing something it can honour. The same absence took
+	 * `examples/coils-rectangle.toml` and `examples/mhd-rectangle.toml` with
+	 * it, six failing cases across this file and `DeviceParity` from one
+	 * missing package. The two examples now name no solver at all; this case
+	 * names whichever one THIS build has, which is the question it is really
+	 * asking. M-221.
+	 */
+#if defined( MFEM_USE_SUITESPARSE )
+	char const *const honourable = "umfpack";
+#elif defined( MFEM_USE_MKL_PARDISO )
+	char const *const honourable = "pardiso";
+#else
+	char const *const honourable = nullptr;
+#endif
+	if ( honourable == nullptr )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the honoured-choice half: this build links no direct "
+			"trace solver at all, so there is no value of TraceSolver it could "
+			"accept and the refusals above are the whole of what it can do." );
+	else
+	{
+		std::string const body =
+			std::string( "TraceSolver = \"" ) + honourable + "\"\n";
+		write( "driver-acceptance-ok.toml", body.c_str() );
+		BOOST_TEST( run( "driver-acceptance-ok.toml" ) == 0,
+		            "an explicit TraceSolver = \"" << honourable << "\" must "
+		            "solve -- it is what this build links -- or the refusals "
+		            "above are testing nothing" );
+	}
 
 	std::remove( "driver-acceptance-mode.toml" );
 	std::remove( "driver-acceptance-case.toml" );
@@ -2444,7 +2489,13 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 
 	// I_p is the constraint rather than an outcome, so this checks that the
 	// border closed and is not a comparison against freegs4e. Measured 3.3e-06.
-	BOOST_TEST( currentError < 1.0e-4,
+	// I_p IS A CONSTRAINT AND IT CLOSES TO THE FORMAT. Measured 3.4e-04
+	// relative in single against 3.3e-06 in double: the border row is a
+	// differenced column and the current it drives is an integral over a
+	// support that moves, so the two compound. A border that did NOT close
+	// leaves O( 1 ). M-221.
+	BOOST_TEST( currentError < std::max( 1.0e-4,
+	                                     meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the delivered plasma current is " << current << " A against the "
 	            << referenceCurrent << " A [source] PlasmaCurrent asked for. "
 	            "That is a constraint, so this is the border failing to close "
@@ -2452,7 +2503,11 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 
 	// psi_ax's OWN border, a separate statement from the agreement: psi_ax =
 	// max psi_h has to hold exactly whatever equilibrium was found.
-	BOOST_TEST( std::fabs( border ) < 1.0e-12,
+	// psi_ax's own border closes to round-off on psi_ax -- -2.13e-07 in single
+	// against 1e-16 in double, which is M-204's measurement on the production
+	// cases. M-220, M-221.
+	BOOST_TEST( std::fabs( border )
+	            < meq::tests::scalarAgreementFloor( 1.0e-12, psiAxis ),
 	            "psi_ax - max psi_h is " << border << ", so the normalisation "
 	            "border did not close" );
 
@@ -2816,7 +2871,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesADivertedTokamak )
 	            "the delivered plasma current is " << current << " A against the "
 	            << referenceCurrent << " A [source] PlasmaCurrent asked for, "
 	            "which is a constraint: this is the border failing to close" );
-	BOOST_TEST( std::fabs( border ) < 1.0e-9,
+	BOOST_TEST( std::fabs( border )
+	            < meq::tests::scalarAgreementFloor( 1.0e-9, psiAxis ),
 	            "psi_ax - max psi_h is " << border << ", so the normalisation "
 	            "border did not close" );
 
@@ -3360,15 +3416,21 @@ BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
 		BOOST_TEST( located2 == 0.0,
 			"the control reported a LOCATED contact, so it did not take the "
 			"prescribed-point path and is not a control at all" );
+		// TWO RUNS OF THE SAME CONSTRAINT, so they agree to round-off on the
+		// quantity: 6.3e-06 relative in single against 1e-15 in double. A
+		// search returning a point that is on the curve but is NOT the
+		// maximum moves psi_bnd by O( the span ). M-221.
 		BOOST_TEST( std::abs( controlBoundary - psiBoundary )
-		            < 1.0e-8*std::abs( psiBoundary ),
+		            < std::max( 1.0e-8*std::abs( psiBoundary ),
+		                        meq::tests::exactAgreementFloor( psiBoundary ) ),
 			"prescribing the contact the search found gives psi_bnd "
 			<< controlBoundary << " against the found " << psiBoundary
 			<< ". The maximum over the polygon is attained AT that point, so the "
 			"two are the same constraint and must agree; a gap means the search "
 			"returned a point that is on the curve but is not the maximum." );
 		BOOST_TEST( std::abs( controlAxis - psiAxis )
-		            < 1.0e-8*std::abs( psiAxis ),
+		            < std::max( 1.0e-8*std::abs( psiAxis ),
+		                        meq::tests::exactAgreementFloor( psiAxis ) ),
 			"the same two runs disagree on psi_ax: " << controlAxis
 			<< " against " << psiAxis );
 	}

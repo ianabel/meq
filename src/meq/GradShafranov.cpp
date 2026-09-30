@@ -17,6 +17,9 @@
 #include "Coils.hpp"
 #include "ConductorField.hpp"
 #include "FieldViews.hpp"
+// samplerInsideTolerance() -- locatePotentialPoint() asks the same question
+// meq::GridSampler does, so it uses the same expression. M-165, M-221.
+#include "Sampler.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -4380,26 +4383,81 @@ namespace
 		point( 0 ) = radius;
 		point( 1 ) = z;
 
+		/*
+		 * **AND THE SEARCH KEEPS ITS BEST NEAR MISS, WHICH IS BOTH THE FIX AND
+		 * THE DIAGNOSTIC.**
+		 *
+		 * `TransformBack()` answers `Inside`, `Outside` or `Unknown`, and the
+		 * third is the Newton failing to reach its own `phys_rtol` -- which is
+		 * `4e-15` in double and `1e-6` in single, MFEM scaling that constant
+		 * with the format as `eltrans.hpp`'s constructor shows. A point a few
+		 * `eps` outside an element, or one the inverse stops short of, is
+		 * therefore `Unknown` in a narrow format where it is `Inside` in a wide
+		 * one, and the loop above walked past every element and threw.
+		 *
+		 * Measured: `examples/diverted-tokamak.toml` prescribes its limiter at
+		 * the reference X-point, `( 1.093144118182931, -0.6039650838688502 )`,
+		 * a point of the mesh that the double build locates in `prepare()` and
+		 * the single build refused before taking a single Newton step.
+		 *
+		 * So the reference coordinates are examined directly rather than the
+		 * verdict alone: the violation is how far outside the reference
+		 * triangle the inverse landed, the smallest one over the mesh is kept,
+		 * and it is accepted when it is within the SAME tolerance
+		 * `meq::GridSampler` uses -- `mfem::InverseElementTransformation`'s own
+		 * `ip_tol`, through `meq::samplerInsideTolerance()`, which is the one
+		 * expression this tree has for that question. M-165, M-184, M-221.
+		 *
+		 * **AND WHEN IT STILL FAILS THE MESSAGE CARRIES THE NUMBER**, because
+		 * "no element contains it" and "every element missed it by 3e-07" send
+		 * a reader to two different places.
+		 */
+		double const tolerance = samplerInsideTolerance();
 		element = -1;
+		int best = -1;
+		double bestViolation = std::numeric_limits<double>::max();
+		mfem::IntegrationPoint bestReference;
+
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
 			thread_local mfem::IsoparametricTransformation scratch;
 			mesh.GetElementTransformation( e, &scratch );
 
 			mfem::IntegrationPoint reference;
-			if ( scratch.TransformBack( point, reference )
-			     != mfem::InverseElementTransformation::Inside )
-				continue;
+			int const verdict = scratch.TransformBack( point, reference );
+			if ( verdict == mfem::InverseElementTransformation::Inside )
+			{
+				best = e;
+				bestViolation = 0.0;
+				bestReference = reference;
+				break;
+			}
 
-			mfem::FiniteElement const *fe = potentialFes->GetFE( e );
-			if ( !fe )
-				continue;
+			// How far outside the reference triangle the inverse landed. Zero
+			// on a face, positive outside, and the smallest over the mesh is
+			// the element that owns a point sitting on a mesh line.
+			double const xi = reference.x;
+			double const eta = reference.y;
+			double const violation = std::max( { -xi, -eta, xi + eta - 1.0, 0.0 } );
+			if ( violation < bestViolation )
+			{
+				bestViolation = violation;
+				best = e;
+				bestReference = reference;
+			}
+		}
 
-			shape.SetSize( fe->GetDof() );
-			fe->CalcShape( reference, shape );
-			potentialFes->GetElementDofs( e, dofs );
-			element = e;
-			return;
+		if ( best >= 0 && bestViolation <= tolerance )
+		{
+			mfem::FiniteElement const *fe = potentialFes->GetFE( best );
+			if ( fe )
+			{
+				shape.SetSize( fe->GetDof() );
+				fe->CalcShape( bestReference, shape );
+				potentialFes->GetElementDofs( best, dofs );
+				element = best;
+				return;
+			}
 		}
 
 		std::ostringstream message;
@@ -4407,6 +4465,12 @@ namespace
 		           "of the mesh contains ( " << radius << ", " << z << " ). A limiter "
 		           "contact has to be a point of Omega: check it against the "
 		           "mesh's own extent rather than against the machine's.";
+		if ( best >= 0 )
+			message << " The closest element is " << best
+			        << ", whose inverse puts the point " << bestViolation
+			        << " outside the reference triangle against a tolerance of "
+			        << tolerance << " -- so this is the point being genuinely "
+			        "outside the mesh rather than an inversion stopping short.";
 		throw std::runtime_error( message.str() );
 	}
 
@@ -8703,6 +8767,35 @@ namespace
 			         : "     Every entry is finite, so this is a genuine"
 			           " degeneracy -- setBorderRegularisation() is the"
 			           " lever.\n" );
+
+			/*
+			 * **AND A ROW THAT IS EXACTLY ZERO IS NOT A DEGENERACY EITHER, IT
+			 * IS A CONSTRAINT THAT HAS NOTHING TO DIFFERENTIATE.** The plasma
+			 * current's border row is a central difference of
+			 * assemblePlasmaCurrent(), so it comes out identically zero when
+			 * the integral does not move -- and the commonest reason for that
+			 * is an EMPTY support, which is what an inverted or collapsed
+			 * ( supportAxis, supportBoundary ) pair produces. M-165 measured
+			 * exactly that, a span of -1.63e-05 where the true one is
+			 * +4.76e-02, and the run CONVERGED to a wall-hugging annulus
+			 * rather than failing. Regularisation cannot help a zero row and
+			 * the message must not send a reader to that lever.
+			 */
+			if ( normalisedSource )
+			{
+				double const supportSpan = normalisedSource->supportAxis()
+				                           - normalisedSource->supportBoundary();
+				out << "     the support edge is ( axis "
+				    << normalisedSource->supportAxis() << ", boundary "
+				    << normalisedSource->supportBoundary() << " ), span "
+				    << supportSpan;
+				if ( !( supportSpan > 0.0 ) )
+					out << "   <== NOT POSITIVE: Psi is negative everywhere, so"
+					       " the support is EMPTY and every integral over it is"
+					       " zero. This is not a degeneracy and"
+					       " setBorderRegularisation() will not help it";
+				out << "\n";
+			}
 			return out.str();
 		};
 

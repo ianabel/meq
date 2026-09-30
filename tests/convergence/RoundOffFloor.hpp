@@ -732,6 +732,39 @@ namespace tests
 			       std::numeric_limits<mfem::real_t>::epsilon() )/( h*h );
 	}
 
+	/**
+	 * How far a TRACED point may sit from the level set it was corrected onto,
+	 * on a mesh of spacing @a h and a field of size @a norm.
+	 *
+	 * **THE THIRD MEMBER OF THE SAME FAMILY**, between
+	 * [[residualEstimatorFloor]]'s `1/h` and [[averagedMetricFloor]]'s `1/h^2`.
+	 * The corrector is Newton along a line on `psi_h`, so its step is
+	 * `( psi_h - c )/| grad psi_h |` and the round-off in the numerator is
+	 * divided by a gradient the mesh resolves to `eps/h`; the distance it
+	 * leaves therefore carries `1/h` as well.
+	 *
+	 * Measured on `FluxSurfaceConvergence`'s field-error study in single, the
+	 * traced contour's distance from the exact one over `n = 16, 32, 64`:
+	 *
+	 *     k = 1   9.120e-03  1.076e-03  5.042e-04     rates 3.083, 1.093
+	 *     k = 2   6.365e-05  8.641e-05  1.991e-04     rates -0.441, -1.205
+	 *
+	 * -- the `k = 2` column RISING with refinement, which is the crossing. Each
+	 * of the floored readings is 21 to 53 times `eps/h`, so the constant is
+	 * **64**: it admits `k = 1`'s first pair, whose 3.083 is a real measurement,
+	 * and turns down every reading past the crossing. In double it is
+	 * `1.1e-12` at the finest `h` here, ten orders below the coarsest distance
+	 * in that table. M-220.
+	 */
+	inline double tracedPositionFloor( double norm, double h )
+	{
+		if ( !( h > 0.0 ) )
+			return 0.0;
+		return 64.0*std::abs( norm )
+		       *static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() )/h;
+	}
+
 	/// The message a caller prints when [[rateIsMeasurable]] refuses, so that the
 	/// weakening is visible in the output rather than inferred from a gap.
 	/// The same notice for a quantity whose order is not `k+1` -- `psi*` at
