@@ -1239,6 +1239,33 @@ is additionally M-186's coin toss), and most of `FreeBoundaryCoupling`'s 13 and
 single biggest cost is substantially done; what stands between single precision
 and a green suite is now the solver.
 
+**AND THE SOLVER IS IN BETTER SHAPE THAN THE COUNT SUGGESTED** →
+**[M-221](MEASUREMENTS.md#m-221)**. Measuring the EXAMPLES rather than the
+suite: of the 22 that run without a mesh generator, **17 give the same verdict
+in both builds** and one fails in both. Every shipped fixed-boundary machine
+converges, and `psi_ax` agrees over a range of 1,600 — **6.9e-07** on
+`fixed-f-diiid`, the largest problem in the tree, to 1.1e-03 on the
+`q(psi)`-driven outer loop. That is M-204's *"qualified per problem and not per
+build"* widened from two cases to eleven.
+
+**THE SHARPEST ROW IS `diverted-tokamak-xpoint` SOLVING WHILE
+`diverted-tokamak` DOES NOT.** Same machine, same mesh: the first puts the
+X-point in the border and the second prescribes a limiter at it. So what fails
+is not the diverted geometry, the free-boundary coupling, the moving support or
+the coil subtraction — the working row exercises all four — but the BRANCH the
+prescribed-limiter formulation lands on. At `MKL_NUM_THREADS` above 1 it
+converges to `psi_bnd = -1.20e-01` against `+3.23e-02` and the driver's
+axis-source guard refuses it: *the safety net works; the branch does not.*
+
+**AND ONLY ONE OF THE THREE CAUSES WAS NUMERICAL.** `TraceSolver = "umfpack"`
+in two shipped examples is a STRUCTURAL absence — UMFPACK is double only — and
+it was six failing cases; no named trace solver exists that every supported
+build has, which is why `meq::defaultTraceSolver()` is build-conditional and
+why an example must name none. `locatePotentialPoint()` refused a point its own
+TOML prescribes, because `TransformBack()`'s third answer is `Unknown` and
+MFEM's `phys_rtol` is `4e-15` in double against `1e-6` in single; it now keeps
+the best near miss and accepts it within `meq::samplerInsideTolerance()`.
+
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by
 `--device cuda` reproducing `--device cpu` **to every printed digit** — that is

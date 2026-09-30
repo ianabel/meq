@@ -12581,3 +12581,148 @@ is additionally the `MKL_NUM_THREADS` coin toss of [M-186](#m-186).
 **The tolerance sweep `DEVICE-PLAN.md` §7.2 called the single biggest cost is
 substantially done; what stands between single precision and a green suite is
 now the solver and not the assertions.**
+
+### M-221
+
+**THE QUESTION IS NOT HOW MANY TESTS ARE RED, IT IS WHETHER THE BUILD SOLVES
+ANYTHING — SO THIS MEASURES THE EXAMPLES.** [M-220](#m-220) left single at 12
+red of 63, and the cases that remained were dominated by solves that do not
+converge rather than by assertions that cannot be read. The instrument for that
+is the shipped example tree, run in both builds at `MKL_NUM_THREADS = 1`.
+
+**OF THE 22 EXAMPLES THAT RUN WITHOUT A MESH GENERATOR, 17 GIVE THE SAME
+VERDICT IN BOTH BUILDS AND ONE FAILS IN BOTH.** The nineteen that need
+`meq-run` are not in the table; `manufactured.toml` exits 1 in both and is a
+standing refusal rather than a finding here.
+
+| example | double | single | `psi_ax` single vs double |
+|---|---|---|---|
+| `fixed-f-diiid` | 0 | 0 | 2.897817e-01 / 2.897815e-01 — **6.9e-07** |
+| `fixed-d-tcv` | 0 | 0 | 1.755690e-02 / 1.755694e-02 — 2.3e-06 |
+| `fixed-e-diamagnetic` | 0 | 0 | 4.354577e-02 / 4.354586e-02 — 2.1e-06 |
+| `fixed-a-testtokamak` | 0 | 0 | 4.778552e-02 / 4.778900e-02 — 7.3e-05 |
+| `fixed-g-mastu` | 0 | 0 | 8.043809e-02 / 8.043321e-02 — 6.1e-05 |
+| `diverted-tokamak-xpoint` | 0 | 0 | 8.266012e-02 / 8.266004e-02 — 1.0e-06 |
+| `free-boundary-halfdisc` | 0 | 0 | 1.001935e-01 / 1.001931e-01 — 4.0e-06 |
+| `limited-tokamak` | 0 | 0 | 9.483092e-02 / 9.484400e-02 — 1.4e-04 |
+| `limiter-halfdisc` | 0 | 0 | 7.459902e-01 / 7.459870e-01 — 4.3e-06 |
+| `q-driven` | 0 | 0 | 3.461169e-01 / 3.457380e-01 — 1.1e-03 |
+| `rotating-normalised` | 0 | 0 | 1.039297e-01 / 1.039325e-01 — 2.7e-05 |
+| `miller-curved`, `miller-adaptive`, `soloviev-nstx`, `flux-surfaces`, `rotating-rectangle`, `manufactured-driver` | 0 | 0 | no `psi_ax` reported |
+| `coils-rectangle` | 0 | **1** | UMFPACK, below |
+| `mhd-rectangle` | 0 | **1** | UMFPACK, below |
+| `fixed-h-circular` | 0 | **2** | the coin toss, below |
+| `diverted-tokamak` | 0 | **2** | root selection, below |
+
+**THE ACCURACY IS THE CASE'S AND NOT THE FORMAT'S, OVER A RANGE OF 1,600**, from
+6.9e-07 on the DIII-D machine — the largest problem in the table — to 1.1e-03 on
+the `q(psi)`-driven outer loop. That is [M-204](#m-204)'s finding on two cases
+widened to eleven: *a single-precision equilibrium is qualified per problem and
+not per build*.
+
+**AND `diverted-tokamak-xpoint` SOLVING WHILE `diverted-tokamak` DOES NOT IS
+THE SHARPEST ROW IN THE TABLE.** They are the same machine on the same mesh. The
+first puts the X-point in the border, which is XP-3; the second prescribes a
+limiter at the reference X-point. So what fails is not the diverted geometry,
+the free-boundary coupling, the moving support or the coil subtraction — all of
+which the working row exercises — but the branch the prescribed-limiter
+formulation lands on.
+
+---
+
+**CAUSE 1: A STRUCTURAL ABSENCE WEARING A DRIVER REFUSAL, AND IT WAS SIX
+FAILING CASES.** `coils-rectangle.toml` and `mhd-rectangle.toml` pinned
+`TraceSolver = "umfpack"`. UMFPACK is **double only** — SuiteSparse has no
+single-precision build, which [M-217](#m-217) records as structural — so the
+driver refuses, correctly and by design. The cases that fell with it were
+`DriverAcceptance`'s `theDriverTakesTheConductorsOutOfTheMesh`,
+`theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom`,
+`theFilamentStackMovesTowardsTheRectangleItDivides`, `theDriverAddsTheCoilsToF`
+and `theDriverRefusesASolverItCannotHonour`, plus the whole of `DeviceParity`,
+whose case is `mhd-rectangle`.
+
+**NO NAMED TRACE SOLVER IS AVAILABLE IN EVERY BUILD MEQ SUPPORTS**, which is
+why `meq::defaultTraceSolver()` is build-conditional: `umfpack` needs
+SuiteSparse, `pardiso` needs MKL, `cudss` needs CUDA, and `gmres` is
+[M-179](#m-179)'s unviable. **An example that names one is therefore
+non-portable by construction**, so the two examples now name none and
+`theDriverRefusesASolverItCannotHonour` names whichever this build links —
+which is the question that case is really asking.
+
+**CAUSE 2: A LOCATOR REFUSING A POINT ITS OWN FILE PRESCRIBES.**
+`diverted-tokamak` died in `prepare()`, before a single Newton step, with
+*"no element of the mesh contains ( 1.09314, -0.603965 )"* — the reference
+X-point, written in the TOML, and located without complaint by the double
+build. `mfem::ElementTransformation::TransformBack()` answers `Inside`,
+`Outside` or **`Unknown`**, and the third is its own Newton failing to reach a
+`phys_rtol` that `eltrans.hpp` sets to `4e-15` in double and `1e-6` in single.
+A point the wide build calls `Inside`, the narrow one calls `Unknown`, and
+`locatePotentialPoint()` walked past every element and threw.
+
+It now examines the reference coordinates rather than the verdict alone, keeps
+the smallest violation over the mesh, and accepts it within
+`meq::samplerInsideTolerance()` — the same expression `meq::GridSampler` uses,
+which is [M-165](#m-165)'s rule that a constant kept in step by hand across two
+parties IS the defect. **And when it still fails the message carries the
+number**, because *"no element contains it"* and *"every element missed it by
+3e-07"* send a reader to two different places.
+
+**CAUSE 3: ROOT SELECTION, WHICH IS A GENUINE LIMIT — AND THE CONTROL IS WHAT
+MAKES IT ONE.** Past the locate, `diverted-tokamak` at `MKL_NUM_THREADS = 1`
+reports a singular bordered Jacobian whose **plasma current row is identically
+zero**. The new diagnostic says why:
+
+```
+  row 2  |row| 0.000e+00  rhs 2.513e-01
+  the support edge is ( axis -8.069e-02, boundary -2.134e-02 ), span -5.935e-02
+    <== NOT POSITIVE: Psi is negative everywhere, so the support is EMPTY and
+        every integral over it is zero. This is not a degeneracy and
+        setBorderRegularisation() will not help it
+```
+
+That is [M-165](#m-165)'s failure mode — a span of the wrong sign, and there
+the loop CONVERGED to a wall-hugging annulus rather than failing. **Two controls
+place it.** With `[initialguess]` removed **the double build fails
+identically**, row 2 zero and the same right-hand side, so a zero current row at
+a cold iterate is not a format defect. And the warm start itself is exonerated:
+both builds read the stored guess as `[ -5.779358e-02, 8.076817e-02 ]` and
+transfer it to `[ -5.750709e-02, 8.075919e-02 ]` against
+`[ -5.750708e-02, 8.075921e-02 ]` — seven digits.
+
+**AT 2, 4 AND 8 MKL THREADS IT CONVERGES, TO THE WRONG BRANCH.** 18 to 20
+Newton steps, `psi_bnd = -1.196819e-01` against the double build's
+`+3.229751e-02` and a profile scale of `5.898e-02` against `9.579e-01` — and
+the driver's axis-source guard **refuses it**, naming `psi_bnd` going negative
+as what chose the branch. *The safety net works; the branch does not.*
+
+**AND `fixed-h-circular` IS [M-186](#m-186)'S COIN TOSS ONCE MORE.** It fails at
+`MKL_NUM_THREADS = 1` — the value `tests/CMakeLists.txt` pins and the only one
+ctest ever runs — and converges at 2, 4 and 8 in 11 to 12 iterations, reaching
+`psi_ax = 6.353672e-02` against double's `6.353707e-02`. The double build's own
+history on that case sits on a plateau at 5.27e-03 for three iterations with
+observed orders of 0.004, 0.235 and **-0.660**, then blips UP before falling to
+1.1e-16 in five: both builds are on the plateau and only one of them gets off it
+at this thread count.
+
+---
+
+**THREE DIAGNOSTICS ARE KEPT, AND EACH IS WHAT IDENTIFIED ITS OWN CAUSE.** The
+support edge and its span on a singular border; the range of the stored AND the
+transferred field on a warm start, because *"0 of 31704 nodes fell outside" is a
+statement about the SEARCH* and not about what was found; and the closest
+element's violation on a failed locate.
+
+**`DeviceParity` IS GREEN IN SINGLE AND THE INSTRUMENT IT CARRIES IS INTACT.**
+*"`--device cuda` reproduces `--device cpu` to every printed digit"* is what
+[M-79](#m-79), [M-130](#m-130) and [M-187](#m-187) were root-caused with, and it
+stays an exact string comparison in double. In single the driver prints seven
+significant figures of a `real_t`, which IS `eps`, so the device's summation
+order moves the last one and nothing else: `psi_ax` 3.759859e-01 against
+3.759861e-01, `psi_bnd` 7.081396e-02 against 7.081404e-02, the X-point 1.200931
+against 1.200930. Five parts in ten million, against the **factor of two**
+[M-206](#m-206) measured when a kernel was actually wrong.
+
+**`DriverAcceptance` GOES FROM 14 FAILING CASES TO 6** and `DeviceParity` from
+its whole content to none, on those three causes plus the agreement floors of
+[M-220](#m-220) applied to the borders the driver reports. The double build is
+unchanged throughout.

@@ -1090,6 +1090,25 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 		// must be fourth order for BOTH pairings: it is the interpolation of a
 		// smooth arc by two points and two of its own tangents, and the field
 		// the arc came from does not enter.
+		/*
+		 * **A FOURTH-ORDER CLAIM NEEDS FOUR DECADES AND THE INTERPOLANT
+		 * REACHES THE FORMAT IN TWO.** The Hermite error is a POSITION, so its
+		 * floor is round-off on the machine's own size: measured in single it
+		 * lands at 1.34e-06 at the finest spacing -- 11 eps -- where the
+		 * chords, being second order, are still at 4.62e-06 and the ratio the
+		 * separation wants is 0.005. In double it reaches 1e-11 and neither
+		 * bound is anywhere near it. The chords' own second-order control is
+		 * not a fourth-order claim and still runs. M-221.
+		 */
+		bool const hermiteIsMeasurable = meq::tests::clearOfContaminant(
+			gradient.back(), meq::tests::scalarAgreementFloor( 0.0, 1.0 ) );
+		if ( !hermiteIsMeasurable )
+			BOOST_TEST_MESSAGE(
+				"  *** " << pairings[ p ].name << ": SKIPPED the Hermite's "
+				"fourth order and its separation from the chords. The finest "
+				"interpolation error is " << gradient.back()
+				<< ", which is round-off on a position of O( 1 ). M-221" );
+		else
 		BOOST_TEST( gradientRate > 4.0 - sequenceSlack,
 		            pairings[ p ].name << ": the cubic Hermite converges at "
 		            << gradientRate << " in Delta_s against the curve whose "
@@ -1105,6 +1124,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 		            << "Hermite, the fourth-order claim has nothing to be "
 		            << "measured against and this test is worthless" );
 
+		if ( hermiteIsMeasurable )
 		BOOST_TEST( gradient.back() < 0.005*chord.back(),
 		            pairings[ p ].name << ": at the finest spacing the Hermite "
 		            << "error is " << gradient.back() << " against the chords' "
@@ -1323,9 +1343,44 @@ BOOST_AUTO_TEST_CASE( theTracedContourConvergesAtTheFieldsOwnOrder )
 		}
 		std::fflush( stdout );
 
+		/*
+		 * **AND A TRACED POSITION CARRIES eps/h, SO THIS COLUMN TURNS RATHER
+		 * THAN FLATTENS.** The corrector is Newton along a line on psi_h, so
+		 * its step is ( psi_h - c )/| grad psi_h | and the round-off in the
+		 * numerator is divided by a gradient the mesh resolves to eps/h; see
+		 * meq::tests::tracedPositionFloor() for the law and the sweep that
+		 * fits it. Measured in single over n = 16, 32, 64:
+		 *
+		 *     k = 1   9.120e-03  1.076e-03  5.042e-04     rates 3.083, 1.093
+		 *     k = 2   6.365e-05  8.641e-05  1.991e-04     rates -0.441, -1.205
+		 *
+		 * -- the k = 2 column RISING with refinement, which is the crossing.
+		 * So each pair is read only while the reading it ENDS at is above the
+		 * floor, and the sequence rate goes with the finest of them. In double
+		 * the floor is 1.1e-12 at the finest h here, ten orders below the
+		 * coarsest distance in the table, and the predicate is unconditionally
+		 * true there in any case. M-220, M-221.
+		 */
+		double const boxWidth = box.width();
+		auto measuring = [ & ]( std::size_t m, double error )
+		{
+			return meq::tests::clearOfContaminant(
+				error, meq::tests::tracedPositionFloor(
+					1.0, boxWidth/static_cast<double>( meshes[ m ] ) ), 1.0 );
+		};
+
 		for ( std::size_t i = 0; i < set.levels.size(); ++i )
 		{
 			double const whole = rate( errors[ i ].front(), errors[ i ].back(), 4.0 );
+			if ( !measuring( meshes.size() - 1, errors[ i ].back() ) )
+				BOOST_TEST_MESSAGE(
+					"  *** k = " << order << ", Psi_N = " << set.fractions[ i ]
+					<< ": SKIPPED the sequence rate. The finest distance is "
+					<< errors[ i ].back() << " against a traced-position floor of "
+					<< meq::tests::tracedPositionFloor(
+						1.0, boxWidth/static_cast<double>( meshes.back() ) )
+					<< " -- eps/h, which RISES as the mesh falls. M-221" );
+			else
 			BOOST_TEST( whole > order + 1.0 - sequenceSlack,
 			            "k = " << order << ", Psi_N = " << set.fractions[ i ]
 			            << ": the traced contour converges on the exact one at "
@@ -1334,12 +1389,16 @@ BOOST_AUTO_TEST_CASE( theTracedContourConvergesAtTheFieldsOwnOrder )
 			            << "implicit function theorem" );
 
 			for ( std::size_t m = 1; m < meshes.size(); ++m )
+			{
+				if ( !measuring( m, errors[ i ][ m ] ) )
+					continue;
 				BOOST_TEST( rate( errors[ i ][ m - 1 ], errors[ i ][ m ], 2.0 )
 				            > order + 1.0 - pairSlack,
 				            "k = " << order << ", Psi_N = " << set.fractions[ i ]
 				            << ": the pair " << meshes[ m - 1 ] << " -> "
 				            << meshes[ m ] << " converges at "
 				            << rate( errors[ i ][ m - 1 ], errors[ i ][ m ], 2.0 ) );
+			}
 		}
 	}
 }
@@ -1542,6 +1601,20 @@ BOOST_AUTO_TEST_CASE( theFaceJumpIsTheDiscretisationAndConvergesAtItsOrder )
 		// same statement as the potential comparison two tests down, arriving
 		// from the direction of the jump rather than of the contour.
 		double const whole = rate( mean.front(), mean.back(), 4.0 );
+		// AND k+2 IS THREE ORDERS AT k = 1, WHICH A SINGLE-PRECISION SEQUENCE
+		// CANNOT CROSS. The jump of psi* is a DIFFERENCE of two element
+		// polynomials across a face, so it is a cancellation and reaches the
+		// format's floor earlier than psi* itself does: measured 2.781 at
+		// k = 2 and 0.027 at k = 3 where the double build gives the design
+		// order at every degree. Skipped by the expected RATE rather than by
+		// the degree, for the reason NewtonConvergence's psi* study gives.
+		// M-220, M-221.
+		if ( !meq::tests::rateOfOrderIsMeasurable( orders[ o ] + 2.0 ) )
+			BOOST_TEST_MESSAGE(
+				meq::tests::rateNotMeasurableNotice( orders[ o ],
+				                                     "the DG jump of psi*",
+				                                     orders[ o ] + 2.0 ) );
+		else
 		BOOST_TEST( whole > orders[ o ] + 2.0 - pairSlack,
 		            "k = " << orders[ o ] << ": the DG jump of psi* converges at "
 		            << whole << " rather than at the k+2 that is psi*'s own "
@@ -1661,6 +1734,36 @@ BOOST_AUTO_TEST_CASE( theRawPotentialAndThePostProcessedOneAreCompared )
 		double const rawRate = rate( raw.front(), raw.back(), 4.0 );
 		double const postRate = rate( post.front(), post.back(), 4.0 );
 
+		/*
+		 * **AND BOTH COLUMNS ARE TRACED POSITIONS, SO BOTH CARRY eps/h.** The
+		 * distances here are the same quantity
+		 * theTracedContourConvergesAtTheFieldsOwnOrder measures, on the same
+		 * fixture, and they turn rather than flatten for the same reason:
+		 * measured in single, rooting psi_h converges at 2.298 at k = 2 and
+		 * rooting psi* at 0.749, where the double build gives k+1 and k+2. The
+		 * finest reading on each column is checked against
+		 * meq::tests::tracedPositionFloor() and the rate skipped when it is
+		 * under it; clearOfContaminant() is unconditionally true in double.
+		 *
+		 * **THE COMPARISON BELOW IS NOT A RATE AND IS KEPT**: whether psi*
+		 * beats psi_h on the finest mesh is what makes psi* the default, and
+		 * it is answerable while both are above the floor -- which they are
+		 * here, since they floor together. M-220, M-221.
+		 */
+		double const rootFloor = meq::tests::tracedPositionFloor(
+			1.0, box.width()/static_cast<double>( meshes.back() ) );
+		bool const rootsAreMeasurable =
+			meq::tests::clearOfContaminant( raw.back(), rootFloor, 1.0 )
+			&& meq::tests::clearOfContaminant( post.back(), rootFloor, 1.0 );
+		if ( !rootsAreMeasurable )
+			BOOST_TEST_MESSAGE(
+				"  *** k = " << orders[ o ] << ": SKIPPED both rooting rates. "
+				"The finest distances are " << raw.back() << " and "
+				<< post.back() << " against a traced-position floor of "
+				<< rootFloor << " -- eps/h, which RISES as the mesh falls. The "
+				"comparison between the two columns still runs. M-221" );
+		else
+		{
 		BOOST_TEST( rawRate > orders[ o ] + 1.0 - sequenceSlack,
 		            "k = " << orders[ o ] << ": rooting psi_h converges at "
 		            << rawRate << " rather than at the k+1 that psi_h's own "
@@ -1675,7 +1778,15 @@ BOOST_AUTO_TEST_CASE( theRawPotentialAndThePostProcessedOneAreCompared )
 		            << postRate << " rather than at the k+2 that psi*'s own "
 		            << "order gives it. If it has fallen back to k+1, the "
 		            << "post-processed field is not the one being rooted" );
+		}
 
+		// AND THE COMPARISON GOES WITH THE RATES WHERE BOTH COLUMNS HAVE
+		// FLOORED, which is the half this case cannot answer either: psi*
+		// beats psi_h because it converges faster, and at the floor neither
+		// converges. Measured in single at k = 2, rooting psi* gives 1.77e-05
+		// against psi_h's own reading on the same mesh, where in double it is
+		// twenty times better. M-221.
+		if ( rootsAreMeasurable )
 		BOOST_TEST( post.back() < 0.2*raw.back(),
 		            "k = " << orders[ o ] << ": on the finest mesh rooting psi* "
 		            << "gives " << post.back() << " against psi_h's "
@@ -1908,7 +2019,13 @@ BOOST_AUTO_TEST_CASE( theSpectralRuleIsOnlyAsGoodAsItsJacobian )
 		             "relative; fit fallbacks %d\n",
 		             worst, scale, worst/scale, fit.fallbackLocations );
 
-		BOOST_TEST( worst < 1.0e-4*scale,
+		// **A SPECTRAL DERIVATIVE IS STILL A DERIVATIVE**, so the two routes
+		// agree to eps^(2/3) rather than to eps: measured 1.08e-03 relative in
+		// single -- the eps^(2/3)-to-sqrt( eps ) band M-219 records -- against
+		// 1e-06 in double. The identity being WRONG is O( 1 ), which is what
+		// this separates. differencedAgreementFloor() is the caller's own
+		// value in double. M-219, M-221.
+		BOOST_TEST( worst < meq::tests::differencedAgreementFloor( 1.0e-4 )*scale,
 		            "rho' from q and a spectral derivative of the radii disagree "
 		            << "by " << worst << " on a scale of " << scale
 		            << ". The two share the traced points and nothing else, so a "
@@ -1995,6 +2112,13 @@ BOOST_AUTO_TEST_CASE( theSpectralRuleIsOnlyAsGoodAsItsJacobian )
 	            "the differenced Jacobian converges at " << differencedRate
 	            << " rather than the second order a central difference gives" );
 
+	// The separation's RATE goes with it, for the same reason. M-221.
+	if ( !meq::tests::clearOfContaminant(
+		     fromFlux.back(), meq::tests::scalarAgreementFloor( 0.0, 1.0 ) ) )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the separation's rate: the pointwise metric has "
+			"reached the format's floor. M-221" );
+	else
 	BOOST_TEST( fluxRate > differencedRate + 1.0,
 	            "the pointwise metric from q converges at " << fluxRate
 	            << " against the differenced one's " << differencedRate
@@ -2006,6 +2130,20 @@ BOOST_AUTO_TEST_CASE( theSpectralRuleIsOnlyAsGoodAsItsJacobian )
 	// asymptotic regime and they sit within a factor of ten of each other; the
 	// separation the table exists to show is what the two rates open up over the
 	// sweep, and it is five orders by the end.
+	// AND THE POINTWISE COLUMN FLOORS FIRST, WHICH IS THE POINT OF IT. It is
+	// the accurate one, so it reaches the arithmetic while the differenced
+	// control sits three orders above -- measured 3.68e-06 against 7.05e-04 in
+	// single, exactly the separation the table intends, but no longer FIVE
+	// orders because the accurate column has stopped measuring the method.
+	// The control's own two bounds above still run. M-221.
+	if ( !meq::tests::clearOfContaminant(
+		     fromFlux.back(), meq::tests::scalarAgreementFloor( 0.0, 1.0 ) ) )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the separation at N = " << counts.back()
+			<< ": the pointwise metric reads " << fromFlux.back()
+			<< ", which is the format's own floor on a quadrature of O( 1 ). "
+			   "M-221" );
+	else
 	BOOST_TEST( fromFlux.back() < 1.0e-4*differenced.back(),
 	            "at N = " << counts.back() << " the pointwise metric is "
 	            << fromFlux.back() << " against the differenced one's "
@@ -2059,7 +2197,13 @@ BOOST_AUTO_TEST_CASE( theMetricAndTheHermiteArcLengthAgree )
 		            "Psi_N = " << set.fractions[ i ]
 		            << ": the fit reports min | u x t | = " << fit.transversality );
 
-		BOOST_TEST( relative < 1.0e-6,
+		// TWO QUADRATURES OVER ONE CONTOUR, so they agree to round-off on it
+		// and no further: 1.07e-05 and 1.26e-06 relative in single against
+		// 1e-14 in double. A defect in either is a missing 2 pi R or a metric
+		// about the wrong point, which is O( 1 ). exactAgreementFloor() is
+		// exactly zero in double. M-221.
+		BOOST_TEST( relative < std::max( 1.0e-6,
+		                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 		            "Psi_N = " << set.fractions[ i ] << ": the Hermite arc length "
 		            << hermite << " and the metric's " << metric << " disagree by "
 		            << relative << " relative. They share the field and the "
@@ -2298,7 +2442,22 @@ BOOST_AUTO_TEST_CASE( theBandIsCrossedOnlyWhenAnExtensionSaysHow )
 			solved.mesh().FindPoints( matrix, found, ips, false );
 
 			bool const inside = found.Size() > 0 && found[ 0 ] >= 0;
-			if ( p.extended && inside )
+			/*
+			 * **A POINT ON Gamma_h BELONGS TO BOTH PREDICATES AND THAT IS NOT
+			 * A DISAGREEMENT.** MEQ's flag and Mesh::FindPoints ask the same
+			 * question of a point whose band depth is zero, and answer it with
+			 * different arithmetic -- MEQ's from the face it stepped off,
+			 * MFEM's from an element inversion -- so in a narrow format a
+			 * point a few eps into the band is flagged extended and found
+			 * inside. Excused only where the DEPTH is at round-off on the
+			 * machine's own size; a point genuinely in the band is O( h ) deep
+			 * and is still counted. exactAgreementFloor() is exactly zero in
+			 * double, where every flagged point has a strictly positive depth
+			 * -- asserted three lines below -- so nothing there is excused.
+			 * M-221.
+			 */
+			if ( p.extended && inside
+			     && p.bandDepth > meq::tests::exactAgreementFloor( 1.0 ) )
 				++flaggedButInside;
 			if ( !p.extended && !inside )
 				++outsideButUnflagged;
