@@ -8,6 +8,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -271,7 +273,15 @@ BOOST_AUTO_TEST_CASE( theLimiterPolygonIsClosedAndFittedToTheMesh )
 		// are mesh lines. A staircase would read something larger and would not
 		// settle -- see the note beside limiterRMin for what a painted circle
 		// does instead.
-		BOOST_TEST( std::fabs( length - limiterPerimeter() ) < 1.0e-12,
+		// ROUND-OFF ON THE PERIMETER, WHICH IS A SUM OF real_t COORDINATES.
+		// The face lengths come out of the mesh's own vertices, so in single
+		// the polygon reads 2.0000001192092896 against 2 -- ONE eps of the
+		// perimeter, at every mesh alike. A staircase reads something larger
+		// AND does not settle, which is the failure this guards and is
+		// O( h ). M-220.
+		BOOST_TEST( std::fabs( length - limiterPerimeter() )
+		            < meq::tests::scalarAgreementFloor( 1.0e-12,
+		                                                limiterPerimeter() ),
 			"the polygon's length at n = " << n << " is " << length
 			<< " against the prescribed rectangle's " << limiterPerimeter()
 			<< ". The rectangle is on mesh lines, so the two must agree to "
@@ -347,7 +357,13 @@ BOOST_AUTO_TEST_CASE( theContactIsFoundWhereTheFieldIsLargestOnThePolygon )
 		             solver.psiBoundary(), sampled, solver.limiterContactR(),
 		             solver.limiterContactZ() );
 
-		BOOST_TEST( solver.psiBoundary() >= sampled - 1.0e-11,
+		// The slack is round-off on psi: the border's maximum and a dense
+		// sample of the same polygon are the same number computed twice, and
+		// in single they part at 1.6e-08 on a psi of 0.52 -- a quarter of one
+		// eps. M-220.
+		BOOST_TEST( solver.psiBoundary()
+		            >= sampled - meq::tests::scalarAgreementFloor(
+			            1.0e-11, solver.psiBoundary() ),
 			"psi_bnd at n = " << n << " is " << solver.psiBoundary()
 			<< " but a dense sample of the polygon found " << sampled
 			<< " at ( " << sampledR << ", " << sampledZ << " ). The constraint "
@@ -361,7 +377,12 @@ BOOST_AUTO_TEST_CASE( theContactIsFoundWhereTheFieldIsLargestOnThePolygon )
 		                            std::fabs( solver.limiterContactR() - limiterRMax ) );
 		double const dZ = std::min( std::fabs( solver.limiterContactZ() - limiterZMin ),
 		                            std::fabs( solver.limiterContactZ() - limiterZMax ) );
-		BOOST_TEST( std::min( dR, dZ ) < 1.0e-12,
+		// ON the polygon to round-off on a coordinate: the contact comes back
+		// at R = 1.2000000476837158 against an edge at 1.2, which is 0.4 eps
+		// of it. A contact that is genuinely off the rectangle is O( h ) away.
+		// M-220.
+		BOOST_TEST( std::min( dR, dZ )
+		            < meq::tests::scalarAgreementFloor( 1.0e-12, limiterRMax ),
 			"the contact at n = " << n << " is ( " << solver.limiterContactR()
 			<< ", " << solver.limiterContactZ() << " ), which is not on the "
 			"rectangle's boundary" );
@@ -496,6 +517,34 @@ BOOST_AUTO_TEST_CASE( theFoundContactAgreesWithTheExactOneAndAWrongOneDoesNot )
 	double const contactRate =
 		std::log2( contactOffset.front()/contactOffset.back() )/2.0;
 	std::printf( "\n    contact position converges at %.3f\n", contactRate );
+
+	/*
+	 * **AND A STATIONARY POINT'S POSITION IS ONLY KNOWABLE TO sqrt( eps ),
+	 * WHICH IS THE ONE PLACE A NARROWER FORMAT COSTS HALF THE DIGITS RATHER
+	 * THAN ALL OF THEM.** psi is FLAT here by construction -- that is the whole
+	 * envelope argument this case rests on -- so psi = psi_max - c dz^2 and a
+	 * flux known to eps pins dz only to sqrt( eps/c ). Measured in single, the
+	 * offset runs 1.177e-03, 2.408e-04, 1.536e-04: converging at 2.289 on the
+	 * first pair and then FLOORING, at 1.5e-04, which is sqrt( eps ) on a
+	 * half-width of 0.5. In double the same floor is 1.49e-08 and four dyadic
+	 * meshes never approach it.
+	 *
+	 * So the rate is asserted while the finest offset is still above that
+	 * floor, and skipped loudly otherwise. What is NOT skipped is the gap
+	 * against the exactly-prescribed contact below -- an O( sqrt( eps ) ) error
+	 * in WHERE the contact is costs O( eps ) in the VALUE there, which is the
+	 * envelope theorem arriving from the other side, so the assertion this case
+	 * exists for survives the format untouched. M-220.
+	 */
+	if ( !meq::tests::stationaryPositionIsMeasurable( contactOffset.back(),
+	                                                 0.5*( limiterRMax
+	                                                       - limiterRMin ) ) )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the contact's convergence rate. The finest offset is "
+			<< contactOffset.back() << " m, at sqrt( eps ) on this feature -- "
+			"the floor on locating a STATIONARY point, which no refinement "
+			"moves. The value there is unaffected and is asserted below. M-220" );
+	else
 	BOOST_TEST( contactRate > 1.8,
 		"the located contact approaches the midplane at only " << contactRate
 		<< ", where the field it is a stationary point of converges at "
@@ -574,7 +623,18 @@ BOOST_AUTO_TEST_CASE( theBorderRowKeepsNewtonsQuadraticOrder )
 		}
 
 		// The tail: the last triple whose middle and last are above the floor.
-		double const floorLevel = 1.0e-13*found.residuals.front();
+		//
+		// **AND THE FLOOR IS THE TOLERANCE THE SOLVE WAS GIVEN, NOT ONLY A
+		// FRACTION OF || r_0 ||.** A residual at or below the target is not a
+		// Newton step, it is the stop -- and meq::newtonTolerance() floors that
+		// target at ten eps, so in single the history ends 7.99e-04, 1.52e-06,
+		// 1.05e-06 with the last entry BELOW 1.19e-06 and the triple ending
+		// there reading order 0.059. The triple ending one earlier reads
+		// 1.882, which is the quadratic tail this case is about. In double the
+		// target is 2.2e-15 and 1e-13 || r_0 || is larger, so the historical
+		// expression is what selects and nothing moves. M-220.
+		double const floorLevel = std::max( 1.0e-13*found.residuals.front(),
+		                                    meq::newtonTolerance( 0.0 ) );
 		double tail = 0.0;
 		for ( std::size_t i = 2; i < found.residuals.size(); ++i )
 			if ( found.residuals[ i ] > floorLevel )
@@ -750,8 +810,14 @@ BOOST_AUTO_TEST_CASE( theDriversOwnEstimateIsTheSameFunctionalAsTheBorder )
 		             n, solver.psiBoundary(), polygon, region,
 		             solver.psiAxis() );
 
+		// ONE FUNCTION, TO ROUND-OFF. The two walk the same faces and reduce
+		// the same maximum through different code, so in single they part at
+		// 4.6e-08 on 0.516 -- 0.8 eps. M-165's defect, the one this case
+		// exists for, read psi_ax against psi_bnd and was O( 1 ) out. M-220.
 		BOOST_TEST( std::fabs( polygon - solver.psiBoundary() )
-		            <= 1.0e-12*std::max( 1.0, std::fabs( solver.psiBoundary() ) ),
+		            <= meq::tests::scalarAgreementFloor(
+			            1.0e-12*std::max( 1.0, std::fabs( solver.psiBoundary() ) ),
+			            solver.psiBoundary() ),
 			"meq::limiterPolygonMaximum() gives " << polygon << " at n = " << n
 			<< " where the border the same solve closed on gives "
 			<< solver.psiBoundary() << ". The driver poses the first support "

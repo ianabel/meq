@@ -681,6 +681,27 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
 		            << differencedRate << " rather than the second order a "
 		            << "central difference gives" );
 
+		// AND THE POINTWISE COLUMN FLOORS FIRST, WHICH IS THE WHOLE POINT OF
+		// IT. It is the accurate one, so it is the one that reaches the
+		// arithmetic: in single it reads 2.95e-06 at N = 128 -- 25 eps --
+		// while the differenced control sits at 1.85e-03, three orders above,
+		// exactly as the table intends. What cannot then be read is the
+		// SEPARATION, since the accurate column has stopped being a
+		// measurement of the method. In double it reaches 1e-13 and
+		// clearOfContaminant() is true there unconditionally. M-220.
+		if ( !meq::tests::clearOfContaminant(
+			     column.pointwise.back(),
+			     meq::tests::scalarAgreementFloor( 0.0, 1.0 ) ) )
+		{
+			BOOST_TEST_MESSAGE(
+				"  *** " << column.name << ": SKIPPED the separation. The "
+				"pointwise metric reads " << column.pointwise.back()
+				<< " at N = " << counts.back() << ", which is the format's own "
+				"floor on a quadrature of O( 1 ). The differenced control's own "
+				"two bounds above still run. M-220" );
+			continue;
+		}
+
 		BOOST_TEST( pointwiseRate > differencedRate + 1.0,
 		            column.name << ": the pointwise metric from q converges at "
 		            << pointwiseRate << " against the differenced one's "
@@ -851,6 +872,22 @@ BOOST_AUTO_TEST_CASE( theAveragesConvergeInTheMeshAgainstTheExactField )
 
 		double const ratio = static_cast<double>( sizes.back() )/sizes.front();
 
+		/*
+		 * **AND AN AVERAGE IS WORSE ON THE FINER MESH IN A NARROW FORMAT, WHICH
+		 * IS THE OPPOSITE OF A RATE TAIL FLATTENING.** The arc-length metric
+		 * comes off `q`, so the round-off part of these quadratures carries
+		 * `h^-2` where the truncation carries `h^(k+1)`; the two cross and past
+		 * the crossing refining makes the number worse. Measured in single at
+		 * k = 2 the rms relative error in V' RISES 6.64e-06, 8.80e-06,
+		 * 1.54e-04, 3.31e-04 over n = 12 to 96, and every observed order in the
+		 * table is negative. meq::tests::averagedMetricFloor() carries the law
+		 * and the measurement; in double it is 8.2e-12 on the finest mesh here
+		 * and clearOfContaminant() is true unconditionally there, so every rate
+		 * and every ceiling this build asserts today still runs.
+		 */
+		double const metricFloor =
+			meq::tests::averagedMetricFloor( box.width()/sizes.back() );
+
 		for ( std::size_t c = 0; c < choices.size(); ++c )
 		{
 			double const vRate = rate( vErrors[ c ].front(), vErrors[ c ].back(),
@@ -861,6 +898,21 @@ BOOST_AUTO_TEST_CASE( theAveragesConvergeInTheMeshAgainstTheExactField )
 			std::printf( "  k = %d, %s over the sequence: V' %.3f, "
 			             "< R^-2 > %.3f\n", order, choices[ c ].name, vRate,
 			             aRate );
+
+			if ( !meq::tests::clearOfContaminant( vErrors[ c ].back(),
+			                                      metricFloor )
+			     || !meq::tests::clearOfContaminant( aErrors[ c ].back(),
+			                                         metricFloor ) )
+			{
+				BOOST_TEST_MESSAGE(
+					"  *** k = " << order << ", " << choices[ c ].name
+					<< ": SKIPPED. The finest mesh reads " << vErrors[ c ].back()
+					<< " in V' and " << aErrors[ c ].back() << " in < R^-2 > "
+					"against a metric floor of " << metricFloor
+					<< " -- eps/h^2, which RISES as the mesh falls, so there is "
+					"no truncation left in this column to converge. M-220" );
+				continue;
+			}
 
 			BOOST_TEST( vRate > expected - sequenceSlack,
 			            "k = " << order << ", " << choices[ c ].name
@@ -1035,6 +1087,29 @@ BOOST_AUTO_TEST_CASE( theAveragedIdentityHoldsOnTheDiscreteFieldAndConverges )
 		            << "the mesh instead then the instrument is not the limit "
 		            << "and this comparison is empty" );
 
+		// AND BOTH COLUMNS ARE DIFFERENCED, SO THE FLOOR IS sqrt( eps ) AND
+		// NOT eps. A central difference of a field known to eps resolves a
+		// derivative to eps^(2/3) at best and a Richardson extrapolation of
+		// two of them no better; measured, the extrapolated residual reads
+		// 5.28e-04 in single against a right-hand side of 1.164 -- 4.5e-04
+		// relative, which is sqrt( eps ) -- where in double it reaches 1e-09.
+		// Past that point the extrapolation cannot beat the difference it is
+		// built from, because both are the same noise. M-219, M-220.
+		double const identityFloor =
+			meq::tests::differencedAgreementFloor( 1.0e-7 )*scale;
+		if ( !meq::tests::clearOfContaminant( richardson.back(),
+		                                      identityFloor ) )
+		{
+			BOOST_TEST_MESSAGE(
+				"  *** k = " << order << ": SKIPPED the extrapolation's gain "
+				"and its rate. The extrapolated residual is "
+				<< richardson.back() << " against a floor of " << identityFloor
+				<< " -- sqrt( eps ) of the right-hand side, which is what a "
+				"differenced instrument can resolve. The control's own "
+				"assertion above still runs. M-220" );
+			continue;
+		}
+
 		BOOST_TEST( richardson.back() < 0.02*central.back(),
 		            "k = " << order << ": on the finest mesh the extrapolated "
 		            << "residual is " << richardson.back() << " and the plain "
@@ -1042,7 +1117,7 @@ BOOST_AUTO_TEST_CASE( theAveragedIdentityHoldsOnTheDiscreteFieldAndConverges )
 		            << "identity in both, so the gap between them is the "
 		            << "INSTRUMENT and nothing else" );
 
-		BOOST_TEST( richardson.back() < 1.0e-7*scale,
+		BOOST_TEST( richardson.back() < identityFloor,
 		            "k = " << order << ": the identity residual on the finest "
 		            << "mesh is " << richardson.back() << " against a "
 		            << "right-hand side of " << scale << ". Three averages are "
@@ -1286,6 +1361,23 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 		std::printf( "  k = %d: the disagreement converges at %.3f in V' and "
 		             "%.3f in < R^-2 >\n", order, gapRate, inverseRate );
 
+		// AND THE GAP BETWEEN TWO EXTRACTIONS IS AN AVERAGE TOO, so it carries
+		// the same eps/h^2 floor as the columns it is a difference of --
+		// see meq::tests::averagedMetricFloor(). In single the gap has stopped
+		// being the discretisation the two share by the third mesh. M-220.
+		double const gapFloor =
+			meq::tests::averagedMetricFloor( box.width()/sizes.back() );
+		if ( !meq::tests::clearOfContaminant( gaps.back(), gapFloor )
+		     || !meq::tests::clearOfContaminant( inverseGaps.back(), gapFloor ) )
+		{
+			BOOST_TEST_MESSAGE(
+				"  *** k = " << order << ": SKIPPED the disagreement's rate. "
+				"The finest gap is " << gaps.back() << " in V' and "
+				<< inverseGaps.back() << " in < R^-2 > against a metric floor "
+				"of " << gapFloor << ". M-220" );
+			continue;
+		}
+
 		BOOST_TEST( gapRate > order + 1.0 - sequenceSlack,
 		            "k = " << order << ": the disagreement between the two "
 		            << "extractions converges at " << gapRate << " rather than "
@@ -1336,12 +1428,18 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 			std::printf( "  %8.2f %14.4e %14.4e %10.3f\n", offset, dv, da,
 			             fit.transversality );
 
-			BOOST_TEST( dv < 1.0e-8,
+			// RELATIVE ROUND-OFF ON A RE-SAMPLED QUADRATURE. The two runs
+			// sample the same curve at different points and sum in a
+			// different order, so in single they part at 3.25e-06 -- 27 eps
+			// -- where in double they agree at 1e-14. A metric identity that
+			// is actually wrong gives a dependence on the ORIGIN, which is
+			// O( offset ). M-220.
+			BOOST_TEST( dv < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 ),
 			            "moving the ray origin by " << offset << " moved V' by "
 			            << dv << " relative. The integral is over a curve and "
 			            << "cannot depend on the rays used to sample it; a "
 			            << "dependence is the metric identity being wrong" );
-			BOOST_TEST( da < 1.0e-8,
+			BOOST_TEST( da < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 ),
 			            "moving the ray origin by " << offset
 			            << " moved < R^-2 > by " << da << " relative" );
 		}
@@ -1510,14 +1608,19 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	             "%.14e\n", angle.arcLength(), fitted.fit.length(),
 	             hermite.arcLength() );
 
-	BOOST_TEST( relative( angle.arcLength(), fitted.fit.length() ) < 1.0e-13,
+	// The same sum through two wrappers, so they agree to round-off on it:
+	// 2.8657089 against 2.8657087 in single, which is 0.8 eps relative. A
+	// weight built the wrong way is O( 1 ). M-220.
+	BOOST_TEST( relative( angle.arcLength(), fitted.fit.length() )
+	            < meq::tests::scalarAgreementFloor( 1.0e-13, 1.0 ),
 	            "the arc length through the facility is " << angle.arcLength()
 	            << " and AngleParametrisation::length() is "
 	            << fitted.fit.length() << ". They are algebraically the same "
 	            << "number, so a difference is a weight that is not built the "
 	            << "way SurfaceAverage.hpp says it is" );
 	BOOST_TEST( relative( hermite.arcLength(),
-	                      fitted.contour.hermiteLength( 10 ) ) < 1.0e-13,
+	                      fitted.contour.hermiteLength( 10 ) )
+	            < meq::tests::scalarAgreementFloor( 1.0e-13, 1.0 ),
 	            "the arc length through the facility is " << hermite.arcLength()
 	            << " and Contour::hermiteLength() is "
 	            << fitted.contour.hermiteLength( 10 ) );

@@ -796,7 +796,12 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 	                    "robustness route failing and is the more serious of the "
 	                    "two" );
 
-	BOOST_TEST( bestAgreement < 1.0e-10,
+	// TO ROUND-OFF, AND ROUND-OFF IS A PROPERTY OF THE FORMAT: the best
+	// agreement reads 9.93e-08 relative in single -- 0.8 eps -- against
+	// 9.07e-14 in double. A Picard path solving a NEIGHBOURING PROBLEM, which
+	// is what this guards, disagrees by O( 1 ). M-220.
+	BOOST_TEST( bestAgreement
+	            < meq::tests::scalarAgreementFloor( 1.0e-10, 1.0 ),
 	            "the two paths never agree better than " << bestAgreement
 	            << " over the sweep. At least one mesh should see them reach the "
 	            "SAME discrete solution to round-off; that they never do means "
@@ -1208,6 +1213,18 @@ BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 	            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md -- so "
 	            "compare the two orderings first: if condense-first still "
 	            "converges here, it is that class of defect again" );
+	// AND THE COUNT IS AN ARTEFACT OF THE FORMAT, where converging is not:
+	// single takes 31 iterations on this case against double's 8 to 11,
+	// because the element-local solves are noisier there while the outer
+	// target is looser. The claim -- that p-refinement cures the coarse case
+	// -- is the assertion above and still runs. M-219, M-220.
+	if ( !meq::tests::iterationCountIsComparable() )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the iteration count for k = 2, n = 16: it read "
+			<< raised.newtonIterations << " against the 11 measured in double, "
+			"which is the format and not a regression. Convergence itself is "
+			"asserted above. M-220" );
+	else
 	BOOST_TEST( raised.newtonIterations <= 20,
 	            "k = 2, n = 16 took " << raised.newtonIterations
 	            << " iterations where 11 is the value measured under "
@@ -1426,10 +1443,21 @@ BOOST_AUTO_TEST_CASE( aCornerSingularSolutionCapsTheRateOnThisRectangle )
 			eq, "control: Solov'ev, homogeneous data", order, cloud(), zeroDatum,
 			standardBox(), dyadicFrom( 16 ), psiFloor[ order ], fluxFloor[ order ],
 			newtonCap, 1.0e-9 );
+		// ONE STEP, OR ONE STEP'S WORTH OF REDUCTION. An exact Newton on an
+		// affine residual finishes in one; in single the second step is the
+		// solver noticing that the first landed at the round-off floor rather
+		// than below a target seven orders under it, so the COUNT reads 2 and
+		// the CLAIM is intact. oneExactStepReachedTheFloor() asserts the
+		// reduction instead, which a merely-close Jacobian cannot reach in one
+		// step whatever the target -- a stronger statement than the count.
+		// M-219.
 		for ( SelfMeasurement const &point : points )
-			BOOST_TEST( point.newtonIterations <= 1,
+			BOOST_TEST( ( point.newtonIterations <= 1
+			              || meq::tests::oneExactStepReachedTheFloor(
+				              point.residuals ) ),
 			            "the Solov'ev source does not depend on psi, so one exact "
-			            "Newton step must finish it" );
+			            "Newton step must finish it"
+			            << meq::tests::stepReductionNotice( point.residuals ) );
 	}
 }
 

@@ -9,6 +9,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -484,7 +486,12 @@ BOOST_AUTO_TEST_CASE( theInscribedPolygonDoesNotMoveWithRefinement )
 					worst = std::max( worst, std::abs( shape().levelSet( x[ 0 ], x[ 1 ] ) ) );
 				}
 			}
-			BOOST_TEST( worst < 1.0e-12,
+			// ON the curve to round-off on a coordinate: the vertices are
+			// real_t and the level set is evaluated in double from them, so
+			// in single the worst reads 5.37e-08 -- 0.45 eps of the machine's
+			// own size. A vertex that is genuinely off the curve is O( h ).
+			// M-220.
+			BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 			            "a base-mesh boundary vertex is " << worst << " off the "
 			            "Miller curve" );
 		}
@@ -493,7 +500,13 @@ BOOST_AUTO_TEST_CASE( theInscribedPolygonDoesNotMoveWithRefinement )
 
 	for ( int level = 1; level < millerLevels; ++level )
 	{
-		BOOST_TEST( std::abs( area[ level ] - area[ 0 ] ) < 1.0e-12*area[ 0 ],
+		// The same area computed twice from real_t vertices, once per
+		// refinement level, so the two agree to round-off on it rather than
+		// exactly. A domain that MOVED under refinement changes area by
+		// O( h ). M-220.
+		BOOST_TEST( std::abs( area[ level ] - area[ 0 ] )
+		            < meq::tests::scalarAgreementFloor( 1.0e-12*area[ 0 ],
+		                                                area[ 0 ] ),
 		            "the domain changed area between level 0 and level " << level
 		            << ", so uniform refinement is not leaving the polygon alone and "
 		            "the self-convergence measurement is contaminated by a moving "
@@ -603,6 +616,15 @@ BOOST_AUTO_TEST_CASE( example6SelfConverges )
 		// q: design order in the interior. Measured 1.993, 3.360, 4.595.
 		double const fluxFloor = order + 1.0 - 0.25;
 
+		// THE SELF-DIFFERENCE TAIL IS NOT MEASURABLE ABOVE k = 1 IN SINGLE.
+		// Delta( q ) reads 1.924 at k = 2 and 0.043 at k = 3 on the finest
+		// pair, where this build's own coarser pairs and the double build's
+		// whole table give the design order -- the difference between two
+		// solutions four times apart has reached the format's floor. Skipped
+		// loudly by DEGREE, per M-218. M-220.
+		if ( !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+		else
 		for ( std::size_t i = 1; i < interiorDiffs.size(); ++i )
 		{
 			double const ratio = interiorDiffs[ i - 1 ].h/interiorDiffs[ i ].h;
@@ -749,6 +771,16 @@ BOOST_AUTO_TEST_CASE( diagnosticExactSolutionOnThePolygon )
 				                                          previousH/largest );
 				std::printf( "    h %.5f  psi %.4e %6.3f  q %.4e %6.3f\n", largest, ep,
 				             ratePsi, ef, rateFlux );
+				// AND THE RATES ARE SKIPPED BY DEGREE IN SINGLE, for the same
+				// reason the self-difference above is: at k = 3 psi reads
+				// -0.190 on the finest pair against the design 4, the error
+				// having reached the format's floor two refinements earlier.
+				// M-218, M-220.
+				if ( !meq::tests::rateIsMeasurable( order ) )
+					BOOST_TEST_MESSAGE(
+						meq::tests::rateNotMeasurableNotice( order ) );
+				else
+				{
 				BOOST_TEST( ratePsi >= order + 1.0 - 0.15,
 				            "k = " << order << ", h = " << largest << ": psi converged at "
 				            << ratePsi << " against an EXACT solution on the same "
@@ -758,6 +790,7 @@ BOOST_AUTO_TEST_CASE( diagnosticExactSolutionOnThePolygon )
 				            "k = " << order << ", h = " << largest << ": q converged at "
 				            << rateFlux << " against an exact solution on the same "
 				            "polygon" );
+				}
 			}
 			previousPsi = ep;
 			previousFlux = ef;

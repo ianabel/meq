@@ -412,11 +412,24 @@ BOOST_AUTO_TEST_CASE( everyComponentConvergesAtKPlusOne )
 
 		double const expected = order + 1.0 - rateSlack;
 
+		// THE RATES ARE NOT MEASURABLE ABOVE k = 1 IN THIS FORMAT, and eta is
+		// worse placed than the error it estimates: see
+		// meq::tests::residualEstimatorFloor() for why its round-off part
+		// carries 1/h where the truncation carries h^(k+1), so the two cross
+		// and eta RISES on refinement. Measured in single at k = 3, every
+		// component reads about -1.0 on every pair. Skipped by DEGREE, per
+		// M-218; the eta_6 identity below is not a rate and still runs at
+		// every degree and every mesh, and so does the ceiling. M-220.
+		bool const rates = meq::tests::rateIsMeasurable( order );
+		if ( !rates )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
 			double const ratio = points[ i - 1 ].h/points[ i ].h;
 
 			double const total = rate( points[ i - 1 ].eta, points[ i ].eta, ratio );
+			if ( rates )
 			BOOST_TEST( total >= expected,
 			            "k = " << order << ", h = " << points[ i ].h << ": eta converged at "
 			            << total << ", wanted " << expected );
@@ -447,6 +460,8 @@ BOOST_AUTO_TEST_CASE( everyComponentConvergesAtKPlusOne )
 
 				double const measured = rate( points[ i - 1 ].component[ t ],
 				                              points[ i ].component[ t ], ratio );
+				if ( !rates )
+					continue;
 				BOOST_TEST( measured >= expected,
 				            "k = " << order << ", h = " << points[ i ].h << ": "
 				            << meq::ResidualEstimator::name( static_cast<Term>( t ) )
@@ -459,9 +474,19 @@ BOOST_AUTO_TEST_CASE( everyComponentConvergesAtKPlusOne )
 		// three times the measured finest-mesh eta: 6.391e-04, 3.820e-06,
 		// 1.927e-08 at k = 1, 2, 3.
 		double const ceiling[ 3 ] = { 2.0e-3, 1.2e-5, 6.0e-8 };
-		BOOST_TEST( points.back().eta < ceiling[ order - 1 ],
+		// AND THE CEILING CARRIES THE ESTIMATOR'S OWN FLOOR UNDER IT. eta does
+		// not merely stop falling in single, it RISES -- 8.93e-05, 9.73e-05,
+		// 1.97e-04, 3.93e-04 at k = 3 -- so a ceiling set from the double
+		// build's 1.93e-08 is below what the arithmetic can reach. In double
+		// the floor is 2.27e-12 and every ceiling here dominates it by eight
+		// orders. M-220.
+		double const etaCeiling =
+			std::max( ceiling[ order - 1 ],
+			          meq::tests::residualEstimatorFloor( points.back().normPsi,
+			                                              points.back().h ) );
+		BOOST_TEST( points.back().eta < etaCeiling,
 		            "k = " << order << ": eta is " << points.back().eta
-		            << " on the finest mesh, above the ceiling " << ceiling[ order - 1 ] );
+		            << " on the finest mesh, above the ceiling " << etaCeiling );
 	}
 }
 
@@ -502,6 +527,18 @@ BOOST_AUTO_TEST_CASE( theEffectivityIndexIsBoundedAndSettles )
 		// 10.72 -> 10.61 -> 10.55 -> 10.52 at k = 1. A drifting index is what a
 		// term of the wrong order looks like, and it is exactly what the printed
 		// eta_5 produces; see theLiteralTraceTermIsItsOwnFloor below.
+		// AND THE DRIFT IS A RATIO OF RATIOS, WITH THE ROUND-OFF IN IT TWICE.
+		// The bounds above are a different question and still run at every
+		// mesh and every degree; this 1.5 per cent band needs both columns
+		// clean to well under a per cent, and in single the finest L2( q ) at
+		// k = 1 -- the cleanest case here -- is 9 per cent contaminated and
+		// the index reads 9.66 against the double build's 10.52. M-220.
+		if ( !meq::tests::driftIsMeasurable() )
+			BOOST_TEST_MESSAGE(
+				"  *** k = " << order << ": SKIPPED the effectivity DRIFT. A "
+				"ratio of ratios carries the format's round-off twice; the "
+				"index's own bounds above are asserted at every mesh. M-220" );
+		else
 		for ( std::size_t i = 2; i < index.size(); ++i )
 		{
 			double const drift = index[ i ]/index[ i - 1 ];
@@ -545,6 +582,16 @@ BOOST_AUTO_TEST_CASE( theRawPotentialCostsEtaTwoExactlyOneOrder )
 			}
 		}
 		std::fflush( stdout );
+
+		// EVERY STATEMENT IN THIS CASE IS ABOUT AN ORDER, so all of it is
+		// skipped by degree in single -- including the 50-times gap at the
+		// end, which is that order expressed as a ratio over four
+		// refinements rather than as a rate. M-218, M-220.
+		if ( !meq::tests::rateIsMeasurable( order ) )
+		{
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+			continue;
+		}
 
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
@@ -623,6 +670,16 @@ BOOST_AUTO_TEST_CASE( theLiteralTraceTermIsItsOwnFloor )
 		}
 		std::fflush( stdout );
 
+		// EVERY CLAIM BELOW IS ASYMPTOTIC -- the printed term IS the floor, the
+		// floor converges at k, the projected one at k+1, and the total loses
+		// an order -- so all of it goes by degree in single, where at k = 2 on
+		// the finest mesh the printed eta_5 and its computed floor have parted
+		// by 23 per cent and every rate reads about -0.9. The floor being
+		// non-zero is not asymptotic and still runs. M-218, M-220.
+		bool const rates = meq::tests::rateIsMeasurable( order );
+		if ( !rates )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+
 		for ( Measurement const &p : points )
 		{
 			// The floor is not zero, which is the whole argument: eq (20)'s fifth
@@ -635,6 +692,8 @@ BOOST_AUTO_TEST_CASE( theLiteralTraceTermIsItsOwnFloor )
 
 			// And it is the printed term, to within a few per cent.
 			double const share = p.componentLiteral[ 4 ]/p.floorTerm;
+			if ( !rates )
+				continue;
 			BOOST_TEST( ( share > 0.9 && share < 1.1 ),
 			            "k = " << order << ", h = " << p.h << ": the printed eta_5 is "
 			            << p.componentLiteral[ 4 ] << " and its solution-independent floor "
@@ -643,6 +702,9 @@ BOOST_AUTO_TEST_CASE( theLiteralTraceTermIsItsOwnFloor )
 			            "stopped being dominated by the floor and this argument needs "
 			            "revisiting" );
 		}
+
+		if ( !rates )
+			continue;
 
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
@@ -707,7 +769,8 @@ BOOST_AUTO_TEST_CASE( reconstructGivesThePostProcessedPotentialAtKPlusTwo )
 	{
 		std::vector<Measurement> const points = study( order );
 
-		std::printf( "\n  psi* against psi_h, k = %d\n", order );
+		std::printf( "\n  psi* against psi_h, k = %d ( || psi || = %.4e )\n",
+		             order, points.front().normPsi );
 		std::printf( "    %8s %12s %6s %12s %6s\n",
 		             "h", "L2(psi)", "rate", "L2(psi*)", "rate" );
 		for ( std::size_t i = 0; i < points.size(); ++i )
@@ -728,6 +791,39 @@ BOOST_AUTO_TEST_CASE( reconstructGivesThePostProcessedPotentialAtKPlusTwo )
 			}
 		}
 		std::fflush( stdout );
+
+		/*
+		 * **psi* IS A DIFFERENTIATED QUANTITY, SO ITS FLOOR RISES AS THE MESH
+		 * FALLS AND THERE IS NO WINDOW AT ANY DEGREE ON THIS FIXTURE.** The
+		 * post-processing solves a local Neumann problem per element, so in
+		 * single its round-off part behaves the way the estimator's does --
+		 * see meq::tests::residualEstimatorFloor() -- and the column does not
+		 * flatten, it TURNS. Measured on || psi || = 1.823e-01:
+		 *
+		 *     k = 1   1.735e-04  2.222e-05  3.191e-06  4.743e-06
+		 *     k = 2   3.768e-06  8.290e-07  1.628e-06  9.671e-06
+		 *
+		 * -- the minimum is reached at the third mesh at k = 1 and the second
+		 * at k = 2, and refining past it makes psi* worse. A per-reading cut
+		 * cannot separate these: k = 2's GENUINE 8.29e-07 is 38 eps of
+		 * || psi || while k = 1's FLOORED 4.74e-06 is 220, so no constant
+		 * orders them. NewtonConvergence's copy of this study is on Example 5,
+		 * where psi* falls cleanly at k = 1 to 91 eps of a norm four times
+		 * larger, and there the per-reading cut does work and is used.
+		 *
+		 * So here it is a DEGREE cut, on the expected rate rather than on k:
+		 * psi* asks for k+2, which is three orders even at k = 1. The
+		 * comparison below goes with it, because with the column turning there
+		 * is no mesh at which psi* is both above the floor and finer than
+		 * psi_h's own. M-218, M-220.
+		 */
+		if ( !meq::tests::rateOfOrderIsMeasurable( order + 2.0 ) )
+		{
+			BOOST_TEST_MESSAGE(
+				meq::tests::rateNotMeasurableNotice( order, "psi*",
+				                                     order + 2.0 ) );
+			continue;
+		}
 
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{

@@ -9,6 +9,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
@@ -187,14 +189,27 @@ BOOST_AUTO_TEST_CASE( theSymmetryProjectionLeavesASymmetricSolutionAlone )
 	 * residual, so it reassociates sums that the plain one does not, and it
 	 * starts Newton from a projected guess. What is asserted is that the
 	 * projection changes no digit that matters, not that it changes none.
+	 *
+	 * **AND WHICH DIGITS MATTER IS A PROPERTY OF THE FORMAT.** Measured, the
+	 * two runs part company at 8.73e-06 in psi and 8.53e-06 in the flux --
+	 * 73 eps of a relative quantity, which is what a reassociated sum carried
+	 * through a Newton solve costs. The failure this guards is not in that
+	 * range at all: a dof paired with a non-partner, or the flux map's sign
+	 * taken backwards, lands the projection on the antisymmetric subspace and
+	 * is O( 1 ) RELATIVE. exactAgreementFloor()'s 1024 eps is 1.22e-04, four
+	 * orders inside that gap, and is EXACTLY ZERO in double -- so the 1e-10
+	 * below is what the double build still asserts, to the bit. M-220.
 	 */
-	BOOST_TEST( worstPotential < 1.0e-10,
+	double const projectionFloor =
+		std::max( 1.0e-10, meq::tests::exactAgreementFloor( 1.0 ) );
+
+	BOOST_TEST( worstPotential < projectionFloor,
 	            "the symmetry projection moved psi on a problem that is "
 	            "already symmetric -- worst relative " << worstPotential
 	            << ". On such a problem it must be the identity, so this is "
 	            "the potential map pairing dofs that are not partners" );
 
-	BOOST_TEST( worstFlux < 1.0e-10,
+	BOOST_TEST( worstFlux < projectionFloor,
 	            "the symmetry projection moved the FLUX on a problem that is "
 	            "already symmetric -- worst relative " << worstFlux
 	            << ". q_r is even in z and q_z is odd, so this is the SIGN the "

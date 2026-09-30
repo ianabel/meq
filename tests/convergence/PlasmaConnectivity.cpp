@@ -89,6 +89,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Coils.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/PlasmaComponent.hpp"
@@ -1877,8 +1879,14 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		try
 		{
 			solver.solve();
+			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
+			// meq::newtonTolerance() floors this solver's targets at ten eps, so
+			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
+			// rejects it. M-220.
 			row.converged = !solver.newtonResiduals().empty()
-			                && solver.newtonResiduals().back() < 1.0e-8;
+			                && solver.newtonResiduals().back()
+			                   < meq::tests::convergedResidualFloor(
+				                   1.0e-8, solver.newtonResiduals() );
 		}
 		catch ( std::exception const & )
 		{

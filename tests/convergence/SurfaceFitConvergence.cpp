@@ -1633,6 +1633,7 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 	std::vector<std::vector<double>> fieldSpeeds;
 	int stalledRays = 0;
 	double worstRayResidual = 0.0;
+	double worstCorrectorTarget = 0.0;
 
 	for ( int i = 0; i < surfaces; ++i )
 	{
@@ -1656,6 +1657,8 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 
 		stalledRays += fit.stalledRays;
 		worstRayResidual = std::max( worstRayResidual, fit.worstResidual );
+		worstCorrectorTarget = std::max( worstCorrectorTarget,
+		                                 contour.correctorTarget );
 
 		for ( std::size_t j = 0; j < fit.count(); ++j )
 		{
@@ -1685,8 +1688,9 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 	}
 
 	std::printf( "  %d surfaces traced and fitted at the default tolerance:"
-	             " %d stalled rays, worst ray residual %.3e\n",
-	             surfaces, stalledRays, worstRayResidual );
+	             " %d stalled rays, worst ray residual %.3e against a target"
+	             " of %.3e\n",
+	             surfaces, stalledRays, worstRayResidual, worstCorrectorTarget );
 
 	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
@@ -1788,7 +1792,15 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 	// the property, and it is what SurfaceAverageConvergence.cpp's ladder was
 	// working around; if this ever throws again, that ladder is the record of
 	// what it used to cost.
-	BOOST_TEST( worstRayResidual < 1.0e-9 );
+	// THE BOUND IS THE TOLERANCE THE RAY NEWTON WAS GIVEN, WHICH FOLLOWS
+	// real_t AND IS NOT A CONSTANT. meq::newtonTolerance() floors the tracer's
+	// 1e-12 at ten eps, so the target is 1.12e-12 in double and 1.19e-06 in
+	// single; the residual reads 6.77e-13 and 8.87e-07, which is the same
+	// relation to the same target in both. The 1e-9 was chosen against the
+	// double target. In double it dominates and nothing moves. M-220.
+	BOOST_TEST( worstRayResidual
+	            < meq::tests::achievedToleranceFloor( 1.0e-9,
+	                                                  worstCorrectorTarget ) );
 
 	// The chain lands on the right geometry. The bound is the discretisation's,
 	// not the representation's: at k = 2 on n = 48 the traced contour is
@@ -2749,6 +2761,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 	// How far the fitted curve is from the EXACT surface, which is the
 	// discretisation plus the representation and is bounded by neither alone.
 	double worstAgainstExact = 0.0;
+	double worstFieldDisplacement = 0.0;
 	for ( int i = 0; i < surfaces; ++i )
 	{
 		double const normalisedFlux = smallest
@@ -2770,16 +2783,46 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 			worstAgainstExact = std::max( worstAgainstExact,
 			                              std::hypot( radius - exactR,
 			                                          z - exactZ ) );
+
+			/*
+			 * AND HOW FAR THE SOLVED FIELD'S OWN LEVEL SET IS FROM THE EXACT
+			 * ONE, AT THE SAME POINT AND THROUGH THE SAME LAMBDA. The fit is
+			 * chasing { Psi_N,h = c }; the comparison above is against
+			 * { Psi_N = c }; so the distance between those two is the floor
+			 * on the line above and belongs in the assertion rather than in a
+			 * constant. | Psi_N,h( x ) - Psi_N( x ) |/| grad Psi_N,h | is that
+			 * distance to first order, which is the same reduction
+			 * FluxGridConvergence's position column uses.
+			 */
+			double sampled = 0.0;
+			double sampledR = 0.0;
+			double sampledZ = 0.0;
+			if ( field.sample( exactR, exactZ, sampled, sampledR, sampledZ ) )
+			{
+				double const slope = std::hypot( sampledR, sampledZ );
+				if ( slope > 0.0 )
+					worstFieldDisplacement =
+						std::max( worstFieldDisplacement,
+						          std::abs( sampled - normalisedFlux )/slope );
+			}
 		}
 	}
 
-	std::printf( "  worst distance from the EXACT surfaces %.6e, which is the"
-	             " post-processed field's own O( h^(k+2) ) and not the fit's\n",
-	             worstAgainstExact );
+	std::printf( "  worst distance from the EXACT surfaces %.6e, against the"
+	             " SOLVED field's own level sets standing %.6e from them\n",
+	             worstAgainstExact, worstFieldDisplacement );
 
 	// It landed on the SOLVED level sets, to five thousand times closer than the
 	// linear fit it started from and to far better than the mesh knows them.
-	BOOST_TEST( report.surfaceError < 1.0e-6 );
+	//
+	// THE FLOOR IS ROUND-OFF ON A POSITION, NOT ON A FLUX. The Gauss-Newton
+	// drives a geometric residual whose Jacobian is | grad Psi_N |, so a
+	// coordinate carried in real_t pins the minimiser to a few eps of the
+	// coordinate's own size -- measured, 2.96e-06 on a machine at R = 1.32,
+	// which is 25 eps of it. In double that floor is 1.9e-14 and the historical
+	// 1e-6 stands. M-220.
+	BOOST_TEST( report.surfaceError
+	            < meq::tests::scalarAgreementFloor( 1.0e-6, axis.radius ) );
 	BOOST_TEST( report.initialSurfaceError > 100.0*report.surfaceError );
 
 	// And it is still a map, and its axis is still one point.
@@ -2793,5 +2836,13 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 	// truth than the field it was fitted to; if this number ever falls below
 	// h^(k+2) something is compensating and should be looked at rather than
 	// celebrated.
-	BOOST_TEST( worstAgainstExact < 1.0e-5 );
+	//
+	// **AND THE BOUND IS NOW THE MEASUREMENT RATHER THAN THE CONSTANT**, which
+	// is what lets it hold in a format whose solved level sets are 280 times
+	// further from the truth: 5.71e-07 in double and 1.61e-04 in single, the
+	// second being the solve's own round-off and not the fit's. Four times the
+	// measured displacement, so a fit that had genuinely stopped tracking the
+	// field still fails. M-220.
+	BOOST_TEST( worstAgainstExact
+	            < std::max( 1.0e-5, 4.0*worstFieldDisplacement ) );
 }

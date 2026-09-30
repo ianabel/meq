@@ -1740,6 +1740,33 @@ on, and three separate per-pair criteria were tried and each one provably fails.
 **MEQ's rate acceptance is not a thing single precision verifies; agreement with
 the double build is.** That is the finding this section was for.
 
+**AND THE SWEEP IS NOW MOSTLY DONE, ON FOUR LAWS RATHER THAN A TABLE OF
+CONSTANTS** → **[M-219](MEASUREMENTS.md#m-219)**, **[M-220](MEASUREMENTS.md#m-220)**.
+What this section called *"a large, careful edit with a real risk of relaxing an
+assertion into vacuity"* turned out to be four statements about where a floor
+comes from, each measured, each expressed once in
+`tests/convergence/RoundOffFloor.hpp` and reached from every caller:
+
+* *a difference is not a derivative* — `eps` where two routes are exact,
+  `eps^(2/3)` to `sqrt( eps )` where one is a finite difference;
+* *a tolerance a solver was GIVEN is the floor on what it can achieve*, and a
+  FIXED-POINT iteration cannot be given a Newton's, since it approaches the
+  floor from above and never crosses it;
+* *a stationary point's POSITION costs half the digits and its VALUE costs
+  none* — `sqrt( eps )`, and the envelope argument that hides the one keeps the
+  other;
+* *a quantity obtained by differentiating rises as the mesh falls* — an
+  estimator floors at `eps/h`, a flux-surface average at `eps/h²`, so the floor
+  and the truncation CROSS and refining past the crossing makes the number
+  worse. That is also why an adaptive loop in this format stops being a descent.
+
+**AND THE SAFETY PROPERTY IS WHAT MAKES THE EDIT SAFE RATHER THAN CAREFUL
+READING.** Every helper in that header either `std::max`es against the caller's
+own historical value or is `#ifdef`'d to be inert in double, so a guard applied
+in the wrong place cannot weaken the double build — and the double control,
+62/63 at every step, says so. The risk this section named is closed by
+construction rather than by attention.
+
 **WHAT REMAINS IS THE SWEEP THIS SECTION DESCRIBES, AND IT IS NOW SIZED.**
 Class C is eight rate assertions, all at `k = 2` and the finest `h`, which is
 exactly the flattened tail described below. Class D is 25, of which several are

@@ -1195,6 +1195,50 @@ few ulps apart. The same thing at a coil edge switches **the whole coil term**,
 -9.2153 against 0. Neither is a tolerance; both are the MFEM-free seam reaching
 a boundary predicate.
 
+**AND THE FLOORS ARE NOT ALL `eps`. THE FOUR THAT ARE NOT ARE THE NEXT
+FINDING** → **[M-220](MEASUREMENTS.md#m-220)**. *A tolerance a solver was GIVEN
+is the floor on what it can achieve*, and seven sites asked
+`newtonResiduals().back() < 1e-8` while handing `solve()` a target
+`meq::newtonTolerance()` floors at ten `eps` — M-217's lesson one level out,
+with the override in the caller. *A fixed-point iteration cannot be asked for a
+Newton's tolerance*: Newton's last step squares the residual and crosses a
+target near the floor, Picard contracts by a fixed factor and never does —
+Anderson–Picard runs its full 500 iterations and stalls at **5.80e-05** against
+a target of 1.19e-06, so `meq::picardTolerance()` is `4096 eps` in single and
+the caller's own value in double. *A stationary point's POSITION costs half the
+digits and its VALUE costs none*: `sqrt( eps )` = 3.45e-04, measured on the
+limiter contact flooring at 1.5e-04 and the located axis reading
+`R = 0.99999583` — and the envelope argument that hides the position is the same
+one that keeps the value at `eps`. And *an estimator differentiates, so its
+floor RISES as the mesh falls*: `eta` reads 8.93e-05, 9.73e-05, 1.97e-04,
+3.93e-04 over four refinements in single where double's finest is 1.927e-08, and
+one derivative further a flux-surface average floors at `eps/h²`.
+
+**AND THAT CROSSING IS WHY AN ADAPTIVE LOOP IN A NARROW FORMAT STOPS BEING A
+DESCENT.** Past it, refining genuinely RAISES the error — the conditioning
+growing like `h^-2` while the truncation falls like `h^(k+1)` — so the marker is
+steering on round-off and neither `eta` nor the true error is monotone. It is
+the estimator reporting what the arithmetic gives it, not the estimator failing.
+
+**AND THE COMPENSATED-SUMMATION ROUTE INTO KINSOL DOES NOT EXIST, WHICH WAS
+CHECKED RATHER THAN ASSUMED.** SUNDIALS 7.5.0's compensated sums are an
+**ARKODE SPRK** runtime option — `ARKodeSetUseCompensatedSums()` — for a
+symplectic stepper's time accumulation. There is no build flag, and
+`src/kinsol/` contains the string nowhere. `picardTolerance()` is the answer
+instead.
+
+**AND SEVENTEEN TESTS WENT GREEN: SINGLE READS 12 RED OF 63 AT 61 CASES**,
+against M-219's 29 and 125, with the double control at **62/63** — the one red
+there being the standing deliberate `PlasmaEdgeConvergence`, so it is one of the
+twelve rather than a finding. **What is left is a different kind of thing**: of
+the eleven others, the remaining cases are dominated by solves that do not
+CONVERGE rather than by assertions that cannot be read — `PlasmaConnectivity`,
+`XPointOuter`, `DeviceParity`'s `mhd-rectangle`, `MachineFixedBoundary` (which
+is additionally M-186's coin toss), and most of `FreeBoundaryCoupling`'s 13 and
+`DriverAcceptance`'s 14. The tolerance sweep `DEVICE-PLAN.md` §7.2 called the
+single biggest cost is substantially done; what stands between single precision
+and a green suite is now the solver.
+
 **AND IT IS THE LAST ITEM OF THAT PLAN, NOT THE FIRST, WHICH IS THE ORDERING
 DECISION WORTH KEEPING.** Everything on the device is validated by
 `--device cuda` reproducing `--device cpu` **to every printed digit** — that is

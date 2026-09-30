@@ -9,6 +9,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Estimator.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
@@ -327,6 +329,11 @@ namespace
 		double eta;
 		double errorFlux;
 		double errorPsi;
+		/// The L2 norm of the EXACT flux, on the same rule errorFlux uses, so
+		/// a round-off floor on the error has a denominator in the same
+		/// measure. It does not move with the mesh; it is here so that each
+		/// cycle carries its own and nothing has to be passed alongside.
+		double normFlux;
 		double largest;
 		double smallest;
 	};
@@ -391,6 +398,7 @@ namespace
 			entry.eta = estimator.GetTotalError();
 			entry.errorFlux = solver.fluxError( fluxCoeff );
 			entry.errorPsi = solver.potentialError( psiCoeff );
+			entry.normFlux = solver.exactFluxNorm( fluxCoeff );
 			entry.largest = 0.0;
 			entry.smallest = 0.0;
 			for ( int e = 0; e < mesh.GetNE(); ++e )
@@ -633,19 +641,59 @@ BOOST_AUTO_TEST_CASE( theAdaptiveLoopRunsAndTheEstimatorStaysHonest )
 
 		std::printf( "\n  the adaptive loop on the fitted rectangle, k = %d, %s\n",
 		             order, variant.name );
-		std::printf( "  %6s %7s %8s %7s %11s %11s %11s %8s %8s %8s\n",
+		std::printf( "  %6s %7s %8s %7s %11s %11s %11s %8s %8s %8s %11s\n",
 		             "cycle", "elem", "trace", "marked", "eta", "L2(q)", "L2(psi)",
-		             "eta/L2q", "h_max", "h_min" );
+		             "eta/L2q", "h_max", "h_min", "floor" );
 		for ( std::size_t c = 0; c < history.size(); ++c )
 		{
 			Cycle const &e = history[ c ];
-			std::printf( "  %6zu %7d %8d %7d %11.4e %11.4e %11.4e %8.3f %8.5f %8.5f\n",
+			std::printf( "  %6zu %7d %8d %7d %11.4e %11.4e %11.4e %8.3f %8.5f %8.5f %11.4e\n",
 			             c, e.elements, e.traceDofs, e.marked, e.eta, e.errorFlux,
-			             e.errorPsi, e.eta/e.errorFlux, e.largest, e.smallest );
+			             e.errorPsi, e.eta/e.errorFlux, e.largest, e.smallest,
+			             meq::tests::roundOffFloor( e.normFlux ) );
 		}
 		std::fflush( stdout );
 
-		for ( std::size_t c = 1; c < history.size(); ++c )
+		/*
+		 * AND THE LOOP IS ONLY READABLE WHILE REFINING STILL PAYS. A residual
+		 * estimator steers on eta, and eta is a cancellation -- f + Delta* psi_h
+		 * evaluated from a field known to eps -- so in a narrow format it
+		 * reaches its own round-off floor at a resolution the true error has
+		 * not. Past that point refining RAISES the error, the conditioning
+		 * growing like h^-2 while the truncation falls like h^(k+1), and
+		 * neither eta nor the error is monotone: measured here, the maximum
+		 * marker at gamma = 0.3 reads 1.31e-05, 5.57e-05, 3.05e-05 in L2( q )
+		 * over cycles 2 to 4 where the double build reads 2.00e-06, 2.51e-07,
+		 * 3.14e-08 and never approaches its own floor.
+		 *
+		 * THE CROSSOVER IS A PROPERTY OF THE FORMAT AND THE FIXTURE, NOT OF
+		 * THE ESTIMATOR, so the cycles past it are printed and skipped rather
+		 * than asserted at a loosened bound -- an estimator that had genuinely
+		 * stopped tracking the error would pass a loosened one. The other two
+		 * variants grade rather than refine uniformly and never reach the
+		 * floor in either format, so they assert every cycle as before. In
+		 * double the floor is 4.55e-13 of || q || and no cycle in this
+		 * directory comes within six orders of it. M-220.
+		 */
+		std::size_t readable = history.size();
+		for ( std::size_t c = 0; c < history.size(); ++c )
+			if ( history[ c ].errorFlux
+			     < meq::tests::roundOffFloor( history[ c ].normFlux ) )
+			{
+				readable = c + 1;
+				break;
+			}
+		if ( readable < history.size() )
+			BOOST_TEST_MESSAGE(
+				variant.name << ": cycles " << readable << " onward are SKIPPED, "
+				"the flux error having reached "
+				<< meq::tests::roundOffFloor( history[ readable - 1 ].normFlux )
+				<< " -- round-off on a flux of norm "
+				<< history[ readable - 1 ].normFlux << ". Refining past that "
+				"point raises the error rather than lowering it, so neither eta "
+				"nor the error can be monotone and the loop is steering on noise." );
+
+		for ( std::size_t c = 1; c < readable; ++c )
 		{
 			BOOST_TEST( history[ c ].eta < history[ c - 1 ].eta,
 			            variant.name << ": eta went from " << history[ c - 1 ].eta
@@ -663,8 +711,9 @@ BOOST_AUTO_TEST_CASE( theAdaptiveLoopRunsAndTheEstimatorStaysHonest )
 		// h_K or h_e weight were wrong would be right there and wrong here, since
 		// on a uniform mesh every h is the same number and a misplaced power of h
 		// is only a constant.
-		for ( Cycle const &e : history )
+		for ( std::size_t c = 0; c < readable; ++c )
 		{
+			Cycle const &e = history[ c ];
 			double const index = e.eta/e.errorFlux;
 			BOOST_TEST( ( index > 5.0 && index < 40.0 ),
 			            variant.name << ": the effectivity index is " << index

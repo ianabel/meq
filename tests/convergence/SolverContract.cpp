@@ -15,6 +15,8 @@
 	#include <omp.h>
 #endif
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -501,7 +503,8 @@ BOOST_AUTO_TEST_CASE( theReconstructedQuantitiesAreThereAndSigned )
 	} );
 
 	std::printf( "\n  the reconstructed quantities, Solov'ev on the linear path\n" );
-	std::printf( "    %2s %14s %14s %14s\n", "k", "L2( q )", "L2( q* )", "|q + total|" );
+	std::printf( "    %2s %14s %14s %14s %14s\n", "k", "L2( q )", "L2( q* )",
+	             "|q + total|", "|| q ||" );
 
 	for ( int order = 1; order <= 3; ++order )
 	{
@@ -533,8 +536,8 @@ BOOST_AUTO_TEST_CASE( theReconstructedQuantitiesAreThereAndSigned )
 		mfem::VectorGridFunctionCoefficient negatedCoeff( &negatedTotal );
 		double const mismatch = solver.flux().ComputeL2Error( negatedCoeff )/fluxNorm;
 
-		std::printf( "    %2d %14.6e %14.6e %14.6e\n",
-		             order, fluxError, enrichedError, mismatch );
+		std::printf( "    %2d %14.6e %14.6e %14.6e %14.6e\n",
+		             order, fluxError, enrichedError, mismatch, fluxNorm );
 		std::fflush( stdout );
 
 		BOOST_TEST( std::isfinite( enrichedError ),
@@ -542,10 +545,30 @@ BOOST_AUTO_TEST_CASE( theReconstructedQuantitiesAreThereAndSigned )
 		// MEASURED: 6.92e-4 against 9.58e-4, 8.90e-6 against 1.58e-5, 1.43e-7
 		// against 2.22e-7 at k = 1, 2, 3 -- about 1.5x better at every order. So
 		// "better than q" is the assertion, not "not much worse".
-		BOOST_TEST( enrichedError < fluxError,
-		            "k = " << order << ": the post-processed flux has L2 error "
-		            << enrichedError << " against " << fluxError << " for q itself, "
-		            "so the enriched reconstruction is not adding anything" );
+		/*
+		 * AND THE COMPARISON IS ONLY AVAILABLE WHILE THERE IS A DISCRETISATION
+		 * ERROR TO COMPARE. "q* is better than q" is a statement about
+		 * TRUNCATION, and at k = 3 on this mesh the double build reads
+		 * 1.43e-07 against 2.22e-07 -- both below what an L2 norm of a field
+		 * of size || q || can carry in single, where the same two read
+		 * 8.80e-06 and 7.90e-06 and their ORDER is a coin toss. Skipped
+		 * loudly rather than loosened: widening the bound would leave a case
+		 * that cannot tell an enriched reconstruction from an absent one and
+		 * reports green. The finiteness check above still runs, and so does
+		 * every degree whose truncation is still above the floor. M-220.
+		 */
+		double const floor = meq::tests::roundOffFloor( fluxNorm );
+		if ( fluxError < floor && enrichedError < floor )
+			BOOST_TEST_MESSAGE(
+				"k = " << order << ": SKIPPED, L2( q ) = " << fluxError
+				<< " and L2( q* ) = " << enrichedError << " are both under "
+				<< floor << ", which is round-off on a flux of norm "
+				<< fluxNorm << ". There is no truncation left here to compare." );
+		else
+			BOOST_TEST( enrichedError < fluxError,
+			            "k = " << order << ": the post-processed flux has L2 error "
+			            << enrichedError << " against " << fluxError << " for q itself, "
+			            "so the enriched reconstruction is not adding anything" );
 		// MEASURED: 2.53e-3, 4.92e-5, 5.38e-7 -- converging, which is what says the
 		// two conventions agree rather than happening to be close on one mesh.
 		BOOST_TEST( mismatch < 0.05,

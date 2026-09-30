@@ -2033,8 +2033,14 @@ namespace
 		else
 			fixedPoint.SetDamping( picardDamping );
 		fixedPoint.SetOperator( map );
-		fixedPoint.SetRelTol( newtonRelativeTolerance );
-		fixedPoint.SetAbsTol( newtonAbsoluteTolerance );
+		// THE TARGET IS THE FIXED POINT'S AND NOT NEWTON'S, and in a narrow
+		// format those differ: a linearly convergent iteration approaches the
+		// arithmetic's floor from above and never crosses it, where Newton's
+		// last step squares the residual straight through. picardTolerance()
+		// carries the measurement. In double it is the caller's own value,
+		// unchanged.
+		fixedPoint.SetRelTol( picardTolerance( newtonRelativeTolerance ) );
+		fixedPoint.SetAbsTol( picardTolerance( newtonAbsoluteTolerance ) );
 		fixedPoint.SetMaxIter( newtonMaxIterations );
 		fixedPoint.SetPrintLevel( -1 );
 		fixedPoint.iterative_mode = true;
@@ -2044,8 +2050,23 @@ namespace
 		fixedPoint.Mult( unused, iterate );
 		newtonIterationCount = fixedPoint.GetNumIterations();
 
+		// AND THE MESSAGE CARRIES THE NUMBERS, because "did not converge" on its
+		// own sends the reader to a debugger for two figures KINSOL already
+		// has. A fixed-point iteration stopping AT its target and a diverging
+		// one look identical without them.
 		if ( !fixedPoint.GetConverged() )
-			throw std::runtime_error( "meq::GradShafranovSolver::solve: the Picard iteration did not converge" );
+		{
+			std::ostringstream what;
+			what << "meq::GradShafranovSolver::solve: the Picard iteration did "
+			        "not converge -- " << fixedPoint.GetNumIterations()
+			     << " iterations of " << newtonMaxIterations
+			     << ", final scaled residual norm " << fixedPoint.GetFinalNorm()
+			     << " against a target of "
+			     << picardTolerance( newtonRelativeTolerance )
+			     << " relative / "
+			     << picardTolerance( newtonAbsoluteTolerance ) << " absolute";
+			throw std::runtime_error( what.str() );
+		}
 
 		// One last step at the converged iterate, so that the flux, the trace and
 		// the potential all come from the SAME assembly. Without it the flux would
@@ -2326,7 +2347,22 @@ namespace
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 			extent = std::max( extent, std::abs( mesh.GetVertex( v )[ 0 ] )
 			                           + std::abs( mesh.GetVertex( v )[ 1 ] ) );
-		double const tolerance = 1.0e-9*std::max( extent, mfem::real_t( 1.0 ) );
+		//
+		// AND IT FOLLOWS real_t's EPSILON RATHER THAN A LITERAL. A centroid is
+		// an average of coordinates the element transformation computes in
+		// real_t, so a mesh that mirrors EXACTLY still hands back centroids
+		// differing by a few eps of the extent -- 1.19e-07 of it in single
+		// precision, a hundred times the 1e-9 a double build can demand, and
+		// the refusal above then fires on a mesh that IS symmetric. 64 eps of
+		// the extent is 7.6e-06 in single and 1.4e-14 in double, so the
+		// historical value stands there and the double path is unmoved; and it
+		// is three orders below h/2 on the coarsest mesh in the tree, so it
+		// cannot pair two distinct entities in either format. M-220.
+		double const tolerance =
+			std::max( 1.0e-9,
+			          64.0*static_cast< double >(
+				          std::numeric_limits< mfem::real_t >::epsilon() ) )
+			*std::max( extent, mfem::real_t( 1.0 ) );
 
 		auto cell = [ & ]( double value )
 		{

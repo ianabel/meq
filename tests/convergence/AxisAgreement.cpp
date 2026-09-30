@@ -7,6 +7,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Coils.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/GradShafranov.hpp"
@@ -245,17 +247,34 @@ BOOST_AUTO_TEST_CASE( aSpikedNodalValueIsNotAMagneticAxis )
 		"checkAxis() found no interior maximum of a paraboloid whose maximum is "
 		"at ( " << centreR << ", " << centreZ << " ). The flux was projected from "
 		"a closed form, so this is the root finder and not the field." );
-	BOOST_TEST( std::abs( healthy.axis.radius - centreR ) < 1.0e-8,
+	// TO sqrt( eps ) RATHER THAN TO eps, AND THE EXPONENT IS THE POINT. The
+	// axis is a stationary point of a paraboloid, so psi = psi_ax - c |x|^2
+	// and a flux carried in real_t pins the POSITION only to sqrt( eps/c ) --
+	// measured, R = 0.99999583 against an exact 1 and z = -3.16e-06 against 0,
+	// which is a hundredth of sqrt( eps ). The VALUE there is unaffected, and
+	// every other assertion in this case is about the value. In double
+	// stationaryPositionFloor() is exactly zero and the historical 1e-8 is
+	// what runs, to the bit. M-220.
+	double const positionFloor =
+		std::max( 1.0e-8, meq::tests::stationaryPositionFloor( 1.0 ) );
+	BOOST_TEST( std::abs( healthy.axis.radius - centreR ) < positionFloor,
 		"the located axis is at R = " << healthy.axis.radius << " against an exact "
 		<< centreR );
-	BOOST_TEST( std::abs( healthy.axis.z - centreZ ) < 1.0e-8,
+	BOOST_TEST( std::abs( healthy.axis.z - centreZ ) < positionFloor,
 		"the located axis is at z = " << healthy.axis.z << " against an exact "
 		<< centreZ );
 	BOOST_TEST( healthy.agrees,
 		"the guard fires on a field whose largest nodal value IS its axis: Psi "
 		"read " << healthy.normalisedFlux << ". A guard that refuses a healthy "
 		"run is worse than none." );
-	BOOST_TEST( healthy.normalisedFlux >= 1.0,
+	// FROM ABOVE, TO ROUND-OFF. Psi = ( psi_ax - psi )/( psi_ax - psi_bnd ) is
+	// a quotient of differences, so in single it reads 0.99999982 -- 1.5 eps
+	// below one -- where in double the inequality holds to the bit. A field
+	// whose largest nodal value is NOT its axis reads well under 1, which is
+	// what this guards. exactAgreementFloor() is exactly zero in double, so
+	// the strict >= 1.0 is what still runs there. M-220.
+	BOOST_TEST( healthy.normalisedFlux
+	            >= 1.0 - meq::tests::exactAgreementFloor( 1.0 ),
 		"Psi at the axis read " << healthy.normalisedFlux << ", below 1. psi_ax "
 		"is the largest NODAL value and the peak of a polynomial over a closed "
 		"element is at least its largest nodal value, so a healthy field reaches "
@@ -573,8 +592,12 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 	// reported separately because the two are in different units. Both are
 	// required before the guard's answer means anything.
 	BOOST_REQUIRE( !solver.newtonResiduals().empty() );
-	BOOST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8 );
-	BOOST_REQUIRE( std::abs( solver.normalisationResidual() ) < 1.0e-10 );
+	BOOST_REQUIRE( solver.newtonResiduals().back()
+	               < meq::tests::convergedResidualFloor(
+		               1.0e-8, solver.newtonResiduals() ) );
+	BOOST_REQUIRE( std::abs( solver.normalisationResidual() )
+	               < meq::tests::scalarAgreementFloor( 1.0e-10,
+	                                                   solver.psiAxis() ) );
 
 	std::printf( "\n  the high-beta bordered Newton, k = %d, n = %d, "
 	             "nu = %d, A = %.1f\n", order, n, nu, amplitude );
@@ -594,8 +617,12 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 		"the guard refuses a converged bordered-Newton solve at Psi = "
 		<< healthy.normalisedFlux << ", where the constraint psi_ax - max psi_h "
 		"reads " << solver.normalisationResidual() << "." );
+	// Same field and same rule, so the two agree to round-off on psi_ax: in
+	// single they part at 2.7e-09 on 0.306, which is 0.07 eps of it, because
+	// the two reductions visit the dofs in a different order. M-220.
 	BOOST_TEST( std::abs( healthy.nodalExtreme - solver.psiAxis() )
-	            <= 1.0e-10*std::abs( solver.psiAxis() ),
+	            <= meq::tests::scalarAgreementFloor(
+		            1.0e-10*std::abs( solver.psiAxis() ), solver.psiAxis() ),
 		"checkAxis() recomputed the largest nodal value as "
 		<< healthy.nodalExtreme << " where the solver reports psi_ax = "
 		<< solver.psiAxis() << ". Same field, same rule, so a disagreement is "
@@ -705,7 +732,9 @@ BOOST_AUTO_TEST_CASE( theLocatedAxisConstraintPutsPsiAxisOnTheAxis )
 	solver.solve();
 
 	BOOST_REQUIRE( !solver.newtonResiduals().empty() );
-	BOOST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8 );
+	BOOST_REQUIRE( solver.newtonResiduals().back()
+	               < meq::tests::convergedResidualFloor(
+		               1.0e-8, solver.newtonResiduals() ) );
 
 	double nodal = 0.0;
 	largestNodalDof( solver.potential(), nodal );
@@ -731,8 +760,13 @@ BOOST_AUTO_TEST_CASE( theLocatedAxisConstraintPutsPsiAxisOnTheAxis )
 
 	// The border still closes, at the new point. 1e-9 rather than round-off
 	// because the constraint point comes from a root search.
+	// 1e-9 rather than round-off in double because the constraint point comes
+	// from a root search; in single the border closes to the format's own
+	// epsilon on psi_ax -- -4.91e-08 against 0.306, 1.3 eps -- which M-204
+	// measured on the production cases as well. M-220.
 	BOOST_TEST( std::abs( solver.normalisationResidual() )
-	            < 1.0e-9*std::abs( solver.psiAxis() ),
+	            < meq::tests::scalarAgreementFloor(
+		            1.0e-9*std::abs( solver.psiAxis() ), solver.psiAxis() ),
 		"the normalisation constraint reads " << solver.normalisationResidual()
 		<< " against psi_ax = " << solver.psiAxis() );
 

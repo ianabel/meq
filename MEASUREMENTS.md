@@ -12366,3 +12366,218 @@ a courtesy check here but the thing that makes the work possible at all: every
 helper either `std::max`es against the caller's own historical value or is
 `#ifdef`'d, so a misapplied guard cannot weaken the double build and the control
 says so.
+
+
+### M-220
+
+**THE SINGLE-PRECISION FLOORS ARE NOT ALL `eps`, AND THE FOUR THAT ARE NOT ARE
+THE FINDING.** [M-219](#m-219) took single from 40 red of 63 to 29, on one
+distinction — *a difference is not a derivative*, so the floor is `eps` where
+both routes are exact and `eps^(2/3)` to `sqrt( eps )` where one is a finite
+difference. Working down the remaining 125 cases turns up three more laws, each
+measured rather than assumed, and together they cover most of what was left.
+
+**A TOLERANCE A SOLVER WAS GIVEN IS THE FLOOR ON WHAT IT CAN ACHIEVE, AND SEVEN
+SITES NAMED A LITERAL INSTEAD.** Every one asks
+`newtonResiduals().back() < 1.0e-08` while handing `solve()` a target built by
+`meq::newtonTolerance()`, which floors at ten `eps` — `1.19e-06` in single. So
+the solve reaches exactly what it was asked for and the test rejects it at a
+hundred times tighter. M-217's lesson one level out: *a default is only a
+default on the paths that do not override it*, and here the override is in the
+caller. The same shape appears in the tracer, where `Contour::correctorTarget`
+reads `1.12e-12` in double and `1.335e-06` in single and the worst residual
+achieved is `3.07e-10` and **exactly `1.335e-06`** — the corrector meeting its
+target in both, against assertions of `1.0e-08` and `1.0e-09` chosen when the
+target was `1e-12`.
+
+**AND A FIXED-POINT ITERATION CANNOT BE ASKED FOR A NEWTON'S TOLERANCE.** This
+is the sharpest of the four and it is a statement about the METHOD rather than
+about any constant. Newton's last step squares the residual, so a target within
+an order of the arithmetic's own floor is met on the step that crosses it.
+Picard contracts by a fixed factor, approaches the floor from above and never
+crosses it — and Anderson acceleration makes this worse rather than better,
+since the least-squares combination it forms over the difference history is a
+cancellation of vectors that are themselves at round-off. Measured on
+`NewtonConvergence`'s Example 5 at `k = 2, n = 16`:
+
+| path | double | single, target `1.19e-06` | single, target `4.88e-04` |
+|---|---|---|---|
+| Newton | 3 iterations | 3 iterations | 3 iterations |
+| Anderson–Picard | converges | **500 iterations, stalled at `5.80e-05`** | converges |
+| Picard, `w = 0.5` | converges | not reached — the case aborts above | converges |
+| Picard → Newton | converges | not reached — the case aborts above | converges |
+
+`meq::picardTolerance()` is the repair: `4096 eps` in single and **the caller's
+own value in double**, `#ifdef`'d rather than `std::max`'d because `4096 eps` in
+double is `9.1e-13` and `FreeBoundaryCoupling` asks for `1.0e-13` — a scaled
+version would loosen that build rather than leave it alone.
+
+**IT DOES NOT CURE `pedestalSelfConverges`, AND THAT NEGATIVE IS WORTH KEEPING.**
+That case went green on two targeted runs afterwards and red again on the full
+`-j4` suite, at *"k = 1, h = 0.0333: Newton did NOT converge in 60 iterations"* —
+which is the **same** case `pedestalConvergenceIsAResolutionThreshold` spends
+forty lines establishing as a knife edge decided by a threaded BLAS-3's
+summation order at `O( 1e-16 )`, and which [M-186](#m-186) measured failing in
+two of five thread configurations on `HEAD` itself. *A case that changes verdict
+between two runs of one binary is not evidence about a change made between
+them.*
+
+**AND IT IS NOT THE COMPENSATED SUMMATION HINT, WHICH WAS CHECKED RATHER THAN
+ASSUMED.** SUNDIALS 7.5.0 has compensated sums, and they are an **ARKODE SPRK**
+runtime option — `ARKodeSetUseCompensatedSums()`, `arkode.c:2763`, reached from
+`ark_kepler.c --use-compensated-sums` — for the time accumulation of a
+symplectic stepper. There is no `SUNDIALS_BUILD_WITH_COMPENSATED_SUMS` in
+`cmake/SundialsBuildOptions*.cmake`, and `src/kinsol/` contains the string
+nowhere. So a rebuild of `../sundials/cuda-single-install` could not have
+reached this, and the KINSOL stall is the method meeting the format rather than
+a summation that could be made exact.
+
+**A STATIONARY POINT'S POSITION COSTS HALF THE DIGITS, AND ITS VALUE COSTS
+NONE.** Near a maximum `psi = psi_max − c dz²`, so a flux known to `eps` pins
+the position only to `sqrt( eps/c )` — `3.45e-04` in single against `1.49e-08`
+in double, four and a half orders apart where the format is one, and no
+refinement moves it. Measured, `LimiterCurve`'s located contact stands
+1.177e-03, 2.408e-04, **1.536e-04** from the midplane over `n = 12, 24, 48`:
+converging at 2.289 on the first pair and then flooring, at `sqrt( eps )` on a
+half-width of 0.5. `AxisAgreement`'s located axis reads `R = 0.99999583` against
+an exact 1 and `z = −3.16e-06` against 0, both asserted against `1.0e-08`.
+**The other half is why this is not a loss**: the same flatness that hides the
+position makes `psi` there accurate to `eps`, so an `O( sqrt( eps ) )` error in
+WHERE costs `O( eps )` in the VALUE — which is the envelope argument
+`LimiterCurve` already rests on, arriving from the other side.
+
+**AN ESTIMATOR DIFFERENTIATES, SO ITS FLOOR RISES AS THE MESH FALLS — THE
+OPPOSITE DIRECTION TO THE ERROR IT ESTIMATES.** `eta_1` is
+`h_K || f + Delta* psi_h ||_K` and that residual is a cancellation of second
+derivatives, so its round-off part carries a NEGATIVE power of `h` where every
+term it is compared against carries a positive one. The two therefore cross,
+and past the crossing refining makes `eta` larger. `EstimatorConvergence` at
+`k = 3`, the same four meshes in both builds:
+
+| `h` | 0.2 | 0.1 | 0.05 | 0.025 |
+|---|---|---|---|---|
+| `eta`, single | 8.93e-05 | 9.73e-05 | 1.97e-04 | **3.93e-04** |
+
+The double build's own finest-mesh reading at that degree is **1.927e-08**, the
+value `everyComponentConvergesAtKPlusOne`'s ceiling was set from, and its column
+falls at `k+1` across the sequence. The single column RISES, and doubles with
+each halving of `h`, so the floor goes as `1/h` here; `meq::tests::residualEstimatorFloor()` carries it. **One derivative
+further on it is `1/h²`**: a flux-surface average is a quadrature over a traced
+level set whose arc-length metric comes off `q`, and
+`SurfaceAverageConvergence`'s rms relative error in `V'` at `k = 2` RISES
+6.64e-06, 8.80e-06, 1.54e-04, **3.31e-04** over `n = 12` to 96 — a factor of 50
+over an eight-fold refinement, which is `h^-1.9`. Against `eps/h²` those four
+readings are 0.39, 0.13, 0.36 and 0.30 of it, so the law fits to within a factor
+of three across the sweep.
+
+**AND THAT CROSSING IS WHY AN ADAPTIVE LOOP IN A NARROW FORMAT STOPS BEING A
+DESCENT.** `AdaptiveRefinement`'s uniform-marking arm, the same loop in both
+builds:
+
+| cycle | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| `L2( q )`, double | 1.24e-04 | 1.58e-05 | 2.00e-06 | 2.51e-07 | 3.14e-08 |
+| `L2( q )`, single | 1.23e-04 | 1.68e-05 | 1.31e-05 | **5.57e-05** | 3.05e-05 |
+| elements, single | 32 | 128 | 512 | 1618 | 4567 |
+
+The marker stops marking everything at cycle 2 — 209 of 512 — because the
+indicator is now round-off and round-off is not uniform, and from there neither
+`eta` nor the true error is monotone. **It is not the estimator failing**: the
+estimator is reporting what the arithmetic gives it, and refining past the
+crossing genuinely raises the error, the conditioning growing like `h^-2` while
+the truncation falls like `h^(k+1)`.
+
+**A PER-READING CUT IS RIGHT FOR A COMPARISON WHERE A PER-DEGREE CUT IS RIGHT
+FOR A RATE, AND M-218 SETTLED ONLY THE SECOND.** That finding — that no per-pair
+criterion separates a good rate from a contaminated one, because the tail bends
+before it flattens — is about a rate ACROSS A SEQUENCE. *"`psi*` beats `psi_h`
+by ten times"* is a different question: it is about two numbers, and it is
+answerable exactly while both are above the floor. `NewtonConvergence`'s
+Example 5 in single shows why the distinction pays:
+
+| `h` | 0.2 | 0.1 | 0.05 | 0.025 |
+|---|---|---|---|---|
+| `L2( psi* )`, `k = 1` | 4.097e-03 | 4.800e-04 | 5.807e-05 | 7.235e-06 |
+| rate | — | 3.093 | 3.047 | 3.005 |
+| `L2( psi* )`, `k = 3` | 3.950e-06 | 1.859e-06 | 1.836e-06 | 1.771e-06 |
+| rate | — | 1.088 | 0.017 | 0.052 |
+
+A degree cut would throw the clean `k = 1` column away with the rest.
+`aboveTheFormatsFloor()` is the predicate and it is `#ifdef`'d true in double,
+so it cannot drop an assertion that build makes today.
+
+**AND A DRIFT IS A RATIO OF RATIOS, WITH THE ROUND-OFF IN IT TWICE AND THE
+SIGNAL ONCE.** `EstimatorConvergence`'s effectivity index is asserted to settle
+to within 1.5 per cent between consecutive meshes, which is the sharpest
+statement in that directory. At `k = 1`, its cleanest case, single reads 10.71,
+10.60, 10.53, **9.66** against a double build's 10.72, 10.61, 10.55, 10.52: the
+finest `L2( q )` is 9 per cent contaminated and the drift reads 0.918 against a
+band of 0.95 to 1.05. The index's own bounds — reliable above, efficient below,
+1 to 60 — hold at every mesh and every degree in single and are still asserted.
+
+**THE BEST FLOOR IS ONE THE CASE MEASURES ITSELF.** `OutputConvergence`'s band
+study evaluates interior nodes that are continued not at all, so whatever they
+read IS the arithmetic: 8.53e-07 in single, and in double so far below the
+`1.0e-12` that case asserts that it has never been the binding term. The band error
+runs 1.325e-06 to 9.085e-07 over its two meshes — inside a factor of two of that
+— so the "rate" of 0.54 is a rate of round-off, and the cut needs no constant at
+all. `WarmStartConvergence`'s grid sweep has the same shape with a
+DISCRETISATION rather than round-off as the contaminant: its own comment already
+said *"by 257 nodes the grid error is within a factor of two of the coarse
+solve's own, which the grid cannot represent better than"*, and in single that
+gap closes enough to take the last rate from 1.735 to 1.689 against a bound of
+1.7.
+
+**TWO OF MEQ'S OWN CONSTANTS WERE WRONG AND ONE OF THEM WAS WRONG IN THE
+OPPOSITE DIRECTION TO EVERY OTHER ONE IN THIS SERIES.**
+`setUpDownSymmetry()`'s centroid-matching tolerance is `1e-9` of the mesh
+extent; a centroid is an average of coordinates the element transformation
+computes in `real_t`, so a mesh that mirrors EXACTLY hands back centroids
+differing by a few `eps` of the extent — a hundred times that — and the refusal
+fires on a mesh that IS symmetric. It is now `64 eps` of the extent, `7.6e-06`
+in single and `1.4e-14` in double, three orders below `h/2` on the coarsest mesh
+in the tree in either format.
+
+**AND `meq::GridSampler`'s `insideTolerance` WAS TOO TIGHT BECAUSE MFEM'S OWN IS
+ALREADY SCALED.** `mfem::InverseElementTransformation` carries
+`ref_tol( 1e-15 ), phys_rtol( 4e-15 ), ip_tol( 1e-8 )` in double and
+`ref_tol( 4e-7 ), phys_rtol( 1e-6 ), ip_tol( 1e-4 )` in single — the *opposite*
+of [M-183](#m-183)'s `ExtensionBoundaryQuadrature` finding, and worth recording
+as such. A floor of `128 eps` is `1.5e-05`, six times TIGHTER than what MFEM's
+own inverse accepts, so MEQ's affine path refused points the Newton path took —
+which is exactly the disagreement `SamplerConvergence` reported at node
+`( 24, 0 )`, on the domain's bottom edge. The expression is now
+`meq::samplerInsideTolerance()` in `Sampler.hpp`, MFEM's own pair copied, and
+the test hands the SAME number to `SetElementTol()` before comparing the two
+inverses — the M-165 rule, that a constant kept in step by hand across two
+parties IS the defect.
+
+**ONE CONTRACT NARROWS AND IT IS THE ANDERSON ARM'S.** With
+`picardTolerance()` in, the three Picard paths converge and reach `L2` errors of
+1.04e-04, 2.16e-04 and 2.98e-05 against Newton's 2.98e-05, where in double all
+four agree to seven figures. **The solutions still agree; it is the errors that
+do not** — the largest gap is 1.9e-04 on a potential of norm 6.7e-01, which is
+2.8e-04 relative — and what the case exists to rule out survives untouched: the
+hazard is a path landing on a DIFFERENT discrete solution, which
+`CLAUDE_HDGGS.md` records at **9.4 per cent** apart, four orders above this.
+
+**THE RESULT.** Single reads **12 red of 63** at **61** distinct failing cases,
+against M-219's 29 and 125, with the double control at **62/63** — the one red
+there being the standing deliberate `PlasmaEdgeConvergence`, which is therefore
+one of the twelve and not a finding. Seventeen tests went green and none
+regressed: `SolverContract`, `AxisConvergence`, `UpDownSymmetry`, `OpenSurfaces`,
+`SurfaceFitConvergence`, `AdaptiveRefinement`, `ExtensionConvergence`,
+`NewtonConvergence`, `LimiterCurve`, `WarmStartConvergence`, `AxisAgreement`,
+`MillerConvergence`, `OutputConvergence`, `SamplerConvergence`,
+`EstimatorConvergence`, `SurfaceAverageConvergence` and `FluxGridConvergence`.
+
+**AND WHAT IS LEFT IS A DIFFERENT KIND OF THING, WHICH IS THE USEFUL PART OF
+THE COUNT.** Of the eleven that are not the deliberate red, the cases that
+remain are dominated by **solves that do not converge at all** rather than by
+assertions that cannot be read: `PlasmaConnectivity`, `XPointOuter`,
+`DeviceParity`'s `mhd-rectangle`, `MachineFixedBoundary`'s two, and most of
+`FreeBoundaryCoupling`'s 13 and `DriverAcceptance`'s 14. `MachineFixedBoundary`
+is additionally the `MKL_NUM_THREADS` coin toss of [M-186](#m-186).
+**The tolerance sweep `DEVICE-PLAN.md` §7.2 called the single biggest cost is
+substantially done; what stands between single precision and a green suite is
+now the solver and not the assertions.**

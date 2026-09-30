@@ -262,6 +262,45 @@ namespace meq
 			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
 	}
 
+
+	/**
+	 * The same, for a FIXED-POINT iteration, which cannot be asked for a
+	 * Newton's tolerance in a narrow format.
+	 *
+	 * **A QUADRATICALLY CONVERGENT ITERATION OVERSHOOTS ITS TARGET AND A
+	 * LINEARLY CONVERGENT ONE STOPS EXACTLY AT IT.** Newton's last step
+	 * squares the residual, so a target within an order of the arithmetic's
+	 * own floor is met on the step that crosses it. Picard contracts by a
+	 * fixed factor, so it approaches the floor from above and never crosses
+	 * it -- and Anderson acceleration makes this worse rather than better,
+	 * since the least-squares combination it forms over the difference history
+	 * is a cancellation of vectors that are themselves at round-off.
+	 *
+	 * Measured on `NewtonConvergence`'s Example 5 at `k = 2, n = 16` in
+	 * single: Anderson-Picard runs the full 500 iterations and stops at a
+	 * scaled residual of **5.80e-05** against the `1.19e-06` that
+	 * [[newtonTolerance]] floors the target at -- 49 times short, where plain
+	 * Newton on the same problem finishes in three. `4096 eps` is `4.88e-04`,
+	 * eight times above the measured stall and three orders below the `O( 1 )`
+	 * an iteration that had not converged at all would leave.
+	 *
+	 * **IT IS `#ifdef`'d RATHER THAN `std::max`'d, AND THAT IS NOT A STYLE
+	 * CHOICE.** `4096 eps` in double is `9.1e-13`, which is LARGER than
+	 * tolerances callers in this tree actually pass -- `FreeBoundaryCoupling`
+	 * asks for `1.0e-13` -- so a scaled version would loosen the double build
+	 * rather than leave it alone. M-220.
+	 */
+	inline double picardTolerance( double historical )
+	{
+#ifdef MFEM_USE_SINGLE
+		return std::max( historical,
+		                 4096.0*static_cast<double>(
+			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
+#else
+		return historical;
+#endif
+	}
+
 	double limiterPolygonMaximum( mfem::FiniteElementSpace const &space,
 	                              std::vector<LimiterPolygonFace> const &polygon,
 	                              mfem::Vector const &values, int offset,

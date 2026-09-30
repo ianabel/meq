@@ -126,6 +126,72 @@ namespace tests
 	}
 
 	/**
+	 * How far past the tolerance a routine was GIVEN its achieved residual may
+	 * sit, floored from the caller's own historical bound.
+	 *
+	 * **A TOLERANCE THAT FOLLOWS `real_t` IS NOT A CONSTANT, AND AN ASSERTION
+	 * ON WHAT IT ACHIEVES CANNOT BE ONE EITHER.** `meq::newtonTolerance()`
+	 * floors the tracer's `1e-12` at ten `eps`, so the corrector and the ray
+	 * Newton are asked for `1.19e-06` in single and reach it: `OpenSurfaces`
+	 * reads a target of `1.335e-06` and a worst residual of exactly
+	 * `1.335e-06`, and `SurfaceFitConvergence` reads `8.87e-07` against the
+	 * same target. Both were asserted against `1.0e-08` and `1.0e-09`, numbers
+	 * chosen when the target was `1e-12` and three orders below what the
+	 * routine is now allowed to stop at.
+	 *
+	 * **THE TARGET IS AN ARGUMENT AND NOT AN `eps` EXPRESSION**, because it is
+	 * not `eps` alone: `Contour::correctorTarget` is the tolerance times the
+	 * scale of `psi_h` over the mesh, and only the caller has that. Passing it
+	 * is also what makes this a statement about the routine rather than about
+	 * the format -- a corrector that stalls two orders above its target still
+	 * fails.
+	 *
+	 * @a slack is 4 by default. It is not the double build's own ratio, which
+	 * is 274 on `OpenSurfaces`: a corrector keeping its best iterate after four
+	 * non-improving steps does not always meet its target, and in double the
+	 * historical bound absorbs that. In single every measured residual sits
+	 * AT the target, so 4 is slack over a routine that converged and is three
+	 * orders below a trace that has wandered off the level set. M-220.
+	 */
+	inline double achievedToleranceFloor( double historical, double target,
+	                                      double slack = 4.0 )
+	{
+		return std::max( historical, slack*target );
+	}
+
+	/**
+	 * The residual a CONVERGED Newton may leave, floored from the caller's own
+	 * historical bound.
+	 *
+	 * **A CONVERGENCE PRECONDITION IS A STATEMENT ABOUT THE TOLERANCE THE
+	 * SOLVER WAS GIVEN, AND SEVEN SITES IN THIS DIRECTORY NAME A LITERAL
+	 * INSTEAD.** Each asks `newtonResiduals().back() < 1.0e-08` while handing
+	 * `solve()` a tolerance built by `meq::newtonTolerance()`, which floors at
+	 * ten `eps` -- `1.19e-06` in single. So the solve reaches exactly what it
+	 * was asked for and the test rejects it at a hundred times tighter. M-217's
+	 * lesson one level out: *a default is only a default on the paths that do
+	 * not override it*, and here the override is in the caller.
+	 *
+	 * The floor is `80 eps` times `max( 1, || r_0 || )`, the reference being
+	 * the relative target's own multiplier read back out of the history the
+	 * caller already holds -- `9.5e-06` in single on an `O( 1 )` problem. A
+	 * solve that did NOT converge leaves `O( || r_0 || )`, which on the machine
+	 * cases here is `1e-02` to `1e+00`, so the bound sits three to five orders
+	 * inside that gap. In double it is `1.8e-14` and every historical value
+	 * dominates, so the double path is unmoved. M-220.
+	 */
+	inline double convergedResidualFloor( double historical,
+	                                      std::vector<double> const &residuals )
+	{
+		double const reference =
+			residuals.empty() ? 1.0 : std::max( 1.0, residuals.front() );
+		return std::max( historical,
+		                 80.0*reference
+		                 *static_cast<double>(
+			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
+	}
+
+	/**
 	 * The departure two routes computing the SAME quantity may show, floored at
 	 * round-off on a quantity of size @a scale.
 	 *
@@ -166,18 +232,23 @@ namespace tests
 	 * claim is intact; and in double this returns **exactly zero**, so the
 	 * assertion there is the bit-equality it always was.
 	 *
-	 * The constant is **1024**, set by the widest-spread user rather than the
-	 * narrowest: `DeviceRowsTests` contracts a length-97 row against a column
-	 * and reads **71 eps** on an entry of 7.5e+06, which is what cancellation in
-	 * a sum that long costs. `BorderAssembly` reads 0.06 and `SourceViewTests`
-	 * 0.54. A transposed `r + nr*c`, a dropped row or a wrong support index is
-	 * `O( 1 )` RELATIVE, so 1024 eps still sits three orders below the smallest
-	 * of them. M-219.
+	 * The constant is **4096**, set by the widest-spread user rather than the
+	 * narrowest. Within one contraction it is `DeviceRowsTests`, which reads
+	 * **71 eps** on a length-97 row against an entry of 7.5e+06 -- what
+	 * cancellation in a sum that long costs -- against `BorderAssembly`'s 0.06
+	 * and `SourceViewTests`' 0.54. **The widest is a whole SOLVE compared
+	 * through two assembly routes**: `NewtonConvergence` reads **1270 eps** on
+	 * the flux at `k = 4, n = 16`, where the difference between the two paths
+	 * is `eps` times the trace system's conditioning and that conditioning
+	 * grows with the degree. A transposed `r + nr*c`, a dropped row, a wrong
+	 * support index, a sign in `SourceIntegrator` -- every failure this bound
+	 * guards is `O( 1 )` RELATIVE, so 4096 eps is `4.9e-04` and still sits
+	 * three orders below the smallest of them. M-219, M-220.
 	 */
 	inline double exactAgreementFloor( double scale )
 	{
 #ifdef MFEM_USE_SINGLE
-		return 1024.0*std::abs( scale )
+		return 4096.0*std::abs( scale )
 		       *static_cast<double>(
 			       std::numeric_limits<mfem::real_t>::epsilon() );
 #else
@@ -193,14 +264,22 @@ namespace tests
 	 * DOES THE SAME JOB.** `MillerConvergence`'s own comment states the
 	 * discriminator: *"an inexact step on an affine system is `O( 1 )`, not
 	 * `O( 1e-10 )`"*. Measured across the affine cases here the reduction runs
-	 * from 163 to **2243** `eps`, in both builds alike; 8192 clears the worst by
-	 * 3.7 and still sits three orders below the `O( 1 )` an inexact step gives.
-	 * It is a bound chosen in the middle of a four-order gap rather than a
-	 * constant fitted to the data, which is the distinction that matters. In
-	 * double it is `1.8e-12`, so every caller's historical `1.0e-8` dominates
-	 * and nothing there moves. M-219.
+	 * from 163 `eps` to **19,087**, the largest being
+	 * `PedestalConvergence`'s corner-singular control at `k = 3` on the finest
+	 * mesh -- where one exact step takes the residual from 6.637e-03 to
+	 * 1.510e-05, which is `eps` times a trace system whose conditioning the
+	 * corner has made about 1.9e+04. 65,536 clears that by 3.4 and still sits
+	 * **two orders** below the `O( 1 )` an inexact step gives, an inexact
+	 * Jacobian leaving the residual within a factor of about two of where it
+	 * started. That is a narrower gap than this header's other constants enjoy
+	 * and the number is recorded for that reason.
+	 *
+	 * In double it is `1.5e-11`, and it is consulted only where the iteration
+	 * COUNT has already failed -- `newtonIterations <= 1 || reachedTheFloor` --
+	 * which on every affine case in this tree does not happen there, so no
+	 * double-build assertion reaches it at all. M-219, M-220.
 	 */
-	double const affineStepFactor = 8192.0;
+	double const affineStepFactor = 65536.0;
 
 	/**
 	 * The residual reduction one exact Newton step on an AFFINE residual can be
@@ -354,7 +433,8 @@ namespace tests
 		text << "the first Newton step took the residual from " << residuals[ 0 ]
 		     << " to " << residuals[ 1 ] << ", a reduction of " << ratio
 		     << " -- which is " << ratio/eps << " times this build's eps, against "
-		        "the 2048 an exact Jacobian on an affine residual reaches";
+		        "the " << affineStepFactor
+		     << " an exact Jacobian on an affine residual is allowed";
 		return text.str();
 	}
 
@@ -368,8 +448,307 @@ namespace tests
 #endif
 	}
 
+	/**
+	 * The same question asked of the RATE rather than of the degree, for the
+	 * studies whose observed order is not `k+1`.
+	 *
+	 * **THE FORMAT DOES NOT CARE WHICH POLYNOMIAL DEGREE PRODUCED AN ORDER, IT
+	 * CARES HOW MANY DECADES THE SEQUENCE HAS TO CROSS.** `psi*` converges at
+	 * `k+2`, so a `k = 1` post-processing study is asking for THREE orders over
+	 * four dyadic meshes -- 3.6 decades -- where a `k = 1` potential study asks
+	 * for two. Measured, `ExtensionConvergence`'s `psi*` at `k = 1` reads 2.354
+	 * across the sequence against a design 3, and 1.480 on the finest pair,
+	 * while its potential at the same degree is clean. So the predicate is the
+	 * EXPECTED RATE and the cut is the same one
+	 * [[rateIsMeasurable]] makes: two orders is measurable in single, three is
+	 * not. `rateIsMeasurable( k )` is exactly this asked of `k + 1`. M-220.
+	 */
+	inline bool rateOfOrderIsMeasurable( double expected )
+	{
+#ifdef MFEM_USE_SINGLE
+		return expected <= 2.0;
+#else
+		(void)expected;
+		return true;
+#endif
+	}
+
+	/**
+	 * Whether an error is still measuring the DISCRETISATION rather than the
+	 * format, on a quantity of size @a norm.
+	 *
+	 * **THE DEGREE-BASED SKIP IS THE RIGHT INSTRUMENT FOR A RATE ACROSS A
+	 * SEQUENCE AND THE WRONG ONE FOR A SINGLE READING.** M-218 settled that no
+	 * per-pair criterion can separate a good rate from a contaminated one --
+	 * the tail bends before it flattens -- so `rateIsMeasurable` cuts by
+	 * degree. A COMPARISON is a different question: *"psi* beats psi_h by ten
+	 * times"* is about two numbers, and it is answerable exactly while both of
+	 * them are above the floor. Measured on `NewtonConvergence`'s Example 5 in
+	 * single, `psi*` reads 4.10e-03, 4.80e-04, 5.81e-05, 7.23e-06 at `k = 1` --
+	 * the design third order, every pair -- and floors at 3.73e-07 by `k = 2`.
+	 * A degree cut would throw the `k = 1` column away with the rest.
+	 *
+	 * The constant is **16 eps**. The floors measured here are 3.5 `eps` for
+	 * `psi*`, 2.5 for a level-set position and 6.5 for a Chebyshev fit over
+	 * 2886 samples, so 16 clears the worst by 2.5 and still admits everything
+	 * an order above it.
+	 *
+	 * **IT IS `#ifdef`'d RATHER THAN SCALED, AND THAT IS THE SAFETY PROPERTY.**
+	 * In double it returns true unconditionally, so a guard written with it
+	 * cannot skip an assertion the double build makes today, however wrong the
+	 * norm handed to it. Every helper in this header is either a `std::max`
+	 * against the caller's own historical value or is `#ifdef`'d for the same
+	 * reason. M-220.
+	 */
+	inline bool aboveTheFormatsFloor( double error, double norm,
+	                                  double constant = 16.0 )
+	{
+#ifdef MFEM_USE_SINGLE
+		return error > constant*std::abs( norm )
+		       *static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() );
+#else
+		(void)error;
+		(void)norm;
+		(void)constant;
+		return true;
+#endif
+	}
+
+	/**
+	 * How well a STATIONARY point's position can be known, on a feature of
+	 * size @a scale.
+	 *
+	 * **A MAXIMUM IS FLAT, SO LOCATING ONE COSTS HALF THE DIGITS.** Near a
+	 * stationary point `psi = psi_max - c dz^2`, so a flux known to `eps` pins
+	 * the position only to `sqrt( eps/c )` -- `3.45e-04` in single against
+	 * `1.49e-08` in double, four and a half orders apart where the format is
+	 * one. It is not a tolerance anybody chose and no amount of refinement
+	 * moves it: it is the square root in the relation.
+	 *
+	 * Measured, and the shape is exactly that. `LimiterCurve`'s located
+	 * contact stands 1.177e-03, 2.408e-04, 1.536e-04 from the midplane over
+	 * `n = 12, 24, 48` -- converging at 2.289 and then FLOORING at 1.5e-04,
+	 * which is `sqrt( eps )` on a half-width of 0.5. `AxisAgreement`'s located
+	 * axis reads `R = 0.99999583` against an exact 1 and `z = -3.16e-06`
+	 * against 0. Both were asserted against `1.0e-08`.
+	 *
+	 * **THE VALUE AT THE POINT IS UNAFFECTED, WHICH IS THE OTHER HALF AND IS
+	 * WHY THIS IS NOT A LOSS.** The same flatness that hides the position
+	 * makes `psi` there accurate to `eps`: an `O( sqrt( eps ) )` error in
+	 * WHERE costs `O( eps )` in the VALUE. That is the envelope argument
+	 * `LimiterCurve` already rests on, arriving from the other side.
+	 *
+	 * `#ifdef`'d true in double, so a guard written with it cannot skip an
+	 * assertion that build makes today. M-220.
+	 */
+	inline bool stationaryPositionIsMeasurable( double offset, double scale )
+	{
+#ifdef MFEM_USE_SINGLE
+		return offset > 4.0*std::abs( scale )
+		       *std::sqrt( static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() ) );
+#else
+		(void)offset;
+		(void)scale;
+		return true;
+#endif
+	}
+
+	/// The same floor as a NUMBER, to `std::max` against a caller's own
+	/// historical bound on how far a located stationary point may sit from a
+	/// known one: `1.38e-03` on a unit feature in single and **exactly zero**
+	/// in double, so the caller's own bound is what runs there, to the bit.
+	/// See [[stationaryPositionIsMeasurable]] for why the exponent is a half,
+	/// and [[exactAgreementFloor]] for why it is `#ifdef`'d rather than
+	/// evaluated in both formats -- `sqrt( eps )` in double is 1.49e-08, which
+	/// is LARGER than several of the bounds this would be maxed against, so a
+	/// scaled version would loosen the double build rather than leave it
+	/// alone.
+	inline double stationaryPositionFloor( double scale )
+	{
+#ifdef MFEM_USE_SINGLE
+		return 4.0*std::abs( scale )
+		       *std::sqrt( static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() ) );
+#else
+		(void)scale;
+		return 0.0;
+#endif
+	}
+
+	/**
+	 * Whether @a value stands far enough above a KNOWN contaminant for a rate
+	 * through it to be a rate of @a value rather than of the two together.
+	 *
+	 * **THIS IS NOT A ROUND-OFF FLOOR, IT IS A SECOND ERROR THAT DOES NOT
+	 * MOVE.** `WarmStartConvergence` measures a structured grid's bilinear
+	 * interpolation against the coarse solve it interpolates, and that solve's
+	 * own discretisation error is a constant the grid sequence cannot go below.
+	 * The file already says so: *"by 257 nodes the grid error is within a
+	 * factor of two of the coarse solve's own, which the grid cannot represent
+	 * better than"*. In single the solve's error carries the format in it as
+	 * well, the gap narrows further, and the last rate reads 1.689 against a
+	 * bound of 1.7 set from the double build's 1.735.
+	 *
+	 * `#ifdef`'d true in double for the same reason as
+	 * [[aboveTheFormatsFloor]]: the published rates are that build's, and a
+	 * guard must not be able to drop one of them. M-220.
+	 */
+	inline bool clearOfContaminant( double value, double contaminant,
+	                                double factor = 2.0 )
+	{
+#ifdef MFEM_USE_SINGLE
+		return value > factor*std::abs( contaminant );
+#else
+		(void)value;
+		(void)contaminant;
+		(void)factor;
+		return true;
+#endif
+	}
+
+	/**
+	 * Whether a SECOND difference of measured errors is readable in this
+	 * format -- a drift, a ratio of one measured ratio to the next.
+	 *
+	 * **A RATIO OF RATIOS HAS THE ROUND-OFF IN IT TWICE AND THE SIGNAL ONCE.**
+	 * `EstimatorConvergence`'s effectivity index is `eta/L2( q )` and it is
+	 * asserted to settle to within 1.5 per cent between consecutive meshes,
+	 * which is the sharpest statement in this directory -- it is what separates
+	 * an estimator with the right power of `h` in it from one that merely
+	 * shares a rate. Reading it needs both columns clean to well under a per
+	 * cent. Measured in single at `k = 1`, the cleanest case in that file, the
+	 * index runs 10.71, 10.60, 10.53, **9.66** against a double build's 10.72,
+	 * 10.61, 10.55, 10.52: the finest `L2( q )` is 9 per cent contaminated and
+	 * the drift reads 0.918 against a band of 0.95 to 1.05.
+	 *
+	 * **THE BOUNDS ON THE INDEX ITSELF ARE A DIFFERENT QUESTION AND STILL RUN**
+	 * -- reliable above and efficient below, 1 to 60 -- and they hold at every
+	 * mesh and every degree in single. What is skipped is the drift alone.
+	 *
+	 * `#ifdef`'d, so the double build asserts everything it always did. M-220.
+	 */
+	inline bool driftIsMeasurable()
+	{
+#ifdef MFEM_USE_SINGLE
+		return false;
+#else
+		return true;
+#endif
+	}
+
+	/**
+	 * Whether an ITERATION COUNT may be held to a value measured in another
+	 * format.
+	 *
+	 * **A COUNT IS AN ARTEFACT OF THE ARITHMETIC AS MUCH AS OF THE METHOD**, and
+	 * it moves in the direction nobody expects: a narrower format makes the
+	 * element-local non-linear solves noisier, so the OUTER Newton takes more
+	 * steps to reach a target that is itself looser. Measured on
+	 * `PedestalConvergence`'s `k = 2, n = 16` -- the case
+	 * `pedestalConvergenceIsAResolutionThreshold` exists to document as a knife
+	 * edge -- single takes **31** iterations where double takes 8 to 11.
+	 *
+	 * **WHAT THE CASE ACTUALLY CLAIMS IS UNAFFECTED AND IS STILL ASSERTED**:
+	 * that `p`-refinement cures the coarse case, which is `converged` being
+	 * true. M-219's lesson is to assert the claim rather than the count, and
+	 * here the claim already has its own assertion beside the count.
+	 *
+	 * `#ifdef`'d, so the double build holds every count it always did. M-220.
+	 */
+	inline bool iterationCountIsComparable()
+	{
+#ifdef MFEM_USE_SINGLE
+		return false;
+#else
+		return true;
+#endif
+	}
+
+	/**
+	 * The floor on a RESIDUAL ESTIMATOR, on a potential of size @a norm over a
+	 * mesh of spacing @a h, to `std::max` against a caller's own ceiling.
+	 *
+	 * **AN ESTIMATOR DIFFERENTIATES, SO ITS FLOOR RISES AS THE MESH FALLS --
+	 * THE OPPOSITE DIRECTION TO THE ERROR IT ESTIMATES.** `eta_1` is
+	 * `h_K || f + Delta* psi_h ||_K` and that residual is a cancellation of
+	 * second derivatives, so its round-off part carries a negative power of
+	 * `h` where every term it is compared against carries a positive one. The
+	 * two therefore CROSS, and past the crossing refining makes `eta` larger.
+	 *
+	 * Measured on `EstimatorConvergence` at `k = 3` in single, over
+	 * `h = 0.2, 0.1, 0.05, 0.025`: `eta` reads 8.93e-05, 9.73e-05, 1.97e-04,
+	 * 3.93e-04 -- rising, and doubling with each halving of `h`, so the floor
+	 * goes as `1/h` on this fixture. The double build's own column falls to
+	 * 1.93e-08 on the same meshes and never approaches it. The constant is
+	 * **512**, which puts the floor at 1.22e-03 on the finest mesh here --
+	 * above the 3.93e-04 measured by 3.1, and 2.27e-12 in double, below every
+	 * ceiling in that file by eight orders, so nothing there moves.
+	 *
+	 * **AND IT IS WHY AN ADAPTIVE LOOP IN A NARROW FORMAT STOPS BEING A
+	 * DESCENT.** M-220's `AdaptiveRefinement` entry is the same crossing seen
+	 * from the loop's side: past it the marker is steering on round-off.
+	 */
+	inline double residualEstimatorFloor( double norm, double h )
+	{
+		if ( !( h > 0.0 ) )
+			return 0.0;
+		return 512.0*std::abs( norm )
+		       *static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() )/h;
+	}
+
+	/**
+	 * The RELATIVE round-off floor on a flux-surface average, on a mesh of
+	 * spacing @a h.
+	 *
+	 * **THE SAME LAW AS [[residualEstimatorFloor]] ONE DERIVATIVE FURTHER ON,
+	 * AND IT IS WHY REFINING MAKES AN AVERAGE WORSE IN A NARROW FORMAT.** `V'`
+	 * and `< R^-2 >` are quadratures over a traced level set with weight
+	 * `1/( R | grad psi | )`, and the arc-length metric that parametrises them
+	 * comes off `q` -- a first derivative of `psi` -- whose own variation along
+	 * the contour is a second. So the round-off part carries `h^-2` where every
+	 * term it is compared against carries `h^(k+1)`, the two cross, and past
+	 * the crossing the average is worse on the finer mesh.
+	 *
+	 * Measured on `SurfaceAverageConvergence` in single at `k = 2`, over
+	 * `n = 12, 24, 48, 96`: the rms relative error in `V'` reads 6.64e-06,
+	 * 8.80e-06, 1.54e-04, 3.31e-04 -- RISING, and by a factor of 50 over an
+	 * eight-fold refinement, which is `h^-1.9`. The same column at `k = 3`
+	 * behaves the same way. Against `eps/h^2` those four readings are 0.39,
+	 * 0.13, 0.36 and 0.30 of it, so the law fits to within a factor of three
+	 * across the sweep and the constant here is **4**, an order above the worst
+	 * of them.
+	 *
+	 * In double the same expression at `n = 96` is `8.2e-12`, eight orders
+	 * below the `1e-04` ceilings in that file, so nothing there moves. M-220.
+	 */
+	inline double averagedMetricFloor( double h )
+	{
+		if ( !( h > 0.0 ) )
+			return 0.0;
+		return 4.0*static_cast<double>(
+			       std::numeric_limits<mfem::real_t>::epsilon() )/( h*h );
+	}
+
 	/// The message a caller prints when [[rateIsMeasurable]] refuses, so that the
 	/// weakening is visible in the output rather than inferred from a gap.
+	/// The same notice for a quantity whose order is not `k+1` -- `psi*` at
+	/// `k+2`, an estimator component, a differenced metric.
+	inline std::string rateNotMeasurableNotice( int order, char const *quantity,
+	                                            double expected )
+	{
+		std::ostringstream text;
+		text << "  *** k = " << order << ": SKIPPED the rate assertion on "
+		     << quantity << ", whose design order here is " << expected
+		     << ". This build is MFEM_PRECISION = single, in which a sequence "
+		        "has to cross that many decades before it ends and the error "
+		        "reaches the format's floor first. The absolute ceilings and "
+		        "every comparison that is not a rate are still asserted. M-220";
+		return text.str();
+	}
+
 	inline std::string rateNotMeasurableNotice( int order )
 	{
 		std::ostringstream text;

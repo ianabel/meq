@@ -9,6 +9,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Field.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Sampler.hpp"
@@ -84,7 +86,14 @@ BOOST_AUTO_TEST_CASE( everyNodeIsFoundInAnElementThatContainsIt )
 			                                     zs[ at ] - sampler.zAt( j ) ) );
 		}
 
-	BOOST_TEST( worst < 1.0e-10,
+	// ROUND-OFF ON A COORDINATE, NOT A LITERAL. The reference point is
+	// recovered from an element map computed in real_t and mapped forward
+	// again through the same arithmetic, so in single the round trip lands
+	// 1.78e-07 away -- 1.5 eps of the domain. A node located in the WRONG
+	// element is a whole element away, which is O( h ) = 5e-02 here. In double
+	// the historical 1e-10 dominates. M-220.
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-10,
+	                                                      box().width() ),
 	            "a node was located in an element that does not contain it: the "
 	            "recorded reference point maps back " << worst << " away" );
 }
@@ -176,7 +185,17 @@ BOOST_AUTO_TEST_CASE( theAffineInverseLocatesWhatTheNewtonInverseDoes )
 				mfem::IsoparametricTransformation transformation;
 				mesh.GetElementTransformation( e, &transformation );
 				mfem::IntegrationPoint here;
-				if ( transformation.TransformBack( physical, here )
+				// THE SAME QUESTION, WHICH MEANS THE SAME TOLERANCE. MFEM's
+				// InverseElementTransformation carries ip_tol = 1e-8 as a
+				// fixed literal and MEQ's affine path floors the same
+				// constant at 128 eps, so with the default left in place the
+				// two inverses disagree about a node lying ON a face -- node
+				// ( 24, 0 ), on the domain's bottom edge, is located by one
+				// and not the other in single. meq::samplerInsideTolerance()
+				// is the one expression both now use. M-220.
+				mfem::InverseElementTransformation inverse( &transformation );
+				inverse.SetElementTol( meq::samplerInsideTolerance() );
+				if ( inverse.Transform( physical, here )
 				     == mfem::InverseElementTransformation::Inside )
 				{
 					++claims;
@@ -219,7 +238,11 @@ BOOST_AUTO_TEST_CASE( theAffineInverseLocatesWhatTheNewtonInverseDoes )
 	             checked, onAFace, worstValue );
 	std::fflush( stdout );
 
-	BOOST_TEST( worstValue < 1.0e-12,
+	// THE TWO INVERSES ARE TWO ROUTES TO ONE REFERENCE POINT, so they agree to
+	// round-off on the field evaluated there: 2.03e-06 in single -- 17 eps of
+	// a field of O( 1 ) -- against 1e-15 in double. An affine inverse that had
+	// the wrong element, or a transposed 2x2 solve, gives O( 1 ). M-220.
+	BOOST_TEST( worstValue < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 	            "the two inverses agree on the element and not on the point in "
 	            "it: the sampled field differs by " << worstValue );
 }
@@ -326,8 +349,18 @@ BOOST_AUTO_TEST_CASE( theSampledFieldsMatchTheExactSolution )
 	// at sample points, so they sit an order above the L2 errors the rate tables
 	// record -- 1.9e-7 for psi at k = 2 on this mesh. Measured: psi 1.88e-6,
 	// B 1.19e-6.
-	BOOST_TEST( worstPsi < 6.0e-6 );
-	BOOST_TEST( worstB < 4.0e-6 );
+	//
+	// **AND IN SINGLE THESE ARE THE SOLVE'S OWN FLOOR AND NOT THE MESH'S
+	// ERROR.** Measured, psi 4.33e-05 and B 1.16e-04 against the same mesh's
+	// 1.88e-06 and 1.19e-06 in double -- 360 and 975 eps on fields of O( 1 ),
+	// which is eps carried through the trace system's conditioning at k = 2 on
+	// eight cells a side. A sampler reading the wrong element, or a component
+	// transposed, is O( 1 ). exactAgreementFloor() is EXACTLY ZERO in double,
+	// so the historical ceilings are what still run there, to the bit. M-220.
+	BOOST_TEST( worstPsi < std::max( 6.0e-6,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ) );
+	BOOST_TEST( worstB < std::max( 4.0e-6,
+	                               meq::tests::exactAgreementFloor( 1.0 ) ) );
 }
 
 /*

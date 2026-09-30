@@ -65,6 +65,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Coils.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
@@ -801,8 +803,18 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
 	 * the disc reads -1, so the quantity can go negative and the >= is doing
 	 * work.
 	 */
+	//
+	// AND AN EXACT ZERO IS A PROPERTY OF THE ARITHMETIC AS WELL AS OF THE
+	// GEOMETRY. ( x - c ) . n on a tangent face is a cancellation of two
+	// O( 1 ) numbers, so in single it lands at one eps of | x - c | rather
+	// than on zero -- measured -7.95e-08 and -6.81e-08 where double reads
+	// 0.000000000e+00 at every mesh. exactAgreementFloor() is EXACTLY ZERO in
+	// double, so the assertion there is still margin >= 0 to the bit; in
+	// single it is 1.22e-04, against a genuinely turned-away face giving a
+	// cosine of O( h/R ) = 5e-02. M-220.
+	double const tangentFloor = meq::tests::exactAgreementFloor( 1.0 );
 	for ( std::size_t i = 0; i < margins.size(); ++i )
-		BOOST_TEST( margins[ i ] >= 0.0,
+		BOOST_TEST( margins[ i ] >= -tangentFloor,
 		            "Gamma_h is NOT star-shaped about the centre at mesh " << i
 		            << ": margin " << margins[ i ] << ". A ray from the centre "
 		            "then meets it more than once, two faces claim the same piece "
@@ -3346,11 +3358,21 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 		// psi_ax's own constraint, in its own units. The printed residual is a
 		// weighted combination over the whole bordered system and can be small
 		// while this is not.
-		BOOST_TEST( std::abs( solver.normalisationResidual() ) < 1.0e-12,
+		//
+		// **TO ROUND-OFF ON psi_ax, NOT TO A LITERAL.** The border closes this
+		// difference to the format's own epsilon and no further -- M-204
+		// measured -1.240e-07 and -1.863e-07 on the two production cases in
+		// single, against -6.466e-12 in double -- so the bound carries the
+		// scale of the quantity being differenced. A border that did NOT close
+		// leaves O( span ), which is 1e-01 here. M-220.
+		BOOST_TEST( std::abs( solver.normalisationResidual() )
+		            < meq::tests::scalarAgreementFloor( 1.0e-12,
+		                                                solver.psiAxis() ),
 		            "psi_ax - max psi_h is " << solver.normalisationResidual()
 		            << " at limiter R = " << limiterR );
 
-		if ( residual < 1.0e-8 )
+		if ( residual < meq::tests::convergedResidualFloor(
+			     1.0e-8, solver.newtonResiduals() ) )
 			converged++;
 	}
 	std::fflush( stdout );
@@ -3470,7 +3492,10 @@ BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell )
 			double const residual =
 				run( limiterR, confine, muZeroCurrent, psiAx, psiBnd, scale,
 				     its );
-			bool const ok = residual < 1.0e-8;
+			// The converged/not verdict follows the tolerance the solve was
+			// given, which meq::newtonTolerance() floors at ten eps. M-220.
+			bool const ok =
+				residual < meq::tests::convergedResidualFloor( 1.0e-8, {} );
 			if ( ok )
 				converged++;
 			std::printf( "  %3s%-3d", ok ? "ok" : "--", its );
@@ -3992,8 +4017,14 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		try
 		{
 			solver.solve();
+			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
+			// meq::newtonTolerance() floors this solver's targets at ten eps, so
+			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
+			// rejects it. M-220.
 			row.converged = !solver.newtonResiduals().empty()
-			                && solver.newtonResiduals().back() < 1.0e-8;
+			                && solver.newtonResiduals().back()
+			                   < meq::tests::convergedResidualFloor(
+				                   1.0e-8, solver.newtonResiduals() );
 		}
 		catch ( std::exception const & )
 		{
@@ -4248,7 +4279,9 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		solver.solve();
 
 		BOOST_TEST_REQUIRE( !solver.newtonResiduals().empty() );
-		BOOST_TEST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8,
+		BOOST_TEST_REQUIRE( solver.newtonResiduals().back()
+		                    < meq::tests::convergedResidualFloor(
+			                    1.0e-8, solver.newtonResiduals() ),
 			"the solve did not converge for " << cell.label
 			<< ", so there is no converged psi_bnd to evaluate the source at" );
 

@@ -37,6 +37,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Coils.hpp"
 #include "meq/Config.hpp"
 #include "meq/CriticalPoints.hpp"
@@ -310,8 +312,14 @@ namespace meqtest
 		try
 		{
 			m.solver->solve();
+			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
+			// meq::newtonTolerance() floors this solver's targets at ten eps, so
+			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
+			// rejects it. M-220.
 			m.converged = !m.solver->newtonResiduals().empty()
-			              && m.solver->newtonResiduals().back() < 1.0e-8;
+			              && m.solver->newtonResiduals().back()
+			                 < meq::tests::convergedResidualFloor(
+				                 1.0e-8, m.solver->newtonResiduals() );
 		}
 		catch ( std::exception const & )
 		{

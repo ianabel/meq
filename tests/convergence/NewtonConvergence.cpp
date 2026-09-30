@@ -8,6 +8,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -461,7 +463,18 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnSoloviev )
 	             relative, newtonSolver.newtonIterations() );
 	std::fflush( stdout );
 
-	BOOST_TEST( relative < 1.0e-10,
+	/*
+	 * **THE TWO ROUTES ASSEMBLE THE SAME SYSTEM AND DO NOT SUM IT THE SAME
+	 * WAY**, so what they agree to is round-off amplified by the trace
+	 * system's conditioning. Measured, 1.33e-05 and 1.64e-05 relative in
+	 * single -- about 130 eps -- against a double build where the same two
+	 * agree at 1e-15. A sign or a missing 1/R in SourceIntegrator is O( 1 )
+	 * relative, so exactAgreementFloor()'s 1024 eps sits four orders inside
+	 * that gap; and it is EXACTLY ZERO in double, where the 1e-10 below is
+	 * what still runs, to the bit. M-220.
+	 */
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the two setSource() overloads disagree by " << relative
 	            << " relative on a source that does not depend on psi, so the "
 	            "sign or the 1/R in SourceIntegrator does not match the right hand "
@@ -575,10 +588,20 @@ BOOST_AUTO_TEST_CASE( theReconstructionDefectDoesNotReachTheSolve )
 			// The Newton path is the one whose reconstruction is degenerate. Its
 			// psi_h and q_h must still be the linear path's, which have been
 			// measured against the closed form at k+1 in SolovievConvergence.cpp.
-			BOOST_TEST( relativePsi < 1.0e-9,
+			//
+			// TO ROUND-OFF ON THE COEFFICIENTS RATHER THAN TO A LITERAL: the
+			// two paths assemble the same system through different code and sum
+			// it in a different order, so in single they part at 2.81e-06 in
+			// psi and 4.28e-06 in q -- about 30 eps relative -- where in double
+			// they agree at 1e-15. A reconstruction defect reaching the solve
+			// is O( 1 ) relative, which is what the 1024 eps below is four
+			// orders inside; and it is exactly zero in double. M-220.
+			double const pathFloor =
+				std::max( 1.0e-9, meq::tests::exactAgreementFloor( 1.0 ) );
+			BOOST_TEST( relativePsi < pathFloor,
 			            "k = " << order << ", n = " << n << ": psi_h differs by "
 			            << relativePsi << " between the paths" );
-			BOOST_TEST( relativeFlux < 1.0e-9,
+			BOOST_TEST( relativeFlux < pathFloor,
 			            "k = " << order << ", n = " << n << ": q_h differs by "
 			            << relativeFlux << " between the paths -- the flux is the "
 			            "physical output and it has moved where psi may not have" );
@@ -786,7 +809,18 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
 		                  meq::newtonTolerance( 1.0e-14 ), 500 );
 
-		BOOST_REQUIRE_NO_THROW( solver.solve() );
+		// NOT BOOST_REQUIRE_NO_THROW: it reports "unexpected exception thrown"
+		// and discards what(), which is where the iteration count, the final
+		// residual and the target it was measured against are. A red case
+		// nobody can action is one people learn to ignore.
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::exception const &error )
+		{
+			BOOST_FAIL( run.name << "threw: " << error.what() );
+		}
 
 		double const error = solver.potentialError( exact );
 		std::printf( "    %s %3d iterations, L2 error %.6e\n",
@@ -805,10 +839,35 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 		// local solve giving up is not by itself a failed solve, and the warnings
 		// are not a reason to reach for a tolerance.
 
+		/*
+		 * **AND A FIXED-POINT ITERATION CANNOT REACH THE DISCRETE SOLUTION AS
+		 * CLOSELY AS NEWTON IN A NARROW FORMAT, WHICH IS A PROPERTY OF THE
+		 * METHOD AND NOT OF THE PROBLEM.** Newton's last step squares the
+		 * residual and lands on the discrete solution to `eps`; Picard
+		 * contracts by a fixed factor and stops where
+		 * `meq::picardTolerance()` lets it, which is `4096 eps` scaled.
+		 * Measured here in single, the three Picard arms reach 1.04e-04,
+		 * 2.16e-04 and 2.98e-05 in `L2` against Newton's 2.98e-05, where in
+		 * double all four agree to seven figures.
+		 *
+		 * **THE SOLUTIONS STILL AGREE; IT IS THE ERRORS THAT DO NOT.** The
+		 * largest gap is 1.9e-04 on a potential of norm 6.7e-01 -- 2.8e-04
+		 * relative, inside exactAgreementFloor()'s 4096 eps -- so what this
+		 * case exists to rule out survives: the hazard is a path landing on a
+		 * DIFFERENT discrete solution, which `CLAUDE_HDGGS.md` records at
+		 * 9.4 per cent apart, four orders above this. The bound is therefore
+		 * the solution's own round-off rather than a fraction of an error
+		 * that is itself smaller than it. In double the floor is exactly zero
+		 * and the historical `1e-6 x reference` is what runs, to the bit.
+		 * M-220.
+		 */
 		if ( reference < 0.0 )
 			reference = error;
 		else
-			BOOST_TEST( std::abs( error - reference ) <= 1.0e-6*reference,
+			BOOST_TEST( std::abs( error - reference )
+			            <= std::max( 1.0e-6*reference,
+			                         meq::tests::exactAgreementFloor(
+				                         solver.exactPotentialNorm( exact ) ) ),
 			            "path " << run.name << " reached L2 error " << error
 			            << " where Newton reached " << reference
 			            << " -- the same discretisation should give the same error "
@@ -864,7 +923,8 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
 		return eq.psi( x( 0 ), x( 1 ) );
 	} );
 
-	struct Point { double h; double errorPsi; double errorStar; int iterations; };
+	struct Point { double h; double errorPsi; double errorStar; int iterations;
+	               double normPsi; };
 
 	for ( int order = 1; order <= 3; ++order )
 	{
@@ -883,10 +943,12 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
 			points.push_back( Point{ ( maxRadius - minRadius )/n,
 			                         solver.potentialError( exact ),
 			                         solver.postProcessedPotentialError( exact ),
-			                         solver.newtonIterations() } );
+			                         solver.newtonIterations(),
+			                         solver.exactPotentialNorm( exact ) } );
 		}
 
-		std::printf( "\n  psi* through Newton, Example 5, k = %d\n", order );
+		std::printf( "\n  psi* through Newton, Example 5, k = %d"
+		             " ( || psi || = %.4e )\n", order, points.front().normPsi );
 		std::printf( "    %8s %5s %12s %6s %12s %6s\n",
 		             "h", "it", "L2(psi)", "rate", "L2(psi*)", "rate" );
 		for ( std::size_t i = 0; i < points.size(); ++i )
@@ -908,8 +970,56 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
 		}
 		std::fflush( stdout );
 
+		/*
+		 * psi* CONVERGES AT k+2, SO IT REACHES THE FORMAT'S FLOOR THREE ORDERS
+		 * BEFORE psi_h DOES. Measured in single: at k = 1 it reads 4.10e-03,
+		 * 4.80e-04, 5.81e-05, 7.23e-06 -- the design third order on every pair
+		 * -- and by k = 2 it has floored at 3.73e-07, where the rate reads
+		 * 0.222 and psi* stops beating psi_h by ten times. At k = 3 it comes
+		 * out WORSE than psi_h.
+		 *
+		 * SO THE CUT IS PER READING RATHER THAN PER DEGREE, which is the one
+		 * place a per-pair criterion is the right instrument: M-218's finding
+		 * is about a RATE across a sequence, where the tail bends before it
+		 * flattens, and this is a comparison of two numbers that is exactly
+		 * answerable while both are above the floor. A degree cut would throw
+		 * the clean k = 1 column away with the rest. aboveTheFormatsFloor() is
+		 * unconditionally true in double, so nothing there is skipped. M-220.
+		 */
+		//
+		// THE CONSTANT IS 128 eps RATHER THAN THE HELPER'S DEFAULT 16.
+		// Measured on || psi || = 6.650e-01: psi* floors at 1.77e-06 to
+		// 1.86e-06, which is 27 eps of it, and the smallest reading still
+		// converging is 7.23e-06 at k = 1 on the finest mesh -- 109 eps, at a
+		// rate of 3.005. 128 sits just above that, so what the cut costs is
+		// the finest k = 1 pair; the two coarser ones still assert it at 3.093
+		// and 3.047.
+		//
+		// **AND A PER-READING CUT WORKS HERE AND DOES NOT ON
+		// EstimatorConvergence'S COPY OF THIS STUDY, WHICH IS A PROPERTY OF
+		// THE FIXTURES AND NOT AN INCONSISTENCY.** Example 5's psi* column
+		// FALLS at k = 1 and flattens; that fixture's TURNS, its minimum
+		// arriving at the third mesh and refining past it making psi* worse,
+		// so there no constant can order a genuine 38 eps against a floored
+		// 220. It cuts by degree instead and says why. M-220.
+		auto measuring = [ & ]( Point const &p )
+		{
+			return meq::tests::aboveTheFormatsFloor( p.errorStar, p.normPsi,
+			                                         128.0 );
+		};
+
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
+			if ( !measuring( points[ i ] ) )
+			{
+				BOOST_TEST_MESSAGE(
+					"  *** k = " << order << ", h = " << points[ i ].h
+					<< ": SKIPPED, psi* is " << points[ i ].errorStar
+					<< " on a potential of norm " << points[ i ].normPsi
+					<< " -- the format's own floor, with no discretisation "
+					   "left in it to converge. M-220" );
+				continue;
+			}
 			double const ratio = points[ i - 1 ].h/points[ i ].h;
 			double const measured = rate( points[ i - 1 ].errorStar,
 			                              points[ i ].errorStar, ratio );
@@ -923,11 +1033,17 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
 		}
 
 		// A rate alone would not catch a psi* that converges at k+2 to something
-		// no better than psi_h, and the defect this replaces was silent.
-		BOOST_TEST( points.back().errorStar < 0.1*points.back().errorPsi,
-		            "k = " << order << ": psi* is " << points.back().errorStar
-		            << " against " << points.back().errorPsi << " for psi_h, so the "
-		            "post-processing is not buying the extra order it converges at" );
+		// no better than psi_h, and the defect this replaces was silent. Read
+		// on the finest mesh whose psi* is still above the floor, which in
+		// double is always the last one.
+		std::size_t finest = points.size() - 1;
+		while ( finest > 0 && !measuring( points[ finest ] ) )
+			--finest;
+		BOOST_TEST( points[ finest ].errorStar < 0.1*points[ finest ].errorPsi,
+		            "k = " << order << ": psi* is " << points[ finest ].errorStar
+		            << " against " << points[ finest ].errorPsi << " for psi_h at h = "
+		            << points[ finest ].h << ", so the post-processing is not buying "
+		            "the extra order it converges at" );
 	}
 }
 

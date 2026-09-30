@@ -14,6 +14,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/Field.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
@@ -227,8 +229,12 @@ BOOST_AUTO_TEST_CASE( theBandIsContinuedByTheFluxAtTheFluxesOwnOrder )
 	             std::max( coarseInterior, fineInterior ) );
 	std::fflush( stdout );
 
-	// Interior nodes involve no continuation at all, so they ARE exact.
-	BOOST_TEST( std::max( coarseInterior, fineInterior ) < 1.0e-12,
+	// Interior nodes involve no continuation at all, so they ARE exact -- to
+	// the format's own round-off on a psi of this size, which is 8.53e-07 in
+	// single and 2.2e-15 in double. "Exact" is a claim about the METHOD and it
+	// survives; the number it is checked to is the arithmetic's. M-220.
+	BOOST_TEST( std::max( coarseInterior, fineInterior )
+	            < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 	            "an interior node is out by "
 	            << std::max( coarseInterior, fineInterior )
 	            << " on a linear potential, which needs no continuation" );
@@ -237,6 +243,24 @@ BOOST_AUTO_TEST_CASE( theBandIsContinuedByTheFluxAtTheFluxesOwnOrder )
 	// flux's projection error with the O( |p - x0|^2 ) of the extension itself,
 	// and the second term does not care how good q is. What it rules out is the
 	// thing that matters: a continuation that does not converge.
+	//
+	// AND THE INTERIOR NODES MEASURE THE FLOOR IN SITU, which is what makes
+	// this cut a measurement rather than a constant: they carry no
+	// continuation at all, so whatever they read IS the arithmetic. In single
+	// they read 8.53e-07 and the band error runs 1.325e-06 to 9.085e-07 --
+	// inside a factor of two of it at the fine mesh, where the "rate" is 0.54
+	// and is a rate of round-off. In double the interior nodes read 2.2e-15
+	// and the band error 1e-05, eleven orders apart, and clearOfContaminant()
+	// is true unconditionally there anyway. M-220.
+	if ( !meq::tests::clearOfContaminant( fine, std::max( coarseInterior,
+	                                                      fineInterior ) ) )
+		BOOST_TEST_MESSAGE(
+			"  *** SKIPPED the band continuation's rate. The fine band error "
+			<< fine << " is within a factor of two of what the interior nodes "
+			"-- which are continued not at all -- read as pure round-off, "
+			<< std::max( coarseInterior, fineInterior )
+			<< ". There is no continuation error left here to converge. M-220" );
+	else
 	BOOST_TEST( rate > 2.0,
 	            "the band error converges at " << rate << ", which is too slow "
 	            "to be a Taylor extension carried by the flux. A polynomial "
@@ -354,8 +378,10 @@ BOOST_AUTO_TEST_CASE( theBandVectorContinuesAtItsGradientsOrder )
 	std::fflush( stdout );
 
 	// The field is in the space, so an interior node has no discretisation error
-	// to show. Anything above round-off here is the sampler, not the extension.
-	BOOST_TEST( std::max( coarseInterior, fineInterior ) < 1.0e-11,
+	// to show. Anything above round-off here is the sampler, not the extension
+	// -- and round-off is 1.05e-06 in single against 1e-15 in double. M-220.
+	BOOST_TEST( std::max( coarseInterior, fineInterior )
+	            < meq::tests::scalarAgreementFloor( 1.0e-11, 1.0 ),
 	            "an interior node is out by "
 	            << std::max( coarseInterior, fineInterior )
 	            << " on a field its own space represents exactly" );
@@ -569,7 +595,10 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 	             checked, mesh.GetNBE(), worstBefore, worst );
 	std::fflush( stdout );
 
-	BOOST_TEST( worst < 1.0e-12,
+	// ON the circle to round-off on a coordinate: the projection is exact in
+	// exact arithmetic and lands 5.10e-08 out in single, which is 0.4 eps of
+	// the radius. A node that was MISSED sits O( h ) inside. M-220.
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 	            "a boundary node sits " << worst << " off the circle after "
 	            "projection onto it. Either a node was missed -- the high-order "
 	            "ones between the vertices are the likely ones -- or the "
@@ -793,8 +822,14 @@ BOOST_AUTO_TEST_CASE( theGridFileReadsBackAsTheExactSolution )
 	std::fflush( stdout );
 
 	BOOST_TEST( compared > 1000 );
-	BOOST_TEST( worstPsi < 6.0e-6 );
-	BOOST_TEST( worstB < 4.0e-6 );
+	// The same two ceilings SamplerConvergence sets on the same fixture, and
+	// the same reason for the floor under them: in single these read 3.50e-05
+	// and 1.17e-04, which is eps carried through the trace system's
+	// conditioning rather than anything about the grid file. M-220.
+	BOOST_TEST( worstPsi < std::max( 6.0e-6,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ) );
+	BOOST_TEST( worstB < std::max( 4.0e-6,
+	                               meq::tests::exactAgreementFloor( 1.0 ) ) );
 }
 
 /// THE ROTATING FIELDS -- n_s AND e phi_0 -- AND THE ONE WAY OF WRITING THEM
@@ -936,7 +971,8 @@ BOOST_AUTO_TEST_CASE( theRotatingFieldsUseTheNodesOwnRadius )
 	             bandNodes, worstBand, worstBandCoefficient, worstInterior );
 	std::fflush( stdout );
 
-	BOOST_TEST( worstInterior < 1.0e-12,
+	// Round-off on a density of O( 1 ): 2.87e-07 in single. M-220.
+	BOOST_TEST( worstInterior < meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 	            "an interior node's density is out by " << worstInterior
 	            << ", where no continuation happens at all and psi is linear" );
 	BOOST_TEST( worstBand < 1.0e-5,

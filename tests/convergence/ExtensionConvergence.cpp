@@ -513,12 +513,22 @@ namespace
 		             overallPsi, overallFlux, expected );
 		std::fflush( stdout );
 
-		BOOST_TEST( overallPsi >= expected,
-		            "k = " << order << ": psi converged at " << overallPsi
-		            << " across the sequence, wanted " << expected );
-		BOOST_TEST( overallFlux >= expected,
-		            "k = " << order << ": q converged at " << overallFlux
-		            << " across the sequence, wanted " << expected );
+		// THE SEQUENCE RATE IS A RATE TOO, and the guard above covered only the
+		// per-pair loop. In single at k >= 2 the tail is round-off on both
+		// columns -- measured 1.081 and 0.825 at k = 2, 0.068 and -0.022 at
+		// k = 3 -- so it is skipped by DEGREE here as well, with the absolute
+		// ceilings below still asserted. M-218, M-220.
+		if ( !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+		else
+		{
+			BOOST_TEST( overallPsi >= expected,
+			            "k = " << order << ": psi converged at " << overallPsi
+			            << " across the sequence, wanted " << expected );
+			BOOST_TEST( overallFlux >= expected,
+			            "k = " << order << ": q converged at " << overallFlux
+			            << " across the sequence, wanted " << expected );
+		}
 
 		// A rate is blind to a solution wrong by a constant factor or a sign, so
 		// the absolute error is checked too. The ceilings sit at about three times
@@ -742,19 +752,33 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialConvergesAtKPlusTwo )
 		// The headline: psi* must beat psi by a full order. This is the statement
 		// that fails when the reconstruction is wrong, and it fails loudly --
 		// a broken psi* is not merely slow, it stops converging.
-		BOOST_TEST( overall >= expected,
-		            "k = " << order << ": psi* converged at " << overall
-		            << " across the sequence, wanted " << expected );
-
+		//
+		// AND IT IS A THREE-ORDER CLAIM AT k = 1, which is one more than a
+		// single-precision sequence can cross: measured 2.354 across the
+		// sequence and 1.480 on the finest pair, where the double build reads
+		// the design order. The predicate is therefore the EXPECTED RATE and
+		// not the degree -- rateIsMeasurable( k ) would have admitted k = 1
+		// here. The comparison below, that psi* beats psi_h, is NOT a rate and
+		// still runs at every degree. M-220.
 		double const expectedPair = order + pairFloor;
-		for ( std::size_t i = 1; i < points.size(); ++i )
+		if ( !meq::tests::rateOfOrderIsMeasurable( expected ) )
+			BOOST_TEST_MESSAGE(
+				meq::tests::rateNotMeasurableNotice( order, "psi*", expected ) );
+		else
 		{
-			double const ratio = points[ i - 1 ].h/points[ i ].h;
-			double const observedRate = rate( points[ i - 1 ].errorPsiStar,
-			                                  points[ i ].errorPsiStar, ratio );
-			BOOST_TEST( observedRate >= expectedPair,
-			            "k = " << order << ", h = " << points[ i ].h
-			            << ": psi* converged at " << observedRate << ", wanted " << expectedPair );
+			BOOST_TEST( overall >= expected,
+			            "k = " << order << ": psi* converged at " << overall
+			            << " across the sequence, wanted " << expected );
+
+			for ( std::size_t i = 1; i < points.size(); ++i )
+			{
+				double const ratio = points[ i - 1 ].h/points[ i ].h;
+				double const observedRate = rate( points[ i - 1 ].errorPsiStar,
+				                                  points[ i ].errorPsiStar, ratio );
+				BOOST_TEST( observedRate >= expectedPair,
+				            "k = " << order << ", h = " << points[ i ].h
+				            << ": psi* converged at " << observedRate << ", wanted " << expectedPair );
+			}
 		}
 
 		// And it must actually be better than the potential it is built from.
@@ -871,7 +895,18 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnTheCurvedBoundary )
 	             relative, newtonSolver.newtonIterations() );
 	std::fflush( stdout );
 
-	BOOST_TEST( relative < 1.0e-10,
+	/*
+	 * **THE TWO ROUTES ASSEMBLE THE SAME SYSTEM AND DO NOT SUM IT THE SAME
+	 * WAY**, so what they agree to is round-off amplified by the trace
+	 * system's conditioning. Measured, 1.33e-05 and 1.64e-05 relative in
+	 * single -- about 130 eps -- against a double build where the same two
+	 * agree at 1e-15. A sign or a missing 1/R in SourceIntegrator is O( 1 )
+	 * relative, so exactAgreementFloor()'s 1024 eps sits four orders inside
+	 * that gap; and it is EXACTLY ZERO in double, where the 1e-10 below is
+	 * what still runs, to the bit. M-220.
+	 */
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the linear and Newton paths disagree by " << relative
 	            << " relative on a curved boundary, so the extension is not being "
 	            "assembled the same way on both" );

@@ -7,6 +7,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/FluxSurfaces.hpp"
 #include "meq/SurfaceFit.hpp"
 
@@ -207,12 +209,26 @@ BOOST_AUTO_TEST_CASE( anOpenLevelIsTracedFromWallToWall )
 		<< ". Since | grad psi | >= 1 on this fixture the distance cannot "
 		"exceed the residual, so the two disagree about where the curve is" );
 
-	// AND THE RESIDUAL ITSELF IS SMALL, which is the half the relation above
-	// does not cover: it would hold just as well for a trace that wandered off
-	// the level set by a millimetre.
-	BOOST_TEST( whole.worstResidual < 1.0e-8,
+	/*
+	 * AND THE RESIDUAL ITSELF IS SMALL, which is the half the relation above
+	 * does not cover: it would hold just as well for a trace that wandered off
+	 * the level set by a millimetre.
+	 *
+	 * **SMALL AGAINST THE TARGET THE CORRECTOR WAS GIVEN, WHICH IS NOT A
+	 * CONSTANT.** `meq::newtonTolerance()` floors the tracer's `1e-12` at ten
+	 * `eps`, so `correctorTarget` reads `1.12e-12` in double and `1.335e-06`
+	 * in single -- and the worst residual is `3.07e-10` there and exactly
+	 * `1.335e-06` here, which is the corrector meeting its target in both. The
+	 * `1.0e-08` was chosen against the double target and sits three orders
+	 * below what the routine is now allowed to stop at. In double the
+	 * historical value dominates and nothing moves. M-220.
+	 */
+	BOOST_TEST( whole.worstResidual
+	            < meq::tests::achievedToleranceFloor( 1.0e-8,
+	                                                  whole.correctorTarget ),
 		"the trace did not stay on the level set: worst residual "
-		<< whole.worstResidual );
+		<< whole.worstResidual << " against a corrector target of "
+		<< whole.correctorTarget );
 }
 
 /*
@@ -306,13 +322,30 @@ BOOST_AUTO_TEST_CASE( theChebyshevFitConvergesWhereAPeriodicOneFloors )
 	BOOST_TEST( gain > 1.0e4,
 		"the Chebyshev fit improved by only " << gain << " over the sweep" );
 
-	// THE FLAT RANGE STOPS BEFORE THE FLOOR. By 32 modes the fit has reached
-	// about 6e-8 m, which is the traced points' own accuracy carried through a
-	// least squares of 32 columns -- so the last ratio is the floor arriving
-	// and not the decay changing, and asserting on it would be asserting on
-	// round-off.
+	/*
+	 * THE FLAT RANGE STOPS BEFORE THE FLOOR. By 32 modes the fit has reached
+	 * about 6e-8 m, which is the traced points' own accuracy carried through a
+	 * least squares of 32 columns -- so the last ratio is the floor arriving
+	 * and not the decay changing, and asserting on it would be asserting on
+	 * round-off.
+	 *
+	 * **AND WHERE THE FLOOR ARRIVES IS A PROPERTY OF THE FORMAT, SO DROPPING A
+	 * FIXED TWO ENTRIES IS NOT ENOUGH.** In single the traced points are good
+	 * to 1.31e-06 m rather than 3.07e-10 -- the corrector's own target, five
+	 * orders wider -- and the fit floors at 8.28e-07 by 28 modes, four earlier:
+	 * measured, the column reads x5.96, x4.81, x1.87, x0.94 where double reads
+	 * x6.37, x6.43, x8.49, x2.05. So the window ENDS at the floor rather than
+	 * at a fixed offset from the sweep, and the floor is 32 eps of the curve's
+	 * own length. That is five times the 6.5 eps the fit actually reaches here
+	 * and, in double, 7.6e-15 m -- seven orders below the smallest entry in the
+	 * column, so every ratio this build ever asserted is still asserted. M-220.
+	 */
+	double const fitFloor = 32.0*arc.back()
+	                        *static_cast<double>(
+		                        std::numeric_limits<mfem::real_t>::epsilon() );
 	std::vector<double> ratios;
-	for ( std::size_t i = 2; i + 2 < counts.size(); ++i )
+	for ( std::size_t i = 2; i + 2 < counts.size() && chebyshev[ i ] > fitFloor;
+	      ++i )
 		ratios.push_back( chebyshev[ i - 1 ]/chebyshev[ i ] );
 	BOOST_TEST_REQUIRE( ratios.size() >= 3u );
 
@@ -332,8 +365,12 @@ BOOST_AUTO_TEST_CASE( theChebyshevFitConvergesWhereAPeriodicOneFloors )
 		"holds its ratio over equal additive steps" );
 
 	// MONOTONE, which an algebraic basis fighting the parametrisation would not
-	// be -- IN-3's prescribed-angle column decayed at L^-1.2 and wandered.
-	for ( std::size_t i = 1; i < chebyshev.size(); ++i )
+	// be -- IN-3's prescribed-angle column decayed at L^-1.2 and wandered. Each
+	// step is asserted while the entry it starts FROM is above the floor above,
+	// which in double is every one of them and in single is every step down to
+	// 24 modes; past the floor the column is noise and rises by 6% here.
+	for ( std::size_t i = 1;
+	      i < chebyshev.size() && chebyshev[ i - 1 ] > fitFloor; ++i )
 		BOOST_TEST( chebyshev[ i ] < chebyshev[ i - 1 ],
 			"the Chebyshev error rose from " << counts[ i - 1 ] << " to "
 			<< counts[ i ] << " modes" );

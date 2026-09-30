@@ -3,6 +3,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/BoundaryShape.hpp"
 #include "meq/Coils.hpp"
 #include "meq/ConductorField.hpp"
@@ -476,7 +478,15 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesTheSolovievBenchmarkAndWritesIt )
 	// Both ran the same arithmetic in the same order, so this is round-off and
 	// not a tolerance to be tuned. 1e-10 leaves room for the file round-trip,
 	// which writes at precision 16.
-	BOOST_TEST( relative < 1.0e-10,
+	// **TO ROUND-OFF, AND ROUND-OFF IS A PROPERTY OF THE FORMAT.** The two runs
+	// assemble the same problem through different code and do not sum it in the
+	// same order, so in single they part at 2.55e-07 to 2.72e-05 relative --
+	// about 230 eps at worst -- where in double they agree at 1e-16. The driver
+	// mis-plumbing the configuration, or writing the wrong field, is O( 1 )
+	// relative. exactAgreementFloor() is EXACTLY ZERO in double, so what runs
+	// there is the historical bound to the bit. M-220.
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the driver's stored psi differs from the library's by "
 	            << relative << " relative. Same mesh, same degree, same source, "
 	            "so this is the driver mis-plumbing the configuration or writing "
@@ -616,7 +626,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 	             relative, stored.Size(), sub.GetNE(), background.GetNE() );
 	std::fflush( stdout );
 
-	BOOST_TEST( relative < 1.0e-10,
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the driver's curved solve differs from the library's by "
 	            << relative << " relative" );
 
@@ -852,7 +863,8 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	 * less, since a difference in the starting iterate is exactly what this is
 	 * now able to see.
 	 */
-	BOOST_TEST( relative < 1.0e-10,
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the driver's adaptive solve differs from the library's by "
 	            << relative << " relative. The driver warm-starts each cycle and "
 	            "this loop does not, so a difference here is the warm start "
@@ -927,7 +939,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	             relative, stored.Size(), solver.potential().Max() );
 	std::fflush( stdout );
 
-	BOOST_TEST( relative < 1.0e-10,
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the driver's rotating solve differs from the library's by "
 	            << relative << " relative" );
 
@@ -1056,7 +1069,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	             solver.normalisationResidual(), solver.newtonIterations() );
 	std::fflush( stdout );
 
-	BOOST_TEST( relative < 1.0e-10,
+	BOOST_TEST( relative < std::max( 1.0e-10,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the driver's normalised solve differs from the library's by "
 	            << relative << " relative" );
 
@@ -1630,10 +1644,22 @@ BOOST_AUTO_TEST_CASE( theDriverTakesItsGridFromAMeshItDidNotBuild )
 	// MEQ's own writer.
 	std::pair<double, double> const radius = coordinateRange( "frommesh.nc", "R" );
 	std::pair<double, double> const z = coordinateRange( "frommesh.nc", "Z" );
-	BOOST_TEST( radius.first == minRadius, boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( radius.second == maxRadius, boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( z.first == zMin, boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( z.second == zMax, boost::test_tools::tolerance( 1.0e-12 ) );
+	// THE EXTENT COMES OUT OF THE MESH'S OWN VERTICES, WHICH ARE real_t. A
+	// corner written as 1.3 reads back 1.29999995231628 in single -- 3.67e-08
+	// relative, a third of one eps -- so the tolerance is a relative
+	// round-off and not a literal. The failure it guards is a grid taken from
+	// a DIFFERENT mesh, which is O( 1 ) out. In double the historical 1e-12
+	// dominates and nothing moves. M-220.
+	double const extentTolerance =
+		meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 );
+	BOOST_TEST( radius.first == minRadius,
+	            boost::test_tools::tolerance( extentTolerance ) );
+	BOOST_TEST( radius.second == maxRadius,
+	            boost::test_tools::tolerance( extentTolerance ) );
+	BOOST_TEST( z.first == zMin,
+	            boost::test_tools::tolerance( extentTolerance ) );
+	BOOST_TEST( z.second == zMax,
+	            boost::test_tools::tolerance( extentTolerance ) );
 	std::printf( "\n  a mesh MEQ did not build\n"
 	             "    grid R [%.4f, %.4f]  Z [%.4f, %.4f]  from the mesh itself\n",
 	             radius.first, radius.second, z.first, z.second );
@@ -2044,7 +2070,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 
 	// THE DRIVER IS THE LIBRARY. Anything above round-off here is the driver
 	// building a different problem from the one the file describes.
-	BOOST_TEST( relative < 1.0e-12,
+	BOOST_TEST( relative < std::max( 1.0e-12,
+	                                 meq::tests::exactAgreementFloor( 1.0 ) ),
 	            "the driver and the library disagree by " << relative );
 
 	// AND THE COUPLING DOES REAL WORK. Without this the case would pass with

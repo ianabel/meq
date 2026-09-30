@@ -42,13 +42,50 @@
  * Gamma" are the same question and the locator answers both at once.
  */
 
+#include <algorithm>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "mfem.hpp"
 
 namespace meq
 {
+	/**
+	 * How far outside the reference element a located point may sit.
+	 *
+	 * `mfem::InverseElementTransformation`'s own default -- `ip_tol`, applied
+	 * to the same `Geometry::CheckPoint()` test -- so the affine path accepts
+	 * exactly the candidates `TransformBack()` accepts rather than nearly them.
+	 *
+	 * **AND UPSTREAM ALREADY SCALES IT WITH THE FORMAT, WHICH IS WHY THIS IS A
+	 * COPIED PAIR AND NOT AN `eps` EXPRESSION.** `eltrans.hpp`'s constructor
+	 * carries `ref_tol( 1e-15 ), phys_rtol( 4e-15 ), ip_tol( 1e-8 )` in double
+	 * and `ref_tol( 4e-7 ), phys_rtol( 1e-6 ), ip_tol( 1e-4 )` in single -- the
+	 * opposite of the `ExtensionBoundaryQuadrature` finding of M-183, and worth
+	 * recording as such. A floor like `128 eps` would be `1.5e-05`, SIX TIMES
+	 * TIGHTER than what MFEM's own inverse accepts, so the affine path would
+	 * refuse points the Newton path takes -- which is exactly the disagreement
+	 * `SamplerConvergence` reported at node ( 24, 0 ), on the domain's bottom
+	 * edge.
+	 *
+	 * **IT IS HERE RATHER THAN IN `Sampler.cpp` BECAUSE TWO PARTIES NEED IT.**
+	 * That test compares MEQ's affine inverse against MFEM's Newton one and has
+	 * to ask both the SAME question, so it hands this number to
+	 * `InverseElementTransformation::SetElementTol()`. A constant kept in step
+	 * by hand across two files IS the defect -- M-165 and M-189 -- so it is one
+	 * shared expression. M-184, M-220.
+	 */
+	inline double samplerInsideTolerance()
+	{
+#ifdef MFEM_USE_SINGLE
+		return 1.0e-4;
+#else
+		return 1.0e-8;
+#endif
+	}
+
+
 	/// A uniform ( R, Z ) grid, and where each of its nodes sits in a mesh.
 	///
 	/// Locating is done once at construction; sampling a field afterwards is a

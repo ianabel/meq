@@ -8,6 +8,8 @@
 
 #include "mfem.hpp"
 
+#include "RoundOffFloor.hpp"
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/Source.hpp"
@@ -207,7 +209,19 @@ BOOST_AUTO_TEST_CASE( theTransferIsExactOntoARefinedMesh )
 		// two values and the search picks a side. Gauss quadrature points are
 		// strictly interior, so the projection never evaluates on a jump. The
 		// floor here is not gslib's search tolerance; see WarmStart.cpp.
-		BOOST_TEST( relative < 1.0e-5,
+		// **THE TWO ERRORS DIFFER BY AT MOST THE TWO SOLUTIONS' DIFFERENCE,
+		// WHICH IS ABSOLUTE ROUND-OFF AND NOT A FRACTION OF THE ERROR.** A
+		// relative bound on a pair of L2 errors tightens as those errors fall,
+		// so at k = 3 it demands 6e-11 of two numbers a narrow format knows to
+		// 3e-08. Measured in single, the transferred and coarse errors part by
+		// 2.7e-08 at k = 2 and 3.1e-08 at k = 3 -- a quarter of one eps of
+		// || psi || -- against a transfer that is genuinely lossy costing the
+		// 9 per cent nodal interpolation gives. In double the historical
+		// relative bound dominates and nothing moves. M-220.
+		BOOST_TEST( std::abs( transferredError - coarseError )
+		            < meq::tests::scalarAgreementFloor(
+			            1.0e-5*coarseError,
+			            coarse.solver->exactPotentialNorm( exact ) ),
 		            "k = " << order << ": the transferred field has L2 error "
 		            << transferredError << " against " << coarseError
 		            << " for the field it came from, a relative difference of "
@@ -390,7 +404,12 @@ BOOST_AUTO_TEST_CASE( aWarmStartCutsTheWorkAndNotTheAnswer )
 	            "guess is not reaching the iterate" );
 
 	// Six figures: a starting point must move the path and not the answer.
-	BOOST_TEST( std::abs( warmError - coldError ) < 1.0e-6*coldError,
+	// Six figures in double; in single the two paths part at round-off on
+	// || psi || -- 1.4e-07 measured, about one eps of it -- and the fraction
+	// of an error that is itself 6e-07 cannot express that. M-220.
+	BOOST_TEST( std::abs( warmError - coldError )
+	            < meq::tests::scalarAgreementFloor(
+		            1.0e-6*coldError, cold.exactPotentialNorm( exact ) ),
 	            "the warm start converged to L2 error " << warmError
 	            << " where the cold start reached " << coldError
 	            << ". A starting point must move the path and not the answer" );
@@ -500,7 +519,12 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 	// THE FULL-ORDER GUESS IS THE COARSE SOLUTION, so its error against the exact
 	// solution is the coarse discretisation error and nothing more. It has no
 	// grid to depend on, which is the whole of its advantage.
-	BOOST_TEST( std::abs( fullGuessError - coarseError ) < 1.0e-5*coarseError,
+	// Round-off on || psi ||, for the reason above: at k = 3 these two are
+	// 5.99e-06 and 6.02e-06 and they part by 3.1e-08. M-220.
+	BOOST_TEST( std::abs( fullGuessError - coarseError )
+	            < meq::tests::scalarAgreementFloor(
+		            1.0e-5*coarseError,
+		            coarse.solver->exactPotentialNorm( exact ) ),
 	            "the full-order guess has L2 error " << fullGuessError
 	            << " where the solve it came from had " << coarseError
 	            << ": the transfer is losing accuracy the representation already had" );
@@ -518,6 +542,22 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 	{
 		double const rate = std::log( gridErrors[ i - 1 ]/gridErrors[ i ] )
 		                    /std::log( spacings[ i - 1 ]/spacings[ i ] );
+		// AND THE CONTAMINANT IS NAMED IN THE PARAGRAPH ABOVE, so the pair
+		// that runs into it is skipped rather than read: in single the finest
+		// grid error is 1.06e-05 against a coarse solve at 6.02e-06, inside
+		// the factor of two the comment says the grid cannot represent better
+		// than, and the rate reads 1.689. The 65 -> 129 pair, clear of it,
+		// reads 1.795. clearOfContaminant() is true unconditionally in double,
+		// so both published rates still run there. M-220.
+		if ( !meq::tests::clearOfContaminant( gridErrors[ i ], coarseError ) )
+		{
+			BOOST_TEST_MESSAGE(
+				"  *** SKIPPED the grid rate at spacing " << spacings[ i ]
+				<< ": the guess error " << gridErrors[ i ] << " is within a "
+				"factor of two of the coarse solve's own " << coarseError
+				<< ", which no grid can represent better than. M-220" );
+			continue;
+		}
 		BOOST_TEST( rate > 1.7,
 		            "the structured-grid guess converged at " << rate
 		            << " in the grid spacing, not the second order bilinear "
@@ -583,7 +623,8 @@ BOOST_AUTO_TEST_CASE( carryingTheAnswerAcrossCyclesCutsTheWork )
 		return eq.psi( x( 0 ), x( 1 ) );
 	} );
 
-	struct Run { int total = 0; std::vector<int> perCycle; double error = 0.0; };
+	struct Run { int total = 0; std::vector<int> perCycle; double error = 0.0;
+	             double norm = 0.0; };
 
 	auto sweep = [ & ]( bool warm )
 	{
@@ -615,6 +656,7 @@ BOOST_AUTO_TEST_CASE( carryingTheAnswerAcrossCyclesCutsTheWork )
 			out.perCycle.push_back( solver->newtonIterations() );
 			out.total += solver->newtonIterations();
 			out.error = solver->potentialError( exact );
+			out.norm = solver->exactPotentialNorm( exact );
 
 			if ( cycle + 1 == cycles )
 				break;
@@ -671,8 +713,13 @@ BOOST_AUTO_TEST_CASE( carryingTheAnswerAcrossCyclesCutsTheWork )
 	// AND NOT THE ANSWER, which is the half that makes the other half safe. Same
 	// meshes, same source, same tolerance: the converged discrete solution does
 	// not know how the iteration got to it.
+	// Round-off on the potential, not a fraction of an error of 3.7e-06: in
+	// single the two runs part by 3.5e-09, which is 0.04 of one eps of
+	// || psi ||, and 1e-8 of the error is 3.7e-14. M-220.
 	BOOST_TEST( std::abs( warm.error - cold.error )
-	                < 1.0e-8*std::max( cold.error, warm.error ),
+	                < meq::tests::scalarAgreementFloor(
+		                1.0e-8*std::max( cold.error, warm.error ),
+		                warm.norm ),
 	            "the warm run converged to L2 " << warm.error
 	            << " where the cold one reached " << cold.error
 	            << " -- a warm start must change the work and not the answer" );
