@@ -1,11 +1,14 @@
 #ifndef MEQ_DEVICENPC_HPP
 #define MEQ_DEVICENPC_HPP
 
+#include "Crossings.hpp"
 #include "SourceView.hpp"
 
 #include "mfem.hpp"
 
+#include <cstring>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 /**
@@ -81,6 +84,81 @@ namespace meq
 	};
 
 	/**
+	 * **PHASE B'S PAYLOAD, OWNED BY THE CALLER SO THAT IT OUTLIVES THE
+	 * OPERATOR THAT READS IT.**
+	 *
+	 * DEVICE-PLAN.md section 3.3 draws phase B as a prologue -- *configure the
+	 * device problem*, one upload, then run -- and MEQ was running it **sixteen
+	 * times inside phase C** -> [M-226](../MEASUREMENTS.md). The five buffers
+	 * below are per-mesh and per-source constants; the operator that reads them
+	 * is rebuilt whenever the hybridization is re-finalised, which is once per
+	 * support sweep and again after every right-hand-side re-assembly, and
+	 * every rebuild re-uploaded all five.
+	 *
+	 * **THE MEASUREMENT THAT FOUND IT COULD NOT HAVE BEEN A CLOCK, AND WAS NOT
+	 * A DOWNLOAD COUNT EITHER.** 1.22 MB of h2d over a run whose whole
+	 * download traffic is 0.888 MB, in a phase the published acceptance reports
+	 * as `0.2 transfers a step` -- a figure that counts the other direction and
+	 * is in any case three transfers in phase A. *An instrument that can see
+	 * one direction of the bus cannot measure a plan whose first phase is an
+	 * upload.*
+	 *
+	 * **WHAT IT IS NOT IS A CACHE OF THE STATE.** Nothing here is written by
+	 * phase C: `knots` and `coils` are the source's own description, `flags` is
+	 * XP-1's per-element connectivity -- frozen within a solve by XP-2 and
+	 * moving only between support sweeps -- and `shift`/`offsetsOfShift` are
+	 * the conductor cache, which is per mesh. A buffer phase C wrote would have
+	 * to come back down, and none of these does, which is exactly what makes
+	 * them phase B's and not phase C's.
+	 *
+	 * The caller declares one beside the flag vector it already declares for
+	 * the same reason, and hands it in; `refresh()` re-uploads a buffer only
+	 * when its contents have actually changed, so the support sweep that
+	 * genuinely moves `flags` still pays for `flags` and for nothing else.
+	 */
+	struct DeviceConstants
+	{
+		mfem::Array<KnotView> knots;
+		mfem::Array<CoilView> coils;
+		mfem::Array<int> flags;
+		mfem::Array<int> offsetsOfShift;
+		mfem::Vector shift;
+
+		int coilCount = 0;
+		int elementCount = 0;
+		int shiftCount = 0;
+
+		/*
+		 * HOST SHADOWS, KEPT ONLY SO refresh() CAN TELL A CHANGED BUFFER FROM
+		 * AN UNCHANGED ONE.
+		 *
+		 * The alternative is to read the device copy back and compare, which
+		 * is the transfer this whole object exists to avoid -- so the
+		 * comparison has to be against something that never left the host.
+		 * They cost one host copy of each constant, which is the smaller half
+		 * of what one avoided upload saves.
+		 */
+		std::vector<KnotView> knotShadow;
+		std::vector<CoilView> coilShadow;
+		std::vector<int> flagShadow;
+		std::vector<int> offsetShadow;
+		std::vector<double> shiftShadow;
+		bool populated = false;
+
+		/**
+		 * Bring every buffer up to date with @a inputs, uploading only what
+		 * changed.
+		 *
+		 * Call it inside a `meq::PhaseScope( meq::Phase::Upload )` so the
+		 * uploads land in the phase they belong to -- which is what lets the
+		 * instrument say whether "one upload" is what is happening.
+		 */
+		void refresh( DeviceIntegrandInputs const &inputs,
+		              std::vector<KnotView> const &knotList,
+		              std::vector<CoilView> const &coilList );
+	};
+
+	/**
 	 * An `mfem::DarcyNPCOperator` that routes through the caller-integrand
 	 * seam, or **null** when this configuration cannot use it.
 	 *
@@ -102,7 +180,8 @@ namespace meq
 		mfem::DarcyHybridization &hybridization,
 		mfem::Array<int> const &offsets,
 		mfem::BlockVector const &load,
-		DeviceIntegrandInputs const &inputs );
+		DeviceIntegrandInputs const &inputs,
+		DeviceConstants &constants );
 
 }
 

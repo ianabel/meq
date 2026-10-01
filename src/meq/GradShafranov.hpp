@@ -10,6 +10,10 @@
 #include "mfem.hpp"
 
 #include "ConductorStore.hpp"
+// Phase B's payload is a member, so its definition has to be visible here.
+// It is MFEM types and PODs only -- no device language -- so a host build
+// includes it exactly as a device build does.
+#include "DeviceNPC.hpp"
 #include "ExteriorDtN.hpp"
 #include "PlasmaComponent.hpp"
 #include "Source.hpp"
@@ -3805,6 +3809,27 @@ namespace meq
 			/// newtonResiduals().
 			void solve();
 
+			/// **PHASE D OF `DEVICE-PLAN.md` SECTION 3.3: THE ANSWER RETURNS,
+			/// ONCE.** Brings `solution` and its three aliases to the host
+			/// through counted funnels, so that everything after it -- the
+			/// post-processing, the estimator, every writer -- starts from a
+			/// host-valid state.
+			///
+			/// **THE SYNCS AT THE END OF solve() ARE NOT THIS, AND THE
+			/// DIFFERENCE IS THE WHOLE POINT.** `SyncToBlocks()` and
+			/// `SyncMemory()` make the validity FLAGS honest; they move nothing
+			/// and they promise nothing about where the data is. Without this
+			/// the answer comes over piecemeal, pulled by whichever host read
+			/// happens first, through MFEM's own accessors -- which no funnel of
+			/// MEQ's can see. *A phase that nothing counts is a phase nobody can
+			/// say is working.*
+			///
+			/// solve() calls it, so an ordinary caller never needs to. It is
+			/// public and idempotent so that a test can assert the property --
+			/// a second call transfers nothing -- and so that a caller driving
+			/// solve() from an outer loop can state where its own phase D is.
+			void downloadSolution();
+
 			/// psi_h in W_h. Valid after solve().
 			///
 			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS THE REMAINDER
@@ -5259,6 +5284,29 @@ namespace meq
 			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Batched;
 
 			bool deviceIntegrandInUse = false;
+
+			/**
+			 * **PHASE B'S PAYLOAD, AND IT IS A MEMBER SO THAT PHASE B IS A
+			 * PROLOGUE.** DEVICE-PLAN.md section 3.3.
+			 *
+			 * It was a local of `solveWithNormalisation()`, which is once per
+			 * `solve()` and therefore once per support sweep -- so the per-mesh
+			 * constants were re-uploaded three times on the shipped machine
+			 * case even after they stopped being re-uploaded per operator
+			 * rebuild. **A buffer whose lifetime is a solve cannot be uploaded
+			 * once per mesh, however carefully it is refreshed.** M-226.
+			 *
+			 * **AND A MEMBER IS SAFE ACROSS A MESH CHANGE BY CONSTRUCTION
+			 * RATHER THAN BY DISCIPLINE**, which is why it needs no
+			 * invalidation hook and no `reprepare()` call: `refresh()` decides
+			 * what to upload by COMPARING against host shadows, and an adaptive
+			 * cycle changes the element count, so `flags`, `offsetsOfShift` and
+			 * the conductor shift all differ in size and re-upload while the
+			 * source's knots and coils correctly do not. A flag somebody has to
+			 * remember to clear is the thing this avoids.
+			 */
+			DeviceConstants npcConstants;
+
 			/// DEVICE-PLAN.md section 3.3 item 4; see borderDotsRanOnDevice().
 			/// Mutable because the bordered step that sets it is const-correct
 			/// about everything else it touches and this is a report, not

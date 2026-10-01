@@ -415,6 +415,151 @@ BOOST_AUTO_TEST_CASE( theCounterSeparatesAReadFromATransfer )
 	BOOST_TEST( meq::crossings().reads == 0 );
 }
 
+/*
+ * AND IT SEES THE OTHER DIRECTION, WHICH IT COULD NOT UNTIL PHASE B NEEDED IT.
+ *
+ * DEVICE-PLAN.md section 3.3 defines phase B as *one upload*, and the counter
+ * above measures host reads -- downloads. **An instrument that can see one
+ * direction of the bus cannot measure a plan whose first phase is an upload**,
+ * which is the same species of coverage defect as M-198's first crossing
+ * counter covering 17 funnels of 36 and reporting a number 18x too low.
+ *
+ * The condition is the MIRROR and not the same one: a device read moves data
+ * exactly when the host holds the live copy and the device does not.
+ */
+BOOST_AUTO_TEST_CASE( theCounterSeesTheUploadDirection )
+{
+	deviceOnce();
+
+	meq::crossings().clear();
+
+	mfem::Vector v( 64 );
+	v.UseDevice( true );
+	v.HostWrite();
+	for ( int i = 0; i < v.Size(); ++i )
+		v( i ) = 0.5*i;
+
+	// Host-valid and device-stale: a device read has to move it.
+	meq::countedDeviceRead( v );
+	BOOST_TEST( meq::crossings().deviceReads == 1 );
+	BOOST_TEST( meq::crossings().uploads == 1,
+	            "a device read of a host-only buffer did not count as an upload" );
+	BOOST_TEST( meq::crossings().uploadEntries == 64,
+	            "the upload did not account for the buffer's size" );
+
+	// And now both copies are valid, so a second device read is free. THIS is
+	// what makes phase B's "one upload" an assertable property rather than a
+	// hope: a constant that stays up is re-read for nothing.
+	meq::countedDeviceRead( v );
+	BOOST_TEST( meq::crossings().deviceReads == 2 );
+	BOOST_TEST( meq::crossings().uploads == 1,
+	            "a repeat device read counted as a second upload, so the "
+	            "counter is measuring calls rather than data movement" );
+
+	// A host WRITE takes the device copy away again, which is what a phase-C
+	// host leg does to phase B's payload -- and the next upload is real.
+	v.HostWrite();
+	meq::countedDeviceRead( v );
+	BOOST_TEST( meq::crossings().uploads == 2,
+	            "a device read after a host write did not re-upload" );
+
+	// The two directions are counted separately and neither touches the other.
+	BOOST_TEST( meq::crossings().reads == 0,
+	            "a device read was counted as a host read" );
+	BOOST_TEST( meq::crossings().transfers == 0 );
+
+	meq::crossings().clear();
+}
+
+/*
+ * THE PHASE MARKER RESTORES WHAT IT FOUND, WHICH IS WHAT MAKES IT SAFE UNDER
+ * RE-ENTRY.
+ *
+ * meq::GradShafranovSolver::solve() is re-entrant -- solveByPicardThenNewton()
+ * calls it for its second stage -- and prepare(), which is phase B, is
+ * re-entered from inside it by picardStep(). A marker that cleared to a default
+ * on exit would have the inner scope leave the outer one mislabelled for the
+ * rest of its run, so every crossing after it would be attributed to the wrong
+ * phase and the headline would silently move. Same hazard solve() records about
+ * `profileStart` being a local rather than a member, one level up.
+ */
+BOOST_AUTO_TEST_CASE( thePhaseScopeRestoresWhatItFound )
+{
+	BOOST_TEST_REQUIRE( ( meq::residencyPhase() == meq::Phase::Setup ) );
+
+	{
+		meq::PhaseScope const outer( meq::Phase::Solve );
+		BOOST_TEST( ( meq::residencyPhase() == meq::Phase::Solve ) );
+
+		{
+			meq::PhaseScope const inner( meq::Phase::Upload );
+			BOOST_TEST( ( meq::residencyPhase() == meq::Phase::Upload ) );
+		}
+
+		// The point of the case: Solve, not Setup.
+		BOOST_TEST( ( meq::residencyPhase() == meq::Phase::Solve ),
+		            "a nested phase scope cleared to the default instead of "
+		            "restoring the phase it found, so every crossing after an "
+		            "inner scope would be attributed to the wrong phase" );
+	}
+
+	BOOST_TEST( ( meq::residencyPhase() == meq::Phase::Setup ) );
+}
+
+/*
+ * AND A CROSSING LANDS IN THE PHASE IT HAPPENED IN, which is the whole reason
+ * the phases exist: a transfer in phase B is the design and the same transfer
+ * in phase C is the defect, and one total cannot tell them apart.
+ */
+BOOST_AUTO_TEST_CASE( aCrossingIsAttributedToItsPhase )
+{
+	deviceOnce();
+
+	meq::crossings().clear();
+	for ( int k = 0; k < meq::phaseCount; ++k )
+		meq::crossingPhases()[ k ].clear();
+
+	mfem::Vector v( 32 );
+	v.UseDevice( true );
+	v.HostWrite();
+
+	// FILLED IN A LOOP AND NOT WITH `v = 1.0`, AND THE FIRST DRAFT OF THIS CASE
+	// USED THE ASSIGNMENT AND FAILED. mfem::Vector::operator=( double ) is
+	// DEVICE-AWARE -- Write() then a forall -- so it leaves the vector
+	// device-valid, and the countedDeviceRead() below then correctly counts no
+	// upload because there is nothing to upload. That is M-200's finding, which
+	// cost MEQ 12x its transfer count in production code, reproduced here by a
+	// test written to measure uploads.
+	for ( int i = 0; i < v.Size(); ++i )
+		v( i ) = 1.0;
+
+	{
+		meq::PhaseScope const phase( meq::Phase::Upload );
+		meq::countedDeviceRead( v );
+	}
+
+	v.Write();
+
+	{
+		meq::PhaseScope const phase( meq::Phase::Download );
+		meq::countedHostRead( v );
+	}
+
+	int const upload = static_cast<int>( meq::Phase::Upload );
+	int const download = static_cast<int>( meq::Phase::Download );
+	int const solve = static_cast<int>( meq::Phase::Solve );
+
+	BOOST_TEST( meq::crossingPhases()[ upload ].uploads == 1 );
+	BOOST_TEST( meq::crossingPhases()[ download ].transfers == 1 );
+	BOOST_TEST( meq::crossingPhases()[ solve ].uploads == 0,
+	            "a crossing outside phase C was attributed to it" );
+	BOOST_TEST( meq::crossingPhases()[ solve ].transfers == 0 );
+
+	meq::crossings().clear();
+	for ( int k = 0; k < meq::phaseCount; ++k )
+		meq::crossingPhases()[ k ].clear();
+}
+
 // THE MIRROR IS REFRESHED ONCE PER NEWTON STEP, SO upload() IS CALLED MANY
 // TIMES ON ONE OBJECT -- AND EVERY CALL AFTER THE FIRST WRITES INTO BUFFERS ITS
 // OWN PREVIOUS CALL LEFT DEVICE-VALID.

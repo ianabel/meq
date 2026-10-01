@@ -6627,6 +6627,49 @@ int main( int argc, char **argv )
 		                 /( 1024.0*1024.0 ),
 		             cross.reads/steps, cross.transfers/steps );
 
+		/*
+		 * AND THE OTHER DIRECTION, WHICH HAD NO COUNTER AT ALL UNTIL PHASE B
+		 * NEEDED ONE.
+		 *
+		 * DEVICE-PLAN.md section 3.3 defines phase B as *one upload*, and the
+		 * line above counts host reads -- downloads. *An instrument that can
+		 * see one direction of the bus cannot measure a plan whose first phase
+		 * is an upload.* A device read moves data exactly when the host holds
+		 * the live copy and the device does not, which is the mirror of the
+		 * condition the download counter asks.
+		 */
+		std::printf( "MEQ:   device reads of host-written state: %ld reads, "
+		             "%ld uploads, %.3g MB\n",
+		             cross.deviceReads, cross.uploads,
+		             static_cast<double>( cross.uploadEntries )*sizeof( double )
+		                 /( 1024.0*1024.0 ) );
+
+		/*
+		 * BY RESIDENCY PHASE, WHICH IS WHAT TURNS A NUMBER INTO A VERDICT.
+		 *
+		 * A transfer in phase B or D is the plan working: the upload that
+		 * configures the device problem and the one download that returns the
+		 * answer. The same transfer in phase C is the thing residency exists to
+		 * remove. A single total is an average over populations with opposite
+		 * meanings, so the headline above cannot say whether residency is
+		 * arriving -- only this split can, and **phase C is the row to read**.
+		 */
+		std::printf( "MEQ:   by residency phase (DEVICE-PLAN.md 3.3):\n" );
+		for ( int k = 0; k < meq::phaseCount; ++k )
+		{
+			meq::Phase const which = static_cast<meq::Phase>( k );
+			meq::CrossingCount const &ph = meq::crossingPhases()[ k ];
+			if ( ph.reads == 0 && ph.deviceReads == 0 )
+				continue;
+			std::printf( "MEQ:     %-10s %6ld down (%.1f/step), "
+			             "%6ld up, of %ld + %ld funnels%s\n",
+			             meq::phaseName( which ), ph.transfers,
+			             ph.transfers/steps, ph.uploads,
+			             ph.reads, ph.deviceReads,
+			             which == meq::Phase::Solve
+			                 ? "   <- the one to drive to zero" : "" );
+		}
+
 		// AND WHERE THEY ARE, because a single number names nothing to do.
 		// The five busiest funnels, by GradShafranov.cpp line.
 		// SORTED BY TRANSFERS AND NOT BY READS. A read that moves nothing is
@@ -6651,6 +6694,31 @@ int main( int argc, char **argv )
 			                 *sizeof( double )/( 1024.0*1024.0 ),
 			             site.reads );
 		}
+		/*
+		 * AND THE UPLOAD SITES, SEPARATELY, because they are a different
+		 * question with a different right answer. A download site wants its
+		 * count driven to zero; an upload site in phase B wants its count to be
+		 * ONE, and the thing worth seeing is a site that uploads once per
+		 * Newton step because something keeps invalidating what it put there.
+		 */
+		std::vector<std::pair<long, int>> uploaders;
+		for ( auto const &entry : meq::crossingSites() )
+			if ( entry.second.uploads > 0 )
+				uploaders.emplace_back( entry.second.uploads, entry.first );
+		std::sort( uploaders.rbegin(), uploaders.rend() );
+		for ( std::size_t k = 0; k < uploaders.size() && k < 6; ++k )
+		{
+			meq::CrossingCount const &site =
+				meq::crossingSites()[ uploaders[ k ].second ];
+			std::printf( "MEQ:     line %d  %ld uploads (%.1f/step), "
+			             "%.3g MB, of %ld device reads\n",
+			             uploaders[ k ].second, site.uploads,
+			             site.uploads/steps,
+			             static_cast<double>( site.uploadEntries )
+			                 *sizeof( double )/( 1024.0*1024.0 ),
+			             site.deviceReads );
+		}
+
 		std::fflush( stdout );
 	}
 

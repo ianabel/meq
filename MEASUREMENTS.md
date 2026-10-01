@@ -13115,3 +13115,120 @@ host read — the repair of [M-79](#m-79), made for a different reason two month
 before this hazard existed. *A contract honoured for one reason is honoured for
 the next one too, which is the argument for syncing at the funnel rather than at
 the symptom.*
+
+### M-226
+
+**PHASE B EXISTED, RAN SIXTEEN TIMES INSIDE PHASE C, AND NO INSTRUMENT IN THIS
+PROJECT COULD SEE IT.** `DEVICE-PLAN.md` §3.3 divides a resident solve into
+*setup · one upload · device only · one download · output*, and §4 stage 4b's
+acceptance — the one number this project trusts about residency — is a count of
+**host reads**. Phase B is an **upload**. *An instrument that can see one
+direction of the bus cannot measure a plan whose first phase is an upload*, and
+stage 4b has reported a figure in the other direction and called it the
+residency acceptance for as long as it has existed.
+
+`meq::countedDeviceRead()` is the mirror of `meq::countedHostRead()` — it asks
+`HostIsValid() && !DeviceIsValid()` before a `Read()`, which is exactly when a
+device read moves data — and `meq::PhaseScope` attributes every crossing to the
+phase it happened in. `machine-f-diiid`, `--device cuda`, 12 Newton steps over
+three support sweeps, `MKL_NUM_THREADS=1`.
+
+**AND THE HEADLINE WAS NOT A MEASUREMENT OF THE SOLVE.** Split by phase, the
+published *0.2 transfers a step* is **three transfers in phase A**, divided by a
+Newton step count — a rate for a phase those transfers do not occur in. Phase C,
+the phase the acceptance is about, reads **zero**:
+
+| phase | host-read funnels | transfers down | device-read funnels | uploads |
+|---|---|---|---|---|
+| **A** setup | 9 | **3** | 0 | 0 |
+| **B** upload | 0 | 0 | 6 | **6** |
+| **C** solve | 10,710 | **0** | 188 | **0** |
+| **D** download | 12 | 0 | 0 | 0 |
+| **E** output | 0 | 0 | 0 | 0 |
+
+**PHASE C's ZERO IS NOT RESIDENCY, AND THAT IS WHY THE TRANSFER COUNT CANNOT BE
+THE ACCEPTANCE ON ITS OWN.** 10,710 host reads that move nothing means the state
+is host-valid throughout, which is the *opposite* of resident. The counter reads
+the same `0` for a perfectly resident solve and for one where nothing reaches the
+device at all. Only the upload count beside it separates them: **residency
+arriving looks like uploads in B, zero in C and one download in D; nothing on the
+device looks like zero everywhere.** Today MEQ has the phase-B half of that shape
+and none of the phase-D half — `0.888 MB` still comes down, and it comes down in
+phase A rather than in D.
+
+**PHASE E HAS NO FUNNELS AT ALL, WHICH IS A COVERAGE STATEMENT AND NOT A GOOD
+RESULT.** The output stage reads through MFEM's own `GridFunction` accessors,
+which no funnel of MEQ's can see — [M-198](#m-198)'s limit, unchanged and now
+visible as an empty row rather than hidden in a total.
+
+**AND PHASE B WAS A PROLOGUE NOWHERE: IT WAS RE-RUN ONCE PER OPERATOR REBUILD,
+AND THE OPERATOR IS REBUILT PER SUPPORT SWEEP AND AFTER EVERY RIGHT-HAND-SIDE
+RE-ASSEMBLY.** Five per-mesh constants — the source's knots, the coil table,
+XP-1's per-element flags and the conductor cache with its offsets — were members
+of `meq::DeviceNPCOperator` and were uploaded in its constructor. Moving them
+into a `meq::DeviceConstants` the caller owns, and uploading only what a
+comparison against host shadows says has changed:
+
+| where phase B's buffers live | uploads | MB | `psi_ax` | constraint |
+|---|---|---|---|---|
+| the operator, rebuilt 16× | 80 | 1.22 | 3.759851e-01 | −6.465e-12 |
+| a local of `solveWithNormalisation()` | 15 | 0.228 | 3.759851e-01 | −6.465e-12 |
+| a solver member, filled raw | 5 | 0.0761 | **3.759845e-01** | **−6.459e-12** |
+| a solver member, `HostWrite()` first | **6** | **0.113** | 3.759851e-01 | −6.465e-12 |
+
+**13× fewer uploads and 11× fewer bytes, with every printed digit of the host's
+answer** — and the third row is the finding.
+
+**HOISTING WORK OUT OF A LOOP CREATED A DEVICE DEFECT THE UN-HOISTED VERSION
+COULD NOT HAVE HAD, AND IT IS [M-211](#m-211)'s, MET FROM THE OTHER SIDE.** The
+constructor built these arrays **fresh** every time, and a fresh `mfem::Array`
+has `UseDevice()` false, so filling it through `operator[]` was safe. A
+persistent object fills them **in place**; `SetSize()` at an unchanged size
+reallocates nothing; so the fill is a raw host write into a buffer whose live
+copy is on the device, and the `Read()` after it copies nothing because MFEM
+still believes the device copy is current. The plasma support changes between
+sweeps, the device keeps the old flags, and the run converges to a
+**neighbouring answer** — 1.6e-6 relative in `psi_ax`, with every other printed
+line healthy and the bordered constraint still satisfied at 1e-12, because *a
+bordered row certifies consistency and not correctness* ([M-206](#m-206)).
+**`HostWrite()` before each fill is the repair**, which is `meq::DeviceRows`'
+own and was already written down. *A fill that is safe in a constructor is not
+safe in a refresh*, and the whole of phase B is turning the first into the
+second.
+
+**THE INSTRUMENT FOUND IT, AND NOTHING ELSE IN THE PROJECT COULD HAVE.** The
+per-site table read **`2 device reads, 1 upload`** on the flag buffer — a fill
+that happened and a transfer that did not, on consecutive lines of one report.
+A clock cannot see a copy that did not occur; the download counter cannot see
+this direction at all; `Device( "debug" )` is blind to it, because every flag was
+honest about a location and wrong only about which copy was newer, which is
+[M-206](#m-206)'s recorded limit. **The upload counter was built to measure
+phase B and its first act was to catch a wrong answer in the change that
+created it.**
+
+**AND THE PREDICTION WAS WRONG TWICE.** Seven uploads was the arithmetic — five
+constants plus two support sweeps — and the measurement read 15, then 5, then 6.
+15, because a local of `solveWithNormalisation()` dies once per `solve()` and the
+support sweeps rebuild it: *a buffer whose lifetime is a solve cannot be uploaded
+once per mesh, however carefully it is refreshed.* 5, because the missed fill
+suppressed the re-upload the support change should have caused — the wrong
+number and the wrong answer were **the same defect**, and the one that looked
+better was the broken one. 6 is five constants up once and the flags up again
+when the support genuinely moves, which is what the plan asks for.
+
+**A MEMBER IS SAFE ACROSS AN ADAPTIVE MESH CHANGE BY CONSTRUCTION RATHER THAN BY
+DISCIPLINE, WHICH IS WHY THERE IS NO INVALIDATION HOOK.** `refresh()` decides
+what to upload by comparing against host shadows, and a refined mesh changes the
+element count — so the flags, the shift offsets and the conductor cache differ in
+size and re-upload, while the source's knots and coils correctly do not. *A flag
+somebody has to remember to clear is the thing this avoids.*
+
+**PHASE D NOW EXISTS AND IS FREE, WHICH IS THE SAME SENTENCE TWICE.**
+`downloadSolution()` funnels `solution` and its three long-lived aliases — all
+four, because an alias carries its own validity flags and a read of the base
+cannot see data still on an alias ([M-79](#m-79)) — and it moves **nothing**,
+because the host trace solve and `NPCRecover` have already left the state on the
+host. That is phase D costing zero for exactly the reason residency has not
+arrived: there is nothing to bring back. It is built now so that the number is
+read where the answer returns rather than wherever a reader happens to touch it
+first.

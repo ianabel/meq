@@ -682,6 +682,49 @@ FIRST call is the only one that survives**, a fresh `mfem::Vector` having
 zero"* in MEQ's own code. `HostWrite()` before each fill, and
 `theMirrorSurvivesBeingRefreshed` pins it by uploading five times.
 
+**AND IT CAME BACK, IN NEW CODE, CREATED BY THE OPTIMISATION THAT REMOVED THE
+CONSTRUCTION** → **[M-226](MEASUREMENTS.md#m-226)**. `DEVICE-PLAN.md` §3.3's
+phase B is *one upload*, and MEQ was re-uploading its five per-mesh device
+constants once per rebuild of `meq::DeviceNPCOperator` — **sixteen times** on
+the shipped machine case. Hoisting them into a solver-owned
+`meq::DeviceConstants` is 80 uploads and 1.22 MB down to **6 and 0.113 MB** —
+and it shipped a **neighbouring answer**, `psi_ax = 3.759845e-01` against
+`3.759851e-01`, because the constructor built those arrays **fresh** every time
+and a fresh `mfem::Array` has `UseDevice()` false, so its raw `operator[]` fill
+was safe. A persistent object fills in place, `SetSize()` at an unchanged size
+reallocates nothing, and the `Read()` after the fill copies nothing because MFEM
+still believes the device copy is current. ***A fill that is safe in a
+constructor is not safe in a refresh***, and the whole of phase B is turning the
+first into the second — so expect this defect wherever work is hoisted out of a
+loop onto a device. Every other printed line was healthy and the bordered
+constraint was still satisfied at 1e-12, which is M-206's *a bordered row
+certifies consistency and not correctness* a second time.
+
+**THE INSTRUMENT THAT FOUND IT DID NOT EXIST THAT MORNING, AND THAT IS THE OTHER
+HALF.** `meq::countedHostRead()` counts **downloads**; phase B is an **upload**,
+so the acceptance `DEVICE-PLAN.md` §4 stage 4b rests on could not see the
+traffic its own first phase is defined by. *An instrument that can see one
+direction of the bus cannot measure a plan whose first phase is an upload.*
+`meq::countedDeviceRead()` is the mirror — `HostIsValid() && !DeviceIsValid()`
+before the `Read()` — and its per-site table read **`2 device reads, 1 upload`**
+on the flag buffer, a fill that happened beside a transfer that did not. No
+clock can see a copy that did not occur, and `Device( "debug" )` is blind to it
+for M-206's recorded reason: every flag was honest about a location and wrong
+only about which copy was newer.
+
+**AND SPLITTING THE COUNT BY PHASE SAID THE PUBLISHED HEADLINE WAS NOT A
+MEASUREMENT OF THE SOLVE.** `meq::PhaseScope` attributes each crossing to A/B/C/
+D/E, and the *0.2 transfers a step* stage 4b reports turns out to be **three
+transfers in phase A**, divided by a Newton step count — a rate for a phase they
+do not occur in — while **phase C reads zero over 10,710 funnels**. *That zero is
+not residency*: the counter reads the same `0` for a perfectly resident solve and
+for one where nothing reaches the device at all, because 10,710 host reads that
+move nothing means the state is host-valid throughout. Only the two directions
+together separate them — uploads in B, zero in C, one download in D is residency;
+zero everywhere is an empty device. `GradShafranovSolver::downloadSolution()` is
+phase D and **moves nothing today**, for precisely the reason residency has not
+arrived.
+
 **AND THE ELEMENT BLOCKS ARE THE NINTH, AND THAT ONE IS UPSTREAM'S AND IS
 FIXED** → **[M-214](MEASUREMENTS.md#m-214)**. `LocalFactorMode::Batched` — MEQ's
 own default under a Device — left `Ct_data` device-only and
@@ -3573,7 +3616,16 @@ src/meq/     the library. Config, Profiles, Source, SourceFactory,
              Crossings and StageChecksum are the two DEVICE instruments and
              neither is part of the solve. Crossings counts host reads of a
              device-written state and, separately, how many of them MOVED
-             data -- read the transfer column, not the read column. Stage-
+             data -- read the transfer column, not the read column. It counts
+             the UPLOAD direction too, which it did not until phase B needed
+             it: countedDeviceRead() asks HostIsValid() && !DeviceIsValid()
+             before the Read(), and phase B is defined as "one upload", so an
+             instrument seeing downloads alone could not measure it. And every
+             crossing is attributed to a DEVICE-PLAN.md 3.3 residency phase
+             through meq::PhaseScope, because a transfer in phase B is the
+             design and the same transfer in phase C is the defect, and one
+             total is an average over populations with opposite meanings.
+             M-226. Stage-
              Checksum is the other half: it hashes a buffer at a named stage
              and reports its VALIDITY FLAGS BEFORE the read, so `H- D+` names
              a stage where anything not going through a funnel gets stale

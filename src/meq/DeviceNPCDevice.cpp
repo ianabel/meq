@@ -1,5 +1,6 @@
 #include "DeviceNPC.hpp"
 
+#include "Crossings.hpp"
 #include "Source.hpp"
 
 /*
@@ -28,67 +29,29 @@ namespace meq
 				                   mfem::BlockVector const &loadIn,
 				                   DeviceIntegrandInputs const &inputs,
 				                   SourceView const &view,
-				                   std::vector<KnotView> const &knotList,
-				                   std::vector<CoilView> const &coilList,
-				                   mfem::real_t permeabilityIn )
+				                   mfem::real_t permeabilityIn,
+				                   DeviceConstants const &constantsIn )
 					: mfem::DarcyNPCOperator( hybridization, offsetsIn, loadIn ),
 					  hyb( &hybridization ), load( &loadIn ),
 					  source( inputs.source ), permeability( permeabilityIn ),
-					  cached( view )
+					  cached( view ), constants( &constantsIn )
 				{
 					offsets = offsetsIn;
 					locOffsets = LocalOffsets();
 
-					// The three fixed arrays, uploaded once. A zero-sized
-					// mfem::Array gives Read() nothing to hand a kernel, so an
-					// empty set still allocates one entry the kernel will not
-					// look at -- the counts are what gate it.
-					knots.SetSize( knotList.empty() ? 1
-					               : static_cast<int>( knotList.size() ) );
-					for ( std::size_t k = 0; k < knotList.size(); ++k )
-						knots[ static_cast<int>( k ) ] = knotList[ k ];
-					if ( knotList.empty() )
-						knots[ 0 ] = KnotView{ 0, 0, 0 };
-
-					coilCount = static_cast<int>( coilList.size() );
-					coils.SetSize( coilCount > 0 ? coilCount : 1 );
-					for ( int k = 0; k < coilCount; ++k )
-						coils[ k ] = coilList[ static_cast<std::size_t>( k ) ];
-					if ( coilCount == 0 )
-						coils[ 0 ] = CoilView{ 0, 0, 0, 0, 0 };
-
-					elementCount = inputs.elementCount;
-					flags.SetSize( elementCount > 0 ? elementCount : 1 );
-					for ( int e = 0; e < elementCount; ++e )
-						flags[ e ] = inputs.elementInPlasma
-							? inputs.elementInPlasma[ e ] : 1;
-					if ( elementCount == 0 )
-						flags[ 0 ] = 1;
-
-					shiftCount = inputs.conductorValueCount;
-					shift.SetSize( shiftCount > 0 ? shiftCount : 1 );
-					shift.HostWrite();
-					for ( int k = 0; k < shiftCount; ++k )
-						shift( k ) = static_cast<mfem::real_t>(
-							inputs.conductorValues[ k ] );
-					if ( shiftCount == 0 )
-						shift( 0 ) = mfem::real_t( 0 );
-					shift.UseDevice( true );
-
-					// The cache's own offsets, so the kernel indexes it exactly
-					// as conductorShiftAt() does rather than assuming e*nq.
-					offsetsOfShift.SetSize( elementCount > 0 ? elementCount : 1 );
-					for ( int e = 0; e < elementCount; ++e )
-						offsetsOfShift[ e ] = inputs.conductorOffsets
-							? inputs.conductorOffsets[ e ] : 0;
-					if ( elementCount == 0 )
-						offsetsOfShift[ 0 ] = 0;
-
-					knots.Read();
-					coils.Read();
-					flags.Read();
-					offsetsOfShift.Read();
-					shift.Read();
+					/*
+					 * THE FIVE CONSTANTS ARE NOT BUILT HERE ANY MORE, AND
+					 * THAT IS PHASE B LEAVING PHASE C.
+					 *
+					 * They were members, filled and uploaded in this
+					 * constructor -- which is correct once and was happening
+					 * SIXTEEN times, because this operator is rebuilt
+					 * whenever the hybridization is re-finalised
+					 * -> M-226. meq::DeviceConstants now owns them, the
+					 * caller declares it beside the flag vector it already
+					 * declares for the same reason, and it outlives every
+					 * rebuild.
+					 */
 				}
 
 				/*
@@ -195,18 +158,30 @@ namespace meq
 				ResidualIntegrand residualIntegrand() const
 				{
 					refresh();
+					// Counted, not bare: these are phase B's payload being
+					// re-read once per residual, and whether that MOVES
+					// anything is the measurement, not an assumption.
 					return ResidualIntegrand{
-						cached, knots.Read(), coils.Read(), flags.Read(),
-						offsetsOfShift.Read(), shift.Read(), permeability,
-						coilCount, shiftCount > 0 };
+						cached,
+						countedDeviceRead( constants->knots, __LINE__ ),
+						countedDeviceRead( constants->coils, __LINE__ ),
+						countedDeviceRead( constants->flags, __LINE__ ),
+						countedDeviceRead( constants->offsetsOfShift, __LINE__ ),
+						countedDeviceRead( constants->shift, __LINE__ ),
+						permeability, constants->coilCount,
+						constants->shiftCount > 0 };
 				}
 
 				GradientIntegrand gradientIntegrand() const
 				{
 					refresh();
 					return GradientIntegrand{
-						cached, knots.Read(), flags.Read(),
-						offsetsOfShift.Read(), shift.Read(), shiftCount > 0 };
+						cached,
+						countedDeviceRead( constants->knots, __LINE__ ),
+						countedDeviceRead( constants->flags, __LINE__ ),
+						countedDeviceRead( constants->offsetsOfShift, __LINE__ ),
+						countedDeviceRead( constants->shift, __LINE__ ),
+						constants->shiftCount > 0 };
 				}
 
 				void Mult( mfem::Vector const &x, mfem::Vector &y ) const override
@@ -334,14 +309,10 @@ namespace meq
 				mfem::real_t permeability;
 
 				mfem::Array<int> offsets, locOffsets;
-				mfem::Array<KnotView> knots;
-				mfem::Array<CoilView> coils;
-				mfem::Array<int> flags;
-				mfem::Array<int> offsetsOfShift;
-				mfem::Vector shift;
-				int coilCount = 0;
-				int elementCount = 0;
-				int shiftCount = 0;
+
+				/// Phase B's payload, BORROWED. The caller owns it so that it
+				/// outlives this operator's rebuilds -- see DeviceConstants.
+				DeviceConstants const *constants;
 
 				mutable SourceView cached;
 				mutable mfem::BlockVector xLoc, rLoc;
@@ -355,7 +326,8 @@ namespace meq
 		mfem::DarcyHybridization &hybridization,
 		mfem::Array<int> const &offsets,
 		mfem::BlockVector const &load,
-		DeviceIntegrandInputs const &inputs )
+		DeviceIntegrandInputs const &inputs,
+		DeviceConstants &constants )
 	{
 		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
 			return nullptr;
@@ -372,20 +344,182 @@ namespace meq
 		if ( !makeCoilViews( *inputs.source, coilList, permeability ) )
 			return nullptr;
 
+		// PHASE B. Uploads only what has actually changed since the last
+		// rebuild, which on every rebuild but the first and the support
+		// sweeps is nothing at all.
+		constants.refresh( inputs, knotList, coilList );
+
 		return std::make_unique<DeviceNPCOperator>(
-			hybridization, offsets, load, inputs, view, knotList, coilList,
-			permeability );
+			hybridization, offsets, load, inputs, view, permeability,
+			constants );
 	}
 
 #else
 
 	std::unique_ptr<mfem::DarcyNPCOperator> makeDeviceNPCOperator(
 		mfem::DarcyHybridization &, mfem::Array<int> const &,
-		mfem::BlockVector const &, DeviceIntegrandInputs const & )
+		mfem::BlockVector const &, DeviceIntegrandInputs const &,
+		DeviceConstants & )
 	{
 		return nullptr;
 	}
 
 #endif
+
+	/*
+	 * PHASE B, AND IT IS OUTSIDE THE #if ON PURPOSE.
+	 *
+	 * A host build has no kernels to feed, so every comparison below finds
+	 * nothing to do and every Read() is a no-op on an unregistered buffer --
+	 * but the function still has to EXIST, because the caller declares a
+	 * DeviceConstants whether or not a device compiler was present. The five
+	 * device translation units each compile to a host stub for the same
+	 * reason; this is the one piece of them that is not a stub because it is
+	 * not device code.
+	 */
+	void DeviceConstants::refresh( DeviceIntegrandInputs const &inputs,
+	                               std::vector<KnotView> const &knotList,
+	                               std::vector<CoilView> const &coilList )
+	{
+		static_assert( std::is_trivially_copyable<KnotView>::value,
+		               "KnotView is compared by memcmp below" );
+		static_assert( std::is_trivially_copyable<CoilView>::value,
+		               "CoilView is compared by memcmp below" );
+
+		/*
+		 * A ZERO-SIZED mfem::Array GIVES Read() NOTHING TO HAND A KERNEL, so
+		 * an empty set still allocates one entry the kernel will not look at
+		 * and the COUNTS are what gate it. Same convention the operator used
+		 * when it owned these, and the kernels already rely on it.
+		 */
+		auto const changed = []( auto const &shadow, auto const *source,
+		                         std::size_t count ) -> bool
+		{
+			if ( shadow.size() != count )
+				return true;
+			if ( count == 0 )
+				return false;
+			return std::memcmp( shadow.data(), source,
+			                    count*sizeof( *source ) ) != 0;
+		};
+
+		/*
+		 * EVERY FILL BELOW OPENS WITH HostWrite(), AND M-211 IS WHY.
+		 *
+		 * These buffers are now REFRESHED IN PLACE rather than freshly
+		 * constructed, and `SetSize()` at an unchanged size reallocates
+		 * nothing -- so `Array::operator[]` is a raw host write into a buffer
+		 * whose live copy is on the device, and the `Read()` that follows sees
+		 * a device copy MFEM still believes is current and copies nothing.
+		 * The support changes between sweeps, the device keeps the old flags,
+		 * and the run converges to a neighbouring answer: measured at
+		 * `psi_ax = 3.759845e-01` against the host's `3.759851e-01`.
+		 *
+		 * **IT IS MEQ'S OWN meq::DeviceRows::upload() SHAPE, MET AGAIN** -- *a
+		 * buffer refreshed in place is device-valid from its own previous use*
+		 * -- and the first version of this function reproduced it exactly,
+		 * because the code it was hoisted out of was CONSTRUCTING these arrays
+		 * each time and a fresh mfem::Array has UseDevice() false. *A fill that
+		 * is safe in a constructor is not safe in a refresh.*
+		 */
+		bool const first = !populated;
+
+		if ( first || changed( knotShadow, knotList.data(), knotList.size() ) )
+		{
+			knotShadow = knotList;
+			knots.SetSize( knotList.empty()
+			               ? 1 : static_cast<int>( knotList.size() ) );
+			knots.HostWrite();
+			for ( std::size_t k = 0; k < knotList.size(); ++k )
+				knots[ static_cast<int>( k ) ] = knotList[ k ];
+			if ( knotList.empty() )
+				knots[ 0 ] = KnotView{ 0, 0, 0 };
+			countedDeviceRead( knots, __LINE__ );
+		}
+
+		if ( first || changed( coilShadow, coilList.data(), coilList.size() ) )
+		{
+			coilShadow = coilList;
+			coilCount = static_cast<int>( coilList.size() );
+			coils.SetSize( coilCount > 0 ? coilCount : 1 );
+			coils.HostWrite();
+			for ( int k = 0; k < coilCount; ++k )
+				coils[ k ] = coilList[ static_cast<std::size_t>( k ) ];
+			if ( coilCount == 0 )
+				coils[ 0 ] = CoilView{ 0, 0, 0, 0, 0 };
+			countedDeviceRead( coils, __LINE__ );
+		}
+
+		/*
+		 * THE ONE THAT GENUINELY MOVES, AND IT MOVES ONCE PER SUPPORT SWEEP.
+		 * XP-2 freezes the plasma support for the duration of a solve, so
+		 * within a sweep this comparison finds nothing; between sweeps the
+		 * fill has re-decided and the upload is real work rather than waste.
+		 * That is the whole point of comparing instead of re-uploading: the
+		 * buffer that changes still pays, and the four that do not stop
+		 * paying.
+		 */
+		elementCount = inputs.elementCount;
+		std::vector<int> freshFlags(
+			static_cast<std::size_t>( elementCount > 0 ? elementCount : 0 ) );
+		for ( int e = 0; e < elementCount; ++e )
+			freshFlags[ static_cast<std::size_t>( e ) ] =
+				inputs.elementInPlasma ? inputs.elementInPlasma[ e ] : 1;
+
+		if ( first || changed( flagShadow, freshFlags.data(),
+		                       freshFlags.size() ) )
+		{
+			flagShadow = freshFlags;
+			flags.SetSize( elementCount > 0 ? elementCount : 1 );
+			flags.HostWrite();
+			for ( int e = 0; e < elementCount; ++e )
+				flags[ e ] = freshFlags[ static_cast<std::size_t>( e ) ];
+			if ( elementCount == 0 )
+				flags[ 0 ] = 1;
+			countedDeviceRead( flags, __LINE__ );
+		}
+
+		std::vector<int> freshOffsets(
+			static_cast<std::size_t>( elementCount > 0 ? elementCount : 0 ) );
+		for ( int e = 0; e < elementCount; ++e )
+			freshOffsets[ static_cast<std::size_t>( e ) ] =
+				inputs.conductorOffsets ? inputs.conductorOffsets[ e ] : 0;
+
+		if ( first || changed( offsetShadow, freshOffsets.data(),
+		                       freshOffsets.size() ) )
+		{
+			offsetShadow = freshOffsets;
+			offsetsOfShift.SetSize( elementCount > 0 ? elementCount : 1 );
+			offsetsOfShift.HostWrite();
+			for ( int e = 0; e < elementCount; ++e )
+				offsetsOfShift[ e ] =
+					freshOffsets[ static_cast<std::size_t>( e ) ];
+			if ( elementCount == 0 )
+				offsetsOfShift[ 0 ] = 0;
+			countedDeviceRead( offsetsOfShift, __LINE__ );
+		}
+
+		shiftCount = inputs.conductorValueCount;
+		if ( first || changed( shiftShadow, inputs.conductorValues,
+		                       static_cast<std::size_t>(
+		                           shiftCount > 0 ? shiftCount : 0 ) ) )
+		{
+			shiftShadow.clear();
+			if ( inputs.conductorValues != nullptr && shiftCount > 0 )
+				shiftShadow.assign( inputs.conductorValues,
+				                    inputs.conductorValues + shiftCount );
+			shift.SetSize( shiftCount > 0 ? shiftCount : 1 );
+			shift.HostWrite();
+			for ( int k = 0; k < shiftCount; ++k )
+				shift( k ) = static_cast<mfem::real_t>(
+					inputs.conductorValues[ k ] );
+			if ( shiftCount == 0 )
+				shift( 0 ) = mfem::real_t( 0 );
+			shift.UseDevice( true );
+			countedDeviceRead( shift, __LINE__ );
+		}
+
+		populated = true;
+	}
 
 }

@@ -5449,6 +5449,12 @@ namespace
 
 	void GradShafranovSolver::prepare( bool seedFromGuess )
 	{
+		// PHASE B OF DEVICE-PLAN.md section 3.3 -- *configure the device
+		// problem*. Everything uploaded here is a per-mesh or per-source
+		// constant that phase C reads and never writes, so a transfer counted
+		// in this phase is the plan working rather than a leak.
+		PhaseScope const residency( Phase::Upload );
+
 		if ( !linearSource && !nonlinearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::prepare: no source has been set" );
 		// On the extension path a Gamma_h attribute carries no datum of its own --
@@ -8094,8 +8100,36 @@ namespace
 		 * support would be picked up anyway.
 		 */
 		std::vector<int> npcPlasmaFlags;
+
+		/*
+		 * PHASE B'S DEVICE BUFFERS ARE A MEMBER AND NOT A LOCAL HERE, WHICH IS
+		 * THE SECOND HALF OF THE SAME FIX.
+		 *
+		 * As a local they outlived every rebuild of the operator -- 16 of them
+		 * on the shipped machine case -- and died with this function, which
+		 * runs once per support sweep, so the per-mesh constants were still
+		 * uploaded three times. `npcConstants` is declared on the solver for
+		 * that reason; see its declaration for why comparing against host
+		 * shadows makes a member safe across an adaptive mesh change without an
+		 * invalidation hook. M-226.
+		 */
+
 		auto buildNpc = [ & ]() -> std::unique_ptr<mfem::DarcyNPCOperator>
 		{
+			/*
+			 * THIS IS PHASE B, AND IT RUNS INSIDE PHASE C -- WHICH IS A FACT
+			 * ABOUT MEQ AND NOT A MISLABELLING.
+			 *
+			 * DEVICE-PLAN.md section 3.3 draws phase B as a prologue: configure
+			 * the device problem, once, then run. MEQ's device operator is
+			 * rebuilt whenever the hybridization is re-finalised, so the
+			 * constants it uploads are re-uploaded once per support sweep and
+			 * again after every re-assembly below. Saying so with a scope is
+			 * what lets the instrument COUNT it rather than averaging it into
+			 * the phase-C total it is not part of.
+			 */
+			PhaseScope const residency( Phase::Upload );
+
 			mfem::DarcyHybridization &hyb = *darcy->GetHybridization();
 
 			DeviceIntegrandInputs inputs;
@@ -8123,7 +8157,8 @@ namespace
 			}
 
 			if ( auto device = makeDeviceNPCOperator( hyb, blockOffsets,
-			                                          darcyRhs, inputs ) )
+			                                          darcyRhs, inputs,
+			                                          npcConstants ) )
 			{
 				deviceIntegrandInUse = true;
 				return device;
@@ -11789,6 +11824,22 @@ namespace
 	void GradShafranovSolver::solve()
 	{
 		/*
+		 * PHASE C OF DEVICE-PLAN.md section 3.3 -- *run the problem on the
+		 * device, receiving only diagnostic data*. Crossings counted between
+		 * here and downloadSolution() are the ones residency has to drive to
+		 * zero; the ones in phase B and phase D are the design.
+		 *
+		 * A SCOPE AND NOT AN ASSIGNMENT, because solve() is re-entrant:
+		 * solveByPicardThenNewton() calls it for its second stage, and
+		 * picardStep() re-enters prepare() -- which is phase B -- from inside
+		 * it. PhaseScope restores what it found rather than returning to a
+		 * default, so the inner call cannot leave the outer one mislabelled.
+		 * Same hazard as `profileStart` being a local rather than a member,
+		 * three lines down.
+		 */
+		PhaseScope const residency( Phase::Solve );
+
+		/*
 		 * THE LEG PROFILE IS ZEROED HERE AND THE TOTAL CLOCK STARTS HERE, so the
 		 * numbers belong to THIS solve and to nothing before it.
 		 *
@@ -12363,7 +12414,14 @@ namespace
 		potentialGf.SyncMemory( solution.GetBlock( 1 ) );
 		traceGf.SyncMemory( solution.GetBlock( 2 ) );
 
+		// PHASE D: the answer returns, once, through counted funnels -- AFTER
+		// the syncs above, which make the flags honest and move nothing. See
+		// the declaration for why those are not this.
+		downloadSolution();
+
 		// The one place the sign convention is undone. See the file comment.
+		// After the download, so the copy reads a host-valid source rather than
+		// dragging the flux over as its own uncounted transfer.
 		fluxGf = darcyFlux;
 		fluxGf.Neg();
 
@@ -12372,8 +12430,45 @@ namespace
 		postProcessed = false;
 	}
 
+	void GradShafranovSolver::downloadSolution()
+	{
+		PhaseScope const residency( Phase::Download );
+
+		/*
+		 * THE BASE AND ALL THREE OF ITS LONG-LIVED ALIASES, AND THE ALIASES
+		 * ARE NOT REDUNDANT.
+		 *
+		 * `darcyFlux`, `potentialGf` and `traceGf` are MakeRef aliases onto the
+		 * blocks of `solution`, made in the constructor, and an alias carries
+		 * its OWN validity flags -- which is the whole of M-79 and the reason
+		 * the three SyncMemory() calls above this exist. So bringing the base
+		 * over says nothing about where an alias's data is, and a funnel on the
+		 * base alone would leave exactly the three objects the output stage
+		 * actually reads still pointing at the device. *A sync on the base
+		 * cannot see data that is still on the alias*, and nor can a read.
+		 *
+		 * `fluxGf` is deliberately NOT here: it is a separate GridFunction that
+		 * solve() assigns from `darcyFlux` immediately after this call, so its
+		 * contents do not exist yet and reading it would funnel the previous
+		 * solve's answer.
+		 *
+		 * Idempotent by construction -- a funnel on a host-valid buffer is a
+		 * read that moves nothing -- so a caller with an outer loop may state
+		 * its own phase D without paying twice.
+		 */
+		countedHostRead( solution, __LINE__ );
+		countedHostRead( darcyFlux, __LINE__ );
+		countedHostRead( potentialGf, __LINE__ );
+		countedHostRead( traceGf, __LINE__ );
+	}
+
 	void GradShafranovSolver::postProcess()
 	{
+		// PHASE E OF DEVICE-PLAN.md section 3.3 -- host, and nothing should
+		// cross. A transfer counted here is a block phase D did not bring over,
+		// which is a finding rather than a cost.
+		PhaseScope const residency( Phase::Output );
+
 		if ( !prepared )
 			throw std::logic_error( "meq::GradShafranovSolver::postProcess: solve() has not been called" );
 
