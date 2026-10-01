@@ -10584,6 +10584,34 @@ namespace
 				 * remove: with the bordered fill done device-side these
 				 * columns never need to be on the host at all.
 				 */
+				/*
+				 * WHERE THE COLUMNS ACTUALLY ARE WHEN THEY GET HERE, WHICH IS
+				 * THE QUESTION DEVICE-PLAN.md ITEM 4's GATE TURNS ON AND WHICH
+				 * NOTHING HAD ASKED.
+				 *
+				 * The comment above says `flush()` brings the columns to the
+				 * host, and that reads as though this funnel is the CAUSE --
+				 * so item 4's `columnIsResident()` gate looks like something
+				 * the dense elimination is holding shut. **It is not.**
+				 * Measured on `machine-f-diiid` under `--device cuda`, all
+				 * 168 columns of a twelve-step run arrive here `H+ D-`:
+				 * host-valid and device-INVALID, so they were never written on
+				 * the device at all and the funnel below moves nothing --
+				 * 0 transfers at this site, against the run's 3.
+				 * [M-227](../MEASUREMENTS.md).
+				 *
+				 * `NPCReduce` and `NPCRecover` are batched kernels here and
+				 * still the output is host-only, because the TRACE SOLVE in
+				 * between them is PARDISO and PARDISO is a host solver. **So
+				 * item 4's data gate cannot open until item 6 does**, and the
+				 * dense elimination is not what stands in the way: it is
+				 * `( N + 4 )²` scalars, and the two full-size operations after
+				 * it -- `Vector::Add()` and `Norml2()` -- are device-aware
+				 * already.
+				 */
+				if ( stageChecksumWanted() )
+					for ( int i = 0; i < borderOut.Size(); ++i )
+						stageChecksum( "border.column", *borderOut[ i ] );
 				for ( int i = 0; i < borderOut.Size(); ++i )
 					countedHostRead( *borderOut[ i ], __LINE__ );
 				borderRhs.SetSize( 0 );
@@ -11045,12 +11073,10 @@ namespace
 				 * AND THE ROUTE SELECTS ITSELF ON WHERE THE COLUMNS ALREADY
 				 * ARE, WHICH IS THE MEASUREMENT AND NOT A PREFERENCE.
 				 *
-				 * A kernel wants its operand on the device. Today `flush()`
-				 * deliberately brings every solved column to the HOST -- the
-				 * dense elimination below it is host arithmetic -- so taking
-				 * this route unconditionally pushes each column BACK, 698 KB
-				 * at a time. Measured on `machine-f-diiid` over the WHOLE RUN,
-				 * which is twelve Newton steps:
+				 * A kernel wants its operand on the device. Today the columns
+				 * are on the HOST, so taking this route unconditionally pushes
+				 * each one up, 698 KB at a time. Measured on `machine-f-diiid`
+				 * over the WHOLE RUN, which is twelve Newton steps:
 				 *
 				 *   host gathers, as shipped                3 transfers
 				 *   device dots in FRONT of the gathers  17.7 transfers
@@ -11070,6 +11096,16 @@ namespace
 				 * than reads. The ratios above are unaffected, both sides
 				 * being counted the same way.
 				 * [M-223](../MEASUREMENTS.md).
+				 *
+				 * **AND THEY ARE ON THE HOST BECAUSE THEY WERE BORN THERE,
+				 * NOT BECAUSE `flush()` FETCHED THEM** --
+				 * [M-227](../MEASUREMENTS.md). Probed at the flush, all 168
+				 * columns of that run read `H+ D-`: never on the device.
+				 * `NPCReduce` and `NPCRecover` are both kernels, and the trace
+				 * solve between them is PARDISO, which is a host solver -- so
+				 * **this gate waits on item 6 and on nothing of the dense
+				 * arithmetic below.** *A leg's residency is a property of what
+				 * produces its data, not of what consumes it.*
 				 *
 				 * So the gate is `DeviceIsValid()` on the columns themselves.
 				 * Today that is false and the host path runs, bit for bit as

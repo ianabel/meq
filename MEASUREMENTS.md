@@ -13232,3 +13232,63 @@ host. That is phase D costing zero for exactly the reason residency has not
 arrived: there is nothing to bring back. It is built now so that the number is
 read where the answer returns rather than wherever a reader happens to touch it
 first.
+
+### M-227
+
+**THE BORDERED COLUMNS ARE NOT BROUGHT DOWN BY THE FLUSH — THEY ARE NEVER ON
+THE DEVICE AT ALL, AND THAT MOVES ITEM 4's GATE BEHIND ITEM 6.**
+`DEVICE-PLAN.md` §3.3 item 4 gates `meq::DeviceRows::dotAll()` on
+`Memory::DeviceIsValid()` of the solved columns, and both the plan and the code
+beside it say `flush()` *"deliberately brings every solved column to the
+HOST"* — which reads as though the host-side dense elimination is what holds
+the gate shut, and is how this project's own ordered list described it.
+
+`meq::stageChecksum()` reports a buffer's **validity flags before it reads**,
+which is the half a plain checksum lacks. Probed at the first statement after
+`npcLinear.ArrayMult()`, ahead of the funnel, on `machine-f-diiid` under
+`--device cuda`, `MKL_NUM_THREADS=1`:
+
+| border columns probed over a 12-step run | flags | count |
+|---|---|---|
+| `border.column`, n = 109,203 each | **`H+ D-`** | **168 of 168** |
+
+**Host-valid and device-INVALID, every one.** Not *brought* down — never up.
+The funnel below the probe therefore moves nothing, which the crossing counter
+independently confirms: that site reports **0 transfers** against the whole
+run's 3 ([M-226](#m-226)).
+
+**SO THE DENSE ELIMINATION IS NOT THE BLOCKER, AND NAMING IT WAS A GUESS
+DRESSED AS A DIAGNOSIS.** The bordered Schur complement is `( N + 4 )²`
+scalars — order 14 on this case — and the two operations that touch the
+full-size columns after it are `mfem::Vector::Add()` and `Norml2()`, **both
+device-aware already**: `Add()` is `ReadWrite()` plus a `forall`, and
+[M-195](#m-195) recorded `Norml2()` as an `mfem::reduce`. Porting the dense
+solve would move arithmetic that is already free and change nothing about where
+the columns live.
+
+**THE PRODUCER IS WHAT DECIDES, AND THE PRODUCER IS PARDISO.**
+`CanBatchNPCTraversal()` reads **yes** here — `NPCReduce` and `NPCRecover` are
+both kernels ([M-212](#m-212)) — and the output is still host-only, because the
+trace solve sandwiched between them is a **host** direct solver. A batched
+traversal around a host solve produces a host answer. *A leg's residency is a
+property of what produces its data, not of what consumes it.*
+
+**WHICH PUTS ITEM 4 STRICTLY AFTER ITEM 6 AND CONFIRMS §3.3's ORDERING FOR A
+REASON §3.3 DID NOT GIVE.** The plan orders cuDSS last to protect the
+digit-for-digit instrument — a choice about what can be *validated*. This is a
+second and independent reason: until the trace solve is on the device there is
+no device-resident column for `dotAll()` to read, so item 4 cannot turn on
+whatever is done to the dense arithmetic. **And pushing them up instead is
+already measured as a loss** — [M-208](#m-208)'s 33.1 transfers and 55.1 MB
+against 3 and 0.888 MB, an 11× and 62× cost, because *no amount of kernel makes
+an h2d of the state cheaper than a gather from it.*
+
+**THE INSTRUMENT WAS THE ONE ALREADY IN THE TREE AND IT TOOK ONE PROBE.**
+`meq::StageChecksum` exists because [M-206](#m-206) needed it and it was kept
+that time; the question *"where is this buffer actually"* had simply never been
+asked at this site, and the comment that stood there answered it by assertion.
+*A comment describing a mechanism is a hypothesis until something reads the
+flags.* Same species as `ComputeHDGFaceEnergy()`'s line-range error and the
+`darcyform.hpp` doxygen that this project carried as its largest dependency for
+months — and the cost here was a plan item ordered against a cause that was not
+the cause.
