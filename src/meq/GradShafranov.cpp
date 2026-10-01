@@ -8202,6 +8202,46 @@ namespace
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
 		mfem::Vector columnL( n ), zL( n ), currentRow( n );
+
+		/*
+		 * THE SOLVED COLUMNS MAY LIVE ON THE DEVICE, AND A FRESHLY CONSTRUCTED
+		 * mfem::Vector MAY NOT -- WHICH IS WHY ITEM 4's GATE COULD NEVER OPEN.
+		 *
+		 * `mfem::Vector v( n )` has `UseDevice()` FALSE, so `Write()` and
+		 * `ReadWrite()` on it hand back HOST pointers and every kernel that
+		 * fills it fills host memory. These five -- `y`, `z`, `zL`, `zB` and
+		 * each `exteriorZ` -- are the outputs of the blocked trace solve, and
+		 * `DEVICE-PLAN.md` item 4 gates `meq::DeviceRows::dotAll()` on
+		 * `Memory::DeviceIsValid()` of exactly them. **The predicate was about
+		 * data that could not satisfy it under any trace solver**, which is
+		 * why [M-227](../MEASUREMENTS.md) read 168 of 168 `H+ D-` under
+		 * PARDISO and why making cuDSS the device default did not move it.
+		 * *A data gate on a buffer that is not device-capable is a gate on
+		 * nothing, and it reports the same NO for both reasons.*
+		 *
+		 * **AND THE CALLS ARE NOT HERE, WHICH IS A MEASUREMENT AND NOT AN
+		 * OVERSIGHT** -> [M-229](../MEASUREMENTS.md). `UseDevice( true )` on
+		 * these five was built, run, and reverted: 126 of 168 columns duly
+		 * arrived `H+ D+` where every one had been `H+ D-`, `psi_ax` did not
+		 * move -- and the run's transfers went from **3 and 0.888 MB to 20 and
+		 * 15.1 MB**. The crossing did not disappear, it MOVED: the trial step
+		 * is `unknown.Add( -damping, y )`, so a device-valid column makes the
+		 * ITERATE device-valid, and the next step's axis constraint -- a host
+		 * mesh search -- drags the whole state back. That is section 3.3's
+		 * alternation, made visible and counted at 1.4 transfers a step.
+		 *
+		 * **RESIDENCY IS A PROPERTY OF A CYCLE AND NOT OF A LEG**, which is
+		 * what no per-item ordering in that plan can express. Every leg of a
+		 * Newton step must be device-side together or the one host leg pulls
+		 * the state down and converts every other leg's kernel into an upload.
+		 * The trace solve is cuDSS now, the traversal and the integrand are
+		 * kernels, the row dots and `I_p` are BUILT -- and
+		 * `plasmaCurrentPerElementOnDevice()` has no caller and the axis
+		 * constraint is a mesh SEARCH, which section 3.4 calls the hardest part
+		 * of the whole page. *Each leg was waiting for the state to be
+		 * resident, and the state can only be resident if they all move at
+		 * once.*
+		 */
 		/// The same row, on its support alone -- the potential dofs of the
 		/// elements the plasma fill reached. Rebuilt every Newton step, because
 		/// the support moves with the plasma. See meq::CompressedRows.
@@ -10517,6 +10557,33 @@ namespace
 			 */
 			mfem::Array<mfem::Vector const *> borderRhs;
 			mfem::Array<mfem::Vector *> borderOut;
+
+			/*
+			 * WHETHER THE FLUSH BELOW LEAVES ITS OUTPUTS WHERE IT FOUND THEM --
+			 * DEVICE-PLAN.md ITEM 4, AND THE LAST LINK OF ITEM 6.
+			 *
+			 * The funnel in `flush()` is the one place the solved columns come
+			 * to the host, and it exists because everything after it was host
+			 * arithmetic. Once `dotAll()` takes the contractions that is no
+			 * longer true, and funnelling then costs exactly what
+			 * [M-208](../MEASUREMENTS.md) measured: 12.5 MB a run on this case,
+			 * paid to put data on the host that the next thing to read it will
+			 * push straight back.
+			 *
+			 * **THE ROUTE HAS TO BE DECIDED BEFORE THE FLUSH, WHICH IS WHY THIS
+			 * IS A FLAG AND NOT A PREDICATE.** Item 4's gate asks
+			 * `DeviceIsValid()` of the columns, and the funnel is what makes
+			 * that false -- so asking after the flush can only ever answer no,
+			 * which is a cycle and not a measurement. What CAN be asked
+			 * beforehand is whether the device route will be ELIGIBLE: the
+			 * mirrors, the row counts, and `nBorderTotal > 1`, none of which
+			 * depend on where any data is.
+			 *
+			 * Set false here so every flush before the last -- the one the
+			 * differenced `psi_bnd` column forces, which has a residual
+			 * evaluation after it -- keeps today's behaviour exactly.
+			 */
+			bool keepColumnsResident = false;
 			auto queue = [ & ]( mfem::Vector const &rhs, mfem::Vector &out )
 			{
 				borderRhs.Append( &rhs );
@@ -10612,8 +10679,19 @@ namespace
 				if ( stageChecksumWanted() )
 					for ( int i = 0; i < borderOut.Size(); ++i )
 						stageChecksum( "border.column", *borderOut[ i ] );
-				for ( int i = 0; i < borderOut.Size(); ++i )
-					countedHostRead( *borderOut[ i ], __LINE__ );
+				/*
+				 * AND THE FUNNEL IS SKIPPED WHERE THE CONSUMER IS A KERNEL.
+				 * See `keepColumnsResident` for why the route is decided
+				 * before this call rather than asked of the data after it.
+				 * **A FALLBACK IS STILL SAFE**: if `dotAll()` declines after
+				 * all, the host route's `CompressedRows::gather()` opens with
+				 * `v.HostRead()`, so it funnels for itself -- it pays the
+				 * crossing this skipped, which is the right cost for a path
+				 * nobody wanted.
+				 */
+				if ( !keepColumnsResident )
+					for ( int i = 0; i < borderOut.Size(); ++i )
+						countedHostRead( *borderOut[ i ], __LINE__ );
 				borderRhs.SetSize( 0 );
 				borderOut.SetSize( 0 );
 			};
@@ -10996,6 +11074,26 @@ namespace
 				queue( columnB, zB );
 			}
 
+
+			/*
+			 * THE ROUTE, DECIDED HERE BECAUSE AFTER THE FLUSH IT CANNOT BE.
+			 * Eligibility only -- the mirrors, the row counts and the border
+			 * size. Whether the columns actually ARRIVE device-valid is still
+			 * `columnIsResident()`'s question below, and a no there falls back
+			 * to the host gathers, which funnel for themselves.
+			 *
+			 * `nBorderTotal > 1` because the one-border branch contracts
+			 * through the HOST `rowDot()` with no device operand at all, and
+			 * leaving its columns on the device would hand it a raw read.
+			 */
+			keepColumnsResident =
+				nBorderTotal > 1
+				&& ( transmissionRows.rowCount() > 0
+				     || currentRows.rowCount() > 0 )
+				&& ( transmissionRows.rowCount() == 0
+				     || transmissionRowsDevice.valid() )
+				&& ( currentRows.rowCount() == 0
+				     || currentRowsDevice.valid() );
 
 			// Every column of the step is assembled by here, so this is the one
 			// ArrayMult on the ordinary path. See the lambda for what it saves.

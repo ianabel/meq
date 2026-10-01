@@ -843,6 +843,42 @@ outer Newton**, so it is the only one that re-enters the solver's long-lived
 state dozens of times with a Device configured; *a defect in re-entry needs a
 case that re-enters.*
 
+**AND cuDSS IS NOW THE TRACE SOLVER UNDER CUDA — ITEM 6, TAKEN DELIBERATELY —
+AND BOTH OF THE PLAN'S PREDICTIONS ABOUT IT CAME OUT THE OTHER WAY**
+→ **[M-229](MEASUREMENTS.md#m-229)**. The driver defaults to cuDSS when
+`Backend::CUDA_MASK` is allowed and the file named no trace solver. **`CUDA_MASK`
+and not `DEVICE_MASK`**, because `DEVICE_MASK` includes `DEBUG_DEVICE` and
+`--device debug` is a Device with no GPU execution for a CUDA library to run on;
+the two batched keys beside it are right to use `DEVICE_MASK` because they are
+about memory and routes rather than about a vendor library executing.
+
+**THE INSTRUMENT SURVIVED, WHICH §3.5 SAID IT WOULD NOT.** cuDSS is live and
+nondeterministic — the bordered constraint reads `-6.465e-12`, `-6.466e-12`,
+`-6.466e-12` over three runs where PARDISO is stable — and over **eight** repeats
+every field `DeviceParity` compares is **identical**: 2 Newton steps,
+`psi_ax = 3.759851e-01`, `psi_bnd = 7.081394e-02`, X-point
+`( 1.200929, -0.999491 )`. The driver prints seven significant figures of a
+quantity perturbed at the fifteenth. *The exact assertion stays exact and what
+it rests on has changed* — determinism before, printed precision now — so it is
+documented rather than pre-emptively widened, and the tolerance to reach for if
+it ever flickers is the measured spread and not a convenient one.
+
+**AND IT BOUGHT NO RESIDENCY, BECAUSE THE BLOCKER WAS NEVER THE TRACE SOLVER.**
+[M-227](MEASUREMENTS.md#m-227) found the bordered columns `H+ D-` at the flush
+and named the host solve; with cuDSS in they were still **168 of 168 `H+ D-`**,
+because they are declared `mfem::Vector v( n )` and **a freshly constructed
+`mfem::Vector` has `UseDevice()` FALSE**. *Item 4's gate was a predicate on data
+that could not satisfy it under any trace solver, and it reported the same NO for
+both reasons.* `UseDevice( true )` on them works — 126 of 168 arrive device-valid
+— and costs **17× the bus traffic**, 0.888 MB to 15.1 MB, because the crossing
+does not vanish but MOVES: `unknown.Add( -damping, y )` makes the ITERATE
+device-valid and the next step's axis constraint, a host mesh search, drags the
+whole state back. **Residency is a property of a CYCLE and not of a leg** — every
+leg must move together or the one host leg converts every other leg's kernel into
+an upload — and the last leg is the mesh search `DEVICE-PLAN.md` §3.4 already
+calls the hardest part of the page. The arm is reverted and kept as a
+measurement.
+
 **AND THE REFUSAL OF `TraceSolver = "cudss"` WITHOUT A DEVICE STANDS ON A
 NARROWER MEASUREMENT THAN IT USED TO, AND INVERTS FOR A RESIDENT PATH.** The
 trade argument is measured rather than argued, and **the measurement has moved

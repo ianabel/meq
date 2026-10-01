@@ -1738,6 +1738,55 @@ int main( int argc, char **argv )
 		case meq::TraceSolverType::GMRES:   traceSolver = TS::GMRES;   break;
 	}
 
+	/*
+	 * cuDSS IS THE TRACE SOLVER UNDER CUDA -- DEVICE-PLAN.md section 3.3
+	 * ITEM 6, AND IT IS THE STEP THAT SPENDS THE BIT-EXACTNESS INSTRUMENT.
+	 *
+	 * **WHAT IT BUYS IS RESIDENCY AND NOT A TRACE-SOLVE SPEEDUP**, which is
+	 * the half that was not obvious until it was measured.
+	 * [M-227](../MEASUREMENTS.md) probed the bordered columns at the flush
+	 * under PARDISO and found all 168 of a twelve-step run `H+ D-`: host-valid
+	 * and device-invalid, never on the device at all. `NPCReduce` and
+	 * `NPCRecover` are both kernels; the host direct solve BETWEEN them is what
+	 * lands the answer on the host. *A leg's residency is a property of what
+	 * produces its data, not of what consumes it* -- so every MEQ kernel that
+	 * reads the state is paying an upload, and item 4's `dotAll()` gate, which
+	 * is a predicate on `Memory::DeviceIsValid()`, cannot open while a host
+	 * solver produces the columns. **This is the one change that can open it,
+	 * and it opens it without a line of item 4 being touched.**
+	 *
+	 * **CUDA_MASK AND NOT DEVICE_MASK, WHICH IS NOT A DETAIL.**
+	 * `DEVICE_MASK = CUDA_MASK | HIP_MASK | DEBUG_DEVICE`, so `--device debug`
+	 * is a Device by that test -- and it is a Device with no GPU execution in
+	 * the process at all, where a CUDA library has nothing to run on. The two
+	 * keys above are right to use DEVICE_MASK, because batching is about
+	 * memory and about which route the library takes; this one is about a
+	 * vendor library actually executing, and the masks are different questions.
+	 *
+	 * **AND IT COSTS THE INSTRUMENT, DELIBERATELY AND WITH THE BASELINE
+	 * ALREADY BANKED.** cuDSS 0.8.0 leaves `CUDSS_CONFIG_DETERMINISTIC_MODE` at
+	 * 0 and is nondeterministic run to run at up to 3.6e-15 for 16 columns, and
+	 * `SetDeterministic( true )` is supported for ONE right-hand side only --
+	 * refusing MEQ's `N + 4` with `CUDSS_STATUS_NOT_SUPPORTED`, so the one
+	 * configuration MEQ would want determinism in is the one where it cannot
+	 * have it. *"`--device cuda` reproduces `--device cpu` to every printed
+	 * digit"* -- the instrument that root-caused M-79, M-130, M-187 and M-206
+	 * -- ends here. It is spent rather than lost: every exact arm was pinned
+	 * first, `DeviceParity`'s CUDA arm last of all ([M-228](../MEASUREMENTS.md)),
+	 * so the exact baseline is in the history and a later disagreement can be
+	 * compared against it.
+	 *
+	 * Inherited only. A file naming a trace solver gets the one it named, on a
+	 * device as anywhere else -- *an inherited default has to be honourable in
+	 * the configuration that inherits it, and a stated one is not a default at
+	 * all.* And `traceSolverAvailable()` because a build without
+	 * MFEM_USE_CUDSS must keep PARDISO rather than reach a package it lacks.
+	 */
+	bool const onCuda = mfem::Device::Allows( mfem::Backend::CUDA_MASK );
+	if ( onCuda && !config->getSolver().traceSolverWasGiven
+	     && meq::GradShafranovSolver::traceSolverAvailable( TS::cuDSS ) )
+		traceSolver = TS::cuDSS;
+
 	if ( !meq::GradShafranovSolver::assemblyModeAvailable( assemblyMode ) )
 	{
 		/*

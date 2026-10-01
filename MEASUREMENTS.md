@@ -13350,3 +13350,90 @@ includes `mfem.hpp` — which is what makes the test mean anything.
 library, included no MFEM header, and its `#ifdef MFEM_USE_SINGLE` compiled, ran
 and silently took the other branch, because a configuration macro in a TU that
 has not included MFEM is not false but **undefined**.
+
+### M-229
+
+**cuDSS IS THE TRACE SOLVER UNDER CUDA, AND IT TURNS OUT TO BE NECESSARY AND
+NOWHERE NEAR SUFFICIENT.** `DEVICE-PLAN.md` §3.3 item 6, taken deliberately and
+with the exact baseline banked first ([M-228](#m-228)). The driver now defaults
+to cuDSS when `Backend::CUDA_MASK` is allowed and the file named no trace
+solver.
+
+**`CUDA_MASK` AND NOT `DEVICE_MASK`, WHICH IS NOT A DETAIL.**
+`DEVICE_MASK = CUDA_MASK | HIP_MASK | DEBUG_DEVICE`, so `--device debug` is a
+Device by that test — and it is a Device with no GPU execution in the process,
+where a CUDA library has nothing to run on. The two batched keys beside it are
+right to use `DEVICE_MASK` because they are about memory and routes; this one is
+about a vendor library actually executing.
+
+**THE NONDETERMINISM IS REAL AND IS BELOW THE PRINTED PRECISION, WHICH §3.5 DID
+NOT PREDICT.** Three runs of `machine-f-diiid` report the bordered constraint at
+`-6.465e-12`, `-6.466e-12`, `-6.466e-12` where PARDISO is stable — so cuDSS is
+live and is varying at about 1e-15 absolute, as 0.8.0's open
+`CUDSS_CONFIG_DETERMINISTIC_MODE` implies. But over **eight** repeat runs every
+field `DeviceParity` compares is **identical**:
+
+| eight `--device cuda` runs | value | distinct |
+|---|---|---|
+| Newton steps | 2 | **1 of 8** |
+| `psi_ax` | 3.759851e-01 | **1 of 8** |
+| `psi_bnd` | 7.081394e-02 | **1 of 8** |
+| X-point | ( 1.200929, −0.999491 ) | **1 of 8** |
+
+**So the exact assertion stays exact, and what it now rests on has changed.** It
+was resting on determinism; it rests on the driver printing seven significant
+figures of a quantity perturbed at the fifteenth. *That is a weaker foundation
+and it is still a true one*, so the repair is to say so rather than to pre-emptively
+widen a tolerance — and if it ever flickers, the tolerance to use is the measured
+spread above and not a convenient one.
+
+**WHAT ITEM 6 WAS SUPPOSED TO BUY WAS RESIDENCY, AND IT DID NOT BUY IT.**
+[M-227](#m-227) found the bordered columns `H+ D-` at the flush and named the
+host trace solve as the cause. With cuDSS in they were still **168 of 168
+`H+ D-`** — because the columns are declared `mfem::Vector v( n )`, and **a
+freshly constructed `mfem::Vector` has `UseDevice()` false**, so `Write()` hands
+back a host pointer and every kernel filling one fills host memory. *Item 4's
+gate was a predicate on data that could not satisfy it under any trace solver,
+and it reported the same NO for both reasons.*
+
+**MAKING THEM DEVICE-CAPABLE WORKED, AND MADE THE RUN SEVENTEEN TIMES WORSE.**
+`UseDevice( true )` on the five output families — `y`, `z`, `zL`, `zB`,
+`exteriorZ` — plus skipping the flush funnel where the device route is eligible:
+
+| | columns device-valid at the flush | transfers | MB | `psi_ax` |
+|---|---|---|---|---|
+| PARDISO | 0 of 168 | 3 | 0.888 | 3.759851e-01 |
+| cuDSS | 0 of 168 | 3 | 0.888 | 3.759851e-01 |
+| cuDSS + `UseDevice( true )` | **126 of 168** | **20** | **15.1** | 3.759851e-01 |
+
+**THE CROSSING DID NOT DISAPPEAR — IT MOVED, AND THE SITE IT MOVED TO IS THE
+FINDING.** 15 of the 20 transfers land on one line: the **axis constraint's**
+read of the iterate, 12.5 MB. The trial step is
+`unknown.Add( -damping, y )`, so a device-valid column makes the **iterate**
+device-valid, and the next step's axis constraint — a host mesh search — drags
+the whole state back. That is §3.3's *alternation*, previously an argument and
+now a counted 1.4 transfers a step.
+
+**SO RESIDENCY IS A PROPERTY OF A CYCLE AND NOT OF A LEG, AND NO PER-ITEM
+ORDERING CAN EXPRESS THAT.** Every leg of a Newton step must be device-side
+**together**, or the one host leg pulls the state down and converts every other
+leg's kernel into an upload. The trace solve is now cuDSS, the NPC traversal and
+the integrand are kernels, and the row dots and `I_p` are **built** — and
+`meq::plasmaCurrentPerElementOnDevice()` has **no caller at all**, deferred in
+M-192 for the same reason `dotAll()` was in M-208: *a device reduction is
+correct as soon as it is written and only pays once the state is already
+resident.* **Every leg was waiting for the state to be resident, and the state
+can only be resident if they all move at once.**
+
+**AND THE LAST ONE IS A MESH SEARCH, WHICH §3.4 ALREADY CALLED THE HARDEST PART
+OF THE PAGE.** The axis constraint roots the solved `q`; its sibling the limiter
+was measured **not worth porting** ([M-201](#m-201)). So the cycle cannot be
+closed by wiring what is already built, and the `UseDevice( true )` arm is
+reverted — kept as a measurement rather than as code, because shipping it is a
+17× regression in bus traffic by the one metric this machine can honour.
+
+**WHAT IS KEPT IS cuDSS AND THE PREPARED FUNNEL.** `flush()` now skips its host
+funnel when the device route is eligible — decided **before** the flush, since
+asking `DeviceIsValid()` after it is a cycle rather than a measurement — and a
+failed device route is still safe, because `CompressedRows::gather()` opens with
+`v.HostRead()` and funnels for itself.
