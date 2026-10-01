@@ -94,15 +94,24 @@ Requirements:
 | Boost | header-only Boost.Math for the library; `unit_test_framework` for the tests |
 | clang-tidy | optional; gates the `naming` test only |
 
-Reached *through* MFEM rather than found separately: SuiteSparse (UMFPACK, the
-default direct solver), SUNDIALS (KINSOL, which backs the Picard globalisations),
-GSLIB (point location, for interpolating a warm start between meshes), and
-optionally MKL PARDISO and cuDSS. MEQ reads which of them are present out of
-MFEM's own configuration and adapts.
+Reached *through* MFEM rather than found separately: oneMKL (PARDISO, the
+default trace solver wherever the build has it), SuiteSparse (UMFPACK, the
+fallback where it does not, and what every convergence rate in the suite was
+measured against), SUNDIALS (KINSOL, which backs the Picard globalisations), and
+optionally CUDA and cuDSS for the device path. `meq::defaultTraceSolver()` is
+build-conditional for that reason: a default nobody can honour would throw out
+of a solve rather than at startup.
 
-MEQ needs a specific MFEM: a **local merge of four development branches**
+GSLIB is not on that list. Point location — for the warm start that interpolates
+a stored answer onto a different mesh — is `meq::PointLocator`, MEQ's own, which
+reproduces gslib to every printed digit and, unlike it, builds beside
+`MFEM_PRECISION = single`. MEQ reads which of the rest are present out of MFEM's
+own configuration and adapts.
+
+MEQ needs a specific MFEM: a **local merge of fourteen development branches**
 carrying `DarcyForm`, the HDG integrators under `fem/darcy/`, the
-curved-boundary extension machinery and the NPC nonlinear ordering.
+curved-boundary extension machinery, the NPC nonlinear ordering and the batched
+element and face kernels the device path runs on.
 `mfem/master` will not work — the older `HDGBilinearForm` API that MEQ used to
 depend on has been replaced.
 

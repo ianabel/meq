@@ -1037,8 +1037,16 @@ only two things in it that were neither built nor recorded anywhere else.
   and nothing is wrong -- but it is an arbitrary choice where a rule exists.
   FindPointsGSLIB::SetL2AvgType does arithmetic or harmonic averaging over the
   elements meeting at a point, for exactly this case, and BOTH of MEQ's sampled
-  fields are L2. GSLIB has been on since stage 7 (meq::FieldTransfer uses it),
-  so this is reachable and simply has not been done.
+  fields are L2.
+
+  AND THE ROUTE TO IT IS NO LONGER FREE, WHICH CHANGES THIS ITEM FROM "REACHABLE
+  AND NOT DONE" TO "A RULE TO IMPLEMENT". meq::FieldTransfer is
+  meq::PointLocator, MEQ's own, and MFEM_USE_GSLIB is optional -- it has to be,
+  because gslib carries no floating-point abstraction and cannot be built beside
+  MFEM_PRECISION = single. So taking gslib's rule means WRITING it in
+  meq::PointLocator rather than calling a setter, and the rule is the part worth
+  having: an arithmetic or harmonic mean over the elements meeting at the point,
+  in place of whichever element the search happened to return.
 
   Note the sampler does NOT otherwise want GSLIB: the output grid is uniform, so
   locating a point is index arithmetic and the search is already free. It is the
@@ -1046,10 +1054,8 @@ only two things in it that were neither built nor recorded anywhere else.
 
   AND THE TWO SAMPLERS HAVE NEVER BEEN COMPARED TO EACH OTHER. meq::GridSampler
   inverts the loop -- element bounding box to grid index range, then
-  TransformBack -- and meq::FieldTransfer goes through FindPointsGSLIB, whose
-  simplex path splits triangles into quads internally (mesh_split, ir_split,
-  split_element_map in fem/gslib.hpp). MEQ's meshes are triangles, so that is a
-  code path a quad-based user never exercises. WarmStartConvergence.cpp does run
+  TransformBack -- and meq::FieldTransfer locates through meq::PointLocator,
+  which is a different search over the same mesh. WarmStartConvergence.cpp does run
   it on triangles and does measure the result -- but against the EXACT SOLUTION,
   not against GridSampler, so the two are never asked the same question at the
   same points on the same mesh.

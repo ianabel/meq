@@ -89,13 +89,14 @@ The options MEQ reads, and what each buys:
 
 | option | required? | what MEQ does with it |
 |---|---|---|
-| `MFEM_USE_SUITESPARSE` | **effectively yes** | UMFPACK, the default trace solver. Without any direct solver MEQ falls back to GMRES. |
+| `MFEM_PRECISION` | **a decision, not a tick box** | `double` or `single`, deciding `mfem::real_t` for the whole library. **MEQ has no key for it and cannot have one** — it is inherited through `MFEM_DIR`, so choosing a precision means choosing an MFEM. Both build and both pass the suite; see *Two installs, two questions* below. |
+| `MFEM_USE_SUITESPARSE` | optional | UMFPACK, one of the trace solvers. Without **any** direct solver MEQ falls back to GMRES, which `MEASUREMENTS.md` M-179 measures as unviable. SuiteSparse ships no single-precision build, so a `single` install has none and runs PARDISO. |
 | `MFEM_USE_EXCEPTIONS` | **yes, for the driver** | Makes an MFEM error a C++ exception rather than an abort. Without it a failed solve is a `SIGABRT` instead of exit code 2. |
-| `MFEM_USE_SUNDIALS` | for globalisation | KINSOL, behind the Anderson–Picard and Picard-then-Newton paths |
-| `MFEM_USE_GSLIB` | for warm starts | `FindPointsGSLIB`, used to interpolate a stored answer onto a different mesh |
+| `MFEM_USE_SUNDIALS` | for globalisation | KINSOL, behind the Anderson–Picard and Picard-then-Newton paths. Must itself be built at the same precision — MFEM `static_assert`s it. |
+| `MFEM_USE_GSLIB` | optional | `FindPointsGSLIB`. MEQ's warm start uses `meq::PointLocator`, its own, which reproduces gslib to every printed digit; gslib has no floating-point abstraction and cannot be built beside `MFEM_PRECISION = single`. |
 | `MFEM_USE_LAPACK` | recommended | Also gates MFEM's cut-element quadrature |
-| `MFEM_USE_MKL_PARDISO` | optional | A second trace solver, selectable at run time |
-| `MFEM_USE_CUDA`, `MFEM_USE_CUDSS` | optional | A third trace solver. A prerequisite, not a speed-up: `fem/darcy/` has no partial-assembly kernels and MEQ issues no device kernels of its own. |
+| `MFEM_USE_MKL_PARDISO` | recommended | A trace solver, and MEQ's default wherever it is present |
+| `MFEM_USE_CUDA`, `MFEM_USE_CUDSS` | for the device path | Three things, not one: the `cuDSS` trace solver; MFEM's batched element and face kernels, reached through `[solver] AssemblyMode`, `LocalFactorMode` and `TraceAssemblyMode`, which **are** the device route; and MEQ's own device translation units, which CMake hands to `nvcc` at the architecture it reads out of `config.mk`. Without CUDA those compile to host stubs and the build is host-only and correct. |
 | `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | optional, **both or neither** | Threaded element assembly, which MEQ exposes as an opt-in. It *aborts* rather than falling back if only one is set. |
 | `MFEM_USE_MPI` | **no** | MEQ is serial. Detected only so that a parallel MFEM fails intelligibly. |
 
@@ -103,6 +104,37 @@ MEQ reads all of these out of MFEM's own `share/mfem/config.mk` rather than
 probing, and prints what it found at configure time. It accepts either layout an
 MFEM build leaves behind — an installed tree, or an in-source `make` build with
 `config/config.mk`.
+
+### Two installs, two questions
+
+`MFEM_PRECISION` is settled when MFEM is configured, so a precision is chosen by
+pointing at a different MFEM:
+
+```sh
+cmake -B build        -DMFEM_DIR=../mfem/install          # double
+cmake -B build-single -DMFEM_DIR=../mfem/install-single   # single
+```
+
+**The double build is the reference and the single one is validated against
+it.** MEQ's acceptance criteria are measured convergence rates, and a rate needs
+a mesh sequence above the round-off floor: at `~1e-7` there is none left, so
+`k+1` above `k = 1` is a double-build acceptance and no single build can carry
+it. What a single build is checked against is **agreement with the double one at
+the same stopping point**.
+
+**A single install is not a double install minus a flag — it is minus six
+things**, two of them structural: SuiteSparse and gslib have no
+single-precision build. A red test in one build and not the other cannot say by
+itself which difference it met.
+
+**The device path does not depend on the precision.** It keys on whether an
+`mfem::Device` is configured, never on `real_t`, so `--device cuda` behaves
+identically in both — which is what makes a double device build the right one
+on a part whose FP64 rate is about half its FP32 rate, and a single one the
+answer on a part where it is a thirtieth.
+
+`meq --version` and every output file's `meq_precision` attribute say which
+build produced a given answer, which is the whole reason they carry it.
 
 > **`make clean` after editing any MFEM header.** MFEM's makefiles have no
 > header dependency tracking, and a stale object has produced heap corruption in

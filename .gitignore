@@ -122,6 +122,11 @@ driver-acceptance-*.toml
 # so that running the test does not scatter six machines' worth of mesh, .gf,
 # .vtu and .nc across the repository root. Anchored, per the note below.
 /machine-fixed-boundary-scratch/
+# And DeviceParity's, for the same reason: it drives the shipped binary on
+# examples/mhd-rectangle.toml and examples/machine-f-diiid.toml under two
+# devices and keeps each run's transcript, which is what the case asserts on.
+# Anchored, per the note below.
+/device-parity-scratch/
 visit_dump*/
 ParaView/
 

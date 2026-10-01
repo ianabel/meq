@@ -1436,15 +1436,16 @@ namespace meq
 		// must match the one being solved on -- this is the EXACT restart of
 		// docs/running.rst, not the interpolating one.
 		//
-		// THE INTERPOLATING ONE IS NOT "NOT WRITTEN", WHICH IS WHAT THIS SAID,
-		// AND IT IS NO LONGER UNWIRED EITHER. meq::FieldTransfer in
-		// WarmStart.hpp is built on mfem::FindPointsGSLIB, the install has
-		// MFEM_USE_GSLIB = YES, and WarmStartConvergence is a registered ctest.
-		// Since 2026-09-02 apps/meq.cpp uses it: a mesh-count mismatch
-		// INTERPOLATES rather than being refused, so restarting from a run at
-		// another resolution -- the ordinary way to use a stored answer -- works.
-		// The exact restart is still taken when the meshes match, since it is
-		// every coefficient rather than an interpolation.
+		// THE INTERPOLATING RESTART IS THE OTHER ROUTE AND IT IS WIRED.
+		// meq::FieldTransfer in WarmStart.hpp IS meq::PointLocator -- MEQ's
+		// own, and not mfem::FindPointsGSLIB, which is why MFEM_USE_GSLIB is
+		// optional and why a single-precision build can have a warm start at
+		// all -- and WarmStartConvergence is a registered ctest. apps/meq.cpp
+		// reaches it: a mesh-count mismatch INTERPOLATES rather than being
+		// refused, so restarting from a run at another resolution -- the
+		// ordinary way to use a stored answer -- works. The exact restart is
+		// still taken when the meshes match, since it is every coefficient
+		// rather than an interpolation.
 		std::string file;
 		std::string meshFile;
 

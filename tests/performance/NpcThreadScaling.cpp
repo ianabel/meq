@@ -541,11 +541,11 @@ int main( int argc, char **argv )
 	 * so this is where "the trace solve alone is worse than nothing" would
 	 * become a number rather than a prediction.
 	 *
-	 * IT DOES NOT GET THAT FAR, AND WHAT IT FINDS INSTEAD IS WORTH MORE THAN THE
-	 * TIMING WOULD HAVE BEEN. A whole NPC solve with an mfem::Device configured
-	 * for CUDA does not compute the right answer, and cuDSS is a BYSTANDER
-	 * rather than the cause -- measured on all three trace solvers at
-	 * --device cuda, k=2, n=32:
+	 * WHAT THIS HARNESS FOUND INSTEAD OF A TIMING WAS WORTH MORE THAN THE TIMING,
+	 * AND IT IS THE REASON THE FLAG IS STILL HERE. The symptoms below are the
+	 * record of a whole NPC solve under --device cuda mis-solving, and cuDSS is a
+	 * BYSTANDER rather than the cause -- the same numbers on all three trace
+	 * solvers at k=2, n=32, which is what says one common fault and not three:
 	 *
 	 *   OMP_NUM_THREADS=8   aborts, and from several threads at once, in
 	 *                       MemoryManager::CheckHostMemoryType_ reached through
@@ -561,40 +561,52 @@ int main( int argc, char **argv )
 	 *                       UMFPack, PARDISO and cuDSS, which is what says there
 	 *                       is one common fault rather than three.
 	 *
-	 * THE 0/0 IS REPAIRED AND THE ABORT IS NOT, AND THEY WERE NEVER ONE
-	 * FAULT. M-79 found a device-memory alias chain at four sites, two of them
-	 * MEQ's own, and with those fixed the OMP_NUM_THREADS=1 symptom above is
-	 * gone: the same configuration now runs a real Newton to a residual floor
-	 * of 2.14e-15 against the host's 7.03e-17, rather than reporting 0/0 and
-	 * an identically zero potential.
+	 * THE 0/0 AND THE ABORT WERE NEVER ONE FAULT, AND THE 0/0 IS REPAIRED.
+	 * M-79 found a device-memory alias chain at four sites, two of them MEQ's
+	 * own, and with those fixed the OMP_NUM_THREADS=1 symptom above is gone: the
+	 * same configuration runs a real Newton to a residual floor of 2.14e-15
+	 * against the host's 7.03e-17, rather than reporting 0/0 and an identically
+	 * zero potential.
 	 *
-	 * WHAT REMAINS, RE-MEASURED RATHER THAN REMEMBERED, IS TWO THINGS AND
-	 * NEITHER IS UNIVERSAL. At OMP_NUM_THREADS=8 a device still aborts on the
-	 * PLAIN path -- examples/mhd-rectangle.toml, the message above, from
-	 * several threads at once -- while the BORDERED path survives it and
-	 * reaches the host's answer, 12 iterations and psi_ax 9.484400e-02 on
-	 * examples/limited-tokamak.toml. And at one thread the device degrades
-	 * Newton's RATE by a case-dependent amount: 5 steps to 9 on the plain
-	 * case, none at all on that bordered one. MEASUREMENTS.md M-129 is the
-	 * table.
+	 * EVERY ROW OF M-129's TABLE HAS SINCE BEEN WALKED, AND NOT ONE OF THEM WAS
+	 * THE DEVICE ARITHMETIC. examples/machine-f-diiid failed its bordered Newton
+	 * outright and finished through the driver's ladder; that was two unsynced
+	 * reads of MEQ's own -- prepare()'s alias seeding and GetEssentialTrueDofs()
+	 * -- and with them fixed the case solves on a device in 2 steps to the
+	 * host's every digit (M-130). The plain path's rate degradation, 5 Newton
+	 * steps becoming 9 on examples/mhd-rectangle.toml, was mfem::DarcyNPCOperator
+	 * writing a block vector's blocks without carrying them up, and upstream's
+	 * ce744b84de closes it: the case takes 5 under --device debug against 5
+	 * on the host, agreeing on every printed line but the final residual
+	 * (M-207, M-223). tests/convergence/DeviceParity is the standing regression
+	 * on both, and it is green. *A degradation nobody has walked is a suspect
+	 * rather than a datum*, and both of these turned out to be unsynced reads on
+	 * one side or the other rather than anything about a device.
 	 *
-	 * ONE ROW OF THAT TABLE HAS SINCE BEEN WALKED AND WAS NOT THE DEVICE.
-	 * examples/machine-f-diiid failed its bordered Newton outright and
-	 * finished through the driver's ladder; that was two unsynced reads of
-	 * MEQ's own -- prepare()'s alias seeding and GetEssentialTrueDofs() -- and
-	 * with them fixed the case solves on a device in 2 steps to the host's
-	 * every digit. MEASUREMENTS.md M-130. Read the remaining plain-path
-	 * degradation as a suspect rather than a datum; nobody has walked it.
+	 * WHAT REMAINS IS A PAIRING RATHER THAN A PATH. AssemblyMode::Threaded
+	 * under a configured Device above one thread aborts inside MFEM, because the
+	 * memory manager registers lazily into bare unordered_maps with no mutex
+	 * anywhere (M-188); apps/meq refuses that pair by name, and THIS harness
+	 * sets the mode itself, so it can still reach the abort. Run the device
+	 * columns at OMP_NUM_THREADS=1, or with serial assembly.
 	 *
-	 * So the refusal apps/meq.cpp carries rests on the trade argument, which
-	 * is unchanged: the integrators are 46-53% of an NPC step and have no
-	 * kernels. "The solve does not survive a Device at all" was the second
-	 * reason it used to rest on and it is too strong -- the bordered path,
-	 * which is what MEQ runs, survives one.
+	 * AND THE REFUSAL apps/meq.cpp CARRIES IS NARROW: the gate is `cuDSS WITHOUT
+	 * a device`, and --device cuda honours the key. The trade argument is what
+	 * survives, and it is about the NO-DEVICE case only -- configuring a Device
+	 * to reach cuDSS and nothing else buys a fifth of a step (M-126) and pays a
+	 * bus crossing on the rest. With a Device the integrators are NOT on the
+	 * host: MEQ's own element integrand is a device kernel (M-197), and the
+	 * batched local solve, the whole NPC traversal and the trace assembly are
+	 * reached through LocalFactorMode and TraceAssemblyMode (M-209, M-212,
+	 * M-223).
 	 *
-	 * Re-run this the day the integrators get device kernels. The flag and the
-	 * cuDSS column are here so that it costs one command rather than an
-	 * afternoon.
+	 * So the number this binary was waiting for exists, and it is not this
+	 * binary's: M-223 is the whole-solve device timing on the production
+	 * bordered case, taken through apps/meq --profile, where the solve leg is at
+	 * PARITY with the host-threaded default and what a device run loses is the
+	 * output stage. What is still worth running here is the ISOLATED question --
+	 * MultNL() under a device, which no whole-run wall clock separates -- and
+	 * the flag and the cuDSS column are here so that it costs one command.
 	 */
 	std::string device = "cpu";
 

@@ -195,24 +195,35 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		/*
 		 * A RED HERE MUST SAY WHAT FIXES IT. `CLAUDE.md`'s testing stance:
 		 * *"a failing test must say what fixes it, because a red suite nobody
-		 * can action is one people learn to ignore"* -- and this one is
-		 * currently red for a defect MEQ cannot fix, which makes the message
-		 * the whole of its value.
+		 * can action is one people learn to ignore"* -- and the message below
+		 * is written for a reader who has just been handed a red they did not
+		 * cause, because the defect this case has caught twice was upstream's
+		 * both times.
+		 *
+		 * THE CASE IS GREEN. M-214's ReconstructTotalFlux() defect is fixed at
+		 * upstream's `d720f02d62` and M-207's `mhd-rectangle` at `ce744b84de`,
+		 * so both arms exit 0 and the whole binary passes. The named diagnosis
+		 * stays in the message anyway: it is the cheapest thing to check first
+		 * if the exit status ever moves again, and LocalFactorMode is still the
+		 * one key that separates a device defect in the SOLVE from one in the
+		 * post-processing -- `"serial"` there leaves the answer untouched and
+		 * moves only which route reads the element blocks.
 		 */
 		BOOST_TEST( device.status == 0,
 		            std::string( which.stem ) + " exits "
 		                + std::to_string( device.status )
-		                + " under --device debug and 0 on the host. If this is "
-		                  "machine-f-diiid: KNOWN, and it is upstream's. "
-		                  "DarcyHybridization::ReconstructTotalFlux() reads the "
-		                  "element-local blocks on the host after "
-		                  "LocalFactorMode::Batched left them on the device; "
-		                  "setting LocalFactorMode = \"serial\" in the file "
-		                  "makes the same run exit 0 with the host's answer to "
-		                  "every digit. Reported as "
-		                  "HDG-RECONSTRUCT-LOCAL-BLOCKS-FROM-MEQ.md; "
-		                  "MEASUREMENTS.md M-214. Anything else is new -- walk "
-		                  "it with MEQ_STAGE_CHECKSUM=1" );
+		                + " under --device debug and 0 on the host. CHECK "
+		                  "LocalFactorMode FIRST: a fault of exactly this shape "
+		                  "was DarcyHybridization::ReconstructTotalFlux() "
+		                  "reading the element-local blocks on the host after "
+		                  "LocalFactorMode::Batched left them on the device, and "
+		                  "setting LocalFactorMode = \"serial\" in the file made "
+		                  "the same run exit 0 with the host's answer to every "
+		                  "digit -- which is what separates a device fault in "
+		                  "the SOLVE from one in the post-processing. Fixed "
+		                  "upstream at d720f02d62; MEASUREMENTS.md M-214. If "
+		                  "that key does not move it, this is new -- walk it "
+		                  "with MEQ_STAGE_CHECKSUM=1" );
 		/*
 		 * THE NEWTON COUNT IS THE ONE FIELD EVERY CASE PRINTS, and on a
 		 * fixed-boundary case it is the ONLY one: `psi_ax` is a bordered

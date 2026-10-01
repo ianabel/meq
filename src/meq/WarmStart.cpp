@@ -15,13 +15,12 @@ namespace meq
 		if ( sourceMesh.Dimension() != 2 )
 			throw std::invalid_argument( "meq::FieldTransfer: the source mesh must be two dimensional ( R, z )" );
 
-		// FindPointsGSLIB::Setup() requires the mesh to carry an explicit nodal
-		// grid function -- "Mesh nodes are required" -- and a mesh from
-		// Mesh::MakeCartesian2D or read from a .mesh file has none until it is
-		// asked for one. EnsureNodes() builds it at the mesh's own order, which
-		// for MEQ's straight-sided triangles is degree 1 and exact. This is why
-		// the constructor takes a non-const Mesh &: setting up the search
-		// modifies the mesh, and pretending otherwise would need a copy of it.
+		// A mesh from Mesh::MakeCartesian2D or read from a .mesh file carries no
+		// explicit nodal grid function until it is asked for one. EnsureNodes()
+		// builds it at the mesh's own order, which for MEQ's straight-sided
+		// triangles is degree 1 and exact. This is why the constructor takes a
+		// non-const Mesh &: setting up the search modifies the mesh, and
+		// pretending otherwise would need a copy of it.
 		/*
 		 * EnsureNodes() IS KEPT THOUGH THE LOCATOR DOES NOT NEED IT, and the
 		 * reason is a measured trap rather than caution. gslib refused a mesh
@@ -171,9 +170,13 @@ namespace meq
 		 * element mass matrix, DenseMatrixInverse -- and it reads `values`,
 		 * `code` and `distance` through operator() and operator[], which are
 		 * RAW: they neither sync nor invalidate. With an mfem::Device
-		 * configured, FindPointsGSLIB::Interpolate can leave its output on the
-		 * device (fem/gslib.hpp carries InterpolateOnDevice), so those raw
-		 * reads take a STALE HOST COPY.
+		 * configured, meq::PointLocator runs its search as a kernel --
+		 * PointLocatorDevice.cpp is one of the five translation units nvcc owns
+		 * -- and leaves its output on the device, so those raw reads take a
+		 * STALE HOST COPY. The hazard belongs to the LOCATOR being device-aware
+		 * and not to any one implementation of it: gslib had it too, through
+		 * fem/gslib.hpp's InterpolateOnDevice, and replacing gslib did not
+		 * remove it.
 		 *
 		 * WHAT THAT COSTS IS NOT A CRASH, WHICH IS WHY IT IS WORTH THE COMMENT.
 		 * Under CUDA it is silent: the projection is built from whatever the

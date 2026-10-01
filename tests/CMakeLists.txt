@@ -605,7 +605,7 @@ else()
 	# clang-diagnostic-errors and a check that has run on nothing, reported as
 	# a failure -- which is the right report and the wrong test. CMakeLists.txt
 	# fills MEQ_CORE_SOURCES_DEVICE_LANGUAGE only when a device language was
-	# enabled, so on a host build these two files ARE checked. The convention
+	# enabled, so on a host build all five ARE checked. The convention
 	# still applies to them; what is missing is an instrument, and the cost is
 	# recorded here rather than hidden by an exclusion with no comment.
 	set(_naming_sources "")

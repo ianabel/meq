@@ -10985,9 +10985,10 @@ namespace
 				 * solution block to the host -- 698 KB on the shipped machine
 				 * case -- and the launches below then buy nothing while
 				 * costing a second traversal. Measured with the gathers still
-				 * running: transfers per step went from 3.0 to 17.7 and bytes
-				 * from 0.888 MB to 15.1 MB. *A device route added in front of
-				 * the host route it replaces is strictly worse than either.*
+				 * running, over the same whole run: transfers went from 3 to
+				 * 17.7 and bytes from 0.888 MB to 15.1 MB. *A device route
+				 * added in front of the host route it replaces is strictly
+				 * worse than either.*
 				 *
 				 * **AND BOTH ROW SETS MOVE TOGETHER OR NEITHER DOES.** They
 				 * have different supports and so need separate mirrors, but
@@ -11013,16 +11014,27 @@ namespace
 				 * deliberately brings every solved column to the HOST -- the
 				 * dense elimination below it is host arithmetic -- so taking
 				 * this route unconditionally pushes each column BACK, 698 KB
-				 * at a time. Measured on `machine-f-diiid`, per Newton step:
+				 * at a time. Measured on `machine-f-diiid` over the WHOLE RUN,
+				 * which is twelve Newton steps:
 				 *
-				 *   host gathers, as shipped              3.0 transfers
+				 *   host gathers, as shipped                3 transfers
 				 *   device dots in FRONT of the gathers  17.7 transfers
 				 *   device dots INSTEAD of the gathers   33.1 transfers
 				 *
-				 * -- 0.888 MB against 15.1 MB against 55.1 MB. The route is
+				 * -- 0.888 MB against 15.1 MB against 55.1 MB, so the route
+				 * costs **11x in transfers and 62x in bytes**. The route is
 				 * not wrong; the operand is in the wrong place, and no amount
 				 * of kernel makes an h2d of the state cheaper than a gather
 				 * from it. [M-208](../MEASUREMENTS.md).
+				 *
+				 * **THE UNITS ARE WHOLE-RUN AND NOT PER-STEP, WHICH IS WORTH
+				 * SAYING BECAUSE THE BASELINE HAS BEEN READ AS A RATE.** The
+				 * shipped row is 3 transfers and 0.888 MB for the run --
+				 * **0.2 transfers a Newton step** against 893.2 host reads a
+				 * step, which is the whole point of counting transfers rather
+				 * than reads. The ratios above are unaffected, both sides
+				 * being counted the same way.
+				 * [M-223](../MEASUREMENTS.md).
 				 *
 				 * So the gate is `DeviceIsValid()` on the columns themselves.
 				 * Today that is false and the host path runs, bit for bit as

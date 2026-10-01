@@ -246,11 +246,20 @@ int main( int argc, char **argv )
 	 * reads its matrix through SparseMatrix::ReadI/ReadJ/ReadData and its vectors
 	 * through Read()/Write(), which return DEVICE pointers only when a device
 	 * backend is configured -- so cuDSS cannot be measured without it. But
-	 * configuring one changes where the rest of meq allocates too, and meq's HDG
-	 * assembly has no device kernels, so the CPU columns taken under "cuda" would
-	 * be CPU columns paying a memory manager they do not use. Two runs, two
-	 * configurations, and the comparison between UMFPACK and cuDSS is made
-	 * WITHIN one of them rather than across both.
+	 * configuring one changes where the rest of meq allocates too, and THIS
+	 * HARNESS'S ASSEMBLY COLUMNS ARE HOST COLUMNS BY CONSTRUCTION: the sweep
+	 * below is Serial against Threaded, and the route that puts element and face
+	 * work on a device is the BATCHED one -- AssemblyMode::Batched,
+	 * LocalFactorMode and TraceAssemblyMode, which meq reaches and this file
+	 * never asks for. Taken under "cuda" they would be host columns paying a
+	 * memory manager they do not use. Two runs, two configurations, and the
+	 * comparison between UMFPACK and cuDSS is made WITHIN one of them rather
+	 * than across both.
+	 *
+	 * Which is also why a whole-solve device number does not come from here.
+	 * `apps/meq --profile` reports the routes the library actually took and
+	 * MEASUREMENTS.md M-223 is the timing; what this binary measures is the
+	 * trace solve in isolation, on the host assembly it has always measured.
 	 */
 	std::unique_ptr<mfem::Device> deviceHandle;
 	if ( device != "cpu" )

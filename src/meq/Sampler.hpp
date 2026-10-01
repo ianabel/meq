@@ -18,11 +18,12 @@
  * element centres. A 129x129 grid against a 20k-element mesh is 3.3e8 element
  * tests for a job that should be instant.
  *
- * GSLIB IS NOT THE ANSWER HERE, AND THIS COMMENT USED TO SAY IT WAS
- * UNAVAILABLE, WHICH IS FALSE -- the install has MFEM_USE_GSLIB = YES and
- * meq::FieldTransfer already uses mfem::FindPointsGSLIB. It is not used in this
- * class because the inversion below is already linear and needs no search
- * structure at all, not because it could not be.
+ * A SEARCH STRUCTURE IS NOT THE ANSWER HERE, AND IT IS WORTH SAYING WHY RATHER
+ * THAN LEAVING THE ABSENCE TO LOOK LIKE ONE. MEQ has a point locator of its own
+ * -- meq::PointLocator, which is what meq::FieldTransfer is -- and MFEM offers
+ * FindPointsGSLIB wherever MFEM_USE_GSLIB is set. Neither is reached from this
+ * class, because the inversion below is already linear and needs no search
+ * structure at all; not because one could not be had.
  *
  * SO THE LOOP IS INVERTED. Rather than asking, for each point, which element
  * holds it, this asks for each element which points it might hold: the element's

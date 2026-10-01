@@ -305,7 +305,9 @@ and a threaded timing on one machine is a measurement about that machine.
 .. note::
 
    **Local GPU results here are correctness evidence, not performance
-   evidence.** MEQ is built for double precision, and consumer graphics cards
-   run double precision at a small fraction of their single-precision rate where
-   datacentre parts run it at about half — so a device timing on a workstation
-   can invert the conclusion a production part would give.
+   evidence.** The measurements in this manual are taken from a double-precision
+   build, and consumer graphics cards run double precision at a small fraction
+   of their single-precision rate where datacentre parts run it at about half —
+   so a device timing on a workstation can invert the conclusion a production
+   part would give. A single-precision build exists and is the answer on a part
+   with that penalty; :ref:`install-precision` says how the two differ.

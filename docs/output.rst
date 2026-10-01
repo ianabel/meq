@@ -192,6 +192,35 @@ iteration count and final residual, the boundary treatment, and for adaptive
 runs the cycle count, the final estimator and the marking strategy. This is what
 makes a ``.nc`` file self-describing enough to plot six months later.
 
+``meq_version`` names the commit the binary was built from, and it is read at
+**build** time rather than at configure time, so a long-lived build directory
+cannot stamp a fresh binary with a stale commit. A ``-dirty`` suffix means the
+tracked files had uncommitted edits.
+
+Two more say which *build* wrote the file, which is not the same question as
+which commit:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Attribute
+     - What it is
+   * - ``meq_precision``
+     - ``"double"`` or ``"single"`` — what ``mfem::real_t`` is in the MFEM this
+       binary linked. Not a MEQ option and not a key in the configuration file:
+       ``MFEM_PRECISION`` is a cache variable of MFEM's own build, and MEQ
+       inherits it through ``MFEM_DIR``. It belongs in the file because the two
+       builds answer to floors three orders apart, and an equilibrium's
+       accuracy is qualified per problem and per format
+   * - ``meq_device_backends``
+     - the device backends this build *could* configure — ``"cuda"``,
+       ``"hip"``, ``"cuda, hip"`` or ``"none"``. Available is not configured:
+       whether a particular run used one is ``--device``, which is process-wide
+       runtime state
+
+Both are on ``<stem>_surfaces.nc`` as well.
+
 **The two-dimensional variables are indexed** ``(Z, R)``, **with** ``R``
 **varying fastest.** That is C row-major order, and it is the layout a transport
 code coupling to MEQ along :math:`(t, x)` already expects.

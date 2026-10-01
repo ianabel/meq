@@ -35,7 +35,7 @@ becomes a pointer. What neither becomes is an entry that still reads like work.
 | `INVERSION-PLAN.md` | item 10's machinery — **CLOSED 2026-09-19**, IN-A to IN-P, 9 of 9, with the ten acceptance tests verified passing together. **It stays rather than being converted** for a reason the other two did not have: the user-facing half already went to `docs/flux_surfaces.rst`, `docs/surface_geometry.rst` and `docs/normalised_flux.rst`, and what is left is the derivation, which `src/meq`, `tests/` and `apps/` cite by section and stage number at **125 sites across 32 files**. It is a design record, not a plan. **The one gap closing it found is now half fixed**: the driver set `options.toroidalField` nowhere, so `q` reached no output at all; the `q`-driven route now reports it to 4.5e-07 of target (M-131), and giving a prescribed-field run a `q` is a schema decision left open |
 | `INTERPOLATORY-HDG-PLAN.md` | item 12.1, and it **supersedes §12.1 below**. MFEM has already built the method and MEQ links it; this is a wiring job plus two small asks. **Read its §0 before its stages** — the falsifying arithmetic deflates the headline to 1.6–2.0× fewer `F` evaluations against an Amdahl ceiling of 23–28% |
 | `THREADING-PLAN.md` | **CLOSED.** Items A, B, C and D built (`0108f49`), **E and F declined standing** — if either grows it is a new plan, and that file's *When E or F would be worth revisiting* says what "grows" has to mean, since a share inflates whenever anything else is threaded — G moved to `BORDERED-GLOBALISATION-PLAN.md` §12, §0's two sub-slices read and the payoff measured at **1.16×** → **[M-137](MEASUREMENTS.md#m-137)**. The budget it was written against is superseded by **[M-138](MEASUREMENTS.md#m-138)**: about 59% of the run now threads, and the largest single-threaded leg is MFEM's `Reconstruct()` at 18.5% |
-| `DEVICE-PLAN.md` | an audit of what a device-resident solve would need. **Not a commitment**, and §3.3's refusals stand. §1.2 and §4's stages 1 and 4 have since been walked → M-130 |
+| `DEVICE-PLAN.md` | an audit of what a device-resident solve would need. **Not a commitment**, and §3.3's refusals stand — the cuDSS one now scoped to a run that configured no device rather than to every run. **§3.0's items 1 to 5 are done, and so is 8**: MEQ's own element integrand, the batched local solve, the whole NPC traversal, the constraint reductions and the bordered border all reach the device, `DeviceParity` is green, and the single-precision build is at parity with the double → **[M-223](MEASUREMENTS.md#m-223)**, **[M-222](MEASUREMENTS.md#m-222)**. **What is left is item 7 and then item 6.** Item 7 is re-sized *upwards*: with the solve leg at parity, the serial `Reconstruct()` a Device forces is the whole of the 1.07–1.13× a device run loses. Item 6 is cuDSS as the device default, and it is last because it is the step that costs the bit-exactness instrument |
 | `BORDERED-GLOBALISATION-PLAN.md` | **the ladder is built and closes none of the six cold failures** — M-116, M-117, M-119. Read it for the design and the four families ruled out; do not start its §8 |
 | `MIRROR-PLAN.md` | **NEW, and stage MR-0 is a falsifying experiment — run it before anything else.** A centrifugal mirror, free boundary. The SOURCE half is closed: [M-167](MEASUREMENTS.md#m-167) puts `meq::RotatingSource` and geq's independent implementation of RoPP (136) at agreement with no error floor on either side. What is open is posing a mirror in a solver whose every free-boundary assumption was written for a tokamak — no magnetic axis, an annular support, and an exterior whose admissibility [M-168](MEASUREMENTS.md#m-168) says must be checked rather than assumed |
 | `BORDER-SCALING-PLAN.md` | **BS-0 is run** — M-117. H2 excluded, H1 and H3 split the six, and BS-5 is the stage its own gate selects |
@@ -410,16 +410,19 @@ Newton step — **toroidal flow is finished**, FL-0 to FL-8, and **solution
 inversion is finished**, every stage of it including IN-6's output and IN-5's
 open surfaces.
 
-**The driver refuses SIX things, in three kinds.** About the **file**:
+**The driver refuses SEVEN things, in three kinds.** About the **file**:
 `[boundary] Type = "exact"`. About the **build**, checked at startup before a
 mesh exists: an `AssemblyMode` the file asked for that the build cannot honour,
-a `TraceSolver` naming a package this build lacks, and `TraceSolver = "cudss"`
-**even where the build has it** — withheld rather than unimplemented, until
-MFEM's integrator offload lands. About the **answer**, and these are the first
-two that cost a solve, because `ψ_bnd` is an unknown of the bordered Newton:
-**a `ψ_ax` that is not the flux at a magnetic axis**, and **a source that does
-not vanish on the symmetry axis**, the second ordered first because a bad `ψ_ax`
-is its consequence.
+a `TraceSolver` naming a package this build lacks, `TraceSolver = "cudss"`
+**on a run that configured no device** — `--device cuda` honours it, the
+configuration file alone cannot reach it — and `AssemblyMode = "threaded"`
+**paired with a device above one thread**, which is MFEM's unguarded memory
+bookkeeping and would otherwise abort three frames inside the library naming
+neither the key nor the device (M-188). About the **answer**, and these
+are the first two that cost a solve, because `ψ_bnd` is an unknown of the
+bordered Newton: **a `ψ_ax` that is not the flux at a magnetic axis**, and
+**a source that does not vanish on the symmetry axis**, the second ordered
+first because a bad `ψ_ax` is its consequence.
 
 ## The nonlinear question is settled
 
@@ -560,12 +563,14 @@ detector — the first Newton step making the residual worse — has since been
 measured and is *anti*-correlated. **Continuation must not go in** either, for
 the stronger reason that it has no black-box form at all; see item 7.
 
-**The driver refuses SIX things**, and they fall into three kinds. About the
+**The driver refuses SEVEN things**, and they fall into three kinds. About the
 **file**: `[boundary] Type = "exact"`, which needs a closed form `meq::Source`
 does not carry. About the **build**: an `AssemblyMode` or a `TraceSolver` the
 linked library cannot honour, checked at startup before a mesh exists — plus
-`TraceSolver = "cudss"` even where the build has it, withheld until MFEM's
-integrator offload lands. And about the **answer**, which are the first two that
+`TraceSolver = "cudss"` on a run that configured no device, which
+`--device cuda` lifts, and `AssemblyMode = "threaded"` paired with a device
+above one thread, which is a PAIRING rather than either key on its own
+(M-188). And about the **answer**, which are the first two that
 cost a solve, because `ψ_bnd` is an unknown of the bordered Newton: **a `ψ_ax`
 that is not the flux at a magnetic axis**, and **a source that does not vanish on
 the symmetry axis**. The last is ordered first, a bad `ψ_ax` being its
@@ -640,11 +645,12 @@ at **30.6% of its step and 1.00× across eight threads** →
 **[M-126](MEASUREMENTS.md#m-126)**. *A share measured on a problem with one
 right-hand side is not a share.*
 
-**IT IS NOT IN THE LIBRARY MEQ LINKS.** `GetNPCTraversalTime` is in
-`../mfem-hdg-dev/fem/darcy/darcyhybridization.hpp` and **not** in
-`../mfem/install/include/`, so this buys MEQ nothing until `meq-integration` is
-re-created and reinstalled. Per the standing rule, the only test of "landed" is
-the code MEQ builds against.
+**IT IS IN THE LIBRARY MEQ LINKS.** `GetNPCTraversalTime` is in the *installed*
+`fem/darcy/darcyhybridization.hpp`, which is the only test of "landed" this
+project applies — the code MEQ builds against, not a document. The leg is
+threaded and measured at **2.61× on it and 1.25× on the whole run**
+→ **[M-135](MEASUREMENTS.md#m-135)**, and it runs as a kernel under a device
+→ **[M-209](MEASUREMENTS.md#m-209)**, **[M-212](MEASUREMENTS.md#m-212)**.
 
 **A second correction from the same file, and it is a live trap.** `InvertA` and
 `InvertD` are **not** OpenMP loops; what is threaded beside them is the
@@ -654,10 +660,12 @@ local factorisation takes `ComputeH` from 0.418 s to **1.075 s and it stops
 scaling**. The default is `Serial`, so nothing is hit by default — and M-101
 already measured the trade flat from MEQ's side, for a different reason.
 
-**And §1 of it has LANDED and MEQ is not using it**: `LocalFactorMode`,
+**And §1 of it has LANDED and MEQ takes it**: `LocalFactorMode`,
 `SetLocalFactorMode` and `CanBatchLocalFactor` are in the *installed*
-`darcyhybridization.hpp`, and `LocalFactorMode` appears nowhere in `src/`,
-`tests/` or `apps/`. See item 6 for what it does and does not buy.
+`darcyhybridization.hpp`, `[solver] LocalFactorMode` is a TOML key, and the
+driver turns it on **under a Device** — where `CanBatchLocalSolve()` opens on it,
+so with the key off the element-local dense algebra stays on the host. The host
+default stays `Serial`. See item 6 for what it does and does not buy.
 
 **AND IT IS UNBLOCKED, MORE CLEANLY THAN WHEN IT WAS FILED.** MEQ's default is
 now `NonlinearOrdering::NPC` — `mfem::DarcyNPCOperator` over the full
@@ -1206,41 +1214,48 @@ quadratic; this buys it by giving the convergence rate up. Reach for it if
 
 ## Deliberately not yet
 
-* **GPU and cuDSS.** Correctness-testable here; this card cannot say whether it
-  is worth it. Consumer FP64 is 1/32 of FP32 where datacentre parts are 1/2, so a
-  local timing can invert the production conclusion.
-
-  **AND THERE IS A SECOND REASON, WHICH IS THE BINDING ONE AND IS NOT ABOUT THIS
-  MACHINE.** A device trace solve is only worth having if the data STAYS on the
-  device. `../mfem-hdg-dev/doc/HDG-DEVICE-OFFLOAD.md` — under construction —
-  measures the shares of an NPC step and gates the whole device path on the
-  **integrators** (46–53%), because the trace solve (26–31%) and the local dense
-  algebra (7–10%) can be moved almost for free and moving only those is *"worse
-  than doing nothing … plausibly slower than staying on the host throughout"*.
-  MEQ's integrators and scatter have no device kernels.
-
-  So `[solver] TraceSolver = "cudss"` is **refused by the driver** — withheld
-  rather than unimplemented — and the library keeps cuDSS only so that
-  correctness on the device path is checkable. **The key opens when MFEM's group
-  2 lands**, and that is a request on `../mfem-hdg-dev` rather than MEQ work.
-  Note the entry below: partial assembly for the HDG integrators is exactly what
-  group 2 is, so these two items are one item seen from two sides.
+* **A performance verdict on the GPU, from this card.** The partial device path
+  is built and it is green — `DeviceParity` passes, and with the batched keys
+  held equal `--device cuda` reproduces `--device cpu` on every printed line but
+  the final residual, at 5.3e-17. What this machine cannot supply is the
+  *verdict*: consumer FP64 runs at 1/32 to 1/64 of FP32 where a datacentre part
+  runs it at about 1/2, so a local timing can invert the production conclusion.
+  Take the numbers elsewhere before concluding anything about whether the device
+  is worth it. **[M-223](MEASUREMENTS.md#m-223) is where they stand here** — the
+  solve leg at parity with the host-threaded default, and the whole 1.07–1.13×
+  wall loss in the **output** stage, which is `Reconstruct()` losing its host
+  threading under a Device rather than anything in the solve.
+* **`TraceSolver = "cudss"` from a configuration file alone.** The gate is the
+  device, not the key: a run that configured none is refused and `--device cuda`
+  honours it. **This waits on nothing of upstream's** — it rests on the trade,
+  which is unchanged. M-126 puts the trace solve at 20.1% of a threaded step, so
+  configuring a device to reach cuDSS and nothing else buys a share of a fifth
+  while paying a bus crossing on the other four fifths; and without a device
+  cuDSS does not fall back but dies inside CUDA naming `cudaMemcpy` and not the
+  key. **And cuDSS 0.8.0 costs the instrument**, which is the reason to order it
+  last rather than merely to leave it off: it is nondeterministic run to run,
+  and its deterministic mode is single-right-hand-side only where MEQ's bordered
+  step solves `N + 4` columns at once — so a cuDSS run gives up the
+  digit-for-digit device-against-host agreement that root-caused M-79, M-130 and
+  M-187. `DEVICE-PLAN.md` §3.5 is the ordering, and it expects the default to
+  invert once the solve is fully resident.
 * **Partial assembly.** Not implemented for the HDG integrators at all, and its
   case is sum factorisation, which wants tensor-product elements where MEQ is
-  triangles. A discretisation decision, not a flag.
+  triangles. A discretisation decision, not a flag — and **not the blocker it
+  reads as**: the device route is MFEM's batched element and face kernels,
+  reached through `[solver] AssemblyMode`, `LocalFactorMode` and
+  `TraceAssemblyMode`, and MEQ is on it.
 * **A fully device-resident solve.** `DEVICE-PLAN.md` is the audit and it is
-  explicitly not a commitment. What has changed since the paragraph above is
-  that *"group 2 needs a partial-assembly rewrite and is not built"* is now
-  only half true: there is still no partial-assembly route and MEQ is
-  simplices, so **that** economic case does not apply here at all — but what
-  upstream built instead is batched element and face kernels behind `CanBatch*`
-  predicates, MEQ passes most of them, and upstream's own chain measurement
-  reads **1.33× at 4096 elements** where its headline used to say *worse than
-  doing nothing*. **The refusal of `TraceSolver = "cudss"` from a file stands
-  regardless**, on the trade argument alone and on MEQ's own leg profile: M-126
-  puts the trace solve at 20.1% of a threaded step, so group-4-alone buys a
-  share of a fifth while paying a round trip on the other four fifths. Three
-  MEQ-specific facts keep upstream's crossover from being MEQ's — their fixture
+  explicitly not a commitment. Where it stands, **asked of the library with
+  `--profile` rather than inferred** (M-223): MEQ's own device integrand, the
+  batched nonlinear residual and gradient, the batched local solve, the whole
+  NPC traversal, the condensation cache and the batched trace assembly are all
+  on under `--device cuda`. Face assembly is serial **deliberately** — its
+  kernels accumulate `D` through `AtomicAdd`, which is what would destroy the
+  bit-reproducibility the item above is protecting ([M-215](MEASUREMENTS.md#m-215)) —
+  and the bordered row dots stay on the host, gated on the column count. What is
+  left is the output stage and the border. Three MEQ-specific facts also keep
+  upstream's **1.33× at 4096 elements** from being MEQ's crossover: their fixture
   is quads and MEQ is triangles everywhere, five of MEQ's eight shipped meshes
   are *below* 4096 elements, and MEQ's Newton is bordered with the border being
   host arithmetic that would not go to a device.

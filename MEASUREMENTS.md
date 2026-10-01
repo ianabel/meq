@@ -11359,6 +11359,12 @@ LOSS ON TODAY'S DATA LAYOUT — BY 11× IN TRANSFERS AND 62× IN BYTES.**
 [M-190](#m-190) and the plan has carried item 4 as *"DONE, not wired"*. Wired,
 on `machine-f-diiid` under `--device cuda`, per Newton step:
 
+**THE COLUMN HEADING BELOW SAYS "per Newton step" AND THE FIGURES ARE THE WHOLE
+RUN'S** — twelve steps — which [M-223](#m-223) found by reading the instrument
+beside them: the shipped row is **3 transfers and 0.888 MB for the run**, i.e.
+**0.2 a step**. The ratios are unaffected, all three rows being counted the same
+way. *A rate and a total printed side by side read as one row.*
+
 | the bordered fill's row contractions | transfers | bytes |
 |---|---|---|
 | host gathers, as shipped | **3.0** | **0.888 MB** |
@@ -12928,3 +12934,184 @@ statement about the FIT, and an order fitted through a last residual sitting on
 the floor is unbounded above: **6.15** on `XPointBorder`'s bootstrap. So the
 ceiling is skipped and the floor is not, which leaves the assertion that has
 teeth.
+
+### M-223
+
+**THE PARTIAL DEVICE PATH IS NO LONGER A LOSS ON THE SOLVE, AND WHAT IS LEFT OF
+[M-173](#m-173)'s 2.14× IS ONE HOST LEG.** `examples/machine-f-diiid.toml`,
+4848 triangles, `k = 2`, `build/meq` against `../mfem/install` at `dfb5525a35`
+— double, CUDA, cuDSS, `sm_75` — `MKL_NUM_THREADS=1`, three interleaved rounds
+on a quiet machine. `psi_ax = 3.759851e-01` in every run, so this is cost and
+not answers.
+
+| | wall s | solve leg | output leg |
+|---|---|---|---|
+| host default, `OMP = 8`, `AssemblyMode::Threaded` | 4.866 / 5.323 / 5.383 | 4.455 / 4.854 / 4.935 | 0.391 / 0.508 / 0.366 |
+| `--device cuda`, `OMP = 1` | 5.511 / 5.712 / 5.825 | 4.529 / 4.748 / 4.751 | 0.962 / 0.945 / 1.053 |
+
+**THE SOLVE LEG IS AT PARITY AND THE WHOLE 1.07–1.13× WALL LOSS IS THE OUTPUT
+STAGE.** M-173 measured 2.14× on the solve; here the two solve columns overlap.
+What changed is not one thing: the driver's device default became
+`AssemblyMode::Serial` ([M-215](#m-215)) where M-173's device arm ran
+`Batched`, whose host cost [M-185](#m-185) puts at 1.74× on its own; the NPC
+traversal moved to kernels ([M-209](#m-209), [M-212](#m-212)); and MEQ's own
+integrand reached the device ([M-197](#m-197)).
+
+**AND THE REMAINING LOSS IS NOT A KERNEL — IT IS `Reconstruct()` LOSING ITS
+HOST THREADING UNDER A DEVICE, AND A THREAD COUNT SAYS SO.** The device output
+leg reads **0.902 and 0.966 s at `OMP_NUM_THREADS=8`** against 0.872–1.053 at
+1 — flat — while the host leg reads **0.886 and 0.894 at 1** against 0.366–0.508
+at 8. Thread-count independent under a device, thread-count dependent without
+one, which is `meq::hostLoopsAreSafe()` and `DarcyHybridization::ThreadHostLoops()`
+doing exactly what they are for. That is DEVICE-PLAN.md §3.3's **item 7**,
+reading about **10% of the wall on this case** where [M-216](#m-216) sized it
+at under 2% of a device run. *A transition cost is a property of which legs have
+kernels yet, so it grows as a share every time another leg stops being the
+problem* — the same shape as `Reconstruct()`'s own share growing while the leg
+sat still ([M-138](#m-138)).
+
+**THE ROUTES, ASKED OF THE LIBRARY RATHER THAN INFERRED**, `--profile` on the
+same case:
+
+| | `--device cpu` | `--device cuda` |
+|---|---|---|
+| batched nonlinear residual / gradient | yes / yes | yes / yes |
+| **MEQ's own device integrand** | NO | **yes** |
+| batched local solve (`CanBatchLocalSolve`) | NO | **yes** |
+| whole NPC traversal (`CanBatchNPCTraversal`) | NO | **yes** |
+| flux mass prefactored · condensation cache | yes · yes | yes · yes |
+| face assembly batched | no — *deliberate*, §3.5 | no — *deliberate* |
+| bordered row dots on device | NO | NO — gated on the columns |
+| crossings | 10,719 reads, **0** transfers | 10,719 reads, **3** transfers, 0.888 MB |
+| per Newton step | 893.2 reads, 0.0 transfers | 893.2 reads, **0.2** transfers |
+
+**IT REPRODUCES [M-212](#m-212) FIGURE FOR FIGURE**, which is the control: the
+timing moved and the crossing count did not, because nothing on this path
+changed what crosses the bus. **And it survives the library refresh**: with
+`../mfem/install` rebuilt clean from `meq-integration` at `f5fd727ea2` and MEQ
+rebuilt `--clean-first` against it, every predicate in that table reads the
+same, the crossings read 10,719 / 3 / 0.888 MB again, and `machine-f-diiid`
+gives `psi_ax = 3.759851e-01` and `-6.465e-12` in 2 Newton steps. The full
+double suite is **62 of 63**, the one red being the standing deliberate
+`PlasmaEdgeConvergence`.
+
+**AND `install-single` IS REFRESHED FROM THE SAME TIP AND HOLDS
+[M-222](#m-222)'s PARITY: 62 of 63 THERE TOO, THE SAME TEST RED.** That refresh
+is the one that had to happen rather than the one that was convenient: MEQ's
+`double` → `real_t` edits to `linalg/sundials.{hpp,cpp}` were sitting
+**uncommitted** in `mfem-src` and are superseded by upstream's `sundials-real-t`,
+so the single install could not have been rebuilt from a clean tree at all
+without it — MFEM does not compile in the `MFEM_PRECISION = single` +
+`MFEM_USE_SUNDIALS` pairing otherwise. MEQ's six sites were the ones that stop
+the compile; upstream found **73**. `machine-f-diiid` there reads
+`psi_ax = 3.759862e-01` against the double build's `3.759851e-01`, which is
+[M-184](#m-184)'s figure unmoved. *An install rebuilt from local edits is an
+install nobody else can reproduce, and the tell is that the edits are not in a
+commit.* **And the per-step transfer figure is 0.2, not
+3.0** — 3 is the whole-run total over 12 Newton steps. DEVICE-PLAN.md's opening
+and its §3.0 both quote it as a per-step number; that is a conflation of a total
+with a rate, and it is corrected there.
+
+**PARITY HOLDS, AND IT IS NOW GREEN IN THE SUITE.** `DeviceParity` passes at
+**444.9 s** and `cuDSSTraceSolver` at 0.86 s. With the batched keys held equal
+on both arms — `AssemblyMode = "serial"`, `LocalFactorMode = "batched"`,
+`TraceAssemblyMode = "batched"` — `--device cuda` reproduces `--device cpu` on
+**every printed line but the final residual**, `2.992567e-12` against
+`2.992620e-12`, 5.3e-17 absolute. Without the keys held equal the device arm
+additionally moves the constraint's last digit, `-6.465e-12` against
+`-6.466e-12`, which is `LocalFactorMode::Batched` and not the device.
+
+**AND `mhd-rectangle` IS REPAIRED.** 5 Newton steps under `--device debug`
+against 5 on the host, every printed line agreeing but the final residual at
+5.3e-19. [M-207](#m-207) left it red on `mfem::DarcyNPCOperator` carrying the
+`xLoc` idiom unsynced. Upstream's `ce744b84de` closes it — and **the defect was
+`b_tr`, not the `x_loc` MEQ named**: the report was right about the symptom, the
+idiom and the file, and wrong about the member. *A reproduction is not a
+diagnosis, and upstream's own two-arm rewrite of the same Newton is what
+separated them.*
+
+### M-224
+
+**A BINARY DID NOT KNOW WHICH TREE IT CAME FROM, AND NEITHER DID ANYTHING IT
+WROTE.** `build/meq`, linked at 13:41 from a working tree at `6a078e2`, reported
+`MEQ 0.1.0 (6d4b68a)` — five commits stale — and the `machine-f-diiid.nc` it
+wrote minutes later carried `:meq_version = "0.1.0 (6d4b68a)"`.
+
+**THE MECHANISM IS A CONFIGURE-TIME `execute_process()`.** `CMakeLists.txt`
+read `git rev-parse --short HEAD` while configuring the build directory and
+`configure_file`d it into `meq_version.hpp`, so the commit is frozen the day
+`cmake -B build` is first run and every binary that directory ever produces
+carries it. Nothing re-reads it, nothing warns, and the string is
+plausible — it is a real commit of this repository, merely not this one.
+
+**IT IS A PROVENANCE DEFECT RATHER THAN A COSMETIC ONE, AND THREE THINGS IN THIS
+TREE REST ON IT.** `CLAUDE.md`'s method for separating *this was already
+failing* from *I broke it* is to build `HEAD` in a `git worktree` and compare
+two binaries. The whole device programme is a comparison between two builds.
+And `docs/running.rst` tells a user that the answer to *which equilibrium did
+this plot come from* is a file that can be re-run.
+
+**AND THE FILE SAID NOTHING ABOUT THE BUILD AT ALL, WHICH IS THE LARGER HALF.**
+`meq --version` reported neither the precision nor the device backends, and
+neither did any output file — so an equilibrium written by the single-precision
+build and one written by the double build were **indistinguishable from their
+own attributes**, while [M-204](#m-204) measures the same quantity at
+`2.2 × eps` on one machine and `1,260 × eps` on another. *An accuracy qualified
+per problem and per format is unreadable from a file that records neither.*
+
+The repair is `cmake/GitCommit.cmake`, run as a build step rather than at
+configure time and writing through `copy_if_different` so the relink happens
+when the commit moves and not once per build, with a `-dirty` suffix from
+`git status --porcelain --untracked-files=no` — tracked files only, because this
+repository's root holds hundreds of untracked run products and a flag that is
+always set means nothing. `meq::realPrecision()` and `meq::deviceBackends()` are
+the other half, in `src/meq/BuildInfo.cpp` **and not in a header**: they are
+answers about MFEM's own preprocessor, and `CLAUDE.md` records
+`MachineFixedBoundary.cpp` testing `#ifdef MFEM_USE_SINGLE` in a translation
+unit that included no MFEM header, where the guard compiled, ran and silently
+took the other branch.
+
+### M-225
+
+**THE RE-ENTRANT OUTER LOOP SURVIVES A DEVICE-RESIDENT NPC TRAVERSAL, WHICH IS
+THE ONE THING `DeviceParity` CANNOT ASK.** Upstream's `21d7b2ce9f` leaves both
+traversal legs' outputs **on the device** and restores the caller's
+`UseDevice()` flag, and warns that a whole-vector operation followed by a block
+read is then the caller's to sync — *"three of our `[GPU]` cases went O(1) wrong
+on the first hardware run before this was found"*. `examples/q-driven.toml` is
+the only example in the tree that drives `solve()` from an outer Newton, so it
+is the only one that re-enters the solver's long-lived state dozens of times
+with a Device configured. `../mfem/install` at `f5fd727ea2`, `MKL = OMP = 1`:
+
+| | `--device cpu` | `--device cuda` |
+|---|---|---|
+| KINSOL iterations · map evaluations | 12 · 43 | **12 · 43** |
+| final norm | 1.94945e-06 | **1.94945e-06** |
+| outer Jacobian conditioning | 1.386e-02 | **1.386e-02** |
+| `psi_ax` | 3.457380e-01 | **3.457380e-01** |
+| recovered `g` on axis · at `Psi = 0.5` · on the boundary | 2.749996 · 2.474996 · 2.199997 | **identical** |
+| inner constraint | 2.220e-16 | 4.996e-16 |
+| wall | 23.501 s | 23.244 s |
+
+**Every printed line agrees but three, and all three are at `eps`**: the inner
+constraint, the last two Newton residuals of the final solve (`2.855343e-16`
+against `3.176010e-16`), and a flux-surface worst residual at `3.447e-13`
+against `3.448e-13`. The device arm additionally runs
+`LocalFactorMode::Batched`, which is the driver's device default and is where
+the last bits come from.
+
+**IT ANSWERS UPSTREAM'S THIRD ASK IN THE NEGATIVE, WHICH IS THE USEFUL
+DIRECTION.** They asked MEQ to re-run `q-driven` at `ce744b84de` before digging,
+because [M-206](#m-206)'s factor of two survived turning MEQ's caller-integrand
+route off — which runs *their* `DarcyNPCOperator`, the path their `b_tr` defect
+lived on — and *"0 KINSOL iterations, final norm 0"* means the outer loop saw
+something wrong. It does not pull this problem onto a different root: M-206's
+five KINSOL seams are what fixed it, and they hold against the new traversal.
+
+**AND THE `SyncToBlocks()` OBLIGATION IS MET RATHER THAN DODGED.** MEQ's own
+long-lived `BlockVector solution` carries three grid-function aliases made in
+the constructor, and `solve()` syncs the base and each alias before the first
+host read — the repair of [M-79](#m-79), made for a different reason two months
+before this hazard existed. *A contract honoured for one reason is honoured for
+the next one too, which is the argument for syncing at the funnel rather than at
+the symptom.*

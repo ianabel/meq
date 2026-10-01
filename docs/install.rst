@@ -104,25 +104,41 @@ The MFEM features MEQ reads out of the configuration, and what each buys:
 
    * - MFEM option
      - What MEQ does with it
+   * - ``MFEM_PRECISION``
+     - ``double`` or ``single``, and it decides ``mfem::real_t`` throughout the
+       library. **MEQ has no key for this and cannot have one**: it is a
+       property of the MFEM an install links, inherited through ``MFEM_DIR``,
+       so choosing it means choosing which MFEM to point at. Both build and
+       both pass the test suite. See :ref:`install-precision`.
    * - ``MFEM_USE_SUITESPARSE``
-     - UMFPACK, the default direct solver for the global trace system. Without
+     - UMFPACK, one of the direct solvers for the global trace system. Without
        any direct solver MEQ falls back to GMRES; see :doc:`linear_solvers`.
+       SuiteSparse ships no single-precision build, so a
+       ``MFEM_PRECISION = single`` install has no UMFPACK and MEQ's default
+       trace solver there is PARDISO.
    * - ``MFEM_USE_SUNDIALS``
      - KINSOL, which backs the Anderson–Picard and Picard-then-Newton
        globalisations. See :doc:`nonlinear`.
    * - ``MFEM_USE_GSLIB``
-     - ``FindPointsGSLIB``, which is how a warm start is interpolated from one
-       mesh onto another.
+     - ``FindPointsGSLIB``. Optional: MEQ interpolates a warm start from one
+       mesh onto another with its own point locator, which reproduces gslib to
+       every printed digit and has no floating-point abstraction to lose in a
+       single-precision build.
    * - ``MFEM_USE_EXCEPTIONS``
      - Makes an MFEM error a C++ exception rather than an abort. **This is what
        makes the driver's exit code 2 reachable**: without it a failed solve
        takes the process down with ``SIGABRT`` instead of reporting itself.
    * - ``MFEM_USE_MKL_PARDISO``
-     - An alternative trace solver, selectable at run time.
+     - A trace solver, selectable at run time, and the default wherever it is
+       present.
    * - ``MFEM_USE_CUDA``, ``MFEM_USE_CUDSS``
-     - A third trace solver, ``cuDSS``. A prerequisite rather than a speed-up:
-       ``fem/darcy/`` has no partial-assembly kernels and MEQ issues no device
-       kernels of its own.
+     - The device path. It buys three things: the ``cuDSS`` trace solver,
+       MFEM's batched element and face kernels — which are reached through
+       ``[solver] AssemblyMode``, ``LocalFactorMode`` and ``TraceAssemblyMode``
+       and are the device route — and MEQ's own device translation units, which
+       CMake hands to ``nvcc`` at the architecture it reads out of MFEM's
+       ``config.mk``. Without CUDA those compile to host stubs and everything
+       still builds and runs.
    * - ``MFEM_USE_OPENMP`` + ``MFEM_THREAD_SAFE``
      - Both together enable threaded element assembly, which MEQ exposes as an
        opt-in. Threaded assembly *aborts* rather than falling back if only one
@@ -130,6 +146,51 @@ The MFEM features MEQ reads out of the configuration, and what each buys:
    * - ``MFEM_USE_MPI``
      - MEQ is serial and does not use it. It is detected only so that a
        parallel MFEM fails intelligibly rather than at link time.
+
+.. _install-precision:
+
+Choosing the precision, which means choosing an MFEM
+----------------------------------------------------
+
+``MFEM_PRECISION`` decides ``mfem::real_t`` for the whole library, so it is
+settled when MFEM is configured and is not something a MEQ run can ask for.
+There is no ``Precision`` key in the configuration file, and there will not be.
+Building MEQ at one precision or the other is therefore a matter of which MFEM
+``MFEM_DIR`` points at:
+
+.. code-block:: sh
+
+   cmake -B build        -DMFEM_DIR=/path/to/mfem-double/install
+   cmake -B build-single -DMFEM_DIR=/path/to/mfem-single/install
+
+Both work and both pass the test suite. What differs:
+
+* **Double is the reference.** Every published measurement is taken there, and
+  it is the only build in which MEQ's own acceptance criteria — measured
+  convergence rates, :math:`k+1` in :math:`\psi` and :math:`k+2` in
+  :math:`\psi^\star` — can be read at all: at a round-off floor near
+  :math:`10^{-7}` there is no mesh sequence left above it to measure a rate on.
+  A single build is validated by *agreement with the double build*, not by its
+  own rate tables.
+* **Double keeps two libraries single cannot have.** SuiteSparse and GSLIB have
+  no single-precision build. Neither is required — MEQ's default trace solver
+  is PARDISO where it is present, and the warm start uses MEQ's own point
+  locator — but a single install is not a double install minus one flag, and a
+  comparison between the two has to account for that.
+* **Single is for a device.** The case for it is arithmetic throughput on a
+  part whose double rate is a small fraction of its single one; on a
+  workstation card that is most of them, and on a datacentre part it is about
+  half, which is why a **double** device build is the right one there. The
+  device path itself is identical in both: it keys on whether an
+  ``mfem::Device`` is configured, never on ``real_t``.
+* **Accuracy is qualified per problem, not per build.** Measured across the
+  shipped machines, a single-precision equilibrium's ``psi_ax`` agrees with the
+  double build's over a range of three orders of magnitude — so the question
+  *is single precision good enough* has an answer per case and no answer per
+  install.
+
+Whichever is built, ``meq --version`` and every output file's
+``meq_precision`` attribute say which one produced a given answer.
 
 Building
 --------

@@ -201,6 +201,7 @@ set_target_properties(toml11::toml11 PROPERTIES
 # owns itself. What was left of its job lives on GradShafranovSolver.
 set(MEQ_CORE_SOURCES
 	src/meq/BoundaryShape.cpp
+	src/meq/BuildInfo.cpp
 	src/meq/Coils.cpp
 	src/meq/ConductorField.cpp
 	src/meq/ConductorStore.cpp
@@ -241,6 +242,7 @@ set(MEQ_CORE_SOURCES
 # Sources that will not compile without MFEM. Filtered out when it is absent;
 # see the find_package note above for why that case exists at all.
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
+	src/meq/BuildInfo.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Crossings.cpp
 	src/meq/DeviceNPCDevice.cpp
@@ -481,8 +483,8 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
 	endif()
 
-	# THE ONE FILE IN src/meq COMPILED BY A DEVICE COMPILER, AND WHY IT IS ONE
-	# FILE. mfem::forall does not compile under the host compiler at all:
+	# THE FIVE FILES IN src/meq A DEVICE COMPILER OWNS, AND WHY THEY ARE A
+	# SEPARATE SET AT ALL. mfem::forall does not compile under the host compiler:
 	# general/backends.hpp:134 turns the absence of MFEM_USE_CUDA_OR_HIP_LANG
 	# into a static_assert reading "The calling function needs to be compiled
 	# with CUDA/HIP language!". So a device kernel anywhere in MEQ's ordinary
@@ -497,18 +499,19 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# between a build that follows MFEM and one that has to be edited when MFEM
 	# moves.
 	#
-	# WITHOUT THIS BLOCK THE BUILD IS STILL CORRECT AND IS HOST ONLY:
-	# PointLocatorDevice.cpp compiles to a stub returning false and
-	# PointLocator::locate() runs its host loop unconditionally. That is the
-	# configuration CI builds and it is why the stub exists rather than the
-	# file being excluded.
+	# WITHOUT THIS BLOCK THE BUILD IS STILL CORRECT AND IS HOST ONLY: each of
+	# the five compiles to a stub -- PointLocatorDevice.cpp returns false and
+	# PointLocator::locate() runs its host loop unconditionally, and the others
+	# the same way -- so every caller has a host route and nothing is skipped.
+	# That is the configuration CI builds, and it is why the stubs exist rather
+	# than the files being excluded from the target.
 	# WHICH SOURCES A DEVICE COMPILER OWNS, FOR THE ONE CONSUMER THAT CANNOT
 	# READ THEM. clang-tidy takes each file's flags out of the compile database,
 	# and nvcc's flags are not clang's: `--expt-extended-lambda`,
 	# `-forward-unknown-to-host-compiler` and `--generate-code=...` are all
 	# `unknown argument` to it, and `__clang_cuda_runtime_wrapper.h` then fails
 	# to find `texture_fetch_functions.h`. Sixteen errors, and a file that does
-	# not parse has not been checked -- so the `naming` test must skip these two
+	# not parse has not been checked -- so the `naming` test must skip these five
 	# rather than report a pass it did not earn. EMPTY unless a device language
 	# was actually enabled, so the CI build checks them like anything else.
 	set(MEQ_CORE_SOURCES_DEVICE_LANGUAGE "")
@@ -600,18 +603,42 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		set_target_properties(meq_core PROPERTIES
 			CUDA_SEPARABLE_COMPILATION ON
 			CUDA_ARCHITECTURES "${_meq_cuda_arch}")
+		list(LENGTH MEQ_CORE_SOURCES_DEVICE_LANGUAGE _meq_device_file_count)
 		message(STATUS
-			"meq: PointLocatorDevice.cpp compiles as CUDA, arch ${_meq_cuda_arch}")
+			"meq: ${_meq_device_file_count} sources compile as CUDA, arch ${_meq_cuda_arch}")
 	elseif(MFEM_FOUND AND MFEM_USE_HIP)
 		enable_language(HIP)
-		set_source_files_properties(
-			src/meq/PointLocatorDevice.cpp
-			src/meq/SourceViewDevice.cpp
-			PROPERTIES LANGUAGE HIP)
-		list(APPEND MEQ_CORE_SOURCES_DEVICE_LANGUAGE
+		# THE SAME FIVE, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
+		# RESTATED. This arm carried two of them for as long as there were two,
+		# and a device file added to the CUDA branch did not reach it -- which
+		# is not a slow path but a COMPILE ERROR, mfem::forall's static_assert
+		# firing under the host compiler, and only on a machine nobody here
+		# has. A second copy of a list is a second thing to keep in step by
+		# hand, which is the defect meq::limiterPolygonMaximum() and
+		# meq::extensionFdStep() both are.
+		set(MEQ_CORE_SOURCES_DEVICE_LANGUAGE
+			src/meq/DeviceNPCDevice.cpp
+			src/meq/DeviceQuadratureDevice.cpp
+			src/meq/DeviceRowsDevice.cpp
 			src/meq/PointLocatorDevice.cpp
 			src/meq/SourceViewDevice.cpp)
-		message(STATUS "meq: PointLocatorDevice.cpp compiles as HIP")
+		set_source_files_properties(
+			${MEQ_CORE_SOURCES_DEVICE_LANGUAGE}
+			PROPERTIES LANGUAGE HIP)
+		# -ffp-contract=off is hipcc's spelling of the CUDA arm's -fmad=false,
+		# and it is on DeviceRowsDevice.cpp for the same reason: meq::DeviceRows
+		# exists to reproduce meq::CompressedRows::dot() BIT FOR BIT against a
+		# host build with no -march and therefore no FMA. UNTESTED, as the whole
+		# arm is -- cuDSS restricts MEQ to CUDA today -- so it is written to
+		# follow the CUDA arm's decisions rather than to be discovered later.
+		set_source_files_properties(
+			src/meq/DeviceRowsDevice.cpp
+			PROPERTIES
+				LANGUAGE HIP
+				COMPILE_OPTIONS "-ffp-contract=off")
+		list(LENGTH MEQ_CORE_SOURCES_DEVICE_LANGUAGE _meq_device_file_count)
+		message(STATUS
+			"meq: ${_meq_device_file_count} sources compile as HIP")
 	endif()
 
 	# PRIVATE, unlike MFEM: netcdf appears only inside Output.cpp and
@@ -643,26 +670,34 @@ if(MEQ_BUILD_APP)
 		message(FATAL_ERROR "MEQ_BUILD_APP is ON but meq_core has no sources to build from.")
 	endif()
 
+	add_executable(meq apps/meq.cpp)
+	target_link_libraries(meq PRIVATE meq_core)
+
 	# The commit, so a run can be traced back to the tree that produced it. Not
 	# fatal when git is absent or this is an unpacked tarball -- the version
 	# falls back to the project version alone.
+	#
+	# READ AT BUILD TIME, NOT AT CONFIGURE TIME, AND cmake/GitCommit.cmake SAYS
+	# WHY AT LENGTH: an execute_process() here runs once per configure, so a
+	# long-lived build directory stamps every binary -- and every .nc those
+	# binaries write -- with whatever HEAD was the day it was created. This
+	# generates the header once at configure so a first build has one, and
+	# refreshes it before every link.
 	set(MEQ_GIT_COMMIT "unknown")
-	find_package(Git QUIET)
-	if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
-		execute_process(
-			COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
-			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-			OUTPUT_VARIABLE MEQ_GIT_COMMIT
-			OUTPUT_STRIP_TRAILING_WHITESPACE
-			ERROR_QUIET)
-	endif()
-
-	add_executable(meq apps/meq.cpp)
-	target_link_libraries(meq PRIVATE meq_core)
 	configure_file(
 		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.hpp.in"
 		"${CMAKE_CURRENT_BINARY_DIR}/meq_version.hpp"
 		@ONLY)
+	add_custom_target(meq_version_header
+		COMMAND "${CMAKE_COMMAND}"
+			"-DMEQ_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+			"-DMEQ_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+			"-DMEQ_PROJECT_VERSION=${PROJECT_VERSION}"
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GitCommit.cmake"
+		BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/meq_version.hpp"
+		COMMENT "Recording the commit meq is being built from"
+		VERBATIM)
+	add_dependencies(meq meq_version_header)
 	target_include_directories(meq PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 	# meq-run: the mesh generator and the solver, from one file.

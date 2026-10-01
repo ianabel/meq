@@ -17,6 +17,21 @@ instances of — see :doc:`examples`.
 
    ./build/meq examples/soloviev-nstx.toml
 
+``--version`` reports four things, and two of them are not MEQ's own choices:
+
+.. code-block:: text
+
+   MEQ 0.1.0 (6a078e2) (MFEM 4.10.1, double, cuda)
+
+the MEQ version and the commit the binary was built from, then the MFEM it
+linked, the floating-point precision that MFEM was configured at, and the device
+backends this build could be given. **Precision is not a key in the
+configuration file and cannot be**: ``MFEM_PRECISION`` decides ``real_t``
+throughout the library, so one source tree built against two MFEM installs
+produces two binaries with the same name that answer to different round-off
+floors. ``--version`` and the output files' ``meq_precision`` attribute are how
+a run says which one it was. See :doc:`install`.
+
 .. note::
 
    The absence of a command line is a deliberate choice, not an unfinished one.

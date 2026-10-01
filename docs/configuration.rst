@@ -686,7 +686,8 @@ since that is an ellipse.
        hybridized trace system. The default falls back to ``"umfpack"`` on a
        build without oneMKL — a value the file *states* is refused there, one it
        merely inherits is downgraded. See :ref:`linear-trace-solver`.
-       ``"cudss"`` parses but the driver refuses it — see the note below.
+       ``"cudss"`` is a third value and it needs ``--device`` on the command
+       line — see the note below.
 
 .. note::
 
@@ -736,23 +737,39 @@ since that is an ellipse.
 
 .. note::
 
-   ``TraceSolver = "cudss"`` is a valid spelling and the **library** supports it,
-   but the **driver refuses it** even on a build that has cuDSS — and it is
-   withheld rather than merely unimplemented.
+   ``TraceSolver = "cudss"`` needs a device, and the driver refuses it when the
+   run configured none. ``meq --device cuda config.toml`` honours it; the
+   configuration file **alone** cannot reach it, on a build that has cuDSS or
+   any other.
 
-   A device solver is only worth having if the data **stays** on the device.
-   MEQ's element-local integrators and its scatter into the trace matrix — most
-   of a Newton step between them — have no device kernels yet, so a device trace
-   solve would copy the system across the bus once per iteration in order to
-   accelerate one part of it. MFEM's own HDG device-offload plan reaches the same
-   conclusion about doing this group on its own: *"doing only those is worse than
-   doing nothing … plausibly slower than staying on the host throughout"*. That
-   work is under construction upstream, and this key will open when it lands.
+   **The gate is the device rather than the key**, because a device solver is
+   only worth having if the data **stays** on the device. Under ``--device`` the
+   caller is already paying for every vector to live there, and cuDSS is then
+   the one trace solver that does not force a round trip; MEQ's own element
+   integrand, the batched local solve and the whole NPC traversal are on the
+   device beside it. Without one, configuring a device for the trace solve alone
+   would buy a fifth of a Newton step — measured — and pay a bus crossing per
+   iteration for the other four fifths. MFEM's own HDG device-offload plan
+   reaches the same conclusion about moving that group by itself: *"doing only
+   those is worse than doing nothing … plausibly slower than staying on the host
+   throughout"*.
 
-   There is an immediate failure too, which is what made the refusal urgent
-   rather than only principled: without an ``mfem::Device`` configured, cuDSS
-   does not fall back. It reads host pointers as device pointers and aborts
-   inside CUDA, with a message that says nothing about the key that caused it.
+   Without a device there is an immediate failure as well, which is what makes
+   the refusal a message rather than an abort: cuDSS does not fall back. It
+   reads host pointers as device pointers and dies inside CUDA, with a
+   diagnostic that says nothing about the key that caused it.
+
+   **Time it before you keep it, and hold everything else equal.** cuDSS 0.8.0
+   is not deterministic run to run, and its deterministic mode is supported for
+   a single right-hand side where MEQ's bordered step solves :math:`N + 4`
+   columns at once — so a cuDSS run gives up the digit-for-digit agreement
+   between ``--device cuda`` and ``--device cpu`` that the driver's own device
+   defaults are chosen to preserve. That agreement is the only instrument that
+   can tell a wrong kernel from a narrower arithmetic, which is why ``--device``
+   does not change the default trace solver. ``MEASUREMENTS.md`` M-223 is the
+   device timing on the production free-boundary case, and the choice is exposed
+   precisely so that you can take it again on your own machine and your own
+   problem.
 
 .. warning::
 

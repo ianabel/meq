@@ -32,8 +32,12 @@ namespace meq
 		/// WORTH TWO ORDERS OF MAGNITUDE. Mesh::GetNodes() is null for every
 		/// mesh MEQ builds with MakeCartesian2D and every order-1 .msh gmsh
 		/// writes -- but any call to Mesh::EnsureNodes() installs one, and
-		/// meq::FieldTransfer's constructor makes exactly that call, because
-		/// FindPointsGSLIB refuses a mesh without nodes. Testing the POINTER
+		/// meq::FieldTransfer's constructor makes exactly that call. It no
+		/// longer needs to -- meq::PointLocator asks the geometry's degree and
+		/// is happy either way -- and it is KEPT because removing it would
+		/// change this sampler's route on every mesh a warm start has touched,
+		/// which is a decision for this file rather than that one. Testing the
+		/// POINTER
 		/// therefore drops this sampler onto the Newton route, permanently and
 		/// for the whole process, on any mesh a warm start has touched:
 		/// measured at 159x at 129^2 and 83x at 513^2, with the answer

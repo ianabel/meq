@@ -1114,8 +1114,9 @@ namespace meq
 				 *
 				 * So this is the one mode here a bit-exactness assertion will
 				 * not survive. What it buys is the sparse third of
-				 * `ComputeH()`, which had no device path at all and which on a
-				 * host rebuilds a linked-list matrix every linearisation.
+				 * `ComputeH()`, which `Serial` leaves with no device path at
+				 * all and which on a host rebuilds a linked-list matrix every
+				 * linearisation.
 				 *
 				 * **AND IT IS THE DEFAULT FOR A FILE, WHICH IT WAS NOT WHEN THIS
 				 * MODE WAS WRITTEN.** It was opt-in on the bit-exactness
@@ -2565,17 +2566,44 @@ namespace meq
 				///
 				/// **AND IT IS NOT WORTH TAKING ON ITS OWN, WHICH IS A STRONGER
 				/// STATEMENT THAN THE TIMING ONE BELOW.** A device solver pays
-				/// only if the data STAYS on the device, and MEQ's integrators
-				/// and its scatter have no device kernels -- 58% to 70% of an NPC
-				/// step by MFEM's own measurement. Its
-				/// `doc/HDG-DEVICE-OFFLOAD.md`, under construction, gates the
-				/// whole device path on the integrators for exactly this reason:
-				/// doing the trace solve alone means copying the system across
-				/// the bus once per iteration to accelerate a quarter of it,
-				/// which is "plausibly slower than staying on the host
-				/// throughout". `apps/meq.cpp` therefore refuses this choice
-				/// from a config file; the library keeps it so that correctness
-				/// on the device path can be checked at all.
+				/// only if the data STAYS on the device, and the trace solve is
+				/// about a fifth of a threaded step, so taking it ALONE means
+				/// copying the system across the bus once per iteration to
+				/// accelerate that fifth -- which MFEM's own
+				/// `doc/HDG-DEVICE-OFFLOAD.md` calls "plausibly slower than
+				/// staying on the host throughout". That is a statement about
+				/// a process in which nothing else moved, and it is the
+				/// process a caller reaches by naming this solver in a file
+				/// and nothing else.
+				///
+				/// **THE REST OF THE SOLVE DOES REACH THE DEVICE, AND THE ROUTE
+				/// IS THE BATCHED ONE RATHER THAN PARTIAL ASSEMBLY.** PA's
+				/// economic case is sum factorisation on tensor-product
+				/// elements and MEQ is triangles everywhere, so it would buy
+				/// nothing here whether or not `fem/darcy/` had it. What
+				/// carries the work is MFEM's batched element and face kernels,
+				/// asked for through AssemblyMode, LocalFactorMode and
+				/// TraceAssemblyMode, beside the five translation units in
+				/// `src/meq` that a device compiler owns -- the source
+				/// evaluators, the NPC operator that hands them to upstream's
+				/// seam, the bordered row mirrors, the plasma-current
+				/// quadrature and the point locator. Under `--device cuda` on
+				/// the shipped machine case the device integrand, the batched
+				/// residual and gradient, the batched local solve and the whole
+				/// NPC traversal are all taken, and the solve leg is at parity
+				/// with the host-threaded default. See MEASUREMENTS.md M-223.
+				///
+				/// So what is left for cuDSS is a genuine question rather than
+				/// a foregone one, and `apps/meq.cpp` still refuses this choice
+				/// from a config file ALONE: a file naming it would configure a
+				/// device on the strength of a solver name, asking for none of
+				/// the batched routes above, and cuDSS is additionally
+				/// nondeterministic run to run at MEQ's column count -- which
+				/// costs the digit-for-digit agreement with the host that every
+				/// device defect in this project was found with. With
+				/// `--device` on the command line it is honoured. The library
+				/// keeps it unconditionally, so that correctness on the device
+				/// path can be checked at all.
 				///
 				/// **Correct, and not recommended on the strength of any timing
 				/// taken here.** It agrees with UMFPack to 3.5e-14 from 9,408 to

@@ -8,15 +8,26 @@ threading is then irrelevant** — not preserved, not traded against, simply not
 part of the design. Anything that reads "we would lose the host threading" is
 an argument about a *partial* offload and does not bear on this plan.
 
-**THE PARTIAL PATH IS MEASURED AND IT IS A LOSS, WHICH IS THE EVIDENCE FOR
-RESIDENCY RATHER THAN AGAINST THE DEVICE.** `--device cuda` today runs
-`machine-f-diiid` correctly and **2.14x slower**
-→ **[M-173](MEASUREMENTS.md#m-173)**. Exactly one leg gains — the trace
-backsolve, 1.14x — and four legs that were threaded on the host collapse to
-1.00 cores because they never reach the device at all and the device default
-takes them off the threaded route. That is upstream's own group-4-alone
-prediction met in full. **It is a measurement of a configuration, not of the
-card.**
+**THE PARTIAL PATH WAS MEASURED AS A LOSS AND IS NOW MEASURED AT PARITY ON THE
+SOLVE, WHICH CHANGES THE ARGUMENT FOR RESIDENCY WITHOUT WEAKENING IT.**
+`--device cuda` runs `machine-f-diiid` correctly, its **solve leg overlapping
+the host-threaded default's** — 4.53/4.75/4.75 s against 4.46/4.85/4.94 — and
+the whole 1.07–1.13x wall loss is the **output** stage
+→ **[M-223](MEASUREMENTS.md#m-223)**. [M-173](MEASUREMENTS.md#m-173)'s 2.14x
+was a measurement of a configuration and said so: its device arm ran
+`AssemblyMode::Batched`, whose host cost alone is 1.74x
+([M-185](MEASUREMENTS.md#m-185)), and since then the driver's device default
+became `Serial` ([M-215](MEASUREMENTS.md#m-215)), the NPC traversal moved to
+kernels ([M-209](MEASUREMENTS.md#m-209)) and MEQ's integrand reached the device
+([M-197](MEASUREMENTS.md#m-197)).
+
+**WHAT IS LEFT OF THE LOSS IS ONE HOST LEG AND IT IS ITEM 7.** The output leg is
+`Reconstruct()` running serially because a Device and a host OpenMP region that
+touches MFEM memory are mutually exclusive — measured by a thread count rather
+than argued, 0.90 and 0.97 s at `OMP = 8` and the same at `OMP = 1`, against a
+host leg that halves. So the partial path no longer argues for residency by
+being slow; it argues for it by **still having a host leg to lose**, and that is
+a narrower and more honest claim.
 
 **AND FIVE SIXTHS OF THAT LOSS IS NOT THE DEVICE, WHICH ONE MISSING CONTROL
 SETTLED** → **[M-185](MEASUREMENTS.md#m-185)**. M-173's two arms vary the
@@ -44,10 +55,16 @@ THE ONE THING TO TAKE FROM THIS PAGE IF NOTHING ELSE.** A leg's share answers
 *what is expensive on a clean host run*, which is the wrong question: the point
 of a device run is that the whole calculation stays on the device and the host
 never blocks it. Measured on `machine-f-diiid` over 12 Newton steps, MEQ's step
-makes **891.8 host reads of a device-written state per step, of which 3.0 are
-actual transfers** → [M-198](MEASUREMENTS.md#m-198). **The two columns answer
-different questions and conflating them is the mistake this plan has already
-made**: transfers are what MEQ pays on today's partial offload, reads are what
+makes **893.2 host reads of a device-written state per step, of which 0.2 are
+actual transfers** — 3 transfers and 0.888 MB over the whole run
+→ [M-212](MEASUREMENTS.md#m-212), [M-223](MEASUREMENTS.md#m-223). **The two
+columns answer different questions and conflating them is the mistake this plan
+has already made**, and it made a second one on top of it: the *"3.0 transfers a
+step"* this paragraph carried is [M-198](MEASUREMENTS.md#m-198)'s **pre-fix**
+figure, 36 over 12 steps, kept after [M-200](MEASUREMENTS.md#m-200) and
+[M-202](MEASUREMENTS.md#m-202) took the run to 3 — and kept beside `0.888 MB`,
+which is a **total**. *A rate and a total printed side by side read as one
+row.* transfers are what MEQ pays on today's partial offload, reads are what
 it would pay once a resident device writes between them. The leg carrying most
 of the READS is 0.9% of the profile and transfers nothing at all. §3.3 has the
 table, §1.3 the inventory, and §3.4a the decomposition — which says the reads
@@ -753,7 +770,7 @@ turns on the detail.
 | **Request 1 — a device route** | **DONE, and it was never missing.** Upstream's own audit of MEQ's form configuration puts MEQ at **YES on seven of the ten** `CanBatch*` predicates, with the two NPC-only refusals correct for MEQ and `CanBatchPotMass` correctly `no` because `M_p` is null. §3.6 |
 | **Request 2 — `HDGExtensionIntegrator` on a device** | **ANSWERED: nothing is owed.** It is on a bilinear form, assembled once, and its blocks already reach `Af`/`Ae` through `AssembleFluxMassBdrMatricesBatched()`, which batches the scatter and never dispatches on the integrator. Upstream corrected two of their own doxygen claims that said no such integrator existed |
 | **Request 3 — a batched local residual taking a caller's integrand** | **CLOSED, BUILT ON BOTH SIDES, AND RUNNING** → [M-197](MEASUREMENTS.md#m-197). Upstream asked for the seam rather than the loosening — *"it is blocked on an interface, and the interface is ours … send us the POD and the signature you want to write `F` and `F'` in and we will build the other side"* — MEQ sent `HDG-BATCHED-RESIDUAL-SEAM-FROM-MEQ.md`, and `NPCResidual()` / `NPCGradient()` now take a caller's `f( element, point, x, y, u )`. MEQ's half is `meq::DeviceNPCOperator`, whose integrands are **functor structs** rather than lambdas because nvcc refuses an extended lambda in three of the shapes this wanted. **Two refusals had to fall first and only one was upstream's**: `CanBatchNonlinearResidual()` requires an explicit `IntegrationRule` and `meq::SourceIntegrator` chose its own per element ([M-193](MEASUREMENTS.md#m-193)), and the seam is reached only by a caller that calls `NPCResidual()` itself ([M-194](MEASUREMENTS.md#m-194)) |
-| **The 2.14× of [M-173](MEASUREMENTS.md#m-173)** | **diagnosed as upstream's and half fixed.** `AssemblyMode` is one enum, so asking for `Batched` asked for *serial* everywhere a kernel did not reach; `ThreadHostLoops()` now decides that and every host loop gates on it, worth 1.82× to 4.13× on their own fixture. **MEQ gains none of it**, because the same function returns false under a Device — §3.7 |
+| **The 2.14× of [M-173](MEASUREMENTS.md#m-173)** | **diagnosed as upstream's and half fixed, and the OTHER half went away with the driver's device default.** `AssemblyMode` is one enum, so asking for `Batched` asked for *serial* everywhere a kernel did not reach; `ThreadHostLoops()` now decides that and every host loop gates on it, worth 1.82× to 4.13× on their own fixture. **MEQ gains none of THAT**, because the same function returns false under a Device — §3.7. What MEQ gained instead is `AssemblyMode::Serial` under a device ([M-215](MEASUREMENTS.md#m-215)), removing the 1.74× M-173's arm was carrying: **the solve leg is now at parity and only the output stage loses** → [M-223](MEASUREMENTS.md#m-223) |
 
 **AND ONE ITEM UPSTREAM NAMES AS NOT STARTED IS ONE THIS PAGE USED TO CARE
 MOST ABOUT AND HAS SINCE DOWNGRADED** → [M-216](MEASUREMENTS.md#m-216):
@@ -782,14 +799,27 @@ file worth keeping*. What a reader needs first is the state:
 | 4 · the bordered border | **DONE AND WIRED** → [M-208](MEASUREMENTS.md#m-208), and wiring it measured the route as an **11× LOSS in transfers** on today's layout, because `flush()` brings the columns to the host. Gated on `Memory::DeviceIsValid()` of the columns, so it turns itself on under residency and is reported by `borderDotsRanOnDevice()` |
 | 5 · the host branches | **needed no kernel** → [M-195](MEASUREMENTS.md#m-195) |
 | 6 · cuDSS as the device default | after everything, and §3.5's reason for that has itself been corrected — see below |
-| 7 · `mem_manager` thread safety | **OPTIONAL for MEQ, and downgraded on MEQ's own numbers** → [M-216](MEASUREMENTS.md#m-216). It is worth **under 2% of a device run** here and shrinks toward zero as the routes wire up: host runs are untouched, the largest item in M-137's 1.16× is sparsity rather than threading, and two of the three loops the gate serialises already have kernels. MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188) |
-| 8 · single precision | last — but **the one experiment that could run early HAS been run** → [M-204](MEASUREMENTS.md#m-204). The bordered Newton survives FP32 on both bordered machines; the cost is one tolerance per file and a per-case accuracy that ranges over 560× |
+| 7 · `mem_manager` thread safety | **OPTIONAL for MEQ, and RE-SIZED UPWARDS ON THIS CASE** → [M-216](MEASUREMENTS.md#m-216), [M-223](MEASUREMENTS.md#m-223). M-216 put it under 2% of a device run and expected it to shrink as the routes wire up; the opposite happened, because the routes wiring up is what removed everything else. With the solve leg at parity, the serial `Reconstruct()` this gate forces is **the whole of the 1.07–1.13× a device run loses**, about 10% of the wall. *A transition cost is a property of which legs have kernels yet, so it grows as a share every time another leg stops being the problem.* MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188) |
+| 8 · single precision | last — and **the whole of it has now been run, not only the early experiment** → [M-204](MEASUREMENTS.md#m-204), [M-222](MEASUREMENTS.md#m-222). The bordered Newton survives FP32 on both bordered machines; the single suite reads **62 of 63** against the double control's 62/63, the one red in each being the deliberate `PlasmaEdgeConvergence`; and the cost was one solver constant, four laws about where a floor comes from, and a per-case accuracy that ranges over 560× |
+
+**AND THE STATE OF THE PARTIAL PATH ITSELF HAS CHANGED, WHICH THIS TABLE'S ITEMS
+1, 2 AND 7 ADD UP TO** → **[M-223](MEASUREMENTS.md#m-223)**. On
+`machine-f-diiid` under `--device cuda`, asked of the library rather than
+inferred: **device integrand yes, batched residual and gradient yes, batched
+local solve yes, whole NPC traversal yes, condensation cache yes, trace assembly
+batched yes**, face assembly deliberately serial, bordered row dots off behind
+their data gate. Three of upstream's four groups reach the device, the solve leg
+is at parity with the host-threaded default, and `DeviceParity` is green. **What
+residency still has to buy is phases A, B, D and E and the border's
+alternation** — not the legs.
 
 **THE NUMBER THIS SECTION IS ORDERED BY HAS BEEN CORRECTED TWICE AND IS NOW
 INSTRUMENTED.** §3.3's 21.1 host reads a step was a proxy off leg call counts;
 [M-196](MEASUREMENTS.md#m-196) instrumented it at 333 and was itself wrong
 (17 of 36 funnels); [M-198](MEASUREMENTS.md#m-198) is the complete one at
-**891.8 reads and 3.0 transfers a step**, and it reads **893.2 and 3.0** on the
+**891.8 reads and 3.0 transfers a step** — the transfer figure being a rate over
+12 steps, and superseded by [M-200](MEASUREMENTS.md#m-200)'s repair to 3 over
+the whole run. It reads **893.2 reads and 0.2 transfers a step** on the
 refreshed library with the NPC traversal on kernels
 → [M-212](MEASUREMENTS.md#m-212). **Read the transfer column, not the
 read column**: a read of a host-valid buffer is free, and sorting by reads names
@@ -840,7 +870,7 @@ total 0.692 s:
 **Device-able 69.8% under partial offload.** The three figures that used to
 close this section — 3.31x on the step, about 2x on a run, realistically
 1.1–1.3x — are all statements about the partial case and all superseded by the
-measurement: **the partial case is 2.14x SLOWER**, not 1.1–1.3x faster, because
+measurement: **the partial case was 2.14x SLOWER**, not 1.1–1.3x faster, because
 the arithmetic credited the host-bound legs with keeping their threading and
 they do not. → **[M-173](MEASUREMENTS.md#m-173)**.
 
@@ -1044,7 +1074,7 @@ step that is neither dense algebra nor an integrator.** Those are M-126's
 threaded shares; §3.3's table is a different, serial run and reads the same leg
 at 0.9%. **Neither share is the reason this is item 3** — the crossing count is,
 and it is 21.1 a step in both — a proxy since superseded by
-[M-198](MEASUREMENTS.md#m-198)'s instrumented **891.8 reads and 3.0
+[M-198](MEASUREMENTS.md#m-198)'s instrumented **893.2 reads and 0.2
 transfers**. It is scalar reductions
 feeding **host control flow**: `psi_ax` and `psi_bnd` closing a bordered Newton,
 the X-point location, the plasma-support decision, the convergence test. Every
@@ -1365,7 +1395,9 @@ closed. What changes at item 6 is the **default**, not the refusal.
   not a verdict on the device route.
 * **Timing anything on this machine and calling it throughput.** M-77 measures
   the CUDA build costing 7% of the wall on the CPU path for byte-identical
-  output. M-173 measures the partial device path at 2.14x slower. Neither is a
+  output. M-223 measures the partial device path's SOLVE at parity with the
+  host-threaded default, and the residual 1.07-1.13x on the wall as one host
+  leg. Neither is a
   measurement of what a datacentre part would do, and §7 is the only thing that
   makes a local device timing worth taking at all.
 * **A second expression of `F( R, z, psi )` before item 3 exists.** Two
@@ -1456,13 +1488,13 @@ tolerance:**
 
 | stage | acceptance |
 |---|---|
-| **0. Today's state, as a regression** | **STILL OPEN, and M-130 is the argument for it**: the two links it found were latent for as long as nothing ran a bordered free-boundary case under a Device. There is **no ctest that runs a whole solve under a Device** — `tests/CMakeLists.txt:323` registers exactly one, `cuDSSTraceSolver`, and it checks the trace solver's agreement alone. The first thing to build is a `--device debug` run of one free-boundary case and one fixed-boundary case asserting the CPU answer to every printed digit. `debug` needs no GPU, so it runs in any build |
+| **0. Today's state, as a regression** | **BUILT AND GREEN** → [M-223](MEASUREMENTS.md#m-223). `DeviceParity` is the ctest M-130 argued for — one fixed-boundary case and one bordered free-boundary case, each run under `--device cpu` and `--device debug`, asserting the host's `psi_ax`, `psi_bnd`, X-point and **Newton count** to every printed digit — and it passes at 444.9 s. `debug` needs no GPU, so it runs in any build; the one thing it does NOT cover is real CUDA, and §3.5's *what tightness buys* says why that is a gap worth naming rather than closing with a second slow case |
 | **1. §1.2's three candidates** | **the `postProcess()` one is DONE** → M-130: it faults, each fix moved the fault forward, and the root cause is `Memory<T>::Wrap`'s non-owning `Delete()` inside MFEM rather than either hypothesis this plan offered. The `PicardThenNewton` pair is still unrun; `--device debug` on such a fixture either faults — and each fix moves the fault forward — or does not, in which case the sites are safe and the reading was wrong. **Both outcomes are results** |
 | **1b. §1.2's thirteen ordering-protected reads** | a **limited** free-boundary case with the plasma support frozen — no `refreshXPoint`, no `refreshPlasmaComponent` — under `--device debug`, which is the configuration where the ordering that currently protects them is absent. A clean run says the ordering holds more widely than the reading suggests; a fault names the first site |
 | **2. Threaded assembly under a Device** | **ANSWERED, AND THE ANSWER IS THAT IT CANNOT BE MADE TO WORK TODAY** → [M-188](MEASUREMENTS.md#m-188). The acceptance stood as *the same digits at `OMP = 1` and `OMP = 8` under `debug`*, and that is now **MET for serial assembly**: `machine-f-diiid` reads 7 / 3 / 2 and `2.992753e-12` at both thread counts once MEQ's own element loops are gated on `meq::hostLoopsAreSafe()`. It is **unmeetable for threaded assembly**, because `mem_manager.cpp`'s maps are unguarded and upstream has not started on them; the driver refuses that pair above one thread instead. **A refusal is the resolution of this row, not a deferral of it** |
 | **3. A device `SourceIntegrator`** | the analytic fixture ladder, unchanged: `k+1` in `ψ` and `q`, `k+2` in `ψ*`, on `ManufacturedNonlinear` and `SimilarityExponential` at `k = 1…3`, with the host and device rows agreeing to round-off. A device path that changes a rate is a wrong integrand, not a faster one |
-| **4. The whole chain** | `psi_ax`, `psi_bnd`, the X-point and the Newton count identical to the host on `machine-f-diiid.toml`, under `debug` AND under `cuda`, at more than one thread count. M-79's own closing row is the template: cpu, cuda and debug agreeing to every printed digit. **MET at `OMP = MKL = 1`** → M-130 — `psi_ax = 3.759851e-01`, X-point `( 1.200929, −0.999491 )`, constraint `−6.466e-12`, 2 steps. The thread-count half is stage 2 and is still open, and **`mhd-rectangle` still takes 9 Newton steps under a device against 5 on the host** — **now walked** → [M-203](MEASUREMENTS.md#m-203). It is a configured `mfem::Device` and nothing else: not GPU arithmetic (`debug` reproduces `cuda`), not `LocalFactorMode`, not `AssemblyMode`, and not the border, since this case has none. Every route predicate is character for character identical between an arm that takes 5 and an arm that takes 9, the answer agrees to **1.05e-14**, and the device run is the host run with a **no-op step interleaved after every contraction** that raises `‖r‖` by a constant **0.47%**. **WALKED, EXPLAINED AND NOW GREEN** → [M-207](MEASUREMENTS.md#m-207), [M-214](MEASUREMENTS.md#m-214). `meq::StageChecksum` is the instrument M-187 prescribed, kept this time, and `meq::ProbedSolver` sits where `mfem::NewtonSolver` keeps the increment to itself: on the same right-hand side the device returns an increment **36× too small**, which is a wrong JACOBIAN. MEQ's own operator had exactly that — `xLoc` written blockwise and never carried up — and with it fixed **M-187's 31 / 16 / 4 is now 7 / 3 / 2, the host's to every digit**. `mhd-rectangle` takes `mfem::DarcyNPCOperator` instead, whose `Mult()` and `GetGradient()` carry the identical idiom unsynced; that half is upstream's and reported. **AND THE ACCEPTANCE IS STATED ON ONE FILE AND IS NOT ENOUGH** → [M-205](MEASUREMENTS.md#m-205), [M-206](MEASUREMENTS.md#m-206): `examples/q-driven.toml` was wrong under any configured Device by a **factor of two** in `psi_ax` — **five** raw seams in MEQ's own outer Newton, each hiding behind the one in front of it, the fourth of which cost convergence RATE rather than correctness — while its inner bordered solve converged in the same 4 steps and satisfied its own constraint to 1e-16 throughout. *A bordered row certifies consistency, not correctness.* **`--device cuda` now reproduces `--device cpu` to every printed digit on it.** This row should name every nonlinear example, not one machine |
-| **4b. The crossing count** | **NEW, and it is the acceptance §3.3's restructure implies.** Correctness alone cannot tell a resident solve from a partial one — M-187 is the proof, an answer right to every digit on a run doing 4× the work. So the acceptance is a **count of TRANSFERS of a device-written state per Newton step**, instrumented rather than inferred. **BUILT** → [M-196](MEASUREMENTS.md#m-196), [M-198](MEASUREMENTS.md#m-198): `meq::countedHostRead()` asks `Memory::DeviceIsValid()` before the funnel, so it separates a read from a data movement, and it names its sites by `__LINE__`. Today's reading is **891.8 reads and 3.0 transfers a step**, and every remaining transfer is a real one. It needs no GPU and makes no speed claim, which is what makes it the one throughput-shaped acceptance this machine can honour. **Its own coverage is part of the measurement** — the first version covered 17 of 36 funnels and reported a number 18× too low — and it sees MEQ's funnels only, not MFEM's |
+| **4. The whole chain** | `psi_ax`, `psi_bnd`, the X-point and the Newton count identical to the host on `machine-f-diiid.toml`, under `debug` AND under `cuda`, at more than one thread count. M-79's own closing row is the template: cpu, cuda and debug agreeing to every printed digit. **MET at `OMP = MKL = 1`** → M-130 — `psi_ax = 3.759851e-01`, X-point `( 1.200929, −0.999491 )`, constraint `−6.466e-12`, 2 steps. The thread-count half is stage 2 and is still open, and **`mhd-rectangle` took 9 Newton steps under a device against 5 on the host** — **walked** → [M-203](MEASUREMENTS.md#m-203). It is a configured `mfem::Device` and nothing else: not GPU arithmetic (`debug` reproduces `cuda`), not `LocalFactorMode`, not `AssemblyMode`, and not the border, since this case has none. Every route predicate is character for character identical between an arm that takes 5 and an arm that takes 9, the answer agrees to **1.05e-14**, and the device run is the host run with a **no-op step interleaved after every contraction** that raises `‖r‖` by a constant **0.47%**. **WALKED, EXPLAINED AND NOW GREEN** → [M-207](MEASUREMENTS.md#m-207), [M-214](MEASUREMENTS.md#m-214). `meq::StageChecksum` is the instrument M-187 prescribed, kept this time, and `meq::ProbedSolver` sits where `mfem::NewtonSolver` keeps the increment to itself: on the same right-hand side the device returns an increment **36× too small**, which is a wrong JACOBIAN. MEQ's own operator had exactly that — `xLoc` written blockwise and never carried up — and with it fixed **M-187's 31 / 16 / 4 is now 7 / 3 / 2, the host's to every digit**. `mhd-rectangle` takes `mfem::DarcyNPCOperator` instead of MEQ's own subclass; **that half is upstream's and is CLOSED at `ce744b84de`**, and it reads **5 steps under `--device debug` against 5 on the host**, every printed line agreeing but the final residual at 5.3e-19 → [M-223](MEASUREMENTS.md#m-223). MEQ's report named `x_loc`, by analogy with its own defect, and the fault was **`b_tr`** — right about the symptom, the idiom and the file, wrong about the member, and what separated them was upstream running the same Newton two ways in one process. *A reproduction is not a diagnosis.* **AND THE ACCEPTANCE IS STATED ON ONE FILE AND IS NOT ENOUGH** → [M-205](MEASUREMENTS.md#m-205), [M-206](MEASUREMENTS.md#m-206): `examples/q-driven.toml` was wrong under any configured Device by a **factor of two** in `psi_ax` — **five** raw seams in MEQ's own outer Newton, each hiding behind the one in front of it, the fourth of which cost convergence RATE rather than correctness — while its inner bordered solve converged in the same 4 steps and satisfied its own constraint to 1e-16 throughout. *A bordered row certifies consistency, not correctness.* **`--device cuda` now reproduces `--device cpu` to every printed digit on it.** This row should name every nonlinear example, not one machine |
+| **4b. The crossing count** | **NEW, and it is the acceptance §3.3's restructure implies.** Correctness alone cannot tell a resident solve from a partial one — M-187 is the proof, an answer right to every digit on a run doing 4× the work. So the acceptance is a **count of TRANSFERS of a device-written state per Newton step**, instrumented rather than inferred. **BUILT** → [M-196](MEASUREMENTS.md#m-196), [M-198](MEASUREMENTS.md#m-198): `meq::countedHostRead()` asks `Memory::DeviceIsValid()` before the funnel, so it separates a read from a data movement, and it names its sites by `__LINE__`. Today's reading is **893.2 reads and 0.2 transfers a step** — 3 transfers and 0.888 MB over a whole 12-step run — and every remaining transfer is a real one. **The `3.0 a step` this row carried was [M-198](MEASUREMENTS.md#m-198)'s pre-fix total read as a rate**, 36 over 12 steps, kept after [M-200](MEASUREMENTS.md#m-200) took the run to 3 and printed beside `0.888 MB`, which is a total. *An acceptance stated in the wrong units is an acceptance nobody can fail.* It needs no GPU and makes no speed claim, which is what makes it the one throughput-shaped acceptance this machine can honour. **Its own coverage is part of the measurement** — the first version covered 17 of 36 funnels and reported a number 18× too low — and it sees MEQ's funnels only, not MFEM's |
 | **5. Anything about speed** | **not on this machine.** §3.3 |
 
 **AND THE INSTRUMENT HAS AN EXPIRY DATE, WHICH IS NEW.** Every *"to every
@@ -1527,7 +1559,8 @@ themselves stale within three commits, which is the argument.
   `:4076`, `:4097`, `:4113`, `:4144`, `:4188`, `:4198` today and will not be
   tomorrow. The inventory names `buildForms()` and the integrator instead.
 * ~~**`apps/meq.cpp:954–956` has no `M-nn` anchor**~~ **TAKEN.** The `--device`
-  comment table is re-taken against M-130 — soloviev 1→1, mhd-rectangle 5→9,
+  comment table is re-taken against M-130 — soloviev 1→1, mhd-rectangle 5→5
+  since upstream's `ce744b84de` ([M-223](MEASUREMENTS.md#m-223)),
   limited-tokamak 12→12, **machine-f 2→2 to the host's every digit** — and
   carries the rule the correction is really about: *a device row that looks like
   a cost is a suspect, not a datum*.
@@ -1586,8 +1619,12 @@ Stated plainly, because an admitted gap is worth more than a confident guess.
   **It is load-bearing for item 7 of §3.2 and it should get an anchor or a
   correction before anything is built on it.**~~ **ANSWERED: it was two unsynced
   reads, not a device property** → M-130. `machine-f-diiid` reads 2 steps on
-  both. What survives is `mhd-rectangle`'s 5→9, which the syncs do **not** move
-  and which nobody has walked.
+  both. `mhd-rectangle`'s 5→9 survived that repair, was walked
+  ([M-203](MEASUREMENTS.md#m-203), [M-207](MEASUREMENTS.md#m-207)) and is
+  **closed**: it takes `mfem::DarcyNPCOperator` rather than MEQ's own subclass,
+  upstream fixed it at `ce744b84de`, and it reads **5→5** →
+  [M-223](MEASUREMENTS.md#m-223). MEQ's report named `x_loc` by analogy with its
+  own defect and the fault was `b_tr` — *a reproduction is not a diagnosis*.
 * ~~**`tests/performance/NpcThreadScaling.cpp:544-570` states that "a whole NPC
   solve with an `mfem::Device` configured for CUDA does not compute the right
   answer".**~~ **CORRECTED** — it points at M-130.
@@ -1720,7 +1757,9 @@ PARDISO is the default trace solver, so that is the knob
 [M-78](MEASUREMENTS.md#m-78) measured as deciding which problems converge.
 *A configuration stated in flags is not a configuration.*
 
-**THE SUITE READS 40 RED OF 63 AND THE DOUBLE CONTROL IS 62/63 THROUGHOUT.**
+**AT THIS STEP THE SUITE READS 40 RED OF 63 AND THE DOUBLE CONTROL IS 62/63**
+— it reaches **62/63 in both** at [M-222](MEASUREMENTS.md#m-222), and the
+progression is kept because what each step cost is the finding.
 Against the parity install it was 46, and the six that cleared are
 `SolovievConvergence`, `FieldConvergence`, `RotatingSolovievConvergence`,
 `RotatingSourceConvergence`, `MaschkePerrinConvergence` and `cuDSSTraceSolver`.

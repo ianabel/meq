@@ -25,6 +25,7 @@
 #include "meq_version.hpp"
 
 #include "meq/BoundaryShape.hpp"
+#include "meq/BuildInfo.hpp"
 #include "meq/Coils.hpp"
 #include "meq/ConductorField.hpp"
 #include "meq/ConductorStore.hpp"
@@ -101,12 +102,14 @@ namespace
 			"                       machine.\n"
 			"\n"
 			"  --device <name>      run under an mfem::Device: cpu (the\n"
-			"                       default), cuda, or debug. CORRECTNESS\n"
-			"                       rather than speed -- MEQ's integrators have\n"
-			"                       no device kernels, so a device run costs\n"
-			"                       Newton steps. \"debug\" has device memory\n"
-			"                       semantics with host arithmetic and turns a\n"
-			"                       stale host read into a named fault.\n"
+			"                       default), cuda, or debug. Answers agree with\n"
+			"                       the host to every printed digit, and the\n"
+			"                       SOLVE leg is at parity with the host-threaded\n"
+			"                       default; what a device run still costs is the\n"
+			"                       output stage, where the reconstruction gives\n"
+			"                       up its host threading. \"debug\" has device\n"
+			"                       memory semantics with host arithmetic and\n"
+			"                       turns a stale host read into a named fault.\n"
 			"\n"
 			"Exit codes: 0 solved, 1 configuration, 2 solve did not converge,\n"
 			"3 output could not be written.\n" );
@@ -918,7 +921,19 @@ int main( int argc, char **argv )
 
 	if ( wantVersion )
 	{
-		std::printf( "MEQ %s (MFEM %s)\n", MEQ_VERSION, MFEM_VERSION_STRING );
+		/*
+		 * THE PRECISION AND THE DEVICE BACKENDS BELONG HERE BECAUSE THEY ARE
+		 * NOT MEQ'S TO CHOOSE AND ARE NOT IN THE CONFIGURATION FILE.
+		 * `MFEM_PRECISION` decides `real_t` throughout the library, so it is a
+		 * property of the MFEM this binary linked and is inherited through
+		 * `MFEM_DIR`; there is no TOML key for it and there cannot be. So two
+		 * installs produce two `meq` binaries that are indistinguishable from
+		 * the outside and answer to different floors -- DEVICE-PLAN.md section
+		 * 7.5 measures one equilibrium at 2.2 eps and another at 1,260 -- and
+		 * this line is the only place a user can ask which one they have.
+		 */
+		std::printf( "MEQ %s (MFEM %s, %s)\n", MEQ_VERSION, MFEM_VERSION_STRING,
+		             meq::buildDescription().c_str() );
 		return Solved;
 	}
 
@@ -985,34 +1000,61 @@ int main( int argc, char **argv )
 	 * mfem::Device( "cpu" ) is nearly inert but it is not nothing, and a driver
 	 * run without the flag should be byte-for-byte the run it always was.
 	 *
-	 * WHAT IT IS FOR IS CORRECTNESS, NOT SPEED. MEQ's element-local
-	 * integrators and its scatter have no device kernels, so a device buys no
-	 * arithmetic here; what it costs is measured per case and does NOT
-	 * generalise:
+	 * IT IS FOR CORRECTNESS FIRST AND FOR THE ARITHMETIC SECOND, AND THE SECOND
+	 * HALF IS REAL RATHER THAN ASPIRATIONAL. MEQ compiles five of its own
+	 * translation units through nvcc -- DeviceNPCDevice.cpp,
+	 * DeviceQuadratureDevice.cpp, DeviceRowsDevice.cpp, PointLocatorDevice.cpp
+	 * and SourceViewDevice.cpp -- so the source evaluators, the NPC operator
+	 * that feeds them to upstream's seam, the bordered row mirrors, the
+	 * plasma-current quadrature and the point locator all carry kernels of
+	 * MEQ's own, and MFEM's batched entry points carry the element-local
+	 * dense algebra, the whole NPC traversal and the trace assembly. What the
+	 * library takes is REPORTED and not inferred: `--profile` on
+	 * machine-f-diiid under --device cuda reads device integrand YES, batched
+	 * nonlinear residual and gradient YES, batched local solve YES, whole NPC
+	 * traversal YES, condensation cache YES, trace assembly batched YES --
+	 * against a --device cpu run of the same file where the integrand, the
+	 * local solve and the traversal all read NO. Face assembly is serial on
+	 * both by DELIBERATE choice, because its kernels accumulate through
+	 * AtomicAdd and that is what would destroy "cuda reproduces cpu to every
+	 * printed digit"; DEVICE-PLAN.md section 3.5 and MEASUREMENTS.md M-215.
+	 *
+	 * WHAT IT COSTS IS MEASURED PER CASE AND DOES NOT GENERALISE:
 	 *
 	 *   soloviev-nstx   plain, dF/dpsi=0   1 -> 1 step
-	 *   mhd-rectangle   plain Newton      5 -> 9 steps, 0.54 -> 1.20 s
-	 *   limited-tokamak bordered         12 -> 12 steps, 4.94 -> 5.43 s
-	 *   machine-f-diiid bordered          2 -> 2 steps, the host's every digit
+	 *   mhd-rectangle   plain Newton       5 -> 5 steps
+	 *   limited-tokamak bordered          12 -> 12 steps
+	 *   machine-f-diiid bordered           2 -> 2 steps, the host's every digit
 	 *
-	 * THIS COMMENT ONCE SAID THE COUNT RISES "WHERE dF/dpsi IS NON-ZERO", AT
-	 * 1.7x TO 2.0x, AND BOTH HALVES ARE FALSE. The middle row has non-zero
-	 * dF/dpsi and pays nothing, so that is not the discriminator; and the
-	 * ratios are a spread across cases rather than a range. The claim carried
-	 * no M-nn anchor and the commit that introduced it recorded the opposite
-	 * on its own case. See MEASUREMENTS.md M-129.
+	 * and on machine-f-diiid the SOLVE leg is at parity with the host-threaded
+	 * default -- 4.53 / 4.75 / 4.75 s against 4.46 / 4.85 / 4.94 over three
+	 * interleaved rounds on a quiet machine. The 1.07x to 1.13x that is left on
+	 * the WALL is entirely the OUTPUT stage: DarcyForm::Reconstruct() gives up
+	 * its host threading under a Device, and a thread count says so rather than
+	 * a guess -- the device output leg is flat in OMP_NUM_THREADS where the
+	 * host one falls by better than two. MEASUREMENTS.md M-223.
 	 *
-	 * AND THE machine-f-diiid ROW USED TO READ "the bordered Newton FAILS, the
-	 * ladder catches it, 13 steps, and psi_ax moves in its sixth digit". That
-	 * was real, reproducible, and NOT the device: it was two unsynced reads,
-	 * one in prepare()'s alias seeding and one on GetEssentialTrueDofs(), and
-	 * fixing them takes the case back to 2 steps and the host's every printed
-	 * digit. MEASUREMENTS.md M-130 has the chase. What is left on this list is
-	 * mhd-rectangle's 5 -> 9, which is unexplained and open.
+	 * EVERY APPARENT DEVICE COST ON THAT LIST RESOLVED AS A DEFECT, AND THAT IS
+	 * THE DURABLE FINDING RATHER THAN A HISTORY OF THE TABLE. machine-f-diiid
+	 * once read "the bordered Newton FAILS, the ladder catches it, 13 steps,
+	 * and psi_ax moves in its sixth digit": real, reproducible, and NOT the
+	 * device, but two unsynced reads -- one in prepare()'s alias seeding and
+	 * one on GetEssentialTrueDofs() -- MEASUREMENTS.md M-130. mhd-rectangle
+	 * read 5 -> 9 for as long as mfem::DarcyNPCOperator carried an unsynced
+	 * BlockVector block, and the member was `b_tr` rather than the `x_loc` this
+	 * project's own report named: right about the symptom, the idiom and the
+	 * file, and wrong about the member. *A reproduction is not a diagnosis.*
+	 * MEASUREMENTS.md M-207 and M-223. And one hypothesis was measured and
+	 * killed on the way and is worth not re-deriving: the count does NOT rise
+	 * "where dF/dpsi is non-zero", because mhd-rectangle has non-zero dF/dpsi
+	 * and pays nothing -- MEASUREMENTS.md M-129.
 	 *
 	 * SO THE STANDING ADVICE IS: A DEVICE ROW THAT LOOKS LIKE A COST IS A
 	 * SUSPECT, NOT A DATUM. Reach for --device debug and walk it before
-	 * writing it down.
+	 * writing it down. What debug CANNOT see is a stale copy behind honest
+	 * flags -- it faults on a raw access to the wrong location, not on a read
+	 * of the wrong copy -- and MEQ_STAGE_CHECKSUM is the instrument for that
+	 * one, printing each stage's validity flags before it reads.
 	 *
 	 * AND AT OMP_NUM_THREADS=8 A DEVICE STILL ABORTS ON THE PLAIN PATH --
 	 * "host pointer is not registered", from several threads at once inside
@@ -1110,7 +1152,8 @@ int main( int argc, char **argv )
 	 * warm-start interpolation are all charged to the solve phase while
 	 * belonging to none of solve()'s legs. On the diverted machine case that
 	 * is most of a leg-free remainder nobody could account for, and the guess
-	 * transfer alone is gslib locating tens of thousands of points.
+	 * transfer alone is meq::PointLocator inverting the element map at tens of
+	 * thousands of points.
 	 */
 	double buildSeconds = 0.0;
 	double buildCpuSeconds = 0.0;
@@ -1786,14 +1829,14 @@ int main( int argc, char **argv )
 	}
 
 	/*
-	 * cuDSS IS REFUSED BY THE DRIVER EVEN WHERE THE BUILD HAS IT, AND THE REASON
-	 * IS NOT THAT THE DRIVER CONFIGURES NO mfem::Device. IT IS THAT CONFIGURING
-	 * ONE WOULD BE THE WRONG TRADE UNTIL THE REST OF THE SOLVE GOES WITH IT.
+	 * THE CONFIG-FILE ROUTE TO cuDSS IS REFUSED EVEN WHERE THE BUILD HAS IT,
+	 * AND THE REASON IS NOT THAT cuDSS IS UNIMPLEMENTED. IT IS THAT A FILE
+	 * NAMING IT IS ASKING MEQ TO CONFIGURE A DEVICE FOR ONE LEG OF THE SOLVE.
 	 *
 	 * A device solver is only worth having if the data STAYS on the device.
 	 * MFEM's own plan for this -- doc/HDG-DEVICE-OFFLOAD.md on the branch MEQ
-	 * builds from, which is explicitly under construction -- divides the
-	 * element-local work into four groups and measures their shares:
+	 * builds from -- divides the element-local work into four groups and
+	 * measures their shares:
 	 *
 	 *     group 1  local dense linear algebra     7-10% of an NPC step
 	 *     group 2  the integrators               46-53%
@@ -1806,12 +1849,43 @@ int main( int argc, char **argv )
 	 * iteration would copy the local blocks host-device around host-side
 	 * integrator work -- plausibly slower than staying on the host throughout."
 	 *
-	 * Group 2 needs a partial-assembly rewrite and is not built. So exposing
-	 * cuDSS from a config file today is precisely the group-4-alone case: MEQ
-	 * would configure a Device, every Vector in the process would allocate
-	 * through it, the integrators and the scatter -- 58% to 70% of an NPC step
-	 * -- would still run on the host, and each Newton iteration would pay a
-	 * round trip for the one part that moved.
+	 * THAT SENTENCE DESCRIBES THE CONFIGURATION A CONFIG-FILE cuDSS REACHES,
+	 * WHICH IS WHY IT STILL DECIDES THIS GATE -- AND IT NO LONGER DESCRIBES
+	 * --device cuda. The route the other three groups needed is not a
+	 * partial-assembly rewrite and never was: PA's economic case is sum
+	 * factorisation on tensor-product elements and MEQ is triangles
+	 * everywhere, so no amount of it would apply here. What carries them is
+	 * MFEM's BATCHED element and face kernels, reached through [solver]
+	 * AssemblyMode, LocalFactorMode and TraceAssemblyMode, together with MEQ's
+	 * own five nvcc-compiled translation units for the integrand it owns.
+	 * Asked of the library on machine-f-diiid, --device cuda takes the device
+	 * integrand, the batched nonlinear residual and gradient, the batched
+	 * local solve, the whole NPC traversal, the condensation cache and the
+	 * batched trace assembly; the same file on --device cpu takes none of the
+	 * first three. MEASUREMENTS.md M-223.
+	 *
+	 * So exposing cuDSS from a config file is precisely the group-4-alone case
+	 * FOR THE PROCESS THAT WOULD REACH IT, which is a process with no
+	 * mfem::Device in it until this key made one: MEQ would configure a Device
+	 * on the strength of a trace-solver name, every Vector in the process
+	 * would allocate through it, none of the batched routes above would be
+	 * asked for, and each Newton iteration would pay a round trip for a leg
+	 * that MEQ's own profile puts at 20.1% of a threaded step
+	 * (MEASUREMENTS.md M-126). The gate below is therefore about the DEVICE
+	 * and not about the solver: a caller who has already asked for one on the
+	 * command line is not in that case at all, and gets cuDSS.
+	 *
+	 * AND IT IS WITHHELD FROM THE FILE FOR A SECOND REASON THAT SURVIVES
+	 * RESIDENCY. cuDSS 0.8.0 leaves CUDSS_CONFIG_DETERMINISTIC_MODE at 0 and
+	 * has no usable switch at MEQ's column count -- SetDeterministic( true )
+	 * is supported for one right-hand side only, and MEQ's bordered step is
+	 * N + 4 columns through ArrayMult -- so the same matrix and the same
+	 * right-hand sides differ run to run at 6.7e-16 to 3.6e-15. That destroys
+	 * "--device cuda reproduces --device cpu to every printed digit", which is
+	 * the instrument that root-caused M-79, M-130 and M-187, and it is why
+	 * DEVICE-PLAN.md section 3.5 orders cuDSS strictly last among the
+	 * residency items. A key in a shipped example would make a run silently
+	 * irreproducible; a flag on the command line is somebody choosing that.
 	 *
 	 * THERE IS ALSO AN IMMEDIATE FAILURE, and it is what made the refusal
 	 * urgent rather than merely principled. Without a Device, CuDSSSolver does
@@ -1825,18 +1899,19 @@ int main( int argc, char **argv )
 	 * device path is checked at all. tests/performance/TraceSolverScaling.cpp
 	 * constructs the Device first, and the `cuDSSTraceSolver` ctest pins cuDSS
 	 * against UMFPACK. What is refused here is only the config-file route, and
-	 * only until the field data has a reason to be on the device.
+	 * `--device cuda` is what opens it.
 	 */
 	/*
-	 * AND THE GATE IS NOW `WITHOUT A DEVICE` RATHER THAN `ALWAYS`, because
-	 * --device changes which half of the argument above applies.
+	 * SO THE GATE IS `WITHOUT A DEVICE` RATHER THAN `ALWAYS`, because --device
+	 * changes which half of the argument above applies.
 	 *
-	 * The refusal has always had two reasons and they are not equally durable.
-	 * The IMMEDIATE one -- CuDSSSolver reads host pointers through the
+	 * The refusal has two reasons and they are not equally durable. The
+	 * IMMEDIATE one -- CuDSSSolver reads host pointers through the
 	 * device-aware accessors and aborts inside CUDA -- is a statement about a
 	 * process with no mfem::Device in it, and `--device cuda` removes it.
-	 * The STANDING one -- the trade -- is a statement about where the rest of
-	 * the solve runs, and it is untouched.
+	 * The STANDING one -- the trade, and the reproducibility -- is a statement
+	 * about what a FILE may decide on the reader's behalf, and that is
+	 * untouched by the rest of the solve having reached the device.
 	 *
 	 * What the trade argument actually says is that MEQ should not CONFIGURE a
 	 * device in order to reach cuDSS. It does not say that a caller who has
@@ -1857,13 +1932,18 @@ int main( int argc, char **argv )
 			"\n"
 			"     It is not reachable from the configuration file alone, and\n"
 			"     that is withheld rather than unimplemented. A device solver\n"
-			"     is only worth having if the data stays on the device: MEQ's\n"
-			"     element-local integrators and its scatter into the trace\n"
-			"     matrix -- together most of a Newton step -- have no device\n"
-			"     kernels yet, so configuring a device for the trace solve\n"
-			"     alone copies the system across the bus once per iteration to\n"
-			"     accelerate one part of it. That is what MFEM's own HDG\n"
-			"     device-offload plan concludes against doing.\n"
+			"     is only worth having if the data stays on the device, and a\n"
+			"     file that names no device reaches none of the batched routes\n"
+			"     that put it there -- so this key alone would configure a\n"
+			"     device for the trace solve and nothing else, copying the\n"
+			"     system across the bus once per iteration to accelerate a leg\n"
+			"     worth about a fifth of a step. Asking for the device makes\n"
+			"     the rest of the solve resident with it.\n"
+			"\n"
+			"     cuDSS is also nondeterministic run to run at MEQ's column\n"
+			"     count, so a run that takes it cannot be reproduced digit for\n"
+			"     digit. That is a reasonable thing to choose on a command\n"
+			"     line and not a reasonable thing to inherit from a file.\n"
 			"\n"
 			"     Without --device this would not fall back either: CuDSSSolver\n"
 			"     reads host pointers through the device-aware accessors and\n"
@@ -2801,10 +2881,10 @@ int main( int argc, char **argv )
 		{
 			/*
 			 * THE INTERPOLATING WARM START, AND THE REASON CYCLES AFTER THE FIRST
-			 * NO LONGER BEGIN COLD. The FULL-ORDER route of docs/running.rst, which
-			 * this file used to refuse on the grounds that it "needs GSLIB" --
-			 * and GSLIB has been on, with meq::FieldTransfer written and pinned
-			 * by WarmStartConvergence, for longer than that comment survived.
+			 * DO NOT BEGIN COLD. It is the FULL-ORDER route of docs/running.rst,
+			 * through meq::FieldTransfer -- which IS meq::PointLocator, MEQ's own,
+			 * so it asks nothing of MFEM_USE_GSLIB -- and it is pinned by
+			 * WarmStartConvergence.
 			 *
 			 * The previous cycle converged on a coarser mesh, so its answer is
 			 * the best starting point available for this one: same equilibrium,
@@ -2836,9 +2916,8 @@ int main( int argc, char **argv )
 			// TWO ROUTES, AND THE MESH DECIDES WHICH. Same mesh, same degree:
 			// the EXACT restart, every coefficient. A different mesh: the
 			// INTERPOLATING restart of docs/running.rst, through
-			// meq::FieldTransfer. This branch used to refuse the second and say
-			// it "needs FindPointsGSLIB and is not written yet", which had been
-			// untrue for months -- see the else below.
+			// meq::FieldTransfer -- MEQ's own point locator, which is why
+			// neither route is gated on MFEM_USE_GSLIB. See the else below.
 			//
 			// It is a FIRST-CYCLE guess because cycles after the first have a
 			// better one available: the previous cycle's converged answer,
@@ -2853,11 +2932,13 @@ int main( int argc, char **argv )
 			}
 			else
 			{
-				// AND A DIFFERENT MESH IS NO LONGER REFUSED. This threw until
-				// 2026-09-02, saying the interpolating restart "needs GSLIB" --
-				// which was written before meq::FieldTransfer existed and was
-				// never revisited. Restarting from a run at another resolution is
-				// the ordinary way to use a stored answer, and it works.
+				// AND A DIFFERENT MESH IS NOT REFUSED. Restarting from a run at
+				// another resolution is the ordinary way to use a stored answer,
+				// so it interpolates: meq::FieldTransfer locates each node of
+				// this mesh in the stored one and evaluates there. Nothing about
+				// it needs MFEM_USE_GSLIB, which is what lets a build without
+				// that option -- a single-precision one, for instance -- have a
+				// warm start at all.
 				meq::FieldTransfer transfer( *guessMesh );
 				carried = std::make_unique<mfem::GridFunction>(
 					fresh->potential().FESpace() );
@@ -5380,6 +5461,15 @@ int main( int argc, char **argv )
 		meq::NetCDFWriter writer( stem + ".nc", sampler );
 		writer.attribute( "title", "MEQ equilibrium" );
 		writer.attribute( "meq_version", MEQ_VERSION );
+		// AND WHICH BUILD, WHICH IS NOT THE SAME QUESTION AS WHICH COMMIT.
+		// One tree builds against a double MFEM and against a single one, and
+		// the two answer to floors three orders apart (DEVICE-PLAN.md section
+		// 7.5), so a file that names its commit and not its precision has not
+		// said enough for its numbers to be read. Separate attributes rather
+		// than a longer meq_version, so anything already reading that string
+		// keeps reading the same thing.
+		writer.attribute( "meq_precision", meq::realPrecision() );
+		writer.attribute( "meq_device_backends", meq::deviceBackends() );
 		// The file says which input produced it and how well. A directory of
 		// scan output is unreadable otherwise, and "which commit was this?" is
 		// the first question asked of any result that looks wrong.
@@ -6118,6 +6208,9 @@ int main( int argc, char **argv )
 				                              family );
 				surfaces.attribute( "title", "MEQ flux-surface geometry" );
 				surfaces.attribute( "meq_version", MEQ_VERSION );
+				surfaces.attribute( "meq_precision", meq::realPrecision() );
+				surfaces.attribute( "meq_device_backends",
+				                    meq::deviceBackends() );
 				surfaces.attribute( "config_file", argument );
 				surfaces.attribute( "source_type",
 				                    sourceTypeName( config->getSource().type ) );
