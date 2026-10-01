@@ -1581,6 +1581,18 @@ product at the core count is what pays:
 
 37/37 in every configuration when that table was taken, and **62 of 63 today**,
 the one red being `PlasmaEdgeConvergence` while the staircase `Γ_{p,h}` stands.
+**`DeviceParity` NOW RUNS THREE ARMS, cpu AND debug AND cuda** →
+**[M-228](MEASUREMENTS.md#m-228)**. The CUDA gap was left open on the grounds
+that a third arm would be a second slow case, and that is backwards: `debug`
+`mprotect`s the host page and is the expensive one, so the card arm costs
+**35 s on a 427 s test**. It is not a repeat — `debug` catches a raw read of the
+WRONG LOCATION and is blind to honest flags over a STALE COPY, which is what
+cost `q-driven` a factor of two past a clean `debug` run and an unchanged Newton
+count (M-206). Skipped loudly, on MFEM's own `Device configuration:` line, where
+no device is configured. **Added before item 6 deliberately**: cuDSS as the
+device default ends the digit-for-digit instrument, so this was the last moment
+an exact CUDA arm could be pinned at all.
+
 **`DeviceParity` is the newest case and the slowest after
 `FreeBoundaryCoupling`** — 361 s, of which 329 s is `machine-f-diiid` under
 `--device debug` — and it went green when upstream fixed

@@ -13292,3 +13292,61 @@ flags.* Same species as `ComputeHDGFaceEnergy()`'s line-range error and the
 `darcyform.hpp` doxygen that this project carried as its largest dependency for
 months — and the cost here was a plan item ordered against a cause that was not
 the cause.
+
+### M-228
+
+**`DeviceParity` GAINS A REAL-CUDA ARM, AND THE REASON IT DID NOT HAVE ONE WAS
+BACKWARDS.** The case ran `--device cpu` against `--device debug` and
+`DEVICE-PLAN.md` §4 stage 0 named the missing CUDA coverage *"a gap worth naming
+rather than closing with a second slow case"*. **`debug` is the slow arm.** It
+has device memory semantics with host arithmetic and `mprotect`s the host page,
+so it pays for every protection fault; a card run does the same work on the
+card.
+
+| `machine-f-diiid`, `mhd-rectangle` | seconds |
+|---|---|
+| `DeviceParity` before, cpu + debug | 392 |
+| `DeviceParity` after, cpu + debug + cuda | **427** |
+
+**35 seconds for the arm that covers the class the other two cannot.**
+
+| case | arm | Newton | `psi_ax` |
+|---|---|---|---|
+| `machine-f-diiid` | cpu · debug · **cuda** | 2 · 2 · **2** | 3.759851e-01 · 3.759851e-01 · **3.759851e-01** |
+| `mhd-rectangle` | cpu · debug · **cuda** | 5 · 5 · **5** | — (no border) |
+
+**AND IT IS NOT A REPEAT OF THE `debug` ARM, WHICH IS THE WHOLE JUSTIFICATION.**
+The file's own header claimed the iteration-count assertion was what the
+stale-copy class needed. **That is M-187's class** — an answer right to every
+digit on four times the work. **[M-206](#m-206) defeats both instruments at
+once**: a 43-solve outer loop ran to completion under `debug` **without faulting
+once**, `psi_ax` came back wrong by a **factor of two**, and the inner bordered
+solve took the **same four Newton steps** on both arms. `debug` protects a page
+and so catches a raw read of the **wrong location**; it is blind to honest flags
+over a **stale copy**, and no count can see a value that is merely old. What
+found M-206 was `cpu` against `cuda`, stage by stage. *A green `debug` arm is
+not evidence about the card.*
+
+**THE SKIP IS READ OFF MFEM'S OWN OUTPUT AND NOT INFERRED FROM AN EXIT CODE.**
+A build carrying CUDA on a machine with no card and a device that disagrees
+share an exit status, so the arm asks whether MFEM printed
+`Device configuration: cuda` and treats its absence as an absence. *An absent
+GPU is not a disagreement*, and a test that cannot tell the two apart either
+fails everywhere or skips silently — the second being worse than having no test,
+which is why the skipped row prints its reason.
+
+**AND IT HAD TO BE ADDED BEFORE ITEM 6, NOT AFTER.** §3.5 records that cuDSS as
+the device default ends *"`--device cuda` reproduces `--device cpu` to every
+printed digit"* — 0.8.0 is nondeterministic run to run at up to 3.6e-15 with no
+usable switch at `N + 4` right-hand sides. So every digit-for-digit arm must be
+pinned **while the trace solve is still PARDISO**; afterwards the same assertion
+can only be written as a tolerance. *The cheapest moment to buy an exact
+instrument is the last one before it stops being available.*
+
+**THE COMPILE-TIME HALF IS LEGITIMATE HERE AND IS NOT ALWAYS.**
+`#ifdef MFEM_USE_CUDA` decides whether to try, and this translation unit
+includes `mfem.hpp` — which is what makes the test mean anything.
+`MachineFixedBoundary.cpp` drives the shipped binary, needs nothing of the
+library, included no MFEM header, and its `#ifdef MFEM_USE_SINGLE` compiled, ran
+and silently took the other branch, because a configuration macro in a TU that
+has not included MFEM is not false but **undefined**.

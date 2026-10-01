@@ -21,14 +21,31 @@
  * answer by doing twice the work has a defect**, and M-187 sat in this
  * project's measurements for weeks described as a property of the device path.
  *
- * `debug` AND NOT `cuda`, DELIBERATELY. `mfem::Device( "debug" )` has device
- * MEMORY semantics with host arithmetic, so it exercises the whole validity-
- * flag path -- which is where every one of the three defects above lived --
- * and needs no GPU, so this runs anywhere MFEM does. It is also the stricter
- * arm: it `mprotect`s the host page, so a raw read of a device-valid buffer
- * faults here and is merely a wrong number under CUDA. What it CANNOT see is
- * honest flags over a stale copy (M-187), and that is exactly what the
- * iteration-count assertion is for.
+ * `debug` IS THE PORTABLE ARM. `mfem::Device( "debug" )` has device MEMORY
+ * semantics with host arithmetic, so it exercises the whole validity-flag path
+ * -- which is where every one of the three defects above lived -- and needs no
+ * GPU, so this runs anywhere MFEM does. It is also the stricter arm for one
+ * class: it `mprotect`s the host page, so a raw read of a device-valid buffer
+ * faults here and is merely a wrong number under CUDA.
+ *
+ * **AND `cuda` IS A THIRD ARM, BECAUSE `debug` IS BLIND TO THE CLASS THAT COST
+ * M-206 A FACTOR OF TWO AND THE ITERATION COUNT DOES NOT COVER IT EITHER.**
+ * This header used to say the count was what the stale-copy class needed. It
+ * is what **M-187**'s needs -- an answer right to every digit on four times
+ * the work. **M-206 defeats both**: a 43-solve outer loop ran to completion
+ * under `debug` without faulting once, `psi_ax` came back wrong by a factor of
+ * two, and the inner bordered solve took the SAME four Newton steps on both
+ * arms. Honest flags over a stale copy fault nowhere and change no count. What
+ * found it was `cpu` against `cuda`, compared digit for digit.
+ *
+ * So the cuda arm runs where the build and the machine have one, and is
+ * **skipped loudly rather than failed** where they do not -- a build without
+ * CUDA is an absence, not a disagreement. It is nearly free: `debug` is the
+ * expensive arm at some hundreds of seconds a case and a card run is seconds.
+ * **It is added BEFORE item 6 on purpose**: `DEVICE-PLAN.md` section 3.5 ends
+ * the digit-for-digit instrument when cuDSS becomes the device default, so
+ * this is the last point at which a CUDA arm can be pinned exactly rather than
+ * to a tolerance.
  *
  * THE COMPARISON IS ON THE PRINTED TEXT, not on a parsed double within a
  * tolerance. "Identical to every printed digit" is what the acceptance says
@@ -94,7 +111,32 @@ namespace
 		std::string psiBoundary;
 		std::string xPoint;
 		std::string newton;
+
+		/// Whether MFEM printed its own device configuration naming this
+		/// backend. **A build carrying CUDA on a machine with no card does not
+		/// get that line**, and the difference between *the device was never
+		/// configured* and *the device gave a different answer* is the whole
+		/// of what makes a skip honest. Asked of MFEM's own output rather than
+		/// inferred from an exit code, because an abort and a refusal share one.
+		bool configured = false;
 	};
+
+	/// Whether this BUILD can reach CUDA at all.
+	///
+	/// **THIS TRANSLATION UNIT INCLUDES `mfem.hpp`, WHICH IS WHAT MAKES THE
+	/// TEST LEGITIMATE.** `MachineFixedBoundary.cpp` drives the shipped binary,
+	/// needs nothing of the library, included no MFEM header -- and its
+	/// `#ifdef MFEM_USE_SINGLE` compiled, ran, and silently took the other
+	/// branch, because a precision macro in a TU that has not included MFEM is
+	/// not false but UNDEFINED. `mfem/config/config.hpp` is what defines these.
+	bool cudaIsBuilt()
+	{
+#ifdef MFEM_USE_CUDA
+		return true;
+#else
+		return false;
+#endif
+	}
 
 	/// The characters following @a marker up to the end of the number, or an
 	/// empty string when the marker is absent. Absence is itself comparable:
@@ -149,6 +191,9 @@ namespace
 		run.psiBoundary = after( text, "psi_bnd = " );
 		run.xPoint = after( text, "at the X-point ( " );
 		run.newton = after( text, "converged in " );
+		run.configured =
+			text.find( std::string( "Device configuration: " ) + device )
+			!= std::string::npos;
 		return run;
 	}
 
@@ -177,8 +222,20 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		Run const host = solve( which, "cpu" );
 		Run const device = solve( which, "debug" );
 
+		/*
+		 * THE CARD ARM. Run only where the build has CUDA; `configured` then
+		 * says whether the MACHINE did too, read off MFEM's own output rather
+		 * than guessed from an exit code. See the header for why `debug` alone
+		 * is not enough and why this is added before item 6 rather than after.
+		 */
+		Run const card = cudaIsBuilt() ? solve( which, "cuda" ) : Run{};
+
 		for ( auto const &pair : { std::make_pair( "cpu", &host ),
-		                           std::make_pair( "debug", &device ) } )
+		                           std::make_pair( "debug", &device ),
+		                           std::make_pair( "cuda", &card ) } )
+		{
+			if ( std::string( pair.first ) == "cuda" && !card.configured )
+				continue;
 			std::printf( "    %-18s %-8s %6d %8.1f %16s %10s\n",
 			             which.stem, pair.first, pair.second->status,
 			             pair.second->seconds,
@@ -186,6 +243,12 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 			                 ? "-" : pair.second->psiAxis.c_str(),
 			             pair.second->newton.empty()
 			                 ? "-" : pair.second->newton.c_str() );
+		}
+		if ( !card.configured )
+			std::printf( "    %-18s %-8s %s\n", which.stem, "cuda",
+			             cudaIsBuilt()
+			                 ? "SKIPPED -- built with CUDA, no device configured"
+			                 : "SKIPPED -- this build has no CUDA" );
 
 		BOOST_TEST_REQUIRE( host.status == 0,
 		                    std::string( which.stem )
@@ -293,5 +356,50 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		                + " Newton iterations under a device against "
 		                + host.newton + " on the host -- the answer may be "
 		                  "right and the work is not (MEASUREMENTS.md M-187)" );
+
+		/*
+		 * AND THE SAME FOUR AGAINST THE CARD, WHICH IS A DIFFERENT QUESTION
+		 * AND NOT A REPEAT.
+		 *
+		 * `debug` and `cuda` disagree about exactly one thing and it is the
+		 * one that matters here: `debug` protects the host page, so a stale
+		 * copy read raw is a FAULT, while under CUDA nothing is protected and
+		 * the same read returns the wrong number quietly. M-206 is the worked
+		 * example -- a whole outer loop clean under `debug`, `psi_ax` wrong by
+		 * a factor of two under CUDA, the same Newton count on both. So a
+		 * green `debug` arm is not evidence about this one.
+		 *
+		 * Skipped and not failed where no device was configured: *an absent
+		 * GPU is an absence, not a disagreement*, and `configured` is read off
+		 * MFEM's own line so the two cannot be confused.
+		 */
+		if ( !card.configured )
+			continue;
+
+		BOOST_TEST( card.status == 0,
+		            std::string( which.stem ) + " exits "
+		                + std::to_string( card.status )
+		                + " under --device cuda and 0 on the host" );
+		BOOST_TEST( printedDigitsAgree( card.psiAxis, host.psiAxis ),
+		            std::string( which.stem ) + ": psi_ax is "
+		                + card.psiAxis + " under CUDA against "
+		                + host.psiAxis + " on the host. THE debug ARM BEING "
+		                  "GREEN SAYS NOTHING HERE -- debug faults on a raw "
+		                  "read of a device-valid buffer and is blind to "
+		                  "honest flags over a STALE copy, which is what cost "
+		                  "q-driven a factor of two (MEASUREMENTS.md M-206). "
+		                  "Walk it with MEQ_STAGE_CHECKSUM=1 on both arms and "
+		                  "diff: the first stage that disagrees names it" );
+		BOOST_TEST( printedDigitsAgree( card.psiBoundary, host.psiBoundary ),
+		            std::string( which.stem ) + ": psi_bnd is "
+		                + card.psiBoundary + " under CUDA against "
+		                + host.psiBoundary );
+		BOOST_TEST( printedDigitsAgree( card.xPoint, host.xPoint ),
+		            std::string( which.stem ) + ": the X-point is "
+		                + card.xPoint + " under CUDA against " + host.xPoint );
+		BOOST_TEST( card.newton == host.newton,
+		            std::string( which.stem ) + ": " + card.newton
+		                + " Newton iterations under CUDA against "
+		                + host.newton + " on the host" );
 	}
 }
