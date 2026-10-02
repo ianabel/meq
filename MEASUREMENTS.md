@@ -13604,3 +13604,55 @@ transmission constraint, the nodal-maximum fallback and the rest — and every
 one of them is a reduction or a point evaluation of the kind
 `meq::DeviceBasis` and `meq::DeviceQuadrature` now both serve. None is a search;
 the search was the hard one and it is done.
+
+### M-233
+
+**THE AXIS KERNEL WAS 65x OFF ITS OWN ARITHMETIC, AND TWO THIRDS OF THAT WAS
+TWO SERIAL SCANS AND A RUNTIME LOOP BOUND.**
+
+`meq::axisCandidatesOnDevice()` as first written took **297 ms** to root
+102,840 elements -- 2.9 us an element, against the ~4.5 ms the flop count and
+this card's FP64 rate give. Three causes, found with `-Xptxas -v` and a thread
+count rather than guessed:
+
+| | | |
+|---|---|---|
+| **the two reductions were `mfem::forall( 1, ... )`** | the flux scale walked **1.23 million dofs on one CUDA core** and the compaction 205,680 slots | the comment justified it as *"thirty microseconds of serial walk"* -- an estimate made against a case forty times smaller, and wrong by that factor |
+| **a runtime loop bound** | `basis.dofs` is not a constant, so nvcc could not unroll; `coefficients[ at ]` stayed a dynamic index and the three per-thread arrays went to LOCAL MEMORY -- **608 bytes of stack frame with ZERO register spills**, which is what that pairing means | at 1024 threads an SM carries 622 KB of local working set against 64 KB of L1 |
+| **the cap was a download budget** | the compacted array came back WHOLE, so 256 was the most it could hold | one refusal on `fixed-f-diiid` cost a **22.4 second** host sweep |
+
+| `fixed-f-diiid`, 102,840 elements, per device sweep | |
+|---|---|
+| as first written | **297 ms** |
+| + two-stage max and order-preserving stream compaction | 89 ms |
+| + the degree as a template parameter | **11.9 ms** |
+
+**25x, and the answer did not move**: the candidate lists are bit-identical to
+the single-threaded version's at every degree, and the stopping scale still
+reads `0.0 eps` apart from `fluxScale()`'s own. 116 ns an element is about
+2.6x off this card's FP64 peak for the flop count.
+
+**THE SECOND ROW IS THE ONE WORTH KEEPING.** Halving
+`meq::triangleBasisMaxDegree` as a diagnostic took the stack frame from 608 to
+**272** bytes, accounting for the array sizes exactly -- which is what said the
+arrays were the whole of it, before any refactor. Templating on the degree then
+took it to **0 bytes and 96 registers**. *A stack frame with no spills is not a
+register-pressure problem; it is an array the compiler could not see the bounds
+of.*
+
+**AND IT IS NOT `mfem::reduce`, WHICH IS THE ONE PLACE THE STANDING PREFERENCE
+FOR MFEM'S ABSTRACTIONS GIVES WAY.** That routine takes `T &res`, a HOST
+reference, so the one scalar these kernels keep on the device would come back
+and be pushed out again -- a download and an upload per constraint evaluation
+of the number `meq::AxisSearchInputs::target` points at. The two-stage form
+keeps it where it is, and `fmax` being associative AND commutative means
+nothing is given up for it; `meq::DeviceRows` refuses the same primitive for
+the opposite reason, its sum having an order to reproduce.
+
+**WHAT IS LEFT IS NOT THE KERNEL.** The leg is now one declined call: at a
+near-zero iterate `max | q |` collapses, the stopping rule becomes absolute,
+every element reports a root at its own seed and the list is `2 x elements`
+long. The route refuses it -- and **the host meets the same pathology**,
+paying 22.4 s for that one sweep and eleven of them over a `--device cpu` run.
+*That is a property of the stopping rule on a degenerate iterate, not of
+either route.*

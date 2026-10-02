@@ -6643,6 +6643,10 @@ int main( int argc, char **argv )
 		// predicates because it is one: the kernel is built and bit-identical,
 		// and whether it RUNS is decided by where the border's columns happen
 		// to be when the fill reaches them. M-208.
+		std::printf( "MEQ:   axis and X-point field evaluations on device: "
+		             "%ld taken, %ld declined\n",
+		             solver->axisRoutesTakenOnDevice(),
+		             solver->axisRoutesDeclinedOnDevice() );
 		std::printf( "MEQ:   bordered row dots on device %s\n",
 		             solver->borderDotsRanOnDevice() ? "yes" : "NO" );
 

@@ -219,18 +219,53 @@ namespace meq
 	 * against anything -- there is no host loop with this shape to match -- but
 	 * is what makes two runs of the same kernel agree with each other.
 	 */
+	/**
+	 * The same, with the dof count a COMPILE-TIME constant.
+	 *
+	 * **THE TEMPLATE IS NOT A TIDINESS EXERCISE: IT IS WHERE THE
+	 * COEFFICIENTS LIVE.** With a runtime bound nvcc cannot unroll these
+	 * loops, so `out[ b ]` is a dynamic index and the array it belongs to is
+	 * placed in LOCAL MEMORY rather than in registers -- measured with
+	 * `-Xptxas -v`, the root-finding kernel carried a **608 byte stack
+	 * frame** with zero register spills, which is what that combination
+	 * means. At 1024 threads an SM then has 622 KB of local working set
+	 * against 64 KB of L1. Constant bounds unroll, the indices become
+	 * constants, and the arrays become registers.
+	 */
+	template <int DOFS>
+	MFEM_HOST_DEVICE inline void triangleBasisCoefficients(
+		mfem::real_t const *change, mfem::real_t const *dofs,
+		mfem::real_t *out )
+	{
+		MFEM_UNROLL( DOFS )
+		for ( int b = 0; b < DOFS; ++b )
+		{
+			mfem::real_t total = 0.0;
+			mfem::real_t const *row = change + b*DOFS;
+			MFEM_UNROLL( DOFS )
+			for ( int i = 0; i < DOFS; ++i )
+				total += row[ i ]*dofs[ i ];
+			out[ b ] = total;
+		}
+	}
+
+	/// The runtime form, which dispatches to the template above so that the
+	/// arithmetic is written once. The host path and the tests take this one.
 	MFEM_HOST_DEVICE inline void triangleBasisCoefficients(
 		TriangleBasisView const &basis, mfem::real_t const *dofs,
 		mfem::real_t *out )
 	{
-		for ( int b = 0; b < basis.dofs; ++b )
+		switch ( basis.dofs )
 		{
-			mfem::real_t total = 0.0;
-			mfem::real_t const *row = basis.change + b*basis.dofs;
-			for ( int i = 0; i < basis.dofs; ++i )
-				total += row[ i ]*dofs[ i ];
-			out[ b ] = total;
+			case 1:  triangleBasisCoefficients<  1 >( basis.change, dofs, out ); return;
+			case 3:  triangleBasisCoefficients<  3 >( basis.change, dofs, out ); return;
+			case 6:  triangleBasisCoefficients<  6 >( basis.change, dofs, out ); return;
+			case 10: triangleBasisCoefficients< 10 >( basis.change, dofs, out ); return;
+			case 15: triangleBasisCoefficients< 15 >( basis.change, dofs, out ); return;
+			default: break;
 		}
+		for ( int b = 0; b < basis.dofs; ++b )
+			out[ b ] = 0.0;
 	}
 
 	/**
@@ -248,44 +283,35 @@ namespace meq
 	 * Newton outside, deliberately, and a clamped evaluation would silently be
 	 * a different function there.
 	 */
+	/**
+	 * The value at a reference point and its reference gradient, with the
+	 * degree a COMPILE-TIME constant.
+	 *
+	 * See triangleBasisCoefficients() for why the template exists: a runtime
+	 * degree leaves `coefficients[ at ]` a dynamic index, which puts the
+	 * caller's array in local memory rather than in registers.
+	 */
+	template <int DEGREE>
 	MFEM_HOST_DEVICE inline void evaluateTriangleBasis(
-		int degree, mfem::real_t const *coefficients,
+		mfem::real_t const *coefficients,
 		mfem::real_t xi, mfem::real_t eta,
-		mfem::real_t &value, mfem::real_t *dValueDxi, mfem::real_t *dValueDeta )
+		mfem::real_t &value, mfem::real_t *dValueDxi,
+		mfem::real_t *dValueDeta )
 	{
-		/*
-		 * THE BOUND IS CHECKED HERE AND NOT ONLY IN build(), BECAUSE THE THREE
-		 * STACK ARRAYS BELOW ARE SIZED BY IT.
-		 *
-		 * `build()` refuses a degree above the ceiling, but it is in another
-		 * translation unit and this function is public, MFEM_HOST_DEVICE and
-		 * called directly by tests. A `degree` one too large writes one past
-		 * `p0`, and an out-of-bounds stack write in a kernel is the "plausible
-		 * wrong number" this project keeps recording rather than a crash. A
-		 * MFEM_HOST_DEVICE function cannot throw and cannot assert, so the
-		 * answer is a defined zero.
-		 */
-		if ( degree < 0 || degree > triangleBasisMaxDegree )
-		{
-			value = 0.0;
-			if ( dValueDxi != nullptr ) { *dValueDxi = 0.0; }
-			if ( dValueDeta != nullptr ) { *dValueDeta = 0.0; }
-			return;
-		}
-
 		mfem::real_t const lambda0 = mfem::real_t( 1.0 ) - xi - eta;
 		mfem::real_t const lambda1 = xi;
 		mfem::real_t const lambda2 = eta;
 
 		// Powers by repeated multiplication rather than pow(): the bases go
 		// negative outside the element and the exponents are small integers.
-		mfem::real_t p0[ triangleBasisMaxDegree + 1 ];
-		mfem::real_t p1[ triangleBasisMaxDegree + 1 ];
-		mfem::real_t p2[ triangleBasisMaxDegree + 1 ];
+		mfem::real_t p0[ DEGREE + 1 ];
+		mfem::real_t p1[ DEGREE + 1 ];
+		mfem::real_t p2[ DEGREE + 1 ];
 		p0[ 0 ] = 1.0;
 		p1[ 0 ] = 1.0;
 		p2[ 0 ] = 1.0;
-		for ( int e = 1; e <= degree; ++e )
+		MFEM_UNROLL( DEGREE )
+		for ( int e = 1; e <= DEGREE; ++e )
 		{
 			p0[ e ] = p0[ e - 1 ]*lambda0;
 			p1[ e ] = p1[ e - 1 ]*lambda1;
@@ -298,10 +324,11 @@ namespace meq
 		bool const wantGradient = dValueDxi != nullptr && dValueDeta != nullptr;
 
 		int at = 0;
-		for ( int j = 0; j <= degree; ++j )
-			for ( int k = 0; k <= degree - j; ++k, ++at )
+		MFEM_UNROLL( DEGREE + 1 )
+		for ( int j = 0; j <= DEGREE; ++j )
+			for ( int k = 0; k <= DEGREE - j; ++k, ++at )
 			{
-				int const i = degree - j - k;
+				int const i = DEGREE - j - k;
 				mfem::real_t const c = coefficients[ at ];
 				total += c*p0[ i ]*p1[ j ]*p2[ k ];
 
@@ -329,6 +356,52 @@ namespace meq
 			*dValueDxi = totalXi;
 			*dValueDeta = totalEta;
 		}
+	}
+
+	/**
+	 * The value at a reference point, and its reference gradient.
+	 *
+	 * @param degree the polynomial degree the coefficients belong to.
+	 * @param coefficients `triangleBasisDofs( degree )` monomial coefficients,
+	 *        as triangleBasisCoefficients() produces them.
+	 * @param dValueDxi, dValueDeta may be null together, in which case only the
+	 *        value is computed -- which is the case the axis search wants,
+	 *        since it differences the value rather than reading the gradient.
+	 *
+	 * Defined for ANY `( xi, eta )`, inside the reference triangle or not.
+	 * See the file comment: the caller this was written for spends part of its
+	 * Newton outside, deliberately, and a clamped evaluation would silently be
+	 * a different function there.
+	 *
+	 * A dispatcher onto the template above, so the arithmetic is written once.
+	 * The bound is checked HERE and not only in build(), because the three
+	 * stack arrays are sized by it, this function is public and
+	 * MFEM_HOST_DEVICE, and a MFEM_HOST_DEVICE function cannot throw or
+	 * assert -- so the answer out of range is a defined zero.
+	 */
+	MFEM_HOST_DEVICE inline void evaluateTriangleBasis(
+		int degree, mfem::real_t const *coefficients,
+		mfem::real_t xi, mfem::real_t eta,
+		mfem::real_t &value, mfem::real_t *dValueDxi,
+		mfem::real_t *dValueDeta )
+	{
+		switch ( degree )
+		{
+			case 0: evaluateTriangleBasis< 0 >( coefficients, xi, eta, value,
+			                                    dValueDxi, dValueDeta ); return;
+			case 1: evaluateTriangleBasis< 1 >( coefficients, xi, eta, value,
+			                                    dValueDxi, dValueDeta ); return;
+			case 2: evaluateTriangleBasis< 2 >( coefficients, xi, eta, value,
+			                                    dValueDxi, dValueDeta ); return;
+			case 3: evaluateTriangleBasis< 3 >( coefficients, xi, eta, value,
+			                                    dValueDxi, dValueDeta ); return;
+			case 4: evaluateTriangleBasis< 4 >( coefficients, xi, eta, value,
+			                                    dValueDxi, dValueDeta ); return;
+			default: break;
+		}
+		value = 0.0;
+		if ( dValueDxi != nullptr ) { *dValueDxi = 0.0; }
+		if ( dValueDeta != nullptr ) { *dValueDeta = 0.0; }
 	}
 
 	/**

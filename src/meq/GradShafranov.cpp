@@ -7674,6 +7674,16 @@ namespace
 		return borderDotsOnDevice;
 	}
 
+	long GradShafranovSolver::axisRoutesTakenOnDevice() const
+	{
+		return axisDeviceTaken;
+	}
+
+	long GradShafranovSolver::axisRoutesDeclinedOnDevice() const
+	{
+		return axisDeviceDeclined;
+	}
+
 	bool GradShafranovSolver::sourceRuleIsExplicit() const
 	{
 		return sourceIntegrator != nullptr
@@ -8599,7 +8609,8 @@ namespace
 		int axisDeviceState = 0;
 		/// Times a route was available and then declined mid-solve, which is a
 		/// different thing from being unavailable and is reported separately.
-		long axisDeviceDeclines = 0;
+		axisDeviceTaken = 0;
+		axisDeviceDeclined = 0;
 
 		/*
 		 * WHETHER THE DEVICE CAN EVALUATE THIS PROBLEM'S FIELDS AT ALL.
@@ -8730,7 +8741,10 @@ namespace
 			       mfem::IntegrationPoint const &reference ) -> bool
 		{
 			if ( !iterateIsResident( state ) || !ensureDeviceBasis() )
+			{
+				++axisDeviceDeclined;
 				return false;
+			}
 
 			XPointFieldInputs inputs{};
 			inputs.flux = axisFluxBasis.view();
@@ -8746,7 +8760,7 @@ namespace
 			XPointFieldValues got{};
 			if ( !xPointFieldOnDevice( inputs, got ) )
 			{
-				++axisDeviceDeclines;
+				++axisDeviceDeclined;
 				return false;
 			}
 
@@ -8757,6 +8771,7 @@ namespace
 					xFluxJacobian[ i ][ j ] = got.fluxJacobian[ 2*i + j ];
 			xPotentialGradient[ 0 ] = got.potentialGradient[ 0 ];
 			xPotentialGradient[ 1 ] = got.potentialGradient[ 1 ];
+			++axisDeviceTaken;
 			return true;
 		};
 
@@ -9367,7 +9382,10 @@ namespace
 		auto axisDeviceRoute = [ & ]( mfem::Vector const &state ) -> bool
 		{
 			if ( axisDeviceState < 0 || !iterateIsResident( state ) )
+			{
+				++axisDeviceDeclined;
 				return false;
+			}
 
 			if ( axisDeviceState == 0 )
 			{
@@ -9421,7 +9439,7 @@ namespace
 				     static_cast<mfem::real_t>( defaults.newtonTolerance() ),
 				     axisNewtonTarget ) )
 			{
-				++axisDeviceDeclines;
+				++axisDeviceDeclined;
 				return false;
 			}
 
@@ -9452,7 +9470,7 @@ namespace
 				// compaction holds. A TRUNCATED competition is one missing an
 				// entrant, which is exactly how a coil's O-point would win
 				// one -- so it is refused rather than used.
-				++axisDeviceDeclines;
+				++axisDeviceDeclined;
 				return false;
 			}
 
@@ -9519,6 +9537,7 @@ namespace
 			// two equals. See CriticalPointFinder::mergeCandidates() for why
 			// skipping it changes answers rather than only lengthening a list.
 			deviceCandidates = defaults.mergeCandidates( deviceCandidates );
+			++axisDeviceTaken;
 			return true;
 		};
 

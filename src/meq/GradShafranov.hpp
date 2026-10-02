@@ -1249,6 +1249,11 @@ namespace meq
 			 * [M-208](../MEASUREMENTS.md).
 			 */
 			bool borderDotsRanOnDevice() const;
+
+			/// @copydoc axisDeviceTaken
+			long axisRoutesTakenOnDevice() const;
+			/// @copydoc axisDeviceTaken
+			long axisRoutesDeclinedOnDevice() const;
 			/// @}
 
 			bool batchedPotFaceAssemblyTaken() const;
@@ -5312,6 +5317,23 @@ namespace meq
 			/// about everything else it touches and this is a report, not
 			/// state the solve reads back.
 			mutable bool borderDotsOnDevice = false;
+			/**
+			 * How many axis or X-point evaluations took the device route and
+			 * how many declined, over the last solve.
+			 *
+			 * **A COUNT RATHER THAN A FLAG, BECAUSE THE INTERESTING STATE IS
+			 * PARTIAL.** `borderDotsRanOnDevice()` is a flag and that is right
+			 * for it: the bordered dots are all on the device or none are.
+			 * These two routes are asked once per constraint evaluation and
+			 * each answer is its own, so a run can take the device fifteen
+			 * times and decline once -- which is exactly what
+			 * `fixed-f-diiid` did, and the one decline cost a 22 second host
+			 * sweep where the fifteen cost 15 ms each. *A flag would have
+			 * reported `yes` on a leg whose cost was entirely the `no`.*
+			 */
+			mutable long axisDeviceTaken = 0;
+			/// @copydoc axisDeviceTaken
+			mutable long axisDeviceDeclined = 0;
 			bool prepared;
 			bool postProcessed;
 	};

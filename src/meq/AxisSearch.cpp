@@ -71,29 +71,41 @@ namespace meq
 		 * rather than by a host fill.
 		 */
 		mfem::Array<AxisCandidate> perElement( 2*inputs.elements );
+		mfem::Array<int> offsets;
 		mfem::Array<int> total( 1 );
-		out.SetSize( axisCandidateCap );
 
-		if ( !axisCandidatesKernel( inputs, perElement, out, total,
-		                            axisCandidateCap ) )
+		if ( !axisCandidatesCountKernel( inputs, perElement, offsets, total ) )
 			return false;
 
 		/*
-		 * THE ONE DOWNLOAD, AND IT IS WHAT THE WHOLE FILE IS FOR. The count
-		 * and at most `axisCandidateCap` records come to the host; the iterate
-		 * does not. Counted through the instrument like everything else, so
-		 * the per-site table names this line rather than leaving the saving to
-		 * be inferred from the total.
+		 * THE COUNT COMES BACK FIRST, AND THE COMPACTED ARRAY IS SIZED TO IT.
+		 *
+		 * **FOUR BYTES, SO THAT THE SECOND DOWNLOAD IS PROPORTIONAL TO THE
+		 * CANDIDATES THAT EXIST RATHER THAN TO A CEILING.** The first draft
+		 * downloaded a fixed `axisCandidateCap` records, which made the
+		 * ceiling the cost and forced it down to 256 -- and on
+		 * `fixed-f-diiid`'s 102,840 elements a transient iterate exceeded
+		 * that, the route declined, and the host sweep that replaced it cost
+		 * **22.4 seconds**, the whole leg. *A refusal that costs more than
+		 * the thing it refuses is not a safe default.*
+		 *
+		 * Two downloads where there was one, and the pair is smaller than the
+		 * single one was: a handful of records at convergence against 22 KB
+		 * of mostly-empty array, and against the 830 KB state either replaces.
 		 */
 		countedHostRead( total, __LINE__ );
-		countedHostRead( out, __LINE__ );
-
 		count = total[ 0 ];
 
 		// A TRUNCATED competition is one missing an entrant, which is exactly
 		// how a conductor's O-point would win one. The count is reported
 		// truthfully either way so a caller can say what happened.
-		return count <= axisCandidateCap;
+		if ( count > axisCandidateCap )
+			return false;
+
+		out.SetSize( count > 0 ? count : 1 );
+		axisCandidatesScatterKernel( inputs, perElement, offsets, out );
+		countedHostRead( out, __LINE__ );
+		return true;
 	}
 
 	bool xPointFieldOnDevice( XPointFieldInputs const &inputs,

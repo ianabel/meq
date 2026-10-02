@@ -193,6 +193,7 @@ namespace meq
 	 * @param potentialCoefficients `potential.dofs` of the potential.
 	 * @return whether a root was found and accepted for this element.
 	 */
+	template <int DEGREE>
 	MFEM_HOST_DEVICE inline bool rootInTriangle(
 		AxisSearchInputs const &in, int element,
 		mfem::real_t const *coefficients,
@@ -200,9 +201,9 @@ namespace meq
 		mfem::real_t seedXi, mfem::real_t seedEta,
 		AxisCandidate &found )
 	{
+		constexpr int DOFS = ( DEGREE + 1 )*( DEGREE + 2 )/2;
 		AffineTriangle const &map = in.maps[ element ];
-		int const degree = in.flux.degree;
-		mfem::real_t const *second = coefficients + in.flux.dofs;
+		mfem::real_t const *second = coefficients + DOFS;
 		mfem::real_t const target = *in.target;
 
 		mfem::real_t xi = seedXi;
@@ -212,9 +213,9 @@ namespace meq
 		bool converged = false;
 		for ( int iteration = 0; iteration < in.maxIterations; ++iteration )
 		{
-			evaluateTriangleBasis( degree, coefficients, xi, eta,
+			evaluateTriangleBasis< DEGREE >( coefficients, xi, eta,
 			                       first, nullptr, nullptr );
-			evaluateTriangleBasis( degree, second, xi, eta,
+			evaluateTriangleBasis< DEGREE >( second, xi, eta,
 			                       other, nullptr, nullptr );
 
 			mfem::real_t const residual =
@@ -259,13 +260,13 @@ namespace meq
 
 				mfem::real_t highFirst = 0.0, highOther = 0.0;
 				mfem::real_t lowFirst = 0.0, lowOther = 0.0;
-				evaluateTriangleBasis( degree, coefficients, hi[ 0 ], hi[ 1 ],
+				evaluateTriangleBasis< DEGREE >( coefficients, hi[ 0 ], hi[ 1 ],
 				                       highFirst, nullptr, nullptr );
-				evaluateTriangleBasis( degree, second, hi[ 0 ], hi[ 1 ],
+				evaluateTriangleBasis< DEGREE >( second, hi[ 0 ], hi[ 1 ],
 				                       highOther, nullptr, nullptr );
-				evaluateTriangleBasis( degree, coefficients, lo[ 0 ], lo[ 1 ],
+				evaluateTriangleBasis< DEGREE >( coefficients, lo[ 0 ], lo[ 1 ],
 				                       lowFirst, nullptr, nullptr );
-				evaluateTriangleBasis( degree, second, lo[ 0 ], lo[ 1 ],
+				evaluateTriangleBasis< DEGREE >( second, lo[ 0 ], lo[ 1 ],
 				                       lowOther, nullptr, nullptr );
 
 				jacobian[ 0 ][ d ] =
@@ -321,9 +322,9 @@ namespace meq
 
 			if ( length < mfem::real_t( 1.0e-15 ) )
 			{
-				evaluateTriangleBasis( degree, coefficients, xi, eta,
+				evaluateTriangleBasis< DEGREE >( coefficients, xi, eta,
 				                       first, nullptr, nullptr );
-				evaluateTriangleBasis( degree, second, xi, eta,
+				evaluateTriangleBasis< DEGREE >( second, xi, eta,
 				                       other, nullptr, nullptr );
 				converged = true;
 				break;
@@ -379,13 +380,13 @@ namespace meq
 
 				mfem::real_t highFirst = 0.0, highOther = 0.0;
 				mfem::real_t lowFirst = 0.0, lowOther = 0.0;
-				evaluateTriangleBasis( degree, coefficients, hi[ 0 ], hi[ 1 ],
+				evaluateTriangleBasis< DEGREE >( coefficients, hi[ 0 ], hi[ 1 ],
 				                       highFirst, nullptr, nullptr );
-				evaluateTriangleBasis( degree, second, hi[ 0 ], hi[ 1 ],
+				evaluateTriangleBasis< DEGREE >( second, hi[ 0 ], hi[ 1 ],
 				                       highOther, nullptr, nullptr );
-				evaluateTriangleBasis( degree, coefficients, lo[ 0 ], lo[ 1 ],
+				evaluateTriangleBasis< DEGREE >( coefficients, lo[ 0 ], lo[ 1 ],
 				                       lowFirst, nullptr, nullptr );
-				evaluateTriangleBasis( degree, second, lo[ 0 ], lo[ 1 ],
+				evaluateTriangleBasis< DEGREE >( second, lo[ 0 ], lo[ 1 ],
 				                       lowOther, nullptr, nullptr );
 
 				reference[ 0 ][ d ] =
@@ -423,7 +424,7 @@ namespace meq
 		affineTransform( map, xi, eta, radius, z );
 
 		mfem::real_t psi = 0.0;
-		evaluateTriangleBasis( in.potential.degree, potentialCoefficients,
+		evaluateTriangleBasis< DEGREE >( potentialCoefficients,
 		                       xi, eta, psi, nullptr, nullptr );
 
 		found.referenceX = xi;
@@ -456,12 +457,32 @@ namespace meq
 	/**
 	 * The largest accepted-candidate list this routine will return.
 	 *
-	 * A cap on the DOWNLOAD and not on the field, so exceeding it is a refusal
-	 * rather than a truncation -- see the file comment. 256 against a handful
-	 * observed; the compacted array is 14 KB, where the state it replaces is
-	 * 830 KB.
+	 * **IT IS A SANITY CEILING AND NO LONGER A DOWNLOAD BUDGET**, which is
+	 * why it is large. The first draft sized it at 256 because the compacted
+	 * array was downloaded WHOLE, so the cap was the cost -- and on
+	 * `fixed-f-diiid`'s 102,840 elements a transient iterate exceeded it, the
+	 * route declined, and the one host sweep that replaced it cost **22.4
+	 * seconds**, which is the entire leg. *A refusal that costs more than the
+	 * thing it refuses is not a safe default.*
+	 *
+	 * The count now comes back BEFORE the scatter -- four bytes -- and the
+	 * compacted array is sized to it, so the download is proportional to the
+	 * candidates that exist rather than to the ceiling, and the ceiling costs
+	 * nothing until it is reached. Reaching it is still a refusal rather than
+	 * a truncation: a truncated competition is one missing an entrant, which
+	 * is exactly how a conductor's O-point would win one.
+	 *
+	 * **4096 BOUNDS THE WORST CASE AT 352 KB AND THE CASE IT BOUNDS IS REAL.**
+	 * At a near-zero iterate `max | q |` collapses, `fluxScale()` falls back
+	 * to 1.0, and the stopping rule becomes `residual <= tolerance` in
+	 * ABSOLUTE terms -- which every element meets at its own seed, so every
+	 * element reports a root and the list is `2 x elements` long. That is not
+	 * a competition worth holding and **the host meets it too**: the same
+	 * iterate costs `sweep()` 22.4 seconds on `fixed-f-diiid`, and `cpu8`
+	 * pays it eleven times over a run. Refusing it and handing it back is
+	 * correct; what it is not is a device problem.
 	 */
-	int constexpr axisCandidateCap = 256;
+	int constexpr axisCandidateCap = 4096;
 
 	/**
 	 * `tolerance * max( | q |, 1 )` over the flux dofs, computed and LEFT on
@@ -588,11 +609,23 @@ namespace meq
 	 */
 	bool axisFluxScaleKernel( mfem::Vector const &state, int scalarDofs,
 	                          mfem::real_t tolerance, mfem::Vector &out );
-	/// @copydoc axisFluxScaleKernel
-	bool axisCandidatesKernel( AxisSearchInputs const &inputs,
-	                           mfem::Array<AxisCandidate> &perElement,
-	                           mfem::Array<AxisCandidate> &out,
-	                           mfem::Array<int> &total, int cap );
+	/**
+	 * @copydoc axisFluxScaleKernel
+	 *
+	 * Two halves with a four-byte download between them, so the compacted
+	 * array can be sized to the candidates that exist. The count half roots
+	 * every element and forms the per-chunk prefix sum; the scatter half
+	 * writes the candidates out in element order.
+	 */
+	bool axisCandidatesCountKernel( AxisSearchInputs const &inputs,
+	                                mfem::Array<AxisCandidate> &perElement,
+	                                mfem::Array<int> &offsets,
+	                                mfem::Array<int> &total );
+	/// @copydoc axisCandidatesCountKernel
+	void axisCandidatesScatterKernel( AxisSearchInputs const &inputs,
+	                                  mfem::Array<AxisCandidate> const &perElement,
+	                                  mfem::Array<int> const &offsets,
+	                                  mfem::Array<AxisCandidate> &out );
 	/// @copydoc axisFluxScaleKernel
 	bool xPointFieldKernel( XPointFieldInputs const &inputs,
 	                        mfem::Array<XPointFieldValues> &out );

@@ -41,6 +41,92 @@ namespace meq
 	 */
 	int constexpr reductionChunks = 8192;
 
+	/**
+	 * The root find, with the degree a compile-time constant.
+	 *
+	 * See the dispatcher in axisCandidatesKernel() for why this is a template
+	 * and not a loop bound.
+	 */
+	template <int DEGREE>
+	static void axisRootLaunch( AxisSearchInputs const &in,
+	                            AxisCandidate *d_perElement )
+	{
+		constexpr int DOFS = ( DEGREE + 1 )*( DEGREE + 2 )/2;
+
+		mfem::forall( in.elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		{
+			d_perElement[ 2*e ].accepted = 0;
+			d_perElement[ 2*e + 1 ].accepted = 0;
+
+			if ( !in.maps[ e ].affine )
+				return;
+
+			mfem::real_t local[ DOFS ];
+			mfem::real_t coefficients[ 2*DOFS ];
+			mfem::real_t potentialCoefficients[ DOFS ];
+
+			/*
+			 * AN L2 SPACE LAYS ITS ELEMENT DOFS OUT BLOCKED -- `e*nd + i` --
+			 * and a vdim-2 space is `Ordering::byNODES`, so component 1 is
+			 * one `GetNDofs()` further on. Both were checked by running MFEM
+			 * rather than read off its documentation, at every degree this
+			 * file takes. That is what lets the kernel index the state
+			 * directly and skip the dof list, which is the other host object
+			 * it would otherwise need.
+			 *
+			 * NEGATED, because mfem::DarcyForm holds `-q`.
+			 */
+			for ( int c = 0; c < 2; ++c )
+			{
+				MFEM_UNROLL( DOFS )
+				for ( int i = 0; i < DOFS; ++i )
+					local[ i ] = -in.state[ c*in.fluxScalarDofs
+					                        + e*DOFS + i ];
+				triangleBasisCoefficients< DOFS >(
+					in.flux.change, local, coefficients + c*DOFS );
+			}
+			MFEM_UNROLL( DOFS )
+			for ( int i = 0; i < DOFS; ++i )
+				local[ i ] = in.state[ in.potentialOffset + e*DOFS + i ];
+			triangleBasisCoefficients< DOFS >(
+				in.potential.change, local, potentialCoefficients );
+
+			// Seed one: the element centre.
+			if ( rootInTriangle< DEGREE >(
+				     in, e, coefficients, potentialCoefficients,
+				     in.centreXi, in.centreEta, d_perElement[ 2*e ] ) )
+				d_perElement[ 2*e ].accepted = 1;
+
+			// Seed two: the flux node carrying the smallest | q |, which is
+			// elementSeeds()' second seed and is why the basis carries its
+			// element's nodes.
+			int best = 0;
+			mfem::real_t smallest = -1.0;
+			MFEM_UNROLL( DOFS )
+			for ( int i = 0; i < DOFS; ++i )
+			{
+				mfem::real_t const xi = in.flux.nodes[ 2*i ];
+				mfem::real_t const eta = in.flux.nodes[ 2*i + 1 ];
+				mfem::real_t first = 0.0, other = 0.0;
+				evaluateTriangleBasis< DEGREE >( coefficients, xi, eta,
+				                                 first, nullptr, nullptr );
+				evaluateTriangleBasis< DEGREE >( coefficients + DOFS, xi, eta,
+				                                 other, nullptr, nullptr );
+				mfem::real_t const size = sqrt( first*first + other*other );
+				if ( smallest < mfem::real_t( 0.0 ) || size < smallest )
+				{
+					smallest = size;
+					best = i;
+				}
+			}
+			if ( rootInTriangle< DEGREE >(
+				     in, e, coefficients, potentialCoefficients,
+				     in.flux.nodes[ 2*best ], in.flux.nodes[ 2*best + 1 ],
+				     d_perElement[ 2*e + 1 ] ) )
+				d_perElement[ 2*e + 1 ].accepted = 1;
+		} );
+	}
+
 	bool axisFluxScaleKernel( mfem::Vector const &state, int scalarDofs,
 	                          mfem::real_t tolerance, mfem::Vector &out )
 	{
@@ -121,105 +207,60 @@ namespace meq
 		return true;
 	}
 
-	bool axisCandidatesKernel( AxisSearchInputs const &inputs,
-	                           mfem::Array<AxisCandidate> &perElement,
-	                           mfem::Array<AxisCandidate> &out,
-	                           mfem::Array<int> &total, int cap )
+	/// How the slots divide between threads. Written once because the count
+	/// half and the scatter half must agree about it exactly -- a chunking
+	/// that differed between them would scatter into the wrong offsets.
+	static int axisChunkCount( int slots )
+	{
+		return slots < reductionChunks ? slots : reductionChunks;
+	}
+
+	bool axisCandidatesCountKernel( AxisSearchInputs const &inputs,
+	                                mfem::Array<AxisCandidate> &perElement,
+	                                mfem::Array<int> &offsets,
+	                                mfem::Array<int> &total )
 	{
 		perElement.UseDevice( true );
 		total.UseDevice( true );
-		out.UseDevice( true );
 
 		AxisSearchInputs const in = inputs;
 		AxisCandidate *const d_perElement = perElement.Write();
-		AxisCandidate *const d_out = out.Write();
 		int *const d_total = total.Write();
 
 		/*
 		 * ONE THREAD PER ELEMENT. This is the parallelism and it is the whole
 		 * reason the ring walk goes away: a host sweep is 40x a seeded search
 		 * ([M-100](../MEASUREMENTS.md)) and on a card 4,848 Newtons and 19
-		 * Newtons are one launch, so the device can afford the answer the host
-		 * has to approximate.
+		 * Newtons are one launch, so the device can afford the answer the
+		 * host has to approximate.
 		 *
-		 * The per-thread arrays are `2*28 + 28 + 28` doubles at the worst
-		 * degree this file takes. That is local memory and it will hurt
-		 * occupancy; it is correct first, and the leg it replaces is 2.5 ms of
-		 * host time that currently costs 830 KB of bus.
+		 * **TEMPLATED ON THE DEGREE, AND THAT IS WHERE THE COEFFICIENTS
+		 * LIVE.** The first draft sized the three per-thread arrays by
+		 * `triangleBasisMaxDofs` and bounded every loop by `basis.dofs`, a
+		 * runtime value. nvcc cannot unroll a runtime bound, so every
+		 * `coefficients[ at ]` stayed a dynamic index and the arrays were
+		 * placed in LOCAL MEMORY -- measured with `-Xptxas -v` as a **608
+		 * byte stack frame with zero register spills**, which is exactly what
+		 * that combination means. At 1024 threads an SM then carries 622 KB
+		 * of local working set against 64 KB of L1. Halving
+		 * `triangleBasisMaxDegree` as a diagnostic took the frame to 272
+		 * bytes, accounting for the difference to the byte, which is what
+		 * said the arrays were the whole of it.
+		 *
+		 * With the degree a compile-time constant the loops unroll, the
+		 * indices become constants and the arrays become registers. The
+		 * launch is dispatched on `flux.degree` below; MEQ builds both spaces
+		 * from one `orderValue`, and a caller whose two degrees differ is
+		 * refused rather than served by the wrong instantiation.
 		 */
-		mfem::forall( in.elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		switch ( in.flux.degree )
 		{
-			d_perElement[ 2*e ].accepted = 0;
-			d_perElement[ 2*e + 1 ].accepted = 0;
-
-			if ( !in.maps[ e ].affine )
-				return;
-
-			int const fluxDofs = in.flux.dofs;
-			int const potentialDofs = in.potential.dofs;
-
-			mfem::real_t local[ triangleBasisMaxDofs ];
-			mfem::real_t coefficients[ 2*triangleBasisMaxDofs ];
-			mfem::real_t potentialCoefficients[ triangleBasisMaxDofs ];
-
-			/*
-			 * AN L2 SPACE LAYS ITS ELEMENT DOFS OUT BLOCKED -- `e*nd + i` --
-			 * and a vdim-2 space is `Ordering::byNODES`, so component 1 is one
-			 * `GetNDofs()` further on. Both were checked by running MFEM
-			 * rather than read off its documentation, at every degree this
-			 * file takes. That is what lets the kernel index the state
-			 * directly and skip the dof list, which is the other host object
-			 * it would otherwise need.
-			 *
-			 * NEGATED, because mfem::DarcyForm holds `-q`.
-			 */
-			for ( int c = 0; c < 2; ++c )
-			{
-				for ( int i = 0; i < fluxDofs; ++i )
-					local[ i ] = -in.state[ c*in.fluxScalarDofs
-					                        + e*fluxDofs + i ];
-				triangleBasisCoefficients( in.flux, local,
-				                           coefficients + c*fluxDofs );
-			}
-			for ( int i = 0; i < potentialDofs; ++i )
-				local[ i ] = in.state[ in.potentialOffset
-				                       + e*potentialDofs + i ];
-			triangleBasisCoefficients( in.potential, local,
-			                           potentialCoefficients );
-
-			// Seed one: the element centre.
-			if ( rootInTriangle( in, e, coefficients, potentialCoefficients,
-			                     in.centreXi, in.centreEta,
-			                     d_perElement[ 2*e ] ) )
-				d_perElement[ 2*e ].accepted = 1;
-
-			// Seed two: the flux node carrying the smallest | q |, which is
-			// elementSeeds()' second seed and is why the basis carries its
-			// element's nodes.
-			int best = 0;
-			mfem::real_t smallest = -1.0;
-			for ( int i = 0; i < fluxDofs; ++i )
-			{
-				mfem::real_t const xi = in.flux.nodes[ 2*i ];
-				mfem::real_t const eta = in.flux.nodes[ 2*i + 1 ];
-				mfem::real_t first = 0.0, other = 0.0;
-				evaluateTriangleBasis( in.flux.degree, coefficients,
-				                       xi, eta, first, nullptr, nullptr );
-				evaluateTriangleBasis( in.flux.degree, coefficients + fluxDofs,
-				                       xi, eta, other, nullptr, nullptr );
-				mfem::real_t const size = sqrt( first*first + other*other );
-				if ( smallest < mfem::real_t( 0.0 ) || size < smallest )
-				{
-					smallest = size;
-					best = i;
-				}
-			}
-			if ( rootInTriangle( in, e, coefficients, potentialCoefficients,
-			                     in.flux.nodes[ 2*best ],
-			                     in.flux.nodes[ 2*best + 1 ],
-			                     d_perElement[ 2*e + 1 ] ) )
-				d_perElement[ 2*e + 1 ].accepted = 1;
-		} );
+			case 1: axisRootLaunch< 1 >( in, d_perElement ); break;
+			case 2: axisRootLaunch< 2 >( in, d_perElement ); break;
+			case 3: axisRootLaunch< 3 >( in, d_perElement ); break;
+			case 4: axisRootLaunch< 4 >( in, d_perElement ); break;
+			default: return false;
+		}
 
 		/*
 		 * AND THE COMPACTION IS AN ORDER-PRESERVING STREAM COMPACTION, WHICH
@@ -244,8 +285,8 @@ namespace meq
 		 * largest case in the tree.
 		 */
 		int const slots = 2*in.elements;
-		int const chunks = slots < reductionChunks ? slots : reductionChunks;
-		mfem::Array<int> offsets( chunks + 1 );
+		int const chunks = axisChunkCount( slots );
+		offsets.SetSize( chunks + 1 );
 		offsets.UseDevice( true );
 		int *const d_offsets = offsets.Write();
 
@@ -281,6 +322,29 @@ namespace meq
 			d_total[ 0 ] = running;
 		} );
 
+		return true;
+	}
+
+	void axisCandidatesScatterKernel(
+		AxisSearchInputs const &inputs,
+		mfem::Array<AxisCandidate> const &perElement,
+		mfem::Array<int> const &offsets,
+		mfem::Array<AxisCandidate> &out )
+	{
+		out.UseDevice( true );
+
+		int const slots = 2*inputs.elements;
+		int const chunks = axisChunkCount( slots );
+		int const room = out.Size();
+		AxisCandidate const *const d_perElement = perElement.Read();
+		int const *const d_offsets = offsets.Read();
+		AxisCandidate *const d_out = out.Write();
+
+		auto chunkLow = [ = ] MFEM_HOST_DEVICE ( int c )
+		{
+			return static_cast<int>( static_cast<long>( c )*slots/chunks );
+		};
+
 		mfem::forall( chunks, [ = ] MFEM_HOST_DEVICE ( int c )
 		{
 			int const lo = chunkLow( c );
@@ -290,16 +354,13 @@ namespace meq
 			{
 				if ( d_perElement[ slot ].accepted == 0 )
 					continue;
-				// Over the cap is a REFUSAL at the caller, not a truncation
-				// here -- the count is reported truthfully either way.
-				if ( at < cap )
+				if ( at < room )
 					d_out[ at ] = d_perElement[ slot ];
 				++at;
 			}
 		} );
-
-		return true;
 	}
+
 
 	bool xPointFieldKernel( XPointFieldInputs const &inputs,
 	                        mfem::Array<XPointFieldValues> &out )
@@ -410,12 +471,19 @@ namespace meq
 		return false;
 	}
 
-	bool axisCandidatesKernel( AxisSearchInputs const &,
-	                           mfem::Array<AxisCandidate> &,
-	                           mfem::Array<AxisCandidate> &,
-	                           mfem::Array<int> &, int )
+	bool axisCandidatesCountKernel( AxisSearchInputs const &,
+	                                mfem::Array<AxisCandidate> &,
+	                                mfem::Array<int> &,
+	                                mfem::Array<int> & )
 	{
 		return false;
+	}
+
+	void axisCandidatesScatterKernel( AxisSearchInputs const &,
+	                                  mfem::Array<AxisCandidate> const &,
+	                                  mfem::Array<int> const &,
+	                                  mfem::Array<AxisCandidate> & )
+	{
 	}
 
 	bool xPointFieldKernel( XPointFieldInputs const &,
