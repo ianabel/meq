@@ -1133,6 +1133,17 @@ for a seeded search inverts — and the host keeps the selection, which is the
 half carrying the physics. The candidate lists agree to **2.2e-16 in both
 directions**.
 
+**AND THE SEARCH IS OVER A NEIGHBOURHOOD RATHER THAN THE MESH**
+-> **[M-234](MEASUREMENTS.md#m-234)**. Sweeping every element is 36x the
+host's warm ring search per call and 7.1x faster than its cold sweep, so the
+answer is the one the host already takes with a block the device can afford to
+make generous: `meq::PointLocator`'s bin grid names one in O( 1 ), it is
+geometry and therefore phase B, and it was already built for the warm start.
+A warm attempt that finds nothing widens to the mesh once, which is the ring
+walk's own *widen then give up* and is what makes a bounded search safe. The
+axis leg on `machine-f-diiid` reads **1.7 ms a call on one core against the
+host's 1.6 ms at 7.01**.
+
 **WHAT IS STILL TRUE BELOW IS THE SHAPE AND NOT THE DIFFICULTY.** The remaining
 host legs are reductions and point evaluations, both of which now have a device
 route; `Mesh::FindPoints` remains the one genuinely awkward thing and the axis

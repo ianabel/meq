@@ -127,6 +127,9 @@ namespace
 	/// The device route's inputs, bound exactly as the solver binds them.
 	struct Route
 	{
+		/// Every element, ascending -- which is what a cold search passes and
+		/// is the selection these cases compare against sweep() with.
+		mfem::Array<int> everyElement;
 		meq::DeviceTriangleBasis fluxBasis;
 		meq::DeviceTriangleBasis potentialBasis;
 		mfem::Array<meq::AffineTriangle> maps;
@@ -148,6 +151,14 @@ namespace
 				     target ) )
 				return false;
 
+			everyElement.SetSize( fixture.mesh.GetNE() );
+			everyElement.UseDevice( true );
+			{
+				int *const host = everyElement.HostWrite();
+				for ( int e = 0; e < fixture.mesh.GetNE(); ++e )
+					host[ e ] = e;
+			}
+
 			mfem::IntegrationPoint const centre =
 				mfem::Geometries.GetCenter( mfem::Geometry::TRIANGLE );
 
@@ -159,6 +170,8 @@ namespace
 			inputs.target = target.Read();
 			inputs.centreXi = static_cast<mfem::real_t>( centre.x );
 			inputs.centreEta = static_cast<mfem::real_t>( centre.y );
+			inputs.selected = meq::countedDeviceRead( everyElement, __LINE__ );
+			inputs.selectedCount = everyElement.Size();
 			inputs.elements = fixture.mesh.GetNE();
 			inputs.fluxScalarDofs = fixture.fluxSpace.GetNDofs();
 			inputs.potentialOffset = fixture.offsets[ 1 ];

@@ -48,7 +48,8 @@ namespace meq
 	{
 		count = 0;
 		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
-		     || inputs.elements <= 0 || inputs.flux.change == nullptr
+		     || inputs.elements <= 0 || inputs.selectedCount <= 0
+		     || inputs.selected == nullptr || inputs.flux.change == nullptr
 		     || inputs.potential.change == nullptr || inputs.maps == nullptr
 		     || inputs.state == nullptr || inputs.target == nullptr )
 			return false;
@@ -70,7 +71,7 @@ namespace meq
 		 * `out`, which the caller owns and which is written by `Write()`
 		 * rather than by a host fill.
 		 */
-		mfem::Array<AxisCandidate> perElement( 2*inputs.elements );
+		mfem::Array<AxisCandidate> perElement( 2*inputs.selectedCount );
 		mfem::Array<int> offsets;
 		mfem::Array<int> total( 1 );
 

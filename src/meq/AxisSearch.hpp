@@ -148,6 +148,30 @@ namespace meq
 		mfem::real_t centreEta;
 		/// `max | q |` over the flux dofs, already scaled by the tolerance.
 		mfem::real_t const *target;
+		/**
+		 * The elements to root, in ASCENDING order, and how many.
+		 *
+		 * **THE SEARCH IS OVER A NEIGHBOURHOOD AND NOT NECESSARILY OVER THE
+		 * MESH, WHICH IS WHAT MAKES IT AFFORDABLE AT EVERY SIZE.** The host's
+		 * warm path rings out from the previous axis and touches about one
+		 * element; the first version of this kernel swept all 102,840, which
+		 * wins when the seed keeps failing and loses by 36x when it works. A
+		 * caller that knows roughly where the axis was can hand over a block
+		 * of it instead -- `meq::PointLocator::grid()` names one in O( 1 ) --
+		 * and the device can afford to be generous where the host must be
+		 * stingy: a few thousand elements costs it about half a millisecond
+		 * where the host pays forty times its ring search for guessing wrong.
+		 *
+		 * ASCENDING, because the compaction preserves the order it is given
+		 * and `CriticalPointFinder::mergeCandidates()` keeps the FIRST of two
+		 * equals. A permuted list is a different tie-break.
+		 *
+		 * The whole mesh in ascending order is a legitimate value and is what
+		 * a cold search passes.
+		 */
+		int const *selected;
+		int selectedCount;
+		/// The mesh's element count, which bounds `maps` and the dof indexing.
 		int elements;
 		/// `GetNDofs()` of the SCALAR flux space: component 1 sits that far on.
 		int fluxScalarDofs;
@@ -201,9 +225,12 @@ namespace meq
 		mfem::real_t seedXi, mfem::real_t seedEta,
 		AxisCandidate &found )
 	{
-		constexpr int DOFS = ( DEGREE + 1 )*( DEGREE + 2 )/2;
+		// lowerCamelCase because it is a VARIABLE and not a template
+		// parameter, which the naming check distinguishes and the house rule
+		// in CLAUDE.md does too.
+		constexpr int basisDofs = ( DEGREE + 1 )*( DEGREE + 2 )/2;
 		AffineTriangle const &map = in.maps[ element ];
-		mfem::real_t const *second = coefficients + DOFS;
+		mfem::real_t const *second = coefficients + basisDofs;
 		mfem::real_t const target = *in.target;
 
 		mfem::real_t xi = seedXi;

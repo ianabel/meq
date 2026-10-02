@@ -51,19 +51,28 @@ namespace meq
 	static void axisRootLaunch( AxisSearchInputs const &in,
 	                            AxisCandidate *d_perElement )
 	{
-		constexpr int DOFS = ( DEGREE + 1 )*( DEGREE + 2 )/2;
+		// lowerCamelCase: the naming ctest cannot read this file --
+		// nvcc's flags do not parse under clang -- but CLAUDE.md records
+		// that exclusion as an instrument failing rather than a rule
+		// being relaxed, so the convention still binds here.
+		constexpr int basisDofs = ( DEGREE + 1 )*( DEGREE + 2 )/2;
 
-		mfem::forall( in.elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		mfem::forall( in.selectedCount, [ = ] MFEM_HOST_DEVICE ( int s )
 		{
-			d_perElement[ 2*e ].accepted = 0;
-			d_perElement[ 2*e + 1 ].accepted = 0;
+			// The OUTPUT is indexed by the slot and the INPUT by the element,
+			// which is what lets the compaction scan the neighbourhood rather
+			// than the mesh. The list is ascending, so slot order is element
+			// order and the merge's tie-break is the host's.
+			int const e = in.selected[ s ];
+			d_perElement[ 2*s ].accepted = 0;
+			d_perElement[ 2*s + 1 ].accepted = 0;
 
-			if ( !in.maps[ e ].affine )
+			if ( e < 0 || e >= in.elements || !in.maps[ e ].affine )
 				return;
 
-			mfem::real_t local[ DOFS ];
-			mfem::real_t coefficients[ 2*DOFS ];
-			mfem::real_t potentialCoefficients[ DOFS ];
+			mfem::real_t local[ basisDofs ];
+			mfem::real_t coefficients[ 2*basisDofs ];
+			mfem::real_t potentialCoefficients[ basisDofs ];
 
 			/*
 			 * AN L2 SPACE LAYS ITS ELEMENT DOFS OUT BLOCKED -- `e*nd + i` --
@@ -78,39 +87,39 @@ namespace meq
 			 */
 			for ( int c = 0; c < 2; ++c )
 			{
-				MFEM_UNROLL( DOFS )
-				for ( int i = 0; i < DOFS; ++i )
+				MFEM_UNROLL( basisDofs )
+				for ( int i = 0; i < basisDofs; ++i )
 					local[ i ] = -in.state[ c*in.fluxScalarDofs
-					                        + e*DOFS + i ];
-				triangleBasisCoefficients< DOFS >(
-					in.flux.change, local, coefficients + c*DOFS );
+					                        + e*basisDofs + i ];
+				triangleBasisCoefficients< basisDofs >(
+					in.flux.change, local, coefficients + c*basisDofs );
 			}
-			MFEM_UNROLL( DOFS )
-			for ( int i = 0; i < DOFS; ++i )
-				local[ i ] = in.state[ in.potentialOffset + e*DOFS + i ];
-			triangleBasisCoefficients< DOFS >(
+			MFEM_UNROLL( basisDofs )
+			for ( int i = 0; i < basisDofs; ++i )
+				local[ i ] = in.state[ in.potentialOffset + e*basisDofs + i ];
+			triangleBasisCoefficients< basisDofs >(
 				in.potential.change, local, potentialCoefficients );
 
 			// Seed one: the element centre.
 			if ( rootInTriangle< DEGREE >(
 				     in, e, coefficients, potentialCoefficients,
-				     in.centreXi, in.centreEta, d_perElement[ 2*e ] ) )
-				d_perElement[ 2*e ].accepted = 1;
+				     in.centreXi, in.centreEta, d_perElement[ 2*s ] ) )
+				d_perElement[ 2*s ].accepted = 1;
 
 			// Seed two: the flux node carrying the smallest | q |, which is
 			// elementSeeds()' second seed and is why the basis carries its
 			// element's nodes.
 			int best = 0;
 			mfem::real_t smallest = -1.0;
-			MFEM_UNROLL( DOFS )
-			for ( int i = 0; i < DOFS; ++i )
+			MFEM_UNROLL( basisDofs )
+			for ( int i = 0; i < basisDofs; ++i )
 			{
 				mfem::real_t const xi = in.flux.nodes[ 2*i ];
 				mfem::real_t const eta = in.flux.nodes[ 2*i + 1 ];
 				mfem::real_t first = 0.0, other = 0.0;
 				evaluateTriangleBasis< DEGREE >( coefficients, xi, eta,
 				                                 first, nullptr, nullptr );
-				evaluateTriangleBasis< DEGREE >( coefficients + DOFS, xi, eta,
+				evaluateTriangleBasis< DEGREE >( coefficients + basisDofs, xi, eta,
 				                                 other, nullptr, nullptr );
 				mfem::real_t const size = sqrt( first*first + other*other );
 				if ( smallest < mfem::real_t( 0.0 ) || size < smallest )
@@ -122,8 +131,8 @@ namespace meq
 			if ( rootInTriangle< DEGREE >(
 				     in, e, coefficients, potentialCoefficients,
 				     in.flux.nodes[ 2*best ], in.flux.nodes[ 2*best + 1 ],
-				     d_perElement[ 2*e + 1 ] ) )
-				d_perElement[ 2*e + 1 ].accepted = 1;
+				     d_perElement[ 2*s + 1 ] ) )
+				d_perElement[ 2*s + 1 ].accepted = 1;
 		} );
 	}
 
@@ -284,7 +293,7 @@ namespace meq
 		 * against the 205,680 slots the first draft walked on one core at the
 		 * largest case in the tree.
 		 */
-		int const slots = 2*in.elements;
+		int const slots = 2*in.selectedCount;
 		int const chunks = axisChunkCount( slots );
 		offsets.SetSize( chunks + 1 );
 		offsets.UseDevice( true );
@@ -333,7 +342,7 @@ namespace meq
 	{
 		out.UseDevice( true );
 
-		int const slots = 2*inputs.elements;
+		int const slots = 2*inputs.selectedCount;
 		int const chunks = axisChunkCount( slots );
 		int const room = out.Size();
 		AxisCandidate const *const d_perElement = perElement.Read();

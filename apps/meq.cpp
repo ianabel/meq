@@ -6643,6 +6643,16 @@ int main( int argc, char **argv )
 		// predicates because it is one: the kernel is built and bit-identical,
 		// and whether it RUNS is decided by where the border's columns happen
 		// to be when the fill reaches them. M-208.
+		/*
+		 * TAKEN AND DECLINED, OVER THE LAST solve(). **IT IS NOT THE SAME
+		 * POPULATION AS THE `of which axis` LEG ABOVE AND THAT IS NOT YET
+		 * EXPLAINED**: machine-f-diiid reads 6 taken against 19 axis calls
+		 * with ZERO declines and zero cold sweeps, so every call the route
+		 * was asked for it answered, and the other thirteen reached the leg
+		 * timer by a path that does not consult it. Printed as a pair with
+		 * the declines because the useful reading is `declined == 0`; do not
+		 * read `taken` against `axisCalls` until the two are reconciled.
+		 */
 		std::printf( "MEQ:   axis and X-point field evaluations on device: "
 		             "%ld taken, %ld declined\n",
 		             solver->axisRoutesTakenOnDevice(),

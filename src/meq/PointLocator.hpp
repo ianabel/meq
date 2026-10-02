@@ -165,6 +165,38 @@ namespace meq
 			/// Whether the device path was taken by the last locate().
 			bool usedDevice() const { return deviceUsed; }
 
+			/**
+			 * The bin grid itself, for a caller that wants a spatial
+			 * NEIGHBOURHOOD rather than the element containing a point.
+			 *
+			 * **EXPOSED SO THAT meq::AxisSearch DOES NOT BUILD A SECOND
+			 * ONE.** It wants "the elements near where the axis was last
+			 * time", which is a block of bins and is O( 1 ) to name; what it
+			 * does NOT want is `locate()`, which answers a different
+			 * question. The grid is a constant of the MESH -- about one
+			 * element per bin by construction -- so it is built once and is
+			 * `DEVICE-PLAN.md` section 3.3's phase B, and a second copy of it
+			 * would be two uploads of one table, attributable to neither.
+			 *
+			 * The pointers are HOST pointers and are valid for this object's
+			 * lifetime. A caller that wants them on a device uploads them; a
+			 * caller that wants to walk a bin block on the host, as the axis
+			 * search does when choosing its neighbourhood, reads them here.
+			 */
+			struct BinGrid
+			{
+				int const *start;    ///< `binsR*binsZ + 1` prefix offsets
+				int const *element;  ///< element ids, grouped by bin
+				mfem::real_t rMin, zMin, dR, dZ;
+				int binsR, binsZ;
+				/// False when any element is not a straight-sided triangle,
+				/// which is the same refusal locate() makes.
+				bool affine;
+			};
+
+			/// @copydoc BinGrid
+			BinGrid grid() const;
+
 		private:
 
 			void buildBins();

@@ -10,6 +10,7 @@
 #include "AxisSearch.hpp"
 #include "DeviceBasis.hpp"
 #include "DeviceNPC.hpp"
+#include "PointLocator.hpp"
 #include "DeviceRows.hpp"
 #include "StageChecksum.hpp"
 
@@ -8605,12 +8606,43 @@ namespace
 		mfem::Vector axisNewtonTarget;
 		mfem::Array<AxisCandidate> axisRawCandidates;
 		std::vector<CriticalPoint> deviceCandidates;
+		/**
+		 * The bin grid, so the search can be over a NEIGHBOURHOOD of the
+		 * previous axis rather than over the mesh.
+		 *
+		 * `meq::PointLocator` builds one in its constructor and it is a
+		 * constant of the mesh -- about one element per bin -- so this is
+		 * phase B like everything beside it. It is borrowed rather than
+		 * rebuilt: a second grid would be two uploads of one table and a
+		 * second thing to keep in step with the mesh.
+		 */
+		std::unique_ptr<PointLocator> axisBins;
+		mfem::Array<int> axisSelection;
+		std::vector<int> axisSelectionHost;
+
+		/**
+		 * How many elements the neighbourhood aims at.
+		 *
+		 * **TWO REQUIREMENTS PULL OPPOSITE WAYS AND THIS IS WHERE THEY
+		 * MEET.** Correctness wants only enough to contain the axis: it moves
+		 * about a millimetre between evaluations and a bin is about five on
+		 * the largest case in the tree, so two or three rings -- a few dozen
+		 * elements -- would do. Cost wants enough that the four launches are
+		 * not pure latency: at a few dozen elements the kernels finish before
+		 * the launches do. A thousand is past the launch floor and still
+		 * **a hundredth of the 102,840** a full sweep roots, and it leaves
+		 * the margin that matters -- the host's ring search pays forty times
+		 * over when its seed is stale, and this is what buys the margin
+		 * instead of paying that.
+		 *
+		 * It is a target and not a bound: rings are added whole, so the
+		 * neighbourhood overshoots rather than splitting one.
+		 */
+		int const axisNeighbourhoodTarget = 1024;
 		/// 0 not yet asked, 1 available, -1 refused. Asked once per solve.
 		int axisDeviceState = 0;
 		/// Times a route was available and then declined mid-solve, which is a
 		/// different thing from being unavailable and is reported separately.
-		axisDeviceTaken = 0;
-		axisDeviceDeclined = 0;
 
 		/*
 		 * WHETHER THE DEVICE CAN EVALUATE THIS PROBLEM'S FIELDS AT ALL.
@@ -8700,8 +8732,81 @@ namespace
 			if ( !affineTrianglesOf( mesh, axisAffineMaps ) )
 				return false;
 
+			// The bin grid, borrowed from meq::PointLocator so there is one
+			// of them. Its own refusal -- any element that is not a straight
+			// triangle -- is the same one affineTrianglesOf() just made, so
+			// reaching here means it holds.
+			axisBins = std::make_unique<PointLocator>( mesh );
+			if ( !axisBins->grid().affine )
+				return false;
+
 			axisDeviceState = 1;
 			return true;
+		};
+
+		/*
+		 * THE ELEMENTS NEAR A POINT, AS A BLOCK OF BINS.
+		 *
+		 * Rings of bins out from the one containing @a radius, @a z, until
+		 * the collection reaches its target. An element's bounding box can
+		 * cover several bins, so the list is sorted and uniqued -- and the
+		 * SORT is not tidiness: the compaction preserves the order it is
+		 * given and `mergeCandidates()` keeps the first of two equals, so a
+		 * list in bin order rather than element order is a different
+		 * tie-break from the host's.
+		 */
+		auto axisNeighbourhood = [ & ]( double radius, double z, int target,
+		                                std::vector<int> &out ) -> bool
+		{
+			if ( !axisBins )
+				return false;
+			PointLocator::BinGrid const grid = axisBins->grid();
+			if ( grid.start == nullptr || grid.binsR < 1 || grid.binsZ < 1 )
+				return false;
+
+			int centreI = static_cast<int>( ( radius - grid.rMin )/grid.dR );
+			int centreJ = static_cast<int>( ( z - grid.zMin )/grid.dZ );
+			centreI = centreI < 0 ? 0
+			        : ( centreI > grid.binsR - 1 ? grid.binsR - 1 : centreI );
+			centreJ = centreJ < 0 ? 0
+			        : ( centreJ > grid.binsZ - 1 ? grid.binsZ - 1 : centreJ );
+
+			int const widest = grid.binsR > grid.binsZ ? grid.binsR
+			                                           : grid.binsZ;
+			out.clear();
+			for ( int ring = 0; ring <= widest; ++ring )
+			{
+				int const i0 = centreI - ring < 0 ? 0 : centreI - ring;
+				int const i1 = centreI + ring > grid.binsR - 1
+					? grid.binsR - 1 : centreI + ring;
+				int const j0 = centreJ - ring < 0 ? 0 : centreJ - ring;
+				int const j1 = centreJ + ring > grid.binsZ - 1
+					? grid.binsZ - 1 : centreJ + ring;
+
+				for ( int j = j0; j <= j1; ++j )
+					for ( int i = i0; i <= i1; ++i )
+					{
+						// Only the ring's own shell; the interior was added
+						// by an earlier pass.
+						if ( ring > 0 && i != i0 && i != i1
+						     && j != j0 && j != j1 )
+							continue;
+						int const bin = j*grid.binsR + i;
+						for ( int k = grid.start[ bin ];
+						      k < grid.start[ bin + 1 ]; ++k )
+							out.push_back( grid.element[ k ] );
+					}
+
+				if ( static_cast<int>( out.size() ) >= target )
+					break;
+				if ( i0 == 0 && j0 == 0 && i1 == grid.binsR - 1
+				     && j1 == grid.binsZ - 1 )
+					break;
+			}
+
+			std::sort( out.begin(), out.end() );
+			out.erase( std::unique( out.begin(), out.end() ), out.end() );
+			return !out.empty();
 		};
 
 		/*
@@ -9379,7 +9484,8 @@ namespace
 		 * taken for its reason: there is no approximate mode worth having in a
 		 * constraint functional.
 		 */
-		auto axisDeviceRoute = [ & ]( mfem::Vector const &state ) -> bool
+		auto axisDeviceRoute = [ & ]( mfem::Vector const &state,
+		                              bool wholeMesh ) -> bool
 		{
 			if ( axisDeviceState < 0 || !iterateIsResident( state ) )
 			{
@@ -9443,6 +9549,42 @@ namespace
 				return false;
 			}
 
+			/*
+			 * THE NEIGHBOURHOOD, OR THE MESH.
+			 *
+			 * A warm call roots a block of bins around the previous axis; a
+			 * cold one, or a warm one that found nothing there, roots
+			 * everything. That is the ring search's own structure -- widen,
+			 * then give up -- with the widening done in one step because the
+			 * device can afford it, and it is why this route no longer has a
+			 * case where it is thirty-six times the host's.
+			 */
+			axisSelectionHost.clear();
+			if ( !wholeMesh && havePreviousAxis )
+				axisNeighbourhood( previousAxisR, previousAxisZ,
+				                   axisNeighbourhoodTarget,
+				                   axisSelectionHost );
+			if ( axisSelectionHost.empty() )
+			{
+				axisSelectionHost.resize(
+					static_cast<std::size_t>( mesh.GetNE() ) );
+				for ( int e = 0; e < mesh.GetNE(); ++e )
+					axisSelectionHost[ static_cast<std::size_t>( e ) ] = e;
+			}
+
+			// HostWrite() before the fill and a Read() after it, which is
+			// M-211 and M-226 in one line: this buffer is refreshed in place
+			// every call, so a fill after a SetSize() at an unchanged size
+			// would write into a page the device copy still owns.
+			axisSelection.SetSize(
+				static_cast<int>( axisSelectionHost.size() ) );
+			axisSelection.UseDevice( true );
+			{
+				int *const host = axisSelection.HostWrite();
+				for ( std::size_t i = 0; i < axisSelectionHost.size(); ++i )
+					host[ i ] = axisSelectionHost[ i ];
+			}
+
 			mfem::IntegrationPoint const centre =
 				mfem::Geometries.GetCenter( mfem::Geometry::TRIANGLE );
 
@@ -9454,6 +9596,8 @@ namespace
 			inputs.target = axisNewtonTarget.Read();
 			inputs.centreXi = static_cast<mfem::real_t>( centre.x );
 			inputs.centreEta = static_cast<mfem::real_t>( centre.y );
+			inputs.selected = countedDeviceRead( axisSelection, __LINE__ );
+			inputs.selectedCount = axisSelection.Size();
 			inputs.elements = mesh.GetNE();
 			inputs.fluxScalarDofs = fluxFes->GetNDofs();
 			inputs.potentialOffset = blockOffsets[ 1 ];
@@ -9673,11 +9817,28 @@ namespace
 			 * half carrying the physics and they do not belong in a kernel.
 			 */
 			bool deviceTaken = false;
-			if ( axisDeviceRoute( state ) )
+			if ( axisDeviceRoute( state, !havePreviousAxis ) )
 			{
 				deviceTaken = true;
 				found = pickAxis( deviceCandidates, wanted, span,
 				                  conductors, best );
+
+				/*
+				 * AND IF THE NEIGHBOURHOOD HELD NOTHING, WIDEN TO THE MESH
+				 * ONCE -- WHICH IS WHAT THE RING SEARCH DOES AND IS THE ONLY
+				 * THING THAT MAKES A BOUNDED SEARCH SAFE.
+				 *
+				 * A neighbourhood that silently missed the axis would hand
+				 * `pickAxis()` a competition the winner was not entered in,
+				 * and the selection cannot tell that from there being no
+				 * axis. So a warm attempt that finds nothing is retried over
+				 * everything before the route gives up, and only then does
+				 * the nodal fallback happen.
+				 */
+				if ( !found && havePreviousAxis
+				     && axisDeviceRoute( state, true ) )
+					found = pickAxis( deviceCandidates, wanted, span,
+					                  conductors, best );
 			}
 
 			if ( !deviceTaken )
@@ -12581,6 +12742,18 @@ namespace
 		 * member would have the inner call overwrite the outer one's start.
 		 */
 		profile = StepProfile{};
+		/*
+		 * BESIDE THE PROFILE AND NOT PER SOLVE, WHICH IS A CORRECTION.
+		 *
+		 * These were reset at the top of solveWithNormalisation(), so on a
+		 * run with several support sweeps they reported the LAST sweep alone
+		 * while `profile.axisCalls` beside them counted every one --
+		 * `machine-f-diiid` read "6 taken" against 19 axis calls, which looks
+		 * like thirteen declines and is three solves. *Two counters printed
+		 * on the same line have to be reset in the same place.*
+		 */
+		axisDeviceTaken = 0;
+		axisDeviceDeclined = 0;
 
 		// Level 2. Process-wide and static, so it is reset here beside the legs
 		// and read in the same destructor that closes the total. See StepProfile.

@@ -13656,3 +13656,56 @@ long. The route refuses it -- and **the host meets the same pathology**,
 paying 22.4 s for that one sweep and eleven of them over a `--device cpu` run.
 *That is a property of the stopping rule on a degenerate iterate, not of
 either route.*
+
+### M-234
+
+**THE SEARCH IS OVER A NEIGHBOURHOOD AND THE INDEX FOR IT WAS ALREADY IN THE
+TREE.**
+
+[M-231](#m-231)'s port swept every element on every call, which is 36x the
+host's warm ring search per call on `machine-f-diiid` and 7.1x FASTER than its
+cold sweep on `fixed-f-diiid` -- a win exactly when the seed keeps failing and
+a loss when it works. The answer is the one the host already takes and the
+device can afford better: root a BLOCK around the previous axis, and let the
+block be generous because a thousand elements costs about what one launch does.
+
+**AND "FINDING THOSE CELLS" IS NOT THE PAIN POINT, WHICH IS THE ONLY REASON
+THIS IS CHEAP.** `meq::PointLocator` builds a uniform bin grid over element
+bounding boxes in CSR form -- about one element per bin, geometry only,
+therefore phase B -- for a completely different purpose, the warm start's point
+location. A spatial neighbourhood is a block of its bins and is O( 1 ) to name.
+`PointLocator::grid()` exposes it so there is ONE grid rather than two uploads
+of one table.
+
+| `machine-f-diiid`, the axis leg per call | |
+|---|---|
+| host, `--device cpu`, 8 threads | 1.6 ms wall at **7.01 cores** |
+| device, sweeping every element ([M-233](#m-233)) | 3.0 ms |
+| device, neighbourhood of 1024 | **1.7 ms at 1.00 core** |
+
+**Parity with seven host cores on one**, and `psi_ax` unmoved. On
+`fixed-f-diiid`'s 102,840 elements a neighbourhood call is about 13 ms against
+a full device sweep's 11.9 and a threaded host sweep's 2,121.
+
+**THE WIDENING IS WHAT MAKES A BOUNDED SEARCH SAFE AND IT IS NOT DECORATION.**
+A neighbourhood that silently missed the axis would hand the selection a
+competition its winner was not entered in, and the selection cannot tell that
+from there being no axis at all. So a warm attempt that finds nothing is
+retried over the whole mesh before the route gives up -- the ring walk's own
+structure, widen then give up, with the widening in one step. On
+`fixed-f-diiid` from a cold start it fires about half the time, because the
+axis moves further in the first Newton steps than any fixed block covers; on
+the warm-started machine case it never fires.
+
+**WHAT IS LEFT IS NOT THE SEARCH AND IT BELONGS TO BOTH ROUTES.** The first
+evaluation of a `fixed-f-diiid` run costs **21 s** whoever makes it. At a
+near-zero iterate `max | q |` collapses, `fluxScale()` falls back to 1.0, and
+the stopping rule becomes `residual <= tolerance` in ABSOLUTE terms -- which
+every element meets at its own seed, so every element reports a root and the
+list is `2 x elements` long. Letting the device take it (cap raised to a
+million, the download already being proportional to the count) removes the host
+sweep entirely -- **0 cold sweeps, 24 taken, 0 declined** -- and moves the leg
+only 21.4 s to 19.6 s, because the cost follows the list to whoever handles it.
+*That is the stopping rule on a degenerate iterate and not a property of either
+route*, and the cap is left at 4096 because a refusal and an acceptance cost
+the same there while the refusal bounds the bus.

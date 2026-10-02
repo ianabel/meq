@@ -927,6 +927,34 @@ right both before and after residency arrives -- and are **inert today**, which
 is the arrangement `meq::DeviceRows` has been in since M-208. **A per-site table
 attributes a transfer to whoever asks FIRST, not to whoever needs it.**
 
+**AND THE SEARCH IS OVER A NEIGHBOURHOOD, WHOSE INDEX WAS ALREADY IN THE TREE**
+-> **[M-233](MEASUREMENTS.md#m-233)**, **[M-234](MEASUREMENTS.md#m-234)**.
+Sweeping every element is 36x the host's warm ring search per call, so the
+device roots a BLOCK around the previous axis instead -- and *finding* that
+block is free, because `meq::PointLocator` already builds a uniform bin grid
+over element bounding boxes in CSR form, at about one element per bin, for the
+warm start's point location. `PointLocator::grid()` exposes it so there is one
+grid rather than two uploads of one table. A warm attempt that finds nothing
+widens to the whole mesh once, which is the ring walk's own structure and is
+what makes a bounded search safe: *a neighbourhood that silently missed the
+axis would hand the selection a competition its winner was not entered in.*
+
+**AND THE KERNEL WAS 65x OFF ITS OWN ARITHMETIC, TWO THIRDS OF IT IN THE
+REDUCTIONS AND A LOOP BOUND.** Both reductions were `mfem::forall( 1, ... )` --
+the flux scale walking **1.23 million dofs on one CUDA core** -- and the loop
+bounds were runtime, so nvcc could not unroll, every coefficient read stayed a
+dynamic index and the per-thread arrays went to LOCAL MEMORY: **608 bytes of
+stack frame with ZERO register spills**, which is what that pairing means.
+*A stack frame with no spills is not register pressure; it is an array whose
+bounds the compiler cannot see.* Halving `triangleBasisMaxDegree` as a
+diagnostic accounted for the frame to the byte before any refactor. Templating
+on the degree takes it to 0 bytes and 96 registers, and the sweep from **297 ms
+to 11.9 ms at 102,840 elements** -- with the candidate lists bit-identical and
+the stopping scale still 0.0 eps from `fluxScale()`'s. **It is NOT
+`mfem::reduce`**, which takes a host reference and would put the one scalar
+these kernels keep on the device back on the bus; `meq::DeviceRows` refuses the
+same primitive for the opposite reason, its sum having an order to reproduce.
+
 **AND REMOVING A FUNNEL EXPOSED A DORMANT DEFECT, WHICH IS NEW.**
 `mfem::Device( "debug" )` aborted on the first run: `coldState( unknown )` is a
 copy construction whose SOURCE is funnelled -- M-205's repair -- while the

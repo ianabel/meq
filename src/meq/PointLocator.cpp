@@ -97,6 +97,21 @@ namespace meq
 		buildBins();
 	}
 
+	PointLocator::BinGrid PointLocator::grid() const
+	{
+		BinGrid out{};
+		out.start = binStart.HostRead();
+		out.element = binElement.HostRead();
+		out.rMin = rMin;
+		out.zMin = zMin;
+		out.dR = dR;
+		out.dZ = dZ;
+		out.binsR = binsR;
+		out.binsZ = binsZ;
+		out.affine = !anyCurved;
+		return out;
+	}
+
 	void PointLocator::buildBins()
 	{
 		int const elements = meshRef.GetNE();
