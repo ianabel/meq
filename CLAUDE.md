@@ -879,6 +879,64 @@ an upload — and the last leg is the mesh search `DEVICE-PLAN.md` §3.4 already
 calls the hardest part of the page. The arm is reverted and kept as a
 measurement.
 
+**AND THAT MESH SEARCH IS NOW ON THE DEVICE, AND THE PLAN WAS RIGHT ABOUT WHICH
+ITEM WAS HARDEST AND WRONG ABOUT WHY** → **[M-230](MEASUREMENTS.md#m-230)**,
+**[M-231](MEASUREMENTS.md#m-231)**, **[M-232](MEASUREMENTS.md#m-232)**.
+`DEVICE-PLAN.md` §3.4 read the obstacle as host control flow -- a scalar
+reduction feeding a branch -- and said *"none of it is add a kernel"*. It was
+one level down and it WAS add a kernel, once the thing a kernel needs existed:
+**`FiniteElement::CalcShape` is a host virtual taking an
+`mfem::IntegrationPoint`**, so no device code could evaluate `q_h` at an
+arbitrary reference point, and an element-local Newton is nothing but such
+evaluations. `src/meq/PointLocatorDevice.cpp` had named that same blocker from
+the other side for as long as it existed -- *"IT LOCATES, IT DOES NOT
+INTERPOLATE"* -- and neither file had connected the two.
+
+**`meq::DeviceBasis` IS THE MISSING PIECE AND IT BORROWS NOTHING FROM MFEM'S
+INTERNALS.** The host asks the element for its own shape functions at its own
+nodes and solves for the constant matrix re-expressing them in barycentric
+monomials; that matrix depends on the geometry, the degree and the basis type
+and on **nothing about the solution**, so it is §3.3's phase B in its purest
+form. **A fixed quadrature rule could not have served**: `GetDofToQuad()` gives
+`phi_i` at ONE `mfem::IntegrationRule`'s points, which is everything an integral
+needs and nothing a search needs -- *a rule is a set of points; a search needs a
+function*. **The ceiling is degree 4 and it is a MEASURED conditioning bound
+rather than an array size**: outside the element, where this evaluator's caller
+deliberately spends part of its Newton, the error grows twentyfold per degree
+and reaches 4.8e-07 at degree 6, which a stopping target of `1e-13 max|q|`
+cannot survive.
+
+**THE ACCEPTANCE IS THE CANDIDATE LIST AND NOT THE ANSWER.**
+`meq::axisCandidatesOnDevice()` roots every element -- a sweep, because on a
+card M-100's 40x economy for a seeded search inverts -- and agrees with
+`CriticalPointFinder::sweep()` to **2.2e-16 in both directions**, with `psi` at
+a matched point to 7.8e-16 and the stopping scale exactly. *A test on the final
+answer passes a port that found a different set and picked the same one*:
+`machine-f-diiid` reports the same `psi_ax` whether or not the device list is
+merged, and the merge is the half that was nearly left out.
+
+**AND THE SAME 12.5 MB MOVED THREE TIMES, WHICH IS THE FINDING.** Forced open,
+the axis constraint's own download disappears and the identical 12.5 MB
+reappears at `refreshXPoint()`; port that too and it reappears at
+`limiterValue()`. The iterate was crossing **once a step** and every host leg
+after the first rode on it for nothing. ***A leg ported in isolation does not
+remove a transfer, it RENAMES one***, and the count falls only when the LAST
+host reader goes. So both routes are gated on
+`DeviceIsValid() && !HostIsValid()` -- a predicate about the DATA, the only form
+right both before and after residency arrives -- and are **inert today**, which
+is the arrangement `meq::DeviceRows` has been in since M-208. **A per-site table
+attributes a transfer to whoever asks FIRST, not to whoever needs it.**
+
+**AND REMOVING A FUNNEL EXPOSED A DORMANT DEFECT, WHICH IS NEW.**
+`mfem::Device( "debug" )` aborted on the first run: `coldState( unknown )` is a
+copy construction whose SOURCE is funnelled -- M-205's repair -- while the
+DESTINATION is not. `Vector::Vector( Vector const & )` propagates `UseDevice()`
+and copies device-to-device, so the copy is born device-valid with its host page
+protected and the raw loops after it fault. ***Funnelling the source of a copy
+does not funnel the copy.*** It was unreachable while the axis funnel ran first
+on every path -- M-130's *ordering has protected it so far* for the third time,
+and the first time **deleting** a funnel is what exposed the next one.
+
 **AND THE REFUSAL OF `TraceSolver = "cudss"` WITHOUT A DEVICE STANDS ON A
 NARROWER MEASUREMENT THAN IT USED TO, AND INVERTS FOR A RESIDENT PATH.** The
 trade argument is measured rather than argued, and **the measurement has moved
@@ -3661,6 +3719,17 @@ src/meq/     the library. Config, Profiles, Source, SourceFactory,
              CriticalPoints, FluxSurfaces, SurfaceAverage, SurfaceFit and
              Zernike are the solution-inversion work and were written here
              rather than ported; see that section.
+             DeviceBasis and AxisSearch are the keystone of the device
+             programme and its first consumer. DeviceBasis evaluates an L2
+             grid function at an ARBITRARY reference point on a straight
+             triangle, which MFEM cannot do on a device at all --
+             FiniteElement::CalcShape is a host virtual -- and which every
+             SEARCH needs where an integral is served by GetDofToQuad()'s
+             fixed rule. It is a change of basis built once per space in
+             phase B. AxisSearch is what it was written for: the magnetic
+             axis found by rooting every element on the device, with the host
+             keeping the selection, the conductor filter and the merge --
+             the half carrying the physics. M-230, M-231, M-232.
              Crossings and StageChecksum are the two DEVICE instruments and
              neither is part of the solve. Crossings counts host reads of a
              device-written state and, separately, how many of them MOVED

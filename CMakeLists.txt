@@ -210,6 +210,9 @@ set(MEQ_CORE_SOURCES
 	src/meq/Estimator.cpp
 	src/meq/Crossings.cpp
 	src/meq/DeviceNPCDevice.cpp
+	src/meq/AxisSearch.cpp
+	src/meq/AxisSearchDevice.cpp
+	src/meq/DeviceBasis.cpp
 	src/meq/DeviceQuadrature.cpp
 	src/meq/DeviceQuadratureDevice.cpp
 	src/meq/DeviceRows.cpp
@@ -246,6 +249,9 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/CriticalPoints.cpp
 	src/meq/Crossings.cpp
 	src/meq/DeviceNPCDevice.cpp
+	src/meq/AxisSearch.cpp
+	src/meq/AxisSearchDevice.cpp
+	src/meq/DeviceBasis.cpp
 	src/meq/DeviceQuadrature.cpp
 	src/meq/DeviceQuadratureDevice.cpp
 	src/meq/DeviceRows.cpp
@@ -483,7 +489,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
 	endif()
 
-	# THE FIVE FILES IN src/meq A DEVICE COMPILER OWNS, AND WHY THEY ARE A
+	# THE SIX FILES IN src/meq A DEVICE COMPILER OWNS, AND WHY THEY ARE A
 	# SEPARATE SET AT ALL. mfem::forall does not compile under the host compiler:
 	# general/backends.hpp:134 turns the absence of MFEM_USE_CUDA_OR_HIP_LANG
 	# into a static_assert reading "The calling function needs to be compiled
@@ -594,7 +600,23 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			PROPERTIES
 				LANGUAGE CUDA
 				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
+		# AxisSearchDevice.cpp ALSO KEEPS THE DEFAULT CONTRACTION, and the
+		# reason is the same one DeviceQuadratureDevice.cpp gives rather than
+		# the one DeviceRowsDevice.cpp gives. It roots a polynomial by Newton:
+		# the arithmetic is the work, there is no host summation order to
+		# reproduce, and its acceptance is that --device cuda reaches the same
+		# equilibrium as --device cpu -- which a last-bit difference in a
+		# Jacobian entry cannot threaten, since the Newton converges to the
+		# root of the same polynomial either way. M-220's envelope argument is
+		# the formal version: what this feeds is a STATIONARY point, whose
+		# value costs nothing and whose position costs half the digits.
+		set_source_files_properties(
+			src/meq/AxisSearchDevice.cpp
+			PROPERTIES
+				LANGUAGE CUDA
+				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
 		list(APPEND MEQ_CORE_SOURCES_DEVICE_LANGUAGE
+			src/meq/AxisSearchDevice.cpp
 			src/meq/DeviceNPCDevice.cpp
 			src/meq/DeviceQuadratureDevice.cpp
 			src/meq/DeviceRowsDevice.cpp
@@ -608,7 +630,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			"meq: ${_meq_device_file_count} sources compile as CUDA, arch ${_meq_cuda_arch}")
 	elseif(MFEM_FOUND AND MFEM_USE_HIP)
 		enable_language(HIP)
-		# THE SAME FIVE, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
+		# THE SAME SIX, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
 		# RESTATED. This arm carried two of them for as long as there were two,
 		# and a device file added to the CUDA branch did not reach it -- which
 		# is not a slow path but a COMPILE ERROR, mfem::forall's static_assert
@@ -617,6 +639,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		# hand, which is the defect meq::limiterPolygonMaximum() and
 		# meq::extensionFdStep() both are.
 		set(MEQ_CORE_SOURCES_DEVICE_LANGUAGE
+			src/meq/AxisSearchDevice.cpp
 			src/meq/DeviceNPCDevice.cpp
 			src/meq/DeviceQuadratureDevice.cpp
 			src/meq/DeviceRowsDevice.cpp

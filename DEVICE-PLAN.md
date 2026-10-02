@@ -989,7 +989,18 @@ at 102,840 elements is **21×** that.
 **A COUNT OF READS IS NOT A COUNT OF TRANSFERS, AND THIS TABLE DOES NOT CLAIM IT
 IS.** Once any one of these reads has brought the state to the host it stays
 valid until the device writes again, so the transfers are bounded below by the
-number of **alternations** rather than by the counts above. What the counts
+number of **alternations** rather than by the counts above.
+
+**AND THAT PARAGRAPH IS NOW MEASURED RATHER THAN REASONED, WITH A CONSEQUENCE
+IT DID NOT DRAW** → **[M-232](MEASUREMENTS.md#m-232)**. Porting the axis
+constraint removes its own 12.5 MB and the identical 12.5 MB **reappears at
+`refreshXPoint()`**; port that too and it reappears at `limiterValue()`. The
+iterate was crossing once a step and every host leg after the first rode on it
+for nothing. So **a leg ported in isolation does not remove a transfer, it
+RENAMES one**, and the count falls only when the LAST host reader goes — which
+means the per-site table below attributes a transfer to whoever asks FIRST, not
+to whoever needs it, and the committed headline of 3 transfers was never a
+measurement of how little the iterate moves. What the counts
 establish is the *shape*, and the shape is the finding: the step does not
 separate into a device phase and a host phase, because the border interleaves
 its 14 backsolves with the functionals it differences. **That is why ordering by
@@ -1019,10 +1030,11 @@ later disagreement with two candidate causes and no way to separate them.
 | — | ~~**`mfem::HDGExtensionIntegrator` on a device**~~ | — | — | **ANSWERED: NOTHING IS OWED** → [M-185](MEASUREMENTS.md#m-185) |
 | **1** | ~~**The element-local nonlinear residual**~~ | **C** | MEQ + upstream | **DONE, BOTH HALVES** → [M-197](MEASUREMENTS.md#m-197). `meq::makeDeviceNPCOperator()` routes MEQ's POD integrand through upstream's batched residual AND gradient; `--device cuda` reports `residual yes, gradient yes, device integrand yes` and reproduces the host to every printed digit. The coil term turned out POD-able — a closed rectangle test and a constant — so the production configuration is covered |
 | **2** | **`NPCReduce` / `NPCRecover` — the FACE loop** | **C** | upstream | **HALF DONE, AND MEQ TAKES IT** → [M-199](MEASUREMENTS.md#m-199). The element-local solves are already batched through `MultInvBatched()`, gated on `CanBatchLocalSolve()`, which reads **yes** under `--device cuda`. What remains is the FACE traversal — host dense work through `GetData()` — which is what forces `du_all.HostRead()`/`dp_all.HostRead()` per call. The "unowned, 1.00 cores, not started" this row carried was wrong on all three |
-| **3** | ~~**The constraint functionals, device-side**~~ | **C** | MEQ | **THE REDUCTIONS ARE DONE** → [M-190](MEASUREMENTS.md#m-190), and `I_p` is built as an element loop → [M-192](MEASUREMENTS.md#m-192). The list had **two** real reductions and one kernel serves both. The limiter is a SEARCH and is **measured not worth porting** → [M-201](MEASUREMENTS.md#m-201): one shipped case, 0.7%, zero transfers |
+| **3** | ~~**The constraint functionals, device-side**~~ | **C** | MEQ | **THE REDUCTIONS ARE DONE** → [M-190](MEASUREMENTS.md#m-190), and `I_p` is built as an element loop → [M-192](MEASUREMENTS.md#m-192). The list had **two** real reductions and one kernel serves both. The limiter is a SEARCH and is **measured not worth porting** → [M-201](MEASUREMENTS.md#m-201): one shipped case, 0.7%, zero transfers. **AND THE AXIS SEARCH, WHICH IS §3.4's OWN HARDEST ITEM, IS NOW DONE** → [M-230](MEASUREMENTS.md#m-230), [M-231](MEASUREMENTS.md#m-231) |
 | **4** | ~~**The bordered border** — `rowDot()` and the `(N+4)²` fill~~ | **C** | MEQ | **DONE AND WIRED** → [M-190](MEASUREMENTS.md#m-190), [M-208](MEASUREMENTS.md#m-208). `dotAll()` is called per column for both compressed row sets, the host gathers are skipped when it runs, and `psi_ax`, the constraint and the X-point are bit-identical between `cpu` and `cuda`. **Wiring it MEASURED the route as a loss** — 3.0 transfers a step becomes 17.7 with the dots in front of the gathers and **33.1** with them instead, because `flush()` brings every column to the host and `dotAll()` pushes each 698 KB one back. So the gate is `Memory::DeviceIsValid()` **on the columns**, a predicate about the data rather than a key about the build: false today, true the moment the columns stop coming down |
 | **5** | ~~**The host branches**~~ | **C** | MEQ | **NEEDED NO KERNEL** → [M-195](MEASUREMENTS.md#m-195). `Norml2()` is already an `mfem::reduce`, so the convergence test and the line search are library primitives; the support decision is FROZEN within a solve by XP-2 and reads **0 calls**. What remained was §4 stage 4b's crossing instrument, now built → [M-196](MEASUREMENTS.md#m-196), [M-198](MEASUREMENTS.md#m-198) |
 | **6** | ~~**`TraceSolver = "cudss"` as the DEFAULT under a device**~~ | **C** | MEQ | **DONE** → [M-229](MEASUREMENTS.md#m-229). Taken deliberately, with every exact arm pinned first ([M-228](MEASUREMENTS.md#m-228)). **It did not destroy the instrument and it did not buy residency**, and both halves were predictions of this plan. The printed comparison survives because seven figures sit above a 1e-15 perturbation; residency did not arrive because the bordered columns are `mfem::Vector v( n )`, whose `UseDevice()` is **false** — so no trace solver could ever have made them device-valid. Making them device-capable works and costs **17× the bus traffic**, because the crossing MOVES to the axis constraint's host mesh search. *Residency is a property of a cycle, not of a leg* |
+| **9** | ~~**The axis constraint's mesh SEARCH, and the basis it needs**~~ | **C** | MEQ | **DONE** → [M-230](MEASUREMENTS.md#m-230), [M-231](MEASUREMENTS.md#m-231), [M-232](MEASUREMENTS.md#m-232). §3.4 called this the hardest part of the page and it was right about which, and wrong about why: the obstacle was not the Newton but the EVALUATION — `FiniteElement::CalcShape` is a host virtual, so no kernel could read `q_h` at an arbitrary reference point. `meq::DeviceBasis` is that missing piece, a change of basis to barycentric monomials built once per space in phase B, and it unblocks `meq::PointLocatorDevice`'s stated gap in the same stroke. `meq::axisCandidatesOnDevice()` then ports `rootInElement()` line for line and agrees with `sweep()`'s candidate list to **2.2e-16** in both directions. **The X-point's evaluation goes with it**, being the same mechanism at one located point. Both are **gated on `DeviceIsValid() && !HostIsValid()`** and inert today, for item 4's reason and M-232's: forced open they RENAME a transfer rather than removing one |
 | **7** | **`general/mem_manager.cpp` made thread-safe** | B, C | **upstream** | **OPTIONAL for MEQ** → [M-216](MEASUREMENTS.md#m-216). *A host loop worth threading under a device is a loop that should be a KERNEL*, so this is a TRANSITION cost rather than a requirement — worth under 2% of a device run and falling. MEQ's own gate and the threaded-assembly refusal stay either way, because they are what make a device run CORRECT rather than fast. The 1.74× of [M-185](MEASUREMENTS.md#m-185) is a different measurement and is upstream's own |
 | **8** | **`MFEM_PRECISION = single`, MEQ swept `double` → `real_t`** | all | **MEQ** | **items 1–7, deliberately** — §7. The **second** instrument-destroying step, and it pairs with item 6 |
 | — | **The simplex face-restriction crash** | — | upstream | blocks nothing here; it gates tensor-only device *geometry*, which residency does not route through (§2.4) |
@@ -1100,6 +1112,32 @@ is no, item 8 is not work to schedule — it is work not to do**, and the case f
 this hardware collapses with it. Run it long before its turn comes.
 
 ### 3.4 The hardest part is not an integrator, and the plan used to hide it in a remainder
+
+**AND IT IS NOW DONE, AND THIS SECTION WAS RIGHT ABOUT WHICH ITEM AND WRONG
+ABOUT WHY** → **[M-230](MEASUREMENTS.md#m-230)**, **[M-231](MEASUREMENTS.md#m-231)**.
+Everything below reads the obstacle as *host control flow* — a scalar reduction
+feeding a branch, a synchronisation point per iteration, *"none of it is add a
+kernel"*. The obstacle was one level down and it WAS add a kernel, once the
+thing a kernel needs existed: **`FiniteElement::CalcShape` is a host virtual
+taking an `mfem::IntegrationPoint`**, so no device code could evaluate `q_h` at
+an arbitrary reference point at all, and an element-local Newton is nothing but
+such evaluations. `src/meq/PointLocatorDevice.cpp` had named exactly that
+blocker from the other side for as long as it existed — *"IT LOCATES, IT DOES
+NOT INTERPOLATE"* — and this section never connected the two.
+
+`meq::DeviceBasis` is the missing piece: a change of basis to barycentric
+monomials, built once per space from `CalcShape` at the element's own nodes,
+uploaded in phase B. `meq::axisCandidatesOnDevice()` then roots **every**
+element with one thread each — a sweep, because on a card M-100's 40× economy
+for a seeded search inverts — and the host keeps the selection, which is the
+half carrying the physics. The candidate lists agree to **2.2e-16 in both
+directions**.
+
+**WHAT IS STILL TRUE BELOW IS THE SHAPE AND NOT THE DIFFICULTY.** The remaining
+host legs are reductions and point evaluations, both of which now have a device
+route; `Mesh::FindPoints` remains the one genuinely awkward thing and the axis
+search was already seeded past it. **What the port cost was not the Newton — it
+was the evaluator.**
 
 **`other (remainder)` at 14.0% plus `constraint location` at 3.3% is 17.3% of a
 step that is neither dense algebra nor an integrator.** Those are M-126's

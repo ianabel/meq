@@ -6720,7 +6720,16 @@ int main( int argc, char **argv )
 		}
 
 		// AND WHERE THEY ARE, because a single number names nothing to do.
-		// The five busiest funnels, by GradShafranov.cpp line.
+		// The five busiest funnels, by LINE NUMBER.
+		//
+		// THE KEY IS A LINE AND NOT A ( FILE, LINE ), WHICH IS A LIMITATION
+		// OF THIS TABLE AND NOT OF THE COUNTS ABOVE IT. Funnels are registered
+		// from several files in src/meq -- GradShafranov.cpp, CriticalPoints.cpp,
+		// DeviceBasis.cpp, AxisSearchDevice.cpp and PointLocator.cpp among them
+		// -- and two sites sharing a line number would be SUMMED into one row.
+		// The totals, the two directions and the phase split are unaffected;
+		// only the attribution of a row could merge. Check the line against
+		// more than one file before reading a row as naming a site.
 		// SORTED BY TRANSFERS AND NOT BY READS. A read that moves nothing is
 		// free, so the site with the most reads is not the site to attack --
 		// M-196 published a table ordered the wrong way for exactly that

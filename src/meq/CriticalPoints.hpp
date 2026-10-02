@@ -840,6 +840,58 @@ namespace meq
 			void setContainment( double containmentIn );
 
 			/**
+			 * The four constants the element-local Newton runs on.
+			 *
+			 * **THESE EXIST SO THAT THE DEVICE ROUTE READS THEM RATHER THAN
+			 * RESTATING THEM.** `meq::rootInTriangle()` is a port of
+			 * `rootInElement()` and has to stop at the same residual, difference
+			 * at the same step, give up after the same number of iterations and
+			 * accept at the same distance outside the element -- otherwise the
+			 * two find different roots on the cases where it matters and agree
+			 * everywhere it does not, which is the worst way for a port to be
+			 * wrong. A second copy of a constant kept in step by hand is the
+			 * defect `meq::limiterPolygonMaximum()` and `meq::extensionFdStep()`
+			 * both turned out to be; this is the same answer applied before
+			 * rather than after.
+			 */
+			double newtonTolerance() const;
+			/// @copydoc newtonTolerance
+			int newtonMaxIterations() const;
+			/// @copydoc newtonTolerance
+			double newtonJacobianStep() const;
+			/// @copydoc newtonTolerance
+			double rootContainment() const;
+			/// @copydoc newtonTolerance
+			double rootSeparation() const;
+
+			/**
+			 * sweep()'s deduplication, on a candidate list somebody else
+			 * produced.
+			 *
+			 * **PUBLIC SO THAT THE DEVICE ROUTE RUNS THIS ONE AND NOT A COPY
+			 * OF IT.** `meq::axisCandidatesOnDevice()` roots every element and
+			 * does not merge -- a kernel cannot, since the merge keeps the
+			 * first of two equals and is therefore order dependent, which is
+			 * the same reason sweep() does it OUTSIDE its OpenMP region. So
+			 * the device route brings its list back and calls this.
+			 *
+			 * *It is not an optimisation and skipping it changes answers.* Two
+			 * candidates of the same type within half an element are one
+			 * critical point rooted from two neighbouring elements'
+			 * polynomials, landing in two different places with two different
+			 * `psi` -- measured at 7.2e-03 apart at `k = 1` on a cosine
+			 * fixture, which is interpolation error and not round-off. The one
+			 * kept is the one LEAST OUTSIDE its own element, and the
+			 * competition downstream is between whichever survive.
+			 *
+			 * @param ordered candidates in ELEMENT order, which is the order a
+			 *        tie is broken in. `reach` is taken from each candidate's
+			 *        own `element`, so the list must carry it.
+			 */
+			std::vector< CriticalPoint > mergeCandidates(
+				std::vector< CriticalPoint > const &ordered ) const;
+
+			/**
 			 * How much work this finder has done since it was built or since
 			 * resetCounters(), counted rather than timed.
 			 *

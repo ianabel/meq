@@ -7,6 +7,8 @@
 // the .cpp.
 #include "CriticalPoints.hpp"
 #include "Crossings.hpp"
+#include "AxisSearch.hpp"
+#include "DeviceBasis.hpp"
 #include "DeviceNPC.hpp"
 #include "DeviceRows.hpp"
 #include "StageChecksum.hpp"
@@ -8564,6 +8566,201 @@ namespace
 		}
 
 		/*
+		 * THE DEVICE ROUTE'S STANDING STATE, SHARED BY THE TWO CONSTRAINTS
+		 * THAT EVALUATE A FIELD AT A POINT.
+		 *
+		 * DEVICE-PLAN.md section 3.3's phase B is *one upload*, and every one
+		 * of these is a constant of the DISCRETISATION rather than of the
+		 * iterate: a change of basis per space and the affine map of every
+		 * element. There is exactly one of each per solve however many callers
+		 * want them -- the axis search and the X-point border both do -- and a
+		 * second copy would be M-226's shape, one upload counted twice and
+		 * attributable to neither.
+		 *
+		 * DECLARED HERE, ABOVE refreshXPoint(), BECAUSE A LAMBDA CAPTURES ONLY
+		 * WHAT IS ALREADY IN SCOPE. locateAxisPoint()'s route is six hundred
+		 * lines further down and would otherwise own a constant its first
+		 * consumer cannot see.
+		 *
+		 * **THEY ARE BUILT, NEVER REFRESHED.** [M-226](../MEASUREMENTS.md) is a
+		 * buffer filled in place after a SetSize() at an unchanged size, which
+		 * reallocates nothing and leaves the fill writing into a page the
+		 * device copy is still believed to own. None of these is ever filled
+		 * twice: the only event that invalidates them is a new mesh, and that
+		 * is a new solver.
+		 */
+		DeviceTriangleBasis axisFluxBasis;
+		DeviceTriangleBasis axisPotentialBasis;
+		mfem::Array<AffineTriangle> axisAffineMaps;
+		mfem::Vector axisNewtonTarget;
+		mfem::Array<AxisCandidate> axisRawCandidates;
+		std::vector<CriticalPoint> deviceCandidates;
+		/// 0 not yet asked, 1 available, -1 refused. Asked once per solve.
+		int axisDeviceState = 0;
+		/// Times a route was available and then declined mid-solve, which is a
+		/// different thing from being unavailable and is reported separately.
+		long axisDeviceDeclines = 0;
+
+		/*
+		 * WHETHER THE DEVICE CAN EVALUATE THIS PROBLEM'S FIELDS AT ALL.
+		 *
+		 * Asked once and remembered, because every refusal is a property of
+		 * the discretisation rather than of an iterate. The refusals that
+		 * belong to ONE constraint -- the conductor split, the envelope row --
+		 * stay with that constraint; what is here is what both need.
+		 */
+		/*
+		 * AND WHETHER TAKING IT WOULD SAVE A CROSSING OR CREATE ONE.
+		 *
+		 * **THIS GATE IS THE WHOLE FINDING OF THE SESSION THAT BUILT THESE
+		 * ROUTES, AND IT IS A PREDICATE ABOUT THE DATA RATHER THAN A KEY ABOUT
+		 * THE BUILD** -- the only form that can be right both before and after
+		 * residency arrives, which is the same shape `columnIsResident()` has
+		 * for meq::DeviceRows and for the same reason.
+		 *
+		 * `H- D+` is the only state in which the device route is the cheaper
+		 * one. If the host already holds a live copy, the host route moves
+		 * nothing and the device route moves nothing either, so there is
+		 * nothing to buy; if the host holds the ONLY live copy, the device
+		 * route pays an UPLOAD to avoid a download that would not have
+		 * happened.
+		 *
+		 * **AND WITHOUT IT THESE ROUTES MAKE THE MEASUREMENT WORSE, WHICH WAS
+		 * MEASURED RATHER THAN FEARED** -> [M-230](../MEASUREMENTS.md). Forced
+		 * open on `machine-f-diiid` under `--device cuda`, the axis
+		 * constraint's own 12.5 MB duly disappears -- and the **same 12.5 MB
+		 * reappears at `refreshXPoint()`**, which had been reading a copy the
+		 * axis funnel paid for. Port that one too and it reappears a third
+		 * time at `limiterValue()`. The run goes from 3 transfers and 0.888 MB
+		 * to 69 and 15.9 MB, with `psi_ax` identical at every step.
+		 *
+		 * *The iterate was crossing the bus ONCE A STEP and every host leg
+		 * after the first rode on it for nothing.* So a leg ported in
+		 * isolation does not remove a transfer, it RENAMES one -- and the
+		 * count falls only when the LAST host reader of the iterate goes.
+		 * That is [M-229](../MEASUREMENTS.md)'s *residency is a property of a
+		 * cycle and not of a leg*, demonstrated from the other direction and
+		 * three times over. **A per-site table attributes a transfer to
+		 * whoever asks first, which is not the same as attributing it to
+		 * whoever needs it.**
+		 */
+		auto iterateIsResident = [ & ]( mfem::Vector const &state )
+		{
+			// MEQ_AXIS_DEVICE=force overrides it, so the kernels can be put
+			// on a clock at all -- see meq::axisDeviceRouteForced(). It is a
+			// measurement switch and changes which route runs, not what
+			// either computes.
+			if ( axisDeviceRouteForced() )
+				return true;
+			mfem::Memory<mfem::real_t> const &memory = state.GetMemory();
+			return memory.DeviceIsValid() && !memory.HostIsValid();
+		};
+
+		auto ensureDeviceBasis = [ & ]() -> bool
+		{
+			if ( axisDeviceState != 0 )
+				return axisDeviceState > 0;
+
+			// Refused until proved otherwise, so every `return false` below is
+			// also a decision not to ask again this solve.
+			axisDeviceState = -1;
+
+			if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+				return false;
+			if ( !fluxFes || !potentialFes )
+				return false;
+
+			/*
+			 * AND THE BUILD IS ATTRIBUTED TO PHASE B RATHER THAN TO THE PHASE
+			 * IT HAPPENS IN, WHICH IS THE WHOLE POINT OF M-226.
+			 *
+			 * This runs inside solve(), so without the scope its uploads land
+			 * in phase C -- *the one to drive to zero* -- and a reader would
+			 * be asked to tell a constant of the discretisation from an
+			 * iterate crossing the bus every step. They are opposite findings
+			 * and a single total is an average over the two. Phase B running
+			 * inside phase C is a fact about MEQ rather than a defect, and the
+			 * scope is what makes it counted instead of averaged.
+			 */
+			PhaseScope const residency( Phase::Upload );
+			if ( !axisFluxBasis.build( *fluxFes )
+			     || !axisPotentialBasis.build( *potentialFes ) )
+				return false;
+			if ( !affineTrianglesOf( mesh, axisAffineMaps ) )
+				return false;
+
+			axisDeviceState = 1;
+			return true;
+		};
+
+		/*
+		 * THE X-POINT'S THREE QUANTITIES, READ WHERE THE ITERATE ALREADY IS.
+		 *
+		 * **THIS IS ONE LINE OF ONE TABLE AND IT IS THE LARGEST LINE LEFT.**
+		 * With the axis constraint no longer downloading the iterate, the
+		 * funnel in refreshXPoint() moves **15 transfers and 12.5 MB** of a
+		 * `--device cuda` run of examples/machine-f-diiid.toml -- one 830 KB
+		 * download per call, twelve Newton steps and three support sweeps --
+		 * to come away with EIGHT DOUBLES. Every other site in the run put
+		 * together is smaller.
+		 *
+		 * **IT IS AN EVALUATION AND NOT A SEARCH, WHICH IS WHY IT IS THE EASY
+		 * HALF OF DEVICE-PLAN.md SECTION 3.4.** locateFieldPoint() has already
+		 * inverted the element map and it reads no solution vector at all, so
+		 * `element` and `reference` are in hand before `state` is touched. One
+		 * element, one point, one thread. meq::axisCandidatesOnDevice() is the
+		 * hard sibling and it is what the basis was built for.
+		 *
+		 * **A CONDUCTOR SPLIT IS NOT A REFUSAL HERE, WHERE IT IS ONE FOR THE
+		 * AXIS.** The q_c terms are closed forms evaluated at host doubles and
+		 * ADDED to these three quantities afterwards; they read no state. The
+		 * axis route refuses the split because the split field is what it
+		 * ROOTS and what its stopping scale is measured against. Two
+		 * constraints, one mechanism, different answers -- said rather than
+		 * left to be inferred from one route's gate.
+		 *
+		 * THE ELEMENT'S affine FLAG IS CHECKED ON THE DEVICE AND NOT HERE.
+		 * affineTrianglesOf() returning true already says every element is
+		 * affine, and `axisAffineMaps[ element ]` would be a raw
+		 * mfem::Array::operator[] on a device-valid array -- M-187's shape --
+		 * dragging the whole map table over to save eight doubles.
+		 */
+		auto xPointFieldFromDevice =
+			[ & ]( mfem::Vector const &state, int element,
+			       mfem::IntegrationPoint const &reference ) -> bool
+		{
+			if ( !iterateIsResident( state ) || !ensureDeviceBasis() )
+				return false;
+
+			XPointFieldInputs inputs{};
+			inputs.flux = axisFluxBasis.view();
+			inputs.potential = axisPotentialBasis.view();
+			inputs.maps = axisAffineMaps.Read();
+			inputs.state = countedDeviceRead( state, __LINE__ );
+			inputs.element = element;
+			inputs.xi = static_cast<mfem::real_t>( reference.x );
+			inputs.eta = static_cast<mfem::real_t>( reference.y );
+			inputs.fluxScalarDofs = fluxFes->GetNDofs();
+			inputs.potentialOffset = blockOffsets[ 1 ];
+
+			XPointFieldValues got{};
+			if ( !xPointFieldOnDevice( inputs, got ) )
+			{
+				++axisDeviceDeclines;
+				return false;
+			}
+
+			xFlux[ 0 ] = got.flux[ 0 ];
+			xFlux[ 1 ] = got.flux[ 1 ];
+			for ( int i = 0; i < 2; ++i )
+				for ( int j = 0; j < 2; ++j )
+					xFluxJacobian[ i ][ j ] = got.fluxJacobian[ 2*i + j ];
+			xPotentialGradient[ 0 ] = got.potentialGradient[ 0 ];
+			xPotentialGradient[ 1 ] = got.potentialGradient[ 1 ];
+			return true;
+		};
+
+		/*
 		 * THE X-POINT'S ELEMENT AND EVERYTHING READ ON IT, AT @a state.
 		 *
 		 * It runs at every iterate and then stays FROZEN through the
@@ -8665,33 +8862,60 @@ namespace
 			 * each line-search trial, and the fallback step -- so a sync here
 			 * cannot be outgrown by a new caller, where a list of producers can.
 			 */
-			countedHostRead( state, __LINE__ );
-			countedHostReadWrite( xFluxField, __LINE__ );
-			countedHostReadWrite( xPotentialField, __LINE__ );
+			/*
+			 * AND THE OTHER WAY THROUGH A FUNNEL IS NOT TO BRING THE DATA OVER
+			 * AT ALL. A REFUSAL IS ALWAYS THE HOST PATH BELOW, VERBATIM.
+			 *
+			 * meq::makeSourceView()'s contract, taken for its reason: there is
+			 * no approximate mode worth having in a border row. The two arms
+			 * share no state -- the device arm never writes xFluxField or
+			 * xPotentialField and the host arm never reads anything the device
+			 * arm wrote -- so a route that is available on one call and
+			 * declines on the next is safe rather than merely untested.
+			 *
+			 * THE TWO ARE NOT BIT-IDENTICAL AND THIS IS WHERE THAT IS PAID.
+			 * meq::DeviceBasis evaluates the same polynomial through a change
+			 * of basis, so it agrees with CalcShape() to round-off and not to
+			 * the bit. What that costs the ANSWER is bounded rather than hoped
+			 * for: x_X is a SIMPLE root of q_h -- the Jacobian is
+			 * non-degenerate at a saddle by construction, and it is the very
+			 * matrix this lambda fills -- so a perturbation at eps moves the
+			 * located point at eps/| J | rather than at sqrt( eps ), and
+			 * psi_bnd = psi_h( x_X ) follows at eps. What establishes it is
+			 * not this comment: it is tests/convergence/DeviceParity.cpp,
+			 * where the X-point is compared to six decimals and psi_bnd to
+			 * seven figures.
+			 */
+			if ( !xPointFieldFromDevice( state, element, reference ) )
+			{
+				countedHostRead( state, __LINE__ );
+				countedHostReadWrite( xFluxField, __LINE__ );
+				countedHostReadWrite( xPotentialField, __LINE__ );
 
-			for ( int i = 0; i < xFluxDofsR.Size(); ++i )
-				xFluxField( xFluxDofsR[ i ] ) = -state( xFluxDofsR[ i ] );
-			for ( int i = 0; i < xFluxDofsZ.Size(); ++i )
-				xFluxField( xFluxDofsZ[ i ] ) = -state( xFluxDofsZ[ i ] );
-			for ( int i = 0; i < limiterDofs.Size(); ++i )
-				xPotentialField( limiterDofs[ i ] ) =
-					state( blockOffsets[ 1 ] + limiterDofs[ i ] );
+				for ( int i = 0; i < xFluxDofsR.Size(); ++i )
+					xFluxField( xFluxDofsR[ i ] ) = -state( xFluxDofsR[ i ] );
+				for ( int i = 0; i < xFluxDofsZ.Size(); ++i )
+					xFluxField( xFluxDofsZ[ i ] ) = -state( xFluxDofsZ[ i ] );
+				for ( int i = 0; i < limiterDofs.Size(); ++i )
+					xPotentialField( limiterDofs[ i ] ) =
+						state( blockOffsets[ 1 ] + limiterDofs[ i ] );
 
-			mfem::Vector value( 2 );
-			xFluxField.GetVectorValue( element, reference, value );
-			xFlux[ 0 ] = value( 0 );
-			xFlux[ 1 ] = value( 1 );
+				mfem::Vector value( 2 );
+				xFluxField.GetVectorValue( element, reference, value );
+				xFlux[ 0 ] = value( 0 );
+				xFlux[ 1 ] = value( 1 );
 
-			mfem::DenseMatrix gradient( 2, 2 );
-			xFluxField.GetVectorGradient( scratch, gradient );
-			for ( int i = 0; i < 2; ++i )
-				for ( int j = 0; j < 2; ++j )
-					xFluxJacobian[ i ][ j ] = gradient( i, j );
+				mfem::DenseMatrix gradient( 2, 2 );
+				xFluxField.GetVectorGradient( scratch, gradient );
+				for ( int i = 0; i < 2; ++i )
+					for ( int j = 0; j < 2; ++j )
+						xFluxJacobian[ i ][ j ] = gradient( i, j );
 
-			mfem::Vector potentialGradient( 2 );
-			xPotentialField.GetGradient( scratch, potentialGradient );
-			xPotentialGradient[ 0 ] = potentialGradient( 0 );
-			xPotentialGradient[ 1 ] = potentialGradient( 1 );
+				mfem::Vector potentialGradient( 2 );
+				xPotentialField.GetGradient( scratch, potentialGradient );
+				xPotentialGradient[ 0 ] = potentialGradient( 0 );
+				xPotentialGradient[ 1 ] = potentialGradient( 1 );
+			}
 
 			/*
 			 * AND THE X-POINT IS A NULL OF THE TOTAL FIELD, NOT OF THE
@@ -9053,6 +9277,316 @@ namespace
 		 * pass through; falling back to the nodal maximum keeps the constraint
 		 * well defined and axisWasLocated() records that it happened.
 		 */
+		/*
+		 * THE SCORE SELECTION, ONE IMPLEMENTATION FOR BOTH ROUTES.
+		 *
+		 * The host route reaches this with meq::CriticalPointFinder::sweep()'s
+		 * candidates and the device route with meq::axisCandidatesOnDevice()'s;
+		 * what is chosen from them must not depend on which. A second copy of a
+		 * selection rule kept in step by hand is the defect
+		 * meq::limiterPolygonMaximum() and meq::extensionFdStep() both turned
+		 * out to be -- and this rule in particular decides WHICH EQUILIBRIUM is
+		 * reported, which is the class of divergence CLAUDE.md's *two readings
+		 * of one constraint under the same words* records costing a whole
+		 * wall-hugging annulus.
+		 *
+		 * TWO PASSES, AND THE SECOND ONE IS NOT A SOFTENING OF THE FIRST -- IT
+		 * IS WHAT KEEPS THE FILTER FROM CHANGING ANSWERS ON ITERATES THAT ARE
+		 * NOT YET EQUILIBRIA.
+		 *
+		 * Pass 0 drops the conductors. Pass 1 runs only if that left NOTHING of
+		 * the wanted sense anywhere on the mesh, and repeats the competition
+		 * over the whole field.
+		 *
+		 * The case that forces it is an inverted span. `wanted` follows the
+		 * ITERATE's span, so while psi_ax sits below psi_bnd the search is for
+		 * a MINIMUM -- and on a machine whose coils carry current opposite to
+		 * the plasma's, the only minima in the field are the conductors' own
+		 * O-points. Filtering them then leaves the competition empty, this
+		 * returns false, and the solve loses the located-axis constraint
+		 * mid-iteration.
+		 *
+		 * MEASURED ON examples/limited-tokamak.toml, WHERE THAT COSTS THE
+		 * ANSWER: the second pass fires on 3 of the 7 cold sweeps a run makes,
+		 * and with it the run is 12 Newton steps to psi_ax = 9.484400e-02,
+		 * digit for digit what the same solve gives with no filter at all and
+		 * 1.3e-04 from freegs4e. Without it the same case takes 27 steps to
+		 * 9.778179e-02 -- 3.1% out, a hundred times the gap DriverAcceptance
+		 * pins.
+		 *
+		 * So the rule is: a conductor's O-point is not a magnetic axis and is
+		 * not chosen while anything else is available; on an iterate that
+		 * offers nothing else, following it is better than following nothing,
+		 * and the equilibrium the iteration is converging to gets the filter as
+		 * soon as it has an extremum of its own.
+		 */
+		auto pickByScore = [ & ]( std::vector< CriticalPoint > const &all,
+		                          CriticalPointType wanted, double span,
+		                          CoilSet const *conductorSet,
+		                          CriticalPoint &best ) -> bool
+		{
+			bool found = false;
+			for ( int pass = 0; !found && pass < 2; ++pass )
+			{
+				bool const dropConductors =
+					( pass == 0 ) && conductorSet != nullptr;
+				double bestScore = 0.0;
+				for ( std::size_t i = 0; i < all.size(); ++i )
+				{
+					if ( all[ i ].type != wanted )
+						continue;
+
+					if ( dropConductors
+					     && conductorSet->indexContaining( all[ i ].radius,
+					                                       all[ i ].z ) >= 0 )
+						continue;
+
+					double const score = span >= 0.0 ? all[ i ].psi
+					                                 : -all[ i ].psi;
+					if ( !found || score > bestScore )
+					{
+						found = true;
+						bestScore = score;
+						best = all[ i ];
+					}
+				}
+			}
+			return found;
+		};
+
+		/*
+		 * WHETHER THE ROOT FINDING CAN RUN WHERE THE DATA IS -- AND IF SO,
+		 * RUNNING IT.
+		 *
+		 * Every refusal below is a case meq::CriticalPointFinder handles and
+		 * this route does not, and each one falls back to it rather than
+		 * approximating. That is meq::makeSourceView()'s contract and it is
+		 * taken for its reason: there is no approximate mode worth having in a
+		 * constraint functional.
+		 */
+		auto axisDeviceRoute = [ & ]( mfem::Vector const &state ) -> bool
+		{
+			if ( axisDeviceState < 0 || !iterateIsResident( state ) )
+				return false;
+
+			if ( axisDeviceState == 0 )
+			{
+				if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+					return false;
+
+				/*
+				 * THE CONDUCTOR SPLIT, WHICH IS A REFUSAL AND NOT A GAP.
+				 * Under [conductors] Model the rooted field is q_p + q_c and
+				 * the stopping scale is the TOTAL's, both out of a per-node
+				 * table. Portable, and not ported: no shipped example that
+				 * reaches this constraint uses the split, so porting it would
+				 * be writing a kernel nothing runs -- and the tree already
+				 * carries several of those.
+				 */
+				if ( conductorFieldSet != nullptr )
+					return false;
+
+				/*
+				 * AND THE ENVELOPE ROW, FOR A SHARPER REASON: it differences
+				 * grad q_h at the root and reads the axis element's FLUX dofs
+				 * on the host to do it, so taking this route under it would
+				 * move one read of the iterate and leave the other. It is off
+				 * by default -- AxisRow::PositionDropped -- and a run that
+				 * asks for it keeps the host route whole.
+				 */
+				if ( axisRowChoice == AxisRow::WithEnvelope )
+					return false;
+
+				// ONE BUILD FOR BOTH CONSTRAINTS. The M-226 argument and the
+				// PhaseScope live in ensureDeviceBasis(); what stays here are
+				// the refusals that are the AXIS route's alone.
+				if ( !ensureDeviceBasis() )
+					return false;
+			}
+
+			/*
+			 * THE FOUR NEWTON CONSTANTS COME OUT OF A FINDER RATHER THAN BEING
+			 * RESTATED HERE. meq::rootInTriangle() is a port of
+			 * rootInElement() and has to stop at the same residual, difference
+			 * at the same step, give up after the same number of iterations
+			 * and accept at the same distance outside the element. A second
+			 * copy of a constant kept in step by hand is the defect
+			 * meq::limiterPolygonMaximum() and meq::extensionFdStep() both
+			 * are; asking the class that owns them costs two references.
+			 */
+			CriticalPointFinder const defaults( axisFlux, axisPotential );
+
+			if ( !axisFluxScaleOnDevice(
+				     state, fluxFes->GetNDofs(),
+				     static_cast<mfem::real_t>( defaults.newtonTolerance() ),
+				     axisNewtonTarget ) )
+			{
+				++axisDeviceDeclines;
+				return false;
+			}
+
+			mfem::IntegrationPoint const centre =
+				mfem::Geometries.GetCenter( mfem::Geometry::TRIANGLE );
+
+			AxisSearchInputs inputs{};
+			inputs.flux = axisFluxBasis.view();
+			inputs.potential = axisPotentialBasis.view();
+			inputs.maps = axisAffineMaps.Read();
+			inputs.state = countedDeviceRead( state, __LINE__ );
+			inputs.target = axisNewtonTarget.Read();
+			inputs.centreXi = static_cast<mfem::real_t>( centre.x );
+			inputs.centreEta = static_cast<mfem::real_t>( centre.y );
+			inputs.elements = mesh.GetNE();
+			inputs.fluxScalarDofs = fluxFes->GetNDofs();
+			inputs.potentialOffset = blockOffsets[ 1 ];
+			inputs.jacobianStep =
+				static_cast<mfem::real_t>( defaults.newtonJacobianStep() );
+			inputs.containment =
+				static_cast<mfem::real_t>( defaults.rootContainment() );
+			inputs.maxIterations = defaults.newtonMaxIterations();
+
+			int count = 0;
+			if ( !axisCandidatesOnDevice( inputs, axisRawCandidates, count ) )
+			{
+				// Either no device route at all, or more candidates than the
+				// compaction holds. A TRUNCATED competition is one missing an
+				// entrant, which is exactly how a coil's O-point would win
+				// one -- so it is refused rather than used.
+				++axisDeviceDeclines;
+				return false;
+			}
+
+			/*
+			 * AND THE MERGE, WHICH IS THE HOST'S AND IS REPRODUCED RATHER
+			 * THAN ARGUED AWAY.
+			 *
+			 * **THE FIRST VERSION OF THIS SKIPPED IT, ON THE ARGUMENT THAT
+			 * BOTH SELECTION RULES ARE INVARIANT UNDER DUPLICATES. THAT
+			 * ARGUMENT IS TRUE AND IT IS ABOUT THE WRONG THING.** `sweep()`
+			 * does not merely drop exact duplicates: it merges any two
+			 * candidates of the same type within half an element of each
+			 * other, keeping **the one least outside its own element**. Those
+			 * are not copies -- they are one critical point rooted from two
+			 * neighbouring elements' polynomials, landing in two slightly
+			 * different places with two slightly different `psi`. Measured on
+			 * a cosine fixture at `k = 1, 2, 3`: the host returns 5 candidates
+			 * where the device returns 20 to 28, and the extras sit **7.2e-03,
+			 * 4.3e-03 and 7.5e-04** away. So an unmerged list hands the score
+			 * rule a competitor the host had already eliminated, and the
+			 * disagreement is the INTERPOLATION error -- `O( h^(k+1) )`, not
+			 * round-off. *Two representations of one critical point are not
+			 * duplicates, and the rule that picks between them is the half
+			 * that was left out.*
+			 *
+			 * `tests/unit/AxisSearchTests.cpp` is what said so, by comparing
+			 * the LISTS rather than the answer. `DeviceParity` would not have:
+			 * `machine-f-diiid` reports the same `psi_ax` to every printed
+			 * digit either way, because there the right candidate happens to
+			 * win both competitions. *A test on the final answer passes a port
+			 * that found a different set and picked the same one.*
+			 *
+			 * Reproduced on the HOST, on the downloaded list, because it is
+			 * serial by construction -- `sweep()`'s own comment records that
+			 * merging inside its OpenMP region would make the answer
+			 * thread-order dependent at the 1e-3 level -- and because every
+			 * number it needs is geometry.
+			 */
+			deviceCandidates.clear();
+			deviceCandidates.reserve( static_cast<std::size_t>( count ) );
+			for ( int i = 0; i < count; ++i )
+			{
+				AxisCandidate const &from = axisRawCandidates[ i ];
+				CriticalPoint point;
+				point.radius = from.radius;
+				point.z = from.z;
+				point.psi = from.psi;
+				point.type = static_cast<CriticalPointType>( from.type );
+				point.index = criticalPointIndex( point.type );
+				point.element = from.element;
+				point.fluxResidual = from.fluxResidual;
+				point.determinant = from.determinant;
+				point.trace = from.trace;
+				point.overshoot = from.overshoot;
+				point.referenceX = from.referenceX;
+				point.referenceY = from.referenceY;
+				deviceCandidates.push_back( point );
+			}
+
+			// AND THE MERGE IS THE HOST'S OWN, CALLED AND NOT COPIED.
+			// The candidates arrive in ELEMENT order -- which the compaction
+			// kernel is one thread for precisely so that this sees the order
+			// sweep()'s serial pass sees, since the merge keeps the first of
+			// two equals. See CriticalPointFinder::mergeCandidates() for why
+			// skipping it changes answers rather than only lengthening a list.
+			deviceCandidates = defaults.mergeCandidates( deviceCandidates );
+			return true;
+		};
+
+		/*
+		 * AND WHICH OF THEM IS THE AXIS, ON THE DEVICE ROUTE'S LIST.
+		 *
+		 * **THE WARM RULE IS A CONTINUATION AND THAT IS WHY IT IS FIRST.**
+		 * tryFindCriticalPointFrom() follows the extremum nearest the previous
+		 * axis rather than re-running the competition at every step, which is
+		 * what answers the stability objection to this constraint. The
+		 * conductor filter is applied to the point ADOPTED rather than to the
+		 * way it was reached, because the cold fallback can hand the warm
+		 * search a coil's O-point on a transient iterate and a seeded search
+		 * asked to continue from one finds it again.
+		 *
+		 * **IT IS NOT THE HOST'S ALGORITHM AND THE DIFFERENCE IS STATED RATHER
+		 * THAN BURIED.** The host walks rings out from the seed element and
+		 * stops at the FIRST ring holding a clean root; this takes the nearest
+		 * clean root GLOBALLY, because the device has rooted every element
+		 * anyway and a ring limit on a card buys nothing -- M-100 measured a
+		 * host sweep at 40x a seeded search and that economy inverts when
+		 * 4,848 Newtons and 19 Newtons are one launch. The two agree whenever
+		 * the nearest clean root lies in that first productive ring, which is
+		 * the case the ring walk exists for, and can differ where two O-points
+		 * sit at comparable distances in different rings. What establishes
+		 * that they agree on the problems MEQ solves is not this comment: it
+		 * is tests/convergence/DeviceParity.cpp, where a different axis is a
+		 * different psi_ax and a different Newton count.
+		 */
+		auto pickAxis = [ & ]( std::vector< CriticalPoint > const &all,
+		                       CriticalPointType wanted, double span,
+		                       CoilSet const *conductorSet,
+		                       CriticalPoint &best ) -> bool
+		{
+			if ( havePreviousAxis )
+			{
+				bool found = false;
+				double nearest = 0.0;
+				for ( std::size_t i = 0; i < all.size(); ++i )
+				{
+					if ( all[ i ].type != wanted )
+						continue;
+					// Strictly inside its own element, which is what the ring
+					// walk calls a clean root and what it stops on.
+					if ( !( all[ i ].overshoot <= 0.0 ) )
+						continue;
+					if ( conductorSet != nullptr
+					     && conductorSet->indexContaining( all[ i ].radius,
+					                                       all[ i ].z ) >= 0 )
+						continue;
+
+					double const dr = all[ i ].radius - previousAxisR;
+					double const dz = all[ i ].z - previousAxisZ;
+					double const distance = dr*dr + dz*dz;
+					if ( !found || distance < nearest )
+					{
+						found = true;
+						nearest = distance;
+						best = all[ i ];
+					}
+				}
+				if ( found )
+					return true;
+			}
+
+			return pickByScore( all, wanted, span, conductorSet, best );
+		};
+
 		auto locateAxisPoint = [ & ]( mfem::Vector const &state,
 		                              double normalisation, double &value,
 		                              int *element, int *dof ) -> bool
@@ -9062,218 +9596,199 @@ namespace
 			constraintFluxDofs.SetSize( 0 );
 			constraintFluxRow.SetSize( 0 );
 
-			// THE FUNNEL, AND IT IS NOT DECORATION HERE. The two loops below
-			// index the iterate raw, and this is the DEFAULT axis constraint --
-			// it runs every Newton step of every bordered solve. Ordering has
-			// protected it so far, because refreshXPoint() or
-			// refreshPlasmaComponent() happens to sync the same buffer first on
-			// the configurations that have been run; a limited machine with a
-			// frozen plasma support calls neither. See rowDot()'s comment for
-			// the whole argument, and DEVICE-PLAN.md section 1.2 for the sweep.
-			countedHostRead( state, __LINE__ );
-
-			// q, NOT the raw block. DarcyForm holds -q, and in even dimension
-			// index( -v ) = index( v ), so a finder handed the raw block puts
-			// every Maximum where a Minimum is and the classification below
-			// silently picks the wrong extremum. CriticalPoints.hpp records this
-			// as the failure to watch for.
-			for ( int i = 0; i < blockOffsets[ 1 ]; ++i )
-				axisFlux( i ) = -state( i );
-			for ( int i = blockOffsets[ 1 ]; i < blockOffsets[ 2 ]; ++i )
-				axisPotential( i - blockOffsets[ 1 ] ) = state( i );
-
-			// THE SENSE FOLLOWS THE SPAN, exactly as checkAxis() does: the
-			// plasma is where ( psi - psi_bnd ) carries the span's sign, so a
-			// positive span puts the axis at a maximum. Guessing it instead
-			// would meet AxisSense::Either's refusal on every real problem.
-			//
-			// THE ITERATE'S span, NOT psiAxisValue's. The member is only written
-			// at the END of the solve, so inside the loop it still holds the
-			// value setSource() was given -- which is the initial GUESS, and on a
-			// problem whose span changes sign against it this would pick the
-			// wrong extremum for the whole iteration.
+			/*
+			 * THE SENSE AND THE CONDUCTOR FILTER, HOISTED ABOVE THE FUNNEL.
+			 *
+			 * Neither reads the iterate -- `span` is two scalars and
+			 * `filterConductors()` is the source's geometry -- and the device
+			 * route below needs both BEFORE deciding whether it can avoid
+			 * bringing the iterate over. Moving them up changes no arithmetic
+			 * and is what lets the funnel sit inside a branch.
+			 *
+			 * THE SENSE FOLLOWS THE SPAN, exactly as checkAxis() does: the
+			 * plasma is where ( psi - psi_bnd ) carries the span's sign, so a
+			 * positive span puts the axis at a maximum. Guessing it instead
+			 * would meet AxisSense::Either's refusal on every real problem.
+			 *
+			 * THE ITERATE'S span, NOT psiAxisValue's. The member is only
+			 * written at the END of the solve, so inside the loop it still
+			 * holds the value setSource() was given -- which is the initial
+			 * GUESS, and on a problem whose span changes sign against it this
+			 * would pick the wrong extremum for the whole iteration.
+			 */
 			double const span = normalisation - sB;
 			CriticalPointType const wanted = span >= 0.0
 				? CriticalPointType::Maximum : CriticalPointType::Minimum;
-
-			CriticalPointFinder finder( axisFlux, axisPotential );
-			// The axis is a zero of the PHYSICAL flux and a value of the
-			// physical potential; under the split this solver holds only the
-			// remainder. Null unless the split is in use, and null shifts by
-			// exactly zero. COIL-SUBTRACTION-PLAN.md CS-4.
-			finder.setConductorField( conductorFieldSet );
-			finder.setInterpolatedFlux( interpolateConductorFlux );
-
-			/*
-			 * AND ITS q_c TABLE, WHICH IS THE EXPENSIVE ONE AND IS NOT psi_c.
-			 *
-			 * This finder is constructed per solve, and its table is `q_c` at
-			 * every flux node -- a cross-section quadrature of elliptic
-			 * integrals per node for a rectangle. Measured, caching `psi_c`
-			 * alone left this at 61% of a warm run's profile. So the table is
-			 * held on the SOLVER, built once and then handed to every finder
-			 * after it, and `src/meq/ConductorStore.hpp` carries it between
-			 * runs.
-			 */
-			if ( conductorFieldSet )
-			{
-				// THE SAME re-mesh GUARD THE OTHER TWO CACHES CARRY. An
-				// adaptive cycle refines without rebuilding this solver, and a
-				// q_c table indexed by element on the coarse mesh would be
-				// read against the refined one. Signature first, every time.
-				if ( pendingConductorCache.hasCriticalPointTable()
-				     && pendingConductorCacheStillApplies() )
-					finder.adoptNodalConductors(
-						criticalTableFromCache( pendingConductorCache ) );
-				else
-				{
-					criticalTableIntoCache( finder.nodalConductorTable(),
-					                        pendingConductorCache );
-					// Stamped with THIS mesh, so the guard above can pass on
-					// the next solve of the same problem and must fail on a
-					// refined one.
-					pendingConductorCache.signature = conductorCacheSignature();
-				}
-			}
 			AxisSense const sense = span >= 0.0 ? AxisSense::Maximum
 			                                    : AxisSense::Minimum;
+
+			// The conductors, if this source carries any. Both routes below
+			// consult them, and the WARM one has to: a cold pass that has no
+			// admissible candidate at all falls back to the whole field, so a
+			// conductor's O-point CAN be adopted on a transient iterate -- and
+			// without this the seeded search would then follow it for the rest
+			// of the solve, which is exactly the failure the filter exists to
+			// prevent. Measured on the diverted machine: with the cold filter
+			// alone the run ends with psi_ax at ( 1.0053, -1.1016 ), inside
+			// P1L, having been handed it once.
+			CoilSet const *const conductors = filterConductors();
 
 			CriticalPoint best;
 			bool found = false;
 
 			/*
-			 * WARM: A SEEDED SEARCH FROM THE LAST AXIS, WHICH IS WHAT MAKES THIS
-			 * AFFORDABLE AND WHAT MAKES IT FOLLOW ONE AXIS.
+			 * THE DEVICE ROUTE, AND IT IS FIRST BECAUSE WHAT IT AVOIDS IS THE
+			 * NEXT STATEMENT.
 			 *
-			 * tryFindAxisFrom() roots the seed's element and widens by rings,
-			 * stopping at the first ring with a clean root: measured, ONE element
-			 * when the seed is still on the answer and 19 of 2048 when it is a
-			 * whole element away. A sweep roots every element, so the seeded
-			 * cost is bounded by a ring count rather than by the mesh and the
-			 * ratio IMPROVES with refinement -- which is the property a Newton
-			 * loop needs.
+			 * [M-229](../MEASUREMENTS.md) measured a resident bordered step at
+			 * 20 transfers and 15.1 MB against 3 and 0.888, and put **15 of
+			 * those transfers and 12.5 of those megabytes on the funnel
+			 * below** -- one site, more than every other site in the run put
+			 * together. `meq::axisCandidatesOnDevice()` roots every element
+			 * where the data already is and brings back the accepted
+			 * candidates, so the iterate stays where the kernels left it.
 			 *
-			 * And it is what answers the stability objection to this constraint:
-			 * following the extremum nearest the previous one is a continuation
-			 * in the axis rather than a fresh competition between every O-point
-			 * in the field at every step.
+			 * **ONLY THE ROOT FINDING MOVES.** The selection below is the same
+			 * code on either route, reading the same list: the conductor
+			 * filter, its two passes, the score and the continuation are the
+			 * half carrying the physics and they do not belong in a kernel.
 			 */
-			// The conductors, if this source carries any. Both paths below
-			// consult them, and the WARM one has to: a cold pass that has no
-			// admissible candidate at all falls back to the whole field (see
-			// below), so a conductor's O-point CAN be adopted on a transient
-			// iterate -- and without this the seeded search would then follow
-			// it for the rest of the solve, which is exactly the failure the
-			// filter exists to prevent. Measured on the diverted machine: with
-			// the cold filter alone the run ends with psi_ax at
-			// ( 1.0053, -1.1016 ), inside P1L, having been handed it once.
-			CoilSet const *const conductors = filterConductors();
-
-			if ( havePreviousAxis )
+			bool deviceTaken = false;
+			if ( axisDeviceRoute( state ) )
 			{
-				found = finder.tryFindAxisFrom( previousAxisR, previousAxisZ,
-				                                sense, best );
-				if ( found && conductors != nullptr
-				     && conductors->indexContaining( best.radius, best.z ) >= 0 )
-					found = false;
+				deviceTaken = true;
+				found = pickAxis( deviceCandidates, wanted, span,
+				                  conductors, best );
 			}
 
-			/*
-			 * COLD, or after the warm start lost it: the extremum carrying the
-			 * largest normalised flux, which is checkAxis()'s own rule and the
-			 * best available guess at which of several is the core -- MINUS any
-			 * candidate inside a conductor.
-			 *
-			 * **A COIL'S O-POINT IS AN EXTREMUM OF psi AND COMPETES ON EXACTLY
-			 * THIS SCORE.** Any conductor carrying current of the plasma's own
-			 * sign has one, and on a machine whose coils are meshed inside Omega
-			 * -- which is every machine MEQ can pose, no semicircle centred on
-			 * the axis both enclosing a plasma and excluding the coils near it
-			 * -- it is a legitimate zero of q_h sitting in the same field.
-			 * Measured on the diverted machine of FREE-BOUNDARY-PLAN.md
-			 * section 10, whose P1L carries +1.37e+05 A against an I_p of
-			 * 2.0e+05 A: this loop returned ( 1.0103, -1.1018 ), inside that
-			 * conductor, carrying psi = 1.21e-01 where the reference
-			 * equilibrium's axis carries 8.3e-02. It WINS the score,
-			 * and every check downstream then passes -- psi_ax is constrained at
-			 * the located axis, so the normalised flux there reads 1 whatever
-			 * the axis is.
-			 *
-			 * A plasma has no magnetic axis inside a conductor, so the
-			 * candidates are dropped. meq::Source::conductors() is how the
-			 * geometry gets here and returns null for a source that carries
-			 * none, in which case this is the loop it always was.
-			 *
-			 * THE WARM PATH GETS THE SAME FILTER AND NOT FOR THE SAME REASON.
-			 * It follows the axis it already had, so on its own it would never
-			 * DISCOVER a conductor -- but the fallback below can hand it one on
-			 * a transient iterate, and a seeded search asked to continue from a
-			 * conductor's O-point finds that O-point. So the filter is on the
-			 * point ADOPTED rather than on the way it was reached.
-			 */
-			if ( !found )
+			if ( !deviceTaken )
 			{
-				LegTimer const cold( profile.axisSweepSeconds,
-				                     profile.axisSweepCpuSeconds,
-				                     profile.axisSweepCalls );
-				std::vector< CriticalPoint > const all = finder.sweep();
+
+				// THE FUNNEL, AND IT IS NOT DECORATION HERE. The two loops below
+				// index the iterate raw, and this is the DEFAULT axis constraint --
+				// it runs every Newton step of every bordered solve. Ordering has
+				// protected it so far, because refreshXPoint() or
+				// refreshPlasmaComponent() happens to sync the same buffer first on
+				// the configurations that have been run; a limited machine with a
+				// frozen plasma support calls neither. See rowDot()'s comment for
+				// the whole argument, and DEVICE-PLAN.md section 1.2 for the sweep.
+				countedHostRead( state, __LINE__ );
+
+				// q, NOT the raw block. DarcyForm holds -q, and in even dimension
+				// index( -v ) = index( v ), so a finder handed the raw block puts
+				// every Maximum where a Minimum is and the classification below
+				// silently picks the wrong extremum. CriticalPoints.hpp records this
+				// as the failure to watch for.
+				for ( int i = 0; i < blockOffsets[ 1 ]; ++i )
+					axisFlux( i ) = -state( i );
+				for ( int i = blockOffsets[ 1 ]; i < blockOffsets[ 2 ]; ++i )
+					axisPotential( i - blockOffsets[ 1 ] ) = state( i );
+
+				CriticalPointFinder finder( axisFlux, axisPotential );
+				// The axis is a zero of the PHYSICAL flux and a value of the
+				// physical potential; under the split this solver holds only the
+				// remainder. Null unless the split is in use, and null shifts by
+				// exactly zero. COIL-SUBTRACTION-PLAN.md CS-4.
+				finder.setConductorField( conductorFieldSet );
+				finder.setInterpolatedFlux( interpolateConductorFlux );
 
 				/*
-				 * TWO PASSES, AND THE SECOND ONE IS NOT A SOFTENING OF THE
-				 * FIRST -- IT IS WHAT KEEPS THE FILTER FROM CHANGING ANSWERS
-				 * ON ITERATES THAT ARE NOT YET EQUILIBRIA.
+				 * AND ITS q_c TABLE, WHICH IS THE EXPENSIVE ONE AND IS NOT psi_c.
 				 *
-				 * Pass 0 drops the conductors. Pass 1 runs only if that left
-				 * NOTHING of the wanted sense anywhere on the mesh, and repeats
-				 * the competition over the whole field.
-				 *
-				 * The case that forces it is an inverted span. `wanted` follows
-				 * the ITERATE's span, so while psi_ax sits below psi_bnd the
-				 * search is for a MINIMUM -- and on a machine whose coils carry
-				 * current opposite to the plasma's, the only minima in the field
-				 * are the conductors' own O-points. Filtering them then leaves
-				 * the competition empty, this returns false, and the solve loses
-				 * the located-axis constraint mid-iteration.
-				 *
-				 * MEASURED ON examples/limited-tokamak.toml, WHERE THAT COSTS
-				 * THE ANSWER: the second pass fires on 3 of the 7 cold sweeps a
-				 * run makes, and with it the run is 12 Newton steps to
-				 * psi_ax = 9.484400e-02, digit for digit what the same solve
-				 * gives with no filter at all and 1.3e-04 from freegs4e. Without
-				 * it the same case takes 27 steps to 9.778179e-02 -- 3.1% out,
-				 * a hundred times the gap DriverAcceptance pins.
-				 *
-				 * So the rule is: a conductor's O-point is not a magnetic axis
-				 * and is not chosen while anything else is available; on an
-				 * iterate that offers nothing else, following it is better than
-				 * following nothing, and the equilibrium the iteration is
-				 * converging to gets the filter as soon as it has an extremum of
-				 * its own.
+				 * This finder is constructed per solve, and its table is `q_c` at
+				 * every flux node -- a cross-section quadrature of elliptic
+				 * integrals per node for a rectangle. Measured, caching `psi_c`
+				 * alone left this at 61% of a warm run's profile. So the table is
+				 * held on the SOLVER, built once and then handed to every finder
+				 * after it, and `src/meq/ConductorStore.hpp` carries it between
+				 * runs.
 				 */
-				for ( int pass = 0; !found && pass < 2; ++pass )
+				if ( conductorFieldSet )
 				{
-					bool const dropConductors =
-						( pass == 0 ) && conductors != nullptr;
-					double bestScore = 0.0;
-					for ( std::size_t i = 0; i < all.size(); ++i )
+					// THE SAME re-mesh GUARD THE OTHER TWO CACHES CARRY. An
+					// adaptive cycle refines without rebuilding this solver, and a
+					// q_c table indexed by element on the coarse mesh would be
+					// read against the refined one. Signature first, every time.
+					if ( pendingConductorCache.hasCriticalPointTable()
+					     && pendingConductorCacheStillApplies() )
+						finder.adoptNodalConductors(
+							criticalTableFromCache( pendingConductorCache ) );
+					else
 					{
-						if ( all[ i ].type != wanted )
-							continue;
-
-						if ( dropConductors
-						     && conductors->indexContaining( all[ i ].radius,
-						                                     all[ i ].z ) >= 0 )
-							continue;
-
-						double const score = span >= 0.0 ? all[ i ].psi
-						                                 : -all[ i ].psi;
-						if ( !found || score > bestScore )
-						{
-							found = true;
-							bestScore = score;
-							best = all[ i ];
-						}
+						criticalTableIntoCache( finder.nodalConductorTable(),
+						                        pendingConductorCache );
+						// Stamped with THIS mesh, so the guard above can pass on
+						// the next solve of the same problem and must fail on a
+						// refined one.
+						pendingConductorCache.signature = conductorCacheSignature();
 					}
+				}
+				/*
+				 * WARM: A SEEDED SEARCH FROM THE LAST AXIS, WHICH IS WHAT MAKES THIS
+				 * AFFORDABLE AND WHAT MAKES IT FOLLOW ONE AXIS.
+				 *
+				 * tryFindAxisFrom() roots the seed's element and widens by rings,
+				 * stopping at the first ring with a clean root: measured, ONE element
+				 * when the seed is still on the answer and 19 of 2048 when it is a
+				 * whole element away. A sweep roots every element, so the seeded
+				 * cost is bounded by a ring count rather than by the mesh and the
+				 * ratio IMPROVES with refinement -- which is the property a Newton
+				 * loop needs.
+				 *
+				 * And it is what answers the stability objection to this constraint:
+				 * following the extremum nearest the previous one is a continuation
+				 * in the axis rather than a fresh competition between every O-point
+				 * in the field at every step.
+				 */
+				if ( havePreviousAxis )
+				{
+					found = finder.tryFindAxisFrom( previousAxisR, previousAxisZ,
+					                                sense, best );
+					if ( found && conductors != nullptr
+					     && conductors->indexContaining( best.radius, best.z ) >= 0 )
+						found = false;
+				}
+
+				/*
+				 * COLD, or after the warm start lost it: the extremum carrying the
+				 * largest normalised flux, which is checkAxis()'s own rule and the
+				 * best available guess at which of several is the core -- MINUS any
+				 * candidate inside a conductor.
+				 *
+				 * **A COIL'S O-POINT IS AN EXTREMUM OF psi AND COMPETES ON EXACTLY
+				 * THIS SCORE.** Any conductor carrying current of the plasma's own
+				 * sign has one, and on a machine whose coils are meshed inside Omega
+				 * -- which is every machine MEQ can pose, no semicircle centred on
+				 * the axis both enclosing a plasma and excluding the coils near it
+				 * -- it is a legitimate zero of q_h sitting in the same field.
+				 * Measured on the diverted machine of FREE-BOUNDARY-PLAN.md
+				 * section 10, whose P1L carries +1.37e+05 A against an I_p of
+				 * 2.0e+05 A: this loop returned ( 1.0103, -1.1018 ), inside that
+				 * conductor, carrying psi = 1.21e-01 where the reference
+				 * equilibrium's axis carries 8.3e-02. It WINS the score,
+				 * and every check downstream then passes -- psi_ax is constrained at
+				 * the located axis, so the normalised flux there reads 1 whatever
+				 * the axis is.
+				 *
+				 * A plasma has no magnetic axis inside a conductor, so the
+				 * candidates are dropped. meq::Source::conductors() is how the
+				 * geometry gets here and returns null for a source that carries
+				 * none, in which case this is the loop it always was.
+				 *
+				 * THE WARM PATH GETS THE SAME FILTER AND NOT FOR THE SAME REASON.
+				 * It follows the axis it already had, so on its own it would never
+				 * DISCOVER a conductor -- but the fallback below can hand it one on
+				 * a transient iterate, and a seeded search asked to continue from a
+				 * conductor's O-point finds that O-point. So the filter is on the
+				 * point ADOPTED rather than on the way it was reached.
+				 */
+				if ( !found )
+				{
+					LegTimer const cold( profile.axisSweepSeconds,
+					                     profile.axisSweepCpuSeconds,
+					                     profile.axisSweepCalls );
+					std::vector< CriticalPoint > const all = finder.sweep();
+					found = pickByScore( all, wanted, span, conductors, best );
 				}
 			}
 
@@ -9306,10 +9821,35 @@ namespace
 			mfem::Array< int > dofs;
 			potentialFes->GetElementDofs( best.element, dofs );
 
-			value = 0.0;
-			for ( int i = 0; i < dofs.Size() && i < constraintShape.Size(); ++i )
-				value += constraintShape( i )
-				         *state( blockOffsets[ 1 ] + dofs[ i ] );
+			if ( deviceTaken )
+			{
+				/*
+				 * THE SAME CONTRACTION, ALREADY DONE WHERE THE DATA IS.
+				 *
+				 * `CriticalPoint::psi` is `totalPotential()` at the root,
+				 * which with no conductor split -- the only configuration the
+				 * device route takes -- is exactly the sum below, against the
+				 * same shape functions at the same reference point. Repeating
+				 * it here would be a raw read of the iterate's potential
+				 * block, and a raw read of the iterate is the whole of what
+				 * this route exists to avoid: doing it would leave the
+				 * transfer exactly where [M-229](../MEASUREMENTS.md) found it
+				 * while making the run slower.
+				 *
+				 * It agrees with the host sum to round-off and not to the bit,
+				 * the two evaluating one polynomial through two bases. See
+				 * meq::DeviceBasis on why that is the available contract and
+				 * on the envelope argument that bounds what it costs.
+				 */
+				value = best.psi;
+			}
+			else
+			{
+				value = 0.0;
+				for ( int i = 0; i < dofs.Size() && i < constraintShape.Size(); ++i )
+					value += constraintShape( i )
+					         *state( blockOffsets[ 1 ] + dofs[ i ] );
+			}
 
 			/*
 			 * AND psi_c AT THE AXIS, BECAUSE psi_ax IS THE PHYSICAL FLUX
@@ -9876,6 +10416,7 @@ namespace
 		// point of having a control.
 		mfem::Vector columnB( n );
 		mfem::Vector zB( n );
+
 		mfem::Vector initialColumn( n );
 		{
 			double const h = normalisationStep( s );
@@ -9958,6 +10499,38 @@ namespace
 			// other `mfem::Vector`-from-`unknown` in this function.
 			countedHostRead( unknown, __LINE__ );
 			mfem::Vector coldState( unknown );
+			/*
+			 * AND THE COPY NEEDS ITS OWN FUNNEL, WHICH IS M-205 ONE LEVEL OUT
+			 * AND WAS DORMANT UNTIL THE AXIS CONSTRAINT STOPPED DOWNLOADING THE
+			 * ITERATE.
+			 *
+			 * The line above funnels the SOURCE, which is what M-205's sweep
+			 * installed and which makes the COPY CONSTRUCTOR's read safe. It
+			 * does nothing whatever for the DESTINATION:
+			 * `mfem::Vector::Vector( Vector const & )` propagates `UseDevice()`
+			 * from its source and copies device-to-device when the source has a
+			 * live device copy, so `coldState` is born **device-valid with its
+			 * host page protected** -- and the three raw loops below write it.
+			 *
+			 * ***FUNNELLING THE SOURCE OF A COPY DOES NOT FUNNEL THE COPY.***
+			 * The raw-read sweep asked *is this read funnelled* of every copy
+			 * construction it found and gave the right answer to the wrong
+			 * question at this one -- the same shape as M-187's twelve sites,
+			 * where a sync on the base could not see data still on the alias.
+			 *
+			 * **IT WAS UNREACHABLE UNTIL A FUNNEL WAS REMOVED**, which is the
+			 * part worth keeping. `locateAxisPoint()`'s `countedHostRead( state )`
+			 * ran before this on every path, so `unknown` was host-valid here and
+			 * the copy took the host route. That is M-130's *ordering has
+			 * protected it so far* for the third time, and the first time it was
+			 * DELETING a funnel rather than adding a configuration that exposed
+			 * the next one. `mfem::Device( "debug" )` named it on the first run.
+			 *
+			 * ReadWrite and not Write: the loops overwrite the Darcy block and
+			 * the non-essential trace, and every other entry must keep the value
+			 * it was copied with. HostWrite()'s contents are undefined.
+			 */
+			countedHostReadWrite( coldState, __LINE__ );
 			int const traceBase = blockOffsets[ 2 ];
 			for ( int i = 0; i < traceBase; ++i )
 				coldState( i ) = 0.0;

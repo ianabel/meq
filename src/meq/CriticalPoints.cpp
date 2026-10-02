@@ -262,6 +262,110 @@ namespace meq
 		containment = containmentIn;
 	}
 
+	double CriticalPointFinder::newtonTolerance() const
+	{
+		return tolerance;
+	}
+
+	int CriticalPointFinder::newtonMaxIterations() const
+	{
+		return maxIterations;
+	}
+
+	double CriticalPointFinder::newtonJacobianStep() const
+	{
+		return jacobianStep;
+	}
+
+	double CriticalPointFinder::rootContainment() const
+	{
+		return containment;
+	}
+
+	std::vector< CriticalPoint > CriticalPointFinder::mergeCandidates(
+		std::vector< CriticalPoint > const &ordered ) const
+	{
+		// The bounding box, purely as the length scale the deduplication
+		// tolerance is relative to.
+		double diameter = 0.0;
+		if ( meshRef.GetNV() > 0 )
+		{
+			mfem::real_t lo[ 2 ] = { meshRef.GetVertex( 0 )[ 0 ],
+			                         meshRef.GetVertex( 0 )[ 1 ] };
+			mfem::real_t hi[ 2 ] = { lo[ 0 ], lo[ 1 ] };
+			for ( int v = 1; v < meshRef.GetNV(); ++v )
+			{
+				auto const *vertex = meshRef.GetVertex( v );
+				for ( int d = 0; d < 2; ++d )
+				{
+					lo[ d ] = std::min( lo[ d ], vertex[ d ] );
+					hi[ d ] = std::max( hi[ d ], vertex[ d ] );
+				}
+			}
+			diameter = std::sqrt( ( hi[ 0 ] - lo[ 0 ] )*( hi[ 0 ] - lo[ 0 ] )
+			                      + ( hi[ 1 ] - lo[ 1 ] )*( hi[ 1 ] - lo[ 1 ] ) );
+		}
+
+		std::vector<CriticalPoint> points;
+		// THREAD LOCAL, NOT THE MESH'S SHARED SCRATCH -- the reentrant
+		// overload, for the reason rootInElement() gives.
+		thread_local mfem::IsoparametricTransformation sizeScratch;
+
+		for ( CriticalPoint const &point : ordered )
+		{
+			// `reach` travels WITH the candidate: the size of the element the
+			// root was found in, so a candidate is merged against its own
+			// element's reach and not the one being merged into.
+			double reach = 0.0;
+			if ( point.element >= 0 && point.element < meshRef.GetNE() )
+			{
+				meshRef.GetElementTransformation( point.element, &sizeScratch );
+				reach = 0.5*meshRef.GetElementSize( &sizeScratch );
+			}
+
+			bool duplicate = false;
+			for ( std::size_t j = 0; j < points.size(); ++j )
+			{
+				double const dr = points[ j ].radius - point.radius;
+				double const dz = points[ j ].z - point.z;
+				double const distance = std::sqrt( dr*dr + dz*dz );
+				if ( distance < separation*diameter )
+				{
+					duplicate = true;
+					break;
+				}
+				// Same type and within half an element: one object seen from
+				// both sides of a face. Different types are never merged, so a
+				// spurious maximum-and-saddle pair -- which is the only shape
+				// numerical noise produces, and the one thing audit() is blind
+				// to -- is reported rather than tidied away.
+				if ( points[ j ].type == point.type && distance < reach )
+				{
+					duplicate = true;
+					// KEEP THE ONE LEAST OUTSIDE ITS OWN ELEMENT, which without
+					// this rule is decided by element numbering. Measured on the
+					// Solov'ev benchmark at k = 1, n = 6: the candidate strictly
+					// inside its element is 2.7e-3 from the true axis and the one
+					// sitting 8.5e-2 outside a neighbour is 6.1e-3, and the
+					// neighbour has the lower element index. Element order is not
+					// a tie break.
+					if ( point.overshoot < points[ j ].overshoot )
+						points[ j ] = point;
+					break;
+				}
+			}
+			if ( !duplicate )
+				points.push_back( point );
+		}
+
+		return points;
+	}
+
+	double CriticalPointFinder::rootSeparation() const
+	{
+		return separation;
+	}
+
 	void CriticalPointFinder::setConductorField( ConductorField const *c )
 	{
 		conductors = c;
@@ -1528,51 +1632,25 @@ namespace meq
 		// element is visited whether or not it yields a candidate.
 		elementCount += elementTotal;
 
-		std::vector<CriticalPoint> points;
-
+		/*
+		 * FLATTENED IN ELEMENT ORDER AND THEN MERGED BY THE SHARED ROUTINE.
+		 *
+		 * The merge used to be written out here. It is now
+		 * mergeCandidates(), because the device route produces the same list
+		 * by another means and has to be merged the same way -- and a second
+		 * copy of a rule that decides WHICH EQUILIBRIUM is reported is the
+		 * defect meq::limiterPolygonMaximum() and meq::extensionFdStep() both
+		 * turned out to be. `Candidate::reach` is `0.5*GetElementSize` of the
+		 * element the root was found in, which is `point.element`, so the
+		 * shared routine recovers it rather than being handed it.
+		 */
+		std::vector<CriticalPoint> ordered;
 		for ( int element = 0; element < elementTotal; ++element )
-		{
 			for ( Candidate const &candidate :
 			      perElement[ static_cast<std::size_t>( element ) ] )
-			{
-				CriticalPoint const &point = candidate.point;
-				double const reach = candidate.reach;
+				ordered.push_back( candidate.point );
 
-				bool duplicate = false;
-				for ( std::size_t j = 0; j < points.size(); ++j )
-				{
-					double const dr = points[ j ].radius - point.radius;
-					double const dz = points[ j ].z - point.z;
-					double const distance = std::sqrt( dr*dr + dz*dz );
-					if ( distance < separation*diameter )
-					{
-						duplicate = true;
-						break;
-					}
-					// Same type and within half an element: one object seen from
-					// both sides of a face. Different types are never merged, so a
-					// spurious maximum-and-saddle pair -- which is the only shape
-					// numerical noise produces, and the one thing audit() is blind
-					// to -- is reported rather than tidied away.
-					if ( points[ j ].type == point.type && distance < reach )
-					{
-						duplicate = true;
-						// KEEP THE ONE LEAST OUTSIDE ITS OWN ELEMENT, which without
-						// this rule is decided by element numbering. Measured on the
-						// Solov'ev benchmark at k = 1, n = 6: the candidate strictly
-						// inside its element is 2.7e-3 from the true axis and the one
-						// sitting 8.5e-2 outside a neighbour is 6.1e-3, and the
-						// neighbour has the lower element index. Element order is not
-						// a tie break.
-						if ( point.overshoot < points[ j ].overshoot )
-							points[ j ] = point;
-						break;
-					}
-				}
-				if ( !duplicate )
-					points.push_back( point );
-			}
-		}
+		std::vector<CriticalPoint> const points = mergeCandidates( ordered );
 
 		return points;
 	}

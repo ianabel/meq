@@ -22,6 +22,8 @@ set(MEQ_UNIT_TESTS
 	ConfigTests
 	ExteriorDtNTests
 	FluxFamilyTests
+	AxisSearchTests
+	DeviceBasisTests
 	DeviceQuadratureTests
 	DeviceRowsTests
 	PlasmaComponentTests

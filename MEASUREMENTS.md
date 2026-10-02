@@ -13437,3 +13437,170 @@ funnel when the device route is eligible — decided **before** the flush, since
 asking `DeviceIsValid()` after it is a cycle rather than a measurement — and a
 failed device route is still safe, because `CompressedRows::gather()` opens with
 `v.HostRead()` and funnels for itself.
+
+### M-230
+
+**A `MFEM_HOST_DEVICE` BASIS ON THE REFERENCE TRIANGLE, WHICH TWO PLACES IN
+THE TREE HAD ALREADY NAMED AS THE BLOCKER.**
+`src/meq/PointLocatorDevice.cpp` opens by saying what it cannot do — *"IT
+LOCATES, IT DOES NOT INTERPOLATE. Evaluating the field needs
+`FiniteElement::CalcShape`, which is a host virtual taking an
+`mfem::IntegrationPoint`. A device evaluation needs a `MFEM_HOST_DEVICE` basis
+and that is `DEVICE-PLAN.md` item 3's blocker"* — and §3.4 calls the axis
+constraint the hardest item on the page. **They are one blocker seen from two
+sides**, and `meq::DeviceBasis` is it.
+
+**A FIXED QUADRATURE RULE IS NOT THE ANSWER, WHICH IS WHY THIS HAD TO EXIST.**
+`FiniteElement::GetDofToQuad()` already hands shape functions to a device, and
+`meq::plasmaCurrentPerElementOnDevice()` needs nothing more — but it supplies
+`phi_i` at the points of ONE `mfem::IntegrationRule`, decided before the
+launch. That is everything an INTEGRAL needs and nothing a SEARCH needs:
+`rootInElement()` evaluates wherever its iterate has got to and is documented
+to let it leave the element by two reference units. *A rule is a set of points;
+a search needs a function.*
+
+**THE CONSTRUCTION BORROWS NOTHING FROM MFEM'S INTERNALS.** The host asks the
+element for its own shape functions at its own nodes and solves for the
+constant matrix re-expressing them in barycentric monomials:
+`M( a, b ) = B_b( node_a )`, `S( a, i ) = phi_i( node_a )`, `T = M^-1 S`, with
+the Bernstein multinomial folded into `T`'s rows so the kernel evaluates plain
+powers. `T` depends on the geometry, the degree and the basis type and on
+nothing about the solution, so it is §3.3's **phase B in its purest form**.
+
+| degree | cond( M ) | reconstruction, containment band | **absolute**, abandon bound | value vs `GetValue` | gradient vs `GetGradient` |
+|---|---|---|---|---|---|
+| 1 | 1.0 | 1.9e-16 | 4.4e-16 | 1.1e-16 | 0 exactly |
+| 2 | 3.0 | 6.9e-16 | 1.6e-14 | 2.2e-16 | 4.3e-16 |
+| 3 | 11.0 | 8.3e-16 | 6.3e-13 | 5.0e-16 | 9.6e-16 |
+| 4 | 22.6 | 5.3e-15 | **1.27e-11** | 8.7e-16 | 4.2e-15 |
+
+(relative except where marked; `tests/unit/DeviceBasisTests.cpp` prints all of
+it every run, and the probe points include several well OUTSIDE the element.)
+
+**THE CEILING IS A MEASURED CONDITIONING BOUND AND NOT AN ARRAY SIZE, WHICH IS
+THE CORRECTION WORTH KEEPING.** The first draft set it at six, on the sound
+argument that the limit is the per-thread coefficient array and a kernel that
+spills is slow rather than wrong. **That is true inside the element and false
+outside it**, which is where this evaluator's caller spends part of its Newton:
+the absolute disagreement at the abandon bound grows by about **twenty per
+degree**, and taken with the ceiling temporarily at six, degrees 5 and 6 read
+**1.6e-09 and 4.8e-07**. At 4.8e-07 a stopping target of `1e-13 max | q |` is
+unreachable, and a search whose residual cannot fall below its target runs to
+its cap and reports nothing. `lambda0` goes negative out there and `lambda0^p`
+carries the growth, where MFEM's own recursion degrades far more slowly. **So
+the ceiling is 4, every degree accepted is swept by the test, and raising it
+means a better conditioned device basis rather than a larger array.**
+
+**AND THE AFFINE MAP IS MFEM'S OWN, ASKED RATHER THAN REPRODUCED FROM THE
+VERTICES.** `ElementTransformation::Jacobian()` is **bitwise constant** over a
+straight-sided triangle — measured, exactly 0 difference at three well-separated
+reference points — and `Transform` agrees with `v0 + J ( xi, eta )` to one ulp.
+Affineness is then measured per element by comparing the Jacobian at two points
+rather than inferred from `Mesh::GetNodes() == nullptr`, because CLAUDE.md
+records a mesh ACQUIRING nodes without becoming curved and `meq::GridSampler`
+paying two orders of magnitude for reading that pointer as the question.
+
+### M-231
+
+**THE AXIS CONSTRAINT'S MESH SEARCH, ON THE DEVICE — AND THE ACCEPTANCE IS THE
+CANDIDATE LIST RATHER THAN THE ANSWER.**
+`meq::axisCandidatesOnDevice()` roots every element with one thread each,
+porting `rootInElement()` and the `referenceJacobian()` it calls line for line:
+same seeds, same central-difference step with the same stencil sliding, same
+Cramer solve, same unit step truncation, same two-diameter abandon, same
+`containment + 1e-9` acceptance, same degeneracy threshold, same classification
+ladder. The iteration is in REFERENCE coordinates throughout, which is what
+makes the port exact where it matters.
+
+| degree | host `sweep()` candidates | device, merged | before the merge | device → host | host → device | `psi` at a matched point |
+|---|---|---|---|---|---|---|
+| 1 | 5 | 5 | 20 | 4.5e-14 | 4.5e-14 | |
+| 2 | 5 | 5 | 28 | 2.2e-16 | 2.2e-16 | 7.8e-16 |
+| 3 | 5 | 5 | 28 | 6.5e-16 | 6.5e-16 | |
+
+Both directions, because a one-sided check misses half: a kernel finding a
+SUBSET passes *every device point is a host point*, and one accepting spurious
+roots passes the converse. The stopping scale agrees **exactly** — a max is
+exactly associative and `( -a )*( -a )` is `a*a`, so unlike everything else
+here that one is a `==`.
+
+**THE MERGE IS THE HOST'S AND SKIPPING IT CHANGES ANSWERS, WHICH THE FIRST
+VERSION GOT WRONG ON A TRUE ARGUMENT.** The device list was first left
+unmerged, on the reasoning that both selection rules — largest score, nearest
+the previous axis — are invariant under duplicates. That reasoning is correct
+and it is about the wrong thing: `sweep()` does not merely drop exact
+duplicates, it merges two candidates of the same type within **half an
+element**, keeping the one least outside its own. Those are not copies but one
+critical point rooted from two neighbouring elements' polynomials, landing in
+two places with two values of `psi` — measured **7.2e-03, 4.3e-03 and 7.5e-04**
+apart at `k = 1, 2, 3`, which is interpolation error and not round-off. *Two
+representations of one critical point are not duplicates.*
+`CriticalPointFinder::mergeCandidates()` is now public and both routes call it.
+
+**AND `DeviceParity` COULD NOT HAVE FOUND THAT.** `machine-f-diiid` reports
+`psi_ax = 3.759851e-01` to every printed digit with the merge in or out,
+because there the right candidate wins both competitions. *A test on the final
+answer passes a port that found a different set and picked the same one.*
+
+**A SEMANTIC DIFFERENCE IS KEPT AND STATED.** The host's warm path stops at the
+first ring holding a clean root; the device roots every element — on a card
+4,848 Newtons and 19 Newtons are one launch, so M-100's 40× economy inverts —
+and the host then picks the nearest clean root GLOBALLY. They agree whenever
+the nearest clean root lies in that first productive ring, which is the case
+the ring walk exists for.
+
+**AND IT FOUND A DORMANT DEFECT OF MEQ'S OWN, BY REMOVING A FUNNEL.**
+`mfem::Device( "debug" )` aborted on the first run: `coldState( unknown )` is a
+copy construction whose SOURCE is funnelled — M-205's repair — while the
+DESTINATION is not. `Vector::Vector( Vector const & )` propagates `UseDevice()`
+and copies device-to-device, so `coldState` is born device-valid with its host
+page protected, and the three raw loops after it write 698,112 bytes into it.
+***Funnelling the source of a copy does not funnel the copy.*** It was
+unreachable until the axis constraint stopped downloading the iterate, because
+that funnel ran first on every path — M-130's *ordering has protected it so
+far* for the third time, and **the first time DELETING a funnel is what exposed
+the next one.**
+
+### M-232
+
+**THE SAME 12.5 MB MOVED THREE TIMES, AND THAT IS THE MEASUREMENT.**
+With the device routes forced open on `machine-f-diiid` under `--device cuda`:
+
+| | transfers | MB | largest site | `psi_ax` |
+|---|---|---|---|---|
+| committed | 3 | 0.888 | — (phase A) | 3.759851e-01 |
+| axis search on the device | 53 | 15.9 | **`refreshXPoint()`, 15 × 830 KB** | 3.759851e-01 |
+| + the X-point evaluation | 69 | 15.9 | **`limiterValue()`, 15 × 830 KB** | 3.759851e-01 |
+| gated on residency | **3** | **0.888** | — | 3.759851e-01 |
+
+The axis constraint's own 12.5 MB duly disappears each time — and the identical
+12.5 MB reappears at the next host leg, which had been reading a copy the first
+one paid for. **The iterate was crossing the bus ONCE A STEP and every host leg
+after the first rode on it for nothing.**
+
+**SO A LEG PORTED IN ISOLATION DOES NOT REMOVE A TRANSFER, IT RENAMES ONE**,
+and the count falls only when the LAST host reader of the iterate goes. That is
+[M-229](#m-229)'s *residency is a property of a cycle and not of a leg*,
+demonstrated from the other direction and three times over rather than argued
+once. **A per-site table attributes a transfer to whoever asks first, which is
+not the same as attributing it to whoever needs it** — and the committed
+headline of 3 transfers was never a measurement of how little the iterate
+moves, only of how little it moved while nothing had put it on the device.
+
+**THE GATE IS A PREDICATE ABOUT THE DATA**, `DeviceIsValid() && !HostIsValid()`
+— the same shape `columnIsResident()` has for `meq::DeviceRows` and for the
+same reason: it is the only form that is right both before and after residency
+arrives. `H- D+` is the one state in which the device route is the cheaper one;
+with the host holding a live copy there is nothing to buy, and with the host
+holding the ONLY live copy the device route pays an upload to avoid a download
+that would not have happened. Both routes are therefore **inert today and
+switch on with no further edit**, which is the arrangement `meq::DeviceRows`
+has been in since M-208 and `meq::plasmaCurrentPerElementOnDevice()` since
+M-192.
+
+**WHAT IS LEFT IS A COUNT AND NOT A DIFFICULTY.** Ten host legs still read the
+iterate — the limiter contact, the plasma current and its two columns, the
+transmission constraint, the nodal-maximum fallback and the rest — and every
+one of them is a reduction or a point evaluation of the kind
+`meq::DeviceBasis` and `meq::DeviceQuadrature` now both serve. None is a search;
+the search was the hard one and it is done.

@@ -39,6 +39,17 @@
  * direction of the bus cannot measure a plan whose first phase is an upload*,
  * and stage 4b reported a figure in the other direction and called it the
  * residency acceptance for as long as it existed.
+ * **THE PER-SITE TABLE IS KEYED BY A LINE NUMBER ALONE, AND THAT IS A KNOWN
+ * LIMITATION RATHER THAN AN OVERSIGHT.** Call sites pass `__LINE__` and not
+ * `__FILE__`, so two funnels at the same line in different files are summed
+ * into one row -- and funnels are registered from GradShafranov.cpp,
+ * CriticalPoints.cpp, PointLocator.cpp, DeviceBasis.cpp and
+ * AxisSearchDevice.cpp. **The totals, the two directions and the phase split
+ * are exact**; only the attribution of one ROW can merge, and a reader chasing
+ * a row should check the line in more than one file. Fixing it means a
+ * `( file, line )` key and `__FILE__` at every call site, which is forty
+ * edits for a table that is read by hand.
+ *
  * `meq::countedDeviceRead()` is the mirror: a device read moves data exactly
  * when the HOST holds the live copy and the device does not.
  *
