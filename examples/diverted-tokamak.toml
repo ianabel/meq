@@ -63,6 +63,15 @@ PolynomialDegree = 2
 [solver]
 NewtonMaxIterations = 200
 NewtonRelativeTolerance = 1.0e-10
+# THE SUPPORT IS FROZEN WITHIN EACH SOLVE AND RE-DECIDED BETWEEN THEM, AND ON
+# THIS FILE THAT IS WHAT SELECTS THE EQUILIBRIUM THE HEADER COMPARES AGAINST.
+# The prescribed-limiter formulation has discrete equilibria (MEASUREMENTS.md
+# M-132), and with the support re-decided at every residual instead this file
+# converged in 25 Newton steps to psi_ax = 8.486e-02 -- 2.6% from the freegs4e
+# psi_axis quoted above, on the OTHER branch. Frozen, it reaches 8.266088e-02
+# in 7 + 3 + 2 steps: 6.9e-04 from freegs4e and the same equilibrium as
+# diverted-tokamak-xpoint.toml. M-239.
+PlasmaSupportSweeps = 4
 
 [source]
 Type = "mhd"

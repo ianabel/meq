@@ -118,7 +118,39 @@ namespace meq
 		return true;
 	}
 
+	bool dotRowsAgainstColumnsKernel( mfem::Array<RowView> const &rows,
+	                                  mfem::Array<mfem::real_t const *> const &columns,
+	                                  mfem::Vector &out )
+	{
+		auto const *d_rows = rows.Read();
+		auto const *d_columns = columns.Read();
+		auto *d_out = out.Write();
+		int const nr = rows.Size();
+
+		// One thread per ( row, column ), summing from zero in k order: the
+		// host rowDot()'s loop exactly, which is what -fmad=false is for.
+		mfem::forall( rows.Size()*columns.Size(), [ = ] MFEM_HOST_DEVICE ( int t )
+		{
+			int const r = t % nr;
+			int const c = t / nr;
+			RowView const row = d_rows[ r ];
+			mfem::real_t const *const column = d_columns[ c ];
+			mfem::real_t total = mfem::real_t( 0 );
+			for ( int k = 0; k < row.count; ++k )
+				total += row.weights[ k ]*column[ row.indices[ k ] ];
+			d_out[ t ] = row.negate ? -total : total;
+		} );
+		return true;
+	}
+
 #else
+
+	bool dotRowsAgainstColumnsKernel( mfem::Array<RowView> const &,
+	                                  mfem::Array<mfem::real_t const *> const &,
+	                                  mfem::Vector & )
+	{
+		return false;
+	}
 
 	bool dotCompressedRowsOnDevice( mfem::Vector const &, mfem::Array<int> const &,
 	                                int, int, mfem::Vector const &,

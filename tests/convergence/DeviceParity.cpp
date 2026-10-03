@@ -100,7 +100,48 @@ namespace
 		char const *stem;      ///< examples/<stem>.toml
 		bool meshReady;        ///< carries [mesh.generate], so --mesh-ready
 		char const *what;
+		/// Whether to pay for the `debug` arm. It is the expensive one -- it
+		/// `mprotect`s every host page -- and a case added for a defect the
+		/// card arm catches need not buy it. Defaults on.
+		bool debugArm = true;
+		/// A key to REMOVE from the shipped file before running it, or null to
+		/// run the file as shipped. The copy is written into the scratch
+		/// directory; see the moving-support case for why one exists.
+		char const *strip = nullptr;
 	};
+
+	/// The file to hand the driver: the shipped one, or a copy with
+	/// `which.strip`'s line removed.
+	std::string configFor( Case const &which )
+	{
+		std::string const shipped = "examples/" + std::string( which.stem ) + ".toml";
+		if ( which.strip == nullptr )
+			return shipped;
+		std::string const copy = std::string( scratch() ) + "/" + which.stem
+		                         + "-without-" + which.strip + ".toml";
+		std::ifstream in( shipped );
+		std::ofstream out( copy );
+		std::string line;
+		bool removed = false;
+		while ( std::getline( in, line ) )
+		{
+			std::size_t const first = line.find_first_not_of( " \t" );
+			if ( first != std::string::npos
+			     && line.compare( first, std::string( which.strip ).size(),
+			                      which.strip ) == 0 )
+			{
+				removed = true;
+				continue;
+			}
+			out << line << '\n';
+		}
+		if ( !removed )
+			throw std::runtime_error(
+				shipped + " has no " + which.strip + " line to remove, so this "
+				"case would run the shipped configuration and test nothing it "
+				"was added for" );
+		return copy;
+	}
 
 	/// What one run reported, as TEXT -- see the header for why.
 	struct Run
@@ -156,10 +197,14 @@ namespace
 		return text.substr( begin, i - begin );
 	}
 
-	Run solve( Case const &which, char const *device )
+	/// @param forced run with `MEQ_AXIS_DEVICE=force`, so every host reader of
+	///        the iterate takes its device route whatever the iterate's flags
+	///        say. See the fourth arm below.
+	Run solve( Case const &which, char const *device, bool forced = false )
 	{
 		std::string const log = std::string( scratch() ) + "/"
-		                        + which.stem + "-" + device + ".log";
+		                        + which.stem + "-" + device
+		                        + ( forced ? "-forced" : "" ) + ".log";
 		/*
 		 * `OMP_NUM_THREADS=1` ON BOTH ARMS, AND IT IS NOT A CONVENIENCE.
 		 * A Device and a host OpenMP region that touches MFEM memory are
@@ -171,12 +216,12 @@ namespace
 		 * HOST arm too, so the two sides differ in the device and in nothing
 		 * else.
 		 */
-		std::string command = "OMP_NUM_THREADS=1 " + std::string( driver() )
+		std::string command = std::string( forced ? "MEQ_AXIS_DEVICE=force " : "" )
+		                      + "OMP_NUM_THREADS=1 " + std::string( driver() )
 		                      + " --device " + device;
 		if ( which.meshReady )
 			command += " --mesh-ready";
-		command += " examples/" + std::string( which.stem ) + ".toml > " + log
-		           + " 2>&1";
+		command += " " + configFor( which ) + " > " + log + " 2>&1";
 
 		auto const started = std::chrono::steady_clock::now();
 		int const raw = std::system( command.c_str() );
@@ -203,6 +248,27 @@ namespace
 	Case const diiid
 		{ "machine-f-diiid", true,
 		  "bordered free boundary, four border rows -- M-187's case" };
+	/*
+	 * A MOVING PLASMA SUPPORT WITH XP-1's FILL, AND ITS ABSENCE FROM THIS LIST
+	 * IS HOW A WRONG ANSWER SURVIVED. Under any Device the integrand's element
+	 * flags were an upload refreshed only when the operator was rebuilt, while
+	 * the host's followed refreshPlasmaComponent() at every residual -- so
+	 * `--device cuda` parted from the host at the first Newton step and
+	 * settled with its axis inside a coil, at `HEAD` as well as after.
+	 * MEASUREMENTS.md M-239. The two cases above freeze the support within a
+	 * solve, which is why neither could see it.
+	 *
+	 * **RUN WITH `PlasmaSupportSweeps` STRIPPED, BECAUSE THE SHIPPED FILE NOW
+	 * FREEZES IT** -- that is what puts it on the benchmarked branch (M-239) --
+	 * and no other shipped example moves a FILLED support: `limited-tokamak`
+	 * moves one without the fill and agreed under CUDA with the stale flags.
+	 * So the copy is the only configuration in the tree that reaches the path,
+	 * and the strip throws if the key it removes ever disappears.
+	 */
+	Case const moving
+		{ "diverted-tokamak", false,
+		  "moving, filled plasma support -- M-239's case", false,
+		  "PlasmaSupportSweeps" };
 }
 
 // EVERY NONLINEAR SHIPPED EXAMPLE GIVES THE HOST'S ANSWER AND THE HOST'S WORK
@@ -211,7 +277,7 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 {
 	std::system( ( "mkdir -p " + std::string( scratch() ) ).c_str() );
 
-	Case const cases[] = { rectangle, diiid };
+	Case const cases[] = { rectangle, diiid, moving };
 
 	std::printf( "\n  A DEVICE CHANGES NEITHER THE ANSWER NOR THE WORK\n" );
 	std::printf( "    %-18s %-8s %6s %8s %16s %10s\n",
@@ -220,7 +286,7 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 	for ( Case const &which : cases )
 	{
 		Run const host = solve( which, "cpu" );
-		Run const device = solve( which, "debug" );
+		Run const device = which.debugArm ? solve( which, "debug" ) : host;
 
 		/*
 		 * THE CARD ARM. Run only where the build has CUDA; `configured` then
@@ -236,6 +302,13 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		{
 			if ( std::string( pair.first ) == "cuda" && !card.configured )
 				continue;
+			if ( std::string( pair.first ) == "debug" && !which.debugArm )
+			{
+				std::printf( "    %-18s %-8s %s\n", which.stem, "debug",
+				             "SKIPPED -- not paid for on this case; the cuda "
+				             "arm is the one it was added for" );
+				continue;
+			}
 			std::printf( "    %-18s %-8s %6d %8.1f %16s %10s\n",
 			             which.stem, pair.first, pair.second->status,
 			             pair.second->seconds,
@@ -401,5 +474,52 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		            std::string( which.stem ) + ": " + card.newton
 		                + " Newton iterations under CUDA against "
 		                + host.newton + " on the host" );
+
+		/*
+		 * AND A FOURTH ARM, WITH EVERY DEVICE ROUTE FORCED OPEN.
+		 *
+		 * The arms above run the routes ResidentIterate.hpp and AxisSearch.hpp
+		 * built, and NOT ONE OF THEM IS TAKEN: each is gated on the iterate being
+		 * device-valid and host-invalid, which nothing yet arranges, so every
+		 * shipped case reads `0 taken`. A route nobody takes is a route nobody
+		 * tests, and the day residency arrives they all switch on at once.
+		 *
+		 * `MEQ_AXIS_DEVICE=force` takes them now, on the same file, and the same
+		 * four fields are compared with the host's as printed text. It is the
+		 * acceptance for the ten host readers of the iterate being ported --
+		 * the plasma loops, the transmission and psi_bnd rows, the cold state --
+		 * and it costs a card run, which is seconds. The `debug` arm is not
+		 * repeated forced: it is the expensive one, and a forced run under it is
+		 * recorded in MEASUREMENTS.md rather than paid for on every ctest.
+		 */
+		Run const forced = solve( which, "cuda", true );
+		std::printf( "    %-18s %-8s %6d %8.1f %16s %10s\n", which.stem,
+		             "cuda+f", forced.status, forced.seconds,
+		             forced.psiAxis.empty() ? "-" : forced.psiAxis.c_str(),
+		             forced.newton.empty() ? "-" : forced.newton.c_str() );
+
+		BOOST_TEST( forced.status == 0,
+		            std::string( which.stem ) + " exits "
+		                + std::to_string( forced.status )
+		                + " under --device cuda with MEQ_AXIS_DEVICE=force" );
+		BOOST_TEST( printedDigitsAgree( forced.psiAxis, host.psiAxis ),
+		            std::string( which.stem ) + ": psi_ax is "
+		                + forced.psiAxis + " with the device routes forced "
+		                  "against " + host.psiAxis + " on the host. Every "
+		                  "route reproduces a host loop operation for operation "
+		                  "on host-computed radii and weights; a digit here is a "
+		                  "kernel that does not" );
+		BOOST_TEST( printedDigitsAgree( forced.psiBoundary, host.psiBoundary ),
+		            std::string( which.stem ) + ": psi_bnd is "
+		                + forced.psiBoundary + " with the device routes forced "
+		                  "against " + host.psiBoundary );
+		BOOST_TEST( printedDigitsAgree( forced.xPoint, host.xPoint ),
+		            std::string( which.stem ) + ": the X-point is "
+		                + forced.xPoint + " with the device routes forced "
+		                  "against " + host.xPoint );
+		BOOST_TEST( forced.newton == host.newton,
+		            std::string( which.stem ) + ": " + forced.newton
+		                + " Newton iterations with the device routes forced "
+		                  "against " + host.newton + " on the host" );
 	}
 }

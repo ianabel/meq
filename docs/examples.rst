@@ -74,7 +74,10 @@ relative path:
        loop of its own. :doc:`validation`.
    * - ``diverted-tokamak.toml``
      - The same machine with the bounding point *prescribed* at the reference's
-       X-point instead. Kept as the comparison that isolates the border.
+       X-point instead. Kept as the comparison that isolates the border. Its
+       ``PlasmaSupportSweeps`` is what puts it on the reference's equilibrium:
+       this formulation has more than one, and with the support re-decided at
+       every Newton step instead it converges to another, 2.6% away.
    * - ``diverted-tokamak-generated.toml``
      - The same machine again, **meshing itself**: ``[mesh.generate]`` describes
        the half-disc and the conductors' rectangles are derived from the

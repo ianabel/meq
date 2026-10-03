@@ -1,5 +1,102 @@
 # DEVICE-PLAN.md — a fully device-resident MEQ solve
 
+## What is next
+
+**EVERY DEVICE ROUTE IS BUILT, AND SINCE [M-238](MEASUREMENTS.md#m-238) THE
+GATES OPEN ON EVERY BORDERED SOLVE UNDER A DEVICE -- THE STATE TO PICK UP FROM
+IS BELOW. WHAT FOLLOWS IN THIS PARAGRAPH IS HOW IT STOOD BEFORE.** Items 1 to 6 and 9 of §3.3 are done and the legs are not what is
+left: `machine-f-diiid` under `--device cuda` answers yes to the device
+integrand, the batched residual and gradient, the batched local solve, the whole
+NPC traversal, the condensation cache and the batched trace assembly, with cuDSS
+the default trace solver. Both CUDA arms of
+[M-235](MEASUREMENTS.md#m-235) print **`0 taken, 15 declined`**. The gates are
+`DeviceIsValid() && !HostIsValid()` — predicates about the DATA, so they switch
+on with no further edit — and every one of them is closed, because nothing has
+put the iterate on the device to stay.
+
+**THE TEN HOST READERS OF THE ITERATE ARE PORTED** →
+**[M-237](MEASUREMENTS.md#m-237)**. Found by watching the iterate's own buffer
+through every funnel rather than from a list: the five plasma element loops
+(`meq::DevicePlasmaLoops`), the transmission gather (`meq::DeviceRows`), the
+`psi_bnd` row (`meq::orderedDotOnDevice()`) and three copy constructions, all
+behind the axis route's gate and all reproducing their host loops **to the
+bit** -- 126 of 126 evaluations, once one Hermite derivative was written the
+host's way. Forced, the iterate is read on the host in phase D alone, and phase
+C carries 2.13 MB of partials and scalars where it carried 15.0.
+
+**AND THIS SECTION'S PREDICTION WAS WRONG.** It said the last reader to go
+*"turns every gate in the tree on at once"*, and it did not. Unforced they
+still read `0 taken`, because the gate wants the iterate `H- D+` and the Newton
+update adds host-only columns into it. *Removing the readers is what makes the
+columns worth moving; it does not move them.*
+
+**AND THE BORDERED COLUMNS NOW STAY ON THE DEVICE** →
+**[M-238](MEASUREMENTS.md#m-238)**. `flush()` makes each output device-valid
+before `ArrayMult()`, so its `SyncFromBlocks()` has nothing to download; the
+dense fill contracts every border row against every column in one launch,
+bit-identical to the host `rowDot()`; MEQ's residual operator stops downloading
+its own output; and the exterior columns go up once per solve. Unforced, every
+route opens by itself, and the whole run's device-to-host traffic falls from
+259 MB to 101 MB and host-to-device from 692 MB to 543 MB, with 27 of 29
+shipped examples at the host's every printed digit; with item 3 below fixed,
+28 -- the other is item 4.
+
+**SO WHAT IS NEXT IS WHAT THE BUS STILL SHOWS, AND MOST OF IT IS UPSTREAM'S.**
+
+1. **Upstream's three, FILED as `../mfem-hdg-dev/doc/HDG-DEVICE-BUS-FROM-MEQ.md`**,
+   about 335 MB up and 70 MB down a run: `HDGNPCScatterColumn()` opening a
+   destination it overwrites whole with `ReadWrite()` (112 MB up, the
+   `ArrayMult()` scratch); `SyncLocalBlocksToHost()` round-tripping the local
+   factors twice a Newton step on the batched route (39 MB down, about 200 MB
+   up through `LUSolve`); and the residual's finish and the gradient's gathers
+   on the host. Waiting on upstream.
+2. **MEQ's `load` is re-uploaded every residual**, through a fresh alias in
+   `ResidualRowsBatched()`, about 12 MB a run: the exterior columns' shape
+   (M-238), one `Read()` after `prepare()` assembles it. MEQ's, and small.
+3. ~~**`diverted-tokamak` under a device reaches a different equilibrium**~~
+   **FIXED** -> [M-239](MEASUREMENTS.md#m-239): the device integrand read the
+   plasma support as of the operator's last rebuild while the host's followed
+   every move; `refreshPlasmaComponent()` now carries each move to the device
+   flags, and `DeviceParity` runs the case with its support left moving. The
+   shipped example now freezes the support, which puts it on the benchmarked
+   branch.
+4. **`rotating-normalised` locates a different axis under a device** --
+   the routes' one stated semantic difference, nearest clean root globally
+   against the host's first productive ring, met on a shipped case once the
+   one-row border opened. The device's agrees with the run's own post-solve
+   check. Owed: which the constraint should take. MEQ's.
+5. **The phase-C scalars, eleven downloads a step**, as one batched download
+   per evaluation; and phase D's answer, which `downloadSolution()` still
+   copies twice. MEQ's, and small.
+6. **The FIRST evaluation of a solve is still on the host**, because the
+   iterate starts host-valid and the gates want it device-only. On `ff3` that
+   one cold axis sweep is **21.9 s of a 22.1 s axis leg** -- the other fifteen
+   evaluations take 0.19 s on the device -- where M-235 read the whole leg at
+   33.6 s. Uploading the initial guess once, as phase B, is the shape. MEQ's.
+
+**AND THE INSTRUMENT FOR THE BUS IS `nsys`, NOT THE CROSSING COUNTER.** The
+counter reads 0.888 MB on a run `nsys` puts at 692 MB host-to-device and 259 MB
+back: it counts MEQ's funnels, which is what attribution inside MEQ needs and
+not what a residency verdict needs. A breakpoint on `mfem::CuMemcpyDtoH` with a
+backtrace per hit is what named `ArrayMult()`.
+
+**AFTER THAT, PHASE B's MESH AND DOF MAPS**, which MFEM uploads lazily and MEQ
+does not control; `meq::DeviceConstants` covers the rest of phase B already
+→ [M-226](MEASUREMENTS.md#m-226). Item 7 is upstream's and is optional for MEQ.
+Item 8 is run rather than pending, and the single suite is at parity with the
+double control → [M-222](MEASUREMENTS.md#m-222).
+
+**AND THE COST OF LEAVING THE GATES SHUT IS NOW THE LARGEST SINGLE ITEM IN A
+DEVICE RUN** → **[M-235](MEASUREMENTS.md#m-235)**. `ff3`'s axis leg reads
+33.57 s in double and 51.46 s in single at **1.00 cores** under CUDA, against
+21.57 s at 1.97 cores and 24.19 s at 2.61 on the host — **18.1% of the double
+device wall and 19.8% of the single**, and 1.56x and 2.13x worse than the host,
+because a device run loses `meq::hostLoopsAreSafe()`
+([M-188](MEASUREMENTS.md#m-188)) and takes the host sweep serially while
+[M-233](MEASUREMENTS.md#m-233)'s 11.9 ms kernel sits beside it built,
+bit-identical and idle. *The leg the port was written for is the one the device
+is losing on, and it is losing on it because the port is correctly off.*
+
 **THE TARGET IS RESIDENCY, AND THAT IS A DECISION RATHER THAN AN AMBITION.**
 The whole calculation runs on the device: the iterate, the local blocks, the
 trace system and the border all live in device memory from `prepare()` to the

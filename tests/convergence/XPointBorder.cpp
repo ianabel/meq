@@ -636,13 +636,26 @@ BOOST_AUTO_TEST_CASE( theBorderAndTheOuterLoopReachTheSameEquilibrium )
 	// span, which is 17 eps. scalarAgreementFloor() is 64 and keeps the 1e-6 in
 	// double. The X-POINT's agreement above is a POSITION and is bounded
 	// separately at 1e-5, which the two routes still meet in single.
+	//
+	// AND psi_bnd IS THE SAME KIND OF QUANTITY AND TAKES THE SAME FLOOR,
+	// which it was not given when psi_ax was. It is the flux AT the X-point,
+	// so it is a VALUE at a stationary point exactly as psi_ax is -- a saddle
+	// rather than an extremum, which changes the sign of the Hessian and not
+	// the second-order insensitivity that costs a value no digits. It reads
+	// 45 eps against psi_ax's 17 on the same pair of solves, and both are
+	// that shared tolerance rather than anything geometric: the two routes
+	// put the X-point 1e-5 m apart at worst, which a stationary VALUE feels
+	// at second order. A real disagreement -- a wrong corner block, a route
+	// short of its own fixed point -- is O( span ), four orders above this
+	// bound, so the claim is intact. M-222.
 	BOOST_TEST( std::abs( border.psiAxis - loop.psiAxis )
 	            < meq::tests::scalarAgreementFloor( 1.0e-6, 1.0 )
 	              *std::abs( span ),
 		"psi_ax disagrees between the two routes by "
 		<< std::abs( border.psiAxis - loop.psiAxis )/span << " of the span" );
 	BOOST_TEST( std::abs( border.psiBoundary - loop.psiBoundary )
-	            < 1.0e-6*std::abs( span ),
+	            < meq::tests::scalarAgreementFloor( 1.0e-6, 1.0 )
+	              *std::abs( span ),
 		"psi_bnd disagrees between the two routes by "
 		<< std::abs( border.psiBoundary - loop.psiBoundary )/span
 		<< " of the span" );

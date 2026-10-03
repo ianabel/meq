@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <iomanip>
@@ -564,6 +565,37 @@ namespace
 		supportIndices = support;
 		rows = 1;
 		rowValues.assign( supportIndices.size(), 0.0 );
+
+		/*
+		 * A ROW THAT LIVES ONLY ON THE DEVICE IS GATHERED THERE.
+		 *
+		 * The plasma-current row is the case: under a resident iterate
+		 * assembleCurrentRow() leaves it device-valid, full length, and this
+		 * reads a support's worth of it -- a few thousand entries against the
+		 * row's whole vector. The values are the same doubles either way, so
+		 * the compressed row, and every dot against it, is bit-unchanged.
+		 */
+		mfem::Memory<mfem::real_t> const &memory = row.GetMemory();
+		if ( memory.DeviceIsValid() && !memory.HostIsValid()
+		     && !supportIndices.empty() )
+		{
+			mfem::Array<int> indices( static_cast<int>( supportIndices.size() ) );
+			indices.UseDevice( true );
+			{
+				int *const host = indices.HostWrite();
+				for ( std::size_t k = 0; k < supportIndices.size(); ++k )
+					host[ k ] = supportIndices[ k ];
+			}
+			mfem::Vector gathered;
+			if ( gatherOnDevice( row, indices, gathered ) )
+			{
+				countedHostRead( gathered, __LINE__ );
+				for ( std::size_t k = 0; k < supportIndices.size(); ++k )
+					rowValues[ k ] = gathered( static_cast<int>( k ) );
+				return;
+			}
+		}
+
 		countedHostRead( row, __LINE__ );
 		for ( std::size_t k = 0; k < supportIndices.size(); ++k )
 			rowValues[ k ] = row( supportIndices[ k ] );
@@ -5053,8 +5085,11 @@ namespace
 			auto *extension = new mfem::HDGExtensionIntegrator(
 				*transferPath, radiusCoefficient, +1.0, extensionLineOrder );
 			// THE OUTER RULE, which is the inexact one. See
-			// setExtensionQuadratureOrder(); negative leaves MFEM's 2k+2 and
-			// every solve written before this existed is bit-unchanged.
+			// setExtensionQuadratureOrder(); negative leaves MFEM's own default,
+			// which is 2k -- the SAME value VectorBoundaryFluxLFIntegrator uses
+			// for the data half, and deliberately so -- hence the two halves
+			// share a rule on that path as well, and every solve written before
+			// this existed is bit-unchanged.
 			if ( extensionFaceOrder >= 0 )
 				extension->SetIntRule( &mfem::IntRules.Get(
 					mfem::Geometry::SEGMENT, extensionFaceOrder ) );
@@ -5663,8 +5698,11 @@ namespace
 			fluxRhs = std::make_unique<mfem::LinearForm>();
 			fluxRhs->Update( fluxFes.get(), rhs.GetBlock( 0 ), 0 );
 			// g( a( x ) ) is no more polynomial in x than L_e is, so the data
-			// half takes the same rule as the solution half. MFEM's default
-			// here is 2k, lower still.
+			// half takes the same rule as the solution half -- which is a
+			// REQUIREMENT and not a nicety: the two halves' quadrature errors
+			// cancel only under one rule, and mismatched ones cost upstream's
+			// corner fixture 845x the no-transfer flux error at order 2. Both
+			// defaults are 2k, so leaving both alone shares too.
 			fluxRhs->AddBdrFaceIntegrator(
 				new mfem::VectorBoundaryFluxLFIntegrator(
 					*exteriorDatumCoefficient, 1.0,
@@ -6440,6 +6478,64 @@ namespace
 
 	void GradShafranovSolver::refreshPlasmaComponent( mfem::Vector const &state )
 	{
+		refreshPlasmaComponentMask( state );
+		if ( deviceIntegrandInUse )
+			refreshDeviceIntegrandFlags();
+	}
+
+	DeviceIntegrandInputs GradShafranovSolver::deviceIntegrandInputs(
+		std::vector<int> &flags ) const
+	{
+		DeviceIntegrandInputs inputs;
+		inputs.source = nonlinearSource;
+
+		int const elementTotal = potentialFes ? potentialFes->GetNE() : 0;
+		flags.assign( static_cast<std::size_t>( elementTotal ), 1 );
+		for ( int e = 0; e < elementTotal; ++e )
+			flags[ static_cast<std::size_t>( e ) ] =
+				plasmaComponentMask.holds( e ) ? 1 : 0;
+		inputs.elementInPlasma = flags.empty() ? nullptr : flags.data();
+		inputs.elementCount = elementTotal;
+
+		if ( sourceIntegrator != nullptr
+		     && !sourceIntegrator->conductorCacheValues().empty() )
+		{
+			inputs.conductorValues =
+				sourceIntegrator->conductorCacheValues().data();
+			inputs.conductorOffsets =
+				sourceIntegrator->conductorCacheOffsets().data();
+			inputs.conductorValueCount = static_cast<int>(
+				sourceIntegrator->conductorCacheValues().size() );
+		}
+		return inputs;
+	}
+
+	void GradShafranovSolver::refreshDeviceIntegrandFlags()
+	{
+		if ( nonlinearSource == nullptr )
+			return;
+
+		/*
+		 * THE SAME KNOTS AND COILS THE OPERATOR WAS BUILT WITH, so the
+		 * comparison inside refresh() finds them unchanged and only the flags
+		 * move -- makeDeviceNPCOperator() builds them by exactly these two
+		 * calls. A source with no POD form has no device integrand, and
+		 * deviceIntegrandInUse is false before this is reached.
+		 */
+		SourceView view{};
+		std::vector<KnotView> knots;
+		std::vector<CoilView> coils;
+		mfem::real_t permeability = 0;
+		if ( !makePlasmaSourceView( *nonlinearSource, view, knots )
+		     || !makeCoilViews( *nonlinearSource, coils, permeability ) )
+			return;
+
+		std::vector<int> flags;
+		npcConstants.refresh( deviceIntegrandInputs( flags ), knots, coils );
+	}
+
+	void GradShafranovSolver::refreshPlasmaComponentMask( mfem::Vector const &state )
+	{
 		if ( !plasmaComponentWanted() )
 			return;
 
@@ -6878,6 +6974,23 @@ namespace
 			return mfem::IntRules.Get( el.GetGeomType(),
 			                           2*el.GetOrder() + tr.OrderW() + extra );
 		}
+
+		/**
+		 * Zero @a v ON THE HOST, whatever its UseDevice() says.
+		 *
+		 * The three scatters below write their output raw from an element
+		 * loop, after zeroing it. `v = 0.0` is device-aware, so once a device
+		 * route has handed the same vector back with UseDevice() true, the
+		 * zero lands on the DEVICE and the raw writes after it go into a host
+		 * page MFEM no longer believes in -- M-211's refreshed buffer, met at
+		 * the switch between two routes rather than within one. For a vector
+		 * that never left the host this is `v = 0.0` exactly.
+		 */
+		void zeroOnHost( mfem::Vector &v )
+		{
+			mfem::real_t *const host = v.HostWrite();
+			std::fill( host, host + v.Size(), mfem::real_t( 0 ) );
+		}
 	}
 
 	CoilSet const *GradShafranovSolver::filterConductors() const
@@ -6984,6 +7097,35 @@ namespace
 		LegTimer const slice( profile.currentSeconds, profile.currentCpuSeconds, profile.currentCalls );
 		if ( !normalisedSource )
 			return 0.0;
+
+		/*
+		 * THE DEVICE ROUTE, WHEN THE STATE IS WHERE IT WOULD BE READ FROM.
+		 *
+		 * One of the ten host readers of the iterate ResidentIterate.hpp names,
+		 * and the one DEVICE-PLAN.md section 3.3 item 3 called done as a kernel
+		 * that nothing called. The per-element partials come back -- one double
+		 * an element against the state's whole vector -- and are summed HERE,
+		 * in element order, for this function's own reason below: the answer
+		 * may not depend on how the work was split.
+		 */
+		if ( iterateIsResident( state ) )
+		{
+			SourceView view{};
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.integrate( PlasmaQuantity::Current, view,
+			                               npcConstants, state,
+			                               blockOffsets[ 1 ], plasmaLoopFirst,
+			                               nullptr ) )
+			{
+				++iterateDeviceTaken;
+				countedHostRead( plasmaLoopFirst, __LINE__ );
+				double total = 0.0;
+				for ( int e = 0; e < plasmaLoopFirst.Size(); ++e )
+					total += plasmaLoopFirst( e );
+				return total;
+			}
+			++iterateDeviceDeclined;
+		}
 
 		// The element loop below indexes `state` raw, and it runs inside an
 		// OpenMP region -- so the funnel has to be here, ahead of it, rather
@@ -7131,13 +7273,30 @@ namespace
 	{
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
-		out = 0.0;
+		zeroOnHost( out );
 		if ( !normalisedSource )
 			return;
 
 		double const scale = normalisedSource->currentScale();
 		if ( scale == 0.0 )
 			return;
+
+		// The device route, left device-valid: this column is a right-hand
+		// side of the trace solve and goes nowhere near the host on its way
+		// there. See assemblePlasmaCurrent().
+		if ( iterateIsResident( state ) )
+		{
+			SourceView view{};
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.scatter( PlasmaQuantity::CurrentColumn, view,
+			                             npcConstants, state, blockOffsets[ 1 ],
+			                             static_cast<mfem::real_t>( scale ), out ) )
+			{
+				++iterateDeviceTaken;
+				return;
+			}
+			++iterateDeviceDeclined;
+		}
 
 		// The loop below indexes the iterate raw. One funnel here rather than
 		// one per read, and it is unconditional: ordering is not a guard.
@@ -7237,11 +7396,6 @@ namespace
 		againstAxis = 0.0;
 		againstBoundary = 0.0;
 
-		// The loop below indexes the iterate raw. One funnel here rather than
-		// one per read, and it is unconditional: ordering is not a guard.
-		// DEVICE-PLAN.md section 1.2.
-		countedHostRead( state, __LINE__ );
-
 		if ( !normalisedSource )
 			return;
 
@@ -7317,6 +7471,37 @@ namespace
 			againstBoundary = ( boundaryUp - boundaryDown )/( 2.0*hBoundary );
 			return;
 		}
+
+		// The device route: both partial sums per element in one launch, summed
+		// here in element order exactly as below. See assemblePlasmaCurrent().
+		if ( iterateIsResident( state ) )
+		{
+			SourceView view{};
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.integrate( PlasmaQuantity::NormalisationCorner,
+			                               view, npcConstants, state,
+			                               blockOffsets[ 1 ], plasmaLoopFirst,
+			                               &plasmaLoopSecond ) )
+			{
+				++iterateDeviceTaken;
+				countedHostRead( plasmaLoopFirst, __LINE__ );
+				countedHostRead( plasmaLoopSecond, __LINE__ );
+				for ( int e = 0; e < plasmaLoopFirst.Size(); ++e )
+				{
+					againstAxis += plasmaLoopFirst( e );
+					againstBoundary += plasmaLoopSecond( e );
+				}
+				return;
+			}
+			++iterateDeviceDeclined;
+		}
+
+		// The loop below indexes the iterate raw. One funnel here rather than
+		// one per read, and it is unconditional: ordering is not a guard. It
+		// sits after the differenced branch, which reaches the state only
+		// through assemblePlasmaCurrent() and that funnels -- or routes --
+		// for itself. DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
@@ -7425,12 +7610,7 @@ namespace
 	{
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
-		out = 0.0;
-
-		// The loop below indexes the iterate raw. One funnel here rather than
-		// one per read, and it is unconditional: ordering is not a guard.
-		// DEVICE-PLAN.md section 1.2.
-		countedHostRead( state, __LINE__ );
+		zeroOnHost( out );
 
 		if ( support )
 			support->clear();
@@ -7440,6 +7620,70 @@ namespace
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
 		int const elementTotal = mesh.GetNE();
+
+		/*
+		 * THE SUPPORT, AND WHY IT IS A SECOND PASS RATHER THAN A PUSH INSIDE
+		 * THE QUADRATURE LOOP.
+		 *
+		 * The loop below is threaded, and a shared list pushed to from every
+		 * thread is the one thing this file's own hazard note forbids. The set
+		 * wanted is `the potential dofs of the elements the plasma fill
+		 * reached`, which is pure indexing -- no quadrature, no source -- so it
+		 * is cheaper to walk it again serially than to synchronise it. The
+		 * potential space is L2, so no two elements share a dof and the sort is
+		 * a formality; it is done anyway because meq::CompressedRows requires
+		 * ascending order for its exactness and that requirement should not
+		 * rest on a property of the space.
+		 *
+		 * A lambda because both routes need it: it reads no state, so the
+		 * device route builds it on the host exactly as the host route does.
+		 */
+		auto collectSupport = [ & ]()
+		{
+			mfem::Array<int> supportDofs;
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+			{
+				if ( !elementInPlasma( e ) )
+					continue;
+				potentialFes->GetElementDofs( e, supportDofs );
+				for ( int j = 0; j < supportDofs.Size(); ++j )
+					support->push_back( potentialStart + supportDofs[ j ] );
+			}
+			std::sort( support->begin(), support->end() );
+			support->erase( std::unique( support->begin(), support->end() ),
+			                support->end() );
+		};
+
+		/*
+		 * THE DEVICE ROUTE, AND THE ONE CHECK IT DOES NOT MAKE.
+		 *
+		 * firstNonzeroOutside() below reads the whole row on the host, which is
+		 * the transfer this route exists to avoid. It guards the support and
+		 * the scatter falling out of step, and on this route they cannot: the
+		 * kernel scatters into exactly the elements whose flag is set, and
+		 * plasmaLoopsAvailable() refuses unless those flags ARE the
+		 * elementInPlasma() the support is collected from.
+		 */
+		if ( iterateIsResident( state ) )
+		{
+			SourceView view{};
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.scatter( PlasmaQuantity::CurrentRow, view,
+			                             npcConstants, state, potentialStart,
+			                             1.0, out ) )
+			{
+				++iterateDeviceTaken;
+				if ( support )
+					collectSupport();
+				return;
+			}
+			++iterateDeviceDeclined;
+		}
+
+		// The loop below indexes the iterate raw. One funnel here rather than
+		// one per read, and it is unconditional: ordering is not a guard.
+		// DEVICE-PLAN.md section 1.2.
+		countedHostRead( state, __LINE__ );
 		std::exception_ptr failure;
 
 		// Disjoint L2 scatter, so bit-identical both across thread counts and
@@ -7508,34 +7752,9 @@ namespace
 		if ( failure )
 			std::rethrow_exception( failure );
 
-		/*
-		 * THE SUPPORT, AND WHY IT IS A SECOND PASS RATHER THAN A PUSH INSIDE
-		 * THE QUADRATURE LOOP.
-		 *
-		 * The loop above is threaded, and a shared list pushed to from every
-		 * thread is the one thing this file's own hazard note forbids. The set
-		 * wanted is `the potential dofs of the elements the plasma fill
-		 * reached`, which is pure indexing -- no quadrature, no source -- so it
-		 * is cheaper to walk it again serially than to synchronise it. The
-		 * potential space is L2, so no two elements share a dof and the sort is
-		 * a formality; it is done anyway because meq::CompressedRows requires
-		 * ascending order for its exactness and that requirement should not
-		 * rest on a property of the space.
-		 */
 		if ( support )
 		{
-			mfem::Array<int> supportDofs;
-			for ( int e = 0; e < mesh.GetNE(); ++e )
-			{
-				if ( !elementInPlasma( e ) )
-					continue;
-				potentialFes->GetElementDofs( e, supportDofs );
-				for ( int j = 0; j < supportDofs.Size(); ++j )
-					support->push_back( potentialStart + supportDofs[ j ] );
-			}
-			std::sort( support->begin(), support->end() );
-			support->erase( std::unique( support->begin(), support->end() ),
-			                support->end() );
+			collectSupport();
 
 			// As in exteriorTransmissionRows(): the list is checked against the
 			// row it claims to describe, not trusted. A compressed contraction
@@ -7683,6 +7902,85 @@ namespace
 	long GradShafranovSolver::axisRoutesDeclinedOnDevice() const
 	{
 		return axisDeviceDeclined;
+	}
+
+	long GradShafranovSolver::iterateRoutesTakenOnDevice() const
+	{
+		return iterateDeviceTaken;
+	}
+
+	long GradShafranovSolver::iterateRoutesDeclinedOnDevice() const
+	{
+		return iterateDeviceDeclined;
+	}
+
+	bool GradShafranovSolver::iterateIsResident( mfem::Vector const &state ) const
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		if ( axisDeviceRouteForced() )
+			return true;
+		return vectorIsResident( state );
+	}
+
+	bool GradShafranovSolver::vectorIsResident( mfem::Vector const &v ) const
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		mfem::Memory<mfem::real_t> const &memory = v.GetMemory();
+		return memory.DeviceIsValid() && !memory.HostIsValid();
+	}
+
+	bool GradShafranovSolver::plasmaLoopsAvailable( SourceView &view ) const
+	{
+		if ( normalisedSource == nullptr || !potentialFes )
+			return false;
+		// npcConstants is populated by the device NPC operator and by nothing
+		// else, so without one there is nothing to borrow.
+		if ( !deviceIntegrandInUse )
+			return false;
+		if ( static_cast<Source const *>( normalisedSource ) != nonlinearSource )
+			return false;
+
+		std::vector<KnotView> knots;
+		if ( !makePlasmaSourceView( *normalisedSource, view, knots ) )
+			return false;
+
+		// THE KNOTS THE OPERATOR UPLOADED MUST BE THESE, or `view` indexes a
+		// different table. Equal by construction today -- one source, one
+		// makePlasmaSourceView() -- and compared because that is a property of
+		// two call sites rather than of either.
+		if ( npcConstants.knotShadow.size() != knots.size()
+		     || ( !knots.empty()
+		          && std::memcmp( npcConstants.knotShadow.data(), knots.data(),
+		                          knots.size()*sizeof( KnotView ) ) != 0 ) )
+			return false;
+
+		// AND THE PLASMA MASK, which the host loops read LIVE through
+		// elementInPlasma() and the operator froze at its last rebuild. Under a
+		// support frozen within a solve the two are one array; under a moving
+		// one they can part, and then this is the host loop.
+		int const elementTotal = potentialFes->GetNE();
+		if ( npcConstants.elementCount != elementTotal
+		     || static_cast<int>( npcConstants.flagShadow.size() ) != elementTotal )
+			return false;
+		for ( int e = 0; e < elementTotal; ++e )
+			if ( npcConstants.flagShadow[ static_cast<std::size_t>( e ) ]
+			     != ( plasmaComponentMask.holds( e ) ? 1 : 0 ) )
+				return false;
+
+		// AND THE CONDUCTOR SHIFT: conductorPsiAtQuadrature() adds the cache
+		// only with a conductor field set, so a cache the operator carries and
+		// the host would not add is a different psi.
+		std::size_t const hostShift =
+			( conductorFieldSet && sourceIntegrator )
+			? sourceIntegrator->conductorCacheValues().size() : 0;
+		std::size_t const deviceShift = npcConstants.shiftCount > 0
+			? static_cast<std::size_t>( npcConstants.shiftCount ) : 0;
+		if ( hostShift != deviceShift )
+			return false;
+
+		return plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra );
 	}
 
 	bool GradShafranovSolver::sourceRuleIsExplicit() const
@@ -7870,7 +8168,28 @@ namespace
 		}
 
 		out.SetSize( state.Size() );
-		out = 0.0;
+		zeroOnHost( out );
+
+		// The device route, for the source the probe above just accepted --
+		// and a POD form exists only for meq::NormalisedMHDSource, whose
+		// derivatives never refuse, so the host's per-point refusal has no
+		// device counterpart to miss. Left device-valid; see
+		// assembleCurrentColumn().
+		if ( iterateIsResident( state ) )
+		{
+			SourceView view{};
+			if ( plasmaLoopsAvailable( view )
+			     && view.kind == static_cast<int>( SourceKind::NormalisedMHD )
+			     && plasmaLoops.scatter( axis ? PlasmaQuantity::AxisColumn
+			                                  : PlasmaQuantity::BoundaryColumn,
+			                             view, npcConstants, state,
+			                             blockOffsets[ 1 ], 1.0, out ) )
+			{
+				++iterateDeviceTaken;
+				return true;
+			}
+			++iterateDeviceDeclined;
+		}
 
 		// The loop below indexes the iterate raw, and psi_ax is an unknown of
 		// every bordered solve, so this runs per step on the default path.
@@ -8107,10 +8426,14 @@ namespace
 		 * build, and the element loop is what happens when either says no.
 		 *
 		 * The flag vector is declared here so it outlives the operator that
-		 * borrows it. XP-2 freezes the plasma support for the duration of a
-		 * solve, so it is filled once; the operator is rebuilt by reprepare()
-		 * whenever the hybridization is re-finalised, which is where a moving
-		 * support would be picked up anyway.
+		 * borrows it. Under XP-2's frozen support it is filled once per solve.
+		 * **Under a MOVING support it is not enough, and this comment said it
+		 * was**: the operator is rebuilt only by reprepare(), while
+		 * refreshPlasmaComponent() moves the mask at every residual -- so the
+		 * device integrand integrated a stale support and
+		 * `examples/diverted-tokamak.toml` reached a different equilibrium
+		 * under `--device cuda`, at `HEAD` as well. refreshPlasmaComponent()
+		 * now carries every move to the uploaded flags. M-239.
 		 */
 		std::vector<int> npcPlasmaFlags;
 
@@ -8145,29 +8468,8 @@ namespace
 
 			mfem::DarcyHybridization &hyb = *darcy->GetHybridization();
 
-			DeviceIntegrandInputs inputs;
-			inputs.source = nonlinearSource;
-
-			int const elementTotal = potentialFes ? potentialFes->GetNE() : 0;
-			npcPlasmaFlags.assign(
-				static_cast<std::size_t>( elementTotal ), 1 );
-			for ( int e = 0; e < elementTotal; ++e )
-				npcPlasmaFlags[ static_cast<std::size_t>( e ) ] =
-					plasmaComponentMask.holds( e ) ? 1 : 0;
-			inputs.elementInPlasma = npcPlasmaFlags.empty()
-				? nullptr : npcPlasmaFlags.data();
-			inputs.elementCount = elementTotal;
-
-			if ( sourceIntegrator != nullptr
-			     && !sourceIntegrator->conductorCacheValues().empty() )
-			{
-				inputs.conductorValues =
-					sourceIntegrator->conductorCacheValues().data();
-				inputs.conductorOffsets =
-					sourceIntegrator->conductorCacheOffsets().data();
-				inputs.conductorValueCount = static_cast<int>(
-					sourceIntegrator->conductorCacheValues().size() );
-			}
+			DeviceIntegrandInputs const inputs =
+				deviceIntegrandInputs( npcPlasmaFlags );
 
 			if ( auto device = makeDeviceNPCOperator( hyb, blockOffsets,
 			                                          darcyRhs, inputs,
@@ -8217,43 +8519,34 @@ namespace
 		mfem::Vector columnL( n ), zL( n ), currentRow( n );
 
 		/*
-		 * THE SOLVED COLUMNS MAY LIVE ON THE DEVICE, AND A FRESHLY CONSTRUCTED
-		 * mfem::Vector MAY NOT -- WHICH IS WHY ITEM 4's GATE COULD NEVER OPEN.
+		 * THE SOLVED COLUMNS LIVE ON THE DEVICE UNDER ONE, AND THE CALLS THAT
+		 * PUT THEM THERE ARE IN flush() RATHER THAN HERE.
 		 *
-		 * `mfem::Vector v( n )` has `UseDevice()` FALSE, so `Write()` and
-		 * `ReadWrite()` on it hand back HOST pointers and every kernel that
-		 * fills it fills host memory. These five -- `y`, `z`, `zL`, `zB` and
-		 * each `exteriorZ` -- are the outputs of the blocked trace solve, and
-		 * `DEVICE-PLAN.md` item 4 gates `meq::DeviceRows::dotAll()` on
-		 * `Memory::DeviceIsValid()` of exactly them. **The predicate was about
-		 * data that could not satisfy it under any trace solver**, which is
-		 * why [M-227](../MEASUREMENTS.md) read 168 of 168 `H+ D-` under
-		 * PARDISO and why making cuDSS the device default did not move it.
-		 * *A data gate on a buffer that is not device-capable is a gate on
-		 * nothing, and it reports the same NO for both reasons.*
+		 * `mfem::Vector v( n )` has `UseDevice()` false and is host-valid, and
+		 * these five -- `y`, `z`, `zL`, `zB` and each `exteriorZ` -- are the
+		 * outputs of the blocked trace solve. Handed to
+		 * `DarcyNPCSolver::ArrayMult()` like that, they are written on the
+		 * device by `NPCRecover` and then DOWNLOADED inside it, because its
+		 * `SyncFromBlocks()` makes each block match a base that says host:
+		 * fourteen columns a Newton step, 140 MB over `machine-f-diiid`
+		 * ([M-237](../MEASUREMENTS.md)). [M-227](../MEASUREMENTS.md) read them
+		 * `H+ D-` at the flush and took that for *never on the device*; it was
+		 * the download's result.
 		 *
-		 * **AND THE CALLS ARE NOT HERE, WHICH IS A MEASUREMENT AND NOT AN
-		 * OVERSIGHT** -> [M-229](../MEASUREMENTS.md). `UseDevice( true )` on
-		 * these five was built, run, and reverted: 126 of 168 columns duly
-		 * arrived `H+ D+` where every one had been `H+ D-`, `psi_ax` did not
-		 * move -- and the run's transfers went from **3 and 0.888 MB to 20 and
-		 * 15.1 MB**. The crossing did not disappear, it MOVED: the trial step
-		 * is `unknown.Add( -damping, y )`, so a device-valid column makes the
-		 * ITERATE device-valid, and the next step's axis constraint -- a host
-		 * mesh search -- drags the whole state back. That is section 3.3's
-		 * alternation, made visible and counted at 1.4 transfers a step.
+		 * **SETTING `UseDevice( true )` HERE IS NOT ENOUGH, AND THAT WAS
+		 * MEASURED TWICE.** [M-229](../MEASUREMENTS.md) did it while the
+		 * iterate still had ten host readers, and the crossing MOVED -- the
+		 * trial step `unknown.Add( -damping, y )` made the iterate device-valid
+		 * and the next host reader dragged it back. With the readers ported
+		 * (M-237) the gates open, and still every column came down inside
+		 * `ArrayMult()`, plus a second download for being device-capable and
+		 * host-valid at once. What works is flush() making each output
+		 * DEVICE-valid immediately before the solve, and the dense fill reading
+		 * them there in one launch -- M-238.
 		 *
-		 * **RESIDENCY IS A PROPERTY OF A CYCLE AND NOT OF A LEG**, which is
-		 * what no per-item ordering in that plan can express. Every leg of a
-		 * Newton step must be device-side together or the one host leg pulls
+		 * **RESIDENCY IS A PROPERTY OF A CYCLE AND NOT OF A LEG.** Every leg of
+		 * a Newton step must be device-side together or the one host leg pulls
 		 * the state down and converts every other leg's kernel into an upload.
-		 * The trace solve is cuDSS now, the traversal and the integrand are
-		 * kernels, the row dots and `I_p` are BUILT -- and
-		 * `plasmaCurrentPerElementOnDevice()` has no caller and the axis
-		 * constraint is a mesh SEARCH, which section 3.4 calls the hardest part
-		 * of the whole page. *Each leg was waiting for the state to be
-		 * resident, and the state can only be resident if they all move at
-		 * once.*
 		 */
 		/// The same row, on its support alone -- the potential dofs of the
 		/// elements the plasma fill reached. Rebuilt every Newton step, because
@@ -8407,8 +8700,90 @@ namespace
 		 * would put the decision at the call site, where it is exactly the
 		 * thing a reader gets wrong.
 		 */
-		auto limiterValue = [ & ]( mfem::Vector const &v )
+		/*
+		 * THE ROW'S DEVICE HALF, AND IT IS A HANDFUL OF ENTRIES.
+		 *
+		 * The third rename of [M-232](../MEASUREMENTS.md): with the axis and the
+		 * X-point evaluated where the iterate is, the same 12.5 MB reappeared
+		 * HERE, to read six doubles. The row is the containing element's shape
+		 * functions at the contact -- or one unit entry under NearestDof -- so
+		 * the device route is one thread summing them in the host's order and
+		 * one double coming back.
+		 *
+		 * The index and weight lists move with the contact, which is every
+		 * iterate on the X-point path, so they are compared against what was
+		 * last uploaded rather than re-sent per call: the same row is applied
+		 * to the iterate and then to every backsolved direction of the step.
+		 */
+		mfem::Array<int> limiterRowIndices;
+		mfem::Vector limiterRowWeights;
+		mfem::Vector limiterRowDot;
+		std::vector<int> limiterRowIndexShadow;
+		std::vector<mfem::real_t> limiterRowWeightShadow;
+		auto limiterValueOnDevice = [ & ]( mfem::Vector const &v,
+		                                   mfem::real_t &out ) -> bool
 		{
+			std::vector<int> indices;
+			std::vector<mfem::real_t> weights;
+			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
+			{
+				// 0 + 1*v is v exactly, so the host's bare read is reproduced.
+				indices.push_back( boundaryDof );
+				weights.push_back( 1.0 );
+			}
+			else
+				for ( int i = 0; i < limiterDofs.Size() && i < limiterShape.Size(); ++i )
+				{
+					indices.push_back( blockOffsets[ 1 ] + limiterDofs[ i ] );
+					weights.push_back( limiterShape( i ) );
+				}
+			if ( indices.empty() || indices.front() < 0 )
+				return false;
+
+			if ( indices != limiterRowIndexShadow
+			     || weights != limiterRowWeightShadow )
+			{
+				// HostWrite() before the fill: M-211, a buffer refreshed in place.
+				limiterRowIndices.SetSize( static_cast<int>( indices.size() ) );
+				limiterRowIndices.UseDevice( true );
+				limiterRowWeights.SetSize( static_cast<int>( weights.size() ) );
+				limiterRowWeights.UseDevice( true );
+				int *const hostIndices = limiterRowIndices.HostWrite();
+				mfem::real_t *const hostWeights = limiterRowWeights.HostWrite();
+				for ( std::size_t k = 0; k < indices.size(); ++k )
+				{
+					hostIndices[ k ] = indices[ k ];
+					hostWeights[ k ] = weights[ k ];
+				}
+				limiterRowIndexShadow = indices;
+				limiterRowWeightShadow = weights;
+			}
+
+			if ( !orderedDotOnDevice( v, limiterRowIndices, limiterRowWeights,
+			                          limiterRowDot ) )
+				return false;
+			countedHostRead( limiterRowDot, __LINE__ );
+			out = limiterRowDot( 0 );
+			return true;
+		};
+
+		// @a isState: whether @a v is the iterate, which the force switch may
+		// treat as resident, or a backsolved direction, which is gated on its
+		// own flags alone. See vectorIsResident().
+		auto limiterValue = [ & ]( mfem::Vector const &v,
+		                           bool isState ) -> mfem::real_t
+		{
+			if ( isState ? iterateIsResident( v ) : vectorIsResident( v ) )
+			{
+				mfem::real_t onDevice = 0.0;
+				if ( limiterValueOnDevice( v, onDevice ) )
+				{
+					++iterateDeviceTaken;
+					return onDevice;
+				}
+				++iterateDeviceDeclined;
+			}
+
 			// Both arms index `v` raw, and this is the psi_bnd row -- it runs
 			// per step under any limiter. DEVICE-PLAN.md section 1.2.
 			countedHostRead( v, __LINE__ );
@@ -8467,7 +8842,7 @@ namespace
 		 */
 		auto limiterTotal = [ & ]( mfem::Vector const &state )
 		{
-			double total = limiterValue( state );
+			double total = limiterValue( state, true );
 
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
 				total += conductorPsiAtDof( boundaryDof - blockOffsets[ 1 ] );
@@ -8687,17 +9062,11 @@ namespace
 		 * whoever asks first, which is not the same as attributing it to
 		 * whoever needs it.**
 		 */
-		auto iterateIsResident = [ & ]( mfem::Vector const &state )
-		{
-			// MEQ_AXIS_DEVICE=force overrides it, so the kernels can be put
-			// on a clock at all -- see meq::axisDeviceRouteForced(). It is a
-			// measurement switch and changes which route runs, not what
-			// either computes.
-			if ( axisDeviceRouteForced() )
-				return true;
-			mfem::Memory<mfem::real_t> const &memory = state.GetMemory();
-			return memory.DeviceIsValid() && !memory.HostIsValid();
-		};
+		// The gate is GradShafranovSolver::iterateIsResident(), the member, so
+		// that every host reader of the iterate -- these two and the ten
+		// ResidentIterate.hpp names -- asks one predicate. MEQ_AXIS_DEVICE=force
+		// overrides it there, so the kernels can be put on a clock at all; it
+		// changes which route runs, not what either computes.
 
 		auto ensureDeviceBasis = [ & ]() -> bool
 		{
@@ -10445,7 +10814,14 @@ namespace
 			 * under here -- see MEASUREMENTS.md M-205. The read is counted
 			 * because every other funnel in this file is.
 			 */
-			countedHostRead( unknown, __LINE__ );
+			//
+			// AND SKIPPED WHEN THE ITERATE IS RESIDENT, because then the funnel
+			// IS the transfer: the copy constructor copies whichever copy is
+			// live, so a device-valid iterate gives a device-valid copy, and the
+			// only reader of this one is `unknown = savedIterate`, which is
+			// device-aware. ResidentIterate.hpp.
+			if ( !iterateIsResident( unknown ) )
+				countedHostRead( unknown, __LINE__ );
 			mfem::Vector const savedIterate( unknown );
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 
@@ -10504,6 +10880,29 @@ namespace
 				unknown = savedIterate;
 			}
 
+			/*
+			 * THE EXTERIOR COLUMNS GO TO THE DEVICE ONCE, HERE, AND STAY.
+			 *
+			 * They are constant for the solve and are right-hand sides of every
+			 * Newton step's ArrayMult(), which copies each into a scratch
+			 * BlockVector through an alias of the column. An alias takes its
+			 * base's flags when it is made, so a column that is only host-valid
+			 * is copied on the host and the gather kernel then uploads the
+			 * copy: ten columns a Newton step on `machine-f-diiid`, every step.
+			 * Uploaded once and left valid on both sides, the copy runs on the
+			 * device from the device copy. Attributed to phase B: a constant of
+			 * the solve is configuration, not the iterate crossing. M-238.
+			 */
+			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			{
+				PhaseScope const residency( Phase::Upload );
+				for ( mfem::Vector &c : exteriorColumns )
+				{
+					c.UseDevice( true );
+					countedDeviceRead( c, __LINE__ );
+				}
+			}
+
 			fieldResidual( unknown, s, residual );
 		}
 
@@ -10524,16 +10923,9 @@ namespace
 
 		/// T_m = ( transmission integral of x )_m + blockEntry( m ) a_m
 		///       - int_Gamma ( q_coil . nu ) C_m dGamma.
-		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
+		/// T_m given `row_m . state`, which is everything after the dot.
+		auto transmissionFromDot = [ & ]( int mode, double total )
 		{
-			LegTimer const timer( profile.constraintSeconds,
-			                      profile.constraintCpuSeconds,
-			                      profile.constraintCalls );
-			// The row is stored on its support alone, and the gather restricts
-			// the state to the same indices in the same ascending order -- so
-			// the sum below has the same terms in the same sequence as the walk
-			// over all n it replaces, and the answer is bit-identical.
-			double total = transmissionRows.dot( mode, state, transmissionGather );
 			/*
 			 * THE MINUS IS DERIVED AND THEN TESTED, in that order, because this
 			 * file records the transmission row's sign going wrong once already
@@ -10582,10 +10974,59 @@ namespace
 			         *exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ];
 		};
 
+		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
+		{
+			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCpuSeconds,
+			                      profile.constraintCalls );
+			// The row is stored on its support alone, and the gather restricts
+			// the state to the same indices in the same ascending order -- so
+			// the sum below has the same terms in the same sequence as the walk
+			// over all n it replaces, and the answer is bit-identical.
+			return transmissionFromDot(
+				mode, transmissionRows.dot( mode, state, transmissionGather ) );
+		};
+
+		/*
+		 * EVERY MODE AT ONCE, WHICH IS HOW THE DEVICE ROUTE WANTS IT.
+		 *
+		 * The gather above opens with `v.HostRead()`, so one mode's constraint
+		 * brings the whole state over -- 160 of the run's host reads of the
+		 * iterate were this line ([M-232](../MEASUREMENTS.md)'s count, by
+		 * watching the iterate's buffer). meq::DeviceRows does every row against
+		 * the state in one launch, bit-identical to CompressedRows::dot() by its
+		 * own contract, and `nModes` doubles come back.
+		 */
+		mfem::Vector transmissionDotsState;
+		auto transmissionAll = [ & ]( mfem::Vector const &state,
+		                              std::vector<double> &out )
+		{
+			out.assign( static_cast<std::size_t>( nModes ), 0.0 );
+			if ( nModes > 0 && iterateIsResident( state ) )
+			{
+				LegTimer const timer( profile.constraintSeconds,
+				                      profile.constraintCpuSeconds,
+				                      profile.constraintCalls );
+				if ( transmissionRowsDevice.valid()
+				     && transmissionRowsDevice.rowCount() == nModes
+				     && transmissionRowsDevice.dotAll( state, transmissionDotsState ) )
+				{
+					++iterateDeviceTaken;
+					countedHostRead( transmissionDotsState, __LINE__ );
+					for ( int mode = 0; mode < nModes; ++mode )
+						out[ static_cast<std::size_t>( mode ) ] = transmissionFromDot(
+							mode, transmissionDotsState( mode ) );
+					return;
+				}
+				++iterateDeviceDeclined;
+			}
+			for ( int mode = 0; mode < nModes; ++mode )
+				out[ static_cast<std::size_t>( mode ) ] =
+					transmissionConstraint( state, mode );
+		};
+
 		std::vector<double> transmission( static_cast<std::size_t>( nModes ), 0.0 );
-		for ( int mode = 0; mode < nModes; ++mode )
-			transmission[ static_cast<std::size_t>( mode ) ] =
-				transmissionConstraint( unknown, mode );
+		transmissionAll( unknown, transmission );
 
 		// c at the starting iterate, computed whatever the coupling: it is both
 		// the first step's column and the scale gamma. gamma converts a
@@ -10675,48 +11116,83 @@ namespace
 		 */
 		double reference = 0.0;
 		{
-			// A COPY CONSTRUCTION IS A RAW HOST READ -- see the note at the
-			// other `mfem::Vector`-from-`unknown` in this function.
-			countedHostRead( unknown, __LINE__ );
-			mfem::Vector coldState( unknown );
 			/*
-			 * AND THE COPY NEEDS ITS OWN FUNNEL, WHICH IS M-205 ONE LEVEL OUT
-			 * AND WAS DORMANT UNTIL THE AXIS CONSTRAINT STOPPED DOWNLOADING THE
-			 * ITERATE.
+			 * THE COLD STATE: the iterate with everything but its essential
+			 * trace values zeroed. Two routes to the same doubles.
 			 *
-			 * The line above funnels the SOURCE, which is what M-205's sweep
-			 * installed and which makes the COPY CONSTRUCTOR's read safe. It
-			 * does nothing whatever for the DESTINATION:
-			 * `mfem::Vector::Vector( Vector const & )` propagates `UseDevice()`
-			 * from its source and copies device-to-device when the source has a
-			 * live device copy, so `coldState` is born **device-valid with its
-			 * host page protected** -- and the three raw loops below write it.
-			 *
-			 * ***FUNNELLING THE SOURCE OF A COPY DOES NOT FUNNEL THE COPY.***
-			 * The raw-read sweep asked *is this read funnelled* of every copy
-			 * construction it found and gave the right answer to the wrong
-			 * question at this one -- the same shape as M-187's twelve sites,
-			 * where a sync on the base could not see data still on the alias.
-			 *
-			 * **IT WAS UNREACHABLE UNTIL A FUNNEL WAS REMOVED**, which is the
-			 * part worth keeping. `locateAxisPoint()`'s `countedHostRead( state )`
-			 * ran before this on every path, so `unknown` was host-valid here and
-			 * the copy took the host route. That is M-130's *ordering has
-			 * protected it so far* for the third time, and the first time it was
-			 * DELETING a funnel rather than adding a configuration that exposed
-			 * the next one. `mfem::Device( "debug" )` named it on the first run.
-			 *
-			 * ReadWrite and not Write: the loops overwrite the Darcy block and
-			 * the non-essential trace, and every other entry must keep the value
-			 * it was copied with. HostWrite()'s contents are undefined.
+			 * Under a resident iterate the copy-then-mask below would bring the
+			 * whole state over to zero most of it -- three of [M-232]'s
+			 * transfers, one per solve. The device route starts from zero
+			 * where the iterate is and copies the essential entries across,
+			 * which leaves the same vector without either copy touching the
+			 * host. The list is a property of the essential boundary, not of
+			 * the iterate, so it is built here on the host from `essential`.
 			 */
-			countedHostReadWrite( coldState, __LINE__ );
 			int const traceBase = blockOffsets[ 2 ];
-			for ( int i = 0; i < traceBase; ++i )
-				coldState( i ) = 0.0;
-			for ( int i = traceBase; i < n; ++i )
-				if ( !essential[ i - traceBase ] )
-					coldState( i ) = 0.0;
+			auto coldFrom = [ & ]() -> mfem::Vector
+			{
+				if ( iterateIsResident( unknown ) )
+				{
+					mfem::Array<int> keep;
+					keep.UseDevice( true );
+					for ( int i = traceBase; i < n; ++i )
+						if ( essential[ i - traceBase ] )
+							keep.Append( i );
+					mfem::Vector device( n );
+					device.UseDevice( true );
+					device = 0.0;
+					if ( copyEntriesOnDevice( unknown, keep, device ) )
+					{
+						++iterateDeviceTaken;
+						return device;
+					}
+					++iterateDeviceDeclined;
+				}
+
+				// A COPY CONSTRUCTION IS A RAW HOST READ -- see the note at the
+				// other `mfem::Vector`-from-`unknown` in this function.
+				countedHostRead( unknown, __LINE__ );
+				mfem::Vector host( unknown );
+				/*
+				 * AND THE COPY NEEDS ITS OWN FUNNEL, WHICH IS M-205 ONE LEVEL OUT
+				 * AND WAS DORMANT UNTIL THE AXIS CONSTRAINT STOPPED DOWNLOADING THE
+				 * ITERATE.
+				 *
+				 * The line above funnels the SOURCE, which is what M-205's sweep
+				 * installed and which makes the COPY CONSTRUCTOR's read safe. It
+				 * does nothing whatever for the DESTINATION:
+				 * `mfem::Vector::Vector( Vector const & )` propagates `UseDevice()`
+				 * from its source and copies device-to-device when the source has a
+				 * live device copy, so `coldState` is born **device-valid with its
+				 * host page protected** -- and the three raw loops below write it.
+				 *
+				 * ***FUNNELLING THE SOURCE OF A COPY DOES NOT FUNNEL THE COPY.***
+				 * The raw-read sweep asked *is this read funnelled* of every copy
+				 * construction it found and gave the right answer to the wrong
+				 * question at this one -- the same shape as M-187's twelve sites,
+				 * where a sync on the base could not see data still on the alias.
+				 *
+				 * **IT WAS UNREACHABLE UNTIL A FUNNEL WAS REMOVED**, which is the
+				 * part worth keeping. `locateAxisPoint()`'s `countedHostRead( state )`
+				 * ran before this on every path, so `unknown` was host-valid here and
+				 * the copy took the host route. That is M-130's *ordering has
+				 * protected it so far* for the third time, and the first time it was
+				 * DELETING a funnel rather than adding a configuration that exposed
+				 * the next one. `mfem::Device( "debug" )` named it on the first run.
+				 *
+				 * ReadWrite and not Write: the loops overwrite the Darcy block and
+				 * the non-essential trace, and every other entry must keep the value
+				 * it was copied with. HostWrite()'s contents are undefined.
+				 */
+				countedHostReadWrite( host, __LINE__ );
+				for ( int i = 0; i < traceBase; ++i )
+					host( i ) = 0.0;
+				for ( int i = traceBase; i < n; ++i )
+					if ( !essential[ i - traceBase ] )
+						host( i ) = 0.0;
+				return host;
+			};
+			mfem::Vector coldState = coldFrom();
 
 			mfem::Vector coldResidual( n );
 			fieldResidual( coldState, s, coldResidual );
@@ -10762,9 +11238,7 @@ namespace
 				plasmaSeedElement = -1;
 			}
 			std::vector<double> coldModes( static_cast<std::size_t>( nModes ), 0.0 );
-			for ( int mode = 0; mode < nModes; ++mode )
-				coldModes[ static_cast<std::size_t>( mode ) ] =
-					transmissionConstraint( coldState, mode );
+			transmissionAll( coldState, coldModes );
 			// XP-3's two constraints are EXACTLY ZERO here and are not computed:
 			// coldState zeroes the flux and potential blocks outright, so q_h
 			// vanishes identically and q_h( x ) = 0 wherever x is. They are
@@ -11328,9 +11802,9 @@ namespace
 			 * `DeviceIsValid()` of the columns, and the funnel is what makes
 			 * that false -- so asking after the flush can only ever answer no,
 			 * which is a cycle and not a measurement. What CAN be asked
-			 * beforehand is whether the device route will be ELIGIBLE: the
-			 * mirrors, the row counts, and `nBorderTotal > 1`, none of which
-			 * depend on where any data is.
+			 * beforehand is whether the device route will be ELIGIBLE: a
+			 * Device, and the mirrors for whichever compressed rows exist,
+			 * none of which depend on where any data is.
 			 *
 			 * Set false here so every flush before the last -- the one the
 			 * differenced `psi_bnd` column forces, which has a residual
@@ -11391,6 +11865,28 @@ namespace
 				double const c0 = profileCpuNow();
 				double const traceBefore = profile.traceSolveSeconds;
 				double const traceCpuBefore = profile.traceSolveCpuSeconds;
+				/*
+				 * THE OUTPUTS ARE MADE DEVICE-VALID BEFORE THE SOLVE WRITES THEM,
+				 * OR THE SOLVE DOWNLOADS THEM.
+				 *
+				 * `DarcyNPCSolver::ArrayMult()` writes each column's three blocks
+				 * on the device -- NPCRecover is a kernel -- through a
+				 * BlockVector over `Y[ j ]`, then calls `SyncFromBlocks()`, which
+				 * makes every BLOCK match its BASE. A base that is host-valid,
+				 * which a freshly declared `mfem::Vector v( n )` is, therefore
+				 * copies every block down: fourteen columns a Newton step on
+				 * `machine-f-diiid`, 140 MB over its run, invisible to MEQ's own
+				 * counter because it happens inside the library ([M-237]).
+				 * `Write()` costs nothing -- it allocates the device copy if
+				 * needed and marks it the live one -- and the blocks then have
+				 * nothing to catch up to.
+				 */
+				if ( keepColumnsResident )
+					for ( int i = 0; i < borderOut.Size(); ++i )
+					{
+						borderOut[ i ]->UseDevice( true );
+						borderOut[ i ]->Write();
+					}
 				npcLinear.ArrayMult( borderRhs, borderOut );
 				profile.npcTraversalSeconds += profileNow() - t0
 					- ( profile.traceSolveSeconds - traceBefore );
@@ -11398,36 +11894,12 @@ namespace
 					- ( profile.traceSolveCpuSeconds - traceCpuBefore );
 				++profile.npcTraversalCalls;
 				/*
-				 * THE BATCHED COLUMN SOLVE'S FLUSH, AND IT IS N + 4 CROSSINGS
-				 * PER STEP -- the largest single group the instrument sees,
-				 * and exactly what meq::DeviceRows::dotColumns() exists to
-				 * remove: with the bordered fill done device-side these
-				 * columns never need to be on the host at all.
-				 */
-				/*
-				 * WHERE THE COLUMNS ACTUALLY ARE WHEN THEY GET HERE, WHICH IS
-				 * THE QUESTION DEVICE-PLAN.md ITEM 4's GATE TURNS ON AND WHICH
-				 * NOTHING HAD ASKED.
-				 *
-				 * The comment above says `flush()` brings the columns to the
-				 * host, and that reads as though this funnel is the CAUSE --
-				 * so item 4's `columnIsResident()` gate looks like something
-				 * the dense elimination is holding shut. **It is not.**
-				 * Measured on `machine-f-diiid` under `--device cuda`, all
-				 * 168 columns of a twelve-step run arrive here `H+ D-`:
-				 * host-valid and device-INVALID, so they were never written on
-				 * the device at all and the funnel below moves nothing --
-				 * 0 transfers at this site, against the run's 3.
-				 * [M-227](../MEASUREMENTS.md).
-				 *
-				 * `NPCReduce` and `NPCRecover` are batched kernels here and
-				 * still the output is host-only, because the TRACE SOLVE in
-				 * between them is PARDISO and PARDISO is a host solver. **So
-				 * item 4's data gate cannot open until item 6 does**, and the
-				 * dense elimination is not what stands in the way: it is
-				 * `( N + 4 )²` scalars, and the two full-size operations after
-				 * it -- `Vector::Add()` and `Norml2()` -- are device-aware
-				 * already.
+				 * THE COLUMNS LEAVE THE SOLVE WHERE IT WROTE THEM. With the
+				 * outputs device-valid going in, `ArrayMult()`'s
+				 * `SyncFromBlocks()` has nothing to download, and the dense fill
+				 * below contracts them on the device. Without a Device, or with
+				 * keepColumnsResident false, they are host vectors exactly as
+				 * before and the funnel below moves nothing. M-237, M-238.
 				 */
 				if ( stageChecksumWanted() )
 					for ( int i = 0; i < borderOut.Size(); ++i )
@@ -11523,11 +11995,19 @@ namespace
 			};
 			std::vector<double> rowGatherScratch;
 
-			// b_i . v, for each border row.
+			/*
+			 * b_i . v, for each border row.
+			 *
+			 * **THIS DISPATCH HAS A DEVICE TWIN AND THE TWO MUST MOVE
+			 * TOGETHER.** The dense fill's device route builds a meq::RowView
+			 * per row by the same branches in the same order -- psi_ax,
+			 * psi_bnd, XP-3's two, the current, the modes -- with this
+			 * function's signs folded into its weights. A row added here and
+			 * not there is a border the device fill contracts against the
+			 * wrong weights, and DeviceParity's forced arm is what says so.
+			 */
 			auto rowDot = [ & ]( int i, mfem::Vector const &v,
-			                     BorderGather const *pre = nullptr,
-			                     mfem::Vector const *transmissionPre = nullptr,
-			                     mfem::Vector const *currentPre = nullptr )
+			                     BorderGather const *pre = nullptr )
 			{
 				/*
 				 * AND THE FUNNEL SYNCS TOO, WHICH IS BELT AND BRACES AND IS
@@ -11569,7 +12049,7 @@ namespace
 					return total;
 				}
 				if ( boundaryFluxIsUnknown && i == boundaryIndex )
-					return coupled ? -limiterValue( v ) : 0.0;
+					return coupled ? -limiterValue( v, false ) : 0.0;
 				if ( isXPointRow( i ) )
 				{
 					/*
@@ -11603,39 +12083,12 @@ namespace
 					// plasma fill reached and is exactly zero everywhere else,
 					// so the sum below has the same terms in the same ascending
 					// order as the walk over all n it replaces.
-					// The device route, at the one branch it belongs to;
-					// see the transmission arm below for why the dispatch is
-					// not duplicated in the caller.
-					// WIDENED EXPLICITLY. `rowDot()`'s other arms return
-					// `double` -- CompressedRows::dot() is MEQ's own and is
-					// MFEM-free -- while an mfem::Vector yields `real_t`. In
-					// the double build those are the same type and the
-					// compiler says nothing; under MFEM_PRECISION = single the
-					// lambda's return type stops deducing. MEASUREMENTS.md
-					// M-217.
-					if ( currentPre != nullptr )
-						return static_cast<double>( ( *currentPre )( 0 ) );
 					if ( pre )
 						return currentRows.dot( 0, pre->current );
 					return currentRows.dot( 0, v, rowGatherScratch );
 				}
 
 				int const mode = i - nBorders;
-				/*
-				 * THE DEVICE ROUTE, AND THE DISPATCH STAYS IN ONE PLACE.
-				 *
-				 * The caller cannot tell a transmission row from the four
-				 * others without re-implementing every branch above, and a
-				 * second copy of this dispatch is exactly the kind of thing
-				 * that goes wrong silently when a border row is added. So the
-				 * precomputed vector is passed IN and consulted here, at the
-				 * one branch it belongs to. It is bit-identical to the line
-				 * below it -- meq::DeviceRows' contract, asserted on the
-				 * double in tests/unit/DeviceRowsTests.cpp.
-				 */
-				// Widened explicitly; see the current arm above.
-				if ( transmissionPre != nullptr )
-					return static_cast<double>( ( *transmissionPre )( mode ) );
 				if ( pre )
 					return transmissionRows.dot( mode, pre->transmission );
 				return transmissionRows.dot( mode, v, rowGatherScratch );
@@ -11835,14 +12288,13 @@ namespace
 			 * `columnIsResident()`'s question below, and a no there falls back
 			 * to the host gathers, which funnel for themselves.
 			 *
-			 * `nBorderTotal > 1` because the one-border branch contracts
-			 * through the HOST `rowDot()` with no device operand at all, and
-			 * leaving its columns on the device would hand it a raw read.
+			 * Every border size, the one-row one included: both branches of
+			 * the elimination read the device table when the columns arrive
+			 * device-valid, and fall back to the host `rowDot()`, which
+			 * funnels for itself, when they do not.
 			 */
 			keepColumnsResident =
-				nBorderTotal > 1
-				&& ( transmissionRows.rowCount() > 0
-				     || currentRows.rowCount() > 0 )
+				mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
 				&& ( transmissionRows.rowCount() == 0
 				     || transmissionRowsDevice.valid() )
 				&& ( currentRows.rowCount() == 0
@@ -11862,10 +12314,257 @@ namespace
 			                           profile.borderSolveCpuSeconds,
 			                           profile.borderSolveCalls );
 
+			/*
+			 * THE DOTS ON THE DEVICE, AND WHY THEY REPLACE THE GATHERS RATHER
+			 * THAN SITTING BESIDE THEM -- DEVICE-PLAN.md section 3.3, item 4,
+			 * whose first route was one launch per column per row set.
+			 *
+			 * **BEFORE THE GATHERS AND NOT AFTER, WHICH IS THE WHOLE
+			 * POINT.** `CompressedRows::gather()` opens with
+			 * `v.HostRead()`, so a gather left in place brings the entire
+			 * solution block to the host -- 698 KB on the shipped machine
+			 * case -- and the launches below then buy nothing while
+			 * costing a second traversal. Measured with the gathers still
+			 * running, over the same whole run: transfers went from 3 to
+			 * 17.7 and bytes from 0.888 MB to 15.1 MB. *A device route
+			 * added in front of the host route it replaces is strictly
+			 * worse than either.*
+			 *
+			 * **AND BOTH ROW SETS MOVE TOGETHER OR NEITHER DOES.** They
+			 * have different supports and so need separate mirrors, but
+			 * they read the SAME columns: one gather left on the host for
+			 * either set pays the full crossing and takes the other's win
+			 * with it.
+			 *
+			 * All or nothing on refusals for the same reason, and the
+			 * results are funnelled once here so the dense arithmetic
+			 * below stays exactly the host arithmetic it was. The read is
+			 * `rowCount()` doubles against the block's 698 KB.
+			 */
+			/*
+			 * EVERY ROW AGAINST EVERY COLUMN, ON THE DEVICE, IN ONE LAUNCH --
+			 * when the columns are there, which flush() arranges whenever
+			 * keepColumnsResident is set.
+			 *
+			 * Each border row is a sum from zero of weight times entry in a
+			 * fixed order, so all of them are meq::RowView: the transmission
+			 * and current rows from their mirrors, and the four short ones --
+			 * psi_ax's, psi_bnd's, XP-3's two -- gathered here into one small
+			 * table each fill. Ahead of the one-row and the dense branch alike:
+			 * a fixed-boundary case's border is psi_ax alone, its columns are
+			 * `y` and `z`, and leaving them on the host left every gate on that
+			 * case shut. XP-3's `total -= w v` folds into its weights,
+			 * exactly -- IEEE subtraction is addition of the negation -- and
+			 * psi_bnd's `-limiterValue( v )` keeps its weights and negates the
+			 * finished sum, because the two part on an exact zero: `-( +0 )`
+			 * is `-0` and a sum of negated terms from `+0` is `+0`. The
+			 * probe that first compared this fill with rowDot() found exactly
+			 * that, twice a step. The X-point columns are zero
+			 * vectors, whose dot rowDot() returns as exactly +0, so they are
+			 * not launched at all. One table of `( N + 4 ) x ( N + 5 )`
+			 * doubles comes back, and the dense arithmetic below is the host
+			 * arithmetic it always was.
+			 */
+			/*
+			 * AND THE ROUTE SELECTS ITSELF ON WHERE THE COLUMNS ALREADY
+			 * ARE, WHICH IS THE MEASUREMENT AND NOT A PREFERENCE.
+			 *
+			 * A kernel wants its operand on the device. Today the columns
+			 * are on the HOST, so taking this route unconditionally pushes
+			 * each one up, 698 KB at a time. Measured on `machine-f-diiid`
+			 * over the WHOLE RUN, which is twelve Newton steps:
+			 *
+			 *   host gathers, as shipped                3 transfers
+			 *   device dots in FRONT of the gathers  17.7 transfers
+			 *   device dots INSTEAD of the gathers   33.1 transfers
+			 *
+			 * -- 0.888 MB against 15.1 MB against 55.1 MB, so the route
+			 * costs **11x in transfers and 62x in bytes**. The route is
+			 * not wrong; the operand is in the wrong place, and no amount
+			 * of kernel makes an h2d of the state cheaper than a gather
+			 * from it. [M-208](../MEASUREMENTS.md).
+			 *
+			 * **THE UNITS ARE WHOLE-RUN AND NOT PER-STEP, WHICH IS WORTH
+			 * SAYING BECAUSE THE BASELINE HAS BEEN READ AS A RATE.** The
+			 * shipped row is 3 transfers and 0.888 MB for the run --
+			 * **0.2 transfers a Newton step** against 893.2 host reads a
+			 * step, which is the whole point of counting transfers rather
+			 * than reads. The ratios above are unaffected, both sides
+			 * being counted the same way.
+			 * [M-223](../MEASUREMENTS.md).
+			 *
+			 * **AND THEY WERE ON THE HOST BECAUSE THE SOLVE DOWNLOADED THEM,
+			 * NOT BECAUSE THEY WERE BORN THERE**, which is what
+			 * [M-227](../MEASUREMENTS.md) concluded from reading them
+			 * `H+ D-` at the flush. `ArrayMult()`'s `SyncFromBlocks()`
+			 * copies every block of a host-valid output down -- M-237,
+			 * found with a breakpoint on MFEM's own copy, which the
+			 * crossing counter cannot see. flush() now makes the outputs
+			 * device-valid first. *A flag read after a library call
+			 * reports where the call LEFT the data, not where it made it.*
+			 *
+			 * So the gate is `DeviceIsValid()` on the columns themselves.
+			 * Today that is false and the host path runs, bit for bit as
+			 * before; under a resident step the columns never come down
+			 * and the same line turns the route on with nothing else
+			 * changing. **This is a predicate about the DATA and not a
+			 * key about the build**, which is the only form that can be
+			 * right both before and after residency arrives.
+			 */
+			auto columnIsResident = [ & ]( mfem::Vector const &v )
+			{
+				mfem::Memory<mfem::real_t> const &m = v.GetMemory();
+				return m.DeviceIsValid() && !m.HostIsValid();
+			};
+			bool deviceDots = keepColumnsResident && columnIsResident( y );
+			for ( int j = 0; deviceDots && j < nBorderTotal; ++j )
+				deviceDots = isXPointRow( j ) || columnIsResident( columnZ( j ) );
+
+			// The short rows' device table, rebuilt per fill: the contact and
+			// the X-point move with the iterate.
+			std::vector<int> shortIndices;
+			std::vector<mfem::real_t> shortWeights;
+			std::vector<int> shortStart( static_cast<std::size_t>( nBorderTotal ), -1 );
+			std::vector<int> shortCount( static_cast<std::size_t>( nBorderTotal ), 0 );
+			std::vector<int> shortNegate( static_cast<std::size_t>( nBorderTotal ), 0 );
+			auto addShortRow = [ & ]( int i, mfem::Array<int> const &dofs,
+			                          int offset, mfem::Vector const &weights,
+			                          int count, mfem::real_t sign,
+			                          bool negateSum )
+			{
+				shortNegate[ static_cast<std::size_t>( i ) ] = negateSum ? 1 : 0;
+				countedHostRead( dofs, __LINE__ );
+				countedHostRead( weights, __LINE__ );
+				shortStart[ static_cast<std::size_t>( i ) ] =
+					static_cast<int>( shortIndices.size() );
+				for ( int k = 0; k < count; ++k )
+				{
+					shortIndices.push_back( offset + dofs[ k ] );
+					shortWeights.push_back( sign*weights( k ) );
+				}
+				shortCount[ static_cast<std::size_t>( i ) ] = count;
+			};
+
+			mfem::Array<RowView> rowViews;
+			mfem::Array<int> shortIndexTable;
+			mfem::Vector shortWeightTable;
+			mfem::Vector dots;
+			if ( deviceDots )
+			{
+				mfem::Vector const unitWeight( { mfem::real_t( 1 ) } );
+				mfem::Array<int> nearest( { boundaryDof } );
+				for ( int i = 0; i < nBorderTotal; ++i )
+				{
+					// rowDot()'s dispatch, branch for branch.
+					if ( i == 0 )
+						addShortRow( i, borderDofs, 0, border,
+						             borderDofs.Size(), 1.0, false );
+					else if ( boundaryFluxIsUnknown && i == boundaryIndex )
+					{
+						// -limiterValue( v ): the sum, THEN the sign, so the
+						// flag and not the weights -- see meq::RowView.
+						if ( !coupled )
+							shortStart[ static_cast<std::size_t>( i ) ] =
+								static_cast<int>( shortIndices.size() );
+						else if ( limiterConstraintChoice
+						          == LimiterConstraint::NearestDof )
+							addShortRow( i, nearest, 0, unitWeight, 1, 1.0,
+							             true );
+						else
+							addShortRow( i, limiterDofs, blockOffsets[ 1 ],
+							             limiterShape,
+							             std::min( limiterDofs.Size(),
+							                       limiterShape.Size() ),
+							             1.0, true );
+					}
+					else if ( isXPointRow( i ) )
+					{
+						mfem::Array<int> const &dofs =
+							( i == xPointIndex ) ? xFluxDofsR : xFluxDofsZ;
+						// `total -= w v`, which IS `total += ( -w ) v`.
+						addShortRow( i, dofs, 0, xFluxShape,
+						             std::min( dofs.Size(), xFluxShape.Size() ),
+						             -1.0, false );
+					}
+				}
+
+				// HostWrite() before the fill and the upload after it: these
+				// are fresh, so M-211 cannot bite, and the habit costs nothing.
+				shortIndexTable.SetSize(
+					std::max<int>( 1, static_cast<int>( shortIndices.size() ) ) );
+				shortIndexTable.UseDevice( true );
+				shortWeightTable.SetSize( shortIndexTable.Size() );
+				shortWeightTable.UseDevice( true );
+				{
+					int *const hostIndices = shortIndexTable.HostWrite();
+					mfem::real_t *const hostWeights = shortWeightTable.HostWrite();
+					hostIndices[ 0 ] = 0;
+					hostWeights[ 0 ] = 0.0;
+					for ( std::size_t k = 0; k < shortIndices.size(); ++k )
+					{
+						hostIndices[ k ] = shortIndices[ k ];
+						hostWeights[ k ] = shortWeights[ k ];
+					}
+				}
+				int const *const deviceIndices =
+					countedDeviceRead( shortIndexTable, __LINE__ );
+				mfem::real_t const *const deviceWeights =
+					countedDeviceRead( shortWeightTable, __LINE__ );
+
+				rowViews.SetSize( nBorderTotal );
+				rowViews.UseDevice( true );
+				{
+					RowView *const host = rowViews.HostWrite();
+					for ( int i = 0; i < nBorderTotal; ++i )
+					{
+						std::size_t const at = static_cast<std::size_t>( i );
+						if ( shortStart[ at ] >= 0 )
+							host[ i ] = RowView{ deviceIndices + shortStart[ at ],
+							                     deviceWeights + shortStart[ at ],
+							                     shortCount[ at ],
+							                     shortNegate[ at ] };
+						else if ( currentIsUnknown && i == currentIndex )
+							host[ i ] = currentRowsDevice.row( 0 );
+						else
+							host[ i ] = transmissionRowsDevice.row( i - nBorders );
+					}
+				}
+
+				// Column 0 is y; then every z_j that is not an X-point's zero.
+				mfem::Array<mfem::real_t const *> columnPointers;
+				columnPointers.UseDevice( true );
+				columnPointers.Append( y.Read() );
+				for ( int j = 0; j < nBorderTotal; ++j )
+					if ( !isXPointRow( j ) )
+						columnPointers.Append( columnZ( j ).Read() );
+
+				deviceDots = dotRowsAgainstColumnsOnDevice( rowViews,
+				                                            columnPointers,
+				                                            dots );
+				if ( deviceDots )
+					countedHostRead( dots, __LINE__ );
+			}
+			borderDotsOnDevice = deviceDots;
+
+			// The table's entry for row i against column 0 ( y ) or z_j.
+			auto deviceDot = [ & ]( int i, int column ) -> double
+			{
+				return static_cast<double>( dots( i + nBorderTotal*column ) );
+			};
+			std::vector<int> columnSlot( static_cast<std::size_t>( nBorderTotal ), -1 );
+			{
+				int slot = 1;
+				for ( int j = 0; j < nBorderTotal; ++j )
+					if ( !isXPointRow( j ) )
+						columnSlot[ static_cast<std::size_t>( j ) ] = slot++;
+			}
+
 			if ( nBorderTotal == 1 )
 			{
-				double const borderDotY = rowDot( 0, y );
-				double const borderDotZ = rowDot( 0, z );
+				double const borderDotY = deviceDots ? deviceDot( 0, 0 )
+				                                     : rowDot( 0, y );
+				double const borderDotZ = deviceDots ? deviceDot( 0, 1 )
+				                                     : rowDot( 0, z );
 				double const denominator = corner - borderDotZ;
 				if ( denominator == 0.0 || !std::isfinite( denominator ) )
 					throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in psi_ax" );
@@ -11889,138 +12588,13 @@ namespace
 				std::vector<BorderGather> gatheredZ(
 					static_cast<std::size_t>( nBorderTotal ) );
 
-				/*
-				 * THE COMPRESSED ROWS' DOTS, ON THE DEVICE, ONE LAUNCH PER
-				 * COLUMN PER ROW SET -- DEVICE-PLAN.md section 3.3, item 4.
-				 *
-				 * **BEFORE THE GATHERS AND NOT AFTER, WHICH IS THE WHOLE
-				 * POINT.** `CompressedRows::gather()` opens with
-				 * `v.HostRead()`, so a gather left in place brings the entire
-				 * solution block to the host -- 698 KB on the shipped machine
-				 * case -- and the launches below then buy nothing while
-				 * costing a second traversal. Measured with the gathers still
-				 * running, over the same whole run: transfers went from 3 to
-				 * 17.7 and bytes from 0.888 MB to 15.1 MB. *A device route
-				 * added in front of the host route it replaces is strictly
-				 * worse than either.*
-				 *
-				 * **AND BOTH ROW SETS MOVE TOGETHER OR NEITHER DOES.** They
-				 * have different supports and so need separate mirrors, but
-				 * they read the SAME columns: one gather left on the host for
-				 * either set pays the full crossing and takes the other's win
-				 * with it.
-				 *
-				 * All or nothing on refusals for the same reason, and the
-				 * results are funnelled once here so the dense arithmetic
-				 * below stays exactly the host arithmetic it was. The read is
-				 * `rowCount()` doubles against the block's 698 KB.
-				 */
-				std::vector<mfem::Vector> transmissionDots;
-				std::vector<mfem::Vector> currentDots;
-				mfem::Vector transmissionDotsY, currentDotsY;
-				bool const wantTransmission = transmissionRows.rowCount() > 0;
-				bool const wantCurrent = currentRows.rowCount() > 0;
-				/*
-				 * AND THE ROUTE SELECTS ITSELF ON WHERE THE COLUMNS ALREADY
-				 * ARE, WHICH IS THE MEASUREMENT AND NOT A PREFERENCE.
-				 *
-				 * A kernel wants its operand on the device. Today the columns
-				 * are on the HOST, so taking this route unconditionally pushes
-				 * each one up, 698 KB at a time. Measured on `machine-f-diiid`
-				 * over the WHOLE RUN, which is twelve Newton steps:
-				 *
-				 *   host gathers, as shipped                3 transfers
-				 *   device dots in FRONT of the gathers  17.7 transfers
-				 *   device dots INSTEAD of the gathers   33.1 transfers
-				 *
-				 * -- 0.888 MB against 15.1 MB against 55.1 MB, so the route
-				 * costs **11x in transfers and 62x in bytes**. The route is
-				 * not wrong; the operand is in the wrong place, and no amount
-				 * of kernel makes an h2d of the state cheaper than a gather
-				 * from it. [M-208](../MEASUREMENTS.md).
-				 *
-				 * **THE UNITS ARE WHOLE-RUN AND NOT PER-STEP, WHICH IS WORTH
-				 * SAYING BECAUSE THE BASELINE HAS BEEN READ AS A RATE.** The
-				 * shipped row is 3 transfers and 0.888 MB for the run --
-				 * **0.2 transfers a Newton step** against 893.2 host reads a
-				 * step, which is the whole point of counting transfers rather
-				 * than reads. The ratios above are unaffected, both sides
-				 * being counted the same way.
-				 * [M-223](../MEASUREMENTS.md).
-				 *
-				 * **AND THEY ARE ON THE HOST BECAUSE THEY WERE BORN THERE,
-				 * NOT BECAUSE `flush()` FETCHED THEM** --
-				 * [M-227](../MEASUREMENTS.md). Probed at the flush, all 168
-				 * columns of that run read `H+ D-`: never on the device.
-				 * `NPCReduce` and `NPCRecover` are both kernels, and the trace
-				 * solve between them is PARDISO, which is a host solver -- so
-				 * **this gate waits on item 6 and on nothing of the dense
-				 * arithmetic below.** *A leg's residency is a property of what
-				 * produces its data, not of what consumes it.*
-				 *
-				 * So the gate is `DeviceIsValid()` on the columns themselves.
-				 * Today that is false and the host path runs, bit for bit as
-				 * before; under a resident step the columns never come down
-				 * and the same line turns the route on with nothing else
-				 * changing. **This is a predicate about the DATA and not a
-				 * key about the build**, which is the only form that can be
-				 * right both before and after residency arrives.
-				 */
-				auto columnIsResident = [ & ]( mfem::Vector const &v )
-				{
-					mfem::Memory<mfem::real_t> const &m = v.GetMemory();
-					return m.DeviceIsValid() && !m.HostIsValid();
-				};
-				bool deviceDots =
-					( !wantTransmission || transmissionRowsDevice.valid() )
-					&& ( !wantCurrent || currentRowsDevice.valid() )
-					&& ( wantTransmission || wantCurrent )
-					&& columnIsResident( y );
-				for ( int j = 0; deviceDots && j < nBorderTotal; ++j )
-					deviceDots = columnIsResident( columnZ( j ) );
-				borderDotsOnDevice = deviceDots;
-
-				auto dotColumn = [ & ]( mfem::Vector const &v,
-				                        mfem::Vector &tOut,
-				                        mfem::Vector &cOut )
-				{
-					if ( wantTransmission
-					     && !transmissionRowsDevice.dotAll( v, tOut ) )
-						return false;
-					if ( wantCurrent && !currentRowsDevice.dotAll( v, cOut ) )
-						return false;
-					return true;
-				};
-
-				if ( deviceDots )
-				{
-					transmissionDots.resize(
-						static_cast<std::size_t>( nBorderTotal ) );
-					currentDots.resize(
-						static_cast<std::size_t>( nBorderTotal ) );
-					deviceDots = dotColumn( y, transmissionDotsY, currentDotsY );
-					for ( int j = 0; deviceDots && j < nBorderTotal; ++j )
-						deviceDots = dotColumn(
-							columnZ( j ),
-							transmissionDots[ static_cast<std::size_t>( j ) ],
-							currentDots[ static_cast<std::size_t>( j ) ] );
-				}
-				if ( deviceDots )
-				{
-					countedHostRead( transmissionDotsY, __LINE__ );
-					countedHostRead( currentDotsY, __LINE__ );
-					for ( mfem::Vector const &d : transmissionDots )
-						countedHostRead( d, __LINE__ );
-					for ( mfem::Vector const &d : currentDots )
-						countedHostRead( d, __LINE__ );
-				}
 
 				auto gatherFor = [ & ]( mfem::Vector const &v,
 				                        BorderGather &out )
 				{
 					// Skipped entirely on the device route: every consumer of
-					// these gathers is a dot the launches above have already
-					// done, and the gather is the crossing.
+					// these gathers is a dot the launch above has already done,
+					// and the gather is the crossing.
 					if ( deviceDots ) { return; }
 					if ( transmissionRows.rowCount() > 0 )
 						transmissionRows.gather( v, out.transmission );
@@ -12034,23 +12608,24 @@ namespace
 
 				for ( int i = 0; i < nBorderTotal; ++i )
 				{
-					right( i ) = rowDot( i, y,
-					                     deviceDots ? nullptr : &gatheredY,
-					                     deviceDots ? &transmissionDotsY
-					                                : nullptr,
-					                     deviceDots ? &currentDotsY : nullptr )
+					right( i ) = ( deviceDots ? deviceDot( i, 0 )
+					                          : rowDot( i, y, &gatheredY ) )
 					             - constraintAt( i );
 					for ( int j = 0; j < nBorderTotal; ++j )
 					{
 						std::size_t const c = static_cast<std::size_t>( j );
-						dense( i, j ) =
-							cornerEntry( i, j )
-							- rowDot( i, columnZ( j ),
-							          deviceDots ? nullptr : &gatheredZ[ c ],
-							          deviceDots ? &transmissionDots[ c ]
-							                     : nullptr,
-							          deviceDots ? &currentDots[ c ]
-							                     : nullptr );
+						double dotZ = 0.0;
+						if ( !deviceDots )
+							dotZ = rowDot( i, columnZ( j ), &gatheredZ[ c ] );
+						else if ( !isXPointRow( j ) )
+							dotZ = deviceDot( i, columnSlot[ c ] );
+						else if ( coupled && boundaryFluxIsUnknown
+						          && i == boundaryIndex )
+							// rowDot()'s value against a zero column, sign and
+							// all: every arm sums from +0 and gives +0, and the
+							// psi_bnd arm then NEGATES, which gives -0.
+							dotZ = -0.0;
+						dense( i, j ) = cornerEntry( i, j ) - dotZ;
 					}
 				}
 
@@ -12327,8 +12902,12 @@ namespace
 			 * because they are one vector -- which is the half of a line search a
 			 * trace-only operator cannot express.
 			 */
-			// A COPY CONSTRUCTION IS A RAW HOST READ -- MEASUREMENTS.md M-205.
-			countedHostRead( unknown, __LINE__ );
+			// A COPY CONSTRUCTION IS A RAW HOST READ -- MEASUREMENTS.md M-205 --
+			// unless the iterate is resident, when the copy is made where the
+			// iterate is and the funnel would be the transfer. Its only readers
+			// are the two `unknown = savedState` below, which are device-aware.
+			if ( !iterateIsResident( unknown ) )
+				countedHostRead( unknown, __LINE__ );
 			mfem::Vector const savedState( unknown );
 			double const savedS = s;
 			double const savedB = sB;
@@ -12441,9 +13020,7 @@ namespace
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 					fieldResidual( unknown, s, residual );
-					for ( int mode = 0; mode < nModes; ++mode )
-						transmission[ static_cast<std::size_t>( mode ) ] =
-							transmissionConstraint( unknown, mode );
+					transmissionAll( unknown, transmission );
 					// BOTH constraints, or the line search is blind to the one it
 					// is not told about and will happily accept a step that has
 					// wrecked psi_bnd to improve psi_ax.
@@ -12623,9 +13200,7 @@ namespace
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 				fieldResidual( unknown, s, residual );
-				for ( int mode = 0; mode < nModes; ++mode )
-					transmission[ static_cast<std::size_t>( mode ) ] =
-						transmissionConstraint( unknown, mode );
+				transmissionAll( unknown, transmission );
 			}
 
 			/*

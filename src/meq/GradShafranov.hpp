@@ -16,6 +16,7 @@
 #include "DeviceNPC.hpp"
 #include "ExteriorDtN.hpp"
 #include "PlasmaComponent.hpp"
+#include "ResidentIterate.hpp"
 #include "Source.hpp"
 
 /*
@@ -1239,14 +1240,15 @@ namespace meq
 			/**
 			 * Whether the bordered fill's row contractions ran on the device.
 			 *
-			 * **FALSE ON EVERY HOST BUILD AND, TODAY, UNDER A DEVICE TOO.**
-			 * The route exists and is bit-identical; what gates it is whether
-			 * the border's COLUMNS are still device-resident when the fill
-			 * runs, and `flush()` currently brings them to the host for the
-			 * dense elimination. Reported rather than inferred for the reason
-			 * every other route predicate here is: *a route that falls back
-			 * silently is one nobody measures.*
-			 * [M-208](../MEASUREMENTS.md).
+			 * **FALSE ON EVERY HOST BUILD, TRUE ON THE BORDERED PATH UNDER A
+			 * DEVICE.** Every border row against `y` and every backsolved
+			 * column in one launch, bit-identical to the host `rowDot()`; it
+			 * is taken whenever the columns arrive device-valid, which
+			 * `flush()` arranges for any border of more than one row. The
+			 * one-row border contracts on the host. Reported rather than
+			 * inferred for the reason every other route predicate here is:
+			 * *a route that falls back silently is one nobody measures.*
+			 * [M-208](../MEASUREMENTS.md), [M-238](../MEASUREMENTS.md).
 			 */
 			bool borderDotsRanOnDevice() const;
 
@@ -1254,6 +1256,22 @@ namespace meq
 			long axisRoutesTakenOnDevice() const;
 			/// @copydoc axisDeviceTaken
 			long axisRoutesDeclinedOnDevice() const;
+
+			/**
+			 * How many of the ITERATE's other host readers took a device route
+			 * and how many declined -- the plasma loops, the transmission and
+			 * `psi_bnd` rows, the copies. meq::DevicePlasmaLoops.
+			 *
+			 * **ZERO AND ZERO ON EVERY SHIPPED CASE TODAY**, and that is the
+			 * gate working rather than the routes missing: they are asked only
+			 * when the vector they read is device-valid and host-invalid, which
+			 * nothing yet arranges -- `MEQ_AXIS_DEVICE=force` is how they are
+			 * exercised before something does. A decline is a route that was
+			 * asked and refused, and reads as a host loop paying for it.
+			 */
+			long iterateRoutesTakenOnDevice() const;
+			/// @copydoc iterateRoutesTakenOnDevice
+			long iterateRoutesDeclinedOnDevice() const;
 			/// @}
 
 			bool batchedPotFaceAssemblyTaken() const;
@@ -1519,6 +1537,14 @@ namespace meq
 			 * thread before the element loop rather than inside it, so the mask
 			 * meq::SourceIntegrator reads under AssemblyMode::Threaded is
 			 * finished being written before any thread sees it.
+			 *
+			 * **AND UNDER A DEVICE IT CARRIES THE NEW MASK TO THE DEVICE
+			 * INTEGRAND**, whose element flags are an upload rather than a
+			 * pointer. Without that the host integrand followed the moving
+			 * support while the device one integrated the support as it was at
+			 * the operator's last rebuild: `examples/diverted-tokamak.toml`
+			 * under `--device cuda` parted from the host at the first Newton
+			 * step and settled with its axis inside a coil (M-239).
 			 */
 			void refreshPlasmaComponent( mfem::Vector const &state );
 
@@ -2282,10 +2308,39 @@ namespace meq
 			 *   `setExtension()`'s own line order integrates it EXACTLY;
 			 * * the OUTER one, over the face, does not — `a( x )`, the foot map,
 			 *   is not polynomial in `x`, and `mfem::HDGExtensionIntegrator`'s
-			 *   header says so in as many words. MFEM defaults it to `2k+2`, and
-			 *   `mfem::VectorBoundaryFluxLFIntegrator` defaults the data half to
-			 *   `2k`, both keyed to the polynomial degree rather than to how
-			 *   rough the foot map is.
+			 *   header says so in as many words. **BOTH HALVES DEFAULT TO `2k`,
+			 *   AND THAT IS NOT A COINCIDENCE** --
+			 *   `mfem::HDGExtensionIntegrator::GetFaceRule()` returns
+			 *   `2*el1.GetOrder()` and its doxygen says the value is CHOSEN to be
+			 *   `mfem::VectorBoundaryFluxLFIntegrator`'s, so two integrators left
+			 *   alone agree. Both are keyed to the polynomial degree rather than
+			 *   to how rough the foot map is, which is the real objection and
+			 *   survives.
+			 *
+			 * **AND THE TWO RULES MUST MATCH, WHICH IS A STRONGER REQUIREMENT
+			 * THAN EITHER OF THEM BEING GOOD ENOUGH.** For the exact solution the
+			 * halves SUM to the potential, which is smooth whatever the paths;
+			 * each half alone is smooth only where `a( x )` is, and `a` has a kink
+			 * inside any face whose paths are split between a corner of `Omega`
+			 * and an arc beside it. The two quadrature errors cancel only under
+			 * ONE rule. Upstream measures a disc segment with a 120-degree corner,
+			 * `K = I` and an exact datum at `n = 32`: mismatched rules give a flux
+			 * error **8 times** the no-transfer error at order 1 and **845 times**
+			 * at order 2, where a shared rule of ANY order gives 1.04 and 1.34.
+			 *
+			 * MEQ passes the same `extensionFaceOrder` to the extension and to
+			 * both data-half linear forms, and falls back to the two defaults
+			 * together, so it shares on either path. **This file recorded `2k+2`
+			 * against `2k` and therefore described MEQ's own default path as the
+			 * mismatched one** -- which, had it been true, is the configuration
+			 * above. *A claim about somebody else's default is only as fresh as
+			 * the last time it was read.*
+			 *
+			 * The latent coupling is p-adaptivity: one `mfem::IntegrationRule`
+			 * shared by hand stops matching the moment element orders vary across
+			 * `Gamma_h`, and `mfem::ExtensionDatumLFIntegrator` -- which reads the
+			 * extension's rule face by face -- is what keeps the halves together
+			 * then.
 			 *
 			 * **WHY IT MIGHT MATTER MORE THAN IT LOOKS.** A quadrature error here
 			 * is a perturbation of the DIRICHLET DATUM, and the two variables do
@@ -5334,6 +5389,76 @@ namespace meq
 			mutable long axisDeviceTaken = 0;
 			/// @copydoc axisDeviceTaken
 			mutable long axisDeviceDeclined = 0;
+
+			/**
+			 * Whether a host reader of @a state should take its device route.
+			 *
+			 * `DeviceIsValid() && !HostIsValid()` -- the axis route's gate, and
+			 * for its reason: `H- D+` is the only state in which a device route
+			 * saves a transfer rather than renaming one ([M-232](../MEASUREMENTS.md)).
+			 * `MEQ_AXIS_DEVICE=force` overrides it, so the routes can be measured
+			 * before anything keeps the iterate resident. ONE predicate for every
+			 * reader, because a reader gated differently from its neighbours is
+			 * the one host leg that pulls the state down for all of them.
+			 */
+			bool iterateIsResident( mfem::Vector const &state ) const;
+
+			/**
+			 * The same predicate WITHOUT the force switch, for vectors that are
+			 * not the iterate -- the backsolved directions a border row is also
+			 * applied to. The switch stands in for *the iterate is resident*;
+			 * read as *every vector is*, it uploads each host-only direction to
+			 * dot six entries of it, which measured 37.5 MB on
+			 * `machine-f-diiid` and is not anything residency would do.
+			 */
+			bool vectorIsResident( mfem::Vector const &v ) const;
+
+			/**
+			 * The plasma source as POD with phase B confirmed, or false and the
+			 * host loop.
+			 *
+			 * **IT BORROWS `npcConstants` RATHER THAN UPLOADING A SECOND COPY**
+			 * of the knots, the element flags and the conductor shift -- M-226's
+			 * one upload -- and so it refuses whenever those could disagree with
+			 * what the host loop reads: no device integrand, a source that is not
+			 * the one the operator was built from, or a plasma mask or conductor
+			 * cache that has moved since. Refusing is the host loop; refreshing
+			 * would change the NPC operator's own integrand under it.
+			 */
+			bool plasmaLoopsAvailable( SourceView &view ) const;
+
+			/// refreshPlasmaComponent()'s mask update alone.
+			void refreshPlasmaComponentMask( mfem::Vector const &state );
+
+			/**
+			 * What the device integrand needs besides the live source, built
+			 * from the CURRENT mask into @a flags, which must outlive the
+			 * result. One construction for the operator's build and for every
+			 * refresh after a support move, so the two cannot disagree about
+			 * what a flag means.
+			 */
+			DeviceIntegrandInputs deviceIntegrandInputs( std::vector<int> &flags ) const;
+
+			/// Re-upload the device integrand's element flags if the mask has
+			/// moved; comparison inside DeviceConstants makes an unmoved mask
+			/// free. See refreshPlasmaComponent().
+			void refreshDeviceIntegrandFlags();
+
+			/// The five plasma element loops' device half. Mutable because phase
+			/// B is built lazily from const assemblies; it is a cache of
+			/// constants of the mesh, not state a solve reads back.
+			mutable DevicePlasmaLoops plasmaLoops;
+			/// The per-element partial sums the device route hands back. Members
+			/// so a constraint evaluation does not allocate device memory; safe to
+			/// refresh in place because the KERNEL fills them, through Write(),
+			/// and the host only ever reads them -- M-211's hazard is a host fill.
+			mutable mfem::Vector plasmaLoopFirst;
+			/// @copydoc plasmaLoopFirst
+			mutable mfem::Vector plasmaLoopSecond;
+			/// @copydoc iterateRoutesTakenOnDevice
+			mutable long iterateDeviceTaken = 0;
+			/// @copydoc iterateRoutesTakenOnDevice
+			mutable long iterateDeviceDeclined = 0;
 			bool prepared;
 			bool postProcessed;
 	};

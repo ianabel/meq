@@ -1514,26 +1514,11 @@ namespace meq
 
 	std::vector<CriticalPoint> CriticalPointFinder::sweep() const
 	{
-		// The bounding box, purely as the length scale the deduplication
-		// tolerance is relative to.
-		double diameter = 0.0;
-		if ( meshRef.GetNV() > 0 )
-		{
-			mfem::real_t lo[ 2 ] = { meshRef.GetVertex( 0 )[ 0 ], meshRef.GetVertex( 0 )[ 1 ] };
-			mfem::real_t hi[ 2 ] = { lo[ 0 ], lo[ 1 ] };
-			for ( int v = 1; v < meshRef.GetNV(); ++v )
-			{
-				auto const *vertex = meshRef.GetVertex( v );
-				for ( int d = 0; d < 2; ++d )
-				{
-					lo[ d ] = std::min( lo[ d ], vertex[ d ] );
-					hi[ d ] = std::max( hi[ d ], vertex[ d ] );
-				}
-			}
-			diameter = std::sqrt( ( hi[ 0 ] - lo[ 0 ] )*( hi[ 0 ] - lo[ 0 ] )
-			                      + ( hi[ 1 ] - lo[ 1 ] )*( hi[ 1 ] - lo[ 1 ] ) );
-		}
-
+		// The deduplication's length scale is the mesh bounding box, and it is
+		// mergeCandidates()'s to compute -- this routine walked every vertex to
+		// build a second copy and then handed the merge nothing, which is what
+		// extracting the merge left behind. -Wunused-but-set-variable is the
+		// only thing that reported it, a sweep being per Newton step.
 		double const target = tolerance*fluxScale();
 		int const elementTotal = meshRef.GetNE();
 

@@ -6657,6 +6657,14 @@ int main( int argc, char **argv )
 		             "%ld taken, %ld declined\n",
 		             solver->axisRoutesTakenOnDevice(),
 		             solver->axisRoutesDeclinedOnDevice() );
+		// AND THE ITERATE'S OTHER HOST READERS, which ResidentIterate.hpp names:
+		// the plasma loops, the transmission and psi_bnd rows, the cold state.
+		// Gated on the same predicate, so zero and zero until something keeps
+		// the iterate on the device -- or MEQ_AXIS_DEVICE=force says to.
+		std::printf( "MEQ:   other iterate readers on device: "
+		             "%ld taken, %ld declined\n",
+		             solver->iterateRoutesTakenOnDevice(),
+		             solver->iterateRoutesDeclinedOnDevice() );
 		std::printf( "MEQ:   bordered row dots on device %s\n",
 		             solver->borderDotsRanOnDevice() ? "yes" : "NO" );
 
@@ -6724,10 +6732,20 @@ int main( int argc, char **argv )
 			meq::CrossingCount const &ph = meq::crossingPhases()[ k ];
 			if ( ph.reads == 0 && ph.deviceReads == 0 )
 				continue;
-			std::printf( "MEQ:     %-10s %6ld down (%.1f/step), "
-			             "%6ld up, of %ld + %ld funnels%s\n",
+			// The megabytes beside the counts: a phase of many small transfers
+			// and a phase of one large one read the same in a count, and the
+			// difference is the whole of what porting a host reader buys --
+			// M-237's phase C went from 66 transfers to 150 while its bytes
+			// fell sevenfold.
+			std::printf( "MEQ:     %-10s %6ld down (%.1f/step) %.3g MB, "
+			             "%6ld up %.3g MB, of %ld + %ld funnels%s\n",
 			             meq::phaseName( which ), ph.transfers,
-			             ph.transfers/steps, ph.uploads,
+			             ph.transfers/steps,
+			             static_cast<double>( ph.entries )*sizeof( double )
+			                 /( 1024.0*1024.0 ),
+			             ph.uploads,
+			             static_cast<double>( ph.uploadEntries )*sizeof( double )
+			                 /( 1024.0*1024.0 ),
 			             ph.reads, ph.deviceReads,
 			             which == meq::Phase::Solve
 			                 ? "   <- the one to drive to zero" : "" );

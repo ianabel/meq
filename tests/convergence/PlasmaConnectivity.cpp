@@ -2007,9 +2007,46 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 	 * THE MARGIN, COARSEST FIRST. `n` is an element count and h goes as its
 	 * square root on a two-dimensional mesh, so that is what the order is taken
 	 * against.
+	 *
+	 * **AND A MESH THAT DID NOT CONVERGE IS NOT A MEMBER OF THIS SEQUENCE.**
+	 * What is relaxed is a PRECONDITION and not a tolerance, which is the
+	 * `PedestalConvergence` and `XPointBorder` shape and the one thing
+	 * *Testing stance* allows: the order is taken against `psi_bnd`, and
+	 * `psi_bnd` is the boundary flux OF A CONVERGED EQUILIBRIUM, so a run
+	 * parked at its iteration cap carries a number that is not that quantity at
+	 * all. Measured in single at 314 elements it reads **1.938e-02 against the
+	 * double build's converged 6.814e-04**, 28x, and that denominator alone
+	 * inverts both orders. ***A row that did not converge poisons a sequence
+	 * through its DENOMINATOR before it poisons it through the quantity being
+	 * measured*** -- the layer in the numerator is still three orders above its
+	 * own round-off floor, so no floor helper could have repaired this and the
+	 * obvious reading of a single-precision red would have been wrong.
+	 *
+	 * **THE ROW IT DROPS IS A REAL FINDING AND NOT THIS CASE'S SUBJECT.** That
+	 * bordered solve runs its full 150 iterations with the residual RISING,
+	 * 1212x above the floor [[convergedResidualFloor]] computes for it; `n = 12`
+	 * is already the marginal mesh in double at 17 Newton iterations against 10
+	 * and 8. M-186's knife edge met in the narrower format, and it is
+	 * consistent with the verdict moving when the transfer-path tolerance moves
+	 * the exterior datum.
+	 *
+	 * **IT IS A GAP IN BOTH BUILDS**, not a single-precision repair: double has
+	 * simply never had a row fail here, so `margin` is the same three rows
+	 * there and every printed number is unchanged.
 	 */
-	std::vector<Row const *> margin{ &rows[ marginRow ], &rows[ marginRow + 1 ],
-	                                 &rows[ healthyRow ] };
+	std::vector<Row const *> margin;
+	for ( std::size_t i : { marginRow, marginRow + 1, healthyRow } )
+	{
+		if ( !rows[ i ].converged )
+		{
+			std::printf( "      DROPPED: %d elements did not converge in %d "
+			             "iterations, so its psi_bnd = %.6e is an iterate's "
+			             "and not an equilibrium's\n",
+			             rows[ i ].n, rows[ i ].iterations, rows[ i ].psiBnd );
+			continue;
+		}
+		margin.push_back( &rows[ i ] );
+	}
 	std::vector<double> ratio;
 	for ( Row const *row : margin )
 		ratio.push_back( row->axis.layer/row->psiBnd );
@@ -2035,8 +2072,9 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		             margin[ i ]->axis.layer, margin[ i ]->psiBnd, ratio[ i ],
 		             rateText );
 	}
-	std::printf( "      over the whole sequence: %.3f, against k+1 = %d\n",
-	             observedOrder( 0, margin.size() - 1 ), order + 1 );
+	if ( margin.size() >= 2 )
+		std::printf( "      over the whole sequence: %.3f, against k+1 = %d\n",
+		             observedOrder( 0, margin.size() - 1 ), order + 1 );
 	std::fflush( stdout );
 
 	/*
@@ -2120,20 +2158,31 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 	 *    reason CriticalPointConvergence and ExtensionConvergence both allow a
 	 *    pair more slack than the sequence.
 	 */
-	BOOST_TEST( observedOrder( 0, margin.size() - 1 ) > 2.5,
-	            "psi_h on the symmetry axis falls at order "
-	            << observedOrder( 0, margin.size() - 1 ) << " across the whole "
-	            "sequence, where k+1 = " << order + 1 << " is expected. A layer "
-	            "that stops falling is a layer the pole is feeding, and the "
-	            "margin that keeps checkAxisSource() sufficient is then a number "
-	            "rather than a limit" );
-	for ( std::size_t i = 1; i < margin.size(); ++i )
+	//    AND THE SURVIVORS ARE REQUIRED NON-FATALLY, which is the half that
+	//    matters: a BOOST_TEST_REQUIRE here would abandon sections 1 to 3 as
+	//    well, and those are the case's subject. XPointBorder's own repair
+	//    records that a REQUIRE on a precondition is the brittle direction.
+	BOOST_TEST( margin.size() >= 2,
+	            "only " << margin.size() << " of the three margin meshes "
+	            "converged, so there is no sequence left to take an order over. "
+	            "The DROPPED lines above say which went and why" );
+	if ( margin.size() >= 2 )
 	{
-		double const observed = observedOrder( i - 1, i );
-		BOOST_TEST( observed > 2.0,
-		            "psi_h on the symmetry axis is " << ratio[ i ]
-		            << " of psi_bnd at " << margin[ i ]->n << " elements "
-		            "against " << ratio[ i - 1 ] << " at " << margin[ i - 1 ]->n
-		            << ", an order of " << observed << " over that pair" );
+		BOOST_TEST( observedOrder( 0, margin.size() - 1 ) > 2.5,
+		            "psi_h on the symmetry axis falls at order "
+		            << observedOrder( 0, margin.size() - 1 ) << " across the whole "
+		            "sequence, where k+1 = " << order + 1 << " is expected. A layer "
+		            "that stops falling is a layer the pole is feeding, and the "
+		            "margin that keeps checkAxisSource() sufficient is then a number "
+		            "rather than a limit" );
+		for ( std::size_t i = 1; i < margin.size(); ++i )
+		{
+			double const observed = observedOrder( i - 1, i );
+			BOOST_TEST( observed > 2.0,
+			            "psi_h on the symmetry axis is " << ratio[ i ]
+			            << " of psi_bnd at " << margin[ i ]->n << " elements "
+			            "against " << ratio[ i - 1 ] << " at " << margin[ i - 1 ]->n
+			            << ", an order of " << observed << " over that pair" );
+		}
 	}
 }

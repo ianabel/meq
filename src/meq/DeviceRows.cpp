@@ -1,5 +1,7 @@
 #include "DeviceRows.hpp"
 
+#include "Crossings.hpp"
+
 #include <sstream>
 #include <stdexcept>
 
@@ -102,6 +104,33 @@ namespace meq
 		rows = 0;
 		columns = 0;
 		largestIndex = -1;
+	}
+
+	RowView DeviceRows::row( int r ) const
+	{
+		RowView view{};
+		view.indices = indices.Read();
+		view.weights = values.Read() + static_cast<std::size_t>( r )*columns;
+		view.count = columns;
+		view.negate = 0;
+		return view;
+	}
+
+	bool dotRowsAgainstColumnsOnDevice( mfem::Array<RowView> const &rows,
+	                                    mfem::Array<mfem::real_t const *> const &columns,
+	                                    mfem::Vector &out )
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		if ( rows.Size() == 0 || columns.Size() == 0 )
+			return false;
+		out.SetSize( rows.Size()*columns.Size() );
+		out.UseDevice( true );
+		// The two descriptor tables are rebuilt per fill and small -- a few
+		// dozen pointers -- and counted, so they show as the uploads they are.
+		countedDeviceRead( rows, __LINE__ );
+		countedDeviceRead( columns, __LINE__ );
+		return dotRowsAgainstColumnsKernel( rows, columns, out );
 	}
 
 	bool DeviceRows::valid() const

@@ -28,6 +28,7 @@ set(MEQ_UNIT_TESTS
 	DeviceRowsTests
 	PlasmaComponentTests
 	ProfilesTests
+	ResidentIterateTests
 	RotatingSourceTests
 	SafetyFactorTests
 	SourceTests

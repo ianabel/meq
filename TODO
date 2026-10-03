@@ -1332,3 +1332,51 @@ need something these cases structurally cannot give.
   not say anything about, five of its eight shipped meshes being below it -- is
   now a sweep of one key on one file rather than a fixture-building exercise.
 
+
+
+================================================================================
+Give up on a bordered Newton that has stopped moving, instead of running the cap
+Raised 2026-10-02.  ANSWERED THE SAME DAY as a diagnosis; what is left is cost.
+================================================================================
+
+  WHERE THIS CAME FROM, AND THE DIAGNOSIS IS CLOSED. PlasmaConnectivity's
+  314-element row diverged in single where double converged, and the suspicion
+  was a defect the narrow format exposes.  It is not: it is M-186's coin toss on
+  a fifth case, and both builds fail somewhere in 1.14 <= L <= 1.17 with
+  INTERLEAVED failure sets -- double fails at limiter 1.1515 and converges in 17
+  at 1.1500, where single does the opposite.  At MKL_NUM_THREADS = 6 the single
+  build reaches double's answer in 11 iterations against double's 17.  Nothing
+  is owed for correctness; the run throws and the driver exits 2.  The whole
+  measurement is M-236.
+
+  WHAT IS LEFT IS THE ONE ACTIONABLE ITEM, AND THE TREE HAD ALREADY DEFERRED IT
+  PENDING EXACTLY THIS NUMBER.  `BorderStep::residualCollinearity`'s doxygen at
+  GradShafranov.hpp:4153 says "RECORDED AND NOT ACTED ON ... Measure before
+  remedying".  The measurement is now in: on that row it reads **1.0000e+00 for
+  142 consecutive steps**, every one with `armijo = 0`, `trials = 12` and
+  `damping = 2^-11`.  That is about 1,700 residual evaluations and 142 Jacobian
+  assemblies after the iteration had demonstrably stopped moving, and it is most
+  of PlasmaConnectivity's single-precision runtime.
+
+  THE SHAPE.  Exit when collinearity exceeds a threshold AND Armijo has failed
+  for N consecutive steps -- two conditions, because either alone is reachable
+  by a healthy iteration: a bordered step can be collinear with the residual for
+  one step without being stuck, and a single non-Armijo step is what the
+  `bestDamping` fallback exists to absorb.  freegsnke's own threshold is 0.9.
+
+  THE CONSTRAINT THAT DECIDES WHETHER THIS IS WORTH DOING.  It must not change
+  any run that converges today, and that is an assertion rather than an
+  intention: the acceptance is the full suite in BOTH builds bit-for-bit, not a
+  count.  It buys no correctness and no case that currently fails -- single
+  still fails here with `setLineSearchMerit( Field )` and with
+  `BorderedPicardThenNewton` -- so it is a diagnosis-and-cost item.  What it
+  turns 150 wasted iterations into is an early and honest failure, and the
+  message is the deliverable as much as the exit: "the step direction has been
+  collinear with the residual for N steps and no damping reduced the merit" says
+  something a cap does not.
+
+  AND THE THRESHOLD MUST BE MEASURED ON CONVERGING RUNS BEFORE IT IS SET.  The
+  number above is from a run that failed; what nobody has is the distribution of
+  collinearity over runs that SUCCEED, which is what says whether 0.9 is loose
+  or tight here.  A threshold calibrated only against the pathology is calibrated
+  against one draw -- the same objection this file makes to every other constant.

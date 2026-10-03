@@ -615,3 +615,142 @@ BOOST_AUTO_TEST_CASE( theMirrorSurvivesBeingRefreshed )
 			                  "previous upload left device-valid" );
 	}
 }
+
+// EVERY BORDER ROW AGAINST EVERY COLUMN IN ONE LAUNCH, EQUAL TO THE HOST
+// rowDot()'S ARMS TO THE BIT -- the bordered fill's device route, M-238.
+//
+// The arms are written here as GradShafranov.cpp's rowDot() writes them: a
+// compressed row's sum from zero in support order; psi_ax's in dof order;
+// psi_bnd's NEGATED after the sum; XP-3's by `total -=`. XP-3's sign folds into
+// its weights exactly; psi_bnd's cannot, because `-( +0 )` is `-0` and a sum of
+// negated terms is `+0` -- so it is meq::RowView's flag, and the zero column
+// below is what tells the two apart.
+BOOST_AUTO_TEST_CASE( theBatchedFillIsEveryHostArmToTheBit )
+{
+	deviceOnce();
+
+	int const n = 61;
+	int const columnCount = 4;
+	std::vector<mfem::Vector> columns( columnCount );
+	for ( int c = 0; c < columnCount; ++c )
+	{
+		columns[ c ].SetSize( n );
+		columns[ c ].UseDevice( true );
+		mfem::real_t *const host = columns[ c ].HostWrite();
+		for ( int i = 0; i < n; ++i )
+			host[ i ] = c == columnCount - 1
+			            ? 0.0   // a zero column, as XP-3's z_j is
+			            : std::sin( 0.7*i + 1.3*c ) + 0.25*c;
+		columns[ c ].Read();
+	}
+
+	// A compressed row set on a shared ascending support, through the mirror.
+	std::vector<int> support = { 2, 5, 9, 14, 20, 33, 47, 58 };
+	std::vector<double> values;
+	for ( int r = 0; r < 2; ++r )
+		for ( std::size_t k = 0; k < support.size(); ++k )
+			values.push_back( std::cos( 0.9*k + 2.1*r ) - 0.3 );
+	meq::DeviceRows mirror;
+	mirror.upload( support, values, 2 );
+
+	// The short rows, in their own dof orders, with rowDot()'s signs folded.
+	std::vector<int> shortIndices = { 40, 3, 17, 11,   7, 52, 30 };
+	std::vector<double> shortWeights = { 0.5, -1.25, 3.0e-3, 0.7,   2.0, -0.125, 1.5 };
+	mfem::Array<int> shortIndexTable( static_cast<int>( shortIndices.size() ) );
+	mfem::Vector shortWeightTable( static_cast<int>( shortWeights.size() ) );
+	shortIndexTable.UseDevice( true );
+	shortWeightTable.UseDevice( true );
+	for ( std::size_t k = 0; k < shortIndices.size(); ++k )
+	{
+		shortIndexTable[ static_cast<int>( k ) ] = shortIndices[ k ];
+		shortWeightTable( static_cast<int>( k ) ) = shortWeights[ k ];
+	}
+	// Row 0 is psi_ax's, the first four; row 1 psi_bnd's, the last three with
+	// the finished sum negated -- the flag, not the weights. See meq::RowView.
+	int const *const dIndices = shortIndexTable.Read();
+	mfem::real_t const *const dWeights = shortWeightTable.Read();
+
+	mfem::Array<meq::RowView> rows( 4 );
+	rows.UseDevice( true );
+	rows[ 0 ] = meq::RowView{ dIndices, dWeights, 4, 0 };
+	rows[ 1 ] = meq::RowView{ dIndices + 4, dWeights + 4, 3, 1 };
+	rows[ 2 ] = mirror.row( 0 );
+	rows[ 3 ] = mirror.row( 1 );
+
+	mfem::Array<mfem::real_t const *> columnPointers;
+	columnPointers.UseDevice( true );
+	for ( mfem::Vector const &c : columns )
+		columnPointers.Append( c.Read() );
+
+	mfem::Vector dots;
+	BOOST_TEST_REQUIRE( meq::dotRowsAgainstColumnsOnDevice( rows, columnPointers,
+	                                                        dots ) );
+	dots.HostRead();
+	BOOST_TEST_REQUIRE( dots.Size() == 4*columnCount );
+
+	for ( int c = 0; c < columnCount; ++c )
+	{
+		mfem::Vector const &v = columns[ c ];
+		v.HostRead();
+
+		// psi_ax's arm.
+		double axis = 0.0;
+		for ( int k = 0; k < 4; ++k )
+			axis += shortWeights[ k ]*v( shortIndices[ k ] );
+		// psi_bnd's: limiterValue(), then negated.
+		mfem::real_t limiter = 0.0;
+		for ( int k = 4; k < 7; ++k )
+			limiter += shortWeights[ k ]*v( shortIndices[ k ] );
+		double const boundary = -limiter;
+		// The compressed rows: CompressedRows::dot() on the gathered column.
+		double compressed[ 2 ] = { 0.0, 0.0 };
+		for ( int r = 0; r < 2; ++r )
+			for ( std::size_t k = 0; k < support.size(); ++k )
+				compressed[ r ] += values[ r*support.size() + k ]*v( support[ k ] );
+
+		double const want[ 4 ] = { axis, boundary, compressed[ 0 ], compressed[ 1 ] };
+		for ( int r = 0; r < 4; ++r )
+		{
+			double const got = dots( r + 4*c );
+			BOOST_TEST( ( got == want[ r ]
+			              && std::signbit( got ) == std::signbit( want[ r ] ) ),
+			            "row " << r << " against column " << c << ": the launch "
+			            "gives " << got << " and the host arm " << want[ r ] );
+		}
+	}
+
+	// AND THE XP-3 ARM, `total -=`, against the same table read as +w: one
+	// more launch with the X-point's own sign convention folded.
+	mfem::Vector xpointWeights( 3 );
+	xpointWeights.UseDevice( true );
+	for ( int k = 0; k < 3; ++k )
+		xpointWeights( k ) = -shortWeights[ 4 + k ];
+	mfem::Array<meq::RowView> xpointRow( 1 );
+	xpointRow.UseDevice( true );
+	xpointRow[ 0 ] = meq::RowView{ shortIndexTable.Read() + 4,
+	                               xpointWeights.Read(), 3, 0 };
+	// FRESH POINTERS, TAKEN NOW: the loop above read every column on the
+	// host, and a device pointer is good for the launch it was taken for --
+	// under the debug backend a stale one is a fault, which is how this case
+	// first failed. The solver takes its own immediately before its launch.
+	mfem::Array<mfem::real_t const *> freshPointers;
+	freshPointers.UseDevice( true );
+	for ( mfem::Vector const &c : columns )
+		freshPointers.Append( c.Read() );
+	BOOST_TEST_REQUIRE( meq::dotRowsAgainstColumnsOnDevice( xpointRow,
+	                                                        freshPointers,
+	                                                        dots ) );
+	dots.HostRead();
+	for ( int c = 0; c < columnCount; ++c )
+	{
+		mfem::Vector const &v = columns[ c ];
+		v.HostRead();
+		double total = 0.0;
+		for ( int k = 4; k < 7; ++k )
+			total -= shortWeights[ k ]*v( shortIndices[ k ] );
+		BOOST_TEST( ( dots( c ) == total
+		              && std::signbit( dots( c ) ) == std::signbit( total ) ),
+		            "XP-3's row against column " << c << ": " << dots( c )
+		            << " against the host's " << total );
+	}
+}

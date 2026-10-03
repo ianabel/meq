@@ -13709,3 +13709,652 @@ only 21.4 s to 19.6 s, because the cost follows the list to whoever handles it.
 *That is the stopping rule on a degenerate iterate and not a property of either
 route*, and the cap is left at 4096 because a refusal and an acceptance cost
 the same there while the refusal bounds the bus.
+
+### M-235
+
+**SINGLE AND DOUBLE, HOST AND DEVICE, ON A QUIET MACHINE -- AND THE FORMAT THAT
+WAS SUPPOSED TO SETTLE THE DEVICE QUESTION WAS MEASURING A BISECTION THAT COULD
+NOT STOP.**
+
+Four cases, six arms, interleaved within each round in [M-135](#m-135)'s shape,
+gated on `/proc/loadavg` under 0.60 for four consecutive minutes. Best of 3
+rounds (2 at `ff3`). `mf` is `machine-f-diiid`; `ff1`/`ff2`/`ff3` are
+`fixed-f-diiid` at RefinementLevels 1/2/3.
+
+| case | elem | N | arm | wall | setup | solve | solve/N | psi_ax |
+|---|---|---|---|---|---|---|---|---|
+| mf | 4848 | 2 | dbl cpu8 | 4.098 | 0.020 | 3.727 | 1.863 | 3.759851e-01 |
+| | | 2 | dbl cuda | **3.874** | 0.019 | **3.010** | 1.505 | 3.759851e-01 |
+| | | 1 | sgl cpu8 | 3.301 | 0.019 | 2.871 | 2.871 | 3.759862e-01 |
+| | | 1 | sgl cuda | 3.350 | 0.020 | **2.445** | 2.445 | 3.759861e-01 |
+| ff1 | 6245 | 10 | dbl cpu8 | **18.42** | 13.67 | 3.862 | 0.386 | 2.897811e-01 |
+| | | 10 | dbl cuda | 19.56 | 13.55 | 4.468 | 0.447 | 2.897811e-01 |
+| | | 8 | sgl cpu8 | 36.37 | 27.92 | 7.453 | 0.932 | 2.897815e-01 |
+| | | 8 | sgl cuda | 37.72 | 27.54 | 8.093 | 1.012 | 2.897815e-01 |
+| ff2 | 25487 | 9 | dbl cpu8 | **41.10** | 26.33 | 11.78 | 1.308 | 2.897815e-01 |
+| | | 9 | dbl cuda | 50.70 | 32.63 | 12.92 | 1.435 | 2.897815e-01 |
+| | | 8 | sgl cpu8 | 81.87 | 59.37 | 19.35 | 2.418 | 2.897815e-01 |
+| | | 8 | sgl cuda | 75.31 | 48.17 | 22.07 | 2.759 | 2.897815e-01 |
+| ff3 | 102840 | 10 | dbl cpu8 | **175.4** | 99.4 | 63.9 | 6.395 | 2.897815e-01 |
+| | | 10 | dbl cuda | 185.6 | 101.0 | 65.6 | 6.558 | 2.897815e-01 |
+| | | 10 | sgl cpu8 | 210.0 | 126.0 | 72.0 | 7.204 | 2.897817e-01 |
+| | | 10 | sgl cuda | 259.7 | 135.5 | 97.6 | 9.758 | 2.897817e-01 |
+
+**THE NEWTON COUNTS DIFFER BETWEEN THE FORMATS, SO A WALL COMPARISON IS
+CONFOUNDED AND `solve/N` IS THE COMPARABLE COLUMN** -- `mf` takes one step in
+single against two in double, `ff1` eight against ten. `psi_ax` agrees across
+formats at FP32's own floor, 2.9e-06 on `mf` and 7e-07 on the `ff` family, which
+is [M-184](#m-184)'s figure on four more cases. **`ff3` marks 102,836 elements
+in single against 102,840** -- four elements, the level-set marking decided at
+round-off, and `meq::markingOffset()`'s subject.
+
+**THE DEVICE WINS THE PRODUCTION BORDERED CASE IN BOTH FORMATS AND LOSES THE
+BIG FIXED ONES**, 0.81x and 0.85x on `mf`'s solve against 1.03x and 1.35x at
+`ff3`. The fastest solve of all sixteen arms is **single + CUDA on `mf` at
+2.445 s** against the double host's 3.727, 0.66x.
+
+**AND THE REASON `ff3` LOSES IS NOT THE FP64 RATE. IT IS THAT THE PORTED AXIS
+SEARCH IS NEVER ENTERED AND THE HOST FALLBACK LOSES ITS THREADING.** Both CUDA
+arms print `axis and X-point field evaluations on device: 0 taken, 15 declined`
+-- the gate is `DeviceIsValid() && !HostIsValid()` and is inert by design, which
+is [M-232](#m-232)'s whole argument. So a device run takes the host sweep with
+`meq::hostLoopsAreSafe()` false ([M-188](#m-188)):
+
+| `ff3` axis leg | cpu8 | cuda |
+|---|---|---|
+| double | 21.57 s at **1.97 cores** | 33.57 s at **1.00 cores** |
+| single | 24.19 s at **2.61 cores** | 51.46 s at **1.00 cores** |
+
+That is **18.1% of the double device wall and 19.8% of the single** -- the
+largest single item in a device run, 1.56x and 2.13x worse than the host's,
+while [M-233](#m-233)'s 11.9 ms kernel sits beside it built, bit-identical and
+idle. *The leg the port was written for is the one the device is losing on, and
+it is losing on it because the port is correctly switched off.*
+
+**SINGLE PRECISION READ AS A 1.1x TO 2.4x LOSS AND THE ARITHMETIC WAS NEVER THE
+REASON.** Per call every threaded solve leg is FASTER in single, as FP32 should
+be -- `ff1` residual 14.7 ms/call in double against 12.9, gradient 24.0 against
+20.3, trace factorisation 47.6 against 41.5, backsolve 13.3 against 9.6. The
+loss is two SINGLE-THREADED host legs: `setup` at 1.00 cores, 18.7 s against
+40.2, and `re-assembly` -- one call, 1.0 cores -- 3.04 s against 8.55. Same
+mesh, same 6245 elements, same 0 transfer paths widened, same 98% of the
+boundary reaching `Gamma`. **Identical work, 2.15x the time.**
+
+**THE SUSPECT WAS THE EXTENSION QUADRATURE AND IT WAS WRONG.** `meq::
+extensionFdStep()` is 5.0e-3 in single against 1.0e-6 in double, a 5000x step
+against a degeneracy floor that follows `eps`, and M-183 is exactly that pairing
+going wrong once already -- so it was the obvious candidate and it is not the
+answer. **`perf` was**, and it named `meq::BoundaryShape::shiftedAngle` at
+48.1% of the double run and **68.7%** of the single. That function takes a
+`double` and is in MEQ's MFEM-free half, so its arithmetic is IDENTICAL in the
+two builds; its self time went 1.878 s to 5.621 s, **2.99x**, which for identical
+per-call work IS the call count.
+
+**AND TWO CONSUMERS OF THE SAME `levelSet()` SEPARATE THE CAUSE OUTRIGHT**,
+which is what makes this a diagnosis rather than a profile:
+
+| inclusive frame | double | single | absolute |
+|---|---|---|---|
+| `VertexConePath` -> `VertexDirection` -> `FirstCrossing` | 32.61% | **50.72%** | 4.92 s -> **15.33 s**, 3.1x |
+| `MarkLevelSetSubdomain` | 10.66% | 6.63% | 1.61 s -> 2.00 s, 1.25x |
+
+`MarkLevelSetSubdomain` calls `levelSet()` once per lattice point -- a FIXED
+count -- and is flat. `FirstCrossing` is a root find whose count a tolerance
+decides, and it triples. *A fixed-count consumer and a tolerance-driven consumer
+of one function is a controlled experiment with the arithmetic held equal.*
+
+**`mfem::VertexConePath`'s DEFAULT `tol_` IS `1e-13` AND A FLOAT BISECTION
+CANNOT REACH IT.** `FirstCrossing()` brackets the crossing to
+`length/search_steps` and halves while `tb - ta > tol*length`. In double that is
+39 halvings. In single `tb - ta` floors at `eps*length`, about `1.19e-07*length`
+-- **six orders ABOVE the target** -- so the condition never goes false and the
+loop runs to `max_iter = 100`, on every ray of every vertex of `Gamma_h`.
+
+**IT IS THE SEVENTH CONSTANT OF [M-184](#m-184)'S SPECIES AND THE FIRST THAT
+COSTS ONLY TIME.** The other six were wrong answers -- an empty quadrature
+reporting success, a `build()` refusing everything, a correct answer refused.
+This one misreports nothing: the crossing IS located, to `eps`, which is better
+than the target asks for and the best single can do. **So no assertion in the
+tree can see it and only a clock can**, which is why a suite at
+[M-222](#m-222)'s 62-of-63 parity carried it. And it is MFEM's default argument
+rather than MEQ's literal, which makes it M-222's `TransformBack` finding a
+second time: *the largest single item was one line of somebody else's header.*
+
+**AND THE REPAIR IS NOT A TOLERANCE AT ALL -- IT IS THE BISECTION'S
+TERMINATION, AND IT IS UPSTREAM'S.** MEQ built `meq::pathTolerance()` first,
+`std::max( 1.0e-13, N eps )` at all ten construction sites, and swept `N`
+against the suite. **Every value that is loose enough to help is loose enough
+to move an answer**, which is the finding and is the opposite of what the first
+version of this entry claimed:
+
+| | `1e-13` (upstream) | `64 eps` | `4 eps` |
+|---|---|---|---|
+| `ConductorSubtraction` | GREEN | **RED** | GREEN |
+| `DriverAcceptance` | GREEN | RED | **RED** |
+| `MachineFixedBoundary` | GREEN | GREEN | **RED** |
+
+`DriverAcceptance` is the one that cannot be argued with: *"the driver wrote 620
+elements where the same loop by hand ends at 612"*, a deterministic element
+count rather than a convergence coin toss. **This constant decides where the
+transfer path ENDS and the exterior datum is assembled there, so it is a
+tolerance on the ANSWER**; trading its last digits for iterations buys a clock
+and sells a result. MEQ's arm is reverted whole and the call sites are back on
+the default.
+
+**THE REAL FIX COSTS NO ACCURACY AND IS ONE LINE OF `FirstCrossing()`.** That
+loop is a bisection, and a bisection in a finite format should stop when the
+midpoint stops moving, not at an absolute bracket. Simulated in both formats
+from `length/32`:
+
+| float | iterations | error |
+|---|---|---|
+| `tol = 1e-13` (upstream today) | **100**, the cap | 2.980e-08 |
+| `tol = 4.77e-07` (MEQ's abandoned arm) | 16 | **1.490e-07** |
+| `if ( tm <= ta \|\| tm >= tb ) break;` | **20** | **2.980e-08** |
+
+**Full accuracy in a fifth of the work**, and in DOUBLE the `1e-13` target still
+fires first -- 39 halvings against the no-progress rule's 49 -- so **the double
+path is bit-identical and no caller sees a change**. *The question was never
+how tight to ask for; it was that the loop had no idea when it had finished.*
+Reported as `HDG-PATH-BISECTION-TERMINATION-FROM-MEQ.md`.
+
+**AND THE DEFAULT IS BEING PROPAGATED, WHICH IS WHY THIS IS WORTH A REPORT
+RATHER THAN A WORKAROUND.** `tol_ = 1e-13, max_iter_ = 100` stands at
+`LevelSetPath`, `VertexConePath` and the `TiltedPath` added by the 2026-10-01
+path merge -- **three classes and not the four MEQ reported**, since
+`ClosestPointPath` is a closed form with no bisection in it. All three reach the
+one `FirstCrossing()`, so one line covers every caller. A consumer in single
+precision meets the pair at each of them.
+
+**THE FIX IS LANDED, TAKEN AS WRITTEN, AND UPSTREAM'S PIN IS THE SHARPER HALF OF
+IT** -- `238f719f50`, contained in `meq-integration` at `5c2324e921`. Their
+tree's single-precision unit tests SKIP, so a single-precision defect has no
+single-precision test to catch it; they put a DOUBLE into the same position
+instead -- a tolerance no double bracket can reach, `1e-30`, a cap of 10,000,
+and a COUNT of level-set calls rather than a clock -- and it reads **10,002
+calls before the fix and under 100 after**, with a second section checking the
+`1e-13` default still stops at its bracket. *A format-specific defect is pinned
+by putting the other format in the same position*, which costs one test case
+where a second build costs an install.
+
+**THE BASELINE NEEDED NO STASH AND NO WORKTREE, WHICH IS THE CHEAP HALF**: the
+pre-change state IS `pathTolerance()` returning `1e-13`, because `1e-13` is the
+default, so one constant reproduces it exactly and the arm is controlled. *A
+cure measured after changing two things attributes nothing* --
+[M-210](#m-210) -- and this entry's first version changed MEQ's tolerance and
+the MFEM install together and credited the tolerance.
+
+### M-236
+
+**A COARSE BORDERED SOLVE THAT DIVERGES IN SINGLE AND CONVERGES IN DOUBLE, AND
+BOTH BUILDS FAIL IN THE SAME BAND 0.13 PER CENT AWAY -- M-186'S COIN TOSS ON A
+FIFTH CASE, WITH THE MECHANISM NAMED THIS TIME.**
+
+`PlasmaConnectivity`'s `run( 0, 1.15, 150 )`: the 314-element half-disc machine,
+limiter radius 1.15. Double converges in 17 Newton iterations; single runs its
+full 150 with the residual RISING, and the obvious reading -- a single-precision
+defect -- is wrong.
+
+**THE FIRST HALF IS M-186'S INSTRUMENT.** `MKL_NUM_THREADS` reassociates a
+blocked BLAS-3 and changes nothing else, applied to one binary:
+
+| MKL | single | its | `psi_ax` |
+|---|---|---|---|
+| 1, 2 | **fails at the cap** | 150 | 2.915004e-02 |
+| 3 | **fails at the cap** | 150 | 4.075228e-02 |
+| 4 | converged | 11 | 1.170586362e-02 |
+| 6 | converged | 11 | **1.170591858e-02** |
+| 8, 16 | converged | 11 | 1.170589257e-02 |
+
+Double reads `1.170592059e-02`. **At six MKL threads the single build reaches it
+in ELEVEN iterations against double's seventeen**, agreeing to seven significant
+figures. `tests/CMakeLists.txt` pins `MKL_NUM_THREADS = 1`, which is one draw.
+
+**AND THE SECOND HALF IS WHAT MAKES IT A COIN TOSS RATHER THAN A FORMAT
+VERDICT: THE DOUBLE BUILD FAILS HERE TOO.** A dense limiter sweep at the same
+mesh, 61 radii over `1.1400` to `1.1700` in double at `MKL = 1`, has two
+outright failures -- **1.1515 and 1.1695** -- two 48-iteration runs, and counts
+bouncing 8 to 24, against a stable 9 to 11 everywhere outside the band. Checked
+independently on the same binary at two radii 0.13 per cent apart:
+
+| double, `n = 314` | |
+|---|---|
+| limiter `1.1500` | converges, 17 its, `psi_ax = 1.170592059e-02` |
+| limiter `1.1515` | **`the non-linear iteration did not converge`**, 150 its |
+
+**THE FAILURE SETS ARE INTERLEAVED**, which is the clincher -- 1.1500 is in
+single's and 1.1515 is in double's:
+
+| limiter | double | single |
+|---|---|---|
+| 1.1450 | 17 | 10 |
+| 1.1475 | 11 | 18 |
+| **1.1500** | **17** | **FAIL** |
+| **1.1515** | **FAIL** | **9** |
+| 1.1525 | 9 | 9 |
+| 1.1600 | 10 | 29 |
+
+*Neither build is the bad one.* Outside the band they are the same solver:
+1.10/1.12/1.14/1.18 give 11/9/10/10 in double and 11/8/10/11 in single, and the
+finer meshes give 10/8 against 9/7.
+
+**THEY PART AT STEP 1 THROUGH THE LINE SEARCH AND NOT THROUGH THE ARITHMETIC**,
+which is the part worth keeping. Step 0 is near-identical -- `fieldNorm`
+1.240239e-01 against 1.240240e-01, the same `directionNorm`, both failing Armijo
+on all twelve rungs and taking the `bestDamping` fallback at 0.5 -- but step 0's
+trial ladder is a **sharp V**: double reads 59.71 at damping 1, **0.1885 at
+0.5**, 2.352 at 0.25. Single reads 62.61, **0.1758**, 2.379. *Near the bottom of
+a V a 3e-05 difference becomes 7 per cent*, and at step 1 double's full step is
+rejected at merit 3.365e-01 where single's is accepted at 8.527e-02. Different
+trajectories from there.
+
+**AND THE DIVERGENCE IS THE AXIS ROW CLIMBING, NOT THE FIELD.** Single spends
+**142 consecutive steps** at `damping = 2^-11`, `trials = 12`, `armijo = 0` --
+the `bestDamping` fallback, which its own doxygen says *"is NOT an Armijo step:
+it is how the residual rises from one iteration to the next"*. Differentiating
+the trial ladder, **134 of 148 steps have `d(merit)/da > 0`** against double's 1
+of 12, while `d( ||R|| )/da` -- the FIELD block -- is **negative at every step in
+both builds**. Decomposing the merit names the row:
+
+| step | field | **axis** | current | boundary | exterior |
+|---|---|---|---|---|---|
+| 20 | -5.93e-03 | **-7.74e-02** | -4.92e-03 | +7.9e-06 | -3.9e-06 |
+| 100 | -5.19e-03 | **+4.29e-01** | +8.2e-05 | +1.9e-05 | -8.6e-06 |
+| 148 | -4.70e-03 | **+3.91e-01** | -9.63e-03 | -3.1e-06 | +3.1e-06 |
+
+Two orders above every other row and driving `|axis|` AWAY from zero where the
+linearisation demands it go to zero. **The field Jacobian is sound and the
+bordered direction is an ASCENT direction for the augmented merit.** Double
+shows the same pathology in the same band and merely does not get absorbed by
+it -- 1/10 ascent steps at `L = 1.145`, 2/12 at 1.149, 3/18 at 1.153 -- so the
+stretch is a property of the PROBLEM at this resolution and radius, and the
+format only decides whether the iteration escapes.
+
+**WHAT WAS RULED OUT, EACH BY MEASUREMENT.** The differenced border columns are
+**not reached at all**: `NormalisedMHDSource::normalisationDerivatives()`
+returns `true` unconditionally, so the `psi_ax`, `psi_bnd` and current columns
+are ANALYTIC on this fixture and the finite-difference fallback never runs --
+which kills the first and most plausible suspect outright. `extensionFdStep()`
+is not it either: the exterior transmission residual is 2e-08 in single against
+a merit of 1e-02. M-187's zero-column species is impossible with the field block
+descending at every one of 148 steps. It is not a tolerance -- the target is
+1.19e-06 and the run sits at 1.16e-02 -- and not a floor, the best residual
+being 5.47e-03 at **1212x** `convergedResidualFloor()`. It is not the starting
+point: double survives a relative perturbation of the guess from 1e-12 to
+**1e-03**, four orders ABOVE float epsilon, converging to nine digits every
+time. And MEQ's two existing levers do not rescue it -- `setLineSearchMerit(
+Field )` takes double from 17 to 11 and leaves single at the cap, and
+`BorderedPicardThenNewton` fails at 300.
+
+**NOTHING IS OWED FOR CORRECTNESS**: the run throws and the driver exits 2, so
+no wrong answer is reported. What is owed is M-186's standing note on a fifth
+case, and a test may not take *"this mesh converged"* as a hard precondition
+there.
+
+**AND IT IS THE MEASUREMENT `residualCollinearity` WAS WAITING FOR.** That
+field's doxygen says *"RECORDED AND NOT ACTED ON ... Measure before remedying"*
+(`GradShafranov.hpp:4153`). This run is the measurement: **`1.0000e+00` for 142
+consecutive steps**, every one with `armijo = 0`, `trials = 12` and
+`damping = 2^-11` -- about 1,700 residual evaluations and 142 Jacobian
+assemblies spent after the iteration had demonstrably stopped moving, where
+`freegsnke`'s own threshold is 0.9. An exit on *"collinearity above 0.9 and
+Armijo failed for N consecutive steps"* turns 150 wasted iterations into an
+early and honest failure. **It would not make this case converge**, and it must
+not move any run that converges today, so it is a cost-and-diagnosis item rather
+than a correctness one -- and the cost is concrete: this one row is most of
+`PlasmaConnectivity`'s single-precision runtime.
+
+### M-237
+
+**THE TEN HOST READERS OF THE ITERATE ARE PORTED, THE GATES OPEN ON THEIR OWN
+ONCE THE COLUMNS ARE DEVICE-CAPABLE -- AND THE BUS SAYS MEQ'S OWN READERS WERE
+UNDER ONE PER CENT OF IT.**
+
+**THE TEN WERE FOUND BY WATCHING THE ITERATE'S OWN BUFFER**, not by reading the
+plan's list: a temporary probe in `countedHostRead()` tallied every funnel whose
+data pointer was `solution`'s, on `machine-f-diiid` under `--device cuda` with
+`MEQ_AXIS_DEVICE=force`. It named exactly ten sites, which is the plan's count:
+
+| site | funnels of the iterate, per run |
+|---|---|
+| `CompressedRows::gather()`, the transmission constraint | 160 |
+| `assemblePlasmaCurrent()` | 25 |
+| `assembleNormalisationColumn()`, axis and boundary | 24 |
+| `limiterValue()`, the `psi_bnd` row | 16 |
+| `assembleCurrentColumn()`, `assembleCurrentRow()`, `assembleCurrentNormalisationCorner()` | 12 each |
+| the bordered step's `savedState` copy | 12 |
+| the exterior columns' `savedIterate` copy, the cold state's copy | 3 each |
+
+**TEN ON THIS CASE, AND FOUR MORE THAT IT NEVER REACHES.** The probe can only
+name what the run executes, and `machine-f-diiid` takes none of: `peakAt()`'s
+nodal-maximum fallback, which runs when no axis is located and which the plan
+listed among its ten; `limiterPolygonMaximum()` under
+`LimiterConstraint::LocatedContact`, a search over the limiter's faces;
+`projectUpDown()` under `UpDownSymmetry`; and `refreshPlasmaComponent()` under a
+moving support. All four still read the iterate on the host and are not
+ported. `recoverPeak()` and `totalPotential()` read it too, once, after a solve.
+
+Every one of the ten now has a device route behind the axis route's gate --
+`meq::DevicePlasmaLoops` for the five element loops, `meq::DeviceRows::dotAll()`
+for the transmission rows, `meq::orderedDotOnDevice()` for the `psi_bnd` row,
+and for the copies nothing but the funnel left out, a copy of a device-valid
+vector being born device-valid ([M-205](#m-205)); the cold state's mask is
+`meq::copyEntriesOnDevice()`. `src/meq/ResidentIterate.hpp`.
+
+**FORCED, THE ITERATE NO LONGER CROSSES IN PHASE C.** Same run, same file:
+
+| `--device cuda`, forced | phase C down | MB | phase C up | MB | the iterate read on the host |
+|---|---|---|---|---|---|
+| before ([M-232](#m-232)) | 66 | 15.0 | 17 | -- | ten sites, every step |
+| after | 150 | **2.13** | 64 | 1.11 | `downloadSolution()` only -- phase D |
+
+`6 + 129` routes taken, 0 declined; `psi_ax`, `psi_bnd`, the X-point and the
+Newton count to every printed digit of the host's. **The COUNT rose and the
+BYTES fell sevenfold**, and both are honest: what is left in phase C is what
+the host's control flow consumes -- per-element partials for `I_p` and its
+corner (37 KB a call, summed on the host in element order for the reason
+`assemblePlasmaCurrent()` gives), the ten transmission dots, the one `psi_bnd`
+scalar, the axis candidates, and a support's worth of the current row. A batched
+download per evaluation is the shape that would take the count down; it is not
+built.
+
+**TO THE BIT, AFTER ONE HERMITE DERIVATIVE WAS WRITTEN THE HOST'S WAY.** Each
+route was run beside its host loop on the same state, in the forced run: the
+plasma current, the current column, the transmission dots and the `psi_bnd` row
+agreed to the bit at every call, and every route that carries a PROFILE
+DERIVATIVE did not -- the row 818 of 109,203 entries off by up to 5.6e-17 on
+3.1e-02, the corner 3.6e-15 on 9.5. `meq::hermite10Prime()` was
+`( 3t - 1 )( t - 1 )` where `Profiles.cpp` writes `3t^2 - 4t + 1`, and the
+profile scale multiplied before the division where `meq::ScaledProfile::prime()`
+multiplies after. Both rewritten: **126 of 126 evaluations equal**. The
+radii and weights are the host's own `Transform()` and `Weight()` values,
+uploaded once, and the device file has `-fmad=false`, which is what makes that
+reachable at all. `ResidentIterateTests` pins all six quantities and the three
+small kernels to the bit under `debug` and `cuda`, and goes red in four places
+with the factored derivative put back. *`SourceViewTests` could not see it*: it
+admits `dF/dpsi` anywhere in the envelope of four ulps of `psi`, which is
+correct for a knot and wide enough for a rounding.
+
+**AND THE CONTROLS.** Forced under `--device debug`: exit 0 in 7 m 59 s, no
+fault, the same answer -- every buffer the routes leave device-valid is
+funnelled before a host read. Unforced, every gate stays shut (`0 taken`) and
+the host path is the host path: `--device cpu` prints byte-for-byte what `HEAD`
+prints, and `--device cuda` differs only in the last residual, 2.992853e-12
+against `HEAD`'s own 2.992878, 2.993187 and 2.993032 over three runs -- cuDSS
+([M-229](#m-229)). `DeviceParity` carries a forced CUDA arm from here on.
+
+**THE FORCE SWITCH WAS FORCING THE WRONG VECTORS, AND IT COST 37.5 MB.**
+`limiterValue()` is the `psi_bnd` row and is applied to the backsolved
+DIRECTIONS as well as to the iterate; forcing every vector it was handed
+uploaded each host-only direction to dot six entries of it -- 45 uploads. The
+switch stands in for *the iterate is resident*, not *every vector is*, so the
+directions are gated on their own flags (`vectorIsResident()`).
+
+**THE PLAN SAID THE LAST READER WOULD TURN EVERY GATE ON, AND IT DID NOT.**
+Unforced, all routes read `0 taken`: the gate wants the iterate `H- D+`, and the
+Newton update adds HOST-ONLY columns into it. Re-running [M-229](#m-229)'s
+experiment -- `UseDevice( true )` on `y`, `z`, `zL`, `zB` and each `exteriorZ`,
+nothing forced -- **the gates open by themselves**: 6 axis and 118 iterate
+routes taken, 0 declined, every printed digit the host's, and MEQ's counter
+reads phase C at 138 down and 1.97 MB where M-229 read 20 transfers and
+15.1 MB with the iterate dragged back every step. *Removing the readers is what
+makes the columns worth moving; it does not move them.* The experiment is
+reverted, for the reason below.
+
+**AND THE BUS SAYS MEQ'S COUNTER SEES UNDER ONE PER CENT OF IT.**
+`nsys profile --trace=cuda` over the whole run, MB / count:
+
+| arm | host to device | device to host |
+|---|---|---|
+| plain | 692 / 1449 | 259 / 918 |
+| forced | 692 / 1433 | 409 / 1312 |
+| columns resident | 731 / 1482 | 442 / 1329 |
+
+The plain arm's counter reads **0.888 MB** of that. A `gdb` breakpoint on
+`mfem::CuMemcpyDtoH` with a backtrace per hit attributes the device-to-host
+side, and the largest item is not MEQ's code:
+
+| where | plain | columns resident |
+|---|---|---|
+| `DarcyNPCSolver::ArrayMult` > `BlockVector::SyncFromBlocks` | **504, 140 MB** | 504, 140 MB |
+| `DarcyNPCSolver::ArrayMult`, directly | -- | **168, 140 MB** |
+| `SyncFromBlocks`, other callers | 79, 22.5 MB | 147, 45.1 MB |
+| `DarcyHybridization::NonlinearResidualFinish` | 56, 18.6 MB | 56, 18.6 MB |
+| `LinearForm::Assemble` in `prepare()` | 17, 7.6 MB | 17, 7.6 MB |
+| `DarcyHybridization::NPCResidualFinish` | 20, 3.4 MB | 20, 3.4 MB |
+
+**EVERY BACKSOLVED COLUMN IS DOWNLOADED INSIDE UPSTREAM'S BLOCKED SOLVE, ON
+TODAY'S DEFAULT PATH.** `ArrayMult` writes each column's three blocks through a
+`BlockVector` over `Y[ j ]` -- on the device, `NPCRecover` being a kernel -- and
+then calls `SyncFromBlocks()`, which is `block.SyncAlias( base )`: it makes each
+BLOCK match the BASE, and MEQ hands it a base that is host-valid, so each block
+is copied down. **Per Newton step that is 14 columns** -- the field direction
+`y`, the three border columns `z`, `zB` and `zL`, and the ten exterior modes;
+XP-3's two cost no column -- so 11.7 MB a step, and over the run's twelve steps
+(sweeps of 7, 3 and 2) 168 columns, three blocks each, 140 MB. A fixed-boundary
+case with only the `psi_ax` border pays for two columns a step. That also qualifies
+[M-227](#m-227)'s reading, which was that the columns read `H+ D-` at the flush
+because they were never on the device: measured here under cuDSS they are
+produced there and brought down by this call, and under M-227's PARDISO the
+flux and potential blocks come out of the same `NPCRecover` kernel -- not
+re-measured, so *qualifies* rather than *corrects*. A
+device-capable column (`UseDevice( true )`) that still arrives host-valid pays a
+SECOND full download per column, which is the experiment's extra 168. So the
+columns item is now precise: the outputs must arrive DEVICE-valid at
+`ArrayMult()` and the border's dense algebra must read them there -- the
+`deviceDots` route, built in [M-208](#m-208) -- or the 140 MB stays.
+
+**AND PHASE D DOWNLOADS THE ANSWER TWICE.** `downloadSolution()` funnels the
+state and then its three long-lived aliases, and each alias, still flagged
+device-valid, copies its own range again: 12 transfers and 5.0 MB over three
+solves where 2.5 MB would do. A `SyncAliasMemory()` from the base after the one
+read is the repair. Small, and recorded rather than built.
+
+*An instrument that counts one project's funnels measures that project's
+readers, not the bus.* The counter was right about everything it could see,
+and the ten readers it saw were real -- and the largest single transfer in a
+device run of MEQ was one call further in, in a library routine it does not
+instrument. `nsys` and a breakpoint on MFEM's own copy are the instruments for
+the bus; the counter remains the one for attribution inside MEQ.
+
+### M-238
+
+**THE BORDERED COLUMNS STAY ON THE DEVICE, AND THE BUS SAYS SO: DEVICE-TO-HOST
+FROM 259 MB TO 101 MB, HOST-TO-DEVICE FROM 692 MB TO 543 MB, WITH THE HOST'S
+ANSWER TO EVERY PRINTED DIGIT ON 27 OF THE 29 SHIPPED EXAMPLES.**
+
+The columns are fourteen a Newton step on `machine-f-diiid` -- the field
+direction `y`, the three border columns `z`, `zB` and `zL`, and ten exterior
+modes; XP-3's two cost no backsolve -- so 168 over the run's twelve steps.
+Each change was found by attributing the bus rather than by reading a counter:
+`nsys` for the totals, a `gdb` breakpoint on MFEM's own copy for the call sites
+([M-237](#m-237)).
+
+| after | device to host | host to device |
+|---|---|---|
+| `machine-f-diiid`, `--device cuda`, whole run, before | 259 MB / 918 | 692 MB / 1449 |
+| `flush()` makes each output device-valid before `ArrayMult()`, and the dense fill contracts every row against every column in ONE launch | 148 MB / 669 | 658 MB / 1446 |
+| `DeviceNPCOperator::Mult()` makes `y` and `xLoc` device-valid | 101 MB / 524 | 623 MB / 1340 |
+| the ten exterior columns go up once per solve, in phase B | **101 MB / 522** | **543 MB / 1008** |
+
+The first row removed `ArrayMult()`'s 504 downloads (140 MB) and exposed the
+residual's: with the iterate resident, `DeviceNPCOperator::Mult()`'s own
+`SyncFromBlocks()` calls grew from 79 copies to 147, which the second row
+removes.
+
+**ONE MISTAKE, FOUR TIMES: `BlockVector::SyncFromBlocks()` MAKES EACH BLOCK
+MATCH ITS BASE.** It is `block.SyncAlias( base )`, and `SyncAlias_` copies the
+block's other copy across wherever the base says a location is live. Every
+site above handed a kernel's output a base that said HOST -- a fresh
+`mfem::Vector v( n )`, or a scratch vector after `Update()` -- so every block a
+kernel wrote was copied straight back down. `ArrayMult()` did it to the
+columns, MEQ's own residual did it to the residual and to `xLoc`, and MEQ's own
+comment on that residual said the call *carries the blocks up*. **The repair is
+`Write()` on the base before the blocks are written** -- it moves nothing and
+marks the device copy live -- and, where a scratch vector's blocks were made
+before it was device-capable, `UseDevice( true )` on each block by name:
+`mfem::Device( "debug" )` faulted in a host `memcpy` there, because
+`Vector::operator=` runs where either side's flag says and `Update()` at an
+unchanged size keeps the blocks it made first. Under CUDA that same copy was a
+silent host write repaired by an upload.
+
+**THE FILL IS BIT-IDENTICAL TO THE HOST `rowDot()` AND ITS DISPATCH WAS
+CHECKED ENTRY BY ENTRY.** Every border row is `meq::RowView` -- the compressed
+transmission and current rows from their mirrors, `psi_ax`'s, `psi_bnd`'s and
+XP-3's from a small table rebuilt per fill -- and one thread per `( row,
+column )` sums from zero in the host's order, in the file compiled without FMA.
+A temporary probe ran the host `rowDot()` beside every entry: **240 of 240 a
+step equal**, over all twelve steps, after one correction. XP-3's `total -= w v`
+folds into its weights exactly, IEEE subtraction being addition of the
+negation; `psi_bnd`'s `-limiterValue( v )` does NOT, because `-( +0 )` is `-0`
+and a sum of negated terms from `+0` is `+0`. The probe met that twice a step
+against the X-point's zero columns, and the general case -- a nonzero column
+whose entries at the contact happen to vanish -- is why `meq::RowView` carries
+a `negate` flag rather than the special case alone. `DeviceRowsTests` pins all
+three arms, signed zero included.
+
+**AND THE ONE-ROW BORDER TOO, WHICH IS EVERY FIXED-BOUNDARY MACHINE.** Its
+columns are `y` and `z` and its elimination is a division, which read them on
+the host -- so on `fixed-a-testtokamak` every route stayed declined. The same
+launch serves it: 10 axis evaluations and 7 iterate readers on the device, the
+host's `psi_ax` and Newton count. On `ff3` the axis leg reads 22.1 s against
+M-235's 33.6 s, and **21.9 s of it is ONE cold sweep** -- the solve's first
+evaluation, made before the iterate has ever been on the device; the other
+fifteen take 0.19 s between them.
+
+**AND THE ROUTES NOW OPEN WITHOUT BEING FORCED.** Under `--device cuda` on
+`machine-f-diiid`, with nothing set: 6 axis and X-point evaluations and 118
+iterate readers on the device, 0 declined, the bordered row dots on the device,
+and MEQ's host funnels down from about 10,500 to 460 a run. The host path is
+byte-identical to what it printed before.
+
+**AND OPENING THE ONE-ROW BORDER EXPOSED THE AXIS ROUTES' ONE SEMANTIC
+DIFFERENCE ON A SHIPPED CASE.** `rotating-normalised` reads `psi_ax =
+1.039297e-01` under CUDA and under `debug` alike -- so not a stale read --
+against the host's `1.039325e-01`, same seven Newton steps, parting at step 3.
+Both report the axis LOCATED; they located different points. The device's is
+the root the post-solve check also finds, at `( 1.0919, 0 )` and normalised
+flux 1.0000; the host's warm ring walk settles on a point whose flux sits above
+it, and its own post-solve check then reads normalised flux 0.9999. That is the
+difference `AxisSearch.hpp` states and leaves to `DeviceParity` -- nearest
+clean root globally against the first productive ring -- and `DeviceParity`'s
+cases had never met it, the two-row borders having agreed throughout. It is a
+768-element rectangle, the coarsest case in the tree. **Owed: which of the two
+the constraint should take**, and the device's is the one the run's own check
+agrees with.
+
+**27 OF 29 SHIPPED EXAMPLES GIVE THE HOST'S ANSWER UNDER CUDA: `rotating-
+normalised` IS THE ONE ABOVE, AND `diverted-tokamak` WAS ALREADY WRONG.** `psi_ax`, `psi_bnd`, the X-point and the Newton count compared
+as printed text, cpu against cuda: every multi-row bordered machine, the
+`q(psi)`-driven outer loop, `rotating-rectangle` and the fixed-boundary six --
+whose one-row border now runs on the device too -- agree; `manufactured` exits
+1 on both. **`diverted-tokamak` does not**: the host
+converges in 25 steps to `psi_ax = 8.486e-02`, this tree under CUDA in 11 to
+`8.091e-02` with the axis inside conductor 1 -- and **`HEAD` under CUDA is wrong
+too**, in 55 steps to `psi_ax = -8.206e-02`, which the driver refuses. The two
+part from the host at the FIRST Newton step, by far more than round-off. It is
+the only shipped case with a MOVING plasma support and a prescribed limiter, and
+`DeviceParity` covers neither; the likeliest mechanism is the device integrand
+reading XP-1's element flags as of its last rebuild while
+`refreshPlasmaComponent()` moves the mask every residual. That was it, and it is
+fixed -- [M-239](#m-239).
+
+**AND THE OUTPUT STAGE OF A CURVED FIXED-BOUNDARY CASE COULD NOT RUN UNDER
+`debug` AT ALL.** `HEAD` faults on `fixed-a-testtokamak` before the solve; with
+the routes open the solve completes and `meq::curveBoundaryOnto()` faults
+twice -- a copy of the mesh nodes born device-valid, then a device-aware
+`*nodes = original` ahead of raw `+=` writes. Both funnelled, and the case
+runs end to end under `debug`. Under CUDA the same sequence wrote the host copy
+of the nodes while the flags named the device's; whether the `.vtu` writer then
+read the un-bent copy was not checked.
+
+**WHAT IS LEFT ON THE BUS IS UPSTREAM'S, AND IT IS MOSTLY SCRATCH.** Of the
+543 MB host-to-device, about 470 MB is inside `DarcyNPCSolver::ArrayMult()`'s
+batched traversal: its per-call `r_locs` and `dx_locs` are born on the host and
+uploaded by the gather and scatter kernels, and `LUSolve` uploads local blocks
+each call. Of the 101 MB back, about 70 MB is `DarcyHybridization`'s host legs
+-- `NonlinearResidualFinish`, `SyncLocalBlocksToHost` under `ComputeH()` and
+`MultNL()`, `GetSubVector`, `NPCResidualFinish`. MEQ's own share is the phase-C
+partials and scalars (2 MB) and phase D's answer, which `downloadSolution()`
+still copies twice.
+
+### M-239
+
+**`diverted-tokamak` HAD FOUR FAILURE MODES ON RECORD OR IN THE TREE, AND THEY
+ARE FOUR DIFFERENT THINGS: ONE DEVICE DEFECT, NOW FIXED; ONE CURE NOBODY HAD
+RECORDED; ONE LIMIT OF THE FORMULATION; AND A SHIPPED EXAMPLE THAT REPORTS THE
+BRANCH ITS OWN HEADER DOES NOT COMPARE AGAINST.**
+
+The case is the only shipped one with a MOVING plasma support -- `ConfineToPlasma`
+with no X-point border and no `PlasmaSupportSweeps`, so `refreshPlasmaComponent()`
+re-decides the support at every residual -- and its `psi_bnd` is a point limiter
+at freegs4e's X-point.
+
+**1. UNDER ANY DEVICE THE INTEGRAND READ A STALE SUPPORT. FIXED.** The device
+integrand's element flags are an upload in `npcConstants`, refreshed only when
+the NPC operator is rebuilt; the host's `meq::SourceIntegrator` reads the live
+mask. So the two integrated `F` over different supports from the first time the
+support moved -- the first Newton step. Measured on one binary:
+
+| arm | Newton | `psi_ax` | first `‖r‖` | |
+|---|---|---|---|---|
+| host, `MKL_NUM_THREADS` 1, 2, 4, 8; 4 OpenMP threads; UMFPACK; batched local factorisation | 25 | 8.486305e-02 | 6.844383e-02 | all seven identical |
+| `cuda`: cuDSS or PARDISO, serial or batched local factorisation | 11 | 8.091091e-02 | 6.858029e-02 | all four identical, axis INSIDE coil P1U |
+| `debug`, host arithmetic | 11 | 8.091091e-02 | 6.858029e-02 | the same wrong answer |
+| `HEAD`, `cuda` | 55 | **-8.205878e-02** | | refused by the driver |
+| `HEAD` single, `cuda` | 49 | **-8.205861e-02** | | refused |
+| **fixed**, `cuda` | **25** | **8.486305e-02** | **6.844383e-02** | the host's to every printed digit |
+| **fixed**, single `cuda` | 23 | 8.486282e-02 | | single host's to its floor |
+
+*Seven host perturbations agreeing exactly and four device arms agreeing exactly
+with each other but not with the host* is what said "semantic, not arithmetic"
+before any code was read, and `debug` reproducing the card's answer to every
+digit said it again. `refreshPlasmaComponent()` now carries every move to the
+uploaded flags -- comparison inside `DeviceConstants::refresh()` keeps an
+unmoved mask free -- through one `deviceIntegrandInputs()` shared with the
+operator's build. **`DeviceParity` could not see it**: both its cases freeze the
+support within a solve. It now runs this case on `cpu`, `cuda` and forced
+`cuda`, without the `debug` arm, which the defect does not need.
+
+**2. SINGLE PRECISION NO LONGER FAILS, AND THE CURE PREDATES THIS WORK.**
+[M-221](#m-221) recorded a singular border at `MKL_NUM_THREADS = 1` and a
+refused negative-`psi_bnd` branch at 2, 4 and 8. Today, and at `HEAD`, the
+single build converges at all four in 23 steps to `psi_ax = 8.48628e-02`, within
+FP32's floor of double's. Several things landed between M-221 and `HEAD` --
+[M-222](#m-222)'s inverse-transform tolerance and marking offset among them --
+and none is credited: the old binary is gone, and *a cure measured after
+changing several things attributes nothing*.
+
+**3. A COLD START IS SINGULAR, ON EVERY ARM, AND THAT IS THE FORMULATION.**
+Without `[initialguess]` the zero Dirichlet datum makes the cold iterate
+`psi_h = 0`, the support is empty, and the plasma-current row of the dense
+corner is identically zero -- `|row| 0.000e+00`, on the host and the card
+alike, through Newton and Picard-then-Newton both. The trivial branch every
+GS-2 source has (`CLAUDE.md`, *Traps*), met through the current constraint. The
+example ships a warm start for this reason.
+
+**4. AND THE SHIPPED EXAMPLE REPORTS THE OTHER BRANCH.** [M-132](#m-132)
+established that this prescribed-limiter formulation has discrete equilibria
+selected by the starting `psi_bnd`: from 0 it reaches `8.486e-02`, seeded near
+the answer it reaches `8.266e-02`, and the two do not merge under refinement.
+The file starts from 0, so it reports `8.486305e-02` -- **2.6% from the
+freegs4e `psi_axis` its own header lists "for anything comparing against
+it"**. Freezing the support within each solve selects the benchmarked branch:
+
+| `diverted-tokamak`, `k = 2`, 2642 elements | Newton | `psi_ax` | `psi_bnd` |
+|---|---|---|---|
+| as shipped, the support moving inside Newton | 25 | 8.486305e-02 | 3.229767e-02 |
+| `PlasmaSupportSweeps = 4`, host and `cuda` alike | 7 + 3 + 2 | **8.266088e-02** | **3.237970e-02** |
+| `diverted-tokamak-xpoint`, the X-point a border ([M-87](#m-87)) | | 8.266004e-02 | 3.237932e-02 |
+| freegs4e, 129^2 | | 8.271751e-02 | 3.240413e-02 |
+
+The moving support's own Jacobian is not the problem: both profiles vanish
+quadratically at `Psi_N = 0`, so the edge term `dF/dpsi` cannot carry is zero.
+The slow phase is globalisation -- the step-0 full Newton step is 249 times
+WORSE in merit, and the line search accepts a sixteenth to a half of a step for
+fifteen steps before the quadratic finish. **The example now sets
+`PlasmaSupportSweeps = 4`**, decided as a change of which equilibrium it reports
+rather than made silently, and its header's comparison holds: `8.266088e-02` on
+host and `cuda` alike, in 7 + 3 + 2 steps. `DeviceParity` keeps the moving
+support covered by running a copy with that key stripped -- no other shipped
+example moves a FILLED support.

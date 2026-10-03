@@ -188,9 +188,53 @@ namespace meq
 				{
 					mfem::BlockVector const xb(
 						const_cast<mfem::Vector &>( x ), offsets );
+					/*
+					 * THE OUTPUT AND THE LOCAL STATE ARE MADE DEVICE-VALID
+					 * BEFORE THEIR BLOCKS ARE WRITTEN, OR THE TWO
+					 * SyncFromBlocks() BELOW ARE DOWNLOADS.
+					 *
+					 * `BlockVector::SyncFromBlocks()` is `block.SyncAlias(
+					 * base )` per block: it makes each BLOCK match its BASE,
+					 * and `SyncAlias_` copies the block's device range down
+					 * whenever the base says host. `y` arrives host-valid --
+					 * every residual vector MEQ declares is a fresh
+					 * `mfem::Vector v( n )` -- and `xLoc` is host-valid after
+					 * `Update()`, so every residual evaluation downloaded five
+					 * blocks the kernels had just written: 147 copies and
+					 * 45 MB over `machine-f-diiid`, upstream's
+					 * `DarcyNPCSolver::ArrayMult()` shape in MEQ's own copy
+					 * (M-237). `Write()` marks the device copy live without
+					 * moving anything, and a base that says device leaves the
+					 * blocks nothing to catch up to -- while a block written on
+					 * the HOST is then carried UP, so the flags stay honest on
+					 * either route.
+					 *
+					 * Before `yb` is taken: an alias copies its base's flags
+					 * when it is made.
+					 */
+					y.UseDevice( true );
+					y.Write();
 					mfem::BlockVector yb( y, offsets );
 
+					/*
+					 * AND EVERY BLOCK IS MADE DEVICE-CAPABLE BY NAME, because
+					 * the copies below are `Vector::operator=`, which runs
+					 * where either side's UseDevice() says -- and a block keeps
+					 * the flags it was MADE with. `Update()` at an unchanged
+					 * size returns early and keeps blocks made before the base
+					 * was device-capable, so the copy ran on the host into a
+					 * page the base had just been told was the device's:
+					 * `mfem::Device( "debug" )` faulted in its memcpy, and under
+					 * CUDA it was a silent host write repaired by an upload.
+					 */
+					for ( int b = 0; b < yb.NumBlocks(); ++b )
+						yb.GetBlock( b ).UseDevice( true );
+
 					xLoc.Update( locOffsets );
+					xLoc.UseDevice( true );
+					xLoc.Write();
+					for ( int b = 0; b < xLoc.NumBlocks(); ++b )
+						xLoc.GetBlock( b ).UseDevice( true );
 					xLoc.GetBlock( 0 ) = xb.GetBlock( 0 );
 					xLoc.GetBlock( 1 ) = xb.GetBlock( 1 );
 					/*
@@ -240,11 +284,22 @@ namespace meq
 					 * BOTH HOPS, COPIED FROM DarcyNPCOperator::Mult RATHER THAN
 					 * REASONED ABOUT. yb is an ALIAS of y and each block is an
 					 * alias of yb -- three Memory objects with three sets of
-					 * flags. SyncFromBlocks() carries the blocks up to yb and
-					 * SyncAliasMemory() carries yb up to y. Upstream's own
-					 * comment records that without the first, a fresh Newton
-					 * work vector reads zero and M-79's symptom comes back: a
-					 * converged Newton that takes no steps.
+					 * flags. Upstream's own comment records that without the
+					 * first, a fresh Newton work vector reads zero and M-79's
+					 * symptom comes back: a converged Newton that takes no
+					 * steps.
+					 *
+					 * **WHAT `SyncFromBlocks()` DOES IS MAKE EACH BLOCK MATCH
+					 * ITS BASE, NOT CARRY THE BLOCKS UP** -- it is
+					 * `block.SyncAlias( base )`, and `SyncAlias_` reconciles the
+					 * alias to the base's validity, copying the block's other
+					 * copy across where the base says a location is live and the
+					 * block does not. This comment said *up*. With `y` arriving
+					 * host-valid, what happened was the device-written blocks
+					 * being copied DOWN to match it -- the right values, paid
+					 * for with a download per block per residual. See the top
+					 * of this function for why `y` is now device-valid going
+					 * in. M-238.
 					 */
 					yb.SyncFromBlocks();
 					yb.SyncAliasMemory( y );
@@ -255,7 +310,13 @@ namespace meq
 					mfem::BlockVector const xb(
 						const_cast<mfem::Vector &>( x ), offsets );
 
+					// Device-valid before the blocks are written, and the blocks
+					// device-capable by name; see Mult().
 					xLoc.Update( locOffsets );
+					xLoc.UseDevice( true );
+					xLoc.Write();
+					for ( int b = 0; b < xLoc.NumBlocks(); ++b )
+						xLoc.GetBlock( b ).UseDevice( true );
 					xLoc.GetBlock( 0 ) = xb.GetBlock( 0 );
 					xLoc.GetBlock( 1 ) = xb.GetBlock( 1 );
 					/*

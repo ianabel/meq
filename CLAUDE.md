@@ -939,6 +939,125 @@ widens to the whole mesh once, which is the ring walk's own structure and is
 what makes a bounded search safe: *a neighbourhood that silently missed the
 axis would hand the selection a competition its winner was not entered in.*
 
+**AND THE WHOLE OF IT IS MEASURED NOW, IN BOTH FORMATS, AND THE PORT BEING
+CORRECTLY SWITCHED OFF IS WHAT A DEVICE RUN LOSES ON**
+-> **[M-235](MEASUREMENTS.md#m-235)**. Four cases, six arms, gated on a quiet
+machine. The device wins the production bordered case in both formats --
+**0.81x and 0.85x on `mf`'s solve**, and the fastest of all sixteen arms is
+single + CUDA at 2.445 s against the double host's 3.727 -- and loses the big
+fixed ones. **The reason is not the FP64 rate**: both CUDA arms print
+`0 taken, 15 declined`, because the gate is a predicate about the DATA and is
+inert until residency arrives, so the axis leg runs the HOST sweep with
+`meq::hostLoopsAreSafe()` false (M-188) -- **1.00 cores against 1.97 and 2.61,
+and 18 to 20 per cent of a device run's wall**. The 11.9 ms kernel sits beside
+it, built and idle. *The leg the port was written for is the one the device is
+losing on, and it is losing on it because the port is correctly off.*
+
+**AND THE TEN HOST READERS OF THE ITERATE ARE PORTED, TO THE BIT, AND THE BUS
+SAYS THEY WERE UNDER ONE PER CENT OF IT** -> **[M-237](MEASUREMENTS.md#m-237)**.
+`src/meq/ResidentIterate.hpp` gives the five plasma element loops, the
+transmission gather, the `psi_bnd` row and the three copy constructions device
+routes behind the axis route's gate; forced, 126 of 126 evaluations equal their
+host loops and the iterate is read on the host in phase D alone. **Three things
+from it generalise.** *A second expression of the physics is bit-identical only
+where it is the same expression*: `hermite10Prime` factored where `Profiles.cpp`
+expands, an ulp in every derivative route, invisible to `SourceViewTests`
+because its derivative envelope is four ulps of `psi` wide. *Removing the readers
+does not open the gate*: unforced it reads `0 taken` until the bordered columns
+are device-capable, and then every route opens by itself. And ***an instrument
+that counts one project's funnels measures that project's readers, not the
+bus***: the crossing counter read 0.888 MB on a run `nsys` puts near 950 MB, and
+the largest single item -- **every backsolved column downloaded inside upstream's
+`DarcyNPCSolver::ArrayMult()`, fourteen columns a Newton step and 140 MB over
+`machine-f-diiid`'s twelve, on the default path**, because
+`SyncFromBlocks()` matches each block to a base MEQ hands it host-valid -- was
+found with a `gdb` breakpoint on `mfem::CuMemcpyDtoH`, one call further in than
+the counter looks.
+
+**AND THE BORDERED COLUMNS NOW STAY ON THE DEVICE, AND THE ROUTES OPEN WITHOUT
+BEING FORCED** -> **[M-238](MEASUREMENTS.md#m-238)**. Device-to-host over a
+`machine-f-diiid` run falls from 259 MB to 101 MB and host-to-device from 692 MB
+to 543 MB, with 27 of 29 shipped examples at the host's every printed digit
+under CUDA. Of the other two, `diverted-tokamak` was already wrong under CUDA at
+`HEAD` -- the device integrand read a stale plasma support, fixed in
+[M-239](MEASUREMENTS.md#m-239) -- and `rotating-normalised` locates a different
+axis on the device, the axis routes' one stated semantic difference, which is
+owed. **The transferable half is one sentence:
+`BlockVector::SyncFromBlocks()` makes each block match its BASE**, so a kernel
+writing the blocks of a vector whose base says host has its output downloaded
+on the spot -- upstream's `ArrayMult()` did it to every backsolved column, and
+MEQ's own residual operator did it to its output while its comment said the
+call *carries the blocks up*. `Write()` on the base before the blocks are
+written is the repair, plus `UseDevice( true )` on each block by name where
+`Update()` kept blocks made before the base was device-capable --
+`Device( "debug" )` faulted on exactly that. And the dense fill's device
+contraction is bit-identical to `rowDot()` only because `psi_bnd`'s
+`-limiterValue()` is a flag on the finished sum and not a negated weight:
+*`-( +0 )` is `-0`, and a sum of negated terms from `+0` is `+0`.*
+
+**AND AN UPLOAD OF HOST STATE IS A SNAPSHOT, SO IT GOES STALE WHEN THE HOST
+STATE MOVES BETWEEN REFRESHES** -> **[M-239](MEASUREMENTS.md#m-239)**. The
+device integrand's element flags were uploaded at the NPC operator's rebuild;
+under a MOVING plasma support `refreshPlasmaComponent()` changes the mask at
+every residual, the host integrand followed it and the device one did not --
+so `diverted-tokamak` under any Device, `HEAD` included, converged to a
+different equilibrium. Seven host perturbations agreeing exactly and four
+device arms agreeing exactly with each other but not with the host is the
+signature of a semantic difference rather than arithmetic, and it is worth
+reading before any code. **`DeviceParity` could not see it because both its
+cases freeze the support**, which is the coverage lesson: *a device test's
+cases have to exercise every way host state can move, not only every leg.* The
+same entry records that this example reported M-132's OTHER branch, 2.6% from
+the freegs4e reference its header quotes, until `PlasmaSupportSweeps = 4` put it
+on the benchmarked one; `DeviceParity` runs a copy with that key stripped to
+keep the moving support covered.
+
+**AND SINGLE PRECISION READ AS A 1.1x TO 2.4x LOSS WHILE EVERY ARITHMETIC LEG
+IN IT WAS FASTER, WHICH IS THE SEVENTH CONSTANT OF M-184'S SPECIES AND THE
+FIRST THAT COSTS ONLY TIME.** Per call the threaded solve legs are 10 to 27 per
+cent FASTER in single, as FP32 should be; the loss is two SINGLE-THREADED host
+legs, `setup` at 2.15x and `re-assembly` at 2.8x, on identical work -- same
+mesh, same elements, same 0 paths widened, same 98 per cent reaching `Gamma`.
+**The suspect was `extensionFdStep()` and it was wrong**; `perf` named
+`meq::BoundaryShape::shiftedAngle`, which takes a `double` and is in the
+MFEM-free half, so its arithmetic is identical in the two builds and its 2.99x
+self time IS a call count. **`mfem::VertexConePath`'s default `tol_` is
+`1e-13`** and `FirstCrossing()`'s bisection floors at `eps*length`, six orders
+ABOVE it in single -- so the loop runs to `max_iter = 100` on every ray of every
+vertex, where double stops at 39 halvings. *A fixed-count consumer and a
+tolerance-driven consumer of one function, with the arithmetic held equal, is
+what separated it*: `MarkLevelSetSubdomain` is flat at 1.25x and
+`FirstCrossing` triples. **It misreports NOTHING** -- the crossing is located
+to `eps`, better than the target asks -- so no assertion in the tree can see it
+and only a clock can, which is how a suite at M-222's 62-of-63 parity carried
+it. **AND THE REPAIR IS NOT A TOLERANCE -- IT IS THE BISECTION'S TERMINATION,
+AND IT IS UPSTREAM'S.** MEQ built `meq::pathTolerance()` first and swept it:
+every value loose enough to help is loose enough to MOVE AN ANSWER, because
+this constant decides where the transfer path ends and the exterior datum is
+assembled there. `64 eps` takes `ConductorSubtraction` red, `4 eps` takes
+`DriverAcceptance` red at *"620 elements where the same loop by hand ends at
+612"* -- a deterministic element count, not a coin toss -- and
+`MachineFixedBoundary` with it. **MEQ's arm is reverted whole.** The fix that
+costs nothing is one line of `FirstCrossing()`: a bisection in a finite format
+should stop when the midpoint stops moving, `if ( tm <= ta || tm >= tb )`.
+Simulated, float reaches the SAME answer in **20 iterations against the cap's
+100**, and double's `1e-13` still fires first at 39, so **the double path is
+bit-identical and no caller sees a change**. *The question was never how tight
+to ask for; it was that the loop had no idea when it had finished.* And the
+pair is carried by THREE path classes and not four -- `LevelSetPath`,
+`VertexConePath` and the `TiltedPath` added by the 2026-10-01 path merge, which
+all reach the one `FirstCrossing()`. `ClosestPointPath` is a closed form with no
+bisection in it; MEQ's report said four and upstream corrected it. **THE FIX IS
+UPSTREAM'S NOW, TAKEN AS WRITTEN** -- `238f719f50`, contained in
+`meq-integration` at `5c2324e921`. **AND THEIR PIN IS THE SHARPER HALF, BECAUSE
+IT RUNS IN DOUBLE**: a single-precision defect cannot be pinned by a
+single-precision test in a tree whose single tests skip, so they ask a DOUBLE
+for a tolerance no double bracket can reach -- `1e-30`, a cap of 10,000, and a
+COUNT of level-set calls rather than a clock -- reading **10,002 before and
+under 100 after**. *A format-specific defect is pinned by putting the other
+format in the same position*, which is a cheaper instrument than a second build.
+Reported as `HDG-PATH-BISECTION-TERMINATION-FROM-MEQ.md`.
+
 **AND THE KERNEL WAS 65x OFF ITS OWN ARITHMETIC, TWO THIRDS OF IT IN THE
 REDUCTIONS AND A LOOP BOUND.** Both reductions were `mfem::forall( 1, ... )` --
 the flux scale walking **1.23 million dofs on one CUDA core** -- and the loop
@@ -1578,9 +1697,10 @@ cannot be built beside `MFEM_PRECISION = single`; its simplex path splits every
 triangle into **three** quads; and MFEM's device findpts is gated on
 `tensor_product_only`, so MEQ's triangles can never reach it
 → **[M-175](MEASUREMENTS.md#m-175)**. **The device half is MEQ's own and is one
-of the FIVE files in `src/meq` a device compiler owns** —
+of the SEVEN files in `src/meq` a device compiler owns** —
 `PointLocatorDevice.cpp`, `SourceViewDevice.cpp`, `DeviceNPCDevice.cpp`,
-`DeviceQuadratureDevice.cpp` and `DeviceRowsDevice.cpp` — because `mfem::forall`
+`DeviceQuadratureDevice.cpp`, `DeviceRowsDevice.cpp`, `AxisSearchDevice.cpp` and
+`ResidentIterateDevice.cpp` — because `mfem::forall`
 `static_assert`s under `g++`; CMake marks that set and reads the architecture
 out of MFEM's `config.mk` rather than guessing. Each compiles to a **host stub**
 without CUDA, so the build is host-only and correct rather than short of a
@@ -2206,10 +2326,11 @@ is `BatchedLinAlg`'s `gpu_blas` backend and `CuDSSSolver`; **MFEM's batched
 element and face kernels**, which are reached through `AssemblyMode`,
 `LocalFactorMode` and `TraceAssemblyMode` and **are** the device route; and
 **MEQ's own device translation units** — `DeviceNPCDevice.cpp`,
-`DeviceQuadratureDevice.cpp`, `DeviceRowsDevice.cpp`, `PointLocatorDevice.cpp`
-and `SourceViewDevice.cpp`, which CMake hands to `nvcc` at the architecture it
-reads out of `config.mk`, with `mfem::forall` in eight files under `src/meq`.
-Without CUDA those five compile to host stubs and the build is host-only and
+`DeviceQuadratureDevice.cpp`, `DeviceRowsDevice.cpp`, `PointLocatorDevice.cpp`,
+`SourceViewDevice.cpp`, `AxisSearchDevice.cpp` and `ResidentIterateDevice.cpp`,
+which CMake hands to `nvcc` at the architecture it reads out of `config.mk`, and
+which hold every `mfem::forall` launch in `src/meq`.
+Without CUDA those seven compile to host stubs and the build is host-only and
 correct, which is what CI builds. → **[M-223](MEASUREMENTS.md#m-223)**.
 
 **AND IT IS NOT FREE — IT COSTS 7% OF THE WALL CLOCK ON THE CPU PATH, MEASURED
@@ -3051,6 +3172,24 @@ member and `apps/meq.cpp` takes it by reference — so this is a fixture defect,
 and the fix is a `static` pool that lives as long as the process. **Anything
 that returns a `SubMesh` must return, or otherwise outlive, its parent.**
 
+**AND THE TRIGGER IS NOW GATED, WHICH CHANGES WHAT IS LATENT AND NOT WHAT IS
+OWED.** The constructor opens
+`const SubMesh *sub = use_cone_ ? dynamic_cast<const SubMesh *>( mesh ) : NULL;`
+— so it reaches the parent **only when the cone is asked for**, and `use_cone_`
+is `false` by default with MEQ passing it at none of its construction sites. So
+MEQ has never used `C(x)`, and this backtrace is not reachable on MEQ's own
+paths today. **The cone being off is upstream's measured decision rather than an
+oversight, and half the measurement is MEQ's**: it restricts every vertex at
+every refinement, `π/2` becoming `π/8`, and changes neither the tiling residual
+nor the flux rates — while it costs the far face's quadrature, which is the half
+MEQ found. The cost is not a coverage failure but the SMOOTHNESS of
+`ξ ↦ a( x( ξ ) )` along a face, and refining the RULE rather than the mesh is
+what separates those two: the same cone-on sums fall to the instrument's own
+floor at a 40th-order rule. *A caller who wants the cone must raise the face
+rule with it.* The lifetime rule above stands on its own — a dangling parent is
+undefined behaviour whether or not anything currently dereferences it, and what
+the gate bought is time, not safety.
+
 **AND IT IS THE SECOND TIME AN MFEM UPDATE HAS TURNED A LATENT MEQ DEFECT INTO A
 CRASH IN MFEM'S OWN CODE.** The first was `SourceIntegrator`'s shared scratch
 meeting the threaded element loop. Both were dormant contracts — *the parent
@@ -3758,6 +3897,11 @@ src/meq/     the library. Config, Profiles, Source, SourceFactory,
              axis found by rooting every element on the device, with the host
              keeping the selection, the conductor filter and the merge --
              the half carrying the physics. M-230, M-231, M-232.
+             ResidentIterate is the rest of the iterate's readers: the five
+             plasma element loops, the psi_bnd row's ordered dot and the cold
+             state's mask, each reproducing its host loop TO THE BIT on the
+             host's own radii and weights. Gated like AxisSearch, so inert
+             until the iterate stays on the device. M-237.
              Crossings and StageChecksum are the two DEVICE instruments and
              neither is part of the solve. Crossings counts host reads of a
              device-written state and, separately, how many of them MOVED
@@ -3946,7 +4090,7 @@ both places
 
 **This is enforced**, by `.clang-tidy`'s `readability-identifier-naming` and a
 ctest named `naming`. It runs over `MEQ_CORE_SOURCES_PRESENT`, which is now
-**every** file in `src/meq` **except the five a device compiler owns**.
+**every** file in `src/meq` **except the seven a device compiler owns**.
 
 **AND THAT EXCEPTION IS AN INSTRUMENT FAILING, NOT A RULE BEING RELAXED.**
 clang-tidy reads each file's flags out of the compile database, and a CUDA entry
@@ -3958,7 +4102,7 @@ that has run on nothing** — reported as a failure, which is the right report o
 the wrong thing, and it took the `naming` ctest red for a session.
 `CMakeLists.txt` fills `MEQ_CORE_SOURCES_DEVICE_LANGUAGE` only where a device
 language was actually enabled, so **on a host build — which is what CI builds —
-all five are checked like everything else**. The convention still binds them; what is missing is a tool that can read
+all seven are checked like everything else**. The convention still binds them; what is missing is a tool that can read
 them here.
 
 `src/meq` deliberately keeps MFEM out of `Profiles` and `Source` — plain `double`

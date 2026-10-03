@@ -2996,15 +2996,27 @@ BOOST_AUTO_TEST_CASE( theOutermostSurfaceIsTracedEntirelyInTheBand )
 			            "order in the band width at every k, so if this is real "
 			            "the control has stopped being a control" );
 			if ( liftIsMeasurable )
-			BOOST_TEST( liftRate > taylorRate + 1.0,
-			            "k = " << order << ": the transfer lift converges at "
-			            << liftRate << " against the Taylor step's " << taylorRate
-			            << ", less than the full order that separates an "
-			            "O( h^2 ) remainder from an integrated O( h^(k+1) ) flux" );
-			BOOST_TEST( ratio > 100.0,
-			            "k = " << order << ": the transfer lift is only " << ratio
-			            << " times closer to Gamma than the Taylor step on the "
-			            "finest mesh" );
+			{
+				BOOST_TEST( liftRate > taylorRate + 1.0,
+				            "k = " << order << ": the transfer lift converges at "
+				            << liftRate << " against the Taylor step's " << taylorRate
+				            << ", less than the full order that separates an "
+				            "O( h^2 ) remainder from an integrated O( h^(k+1) ) flux" );
+				// AND THE RATIO IS THE SAME CLAIM READ ON THE FINEST MESH, so it
+				// takes the same guard. The lift is the numerator and it has
+				// stopped falling; the Taylor step is four decades above that
+				// floor and has not, so the quotient measures the format rather
+				// than the lift. Double reads 93818 at k = 3 where single reads
+				// 30.8 against a bound of 100 -- and double's own finest lift
+				// error is 1.08e-08, BELOW one single epsilon, so what single
+				// cannot do is represent the numerator rather than achieve it.
+				// Left unguarded when its three siblings above were guarded.
+				// M-222.
+				BOOST_TEST( ratio > 100.0,
+				            "k = " << order << ": the transfer lift is only " << ratio
+				            << " times closer to Gamma than the Taylor step on the "
+				            "finest mesh" );
+			}
 		}
 	}
 }

@@ -53,6 +53,33 @@ namespace meq
 {
 
 	/**
+	 * One border row as a kernel sees it: `count` weights against `count`
+	 * indices of a column, summed from zero in `k` order.
+	 *
+	 * **EVERY ROW OF THE BORDER HAS THIS SHAPE**, which is what lets one launch
+	 * contract all of them: the compressed transmission and current rows are a
+	 * shared support and a stretch of values; `psi_ax`'s is one element's
+	 * trace dofs; `psi_bnd`'s the contact's shape functions or a single unit
+	 * entry; XP-3's two are one element's flux dofs. Pointers are DEVICE
+	 * pointers into buffers the caller keeps alive across the launch.
+	 *
+	 * `negate` flips the finished sum, which is NOT the same as negating the
+	 * weights: `-( +0 )` is `-0` where a sum of negated terms from `+0` is
+	 * `+0`. `psi_bnd`'s row is `-limiterValue( v )` on the host, so it carries
+	 * the flag; XP-3's `total -= w v` folds into its weights exactly, IEEE
+	 * subtraction being addition of the negation.
+	 *
+	 * No default member initialisers, for the reason meq::AxisCandidate gives.
+	 */
+	struct RowView
+	{
+		int const *indices;
+		mfem::real_t const *weights;
+		int count;
+		int negate;
+	};
+
+	/**
 	 * A device-resident mirror of a meq::CompressedRows, and its reduction.
 	 *
 	 * The mirror is uploaded when the rows are built -- once per support sweep
@@ -150,6 +177,11 @@ namespace meq
 			bool dotColumns( mfem::Vector const &columns, int columnCount,
 			                 int length, mfem::DenseMatrix &out ) const;
 
+			/// Row @a r as a meq::RowView over this mirror's device buffers,
+			/// for dotRowsAgainstColumnsOnDevice(). Valid while the mirror is
+			/// neither re-uploaded nor cleared.
+			RowView row( int r ) const;
+
 		private:
 			mfem::Array<int> indices;
 			mfem::Vector values;
@@ -203,6 +235,34 @@ namespace meq
 	                                   mfem::Vector const &columns,
 	                                   int columnCount, int length,
 	                                   mfem::DenseMatrix &out );
+
+	/**
+	 * Every row of @a rows against every column of @a columns, in ONE launch.
+	 *
+	 * The bordered step's dense fill is `( N + 4 )` rows against `y` and the
+	 * `N + 4` backsolved columns, and every one of those dots used to be a
+	 * host loop over a column the host had to fetch: fourteen columns a
+	 * Newton step on `machine-f-diiid`, 0.83 MB each. With the columns kept
+	 * on the device the dots are taken there and only the table comes back --
+	 * `rows x columns` doubles, column-major (`out[ r + rows*c ]`, which is
+	 * mfem::DenseMatrix's layout), left DEVICE-valid for the caller to funnel.
+	 *
+	 * One thread per `( row, column )` pair summing from zero in `k` order,
+	 * in the file compiled without FMA contraction, so each entry is the
+	 * host `rowDot()`'s double exactly. M-237's successor.
+	 *
+	 * @param columns device pointers, each to a column of at least the length
+	 *        every row's largest index reaches.
+	 * @return false, having touched nothing, with no mfem::Device.
+	 */
+	bool dotRowsAgainstColumnsOnDevice( mfem::Array<RowView> const &rows,
+	                                    mfem::Array<mfem::real_t const *> const &columns,
+	                                    mfem::Vector &out );
+
+	/// dotRowsAgainstColumnsOnDevice()'s launch.
+	bool dotRowsAgainstColumnsKernel( mfem::Array<RowView> const &rows,
+	                                  mfem::Array<mfem::real_t const *> const &columns,
+	                                  mfem::Vector &out );
 
 }
 

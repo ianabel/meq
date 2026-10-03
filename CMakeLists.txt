@@ -228,6 +228,8 @@ set(MEQ_CORE_SOURCES
 	src/meq/PointLocator.cpp
 	src/meq/PointLocatorDevice.cpp
 	src/meq/Profiles.cpp
+	src/meq/ResidentIterate.cpp
+	src/meq/ResidentIterateDevice.cpp
 	src/meq/RotatingSource.cpp
 	src/meq/SafetyFactor.cpp
 	src/meq/SafetyFactorSolve.cpp
@@ -264,6 +266,8 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Output.cpp
 	src/meq/PointLocator.cpp
 	src/meq/PointLocatorDevice.cpp
+	src/meq/ResidentIterate.cpp
+	src/meq/ResidentIterateDevice.cpp
 	# The INVERSION is MFEM-free and CI gates it; the outer Newton around it is
 	# KINSOL through mfem::KINSolver and is not. The split is along the
 	# contract: g = 4 pi^2 q/( V' < R^-2 > ) is arithmetic a mesh cannot change,
@@ -584,9 +588,15 @@ if(MEQ_CORE_SOURCES_PRESENT)
 				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
 		set_source_files_properties(
 			src/meq/DeviceRowsDevice.cpp
+			src/meq/ResidentIterateDevice.cpp
 			PROPERTIES
 				LANGUAGE CUDA
 				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr;-fmad=false")
+		# ResidentIterateDevice.cpp shares that flag for that reason: its five
+		# plasma loops, its gather and its ordered dot reproduce host loops
+		# operation for operation, against host-computed radii and weights, so
+		# the device route can be compared with the host digit for digit once
+		# the iterate is resident -- and a contraction would cost exactly that.
 		# DeviceQuadratureDevice.cpp keeps the DEFAULT contraction, which is the
 		# other side of the trade M-190 records. It is an element-loop
 		# quadrature, not a reduction whose job is to reproduce a host sum: the
@@ -621,6 +631,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			src/meq/DeviceQuadratureDevice.cpp
 			src/meq/DeviceRowsDevice.cpp
 			src/meq/PointLocatorDevice.cpp
+			src/meq/ResidentIterateDevice.cpp
 			src/meq/SourceViewDevice.cpp)
 		set_target_properties(meq_core PROPERTIES
 			CUDA_SEPARABLE_COMPILATION ON
@@ -630,7 +641,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			"meq: ${_meq_device_file_count} sources compile as CUDA, arch ${_meq_cuda_arch}")
 	elseif(MFEM_FOUND AND MFEM_USE_HIP)
 		enable_language(HIP)
-		# THE SAME SIX, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
+		# THE SAME SEVEN, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
 		# RESTATED. This arm carried two of them for as long as there were two,
 		# and a device file added to the CUDA branch did not reach it -- which
 		# is not a slow path but a COMPILE ERROR, mfem::forall's static_assert
@@ -644,6 +655,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			src/meq/DeviceQuadratureDevice.cpp
 			src/meq/DeviceRowsDevice.cpp
 			src/meq/PointLocatorDevice.cpp
+			src/meq/ResidentIterateDevice.cpp
 			src/meq/SourceViewDevice.cpp)
 		set_source_files_properties(
 			${MEQ_CORE_SOURCES_DEVICE_LANGUAGE}
@@ -656,6 +668,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		# follow the CUDA arm's decisions rather than to be discovered later.
 		set_source_files_properties(
 			src/meq/DeviceRowsDevice.cpp
+			src/meq/ResidentIterateDevice.cpp
 			PROPERTIES
 				LANGUAGE HIP
 				COMPILE_OPTIONS "-ffp-contract=off")

@@ -1,5 +1,7 @@
 #include "Output.hpp"
 
+#include "Crossings.hpp"
+
 #include <algorithm>
 #include <fstream>
 #include <map>
@@ -240,6 +242,18 @@ namespace meq
 			return 0;
 		mfem::FiniteElementSpace const *space = nodes->FESpace();
 
+		/*
+		 * THE NODES ARE FUNNELLED BEFORE THEY ARE COPIED AND EDITED, because
+		 * under an mfem::Device the solve's own kernels may have read them --
+		 * and a COPY of a vector whose live copy is on the device is born
+		 * device-valid (MEASUREMENTS.md M-205), so every raw read of `original`
+		 * below would read a stale page, or fault under `Device( "debug" )`,
+		 * which is how this was found: on `fixed-a-testtokamak` the solve
+		 * finished and the output stage died here (M-238). A read-WRITE,
+		 * because the loop below moves the nodes on the host.
+		 */
+		countedHostReadWrite( *nodes, __LINE__ );
+
 		// The undisplaced geometry, kept so that every trial fraction starts
 		// from the same place and so that failure can restore it exactly.
 		mfem::GridFunction const original( *nodes );
@@ -342,6 +356,10 @@ namespace meq
 		for ( int attempt = 0; attempt < 8; ++attempt )
 		{
 			*nodes = original;
+			// That assignment is device-aware, so under a Device it leaves the
+			// device copy the live one and the raw `+=` below would write a
+			// stale page. Funnelled after it, every attempt.
+			countedHostReadWrite( *nodes, __LINE__ );
 			for ( std::size_t d = 0; d < spread.size(); ++d )
 				( *nodes )( static_cast<int>( d ) ) += scale[ d ]*spread[ d ];
 

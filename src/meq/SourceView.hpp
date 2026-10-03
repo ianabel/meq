@@ -233,8 +233,13 @@ namespace meq
 
 	MFEM_HOST_DEVICE inline mfem::real_t hermite00Prime( mfem::real_t t )
 	{ return mfem::real_t( 6 )*t*( t - mfem::real_t( 1 ) ); }
+	/// EXPANDED, AS `Profiles.cpp`'s `h10Prime` WRITES IT. The factored form
+	/// `( 3t - 1 )( t - 1 )` is the same polynomial and a different double:
+	/// measured as a 1-ulp disagreement in every derivative-carrying device
+	/// route against its host loop, while every value-only route agreed to the
+	/// bit. ResidentIterate.hpp.
 	MFEM_HOST_DEVICE inline mfem::real_t hermite10Prime( mfem::real_t t )
-	{ return ( mfem::real_t( 3 )*t - mfem::real_t( 1 ) )*( t - mfem::real_t( 1 ) ); }
+	{ return mfem::real_t( 3 )*t*t - mfem::real_t( 4 )*t + mfem::real_t( 1 ); }
 	MFEM_HOST_DEVICE inline mfem::real_t hermite01Prime( mfem::real_t t )
 	{ return mfem::real_t( 6 )*t*( mfem::real_t( 1 ) - t ); }
 	MFEM_HOST_DEVICE inline mfem::real_t hermite11Prime( mfem::real_t t )
@@ -354,10 +359,12 @@ namespace meq
 		mfem::real_t const delta = hi - lo;
 		mfem::real_t const t = ( x - lo )/delta;
 
-		return view.scale*( k[ i ].value*hermite00Prime( t )
-		                    + k[ i ].derivative*delta*hermite10Prime( t )
-		                    + k[ i + 1 ].value*hermite01Prime( t )
-		                    + k[ i + 1 ].derivative*delta*hermite11Prime( t ) )/delta;
+		// The scale AFTER the division: meq::ScaledProfile::prime() is
+		// `scale*inner.prime()`, and the inner derivative already divided.
+		return view.scale*( ( k[ i ].value*hermite00Prime( t )
+		                      + k[ i ].derivative*delta*hermite10Prime( t )
+		                      + k[ i + 1 ].value*hermite01Prime( t )
+		                      + k[ i + 1 ].derivative*delta*hermite11Prime( t ) )/delta );
 	}
 
 	/// Whether @a psi is inside the plasma, pointwise -- the value test only.
@@ -431,6 +438,48 @@ namespace meq
 		            *evaluateProfilePrime( view.pPrime, knots, psiN )
 		          + evaluateProfilePrime( view.ggPrime, knots, psiN ) )
 		       /( span*span );
+	}
+
+	/**
+	 * `dF/dpsi_ax` and `dF/dpsi_bnd` at the same point, which is
+	 * `meq::NormalisedMHDSource::normalisationDerivatives()` written once more
+	 * as arithmetic a kernel can run.
+	 *
+	 * `F = scale g( Psi )/span` with `Psi = ( psi - psi_bnd )/span`, so
+	 * `dPsi/dpsi_ax = -Psi/span` and `dPsi/dpsi_bnd = ( Psi - 1 )/span`, and the
+	 * span moves by `+1` and `-1`. **Every operation is in the host's order**,
+	 * because the plasma-current border's corner and the two normalisation
+	 * columns are what the device route computes with it and the acceptance
+	 * there is the host's digits rather than its neighbourhood.
+	 *
+	 * Solov'ev has no normalisation and is answered with zeros; the host has no
+	 * NormalisedSource to ask in that case, so a caller never reaches it.
+	 */
+	MFEM_HOST_DEVICE inline void sourceNormalisationDerivatives(
+		SourceView const &view, KnotView const *knots,
+		mfem::real_t radius, mfem::real_t /* z */, mfem::real_t psi,
+		mfem::real_t &dFdAxis, mfem::real_t &dFdBoundary )
+	{
+		dFdAxis = mfem::real_t( 0 );
+		dFdBoundary = mfem::real_t( 0 );
+		if ( view.kind == static_cast<int>( SourceKind::Soloviev ) )
+			return;
+		if ( !insidePlasmaValue( view, psi ) )
+			return;
+
+		mfem::real_t const span = view.psiAxis - view.psiBoundary;
+		mfem::real_t const psiN = ( psi - view.psiBoundary )/span;
+
+		mfem::real_t const g = view.permeability*radius*radius
+		                         *evaluateProfile( view.pPrime, knots, psiN )
+		                       + evaluateProfile( view.ggPrime, knots, psiN );
+		mfem::real_t const gPrime = view.permeability*radius*radius
+		                              *evaluateProfilePrime( view.pPrime, knots, psiN )
+		                            + evaluateProfilePrime( view.ggPrime, knots, psiN );
+
+		dFdAxis = -view.currentScale*( gPrime*psiN + g )/( span*span );
+		dFdBoundary = view.currentScale*( gPrime*( psiN - mfem::real_t( 1 ) ) + g )
+		              /( span*span );
 	}
 
 	/**

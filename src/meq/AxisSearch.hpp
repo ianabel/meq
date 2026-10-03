@@ -605,7 +605,7 @@ namespace meq
 	 * bearing.
 	 *
 	 * An environment variable rather than a key, for `MEQ_STAGE_CHECKSUM`'s
-	 * reason: it has to be reachable on a shipped `examples/*.toml` without
+	 * reason: it has to be reachable on a shipped `examples` TOML file without
 	 * editing the file, because the point is to measure the case somebody
 	 * actually runs. Read once and cached, so a disabled check costs one
 	 * predicted branch.

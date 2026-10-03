@@ -41,7 +41,7 @@
  * **OFF UNLESS `MEQ_STAGE_CHECKSUM` IS SET IN THE ENVIRONMENT**, and an
  * environment variable rather than a key because this is a debugging
  * instrument and not a property of a problem: it must be reachable on a
- * shipped `examples/*.toml` without editing the file, which is the whole point
+ * shipped `examples` TOML file without editing it, which is the whole point
  * of walking a case that already misbehaves. Reading it is cached, so a
  * disabled probe costs one predicted branch.
  */
