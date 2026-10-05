@@ -1012,6 +1012,34 @@ the freegs4e reference its header quotes, until `PlasmaSupportSweeps = 4` put it
 on the benchmarked one; `DeviceParity` runs a copy with that key stripped to
 keep the moving support covered.
 
+**AND THE FIRST EVALUATION OF A SOLVE IS ON THE DEVICE, AND WHAT KEPT IT OFF
+WAS A QUADRATIC MERGE THE HOST PAID TOO** -> **[M-240](MEASUREMENTS.md#m-240)**.
+`ff3`'s axis leg reads **0.40 s against 22.1**, its solve 21.7 s against 43.3,
+with the Newton history unmoved. Uploading the iterate before its first reader
+was necessary and on its own made phase C WORSE: a `Type = "ramp"` guess leaves
+the flux block zero, so every element reports a root at its seed, the device
+route refused the list as over its ceiling, and the host sweep that replaced it
+downloaded the iterate it had just been sent. `perf` then put the 22 seconds in
+`CriticalPointFinder::mergeCandidates()`, which walked the kept list for every
+candidate -- the rooting did not rank. **It is grid-indexed now and returns the
+walk's list to the bit**, the walk itself being the test's oracle; the ceiling
+is gone, the list being bounded by the mesh; and the nodal fallback is two exact
+reductions on the device, because `mfem::ArgMaxReducer` gives a tie to whichever
+joined LAST. *A cost attributed to a route is the route's only if the other
+route does not pay it.* Four more of MEQ's own crossings went with it -- phase D
+downloading the answer twice through its aliases, the output stage restoring
+mesh nodes with a device-aware `=`, `fluxGf` negated on the device, and `rLoc`
+arriving host-valid as upstream's reply said -- taking `machine-f-diiid` to
+508 MB up and 78.6 down from 543 and 101. **And the residual's last uploads
+ARE MEQ's load, although uploading `darcyRhs` added 11 MB and moved the count
+not at all** -> **[M-243](MEASUREMENTS.md#m-243)**. The control uploaded the
+BASE, and what `ResidualRowsBatched()` reads is the base's block VIEWS, which
+`darcyRhs.Update()` re-makes host-only at every `prepare()`. Printing the
+views' flags at the call settled it: host-only at exactly the re-assembly
+leg's 16 calls of 28. *A fix that does not move its number measures the
+attribution only if it reached the object the reader holds.* A view's validity
+flags belong to the view.
+
 **AND SINGLE PRECISION READ AS A 1.1x TO 2.4x LOSS WHILE EVERY ARITHMETIC LEG
 IN IT WAS FASTER, WHICH IS THE SEVENTH CONSTANT OF M-184'S SPECIES AND THE
 FIRST THAT COSTS ONLY TIME.** Per call the threaded solve legs are 10 to 27 per
@@ -1057,6 +1085,12 @@ COUNT of level-set calls rather than a clock -- reading **10,002 before and
 under 100 after**. *A format-specific defect is pinned by putting the other
 format in the same position*, which is a cheaper instrument than a second build.
 Reported as `HDG-PATH-BISECTION-TERMINATION-FROM-MEQ.md`.
+**AND ON THE LIBRARY CARRYING IT THE LOSS IS GONE** ->
+**[M-242](MEASUREMENTS.md#m-242)**: single is 0.81x to 0.90x of double per
+Newton step on the three `fixed-f-diiid` meshes, host and CUDA alike, and its
+SETUP is 0.69x to 0.81x of double's -- the direction the no-progress rule
+predicts, a float bisection stopping at about 20 halvings where double's
+`1e-13` stops at 39.
 
 **AND THE KERNEL WAS 65x OFF ITS OWN ARITHMETIC, TWO THIRDS OF IT IN THE
 REDUCTIONS AND A LOOP BOUND.** Both reductions were `mfem::forall( 1, ... )` --
@@ -2496,10 +2530,15 @@ with no diagnostic. **MEQ must be fully rebuilt too**, `cmake --build build -j6
 it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
-**THE INSTALL IS CURRENT AND `install-single` IS THE ONE TO WATCH.** Both checks
-below pass on `../mfem/install` against `meq-integration` at `f5fd727ea2`, and
-the DIII-D machine reads `psi_ax = 3.759851e-01` and a constraint of
-`-6.465e-12` under `--device cuda` on it, unchanged. The single install is a
+**BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../mfem/install` and
+on `../mfem/install-single` against `meq-integration` at `4929772e95`, and the
+DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of `-6.466e-12`
+under `--device cuda` on the double one, as it did on the install before --
+[M-243](MEASUREMENTS.md#m-243), where the double suite is 65 of 66. **The
+single suite read 60 of 66 at `969569440e` and no answer moved**, and it has
+not been re-run since -> [M-242](MEASUREMENTS.md#m-242): two device-route tests
+assert bit-identity that only a double build can give, and three solves sit on
+M-222's knife edge at `MKL_NUM_THREADS = 1`. The single install is a
 **second** tree with the same obligation and its own reason to move first:
 `sundials-real-t` is in the merge because MFEM does not compile **at all** in
 the `MFEM_PRECISION = single` + `MFEM_USE_SUNDIALS` pairing without it.

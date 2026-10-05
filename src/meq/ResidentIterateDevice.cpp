@@ -1,5 +1,9 @@
 #include "ResidentIterate.hpp"
 
+#include "mfem/general/reducers.hpp"
+
+#include <limits>
+
 /*
  * THE LAUNCHES, AND NOTHING ELSE. Everything a reader looks up -- the
  * refusals, the phase-B tables, the gate -- is in ResidentIterate.cpp, which
@@ -202,6 +206,45 @@ namespace meq
 		return true;
 	}
 
+	bool nodalPeakKernel( mfem::Vector const &source, int begin, int end,
+	                      mfem::real_t &best, int &bestIndex )
+	{
+		best = -std::numeric_limits<mfem::real_t>::infinity();
+		bestIndex = -1;
+		int const count = end - begin;
+		if ( count <= 0 )
+			return true;
+
+		auto const *d_source = source.Read();
+
+		// THE VALUE FIRST, which is exact in any order: fmax is a selection
+		// and not arithmetic, and it skips NaN exactly as the host's `>` does.
+		mfem::real_t peak = best;
+		mfem::Array<mfem::real_t> valueWork;
+		mfem::reduce( count, peak,
+		              [ = ] MFEM_HOST_DEVICE ( int i, mfem::real_t &r )
+		              {
+		                      r = fmax( r, d_source[ begin + i ] );
+		              },
+		              mfem::MaxReducer<mfem::real_t>{}, true, valueWork );
+		if ( !( peak > best ) )
+			return true;
+
+		// THEN THE EARLIEST INDEX HOLDING IT, which is the walk's tie-break.
+		int first = end;
+		mfem::Array<int> indexWork;
+		mfem::reduce( count, first,
+		              [ = ] MFEM_HOST_DEVICE ( int i, int &r )
+		              {
+		                      if ( d_source[ begin + i ] == peak && begin + i < r )
+		                              r = begin + i;
+		              },
+		              mfem::MinReducer<int>{}, true, indexWork );
+		best = peak;
+		bestIndex = first;
+		return true;
+	}
+
 	bool copyEntriesKernel( mfem::Vector const &source,
 	                        mfem::Array<int> const &indices,
 	                        mfem::Vector &destination )
@@ -237,6 +280,12 @@ namespace meq
 
 	bool orderedDotKernel( mfem::Vector const &, mfem::Array<int> const &,
 	                       mfem::Vector const &, mfem::Vector & )
+	{
+		return false;
+	}
+
+	bool nodalPeakKernel( mfem::Vector const &, int, int, mfem::real_t &,
+	                      int & )
 	{
 		return false;
 	}

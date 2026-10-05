@@ -268,6 +268,17 @@ namespace meq
 		return orderedDotKernel( source, indices, weights, out );
 	}
 
+	bool nodalPeakOnDevice( mfem::Vector const &source, int begin, int end,
+	                        mfem::real_t &best, int &bestIndex )
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		if ( begin < 0 || end > source.Size() || begin > end )
+			return false;
+		countedDeviceRead( source, __LINE__ );
+		return nodalPeakKernel( source, begin, end, best, bestIndex );
+	}
+
 	bool copyEntriesOnDevice( mfem::Vector const &source,
 	                          mfem::Array<int> const &indices,
 	                          mfem::Vector &destination )

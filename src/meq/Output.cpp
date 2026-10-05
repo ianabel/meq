@@ -353,13 +353,29 @@ namespace meq
 		// other face back with them.
 		std::vector<double> scale( spread.size(), 1.0 );
 		bool clean = false;
+
+		/*
+		 * EACH ATTEMPT STARTS FROM THE ORIGINAL NODES, COPIED ON THE HOST.
+		 *
+		 * `*nodes = original` is device-aware: with `UseDevice()` set it
+		 * uploads `original`, copies on the device and leaves the device copy
+		 * the live one -- so the raw `+=` below needed a funnel after it, and
+		 * the funnel then brought the nodes straight back. Eight attempts,
+		 * 25.2 MB down on `fixed-f-diiid`, for a copy whose every reader is
+		 * this host loop. `original` was copied from host-valid nodes, so its
+		 * host copy is current; `HostWrite()` makes the nodes' host copy the
+		 * live one without moving anything.
+		 */
+		auto restoreOriginal = [ & ]()
+		{
+			mfem::real_t const *const from = original.HostRead();
+			mfem::real_t *const to = nodes->HostWrite();
+			std::copy( from, from + original.Size(), to );
+		};
+
 		for ( int attempt = 0; attempt < 8; ++attempt )
 		{
-			*nodes = original;
-			// That assignment is device-aware, so under a Device it leaves the
-			// device copy the live one and the raw `+=` below would write a
-			// stale page. Funnelled after it, every attempt.
-			countedHostReadWrite( *nodes, __LINE__ );
+			restoreOriginal();
 			for ( std::size_t d = 0; d < spread.size(); ++d )
 				( *nodes )( static_cast<int>( d ) ) += scale[ d ]*spread[ d ];
 
@@ -383,7 +399,7 @@ namespace meq
 			// Still folded. Leave the mesh exactly as it was found: a faceted
 			// boundary is honest, and a folded element renders as a black spike
 			// that looks like a solver failure.
-			*nodes = original;
+			restoreOriginal();
 			applied = 0.0;
 			return 0;
 		}

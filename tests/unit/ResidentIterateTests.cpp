@@ -34,7 +34,9 @@
 #include "mfem.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -202,7 +204,7 @@ namespace
 			if ( got( i ) != want( i ) )
 			{
 				++count;
-				largest = std::max( largest, std::fabs( got( i ) - want( i ) ) );
+				largest = std::max( largest, double( std::fabs( got( i ) - want( i ) ) ) );
 			}
 		return count;
 	}
@@ -407,6 +409,80 @@ BOOST_AUTO_TEST_CASE( theSmallKernelsAreTheHostLoops )
 		for ( int k = 0; k < indices.Size(); ++k )
 			kept = kept || indices[ k ] == i;
 		BOOST_TEST( target( i ) == ( kept ? source( i ) : 0.0 ) );
+	}
+}
+
+// THE NODAL FALLBACK'S PEAK IS THE WALK'S: VALUE, INDEX AND SIGN OF ZERO.
+//
+// peakAt()'s fallback walks the potential block from -inf with a strict `>`,
+// so it keeps the FIRST of equal maxima, skips NaN, and reports -1 when
+// nothing beats -inf. A parallel reduction gets none of those for free --
+// MFEM's ArgMaxReducer keeps whichever equal joined last -- so each is a case
+// here, against the walk written out. `+ 0.0` is the walk's own `+
+// conductorPsiAtDof()` with no table, and is what makes a -0 peak +0.
+BOOST_AUTO_TEST_CASE( theNodalPeakIsTheWalk )
+{
+	deviceOnce();
+
+	double const inf = std::numeric_limits<double>::infinity();
+	double const nan = std::numeric_limits<double>::quiet_NaN();
+	struct Case
+	{
+		char const *name;
+		std::vector<double> values;
+		int begin;
+		int end;
+	};
+	std::vector<double> ramp( 5000 );
+	for ( std::size_t i = 0; i < ramp.size(); ++i )
+		ramp[ i ] = std::sin( 0.01*static_cast<double>( i ) );
+	std::vector<double> ties = ramp;
+	ties[ 4000 ] = ties[ 1200 ] = ties[ 2500 ] = 3.0;
+	std::vector<Case> const cases = {
+		{ "ramp", ramp, 0, 5000 },
+		{ "three equal maxima", ties, 0, 5000 },
+		{ "a sub-range missing the first maximum", ties, 1500, 5000 },
+		{ "NaN ahead of the maximum", { nan, 1.0, nan, 2.0, nan }, 0, 5 },
+		{ "signed zeros, -0 first", { -1.0, -0.0, 0.0, -2.0 }, 0, 4 },
+		{ "nothing beats -inf", { -inf, nan, -inf }, 0, 3 },
+		{ "an empty range", { 1.0, 2.0 }, 1, 1 },
+	};
+
+	for ( Case const &c : cases )
+	{
+		mfem::Vector source( static_cast<int>( c.values.size() ) );
+		source.UseDevice( true );
+		{
+			mfem::real_t *const host = source.HostWrite();
+			for ( std::size_t i = 0; i < c.values.size(); ++i )
+				host[ i ] = static_cast<mfem::real_t>( c.values[ i ] );
+		}
+		source.Read();
+
+		mfem::real_t got = 0.0;
+		int gotIndex = -2;
+		BOOST_TEST_REQUIRE( meq::nodalPeakOnDevice( source, c.begin, c.end,
+		                                            got, gotIndex ) );
+		double const reported = gotIndex < 0 ? -inf : static_cast<double>( got ) + 0.0;
+
+		source.HostRead();
+		double want = -inf;
+		int wantIndex = -1;
+		for ( int i = c.begin; i < c.end; ++i )
+		{
+			double const value = source( i ) + 0.0;
+			if ( value > want )
+			{
+				want = value;
+				wantIndex = i;
+			}
+		}
+
+		std::printf( "  %-40s walk %d %+.17g, device %d %+.17g\n", c.name,
+		             wantIndex, want, gotIndex, reported );
+		BOOST_TEST( gotIndex == wantIndex );
+		BOOST_TEST( std::signbit( reported ) == std::signbit( want ) );
+		BOOST_TEST( ( reported == want ) );
 	}
 }
 

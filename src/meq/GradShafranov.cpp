@@ -10617,6 +10617,40 @@ namespace
 				}
 			}
 
+			/*
+			 * ON THE DEVICE WHERE THE ITERATE IS, AND WITHOUT A CONDUCTOR
+			 * TABLE, which is the term the device does not hold.
+			 *
+			 * Every `Type = "ramp"` solve reaches this on its first evaluation:
+			 * the guess leaves `q_h` identically zero, so no candidate the
+			 * search returns is an axis, and the walk below then brought the
+			 * whole iterate over to find one maximum -- 17.7 MB on
+			 * `fixed-f-diiid`, and the copy after it a second time because
+			 * the first had left the iterate host-valid. The reduction keeps
+			 * the walk's first-of-equals and its NaN skip, and `+ 0.0` is the
+			 * walk's own `+ conductorPsiAtDof()` with no table: it maps a `-0`
+			 * peak to `+0` exactly as the walk's sum does.
+			 */
+			if ( conductorNodalPsi.empty() && iterateIsResident( state ) )
+			{
+				mfem::real_t deviceBest = 0.0;
+				int deviceIndex = -1;
+				if ( nodalPeakOnDevice( state, blockOffsets[ 1 ],
+				                        blockOffsets[ 2 ], deviceBest,
+				                        deviceIndex ) )
+				{
+					++iterateDeviceTaken;
+					if ( element )
+						*element = -1;
+					if ( dof )
+						*dof = deviceIndex;
+					return deviceIndex < 0
+					       ? -std::numeric_limits<double>::infinity()
+					       : static_cast<double>( deviceBest ) + 0.0;
+				}
+				++iterateDeviceDeclined;
+			}
+
 			// The nodal fallback indexes the iterate raw. locateAxisPoint()
 			// syncs it too, but only when it RUNS -- this arm is reached
 			// precisely when it did not. DEVICE-PLAN.md section 1.2.
@@ -10702,6 +10736,31 @@ namespace
 		countedHostRead( essentialTrace, __LINE__ );
 		for ( int i = 0; i < essentialTrace.Size(); ++i )
 			essential[ essentialTrace[ i ] ] = true;
+
+		/*
+		 * THE ITERATE GOES UP HERE, ONCE, AHEAD OF ITS FIRST READER.
+		 *
+		 * Every route that reads the iterate on the device is gated on it being
+		 * `H- D+` -- a predicate about the DATA -- and until now the first
+		 * Newton update was what made it so: `unknown.Add( -damping, y )` with
+		 * device-valid columns. So every evaluation BEFORE that update ran on the
+		 * host, and the first is the expensive one: no previous axis to seed a
+		 * ring walk from, so a full-mesh sweep, serial because a Device turns
+		 * the host's threading off (M-188). On `ff3` it was 21.9 s of a 22.1 s
+		 * axis leg, the other fifteen evaluations 0.19 s on the device. M-238.
+		 *
+		 * `ReadWrite()` rather than `Read()` because a read leaves the host copy
+		 * valid too and opens no gate. Phase B: the initial guess is
+		 * configuration, uploaded once per solve, exactly as the exterior
+		 * columns are below. Nothing here changes a value -- the two copies are
+		 * equal when the host one is invalidated -- so the host path is
+		 * untouched and every reader that is not ported still funnels.
+		 */
+		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		{
+			PhaseScope const residency( Phase::Upload );
+			countedDeviceReadWrite( unknown, __LINE__ );
+		}
 
 		double s = psiAxisValue;
 		int argElement = -1;
@@ -13894,10 +13953,20 @@ namespace
 		downloadSolution();
 
 		// The one place the sign convention is undone. See the file comment.
-		// After the download, so the copy reads a host-valid source rather than
-		// dragging the flux over as its own uncounted transfer.
-		fluxGf = darcyFlux;
-		fluxGf.Neg();
+		// After the download, and ON THE HOST: `=` and Neg() are both
+		// device-aware, so with `UseDevice()` set they uploaded the flux just
+		// downloaded, negated it there, and the post-solve axis check's finder
+		// brought it back -- 9.42 MB each way on `fixed-f-diiid`. Every reader
+		// of `fluxGf` is host code. `-x` is what Neg() computes, so the values
+		// are the same bits.
+		{
+			MFEM_VERIFY( fluxGf.Size() == darcyFlux.Size(),
+			             "fluxGf and the flux block disagree in size" );
+			mfem::real_t const *const from = darcyFlux.HostRead();
+			mfem::real_t *const to = fluxGf.HostWrite();
+			for ( int i = 0; i < darcyFlux.Size(); ++i )
+				to[ i ] = -from[ i ];
+		}
 
 		// A new solution invalidates the old post-processing rather than being
 		// silently paired with it.
@@ -13929,8 +13998,23 @@ namespace
 		 * Idempotent by construction -- a funnel on a host-valid buffer is a
 		 * read that moves nothing -- so a caller with an outer loop may state
 		 * its own phase D without paying twice.
+		 *
+		 * **ONE COPY, NOT TWO.** The aliases share the base's memory on both
+		 * sides, so once the base is host-valid their host ranges are already
+		 * current -- but their FLAGS still say device-only, and a funnel on
+		 * each then copied its block down a second time: 17.7 MB twice on
+		 * `fixed-f-diiid`. `SyncMemory()` copies flags and nothing else, and
+		 * after the base's download the flags it copies are true of the
+		 * aliases. solve() makes the base the authority before this is
+		 * called, with the same syncs; this repeats them after the download
+		 * moves the base. The alias funnels stay, as checks, and count no
+		 * transfer.
 		 */
 		countedHostRead( solution, __LINE__ );
+		solution.SyncToBlocks();
+		darcyFlux.SyncMemory( solution.GetBlock( 0 ) );
+		potentialGf.SyncMemory( solution.GetBlock( 1 ) );
+		traceGf.SyncMemory( solution.GetBlock( 2 ) );
 		countedHostRead( darcyFlux, __LINE__ );
 		countedHostRead( potentialGf, __LINE__ );
 		countedHostRead( traceGf, __LINE__ );

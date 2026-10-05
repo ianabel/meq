@@ -340,6 +340,18 @@ namespace meq
 		return v.Read();
 	}
 
+	/**
+	 * The same for a read-WRITE: uploads on the same condition and
+	 * additionally invalidates the HOST copy, which is what makes a vector
+	 * `H- D+` -- the state every residency gate in `GradShafranov.cpp` asks
+	 * for. A `Read()` leaves both copies valid and opens none of them.
+	 */
+	inline mfem::real_t *countedDeviceReadWrite( mfem::Vector &v, int line = 0 )
+	{
+		recordDeviceRead( v.GetMemory(), v.Size(), line );
+		return v.ReadWrite();
+	}
+
 	/// The same for an `mfem::Array<T>`, for the reason the host overload gives.
 	template <typename T>
 	inline T const *countedDeviceRead( mfem::Array<T> const &a, int line = 0 )

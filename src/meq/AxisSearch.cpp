@@ -82,27 +82,23 @@ namespace meq
 		 * THE COUNT COMES BACK FIRST, AND THE COMPACTED ARRAY IS SIZED TO IT.
 		 *
 		 * **FOUR BYTES, SO THAT THE SECOND DOWNLOAD IS PROPORTIONAL TO THE
-		 * CANDIDATES THAT EXIST RATHER THAN TO A CEILING.** The first draft
-		 * downloaded a fixed `axisCandidateCap` records, which made the
-		 * ceiling the cost and forced it down to 256 -- and on
-		 * `fixed-f-diiid`'s 102,840 elements a transient iterate exceeded
-		 * that, the route declined, and the host sweep that replaced it cost
-		 * **22.4 seconds**, the whole leg. *A refusal that costs more than
-		 * the thing it refuses is not a safe default.*
-		 *
-		 * Two downloads where there was one, and the pair is smaller than the
-		 * single one was: a handful of records at convergence against 22 KB
-		 * of mostly-empty array, and against the 830 KB state either replaces.
+		 * CANDIDATES THAT EXIST**: a handful of records at convergence,
+		 * against the whole state a host sweep would have needed.
 		 */
 		countedHostRead( total, __LINE__ );
 		count = total[ 0 ];
 
-		// A TRUNCATED competition is one missing an entrant, which is exactly
-		// how a conductor's O-point would win one. The count is reported
-		// truthfully either way so a caller can say what happened.
-		if ( count > axisCandidateCap )
-			return false;
-
+		/*
+		 * NO CEILING, AND THE LIST IS NEVER TRUNCATED.
+		 *
+		 * It is at most two candidates per selected element by construction
+		 * -- `perElement` has no other slots -- so the download is bounded by
+		 * the mesh, and at that bound it is the size of the iterate itself:
+		 * 18 MB against 17.7 on `fixed-f-diiid`. A ceiling refused that case
+		 * and handed it back, and the refusal cost the iterate's download
+		 * PLUS a host sweep of every element -- more than the thing it
+		 * refused, on the one call a flux-free guess makes every solve.
+		 */
 		out.SetSize( count > 0 ? count : 1 );
 		axisCandidatesScatterKernel( inputs, perElement, offsets, out );
 		countedHostRead( out, __LINE__ );

@@ -43,16 +43,35 @@ shipped examples at the host's every printed digit; with item 3 below fixed,
 
 **SO WHAT IS NEXT IS WHAT THE BUS STILL SHOWS, AND MOST OF IT IS UPSTREAM'S.**
 
-1. **Upstream's three, FILED as `../mfem-hdg-dev/doc/HDG-DEVICE-BUS-FROM-MEQ.md`**,
-   about 335 MB up and 70 MB down a run: `HDGNPCScatterColumn()` opening a
-   destination it overwrites whole with `ReadWrite()` (112 MB up, the
-   `ArrayMult()` scratch); `SyncLocalBlocksToHost()` round-tripping the local
-   factors twice a Newton step on the batched route (39 MB down, about 200 MB
-   up through `LUSolve`); and the residual's finish and the gradient's gathers
-   on the host. Waiting on upstream.
-2. **MEQ's `load` is re-uploaded every residual**, through a fresh alias in
-   `ResidualRowsBatched()`, about 12 MB a run: the exterior columns' shape
-   (M-238), one `Read()` after `prepare()` assembles it. MEQ's, and small.
+1. **Upstream's three are ANSWERED AND INSTALLED** ->
+   [M-241](MEASUREMENTS.md#m-241), [M-243](MEASUREMENTS.md#m-243). Both
+   installs are at `meq-integration` `4929772e95`. `machine-f-diiid` moves
+   83 MB up and 49 MB down, from 508 and 79, with every printed answer
+   unchanged. What is left, as reported in `HDG-DEVICE-BUS-4929-FROM-MEQ.md`:
+   * `ComputeH()`'s read-only syncs, 24 MB down: upstream's, and open;
+   * the load's re-uploads, 11.2 MB up: MEQ's, item 2;
+   * `CuDSSSolver::SetMatrix()` downloading the gradient's whole I through
+     `NumNonZeroElems()`, 12 times, 1.05 MB: upstream's, and new on
+     `4929772e95` because I now lives on the device.
+
+   MEQ's largest remaining item is its own: the exterior columns, uploaded
+   once per SOLVE (26.2 MB over three sweeps) when they are constant for the
+   life of the mesh. `install-single` is refreshed too, and M-235's
+   comparison retaken on both -> [M-242](MEASUREMENTS.md#m-242): CUDA now wins
+   the solve on all four cases in both formats, 0.38x to 0.90x of the host per
+   step, and single is 0.81x to 0.90x of double. What a device run loses on now
+   is outside the solve: `setup` at 1.00 cores, 60 to 67 per cent of `ff3`, and
+   the output stage and the post-solve axis check serial under a Device.
+2. **MEQ's `load` is re-uploaded at every re-assembly** ->
+   [M-243](MEASUREMENTS.md#m-243). It is `darcyRhs` after all. M-240's control
+   uploaded the BASE once per build, and the base is never what is read: its
+   block views are, and `darcyRhs.Update()` re-makes them at the end of every
+   `prepare()`, host-only. That is 16 of 28 residuals and 11.2 MB; the potential
+   block is zero throughout and goes up 16 times anyway.
+   `BORDERED-GLOBALISATION-PLAN.md` §12 is the repair, since the load is linear
+   in the exterior coefficients. What WAS MEQ's next to it is done: `rLoc` and
+   `rTr` arrived host-valid, so the residual's blocks and its trace row went
+   down and back up every call.
 3. ~~**`diverted-tokamak` under a device reaches a different equilibrium**~~
    **FIXED** -> [M-239](MEASUREMENTS.md#m-239): the device integrand read the
    plasma support as of the operator's last rebuild while the host's followed
@@ -65,14 +84,16 @@ shipped examples at the host's every printed digit; with item 3 below fixed,
    against the host's first productive ring, met on a shipped case once the
    one-row border opened. The device's agrees with the run's own post-solve
    check. Owed: which the constraint should take. MEQ's.
-5. **The phase-C scalars, eleven downloads a step**, as one batched download
-   per evaluation; and phase D's answer, which `downloadSolution()` still
-   copies twice. MEQ's, and small.
-6. **The FIRST evaluation of a solve is still on the host**, because the
-   iterate starts host-valid and the gates want it device-only. On `ff3` that
-   one cold axis sweep is **21.9 s of a 22.1 s axis leg** -- the other fifteen
-   evaluations take 0.19 s on the device -- where M-235 read the whole leg at
-   33.6 s. Uploading the initial guess once, as phase B, is the shape. MEQ's.
+5. **Phase D's double download is FIXED** and **the phase-C scalars are
+   MEASURED AND LEFT** -> [M-240](MEASUREMENTS.md#m-240): 247 copies of 4 KB
+   or less over `machine-f-diiid`, 0.29 ms of copy time in all.
+6. ~~**The FIRST evaluation of a solve is still on the host**~~ **DONE** ->
+   [M-240](MEASUREMENTS.md#m-240). `ff3`'s axis leg 22.1 s to 0.40, solve
+   43.3 s to 21.7. Uploading the iterate was half of it; the other half was
+   `CriticalPointFinder::mergeCandidates()` being quadratic on the
+   two-per-element list a flux-free guess hands it -- a cost the HOST sweep
+   pays as well -- plus a candidate ceiling that refused that list and a nodal
+   fallback that downloaded the iterate to take one maximum.
 
 **AND THE INSTRUMENT FOR THE BUS IS `nsys`, NOT THE CROSSING COUNTER.** The
 counter reads 0.888 MB on a run `nsys` puts at 692 MB host-to-device and 259 MB
@@ -96,6 +117,10 @@ because a device run loses `meq::hostLoopsAreSafe()`
 [M-233](MEASUREMENTS.md#m-233)'s 11.9 ms kernel sits beside it built,
 bit-identical and idle. *The leg the port was written for is the one the device
 is losing on, and it is losing on it because the port is correctly off.*
+**Both halves of that are closed**: the gates open by themselves since
+[M-238](MEASUREMENTS.md#m-238), and the one evaluation they still missed --
+the first, on a flux-free guess -- is on the device since
+[M-240](MEASUREMENTS.md#m-240), taking `ff3`'s axis leg to 0.40 s.
 
 **THE TARGET IS RESIDENCY, AND THAT IS A DECISION RATHER THAN AN AMBITION.**
 The whole calculation runs on the device: the iterate, the local blocks, the

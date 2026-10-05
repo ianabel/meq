@@ -13,6 +13,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 /*
@@ -306,25 +307,121 @@ namespace meq
 			                      + ( hi[ 1 ] - lo[ 1 ] )*( hi[ 1 ] - lo[ 1 ] ) );
 		}
 
-		std::vector<CriticalPoint> points;
 		// THREAD LOCAL, NOT THE MESH'S SHARED SCRATCH -- the reentrant
 		// overload, for the reason rootInElement() gives.
 		thread_local mfem::IsoparametricTransformation sizeScratch;
 
-		for ( CriticalPoint const &point : ordered )
+		// `reach` travels WITH the candidate: the size of the element the root
+		// was found in, so a candidate is merged against its own element's
+		// reach and not the one being merged into. Taken up front because the
+		// largest of them sizes the grid below.
+		std::vector<double> reaches( ordered.size(), 0.0 );
+		double largestReach = 0.0;
+		for ( std::size_t i = 0; i < ordered.size(); ++i )
 		{
-			// `reach` travels WITH the candidate: the size of the element the
-			// root was found in, so a candidate is merged against its own
-			// element's reach and not the one being merged into.
-			double reach = 0.0;
-			if ( point.element >= 0 && point.element < meshRef.GetNE() )
+			int const element = ordered[ i ].element;
+			if ( element >= 0 && element < meshRef.GetNE() )
 			{
-				meshRef.GetElementTransformation( point.element, &sizeScratch );
-				reach = 0.5*meshRef.GetElementSize( &sizeScratch );
+				meshRef.GetElementTransformation( element, &sizeScratch );
+				reaches[ i ] = 0.5*meshRef.GetElementSize( &sizeScratch );
+				largestReach = std::max( largestReach, reaches[ i ] );
+			}
+		}
+
+		/*
+		 * A GRID OF KEPT POINTS, AND THE ANSWER IS THE QUADRATIC LOOP'S TO THE
+		 * BIT.
+		 *
+		 * The rule is: walk the kept list in order and stop at the FIRST point
+		 * within `separation*diameter`, or of the same type within the
+		 * candidate's reach. Both thresholds are at most `cell`, so every point
+		 * that can match lies in the 3 x 3 block of cells around the candidate
+		 * -- two cells apart is strictly more than `cell` in one coordinate --
+		 * and the smallest matching index among that block is the index the
+		 * walk would have stopped at. Same distances, same expression, same
+		 * comparisons; only the points that cannot match are skipped.
+		 *
+		 * **IT WAS QUADRATIC AND ON ONE ITERATE THAT IS THE WHOLE OF A LEG.** A
+		 * guess that seeds the potential and not the flux -- `Type = "ramp"`,
+		 * every `examples/fixed-*.toml` -- has `q_h` identically zero, so every
+		 * element meets the absolute stopping rule at its own seed and the list
+		 * is two candidates per element, nearly all of them kept. On
+		 * `fixed-f-diiid`'s 102,840 elements that walk was 22 seconds of a 22.1
+		 * second axis leg, and the rooting beside it was too small for `perf`
+		 * to rank.
+		 */
+		double const cell = std::max( separation*diameter, largestReach );
+		// A non-finite coordinate has no cell, so a list carrying one takes
+		// the plain walk. The finder produces none; the guard is what makes
+		// that a property of the caller rather than undefined behaviour here.
+		bool indexed = cell > 0.0 && std::isfinite( cell );
+		for ( CriticalPoint const &point : ordered )
+			if ( !std::isfinite( point.radius/cell )
+			     || !std::isfinite( point.z/cell ) )
+				indexed = false;
+		auto cellOf = [ & ]( double radius, double z )
+		{
+			long long const i =
+				static_cast<long long>( std::floor( radius/cell ) );
+			long long const j = static_cast<long long>( std::floor( z/cell ) );
+			return std::pair<long long, long long>( i, j );
+		};
+		auto key = []( long long i, long long j )
+		{
+			return static_cast<unsigned long long>( i )*0x9E3779B97F4A7C15ULL
+			       ^ static_cast<unsigned long long>( j );
+		};
+		std::unordered_map<unsigned long long, std::vector<std::size_t>> grid;
+		auto insert = [ & ]( std::size_t at, double radius, double z )
+		{
+			auto const c = cellOf( radius, z );
+			grid[ key( c.first, c.second ) ].push_back( at );
+		};
+		auto erase = [ & ]( std::size_t at, double radius, double z )
+		{
+			auto const c = cellOf( radius, z );
+			std::vector<std::size_t> &slot = grid[ key( c.first, c.second ) ];
+			slot.erase( std::find( slot.begin(), slot.end(), at ) );
+		};
+
+		std::vector<CriticalPoint> points;
+		std::vector<std::size_t> nearby;
+		for ( std::size_t i = 0; i < ordered.size(); ++i )
+		{
+			CriticalPoint const &point = ordered[ i ];
+			double const reach = reaches[ i ];
+
+			// What can match, in no particular order. Without a grid --
+			// a mesh with no extent -- everything can.
+			nearby.clear();
+			if ( indexed )
+			{
+				auto const c = cellOf( point.radius, point.z );
+				for ( long long di = -1; di <= 1; ++di )
+					for ( long long dj = -1; dj <= 1; ++dj )
+					{
+						auto const found =
+							grid.find( key( c.first + di, c.second + dj ) );
+						if ( found != grid.end() )
+							nearby.insert( nearby.end(), found->second.begin(),
+							               found->second.end() );
+					}
+				// Two distinct cells can hash to one key, so a slot may hold
+				// points from elsewhere. They are tested like any other and
+				// cannot match, which is the distance test's job.
+				std::sort( nearby.begin(), nearby.end() );
+				nearby.erase( std::unique( nearby.begin(), nearby.end() ),
+				              nearby.end() );
+			}
+			else
+			{
+				nearby.resize( points.size() );
+				for ( std::size_t j = 0; j < points.size(); ++j )
+					nearby[ j ] = j;
 			}
 
 			bool duplicate = false;
-			for ( std::size_t j = 0; j < points.size(); ++j )
+			for ( std::size_t const j : nearby )
 			{
 				double const dr = points[ j ].radius - point.radius;
 				double const dz = points[ j ].z - point.z;
@@ -350,12 +447,24 @@ namespace meq
 					// neighbour has the lower element index. Element order is not
 					// a tie break.
 					if ( point.overshoot < points[ j ].overshoot )
+					{
+						// It keeps its place in the list and moves on the grid.
+						if ( indexed )
+						{
+							erase( j, points[ j ].radius, points[ j ].z );
+							insert( j, point.radius, point.z );
+						}
 						points[ j ] = point;
+					}
 					break;
 				}
 			}
 			if ( !duplicate )
+			{
+				if ( indexed )
+					insert( points.size(), point.radius, point.z );
 				points.push_back( point );
+			}
 		}
 
 		return points;

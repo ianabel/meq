@@ -271,7 +271,40 @@ namespace meq
 					 * MEASUREMENTS.md M-207 and M-210.
 					 */
 					xLoc.SyncFromBlocks();
+					/*
+					 * AND THE RESIDUAL'S LOCAL BLOCKS GO TO THE DEVICE FOR
+					 * THE SAME REASON AS `xLoc`.
+					 *
+					 * Upstream's batched residual writes `rLoc`'s blocks on
+					 * the device and then syncs each block to its BASE -- so a
+					 * host-valid `rLoc` had both blocks downloaded inside
+					 * `NonlinearResidualFinish()`, and the copies into `yb`
+					 * below uploaded them again: 28 of each over
+					 * `machine-f-diiid`, the potential block's re-upload
+					 * alone 6.5 MB. Upstream named the cause in its reply to
+					 * HDG-DEVICE-BUS-FROM-MEQ.md -- *MEQ's `r` has
+					 * `UseDevice()` false* -- and it is the caller's to fix.
+					 */
 					rLoc.Update( locOffsets );
+					rLoc.UseDevice( true );
+					rLoc.Write();
+					for ( int b = 0; b < rLoc.NumBlocks(); ++b )
+						rLoc.GetBlock( b ).UseDevice( true );
+					/*
+					 * AND THE TRACE ROW, WHICH IS THE SAME DEFECT ONE ARGUMENT
+					 * OVER. With no prolongation `NPCResidualStart()` makes
+					 * its local trace row an ALIAS of `rTr`, the kernel writes
+					 * the alias, and `NPCResidualFinish()` syncs the alias to
+					 * this base -- so a host-valid `rTr` downloaded the row on
+					 * every residual and the copy into `yb` below uploaded it
+					 * again. Sized here because `NPCResidualStart()` resizes
+					 * only on a mismatch, and a resize would reallocate past
+					 * the `Write()`; with a prolongation the true-dof size is
+					 * still the iterate's trace block.
+					 */
+					rTr.SetSize( xb.GetBlock( 2 ).Size() );
+					rTr.UseDevice( true );
+					rTr.Write();
 
 					hyb->NPCResidual( *load, xLoc, xb.GetBlock( 2 ), rLoc, rTr,
 					                  residualIntegrand() );

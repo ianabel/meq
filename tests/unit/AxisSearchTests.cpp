@@ -445,19 +445,161 @@ BOOST_AUTO_TEST_CASE( theStoppingScaleAgreesAndStaysOnTheDevice )
 	BOOST_TEST( std::fabs( target( 0 ) - expected ) <= 4.0*eps*expected );
 }
 
-// AND IT REFUSES RATHER THAN TRUNCATING WHEN THERE ARE MORE CANDIDATES THAN
-// THE DOWNLOAD HOLDS.
+// THE MERGE IS THE QUADRATIC LOOP'S, TO THE BIT, ON A LIST LONG ENOUGH TO MATTER.
 //
-// A truncated candidate list is a competition missing an entrant, which is
-// exactly how a conductor's O-point would win one -- so the cap is a refusal
-// and the caller keeps the host sweep. The fixture is a lattice of critical
-// points on a fine mesh, which is the cheapest way to exceed it.
-BOOST_AUTO_TEST_CASE( itRefusesRatherThanTruncatingTheCandidateList )
+// mergeCandidates() walks a spatial grid rather than the whole kept list, and
+// the claim that makes that safe is that it returns EXACTLY what the walk did:
+// same points, same order, same replacements. So the oracle here is the walk
+// itself, verbatim, and the comparison is `==` on every field. The list is
+// built to reach every branch of the rule -- coincident points (the
+// separation test), same-type neighbours within half an element (the merge),
+// a later candidate less outside its element (the replacement, which MOVES a
+// kept point), and different types side by side (never merged) -- and it is
+// two candidates per element, which is the shape a flux-free guess hands the
+// sweep and the shape that made the walk 22 seconds on fixed-f-diiid.
+BOOST_AUTO_TEST_CASE( theMergeIsTheWalkItReplaces )
+{
+	Fixture fixture( 1, 40 );
+	meq::CriticalPointFinder const finder( fixture.flux, fixture.potential );
+	mfem::Mesh &mesh = fixture.mesh;
+
+	// A deterministic scatter: an LCG, so the list is the same on every run.
+	unsigned long long state = 12345;
+	auto next = [ & ]()
+	{
+		state = state*6364136223846793005ULL + 1442695040888963407ULL;
+		return static_cast<double>( state >> 11 )/9007199254740992.0;
+	};
+
+	std::vector<meq::CriticalPoint> ordered;
+	mfem::IsoparametricTransformation scratch;
+	for ( int e = 0; e < mesh.GetNE(); ++e )
+	{
+		mesh.GetElementTransformation( e, &scratch );
+		double const h = mesh.GetElementSize( &scratch );
+		mfem::IntegrationPoint centre;
+		centre.Set2( 1.0/3.0, 1.0/3.0 );
+		mfem::Vector x( 2 );
+		scratch.Transform( centre, x );
+		for ( int seed = 0; seed < 2; ++seed )
+		{
+			meq::CriticalPoint point;
+			point.element = e;
+			point.radius = x( 0 ) + ( next() - 0.5 )*h;
+			point.z = x( 1 ) + ( next() - 0.5 )*h;
+			// One in eight sits exactly on the previous candidate, which is
+			// the separation branch and no other.
+			if ( !ordered.empty() && next() < 0.125 )
+			{
+				point.radius = ordered.back().radius;
+				point.z = ordered.back().z;
+			}
+			point.psi = next();
+			point.overshoot = next() - 0.5;
+			int const pick = static_cast<int>( 3.0*next() );
+			point.type = pick == 0 ? meq::CriticalPointType::Maximum
+			             : pick == 1 ? meq::CriticalPointType::Minimum
+			                         : meq::CriticalPointType::Saddle;
+			ordered.push_back( point );
+		}
+	}
+
+	// THE ORACLE, which is the walk mergeCandidates() replaced, verbatim.
+	double diameter = 0.0;
+	{
+		mfem::real_t lo[ 2 ] = { mesh.GetVertex( 0 )[ 0 ], mesh.GetVertex( 0 )[ 1 ] };
+		mfem::real_t hi[ 2 ] = { lo[ 0 ], lo[ 1 ] };
+		for ( int v = 1; v < mesh.GetNV(); ++v )
+			for ( int d = 0; d < 2; ++d )
+			{
+				lo[ d ] = std::min( lo[ d ], mesh.GetVertex( v )[ d ] );
+				hi[ d ] = std::max( hi[ d ], mesh.GetVertex( v )[ d ] );
+			}
+		diameter = std::sqrt( ( hi[ 0 ] - lo[ 0 ] )*( hi[ 0 ] - lo[ 0 ] )
+		                      + ( hi[ 1 ] - lo[ 1 ] )*( hi[ 1 ] - lo[ 1 ] ) );
+	}
+	double const separation = finder.rootSeparation();
+	std::vector<meq::CriticalPoint> expected;
+	int replaced = 0;
+	int separated = 0;
+	for ( meq::CriticalPoint const &point : ordered )
+	{
+		mesh.GetElementTransformation( point.element, &scratch );
+		double const reach = 0.5*mesh.GetElementSize( &scratch );
+		bool duplicate = false;
+		for ( std::size_t j = 0; j < expected.size(); ++j )
+		{
+			double const dr = expected[ j ].radius - point.radius;
+			double const dz = expected[ j ].z - point.z;
+			double const distance = std::sqrt( dr*dr + dz*dz );
+			if ( distance < separation*diameter )
+			{
+				duplicate = true;
+				++separated;
+				break;
+			}
+			if ( expected[ j ].type == point.type && distance < reach )
+			{
+				duplicate = true;
+				if ( point.overshoot < expected[ j ].overshoot )
+				{
+					expected[ j ] = point;
+					++replaced;
+				}
+				break;
+			}
+		}
+		if ( !duplicate )
+			expected.push_back( point );
+	}
+
+	std::vector<meq::CriticalPoint> const got = finder.mergeCandidates( ordered );
+
+	std::printf( "  %zu candidates over %d elements: %zu kept, %d separated, "
+	             "%d replaced\n", ordered.size(), mesh.GetNE(), expected.size(),
+	             separated, replaced );
+
+	// Every branch was reached, or the comparison below proves less than it says.
+	BOOST_TEST_REQUIRE( separated > 0 );
+	BOOST_TEST_REQUIRE( replaced > 0 );
+	BOOST_TEST_REQUIRE( expected.size() < ordered.size() );
+
+	BOOST_TEST_REQUIRE( got.size() == expected.size() );
+	int differing = 0;
+	for ( std::size_t i = 0; i < got.size(); ++i )
+		if ( got[ i ].radius != expected[ i ].radius
+		     || got[ i ].z != expected[ i ].z
+		     || got[ i ].psi != expected[ i ].psi
+		     || got[ i ].type != expected[ i ].type
+		     || got[ i ].element != expected[ i ].element
+		     || got[ i ].overshoot != expected[ i ].overshoot )
+			++differing;
+	BOOST_TEST( differing == 0 );
+}
+
+// AND IT RETURNS THE WHOLE LIST, HOWEVER LONG, AND IT IS THE HOST'S.
+//
+// The route has no ceiling: the list is at most two candidates per element,
+// and the long case is real -- a flux-free guess makes every element report a
+// root. A truncated list would be a competition missing an entrant, which is
+// how a conductor's O-point would win one, so the claim is the whole list or
+// nothing, and the whole list here is the host sweep's. The fixture is that
+// guess: the cosine potential with the flux block ZEROED, as `Type = "ramp"`
+// leaves it, on 5000 elements -- past the 4096 a ceiling once refused.
+BOOST_AUTO_TEST_CASE( itReturnsTheWholeCandidateListHoweverLong )
 {
 	deviceOnce();
 
-	Fixture fixture( 2, 26 );
+	Fixture fixture( 1, 50 );
+	{
+		mfem::real_t *const host = fixture.state.HostReadWrite();
+		for ( int i = 0; i < fixture.offsets[ 1 ]; ++i )
+			host[ i ] = 0.0;
+		fixture.flux = 0.0;
+		fixture.flux.HostRead();
+	}
 	meq::CriticalPointFinder const finder( fixture.flux, fixture.potential );
+	std::vector<meq::CriticalPoint> const host = finder.sweep();
 
 	Route route;
 	std::vector<meq::CriticalPoint> device;
@@ -465,12 +607,20 @@ BOOST_AUTO_TEST_CASE( itRefusesRatherThanTruncatingTheCandidateList )
 	bool const took = route.run( fixture, finder, device, count );
 
 	std::printf( "  %d elements: %d roots before the merge, %d after, "
-	             "cap %d, route %s\n",
-	             fixture.mesh.GetNE(), route.rawCount, count,
-	             meq::axisCandidateCap, took ? "taken" : "REFUSED" );
+	             "host %zu, route %s\n",
+	             fixture.mesh.GetNE(), route.rawCount, count, host.size(),
+	             took ? "taken" : "REFUSED" );
 
-	// Whichever side of the cap this fixture lands on, the contract is the
-	// same: the count is reported truthfully, and the route is taken only
-	// when the whole list fits.
-	BOOST_TEST( took == ( route.rawCount <= meq::axisCandidateCap ) );
+	BOOST_TEST_REQUIRE( took );
+	BOOST_TEST( route.rawCount > 4096 );
+	BOOST_TEST( count == static_cast<int>( host.size() ) );
+	// Merged by one routine from two lists of the same roots, so the merged
+	// lists are the same points; how close is theDeviceRootsWhatTheHostSweepRoots's
+	// question, asked here only of the element each came from.
+	int differing = 0;
+	for ( std::size_t i = 0; i < host.size() && i < device.size(); ++i )
+		if ( host[ i ].element != device[ i ].element
+		     || host[ i ].type != device[ i ].type )
+			++differing;
+	BOOST_TEST( differing == 0 );
 }

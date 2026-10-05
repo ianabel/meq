@@ -14358,3 +14358,372 @@ rather than made silently, and its header's comparison holds: `8.266088e-02` on
 host and `cuda` alike, in 7 + 3 + 2 steps. `DeviceParity` keeps the moving
 support covered by running a copy with that key stripped -- no other shipped
 example moves a FILLED support.
+
+### M-240
+
+**THE FIRST EVALUATION OF A SOLVE IS ON THE DEVICE, AND WHAT KEPT IT OFF WAS A
+QUADRATIC MERGE -- NOT THE HOST, NOT THE ROOTING, AND NOT WHERE THE ITERATE
+WAS.**
+
+[M-238](#m-238) left `ff3`'s axis leg at 22.1 s, 21.9 of it one cold sweep, and
+`DEVICE-PLAN.md` read it as the iterate starting host-valid while every gate
+wants it device-only. **Uploading the iterate once, ahead of its first reader,
+was necessary and on its own made things WORSE**: the device route still
+declined, and the host sweep that replaced it now downloaded the iterate it had
+just been sent -- phase C from 0.001 MB to 35.3. *A crossing moved earlier is
+still a crossing until its reader moves too.*
+Probed rather than argued, the refusal was the candidate ceiling -- **4,960
+candidates on `fixed-a-testtokamak`'s 2,480 elements**, two per element. A
+`Type = "ramp"` guess seeds the potential and the trace and leaves the flux
+block zero, so `q_h` is identically zero, `max | q |` is zero, the stopping rule
+is absolute, and every element meets it at its own seed. Every
+`examples/fixed-*.toml` starts there.
+
+**AND `perf` PUT THE 22 SECONDS IN THE MERGE.** On `ff3` under CUDA,
+`CriticalPointFinder::mergeCandidates()` is **13.9% of a 156 s run** -- the
+whole leg -- and the rooting beside it does not rank. The merge walked the kept
+list for every candidate, and on a list of two hundred thousand nearly all kept
+that is quadratic. *A cost attributed to a route is a cost of the route only if
+the other route does not pay it*: the host sweep calls the same merge.
+
+| `ff3`, `--device cuda`, `OMP = MKL = 1` | M-238 | upload only | **all four** |
+|---|---|---|---|
+| solve | 43.3 s | 41.1 s | **21.7 -- 22.9 s** |
+| axis leg | 22.1 s | 19.8 s | **0.40 -- 0.42 s** |
+| cold full sweeps on the host | 1 | 1 | **0** |
+| axis and X-point evaluations on device | 23 taken, 1 declined | 23, 1 | **24, 0** |
+| phase C down | 0.001 MB | 35.3 MB | **1.57 MB** |
+| Newton history | | | M-238's run's to iteration 9; iteration 10 at cuDSS's 1e-15 |
+
+**The four, and each is necessary:**
+
+1. **The iterate goes up once, before its first reader**, under `Phase::Upload`:
+   `countedDeviceReadWrite()`, a new funnel, because a `Read()` leaves the host
+   copy valid and opens no gate.
+2. **`mergeCandidates()` is grid-indexed** and returns the walk's list **to the
+   bit**. Every point that can match lies within `max( separation x diameter,
+   largest reach )`, so a grid of that cell size holds every candidate match in
+   the 3 x 3 block around it, and the smallest matching index there is the
+   index the walk stopped at; a replacement moves its point on the grid.
+   `theMergeIsTheWalkItReplaces` holds the walk verbatim as the oracle on 6,400
+   candidates reaching all three branches -- 524 separated, 928 replaced -- and
+   goes red at 4,453 kept against 3,846 with the search narrowed to one cell.
+3. **The candidate ceiling is gone.** The list is at most two per element by
+   construction, so the mesh bounds it, and at the bound it is the size of the
+   iterate; a refusal cost the iterate's download PLUS a host sweep.
+   `itReturnsTheWholeCandidateListHoweverLong` takes 10,000 roots off a
+   zero-flux fixture and matches the host sweep element for element.
+4. **The nodal fallback runs on the device.** No candidate on a zero-flux field
+   is an axis, so `peakAt()` falls back to the largest potential dof -- and that
+   walk downloaded the iterate, 17.7 MB, and the cold-state copy after it a
+   second time. Two exact reductions replace it: `fmax`, then the smallest
+   index holding the maximum, which is the walk's first-of-equals.
+   **`mfem::ArgMaxReducer` was the obvious primitive and is wrong**: its `Join`
+   is `a.first <= b.first`, so a tie goes to whichever joined last.
+   `theNodalPeakIsTheWalk` pins ties, NaN, signed zero and an all `-inf` range,
+   and goes red with the index match loosened.
+
+**AND FIVE DOWNLOADS AND UPLOADS ELSEWHERE WERE MEQ'S OWN.** `machine-f-diiid`
+under CUDA, `nsys` over the whole run:
+
+| | M-238 | now |
+|---|---|---|
+| host to device | 543.4 MB, 1,008 copies | **508.2 MB, 909** |
+| device to host | 100.7 MB, 522 | **78.6 MB, 470** |
+
+* **Phase D downloaded the answer twice.** `downloadSolution()` funnelled the
+  base and then each of its three aliases, whose flags still said device-only
+  -- so each copied its block down again. `SyncMemory()` copies flags and
+  nothing else, and after the base's download the flags are true of the
+  aliases: `ff3` 35.3 MB to 17.7.
+* **`curveBoundaryOnto()` restored the nodes with a device-aware `=`** eight
+  times, so the funnel after each brought them back: 25.2 MB on `ff3`, the
+  funnel M-238 added to fix a `debug` fault. A host copy is what every reader
+  wanted.
+* **`fluxGf = darcyFlux; fluxGf.Neg()` ran on the device** after the flux had
+  just come down, and the post-solve axis check's finder downloaded it again:
+  9.42 MB on `ff3`. Written as `-x` on the host, the same bits.
+* **`DeviceNPCOperator::Mult`'s `rLoc` arrived host-valid**, so upstream's
+  residual finish synced its device-written blocks down to it and the copies
+  into the output put them back up: 28 a run each way. Upstream named this in
+  its reply -- *MEQ's `r` has `UseDevice()` false* -- and it is `xLoc`'s repair
+  again.
+
+**`DEVICE-PLAN.md`'s item 2 WAS MISATTRIBUTED, AND THE CONTROL IS WHAT SAID
+SO.** It read the per-residual uploads under `ResidualRowsBatched()` as MEQ's
+`darcyRhs`. Uploading `darcyRhs` once per rebuild added 11.2 MB and moved those
+33 uploads not at all -- they are upstream's `darcy_u` and `darcy_p`, copied
+from the state inside `NPCResidualStart()` -- so it was reverted. *A fix that
+does not move the number it was written for is a measurement of the
+attribution.* And a flag sync on `xLoc`'s blocks, found by a probe that showed
+them `H1 D0` under a device-only base, moved nothing either and was reverted:
+the copy runs on the source's flags, not the destination's.
+
+**THE PHASE-C SCALARS ARE MEASURED AND LEFT.** 247 device-to-host copies of
+4 KB or less over `machine-f-diiid`, **0.29 ms** of copy time in all. Batching
+them is a restructuring of the step for well under one per cent.
+
+**AND `machine-f-diiid` READS `3.759850e-01`, NOT THE `3.759851e-01` THIS FILE
+QUOTES SIXTY TIMES** -- on the host and the card alike, at this change and in
+the logs of the commit before it, with `psi_bnd` `7.081392e-02` and the X-point
+`( 1.200929, -0.999490 )` one unit off in the last printed digit too. Nothing
+here moved it; when it moved is not established.
+
+### M-241
+
+**UPSTREAM'S ANSWER TO THE BUS REQUEST, INSTALLED: UPLOADS 508 MB TO 102, AND
+NOT ONE HEADLINE ANSWER MOVES.**
+
+`../mfem/install` is rebuilt from `meq-integration` at `969569440e`, which
+carries upstream's `e96134e651` -- their answer to
+`HDG-DEVICE-BUS-FROM-MEQ.md` -- and the subdomains line's `683646da4b`. The
+installed headers match the branch, `libmfem.a` is newer than its tip, and
+MEQ was rebuilt `--clean-first` after the headers were touched. `libmfem.a`
+is static, so the old-library arm is the MEQ binary from the SAME source,
+kept aside before the reinstall.
+
+`machine-f-diiid`, `--device cuda`, `nsys` over the run:
+
+| | M-238 | [M-240](#m-240), old library | **`969569440e`** |
+|---|---|---|---|
+| host to device | 543.4 MB, 1008 copies | 508.2 MB, 909 | **102.3 MB, 386** |
+| device to host | 100.7 MB, 522 | 78.6 MB, 470 | **51.4 MB, 422** |
+
+By upstream's three items, gdb on `CuMemcpyHtoD` / `CuMemcpyDtoH`:
+
+| | old library | new |
+|---|---|---|
+| scatter uploads, `HDGNPCScatterColumn` | 336, 117.3 MB | 0 |
+| `LUSolve` re-uploads under `MultInvBatched` | 72, 171.7 MB | 0 |
+| `SyncLocalBlocksToHost` downloads | 38, 40.7 MB | 26, 24.0 MB |
+| residual-finish uploads | 32, 11.2 MB | 0 |
+| `MultNL` gathers from `GetGradient`, down | 36, 10.5 MB | 0 |
+
+**What is left is upstream's, and two of the items are new.**
+* `ComputeH()`'s read-only syncs, 24 MB down: upstream named these as not
+  done.
+* `ResidualRowsBatched()`'s gathers, 11.4 MB up: M-240 showed they are not
+  MEQ's `darcyRhs`.
+* `HDGTraceEliminateRows`, 12 x 1.31 MB up per gradient.
+
+Both new ones are reported, with these numbers, in
+`HDG-DEVICE-BUS-MEASUREMENTS-FROM-MEQ.md`.
+
+**AND THE LIBRARY MOVES NO HEADLINE ANSWER.** Every shipped example that runs
+without a mesh generator was run with both binaries on `cpu`, and with the new
+one on `cuda`. On all 29 examples these are identical:
+* `psi_ax`, `psi_bnd` and the X-point;
+* Newton counts and exit codes.
+
+Three curved-path examples differ below that, which is the subdomains change
+and not the bus work:
+* **`miller-adaptive`:** the first residual moves in its seventh digit
+  (`6.757121e-01` to `6.757124e-01`), and the final `eta` in its fifth
+  (`6.8670e-05` to `6.8669e-05`).
+* **`miller-curved` and `flux-surfaces`:** a final residual moves at `1e-14`.
+
+On the new library, `rotating-normalised` remains the one cpu/cuda
+disagreement: the axis-route difference `DEVICE-PLAN.md` carries as item 4.
+The suite is 65 of 66 on it. The one failure is the deliberate
+`PlasmaEdgeConvergence`, at the same case; `DeviceParity`'s three arms pass.
+MEQ's clean rebuild shows no `#20011-D`, which is the host-function-in-device-
+lambda warning upstream asked consumers to check for.
+
+### M-242
+
+**M-235 RETAKEN ON `969569440e` IN BOTH FORMATS: THE DEVICE NOW WINS THE SOLVE
+ON EVERY CASE, SINGLE PRECISION IS NO LONGER A LOSS, AND WHAT IS LEFT IS TWO
+SINGLE-THREADED HOST LEGS OUTSIDE THE SOLVE.**
+
+`../mfem/install-single` is rebuilt from `meq-integration` at `969569440e`, the
+commit `../mfem/install` carries ([M-241](#m-241)): the installed headers match
+the branch, `libmfem.a` is newer than its tip, and `config.mk` is unchanged.
+MEQ's `build-single` was rebuilt `--clean-first` against it. Same harness,
+cases and gate as [M-235](#m-235): six arms interleaved within each round,
+`/proc/loadavg` under 0.60 for four minutes first, best of 3 rounds (2 at
+`ff3`). 66 of 66 runs exit 0.
+
+| case | elem | arm | N | wall | setup | solve | output | solve/N | psi_ax |
+|---|---|---|---|---|---|---|---|---|---|
+| mf | 4848 | dbl cpu8 | 2 | 4.522 | 0.023 | 4.136 | 0.358 | 2.068 | 3.759850e-01 |
+| | | dbl cpu1 | 2 | 8.268 | 0.021 | 7.357 | 0.870 | 3.679 | 3.759850e-01 |
+| | | dbl cuda | 2 | **3.352** | 0.020 | 2.461 | 0.870 | 1.230 | 3.759850e-01 |
+| | | sgl cpu8 | 1 | 3.621 | 0.020 | 3.174 | 0.426 | 3.174 | 3.759860e-01 |
+| | | sgl cpu1 | 1 | 6.532 | 0.020 | 5.587 | 0.917 | 5.587 | 3.759860e-01 |
+| | | sgl cuda | 1 | **3.207** | 0.019 | 2.246 | 0.936 | 2.246 | 3.759862e-01 |
+| ff1 | 6245 | dbl cpu8 | 10 | 18.29 | 13.65 | 3.326 | 0.947 | 0.333 | 2.897811e-01 |
+| | | dbl cpu1 | 10 | 20.37 | 12.24 | 6.340 | 1.575 | 0.634 | 2.897811e-01 |
+| | | dbl cuda | 10 | 18.20 | 13.37 | 2.922 | 1.524 | 0.292 | 2.897811e-01 |
+| | | sgl cpu8 | 8 | **12.82** | 9.456 | 2.336 | 0.907 | 0.292 | 2.897815e-01 |
+| | | sgl cpu1 | 8 | 16.00 | 9.383 | 4.808 | 1.567 | 0.601 | 2.897815e-01 |
+| | | sgl cuda | 8 | 14.13 | 10.35 | 2.106 | 1.593 | 0.263 | 2.897815e-01 |
+| ff2 | 25487 | dbl cpu8 | 9 | 45.44 | 31.46 | 11.14 | 2.841 | 1.237 | 2.897815e-01 |
+| | | dbl cpu1 | 9 | 56.29 | 28.32 | 22.39 | 5.577 | 2.488 | 2.897815e-01 |
+| | | dbl cuda | 9 | 45.32 | 32.75 | 6.270 | 5.839 | 0.697 | 2.897815e-01 |
+| | | sgl cpu8 | 8 | **36.16** | 24.94 | 8.078 | 3.035 | 1.010 | 2.897814e-01 |
+| | | sgl cpu1 | 8 | 50.98 | 24.86 | 20.26 | 5.634 | 2.533 | 2.897814e-01 |
+| | | sgl cuda | 8 | 36.56 | 25.36 | 4.837 | 5.658 | 0.605 | 2.897815e-01 |
+| ff3 | 102840 | dbl cpu8 | 10 | 149.3 | 89.27 | 46.91 | 12.79 | 4.691 | 2.897815e-01 |
+| | | dbl cpu1 | 10 | 219.5 | 88.72 | 105.6 | 24.08 | 10.56 | 2.897815e-01 |
+| | | dbl cuda | 10 | 121.1 | 78.18 | 18.35 | 24.62 | 1.835 | 2.897815e-01 |
+| | 102836 | sgl cpu8 | 9 | 121.9 | 72.54 | 35.75 | 12.61 | 3.972 | 2.897817e-01 |
+| | | sgl cpu1 | 9 | 200.6 | 76.96 | 98.43 | 23.28 | 10.94 | 2.897817e-01 |
+| | | sgl cuda | 9 | **111.5** | 74.82 | 13.43 | 23.23 | 1.492 | 2.897817e-01 |
+
+**THE ANSWERS DID NOT MOVE.** `psi_ax` reads M-235's in every double arm except
+`mf`'s last digit, which is [M-240](#m-240)'s known `3.759850e-01`, and the
+single arms agree with double at FP32's floor as before. `ff3` still marks
+102,836 elements in single against 102,840; single `ff3` now takes 9 Newton
+steps against M-235's 10. Every CUDA arm prints `0 declined` for the axis
+routes -- 24 taken on double `ff3`, where M-235 read 0 taken and 15 declined.
+
+**THE DEVICE NOW WINS THE SOLVE ON ALL FOUR CASES IN BOTH FORMATS**, where
+M-235 had it winning `mf` alone. Solve per Newton step, CUDA against its own
+eight-thread host:
+
+| | M-235 dbl | M-235 sgl | **now dbl** | **now sgl** |
+|---|---|---|---|---|
+| mf | 0.81x | 0.85x | **0.60x** | **0.71x** |
+| ff1 | 1.16x | 1.09x | **0.88x** | **0.90x** |
+| ff2 | 1.10x | 1.14x | **0.56x** | **0.60x** |
+| ff3 | 1.03x | 1.35x | **0.39x** | **0.38x** |
+
+`ff3`'s solve under CUDA is **65.6 s to 18.35 in double and 97.6 s to 13.43 in
+single**. This entry does not attribute that split: between M-235 and here
+stand MEQ's `6f49312` and [M-240](#m-240) and the library's move to
+`969569440e`. The one part measured in isolation before is the axis leg,
+33.57 s at 1.00 cores in M-235 and **0.348 s** here, M-240's figure. The HOST
+axis leg fell with it, 21.57 s to 3.56 s at 6.81 cores, because the quadratic
+merge M-240 replaced was the host sweep's cost too.
+
+**SINGLE PRECISION IS NOW 0.81x TO 0.90x OF DOUBLE PER STEP**, on `ff1`, `ff2`
+and `ff3` on both arms, against 1.08x to 2.41x in M-235. `mf` is not comparable
+per step, being one step in single against two. And **single SETUP is now
+FASTER than double**, 0.69x, 0.79x and 0.81x of it on the three `ff` cases,
+against 2.04x, 2.25x and 1.27x. That is the direction M-235's own simulation
+predicts once `238f719f50` is in: the no-progress rule stops a float bisection
+at about 20 halvings, where double's `1e-13` stops it at 39. The fix is in the
+library this entry links; whether the M-235 single binary linked a library
+without it was not recorded, so this is consistency rather than an isolated
+measurement. `re-assembly`, the other leg M-235 blamed, reads 1.02 s in single
+against 1.56 in double on `ff1`, where it read 8.55 against 3.04.
+
+**WHAT A DEVICE RUN NOW LOSES ON IS OUTSIDE THE SOLVE, AND IT IS ALL HOST
+THREADING.**
+
+* **`setup` is 60 to 67 per cent of every `ff3` arm at 1.00 cores**, host and
+  device alike: 72.5 to 89.3 s. It is the largest item in every large run.
+  It spreads by about 15 per cent between arms doing identical work -- 28.3
+  to 32.7 s on double `ff2` -- so read it as one leg and not six.
+* **`output` doubles under a device**, 12.8 s at 2.55 cores to 24.6 s at 1.00
+  on double `ff3`: [M-223](#m-223)'s `DarcyForm::Reconstruct()`, threaded on
+  the host and serial under a Device.
+* **The post-solve axis check is M-235's axis leg one step later**: 0.35 s at
+  6.71 cores on the host, 1.55 s at 1.00 under CUDA on double `ff3`, and
+  2.01 s in single. A host sweep that loses `meq::hostLoopsAreSafe()` under a
+  Device ([M-188](#m-188)).
+
+So `ff1` and `ff2` tie on the wall in double, 18.20 against 18.29 and 45.32
+against 45.44, with the solve at 0.88x and 0.56x. `ff3` wins the wall, 121.1
+against 149.3, only because its solve is large enough to pay for the other two.
+**The fastest arm on every `ff` case is single**: `ff3` single + CUDA at 111.5 s
+is 0.75x of the double host's wall.
+
+**ONE NUMBER MOVED THE WRONG WAY AND IS NOT EXPLAINED.** `mf`'s double host
+solve is 4.136 s against M-235's 3.727, and single's 3.174 against 2.871, both
+about 10 per cent slower with no device anywhere in the arm. The ratios above
+are within-run and do not depend on it.
+
+**THE SINGLE SUITE IS 60 OF 66 ON THE NEW INSTALL, AND NONE OF THE FIVE NEW REDS
+IS AN ANSWER MOVING.** Against [M-222](#m-222)'s 62 of 63:
+
+* `PlasmaEdgeConvergence` is the standing deliberate red, failing the same
+  case at the same rates as the last single run (`0.6297` at `k = 2`).
+* **`DeviceRowsTests::theBatchedFillIsEveryHostArmToTheBit` and
+  `ResidentIterateTests`' two `...MatchTheirHostLoopsToTheBit` cases are
+  double-build acceptances.** Both arrived in `6f49312`, after the single suite
+  last ran. The host arms keep `double` accumulators and evaluate the source in
+  MEQ's MFEM-free `double` half; the device routes are `real_t` throughout. In
+  single the two routes are therefore different arithmetic, and they differ at
+  FP32's last bits: 1.5e-08 on a per-element current, 3e-08 on a dense-fill
+  entry of 0.25. *M-237's "to the bit" holds in double and cannot hold in
+  single*, which is [M-219](#m-219)'s class.
+* **`XPointBorder`, `XPointOuter` and `FreeBoundaryCoupling`'s
+  `theTwoBorderSolveReportsATrueMagneticAxis` are M-222's knife edge.** All
+  three fail at `MKL_NUM_THREADS = 1`, the one draw ctest pins:
+
+  | | MKL = 1 | MKL = 2 | MKL = 4 |
+  |---|---|---|---|
+  | `XPointBorder` merit weight 4 | **58 iterations, other basin** | skipped as plateau | skipped as plateau |
+  | `XPointOuter` outer step | **too slow** | **too slow** | passes |
+  | `FreeBoundaryCoupling` limiter radii | **4 of 5** | 5 of 5 | 5 of 5 |
+
+  `XPointBorder`'s is M-222's row exactly -- `psi_ax = 8.05e-02` against
+  `8.27e-02` -- except that the crossing took 58 bootstrap iterations where it
+  took 195, which is under the case's `8x` plateau threshold of 88, so the
+  answer was compared rather than skipped. *The work discriminator M-222 added
+  is a threshold on a coin toss, and this draw landed under it.*
+
+The double control on the same MEQ source is 65 of 66 ([M-241](#m-241)).
+
+### M-243
+
+**`4929772e95`: THE GRADIENT'S PATTERN STAYS ON THE DEVICE, CUDSS NOW READS ITS
+ROW POINTERS BACK, AND THE RESIDUAL'S LAST UPLOADS ARE MEQ'S LOAD.**
+
+Both installs are rebuilt from `meq-integration` at `4929772e95`, which carries
+upstream's `3c183cde03`, `35ab01a477` and `0ce31ebcc2`. The headers match the
+branch, both `libmfem.a` are newer than its tip, there is no `#20011-D` in any
+log, and both MEQ trees were rebuilt `--clean-first`. `machine-f-diiid`,
+`--device cuda`, `MKL = OMP = 1`, `nsys` over the run, cuDSS as the trace
+solver:
+
+| | [M-241](#m-241), `969569440e` | `4929772e95` | `4929772e95` + `rTr` |
+|---|---|---|---|
+| host to device | 102.3 MB, 386 | 86.9 MB, 363 | **83.4 MB, 343** |
+| device to host | 51.4 MB, 422 | 52.4 MB, 434 | **48.9 MB, 414** |
+
+Copies matched by size between the two libraries:
+
+| bytes | | `969569440e` | `4929772e95` |
+|---|---|---|---|
+| 1,310,436, the gradient's J | up | 12 | 1 |
+| 87,760, its I | up | 13 | 1 |
+| 87,760, its I | **down** | 0 | **12** |
+
+**The new download is `CuDSSSolver::SetMatrix()` asking
+`SparseMatrix::NumNonZeroElems()` for a count**, which is `HostReadI(); return
+I[height];`, so one integer costs the whole array once I lives on the device.
+One gdb frame for all 12. Upstream had no cuDSS build to see it, and said so.
+
+**`rTr` is `rLoc`'s defect one argument over.** With no prolongation,
+`NPCResidualStart()` makes the local trace row an alias of `rTr`, and
+`NPCResidualFinish()` syncs it to a base that was host-valid. So each residual
+downloaded the row and the copy into the output uploaded it again. Sized,
+`UseDevice( true )` and `Write()` before the call: 20 copies of 175,512 B go in
+each direction.
+
+**THE RESIDUAL'S `GetSubVector()` UPLOADS ARE `darcyRhs`, AND THE BLOCK VIEWS
+ARE WHAT FORGETS.** The load blocks' flags at entry to each of the 28
+residuals:
+* **Host-only at 16, device-valid at 12.** The 16 are the re-assembly leg's 16
+  calls. 16 × (465 KB + 233 KB) = 11.2 MB, against M-241's 11.4.
+* **The base reads `H1 D0` at all 28.** Only the views ever held a device copy,
+  and `darcyRhs.Update()` re-makes them at the end of `prepare()`. So uploading
+  the base once per build, [M-240](#m-240)'s control, could not move the count.
+* **The flux block's values change at 13 of the 16.** The potential block is
+  zero at all 28 and goes up 16 times anyway.
+
+*A view's flags are the view's.* Making a vector device-valid helps no reader
+that sees it through views made afterwards.
+
+What removes the load uploads is `BORDERED-GLOBALISATION-PLAN.md` §12: the
+load is linear in the exterior coefficients, and MEQ holds the per-mode loads.
+`DEVICE-PLAN.md` §1 had already predicted these 16 uploads, by that count.
+
+Every printed answer is unchanged across the three columns. The double suite is
+65 of 66: the deliberate `PlasmaEdgeConvergence`, at
+`theUncutPlasmaKeepsItsOrderAtEveryVanishingOrder`. `DeviceParity`'s three arms
+pass. The single binary solves `machine-f-diiid` on the host and under CUDA, at
+`3.759860e-01` and `3.759861e-01`. M-242 read `…862` under CUDA, and the step
+is within FP32's floor on a cuDSS path that is nondeterministic.

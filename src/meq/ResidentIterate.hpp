@@ -218,6 +218,18 @@ namespace meq
 	                          mfem::Vector &destination );
 
 	/**
+	 * The largest of `source[ begin, end )` and the FIRST index holding it --
+	 * the axis constraint's nodal fallback, which is a strict `>` walk from
+	 * `-inf` and so keeps the earliest of equals and skips NaN. Two exact
+	 * reductions rather than an arg-max: MFEM's `ArgMaxReducer` breaks a tie
+	 * by join order, which is the one thing the walk does not. @a bestIndex is
+	 * -1 and @a best `-inf` when nothing exceeds `-inf`, as the walk leaves
+	 * them. Two scalars cross the bus; the vector does not.
+	 */
+	bool nodalPeakOnDevice( mfem::Vector const &source, int begin, int end,
+	                        mfem::real_t &best, int &bestIndex );
+
+	/**
 	 * The kernel halves, in the device translation unit; no-ops returning
 	 * false without a device language. See AxisSearch.hpp for why the split.
 	 */
@@ -228,6 +240,9 @@ namespace meq
 	/// @copydoc plasmaElementKernel
 	bool gatherKernel( mfem::Vector const &source, mfem::Array<int> const &indices,
 	                   mfem::Vector &out );
+	/// @copydoc plasmaElementKernel
+	bool nodalPeakKernel( mfem::Vector const &source, int begin, int end,
+	                      mfem::real_t &best, int &bestIndex );
 	/// @copydoc plasmaElementKernel
 	bool orderedDotKernel( mfem::Vector const &source,
 	                       mfem::Array<int> const &indices,

@@ -87,11 +87,6 @@
  *     writing a kernel nothing runs, and the tree already has five of those.
  *   * **A CURVED OR MIXED MESH**, which meq::AffineTriangle refuses by
  *     construction, and a degree above meq::triangleBasisMaxDegree.
- *   * **MORE ACCEPTED CANDIDATES THAN THE COMPACTION HOLDS.** The cap is a
- *     property of the download and not of the field, so exceeding it is
- *     reported rather than truncated -- a truncated candidate list is a
- *     competition missing an entrant, which is exactly how a coil's O-point
- *     would win one.
  */
 
 namespace meq
@@ -481,35 +476,24 @@ namespace meq
 		return true;
 	}
 
-	/**
-	 * The largest accepted-candidate list this routine will return.
+	/*
+	 * THERE IS NO CEILING ON THE CANDIDATE LIST, AND THE ONE THERE WAS COST
+	 * MORE THAN IT SAVED.
 	 *
-	 * **IT IS A SANITY CEILING AND NO LONGER A DOWNLOAD BUDGET**, which is
-	 * why it is large. The first draft sized it at 256 because the compacted
-	 * array was downloaded WHOLE, so the cap was the cost -- and on
-	 * `fixed-f-diiid`'s 102,840 elements a transient iterate exceeded it, the
-	 * route declined, and the one host sweep that replaced it cost **22.4
-	 * seconds**, which is the entire leg. *A refusal that costs more than the
-	 * thing it refuses is not a safe default.*
+	 * The list is at most two candidates per selected element, so the mesh
+	 * bounds it. A flux-free guess reaches that bound -- `max | q |` is zero,
+	 * the stopping rule is absolute, and every element meets it at its own
+	 * seed -- and it is every `Type = "ramp"` solve's first evaluation. A
+	 * ceiling of 4096 refused that list and handed the iterate back to a host
+	 * sweep, which on `fixed-f-diiid` was 22 seconds.
 	 *
-	 * The count now comes back BEFORE the scatter -- four bytes -- and the
-	 * compacted array is sized to it, so the download is proportional to the
-	 * candidates that exist rather than to the ceiling, and the ceiling costs
-	 * nothing until it is reached. Reaching it is still a refusal rather than
-	 * a truncation: a truncated competition is one missing an entrant, which
-	 * is exactly how a conductor's O-point would win one.
-	 *
-	 * **4096 BOUNDS THE WORST CASE AT 352 KB AND THE CASE IT BOUNDS IS REAL.**
-	 * At a near-zero iterate `max | q |` collapses, `fluxScale()` falls back
-	 * to 1.0, and the stopping rule becomes `residual <= tolerance` in
-	 * ABSOLUTE terms -- which every element meets at its own seed, so every
-	 * element reports a root and the list is `2 x elements` long. That is not
-	 * a competition worth holding and **the host meets it too**: the same
-	 * iterate costs `sweep()` 22.4 seconds on `fixed-f-diiid`, and `cpu8`
-	 * pays it eleven times over a run. Refusing it and handing it back is
-	 * correct; what it is not is a device problem.
+	 * **AND THOSE 22 SECONDS WERE NEVER THE ROOTING.** `perf` puts them in
+	 * CriticalPointFinder::mergeCandidates(), which walked the whole kept list
+	 * for every candidate -- quadratic, and two hundred thousand candidates
+	 * long on that iterate. The merge is now grid-indexed and returns the
+	 * walk's list to the bit (`theMergeIsTheWalkItReplaces`), so the long list
+	 * is cheap on either route and there is nothing left to refuse.
 	 */
-	int constexpr axisCandidateCap = 4096;
 
 	/**
 	 * `tolerance * max( | q |, 1 )` over the flux dofs, computed and LEFT on
@@ -660,15 +644,13 @@ namespace meq
 	/**
 	 * Roots every element and returns the accepted candidates, compacted.
 	 *
-	 * @param out resized to meq::axisCandidateCap and **left host-valid**: it
+	 * @param out resized to the accepted count and **left host-valid**: it
 	 *        is the answer and the host is what reads it. This is the one
 	 *        download, and it is the whole of what the axis constraint costs
 	 *        the bus.
 	 * @param count how many of @a out are filled.
-	 * @return false, having touched nothing, with no `mfem::Device`, with an
-	 *         invalid basis, or when more candidates were accepted than the
-	 *         cap holds -- in which case @a count reports how many there were,
-	 *         so a caller can say so rather than guess.
+	 * @return false, having touched nothing, with no `mfem::Device` or with
+	 *         an invalid basis. The list is never truncated.
 	 */
 	bool axisCandidatesOnDevice( AxisSearchInputs const &inputs,
 	                             mfem::Array<AxisCandidate> &out, int &count );
