@@ -376,6 +376,17 @@ namespace meq
 			/// The total current through the cross-section, in amperes.
 			double current() const;
 
+			/// Replace the current, leaving the geometry alone. An inverse
+			/// solve makes a coil's current an UNKNOWN, and the source the
+			/// solver evaluates has to carry the iterate's value rather than a
+			/// copy of it: two answers to "what does this coil carry" that
+			/// could disagree is the failure CoilAugmentedNormalisedSource's
+			/// forwarding exists to rule out. INVERSE-AND-RECONSTRUCTION-PLAN.md
+			/// IV-3.
+			///
+			/// @throws std::invalid_argument if not finite.
+			void setCurrent( double currentIn );
+
 			/// The bounding box, which is the coil itself.
 			double minRadius() const;
 			double maxRadius() const;
@@ -893,6 +904,13 @@ namespace meq
 
 			/// The coils, in the order they were added.
 			std::vector<Coil> const &coils() const;
+
+			/// Replace one coil's current. See Coil::setCurrent: this is how
+			/// GradShafranovSolver::setFreeCurrents() moves a current that is
+			/// an unknown, through the one set every reader already holds.
+			/// @throws std::out_of_range as coil() does, and
+			///         std::invalid_argument if the current is not finite.
+			void setCurrent( std::size_t index, double current );
 
 			/**
 			 * The Grad-Shafranov source term, IN MEQ'S F CONVENTION:

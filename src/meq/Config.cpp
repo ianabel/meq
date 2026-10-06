@@ -964,7 +964,7 @@ namespace meq
 		// Catch a misspelt or misplaced table before anything reports a key
 		// missing from a table that is not the one the author meant to write.
 		{
-			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils", "conductors" };
+			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils", "circuits", "conductors" };
 			for ( auto const & entry : document.as_table() )
 			{
 				auto matches = [ &entry ]( char const * candidate ) { return entry.first == candidate; };
@@ -994,12 +994,13 @@ namespace meq
 		{
 			Table const rootTable = Table::root( document, sourceName );
 			std::vector< Table > const blocks = rootTable.getTableArrayOr( "coils" );
+			std::vector< bool > namesCurrent;
 			for ( std::size_t i = 0; i < blocks.size(); ++i )
 			{
 				Table const & one = blocks[ i ];
 				one.rejectUnknownKeys( { "Name", "CentreR", "CentreZ", "HalfWidth",
 				                         "HalfHeight", "Current", "CurrentDensity",
-				                         "FilamentsR", "FilamentsZ" } );
+				                         "FilamentsR", "FilamentsZ", "Free" } );
 
 				CoilParameters coil;
 				coil.name = one.getStringOr( "Name", "coil" + std::to_string( i ) );
@@ -1036,8 +1037,11 @@ namespace meq
 					one.fail( "Current", "names both Current and CurrentDensity; give exactly one. They are related by the area 4 * HalfWidth * HalfHeight = "
 					          + std::to_string( 4.0*coil.halfWidth*coil.halfHeight )
 					          + " m^2, so writing both says the same thing twice or contradicts itself, and this cannot tell which" );
-				if ( !hasCurrent && !hasDensity )
-					one.fail( "Current", "a coil needs a current: give either Current, the TOTAL through the cross-section in amperes, or CurrentDensity, the uniform j_phi in A/m^2" );
+				// NEITHER IS REFUSED BELOW, once [[circuits]] is read: a coil
+				// wired into a circuit takes its current from the circuit and
+				// must name none, so whether "no current" is an error depends
+				// on a table this loop has not reached.
+				namesCurrent.push_back( hasCurrent || hasDensity );
 
 				double const area = 4.0*coil.halfWidth*coil.halfHeight;
 				if ( hasDensity )
@@ -1045,10 +1049,14 @@ namespace meq
 					coil.densityGiven = true;
 					coil.current = one.getFloat( "CurrentDensity" )*area;
 				}
-				else
+				else if ( hasCurrent )
 				{
 					coil.current = one.getFloat( "Current" );
 				}
+
+				// AN UNKNOWN, NOT DATA: `Current` is where the inverse solve
+				// starts, which is why it is still required beside it.
+				coil.free = one.getBooleanOr( "Free", false );
 
 				/*
 				 * THIS BLOCK'S OWN FILAMENT STACK, overriding [conductors]
@@ -1095,6 +1103,95 @@ namespace meq
 
 				coilOptions.coils.push_back( coil );
 			}
+
+			/*
+			 * [[circuits]] -- CONDUCTORS ON ONE SUPPLY.
+			 * INVERSE-AND-RECONSTRUCTION-PLAN.md section 7.2, and see
+			 * CircuitParameters for why a flat coil list is not enough.
+			 *
+			 * Every member is a [[coils]] block BY NAME, so a member must exist
+			 * and be the only block of that name; it belongs to one circuit;
+			 * and it names no current or Free of its own, since the circuit's
+			 * current is the one number and the circuit's Free the one
+			 * unknown. Each of those is refused rather than resolved by
+			 * precedence, for the reason Current beside CurrentDensity is.
+			 *
+			 * THE MULTIPLIER IS REQUIRED. It is signed -- an anti-series pair
+			 * is a -1 -- and a default of 1 would wire a pair in series that
+			 * the author meant the other way, silently and with a plausible
+			 * equilibrium at the end.
+			 */
+			std::vector< Table > const circuitBlocks = rootTable.getTableArrayOr( "circuits" );
+			std::vector< std::string > circuitNames;
+			for ( std::size_t c = 0; c < circuitBlocks.size(); ++c )
+			{
+				Table const & one = circuitBlocks[ c ];
+				one.rejectUnknownKeys( { "Name", "Current", "Free", "Coils" } );
+
+				CircuitParameters circuit;
+				circuit.name = one.getString( "Name" );
+				if ( std::find( circuitNames.begin(), circuitNames.end(), circuit.name )
+				     != circuitNames.end() )
+					one.fail( "Name", "\"" + circuit.name + "\" names a second circuit; circuit names must be distinct, because they are how a result reports which current it chose" );
+				circuitNames.push_back( circuit.name );
+
+				if ( !one.has( "Current" ) )
+					one.fail( "Current", "a circuit needs a current: the TOTAL its supply drives, in amperes, which each member carries times its Multiplier -- and the starting value when Free = true" );
+				circuit.current = one.getFloat( "Current" );
+				circuit.free = one.getBooleanOr( "Free", false );
+
+				std::vector< Table > const members = one.getTableArrayOr( "Coils" );
+				if ( members.empty() )
+					one.fail( "Coils", "a circuit needs at least one member: Coils = [ { Name = \"...\", Multiplier = 1.0 }, ... ], each Name a [[coils]] block" );
+
+				for ( Table const & member : members )
+				{
+					member.rejectUnknownKeys( { "Name", "Multiplier" } );
+					CircuitMember entry;
+					entry.coil = member.getString( "Name" );
+					if ( !member.has( "Multiplier" ) )
+						member.fail( "Multiplier", "is required: it is this coil's signed share of the circuit's current, and a default of 1 would wire an anti-series pair in series without saying so" );
+					entry.multiplier = member.getFloat( "Multiplier" );
+					if ( !std::isfinite( entry.multiplier ) || entry.multiplier == 0.0 )
+						member.fail( "Multiplier", "must be finite and non-zero; a coil that carries none of the circuit's current is not in the circuit" );
+
+					std::size_t found = coilOptions.coils.size();
+					for ( std::size_t k = 0; k < coilOptions.coils.size(); ++k )
+					{
+						if ( coilOptions.coils[ k ].name != entry.coil )
+							continue;
+						if ( found != coilOptions.coils.size() )
+							member.fail( "Name", "\"" + entry.coil + "\" names more than one [[coils]] block, so this cannot tell which is in the circuit; give the coils distinct names" );
+						found = k;
+					}
+					if ( found == coilOptions.coils.size() )
+						member.fail( "Name", "\"" + entry.coil + "\" is not the Name of any [[coils]] block" );
+
+					CoilParameters & coil = coilOptions.coils[ found ];
+					Table const & coilTable = blocks[ found ];
+					if ( !coil.circuit.empty() )
+						member.fail( "Name", "\"" + entry.coil + "\" is already in circuit \"" + coil.circuit + "\"; a conductor is on one supply" );
+					if ( namesCurrent[ found ] )
+						coilTable.fail( coilTable.has( "Current" ) ? "Current" : "CurrentDensity",
+						                "this coil is in circuit \"" + circuit.name + "\", whose Current times this coil's Multiplier IS its current; naming one here as well says the same thing twice or contradicts it, and this cannot tell which" );
+					if ( coilTable.has( "Free" ) )
+						coilTable.fail( "Free", "this coil is in circuit \"" + circuit.name + "\", and a circuit has one current: write Free on the [[circuits]] block, where the unknown is" );
+
+					coil.circuit = circuit.name;
+					coil.multiplier = entry.multiplier;
+					coil.current = entry.multiplier*circuit.current;
+					entry.index = found;
+					circuit.members.push_back( entry );
+				}
+
+				coilOptions.circuits.push_back( circuit );
+			}
+
+			// AND NOW "NO CURRENT" CAN BE DECIDED: a coil outside every
+			// circuit still needs exactly one, with the message it always had.
+			for ( std::size_t i = 0; i < blocks.size(); ++i )
+				if ( !namesCurrent[ i ] && coilOptions.coils[ i ].circuit.empty() )
+					blocks[ i ].fail( "Current", "a coil needs a current: give either Current, the TOTAL through the cross-section in amperes, or CurrentDensity, the uniform j_phi in A/m^2 -- or wire it into a [[circuits]] block, which then supplies it" );
 		}
 
 		// [conductors] -- HOW the blocks above enter the equation.

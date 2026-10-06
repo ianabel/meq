@@ -3337,6 +3337,42 @@ namespace meq
 			/// The weight setXPointMeritWeight() last set. One by default.
 			double xPointMeritWeight() const;
 
+			/**
+			 * @brief Reject any line-search trial that carries XP-3's X-point
+			 *        further than @a length metres from the seed
+			 *        setXPointBoundary() was given. Zero, the default, is off.
+			 *
+			 * The rejection is refreshXPoint()'s out-of-the-mesh rejection moved
+			 * inward: the trial throws inside the Armijo loop and is halved, so a
+			 * step that would relocate the null is shortened until it does not.
+			 * BORDER-SCALING-PLAN.md BS-5.
+			 *
+			 * **A BRANCH CONTROL, NOT A STEP RULE, AND MEASURED TO BE ONE**
+			 * (MEASUREMENTS.md M-247). Applied from the first solve it changes
+			 * which equilibrium a run that converges today reports -- it loses
+			 * MAST's and MAST-U's cold solves and reports one machine converged
+			 * with its axis 1.39 m off. Applied only after a solve has FAILED,
+			 * at 0.03 to 0.10 of `[boundary.exterior] Radius`, it closes the two
+			 * X-point excursions among the cold failures and moves nothing,
+			 * because a run that converges never reaches it. So it is a library
+			 * setter and never a TOML key, and the driver sets it on its retry
+			 * rung alone.
+			 *
+			 * ANCHORED AT THE SEED and not at each step's start: a cap on one
+			 * step lets a run of short steps walk past it, and measured worse on
+			 * every case.
+			 *
+			 * @throws std::invalid_argument for a negative or non-finite length.
+			 */
+			void setXPointRelocationCap( double length );
+
+			/// The cap setXPointRelocationCap() last set, metres; zero is off.
+			double xPointRelocationCap() const;
+
+			/// Line-search trials the cap has rejected over this solver's
+			/// life -- the count that says it did anything.
+			long xPointCapRejections() const;
+
 
 			/// Whether setXPointBoundary() made the X-point an unknown.
 			bool xPointIsAnUnknown() const;
@@ -3422,6 +3458,124 @@ namespace meq
 			 * about 1 on a healthy case and passes through 0 at the fold.
 			 */
 			double plasmaCurrentSensitivity() const;
+
+			/**
+			 * ONE SUPPLY'S CURRENT, AS AN UNKNOWN: its member coils, by index
+			 * into the meq::CoilSet setFreeCurrents() is handed, and the signed
+			 * multiplier each carries. A coil's current is `multiplier * I`.
+			 * meq::CircuitParameters is the configuration's form of the same
+			 * thing; this is the library's, and holds indices because a solver
+			 * has no business with names.
+			 */
+			struct FreeCircuit
+			{
+				std::string name;
+				std::vector< std::size_t > coils;
+				std::vector< double > multipliers;
+			};
+
+			/**
+			 * @brief MAKE SOME COIL CURRENTS UNKNOWNS OF THE BORDERED NEWTON.
+			 *        INVERSE-AND-RECONSTRUCTION-PLAN.md section 4, stage IV-3.
+			 *
+			 * Each circuit's current becomes one more border unknown, and its
+			 * COLUMN `dR/dI` is constant: the coil term of the source is
+			 * `mu0 R I/area` on the coil's rectangle and does not depend on
+			 * `psi`, the support or the iterate (plan section 3.3). So the
+			 * column is measured once per solve, by a difference that is exact
+			 * because the residual is affine in `I`, and each free current
+			 * costs one backsolve per Newton step and nothing else. No existing
+			 * border row depends on a coil current, so every corner entry
+			 * against one is exactly zero.
+			 *
+			 * **THE CURRENTS MOVE IN @a coils ITSELF**, which must be the set
+			 * the source carries -- `source.conductors()` is compared by
+			 * address. The solved currents are therefore what every reader of
+			 * the set sees afterwards, and there is no second copy of them that
+			 * could disagree with the field. The seed is what the set holds
+			 * when this is called, and every member of a circuit must already
+			 * carry `multiplier * I` for one `I`.
+			 *
+			 * **TARGETS ARE WHAT DETERMINE THEM**: addIsofluxTarget(). A free
+			 * current with no target is refused at solve(), and so is a target
+			 * with no free current, since neither poses a problem. The dense
+			 * corner then stops being square and is solved as the regularised
+			 * least squares of meq::solveRegularisedLeastSquares(), which is the
+			 * whole of the new numerical content: a Newton step when the targets
+			 * are reachable, a Gauss-Newton step when they are not.
+			 *
+			 * @param regularisation  `gamma` per circuit, in units of flux per
+			 *        ampere, applied to the STEP in each current (plan section
+			 *        4.4). Empty means zero for every circuit, which is the
+			 *        minimum-norm Newton step. Large damps the currents toward
+			 *        the forward problem.
+			 *
+			 * **WHAT IS REFUSED, AT solve()**: anything but the bordered,
+			 * normalised path; a set the source does not carry; conductors
+			 * entering through an analytic field -- setConductorField() or
+			 * setExteriorConductors() -- because then a current enters terms
+			 * this column does not measure; and a configured mfem::Device,
+			 * whose integrand uploads a SNAPSHOT of the coil currents
+			 * (MEASUREMENTS.md M-239's lesson: an upload of host state goes
+			 * stale when the host state moves).
+			 *
+			 * @throws std::invalid_argument here for a null set, an empty or
+			 *         malformed circuit, an index out of range, a coil in two
+			 *         circuits, a zero or non-finite multiplier, members whose
+			 *         currents are not one circuit current, or a negative or
+			 *         non-finite gamma.
+			 */
+			void setFreeCurrents( std::shared_ptr< CoilSet > coils,
+			                      std::vector< FreeCircuit > circuits,
+			                      std::vector< double > regularisation = {} );
+
+			/**
+			 * @brief Ask that `psi( R1, Z1 ) = psi( R2, Z2 )`. Plan section 5,
+			 *        the first row.
+			 *
+			 * The points are PRESCRIBED, so the row is the difference of two
+			 * potential shape-function covectors and needs no envelope argument
+			 * -- it is the psi_ax row without the root find. Both points are
+			 * located once per solve and must lie in the mesh.
+			 *
+			 * @throws std::invalid_argument for a non-finite coordinate, or two
+			 *         coincident points, which is a row of zeros.
+			 */
+			void addIsofluxTarget( double r1, double z1, double r2, double z2 );
+
+			/// Undo setFreeCurrents() and every addIsofluxTarget(): the next
+			/// solve is the forward problem, at whatever currents the set holds.
+			void clearInverse();
+
+			/// Whether setFreeCurrents() has made any current an unknown.
+			bool inverseIsPosed() const;
+
+			/// The circuit currents the last solve reached -- or the seeds,
+			/// before one -- in the order setFreeCurrents() was given them.
+			std::vector< double > freeCircuitCurrents() const;
+
+			/// `psi( P1 ) - psi( P2 )` per isoflux target at the last solve's
+			/// answer, in addIsofluxTarget() order.
+			std::vector< double > isofluxResiduals() const;
+
+			/**
+			 * THE NUMERICAL RANK OF THE LAST STEP'S CORNER, and its nullity
+			 * against the corner's column count -- every border unknown and
+			 * every free current. Plan section 4.5: Lackner's warning made
+			 * quantitative. A nullity above zero is the number of directions in
+			 * the currents the targets did not determine and the
+			 * regularisation (or the minimum norm) chose instead.
+			 */
+			int inverseRank() const;
+			int inverseNullity() const;
+
+			/// The singular values of that corner, largest first, AFTER the
+			/// row weighting and the current columns' scaling. Their spread is
+			/// the honest companion of the rank: a corner of full rank whose
+			/// smallest value is eleven orders below its largest determines the
+			/// currents only in exact arithmetic, and that ratio is what
+			/// multiplies a target's error into a current's.
+			std::vector< double > inverseSingularValues() const;
 
 			/**
 			 * COUPLE THE EXTERIOR TO THE SOLVE, so that the Gegenbauer
@@ -4957,6 +5111,35 @@ namespace meq
 			bool xPointLocatedValue = false;
 			double xPointRValue = 0.0;
 			double xPointZValue = 0.0;
+			/// The point setXPointBoundary() was given; see
+			/// setXPointRelocationCap().
+			double xPointSeedRValue = 0.0;
+			double xPointSeedZValue = 0.0;
+			double xPointCapValue = 0.0;
+			long xPointCapRejectionCount = 0;
+
+			/// setFreeCurrents() and addIsofluxTarget(): IV-3's unknowns and
+			/// rows. The circuit currents are the ITERATE, seeded by the setter
+			/// and left wherever solve() finishes, exactly as the X-point is.
+			std::shared_ptr< CoilSet > freeCoilSet;
+			std::vector< FreeCircuit > freeCircuitList;
+			std::vector< double > freeCircuitCurrentValues;
+			std::vector< double > freeCircuitRegularisation;
+			struct IsofluxTarget
+			{
+				double r1 = 0.0;
+				double z1 = 0.0;
+				double r2 = 0.0;
+				double z2 = 0.0;
+			};
+			std::vector< IsofluxTarget > isofluxTargetList;
+			std::vector< double > isofluxResidualValues;
+			int inverseRankValue = 0;
+			int inverseNullityValue = 0;
+			std::vector< double > inverseSingularValueList;
+
+			/// Write freeCircuitCurrentValues into freeCoilSet, member by member.
+			void applyFreeCircuitCurrents();
 
 			/**
 			 * The element containing ( @a R, @a z ) and the reference

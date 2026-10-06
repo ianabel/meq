@@ -72,9 +72,14 @@ namespace meq
 	///
 	/// @throws ConfigError naming the offending `[[coils]]` block by the name
 	///         it was given, or by `coils[i]` if it was not named.
-	std::shared_ptr<CoilSet const> makeCoilSet( CoilConfig const &config,
-	                                            double mu0 = vacuumPermeability,
-	                                            std::string const &configFileName = std::string() );
+	///
+	/// **NON-CONST, BECAUSE AN INVERSE SOLVE MOVES THE CURRENTS.** A forward
+	/// caller holds it as `std::shared_ptr<CoilSet const>` and loses nothing;
+	/// GradShafranovSolver::setFreeCurrents() needs the same object writable,
+	/// so the source it wraps and the currents it solves for are one set.
+	std::shared_ptr<CoilSet> makeCoilSet( CoilConfig const &config,
+	                                      double mu0 = vacuumPermeability,
+	                                      std::string const &configFileName = std::string() );
 
 	/// Construct the ANALYTIC conductor field `[conductors]` asks for, or a
 	/// null pointer when it asks for nothing -- `ConductorModel::Meshed`, or a

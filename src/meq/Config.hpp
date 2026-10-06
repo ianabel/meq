@@ -700,13 +700,81 @@ namespace meq
 		/// the resolution below is not left inferring it.
 		bool stackGiven() const noexcept
 		{ return filamentsR > 0 && filamentsZ > 0; };
+
+		/// `Free` -- the current is an UNKNOWN of an inverse solve and
+		/// `current` is its starting value, exactly as `[boundary.xpoint]`'s
+		/// position is. INVERSE-AND-RECONSTRUCTION-PLAN.md section 7.1. A coil
+		/// in a circuit may not carry it: the circuit's current is the unknown.
+		bool free = false;
+
+		/// The `[[circuits]]` block this coil is wired into, or empty. A coil
+		/// in a circuit names no current of its own; `current` is resolved
+		/// from the circuit's as `multiplier * current`.
+		std::string circuit;
+
+		/// This coil's signed share of its circuit's current. Meaningful only
+		/// where `circuit` is non-empty.
+		double multiplier = 0.0;
 	};
 
-	/// The coil set, as a sequence of `[[coils]]` blocks. Empty is legal and is
-	/// what every fixed-boundary configuration has.
+	/// One member of a `[[circuits]]` block: a `[[coils]]` block by name, and
+	/// its signed multiplier on the circuit's current.
+	struct CircuitMember
+	{
+		std::string coil;
+		double multiplier = 0.0;
+		/// Its position in CoilConfig::coils.
+		std::size_t index = 0;
+	};
+
+	/**
+	 * CONDUCTORS ON ONE SUPPLY. INVERSE-AND-RECONSTRUCTION-PLAN.md section 7.2.
+	 *
+	 * **A FLAT COIL LIST IS THE RIGHT INPUT FOR A FORWARD SOLVE AND THE WRONG
+	 * ONE FOR AN INVERSE ONE**, and that is measured: freeing every conductor
+	 * of a machine that is wired in circuits gives an inverse solve more
+	 * freedom than the machine has, and on freegs4e's TCV it does not converge
+	 * and on MAST it lands on another branch (MEASUREMENTS.md M-244). A
+	 * circuit is ONE current with a fixed signed multiplier per conductor,
+	 * which is how freegs4e's `Circuit` is built and how a real machine is
+	 * wired; a negative multiplier is an anti-series pair.
+	 *
+	 * For a forward solve a circuit is a notation: every member's current is
+	 * `multiplier * current`, resolved into CoilParameters::current at parse
+	 * time, so nothing downstream of the configuration knows circuits exist.
+	 * A coil in no circuit is its own one-member circuit and every file
+	 * without `[[circuits]]` is unchanged.
+	 */
+	struct CircuitParameters
+	{
+		std::string name;
+		/// The circuit's current, in amperes; the starting value when `free`.
+		double current = 0.0;
+		/// `Free` -- the circuit's current is an unknown of an inverse solve.
+		bool free = false;
+		std::vector< CircuitMember > members;
+	};
+
+	/// The coil set, as a sequence of `[[coils]]` blocks, and the circuits
+	/// wiring them. Empty is legal and is what every fixed-boundary
+	/// configuration has.
 	struct CoilConfig
 	{
 		std::vector< CoilParameters > coils;
+		std::vector< CircuitParameters > circuits;
+
+		/// Does any coil or circuit carry `Free = true`? Every such current is
+		/// an unknown of an inverse solve.
+		bool anyFree() const noexcept
+		{
+			for ( CoilParameters const & coil : coils )
+				if ( coil.free )
+					return true;
+			for ( CircuitParameters const & circuit : circuits )
+				if ( circuit.free )
+					return true;
+			return false;
+		};
 	};
 
 	/**

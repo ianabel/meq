@@ -8,8 +8,8 @@ MEQ already has, worked out far enough to be costed and argued with.
 
 **THE PRECONDITION WAS EXPLICIT — get `j ≥ 1` right first — AND IT IS NOW MET.**
 Nothing here was to be started until the ordinary path was green and measured at
-`j = 1`. All three parts of that have landed: `PlasmaEdgeConvergence` green as of
-2026-09-05, FB-5's bordered solve carrying the **moving support**
+`j = 1`. All three parts of that have landed: the `j ≥ 1` rates measured on the
+ordinary path, FB-5's bordered solve carrying the **moving support**
 (`setPlasmaCurrent()` and `[source] ConfineToPlasma`, with the support a
 connected component rather than a pointwise test), and a **machine case against
 `../freegs4e`** — `examples/limited-tokamak.toml`, whose profile tables are

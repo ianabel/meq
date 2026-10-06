@@ -41,13 +41,22 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include "Coils.hpp"
 #include "Config.hpp"
+#include "SourceFactory.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <limits>
+#include <memory>
 #include <ostream>
 #include <random>
 #include <string>
+#include <vector>
 
 namespace meq
 {
@@ -3183,4 +3192,245 @@ BOOST_AUTO_TEST_CASE( the_guess_content_says_which_field_a_stored_file_holds )
 		ConfigError,
 		[]( ConfigError const & e )
 		{ return e.getKey() == "initialguess.Content"; } );
+}
+
+/*
+ * ============================================================================
+ * [[circuits]] AND Free -- INVERSE-AND-RECONSTRUCTION-PLAN.md IV-1
+ * ============================================================================
+ *
+ * The configuration half of the inverse solve, and nothing of the solver. A
+ * circuit is ONE current on one supply with a signed multiplier per member,
+ * which is how freegs4e's machines are wired and why a flat coil list hands an
+ * inverse solve more freedom than the machine has (MEASUREMENTS.md M-244). For
+ * a forward solve a circuit is a notation, resolved at parse time into each
+ * member's total current, so these tests ask two things: that the notation
+ * resolves to the right currents, and that every way of writing it ambiguously
+ * is refused naming its key.
+ */
+namespace
+{
+	std::string withCircuit( std::string const & coils, std::string const & circuits )
+	{
+		return withSource( "[source]\nType = \"soloviev\"\nA = 0.5\n\n"
+		                   "[boundary]\nType = \"zero\"\n\n" + coils + "\n" + circuits );
+	}
+
+	std::string coilBlock( std::string const & name, double centreZ,
+	                       std::string const & extra = "" )
+	{
+		return "[[coils]]\nName = \"" + name + "\"\nCentreR = 1.6\nCentreZ = "
+		       + std::to_string( centreZ ) + "\nHalfWidth = 0.1\nHalfHeight = 0.05\n"
+		       + extra + "\n";
+	}
+
+	// An up-down pair in ANTI-series, the case the signed multiplier exists
+	// for, beside a coil on its own supply.
+	std::string const pairCoils = coilBlock( "PU", 0.8 ) + coilBlock( "PL", -0.8 )
+	                              + coilBlock( "Solo", 0.0, "Current = 3.0e5\n" );
+	std::string const pairCircuit =
+		"[[circuits]]\nName = \"P\"\nCurrent = 1.0e5\n"
+		"Coils = [ { Name = \"PU\", Multiplier = 2.0 }, { Name = \"PL\", Multiplier = -2.0 } ]\n";
+}
+
+BOOST_AUTO_TEST_CASE( a_circuit_gives_each_member_its_share_of_one_current )
+{
+	Configuration const c = parse( withCircuit( pairCoils, pairCircuit ) );
+	meq::CoilConfig const & coils = c.getCoils();
+	BOOST_TEST_REQUIRE( coils.coils.size() == 3u );
+	BOOST_TEST_REQUIRE( coils.circuits.size() == 1u );
+
+	// FILE ORDER IS KEPT, because the mesher's `10 + i` attributes follow it.
+	BOOST_TEST( coils.coils[ 0 ].name == "PU" );
+	BOOST_TEST( coils.coils[ 1 ].name == "PL" );
+	BOOST_TEST( coils.coils[ 2 ].name == "Solo" );
+
+	BOOST_TEST( coils.coils[ 0 ].current == 2.0e5 );
+	BOOST_TEST( coils.coils[ 1 ].current == -2.0e5 );
+	BOOST_TEST( coils.coils[ 0 ].circuit == "P" );
+	BOOST_TEST( coils.coils[ 1 ].multiplier == -2.0 );
+
+	// A coil in no circuit is its own supply and is untouched.
+	BOOST_TEST( coils.coils[ 2 ].current == 3.0e5 );
+	BOOST_TEST( coils.coils[ 2 ].circuit.empty() );
+
+	meq::CircuitParameters const & p = coils.circuits.front();
+	BOOST_TEST( p.name == "P" );
+	BOOST_TEST( p.current == 1.0e5 );
+	BOOST_TEST( p.free == false );
+	BOOST_TEST_REQUIRE( p.members.size() == 2u );
+	BOOST_TEST( p.members[ 1 ].coil == "PL" );
+	BOOST_TEST( p.members[ 1 ].index == 1u );
+
+	BOOST_TEST( !coils.anyFree() );
+}
+
+/*
+ * FREE IS READ ON A COIL AND ON A CIRCUIT, AND IS AN UNKNOWN'S STARTING VALUE.
+ * The Current beside it stays required, exactly as [boundary.xpoint]'s
+ * position is required although the border moves it.
+ */
+BOOST_AUTO_TEST_CASE( free_marks_a_current_as_an_unknown_and_keeps_its_seed )
+{
+	{
+		Configuration const c = parse( withCircuit(
+			coilBlock( "F1", 0.0, "Current = 1.0e5\nFree = true\n" ), "" ) );
+		BOOST_TEST( c.getCoils().coils.front().free );
+		BOOST_TEST( c.getCoils().coils.front().current == 1.0e5 );
+		BOOST_TEST( c.getCoils().anyFree() );
+	}
+	{
+		Configuration const c = parse( withCircuit(
+			pairCoils, pairCircuit + "Free = true\n" ) );
+		BOOST_TEST( c.getCoils().circuits.front().free );
+		BOOST_TEST( c.getCoils().anyFree() );
+		// The seed reaches the members as it would were it data.
+		BOOST_TEST( c.getCoils().coils[ 0 ].current == 2.0e5 );
+	}
+	// And a free coil still needs its seed: the "needs a current" refusal is
+	// unchanged for a coil outside every circuit.
+	BOOST_CHECK_EXCEPTION( parse( withCircuit( coilBlock( "F1", 0.0, "Free = true\n" ), "" ) ),
+		ConfigError, []( ConfigError const & e ) { return e.getKey() == "coils[0].Current"; } );
+}
+
+/*
+ * EVERY AMBIGUOUS WAY OF WIRING A CIRCUIT IS REFUSED, NAMING ITS KEY.
+ *
+ * Each of these has two readings, and resolving it by precedence is how a coil
+ * set ends up carrying a current nobody chose -- the reason Current beside
+ * CurrentDensity is refused. The multiplier is required for the sharper version
+ * of that reason: a default of 1 wires an anti-series pair in series.
+ */
+BOOST_AUTO_TEST_CASE( an_ambiguous_circuit_is_refused_naming_its_key )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e )
+			{
+				if ( e.getKey() != key )
+					BOOST_TEST_MESSAGE( "refused at " << e.getKey() << ", wanted " << key );
+				return e.getKey() == key;
+			} );
+	};
+	std::string const both = coilBlock( "PU", 0.8 ) + coilBlock( "PL", -0.8 );
+	auto const circuit = []( std::string const & body )
+	{
+		return "[[circuits]]\nName = \"P\"\nCurrent = 1.0e5\n" + body;
+	};
+	std::string const members =
+		"Coils = [ { Name = \"PU\", Multiplier = 1.0 }, { Name = \"PL\", Multiplier = 1.0 } ]\n";
+
+	// A member that names its own current, total or density, or its own Free.
+	refuses( withCircuit( coilBlock( "PU", 0.8, "Current = 1.0\n" ) + coilBlock( "PL", -0.8 ),
+	                      circuit( members ) ), "coils[0].Current" );
+	refuses( withCircuit( coilBlock( "PU", 0.8 ) + coilBlock( "PL", -0.8, "CurrentDensity = 1.0\n" ),
+	                      circuit( members ) ), "coils[1].CurrentDensity" );
+	refuses( withCircuit( coilBlock( "PU", 0.8, "Free = true\n" ) + coilBlock( "PL", -0.8 ),
+	                      circuit( members ) ), "coils[0].Free" );
+
+	// The multiplier: absent, zero, and a member with an unknown key.
+	refuses( withCircuit( both, circuit( "Coils = [ { Name = \"PU\" }, { Name = \"PL\", Multiplier = 1.0 } ]\n" ) ),
+	         "circuits[0].Coils[0].Multiplier" );
+	refuses( withCircuit( both, circuit( "Coils = [ { Name = \"PU\", Multiplier = 0.0 }, { Name = \"PL\", Multiplier = 1.0 } ]\n" ) ),
+	         "circuits[0].Coils[0].Multiplier" );
+	refuses( withCircuit( both, circuit( "Coils = [ { Name = \"PU\", Multiplier = 1.0, Turns = 3 }, { Name = \"PL\", Multiplier = 1.0 } ]\n" ) ),
+	         "circuits[0].Coils[0].Turns" );
+
+	// The member is not a coil, is two coils, or is in two circuits.
+	refuses( withCircuit( both, circuit( "Coils = [ { Name = \"PX\", Multiplier = 1.0 } ]\n" ) ),
+	         "circuits[0].Coils[0].Name" );
+	refuses( withCircuit( coilBlock( "PU", 0.8 ) + coilBlock( "PU", -0.8 ),
+	                      circuit( "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" ) ),
+	         "circuits[0].Coils[0].Name" );
+	refuses( withCircuit( both, circuit( members )
+	                            + "\n[[circuits]]\nName = \"Q\"\nCurrent = 1.0\n"
+	                              "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" ),
+	         "circuits[1].Coils[0].Name" );
+
+	// The circuit itself: no current, no members, a name used twice.
+	refuses( withCircuit( both, "[[circuits]]\nName = \"P\"\n" + members ), "circuits[0].Current" );
+	refuses( withCircuit( both, circuit( "Coils = []\n" ) ), "circuits[0].Coils" );
+	refuses( withCircuit( coilBlock( "PU", 0.8 ) + coilBlock( "PL", -0.8 ),
+	                      circuit( "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" )
+	                      + "\n[[circuits]]\nName = \"P\"\nCurrent = 1.0\n"
+	                        "Coils = [ { Name = \"PL\", Multiplier = 1.0 } ]\n" ),
+	         "circuits[1].Name" );
+
+	// A member left with no current because no circuit took it is the ordinary
+	// refusal, unchanged.
+	refuses( withCircuit( both, circuit( "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" ) ),
+	         "coils[1].Current" );
+
+	// And [circuits] written as a plain table is not the array it must be.
+	refuses( withCircuit( both, "[circuits]\nName = \"P\"\n" ), "circuits" );
+}
+
+/*
+ * IV-1's ACCEPTANCE: THE CIRCUIT LAYER CANNOT CHANGE A FORWARD ANSWER.
+ *
+ * tools/freegs4e-benchmark/circuits.py writes each of the seven benchmark
+ * machines twice over the same rectangles: flattened, every conductor's total
+ * current as examples/machine-*.toml carries it; and circuited, one current per
+ * freegs4e Circuit and a signed Multiplier per member, `turns * multiplier`.
+ * They must give the same coil set -- every current to a few ulps, the
+ * difference being the order of one multiplication, and CoilSet::f() at every
+ * conductor's centre likewise.
+ *
+ * TestTokamak and DIII-D have no Circuit, so their two files are one file and
+ * the comparison is trivially exact; MAST, TCV and MAST-U are the three that
+ * test anything, and between them they carry an anti-series pair (MAST's P6,
+ * MAST-U's P61 and P62), a solenoid inside a circuit (TCV's OH1, whose
+ * Multiplier is 0.01 x 100 turns) and twelve circuits.
+ */
+BOOST_AUTO_TEST_CASE( the_seven_machines_wired_as_circuits_carry_the_same_currents )
+{
+	auto const read = []( std::string const & path )
+	{
+		std::ifstream in( path );
+		BOOST_TEST_REQUIRE( in.good(), "cannot open " << path );
+		return std::string( std::istreambuf_iterator<char>( in ), {} );
+	};
+
+	int circuited = 0;
+	for ( char const * stem : { "machine-a-testtokamak", "machine-b-ffprime", "machine-c-mast",
+	                            "machine-d-tcv", "machine-e-diamagnetic", "machine-f-diiid",
+	                            "machine-g-mastu" } )
+	{
+		std::string const base = std::string( "tests/unit/circuits/" ) + stem;
+		Configuration const flat = parse( withCircuit( read( base + "-flattened.toml" ), "" ) );
+		Configuration const wired = parse( withCircuit( read( base + "-circuited.toml" ), "" ) );
+
+		std::vector<meq::CoilParameters> const & a = flat.getCoils().coils;
+		std::vector<meq::CoilParameters> const & b = wired.getCoils().coils;
+		BOOST_TEST_REQUIRE( a.size() == b.size() );
+		BOOST_TEST( flat.getCoils().circuits.empty() );
+		circuited += !wired.getCoils().circuits.empty();
+
+		double worst = 0.0;
+		for ( std::size_t i = 0; i < a.size(); ++i )
+		{
+			BOOST_TEST( a[ i ].name == b[ i ].name );
+			BOOST_TEST( a[ i ].centreR == b[ i ].centreR );
+			double const scale = std::max( std::abs( a[ i ].current ), 1.0e-300 );
+			worst = std::max( worst, std::abs( a[ i ].current - b[ i ].current )/scale );
+		}
+
+		std::shared_ptr<meq::CoilSet const> const fa = meq::makeCoilSet( flat.getCoils() );
+		std::shared_ptr<meq::CoilSet const> const fb = meq::makeCoilSet( wired.getCoils() );
+		double worstF = 0.0;
+		for ( meq::CoilParameters const & coil : a )
+		{
+			double const x = fa->f( coil.centreR, coil.centreZ );
+			double const y = fb->f( coil.centreR, coil.centreZ );
+			worstF = std::max( worstF, std::abs( x - y )/std::max( std::abs( x ), 1.0e-300 ) );
+		}
+
+		std::printf( "  %-24s %2zu conductors, %2zu circuits: currents %.2e, f %.2e relative\n",
+		             stem, a.size(), wired.getCoils().circuits.size(), worst, worstF );
+		double const ulps = 4.0*std::numeric_limits<double>::epsilon();
+		BOOST_TEST( worst <= ulps );
+		BOOST_TEST( worstF <= ulps );
+	}
+	BOOST_TEST( circuited == 3, "MAST, TCV and MAST-U are the machines with circuits" );
 }

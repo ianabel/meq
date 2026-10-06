@@ -142,13 +142,21 @@ def flatten(machine, half=DEFAULT_HALF):
 			# freegs4e stacks Ns filaments between Zsmin and Zsmax; at the turn
 			# counts these machines use that is a uniform winding to any
 			# accuracy that matters outside it.
+			#
+			# INSIDE A CIRCUIT THE SCALE *IS* THE CURRENT, as it is for a Coil
+			# below: Circuit sets each member's current to multiplier * I, and
+			# that is what `scale` carries. Multiplying by item.current as well
+			# counts it twice -- quadratic in the circuit current -- and that is
+			# what this line did: TCV's OH1, the one solenoid inside a circuit
+			# in these machines, read 4.86e+06 A for a correct 2.2e+04, 220x,
+			# in the .npz conductor table, examples/machine-d-tcv.toml and its
+			# guess. MEASUREMENTS.md M-246.
 			rs = float(item.Rs)
 			width = min(SOLENOID_HALF_WIDTH, 0.25*rs)
+			current = float(item.current) if scale is None else scale
 			out.append(_rect(label, rs, 0.5*(item.Zsmin + item.Zsmax),
 			                 width, 0.5*abs(item.Zsmax - item.Zsmin),
-			                 (1.0 if scale is None else scale)
-			                 *float(item.Ns)*float(item.current),
-			                 "solenoid"))
+			                 float(item.Ns)*current, "solenoid"))
 			return
 
 		# `scale` carries the circuit's contribution, and None -- not zero --

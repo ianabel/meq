@@ -314,6 +314,23 @@ inferred from `F` about which solver to run, and two candidate detectors have
 now been measured and killed. See `CLAUDE_HDGGS.md`, *Why MEQ's Newton struggles* and *There is no
 cheap discriminator*.
 
+**THE BORDERED PATH HAS ITS OWN SECOND RUNG, AND IT IS WHERE MEQ'S ONE BRANCH
+CONTROL LIVES** → **[M-247](MEASUREMENTS.md#m-247)**, **[M-248](MEASUREMENTS.md#m-248)**.
+`BorderedPicardThenNewton`, rebuilt, with the X-point held within
+`0.05 × [boundary.exterior] Radius` of its seed — `setXPointRelocationCap()`,
+BS-5. **It is reached two ways and both are observed**: the bordered Newton
+failing, or converging to a flux with no interior extremum, an annulus. In the
+second the first answer stands if the retry finds no axis either, the shared
+source's state put back exactly. **The cap is a branch control and is legal
+ONLY here**: from the first solve it loses MAST's and MAST-U's cold solves; on
+the retry rung it closes A, A shaped, E and E shaped and moves nothing, taking
+MEQ's cold table from five of fourteen with a located axis to nine. **And the
+rung starts from the edge the first attempt started from** —
+`freezePlasmaEdge()` on the shared source otherwise carried the failed attempt's
+freeze into the retry, so one configuration closed or not depending on how the
+attempt before it had failed. *A second attempt is only a second attempt if it
+starts where the first did.*
+
 **What the driver refuses rather than approximates**: `[boundary] Type =
 "exact"` needs a closed form `meq::Source` does not carry, and exits 1 with an
 explanation. There are also two more, and they are refusals about
@@ -329,7 +346,8 @@ of the bordered Newton, so what the profiles are evaluated at on the axis is not
 known until it closes. **A `ψ_ax` that is not the flux at a magnetic axis**
 refuses on a *positive* detection only, `checkAxis()` being one-sided and
 missing rather than false-alarming; no interior extremum found at all stays a
-warning, since a wall-hugging annulus is a real thing to look at. **A source that
+warning, since a wall-hugging annulus is a real thing to look at — after a
+diverted run has first been retried on the bordered rung, above. **A source that
 does not vanish on the symmetry axis** refuses outright — `F/R` is `μ₀ j_φ`, so
 that is an infinite current density on `R = 0`. The source one is **ordered
 first**, because a bad `ψ_ax` is its consequence and the `ψ_ax` message's advice
@@ -1800,7 +1818,7 @@ file stays the technical record; that one is only about what to do first.
 | 5 | Curved `Γ` by extension from subdomains | **done** |
 | 6 | Adaptivity: the residual estimator and mesh update | **done** |
 
-Beyond the port, three campaigns have their own plans, their own staging and
+Beyond the port, four campaigns have their own plans, their own staging and
 their own file:
 
 | | | |
@@ -1808,10 +1826,11 @@ their own file:
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst` is the derivation, and `CLAUDE_FLOW.md` the record |
 | solution inversion | IN-A to IN-P, **every stage done** | `INVERSION-PLAN.md`, and `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-4 **done** — the X-point is two unknowns of the bordered Newton, driveable from a file, and MEQ reproduces `freegs4e`'s DIVERTED equilibrium | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
+| inverse solve | IV-0 to IV-3 **done**: coil currents are border unknowns of the same Newton and isoflux targets its rows, in the library, M-250. IV-4, the X-point rows, is next; the driver refuses `Free` until IV-5 | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
 
 The two plan files that had nothing left in them are gone, converted to `docs/`:
 `DRIVER-PLAN.md` was stage 7 and `FLOW-PLAN.md` was the flow campaign. Git has
-them. What is left open across all three is short and `ROADMAP.md` is the
+them. What is left open across all four is short and `ROADMAP.md` is the
 priority order for it.
 
 ### The campaigns are their own files

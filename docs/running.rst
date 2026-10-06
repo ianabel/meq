@@ -232,7 +232,10 @@ a :math:`\psi_{\mathrm{ax}}` that is not the flux at a magnetic axis
    checks the normalised flux there, which must be 1. Only a *positive*
    detection refuses: the search is seeded rather than exhaustive and misses
    rather than false-alarms, so finding no interior extremum at all is a
-   warning, not a refusal.
+   warning, not a refusal. On a diverted free-boundary run — an X-point in the
+   border and ``[boundary.exterior]`` set — it is first treated as an observed
+   failure and retried, as described under :ref:`running-failure`; the warning
+   is what is left if the retry does no better.
 
 a plasma that contains the symmetry axis
    :math:`\psi(0, z) = 0` exactly, so the normalised flux on the axis is
@@ -290,6 +293,27 @@ it does:
 .. code-block:: text
 
    MEQ: Newton did not converge: ... Retrying with Anderson-Picard ...
+
+**A free-boundary run with a normalised source has a ladder of its own**,
+because its unknowns include :math:`\psi_{\mathrm{ax}}`, :math:`\psi_{\mathrm{bnd}}`
+and the rest of the border, which Anderson–Picard has nowhere to put. Its second
+rung keeps the border and runs Picard in the field block before Newton finishes,
+starting from the same state the first attempt started from. Where the X-point is
+in the border it also **holds the X-point within a twentieth of**
+``[boundary.exterior] Radius`` **of the position the file gives**: a step that
+would carry it further is shortened. The rung is reached in two ways — the first
+attempt failing, or the first attempt converging to a flux with **no magnetic
+axis at all**, an annulus — and in the second case the first answer stands if the
+retry does not find an axis either.
+
+.. code-block:: text
+
+   MEQ: the bordered Newton did not converge: ... Retrying with PICARD in the field block ...
+   MEQ: the retry holds the X-point within 0.12 m of its seed ( 1.1000, -0.6000 ): 0.05 of Gamma's radius
+
+Holding the X-point is a choice about *which* equilibrium is found, so MEQ makes
+it only on a run that has already failed: applied from the start, the same
+restriction changes the answer on machines that converge without it.
 
 The ladder is deliberately never *predictive*. Nothing is inferred from the
 source about which strategy to use, and two plausible cheap indicators — the

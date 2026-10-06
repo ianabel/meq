@@ -1,0 +1,246 @@
+# machine-g-mastu, from tools/freegs4e-benchmark/G_mastu_simple.npz by circuits.py.
+# Generated: edit the script, not this.
+
+[[coils]]
+Name = "Solenoid"
+CentreR = 0.19475000000000001
+CentreZ = 0
+HalfWidth = 0.02
+HalfHeight = 1.581
+Current = -1116370.9182188541
+
+[[coils]]
+Name = "Pc"
+CentreR = 0.067000000000000004
+CentreZ = 0
+HalfWidth = 0.016750000000000001
+HalfHeight = 0.59999999999999998
+Current = -188229.60764345032
+
+[[coils]]
+Name = "Px.PxU"
+CentreR = 0.24049999999999999
+CentreZ = 1.2284999999999999
+HalfWidth = 0.021174999999999989
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "Px.PxL"
+CentreR = 0.24049999999999999
+CentreZ = -1.2284999999999999
+HalfWidth = 0.021174999999999989
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D1.D1U"
+CentreR = 0.38100000000000001
+CentreZ = 1.5549999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D1.D1L"
+CentreR = 0.38100000000000001
+CentreZ = -1.5549999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D2.D2U"
+CentreR = 0.57399999999999995
+CentreZ = 1.734
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D2.D2L"
+CentreR = 0.57399999999999995
+CentreZ = -1.734
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D3.D3U"
+CentreR = 0.81499999999999995
+CentreZ = 1.98
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D3.D3L"
+CentreR = 0.81499999999999995
+CentreZ = -1.98
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "Dp.DpU"
+CentreR = 0.91800000000000004
+CentreZ = 1.5009999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "Dp.DpL"
+CentreR = 0.91800000000000004
+CentreZ = -1.5009999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D5.D5U"
+CentreR = 1.8999999999999999
+CentreZ = 1.95
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D5.D5L"
+CentreR = 1.8999999999999999
+CentreZ = -1.95
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D6.D6U"
+CentreR = 1.2849999999999999
+CentreZ = 1.47
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D6.D6L"
+CentreR = 1.2849999999999999
+CentreZ = -1.47
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D7.D7U"
+CentreR = 1.52
+CentreZ = 1.47
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "D7.D7L"
+CentreR = 1.52
+CentreZ = -1.47
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P4.P4U"
+CentreR = 1.5
+CentreZ = 1.1000000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P4.P4L"
+CentreR = 1.5
+CentreZ = -1.1000000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P5.P5U"
+CentreR = 1.6499999999999999
+CentreZ = 0.35699999999999998
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P5.P5L"
+CentreR = 1.6499999999999999
+CentreZ = -0.35699999999999998
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P61.P61U"
+CentreR = 1.1975
+CentreZ = 1.11175
+HalfWidth = 0.027000000000000024
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P61.P61L"
+CentreR = 1.1975
+CentreZ = -1.11175
+HalfWidth = 0.027000000000000024
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P62.P62U"
+CentreR = 1.2575000000000001
+CentreZ = 1.0575000000000001
+HalfWidth = 0.027000000000000024
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "P62.P62L"
+CentreR = 1.2575000000000001
+CentreZ = -1.0575000000000001
+HalfWidth = 0.027000000000000024
+HalfHeight = 0.050000000000000003
+
+[[circuits]]
+Name = "Px"
+Current = -579.03512211521036
+Coils = [ { Name = "Px.PxU", Multiplier = 44 }, { Name = "Px.PxL", Multiplier = 44 } ]
+
+[[circuits]]
+Name = "D1"
+Current = 6422.6848288110032
+Coils = [ { Name = "D1.D1U", Multiplier = 35 }, { Name = "D1.D1L", Multiplier = 35 } ]
+
+[[circuits]]
+Name = "D2"
+Current = -3682.7228592759229
+Coils = [ { Name = "D2.D2U", Multiplier = 23 }, { Name = "D2.D2L", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "D3"
+Current = 3455.7478450139106
+Coils = [ { Name = "D3.D3U", Multiplier = 23 }, { Name = "D3.D3L", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "Dp"
+Current = 749.39268758630203
+Coils = [ { Name = "Dp.DpU", Multiplier = 23 }, { Name = "Dp.DpL", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "D5"
+Current = -1679.9738071908835
+Coils = [ { Name = "D5.D5U", Multiplier = 27 }, { Name = "D5.D5L", Multiplier = 27 } ]
+
+[[circuits]]
+Name = "D6"
+Current = -1226.3238365512373
+Coils = [ { Name = "D6.D6U", Multiplier = 23 }, { Name = "D6.D6L", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "D7"
+Current = -488.76941441199745
+Coils = [ { Name = "D7.D7U", Multiplier = 23 }, { Name = "D7.D7L", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "P4"
+Current = -1940.7279733956937
+Coils = [ { Name = "P4.P4U", Multiplier = 23 }, { Name = "P4.P4L", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "P5"
+Current = -5473.1581966287913
+Coils = [ { Name = "P5.P5U", Multiplier = 23 }, { Name = "P5.P5L", Multiplier = 23 } ]
+
+[[circuits]]
+Name = "P61"
+Current = -9.1274355395605295e-07
+Coils = [ { Name = "P61.P61U", Multiplier = 2 }, { Name = "P61.P61L", Multiplier = -2 } ]
+
+[[circuits]]
+Name = "P62"
+Current = 1.5715920146032111e-06
+Coils = [ { Name = "P62.P62U", Multiplier = 2 }, { Name = "P62.P62L", Multiplier = -2 } ]

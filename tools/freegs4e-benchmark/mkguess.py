@@ -16,7 +16,14 @@ from scipy.interpolate import RegularGridInterpolator
 
 def write_guess(mesh_path, gf_path, R, Z, psi, box, n=96):
     """Sample `psi(Z,R)` onto an n x n quad mesh over `box` and write both files."""
-    rs = np.linspace(box["rmin"], box["rmax"], n + 1)
+    # EITHER SPELLING. The tree's radius rename made the four guess builders
+    # write "Rmin"/"Rmax" and left this reading "rmin"/"rmax", so every
+    # mkcoldguess run died here with KeyError: 'rmin' and nothing regenerated a
+    # machine case; the committed examples/*-meta.json files still carry the
+    # old spelling and are read below. A missing key still fails.
+    R_lo = box["Rmin"] if "Rmin" in box else box["rmin"]
+    R_hi = box["Rmax"] if "Rmax" in box else box["rmax"]
+    rs = np.linspace(R_lo, R_hi, n + 1)
     zs = np.linspace(box["zmin"], box["zmax"], n + 1)
 
     interp = RegularGridInterpolator((Z, R), psi, bounds_error=False,

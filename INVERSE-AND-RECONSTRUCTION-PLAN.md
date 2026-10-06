@@ -23,7 +23,46 @@ rather than trusting the number.
 **NO NUMBER IN THIS FILE IS NEW.** Every measurement is cited to an `M-nn`
 anchor, a `file:line`, or a paper with its section and equation number. Where
 the design needs a number that does not exist, the experiment that would produce
-it is named and the gap is left open. Nothing here has been run.
+it is named and the gap is left open.
+
+## STATUS: IV-0 TO IV-3 ARE DONE; IV-4 IS NEXT
+
+**IV-3 → [M-250](MEASUREMENTS.md#m-250)**: on DIII-D, four perturbed circuits
+come back to 1.4e-11 in two Newton steps, and all eighteen to 1.2e-07 through a
+corner of condition 3.4e+08. With five targets the shape is met by other
+currents and the nullity says so. The library solves it; the driver refuses
+`Free` until IV-5. **IV-2** is the corner,
+[M-249](MEASUREMENTS.md#m-249); **IV-1** is the circuits, beside
+[M-246](MEASUREMENTS.md#m-246).
+
+### IV-0 is run and its gate passes → [M-244](MEASUREMENTS.md#m-244)
+
+`forward.py --cold --native` on all fourteen references: `freegs4e`'s inverse
+solve, on its own machine with its circuits and from its default currents,
+finds the reference's basin on **thirteen of fourteen** configurations and every
+machine on at least one arm, where [M-112](MEASUREMENTS.md#m-112)'s cold
+forward solve finds it on **none**. §2.2's basin-finder claim is measured for
+`freegs4e`, and IV-1 onward may start on that argument. Three qualifications
+travel with it:
+
+* **The release row is close to a tautology** — the references were made by the
+  same inverse solve — so what the gate measured is the inverse column against
+  M-112's forward one. §0.1's claim **for MEQ** is still IV-6's to test.
+* **The circuits are load-bearing, measured.** Freeing every conductor —
+  `forward.py --cold` without `--native` — gives the inverse more freedom than
+  the problem has: MAST-U shaped does not converge and MAST, TCV and MAST-U land
+  elsewhere. §4.6's *"a flat coil list is the wrong input"* is a measurement now,
+  and IV-1's circuits are a prerequisite of IV-3 rather than a convenience.
+* **Part of what fails in the flattened arm is Picard's.** A converged inverse
+  whose released forward Picard walks off vertically is the fixed-current
+  iteration's own instability; MEQ's Newton does not inherit it.
+
+**AND THE SOLVER-SIDE ALTERNATIVE HAS CLOSED AGAIN** →
+[M-245](MEASUREMENTS.md#m-245): BS-1's per-border merit scale, which §8 asked to
+land first, closes none of the six and moves three answers, and is reverted. So
+§8's ordering no longer holds — there is no BS-1 machinery for an inverse border
+to slot into, and an inverse border's `1/M_c` scale (§4.4) is now a question the
+merit has to answer on its own.
 
 ---
 
@@ -1017,7 +1056,7 @@ would settle it still costs no MEQ code and has still not been run.
 | | | |
 |---|---|---|
 | **`BORDERED-GLOBALISATION-PLAN.md`** | **complementary, and its BG-0 gates this document's motivation** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its §2.2 is load bearing here — no `Jᵀ` — and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |
-| **`BORDER-SCALING-PLAN.md`** | **complementary, and a dependency in the other direction** | It replaces one merit scale over six constraint kinds with a per-border scale. An inverse border makes it **eight** kinds — and, unusually, brings a scale with a closed-form physical answer, `1/M_c` (§4.4). So BS-1's machinery should land first and the inverse border is a new and easy datum for it, not a new problem. Its **BS-0 gate is BG-0 restated** and the same caveat applies |
+| **`BORDER-SCALING-PLAN.md`** | **complementary, and a dependency in the other direction** | It replaces one merit scale over six constraint kinds with a per-border scale. An inverse border makes it **eight** kinds — and, unusually, brings a scale with a closed-form physical answer, `1/M_c` (§4.4). It said BS-1's machinery should land first; **BS-1 is reverted** ([M-245](MEASUREMENTS.md#m-245) — a per-border ruler moves which equilibrium is reported), so an inverse border's scale is the merit's own question again, and `1/M_c` is the candidate to measure rather than a datum to slot in. Its **BS-0 gate is BG-0 restated** and the same caveat applies |
 
 **Is an inverse capability a superset of either? No, and the claim should not be
 made.** Three reasons:
@@ -1046,7 +1085,7 @@ Each ends in a **measured** acceptance criterion naming its test file, per
 `CLAUDE.md`'s testing stance. **A test asserts the behaviour that is wanted and
 fails until it is there.**
 
-### IV-0 — the gate, in Python, costing no MEQ code
+### IV-0 — the gate, in Python, costing no MEQ code — **DONE, PASSES, M-244**
 
 **Run `solve_from_cold()` on all seven machines** and tabulate inverse-stage
 iterations, released-forward iterations, and final agreement with the reference.
@@ -1058,7 +1097,32 @@ seven release cleanly, the basin-finder motivation is not established and IV-3
 onward should not start on that argument.** Harness: `tools/freegs4e-benchmark/
 forward.py`, already written.
 
-### IV-1 — circuits, and `Free`, in the configuration layer alone
+### IV-1 — circuits, and `Free`, in the configuration layer alone — **DONE**
+
+**Built as specified, with three decisions this section left open.** A member
+coil names no `Current` or `CurrentDensity` of its own — the circuit's is the
+one number, resolved into each member as `Multiplier * Current` — and
+`Multiplier` is required rather than defaulting to 1, since a default wires an
+anti-series pair in series. **`[inverse]` and its targets (§7.3) are NOT
+parsed here**: nothing consumes them before IV-5 wires the driver, and a
+parsed key nothing reads is the accepted-and-ignored failure; the table stays an
+unknown table, refused at parse. And the driver **refuses** `Free = true` with
+exit 1 until IV-5, for the same reason — run forward it would solve with the seed as
+data. `ConfigTests` carries the refusals and the seven-machine equivalence,
+over fixtures `tools/freegs4e-benchmark/circuits.py` writes into
+`tests/unit/circuits/`; `DriverAcceptance`'s
+`theDriverRefusesAFreeCurrentUntilItHasAnInversePath` the pairing.
+
+**THE EQUIVALENCE FOUND A DEFECT ON ITS FIRST RUN**: TCV's solenoid, the one
+solenoid inside a circuit in these machines, was counted twice by
+`conductors.flatten()` and carried 220× its current in the reference table,
+`examples/machine-d-tcv.toml` and its guess → [M-246](MEASUREMENTS.md#m-246).
+Six machines agree to the bit; TCV agrees once the table is corrected.
+
+**AND §4.6's EXAMPLE IS WRONG ABOUT TESTTOKAMAK**: `freegs4e`'s
+`TestTokamak()` is four independent top-level coils, not two symmetric pairs,
+and the reference's currents are asymmetric (P1L 1.37e+05 against P1U
+6.26e+04). The machines with circuits are MAST (5), TCV (1) and MAST-U (12).
 
 `[[circuits]]`, `Free` on coils and circuits, and the refusals of §7. **No
 solver change.** `Config` is MFEM-free, so this is CI-gated
@@ -1071,7 +1135,12 @@ that the seven machines' flattened and circuited descriptions produce **the same
 flattened values. That last assertion is what stops the circuit layer changing
 the forward answer, and it is the `theDriverReproducesTheLibrary` pattern.
 
-### IV-2 — the regularised corner solve, in isolation
+### IV-2 — the regularised corner solve, in isolation — **DONE, M-249**
+
+`meq::solveRegularisedLeastSquares` in `src/meq/RegularisedLeastSquares.{hpp,cpp}`,
+MFEM-free, Eigen's `JacobiSVD` on the augmented system. The measurement chose
+Eigen for reasons other than speed, one of them an MFEM defect on exactly the
+corner's shape.
 
 The rectangular least squares of §4.3, with rank reporting, **as a free function
 with no solver attached**. Measure `mfem::DenseMatrixSVD` against Eigen at the
@@ -1084,7 +1153,32 @@ rank is exact; and `Γ → ∞` drives the current block of the step to zero
 monotonically. **Mutation-test it**, per `CLAUDE.md`: a dropped transpose and a
 `γ` on the wrong block must both be caught.
 
-### IV-3 — coil currents as border unknowns, one machine, isoflux only
+### IV-3 — coil currents as border unknowns, one machine, isoflux only — **DONE, M-250**
+
+`GradShafranovSolver::setFreeCurrents()` and `addIsofluxTarget()`. Built as
+specified, with five decisions this section left open:
+
+* **The currents move in the `meq::CoilSet` the source carries**, by address,
+  through `CoilSet::setCurrent()`. The solved currents are therefore what every
+  reader of the set sees, with no second copy to disagree with the field.
+* **The column is MEASURED** by one forward difference per circuit per solve.
+  That is exact, because the residual is affine in a current, and it is the
+  exterior columns' probe rather than a second expression of the coil term.
+* **The corner rows are weighted as `augmentedNorm()` weights them**, and the
+  current columns are scaled by their seeds before the SVD, so the rank
+  threshold and the minimum norm compare commensurate columns.
+* **The targets enter the merit** at `gamma` like every flux row.
+* **Refused at `solve()`**: a set the source does not carry; an analytic
+  conductor field (subtracted, filament or exterior), because there a current
+  enters terms the column does not measure; a configured Device, whose
+  integrand snapshots the coil densities; and `setBorderRegularisation()`.
+
+`inverseSingularValues()` is reported beside the rank, because the rank alone
+calls the eighteen-coil case healthy at a condition of 3.4e+08. The test is
+`theInverseSolveRecoversAKnownCurrentSet`: four circuits come back to 1.4e-11
+in two Newton steps, and all eighteen to 1.2e-07. Beside it,
+`tooFewTargetsMeetTheShapeWithOtherCurrents` meets five targets with currents
+up to 2.7% from the machine's and reports nullity 13.
 
 The constant column of §3.3, the isoflux row of §5, interior conductors only
 (§6.3). DIII-D, which is the one machine that converges forward today (M-103), so

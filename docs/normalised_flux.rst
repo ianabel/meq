@@ -344,7 +344,9 @@ is a different equilibrium rather than a bad number.
 
 A run whose flux carries no interior extremum at all is warned about separately:
 that is a plasma with no closed surface around an axis, and :math:`\psiax` is
-then the edge of nothing.
+then the edge of nothing. A diverted free-boundary run is retried first, and
+reaches this warning only if the retry finds no axis either — see
+:ref:`running-failure`.
 
 The ``.nc`` file carries ``axis_normalised_flux``, ``axis_r`` and ``axis_z``
 beside ``psi_axis``, so a consumer differencing two runs can see the same thing

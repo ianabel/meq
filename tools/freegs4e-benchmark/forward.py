@@ -61,6 +61,9 @@ USAGE
     python3 forward.py A F                   # named cases
     python3 forward.py --write out/          # a standalone input per case
     python3 forward.py --nx 129 257 A        # a refinement ladder
+    python3 forward.py --cold A              # cold -> inverse -> forward
+    python3 forward.py --cold --native A     # the same, on freegs4e's own
+                                             # machine with its circuits
 
 `--write` emits one runnable script per case that reads only its `.npz` and
 this directory's two documented workarounds.
@@ -163,7 +166,31 @@ def build_profile(npz, case):
                           Raxis=1.0, Ip_logic=True)   # TRAP 2
 
 
-def solve_from_cold(npz, case, nx=None, rtol=1e-9, maxits=500, gammas=None):
+def native_machine(npz_name, case):
+    """The machine the reference was SOLVED on: freegs4e's own constructor,
+    with its circuits, solenoids and control flags, at its default currents --
+    rebuilt as ShapedCoil for a `_shaped` reference, exactly as fgsref.py's
+    --shaped does.
+
+    WHY IT IS NOT build_machine().  That flattens every circuit into
+    independent conductors at the reference's CONVERGED currents.  Correct for
+    a forward solve, which freezes them anyway; wrong for an inverse one on
+    two counts.  The circuits are constraints -- MAST_sym, TCV and MASTU_simple
+    carry them, TestTokamak does not -- so a flattened inverse solve has more
+    freedom than the reference had and may find another answer.  And it starts
+    the currents AT the answer, so it is not cold in the very unknowns it
+    solves for."""
+    tok = case["make"]()
+    if npz_name.endswith("_shaped"):
+        import conductors
+        import shaped
+        tok, _ = shaped.shaped_machine(tok, half=conductors.DEFAULT_HALF)
+    tok.getCurrentsVec()
+    return tok
+
+
+def solve_from_cold(npz, case, nx=None, rtol=1e-9, maxits=500, gammas=None,
+                    native_name=None):
     """COLD to forward, using the INVERSE solve as the basin finder.
 
     THE PROBLEM THIS SOLVES.  A forward solve from cold does not find this
@@ -188,7 +215,12 @@ def solve_from_cold(npz, case, nx=None, rtol=1e-9, maxits=500, gammas=None):
     """
     from fgsref import SyncConstrain
 
-    tok = build_machine(npz)
+    # `native_name` replays the reference's own construction; see
+    # native_machine().  Without it this is the flattened machine at the
+    # reference's currents, which is what the release stage's forward problem
+    # IS but not what the inverse stage should start from.
+    tok = native_machine(native_name, case) if native_name \
+        else build_machine(npz)
     eq = build_equilibrium(npz, tok, nx, seeded=False)
     prof = build_profile(npz, case)
 
@@ -232,6 +264,42 @@ def solve_from_cold(npz, case, nx=None, rtol=1e-9, maxits=500, gammas=None):
     except Exception:
         out["Raxis"] = out["Zaxis"] = float("nan")
     out["currents"] = {l: float(c.current) for l, c in tok.coils}
+
+    # THE TOPOLOGY THE RELEASED STAGE LANDED ON, because a forward stage that
+    # converges is not one that converged to the reference's branch: M-112's
+    # cold forward runs that report `rtol` are multi-lobed.  Counted the way
+    # trace_forward() counts, inside the limiter.
+    from freegs4e import critical
+    try:
+        opt, xpt = critical.find_critical(eq.R, eq.Z, eq.psi(),
+                                          prof.mask_inside_limiter, prof.Ip)
+    except Exception:
+        opt, xpt = [], []
+    out["n_o"], out["n_x"] = len(opt), len(xpt)
+    # AND THE REFERENCE'S OWN COUNT UNDER THE SAME MASK, because the count
+    # includes conductor O-points and outer saddles: machine A's reference
+    # reads 3 and 2, so a raw count is not a topology verdict -- agreement
+    # with this is.
+    try:
+        ropt, rxpt = critical.find_critical(eq.R, eq.Z,
+                                            np.asarray(npz["psi"], float),
+                                            prof.mask_inside_limiter, prof.Ip)
+        out["ref_o"], out["ref_x"] = len(ropt), len(rxpt)
+    except Exception:
+        out["ref_o"] = out["ref_x"] = -1
+
+    # HOW FAR STAGE 1 MOVED THE CURRENTS, against the reference's own.  The
+    # reference was made by the same inverse solve, so a small number here says
+    # the basin finder found the reference's coil set and not merely its shape.
+    # Only on the flattened machine, whose coil list IS the reference's
+    # conductor table; a native machine's top-level list is circuits.
+    if native_name:
+        out["dI"] = float("nan")
+    else:
+        ref = np.asarray(npz["coil_currents"], float)
+        got = np.array([float(c.current) for _, c in tok.coils])
+        out["dI"] = float(np.max(np.abs(got - ref))
+                          / max(np.max(np.abs(ref)), 1.0))
     return out
 
 
@@ -522,6 +590,9 @@ def main():
     cold = "--cold" in argv
     if cold:
         argv.remove("--cold")
+    native = "--native" in argv
+    if native:
+        argv.remove("--native")
     trace = "--trace" in argv
     if trace:
         argv.remove("--trace")
@@ -605,29 +676,48 @@ def main():
         return
 
     if cold:
-        print("\n  COLD -> INVERSE -> FORWARD, no stored answer used",
-              flush=True)
+        print("\n  COLD -> INVERSE -> FORWARD, no stored answer used%s"
+              % ("\n  NATIVE: freegs4e's own machine, circuits and default "
+                 "currents, as the reference was made" if native else
+                 "\n  FLATTENED: every conductor free, starting at the "
+                 "reference's currents"), flush=True)
         print("  stage 1 finds the basin with the geometric targets; stage 2\n"
               "  RELEASES them and re-solves forward with the currents frozen\n"
               "  at whatever stage 1 chose.  A forward stage that converges in\n"
               "  one or two iterations is the finding: the inverse solve's\n"
               "  answer IS a fixed point of the forward problem.\n", flush=True)
-        print("  %-38s %6s %8s %7s %10s %16s %11s"
-              % ("case", "nx", "inverse", "forward", "L", "psi_axis",
-                 "vs inverse"), flush=True)
+        # Each stage is `status:iterations`, status being picard_loop's own
+        # -- `rtol`/`atol` converged, `maxits` did not.  `axis` is the
+        # released axis's distance from the reference's, in metres;
+        # `psi_bndry` is relative to the reference's span psi_axis - psi_bndry,
+        # since psi_bndry itself may be near zero; `dI` the
+        # largest coil-current change stage 1 made, relative to the largest
+        # reference current.
+        print("  %-38s %4s %14s %13s %5s %5s %11s %11s %9s %9s %6s"
+              % ("case", "nx", "inverse", "forward", "nO/r", "nX/r",
+                 "psi_axis", "psi_bndry", "axis m", "dI", "wall s"),
+              flush=True)
         for name, case in rows:
             npz = np.load(os.path.join(HERE, name + ".npz"), allow_pickle=True)
             try:
-                R = solve_from_cold(npz, case, grids[0] if grids else None)
+                R = solve_from_cold(npz, case, grids[0] if grids else None,
+                                    native_name=name if native else None)
             except Exception as exc:
                 print("  %-38s  FAILED %r" % (name, exc), flush=True)
                 continue
             ref = float(npz["psi_axis"])
             rel = abs(R["psi_axis"] - ref)/abs(ref)
-            inv = "/".join(str(x[2]) for x in R["stages"][:-1])
-            print("  %-38s %6d %8s %7d %10.6f %16.10e %11.3e"
-                  % (name, R["nx"], inv, R["stages"][-1][2], R["L"],
-                     R["psi_axis"], rel), flush=True)
+            refb = float(npz["psi_bndry"])
+            relb = abs(R["psi_bndry"] - refb)/abs(ref - refb)
+            dax = float(np.hypot(R["Raxis"] - float(npz["Raxis"]),
+                                 R["Zaxis"] - float(npz["Zaxis"])))
+            inv = "/".join("%s:%d" % (x[1], x[2]) for x in R["stages"][:-1])
+            fwd = "%s:%d" % (R["stages"][-1][1], R["stages"][-1][2])
+            print("  %-38s %4d %14s %13s %5s %5s %11.3e %11.3e %9.2e %9.2e %6.1f"
+                  % (name, R["nx"], inv, fwd,
+                     "%d/%d" % (R["n_o"], R["ref_o"]),
+                     "%d/%d" % (R["n_x"], R["ref_x"]), rel, relb,
+                     dax, R["dI"], R["wall"]), flush=True)
         return
 
     print("\n  FORWARD AGAINST THE INVERSE REFERENCE IT CAME FROM", flush=True)

@@ -1,0 +1,90 @@
+# machine-c-mast, from tools/freegs4e-benchmark/C_mast_spherical.npz by circuits.py.
+# Generated: edit the script, not this.
+
+[[coils]]
+Name = "P2.P2U"
+CentreR = 0.48999999999999999
+CentreZ = 1.76
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 25818.743462512735
+
+[[coils]]
+Name = "P2.P2L"
+CentreR = 0.48999999999999999
+CentreZ = -1.76
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 25818.743462512735
+
+[[coils]]
+Name = "P3.P3U"
+CentreR = 1.1000000000000001
+CentreZ = 1.1000000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 7076.310340449767
+
+[[coils]]
+Name = "P3.P3L"
+CentreR = 1.1000000000000001
+CentreZ = -1.1000000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 7076.310340449767
+
+[[coils]]
+Name = "P4.P4U"
+CentreR = 1.51
+CentreZ = 1.095
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -39672.807974688709
+
+[[coils]]
+Name = "P4.P4L"
+CentreR = 1.51
+CentreZ = -1.095
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -39672.807974688709
+
+[[coils]]
+Name = "P5.P5U"
+CentreR = 1.6599999999999999
+CentreZ = 0.52000000000000002
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -148080.55911526957
+
+[[coils]]
+Name = "P5.P5L"
+CentreR = 1.6599999999999999
+CentreZ = -0.52000000000000002
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -148080.55911526957
+
+[[coils]]
+Name = "P6.P6U"
+CentreR = 1.5
+CentreZ = 0.90000000000000002
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 1.1388805338168885e-06
+
+[[coils]]
+Name = "P6.P6L"
+CentreR = 1.5
+CentreZ = -0.90000000000000002
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -1.1388805338168885e-06
+
+[[coils]]
+Name = "P1"
+CentreR = 0.14999999999999999
+CentreZ = 0
+HalfWidth = 0.02
+HalfHeight = 1.45
+Current = -7023729.2779459972

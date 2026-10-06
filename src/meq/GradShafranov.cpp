@@ -11,6 +11,7 @@
 #include "DeviceBasis.hpp"
 #include "DeviceNPC.hpp"
 #include "PointLocator.hpp"
+#include "RegularisedLeastSquares.hpp"
 #include "DeviceRows.hpp"
 #include "StageChecksum.hpp"
 
@@ -3700,6 +3701,11 @@ namespace
 		xPointIsUnknown = true;
 		xPointRValue = radius;
 		xPointZValue = z;
+		// AND KEPT APART FROM THE UNKNOWN, which every solve overwrites with
+		// where it ended: setXPointRelocationCap() measures against the point
+		// the caller GAVE, not against wherever the iteration has wandered to.
+		xPointSeedRValue = radius;
+		xPointSeedZValue = z;
 		xPointLocatedValue = false;
 		// So that anything reading the pinned point -- the diagnostics, and the
 		// ExactPoint setup this path then skips -- sees the same place.
@@ -5315,6 +5321,25 @@ namespace
 		 * upstream's 26fccc9f3d, which `git merge-base --is-ancestor` confirms
 		 * is contained in the meq-integration MEQ links.
 		 *
+		 * AND THE PROMISE NOW COVERS THE RECONSTRUCTION, WHICH IS THREADED.
+		 * DarcyForm::ReconstructFluxAndPot() runs its element loop under
+		 * OpenMP and reaches, per element and per face:
+		 *
+		 *   M_u, B domain integrators    the two stock classes above
+		 *   Mp_nl                        meq::SourceIntegrator, above
+		 *   c_bfi_p                      HDGDiffusionIntegrator, guarded in
+		 *                                fem/darcy/bilininteg_hdg.hpp
+		 *   c_bfi                        NormalTraceJumpIntegrator -- the
+		 *                                object EnableHybridization() takes
+		 *                                above -- guarded in fem/bilininteg.hpp
+		 *
+		 * M_p and c_nlfi_p are null on the Newton path, and the extension
+		 * integrator is not reached, the reconstruction taking only the flux
+		 * mass's DOMAIN integrators. That last is a property of one line of
+		 * darcyform.cpp, so re-read it when that loop changes.
+		 * THREADING-PLAN.md's addendum is the audit, and psi* is
+		 * byte-identical at OMP_NUM_THREADS 1 and 8.
+		 *
 		 * WHAT THIS COMMENT USED TO SAY, AND WHY THE SHAPE OF THE ERROR IS
 		 * WORTH MORE THAN THE FACT. It described that class as carrying plain
 		 * unguarded members and argued the promise held anyway because nothing
@@ -6068,6 +6093,186 @@ namespace
 	double GradShafranovSolver::xPointMeritWeight() const
 	{
 		return xPointMeritWeightValue;
+	}
+
+	void GradShafranovSolver::setXPointRelocationCap( double length )
+	{
+		if ( !( length >= 0.0 ) || !std::isfinite( length ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setXPointRelocationCap: the cap is a "
+				"distance in metres and must be finite and non-negative, got "
+				+ std::to_string( length ) + "; zero turns it off" );
+		xPointCapValue = length;
+	}
+
+	double GradShafranovSolver::xPointRelocationCap() const
+	{
+		return xPointCapValue;
+	}
+
+	long GradShafranovSolver::xPointCapRejections() const
+	{
+		return xPointCapRejectionCount;
+	}
+
+	void GradShafranovSolver::setFreeCurrents( std::shared_ptr< CoilSet > coils,
+	                                           std::vector< FreeCircuit > circuits,
+	                                           std::vector< double > regularisation )
+	{
+		char const *const where = "meq::GradShafranovSolver::setFreeCurrents: ";
+		auto refuse = [ & ]( std::string const &why )
+		{
+			throw std::invalid_argument( std::string( where ) + why );
+		};
+
+		if ( !coils )
+			refuse( "the coil set is null; it must be the set the source carries" );
+		if ( circuits.empty() )
+			refuse( "no circuit was given; clearInverse() is how to pose the "
+			        "forward problem" );
+		if ( !regularisation.empty() && regularisation.size() != circuits.size() )
+			refuse( "there are " + std::to_string( regularisation.size() )
+			        + " regularisation weights for "
+			        + std::to_string( circuits.size() )
+			        + " circuits; give one per circuit or none" );
+		for ( double gamma : regularisation )
+			if ( !( gamma >= 0.0 ) || !std::isfinite( gamma ) )
+				refuse( "every regularisation weight must be finite and "
+				        "non-negative, got " + std::to_string( gamma ) );
+
+		std::vector< int > owner( coils->size(), -1 );
+		std::vector< double > seeds;
+		for ( std::size_t k = 0; k < circuits.size(); ++k )
+		{
+			FreeCircuit const &circuit = circuits[ k ];
+			std::string const label = circuit.name.empty()
+			                          ? "circuit " + std::to_string( k )
+			                          : "circuit " + circuit.name;
+			if ( circuit.coils.empty() )
+				refuse( label + " has no member coils" );
+			if ( circuit.multipliers.size() != circuit.coils.size() )
+				refuse( label + " has " + std::to_string( circuit.coils.size() )
+				        + " coils and " + std::to_string( circuit.multipliers.size() )
+				        + " multipliers" );
+			for ( std::size_t m = 0; m < circuit.coils.size(); ++m )
+			{
+				std::size_t const index = circuit.coils[ m ];
+				double const multiplier = circuit.multipliers[ m ];
+				if ( index >= coils->size() )
+					refuse( label + " names coil " + std::to_string( index )
+					        + " of a set of " + std::to_string( coils->size() ) );
+				if ( owner[ index ] >= 0 )
+					refuse( label + " names coil " + std::to_string( index )
+					        + ", which another circuit already carries; one coil "
+					          "is on one supply" );
+				owner[ index ] = static_cast< int >( k );
+				if ( !( multiplier != 0.0 ) || !std::isfinite( multiplier ) )
+					refuse( label + " gives coil " + std::to_string( index )
+					        + " a multiplier of " + std::to_string( multiplier )
+					        + "; it must be finite and non-zero" );
+			}
+
+			// THE SEED, AND EVERY MEMBER MUST AGREE ON IT. A circuit is one
+			// current, so a set whose members do not carry one I between them
+			// is not the circuit the caller described -- and adopting the first
+			// member's would silently move the others at the first step.
+			double const seed = coils->coil( circuit.coils[ 0 ] ).current()
+			                    /circuit.multipliers[ 0 ];
+			for ( std::size_t m = 1; m < circuit.coils.size(); ++m )
+			{
+				double const carried = coils->coil( circuit.coils[ m ] ).current();
+				double const wanted = circuit.multipliers[ m ]*seed;
+				if ( std::abs( carried - wanted )
+				     > 1.0e-12*std::max( std::abs( carried ), std::abs( wanted ) ) )
+					refuse( label + "'s coil " + std::to_string( circuit.coils[ m ] )
+					        + " carries " + std::to_string( carried )
+					        + " A where its multiplier and the first member "
+					          "give " + std::to_string( wanted ) + " A" );
+			}
+			seeds.push_back( seed );
+		}
+
+		freeCoilSet = std::move( coils );
+		freeCircuitList = std::move( circuits );
+		freeCircuitCurrentValues = std::move( seeds );
+		freeCircuitRegularisation = regularisation.empty()
+			? std::vector< double >( freeCircuitList.size(), 0.0 )
+			: std::move( regularisation );
+		inverseRankValue = 0;
+		inverseNullityValue = 0;
+		inverseSingularValueList.clear();
+	}
+
+	void GradShafranovSolver::addIsofluxTarget( double r1, double z1,
+	                                            double r2, double z2 )
+	{
+		if ( !std::isfinite( r1 ) || !std::isfinite( z1 )
+		     || !std::isfinite( r2 ) || !std::isfinite( z2 ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::addIsofluxTarget: every coordinate "
+				"must be finite" );
+		if ( r1 == r2 && z1 == z2 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::addIsofluxTarget: the two points "
+				"coincide, so the row is identically zero and constrains "
+				"nothing" );
+		isofluxTargetList.push_back( IsofluxTarget{ r1, z1, r2, z2 } );
+		isofluxResidualValues.clear();
+	}
+
+	void GradShafranovSolver::clearInverse()
+	{
+		freeCoilSet.reset();
+		freeCircuitList.clear();
+		freeCircuitCurrentValues.clear();
+		freeCircuitRegularisation.clear();
+		isofluxTargetList.clear();
+		isofluxResidualValues.clear();
+		inverseRankValue = 0;
+		inverseNullityValue = 0;
+		inverseSingularValueList.clear();
+	}
+
+	bool GradShafranovSolver::inverseIsPosed() const
+	{
+		return !freeCircuitList.empty();
+	}
+
+	std::vector< double > GradShafranovSolver::freeCircuitCurrents() const
+	{
+		return freeCircuitCurrentValues;
+	}
+
+	std::vector< double > GradShafranovSolver::isofluxResiduals() const
+	{
+		return isofluxResidualValues;
+	}
+
+	int GradShafranovSolver::inverseRank() const
+	{
+		return inverseRankValue;
+	}
+
+	int GradShafranovSolver::inverseNullity() const
+	{
+		return inverseNullityValue;
+	}
+
+	std::vector< double > GradShafranovSolver::inverseSingularValues() const
+	{
+		return inverseSingularValueList;
+	}
+
+	void GradShafranovSolver::applyFreeCircuitCurrents()
+	{
+		for ( std::size_t k = 0; k < freeCircuitList.size(); ++k )
+		{
+			FreeCircuit const &circuit = freeCircuitList[ k ];
+			for ( std::size_t m = 0; m < circuit.coils.size(); ++m )
+				freeCoilSet->setCurrent( circuit.coils[ m ],
+				                         circuit.multipliers[ m ]
+				                         *freeCircuitCurrentValues[ k ] );
+		}
 	}
 
 	void GradShafranovSolver::setLineSearchMerit( LineSearchMerit choice )
@@ -8357,6 +8562,62 @@ namespace
 		 */
 		bool const hasNormalisation = normalisedSource != nullptr;
 		int const nModes = exteriorCoupling ? exteriorCoupling->modeCount() : 0;
+
+		/*
+		 * IV-3: FREE COIL CURRENTS AND ISOFLUX TARGETS. INVERSE-AND-
+		 * RECONSTRUCTION-PLAN.md section 4.
+		 *
+		 * A current is one more border unknown with a CONSTANT column and a zero
+		 * corner against every row; a target is one more row with no column of
+		 * its own. Nothing else about the elimination changes, and the corner
+		 * becomes ( nBorderTotal + nTargets ) x ( nBorderTotal + nFree ).
+		 *
+		 * The refusals are here and not in the setters because each is about
+		 * the PAIRING of the inverse with something set separately, and only
+		 * solve() sees the whole configuration.
+		 */
+		int const nFree = static_cast< int >( freeCircuitList.size() );
+		int const nTargets = static_cast< int >( isofluxTargetList.size() );
+		bool const inverse = nFree > 0 || nTargets > 0;
+		if ( inverse )
+		{
+			char const *const where = "meq::GradShafranovSolver::solve: ";
+			if ( nFree == 0 )
+				throw std::logic_error( std::string( where )
+					+ "an isoflux target needs a free coil current to move; with "
+					  "none, the targets are rows nothing can satisfy but the "
+					  "equilibrium's own constraints. setFreeCurrents() first" );
+			if ( nTargets == 0 )
+				throw std::logic_error( std::string( where )
+					+ "free coil currents need targets to determine them; with "
+					  "none, every current is a null direction of the step. "
+					  "addIsofluxTarget() first" );
+			if ( !normalisedSource
+			     || normalisedSource->conductors() != freeCoilSet.get() )
+				throw std::logic_error( std::string( where )
+					+ "the coil set handed to setFreeCurrents() is not the one the "
+					  "source carries, so moving its currents would move nothing "
+					  "the residual reads" );
+			if ( conductorFieldSet || exteriorConductorSet )
+				throw std::logic_error( std::string( where )
+					+ "free coil currents are implemented for MESHED conductors "
+					  "only. Under setConductorField() or setExteriorConductors() "
+					  "a current also enters an analytic field -- the datum, the "
+					  "transmission moments, psi_c itself -- which the constant "
+					  "column does not measure" );
+			if ( borderL2Value > 0.0 || borderCollinearityValue > 0.0 )
+				throw std::logic_error( std::string( where )
+					+ "setBorderRegularisation() damps a SQUARE corner and an "
+					  "inverse solve's is rectangular; its regularisation is the "
+					  "per-circuit gamma setFreeCurrents() takes" );
+			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+				throw std::logic_error( std::string( where )
+					+ "free coil currents are refused under a configured "
+					  "mfem::Device: the device integrand uploads the coil current "
+					  "densities once per operator build, and a current that "
+					  "moves between residuals would leave it integrating a stale "
+					  "machine -- MEASUREMENTS.md M-239's class of defect" );
+		}
 
 		if ( nModes > 0 && !usesNonlinearForms() )
 			throw std::logic_error(
@@ -10975,6 +11236,104 @@ namespace
 			conductorMomentsOnGamma( *exteriorCoupling, conductorMoments,
 			                         subtractedMoments );
 
+		/*
+		 * IV-3's COLUMNS, ONCE PER SOLVE, BY A DIFFERENCE THAT IS EXACT.
+		 *
+		 * A coil current enters the residual through meq::SourceIntegrator and
+		 * nowhere else -- `mu0 R I/area` on the coil's rectangle, independent of
+		 * psi, of the support and of every border unknown -- so the residual is
+		 * AFFINE in each circuit current and one forward difference is its
+		 * derivative to round-off, at any step. The step is the seed's own size
+		 * so the difference is not a small number minus a small number.
+		 *
+		 * MEASURED RATHER THAN ASSEMBLED, for the reason the exterior columns'
+		 * probe gives: the difference asks the question the residual answers,
+		 * through the same quadrature, the same point-sampled coil edges and the
+		 * same elimination, so no second expression of the coil term exists to
+		 * disagree with the first. Costs one residual per circuit per solve.
+		 *
+		 * The support does not move here: the iterate is the same in both
+		 * evaluations, and a frozen support does not refresh at all.
+		 */
+		std::vector< mfem::Vector > coilColumns, coilZ;
+		std::vector< double > coilScale;
+		if ( nFree > 0 )
+		{
+			mfem::Vector baseline( n );
+			fieldResidual( unknown, s, baseline );
+			for ( int k = 0; k < nFree; ++k )
+			{
+				std::size_t const at = static_cast< std::size_t >( k );
+				double const seed = freeCircuitCurrentValues[ at ];
+				double const h = std::max( 1.0, std::abs( seed ) );
+				coilScale.push_back( h );
+
+				freeCircuitCurrentValues[ at ] = seed + h;
+				applyFreeCircuitCurrents();
+				mfem::Vector response( n );
+				fieldResidual( unknown, s, response );
+				freeCircuitCurrentValues[ at ] = seed;
+				applyFreeCircuitCurrents();
+
+				response -= baseline;
+				response /= h;
+				coilColumns.push_back( response );
+				coilZ.emplace_back( n );
+			}
+			fieldResidual( unknown, s, residual );
+		}
+
+		/*
+		 * THE TARGET POINTS, LOCATED ONCE. They are prescribed and do not move,
+		 * so each is the containing element's potential shape functions at the
+		 * point for the whole solve -- the ExactPoint limiter's arrangement.
+		 */
+		struct LocatedTarget
+		{
+			mfem::Vector shape1, shape2;
+			mfem::Array< int > dofs1, dofs2;
+		};
+		std::vector< LocatedTarget > targetPoints(
+			static_cast< std::size_t >( nTargets ) );
+		for ( int m = 0; m < nTargets; ++m )
+		{
+			std::size_t const at = static_cast< std::size_t >( m );
+			IsofluxTarget const &target = isofluxTargetList[ at ];
+			int element = -1;
+			locatePotentialPoint( target.r1, target.z1, element,
+			                      targetPoints[ at ].shape1,
+			                      targetPoints[ at ].dofs1 );
+			locatePotentialPoint( target.r2, target.z2, element,
+			                      targetPoints[ at ].shape2,
+			                      targetPoints[ at ].dofs2 );
+		}
+
+		/// `psi_h( P1 ) - psi_h( P2 )` of target `m` contracted against `v`:
+		/// the target's value on a state, and its border row on a direction.
+		auto targetDot = [ & ]( int m, mfem::Vector const &v ) -> double
+		{
+			countedHostRead( v, __LINE__ );
+			LocatedTarget const &t = targetPoints[ static_cast< std::size_t >( m ) ];
+			int const base = blockOffsets[ 1 ];
+			double total = 0.0;
+			for ( int i = 0; i < t.dofs1.Size() && i < t.shape1.Size(); ++i )
+				total += t.shape1( i )*v( base + t.dofs1[ i ] );
+			for ( int i = 0; i < t.dofs2.Size() && i < t.shape2.Size(); ++i )
+				total -= t.shape2( i )*v( base + t.dofs2[ i ] );
+			return total;
+		};
+
+		/// Every target's value on a state.
+		std::vector< double > targetValues( static_cast< std::size_t >( nTargets ),
+		                                    0.0 );
+		auto targetsAll = [ & ]( mfem::Vector const &state,
+		                         std::vector< double > &out )
+		{
+			out.assign( static_cast< std::size_t >( nTargets ), 0.0 );
+			for ( int m = 0; m < nTargets; ++m )
+				out[ static_cast< std::size_t >( m ) ] = targetDot( m, state );
+		};
+
 		/// Scratch for the gathers below; see meq::CompressedRows. Hoisted out of
 		/// the lambdas so a per-call std::vector allocation does not land in the
 		/// constraint leg.
@@ -11153,6 +11512,12 @@ namespace
 			for ( double v : cModes )
 				total += gamma*gamma*v*v;
 			total += gamma*gamma*xScale*xScale*( cXr*cXr + cXz*cXz );
+			// IV-3's targets, which are flux differences like the axis and
+			// boundary rows and take their weight for the same reason. READ
+			// FROM targetValues, which every caller refreshes on the state it
+			// is measuring -- the cold one included, where they are zero.
+			for ( double v : targetValues )
+				total += gamma*gamma*v*v;
 			return std::sqrt( total );
 		};
 
@@ -11298,6 +11663,10 @@ namespace
 			}
 			std::vector<double> coldModes( static_cast<std::size_t>( nModes ), 0.0 );
 			transmissionAll( coldState, coldModes );
+			// ZERO, since coldState zeroes the potential block, and computed
+			// rather than assumed so the merit's one reading of the targets
+			// is never stale.
+			targetsAll( coldState, targetValues );
 			// XP-3's two constraints are EXACTLY ZERO here and are not computed:
 			// coldState zeroes the flux and potential blocks outright, so q_h
 			// vanishes identically and q_h( x ) = 0 wherever x is. They are
@@ -11481,6 +11850,9 @@ namespace
 		// null searches run BEFORE that on the initial state.
 		if ( upDownSymmetryWanted )
 			projectUpDown( unknown );
+
+		// Back on the iterate, after the cold reference read them at zero.
+		targetsAll( unknown, targetValues );
 
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations*phaseCount;
@@ -12003,6 +12375,12 @@ namespace
 				queue( exteriorColumns[ static_cast<std::size_t>( mode ) ],
 				       exteriorZ[ static_cast<std::size_t>( mode ) ] );
 
+			// IV-3's: constant columns, so they queue with the exterior ones
+			// and cost a backsolve each in the same blocked pass.
+			for ( int k = 0; k < nFree; ++k )
+				queue( coilColumns[ static_cast<std::size_t>( k ) ],
+				       coilZ[ static_cast<std::size_t>( k ) ] );
+
 			/*
 			 * THE BORDERED ELIMINATION, IN ITS GENERAL FORM.
 			 *
@@ -12033,6 +12411,8 @@ namespace
 			 */
 			int const nBorderTotal = nBorders + nModes;
 			std::vector<double> step( static_cast<std::size_t>( nBorderTotal ), 0.0 );
+			// IV-3: the step in each free circuit current, in amperes.
+			std::vector<double> currentStep( static_cast<std::size_t>( nFree ), 0.0 );
 
 			/*
 			 * THE ELEVEN ROWS THAT WALKED THE WHOLE VECTOR ARE COMPRESSED, AND
@@ -12618,7 +12998,101 @@ namespace
 						columnSlot[ static_cast<std::size_t>( j ) ] = slot++;
 			}
 
-			if ( nBorderTotal == 1 )
+			if ( inverse )
+			{
+				/*
+				 * IV-3's CORNER: RECTANGULAR, AND SOLVED AS A LEAST SQUARES.
+				 * INVERSE-AND-RECONSTRUCTION-PLAN.md section 4.3.
+				 *
+				 * Rows are every border constraint and then every target;
+				 * columns are every border unknown and then every free current.
+				 * The entries are what the square branch below forms -- corner
+				 * minus row dotted with backsolved column -- with the two new
+				 * blocks' corners EXACTLY ZERO: no border row reads a coil
+				 * current, and no unknown appears in a target but through psi.
+				 *
+				 * **THE ROWS ARE WEIGHTED AS THE MERIT WEIGHTS THEM**, so the
+				 * least-squares step is the Gauss-Newton step of the border half
+				 * of augmentedNorm(): gamma cancels, and XP-3's two rows carry
+				 * `xScale` because the merit gives them that length. Where the
+				 * targets are reachable the residual of this solve goes to zero
+				 * and the weighting decides nothing.
+				 *
+				 * **THE CURRENT COLUMNS ARE SCALED BY THEIR SEEDS** before the
+				 * decomposition and unscaled after it. A column per ampere is
+				 * five or six orders below a column per weber, and both the rank
+				 * threshold and the minimum norm are statements about a matrix's
+				 * columns being commensurate. The regularisation is scaled with
+				 * them, so `gamma` keeps its stated units of flux per ampere.
+				 */
+				int const rows = nBorderTotal + nTargets;
+				int const columns = nBorderTotal + nFree;
+				auto rowOf = [ & ]( int i, mfem::Vector const &v ) -> double
+				{
+					return i < nBorderTotal ? rowDot( i, v )
+					                        : targetDot( i - nBorderTotal, v );
+				};
+				auto columnOf = [ & ]( int j ) -> mfem::Vector const &
+				{
+					return j < nBorderTotal
+					       ? columnZ( j )
+					       : coilZ[ static_cast<std::size_t>( j - nBorderTotal ) ];
+				};
+
+				std::vector<double> matrix(
+					static_cast<std::size_t>( rows )*static_cast<std::size_t>( columns ),
+					0.0 );
+				std::vector<double> rhs( static_cast<std::size_t>( rows ), 0.0 );
+				std::vector<double> weights( static_cast<std::size_t>( columns ),
+				                             0.0 );
+				for ( int k = 0; k < nFree; ++k )
+					weights[ static_cast<std::size_t>( nBorderTotal + k ) ] =
+						freeCircuitRegularisation[ static_cast<std::size_t>( k ) ]
+						*coilScale[ static_cast<std::size_t>( k ) ];
+
+				for ( int i = 0; i < rows; ++i )
+				{
+					double const weight =
+						( i < nBorderTotal && isXPointRow( i ) ) ? xScale : 1.0;
+					double const value =
+						i < nBorderTotal
+						? constraintAt( i )
+						: targetValues[ static_cast<std::size_t>( i - nBorderTotal ) ];
+					rhs[ static_cast<std::size_t>( i ) ] =
+						weight*( rowOf( i, y ) - value );
+					for ( int j = 0; j < columns; ++j )
+					{
+						double entry = ( i < nBorderTotal && j < nBorderTotal )
+						               ? cornerEntry( i, j ) : 0.0;
+						entry -= rowOf( i, columnOf( j ) );
+						if ( j >= nBorderTotal )
+							entry *= coilScale[ static_cast<std::size_t>( j - nBorderTotal ) ];
+						matrix[ static_cast<std::size_t>( i )*static_cast<std::size_t>( columns )
+						        + static_cast<std::size_t>( j ) ] = weight*entry;
+					}
+				}
+
+				RegularisedStep const solved =
+					solveRegularisedLeastSquares( matrix, rows, columns, rhs,
+					                              weights );
+				inverseRankValue = solved.rank;
+				inverseNullityValue = solved.nullity;
+				inverseSingularValueList = solved.singularValues;
+				for ( int j = 0; j < columns; ++j )
+				{
+					double const value = solved.step[ static_cast<std::size_t>( j ) ];
+					if ( !std::isfinite( value ) )
+						throw std::runtime_error(
+							"meq::GradShafranovSolver::solve: the inverse "
+							"corner's least-squares step is not finite" );
+					if ( j < nBorderTotal )
+						step[ static_cast<std::size_t>( j ) ] = value;
+					else
+						currentStep[ static_cast<std::size_t>( j - nBorderTotal ) ] =
+							value*coilScale[ static_cast<std::size_t>( j - nBorderTotal ) ];
+				}
+			}
+			else if ( nBorderTotal == 1 )
 			{
 				double const borderDotY = deviceDots ? deviceDot( 0, 0 )
 				                                     : rowDot( 0, y );
@@ -12974,6 +13448,7 @@ namespace
 			double const savedXr = xR;
 			double const savedXz = xZ;
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
+			std::vector<double> const savedCurrents = freeCircuitCurrentValues;
 
 			double bestNorm = std::numeric_limits<double>::infinity();
 			double bestDamping = 0.0;
@@ -13054,6 +13529,17 @@ namespace
 					for ( int mode = 0; mode < nModes; ++mode )
 						unknown.Add( -damping*step[ static_cast<std::size_t>( nBorders + mode ) ],
 						             exteriorZ[ static_cast<std::size_t>( mode ) ] );
+					if ( nFree > 0 )
+					{
+						for ( int k = 0; k < nFree; ++k )
+						{
+							std::size_t const at = static_cast<std::size_t>( k );
+							freeCircuitCurrentValues[ at ] =
+								savedCurrents[ at ] + damping*currentStep[ at ];
+							unknown.Add( -damping*currentStep[ at ], coilZ[ at ] );
+						}
+						applyFreeCircuitCurrents();
+					}
 
 					// XP-3's two move only themselves -- no field direction to
 					// add -- and are damped with everything else, because the
@@ -13063,6 +13549,32 @@ namespace
 					{
 						xR = savedXr + damping*deltaXr;
 						xZ = savedXz + damping*deltaXz;
+
+						/*
+						 * THE RELOCATION CAP, refreshXPoint()'s out-of-the-mesh
+						 * rejection moved inward: a trial carrying the X-point
+						 * further than the cap from its SEED throws, and the
+						 * catch below halves it exactly as it halves that one.
+						 * Checked before any constraint is re-read, so a
+						 * rejected trial costs nothing. Off unless set; see
+						 * setXPointRelocationCap() for why it is a branch
+						 * control and is only ever applied reactively.
+						 */
+						if ( xPointCapValue > 0.0 )
+						{
+							double const moved = std::hypot( xR - xPointSeedRValue,
+							                                 xZ - xPointSeedZValue );
+							if ( moved > xPointCapValue )
+							{
+								++xPointCapRejectionCount;
+								throw std::runtime_error(
+									"meq::GradShafranovSolver::solve: the X-point "
+									"relocation cap rejected a trial "
+									+ std::to_string( moved ) + " m from the seed "
+									"against a cap of "
+									+ std::to_string( xPointCapValue ) + " m" );
+							}
+						}
 					}
 
 					peak = hasNormalisation
@@ -13080,6 +13592,7 @@ namespace
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 					fieldResidual( unknown, s, residual );
 					transmissionAll( unknown, transmission );
+					targetsAll( unknown, targetValues );
 					// BOTH constraints, or the line search is blind to the one it
 					// is not told about and will happily accept a step that has
 					// wrecked psi_bnd to improve psi_ax.
@@ -13230,6 +13743,17 @@ namespace
 				for ( int mode = 0; mode < nModes; ++mode )
 					unknown.Add( -bestDamping*step[ static_cast<std::size_t>( nBorders + mode ) ],
 					             exteriorZ[ static_cast<std::size_t>( mode ) ] );
+				if ( nFree > 0 )
+				{
+					for ( int k = 0; k < nFree; ++k )
+					{
+						std::size_t const at = static_cast<std::size_t>( k );
+						freeCircuitCurrentValues[ at ] =
+							savedCurrents[ at ] + bestDamping*currentStep[ at ];
+						unknown.Add( -bestDamping*currentStep[ at ], coilZ[ at ] );
+					}
+					applyFreeCircuitCurrents();
+				}
 				if ( xPointIsUnknown )
 				{
 					xR = savedXr + bestDamping*deltaXr;
@@ -13260,6 +13784,7 @@ namespace
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 				fieldResidual( unknown, s, residual );
 				transmissionAll( unknown, transmission );
+				targetsAll( unknown, targetValues );
 			}
 
 			/*
@@ -13327,6 +13852,8 @@ namespace
 				normalisedSource->setCurrentScale( sL );
 		}
 		normalisationResidualValue = constraint;
+		if ( inverse )
+			isofluxResidualValues = targetValues;
 		// Both, for the reason above: leaving the source at psi_bnd = 0 after the
 		// solve makes every later evaluation -- postProcess(), the estimator, the
 		// sampler -- read a different source from the one that was solved.
@@ -13344,6 +13871,15 @@ namespace
 
 	void GradShafranovSolver::solve()
 	{
+		// IV-3's unknowns are border unknowns, and only the bordered path has a
+		// border. Refused before any dispatch, since two of them return early.
+		if ( ( !freeCircuitList.empty() || !isofluxTargetList.empty() )
+		     && !normalisedSource )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::solve: free coil currents and isoflux "
+				"targets are border unknowns and rows of the bordered Newton, "
+				"which runs only with setSource( NormalisedSource &, double )" );
+
 		/*
 		 * PHASE C OF DEVICE-PLAN.md section 3.3 -- *run the problem on the
 		 * device, receiving only diagnostic data*. Crossings counted between

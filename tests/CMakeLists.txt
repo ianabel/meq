@@ -28,6 +28,7 @@ set(MEQ_UNIT_TESTS
 	DeviceRowsTests
 	PlasmaComponentTests
 	ProfilesTests
+	RegularisedLeastSquaresTests
 	ResidentIterateTests
 	RotatingSourceTests
 	SafetyFactorTests
@@ -477,6 +478,28 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptan
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
 	message(STATUS "meq: DriverAcceptance not registered (needs MEQ_BUILD_APP=ON)")
+endif()
+
+# InverseSolve is IV-3's acceptance (INVERSE-AND-RECONSTRUCTION-PLAN.md section
+# 9): the DIII-D machine solved forward through the library, isoflux targets
+# read off its own separatrix, four coil currents perturbed and made unknowns,
+# and the currents asserted to come back. It drives the LIBRARY, not the
+# binary -- the driver has no inverse path until IV-5 -- and needs meq-run only
+# to make the machine's mesh, which is a build product of the file.
+if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/InverseSolve.cpp")
+	add_executable(InverseSolve "convergence/InverseSolve.cpp")
+	target_include_directories(InverseSolve PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(InverseSolve PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(InverseSolve PRIVATE
+		MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
+	add_test(NAME InverseSolve COMMAND InverseSolve
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(InverseSolve PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: InverseSolve not registered (needs MEQ_BUILD_APP=ON)")
 endif()
 
 # MachineFixedBoundary runs the SHIPPED examples/fixed-*.toml through the

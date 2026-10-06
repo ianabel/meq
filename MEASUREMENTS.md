@@ -14727,3 +14727,458 @@ Every printed answer is unchanged across the three columns. The double suite is
 pass. The single binary solves `machine-f-diiid` on the host and under CUDA, at
 `3.759860e-01` and `3.759861e-01`. M-242 read `…862` under CUDA, and the step
 is within FP32's floor on a cuDSS path that is nondeterministic.
+
+### M-244
+
+**IV-0: `freegs4e`'s INVERSE SOLVE FINDS THE BASIN FROM COLD ON THIRTEEN OF
+FOURTEEN CONFIGURATIONS, WHERE ITS FORWARD SOLVE FINDS NONE — AND ONLY ON THE
+MACHINE WITH ITS CIRCUITS.** `INVERSE-AND-RECONSTRUCTION-PLAN.md` §0.2's gate,
+run. `tools/freegs4e-benchmark/forward.py --cold --native`, every reference at
+its own `129²`, `rtol = 1e-9`, 500 Picard passes a stage, `MKL = 1`: stage 1 is
+`SyncConstrain( xpoints, isoflux )` on `freegs4e`'s own machine constructor at
+its default currents, which is how `fgsref.py` made the references; stage 2
+freezes the currents stage 1 chose, drops the constraint and re-solves forward.
+
+| case | inverse | forward | nO / ref | nX / ref | `psi_axis` | `psi_bndry` / span | axis m |
+|---|---|---|---|---|---|---|---|
+| A | rtol 104 | rtol 1 | 3 / 3 | 2 / 2 | 6.5e-08 | 1.9e-08 | 2.0e-08 |
+| A shaped | rtol 106 | rtol 1 | 3 / 3 | 3 / 3 | 6.4e-08 | 2.1e-08 | 2.2e-08 |
+| B | rtol 74 | rtol 1 | 3 / 3 | 2 / 2 | 2.1e-07 | 2.1e-07 | 6.0e-08 |
+| B shaped | rtol 75 | rtol 1 | 2 / 2 | 3 / 3 | 2.1e-07 | 2.1e-07 | 5.6e-08 |
+| C MAST | rtol 26 | rtol 1 | 9 / 9 | 7 / 7 | 2.8e-06 | 1.1e-06 | 2.0e-07 |
+| C shaped | **maxits** 501 | rtol 29 | 6 / 6 | 4 / 4 | 7.9e-05 | 2.0e-04 | 7.2e-05 |
+| D TCV | rtol 45 | rtol 1 | 1 / 1 | 12 / 12 | 1.3e-05 | 2.1e-05 | 5.0e-05 |
+| D shaped | rtol 57 | rtol 1 | 11 / 11 | 39 / 39 | 6.0e-04 | 7.1e-04 | 5.1e-05 |
+| E | rtol 93 | rtol 1 | 3 / 3 | 2 / 2 | 4.0e-08 | 1.5e-07 | 6.7e-08 |
+| E shaped | rtol 95 | rtol 1 | 2 / 2 | 3 / 3 | 5.5e-08 | 1.3e-07 | 5.2e-08 |
+| F DIII-D | rtol 33 | rtol 1 | 5 / 5 | 2 / 2 | 2.1e-06 | 7.3e-07 | 9.0e-07 |
+| F shaped | rtol 33 | rtol 1 | 10 / 10 | 3 / 3 | 1.1e-06 | 1.5e-06 | 8.8e-06 |
+| **G MAST-U** | rtol 23 | rtol 1 | **9 / 13** | **11 / 16** | **1.8e-02** | 2.1e-02 | 4.0e-04 |
+| G shaped | rtol 22 | rtol 1 | 12 / 12 | 10 / 10 | 5.0e-06 | 6.8e-07 | 4.4e-07 |
+
+The last three columns are relative to the reference — `psi_bndry` to the span
+`psi_axis − psi_bndry`, since `psi_bndry` may be near zero — and the axis is
+the distance from the reference's, in metres. `nO`/`nX` count critical points
+inside the limiter under the same mask on both fields; the count includes
+conductor O-points and outer saddles, so it is agreement with the reference's
+own count that is a topology verdict, not the number. C shaped's inverse stage
+runs to the cap exactly as its reference did (`stage2_status = maxits`, 401) and
+the release still lands at 7.9e-05.
+
+**THE GATE PASSES.** Every machine releases cleanly on at least one arm, and
+thirteen of the fourteen configurations land within 6e-04 of their reference in
+`psi_axis` — against [M-112](#m-112), where `forward.py --cold-forward` on the
+same inputs converges to the reference on **none** of the fourteen. One code,
+one set of inputs, two modes: the inverse finds the basin and the forward does
+not. That is §2.2's basin-finder claim, measured rather than read off a
+docstring.
+
+**WHAT IT DOES NOT ESTABLISH, IN THREE PARTS, AND THE FIRST IS THE GATE'S OWN
+DESIGN.** (1) **A release taking one iteration is close to a tautology**: the
+references were MADE by this inverse solve, so its answer at frozen currents is
+a forward fixed point by construction. What the release row adds is that the
+cold inverse found the reference's basin and not a neighbour of it; the
+informative half of the experiment is the inverse column against M-112's
+forward one. (2) **It is Picard's evidence and MEQ is Newton.** (3) **The
+circuits are load-bearing**, and that one is the finding — see below.
+
+**`forward.py --cold` WITHOUT `--native` IS A DIFFERENT EXPERIMENT AND FAILS IT,
+FOR TWO REASONS ONLY ONE OF WHICH IS FAIR.** That arm builds the machine from the
+`.npz` conductor table — every conductor an independent free coil, starting at
+the reference's CONVERGED currents. Where the two arms differ, TCV's row taken
+on the table [M-246](#m-246) corrects:
+
+| case | flattened | native |
+|---|---|---|
+| C MAST | inverse rtol 31, releases to **5.2e-01**, 11 O-points against 9 | 2.8e-06 |
+| D TCV | inverse rtol 42, releases to **1.5e-02**, 2 O-points against 1 | 1.3e-05 |
+| D shaped | inverse rtol 45, release **maxits**, no X-point | 6.0e-04 |
+| F shaped | inverse rtol 33, release **maxits**, 1.27e+00 | 1.1e-06 |
+| G MAST-U | inverse rtol 80, release **maxits**, 2.2e+00 | 1.8e-02 |
+| G shaped | inverse **maxits**, release maxits, 8.8e-01 | 5.0e-06 |
+
+A, B and E agree to 1e-7 in both arms, and TestTokamak is the one machine with
+no circuit. **MAST_sym, TCV and MASTU_simple carry circuits, and freeing every
+conductor of them gives the inverse solve more freedom than the problem has**:
+G shaped does not converge at all and C, D and G land elsewhere. That is §4.6's
+*"a flat coil list is the wrong input"* as a measurement, and it makes IV-1's
+circuits a prerequisite of IV-3 rather than a convenience. The flattened arm's
+F shaped row is the other reason and it is NOT fair to the flattened route: its
+inverse stage converges and the RELEASED Picard then walks away vertically — the
+fixed-current Picard iteration's own instability that `trace_forward()` exists
+to diagnose. A Newton has no such instability, so that row is a statement about
+`freegs4e`'s forward iteration and not about the basin.
+
+**AND MEQ'S OWN COLD TABLE, RE-TAKEN ON TODAY'S TREE, HAS NOT MOVED SINCE M-112.**
+The fourteen shipped `examples/machine-*.toml`, meshed by `meq-run`, solved
+under `--mesh-ready --profile` at `OMP = MKL = 8`, `psi_ax` against each
+reference: A and A shaped exit 0 with **no axis** (5.69e-01), B and B shaped exit
+2, C 1.737e-02, C shaped exit 2, D exit 2, D shaped 3.517e-02, E and E shaped
+exit 2, F 3.471e-04, F shaped 3.412e-06, G 4.943e-02 — **every row to M-112's
+digits** — and G shaped, which M-112 recorded as exit 0 at 4.171e+00, is now
+**refused**: exit 1, *"the plasma contains the symmetry axis"*, the axis-source
+guard added since. A non-answer reported as an answer became a refusal, which is
+the guard doing its job. **Five of fourteen with a located axis**: C, D shaped, F,
+F shaped and G.
+
+### M-245
+
+**BS-1 — ONE MERIT SCALE PER BORDER — IS BUILT, PRICES THE BORDERS VERY
+DIFFERENTLY, CLOSES NONE OF THE SIX, AND MOVES THREE ANSWERS. REVERTED.**
+`BORDER-SCALING-PLAN.md` BS-1: `augmentedNorm()` weighted every border by
+`psi_ax`'s `gamma = || dR/dpsi_ax ||`; the arm weighted border `i` by
+`gamma_i = || c_i ||/| D_ii |`, frozen at the starting iterate — `psi_bnd`'s
+column differenced as `psi_ax`'s is, the current's assembled and divided by
+`( int F/R )/L`, each exterior mode's exact column over its DtN diagonal — with
+the X-point left at `gamma*xScale`, its column being exactly zero.
+
+**THE SCALES DISAGREE, SO THE PLAN'S FALSIFIER 4 DOES NOT FIRE.** `gamma_i/
+gamma_ax` at the starting iterate:
+
+| | `psi_bnd` | current | exterior modes |
+|---|---|---|---|
+| `machine-f-diiid` | 0.459 | 0.112 | 6.65 to 11.6 |
+| `DivertedMachine.hpp`, last sweep | 0.423 | 0.085 | 2.94 to 5.18, rising with the mode |
+
+**The shared `gamma` overpriced the plasma current about tenfold and underpriced
+the exterior transmission rows three- to twelvefold.** The unit error the plan
+named is real and is this size.
+
+**THE SINGLE-BORDER REGRESSION HELD.** `HighBetaConvergence` at
+`MKL = 1, OMP = 4` against the pre-change binary: every table byte-identical but
+the two whose solves carry a second border, where only the printed final merit
+moved — `psi_ax`, `psi_bnd`, the scale and every Newton count to the printed
+digit. That needed `gamma*gamma*( c*c )`'s shape in the merit: `( gamma*c )²`
+rounds differently and is not the same number.
+
+**AND IT DOES NOT HELP, MEASURED THREE WAYS.**
+
+* **The cold table**, M-244's harness, before and after:
+
+  | | before | BS-1 |
+  |---|---|---|
+  | A, A shaped | exit 0, no axis | exit 2 |
+  | B, B shaped, D, E, E shaped | exit 2 | exit 2 |
+  | **C MAST** | **1.737e-02, 3 its** | **exit 2** |
+  | **C shaped** | exit 2 | **exit 0 in 115, axis 1.49 m from the reference's, support DID NOT SETTLE** |
+  | **D shaped** | 3.517e-02 in 2 | **3.598e-02 in 204** |
+  | F, F shaped, G, G shaped | | unchanged |
+
+  None of the six closes; a correct solve is lost; a failure becomes a **wrong
+  answer reported as converged with a located axis**; and a converging case
+  moves to a neighbouring equilibrium, `psi_ax` 2.250052e-02 → 2.251799e-02,
+  at a hundred times the work. Falsifiers 5 and 6 both fire.
+* **XP-3's own acceptance**, `theXPointBorderClosesOnTheSaddle`: the same
+  equilibrium to every printed digit, at **29 bootstrap iterations against 14**
+  and 3–4 per warm sweep against 2–3.
+* **The control, which is what attributes it.** The scales computed exactly as
+  in the arm and the merit put back on the shared `gamma` reproduces the
+  baseline to every digit on C, C shaped and D shaped. The arm's two extra
+  residual evaluations — which on a moving support can refresh it — move
+  nothing; **the ruler alone moved the three answers**.
+
+**THE FINDING IS THAT THE MERIT IS A BRANCH CONTROL ON THESE PROBLEMS, NOT A
+YARDSTICK.** [M-132](#m-132) has the discrete equilibria and the path choosing
+among them; Armijo's ruler decides which steps the path takes, so a better-
+founded ruler is a different path and lands in a different basin as readily as
+in the same one. The plan's §5 asked *"would rescaling change which equilibrium
+is reported?"* — on three of the fourteen, yes. A dimensionally correct merit
+is not thereby a neutral one, and BS-3's no-answer-moves regression is the
+check that caught it, as it was written to.
+
+**AND THE PLAN'S THIRD ACCEPTANCE COULD NOT HAVE DISTINGUISHED THE TWO RULES.**
+Profile tables `×10` with the starting `L` unchanged moves `G_L` under both
+rules; with `L` started at a tenth `F` is unchanged and nothing moves under
+either. The unit error is visible in the scales above and not in that
+invariance.
+
+### M-246
+
+**TCV'S FILAMENT ARM WAS A DIFFERENT MACHINE: ITS SOLENOID CARRIED 220 TIMES ITS
+CURRENT, AND IT WAS FOUND BY THE CIRCUIT LAYER'S OWN ACCEPTANCE.**
+`tools/freegs4e-benchmark/conductors.py`'s `flatten()` passes a circuit member
+its share `multiplier * I_circuit` as `scale`, and for a `Coil` uses that as the
+current. For a `Solenoid` it multiplied by `item.current` as WELL — and after
+`freegs4e`'s solve a circuit member's `current` IS `multiplier * I_circuit`, so
+the total came out `Ns * ( multiplier * I )²`, quadratic in the supply. TCV's
+`OH1` is the one solenoid inside a circuit across the seven machines
+(`multiplier = 0.01`, `Ns = 100`, `I_OH = 22048.9 A`): the correct total is
+**2.2049e+04 A** and the `.npz` conductor table, `examples/machine-d-tcv.toml`
+and its cold guess all carried **4.8615e+06 A**. The shaped arm builds its
+table through `ShapedCoil` and is correct (2.2509e+04); MAST's and MAST-U's
+solenoids are on supplies of their own and are correct.
+
+**HOW IT SURFACED.** IV-1's acceptance writes each machine twice —
+flattened from the reference's conductor table, and wired as `[[circuits]]`
+with `Multiplier = multiplier * turns` — and asserts the two parse to the same
+coil set. Six machines agreed to the bit; TCV disagreed by a factor of
+**219.5**, on `OH1` alone, which is the double count read off directly. A
+circuit is the one representation in which a member's current cannot be
+counted twice.
+
+**IT WAS NOT A MODELLING DIFFERENCE AND IT WAS IN THE INPUT, NOT A SOLVER.**
+`freegs4e`'s own solve was right; only the saved table, and everything built
+from it, was wrong. The fix is one line of `flatten()`; the `.npz` and `.json`
+entry is patched in place from the circuit current the `.json` already records,
+and `make_diverted_case.py` regenerated the configuration and its guess, whose
+`[source] PsiAxis` seed moves from 2.507e-01 to **1.753e-02** against the
+reference's 2.253e-02 — 11× off to 22% off.
+
+**WHAT WAS MEASURED ON THE WRONG MACHINE**, filament arm only, every row:
+
+| | before | corrected |
+|---|---|---|
+| MEQ cold, M-103 / M-112 / M-244 | exit 2 in 9 s, an **X-point excursion** of 1.6 m (M-117) | **exit 2 in 278 s, a PLATEAU**: the X-point stays within 8 cm of its seed, `||r||` stalls at 2.8e-03 with the current row dominating the merit and 8–12 halvings a step |
+| `freegs4e` cold forward, M-112 | 1.093e+02 | **2.42e-01**, still at the cap |
+| `freegs4e` flattened cold → inverse → forward, M-244 | inverse maxits, 8.86e+01 | inverse rtol 42, released in 1, **1.51e-02** |
+| `freegs4e` forward seeded from the reference, `forward.py` | — | maxits, 6.94e-01 |
+
+The last row is `forward.py`'s own model and not the reference's: it rebuilds
+the solenoid row as ONE point filament at its centre, which is not `freegs4e`'s
+`Solenoid`, and `CLAUDE_FB.md` already says those rows must not be read. The
+native release on the same corrected machine (M-244) lands at 1.3e-05.
+
+**SO ONE OF M-117'S THREE X-POINT EXCURSIONS WAS THE INPUT.** The corrected
+TCV is a chronic plateau like MAST shaped, not an excursion; the six cold
+failures are now two fatal steps (B, B shaped), two chronic (C shaped, D) and
+two excursions (E, E shaped). And M-117's merit-share finding — the border
+"~1e-03 against a field residual of 2.953" at TCV's end of a three-order range —
+was read off this machine and does not stand as stated; MAST's end does. The
+native IV-0 row in M-244 was always right, `freegs4e`'s own `TCV()` carrying
+the correct solenoid.
+
+**THE GUESS BUILDERS HAD NOT RUN SINCE THE RADIUS RENAME.** Regenerating the
+case found `mkguess.write_guess()` reading `box["rmin"]` while the four builders
+had been renamed to write `"Rmin"` — `817b49d`, the Python half of the trap
+`CLAUDE.md` records for that rename — so every `mkcoldguess.py` run died with
+`KeyError: 'rmin'` and no machine case could have been regenerated.
+`make_case.py` had the same split against itself. Both read either spelling now,
+because the committed `examples/*-meta.json` still carry the old one.
+`py_compile` cannot see a dictionary key; only running the tool could.
+
+### M-247
+
+**BS-5 — A CAP ON HOW FAR A LINE-SEARCH TRIAL MAY MOVE THE X-POINT FROM ITS
+SEED — CLOSES E AND E SHAPED AND MOVES NOTHING, BUT ONLY AS A RETRY RUNG.
+APPLIED FROM THE FIRST SOLVE IT IS A BRANCH CONTROL THAT LOSES MAST AND MAST-U.**
+`BORDER-SCALING-PLAN.md` BS-5, prototyped and measured, **not landed**. A trial
+whose X-point unknown lands further than `f·L` from the `[boundary.xpoint]` seed
+throws inside the Armijo loop, so the existing catch halves it exactly as it
+does an out-of-mesh trial; `L` is `[boundary.exterior] Radius`, 2.4–3.5 m on
+these machines. The SEED is the anchor and is stored apart from the unknown,
+which each support sweep overwrites. Off by default and byte-identical over all
+fourteen logs. M-244's harness, `OMP = MKL = 8`; `psi_ax` against the reference,
+`x` exit 2, `NA` exit 0 with no axis, `R` refused, `=` identical to the printed
+digit:
+
+| case | base | from first solve, `f` = .03 | .05 | .10 | .25 | reactive .03 / .05 / .10 | reactive .25 |
+|---|---|---|---|---|---|---|---|
+| A, A shaped | NA | 2.46e-02, 2.39e-02 | same | x | x | NA | NA |
+| B, B shaped | x | x | x | x | x | x | x |
+| C | 1.737e-02 | **x** | = | **x** | **x** | = | = |
+| C shaped | x | 1.20e-03 | x | x | 1.20e-03 | x | x |
+| D shaped, F, F shaped | | = | = | = | = | = | = |
+| E | x | 4.67e-04 | 4.51e-04 | 4.51e-04 | **0.231, axis 1.39 m off** | 4.67e-04 / 4.51e-04 / 4.51e-04 | x |
+| E shaped | x | 3.84e-04 | 3.84e-04 | 3.84e-04 | **0.231** | 3.84e-04 | x |
+| G | 4.943e-02 | **x** | **x** | **x** | = | = | = |
+| G shaped | R | x | x | x | R | R | R |
+
+"Reactive" applies the cap on the bordered-Picard-then-Newton retry rung only,
+so the five configurations that converge on the first rung never meet it.
+Every closure is on that rung, with the X-point 0.3 mm to 17 mm from its seed.
+
+**REACTIVE, AT `f` = 0.03 TO 0.10, IS THE ONE ARRANGEMENT THAT CLOSES SOMETHING
+AND MOVES NOTHING**: E at 4.5e-04 and E shaped at 3.8e-04, the two remaining
+excursions. Two of six sits on the plan's falsifier 6, and it is not a broad
+fix. **From the first solve it is M-245's lesson again**: it also meets BS-5's
+own acceptance on machine A — X-point 1.7 cm from its seed, an O-point located,
+2.4e-02 — and closes C shaped, and it loses C at three of four caps, loses G at
+every cap up to 0.10, and at 0.25 reports E converged with its axis 1.39 m
+off. **G's own converged answer is an excursion**: its X-point sits 0.82 m from
+a seed that is the reference's own null, and any cap below 0.235 L loses it. A
+per-STEP anchor was also measured and is worse on every row.
+
+**TCV, CORRECTED, IS NOT CLOSED EITHER WAY.** The table above ran on the
+pre-[M-246](#m-246) TCV, whose solenoid carried 220 times its current, so its
+D row is omitted. On the corrected machine, `f` = 0.05 exits 2 reactive and from
+the first solve alike, which is what M-246's plateau predicts: the X-point was
+never the thing moving.
+
+**AND RUNG 2 INHERITS STATE FROM RUNG 1**: identically configured, the
+bordered-Picard rung closes C shaped when the cap was on during rung 1 and not
+when it was off. The shared normalised source's current scale, which
+`makeSolver()` does not reset, is the suspected carrier — inferred from the
+code, not isolated. A retry rung whose outcome depends on how the failed attempt
+failed is not the clean second attempt the ladder assumes.
+
+**BS-6(a) IS ANSWERED BY THE CODE AS IT STANDS.** `checkAxisSource()` sets
+`supportReachesAxis` through `elementInPlasma()`, which reads the plasma
+component mask, and the driver refuses only on that. MAST passes with the
+level-set warning, and G shaped's refusal is right: the axis node is in element
+995 at `Psi = +1.52e-04`, the component kept it, `psi_ax = -5.07`, and the
+X-point is at ( 0.057, 0.446 ), 1.67 m from its seed — an excursion onto the
+symmetry axis.
+
+### M-248
+
+**BS-5 IS LANDED ON THE RETRY RUNG, AND THE RUNG NOW TAKES TWO TRIGGERS: MEQ'S
+COLD TABLE GOES FROM FIVE OF FOURTEEN WITH A LOCATED AXIS TO NINE, AND NO
+ANSWER MOVES.** [M-247](#m-247)'s prototype, made the driver's behaviour: the
+bordered Picard-then-Newton rung sets `setXPointRelocationCap()` at
+`0.05 × [boundary.exterior] Radius` wherever XP-3 carries the X-point. No
+environment variable and no key. M-244's harness on today's tree, TCV the
+corrected machine of [M-246](#m-246), `OMP = MKL = 8`:
+
+| | before | landed |
+|---|---|---|
+| A, A shaped | exit 0, **no axis**, 5.69e-01 | **2.46e-02, 2.39e-02**, axis 2.9 / 2.8 cm from the reference's, X-point 1.7 cm from its seed |
+| B, B shaped, C shaped, D | exit 2 | exit 2 |
+| C, D shaped, F, F shaped, G | | **identical to the printed digit** |
+| E, E shaped | exit 2 | **4.51e-04, 3.84e-04**, axis within 0.7 mm |
+| G shaped | refused | refused, the retry having failed and the first answer restored |
+
+**TWO THINGS HAD TO CHANGE BEYOND THE CAP.**
+
+* **The rung starts from the edge the first attempt started from.** Every
+  support sweep calls `freezePlasmaEdge()` on the source the driver shares
+  between solvers and nothing undid it, so the retry began from whatever edge
+  the failed attempt had frozen — which is why M-247 found the same
+  configuration closing or not depending on rung 1. The driver records the
+  first sweep's freeze and re-applies it. The suspected carrier in M-247, the
+  current scale, is not one: a fresh solver resets it at the start of every
+  solve.
+* **A diverted run that converges with no interior extremum is an observed
+  failure.** Machine A's first attempt meets every constraint in two Newton
+  steps on an annulus. Read through the same `checkAxis()` the report uses —
+  one lambda now, so the ladder and the report cannot disagree — it goes to the
+  retry, which closes it. **If the retry fails or also finds no axis, the first
+  answer stands**: its solver, and the shared source's normalisation, current
+  scale and frozen edge, put back exactly. G shaped takes that path and is then
+  refused by the axis-source guard as before.
+
+**The six cold failures are now four**: B and B shaped, one fatal step each;
+C shaped and TCV, chronic plateaus. None is an X-point excursion, so nothing on
+this rung reaches them. `DriverAcceptance`'s
+`theRetryRungClosesAnExcursionAndAnAnnulus` pins E and A against the
+reference. The double suite is **66 of 67** on this tree, the one red the
+deliberate `PlasmaEdgeConvergence`; it grew by `RegularisedLeastSquaresTests`
+(M-249).
+
+### M-249
+
+**IV-2: THE INVERSE SOLVE'S CORNER IS `meq::solveRegularisedLeastSquares`, AND
+`mfem::DenseMatrixSVD` OVERFLOWS ON THE SHAPE IT HAS.**
+`INVERSE-AND-RECONSTRUCTION-PLAN.md` §4.3 asked for MFEM's SVD to be measured
+against Eigen before either was chosen. A 21 × 33 matrix of rank 17 — DIII-D's
+corner — built from known orthonormal factors with singular values 1 to 1e-6,
+so the minimum-norm solution is a closed form; `MKL = OMP = 1`, 20,000 solves
+each:
+
+| | rank | error | per solve |
+|---|---|---|---|
+| Eigen `JacobiSVD` | 17 | 3.5e-11 | 102 µs |
+| Eigen `CompleteOrthogonalDecomposition` | 17 | 9.0e-11 | 20 µs |
+| `mfem::DenseMatrixSVD` + a hand-written pseudo-inverse | 17 | 2.8e-11 | 83 µs |
+
+**All three are right and all three are free** against a Newton step's sparse
+factorisation, so the choice is not a measurement of speed. Eigen's `JacobiSVD`
+was taken: it solves for the minimum-norm minimiser itself where MFEM's returns
+factors and leaves the pseudo-inverse to be maintained here, it keeps the unit
+MFEM-free and so gated by CI, and **`DenseMatrixSVD` with `jobvt = 'S'` writes
+past its own buffer for a wide matrix**: it sizes `Vt` as `min( m, n ) × n` and
+hands LAPACK `LDVT = n`, so `dgesvd` writes `n × n`. Measured as
+`free(): invalid next size` in the destructor on exactly this 21 × 33, which is
+the corner's normal, underdetermined shape. It is on MFEM master as well, and is
+reported as `../mfem-hdg-dev/doc/DENSEMATRIXSVD-LDVT-FROM-MEQ.md`; the table's
+MFEM row used `jobvt = 'A'`, which allocates consistently.
+
+**The unit solves the augmented system `[ M ; diag( gamma ) ] x ~ [ f ; 0 ]`
+and never the normal equations**, gamma per column with zero meaning
+unregularised, and reports `M`'s own rank and nullity beside the step.
+`RegularisedLeastSquaresTests`, against closed forms:
+
+* 21 × 33 of rank 17: the minimum-norm step to **1.5e-15**, rank 17 and nullity
+  16 exactly;
+* machine A's overdetermined 5 × 4: the unique best fit, `M^T ( M x − f )` to
+  1e-14;
+* gamma on three of eight columns: `( M^T M + diag( gamma )² ) x = M^T f` to
+  **1.3e-15**;
+* gamma swept 1e-3 to 1e6 on a two-column current block: the block falls
+  monotonically to **3.5e-13** and the other columns converge to the reduced
+  least squares to 3.2e-12;
+* every inconsistent call refused.
+
+**Mutation-tested as the plan asked**: reading the row-major matrix transposed
+fails 14 checks and putting gamma on the neighbouring column fails 6.
+
+### M-250
+
+**IV-3: COIL CURRENTS AS BORDER UNKNOWNS. FOUR CIRCUITS COME BACK TO 1e-11 IN
+TWO NEWTON STEPS, AND ALL EIGHTEEN COME BACK THROUGH A CORNER WHOSE CONDITION
+IS 3.4e+08.** `INVERSE-AND-RECONSTRUCTION-PLAN.md` §9. `machine-f-diiid` solved
+forward through the library with its support sweeps (3, settling;
+`psi_ax = 3.7598501820e-01`, X-point `( 1.200929, -0.999490 )`), then isoflux
+targets read off its own converged separatrix: rays from the located axis
+every 15°, the one within 0.15 rad of the X-point dropped, each crossing of
+`psi_h = psi_bnd` bisected to `|psi − psi_bnd| ≤ 2.8e-16`. Every target asks
+that point `i` share point 0's flux. Coil currents perturbed by 2 to 3 per
+cent, made free one circuit each, and solved from the forward answer on its
+frozen support, which the original currents satisfy exactly.
+`tests/convergence/InverseSolve.cpp`, `MKL = 1`:
+
+| free | rows | Newton | rank / nullity | σ max .. min | targets | currents back to |
+|---|---|---|---|---|---|---|
+| F2A F2B F6A F6B | 21 | 2 | 19 / 0 | 5.8 .. 5.3e-03 | 1.3e-13 | **1.4e-11** |
+| all 18 | 21 | 2 | 33 / 0 | 5.8 .. **1.7e-08** | 2.7e-15 | **1.2e-07** (F3B, 482 A); 1e-11 on the large coils |
+| all 18 | 5 | 3 | 20 / **13** | 5.0 .. 5.3e-03 | 3.3e-17 | **not recovered**: 6e-04 to 2.7e-02 |
+
+The corner's columns are the border unknowns, then the circuit currents scaled
+by their seeds; its rows are the border constraints, then the targets, weighted
+as `augmentedNorm()` weights them. The merit history of the four-circuit solve
+is 2.9e-02, 1.8e-08, 4.5e-13.
+
+**THE COIL COLUMN IS EXACT AND THE NEWTON COUNT IS WHAT SAYS SO.** It is
+measured once per solve by one forward difference of the residual in each
+circuit current, which is exact because the residual is affine in a current:
+the coil term is `mu0 R I/area` on the rectangle and enters nowhere else on the
+meshed route. The residual is exact whatever the column says, so a wrong column
+still converges, linearly, to the same answer. Mutated, all three caught:
+
+| mutation | Newton | currents |
+|---|---|---|
+| none | 2 | 1.4e-11 |
+| column 10% too large | **7** | 1.6e-09 |
+| current step left in scaled units | no convergence in 200 | — |
+| currents not written to the set at the line-search trials | **5** | 1.6e-11 |
+
+**WITH EIGHTEEN FREE THE SEPARATRIX DETERMINES THE CURRENTS IN EXACT ARITHMETIC
+AND ALMOST NOWHERE ELSE**, which is §1.4 made quantitative rather than
+refuted. The rank is full and the currents return, but the smallest singular
+value is 3.4e+08 below the largest. That ratio multiplies a target's error into
+a current's, so a separatrix known to one part in 1e8 fixes the eighteen
+currents to order one, and a reconstruction's magnetics are known to about one
+per cent. The lower coils are consistently the worse determined, the X-point
+being below. **The rank alone would have reported this case as healthy**, which
+is why `inverseSingularValues()` is reported beside it.
+
+**WITH FIVE ROWS THE SHAPE IS MET BY CURRENTS THAT ARE NOT THE MACHINE'S.**
+Nullity 13 is exactly 18 − 5, so the border rows are independent of the
+targets. The run converges, meets every target to 3e-17 and moves the currents
+by up to 2.7 per cent from the originals, about as far as they were perturbed,
+choosing them by the minimum norm. That is Lackner's figures 3–4 on one
+machine, and `tooFewTargetsMeetTheShapeWithOtherCurrents` asserts it: targets
+met, nullity at least `N_free − rows`, currents **not** recovered.
+
+**WHAT IS REFUSED, AND WHY EACH IS REFUSED RATHER THAN APPROXIMATED**:
+* targets with no free current, or free currents with no target;
+* a coil set that is not the one the source carries, which would move nothing
+  the residual reads;
+* `setConductorField()` or `setExteriorConductors()`, because then a current
+  also enters an analytic field that the column does not measure;
+* a configured `mfem::Device`, whose integrand uploads a snapshot of the coil
+  current densities ([M-239](#m-239)'s class);
+* `setBorderRegularisation()`, which damps a square corner.
+
+The test is 13 s for the first case and 21 s in all under `ctest -j4`. The double suite is **67 of 68** on this tree, the one red being the deliberate `PlasmaEdgeConvergence`. It is a self-consistency test: the targets
+come from the answer, so it cannot detect a target the machine cannot reach,
+and IV-6 is the test that can.

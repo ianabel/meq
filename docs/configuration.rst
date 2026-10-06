@@ -846,6 +846,14 @@ coils alone is affine and finishes in one Newton step.
      - This block's own filament stack, under ``[conductors] Model =
        "filament"`` **only**. Both or neither. See
        :ref:`dividing-a-rectangle`.
+   * - ``Free``
+     - ``false``
+     - Marks this coil's current as an **unknown** of an inverse solve, with
+       ``Current`` as its starting value. The driver does not run an inverse
+       solve yet, since the targets that would determine the current have no
+       keys, so it **refuses** a file carrying this rather than solving with
+       the starting value as data. A coil in a ``[[circuits]]`` block may not
+       carry it; write it on the circuit.
 
 .. important::
 
@@ -884,6 +892,76 @@ needs to.
 
 ``examples/coils-rectangle.toml`` is the worked example, and it writes its two
 currents one each way so that both spellings are exercised.
+
+``[[circuits]]``
+----------------
+
+Conductors on one supply: **one** current, and a signed multiplier per member
+coil. This is how a real machine is wired, and an up–down pair in
+**anti-series** is a pair of multipliers of opposite sign.
+
+.. code-block:: toml
+
+   [[coils]]
+   Name = "P6U"
+   CentreR = 1.45
+   CentreZ = 0.90
+   HalfWidth = 0.05
+   HalfHeight = 0.05
+
+   [[coils]]
+   Name = "P6L"
+   CentreR = 1.45
+   CentreZ = -0.90
+   HalfWidth = 0.05
+   HalfHeight = 0.05
+
+   [[circuits]]
+   Name = "P6"
+   Current = 1.0e4
+   Coils = [ { Name = "P6U", Multiplier = 1.0 },
+             { Name = "P6L", Multiplier = -1.0 } ]
+
+Each member carries ``Multiplier × Current`` amperes in total, so a winding's
+turns belong in its multiplier. For a forward solve a circuit is a notation:
+the run is identical to writing every member's current on its ``[[coils]]``
+block. What it changes is what an inverse solve may adjust — one current per
+supply, not one per conductor — and freeing every conductor of a machine that
+is wired in circuits gives such a solve freedoms the machine does not have.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``Name``
+     - *required*
+     - Distinct across circuits.
+   * - ``Current``
+     - *required*
+     - The supply's current, amperes, signed.
+   * - ``Coils``
+     - *required*
+     - The members, each ``{ Name = ..., Multiplier = ... }``: the ``Name`` of
+       a ``[[coils]]`` block and its signed share of ``Current``.
+       ``Multiplier`` is required and non-zero — there is no default, because
+       a default of 1 would wire an anti-series pair in series without saying
+       so.
+   * - ``Free``
+     - ``false``
+     - The circuit's current is an unknown of an inverse solve, starting from
+       ``Current``. Refused by the driver, as on a coil.
+
+.. important::
+
+   **A member coil names no current of its own**, neither ``Current`` nor
+   ``CurrentDensity``, and no ``Free``: the circuit's current is the one number
+   and the circuit's ``Free`` the one unknown. A coil in two circuits, a member
+   name matching no coil or two coils, and a circuit with no members are all
+   refused. A coil in no circuit is its own supply and needs its own current,
+   exactly as before.
 
 ``[conductors]``
 ----------------

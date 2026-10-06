@@ -1826,6 +1826,54 @@ BOOST_AUTO_TEST_CASE( theDriverRefusesASolverItCannotHonour )
 }
 
 /*
+ * A FREE CURRENT IS AN UNKNOWN THE DRIVER CANNOT YET SOLVE FOR, AND IT SAYS SO.
+ *
+ * `Free = true` parses -- INVERSE-AND-RECONSTRUCTION-PLAN.md IV-1 puts the
+ * schema in place before the solver. The library solves for free currents
+ * (IV-3, InverseSolve.cpp), but the targets that would drive them have no keys
+ * and the driver has no inverse path until IV-5. Run forward, the seed Current
+ * would be treated as data and the
+ * run would report an equilibrium for currents nobody chose: the
+ * accepted-and-ignored key. So the driver refuses it with exit 1, on a coil
+ * and on a circuit, and the same file without `Free` must SOLVE, or the case
+ * would pass with every coil refused. Asserted on the PAIRING, as
+ * theDriverRefusesThreadedAssemblyOnADevice is.
+ */
+BOOST_AUTO_TEST_CASE( theDriverRefusesAFreeCurrentUntilItHasAnInversePath )
+{
+	auto write = []( char const *path, char const *coilExtra, char const *circuits )
+	{
+		std::ofstream file( path );
+		file << "[mesh]\nRMin = 0.1\nRMax = 1.9\nZMin = -1.7\nZMax = 1.7\n"
+		     << "NR = 4\nNZ = 4\n\n[discretisation]\nPolynomialDegree = 1\n"
+		     << "\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		     << "\n[[coils]]\nName = \"PU\"\nCentreR = 1.5\nCentreZ = 1.2\n"
+		     << "HalfWidth = 0.1\nHalfHeight = 0.1\n" << coilExtra
+		     << "\n[[coils]]\nName = \"PL\"\nCentreR = 1.5\nCentreZ = -1.2\n"
+		     << "HalfWidth = 0.1\nHalfHeight = 0.1\nCurrent = 1.0e3\n"
+		     << circuits
+		     << "\n[output]\nPrefix = \"driver-acceptance-free\"\n";
+	};
+
+	write( "driver-acceptance-free-coil.toml", "Current = 1.0e3\nFree = true\n", "" );
+	BOOST_TEST( run( "driver-acceptance-free-coil.toml" ) == 1,
+	            "a Free coil must be refused until the driver has an inverse path" );
+
+	write( "driver-acceptance-free-circuit.toml", "",
+	       "\n[[circuits]]\nName = \"P\"\nCurrent = 1.0e3\nFree = true\n"
+	       "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" );
+	BOOST_TEST( run( "driver-acceptance-free-circuit.toml" ) == 1,
+	            "a Free circuit must be refused until the driver has an inverse path" );
+
+	// The same circuit, NOT free, is a forward notation and solves.
+	write( "driver-acceptance-circuit.toml", "",
+	       "\n[[circuits]]\nName = \"P\"\nCurrent = 1.0e3\n"
+	       "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" );
+	BOOST_TEST( run( "driver-acceptance-circuit.toml" ) == 0,
+	            "a circuit that is not Free is data and must solve" );
+}
+
+/*
  * A DEVICE AND MEQ'S THREADED ASSEMBLY CANNOT BE COMBINED, AND THE ABORT THAT
  * RESULTS NAMES NEITHER OF THEM.
  *
@@ -4198,4 +4246,72 @@ BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
 		"the .nc's conductor table sums to " << total << " where the file asks "
 		"for 3.0e5 A. A stack divides a block's current and does not change "
 		"it; a sum that has moved is a share applied to the wrong count." );
+}
+
+/*
+ * THE RETRY RUNG CLOSES WHAT IT WAS BUILT FOR, AND THE ANSWER IS THE
+ * REFERENCE'S. BORDER-SCALING-PLAN.md BS-5, MEASUREMENTS.md M-247.
+ *
+ * Two shipped machine files from cold, through the wrapper, each failing its
+ * first attempt in one of the two ways the rung is reached:
+ *
+ *   E, diamagnetic   the bordered Newton FAILS -- its X-point leaves its
+ *                    seed in one step and flips sign -- and the retry, with
+ *                    the X-point held within 0.05 of Gamma's radius of the
+ *                    seed, converges to 4.5e-04 of the reference
+ *   A, classic       the bordered Newton CONVERGES, to an annulus with no
+ *                    interior extremum and its X-point 1.1 m from its seed;
+ *                    the driver reads that as a failure, and the retry finds
+ *                    an axis 2.9 cm from the reference's
+ *
+ * ASSERTED ON THE ANSWER, against freegs4e's reference out of each file's
+ * header, and on the rung having run: a case that only asked "did it exit 0"
+ * passed on machine A before any of this existed, reporting an equilibrium
+ * with no axis. The tolerances are about four times the measured errors, and
+ * A's is the looser because its reference was made by an inverse solve that
+ * MEQ's forward one is not (M-112's mode mismatch).
+ */
+BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
+{
+	struct Case
+	{
+		char const *stem;
+		double psiAxis;
+		double axisR;
+		double axisZ;
+		double relative;
+		double distance;
+	};
+	for ( Case const &c : { Case{ "machine-e-diamagnetic", 8.376562158930125e-02,
+	                              1.335940, 0.0, 2.0e-03, 5.0e-03 },
+	                        Case{ "machine-a-testtokamak", 8.271751444840184e-02,
+	                              1.351273, 0.062226, 1.0e-01, 1.2e-01 } } )
+	{
+		std::string const config = std::string( "examples/" ) + c.stem + ".toml";
+		int status = -1;
+		std::string const log = captureStdout(
+			std::string( wrapper() ) + " " + config, &status );
+		BOOST_TEST_REQUIRE( status == 0,
+		                    "the wrapper exited " << status << " on " << config
+		                    << ". captureStdout() discards stderr, so re-run it by "
+		                    "hand for the diagnosis. Its stdout was:\n" << log );
+		BOOST_TEST( log.find( "the retry holds the X-point" ) != std::string::npos,
+		            config << " converged without the retry rung, so this case is "
+		            "no longer testing it -- the first attempt has started to succeed, "
+		            "which is news worth a measurement before this case is changed" );
+
+		std::string const header = ncdumpHeader( std::string( c.stem ) + ".nc" );
+		BOOST_TEST_REQUIRE( !header.empty(), c.stem << ".nc is unreadable" );
+		double const psiAxis = headerAttribute( header, "psi_axis" );
+		double const axisR = headerAttribute( header, "axis_r" );
+		double const axisZ = headerAttribute( header, "axis_z" );
+		BOOST_TEST_REQUIRE( std::isfinite( axisR ),
+		                    c.stem << " reports no magnetic axis -- the annulus" );
+		double const relative = std::abs( psiAxis - c.psiAxis )/c.psiAxis;
+		double const distance = std::hypot( axisR - c.axisR, axisZ - c.axisZ );
+		std::printf( "  %-24s psi_ax %.6e, %.2e from the reference; axis %.2e m off\n",
+		             c.stem, psiAxis, relative, distance );
+		BOOST_TEST( relative < c.relative );
+		BOOST_TEST( distance < c.distance );
+	}
 }

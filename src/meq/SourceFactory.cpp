@@ -340,9 +340,9 @@ namespace meq
 		                   "this source type has no normalised form" );
 	}
 
-	std::shared_ptr<CoilSet const> makeCoilSet( CoilConfig const &config,
-	                                           double mu0,
-	                                           std::string const &configFileName )
+	std::shared_ptr<CoilSet> makeCoilSet( CoilConfig const &config,
+	                                      double mu0,
+	                                      std::string const &configFileName )
 	{
 		if ( config.coils.empty() )
 			return nullptr;

@@ -1763,6 +1763,59 @@ sources that differ at the per-cent level, and an agreement much tighter than
 what is measured would be evidence of a shared mistake rather than of two right
 answers.
 
+## IV-3: coil currents are border unknowns of the same Newton
+
+`GradShafranovSolver::setFreeCurrents()` makes a circuit's current one more
+border unknown, and `addIsofluxTarget()` adds one more row,
+`psi_h( P1 ) − psi_h( P2 ) = 0`. `INVERSE-AND-RECONSTRUCTION-PLAN.md` is the
+design and [M-250](MEASUREMENTS.md#m-250) the measurement.
+
+**THE COLUMN IS CONSTANT AND THE CORNER AGAINST IT IS ZERO, SO A FREE CURRENT
+COSTS ONE BACKSOLVE A STEP.** On the meshed route a coil enters the residual
+only as `mu0 R I/area` on its rectangle through `meq::SourceIntegrator`. That
+is affine in `I` and independent of `psi`, the support and every border
+unknown, so one forward difference of the residual per circuit per solve IS
+the column. The difference rather than an assembly is the exterior columns'
+reason: it asks the question the residual answers, through the same
+point-sampled coil edges. **No border row reads a current**: the plasma-current
+row integrates `scaledF()`, the plasma term alone, and the transmission rows'
+conductor moments are zero without an analytic conductor field.
+
+**THE CORNER IS THEN RECTANGULAR AND GOES TO IV-2's LEAST SQUARES**, with the
+rows weighted as `augmentedNorm()` weights them, so the step is the
+Gauss-Newton step of the merit's border half. The current columns are scaled by
+their seeds, because a column per ampere sits five orders below one per weber
+and both the rank threshold and the minimum norm compare columns. On reachable
+targets the residual of that solve goes to zero and Newton stays quadratic:
+two steps on DIII-D. **The Newton count is the test of the column**: the
+residual is exact whatever the column says, so a column 10% wrong still
+recovers the currents, in seven steps.
+
+**THE CURRENTS LIVE IN THE `meq::CoilSet` THE SOURCE CARRIES**, written through
+`CoilSet::setCurrent()` at every trial point. The solver refuses any other
+set, by address. A solver-side offset added to the residual would have worked
+and left the set reporting the seed while the field reflected the answer: two
+answers to one question, which the coil wrapper's forwarding exists to rule
+out. `makeCoilSet()` returns the set writable for this reason.
+
+**THE RANK IS NOT ENOUGH, AND THE SINGULAR VALUES ARE REPORTED BESIDE IT.**
+All eighteen DIII-D coils against 21 isoflux rows is full rank and recovers
+every current, at a condition of 3.4e+08. That is determined in exact
+arithmetic and in nothing a magnetics measurement supplies, and the rank alone
+reports it healthy. With five rows the nullity is 13, every target is met to
+3e-17, and the currents are up to 2.7% from the machine's. That is Lackner's
+§2.3 on one machine, asserted rather than described.
+
+**REFUSED, EACH ONE A CONVERGED WRONG ANSWER OTHERWISE**:
+* an analytic conductor field, where a current also enters the datum and the
+  moments;
+* a configured Device, whose integrand uploads a snapshot of the coil
+  densities, which is M-239's class;
+* `setBorderRegularisation()`, which damps a square corner;
+* targets without free currents, and free currents without targets.
+
+The driver refuses `Free` until IV-5 gives the targets keys.
+
 ## PE-0: the premise is true, and the plan's own machinery does not cash it
 
 **`PLASMA-EDGE-PLAN.md` §6's first stage is run, and it splits the plasma edge's
@@ -2438,7 +2491,10 @@ make the whole globalisation campaign moot. They are three distinct failures:
 two machines lose a SINGLE step of twenty-seven; one is chronic, exhausting the
 halving ladder on 55 of 288; and three are not step-length failures at all but
 **X-point EXCURSIONS** — TCV's null travels 1.6 m in Z from its seed and E's
-flips sign in one step.
+flips sign in one step. **TCV's was the input**: its filament arm carried its
+solenoid at 220 times its current, and corrected it is a chronic plateau with
+the X-point within 8 cm of its seed → **[M-246](MEASUREMENTS.md#m-246)**. Two
+excursions, E and E shaped, remain.
 
 → **[M-117](MEASUREMENTS.md#m-117)** — the classification · the traces ·
 → **[M-116](MEASUREMENTS.md#m-116)** — `PicardSweeps`, which fixes none of them
@@ -2447,7 +2503,9 @@ flips sign in one step.
 MACHINES.** The border constraints' share of `augmentedNorm` differs by three
 orders of magnitude across two cases of one benchmark: on MAST `g·axis` alone is
 **0.75** of a merit of 0.843, and on TCV the whole border is **~1e-03** against a
-field residual of 2.953. So MAST is the end where the border already dominates —
+field residual of 2.953 — **a field residual measured on a TCV whose solenoid
+carried 220 times its current** ([M-246](MEASUREMENTS.md#m-246)), so that end of
+the range is not established; MAST's is. So MAST is the end where the border already dominates —
 raising it cannot do anything, which is exactly what `BorderMeritWeight`'s
 upward saturation measured — and TCV is the end where nothing restrains the
 X-point at all. M-113's inversion, M-114's local optimum and that saturation are
@@ -2962,7 +3020,10 @@ MAST-U rebuild 24 and 26 conductors against 20 and 14 circuits, because
 solenoids expand into windings in the `.npz` and a per-row rebuild is not
 `freegs4e`'s `Solenoid`. Their flux is wrong before any iteration — 50× the
 field range on TCV — and M-96 already names those as the solenoid-carrying
-machines.
+machines. **On TCV part of that was the table itself**: `conductors.flatten()`
+counted the current of a solenoid inside a circuit twice, so the `.npz`, the
+TOML and its guess all carried TCV's solenoid at 220× its current →
+[M-246](MEASUREMENTS.md#m-246).
 
 
 **`tools/freegs4e-benchmark/`.** The first check of MEQ against a

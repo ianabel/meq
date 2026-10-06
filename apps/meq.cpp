@@ -831,6 +831,16 @@ namespace
 	}
 }
 
+namespace
+{
+	/// BS-5's cap on the retry rung, as a fraction of `[boundary.exterior]
+	/// Radius`. MEASUREMENTS.md M-247 measured 0.03, 0.05 and 0.10 to give the
+	/// same answers on all fourteen cold configurations and 0.25 to close
+	/// nothing, so this sits in the middle of the range that works rather than
+	/// at either end of it. Not a key: it is a branch control.
+	constexpr double xPointRelocationFraction = 0.05;
+}
+
 int main( int argc, char **argv )
 {
 	/*
@@ -1376,6 +1386,33 @@ int main( int argc, char **argv )
 				"     `meq --mesh-command` prints, and say so by re-running\n"
 				"     with --mesh-ready.\n",
 				argument.c_str() );
+			return ConfigurationError;
+		}
+
+		/*
+		 * `Free = true` IS AN UNKNOWN THIS DRIVER CANNOT YET SOLVE FOR.
+		 *
+		 * It marks a coil or circuit current as an unknown of the inverse
+		 * solve, `Current` being where that solve starts -- and the inverse
+		 * solve is INVERSE-AND-RECONSTRUCTION-PLAN.md IV-3, not built. Run
+		 * forward, the file would solve with the seed as data and report an
+		 * equilibrium for currents nobody chose, which is the
+		 * accepted-and-ignored key this tree refuses everywhere else. The
+		 * configuration layer reads and checks it so that the schema exists
+		 * before the solver does.
+		 */
+		if ( config->getCoils().anyFree() )
+		{
+			std::fprintf( stderr,
+				"MEQ: this configuration marks a coil or circuit current Free,\n"
+				"     which makes it an unknown of an INVERSE solve -- and the\n"
+				"     driver does not run one yet: the library solves it, the\n"
+				"     [inverse] targets that would drive it have no keys\n"
+				"     (INVERSE-AND-RECONSTRUCTION-PLAN.md, stage IV-5). It is\n"
+				"     refused rather than run\n"
+				"     forward, because a forward run would treat the starting\n"
+				"     Current as data and report an equilibrium for currents\n"
+				"     nobody chose. Remove Free to solve with those currents.\n" );
 			return ConfigurationError;
 		}
 
@@ -2178,6 +2215,22 @@ int main( int argc, char **argv )
 
 	int sweepsRun = 0;
 	bool supportSettled = false;
+
+	/*
+	 * THE EDGE THE FIRST ATTEMPT STARTED FROM, so the retry can start there too.
+	 *
+	 * The support loop freezes the source's plasma edge at every sweep and
+	 * leaves the last freeze in force -- deliberately, see the note at the end
+	 * of that loop. A sweep that FAILED leaves its freeze in force as well, and
+	 * the source is shared by every solver this driver builds, so the retry
+	 * rung inherited whatever edge the failed attempt had reached: identically
+	 * configured, it closed one machine or not depending on how the attempt
+	 * before it had failed. MEASUREMENTS.md M-247. A second attempt is only a
+	 * second attempt if it starts where the first did.
+	 */
+	bool firstFreezeTaken = false;
+	double firstFreezeAxis = 0.0;
+	double firstFreezeBoundary = 0.0;
 
 	meq::AdaptivityConfig const &adapt = config->getAdaptivity();
 	// MaxIterations counts SOLVES, not refinements: a run with MaxIterations = 1
@@ -3044,6 +3097,51 @@ int main( int argc, char **argv )
 			config->getOutput().directory + "/" + config->getOutput().prefix,
 			config->getDiscretisation().polynomialDegree + 1 );
 
+	/*
+	 * THE MAGNETIC AXIS OF A SOLVED EQUILIBRIUM, as the post-solve report asks
+	 * for it -- and as the retry ladder asks for it too, which is why this is
+	 * one lambda: a run that converges with NO interior extremum is an observed
+	 * failure for a diverted case (see the ladder), and the question the ladder
+	 * asks must be exactly the one the report answers, or the two could
+	 * disagree about whether a run has an axis.
+	 */
+	auto checkSolvedAxis = [ & ]( meq::GradShafranovSolver const &solved )
+		-> meq::AxisAgreement
+	{
+		meq::CriticalPointFinder finder( solved );
+
+		// AND THE SOLVER'S q_c TABLE, which it has already built or
+		// read from a file. Without this the driver's own finder
+		// rebuilds `grad psi_c` at every flux node -- the single most
+		// expensive thing in a subtracted-rectangle run -- to answer a
+		// question the comment above calls cheap.
+		{
+			meq::ConductorCache const held
+				= solved.conductorCacheSnapshot();
+			if ( held.hasCriticalPointTable() )
+				finder.adoptNodalConductors(
+					meq::criticalTableFromCache( held ) );
+		}
+
+		// A PLASMA HAS NO MAGNETIC AXIS INSIDE A CONDUCTOR, and on a
+		// machine whose coils are meshed inside Omega one of them can
+		// carry a higher psi than the plasma does -- measured on the
+		// diverted machine of FREE-BOUNDARY-PLAN.md section 10, whose
+		// P1L runs at +1.37e+05 A against an I_p of 2.0e+05 A and whose
+		// O-point reads a normalised flux of 1.5564. The solver's own axis constraint
+		// already drops those candidates; this is the same exclusion for
+		// the DIAGNOSTIC, without which every run of such a machine
+		// warns that it found a higher O-point than the one it followed,
+		// correctly and uselessly.
+		if ( conductorGeometry )
+			finder.setExcluded(
+				[ conductorGeometry ]( double radius, double z )
+				{
+					return conductorGeometry->indexContaining( radius, z ) >= 0;
+				} );
+		return finder.checkAxis( solved.psiAxis(), solved.psiBoundary() );
+	};
+
 	for ( int cycle = 0; cycle < maxCycles; ++cycle )
 	{
 		// The curved adaptive path rebuilds D_h's dependants every cycle. The
@@ -3841,6 +3939,12 @@ int main( int argc, char **argv )
 				double const supportStart = elapsedSince( started );
 				double const supportStartCpu = cpuNow();
 				normalised->freezePlasmaEdge( axis, boundary );
+				if ( sweep == 0 )
+				{
+					firstFreezeTaken = true;
+					firstFreezeAxis = axis;
+					firstFreezeBoundary = boundary;
+				}
 				// The PUBLIC refresh, which setPlasmaSupportFrozen() deliberately
 				// does not suppress: this is the outer loop moving the support,
 				// and it is the only thing that may.
@@ -3904,6 +4008,44 @@ int main( int argc, char **argv )
 			 */
 		};
 
+		/*
+		 * THE BORDERED PATH'S RETRY RUNG, BUILT ONE WAY FOR BOTH ITS TRIGGERS.
+		 *
+		 * REBUILT, for the reason the unbordered rung below rebuilds: a caught
+		 * mfem::ErrorException leaves a solver unusable. STARTED FROM WHERE THE
+		 * FIRST ATTEMPT STARTED; see firstFreezeTaken. And with the X-point held
+		 * near its seed: BORDER-SCALING-PLAN.md BS-5, a trial that carries the
+		 * null further than a twentieth of Gamma's radius from where the file put
+		 * it is halved. HERE AND NOWHERE ELSE, because it is a branch control: on
+		 * the first attempt it loses two machines that converge today, and here --
+		 * reached only by a run that has already failed or found no axis -- it
+		 * closes the two X-point excursions among the cold failures and the two
+		 * annuli, and moves nothing. MEASUREMENTS.md M-247.
+		 */
+		auto runRetryRung = [ & ]()
+		{
+			solver = makeSolver( *solveMesh, cycle == 0 );
+			solver->setGlobalisation(
+				meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton );
+			if ( firstFreezeTaken )
+				normalised->freezePlasmaEdge( firstFreezeAxis, firstFreezeBoundary );
+
+			meq::ExteriorConfig const &exterior = config->getBoundary().exterior;
+			double const cap = solver->xPointIsAnUnknown() && exterior.given
+			                   ? xPointRelocationFraction*exterior.radius : 0.0;
+			if ( cap > 0.0 )
+			{
+				solver->setXPointRelocationCap( cap );
+				std::printf( "MEQ: the retry holds the X-point within %.4g m of its "
+				             "seed ( %.4f, %.4f ): %.2f of Gamma's radius\n",
+				             cap, xPointSeedR, xPointSeedZ, xPointRelocationFraction );
+			}
+			solver->solve();
+			if ( cap > 0.0 )
+				std::printf( "     the cap rejected %ld line-search trials\n",
+				             solver->xPointCapRejections() );
+		};
+
 		try
 		{
 			// THE BASIN FIRST, WHEN ASKED FOR, AND THE SOLVER IS REBUILT AFTER
@@ -3918,7 +4060,88 @@ int main( int argc, char **argv )
 					solver->setInitialGuess( *picardState );
 			}
 
+			firstFreezeTaken = false;
 			runSolveWithSupportLoop();
+
+			/*
+			 * A DIVERTED RUN THAT CONVERGES WITH NO MAGNETIC AXIS HAS FAILED,
+			 * AND IS RETRIED -- BUT NEVER REPLACED BY SOMETHING WORSE.
+			 *
+			 * Machine A converges in two Newton steps to a wall-hugging annulus:
+			 * every constraint met, no interior extremum, the X-point 1.1 m from
+			 * where the file put it. That is an OBSERVED outcome and not a
+			 * prediction, so treating it as a failure keeps the ladder reactive;
+			 * forced onto the retry rung it converges with an axis 2.9 cm from
+			 * the reference's (MEASUREMENTS.md M-247). Asked only where XP-3
+			 * carries the X-point and Gamma is set, which is where the rung's cap
+			 * exists to help.
+			 *
+			 * An annulus is still a real thing to look at, which is why a solve
+			 * with no axis is otherwise a warning and not a refusal: so if the
+			 * retry fails, or ALSO finds no axis, the first answer stands -- its
+			 * solver, and the shared source's state, put back exactly as they
+			 * were -- and the report warns as it always has.
+			 */
+			if ( normalised && solver->xPointIsAnUnknown()
+			     && config->getBoundary().exterior.given )
+			{
+				meq::AxisAgreement found;
+				bool checked = true;
+				try
+				{
+					found = checkSolvedAxis( *solver );
+				}
+				catch ( std::exception const & )
+				{
+					checked = false;
+				}
+				if ( checked && !found.located )
+				{
+					std::fprintf( stderr,
+						"MEQ: the bordered Newton converged with NO interior extremum of\n"
+						"     psi_h -- an annulus, not a plasma with an axis. Retrying on\n"
+						"     the bordered Picard-then-Newton rung; the first answer stands\n"
+						"     if the retry does not find one.\n" );
+					std::unique_ptr<meq::GradShafranovSolver> first = std::move( solver );
+					double const keptAxis = normalised->normalisation();
+					double const keptBoundary = normalised->boundaryNormalisation();
+					double const keptScale = normalised->currentScale();
+					bool const keptFrozen = normalised->plasmaEdgeIsFrozen();
+					double const keptFrozenAxis = normalised->supportAxis();
+					double const keptFrozenBoundary = normalised->supportBoundary();
+
+					bool adopted = false;
+					bool retryConverged = false;
+					try
+					{
+						runRetryRung();
+						retryConverged = true;
+						adopted = checkSolvedAxis( *solver ).located;
+					}
+					catch ( std::exception const &retry )
+					{
+						std::fprintf( stderr, "MEQ: the retry did not converge: %s\n",
+						              retry.what() );
+					}
+					if ( adopted )
+					{
+						globalised = true;
+						rung = "bordered-picard-then-newton";
+					}
+					else
+					{
+						solver = std::move( first );
+						normalised->setNormalisation( keptAxis, keptBoundary );
+						normalised->setCurrentScale( keptScale );
+						if ( keptFrozen )
+							normalised->freezePlasmaEdge( keptFrozenAxis, keptFrozenBoundary );
+						else
+							normalised->thawPlasmaEdge();
+						std::fprintf( stderr, "MEQ: %sthe first answer stands.\n",
+						              retryConverged ? "the retry found no axis either; " : "" );
+					}
+				}
+			}
 		}
 		catch ( std::exception const &firstAttempt )
 		{
@@ -3963,12 +4186,7 @@ int main( int argc, char **argv )
 
 				try
 				{
-					// REBUILT, for the reason the unbordered rung below rebuilds:
-					// a caught mfem::ErrorException leaves a solver unusable.
-					solver = makeSolver( *solveMesh, cycle == 0 );
-					solver->setGlobalisation(
-						meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton );
-					solver->solve();
+					runRetryRung();
 					globalised = true;
 					rung = "bordered-picard-then-newton";
 				}
@@ -4677,42 +4895,9 @@ int main( int argc, char **argv )
 		{
 			try
 			{
-				meq::CriticalPointFinder finder( *solver );
-
-				// AND THE SOLVER'S q_c TABLE, which it has already built or
-				// read from a file. Without this the driver's own finder
-				// rebuilds `grad psi_c` at every flux node -- the single most
-				// expensive thing in a subtracted-rectangle run -- to answer a
-				// question the comment above calls cheap.
-				{
-					meq::ConductorCache const held
-						= solver->conductorCacheSnapshot();
-					if ( held.hasCriticalPointTable() )
-						finder.adoptNodalConductors(
-							meq::criticalTableFromCache( held ) );
-				}
-
-				// A PLASMA HAS NO MAGNETIC AXIS INSIDE A CONDUCTOR, and on a
-				// machine whose coils are meshed inside Omega one of them can
-				// carry a higher psi than the plasma does -- measured on the
-				// diverted machine of FREE-BOUNDARY-PLAN.md section 10, whose
-				// P1L runs at +1.37e+05 A against an I_p of 2.0e+05 A and whose
-				// O-point reads a normalised flux of 1.5564. The solver's own axis constraint
-				// already drops those candidates; this is the same exclusion for
-				// the DIAGNOSTIC, without which every run of such a machine
-				// warns that it found a higher O-point than the one it followed,
-				// correctly and uselessly.
-				if ( conductorGeometry )
-					finder.setExcluded(
-						[ conductorGeometry ]( double radius, double z )
-						{
-							return conductorGeometry->indexContaining( radius, z ) >= 0;
-						} );
-
 				double const checkStart = elapsedSince( started );
 				double const checkStartCpu = cpuNow();
-				axisCheck = finder.checkAxis( solver->psiAxis(),
-				                              solver->psiBoundary() );
+				axisCheck = checkSolvedAxis( *solver );
 				checkSeconds += elapsedSince( started ) - checkStart;
 				checkCpuSeconds += cpuNow() - checkStartCpu;
 				axisChecked = true;

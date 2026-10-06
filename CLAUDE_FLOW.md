@@ -187,12 +187,14 @@ against that fixture's 2.50×, and nothing in it came from MEQ — so this is th
 first **outside** confirmation rather than the only check.
 
 **AND THE NEXT RUNG IS A MIRROR SOLVE RATHER THAN A SOURCE COMPARISON.**
-`MIRROR-PLAN.md` is the plan — MR-0 to MR-5 — and its first stage is a
-falsifying experiment about whether MEQ's semicircular exterior is admissible
-for a machine whose flux tube leaves the domain. Read
-[M-168](MEASUREMENTS.md#m-168) before its stages: geq's shipped mirror does NOT
-satisfy the assumption the exterior rests on, rotation is a weak lever, and
-moving `Γ` outward makes it worse rather than better.
+`MIRROR-PLAN.md` is the plan — MR-0 to MR-5 — and its first stage, the
+falsifying experiment on whether MEQ's semicircular exterior is admissible for a
+machine whose flux tube leaves the domain, is run and passed →
+[M-169](MEASUREMENTS.md#m-169). With `Γ` put outside the machine no current lies
+beyond it at any Mach number, and what is left is a mode count.
+[M-168](MEASUREMENTS.md#m-168)'s contrary reading measured the current beyond a
+radius inside the machine and is superseded; *an admissibility test is a
+statement about where `Γ` was put, not about the machine*.
 
 **RECONCILE THE `φ₀` GAUGE FIRST — IT IS NOT A DETAIL.** MEQ pins
 `φ₀(ReferenceRadius, ψ) = 0`, one condition per flux surface. geq pins **one

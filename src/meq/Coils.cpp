@@ -821,6 +821,12 @@ namespace meq
 		return currentValue;
 	}
 
+	void Coil::setCurrent( double currentIn )
+	{
+		requireFinite( currentIn, "the current", "meq::Coil::setCurrent" );
+		currentValue = currentIn;
+	}
+
 	double Coil::minRadius() const
 	{
 		return centreRValue - halfWidthValue;
@@ -1322,6 +1328,16 @@ namespace meq
 	std::vector<Coil> const &CoilSet::coils() const
 	{
 		return coilList;
+	}
+
+	void CoilSet::setCurrent( std::size_t index, double current )
+	{
+		if ( index >= coilList.size() )
+			throw std::out_of_range(
+				"meq::CoilSet::setCurrent: index " + std::to_string( index )
+				+ " is outside a set of " + std::to_string( coilList.size() )
+				+ " coils" );
+		coilList[ index ].setCurrent( current );
 	}
 
 	double CoilSet::f( double radius, double z ) const

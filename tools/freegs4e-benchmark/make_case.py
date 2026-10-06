@@ -319,8 +319,8 @@ def build(npz_path, outdir, stem=None, degree=2, target_elements=4000,
 # triangles is exact, so raising it gives a mesh NESTED in this one and the
 # geometry does not move; raising NR or NZ instead changes which elements fall
 # inside Gamma, which is a different problem rather than a finer one.
-RMin = {box['rmin']:.6f}
-RMax = {box['rmax']:.6f}
+RMin = {box['Rmin']:.6f}
+RMax = {box['Rmax']:.6f}
 ZMin = {box['zmin']:.6f}
 ZMax = {box['zmax']:.6f}
 NR = {nr}

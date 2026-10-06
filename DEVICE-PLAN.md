@@ -1151,7 +1151,7 @@ later disagreement with two candidate causes and no way to separate them.
 | — | ~~**A device route through `DarcyHybridization`**~~ | — | — | **DONE, AND NEVER MISSING. `AssemblyMode = "batched"` IS THE ROUTE** — §3.6 |
 | — | ~~**`mfem::HDGExtensionIntegrator` on a device**~~ | — | — | **ANSWERED: NOTHING IS OWED** → [M-185](MEASUREMENTS.md#m-185) |
 | **1** | ~~**The element-local nonlinear residual**~~ | **C** | MEQ + upstream | **DONE, BOTH HALVES** → [M-197](MEASUREMENTS.md#m-197). `meq::makeDeviceNPCOperator()` routes MEQ's POD integrand through upstream's batched residual AND gradient; `--device cuda` reports `residual yes, gradient yes, device integrand yes` and reproduces the host to every printed digit. The coil term turned out POD-able — a closed rectangle test and a constant — so the production configuration is covered |
-| **2** | **`NPCReduce` / `NPCRecover` — the FACE loop** | **C** | upstream | **HALF DONE, AND MEQ TAKES IT** → [M-199](MEASUREMENTS.md#m-199). The element-local solves are already batched through `MultInvBatched()`, gated on `CanBatchLocalSolve()`, which reads **yes** under `--device cuda`. What remains is the FACE traversal — host dense work through `GetData()` — which is what forces `du_all.HostRead()`/`dp_all.HostRead()` per call. The "unowned, 1.00 cores, not started" this row carried was wrong on all three |
+| **2** | **`NPCReduce` / `NPCRecover` — the FACE loop** | **C** | upstream | **DONE, AND MEQ TAKES IT** → [M-209](MEASUREMENTS.md#m-209), [M-212](MEASUREMENTS.md#m-212). `CanBatchNPCTraversal()` reads **yes** on MEQ's production bordered case under `--device cuda`, so both legs and both overloads run as kernels, the blocked `ArrayMult()` path included — 4.0× and 4.5× per call against the host route at MEQ's size, agreeing to 6.5e-16. `CanBatchLocalSolve()` reading yes covers only the single-column overloads, which is M-209's correction of [M-199](MEASUREMENTS.md#m-199) |
 | **3** | ~~**The constraint functionals, device-side**~~ | **C** | MEQ | **THE REDUCTIONS ARE DONE** → [M-190](MEASUREMENTS.md#m-190), and `I_p` is built as an element loop → [M-192](MEASUREMENTS.md#m-192). The list had **two** real reductions and one kernel serves both. The limiter is a SEARCH and is **measured not worth porting** → [M-201](MEASUREMENTS.md#m-201): one shipped case, 0.7%, zero transfers. **AND THE AXIS SEARCH, WHICH IS §3.4's OWN HARDEST ITEM, IS NOW DONE** → [M-230](MEASUREMENTS.md#m-230), [M-231](MEASUREMENTS.md#m-231) |
 | **4** | ~~**The bordered border** — `rowDot()` and the `(N+4)²` fill~~ | **C** | MEQ | **DONE AND WIRED** → [M-190](MEASUREMENTS.md#m-190), [M-208](MEASUREMENTS.md#m-208). `dotAll()` is called per column for both compressed row sets, the host gathers are skipped when it runs, and `psi_ax`, the constraint and the X-point are bit-identical between `cpu` and `cuda`. **Wiring it MEASURED the route as a loss** — 3.0 transfers a step becomes 17.7 with the dots in front of the gathers and **33.1** with them instead, because `flush()` brings every column to the host and `dotAll()` pushes each 698 KB one back. So the gate is `Memory::DeviceIsValid()` **on the columns**, a predicate about the data rather than a key about the build: false today, true the moment the columns stop coming down |
 | **5** | ~~**The host branches**~~ | **C** | MEQ | **NEEDED NO KERNEL** → [M-195](MEASUREMENTS.md#m-195). `Norml2()` is already an `mfem::reduce`, so the convergence test and the line search are library primitives; the support decision is FROZEN within a solve by XP-2 and reads **0 calls**. What remained was §4 stage 4b's crossing instrument, now built → [M-196](MEASUREMENTS.md#m-196), [M-198](MEASUREMENTS.md#m-198) |
@@ -2230,14 +2230,15 @@ would tell us whether the rest of the plan is worth writing. It is.
 
 **Three things it does not settle, in the order they will cost.**
 
-1. **THE RATE TABLES, WHICH ARE MEQ'S ACTUAL ACCEPTANCE.** §7.2 is unpaid:
-   nothing in `tests/` has been run against `install-single`, and
-   `tests/convergence/ConductorSubtraction.cpp` does not compile there. A rate
-   study asserting `k+2` over dyadic refinements truncates several refinements
-   sooner at a 1e-7 floor, so the question is not *does it pass* but *which
-   pairs are still above the floor at each `k`* — and that has to be measured
-   per test before any tolerance is touched, or the edit is the vacuity
-   `CLAUDE.md`'s testing stance forbids.
+1. ~~**THE RATE TABLES, WHICH ARE MEQ'S ACTUAL ACCEPTANCE.**~~ **PAID** →
+   [M-217](MEASUREMENTS.md#m-217) to [M-222](MEASUREMENTS.md#m-222). The whole
+   tree builds and runs against `install-single` and reaches parity with the
+   double build, the one red in each being `PlasmaEdgeConvergence`. The rate
+   question was answered per test, as this item said it had to be: `k+1` above
+   `k = 1` is a double-build acceptance and is skipped by DEGREE in single with
+   the absolute ceiling still asserted, and every other repair relaxed a
+   precondition rather than a tolerance. On `4929772e95` the single suite reads
+   60 of 66 ([M-242](MEASUREMENTS.md#m-242)).
 2. **WHETHER 1.5e-04 ON `psi_ax` IS ACCEPTABLE PHYSICS**, which is a question
    for the person reading the equilibrium and not for this file. §7.5 measures
    it as a per-case number spanning 560×, so the answer cannot be a single

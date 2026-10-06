@@ -228,6 +228,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/PointLocator.cpp
 	src/meq/PointLocatorDevice.cpp
 	src/meq/Profiles.cpp
+	src/meq/RegularisedLeastSquares.cpp
 	src/meq/ResidentIterate.cpp
 	src/meq/ResidentIterateDevice.cpp
 	src/meq/RotatingSource.cpp
@@ -322,6 +323,12 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # doubles in and out. FREE-BOUNDARY-PLAN.md section 5.1 asks for exactly that,
 # so that FB-0's acceptance is a UNIT test CI can run rather than a convergence
 # study it cannot build.
+
+# src/meq/RegularisedLeastSquares.cpp is ABSENT from it too: the inverse solve's
+# dense corner, INVERSE-AND-RECONSTRUCTION-PLAN.md IV-2, is a least squares of
+# order tens -- plain doubles in, a step out, Eigen inside the .cpp as
+# SurfaceFit's is. It was measured against mfem::DenseMatrixSVD and taken
+# MFEM-free so that CI gates it; see its header for the rest of the reason.
 
 # src/meq/SurfaceFit.cpp is DELIBERATELY ABSENT from that list. IN-3's fit is a
 # linear least-squares problem against a point cloud -- plain doubles in,

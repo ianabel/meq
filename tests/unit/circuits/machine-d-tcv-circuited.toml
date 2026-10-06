@@ -1,0 +1,194 @@
+# machine-d-tcv, from tools/freegs4e-benchmark/D_tcv_conventional.npz by circuits.py.
+# Generated: edit the script, not this.
+
+[[coils]]
+Name = "E1"
+CentreR = 0.505
+CentreZ = -0.69999999999999996
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 19435.842312001623
+
+[[coils]]
+Name = "E2"
+CentreR = 0.505
+CentreZ = -0.5
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -2615.3888475983404
+
+[[coils]]
+Name = "E3"
+CentreR = 0.505
+CentreZ = -0.29999999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -21687.567363352457
+
+[[coils]]
+Name = "E4"
+CentreR = 0.505
+CentreZ = -0.10000000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -24783.643845647573
+
+[[coils]]
+Name = "E5"
+CentreR = 0.505
+CentreZ = 0.10000000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -24765.693400627933
+
+[[coils]]
+Name = "E6"
+CentreR = 0.505
+CentreZ = 0.29999999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -20229.463011353742
+
+[[coils]]
+Name = "E7"
+CentreR = 0.505
+CentreZ = 0.5
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -1830.2153218588792
+
+[[coils]]
+Name = "E8"
+CentreR = 0.505
+CentreZ = 0.69999999999999996
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = 17289.800991524011
+
+[[coils]]
+Name = "F1"
+CentreR = 1.3095000000000001
+CentreZ = -0.77000000000000002
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -3940.8890179996379
+
+[[coils]]
+Name = "F2"
+CentreR = 1.3095000000000001
+CentreZ = -0.60999999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -10299.853584593162
+
+[[coils]]
+Name = "F3"
+CentreR = 1.3095000000000001
+CentreZ = -0.31
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -16440.53448789008
+
+[[coils]]
+Name = "F4"
+CentreR = 1.3095000000000001
+CentreZ = -0.14999999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -12448.210560237058
+
+[[coils]]
+Name = "F5"
+CentreR = 1.3095000000000001
+CentreZ = 0.14999999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -13097.419422398321
+
+[[coils]]
+Name = "F6"
+CentreR = 1.3095000000000001
+CentreZ = 0.31
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -17769.727659585886
+
+[[coils]]
+Name = "F7"
+CentreR = 1.3095000000000001
+CentreZ = 0.60999999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -13215.856713516638
+
+[[coils]]
+Name = "F8"
+CentreR = 1.3095000000000001
+CentreZ = 0.77000000000000002
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -7263.1226237108931
+
+[[coils]]
+Name = "T1"
+CentreR = 1.554
+CentreZ = -0.78000000000000003
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -4802.2583931949921
+
+[[coils]]
+Name = "T2"
+CentreR = 1.7170000000000001
+CentreZ = -0.78000000000000003
+HalfWidth = 0.016649999999999967
+HalfHeight = 0.050000000000000003
+Current = -4778.448048745282
+
+[[coils]]
+Name = "T3"
+CentreR = 1.754
+CentreZ = -0.78000000000000003
+HalfWidth = 0.016649999999999967
+HalfHeight = 0.050000000000000003
+Current = -4759.2355654553976
+
+[[coils]]
+Name = "OH.OH1"
+CentreR = 0.42999999999999999
+CentreZ = 0
+HalfWidth = 0.02
+HalfHeight = 0.93000000000000005
+
+[[coils]]
+Name = "OH.C1"
+CentreR = 0.62150000000000005
+CentreZ = -1.1100000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "OH.C2"
+CentreR = 0.62150000000000005
+CentreZ = 1.1100000000000001
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "OH.D1"
+CentreR = 1.1765000000000001
+CentreZ = -1.1699999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[coils]]
+Name = "OH.D2"
+CentreR = 1.1765000000000001
+CentreZ = 1.1699999999999999
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+
+[[circuits]]
+Name = "OH"
+Current = 22048.909853567369
+Coils = [ { Name = "OH.OH1", Multiplier = 1 }, { Name = "OH.C1", Multiplier = 1 }, { Name = "OH.C2", Multiplier = 1 }, { Name = "OH.D1", Multiplier = 1 }, { Name = "OH.D2", Multiplier = 1 } ]

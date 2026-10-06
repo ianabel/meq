@@ -42,7 +42,10 @@ exit-2 configurations, so §0.1's row that would have made this whole route moot
 does not hold and the elimination is not the defect.
 
 **H1 AND H3 SPLIT THE SIX, WHICH IS WHY THE GATE POINTS TWO WAYS AT ONCE.**
-Three cases are **X-point excursions** — TCV's null travels 1.6 m in `z` from
+**One of these three was the input** — TCV's filament arm carried its solenoid
+at 220 times its current, and corrected it is a chronic plateau with the X-point
+within 8 cm of its seed ([M-246](MEASUREMENTS.md#m-246)); two excursions, E and
+E shaped, remain. As M-117 recorded it: three cases are **X-point excursions** — TCV's null travels 1.6 m in `z` from
 its seed and E's flips sign in one step — which is H3 and makes **BS-5 the
 plan** for them, exactly as §7's gate says. The other three are step failures
 with a finite direction, which is H1.
@@ -56,6 +59,24 @@ one benchmark**, so there is no single `gamma` that can be right for both — an
 that unifies M-113's inversion, M-114's local optimum and `BorderMeritWeight`'s
 one-sided saturation, all three of which were taken on **one** machine at one
 end of that range.
+
+**AND BS-1 IS BUILT, MEASURED AND REVERTED** →
+**[M-245](MEASUREMENTS.md#m-245)**. The per-border scales disagree as §2 said
+they would — on DIII-D the current is overpriced tenfold and the exterior modes
+underpriced up to twelvefold — so falsifier 4 does not fire, and the single-
+border regression held to the bit. **But falsifiers 5 and 6 both do**: on the
+fourteen cold configurations it closes none of the six, loses MAST's correct
+solve, turns MAST shaped's failure into a wrong answer reported as converged,
+and moves TCV shaped to a neighbouring equilibrium at a hundred times the work.
+A control computing the same scales with the merit left on the shared `gamma`
+reproduces the baseline to every digit, so the ruler alone did it. **The merit
+is a branch control on these problems, not a yardstick**: §5's question has
+the answer *yes*, and BS-3 is the check that said so. BS-4 is subsumed —
+[M-244](MEASUREMENTS.md#m-244)'s MEQ table is the re-take, and M-245 is the arm
+against it. **BS-2 changes the same ruler and inherits the same hazard**; it
+should not be built on the expectation that a better-founded X-point scale is a
+neutral one. BS-5, the stage M-117 selected, is a different kind of control — a
+rejection of a trial that moves the X-point, not a reweighting — and stands.
 
 **WHAT HAS SINCE MOVED THE CASES IS NOT A RULER.** `setBorderRegularisation()`
 removes the singular-Jacobian throw (**[M-123](MEASUREMENTS.md#m-123)**) and an
@@ -701,7 +722,12 @@ contract on the solver's own reporting and needs one small bordered fixture.
 **Gate.** H2 dominant → stop, open the elimination. H3 dominant → the X-point
 relocation is the defect and BS-5 becomes the plan. H1 → continue.
 
-### BS-1 — Per-border `gamma_i` for the four kinds where it is defined
+### BS-1 — Per-border `gamma_i` for the four kinds where it is defined — **BUILT, MOVES ANSWERS, REVERTED: M-245**
+
+**Acceptance 3 below could not have distinguished the two rules**: with the
+starting `L` unchanged, `G_L` moves under both, and with `L` started at a tenth,
+`F` is unchanged and nothing moves under either. M-245 reports the scales
+directly instead.
 
 **Do.** Replace the scalar `gamma` with a `std::vector<double>` sized to the
 border, filled at iteration 0 from `‖c_i‖/|D_ii|` using the columns the loop
@@ -774,7 +800,7 @@ multi-border and their iteration counts will move (§3.4). Re-take them under th
 same anchors' successors; **do not edit the existing anchors**, per the standing
 rule.
 
-### BS-4 — Re-take M-103
+### BS-4 — Re-take M-103 — **SUBSUMED: M-244 is the re-take, M-245 the BS-1 arm against it**
 
 **Do.** All seven machines, both conductor models, shipped configurations,
 `OMP = MKL = 16`, both arms — the control M-96 insists on.
@@ -784,7 +810,25 @@ summary from BS-0's printer, refusing `absent` as well as `bad` per M-103's own
 harness note. **The number that decides the route is how many of the six exit-2
 configurations close with a located O-point.**
 
-### BS-5 — The X-point relocation, conditional on BS-0 finding H3 — **SELECTED: M-117 finds H3 on three of six**
+### BS-5 — The X-point relocation, conditional on BS-0 finding H3 — **LANDED ON THE RETRY RUNG, M-248**
+
+**Landed as the driver's bordered retry rung and nowhere else**, at `0.05 ×
+[boundary.exterior] Radius`, with the rung's starting edge made independent of
+the failed attempt and a converged run with no axis counted as a failure. It
+closes A, A shaped, E and E shaped and moves nothing. The paragraph below is the
+prototype's record.
+
+**Reactive, anchored at the seed, at 0.03–0.10 of `[boundary.exterior] Radius`,
+it closes E and E shaped and moves nothing; from the first solve it is a branch
+control** that meets this stage's acceptance on machine A and loses MAST and
+MAST-U. One of M-117's three excursions, TCV, was the input (M-246), so two of
+six is all an X-point cap could reach. Landing it needs three things first: the
+retry rung's state made independent of the failed rung's (M-247 finds it is
+not), a decision on whether "converged with no located axis" counts as an
+observed failure — machine A's case, which the retry rung never sees — and E
+pinned in `XPointBorder.cpp`. The prototype is a library setter
+`setXPointRelocationCap( length, anchor )`, default off and byte-identical,
+reached for the experiment through `MEQ_XPOINT_CAP`.
 
 **Do.** Only if BS-0 says the X-point jumps. `refreshXPoint()` already rejects a
 trial that carries the point out of the mesh; the change is to reject one that
@@ -798,7 +842,7 @@ O-point at all.
 
 **File.** `tests/convergence/XPointBorder.cpp`.
 
-### BS-6 — The two side findings, scheduled separately
+### BS-6 — The two side findings, scheduled separately — **(a) ANSWERED, M-247: the refusal already asks the plasma component, and G shaped's refusal is right**
 
 **Do.** (a) Check whether `checkAxisSource()` should consult
 `plasmaComponentMask` before refusing: one call to `plasmaComponentHolds()` on

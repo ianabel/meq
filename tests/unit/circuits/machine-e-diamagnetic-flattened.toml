@@ -1,0 +1,34 @@
+# machine-e-diamagnetic, from tools/freegs4e-benchmark/E_testtokamak_diamagnetic.npz by circuits.py.
+# Generated: edit the script, not this.
+
+[[coils]]
+Name = "P1L"
+CentreR = 1
+CentreZ = -1.1000000000000001
+HalfWidth = 0.050000000000000044
+HalfHeight = 0.049999999999999933
+Current = 162828.55701141784
+
+[[coils]]
+Name = "P1U"
+CentreR = 1
+CentreZ = 1.1000000000000001
+HalfWidth = 0.050000000000000044
+HalfHeight = 0.049999999999999933
+Current = 162828.56321776254
+
+[[coils]]
+Name = "P2L"
+CentreR = 1.75
+CentreZ = -0.59999999999999998
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -107056.62397933686
+
+[[coils]]
+Name = "P2U"
+CentreR = 1.75
+CentreZ = 0.59999999999999998
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -107056.62688630758

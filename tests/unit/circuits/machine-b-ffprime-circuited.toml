@@ -1,0 +1,34 @@
+# machine-b-ffprime, from tools/freegs4e-benchmark/B_testtokamak_peaked_ffdom.npz by circuits.py.
+# Generated: edit the script, not this.
+
+[[coils]]
+Name = "P1L"
+CentreR = 1
+CentreZ = -1.1000000000000001
+HalfWidth = 0.050000000000000044
+HalfHeight = 0.049999999999999933
+Current = 189698.17700179416
+
+[[coils]]
+Name = "P1U"
+CentreR = 1
+CentreZ = 1.1000000000000001
+HalfWidth = 0.050000000000000044
+HalfHeight = 0.049999999999999933
+Current = 85309.243161583494
+
+[[coils]]
+Name = "P2L"
+CentreR = 1.75
+CentreZ = -0.59999999999999998
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -120903.88200302217
+
+[[coils]]
+Name = "P2U"
+CentreR = 1.75
+CentreZ = 0.59999999999999998
+HalfWidth = 0.050000000000000003
+HalfHeight = 0.050000000000000003
+Current = -74226.775548864796

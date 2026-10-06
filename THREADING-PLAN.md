@@ -835,11 +835,15 @@ leg MEQ owns.
 
 # ADDENDUM: taking a threaded `Reconstruct()`
 
-**THIS PLAN IS CLOSED AND THIS ADDENDUM IS NOT A NEW ITEM IN IT.** It exists
-because [M-138](MEASUREMENTS.md#m-138) makes `DarcyForm::Reconstruct()` the
-largest single-threaded item in a MEQ run — **0.632 s, 18.5%, 1.00 cores** — and
-upstream is working on it. What follows is what MEQ owes *before* that lands,
-which is an audit rather than code.
+**THIS PLAN IS CLOSED AND THIS ADDENDUM IS NOT A NEW ITEM IN IT, AND ALL FOUR
+OF ITS ITEMS ARE DISCHARGED.** It exists because
+[M-138](MEASUREMENTS.md#m-138) made `DarcyForm::Reconstruct()` the largest
+single-threaded item in a MEQ run — **0.632 s, 18.5%, 1.00 cores**. Upstream
+has threaded `ReconstructFluxAndPot()` and `ReconstructTotalFlux()`, MEQ links
+it, and the leg reads **0.141 s at 6.31 cores, `1.177×` on the whole run**
+against the `1.19×` predicted below → [M-172](MEASUREMENTS.md#m-172). What
+follows is the audit MEQ took before it landed, and it stays because the
+contract it describes binds every future loop.
 
 **THE PRIZE.** At the residual leg's observed 6.5 cores of 8,
 `1/(1 − 0.185×(1 − 1/6.5)) = 1.19×` on the whole run, and MEQ writes none of it.
@@ -850,9 +854,10 @@ That is larger than everything this plan built put together.
 **MEQ CALLS `SetIntegratorsThreadSafe()`** — `buildForms()`, beside
 `SetAssemblyMode()` — and that is a **promise, not a setting**. The library
 refuses a threaded element loop that would evaluate an integrator *unless* the
-caller has promised; MEQ has promised. **So the day upstream threads
-`ReconstructFluxAndPot()`, MEQ's build takes the new loop silently, with no
-abort and without being asked.** The audit behind that promise was taken against
+caller has promised; MEQ has promised. **So when upstream threaded
+`ReconstructFluxAndPot()`, MEQ's build took the new loop silently, with no
+abort and without being asked** — which is why the audit below had to come
+first. The audit behind that promise was taken against
 the loops that existed when it was made, and the reconstruction loop is not one
 of them.
 
@@ -883,9 +888,9 @@ and **a clean MFEM rebuild is owed here**, because the class layout moves in a
 `MFEM_THREAD_SAFE` build even though it does not in a build without it.
 
 **ONE CORRECTION TO THE REPORT MEQ SENT, AND IT IS THE TENSE.** It said the
-class is reached by "the loop you are threading". **There is no such loop yet**:
-`darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly, and
-both reconstruction entry points are serial today. MEQ inferred "they are
+class is reached by "the loop you are threading". **There was no such loop when
+it was written**: `darcyform.cpp`'s three `#pragma omp parallel` regions were
+all assembly, and both reconstruction entry points were serial. MEQ inferred "they are
 threading it" from being told the work was in progress and wrote the inference
 as an observation. So the audit above is a **latent** hazard closed before it
 could go live, not a race running now — and upstream's own reply says that is
@@ -919,11 +924,16 @@ a thing to rely on.
    classes already behind that switch, and outside the directory the work is in,
    which is exactly how it got missed. **Sending it mid-work rather than after
    is what this item was for**, and it cost one file.
-2. **Re-take the promise audit against the new loop when it lands.** The comment
-   in `buildForms()` enumerates what the promise covers; the reconstruction's
-   seven handles above are not in it, and the comment has to grow them or the
-   promise is being made for loops nobody read.
-3. **Assert before measuring.** `ψ*` is pinned in several places —
+2. ~~**Re-take the promise audit against the new loop when it lands.**~~
+   **DONE.** The comment at `SetIntegratorsThreadSafe()` in `buildForms()` names
+   the reconstruction's handles, and every one MEQ installs is behind
+   `#ifndef MFEM_THREAD_SAFE` in the installed headers —
+   `NormalTraceJumpIntegrator` (`fem/bilininteg.hpp`) and
+   `HDGDiffusionIntegrator` (`fem/darcy/bilininteg_hdg.hpp`) included.
+3. **Assert before measuring — DONE, and it holds.** `machine-f-diiid` at
+   `MKL_NUM_THREADS=1` writes a byte-identical `_psistar.gf`, `_psi.gf` and
+   `_grad_psi.gf` at `OMP_NUM_THREADS` 1 and 8, and its `.nc` differs only in
+   the file names it records. What it checks: `ψ*` is pinned in several places —
    `thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes`,
    `theDriverRunsTheAdaptiveLoop` at 4.4e-14, `DriverAcceptance` at 1.189e-16 —
    and the cross-cutting rule applies unchanged: **`OMP_NUM_THREADS` must not
@@ -931,7 +941,8 @@ a thing to rely on.
    reassociates would move `ψ*` and turn those into flaky tests. That is a
    finding to bring back for an argument, not something to absorb with a
    tolerance.
-4. **Then measure it, with the harness that already exists.** The payoff pair in
+4. **Then measure it — DONE**, `1.177×` → [M-172](MEASUREMENTS.md#m-172),
+   with the harness that already existed. The payoff pair in
    [M-137](MEASUREMENTS.md#m-137) is the template: two binaries against one
    library where only the library changes, interleaved `before, after`, six
    pairs, `OMP = MKL = 8` under `OMP_WAIT_POLICY=passive`, on a machine the

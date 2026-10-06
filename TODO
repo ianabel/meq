@@ -342,9 +342,11 @@ derivation.
   ONE THING IT LEFT OPEN. No published rotating benchmark exercises the C'(psi)
   term -- Li & Zhu's Solov'ev case holds T and Omega constant and Maschke-Perrin's
   (4.7) FORCES C constant -- and that is precisely the term Li & Zhu got the sign
-  of wrong. Only RotatingSourceTests' dFdPsi sweep touches it. Putting
-  Maschke-Perrin into tests/analytic/ is the cheap follow-up and is not done; see
-  CLAUDE_FLOW.md, which verified it by substitution to 8e-26.
+  of wrong. Both halves are now covered: tests/analytic/MaschkePerrin.hpp with
+  MaschkePerrinConvergence.cpp is the second exact rotating benchmark, and
+  tests/analytic/VaryingCentrifugal.hpp with its convergence test is a
+  manufactured case whose C'(psi) is nonzero, which no published one has. See
+  CLAUDE_FLOW.md.
 
   Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
@@ -423,6 +425,7 @@ Part (a) closed the same day.
   revisited for the other. That rule still holds for (b): a prescribed-field
   run has no g and its file correctly says so by having no variable.
 
+================================================================================
 Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
@@ -447,9 +450,9 @@ Raised 2026-08-25.
                              right one: Plasma Physics 22 (1980) 579, as
                              MaschkePerrin.pdf. Its section 4 IS a benchmark for
                              the rotation work, verified by substitution to
-                             8e-26, and is NOT yet in tests/analytic/; its
-                             section 3, the actual polytrope, is not a benchmark
-                             for it at all. See CLAUDE_FLOW.md, Toroidal flow
+                             8e-26, and is tests/analytic/MaschkePerrin.hpp;
+                             its section 3, the actual polytrope, is not a
+                             benchmark for it at all. See CLAUDE_FLOW.md, Toroidal flow
     Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
     Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
                              discharges with anisotropic pressure, PPCF 43, 1441
@@ -524,11 +527,12 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   BOTH NOW HAVE MACHINERY BEHIND THEM, WHICH IS WHAT INVERSION-PLAN.md WAS FOR.
   IN-2 builds the flux-surface averages as ONE primitive over a callable
   integrand, so dGeometry_dpsi is differentiated once rather than per slot, and
-  IN-3's fit supplies the surface derivative. What is still missing on MEQ's side
-  is IN-6's per-psi cache -- INVERSION-PLAN.md section 11.1 argues it is a
-  REQUIREMENT of the pointwise call pattern rather than an optimisation, and its
-  invalidation contract is MANTA-COUPLING.md section 8 -- and IN-P, the cost
-  measurement, which is under way. Do not design the coupling against the
+  IN-3's fit supplies the surface derivative, and IN-6's per-psi cache is built
+  as meq::GeometryCache (FluxFamily.hpp) -- INVERSION-PLAN.md section 11.1 argues
+  it is a REQUIREMENT of the pointwise call pattern rather than an optimisation,
+  and its invalidation contract is MANTA-COUPLING.md section 8. INVERSION-PLAN.md
+  is closed, IN-P included. What is still owed on MEQ's side is the closed-form
+  shape derivative its section 11.4 names as the largest lever. Do not design the coupling against the
   illustrative geometry slot list: MANTA-COUPLING.md says itself that the list
   "is negotiated with the transport physics case, not fixed by MaNTA", and its
   tokamak set is known to be under revision.
@@ -771,13 +775,14 @@ accuracy and not for patience.
      which is what M-126 and M-128 are, and which is what THREADING-PLAN.md was
      sized against. Neither perf nor MFEM_USE_CALIPER was needed.
 
-  3. DONE UPSTREAM, AND NOT YET IN THE LIBRARY MEQ LINKS.
-     HDG-ELEMENT-LOCAL-PARALLELISM.md now records every element-local loop in
+  3. DONE UPSTREAM, AND IN THE LIBRARY MEQ LINKS.
+     HDG-ELEMENT-LOCAL-PARALLELISM.md records every element-local loop in
      DarcyHybridization as threaded -- ComputeH, InvertA, InvertD, MultNL,
      ComputeSolution, EliminateVDofsInRHS, EliminateTrueDofsInRHS, ReduceRHS,
      and the two MEQ asked for, NPCReduce and NPCRecover, at 4.35x on eight
-     threads bit for bit. GetNPCTraversalTime is in ../mfem-hdg-dev and NOT in
-     ../mfem/install, so it costs a meq-integration rebuild to reach MEQ.
+     threads bit for bit. GetNPCTraversalTime is in the installed header, and
+     MEQ measured the traversal at 2.61x on the leg and 1.25x on the whole run,
+     MEASUREMENTS.md M-135.
 
      TWO CORRECTIONS THIS ENTRY CARRIED AND SHOULD NOT. InvertA and InvertD are
      NOT OpenMP loops; the threaded route beside them is the BATCHED one, which
@@ -1295,13 +1300,14 @@ need something these cases structurally cannot give.
   Ian's pathway is "run with coarse mesh and filaments, use that to get so
   close that we only need one or two big newton iterations using meshed
   coils", so the split only has to WIN on filaments -- and a [[coils]] block
-  is currently ONE filament at the rectangle's centre.  MAST-U's solenoid is
+  is ONE filament at the rectangle's centre by default.  MAST-U's solenoid is
   12 mm by 3.18 m and sits beside the plasma, so that collapse is not a
   machine whose equilibrium is near MAST-U's: the filament arm reaches a
   relative residual of 7.0e-04 in 200 Newton steps and does not converge,
-  where the meshed arm converges in 2.  Subdividing a block into an n_R x n_Z
-  stack carrying I/( n_R n_Z ) each is the fix, it costs 2.38 us per 23
-  conductors, and the open question is how many and chosen how.
+  where the meshed arm converges in 2.  [conductors] FilamentSize is the
+  subdivision -- a target cell LENGTH, converging to the rectangle at order
+  2.000, MEASUREMENTS.md M-166 -- and the default stays one per block.  What
+  is open is a shipped MAST-U filament case, which wants MAST-U's cold start:
   COIL-SUBTRACTION-PLAN.md section 13.5.
 
   THE OLD TEXT OF THIS BULLET FOLLOWS, BECAUSE THE FIXED-BOUNDARY FIXTURE IS
@@ -1351,7 +1357,7 @@ Raised 2026-10-02.  ANSWERED THE SAME DAY as a diagnosis; what is left is cost.
 
   WHAT IS LEFT IS THE ONE ACTIONABLE ITEM, AND THE TREE HAD ALREADY DEFERRED IT
   PENDING EXACTLY THIS NUMBER.  `BorderStep::residualCollinearity`'s doxygen at
-  GradShafranov.hpp:4153 says "RECORDED AND NOT ACTED ON ... Measure before
+  GradShafranov.hpp:4176 says "RECORDED AND NOT ACTED ON ... Measure before
   remedying".  The measurement is now in: on that row it reads **1.0000e+00 for
   142 consecutive steps**, every one with `armijo = 0`, `trials = 12` and
   `damping = 2^-11`.  That is about 1,700 residual evaluations and 142 Jacobian
