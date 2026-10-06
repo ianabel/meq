@@ -6216,8 +6216,31 @@ namespace
 				"meq::GradShafranovSolver::addIsofluxTarget: the two points "
 				"coincide, so the row is identically zero and constrains "
 				"nothing" );
-		isofluxTargetList.push_back( IsofluxTarget{ r1, z1, r2, z2 } );
-		isofluxResidualValues.clear();
+		inverseTargetList.push_back(
+			InverseTarget{ TargetKind::Isoflux, r1, z1, r2, z2 } );
+		targetResidualValues.clear();
+	}
+
+	void GradShafranovSolver::addXPointTarget( double radius, double z )
+	{
+		if ( !std::isfinite( radius ) || !std::isfinite( z ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::addXPointTarget: the point must be "
+				"finite" );
+		inverseTargetList.push_back(
+			InverseTarget{ TargetKind::XPoint, radius, z, 0.0, 0.0 } );
+		targetResidualValues.clear();
+	}
+
+	void GradShafranovSolver::addCriticalPointTarget( double radius, double z )
+	{
+		if ( !std::isfinite( radius ) || !std::isfinite( z ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::addCriticalPointTarget: the point "
+				"must be finite" );
+		inverseTargetList.push_back(
+			InverseTarget{ TargetKind::CriticalPoint, radius, z, 0.0, 0.0 } );
+		targetResidualValues.clear();
 	}
 
 	void GradShafranovSolver::clearInverse()
@@ -6226,8 +6249,8 @@ namespace
 		freeCircuitList.clear();
 		freeCircuitCurrentValues.clear();
 		freeCircuitRegularisation.clear();
-		isofluxTargetList.clear();
-		isofluxResidualValues.clear();
+		inverseTargetList.clear();
+		targetResidualValues.clear();
 		inverseRankValue = 0;
 		inverseNullityValue = 0;
 		inverseSingularValueList.clear();
@@ -6243,9 +6266,9 @@ namespace
 		return freeCircuitCurrentValues;
 	}
 
-	std::vector< double > GradShafranovSolver::isofluxResiduals() const
+	std::vector< double > GradShafranovSolver::targetResiduals() const
 	{
-		return isofluxResidualValues;
+		return targetResidualValues;
 	}
 
 	int GradShafranovSolver::inverseRank() const
@@ -8564,27 +8587,31 @@ namespace
 		int const nModes = exteriorCoupling ? exteriorCoupling->modeCount() : 0;
 
 		/*
-		 * IV-3: FREE COIL CURRENTS AND ISOFLUX TARGETS. INVERSE-AND-
-		 * RECONSTRUCTION-PLAN.md section 4.
+		 * IV-3 AND IV-4: FREE COIL CURRENTS AND THE TARGETS THAT DETERMINE
+		 * THEM. INVERSE-AND-RECONSTRUCTION-PLAN.md sections 4 and 5.
 		 *
 		 * A current is one more border unknown with a CONSTANT column and a zero
-		 * corner against every row; a target is one more row with no column of
-		 * its own. Nothing else about the elimination changes, and the corner
-		 * becomes ( nBorderTotal + nTargets ) x ( nBorderTotal + nFree ).
+		 * corner against every row; a target row has no column of its own. An
+		 * isoflux pair is one row; a point target -- an X-point or a critical
+		 * point -- is two. Nothing else about the elimination changes, and the
+		 * corner becomes ( nBorderTotal + nTargets ) x ( nBorderTotal + nFree ),
+		 * nTargets counting ROWS.
 		 *
 		 * The refusals are here and not in the setters because each is about
 		 * the PAIRING of the inverse with something set separately, and only
 		 * solve() sees the whole configuration.
 		 */
 		int const nFree = static_cast< int >( freeCircuitList.size() );
-		int const nTargets = static_cast< int >( isofluxTargetList.size() );
+		int nTargets = 0;
+		for ( InverseTarget const &target : inverseTargetList )
+			nTargets += target.kind == TargetKind::Isoflux ? 1 : 2;
 		bool const inverse = nFree > 0 || nTargets > 0;
 		if ( inverse )
 		{
 			char const *const where = "meq::GradShafranovSolver::solve: ";
 			if ( nFree == 0 )
 				throw std::logic_error( std::string( where )
-					+ "an isoflux target needs a free coil current to move; with "
+					+ "a target needs a free coil current to move; with "
 					  "none, the targets are rows nothing can satisfy but the "
 					  "equilibrium's own constraints. setFreeCurrents() first" );
 			if ( nTargets == 0 )
@@ -8592,6 +8619,13 @@ namespace
 					+ "free coil currents need targets to determine them; with "
 					  "none, every current is a null direction of the step. "
 					  "addIsofluxTarget() first" );
+			for ( InverseTarget const &target : inverseTargetList )
+				if ( target.kind == TargetKind::XPoint && !xPointIsUnknown )
+					throw std::logic_error( std::string( where )
+						+ "addXPointTarget() pins the X-point THIS SOLVE TRACKS, "
+						  "and there is none without setXPointBoundary(). "
+						  "addCriticalPointTarget() asks for a critical point at a "
+						  "place without tracking one" );
 			if ( !normalisedSource
 			     || normalisedSource->conductors() != freeCoilSet.get() )
 				throw std::logic_error( std::string( where )
@@ -11284,54 +11318,167 @@ namespace
 		}
 
 		/*
-		 * THE TARGET POINTS, LOCATED ONCE. They are prescribed and do not move,
-		 * so each is the containing element's potential shape functions at the
-		 * point for the whole solve -- the ExactPoint limiter's arrangement.
+		 * THE TARGET ROWS, LOCATED ONCE. Every target point is prescribed and
+		 * does not move, so each row is the containing element's shape
+		 * functions at the point for the whole solve -- the ExactPoint
+		 * limiter's arrangement -- held as indices into the UNKNOWN.
+		 *
+		 *   Isoflux        psi_h( P1 ) - psi_h( P2 ). Potential shape
+		 *                  functions, two elements, weight 1: a flux like
+		 *                  every other border row.
+		 *   CriticalPoint  q_r( P ), q_z( P ). Flux shape functions on one
+		 *                  element, NEGATED because DarcyForm's flux block
+		 *                  holds -q -- XP-3's rows' own sign. Weight R h at P,
+		 *                  which is xScale's conversion of q into a change of
+		 *                  psi across one element.
+		 *   XPoint         ( H ( x_X - x_target ) )_c with H = grad q_h at the
+		 *                  tracked X-point: NO field part, and a corner of H on
+		 *                  XP-3's two columns. Weight xScale, being XP-3's own
+		 *                  quantity. H is the iterate's, read where refreshXPoint()
+		 *                  left it, so the row is frozen within a Jacobian as
+		 *                  XP-3's are; dropping dH/dx ( x_X - x_target ) is the
+		 *                  Gauss-Newton term, zero at the answer.
 		 */
-		struct LocatedTarget
+		struct TargetRow
 		{
+			TargetKind kind = TargetKind::Isoflux;
+			int component = 0;
+			double radius = 0.0;
+			double z = 0.0;
+			double weight = 1.0;
 			mfem::Vector shape1, shape2;
 			mfem::Array< int > dofs1, dofs2;
 		};
-		std::vector< LocatedTarget > targetPoints(
-			static_cast< std::size_t >( nTargets ) );
-		for ( int m = 0; m < nTargets; ++m )
+		std::vector< TargetRow > targetRows;
+		for ( InverseTarget const &target : inverseTargetList )
 		{
-			std::size_t const at = static_cast< std::size_t >( m );
-			IsofluxTarget const &target = isofluxTargetList[ at ];
-			int element = -1;
-			locatePotentialPoint( target.r1, target.z1, element,
-			                      targetPoints[ at ].shape1,
-			                      targetPoints[ at ].dofs1 );
-			locatePotentialPoint( target.r2, target.z2, element,
-			                      targetPoints[ at ].shape2,
-			                      targetPoints[ at ].dofs2 );
+			if ( target.kind == TargetKind::Isoflux )
+			{
+				TargetRow row;
+				int element = -1;
+				locatePotentialPoint( target.r1, target.z1, element,
+				                      row.shape1, row.dofs1 );
+				locatePotentialPoint( target.r2, target.z2, element,
+				                      row.shape2, row.dofs2 );
+				for ( int i = 0; i < row.dofs1.Size(); ++i )
+					row.dofs1[ i ] += blockOffsets[ 1 ];
+				for ( int i = 0; i < row.dofs2.Size(); ++i )
+					row.dofs2[ i ] += blockOffsets[ 1 ];
+				targetRows.push_back( row );
+				continue;
+			}
+
+			TargetRow row;
+			row.kind = target.kind;
+			row.radius = target.r1;
+			row.z = target.z1;
+			if ( target.kind == TargetKind::CriticalPoint )
+			{
+				int element = -1;
+				mfem::IntegrationPoint reference;
+				if ( !locateFieldPoint( target.r1, target.z1, -1, element,
+				                        reference ) )
+					throw std::runtime_error(
+						"meq::GradShafranovSolver::solve: the critical-point "
+						"target ( " + std::to_string( target.r1 ) + ", "
+						+ std::to_string( target.z1 ) + " ) is outside the "
+						"mesh" );
+				mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+				row.shape1.SetSize( fluxFe->GetDof() );
+				fluxFe->CalcShape( reference, row.shape1 );
+				row.weight = std::abs( target.r1 )
+				             *potentialFes->GetMesh()->GetElementSize( element );
+				if ( !( row.weight > 0.0 ) || !std::isfinite( row.weight ) )
+					row.weight = 1.0;
+				mfem::Array< int > dofs;
+				fluxFes->GetElementDofs( element, dofs );
+				for ( int c = 0; c < 2; ++c )
+				{
+					row.component = c;
+					row.dofs1 = dofs;
+					fluxFes->DofsToVDofs( c, row.dofs1 );
+					targetRows.push_back( row );
+				}
+				continue;
+			}
+			for ( int c = 0; c < 2; ++c )
+			{
+				row.component = c;
+				targetRows.push_back( row );
+			}
 		}
 
-		/// `psi_h( P1 ) - psi_h( P2 )` of target `m` contracted against `v`:
-		/// the target's value on a state, and its border row on a direction.
+		/// Target row `m`'s field covector contracted against `v`: its value on
+		/// a state, and its border row on a direction. Zero for an X-point
+		/// target, which reads the border unknowns and not the field.
 		auto targetDot = [ & ]( int m, mfem::Vector const &v ) -> double
 		{
+			TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
+			if ( t.kind == TargetKind::XPoint )
+				return 0.0;
 			countedHostRead( v, __LINE__ );
-			LocatedTarget const &t = targetPoints[ static_cast< std::size_t >( m ) ];
-			int const base = blockOffsets[ 1 ];
 			double total = 0.0;
 			for ( int i = 0; i < t.dofs1.Size() && i < t.shape1.Size(); ++i )
-				total += t.shape1( i )*v( base + t.dofs1[ i ] );
+				total += t.shape1( i )*v( t.dofs1[ i ] );
 			for ( int i = 0; i < t.dofs2.Size() && i < t.shape2.Size(); ++i )
-				total -= t.shape2( i )*v( base + t.dofs2[ i ] );
-			return total;
+				total -= t.shape2( i )*v( t.dofs2[ i ] );
+			return t.kind == TargetKind::CriticalPoint ? -total : total;
 		};
 
-		/// Every target's value on a state.
+		/// The corner of target row `m` against border unknown `j`: XP-3's
+		/// columns for an X-point target, zero for everything else.
+		auto targetCorner = [ & ]( int m, int j ) -> double
+		{
+			TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
+			if ( t.kind != TargetKind::XPoint || !isXPointRow( j ) )
+				return 0.0;
+			return xFluxJacobian[ t.component ][ j - xPointIndex ];
+		};
+
+		/// The weight that puts target row `m` in psi's units; see above.
+		auto targetWeight = [ & ]( int m ) -> double
+		{
+			TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
+			return t.kind == TargetKind::XPoint ? xScale : t.weight;
+		};
+
+		/// Every target row's constraint on a state. `fieldsLive` false is the
+		/// cold state, where q_h and H vanish identically and an X-point row
+		/// with them -- the reason XP-3's rows are absent from the cold
+		/// reference too.
 		std::vector< double > targetValues( static_cast< std::size_t >( nTargets ),
 		                                    0.0 );
 		auto targetsAll = [ & ]( mfem::Vector const &state,
-		                         std::vector< double > &out )
+		                         std::vector< double > &out,
+		                         bool fieldsLive = true )
 		{
 			out.assign( static_cast< std::size_t >( nTargets ), 0.0 );
 			for ( int m = 0; m < nTargets; ++m )
-				out[ static_cast< std::size_t >( m ) ] = targetDot( m, state );
+			{
+				TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
+				double value = 0.0;
+				if ( t.kind != TargetKind::XPoint )
+					value = targetDot( m, state );
+				else if ( fieldsLive )
+					value = xFluxJacobian[ t.component ][ 0 ]*( xR - t.radius )
+					        + xFluxJacobian[ t.component ][ 1 ]*( xZ - t.z );
+				out[ static_cast< std::size_t >( m ) ] = value;
+			}
+		};
+
+		/// What targetResiduals() reports: the constraint, except an X-point
+		/// row, which is reported as the displacement in metres.
+		auto targetReport = [ & ]() -> std::vector< double >
+		{
+			std::vector< double > out = targetValues;
+			for ( int m = 0; m < nTargets; ++m )
+			{
+				TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
+				if ( t.kind == TargetKind::XPoint )
+					out[ static_cast< std::size_t >( m ) ] =
+						t.component == 0 ? xR - t.radius : xZ - t.z;
+			}
+			return out;
 		};
 
 		/// Scratch for the gathers below; see meq::CompressedRows. Hoisted out of
@@ -11516,8 +11663,12 @@ namespace
 			// boundary rows and take their weight for the same reason. READ
 			// FROM targetValues, which every caller refreshes on the state it
 			// is measuring -- the cold one included, where they are zero.
-			for ( double v : targetValues )
+			for ( int m = 0; m < static_cast< int >( targetValues.size() ); ++m )
+			{
+				double const v = targetWeight( m )
+				                 *targetValues[ static_cast< std::size_t >( m ) ];
 				total += gamma*gamma*v*v;
+			}
 			return std::sqrt( total );
 		};
 
@@ -11666,7 +11817,7 @@ namespace
 			// ZERO, since coldState zeroes the potential block, and computed
 			// rather than assumed so the merit's one reading of the targets
 			// is never stale.
-			targetsAll( coldState, targetValues );
+			targetsAll( coldState, targetValues, false );
 			// XP-3's two constraints are EXACTLY ZERO here and are not computed:
 			// coldState zeroes the flux and potential blocks outright, so q_h
 			// vanishes identically and q_h( x ) = 0 wherever x is. They are
@@ -13053,7 +13204,9 @@ namespace
 				for ( int i = 0; i < rows; ++i )
 				{
 					double const weight =
-						( i < nBorderTotal && isXPointRow( i ) ) ? xScale : 1.0;
+						i < nBorderTotal
+						? ( isXPointRow( i ) ? xScale : 1.0 )
+						: targetWeight( i - nBorderTotal );
 					double const value =
 						i < nBorderTotal
 						? constraintAt( i )
@@ -13062,8 +13215,11 @@ namespace
 						weight*( rowOf( i, y ) - value );
 					for ( int j = 0; j < columns; ++j )
 					{
-						double entry = ( i < nBorderTotal && j < nBorderTotal )
-						               ? cornerEntry( i, j ) : 0.0;
+						double entry = 0.0;
+						if ( j < nBorderTotal )
+							entry = i < nBorderTotal
+							        ? cornerEntry( i, j )
+							        : targetCorner( i - nBorderTotal, j );
 						entry -= rowOf( i, columnOf( j ) );
 						if ( j >= nBorderTotal )
 							entry *= coilScale[ static_cast<std::size_t>( j - nBorderTotal ) ];
@@ -13853,7 +14009,7 @@ namespace
 		}
 		normalisationResidualValue = constraint;
 		if ( inverse )
-			isofluxResidualValues = targetValues;
+			targetResidualValues = targetReport();
 		// Both, for the reason above: leaving the source at psi_bnd = 0 after the
 		// solve makes every later evaluation -- postProcess(), the estimator, the
 		// sampler -- read a different source from the one that was solved.
@@ -13873,10 +14029,10 @@ namespace
 	{
 		// IV-3's unknowns are border unknowns, and only the bordered path has a
 		// border. Refused before any dispatch, since two of them return early.
-		if ( ( !freeCircuitList.empty() || !isofluxTargetList.empty() )
+		if ( ( !freeCircuitList.empty() || !inverseTargetList.empty() )
 		     && !normalisedSource )
 			throw std::logic_error(
-				"meq::GradShafranovSolver::solve: free coil currents and isoflux "
+				"meq::GradShafranovSolver::solve: free coil currents and their "
 				"targets are border unknowns and rows of the bordered Newton, "
 				"which runs only with setSource( NormalisedSource &, double )" );
 

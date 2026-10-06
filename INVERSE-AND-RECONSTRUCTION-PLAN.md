@@ -25,7 +25,11 @@ anchor, a `file:line`, or a paper with its section and equation number. Where
 the design needs a number that does not exist, the experiment that would produce
 it is named and the gap is left open.
 
-## STATUS: IV-0 TO IV-3 ARE DONE; IV-4 IS NEXT
+## STATUS: IV-0 TO IV-4 ARE DONE; IV-5, THE DRIVER, IS NEXT
+
+**IV-4 → [M-251](MEASUREMENTS.md#m-251)**: both X-point rows put the tracked
+saddle on a target moved 2.1 cm, agree on the currents to 5.7e-11, and survive
+release. The control with one distant coil free does not converge.
 
 **IV-3 → [M-250](MEASUREMENTS.md#m-250)**: on DIII-D, four perturbed circuits
 come back to 1.4e-11 in two Newton steps, and all eighteen to 1.2e-07 through a
@@ -1197,7 +1201,26 @@ on a wrong answer.
 file**: the targets come from the answer, so it cannot detect a target the
 machine cannot reach. IV-6 is the test that can.
 
-### IV-4 — the X-point rows, both kinds
+### IV-4 — the X-point rows, both kinds — **DONE, M-251**
+
+`addXPointTarget()` is row four and `addCriticalPointTarget()` row three. Row
+four's constraint is `H ( x_X − x_target )`, with `H = grad q_h` at the
+tracked X-point, rather than the bare displacement. That is the `q` the field
+would carry at the target, in XP-3's units under XP-3's weight, with corner
+`H` on XP-3's columns and no field part; residuals are reported in metres.
+Row three is weighted `R h` at its point. Row four without
+`setXPointBoundary()` is refused. On DIII-D, a 2.1 cm move with F4B and F8B
+free:
+
+* both rows land the saddle on the target and agree on the currents to
+  5.7e-11;
+* the released forward solve reproduces it to 3.6e-12 m;
+* with F6A alone free the run stalls 6.2 mm short.
+
+F8B moves by 58% for those two centimetres, which is reported and not
+asserted. The test is `InverseSolve.cpp`'s
+`theXPointTargetMovesTheTrackedSaddle`.
+
 
 Row three and row four of §5. Row four first, per §5's argument.
 

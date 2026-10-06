@@ -1826,7 +1826,7 @@ their own file:
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst` is the derivation, and `CLAUDE_FLOW.md` the record |
 | solution inversion | IN-A to IN-P, **every stage done** | `INVERSION-PLAN.md`, and `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-4 **done** — the X-point is two unknowns of the bordered Newton, driveable from a file, and MEQ reproduces `freegs4e`'s DIVERTED equilibrium | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
-| inverse solve | IV-0 to IV-3 **done**: coil currents are border unknowns of the same Newton and isoflux targets its rows, in the library, M-250. IV-4, the X-point rows, is next; the driver refuses `Free` until IV-5 | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
+| inverse solve | IV-0 to IV-4 **done**: coil currents are border unknowns of the same Newton, and isoflux, X-point and critical-point targets are its rows, in the library — M-250, M-251. IV-5, the driver, is next; until then it refuses `Free` | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
 
 The two plan files that had nothing left in them are gone, converted to `docs/`:
 `DRIVER-PLAN.md` was stage 7 and `FLOW-PLAN.md` was the flow campaign. Git has

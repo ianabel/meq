@@ -15182,3 +15182,63 @@ met, nullity at least `N_free − rows`, currents **not** recovered.
 The test is 13 s for the first case and 21 s in all under `ctest -j4`. The double suite is **67 of 68** on this tree, the one red being the deliberate `PlasmaEdgeConvergence`. It is a self-consistency test: the targets
 come from the answer, so it cannot detect a target the machine cannot reach,
 and IV-6 is the test that can.
+
+### M-251
+
+**IV-4: THE X-POINT ROWS. BOTH KINDS PUT THE TRACKED SADDLE ON A TARGET MOVED
+2.1 cm, AGREE ON THE CURRENTS TO 5.7e-11, AND THE ANSWER SURVIVES RELEASE.**
+`INVERSE-AND-RECONSTRUCTION-PLAN.md` §9. `machine-f-diiid` solved forward as in
+[M-250](#m-250). The X-point target is the forward null moved by
+`( +0.015, −0.015 ) m`, and two lower coils are free against its two rows, F4B
+inboard and F8B below: a square problem, so the currents that reach it are
+unique. Each arm starts a fresh solver from the forward answer on its frozen
+support, at the original currents. `theXPointTargetMovesTheTrackedSaddle`,
+`MKL = 1`:
+
+| arm | Newton | rank / nullity | X-point off target | F4B | F8B |
+|---|---|---|---|---|---|
+| row four, `addXPointTarget()` | 5 | 17 / 0 | **0** | −13.372% | +58.255% |
+| released forward at those currents, from the forward field | 4 | — | 3.6e-12 m | — | — |
+| row three, `addCriticalPointTarget()` | 5 | 17 / 0 | **0**, `q( P )` at 9e-19 | −13.372% | +58.255% |
+| control: F6A alone free | **no convergence in 30** | — | 6.2e-03 m | — | — |
+
+Rows three and four agree on the currents to **5.7e-11**. The released solve
+reaches `psi_ax` to 4e-11 of the inverse one's. Both rows land the saddle on
+the target's own double: the fixed point is the target, so the last update
+rounds onto it.
+
+**THE TWO ROWS ASK DIFFERENT QUESTIONS AND MEET HERE BECAUSE THE TRACKED SADDLE
+IS THE ONE THAT ARRIVES.** Row four's constraint is `H ( x_X − x_target )`
+with `H = grad q_h` at the tracked X-point: the `q` the field would carry at
+the target, linearised. That puts it in XP-3's units under XP-3's weight, and
+its corner is `H` on XP-3's two columns with no field part. Row three is
+`q_h( P ) = 0` at the fixed point, flux shape functions weighted by `R h`, and
+it is satisfied by any critical point. On this move the two agree. Where a
+different critical point is nearer the target they need not, and row four is
+the one with the topology guarantee.
+
+**THE CURRENTS MOVE A LOT FOR TWO CENTIMETRES**, F8B by 58%. They are reported
+and not asserted, since nothing independent says what they should be. That
+size is section 1.4's warning from the other side: a small change of shape
+can cost a large change of current, and a target set that asks for one
+without the coils to make it cheap is asking for this.
+
+**MUTATED**:
+* H's sign flipped in row four's corner: no convergence.
+* Row three reading `q_r` for both rows: rank 16, nullity 1, the saddle
+  2.6 cm off, and the currents 35% from row four's.
+* Negating a whole row together with its value is an equivalent mutant:
+  `−G = 0` is the same equation, and the test passes on it as it should.
+
+**THE CONTROL IS WHAT SAYS THE CURRENTS DO THE WORK.** XP-3's X-point is
+itself an unknown, so a pass on row four alone could be the X-point unknowns
+obeying their own rows. One distant coil cannot place the null in two
+coordinates; the same target with only F6A free stalls 6.2 mm short at its
+cap.
+
+**ON A FROZEN SUPPORT.** Every arm keeps the forward answer's plasma support
+and edge freeze, which is consistent: the released forward solve is on the
+same support. Whether a support re-decided at the moved X-point settles is
+IV-5's question, §6.2.
+
+`InverseSolve` is 45 s for its five cases. The double suite is **67 of 68** on this tree, the one red the deliberate `PlasmaEdgeConvergence`.

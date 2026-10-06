@@ -1,6 +1,7 @@
 /*
- * IV-3: COIL CURRENTS AS BORDER UNKNOWNS, ONE MACHINE, ISOFLUX ONLY.
- * INVERSE-AND-RECONSTRUCTION-PLAN.md section 9.
+ * IV-3 AND IV-4: COIL CURRENTS AS BORDER UNKNOWNS, ON ONE MACHINE, DRIVEN BY
+ * ISOFLUX TARGETS AND THEN BY THE X-POINT. INVERSE-AND-RECONSTRUCTION-PLAN.md
+ * section 9. The IV-4 case is the last in this file and has its own header.
  *
  * examples/machine-f-diiid.toml is the one machine that converges forward from
  * cold on every route (MEASUREMENTS.md M-103), so a failure here is the
@@ -85,6 +86,32 @@ namespace
 		std::unique_ptr<meq::GradShafranovSolver> solver;
 	};
 
+	/// A solver on the machine, set up as the driver sets one up, starting
+	/// `psi_ax` and the X-point where it is told to. Every arm of a case that
+	/// must start from the same place gets its own: setXPointBoundary() is
+	/// one call per solver by design, so a solver cannot be put back.
+	std::unique_ptr<meq::GradShafranovSolver> makeSolver( Machine &m,
+	                                                      double psiAxisStart,
+	                                                      double xPointR,
+	                                                      double xPointZ )
+	{
+		meq::SourceConfig const &sourceConfig = m.config->getSource();
+		auto solver = std::make_unique<meq::GradShafranovSolver>(
+			*m.sub, m.config->getDiscretisation().polynomialDegree );
+		solver->setNewtonControl(
+			meq::newtonTolerance( m.config->getSolver().newtonRelativeTolerance ),
+			meq::newtonTolerance( m.config->getSolver().newtonAbsoluteTolerance ),
+			m.config->getSolver().newtonMaxIterations );
+		solver->setExtension( *m.path, m.gammaHMarker );
+		solver->setSource( *m.source, psiAxisStart );
+		solver->setXPointBoundary( xPointR, xPointZ );
+		solver->setPlasmaCurrent( sourceConfig.permeability()
+		                          *sourceConfig.plasmaCurrent() );
+		solver->setBoundaryData( m.zero );
+		solver->setExteriorCoupling( *m.exterior );
+		return solver;
+	}
+
 	/// The mesh is a build product of the file, so it is made the way the
 	/// driver's users make it rather than assumed to be on disk.
 	void ensureMesh()
@@ -165,19 +192,8 @@ namespace
 		meq::XPointConfig const &xpoint = m.config->getBoundary().xpoint;
 		BOOST_TEST_REQUIRE( xpoint.given );
 
-		m.solver = std::make_unique<meq::GradShafranovSolver>(
-			*m.sub, m.config->getDiscretisation().polynomialDegree );
-		m.solver->setNewtonControl(
-			meq::newtonTolerance( m.config->getSolver().newtonRelativeTolerance ),
-			meq::newtonTolerance( m.config->getSolver().newtonAbsoluteTolerance ),
-			m.config->getSolver().newtonMaxIterations );
-		m.solver->setExtension( *m.path, m.gammaHMarker );
-		m.solver->setSource( *m.source, sourceConfig.psiAxisGuess() );
-		m.solver->setXPointBoundary( xpoint.radius, xpoint.z );
-		m.solver->setPlasmaCurrent( sourceConfig.permeability()
-		                            *sourceConfig.plasmaCurrent() );
-		m.solver->setBoundaryData( m.zero );
-		m.solver->setExteriorCoupling( *m.exterior );
+		m.solver = makeSolver( m, sourceConfig.psiAxisGuess(), xpoint.radius,
+		                       xpoint.z );
 
 		meq::InitialGuessConfig const &guessConfig = m.config->getInitialGuess();
 		m.guessMesh = std::make_unique<mfem::Mesh>( guessConfig.meshFile.c_str(), 1, 1 );
@@ -399,7 +415,7 @@ namespace
 		for ( std::size_t i = 0; i < history.size(); ++i )
 			std::printf( "   it %2zu  %.6e\n", i, history[ i ] );
 
-		for ( double v : solver.isofluxResiduals() )
+		for ( double v : solver.targetResiduals() )
 			out.worstTarget = std::max( out.worstTarget, std::abs( v ) );
 		std::vector<double> const recovered = solver.freeCircuitCurrents();
 		for ( std::size_t k = 0; k < indices.size() && k < recovered.size(); ++k )
@@ -613,4 +629,194 @@ BOOST_AUTO_TEST_CASE( theInverseRefusesWhatItCannotPose )
 
 	solver.clearInverse();
 	BOOST_TEST( !solver.inverseIsPosed() );
+}
+
+/*
+ * IV-4: THE X-POINT ROWS, BOTH KINDS. INVERSE-AND-RECONSTRUCTION-PLAN.md
+ * section 9.
+ *
+ * The forward answer's X-point target is moved by a stated distance, and two
+ * lower coils are freed against its two rows -- a SQUARE problem, so the
+ * currents that reach it are unique and the two kinds of row can be compared
+ * on what they return:
+ *
+ *   * row four, addXPointTarget(), pins the saddle XP-3 is TRACKING;
+ *   * row three, addCriticalPointTarget(), asks for a critical point there.
+ *
+ * Asserted: row four puts the tracked X-point on the target, and the
+ * equilibrium survives RELEASE -- the same currents solved forward, which is
+ * IV-6's chain on one machine. Row three, from the same start, reaches the
+ * same currents. The currents themselves are REPORTED rather than asserted
+ * against anything, since nothing independent says what they should be.
+ *
+ * AND THE CONTROL: a single free coil far from the null cannot move it to an
+ * arbitrary point, so the same target with only that coil free must FAIL.
+ * Without it, a pass could be the X-point unknowns obeying their own rows
+ * while the currents did nothing.
+ */
+BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
+{
+	ensureMesh();
+	Machine m = buildMachine();
+	int sweeps = 0;
+	BOOST_TEST_REQUIRE( solveWithSweeps( m, sweeps ) );
+
+	// THE FORWARD SOLVER IS KEPT ALIVE: the saved field borrows its space.
+	std::unique_ptr<meq::GradShafranovSolver> const forwardSolver =
+		std::move( m.solver );
+	mfem::GridFunction const forward( forwardSolver->potential() );
+	double const forwardAxis = forwardSolver->psiAxis();
+	double const forwardXR = forwardSolver->xPointR();
+	double const forwardXZ = forwardSolver->xPointZ();
+	double const targetR = forwardXR + 0.015;
+	double const targetZ = forwardXZ - 0.015;
+	std::printf( "forward X ( %.9f, %.9f ), target ( %.9f, %.9f ), moved %.4f m\n",
+	             forwardXR, forwardXZ, targetR, targetZ,
+	             std::hypot( targetR - forwardXR, targetZ - forwardXZ ) );
+
+	std::vector<std::size_t> const pair = { coilNamed( m, "F4B" ),
+	                                        coilNamed( m, "F8B" ) };
+	std::vector<double> original;
+	for ( std::size_t index : pair )
+		original.push_back( m.coils->coil( index ).current() );
+
+	/// A fresh solver at the forward answer, on its frozen support -- the
+	/// source keeps the last sweep's edge -- with the original currents.
+	auto restart = [ & ]() -> meq::GradShafranovSolver &
+	{
+		for ( std::size_t k = 0; k < pair.size(); ++k )
+			m.coils->setCurrent( pair[ k ], original[ k ] );
+		m.solver = makeSolver( m, forwardAxis, forwardXR, forwardXZ );
+		m.solver->prepare();
+		m.solver->setPlasmaSupportFrozen( false );
+		m.solver->refreshPlasmaComponent( forward );
+		m.solver->setPlasmaSupportFrozen( true );
+		m.solver->setInitialGuess( forward );
+		return *m.solver;
+	};
+	auto freePair = [ & ]( meq::GradShafranovSolver &solver )
+	{
+		std::vector<meq::GradShafranovSolver::FreeCircuit> circuits;
+		for ( std::size_t index : pair )
+			circuits.push_back( { m.config->getCoils().coils[ index ].name,
+			                      { index }, { 1.0 } } );
+		solver.setFreeCurrents( m.coils, circuits );
+	};
+	auto miss = [ & ]( meq::GradShafranovSolver const &solver )
+	{
+		return std::hypot( solver.xPointR() - targetR, solver.xPointZ() - targetZ );
+	};
+	auto report = [ & ]( meq::GradShafranovSolver const &solver, char const *label )
+	{
+		std::vector<double> const currents = solver.freeCircuitCurrents();
+		std::printf( "%s: %d Newton iterations, rank %d nullity %d, X ( %.9f, %.9f )"
+		             " off by %.3e m\n", label, solver.newtonIterations(),
+		             solver.inverseRank(), solver.inverseNullity(),
+		             solver.xPointR(), solver.xPointZ(), miss( solver ) );
+		for ( std::size_t k = 0; k < currents.size(); ++k )
+			std::printf( "   %-4s  %+.10e -> %+.10e  ( %+.3f%% )\n",
+			             m.config->getCoils().coils[ pair[ k ] ].name.c_str(),
+			             original[ k ], currents[ k ],
+			             100.0*( currents[ k ] - original[ k ] )/original[ k ] );
+		for ( double v : solver.newtonResiduals() )
+			std::printf( "   %.6e\n", v );
+		std::printf( "   dR %.3e dZ %.3e, target rows", solver.xPointR() - targetR,
+		             solver.xPointZ() - targetZ );
+		for ( double v : solver.targetResiduals() )
+			std::printf( " %.3e", v );
+		std::printf( "\n" );
+	};
+
+	// ROW FOUR.
+	std::vector<double> rowFour;
+	double rowFourMiss = 0.0, rowFourAxis = 0.0, releasedMiss = 0.0;
+	int releasedIterations = 0;
+	{
+		meq::GradShafranovSolver &solver = restart();
+		freePair( solver );
+		solver.addXPointTarget( targetR, targetZ );
+		solver.solve();
+		report( solver, "row four" );
+		rowFour = solver.freeCircuitCurrents();
+		rowFourMiss = miss( solver );
+		rowFourAxis = solver.psiAxis();
+
+		// RELEASED: the solved currents are in the set, so a forward solve
+		// from here is the same machine with nothing free.
+		solver.clearInverse();
+		solver.solve();
+		releasedMiss = miss( solver );
+		releasedIterations = solver.newtonIterations();
+		std::printf( "released: %d Newton iterations, X off by %.3e m, psi_ax "
+		             "%.10e against %.10e\n", releasedIterations, releasedMiss,
+		             solver.psiAxis(), rowFourAxis );
+	}
+
+	// ROW THREE, from the same start.
+	std::vector<double> rowThree;
+	double rowThreeMiss = 0.0;
+	{
+		meq::GradShafranovSolver &solver = restart();
+		freePair( solver );
+		solver.addCriticalPointTarget( targetR, targetZ );
+		solver.solve();
+		report( solver, "row three" );
+		rowThree = solver.freeCircuitCurrents();
+		rowThreeMiss = miss( solver );
+	}
+	double currentsAgree = 0.0;
+	for ( std::size_t k = 0; k < pair.size(); ++k )
+		currentsAgree = std::max( currentsAgree,
+		                          std::abs( rowThree[ k ] - rowFour[ k ] )
+		                          /std::abs( rowFour[ k ] ) );
+	std::printf( "row three against row four: currents agree to %.3e\n",
+	             currentsAgree );
+
+	// THE CONTROL: one distant coil cannot place the null.
+	bool controlConverged = true;
+	double controlMiss = 0.0;
+	{
+		meq::GradShafranovSolver &solver = restart();
+		std::size_t const far = coilNamed( m, "F6A" );
+		solver.setFreeCurrents( m.coils, { { "F6A", { far }, { 1.0 } } } );
+		solver.addXPointTarget( targetR, targetZ );
+		solver.setNewtonControl(
+			meq::newtonTolerance( m.config->getSolver().newtonRelativeTolerance ),
+			meq::newtonTolerance( m.config->getSolver().newtonAbsoluteTolerance ),
+			30 );
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::exception const & )
+		{
+			controlConverged = false;
+		}
+		controlMiss = miss( solver );
+		std::printf( "control, F6A alone: %s after %d iterations, X off by %.3e m\n",
+		             controlConverged ? "CONVERGED" : "did not converge",
+		             solver.newtonIterations(), controlMiss );
+	}
+
+	/*
+	 * MEASURED: a 2.1 cm move takes F4B down 13.4% and F8B up 58.3%, in five
+	 * Newton steps on either row. Both rows put the tracked saddle on the
+	 * target to the last bit -- the fixed point is the target itself, so the
+	 * last update rounds onto it -- and agree on the currents to 5.7e-11.
+	 * Released, the solve converges from the ORIGINAL forward field to the
+	 * same saddle, 3.6e-12 m off, with psi_ax to 4e-11. The control stops
+	 * 6.2 mm short at its cap.
+	 *
+	 * Mutated: H's sign flipped in row four's corner -- no convergence; row
+	 * three reading q_r twice -- rank 16, nullity 1, the saddle 2.6 cm off.
+	 * Negating a whole row with its value is NOT a mutation: -G = 0 is the
+	 * same equation, and the test rightly cannot tell.
+	 */
+	BOOST_TEST( rowFourMiss < 1.0e-9 );
+	BOOST_TEST( releasedMiss < 1.0e-9 );
+	BOOST_TEST( rowThreeMiss < 1.0e-9 );
+	BOOST_TEST( currentsAgree < 1.0e-8 );
+	BOOST_TEST( ( !controlConverged && controlMiss > 1.0e-3 ),
+	            "a single distant coil placed the null, so the pass above does "
+	            "not show the currents doing the work" );
 }

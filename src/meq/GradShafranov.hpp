@@ -3496,7 +3496,8 @@ namespace meq
 			 * when this is called, and every member of a circuit must already
 			 * carry `multiplier * I` for one `I`.
 			 *
-			 * **TARGETS ARE WHAT DETERMINE THEM**: addIsofluxTarget(). A free
+			 * **TARGETS ARE WHAT DETERMINE THEM**: addIsofluxTarget(),
+			 * addXPointTarget() and addCriticalPointTarget(). A free
 			 * current with no target is refused at solve(), and so is a target
 			 * with no free current, since neither poses a problem. The dense
 			 * corner then stops being square and is solved as the regularised
@@ -3543,8 +3544,48 @@ namespace meq
 			 */
 			void addIsofluxTarget( double r1, double z1, double r2, double z2 );
 
-			/// Undo setFreeCurrents() and every addIsofluxTarget(): the next
-			/// solve is the forward problem, at whatever currents the set holds.
+			/**
+			 * @brief Ask that the X-point THIS SOLVE IS TRACKING sit at
+			 *        ( @a radius, @a z ). Plan section 5, the fourth row, and
+			 *        IV-4. Two rows.
+			 *
+			 * **IT PINS XP-3's TWO UNKNOWNS AND SO NEEDS THEM**:
+			 * setXPointBoundary() is refused at solve() without it. That is
+			 * the topology guarantee section 5 builds this row first for --
+			 * the saddle moved is the one the solve was following from its
+			 * seed, never a critical point that happens to be nearer.
+			 *
+			 * **THE CONSTRAINT IS `H ( x_X - x_target )` AND NOT THE BARE
+			 * DISPLACEMENT**, with `H = grad q_h` at the X-point. That is the
+			 * `q` the field would carry at the target if the saddle were where
+			 * the iterate has it, linearised: the same quantity, in the same
+			 * units and under the same weight, as XP-3's own `q = 0` rows. A
+			 * length added to the merit beside fluxes would need a scale
+			 * nothing supplies; this one inherits `xScale`. It vanishes exactly
+			 * where the displacement does whenever `H` is non-singular, which
+			 * is what makes the point a SADDLE and not a degenerate critical
+			 * point. targetResiduals() reports it in metres.
+			 */
+			void addXPointTarget( double radius, double z );
+
+			/**
+			 * @brief Ask that `q_h( radius, z ) = 0`: SOME critical point at
+			 *        that place. Plan section 5, the third row. Two rows.
+			 *
+			 * freegs4e's form. Fixed point, so the rows are the flux shape
+			 * functions of the containing element there, exact, with nothing
+			 * to locate per iterate. **IT IS SATISFIED BY ANY CRITICAL
+			 * POINT** -- an O-point too -- which is the degeneracy
+			 * addXPointTarget() exists to avoid; on a solve that also tracks
+			 * an X-point the two agree only if the tracked saddle is the one
+			 * that arrives. Weighted by `R h` at the point, the same
+			 * conversion of `q` into a change of `psi` across one element that
+			 * `xScale` makes for XP-3's rows.
+			 */
+			void addCriticalPointTarget( double radius, double z );
+
+			/// Undo setFreeCurrents() and every target: the next solve is the
+			/// forward problem, at whatever currents the set holds.
 			void clearInverse();
 
 			/// Whether setFreeCurrents() has made any current an unknown.
@@ -3554,9 +3595,14 @@ namespace meq
 			/// before one -- in the order setFreeCurrents() was given them.
 			std::vector< double > freeCircuitCurrents() const;
 
-			/// `psi( P1 ) - psi( P2 )` per isoflux target at the last solve's
-			/// answer, in addIsofluxTarget() order.
-			std::vector< double > isofluxResiduals() const;
+			/**
+			 * Every target ROW at the last solve's answer, in the order the
+			 * targets were added and two rows for each point target:
+			 * `psi( P1 ) - psi( P2 )` for an isoflux pair, `( q_r, q_z )` at the
+			 * point for a critical-point target, and `x_X - x_target` in METRES
+			 * for an X-point target.
+			 */
+			std::vector< double > targetResiduals() const;
 
 			/**
 			 * THE NUMERICAL RANK OF THE LAST STEP'S CORNER, and its nullity
@@ -5125,15 +5171,23 @@ namespace meq
 			std::vector< FreeCircuit > freeCircuitList;
 			std::vector< double > freeCircuitCurrentValues;
 			std::vector< double > freeCircuitRegularisation;
-			struct IsofluxTarget
+			/// One target as added. A point target uses ( r1, z1 ) alone.
+			enum class TargetKind
 			{
+				Isoflux,
+				XPoint,
+				CriticalPoint
+			};
+			struct InverseTarget
+			{
+				TargetKind kind = TargetKind::Isoflux;
 				double r1 = 0.0;
 				double z1 = 0.0;
 				double r2 = 0.0;
 				double z2 = 0.0;
 			};
-			std::vector< IsofluxTarget > isofluxTargetList;
-			std::vector< double > isofluxResidualValues;
+			std::vector< InverseTarget > inverseTargetList;
+			std::vector< double > targetResidualValues;
 			int inverseRankValue = 0;
 			int inverseNullityValue = 0;
 			std::vector< double > inverseSingularValueList;

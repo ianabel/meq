@@ -1814,6 +1814,23 @@ reports it healthy. With five rows the nullity is 13, every target is met to
 * `setBorderRegularisation()`, which damps a square corner;
 * targets without free currents, and free currents without targets.
 
+**IV-4's TWO X-POINT ROWS ARE DIFFERENT QUESTIONS** →
+[M-251](MEASUREMENTS.md#m-251).
+* `addXPointTarget()` pins the saddle XP-3 is tracking, and is refused
+  without it. Its constraint is `H ( x_X − x_target )` with `H = grad q_h`,
+  not the bare displacement: a length in the merit beside fluxes would need a
+  scale nothing supplies, and this is XP-3's own `q`, in its units and under
+  `xScale`.
+* `addCriticalPointTarget()` is `q_h( P ) = 0`, freegs4e's form, and any
+  critical point satisfies it.
+
+On DIII-D the two agree to 5.7e-11 because the tracked saddle is the one that
+arrives. **Negating a row with its value is an equivalent mutant** (`−G = 0`
+is the same equation), so a test cannot and should not catch it. The control
+that matters is a coil that cannot reach the target, because XP-3's X-point
+is itself an unknown and could otherwise satisfy its own rows while the
+currents did nothing.
+
 The driver refuses `Free` until IV-5 gives the targets keys.
 
 ## PE-0: the premise is true, and the plan's own machinery does not cash it
