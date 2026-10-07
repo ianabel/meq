@@ -1826,7 +1826,7 @@ their own file:
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst` is the derivation, and `CLAUDE_FLOW.md` the record |
 | solution inversion | IN-A to IN-P, **every stage done** | `INVERSION-PLAN.md`, and `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-4 **done** — the X-point is two unknowns of the bordered Newton, driveable from a file, and MEQ reproduces `freegs4e`'s DIVERTED equilibrium | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
-| inverse solve | IV-0 to IV-5 **done**: coil currents are border unknowns of the same Newton, isoflux, X-point and critical-point targets are its rows, and `[inverse]` runs through the driver inside the support sweeps, exiting 4 on a best fit — M-250 to M-252. IV-6, the seven machines, is next | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
+| inverse solve | Part One, IV-0 to IV-6, **done**: coil currents are border unknowns of the same Newton, isoflux, X-point and critical-point targets are its rows, and `[inverse]` runs through the driver inside the support sweeps, exiting 4 on a best fit — M-250 to M-252. IV-6 **run**: as a basin finder it converts one cold failure, TCV, because MEQ freezes the support within a sweep — M-253 | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
 
 The two plan files that had nothing left in them are gone, converted to `docs/`:
 `DRIVER-PLAN.md` was stage 7 and `FLOW-PLAN.md` was the flow campaign. Git has

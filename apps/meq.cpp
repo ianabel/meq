@@ -713,6 +713,26 @@ namespace
 		}
 		std::printf( "\n" );
 
+		// WHAT THE REJECTED TRIALS SAID. A trial that throws is rejected and
+		// halved, and the reason -- the X-point leaving the mesh, the cap, the
+		// support emptying, psi_ax through zero -- is what tells one failure
+		// from another. Without it the benchmark's B read as a fatal step when
+		// it is an X-point excursion.
+		bool anyThrew = false;
+		for ( std::size_t i = 0; i < steps.size(); ++i )
+		{
+			meq::GradShafranovSolver::BorderStep const &b = steps[ i ];
+			if ( b.trialsThrew == 0 )
+				continue;
+			if ( !anyThrew )
+				std::printf( "   trials that threw, and the last reason each step gave\n" );
+			anyThrew = true;
+			std::printf( "  %3zu  %2d of %2d  %s\n", i, b.trialsThrew, b.trials,
+			             b.lastTrialThrow.substr( 0, 160 ).c_str() );
+		}
+		if ( anyThrew )
+			std::printf( "\n" );
+
 		/*
 		 * THE TRIAL LADDER, WHICH IS WHAT SAYS WHETHER THE DIRECTION OR THE
 		 * MERIT IS AT FAULT.

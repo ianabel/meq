@@ -1863,6 +1863,29 @@ set by address. **The driver treats that set as shared state**:
   `[inverse]` off the normalised path. The configuration refuses each of
   these before a mesh exists.
 
+**AS A BASIN FINDER IT CONVERTS ONE CONFIGURATION, AND THE REASON IS THE
+SUPPORT** → [M-253](MEASUREMENTS.md#m-253). IV-6 poses the fourteen cold
+configurations inverse, with `freegs4e`'s targets and every supply free, and
+releases them:
+* from zero currents, none lands on the reference's basin;
+* from a vacuum stage, six are green and only TCV of the five forward reds is
+  converted.
+
+`freegs4e` finds 13 of 14 the same way because it re-decides its core every
+Picard step. MEQ freezes its support within a sweep, so a zero-current guess
+floods the first sweep, and a free current can shift the flux level and empty
+a frozen support. Neither the targets nor any border row sees a uniform
+offset. **An inverse trial that leaves no plasma current is rejected** for
+that reason, as one carrying the X-point out of the mesh is. *Converged with
+every target met is not evidence of the basin*: five machines do exactly that
+from zero currents with the axis at a vacuum O-point.
+
+**AND A REJECTED TRIAL NOW SAYS WHY.** `reportBorderSteps()` lists every step's
+thrown trials and the last reason, and the exit message names the trial's
+throw rather than defaulting to *"psi_ax through zero"*. Without it the
+benchmark's B was filed as one fatal step when every trial of that step had
+carried the X-point out of the mesh.
+
 ## PE-0: the premise is true, and the plan's own machinery does not cash it
 
 **`PLASMA-EDGE-PLAN.md` §6's first stage is run, and it splits the plasma edge's
@@ -2630,7 +2653,9 @@ it helps only by having a different basin, and `A_lin` is unconditionally
 invertible where `A_lin - K` is what goes near-singular — which against M-117's
 classification made **B and B-shaped** (one fatal step) and **C-shaped**
 (chronic) the addressable ones and D/E/E-shaped the X-point excursions it could
-not reach. **Three of six, recorded as the maximum rather than the hope.**
+not reach. **Three of six, recorded as the maximum rather than the hope** -- and
+B's label was itself wrong: its fatal step's every trial carries the null out
+of the mesh, an excursion ([M-253](MEASUREMENTS.md#m-253)).
 
 **IT CLOSES NONE OF THE SIX, AND THE ONE CASE IT HELPS IS NOT ONE OF THE TWO THE
 ARGUMENT LEANED ON.** → **[M-119](MEASUREMENTS.md#m-119)**. B and B-shaped are

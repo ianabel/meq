@@ -13926,7 +13926,36 @@ namespace
 					refreshXPoint( unknown );
 					constraintB = boundaryFluxIsUnknown ? sB - limiterTotal( unknown ) : 0.0;
 					if ( currentIsUnknown )
-						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
+					{
+						double const carried = assemblePlasmaCurrent( unknown );
+						constraintL = carried - targetMuZeroCurrent;
+						/*
+						 * AN INVERSE TRIAL THAT LEAVES NO PLASMA IS REJECTED, as
+						 * one that carries the X-point out of the mesh is.
+						 *
+						 * The targets and every border row are invariant to a
+						 * uniform offset of the flux, so the currents' step is
+						 * free to shift its level -- and the support is frozen
+						 * within a sweep in ABSOLUTE flux, so a shift can put
+						 * every point below the frozen edge. The plasma current
+						 * then assembles to exactly zero, its row is
+						 * identically zero, and nothing can bring it back: the
+						 * corner fits everything else round the hole.
+						 * MEASURED on the benchmark's C and E from their vacuum
+						 * seeds: the first full step emptied the support and
+						 * every later iterate held the current row at the whole
+						 * target while the rest fell to 1e-66. M-253.
+						 *
+						 * INVERSE SOLVES ONLY. A forward solve's currents are
+						 * fixed and it has not been seen to reach this state;
+						 * a guard on that path would want the cold table
+						 * re-taken to show it moves nothing.
+						 */
+						if ( inverseSolve && !( carried != 0.0 ) )
+							throw std::runtime_error(
+								"meq::GradShafranovSolver::solve: the trial left "
+								"no plasma current -- the support emptied" );
+					}
 					fieldResidual( unknown, s, residual );
 					transmissionAll( unknown, transmission );
 					targetsAll( unknown, targetValues );
@@ -14057,7 +14086,15 @@ namespace
 						borderStepHistory.back().handedOff = true;
 						continue;
 					}
-					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- psi_ax through zero, most often, which is the branch leaving the physical one" );
+					// NAME WHAT THREW, not the commonest cause: the benchmark's B
+					// was filed as "psi_ax through zero" while every one of its
+					// twelve trials had carried the X-point out of the mesh.
+					std::string const why =
+						borderStepHistory.back().lastTrialThrow.empty()
+						? std::string( "every trial's residual was non-finite" )
+						: "the last trial threw: "
+						  + borderStepHistory.back().lastTrialThrow;
+					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- " + why );
 				}
 				// The least-bad damping, which is NOT an Armijo step: it is how
 				// the residual rises from one iteration to the next, and the

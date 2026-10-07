@@ -46,6 +46,7 @@ because on a free boundary the guess chooses which equilibrium is reported.
 USAGE
 
     python3 mkcoldguess.py <case.npz> <mesh-out> <gf-out> [rho] [n]
+                           [--remainder] [--currents FILE.json]
 """
 
 import os
@@ -316,6 +317,16 @@ def main():
 	# untouched.  See where the conductors are summed for what it is for.
 	argv = [a for a in sys.argv[1:] if a != "--remainder"]
 	remainder = len(argv) != len(sys.argv) - 1
+	# --currents FILE.json: { conductor label: total current } replacing the
+	# reference's. For a caller that has CHOSEN the currents itself -- IV-6's
+	# vacuum stage, inverse.py -- and wants the guess to carry those rather
+	# than the operating point the reference was solved at.
+	override = None
+	if "--currents" in argv:
+		at = argv.index("--currents")
+		import json
+		override = json.load(open(argv[at + 1]))
+		del argv[at:at + 2]
 
 	npz = argv[0]
 	mesh_path, gf_path = argv[1], argv[2]
@@ -334,6 +345,12 @@ def main():
 
 	# ---- the machine ---------------------------------------------------
 	flat = conductors.from_npz(d)
+	if override is not None:
+		missing = [c["label"] for c in flat if c["label"] not in override]
+		if missing:
+			raise SystemExit("--currents names no current for %s" % missing)
+		for c in flat:
+			c["current"] = float(override[c["label"]])
 	filaments = []
 	for c in flat:
 		# A tall conductor is not a point: MAST-U's solenoid is 3.16 m of

@@ -25,7 +25,17 @@ anchor, a `file:line`, or a paper with its section and equation number. Where
 the design needs a number that does not exist, the experiment that would produce
 it is named and the gap is left open.
 
-## STATUS: IV-0 TO IV-5 ARE DONE; IV-6, THE SEVEN MACHINES, IS NEXT
+## STATUS: PART ONE IS DONE. IV-6 CONVERTS ONE CONFIGURATION, AND §2.2's CLAIM DOES NOT CARRY OVER
+
+**IV-6 → [M-253](MEASUREMENTS.md#m-253)**: on the fourteen cold
+configurations, MEQ's inverse solve and release gives:
+* **6 green from a vacuum stage**, and only one of the forward table's five
+  reds converted, TCV;
+* **none from zero currents**.
+
+MEQ freezes its support within a sweep where `freegs4e` re-decides it every
+step, and that is what stops the inverse finding the basin here. The inverse
+solve itself is built and correct: IV-3 to IV-5.
 
 **IV-5 → [M-252](MEASUREMENTS.md#m-252)**: the driver solves
 `examples/machine-f-diiid-inverse.toml` from its cold guess inside the support
@@ -1046,8 +1056,8 @@ FAVOUR.** BG-0 and BS-0 are the same gate and it has been run →
 **[M-117](MEASUREMENTS.md#m-117)**: `directionFinite` is true on **every step of
 all six** exit-2 configurations, so hypothesis H2 — the non-finite direction
 that would have made both plans and this one moot — **does not hold**. The six
-are one fatal step (two), chronic (one) and **X-point excursions** (three),
-all of which are failures of the path or the problem rather than of the
+are X-point excursions (five, B's two included once their thrown trials are
+read, [M-253](MEASUREMENTS.md#m-253)) and chronic (one), all of which are failures of the path or the problem rather than of the
 elimination.
 
 **And the solver-side campaign that followed came back negative**, which
@@ -1286,7 +1296,36 @@ through the library, in the manner of `theDriverRunsTheAdaptiveLoop`'s
 its count reported — §6.2's hazard, and M-103's *"took 4 sweeps and DID NOT
 SETTLE"* is the failure it guards.
 
-### IV-6 — the seven machines, and the claim in §2.2 tested on MEQ
+### IV-6 — the seven machines, and the claim in §2.2 tested on MEQ — **DONE, M-253: ONE CONVERTED**
+
+`tools/freegs4e-benchmark/inverse.py`. Each shipped cold configuration is
+posed inverse: wired in circuits, every supply free, `fgsref.py`'s targets,
+the X-points as row three. It is solved through the driver and then
+released. The results:
+
+* **From IV-0's literal start, zero currents, none of fourteen lands on the
+  reference's basin.** Five machines converge with every target met onto an
+  axis at a vacuum O-point at the edge of the half-disc.
+* **From a vacuum stage** -- `freegs4e`'s first control step, the
+  minimum-norm currents meeting the targets against the design blob -- six are
+  green.
+* **Of the forward cold table's five reds, ONE is converted: TCV**, with the
+  axis to 0.9 mm. Four configurations the forward solve gets are lost.
+
+**§2.2's claim does not carry over to MEQ as built, and the reason is the
+support, not the inverse border.** MEQ freezes the plasma support within a
+sweep and `freegs4e` re-decides it every Picard step:
+* a zero-current guess has no separatrix, so the first freeze is all plasma;
+* a free current can shift the flux level under a support frozen in absolute
+  flux and empty it. An inverse trial that does so is now rejected.
+
+B's forward pathology survives the inverse, and B turns out to be an X-point
+excursion (M-117's "one fatal step" corrected).
+
+**What would make the inverse a basin finder for MEQ**, named and not built:
+a support re-decided inside the Newton, or a continuation holding the topology
+while the currents move. That is a campaign about the free-boundary support
+rather than about this plan.
 
 Run all seven from cold in inverse mode, then release and re-solve forward with
 the currents frozen, which is `solve_from_cold()`'s chain in MEQ.

@@ -3895,6 +3895,13 @@ The border trace prints on failure under `--profile` and records
 | E diamagnetic | X-point excursion | ( 1.1000, −0.6000 ) → ( 1.4909, **+0.9299** ) → ( 1.8960, +1.3010 ) |
 | E shaped | X-point excursion | as E |
 
+*B's two rows are MISLABELLED, and [M-253](#m-253) has the measurement.* With
+every thrown trial logged, all twelve trials of B's fatal step throw *"the
+X-point unknown reached …, which is outside the mesh"*, the null running out to
+( 4.42, 13.9 ). That is an X-point excursion fast enough that no ACCEPTED step
+shows it. The trace this table was read from recorded the throw and printed
+nothing of it, and the exit message defaulted to *"psi_ax through zero"*.
+
 **TCV's NULL TRAVELS 1.6 m IN Z FROM ITS SEED AND E's FLIPS SIGN IN ONE STEP.**
 That is not a step-length failure at all; it is the iteration leaving the saddle
 XP-3 was told to follow, which `setXPointBoundary`'s own error message names.
@@ -15057,8 +15064,10 @@ corrected machine of [M-246](#m-246), `OMP = MKL = 8`:
   refused by the axis-source guard as before.
 
 **The six cold failures are now four**: B and B shaped, one fatal step each;
-C shaped and TCV, chronic plateaus. None is an X-point excursion, so nothing on
-this rung reaches them. `DriverAcceptance`'s
+C shaped and TCV, chronic plateaus. *B's "one fatal step" is an X-point
+excursion, measured in [M-253](#m-253): the cap on this rung is necessary there
+and not sufficient, rejecting 848 trials while the residual plateaus at 6% of
+its start.* Nothing on this rung reaches the other two. `DriverAcceptance`'s
 `theRetryRungClosesAnExcursionAndAnAnnulus` pins E and A against the
 reference. The double suite is **66 of 67** on this tree, the one red the
 deliberate `PlasmaEdgeConvergence`; it grew by `RegularisedLeastSquaresTests`
@@ -15334,3 +15343,102 @@ that is the stop working. With the exact row four, flipping its corner's sign
 gives no convergence.
 
 `InverseSolve` is 7 cases and 72 s under `ctest -j4`. The double suite is **67 of 68** on this tree, the one red the deliberate `PlasmaEdgeConvergence`.
+
+### M-253
+
+**IV-6: MEQ'S INVERSE SOLVE AS A BASIN FINDER ON THE FOURTEEN COLD
+CONFIGURATIONS. IT CONVERTS ONE, TCV, AND §2.2's CLAIM — MEASURED FOR
+`freegs4e` AT 13 OF 14 (M-244) — DOES NOT CARRY OVER TO MEQ AS BUILT.**
+`INVERSE-AND-RECONSTRUCTION-PLAN.md` §9, `tools/freegs4e-benchmark/inverse.py`.
+Each shipped `examples/machine-*.toml` is posed inverse:
+* wired in circuits by IV-1's `wiring()`, with every supply `Free`, as IV-0
+  frees every top-level item;
+* targeted at `fgsref.py`'s own case table: each design X-point as
+  `[[inverse.xpoint]] Track = false`, `freegs4e`'s row three, and each isoflux
+  pair;
+* solved through the shipped driver with its support sweeps and retry rung,
+  then RELEASED: the solved currents written in as data, nothing free, and
+  restarted from the inverse's own answer.
+
+Two seedings:
+* **zero currents**, IV-0's literal start (`freegs4e`'s constructors default
+  every current to zero), with the plasma blob alone as the guess;
+* a **vacuum stage**: `freegs4e`'s first control step from zero, which is the
+  minimum-norm currents meeting the targets against the design blob, by least
+  squares on the circuits' Green's functions. The guess is then the blob plus
+  those coils.
+
+Nothing solved for is read in either. **Green** means the release converged with
+its magnetic axis AND its X-point within 5 cm of the reference's.
+`MKL = 1`, the double build at 3394914 plus this entry's changes:
+
+| config | forward cold (M-248) | vacuum: inverse | release | `psi_ax` rel | axis m | X m | zero: release axis |
+|---|---|---|---|---|---|---|---|
+| A | ✓ | 4, best fit, 19 its | 0 | 1.8e-02 | 2.1e-02 | 3.2e-03 | ( 2.27, 0.04 ), 0.92 m off |
+| A shaped | ✓ | 4, 19 | 0 | 1.8e-02 | 2.1e-02 | 3.2e-03 | 0.92 m off |
+| B | ✗ | 2 | — | | | | ( 2.26, 0.04 ), 0.98 m off |
+| B shaped | ✗ | 2 | — | | | | 0.98 m off |
+| C | ✓ | 2, support emptied | — | | | | inverse 2 |
+| C shaped | ✗ | 2, support emptied | — | | | | inverse 2 |
+| **D TCV** | **✗** | **0, 2 its, nullity 14** | **0** | 6.6e-02 | **9.3e-04** | **1.3e-04** | 1.40 m off |
+| D shaped | ✓ | 0, 2 | 0 | 1.0e-01 | 9.7e-04 | 1.3e-04 | 1.41 m off |
+| E | ✓ | 4, 380 its, axis ( 1.95, −1.23 ) | 2, no axis | | | | ( 2.28, 0.00 ), 0.94 m off |
+| E shaped | ✓ | 4, 389 | 2, no axis | | | | 0.94 m off |
+| F | ✓ | 0, 2, nullity 12 | 0 | 2.8e-03 | 5.5e-04 | 7.0e-05 | ( 2.97, −1.38 ), 1.83 m off |
+| F shaped | ✓ | 0, 2 | 0 | 2.9e-03 | 4.5e-04 | 7.0e-05 | 1.83 m off |
+| G | ✓ | 2, slow, stalls near 7e-09 | — | | | | inverse 2 |
+| G shaped | ✗ | 2 | — | | | | inverse 2 |
+
+**Vacuum seeds: 6 of 14 green, and ONE of the forward table's five reds
+converted — TCV**, on its filament arm, with the axis to 0.9 mm and the
+X-point to 0.13 mm. Its `psi_ax` differs by 6.6%, which goes with nullity 14:
+twenty supplies against six rows, so MEQ's minimum-norm current set is not
+`freegs4e`'s, and the shape is what the targets fix. **Four configurations the
+forward solve gets are lost** (C, E, E shaped, G). **Zero seeds: none green.**
+Five machines' inverses converge with every target met, and so do their
+releases, every one with its axis at R = 2.27 to 2.97, a vacuum O-point at
+the edge of MEQ's half-disc, nowhere near the plasma. *An inverse solve that
+converges with its targets met is not evidence of the basin.*
+
+**WHY IT DOES NOT TRANSFER: MEQ FREEZES THE SUPPORT WITHIN A SWEEP AND
+`freegs4e` NEVER DOES.** Three mechanisms, each measured:
+* **From zero currents the first sweep is all plasma.** The guess has no
+  separatrix, so the first freeze puts EVERY candidate element in the support
+  (2124 of 2124 on DIII-D). The sweep converges onto that, and the axis
+  migrates to a vacuum O-point outside the coils. `freegs4e` re-decides its core
+  every Picard step, and its grid stops short of the coils.
+* **A free current can empty a frozen support.** The targets and every border
+  row are invariant to a uniform flux offset, so the minimum-norm step is free
+  to shift the level, while the support is frozen in ABSOLUTE flux. On C and E
+  the first full step put every point below the frozen edge, the
+  plasma-current row became identically zero, and the corner fitted everything
+  else to 1e-66 round a current it could not restore. **A trial that leaves no
+  plasma current is now rejected on an inverse solve**, as one that carries the
+  X-point out of the mesh is; that turns E's failure into a best fit and
+  leaves C failing differently.
+* **B's forward pathology survives the inverse.** Its merit is the field
+  residual and its full step moves the X-point 0.23 m; neither is a current
+  problem.
+
+`Gamma = 1e-7 Wb/A` on C and E damps the currents and gives back the forward
+pathology: E's null leaves the mesh.
+
+**AND B IS AN X-POINT EXCURSION, WHICH M-117 AND M-248 FILED AS "ONE FATAL
+STEP".** With every thrown trial logged, all twelve trials of B's fatal step
+throw *"the X-point unknown reached …, which is outside the mesh"*, the null
+running to ( 4.42, 13.9 ). On the retry rung the cap rejects 848 trials while
+the residual plateaus at 6% of its start, so the cap is necessary there and not
+sufficient. The trace had recorded the throw and printed nothing of it, and the
+exit message defaulted to *"psi_ax through zero"*. **Both now name what threw**:
+`reportBorderSteps()` lists each step's rejected trials with the last reason,
+and the "no damping gave a finite residual" exception carries it.
+
+**WHAT WOULD BE NEEDED, NAMED AND NOT BUILT.** An inverse solve that re-decides
+its support inside the Newton, which is the surface term XP-2 left out of the
+Jacobian deliberately (M-82). Or a continuation that holds the topology while
+the currents move. Neither is a change to the inverse border; both are changes
+to how a free-boundary MEQ solve handles its support, and that is a campaign of
+its own.
+
+The double suite is **67 of 68** on this tree, the one red the deliberate
+`PlasmaEdgeConvergence`.
