@@ -36,6 +36,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <iterator>
+#include <sys/wait.h>
 
 #include "mfem.hpp"
 
@@ -44,6 +46,7 @@
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
+#include "meq/Inverse.hpp"
 #include "meq/PointLocator.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
@@ -114,23 +117,23 @@ namespace
 
 	/// The mesh is a build product of the file, so it is made the way the
 	/// driver's users make it rather than assumed to be on disk.
-	void ensureMesh()
+	void ensureMesh( char const *file = machineFile )
 	{
 		std::string const command = std::string( MEQ_RUN_PATH )
-		                            + " --mesh-only " + machineFile
+		                            + " --mesh-only " + file
 		                            + " > /dev/null 2>&1";
 		BOOST_TEST_REQUIRE( std::system( command.c_str() ) == 0,
-		                    "meq-run --mesh-only failed on " << machineFile );
+		                    "meq-run --mesh-only failed on " << file );
 	}
 
 	/// The assembly apps/meq.cpp performs for this file, in its order: cut D_h
 	/// from the half disc at Gamma, wrap the plasma source around the coils and
 	/// confine it ON THE WRAPPER, then the X-point border, the prescribed
 	/// current and the exterior coupling, and the stored guess interpolated in.
-	Machine buildMachine()
+	Machine buildMachine( char const *file = machineFile )
 	{
 		Machine m;
-		m.config = std::make_unique<meq::Configuration>( machineFile );
+		m.config = std::make_unique<meq::Configuration>( file );
 		meq::SourceConfig const &sourceConfig = m.config->getSource();
 
 		m.background = std::make_unique<mfem::Mesh>(
@@ -179,8 +182,8 @@ namespace
 		m.gammaHMarker[ gammaH - 1 ] = 1;
 
 		m.coils = meq::makeCoilSet( m.config->getCoils(),
-		                            sourceConfig.permeability(), machineFile );
-		m.plasma = meq::makeNormalisedSource( sourceConfig, machineFile );
+		                            sourceConfig.permeability(), file );
+		m.plasma = meq::makeNormalisedSource( sourceConfig, file );
 		m.source = std::make_shared<meq::CoilAugmentedNormalisedSource>( m.plasma,
 		                                                                 m.coils );
 		// ON THE WRAPPER, AFTER IT EXISTS -- plan section 6.1 and M-82.
@@ -650,7 +653,8 @@ BOOST_AUTO_TEST_CASE( theInverseRefusesWhatItCannotPose )
  * against anything, since nothing independent says what they should be.
  *
  * AND THE CONTROL: a single free coil far from the null cannot move it to an
- * arbitrary point, so the same target with only that coil free must FAIL.
+ * arbitrary point, so the same target with only that coil free must end at a
+ * BEST FIT that says the target was not met.
  * Without it, a pass could be the X-point unknowns obeying their own rows
  * while the currents did nothing.
  */
@@ -774,6 +778,7 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 
 	// THE CONTROL: one distant coil cannot place the null.
 	bool controlConverged = true;
+	bool controlMet = true;
 	double controlMiss = 0.0;
 	{
 		meq::GradShafranovSolver &solver = restart();
@@ -793,9 +798,12 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 			controlConverged = false;
 		}
 		controlMiss = miss( solver );
-		std::printf( "control, F6A alone: %s after %d iterations, X off by %.3e m\n",
-		             controlConverged ? "CONVERGED" : "did not converge",
-		             solver.newtonIterations(), controlMiss );
+		controlMet = solver.inverseTargetsMet();
+		std::printf( "control, F6A alone: %s after %d iterations, targets %s, X off "
+		             "by %.3e m\n",
+		             controlConverged ? "converged" : "did not converge",
+		             solver.newtonIterations(), controlMet ? "MET" : "not met",
+		             controlMiss );
 	}
 
 	/*
@@ -804,8 +812,9 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 	 * target to the last bit -- the fixed point is the target itself, so the
 	 * last update rounds onto it -- and agree on the currents to 5.7e-11.
 	 * Released, the solve converges from the ORIGINAL forward field to the
-	 * same saddle, 3.6e-12 m off, with psi_ax to 4e-11. The control stops
-	 * 6.2 mm short at its cap.
+	 * same saddle, 3.6e-12 m off, with psi_ax to 4e-11. The control
+	 * converges to the BEST FIT one coil allows, its targets not met and the
+	 * null 1.2 cm short -- the outcome IV-5's stationarity stop exists for.
 	 *
 	 * Mutated: H's sign flipped in row four's corner -- no convergence; row
 	 * three reading q_r twice -- rank 16, nullity 1, the saddle 2.6 cm off.
@@ -816,7 +825,161 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 	BOOST_TEST( releasedMiss < 1.0e-9 );
 	BOOST_TEST( rowThreeMiss < 1.0e-9 );
 	BOOST_TEST( currentsAgree < 1.0e-8 );
-	BOOST_TEST( ( !controlConverged && controlMiss > 1.0e-3 ),
+	BOOST_TEST( controlConverged );
+	BOOST_TEST( ( !controlMet && controlMiss > 1.0e-3 ),
 	            "a single distant coil placed the null, so the pass above does "
 	            "not show the currents doing the work" );
+}
+
+/*
+ * IV-5: THROUGH THE DRIVER, WITH THE SUPPORT SWEEPS.
+ * INVERSE-AND-RECONSTRUCTION-PLAN.md section 9.
+ *
+ * examples/machine-f-diiid-inverse.toml is the forward DIII-D file with four
+ * currents Free at seeds 2 to 3 per cent off, and [inverse] targets read off
+ * the forward equilibrium's separatrix and X-point. The driver runs it FROM
+ * THE FILE'S COLD GUESS, inside the support sweeps, which IV-3 and IV-4 did
+ * not: there the support was frozen at an answer.
+ *
+ * Asserted, in the manner of theDriverRunsTheAdaptiveLoop:
+ *   * the driver exits 0, says the targets are met, and the support SETTLES --
+ *     section 6.2's hazard, the support depending on currents that move;
+ *   * the same file posed through the library by meq::poseInverse() and swept
+ *     as the driver sweeps reaches the driver's psi_h dof for dof and the same
+ *     sweep count;
+ *   * the four currents come back to the forward file's.
+ *
+ * THE CASE THAT FORCED THE DESIGN IS THE FIRST SWEEP. Its support is frozen at
+ * the cold guess's edge, so the targets -- read off the converged
+ * equilibrium -- are not exactly reachable on it. A corner fitting every row
+ * at once stalled there with the equilibrium's own border rows violated at
+ * 1e-08 to 3e-07; the border rows are now constraints and the sweep stops at
+ * the best fit, which the next sweep's support improves. M-252.
+ */
+namespace
+{
+	char const *const inverseFile = "examples/machine-f-diiid-inverse.toml";
+
+	/// Run the shipped wrapper, capturing everything it prints.
+	int runDriver( std::string const &file, std::string const &log )
+	{
+		std::string const command = "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
+		                            + " " + file + " > " + log + " 2>&1";
+		int const status = std::system( command.c_str() );
+		return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+	}
+
+	std::string readAll( std::string const &path )
+	{
+		std::ifstream stream( path );
+		return std::string( std::istreambuf_iterator<char>( stream ),
+		                    std::istreambuf_iterator<char>() );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theDriverSolvesAnInverseProblem )
+{
+	ensureMesh( inverseFile );
+	std::string const log = "inverse-solve-driver.log";
+	int const exit = runDriver( inverseFile, log );
+	std::string const printed = readAll( log );
+	std::remove( log.c_str() );
+	BOOST_TEST_REQUIRE( exit == 0, "the driver exited " << exit << ":\n" << printed );
+	BOOST_TEST( printed.find( "the targets are met" ) != std::string::npos );
+	std::size_t const at = printed.find( "the plasma support took " );
+	BOOST_TEST_REQUIRE( at != std::string::npos );
+	int const driverSweeps = std::atoi( printed.c_str() + at + 24 );
+	BOOST_TEST( printed.find( "sweeps and settled", at ) != std::string::npos,
+	            "the driver's support did not settle" );
+
+	// THE SAME FILE THROUGH THE LIBRARY, by the one translation the driver uses.
+	Machine m = buildMachine( inverseFile );
+	meq::poseInverse( *m.solver, m.coils, m.config->getCoils(),
+	                  m.config->getInverse() );
+	int librarySweeps = 0;
+	BOOST_TEST_REQUIRE( solveWithSweeps( m, librarySweeps ) );
+	BOOST_TEST_REQUIRE( m.solver->inverseTargetsMet() );
+	BOOST_TEST( librarySweeps == driverSweeps );
+
+	mfem::Mesh storedMesh( "machine-f-diiid-inverse.mesh", 1, 1 );
+	std::ifstream stream( "machine-f-diiid-inverse_psi.gf" );
+	BOOST_TEST_REQUIRE( stream.good() );
+	mfem::GridFunction const stored( &storedMesh, stream );
+	BOOST_TEST_REQUIRE( stored.Size() == m.solver->potential().Size() );
+	double worst = 0.0;
+	double largest = 0.0;
+	for ( int i = 0; i < stored.Size(); ++i )
+	{
+		worst = std::max( worst, std::abs( stored( i ) - m.solver->potential()( i ) ) );
+		largest = std::max( largest, std::abs( stored( i ) ) );
+	}
+
+	meq::Configuration const forward( machineFile );
+	std::vector<meq::FreeCircuit> const circuits =
+		meq::makeFreeCircuits( m.config->getCoils() );
+	std::vector<double> const solved = m.solver->freeCircuitCurrents();
+	double worstCurrent = 0.0;
+	for ( std::size_t k = 0; k < circuits.size(); ++k )
+	{
+		double const original =
+			forward.getCoils().coils[ circuits[ k ].coils.front() ].current;
+		worstCurrent = std::max( worstCurrent,
+		                         std::abs( solved[ k ] - original )/std::abs( original ) );
+	}
+	std::printf( "driver against library: %d and %d sweeps, psi_h to %.3e over %d "
+	             "dofs ( max |psi_h| %.3e ), currents to the forward file's %.3e, "
+	             "rank %d nullity %d\n", driverSweeps, librarySweeps, worst,
+	             stored.Size(), largest, worstCurrent, m.solver->inverseRank(),
+	             m.solver->inverseNullity() );
+
+	BOOST_TEST( worst < 1.0e-12 );
+	BOOST_TEST( worstCurrent < 1.0e-8 );
+	BOOST_TEST( m.solver->inverseNullity() == 0 );
+}
+
+/*
+ * A TARGET SET THE FREE CURRENTS CANNOT MEET IS A BEST FIT, AND THE RUN SAYS SO
+ * IN ITS EXIT STATUS. Plan section 4.5.
+ *
+ * The same targets with only F6A free -- the other three held at their
+ * perturbed values -- cannot be met: one current cannot put a separatrix back
+ * through 22 points. The run must converge anyway, to the best fit with every
+ * other constraint of the equilibrium met, write everything, print that the
+ * targets were not met, and exit 4 rather than 0.
+ */
+BOOST_AUTO_TEST_CASE( aTargetSetTheCurrentsCannotMeetIsABestFitAndExitsFour )
+{
+	ensureMesh( inverseFile );
+	std::string text = readAll( inverseFile );
+	for ( char const *name : { "F2A", "F2B", "F6B" } )
+	{
+		std::size_t const block = text.find( std::string( "Name = \"" ) + name + "\"" );
+		BOOST_TEST_REQUIRE( block != std::string::npos );
+		std::size_t const free = text.find( "Free = true\n", block );
+		BOOST_TEST_REQUIRE( free != std::string::npos );
+		text.erase( free, std::string( "Free = true\n" ).size() );
+	}
+	std::size_t const prefix = text.find( "Prefix = \"machine-f-diiid-inverse\"" );
+	BOOST_TEST_REQUIRE( prefix != std::string::npos );
+	text.replace( prefix, std::string( "Prefix = \"machine-f-diiid-inverse\"" ).size(),
+	              "Prefix = \"inverse-solve-best-fit\"" );
+	std::string const file = "inverse-solve-best-fit.toml";
+	{
+		std::ofstream out( file );
+		out << text;
+	}
+
+	std::string const log = "inverse-solve-best-fit.log";
+	int const exit = runDriver( file, log );
+	std::string const printed = readAll( log );
+	std::remove( log.c_str() );
+	std::size_t const at = printed.find( "inverse:" );
+	std::printf( "best fit: exit %d\n%s\n", exit,
+	             at == std::string::npos ? printed.c_str()
+	                                     : printed.substr( at, 600 ).c_str() );
+	BOOST_TEST( exit == 4 );
+	BOOST_TEST( printed.find( "THE TARGETS WERE NOT MET" ) != std::string::npos );
+	BOOST_TEST( printed.find( "inverse-solve-best-fit.nc" ) != std::string::npos,
+	            "a best fit must still be written" );
+	std::remove( file.c_str() );
 }

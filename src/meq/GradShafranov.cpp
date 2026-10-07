@@ -6286,16 +6286,15 @@ namespace
 		return inverseSingularValueList;
 	}
 
+	bool GradShafranovSolver::inverseTargetsMet() const
+	{
+		return inverseTargetsMetValue;
+	}
+
 	void GradShafranovSolver::applyFreeCircuitCurrents()
 	{
-		for ( std::size_t k = 0; k < freeCircuitList.size(); ++k )
-		{
-			FreeCircuit const &circuit = freeCircuitList[ k ];
-			for ( std::size_t m = 0; m < circuit.coils.size(); ++m )
-				freeCoilSet->setCurrent( circuit.coils[ m ],
-				                         circuit.multipliers[ m ]
-				                         *freeCircuitCurrentValues[ k ] );
-		}
+		setCircuitCurrents( *freeCoilSet, freeCircuitList,
+		                    freeCircuitCurrentValues );
 	}
 
 	void GradShafranovSolver::setLineSearchMerit( LineSearchMerit choice )
@@ -8605,8 +8604,8 @@ namespace
 		int nTargets = 0;
 		for ( InverseTarget const &target : inverseTargetList )
 			nTargets += target.kind == TargetKind::Isoflux ? 1 : 2;
-		bool const inverse = nFree > 0 || nTargets > 0;
-		if ( inverse )
+		bool const inverseSolve = nFree > 0 || nTargets > 0;
+		if ( inverseSolve )
 		{
 			char const *const where = "meq::GradShafranovSolver::solve: ";
 			if ( nFree == 0 )
@@ -11331,13 +11330,23 @@ namespace
 		 *                  holds -q -- XP-3's rows' own sign. Weight R h at P,
 		 *                  which is xScale's conversion of q into a change of
 		 *                  psi across one element.
-		 *   XPoint         ( H ( x_X - x_target ) )_c with H = grad q_h at the
-		 *                  tracked X-point: NO field part, and a corner of H on
-		 *                  XP-3's two columns. Weight xScale, being XP-3's own
-		 *                  quantity. H is the iterate's, read where refreshXPoint()
-		 *                  left it, so the row is frozen within a Jacobian as
-		 *                  XP-3's are; dropping dH/dx ( x_X - x_target ) is the
-		 *                  Gauss-Newton term, zero at the answer.
+		 *   XPoint         ( x_X - x_target )_c: NO field part, and a corner of
+		 *                  1 on XP-3's column c. LINEAR IN THE BORDER UNKNOWNS,
+		 *                  so the assembled row is its exact derivative
+		 *                  everywhere. Weighted by xTargetWeight -- xScale times
+		 *                  sqrt| det H |, H = grad q_h at the X-point, FROZEN at
+		 *                  the first iterate that has a field: the q a displaced
+		 *                  saddle would leave at the target, so the row speaks
+		 *                  XP-3's units, held constant.
+		 *
+		 *                  **NOT `H ( x_X - x_target )` WITH H THE ITERATE'S, AND
+		 *                  THAT WAS BUILT FIRST.** Its assembled derivative drops
+		 *                  dH/dx ( x_X - x_target ), which is zero only where the
+		 *                  target is met. Where it cannot be -- a best fit -- the
+		 *                  Gauss-Newton direction is then not a descent direction
+		 *                  for the merit: MEASURED, the merit ROSE by 1e-08 of
+		 *                  itself every step for 400 steps, the line search taking
+		 *                  its least bad trial each time. M-252.
 		 */
 		struct TargetRow
 		{
@@ -11425,21 +11434,24 @@ namespace
 			return t.kind == TargetKind::CriticalPoint ? -total : total;
 		};
 
-		/// The corner of target row `m` against border unknown `j`: XP-3's
-		/// columns for an X-point target, zero for everything else.
+		/// The corner of target row `m` against border unknown `j`: one on
+		/// XP-3's matching column for an X-point target, zero otherwise.
 		auto targetCorner = [ & ]( int m, int j ) -> double
 		{
 			TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
 			if ( t.kind != TargetKind::XPoint || !isXPointRow( j ) )
 				return 0.0;
-			return xFluxJacobian[ t.component ][ j - xPointIndex ];
+			return j - xPointIndex == t.component ? 1.0 : 0.0;
 		};
+
+		/// An X-point target's weight; see TargetRow. Zero until frozen.
+		double xTargetWeight = 0.0;
 
 		/// The weight that puts target row `m` in psi's units; see above.
 		auto targetWeight = [ & ]( int m ) -> double
 		{
 			TargetRow const &t = targetRows[ static_cast< std::size_t >( m ) ];
-			return t.kind == TargetKind::XPoint ? xScale : t.weight;
+			return t.kind == TargetKind::XPoint ? xTargetWeight : t.weight;
 		};
 
 		/// Every target row's constraint on a state. `fieldsLive` false is the
@@ -11460,14 +11472,24 @@ namespace
 				if ( t.kind != TargetKind::XPoint )
 					value = targetDot( m, state );
 				else if ( fieldsLive )
-					value = xFluxJacobian[ t.component ][ 0 ]*( xR - t.radius )
-					        + xFluxJacobian[ t.component ][ 1 ]*( xZ - t.z );
+				{
+					if ( xTargetWeight == 0.0 )
+					{
+						double const determinant =
+							xFluxJacobian[ 0 ][ 0 ]*xFluxJacobian[ 1 ][ 1 ]
+							- xFluxJacobian[ 0 ][ 1 ]*xFluxJacobian[ 1 ][ 0 ];
+						double const weight = xScale*std::sqrt( std::abs( determinant ) );
+						if ( weight > 0.0 && std::isfinite( weight ) )
+							xTargetWeight = weight;
+					}
+					value = t.component == 0 ? xR - t.radius : xZ - t.z;
+				}
 				out[ static_cast< std::size_t >( m ) ] = value;
 			}
 		};
 
-		/// What targetResiduals() reports: the constraint, except an X-point
-		/// row, which is reported as the displacement in metres.
+		/// What targetResiduals() reports: each row's constraint, unweighted,
+		/// an X-point row's being its displacement in metres.
 		auto targetReport = [ & ]() -> std::vector< double >
 		{
 			std::vector< double > out = targetValues;
@@ -12005,6 +12027,45 @@ namespace
 		// Back on the iterate, after the cold reference read them at zero.
 		targetsAll( unknown, targetValues );
 
+		/// `gamma^2 sum ( w_m T_m )^2`: the targets' share of the merit, squared.
+		auto targetMeritSquared = [ & ]()
+		{
+			double total = 0.0;
+			for ( int m = 0; m < nTargets; ++m )
+			{
+				double const v = gamma*targetWeight( m )
+				                 *targetValues[ static_cast<std::size_t>( m ) ];
+				total += v*v;
+			}
+			return total;
+		};
+
+		/*
+		 * AN INVERSE SOLVE'S LINE SEARCH JUDGES AN EXACT-PENALTY MERIT.
+		 *
+		 *     phi = F^2/2 + mu C,
+		 *
+		 * F the targets' share of augmentedNorm() and C the rest of it -- the
+		 * field and every border constraint, NOT squared. The step restores
+		 * the linearised constraints, so C falls at the rate C, and moves the
+		 * targets at a rate g the corner's own linearisation predicts; phi
+		 * descends along it whenever mu > g/C, and mu is raised to twice that
+		 * and never lowered.
+		 *
+		 * **THE AUGMENTED NORM CANNOT BE THE MERIT HERE AND THAT IS MEASURED.**
+		 * It sums the squared constraints and the squared targets with equal
+		 * weight, and a step that restores the equilibrium's equations at the
+		 * targets' expense need not reduce that sum: on DIII-D with one free
+		 * current against 23 unreachable rows, every full step was refused and
+		 * the damping sat at 2^-11 with the field residual at 6e-04 and the
+		 * plasma-current row at 3.6e-03 for 60 steps. M-252. Where the targets
+		 * are reachable F goes to zero with C and the two merits agree.
+		 *
+		 * The augmented norm still decides CONVERGENCE and drives the printed
+		 * history, exactly as LineSearchMerit::Field leaves it.
+		 */
+		double penaltyWeight = 0.0;
+
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations*phaseCount;
 		      ++iteration, ++phaseIteration )
@@ -12040,6 +12101,16 @@ namespace
 				record.exterior = gamma*std::sqrt( modes );
 				record.xPoint = gamma*xScale*std::sqrt( xFlux[ 0 ]*xFlux[ 0 ]
 				                                        + xFlux[ 1 ]*xFlux[ 1 ] );
+				{
+					double squared = 0.0;
+					for ( int m = 0; m < nTargets; ++m )
+					{
+						double const v = targetWeight( m )
+						                 *targetValues[ static_cast<std::size_t>( m ) ];
+						squared += v*v;
+					}
+					record.targets = gamma*std::sqrt( squared );
+				}
 				record.xR = xR;
 				record.xZ = xZ;
 				record.norm = norm;
@@ -12077,6 +12148,7 @@ namespace
 					borderStepHistory.back().handedOff = true;
 				if ( norm <= phaseTarget )
 				{
+					inverseTargetsMetValue = true;
 					converged = true;
 					break;
 				}
@@ -12564,6 +12636,13 @@ namespace
 			std::vector<double> step( static_cast<std::size_t>( nBorderTotal ), 0.0 );
 			// IV-3: the step in each free circuit current, in amperes.
 			std::vector<double> currentStep( static_cast<std::size_t>( nFree ), 0.0 );
+			// Whether this iterate is a least-squares stationary point whose
+			// targets cannot be met; see the inverse corner below.
+			bool bestFitReached = false;
+			// The exact-penalty merit's value here and its slope along the
+			// step; see penaltyWeight.
+			double penaltyMerit = 0.0;
+			double penaltySlope = 0.0;
 
 			/*
 			 * THE ELEVEN ROWS THAT WALKED THE WHOLE VECTOR ARE COMPRESSED, AND
@@ -13149,11 +13228,12 @@ namespace
 						columnSlot[ static_cast<std::size_t>( j ) ] = slot++;
 			}
 
-			if ( inverse )
+			if ( inverseSolve )
 			{
 				/*
-				 * IV-3's CORNER: RECTANGULAR, AND SOLVED AS A LEAST SQUARES.
-				 * INVERSE-AND-RECONSTRUCTION-PLAN.md section 4.3.
+				 * THE INVERSE CORNER: RECTANGULAR, THE EQUILIBRIUM'S ROWS EXACT
+				 * AND THE TARGETS FITTED. INVERSE-AND-RECONSTRUCTION-PLAN.md
+				 * section 4.3.
 				 *
 				 * Rows are every border constraint and then every target;
 				 * columns are every border unknown and then every free current.
@@ -13162,12 +13242,22 @@ namespace
 				 * blocks' corners EXACTLY ZERO: no border row reads a coil
 				 * current, and no unknown appears in a target but through psi.
 				 *
-				 * **THE ROWS ARE WEIGHTED AS THE MERIT WEIGHTS THEM**, so the
-				 * least-squares step is the Gauss-Newton step of the border half
-				 * of augmentedNorm(): gamma cancels, and XP-3's two rows carry
-				 * `xScale` because the merit gives them that length. Where the
-				 * targets are reachable the residual of this solve goes to zero
-				 * and the weighting decides nothing.
+				 * **THE BORDER ROWS ARE CONSTRAINTS AND ONLY THE TARGETS ARE
+				 * FITTED** -- meq::solveConstrainedLeastSquares(). The border
+				 * rows are the equilibrium's own equations, and one least
+				 * squares over every row trades them against a target the
+				 * machine cannot meet: measured on the DIII-D inverse example's
+				 * first support sweep, every border left at 1e-08 to 3e-07 and
+				 * the step at 1e-13, a stationary point that is not an
+				 * equilibrium (MEASUREMENTS.md M-252). Where the targets are
+				 * reachable the two forms agree.
+				 *
+				 * **THE TARGET ROWS ARE WEIGHTED AS THE MERIT WEIGHTS THEM**, so
+				 * the fit is the Gauss-Newton step of the targets' share of
+				 * augmentedNorm(). The border rows carry their merit weights
+				 * too -- XP-3's `xScale` -- which changes nothing about a
+				 * constraint and keeps the rank threshold comparing
+				 * commensurate rows.
 				 *
 				 * **THE CURRENT COLUMNS ARE SCALED BY THEIR SEEDS** before the
 				 * decomposition and unscaled after it. A column per ampere is
@@ -13228,12 +13318,89 @@ namespace
 					}
 				}
 
-				RegularisedStep const solved =
-					solveRegularisedLeastSquares( matrix, rows, columns, rhs,
-					                              weights );
+				std::size_t const split = static_cast<std::size_t>( nBorderTotal )
+				                          *static_cast<std::size_t>( columns );
+				std::vector<double> const boundRows( matrix.begin(),
+				                                     matrix.begin() + split );
+				std::vector<double> const boundRight( rhs.begin(),
+				                                      rhs.begin() + nBorderTotal );
+				std::vector<double> const fitRows( matrix.begin() + split,
+				                                   matrix.end() );
+				std::vector<double> const fitRight( rhs.begin() + nBorderTotal,
+				                                    rhs.end() );
+				ConstrainedStep const solved =
+					solveConstrainedLeastSquares( boundRows, nBorderTotal,
+					                              boundRight, fitRows, nTargets,
+					                              columns, fitRight, weights );
 				inverseRankValue = solved.rank;
 				inverseNullityValue = solved.nullity;
 				inverseSingularValueList = solved.singularValues;
+
+				/*
+				 * CONVERGED TO A BEST FIT, WHICH THE MERIT ALONE CANNOT SEE.
+				 * Plan section 4.5.
+				 *
+				 * Where the targets cannot be met -- a set a designer wrote
+				 * down, or ONE SWEEP of a support that has not settled, whose
+				 * frozen edge is not the equilibrium's -- the least squares
+				 * returns the Gauss-Newton step to the best fit and the merit
+				 * stalls above the tolerance at a stationary point.
+				 * MEASURED: the DIII-D inverse example's first sweep falls
+				 * 0.25 to 9.5e-07 in five steps and then holds there for 200.
+				 *
+				 * So the stop is STATIONARITY: everything but the targets at
+				 * the tolerance, and the LINEAR MODEL ITSELF unable to remove
+				 * more of the target misfit than the tolerance's worth --
+				 * `|| b ||^2 - || A dp - b ||^2` over the target rows, in the
+				 * merit's units. Where the targets are reachable that is the
+				 * whole misfit and the ordinary test above fires first.
+				 */
+				{
+					double rightSquared = 0.0;
+					for ( double v : fitRight )
+						rightSquared += v*v;
+					double const reducible =
+						gamma*std::sqrt( std::max( 0.0, rightSquared
+						                                - solved.residualNorm
+						                                  *solved.residualNorm ) );
+					double targetSquared = 0.0;
+					for ( int m = 0; m < nTargets; ++m )
+					{
+						double const v = targetWeight( m )
+						                 *targetValues[ static_cast<std::size_t>( m ) ];
+						targetSquared += gamma*gamma*v*v;
+					}
+					double const others =
+						std::sqrt( std::max( 0.0, norm*norm - targetSquared ) );
+					bestFitReached = reducible <= phaseTarget
+					                 && others <= phaseTarget;
+
+					// THE SLOPE OF F^2/2 ALONG THE STEP, from the corner's own
+					// linearisation: a target row moves by A dp - b.
+					double slope = 0.0;
+					for ( int m = 0; m < nTargets; ++m )
+					{
+						double predicted = -fitRight[ static_cast<std::size_t>( m ) ];
+						for ( int j = 0; j < columns; ++j )
+							predicted += fitRows[ static_cast<std::size_t>( m )
+							                      *static_cast<std::size_t>( columns )
+							                      + static_cast<std::size_t>( j ) ]
+							             *solved.step[ static_cast<std::size_t>( j ) ];
+						double const weighted =
+							targetWeight( m )*targetValues[ static_cast<std::size_t>( m ) ];
+						slope += gamma*gamma*weighted*predicted;
+					}
+					double const halfTargets = 0.5*targetSquared;
+					// Never below F itself, or a step whose targets already
+					// descend would weigh the constraints at nothing and be
+					// free to undo the equilibrium.
+					penaltyWeight = std::max( penaltyWeight,
+					                          std::sqrt( targetSquared ) );
+					if ( others > 0.0 && slope > 0.0 )
+						penaltyWeight = std::max( penaltyWeight, 2.0*slope/others );
+					penaltyMerit = halfTargets + penaltyWeight*others;
+					penaltySlope = slope - penaltyWeight*others;
+				}
 				for ( int j = 0; j < columns; ++j )
 				{
 					double const value = solved.step[ static_cast<std::size_t>( j ) ];
@@ -13556,6 +13723,20 @@ namespace
 			}
 			}
 
+			if ( bestFitReached )
+			{
+				// A Picard phase hands off, as it does on reaching its target;
+				// the Newton phase stops here, on the iterate it was handed.
+				if ( handOffToNewton( true ) )
+				{
+					borderStepHistory.back().handedOff = true;
+					continue;
+				}
+				inverseTargetsMetValue = false;
+				converged = true;
+				break;
+			}
+
 			double const deltaS = step[ 0 ];
 			double const deltaB = boundaryFluxIsUnknown
 			                      ? step[ static_cast<std::size_t>( boundaryIndex ) ] : 0.0;
@@ -13798,9 +13979,19 @@ namespace
 					constraintB );
 				borderStepHistory.back().trialXElement.push_back( xElement );
 
-				if ( std::isfinite( trialNorm ) && trialNorm < bestNorm )
+				// AN INVERSE SOLVE JUDGES ITS EXACT-PENALTY MERIT; see
+				// penaltyWeight. Everything else judges the augmented norm.
+				double trialMerit = trialNorm;
+				if ( inverseSolve && std::isfinite( trialNorm ) )
 				{
-					bestNorm = trialNorm;
+					double const targets = targetMeritSquared();
+					trialMerit = 0.5*targets
+					             + penaltyWeight*std::sqrt( std::max(
+					                   0.0, trialNorm*trialNorm - targets ) );
+				}
+				if ( std::isfinite( trialMerit ) && trialMerit < bestNorm )
+				{
+					bestNorm = trialMerit;
 					bestDamping = damping;
 				}
 				// Armijo, with the mildest useful constant: what is wanted is a
@@ -13818,6 +14009,11 @@ namespace
 				double const against = onField ? fieldReference : norm;
 				accepted = std::isfinite( judged ) && std::isfinite( trialNorm )
 				           && judged < ( 1.0 - 1.0e-4*damping )*against;
+				if ( inverseSolve )
+					accepted = std::isfinite( trialMerit )
+					           && trialMerit <= penaltyMerit
+					                            + 1.0e-4*damping*penaltySlope
+					           && penaltySlope < 0.0;
 				if ( accepted )
 				{
 					borderStepHistory.back().damping = damping;
@@ -14008,7 +14204,7 @@ namespace
 				normalisedSource->setCurrentScale( sL );
 		}
 		normalisationResidualValue = constraint;
-		if ( inverse )
+		if ( inverseSolve )
 			targetResidualValues = targetReport();
 		// Both, for the reason above: leaving the source at psi_bnd = 0 after the
 		// solve makes every later evaluation -- postProcess(), the estimator, the

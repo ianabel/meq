@@ -964,7 +964,7 @@ namespace meq
 		// Catch a misspelt or misplaced table before anything reports a key
 		// missing from a table that is not the one the author meant to write.
 		{
-			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils", "circuits", "conductors" };
+			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils", "circuits", "conductors", "inverse" };
 			for ( auto const & entry : document.as_table() )
 			{
 				auto matches = [ &entry ]( char const * candidate ) { return entry.first == candidate; };
@@ -1923,6 +1923,76 @@ namespace meq
 						               + std::to_string( meshOptions.generate.radius )
 						               + " does not leave room for it: D_h is CUT FROM that mesh, so the arc gmsh draws is the background's outer edge and not Gamma. Give the generator the larger radius" );
 				}
+			}
+		}
+
+		// [inverse] -- the targets that determine the Free currents.
+		//
+		// READ AFTER [[coils]] AND [boundary], because both refusals that
+		// matter are pairings with them: a Free current and a target come
+		// together or not at all, and Track = true pins the X-point that
+		// [boundary.xpoint] makes an unknown.
+		{
+			Table inverse( document, "inverse", sourceName, false );
+			inverse.rejectUnknownKeys( { "Gamma", "isoflux", "xpoint" } );
+			InverseConfig & v = inverseOptions;
+			v.given = inverse.isPresent() && !inverse.isEmpty();
+
+			v.gamma = inverse.getFloatOr( "Gamma", 0.0 );
+			if ( !( v.gamma >= 0.0 ) || !std::isfinite( v.gamma ) )
+				inverse.fail( "Gamma", "must be finite and non-negative: it is the weight on the step in each free current, in flux per ampere, and zero is no regularisation" );
+
+			for ( Table const & one : inverse.getTableArrayOr( "isoflux" ) )
+			{
+				one.rejectUnknownKeys( { "R1", "Z1", "R2", "Z2" } );
+				IsofluxTargetConfig t;
+				t.r1 = one.getFloat( "R1" );
+				t.z1 = one.getFloat( "Z1" );
+				t.r2 = one.getFloat( "R2" );
+				t.z2 = one.getFloat( "Z2" );
+				if ( !std::isfinite( t.r1 ) || !std::isfinite( t.z1 )
+				     || !std::isfinite( t.r2 ) || !std::isfinite( t.z2 ) )
+					one.fail( "R1", "every coordinate must be finite" );
+				if ( t.r1 == t.r2 && t.z1 == t.z2 )
+					one.fail( "R2", "the two points coincide, so the row is identically zero and constrains nothing" );
+				v.isoflux.push_back( t );
+			}
+
+			int tracked = 0;
+			for ( Table const & one : inverse.getTableArrayOr( "xpoint" ) )
+			{
+				one.rejectUnknownKeys( { "R", "Z", "Track" } );
+				XPointTargetConfig t;
+				t.radius = one.getFloat( "R" );
+				t.z = one.getFloat( "Z" );
+				t.track = one.getBooleanOr( "Track", true );
+				if ( !( t.radius > 0.0 ) || !std::isfinite( t.radius ) || !std::isfinite( t.z ) )
+					one.fail( "R", "the target must be finite and at R > 0: the symmetry axis carries near-zeros of q that are not X-points" );
+				if ( t.track && !boundaryOptions.xpoint.given )
+					one.fail( "Track", "Track = true pins the X-point the solve TRACKS, and there is none without [boundary.xpoint]; give one, or Track = false to ask for a critical point at this place without tracking it" );
+				if ( t.track && ++tracked > 1 )
+					one.fail( "Track", "a second tracked X-point target pins the same two unknowns somewhere else; a solve tracks one X-point" );
+				v.xpoint.push_back( t );
+			}
+
+			if ( v.given && v.rowCount() == 0 )
+				inverse.fail( "isoflux", "[inverse] names no target: give [[inverse.isoflux]] or [[inverse.xpoint]] blocks, which are what determine the Free currents" );
+			if ( v.given && !sourceOptions.isNormalised() )
+				inverse.fail( v.isoflux.empty() ? "xpoint" : "isoflux", "an inverse solve's currents are border unknowns of the bordered Newton, which runs only on a normalised source; set [source] Normalised = true" );
+			if ( v.given && conductorOptions.subtracts() )
+				inverse.fail( v.isoflux.empty() ? "xpoint" : "isoflux", "free currents are solved for MESHED conductors only: under [conductors] Model = \"subtracted\" or \"filament\" a current also enters the analytic conductor field, which the inverse border's column does not measure" );
+			if ( v.given && !coilOptions.anyFree() )
+				inverse.fail( v.isoflux.empty() ? "xpoint" : "isoflux", "there are targets and no Free current to meet them: mark a [[coils]] or [[circuits]] block Free = true, or remove [inverse]" );
+			if ( !v.given && coilOptions.anyFree() )
+			{
+				std::string where;
+				for ( std::size_t i = 0; i < coilOptions.coils.size() && where.empty(); ++i )
+					if ( coilOptions.coils[ i ].free )
+						where = "coils[" + std::to_string( i ) + "].Free";
+				for ( std::size_t c = 0; c < coilOptions.circuits.size() && where.empty(); ++c )
+					if ( coilOptions.circuits[ c ].free )
+						where = "circuits[" + std::to_string( c ) + "].Free";
+				throw ConfigError( sourceName, where, "makes a current an unknown and nothing determines it: an inverse solve needs targets, so add an [inverse] table with [[inverse.isoflux]] or [[inverse.xpoint]] blocks, or remove Free to solve with the given Current as data" );
 			}
 		}
 

@@ -1078,6 +1078,52 @@ namespace meq
 		ExteriorConfig exterior;
 	};
 
+	/// `[[inverse.isoflux]]`: ask that psi( R1, Z1 ) = psi( R2, Z2 ).
+	struct IsofluxTargetConfig
+	{
+		double r1 = 0.0;
+		double z1 = 0.0;
+		double r2 = 0.0;
+		double z2 = 0.0;
+	};
+
+	/// `[[inverse.xpoint]]`: an X-point at ( R, Z ). `Track` true pins the
+	/// saddle `[boundary.xpoint]` makes an unknown -- the plan's row four, and
+	/// the default because it carries the topology guarantee. False asks for
+	/// SOME critical point there, freegs4e's row three.
+	struct XPointTargetConfig
+	{
+		double radius = 0.0;
+		double z = 0.0;
+		bool track = true;
+	};
+
+	/**
+	 * `[inverse]` -- WHAT DETERMINES THE `Free` CURRENTS.
+	 * INVERSE-AND-RECONSTRUCTION-PLAN.md sections 5 and 7.3.
+	 *
+	 * **A FREE CURRENT AND A TARGET COME TOGETHER OR NOT AT ALL**, and both
+	 * halves are refused at parse: a `Free` current with no target is a null
+	 * direction of every step, and a target with nothing free is a row only
+	 * the equilibrium's own constraints could satisfy.
+	 *
+	 * `Gamma` is the regularisation of the STEP in every free current, in flux
+	 * per ampere (plan section 4.4). **ZERO MEANS NONE**, the minimum-norm
+	 * Newton step, and not "derive one": section 7.3 left that open and the
+	 * literal reading is the one that cannot surprise anybody.
+	 */
+	struct InverseConfig
+	{
+		bool given = false;
+		double gamma = 0.0;
+		std::vector< IsofluxTargetConfig > isoflux;
+		std::vector< XPointTargetConfig > xpoint;
+
+		/// The target ROWS: one per isoflux pair, two per X-point.
+		std::size_t rowCount() const noexcept
+		{ return isoflux.size() + 2*xpoint.size(); };
+	};
+
 	// [solver] AssemblyMode -- who computes the element-local work.
 	//
 	// A PERFORMANCE choice and never a numerical one: MFEM guarantees the two
@@ -1700,6 +1746,8 @@ namespace meq
 			DiscretisationConfig const & getDiscretisation() const noexcept { return discretisationOptions; };
 			SourceConfig const & getSource() const noexcept { return sourceOptions; };
 			BoundaryConfig const & getBoundary() const noexcept { return boundaryOptions; };
+			/// `[inverse]`. Not given unless the file has `Free` currents.
+			InverseConfig const & getInverse() const noexcept { return inverseOptions; };
 			SolverConfig const & getSolver() const noexcept { return solverOptions; };
 			OutputConfig const & getOutput() const noexcept { return outputOptions; };
 			InitialGuessConfig const & getInitialGuess() const noexcept
@@ -1722,6 +1770,7 @@ namespace meq
 			DiscretisationConfig discretisationOptions;
 			SourceConfig sourceOptions;
 			BoundaryConfig boundaryOptions;
+			InverseConfig inverseOptions;
 			SolverConfig solverOptions;
 			OutputConfig outputOptions;
 			InitialGuessConfig initialGuessOptions;

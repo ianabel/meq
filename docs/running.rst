@@ -195,6 +195,13 @@ Exit codes
      - The equilibrium was computed and something went wrong writing it — most
        often an output directory that does not exist. MEQ does **not** create
        the output directory.
+   * - ``4``
+     - targets not met
+     - An inverse solve (:ref:`config-inverse`) converged and everything was
+       written, but its targets were **not** met: the answer is the best fit
+       the free currents allow, with the equilibrium itself exact. It is what
+       the machine can do, not the shape that was asked for, and the residual
+       of every target is in the output.
 
 The split between 1 and 2 is the useful one for a script: a 1 means the input is
 wrong and re-running will not help, a 2 means the input is well formed and the

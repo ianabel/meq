@@ -24,7 +24,7 @@ every key; :doc:`examples` walks through the shipped configurations.
 
 Three tables are **required**: ``[mesh]``, ``[discretisation]``, ``[source]``.
 The rest — ``[boundary]``, ``[solver]``, ``[output]``, ``[initialguess]``,
-``[adaptivity]``, ``[conductors]`` — are optional, and an absent table behaves
+``[adaptivity]``, ``[conductors]``, ``[inverse]`` — are optional, and an absent table behaves
 exactly like a present but empty one. ``[[coils]]`` is an *array* of tables
 rather than a table, so "absent" there means no conductors at all.
 
@@ -849,11 +849,10 @@ coils alone is affine and finishes in one Newton step.
    * - ``Free``
      - ``false``
      - Marks this coil's current as an **unknown** of an inverse solve, with
-       ``Current`` as its starting value. The driver does not run an inverse
-       solve yet, since the targets that would determine the current have no
-       keys, so it **refuses** a file carrying this rather than solving with
-       the starting value as data. A coil in a ``[[circuits]]`` block may not
-       carry it; write it on the circuit.
+       ``Current`` as its starting value; ``[inverse]``'s targets are what
+       determine it, and a ``Free`` current with no ``[inverse]`` is refused.
+       A coil in a ``[[circuits]]`` block may not carry it; write it on the
+       circuit. See :ref:`config-inverse`.
 
 .. important::
 
@@ -952,7 +951,7 @@ is wired in circuits gives such a solve freedoms the machine does not have.
    * - ``Free``
      - ``false``
      - The circuit's current is an unknown of an inverse solve, starting from
-       ``Current``. Refused by the driver, as on a coil.
+       ``Current``, as on a coil. See :ref:`config-inverse`.
 
 .. important::
 
@@ -962,6 +961,77 @@ is wired in circuits gives such a solve freedoms the machine does not have.
    name matching no coil or two coils, and a circuit with no members are all
    refused. A coil in no circuit is its own supply and needs its own current,
    exactly as before.
+
+.. _config-inverse:
+
+``[inverse]``
+-------------
+
+**What determines the** ``Free`` **currents.** With it, the run is an *inverse*
+solve: the free coil and circuit currents are unknowns of the same Newton
+iteration as the equilibrium, and the targets below are the equations that fix
+them. ``examples/machine-f-diiid-inverse.toml`` is the worked example.
+
+.. code-block:: toml
+
+   [inverse]
+   Gamma = 0.0
+
+   [[inverse.isoflux]]          # psi( R1, Z1 ) = psi( R2, Z2 )
+   R1 = 2.3162
+   Z1 = 0.0719
+   R2 = 2.2834
+   Z2 = 0.2128
+
+   [[inverse.xpoint]]           # an X-point at ( R, Z )
+   R = 1.2009
+   Z = -0.9995
+   Track = true
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``Gamma``
+     - ``0``
+     - Regularisation of the step in every free current, in flux per ampere.
+       ``0`` is none: among the steps that meet the targets, the smallest is
+       taken. Larger values damp the currents towards the forward problem.
+   * - ``[[inverse.isoflux]]``
+     - —
+     - ``R1``, ``Z1``, ``R2``, ``Z2``: the two points must lie on one flux
+       surface. One equation each.
+   * - ``[[inverse.xpoint]]``
+     - —
+     - ``R``, ``Z``, and ``Track`` (default ``true``). With ``Track = true``
+       the X-point that ``[boundary.xpoint]`` makes an unknown is put at
+       ``( R, Z )``, which needs that block and allows one such target. With
+       ``Track = false`` *some* critical point is asked for there, which an
+       O-point also satisfies. Two equations each.
+
+**Free currents and targets come together.** A ``Free`` current with no
+``[inverse]``, an ``[inverse]`` with nothing free, an ``[inverse]`` naming no
+target, and ``[inverse]`` on a source that is not ``Normalised`` or under a
+``[conductors] Model`` other than ``"meshed"`` are all refused when the file is
+read. The driver also refuses ``[inverse]`` under ``--device`` and beside
+``[solver] BorderRegularisation``.
+
+**What the run reports.** Each free current against its starting value, the
+largest target residual, and the *rank* and *nullity* of the targets'
+equations over the currents, with their conditioning. A nullity above zero is
+a warning: the targets left that many directions in the currents undetermined,
+and those were chosen by the smallest step rather than by anything the file
+asked for. A shape can be matched closely by currents nothing like a real
+machine's; the rank and conditioning are how to tell. The ``.nc`` carries the
+same as ``inverse_*`` attributes.
+
+**Targets the currents cannot meet** are not a failure: the run converges to
+the best fit, with every other equation of the equilibrium satisfied, writes
+it, says so, and exits ``4`` rather than ``0`` — see
+:ref:`running-exit-codes`.
 
 ``[conductors]``
 ----------------

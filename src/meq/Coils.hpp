@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "Source.hpp"
@@ -1222,6 +1223,30 @@ namespace meq
 			std::shared_ptr<Source const> plasmaSource;
 			std::shared_ptr<CoilSet const> coilSet;
 	};
+
+	/**
+	 * ONE SUPPLY'S CURRENT, AS AN UNKNOWN OF AN INVERSE SOLVE: its member coils,
+	 * by index into a meq::CoilSet, and the signed multiplier each carries. A
+	 * member's current is `multiplier * I`. meq::CircuitParameters is the
+	 * configuration's form of the same thing; this one holds indices, because
+	 * GradShafranovSolver::setFreeCurrents() has no business with names and
+	 * the name is carried only for reporting.
+	 */
+	struct FreeCircuit
+	{
+		std::string name;
+		std::vector< std::size_t > coils;
+		std::vector< double > multipliers;
+	};
+
+	/// Write `currents[ k ]` into circuit `k`'s members, each as
+	/// `multiplier * current`. The one place a circuit current reaches its
+	/// coils, so the solver and a caller restoring an answer cannot disagree.
+	/// @throws std::invalid_argument if the counts differ, and what
+	///         CoilSet::setCurrent() throws for a bad index or current.
+	void setCircuitCurrents( CoilSet &coils,
+	                         std::vector< FreeCircuit > const &circuits,
+	                         std::vector< double > const &currents );
 
 	/**
 	 * The same sum, when the plasma source's profiles are functions of

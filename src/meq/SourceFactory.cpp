@@ -373,6 +373,31 @@ namespace meq
 		return set;
 	}
 
+	std::vector< FreeCircuit > makeFreeCircuits( CoilConfig const &config )
+	{
+		std::vector< FreeCircuit > out;
+		for ( std::size_t i = 0; i < config.coils.size(); ++i )
+		{
+			CoilParameters const &coil = config.coils[ i ];
+			if ( coil.free && coil.circuit.empty() )
+				out.push_back( FreeCircuit{ coil.name, { i }, { 1.0 } } );
+		}
+		for ( CircuitParameters const &circuit : config.circuits )
+		{
+			if ( !circuit.free )
+				continue;
+			FreeCircuit one;
+			one.name = circuit.name;
+			for ( CircuitMember const &member : circuit.members )
+			{
+				one.coils.push_back( member.index );
+				one.multipliers.push_back( member.multiplier );
+			}
+			out.push_back( one );
+		}
+		return out;
+	}
+
 	std::shared_ptr<ConductorField const>
 		makeConductorField( CoilConfig const &coils,
 		                    ConductorConfig const &conductors,

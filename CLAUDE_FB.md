@@ -1763,75 +1763,105 @@ sources that differ at the per-cent level, and an agreement much tighter than
 what is measured would be evidence of a shared mistake rather than of two right
 answers.
 
-## IV-3: coil currents are border unknowns of the same Newton
+## IV-3 to IV-5: coil currents are border unknowns of the same Newton
 
 `GradShafranovSolver::setFreeCurrents()` makes a circuit's current one more
-border unknown, and `addIsofluxTarget()` adds one more row,
-`psi_h( P1 ) − psi_h( P2 ) = 0`. `INVERSE-AND-RECONSTRUCTION-PLAN.md` is the
-design and [M-250](MEASUREMENTS.md#m-250) the measurement.
+border unknown. The targets are rows:
+* `addIsofluxTarget()`: `psi_h( P1 ) − psi_h( P2 ) = 0`;
+* `addXPointTarget()`: the tracked saddle at a point;
+* `addCriticalPointTarget()`: `q_h( P ) = 0`.
+
+From a file, `Free` and `[inverse]` reach it through `meq::poseInverse()`, the
+one translation the driver and the tests share.
+`INVERSE-AND-RECONSTRUCTION-PLAN.md` is the design, and
+[M-250](MEASUREMENTS.md#m-250), [M-251](MEASUREMENTS.md#m-251) and
+[M-252](MEASUREMENTS.md#m-252) are the measurements.
 
 **THE COLUMN IS CONSTANT AND THE CORNER AGAINST IT IS ZERO, SO A FREE CURRENT
 COSTS ONE BACKSOLVE A STEP.** On the meshed route a coil enters the residual
 only as `mu0 R I/area` on its rectangle through `meq::SourceIntegrator`. That
 is affine in `I` and independent of `psi`, the support and every border
 unknown, so one forward difference of the residual per circuit per solve IS
-the column. The difference rather than an assembly is the exterior columns'
-reason: it asks the question the residual answers, through the same
-point-sampled coil edges. **No border row reads a current**: the plasma-current
-row integrates `scaledF()`, the plasma term alone, and the transmission rows'
-conductor moments are zero without an analytic conductor field.
+the column. **No border row reads a current**: the plasma-current row
+integrates `scaledF()`, the plasma term alone, and the transmission rows'
+conductor moments are zero without an analytic conductor field. **The Newton
+count is the test of the column**: the residual is exact whatever the column
+says, so a column 10% wrong still recovers the currents, in seven steps.
 
-**THE CORNER IS THEN RECTANGULAR AND GOES TO IV-2's LEAST SQUARES**, with the
-rows weighted as `augmentedNorm()` weights them, so the step is the
-Gauss-Newton step of the merit's border half. The current columns are scaled by
-their seeds, because a column per ampere sits five orders below one per weber
-and both the rank threshold and the minimum norm compare columns. On reachable
-targets the residual of that solve goes to zero and Newton stays quadratic:
-two steps on DIII-D. **The Newton count is the test of the column**: the
-residual is exact whatever the column says, so a column 10% wrong still
-recovers the currents, in seven steps.
+**THE CORNER IS A CONSTRAINED LEAST SQUARES, AND THE CONSTRAINT IS THE WHOLE
+POINT.** The border rows are the equilibrium's own equations and hold exactly;
+only the targets are fitted, by `meq::solveConstrainedLeastSquares()` in the
+null space of the border rows. **One least squares over every row was built
+first and is wrong in a way reachable targets cannot show.** It trades the
+equilibrium's equations against a target it cannot meet, and the first sweep
+of any inverse run is such a case: its support is frozen at a guess, not at
+the equilibrium the targets describe. It stalled with every border row at
+1e-08 to 3e-07, on a state that is not an equilibrium. The current columns are
+scaled by their seeds, because a column per ampere sits five orders below one
+per weber, and the target rows carry their merit weights.
+
+**THE RANK AND SINGULAR VALUES REPORTED ARE THE TARGETS' OVER THAT NULL
+SPACE**, which is the honest answer to how many current directions the targets
+determine, and how well:
+* all eighteen DIII-D coils against 21 isoflux rows is rank 18 at a condition
+  of 1.04e+08, determined in exact arithmetic and in nothing a magnetics
+  measurement supplies;
+* with five rows the nullity is 13, the targets are met to 5e-17, and the
+  currents are up to 2.7% from the machine's.
+
+That second case is Lackner's §2.3 on one machine, asserted. **The rank alone
+reports the first case healthy**, which is why the singular values go to
+stdout and the `.nc`.
+
+**ROW FOUR IS THE DISPLACEMENT `x_X − x_target`, LINEAR IN XP-3's UNKNOWNS.**
+It is weighted into the merit by `xScale sqrt| det grad q_h |`, frozen at the
+first iterate with a field, so it speaks XP-3's units. **It is not
+`H ( x_X − x_target )` with the iterate's `H`**, which was built first. Its
+derivative drops `dH/dx ( x_X − x_target )`, which vanishes only at a met
+target, and on a best fit the merit then crept uphill for 400 steps. *A
+Gauss-Newton term "zero at the answer" is zero only at an answer that
+exists.*
+
+**A TARGET SET THE CURRENTS CANNOT MEET IS A BEST FIT, NOT A FAILURE**, plan
+§4.5, and two things make it reachable:
+1. **The inverse line search judges an exact-penalty merit**,
+   `F²/2 + mu C`: `F` is the targets' share and `C` the equilibrium's, not
+   squared, with `mu` raised to keep the step a descent direction. The
+   augmented norm weighs the two alike, and with one free current every full
+   step was refused at the bottom of the ladder.
+2. **The solve stops at stationarity**: everything but the targets at the
+   tolerance, and the corner's linearisation unable to remove more than the
+   tolerance's worth of target misfit. `inverseTargetsMet()` is then false,
+   and the driver writes everything, says so, and exits 4.
+
+**THE TWO X-POINT ROWS ARE DIFFERENT QUESTIONS.**
+* `addXPointTarget()` pins the saddle XP-3 is tracking, and is refused
+  without it.
+* `addCriticalPointTarget()` is freegs4e's form, and any critical point
+  satisfies it.
+
+On DIII-D they agree to 5.7e-11 because the tracked saddle is the one that
+arrives. Negating a row together with its value is an equivalent mutant
+(`−G = 0`). The control that matters is a coil that cannot reach the target,
+which now ends at a best fit with the null 1.2 cm short.
 
 **THE CURRENTS LIVE IN THE `meq::CoilSet` THE SOURCE CARRIES**, written through
-`CoilSet::setCurrent()` at every trial point. The solver refuses any other
-set, by address. A solver-side offset added to the residual would have worked
-and left the set reporting the seed while the field reflected the answer: two
-answers to one question, which the coil wrapper's forwarding exists to rule
-out. `makeCoilSet()` returns the set writable for this reason.
-
-**THE RANK IS NOT ENOUGH, AND THE SINGULAR VALUES ARE REPORTED BESIDE IT.**
-All eighteen DIII-D coils against 21 isoflux rows is full rank and recovers
-every current, at a condition of 3.4e+08. That is determined in exact
-arithmetic and in nothing a magnetics measurement supplies, and the rank alone
-reports it healthy. With five rows the nullity is 13, every target is met to
-3e-17, and the currents are up to 2.7% from the machine's. That is Lackner's
-§2.3 on one machine, asserted rather than described.
+`CoilSet::setCurrent()` at every trial point, and the solver refuses any other
+set by address. **The driver treats that set as shared state**:
+* every solver it builds starts from the currents its attempt started from,
+  so a retry is the same problem;
+* a converged cycle carries its answer to the next;
+* the no-axis fallback puts the first answer's currents back with its solver.
 
 **REFUSED, EACH ONE A CONVERGED WRONG ANSWER OTHERWISE**:
 * an analytic conductor field, where a current also enters the datum and the
   moments;
 * a configured Device, whose integrand uploads a snapshot of the coil
-  densities, which is M-239's class;
+  densities;
 * `setBorderRegularisation()`, which damps a square corner;
-* targets without free currents, and free currents without targets.
-
-**IV-4's TWO X-POINT ROWS ARE DIFFERENT QUESTIONS** →
-[M-251](MEASUREMENTS.md#m-251).
-* `addXPointTarget()` pins the saddle XP-3 is tracking, and is refused
-  without it. Its constraint is `H ( x_X − x_target )` with `H = grad q_h`,
-  not the bare displacement: a length in the merit beside fluxes would need a
-  scale nothing supplies, and this is XP-3's own `q`, in its units and under
-  `xScale`.
-* `addCriticalPointTarget()` is `q_h( P ) = 0`, freegs4e's form, and any
-  critical point satisfies it.
-
-On DIII-D the two agree to 5.7e-11 because the tracked saddle is the one that
-arrives. **Negating a row with its value is an equivalent mutant** (`−G = 0`
-is the same equation), so a test cannot and should not catch it. The control
-that matters is a coil that cannot reach the target, because XP-3's X-point
-is itself an unknown and could otherwise satisfy its own rows while the
-currents did nothing.
-
-The driver refuses `Free` until IV-5 gives the targets keys.
+* targets without free currents, free currents without targets, and
+  `[inverse]` off the normalised path. The configuration refuses each of
+  these before a mesh exists.
 
 ## PE-0: the premise is true, and the plan's own machinery does not cash it
 

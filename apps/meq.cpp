@@ -38,6 +38,7 @@
 #include "meq/FluxExtraction.hpp"
 #include "meq/FluxFamily.hpp"
 #include "meq/GradShafranov.hpp"
+#include "meq/Inverse.hpp"
 #include "meq/Output.hpp"
 #include "meq/RotatingSource.hpp"
 #include "meq/SafetyFactor.hpp"
@@ -71,7 +72,12 @@ namespace
 		Solved = 0,
 		ConfigurationError = 1,
 		SolveFailed = 2,
-		OutputFailed = 3
+		OutputFailed = 3,
+		// An inverse solve converged and was written, to the BEST FIT its
+		// free currents allow: the targets were not met. Not a plain success,
+		// by INVERSE-AND-RECONSTRUCTION-PLAN.md section 4.5 -- a reader
+		// excuses a shape residual they would refuse if it were named.
+		TargetsNotMet = 4
 	};
 
 	void usage()
@@ -112,7 +118,8 @@ namespace
 			"                       turns a stale host read into a named fault.\n"
 			"\n"
 			"Exit codes: 0 solved, 1 configuration, 2 solve did not converge,\n"
-			"3 output could not be written.\n" );
+			"3 output could not be written, 4 an inverse solve's targets were not\n"
+			"met and the best fit was written.\n" );
 	}
 
 	/*
@@ -690,16 +697,16 @@ namespace
 			return;
 
 		std::printf( "\n   it     ||r||    g*axis     g*bnd     g*Ip"
-		             "   g*ext    g*xpt      damp  n   A       ||y||"
+		             "   g*ext    g*xpt    g*targ      damp  n   A       ||y||"
 		             "        X-point\n" );
 		auto const &steps = solver->borderSteps();
 		for ( std::size_t i = 0; i < steps.size(); ++i )
 		{
 			meq::GradShafranovSolver::BorderStep const &b = steps[ i ];
-			std::printf( "  %3zu  %9.3e %9.2e %9.2e %9.2e %8.1e %8.1e"
+			std::printf( "  %3zu  %9.3e %9.2e %9.2e %9.2e %8.1e %8.1e %8.1e"
 			             "  %8.2e %2d %4s  %10.3e  ( %7.4f, %7.4f )%s\n",
 			             i, b.fieldNorm, b.axis, b.boundary, b.current,
-			             b.exterior, b.xPoint, b.damping, b.trials,
+			             b.exterior, b.xPoint, b.targets, b.damping, b.trials,
 			             b.armijo ? "yes" : "NO", b.directionNorm,
 			             b.xR, b.xZ,
 			             b.directionFinite ? "" : "  <- DIRECTION NOT FINITE" );
@@ -1249,7 +1256,17 @@ int main( int argc, char **argv )
 	/// machine carrying double the coil current with every printed diagnostic
 	/// looking as it should. `conductorField` below is non-null in exactly the
 	/// cases this is null for that reason, and never both.
-	std::shared_ptr<meq::CoilSet const> coils;
+	std::shared_ptr<meq::CoilSet> coils;
+	/// `[inverse]`'s free circuits, their currents as the file gave them, and
+	/// the currents the NEXT solver starts from -- the file's until a cycle
+	/// converges, then that cycle's answer. Empty unless the file has
+	/// `[inverse]`. See makeSolver() and the retry rung.
+	std::vector<meq::FreeCircuit> freeCircuits;
+	std::vector<double> inverseSeeds;
+	std::vector<double> inverseCurrents;
+	/// Set when the converged answer is a best fit to targets it did not
+	/// meet; the run then writes everything and exits TargetsNotMet.
+	bool inverseTargetsShort = false;
 	/*
 	 * psi_c, THE ANALYTIC CONDUCTOR FIELD, or null when `[conductors]` did not
 	 * ask for one.
@@ -1390,30 +1407,42 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * `Free = true` IS AN UNKNOWN THIS DRIVER CANNOT YET SOLVE FOR.
+		 * AN INVERSE SOLVE, AND THE TWO PAIRINGS ONLY THE DRIVER CAN SEE.
+		 * INVERSE-AND-RECONSTRUCTION-PLAN.md IV-5.
 		 *
-		 * It marks a coil or circuit current as an unknown of the inverse
-		 * solve, `Current` being where that solve starts -- and the inverse
-		 * solve is INVERSE-AND-RECONSTRUCTION-PLAN.md IV-3, not built. Run
-		 * forward, the file would solve with the seed as data and report an
-		 * equilibrium for currents nobody chose, which is the
-		 * accepted-and-ignored key this tree refuses everywhere else. The
-		 * configuration layer reads and checks it so that the schema exists
-		 * before the solver does.
+		 * The configuration has already refused every pairing it can read --
+		 * Free without [inverse], targets without Free, a non-normalised
+		 * source, a subtracted conductor model, Track without
+		 * [boundary.xpoint]. What is left is the build and the solver
+		 * options: a configured Device, whose integrand uploads a SNAPSHOT of
+		 * the coil current densities that a free current would leave stale
+		 * (MEASUREMENTS.md M-239's class), and the border regularisation,
+		 * which damps a square corner where an inverse solve's is rectangular
+		 * and regularised by [inverse] Gamma instead. Both are refused here,
+		 * before a mesh exists, where the library would refuse them at the
+		 * first solve and report exit 2 for a configuration error.
 		 */
-		if ( config->getCoils().anyFree() )
+		if ( config->getInverse().given )
 		{
-			std::fprintf( stderr,
-				"MEQ: this configuration marks a coil or circuit current Free,\n"
-				"     which makes it an unknown of an INVERSE solve -- and the\n"
-				"     driver does not run one yet: the library solves it, the\n"
-				"     [inverse] targets that would drive it have no keys\n"
-				"     (INVERSE-AND-RECONSTRUCTION-PLAN.md, stage IV-5). It is\n"
-				"     refused rather than run\n"
-				"     forward, because a forward run would treat the starting\n"
-				"     Current as data and report an equilibrium for currents\n"
-				"     nobody chose. Remove Free to solve with those currents.\n" );
-			return ConfigurationError;
+			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			{
+				std::fprintf( stderr,
+					"MEQ: [inverse] is not solved under --device: the device\n"
+					"     integrand uploads the coil currents once per operator\n"
+					"     build, and a Free current moves between residuals, so\n"
+					"     the device would integrate a stale machine. Run it on the\n"
+					"     host.\n" );
+				return ConfigurationError;
+			}
+			if ( config->getSolver().borderRegularisation > 0.0
+			     || config->getSolver().borderCollinearityRegularisation > 0.0 )
+			{
+				std::fprintf( stderr,
+					"MEQ: [solver] BorderRegularisation damps a SQUARE border\n"
+					"     corner, and an inverse solve's is rectangular; its\n"
+					"     regularisation is [inverse] Gamma. Remove one.\n" );
+				return ConfigurationError;
+			}
 		}
 
 		coils = meq::makeCoilSet( config->getCoils(),
@@ -1446,6 +1475,19 @@ int main( int argc, char **argv )
 		conductorGeometry = coils ? coils.get()
 		                  : conductorField ? &conductorField->coils()
 		                                   : nullptr;
+
+		// [inverse]'s circuits and their seeds, read from the set the source
+		// will carry. The configuration has refused a subtracted conductor
+		// model beside [inverse], so `coils` is the meshed set here.
+		if ( config->getInverse().given && coils )
+		{
+			freeCircuits = meq::makeFreeCircuits( config->getCoils() );
+			for ( meq::FreeCircuit const &circuit : freeCircuits )
+				inverseSeeds.push_back(
+					coils->coil( circuit.coils.front() ).current()
+					/circuit.multipliers.front() );
+			inverseCurrents = inverseSeeds;
+		}
 
 		/*
 		 * AND IT SAYS SO, LOUDLY, BEFORE ANYTHING IS SOLVED.
@@ -2887,6 +2929,28 @@ int main( int argc, char **argv )
 			fresh->setExteriorCoupling( *exterior );
 
 		/*
+		 * IV-5: THE INVERSE PROBLEM, ON EVERY SOLVER THIS BUILDS -- the first
+		 * attempt, the retry rung and each adaptive cycle -- so a retry is the
+		 * same problem as the attempt it follows.
+		 *
+		 * THE COIL SET IS SHARED STATE AND IS PUT BACK FIRST. A solve moves the
+		 * currents in the set the source carries, so a failed attempt leaves
+		 * its last trial there; the retry starts from the currents the attempt
+		 * STARTED from -- `inverseCurrents`, which only a converged cycle moves.
+		 * The rule the plasma edge's first freeze already keeps: a second
+		 * attempt is only a second attempt if it starts where the first did.
+		 * The Picard prestage's unbordered solvers get the seeds too, and no
+		 * inverse: they have no border to carry one.
+		 */
+		if ( !freeCircuits.empty() )
+		{
+			meq::setCircuitCurrents( *coils, freeCircuits, inverseCurrents );
+			if ( normalised && bordered )
+				meq::poseInverse( *fresh, coils, config->getCoils(),
+				                  config->getInverse() );
+		}
+
+		/*
 		 * psi_c, AND IT GOES ON EVERY FRESH SOLVER BECAUSE THE MESH CHECK IS
 		 * PER MESH.
 		 *
@@ -4131,6 +4195,12 @@ int main( int argc, char **argv )
 					else
 					{
 						solver = std::move( first );
+						// THE COIL SET IS SHARED STATE TOO: the retry wrote its
+						// own currents into it, and the first answer was solved
+						// with the first solver's.
+						if ( solver->inverseIsPosed() )
+							meq::setCircuitCurrents( *coils, freeCircuits,
+							                         solver->freeCircuitCurrents() );
 						normalised->setNormalisation( keptAxis, keptBoundary );
 						normalised->setCurrentScale( keptScale );
 						if ( keptFrozen )
@@ -4256,6 +4326,12 @@ int main( int argc, char **argv )
 			xPointSeedR = solver->xPointR();
 			xPointSeedZ = solver->xPointZ();
 		}
+		// AND THE FREE CURRENTS, for the same reason: the next adaptive cycle's
+		// solver starts where this one finished, and a retry within a cycle
+		// starts from the seeds this cycle began with, which is what makes it
+		// a second attempt.
+		if ( solver->inverseIsPosed() )
+			inverseCurrents = solver->freeCircuitCurrents();
 
 		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
 		              -1.0, solver->newtonIterations(), globalised, rung };
@@ -4675,6 +4751,57 @@ int main( int argc, char **argv )
 			std::printf( "     psi_ax = %.6e Wb/rad, constraint psi_ax - max psi_h "
 			             "= %.3e\n",
 			             solver->psiAxis(), solver->normalisationResidual() );
+
+		/*
+		 * THE CURRENTS AN INVERSE SOLVE CHOSE, AND HOW WELL THE TARGETS FIXED
+		 * THEM. A nullity above zero is printed as a warning and not a
+		 * failure: the targets were met, and some directions in the currents
+		 * were chosen by the minimum norm or by Gamma rather than by anything
+		 * the file said -- Lackner's point, which MEASUREMENTS.md M-250 shows
+		 * on DIII-D with five targets meeting the shape at currents up to 2.7%
+		 * from the machine's.
+		 */
+		if ( solver->inverseIsPosed() )
+		{
+			std::vector<double> const solved = solver->freeCircuitCurrents();
+			std::vector<double> const residuals = solver->targetResiduals();
+			std::vector<double> const sigma = solver->inverseSingularValues();
+			double worst = 0.0;
+			for ( double v : residuals )
+				worst = std::max( worst, std::abs( v ) );
+			std::printf( "     inverse: %zu free circuit%s against %zu target "
+			             "row%s, corner rank %d nullity %d",
+			             solved.size(), solved.size() == 1 ? "" : "s",
+			             residuals.size(), residuals.size() == 1 ? "" : "s",
+			             solver->inverseRank(), solver->inverseNullity() );
+			if ( !sigma.empty() && sigma.back() > 0.0 )
+				std::printf( ", condition %.3e", sigma.front()/sigma.back() );
+			std::printf( "\n     largest target residual %.3e\n", worst );
+			for ( std::size_t k = 0; k < solved.size() && k < freeCircuits.size(); ++k )
+				std::printf( "       %-12s %+.10e A  from %+.10e A  ( %+.3f%% )\n",
+				             freeCircuits[ k ].name.c_str(), solved[ k ],
+				             inverseSeeds[ k ],
+				             inverseSeeds[ k ] != 0.0
+				             ? 100.0*( solved[ k ] - inverseSeeds[ k ] )/inverseSeeds[ k ]
+				             : 0.0 );
+			inverseTargetsShort = !solver->inverseTargetsMet();
+			if ( inverseTargetsShort )
+				std::printf( "     WARNING: THE TARGETS WERE NOT MET. This is the BEST FIT the free\n"
+				             "     currents allow, with every other constraint of the equilibrium\n"
+				             "     met: an answer to what this machine can do, and not the shape\n"
+				             "     asked for. The run exits %d.\n",
+				             static_cast<int>( TargetsNotMet ) );
+			else
+				std::printf( "     the targets are met\n" );
+			if ( solver->inverseNullity() > 0 )
+				std::printf( "     WARNING: the targets leave %d direction%s in the "
+				             "currents undetermined; they\n"
+				             "     were chosen by the minimum-norm step%s, not by "
+				             "anything this file asked for.\n",
+				             solver->inverseNullity(),
+				             solver->inverseNullity() == 1 ? "" : "s",
+				             config->getInverse().gamma > 0.0 ? " and Gamma" : "" );
+		}
 
 		/*
 		 * THE EXTERIOR COEFFICIENTS ARE AN ANSWER AND NOT A DIAGNOSTIC, so they
@@ -5829,6 +5956,43 @@ int main( int argc, char **argv )
 			writer.attribute( "coils", static_cast<int>( coils->size() ) );
 			writer.attribute( "coil_current", coils->totalCurrent() );
 			writer.attribute( "conductor_model", "meshed" );
+		}
+		/*
+		 * AN INVERSE SOLVE WRITES OUT WHAT IT CHOSE. INVERSE-AND-
+		 * RECONSTRUCTION-PLAN.md section 7.4, and NOT OPTIONAL by section 1.4: a
+		 * file that reports only the shape is the report Lackner's figures say
+		 * will look perfect on a bad answer. So the currents per circuit, every
+		 * target row's residual, and the corner's rank, nullity and the spread
+		 * of its singular values -- the last because a full rank at a condition
+		 * of 1e8 determines the currents in exact arithmetic and in nothing a
+		 * measurement supplies (MEASUREMENTS.md M-250).
+		 */
+		if ( solver->inverseIsPosed() )
+		{
+			auto joined = []( std::vector<double> const &values )
+			{
+				std::ostringstream out;
+				out.setf( std::ios::scientific );
+				out.precision( 12 );
+				for ( std::size_t i = 0; i < values.size(); ++i )
+					out << ( i == 0 ? "" : " " ) << values[ i ];
+				return out.str();
+			};
+			std::string names;
+			for ( std::size_t k = 0; k < freeCircuits.size(); ++k )
+				names += ( k == 0 ? "" : " " ) + freeCircuits[ k ].name;
+			writer.attribute( "inverse_circuits", names );
+			writer.attribute( "inverse_currents",
+			                  joined( solver->freeCircuitCurrents() ) );
+			writer.attribute( "inverse_target_residuals",
+			                  joined( solver->targetResiduals() ) );
+			writer.attribute( "inverse_targets_met",
+			                  solver->inverseTargetsMet() ? 1 : 0 );
+			writer.attribute( "inverse_rank", solver->inverseRank() );
+			writer.attribute( "inverse_nullity", solver->inverseNullity() );
+			std::vector<double> const sigma = solver->inverseSingularValues();
+			if ( !sigma.empty() && sigma.back() > 0.0 )
+				writer.attribute( "inverse_condition", sigma.front()/sigma.back() );
 		}
 		/*
 		 * AND THE SUBTRACTED ROUTE WRITES THE SAME TWO PLUS THE MODEL, BECAUSE
@@ -6997,5 +7161,5 @@ int main( int argc, char **argv )
 		std::fflush( stdout );
 	}
 
-	return Solved;
+	return inverseTargetsShort ? TargetsNotMet : Solved;
 }

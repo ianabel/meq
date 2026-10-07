@@ -223,6 +223,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/FluxFamily.cpp
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
+	src/meq/Inverse.cpp
 	src/meq/Output.cpp
 	src/meq/PlasmaComponent.cpp
 	src/meq/PointLocator.cpp
@@ -264,6 +265,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/FluxExtraction.cpp
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
+	src/meq/Inverse.cpp
 	src/meq/Output.cpp
 	src/meq/PointLocator.cpp
 	src/meq/PointLocatorDevice.cpp

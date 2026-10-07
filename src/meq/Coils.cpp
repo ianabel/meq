@@ -1330,6 +1330,29 @@ namespace meq
 		return coilList;
 	}
 
+	void setCircuitCurrents( CoilSet &coils,
+	                         std::vector< FreeCircuit > const &circuits,
+	                         std::vector< double > const &currents )
+	{
+		if ( currents.size() != circuits.size() )
+			throw std::invalid_argument(
+				"meq::setCircuitCurrents: " + std::to_string( currents.size() )
+				+ " currents for " + std::to_string( circuits.size() )
+				+ " circuits" );
+		for ( std::size_t k = 0; k < circuits.size(); ++k )
+		{
+			FreeCircuit const &circuit = circuits[ k ];
+			if ( circuit.multipliers.size() != circuit.coils.size() )
+				throw std::invalid_argument(
+					"meq::setCircuitCurrents: circuit " + circuit.name + " has "
+					+ std::to_string( circuit.coils.size() ) + " coils and "
+					+ std::to_string( circuit.multipliers.size() ) + " multipliers" );
+			for ( std::size_t m = 0; m < circuit.coils.size(); ++m )
+				coils.setCurrent( circuit.coils[ m ],
+				                  circuit.multipliers[ m ]*currents[ k ] );
+		}
+	}
+
 	void CoilSet::setCurrent( std::size_t index, double current )
 	{
 		if ( index >= coilList.size() )

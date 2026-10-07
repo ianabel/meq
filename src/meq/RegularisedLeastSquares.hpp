@@ -115,6 +115,73 @@ namespace meq
 	                                              std::vector<double> const &rhs,
 	                                              std::vector<double> const &gamma = {},
 	                                              double relativeThreshold = 0.0 );
+
+	/// What solveConstrainedLeastSquares() returns.
+	struct ConstrainedStep
+	{
+		/// The minimiser, one entry per column.
+		std::vector<double> step;
+
+		/// The numerical rank of the REDUCED problem -- `A` restricted to the
+		/// null space of the constraints -- and its nullity against that null
+		/// space's dimension: the directions the constraints leave open that
+		/// the least-squares rows do not determine either.
+		int rank = 0;
+		int nullity = 0;
+
+		/// The reduced problem's singular values, largest first.
+		std::vector<double> singularValues;
+
+		/// `|| A step - b ||` and `|| C step - d ||`.
+		double residualNorm = 0.0;
+		double constraintResidualNorm = 0.0;
+
+		/// `|| diag( gamma ) step ||`.
+		double penaltyNorm = 0.0;
+	};
+
+	/**
+	 * @brief The minimiser of `|| A x - b ||^2 + || diag( gamma ) x ||^2`
+	 *        SUBJECT TO `C x = d`.
+	 *
+	 * **WHY THE INVERSE CORNER NEEDS THIS AND NOT THE UNCONSTRAINED FORM.**
+	 * The constraint rows are the EQUILIBRIUM's -- psi_ax, psi_bnd, the
+	 * X-point, the plasma current, the transmission rows -- and the
+	 * least-squares rows are the TARGETS. Fitted together as one least
+	 * squares, a target set the machine cannot meet is traded against the
+	 * equilibrium's own equations, and the iteration stalls on a state that
+	 * is not an equilibrium: measured on the DIII-D inverse example's first
+	 * support sweep, every border row left at 1e-08 to 3e-07 beside a target
+	 * misfit of 9e-07, with the step at 1e-13 (MEASUREMENTS.md M-252). Where
+	 * the targets ARE reachable the two forms agree, which is why IV-3 and
+	 * IV-4 could not see it.
+	 *
+	 * Solved in the NULL SPACE of `C`, by singular value decompositions
+	 * throughout: `x_p` the minimum-norm solution of `C x = d` -- the
+	 * least-squares one if the constraints are inconsistent -- `Z` an
+	 * orthonormal basis of `C`'s null space, and then the regularised least
+	 * squares in `y` for `x = x_p + Z y`, minimum norm among minimisers.
+	 *
+	 * @param constraints  `C`, `constraintRows x columns`, row-major. Zero rows
+	 *                     is the unconstrained problem.
+	 * @param matrix       `A`, `rows x columns`, row-major. Zero rows is
+	 *                     `x = x_p` with the regularisation alone deciding
+	 *                     the null space -- that is, `y = 0`.
+	 * @param gamma        one non-negative finite weight per column, or empty.
+	 * @param relativeThreshold  as for solveRegularisedLeastSquares(), applied
+	 *                     to both decompositions.
+	 *
+	 * @throws std::invalid_argument naming the inconsistency, as the
+	 *         unconstrained form does.
+	 */
+	ConstrainedStep solveConstrainedLeastSquares( std::vector<double> const &constraints,
+	                                              int constraintRows,
+	                                              std::vector<double> const &right,
+	                                              std::vector<double> const &matrix,
+	                                              int rows, int columns,
+	                                              std::vector<double> const &rhs,
+	                                              std::vector<double> const &gamma = {},
+	                                              double relativeThreshold = 0.0 );
 }
 
 #endif

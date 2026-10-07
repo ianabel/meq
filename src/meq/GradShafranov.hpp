@@ -9,6 +9,7 @@
 
 #include "mfem.hpp"
 
+#include "Coils.hpp"
 #include "ConductorStore.hpp"
 // Phase B's payload is a member, so its definition has to be visible here.
 // It is MFEM types and PODs only -- no device language -- so a host build
@@ -3459,20 +3460,9 @@ namespace meq
 			 */
 			double plasmaCurrentSensitivity() const;
 
-			/**
-			 * ONE SUPPLY'S CURRENT, AS AN UNKNOWN: its member coils, by index
-			 * into the meq::CoilSet setFreeCurrents() is handed, and the signed
-			 * multiplier each carries. A coil's current is `multiplier * I`.
-			 * meq::CircuitParameters is the configuration's form of the same
-			 * thing; this is the library's, and holds indices because a solver
-			 * has no business with names.
-			 */
-			struct FreeCircuit
-			{
-				std::string name;
-				std::vector< std::size_t > coils;
-				std::vector< double > multipliers;
-			};
+			/// meq::FreeCircuit, which lives with the coils so the MFEM-free
+			/// configuration layer can build one.
+			using FreeCircuit = ::meq::FreeCircuit;
 
 			/**
 			 * @brief MAKE SOME COIL CURRENTS UNKNOWNS OF THE BORDERED NEWTON.
@@ -3555,16 +3545,16 @@ namespace meq
 			 * the saddle moved is the one the solve was following from its
 			 * seed, never a critical point that happens to be nearer.
 			 *
-			 * **THE CONSTRAINT IS `H ( x_X - x_target )` AND NOT THE BARE
-			 * DISPLACEMENT**, with `H = grad q_h` at the X-point. That is the
-			 * `q` the field would carry at the target if the saddle were where
-			 * the iterate has it, linearised: the same quantity, in the same
-			 * units and under the same weight, as XP-3's own `q = 0` rows. A
-			 * length added to the merit beside fluxes would need a scale
-			 * nothing supplies; this one inherits `xScale`. It vanishes exactly
-			 * where the displacement does whenever `H` is non-singular, which
-			 * is what makes the point a SADDLE and not a degenerate critical
-			 * point. targetResiduals() reports it in metres.
+			 * **THE CONSTRAINT IS THE DISPLACEMENT `x_X - x_target`, LINEAR IN
+			 * XP-3's UNKNOWNS, SO ITS ROW IS ITS EXACT DERIVATIVE.** It is
+			 * weighted into the merit by `xScale sqrt| det grad q_h |`, frozen
+			 * at the first iterate with a field: the `q` a saddle displaced by
+			 * that much would leave at the target, so the row speaks XP-3's
+			 * units. Frozen and not the iterate's, because `H ( x_X -
+			 * x_target )` with a moving `H` has a derivative this row does not
+			 * assemble wherever the target is not met -- which made a best fit
+			 * creep UPHILL, measured (MEASUREMENTS.md M-252).
+			 * targetResiduals() reports it in metres.
 			 */
 			void addXPointTarget( double radius, double z );
 
@@ -3622,6 +3612,21 @@ namespace meq
 			/// currents only in exact arithmetic, and that ratio is what
 			/// multiplies a target's error into a current's.
 			std::vector< double > inverseSingularValues() const;
+
+			/**
+			 * WHETHER THE LAST SOLVE MET ITS TARGETS, OR CONVERGED TO THE BEST
+			 * FIT TO THEM. Plan section 4.5.
+			 *
+			 * A solve whose targets the machine cannot reach does not fail: it
+			 * stops where the linear model can remove no more of the misfit
+			 * than the tolerance's worth, with every other constraint met, and
+			 * reports false here. That is a legitimate answer to "what is the
+			 * best this machine can do" and **must be read as such and never as
+			 * the shape that was asked for** -- targetResiduals() says by how
+			 * much it is not. True whenever the whole merit, targets included,
+			 * reached the tolerance.
+			 */
+			bool inverseTargetsMet() const;
 
 			/**
 			 * COUPLE THE EXTERIOR TO THE SOLVE, so that the Gegenbauer
@@ -4331,6 +4336,9 @@ namespace meq
 				double exterior = 0.0;
 				/// gamma * xScale * || q( x_X ) ||, XP-3's two rows together.
 				double xPoint = 0.0;
+				/// IV-3's targets, `gamma` times their weighted norm: the share of
+				/// the merit an inverse solve's targets carry. Zero without one.
+				double targets = 0.0;
 				/// The damping finally applied, 1.0 for a full Newton step.
 				double damping = 0.0;
 				/// Which linearisation the field block of this step's Jacobian
@@ -5191,6 +5199,7 @@ namespace meq
 			int inverseRankValue = 0;
 			int inverseNullityValue = 0;
 			std::vector< double > inverseSingularValueList;
+			bool inverseTargetsMetValue = false;
 
 			/// Write freeCircuitCurrentValues into freeCoilSet, member by member.
 			void applyFreeCircuitCurrents();

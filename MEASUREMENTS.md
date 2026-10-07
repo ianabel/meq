@@ -15113,6 +15113,8 @@ fails 14 checks and putting gamma on the neighbouring column fails 6.
 
 ### M-250
 
+*Measured on the corner as it stood then, one least squares over every row and, for M-251, row four as `H ( x_X − x_target )`. Both are replaced by IV-5 and the cases are re-measured on the constrained corner in [M-252](#m-252).*
+
 **IV-3: COIL CURRENTS AS BORDER UNKNOWNS. FOUR CIRCUITS COME BACK TO 1e-11 IN
 TWO NEWTON STEPS, AND ALL EIGHTEEN COME BACK THROUGH A CORNER WHOSE CONDITION
 IS 3.4e+08.** `INVERSE-AND-RECONSTRUCTION-PLAN.md` §9. `machine-f-diiid` solved
@@ -15185,6 +15187,8 @@ and IV-6 is the test that can.
 
 ### M-251
 
+*Measured on the corner as it stood then, one least squares over every row and, for M-251, row four as `H ( x_X − x_target )`. Both are replaced by IV-5 and the cases are re-measured on the constrained corner in [M-252](#m-252).*
+
 **IV-4: THE X-POINT ROWS. BOTH KINDS PUT THE TRACKED SADDLE ON A TARGET MOVED
 2.1 cm, AGREE ON THE CURRENTS TO 5.7e-11, AND THE ANSWER SURVIVES RELEASE.**
 `INVERSE-AND-RECONSTRUCTION-PLAN.md` §9. `machine-f-diiid` solved forward as in
@@ -15242,3 +15246,91 @@ same support. Whether a support re-decided at the moved X-point settles is
 IV-5's question, §6.2.
 
 `InverseSolve` is 45 s for its five cases. The double suite is **67 of 68** on this tree, the one red the deliberate `PlasmaEdgeConvergence`.
+
+### M-252
+
+**IV-5: THE DRIVER SOLVES AN INVERSE PROBLEM FROM A COLD GUESS INSIDE ITS
+SUPPORT SWEEPS. GETTING THERE FALSIFIED THREE THINGS IV-3 AND IV-4 HAD BUILT,
+EACH OF WHICH WAS RIGHT ONLY WHERE THE TARGETS ARE REACHABLE.**
+`INVERSE-AND-RECONSTRUCTION-PLAN.md` §9. `examples/machine-f-diiid-inverse.toml`
+is the forward DIII-D file with F2A, F2B, F6A and F6B `Free` at seeds 2 to 3
+per cent off, 21 `[[inverse.isoflux]]` pairs read off the forward
+equilibrium's separatrix, and an `[[inverse.xpoint]]` at its X-point.
+`MKL = 1`:
+
+| run | sweeps (Newton per sweep) | targets | currents | exit |
+|---|---|---|---|---|
+| the example, driver, from the cold guess | 3 (6, 2, 2), settled | met, 2.6e-12 | the forward file's to **3.2e-11** | 0 |
+| the same file through the library, `meq::poseInverse()` | 3 | met | — | — |
+| driver against library | — | — | `psi_h` to **0.0** over 29,088 dofs | — |
+| F6A alone free, the other three held at their seeds | 4 (9, 8, 5, 5), settled | **best fit**, 4.6e-03 | F6A −0.81% | **4** |
+
+In the best-fit run every constraint of the equilibrium itself closes to
+round-off: field 3.7e-16, axis 2.6e-17, plasma current 4.1e-16.
+
+**FALSIFIED, FIRST: ONE LEAST SQUARES OVER EVERY ROW OF THE CORNER.** The
+example's first sweep freezes the support at the cold guess's edge, and on
+that support the targets cannot be met exactly, because they were read off
+the converged equilibrium's own support. The merit fell from 0.25 to 9.5e-07
+in five steps and held there for 200. The profile said why:
+
+* the field residual was at round-off and the step at 1e-13;
+* the equilibrium's own border rows were left at 2e-08 (axis), 1.6e-08
+  (`psi_bnd`), 5.5e-08 (plasma current), 2.8e-07 (exterior) and 1e-07
+  (X-point), beside a target misfit of 9e-07.
+
+The least squares had traded the equilibrium's equations against targets it
+could not meet, and converged to a state that is not an equilibrium. **The
+border rows are now constraints and only the targets are fitted**:
+`meq::solveConstrainedLeastSquares()`, in the null space of the constraints,
+agrees with the KKT system to 1.3e-15. On the same random rows the
+unconstrained form leaves the constraints violated at 0.33.
+
+**FALSIFIED, SECOND: ROW FOUR AS `H ( x_X − x_target )` WITH THE ITERATE'S
+`H`.** Its assembled derivative drops `dH/dx ( x_X − x_target )`, which is zero
+only where the target is met. On a best fit the Gauss-Newton direction is then
+not a descent direction for the merit: measured, the merit **rose** by 1e-08 of
+itself every step for 400 steps, the line search taking its least bad trial
+each time. Row four is now the displacement itself, linear in XP-3's unknowns
+and so exactly differentiated. Its weight is `xScale sqrt| det H |`, frozen at
+the first iterate with a field.
+
+**FALSIFIED, THIRD: THE AUGMENTED NORM AS THE INVERSE LINE SEARCH'S MERIT.** It
+weighs squared constraints and squared targets equally, and a step that
+restores the equilibrium at the targets' expense need not reduce that sum. With
+one free current against 23 unreachable rows, every full step was refused: the
+damping sat at 2^-11 for 60 steps, with the field residual at 6e-04 and the
+plasma-current row at 3.6e-03. The inverse line search now judges the exact
+penalty `phi = F²/2 + mu C`:
+* `F` is the targets' share of the augmented norm and `C` the rest, not
+  squared;
+* `mu` is at least `F` and at least twice the targets' predicted slope over
+  `C`, and is never lowered;
+* convergence is still decided on the augmented norm.
+
+**AND A BEST FIT NEEDS ITS OWN STOP.** Where the targets cannot be met the
+merit cannot reach the tolerance. The solve stops when everything but the
+targets is at the tolerance and the corner's own linearisation can remove no
+more than the tolerance's worth of target misfit,
+`|| b ||² − || A dp − b ||²`. The driver writes the answer, prints *THE
+TARGETS WERE NOT MET*, records `inverse_targets_met = 0`, and exits **4**.
+
+**IV-3 AND IV-4 RE-MEASURED ON THE CONSTRAINED CORNER.** Rank, nullity and
+singular values are now those of the targets' equations over the null space
+of the equilibrium's: how many current directions the targets determine, and
+how well.
+
+| case | Newton | rank / nullity | σ max .. min | targets | currents |
+|---|---|---|---|---|---|
+| four circuits, 21 rows | 2 | 4 / 0 | 1.65 .. 1.77e-02 | 1.8e-13 | 2.0e-11 |
+| all 18, 21 rows | 2 | 18 / 0 | 1.77 .. **1.70e-08**, condition **1.04e+08** | 2.7e-15 | 1.2e-07 |
+| all 18, 5 rows | 3 | 5 / **13** | 0.86 .. 2.59e-02 | 4.7e-17 | not recovered, to 2.7e-02 |
+| X-point moved 2.1 cm, row four | 5 | 2 / 0 | — | X-point on target | F4B −13.372%, F8B +58.255% |
+| the same, row three | 5 | 2 / 0 | — | X-point on target | agree with row four to 5.7e-11 |
+| control, F6A alone | 10, **converged** | — | — | **not met**, null 1.2e-02 m short | — |
+
+The control converges to a best fit where it used to stall at its cap, and
+that is the stop working. With the exact row four, flipping its corner's sign
+gives no convergence.
+
+`InverseSolve` is 7 cases and 72 s under `ctest -j4`. The double suite is **67 of 68** on this tree, the one red the deliberate `PlasmaEdgeConvergence`.

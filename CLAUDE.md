@@ -66,7 +66,7 @@ converging quadratically. `tests/convergence/SolovievConvergence.cpp` and
 **MEQ is runnable.** `apps/meq.cpp` is the driver, `MEQ_BUILD_APP` defaults
 `ON`, and `meq config.toml` parses, builds the mesh and source, solves — with
 the adaptive loop if asked — and writes the same equilibrium **three times**,
-with exit codes 0/1/2/3 as `docs/running.rst` specifies — plus, on request, a
+with exit codes 0/1/2/3/4 as `docs/running.rst` specifies — plus, on request, a
 fourth file that is not the equilibrium at all but a **reduction** of it:
 
 | | |
@@ -1826,7 +1826,7 @@ their own file:
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst` is the derivation, and `CLAUDE_FLOW.md` the record |
 | solution inversion | IN-A to IN-P, **every stage done** | `INVERSION-PLAN.md`, and `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-4 **done** — the X-point is two unknowns of the bordered Newton, driveable from a file, and MEQ reproduces `freegs4e`'s DIVERTED equilibrium | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
-| inverse solve | IV-0 to IV-4 **done**: coil currents are border unknowns of the same Newton, and isoflux, X-point and critical-point targets are its rows, in the library — M-250, M-251. IV-5, the driver, is next; until then it refuses `Free` | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
+| inverse solve | IV-0 to IV-5 **done**: coil currents are border unknowns of the same Newton, isoflux, X-point and critical-point targets are its rows, and `[inverse]` runs through the driver inside the support sweeps, exiting 4 on a best fit — M-250 to M-252. IV-6, the seven machines, is next | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, and `CLAUDE_FB.md` |
 
 The two plan files that had nothing left in them are gone, converted to `docs/`:
 `DRIVER-PLAN.md` was stage 7 and `FLOW-PLAN.md` was the flow campaign. Git has

@@ -69,7 +69,8 @@ USAGE = """meq-run -- make a configuration's mesh, then solve on it
 
 Any other option is passed through to meq, so `meq-run f.toml --device debug`
 works.  Exit codes are meq's own -- 0 solved, 1 configuration, 2 the solve did
-not converge, 3 output -- because the solve is exec'd rather than called.
+not converge, 3 output, 4 an inverse solve's targets were not met and the best
+fit was written -- because the solve is exec'd rather than called.
 """
 
 

@@ -1826,20 +1826,22 @@ BOOST_AUTO_TEST_CASE( theDriverRefusesASolverItCannotHonour )
 }
 
 /*
- * A FREE CURRENT IS AN UNKNOWN THE DRIVER CANNOT YET SOLVE FOR, AND IT SAYS SO.
+ * A FREE CURRENT WITH NOTHING TO DETERMINE IT IS REFUSED, AND SO IS AN INVERSE
+ * SOLVE THE DRIVER CANNOT POSE.
  *
- * `Free = true` parses -- INVERSE-AND-RECONSTRUCTION-PLAN.md IV-1 puts the
- * schema in place before the solver. The library solves for free currents
- * (IV-3, InverseSolve.cpp), but the targets that would drive them have no keys
- * and the driver has no inverse path until IV-5. Run forward, the seed Current
- * would be treated as data and the
- * run would report an equilibrium for currents nobody chose: the
- * accepted-and-ignored key. So the driver refuses it with exit 1, on a coil
- * and on a circuit, and the same file without `Free` must SOLVE, or the case
- * would pass with every coil refused. Asserted on the PAIRING, as
- * theDriverRefusesThreadedAssemblyOnADevice is.
+ * `Free = true` makes a current an unknown, and [inverse]'s targets are what
+ * determine it (INVERSE-AND-RECONSTRUCTION-PLAN.md IV-5). A Free current with
+ * no [inverse] would be a null direction of every Newton step, and run
+ * forward it would solve with the seed Current as data -- the
+ * accepted-and-ignored key. So the configuration refuses it with exit 1, on a
+ * coil and on a circuit; it refuses [inverse] on a source that is not
+ * normalised, since only the bordered Newton carries the currents; and the
+ * same file with neither must SOLVE, or the case would pass with every coil
+ * refused. Asserted on the PAIRING, as theDriverRefusesThreadedAssemblyOnADevice
+ * is. The positive inverse case is InverseSolve.cpp's
+ * theDriverSolvesAnInverseProblem, on the DIII-D machine.
  */
-BOOST_AUTO_TEST_CASE( theDriverRefusesAFreeCurrentUntilItHasAnInversePath )
+BOOST_AUTO_TEST_CASE( theDriverRefusesAFreeCurrentWithNothingToDetermineIt )
 {
 	auto write = []( char const *path, char const *coilExtra, char const *circuits )
 	{
@@ -1857,13 +1859,20 @@ BOOST_AUTO_TEST_CASE( theDriverRefusesAFreeCurrentUntilItHasAnInversePath )
 
 	write( "driver-acceptance-free-coil.toml", "Current = 1.0e3\nFree = true\n", "" );
 	BOOST_TEST( run( "driver-acceptance-free-coil.toml" ) == 1,
-	            "a Free coil must be refused until the driver has an inverse path" );
+	            "a Free coil with no [inverse] must be refused" );
+
+	// AND WITH TARGETS, on a source that is not normalised: there is no
+	// bordered Newton to carry the current as an unknown.
+	write( "driver-acceptance-free-inverse.toml", "Current = 1.0e3\nFree = true\n",
+	       "\n[inverse]\n[[inverse.isoflux]]\nR1 = 1.0\nZ1 = 0.5\nR2 = 1.0\nZ2 = -0.5\n" );
+	BOOST_TEST( run( "driver-acceptance-free-inverse.toml" ) == 1,
+	            "[inverse] on a source that is not normalised must be refused" );
 
 	write( "driver-acceptance-free-circuit.toml", "",
 	       "\n[[circuits]]\nName = \"P\"\nCurrent = 1.0e3\nFree = true\n"
 	       "Coils = [ { Name = \"PU\", Multiplier = 1.0 } ]\n" );
 	BOOST_TEST( run( "driver-acceptance-free-circuit.toml" ) == 1,
-	            "a Free circuit must be refused until the driver has an inverse path" );
+	            "a Free circuit with no [inverse] must be refused" );
 
 	// The same circuit, NOT free, is a forward notation and solves.
 	write( "driver-acceptance-circuit.toml", "",

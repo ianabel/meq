@@ -1,0 +1,411 @@
+# MACHINE-F-DIIID-INVERSE -- examples/machine-f-diiid.toml POSED AS AN
+# INVERSE PROBLEM. INVERSE-AND-RECONSTRUCTION-PLAN.md stage IV-5.
+#
+# Four of the eighteen coil currents are UNKNOWNS -- F2A, F2B, F6A, F6B,
+# marked Free = true -- and their Current is only where the solve STARTS,
+# set 2 to 3 per cent away from the forward file's: +3%, -2%, +2%, -3%.
+# What determines them is [inverse] at the bottom: the separatrix of the
+# forward file's own converged equilibrium, read off at 22 points, and its
+# X-point.
+#
+# SO THIS IS A SELF-CONSISTENCY CASE AND SAYS SO: the targets come from an
+# answer, so the currents that meet them are known -- the forward file's --
+# and a run of this file should report each of the four within about 1e-9
+# of them. It cannot show a target the machine cannot reach; a target set a
+# designer wrote down could be one.
+#
+# Everything else -- mesh, profiles, plasma current, the cold guess, the
+# support sweeps -- is examples/machine-f-diiid.toml's, unchanged. Run it
+# with meq-run, which makes the mesh:
+#
+#     ./build/meq-run examples/machine-f-diiid-inverse.toml
+#
+# The targets were written by solving machine-f-diiid.toml forward through
+# the library and bisecting psi_h = psi_bnd along 24 rays from the axis,
+# dropping the one through the X-point -- the procedure in
+# tests/convergence/InverseSolve.cpp's separatrixPoints().
+
+[mesh]
+File = "examples/machine-f-diiid.msh"
+
+# THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
+# [boundary.exterior] Radius = 3.4, which has to fit strictly inside.
+# Every conductor lies within 2.7078 m of the origin.
+[mesh.generate]
+Tool = "halfdisc"
+Radius = 3.7
+Size = 0.259
+PlasmaRMin = 0.8550
+PlasmaRMax = 2.5450
+PlasmaZMin = -1.3000
+PlasmaZMax = 1.3000
+PlasmaSize = 0.1268
+# The smallest conductor here is 0.0500 m in its shorter half-extent.
+CoilSize = 0.04
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+# The plasma support is a SET, so its derivative is a surface term the
+# Jacobian does not have: it is frozen within each solve and re-decided
+# between them.  MEASUREMENTS.md M-82 -- without this the first solve
+# stalls at the iteration cap rather than running slowly.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+# THE STARTING VALUE OF AN UNKNOWN, taken from the peak of the cold
+# guess below.  psi_ax is a functional of the solution -- a bordered
+# Newton row and not data -- so what a file supplies is where to START,
+# and the best estimate available before solving is the best available
+# guess's own peak.  The reference converged to 3.758545e-01, which is 23%
+# away: this is a basin and not an answer.
+PsiAxis = 2.887839087e-01
+PlasmaCurrent = 1.0000000003e+06
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/machine-f-diiid-pprime.dat"
+GGPrimeFile = "examples/machine-f-diiid-ggprime.dat"
+
+# THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
+# --coil rectangles from these blocks, in this order, so the mesh is
+# aligned to the conductors the solve integrates over.  Currents are the
+# TOTAL through each cross-section: freegs4e's turns, circuit
+# multipliers and solenoid windings are all resolved into them by
+# tools/freegs4e-benchmark/conductors.py.
+# This machine's are filament.
+
+[[coils]]
+Name = "F1A"
+CentreR = 0.860800
+CentreZ = 0.168300
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.3773984082e+05
+
+[[coils]]
+Name = "F2A"
+CentreR = 0.861400
+CentreZ = 0.508100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.4098854673e+05
+Free = true
+
+[[coils]]
+Name = "F3A"
+CentreR = 0.862800
+CentreZ = 0.849100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.6247566500e+03
+
+[[coils]]
+Name = "F4A"
+CentreR = 0.861100
+CentreZ = 1.189900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.7012221102e+05
+
+[[coils]]
+Name = "F5A"
+CentreR = 1.004100
+CentreZ = 1.516900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.0618607304e+05
+
+[[coils]]
+Name = "F6A"
+CentreR = 2.612400
+CentreZ = 0.437600
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.7337668216e+05
+Free = true
+
+[[coils]]
+Name = "F7A"
+CentreR = 2.373300
+CentreZ = 1.117100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.7507862309e+05
+
+[[coils]]
+Name = "F8A"
+CentreR = 1.251800
+CentreZ = 1.601900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.7905453512e+04
+
+[[coils]]
+Name = "F9A"
+CentreR = 1.689000
+CentreZ = 1.587400
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -7.3633472440e+04
+
+[[coils]]
+Name = "F1B"
+CentreR = 0.860800
+CentreZ = -0.173700
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.4145918088e+05
+
+[[coils]]
+Name = "F2B"
+CentreR = 0.860700
+CentreZ = -0.513500
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.2398551228e+05
+Free = true
+
+[[coils]]
+Name = "F3B"
+CentreR = 0.861100
+CentreZ = -0.854300
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.8184268665e+02
+
+[[coils]]
+Name = "F4B"
+CentreR = 0.863000
+CentreZ = -1.195700
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.7450310830e+05
+
+[[coils]]
+Name = "F5B"
+CentreR = 1.002500
+CentreZ = -1.516900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.0335291826e+05
+
+[[coils]]
+Name = "F6B"
+CentreR = 2.612400
+CentreZ = -0.443760
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.6455142734e+05
+Free = true
+
+[[coils]]
+Name = "F7B"
+CentreR = 2.383400
+CentreZ = -1.117100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.7562339658e+05
+
+[[coils]]
+Name = "F8B"
+CentreR = 1.252400
+CentreZ = -1.602700
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.8077755341e+04
+
+[[coils]]
+Name = "F9B"
+CentreR = 1.688900
+CentreZ = -1.578000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -7.4894015579e+04
+
+[boundary]
+Type = "zero"
+
+# THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a
+# prescription: XP-3's border closes q_r = q_z = 0 and
+# psi_bnd = psi_h( R_X, z_X ) on the same Newton, and the seed selects
+# WHICH saddle is followed.
+#
+# THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the
+# reference achieved, which is 0.0001 m away.  That distinction is the
+# whole of what makes this a cold start.
+[boundary.xpoint]
+R = 1.200000000000
+Z = -1.000000000000
+
+[boundary.exterior]
+Radius = 3.4
+CentreZ = 0.0
+Modes = 10
+
+# NOT A NICETY.  A cold start on a free-boundary machine case wanders
+# and does not converge; the guess is part of the problem statement.
+#
+# IT IS COLD.  tools/freegs4e-benchmark/mkcoldguess.py builds it from
+# the MACHINE -- the conductors and their currents, the target plasma
+# current, and the shape the operator asked for -- and from nothing
+# that was solved for.  mkexactguess.py is the OTHER one, which sums
+# Green's functions over the reference's own converged Jtor; this
+# comment named it for a while and was wrong, which matters: a run
+# seeded from mkexactguess has the answer in the starting position,
+# and is a different benchmark.
+[initialguess]
+Type = "gridfunction"
+File = "examples/machine-f-diiid-guess.gf"
+MeshFile = "examples/machine-f-diiid-guess.mesh"
+
+[output]
+Prefix = "machine-f-diiid-inverse"
+GridNR = 129
+GridNZ = 129
+
+# THE TARGETS. Every [[inverse.isoflux]] asks that its two points share one
+# flux, and the first point of each is the same, so together they ask for
+# one flux surface through 22 points. The [[inverse.xpoint]] pins the
+# X-point [boundary.xpoint] makes an unknown -- Track = true, the default --
+# and Track = false would ask for SOME critical point there instead.
+#
+# Gamma = 0 is no regularisation: the minimum-norm Newton step. With four
+# free circuits against 23 target rows there is nothing for it to choose.
+[inverse]
+Gamma = 0.0
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.283400183871
+Z2 = 0.212848222797
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.228254331390
+Z2 = 0.352115346450
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.150052323076
+Z2 = 0.496223728666
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.034505509281
+Z2 = 0.640426199293
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.871580590645
+Z2 = 0.777741776298
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.650826919943
+Z2 = 0.898742000003
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.363322924131
+Z2 = 0.979645074771
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.176710416485
+Z2 = 0.771953314620
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.139989934635
+Z2 = 0.482632469404
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.112216980394
+Z2 = 0.271964918274
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.099102944801
+Z2 = 0.088062423376
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.098832326639
+Z2 = -0.088404876765
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.110991438332
+Z2 = -0.272779380250
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.137333619562
+Z2 = -0.484977557481
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.650913061454
+Z2 = -0.898394516097
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 1.871518153164
+Z2 = -0.777574342376
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.034130234694
+Z2 = -0.639827032130
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.149472141201
+Z2 = -0.495774446759
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.227851903513
+Z2 = -0.352113378513
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.283149221852
+Z2 = -0.213051096758
+
+[[inverse.isoflux]]
+R1 = 2.316215166235
+Z1 = 0.071866614588
+R2 = 2.316255406296
+Z2 = -0.072178738125
+
+[[inverse.xpoint]]
+R = 1.200929095566
+Z = -0.999490432122
+Track = true

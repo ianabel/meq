@@ -25,7 +25,14 @@ anchor, a `file:line`, or a paper with its section and equation number. Where
 the design needs a number that does not exist, the experiment that would produce
 it is named and the gap is left open.
 
-## STATUS: IV-0 TO IV-4 ARE DONE; IV-5, THE DRIVER, IS NEXT
+## STATUS: IV-0 TO IV-5 ARE DONE; IV-6, THE SEVEN MACHINES, IS NEXT
+
+**IV-5 → [M-252](MEASUREMENTS.md#m-252)**: the driver solves
+`examples/machine-f-diiid-inverse.toml` from its cold guess inside the support
+sweeps, which settle in three, and returns the four currents to 3.2e-11. The
+driver and the library agree on `psi_h` exactly. A target set the currents
+cannot meet converges to a best fit, says so, and exits 4. Getting there made
+the corner an equality-constrained least squares.
 
 **IV-4 → [M-251](MEASUREMENTS.md#m-251)**: both X-point rows put the tracked
 saddle on a target moved 2.1 cm, agree on the currents to 5.7e-11, and survive
@@ -1115,7 +1122,7 @@ exit 1 until IV-5, for the same reason — run forward it would solve with the s
 data. `ConfigTests` carries the refusals and the seven-machine equivalence,
 over fixtures `tools/freegs4e-benchmark/circuits.py` writes into
 `tests/unit/circuits/`; `DriverAcceptance`'s
-`theDriverRefusesAFreeCurrentUntilItHasAnInversePath` the pairing.
+`theDriverRefusesAFreeCurrentWithNothingToDetermineIt` the pairing.
 
 **THE EQUIVALENCE FOUND A DEFECT ON ITS FIRST RUN**: TCV's solenoid, the one
 solenoid inside a circuit in these machines, was counted twice by
@@ -1168,9 +1175,11 @@ specified, with five decisions this section left open:
 * **The column is MEASURED** by one forward difference per circuit per solve.
   That is exact, because the residual is affine in a current, and it is the
   exterior columns' probe rather than a second expression of the coil term.
-* **The corner rows are weighted as `augmentedNorm()` weights them**, and the
-  current columns are scaled by their seeds before the SVD, so the rank
-  threshold and the minimum norm compare commensurate columns.
+* **The border rows are constraints and only the targets are fitted** --
+  IV-5's correction, [M-252](MEASUREMENTS.md#m-252). The target rows are
+  weighted as `augmentedNorm()` weights them, and the current columns are
+  scaled by their seeds, so the rank threshold and the minimum norm compare
+  commensurate columns.
 * **The targets enter the merit** at `gamma` like every flux row.
 * **Refused at `solve()`**: a set the source does not carry; an analytic
   conductor field (subtracted, filament or exterior), because there a current
@@ -1178,8 +1187,8 @@ specified, with five decisions this section left open:
   integrand snapshots the coil densities; and `setBorderRegularisation()`.
 
 `inverseSingularValues()` is reported beside the rank, because the rank alone
-calls the eighteen-coil case healthy at a condition of 3.4e+08. The test is
-`theInverseSolveRecoversAKnownCurrentSet`: four circuits come back to 1.4e-11
+calls the eighteen-coil case healthy at a condition of 1.04e+08. The test is
+`theInverseSolveRecoversAKnownCurrentSet`: four circuits come back to 2.0e-11
 in two Newton steps, and all eighteen to 1.2e-07. Beside it,
 `tooFewTargetsMeetTheShapeWithOtherCurrents` meets five targets with currents
 up to 2.7% from the machine's and reports nullity 13.
@@ -1204,18 +1213,20 @@ machine cannot reach. IV-6 is the test that can.
 ### IV-4 — the X-point rows, both kinds — **DONE, M-251**
 
 `addXPointTarget()` is row four and `addCriticalPointTarget()` row three. Row
-four's constraint is `H ( x_X − x_target )`, with `H = grad q_h` at the
-tracked X-point, rather than the bare displacement. That is the `q` the field
-would carry at the target, in XP-3's units under XP-3's weight, with corner
-`H` on XP-3's columns and no field part; residuals are reported in metres.
-Row three is weighted `R h` at its point. Row four without
+four's constraint is the displacement `x_X − x_target`, linear in XP-3's
+unknowns and so exactly differentiated, weighted by
+`xScale sqrt| det grad q_h |` frozen at the first iterate with a field.
+`H ( x_X − x_target )` with the iterate's `H` was built first and fails on a
+best fit ([M-252](MEASUREMENTS.md#m-252)). Row three is weighted `R h` at its
+point. Row four without
 `setXPointBoundary()` is refused. On DIII-D, a 2.1 cm move with F4B and F8B
 free:
 
 * both rows land the saddle on the target and agree on the currents to
   5.7e-11;
 * the released forward solve reproduces it to 3.6e-12 m;
-* with F6A alone free the run stalls 6.2 mm short.
+* with F6A alone free the run ends at a best fit, its target not met and the
+  null 1.2 cm short.
 
 F8B moves by 58% for those two centimetres, which is reported and not
 asserted. The test is `InverseSolve.cpp`'s
@@ -1232,7 +1243,38 @@ the coil-free arm must fail, so that the currents are shown to be doing the work
 — the `theDriverSolvesOnACurvedBoundary` pattern, which pins against the library
 **and** against a do-nothing arm.
 
-### IV-5 — through the driver, with the support sweeps
+### IV-5 — through the driver, with the support sweeps — **DONE, M-252**
+
+`[inverse]`, with `Gamma`, `[[inverse.isoflux]]` and `[[inverse.xpoint]]`
+(`Track` picks row four or row three), parsed and paired by
+`meq::Configuration`. It reaches the solver through `meq::poseInverse()`, which
+the driver and the tests share. `examples/machine-f-diiid-inverse.toml` solves
+from its cold guess in three sweeps that settle. Its four currents return to
+3.2e-11, and the library on the same file agrees with the driver's `psi_h` to
+0.0 over 29,088 dofs.
+
+**It falsified three things IV-3 and IV-4 built, each right only for
+reachable targets:**
+* one least squares over every row of the corner, which traded the
+  equilibrium's equations against unreachable targets on the first, unsettled
+  sweep;
+* row four with the iterate's `H`, whose dropped term made a best fit creep
+  uphill;
+* the augmented norm as the inverse line search's merit, which refused every
+  step when one current faced 23 unreachable rows.
+
+The corner is now an equality-constrained least squares, row four is the
+exact displacement, the inverse line search judges an exact-penalty merit, and
+a best fit stops at stationarity. The driver writes a best fit, says the
+targets were not met, and exits **4**.
+
+The acceptances are in `InverseSolve.cpp` rather than `DriverAcceptance.cpp`,
+because the machine's library fixture lives there:
+`theDriverSolvesAnInverseProblem` and
+`aTargetSetTheCurrentsCannotMeetIsABestFitAndExitsFour`. The second is F6A
+alone, which settles in four sweeps to a best fit 4.6e-03 off with the
+equilibrium itself at round-off.
+
 
 `apps/meq.cpp`, `ConfineToPlasma`, `PlasmaSupportSweeps`, the exterior coupling.
 §6.

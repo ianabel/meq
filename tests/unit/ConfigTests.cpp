@@ -3216,6 +3216,17 @@ namespace
 		                   "[boundary]\nType = \"zero\"\n\n" + coils + "\n" + circuits );
 	}
 
+	// The same, on a NORMALISED source: an inverse solve's currents are
+	// unknowns of the bordered Newton, which runs only there. The profile
+	// files are not opened by the parse.
+	std::string withNormalisedCircuit( std::string const & coils, std::string const & circuits )
+	{
+		return withSource( "[source]\nType = \"mhd\"\nPPrimeFile = \"profiles/pprime.dat\"\n"
+		                   "GGPrimeFile = \"profiles/ggprime.dat\"\nNormalised = true\n"
+		                   "PsiAxis = 0.1\n\n[boundary]\nType = \"zero\"\n\n"
+		                   + coils + "\n" + circuits );
+	}
+
 	std::string coilBlock( std::string const & name, double centreZ,
 	                       std::string const & extra = "" )
 	{
@@ -3223,6 +3234,11 @@ namespace
 		       + std::to_string( centreZ ) + "\nHalfWidth = 0.1\nHalfHeight = 0.05\n"
 		       + extra + "\n";
 	}
+
+	// A target, so that a file carrying Free parses: a free current with
+	// nothing to determine it is refused, IV-5.
+	std::string const isofluxTarget =
+		"\n[inverse]\n[[inverse.isoflux]]\nR1 = 1.2\nZ1 = 0.5\nR2 = 1.2\nZ2 = -0.5\n";
 
 	// An up-down pair in ANTI-series, the case the signed multiplier exists
 	// for, beside a coil on its own supply.
@@ -3273,15 +3289,15 @@ BOOST_AUTO_TEST_CASE( a_circuit_gives_each_member_its_share_of_one_current )
 BOOST_AUTO_TEST_CASE( free_marks_a_current_as_an_unknown_and_keeps_its_seed )
 {
 	{
-		Configuration const c = parse( withCircuit(
-			coilBlock( "F1", 0.0, "Current = 1.0e5\nFree = true\n" ), "" ) );
+		Configuration const c = parse( withNormalisedCircuit(
+			coilBlock( "F1", 0.0, "Current = 1.0e5\nFree = true\n" ), isofluxTarget ) );
 		BOOST_TEST( c.getCoils().coils.front().free );
 		BOOST_TEST( c.getCoils().coils.front().current == 1.0e5 );
 		BOOST_TEST( c.getCoils().anyFree() );
 	}
 	{
-		Configuration const c = parse( withCircuit(
-			pairCoils, pairCircuit + "Free = true\n" ) );
+		Configuration const c = parse( withNormalisedCircuit(
+			pairCoils, pairCircuit + "Free = true\n" + isofluxTarget ) );
 		BOOST_TEST( c.getCoils().circuits.front().free );
 		BOOST_TEST( c.getCoils().anyFree() );
 		// The seed reaches the members as it would were it data.
@@ -3291,6 +3307,79 @@ BOOST_AUTO_TEST_CASE( free_marks_a_current_as_an_unknown_and_keeps_its_seed )
 	// unchanged for a coil outside every circuit.
 	BOOST_CHECK_EXCEPTION( parse( withCircuit( coilBlock( "F1", 0.0, "Free = true\n" ), "" ) ),
 		ConfigError, []( ConfigError const & e ) { return e.getKey() == "coils[0].Current"; } );
+}
+
+/*
+ * [inverse] -- THE TARGETS THAT DETERMINE THE Free CURRENTS. IV-5.
+ *
+ * A free current and a target come TOGETHER OR NOT AT ALL, and both halves are
+ * refused at parse: a free current with no target is a null direction of every
+ * Newton step, and a target with nothing free is a row only the equilibrium's
+ * own constraints could meet. Track = true pins the X-point [boundary.xpoint]
+ * makes an unknown, so it needs one.
+ */
+BOOST_AUTO_TEST_CASE( free_currents_and_inverse_targets_come_together )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e )
+			{
+				if ( e.getKey() != key )
+					BOOST_TEST_MESSAGE( "refused at " << e.getKey() << ", wanted " << key );
+				return e.getKey() == key;
+			} );
+	};
+	std::string const freeCoil = coilBlock( "F1", 0.0, "Current = 1.0e5\nFree = true\n" );
+	std::string const fixedCoil = coilBlock( "F1", 0.0, "Current = 1.0e5\n" );
+
+	// THE CONTROL: both halves, parsed in full.
+	{
+		Configuration const c = parse( withNormalisedCircuit( freeCoil,
+			"\n[inverse]\nGamma = 2.0e-7\n"
+			"[[inverse.isoflux]]\nR1 = 1.2\nZ1 = 0.5\nR2 = 1.3\nZ2 = -0.5\n"
+			"[[inverse.isoflux]]\nR1 = 1.2\nZ1 = 0.5\nR2 = 1.1\nZ2 = 0.0\n"
+			"[[inverse.xpoint]]\nR = 1.2\nZ = -0.9\nTrack = false\n" ) );
+		meq::InverseConfig const & v = c.getInverse();
+		BOOST_TEST( v.given );
+		BOOST_TEST( v.gamma == 2.0e-7 );
+		BOOST_TEST_REQUIRE( v.isoflux.size() == 2u );
+		BOOST_TEST( v.isoflux[ 1 ].r2 == 1.1 );
+		BOOST_TEST_REQUIRE( v.xpoint.size() == 1u );
+		BOOST_TEST( !v.xpoint[ 0 ].track );
+		BOOST_TEST( v.rowCount() == 4u );
+	}
+	// And a file with neither is untouched.
+	BOOST_TEST( !parse( withCircuit( fixedCoil, "" ) ).getInverse().given );
+
+	// Free with nothing to determine it, on a coil and on a circuit.
+	refuses( withCircuit( freeCoil, "" ), "coils[0].Free" );
+	refuses( withCircuit( pairCoils, pairCircuit + "Free = true\n" ), "circuits[0].Free" );
+
+	// Targets with nothing free.
+	refuses( withNormalisedCircuit( fixedCoil, isofluxTarget ), "inverse.isoflux" );
+	// [inverse] with no target in it.
+	refuses( withNormalisedCircuit( freeCoil, "\n[inverse]\nGamma = 0.0\n" ), "inverse.isoflux" );
+	refuses( withNormalisedCircuit( freeCoil, "\n[inverse]\nGamma = -1.0\n"
+	                                "[[inverse.isoflux]]\nR1 = 1.2\nZ1 = 0.5\nR2 = 1.2\nZ2 = -0.5\n" ),
+	         "inverse.Gamma" );
+	// A pair that coincides is a row of zeros.
+	refuses( withNormalisedCircuit( freeCoil, "\n[inverse]\n[[inverse.isoflux]]\n"
+	                                "R1 = 1.2\nZ1 = 0.5\nR2 = 1.2\nZ2 = 0.5\n" ),
+	         "inverse.isoflux[0].R2" );
+	// A tracked X-point with nothing tracking one -- Track defaults to true.
+	refuses( withNormalisedCircuit( freeCoil, "\n[inverse]\n[[inverse.xpoint]]\nR = 1.2\nZ = -0.9\n" ),
+	         "inverse.xpoint[0].Track" );
+	// Off the normalised path there is no bordered Newton to carry a current.
+	BOOST_CHECK_EXCEPTION( parse( withCircuit( freeCoil, isofluxTarget ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "inverse.isoflux"
+			       && std::string( e.what() ).find( "Normalised" ) != std::string::npos;
+		} );
+	// And no target kind the plan names but MEQ does not build.
+	refuses( withNormalisedCircuit( freeCoil, "\n[inverse]\n[[inverse.flux]]\nR = 1.0\nZ = 0.0\nPsi = 0.0\n" ),
+	         "inverse.flux" );
 }
 
 /*

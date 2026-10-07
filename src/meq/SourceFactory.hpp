@@ -81,6 +81,21 @@ namespace meq
 	                                      double mu0 = vacuumPermeability,
 	                                      std::string const &configFileName = std::string() );
 
+	/**
+	 * The `Free` currents of a `[[coils]]` / `[[circuits]]` description, as the
+	 * circuits GradShafranovSolver::setFreeCurrents() takes, with coil indices
+	 * into the set makeCoilSet() builds from the same configuration.
+	 *
+	 * A free coil outside every circuit is its own one-member circuit with
+	 * multiplier 1, and comes first, in file order; then every free
+	 * `[[circuits]]` block, in file order. **ONE READER**: the driver and every
+	 * test that poses a file's inverse problem through the library call this,
+	 * so the two cannot wire a circuit differently and both converge.
+	 *
+	 * Empty when nothing is free.
+	 */
+	std::vector< FreeCircuit > makeFreeCircuits( CoilConfig const &config );
+
 	/// Construct the ANALYTIC conductor field `[conductors]` asks for, or a
 	/// null pointer when it asks for nothing -- `ConductorModel::Meshed`, or a
 	/// file with no `[[coils]]` at all.
