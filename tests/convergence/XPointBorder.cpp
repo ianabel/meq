@@ -20,7 +20,7 @@
  * The plan's own acceptance is "agreement with XP-2 at round-off, and the
  * observed Newton order, which is the only thing that can see the inexact
  * grad q corner block". Both are here, and so is the reason the second matters:
- * CLAUDE.md's *A wrong Jacobian is invisible to a convergence table* -- Newton
+ * CLAUDE_HDGGS.md's *A wrong Jacobian is invisible to a convergence table* -- Newton
  * converges to the same discrete solution whatever Jacobian carried it there,
  * so a corner block that is wrong, or absent, moves the ITERATION COUNT and the
  * observed order and moves no number in the answer. An equilibrium comparison
@@ -506,7 +506,7 @@ BOOST_AUTO_TEST_CASE( theXPointBorderClosesOnTheSaddle )
 	 *
 	 * Everything above is satisfied by a border whose corner block is merely
 	 * WRONG: Newton reaches the same discrete solution whatever Jacobian
-	 * carried it there, which is CLAUDE.md's *A wrong Jacobian is invisible to
+	 * carried it there, which is CLAUDE_HDGGS.md's *A wrong Jacobian is invisible to
 	 * a convergence table*. So this is the assertion the stage stands on.
 	 *
 	 * **IT IS THE FIRST SWEEP AND NOT THE LAST, AND THE REASON IS A PROPERTY OF

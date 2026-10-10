@@ -47,7 +47,7 @@
  * that cap is a property of the EXACT SOLUTION rather than of any method: the
  * singular part is | d |^m across a curve, whose best polynomial approximation
  * on an element of size h is O( h^m ) at every degree, over O( 1/h ) elements.
- * See CLAUDE.md's *The plasma edge caps the order, and it is the profiles that
+ * See CLAUDE_FB.md's *The plasma edge caps the order, and it is the profiles that
  * set the cap* for the measurement.
  *
  * NOTHING HERE MOVES. The cut is prescribed, so this isolates the

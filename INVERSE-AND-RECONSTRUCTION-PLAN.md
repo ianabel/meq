@@ -3,9 +3,10 @@
 Written 2026-09-16. `CLAUDE.md` is the maintainer's index, `CLAUDE_FB.md` owns
 the borders and the `freegs4e` benchmark, `CLAUDE_HDGGS.md` owns Newton, and
 `MEASUREMENTS.md` holds the published tables; this file defers to all four and
-restates none of them. `BORDERED-GLOBALISATION-PLAN.md` and
-`BORDER-SCALING-PLAN.md`, both written 2026-09-15, attack the same cold-start
-failure from the solver side and §8 says how this relates to them.
+restates none of them. `BORDERED-GLOBALISATION-PLAN.md` and the
+per-border merit scaling (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**,
+*Border scaling: a per-border ruler for the bordered merit*) attack the same
+cold-start failure from the solver side, and §8 says how this relates to them.
 
 **THIS FILE HAS TWO HALVES AND THEY ARE NOT THE SAME KIND OF DOCUMENT.**
 
@@ -404,6 +405,14 @@ is a better argument for it than "continuation".
 
 ### 2.3 It closes the benchmark's standing mode mismatch from the other side
 
+**MEASURED → [M-254](MEASUREMENTS.md#m-254).** Inverse against inverse, with the
+determined supplies free: DIII-D shaped's currents agree to 3.0e-04 — at
+`freegs4e`'s own resolution floor — once the reference solves the same profile,
+and MAST-U's 0.80 m forward X-point disagreement closes to 0.02 mm. With the
+shaped references corrected → **[M-255](MEASUREMENTS.md#m-255)**, MEQ, NICE and
+`freegs4e` agree on the shaped currents to about 1e-03 on every solvable
+machine.
+
 `CLAUDE_FB.md:2304`, *STANDING RULE: COMPARE IN THE SAME MODE MEQ SOLVES IN*:
 every `freegs4e` reference in the tree was made by an **inverse** solve, the
 currents are an output of the reference and an input to MEQ, *"so the two codes
@@ -554,16 +563,10 @@ are assembled by different code. §6.3.
 ### 3.4 AND MEQ HAS NO `Jᵀ`, WHICH DECIDES THE ARCHITECTURE BEFORE ANY TRADE-OFF
 
 `BORDERED-GLOBALISATION-PLAN.md` §2.2, verified against the installed header:
-`mfem::DarcyNPCOperator::Jacobian::Mult` **aborts**
-(`../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp:3756-3761`) —
-after `ComputeH()` the local arrays hold **factored** blocks, so the Jacobian can
-be *solved with* and cannot be *applied*. **There is no `Jᵀ` either.**
-
-**CEDRES++'s architecture is therefore not available to MEQ, and this is not a
-preference.** Its SQP iteration (3.33) is a 3×3 block KKT system containing
-`D_y Bᵀ(yⁱ)` explicitly in the first block row. MEQ cannot form that block, cannot
-apply it, and cannot hand it to a direct solver. A full-space KKT solve is
+`mfem::DarcyNPCOperator::Jacobian::Mult` **aborts** and there is no `Jᵀ`, so
+CEDRES++'s full-space SQP — a KKT system containing `D_y Bᵀ(yⁱ)` explicitly — is
 **structurally unbuildable** on the NPC path.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Methods that need Jᵀ: merit-gradient Armijo, dogleg, trust region, JFNK, full-space SQP*
 
 **What IS available is exactly what the bordered elimination uses**: `J⁻¹`
 applied to a right-hand side and to each border column. That is `NPCReduce()`,
@@ -618,41 +621,12 @@ backsolves block through `ArrayMult` with the ones already queued.
 
 ### 4.2 Why not an outer loop, and the number that settles it
 
-**MEQ has already built an outer loop around this solver and measured it.**
-`CLAUDE_INVERSION.md`, *Driving by `q(ψ)`*: the `q(ψ)`-driven solve is a KINSOL
-outer Newton whose unknowns are the coefficients of a fitted `g²`, wrapping the
-bordered Newton. `DriverAcceptance::theDriverSolvesForTheToroidalField` reads
-**42.5 s, 12 outer iterations, 43 equilibria** to recover a three-coefficient
-closed form.
-
-**43 equilibria for 3 outer unknowns.** A differenced outer Jacobian costs one
-equilibrium per unknown per outer step, so at DIII-D's **18 coils** — and
-`examples/machine-*.toml` carries 4, 4, 11, 24, 4, 18 and 26 — the same
-architecture costs of order **19 equilibrium solves per outer step**, against
-`N_free` **backsolves** per Newton step for the bordered route. The two are not
-close, and the gap widens with the coil count.
-
-**And that is only the cost argument.** The house objection is stronger and is
-about the answer rather than the clock: `CLAUDE.md` records that
-`PicardThenNewton` and `Globalisation` are not exposed as keys because three
-solve routes reach discrete solutions **9.4% apart** on an under-resolved mesh,
-and `CLAUDE_INVERSION.md` records that *"a converged outer solve is not evidence
-the root is the answer"* — both failing configurations of the `q(ψ)` loop
-converged, to 3.5e-07, on a fixed point that was not the answer. **An outer loop
-adds a second convergence criterion, and a second thing that can converge to the
-wrong place quietly.**
-
-**The `q(ψ)` loop is an outer loop for a reason that does not apply here**, and
-saying so is the honest version of this argument: `g²` enters the source through
-`setGGPrime()`, a whole profile object, and there is no assembled route to
-`∂R/∂(spline coefficient)`. **There is an assembled route to `∂R/∂I_c` — it is a
-constant vector, §3.3.** That is precisely the difference between a quantity that
-belongs in a border and one that does not.
-
-**What an outer loop would buy, and it is not nothing.** It would reuse
-`freegs4e`'s algorithm unchanged, need no change to `solveWithNormalisation()`,
-and let the regularisation be somebody else's well-tested least squares. §9's
-**IV-0** is exactly that, as a throwaway instrument rather than as the product.
+**Declined.** An outer loop round the forward solve costs of order **19
+equilibrium solves per outer step** at DIII-D's 18 coils, against `N_free`
+backsolves per Newton step for the bordered route, and it adds a second
+convergence criterion that can converge to the wrong place quietly. IV-0 uses
+one as a throwaway instrument and not as the product.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *An outer loop round the forward solve for the coil currents*
 
 ### 4.3 THE REGULARISATION GOES IN THE DENSE CORNER, AND THE CORNER IS TINY
 
@@ -740,15 +714,16 @@ attached to it that works because it is effectively zero.
 | `Γ ~ 1/M` | one ampere of coil current is worth one coil-point-flux of shape error. The scale at which the two terms are the same size |
 | `Γ → ∞` | the current step is damped to zero and the solve degenerates to the **forward** problem. This is `forward.py:184-187`'s continuation knob, §2.2 |
 
-**AND THIS IS THE SAME QUESTION `BORDER-SCALING-PLAN.md` IS ABOUT.** That
-document's one-sentence statement is that `augmentedNorm()` *"weights six
-structurally different constraints with one scale taken from the first of
-them"*, and proposes a per-border scale derived from each border's own column
-and corner. An inverse border makes that **eight** kinds of constraint and adds
-one whose scale has a closed-form physical answer. So BS-1's machinery is a
-dependency and the inverse border is a **new datum for it**, not a new problem:
-the per-border scale BS-1 wants for a coil current is `1/M_c`, derivable rather
-than tuned. §8.
+**AND THIS IS THE SAME QUESTION THE PER-BORDER MERIT SCALE ASKED.**
+`augmentedNorm()` *"weights six structurally different constraints with one
+scale taken from the first of them"*, and BS-1 replaced that with a per-border
+scale derived from each border's own column and corner. An inverse border makes
+that **eight** kinds of constraint and adds one whose scale has a closed-form
+physical answer: for a coil current it is `1/M_c`, derivable rather than tuned.
+**BS-1 is reverted** ([M-245](MEASUREMENTS.md#m-245)) — a per-border ruler moves
+which equilibrium is reported — so `1/M_c` is a candidate to measure rather than
+a datum to slot in. §8.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Border scaling: a per-border ruler for the bordered merit*
 
 ### 4.5 Underdetermined, infeasible, and which is the normal case
 
@@ -1077,7 +1052,7 @@ would settle it still costs no MEQ code and has still not been run.
 | | | |
 |---|---|---|
 | **`BORDERED-GLOBALISATION-PLAN.md`** | **complementary, and its BG-0 gates this document's motivation** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its §2.2 is load bearing here — no `Jᵀ` — and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |
-| **`BORDER-SCALING-PLAN.md`** | **complementary, and a dependency in the other direction** | It replaces one merit scale over six constraint kinds with a per-border scale. An inverse border makes it **eight** kinds — and, unusually, brings a scale with a closed-form physical answer, `1/M_c` (§4.4). It said BS-1's machinery should land first; **BS-1 is reverted** ([M-245](MEASUREMENTS.md#m-245) — a per-border ruler moves which equilibrium is reported), so an inverse border's scale is the merit's own question again, and `1/M_c` is the candidate to measure rather than a datum to slot in. Its **BS-0 gate is BG-0 restated** and the same caveat applies |
+| **Border scaling**, BS-0 to BS-5 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Border scaling: a per-border ruler for the bordered merit* | **complementary** | **BS-1, a per-border merit scale, is reverted** ([M-245](MEASUREMENTS.md#m-245) — a per-border ruler moves which equilibrium is reported), so an inverse border's scale, `1/M_c` (§4.4), is a candidate to measure rather than a datum to slot in. **BS-5, the X-point relocation cap, is landed on the retry rung** ([M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248)). Its BS-0 gate is BG-0 restated |
 
 **Is an inverse capability a superset of either? No, and the claim should not be
 made.** Three reasons:
@@ -1264,14 +1239,8 @@ from its cold guess in three sweeps that settle. Its four currents return to
 0.0 over 29,088 dofs.
 
 **It falsified three things IV-3 and IV-4 built, each right only for
-reachable targets:**
-* one least squares over every row of the corner, which traded the
-  equilibrium's equations against unreachable targets on the first, unsettled
-  sweep;
-* row four with the iterate's `H`, whose dropped term made a best fit creep
-  uphill;
-* the augmented norm as the inverse line search's merit, which refused every
-  step when one current faced 23 unreachable rows.
+reachable targets** ([M-252](MEASUREMENTS.md#m-252)).
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Machinery right only for reachable targets: one least squares over every row, row four with the iterate's `H`, and the augmented-norm merit*
 
 The corner is now an equality-constrained least squares, row four is the
 exact displacement, the inverse line search judges an exact-penalty merit, and
@@ -1363,9 +1332,9 @@ listing `refs/`, not by remembering:
 
 | file | what it actually is | in `refs/Refs.md`? |
 |---|---|---|
-| `refs/MHD Equilibrium Reconstruction in the DIII-D Tokamak.pdf` | **Lao, St. John, Peng, Ferron, Strait, Taylor, Meyer, Zhang & You**, *Fusion Science and Technology* **48**:2 (2005) 968–977, `10.13182/FST48-968`. 11 pp. **The primary reference and the one that answers the structural questions** | **NO** |
-| `refs/EFIT2006.pdf` | **Appel, Huysmans, Lao, McCarthy, Muir, Solano, Storrs, Taylor, Zwingmann** + EFDA ITM Task Force + JET-EFDA Contributors, *A Unified Approach to Equilibrium Reconstruction*, EFDA–JET–CP(06)03-07, 33rd EPS, Rome 2006. **4 pages of content** | **NO** |
-| `refs/EFIT-revisited-for-MAST.pdf` | **Appel & Lupelli**, *Equilibrium reconstruction in an iron core tokamak using a deterministic magnetisation model*, *Comput. Phys. Commun.* **223** (2018) 1–17, `10.1016/j.cpc.2017.09.016`, JET Contributors. **THE FILENAME IS WRONG ABOUT THE MACHINE** | **NO** |
+| `refs/MHD Equilibrium Reconstruction in the DIII-D Tokamak.pdf` | **Lao, St. John, Peng, Ferron, Strait, Taylor, Meyer, Zhang & You**, *Fusion Science and Technology* **48**:2 (2005) 968–977, `10.13182/FST48-968`. 11 pp. **The primary reference and the one that answers the structural questions** | yes |
+| `refs/EFIT2006.pdf` | **Appel, Huysmans, Lao, McCarthy, Muir, Solano, Storrs, Taylor, Zwingmann** + EFDA ITM Task Force + JET-EFDA Contributors, *A Unified Approach to Equilibrium Reconstruction*, EFDA–JET–CP(06)03-07, 33rd EPS, Rome 2006. **4 pages of content** | yes |
+| `refs/AppelLupelli-JET-IronCoreEFIT.pdf` | **Appel & Lupelli**, *Equilibrium reconstruction in an iron core tokamak using a deterministic magnetisation model*, *Comput. Phys. Commun.* **223** (2018) 1–17, `10.1016/j.cpc.2017.09.016`, JET Contributors. The machine is JET | yes |
 | `refs/Fitzgerald-AnisotropicEFIT.pdf` | **ABSENT.** `refs/Refs.md:297` indexes it as an *"unread seed"* — Fitzgerald, Appel & Hole, *EFIT tokamak equilibria with toroidal flow and anisotropic pressure using the two-temperature guiding-centre plasma*, *Nucl. Fusion* **53** (2013) 113040, **`10.1088/0029-5515/53/11/113040`** | indexed, PDF absent |
 
 **`EFIT2006.pdf` IS NOT THE PAPER ITS TITLE SUGGESTS AND THE DOCUMENT SHOULD NOT
@@ -1388,20 +1357,14 @@ load-bearing citation on a paper that cannot carry it. **The structural answers
 come from the DIII-D paper and from the iron-core paper's §2**, and §§11–12 say
 which at each point.
 
-**`refs/Refs.md` HAS NO ENTRY FOR ANY OF THE THREE PDFs.** §17 lists what to add.
-Per `CLAUDE.md`, this file does not edit `Refs.md`.
+All three are indexed in `refs/Refs.md`, *Equilibrium reconstruction*.
 
-**And `EFIT-revisited-for-MAST.pdf` is misnamed.** The machine is **JET**
-throughout — discharge 82 937 for validation, 91 576 for the application, JET's
-iron core, JET's `Nomatil RD` material, compared against COMSOL and CREATE. A
-search of the paper finds **three** occurrences of "MAST", none of them a
-comparison: one sentence noting that Fig. 1b and 1c plot MAST and JET flux
-surfaces, the Fig. 1 caption, and the word "Master" in a thesis reference. There
-is no MAST-U mention and no "revisiting" anywhere. **The nearest defence for the
-filename is in the OTHER paper** — `EFIT2006.pdf` §2 says EFIT-f95 is *"based on
-the EFIT source code originally developed for MAST"* — so whoever named the file
-may have attached that sentence to the wrong PDF. **Cite it by its real title and
-machine.**
+**The iron-core paper's machine is JET throughout** — discharge 82 937 for
+validation, 91 576 for the application, JET's iron core, JET's `Nomatil RD`
+material, compared against COMSOL and CREATE. "MAST" occurs three times and
+never as a comparison. `EFIT2006.pdf` §2 says EFIT-f95 is *"based on the EFIT
+source code originally developed for MAST"*, which is a different paper's
+sentence. Cite it by its real title and machine.
 
 ---
 
@@ -1947,23 +1910,3 @@ EFIT's cheap inner linear fit.**
 * **I have not run anything.** No number in this file was produced here.
 * **`GradShafranov.{hpp,cpp}` were under uncommitted edit while this was
   written.** Line numbers may have moved; the names have not.
-
----
-
-## 17. `refs/Refs.md` needs three entries, and this file does not add them
-
-Per `CLAUDE.md`, `refs/Refs.md` is the index and is written by hand. **None of
-the three reconstruction PDFs on disk has an entry**, and a PDF in `refs/` that
-the index does not know about is the condition this project's own rules exist to
-prevent. Recommended, with the dois verified as far as the documents themselves
-allow:
-
-| file | entry |
-|---|---|
-| `MHD Equilibrium Reconstruction in the DIII-D Tokamak.pdf` | Lao, St. John, Peng, Ferron, Strait, Taylor, Meyer, Zhang & You, *Fusion Science and Technology* **48**:2 (2005) 968–977, **`10.13182/FST48-968`**. The EFIT reference. Note its `F = 2πRB_φ/μ₀` convention, which puts `μ₀` in the numerator of the `FF′` term |
-| `EFIT2006.pdf` | Appel, Huysmans, Lao, McCarthy, Muir, Solano, Storrs, Taylor, Zwingmann + EFDA ITM Task Force + JET-EFDA Contributors, *A Unified Approach to Equilibrium Reconstruction*, **EFDA–JET–CP(06)03-07**, 33rd EPS Rome 2006. **Architecture and data plumbing, not physics** — the entry should say so, since the title promises otherwise. **Its reference [1] miscites Lao 1985 as Nucl. Fusion vol 22; it is vol 25** |
-| `EFIT-revisited-for-MAST.pdf` | Appel & Lupelli, *Equilibrium reconstruction in an iron core tokamak using a deterministic magnetisation model*, *Comput. Phys. Commun.* **223** (2018) 1–17, **`10.1016/j.cpc.2017.09.016`**. **THE FILENAME IS WRONG — the machine is JET, not MAST.** Consider renaming. Carries the 12-vs-110 parameter result of §13.4 and the `Δ*ψ = −2μ₀RJ_φ` factor-of-2 flag |
-
-and `refs/Refs.md:297`'s Fitzgerald row should record that **the PDF is still not
-on disk**, since it currently reads as an unread seed without saying whether it
-was ever fetched.

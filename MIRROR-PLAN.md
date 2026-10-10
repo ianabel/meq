@@ -155,17 +155,11 @@ study used geq's flux-only mask, which reaches the domain end at `|z| = 1.5`.
 With the current cut at the throat the source is more contained, so `ρ_Γ` may
 come in and `N` may come down from the 32 quoted there.
 
-### 3. ~~XP-1's element flood fill has nothing to seed from~~ — dissolved by item 2
+### 3. XP-1's element flood fill — not wanted on this path, dissolved by item 2
 
-The element-level half of the support takes the connected component containing
-the magnetic axis. A mirror has no axis, and a flux-labelled annulus is connected
-*through the tube* to the ends of the machine — so the fill neither starts nor
-terminates where it should.
-
-**THE AXIAL CUTOFF REMOVES THE QUESTION.** With `|z| ≤ z_edge` the support is a
-bounded annular box, defined pointwise and needing no seed and no connected
-component. So the fill is simply not wanted on this path — which is a decision
-the plan can now take rather than a `2 × 2` it has to run.
+The axial cutoff makes the support a bounded box that needs no seed and no
+connected component, so the fill is off here:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *XP-1's element flood fill on the mirror path*
 
 **Keep the fill's own guard in view even so.** `CLAUDE_FB.md` records XP-1's fill
 being silently off as a real defect on the diverted case, found only because a
@@ -284,13 +278,9 @@ should be re-pointed at the fixed-`R` gauge, which is where the trap still lives
 
 ### What does NOT bite, which is worth saying
 
-**The plasma-current border is not needed.** `CLAUDE_FB.md` records that with a
-fixed profile amplitude a confined equilibrium is a non-linear *eigenvalue*
-problem and the coupled solve fails from everywhere without `setPlasmaCurrent`.
-That argument turns on the support being free. Here **both** labels are pinned at
-prescribed points, so the support is not free and the eigenvalue does not arise —
-geq prescribes physical densities and temperatures and never a current. Expect
-to need no current border, and treat needing one as a finding.
+**The plasma-current border is not needed**, because both labels are pinned and
+the support is not free:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A plasma-current border for the mirror*
 
 **`g = 0` is fine.** `F = μ₀ R² ∂p/∂ψ` with `∂p/∂ψ ≠ 0` at the inner label, so
 the trivial branch that `examples/rotating-rectangle.toml` warns about is not

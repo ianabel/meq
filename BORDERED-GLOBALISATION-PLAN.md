@@ -36,7 +36,7 @@ which anchor holds which stage, so a reader does not plan work that is done.
 | **BG-3** the bordered Picard | **DONE**, as `Globalisation::BorderedPicardThenNewton` → **[M-119](MEASUREMENTS.md#m-119)**. **0 of 6 close and the prediction that it would close three is falsified**; four of six reach a *worse* minimum than plain Newton. The one row that pays pays as an **instrument**: with the field block replaced by something that cannot be singular, what is left singular is the **border's Schur complement**, which is §0.1's first row reached by measurement |
 | **BG-4**, **BG-5** the handoff and the driver rung | **DONE**, with two departures `CLAUDE_FB.md` records: a new enum value rather than re-purposing `PicardOnly`, and **one** loop inside `solveWithNormalisation()` rather than two calls to `solve()`. The rung prints as `bP->N` |
 | **BG-6** re-take M-103 | **the six cold failures are re-taken** in M-116 and M-119, both arms from one run |
-| **BG-7** continuation in `μ₀ I_p` | **DEAD**, falsified in `BORDER-SCALING-PLAN.md` §1.4 |
+| **BG-7** continuation in `μ₀ I_p` | **DEAD**, falsified by a plasma-current ramp that fails at every `λ` down to 0.05 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Border scaling: a per-border ruler for the bordered merit* |
 
 **WHERE THE CAMPAIGN POINTS INSTEAD.** M-119 says the obstruction on five of
 six is **not the field**, so §6.1's degenerate axis row and §6.2's X-point
@@ -245,22 +245,9 @@ So:
 runs report would be exactly the kind of thing CLAUDE.md refuses to expose"*).
 Nothing below may weaken that.
 
-**And there is no predictive trigger to be had.** Two candidates are measured
-and dead: `max|∂F/∂ψ|/λ₁` (`CLAUDE_HDGGS.md`, *Why MEQ's Newton struggles*; two
-points, no threshold, and it needs the range of `ψ` which is not known before
-solving) and `‖r₁‖/‖r₀‖`, which M-24 measures **anti**-correlated. **A third
-observation, from this tree's own shipped outputs, says the iteration count
-carries no signal either**: `machine-a-testtokamak.nc` and
-`machine-a-testtokamak-shaped.nc` both record `newton_iterations = 2` and no
-`axis_normalised_flux` at all, while `machine-f-diiid.nc` — the one that is
-right — also records `newton_iterations = 2` with
-`axis_normalised_flux = 1.00000000002119`. The wrong root and the right one
-take the same number of steps. **That reading is an observation and not a
-measurement** — those three files carry `meq_version` 969b626, 969b626 and
-d4a203b, so they are not one run of one tree, and the count is the last support
-sweep's rather than the solve's. It is worth re-taking inside BG-0, where the
-instrumentation is being added anyway. Do not propose a fourth detector without
-saying how it would be falsified on all fourteen of M-103's rows.
+**And there is no predictive trigger to be had**: three candidate signals are
+measured or observed carrying none.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Predictive solver selection: the killed detectors*
 
 ---
 
@@ -289,19 +276,10 @@ is fixing where the iterate is, not how far it steps.**
 
 ### 2.2 The NPC Jacobian is solve-only, so most textbook globalisations are out
 
-`mfem::DarcyNPCOperator::Jacobian::Mult` **aborts**
-(`../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp:3756-3761`):
-after `ComputeH()` the local arrays hold factored blocks, so the Jacobian can be
-solved with and cannot be applied. There is no `Jᵀ` either.
-
-That removes, structurally:
-
-* a **merit-function gradient** `∇‖R‖² = 2JᵀR`, hence any Armijo test with a
-  real directional derivative rather than the `(1 − 1e-4α)` surrogate that is
-  there;
-* a **dogleg** or any trust region needing a Cauchy point;
-* **Newton–Krylov / JFNK**, which needs `J·v`;
-* and anything that wants to *compare* `J` between iterates.
+`mfem::DarcyNPCOperator::Jacobian::Mult` aborts and there is no `Jᵀ`, so a
+merit-function gradient, a dogleg or trust region, JFNK and any comparison of
+`J` between iterates are structurally out.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Methods that need Jᵀ: merit-gradient Armijo, dogleg, trust region, JFNK, full-space SQP*
 
 What is available is: the step direction, the residual and the constraints at
 trial points, the dense `(N+4)` border system, and the freedom to change what
@@ -336,17 +314,8 @@ border, and the design below turns on that distinction.
 
 ### 2.4 A border-Picard already exists and is already measured failing
 
-`Normalisation::Decoupled` (`setNormalisationCoupling()`) zeroes the column
-(`sourceColumn`, `GradShafranov.cpp:5934-5940`) and the row (`coupled` false,
-`GradShafranov.cpp:6425`), leaving `step[0] = −constraint` — a Picard update on
-`ψ_ax` wrapped round a full Newton on the field. **M-31 measures it**: coupled
-reaches `4.447e-15` in 4 iterations, decoupled sits at `8.239e-02` after 15 and
-does not converge.
-
-That is the *opposite* split from family (a): Newton on the field, Picard on the
-border. It is worth stating because it is the obvious first idea and it is
-already dead, and because it is the control that says the coupling is doing real
-work. **Do not re-derive it.**
+`Normalisation::Decoupled` is that border-Picard, and M-31 measures it not converging.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *`Normalisation::Decoupled`: a Picard on the border round a Newton on the field*
 
 ---
 
@@ -497,28 +466,9 @@ nothing in the trace to say so."* Replacing the whole form is strictly worse.
 
 ### 3.6 Anderson, KINSOL, and a rule this tree keeps
 
-M-36 and `CLAUDE_HDGGS.md` both say plain Picard needs damping and Anderson at
-depth 1 does not. MEQ gets Anderson from `mfem::KINSolver( KIN_FP )`
-(`solveByPicard()`, `GradShafranov.cpp:1309-1370`).
-
-**KINSOL cannot be handed this fixed point.** `KINSolver::Mult` drives
-`oper( x ) = 0` or `u = G( u )` over one vector; the bordered iteration's state
-is `(x, p)` with `p`'s equations being the constraints, and MEQ's residual is
-not zero (hence `ShiftedResidual`). Wiring it would re-create exactly the
-"drives a residual of its own" problem the throw complains about.
-
-So a bordered Picard is a loop inside `solveWithNormalisation()`, and Anderson —
-if wanted — is a small dense least squares over the last `m` increments of
-`(x, p)`. **That collides with `CLAUDE.md`'s standing preference for a
-maintained library over a hand-rolled algorithm**, and the collision should be
-stated rather than resolved by taste: KINSOL is the maintained implementation
-and it structurally cannot take this problem; Eigen is already a sanctioned
-dependency for dense least squares and would carry the QR. **Recommendation:
-build the damped fixed point first with no acceleration (BG-3), measure it, and
-only add Anderson if the iteration count is the thing that kills it** — M-36
-reads 122 to 290 Picard iterations on the unbordered stiff cases, and at M-90's
-1.1 s per non-linear step on DIII-D that is two to five minutes for a reactive
-rung, which is affordable.
+KINSOL cannot take the bordered state `(x, p)`, so Anderson here would be hand-rolled,
+and BG-3's unaccelerated fixed point is falsified on other grounds (M-119).
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *KINSOL and Anderson acceleration on the bordered fixed point*
 
 ### 3.7 The handoff
 
@@ -776,11 +726,9 @@ sanctioned, orthogonal to (a) and (b), and aimed squarely at the
 prescribed-current family that fails. Deferred behind (a) only because a rung
 that is tried after a rung is worth less than the first rung.
 
-**5. Rejected outright, with reasons**: KINSOL on the bordered residual (§3.6 —
-it cannot take the border); a dogleg, trust region or JFNK (§2.2 — the NPC
-Jacobian is solve-only); `Normalisation::Decoupled` as a rung (§2.4 — measured
-failing, M-31); any predictive trigger (§1.4 — two signals measured useless,
-one of them anti-correlated, and a third that looks the same way).
+**5. Rejected outright, with reasons**: four routes, each with its measurement or
+its structural reason.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *The bordered ladder's rejected-outright list*
 
 ---
 

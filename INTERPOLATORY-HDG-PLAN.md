@@ -93,7 +93,7 @@ this is the likely outcome and why it is an estimate rather than a result.
 ### 0.3 The argument that survives both falsifiers
 
 **The interpolatory form is the only shape in which MEQ's own integrator can
-ever reach a device.** `CLAUDE.md`, *Which integrators need device offload*,
+ever reach a device.** `CLAUDE_DEVICE.md`, *Which integrators need device offload*,
 ranks `meq::SourceIntegrator` **first** and says it "is the only one on this
 list MEQ can write itself". A quadrature loop containing a virtual
 `meq::Source::f()` call per point has no kernel in it. `A9 F( γ )` and
@@ -999,34 +999,7 @@ Three separate points.
 
 ## 10. Hypotheses considered here and rejected, so they are not re-derived
 
-* **"Interpolate `F( ψ_h )` into `W_h`."** That is the 2019 predecessor, and it
-  loses the superconvergence of the postprocessed solution — which for MEQ means
-  `ψ*` at `k+1`, the estimator a full order worse, and the adaptive loop
-  refining on a degraded indicator. `Z_h = P^{k+1}` is not a refinement of the
-  idea, it is the theorem.
-* **"Feed `DarcyForm::Reconstruct()`'s `ψ*` to the source, since MEQ already has
-  it."** It lifts the non-linear potential integrators and takes their gradient
-  at the computed potential, so it is not linear in the unknowns, `B11`/`B12`
-  would not be constant, and each element's reconstruction would become an
-  implicit local fixed point. §6.4.
-* **"Interpolate `F/R`, since that is what the weak form carries."** A pole at
-  `R = 0` on the half-disc, and it destroys the Solov'ev exactness. §1.6, §7.1.
-* **"The saving is that quadrature of `F` disappears."** At MEQ's degrees
-  `ns` is within a factor of two of `N_q`, and at `extraOrder = 0` it is
-  **larger**. §3.2. The paper's framing is a time-stepping one — matrices
-  assembled once before the integration — and MEQ already reassembles nothing
-  but the source.
-* **"It removes `ComputeH()`'s cost."** It does not; `ComputeH()` is 68–73% of
-  the gradient leg on every row of M-80 and is element-local dense algebra, not
-  assembly. §3.3, §3.4.
-* **"Paper I measures the speed-up."** It does not. Grepped: the paper reports
-  Table 1's convergence history and pattern-formation figures, and **no timing
-  of any kind**. Remark 2.3's claim of computational advantage is asserted. The
-  only measurement of the gap this project has access to is MFEM's own, in
-  `reaction_hdg.hpp`'s doxygen.
-* **"MEQ's `AssemblyMode` or `TraceSolver` precedent means `SourceTerm` can be a
-  TOML key."** Those cannot change the answer; this one changes it by
-  construction. IH-8.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *The interpolatory source: seven hypotheses rejected*
 
 ---
 

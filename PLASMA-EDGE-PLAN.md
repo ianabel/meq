@@ -86,13 +86,13 @@ order, is the case for doing this at all.**
 ## 2. Why this route and not the other two
 
 Three routes beat an unfitted polynomial cap, and all three work by putting the
-interface into the discretisation.
+interface into the discretisation: fit the mesh, enrich the space, or two
+subdomains coupled at a distance. The first two are declined.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Fitting the mesh to `Γ_p`, or enriching the space (XFEM/GFEM)*
 
-| | what it is | why not |
-|---|---|---|
-| **Fit the mesh** | remesh so element faces follow `Γ_p`, curved | `Γ_p` moves every iterate, so it is a remesh per iterate; the trace space changes shape; and a *straight-sided* fit caps at second order, which `refs/CutElementQuadratureSurvey.pdf` makes its central finding |
-| **Enrich the space** | add `d_+^{j+2}` to `P_k` on cut elements (XFEM/GFEM) | cheapest in principle, and the exponent is known exactly. But HDG's `k+2` post-processing is a theorem about polynomial local problems, and it would have to be re-derived on an enriched space. A large piece of analysis MEQ cannot check by measurement alone |
-| **Two subdomains, coupled at a distance** | **this plan** | it is `refs/CouplingAtADistance.pdf` applied to an interior interface rather than an exterior operator — the same paper, the same primitives, and MEQ has already built one instance of it |
+**Two subdomains, coupled at a distance**, is this plan: `refs/CouplingAtADistance.pdf` applied to an interior
+interface rather than an exterior operator — the same paper, the same
+primitives, and MEQ has already built one instance of it.
 
 **The third is the one that fits because MEQ has already built its harder
 half.** Stage 5 solves on a subdomain of whole elements with a boundary
@@ -368,22 +368,10 @@ skipping it.
 
 ## 8. What this deliberately does not do
 
-**It does not remove `j` from the physics.** A profile with `p'(0) ≠ 0` still
-puts a jump in the current density at the plasma edge; this plan represents that
-jump instead of smearing it. Whether a user wants such an equilibrium is a
-modelling question and this changes nothing about it.
-
-**It does not help the fixed-boundary path.** There `Γ` is given and stage 5
-already does this.
-
-**It is not a cut quadrature and does not become one.** If what is wanted is
-*solvability* at `j = 0` rather than high order, a cut volume rule plus the
-matching cut surface rule for the Jacobian's `∮ F φ/|∇ψ|` term is a much smaller
-piece of work with a much smaller prize — about second order — and it should be
-costed separately rather than folded in here.
-
-**And it should not be started while `j ≥ 1` is unfinished.** See the top of this
-file.
+It does not remove `j` from the physics, does not help the fixed-boundary path,
+and is not a cut quadrature.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *The interior-interface plan's scope: `j` stays in the physics, and the fixed-boundary path gains nothing*
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Cut quadrature, Algoim and moment fitting*
 
 ## 9. The diverted case, and the one measurement that says what it costs
 
@@ -600,20 +588,10 @@ diverted case needs a different geometry rather than a better path family.
 
 ### 9.6 The modal border must be per-arc, and the plan inherited its smoothness from the wrong parent
 
-**§3 expands `λ( s )` in one curve parameter and claims spectral convergence with
-`N ~ log( 1/h )`. That claim comes from `CouplingAtADistance.pdf`, whose `Γ` is
-an ARTIFICIAL interface chosen smooth** — a circle, in its §4.2 — and which says
-so: *"the BEM is defined on a suitably chosen, **smooth** artificial interface"*,
-*"let `x : R → Γ` be a **smooth regular**"* parametrisation. They pick a smooth
-`Γ` precisely to avoid this question. It is the **extension** work,
-`HDG-CurvedExtensions.pdf` and the Joukowsky aerofoil of its §3.4, that is built
-for a sharp `Γ` — and `VertexConePath` exists because both closed-form families
-give out there.
-
-**So the transfer half of this plan has a parent that meets corners and the
-modal half does not**, and a global Fourier series on a closed curve with a
-corner converges at `O( 1/m² )`, not spectrally: `N ~ h⁻¹`, and §3's whole cost
-argument against a mortar space collapses.
+A single global Fourier series in one curve parameter converges at `O( 1/m² )`
+on a cornered `Γ_p`, not spectrally, so `N ~ h⁻¹` and §3's cost argument
+against a mortar space does not hold there.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A single global Fourier modal border on a cornered `Γ_p`*
 
 **The parametrisation that works** follows from §9.1 and needs nothing exotic,
 because each arc is analytic in arc length right up to the node:

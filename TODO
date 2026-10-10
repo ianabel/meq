@@ -699,19 +699,12 @@ IS DONE, and so is the run-time switch. Rewritten 2026-09-01 to what is left.
   every size against oneAPI MKL 2026.1 and agrees with UMFPACK to round-off, so
   the n ~ 3000 ceiling was Debian's intel-mkl 2020.4.304 and nothing about the
   method; setTraceSolver() picks UMFPack, Pardiso or CuDSS at run time, with
-  UMFPack still the default because oneMKL's licence is not everybody's to
-  accept; SetReuseSymbolic() is on; and the link line no longer straddles two
+  PARDISO the default wherever the build has it and UMFPack where it does not; SetReuseSymbolic() is on; and the link line no longer straddles two
   MKL installations, because MEQ builds its own SuiteSparse.
 
-  DO NOT QUOTE THE TIMINGS THIS ENTRY USED TO CARRY. They were taken before
-  2026-08-30, when a stray libmkl_sequential made MKL resolve sequential for
-  everything, so they were sequential-against-sequential and were never labelled
-  as such. The live numbers are in CLAUDE_HDGGS.md, "Threading, measured".
-
-  THREE HYPOTHESES WERE TESTED AGAINST THE OLD FAILURE AND ARE ALL DEAD, so do
-  not re-test them if a new one appears: a METIS symbol collision with MFEM's
-  -lmetis; an interaction with MFEM's link line; and something particular to
-  MEQ's matrix -- a plain 5-point Laplacian failed identically.
+  The old timings are withdrawn and the three hypotheses tested against the old
+  failure are dead; do not re-test them.
+  → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *PARDISO's old failure: the sequential timings and three dead hypotheses*
 ================================================================================
 Performance: profile the inside of a solve, then decide which backend applies
 Raised 2026-08-26, rewritten 2026-09-01 against the threading campaign. The goal
@@ -993,150 +986,20 @@ Raised 2026-09-06, when DRIVER-PLAN.md was converted to docs/ and these were the
 only two things in it that were neither built nor recorded anywhere else.
 ================================================================================
 
-  BOTH ARE CLOSED, AND THE FIRST ONE'S PROPOSAL WAS WRONG. The entry below is
-  kept because what it proposed is the thing not to do, and because the
-  comparison it asked for found something neither question anticipated.
-  MEASUREMENTS.md M-93 has the numbers;
-  theTwoLocatorsAgreeAtTheSamePoints in tests/convergence/SamplerConvergence.cpp
-  is the case.
-
-  1. SetL2AvgType IS A REAL RULE AND IT IS THE WRONG ONE. This entry called it
-     "a principled answer where meq::GridSampler has a shrug". Measured on
-     psi_h at k = 2: with gslib's default averaging left on, ALL 577 border
-     nodes of a 65^2 grid disagree with GridSampler, worst 1.93e-06, because
-     the averaged value belongs to NEITHER element's polynomial -- which is the
-     same finding meq::FieldTransfer's constructor already records from the
-     other direction, at 28%, 10% and 12% wrong in L2 at k = 1, 2, 3. Picking a
-     side, which is what GridSampler does, is the better rule for a
-     DISCONTINUOUS field. The shrug was right and nothing is to be wired.
-
-  2. THE TWO ARE NOW COMPARED, AND THEY AGREE EXACTLY WHERE THE QUESTION HAS AN
-     ANSWER. 3648 of 3648 nodes strictly inside an element agree to 7.2e-16 --
-     two implementations sharing no locating machinery, which is the check an
-     exact-solution comparison structurally cannot make. Every disagreement is
-     a border node, where both are right and the difference is the face jump,
-     1.17e-06 against 2.03e-06 of error in psi_h itself.
-
-     TWO THINGS THE COMPARISON FOUND THAT NEITHER QUESTION ASKED. Border nodes
-     are COMMON -- 577 of 4225, one in seven, on a grid with no alignment
-     intended, because a uniform grid over a uniform mesh is commensurate with
-     it far more often than a generic point would be. And the count of nodes
-     the two resolve to DIFFERENT elements is not a stable number: one ulp in
-     the mesh extent, 0.7999999999999999 against 0.8, moves it from 202 to 331.
-     It is reported and never gated.
-
-  3. AND THE REAL DEFECT WAS IN NEITHER QUESTION. Setting gslib up on a mesh
-     calls Mesh::EnsureNodes(), and GridSampler's affine fast path was keyed on
-     Mesh::GetNodes() == nullptr -- so constructing a meq::FieldTransfer on a
-     mesh silently put every later GridSampler on it onto the Newton route,
-     159x at 129^2 and 83x at 513^2, with every answer unchanged. Fixed by
-     testing the geometry's DEGREE. Latent in the driver, which builds its
-     transfers on copies. CLAUDE.md's Traps carries it.
-
-================================================================================
-
-  GSLIB HAS A PRINCIPLED ANSWER WHERE meq::GridSampler HAS A SHRUG, AND IT HAS
-  NOT BEEN TAKEN. A grid node landing exactly on an inter-element face is
-  ambiguous, psi_h being discontinuous there: whichever element claims it first
-  wins. The disagreement is the face jump, O( h^(k+1) ), so it converges away
-  and nothing is wrong -- but it is an arbitrary choice where a rule exists.
-  FindPointsGSLIB::SetL2AvgType does arithmetic or harmonic averaging over the
-  elements meeting at a point, for exactly this case, and BOTH of MEQ's sampled
-  fields are L2.
-
-  AND THE ROUTE TO IT IS NO LONGER FREE, WHICH CHANGES THIS ITEM FROM "REACHABLE
-  AND NOT DONE" TO "A RULE TO IMPLEMENT". meq::FieldTransfer is
-  meq::PointLocator, MEQ's own, and MFEM_USE_GSLIB is optional -- it has to be,
-  because gslib carries no floating-point abstraction and cannot be built beside
-  MFEM_PRECISION = single. So taking gslib's rule means WRITING it in
-  meq::PointLocator rather than calling a setter, and the rule is the part worth
-  having: an arithmetic or harmonic mean over the elements meeting at the point,
-  in place of whichever element the search happened to return.
-
-  Note the sampler does NOT otherwise want GSLIB: the output grid is uniform, so
-  locating a point is index arithmetic and the search is already free. It is the
-  multi-valued-at-a-face rule alone that is missing.
-
-  AND THE TWO SAMPLERS HAVE NEVER BEEN COMPARED TO EACH OTHER. meq::GridSampler
-  inverts the loop -- element bounding box to grid index range, then
-  TransformBack -- and meq::FieldTransfer locates through meq::PointLocator,
-  which is a different search over the same mesh. WarmStartConvergence.cpp does run
-  it on triangles and does measure the result -- but against the EXACT SOLUTION,
-  not against GridSampler, so the two are never asked the same question at the
-  same points on the same mesh.
-
-  This project's standing position is that two independent implementations
-  agreeing is worth more than either one being plausible, and this is a case
-  where both already exist and the comparison is a few dozen lines.
+  BOTH ARE CLOSED, AND THE FIRST ONE'S PROPOSAL -- gslib's SetL2AvgType face
+  averaging -- IS THE THING NOT TO DO (MEASUREMENTS.md M-93).
+  → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Face averaging in the grid sampler: gslib's SetL2AvgType*
 
 
 ================================================================================
 A boundary error estimator for the exterior coupling -- DONE 2026-09-06
 Raised 2026-09-06 by FB-5's adaptive loop, which measured the gap rather than
 predicting it. FREE-BOUNDARY-PLAN.md section 7.12 is the write-up.
-
-  CLOSED THE SAME DAY, and the entry is kept because the CURE IS NOT WHAT THIS
-  ENTRY PROPOSED. It said "add it to the marking". Added to eta as a sixth term
-  it does NOTHING: eta_6 is 8.58e-04 against an eta of 2.51e-01, so its share of
-  eta^2 is about 1e-5 and a Doerfler competition never reaches it -- Gamma_h kept
-  all 34 faces for four cycles with the term summed in. The two are different
-  quantities in different units, so one sum over both is a comparison with no
-  meaning however it is weighted. What works is a SECOND MARKING PASS on the
-  boundary term's own distribution, unioned with the interior one; eta_6 stays in
-  eta so the STOPPING rule sees it. Measured, Gamma_h then refines 34 -> 46 -> 57
-  -> 64 and |a - exact| falls 1.32e-03 -> 1.53e-04 against a control that does
-  not move. See CLAUDE_FB.md, FB-5's section.
 ================================================================================
 
-  THE ADAPTIVE LOOP CANNOT SEE THE COUPLING, AND eta IS NOT WRONG. Measured on
-  the half-disc at k = 2 over four cycles, with Gamma fixed and only Gamma_h
-  refining:
-
-      cycle   elements   Gamma_h faces        eta      L2(psi)   |a - exact|
-        0        314          34          2.5109e-01  3.5828e-03  1.3194e-03
-        3        640          34          3.2079e-02  9.3347e-04  1.3194e-03
-
-  eta falls eightfold, the interior error follows it, and the exterior
-  coefficients DO NOT MOVE -- five digits, four cycles. Under UNIFORM refinement
-  the same quantity converges at 3.32, so it is not a mode-truncation floor.
-
-  IT IS NOT A MARKING ACCIDENT. The 34 elements touching Gamma_h are 11% of the
-  mesh and carry 0.00% of eta^2, rising only to 0.07% by cycle 3 as the interior
-  improves around them. Their indicator is essentially zero, so no threshold
-  whatever would mark them, and Gamma_h keeps its 34 faces while the element
-  count doubles.
-
-  AND eta IS ANSWERING A DIFFERENT QUESTION. It estimates the INTERIOR
-  discretisation error, and eta_5 on Gamma_h compares psi* against the datum
-  actually imposed -- the repair CLAUDE.md records under "A separate eta_5
-  problem on the extension path" -- so it correctly reports the boundary as well
-  resolved FOR THE INTERIOR PROBLEM. The exterior coefficients are a BOUNDARY
-  FUNCTIONAL: a transmission integral over Gamma reached by extension from
-  Gamma_h. Nothing in eta measures it. Both statements are true at once and
-  neither is a defect.
-
-  WHAT IT COSTS, QUANTIFIED, AND IT HAS NOT BITTEN YET. At cycle 3 the interior
-  error is 9.3e-04 against a frozen 1.3e-03 in the coefficients. A few more
-  cycles and the second is the floor of the first: the loop would go on
-  reporting a falling eta while psi stopped improving. That is the shape of
-  quiet wrong answer this tree exists to catalogue, and it is recorded before
-  being met rather than after.
-
-  WHAT TO BUILD. The natural indicator is the TRANSMISSION RESIDUAL PER FACE of
-  Gamma_h -- the same integral exteriorTransmissionRows() already sweeps, kept
-  per face instead of contracted and summed -- added to the marking beside eta.
-  The machinery exists; what is missing is a per-face accumulation and a
-  decision about how to weigh two indicators of different quantities against
-  each other, which is the part that wants thought rather than typing.
-
-  DO IT BEFORE FB-6 RATHER THAN DURING IT. A machine case is exactly where the
-  interior error gets small enough for the boundary floor to bite, and
-  diagnosing a stalled machine case is much harder than diagnosing this.
-
-  THE CONTROL ALREADY EXISTS: theCoupledSolveSurvivesTheAdaptiveLoop asserts the
-  coefficients are STABLE across cycles and prints the boundary's share of
-  eta^2. If a boundary indicator lands, that case fails with a message saying so
-  -- which is the intended signal, not a regression.
+  CLOSED: a second marking pass on the boundary term's own distribution is the
+  cure, and adding eta_6 to eta's marking does nothing (MEASUREMENTS.md M-05).
+  → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *η₆ in the marking*
 
 
 ================================================================================

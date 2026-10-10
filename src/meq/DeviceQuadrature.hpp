@@ -33,7 +33,7 @@
  * physical coordinates and the Jacobian determinants at every quadrature point;
  * `mfem::FiniteElement::GetDofToQuad()` supplies the shape functions there; and
  * `mfem::forall` runs the loop. MEQ writes no CUDA and no HIP, so the same
- * source serves both -- see CLAUDE.md, *Prefer a maintained library*.
+ * source serves both -- see CLAUDE.md, *Dependencies, and preferring a maintained library*.
  *
  * WHAT IT REFUSES, AND EACH REFUSAL IS A CASE THE HOST LOOP HANDLES AND THIS
  * ONE CANNOT YET. A refusal returns false and the caller keeps the host path,

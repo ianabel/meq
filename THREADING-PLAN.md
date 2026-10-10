@@ -62,7 +62,7 @@ marker; this table is what a reader needs before any of the estimates.
 | **B** the four plasma element loops | **DONE**, and it is five of them — `assemblePlasmaCurrent()` with the four the item names — through `MEQ_OMP()` in the new `src/meq/Threading.hpp`, per-element partial sums rather than a `reduction(+:)`, and a per-thread `std::exception_ptr` so a throw inside a region is not undefined behaviour |
 | **C** `CriticalPointFinder::sweep()` | **DONE.** Per-element candidate buffers and a serial dedup over an element-ordered concatenation, with `theAxisSweepDoesNotDependOnTheThreadCount` in `tests/convergence/CriticalPointConvergence.cpp` |
 | **D** the unnamed 3.2% | **DONE.** Two legs, `of which driver prepare` and `of which sweep overhead`, printed by `--profile` |
-| **E**, **F** | **declined, and the decline is a decision rather than a deferral.** Re-checked against [M-138](MEASUREMENTS.md#m-138) and unchanged. If either grows, that is a **new plan** and not a reopening of this one — see *When E or F would be worth revisiting* below for what "grows" has to mean |
+| **E**, **F** | **declined, and the decline is a decision rather than a deferral.** Re-checked against [M-138](MEASUREMENTS.md#m-138) and unchanged. If either grows, that is a **new plan** and not a reopening of this one — see `CLAUDE_DECLINED.md`, *Threading the output writers (E) and the Newton loop's remainder (F)*, for what "grows" has to mean |
 | **G** re-assembly | **MOVED**, to `BORDERED-GLOBALISATION-PLAN.md` §12, which is where the Armijo backtrack that calls it sixteen times a run is described. It is a restructure of the line search and not a threading item — the leg reads 1.08 cores and the half that dominates is MFEM's — and it is now the **largest single-threaded leg MEQ owns**, 5.6% of the run in [M-138](MEASUREMENTS.md#m-138) |
 | **the payoff** | **TAKEN. `1.16×` at eight threads, against the `1.14×` predicted** → **[M-137](MEASUREMENTS.md#m-137)**, six interleaved pairs on a quiet machine, both arms against the shipping `libmfem.a` so MEQ's own source is the only variable. `1.03×` at one thread, which is item A alone, the two threaded items having nothing to give there |
 
@@ -272,7 +272,7 @@ sparser.
 from `18 M` terms to about `0.26 M`; what is left is small enough that BLAS-3
 buys nothing measurable, and a blocked GEMM reassociates the sum where dropping
 exact zeros does not. The standing preference for a maintained library
-(`CLAUDE.md`, *Prefer a maintained library to a hand-rolled algorithm*) is not in
+(`CLAUDE.md`, *Dependencies, and preferring a maintained library*) is not in
 play: the question here is *which terms to sum*, not *how to sum them*.
 
 ---
@@ -634,96 +634,17 @@ members the call-site timers could not see. Add a `LegTimer` around the driver's
 
 ### E. The output writers, 3.8% — do not do
 
-`output` less `postProcess` is 0.269 s. M-92 splits it on this same case: the
-`.vtu` 0.130 s, the `.mesh` and three `.gf` 0.053 s, the NetCDF write 0.016 s,
-and the whole `GridSampler` path — constructor and three sampling passes —
-**0.010 s**. That is serialization and file I/O, not compute.
-
-The one loop in it with real arithmetic is the sampling pass, and M-92 already
-observes that grouping the located nodes by element makes it a `forall` with no
-reduction and no contention, and records that it was **not done** because the
-whole grid path is 27 ms. That judgement stands and this plan does not reopen
-it: threading 10 ms buys 0.14% of a run.
-
-Writing the three files concurrently would take 0.20 s to 0.13 s, about 1.0%.
-MFEM's stream I/O is not documented reentrant and the three writers read the
-same `GridFunction`s; 1% is not worth finding out. **Do not do.**
-
-The part of this phase that *is* compute is `postProcess()` —
-`DarcyForm::Reconstruct()`, four integrators re-assembled at the enriched order
-per element. It is MFEM's and out of scope here, and **it is the one number in
-this section the new budget moves**: 13.0% when this was written, **18.5% at
-1.00 cores** in [M-138](MEASUREMENTS.md#m-138), worth `1.19×` if it were
-threaded perfectly. The writers around it are unchanged — `output` less
-`postProcess` is 0.198 s, **5.8%**, and still serialization rather than
-arithmetic — so **the decline stands and the thing next to it got bigger.**
+The writers are serialization and file I/O, and the sampling pass inside them
+is 10 ms; declined → [M-92](MEASUREMENTS.md#m-92), [M-138](MEASUREMENTS.md#m-138).
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Threading the output writers (E) and the Newton loop's remainder (F)*
 
 ---
 
 ### F. `other (remainder)`, 2.7% — not addressable by a loop MEQ can write
 
-This is MFEM `Vector` arithmetic and allocator churn inside the Newton loop:
-`unknown = savedState`, the `Add()` chain in each line-search trial
-(`GradShafranov.cpp:8459`–`:8476`), `Norml2()` in `augmentedNorm`, and the
-temporaries underneath them.
-
-* **The `n`-length vectors are already hoisted.** `residual`, `column`, `y`, `z`,
-  `scratch`, `columnL`, `zL` and `currentRow` are declared once per solve at
-  `:5876`–`:5877`, outside the Newton loop. There is nothing to hoist.
-* **`Vector::Add` and `Norml2` are MFEM's**, dispatched through `mfem::forall`.
-  Threading them on the host means configuring an `mfem::Device`, which is a
-  process-wide decision with its own hazards (M-79), and `Norml2` would then
-  reassociate.
-* **The measured MEQ-side lever is the build, not a loop.** M-77 measures the
-  CUDA-enabled install at **1.07× the wall and +55.4 M allocations** against an
-  otherwise identical `../mfem/install-nocuda`, with byte-identical output, and
-  attributes 24% of the allocation traffic to `mfem::forall`'s host-lambda
-  wrapper. **7% of the whole run for one CMake variable is larger than every
-  item in this plan except A**, and it costs nothing to take for a production
-  CPU build.
-
-**Do not thread this leg. Take the no-CUDA install instead, and say in the
-release notes that a CPU production build is a separate install.**
-
-**RE-CHECKED AGAINST [M-138](MEASUREMENTS.md#m-138) AND UNCHANGED**: the leg is
-0.116 s, **3.4%**, at 1.06 cores. M-77's 7% is still larger than every item this
-plan built except A, and it is still one CMake variable.
-
----
-
-### When E or F would be worth revisiting, and it is a NEW plan when it happens
-
-**E and F are declined and stay declined.** This section exists so that a reader
-meeting a bigger number later can tell whether it means anything, because this
-plan has just produced the counter-example: `re-assembly` went from 4.2% to 5.6%
-of the run **without the leg moving at all**, purely because the run got shorter
-around it.
-
-**A SHARE IS NOT A TRIGGER. SECONDS ARE.** Every share in a leg budget has the
-wall clock as its denominator, so threading anything at all inflates every share
-that did not move. Re-deriving M-138 is what makes a number in this file
-comparable with a number in it; comparing a share across budgets is not.
-
-**E — the output writers.** The leg is 0.198 s and **0.010 s of it is compute**;
-the rest is serialization and file I/O. So the trigger is not the leg, it is the
-`GridSampler` path inside it, and the two things that would move it are a much
-larger `[output] GridNR`/`GridNZ` — it is `O(nodes)` — or a case whose mesh makes
-the location work dominate. **Revisit at 0.1 s of sampling**, which is ten times
-what it costs now, and revisit the concurrent-write half only if somebody
-establishes MFEM's stream I/O is reentrant, which is the part that is not about
-size at all.
-
-**F — `other (remainder)`.** MEQ cannot thread it without configuring a
-process-wide `mfem::Device`, so its trigger is not a size at all: **it becomes
-reachable for free the day MEQ configures a Device on the host path for some
-other reason**, because `Vector::Add` and `Norml2` already dispatch through
-`mfem::forall`. Until then the lever is M-77's build variable and not a loop. If
-a Device does arrive, note that `Norml2` would reassociate and the augmented
-norm feeds the Armijo test, so the exactness rule above applies to it.
-
-**And either way it is a new plan.** This one is closed, its budget is
-superseded, and an item reopened against a stale denominator is how a closed
-plan quietly becomes a wrong one.
+It is MFEM `Vector` arithmetic and allocator churn, and the MEQ-side lever is
+the no-CUDA build, not a loop → [M-77](MEASUREMENTS.md#m-77).
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Threading the output writers (E) and the Newton loop's remainder (F)*, which also says when either would be worth revisiting
 
 ---
 
@@ -821,12 +742,10 @@ order.
    `1.14×`, or `1.106×` counting only the measured parts; the measurement clears
    both. **So this plan has delivered code and a number, and it is closed.**
 
-**Not to be done**: E, the output writers (1% at best, for I/O concurrency
-nobody has established is safe); F, `other` (threading it is not available to
-MEQ, and the 7% that *is* available is a build variable); and the two Γ sweeps
-in `border assembly`, `exteriorTransmissionRows()` and
-`exteriorConductorMoments()`, which run three times each over 82 boundary faces
-and are already below the noise. G has **moved** to
+**Not to be done**: E, F and the two Γ sweeps in `border assembly`.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Threading the output writers (E) and the Newton loop's remainder (F)*
+
+G has **moved** to
 `BORDERED-GLOBALISATION-PLAN.md` §12: real, worth `1.06×`, a restructure of the
 line search rather than a threading item, and now the largest single-threaded
 leg MEQ owns.

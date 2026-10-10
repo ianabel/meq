@@ -418,11 +418,10 @@ writing the obvious file.
 
 ### 7.2 CS-5's acceptance is MEQ's own quadrature, not `freegs4e`
 
-**CS-5 as staged cannot work and [M-139](MEASUREMENTS.md#m-139) is why.** The
-benchmark's floor after matching the conductor models is `7.7e-04` and it does
-not refine, because `freegs4e.shaped_coil.ShapedCoil` caps at 6 points per
-triangle. **A change whose entire claim is that the conductors are resolved
-exactly cannot be accepted against a reference that resolves them to 6 points.**
+**CS-5 as staged cannot work and [M-139](MEASUREMENTS.md#m-139) is why**: the
+`freegs4e` floor after matching the conductor models is `7.7e-04` and does not
+refine, so it cannot accept a change whose claim is exact conductors.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *CS-5's acceptance against `freegs4e`*
 
 **The replacement is an expensive quadrature-based check of MEQ's own.** MEQ
 already owns the kernel — `coilPsi()` at whatever order is asked for, and
@@ -598,12 +597,9 @@ that has to be made correctly 68 times will not be.
 
 ### 8.2 The design: hand each consumer `psi_c`, do not pre-add it
 
-**The rejected option is to form a total `GridFunction` once and let consumers
-read that.** It is the smallest diff and it throws away the plan's central
-claim: `psi_c` projected onto the discrete space is `psi_c` to the mesh's order,
-which is exactly the error §2(b) exists to remove. It would also reintroduce the
-singularity into a finite-element function, which for a filament is the thing
-that cannot be represented at all.
+A total `GridFunction` formed once is rejected: projecting `psi_c` onto the
+discrete space throws away the split's exactness.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A total `GridFunction` `psi_p + psi_c` for consumers to read*
 
 **So each consumer takes a `ConductorField const *` and adds `psi_c` at its own
 evaluation points**, which is the pattern `SourceIntegrator::setConductorField()`

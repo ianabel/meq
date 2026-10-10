@@ -1154,7 +1154,7 @@ BOOST_AUTO_TEST_CASE( theAnalyticCurrentCornerAgreesWithTheDifferencedOne )
 		std::fflush( stdout );
 
 		// THE SAME EQUILIBRIUM. The corner is a Jacobian entry, so it changes
-		// the work and not the answer -- and CLAUDE.md's *A wrong Jacobian is
+		// the work and not the answer -- and CLAUDE_HDGGS.md's *A wrong Jacobian is
 		// invisible to a convergence table* is exactly why this half of the
 		// assertion is the weak one.
 		// Two routes to the same Jacobian column agree to round-off on the

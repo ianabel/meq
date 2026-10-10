@@ -2981,6 +2981,8 @@ either would now be quoted within 8%.
 
 ### M-103
 
+*Note: this entry's shaped C, D and G rows were taken on references built with two `ShapedCoil` defects — turns ignored in its field, a 12-point rule 18–30 per cent off on tall conductors — so they compare MEQ with a machine it was not given; G shaped most of all. [M-255](#m-255) finds them, [M-256](#m-256) re-takes the rows that matter.*
+
 **THE SEVEN DIVERTED MACHINES, BOTH CONDUCTOR MODELS, RE-TAKEN: DIII-D IS
 STILL THE ONLY ONE THAT CLOSES, AND THREE ROWS CHANGED CHARACTER.** M-96's
 end-to-end loop re-run on the shipped configurations, nothing tuned per
@@ -3265,6 +3267,8 @@ fixed-amplitude arm at 1.88e-03. M-103's "DIII-D is the only machine that
 closes" is that number.
 
 ### M-106
+
+*Note: this entry's shaped C, D and G rows were taken on references built with two `ShapedCoil` defects — turns ignored in its field, a 12-point rule 18–30 per cent off on tall conductors — so they compare MEQ with a machine it was not given; G shaped most of all. [M-255](#m-255) finds them, [M-256](#m-256) re-takes the rows that matter.*
 
 **THE WHOLE DIVERTED SET WITH THE SEED FIXED, BOTH ARMS OF THE CURRENT ROW —
 AND THE PROFILE SCALE IS A CLEAN SCREEN ON THE ANSWER.** M-103 runs the shipped
@@ -8752,7 +8756,7 @@ the library and rebuilding MEQ **in place** left Debian's MKL on MEQ's
 resolved values, and the harness **refuses to measure** unless
 `MFEM_EXT_LIBS` is token-identical between the two installs and the two MEQ
 `link.txt` files agree modulo the install path. Same family as the SUNDIALS
-derived-cache trap under `CLAUDE.md`, *Which MFEM, and why not master*.
+derived-cache trap under `CLAUDE_MFEM.md`, *Which MFEM, and why not master*.
 
 **DO NOT READ CUDA'S COST OUT OF THIS TABLE.** The `after` arm is nocuda Release
 at 2.949 s where the same library in the shipping CUDA build read 3.377 s
@@ -14737,6 +14741,8 @@ is within FP32's floor on a cuDSS path that is nondeterministic.
 
 ### M-244
 
+*Note: this entry's shaped C, D and G rows were taken on references built with two `ShapedCoil` defects — turns ignored in its field, a 12-point rule 18–30 per cent off on tall conductors — so they compare MEQ with a machine it was not given; G shaped most of all. [M-255](#m-255) finds them, [M-256](#m-256) re-takes the rows that matter.*
+
 **IV-0: `freegs4e`'s INVERSE SOLVE FINDS THE BASIN FROM COLD ON THIRTEEN OF
 FOURTEEN CONFIGURATIONS, WHERE ITS FORWARD SOLVE FINDS NONE — AND ONLY ON THE
 MACHINE WITH ITS CIRCUITS.** `INVERSE-AND-RECONSTRUCTION-PLAN.md` §0.2's gate,
@@ -14832,7 +14838,8 @@ F shaped and G.
 
 **BS-1 — ONE MERIT SCALE PER BORDER — IS BUILT, PRICES THE BORDERS VERY
 DIFFERENTLY, CLOSES NONE OF THE SIX, AND MOVES THREE ANSWERS. REVERTED.**
-`BORDER-SCALING-PLAN.md` BS-1: `augmentedNorm()` weighted every border by
+BS-1 of the border-scaling plan (now `CLAUDE_DECLINED.md`, *Border scaling*):
+`augmentedNorm()` weighted every border by
 `psi_ax`'s `gamma = || dR/dpsi_ax ||`; the arm weighted border `i` by
 `gamma_i = || c_i ||/| D_ii |`, frozen at the starting iterate — `psi_bnd`'s
 column differenced as `psi_ax`'s is, the current's assembled and divided by
@@ -14968,7 +14975,8 @@ because the committed `examples/*-meta.json` still carry the old one.
 **BS-5 — A CAP ON HOW FAR A LINE-SEARCH TRIAL MAY MOVE THE X-POINT FROM ITS
 SEED — CLOSES E AND E SHAPED AND MOVES NOTHING, BUT ONLY AS A RETRY RUNG.
 APPLIED FROM THE FIRST SOLVE IT IS A BRANCH CONTROL THAT LOSES MAST AND MAST-U.**
-`BORDER-SCALING-PLAN.md` BS-5, prototyped and measured, **not landed**. A trial
+BS-5 of the border-scaling plan (now `CLAUDE_DECLINED.md`, *Border scaling*),
+prototyped and measured, **not landed**. A trial
 whose X-point unknown lands further than `f·L` from the `[boundary.xpoint]` seed
 throws inside the Armijo loop, so the existing catch halves it exactly as it
 does an out-of-mesh trial; `L` is `[boundary.exterior] Radius`, 2.4–3.5 m on
@@ -15027,6 +15035,8 @@ X-point is at ( 0.057, 0.446 ), 1.67 m from its seed — an excursion onto the
 symmetry axis.
 
 ### M-248
+
+*Note: this entry's shaped C, D and G rows were taken on references built with two `ShapedCoil` defects — turns ignored in its field, a 12-point rule 18–30 per cent off on tall conductors — so they compare MEQ with a machine it was not given; G shaped most of all. [M-255](#m-255) finds them, [M-256](#m-256) re-takes the rows that matter.*
 
 **BS-5 IS LANDED ON THE RETRY RUNG, AND THE RUNG NOW TAKES TWO TRIGGERS: MEQ'S
 COLD TABLE GOES FROM FIVE OF FOURTEEN WITH A LOCATED AXIS TO NINE, AND NO
@@ -15346,6 +15356,8 @@ gives no convergence.
 
 ### M-253
 
+*Note: this entry's shaped C, D and G rows were taken on references built with two `ShapedCoil` defects — turns ignored in its field, a 12-point rule 18–30 per cent off on tall conductors — so they compare MEQ with a machine it was not given; G shaped most of all. [M-255](#m-255) finds them, [M-256](#m-256) re-takes the rows that matter.*
+
 **IV-6: MEQ'S INVERSE SOLVE AS A BASIN FINDER ON THE FOURTEEN COLD
 CONFIGURATIONS. IT CONVERTS ONE, TCV, AND §2.2's CLAIM — MEASURED FOR
 `freegs4e` AT 13 OF 14 (M-244) — DOES NOT CARRY OVER TO MEQ AS BUILT.**
@@ -15442,3 +15454,252 @@ its own.
 
 The double suite is **67 of 68** on this tree, the one red the deliberate
 `PlasmaEdgeConvergence`.
+
+### M-254
+
+**MEQ'S INVERSE SOLVE AGAINST `freegs4e`'s IN THE SAME MODE. ON DIII-D SHAPED,
+WITH THE CONDUCTOR MODEL AND THE PROFILE BOTH MATCHED, THE CURRENTS AGREE TO
+3.0e-04 — `freegs4e`'s OWN 129² → 257² SENSITIVITY — AND THE SHAPE TO 0.08 mm.
+ON TCV AND MAST THE SAME MODE LEAVES 6–8 PER CENT IN THE CURRENTS.**
+`tools/freegs4e-benchmark/inverse_compare.py`. Every reference `fgsref.py`
+writes is an inverse solve, so this is the comparison `CLAUDE_FB.md`'s standing
+rule asks for, made from MEQ's side.
+
+**The problem posed.** `freegs4e` frees every supply from zero, and its targets
+do not determine them — DIII-D has 18 supplies against six rows, MAST-U a rank
+of five, and on C and G almost all of the reference current lies in the null
+space of the vacuum target response. All-free currents would differ by a
+selection, not an error. So each configuration frees the supplies a
+column-pivoted QR of the row-normalised vacuum response takes first, as many as
+its rank, and holds every other supply at `freegs4e`'s value: the reference is
+then an exact, locally unique solution of the restricted problem. Targets are
+`fgsref.py`'s own, the design X-points as `Track = false` (`B_R = B_Z = 0`, as
+`freegs4e`'s constraint) and the isoflux pairs. The free supplies are seeded at
+the reference's currents; a second arm seeds them ±10 per cent of the largest
+away and reaches **the same currents to every printed digit** in every
+configuration that converges, bar C shaped. Both codes weight the rows in the
+same units, T and Wb/rad, so where the restricted problem is overdetermined
+(A, B, E: four supplies, five rows) the two best fits answer one question.
+`freegs4e` misses those by 3.5e-03 (A) and 5.9e-03 (B); MEQ by 2.8e-03 and
+3.1e-03.
+
+**Two reference sets.** The committed one solves `fgsref.py`'s
+`UnivariateSpline` of the profile, which moves ff' by 1.3e-02 to 1.7e-02 from
+the analytic shape MEQ's tables carry and leaves it at 5e-03 of its peak at
+`psi_n = 1`. `fgsref.py --interpolating-profiles` rebuilds both splines with
+`s = 0`, moving the tables by 4e-16, and is the **same-profile** set. ΔI/I is
+max |I_MEQ − I_ref| over the free supplies over the largest free |I_ref|; the
+forward column is the same-profile set's. `MKL = 1`, the double build at
+3a5346e:
+
+| config | free | forward ψ_ax, X m | smoothed: exit, ΔI/I, ψ_ax, axis m, X m | same profile: exit, ΔI/I, ψ_ax, axis m, X m |
+|---|---|---|---|---|
+| A | 4 | 2.6e-02, 1.3e-02 | 4, **3.1e-02**, 1.8e-02, 2.2e-02, 3.5e-03 | 4, **3.0e-02**, 1.8e-02, 2.2e-02, 3.4e-03 |
+| A shaped | 4 | 2.5e-02, 1.2e-02 | 4, **3.1e-02**, 1.8e-02, 2.1e-02, 3.5e-03 | 4, **3.0e-02**, 1.8e-02, 2.1e-02, 3.4e-03 |
+| B | 4 | exit 2 | 4, **4.7e-02**, 3.0e-02, 3.0e-02, 4.6e-03 | 4, **4.7e-02**, 3.0e-02, 3.0e-02, 4.6e-03 |
+| B shaped | 4 | exit 2 | 4, **4.7e-02**, 3.0e-02, 3.0e-02, 4.6e-03 | 4, **4.7e-02**, 3.0e-02, 3.0e-02, 4.6e-03 |
+| C | 4 | exit 2 | 4, **7.1e-02**, 5.7e-03, 4.0e-04, 2.6e-04 | 4, **6.3e-02**, 5.2e-03, 5.9e-04, 2.5e-04 |
+| C shaped | 4 | exit 2 | 4, 1.5e+00 — another equilibrium | exit 2 |
+| D TCV | 6 | exit 2 | 0, **2.7e-02**, 3.8e-03, 3.5e-05, 1.3e-04 | exit 1 |
+| D shaped | 6 | 3.5e-02, 1.2e-02 | 0, **8.3e-02**, 6.9e-02, 6.2e-05, 1.3e-04 | 0, **8.4e-02**, 7.1e-02, 5.6e-05, 1.2e-04 |
+| E | 4 | 4.6e-04, 3.3e-04 | 4, **2.9e-04**, 2.1e-04, 6.0e-05, 1.2e-04 | 4, **6.9e-04**, 7.6e-05, 1.2e-04, 1.2e-04 |
+| E shaped | 4 | 3.8e-04, 3.6e-04 | 4, **6.0e-04**, 1.8e-04, 3.0e-04, 1.1e-04 | 4, **1.0e-03**, 4.1e-05, 3.6e-04, 1.1e-04 |
+| F DIII-D | 6 | 3.7e-04, 6.0e-04 | 0, **1.1e-02**, 1.5e-03, 4.5e-05, 7.0e-05 | 0, **4.5e-03**, 6.1e-04, 4.9e-05, 7.5e-05 |
+| **F shaped** | 6 | 3.1e-05, 1.2e-04 | 0, **6.3e-03**, 9.3e-04, 5.8e-05, 7.0e-05 | 0, **3.0e-04**, **6.4e-05**, 5.7e-05, 7.5e-05 |
+| G MAST-U | 5 | 1.3e-01, 8.0e-01 | 4, **6.0e-03**, 1.3e-03, 2.1e-04, 5.8e-05 | 4, **8.2e-03**, 7.1e-04, 1.0e-04, 1.7e-05 |
+| G shaped | 5 | exit 2 | exit 1 | exit 1 |
+
+**F SHAPED IS THE CLEAN CELL, AND IT CLOSES.** Conductors matched
+(`ShapedCoil` against MEQ's meshed rectangles, the 12-point rule accurate to
+1e-06 at every target), profiles matched, mode matched: the currents agree to
+**3.0e-04**, against **2.9e-04** between `freegs4e`'s own 129² and 257²
+references, and `psi_ax` to 6.4e-05. **The 6.3e-03 in the smoothed column is
+the profile spline and nothing else**: MEQ's currents hold at 6.1e-03 to
+6.3e-03 across degree 2, 3 and 4, a halved `PlasmaSize` and `Modes = 20`, and
+its profile scale at 0.99840 — with the analytic tables MEQ's converged plasma
+carried 0.16 per cent more current than `freegs4e`'s, whose own `I_p`
+re-integrates from its `psi` to 9e-06. On the same-profile set the scale is the
+check it was meant to be: the tables still carry the committed reference's
+amplitude, the same-profile reference's is 0.998174 of it with the p'/ff'
+ratio identical to 1e-16, and MEQ's scale reads **0.998012** — the two codes'
+plasma currents agree to 1.6e-04. **F's filament arm keeps 4.5e-03**,
+which is the conductor model: `freegs4e`'s point filaments against MEQ's
+rectangles, and an inverse solve refuses `[conductors] Model = "filament"`.
+
+**MAST-U IS WHAT THE STANDING RULE PREDICTED.** Forward, at `freegs4e`'s
+currents, MEQ's X-point is **0.80 m** from the reference's and `psi_ax` 13 per
+cent out; inverse, the axis is 0.1 mm away, the X-point 0.02 mm and the
+currents within 8e-03. The forward disagreement there is the sensitivity of a
+forward solve to its current set.
+
+**TCV AND MAST ARE NOT — AND M-255 CORRECTS THIS: THE GAP WAS THE REFERENCE.**
+The shaped references below carried two defects in how `freegs4e`'s
+`ShapedCoil` was used (turns ignored in its field, a 12-point rule 18–30 per
+cent off on tall conductors); against corrected ones D shaped agrees to 6.6e-04
+and G shaped converges at 1.2e-03, NICE agreeing. C plain's 6.3e-02 is
+`freegs4e`'s solenoid stack, NICE agreeing with MEQ to 5.5e-04. What follows is
+the record of the measurement as taken. In the same
+mode the geometry is pinned — axis 0.04 to 0.6 mm, X-point 0.12 to 0.26 mm —
+and the currents still differ by **2.7e-02 to 8.4e-02**, matched profile or
+not: on D shaped OH moves 8 per cent and E1 and E8 4 per cent, on C P2 moves
+40 per cent of itself. `psi_ax` and `psi_bnd` on D shaped differ by the same
+absolute 1.5e-03 Wb/rad, a near-uniform flux offset, which is what a solenoid
+adds. These are the supplies the targets constrain worst, so a sub-millimetre
+difference between the codes appears as a per-cent current; what that
+difference IS is not established here. C shaped's own two references disagree
+with each other (P2 = 238 kA shaped, 26 kA filament), so its row compares
+branches and not codes.
+
+**A AND B ARE OVERDETERMINED BEST FITS AND A CARRIES M-105's FOLD**, so their
+3 to 5 per cent is not a measure of either code.
+
+### M-255
+
+**WHY MEQ FAILED WHERE `freegs4e` SUCCEEDED, AND A FOUR-CODE CONSENSUS ON THE
+INVERSE SOLVE. THE SHAPED REFERENCES WERE NOT THE MACHINE MEQ WAS GIVEN, TWICE
+OVER; CORRECTED, MEQ, NICE AND `freegs4e` AGREE ON THE CURRENTS TO ABOUT 1e-03
+ON ALL FIVE SOLVABLE SHAPED MACHINES.** M-254's harness,
+`tools/freegs4e-benchmark/inverse_compare.py`, with `--guess exact` (each arm
+started from the reference's own equilibrium, rebuilt by Green's functions,
+`mkexactguess.py` at n = 128) to separate "MEQ cannot solve this" from "MEQ's
+cold start lands elsewhere". NICE's driver is
+`/home/ian/projects/nice/meq-race/inverse/`, freegsnke's
+`tools/freegs4e-benchmark/inverse_nke.py`; all four codes were posed the same
+targets, free supplies, fixed currents and profile.
+
+**TWO DEFECTS IN THE SHAPED REFERENCES, BOTH IN HOW `freegs4e`'s `ShapedCoil`
+WAS USED, NEITHER IN MEQ.**
+* **`ShapedCoil` ignores `turns` in its field.** Its docstring says the block
+  carries `current × turns`; `controlPsi`, `controlBr` and `controlBz` sum Green's
+  functions with weights summing to one and never multiply by it.
+  `conductors.flatten` exports `turns × current`, so every multi-turn conductor
+  of a shaped reference reached MEQ that many times too strong: MAST-U's table
+  reproduced **22 times** `freegs4e`'s own stored `coil_psi`, and MAST's P1 and
+  TCV's OH1 (100 turns each) were wrong too. G shaped was a different machine,
+  which is why it failed in MEQ from every start and in NICE at every
+  resolution. `shaped.py` now folds the turns into the current (a lone coil)
+  or the circuit multiplier (a member).
+* **`ShapedCoil`'s 12-point rule is not a uniform rectangle on a tall
+  conductor.** Two triangles, six points each: accurate to 3e-05 on a square,
+  and **18 to 30 per cent** off a 48 × 48 rule at the plasma on MAST's P1,
+  TCV's OH1 and MAST-U's solenoid (79 times taller than wide); refining the
+  polygon does not help, the fan triangulation keeps every triangle
+  full-height. `shaped.py`'s `rectangle_rule` gives each conductor a tensor
+  Gauss-Legendre rule, 6 points across the short side, within 1e-07. NICE found
+  this independently: giving NICE `freegs4e`'s 12-point model took D shaped
+  from 4.9e-02 against `freegs4e` to 3.3e-04, and freegsnke reproduced it to
+  1e-06.
+
+The v3 references (`fgsref.py --interpolating-profiles --shaped` with both
+fixes) reproduce their stored `coil_psi` to 1e-07 of the flux span (3–6e-06
+on D and G).
+
+**WHY EACH MEQ FAILURE OCCURRED.**
+
+| failure | where | cause |
+|---|---|---|
+| no solve from any start | G shaped | the conductor table, above. Against v3 it converges, forward ψ_ax 8.3e-04 |
+| inverse from cold | C shaped, TCV, G shaped | the cold start's basin. From the reference's own equilibrium every one converges — M-253's frozen support |
+| forward from the exact answer | B, E | `[source] PsiAxis` at the reference's own value picks the other root of M-105's fold: on B the first sweep carries the X-point from ( 1.10, −0.60 ) to ( 0.74, +0.39 ) and only the capped retry rung recovers, which it does not from this `PsiAxis`; E lands at profile scale 0.414. **With the shipped `PsiAxis` both agree, B to 3.1e-06** — degree 3 changes nothing. M-107's finding on two more machines: *started at the answer, MEQ can leave it* |
+| forward from cold | B, C, D, G shaped | shared with `freegs4e`, whose cold forward solve finds none (M-244) |
+
+**THE CONSENSUS.** Max |ΔI| over the free supplies over the largest free
+reference current; MEQ from the exact guess; NICE at its finest converged rung
+(its own resolution sensitivity 3e-04 to 2e-03, 1.5e-02 on G's antisymmetric
+P61/P62 pair). Shaped rows against v3, plain against the same-profile set:
+
+| config | NICE–fgs | MEQ–fgs | NICE–MEQ | freegsnke–fgs |
+|---|---|---|---|---|
+| C shaped | 3.7e-03 | 9.0e-04 | 2.8e-03 | 4.1e-07 |
+| D shaped | 6.7e-04 | 6.6e-04 | 8.8e-04 | 2.5e-06 |
+| E shaped | 2.0e-04 | 4.3e-04 | 2.7e-04 | 3.0e-06 |
+| F shaped | 4.3e-04 | 3.0e-04 | 7.3e-04 | 1.3e-06 |
+| G shaped | 2.5e-03 | 1.2e-03 | 1.6e-03 | 2.0e-06 |
+| C | 6.3e-02 | 6.3e-02 | **5.5e-04** | 1.2e-06 |
+| E | 3.2e-05 | 6.9e-04 | 6.8e-04 | 2.5e-06 |
+| F | 4.1e-04 | 4.5e-03 | 4.3e-03 | 1.2e-06 |
+| G | 5.9e-03 | 8.2e-03 | 7.8e-03 | 1.9e-06 |
+| A, B (overdetermined) | 1.9–5.8e-02 | 3.0–4.8e-02 | **1.0–1.3e-02** | none usable |
+
+* **freegsnke is not an independent vote.** It solves on `freegs4e`'s grid
+  with `freegs4e`'s operator, Green's functions and critical-point finder;
+  only the nonlinear solver and the inverse algorithm differ, so its 1e-06 is
+  agreement within one discretisation. That family is converged to about
+  1e-05 (129² → 257² → 513²).
+* **Shaped, conductor model matched: MEQ, NICE and the finite-difference
+  family agree to 3e-04 – 4e-03**, the larger values in the weakly
+  determined antisymmetric pairs (P61/P62, P6).
+* **C plain: NICE and MEQ agree with each other to 5.5e-04 and both sit
+  6.3e-02 from `freegs4e`**, whose plain arm stacks MAST's solenoid as 100
+  filaments on a line where NICE and MEQ carry a rectangle.
+* **F plain is MEQ's conductor model**: freegsnke with every conductor a
+  rectangle agrees with MEQ to **3.0e-04** — the F-shaped figure again.
+* **E plain is MEQ's mesh.** Up-down symmetric, five rows of rank four, met
+  to 2e-08 by `freegs4e`; MEQ's generated mesh is not symmetric and its best
+  fit leaves 1.8e-05. On `[mesh.generate] Symmetric = true` that residual is
+  7.7e-10 and the currents come to 1.6e-04.
+* **A and B are best fits and NICE and MEQ agree with each other better than
+  either does with `freegs4e`**, whose answer leaves larger unweighted row
+  residuals than NICE's fit (1.0e-05 against 6.7e-06 on A). freegsnke's
+  inverse, which stops on a geometrically shrinking step rather than on
+  stationarity, ends every variant with a larger residual than it started
+  from.
+* **What is left is about 3e-04 between MEQ and the finite-difference
+  family on F**, both converged, NICE between them within its own
+  resolution. Not established.
+
+**AND THE POSED DIII-D PROBLEM HAS A SECOND EXACT SOLUTION.** From a Gaussian
+plasma, freegsnke's inverse meets all six rows to 2e-09 with F4A at about
+2.05 MA, the axis at ( 1.609, 0.744 ) and the profile scale 4.94, stable from
+129² to 257². The targets do not select the equilibrium alone.
+
+**AND THE TWO NON-INDEPENDENT REFERENCES CHANGE WHAT EARLIER ENTRIES MEASURED.**
+The committed `*_shaped` references, `ref-n257/`, and the shipped
+`examples/machine-{c-mast,d-tcv,g-mastu}-shaped.*` were built with both defects,
+so every shaped C, D and G row of M-103, M-106, M-244, M-248, M-253 and M-254
+compares MEQ with a machine it was not given; G shaped most of all. The other
+shaped references carry the 12-point rule at its square-coil accuracy, 3e-05.
+
+### M-256
+
+**THE SHAPED REFERENCES AND EXAMPLES REGENERATED WITH `shaped.py`'s FIXES, AND
+MEQ RE-TAKEN ON THEM. G SHAPED, WHICH NO START COULD SOLVE, NOW SOLVES INVERSE
+FROM COLD TO 1.8e-03 OF THE REFERENCE'S CURRENTS.** M-255's two defects are fixed
+in `tools/freegs4e-benchmark/shaped.py`, and the seven `*_shaped` references are
+rebuilt with `fgsref.py --shaped` at 129² in place and at 257² into `ref-n257/`
+(default profile spline, as before), then `make_all.sh --shaped` writes the seven
+`examples/machine-*-shaped.*`. **The 257² shaped references the fixed-boundary
+rung was built from are kept as `ref-n257-fixed-boundary/`** and `make_fixed.sh`
+reads them: a fixed-boundary case uses only the boundary and the profiles, so the
+shipped `fixed-*` cases stand.
+
+The tables now reproduce `freegs4e`'s own `coil_psi` to **5e-09 of the flux span
+or better on all seven**, against 22 times too strong on G before. No mesh moved:
+every `[mesh.generate]` table is unchanged. The currents moved by 1e-09 on A, B
+and E (single-turn squares, where the 12-point rule was already good to 3e-05),
+3 and 5 per cent on C and D, and 100 per cent on G. **F moved 1.4 per cent with
+square single-turn coils**: `freegs4e` frees all eighteen supplies against six
+rows, so a field change at the 3e-05 level moves its null-space selection by
+that much — the reason M-254 frees only the determined subset. G's `psi_axis`
+moves 1.3 per cent from 129² to 257² for the same reason, where the other six
+move by 1e-04 or less.
+
+MEQ through `inverse_compare.py` against the regenerated references — `cold` is
+the shipped example's own guess, `exact` the reference's equilibrium; ΔI/I over
+the determined free supplies:
+
+| config | cold forward ψ_ax | cold inverse | exact forward ψ_ax | exact inverse |
+|---|---|---|---|---|
+| C shaped | **1.2e-03** (exit 2 before) | another equilibrium | 1.2e-03 | 5.0e-03 |
+| D shaped | another equilibrium | 1.4e-02, 133 its | 1.3e-04 | 9.7e-03 |
+| G shaped | exit 2 | **1.8e-03** (exit 1 before) | 1.1e-03 | 1.8e-03 |
+| F shaped | 5.7e-06 | 6.3e-03 | 5.7e-06 | 6.3e-03 |
+
+**The residual per cent on C, D and F is the profile spline** — this set keeps
+`freegs4e`'s default `UnivariateSpline`, which moves ff' by 1.3e-02 from the
+analytic shape MEQ's tables carry; on the same-profile references of M-255 the
+same machines agree to 3e-04 – 9e-04. A, B and E reproduce M-254's rows to the
+digits printed. **D shaped's cold forward solve now lands on another
+equilibrium** where the defective example converged to 3.5e-02 — a different
+machine had a different basin — and C shaped's cold inverse still does, which
+is M-253's frozen support. The vacuum-stage arm of M-253 is not re-taken.

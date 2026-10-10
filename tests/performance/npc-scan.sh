@@ -26,7 +26,7 @@
 # The trace solve, meanwhile, runs on the master thread OUTSIDE any parallel
 # region, so it gets all of them. That is what makes PARDISO's MKL threads
 # spendable at all, and it is why the interesting configuration is OMP = MKL = N
-# rather than either axis alone. CLAUDE.md's *What to do* item 0 -- "get
+# rather than either axis alone. CLAUDE_HDGGS.md's *What to do* item 0 -- "get
 # ComputeH()'s element-local dense LU off threaded MKL" -- is about the serial
 # mode, and threaded assembly is a route around it that needs no new code.
 #

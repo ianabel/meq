@@ -406,12 +406,9 @@ samples better while the periodicity pushes the curve further from the truth
 between them. Same mode count, same decomposition, same distance measure — the
 two differ in their basis and in nothing else.
 
-**WHAT IS DELIBERATELY ABSENT.** There are no flux-surface AVERAGES over an open
-surface and there should not be: `V′` and `⟨R⁻²⟩` are integrals round a closed
-loop and the volume an open curve encloses is not defined. IN-5 delivers the
-**geometry**, which is what a scrape-off-layer consumer asks for. And the tracer
-is still not X-point aware — a level AT a separatrix stalls at the saddle, where
-the level set is not a 1-manifold, and `Stalled` is the honest answer.
+There are no averages over an open surface and the tracer is not X-point
+aware, both deliberately:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Open-surface averages and an X-point-aware tracer*
 
 ### The disc basis, and why `ρ = √Ψ_N` rather than `Ψ_N`
 
@@ -952,7 +949,7 @@ properly, which is §11.2's asymmetry confirmed: **the tracer's steps are
 sequential and the rays are not.**
 
 **What is not available is sharing one tracer**, for the `FindPoints` reason
-under `CLAUDE.md`, *Traps*. That is the single blocker, and the walk-depth item above is most
+in `CLAUDE_MFEM.md`, *Traps in MFEM's API*. That is the single blocker, and the walk-depth item above is most
 of its cure.
 
 ### Two levers from §11.4, one of which does not exist
@@ -1008,15 +1005,8 @@ factor of ten** and that is expected: it inverts singular values down to exactly
 zero, so its step is dominated by the smallest resolved `σ` and two SVDs report
 that differently. Its verdict is unchanged — still folded, still diverging.
 
-### Three things in the kernel survey worth not re-doing
-
-→ **[M-51](MEASUREMENTS.md#m-51)** — measured
-
-**And the reason the third one fails is worth keeping**, because the brief
-asserted the opposite: `GridFunction::GetValues( i, ir, vals )` is **a loop
-calling `CalcShape` per point, not a GEMM**. It amortises the dof gather and the
-temporaries and nothing else. The access pattern is 1.15 points per element in
-any case, so there is nothing to batch.
+The kernel survey's three measured non-starters, [M-51](MEASUREMENTS.md#m-51), are recorded in
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A kernel survey: the Kintner recurrence, Vandermonde + GEMM, and batched field evaluation*
 
 ### IN-6: the `(Ψ, θ)` file, the per-`ψ` cache, and a cut that cannot be discovered
 
@@ -1080,8 +1070,10 @@ an element wide — `dρ/dψ`'s `1/(2√Ψ_N)` divergence belongs to the **coord
 
 ### The coarea formula is a third cross-check and it was free
 
-`SurfaceAverage.hpp` records §3.3's implicit quadrature as the missing third leg
-of IN-2's cross-check. There is a cheaper one for `V'` alone. Green's theorem
+§3.3's implicit quadrature, the third extraction IN-2's cross-check names, is
+declined (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature
+on the level set as IN-2's third cross-check*). There is a cheaper check for
+`V'` alone. Green's theorem
 gives the enclosed volume as `V = ∮ πR² dz`, a contour integral with **no
 gradient in it at all**, against `V' = ∮ 2πR dl/|∇ψ|`, which divides by the flux
 at every node; the coarea formula says `V' = |dV/dψ|`. Nothing in common but the
@@ -1295,20 +1287,16 @@ count buys a factor rather than a few percent.
   it is deliberately *not* the surface's level — on a stalled ray the node sits
   as close to the level as the field's jump allows and no closer, and this
   records where it actually is.
-* **§3.3's implicit quadrature is the missing third leg** of IN-2's
-  cross-check. Its acceptance said "all three agreeing is worth more than any one
-  being plausible" and two were delivered.
+* **§3.3's implicit quadrature is declined**, not outstanding: two extractions
+  agree to 3.6e-10 and the leg it would replace is 1.8% of the chain. →
+  **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature on the
+  level set as IN-2's third cross-check*.
 * **Maschke & Perrin is in `tests/analytic/`**, as `MaschkePerrin.hpp` and
   `MaschkePerrinConvergence.cpp`. See `CLAUDE_FLOW.md`, *Maschke & Perrin is
   the second exact rotating benchmark*, and note what it does **not** buy: its PDE is Li & Zhu's
   renamed, so the discretisation study is a restatement. What it buys is the
   **source**.
 
-**What is deliberately absent from the tracer**, so nobody reads more into it
-than is there: it follows **one connected component** and neither finds nor
-reports a disjoint island at the same level — the same disclaimer
-`CriticalPoints.hpp` makes about seeded Newton, and for the same reason. It is
-**not X-point aware**: the level set through a saddle is not a 1-manifold and
-the tangent is undefined there, so a trace at that level will stall or turn a
-corner arbitrarily. `pointAtArcLength()` parametrises segments linearly in
-*polyline* length rather than true arc length, and says so.
+What the tracer deliberately does not do — disjoint islands, X-point awareness,
+true arc length — is recorded in
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Open-surface averages and an X-point-aware tracer*

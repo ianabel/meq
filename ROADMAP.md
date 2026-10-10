@@ -34,13 +34,14 @@ becomes a pointer. What neither becomes is an entry that still reads like work.
 | ~~`INTERPOLATORY-HDG-DECISION.md`~~ | where CCSZ-I's code lives — **closed 2026-09-19**, superseded by `INTERPOLATORY-HDG-PLAN.md`. Its answer was *split, with the element-local algebra upstream*; both asks were filed and **upstream built them**, as `gf-interp-hdg-dev`. Its two surviving open questions — Remark 2.2's `ℓ`, and whether `HDGPotentialPostprocessor` is reentrant under a threaded element loop — are carried into that plan's §7.4. Git has it |
 | `INVERSION-PLAN.md` | item 10's machinery — **CLOSED 2026-09-19**, IN-A to IN-P, 9 of 9, with the ten acceptance tests verified passing together. **It stays rather than being converted** for a reason the other two did not have: the user-facing half already went to `docs/flux_surfaces.rst`, `docs/surface_geometry.rst` and `docs/normalised_flux.rst`, and what is left is the derivation, which `src/meq`, `tests/` and `apps/` cite by section and stage number at **125 sites across 32 files**. It is a design record, not a plan. **The one gap closing it found is now half fixed**: the driver set `options.toroidalField` nowhere, so `q` reached no output at all; the `q`-driven route now reports it to 4.5e-07 of target (M-131), and giving a prescribed-field run a `q` is a schema decision left open |
 | `INTERPOLATORY-HDG-PLAN.md` | item 12.1, and it **supersedes §12.1 below**. MFEM has already built the method and MEQ links it; this is a wiring job plus two small asks. **Read its §0 before its stages** — the falsifying arithmetic deflates the headline to 1.6–2.0× fewer `F` evaluations against an Amdahl ceiling of 23–28% |
-| `THREADING-PLAN.md` | **CLOSED.** Items A, B, C and D built (`0108f49`), **E and F declined standing** — if either grows it is a new plan, and that file's *When E or F would be worth revisiting* says what "grows" has to mean, since a share inflates whenever anything else is threaded — G moved to `BORDERED-GLOBALISATION-PLAN.md` §12, §0's two sub-slices read and the payoff measured at **1.16×** → **[M-137](MEASUREMENTS.md#m-137)**. The budget it was written against is superseded by **[M-138](MEASUREMENTS.md#m-138)**: about 59% of the run now threads, and the largest single-threaded leg is MFEM's `Reconstruct()` at 18.5% |
+| `THREADING-PLAN.md` | **CLOSED.** Items A, B, C and D built (`0108f49`), **E and F declined standing** — if either grows it is a new plan, and `CLAUDE_DECLINED.md`'s *Threading the output writers (E) and the Newton loop's remainder (F)* says what "grows" has to mean, since a share inflates whenever anything else is threaded — G moved to `BORDERED-GLOBALISATION-PLAN.md` §12, §0's two sub-slices read and the payoff measured at **1.16×** → **[M-137](MEASUREMENTS.md#m-137)**. The budget it was written against is superseded by **[M-138](MEASUREMENTS.md#m-138)**: about 59% of the run now threads, and the largest single-threaded leg is MFEM's `Reconstruct()` at 18.5% |
 | `DEVICE-PLAN.md` | an audit of what a device-resident solve would need. **Not a commitment**, and §3.3's refusals stand — the cuDSS one now scoped to a run that configured no device rather than to every run. **§3.0's items 1 to 5 are done, and so is 8**: MEQ's own element integrand, the batched local solve, the whole NPC traversal, the constraint reductions and the bordered border all reach the device, `DeviceParity` is green, and the single-precision build is at parity with the double → **[M-223](MEASUREMENTS.md#m-223)**, **[M-222](MEASUREMENTS.md#m-222)**. **AND PHASES B AND D ARE NOW STARTED, WHICH ITEMS 1 TO 5 WERE NOT** → **[M-226](MEASUREMENTS.md#m-226)**: `meq::DeviceConstants` uploads the per-mesh constants once instead of once per operator rebuild (**80 uploads → 6**) and `downloadSolution()` is the one download, which moves nothing today for exactly the reason residency has not arrived. The crossing instrument gained the **upload direction** and a **phase split** to say so — the published `0.2 transfers a step` turns out to be three transfers in phase A, and phase C reads zero. **What is left is item 7 and then item 6.** Item 7 is re-sized *upwards*: with the solve leg at parity, the serial `Reconstruct()` a Device forces is the whole of the 1.07–1.13× a device run loses. Item 6 is cuDSS as the device default, and it is last because it is the step that costs the bit-exactness instrument |
 | `BORDERED-GLOBALISATION-PLAN.md` | **the ladder is built and closes none of the six cold failures** — M-116, M-117, M-119. Read it for the design and the four families ruled out; do not start its §8 |
 | `MIRROR-PLAN.md` | **MR-0 is run and the gate is open** → [M-169](MEASUREMENTS.md#m-169): with `Γ` put outside the machine no current lies beyond it at any Mach number, and what is left is a mode count, so MR-1 and MR-2 can start. A centrifugal mirror, free boundary. The SOURCE half is closed: [M-167](MEASUREMENTS.md#m-167) puts `meq::RotatingSource` and geq's independent implementation of RoPP (136) at agreement with no error floor on either side. What is open is posing a mirror in a solver whose every free-boundary assumption was written for a tokamak — no magnetic axis, an annular support, and an exterior whose admissibility [M-168](MEASUREMENTS.md#m-168) says must be checked rather than assumed |
-| `BORDER-SCALING-PLAN.md` | **BS-0 is run** — M-117. H2 excluded, H1 and H3 split the six, and BS-5 is the stage its own gate selects. **BS-1 is built, measured and reverted** — [M-245](MEASUREMENTS.md#m-245): the per-border scales are as different as the plan said, and the ruler closes none of the six and moves three answers, so on these problems the merit is a branch control and not a yardstick. BS-2 changes the same ruler. **BS-5 is landed on the retry rung** — [M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248): with the rung started from the first attempt's edge and a converged run with no axis counted as a failure, it closes A, A shaped, E and E shaped and moves nothing; from the first solve it would be a branch control again. Four cold failures remain, none an excursion |
+| `CLAUDE_DECLINED.md`, *Border scaling: a per-border ruler for the bordered merit* | **BS-1 is built, measured and reverted** — [M-245](MEASUREMENTS.md#m-245). **BS-5 is landed on the retry rung** — [M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248). The rest is declined and the plan is deleted |
 | `COIL-SUBTRACTION-PLAN.md` | the conductors out of the mesh. **CS-0 and CS-0b measured** → **[M-139](MEASUREMENTS.md#m-139)**: matching the conductor model takes DIII-D's benchmark floor 5.785e-03 → 7.7e-04, **7.5×**, onto §0a's predicted quadrature residual — and **it still does not refine**, so the benchmark cannot resolve MEQ below about 7e-04 whatever either code does. **CS-1, CS-1b, CS-2, CS-3 and CS-T built and green**, and CS-4's first tranche with them: `meq::ConductorField` carries filaments and rectangles, the split runs on a fixed boundary AND under the exterior DtN, and `[conductors] Model` makes all of it reachable from a file — `"meshed"` (the default, unchanged), `"subtracted"`, `"filament"`. **CS-4 is now closed too** — tranche two put the conductors into `meq::ContourTracer`, so `_surfaces.nc` and the flux-surface averages are level sets of the physical flux rather than of the remainder → **[M-146](MEASUREMENTS.md#m-146)**. **What is open is still a case to measure the split ON, and it is now scoped rather than vague.** The six shipped `examples/fixed-*.toml` machines → **[M-147](MEASUREMENTS.md#m-147)** answer the *other* two things `TODO` wanted from that entry — `k+2` on machine geometry, and a machine-sized regression that is not the free-boundary apparatus — and they **cannot** answer this one: Γ is the plasma edge, so every conductor is outside the computational domain and enters through a datum that is identically zero. **That is now stale in the direction that matters**: M-142's 1.96× lives on a FREE-boundary half-disc, and what stood between MEQ and it was one loop rather than a fixture — `apps/meq.cpp` emitted `--coil` whatever `[conductors] Model` said, so the key reached the solver and never reached the mesh. **CS-M, CS-5 and CS-6 are now all built, and the staging is closed while the CLAIM is not** → **[M-148](MEASUREMENTS.md#m-148)**, **[M-149](MEASUREMENTS.md#m-149)**, **[M-150](MEASUREMENTS.md#m-150)**. `examples/mastu-nke` meshes at 4716 triangles against 9361 by editing one key; the shipped conductor quadrature is 1.3e-12 clear of the conductors against an order-160 reference and the SOLVED split moves by 1.8e-11 when it is raised, four orders under the discretisation; and the `.nc` now carries every coefficient, the space, `content` and the conductor table, so `theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom` rebuilds the physical field from the file's own columns to 3.6e-15. **Posing that first machine found four defects** — a critical-point Newton evaluating `q_c` off the half-plane, TWO CS-4 holes (the X-point border and the plasma-current integral, both reading the remainder), and the conductor filter that keeps an extremum search out of a coil's O-point reading the SOURCE's coil set, which the split empties — which is §13's lesson and `CLAUDE.md`'s: a staged plan's acceptances can each be sharp and jointly miss the cell where two features meet. **AND THE CAMPAIGN'S REASON FOR EXISTING IS NOW MEASURED ON A MACHINE** → **[M-154](MEASUREMENTS.md#m-154)**: `examples/machine-f-diiid.toml` under `Model = "filament"` reproduces `freegs4e`'s `F_diiid_conventional` — whose 18 conductors that code carries as point filaments at exactly the positions MEQ puts its own — to **2.8e-05 in `psi_axis`**, 0.3 mm in the magnetic axis and 0.64 mm in the X-point, in **2 Newton steps on 1510 elements** against the meshed route's 4848. Field-wide **2.031e-03 against the meshed route's 4.593e-03**, which is **below [M-111](MEASUREMENTS.md#m-111)'s 5.785e-03 floor** — the one that entry says no refinement buys down, because it is the conductor model. §0a's 2 × 2 is complete and CS-0's prediction is measured. **It cost three more borders reading the remainder** — `psi_bnd` at the X-point, `psi_ax` at a located axis, and the psi_bnd row's JACOBIAN, which the first of those fixes broke within the hour by putting a constant into a directional derivative. M-154a has the order they must be fixed in; two of the three intermediate states look like progress. §13.4a. **AND THE MODELLING GAP IS CLOSED** → **[M-166](MEASUREMENTS.md#m-166)**: `[conductors] FilamentSize` divides each rectangle into an `n_R × n_Z` stack at a target cell size, with `[[coils]] FilamentsR`/`FilamentsZ` overriding it per block. The gap was real and is now sized rather than argued — one filament at MAST-U's solenoid's centre is **a factor of 5.3** from the rectangle at MAST-U's own plasma — and the stack is the MIDPOINT RULE for the integral `meq::coilPsi()` evaluates, so it converges to the rectangle at **order 2.000** over four refinements. A LENGTH and not a count, because MAST-U's blocks run from an aspect ratio of 265 to 1 and no single count is right for both. **The default stays one per block and that is load bearing**: subdividing moves MEQ *away* from `freegs4e`'s point-filament machine, 3.50× worse in `psi_ax` and 10.81× worse in `psi_bnd`, which is M-154's agreement being a coincidence of models rather than an accuracy. The first stacked run also found that the `.nc` had **never** written a conductor table under `Model = "filament"` — the block is opened by the rectangle set a subtracting model drops — so a filament restart carried its own model's name and none of its geometry. **What is left is a shipped MAST-U filament CASE**, which wants that machine's cold start rather than any capability. §13.5. **AND CS-C IS BUILT** → **[M-170](MEASUREMENTS.md#m-170)**: `psi_c` AND `q_c` go to disk as a netCDF group — at the solver's own points rather than an mgrid-style grid, so a reload IS the recompute and every printed number is byte-identical — worth **8.4×** on the wall clock for subtracted rectangles and **1.05×** for the same conductors as filaments. **The first version cached `psi_c` alone and was worth 3.51×**, with `perf` on the warm arm showing `grad psi_c` at 61% of what remained: a gradient is a different quantity and no `psi_c` cache covers it. §14 |
 | `INVERSE-AND-RECONSTRUCTION-PLAN.md` | Part One an inverse solve, Part Two exploratory research on reconstruction. **IV-0 is run and its gate passes** — [M-244](MEASUREMENTS.md#m-244): `freegs4e`'s inverse finds the basin from cold on thirteen of fourteen configurations where its forward finds none, **on the machine with its circuits** and not with every conductor freed, which makes IV-1's circuits a prerequisite. **IV-1 is built** — `[[circuits]]` and `Free`, `Free` now paired with `[inverse]` targets — and its seven-machine equivalence found TCV's solenoid carried at 220× its current in the filament arm, which was one of the six cold failures ([M-246](MEASUREMENTS.md#m-246)). **IV-2 is built** — the regularised corner solve, [M-249](MEASUREMENTS.md#m-249). **IV-3 is built** — free coil currents as border unknowns, isoflux targets, in the library: on DIII-D four perturbed circuits return to 1.4e-11 in two Newton steps and all eighteen to 1.2e-07 through a corner of condition 3.4e+08, while five targets are met by other currents with nullity 13 ([M-250](MEASUREMENTS.md#m-250)). **IV-4 is built** — both X-point rows: on DIII-D a target moved 2.1 cm is met by two coils on either row, the rows agree on the currents to 5.7e-11, and the released forward solve reproduces it, while one distant coil cannot ([M-251](MEASUREMENTS.md#m-251)). **IV-5 is built** — `[inverse]` through the driver: `examples/machine-f-diiid-inverse.toml` solves from its cold guess in three settling support sweeps, the currents return to 3.2e-11, the driver matches the library exactly, and unreachable targets converge to a best fit that exits 4. The corner became an equality-constrained least squares on the way ([M-252](MEASUREMENTS.md#m-252)). **IV-6 is run** — as a basin finder the inverse converts ONE of the forward cold table's five reds, TCV. From a vacuum stage it is 6 of 14 green, and from zero currents none: MEQ freezes its plasma support within a sweep where `freegs4e` re-decides it every step, which floods the first sweep from zero currents and lets a free current empty it ([M-253](MEASUREMENTS.md#m-253)). Part One is done; making the inverse a basin finder for MEQ is a campaign about the free-boundary support. The same entry re-takes MEQ's own cold table: unchanged since M-112, five of fourteen with a located axis |
+| `INVERSE-RACE-PLAN.md` | **Designed, not built.** A time-to-accuracy race of MEQ, NICE, `freegs4e` and freegsnke on the five shaped machines where all four converge to one answer — [M-254](MEASUREMENTS.md#m-254) poses the problem and [M-255](MEASUREMENTS.md#m-255) shows they agree on it to 3e-04 – 4e-03 once the references are fixed. Two starts: cold from the vacuum stage, and warm as a 1 cm shape step. IR-0 to IR-3 |
 | `FREE-BOUNDARY-PLAN.md` | item 8 — **the staged ladder is CLOSED**: FB-A to FB-7 done or answered, FB-6 met, and §10's XP-0 to XP-4 all met (M-82, M-86, M-87). The conductor model went to `COIL-SUBTRACTION-PLAN.md`. Its **§12 collected the three claims that were still marked unmeasured** as FB-R, FB-S and FB-T, and **all three are now measured**. **FB-R** → M-132: the initial `ψ_bnd` selects among discrete equilibria and **refinement does not merge them** — a factor of 6.3 in `ψ_bnd` at 43,026 elements. **FB-S** → M-133: an X-point on the plasma edge costs the approximation **nothing**, worst rate drop 0.055 of an order over nine `( j, k )` pairs, so the support-corner counter-argument does not bite. **FB-T** → M-134: a prescribed current moves confinement off zero (0/4 → 2/4) and does **not** cure it, where the same lever cures the clamped arm 4/4 — so `theTwoBordersConvergeTogether`'s §11.2 retraction stands and is not going to be lifted this way. Suite 7/7 |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, still **not scheduled**. Its own precondition — `j ≥ 1` green, and a machine case at `j ≥ 1` — is now met, so what holds it is the cost-benefit its own numbers make: `j ≥ 1` already gives `k+2` at `k ≤ j` with nothing built |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
@@ -437,34 +438,10 @@ first because a bad `ψ_ax` is its consequence.
 
 ## The nonlinear question is settled
 
-It ran through four wrong answers, which is why it is written down rather than
-summarised away. MEQ's Newton was thought to fail on the stiff GS-2 sources.
-
-* **Not Newton, and not the boundary condition.** `refs/MFEM-GS-Newton.pdf`
-  reports Newton robust where "conventional Picard-based solvers fail to
-  converge", and calls its own *fixed*-boundary solver "significantly easier"
-  than the free one.
-* **Not the hybridization ordering.** This one was believed and acted on.
-  `NLOrdering::LineariseThenCondense` removes every element-local nonlinear
-  solve (`GetNumLocalNLIterations()` reads 0) and the stiff cases get *worse*.
-  **Confirmed twice**: that mode is now deleted, and `NPC` — the canonical
-  version of the same idea, and MEQ's default — reproduces the verdict.
-* **Mostly it was under-resolution.** §4.2, §4.3 and §4.5 are not stiff at all:
-  raw Newton solves all three in 7 to 17 iterations once resolved, and refining
-  `h` or raising `k` cures them independently. §4.2 at `k = 3, n = 48` takes 7,
-  and `k = 2` converges on the same `n = 16` mesh where `k = 1` takes 42. The
-  whole "stiff sources" narrative came from benchmarking at one under-resolved
-  point.
-* **What is really left is the coarse mesh, and §4.4.** Newton must start inside
-  its basin and on a coarse mesh the Dirichlet datum is not — hence
-  `Globalisation::PicardThenNewton`, which matters because an adaptive run has to
-  solve *before* it has an estimator to refine with. §4.4 is a different animal:
-  `∂F/∂ψ` spans `[−580, +566]` against a first Dirichlet eigenvalue of 22.3, so
-  the linearised operator has swept past ~26 eigenvalues and the problem is
-  multi-valued. Refinement cannot touch that.
-
-Numbers in `CLAUDE_HDGGS.md`, *Why MEQ's Newton struggles* and *Picard, then Newton*.
-**Nothing on this path blocks anything else.**
+What is left is the coarse mesh, which `Globalisation::PicardThenNewton`
+answers, and §4.4, which is multi-valued; the four wrong answers on the way
+are kept so nobody re-derives them. Nothing on this path blocks anything else.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Why MEQ's Newton failed: four wrong answers*
 
 ## Division of labour
 
@@ -782,29 +759,17 @@ per-linearisation factorisation is inside `ComputeElementH()`.
 **Two things settled and no longer worth an item.** PARDISO's `n ≈ 3000`
 ceiling was Debian's `intel-mkl` 2020.4.304 and nothing about the method; and
 the trace solver is a run-time choice, `setTraceSolver()` picking among
-`UMFPack`, `Pardiso` and `CuDSS`, with UMFPack still the default because
-oneMKL's licence is not everybody's to accept. `TODO`'s PARDISO entry carries
+`UMFPack`, `Pardiso` and `CuDSS`, with PARDISO the default wherever the build
+has it and UMFPack where it does not, since oneMKL's licence is not everybody's
+to accept. `TODO`'s PARDISO entry carries
 the one question that is left, which is reproducibility under threading.
 
 `CLAUDE_HDGGS.md`'s *Threading, measured* has the tables.
 ## 7. §4.4, the current hole — a known answer that must stay out of the driver
 
-Solvable: adaptive continuation in the added term's amplitude walks `c₃` from 0
-to −18 at `k = 2, n = 32` in **9 solves with 2 retreats**, final solve 8 Newton
-iterations, no limit point on the branch. Ten uniform steps stall at −10.8, so
-the step control is the whole of it.
-
-**It ramps a constructor argument of the _test fixture_.** `Source` exposes
-`f( R, z, ψ )` and `dFdPsi( R, z, ψ )` and nothing else, so a black-box `F` has
-no amplitude to continue in and this route is unavailable to a driver on
-principle. The expressible analogue `F_λ = λF` is a **different** homotopy —
-degenerate at `λ = 0`, where this path starts from the converged pedestal — and
-is untested.
-
-So this stays a **test-only investigation**, and its value is that §4.4 is now
-known to have a solution MEQ can reach. Making it general needs a
-self-parameterising `Source`: an interface change to argue on its own merits, not
-to smuggle in.
+Amplitude continuation reaches §4.4's solution in a test fixture, and it stays
+out of the driver because a black-box `Source` has no amplitude to continue in.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Continuation in the driver*
 
 ---
 
@@ -1044,13 +1009,9 @@ on `Γ_h`: about one node in ten of the interchange file piecewise constant,
 `inside` so a reader can drop continued nodes rather than being told only how
 many there were.
 
-**What is deliberately NOT done**, recorded so nobody re-derives it: this is
-`O(h²)` at every `k` and does not reach `ψ`'s order, because `ψ` is continued
-with a *solved* variable and `∇q` is a *differentiated* one. `div q = −F/R` and
-`∂_r q_z − ∂_z q_r = −q_z/R` pin two of `∇q`'s four entries exactly, but leave
-the symmetric traceless part differentiated — structure rather than an order, and
-it would need the source plumbed into `GridSampler`. `CLAUDE.md`'s *Status*
-section has the detail.
+The band is `O(h²)` at every `k` and does not reach `ψ`'s order; pinning `∇q`
+to lift it is declined.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Pinning ∇q in the band*
 
 ## 12. Interpolatory HDG, and two experiments beside it — MEQ, open
 
@@ -1153,57 +1114,9 @@ paper I's theory and is where the sequel's method (B) would be needed.
 
 ### 12.2 Locate the plasma edge with `ψ*` — MEASURED AND NOT WORTH BUILDING
 
-**ANSWERED 2026-09-14, and it cost no new code because the oracle was already in
-the tree.** → **[M-94](MEASUREMENTS.md#m-94)**. `tests/analytic/PlasmaEdge.hpp`
-carries two fixtures over one exact solution: `MovingPlasmaEdge` reads its
-support off `ψ_h`, which is what MEQ does, and `PlasmaEdge` cuts at the **exact**
-edge. Since `ψ*` is a better approximation to `ψ` than `ψ_h` is, and the fixed
-cut *is* `ψ`, the second column is an **upper bound on everything this item could
-buy**. `locatingTheEdgeExactlyBuysNoOrder` is the case.
-
-**NO ORDER IS ON THE TABLE.** If the level set limited the rate, the oracle's
-advantage would grow as `h` fell; over a fourfold refinement it grows by at most
-**1.018** in `ψ_h` and **1.121** in `ψ*`, and in the one row where the oracle is
-clearly ahead it *falls*, 2.98 → 2.03.
-
-**AND IN THE REGIME MEQ RUNS IN IT BUYS NOTHING AT ALL.** At `k ≤ j`, where `ψ*`
-keeps `k+2`, cutting at the exact edge is worth between **0.95× and 1.28×** — the
-moving edge is the better of the two in half those rows. The one corner with a
-real factor is `j = 2, k = 3`, about **2×**, which is `k > j`: the regime where
-the cut already caps the order, which is what `PLASMA-EDGE-PLAN.md` addresses by
-a different route, and where `ψ*` would capture only the part of the gap lying
-between `ψ_h` and `ψ`.
-
-**THE PREMISE BELOW IS THE PART THAT WAS WRONG**, and it is kept because it is
-the reasoning to not repeat: *"the place `ψ`'s accuracy DOES bind is the level
-set"*. It does not bind there either. What limits the cut is the **rule's
-blindness** — a quadrature rule cannot see a kink between its points, whatever
-field decided where the kink is — which
-`theLossIsTheRulesBlindnessAndNotItsResolution` measures separately and which
-no improvement to the level set can touch.
-
-
-Substituting `ψ*` into the source **for its own sake**, with the quadrature
-left in place, is not worth it: the consistency error of `F( ψ_h )` is
-`O( h^(k+1) )`, the method's own rate, so `ψ*`'s `O( h^(k+2) )` removes a term
-that limits nothing and buys a constant. Its value in 12.1 is structural — it
-is what the interpolation needs to stay superconvergent — and not that the
-source was inaccurate.
-
-**The place `ψ`'s accuracy DOES bind is the level set.** `ConfineToPlasma`
-locates `{ Ψ > 0 }` as a level set of `ψ_h`, and `PLASMA-EDGE-PLAN.md`'s rate
-cap is about the geometry of that set rather than about the load. Locating the
-edge with `ψ*` while still assembling `F` at `ψ_h` is independent of 12.1, needs
-no new analysis and no Jacobian change, and has `PlasmaEdgeConvergence` waiting
-as its acceptance criterion. It is an afternoon.
-
-**It was an afternoon, and it was spent on the measurement instead of on the
-build — which is the cheaper order whenever an oracle exists.** Bounding what a
-change can buy before writing it needed two fixtures that were already there and
-one test case; writing it would have needed a second support field through
-`meq::SourceIntegrator` and a source-side way to evaluate `F` at one `ψ` while
-testing the support at another, which is an API change across all three
-`NormalisedSource` subclasses.
+Cutting the support at the exact edge buys no order and 0.95× to 1.28× where
+MEQ runs, so this is closed → **[M-94](MEASUREMENTS.md#m-94)**.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Locating the plasma edge with `ψ*` rather than `ψ_h`*
 
 ### 12.3 Reuse the Jacobian across Newton steps — the fallback
 
@@ -1224,59 +1137,13 @@ quadratic; this buys it by giving the convergence rate up. Reach for it if
 
 ## Deliberately not yet
 
-* **A performance verdict on the GPU, from this card.** The partial device path
-  is built and it is green — `DeviceParity` passes, and with the batched keys
-  held equal `--device cuda` reproduces `--device cpu` on every printed line but
-  the final residual, at 5.3e-17. What this machine cannot supply is the
-  *verdict*: consumer FP64 runs at 1/32 to 1/64 of FP32 where a datacentre part
-  runs it at about 1/2, so a local timing can invert the production conclusion.
-  Take the numbers elsewhere before concluding anything about whether the device
-  is worth it. **[M-223](MEASUREMENTS.md#m-223) is where they stand here** — the
-  solve leg at parity with the host-threaded default, and the whole 1.07–1.13×
-  wall loss in the **output** stage, which is `Reconstruct()` losing its host
-  threading under a Device rather than anything in the solve.
-* **`TraceSolver = "cudss"` from a configuration file alone.** The gate is the
-  device, not the key: a run that configured none is refused and `--device cuda`
-  honours it. **This waits on nothing of upstream's** — it rests on the trade,
-  which is unchanged. M-126 puts the trace solve at 20.1% of a threaded step, so
-  configuring a device to reach cuDSS and nothing else buys a share of a fifth
-  while paying a bus crossing on the other four fifths; and without a device
-  cuDSS does not fall back but dies inside CUDA naming `cudaMemcpy` and not the
-  key. **And cuDSS 0.8.0 costs the instrument**, which is the reason to order it
-  last rather than merely to leave it off: it is nondeterministic run to run,
-  and its deterministic mode is single-right-hand-side only where MEQ's bordered
-  step solves `N + 4` columns at once — so a cuDSS run gives up the
-  digit-for-digit device-against-host agreement that root-caused M-79, M-130 and
-  M-187. `DEVICE-PLAN.md` §3.5 is the ordering, and it expects the default to
-  invert once the solve is fully resident.
-* **Partial assembly.** Not implemented for the HDG integrators at all, and its
-  case is sum factorisation, which wants tensor-product elements where MEQ is
-  triangles. A discretisation decision, not a flag — and **not the blocker it
-  reads as**: the device route is MFEM's batched element and face kernels,
-  reached through `[solver] AssemblyMode`, `LocalFactorMode` and
-  `TraceAssemblyMode`, and MEQ is on it.
-* **A fully device-resident solve.** `DEVICE-PLAN.md` is the audit and it is
-  explicitly not a commitment. Where it stands, **asked of the library with
-  `--profile` rather than inferred** (M-223): MEQ's own device integrand, the
-  batched nonlinear residual and gradient, the batched local solve, the whole
-  NPC traversal, the condensation cache and the batched trace assembly are all
-  on under `--device cuda`. Face assembly is serial **deliberately** — its
-  kernels accumulate `D` through `AtomicAdd`, which is what would destroy the
-  bit-reproducibility the item above is protecting ([M-215](MEASUREMENTS.md#m-215)) —
-  and the bordered row dots stay on the host, gated on the column count. What is
-  left is the output stage and the border. Three MEQ-specific facts also keep
-  upstream's **1.33× at 4096 elements** from being MEQ's crossover: their fixture
-  is quads and MEQ is triangles everywhere, five of MEQ's eight shipped meshes
-  are *below* 4096 elements, and MEQ's Newton is bordered with the border being
-  host arithmetic that would not go to a device.
-* **The rest of the physics** — anisotropic pressure, NetCDF profiles, MaNTA
-  coupling. `TODO` carries each with what has been established, and anisotropic
-  pressure still has **no reference pinned**, which is the first thing it needs.
-  **Sonic rotation has left this list**: it is item 9 and it is built, which is
-  why `TODO`'s *Sonic toroidal rotation* entry is a stub pointing at
-  `docs/rotation.rst`. `TODO`'s PARDISO entry is down to its one open question,
-  reproducibility under threading, and its performance entry to what the
-  threading campaign did not already answer.
+A GPU verdict from this card, `TraceSolver = "cudss"` from a configuration file
+alone, partial assembly, a fully device-resident solve, and the rest of the
+physics are each deferred or declined, with the reason.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A GPU performance verdict from this machine*,
+*`TraceSolver = "cudss"` from a configuration file alone*, *Partial assembly*,
+*A fully device-resident solve as a commitment*, and *Anisotropic pressure,
+NetCDF profiles and MaNTA coupling*
 
 ## The standing rule
 

@@ -370,16 +370,17 @@ extracted manifold; moment-fitting (Müller, Kummer & Oberlack,
 curve. So implicit quadrature is a **cross-check on IN-2's integrals**, not the
 primary route. Worth building as a control precisely because it is independent.
 
+It was declined after IN-2 and IN-P measured it:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature on the level set as IN-2's third cross-check*
+
 ### 3.4 What is rejected, and why
 
-| | |
-|---|---|
-| **Marching squares / marching triangles** | Caps at `O(h_cell²)` regardless of `k` — Etiene et al. measured vertex position 1.94, normals 0.93, curvature *divergent* (`10.1109/tvcg.2009.194`). On a simplicial mesh it is at least unambiguous, the affine interpolant's level set being convex hence connected; but the order is the point and it throws away `k−1` of them. |
-| **Subdivide, then march** — what ParaView, VisIt, VTK and MFEM's own exporters do | **Second order in the SUB-CELL size with no `k`-dependence at all**; Remacle et al.'s error falls as `2^{2r}` and the degree never enters. Fine for a picture, which is what it is for. Not fine for `q(ψ)`. |
-| **Exact rational contours** | Wiley et al. give the contour of a bivariate quadratic over a triangle as an exact conic. **It caps at `k = 2` in principle**: a level set of a degree-`d` polynomial is an algebraic curve of degree `d`, and rational parametrisation needs genus 0 — a generic smooth plane cubic has genus 1. MEQ runs to `k = 4`. (Their *quartic* comes from curved element geometry; MEQ's solve mesh is straight-sided, so it would be a conic here.) |
-| **Plain ODE tracing without projection** | Error accumulates monotonically; the curve drifts onto a neighbouring contour and does not close. With projection it *is* §3.1. |
-| **Ray bisection from the axis** | Point accuracy is as good as a corrector's and it parallelises trivially — worth keeping as an **independent cross-check** and as the initialiser for a periodic parametrisation, since it produces points already indexed by angle. **Not the primary route**: it assumes star-shapedness, which fails on indented cross-sections, at and beyond the separatrix, and near the axis where the bracket degenerates. |
-| **The Morse–Smale complex** | **It gives the wrong curves.** Its "separatrices" are integral curves of `∇ψ`, *orthogonal* to the level sets; the plasma separatrix is the level **set** through the X-point. Recorded because it is the natural thing to reach for by name. |
+Marching, subdivide-then-march, exact rational contours, unprojected ODE
+tracing and the Morse–Smale complex are rejected; ray bisection from the axis
+is kept as an independent cross-check and not as the primary route, because it
+assumes star-shapedness, which fails on indented cross-sections, at and beyond
+the separatrix, and near the axis.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Other ways to extract a contour: marching, subdivision, rational contours, unprojected ODEs, rays, Morse–Smale*
 
 ---
 
@@ -1117,20 +1118,9 @@ origin moves `V′` by **3.6e-10** at an offset of 0.05 and 3.9e-11 at 0.15, wit
 transversality falling 0.658 → 0.438. The average is a property of the surface and
 not of the chart, and now that is measured.
 
-**Two of the three cross-checks were built and the third was not.** Ray bisection
-from the axis (§3.4) is kept as the second extraction; **§3.3's implicit
-quadrature — a rule on the level set with no curve extracted at all — is the
-missing third leg** and is deliberately not built.
-
-**AND IT IS NOW DECLINED RATHER THAN OUTSTANDING**, so nobody reads it as work
-waiting. Two measurements close it. IN-P puts the quadrature at **1.8%** of the
-extraction chain against `gaugeFreeFit`'s 84.6%, so an implicit rule saves
-essentially nothing on the leg it replaces; and two independent extractions
-already disagree by less than the discretisation — the ray-bisection control
-agrees with the tracer, and the displaced-origin check moves `V′` by
-**3.6e-10**. A third route would be a third implementation to maintain in
-exchange for a check the second one already passes. If a reason to build it ever
-appears it will be a geometry the tracer cannot close, not a cost.
+Ray bisection from the axis (§3.4) is kept as the second extraction; §3.3's
+implicit quadrature, the third, is declined:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature on the level set as IN-2's third cross-check*
 
 **The fixture needed its own box.** `standardBox()` cannot hold these surfaces —
 `Ψ_N = 0.25` on `nstx()` already spans `R ∈ [0.99, 1.57]` against a box ending at
@@ -1308,14 +1298,9 @@ sense while the periodicity it cannot escape pushes the curve further from the
 truth BETWEEN them. Same mode count, same decomposition, same distance measure —
 the two differ in their basis and in nothing else.
 
-**WHAT IS NOT BUILT, AND IT IS THE SCOPE §6 DESCRIBES.** There are no
-flux-surface AVERAGES over an open surface, and there should not be: `V′` and
-`⟨R^{-2}⟩` are integrals round a closed loop, and the volume an open curve
-encloses is not defined. What IN-5 delivers is the GEOMETRY — the curve, its
-arc length and a basis that represents it — which is what a scrape-off-layer
-consumer asks for. Nor is the tracer X-point aware: a level AT a separatrix
-still stalls at the saddle, where the level set is not a 1-manifold, and
-`Stalled` is the honest answer rather than a defect.
+Open-surface averages and an X-point-aware tracer are not built, and that is
+the scope §6 describes:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Open-surface averages and an X-point-aware tracer*
 
 ### IN-6 — the output — **DONE, 2026-09-07**
 
@@ -1484,13 +1469,9 @@ They stay for exactly as long as the code does.
 
 ## 9. Out of scope
 
-| | |
-|---|---|
-| **Topological classification** — contour trees, open/closed, saddle crossing | §6. It belongs with free boundary, where `χ(annulus) = 0` forces X-points to exist. |
-| **3D / stellarator geometry** | MEQ is axisymmetric. DESC's basis is borrowed; its toroidal Fourier factor is not. |
-| **Straight-field-line, PEST, Boozer or Hamada angles** | Stability and gyrokinetic codes want these; flux-surface *averages* do not. Build them on top of IN-3 if a consumer appears. Note the practical warning that a straight-field-line angle resolves the low-field-side midplane poorly, which is where ballooning modes live. |
-| **Contouring `p` in a rotating equilibrium** | A different curve family (§6). Not hard, but not this. |
-| **The inverse-equilibrium formulation** | VMEC, DESC and CHEASE make the surfaces unknowns of the *solve*. That is a different code, not a post-processing step, and it hard-codes star-shapedness into the discretisation. |
+Topological classification, 3D geometry, straight-field-line angles, `p`
+contours and the inverse-equilibrium formulation are out of scope:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *The inversion's out-of-scope list: topology, 3D, straight-field-line angles, `p` contours and the inverse-equilibrium formulation*
 
 ---
 

@@ -1219,11 +1219,9 @@ off under a Device by design; the collision is only with *MEQ's* threaded
 assembly, which a resident solve does not want. Item 7 stays upstream's and stays
 the largest single number on this page **for phase B**, where the assembly is.
 
-**WHAT IS NO LONGER ON THIS LIST, AND WHY.** Host threading of the NPC traversal
-([M-135](MEASUREMENTS.md#m-135), 1.25×) and of `Reconstruct()`
-([M-172](MEASUREMENTS.md#m-172), 1.177×) are both landed and both are **host**
-parallelism that a resident run replaces rather than uses. Nobody should size
-the device work against them.
+Host threading of the NPC traversal and of `Reconstruct()` is landed and is
+not a device item.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Host threading as a device-plan item*
 
 **AND THE ONE PIECE OF ITEM 8 THAT CAN RUN EARLY IS THE EXPERIMENT, NOT THE
 SWEEP.** A single-precision **host** build costs a second MFEM install and a
@@ -1457,31 +1455,9 @@ is gone: the integrators are on the device, nothing is copied per iteration,
 and cuDSS is the only trace solver that does not force a round trip. **cuDSS
 becomes the default on a device rather than a key that is withheld.**
 
-#### The instrument this section was ordered around is weaker than it claimed
-
-**THIS SECTION SPENT ITS LENGTH PROTECTING *"`--device cuda` REPRODUCES
-`--device cpu` TO EVERY PRINTED DIGIT"*, AND THE RECORD DOES NOT SUPPORT THE
-WEIGHT PUT ON IT.** Every device-path defect either project has found was
-enormous:
-
-| | the disagreement |
-|---|---|
-| [M-79](MEASUREMENTS.md#m-79) | the potential identically **zero**, 0/0 Newton iterations |
-| [M-130](MEASUREMENTS.md#m-130) | *"the bordered Jacobian is singular"* — a refusal, not a number |
-| [M-183](MEASUREMENTS.md#m-183) | the exterior coupling dropped; `psi_ax` **10%** wrong |
-| [M-205](MEASUREMENTS.md#m-205), [M-206](MEASUREMENTS.md#m-206) | **a factor of two** |
-| [M-189](MEASUREMENTS.md#m-189) | **1.27e-06** against a 7.8e-16 history — the tightest ever recorded |
-
-**A 1e-10 tolerance would have caught all of them, and the last twelve digits
-have never once been what fired.** Worse for the claim: the one defect
-digit-for-digit agreement demonstrably **could not** catch is
-[M-187](MEASUREMENTS.md#m-187), where every printed number was identical and
-the work was 4× — found by an iteration count, and root-caused by a probe on
-the Newton increment ([M-207](MEASUREMENTS.md#m-207)).
-
-**SO WHAT FINDS DEVICE DEFECTS IS A REFERENCE ARM YOU TRUST, AND THE TIGHTNESS
-OF THE COMPARISON HAS BEEN NEARLY IRRELEVANT.** This plan has been conflating
-two different things, and only the first is load bearing for debugging.
+Digit-for-digit agreement has never been what found a device defect; a
+reference arm that is trusted has.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Digit-for-digit agreement as the device instrument*
 
 #### What tightness genuinely buys, which is not defect-finding
 
@@ -1540,46 +1516,15 @@ and the driver was quietly failing it by default.*
 
 #### cuDSS, and why its own determinism cannot be bought back
 
-**cuDSS 0.8.0 leaves `CUDSS_CONFIG_DETERMINISTIC_MODE` at 0**: same matrix,
-same right-hand sides, fresh handle, five repeats, **4 of 4 differ**, at
-6.7e-16 / 1.8e-15 / 3.6e-15 for `K = 1 / 4 / 16`.
-
-**AND THE SWITCH THAT WOULD RESTORE IT IS UNUSABLE, FOR A REASON SPECIFIC TO
-MEQ.** Deterministic mode is supported for **one right-hand side only** on
-0.8.0; the solve phase refuses 4 and 16 columns with
-`CUDSS_STATUS_NOT_SUPPORTED`. MEQ's bordered Newton applies one factorisation to
-`N + 4` right-hand sides through `ArrayMult` — M-98's 1.34× — so **the one
-configuration MEQ would want determinism in is the one where it cannot have
-it.** 0.8.0 is the newest cuDSS NVIDIA ships, so this is the library as it
-stands rather than something about to be fixed.
-
-**DO NOT REACH FOR `SetDeterministic( true )`.** It does not work at `N + 4`
-columns; with `CUDSS_MTYPE_SYMMETRIC` it is additionally *silently wrong*, an
-exactly zero solution that every phase reports as success, which is why
-upstream's setter refuses that type by name; and buying determinism with
-column-by-column `Mult()` would mean validating a configuration that is not the
-one being shipped. **MEQ is clear of both hazards today and it is worth saying
-why rather than assuming**: it builds `NONSYMMETRIC` / `FULL`, and it calls
-`SetMatrixSymType()` before `SetMatrixViewType()` at both of its two call sites
-— `GradShafranov.cpp:451` and `TraceSolverScaling.cpp:470` — which is the order
-upstream's own order-dependence defect requires and which a caller had no way to
-know was load bearing.
+cuDSS 0.8.0 differs run to run, and its deterministic mode cannot serve MEQ's
+`N + 4` right-hand sides.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *cuDSS determinism: SetDeterministic and per-column Mult*
 
 #### What this changes about the ordering
 
-**ITEMS 6 AND 8 ARE NO LONGER "STRICTLY LAST BECAUSE THEY ARE UNIQUELY
-DESTRUCTIVE".** They were ordered that way on the premise that they alone take
-the digit-for-digit check away; that premise is gone, because the default
-device configuration already has and because the check was never the thing
-doing the work. **The constraint that replaces it is one sentence: a
-reproducible arm must survive every step, and a step that would leave MEQ with
-none of them does not go in.** cuDSS satisfies that — it is a *trace solver*
-choice, so a PARDISO arm remains available on the same build — and so does
-single precision, whose arm is the double install. What both still owe is
-§7.2's harder problem: an acceptance stated as a tolerance rather than as
-agreement, and a tolerance loose enough to absorb a 3.6e-15 solve that differs
-every run underneath a bordered Newton that differences its constraints through
-it.
+A reproducible arm must survive every step, and a step that would leave MEQ
+with none of them does not go in.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Items 6 and 8 strictly last, as uniquely destructive*
 
 **The gate is already the right shape and needs no change today.** It is
 *refuse without a device*, not *refuse always* (`apps/meq.cpp:1480`), so a
@@ -1587,68 +1532,17 @@ caller who has configured `--device cuda` already gets cuDSS and
 `theDriverRefusesASolverItCannotHonour` keeps the config-file-alone route
 closed. What changes at item 6 is the **default**, not the refusal.
 
-**What does NOT change:**
-
-* **Partial assembly for the HDG integrators.** Its economic case is sum
-  factorisation and MEQ is triangles (§2.4). Residency does not need it —
-  batched dense kernels are the route — so this stays out of the plan entirely
-  rather than moving up it.
-* **`AssemblyMode::Batched` as a HOST default.** M-99's 15–27% loss stands as a
-  host measurement and MEQ's host default stays `Serial`. §3.2 says why that is
-  not a verdict on the device route.
-* **Timing anything on this machine and calling it throughput.** M-77 measures
-  the CUDA build costing 7% of the wall on the CPU path for byte-identical
-  output. M-223 measures the partial device path's SOLVE at parity with the
-  host-threaded default, and the residual 1.07-1.13x on the wall as one host
-  leg. Neither is a
-  measurement of what a datacentre part would do, and §7 is the only thing that
-  makes a local device timing worth taking at all.
-* **A second expression of `F( R, z, psi )` before item 3 exists.** Two
-  implementations that must agree, with nothing to run one on.
+Residency changes neither partial assembly nor the host default for
+`AssemblyMode::Batched`, nor what a timing on this machine means.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Partial assembly*, *`AssemblyMode::Batched` as a host default*, and *A GPU performance verdict from this machine*
 
 ### 3.6 The route was never missing, and this plan spent a section calling it the gate
 
-**`AssemblyMode = "batched"` IS THE DEVICE ROUTE, AND MEQ HAS EXPOSED IT AS A
-TOML KEY THE WHOLE TIME.** `DarcyForm::Assemble()` calls
-`AssembleFluxMassMatricesBatched`, `AssembleDivMatricesBatched`,
-`AssemblePotMassMatricesBatched` and `AssembleFluxMassBdrMatricesBatched`
-**in front of** each of the three element loops; each returns false having done
-nothing unless `AssemblyMode::Batched` is asked for, and only then does the
-caller fall back to `BilinearForm::ComputeElementMatrix()`. So the sentence this
-plan quoted as the blocker — `darcyform.hpp`'s note that hybridized assembly
-goes through `ComputeElementMatrix()` — describes **what happens when the key is
-off**, which is a default and not a wall.
-
-**THE ADMISSION IS NARROW AND IT IS EXACTLY MEQ'S.** `HDGElementMassCanBatch()`
-takes `MassIntegrator` and `VectorMassIntegrator`; `HDGElementDivCanBatch()`
-takes `VectorDivergenceIntegrator`. `buildForms()` installs
-`VectorMassIntegrator( radius )` and `VectorDivergenceIntegrator`. Nothing had
-to be written for MEQ to fit; it already did.
-
-**RUN ON THE PRODUCTION CASE RATHER THAN ARGUED**
-→ **[M-185](MEASUREMENTS.md#m-185)**. With all three batched keys set,
-`machine-f-diiid` prints `face assembly yes, local factorisation yes, local
-solve yes, trace assembly yes` and reaches `psi_ax = 3.759851e-01`, the host
-default's answer to every digit. **Seven of the ten batched routes are taken and
-the one refusal left is `CanBatchLinearResidual()`** — `meq::SourceIntegrator`
-being genuinely nonlinear, which is Request 3 and not a route.
-
-**HOW THIS PLAN GOT IT WRONG IS THE TRANSFERABLE PART, AND IT IS THIS FILE'S OWN
-RULE BROKEN.** §6 says every claim about somebody else's code here was taken by
-extracting whole functions, *"never by reading a line range — `CLAUDE.md`
-records a false claim produced exactly that way"*. This one was a **doxygen
-comment on a member declaration**, read without reading the function it
-describes or the call site in front of it. The comment was true; it was an
-answer to a different question. **A comment is documentation of an intent, and
-the call site is the fact** — and `grep`ping for the batched entry points from
-`DarcyForm::Assemble()` outward is the ten seconds that separates them.
-
-**AND ONE THING THAT LOOKED LIKE A DISAGREEMENT WITH UPSTREAM WAS A
-CONFIGURATION.** Upstream's predicate table reports `CanBatchLocalSolve` as
-**YES**; MEQ's own diagnostic printed **NO** on the same problem. The predicate
-opens `lfac_mode == LocalFactorMode::Batched`, upstream set all three keys and
-MEQ set one, and both readings are correct. **Before reporting that a library
-disagrees with its own table, check which keys the table was taken with.**
+`AssemblyMode = "batched"` is the device route, MEQ's integrators fit it as
+installed, and on `machine-f-diiid` every batched route but
+`CanBatchLinearResidual()` is taken → **[M-185](MEASUREMENTS.md#m-185)**; a
+missing route was never the gate.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A missing device route as the gate*
 
 ### 3.7 The one item that outranks everything else on this page is upstream's and is not a kernel
 
@@ -1720,8 +1614,10 @@ into a fault; under CUDA only the device read-back does.
 
 ## 5. What belongs upstream, and what does not
 
-**Already filed and open**: `HDG-NPC-TRAVERSAL-FROM-MEQ.md` — item 1 of §3.2,
-the largest measured leg, host OpenMP, explicitly not a device request.
+**Filed and landed**: `HDG-NPC-TRAVERSAL-FROM-MEQ.md` — item 1 of §3.2, the
+largest measured leg, host OpenMP, explicitly not a device request. Upstream
+threaded `NPCReduce()` and `NPCRecover()`, worth 2.61× on the leg and 1.25× on
+the run → **[M-135](MEASUREMENTS.md#m-135)**.
 
 **Worth filing, once, and not before it is checked**: the
 `ConformingFaceRestriction` null dereference of §2.4. Upstream's own notes call
@@ -1730,15 +1626,9 @@ file and it may already be filed; MEQ should check rather than duplicate. **A
 "filed as" claim in MEQ's own files needs a check and not a citation** —
 `CLAUDE.md` records one that was never written.
 
-**Not to be filed**: anything measured against `gf-hdg-linearise-first`'s
-unfinished offload work. The standing rule is not to report findings against
-work that has not landed, and six of that plan's nine items landed only
-recently.
-
-**Not upstream's at all**: §1.2's three candidate sites. They are MEQ's own
-aliases, and **no unit test in MFEM's tree can see a caller's long-lived
-aliases onto the solution blocks** — upstream says so in its own words about
-M-79.
+**Not to be filed**: findings against upstream's unfinished offload work, and
+§1.2's three candidate sites, which are MEQ's own aliases.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Device findings MEQ does not file upstream*
 
 ### 5.1 Five corrections MEQ's own files should take — **ALL TAKEN**
 

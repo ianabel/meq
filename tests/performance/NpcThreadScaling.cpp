@@ -39,7 +39,7 @@
  *      MKL_NUM_THREADS=1 stops being a requirement and becomes a requirement
  *      of the SERIAL mode only.
  *
- *   3. Which makes PARDISO's threads reachable. CLAUDE.md's *What to do* item 0
+ *   3. Which makes PARDISO's threads reachable. CLAUDE_HDGGS.md's *What to do* item 0
  *      says MEQ cannot spend them because MKL_NUM_THREADS is process-wide and
  *      the setting PARDISO wants is the setting that ruins ComputeH(). If (2)
  *      holds, the trace solve runs on the master thread OUTSIDE any parallel

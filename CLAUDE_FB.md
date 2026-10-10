@@ -282,22 +282,9 @@ off-diagonal corner entries the code assumes vanish difference to an exact
 `0.000000e+00`. The exterior constraints do not depend on `ψ_ax`, `ψ_bnd` or the
 scale; neither normalisation constraint depends on the scale or on `a`.
 
-**AND THREE HYPOTHESES WERE KILLED ON THE WAY, WHICH IS WHY THEY ARE WORTH
-RECORDING.**
-
-* **Not conditioning.** The dense border matrix has `cond ≈ 1.0e3` — three digits
-  of sixteen — and solves its own system to **8.4e-16**. Equilibration is worth
-  36×, not eleven orders. The SI dynamic range never reaches `M`, because every
-  border row is already a ratio.
-* **Not units.** Non-dimensionalising the whole problem — `μ₀ = 1`, `ψ` scaled to
-  `O(1)`, currents and amplitudes rescaled — reproduces the SI run **to ten
-  digits**, floor and all. It neither fixes nor perturbs it.
-* **Not combinatorial.** In the stalled phase the `ψ_ax` argmax is **frozen** for
-  21 consecutive steps, the support creeps one-directionally (39 points in, 0
-  out), and the line search returns the identical verdict every step. The control
-  is sharper still: the configuration that *converges* is the combinatorially
-  noisier one, with the argmax jumping three times and hundreds of support points
-  flipping **both ways**.
+**THREE OTHER CAUSES WERE KILLED ON THE WAY**: conditioning, units and
+combinatorics.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Conditioning, units and combinatorics as the cause of the bordered stall*
 
 **A SECOND, SEPARATE DEFECT WAS FOUND IN THE SAME PLACE AND IS ALSO FIXED.**
 `augmentedNorm` — the merit the line search and the stopping rule both use — was
@@ -395,32 +382,11 @@ currents are **per coil**. `FREE-BOUNDARY-PLAN.md` §7.18 is the full
 re-measurement, and §7.16 is what a machine case with CONSISTENT inputs does
 instead.
 
-**AND A VACUUM START IS NOT THE ANSWER, THOUGH NOT FOR THE REASON THIS
-PARAGRAPH GAVE.** At `F_plasma = 0` there is no plasma, so `ψ_ax` is a maximum
-of the *coil* field rather than an axis and `ψ_bnd` is the edge of nothing —
-**confirmed**: the only critical points are the two coil centres and the grid
-maximum of `ψ_h` is `−6.06e-06`. What is **FALSE** is that `setNormalisation()`
-refuses it: measured, the vacuum solve **converges in 2 Newton steps to
-7.03e-17** with a span of 3.83e-02, and reports three unknowns that mean nothing.
-A solve that succeeds and describes nothing is worse than one that refuses.
-**The three unknowns the
-continuation would exist to carry are exactly the three that stop meaning
-anything at `λ = 0`**, and ramping the profile amplitude is the same thing in
-slow motion. Ramping **`I_p`** is the exception and is fine: the plasma is
-present throughout, and it is prescribed input rather than something recovered
-from a black-box `F`.
-
-**THE DEEPER POINT IS THAT `../freegs4e` NEVER MEETS THIS, AND WHY IS
-DECISIVE.** Its `constrain` object is a **control system that solves for the
-coil currents inside every Picard iteration** — `control.py` assembles a
-least-squares system over the currents against shape constraints (`Br = 0` and
-`Bz = 0` at a prescribed X-point, isoflux pairs). **The coils adapt to the
-plasma.** MEQ's attempt prescribed currents chosen by eye and asked a cold Newton
-to find a core plasma consistent with them, which is the opposite. The cheap fix
-is not continuation at all but **choosing consistent inputs** — Shafranov's
-`B_v = μ₀I_p/(4πR)·[ ln(8R/a) + β_p + l_i/2 − 3/2 ]` gives the vertical field a
-given `I_p` needs, so the conductors and the guess can be made to agree before
-the solve rather than found to disagree during it. §7.15 is the write-up.
+**A vacuum start or a ramp of the profile amplitude is not the answer, and the
+cure is not continuation at all but consistent inputs** — Shafranov's `B_v`
+gives the vertical field a given `I_p` needs — or solving for the coil currents,
+which is the inverse solve. `FREE-BOUNDARY-PLAN.md` §7.15 and §7.18.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Starting from vacuum, and amplitude continuation*
 
 ## FB-5: the exterior coupling is an unknown of the same Newton
 
@@ -1157,34 +1123,11 @@ against its bound of 3.5, so the half order the shipped default costs is
 recoverable with the rule MEQ already has. `setSourceQuadratureOrder()` is that
 knob and it exists for this measurement.
 
-**SO NO CUT QUADRATURE WAS BUILT *FOR THE ORDER*, AND THAT IS A DECISION
-RATHER THAN AN OMISSION.** An exact cut rule would move `ψ_h` from `j+1.5` to
-`j+2.5` and `ψ*` by nothing that a higher Gauss order does not already buy; it
-would buy `q_h` **nothing at all**, `q` being at its own regularity bound
-already; and it would not move the `k ≤ j` threshold. **What it WOULD buy is
-`j = 0` at all — see the next section, so "a cut rule buys nothing" is too
-strong.** `refs/CutElementQuadratureSurvey.pdf` (Loibl et
-al., arXiv:2602.18130) is the survey of the ten open-source implementations and
-it adds two practical reasons: every one of its benchmarks is Cartesian, and
-**MFEM's two cut backends are quadrilateral and hexahedral only** — the Algoim
-path aborts with *"supports only quads and hexes"* and `MomentFittingIntRules`
-builds four-vertex local meshes — where MEQ's meshes are triangles. Turning
-`MFEM_USE_ALGOIM` on would therefore cost a mesh-type change as well, for a
-threshold that does not move.
-
-**`MomentFittingIntRules` WAS TRIED AND IT WORKS, WITH A CAVEAT WORTH KEEPING.**
-On quadrilaterals it is exact on a straight cut (9e-16) and reached 3.3e-06 on a
-disc — but on one mesh in three it produced weights of **−30 and −63 on elements
-of area 1e-4**, and the area came out 1.3e-02 wrong by cancellation. That is the
-known conditioning fragility of moment fitting on a nearly degenerate cut, and
-it is why the survey's other family — dimension reduction, which is Algoim — is
-the one that reaches its design order.
-
-**AND THE FIRST ATTEMPT AT IT READ ZERO FROM EVERY CUT ELEMENT**, because it
-held `mesh.GetElementTransformation( int )` across the call and MFEM's own cut
-code resets that shared scratch underneath it. Third time this trap has been
-recorded in this tree — `CLAUDE.md`'s *Traps* is where it lives; the fix is a
-local `IsoparametricTransformation`, which is what `ex38.cpp` does.
+**SO NO CUT QUADRATURE IS BUILT *FOR THE ORDER*, AND THAT IS A DECISION RATHER
+THAN AN OMISSION** — though what a cut rule WOULD buy is `j = 0` at all, see
+*At `j = 0` the question does not arise* below, so "a cut rule buys nothing" is
+too strong.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Cut quadrature, Algoim and moment fitting*
 
 **MFEM'S TRIANGLE RULES GO BAD ABOVE ORDER 25 AND NOTHING WARNS YOU.** Measured
 while sweeping `setSourceQuadratureOrder()`: exact and positive-weighted to
@@ -2366,13 +2309,9 @@ It clears by step 2 to 4 and the converged answer has **0** of the 84 as even a
 candidate, with `|F|` on the axis exactly `0.0`. Same shape at 314 and 573
 elements.
 
-**THE FILL IS NOT THE DEFECT AND CHANGING IT WOULD BE WRONG TWICE.** At those
-iterates its answer is *correct* — `{Ψ > 0}` really is connected and really does
-contain `R = 0` when `ψ_bnd < 0` — so a rule refusing to say so would be a fill
-lying about the state it was handed. And blocking axis-touching elements outright
-switches `p′` off in the one device class §11.6 protects: a levitated dipole and
-a magnetic mirror both carry plasma to `R = 0`, both have `gg′ ≡ 0` there, and
-the pole never existed.
+**THE FILL IS NOT THE DEFECT, AND NEITHER CHANGING IT NOR BLOCKING AXIS-TOUCHING
+ELEMENTS IS THE REPAIR.**
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Changing the fill, or blocking axis-touching elements, to keep the axis out of the support*
 
 **WHAT MAKES IT SAFE IS A COUPLING BETWEEN TWO READINGS, AND IT IS ASSERTED
 RATHER THAN OBSERVED.** `ψ( 0, z ) = 0` exactly, so the axis is inside the plasma
@@ -2555,42 +2494,12 @@ the forcing argument is what removes it.
 
 ### The cold failures are three different things, and the merit's balance is machine-dependent
 
-**NOT ONE OF THE SIX COLD `exit 2` CASES HAS A NON-FINITE DIRECTION**, which is
-the condition `BORDERED-GLOBALISATION-PLAN.md` §0.1 names as the one that would
-make the whole globalisation campaign moot. They are three distinct failures:
-two machines lose a SINGLE step of twenty-seven; one is chronic, exhausting the
-halving ladder on 55 of 288; and three are not step-length failures at all but
-**X-point EXCURSIONS** — TCV's null travels 1.6 m in Z from its seed and E's
-flips sign in one step. **TCV's was the input**: its filament arm carried its
-solenoid at 220 times its current, and corrected it is a chronic plateau with
-the X-point within 8 cm of its seed → **[M-246](MEASUREMENTS.md#m-246)**. Two
-excursions, E and E shaped, remain.
-
-→ **[M-117](MEASUREMENTS.md#m-117)** — the classification · the traces ·
-→ **[M-116](MEASUREMENTS.md#m-116)** — `PicardSweeps`, which fixes none of them
-
-**AND THE SAME TRACES EXPLAIN WHY NO MERIT WEIGHT EVER TRANSFERRED BETWEEN
-MACHINES.** The border constraints' share of `augmentedNorm` differs by three
-orders of magnitude across two cases of one benchmark: on MAST `g·axis` alone is
-**0.75** of a merit of 0.843, and on TCV the whole border is **~1e-03** against a
-field residual of 2.953 — **a field residual measured on a TCV whose solenoid
-carried 220 times its current** ([M-246](MEASUREMENTS.md#m-246)), so that end of
-the range is not established; MAST's is. So MAST is the end where the border already dominates —
-raising it cannot do anything, which is exactly what `BorderMeritWeight`'s
-upward saturation measured — and TCV is the end where nothing restrains the
-X-point at all. M-113's inversion, M-114's local optimum and that saturation are
-one fact seen from opposite ends of a range, not three findings.
-
-**`PicardSweeps` IS THE CHEAPEST UNTRIED THING AND IT IS A TRAP.** It had never
-been set by anything in the tree. It fixes none of the six and turns **three of
-them from `exit 2` into `exit 0` with a wrong answer and no warning** — C shaped
-out by a factor of 3.9, both E rows by 23%. A failure is actionable; a green run
-reporting a different machine is not.
-
-**AND E's DEFECT IS ROOT SELECTION, NOT GLOBALISATION.** The Picard pre-stage
-and M-106's exact-seed run reach 1.0308e-01 and 1.0252e-01 — 0.5% apart, both
-23% from the reference. Two routes sharing nothing find the same wrong branch,
-so no step-length management is the repair there.
+**NOT ONE OF THE SIX COLD `exit 2` CASES HAS A NON-FINITE DIRECTION, AND THEY
+ARE THREE DISTINCT FAILURES** → **[M-117](MEASUREMENTS.md#m-117)**: neither
+`PicardSweeps` ([M-116](MEASUREMENTS.md#m-116)), a merit weight transferred
+between machines, nor step-length management repairs them, and E's defect is
+root selection.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Globalisation, and a transferable merit weight, as the repair for the cold failures*; *PicardSweeps and BorderedPicardThenNewton*
 
 ### The bordered path has a globalisation, and it is Picard in the field alone
 
@@ -2825,12 +2734,10 @@ it took the measured rates from 1.33/1.27/1.09 to **1.99/2.88/3.01**. Only the
 plasma support genuinely moves, and FB-4 measures what that costs.
 `occ.fragment` is what makes the coil edges mesh edges.
 
-**What was NOT chosen, and why the survey was short.** Triangle is 2D-only and
-has no subdomain tagging worth the name; CGAL's `Mesh_2` is a large dependency
-for a 2D job; MMG is a re-mesher rather than a generator and would sit *after*
-this rather than instead of it — worth revisiting if FB-5's adaptivity ever
-wants to move the geometry between cycles. Gmsh reads a `.geo` script, drives
-from Python or C++, and is what MFEM's own examples assume.
+Triangle, CGAL's `Mesh_2` and MMG were considered and not chosen; gmsh reads a
+`.geo` script, drives from Python or C++, and is what MFEM's own examples
+assume.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Triangle, CGAL Mesh_2 and MMG as the mesh generator*
 
 ## FB-6's test problem: no reproducible ITER case, and the profile that is
 
@@ -2914,6 +2821,23 @@ the least:
 | A testtokamak | 2.5e-02 |
 | TCV, shaped | 3.5e-02 |
 | MAST-U | 4.9e-02 |
+
+**AND NOW BOTH CODES CAN BE RUN INVERSE, WHICH TESTS THAT READING AND HALF
+SURVIVES** → **[M-254](MEASUREMENTS.md#m-254)**. With the supplies the targets
+determine free and the rest held at the reference's values, MAST-U closes from
+an X-point 0.80 m away to 0.02 mm and currents within 8e-03 — the forward
+sensitivity, as the rule says. DIII-D shaped closes to **3.0e-04** in the
+currents, `freegs4e`'s own grid sensitivity, once the reference also solves the
+analytic profile (`fgsref.py --interpolating-profiles`; its default spline
+moves ff' by 1.3e-02, which was the whole of the 6.3e-03 before). **TCV and
+MAST closed only once the REFERENCES were fixed** → **[M-255](MEASUREMENTS.md#m-255)**:
+`freegs4e`'s `ShapedCoil` ignores `turns` in its field while the export
+multiplied by them, and its 12-point rule is 18–30 per cent off a uniform
+rectangle on a tall conductor. Corrected, MEQ, NICE and `freegs4e` agree on the
+shaped currents to about 1e-03, and C plain's 6.3e-02 is `freegs4e`'s
+filament-stack solenoid, NICE agreeing with MEQ to 5.5e-04. *A reference that
+disagrees with two independent codes that agree with each other is the thing
+to read first.*
 
 **SEVEN OTHER CAUSES WERE ELIMINATED FIRST, ON MACHINE A, AND THE RULE IS WHAT
 SURVIVED.** MEQ's own `h` and `p` refinement (converged, 8.056e-02 across a 4x
@@ -3446,9 +3370,11 @@ the same mesh** — Newton fails, `PicardThenNewton` fails, and the driver's adv
 to raise the degree is what works. That is `p`-refinement reaching a case neither
 `h` nor a globalisation does, which is the pedestal finding from a new direction.
 
-**Deliberately not established**: nothing about free boundary, since MEQ does
-not solve it; nothing about the flux-surface machinery, since only `ψ` on a grid
-is differenced and freegs4e computes no averages; and nothing about a real
+**Deliberately not established**: nothing about free boundary, since this
+comparison hands MEQ the fixed-boundary problem inside a surface (the
+free-boundary comparison is FB-6's, below); nothing about the flux-surface
+machinery, since only `ψ` on a grid is differenced and freegs4e computes no
+averages; and nothing about a real
 reconstruction, since both codes are given analytic profile shapes.
 
 **AND THERE IS A LIMITED CASE NOW, WHICH IS THE ONLY ONE MEQ COULD EVER COMPARE
@@ -3539,18 +3465,10 @@ is already in the file.
   `meq::ellipsePsi`. `[source] PlasmaCurrent` is already in the file, so this
   costs the user ONE number — where the plasma is.
 
-**THE VACUUM FIELD ALONE CONVERGES TO A BRANCH THAT IS NOT ONE**, which is the
-measurement that makes the second part necessary rather than an improvement:
-MAST-U converges in 9 iterations to `psi_ax` 3.5× the reference, with its axis
-at ( 2.65, −0.91 ) — outside the machine.
-
-**AND THE COLUMN IS AN ELLIPSE BECAUSE OF WHAT THE OTHER TWO SHAPES DO.** A
-FILAMENT is singular at exactly the point `locateAxisPoint()` has to find —
-measured, 6.667e-01 at 3 mm from the guessed axis against MAST-U's reference
-`psi_axis` of 9.187e-02, and still climbing — and the solve fails. A RECTANGLE
-is bounded, `meq::Coil` already is one, and a uniform current density over it
-carries a logarithm in its second derivatives at each of four corners; those are
-artefacts of the shape rather than anything the equilibrium puts there.
+**The vacuum field alone converges to a branch that is not one, a filament
+column is singular where the axis must be found, and a rectangle carries corner
+artefacts**, which is why the column is an ellipse.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Cold-start guesses: the vacuum field alone, a filament column, a rectangular column*
 
 → **[M-124](MEASUREMENTS.md#m-124)** — the three guesses against the reference ·
 the approach to the axis · `ellipsePsi`'s two quadrature rules and what one rule
@@ -3785,3 +3703,61 @@ converges to a boundary **0.19 m** away with `psi_ax` 15% out — at a residual
 **lower** than the reference boundary's. Not under-converged: a better minimum,
 at a different equilibrium. M-26 in DESC's coordinates, and the reason the
 matched posing hands both codes the branch rather than letting either search.
+
+## Two traps at the free-boundary seams
+
+**A BOUND ON HOW WRONG AN ESTIMATE MAY BE IS A BOUND ON AN ESTIMATE OF THAT
+QUANTITY, AND SAYS NOTHING ABOUT AN ESTIMATE OF A DIFFERENT ONE.** The driver's
+plasma-support loop is a fixed point over the support, so `apps/meq.cpp`'s own
+comment is right that *"a bad estimate costs sweeps rather than correctness"* —
+the next sweep re-decides from the answer just reached. That licence is what
+made a second, informal reading of a constraint look safe to write, and the
+second reading computed something else: `max psi` over the region a limiter
+ENCLOSES rather than over the faces BOUNDING it. The region holds the magnetic
+axis, so the estimate was `psi_ax`, the first freeze was posed with a span of
+**−1.63e-05 where the true one is +4.76e-02** — negative, so the support
+inverted — and the loop **converged**, from two starting points a whole
+equilibrium apart, to one wall-hugging annulus in every printed digit.
+`meq::limiterPolygonMaximum()` is the single implementation both now call.
+→ **[M-165](MEASUREMENTS.md#m-165)**, and `CLAUDE_FB.md`, *The driver's first
+support freeze read a different functional under the same words*.
+
+**AND THE ESCAPE WAS WRITTEN DOWN BESIDE IT, AS A COST NOTE.** The same comment
+said *"THE SurfaceAttribute BRANCH IS EXERCISED BY NO SHIPPED FIXTURE"* and then
+explained why building one was not small. **A sentence naming what nothing
+tests is a finding, not a caveat** — it is the same shape as the reserved-key
+pairing above, where a refusal that only one of two source types reached was
+listed as accepted on both.
+
+**AN ELEMENT-LOCAL NEWTON EVALUATES ITS POLYNOMIAL OUTSIDE ITS ELEMENT ON
+PURPOSE, AND ANYTHING ADDED TO THAT POLYNOMIAL HAS TO SURVIVE IT.**
+`CriticalPointFinder::rootInElement()` lets the iterate leave the reference
+element by up to 2 — that is how a root near a face is found — and a polynomial
+is defined everywhere, so this cost nothing for as long as the field being
+rooted was one. Under `COIL-SUBTRACTION-PLAN.md`'s split the field is
+`q_p + q_c`, and `q_c` is a function on the OPEN half-plane: NaN on `R = 0`, and
+`meq::coilGradPsi` REFUSES `R < 0`. On a half-disc machine, whose elements reach
+`R = 0` exactly, the iterate leaves the half-plane and the run dies with
+*"the field point radius must not be negative"* — three frames down, naming a
+radius and nothing else. **A point off the half-plane is not a point of the
+machine**, so the seam returns a bool and every caller abandons rather than
+carrying on with `q_p` alone, which would root a different function. The
+transferable form: **a term added to an extrapolating evaluation must be defined
+wherever the extrapolation goes, or the evaluation has to be able to refuse.**
+
+**AND THE SAME THROW CAME BACK AT A SECOND SEAM, WHERE THE FIRST BRANCH OF THAT
+RULE IS THE RIGHT ONE — THE TERM *IS* DEFINED THERE, AND THE PARITY IS WHAT
+DECIDES WHICH SEAM GETS WHICH ANSWER.** The exterior datum is assembled at
+transfer-path TARGETS on `Γ`, and on a half-disc machine `Γ` is a semicircle
+whose two endpoints lie exactly ON `R = 0` — so a target near an endpoint lands
+either side of the axis by an amount that belongs to the path map and not to
+whether the mesh is valid. Measured, `( R, z ) = ( −1.0984e-03, 3.4 )`, about 1%
+of `h`. **`psi = R A_φ` is EVEN in `R`**, both factors changing sign together, so
+`meq::ConductorField::psi` reflects and the point is answered exactly rather than
+refused or clamped. `gradPsi`, `flux` and `poloidalField` still refuse, because
+`∂_r psi` is **odd** where `psi` is even and the continuation therefore differs
+in sign **between the two entries of one vector** — which is why
+`CriticalPointFinder::totalFlux` above keeps its bool and `totalPotential`, the
+scalar sibling, needs no guard at all. **The two seams differ by the parity of
+what they evaluate, not by how carefully each was written.**
+→ **[M-156](MEASUREMENTS.md#m-156)**.

@@ -51,7 +51,7 @@
 #         5     6.277438e-17     2.590520e-15        -
 #
 # -- five iterations, observed order 1.998, which is the quadratic endgame
-# CLAUDE.md's *Newton, and the obligation it creates* is about. The Jacobian is
+# CLAUDE_HDGGS.md's *Newton, and the obligation it creates* is about. The Jacobian is
 # carrying mu0 R^2 d2p/dpsi2 through the hybridization and a wrong one would
 # show up here and nowhere else: CLAUDE.md records that perturbing dF/dpsi by 5%
 # leaves every error and every convergence rate in this project unchanged to six

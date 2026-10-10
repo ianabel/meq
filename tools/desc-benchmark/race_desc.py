@@ -153,7 +153,7 @@ DESC_DIR = os.environ.get("DESC_DIR",
                           os.path.join(os.path.dirname(convert.MEQ), "DESC"))
 
 #: The MFEM MEQ links.  The same default and the same environment variable
-#: MEQ's own CMake finder uses -- CLAUDE.md, *Which MFEM, and why not master* --
+#: MEQ's own CMake finder uses -- CLAUDE_MFEM.md, *Which MFEM, and why not master* --
 #: so a tree configured with a different MFEM_DIR is recorded correctly here
 #: without being told twice.
 MFEM_DIR = os.environ.get("MFEM_DIR",

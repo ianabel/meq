@@ -436,7 +436,7 @@ local work … not fewer floating-point operations."*
 
 **`MFEM_ENABLE_TESTING` IS NOW ON, and turning it on found this in the first
 run.** MEQ had been building with `-DMFEM_ENABLE_TESTING=OFF` because of a CMake
-bug in serial CUDA builds; that bug is fixed (see `CLAUDE.md`, *Which MFEM*), so MFEM's own
+bug in serial CUDA builds; that bug is fixed (see `CLAUDE_MFEM.md`, *Which MFEM*), so MFEM's own
 131 registered tests are available. Run over the Darcy and HDG tags on
 `meq-integration` at `974871c456`:
 
@@ -502,53 +502,10 @@ take an unphysical linear excursion and the outer residual is a tamer function o
 a much smaller unknown. That is a real and well-understood robustness mechanism,
 and it is precisely what NPC gives up in exchange for uniform local work.
 
-**A LINE SEARCH ON THE FULL RESIDUAL DOES NOT FIX IT, AND THE TABLE ABOVE SAYS
-WHY.** Upstream recommends backtracking on the full residual as NPC's
-globalisation — `NewtonSolver::ComputeScalingFactor`, a dozen lines,
-`miniapps/hdg/navierstokes.cpp` carries one. **It was implemented in MEQ and
-measured, and it made every case worse**, including the five that converge
-undamped: all of them went to sixty iterations, creeping by about 1% a step.
-
-**THE MECHANISM OF THE CREEP IS A DEFECT IN THE REFERENCE IMPLEMENTATION, AND
-UPSTREAM FOUND IT AFTER MEQ REPORTED THE SYMPTOM.** MEQ's first reading — that
-`α` collapses because the `ℓ²` merit charges for restoring `(1 − α)` of the flux
-and trace residuals — describes the pressure correctly and gets the mechanism
-wrong. `NSBacktrackingNewton` accepts on `Norm(rt) < n0`, **a monotone test with
-no sufficient-decrease constant**. For Newton on an `ℓ²` merit the direction is
-always a descent direction, so `merit(α) ≈ merit(0)(1 − α)` and *any* small
-enough `α` passes: upstream swept it and `α = 1.2e-4` still "succeeds",
-improving the merit by 1e-4 relative. **So where `α = 1` is rejected the search
-does not fail — it creeps**, which is exactly the 1%-a-step crawl MEQ measured.
-An Armijo test would reject those steps and fail honestly. Fixing it is open
-upstream, and **it would not make MEQ's problem converge**; it would stop the
-globalisation disguising its own failure. **KINSOL's `KIN_LINESEARCH` does use
-an Armijo condition and fails on the same cases**, which is why the two rows
-agree.
-
-**AND THE BLOCK STRUCTURE IS NOT WHAT SEPARATES MEQ'S PROBLEM FROM UPSTREAM'S —
-SEVERITY IS.** This file claimed the failure follows from two rows being linear
-and one non-linear. Upstream measured the same shape on their own Darcy pedestal
-— a full step takes the flux row to 4e-17 and the trace row to 3e-14 with the
-whole remainder in the potential row — and there the line search *works*: 3 of 4
-configurations fail undamped and converge with backtracking. **What differs is
-that a full step IMPROVES their potential residual, 4.7e-01 → 1.7e-01, and
-MULTIPLIES MEQ's BY 77.** The block structure is common to both; the size of the
-first correction is not. So the recommendation in their §6 is supported there
-and wrong here, and MEQ's original explanation was over-general.
-
-MEQ **asked whether §6's baseline was the deleted mode, and it was not** — it
-was plain undamped `NewtonSolver` on NPC, so the disagreement is real rather
-than an artefact of what was being compared against. On the strength of MEQ's
-measurements upstream has withdrawn two §6 claims: *"NPC is not automatically
-faster … not fewer floating-point operations"*, and *"reach for [the reduced
-trace operator] unless you have a reason not to"* as a general default. §6 now
-says the choice turns on what the element-local non-linear solve costs on your
-problem.
-
-So the line search was **not kept**, and the comment at the `Globalisation::None`
-switch in `GradShafranov.cpp` records why. What a step-length rule would need
-here is to damp the non-linear block without un-doing the exact annihilation of
-the linear ones — different, and unattempted.
+**A line search on the full residual does not fix it**: built in MEQ and
+measured, it made every case worse, creeping about 1% a step, and it was not
+kept.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A backtracking line search on the full residual*
 
 **What DOES work is fixing WHERE the iterate is rather than how far it steps**,
 which is the reactive ladder MEQ already has, and this also explains why: Picard
@@ -568,99 +525,21 @@ problem*.
 
 ### There is no cheap discriminator, and the obvious one is ANTI-correlated
 
-**ASKED AND ANSWERED BY MEASUREMENT.** The reactive ladder pays for
-a failure by running Newton to its cap before handing off. The obvious
-improvement is to notice earlier — and the obvious signal, the first Newton
-step making the residual worse, **is not a signal at all**. NPC, plain Newton,
-cap 60, cold start:
-
-→ **[M-24](MEASUREMENTS.md#m-24)** — case · out · its · `‖r₀‖` · `‖r₁‖/‖r₀‖`
-
-**The largest first-step blow-up in the table converges, and the two cases
-where the residual came DOWN at step one both fail.** 1169× at
-`k = 1, n = 24` finishes in 26; the barrier's 0.86 and 0.87 run to the cap.
-Any threshold that catches the pedestal at `n = 16` throws away `n = 24`, and
-no threshold whatever catches the barrier. Under the condensation it is the
-same story from the other side — the barrier drops to 4.3e-02 and 1.1e-02 at
-step one and still fails.
-
-**And `‖r₀‖` carries no information either, because under NPC it is very nearly
-source-INDEPENDENT.** Look down that column: the pedestal and the barrier at
-`k = 1, n = 16` both read 1.136e-01, and the pedestal and the layer at
-`k = 2, n = 16` both read 1.124e-01 — to four figures, on different sources. At
-the cold iterate `(0, 0, g_D)` the residual is dominated by the Dirichlet datum
-entering the flux row through `⟨ψ̂, v·n⟩` and the potential row through the
-stabilisation, and `(F/R, w)` is a small correction to both. `‖r₀‖` is a
-measurement of the boundary data and the mesh, not of the difficulty.
-
-**So the ladder stays reactive and stays triggered by observed failure**, which
-is what *Why MEQ's Newton struggles* already concluded from `max|∂F/∂ψ|/λ₁`.
-Two independent candidate detectors have now been measured and both are
-useless; the difference is that this one is *anti*-correlated, which is worse
-than uninformative. **Do not add a predictive trigger without a measurement
-that separates these fourteen rows**, and note that the failure is cheap to
-observe anyway — see the 1.6 s against 53.5 s above.
+**Neither the first step's `‖r₁‖/‖r₀‖` nor `‖r₀‖` predicts failure** — the first
+is ANTI-correlated ([M-24](MEASUREMENTS.md#m-24)) and the second measures the
+boundary data — so the ladder stays reactive, and no predictive trigger goes in
+without a measurement that separates those fourteen rows.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Predictive solver selection: the killed detectors*
 
 ### Should `PicardThenNewton` simply be the default? No, and cost is the weakest of the three reasons
 
-Plain Newton against `PicardThenNewton`, both under
-NPC, Picard capped at the same 60 iterations, wall clock on an otherwise idle
-machine:
-
-→ **[M-25](MEASUREMENTS.md#m-25)** — case · plain · `PicardThenNewton` · slowdown · rel. `max ψ_h`
-
-**Three reasons, in increasing order of how decisive they are.**
-
-**1. It costs 1.4× to 3.1× on everything that already works**, which is real
-but is the reason you would trade away for robustness if the other two did not
-exist. Note also that this is with Picard *capped at 60*; the cap is a tuning
-parameter and *Picard, then Newton* has already measured the handoff to be
-**non-monotone** in Picard effort, so 60 working on these fourteen rows is not
-a property to build a default on.
-
-**2. It does not cover everything.** The barrier fails under plain Newton and
-fails under `PicardThenNewton`, and the `picard 0` in those rows is Picard
-itself throwing on the first iteration. A default that is 2× slower and still
-needs a fallback is not a default.
-
-**3. IT SILENTLY CHANGES WHICH DISCRETE SOLUTION YOU GET, AND THIS IS THE ONE
-THAT SETTLES IT.** Look at the last column on the rows that converge both ways:
-6.1e-06, 1.6e-05, and **1.0e-02** on §4.5 at `k = 2, n = 16`. These are
-*converged* solves of the same discrete system to `rel_tol = 1e-12`, differing
-by up to one percent in `max ψ_h`. Run three ways rather than two, the same
-case gives three answers:
-
-→ **[M-26](MEASUREMENTS.md#m-26)** — route · Newton steps · `max ψ_h`
-
-**A spread of 9.4%.** This is the multiple-solution finding recorded under
-*The suite is green* — coarse discretisations of these sources
-carry more than one solution — meeting the solver from a third direction. It
-means changing the default globalisation is **not** a performance decision:
-it changes the equilibrium MEQ reports on an under-resolved mesh, which is
-precisely the mesh an adaptive run starts from.
-
-So `Globalisation::None` stays the default and the ladder stays reactive. What
-the ladder is for is a solve that would otherwise not happen at all, and paying
-for it only then is what keeps the answer on the branch plain Newton finds.
-
-**AND THE OTHER ORDERING IS NOT A CHEAPER RUNG THAN PICARD — MEASURED, BECAUSE
-IT LOOKED LIKE IT WOULD BE.** `CondenseThenLinearise` converges both cases NPC
-fails on, in 13–14 iterations against Picard's ~200, so switching ordering on
-failure looks like the obvious cheap rung. It is not: an iteration is not the
-currency, and a condensation iteration carries thousands of element-local
-non-linear solves.
-
-→ **[M-27](MEASUREMENTS.md#m-27)** — case · NPC plain · `CondenseThenLinearise` · NPC `PicardThenNewton`
-
-**`PicardThenNewton` is between 2.0× and 2.6× cheaper than the ordering switch
-on every case either of them cures**, and on the cases neither cures the
-ordering switch costs 25× to 30× more to find that out. The ladder MEQ already
-has is the right one and nothing needs adding to it.
-
-The two cures also do **not** agree at these resolutions — 2.5e-13 on the
-pedestal, but 1.0e-03 on §4.5 at `n = 30` and 9.4e-02 at `k = 2, n = 16` — which
-is reason 3 again, and a second argument against reaching for whichever cure is
-convenient.
+**No.** It costs 1.4× to 3.1× on everything that already works
+([M-25](MEASUREMENTS.md#m-25)), it does not cover the barrier, and — decisively —
+it silently changes which discrete solution is reported, three routes reaching
+`max ψ_h` **9.4%** apart on an under-resolved mesh ([M-26](MEASUREMENTS.md#m-26));
+`CondenseThenLinearise` is not a cheaper rung either ([M-27](MEASUREMENTS.md#m-27)).
+So `Globalisation::None` stays the default and the ladder stays reactive.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *`PicardThenNewton` as the default, and `CondenseThenLinearise` as a cheaper rung*
 
 **A corollary for anyone comparing the two orderings**: do it on a *resolved*
 mesh. A disagreement at `k = 2, n = 16` is this, not a defect.
@@ -690,7 +569,8 @@ driving an `ℓ²` merit over the whole residual — KINSOL's is `½‖fscale·F
 `fscale = 1`. **This is one finding, not two.** They fail *differently*, though,
 and the difference is instructive: KINSOL applies an Armijo sufficient-decrease
 condition and so gives up honestly, while the hand-written one has only a
-monotone test and creeps instead. See the mechanism under *Why it fails*.
+monotone test and creeps instead. See the mechanism in `CLAUDE_DECLINED.md`,
+*A backtracking line search on the full residual*.
 
 ### The flux is seeded, and it buys a diagnostic and not one iteration
 
@@ -844,28 +724,14 @@ that source.
 
 ### What did not work, in the order it was tried
 
-1. **With `ψ_ax` fixed, the profile is inert.** The solution reaches
-   `Ψ = 0.0013`, so a peaked `p ~ Ψ^ν` contributes `Ψ^(ν−1) ~ 1e-9` of itself.
-   Pressure amplitudes of 1 and 512 gave `ψ ∈ [2.570e-07, 1.259e-03]` — identical
-   to every digit. A fixed `ψ_ax` is not a simplification of a normalised
-   profile; unless the value happens to be right it is a **different problem**.
-   `theFixedNormalisationIsADifferentProblem` still asserts that, as the control.
-2. **So "is it a stiff case?" was unanswerable, and the answer looked like no
-   for the wrong reason.** Every configuration converged in 1–2 Newton steps at
-   reaction ratios `max|∂F/∂ψ|/λ₁` from 0.09 to **2523** — the current hole is
-   unsolvable at 26. Nothing was stiff because no non-linearity was switched on.
-   It also showed the ratio was being sampled over `[0, ψ_ax]`, a range the
-   solve never visits: **that diagnostic needs the solution's actual range.** It
-   now gets it, and the answer is **1.9 at `ν = 2` and 13–14 at `ν = 4`** — real
-   but not extreme, between the pedestal's 7 and the hole's 26.
-3. **Closing the loop outside the solver does not rescue it, and the reason is a
-   pole.** Iterating `ψ_ax ← max ψ` with relaxation converges — to
-   `ψ_ax ~ 1e-12`, a degenerate fixed point where `ψ` and `ψ_ax` shrink together,
-   `Ψ` stays `O(1)`, and the pressure gradient `νA/ψ_ax` runs to 1e12 while the
-   solution it drives sits at 1e-12. Mapped afterwards, the cause is plain: the
-   outer map `ψ_ax ↦ max ψ` has a **pole beside its own fixed point**. At `ν = 2`,
-   `A = 1` the fixed point is 0.3059 and the pole is at 0.2996, six parts in a
-   thousand away. Relaxing harder is not a fix for a pole.
+Three routes failed before `ψ_ax` went inside the residual: holding it fixed,
+which makes a normalised profile a different problem
+(`theFixedNormalisationIsADifferentProblem` keeps that as the control); asking
+whether the case is stiff over a range of `ψ` the solve never visits — sampled
+over the solution's actual range it reads **1.9 at `ν = 2` and 13–14 at
+`ν = 4`**; and closing `ψ_ax ← max ψ` outside the solver, which meets a pole
+beside its own fixed point.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Fixing `ψ_ax`, or closing it outside the solver*
 
 **And there is a second solution that is not the equilibrium, which is separate
 from the normalisation and cost its own afternoon.** At a *fixed* `ψ_ax` this
@@ -1285,7 +1151,7 @@ Ratio against `λ₁`, by amplitude:
 Note the pedestal itself already sits at 7 and converges, so exceeding `λ₁` is
 not by itself fatal; 26 is. **This supersedes an earlier reading of §4.4 as a
 trivial-branch problem.** `F(R, 0) = 0` is true and the trivial branch is real —
-see `CLAUDE.md`, *Traps* — but it is not what defeats the iteration here, since the runs above
+see *Traps in the solve* below — but it is not what defeats the iteration here, since the runs above
 carry non-homogeneous ramp data that keeps `ψ` away from zero and fail anyway.
 
 Do not file §4.4 under stiffness.
@@ -1420,7 +1286,7 @@ an unconverged local solve is not smooth, so the difference is meaningless and
 the Jacobian may or may not be. **It is the measured explanation for the
 pedestal's wandering iterations at `k = 1, n = 16` under
 `CondenseThenLinearise`**, and it is the same defect that corrupts a differenced
-border — see the seed note under `CLAUDE.md`, *Traps*. Refinement cures it, because a
+border — see the seed note in `CLAUDE_MFEM.md`, *Traps in MFEM's API*. Refinement cures it, because a
 resolved local problem converges inside its cap.
 
 **Globalising the outer iteration makes the local solves worse, not better**,
@@ -1490,7 +1356,8 @@ narrower one than "the route for stiff sources".
 
 **It does not rescue §4.4.** The current hole fails under Picard, under the
 handoff, and at every order and mesh up to `k = 3, n = 48`. Its problem is the
-trivial branch, not the iteration.
+continuous one — a reaction term past ~26 eigenvalues and a multi-valued
+problem (M-35) — not the iteration, and continuation in `c₃` is what reaches it.
 
 **Picard's job is not to solve the problem.** §4.5 converges at both orders from
 a Picard state that never met its own tolerance, so stage 1 stopping short is an
@@ -1858,7 +1725,7 @@ in-process sweep would measure the first setting five times.
 
 That third entry is the surprise, and it is why the axes must be separated: swept
 together, the `k = 3` assembly blow-up swamps every other column. Full account
-under `CLAUDE.md`, *Traps*; the short of it is `MKL_NUM_THREADS=1`, non-negotiable, and the
+under *`MKL_NUM_THREADS`, measured* below; the short of it is `MKL_NUM_THREADS=1`, non-negotiable, and the
 culprit is `ComputeH()`'s dense LU rather than UMFPACK.
 
 **THREADED ASSEMBLY IS NOW EVERY ELEMENT-LOCAL LOOP, NOT JUST `ComputeH()`,
@@ -1929,7 +1796,7 @@ threaded loop, and the reason is structural rather than lucky:
   specialised local operator keeps its block factored in place.
 * What it does evaluate per element is `m_nlfi_p`, and that is
   **`meq::SourceIntegrator`**, MEQ's own, made reentrant when it first met this
-  loop. See *Traps* in `CLAUDE.md`.
+  loop. See `CLAUDE_MFEM.md`, *Traps in MFEM's API*.
 
 The bit-exactness assertions between assembly modes are the independent check
 and have been green throughout; a shared-scratch integrator on eight threads
@@ -2059,7 +1926,7 @@ MEASURING.**
   region — so they are *not* nested and get the full count. Measured in situ: a
   `NpcThreadScaling` sweep at `MKL=8` that included UMFPack rows sat at **266%
   CPU making no progress**, which is precisely the barrier-spinning signature
-  `CLAUDE.md`'s *Traps* records for `SolovievConvergence` at 1.24 s against
+  *`MKL_NUM_THREADS`, measured* records for `SolovievConvergence` at 1.24 s against
   177.83 s. If
   `MKL_NUM_THREADS > 1`, use PARDISO.
 * **Threaded assembly at `OMP_NUM_THREADS=1` with MKL threads on is
@@ -2076,7 +1943,7 @@ on the kernels at MEQ's own block sizes, `dgetrf` **does not degrade at all** �
 0.0262 at `k = 4`. MKL does not thread a `dgetrf` that small. What degrades is
 the **back-substitution** (`dgetrs` with `nrhs` = the element's trace dofs) and
 the **Schur-complement `dgemm`**: at `k = 3`, 0.0070 to 0.0331 and 0.0020 to
-0.0294. The `k = 2` / `k = 3` threshold `CLAUDE.md`'s *Traps* records is
+0.0294. The `k = 2` / `k = 3` threshold *`MKL_NUM_THREADS`, measured* records is
 confirmed — `k = 2`
 does not move at any thread count — but the **40x magnitude is not reproduced**
 on the clean single-MKL link line, which post-dates that measurement; the
@@ -2122,10 +1989,11 @@ set is worth **2.8x to 3.0x**, because the flag now
 threads the residual and the Jacobian too. PARDISO's own contribution within
 that is about **1.13x**; the rest is the assembly mode.
 
-Threaded assembly **is** the default now. PARDISO is not, because
-`MFEM_USE_MKL_PARDISO` is off in most builds and oneMKL's terms are not
-everybody's to accept; `setTraceSolver()`, `traceSolverAvailable()` and
-`[solver] TraceSolver` are how a caller who has it takes it. **The reason to
+Threaded assembly **is** the default, and so is PARDISO **wherever
+`MFEM_USE_MKL_PARDISO` is set** — `defaultTraceSolver()` is build-conditional
+for the reason `defaultAssemblyMode()` is, and most builds do not have it, since
+oneMKL's terms are not everybody's to accept. `setTraceSolver()`,
+`traceSolverAvailable()` and `[solver] TraceSolver` choose explicitly. **The reason to
 take it is not its 1.13x** — it is that PARDISO is the only trace solver that
 tolerates `MKL_NUM_THREADS > 1` at all, and UMFPACK collapses there whatever the
 assembly mode.
@@ -2133,25 +2001,26 @@ assembly mode.
 ### What to do, in order of value
 
 **The element-local dense work does not need getting off threaded MKL, which is
-which is the obvious place to start.** `AssemblyMode::Threaded` settles it: MKL
+the obvious place to start.** `AssemblyMode::Threaded` settles it: MKL
 suppresses its own threading inside an active OpenMP region, so once the element
 loop *is* such a region the local work is nested and free — **1285× between the
 two modes at `MKL=8`, `k = 3`**. Two details worth having, because both are easy
 to get wrong: it is not the dense **LU** that degrades — `dgetrf` does not move
 at these block sizes at all — but the back-substitutions and the
-Schur-complement `dgemm`; and **`LocalFactorMode::Batched` is not the answer and
-should not be taken**, since it batches `InvertA()`/`InvertD()`, which run once
-from `Finalize()`, while the per-linearisation factorisation is inside
-`ComputeElementH()`, and it aborts on an exact zero pivot where the serial loop
-carries on.
+Schur-complement `dgemm`; and **`LocalFactorMode::Batched` does not address
+it** — on the host it is a small consistent gain of about 4% on `ComputeH` now
+that it keeps the condensation cache, inside the serial arm's spread on the
+wall, so the host default stays `Serial`; under a Device it is the default,
+because it is the route that moves the element-local dense algebra at all
+(`CLAUDE_DEVICE.md`, *Which integrators need device offload, and the batched routes*).
 
 **Symbolic reuse and a run-time trace solver are both in.**
 `theSymbolicAnalysisIsReusedAcrossNewtonSteps` asserts the reuse by count —
 about 23% off each step for no numerical change, on both paths — and
 `setTraceSolver()` picks among three backends that agree to 5e-14 through the
-whole solver. **The default stays UMFPack**, because oneMKL's licence is not
-everybody's to accept; a caller who has PARDISO gets it for one line, and its
-*sequential* advantage is 1.50× on the factorisation with no MKL threads at all.
+whole solver. **The default is PARDISO where the build has it and UMFPack where it does
+not**; PARDISO's *sequential* advantage is 1.50× on the factorisation with no
+MKL threads at all.
 
 **And the ranking below is the one the ASYMMETRY finding gives.** Ranking
 Cholesky highly is what measurements taken only on the fitted path suggest, and
@@ -2161,26 +2030,10 @@ it is wrong wherever `Γ` is curved.
    linear path's fallback has a `GSSmoother`. That inconsistency is a plain bug
    and is worth fixing whatever else happens; without SuiteSparse the Newton
    path is currently running unpreconditioned GMRES on every step.
-2. **Symmetric methods — fitted path only.** CG or MINRES on `−A`, and a CHOLMOD
-   Cholesky, are all correct on a fitted mesh and all invalid on the extension
-   path. CHOLMOD is already linked (`-lcholmod` via SuiteSparse) but MFEM wraps
-   only UMFPACK and KLU. Worth having only if fitted-domain runs become a
-   workload in their own right; the driver's target is curved boundaries, where
-   none of it applies.
-3. **Cholesky on the per-cell flux block — do not.** `(R q, v)` is SPD, so this
-   looks like a free 2×. It is wrong on the extension path for exactly the
-   reason above: `AssembleFluxMassBdrFaces()` puts a term with relative
-   asymmetry 1.0, sixteen times larger than the mass term, into the very block
-   `LU_A` factors. A correct version would have to branch on whether an
-   extension is configured, for at best a small gain on 9×9 to 30×30 blocks.
-   Not worth a conditional in that inner loop. **`LUFactors` is the right
-   choice and should stay.**
-4. **Do not reach for AMG.** At 2D serial sizes direct wins: 50k trace dofs
-   factorise in 0.4 s. AMG earns its place in 3D or in parallel, and serial MFEM
-   has none anyway — `HypreBoomerAMG` needs MPI.
-5. **Do not re-time cuDSS here.** Correctness is established, the timings are
-   irreproducible on this machine by a factor of thirty, and the reason is the
-   machine. It needs a datacentre part, not another afternoon.
+
+The rest of the ranking is what NOT to reach for — symmetric methods and
+CHOLMOD, Cholesky on the flux block, AMG, and re-timing cuDSS on this machine:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Symmetric solvers, flux-block Cholesky, AMG, and re-timing cuDSS*
 
 ### PARDISO and the MKL link line: what is still true
 
@@ -2268,17 +2121,10 @@ UMFPACK keeps its METIS ordering. Suite green twice — **23/23 as it then was**
 the same code, which is the run-to-run spread on this machine and is worth
 knowing before anyone reads a 10% change in a suite time as a result.
 
-**`MKL_THREADING_LAYER=GNU` is inert and has been dropped everywhere.** It only
-ever configured the `libmkl_rt` **dispatcher**, and there is no dispatcher any
-more: `SolovievConvergence`, `NewtonConvergence` and `FieldConvergence` produce
-**bit-identical output** with it set and with it unset. It was briefly kept as a
-free guard, and that argument was rejected for a reason that generalises —
-**most machines will not have MKL at all**, so it named a library the majority
-of readers do not have, about a failure they cannot suffer. A guard that is
-usually inapplicable is a false instruction to whoever reads it next, and it
-spends the credibility of the ones that are real. The driver's matching runtime
-warning went for the same reason. **Choosing a threading layer is CMake's job**,
-which can look at what the build actually links.
+**`MKL_THREADING_LAYER=GNU` is inert and has been dropped everywhere**: there is
+no `libmkl_rt` dispatcher left for it to configure, and output is bit-identical
+with it set and unset. Keeping it as a free guard was rejected.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *MKL_THREADING_LAYER=GNU*
 
 **The hazard went off once, and in the opposite direction to the one predicted.**
 The prediction was wrong answers from mixed threading layers. What actually
@@ -2299,3 +2145,282 @@ iteration dominates outright.
 taught: a property measured on the easy configuration is not a property of the
 code. Symmetry held to 2e-16 on a fitted rectangle and failed at 5.4e-1 on the
 geometry MEQ is actually for.
+
+## Traps in the solve
+
+**A convergence target scaled to `‖r₀‖` makes a good initial guess FAIL, and
+the better the guess the more certain the failure.** MFEM's `NewtonSolver` stops
+at `‖r‖ ≤ max(rel_tol·‖r₀‖, abs_tol)` with `‖r₀‖` measured at the iterate it was
+handed. Warm-start from a converged answer and `‖r₀‖` is already small, so the
+target shrinks with it — and past a point it falls below the round-off floor,
+where nothing can meet it. Measured on Example 5 at `k = 3, n = 8`, restarting
+from the exact answer: the residual reaches the floor in **two** iterations and
+is then reported as a failure at the thirtieth.
+
+```
+   it 0   1.180694e-03
+   it 1   8.782203e-13
+   it 2   4.151551e-14      <- converged; the floor
+   ...    ~4e-14 for 28 more iterations, then FAIL
+```
+
+The target was `max(1e-12 × 1.18e-3, 1e-14) = 1e-14`, under the 3.7e-14 this
+problem can reach. Cold, `‖r₀‖ = 11.2` gives a target of 1.1e-11 and it converges
+in four. **This is the failure mode that matters most for how MEQ will be used** —
+moving to an adjacent equilibrium should cost one or two Newton steps, and it
+instead threw away a converged answer.
+
+`solve()` therefore takes the reference from the **cold** iterate — the Dirichlet
+datum alone, where this solve would have started with no guess — and sets a pure
+absolute target from it. `rel_tol` keeps exactly the meaning it always had, a
+cold solve is bit-identical because there the reference *is* `‖r₀‖`, and only a
+warm one changes: from failing to converging in one step. It costs one extra
+residual evaluation, and only when a guess was set.
+
+**`NewtonSolver` needs `iterative_mode = true`, and the failure is silent.** The
+Dirichlet values ride in the iterate, so with `iterative_mode` left false
+`NewtonSolver` zeroes `x` on entry and throws the boundary data away — silently,
+because the residual is masked on exactly those rows, so nothing complains and
+the answer is merely wrong.
+
+**Every GS-2 §4.2–4.5 source vanishes at `ψ = 0`, so the paper's own problem has
+a trivial branch — and MEQ falls into it.** `F(R, 0) = 0` for eqs (24), (25),
+(26) and (27); for (25) because `b = 2` makes the bracket `O(ψ²)`. With
+homogeneous Dirichlet data `ψ ≡ 0` therefore *solves* the problem, and Newton —
+which starts from the Dirichlet data — lands on it and stops in **zero
+iterations** with an identically zero residual. Not a hypothesis: GS-1's
+Algorithm 2 literally opens `ψ⁰ ; // Non-trivial initial guess`.
+
+**`setInitialGuess()` exists** — in `Coefficient` and `GridFunction` overloads —
+and it is what those four cases need; without it `prepare()` resets the iterate
+and `solve()` calls `prepare()`, so no caller could work round the trivial
+branch. They are posed with a non-homogeneous ramp that puts `ψ = 0` in the
+interior. **Under NPC the guess seeds the potential and the trace and leaves the
+flux block at zero**, which is a real difference; see `CLAUDE_HDGGS.md`,
+*The flux is seeded*.
+
+**A RESIDUAL EVALUATION MAY NOT SIT BETWEEN `NPCGradient()` AND THE SOLVES IT
+ENTITLES.** `NPCResidual()` is non-`const` on `DarcyHybridization` where
+`NPCReduce()` and `NPCRecover()` are `const`, and under a moving support MEQ's
+own `fieldResidual()` calls `refreshPlasmaComponent()` as well — so neither the
+factored local blocks nor the *problem they were factored for* survive it by
+contract. This is why the bordered step's differenced `psi_bnd` column flushes
+its queue before differencing rather than solving across it. The failure it
+guards has no symptom: a column solved against a Jacobian belonging to a
+different plasma support is a plausible number, and Newton converges to
+something.
+
+## `MKL_NUM_THREADS`, measured
+
+**Every run needs `MKL_NUM_THREADS=1`**, which every registered ctest sets. It
+is a no-op wherever MKL is absent, so it costs a non-MKL machine nothing.
+
+**`MKL_THREADING_LAYER=GNU` was the other half of this trap and is now gone**,
+from the ctests, the performance harness and the driver alike. It guarded the
+`libmkl_rt` **dispatcher** — what `/usr/lib/x86_64-linux-gnu/libblas.so.3`
+resolves to on this machine — whose default threading layer silently corrupted
+UMFPACK's BLAS-3: you got numbers, and they were wrong. MEQ no longer loads it,
+building against its own SuiteSparse; see `CLAUDE_DECLINED.md`,
+*MKL_THREADING_LAYER=GNU*, for why the variable was dropped rather than kept. **The trap is still live for
+anyone using Debian's SuiteSparse**, and `../mfem-hdg-dev/CLAUDE.md` records it.
+
+`MKL_NUM_THREADS=1` is the **factor of 140** one. Measured, one
+process, nothing else running: `SolovievConvergence` **1.24 s** against
+**177.83 s** at `=16`, and `FieldConvergence` 1.11 s against 198.35 s — at 273%
+of *sixteen* cores, which is the shape of the answer: the threads are spinning
+on barriers, not working. `SamplerConvergence`, which never reaches a direct
+solver, does not move.
+
+**It is MFEM's element-local dense LU, and not UMFPACK.** `ComputeH()` factors `A`, forms the
+Schur complement and factors that, on blocks of order 10–30, once per element,
+through `LUFactors` → LAPACK → MKL:
+
+→ **[M-59](MEASUREMENTS.md#m-59)** — assembly + reduction · `MKL=1` · `MKL=2`
+
+**`k = 2` does not move and `k = 3` degrades by a factor of forty**, putting
+MKL's threading threshold between those two block sizes. The suite runs `k` up
+to 4 and every element of every mesh pays it, which is why the whole-test
+factors dwarf anything in the solver columns. **A production run at `k ≥ 3` with
+MKL threading left on would be unusable and would look like a solver problem.**
+
+**It is MKL and not OpenMP**, which the obvious cross settles: `FieldConvergence`
+at `OMP=16 MKL=1` is **1.19 s at 99% CPU**, and at `OMP=1 MKL=16` is 183.54 s at
+266%.
+
+The obvious story, UMFPACK calling threaded BLAS on its frontal matrices, fits
+every whole-test fact and is wrong:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *UMFPACK's threaded BLAS as the `MKL_NUM_THREADS` culprit*
+
+**A `libmkl_sequential` behind SuiteSparse hides all of this**, since MKL then
+resolves sequential whatever it is asked for — see `CLAUDE_HDGGS.md`,
+*PARDISO and the MKL link line*.
+
+**AND THE TENSION THAT USED TO SIT HERE — `MKL_NUM_THREADS=1` BEING RIGHT FOR
+MEQ'S SOLVER AND WRONG FOR PARDISO — IS RESOLVED BY THE ASSEMBLY MODE, AND THE
+TWO DEFAULTS NOW MOVE TOGETHER.** Everything above is a measurement of the
+*serial* element loop. Under `AssemblyMode::Threaded`, which is the default, the
+element-local dense work is nested inside an active OpenMP region and MKL
+suppresses its own threading there, so `MKL_NUM_THREADS` costs it nothing —
+while the trace solve runs on the master thread outside every region and takes
+every thread. **So PARDISO is the default trace solver wherever
+`MFEM_USE_MKL_PARDISO` is set**, chosen by `defaultTraceSolver()`, which is
+build-conditional for exactly the reason `defaultAssemblyMode()` is: the
+constructor bypasses `setTraceSolver()`, and an unhonourable default would reach
+`makeTraceSolver()` and throw out of a solve.
+
+→ **[M-78](MEASUREMENTS.md#m-78)** — driver wall by solver × MKL · per-stage solve · what is free and what is not
+
+The short form: **the solver change is worth 8–10% and is free**, user time
+falling with it; **the MKL threads are worth a further 7–9% and cost 75% more
+CPU**; and UMFPack moves the *other* way under them, 6% slower for 30% more CPU,
+which is why the pair is chosen together and not separately. The 1.9× that
+`setTraceSolver()`'s documentation quotes for PARDISO's threads is an isolated
+trace-solve figure and does not survive to the wall clock.
+
+**The registered tests still pin `MKL_NUM_THREADS=1` and must**, because the
+bit-exactness assertions between the two assembly modes hold at that value and
+not above it: at `MKL=8` the modes hand MKL different thread counts and a
+blocked BLAS-3 reassociates, measured at 1.4e-15 in ψ and 1.8e-13 in the flux.
+That is arithmetic, not a race, and `NpcThreadScaling` now says so in its own
+diagnostic rather than sending the reader to hunt for shared scratch in MEQ's
+integrators — which is what its message used to advise.
+
+## The fixture ladder, and how to assert a rate
+
+**Unfitted convergence needs a two-tier rate assertion.** On a fitted mesh a
+single-pair rate is tight enough to assert at 0.15 of slack. On the extension
+path it is not: `Ω^h` is the union of background elements lying inside `Ω`, and
+*which* elements those are is not a smooth function of `h`. At `k = 3` the error
+is not even monotone in the mesh count — 2.02e-5, 3.03e-5, 3.88e-5 at
+`n = 6, 7, 8` — and `{12,24,48,96}` is a worse sequence than `{8,16,32,64}`.
+That is geometry, not the transfer: all four path families give the same
+numbers. So `ExtensionConvergence` allows 0.30 per pair and asserts 0.15 on the
+rate across the whole sequence.
+
+**Newton is not monotone on a stiff source, so assert on the best triple, not on
+every one.** Example 5 gives a clean four-step quadratic run; the GS-2 sources do
+not. A typical history wanders for four to eight steps with observed orders of
+0.02, 0.33, −0.37, −5.9 and *then* enters the quadratic regime and finishes
+1e-9 → 1e-13 in two. §4.5 at `k = 2` even rises mid-run, 1.7e-2 → 5.3e-1 at
+iteration 3, before recovering. Print the whole history; assert on the best
+triple above the round-off floor.
+
+**A self-convergence study on a rectangle cannot demonstrate `k+1`, and the cap
+has nothing to do with the physics.** Measured on a *Solov'ev* source — constant
+in `ψ`, `dF/dψ ≡ 0`, one Newton step — with homogeneous data on the benchmark
+box, the self-difference rate is 2.00/2.86/2.96 in `ψ` and 1.88/2.25/2.18 in `q`:
+flat at about 3 and 2.2 from `k = 2` on, with nothing nonlinear anywhere. That is
+the `r² log R` corner term of a right angle — the solution sits in `H^{3−ε}` and
+its gradient in `H^{2−ε}`, and no polynomial degree recovers it. The
+exact-solution studies are immune because there the datum *is* the trace of a
+smooth solution.
+
+It is worse on a polygon approximating a curved boundary. GS-1 Example 6 on a
+fixed 40-gon gives 2.12 in `ψ` at `k = 3`, against 1.995/3.000/4.000 for a
+Solov'ev control **on exactly the same meshes** — the singular exponent at an
+interior angle of `π − 2π/40` is `40/38 = 1.0526`, and interior pollution goes at
+about twice that. **This is precisely the difficulty GS-2's curved-boundary
+technique exists to remove**, and it is worth knowing before anyone designs
+another fitted-polygon study.
+
+**Mutation-test a suite you are relying on.** `ProfilesTests` and `SourceTests`
+were checked by deliberately introducing fifteen defects — a dropped `r²`, `p'`
+replaced by `p`, `μ₀` on the wrong term, the Solov'ev sign flipped, an
+off-by-one in the interval lookup at a knot, `write()` truncated to six
+significant figures — and confirming each was caught. That is a cheap way to
+find out whether a green suite means anything, and worth repeating for the
+convergence tests, where the risk of a test that passes regardless is higher.
+
+Analytic solutions live in `tests/analytic/`, and they form a deliberate ladder
+in how the source depends on `ψ` — which is to say, in what they demand of a
+Newton Jacobian:
+
+| fixture | source | `∂F/∂ψ` | what it catches |
+|---|---|---|---|
+| `Soloviev.hpp` | constant in `ψ` | `0` | the discretisation alone; Newton must converge in one step |
+| `McCarthy.hpp` | linear in `ψ` | `T`, a nonzero constant | a Jacobian missing its mass term |
+| `ManufacturedNonlinear.hpp` | `ψ²` and `e^(−ψ)` | varies | a Jacobian that is present but wrong |
+| `SimilarityExponential.hpp` | `f₀e^{nψ}(1+εr²)` | `nF` | the same, against an *exact* rather than manufactured solution |
+
+The last two are both nonlinear but are not redundant, and the difference is
+worth keeping straight. **`ManufacturedNonlinear` is manufactured**: a convenient
+`ψ` was chosen and `F` built to fit it, so its `F` is not of a form any physical
+profile produces. **`SimilarityExponential` is exact**: the free function is
+chosen — `f(u) = f₀e^{nu}` — and the solution follows from a similarity
+reduction (Kaltsas & Throumoulopoulos; `refs/Refs.md`). So it tests the solver
+against a nonlinear equation somebody might pose, rather than one reverse
+engineered from an answer. It is also a cleaner shape: the whole `ψ`-dependence
+is one exponential, so `∂F/∂ψ = nF` exactly, and at `n = 3` that exponential
+varies by a factor of 29 across the benchmark rectangle.
+
+The middle rung earns its place: with `∂F/∂ψ = 0` a Solov'ev run cannot tell a
+correct Jacobian from an absent one, and in the nonlinear case the algebra is
+messy enough to hide a factor. McCarthy's `∂F/∂ψ` is a single constant, so the
+mass term is either there or it is not.
+
+Each fixture checks its own transcription rather than trusting it: `deltaStarFD()`
+recomputes `Δ*ψ` by central differences and the suite asserts it against `−f()`.
+For McCarthy's eighteen-term Bessel and Neumann expansion that agrees to 3.6e-6,
+and its analytic gradients match finite differences to 5e-9.
+
+### And a rung above them all with no closed form at all: six machines, fixed boundary
+
+**THE LADDER ABOVE IS ANALYTIC AND THE TREE HAD NOTHING BETWEEN IT AND THE WHOLE
+FREE-BOUNDARY APPARATUS.** Every machine-geometry case here is free boundary —
+the half-disc reaching the axis, the DtN coupling, the two borders, the moving
+plasma edge — and the fixed-boundary examples are the fixtures above or one
+768-element box. `examples/fixed-*.toml` are that missing rung: **six real
+machines posed fixed boundary, 1,086 to 102,840 elements**, each with a
+tabulated `p'` and `gg'` and an independent code's answer to check against.
+
+**Ian's recipe, and it is what makes them a REFERENCE rather than only a source
+of geometry.** Solve the machine free boundary in `freegs4e` at `257²`; fit MXH
+to its `psi_n = 0.95` surface; hand MEQ that curve with `psi = 0` on it. `psi` is
+defined only up to an additive constant, so that is the **same equilibrium in a
+different gauge**, and the free solution shifted by the surface's flux is the
+answer MEQ must reproduce. `tools/freegs4e-benchmark/make_case.py` is the
+generator, `make_fixed.sh` the driver.
+
+**AND `psi_n = 0.95` IS WHAT LIFTS THE ORDER CAP, WHICH IS THE WHOLE REASON
+THESE EXIST.** On every free-boundary machine case `ConstrainPaxisIp` at
+`alpha_n = 1.2` makes `p'` a fractional power of `1 − Psi` at the plasma edge and
+the rate is capped at about **1.2** whatever the degree. At 0.95 that
+singularity is outside the domain and the profiles are analytic across Γ — so
+`psi*` reaches **`k + 2` on machine geometry**, measured at 3.15, 4.05 and 5.50
+for `k = 1, 2, 3`. The separatrix is also excluded for a second reason worth
+keeping: it passes through an X-point and has a **corner**, and MXH is a
+truncated Fourier series that cannot turn one.
+
+→ **[M-147](MEASUREMENTS.md#m-147)** — the six, their cost, their agreement
+with `freegs4e` · the rate table · and the cure for
+[M-61](MEASUREMENTS.md#m-61)'s three roots
+
+**THE COMPARISON IS AGAINST [M-60](MEASUREMENTS.md#m-60) AND NOT AGAINST THE
+FREE-BOUNDARY ONE**, which is worth saying because the machines are the same
+and the two are easy to confuse. M-60 IS this comparison — `CLAUDE_FB.md`'s
+fixed-boundary rehearsal — at `psi_n = 0.90`, a `129²` reference and ten
+harmonics, reading 1.5e-04 to 6.8e-03. Moving to 0.95, `257²` and twenty takes
+it to **5.0e-05 to 1.1e-04**, and [M-62](MEASUREMENTS.md#m-62) is the study that
+said where that order would come from: it swept the grid and the harmonic count
+on one machine and named the limiter at each step, the contour, then the fitter,
+then MEQ.
+
+**AND THE ROOT SELECTION IS M-61'S AND NOT NEW.** What is new is that
+`Normalised = true` removes the upper root rather than navigating around it, so
+these need no seed; and one sentence of M-61 is qualified — a ramp at 12× the
+axis height *does* reach the physical root, so the branch is reachable and the
+selection is **not monotone in the amplitude**. `CLAUDE_FB.md`, *Root selection
+is the finding, not the agreement*, carries both.
+
+**They carry no conductors and that is structural.** Γ is the plasma edge, so
+every coil is outside the computational domain and its whole influence is a
+Dirichlet datum that is identically zero — `[conductors] Model` has nothing to
+act on. A fixed-boundary case that **can** measure coil subtraction needs a
+domain larger than the plasma, which is what `examples/coils-rectangle.toml` is
+and why its split reads exactly 1.00×: that box was never graded to its coils.
+`TODO` carries what is still owed.
+
+`tests/convergence/MachineFixedBoundary.cpp` is the acceptance, and it drives
+the **shipped binary on the shipped file** on purpose: what rots about an
+example is the FILE, and a library-level fixture would re-implement the curved
+path and notice none of it.
