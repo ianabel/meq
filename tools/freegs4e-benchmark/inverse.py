@@ -102,7 +102,11 @@ def rewire(text, wires, currents, free):
     """The shipped file's [[coils]] with every current replaced: a circuit
     member carries none, a coil on its own supply carries `currents[label]`,
     and [[circuits]] blocks are appended with theirs. `free` marks every
-    supply Free."""
+    supply Free when True, none when False, and those it names when it is a
+    set of supply names."""
+    if free is True or free is False:
+        free = {label for label, _, _ in wires} | {c for _, c, _ in wires if c} \
+            if free else set()
     owner = {label: (circuit, mult) for label, circuit, mult in wires}
     pieces, last = [], 0
     for s, e, label in coil_blocks(text):
@@ -111,7 +115,7 @@ def rewire(text, wires, currents, free):
         circuit, _ = owner[label]
         if circuit is None:
             extra = "Current = %.17g\n" % currents[label]
-            if free:
+            if label in free:
                 extra += "Free = true\n"
             body = block.rstrip("\n") + "\n" + extra + "\n"
         else:
@@ -131,7 +135,7 @@ def rewire(text, wires, currents, free):
         lines.append("[[circuits]]")
         lines.append('Name = "%s"' % name)
         lines.append("Current = %.17g" % currents[name])
-        if free:
+        if name in free:
             lines.append("Free = true")
         lines.append("Coils = [ %s ]" % ", ".join(
             '{ Name = "%s", Multiplier = %.17g }' % m for m in members))
@@ -153,10 +157,12 @@ def set_key(text, table, key, value):
     return text[:m.end()] + body + text[end:]
 
 
-def vacuum_currents(npz_path, case, wires):
-    """freegs4e's first control step from zero currents: the minimum-norm
-    supply currents that best meet the case's targets against the design
-    blob's field. Returns ( per supply, per conductor total )."""
+def target_response(npz_path, case, wires):
+    """The vacuum response of freegs4e's target rows to one ampere in each
+    supply -- B_R and B_Z at each design X-point, psi1 - psi2 per isoflux
+    pair -- and the same rows of the design blob's own field. Returns
+    ( A, supplies, blob rows ), A having one column per supply in `supplies`'
+    order, each supply a ( name, [ ( label, multiplier ) ] )."""
     d = with_design(np.load(npz_path), npz_path)
     flat = {c["label"]: c for c in conductors.from_npz(d)}
     # THE SAME FILAMENTS mkcoldguess.py sums, so the guess written from these
@@ -201,7 +207,15 @@ def vacuum_currents(npz_path, case, wires):
         return out
 
     A = np.array([rows(unit(m)) for _, m in supplies]).T
-    b = -np.array(rows(blob))
+    return A, supplies, np.array(rows(blob))
+
+
+def vacuum_currents(npz_path, case, wires):
+    """freegs4e's first control step from zero currents: the minimum-norm
+    supply currents that best meet the case's targets against the design
+    blob's field. Returns ( per supply, per conductor total )."""
+    A, supplies, blob = target_response(npz_path, case, wires)
+    b = -blob
     x = np.linalg.lstsq(A, b, rcond=None)[0]
     per_supply = {name: float(v) for (name, _), v in zip(supplies, x)}
     per_conductor = {}

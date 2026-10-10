@@ -12,15 +12,15 @@
 #
 # THE REFERENCE'S OWN ANSWER, for anything comparing against it:
 #
-#   psi_axis   2.173601197429605e-02   axis at ( 0.914962, -0.002296 )
-#   psi_bndry  3.255279867897931e-03
-#   I_p        1.200000001701083e+05 A
-#   R0 0.8929  a 0.2860  A 3.392  kappa 2.0815  delta +0.5338
-#   X-point    ( 0.749879848, +0.550046158 ) psi 3.255279867897931e-03  ACTIVE
-#   X-point    ( 0.749877306, -0.550044664 ) psi 3.255279747788421e-03
-#   X-point    ( 0.495764376, +0.331575604 ) psi -2.692176466535791e-03
-#   X-point    ( 0.475689257, +0.216374966 ) psi -2.718639986353312e-03
-#   ( and 35 more saddles further out, at the coil nulls )
+#   psi_axis   2.250790117808095e-02   axis at ( 0.915041, -0.002277 )
+#   psi_bndry  4.043079571203025e-03
+#   I_p        1.200000000333659e+05 A
+#   R0 0.8930  a 0.2860  A 3.403  kappa 2.0887  delta +0.5357
+#   X-point    ( 0.749874871, +0.550046610 ) psi 4.043079571203025e-03  ACTIVE
+#   X-point    ( 0.749873063, -0.550044155 ) psi 4.043079517069177e-03
+#   X-point    ( 0.479757725, +0.214920227 ) psi -1.919538563931761e-03
+#   X-point    ( 0.480514367, -0.211888391 ) psi -2.107221742282426e-03
+#   ( and 12 more saddles further out, at the coil nulls )
 #
 # ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
 # examples/diverted-tokamak.toml records: fgsref.py fits a
@@ -74,10 +74,10 @@ ConfineToPlasma = true
 # guess below.  psi_ax is a functional of the solution -- a bordered
 # Newton row and not data -- so what a file supplies is where to START,
 # and the best estimate available before solving is the best available
-# guess's own peak.  The reference converged to 2.173601e-02, which is 18%
+# guess's own peak.  The reference converged to 2.250790e-02, which is 22%
 # away: this is a basin and not an answer.
-PsiAxis = 1.778170099e-02
-PlasmaCurrent = 1.2000000017e+05
+PsiAxis = 1.750730505e-02
+PlasmaCurrent = 1.2000000003e+05
 Mu0 = 1.25663706212e-6
 PPrimeFile = "examples/machine-d-tcv-shaped-pprime.dat"
 GGPrimeFile = "examples/machine-d-tcv-shaped-ggprime.dat"
@@ -96,7 +96,7 @@ CentreR = 0.505000
 CentreZ = -0.700000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.9043489903e+04
+Current = 1.9335547505e+04
 
 [[coils]]
 Name = "E2"
@@ -104,7 +104,7 @@ CentreR = 0.505000
 CentreZ = -0.500000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -2.0483608691e+03
+Current = -2.6279106481e+03
 
 [[coils]]
 Name = "E3"
@@ -112,7 +112,7 @@ CentreR = 0.505000
 CentreZ = -0.300000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -2.0342977334e+04
+Current = -2.1540641852e+04
 
 [[coils]]
 Name = "E4"
@@ -120,7 +120,7 @@ CentreR = 0.505000
 CentreZ = -0.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -2.4287071191e+04
+Current = -2.4952379211e+04
 
 [[coils]]
 Name = "E5"
@@ -128,7 +128,7 @@ CentreR = 0.505000
 CentreZ = 0.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -2.3731750306e+04
+Current = -2.4601456938e+04
 
 [[coils]]
 Name = "E6"
@@ -136,7 +136,7 @@ CentreR = 0.505000
 CentreZ = 0.300000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.9196806859e+04
+Current = -2.0198647465e+04
 
 [[coils]]
 Name = "E7"
@@ -144,7 +144,7 @@ CentreR = 0.505000
 CentreZ = 0.500000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.1560237309e+03
+Current = -1.9240129731e+03
 
 [[coils]]
 Name = "E8"
@@ -152,7 +152,7 @@ CentreR = 0.505000
 CentreZ = 0.700000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.6829876083e+04
+Current = 1.7299858010e+04
 
 [[coils]]
 Name = "F1"
@@ -160,7 +160,7 @@ CentreR = 1.309500
 CentreZ = -0.770000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -4.5175826961e+03
+Current = -3.8945037993e+03
 
 [[coils]]
 Name = "F2"
@@ -168,7 +168,7 @@ CentreR = 1.309500
 CentreZ = -0.610000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.0637437833e+04
+Current = -1.0258758907e+04
 
 [[coils]]
 Name = "F3"
@@ -176,7 +176,7 @@ CentreR = 1.309500
 CentreZ = -0.310000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.6185038236e+04
+Current = -1.6376403925e+04
 
 [[coils]]
 Name = "F4"
@@ -184,7 +184,7 @@ CentreR = 1.309500
 CentreZ = -0.150000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.2229908375e+04
+Current = -1.2526736281e+04
 
 [[coils]]
 Name = "F5"
@@ -192,7 +192,7 @@ CentreR = 1.309500
 CentreZ = 0.150000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.2884329441e+04
+Current = -1.3182760663e+04
 
 [[coils]]
 Name = "F6"
@@ -200,7 +200,7 @@ CentreR = 1.309500
 CentreZ = 0.310000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.7600284358e+04
+Current = -1.7729195428e+04
 
 [[coils]]
 Name = "F7"
@@ -208,7 +208,7 @@ CentreR = 1.309500
 CentreZ = 0.610000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.3784336956e+04
+Current = -1.3108971348e+04
 
 [[coils]]
 Name = "F8"
@@ -216,7 +216,7 @@ CentreR = 1.309500
 CentreZ = 0.770000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -8.1425026744e+03
+Current = -7.2920142178e+03
 
 [[coils]]
 Name = "T1"
@@ -224,7 +224,7 @@ CentreR = 1.554000
 CentreZ = -0.780000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -5.1361285852e+03
+Current = -4.7634291432e+03
 
 [[coils]]
 Name = "T2"
@@ -232,7 +232,7 @@ CentreR = 1.717000
 CentreZ = -0.780000
 HalfWidth = 0.016650
 HalfHeight = 0.050000
-Current = -5.1214746743e+03
+Current = -4.7920961574e+03
 
 [[coils]]
 Name = "T3"
@@ -240,7 +240,7 @@ CentreR = 1.754000
 CentreZ = -0.780000
 HalfWidth = 0.016650
 HalfHeight = 0.050000
-Current = -5.0794136602e+03
+Current = -4.7376156731e+03
 
 [[coils]]
 Name = "OH.OH1"
@@ -248,7 +248,7 @@ CentreR = 0.430000
 CentreZ = 0.000000
 HalfWidth = 0.020000
 HalfHeight = 0.930000
-Current = 2.2509400798e+04
+Current = 2.1908833201e+04
 
 [[coils]]
 Name = "OH.C1"
@@ -256,7 +256,7 @@ CentreR = 0.621500
 CentreZ = -1.110000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.2509400798e+04
+Current = 2.1908833201e+04
 
 [[coils]]
 Name = "OH.C2"
@@ -264,7 +264,7 @@ CentreR = 0.621500
 CentreZ = 1.110000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.2509400798e+04
+Current = 2.1908833201e+04
 
 [[coils]]
 Name = "OH.D1"
@@ -272,7 +272,7 @@ CentreR = 1.176500
 CentreZ = -1.170000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.2509400798e+04
+Current = 2.1908833201e+04
 
 [[coils]]
 Name = "OH.D2"
@@ -280,7 +280,7 @@ CentreR = 1.176500
 CentreZ = 1.170000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.2509400798e+04
+Current = 2.1908833201e+04
 
 [boundary]
 Type = "zero"

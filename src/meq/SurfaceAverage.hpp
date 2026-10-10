@@ -143,13 +143,13 @@
  *
  * One is a ray parametrisation and the other is a predictor-corrector trace
  * with an interpolant; they agree or one of them is wrong, and agreement is
- * worth more than either being plausible. There is a THIRD leg and IT IS NOT
- * BUILT: section 3.3's implicit quadrature, a rule constructed on the level set
- * with no curve extracted at all. It is deferred deliberately rather than
- * forgotten -- Saye's construction is for hyperrectangles and MEQ is on
- * triangles, so it would be Fries-Omerovic or moment fitting, which is a piece
- * of work rather than an afternoon. Read the two-route agreement below as two
- * legs of three.
+ * worth more than either being plausible. A THIRD leg, section 3.3's implicit
+ * quadrature -- a rule constructed on the level set with no curve extracted at
+ * all -- is DECLINED rather than deferred: Saye's construction is for
+ * hyperrectangles and MEQ is on triangles, the leg it would replace is 1.8% of
+ * the extraction chain, and the two routes here already agree far below the
+ * discretisation. CLAUDE_DECLINED.md, "Implicit quadrature on the level set as
+ * IN-2's third cross-check".
  *
  * A THIRD, FREE CHECK THAT IS NOT A THIRD EXTRACTION. The angle builder's nodes
  * are laid out about a ray ORIGIN, and the integral cannot depend on it: a

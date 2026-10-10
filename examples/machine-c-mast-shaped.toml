@@ -12,19 +12,17 @@
 #
 # THE REFERENCE'S OWN ANSWER, for anything comparing against it:
 #
-#   psi_axis   9.011331684396987e-02   axis at ( 1.004409, +0.000000 )
-#   psi_bndry  9.261921768562758e-03
-#   I_p        4.998907381109183e+05 A
-#   R0 0.8695  a 0.8225  A 1.498  kappa 1.8836  delta +0.3014
-#   X-point    ( 0.699921034, -1.100053723 ) psi 9.261921768562758e-03  ACTIVE
-#   X-point    ( 0.699921035, +1.100053724 ) psi 9.261921631905489e-03
-#   X-point    ( 1.091854394, -1.095507708 ) psi -4.120191176848226e-03
-#   X-point    ( 1.149644679, +1.093153684 ) psi -5.846749626220671e-03
+#   psi_axis   9.008944312246704e-02   axis at ( 1.004502, +0.000000 )
+#   psi_bndry  9.249464730622239e-03
+#   I_p        4.999999993103934e+05 A
+#   R0 0.8697  a 0.8225  A 1.499  kappa 1.8844  delta +0.3016
+#   X-point    ( 0.699918369, +1.100055945 ) psi 9.249464730622239e-03  ACTIVE
+#   X-point    ( 0.699918369, -1.100055945 ) psi 9.249464730577570e-03
 #
 # ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
 # examples/diverted-tokamak.toml records: fgsref.py fits a
 # UnivariateSpline to its own analytic profile shape before solving and
-# the fit MOVES it, by 2.293e-04 of the amplitude in p' and 1.324e-02 in ff'.
+# the fit MOVES it, by 1.142e-05 of the amplitude in p' and 1.346e-02 in ff'.
 # The tables here are the ANALYTIC shape, because it extends below
 # Psi = 0 into the vacuum -- which a tabulation on psi_n in [ 0, 1 ]
 # cannot -- and because its edge behaviour is exactly j = 2, which FB-4
@@ -73,10 +71,10 @@ ConfineToPlasma = true
 # guess below.  psi_ax is a functional of the solution -- a bordered
 # Newton row and not data -- so what a file supplies is where to START,
 # and the best estimate available before solving is the best available
-# guess's own peak.  The reference converged to 9.011332e-02, which is 53%
+# guess's own peak.  The reference converged to 9.008944e-02, which is 53%
 # away: this is a basin and not an answer.
-PsiAxis = 4.193713832e-02
-PlasmaCurrent = 4.9989073811e+05
+PsiAxis = 4.193234497e-02
+PlasmaCurrent = 4.9999999931e+05
 Mu0 = 1.25663706212e-6
 PPrimeFile = "examples/machine-c-mast-shaped-pprime.dat"
 GGPrimeFile = "examples/machine-c-mast-shaped-ggprime.dat"
@@ -95,7 +93,7 @@ CentreR = 0.490000
 CentreZ = 1.760000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.3825637424e+05
+Current = 2.3753270133e+05
 
 [[coils]]
 Name = "P2.P2L"
@@ -103,7 +101,7 @@ CentreR = 0.490000
 CentreZ = -1.760000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.3825637424e+05
+Current = 2.3753270133e+05
 
 [[coils]]
 Name = "P3.P3U"
@@ -111,7 +109,7 @@ CentreR = 1.100000
 CentreZ = 1.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -8.6153118049e+03
+Current = -1.0389375533e+04
 
 [[coils]]
 Name = "P3.P3L"
@@ -119,7 +117,7 @@ CentreR = 1.100000
 CentreZ = -1.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -8.6153118049e+03
+Current = -1.0389375533e+04
 
 [[coils]]
 Name = "P4.P4U"
@@ -127,7 +125,7 @@ CentreR = 1.510000
 CentreZ = 1.095000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -9.4602891274e+03
+Current = -5.7019715702e+03
 
 [[coils]]
 Name = "P4.P4L"
@@ -135,7 +133,7 @@ CentreR = 1.510000
 CentreZ = -1.095000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -9.4602891274e+03
+Current = -5.7019715702e+03
 
 [[coils]]
 Name = "P5.P5U"
@@ -143,7 +141,7 @@ CentreR = 1.660000
 CentreZ = 0.520000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.5119440602e+05
+Current = -1.5243555563e+05
 
 [[coils]]
 Name = "P5.P5L"
@@ -151,7 +149,7 @@ CentreR = 1.660000
 CentreZ = -0.520000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.5119440602e+05
+Current = -1.5243555563e+05
 
 [[coils]]
 Name = "P6.P6U"
@@ -159,7 +157,7 @@ CentreR = 1.500000
 CentreZ = 0.900000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.5656773911e-03
+Current = 3.5707618926e-07
 
 [[coils]]
 Name = "P6.P6L"
@@ -167,7 +165,7 @@ CentreR = 1.500000
 CentreZ = -0.900000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.5656773911e-03
+Current = -3.5707618926e-07
 
 [[coils]]
 Name = "P1"
@@ -175,7 +173,7 @@ CentreR = 0.150000
 CentreZ = 0.000000
 HalfWidth = 0.020000
 HalfHeight = 1.450000
-Current = -3.4903138478e+02
+Current = -7.4790301677e+03
 
 [boundary]
 Type = "zero"
@@ -186,7 +184,7 @@ Type = "zero"
 # WHICH saddle is followed.
 #
 # THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the
-# reference achieved, which is 0.0001 m away.  That distinction is the
+# reference achieved, which is 2.2001 m away.  That distinction is the
 # whole of what makes this a cold start.
 [boundary.xpoint]
 R = 0.700000000000

@@ -3346,7 +3346,7 @@ namespace meq
 			 * The rejection is refreshXPoint()'s out-of-the-mesh rejection moved
 			 * inward: the trial throws inside the Armijo loop and is halved, so a
 			 * step that would relocate the null is shortened until it does not.
-			 * BORDER-SCALING-PLAN.md BS-5.
+			 * BS-5, MEASUREMENTS.md M-247 and M-248.
 			 *
 			 * **A BRANCH CONTROL, NOT A STEP RULE, AND MEASURED TO BE ONE**
 			 * (MEASUREMENTS.md M-247). Applied from the first solve it changes

@@ -4259,7 +4259,7 @@ BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
 
 /*
  * THE RETRY RUNG CLOSES WHAT IT WAS BUILT FOR, AND THE ANSWER IS THE
- * REFERENCE'S. BORDER-SCALING-PLAN.md BS-5, MEASUREMENTS.md M-247.
+ * REFERENCE'S. BS-5, MEASUREMENTS.md M-247 and M-248.
  *
  * Two shipped machine files from cold, through the wrapper, each failing its
  * first attempt in one of the two ways the rung is reached:

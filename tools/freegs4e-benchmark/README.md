@@ -59,6 +59,56 @@ the gap is open; `CLAUDE_FB.md` has the list.
 the full elimination — seven other causes were ruled out on machine A first,
 including the profile conversion, which moves `psi_ax` by 1e-05.
 
+### The inverse race, `race_inverse.py`
+
+`INVERSE-RACE-PLAN.md` is the design and `RACE-ARMS.md` the contract: four arms
+— `race_arm_meq.py`, `race_arm_fgs.py`, `race_arm_nke.py` and NICE's
+`meq-race/inverse/race_arm.py` — each taking one configuration, one rung of its
+own ladder and one start, and writing one record whose target rows are evaluated
+from the converged field. On a quiet machine, one configuration per invocation:
+
+```sh
+PYTHONPATH=/home/ian/projects/freegs4e FGSREF_OUT=/tmp \
+    venv/bin/python fgsref.py --shaped --interpolating-profiles C_ D_ E_ F_ G_
+venv/bin/python inverse_problem.py ref-interp/problem.json
+venv/bin/python race_inverse.py run /tmp/race-f --config machine-f-diiid-shaped
+venv/bin/python race_inverse.py summarise /tmp/race-f
+```
+
+`run --dry-run` prints every arm's ladder and runs nothing; `--max-rung`,
+`--codes` and `--starts` cut the race down for a smoke test.
+
+### And the other direction: MEQ inverse against `freegs4e` inverse, `inverse_compare.py`
+
+MEQ has an inverse solve, so the references can be compared in the mode they
+were made in. `inverse_compare.py` poses each shipped machine inverse with
+`fgsref.py`'s own targets, frees the supplies the targets determine (a
+pivoted QR of the vacuum response, as many as its rank) and holds the rest at
+the reference's values, so both codes answer one question with one answer;
+it runs a forward arm, an inverse arm seeded at the reference's currents and
+one seeded away from them. **On DIII-D shaped, with the profile matched too,
+the currents agree to 3.0e-04 — `freegs4e`'s own 129² → 257² sensitivity.**
+**[M-254](../../MEASUREMENTS.md#m-254)**. **And the shaped references were not
+the machine MEQ was given** → **[M-255](../../MEASUREMENTS.md#m-255)**:
+`ShapedCoil` ignores `turns` in its field, and its 12-point rule is 18–30 per
+cent off a uniform rectangle on a tall conductor; `shaped.py` now folds the
+turns into the current and integrates each conductor with `rectangle_rule`.
+Corrected, MEQ, NICE and `freegs4e` agree on the shaped currents to about
+1e-03. `--guess exact` starts every arm from the reference's own equilibrium,
+which is what separates a basin from a disagreement.
+
+```sh
+PYTHONPATH=/home/ian/projects/freegs4e FGSREF_OUT=/some/dir \
+    venv/bin/python fgsref.py --interpolating-profiles [--shaped]
+PYTHONPATH=/home/ian/projects/freegs4e \
+    venv/bin/python inverse_compare.py OUTDIR --reference /some/dir/interp [F ...]
+```
+
+`--interpolating-profiles` is the reference-side cure the *profile fit*
+section below names: the profile splines are rebuilt with `s = 0`, so the
+reference solves the analytic shape MEQ's tables carry, and it writes to
+`FGSREF_OUT/interp` — never over the committed set.
+
 ## Running freegs4e forward: `forward.py`
 
 `forward.py` is the forward-mode harness. It takes each reference's own
@@ -117,7 +167,9 @@ reproduce the field inside.
 4. `convert.py` — freegs4e's profiles onto MEQ's `ψ`.
 5. `make_case.py` — writes the TOML and the two profile tables, against
    MEQ's NORMALISED flux. `make_fixed.sh` is the driver that writes the six
-   shipped `examples/fixed-*.toml` from `ref-n257/`; see its header.
+   shipped `examples/fixed-*.toml` from `ref-n257-fixed-boundary/`, the 257²
+   shaped references they were built from, kept apart when `ref-n257/` was
+   regenerated with `shaped.py`'s fixes (M-255); see its header.
 6. `compare.py` — reads MEQ's `.nc` and diffs. **It refuses a run whose
    `ψ_ax` is not a magnetic axis**; see below.
 
@@ -146,9 +198,14 @@ conductor models on top of two solvers, and `MEASUREMENTS.md` M-87 puts the
 whole of a 2.97e-01 relative `L-infinity` down to exactly that.
 
 `shaped.py` closes it in the reference rather than in MEQ, using freegs4e's own
-`shaped_coil.ShapedCoil`: a polygon, triangulated, with a Gauss rule per
-triangle, so `controlPsi` is the AVERAGE Greens over the cross-section. That is
-MEQ's model term for term.
+`shaped_coil.ShapedCoil`, so `controlPsi` is the AVERAGE Greens over the
+cross-section. That is MEQ's model term for term — **with two corrections
+`shaped.py` applies, because `ShapedCoil` as shipped is neither**
+([M-255](../../MEASUREMENTS.md#m-255)): its field IGNORES `turns`, which its
+docstring says the total carries, so the turns are folded into the current or
+the circuit multiplier; and its rule is two triangles of six points whatever
+the shape, 18–30 per cent off a uniform rectangle on a tall conductor, so each
+conductor gets `rectangle_rule`, a tensor Gauss–Legendre rule good to 1e-07.
 
 ```sh
 PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python fgsref.py --shaped
@@ -893,7 +950,9 @@ reference's own code rather than in a MEQ-side correction. Identical in every
 other field, so the difference between the two cases is the conductor model
 alone.
 
-**The 12-point rule is enough here, measured rather than assumed.** Against a
+**The 12-point rule is enough here — on a SQUARE, and only there** (on a tall
+conductor it is 18–30 per cent off, which is why `shaped.py` replaces it,
+M-255). Against a
 64 × 64 tensor Gauss–Legendre rule over the same square, the worst relative error
 in `controlPsi` over this case's whole boundary ring plus the grid point nearest
 each coil is **3.0e-05**, at `( 1.7500, 0.8000 )` — the boundary point two
@@ -1237,4 +1296,6 @@ rather than of two right answers.** The regression's bounds are set at 1e-2 for
 that reason and the measured numbers sit an order inside them. Closing that gap
 is a REFERENCE-side job — solve `A_testtokamak_classic` against the unfitted
 analytic profile — and it is the same species as the conductor-model job the
-limited case records.
+limited case records. **`fgsref.py --interpolating-profiles` is that job**, and
+on DIII-D shaped it takes the inverse comparison's currents from 6.3e-03 to
+3.0e-04 ([M-254](../../MEASUREMENTS.md#m-254)).

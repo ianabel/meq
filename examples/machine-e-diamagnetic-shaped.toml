@@ -16,13 +16,12 @@
 #
 # THE REFERENCE'S OWN ANSWER, for anything comparing against it:
 #
-#   psi_axis   8.376782076254052e-02   axis at ( 1.335702, +0.000000 )
-#   psi_bndry  3.793197217123667e-02
-#   I_p        1.999999997559488e+05 A
+#   psi_axis   8.376782073888328e-02   axis at ( 1.335702, +0.000000 )
+#   psi_bndry  3.793197215581862e-02
+#   I_p        1.999999997560036e+05 A
 #   R0 1.2784  a 0.6825  A 3.258  kappa 1.5192  delta +0.4615
-#   X-point    ( 1.099948323, +0.600001898 ) psi 3.793197217123667e-02  ACTIVE
-#   X-point    ( 1.099948326, -0.600001896 ) psi 3.793197140451467e-02
-#   X-point    ( 1.784405425, +0.596978979 ) psi -7.840772864280671e-02
+#   X-point    ( 1.099948323, +0.600001898 ) psi 3.793197215581862e-02  ACTIVE
+#   X-point    ( 1.099948326, -0.600001896 ) psi 3.793197142438542e-02
 #
 # ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
 # examples/diverted-tokamak.toml records: fgsref.py fits a
@@ -98,7 +97,7 @@ CentreR = 1.000000
 CentreZ = -1.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.6287368253e+05
+Current = 1.6287368276e+05
 
 [[coils]]
 Name = "P1U"
@@ -106,7 +105,7 @@ CentreR = 1.000000
 CentreZ = 1.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.6287368913e+05
+Current = 1.6287368898e+05
 
 [[coils]]
 Name = "P2L"
@@ -114,7 +113,7 @@ CentreR = 1.750000
 CentreZ = -0.600000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.0706342439e+05
+Current = -1.0706342435e+05
 
 [[coils]]
 Name = "P2U"
@@ -122,7 +121,7 @@ CentreR = 1.750000
 CentreZ = 0.600000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.0706342718e+05
+Current = -1.0706342727e+05
 
 [boundary]
 Type = "zero"

@@ -12,13 +12,12 @@
 #
 # THE REFERENCE'S OWN ANSWER, for anything comparing against it:
 #
-#   psi_axis   8.271684978139204e-02   axis at ( 1.351009, +0.062264 )
-#   psi_bndry  3.241322494424487e-02
-#   I_p        2.000000001315681e+05 A
+#   psi_axis   8.271684983511504e-02   axis at ( 1.351009, +0.062264 )
+#   psi_bndry  3.241322499449292e-02
+#   I_p        2.000000001688191e+05 A
 #   R0 1.3154  a 0.6825  A 2.816  kappa 1.3159  delta +0.3823
-#   X-point    ( 1.093149666, -0.603963142 ) psi 3.241322494424487e-02  ACTIVE
-#   X-point    ( 1.109118064, +0.796091112 ) psi 2.892147603768505e-02
-#   X-point    ( 1.783752070, +0.598482571 ) psi -3.685423780131758e-02
+#   X-point    ( 1.093149666, -0.603963142 ) psi 3.241322499449292e-02  ACTIVE
+#   X-point    ( 1.109118064, +0.796091112 ) psi 2.892147607904126e-02
 #
 # ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
 # examples/diverted-tokamak.toml records: fgsref.py fits a
@@ -74,8 +73,8 @@ ConfineToPlasma = true
 # and the best estimate available before solving is the best available
 # guess's own peak.  The reference converged to 8.271685e-02, which is 27%
 # away: this is a basin and not an answer.
-PsiAxis = 6.023973590e-02
-PlasmaCurrent = 2.0000000013e+05
+PsiAxis = 6.023973591e-02
+PlasmaCurrent = 2.0000000017e+05
 Mu0 = 1.25663706212e-6
 PPrimeFile = "examples/machine-a-testtokamak-shaped-pprime.dat"
 GGPrimeFile = "examples/machine-a-testtokamak-shaped-ggprime.dat"
@@ -94,7 +93,7 @@ CentreR = 1.000000
 CentreZ = -1.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.3736371679e+05
+Current = 1.3736371710e+05
 
 [[coils]]
 Name = "P1U"
@@ -102,7 +101,7 @@ CentreR = 1.000000
 CentreZ = 1.100000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 6.2651131460e+04
+Current = 6.2651131597e+04
 
 [[coils]]
 Name = "P2L"
@@ -110,7 +109,7 @@ CentreR = 1.750000
 CentreZ = -0.600000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -9.9442902169e+04
+Current = -9.9442902143e+04
 
 [[coils]]
 Name = "P2U"
@@ -118,7 +117,7 @@ CentreR = 1.750000
 CentreZ = 0.600000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -6.7655642476e+04
+Current = -6.7655642573e+04
 
 [boundary]
 Type = "zero"

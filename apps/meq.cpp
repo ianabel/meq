@@ -4098,7 +4098,7 @@ int main( int argc, char **argv )
 		 * REBUILT, for the reason the unbordered rung below rebuilds: a caught
 		 * mfem::ErrorException leaves a solver unusable. STARTED FROM WHERE THE
 		 * FIRST ATTEMPT STARTED; see firstFreezeTaken. And with the X-point held
-		 * near its seed: BORDER-SCALING-PLAN.md BS-5, a trial that carries the
+		 * near its seed: BS-5, MEASUREMENTS.md M-248, a trial that carries the
 		 * null further than a twentieth of Gamma's radius from where the file put
 		 * it is halved. HERE AND NOWHERE ELSE, because it is a branch control: on
 		 * the first attempt it loses two machines that converge today, and here --

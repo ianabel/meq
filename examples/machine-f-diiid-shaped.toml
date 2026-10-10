@@ -11,18 +11,17 @@
 #
 # THE REFERENCE'S OWN ANSWER, for anything comparing against it:
 #
-#   psi_axis   3.758654826065798e-01   axis at ( 1.768342, -0.000300 )
-#   psi_bndry  7.083420228378810e-02
-#   I_p        1.000000001335476e+06 A
-#   R0 1.7080  a 0.8450  A 2.792  kappa 1.6338  delta +0.8269
-#   X-point    ( 1.199929601, -1.000001546 ) psi 7.083420228378810e-02  ACTIVE
-#   X-point    ( 1.199937296, +0.999993414 ) psi 7.083416354364167e-02
-#   X-point    ( 0.852426448, +0.528026778 ) psi -2.609663561553516e-02
+#   psi_axis   3.758944458825860e-01   axis at ( 1.768321, -0.000667 )
+#   psi_bndry  7.083450333828005e-02
+#   I_p        1.000000001799474e+06 A
+#   R0 1.7080  a 0.8450  A 2.791  kappa 1.6336  delta +0.8268
+#   X-point    ( 1.199929582, -1.000001559 ) psi 7.083450333828005e-02  ACTIVE
+#   X-point    ( 1.199941457, +0.999990748 ) psi 7.083444536270934e-02
 #
 # ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
 # examples/diverted-tokamak.toml records: fgsref.py fits a
 # UnivariateSpline to its own analytic profile shape before solving and
-# the fit MOVES it, by 1.692e-05 of the amplitude in p' and 1.346e-02 in ff'.
+# the fit MOVES it, by 1.690e-05 of the amplitude in p' and 1.346e-02 in ff'.
 # The tables here are the ANALYTIC shape, because it extends below
 # Psi = 0 into the vacuum -- which a tabulation on psi_n in [ 0, 1 ]
 # cannot -- and because its edge behaviour is exactly j = 2, which FB-4
@@ -71,10 +70,10 @@ ConfineToPlasma = true
 # guess below.  psi_ax is a functional of the solution -- a bordered
 # Newton row and not data -- so what a file supplies is where to START,
 # and the best estimate available before solving is the best available
-# guess's own peak.  The reference converged to 3.758655e-01, which is 23%
+# guess's own peak.  The reference converged to 3.758944e-01, which is 23%
 # away: this is a basin and not an answer.
-PsiAxis = 2.888899229e-01
-PlasmaCurrent = 1.0000000013e+06
+PsiAxis = 2.888515264e-01
+PlasmaCurrent = 1.0000000018e+06
 Mu0 = 1.25663706212e-6
 PPrimeFile = "examples/machine-f-diiid-shaped-pprime.dat"
 GGPrimeFile = "examples/machine-f-diiid-shaped-ggprime.dat"
@@ -93,7 +92,7 @@ CentreR = 0.860800
 CentreZ = 0.168300
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.3853225434e+05
+Current = -1.3808281078e+05
 
 [[coils]]
 Name = "F2A"
@@ -101,7 +100,7 @@ CentreR = 0.861400
 CentreZ = 0.508100
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.3411475669e+05
+Current = -1.3458800452e+05
 
 [[coils]]
 Name = "F3A"
@@ -109,7 +108,7 @@ CentreR = 0.862800
 CentreZ = 0.849100
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 2.8430887380e+03
+Current = 4.3236009934e+03
 
 [[coils]]
 Name = "F4A"
@@ -117,7 +116,7 @@ CentreR = 0.861100
 CentreZ = 1.189900
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.7141402119e+05
+Current = 1.6891597819e+05
 
 [[coils]]
 Name = "F5A"
@@ -125,7 +124,7 @@ CentreR = 1.004100
 CentreZ = 1.516900
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.0435309744e+05
+Current = 1.0555805148e+05
 
 [[coils]]
 Name = "F6A"
@@ -133,7 +132,7 @@ CentreR = 2.612400
 CentreZ = 0.437600
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.6956702283e+05
+Current = -1.6887421455e+05
 
 [[coils]]
 Name = "F7A"
@@ -141,7 +140,7 @@ CentreR = 2.373300
 CentreZ = 1.117100
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.7590051403e+05
+Current = -1.7704424392e+05
 
 [[coils]]
 Name = "F8A"
@@ -149,7 +148,7 @@ CentreR = 1.251800
 CentreZ = 1.601900
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 4.8422840566e+04
+Current = 4.9891647802e+04
 
 [[coils]]
 Name = "F9A"
@@ -157,7 +156,7 @@ CentreR = 1.689000
 CentreZ = 1.587400
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -7.3199278612e+04
+Current = -7.3523043939e+04
 
 [[coils]]
 Name = "F1B"
@@ -165,7 +164,7 @@ CentreR = 0.860800
 CentreZ = -0.173700
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.4098021849e+05
+Current = -1.4119064112e+05
 
 [[coils]]
 Name = "F2B"
@@ -173,7 +172,7 @@ CentreR = 0.860700
 CentreZ = -0.513500
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.2658634479e+05
+Current = -1.2674438004e+05
 
 [[coils]]
 Name = "F3B"
@@ -181,7 +180,7 @@ CentreR = 0.861100
 CentreZ = -0.854300
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 4.0364148900e+02
+Current = 3.4350198653e+02
 
 [[coils]]
 Name = "F4B"
@@ -189,7 +188,7 @@ CentreR = 0.863000
 CentreZ = -1.195700
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.7454318773e+05
+Current = 1.7464840109e+05
 
 [[coils]]
 Name = "F5B"
@@ -197,7 +196,7 @@ CentreR = 1.002500
 CentreZ = -1.516900
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 1.0315436637e+05
+Current = 1.0321368566e+05
 
 [[coils]]
 Name = "F6B"
@@ -205,7 +204,7 @@ CentreR = 2.612400
 CentreZ = -0.443760
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.6967670033e+05
+Current = -1.6980191190e+05
 
 [[coils]]
 Name = "F7B"
@@ -213,7 +212,7 @@ CentreR = 2.383400
 CentreZ = -1.117100
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -1.7548774956e+05
+Current = -1.7559341171e+05
 
 [[coils]]
 Name = "F8B"
@@ -221,7 +220,7 @@ CentreR = 1.252400
 CentreZ = -1.602700
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = 4.7816734507e+04
+Current = 4.7840720828e+04
 
 [[coils]]
 Name = "F9B"
@@ -229,7 +228,7 @@ CentreR = 1.688900
 CentreZ = -1.578000
 HalfWidth = 0.050000
 HalfHeight = 0.050000
-Current = -7.4917294959e+04
+Current = -7.5057769180e+04
 
 [boundary]
 Type = "zero"

@@ -285,8 +285,34 @@ class FreeGSProfileMixin:
         return self.Jtor_part2(R, Z, psi, self.psi_axis, psi_b, mask)
 
 
+# THE PROFILE SPLINE, AND WHAT --interpolating-profiles CHANGES.
+#
+# GeneralPprimeFFprime fits scipy's UnivariateSpline with its DEFAULT
+# smoothing, s = len( psi_n ), an absolute residual budget -- so a profile of
+# order 1 is smoothed to within 1.3e-02 of the table it was handed, and the
+# reference solves THAT profile rather than the analytic one the table came
+# from (spline_smoothing_* below records by how much). It also leaves ff'
+# non-zero at psi_n = 1, 5e-03 of its peak, so the current density jumps at
+# the plasma edge. MEQ's tables are the analytic shape (make_diverted_case.py),
+# so a comparison of the two codes in the SAME MODE -- inverse against inverse,
+# where the currents are the answer -- needs both solving the same profile.
+# The option rebuilds both splines INTERPOLATING, s = 0, which reproduces the
+# analytic shape to interpolation error on the 256-point table. Off by default:
+# the committed references are the smoothed ones.
+INTERPOLATING_PROFILES = False
+
+
 class GeneralProfile(FreeGSProfileMixin, jtor.GeneralPprimeFFprime):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if INTERPOLATING_PROFILES:
+            from scipy.interpolate import UnivariateSpline
+            if self.pprime_data is not None:
+                self.pprime_func = UnivariateSpline(self.psi_n,
+                                                    self.pprime_data, s=0)
+            if self.ffprime_data is not None:
+                self.ffprime_func = UnivariateSpline(self.psi_n,
+                                                     self.ffprime_data, s=0)
 
 
 class PaxisProfile(FreeGSProfileMixin, jtor.ConstrainPaxisIp):
@@ -678,7 +704,9 @@ def make_limited():
 # and the total current is spread uniformly across it.  That is MEQ's model term
 # for term, in the reference's own code rather than in a MEQ-side correction.
 #
-# THE RULE IS 12 POINTS AND THAT IS ENOUGH HERE, MEASURED RATHER THAN ASSUMED.
+# THE RULE IS 12 POINTS AND THAT IS ENOUGH HERE -- ON THESE SQUARES. On a tall
+# conductor it is 18-30 per cent off a uniform rectangle, and shaped.py replaces
+# it for the diverted machines (MEASUREMENTS.md M-255).
 # polygon_quad splits the square into two triangles and puts freegs4e's 6-point
 # degree-4 rule on each.  Against a 64 x 64 tensor Gauss-Legendre rule over the
 # same square, the worst relative error in controlPsi over this case's grid --
@@ -1250,8 +1278,10 @@ def run_case(case):
     rec["spline_smoothing_ffprime"] = float(
         np.max(np.abs(ffprime_used - L1 * ffprime_tab))
         / max(np.max(np.abs(L1 * ffprime_tab)), 1e-300))
-    say("UnivariateSpline(default s) moved the tabulation by %.3e (p') and "
-        "%.3e (ff') relative" % (rec["spline_smoothing_pprime"],
+    say("UnivariateSpline(%s) moved the tabulation by %.3e (p') and "
+        "%.3e (ff') relative" % ("s = 0" if INTERPOLATING_PROFILES
+                                 else "default s",
+                                 rec["spline_smoothing_pprime"],
                                  rec["spline_smoothing_ffprime"]))
 
     # ---- derived 1D profiles, from the saved p' and ff' exactly as the
@@ -1564,6 +1594,9 @@ def main():
         elif a.startswith("--rtol="):
             global RTOL
             RTOL = float(a.split("=", 1)[1])
+        elif a == "--interpolating-profiles":
+            global INTERPOLATING_PROFILES
+            INTERPOLATING_PROFILES = True
         elif a == "--no-cache-boundary":
             global CACHE_BOUNDARY
             CACHE_BOUNDARY = False
@@ -1594,6 +1627,19 @@ def main():
                                     os.path.basename(OUTDIR) + "-n%d" % n))
         os.makedirs(OUTDIR, exist_ok=True)
         print("resolution override: %d x %d, writing to %s" % (n, n, OUTDIR),
+              flush=True)
+
+    if INTERPOLATING_PROFILES:
+        # Never over the committed, smoothed references: ref-interp/ beside
+        # them ( the race's references, INVERSE-RACE-PLAN.md ), or
+        # FGSREF_OUT/interp. ( Through globals(): OUTDIR is declared
+        # global once already, above, and Python refuses a second.)
+        base = os.environ.get("FGSREF_OUT")
+        out = (os.path.join(base, "interp") if base
+               else os.path.join(globals()["OUTDIR"], "ref-interp"))
+        globals()["OUTDIR"] = out
+        os.makedirs(out, exist_ok=True)
+        print("interpolating profile splines, writing to %s" % out,
               flush=True)
 
     if seed_from is not None:

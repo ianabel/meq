@@ -39,10 +39,12 @@ WHAT IS PRESERVED, AND WHY EACH MATTERS.
     be one.  So circuits are rebuilt as circuits, with their multipliers.
   * THE `control` FLAG, per conductor, for the same reason: it is what says
     whether the inverse solve may move that current at all.
-  * `current` AND `turns` SEPARATELY.  ShapedCoil's total is `current*turns`,
-    the same convention Coil uses, so a substitution that carries both across
-    is exact -- and a Solenoid's Ns turns become the ShapedCoil's turns, which
-    is what makes its total `Ns*I` as freegs4e's stack of Ns filaments is.
+  * THE TOTAL CURRENT, with `turns` FOLDED IN.  ShapedCoil's docstring says
+    its total is `current*turns`, but its field ignores `turns` -- see
+    `substitute` below -- so every ShapedCoil here has turns = 1 and the turns
+    are carried by the current (a lone coil) or the circuit multiplier (a
+    member). A Solenoid's Ns turns are folded the same way, which keeps its
+    total `Ns*I` as freegs4e's stack of Ns filaments has it.
 
 WHAT CHANGES, DELIBERATELY: a filament acquires the extent it never had, and a
 solenoid becomes one uniform winding instead of Ns discrete filaments.  Both are
@@ -59,6 +61,42 @@ def _square(rect):
 	r0, r1 = rect.Rmin, rect.Rmax
 	z0, z1 = rect.zmin, rect.zmax
 	return [(r0, z0), (r1, z0), (r1, z1), (r0, z1)]
+
+
+#: Gauss-Legendre points across a rectangle's SHORTER side; the longer side
+#: gets proportionally more. 6 puts every conductor of the seven machines
+#: within 1e-07 of a 48 x 48 rule at the plasma.
+RULE_POINTS = 6
+
+
+def rectangle_rule(rect, n=RULE_POINTS):
+	"""A tensor Gauss-Legendre rule over the rectangle, as ShapedCoil's
+	( R, Z, weight ) list, the weights summing to one.
+
+	WHY NOT ShapedCoil's OWN RULE. It triangulates the polygon -- two
+	triangles for a rectangle -- and puts a 6-point rule on each: 12 points
+	whatever the conductor's shape. That is accurate to 3e-05 on a square
+	(fgsref.py measured it on the limited case) and NOT on a tall conductor:
+	measured against a 48 x 48 rule at plasma points, a conductor's own flux is
+	off by up to 2.3e-01 on MAST, 1.8e-01 on TCV and 3.0e-01 on MAST-U, whose
+	solenoid is 79 times taller than it is wide -- refining the polygon does
+	not help, the fan triangulation keeps every triangle full-height. So the
+	reference was not solving a uniform rectangle. This rule is, to 1e-07:
+	MEASUREMENTS.md M-255. Assigned to `_points`, which is all controlPsi,
+	controlBr and controlBz read.
+	"""
+	import math
+	import numpy as np
+	hw, hh = float(rect["half_width"]), float(rect["half_height"])
+	nr, nz = n, n
+	if hh > hw:
+		nz = max(n, int(math.ceil(n*hh/hw)))
+	else:
+		nr = max(n, int(math.ceil(n*hw/hh)))
+	xr, wr = np.polynomial.legendre.leggauss(nr)
+	xz, wz = np.polynomial.legendre.leggauss(nz)
+	return [(float(rect["R"]) + hw*a, float(rect["Z"]) + hh*b, 0.25*p*q)
+	        for a, p in zip(xr, wr) for b, q in zip(xz, wz)]
 
 
 def shaped_machine(mach, half=conductors.DEFAULT_HALF, shrink=True,
@@ -85,31 +123,54 @@ def shaped_machine(mach, half=conductors.DEFAULT_HALF, shrink=True,
 	moved = conductors.shrink_to_fit(rects) if shrink else []
 	byLabel = {c["label"]: c for c in rects}
 
+	# SHAPEDCOIL IGNORES ITS OWN `turns` IN THE FIELD, so the turns are folded
+	# into the current instead. Its docstring says the block carries
+	# current*turns, and controlPsi/Br/Bz sum Greens over the quadrature points
+	# with weights summing to ONE and never multiply by turns -- so a ShapedCoil
+	# with turns = N produces the field of `current`, not of N*current, where
+	# freegs4e's filament Coil does multiply. conductors.flatten exports
+	# turns*current, as the docstring promises, so every multi-turn conductor
+	# of a shaped reference was written N times stronger than the field
+	# freegs4e solved with: MAST-U's coils (2 to 324 turns) read about 22x
+	# freegs4e's own coil_psi, and MAST's P1 and TCV's OH1 (100 turns each)
+	# put those references on other equilibria. MEASUREMENTS.md M-255.
+	#
+	# So every ShapedCoil here has turns = 1. A lone coil's control variable
+	# becomes its TOTAL current; a circuit member's turns go into its circuit
+	# multiplier, so the circuit current keeps the filament machine's meaning
+	# and the shaped machine is physically the filament one with extent.
 	def substitute(label, item):
+		"""( replacement, turns folded into it ) for one item."""
 		cls = type(item).__name__
 
 		if cls == "Circuit":
-			inner = [(name, substitute("%s.%s" % (label, name), coil), mult)
-			         for name, coil, mult in item.coils]
+			inner = []
+			for name, coil, mult in item.coils:
+				new, turns = substitute("%s.%s" % (label, name), coil)
+				inner.append((name, new, float(mult)*turns))
 			return Circuit(inner, current=float(item.current),
-			               control=bool(item.control))
+			               control=bool(item.control)), 1
 
 		# A polygon the machine itself described: left exactly as it is.
 		if cls == "ShapedCoil":
-			return item
+			return item, 1
 
 		rect = byLabel[label]
-		if cls == "Solenoid":
-			# Ns turns of a uniform winding rather than Ns stacked filaments.
-			return ShapedCoil(_square(rect), current=float(item.current),
-			                  turns=int(item.Ns), control=bool(item.control),
-			                  npoints=npoints)
+		turns = int(item.Ns) if cls == "Solenoid" else \
+			int(getattr(item, "turns", 1))
+		control = bool(getattr(item, "control", True))
+		# A Solenoid becomes one uniform winding rather than Ns stacked
+		# filaments; a filament acquires its rectangle.
+		coil = ShapedCoil(_square(rect), current=float(item.current),
+		                  turns=1, control=control, npoints=npoints)
+		coil._points = rectangle_rule(rect)
+		return coil, turns
 
-		# A filament, which is every remaining case.
-		return ShapedCoil(_square(rect), current=float(item.current),
-		                  turns=int(getattr(item, "turns", 1)),
-		                  control=bool(getattr(item, "control", True)),
-		                  npoints=npoints)
-
-	coils = [(label, substitute(label, item)) for label, item in mach.coils]
+	coils = []
+	for label, item in mach.coils:
+		new, turns = substitute(label, item)
+		if turns != 1:
+			# A lone multi-turn coil: its control variable is the total.
+			new.current = float(new.current)*turns
+		coils.append((label, new))
 	return Machine(coils, getattr(mach, "wall", None)), moved

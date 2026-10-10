@@ -45,7 +45,13 @@
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-$here/../../examples}
-refs=${2:-$here/ref-n257}
+# The fixed-boundary rung reads the 257^2 shaped references it was BUILT from,
+# kept apart in ref-n257-fixed-boundary/ when ref-n257/ was regenerated with
+# shaped.py's turns and quadrature fixes (MEASUREMENTS.md M-255). A
+# fixed-boundary case uses only the reference's boundary and profiles, which
+# are a self-consistent equilibrium whatever the coils were, so the shipped
+# fixed-* cases stand; this keeps them reproducible.
+refs=${2:-$here/ref-n257-fixed-boundary}
 
 if [ ! -d "$refs" ]; then
 	echo "no reference directory $refs -- see the header for how to build it" >&2
