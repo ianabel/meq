@@ -685,9 +685,20 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         # decided to call it.  A caller writing [[coils]] blocks in the same
         # order then has the two lists lined up, which is the only way the
         # attributes are usable at all.
+        #
+        # AND A COIL IS TOLD BY AREA AS WELL, for the limiter's reason below:
+        # the vacuum's centroid on a quarter disc is ( 4 rho/3 pi, 4 rho/3 pi ),
+        # and on MAST under --symmetric that is inside P3U's square, so the
+        # whole upper vacuum took P3U's attribute.  A piece of a conductor is
+        # never larger than the conductor.
         owner = {}
         for dim, tag in surfaces:
-            owner[tag] = _coil_of(occ.getCenterOfMass(dim, tag), meshed)
+            which = _coil_of(occ.getCenterOfMass(dim, tag), meshed)
+            if which is not None:
+                _, _, w, h = meshed[which]
+                if occ.getMass(dim, tag) > 1.05*w*h:
+                    which = None
+            owner[tag] = which
 
         # THE LIMITER INTERIOR IS TOLD BY AREA AND NOT BY ITS CENTRE OF MASS,
         # and that is not fastidiousness: the OUTER region's centroid on this

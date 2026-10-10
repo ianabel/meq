@@ -4343,3 +4343,53 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 			<< sweeps << " sweeps" );
 	}
 }
+
+/*
+ * A SYMMETRIC MESH OF MAST LABELS ITS VACUUM AS THE VACUUM.
+ *
+ * halfdisc.py tells which conductor a surface belongs to by its centre of mass,
+ * and under --symmetric the vacuum is a quarter disc whose centroid is
+ * ( 4 rho/3 pi, 4 rho/3 pi ) -- on MAST, at Radius 2.65, inside P3U's square.
+ * The whole upper vacuum took P3U's attribute and --check refused the file, so
+ * every MEQ run of C shaped in the inverse race, which turns Symmetric on
+ * because C's rows are consistent only by symmetry, exited 1 in a second.
+ * The generator's own --check is the assertion: every coil must cover its
+ * rectangle and nothing more.
+ */
+BOOST_AUTO_TEST_CASE( theSymmetricMeshOfMastKeepsItsVacuum )
+{
+	std::string const config = "machine-c-mast-shaped-symmetric.toml";
+	std::string const mesh = "machine-c-mast-shaped-symmetric.msh";
+
+	std::string text = slurp( "examples/machine-c-mast-shaped.toml" );
+	std::string const file = "File = \"examples/machine-c-mast-shaped.msh\"";
+	std::size_t const at = text.find( file );
+	BOOST_TEST_REQUIRE( at != std::string::npos,
+	                    "examples/machine-c-mast-shaped.toml no longer names its "
+	                    "mesh as this case expects" );
+	text.replace( at, file.size(), "File = \"" + mesh + "\"" );
+	std::string const table = "[mesh.generate]\n";
+	std::size_t const generate = text.find( table );
+	BOOST_TEST_REQUIRE( generate != std::string::npos );
+	text.insert( generate + table.size(), "Symmetric = true\n" );
+	{
+		std::ofstream out( config );
+		out << text;
+	}
+	std::remove( mesh.c_str() );
+
+	int status = -1;
+	std::string const log = captureStdout(
+		std::string( wrapper() ) + " --remesh --mesh-only " + config + " 2>&1",
+		&status );
+	BOOST_TEST( status == 0,
+		"the symmetric mesh of MAST was refused by halfdisc.py --check. A "
+		"surface whose centroid falls in a conductor is that conductor only if "
+		"its area fits as well; the vacuum's quarter-disc centroid is inside "
+		"P3U. Its report was:\n" << log );
+	BOOST_TEST( log.find( "FAIL" ) == std::string::npos, log );
+
+	std::remove( config.c_str() );
+	std::remove( mesh.c_str() );
+	std::remove( ( mesh + ".meq-mesh" ).c_str() );
+}
