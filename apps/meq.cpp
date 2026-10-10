@@ -3966,132 +3966,6 @@ int main( int argc, char **argv )
 			normalised->setCurrentScale( scale );
 		};
 
-		auto runSolveWithSupportLoop = [ & ]()
-		{
-			if ( supportSweeps < 1 )
-			{
-				runSolve();
-				return;
-			}
-
-			/*
-			 * THE FIRST SWEEP'S STATE IS THE INITIAL GUESS, and prepare() is how
-			 * it is read. setInitialGuess() only records the guess; what puts it
-			 * into potential() is the projection prepare() does, and solve()
-			 * would do it a moment later anyway. So this costs one assembly per
-			 * cycle and is the only route that works for every guess route --
-			 * including the ramp and the bump, which arrive as Coefficients and
-			 * have no field to read.
-			 */
-			{
-				double const prepareStart = elapsedSince( started );
-				double const prepareStartCpu = cpuNow();
-				solver->prepare();
-				driverPrepareSeconds += elapsedSince( started ) - prepareStart;
-				driverPrepareCpuSeconds += cpuNow() - prepareStartCpu;
-			}
-
-			// PER CYCLE, not per run: a refined mesh re-decides its own support
-			// from the carried field, and the summary reports the last cycle's
-			// loop rather than the sum of every cycle's.
-			sweepsRun = 0;
-			supportSettled = false;
-
-			// A COPY, because this is handed back to setInitialGuess() and
-			// prepare() overwrites potential() from it. Aliasing the two would
-			// project a field onto itself while reading it.
-			sweepState = std::make_unique<mfem::GridFunction>(
-				solver->potential() );
-			mfem::GridFunction &state = *sweepState;
-			double axis = psiAxisGuess;
-			double boundary = edgeFluxOf( state );
-
-			std::printf( "MEQ: the plasma support is frozen within each solve and "
-			             "re-decided between them, at most %d sweeps\n",
-			             supportSweeps );
-			std::printf( "     %-6s %6s %14s %14s %14s %s\n", "sweep", "its",
-			             "psi_ax", "psi_bnd", "X-point", "support" );
-
-			for ( int sweep = 0; sweep < supportSweeps; ++sweep )
-			{
-				double const overheadStart = elapsedSince( started );
-				double const overheadStartCpu = cpuNow();
-				int const before = solver->plasmaComponentElements();
-				sweepOverheadSeconds += elapsedSince( started ) - overheadStart;
-				sweepOverheadCpuSeconds += cpuNow() - overheadStartCpu;
-
-				double const supportStart = elapsedSince( started );
-				double const supportStartCpu = cpuNow();
-				normalised->freezePlasmaEdge( axis, boundary );
-				if ( sweep == 0 )
-				{
-					firstFreezeTaken = true;
-					firstFreezeAxis = axis;
-					firstFreezeBoundary = boundary;
-				}
-				// The PUBLIC refresh, which setPlasmaSupportFrozen() deliberately
-				// does not suppress: this is the outer loop moving the support,
-				// and it is the only thing that may.
-				solver->setPlasmaSupportFrozen( false );
-				solver->refreshPlasmaComponent( state );
-				solver->setPlasmaSupportFrozen( true );
-
-				if ( sweep > 0 )
-					solver->setInitialGuess( state );
-				supportSeconds += elapsedSince( started ) - supportStart;
-				supportCpuSeconds += cpuNow() - supportStartCpu;
-
-				runSolve();
-				++sweepsRun;
-
-				double const tailStart = elapsedSince( started );
-				double const tailStartCpu = cpuNow();
-
-				int const after = solver->plasmaComponentElements();
-				std::printf( "     %-6d %6d %14.6e %14.6e", sweep,
-				             solver->newtonIterations(), solver->psiAxis(),
-				             solver->psiBoundary() );
-				if ( solver->xPointIsAnUnknown() )
-					std::printf( "  (%6.3f,%7.3f)", solver->xPointR(),
-					             solver->xPointZ() );
-				else
-					std::printf( " %14s", "-" );
-				std::printf( "  %d/%d\n", after, solver->plasmaCandidateElements() );
-				std::fflush( stdout );
-
-				state = solver->potential();
-				axis = solver->psiAxis();
-				boundary = solver->psiBoundary();
-
-				sweepOverheadSeconds += elapsedSince( started ) - tailStart;
-				sweepOverheadCpuSeconds += cpuNow() - tailStartCpu;
-
-				// THE SUPPORT REPEATING IS THE FIXED POINT. The count alone
-				// would miss a swap of one element for another, so the mask is
-				// what the solver compares -- see refreshPlasmaComponent().
-				if ( sweep > 0 && after == before )
-				{
-					supportSettled = true;
-					break;
-				}
-			}
-
-			/*
-			 * AND THE FREEZE IS LEFT IN FORCE, DELIBERATELY.
-			 *
-			 * The answer is the solution of the problem the LAST sweep posed --
-			 * that support, that threshold -- and everything downstream reads
-			 * the source: the post-processing, the estimator, the flux surfaces
-			 * and the axis check. Thawing here would evaluate F on a support the
-			 * residual was never driven to zero on, which on a settled loop is
-			 * the same support to round-off and on an unsettled one is a
-			 * different problem wearing the answer's numbers.
-			 *
-			 * So the fixed-point question is answered by the loop and reported,
-			 * rather than smoothed over by a last refresh nobody solved with.
-			 */
-		};
-
 		/*
 		 * THE BORDERED PATH'S RETRY RUNG, BUILT ONE WAY FOR BOTH ITS TRIGGERS.
 		 *
@@ -4130,6 +4004,164 @@ int main( int argc, char **argv )
 				             solver->xPointCapRejections() );
 		};
 
+		/*
+		 * THE SUPPORT LOOP, AND THE RETRY RUNG IS ITS FIRST SWEEP WHEN `retry`.
+		 *
+		 * A retry that solves once and stops reports the support it froze from
+		 * the COLD guess: the edge at the guess's psi_ax and psi_bnd, never
+		 * re-decided at the answer. Every target row is met on that answer and
+		 * it is a different equilibrium -- 8.2e-03 to 8.5e-03 in the free
+		 * currents from the settled one, at every rung of F shaped, and
+		 * self-consistent across them, so refining does not show it. A retry
+		 * is a different ITERATION and the same problem only if it is swept
+		 * like the first attempt. MEASUREMENTS.md M-257.
+		 */
+		auto runSolveWithSupportLoop = [ & ]( bool retry )
+		{
+			if ( supportSweeps < 1 )
+			{
+				if ( retry )
+					runRetryRung();
+				else
+					runSolve();
+				return;
+			}
+
+			/*
+			 * THE FIRST SWEEP'S STATE IS THE INITIAL GUESS, and prepare() is how
+			 * it is read. setInitialGuess() only records the guess; what puts it
+			 * into potential() is the projection prepare() does, and solve()
+			 * would do it a moment later anyway. So this costs one assembly per
+			 * cycle and is the only route that works for every guess route --
+			 * including the ramp and the bump, which arrive as Coefficients and
+			 * have no field to read.
+			 */
+			if ( !retry )
+			{
+				double const prepareStart = elapsedSince( started );
+				double const prepareStartCpu = cpuNow();
+				solver->prepare();
+				driverPrepareSeconds += elapsedSince( started ) - prepareStart;
+				driverPrepareCpuSeconds += cpuNow() - prepareStartCpu;
+			}
+
+			// PER CYCLE, not per run: a refined mesh re-decides its own support
+			// from the carried field, and the summary reports the last cycle's
+			// loop rather than the sum of every cycle's.
+			sweepsRun = 0;
+			supportSettled = false;
+
+			// A COPY, because this is handed back to setInitialGuess() and
+			// prepare() overwrites potential() from it. Aliasing the two would
+			// project a field onto itself while reading it. On a retry it is
+			// taken after the rung's own solve, from the rebuilt solver: a copy
+			// carries its space by pointer, and the failed solver's is gone.
+			if ( !retry )
+				sweepState = std::make_unique<mfem::GridFunction>(
+					solver->potential() );
+			double axis = psiAxisGuess;
+			double boundary = retry ? 0.0 : edgeFluxOf( *sweepState );
+
+			std::printf( "MEQ: the plasma support is frozen within each solve and "
+			             "re-decided between them, at most %d sweeps%s\n",
+			             supportSweeps,
+			             retry ? ", the retry rung's solve the first" : "" );
+			std::printf( "     %-6s %6s %14s %14s %14s %s\n", "sweep", "its",
+			             "psi_ax", "psi_bnd", "X-point", "support" );
+
+			for ( int sweep = 0; sweep < supportSweeps; ++sweep )
+			{
+				// THE RETRY'S FIRST SWEEP IS THE RUNG, AS IT WAS MEASURED: a
+				// rebuilt solver from the first attempt's freeze (M-247, M-248).
+				// Its `before` is never read, since the first sweep cannot settle.
+				int before = 0;
+				if ( retry && sweep == 0 )
+				{
+					runRetryRung();
+					sweepState = std::make_unique<mfem::GridFunction>(
+						solver->potential() );
+				}
+				else
+				{
+					double const overheadStart = elapsedSince( started );
+					double const overheadStartCpu = cpuNow();
+					before = solver->plasmaComponentElements();
+					sweepOverheadSeconds += elapsedSince( started ) - overheadStart;
+					sweepOverheadCpuSeconds += cpuNow() - overheadStartCpu;
+
+					double const supportStart = elapsedSince( started );
+					double const supportStartCpu = cpuNow();
+					normalised->freezePlasmaEdge( axis, boundary );
+					if ( sweep == 0 )
+					{
+						firstFreezeTaken = true;
+						firstFreezeAxis = axis;
+						firstFreezeBoundary = boundary;
+					}
+					// The PUBLIC refresh, which setPlasmaSupportFrozen()
+					// deliberately does not suppress: this is the outer loop
+					// moving the support, and it is the only thing that may.
+					solver->setPlasmaSupportFrozen( false );
+					solver->refreshPlasmaComponent( *sweepState );
+					solver->setPlasmaSupportFrozen( true );
+
+					if ( sweep > 0 )
+						solver->setInitialGuess( *sweepState );
+					supportSeconds += elapsedSince( started ) - supportStart;
+					supportCpuSeconds += cpuNow() - supportStartCpu;
+
+					runSolve();
+				}
+				++sweepsRun;
+
+				double const tailStart = elapsedSince( started );
+				double const tailStartCpu = cpuNow();
+
+				int const after = solver->plasmaComponentElements();
+				std::printf( "     %-6d %6d %14.6e %14.6e", sweep,
+				             solver->newtonIterations(), solver->psiAxis(),
+				             solver->psiBoundary() );
+				if ( solver->xPointIsAnUnknown() )
+					std::printf( "  (%6.3f,%7.3f)", solver->xPointR(),
+					             solver->xPointZ() );
+				else
+					std::printf( " %14s", "-" );
+				std::printf( "  %d/%d\n", after, solver->plasmaCandidateElements() );
+				std::fflush( stdout );
+
+				*sweepState = solver->potential();
+				axis = solver->psiAxis();
+				boundary = solver->psiBoundary();
+
+				sweepOverheadSeconds += elapsedSince( started ) - tailStart;
+				sweepOverheadCpuSeconds += cpuNow() - tailStartCpu;
+
+				// THE SUPPORT REPEATING IS THE FIXED POINT. The count alone
+				// would miss a swap of one element for another, so the mask is
+				// what the solver compares -- see refreshPlasmaComponent().
+				if ( sweep > 0 && after == before )
+				{
+					supportSettled = true;
+					break;
+				}
+			}
+
+			/*
+			 * AND THE FREEZE IS LEFT IN FORCE, DELIBERATELY.
+			 *
+			 * The answer is the solution of the problem the LAST sweep posed --
+			 * that support, that threshold -- and everything downstream reads
+			 * the source: the post-processing, the estimator, the flux surfaces
+			 * and the axis check. Thawing here would evaluate F on a support the
+			 * residual was never driven to zero on, which on a settled loop is
+			 * the same support to round-off and on an unsettled one is a
+			 * different problem wearing the answer's numbers.
+			 *
+			 * So the fixed-point question is answered by the loop and reported,
+			 * rather than smoothed over by a last refresh nobody solved with.
+			 */
+		};
+
 		try
 		{
 			// THE BASIN FIRST, WHEN ASKED FOR, AND THE SOLVER IS REBUILT AFTER
@@ -4145,7 +4177,7 @@ int main( int argc, char **argv )
 			}
 
 			firstFreezeTaken = false;
-			runSolveWithSupportLoop();
+			runSolveWithSupportLoop( false );
 
 			/*
 			 * A DIVERTED RUN THAT CONVERGES WITH NO MAGNETIC AXIS HAS FAILED,
@@ -4186,6 +4218,12 @@ int main( int argc, char **argv )
 						"     psi_h -- an annulus, not a plasma with an axis. Retrying on\n"
 						"     the bordered Picard-then-Newton rung; the first answer stands\n"
 						"     if the retry does not find one.\n" );
+					// THE FIRST ANSWER'S SUPPORT LOOP TOO, declared before the
+					// solver that borrows its state so that it outlives it: the
+					// retry runs a loop of its own and the summary reports one.
+					std::unique_ptr<mfem::GridFunction> firstState = std::move( sweepState );
+					int const keptSweeps = sweepsRun;
+					bool const keptSettled = supportSettled;
 					std::unique_ptr<meq::GradShafranovSolver> first = std::move( solver );
 					double const keptAxis = normalised->normalisation();
 					double const keptBoundary = normalised->boundaryNormalisation();
@@ -4198,7 +4236,7 @@ int main( int argc, char **argv )
 					bool retryConverged = false;
 					try
 					{
-						runRetryRung();
+						runSolveWithSupportLoop( true );
 						retryConverged = true;
 						adopted = checkSolvedAxis( *solver ).located;
 					}
@@ -4215,6 +4253,9 @@ int main( int argc, char **argv )
 					else
 					{
 						solver = std::move( first );
+						sweepState = std::move( firstState );
+						sweepsRun = keptSweeps;
+						supportSettled = keptSettled;
 						// THE COIL SET IS SHARED STATE TOO: the retry wrote its
 						// own currents into it, and the first answer was solved
 						// with the first solver's.
@@ -4276,7 +4317,7 @@ int main( int argc, char **argv )
 
 				try
 				{
-					runRetryRung();
+					runSolveWithSupportLoop( true );
 					globalised = true;
 					rung = "bordered-picard-then-newton";
 				}

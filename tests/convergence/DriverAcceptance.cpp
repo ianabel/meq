@@ -4267,7 +4267,7 @@ BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
  *   E, diamagnetic   the bordered Newton FAILS -- its X-point leaves its
  *                    seed in one step and flips sign -- and the retry, with
  *                    the X-point held within 0.05 of Gamma's radius of the
- *                    seed, converges to 4.5e-04 of the reference
+ *                    seed, converges to 9.1e-04 of the reference
  *   A, classic       the bordered Newton CONVERGES, to an annulus with no
  *                    interior extremum and its X-point 1.1 m from its seed;
  *                    the driver reads that as a failure, and the retry finds
@@ -4322,5 +4322,24 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 		             c.stem, psiAxis, relative, distance );
 		BOOST_TEST( relative < c.relative );
 		BOOST_TEST( distance < c.distance );
+
+		/*
+		 * AND THE RETRY'S SUPPORT IS SWEPT LIKE THE FIRST ATTEMPT'S. Both
+		 * files ask for PlasmaSupportSweeps, and a rung that solves once
+		 * reports the support frozen from the COLD guess -- every row met, and
+		 * on F shaped 8e-03 from the settled answer in the free currents at
+		 * every rung of the inverse race. It wrote no sweep count at all,
+		 * which is what the first assertion reads.
+		 */
+		double const sweeps = headerAttribute( header, "plasma_support_sweeps" );
+		double const settled = headerAttribute( header, "plasma_support_settled" );
+		BOOST_TEST( std::isfinite( sweeps ),
+			c.stem << " ran the retry rung and reported no support loop: the "
+			"rung solved once on the support frozen from the cold guess and "
+			"never re-decided it, so the answer is not the configured problem's. "
+			"runSolveWithSupportLoop( true ) in apps/meq.cpp is the route" );
+		BOOST_TEST( settled == 1.0,
+			c.stem << "'s support did not settle after the retry rung, in "
+			<< sweeps << " sweeps" );
 	}
 }

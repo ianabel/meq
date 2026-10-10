@@ -229,9 +229,25 @@ def main():
                               float(d.getncattr("xpoint_z"))]]
         # A run with no located magnetic axis writes no axis_normalised_flux.
         located = "axis_normalised_flux" in d.ncattrs()
-        record["finished"] = bool(located) and set(free) <= set(names)
+        # A SUPPORT LOOP THAT DID NOT SETTLE IS NOT AN ANSWER, and neither is
+        # one that never ran: the file asks for sweeps, so a missing attribute
+        # means the solve bypassed them. That is how the retry rung reported
+        # its cold guess's support on five of F shaped's six cold rungs, every
+        # row met and 8e-03 from the settled answer.
+        swept = re.search(r"^\s*PlasmaSupportSweeps\s*=\s*([1-9]\d*)", text,
+                          re.MULTILINE) is not None
+        settled = (not swept) or (
+            "plasma_support_settled" in d.ncattrs()
+            and int(d.getncattr("plasma_support_settled")) == 1)
+        record["support_sweeps"] = (int(d.getncattr("plasma_support_sweeps"))
+                                    if "plasma_support_sweeps" in d.ncattrs()
+                                    else None)
+        record["finished"] = bool(located) and settled and \
+            set(free) <= set(names)
         record["status"] = ("converged" if code == 0 else "best fit") \
-            if record["finished"] else "no located axis"
+            if record["finished"] else ("no located axis" if not located
+                                        else "support not settled"
+                                        if not settled else "circuits missing")
         # The state a warm start restarts from: this run's own field and mesh.
         record["state"] = out
         json.dump(dict(currents=record["currents"], psi_axis=record["psi_axis"],

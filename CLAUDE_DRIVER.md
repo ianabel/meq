@@ -265,7 +265,11 @@ rung starts from the edge the first attempt started from** —
 `freezePlasmaEdge()` on the shared source otherwise carried the failed attempt's
 freeze into the retry, so one configuration closed or not depending on how the
 attempt before it had failed. *A second attempt is only a second attempt if it
-starts where the first did.*
+starts where the first did.* **And the rung is the support loop's first sweep,
+not a solve in place of the loop** (`runSolveWithSupportLoop( true )`): a rung
+that solves once reports the support frozen from the cold guess — every row met,
+the `.nc` silent on sweeps, and a different equilibrium, self-consistent across
+refinement so a ladder does not show it → **[M-257](MEASUREMENTS.md#m-257)**.
 
 **What the driver refuses rather than approximates**: `[boundary] Type =
 "exact"` needs a closed form `meq::Source` does not carry, and exits 1 with an

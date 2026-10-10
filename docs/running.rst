@@ -311,7 +311,10 @@ in the border it also **holds the X-point within a twentieth of**
 would carry it further is shortened. The rung is reached in two ways — the first
 attempt failing, or the first attempt converging to a flux with **no magnetic
 axis at all**, an annulus — and in the second case the first answer stands if the
-retry does not find an axis either.
+retry does not find an axis either. Where ``[solver] PlasmaSupportSweeps`` is
+set, the retry is the first sweep of the support loop and the support is
+re-decided after it exactly as on the first attempt, so a retried run reports
+``plasma_support_sweeps`` and ``plasma_support_settled`` like any other.
 
 .. code-block:: text
 

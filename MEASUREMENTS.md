@@ -14972,6 +14972,8 @@ because the committed `examples/*-meta.json` still carry the old one.
 
 ### M-247
 
+*Note: the retry rung's answers in this entry — A, A shaped, E and E shaped — were taken with the support frozen at the cold guess and never re-decided, since the rung solved once instead of sweeping. [M-257](#m-257) finds it and re-takes those four: A and A shaped are unchanged, E and E shaped move to 9.1e-04 and 8.4e-04.*
+
 **BS-5 — A CAP ON HOW FAR A LINE-SEARCH TRIAL MAY MOVE THE X-POINT FROM ITS
 SEED — CLOSES E AND E SHAPED AND MOVES NOTHING, BUT ONLY AS A RETRY RUNG.
 APPLIED FROM THE FIRST SOLVE IT IS A BRANCH CONTROL THAT LOSES MAST AND MAST-U.**
@@ -15035,6 +15037,8 @@ X-point is at ( 0.057, 0.446 ), 1.67 m from its seed — an excursion onto the
 symmetry axis.
 
 ### M-248
+
+*Note: the retry rung's answers in this entry — A, A shaped, E and E shaped — were taken with the support frozen at the cold guess and never re-decided, since the rung solved once instead of sweeping. [M-257](#m-257) finds it and re-takes those four: A and A shaped are unchanged, E and E shaped move to 9.1e-04 and 8.4e-04.*
 
 *Note: this entry's shaped C, D and G rows were taken on references built with two `ShapedCoil` defects — turns ignored in its field, a 12-point rule 18–30 per cent off on tall conductors — so they compare MEQ with a machine it was not given; G shaped most of all. [M-255](#m-255) finds them, [M-256](#m-256) re-takes the rows that matter.*
 
@@ -15703,3 +15707,55 @@ digits printed. **D shaped's cold forward solve now lands on another
 equilibrium** where the defective example converged to 3.5e-02 — a different
 machine had a different basin — and C shaped's cold inverse still does, which
 is M-253's frozen support. The vacuum-stage arm of M-253 is not re-taken.
+
+### M-257
+
+**THE RETRY RUNG SOLVED ONCE, ON THE SUPPORT FROZEN FROM THE COLD GUESS, AND
+REPORTED A DIFFERENT EQUILIBRIUM WITH EVERY TARGET ROW MET. IT IS NOW THE SUPPORT
+LOOP'S FIRST SWEEP, AND F SHAPED'S COLD INVERSE COMES TO 1.5e-05 OF `freegs4e`'s
+CURRENTS WHERE IT WAS 8.5e-03.** Found by IR-1 of `INVERSE-RACE-PLAN.md`. The
+bordered rung rebuilt the solver, re-applied the first sweep's freeze of the
+plasma edge — the cold guess's `psi_ax` and `psi_bnd` — and called `solve()`
+once. The support loop never ran after it, so `sweepsRun` stayed 0 and the
+`.nc` carried no `plasma_support_sweeps`: an unsettled answer with nothing in
+the file to say so. `runSolveWithSupportLoop( true )` makes the rung the first
+sweep and re-decides the support after it as on the first attempt.
+
+F shaped, inverse, from the race's cold state; ΔI is max |ΔI| over the six free
+supplies over the largest, against `freegs4e`'s 513² run:
+
+| rung | first attempt | support before | ΔI, rung solved once | support after | ΔI, swept |
+|---|---|---|---|---|---|
+| k2 h1.00 | failed | 297 elements | 8.52e-03 | 382, 3 sweeps | 3.01e-04 |
+| k2 h0.50 | converged | — | 2.90e-04 | — | (not retried) |
+| k3 h1.00 | failed | 298 | 8.31e-03 | 382, 3 sweeps | 1.39e-04 |
+| k4 h0.35 | failed | 1927 | 8.45e-03 | 2329, 4 sweeps | **1.46e-05** |
+
+**SELF-CONSISTENT ACROSS REFINEMENT, SO A LADDER DID NOT SHOW IT.** Five of the
+six cold rungs took the rung, the finest among them, and each sat 1.6e-04 to
+5.3e-04 from that finest run, which reads as ordinary convergence; only the one
+rung whose first attempt converged sat 8.5e-03 off. The unswept plasma was 17
+to 22 per cent smaller than its settled support. **The cross-code floor on F
+shaped cold falls from 8.5e-03 to 1.5e-05**, the floor the warm start of the
+same run measured (1.44e-05), below every accuracy target the race asks except
+1e-05.
+
+The retry rung's other cases, re-taken through the wrapper with
+`DriverAcceptance`'s `theRetryRungClosesAnExcursionAndAnAnnulus` and by hand;
+`psi_ax` against the reference:
+
+| case | rung solved once ([M-248](#m-248)) | swept |
+|---|---|---|
+| A | 2.46e-02, axis 2.9 cm | 2.46e-02, axis 2.9 cm, 2 sweeps |
+| A shaped | 2.39e-02, axis 2.8 cm | 2.39e-02, axis 2.8 cm, 2 sweeps |
+| E | 4.51e-04, axis within 0.7 mm | **9.11e-04**, axis 1.0 mm, 3 sweeps |
+| E shaped | 3.84e-04 | **8.41e-04**, axis 0.8 mm, 3 sweeps |
+
+**E MOVES AWAY FROM THE REFERENCE WHEN ITS SUPPORT SETTLES**, which says the
+closer number was the wrong problem agreeing by accident, not that sweeping
+costs accuracy. Both stay inside the test's 2e-03.
+
+**THE RACE HARNESS ACCEPTED THE UNSETTLED RUNS**, because acceptance was the
+rows and the rows are met on either answer. `race_arm_meq.py` now reports a run
+as `finished` only when a file asking for `PlasmaSupportSweeps` reports
+`plasma_support_settled = 1`, and treats a missing attribute as unsettled.
