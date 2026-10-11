@@ -108,7 +108,8 @@ so it is not a tuning failure.
 
 Per case: `meta.txt` (species constants, `R_ref`, `mu0`, the flux range),
 `omega.dat`, `T_<name>.dat`, `n_<name>.dat` in MEQ's own three-column
-`psi f f'` profile format, `Nraw_<name>.dat`, and two point sets —
+`psi f f'` profile format, `Nraw_<name>.dat`, and two point sets, which are
+geq's OUTPUT and are regenerated rather than tracked —
 
 | | |
 |---|---|
@@ -136,8 +137,12 @@ state identically is solved harder.
 
 ## Regenerating the reference
 
-Needs `../geq`, `../freegs4e` and the benchmark venv. The committed reference
-means the **test** needs none of them.
+Needs `../geq`, `../freegs4e` and the benchmark venv. **The point sets are
+geq's answer and are not tracked**, so `GeqSourceComparison` needs this run
+before it can read them; the tables it is given are tracked. Every reference in
+this directory was generated at geq `73b9a72` and freegs4e `9a1ee0c`, both
+clean; `export_rotating.py` records that in its `meta.txt`, and a regeneration
+at any other commit is a different reference.
 
 ```sh
 cd /home/ian/projects/meq
@@ -189,8 +194,8 @@ is compared with is a **coil model**, read off freegs4e rather than assumed:
 
 `reference/vacuum/` holds `meta.txt`, the machine as geq computed it — pack radii,
 length, centre, current, filament count, which the test **reads** rather than
-re-deriving geq's tape-and-turn arithmetic — and `points.dat`, `R z psi` on every
-other node of geq's 65 × 65 grid (`R ∈ [0.05, 0.63]`, `|z| ≤ 1.5`, the corners
+re-deriving geq's tape-and-turn arithmetic — and `points.dat`, geq's output and
+not tracked, `R z psi` on every other node of geq's 65 × 65 grid (`R ∈ [0.05, 0.63]`, `|z| ≤ 1.5`, the corners
 and the midplane kept). Regenerate with
 
 ```sh

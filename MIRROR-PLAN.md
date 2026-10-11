@@ -619,7 +619,9 @@ shipped file, because what rots about an example is the file.
    anisotropic effective-current hook are in geq now and MEQ has no counterpart.
    The benchmark is pinned to the isotropic `ProfilesCentrifugalMirror` path and
    must stay there; a geq default that changes under us is a stale-reference
-   failure, which is why the reference is committed.
+   failure. geq's answers are regenerated rather than committed, so what pins
+   them is the commit they are regenerated at: geq `73b9a72` and freegs4e
+   `9a1ee0c` for every reference so far (`tools/geq-benchmark/README.md`).
 5. **The gauge**, item 5. It is the only item on this list that is a change to a
    published interface rather than to solver internals, and the only one found by
    running the benchmark rather than by reading the code. **Not on MR-4's path**:
