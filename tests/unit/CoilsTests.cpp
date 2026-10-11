@@ -378,16 +378,16 @@ namespace
 	class LinearPlasma : public meq::NormalisedSource
 	{
 		public:
-			double f( double radius, double, double psi ) const override
+			double f( double radius, double z, double psi ) const override
 			{
-				if ( !insidePlasma( psi ) )
+				if ( !insidePlasma( radius, z, psi ) )
 					return 0.0;
 				return radius*( psi - boundaryValue )/( axisValue - boundaryValue );
 			}
 
-			double dFdPsi( double radius, double, double psi ) const override
+			double dFdPsi( double radius, double z, double psi ) const override
 			{
-				if ( !insidePlasma( psi ) )
+				if ( !insidePlasma( radius, z, psi ) )
 					return 0.0;
 				return radius/( axisValue - boundaryValue );
 			}
@@ -517,6 +517,63 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_reaches_the_source_that_evaluates_the_p
 	asBase.setPlasmaSupport( false );
 	BOOST_TEST( plasma->plasmaSupport() == false );
 	BOOST_TEST( sum->f( 2.0, 0.0, outside ) != coils->f( 2.0, 0.0 ) );
+}
+
+/*
+ * AND A MIRROR'S BOX FORWARDS THE SAME WAY. MIRROR-PLAN.md MR-1.
+ *
+ * meq::PlasmaSupportShape::Box adds `Psi <= 1` and `|z| <= z_edge` to the
+ * support, and it is consulted by the object that evaluates the profiles --
+ * the wrapped one. Both ends are asserted for the frozen edge's reason: the
+ * wrapped source not hearing is a source that fills R = 0 and the expander;
+ * the WRAPPER not hearing is GradShafranovSolver reading a one-sided shape
+ * and running XP-1's fill on a support that has no seed.
+ */
+BOOST_AUTO_TEST_CASE( the_support_shape_reaches_the_wrapped_source )
+{
+	auto coils = std::make_shared<CoilSet>();
+	coils->add( standardCoil() );
+	auto plasma = std::make_shared<LinearPlasma>();
+	plasma->setNormalisation( 2.0, 0.0 );
+
+	auto sum = std::make_shared<meq::CoilAugmentedNormalisedSource>( plasma, coils );
+	meq::NormalisedSource &asBase = *sum;
+	asBase.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, 0.5 );
+
+	BOOST_TEST( ( plasma->plasmaSupportShape() == meq::PlasmaSupportShape::Box ),
+	            "setPlasmaSupportShape() did not reach the wrapped source, so "
+	            "the mirror's support would silently be one-sided" );
+	BOOST_TEST( ( sum->plasmaSupportShape() == meq::PlasmaSupportShape::Box ) );
+	BOOST_TEST( plasma->plasmaSupportAxialEdge() == 0.5 );
+	BOOST_TEST( sum->plasmaSupportAxialEdge() == 0.5 );
+
+	// A box is a confinement, on both objects.
+	BOOST_TEST( plasma->plasmaSupport() == true );
+	BOOST_TEST( sum->plasmaSupport() == true );
+
+	// Inside the box the plasma term is live; beyond the throat and inside
+	// the inner surface it is not, and the coil term survives both.
+	BOOST_TEST( plasma->f( 2.0, 0.0, 1.0 ) != 0.0 );
+	for ( double const z : { 0.75, -0.75 } )
+	{
+		BOOST_TEST( plasma->f( 2.0, z, 1.0 ) == 0.0 );
+		BOOST_TEST( sum->f( 2.0, z, 1.0 ) == coils->f( 2.0, z ) );
+	}
+	BOOST_TEST( plasma->f( 2.0, 0.0, 3.0 ) == 0.0 );   // Psi = 1.5
+
+	// A refused edge throws on the wrapped source BEFORE the wrapper is
+	// touched, so the two still agree afterwards.
+	BOOST_CHECK_THROW( asBase.setPlasmaSupportShape( meq::PlasmaSupportShape::Box,
+	                                                 -1.0 ),
+	                   std::invalid_argument );
+	BOOST_TEST( plasma->plasmaSupportAxialEdge() == 0.5 );
+	BOOST_TEST( sum->plasmaSupportAxialEdge() == 0.5 );
+
+	// And back to the tokamak's.
+	asBase.setPlasmaSupportShape( meq::PlasmaSupportShape::OneSided );
+	BOOST_TEST( ( plasma->plasmaSupportShape() == meq::PlasmaSupportShape::OneSided ) );
+	BOOST_TEST( ( sum->plasmaSupportShape() == meq::PlasmaSupportShape::OneSided ) );
+	BOOST_TEST( plasma->f( 2.0, 0.75, 1.0 ) != 0.0 );
 }
 
 /*

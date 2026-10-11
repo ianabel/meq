@@ -92,6 +92,7 @@ passing comparison.
 | `export_mirror.py` | the geq side. Builds the state, does the gauge transfer, writes the reference |
 | `reference/two/` | electron + deuterium at **M = 6.0**, the mirror operating point. MEQ takes `Closure::ClosedForm` |
 | `reference/three/` | + carbon at `Z = 6`, at **M = 0.76**. MEQ takes `Closure::RootFind`, and the charge weighting stops being a plain sum |
+| `export_vacuum.py`, `reference/vacuum/` | the **vacuum** machine, no plasma, for MR-3's solve. See *The vacuum mirror* below |
 
 **THE TWO MACH NUMBERS ARE FORCED, NOT CHOSEN**, with
 `M² = m_i ω² R( z=0 )²/T_e` on the `ψ_n = 0.5` surface and `meta.txt` recording
@@ -165,3 +166,45 @@ re-running the sweep.
 
 `MEQ_GEQ_REFERENCE` points the test at another directory, which is how the sweep
 is taken without touching what is committed.
+
+## The vacuum mirror: `export_vacuum.py` and `reference/vacuum/`
+
+`MIRROR-PLAN.md`'s MR-3 compares MEQ's **solve** with geq's field, which is the
+other half of what this directory does: no plasma, geq's two packs, MEQ's
+half-disc with the exterior coupling live. `tests/convergence/VacuumMirror.cpp`
+is the acceptance and is a registered ctest.
+
+**WITH NO PLASMA geq'S FIELD IS A CLOSED-FORM SUM, NOT A SOLVE**, and the script
+asserts it to round-off before writing anything: freegs4e's `Equilibrium.psi()`
+is then the machine's Greens sum over the coils' own filament lists. So what MEQ
+is compared with is a **coil model**, read off freegs4e rather than assumed:
+
+| | |
+|---|---|
+| a pack | a `MultiCoil` with `R` and `Z` given as lists, so `turns = len( R )` and the `turns` geq passes is ignored on that branch. Each filament carries `current`, and the pack's total is `current * nfil` |
+| the area | never enters the field; it is a current-density limit for the self-force. With `Nr = 1` the pack is **ten filaments at the radial centre**, `z = zc ± 0.05 … 0.45` — exactly `meq::filamentStack( coil, 1, 10 )`, the midpoint rule for the rectangle |
+| `psi` | weber per radian on both sides: freegs4e's `Greens` carries `mu0/2pi` and says "Webers/2pi", `meq::filamentPsi()` is `R A_phi` |
+| the sign | both packs carry the same current — a mirror, not a cusp |
+
+`reference/vacuum/` holds `meta.txt`, the machine as geq computed it — pack radii,
+length, centre, current, filament count, which the test **reads** rather than
+re-deriving geq's tape-and-turn arithmetic — and `points.dat`, `R z psi` on every
+other node of geq's 65 × 65 grid (`R ∈ [0.05, 0.63]`, `|z| ≤ 1.5`, the corners
+and the midplane kept). Regenerate with
+
+```sh
+cd /home/ian/projects/meq
+PYTHONPATH=/home/ian/projects/geq/src \
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_vacuum.py \
+    --out tools/geq-benchmark/reference/vacuum
+```
+
+and `MEQ_GEQ_VACUUM_REFERENCE` points the test elsewhere.
+
+**THE AGREEMENT IS LIMITED BY geq'S COIL MODEL, AND THE TEST SAYS SO BY
+REMOVING IT.** MEQ meshes the pack as the rectangle it is, uniform current
+density over the winding; geq's ten filaments are that rectangle's midpoint rule.
+The test measures geq's filaments in MEQ's own kernel (round-off: every
+convention agrees), geq against `meq::coilPsi()` with no solve at all (the model
+floor), MEQ against both, and finally MEQ handed geq's own twenty filaments by
+subtraction — at which point the floor is gone. → **[M-260](../../MEASUREMENTS.md#m-260)**.

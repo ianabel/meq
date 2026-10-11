@@ -1,6 +1,8 @@
 #ifndef MEQ_SOURCE_HPP
 #define MEQ_SOURCE_HPP
 
+#include <cmath>
+#include <limits>
 #include <memory>
 
 #include "Profiles.hpp"
@@ -187,6 +189,45 @@ namespace meq
 	};
 
 	/**
+	 * THE SHAPE OF THE PLASMA SUPPORT, which NormalisedSource::insidePlasma()
+	 * tests a point against once setPlasmaSupport() is on.
+	 *
+	 * **A TOKAMAK NEEDS ONE BOUND AND A MIRROR NEEDS THREE**, and that is the
+	 * whole reason this is an enumeration rather than an extra test applied to
+	 * everyone. `MIRROR-PLAN.md` §2.
+	 *
+	 *   - In a tokamak `psi_ax` is the EXTREMUM of `psi`, so `Psi <= 1` holds
+	 *     everywhere by construction and the support is `Psi > 0` alone. It
+	 *     must STAY alone: `psi_h` can overshoot the located `psi_ax` by a
+	 *     discretisation error, and a `Psi <= 1` imposed there would switch the
+	 *     source off in a ring around the magnetic axis.
+	 *
+	 *   - A mirror has no axis. Its plasma is an ANNULUS between two prescribed
+	 *     flux surfaces, `psi_ax` the inner label and `psi_bnd` the outer, so
+	 *     `Psi > 0` alone admits everything inside the inner surface down to
+	 *     `R = 0` -- and the profiles CLAMP, so the source there sits at its
+	 *     inner-edge value rather than vanishing. And flux is not a function of
+	 *     `z` along a tube: beyond the throat the same `Psi` recurs in the
+	 *     expander, where the centrifugal potential no longer confines and the
+	 *     density is, within this model, zero. M-168 measured geq's flux-only
+	 *     mask putting the end-plane current five orders above the midplane's.
+	 *
+	 * The `|z|` bound is a PRESCRIBED modelling approximation, not a solved
+	 * one, and a cutoff through a region still carrying current is a jump in
+	 * `F`. GradShafranovSolver::checkAxialCutoff() reports the current density
+	 * reached there so that the approximation is visible on every answer.
+	 */
+	enum class PlasmaSupportShape
+	{
+		/// `Psi > 0`. A tokamak's, and the default.
+		OneSided,
+		/// `0 < Psi <= 1` and `|z| <= axialEdge`. A mirror's. Pointwise and
+		/// bounded on every side, so it needs no connectivity test -- see
+		/// GradShafranovSolver::PlasmaConnectivity for why XP-1's fill is off.
+		Box
+	};
+
+	/**
 	 * A source whose profiles are functions of NORMALISED flux,
 	 *
 	 *     Psi = ( psi - psi_bnd ) / ( psi_ax - psi_bnd )
@@ -279,6 +320,9 @@ namespace meq
 			 * from a source: nothing here knows where the boundary is, and the
 			 * boundary is not an input -- it is wherever `psi` currently puts
 			 * it, so it moves as Newton moves and converges as `psi` converges.
+			 * That is the default PlasmaSupportShape::OneSided; a mirror's
+			 * support is a box, and setPlasmaSupportShape() is how it is asked
+			 * for.
 			 *
 			 * **OFF BY DEFAULT**, so every fixed-boundary caller is untouched.
 			 * There the domain IS the plasma, `Psi > 0` throughout by
@@ -331,26 +375,94 @@ namespace meq
 			}
 
 			/**
-			 * True where the plasma is: `Psi > 0`, with `Psi` built from the
-			 * normalisation the source currently carries.
+			 * **CONFINE THE SOURCE TO A BOX IN `( Psi, z )`, WHICH IS A
+			 * MIRROR'S SUPPORT**: `0 < Psi <= 1` and `|z| <= axialEdge`.
+			 * meq::PlasmaSupportShape says why a tokamak must not get it.
+			 *
+			 * **IT SWITCHES THE SUPPORT ON AS WELL, AND THAT IS DELIBERATE.**
+			 * A box is a confinement; one that waited for a separate
+			 * setPlasmaSupport( true ) would be a flag that happens to be false
+			 * the day a caller forgets it, and the source would then fill
+			 * `R = 0` and the expander with no message -- the defect shape
+			 * CLAUDE_FLOW.md records for ConfineToPlasma on this same source.
+			 * setPlasmaSupport( false ) afterwards still switches the gate off
+			 * entirely, which is how a test runs the same source unconfined.
+			 *
+			 * PlasmaSupportShape::OneSided puts the tokamak's support back and
+			 * leaves setPlasmaSupport() as it was; @a axialEdge is not read.
+			 *
+			 * **VIRTUAL, FOR THE REASON setPlasmaSupport() IS.** A wrapper
+			 * evaluates the profiles through the source it holds, so it is the
+			 * HELD source's shape that insidePlasma() consults, and
+			 * meq::CoilAugmentedNormalisedSource forwards.
+			 *
+			 * @param axialEdge the throat, in metres, measured from `z = 0`.
+			 * @throws std::invalid_argument for PlasmaSupportShape::Box with an
+			 *         @a axialEdge that is not finite and positive. **An
+			 *         infinite edge is refused rather than read as "no axial
+			 *         bound"**: a mirror support without one is geq's
+			 *         flux-only mask, which is what M-168 measured going wrong,
+			 *         so asking for it should take more than a default.
+			 */
+			virtual void setPlasmaSupportShape( PlasmaSupportShape shape,
+			                                    double axialEdge = 0.0 );
+
+			/// The shape insidePlasma() tests against. OneSided unless
+			/// setPlasmaSupportShape() said otherwise.
+			PlasmaSupportShape plasmaSupportShape() const
+			{
+				return supportShape;
+			}
+
+			/// The `|z|` bound of a PlasmaSupportShape::Box support. Infinite
+			/// under OneSided, where nothing reads it.
+			double plasmaSupportAxialEdge() const
+			{
+				return axialEdgeValue;
+			}
+
+			/**
+			 * True where the plasma is, with `Psi` built from the normalisation
+			 * the source currently carries: `Psi > 0` under the default
+			 * PlasmaSupportShape::OneSided, and `0 < Psi <= 1` with
+			 * `|z| <= axialEdge` under PlasmaSupportShape::Box.
 			 *
 			 * Always true when setPlasmaSupport() is off, so a subclass may call
 			 * it unconditionally and a fixed-boundary solve pays one comparison.
+			 *
+			 * **IT TAKES f()'s ARGUMENTS, IN f()'s ORDER, AND THERE IS NO
+			 * FLUX-ONLY FORM.** The box needs `z`, and a one-argument overload
+			 * would be a gate that silently skips the axial bound for whichever
+			 * caller still used it. `radius` is unused today and is there so
+			 * that a call site reads as the f() it guards -- two adjacent
+			 * doubles transposed would compile.
 			 *
 			 * THE SIGN OF THE SPAN IS NOT ASSUMED. `psi_ax - psi_bnd` is
 			 * negative wherever `F` is single-signed negative -- every Solov'ev
 			 * fixture in this tree has its magnetic axis at an interior MINIMUM,
 			 * which CriticalPoints.hpp records as the reason findAxis() seeds
-			 * from both nodal extremes. So the test is on the PRODUCT rather
-			 * than on the difference, and it is the same test either way round.
+			 * from both nodal extremes -- and on EVERY mirror, where the inner
+			 * label is the smaller flux. So the one-sided test is on the PRODUCT
+			 * rather than on the difference, and the box's upper bound is
+			 * written in `Psi` itself rather than as an inequality on `psi`,
+			 * which would have to know which way round the span is.
 			 */
-			bool insidePlasma( double psi ) const
+			bool insidePlasma( double radius, double z, double psi ) const
 			{
+				(void)radius;
 				if ( !confinedToPlasma )
 					return true;
 				double const edge = supportBoundary();
 				double const span = supportAxis() - edge;
-				return ( psi - edge )*span > 0.0;
+				if ( supportShape == PlasmaSupportShape::OneSided )
+					return ( psi - edge )*span > 0.0;
+
+				// PlasmaSupportShape::Box. A NaN z or Psi fails every
+				// comparison below and is outside, which is the safe side.
+				if ( !( std::abs( z ) <= axialEdgeValue ) )
+					return false;
+				double const normalised = ( psi - edge )/span;
+				return normalised > 0.0 && normalised <= 1.0;
 			}
 
 			/**
@@ -583,6 +695,11 @@ namespace meq
 		private:
 			/// setPlasmaSupport(). Off by default; see it for why.
 			bool confinedToPlasma = false;
+
+			/// setPlasmaSupportShape(). The tokamak's unless asked, so every
+			/// existing caller takes the branch it always took.
+			PlasmaSupportShape supportShape = PlasmaSupportShape::OneSided;
+			double axialEdgeValue = std::numeric_limits<double>::infinity();
 
 			/// freezePlasmaEdge(). Off by default, so every existing solve is
 			/// bit-unchanged.

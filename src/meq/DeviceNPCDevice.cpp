@@ -152,6 +152,10 @@ namespace meq
 						cached.supportAxis = fresh.supportAxis;
 						cached.supportBoundary = fresh.supportBoundary;
 						cached.confineToPlasma = fresh.confineToPlasma;
+						// The SHAPE too: a source boxed after this operator was
+						// built would otherwise go on being integrated one-sided.
+						cached.supportShape = fresh.supportShape;
+						cached.axialEdge = fresh.axialEdge;
 					}
 				}
 

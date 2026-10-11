@@ -666,7 +666,7 @@ namespace meq
 		// outside the knot range, so an ungated source does not tail off out
 		// here -- it sits at its plasma-edge value all the way to the wall,
 		// which is a current density filling the vacuum region.
-		if ( !insidePlasma( psi ) )
+		if ( !insidePlasma( radius, z, psi ) )
 			return 0.0;
 
 		// One factor of 1/psi_ax, because the profiles are functions of Psi and
@@ -696,7 +696,7 @@ namespace meq
 		// the edge, the condition setPlasmaSupport() documents as its
 		// precondition. Word for word meq::NormalisedMHDSource's position, and
 		// for the same reason.
-		if ( !insidePlasma( psi ) )
+		if ( !insidePlasma( radius, z, psi ) )
 			return 0.0;
 
 		// TWO factors, not one: the chain rule supplies a second whenever another
@@ -719,7 +719,7 @@ namespace meq
 		// costing less: a difference perturbs the normalisation, which MOVES THE
 		// EDGE, and then straddles it. Word for word
 		// meq::NormalisedMHDSource's position.
-		if ( !insidePlasma( psi ) )
+		if ( !insidePlasma( radius, z, psi ) )
 		{
 			dFdAxis = 0.0;
 			dFdBoundary = 0.0;

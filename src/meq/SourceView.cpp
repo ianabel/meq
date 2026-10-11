@@ -136,6 +136,8 @@ namespace meq
 		view.confineToPlasma = mhd->plasmaSupport() ? 1 : 0;
 		view.supportAxis = static_cast<mfem::real_t>( mhd->supportAxis() );
 		view.supportBoundary = static_cast<mfem::real_t>( mhd->supportBoundary() );
+		view.supportShape = static_cast<int>( mhd->plasmaSupportShape() );
+		view.axialEdge = static_cast<mfem::real_t>( mhd->plasmaSupportAxialEdge() );
 
 		return viewOfProfile( mhd->pPrime(), view.pPrime, knots )
 		       && viewOfProfile( mhd->ggPrime(), view.ggPrime, knots );

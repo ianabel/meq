@@ -897,7 +897,7 @@ BOOST_AUTO_TEST_CASE( aConfinedRotatingSourceVanishesOutsideThePlasma )
 	BOOST_TEST_REQUIRE( source.plasmaSupport() );
 	// The base class's own test agrees the point is outside; it is only f() and
 	// dFdPsi() that do not ask it.
-	BOOST_TEST_REQUIRE( !source.insidePlasma( -0.5 ) );
+	BOOST_TEST_REQUIRE( !source.insidePlasma( testRadii[ 0 ], 0.0, -0.5 ) );
 
 	for ( double radius : testRadii )
 		for ( double psi : { -0.5, -0.1, -1.0e-6 } )
@@ -1126,4 +1126,223 @@ BOOST_AUTO_TEST_CASE( theRotatingNormalisationDerivativesAreAnalytic )
 	                                                     outsideBoundary ) );
 	BOOST_TEST( outsideAxis == 0.0 );
 	BOOST_TEST( outsideBoundary == 0.0 );
+}
+
+/*
+ * A MIRROR'S SUPPORT IS A BOX IN ( Psi, z ), AND THE SOURCE MUST VANISH ON ALL
+ * THREE OF ITS SIDES. MIRROR-PLAN.md MR-1.
+ *
+ * A mirror has no magnetic axis. Its plasma is an ANNULUS labelled by two
+ * prescribed flux surfaces -- psi_ax the INNER one and psi_bnd the OUTER -- so
+ * the span psi_ax - psi_bnd is NEGATIVE, and the one-sided `Psi > 0` a tokamak
+ * needs excludes only the radially-outer side. Two more are owed:
+ *
+ *   inside the inner surface   Psi > 1, toward R = 0, where there is no plasma
+ *                              at all -- and the profiles CLAMP, so ungated the
+ *                              source sits at its inner-edge value down to the
+ *                              axis;
+ *   beyond the throat          |z| > z_edge, where the tube flares into the
+ *                              expander and the same Psi recurs. M-168
+ *                              measured geq's flux-only mask putting the
+ *                              end-plane current five orders above the
+ *                              midplane's.
+ *
+ * ALL THREE QUANTITIES THE SOLVER ASSEMBLES ARE CHECKED AT EVERY PROBE -- f(),
+ * dFdPsi() and normalisationDerivatives() -- because CLAUDE_FLOW.md records
+ * ConfineToPlasma reaching one of a pair of evaluations and not the other, and
+ * half a confinement is harder to see in an answer than none.
+ *
+ * EVERY PROBE IS FIRST SHOWN TO CARRY A NON-ZERO UNCONFINED SOURCE, so each
+ * zero asserted below is one the gate produced and not one the profiles
+ * happened to give. Without that this case could not fail.
+ *
+ * The edges are CLOSED: Psi = 1 (the inner label itself) and |z| = z_edge are
+ * inside, which is what lets GradShafranovSolver::checkAxialCutoff() evaluate
+ * the source AT the cutoff and read the interior limit of the jump.
+ */
+BOOST_AUTO_TEST_CASE( aMirrorSourceVanishesOnAllThreeSidesOfItsBox )
+{
+	double const innerLabel = 0.2;   // psi_ax: the inner surface
+	double const outerLabel = 1.0;   // psi_bnd: the outer surface
+	double const zEdge = 0.8;
+
+	auto mirror = [ & ]()
+	{
+		meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(),
+			ggPrimeProfile(), referenceRadius, 1.0 );
+		source.setNormalisation( innerLabel, outerLabel );
+		return source;
+	};
+
+	meq::NormalisedRotatingSource boxed = mirror();
+	meq::NormalisedRotatingSource const unconfined = mirror();
+
+	// THE SPAN IS NEGATIVE, which is the orientation the bound has to survive.
+	BOOST_TEST_REQUIRE( innerLabel - outerLabel < 0.0 );
+
+	boxed.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, zEdge );
+	BOOST_TEST_REQUIRE( ( boxed.plasmaSupportShape() == meq::PlasmaSupportShape::Box ) );
+	BOOST_TEST_REQUIRE( boxed.plasmaSupportAxialEdge() == zEdge );
+	BOOST_TEST_REQUIRE( boxed.plasmaSupport(),
+	                    "asking for a box must switch the support on" );
+
+	// The three sides, as ( psi, z ) probes. Psi = ( psi - 1 )/( -0.8 ).
+	struct Probe
+	{
+		double psi;
+		double z;
+	};
+	std::vector<Probe> const innerSide{    // Psi > 1
+		{ 0.19, 0.0 }, { 0.1, 0.0 }, { 0.0, 0.3 }, { -0.1, -0.5 } };
+	std::vector<Probe> const outerSide{    // Psi < 0
+		{ 1.01, 0.0 }, { 1.2, 0.0 }, { 1.5, 0.4 }, { 2.0, -0.7 } };
+	std::vector<Probe> const beyondThroat{ // 0 < Psi <= 1, |z| > z_edge
+		{ 0.6, 0.81 }, { 0.6, -0.81 }, { 0.3, 1.5 }, { 0.9, -3.0 } };
+	std::vector<Probe> const insideBox{    // 0 < Psi <= 1, |z| <= z_edge
+		{ 0.3, 0.0 }, { 0.6, 0.5 }, { 0.9, -0.5 },
+		{ innerLabel, 0.0 },               // Psi = 1 exactly: closed
+		{ 0.6, zEdge }, { 0.6, -zEdge } }; // |z| = z_edge: closed
+
+	auto vanishes = [ & ]( std::vector<Probe> const &side, char const *name )
+	{
+		for ( double const radius : testRadii )
+			for ( Probe const &p : side )
+			{
+				BOOST_TEST_REQUIRE( unconfined.f( radius, p.z, p.psi ) != 0.0,
+				                    "the unconfined source is already zero at R = "
+				                    << radius << ", psi = " << p.psi << ", z = "
+				                    << p.z << ", so a zero there proves nothing" );
+
+				BOOST_TEST( boxed.f( radius, p.z, p.psi ) == 0.0,
+				            "F = " << boxed.f( radius, p.z, p.psi ) << " " << name
+				            << " at R = " << radius << ", psi = " << p.psi
+				            << ", z = " << p.z );
+				BOOST_TEST( boxed.dFdPsi( radius, p.z, p.psi ) == 0.0,
+				            "dF/dpsi = " << boxed.dFdPsi( radius, p.z, p.psi ) << " "
+				            << name << " at R = " << radius << ", psi = " << p.psi
+				            << ", z = " << p.z );
+
+				double againstAxis = 1.0, againstBoundary = 1.0;
+				BOOST_TEST_REQUIRE( boxed.normalisationDerivatives(
+					radius, p.z, p.psi, againstAxis, againstBoundary ) );
+				BOOST_TEST( againstAxis == 0.0,
+				            "dF/dpsi_ax = " << againstAxis << " " << name
+				            << " at R = " << radius << ", psi = " << p.psi
+				            << ", z = " << p.z );
+				BOOST_TEST( againstBoundary == 0.0,
+				            "dF/dpsi_bnd = " << againstBoundary << " " << name
+				            << " at R = " << radius << ", psi = " << p.psi
+				            << ", z = " << p.z );
+			}
+	};
+
+	vanishes( innerSide, "inside the inner surface (Psi > 1)" );
+	vanishes( outerSide, "outside the outer surface (Psi < 0)" );
+	vanishes( beyondThroat, "beyond the throat (|z| > z_edge)" );
+
+	// AND NOTHING INSIDE IS SWITCHED OFF OR CHANGED, which is the half a bare
+	// "return 0" would break: every quantity is the unconfined one, to the bit.
+	for ( double const radius : testRadii )
+		for ( Probe const &p : insideBox )
+		{
+			double const want = unconfined.f( radius, p.z, p.psi );
+			BOOST_TEST_REQUIRE( want != 0.0 );
+			BOOST_TEST( boxed.f( radius, p.z, p.psi ) == want,
+			            "F inside the box at R = " << radius << ", psi = " << p.psi
+			            << ", z = " << p.z << " reads "
+			            << boxed.f( radius, p.z, p.psi ) << " against " << want );
+			BOOST_TEST( boxed.dFdPsi( radius, p.z, p.psi )
+			            == unconfined.dFdPsi( radius, p.z, p.psi ) );
+
+			double boxAxis = 0.0, boxBoundary = 0.0, freeAxis = 0.0, freeBoundary = 0.0;
+			BOOST_TEST_REQUIRE( boxed.normalisationDerivatives(
+				radius, p.z, p.psi, boxAxis, boxBoundary ) );
+			BOOST_TEST_REQUIRE( unconfined.normalisationDerivatives(
+				radius, p.z, p.psi, freeAxis, freeBoundary ) );
+			BOOST_TEST( boxAxis == freeAxis );
+			BOOST_TEST( boxBoundary == freeBoundary );
+			BOOST_TEST( boxAxis != 0.0 );
+		}
+
+	// setPlasmaSupport( false ) still switches the whole gate off, which is how
+	// a caller runs the same source unconfined.
+	boxed.setPlasmaSupport( false );
+	BOOST_TEST( boxed.f( testRadii[ 0 ], 0.0, 0.1 )
+	            == unconfined.f( testRadii[ 0 ], 0.0, 0.1 ) );
+}
+
+/*
+ * THE TOKAMAK'S SUPPORT IS UNCHANGED BY THE BOX EXISTING, AND IN PARTICULAR IT
+ * DOES NOT IMPOSE Psi <= 1.
+ *
+ * In a tokamak psi_ax is the EXTREMUM of psi, so Psi <= 1 holds by
+ * construction -- except that psi_h can overshoot the LOCATED psi_ax by a
+ * discretisation error, and a Psi <= 1 bound there would cut a hole round the
+ * magnetic axis. Nor is there any |z| bound. So under the default shape a point
+ * at Psi = 1.05, or at any z, must carry exactly the unconfined source, and the
+ * default must BE the one-sided shape without anybody asking for it.
+ */
+BOOST_AUTO_TEST_CASE( theTokamakSupportIsOneSidedAndUnchanged )
+{
+	meq::NormalisedRotatingSource confined( hydrogenicSpecies(), rotationProfile(),
+		ggPrimeProfile(), referenceRadius, 1.0 );
+	meq::NormalisedRotatingSource const unconfined( hydrogenicSpecies(),
+		rotationProfile(), ggPrimeProfile(), referenceRadius, 1.0 );
+	confined.setPlasmaSupport( true );
+
+	BOOST_TEST_REQUIRE( ( confined.plasmaSupportShape()
+	                      == meq::PlasmaSupportShape::OneSided ),
+	                    "the default support shape must be the tokamak's" );
+	BOOST_TEST( std::isinf( confined.plasmaSupportAxialEdge() ) );
+
+	for ( double const radius : testRadii )
+		for ( double const z : { 0.0, 2.0, -50.0 } )
+			for ( double const psi : { 0.3, 1.0, 1.05, 1.5 } )
+			{
+				BOOST_TEST_REQUIRE( unconfined.f( radius, z, psi ) != 0.0 );
+				BOOST_TEST( confined.f( radius, z, psi ) == unconfined.f( radius, z, psi ),
+				            "a one-sided support changed F at R = " << radius
+				            << ", z = " << z << ", Psi = " << psi );
+				BOOST_TEST( confined.dFdPsi( radius, z, psi )
+				            == unconfined.dFdPsi( radius, z, psi ) );
+			}
+
+	// Outside, Psi <= 0, it is zero -- the one bound a tokamak has.
+	BOOST_TEST( confined.f( testRadii[ 0 ], 0.0, -0.1 ) == 0.0 );
+
+	// AND THE BOX IS REVERSIBLE: asking for the one-sided shape back puts the
+	// source exactly where it started.
+	confined.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, 0.5 );
+	BOOST_TEST( confined.f( testRadii[ 0 ], 0.0, 1.05 ) == 0.0 );
+	confined.setPlasmaSupportShape( meq::PlasmaSupportShape::OneSided );
+	BOOST_TEST( ( confined.plasmaSupportShape() == meq::PlasmaSupportShape::OneSided ) );
+	BOOST_TEST( confined.f( testRadii[ 0 ], 2.0, 1.05 )
+	            == unconfined.f( testRadii[ 0 ], 2.0, 1.05 ) );
+}
+
+/*
+ * THE AXIAL EDGE IS PRESCRIBED, AND A BOX WITHOUT ONE IS REFUSED.
+ *
+ * An infinite edge would be a mirror support with no axial bound -- geq's
+ * flux-only mask, which M-168 measured enrolling the expander as plasma -- so
+ * it takes more than a default to ask for it. A refused call must leave the
+ * source as it was.
+ */
+BOOST_AUTO_TEST_CASE( aBoxWithoutAFinitePositiveEdgeIsRefused )
+{
+	meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(),
+		ggPrimeProfile(), referenceRadius, 1.0 );
+
+	for ( double const bad : { 0.0, -0.5, std::numeric_limits<double>::infinity(),
+	                           std::numeric_limits<double>::quiet_NaN() } )
+	{
+		BOOST_CHECK_THROW( source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box,
+		                                                 bad ),
+		                   std::invalid_argument );
+		BOOST_TEST( ( source.plasmaSupportShape() == meq::PlasmaSupportShape::OneSided ) );
+		BOOST_TEST( source.plasmaSupport() == false,
+		            "a refused box must not have switched the support on" );
+	}
+	BOOST_CHECK_THROW( source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box ),
+	                   std::invalid_argument );
 }

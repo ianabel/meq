@@ -879,6 +879,17 @@ residual, never the continuous equation.
 CONTROL.** `setAxisConstraint()` chooses; `AxisConstraint::LocatedAxis` is the
 default and constrains `ψ_ax` at a zero of `q_h`.
 
+**`AxisConstraint::PrescribedPoint` IS `setBoundaryFluxPoint()`'s ROW FOR
+`ψ_ax`**, selected by `setAxisFluxPoint( R, z )`: a fixed point, the exact row,
+corner 1, no envelope term, no root find. Unlike `LocatedAxis` its row is live
+at iteration 0, because it is built from the point located once per solve and
+not from `constraintLocated`, which the cold reference clears. It exists for the
+mirror, which has no interior extremum (`MIRROR-PLAN.md` MR-2). On a tokamak
+pinned at the located axis it is the same equation with the position term held
+exactly, so it is also the control that isolates the located row's dropped
+envelope term: same root, quadratic where `LocatedAxis` is linear
+(→ **[M-259](MEASUREMENTS.md#m-259)**).
+
 What follows describes `AxisConstraint::NodalMaximum`, which is what the control
 does and is why it is worth having: the largest nodal value differs from the
 maximum of the polynomial by `O(h^{k+1})`, both converge to `max ψ`, and the

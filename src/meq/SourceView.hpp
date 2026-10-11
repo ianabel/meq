@@ -66,7 +66,7 @@
  * `meq::ScaledProfile` around something that is not itself representable.
  *
  * THE PLASMA SUPPORT IS TWO TESTS AND ONLY ONE OF THEM IS HERE. The pointwise
- * `insidePlasma( psi )` is arithmetic on the value and is in `sourceF()`.
+ * `insidePlasma( R, z, psi )` is arithmetic on the point and is in `sourceF()`.
  * XP-1's CONNECTIVITY test is over the element adjacency graph, is decided by
  * the solver, and reaches the integrator as a per-element flag -- so it stays
  * outside this header, exactly as it stays outside meq::Source.
@@ -168,6 +168,18 @@ namespace meq
 		mfem::real_t supportAxis;
 		mfem::real_t supportBoundary;
 		int confineToPlasma;           ///< whether insidePlasma() gates the term
+		/*
+		 * THE SUPPORT'S SHAPE, AND IT IS CARRIED RATHER THAN REFUSED.
+		 * meq::PlasmaSupportShape::Box is a mirror's -- `0 < Psi <= 1` and
+		 * `|z| <= axialEdge` -- and every caller of insidePlasmaValue() already
+		 * holds `z`, so honouring it is two scalars and two comparisons. A
+		 * refusal would have been one line, and it would also have left
+		 * DeviceNPCDevice.cpp's refresh(), which keeps the last view it COULD
+		 * build, integrating a one-sided support after the source had been
+		 * boxed. Zero-initialised by makeSourceView(), which is OneSided.
+		 */
+		int supportShape;              ///< a meq::PlasmaSupportShape
+		mfem::real_t axialEdge;        ///< Box only: the |z| bound
 		ProfileView pPrime;            ///< p'( Psi )
 		ProfileView ggPrime;           ///< gg'( Psi )
 	};
@@ -367,16 +379,28 @@ namespace meq
 		                      + k[ i + 1 ].derivative*delta*hermite11Prime( t ) )/delta );
 	}
 
-	/// Whether @a psi is inside the plasma, pointwise -- the value test only.
-	/// Normalised flux is positive inside by construction, whichever sign the
-	/// span has, which is why this is a product and not a comparison on psi.
+	/// Whether ( @a z, @a psi ) is inside the plasma, pointwise -- the value
+	/// test only. meq::NormalisedSource::insidePlasma() written once more, in
+	/// its order: normalised flux is positive inside by construction, whichever
+	/// sign the span has, which is why the one-sided test is a product and not
+	/// a comparison on psi, and the box's upper bound is on Psi for the same
+	/// reason. `SourceViewTests` holds the two to the bit across both shapes.
 	MFEM_HOST_DEVICE inline bool insidePlasmaValue( SourceView const &view,
+	                                                mfem::real_t z,
 	                                                mfem::real_t psi )
 	{
 		if ( !view.confineToPlasma )
 			return true;
 		mfem::real_t const span = view.supportAxis - view.supportBoundary;
-		return ( psi - view.supportBoundary )*span > mfem::real_t( 0 );
+		if ( view.supportShape == static_cast<int>( PlasmaSupportShape::OneSided ) )
+			return ( psi - view.supportBoundary )*span > mfem::real_t( 0 );
+
+		// PlasmaSupportShape::Box.
+		mfem::real_t const height = z < mfem::real_t( 0 ) ? -z : z;
+		if ( !( height <= view.axialEdge ) )
+			return false;
+		mfem::real_t const normalised = ( psi - view.supportBoundary )/span;
+		return normalised > mfem::real_t( 0 ) && normalised <= mfem::real_t( 1 );
 	}
 
 	/**
@@ -388,14 +412,14 @@ namespace meq
 	MFEM_HOST_DEVICE inline mfem::real_t sourceF( SourceView const &view,
 	                                              KnotView const *knots,
 	                                              mfem::real_t radius,
-	                                              mfem::real_t /* z */,
+	                                              mfem::real_t z,
 	                                              mfem::real_t psi )
 	{
 		if ( view.kind == static_cast<int>( SourceKind::Soloviev ) )
 			return -( ( mfem::real_t( 1 ) - view.solovievA )*radius*radius
 			          + view.solovievA );
 
-		if ( !insidePlasmaValue( view, psi ) )
+		if ( !insidePlasmaValue( view, z, psi ) )
 			return mfem::real_t( 0 );
 
 		mfem::real_t const span = view.psiAxis - view.psiBoundary;
@@ -421,13 +445,13 @@ namespace meq
 	MFEM_HOST_DEVICE inline mfem::real_t sourceDFdPsi( SourceView const &view,
 	                                                   KnotView const *knots,
 	                                                   mfem::real_t radius,
-	                                                   mfem::real_t /* z */,
+	                                                   mfem::real_t z,
 	                                                   mfem::real_t psi )
 	{
 		if ( view.kind == static_cast<int>( SourceKind::Soloviev ) )
 			return mfem::real_t( 0 );
 
-		if ( !insidePlasmaValue( view, psi ) )
+		if ( !insidePlasmaValue( view, z, psi ) )
 			return mfem::real_t( 0 );
 
 		mfem::real_t const span = view.psiAxis - view.psiBoundary;
@@ -457,14 +481,14 @@ namespace meq
 	 */
 	MFEM_HOST_DEVICE inline void sourceNormalisationDerivatives(
 		SourceView const &view, KnotView const *knots,
-		mfem::real_t radius, mfem::real_t /* z */, mfem::real_t psi,
+		mfem::real_t radius, mfem::real_t z, mfem::real_t psi,
 		mfem::real_t &dFdAxis, mfem::real_t &dFdBoundary )
 	{
 		dFdAxis = mfem::real_t( 0 );
 		dFdBoundary = mfem::real_t( 0 );
 		if ( view.kind == static_cast<int>( SourceKind::Soloviev ) )
 			return;
-		if ( !insidePlasmaValue( view, psi ) )
+		if ( !insidePlasmaValue( view, z, psi ) )
 			return;
 
 		mfem::real_t const span = view.psiAxis - view.psiBoundary;

@@ -26,9 +26,12 @@ axis and represents the exterior by Gegenbauer modes decaying as `ρ^(1−n)`,
 which is exact where the exterior is current-free.
 
 **IT IS SATISFIED BY PLACING `Γ` OUTSIDE THE MACHINE, AT EVERY MACH NUMBER** —
-[M-169](MEASUREMENTS.md#m-169). The machine ends at `ρ = 1.63` and the plasma
-with it, so a semicircle at `ρ_Γ = 1.7` has **exactly zero** current beyond it at
-`M = 2` as at `M = 6`. There is no Mach threshold for admissibility.
+[M-169](MEASUREMENTS.md#m-169). The plasma ends inside `ρ = 1.63`, so a
+semicircle beyond it has **exactly zero** plasma current outside it at `M = 2` as
+at `M = 6`. There is no Mach threshold for admissibility. **The copper is a
+different matter and decides `ρ_Γ`**: geq's coil packs span `ρ = 1.27` to
+`2.18`, so `Γ` has to clear 2.18 and the coils are meshed inside it
+([M-260](MEASUREMENTS.md#m-260)).
 
 **AN EARLIER VERSION OF THIS SECTION SAID `M ≳ 6` AND THAT WAS WRONG.** It rested
 on measuring the current beyond `ρ = 1.2` — a radius carried out of an
@@ -78,7 +81,7 @@ be buying back.
 |---|---|
 | `meq::RotatingSource` and its two closures | [M-167](MEASUREMENTS.md#m-167). Nothing owed |
 | the exterior DtN | `meq::ExteriorDtN` is a **semicircle centred on the axis**, and every mode vanishes on the axis identically, so the flat side needs no treatment. It knows nothing about what is inside it |
-| conductors outside `Γ` | FB-7's `meq::ExteriorCoilSet` / `setExteriorConductors()`. `ψ = ψ_coil + ψ̃` with `Δ*ψ_coil = 0` inside, so the coils enter **only through `Γ`**, additively and known, with no new unknowns. Mirror coils sit at `ρ ≈ 1.7` where the plasma is inside `ρ ≈ 1.5` |
+| conductors **inside** `Γ` | geq's packs span `ρ = 1.27` to `2.18` while the plasma reaches `ρ ≈ 1.51` at the throat, so no semicircle puts them outside `Γ`, and `ρ_Γ = 1.7` straddles both (`ExteriorCoilSet::clearance()` and `ConductorField::containment()` both refuse it). The packs are **meshed** rectangles — `[[coils]]`, `CoilAugmentedSource` — inside `Γ = 3.0`. FB-7's `ExteriorCoilSet` does not apply to this machine. [M-260](MEASUREMENTS.md#m-260) |
 | the bordered Newton | the `( N + 2 )` elimination already carries `ψ_ax`, `ψ_bnd` and the exterior coefficients as one system |
 | `ψ_bnd` as an unknown pinned at a POINT | `setBoundaryFluxPoint( R, z )`. Under NPC the row is exactly `−e_j` and the corner exactly 1, neither differenced. **This is the mechanism the mirror needs twice** |
 | meshing | `tools/mesh/halfdisc.py`, a semicircle reaching the axis with coils meshed to, driven from `[mesh.generate]` |
@@ -273,9 +276,16 @@ should be re-pointed at the fixed-`R` gauge, which is where the trap still lives
 the support is not free:
 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *A plasma-current border for the mirror*
 
-**`g = 0` is fine.** `F = μ₀ R² ∂p/∂ψ` with `∂p/∂ψ ≠ 0` at the inner label, so
-the trivial branch that `examples/rotating-rectangle.toml` warns about is not
-reached. The vacuum coil field is the initial guess.
+**`g = 0` is fine.** `F = μ₀ R² ∂p/∂ψ ≠ 0` inside the annulus, so the trivial
+branch that `examples/rotating-rectangle.toml` warns about is not reached. The
+vacuum coil field is the initial guess.
+
+**BUT `F` MUST VANISH AT THE INNER LABEL, NOT ONLY AT THE OUTER ONE.** Under the
+box, `Ψ = 1` is an edge of the support, and it moves with `ψ_ax`.
+`setPlasmaSupport()`'s precondition — `F → 0` at the edge, or the Newton
+Jacobian is missing the edge term — therefore applies at both labels, so a
+mirror's profiles need `p′` to vanish at `Ψ = 1` as well as at `Ψ = 0`. That
+decides how MR-4 writes them, and how geq's profiles are transferred.
 
 ## The stages
 
@@ -288,8 +298,11 @@ Each ends at a measured acceptance, not at "it runs".
 Mach number with `Γ` outside the machine, so what is left is small and is
 engineering rather than physics:
 
-* **A choice**: `ρ_Γ ≳ 1.7` for this machine, and `N = 32` for `M = 2` or 16 for
-  `M ≥ 4`. Both are existing parameters.
+* **A choice**: `ρ_Γ` must clear the **copper** (`ρ = 2.18`), not the plasma.
+  `ρ_Γ = 3.0` with `N = 32` is measured and on the plateau
+  ([M-260](MEASUREMENTS.md#m-260)). [M-169](MEASUREMENTS.md#m-169)'s counts hold
+  for the plasma's own current; with the coils inside `Γ`, the copper's
+  `( 2.18/ρ_Γ )^n` tail sets `N`. Both are existing parameters.
 * **A MEQ-side diagnostic**: the fraction of `∫|F|/R` lying outside `Γ`,
   reported on the converged answer. It is the mirror's analogue of
   `checkAxisSource()` — one-sided, refusing or warning on a positive detection —
@@ -300,7 +313,24 @@ configuration, and a mode-count sweep on MEQ's own solve reproduces
 [M-169](MEASUREMENTS.md#m-169)'s trend. **The risk this stage existed to retire
 is retired**, so it no longer gates the others; MR-1 and MR-2 can start now.
 
-### MR-1 — the plasma support becomes a box in `( Ψ, z )`
+### MR-1 — the plasma support becomes a box in `( Ψ, z )` — DONE
+
+**DONE**, → [M-258](MEASUREMENTS.md#m-258). `meq::PlasmaSupportShape::Box`, set
+by `NormalisedSource::setPlasmaSupportShape( Box, z_edge )`, makes the support
+`0 < Ψ ≤ 1` and `|z| ≤ z_edge`; the upper bound is written in `Ψ`, so a mirror's
+negative span needs nothing. Asking for a box switches the support on; an edge
+that is not finite and positive is refused. `OneSided` stays the default and is
+the tokamak's `Ψ > 0` unchanged — it must not gain `Ψ ≤ 1`, because `ψ_h` can
+overshoot the located `ψ_ax`. `insidePlasma( R, z, ψ )` takes `f()`'s
+arguments and has no flux-only form, because a flux-only overload would be a
+gate that silently skips the axial bound. The box reaches `f`, `dF/dψ`, both
+normalisation columns, the coil wrapper by forwarding, and the device
+`SourceView`. XP-1's fill is off under the box by a switch in
+`plasmaComponentWanted()`, asserted in `MirrorSupport` against a one-sided
+control, and a mask left from an earlier fill is cleared rather than kept.
+`GradShafranovSolver::checkAxialCutoff()` reports the peak `μ₀j_φ`, its value on
+`|z| = z_edge` and their ratio; it is a report, since no threshold is measured.
+
 
 `insidePlasma()` gains a radial upper bound (`Ψ ≤ 1`) and an axial one
 (`|z| ≤ z_edge`), and the element-level fill is switched off on this path as a
@@ -314,17 +344,38 @@ mutation-checked the way `aConfinedRotatingSourceVanishesOutsideThePlasma` was;
 plus a diagnostic reporting the current density reached at the cutoff, so the
 approximation is visible. Cheap, and it needs no mirror solve.
 
-### MR-2 — `AxisConstraint::PrescribedPoint`
+### MR-2 — `AxisConstraint::PrescribedPoint` — DONE
+
+**DONE**, → [M-259](MEASUREMENTS.md#m-259). `setAxisFluxPoint( R, z )` selects
+`AxisConstraint::PrescribedPoint`. The row is the containing element's potential
+shape functions, located once per solve, corner 1, live from iteration 0.
+Pinned at the located axis it reproduces `LocatedAxis` to 11 digits in `ψ_ax`
+and `ψ_bnd` on the stiff high-β case and FB-3's two-border case, and is
+quadratic where `LocatedAxis` is linear. The setter refuses a non-finite point,
+`R ≤ 0`, a point outside the mesh, and choosing the mode without a point.
+`axisWasLocated()` is false under it and `axisR()`/`axisZ()` report the pin.
+
 
 `ψ_ax` pinned at a prescribed point, reusing `ψ_bnd`'s border row.
 **Acceptance**: on an existing *tokamak* fixture, prescribing the point at the
 known axis reproduces `LocatedAxis`'s answer to round-off. **It needs no mirror
 at all**, which is what makes it a safe stage to land early.
 
-### MR-3 — the vacuum mirror, through MEQ
+### MR-3 — the vacuum mirror, through MEQ — DONE
 
-No plasma. Mirror coils as `meq::ExteriorCoilSet` outside `Γ`, half-disc mesh,
-DtN live. **Acceptance**: MEQ's `ψ` against the coil field computed directly from
+**DONE**, `VacuumMirror`, → [M-260](MEASUREMENTS.md#m-260). The coils are meshed
+inside `Γ = 3.0`, not outside it (see the table above).
+* `ψ` converges on `coilPsi()` at `k+1` for `k = 1…3`, over the machine region
+  and over `D_h`.
+* `N` stops mattering over `D_h` at 24, about where the copper's trace tail,
+  `0.725^N`, drops below the discretisation error. The machine region is on its
+  plateau by `N = 8`.
+* Against geq the agreement is 7.29e-04, and that is geq's coil model: ten
+  filaments, the midpoint rule for the winding, 7.28e-04 from `coilPsi()` with
+  no solve. MEQ's own error at those points is 1.6e-06, and handed geq's
+  filaments MEQ agrees with geq to 3.9e-10.
+
+No plasma. Mirror coils, half-disc mesh, DtN live. **Acceptance**: MEQ's `ψ` against the coil field computed directly from
 `meq::coilPsi()`, and against geq's own vacuum field. This validates the
 geometry, the mesh, the coil model and the exterior **together and without the
 plasma**, which is the rung that does not exist today between the analytic
@@ -334,7 +385,9 @@ elongated machine needs on `Γ` — the number MR-0 bounds and this one measures
 ### MR-4 — the free-boundary rotating mirror
 
 Everything at once: rotating source, both labels prescribed at points, two-sided
-support, exterior coils, DtN, bordered Newton. **Acceptance**: agreement with
+support, meshed coils inside `Γ = 3.0`, DtN, bordered Newton. **Start from
+MR-3's geometry and `N = 32`**; whether the plasma's own current needs more
+modes at that `Γ` is not yet measured. **Acceptance**: agreement with
 geq's converged rotating mirror, in the same mode MEQ solves in — `CLAUDE_FB.md`'s
 standing rule. Expect the comparison to be limited by geq's `φ₀` convergence
 before it is limited by MEQ; [M-167](MEASUREMENTS.md#m-167) measured that at
@@ -353,8 +406,9 @@ shipped file, because what rots about an example is the file.
 
 1. ~~**MR-0 fails.**~~ **RETIRED** by [M-169](MEASUREMENTS.md#m-169): zero
    unrepresentable current at `ρ_Γ = 1.7`, at every Mach number.
-2. ~~**The mode count `N` is large.**~~ **MEASURED and small**: 32 modes at
-   `M = 2`, 16 at `M ≥ 4`. MR-3 confirms it on MEQ's own solve.
+2. ~~**The mode count `N` is large.**~~ **MEASURED and moderate**: the copper
+   sets it, not the Mach number — 24 to 32 at `ρ_Γ = 3.0`
+   ([M-260](MEASUREMENTS.md#m-260)).
 3. ~~**The support's element-level half.**~~ **DISSOLVED** by the axial cutoff:
    the support is a bounded box, so no connected component and no seed is needed
    and the fill is simply off here. What remains is that turning it off must be a

@@ -1046,7 +1046,53 @@ namespace meq
 				 * inside each difference. It is REFUSED there rather than
 				 * silently downgraded.
 				 */
-				LocatedAxis
+				LocatedAxis,
+
+				/**
+				 * `psi_ax = psi_h( R, z )` at a point the CALLER names, by
+				 * setAxisFluxPoint(), evaluated inside the element containing
+				 * it. MIRROR-PLAN.md section 1 and stage MR-2.
+				 *
+				 * **IT EXISTS FOR A CONFIGURATION WITH NO MAGNETIC AXIS.** A
+				 * mirror's `psi` rises monotonically outward from `R = 0`, so
+				 * there is no interior extremum for NodalMaximum to take nor a
+				 * zero of `q_h` for LocatedAxis to find. The plasma is an
+				 * annulus between two flux surfaces, and each is labelled by the
+				 * flux at a prescribed point -- `psi_bnd` by
+				 * setBoundaryFluxPoint(), and `psi_ax`, the inner label, by
+				 * this. "Axis" is then the name of the normalisation's `Psi = 1`
+				 * end rather than a claim about the topology.
+				 *
+				 * **THE ROW IS setBoundaryFluxPoint()'s, REUSED.** The point is
+				 * located ONCE per solve and the row is that element's potential
+				 * shape functions there -- `( k+1 )( k+2 )/2` entries, exact and
+				 * undifferenced -- and the corner is exactly 1. Nothing moves
+				 * with the solution, so there is no root find, no warm start, no
+				 * envelope term and no AxisRow choice to make; `-e_j` is the
+				 * special case where the point is a node.
+				 *
+				 * **AND THE ROW IS LIVE FROM ITERATION 0**, as psi_bnd's
+				 * prescribed row always was. LocatedAxis's is EMPTY there --
+				 * the cold reference finds no axis on a zero field, so its first
+				 * step is the decoupled `psi_ax <- psi_h( x* )` -- and
+				 * solveWithNormalisation() records that as a branch-selection
+				 * accident it has declined to repair. A prescribed point has
+				 * nothing to locate and so nothing for the accident to happen
+				 * to.
+				 *
+				 * **WHAT IT DOES NOT DO IS CHECK THAT THE POINT IS AN AXIS.**
+				 * axisWasLocated() is false under it, whatever the field holds,
+				 * and axisR() and axisZ() report the prescribed point because
+				 * that is where `psi_ax` was attained. On a tokamak a point that
+				 * is not the O-point gives a DIFFERENT equilibrium, normalised
+				 * by a flux below the axis's, and that is the caller's choice to
+				 * make. CriticalPointFinder::checkAxis() finding no interior
+				 * extremum is a WARNING on this path and must stay one.
+				 *
+				 * Choosing it without a point is REFUSED rather than defaulted:
+				 * see setAxisConstraint().
+				 */
+				PrescribedPoint
 			};
 
 			/**
@@ -1304,7 +1350,53 @@ namespace meq
 			/// 2026-09-07 was measured with it, so a table that moves is a
 			/// statement about the definition rather than about the solver, and
 			/// there has to be a way to take both readings on one problem.
+			///
+			/// @throws std::logic_error for AxisConstraint::PrescribedPoint when
+			///         setAxisFluxPoint() has not named a point. There is no
+			///         point to default to -- the symmetry axis carries
+			///         `psi = 0` and the domain's centre is nobody's plasma --
+			///         and a default would decide which equilibrium is reported.
 			void setAxisConstraint( AxisConstraint choice );
+
+			/**
+			 * PIN `psi_ax` AT A PRESCRIBED POINT -- AxisConstraint::
+			 * PrescribedPoint, which this also SELECTS. MIRROR-PLAN.md MR-2.
+			 *
+			 * setBoundaryFluxPoint()'s twin for the other label: the constraint
+			 * is `psi_ax = psi_h( R, z )` inside the element containing the
+			 * point, the row is that element's potential shape functions there,
+			 * and the corner is exactly 1. See the enumerator for why it exists
+			 * and what it does not claim.
+			 *
+			 * **SELECTING THE MODE IS PART OF THE CALL**, on
+			 * setLimiterSurface()'s precedent: a point for `psi_ax` has no
+			 * meaning under either other mode, so naming one and leaving the
+			 * constraint where it was would be a call that silently did nothing.
+			 * setAxisConstraint() can switch away afterwards and back again --
+			 * the point is kept -- which is what lets one solver take both
+			 * readings of one problem.
+			 *
+			 * **THE POINT IS LOCATED HERE AS WELL AS PER SOLVE.** Here, so that
+			 * a point outside the mesh costs milliseconds rather than a prepared
+			 * solve; per solve, because an adaptive cycle refines the mesh under
+			 * a solver that keeps its settings, and an element index taken now
+			 * names a different element after a refinement without throwing.
+			 *
+			 * **NPC ONLY**, for setBoundaryFluxPoint()'s reason -- the row is a
+			 * covector on the POTENTIAL -- and NPC is the only ordering, so
+			 * there is nothing to refuse.
+			 *
+			 * Inert without a NormalisedSource: `psi_ax` is then not an unknown
+			 * and there is no row for the point to build.
+			 *
+			 * @throws std::invalid_argument if the point is not finite, or `R`
+			 *         is not strictly positive -- `psi` vanishes on the symmetry
+			 *         axis, so a label there is zero by construction.
+			 * @throws std::runtime_error if no element of the mesh contains the
+			 *         point, exactly as setBoundaryFluxPoint()'s solve does. The
+			 *         solver is left as it was.
+			 */
+			void setAxisFluxPoint( double radius, double z );
 
 			/// The value setAxisConstraint() last set.
 			AxisConstraint axisConstraint() const;
@@ -1404,6 +1496,10 @@ namespace meq
 			/// for, and also when LocatedAxis was asked for and no O-point could
 			/// be reached -- the annulus branch, where there is no closed surface
 			/// to be an axis of. The two are distinguished by axisConstraint().
+			///
+			/// Under AxisConstraint::PrescribedPoint it is FALSE -- nothing was
+			/// located -- and axisR() and axisZ() report the prescribed point,
+			/// since that is where `psi_ax` was attained.
 			bool axisWasLocated() const;
 			double axisR() const;
 			double axisZ() const;
@@ -1496,6 +1592,12 @@ namespace meq
 			 * **INERT UNLESS setPlasmaSupport() IS ON.** With the support off
 			 * the domain IS the plasma and there is nothing to disconnect, so no
 			 * mask is built and every existing solve is bit-unchanged.
+			 *
+			 * **AND OFF, WHATEVER IS CHOSEN HERE, UNDER
+			 * meq::PlasmaSupportShape::Box** -- a mirror's support, bounded in
+			 * `Psi` on both sides and in `|z|`, which is pointwise by
+			 * construction and has no magnetic axis to seed a fill from.
+			 * MIRROR-PLAN.md §3, and plasmaComponentWanted() is the branch.
 			 */
 			enum class PlasmaConnectivity
 			{
@@ -1527,8 +1629,11 @@ namespace meq
 			 *        potential block alone, which is what the condensation path
 			 *        has.
 			 *
-			 * Does nothing unless a NormalisedSource is set, its plasma support
-			 * is on, and PlasmaConnectivity::Component is chosen.
+			 * Fills nothing unless a NormalisedSource is set, its plasma support
+			 * is on and meq::PlasmaSupportShape::OneSided, and
+			 * PlasmaConnectivity::Component is chosen. Where any of those fails
+			 * a mask left by an earlier fill is cleared, so holds() is the
+			 * constant true again apart from setPlasmaExclusion().
 			 *
 			 * @throws std::invalid_argument if @a state is neither of those two
 			 *         sizes. A vector of the wrong length would otherwise be
@@ -3946,6 +4051,82 @@ namespace meq
 			 */
 			AxisSourceCheck checkAxisSource( double tolerance = 1.0e-6 ) const;
 
+			/**
+			 * **THE CURRENT DENSITY A MIRROR'S AXIAL CUTOFF CUTS THROUGH**, so
+			 * that the approximation meq::PlasmaSupportShape::Box makes is
+			 * visible on every answer rather than assumed small.
+			 * MIRROR-PLAN.md MR-1 and risk 3b.
+			 *
+			 * The box's `|z| <= z_edge` is PRESCRIBED, at or near the throat,
+			 * because beyond it the flux tube flares into the expander and the
+			 * density is within this model zero. That is a modelling choice and
+			 * the answer can contradict it: where the plasma still carries
+			 * current at `|z| = z_edge` the cutoff is a jump in `F`, and the
+			 * profiles' own clamping does not soften it. This is the number
+			 * that says how large the jump is.
+			 *
+			 * `F/R` is `mu_0 j_phi`, so every field below is a current density
+			 * in those units, and the ratio is units-free.
+			 */
+			struct AxialCutoffCheck
+			{
+				/// Whether there is a box to ask about: a NormalisedSource with
+				/// its support on and PlasmaSupportShape::Box. FALSE on every
+				/// tokamak run, and every other field is then zero.
+				bool applies = false;
+
+				/// The source's `z_edge`.
+				double axialEdge = 0.0;
+
+				/// The largest `|F|/R` over the potential NODES with `R > 0`,
+				/// in elements the support is assembled on -- the plasma's own
+				/// peak current density, which is the scale the cutoff value is
+				/// judged against. The nodes for checkAxisSource()'s reason:
+				/// on the Gauss-Lobatto basis a node value IS the field there.
+				double peak = 0.0;
+				double peakR = 0.0;
+				double peakZ = 0.0;
+
+				/// The largest `|F|/R` ON `|z| = z_edge`, from the inside. The
+				/// box is closed there, so `F` evaluated at the edge is the
+				/// interior limit of the jump.
+				double atCutoff = 0.0;
+				double cutoffR = 0.0;
+				double cutoffZ = 0.0;
+
+				/// How many of the samples along `z = +z_edge` and
+				/// `z = -z_edge` lay in the mesh. ZERO means the cutoff is
+				/// outside the domain, so the support's axial bound is the
+				/// domain's and there is nothing for this to measure -- which is
+				/// not the same statement as a cutoff carrying no current, and
+				/// is kept separate for that reason.
+				int cutoffSamples = 0;
+
+				/// atCutoff/peak. Zero where there is no current at all.
+				double relative = 0.0;
+			};
+
+			/**
+			 * Evaluate the above at the current iterate -- after solve(), the
+			 * converged answer. A report and not a verdict: what ratio a
+			 * caller should refuse is a modelling question for the
+			 * configuration, and no measurement here calibrates one yet.
+			 *
+			 * The PLASMA term alone, NormalisedSource::scaledF(): a coil-
+			 * augmented source's `f()` is the sum, and a conductor at the
+			 * throat is not plasma current being cut. The TOTAL flux, as every
+			 * other consumer of `psi` reads it under the coil split.
+			 *
+			 * @param samples points along each of the two cutoff lines, spread
+			 *        uniformly across the mesh's radial extent and located by
+			 *        meq::GridSampler, which inverts the element loop rather
+			 *        than searching. A sample in an element setPlasmaExclusion()
+			 *        names is still counted, which can only over-report.
+			 * @throws std::invalid_argument if @a samples is below two.
+			 * @throws std::logic_error if prepare() has not run.
+			 */
+			AxialCutoffCheck checkAxialCutoff( int samples = 513 ) const;
+
 			/// The outward flux of `q` through the true boundary `Gamma`:
 			/// `oint_Gamma q.nu dGamma`.
 			///
@@ -5018,7 +5199,8 @@ namespace meq
 
 			/// The element containing a point, and that element's potential
 			/// shape functions AT the point -- what
-			/// LimiterConstraint::ExactPoint pins `psi_bnd` with.
+			/// LimiterConstraint::ExactPoint pins `psi_bnd` with, and
+			/// AxisConstraint::PrescribedPoint pins `psi_ax` with.
 			///
 			/// `psi_h` is discontinuous, so a point landing exactly on a face is
 			/// two-valued; the first element reporting the point inside wins,
@@ -5026,7 +5208,7 @@ namespace meq
 			/// jump, `O( h^{k+1} )`.
 			///
 			/// @throws std::runtime_error if no element contains the point,
-			///         which for a limiter contact means it is outside `Omega`.
+			///         which for a prescribed point means it is outside `Omega`.
 			void locatePotentialPoint( double radius, double z, int &element,
 			                           mfem::Vector &shape,
 			                           mfem::Array<int> &dofs ) const;
@@ -5238,6 +5420,13 @@ namespace meq
 			bool axisLocatedValue = false;
 			double axisRValue = 0.0;
 			double axisZValue = 0.0;
+
+			/// setAxisFluxPoint(): AxisConstraint::PrescribedPoint's point, and
+			/// whether one was named. Separate from the choice so that switching
+			/// the constraint away and back keeps the point.
+			bool axisFluxPointIsSet = false;
+			double axisFluxR = 0.0;
+			double axisFluxZ = 0.0;
 
 			Globalisation globalisationChoice;
 
@@ -5469,7 +5658,8 @@ namespace meq
 			PlasmaConnectivity connectivityChoice = PlasmaConnectivity::Component;
 
 			/// The fill. Unfilled -- so holds() is the constant true -- unless a
-			/// confined source and PlasmaConnectivity::Component ask for it.
+			/// confined one-sided source and PlasmaConnectivity::Component ask
+			/// for it; plasmaComponentWanted() is that test.
 			PlasmaComponent plasmaComponentMask;
 			std::vector< int > plasmaExclusionAttributeList;
 

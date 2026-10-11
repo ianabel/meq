@@ -192,6 +192,11 @@ set(MEQ_CONVERGENCE_TESTS
 	# solved field; the fill itself is MFEM-free and is unit tested as
 	# PlasmaComponentTests.
 	PlasmaConnectivity
+	# MIRROR-PLAN.md MR-1, the solver's half of a mirror's support: XP-1's fill
+	# is OFF under PlasmaSupportShape::Box, asserted against a one-sided control
+	# on the same field, and checkAxialCutoff() reads the current the prescribed
+	# |z| bound cuts through. No solve runs; the field is a closed form.
+	MirrorSupport
 	# XP-2: psi_bnd from the located X-point, as an outer fixed point.
 	XPointOuter
 	# XP-3: the same statement made INSIDE the Newton -- the X-point is two more
@@ -243,6 +248,12 @@ set(MEQ_CONVERGENCE_TESTS
 	# of q_h and must find 1 there -- and it is a convergence test rather than a
 	# unit one because half of it drives the bordered Newton.
 	AxisAgreement
+	# MIRROR-PLAN.md MR-2: psi_ax pinned at a PRESCRIBED point, which a mirror
+	# needs because it has no magnetic axis. It needs no mirror to test: on a
+	# tokamak, pinned at the axis LocatedAxis converged to, the two constraints
+	# are one equation, so the answers must agree to the root finder's accuracy
+	# -- and the same pin a quarter of an element away is the control that must not.
+	PrescribedAxisPoint
 	# FB-6's remaining capability gap: the limiter as a CURVE rather than a
 	# prescribed point, restricted to the POLYGON the mesh is fitted to. A
 	# convergence test rather than a unit one because the contact is found on a
@@ -587,6 +598,35 @@ if(TARGET meq_core AND NOT _rotating_index EQUAL -1
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
 	message(STATUS "meq: GeqSourceComparison not registered")
+endif()
+
+# VacuumMirror is MIRROR-PLAN.md's MR-3: geq's mirror coils, no plasma, the
+# half-disc from tools/mesh/halfdisc.py and the exterior coupling live, against
+# meq::coilPsi() at a rate and against geq's own vacuum field.
+#
+# IT MAKES ITS MESH, as InverseSolve does through meq-run: the geometry is a
+# build product of halfdisc.py's command line, written once in the test, so it
+# needs python3 with gmsh at test time. The mesh goes to the BUILD tree rather
+# than the source tree, which is the working directory only because the geq
+# reference is named relative to it -- GeqSourceComparison's reason.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/VacuumMirror.cpp")
+	add_executable(VacuumMirror "convergence/VacuumMirror.cpp")
+	target_include_directories(VacuumMirror PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(VacuumMirror PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(VacuumMirror PRIVATE
+		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
+		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+	add_test(NAME VacuumMirror COMMAND VacuumMirror
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(VacuumMirror PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: VacuumMirror not registered")
 endif()
 
 # ---------------------------------------------------------------------------

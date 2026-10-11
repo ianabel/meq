@@ -1,6 +1,7 @@
 #include "Source.hpp"
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -41,6 +42,41 @@ namespace meq
 	double MHDSource::mu0() const
 	{
 		return permeability;
+	}
+
+	void NormalisedSource::setPlasmaSupportShape( PlasmaSupportShape shape,
+	                                              double axialEdge )
+	{
+		// Every case returns, and a value no case names is refused rather than
+		// left to keep whichever shape was there before.
+		switch ( shape )
+		{
+			case PlasmaSupportShape::OneSided:
+				supportShape = shape;
+				axialEdgeValue = std::numeric_limits<double>::infinity();
+				return;
+
+			case PlasmaSupportShape::Box:
+				// Validated BEFORE anything is written, so a refused edge leaves
+				// the source exactly as it was rather than half-boxed.
+				if ( !std::isfinite( axialEdge ) || !( axialEdge > 0.0 ) )
+					throw std::invalid_argument(
+						"meq::NormalisedSource::setPlasmaSupportShape: a Box "
+						"support needs a finite, positive axial edge |z| <= "
+						"z_edge. An infinite one would be a mirror support "
+						"with no axial bound, which is the flux-only mask "
+						"M-168 measured enrolling the expander as plasma" );
+				supportShape = shape;
+				axialEdgeValue = axialEdge;
+				// A box IS a confinement; see the declaration for why asking
+				// for one switches the support on rather than waiting for a
+				// second call.
+				confinedToPlasma = true;
+				return;
+		}
+
+		throw std::invalid_argument(
+			"meq::NormalisedSource::setPlasmaSupportShape: unknown support shape" );
 	}
 
 	NormalisedMHDSource::NormalisedMHDSource( std::shared_ptr<Profile const> pPrime,
@@ -87,7 +123,7 @@ namespace meq
 		return psiAxisValue;
 	}
 
-	double NormalisedMHDSource::f( double radius, double, double psi ) const
+	double NormalisedMHDSource::f( double radius, double z, double psi ) const
 	{
 		// Psi = ( psi - psi_bnd )/span, and the profiles are differentiated with
 		// respect to Psi, so F carries one factor of 1/span. With psi_bnd = 0
@@ -97,7 +133,7 @@ namespace meq
 		// boundary is not an input -- it is wherever psi currently puts it. Off
 		// unless setPlasmaSupport() asked for it, and then this is one
 		// comparison. See NormalisedSource::setPlasmaSupport.
-		if ( !insidePlasma( psi ) )
+		if ( !insidePlasma( radius, z, psi ) )
 			return 0.0;
 
 		double const span = psiAxisValue - psiBoundaryValue;
@@ -107,7 +143,7 @@ namespace meq
 		       /span;
 	}
 
-	double NormalisedMHDSource::dFdPsi( double radius, double, double psi ) const
+	double NormalisedMHDSource::dFdPsi( double radius, double z, double psi ) const
 	{
 		// Two factors of 1/span, not one: the profiles are differentiated with
 		// respect to Psi and the argument carries a further 1/span. Dropping the
@@ -119,7 +155,7 @@ namespace meq
 		// cannot carry -- and which VANISHES exactly when the profiles vanish
 		// at the edge, which setPlasmaSupport() documents as its precondition
 		// and CLAUDE.md measures the cost of violating.
-		if ( !insidePlasma( psi ) )
+		if ( !insidePlasma( radius, z, psi ) )
 			return 0.0;
 
 		double const span = psiAxisValue - psiBoundaryValue;
@@ -129,7 +165,7 @@ namespace meq
 		       /( span*span );
 	}
 
-	bool NormalisedMHDSource::normalisationDerivatives( double radius, double /*z*/,
+	bool NormalisedMHDSource::normalisationDerivatives( double radius, double z,
 	                                                    double psi,
 	                                                    double &dFdAxis,
 	                                                    double &dFdBoundary ) const
@@ -139,7 +175,7 @@ namespace meq
 		// analytic column better than a differenced one rather than merely
 		// cheaper: a difference perturbs the normalisation, which MOVES THE
 		// EDGE, and then straddles it.
-		if ( !insidePlasma( psi ) )
+		if ( !insidePlasma( radius, z, psi ) )
 		{
 			dFdAxis = 0.0;
 			dFdBoundary = 0.0;

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -1069,4 +1070,67 @@ BOOST_AUTO_TEST_CASE( anUnavailableTraceSolverIsRefused )
 			                   std::invalid_argument );
 		}
 	}
+}
+
+/*
+ * AxisConstraint::PrescribedPoint's REFUSALS, which are what keep a prescribed
+ * point from being DEFAULTED. MIRROR-PLAN.md MR-2; the acceptance, which needs
+ * a solve, is PrescribedAxisPoint.cpp.
+ *
+ * Every candidate default chooses an equilibrium -- the symmetry axis carries
+ * psi = 0, the domain's centre is nobody's plasma, and the last located axis is
+ * another constraint's answer -- so choosing the mode without a point throws,
+ * and a point that cannot be one throws at the setter rather than at the solve.
+ * A refused setter leaves the solver as it was.
+ */
+BOOST_AUTO_TEST_CASE( aPrescribedAxisPointIsRefusedRatherThanDefaulted )
+{
+	using A = meq::GradShafranovSolver::AxisConstraint;
+
+	mfem::Mesh mesh = makeMesh( 4 );
+	meq::GradShafranovSolver solver( mesh, 1 );
+
+	BOOST_CHECK( solver.axisConstraint() == A::LocatedAxis );
+	BOOST_CHECK_THROW( solver.setAxisConstraint( A::PrescribedPoint ),
+	                   std::logic_error );
+	BOOST_CHECK( solver.axisConstraint() == A::LocatedAxis );
+
+	double const nan = std::numeric_limits<double>::quiet_NaN();
+	BOOST_CHECK_THROW( solver.setAxisFluxPoint( nan, 0.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( solver.setAxisFluxPoint( 1.0, nan ), std::invalid_argument );
+
+	// ON A MESH THAT REACHES THE AXIS, so that R = 0 is a point of Omega and it
+	// is the radius check refusing it rather than the mesh. On box() R = 0 is
+	// outside the mesh as well, so with the radius check deleted the setter
+	// still throws -- a runtime_error from the location, which this case would
+	// read as an unexpected exception rather than as the missing check.
+	{
+		mfem::Mesh axisMesh =
+			meq::tests::makeMesh( meq::tests::Rectangle{ 0.0, 1.0, -0.5, 0.5 }, 4 );
+		meq::GradShafranovSolver onAxis( axisMesh, 1 );
+		BOOST_CHECK_THROW( onAxis.setAxisFluxPoint( 0.0, 0.0 ),
+		                   std::invalid_argument );
+		BOOST_CHECK_THROW( onAxis.setAxisFluxPoint( 0.0, 0.25 ),
+		                   std::invalid_argument );
+		BOOST_CHECK( onAxis.axisConstraint() == A::LocatedAxis );
+		BOOST_CHECK_NO_THROW( onAxis.setAxisFluxPoint( 0.5, 0.0 ) );
+	}
+	BOOST_CHECK_THROW( solver.setAxisFluxPoint( -1.0, 0.0 ), std::invalid_argument );
+
+	// Outside box() [ 0.6, 1.4 ] x [ -0.6, 0.6 ], at a positive radius, so it
+	// is the mesh refusing it and not the radius check.
+	BOOST_CHECK_THROW( solver.setAxisFluxPoint( 2.0, 0.0 ), std::runtime_error );
+	BOOST_CHECK_THROW( solver.setAxisFluxPoint( 1.0, 0.9 ), std::runtime_error );
+	BOOST_CHECK( solver.axisConstraint() == A::LocatedAxis );
+	// And still refused afterwards: a failed setter named no point.
+	BOOST_CHECK_THROW( solver.setAxisConstraint( A::PrescribedPoint ),
+	                   std::logic_error );
+
+	// A point inside SELECTS the mode, and the point survives a switch away.
+	BOOST_CHECK_NO_THROW( solver.setAxisFluxPoint( 1.0, 0.0 ) );
+	BOOST_CHECK( solver.axisConstraint() == A::PrescribedPoint );
+	solver.setAxisConstraint( A::NodalMaximum );
+	BOOST_CHECK( solver.axisConstraint() == A::NodalMaximum );
+	BOOST_CHECK_NO_THROW( solver.setAxisConstraint( A::PrescribedPoint ) );
+	BOOST_CHECK( solver.axisConstraint() == A::PrescribedPoint );
 }

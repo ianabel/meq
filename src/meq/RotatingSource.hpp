@@ -343,7 +343,12 @@ namespace meq
 				RotatingSource::Closure closure = RotatingSource::Closure::Automatic );
 
 			/// Both honour setPlasmaSupport(): `F` and `dF/dpsi` are zero
-			/// wherever `Psi <= 0`, as meq::NormalisedMHDSource's are.
+			/// wherever `Psi <= 0`, as meq::NormalisedMHDSource's are -- and,
+			/// under setPlasmaSupportShape( PlasmaSupportShape::Box ), wherever
+			/// `Psi > 1` or `|z|` is beyond the throat, which is the support a
+			/// MIRROR needs and the reason this source is the one the mirror
+			/// path uses. normalisationDerivatives() is gated identically, so
+			/// the three never disagree about where the plasma is.
 			///
 			/// THE DIAGNOSTICS BELOW DELIBERATELY DO NOT. potential(), density()
 			/// and pressure() report what the profiles say at a flux value, which

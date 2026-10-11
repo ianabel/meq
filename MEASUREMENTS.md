@@ -8479,6 +8479,10 @@ this rules out is assuming it.
 
 ### M-169
 
+**ITS "MACHINE" IS GEQ'S GRID BOX, `ρ ≤ 1.63`; THE COPPER REACHES `ρ = 2.18`.**
+The table below is the plasma's own current and stands. Where the coils go
+relative to `Γ`, and the mode count they set, is [M-260](#m-260).
+
 **THE MIRROR EXTERIOR NEEDS NO NEW MODEL. IT NEEDS `Γ` PUT OUTSIDE THE MACHINE,
 AND THEN EVERY MACH NUMBER IS ADMISSIBLE.**
 
@@ -15759,3 +15763,167 @@ costs accuracy. Both stay inside the test's 2e-03.
 rows and the rows are met on either answer. `race_arm_meq.py` now reports a run
 as `finished` only when a file asking for `PlasmaSupportSweeps` reports
 `plasma_support_settled = 1`, and treats a missing attribute as unsettled.
+
+### M-258
+
+**MR-1: A MIRROR'S SUPPORT IS A BOX IN `( Ψ, z )`, THE FILL IS OFF ON IT BY A
+STATED BRANCH, AND THE CURRENT AT THE AXIAL CUTOFF IS REPORTED.**
+`tests/convergence/MirrorSupport.cpp`, order 2, 4500 triangles,
+`R ∈ [0.2, 1.4]`, `z ∈ [−1.5, 1.5]`, `ψ = R² + z²` held exactly, mirror labels
+0.25 inner and 1.0 outer (so `span < 0`), `p′( Ψ ) = 4Ψ( 1 − Ψ )`, `μ₀ = 1`,
+`gg′ = 0`, 513 samples per cutoff line.
+
+| XP-1 fill on the same field | reached | candidates | elements masked |
+|---|---|---|---|
+| `OneSided` (control) | 1530 | 1530 | — |
+| `Box`, `z_edge` = 0.5 | **0** | **0** | **0** |
+
+`checkAxialCutoff()` against the closed form:
+
+| `z_edge` | peak `μ₀j_φ` | closed form | at cutoff | closed form | relative | samples located |
+|---|---|---|---|---|---|---|
+| 0.50 | 1.075865e+00 | 1.075980e+00 | 8.586490e-01 | 8.586501e-01 | 0.7981 | 1026 |
+| 1.20 (plasma ends at `\|z\|` = 1) | 1.075865e+00 | 1.075980e+00 | **0** | 0 | 0 | 1026 |
+| 2.00 (beyond the mesh) | 1.075865e+00 | — | 0 | — | 0 | **0** |
+
+Zero samples located means the cutoff lies outside the mesh, which the check
+reports separately from zero current.
+
+**Mutation counts**, failures per suite with one gate removed at a time:
+
+| mutation | RotatingSourceTests | SourceViewTests | CoilsTests | MirrorSupport |
+|---|---|---|---|---|
+| none | 0 | 0 | 0 | 0 |
+| `Ψ > 0` removed from the box | 80 | 36 | 0 | 4 |
+| `Ψ ≤ 1` removed | 81 | 36 | 1 | 0 |
+| `\|z\| ≤ z_edge` removed | 80 | 22 | 4 | 0 |
+| `Ψ ≤ 1` made strict | 25 | 8 | 0 | 0 |
+| fill wanted under `Box` | 0 | 0 | 0 | 3 |
+| stale-mask clear removed | 0 | 0 | 0 | 3 |
+| `checkAxialCutoff` without `/R` | 0 | 0 | 0 | 1 |
+| device gate without `z` | 0 | 34 | 0 | 0 |
+| coil wrapper not forwarding the shape | 0 | 0 | 9 | 0 |
+
+### M-259
+
+**MR-2: `AxisConstraint::PrescribedPoint` PINNED AT `LocatedAxis`'s CONVERGED
+AXIS IS THE SAME EQUILIBRIUM, AND REACHES IT QUADRATICALLY WHERE `LocatedAxis`
+IS LINEAR.** `tests/convergence/PrescribedAxisPoint.cpp`, k = 2, triangulated
+`standardBox`, `setNewtonControl( 1e-12, 1e-14, 40 )`. The control is the same
+pin moved a quarter of an element outboard.
+
+| fixture | n | constraint | `ψ_ax` | `ψ_bnd` | rel. L2 gap in `ψ_h` | Newton | final residual |
+|---|---|---|---|---|---|---|---|
+| high β, ν = 4 | 8 | LocatedAxis | 3.0687083111e-01 | 0 | — | 12, linear tail ×0.073 | 7.5e-14 |
+| | 8 | PrescribedPoint | 3.0687083111e-01 | 0 | 3.6e-13 | **7** | 2.0e-16 |
+| | 8 | control | 2.8335850793e-01 | 0 | 1.5e-01 | 7 | — |
+| | 16 | LocatedAxis | 2.8552308250e-01 | 0 | — | 8 | 7.8e-15 |
+| | 16 | PrescribedPoint | 2.8552308250e-01 | 0 | 8.3e-14 | **5** | 4.5e-16 |
+| | 16 | control | 2.8536571457e-01 | 0 | 1.1e-03 | 5 | — |
+| FB-3, two borders | 8 | LocatedAxis | 5.9690803159e-01 | 5.1599724590e-01 | — | 7 | 5.3e-16 |
+| | 8 | PrescribedPoint | same to 11 digits | same | 3.7e-15 | 7 | 5.1e-16 |
+| | 8 | control | 6.0383962206e-01 | 5.2419403291e-01 | 1.6e-02 | 7 | — |
+| | 16 | LocatedAxis | 5.9715711999e-01 | 5.1627164884e-01 | — | 7 | 5.1e-16 |
+| | 16 | PrescribedPoint | same to 11 digits | same | 1.5e-15 | 7 | 5.0e-16 |
+| | 16 | control | 5.9887618012e-01 | 5.1830858652e-01 | 4.0e-03 | 7 | — |
+
+**THE ITERATION GAP ON THE STIFF SOURCE IS THE ENVELOPE TERM.** The prescribed
+row is the located row with the point held fixed, so it is exact; the located
+row drops `∇ψ_h( x* )·dx*/du`, which is `O( h^k )` and not zero
+(`AxisRow::PositionDropped`, [M-120](#m-120)). Same root, and the exact row is
+quadratic to round-off.
+
+**The row scaled by 0.99** still converges in 8 to 10 steps on a linear tail
+of 0.02 to 0.04 per step, ending at 7.9e-14 to 4.3e-13, and its best-triple
+order reads 1.54 to 2.16 — **so an order assertion alone passes a wrong row**,
+and the acceptance asserts the final residual as well. A whole-element control
+at n = 8 on the ν = 4 source does not converge in 40 steps, which is why the
+control is a quarter of an element.
+
+### M-260
+
+**MR-3: THE VACUUM MIRROR THROUGH MEQ. THE COPPER STRADDLES EVERY `Γ` A
+PLASMA-SIZED SEMICIRCLE COULD TAKE, SO THE COILS ARE MESHED INSIDE `Γ = 3.0`,
+AND THE COPPER — NOT THE PLASMA — SETS THE MODE COUNT.**
+`tests/convergence/VacuumMirror.cpp`. geq's machine: two packs,
+`R ∈ [0.785500, 0.856069]`, `|z| ∈ [1, 2]`, 5.927782e6 A each, same sign. In
+`ρ` the copper is a band from 1.2716 to 2.1755, and the plasma reaches
+`ρ ≈ 1.51` at the throat. No plasma, `Γ = 3.0`, background arc at 3.4,
+mesh from `halfdisc.py`. The machine region is `R ≤ 0.63`, `|z| ≤ 1.5` — geq's
+grid box, 0.15 m clear of the copper. Norms of `ψ_coil`: 2.4485e+00 over `D_h`,
+3.2679e-01 over the machine region.
+
+**(a) `ψ_h` against `meq::coilPsi()`, N = 32:**
+
+| k | level | NE | h | L2 over `D_h` | rate | L2 over machine region | rate |
+|---|---|---|---|---|---|---|---|
+| 1 | 0 | 1696 | 0.5355 | 7.2208e-03 | | 1.0049e-03 | |
+| 1 | 1 | 6854 | 0.2677 | 2.9978e-03 | 1.268 | 2.5804e-04 | 1.961 |
+| 1 | 2 | 27571 | 0.1339 | 6.8228e-04 | 2.135 | 6.3783e-05 | 2.016 |
+| 2 | 0 | 1696 | 0.5355 | 1.8830e-03 | | 4.2181e-05 | |
+| 2 | 1 | 6854 | 0.2677 | 1.6273e-04 | 3.532 | 4.8731e-06 | 3.114 |
+| 2 | 2 | 27571 | 0.1339 | 1.7142e-05 | 3.247 | 5.2362e-07 | 3.218 |
+| 3 | 0 | 1696 | 0.5355 | 4.2002e-04 | | 9.8406e-06 | |
+| 3 | 1 | 6854 | 0.2677 | 2.0634e-05 | 4.347 | 5.2972e-07 | 4.215 |
+| 3 | 2 | 27571 | 0.1339 | 1.3294e-06 | 3.956 | 3.0589e-08 | 4.114 |
+
+Machine-region rate over the whole ladder: 1.989, 3.166, 4.165. The control —
+k = 2, level 0, exterior coupling removed — reads 8.9189e-01 over `D_h` and
+2.5925e-02 over the machine region, 615× the coupled row. One Newton step takes
+the residual from 7.854e-01 to 2.273e-13.
+
+**(b) The mode count**, k = 3, level 1. Mode `n` on `Γ` falls as about
+`( 2.1755/3.0 )^n = 0.725^n`; the trace tail is `coilPsi` alone, in the weight
+`dΓ/R`.
+
+| N | trace tail | L2 over `D_h` | relative | L2 over machine region | relative |
+|---|---|---|---|---|---|
+| 4 | 9.1345e-02 | 5.0794e-02 | 2.0949e-02 | 2.7209e-04 | 8.3109e-04 |
+| 8 | 3.6540e-03 | 1.0318e-03 | 4.2552e-04 | 5.7455e-07 | 1.7550e-06 |
+| 12 | 1.1940e-03 | 3.5804e-04 | 1.4766e-04 | 6.0374e-07 | 1.8441e-06 |
+| 16 | 8.4481e-05 | 2.5487e-05 | 1.0511e-05 | 5.1839e-07 | 1.5834e-06 |
+| 20 | 3.5225e-05 | 2.2765e-05 | 9.3887e-06 | 5.4502e-07 | 1.6648e-06 |
+| 24 | 2.9810e-06 | 2.0750e-05 | 8.5579e-06 | 5.3203e-07 | 1.6251e-06 |
+| 32 | 1.2673e-07 | 2.0634e-05 | 8.5101e-06 | 5.2972e-07 | 1.6180e-06 |
+| 48 | 3.0427e-10 | 2.0689e-05 | 8.5325e-06 | 5.3108e-07 | 1.6222e-06 |
+
+Over `D_h` the error is within 5% of N = 48's from N = 24; the machine region is
+on its plateau by N = 8, because truncation at `Γ` decays inward like a
+harmonic field. The copper's trace tail at other radii, from the same
+projection outside the test:
+
+| `ρ_Γ` | N = 16 | N = 24 | N = 32 | N = 48 | N = 64 |
+|---|---|---|---|---|---|
+| 2.3 | 1.04e-02 | | 1.23e-03 | | 4.55e-05 |
+| 2.5 | 2.22e-03 | | 6.54e-05 | 2.99e-06 | |
+| 3.0 | 8.45e-05 | 3.0e-06 | | | |
+| 3.5 | 5.69e-06 | | | | |
+| 4.0 | 6.66e-07 | | | | |
+
+**`ExteriorDtN::coefficients()` cannot measure this column.** Its fixed
+30-point rule aliases past about 30 modes and returned a flat 0.82 tail at 96;
+the test projects with its own 400-point rule. Nothing in the solve calls it.
+
+**(c) Against geq's own vacuum field**, 1089 points of its 65² grid, none
+dropped; k = 3, level 1, N = 32. rms relative to rms `ψ` (2.5887e-01):
+
+| comparison | rms relative |
+|---|---|
+| geq's 20 filaments in MEQ's own kernel, vs geq | 1.172e-15 |
+| the winding (`coilPsi`), vs geq — **geq's coil model** | **7.284e-04** |
+| MEQ, packs meshed, vs geq | 7.288e-04 |
+| MEQ, packs meshed, vs the winding | 1.599e-06 |
+| MEQ given geq's filaments by subtraction, vs geq | 3.875e-10 |
+
+**THE WHOLE DISAGREEMENT IS GEQ'S COIL MODEL, MEASURED ON GEQ ALONE.** With
+`Nr = 1, Nz = 10` geq's coil is ten filaments at the pack's radial centre —
+`meq::filamentStack( pack, 1, 10 )`, the midpoint rule for the winding — and
+the pack's area never enters its field. Handed those filaments, MEQ agrees with
+geq to 3.9e-10. The first row pins the conventions: Wb/rad on both sides,
+current per filament, same-sign packs.
+
+**Mutations**, each red on every case it was run against: the upper pack moved
+outward by its half-width in MEQ only (rates ≤ 0.32; geq gap 1.9e-02 against a
+7.3e-04 floor); its current reversed (rates ≈ 0.01); `CoilSet::f()` × 1.001
+(every k red; geq gap 9.1e-04); `ExteriorDtN::blockEntry` × 1.01; the mode index
+in `ExteriorDtN::symbol()` × 1.05 (18 failures across the three cases).

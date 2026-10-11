@@ -272,6 +272,96 @@ BOOST_AUTO_TEST_CASE( theViewReproducesTheConfinedSourceAcrossTheEdge )
 	BOOST_TEST( outside > 0 );
 }
 
+BOOST_AUTO_TEST_CASE( theViewReproducesTheMirrorBoxOnAllThreeSides )
+{
+	/*
+	 * meq::PlasmaSupportShape::Box -- `0 < Psi <= 1` and `|z| <= z_edge` -- is
+	 * CARRIED by the view rather than refused, so it is a second expression of
+	 * the support and this is what holds it to the first. MIRROR-PLAN.md MR-1.
+	 *
+	 * Mirror orientation: psi_ax is the INNER label and the smaller flux, so
+	 * the span is negative. Each of the box's three sides is crossed, its two
+	 * closed edges are sat on, and the normalisation columns are compared
+	 * beside F and dF/dpsi, because the device route computes all three.
+	 */
+	double const inner = 0.05;
+	double const outer = 0.4;
+	double const zEdge = 0.6;
+	meq::NormalisedMHDSource source( kinkedSpline(), kinkedSpline(), inner );
+	source.setNormalisation( inner, outer );
+	source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, zEdge );
+
+	meq::SourceView view{};
+	std::vector<meq::KnotView> knots;
+	BOOST_TEST_REQUIRE( meq::makeSourceView( source, view, knots ) );
+	BOOST_TEST( view.confineToPlasma == 1 );
+	BOOST_TEST( view.supportShape == static_cast<int>( meq::PlasmaSupportShape::Box ) );
+	BOOST_TEST( view.axialEdge == static_cast<mfem::real_t>( zEdge ) );
+
+	int inside = 0, innerSide = 0, outerSide = 0, beyondThroat = 0;
+	for ( double const z : { 0.0, 0.3, -zEdge, zEdge, 0.61, -2.0 } )
+		for ( double const psi : { -0.1, 0.0, 0.049, 0.05, 0.051, 0.2, 0.399, 0.4,
+		                           0.401, 0.6 } )
+		{
+			double const fromSource = source.f( 1.3, z, psi );
+			double const fromView = meq::sourceF( view, knots.data(), 1.3, z, psi );
+			BOOST_TEST( agrees( fromView, fromSource ),
+			            "F disagreed at psi = " << psi << ", z = " << z );
+
+			double const dFromView =
+				meq::sourceDFdPsi( view, knots.data(), 1.3, z, psi );
+			BOOST_TEST( agreesNearABoundary( dFromView, psi,
+			                              [ & ]( double p )
+			                              { return source.dFdPsi( 1.3, z, p ); } ),
+			            "dF/dpsi disagreed at psi = " << psi << ", z = " << z );
+
+			double hostAxis = 0.0, hostBoundary = 0.0;
+			BOOST_TEST_REQUIRE( source.normalisationDerivatives(
+				1.3, z, psi, hostAxis, hostBoundary ) );
+			mfem::real_t viewAxis = 0, viewBoundary = 0;
+			meq::sourceNormalisationDerivatives( view, knots.data(), 1.3, z, psi,
+			                                     viewAxis, viewBoundary );
+			BOOST_TEST( agreesNearABoundary( viewAxis, psi,
+				[ & ]( double p )
+				{
+					double a = 0.0, b = 0.0;
+					source.normalisationDerivatives( 1.3, z, p, a, b );
+					return a;
+				} ), "dF/dpsi_ax disagreed at psi = " << psi << ", z = " << z );
+			BOOST_TEST( agreesNearABoundary( viewBoundary, psi,
+				[ & ]( double p )
+				{
+					double a = 0.0, b = 0.0;
+					source.normalisationDerivatives( 1.3, z, p, a, b );
+					return b;
+				} ), "dF/dpsi_bnd disagreed at psi = " << psi << ", z = " << z );
+
+			// Classify by the closed form, not by the source under test.
+			double const normalised = ( psi - outer )/( inner - outer );
+			if ( std::abs( z ) > zEdge )
+				++beyondThroat;
+			else if ( normalised > 1.0 )
+				++innerSide;
+			else if ( !( normalised > 0.0 ) )
+				++outerSide;
+			else
+			{
+				++inside;
+				BOOST_TEST( fromSource != 0.0 );
+			}
+			if ( std::abs( z ) > zEdge || normalised > 1.0 || !( normalised > 0.0 ) )
+				BOOST_TEST( fromView == 0.0,
+				            "the view is not zero outside the box at psi = " << psi
+				            << ", z = " << z );
+		}
+
+	// Every side has to be exercised or the case proves only some of them.
+	BOOST_TEST( inside > 0 );
+	BOOST_TEST( innerSide > 0 );
+	BOOST_TEST( outerSide > 0 );
+	BOOST_TEST( beyondThroat > 0 );
+}
+
 BOOST_AUTO_TEST_CASE( aScaledProfileIsFoldedIntoTheViewRatherThanDropped )
 {
 	// meq::ScaledProfile has no kind of its own -- it folds into `scale` -- so

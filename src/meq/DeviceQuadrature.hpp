@@ -84,7 +84,7 @@ namespace meq
 	 * @param view       the PLASMA source as POD -- meq::makePlasmaSourceView().
 	 * @param knots      the flat knot array @a view indexes into.
 	 * @param inPlasma   one entry per element, non-zero where XP-1's fill
-	 *                   reached. The pointwise `insidePlasma( psi )` test is
+	 *                   reached. The pointwise `insidePlasma( R, z, psi )` test is
 	 *                   inside `sourceF` and is independent of this.
 	 * @param conductorValues `psi_c` per quadrature point, as
 	 *                   meq::SourceIntegrator::conductorCacheValues() holds

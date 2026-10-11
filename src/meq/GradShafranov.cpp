@@ -4145,7 +4145,54 @@ namespace
 
 	void GradShafranovSolver::setAxisConstraint( AxisConstraint choice )
 	{
+		// REFUSED RATHER THAN DEFAULTED. Every candidate default is a choice of
+		// equilibrium: the symmetry axis carries psi = 0, the domain's centre is
+		// nobody's plasma, and the last located axis is a different constraint's
+		// answer. setAxisFluxPoint() names the point and selects this itself, so
+		// reaching here without one means the caller skipped it.
+		if ( choice == AxisConstraint::PrescribedPoint && !axisFluxPointIsSet )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setAxisConstraint: "
+				"AxisConstraint::PrescribedPoint needs a point, and none was "
+				"named. Call setAxisFluxPoint( R, z ), which selects this "
+				"constraint as well -- there is no default point, because "
+				"every candidate would decide which equilibrium is reported" );
+
 		axisConstraintChoice = choice;
+	}
+
+	void GradShafranovSolver::setAxisFluxPoint( double radius, double z )
+	{
+		if ( !std::isfinite( radius ) || !std::isfinite( z ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setAxisFluxPoint: the point must be "
+				"finite" );
+		// setXPointBoundary()'s refusal, for a different reason. psi vanishes on
+		// the symmetry axis, so a label taken there is zero whatever the field
+		// does -- and with psi_bnd also zero on a fixed-boundary problem that is
+		// a span of zero, which the normalisation cannot divide by.
+		if ( !( radius > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setAxisFluxPoint: the point must lie "
+				"at a strictly positive radius. psi vanishes on R = 0, so a flux "
+				"label there is zero by construction rather than a property of "
+				"the plasma" );
+
+		// LOCATED NOW SO THAT A POINT OUTSIDE THE MESH COSTS MILLISECONDS. The
+		// spaces exist from the constructor, as setLimiterSurface() relies on.
+		// locatePotentialPoint() throws std::runtime_error before anything here
+		// has been written, so a caller who catches keeps the solver it had. It
+		// is located AGAIN in every solve, for the re-meshing reason the header
+		// gives; the element found here is not kept.
+		int element = -1;
+		mfem::Vector shape;
+		mfem::Array<int> dofs;
+		locatePotentialPoint( radius, z, element, shape, dofs );
+
+		axisFluxPointIsSet = true;
+		axisFluxR = radius;
+		axisFluxZ = z;
+		axisConstraintChoice = AxisConstraint::PrescribedPoint;
 	}
 
 	GradShafranovSolver::AxisConstraint
@@ -4353,6 +4400,129 @@ namespace
 		return result;
 	}
 
+	GradShafranovSolver::AxialCutoffCheck
+	GradShafranovSolver::checkAxialCutoff( int samples ) const
+	{
+		if ( samples < 2 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::checkAxialCutoff: a cutoff line needs "
+				"at least two samples" );
+
+		AxialCutoffCheck result;
+		if ( normalisedSource == nullptr || !normalisedSource->plasmaSupport()
+		     || normalisedSource->plasmaSupportShape() != PlasmaSupportShape::Box )
+			return result;
+
+		result.applies = true;
+		result.axialEdge = normalisedSource->plasmaSupportAxialEdge();
+
+		// THE TOTAL FLUX. Under the coil split the state is the remainder, and
+		// the support is a level set of the physical flux -- the reason
+		// refreshPlasmaComponentMask() adds psi_c, met here again. Throws if
+		// prepare() has not run, which is the right refusal: there is no
+		// answer to report on.
+		mfem::GridFunction total;
+		totalPotential( total );
+
+		/*
+		 * THE PEAK, OVER THE NODES. On the Gauss-Lobatto basis a node value is
+		 * the field at that point, so this is the source as the answer has it
+		 * without an interpolation in between -- checkAxisSource()'s argument.
+		 * `R = 0` is skipped rather than divided by: a mirror's support does
+		 * not reach the axis, and where a source does, checkAxisSource() is the
+		 * question that owns it.
+		 */
+		mfem::Array< int > dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			if ( !elementInPlasma( e ) )
+				continue;
+
+			potentialFes->GetElementDofs( e, dofs );
+			mfem::IntegrationRule const &nodes = potentialFes->GetFE( e )->GetNodes();
+
+			// A LOCAL transformation: GetElementTransformation( int ) is shared
+			// scratch.
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( e, &transformation );
+
+			for ( int i = 0; i < dofs.Size() && i < nodes.GetNPoints(); ++i )
+			{
+				mfem::Vector point;
+				transformation.Transform( nodes.IntPoint( i ), point );
+				double const radius = point( 0 );
+				if ( !( radius > 0.0 ) )
+					continue;
+
+				int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+				double const density = std::abs(
+					normalisedSource->scaledF( radius, point( 1 ), total( dof ) ) )
+					/radius;
+				if ( density > result.peak )
+				{
+					result.peak = density;
+					result.peakR = radius;
+					result.peakZ = point( 1 );
+				}
+			}
+		}
+
+		/*
+		 * THE CUTOFF, ON THE TWO LINES z = -z_edge AND z = +z_edge.
+		 *
+		 * A two-row meq::GridSampler is exactly those two lines: its rows sit
+		 * at zMin and zMax, and its location is an inverted element loop
+		 * rather than a search. Nodes do not lie on the cutoff, so the field
+		 * is interpolated there -- which is what the cutoff IS, a line through
+		 * elements.
+		 *
+		 * `z` is handed to the source as `+-z_edge` itself rather than read
+		 * back from the sampler's row coordinate, so the evaluation is at the
+		 * box's closed edge -- the interior limit of the jump -- and not one
+		 * rounding either side of it.
+		 */
+		mfem::Vector lower, upper;
+		mesh.GetBoundingBox( lower, upper );
+		if ( !( upper( 0 ) > lower( 0 ) ) )
+			return result;
+
+		GridSampler const sampler( mesh, lower( 0 ), upper( 0 ), samples,
+		                           -result.axialEdge, result.axialEdge, 2 );
+		std::vector< double > values;
+		sampler.sample( total, values,
+		                std::numeric_limits< double >::quiet_NaN() );
+
+		for ( int j = 0; j < 2; ++j )
+		{
+			double const z = j == 0 ? -result.axialEdge : result.axialEdge;
+			for ( int i = 0; i < sampler.nodesR(); ++i )
+			{
+				if ( !sampler.located( i, j ) )
+					continue;
+				++result.cutoffSamples;
+
+				double const radius = sampler.rAt( i );
+				if ( !( radius > 0.0 ) )
+					continue;
+
+				double const psi = values[ static_cast< std::size_t >( j )
+				                           *static_cast< std::size_t >( sampler.nodesR() )
+				                           + static_cast< std::size_t >( i ) ];
+				double const density =
+					std::abs( normalisedSource->scaledF( radius, z, psi ) )/radius;
+				if ( density > result.atCutoff )
+				{
+					result.atCutoff = density;
+					result.cutoffR = radius;
+					result.cutoffZ = z;
+				}
+			}
+		}
+
+		result.relative = result.peak > 0.0 ? result.atCutoff/result.peak : 0.0;
+		return result;
+	}
+
 	/*
 	 * THE POTENTIAL DOF NEAREST A POINT.
 	 *
@@ -4413,8 +4583,10 @@ namespace
 	 * must NOT re-invert the map, because a zero of a DISCONTINUOUS q_h can lie
 	 * a little outside its own element and the inverse does not converge there
 	 * -- measured, a residual of 5.1e-02 on an element of 5e-02. A limiter
-	 * contact is a genuine point of the domain that somebody asked for, so it is
-	 * inside an element by construction and the inversion is the right question.
+	 * contact is a genuine point of the domain that somebody asked for, and so is
+	 * AxisConstraint::PrescribedPoint's -- the same row for the other label -- so
+	 * each is inside an element by construction and the inversion is the right
+	 * question.
 	 * The elements here are straight-sided triangles, where the inverse map is
 	 * affine and `Inside` is exact rather than probable.
 	 */
@@ -4518,9 +4690,11 @@ namespace
 
 		std::ostringstream message;
 		message << "meq::GradShafranovSolver::locatePotentialPoint: no element "
-		           "of the mesh contains ( " << radius << ", " << z << " ). A limiter "
-		           "contact has to be a point of Omega: check it against the "
-		           "mesh's own extent rather than against the machine's.";
+		           "of the mesh contains ( " << radius << ", " << z << " ). A "
+		           "prescribed point -- a limiter contact, or psi_ax's under "
+		           "AxisConstraint::PrescribedPoint -- has to be a point of Omega: "
+		           "check it against the mesh's own extent rather than against "
+		           "the machine's.";
 		if ( best >= 0 )
 			message << " The closest element is " << best
 			        << ", whose inverse puts the point " << bestViolation
@@ -6350,9 +6524,38 @@ namespace
 		// A fill is meaningless without a moving support: with the pointwise
 		// test off, F is evaluated everywhere and every element carries plasma
 		// by definition.
-		return connectivityChoice == PlasmaConnectivity::Component
-		       && normalisedSource != nullptr
-		       && normalisedSource->plasmaSupport();
+		if ( connectivityChoice != PlasmaConnectivity::Component
+		     || normalisedSource == nullptr
+		     || !normalisedSource->plasmaSupport() )
+			return false;
+
+		/*
+		 * **AND NOT ON A MIRROR'S BOX, AS A STATED BRANCH RATHER THAN A FLAG
+		 * THAT HAPPENS TO BE FALSE.** MIRROR-PLAN.md §3.
+		 *
+		 * The fill exists because `{ Psi > 0 }` is a level set and not a
+		 * plasma: it seeds at the magnetic axis and keeps the connected
+		 * component around it. A mirror has no axis to seed from, and its
+		 * flux-labelled annulus is connected THROUGH THE TUBE to the ends of
+		 * the machine, so a fill would neither start nor stop where it should.
+		 * PlasmaSupportShape::Box removes the question instead of answering
+		 * it: bounded in Psi on both sides and in `|z|`, the support is
+		 * pointwise and needs no seed and no component.
+		 *
+		 * Written as a switch with no default so that a third shape has to
+		 * say which way it goes. MirrorSupport's
+		 * theElementFillIsOffOnAMirrorsBox asserts both arms -- the box builds
+		 * no mask and the one-sided control on the same field does -- because CLAUDE_FB.md records this fill being silently off
+		 * as a real defect once already.
+		 */
+		switch ( normalisedSource->plasmaSupportShape() )
+		{
+			case PlasmaSupportShape::OneSided:
+				return true;
+			case PlasmaSupportShape::Box:
+				return false;
+		}
+		throw std::logic_error( "meq::GradShafranovSolver::plasmaComponentWanted: unknown plasma support shape" );
 	}
 
 	void GradShafranovSolver::buildPlasmaAdjacency()
@@ -6773,8 +6976,22 @@ namespace
 
 	void GradShafranovSolver::refreshPlasmaComponentMask( mfem::Vector const &state )
 	{
+		/*
+		 * NOT WANTED IS NOT THE SAME AS NOT THERE. A mask filled while the fill
+		 * was wanted stays active until something clears it, and holds() then
+		 * goes on restricting F to that component -- so a source boxed for a
+		 * mirror, or unconfined, after a one-sided fill would be assembled on
+		 * a support nobody asked for, with plasmaComponentElements() still
+		 * reporting it. setPlasmaConnectivity( Pointwise ) already clears for
+		 * this reason; this is the same rule for the two switches that live on
+		 * the source. clear() keeps the exclusion, which is about the machine.
+		 */
 		if ( !plasmaComponentWanted() )
+		{
+			if ( plasmaComponentMask.active() )
+				plasmaComponentMask.clear();
 			return;
+		}
 
 		buildPlasmaAdjacency();
 
@@ -8928,6 +9145,40 @@ namespace
 		(void)limiterElement;
 
 		/*
+		 * AxisConstraint::PrescribedPoint: psi_ax's ROW, LOCATED ONCE, EXACTLY
+		 * AS psi_bnd's PRESCRIBED ROW IS ABOVE.
+		 *
+		 * The element and its shape functions are fixed for the whole solve, so
+		 * peakAt() contracts against them and builds nothing. Located here and
+		 * not at the setter for the reason locatePotentialPoint()'s callers
+		 * share: a mesh refined under this solver keeps the point and changes
+		 * every element index.
+		 *
+		 * ONLY WITH A NORMALISED SOURCE, because without one psi_ax is not an
+		 * unknown and there is no row for this to be. And the missing point is
+		 * refused here as well as at the setter: setAxisConstraint() cannot be
+		 * reached without one, so this is the guard against a future path that
+		 * writes the choice directly, and a throw costs nothing where it cannot
+		 * fire.
+		 */
+		bool const axisIsPrescribed =
+			hasNormalisation
+			&& axisConstraintChoice == AxisConstraint::PrescribedPoint;
+		int axisPointElement = -1;
+		mfem::Vector axisPointShape;
+		mfem::Array<int> axisPointDofs;
+		if ( axisIsPrescribed )
+		{
+			if ( !axisFluxPointIsSet )
+				throw std::logic_error(
+					"meq::GradShafranovSolver::solve: "
+					"AxisConstraint::PrescribedPoint is selected with no point "
+					"to pin psi_ax at. setAxisFluxPoint() names one" );
+			locatePotentialPoint( axisFluxR, axisFluxZ, axisPointElement,
+			                      axisPointShape, axisPointDofs );
+		}
+
+		/*
 		 * psi_h AT THE LIMITER CONTACT, AND THE BORDER ROW THAT GOES WITH IT.
 		 *
 		 * Under LimiterConstraint::NearestDof both collapse to one entry --
@@ -10910,6 +11161,53 @@ namespace
 			// from "there was no axis on this iterate" and fall back to its own
 			// ladder for the second rather than reusing a stale element.
 			plasmaSeedElement = -1;
+
+			/*
+			 * AxisConstraint::PrescribedPoint: psi_h AT THE POINT, ON THE ROW
+			 * LOCATED ONCE ABOVE. No search, nothing to fall back from, and
+			 * `constraintLocated` stays FALSE -- it means a zero of q_h was
+			 * found, and none was looked for. The row is built from
+			 * `axisPointShape` directly, not from the variables this sets for
+			 * the located path, so the cold reference clearing that flag cannot
+			 * empty it.
+			 *
+			 * psi_c is added for locateAxisPoint()'s reason, value only and
+			 * never the row: psi_ax is the PHYSICAL flux at the point, and under
+			 * the split the state holds the remainder. It is limiterTotal()'s
+			 * ExactPoint arm, for the other label.
+			 *
+			 * AND THE FILL IS SEEDED HERE, which is the decision a prescribed
+			 * point forces and LocatedAxis never had to take. The fill is
+			 * documented as the component containing the axis, and under this
+			 * constraint the point IS what the normalisation calls the axis --
+			 * on a tokamak pinned at its O-point it is the element LocatedAxis
+			 * would hand over. refreshPlasmaComponent() takes the seed only if
+			 * that element carries plasma and otherwise falls back to its own
+			 * ladder, so a point ON the Psi = 1 surface -- a mirror's inner
+			 * label -- costs the ladder and not a wrong fill. MIRROR-PLAN.md
+			 * MR-1 turns the fill off for mirrors as a stated branch; this is
+			 * not that.
+			 */
+			if ( axisIsPrescribed )
+			{
+				// The row indexes `state` raw, and under a Device the iterate
+				// lives there: without the read this is the host's stale copy.
+				countedHostRead( state, __LINE__ );
+				double value = 0.0;
+				for ( int i = 0; i < axisPointDofs.Size()
+				                 && i < axisPointShape.Size(); ++i )
+					value += axisPointShape( i )
+					         *state( blockOffsets[ 1 ] + axisPointDofs[ i ] );
+				value += conductorPsi( axisFluxR, axisFluxZ );
+
+				plasmaSeedElement = axisPointElement;
+				if ( element )
+					*element = axisPointElement;
+				if ( dof )
+					*dof = -1;
+				return value;
+			}
+
 			if ( axisConstraintChoice == AxisConstraint::LocatedAxis )
 			{
 				double located = 0.0;
@@ -12205,7 +12503,39 @@ namespace
 			mfem::Array<int> borderDofs;
 			mfem::Vector border;
 
-			if ( constraintLocated )
+			if ( axisIsPrescribed )
+			{
+				/*
+				 * AxisConstraint::PrescribedPoint's ROW, WHICH IS psi_bnd's
+				 * PRESCRIBED ROW FOR THE OTHER LABEL.
+				 *
+				 * G = s - psi_h( x_p ) with x_p fixed, so dG/d( unknown ) is
+				 * minus the shape functions of x_p's element at x_p, on that
+				 * element's potential dofs -- exact, undifferenced, and with no
+				 * position term at all, because nothing about x_p depends on the
+				 * unknown. That is the whole difference from the branch below,
+				 * which needs the envelope theorem (and, measured, a correction
+				 * to it) to say the same thing about a point that moves.
+				 *
+				 * FIRST, AND READ FROM THE ONCE-LOCATED ROW RATHER THAN FROM
+				 * `constraintLocated`, because the cold reference above clears
+				 * that flag for iteration 0. Gating this row on it would copy
+				 * LocatedAxis's decoupled first step onto a constraint that has
+				 * nothing to locate -- the accident the note beside the cold
+				 * reference describes, inherited by a path it never applied to.
+				 */
+				int const m = std::min( axisPointDofs.Size(),
+				                        axisPointShape.Size() );
+				borderDofs.SetSize( m );
+				border.SetSize( m );
+				for ( int i = 0; i < m; ++i )
+				{
+					// SHIFTED INTO THE FULL VECTOR, as both rows below are.
+					borderDofs[ i ] = blockOffsets[ 1 ] + axisPointDofs[ i ];
+					border( i ) = coupled ? -axisPointShape( i ) : 0.0;
+				}
+			}
+			else if ( constraintLocated )
 			{
 				/*
 				 * OPTION 3's ROW, AND IT IS EXACT FOR THE SAME REASON -e_j IS.
@@ -14233,6 +14563,16 @@ namespace
 		axisLocatedValue = constraintLocated;
 		axisRValue = constraintLocated ? previousAxisR : 0.0;
 		axisZValue = constraintLocated ? previousAxisZ : 0.0;
+		// A PRESCRIBED POINT IS WHERE psi_ax WAS ATTAINED, so it is reported --
+		// but the flag stays false, because nothing was located, and that flag
+		// is what seeds LocatedAxis's warm start on the next solve. A point
+		// handed to a seeded root search as though it were an O-point would be
+		// followed to whatever extremum is nearest it.
+		if ( axisIsPrescribed )
+		{
+			axisRValue = axisFluxR;
+			axisZValue = axisFluxZ;
+		}
 		// XP-3: where the border left the X-point, so a re-solve continues from
 		// it rather than from the original guess -- the same rule the profile
 		// scale follows. `located` says the point was still in the mesh at the
@@ -14607,6 +14947,14 @@ namespace
 						profile.componentCpuSeconds += profileCpuNow() - c0;
 						++profile.componentCalls;
 					} );
+
+			// AND A STALE MASK IS DROPPED BEFORE THE FIRST RESIDUAL rather than
+			// left to restrict a solve whose source no longer wants a fill --
+			// see refreshPlasmaComponentMask(). Only when one is actually
+			// active, so every solve that never filled is untouched, the
+			// device's flag upload included.
+			if ( !plasmaComponentWanted() && plasmaComponentMask.active() )
+				refreshPlasmaComponent( solution );
 
 			mfem::Operator &residualOperator =
 				refreshed ? static_cast<mfem::Operator &>( *refreshed )

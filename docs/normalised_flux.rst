@@ -109,14 +109,25 @@ zero. That locality is measured, not assumed.
 
 .. note::
 
-   :math:`\psiax` **is the flux at the located magnetic axis** — the point where
-   the flux :math:`q_h` vanishes — and that is a definition rather than an
-   approximation. :cpp:func:`meq::GradShafranovSolver::setAxisConstraint`
+   By default :math:`\psiax` **is the flux at the located magnetic axis** — the
+   point where the flux :math:`q_h` vanishes — and that is a definition rather
+   than an approximation. :cpp:func:`meq::GradShafranovSolver::setAxisConstraint`
    selects it; ``AxisConstraint::LocatedAxis`` is the default.
    ``AxisConstraint::NodalMaximum`` takes the largest nodal value of
    :math:`\psi_h` instead, and is kept as a control: the two differ by
    :math:`O(h^2)` in value and :math:`O(h)` in position, **both independent of**
    :math:`k`, so on a refined high-order mesh they separate rather than converge.
+
+   ``AxisConstraint::PrescribedPoint`` is the third, for a configuration with
+   **no** magnetic axis — a magnetic mirror, whose :math:`\psi` rises
+   monotonically outward from :math:`R = 0`. ``setAxisFluxPoint( R, z )`` names
+   the point and selects it, and :math:`\psiax` is then :math:`\psi_h` there:
+   the same exact row a prescribed limiter contact gives :math:`\psibnd`, with
+   nothing located and nothing differenced. Choosing it without a point is
+   refused, and it is not yet a configuration key. On a tokamak pinned at the
+   located axis it reproduces ``LocatedAxis``'s equilibrium; pinned anywhere
+   else it is a different equilibrium, normalised by a flux below the axis's,
+   and nothing checks that the point is an axis.
 
 **The located axis costs nothing in the Jacobian, which is the envelope
 theorem.** :math:`x^*` moves with the solution, so the chain rule gives

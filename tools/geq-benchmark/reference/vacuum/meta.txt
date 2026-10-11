@@ -1,0 +1,11 @@
+case vacuum
+mu0 1.25663706143591729e-06
+field 4.00000000000000000e+00
+coil_inner_radius 7.85499999999999976e-01
+coil_outer_radius 8.56068835817369367e-01
+coil_length 1.00000000000000000e+00
+coil_centre_z 1.50000000000000000e+00
+pack_current 5.92778220865903329e+06
+filaments_per_pack 10
+grid 65 65 stride 2
+filament_sum_agreement 5.025e-16

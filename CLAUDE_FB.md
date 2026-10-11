@@ -757,6 +757,18 @@ there. The two routes are different objects on purpose — see below.
 
 ## FB-7: a conductor outside `Γ`, and the type that carries it has no `f()`
 
+**A MIRROR'S COILS CANNOT USE THIS ROUTE, AND THE REASON IS GEOMETRIC.** Its
+coils are long solenoids that straddle every radius a plasma-sized semicircle
+could take — geq's packs span `ρ = 1.27` to `2.18` around a plasma reaching
+`ρ ≈ 1.51` — so `clearance()` refuses any `Γ` that keeps the plasma inside.
+They are meshed inside `Γ = 3.0` instead, and the exterior series then
+represents the copper's field: mode `n` on `Γ` decays as `( ρ_copper/ρ_Γ )^n`
+whatever the Mach number, while the plasma region plateaus long before `D_h`
+does, since truncation at `Γ` decays inward like a harmonic field.
+`ExteriorDtN::coefficients()` uses a fixed 30-point rule and aliases past about
+30 modes; nothing in the solve calls it, but do not size `N` with it.
+`VacuumMirror` is the acceptance → **[M-260](MEASUREMENTS.md#m-260)**.
+
 `meq::ExteriorCoilSet` in
 `src/meq/Coils.{hpp,cpp}` — MFEM-free, so CI gates it — and
 `GradShafranovSolver::setExteriorConductors()`.

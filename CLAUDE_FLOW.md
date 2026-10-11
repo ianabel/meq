@@ -199,6 +199,17 @@ beyond it at any Mach number, and what is left is a mode count.
 radius inside the machine and is superseded; *an admissibility test is a
 statement about where `Γ` was put, not about the machine*.
 
+**MR-1 TO MR-3 ARE DONE; MR-4, THE SOLVE ITSELF, IS NEXT.** The support is a box
+in `( Ψ, z )` with the fill off ([M-258](MEASUREMENTS.md#m-258)); `ψ_ax` can be
+pinned at a point ([M-259](MEASUREMENTS.md#m-259)); and the vacuum mirror solves
+through MEQ, agreeing with geq to geq's own coil model
+([M-260](MEASUREMENTS.md#m-260)). **What the vacuum stage changed**: the coils
+are meshed inside `Γ = 3.0` rather than outside it, so `ρ_Γ` is set by the
+copper and not the plasma (`CLAUDE_FB.md`, FB-7). **What the support stage
+found**: `Ψ = 1` is a moving edge of the box, so a mirror's `F` must vanish at
+the inner label as well as the outer one (`MIRROR-PLAN.md`, *What does NOT
+bite*).
+
 **RECONCILE THE `φ₀` GAUGE FIRST — IT IS NOT A DETAIL.** MEQ pins
 `φ₀(ReferenceRadius, ψ) = 0`, one condition per flux surface. geq pins **one
 point globally**, at `ψ_n = 0.5` on the midplane. `N_s(ψ)` absorbs the difference

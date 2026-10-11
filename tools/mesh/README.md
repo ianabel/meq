@@ -67,6 +67,26 @@ resulting staircase and Γ bridged by the same Cockburn–Solano transfer the
 curved path uses. The driver refuses a Γ that does not fit strictly inside the
 mesh, and with `[mesh.generate]` it refuses it before gmsh runs.
 
+## A mirror needs no new option, and its `--rho` is set by the copper
+
+A mirror's packs are long solenoids straddling every radius a plasma-sized Γ
+would take — geq's span `ρ = 1.27 … 2.18` while its plasma reaches `ρ ≈ 1.5` at
+the throat — so no semicircle puts them outside Γ, and they are meshed **inside**
+it like any other `--coil`. `tests/convergence/VacuumMirror.cpp` makes its mesh
+with these options, the pack read at full precision from geq's `meta.txt`:
+
+```sh
+python3 tools/mesh/halfdisc.py --rho 3.4 --size 0.4 \
+    --coil 0.7855 -2.0 0.0706 1.0 --coil 0.7855 1.0 0.0706 1.0 --coil-size 0.07 \
+    --plasma 0.0 -1.7 0.75 3.4 --plasma-size 0.1 --check -o mirror.msh
+```
+
+with Γ at `ρ = 3.0` inside the arc. **The mode count then follows the copper and
+not the plasma**: a source reaching `ρ_max` inside Γ puts mode `n` on Γ at about
+`( ρ_max/ρ_Γ )^n`, so moving `--rho` out trades mesh area for modes exactly as
+for the plasma, at the copper's radius. →
+**[M-260](../../MEASUREMENTS.md#m-260)**.
+
 ## What the attributes mean
 
 | | |

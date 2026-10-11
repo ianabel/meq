@@ -1765,6 +1765,16 @@ namespace meq
 		NormalisedSource::setPlasmaSupport( confined );
 	}
 
+	void CoilAugmentedNormalisedSource::setPlasmaSupportShape(
+		PlasmaSupportShape shape, double axialEdge )
+	{
+		// ON THE WRAPPED SOURCE FIRST, for setPlasmaSupport()'s reason -- and
+		// first also because it validates: a refused edge throws before this
+		// wrapper's own shape has been touched, so the two cannot disagree.
+		plasmaSource->setPlasmaSupportShape( shape, axialEdge );
+		NormalisedSource::setPlasmaSupportShape( shape, axialEdge );
+	}
+
 	void CoilAugmentedNormalisedSource::freezePlasmaEdge( double axis,
 	                                                     double boundary )
 	{

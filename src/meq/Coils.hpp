@@ -1299,6 +1299,15 @@ namespace meq
 
 			void setPlasmaSupport( bool confined ) override;
 
+			/// FORWARDED, AND FOR THE REASON setPlasmaSupport() IS: the plasma
+			/// term is evaluated through the wrapped source, so it is that
+			/// object's shape insidePlasma() tests against. The base call after
+			/// it keeps this wrapper's own plasmaSupportShape() honest, which
+			/// is what GradShafranovSolver reads to decide whether XP-1's fill
+			/// runs at all.
+			void setPlasmaSupportShape( PlasmaSupportShape shape,
+			                            double axialEdge = 0.0 ) override;
+
 			/// FORWARDED, AND FOR THE REASON setPlasmaSupport() IS. The plasma
 			/// term is evaluated through the wrapped source, so it is that
 			/// source's frozen edge insidePlasma() consults; freezing only this
