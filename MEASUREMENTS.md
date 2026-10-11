@@ -15927,3 +15927,145 @@ outward by its half-width in MEQ only (rates ≤ 0.32; geq gap 1.9e-02 against a
 7.3e-04 floor); its current reversed (rates ≈ 0.01); `CoilSet::f()` × 1.001
 (every k red; geq gap 9.1e-04); `ExteriorDtN::blockEntry` × 1.01; the mode index
 in `ExteriorDtN::symbol()` × 1.05 (18 failures across the three cases).
+
+### M-261
+
+**MR-4a: THE ROTATING MIRROR'S REFERENCE IS A geq THE SHIPPED TOOLS DO NOT
+PRODUCE, AND EACH DEPARTURE IS MEASURED.** `tools/geq-benchmark/export_rotating.py`,
+geq `73b9a72`, freegs4e `9a1ee0c`. Two species (e, D), geq-Mach 1.997 at the
+profiles' peak `ψ_n = 3/7`, `R = 0.2396` (M-167's Mach 3.088). Every profile is
+`f_edge + ( f_peak − f_edge )·C ψ_n³( 1 − ψ_n )⁴`: `T_e` 1280 → 128 eV, `T_D`
+1530 → 153 eV, `N_e = N_D` 5e18 → 5e17 (a physical midplane peak near 4.4e19),
+`ω` 3.191e6 → 6.38e5 rad/s.
+
+**The edge orders**, `J_φ`/peak on the midplane at distance `d` inside each label:
+
+| `d` | inner | outer |
+|---|---|---|
+| 1e-6 | +3.417e-13 | −7.912e-18 |
+| 1e-4 | +3.418e-09 | −7.907e-12 |
+| 1e-2 | +3.466e-05 | −7.459e-06 |
+
+Fitted exponent 2.0000 inner and 2.9999 outer over the three smallest. The
+quartic `16ψ_n²( 1 − ψ_n )²` reads 3.4e-06 and 4.7e-05 at `d = 1e-4`, linear in
+`d` (`j = 1`), and is symmetric, so it cannot tell `Ψ` from `ψ_n`; shipped
+geq's Gaussians read 1.3e-04 to 1.76e-01, a step.
+
+**geq's own floor, direct `freeBoundary`**, max `|Δψ|` on the 65 × 65 common
+nodes:
+
+| pair | max `\|Δψ\|` | `Δψ_axis` | `Δψ_bndry` |
+|---|---|---|---|
+| 129 against 513 | 1.419e-07 | +1.3e-11 | −3.0e-11 |
+| 257 against 513 | 3.466e-08 | −4.5e-12 | −4.4e-11 |
+
+Order 1.63, irregular — geq's mask is a staircase on its grid. Plasma flux
+8.72e-04, label span 5.975e-02.
+
+**The control, shipped von Hagenow at 257² minus direct**: max 8.06e-06,
+`Δψ_axis` +7.73e-06, `Δψ_bndry` +6.15e-06 — 0.9% of the plasma's flux and 230×
+the direct floor above, from `boundary.py:213`'s fixed `eps = 1e-2` m.
+
+**`φ₀` MUST BE TIGHTENED INSIDE EVERY PICARD STEP.** With both `N_s` prescribed,
+geq's one-point pin is wrong at its node and nowhere else (off it, `Σ Z n` is
+neutral to 4e-15); a pointwise Newton on the spline densities closes it to
+1.7e-15 rms. Tightened only at convergence, the fixed point is the untightened
+problem's: 7.0e-05 max at 129², 2000× the floor.
+
+**Runtime**: direct 5.0 s at 129², 41 s at 257², 569 s at 513²; Picard ends at
+1.85e-09. Tables: 2049 knots, Hermite values within 1.5e-11, slopes within
+2.6e-09 of their largest; `R_ref = 0.213` m minimises `max | ln( n_s/n_s0 ) |` at
+±1.16.
+
+### M-262
+
+**MR-4b AND MR-4c: MEQ SOLVES geq'S PROBLEM FROM THE VACUUM, QUADRATICALLY, AND
+CONVERGES AT THE RATE ITS EDGES ALLOW.** `tests/convergence/RotatingMirror.cpp`,
+the [M-261](#m-261) tables, geq's filaments subtracted, box support
+`z_edge = 1.5`, both labels at points, `N = 32`, the box aligned to the mesh.
+
+| k | level | elements | residuals |
+|---|---|---|---|
+| 2 | 0 | 1175 | 0.644, 6.2e-05, 2.8e-07, 3.3e-12, 1.9e-16 |
+| 3 | 0 | 1175 | 0.548, 1.5e-05, 5.0e-09, 1.5e-14 |
+| 2 | 1 | 4795 | 0.462, 7.2e-06, 1.4e-09, 3.2e-16 |
+| 3 | 1 | 4795 | 0.393, 3.5e-06, 1.2e-11, 1.2e-16 |
+
+Span −5.975e-02; the plasma moves `ψ_ax` by −9.0e-05 and `ψ_bnd` by −8.0e-04.
+`F`'s fitted power at the labels 1.977 inner, 2.984 outer, over
+`d = 2e-3 … 8e-3` — inside the first knot interval the Hermite interpolant's
+slope is linear in `d` at 1e-11 of peak. The axial cutoff cuts 5.4 to 6.3% of
+peak current at `( 0.139, ±1.5 )`. Exterior trace past mode 30: 3.3e-07 of the
+total; the plasma's own, 2.2e-05 at level 0 and 1.2e-07 at level 1, `k = 3`.
+A stopping target three orders tighter moves `ψ` by 0.
+
+**THE CONTROL IS TEN PER CENT, BECAUSE ONE PER CENT IS A COIN TOSS.** `dF/dψ`
+× 0.9, residual exact: order 0.978, ending at 9.7e-14 of the first residual,
+49× above the round-off branch at 2e-15. × 0.99 contracts about 1e-03 a step
+and ended at 4.4e-15, 2.2× above it — a stopping point that can land on
+either side.
+
+**MR-4c, rms over geq's 4225 nodes against level 2, `k = 4` `ψ*`** (whose own
+error is bounded at 3.5e-09 max, 2.0e-10 rms):
+
+| k | levels | `ψ_h` rms | rates | `ψ*` rms | rates |
+|---|---|---|---|---|---|
+| 1 | 1, 2, 3 | 1.41e-04, 4.02e-05, 1.15e-05 | 1.81, 1.81 | 1.33e-05, 1.69e-06, 2.28e-07 | 2.97, 2.89 |
+| 2 | 1, 2, 3 | 3.37e-05, 4.74e-06, 6.51e-07 | 2.83, 2.86 | 9.01e-07, 4.43e-08, 1.50e-09 | 4.35, 4.88 |
+| 3 | 0, 1, 2 | 6.91e-05, 6.57e-06, 5.85e-07 | 3.40, 3.49 | 2.28e-06, 4.93e-08, 5.73e-10 | 5.53, 6.43 |
+
+Design rates under [M-09](#m-09) with the inner edge's `j = 2`: `ψ_h`
+`min( k+1, 3.5 )`, `ψ*` `min( k+2, 4 )`. Asserted under the two-tier rule for
+`ψ*` at every `k` and `ψ_h` at `k = 3`; `ψ_h` at `k ≤ 2` is not yet asymptotic —
+a level-4 probe at `k = 1` reads 1.94 — and is printed.
+
+**Aligning the cutoff**, `ψ*` rms at `k = 3`, with and without the box's edges
+on element faces:
+
+| level | aligned | cut |
+|---|---|---|
+| 0 | 2.28e-06 | 1.80e-06 |
+| 1 | 4.93e-08 | 9.72e-08 |
+| 2 | 5.73e-10 | 8.21e-09 |
+| rates | 5.53, 6.43 | 4.22, 3.57 |
+
+14× at level 2; at `k = 2` the two are indistinguishable.
+
+### M-263
+
+**MR-4d: MEQ AGREES WITH geq TO geq'S OWN RESOLUTION, AND THE DIFFERENCE FALLS
+AS geq REFINES, AT geq'S RATE.** MEQ's level 2, `k = 4` `ψ*` against geq's
+direct solves on 4221 nodes of its 65 × 65 grid:
+
+| | 129 | 257 | 513 |
+|---|---|---|---|
+| max | 1.554e-07 | 4.819e-08 | 1.353e-08 |
+| rms | 5.38e-09 | 1.72e-09 | 5.38e-10 |
+
+Rates 1.69 and 1.83 in max, 1.64 and 1.68 in rms, against geq's own 1.63 and
+1.60. At 513 the difference is 0.39 (max) and 0.44 (rms) of geq's own
+257-against-513 difference; a reference converging at 1.6 against an exact
+answer predicts 0.49. MEQ's own bounded error, 3.5e-09 max and 2.0e-10 rms, is
+below that, so the residual is geq's. `ψ*` at the two points against geq's
+labels: 5.7e-11 at the axis point and 7.8e-10 at the boundary point, at all
+three resolutions. MEQ's `ψ_h` against 513 reads 1.9e-06 max, which is why the
+comparison is made in `ψ*`.
+
+**The control**: MEQ against shipped Hagenow at 257² reads 8.055e-06 max and
+3.197e-06 rms — geq's own Hagenow-minus-direct to four figures, 167× the direct
+257 difference.
+
+**geq'S FOUR GRID CORNERS CARRY EXACTLY HALF THE PLASMA'S OWN FLUX.** At
+`( 0.05, ±1.5 )` the share is 0.500000 and at `( 0.63, ±1.5 )` 0.500002, the
+missing half 2.37e-05 there — above the Hagenow bias — at every resolution, on
+the direct path and the Hagenow one alike, while neighbouring nodes agree to
+3e-06. Nothing in `freegs4e`'s direct `freeBoundary` special-cases a corner,
+and the cause is not located. The test asserts the share on the three direct
+solves, so that it goes red if geq changes, and excludes the four nodes.
+
+**The mutations it catches**: tables read in `ψ_n` (the label powers swap to
+2.98 and 1.98, and the difference sits at 8.56e-04 at every geq resolution);
+`T` in eV (no convergence); `R_ref` 0.24 for 0.213 (3.05e-04, flat). The nodal
+interpolant of `ψ_c` in place of its exact value is NOT caught here: at level 2,
+`k = 4` it is already below geq's floor, and only the label check at coarse
+levels sees it.

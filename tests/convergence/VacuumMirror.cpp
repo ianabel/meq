@@ -15,56 +15,16 @@
  *   (c) psi against geq's own vacuum field, with the disagreement ATTRIBUTED by
  *       measuring geq's field against meq::coilPsi() directly.
  *
+ * The machine, the mesh, D_h and both vacuum routes are MirrorMachine.hpp's,
+ * shared with RotatingMirror; its comment says why the coils are inside Gamma
+ * and why Gamma is at 3.0.
  *
- * WHERE THE COILS ARE DECIDES THE ROUTE
- * -------------------------------------
- *
- * FB-7's exterior conductors cannot carry a mirror's coils. MEASURED, geq's
- * packs are R in [ 0.7855, 0.8561 ], |z| in [ 1.0, 2.0 ], so the copper spans
- * rho = 1.272 .. 2.176 -- a band, not a radius. A semicircle centred on the
- * axis can only put the packs wholly on one side of it, and:
- *
- *   * OUTSIDE Gamma ( FB-7, meq::ExteriorCoilSet ) needs rho_Gamma < 1.272. The
- *     plasma reaches the throat at |z| ~ 1.5 -- rho ~ 1.51 for the flux tube
- *     through R = 0.35 at the midplane, mirror ratio about 3.5 -- and M-169's
- *     whole argument is that Gamma must enclose it. So this route cannot carry
- *     MR-4, and a vacuum fixture built on it would validate a geometry the
- *     machine cannot use.
- *   * STRADDLING it -- M-169's rho_Gamma = 1.7 cuts both packs -- is refused by
- *     both routes, ExteriorCoilSet::clearance() and
- *     ConductorField::containment() measuring to the nearest and farthest point
- *     respectively for exactly this reason.
- *   * INSIDE Gamma is the only placement that holds the plasma and the coils on
- *     one side, so Gamma goes outside the copper: rho_Gamma = 3.0, and the
- *     background mesh's arc at 3.4 so that Gamma_h is cut from it and bridged by
- *     the transfer, as the driver does.
- *
- * Inside Gamma a rectangle can be MESHED ( a domain source through
- * meq::CoilAugmentedSource, the default and the route COIL-SUBTRACTION-PLAN.md
- * section 0a-pre says must never stop working ) or SUBTRACTED ( CS-3 ). This
- * file takes the MESHED route for (a) and (b), because a subtracted vacuum has
- * psi_p = 0 identically and nothing to converge -- section 10.1 of that plan
- * says a rate there would be wrong in both directions -- while a meshed one
- * makes the coil field the solve's own answer, which is the claim. Subtraction
- * appears in (c), where it is the instrument rather than the claim.
- *
- * AND IT MOVES THE MODE COUNT FROM THE PLASMA TO THE COILS. A source inside
- * Gamma reaching rho_max puts mode n on Gamma at about ( rho_max/rho_Gamma )^n,
- * and the copper reaches 2.176 where the plasma stops near 1.6. So N is set by
- * the machine, not by the Mach number -- see (b).
- *
- *
- * THE MACHINE IS geq'S, READ FROM THE COMMITTED REFERENCE
- * -------------------------------------------------------
- *
- * tools/geq-benchmark/export_vacuum.py writes the pack geometry and current as
- * geq computed them ( make_mirror_machine_from_field( field = 4, L = 1,
- * ri = 0.7855, dz = 3, Nr = 1, Nz = 10 ) ) into meta.txt, and this file reads
- * them rather than re-deriving geq's tape-and-turn arithmetic: one machine,
- * written down once. A pack is a meq::Coil over [ ri, ro ] x [ zc - L/2,
- * zc + L/2 ] carrying the pack's whole current at uniform density -- the
- * winding as built -- where geq carries ten point filaments at the radial
- * centre. That difference is the coil model, and (c) measures it.
+ * THIS FILE TAKES THE MESHED ROUTE FOR (a) AND (b), because a subtracted
+ * vacuum has psi_p = 0 identically and nothing to converge --
+ * COIL-SUBTRACTION-PLAN.md section 10.1 says a rate there would be wrong in
+ * both directions -- while a meshed one makes the coil field the solve's own
+ * answer, which is the claim. Subtraction appears in (c), where it is the
+ * instrument rather than the claim.
  */
 
 #define BOOST_TEST_MODULE VacuumMirror
@@ -94,384 +54,20 @@
 #include "meq/Sampler.hpp"
 
 #include "convergence/ConvergenceHarness.hpp"
+#include "convergence/GeqReference.hpp"
+#include "convergence/MirrorMachine.hpp"
 
 namespace
 {
-	/// The committed geq reference, or MEQ_GEQ_VACUUM_REFERENCE -- the same
-	/// override GeqSourceComparison takes, for a regenerated one.
-	std::string referenceDirectory()
-	{
-		char const *override = std::getenv( "MEQ_GEQ_VACUUM_REFERENCE" );
-		return override ? std::string( override )
-		                : std::string( "tools/geq-benchmark/reference/vacuum" );
-	}
+	using namespace meqtest::mirror;
 
-	/// geq's machine, as geq computed it. See the file comment.
-	struct MirrorMachine
-	{
-		double mu0 = 0.0;
-		double innerRadius = 0.0;
-		double outerRadius = 0.0;
-		double length = 0.0;
-		double centreZ = 0.0;
-		double packCurrent = 0.0;
-		int filamentsPerPack = 0;
-	};
-
-	MirrorMachine readMachine()
-	{
-		std::string const path = referenceDirectory() + "/meta.txt";
-		std::ifstream in( path );
-		BOOST_TEST_REQUIRE( in.good(), "cannot open " << path
-			<< " -- the machine is read from the committed geq reference; "
-			"tools/geq-benchmark/README.md says how to regenerate it" );
-		MirrorMachine m;
-		std::string key;
-		while ( in >> key )
-		{
-			if ( key == "mu0" )
-				in >> m.mu0;
-			else if ( key == "coil_inner_radius" )
-				in >> m.innerRadius;
-			else if ( key == "coil_outer_radius" )
-				in >> m.outerRadius;
-			else if ( key == "coil_length" )
-				in >> m.length;
-			else if ( key == "coil_centre_z" )
-				in >> m.centreZ;
-			else if ( key == "pack_current" )
-				in >> m.packCurrent;
-			else if ( key == "filaments_per_pack" )
-				in >> m.filamentsPerPack;
-			else
-			{
-				std::string rest;
-				std::getline( in, rest );
-			}
-		}
-		BOOST_TEST_REQUIRE( m.mu0 > 0.0 );
-		BOOST_TEST_REQUIRE( m.outerRadius > m.innerRadius );
-		BOOST_TEST_REQUIRE( m.length > 0.0 );
-		BOOST_TEST_REQUIRE( m.packCurrent != 0.0 );
-		BOOST_TEST_REQUIRE( m.filamentsPerPack > 0 );
-		return m;
-	}
-
-	MirrorMachine const &machine()
-	{
-		static MirrorMachine const m = readMachine();
-		return m;
-	}
-
-	/// One pack, at z = sign*zc. Both carry the SAME current: a mirror, not a
-	/// cusp.
-	meq::Coil pack( double sign )
-	{
-		MirrorMachine const &m = machine();
-		return meq::Coil( 0.5*( m.innerRadius + m.outerRadius ), sign*m.centreZ,
-		                  0.5*( m.outerRadius - m.innerRadius ), 0.5*m.length,
-		                  m.packCurrent );
-	}
-
-	/// The quadrature order of every reference evaluation of coilPsi() here.
-	/// 16 rather than the default 32 because the error integrals below evaluate
-	/// it at up to 700,000 points: Coils.hpp's table puts 16 at 1e-9 relative
-	/// INSIDE a coil and at round-off 5 cm clear of one, against a smallest
-	/// solve error of 3e-8 relative over the machine region and 5e-7 globally.
-	int const referenceOrder = 16;
-
-	std::shared_ptr<meq::CoilSet> machineCoils()
-	{
-		auto set = std::make_shared<meq::CoilSet>( machine().mu0 );
-		set->add( pack( -1.0 ) );
-		set->add( pack( +1.0 ) );
-		set->setQuadratureOrder( referenceOrder );
-		return set;
-	}
-
-	/// Gamma, and the background mesh's own arc outside it. See the file
-	/// comment for why Gamma is outside the copper.
-	double const rhoGamma = 3.0;
-	double const meshRadius = 3.4;
-
-	/// The mode count every case uses unless it is sweeping it -- (b)'s
-	/// plateau with room to spare, so the truncation stays below the
-	/// discretisation error at every mesh in (a).
-	int const defaultModes = 32;
-
-	/// geq's grid box, where MR-4's plasma lives. The error over it is the one
-	/// asserted at k+1 for every order: it is 0.15 m clear of the copper, so the
-	/// conductor corners' r^2 log r is not in it.
-	bool inMachineRegion( double radius, double z )
-	{
-		return radius <= 0.63 && std::abs( z ) <= 1.5;
-	}
-
-	/**
-	 * The half-disc, made by halfdisc.py once per process into the build tree.
-	 *
-	 * The packs are MESHED TO -- FB-2's aligned rates against cut ones are
-	 * 1.99/2.88/3.01 against 1.33/1.27/1.09 -- and the machine region is refined
-	 * as a plasma box would be, so this is the mesh MR-4 starts from with the
-	 * plasma still absent. Coarse vacuum out to the arc, because Gamma is far
-	 * out and the field there is smooth.
-	 *
-	 * The ladder below REFINES this mesh rather than re-running halfdisc.py at
-	 * smaller sizes, for DivertedMachine.hpp's reason: a re-meshed geometry
-	 * moves which elements the conductors occupy, a second variable in a study
-	 * of the first, and uniform refinement carries the coil edges down exactly.
-	 */
-	std::string const &meshFile()
-	{
-		static std::string const file = []()
-		{
-			MirrorMachine const &m = machine();
-			std::string const out = std::string( MEQ_TEST_OUTPUT_DIR )
-			                        + "/VacuumMirror.msh";
-			double const width = m.outerRadius - m.innerRadius;
-			char buffer[ 2048 ];
-			std::snprintf( buffer, sizeof buffer,
-				"python3 %s --rho %.17g --size 0.4"
-				" --coil %.17g %.17g %.17g %.17g"
-				" --coil %.17g %.17g %.17g %.17g --coil-size 0.07"
-				" --plasma 0.0 -1.7 0.75 3.4 --plasma-size 0.1"
-				" --check -o %s > /dev/null",
-				MEQ_HALFDISC_PATH, meshRadius,
-				m.innerRadius, -m.centreZ - 0.5*m.length, width, m.length,
-				m.innerRadius, m.centreZ - 0.5*m.length, width, m.length,
-				out.c_str() );
-			BOOST_TEST_REQUIRE( std::system( buffer ) == 0,
-				"halfdisc.py failed, so there is no mesh. It needs python3 with "
-				"gmsh; the command was: " << buffer );
-			return out;
-		}();
-		return file;
-	}
-
-	/// Negative inside Gamma.
-	double semicircle( mfem::Vector const &x )
-	{
-		return std::hypot( x( 0 ), x( 1 ) ) - rhoGamma;
-	}
-
-	/// D_h cut from the background at Gamma. The background owns the parent of
-	/// the SubMesh and so lives as long as it does.
-	struct Domain
-	{
-		std::unique_ptr<mfem::Mesh> background;
-		std::unique_ptr<mfem::SubMesh> sub;
-		std::unique_ptr<mfem::VertexConePath> path;
-		mfem::Array<int> gammaHMarker;
-		int gammaH = 0;
-		double h = 0.0;
-	};
+	/// meshFile()'s stem for this test.
+	char const *const meshStem = "VacuumMirror";
 
 	std::unique_ptr<Domain> buildDomain( int refinements )
 	{
-		auto d = std::make_unique<Domain>();
-		d->background = std::make_unique<mfem::Mesh>( meshFile().c_str(), 1, 1 );
-		for ( int level = 0; level < refinements; ++level )
-			d->background->UniformRefinement();
-
-		// A MESH READ FROM A FILE HAS ITS h MEASURED, and a zero search length
-		// is mfem::VertexConePath aborting on the first vertex of Gamma_h.
-		for ( int e = 0; e < d->background->GetNE(); ++e )
-			d->h = std::max( d->h, meq::elementDiameter( *d->background, e ) );
-
-		mfem::Array<int> marker;
-		BOOST_TEST_REQUIRE( mfem::MarkLevelSetSubdomain(
-			*d->background, semicircle, meq::markingOffset( 1.0, 1.5 ), marker,
-			1 ) > 0, "the subdomain inside Gamma is empty" );
-		int const parentBoundaryMax = d->background->bdr_attributes.Max();
-		for ( int e = 0; e < d->background->GetNE(); ++e )
-			d->background->SetAttribute( e, marker[ e ] ? 1 : 2 );
-		d->background->SetAttributes();
-
-		mfem::Array<int> domainAttribute( 1 );
-		domainAttribute[ 0 ] = 1;
-		d->sub = std::make_unique<mfem::SubMesh>(
-			mfem::SubMesh::CreateFromDomain( *d->background, domainAttribute ) );
-		d->gammaH = d->sub->bdr_attributes.Max();
-		BOOST_TEST_REQUIRE( d->gammaH > parentBoundaryMax,
-			"no boundary was generated cutting at Gamma, so Gamma_h names the "
-			"background's own arc and nothing is transferred" );
-		d->gammaHMarker.SetSize( d->gammaH );
-		d->gammaHMarker = 0;
-		d->gammaHMarker[ d->gammaH - 1 ] = 1;
-		d->path = std::make_unique<mfem::VertexConePath>(
-			*d->sub, d->gammaH, semicircle, 6.0*d->h );
-		return d;
+		return meqtest::mirror::buildDomain( refinements, meshStem );
 	}
-
-	/// No plasma. A meq::Source and not a Coefficient because the coupled path
-	/// is NPC and refuses a Coefficient.
-	struct EmptyInterior : public meq::Source
-	{
-		double f( double, double, double ) const override { return 0.0; }
-		double dFdPsi( double, double, double ) const override { return 0.0; }
-	};
-
-	/// Everything a solve aliases, kept alive with it: the solver holds the
-	/// DtN and the source by reference.
-	struct VacuumSolve
-	{
-		std::shared_ptr<meq::CoilSet> coils;
-		std::unique_ptr<meq::Source> source;
-		std::unique_ptr<meq::ConductorField> subtracted;
-		std::unique_ptr<meq::ExteriorDtN> dtn;
-		mfem::ConstantCoefficient zero{ 0.0 };
-		std::unique_ptr<meq::GradShafranovSolver> solver;
-	};
-
-	/// The meshed route: the packs are a domain source, the [[coils]] route.
-	/// @param coupled false drops the exterior coupling, leaving psi = 0 on
-	///        Gamma_h -- the control in (a).
-	std::unique_ptr<VacuumSolve> solveMeshed( Domain &d, int order, int modes,
-	                                          std::shared_ptr<meq::CoilSet> coils,
-	                                          bool coupled = true )
-	{
-		auto s = std::make_unique<VacuumSolve>();
-		s->coils = std::move( coils );
-		s->source = std::make_unique<meq::CoilAugmentedSource>(
-			std::make_shared<EmptyInterior>(), s->coils );
-		s->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, modes );
-		s->solver = std::make_unique<meq::GradShafranovSolver>( *d.sub, order );
-		s->solver->setSource( *s->source );
-		s->solver->setBoundaryData( s->zero );
-		s->solver->setExtension( *d.path, d.gammaHMarker );
-		if ( coupled )
-			s->solver->setExteriorCoupling( *s->dtn );
-		s->solver->solve();
-		return s;
-	}
-
-	/// The subtracted route, CS-3: the conductors are taken off the right-hand
-	/// side and handed to the solver as psi_c, so what it solves for is the
-	/// remainder psi_p and the interior equation has no source at all.
-	std::unique_ptr<VacuumSolve> solveSubtracted( Domain &d, int order, int modes,
-	                                              meq::ConductorField const &field )
-	{
-		auto s = std::make_unique<VacuumSolve>();
-		s->source = std::make_unique<EmptyInterior>();
-		s->subtracted = std::make_unique<meq::ConductorField>( field );
-		s->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, modes );
-		s->solver = std::make_unique<meq::GradShafranovSolver>( *d.sub, order );
-		s->solver->setSource( *s->source );
-		s->solver->setBoundaryData( s->zero );
-		s->solver->setExtension( *d.path, d.gammaHMarker );
-		s->solver->setConductorField( *s->subtracted );
-		s->solver->setExteriorCoupling( *s->dtn );
-		s->solver->solve();
-		return s;
-	}
-
-	struct Errors
-	{
-		double global = 0.0;
-		double region = 0.0;
-		double globalNorm = 0.0;
-		double regionNorm = 0.0;
-	};
-
-	/**
-	 * L2( psi_h - psi_coil ) over D_h and over the machine region, from ONE
-	 * evaluation of the reference.
-	 *
-	 * The reference is what costs -- coilPsi() at every quadrature point, a
-	 * Gauss rule over each pack per point -- so it is tabulated once per mesh
-	 * and order and then charged against as many solves as share them, which
-	 * is what lets (b) sweep N for the price of one table. The rule is
-	 * potentialError()'s, 2k + 4. The element loop stays serial, with a
-	 * caller-allocated transformation rather than the mesh's shared scratch,
-	 * and only the closed-form evaluation is threaded.
-	 */
-	class ReferenceTable
-	{
-		public:
-			ReferenceTable( mfem::Mesh &meshIn, int orderIn,
-			                meq::CoilSet const &reference )
-				: mesh( meshIn ), order( orderIn )
-			{
-				mfem::IsoparametricTransformation transformation;
-				mfem::Vector x( 2 );
-				mfem::Vector centre( 2 );
-				for ( int e = 0; e < mesh.GetNE(); ++e )
-				{
-					mesh.GetElementTransformation( e, &transformation );
-					mesh.GetElementCenter( e, centre );
-					bool const inside = inMachineRegion( centre( 0 ), centre( 1 ) );
-					mfem::IntegrationRule const &ir = rule( e );
-					for ( int q = 0; q < ir.GetNPoints(); ++q )
-					{
-						mfem::IntegrationPoint const &ip = ir.IntPoint( q );
-						transformation.SetIntPoint( &ip );
-						transformation.Transform( ip, x );
-						radius.push_back( x( 0 ) );
-						height.push_back( x( 1 ) );
-						weight.push_back( ip.weight*transformation.Weight() );
-						region.push_back( inside ? 1 : 0 );
-					}
-				}
-				exact.resize( radius.size() );
-				long const n = static_cast<long>( radius.size() );
-				#pragma omp parallel for schedule( dynamic, 256 )
-				for ( long i = 0; i < n; ++i )
-					exact[ static_cast<std::size_t>( i ) ] = reference.psi(
-						radius[ static_cast<std::size_t>( i ) ],
-						height[ static_cast<std::size_t>( i ) ] );
-			}
-
-			/// @param psi a potential on the mesh this table was built on, at
-			///        the order it was built for.
-			Errors errors( mfem::GridFunction const &psi ) const
-			{
-				BOOST_TEST_REQUIRE( psi.FESpace()->GetMesh() == &mesh );
-				Errors out;
-				mfem::IsoparametricTransformation transformation;
-				std::size_t i = 0;
-				for ( int e = 0; e < mesh.GetNE(); ++e )
-				{
-					mesh.GetElementTransformation( e, &transformation );
-					mfem::IntegrationRule const &ir = rule( e );
-					for ( int q = 0; q < ir.GetNPoints(); ++q, ++i )
-					{
-						mfem::IntegrationPoint const &ip = ir.IntPoint( q );
-						transformation.SetIntPoint( &ip );
-						double const difference =
-							psi.GetValue( transformation, ip ) - exact[ i ];
-						double const d2 = weight[ i ]*difference*difference;
-						double const n2 = weight[ i ]*exact[ i ]*exact[ i ];
-						out.global += d2;
-						out.globalNorm += n2;
-						if ( region[ i ] )
-						{
-							out.region += d2;
-							out.regionNorm += n2;
-						}
-					}
-				}
-				out.global = std::sqrt( out.global );
-				out.region = std::sqrt( out.region );
-				out.globalNorm = std::sqrt( out.globalNorm );
-				out.regionNorm = std::sqrt( out.regionNorm );
-				return out;
-			}
-
-		private:
-			mfem::IntegrationRule const &rule( int e ) const
-			{
-				return mfem::IntRules.Get( mesh.GetElementBaseGeometry( e ),
-				                           2*order + 4 );
-			}
-
-			mfem::Mesh &mesh;
-			int order;
-			std::vector<double> radius;
-			std::vector<double> height;
-			std::vector<double> weight;
-			std::vector<double> exact;
-			std::vector<char> region;
-	};
 
 	/**
 	 * The relative tail of psi_coil's own trace on Gamma past N retained
@@ -480,14 +76,12 @@ namespace
 	 * N-mode coupling can do ON Gamma, and entry N is the tail after degrees
 	 * 2 .. N + 1.
 	 *
-	 * **NOT ExteriorDtN::coefficients(), WHICH ALIASES PAST ABOUT THIRTY
-	 * MODES.** That method spends a fixed 30-point Gauss rule, exact for mode
-	 * pairs with m + n <= 61, and its own comment says nobody will use forty
-	 * modes. Measured here at 96 it returns a tail of 0.82 flat out to N = 48,
-	 * which is the quadrature and not the trace. Nothing in the solve calls it
-	 * -- the coupling's coefficients come out of the bordered Newton -- so this
-	 * is a diagnostic's limit and not a solver's; a 400-point rule in mu is
-	 * spent here instead, which resolves the highest mode with room to spare.
+	 * **ITS OWN 400-POINT RULE IN mu, AND NOT ExteriorDtN::coefficients()**,
+	 * so that the reference this case reads N against shares no quadrature
+	 * with the class under test. A fixed 30-point rule in coefficients() read
+	 * this tail as a flat 0.82 out to N = 48 at 96 modes -- M-260, the
+	 * quadrature and not the trace -- which is why that rule now scales with
+	 * the mode count; this one resolves the highest mode with room to spare.
 	 * The tail is summed DOWN from the last mode rather than subtracted from
 	 * the norm, which would floor it at the square root of round-off.
 	 */
@@ -540,8 +134,7 @@ namespace
 	std::vector<GeqPoint> readGeqPoints()
 	{
 		std::string const path = referenceDirectory() + "/points.dat";
-		std::ifstream in( path );
-		BOOST_TEST_REQUIRE( in.good(), "cannot open " << path );
+		std::ifstream in = meqtest::geq::openOutput( referenceDirectory(), "points.dat" );
 		std::vector<GeqPoint> points;
 		std::string line;
 		while ( std::getline( in, line ) )
@@ -901,11 +494,7 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorAgreesWithGeqToGeqsOwnCoilModel )
 	std::vector<GeqPoint> const points = readGeqPoints();
 	int const count = static_cast<int>( points.size() );
 
-	meq::ConductorField geqModel( machine().mu0 );
-	for ( double sign : { -1.0, 1.0 } )
-		for ( meq::CurrentFilament const &filament :
-		      meq::filamentStack( pack( sign ), 1, machine().filamentsPerPack ) )
-			geqModel.add( filament );
+	meq::ConductorField const geqModel = geqFilaments();
 	BOOST_TEST_REQUIRE( geqModel.containment( 0.0, rhoGamma ) > 0.0 );
 
 	std::unique_ptr<Domain> const d = buildDomain( level );

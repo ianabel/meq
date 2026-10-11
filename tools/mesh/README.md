@@ -87,6 +87,37 @@ not the plasma**: a source reaching `ρ_max` inside Γ puts mode `n` on Γ at ab
 for the plasma, at the copper's radius. →
 **[M-260](../../MEASUREMENTS.md#m-260)**.
 
+## `--align-plasma`, for a source that jumps across a prescribed line
+
+`--plasma` is a size field: it says where elements are small, not where
+anything is. `--align-plasma` also fragments that box in, so its four edges are
+element faces — and stay faces under uniform refinement, whose midpoints of a
+straight edge lie on it. The pieces keep the vacuum attribute; the box is where
+the faces are, not a region anything names.
+
+It exists for a mirror's **axial cutoff**. `PlasmaSupportShape::Box` drops the
+source at `|z| = z_edge`, where the current is not small — geq's rotating
+mirror carries several per cent of its peak across it — so the source **jumps**
+there. A jump across a line that cuts elements caps the order as a source
+stepping at a plasma edge does (`CLAUDE_FB.md`, *The plasma edge caps the
+order*, at `j = 0`); across element faces it costs nothing. The line is
+prescribed input, so it is aligned to, for the coils' reason one line further
+on. `tests/convergence/RotatingMirror.cpp` makes its mesh this way, with the
+packs left out because its coils are subtracted filaments:
+
+```sh
+python3 tools/mesh/halfdisc.py --rho 3.4 --size 0.4 \
+    --plasma 0.0 -1.5 0.75 3.0 --align-plasma --plasma-size 0.1 --check -o mirror.msh
+```
+
+and `theAlignedCutoffKeepsTheOrder` there measures the same ladder with the
+fragmentation dropped and nothing else changed.
+
+The box must lie inside the arc and clear of every conductor — a piece of it
+inside a coil would be told a coil by its centre of mass — and under
+`--symmetric` it is geometry, so it must be symmetric about `z = 0`. Each is
+refused rather than resolved.
+
 ## What the attributes mean
 
 | | |

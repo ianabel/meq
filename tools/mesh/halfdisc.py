@@ -63,6 +63,17 @@ changed, and it lands on a wall-hugging annulus from two starting points a whole
 equilibrium apart, reaching the same wrong answer to every digit.  M-164 section
 4.  So this option's mesh is correct and the equilibrium it enables is open.
 
+`--align-plasma` MESHES THE --plasma BOX IN, FOR A SOURCE THAT JUMPS ACROSS IT
+------------------------------------------------------------------------------
+
+The same argument once more, for a line rather than a conductor.  A mirror's
+box support drops the source at |z| = z_edge where the current is not small,
+so the source JUMPS there, and a jump across a line that cuts elements caps the
+order the way a source stepping at a plasma edge does.  The line is prescribed,
+so it is aligned to: the box is fragmented in, its pieces keep the vacuum
+attribute, and uniform refinement keeps its edges on element faces.
+
+
 THE BOUNDARY GROUPS ARE THE OUTER BOUNDARY AND NOTHING ELSE, AND THE FIRST
 VERSION OF THIS FILE GOT THAT WRONG IN A WAY NOTHING WOULD HAVE REPORTED
 -------------------------------------------------------------------------
@@ -561,7 +572,7 @@ def _reflect_msh(path, attributes, tolerance):
 
 def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
           coil_size=None, transition=None, limiter=None, vessel=None,
-          symmetric=False, partner=None):
+          symmetric=False, partner=None, align_plasma=False):
     """A half-disc of radius `rho` about the origin, R >= 0, with `coils` a list
     of (Rmin, zmin, width, height) rectangles fragmented into it.
 
@@ -596,6 +607,13 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
     ONCE, at mesh time, rather than the solve deciding inside/outside per
     element on every residual evaluation.  A vessel does not move and the
     support does, so the work belongs here.
+
+    `align_plasma` fragments the `plasma` box in as well, so that its four
+    edges are mesh lines; its pieces keep the vacuum attribute.  It is for a
+    source that is DISCONTINUOUS across a prescribed line -- a mirror's axial
+    cutoff, `PlasmaSupportShape::Box` -- which caps the order like a source
+    stepping at a plasma edge wherever the line cuts elements, and costs
+    nothing where it lies on their faces.  Uniform refinement keeps it there.
 
     `symmetric` meshes the half z >= 0 and reflects it, so that the result is
     its own mirror image dof for dof and `[solver] UpDownSymmetry` will take
@@ -661,6 +679,15 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
                 tags.extend(tag for (_, tag) in kept)
             else:
                 tags.append(disk)
+        if align_plasma:
+            # A PRESCRIBED LINE IS ALIGNED TO FOR THE CONDUCTORS' REASON, and
+            # the box is fragmented in exactly as they are.  It takes no
+            # attribute of its own: what it buys is where the element faces
+            # are, not a region anything names.
+            box = _upper_half_of(plasma) if symmetric else plasma
+            if box is not None:
+                R, z, w, h = box
+                tags.append(occ.addRectangle(R, z, 0, w, h))
         if vessel is not None:
             # A PLANE SURFACE FROM ITS OWN POINTS, not addPolygon: the OCC
             # kernel has no polygon primitive, and building the loop explicitly
@@ -1190,6 +1217,14 @@ def main():
                    help="a box to refine inside, where the plasma is expected")
     p.add_argument("--plasma-size", type=float, default=None,
                    help="element size inside --plasma; required with it")
+    p.add_argument("--align-plasma", action="store_true",
+                   help="fragment the --plasma box in as well, so its edges "
+                        "are mesh lines and stay so under uniform refinement. "
+                        "For a source that jumps across a prescribed line -- "
+                        "a mirror's axial cutoff -- which caps the order "
+                        "wherever the line cuts elements. The box keeps the "
+                        "vacuum attribute and must lie inside the disc, clear "
+                        "of every conductor")
     p.add_argument("--vessel", type=float, nargs="+", default=None,
                    metavar="R Z",
                    help="a closed vessel polygon, given as alternating R and Z "
@@ -1248,6 +1283,34 @@ def main():
     if (a.plasma is None) != (a.plasma_size is None):
         p.error("--plasma and --plasma-size go together: a region with no size "
                 "refines nothing, and a size with no region has nowhere to act")
+
+    if a.align_plasma:
+        if a.plasma is None:
+            p.error("--align-plasma aligns the --plasma box, and there is none")
+        R, z, w, h = a.plasma
+        if R < 0.0 or w <= 0.0 or h <= 0.0:
+            p.error("--align-plasma needs a box with R >= 0 and a positive "
+                    "extent; got RMIN %g WIDTH %g HEIGHT %g" % (R, w, h))
+        # THE --vessel REFUSAL'S REASON: fragment keeps the part of a tool
+        # outside the shape it is fragmented into, so a box reaching past the
+        # arc would add mesh beyond Gamma with Gamma's attribute inside it.
+        if math.hypot(R + w, max(abs(z), abs(z + h))) >= a.rho:
+            p.error("--align-plasma's box reaches R = %g z = %g, on or outside "
+                    "the arc at rho = %g" % (R + w, max(abs(z), abs(z + h)),
+                                             a.rho))
+        # AND A PIECE OF IT INSIDE A CONDUCTOR would be told a coil by its
+        # centre of mass and a vacuum by nothing, so an overlap is refused
+        # rather than resolved.
+        for (cR, cz, cw, ch) in coils:
+            if (R < cR + cw and cR < R + w and z < cz + ch and cz < z + h):
+                p.error("--align-plasma's box overlaps the conductor at "
+                        "( %g, %g ); a box aligned to is geometry, and the "
+                        "attributes cannot say a region is both"
+                        % (cR, cz))
+        if a.symmetric and abs(2.0*z + h) > SYMMETRY_TOLERANCE*max(a.rho, 1.0):
+            p.error("--align-plasma makes the box geometry, so --symmetric "
+                    "needs it symmetric about z = 0; z [%g, %g] is not"
+                    % (z, z + h))
 
     # THE CONDUCTOR ATTRIBUTES RUN 10, 11, ... AND THE OTHER TWO ARE FIXED
     # NUMBERS IN THAT RANGE, so enough conductors collide with them.  The
@@ -1376,7 +1439,7 @@ def main():
     transition = a.transition if a.transition is not None else 4.0 * a.size
     rep = build(a.rho, coils, a.size, a.out, a.order, a.plasma, a.plasma_size,
                 a.coil_size, transition, a.limiter, vessel, a.symmetric,
-                partner)
+                partner, a.align_plasma)
     print("  %s: %d elements, %d nodes, %d surfaces (%d coil, %d limiter, "
           "%d outside the vessel), %d arc curves, %d axis curves"
           % (a.out, rep["elements"], rep["nodes"], rep["surfaces"],

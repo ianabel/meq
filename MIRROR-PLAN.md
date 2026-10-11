@@ -399,13 +399,27 @@ plasma**, which is the rung that does not exist today between the analytic
 fixtures and a full machine solve. It also sizes the mode count `N` that an
 elongated machine needs on `Γ` — the number MR-0 bounds and this one measures.
 
-### MR-4 — the free-boundary rotating mirror, against geq
+### MR-4 — the free-boundary rotating mirror, against geq — DONE
+
+**DONE: MEQ AGREES WITH geq TO geq'S OWN RESOLUTION, AND THE DIFFERENCE FALLS AS
+geq REFINES, AT geq'S RATE** → [M-261](MEASUREMENTS.md#m-261),
+[M-262](MEASUREMENTS.md#m-262), [M-263](MEASUREMENTS.md#m-263).
+`RotatingMirror` (MR-4b, seconds) and `RotatingMirrorResolution` (MR-4c and
+MR-4d, about four minutes) are the acceptance. From the vacuum guess the bordered
+Newton converges in three or four steps with a negative span, quadratically; `ψ*`
+converges at its design rate; and against geq's direct solves at 129², 257² and
+513² the difference falls at 1.64 to 1.83 against geq's own 1.60 to 1.63,
+ending at 5.4e-10 rms, 0.44 of geq's own last refinement. Shipped geq reads its
+8.06e-06 bias through the same comparison. Departures from what follows: the
+MEQ-native profiles are gone, the problem being geq's; the packs are not meshed
+on the plasma mesh, since under subtraction they are no source and a level-2
+vertex landed on a filament; `ψ_h` at `k ≤ 2` is printed and not asserted,
+being not yet asymptotic; and geq's four grid corners are excluded, for the
+reason M-263 records.
 
 Everything at once: rotating source, both labels prescribed at points, the box
 support, the coils, the DtN, the bordered Newton — compared with geq's converged
-rotating mirror **in the mode geq solves in**. Planned from two read-throughs
-taken against the code and against geq itself; the numbers below were measured
-then and are re-taken by the stages that own them.
+rotating mirror **in the mode geq solves in**.
 
 **NOTHING IN THE SOLVER IS MISSING.** Every piece is library API, so MR-4 is a
 ctest in the shape of `VacuumMirror` and not a driver change. What it needs is a
@@ -468,41 +482,48 @@ order. **That is the resolution any MR-4 agreement can be asserted to.**
 M-167's `M` (on `T_e`) divided by about 1.55: geq-Mach 2 is M-167's 3.1, and 4 is
 6.2. The plan quotes geq's.
 
-#### The profiles: `F` must vanish at both labels
+#### The profiles: `F` must vanish at both labels, to an order
 
 `F = μ₀R² ∂p/∂ψ|_R` vanishes at a label when `N_s′`, `T_s′` and `ω′` all vanish
 there (with `gg′ = 0`): then quasineutrality has no `ψ`-dependence at that label,
 `φ₀′ = 0`, and `∂p/∂ψ = 0`. That is a statement about the PHYSICAL state, so it
 holds in geq's gauge and in MEQ's alike, and the gauge transfer preserves it.
-Use
+
+**WHAT AN EDGE COSTS IS ITS ORDER `j`**, `p′ ~ d^j` at distance `d` inside it:
+[M-09](MEASUREMENTS.md#m-09) caps `ψ*` at `min( k+2, j+2.5 )`. So the profiles
+are
 
 ```
-    f( ψ_n ) = f_edge + ( f_peak − f_edge )·16 ψ_n² ( 1 − ψ_n )²
+    f( ψ_n ) = f_edge + ( f_peak − f_edge )·C ψ_n³ ( 1 − ψ_n )⁴
 ```
 
-for `T_e`, `T_D`, `N_e`, `N_D` and `ω` — peaked at 0.5, zero slope at both ends,
-and a quartic, so MEQ's Hermite tables carry it exactly with explicit derivative
-columns. `F` then vanishes linearly at both labels.
+for `T_e`, `T_D`, `N_e`, `N_D` and `ω`, `C` normalising the peak at `ψ_n = 3/7`
+to 1: `j = 2` at the inner label and `j = 3` at the outer, and polynomial, so
+MEQ's Hermite tables carry them with explicit derivative columns. A quartic
+`16 ψ_n²( 1 − ψ_n )²` is `j = 1`, which caps the rates from `k = 2`, and is
+symmetric about 0.5, so a reader confusing `Ψ` with `ψ_n` reads the same numbers;
+**the asymmetry is what lets the comparison see item 4's inversion**, and it
+does — read in `ψ_n`, the label powers swap and the difference sits at 8.6e-04.
 
-**geq needs a monkeypatch to hold `N_D` as a flux function**: keep
-`AllSpecies.set_flux_density` from rebuilding deuterium's spline, so that both
-`N_e` and `N_D` are the prescribed quartics and `φ₀` alone carries
-quasineutrality. This is untried inside geq and is MR-4a's first risk.
+**geq holds `N_D` as a flux function by a monkeypatch**: `AllSpecies.set_flux_density`
+is kept from rebuilding deuterium's spline, so both `N_s` are the prescribed
+profiles and `φ₀` alone carries quasineutrality.
 
 #### Stages
 
 **MR-4a — the reference.** `tools/geq-benchmark/export_rotating.py`: two
-species (e, D), the quartic profiles, rigid `ω`, `N_D` held, direct
+species (e, D), the profiles above, rigid `ω`, `N_D` held, direct
 `freeBoundary`, `φ₀` tightened, Picard with `atol = 0` and `rtol = 2e-09` (geq's
 default `atol = 1e-06` is what actually stops it, and its returned `psi_bndry`
 then lags `psiRZ` at the point by 2.3e-07 — **export the labels by `psiRZ` at
 the points**). At geq-Mach 2, and at 4 if 2 is clean. Write the tables in MEQ's
 `Ψ` and SI with the gauge transferred pointwise as `export_mirror.py` does, `ψ`
-on geq's grid at 129², 257² and 513², and the labels. **Acceptance**: `J_φ`
-just inside each label below 1e-06 of peak on the converged state, where the
-shipped profiles read 1e-04 to 1e-01; geq's direct self-convergence table
-re-taken; the shipped-Hagenow bias re-taken as the control that shows the
-comparison can see a 1e-05 error. → M-nn.
+on geq's grid at 129², 257² and 513², and the labels — the profile tables
+tracked, geq's answer regenerated and not. **Acceptance**: `J_φ` falling at
+`d^2` and `d^3` inside the two labels on the converged state, where the shipped
+profiles step; geq's direct self-convergence table re-taken; the
+shipped-Hagenow bias re-taken as the control that shows the comparison can see
+a 1e-05 error. → [M-261](MEASUREMENTS.md#m-261).
 
 **MR-4b — MEQ converges on it.** `tests/convergence/RotatingMirror.cpp`, with
 `VacuumMirror`'s machine, mesh and domain extracted into a shared header
@@ -563,23 +584,16 @@ difference — only a difference that falls rules out a conversion error. And th
   bit-identical up to 14 modes, and recovers a 48-mode trace to 8.9e-15 where
   the fixed rule read 4.2e-02.
 
-#### Not yet known, in the order they could stop MR-4
+#### What the run answered
 
-1. **Whether the bordered Newton converges with a negative span from a vacuum
-   guess.** No negative-span bordered solve exists in the tree. Nothing found
-   in the code refuses one — `setNormalisation` refuses only a zero span, and a
-   line-search trial through zero is caught as a rejected step — but it has not
-   run.
-2. **Whether the `N_D` hold works inside geq** (MR-4a).
-3. **Whether the cold-reference stopping target is too loose.** It is scaled
-   from the cold residual, and the 5.9 MA coils dominate that; the plasma's own
-   flux is 1e-03 to 3e-03 of a total of order 6e-02. Subtracting the coils
-   removes most of it from the residual, which is a second reason for that
-   route.
-4. **The exterior coefficients start at zero**, against a vacuum interior; there
-   is no setter to seed them. Newton's first step corrects it, the problem being
-   linear in them. If it costs the first step, solve once with
-   `setCurrentScale( 0 )` and continue from that solver.
+1. **The bordered Newton converges with a negative span from a vacuum guess**,
+   in three or four full steps at every `k` and level, no step damped.
+2. **The `N_D` hold works inside geq**: 32 rebuilds refused in the 513² solve.
+3. **The stopping target is not loose**: three orders tighter moves `ψ` by at
+   most 1.8e-10 of the plasma's own flux, and on geq's tables by nothing.
+4. **Zero initial exterior coefficients cost nothing**: the exterior merit is
+   1e-16 after the first step, and a `setCurrentScale( 0 )` first solve gives
+   an identical second history.
 
 ### MR-5 — from a file
 

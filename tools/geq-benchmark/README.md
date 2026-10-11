@@ -312,6 +312,13 @@ the fitted edge orders — and `psi_direct_{129,257,513}.dat` and
 resolution shares. A test that compares against them needs the script run
 first.
 
+**geq's four grid corners carry exactly half the plasma's own flux** — a share
+of 0.500000 at `( 0.05, ±1.5 )` and 0.500002 at `( 0.63, ±1.5 )`, at every
+resolution, direct and Hagenow alike, while neighbouring nodes agree with MEQ to
+3e-06. The cause is not located. Drop the corners from any comparison of `ψ`;
+`RotatingMirrorResolution` asserts the share, so it goes red if geq changes, and
+excludes them (MEASUREMENTS.md M-263).
+
 ```sh
 cd /home/ian/projects/meq
 PYTHONPATH=/home/ian/projects/geq/src \

@@ -72,6 +72,8 @@
 #include "Profiles.hpp"
 #include "RotatingSource.hpp"
 
+#include "convergence/GeqReference.hpp"
+
 namespace
 {
 	/// The committed reference. MEQ_GEQ_REFERENCE overrides it, which is how the
@@ -83,25 +85,10 @@ namespace
 		return override ? std::string( override ) + "/" : std::string( "tools/geq-benchmark/reference/" );
 	}
 
-	/// One exported case: what meta.txt says, and the tables it names.
-	struct Reference
+	/// One exported prescribed state: meta.txt, read by GeqReference.hpp's one
+	/// reader, and the points geq evaluated its current at.
+	struct Reference : meqtest::geq::GeqCase
 	{
-		double referenceRadius = 0.0;
-		double mu0 = 0.0;
-		double psiAxis = 0.0;
-		double psiBoundary = 0.0;
-
-		struct SpeciesEntry
-		{
-			std::string name;
-			double mass = 0.0;
-			double charge = 0.0;
-			std::string temperatureFile;
-			std::string densityFile;
-		};
-
-		std::vector<SpeciesEntry> species;
-
 		struct Point
 		{
 			double radius = 0.0, z = 0.0, psi = 0.0, f = 0.0;
@@ -109,58 +96,18 @@ namespace
 
 		std::vector<Point> points;       ///< geq's own phi_0, as it ships
 		std::vector<Point> pointsTight;  ///< phi_0 solved pointwise; see below
-		std::string directory;
 	};
 
 	Reference readReference( std::string const & caseName )
 	{
 		Reference reference;
-		reference.directory = referenceRootPath() + caseName + "/";
-
-		std::string const metaPath = reference.directory + "meta.txt";
-		std::ifstream meta( metaPath );
-		if ( !meta )
-			throw std::runtime_error(
-				"cannot open " + metaPath + " -- the exported geq reference is missing. "
-				"It is committed, so a build tree that lacks it is running from the "
-				"wrong working directory; ctest pins CMAKE_SOURCE_DIR. To regenerate "
-				"it see tools/geq-benchmark/README.md." );
-
-		std::string line;
-		while ( std::getline( meta, line ) )
-		{
-			std::istringstream in( line );
-			std::string key;
-			in >> key;
-
-			if ( key == "R_ref" )
-				in >> reference.referenceRadius;
-			else if ( key == "mu0" )
-				in >> reference.mu0;
-			else if ( key == "psi_axis" )
-				in >> reference.psiAxis;
-			else if ( key == "psi_boundary" )
-				in >> reference.psiBoundary;
-			else if ( key == "name" )
-			{
-				Reference::SpeciesEntry entry;
-				std::string label;
-				in >> entry.name
-				   >> label >> entry.mass
-				   >> label >> entry.charge
-				   >> label >> entry.temperatureFile
-				   >> label >> entry.densityFile;
-				reference.species.push_back( entry );
-			}
-		}
+		static_cast<meqtest::geq::GeqCase &>( reference ) =
+			meqtest::geq::readCase( referenceRootPath() + caseName );
 
 		auto const readPoints = [ &reference ]( std::string const & name,
 			std::vector<Reference::Point> & into )
 		{
-			std::string const path = reference.directory + name;
-			std::ifstream points( path );
-			if ( !points )
-				throw std::runtime_error( "cannot open " + path );
+			std::ifstream points = meqtest::geq::openOutput( reference.directory, name );
 
 			std::string line;
 			while ( std::getline( points, line ) )
@@ -182,36 +129,8 @@ namespace
 		return reference;
 	}
 
-	/// The species set in MEQ's gauge, or -- with `raw` -- in geq's, which is the
-	/// mistake the export writes a second set of tables to make checkable.
-	std::vector<meq::Species> speciesFrom( Reference const & reference, bool raw )
-	{
-		std::vector<meq::Species> species;
-
-		for ( auto const & entry : reference.species )
-		{
-			std::string const density = raw
-				? "Nraw_" + entry.name + ".dat"
-				: entry.densityFile;
-
-			meq::Species one;
-			one.mass = entry.mass;
-			one.charge = entry.charge;
-			one.temperature = std::make_shared<meq::SplineProfile const>(
-				meq::SplineProfile::fromFile( reference.directory + entry.temperatureFile ) );
-			one.density = std::make_shared<meq::SplineProfile const>(
-				meq::SplineProfile::fromFile( reference.directory + density ) );
-			species.push_back( one );
-		}
-
-		return species;
-	}
-
-	std::shared_ptr<meq::Profile const> omegaFrom( Reference const & reference )
-	{
-		return std::make_shared<meq::SplineProfile const>(
-			meq::SplineProfile::fromFile( reference.directory + "omega.dat" ) );
-	}
+	using meqtest::geq::omegaFrom;
+	using meqtest::geq::speciesFrom;
 
 	/// Relative L2 of MEQ's F against geq's, over the exported points, and the
 	/// worst single point with it.

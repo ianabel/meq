@@ -19,6 +19,12 @@ name: CI
 #   and every convergence test -- which is to say every claim about rates.
 # See CLAUDE.md; those are the acceptance criteria for stages 2 to 6 and they
 # stay a local responsibility until the MFEM branch is published.
+#
+# AND NOTHING THAT COMPARES AGAINST geq'S ANSWER. GeqSourceComparison is
+# MFEM-free and builds here, but geq's answers are regenerated from ../geq and
+# ../freegs4e rather than committed (tools/geq-benchmark/README.md), and a
+# runner has neither, so it is excluded by name below rather than left to fail
+# on a file it cannot have.
 
 on:
   push:
@@ -64,7 +70,7 @@ jobs:
         # No MKL environment is needed. MKL_NUM_THREADS=1 is set by CMake on
         # every registered test and is a no-op on a runner, which links no MKL;
         # MKL_THREADING_LAYER is no longer set anywhere, see tests/CMakeLists.txt.
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure -E '^GeqSourceComparison$'
 
   coverage:
     name: coverage (no MFEM)
@@ -88,7 +94,7 @@ jobs:
         run: cmake --build build-cov -j"$(nproc)"
 
       - name: Test
-        run: ctest --test-dir build-cov --output-on-failure
+        run: ctest --test-dir build-cov --output-on-failure -E '^GeqSourceComparison$'
 
       # The gate is on the units CI actually exercises. A threshold computed
       # over the whole of src/meq would be meaningless here: GradShafranov.cpp
@@ -151,5 +157,8 @@ jobs:
 
       - name: Test
         # The convergence tests take minutes, not seconds, and they are the
-        # point of this job.
-        run: ctest --test-dir build --output-on-failure --timeout 1800
+        # point of this job. The three that read geq's answers are excluded for
+        # the reason at the top of this file.
+        run: >-
+          ctest --test-dir build --output-on-failure --timeout 1800
+          -E '^(GeqSourceComparison|VacuumMirror|RotatingMirrorResolution)$'

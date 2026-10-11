@@ -574,12 +574,13 @@ endif()
 # compares against geq's own current density. It is the only check in the tree
 # of MEQ's rotating source against an INDEPENDENT implementation of eq (136).
 #
-# IT NEEDS NEITHER THE DRIVER NOR A MESH NOR PYTHON. The reference is committed
-# under tools/geq-benchmark/reference/, so this runs anywhere meq_core builds --
-# including a configuration without MFEM, since meq::RotatingSource is
-# MFEM-free by the same rule meq::Profiles and meq::Source are. Regenerating the
-# reference needs ../geq, ../freegs4e and the benchmark venv; the command is in
-# tools/geq-benchmark/README.md.
+# IT NEEDS NEITHER THE DRIVER NOR A MESH NOR PYTHON, so it builds anywhere
+# meq_core does -- including a configuration without MFEM, since
+# meq::RotatingSource is MFEM-free by the same rule meq::Profiles and
+# meq::Source are. What it compares against, geq's point sets, is geq's answer
+# and is regenerated rather than committed: that needs ../geq, ../freegs4e and
+# the benchmark venv, takes seconds, and the test names the command when the
+# files are absent. CI has none of them and excludes it by name.
 list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/RotatingSource.cpp" _rotating_index)
 if(TARGET meq_core AND NOT _rotating_index EQUAL -1
 		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/GeqSourceComparison.cpp")
@@ -627,6 +628,38 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
 	message(STATUS "meq: VacuumMirror not registered")
+endif()
+
+# RotatingMirror is MIRROR-PLAN.md's MR-4: VacuumMirror's machine with the
+# rotating plasma in it, both labels pinned at points and the box support, on
+# geq's problem from tools/geq-benchmark/reference/rotating. It shares
+# VacuumMirror's machine through convergence/MirrorMachine.hpp, and so its
+# needs: python3 with gmsh at test time, the mesh into the build tree.
+#
+# ONE BINARY, TWO TESTS, by Boost suite: RotatingMirror is the solve's
+# acceptance (MR-4b) and RotatingMirrorResolution the study (MR-4c, and MR-4d
+# against geq's untracked answer, which export_rotating.py writes). The study
+# is most of the cost, and the split lets ctest -j run the two side by side;
+# each makes its own mesh files, so they do not race.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/RotatingMirror.cpp")
+	add_executable(RotatingMirror "convergence/RotatingMirror.cpp")
+	target_include_directories(RotatingMirror PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(RotatingMirror PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(RotatingMirror PRIVATE
+		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
+		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+	add_test(NAME RotatingMirror COMMAND RotatingMirror --run_test=solve
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME RotatingMirrorResolution COMMAND RotatingMirror --run_test=resolution
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(RotatingMirror RotatingMirrorResolution PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: RotatingMirror not registered")
 endif()
 
 # ---------------------------------------------------------------------------
