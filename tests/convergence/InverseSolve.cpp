@@ -37,6 +37,7 @@
 #include <string>
 #include <vector>
 #include <iterator>
+#include <limits>
 #include <sys/wait.h>
 
 #include "mfem.hpp"
@@ -51,6 +52,8 @@
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
 #include "meq/WarmStart.hpp"
+
+#include "RoundOffFloor.hpp"
 
 namespace
 {
@@ -350,7 +353,8 @@ namespace
 			worst = std::max( worst, std::abs( v - solver.psiBoundary() ) );
 		std::printf( "targets: %zu points on psi = psi_bnd, worst |psi - psi_bnd| %.3e\n",
 		             radius.size(), worst );
-		BOOST_TEST_REQUIRE( worst < 1.0e-12 );
+		BOOST_TEST_REQUIRE( worst < meq::tests::scalarAgreementFloor(
+		                                1.0e-12, solver.psiBoundary() ) );
 	}
 
 	/// What one inverse solve reports, printed and returned.
@@ -438,6 +442,25 @@ namespace
 		return out;
 	}
 
+	/**
+	 * Whether this build's format can resolve currents from targets at
+	 * all, given the corner's condition number.
+	 *
+	 * **THE SPREAD OF THE SINGULAR VALUES MULTIPLIES A TARGET'S ROUND-OFF INTO
+	 * A CURRENT**, so a recovered current is good to about `condition x eps`
+	 * relative. Every coil free against 21 rows reads a condition of 7.96e+07:
+	 * that is 1.8e-08 in double, where the recovery is a claim about the
+	 * method, and 9.5 in single, where the currents are undetermined and F3B
+	 * -- 482 A beside 1e+05 -- comes back with its sign flipped. The rank is
+	 * full in both; what the format decides is only how WELL. The factor of
+	 * 1000 leaves three digits for the method to be judged on.
+	 */
+	bool recoveryIsMeasurable( double condition )
+	{
+		return 1000.0*condition*static_cast<double>(
+			std::numeric_limits<mfem::real_t>::epsilon() ) < 1.0;
+	}
+
 	/// The coil index of a named [[coils]] block.
 	std::size_t coilNamed( Machine const &m, std::string const &name )
 	{
@@ -499,10 +522,13 @@ BOOST_AUTO_TEST_CASE( theInverseSolveRecoversAKnownCurrentSet )
 	 * and with the currents not written at the trial points, five.
 	 */
 	BOOST_TEST( solver.inverseNullity() == 0 );
-	BOOST_TEST( got.worstTarget < 1.0e-11 );
-	BOOST_TEST( got.worstCurrent < 1.0e-9 );
+	// Targets are flux, so their scale is psi_ax's; currents are relative.
+	BOOST_TEST( got.worstTarget
+	            < meq::tests::scalarAgreementFloor( 1.0e-11, forwardAxis ) );
+	BOOST_TEST( got.worstCurrent < meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 ) );
 	BOOST_TEST( std::abs( solver.psiAxis() - forwardAxis )
-	            < 1.0e-9*std::abs( forwardAxis ) );
+	            < meq::tests::scalarAgreementFloor( 1.0e-9*std::abs( forwardAxis ),
+	                                                forwardAxis ) );
 	BOOST_TEST( solver.newtonIterations() <= 3 );
 
 	/*
@@ -532,8 +558,15 @@ BOOST_AUTO_TEST_CASE( theInverseSolveRecoversAKnownCurrentSet )
 	std::printf( "every coil: condition %.3e\n", all.condition );
 	BOOST_TEST_REQUIRE( all.solved );
 	BOOST_TEST( solver.inverseNullity() == 0 );
-	BOOST_TEST( all.worstTarget < 1.0e-11 );
-	BOOST_TEST( all.worstCurrent < 1.0e-5 );
+	BOOST_TEST( all.worstTarget
+	            < meq::tests::scalarAgreementFloor( 1.0e-11, forwardAxis ) );
+	if ( recoveryIsMeasurable( all.condition ) )
+		BOOST_TEST( all.worstCurrent < 1.0e-5 );
+	else
+		BOOST_TEST_MESSAGE( "every coil: condition " << all.condition
+		                    << " times this format's eps leaves no digit of the "
+		                       "currents to recover; the rank is asserted and the "
+		                       "recovery is not" );
 }
 
 /*
@@ -573,7 +606,8 @@ BOOST_AUTO_TEST_CASE( tooFewTargetsMeetTheShapeWithOtherCurrents )
 
 	int const rows = static_cast<int>( targetR.size() ) - 1;
 	BOOST_TEST( solver.inverseNullity() >= static_cast<int>( every.size() ) - rows );
-	BOOST_TEST( got.worstTarget < 1.0e-11 );
+	BOOST_TEST( got.worstTarget
+	            < meq::tests::scalarAgreementFloor( 1.0e-11, solver.psiAxis() ) );
 	BOOST_TEST( got.worstCurrent > 1.0e-4 );
 }
 
@@ -821,10 +855,14 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 	 * Negating a whole row with its value is NOT a mutation: -G = 0 is the
 	 * same equation, and the test rightly cannot tell.
 	 */
-	BOOST_TEST( rowFourMiss < 1.0e-9 );
-	BOOST_TEST( releasedMiss < 1.0e-9 );
-	BOOST_TEST( rowThreeMiss < 1.0e-9 );
-	BOOST_TEST( currentsAgree < 1.0e-8 );
+	// The saddle is ROOTED on q_h = 0 by the border's own rows, so the format
+	// costs eps times the coordinates and not sqrt( eps ); the currents are
+	// relative, so their scale is 1. Both floors are zero or inert in double.
+	double const missBound = 1.0e-9 + meq::tests::rootedPositionFloor( targetR );
+	BOOST_TEST( rowFourMiss < missBound );
+	BOOST_TEST( releasedMiss < missBound );
+	BOOST_TEST( rowThreeMiss < missBound );
+	BOOST_TEST( currentsAgree < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 ) );
 	BOOST_TEST( controlConverged );
 	BOOST_TEST( ( !controlMet && controlMiss > 1.0e-3 ),
 	            "a single distant coil placed the null, so the pass above does "
@@ -910,8 +948,9 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesAnInverseProblem )
 	double largest = 0.0;
 	for ( int i = 0; i < stored.Size(); ++i )
 	{
-		worst = std::max( worst, std::abs( stored( i ) - m.solver->potential()( i ) ) );
-		largest = std::max( largest, std::abs( stored( i ) ) );
+		worst = std::max( worst, static_cast<double>(
+			std::abs( stored( i ) - m.solver->potential()( i ) ) ) );
+		largest = std::max( largest, static_cast<double>( std::abs( stored( i ) ) ) );
 	}
 
 	meq::Configuration const forward( machineFile );
@@ -932,8 +971,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesAnInverseProblem )
 	             stored.Size(), largest, worstCurrent, m.solver->inverseRank(),
 	             m.solver->inverseNullity() );
 
-	BOOST_TEST( worst < 1.0e-12 );
-	BOOST_TEST( worstCurrent < 1.0e-8 );
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, largest ) );
+	BOOST_TEST( worstCurrent < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 ) );
 	BOOST_TEST( m.solver->inverseNullity() == 0 );
 }
 
