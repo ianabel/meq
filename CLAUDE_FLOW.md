@@ -120,14 +120,17 @@ pairing. `aConfinedRotatingSourceVanishesOutsideThePlasma` in
 `tests/unit/RotatingSourceTests.cpp` is the regression, and it was
 mutation-checked — 30 failures with the two gates removed, none with them in.
 
-**WHAT IS STILL NOT THERE, AND NOW COSTS MORE THAN IT DID.**
-`normalisationDerivatives()` is not overridden for the rotating closure, so the
-base returns false and the bordered Newton **differences** that column — and a
-difference perturbs the normalisation, which moves the edge, so it straddles a
-kink instead of measuring a derivative. That was harmless while the support
-could not move and is not any more. It degrades rather than fails, and the
-analytic form is the one piece of `meq::NormalisedMHDSource`'s treatment the
-rotating source still lacks.
+**THE NORMALISATION COLUMN IS ANALYTIC.**
+`NormalisedRotatingSource::normalisationDerivatives()` is
+`meq::NormalisedMHDSource`'s algebra under `g → H`: the class is a pure wrapper,
+`F = S H( Ψ )/span`, so the normalisation enters only through `Ψ` and the
+overall `1/span`, and the closure's own derivative is already paid inside
+`inner.dFdPsi()`. Outside the plasma both derivatives are zero. The bordered
+Newton therefore never differences that column — a difference perturbs the
+normalisation, which moves the edge, so it would straddle a kink rather than
+measure a derivative, and the support can move.
+`theRotatingNormalisationDerivativesAreAnalytic` in
+`tests/unit/RotatingSourceTests.cpp` is the test.
 
 
 ## What is measured

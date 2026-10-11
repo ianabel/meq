@@ -83,6 +83,7 @@ be buying back.
 | `ψ_bnd` as an unknown pinned at a POINT | `setBoundaryFluxPoint( R, z )`. Under NPC the row is exactly `−e_j` and the corner exactly 1, neither differenced. **This is the mechanism the mirror needs twice** |
 | meshing | `tools/mesh/halfdisc.py`, a semicircle reaching the axis with coils meshed to, driven from `[mesh.generate]` |
 | `η₆` | the exterior transmission indicator, for when the coefficients stall while the interior refines |
+| the normalisation column | `NormalisedRotatingSource::normalisationDerivatives()` is analytic — `meq::NormalisedMHDSource`'s algebra under `g → H`, with the closure's derivative already paid inside `inner.dFdPsi()` — so the bordered Newton never differences across the support's edge. `theRotatingNormalisationDerivativesAreAnalytic` is the test |
 
 ## What is structurally wrong for a mirror
 
@@ -178,17 +179,7 @@ it backwards converges to a different equilibrium and never complains — and it
 is worse here because a mirror's two labels are not ordered the way a tokamak's
 are.
 
-### 5. `normalisationDerivatives()` is not overridden for the rotating closure
-
-Recorded in `CLAUDE_FLOW.md` and still open: the base returns false, so the
-bordered Newton **differences** that column, and a difference perturbs the
-normalisation, which moves the edge, so it straddles a kink instead of measuring
-a derivative. With both flux labels pinned at prescribed points the support is
-far less free than in a tokamak free-boundary run, so this degrades rather than
-fails — but it is on the path and it is the one piece of
-`meq::NormalisedMHDSource`'s treatment the rotating source still lacks.
-
-### 6. The single-`R_ref` gauge does not survive a high-Mach multi-species mirror
+### 5. The single-`R_ref` gauge does not survive a high-Mach multi-species mirror
 
 **FOUND BY REGENERATING THE SOURCE BENCHMARK AT `M = 6`, AND IT IS ON THE PATH
 TO MR-4.** `meq::Species::density` is `n_s0( ψ )` — the physical density on ONE
@@ -378,9 +369,6 @@ shipped file, because what rots about an example is the file.
    The benchmark is pinned to the isotropic `ProfilesCentrifugalMirror` path and
    must stay there; a geq default that changes under us is a stale-reference
    failure, which is why the reference is committed.
-5. **The gauge**, item 6. It is the only item on this list that is a change to a
+5. **The gauge**, item 5. It is the only item on this list that is a change to a
    published interface rather than to solver internals, and the only one found by
    running the benchmark rather than by reading the code.
-6. **`normalisationDerivatives()`**, item 5. Degrades the Newton tail rather than
-   the answer, and is visible as a linear rate — `CLAUDE_FB.md`'s *a linear rate
-   on a Newton method is a Jacobian statement*.
