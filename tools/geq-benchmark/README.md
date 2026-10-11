@@ -93,6 +93,7 @@ passing comparison.
 | `reference/two/` | electron + deuterium at **M = 6.0**, the mirror operating point. MEQ takes `Closure::ClosedForm` |
 | `reference/three/` | + carbon at `Z = 6`, at **M = 0.76**. MEQ takes `Closure::RootFind`, and the charge weighting stops being a plain sum |
 | `export_vacuum.py`, `reference/vacuum/` | the **vacuum** machine, no plasma, for MR-3's solve. See *The vacuum mirror* below |
+| `export_rotating.py`, `reference/rotating/` | the **solved** free-boundary rotating mirror, for MR-4. See *The rotating mirror* below |
 
 **THE TWO MACH NUMBERS ARE FORCED, NOT CHOSEN**, with
 `M² = m_i ω² R( z=0 )²/T_e` on the `ψ_n = 0.5` surface and `meta.txt` recording
@@ -208,3 +209,113 @@ The test measures geq's filaments in MEQ's own kernel (round-off: every
 convention agrees), geq against `meq::coilPsi()` with no solve at all (the model
 floor), MEQ against both, and finally MEQ handed geq's own twenty filaments by
 subtraction — at which point the floor is gone. → **[M-260](../../MEASUREMENTS.md#m-260)**.
+
+## The rotating mirror: `export_rotating.py` and `reference/rotating/`
+
+`MIRROR-PLAN.md`'s MR-4 compares MEQ's free-boundary rotating mirror with
+geq's, **in the mode geq solves in**: Picard, the twenty filaments FIXED, both
+labels read every step at `( 0.10, 0 )` and `( 0.35, 0 )`, no current
+constraint. Unlike `reference/two/` this is a solve, not a prescribed state.
+MR-4b and MR-4d's ctests read it.
+
+**IT IS NOT SHIPPED geq**, for the three facts `MIRROR-PLAN.md` records, and
+the script changes nothing in `../geq` or `../freegs4e` — every change is a
+monkeypatch from the script:
+
+1. **The direct `freeBoundary`, not von Hagenow.** Shipped Hagenow's fixed
+   `eps = 1e-2` m biases `ψ` by about 1% of the plasma flux, and its own
+   self-convergence cannot see that. The shipped route is solved once, at
+   257², as the CONTROL: a comparison that cannot read its bias cannot resolve
+   an error that size.
+2. **New profiles, flat at both labels to a stated order.** geq's Gaussians
+   step there, which MEQ's support cannot take. Every profile — `T_e`, `T_D`,
+   `N_e = N_D`, `ω` — is
+   `f_edge + ( f_peak − f_edge )·C ψ_n³( 1 − ψ_n )⁴`, `C = 1/( (3/7)³ (4/7)⁴ )`,
+   peaked at `ψ_n = 3/7`, and is evaluated **analytically** inside geq rather
+   than through its cubic splines, whose not-a-knot ends would leave an
+   `O( h³ )` slope at the labels.
+3. **`φ₀` tightened inside every Picard step**, by a pointwise Newton on
+   `Σ_s Z_s n_s = 0` after geq's global solve.
+
+**THE SHAPE IS SET BY THE EDGE ORDER, AND IT IS ASYMMETRIC ON PURPOSE.** What
+an edge costs MEQ is its order `j`, `p′ ~ d^j` at distance `d` inside a label:
+`CLAUDE_FB.md`, *The plasma edge caps the order*, has `ψ*` keep `k + 2` only for
+`k ≤ j`. The plan's first choice, `16 ψ_n²( 1 − ψ_n )²`, is `j = 1` and would cap
+MR-4c's rates from `k = 2`. This shape is `j = 2` at the inner label and `j = 3`
+at the outer, and `J_φ` on the converged state falls as `d^2.000` and `d^3.000`
+there. The asymmetry is the second reason for it: every table differs from its
+own reflection by 35–54% of its peak, so a reader that took them in `ψ_n`
+rather than `Ψ` gets different numbers, and the sense of the abscissa —
+`MIRROR-PLAN.md`'s item 4 — is something this reference can catch.
+`--shape quartic` and `--shape sextic` (`64 ψ_n³( 1 − ψ_n )³`, `j = 2` both sides)
+remain as options; both are symmetric and neither is the reference.
+
+**AND `N_D` IS HELD.** geq rebuilds the deuteron's flux function every step from
+the electrons' midplane density. Here `AllSpecies.set_flux_density` is a no-op
+and the deuteron is flagged `_density_eval`, so both `N_s` are the prescribed
+profiles and `φ₀` alone carries quasineutrality. With both `N_s` prescribed no
+gauge freedom is left, so geq's one-point pin of `φ₀` (`ψ_n = 0.5` on the
+midplane) becomes a wrong value at ONE node, and that node is why fact 3 is
+needed every step and not just at the end: tightening only the converged state
+leaves `ψ` at the untightened fixed point, which is 7e-05 away at 129² — the
+size of the Hagenow bias, and far above geq's own resolution floor. Off that
+node geq's global solve is already neutral to round-off. The script asserts
+after every solve that geq has replaced none of the prescribed profiles.
+
+**THE DENSITY IS SET IN geq'S GAUGE, SO ITS SCALE IS NOT conftest's.**
+conftest prescribes the midplane density; here `N_s` is the density at zero
+potential, and the midplane density is `N_s exp( m_D ω² R²/2( T_e + T_D ) )`, an
+exponent of 2.2 at the peak. So `N_peak = 5e18` puts the physical midplane peak
+near conftest's 5e19. And `ω_edge` is a fifth of `ω_peak`, because the same
+exponent grows as `R²` against a cold edge: at half the peak, the outer edge's
+density is hundreds of times the peak's and the first Picard step diverges.
+
+| | peak, `ψ_n = 3/7` | edge, both labels |
+|---|---|---|
+| `T_e` | 1.28 keV | 128 eV |
+| `T_D` | 1.53 keV | 153 eV |
+| `N_e = N_D` | 5e18 m⁻³ | 5e17 m⁻³ |
+| `ω` | geq-Mach 2 at `R = 0.240` | `ω_peak/5` |
+
+`R = 0.240` m is the converged midplane radius of `ψ_n = 3/7`, rounded, so geq's
+Mach there is 2.00 and M-167's is 3.09.
+
+**THE TABLES ARE IN MEQ'S CONVENTIONS**: `Ψ = 1 − ψ_n` ascending, slopes
+`d/dΨ`, `T_s` in joules, `ω` in rad/s; `n_<name>.dat` is the physical density on
+`R = R_ref`, carried there by `export_mirror.py`'s own transfer, and
+`Nraw_<name>.dat` is geq's prescribed `N_s`. `R_ref = 0.213` m is the radius that
+minimises the largest `| ln( n_s/n_s0 ) |` over the plasma's nodes, at ±1.16;
+the midplane radius of the peak, 0.240, gives −1.60 to +0.98. Evaluated through
+MEQ's own gauge from the tables, `ln n_D` matches geq's at random `( R, ψ_n )` to
+1e-11. The 2049 knots are the fewest power-of-two count whose Hermite
+interpolant is within 1e-10 of every table's values, pointwise and relative;
+the slopes, which `F` is built from, are within 2.6e-09 of their largest. `meta.txt`
+records the measured error of each.
+
+**THE PROBLEM IS TRACKED AND geq'S ANSWER IS NOT.** Tracked, because they are
+what MEQ is given: `meta.txt` — provenance, every setting, `R_ref`, the two
+points, the machine under `export_vacuum.py`'s keys and the species under
+`export_mirror.py`'s — the tables, and `filaments.dat` (`R z current`, the
+twenty fixed filaments). With both `N_s` prescribed, the transfer to `R_ref` is
+pointwise quasineutrality on the prescribed profiles, so the tables do not
+depend on geq's solve; `R_ref` was chosen on the solved state and is fixed here
+as a setting. Written by a run and ignored by git, because they are geq's
+output: `solution.txt` — the labels by `psiRZ` at the two points for each
+resolution, the optimal `R_ref`, the Mach numbers on the converged state and
+the fitted edge orders — and `psi_direct_{129,257,513}.dat` and
+`psi_hagenow_257.dat`, total `ψ` as `R z psi` on the 65 × 65 nodes every
+resolution shares. A test that compares against them needs the script run
+first.
+
+```sh
+cd /home/ian/projects/meq
+PYTHONPATH=/home/ian/projects/geq/src \
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_rotating.py \
+    --out tools/geq-benchmark/reference/rotating
+```
+
+About eleven minutes, nine and a half of them the 513² direct solve (5 s at
+129², 41 s at 257², the Hagenow control under 10 s), and 2 GB of memory.
+Picard runs with `atol = 0` and `rtol = 2e-09`, because geq's default
+`atol = 1e-06` is what actually stops it. `--cache DIR` keeps each solve and
+reuses it.

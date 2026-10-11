@@ -1,0 +1,47 @@
+case rotating
+geq_commit 73b9a72885a5a516245e429e9ff31047699fbc90 clean
+freegs4e_commit 9a1ee0c8d01586aa336ba84aa2842527779c0b40 clean
+# Units: psi in Wb/rad; R, z in m; T in J; n in m^-3; omega in
+# rad/s; mass in kg; charge a charge number. Tables are in
+# Psi = 1 - psi_n = ( psi - psi_bndry )/( psi_axis - psi_bndry ).
+mu0 1.25663706143591729e-06
+R_ref 2.12999999999999995e-01
+axis_point 1.00000000000000006e-01 0.0
+boundary_point 3.49999999999999978e-01 0.0
+z_edge 1.50000000000000000e+00
+ggprime 0.0
+omega_peak 3.19101289638559986e+06
+omega_edge 6.38202579277120065e+05
+Te_peak_eV 1.28000000000000000e+03
+Te_edge_eV 1.28000000000000000e+02
+TD_peak_eV 1.53000000000000000e+03
+TD_edge_eV 1.53000000000000000e+02
+N_peak 5.00000000000000000e+18
+N_edge 5.00000000000000000e+17
+profile f_edge+(f_peak-f_edge)*C*psi_n^3*(1-psi_n)^4 C 1.19146846064814838e+02
+profile_peak_psi_n 4.28571428571428548e-01
+mach_set_at_R 2.39999999999999991e-01
+knots 2049
+hermite_error_omega 6.760e-12 2.595e-09
+hermite_error_T_electron 1.521e-11 2.595e-09
+hermite_error_n_electron 1.405e-11 2.480e-09
+hermite_error_Nraw_electron 1.521e-11 2.595e-09
+hermite_error_T_deuterium 1.521e-11 2.595e-09
+hermite_error_n_deuterium 1.405e-11 2.480e-09
+hermite_error_Nraw_deuterium 1.521e-11 2.595e-09
+neutrality_at_R_ref 4.307e-16
+picard atol 0 rtol 2.000e-09 maxits 400
+boundary freeBoundary ( direct ); control freeBoundaryHagenow
+phi0 tightened_every_picard_step
+N_s held_as_prescribed_flux_functions
+grid R 0.05 0.63 z -1.5 1.5 common 65
+field 4.00000000000000000e+00
+coil_inner_radius 7.85499999999999976e-01
+coil_outer_radius 8.56068835817369367e-01
+coil_length 1.00000000000000000e+00
+coil_centre_z 1.50000000000000000e+00
+pack_current 5.92778220865903329e+06
+filaments_per_pack 10
+species 2
+name electron mass 9.10938371389999982e-31 charge -1.00000000000000000e+00 temperature T_electron.dat density n_electron.dat
+name deuterium mass 3.34358377680000006e-27 charge 1.00000000000000000e+00 temperature T_deuterium.dat density n_deuterium.dat
