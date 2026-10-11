@@ -669,6 +669,17 @@ before believing any comparison between two installs**.
 
 ## Traps in MFEM's API
 
+**`ElementTransformation::TransformBack()` CLAMPS AN OUTSIDE POINT ONTO THE
+ELEMENT.** Its default solver is `NewtonElementProject`, so a point outside the
+element comes back as a reference point *on* its boundary. Any test that reads
+"how far outside" off the reference coordinates then reads zero, and accepts a
+point outside the mesh. Use an `mfem::InverseElementTransformation` with
+`SetSolverType( Newton )` wherever the reference coordinates are examined rather
+than the verdict alone. Every site does: `locateFieldPoint`, the X-point's own
+search, and `locatePotentialPoint` — which places the limiter contact, `ψ_bnd`'s
+point and the prescribed axis, and whose test is `SolverContract`'s
+outside-the-mesh refusals for `setAxisFluxPoint()`.
+
 **A `BlockVector` size mismatch that Release builds do not catch.** Stage 2
 passed a three-block vector (flux, potential, trace) where `DarcyHybridization`
 expects two: `GetOffsets()` stops at the potential, and `ReduceRHS` does

@@ -4432,7 +4432,7 @@ namespace
 		 * **AND THE SEARCH KEEPS ITS BEST NEAR MISS, WHICH IS BOTH THE FIX AND
 		 * THE DIAGNOSTIC.**
 		 *
-		 * `TransformBack()` answers `Inside`, `Outside` or `Unknown`, and the
+		 * The inverse answers `Inside`, `Outside` or `Unknown`, and the
 		 * third is the Newton failing to reach its own `phys_rtol` -- which is
 		 * `4e-15` in double and `1e-6` in single, MFEM scaling that constant
 		 * with the format as `eltrans.hpp`'s constructor shows. A point a few
@@ -4468,9 +4468,19 @@ namespace
 			thread_local mfem::IsoparametricTransformation scratch;
 			mesh.GetElementTransformation( e, &scratch );
 
+			// UNPROJECTED, because the violation below is read off the
+			// reference coordinates. TransformBack()'s default solver,
+			// NewtonElementProject, clamps the iterate into the element, so a
+			// point outside the mesh comes back ON an element's boundary with a
+			// violation of zero and is accepted -- the clamped-inverse failure
+			// locateFieldPoint's declaration records. SolverContract's
+			// outside-the-mesh refusals for setAxisFluxPoint() are the test.
+			mfem::InverseElementTransformation inverse( &scratch );
+			inverse.SetSolverType( mfem::InverseElementTransformation::Newton );
+			inverse.SetPhysicalRelTol( inverseTransformTolerance() );
+
 			mfem::IntegrationPoint reference;
-			int const verdict = scratch.TransformBack(
-				point, reference, inverseTransformTolerance() );
+			int const verdict = inverse.Transform( point, reference );
 			if ( verdict == mfem::InverseElementTransformation::Inside )
 			{
 				best = e;

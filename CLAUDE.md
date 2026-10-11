@@ -301,6 +301,9 @@ The checklist; the measurement and the story of each is in the file named.
   `GetBdrFaceTransformations( int )` return shared scratch**; threaded, that is a
   silent wrong answer. Use the caller-allocated overloads into a `thread_local`.
 * **`Mesh::FindPoints` is not reentrant and is `O(elements × points)`.**
+* **`TransformBack()` clamps an outside point onto the element** (its default
+  solver is `NewtonElementProject`), so an overshoot read off the reference
+  coordinates is zero. Use an unprojected `InverseElementTransformation`.
 * **A `SubMesh` keeps a pointer to its parent**; anything returning one must
   outlive the parent.
 * **A decorator that overrides `Mult()` and not `ArrayMult()` silently
