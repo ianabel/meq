@@ -44,7 +44,10 @@ step is capped by a ratchet and damping**k, so it reports SUCCESS with rows at
 0.1 T (M-255).  Here the rows are evaluated from the converged FIELD
 (eq.Br, eq.Bz, eq.psiRZ at the targets, not freegsnke's constraint vector)
 and the run is `finished` only if every row is within ROW_TOL (1e-8 T and
-Wb/rad, INVERSE-RACE-PLAN.md section 6) and the GS residual within GS_TOL.
+Wb/rad, INVERSE-RACE-PLAN.md section 6) and the GS residual within 10*GS_TOL.
+The timed rungs ask freegsnke for GS_TOL; the datum asks for 10*GS_TOL, the
+bar itself, because at nx257 the residual can floor between the two and every
+forward solve inside the inverse then runs to its cap (DATUM_GS_TOL).
 If freegsnke stops short, the inverse is called again from where it stopped
 -- which resets the ratchet -- up to MAX_RESTARTS times; the count is in
 the record.
@@ -78,6 +81,16 @@ sys.path.insert(0, HERE)
 LADDER = [65, 129, 257]
 ROW_TOL = 1e-8
 GS_TOL = 1e-10
+# THE DATUM ASKS FOR THE ACCEPTANCE BAR, NOT TEN TIMES BELOW IT.  freegsnke
+# hands its inverse's tolerance to every forward solve inside it -- one before
+# each full Jacobian, one per controlled coil for its columns, one after the
+# step -- and on D shaped at nx257 the relative GS residual floors at 4e-10:
+# the rows were met to 1e-16 by iteration 29, and the inverse and every inner
+# solve then ran to their caps, 100 iterations at 700 s each, 70,461 s.  A run
+# is accepted at 10*GS_TOL whatever it asks for, so the untimed datum asks for
+# exactly that; the timed rungs keep GS_TOL, so their walls stay comparable
+# with every record already taken.
+DATUM_GS_TOL = 10*GS_TOL
 PSIT_TOL = 1e-9
 MAX_ITS = 100
 MAX_RESTARTS = 4
@@ -304,6 +317,7 @@ def run(args):
     P = {c["config"]: c for c in json.load(open(args.problem))}
     conf = P[args.config]
     nx = LADDER[args.rung]
+    gs_tol = DATUM_GS_TOL if args.rung == len(LADDER) - 1 else GS_TOL
     start = args.start
     xt, iso = design_targets(conf, start)
     notes = []
@@ -390,7 +404,7 @@ def run(args):
             t = time.perf_counter()
             with contextlib.redirect_stdout(log):
                 solver.solve(eq=eq, profiles=profiles, constrain=None,
-                             target_relative_tolerance=GS_TOL,
+                             target_relative_tolerance=gs_tol,
                              max_solving_iterations=200,
                              force_up_down_symmetric=symmetric, verbose=True)
             solve_s += time.perf_counter() - t
@@ -402,7 +416,7 @@ def run(args):
             t = time.perf_counter()
             with contextlib.redirect_stdout(log):
                 solver.solve(eq=eq, profiles=profiles, constrain=constrain,
-                             target_relative_tolerance=GS_TOL,
+                             target_relative_tolerance=gs_tol,
                              target_relative_psit_update=PSIT_TOL,
                              max_solving_iterations=MAX_ITS,
                              l2_reg=reg, l2_reg_fj=reg,
@@ -438,6 +452,7 @@ def run(args):
         status = "exception: %s: %s" % (type(e).__name__, str(e)[:300])
         rec["traceback"] = traceback.format_exc()[-1500:]
     rec["solve_s"] = solve_s
+    rec["gs_target"] = gs_tol
     text = log.getvalue()
     open(os.path.join(args.out, "freegsnke.log"), "w").write(text)
     rec["iterations"] = text.count("\nIteration: ") + text.startswith("Iteration: ")
@@ -538,10 +553,11 @@ def main():
                "1e-8 sigma_max^2 of the vacuum response; rows from eq.Br/Bz/"
                "psiRZ at the targets; cold starts from the design blob's "
                "free-boundary flux; forward solve before the inverse: %s; "
-               "per-start solve keywords %s; GS tolerance %.0e; inverse "
+               "per-start solve keywords %s; GS tolerance %.0e asked "
+               "(%.0e on the datum rung), %.0e accepted; inverse "
                "re-entered up to %d times while rows > %.0e." % (
                    NQUAD, NQUAD, FORWARD_FIRST, START_KW, GS_TOL,
-                   MAX_RESTARTS, ROW_TOL)))
+                   DATUM_GS_TOL, 10*GS_TOL, MAX_RESTARTS, ROW_TOL)))
     rec["wall_s"] = time.perf_counter() - T0
     json.dump(rec, open(os.path.join(args.out, "record.json"), "w"), indent=1)
     print(json.dumps(dict(config=rec["config"], rung=rec["rung"],
