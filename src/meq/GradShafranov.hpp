@@ -1705,6 +1705,36 @@ namespace meq
 			/// every measurement of the fill needs.
 			int plasmaComponentCount() const;
 
+			/// What plasmaSupportNodes() counts.
+			struct PlasmaSupportNodes
+			{
+				/// Potential nodes the source's insidePlasma() admits.
+				int inside = 0;
+				/// Potential nodes visited, shared ones once per element.
+				int total = 0;
+			};
+
+			/**
+			 * **HOW MUCH OF THE MESH THE SOURCE'S OWN POINTWISE SUPPORT ADMITS
+			 * AT THE CURRENT ITERATE**: every potential node of every element,
+			 * asked of the normalised source's insidePlasma() at the TOTAL flux
+			 * -- the coil split's state is the remainder -- with the
+			 * normalisation the source currently carries, frozen edge
+			 * included.
+			 *
+			 * **IT IS THE ONE COUNT THAT MEANS SOMETHING UNDER THE BOX.**
+			 * plasmaComponentElements() is the fill's, and the fill is off under
+			 * PlasmaSupportShape::Box, so it reads zero on every mirror whatever
+			 * the labels do. And the span's sign is not a proxy for emptiness: a
+			 * mirror's is negative by construction. So an empty support is
+			 * COUNTED, which is what the bordered solve's failure report reads.
+			 *
+			 * Zero inside and zero total with no normalised source or before
+			 * prepare(); `total` everywhere with setPlasmaSupport() off, since
+			 * insidePlasma() then admits every point.
+			 */
+			PlasmaSupportNodes plasmaSupportNodes() const;
+
 			/// True where the confined source is switched on, at element
 			/// granularity. Always true when no fill is live, so the assembly
 			/// tests it unconditionally.
@@ -3995,7 +4025,11 @@ namespace meq
 				 * `insidePlasma()`'s own test makes the axis part of the plasma
 				 * when that is POSITIVE -- which needs `psi_bnd` and the span to
 				 * carry opposite signs, i.e. a NEGATIVE `psi_bnd` on an ordinary
-				 * positive span.
+				 * positive span. Under PlasmaSupportShape::Box it must also be
+				 * at most 1, at an axis node with `|z| <= z_edge`: the verdict
+				 * is NormalisedSource::supportAdmits(), the gate's own rule,
+				 * so a mirror's axis -- `Psi > 1`, since the inner label is the
+				 * smaller flux -- reads outside.
 				 *
 				 * **FOR A TOKAMAK THAT IS NOT A LARGE ERROR, IT IS THE WRONG
 				 * TOPOLOGY.** A tokamak plasma is a torus about `R_0 > 0` and its

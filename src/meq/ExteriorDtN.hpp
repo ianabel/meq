@@ -277,9 +277,9 @@ namespace meq
 			double zCentre() const;
 			double rhoGamma() const;
 
-			/// How many Gauss-Legendre points coefficients() spends. Fixed at
-			/// construction from the mode count, since the integrand's degree
-			/// grows with it.
+			/// How many Gauss-Legendre points coefficients() spends:
+			/// max( 30, 2 lastMode() ), fixed at construction from the mode
+			/// count, since the integrand's degree grows with it.
 			int quadraturePoints() const;
 
 		private:
@@ -302,6 +302,12 @@ namespace meq
 			double rhoGammaValue;
 			int modeCountValue;
 			int quadraturePointCount;
+
+			/// The non-negative half of coefficients()' Gauss-Legendre rule,
+			/// zero first when the count is odd, in Boost's own layout so
+			/// that the sum is taken in Boost's order. Built once, here.
+			std::vector<double> ruleAbscissa;
+			std::vector<double> ruleWeights;
 	};
 
 }

@@ -515,9 +515,12 @@ than copied. The sequence the setters impose:
    `CoilAugmentedNormalisedSource` with the filaments subtracted;
    `setPlasmaSupportShape( Box, 1.5 )`.
 3. `setAxisFluxPoint( 0.10, 0 )`, `setBoundaryFluxPoint( 0.35, 0 )`, and
-   **`setBoundaryFluxInitial( ψ_vac( 0.35, 0 ) )` — MANDATORY**: its default is
-   0 on a fresh solver, which makes the first span `ψ_ax − 0 > 0` and puts the
-   box INSIDE the inner label, around the axis.
+   **`setBoundaryFluxInitial( ψ_vac( 0.35, 0 ) )`**: its default is 0 on a
+   fresh solver, which makes the first span `ψ_ax − 0 > 0` and puts the box
+   INSIDE the inner label, around the axis. The row is linear, so the first
+   step pins `ψ_bnd` and the solve recovers to the same field — in 5 steps
+   rather than 3. A cost, not a failure, and the test asserts both label rows
+   read zero at iteration 0 so that it is paid nowhere.
 4. `setSource( wrapper, ψ_vac( 0.10, 0 ) )`, the boundary data, extension and
    DtN at `N = 32`, `setInitialGuess( vacuum GridFunction )` — the GridFunction
    form, which seeds `q` consistently.
@@ -546,19 +549,19 @@ difference — only a difference that falls rules out a conversion error. And th
 **control**: the same MEQ answer against the shipped-Hagenow reference reads the
 1e-05 bias, which says the comparison resolves an error of that size.
 
-#### Small corrections MR-4 lands, because its run would otherwise read them wrong
+#### Small corrections MR-4 lands, because its run would otherwise read them wrong — DONE
 
-* `borderDiagnosis()` prints "NOT POSITIVE: Psi is negative everywhere, so the
-  support is EMPTY" whenever the span is not positive. On a mirror the span is
-  always negative, so every degeneracy report would point the wrong way.
-* `checkAxisSource()` decides `axisInsidePlasma` by the one-sided rule and
-  ignores the box's `Ψ ≤ 1`: on this mirror `Ψ( R = 0 ) = 1.09`, so it reports
-  the axis inside a plasma the box excludes. Harmless at `gg′ = 0`, since `F` is
-  zero on the axis anyway, and a false refusal of the driver's at `gg′ ≠ 0`.
-  It should ask `insidePlasma()`.
-* `ExteriorDtN::coefficients()`' fixed 30-point rule, which aliases past about
-  30 modes ([M-260](MEASUREMENTS.md#m-260)) — needed for MR-4b's trace-tail
-  report.
+* `borderDiagnosis()` no longer reads a negative span as an empty support: a
+  zero or non-finite span is flagged as `Ψ` undefined, a negative one is named
+  as a mirror's sense, and emptiness is COUNTED — `plasmaSupportNodes()` asks
+  the source's own gate at every potential node.
+* `checkAxisSource()` decides `axisInsidePlasma` by the shape's own test,
+  `NormalisedSource::supportAdmits()`, so a box whose `Ψ( R = 0 ) > 1` reads
+  the axis outside it; the one-sided answer is unchanged.
+  `MirrorSupport`'s `aMirrorsAxisIsOutsideItsBoxAndTheDiagnosticAgrees`.
+* `ExteriorDtN::coefficients()` takes `max( 30, 2 × lastMode )` Gauss points,
+  bit-identical up to 14 modes, and recovers a 48-mode trace to 8.9e-15 where
+  the fixed rule read 4.2e-02.
 
 #### Not yet known, in the order they could stop MR-4
 

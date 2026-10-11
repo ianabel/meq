@@ -76,22 +76,32 @@ namespace meq
 {
 	namespace
 	{
-		/// The Gauss-Legendre rule coefficients() spends.
+		/// THE SMALLEST Gauss-Legendre rule coefficients() spends, and the one
+		/// it spends up to fourteen modes.
 		///
-		/// FIXED AT 30 POINTS RATHER THAN SCALED WITH THE MODE COUNT, because
-		/// Boost's rule is selected by a template parameter and a runtime choice
-		/// would mean a switch over a handful of instantiations for no gain: 30
-		/// points is exact for polynomials up to degree 59, and the mass
-		/// integrals have degree m + n - 2, so it is exact for every pair of
-		/// modes with m + n <= 61. Nobody will use forty modes -- the spectrum
-		/// falls geometrically at a rate set by rho_plasma/rho_Gamma, which is
-		/// why the plan says N is small.
+		/// **THE RULE SCALES WITH THE MODE COUNT, AS 2 lastMode() POINTS ABOVE
+		/// THIS FLOOR.** A p-point rule is exact to degree 2p - 1 and the mass
+		/// integrals have degree m + n - 2, so exactness of the basis alone
+		/// needs only p >= lastMode(). A GENERAL trace needs the factor of two:
+		/// its degree-d content aliases into the projection on mode n once
+		/// d + n - 2 > 2p - 1, so at p = 2 lastMode() the first degree that
+		/// can reach the last retained mode is 3 lastMode() + 1, a whole
+		/// spectrum beyond it. A fixed thirty points reaches only m + n <= 61,
+		/// and M-260 measured what that does past it: a copper trace's tail at
+		/// 96 modes read a flat 0.82 out to N = 48 -- the quadrature, not the
+		/// trace.
 		///
-		/// For a general trace it is a quadrature and not an identity, which is
-		/// what quadraturePoints() exists to let a caller see.
-		constexpr int gaussPoints = 30;
+		/// The floor keeps every count up to fourteen on Boost's tabulated
+		/// thirty-point rule, summed in Boost's order, so those results are
+		/// what they always were to the bit.
+		constexpr int minimumGaussPoints = 30;
 
-		using GaussRule = boost::math::quadrature::gauss<double, gaussPoints>;
+		using FloorRule = boost::math::quadrature::gauss<double, minimumGaussPoints>;
+
+		int gaussPointsFor( int lastMode )
+		{
+			return std::max( minimumGaussPoints, 2*lastMode );
+		}
 
 		/// C_n( mu ) / ( 1 - mu^2 ), which is a POLYNOMIAL of degree n - 2 and
 		/// is the shape every weighted integral in this file actually needs.
@@ -141,7 +151,7 @@ namespace meq
 		: zCentreValue( zCentreIn ),
 		  rhoGammaValue( rhoGammaIn ),
 		  modeCountValue( modesIn ),
-		  quadraturePointCount( gaussPoints )
+		  quadraturePointCount( gaussPointsFor( firstMode() + modesIn - 1 ) )
 	{
 		if ( !( rhoGammaIn > 0.0 ) )
 			throw std::invalid_argument(
@@ -151,6 +161,33 @@ namespace meq
 				"meq::ExteriorDtN: at least one mode is needed; modes are "
 				"indexed by DEGREE from 2, so a count of k carries degrees "
 				"2 .. k + 1" );
+
+		/*
+		 * THE RULE, FROM BOOST EITHER WAY. At the floor it is the tabulated
+		 * one; above it the nodes are boost::math::legendre_p_zeros() -- the
+		 * non-negative zeros of P_p, ascending, zero first when p is odd,
+		 * which is the layout Boost's own tables use -- and the weights the
+		 * standard 2/( ( 1 - x^2 ) P'_p( x )^2 ), with ( 1 - x )( 1 + x ) for
+		 * weightFactor()'s reason.
+		 */
+		if ( quadraturePointCount == minimumGaussPoints )
+		{
+			ruleAbscissa.assign( FloorRule::abscissa().begin(),
+			                     FloorRule::abscissa().end() );
+			ruleWeights.assign( FloorRule::weights().begin(),
+			                    FloorRule::weights().end() );
+		}
+		else
+		{
+			ruleAbscissa = boost::math::legendre_p_zeros<double>( quadraturePointCount );
+			ruleWeights.resize( ruleAbscissa.size() );
+			for ( std::size_t i = 0; i < ruleAbscissa.size(); ++i )
+			{
+				double const x = ruleAbscissa[ i ];
+				double const slope = boost::math::legendre_p_prime( quadraturePointCount, x );
+				ruleWeights[ i ] = 2.0/( weightFactor( x )*slope*slope );
+			}
+		}
 	}
 
 	int ExteriorDtN::firstMode()
@@ -349,8 +386,22 @@ namespace meq
 				return trace( radius, z )*basisOverWeight( n, mu );
 			};
 
-			out[ static_cast<std::size_t>( i ) ] =
-				GaussRule::integrate( integrand, -1.0, 1.0 )/mass( n );
+			// boost::math::quadrature::gauss::integrate()'s own sum: the
+			// centre once when the count is odd, then each symmetric pair.
+			std::size_t start = 0;
+			double sum = 0.0;
+			if ( quadraturePointCount % 2 == 1 )
+			{
+				sum = integrand( 0.0 )*ruleWeights[ 0 ];
+				start = 1;
+			}
+			for ( std::size_t q = start; q < ruleAbscissa.size(); ++q )
+			{
+				double const plus = integrand( ruleAbscissa[ q ] );
+				double const minus = integrand( -ruleAbscissa[ q ] );
+				sum += ( plus + minus )*ruleWeights[ q ];
+			}
+			out[ static_cast<std::size_t>( i ) ] = sum/mass( n );
 		}
 		return out;
 	}

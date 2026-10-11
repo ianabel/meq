@@ -18,10 +18,12 @@
  *   plasma still carries current at the throat is cut through it, and
  *   GradShafranovSolver::checkAxialCutoff() is what makes that visible.
  *
- * NO SOLVE RUNS HERE. The field is a closed form projected onto the potential
- * space, which the diagnostic and the fill then read as they would read a
- * converged answer -- so every number below is checked against arithmetic on
- * the closed form and not against another run of the same code.
+ * THE FIRST TWO CASES RUN NO SOLVE. The field is a closed form projected onto
+ * the potential space, which the diagnostic and the fill then read as they
+ * would read a converged answer -- so every number they check is checked
+ * against arithmetic on the closed form and not against another run of the
+ * same code. The third SOLVES, because what it asks about -- the solver's own
+ * labels, and its axis diagnostic -- exists only after a solve.
  *
  * THE FIELD is `psi = R^2 + z^2` on R in [ 0.2, 1.4 ], z in [ -1.5, 1.5 ],
  * labelled as a mirror: psi_ax = 0.25 is the INNER surface and psi_bnd = 1 the
@@ -338,4 +340,117 @@ BOOST_AUTO_TEST_CASE( theCutoffDiagnosticReadsTheCurrentTheBoxCutsThrough )
 	std::fflush( stdout );
 
 	BOOST_CHECK_THROW( solver.checkAxialCutoff( 1 ), std::invalid_argument );
+}
+
+/*
+ * A MIRROR'S SYMMETRY AXIS IS OUTSIDE ITS BOX, AND checkAxisSource() SAYS SO.
+ *
+ * psi( 0, z ) = 0 exactly, so Psi on the axis is -psi_bnd/span, and on a
+ * mirror -- inner label the smaller flux, span negative -- that is ABOVE 1.
+ * The one-sided rule reads only its sign and puts the axis inside; the box's
+ * Psi <= 1 excludes it, and the gate is the box. So the diagnostic must ask the
+ * gate's own rule, NormalisedSource::supportAdmits(), or it reports the axis
+ * inside a plasma no source evaluation will ever place there -- harmless at
+ * g g' = 0, where F vanishes on the axis anyway, and a false refusal of the
+ * driver's at g g' != 0.
+ *
+ * A REAL SOLVE, because the labels checkAxisSource() reads are the solver's
+ * converged ones. The smallest mirror there is: psi = R^2 on the boundary of
+ * [ 0, 1.4 ] x [ -1.5, 1.5 ] -- Delta*-harmonic, so it is the vacuum field --
+ * with both labels pinned at prescribed points on the midplane, the box
+ * support, and BumpProfile, which vanishes at both labels as the box's
+ * precondition asks. mu0 = 0.1 keeps the plasma a perturbation of R^2, so the
+ * labels sit near 0.25 and 1 and Psi on the axis near 4/3.
+ *
+ * THE TOKAMAK'S READING IS THE CONTROL: the same solver, the same labels, the
+ * shape put back to OneSided, must still read the axis INSIDE -- which is the
+ * one-sided rule unchanged, and what makes the box's "outside" a statement
+ * about the box rather than about the field.
+ *
+ * AND plasmaSupportNodes(), the count the bordered solve's failure report
+ * reads in place of the span's sign: non-empty here with a negative span, and
+ * empty at a frozen edge no node reaches.
+ */
+BOOST_AUTO_TEST_CASE( aMirrorsAxisIsOutsideItsBoxAndTheDiagnosticAgrees )
+{
+	double const width = 1.4;
+	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( 28, 60, mfem::Element::TRIANGLE,
+	                                               false, width, 2.0*halfHeight );
+	for ( int v = 0; v < mesh.GetNV(); ++v )
+		mesh.GetVertex( v )[ 1 ] -= halfHeight;
+
+	meq::NormalisedMHDSource source( std::make_shared<BumpProfile const>(),
+	                                 std::make_shared<meq::ConstantProfile const>( 0.0 ),
+	                                 innerLabel, 0.1 );
+	source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, 1.0 );
+
+	mfem::FunctionCoefficient vacuum( [ ]( mfem::Vector const &x )
+	{
+		return x( 0 )*x( 0 );
+	} );
+
+	GradShafranovSolver solver( mesh, 2 );
+	solver.setAxisFluxPoint( std::sqrt( innerLabel ), 0.0 );
+	solver.setBoundaryFluxPoint( std::sqrt( outerLabel ), 0.0 );
+	// MANDATORY on a mirror: the default 0 makes the first span positive and
+	// puts the box around the axis.
+	solver.setBoundaryFluxInitial( outerLabel );
+	solver.setSource( source, innerLabel );
+	solver.setBoundaryData( vacuum );
+	solver.setInitialGuess( vacuum );
+	solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+	solver.solve();
+
+	double const span = solver.psiAxis() - solver.psiBoundary();
+	GradShafranovSolver::AxisSourceCheck const box = solver.checkAxisSource();
+	GradShafranovSolver::PlasmaSupportNodes const counted = solver.plasmaSupportNodes();
+
+	std::printf( "\n  A MIRROR'S AXIS AGAINST ITS BOX: psi_ax %.10f, psi_bnd %.10f, "
+	             "span %.4e, %d Newton steps\n", solver.psiAxis(),
+	             solver.psiBoundary(), span, solver.newtonIterations() );
+	std::printf( "    Psi on R = 0 %.6f; box: axis inside %d; support holds %d of "
+	             "%d nodes\n", box.normalisedFluxOnAxis, box.axisInsidePlasma,
+	             counted.inside, counted.total );
+
+	BOOST_TEST_REQUIRE( span < 0.0,
+	                    "the fixture is a mirror only if the inner label is the "
+	                    "smaller flux; span " << span );
+	BOOST_TEST_REQUIRE( box.reachesAxis );
+	BOOST_TEST_REQUIRE( box.normalisedFluxOnAxis > 1.0,
+	                    "Psi on the axis is " << box.normalisedFluxOnAxis
+	                    << ", so the box's upper bound is not what this case "
+	                    "exercises" );
+	BOOST_TEST( !box.axisInsidePlasma,
+	            "checkAxisSource() puts a mirror's axis inside its plasma at "
+	            "Psi = " << box.normalisedFluxOnAxis << ", which the box's "
+	            "Psi <= 1 excludes. It must ask the gate's own rule, "
+	            "NormalisedSource::supportAdmits(), not the one-sided sign" );
+	BOOST_TEST( box.sourceVanishesOnAxis );
+
+	BOOST_TEST( counted.inside > 0,
+	            "a converged mirror's support holds no node: the count the "
+	            "border's failure report reads would call it EMPTY" );
+	BOOST_TEST( counted.inside < counted.total );
+
+	// THE CONTROL: the tokamak's one-sided rule at the same labels.
+	source.setPlasmaSupportShape( meq::PlasmaSupportShape::OneSided );
+	GradShafranovSolver::AxisSourceCheck const oneSided = solver.checkAxisSource();
+	std::printf( "    one-sided at the same labels: axis inside %d\n",
+	             oneSided.axisInsidePlasma );
+	BOOST_TEST( oneSided.normalisedFluxOnAxis == box.normalisedFluxOnAxis );
+	BOOST_TEST( oneSided.axisInsidePlasma,
+	            "the one-sided rule reads Psi = " << oneSided.normalisedFluxOnAxis
+	            << " > 0 as inside, and must go on doing so: that is the "
+	            "tokamak's reading, which the driver refuses on" );
+
+	// AND AN EMPTY SUPPORT IS COUNTED AS ONE: a frozen edge above every psi.
+	source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, 1.0 );
+	source.freezePlasmaEdge( 10.0, 9.0 );
+	GradShafranovSolver::PlasmaSupportNodes const empty = solver.plasmaSupportNodes();
+	source.thawPlasmaEdge();
+	std::printf( "    frozen at ( 10, 9 ): support holds %d of %d nodes\n",
+	             empty.inside, empty.total );
+	std::fflush( stdout );
+	BOOST_TEST( empty.inside == 0 );
+	BOOST_TEST( empty.total == counted.total );
 }

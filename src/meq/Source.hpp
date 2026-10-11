@@ -452,16 +452,35 @@ namespace meq
 				(void)radius;
 				if ( !confinedToPlasma )
 					return true;
-				double const edge = supportBoundary();
-				double const span = supportAxis() - edge;
+				return supportAdmits( z, psi, supportAxis(), supportBoundary() );
+			}
+
+			/**
+			 * **THE SHAPE'S TEST ITSELF, AT LABELS THE CALLER NAMES**, whether
+			 * or not setPlasmaSupport() is on: `Psi > 0` under
+			 * PlasmaSupportShape::OneSided, `0 < Psi <= 1` with
+			 * `|z| <= axialEdge` under PlasmaSupportShape::Box.
+			 *
+			 * insidePlasma() is this at the support's own edge behind the
+			 * confinement switch, and it exists separately for a diagnostic
+			 * that asks where the plasma WOULD be at the solver's converged
+			 * labels -- GradShafranovSolver::checkAxisSource() -- which must
+			 * read the same rule as the gate and not a copy of half of it. A
+			 * one-sided copy reports a mirror's axis inside a plasma the box
+			 * excludes.
+			 */
+			bool supportAdmits( double z, double psi, double axis,
+			                    double boundary ) const
+			{
+				double const span = axis - boundary;
 				if ( supportShape == PlasmaSupportShape::OneSided )
-					return ( psi - edge )*span > 0.0;
+					return ( psi - boundary )*span > 0.0;
 
 				// PlasmaSupportShape::Box. A NaN z or Psi fails every
 				// comparison below and is outside, which is the safe side.
 				if ( !( std::abs( z ) <= axialEdgeValue ) )
 					return false;
-				double const normalised = ( psi - edge )/span;
+				double const normalised = ( psi - boundary )/span;
 				return normalised > 0.0 && normalised <= 1.0;
 			}
 

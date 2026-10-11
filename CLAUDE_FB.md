@@ -765,8 +765,9 @@ They are meshed inside `Γ = 3.0` instead, and the exterior series then
 represents the copper's field: mode `n` on `Γ` decays as `( ρ_copper/ρ_Γ )^n`
 whatever the Mach number, while the plasma region plateaus long before `D_h`
 does, since truncation at `Γ` decays inward like a harmonic field.
-`ExteriorDtN::coefficients()` uses a fixed 30-point rule and aliases past about
-30 modes; nothing in the solve calls it, but do not size `N` with it.
+`ExteriorDtN::coefficients()` scales its Gauss rule with the mode count,
+`max( 30, 2 × lastMode )` points, so it sizes `N` at any count; nothing in the
+solve calls it.
 `VacuumMirror` is the acceptance → **[M-260](MEASUREMENTS.md#m-260)**.
 
 `meq::ExteriorCoilSet` in

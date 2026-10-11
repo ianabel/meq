@@ -1398,3 +1398,93 @@ BOOST_AUTO_TEST_CASE( the_truncation_ratio_falls_as_gamma_moves_outward )
 	            << ratios.back() << " of the spectrum at the truncation, which "
 	            "is not converged" );
 }
+
+/*
+ * A KNOWN TRACE AT FORTY-EIGHT MODES, RECOVERED -- AND WITH CONTENT BEYOND THE
+ * LAST RETAINED MODE, WHICH IS WHAT ALIASES.
+ *
+ * coefficients() is a projection by Gauss-Legendre in mu, and a fixed thirty
+ * points is exact only for m + n <= 61: M-260 read a copper trace's tail at 96
+ * modes as a flat 0.82 out to N = 48, which was the rule and not the trace. So
+ * the rule scales, at 2 lastMode() points, and this asserts what that buys on
+ * a trace whose every coefficient is known:
+ *
+ *   trace = sum_{n = 2}^{2 L} c_n C_n,      L = lastMode() = 49,
+ *
+ * a_n = c_n for every RETAINED mode, and the degrees past L -- the tail a
+ * truncated projection must ignore -- contribute exactly zero. That second half
+ * is what the factor of two is for: degree d leaks into mode n once
+ * d + n - 2 exceeds the rule's 2p - 1, so p = L would make the basis
+ * orthogonal and still alias this trace's upper half into the last retained
+ * modes. The coefficients fall slowly, 0.97^n in energy and alternating in
+ * parity, so nothing upstream of the rule hides the difference.
+ *
+ * Judged in ENERGY, | a_n - c_n | sqrt( mass( n ) ) against the trace's norm,
+ * for modeAmplitudes()'s reason. Measured, the scaled rule reads 9e-15; the
+ * fixed thirty points read 4.2e-02 of the norm, and lastMode() + 1 points --
+ * the basis exact, the tail not -- 3.6e-02, both at the last retained modes.
+ */
+BOOST_AUTO_TEST_CASE( a_known_high_mode_trace_is_recovered_without_aliasing )
+{
+	int const retained = 48;
+	ExteriorDtN const dtn( 0.0, rhoGamma, retained );
+	int const last = dtn.lastMode();
+	ExteriorDtN const wide( 0.0, rhoGamma, 2*last - 1 );
+	BOOST_TEST_REQUIRE( wide.lastMode() == 2*last );
+
+	BOOST_TEST( dtn.quadraturePoints() >= 2*last,
+	            "the rule spends " << dtn.quadraturePoints() << " points at "
+	            << retained << " modes; recovering the retained modes of a trace "
+	            "with content to degree " << 2*last << " needs " << 2*last );
+	BOOST_TEST( standard().quadraturePoints() == 30,
+	            "at " << modes << " modes the rule must stay Boost's tabulated "
+	            "thirty points, which is what keeps small counts unchanged" );
+
+	// Known coefficients, in energy 0.97^n with alternating parity weight.
+	std::vector<double> known( static_cast<std::size_t>( 2*last + 1 ), 0.0 );
+	double norm2 = 0.0;
+	for ( int n = ExteriorDtN::firstMode(); n <= 2*last; ++n )
+	{
+		double const energy = std::pow( 0.97, n )*( n % 2 == 0 ? 1.0 : 0.5 );
+		known[ static_cast<std::size_t>( n ) ] = energy/std::sqrt( wide.mass( n ) );
+		if ( n <= last )
+			norm2 += energy*energy;
+	}
+
+	auto trace = [ & ]( double radius, double z )
+	{
+		double sum = 0.0;
+		for ( int n = ExteriorDtN::firstMode(); n <= 2*last; ++n )
+			sum += known[ static_cast<std::size_t>( n ) ]*wide.basis( n, radius, z );
+		return sum;
+	};
+	std::vector<double> const a = dtn.coefficients( trace );
+
+	double worst = 0.0;
+	int worstMode = 0;
+	for ( int i = 0; i < dtn.modeCount(); ++i )
+	{
+		int const n = ExteriorDtN::firstMode() + i;
+		double const error = std::fabs( a[ static_cast<std::size_t>( i ) ]
+		                                - known[ static_cast<std::size_t>( n ) ] )
+		                     *std::sqrt( dtn.mass( n ) );
+		if ( error > worst )
+		{
+			worst = error;
+			worstMode = n;
+		}
+	}
+	double const relative = worst/std::sqrt( norm2 );
+
+	std::printf( "\n  a known trace to degree %d, %d modes retained, %d points: "
+	             "worst energy error %.3e of the norm, at mode %d\n",
+	             2*last, retained, dtn.quadraturePoints(), relative, worstMode );
+	std::fflush( stdout );
+
+	BOOST_TEST( relative < 1.0e-12,
+	            "mode " << worstMode << " of a known trace came back "
+	            << relative << " of the trace's norm away from its coefficient. "
+	            "The integrand is a polynomial the rule should integrate exactly, "
+	            "so this is the rule aliasing the trace's content past mode "
+	            << last << " into the retained ones" );
+}

@@ -4239,6 +4239,7 @@ namespace
 		 * report reachesAxis == false, which is the safe direction for a
 		 * diagnostic: it declines to answer rather than answering wrongly.
 		 */
+		bool axisNodeAdmitted = false;
 		mfem::Array< int > dofs;
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
@@ -4277,6 +4278,21 @@ namespace
 					continue;
 
 				result.reachesAxis = true;
+
+				// Is THIS axis node inside the support, by the gate's own rule
+				// at the solver's labels -- psi = 0 for the reason given below.
+				// Per node because the box's |z| bound is a statement about
+				// where on the axis.
+				if ( normalisedSource != nullptr )
+				{
+					if ( normalisedSource->supportAdmits( point( 1 ), 0.0,
+					                                      psiAxisValue,
+					                                      psiBoundaryValue ) )
+						axisNodeAdmitted = true;
+				}
+				else if ( ( 0.0 - psiBoundaryValue )*( psiAxisValue - psiBoundaryValue )
+				          > 0.0 )
+					axisNodeAdmitted = true;
 
 				/*
 				 * AND ON THE AXIS, psi = 0 RATHER THAN THE ITERATE. THE FIRST
@@ -4339,15 +4355,24 @@ namespace
 		 * AND IS THE SYMMETRY AXIS INSIDE THE PLASMA? A SEPARATE AND WORSE
 		 * QUESTION THAN WHETHER THE LOAD IS BOUNDED.
 		 *
-		 * psi( 0, z ) = 0 exactly, so Psi there is -psi_bnd/span, and
-		 * insidePlasma()'s test makes the axis part of the plasma when that is
-		 * positive. A tokamak's axis is in the vacuum by construction, so a
-		 * positive reading is the wrong TOPOLOGY rather than a large error.
+		 * psi( 0, z ) = 0 exactly, so Psi there is -psi_bnd/span. A tokamak's
+		 * axis is in the vacuum by construction, so a positive reading under
+		 * the one-sided support is the wrong TOPOLOGY rather than a large
+		 * error.
+		 *
+		 * **THE ANSWER IS THE GATE'S OWN RULE**, NormalisedSource::
+		 * supportAdmits() at the solver's labels, and not `Psi > 0` alone. A
+		 * mirror's box also needs `Psi <= 1`, and its axis reads `Psi > 1` --
+		 * the inner label is the smaller flux and psi falls further towards
+		 * R = 0 -- so the one-sided reading reports the axis inside a plasma
+		 * the box excludes, which the driver refuses on at `g g' != 0`. Asked
+		 * whether or not setPlasmaSupport() is on, because this is a question
+		 * about the level set and the tokamak's has always been asked so.
 		 */
 		double const span = psiAxisValue - psiBoundaryValue;
 		if ( span != 0.0 )
 			result.normalisedFluxOnAxis = ( 0.0 - psiBoundaryValue )/span;
-		result.axisInsidePlasma = result.normalisedFluxOnAxis > 0.0;
+		result.axisInsidePlasma = axisNodeAdmitted;
 
 		/*
 		 * AND DID THE FILL ACTUALLY KEEP THAT ELEMENT? The test above is on the
@@ -7343,6 +7368,41 @@ namespace
 		return plasmaComponentMask.componentCount();
 	}
 
+	GradShafranovSolver::PlasmaSupportNodes
+	GradShafranovSolver::plasmaSupportNodes() const
+	{
+		PlasmaSupportNodes result;
+		if ( normalisedSource == nullptr || !potentialFes )
+			return result;
+
+		mfem::GridFunction total;
+		totalPotential( total );
+
+		mfem::Array< int > dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			potentialFes->GetElementDofs( e, dofs );
+			mfem::IntegrationRule const &nodes = potentialFes->GetFE( e )->GetNodes();
+
+			// A LOCAL transformation: GetElementTransformation( int ) is shared
+			// scratch.
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( e, &transformation );
+
+			for ( int i = 0; i < dofs.Size() && i < nodes.GetNPoints(); ++i )
+			{
+				mfem::Vector point;
+				transformation.Transform( nodes.IntPoint( i ), point );
+				int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+				++result.total;
+				if ( normalisedSource->insidePlasma( point( 0 ), point( 1 ),
+				                                     total( dof ) ) )
+					++result.inside;
+			}
+		}
+		return result;
+	}
+
 	bool GradShafranovSolver::elementInPlasma( int element ) const
 	{
 		return plasmaComponentMask.holds( element );
@@ -10129,6 +10189,17 @@ namespace
 			 * rather than failing. Regularisation cannot help a zero row and
 			 * the message must not send a reader to that lever.
 			 */
+			/*
+			 * THE SIGN OF THE SPAN SAYS NOTHING ABOUT EMPTINESS, so the
+			 * support is COUNTED rather than inferred from it. A negative span
+			 * is a mirror's normal state -- the inner label is the smaller flux
+			 * -- and on a tokamak it makes the one-sided support the region
+			 * OUTSIDE the last surface, M-165's wall-hugging annulus, which is
+			 * the wrong plasma and not an empty one. What is degenerate from
+			 * the labels alone is a ZERO span, where Psi is undefined; an
+			 * EMPTY support is a property of the iterate, and
+			 * plasmaSupportNodes() asks it of the source's own insidePlasma().
+			 */
 			if ( normalisedSource )
 			{
 				double const supportSpan = normalisedSource->supportAxis()
@@ -10137,12 +10208,30 @@ namespace
 				    << normalisedSource->supportAxis() << ", boundary "
 				    << normalisedSource->supportBoundary() << " ), span "
 				    << supportSpan;
-				if ( !( supportSpan > 0.0 ) )
-					out << "   <== NOT POSITIVE: Psi is negative everywhere, so"
-					       " the support is EMPTY and every integral over it is"
-					       " zero. This is not a degeneracy and"
+				if ( !( supportSpan != 0.0 ) || !std::isfinite( supportSpan ) )
+					out << "   <== ZERO OR NOT FINITE: Psi is undefined, so"
+					       " every integral over the support is meaningless."
+					       " This is not a degeneracy and"
 					       " setBorderRegularisation() will not help it";
+				else if ( supportSpan < 0.0 )
+					out << "   ( negative: the axis label is the smaller flux,"
+					       " a mirror's sense; on a tokamak the one-sided"
+					       " support is then the region outside the boundary"
+					       " surface )";
 				out << "\n";
+
+				if ( normalisedSource->plasmaSupport()
+				     && supportSpan != 0.0 && std::isfinite( supportSpan ) )
+				{
+					PlasmaSupportNodes const counted = plasmaSupportNodes();
+					out << "     the support holds " << counted.inside << " of "
+					    << counted.total << " potential nodes at this iterate";
+					if ( counted.inside == 0 )
+						out << "   <== EMPTY: every integral over it is zero."
+						       " This is not a degeneracy and"
+						       " setBorderRegularisation() will not help it";
+					out << "\n";
+				}
 			}
 			return out.str();
 		};
