@@ -1,0 +1,121 @@
+{
+ "cmd": "run",
+ "outdir": "race-runs/ir2-d",
+ "config": "machine-d-tcv-shaped",
+ "problem": "/home/ian/projects/meq/tools/freegs4e-benchmark/ref-interp/problem.json",
+ "codes": [
+  "meq",
+  "nice",
+  "freegs4e",
+  "freegsnke"
+ ],
+ "starts": [
+  "cold",
+  "warm"
+ ],
+ "repeats": 3,
+ "max_rung": null,
+ "row_tol": 1e-06,
+ "load_max": 1.0,
+ "quiet_wait": 900.0,
+ "dry_run": false,
+ "rungs": {
+  "meq": [
+   {
+    "rung": 0,
+    "label": "k2 h1.00",
+    "finest": false
+   },
+   {
+    "rung": 1,
+    "label": "k2 h0.50",
+    "finest": false
+   },
+   {
+    "rung": 2,
+    "label": "k3 h1.00",
+    "finest": false
+   },
+   {
+    "rung": 3,
+    "label": "k3 h0.50",
+    "finest": false
+   },
+   {
+    "rung": 4,
+    "label": "k4 h0.50",
+    "finest": false
+   },
+   {
+    "rung": 5,
+    "label": "k4 h0.35",
+    "finest": true
+   }
+  ],
+  "nice": [
+   {
+    "rung": 0,
+    "label": "area x1",
+    "finest": false
+   },
+   {
+    "rung": 1,
+    "label": "area x1/4",
+    "finest": false
+   },
+   {
+    "rung": 2,
+    "label": "area x1/16",
+    "finest": true
+   }
+  ],
+  "freegs4e": [
+   {
+    "rung": 0,
+    "label": "65^2",
+    "finest": false
+   },
+   {
+    "rung": 1,
+    "label": "129^2",
+    "finest": false
+   },
+   {
+    "rung": 2,
+    "label": "257^2",
+    "finest": false
+   },
+   {
+    "rung": 3,
+    "label": "513^2",
+    "finest": true
+   }
+  ],
+  "freegsnke": [
+   {
+    "rung": 0,
+    "label": "nx65",
+    "finest": false
+   },
+   {
+    "rung": 1,
+    "label": "nx129",
+    "finest": false
+   },
+   {
+    "rung": 2,
+    "label": "nx257",
+    "finest": true
+   }
+  ]
+ },
+ "host": {
+  "sysname": "Linux",
+  "nodename": "RHENIUM",
+  "release": "6.6.87.2-microsoft-standard-WSL2",
+  "version": "#1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025",
+  "machine": "x86_64"
+ },
+ "physical_cores": 8,
+ "started": 1791663348.9235208
+}

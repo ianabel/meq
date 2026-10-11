@@ -1,0 +1,87 @@
+config machine-d-tcv-shaped, codes ['meq', 'nice', 'freegs4e', 'freegsnke'], starts ['cold', 'warm'], repeats 3
+  meq       0:k2 h1.00, 1:k2 h0.50, 2:k3 h1.00, 3:k3 h0.50, 4:k4 h0.50, 5:k4 h0.35 (datum)
+  nice      0:area x1, 1:area x1/4, 2:area x1/16 (datum)
+  freegs4e  0:65^2, 1:129^2, 2:257^2, 3:513^2 (datum)
+  freegsnke 0:nx65, 1:nx129, 2:nx257 (datum)
+== cold start
+  meq       cold   rung 0 k2 h1.00   ACCEPTED  wall     6.7 s  converged
+  meq       cold   rung 0 k2 h1.00   ACCEPTED  wall     6.8 s  converged
+  meq       cold   rung 0 k2 h1.00   ACCEPTED  wall     7.0 s  converged
+  nice      cold   rung 0 area x1    ACCEPTED  wall     1.9 s  converged
+  nice      cold   rung 0 area x1    ACCEPTED  wall     1.9 s  converged
+  nice      cold   rung 0 area x1    ACCEPTED  wall     1.9 s  converged
+  freegs4e  cold   rung 0 65^2       ACCEPTED  wall    20.1 s  converged
+  freegs4e  cold   rung 0 65^2       ACCEPTED  wall    20.5 s  converged
+  freegs4e  cold   rung 0 65^2       ACCEPTED  wall    20.7 s  converged
+  freegsnke cold   rung 0 nx65       ACCEPTED  wall    13.2 s  converged
+  freegsnke cold   rung 0 nx65       ACCEPTED  wall    13.1 s  converged
+  freegsnke cold   rung 0 nx65       ACCEPTED  wall    13.5 s  converged
+  nice      cold   rung 1 area x1/4  ACCEPTED  wall     7.1 s  converged
+  nice      cold   rung 1 area x1/4  ACCEPTED  wall     6.8 s  converged
+  nice      cold   rung 1 area x1/4  ACCEPTED  wall     6.9 s  converged
+  freegs4e  cold   rung 1 129^2      ACCEPTED  wall    21.7 s  converged
+  freegs4e  cold   rung 1 129^2      ACCEPTED  wall    22.0 s  converged
+  freegs4e  cold   rung 1 129^2      ACCEPTED  wall    21.6 s  converged
+  freegsnke cold   rung 1 nx129      ACCEPTED  wall   239.5 s  converged
+  freegsnke cold   rung 1 nx129      ACCEPTED  wall   244.0 s  converged
+  freegsnke cold   rung 1 nx129      ACCEPTED  wall   260.3 s  converged
+  meq       cold   rung 1 k2 h0.50   ACCEPTED  wall    16.4 s  converged
+  meq       cold   rung 1 k2 h0.50   ACCEPTED  wall    16.5 s  converged
+  meq       cold   rung 1 k2 h0.50   ACCEPTED  wall    16.5 s  converged
+  freegs4e  cold   rung 2 257^2      ACCEPTED  wall    44.2 s  converged
+  freegs4e  cold   rung 2 257^2      ACCEPTED  wall    43.5 s  converged
+  freegs4e  cold   rung 2 257^2      ACCEPTED  wall    43.0 s  converged
+  freegsnke cold   rung 2 nx257      ACCEPTED  wall 70459.4 s  converged
+  meq       cold   rung 2 k3 h1.00   ACCEPTED  wall    12.5 s  converged
+  meq       cold   rung 2 k3 h1.00   ACCEPTED  wall    10.9 s  converged
+  meq       cold   rung 2 k3 h1.00   ACCEPTED  wall    10.3 s  converged
+  nice      cold   rung 2 area x1/16 ACCEPTED  wall    37.5 s  converged
+  meq       cold   rung 3 k3 h0.50   ACCEPTED  wall    29.7 s  converged
+  meq       cold   rung 3 k3 h0.50   ACCEPTED  wall    29.3 s  converged
+  meq       cold   rung 3 k3 h0.50   ACCEPTED  wall    28.8 s  converged
+  freegs4e  cold   rung 3 513^2      ACCEPTED  wall   438.4 s  converged
+  meq       cold   rung 4 k4 h0.50   ACCEPTED  wall    54.7 s  converged
+  meq       cold   rung 4 k4 h0.50   ACCEPTED  wall    52.0 s  converged
+  meq       cold   rung 4 k4 h0.50   ACCEPTED  wall    51.8 s  converged
+  meq       cold   rung 5 k4 h0.35   ACCEPTED  wall    74.1 s  converged
+== warm start
+  meq       warm   rung 0 k2 h1.00   ACCEPTED  wall     3.8 s  converged
+  meq       warm   rung 0 k2 h1.00   ACCEPTED  wall     3.5 s  converged
+  meq       warm   rung 0 k2 h1.00   ACCEPTED  wall     3.4 s  converged
+  nice      warm   rung 0 area x1    ACCEPTED  wall     1.9 s  converged
+  nice      warm   rung 0 area x1    ACCEPTED  wall     1.8 s  converged
+  nice      warm   rung 0 area x1    ACCEPTED  wall     1.8 s  converged
+  freegs4e  warm   rung 0 65^2       ACCEPTED  wall    14.3 s  converged
+  freegs4e  warm   rung 0 65^2       ACCEPTED  wall    14.5 s  converged
+  freegs4e  warm   rung 0 65^2       ACCEPTED  wall    14.3 s  converged
+  freegsnke warm   rung 0 nx65       ACCEPTED  wall     7.1 s  converged
+  freegsnke warm   rung 0 nx65       ACCEPTED  wall     6.9 s  converged
+  freegsnke warm   rung 0 nx65       ACCEPTED  wall     7.1 s  converged
+  nice      warm   rung 1 area x1/4  ACCEPTED  wall     6.5 s  converged
+  nice      warm   rung 1 area x1/4  ACCEPTED  wall     6.3 s  converged
+  nice      warm   rung 1 area x1/4  ACCEPTED  wall     6.2 s  converged
+  freegs4e  warm   rung 1 129^2      ACCEPTED  wall    18.4 s  converged
+  freegs4e  warm   rung 1 129^2      ACCEPTED  wall    18.2 s  converged
+  freegs4e  warm   rung 1 129^2      ACCEPTED  wall    18.2 s  converged
+  freegsnke warm   rung 1 nx129      ACCEPTED  wall    76.3 s  converged
+  freegsnke warm   rung 1 nx129      ACCEPTED  wall    76.3 s  converged
+  freegsnke warm   rung 1 nx129      ACCEPTED  wall    76.5 s  converged
+  meq       warm   rung 1 k2 h0.50   ACCEPTED  wall     9.4 s  converged
+  meq       warm   rung 1 k2 h0.50   ACCEPTED  wall     8.8 s  converged
+  meq       warm   rung 1 k2 h0.50   ACCEPTED  wall     8.8 s  converged
+  freegs4e  warm   rung 2 257^2      ACCEPTED  wall    40.9 s  converged
+  freegs4e  warm   rung 2 257^2      ACCEPTED  wall    39.8 s  converged
+  freegs4e  warm   rung 2 257^2      ACCEPTED  wall    39.1 s  converged
+  freegsnke warm   rung 2            rejected  wall  1191.6 s  arm exited -15 with no record
+  meq       warm   rung 2 k3 h1.00   ACCEPTED  wall     6.5 s  converged
+  meq       warm   rung 2 k3 h1.00   ACCEPTED  wall     6.2 s  converged
+  meq       warm   rung 2 k3 h1.00   ACCEPTED  wall     6.2 s  converged
+  nice      warm   rung 2 area x1/16 ACCEPTED  wall    33.5 s  converged
+  meq       warm   rung 3 k3 h0.50   ACCEPTED  wall    16.7 s  converged
+  meq       warm   rung 3 k3 h0.50   ACCEPTED  wall    17.5 s  converged
+  meq       warm   rung 3 k3 h0.50   ACCEPTED  wall    15.5 s  converged
+  freegs4e  warm   rung 3 513^2      ACCEPTED  wall   252.4 s  converged
+  meq       warm   rung 4 k4 h0.50   ACCEPTED  wall    25.0 s  converged
+  meq       warm   rung 4 k4 h0.50   ACCEPTED  wall    23.8 s  converged
+  meq       warm   rung 4 k4 h0.50   ACCEPTED  wall    23.7 s  converged
+  meq       warm   rung 5 k4 h0.35   ACCEPTED  wall    48.7 s  converged

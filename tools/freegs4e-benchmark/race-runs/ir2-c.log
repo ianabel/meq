@@ -1,0 +1,87 @@
+config machine-c-mast-shaped, codes ['meq', 'nice', 'freegs4e', 'freegsnke'], starts ['cold', 'warm'], repeats 3
+  meq       0:k2 h1.00, 1:k2 h0.50, 2:k3 h1.00, 3:k3 h0.50, 4:k4 h0.50, 5:k4 h0.35 (datum)
+  nice      0:area x1, 1:area x1/4, 2:area x1/16, 3:area x1/64 (datum)
+  freegs4e  0:65^2, 1:129^2, 2:257^2, 3:513^2 (datum)
+  freegsnke 0:nx65, 1:nx129, 2:nx257 (datum)
+== cold start
+  meq       cold   rung 0 k2 h1.00   rejected  wall     1.3 s  exit 1
+  meq       cold   rung 0 k2 h1.00   rejected  wall     1.2 s  exit 1
+  meq       cold   rung 0 k2 h1.00   rejected  wall     1.3 s  exit 1
+  nice      cold   rung 0 area x1    rejected  wall     1.5 s  converged
+  nice      cold   rung 0 area x1    rejected  wall     1.4 s  converged
+  nice      cold   rung 0 area x1    rejected  wall     1.4 s  converged
+  freegs4e  cold   rung 0 65^2       ACCEPTED  wall     7.4 s  converged
+  freegs4e  cold   rung 0 65^2       ACCEPTED  wall     7.4 s  converged
+  freegs4e  cold   rung 0 65^2       ACCEPTED  wall     7.2 s  converged
+  freegsnke cold   rung 0 nx65       ACCEPTED  wall    12.2 s  converged
+  freegsnke cold   rung 0 nx65       ACCEPTED  wall    11.7 s  converged
+  freegsnke cold   rung 0 nx65       ACCEPTED  wall    11.8 s  converged
+  nice      cold   rung 1 area x1/4  rejected  wall     4.4 s  converged
+  nice      cold   rung 1 area x1/4  rejected  wall     4.2 s  converged
+  nice      cold   rung 1 area x1/4  rejected  wall     4.2 s  converged
+  freegs4e  cold   rung 1 129^2      ACCEPTED  wall    11.4 s  converged
+  freegs4e  cold   rung 1 129^2      ACCEPTED  wall    11.4 s  converged
+  freegs4e  cold   rung 1 129^2      ACCEPTED  wall    11.5 s  converged
+  freegsnke cold   rung 1 nx129      ACCEPTED  wall    58.9 s  converged
+  freegsnke cold   rung 1 nx129      ACCEPTED  wall    59.7 s  converged
+  freegsnke cold   rung 1 nx129      ACCEPTED  wall    58.4 s  converged
+  meq       cold   rung 1 k2 h0.50   rejected  wall     1.4 s  exit 1
+  meq       cold   rung 1 k2 h0.50   rejected  wall     1.2 s  exit 1
+  meq       cold   rung 1 k2 h0.50   rejected  wall     1.3 s  exit 1
+  freegs4e  cold   rung 2 257^2      ACCEPTED  wall    33.3 s  converged
+  freegs4e  cold   rung 2 257^2      ACCEPTED  wall    32.0 s  converged
+  freegs4e  cold   rung 2 257^2      ACCEPTED  wall    34.2 s  converged
+  freegsnke cold   rung 2 nx257      ACCEPTED  wall   238.0 s  converged
+  meq       cold   rung 2 k3 h1.00   rejected  wall     1.4 s  exit 1
+  meq       cold   rung 2 k3 h1.00   rejected  wall     1.3 s  exit 1
+  meq       cold   rung 2 k3 h1.00   rejected  wall     1.2 s  exit 1
+  nice      cold   rung 2 area x1/16 rejected  wall    19.1 s  converged
+  nice      cold   rung 2 area x1/16 rejected  wall    18.8 s  converged
+  nice      cold   rung 2 area x1/16 rejected  wall    19.0 s  converged
+  meq       cold   rung 3 k3 h0.50   rejected  wall     1.4 s  exit 1
+  meq       cold   rung 3 k3 h0.50   rejected  wall     1.2 s  exit 1
+  meq       cold   rung 3 k3 h0.50   rejected  wall     1.5 s  exit 1
+  nice      cold   rung 3 area x1/64 rejected  wall    78.7 s  converged
+  freegs4e  cold   rung 3 513^2      ACCEPTED  wall   175.0 s  converged
+  meq       cold   rung 4 k4 h0.50   rejected  wall     1.4 s  exit 1
+  meq       cold   rung 4 k4 h0.50   rejected  wall     1.2 s  exit 1
+  meq       cold   rung 4 k4 h0.50   rejected  wall     1.5 s  exit 1
+  meq       cold   rung 5 k4 h0.35   rejected  wall     1.6 s  exit 1
+== warm start
+  meq       seeded rung 0 k2 h1.00   rejected  wall     1.1 s  exit 1
+  meq       warm   rung 0: DNF -- no converged design-target state
+  nice      seeded rung 0 area x1    rejected  wall     1.4 s  converged
+  nice      warm   rung 0: DNF -- no converged design-target state
+  freegs4e  warm   rung 0 65^2       ACCEPTED  wall     6.3 s  converged
+  freegs4e  warm   rung 0 65^2       ACCEPTED  wall     6.3 s  converged
+  freegs4e  warm   rung 0 65^2       ACCEPTED  wall     6.3 s  converged
+  freegsnke warm   rung 0 nx65       ACCEPTED  wall     7.5 s  converged
+  freegsnke warm   rung 0 nx65       ACCEPTED  wall     7.6 s  converged
+  freegsnke warm   rung 0 nx65       ACCEPTED  wall     7.6 s  converged
+  nice      seeded rung 1 area x1/4  rejected  wall     4.3 s  converged
+  nice      warm   rung 1: DNF -- no converged design-target state
+  freegs4e  warm   rung 1 129^2      ACCEPTED  wall    10.3 s  converged
+  freegs4e  warm   rung 1 129^2      ACCEPTED  wall    10.3 s  converged
+  freegs4e  warm   rung 1 129^2      ACCEPTED  wall    10.4 s  converged
+  freegsnke warm   rung 1 nx129      ACCEPTED  wall    21.6 s  converged
+  freegsnke warm   rung 1 nx129      ACCEPTED  wall    21.9 s  converged
+  freegsnke warm   rung 1 nx129      ACCEPTED  wall    21.5 s  converged
+  meq       seeded rung 1 k2 h0.50   rejected  wall     1.5 s  exit 1
+  meq       warm   rung 1: DNF -- no converged design-target state
+  freegs4e  warm   rung 2 257^2      ACCEPTED  wall    30.4 s  converged
+  freegs4e  warm   rung 2 257^2      ACCEPTED  wall    30.6 s  converged
+  freegs4e  warm   rung 2 257^2      ACCEPTED  wall    32.9 s  converged
+  freegsnke warm   rung 2 nx257      ACCEPTED  wall   141.6 s  converged
+  meq       seeded rung 2 k3 h1.00   rejected  wall     1.2 s  exit 1
+  meq       warm   rung 2: DNF -- no converged design-target state
+  nice      seeded rung 2 area x1/16 rejected  wall    17.1 s  converged
+  nice      warm   rung 2: DNF -- no converged design-target state
+  meq       seeded rung 3 k3 h0.50   rejected  wall     1.4 s  exit 1
+  meq       warm   rung 3: DNF -- no converged design-target state
+  nice      seeded rung 3 area x1/64 rejected  wall    68.7 s  converged
+  nice      warm   rung 3: DNF -- no converged design-target state
+  freegs4e  warm   rung 3 513^2      ACCEPTED  wall   201.6 s  converged
+  meq       seeded rung 4 k4 h0.50   rejected  wall     1.4 s  exit 1
+  meq       warm   rung 4: DNF -- no converged design-target state
+  meq       seeded rung 5 k4 h0.35   rejected  wall     1.3 s  exit 1
+  meq       warm   rung 5: DNF -- no converged design-target state

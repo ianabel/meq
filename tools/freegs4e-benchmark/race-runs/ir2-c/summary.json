@@ -1,0 +1,418 @@
+{
+ "machine-c-mast-shaped": {
+  "cold": {
+   "freegs4e": {
+    "rungs": [
+     {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 7.354499101638794,
+      "err": 1.1435983712266201e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 1,
+      "label": "129^2",
+      "size": 16641,
+      "wall": 11.39637541770935,
+      "err": 4.396582720712091e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 2,
+      "label": "257^2",
+      "size": 66049,
+      "wall": 33.33302640914917,
+      "err": 1.4865714001767076e-07,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 3,
+      "label": "513^2",
+      "size": 263169,
+      "wall": 174.9843146800995,
+      "err": null,
+      "accepted": 1,
+      "runs": 1
+     }
+    ],
+    "cheapest": {
+     "0.01": {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 7.354499101638794,
+      "err": 1.1435983712266201e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.001": {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 7.354499101638794,
+      "err": 1.1435983712266201e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.0001": {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 7.354499101638794,
+      "err": 1.1435983712266201e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "1e-05": {
+      "rung": 1,
+      "label": "129^2",
+      "size": 16641,
+      "wall": 11.39637541770935,
+      "err": 4.396582720712091e-06,
+      "accepted": 3,
+      "runs": 3
+     }
+    }
+   },
+   "freegsnke": {
+    "rungs": [
+     {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 11.791820504004136,
+      "err": 6.728024727296922e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 1,
+      "label": "nx129",
+      "size": 16641,
+      "wall": 58.926111642998876,
+      "err": 4.524924079918852e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 2,
+      "label": "nx257",
+      "size": 66049,
+      "wall": 237.9722371569951,
+      "err": null,
+      "accepted": 1,
+      "runs": 1
+     }
+    ],
+    "cheapest": {
+     "0.01": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 11.791820504004136,
+      "err": 6.728024727296922e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.001": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 11.791820504004136,
+      "err": 6.728024727296922e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.0001": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 11.791820504004136,
+      "err": 6.728024727296922e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     "1e-05": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 11.791820504004136,
+      "err": 6.728024727296922e-06,
+      "accepted": 3,
+      "runs": 3
+     }
+    }
+   },
+   "meq": {
+    "rungs": [
+     {
+      "rung": 0,
+      "label": "k2 h1.00",
+      "size": null,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 1,
+      "label": "k2 h0.50",
+      "size": null,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 2,
+      "label": "k3 h1.00",
+      "size": null,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 3,
+      "label": "k3 h0.50",
+      "size": null,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 4,
+      "label": "k4 h0.50",
+      "size": null,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 5,
+      "label": "k4 h0.35",
+      "size": null,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 1
+     }
+    ],
+    "cheapest": {
+     "0.01": null,
+     "0.001": null,
+     "0.0001": null,
+     "1e-05": null
+    }
+   },
+   "nice": {
+    "rungs": [
+     {
+      "rung": 0,
+      "label": "area x1",
+      "size": 3271,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 1,
+      "label": "area x1/4",
+      "size": 12432,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 2,
+      "label": "area x1/16",
+      "size": 48651,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 3
+     },
+     {
+      "rung": 3,
+      "label": "area x1/64",
+      "size": 192694,
+      "wall": null,
+      "err": null,
+      "accepted": 0,
+      "runs": 1
+     }
+    ],
+    "cheapest": {
+     "0.01": null,
+     "0.001": null,
+     "0.0001": null,
+     "1e-05": null
+    }
+   },
+   "floor": {
+    "freegs4e-freegsnke": 2.0202425641755165e-07
+   }
+  },
+  "warm": {
+   "freegs4e": {
+    "rungs": [
+     {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 6.2902984619140625,
+      "err": 5.449361254712228e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 1,
+      "label": "129^2",
+      "size": 16641,
+      "wall": 10.321104526519775,
+      "err": 7.581546699351665e-07,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 2,
+      "label": "257^2",
+      "size": 66049,
+      "wall": 30.646384954452515,
+      "err": 1.854349410403785e-07,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 3,
+      "label": "513^2",
+      "size": 263169,
+      "wall": 201.61370539665222,
+      "err": null,
+      "accepted": 1,
+      "runs": 1
+     }
+    ],
+    "cheapest": {
+     "0.01": {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 6.2902984619140625,
+      "err": 5.449361254712228e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.001": {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 6.2902984619140625,
+      "err": 5.449361254712228e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.0001": {
+      "rung": 0,
+      "label": "65^2",
+      "size": 4225,
+      "wall": 6.2902984619140625,
+      "err": 5.449361254712228e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "1e-05": {
+      "rung": 1,
+      "label": "129^2",
+      "size": 16641,
+      "wall": 10.321104526519775,
+      "err": 7.581546699351665e-07,
+      "accepted": 3,
+      "runs": 3
+     }
+    }
+   },
+   "freegsnke": {
+    "rungs": [
+     {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 7.591056799006765,
+      "err": 5.482862954656369e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 1,
+      "label": "nx129",
+      "size": 16641,
+      "wall": 21.595444179998594,
+      "err": 1.1620716804553226e-06,
+      "accepted": 3,
+      "runs": 3
+     },
+     {
+      "rung": 2,
+      "label": "nx257",
+      "size": 66049,
+      "wall": 141.61335942600272,
+      "err": null,
+      "accepted": 1,
+      "runs": 1
+     }
+    ],
+    "cheapest": {
+     "0.01": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 7.591056799006765,
+      "err": 5.482862954656369e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.001": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 7.591056799006765,
+      "err": 5.482862954656369e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "0.0001": {
+      "rung": 0,
+      "label": "nx65",
+      "size": 4225,
+      "wall": 7.591056799006765,
+      "err": 5.482862954656369e-05,
+      "accepted": 3,
+      "runs": 3
+     },
+     "1e-05": {
+      "rung": 1,
+      "label": "nx129",
+      "size": 16641,
+      "wall": 21.595444179998594,
+      "err": 1.1620716804553226e-06,
+      "accepted": 3,
+      "runs": 3
+     }
+    }
+   },
+   "floor": {
+    "freegs4e-freegsnke": 1.4060393750302146e-07
+   }
+  }
+ }
+}

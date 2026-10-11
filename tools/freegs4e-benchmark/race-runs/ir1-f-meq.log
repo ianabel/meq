@@ -1,0 +1,36 @@
+config machine-f-diiid-shaped, codes ['meq'], starts ['cold', 'warm'], repeats 3
+  meq       0:k2 h1.00, 1:k2 h0.50, 2:k3 h1.00, 3:k3 h0.50, 4:k4 h0.50, 5:k4 h0.35 (datum)
+== cold start
+  meq       cold   rung 0 k2 h1.00   ACCEPTED  wall    80.3 s  converged
+  meq       cold   rung 0 k2 h1.00   ACCEPTED  wall    80.9 s  converged
+  meq       cold   rung 0 k2 h1.00   ACCEPTED  wall    77.6 s  converged
+  meq       cold   rung 1 k2 h0.50   ACCEPTED  wall    71.7 s  converged
+  meq       cold   rung 1 k2 h0.50   ACCEPTED  wall    69.2 s  converged
+  meq       cold   rung 1 k2 h0.50   ACCEPTED  wall    68.9 s  converged
+  meq       cold   rung 2 k3 h1.00   ACCEPTED  wall   127.9 s  converged
+  meq       cold   rung 2 k3 h1.00   ACCEPTED  wall   128.7 s  converged
+  meq       cold   rung 2 k3 h1.00   ACCEPTED  wall   128.3 s  converged
+  meq       cold   rung 3 k3 h0.50   ACCEPTED  wall   306.1 s  converged
+  meq       cold   rung 3 k3 h0.50   ACCEPTED  wall   306.9 s  converged
+  meq       cold   rung 3 k3 h0.50   ACCEPTED  wall   309.8 s  converged
+  meq       cold   rung 4 k4 h0.50   ACCEPTED  wall   441.9 s  converged
+  meq       cold   rung 4 k4 h0.50   ACCEPTED  wall   439.6 s  converged
+  meq       cold   rung 4 k4 h0.50   ACCEPTED  wall   440.6 s  converged
+  meq       cold   rung 5 k4 h0.35   ACCEPTED  wall   795.4 s  converged
+== warm start
+  meq       warm   rung 0 k2 h1.00   ACCEPTED  wall     3.4 s  converged
+  meq       warm   rung 0 k2 h1.00   ACCEPTED  wall     3.0 s  converged
+  meq       warm   rung 0 k2 h1.00   ACCEPTED  wall     3.1 s  converged
+  meq       warm   rung 1 k2 h0.50   ACCEPTED  wall     7.3 s  converged
+  meq       warm   rung 1 k2 h0.50   ACCEPTED  wall     6.8 s  converged
+  meq       warm   rung 1 k2 h0.50   ACCEPTED  wall     6.8 s  converged
+  meq       warm   rung 2 k3 h1.00   ACCEPTED  wall     5.4 s  converged
+  meq       warm   rung 2 k3 h1.00   ACCEPTED  wall     5.1 s  converged
+  meq       warm   rung 2 k3 h1.00   ACCEPTED  wall     5.1 s  converged
+  meq       warm   rung 3 k3 h0.50   ACCEPTED  wall    12.3 s  converged
+  meq       warm   rung 3 k3 h0.50   ACCEPTED  wall    11.6 s  converged
+  meq       warm   rung 3 k3 h0.50   ACCEPTED  wall    11.5 s  converged
+  meq       warm   rung 4 k4 h0.50   ACCEPTED  wall    17.2 s  converged
+  meq       warm   rung 4 k4 h0.50   ACCEPTED  wall    16.8 s  converged
+  meq       warm   rung 4 k4 h0.50   ACCEPTED  wall    16.8 s  converged
+  meq       warm   rung 5 k4 h0.35   ACCEPTED  wall    31.0 s  converged

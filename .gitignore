@@ -175,6 +175,11 @@ tools/freegs4e-benchmark/*.json
 # ladder into its own ref-n<N>/, which the two patterns above do not reach.
 tools/freegs4e-benchmark/ref-n*/
 tools/freegs4e-benchmark/ref-interp/
+# The inverse race keeps its RECORDS and not its run products. Each stage's
+# plan.json and records.jsonl are what `race_inverse.py summarise` reads, and
+# with the stage logs they are under a megabyte; every run's own directory
+# (VTU, .gf, .nc, NICE's meshes, freegsnke's state) is 2.9 GB for F, C and D.
+tools/freegs4e-benchmark/race-runs/*/machine-*/
 
 # Claude Code's own working area at the repository root. It holds `worktrees/`,
 # and each entry there is a real GIT WORKTREE of THIS repository -- a directory
