@@ -313,17 +313,26 @@ namespace mirror
 		double h = 0.0;
 	};
 
-	/// @param refinements uniform refinements of the gmsh mesh.
-	/// @param stem        meshFile()'s, one per test -- and one per mesh, so a
-	///                    test making two meshes names two.
-	/// @param plasma      meshFile()'s.
-	inline std::unique_ptr<Domain> buildDomain( int refinements,
-	                                            std::string const &stem,
-	                                            PlasmaMesh const &plasma = PlasmaMesh() )
+	/**
+	 * D_h cut from a half-disc somebody else made -- the driver's own mesh, for
+	 * a case that compares the driver with the library on it.
+	 *
+	 * THE CUT IS THE DRIVER'S, STEP FOR STEP: the background read with
+	 * mfem::Mesh( path, 1, 1 ) and refined uniformly, h its largest element
+	 * diameter, the level set marked at meq::markingOffset( 1.0, 1.5 ) with one
+	 * extra refinement, and a six-h transfer path -- apps/meq.cpp's
+	 * buildSubdomain() and backgroundCellSize() for a [mesh] File. The driver
+	 * also puts the background's material attributes back after the cut, which
+	 * nothing here reads.
+	 *
+	 * @param path        a half-disc .msh reaching R = 0.
+	 * @param refinements uniform refinements of it.
+	 */
+	inline std::unique_ptr<Domain> buildDomainFromFile( std::string const &path,
+	                                                    int refinements )
 	{
 		auto d = std::make_unique<Domain>();
-		d->background = std::make_unique<mfem::Mesh>(
-			meshFile( stem, plasma ).c_str(), 1, 1 );
+		d->background = std::make_unique<mfem::Mesh>( path.c_str(), 1, 1 );
 		for ( int level = 0; level < refinements; ++level )
 			d->background->UniformRefinement();
 
@@ -355,6 +364,17 @@ namespace mirror
 		d->path = std::make_unique<mfem::VertexConePath>(
 			*d->sub, d->gammaH, semicircle, 6.0*d->h );
 		return d;
+	}
+
+	/// @param refinements uniform refinements of the gmsh mesh.
+	/// @param stem        meshFile()'s, one per test -- and one per mesh, so a
+	///                    test making two meshes names two.
+	/// @param plasma      meshFile()'s.
+	inline std::unique_ptr<Domain> buildDomain( int refinements,
+	                                            std::string const &stem,
+	                                            PlasmaMesh const &plasma = PlasmaMesh() )
+	{
+		return buildDomainFromFile( meshFile( stem, plasma ), refinements );
 	}
 
 	/// No plasma. A meq::Source and not a Coefficient because the coupled path

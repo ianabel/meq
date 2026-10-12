@@ -16069,3 +16069,64 @@ solves, so that it goes red if geq changes, and excludes the four nodes.
 interpolant of `ψ_c` in place of its exact value is NOT caught here: at level 2,
 `k = 4` it is already below geq's floor, and only the label check at coarse
 levels sees it.
+
+### M-264
+
+**MR-5: THE SHIPPED BINARY SOLVES `examples/mirror-rotating.toml` AND
+REPRODUCES THE LIBRARY ON geq'S PROBLEM TO THE BIT.** `RotatingMirrorDriver`
+runs the file through `meq-run`, and the library solves geq's MR-4 problem from
+the reference tables. Only the mesh and the starting `ψ_ax` come from the file.
+Both start cold, with no vacuum solve. The run is `k = 2`, 1175 elements inside
+`Γ = 3.0`, `N = 32`.
+
+| | driver | library |
+|---|---|---|
+| `ψ_h`, max difference over 7050 dofs | 0.000e+00 (max `|ψ_h|` 6.646e-03) | |
+| Newton steps | 4 | 4 |
+| `ψ_ax` at `( 0.1, 0 )` | 5.536418e-03 | 5.536417566630e-03 |
+| `ψ_bnd` at `( 0.35, 0 )`, span | 6.525577e-02, −5.9719e-02 | |
+| axial cutoff, relative to the peak, samples | 5.401e-02, 846 | |
+| support nodes | 847 of 7050 | |
+
+The residual history is 6.44e-01, 6.21e-05, 2.76e-07, 3.30e-12, 1.92e-16. The
+exterior spectrum's tail is 3.77e-07 of its largest mode. The library's answer
+from a cold start takes 4 steps; MR-4b's 3 came from a vacuum guess.
+
+**The starting `ψ_bnd` is worth two steps on the mirror, and costs a tokamak
+tenfold.** The driver seeds `ψ_bnd` from the starting state's total flux at the
+outer label (6.610117e-02), on the box path only:
+
+| | as shipped | change | effect |
+|---|---|---|---|
+| mirror | 4 steps | seed removed | 6 steps, `ψ_h` agreeing to 6.08e-16 |
+| mirror | 4 steps | `ψ_c` dropped from the seed | 6 steps |
+| `limited-tokamak` | 12 steps | seed on every point limiter | 129 steps, same `ψ_ax` 9.484404e-02 |
+| `limited-tokamak-filament` | 2 steps | seed on every point limiter | 3 steps, same `ψ_ax` 9.309079e-02 |
+
+The 12 is stable at `MKL_NUM_THREADS` 1 and 4 (9 in single precision).
+
+**The Picard pre-stage cannot initialise a prescribed axis.** With `ψ_ax` read
+at the point in each sweep, every sweep's frozen-label Picard-then-Newton
+diverges on the mirror. The first residuals are 5.436e+47 and 3.880e+47, and
+the bordered solve then takes 4 steps to the same `ψ_ax`. With plain Newton in
+the sweeps instead (an experiment, not shipped), the sweeps converge in 2 and 1
+steps and the bordered solve in 3. `limited-tokamak` with its axis pinned at
+`( 1.0557, 0 )` and `PicardSweeps = 2` exits 2. So `PicardSweeps` is refused
+beside `[source.axis]`.
+
+**What the acceptance catches**:
+
+| mutation | caught by |
+|---|---|
+| `FilamentsZ = 9` | `ψ_h` 3.12e-06 |
+| deuterium given `T_electron.dat` | `ψ_h` 2.36e-04 |
+| support shape not set | exit 2 |
+| `setAxisFluxPoint` not called | exit 2 |
+| axis checked under a prescribed point | log: "no interior extremum", "wall-hugging" |
+| `--align-plasma` dropped | the mesh command; the mesh is 1131 elements |
+| seed removed | 6 steps against 4 |
+
+Swapping the two `[[coils]]` blocks is correctly not caught: it moves `ψ_h` by
+7.28e-16, only the summation order. `DriverAcceptance` bounds
+`limited-tokamak`'s Newton count at 20, so the seed spreading to a tokamak is
+caught there.

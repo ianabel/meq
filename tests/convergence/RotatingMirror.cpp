@@ -76,7 +76,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -87,6 +89,7 @@
 
 #include "mfem.hpp"
 
+#include "meq/Config.hpp"
 #include "meq/ConductorField.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
@@ -237,6 +240,21 @@ namespace
 		double absoluteTolerance = -1.0;
 		int maxIterations = 40;
 		double jacobianFactor = 1.0;   ///< != 1 builds SkewedJacobian
+		/// A half-disc to cut D_h from in place of meshFile()'s -- the
+		/// driver's own, for the driver suite. `aligned` and `stem` are then
+		/// unread, since the file is whatever it is.
+		std::string meshPath;
+		/// No vacuum solve and no initial guess: the remainder starts at zero,
+		/// so the labels start at the filaments' own flux at their points --
+		/// the start a [[coils]] file with no [initialguess] gives the driver.
+		bool coldStart = false;
+		/// psi_ax's starting value under coldStart.
+		double axisGuess = std::numeric_limits<double>::quiet_NaN();
+		/// The deuterons' density built from the electrons' by quasineutrality,
+		/// meq::neutralisingDensity(), as SourceFactory builds the species a
+		/// file marks Neutralising -- rather than read from the reference's own
+		/// table, which agrees with it to 4e-16.
+		bool neutraliseDeuterium = false;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -276,33 +294,54 @@ namespace
 	{
 		meqtest::geq::GeqCase const &p = problem();
 		auto run = std::make_unique<MirrorRun>();
-		PlasmaMesh plasma;
-		plasma.axialEdge = p.axialEdge;
-		plasma.aligned = o.aligned;
-		run->domain = buildDomain( o.level, o.aligned ? o.stem : o.stem + "Cut", plasma );
+		if ( !o.meshPath.empty() )
+			run->domain = buildDomainFromFile( o.meshPath, o.level );
+		else
+		{
+			PlasmaMesh plasma;
+			plasma.axialEdge = p.axialEdge;
+			plasma.aligned = o.aligned;
+			run->domain = buildDomain( o.level, o.aligned ? o.stem : o.stem + "Cut",
+			                           plasma );
+		}
 
-		auto const t0 = std::chrono::steady_clock::now();
-		run->vacuum = solveSubtracted( *run->domain, o.order, o.modes, run->filaments );
-		auto const t1 = std::chrono::steady_clock::now();
-		run->vacuumSeconds = std::chrono::duration<double>( t1 - t0 ).count();
+		if ( o.coldStart )
+		{
+			run->vacuumAxis = run->filaments.psi( p.axisPointR, p.axisPointZ );
+			run->vacuumBoundary = run->filaments.psi( p.boundaryPointR, p.boundaryPointZ );
+		}
+		else
+		{
+			auto const t0 = std::chrono::steady_clock::now();
+			run->vacuum = solveSubtracted( *run->domain, o.order, o.modes, run->filaments );
+			auto const t1 = std::chrono::steady_clock::now();
+			run->vacuumSeconds = std::chrono::duration<double>( t1 - t0 ).count();
 
-		std::vector<double> const labels = totalAt( *run,
-			run->vacuum->solver->potential(), { p.axisPointR, p.boundaryPointR },
-			{ p.axisPointZ, p.boundaryPointZ } );
-		run->vacuumAxis = labels[ 0 ];
-		run->vacuumBoundary = labels[ 1 ];
+			std::vector<double> const labels = totalAt( *run,
+				run->vacuum->solver->potential(), { p.axisPointR, p.boundaryPointR },
+				{ p.axisPointZ, p.boundaryPointZ } );
+			run->vacuumAxis = labels[ 0 ];
+			run->vacuumBoundary = labels[ 1 ];
+		}
 		BOOST_TEST_REQUIRE( std::isfinite( run->vacuumAxis ) );
 		BOOST_TEST_REQUIRE( std::isfinite( run->vacuumBoundary ) );
+		double const axisStart = o.coldStart ? o.axisGuess : run->vacuumAxis;
+		BOOST_TEST_REQUIRE( std::isfinite( axisStart ) );
 
-		MirrorProfiles const profiles = mirrorProfiles();
+		MirrorProfiles profiles = mirrorProfiles();
+		if ( o.neutraliseDeuterium )
+		{
+			BOOST_TEST_REQUIRE( problem().species[ 1 ].name == "deuterium" );
+			profiles.species[ 1 ].density = meq::neutralisingDensity( profiles.species, 1 );
+		}
 		if ( o.jacobianFactor != 1.0 )
 			run->source = std::make_unique<SkewedJacobian>(
-				o.jacobianFactor, profiles, run->vacuumAxis, machine().mu0 );
+				o.jacobianFactor, profiles, axisStart, machine().mu0 );
 		else
 			run->source = std::make_unique<meq::NormalisedRotatingSource>(
 				profiles.species, profiles.omega,
 				std::make_shared<meq::ConstantProfile const>( 0.0 ),
-				profiles.referenceRadius, run->vacuumAxis, machine().mu0 );
+				profiles.referenceRadius, axisStart, machine().mu0 );
 		run->source->setPlasmaSupportShape( meq::PlasmaSupportShape::Box, p.axialEdge );
 
 		run->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, o.modes );
@@ -313,12 +352,13 @@ namespace
 		solver.setBoundaryFluxPoint( p.boundaryPointR, p.boundaryPointZ );
 		if ( o.seedBoundary )
 			solver.setBoundaryFluxInitial( run->vacuumBoundary );
-		solver.setSource( *run->source, run->vacuumAxis );
+		solver.setSource( *run->source, axisStart );
 		solver.setBoundaryData( run->zero );
 		solver.setExtension( *run->domain->path, run->domain->gammaHMarker );
 		solver.setConductorField( run->filaments );
 		solver.setExteriorCoupling( *run->dtn );
-		solver.setInitialGuess( run->vacuum->solver->potential() );
+		if ( run->vacuum )
+			solver.setInitialGuess( run->vacuum->solver->potential() );
 		if ( o.relativeTolerance > 0.0 )
 			solver.setNewtonControl( o.relativeTolerance, o.absoluteTolerance,
 			                         o.maxIterations );
@@ -482,11 +522,16 @@ namespace
 				density( p.boundaryPointR, delta )/m.peak } );
 
 		m.amplitudes = run.dtn->modeAmplitudes( solver.exteriorCoefficients() );
-		std::vector<double> own = solver.exteriorCoefficients();
-		std::vector<double> const &vacuum = run.vacuum->solver->exteriorCoefficients();
-		for ( std::size_t i = 0; i < own.size(); ++i )
-			own[ i ] -= vacuum[ i ];
-		m.plasmaAmplitudes = run.dtn->modeAmplitudes( own );
+		// The plasma's own needs the vacuum's on the same mesh and order, which
+		// a cold start never solved for; it then stays empty.
+		if ( run.vacuum )
+		{
+			std::vector<double> own = solver.exteriorCoefficients();
+			std::vector<double> const &vacuum = run.vacuum->solver->exteriorCoefficients();
+			for ( std::size_t i = 0; i < own.size(); ++i )
+				own[ i ] -= vacuum[ i ];
+			m.plasmaAmplitudes = run.dtn->modeAmplitudes( own );
+		}
 		m.truncation = run.dtn->truncationRatio( solver.exteriorCoefficients() );
 		return m;
 	}
@@ -543,7 +588,8 @@ namespace
 			std::printf( "\n" );
 		};
 		tail( "exterior, total trace ", m.amplitudes );
-		tail( "exterior, plasma's own", m.plasmaAmplitudes );
+		if ( !m.plasmaAmplitudes.empty() )
+			tail( "exterior, plasma's own", m.plasmaAmplitudes );
 		std::printf( "    truncation ratio, total trace %.3e\n", m.truncation );
 		std::fflush( stdout );
 	}
@@ -789,9 +835,10 @@ namespace
 }
 
 /*
- * TWO SUITES, ONE ctest EACH, so that the solve's acceptance does not wait on
+ * THREE SUITES, ONE ctest EACH, so that the solve's acceptance does not wait on
  * the resolution study: `solve` is MR-4b and its controls, `resolution` is
- * MR-4c and MR-4d, which share their runs through sampled().
+ * MR-4c and MR-4d, which share their runs through sampled(), and `driver` is
+ * MR-5 -- the shipped example through the shipped binary, against the library.
  */
 BOOST_AUTO_TEST_SUITE( solve )
 
@@ -1473,3 +1520,305 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqAsGeqRefines )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+#ifdef MEQ_RUN_PATH
+/*
+ * MR-5: THE SHIPPED MIRROR, THROUGH THE SHIPPED BINARY, AGAINST THE LIBRARY.
+ *
+ * examples/mirror-rotating.toml is what a user runs, and what rots about an
+ * example is the FILE -- a key renamed, a table's path, a default moved -- so
+ * this runs that file through meq-run, exactly as a user would, with only its
+ * output redirected (MachineFixedBoundary's text substitution), and holds the
+ * answer against the library solving geq's problem.
+ *
+ * THE LIBRARY SIDE IS BUILT FROM THE REFERENCE, NOT FROM THE TOML: the
+ * species, tables, R_ref, labels, edge, filaments, Gamma and N are
+ * runMirror()'s, read from tools/geq-benchmark/reference/. Only the mesh --
+ * the driver's own, cut the driver's way -- and psi_ax's starting value are
+ * taken from the file, the second being an initial value rather than the
+ * problem. So agreement dof for dof says the file poses geq's problem, and
+ * the start, mesh and iteration being the same, the bound is round-off.
+ *
+ * WHAT IT CANNOT SEE is the alignment of the cutoff, since both sides read
+ * one mesh -- so the generator's command is asserted on its own.
+ */
+namespace
+{
+	char const *const mirrorExample = "examples/mirror-rotating.toml";
+	char const *const mirrorMesh = "examples/mirror-rotating.msh";
+	/// Relative, because ctest runs from the source tree and the example names
+	/// its tables tools/...; anchored in .gitignore.
+	char const *const driverScratch = "mirror-driver-scratch";
+
+	std::string readText( std::string const &path )
+	{
+		std::ifstream stream( path );
+		return std::string( std::istreambuf_iterator<char>( stream ),
+		                    std::istreambuf_iterator<char>() );
+	}
+
+	int runLogged( std::string const &command, std::string const &log )
+	{
+		int const raw = std::system( ( command + " > " + log + " 2>&1" ).c_str() );
+		return WIFEXITED( raw ) ? WEXITSTATUS( raw ) : -1;
+	}
+
+	/// The shipped example with [output] redirected into the scratch directory
+	/// under @a prefix, and @a solverLines added under [solver]. TEXT
+	/// SUBSTITUTION ON THE SHIPPED FILE, because a copy would drift and a
+	/// drifted copy passing is worse than no test.
+	std::string configureMirror( std::string const &prefix,
+	                             std::string const &solverLines )
+	{
+		std::string text = readText( mirrorExample );
+		BOOST_TEST_REQUIRE( !text.empty(), mirrorExample << " is missing or empty" );
+
+		auto replaceLine = [ &text ]( std::string const &key, std::string const &line )
+		{
+			std::size_t at = text.find( "\n" + key );
+			BOOST_TEST_REQUIRE( at != std::string::npos,
+			                    "the shipped example has no " << key << " line" );
+			++at;
+			std::size_t const end = text.find( '\n', at );
+			text.replace( at, end - at, line );
+		};
+		replaceLine( "Directory = ", "Directory = \"" + std::string( driverScratch ) + "\"" );
+		replaceLine( "Prefix = ", "Prefix = \"" + prefix + "\"" );
+		if ( !solverLines.empty() )
+		{
+			std::size_t const at = text.find( "\n[solver]\n" );
+			BOOST_TEST_REQUIRE( at != std::string::npos );
+			text.insert( at + 10, solverLines );
+		}
+
+		std::filesystem::create_directories( driverScratch );
+		std::string const path = std::string( driverScratch ) + "/" + prefix + ".toml";
+		std::ofstream out( path );
+		out << text;
+		return path;
+	}
+
+	struct DriverRun
+	{
+		int status = -1;
+		std::string log;
+		std::string stem;     ///< the output's path without its extension
+		double seconds = 0.0;
+	};
+
+	/// meq-run on the shipped file, once per process: two cases read it.
+	DriverRun const &shippedDriverRun()
+	{
+		static DriverRun const run = []
+		{
+			DriverRun out;
+			std::string const prefix = "mirror-driver";
+			std::string const config = configureMirror( prefix, "" );
+			out.stem = std::string( driverScratch ) + "/" + prefix;
+			auto const t0 = std::chrono::steady_clock::now();
+			out.status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
+			                        + " " + config, out.stem + ".log" );
+			out.seconds = std::chrono::duration<double>(
+				std::chrono::steady_clock::now() - t0 ).count();
+			out.log = readText( out.stem + ".log" );
+			return out;
+		}();
+		return run;
+	}
+
+	/// The number after @a marker in @a text, or NaN.
+	double numberAfter( std::string const &text, std::string const &marker )
+	{
+		std::size_t const at = text.find( marker );
+		if ( at == std::string::npos )
+			return std::numeric_limits<double>::quiet_NaN();
+		return std::strtod( text.c_str() + at + marker.size(), nullptr );
+	}
+
+	bool says( std::string const &text, std::string const &phrase )
+	{
+		return text.find( phrase ) != std::string::npos;
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( driver )
+
+/*
+ * THE SHIPPED MIRROR SOLVES THROUGH THE DRIVER, AND IT IS geq'S PROBLEM.
+ *
+ *   THE MESH IS ALIGNED TO THE CUTOFF: `meq --mesh-command` carries
+ *   --align-plasma and the box -1.5 .. 1.5, and no --coil, since the
+ *   filaments are subtracted.
+ *
+ *   THE BINARY EXITS 0, and says what a mirror run says -- psi_ax a label at a
+ *   prescribed point, psi_bnd seeded at the outer one, the axial cutoff -- and
+ *   none of what a tokamak's axis check says of a mirror, nor a retry.
+ *
+ *   THE DRIVER'S psi_h IS THE LIBRARY'S, dof for dof, to round-off of its
+ *   size, and in the same number of Newton steps -- the second is what sees
+ *   the psi_bnd seed dropped, MR-4b's 3 against 5.
+ *
+ *   THE LABELS AND DIAGNOSTICS ARE MR-4b's: a negative span, each label the
+ *   field at its point, the symmetry axis outside the box, a non-empty
+ *   support and a cutoff that lies in the mesh. And the .nc says so.
+ *
+ *   AND THE FILE'S PsiAxis IS THE FILAMENTS' OWN FLUX AT THE INNER POINT, so
+ *   the axis row reads zero at the first step.
+ */
+BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
+{
+	std::filesystem::create_directories( driverScratch );
+	meqtest::geq::GeqCase const &p = problem();
+	meq::Configuration const file( mirrorExample );
+
+	// ---- the generator's command -----------------------------------------
+	{
+		std::string const log = std::string( driverScratch ) + "/mesh-command.txt";
+		int const status = runLogged( std::string( MEQ_DRIVER_PATH ) + " --mesh-command "
+		                              + mirrorExample, log );
+		std::string const command = readText( log );
+		std::printf( "\n  MR-5: meq --mesh-command %s\n    %s", mirrorExample,
+		             command.c_str() );
+		BOOST_TEST_REQUIRE( status == 0, command );
+		BOOST_TEST( says( command, "--align-plasma" ),
+			"the cutoff is not aligned to: the mesh would cut elements across "
+			"|z| = AxialEdge, where the source jumps, and cost the order" );
+		BOOST_TEST( says( command, "--plasma 0 -1.5 0.75 3 " ) );
+		BOOST_TEST( says( command, "--rho 3.4 " ) );
+		BOOST_TEST( !says( command, "--coil" ),
+			"a subtracted conductor was emitted to the mesher" );
+	}
+
+	// ---- the file poses the reference's problem --------------------------
+	meq::SourceConfig const &source = file.getSource();
+	double const filamentsAtAxis = geqFilaments().psi( p.axisPointR, p.axisPointZ );
+	BOOST_TEST( std::abs( source.psiAxisGuess() - filamentsAtAxis )
+	            <= 1.0e-12*std::abs( filamentsAtAxis ),
+		"[source] PsiAxis is " << source.psiAxisGuess() << " where the filaments' "
+		"flux at the inner point is " << filamentsAtAxis << "; print it with "
+		"meq::ConductorField over geqFilaments() at %.17g" );
+	BOOST_TEST( source.axisPoint.radius == p.axisPointR );
+	BOOST_TEST( source.axisPoint.z == p.axisPointZ );
+	BOOST_TEST( file.getBoundary().limiter.radius == p.boundaryPointR );
+	BOOST_TEST( file.getBoundary().limiter.z == p.boundaryPointZ );
+	BOOST_TEST( source.axialEdge == p.axialEdge );
+	BOOST_TEST( source.getRotating().referenceRadius == p.referenceRadius );
+
+	// ---- the driver --------------------------------------------------------
+	DriverRun const &run = shippedDriverRun();
+	BOOST_TEST_REQUIRE( run.status == 0,
+		"meq-run " << mirrorExample << " exited " << run.status << ":\n" << run.log );
+	for ( char const *phrase : { "converged in ", "at the prescribed point",
+	                             "psi_bnd starts at", "axial cutoff",
+	                             "the plasma support is the BOX" } )
+		BOOST_TEST( says( run.log, phrase ), "the driver did not say '" << phrase << "'" );
+	for ( char const *phrase : { "no interior extremum", "wall-hugging",
+	                             "NOT a magnetic axis", "did not converge", "Retrying",
+	                             "support is EMPTY" } )
+		BOOST_TEST( !says( run.log, phrase ),
+			"the driver said '" << phrase << "' of a mirror:\n" << run.log );
+	int const driverSteps = static_cast<int>( numberAfter( run.log, "converged in " ) );
+	double const driverAxis = numberAfter( run.log, "     psi_ax = " );
+
+	// ---- the library, on geq's problem and the driver's mesh ---------------
+	Options o;
+	o.meshPath = mirrorMesh;
+	o.level = 0;
+	o.order = 2;
+	o.modes = defaultModes;
+	o.coldStart = true;
+	o.neutraliseDeuterium = true;
+	o.axisGuess = source.psiAxisGuess();
+	std::unique_ptr<MirrorRun> const library = runMirror( o );
+	printHistory( *library );
+	BOOST_TEST_REQUIRE( library->converged, library->failure );
+	Measured const m = measure( *library );
+	printMeasured( m, *library );
+	int const librarySteps = static_cast<int>( library->solver->newtonResiduals().size() ) - 1;
+
+	// ---- dof for dof -------------------------------------------------------
+	mfem::Mesh storedMesh( ( run.stem + ".mesh" ).c_str(), 1, 1 );
+	std::ifstream stream( run.stem + "_psi.gf" );
+	BOOST_TEST_REQUIRE( stream.good(), "the driver wrote no " << run.stem << "_psi.gf" );
+	mfem::GridFunction const stored( &storedMesh, stream );
+	mfem::GridFunction const &solved = library->solver->potential();
+	BOOST_TEST_REQUIRE( storedMesh.GetNE() == library->domain->sub->GetNE() );
+	BOOST_TEST_REQUIRE( stored.Size() == solved.Size() );
+	double worst = 0.0;
+	double largest = 0.0;
+	for ( int i = 0; i < stored.Size(); ++i )
+	{
+		worst = std::max( worst, static_cast<double>( std::abs( stored( i ) - solved( i ) ) ) );
+		largest = std::max( largest, static_cast<double>( std::abs( solved( i ) ) ) );
+	}
+	std::printf( "\n  MR-5: driver against library on %d elements: psi_h to %.3e over %d "
+	             "dofs ( max |psi_h| %.3e, %.3e of it ); Newton %d and %d steps; driver "
+	             "wall %.2f s, library solve %.2f s\n", storedMesh.GetNE(), worst,
+	             stored.Size(), largest, worst/largest, driverSteps, librarySteps,
+	             run.seconds, library->plasmaSeconds );
+	std::printf( "    psi_ax printed %.6e, library %.12e\n", driverAxis, m.psiAxis );
+	std::fflush( stdout );
+
+	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, largest ),
+		"the driver's psi_h differs from the library's on geq's problem by " << worst
+		<< ", so the shipped file does not pose that problem" );
+	BOOST_TEST( driverSteps == librarySteps,
+		"the driver took " << driverSteps << " Newton steps and the library "
+		<< librarySteps << "; a mirror's psi_bnd seeded anywhere but at the outer "
+		"label costs steps, so look first at that" );
+	BOOST_TEST( std::abs( driverAxis - m.psiAxis ) <= 1.0e-6*std::abs( m.psiAxis ),
+		"the driver printed psi_ax = " << driverAxis << " against " << m.psiAxis );
+
+	// ---- MR-4b's labels and diagnostics, on the library run ----------------
+	BOOST_TEST( m.span < 0.0 );
+	double const labelTolerance = 1.0e-12*std::abs( m.span );
+	BOOST_TEST( std::abs( m.psiAxis - m.fieldAtAxisPoint ) <= labelTolerance );
+	BOOST_TEST( std::abs( m.psiBoundary - m.fieldAtBoundaryPoint ) <= labelTolerance );
+	BOOST_TEST( !m.axis.axisInsidePlasma );
+	BOOST_TEST( m.cutoff.applies );
+	BOOST_TEST( m.cutoff.cutoffSamples > 0 );
+	BOOST_TEST( m.support.inside > 0 );
+	std::vector<meq::GradShafranovSolver::BorderStep> const &steps =
+		library->solver->borderSteps();
+	BOOST_TEST_REQUIRE( !steps.empty() );
+	BOOST_TEST( std::abs( steps.front().axis ) <= 1.0e-12*steps.front().fieldNorm,
+		"the psi_ax row reads " << steps.front().axis << " at iteration 0" );
+	BOOST_TEST( std::abs( steps.front().boundary ) <= 1.0e-12*steps.front().fieldNorm,
+		"the psi_bnd row reads " << steps.front().boundary << " at iteration 0" );
+
+	// ---- and the interchange file says what the run was --------------------
+	{
+		std::string const header = std::string( driverScratch ) + "/header.txt";
+		BOOST_TEST_REQUIRE( runLogged( "ncdump -h " + run.stem + ".nc", header ) == 0,
+		                    readText( header ) );
+		std::string const nc = readText( header );
+		for ( char const *attribute : { ":axis_constraint = \"prescribed point\"",
+		                                ":axis_point_r = 0.1 ;",
+		                                ":plasma_support = \"box",
+		                                ":plasma_support_axial_edge = 1.5 ;",
+		                                ":axial_cutoff_relative = " } )
+			BOOST_TEST( says( nc, attribute ), "the .nc lacks " << attribute );
+		BOOST_TEST( !says( nc, ":axis_normalised_flux" ),
+			"the .nc reports a magnetic axis a mirror does not have" );
+	}
+}
+
+/*
+ * A MIRROR WITH PicardSweeps IS REFUSED BEFORE ANYTHING IS SOLVED. Each sweep
+ * solves the unbordered problem at frozen labels under Picard-then-Newton, and
+ * on this file every one of them diverges -- a non-finite first residual --
+ * while the bordered Newton needs no initialiser; so Config refuses the pair,
+ * and this asserts the binary carries that through as exit 1 naming the key.
+ */
+BOOST_AUTO_TEST_CASE( aMirrorWithPicardSweepsIsRefusedAtParse )
+{
+	std::string const config = configureMirror( "mirror-driver-picard", "PicardSweeps = 2\n" );
+	std::string const log = std::string( driverScratch ) + "/mirror-driver-picard.log";
+	int const status = runLogged( std::string( MEQ_DRIVER_PATH ) + " " + config, log );
+	std::string const text = readText( log );
+	BOOST_TEST( status == 1, "exit " << status << ":\n" << text );
+	BOOST_TEST( says( text, "solver.PicardSweeps" ), text );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+#endif

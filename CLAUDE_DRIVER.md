@@ -295,6 +295,27 @@ first**, because a bad `ψ_ax` is its consequence and the `ψ_ax` message's advi
 exit 1 and write nothing; `docs/running.rst`'s gloss on code 1 is amended, since
 it said *"nothing was attempted"*.
 
+**A MIRROR GOES THROUGH THE SAME DRIVER, AND FOUR TOKAMAK ASSUMPTIONS ARE
+BRANCHED OR REFUSED BESIDE IT** (`MIRROR-PLAN.md` MR-5,
+→ **[M-264](MEASUREMENTS.md#m-264)**). `[source] SupportShape = "box"` with
+`[source.axis]` poses two labels at prescribed points:
+
+* **The axis check is not asked under `PrescribedPoint`.**
+  `checkSolvedAxis()` returns `std::nullopt`, so the report and the annulus
+  retry cannot disagree about it.
+* **On the box path only, `ψ_bnd` starts at the starting state's total flux at
+  the outer label.** `totalFluxAt()` is the one reader of a point's flux off a
+  state; `edgeFluxOf()` uses it too. The seed is a fixed rule, not a key, and
+  it does not spread to a tokamak: on `limited-tokamak` it costs 12 steps →
+  129, and `DriverAcceptance` bounds that count.
+* **`PlasmaSupportSweeps` is refused beside the box.** Its "settled" test has
+  no state to read there.
+* **`PicardSweeps` is refused beside any `[source.axis]`.** That is measured,
+  not argued: each sweep's Picard-then-Newton diverges.
+
+`RotatingMirrorDriver` runs the shipped example and compares it dof for dof
+with the library.
+
 ## The two performance keys, and what the TOML may choose
 
 **AND `TraceSolver = "gmres"` IS A FOURTH CHOICE, EXPOSED TO BE MEASURED AND

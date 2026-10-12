@@ -83,6 +83,14 @@ relative path:
        the half-disc and the conductors' rectangles are derived from the
        ``[[coils]]`` blocks, so each coil is written once. Run it with
        ``meq-run`` — see :doc:`running`.
+   * - ``mirror-rotating.toml``
+     - A **rotating magnetic mirror**, free boundary: two species in rigid
+       rotation between two flux surfaces read at prescribed points, the box
+       support cut off at the throat, ``geq``'s twenty coil filaments
+       subtracted, and the mesh aligned to the cutoff by ``[mesh.generate]``.
+       Its profile tables are ``geq``'s reference, named in place under
+       ``tools/geq-benchmark/reference/rotating/``. Run it with ``meq-run``;
+       :ref:`rotation-mirror`.
    * - ``fixed-h-circular.toml``, ``fixed-a-testtokamak.toml``,
        ``fixed-e-diamagnetic.toml``, ``fixed-d-tcv.toml``,
        ``fixed-g-mastu.toml``, ``fixed-f-diiid.toml``

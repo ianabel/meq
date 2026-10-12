@@ -277,6 +277,13 @@ a source that does not vanish on the symmetry axis
    one cannot be checked before the solve, because
    :math:`\psi_{\mathrm{bnd}}` is an unknown of it.
 
+**A prescribed** :math:`\psi_{\mathrm{ax}}` **is not checked as an axis.** With
+``[source.axis]`` the label is the flux at the point the file names, so the
+magnetic-axis check above is not asked and the run prints that it was not; a
+magnetic mirror has no axis to locate. A mirror's own refusals —
+``[source] SupportShape = "box"`` beside a key it has no state for — are made
+at parse time and are listed under :ref:`configuration-mirror-support`.
+
 Everything else the driver rejects is a plain configuration error: a shape that
 encloses no element, a shape that touches the edge of the mesh box, an
 unreadable initial guess. The library adds one refusal of the same character as

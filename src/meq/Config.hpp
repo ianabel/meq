@@ -254,6 +254,23 @@ namespace meq
 		 * Defaults false, which is the mesh every existing example has.
 		 */
 		bool symmetric = false;
+
+		/**
+		 * `AlignPlasma` -- FRAGMENT THE `Plasma*` BOX INTO THE GEOMETRY, so its
+		 * four edges are element faces and uniform refinement keeps them so.
+		 *
+		 * **A MIRROR'S BOX SUPPORT IS WHAT WANTS IT.** `[source] SupportShape =
+		 * "box"` cuts the source off at `|z| = [source] AxialEdge`, where the
+		 * current is not small, so the source JUMPS there -- and a jump across
+		 * a line that cuts elements caps the order the way a source stepping
+		 * at a plasma edge does (M-262). The line is prescribed, so the mesh is
+		 * aligned to it, as it is to a conductor. The `[source]` parse checks
+		 * that the box this aligns IS the cutoff, whenever both are in the file.
+		 *
+		 * Requires the `Plasma*` box, and under `Symmetric` a box symmetric
+		 * about `z = 0`: aligned, the box is geometry and not a size field.
+		 */
+		bool alignPlasma = false;
 	};
 
 	/// The element attribute `tools/mesh/halfdisc.py` writes the interior of a
@@ -541,10 +558,86 @@ namespace meq
 	using SourceParameters = std::variant< SolovievParameters, MHDParameters,
 	                                       ManufacturedParameters, RotatingParameters >;
 
+	/**
+	 * `[source] SupportShape` -- WHAT `ConfineToPlasma` CONFINES THE SOURCE TO.
+	 *
+	 * The configuration's spelling of meq::PlasmaSupportShape, which this layer
+	 * cannot name because it is MFEM-free and that enumeration lives with the
+	 * source. The driver maps one onto the other in ONE switch with no default;
+	 * a third value has to be added there by hand, since `-Wswitch` has been
+	 * measured not to fire on such a switch (CLAUDE_DRIVER.md).
+	 */
+	enum class PlasmaSupportShapeType
+	{
+		OneSided,  // "one-sided": Psi > 0, a tokamak's, and the default
+		Box        // "box": 0 < Psi <= 1 and |z| <= AxialEdge, a mirror's
+	};
+
+	/**
+	 * `[source.axis]` -- `psi_ax` PINNED AT A PRESCRIBED POINT, and not at a
+	 * located magnetic axis.
+	 *
+	 * meq::GradShafranovSolver::setAxisFluxPoint: `psi_ax = psi_h( R, Z )` is a
+	 * border row, the twin of `[boundary.limiter] R, Z` for `psi_bnd`. A MIRROR
+	 * HAS NO MAGNETIC AXIS -- its plasma is an annulus between two prescribed
+	 * flux surfaces, `psi_ax` the inner label and `psi_bnd` the outer -- so
+	 * this is how a mirror's inner label is posed. It is also how a tokamak's
+	 * axis can be pinned where it is known, MR-2's use.
+	 *
+	 * **UNDER `[source]` AND NOT `[boundary]`**, because `psi_ax` enters only
+	 * through the source's normalisation and its starting value, `PsiAxis`, is
+	 * already there; `[boundary]` is `Gamma` and `psi_bnd`.
+	 *
+	 * A statement of the PROBLEM -- where the label is read -- and not of the
+	 * iteration, so it is not a solver knob. Refused without
+	 * `Normalised = true`, where `psi_ax` is not an unknown.
+	 */
+	struct AxisPointConfig
+	{
+		/// Whether the file named one. False leaves the axis to
+		/// AxisConstraint::LocatedAxis, the default.
+		bool given = false;
+
+		/// The point, in metres. `R` strictly positive: `psi( 0, z ) = 0` by
+		/// construction, so a label on the axis would be the constant zero.
+		double radius = 0.0;
+		double z = 0.0;
+	};
+
 	struct SourceConfig
 	{
 		SourceType type = SourceType::Soloviev;
 		SourceParameters parameters = SolovievParameters{};
+
+		/// `[source.axis]`. See AxisPointConfig. Beside `parameters` rather
+		/// than inside one, because it means the same thing for both source
+		/// types that have a normalisation.
+		AxisPointConfig axisPoint;
+
+		/**
+		 * `[source] SupportShape` and `AxialEdge` -- THE SHAPE OF THE PLASMA
+		 * SUPPORT, and with "box" a statement of the problem a mirror poses:
+		 * the plasma is `0 < Psi <= 1` between its two labels, and stops at
+		 * the throat `|z| = axialEdge`, a prescribed modelling cutoff.
+		 *
+		 * **A SHAPE OF THE CONFINEMENT, NOT A SECOND CONFINEMENT**, so "box"
+		 * requires `ConfineToPlasma = true` explicitly and every consumer of
+		 * confinesToPlasma() reads it unchanged. It also requires
+		 * `[source.axis]` -- a box around a LOCATED axis would cut a ring off a
+		 * tokamak's core, which meq::PlasmaSupportShape records -- and
+		 * `[boundary.limiter] R, Z`, the outer label.
+		 *
+		 * `axialEdge` is zero unless the shape is Box.
+		 */
+		PlasmaSupportShapeType supportShape = PlasmaSupportShapeType::OneSided;
+		double axialEdge = 0.0;
+
+		/// Whether the support is a mirror's box. Every driver branch that is
+		/// different on a mirror asks this rather than comparing the enum.
+		bool supportIsBox() const
+		{
+			return supportShape == PlasmaSupportShapeType::Box;
+		}
 
 		/**
 		 * `[source] ExcludeAttributes` -- MESH ELEMENT ATTRIBUTES THAT CAN NEVER

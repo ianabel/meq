@@ -595,26 +595,48 @@ difference — only a difference that falls rules out a conversion error. And th
    1e-16 after the first step, and a `setCurrentScale( 0 )` first solve gives
    an identical second history.
 
-### MR-5 — from a file
+### MR-5 — from a file — DONE
 
-`[source] Type = "rotating"` already parses. What is new is the axis constraint's
-prescribed point, the two-sided support, and a `[mesh.generate]` mirror geometry.
-**And the driver has four tokamak assumptions MR-4's ctest does not reach**:
+`build/meq-run examples/mirror-rotating.toml` solves geq's rotating mirror.
+`RotatingMirrorDriver` runs the shipped file and agrees with the library
+solving geq's problem to 0.000e+00 over every dof, in the same four Newton
+steps → **[M-264](MEASUREMENTS.md#m-264)**. The example names the reference
+tables in `tools/geq-benchmark/reference/rotating/` rather than copying them.
 
-* `checkAxis()` runs whenever the source is normalised, not only under
-  `LocatedAxis`; with a negative span it looks for a minimum, finds none on a
-  vacuum-dominated mirror and warns of a "wall-hugging annulus", and a spurious
-  one would trip the `!agrees` refusal.
-* `edgeFluxOf()` returns 0 with no X-point and no limiter, so the first support
-  freeze is `( ψ_ax guess, 0 )` — a positive span, which puts the box around the
-  axis. The driver must seed `setBoundaryFluxInitial()` from the outer point.
-* The support loop's "settled" test is the component's element count repeating,
-  which is identically zero under the box, so it settles at the first sweep
-  whatever the labels do.
-* The Picard pre-stage's `axisFluxOf()` needs an O-point and stops without one.
-**Acceptance**: an `examples/mirror-*.toml` that the shipped binary solves, with
-a driver acceptance in the shape of `MachineFixedBoundary` — the driver on the
-shipped file, because what rots about an example is the file.
+**The schema.** Every new key states the problem; none is a solver knob:
+
+* `[source.axis] R, Z` is the inner label, through `setAxisFluxPoint()`.
+* `[source] SupportShape = "box"` and `AxialEdge` give the support.
+* `[mesh.generate] AlignPlasma` makes the box's edges element faces.
+* The outer label is `[boundary.limiter] R, Z`, which already existed.
+
+Beside the box, the parse refuses everything that would be accepted and
+ignored, or that has not been measured on a mirror. Each refusal is asserted on
+both `mhd` and `rotating`. `ConfigTests`' `mirror_keys` is the list.
+
+**The four driver assumptions, resolved:**
+
+* **`checkAxis()`** is not asked under `PrescribedPoint`.
+  `checkSolvedAxis()` answers `std::nullopt`, for both the report and the
+  annulus retry.
+* **The starting `ψ_bnd`** is the starting state's total flux at the outer
+  label, on the box path only. It is a fixed rule, not a key. Spreading it to a
+  tokamak costs `limited-tokamak` 12 steps → 129, and `DriverAcceptance` now
+  bounds that count.
+* **The support loop** is refused beside the box. Under the box the fill is
+  off, so the loop would read settled whatever the labels did. Judging it by
+  the labels would need a tolerance, which would be a knob. The live edge
+  converges.
+* **The Picard pre-stage** is refused beside any `[source.axis]`, as measured.
+  With the labels read at their points, every sweep's Picard-then-Newton
+  diverges on the mirror, and a pinned tokamak exits 2.
+
+**Not done:**
+
+* the `.nc` `plasma` support mask (the docs warn that `n_s` and `e_phi_0` are
+  evaluated outside the support);
+* adaptivity, `--device` and the bordered retry rung, which are accepted beside
+  the box but have not been run on a mirror.
 
 ## Risks, in the order they are likely to hurt
 

@@ -199,9 +199,10 @@ beyond it at any Mach number, and what is left is a mode count.
 radius inside the machine and is superseded; *an admissibility test is a
 statement about where `Γ` was put, not about the machine*.
 
-**MR-1 TO MR-4 ARE DONE: MEQ SOLVES A ROTATING MIRROR AND AGREES WITH geq TO
-geq'S OWN RESOLUTION** ([M-263](MEASUREMENTS.md#m-263)); MR-5, from a file, is
-next. The support is a box
+**MR-1 TO MR-5 ARE DONE: MEQ SOLVES A ROTATING MIRROR AND AGREES WITH geq TO
+geq'S OWN RESOLUTION** ([M-263](MEASUREMENTS.md#m-263)), and MR-5 runs it from a
+file: `examples/mirror-rotating.toml` through the driver matches the library to the bit
+([M-264](MEASUREMENTS.md#m-264)). The support is a box
 in `( Ψ, z )` with the fill off ([M-258](MEASUREMENTS.md#m-258)); `ψ_ax` can be
 pinned at a point ([M-259](MEASUREMENTS.md#m-259)); and the vacuum mirror solves
 through MEQ, agreeing with geq to geq's own coil model

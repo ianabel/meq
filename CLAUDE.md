@@ -119,7 +119,7 @@ the next, for a third of the Newton work (→ **[M-01](MEASUREMENTS.md#m-01)**).
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst`, `CLAUDE_FLOW.md` |
 | solution inversion | IN-A to IN-P, **done** | `INVERSION-PLAN.md`, `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 done or answered, FB-6 met, XP-0 to XP-4 done — MEQ reproduces `freegs4e`'s diverted equilibrium | `FREE-BOUNDARY-PLAN.md`, `CLAUDE_FB.md` |
-| rotating mirror | MR-0 to MR-4 done — MEQ solves geq's rotating mirror and agrees with it to geq's own resolution (M-261 to M-263); MR-5, from a file, is next | `MIRROR-PLAN.md`, `CLAUDE_FLOW.md` |
+| rotating mirror | MR-0 to MR-5 done — MEQ solves geq's rotating mirror and agrees with it to geq's own resolution (M-261 to M-263); `examples/mirror-rotating.toml` runs it through the driver (M-264) | `MIRROR-PLAN.md`, `CLAUDE_FLOW.md` |
 | inverse solve | IV-0 to IV-6 done — coil currents are border unknowns, `[inverse]` runs through the driver and exits 4 on a best fit (M-250 to M-253) | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, `CLAUDE_FB.md` |
 
 Each stage ends at a **measured convergence rate**, not at "it runs".

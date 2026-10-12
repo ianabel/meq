@@ -221,6 +221,47 @@ which commit:
 
 Both are on ``<stem>_surfaces.nc`` as well.
 
+A normalised run carries ``psi_axis``, and says what it is. With
+:math:`\psi_{\mathrm{ax}}` at the located magnetic axis — the default —
+``axis_normalised_flux``, ``axis_r`` and ``axis_z`` give the axis the check
+found, and :math:`\Psi` there must read 1. With ``[source.axis]`` it is a
+**label** at a prescribed point, and the file carries
+``axis_constraint = "prescribed point"`` with ``axis_point_r`` and
+``axis_point_z`` instead: no magnetic axis was asked for, so none is reported.
+A magnetic mirror's run (``[source] SupportShape = "box"``) also carries:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Attribute
+     - What it is
+   * - ``plasma_support``
+     - ``"box (...)"``: :math:`F = 0` outside :math:`0 < \Psi \le 1` and
+       :math:`|z| \le` ``plasma_support_axial_edge``
+   * - ``plasma_support_axial_edge``
+     - ``[source] AxialEdge``, the prescribed throat
+   * - ``plasma_support_nodes``, ``plasma_support_nodes_total``
+     - how many potential nodes the converged support admits, of those visited.
+       Zero is a converged vacuum, which the run also warns of
+   * - ``axial_cutoff_peak``, ``axial_cutoff_value``, ``axial_cutoff_relative``,
+       ``axial_cutoff_samples``
+     - the cutoff's report: the peak :math:`|F|/R` (:math:`\mu_0 j_\phi`), its
+       largest value on :math:`|z| =` ``AxialEdge``, their ratio, and how many
+       samples along the cutoff lay in the mesh. A report of how much current
+       the prescribed cutoff cuts through, not a verdict
+
+.. warning::
+
+   **A rotating run's** ``n_<species>`` **and** ``e_phi_0`` **are evaluated at
+   every located node**, inside the support or not: they are algebraic in
+   :math:`(R, \psi)`, and the profiles hold their end values outside
+   :math:`[0, 1]`. Outside the plasma they are what the closure would give
+   there, not a density anyone has; mask them with the support — on a mirror,
+   :math:`0 < \Psi \le 1` and :math:`|z| \le` ``plasma_support_axial_edge``,
+   computed from ``psi``, ``psi_axis`` and ``psi_boundary`` — before reading
+   them as a plasma.
+
 **The two-dimensional variables are indexed** ``(Z, R)``, **with** ``R``
 **varying fastest.** That is C row-major order, and it is the layout a transport
 code coupling to MEQ along :math:`(t, x)` already expects.

@@ -1,0 +1,149 @@
+# A ROTATING MAGNETIC MIRROR, FREE BOUNDARY, FROM A FILE.  One command:
+#
+#     build/meq-run examples/mirror-rotating.toml
+#
+# WHAT IT POSES.  The rotating mirror of MIRROR-PLAN.md MR-4: geq's machine --
+# two coil packs at z = -1.5 and +1.5, each carried as ten point filaments --
+# with a two-species plasma (electrons and deuterons) in rigid rotation, solved
+# free boundary inside a semicircle Gamma of radius 3.0 that clears the copper.
+# It is the problem tests/convergence/RotatingMirror.cpp poses through the
+# library, and RotatingMirrorDriver runs THIS FILE through the shipped binary
+# and compares the two dof for dof.  docs/rotation.rst, "A magnetic mirror",
+# is the user's account.
+#
+# A MIRROR HAS NO MAGNETIC AXIS, AND THAT IS WHAT THE THREE MIRROR KEYS SAY.
+# Its plasma is an annulus between two prescribed flux surfaces: the inner
+# label psi_ax is read at [source.axis], the outer label psi_bnd at
+# [boundary.limiter] R, Z, and both float with the solve.  The span
+# psi_ax - psi_bnd is NEGATIVE -- the inner label is the smaller flux -- and the
+# support is the box 0 < Psi <= 1, |z| <= AxialEdge: SupportShape = "box".
+# AxialEdge is the throat, a PRESCRIBED cutoff, and the run reports the current
+# density it cuts through ("axial cutoff").
+#
+# THE PROFILES ARE geq's REFERENCE TABLES, NAMED IN PLACE.  They live in
+# tools/geq-benchmark/reference/rotating/, written by export_rotating.py
+# (MR-4a), and are already in MEQ's normalised flux Psi = 1 - psi_n with
+# temperatures in joules and each density on R = ReferenceRadius.  They are
+# named there rather than copied here so that a regeneration cannot leave two
+# tracked copies disagreeing; RotatingMirrorDriver fails if a path rots.  Each
+# profile is f_edge + ( f_peak - f_edge ) C psi_n^3 ( 1 - psi_n )^4, so F
+# vanishes at BOTH labels -- the box's precondition, which no key can check.
+#
+# WHAT IT DOES NOT DO.  No prescribed plasma current (the profiles' amplitude
+# is the problem, as it is geq's), no toroidal field (GGPrime = 0, which is
+# also what lets the plasma's own flux reach R = 0 without a current there),
+# and no flux-surface output, since a mirror's field lines are open.  The
+# comparison with geq's own answer is RotatingMirrorResolution's.
+
+[mesh]
+# A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it
+# whenever the block changes.
+File = "examples/mirror-rotating.msh"
+
+[mesh.generate]
+Tool = "halfdisc"
+# THE BACKGROUND'S ARC, NOT GAMMA: D_h is cut from this disc at
+# [boundary.exterior] Radius = 3.0.
+Radius = 3.4
+Size = 0.4
+# The plasma box, and with AlignPlasma its edges are ELEMENT FACES.  The
+# support's cutoff at |z| = AxialEdge is a jump in F, and a jump across a line
+# that cuts elements costs the order (M-262); the [source] parse refuses a box
+# that is not exactly -AxialEdge .. AxialEdge.
+PlasmaRMin = 0.0
+PlasmaRMax = 0.75
+PlasmaZMin = -1.5
+PlasmaZMax = 1.5
+PlasmaSize = 0.1
+AlignPlasma = true
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonRelativeTolerance = 1.0e-12
+NewtonAbsoluteTolerance = 1.0e-14
+NewtonMaxIterations = 30
+
+[source]
+Type = "rotating"
+Normalised = true
+ConfineToPlasma = true
+SupportShape = "box"
+AxialEdge = 1.5
+# THE STARTING VALUE OF THE INNER LABEL: the filaments' own flux at
+# [source.axis], psi_c( 0.1, 0 ), which is the vacuum's there since the
+# remainder starts at zero.  It is an initial value and not the problem --
+# psi_ax is an unknown -- and starting exactly on it makes the axis row read
+# zero at the first step.
+PsiAxis = 0.0056378011613958832
+ReferenceRadius = 0.213
+Mu0 = 1.2566370614359173e-06
+GGPrime = 0.0
+OmegaFile = "tools/geq-benchmark/reference/rotating/omega.dat"
+
+# In meta.txt's order, electrons first.
+[[source.species]]
+Name = "electron"
+Mass = 9.1093837139e-31
+Charge = -1.0
+TemperatureFile = "tools/geq-benchmark/reference/rotating/T_electron.dat"
+DensityFile = "tools/geq-benchmark/reference/rotating/n_electron.dat"
+
+[[source.species]]
+Name = "deuterium"
+Mass = 3.3435837768e-27
+Charge = 1.0
+TemperatureFile = "tools/geq-benchmark/reference/rotating/T_deuterium.dat"
+Neutralising = true
+
+# THE INNER LABEL.  A sub-table, so every key below this header belongs to it
+# until the next one -- a [source] key written here is refused by name.
+[source.axis]
+R = 0.1
+Z = 0.0
+
+[boundary]
+Type = "zero"
+
+# THE OUTER LABEL, read at a prescribed point exactly as a limiter contact is.
+[boundary.limiter]
+R = 0.35
+Z = 0.0
+
+[boundary.exterior]
+Radius = 3.0
+Modes = 32
+
+# geq's coils as geq carries them: each pack a column of ten filaments at its
+# radial centre, subtracted rather than meshed (M-260).  LOWER FIRST, the
+# order the library fixture adds them in, so the two filament sums agree to
+# the bit.
+[conductors]
+Model = "filament"
+
+[[coils]]
+Name = "lower"
+CentreR = 0.82078441790868473
+CentreZ = -1.5
+HalfWidth = 0.035284417908684695
+HalfHeight = 0.5
+Current = 5927782.2086590333
+FilamentsR = 1
+FilamentsZ = 10
+
+[[coils]]
+Name = "upper"
+CentreR = 0.82078441790868473
+CentreZ = 1.5
+HalfWidth = 0.035284417908684695
+HalfHeight = 0.5
+Current = 5927782.2086590333
+FilamentsR = 1
+FilamentsZ = 10
+
+[output]
+Directory = "."
+Prefix = "mirror-rotating"
+GridNR = 129
+GridNZ = 129

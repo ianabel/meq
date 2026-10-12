@@ -253,6 +253,10 @@ namespace
 			number( g.plasmaRMax - g.plasmaRMin );
 			number( g.plasmaZMax - g.plasmaZMin );
 			word( "--plasma-size" ); number( g.plasmaSize );
+			// THE BOX AS GEOMETRY: its edges become element faces, which is
+			// what keeps a mirror's axial cutoff from capping the order.
+			if ( g.alignPlasma )
+				word( "--align-plasma" );
 		}
 		if ( !g.vessel.empty() )
 		{
@@ -311,6 +315,25 @@ namespace
 			line += shellQuoted( one );
 		}
 		return line;
+	}
+
+	/**
+	 * `[source] SupportShape` onto the library's enumeration, in ONE switch
+	 * with no default and a throw after it. A Config enum mapped onto a library
+	 * one is exactly where CLAUDE_DRIVER.md measured `-Wswitch` not firing, so a
+	 * third shape added to the configuration reaches the throw rather than the
+	 * tokamak's support.
+	 */
+	meq::PlasmaSupportShape supportShapeOf( meq::PlasmaSupportShapeType type )
+	{
+		switch ( type )
+		{
+			case meq::PlasmaSupportShapeType::OneSided:
+				return meq::PlasmaSupportShape::OneSided;
+			case meq::PlasmaSupportShapeType::Box:
+				return meq::PlasmaSupportShape::Box;
+		}
+		throw std::logic_error( "supportShapeOf: a [source] SupportShape with no library counterpart" );
 	}
 
 	/// What the file said [source] Type was, for the output's provenance. A
@@ -1676,7 +1699,16 @@ int main( int argc, char **argv )
 			 * asking the plasma source would have passed throughout.
 			 */
 			if ( config->getSource().confinesToPlasma() )
+			{
 				normalised->setPlasmaSupport( true );
+				// AND ITS SHAPE, ON THE SAME HANDLE AND FOR THE SAME REASON:
+				// the wrapper forwards to the plasma term, and the solver reads
+				// the handle's shape to decide whether the connectivity fill
+				// runs. One-sided is the default and resets nothing.
+				normalised->setPlasmaSupportShape(
+					supportShapeOf( config->getSource().supportShape ),
+					config->getSource().axialEdge );
+			}
 
 			source = normalised;
 		}
@@ -2254,6 +2286,11 @@ int main( int argc, char **argv )
 	/// GATED ON A NORMALISATION, which Config has already refused a file for
 	/// wanting without one; the guard is here so that the loop below reads its
 	/// own precondition rather than relying on a check in another file.
+	///
+	/// AND NEVER ABOVE ZERO UNDER A MIRROR'S BOX, which Config refuses: the
+	/// loop's settled test is the fill's component repeating, and the box has
+	/// no component -- it would read settled at its second sweep whatever the
+	/// labels did.
 	int const supportSweeps =
 		normalised ? config->getSolver().plasmaSupportSweeps : 0;
 
@@ -2778,6 +2815,39 @@ int main( int argc, char **argv )
 	 * an ordinary meq::Source -- F( R, z, psi ), no unknowns in it -- so this
 	 * is the unbordered semi-linear problem MEQ has solved since stage 4.
 	 */
+	/*
+	 * THE TOTAL FLUX AT A POINT OF A STATE: the field's polynomial there, and
+	 * psi_c evaluated EXACTLY there under a subtracting conductor model -- the
+	 * remainder plus the conductors, which is how the label rows themselves
+	 * read a point. False where the point is not in the mesh.
+	 *
+	 * ONE IMPLEMENTATION for every place the driver reads a label off a state
+	 * before the solver has one of its own: the support loop's and the Picard
+	 * pre-stage's edge estimate, and the starting psi_bnd a mirror's solver is
+	 * seeded with. A copy per caller is how two of them come to disagree about
+	 * whether psi_c is in the number. Mesh::FindPoints is
+	 * O( elements ) per point and not reentrant, which is fine for the single
+	 * points it is asked here, outside any parallel region.
+	 */
+	auto totalFluxAt = [ & ]( mfem::GridFunction const &field, double radius,
+	                          double z, double &out ) -> bool
+	{
+		mfem::DenseMatrix point( 2, 1 );
+		point( 0, 0 ) = radius;
+		point( 1, 0 ) = z;
+		mfem::Array<int> elements;
+		mfem::Array<mfem::IntegrationPoint> local;
+		if ( field.FESpace()->GetMesh()->FindPoints( point, elements, local ) < 1
+		     || elements[ 0 ] < 0 )
+			return false;
+		// psi_c is exactly zero with nothing subtracted, so it is added
+		// unconditionally. ConductorField::psi is even in R and answers on the
+		// axis, so a point on R = 0 is not a refusal here. M-156.
+		out = field.GetValue( elements[ 0 ], local[ 0 ] )
+		      + ( conductorField ? conductorField->psi( radius, z ) : 0.0 );
+		return true;
+	};
+
 	auto makeSolver = [ & ]( mfem::Mesh &mesh, bool firstCycle,
 	                         bool bordered = true )
 		-> std::unique_ptr<meq::GradShafranovSolver>
@@ -2867,6 +2937,17 @@ int main( int argc, char **argv )
 			fresh->setUpDownSymmetry( config->getSolver().upDownSymmetry );
 			fresh->setXPointMeritWeight( config->getSolver().xPointMeritWeight );
 		}
+
+		/*
+		 * `[source.axis]` -- psi_ax AT A PRESCRIBED POINT, AxisConstraint::
+		 * PrescribedPoint, the twin of the limiter point above. A mirror's
+		 * inner label. The setter refuses a point outside this mesh, which the
+		 * caller turns into exit 1: the file named a point the mesh does not
+		 * reach.
+		 */
+		meq::AxisPointConfig const &axisPoint = config->getSource().axisPoint;
+		if ( bordered && axisPoint.given )
+			fresh->setAxisFluxPoint( axisPoint.radius, axisPoint.z );
 
 		/*
 		 * THE THIRD BORDER, AND THE FILE SPEAKS AMPERES WHERE THE SOLVER SPEAKS
@@ -3153,6 +3234,49 @@ int main( int argc, char **argv )
 			}
 		}
 
+		/*
+		 * A MIRROR'S STARTING psi_bnd IS READ OFF THE STATE IT STARTS FROM.
+		 *
+		 * psi_bnd starts every bordered solve at zero on a fresh solver. On a
+		 * tokamak that is the right place: section 10.5 of
+		 * FREE-BOUNDARY-PLAN.md measures a limited machine started NEAR its
+		 * answer drifting to the iteration cap, and a diverted one reaching a
+		 * different equilibrium -- which is why setBoundaryFluxInitial() is not
+		 * a key. On a mirror zero is the wrong side: the first span is then
+		 * psi_ax - 0 > 0 where the answer's is negative, and the box sits
+		 * around the axis instead of between the labels. MR-4b measured that as
+		 * five Newton steps instead of three to the same answer -- a cost, but
+		 * one paid for reading the label somewhere other than where the problem
+		 * pins it.
+		 *
+		 * SO IT IS A FIXED RULE AND NOT A KEY: the outer label starts at the
+		 * starting state's total flux at its own point, on the box path only.
+		 * prepare() is what puts the guess -- whichever route supplied it, the
+		 * previous adaptive cycle's included -- into potential(); it costs one
+		 * assembly, and solve() repeats it. The Picard pre-stage, which sets
+		 * its guess after this lambda returns, is refused beside the box.
+		 */
+		if ( bordered && normalised && config->getSource().supportIsBox() )
+		{
+			fresh->prepare();
+			meq::LimiterConfig const &outer = config->getBoundary().limiter;
+			double seed = 0.0;
+			if ( !totalFluxAt( fresh->potential(), outer.radius, outer.z, seed ) )
+				throw std::runtime_error(
+					"[boundary.limiter] R, Z -- the outer label -- is not inside the mesh" );
+			fresh->setBoundaryFluxInitial( seed );
+
+			double atAxis = std::numeric_limits<double>::quiet_NaN();
+			totalFluxAt( fresh->potential(), axisPoint.radius, axisPoint.z, atAxis );
+			std::printf( "MEQ: psi_bnd starts at %.6e, the starting state's flux at "
+			             "the outer label ( %g, %g );\n"
+			             "     psi_ax starts at %.6e, and the state reads %.6e at "
+			             "the inner label ( %g, %g )\n",
+			             seed, outer.radius, outer.z, psiAxisGuess, atAxis,
+			             axisPoint.radius, axisPoint.z );
+			std::fflush( stdout );
+		}
+
 		return fresh;
 	};
 
@@ -3188,10 +3312,27 @@ int main( int argc, char **argv )
 	 * failure for a diverted case (see the ladder), and the question the ladder
 	 * asks must be exactly the one the report answers, or the two could
 	 * disagree about whether a run has an axis.
+	 *
+	 * NOT ASKED OF A PRESCRIBED POINT, WHICH IS A LABEL AND NOT AN AXIS, and
+	 * so std::nullopt: whether to ask is part of the question, and is decided
+	 * here for both callers. checkAxis() asks whether psi_ax is the flux at a
+	 * magnetic axis, and under AxisConstraint::PrescribedPoint it is by
+	 * definition the flux at the point the file named. On a mirror there is no
+	 * axis at all: with a negative span the search looks for a minimum, finds
+	 * none on a vacuum-dominated field and warns of a wall-hugging annulus; a
+	 * spurious one would trip the report's refusal with a message -- "psi_ax
+	 * is the largest NODAL value" -- that is false of this constraint; and the
+	 * ladder would retry a converged answer for lacking something the problem
+	 * never asked for. theShippedMirrorSolvesThroughTheDriver is what fails if
+	 * a prescribed point is asked.
 	 */
 	auto checkSolvedAxis = [ & ]( meq::GradShafranovSolver const &solved )
-		-> meq::AxisAgreement
+		-> std::optional<meq::AxisAgreement>
 	{
+		if ( solved.axisConstraint()
+		     == meq::GradShafranovSolver::AxisConstraint::PrescribedPoint )
+			return std::nullopt;
+
 		meq::CriticalPointFinder finder( solved );
 
 		// AND THE SOLVER'S q_c TABLE, which it has already built or
@@ -3507,39 +3648,16 @@ int main( int argc, char **argv )
 		 */
 		auto edgeFluxOf = [ & ]( mfem::GridFunction const &field ) -> double
 		{
-			auto valueAt = []( mfem::GridFunction const &f, double radius, double z,
-			                   double &out ) -> bool
-			{
-				mfem::DenseMatrix point( 2, 1 );
-				point( 0, 0 ) = radius;
-				point( 1, 0 ) = z;
-				mfem::Array<int> elements;
-				mfem::Array<mfem::IntegrationPoint> local;
-				if ( f.FESpace()->GetMesh()->FindPoints( point, elements, local ) < 1
-				     || elements[ 0 ] < 0 )
-					return false;
-				out = f.GetValue( elements[ 0 ], local[ 0 ] );
-				return true;
-			};
-			// psi_c at a point, or exactly zero with nothing subtracted, so
-			// every return below adds it unconditionally. ConductorField::psi
-			// is even in R and answers on the axis, so a seed on R = 0 -- which
-			// a half-disc machine's Gamma endpoints are -- is not a refusal
-			// here. MEASUREMENTS.md M-156.
-			auto conductorPsi = [ & ]( double radius, double z ) -> double
-			{
-				return conductorField ? conductorField->psi( radius, z ) : 0.0;
-			};
-
 			double value = 0.0;
 			meq::LimiterConfig const &l = config->getBoundary().limiter;
 			meq::XPointConfig const &x = config->getBoundary().xpoint;
 
-			if ( x.given && valueAt( field, xPointSeedR, xPointSeedZ, value ) )
-				return value + conductorPsi( xPointSeedR, xPointSeedZ );
+			// totalFluxAt() adds psi_c at the point, exactly; see it.
+			if ( x.given && totalFluxAt( field, xPointSeedR, xPointSeedZ, value ) )
+				return value;
 			if ( l.given && l.surfaceAttribute == 0
-			     && valueAt( field, l.radius, l.z, value ) )
-				return value + conductorPsi( l.radius, l.z );
+			     && totalFluxAt( field, l.radius, l.z, value ) )
+				return value;
 			if ( l.surfaceAttribute > 0 )
 				// THE CURVE, AND IT IS THE CURVE AND NOT THE DISC -- see the
 				// note above for what the disc costs and what it measures.
@@ -4197,11 +4315,15 @@ int main( int argc, char **argv )
 			 * retry fails, or ALSO finds no axis, the first answer stands -- its
 			 * solver, and the shared source's state, put back exactly as they
 			 * were -- and the report warns as it always has.
+			 *
+			 * A PRESCRIBED POINT IS NOT ASKED, here as in the report: under
+			 * [source.axis] checkSolvedAxis() answers std::nullopt, so a run
+			 * whose psi_ax is a label is never retried for lacking an axis.
 			 */
 			if ( normalised && solver->xPointIsAnUnknown()
 			     && config->getBoundary().exterior.given )
 			{
-				meq::AxisAgreement found;
+				std::optional<meq::AxisAgreement> found;
 				bool checked = true;
 				try
 				{
@@ -4211,7 +4333,7 @@ int main( int argc, char **argv )
 				{
 					checked = false;
 				}
-				if ( checked && !found.located )
+				if ( checked && found && !found->located )
 				{
 					std::fprintf( stderr,
 						"MEQ: the bordered Newton converged with NO interior extremum of\n"
@@ -4238,7 +4360,9 @@ int main( int argc, char **argv )
 					{
 						runSolveWithSupportLoop( true );
 						retryConverged = true;
-						adopted = checkSolvedAxis( *solver ).located;
+						std::optional<meq::AxisAgreement> const again
+							= checkSolvedAxis( *solver );
+						adopted = again && again->located;
 					}
 					catch ( std::exception const &retry )
 					{
@@ -4685,6 +4809,10 @@ int main( int argc, char **argv )
 	 */
 	meq::AxisAgreement axisCheck;
 	bool axisChecked = false;
+	/// A mirror's axial cutoff and the support's node count, for the same
+	/// reason: reported below and written into the `.nc`.
+	meq::GradShafranovSolver::AxialCutoffCheck axialCutoff;
+	meq::GradShafranovSolver::PlasmaSupportNodes supportNodes;
 	// Deferred rather than acted on where it is found, so that the SOURCE
 	// check below can speak first: a psi_ax that is not an axis is the
 	// CONSEQUENCE of an unbounded axis current and its advice -- look at the
@@ -4724,7 +4852,11 @@ int main( int argc, char **argv )
 			             conductorField->size() == 1 ? "" : "s",
 			             conductorField->totalCurrent() );
 
-		if ( config->getSource().confinesToPlasma() )
+		if ( config->getSource().supportIsBox() )
+			std::printf( "MEQ: the plasma support is the BOX 0 < Psi <= 1, "
+			             "abs( z ) <= %g, live within Newton\n",
+			             config->getSource().axialEdge );
+		else if ( config->getSource().confinesToPlasma() )
 			std::printf( "MEQ: the plasma support %s: F = 0 wherever the "
 			             "normalised flux is non-positive\n",
 			             supportSweeps > 0
@@ -4808,7 +4940,17 @@ int main( int argc, char **argv )
 		 * is a solved equation for a plasma nobody asked for. So the constraint
 		 * is reported separately, in its own units.
 		 */
-		if ( normalised )
+		// The constraint NAMED, since psi_ax is a different functional of the
+		// field under each: the peak, or the field at a prescribed point.
+		bool const axisPrescribed = normalised && solver
+			&& solver->axisConstraint()
+			   == meq::GradShafranovSolver::AxisConstraint::PrescribedPoint;
+		if ( axisPrescribed )
+			std::printf( "     psi_ax = %.6e Wb/rad, constraint psi_ax - psi_h( %g, %g ) "
+			             "= %.3e\n",
+			             solver->psiAxis(), solver->axisR(), solver->axisZ(),
+			             solver->normalisationResidual() );
+		else if ( normalised )
 			std::printf( "     psi_ax = %.6e Wb/rad, constraint psi_ax - max psi_h "
 			             "= %.3e\n",
 			             solver->psiAxis(), solver->normalisationResidual() );
@@ -5011,7 +5153,9 @@ int main( int argc, char **argv )
 				             located ? solver->limiterContactZ()
 				                     : config->getBoundary().limiter.z,
 				             located ? ", found on the limiter surface"
-				                     : ", as prescribed" );
+				             : config->getSource().supportIsBox()
+				                 ? ", the outer label, as prescribed"
+				                 : ", as prescribed" );
 			}
 			if ( solver->xPointIsAnUnknown() )
 			{
@@ -5079,16 +5223,30 @@ int main( int argc, char **argv )
 		 * The sweep is two Newtons on a 2x2 system per element and is linear in
 		 * the mesh.
 		 */
+		/*
+		 * NOT ASKED OF A PRESCRIBED POINT, WHICH IS A LABEL AND NOT AN AXIS:
+		 * checkSolvedAxis() says so by answering std::nullopt, for the reason
+		 * given beside it, and the label is reported as what it is instead.
+		 */
 		if ( normalised )
 		{
 			try
 			{
 				double const checkStart = elapsedSince( started );
 				double const checkStartCpu = cpuNow();
-				axisCheck = checkSolvedAxis( *solver );
+				std::optional<meq::AxisAgreement> const asked = checkSolvedAxis( *solver );
 				checkSeconds += elapsedSince( started ) - checkStart;
 				checkCpuSeconds += cpuNow() - checkStartCpu;
-				axisChecked = true;
+				if ( asked )
+				{
+					axisCheck = *asked;
+					axisChecked = true;
+				}
+				else
+					std::printf( "     psi_ax = %.6e at the prescribed point ( %g, %g ), a "
+					             "label and not a located magnetic axis: the magnetic-axis "
+					             "check does not apply\n",
+					             solver->psiAxis(), solver->axisR(), solver->axisZ() );
 			}
 			catch ( std::exception const &error )
 			{
@@ -5471,6 +5629,53 @@ int main( int argc, char **argv )
 						  /( solver->psiAxis() - solver->psiBoundary() )
 						: 0.0 );
 				return ConfigurationError;
+			}
+		}
+
+		/*
+		 * A MIRROR'S PRESCRIBED CUTOFF, AND HOW MUCH OF THE MESH ITS SUPPORT
+		 * HOLDS -- REPORTS, NOT VERDICTS.
+		 *
+		 * The box stops the plasma at |z| = AxialEdge, a modelling
+		 * approximation that is a jump in F wherever current still flows there,
+		 * so the current density it cuts through is printed beside the peak on
+		 * every answer, as MR-1 asks. No ratio is calibrated to refuse on.
+		 *
+		 * And the support is COUNTED: under the box the connectivity fill is
+		 * off, so plasmaComponentElements() is zero whatever the labels do, and
+		 * a mirror's span is negative by construction -- neither says whether
+		 * any plasma is left. An empty support is a converged vacuum, which is
+		 * worth a warning; no measurement backs a refusal.
+		 */
+		if ( normalised && solver && config->getSource().supportIsBox() )
+		{
+			double const cutoffStart = elapsedSince( started );
+			double const cutoffStartCpu = cpuNow();
+			axialCutoff = solver->checkAxialCutoff();
+			supportNodes = solver->plasmaSupportNodes();
+			checkSeconds += elapsedSince( started ) - cutoffStart;
+			checkCpuSeconds += cpuNow() - cutoffStartCpu;
+
+			if ( axialCutoff.applies )
+				std::printf( "     axial cutoff abs( z ) = %g: peak abs( F )/R %.6e at "
+				             "( %.4f, %.4f ), %.6e on the cutoff at ( %.4f, %.4f ), "
+				             "%.3e of the peak, %d samples\n",
+				             axialCutoff.axialEdge, axialCutoff.peak,
+				             axialCutoff.peakR, axialCutoff.peakZ,
+				             axialCutoff.atCutoff, axialCutoff.cutoffR,
+				             axialCutoff.cutoffZ, axialCutoff.relative,
+				             axialCutoff.cutoffSamples );
+			std::printf( "     the plasma support holds %d of %d potential nodes\n",
+			             supportNodes.inside, supportNodes.total );
+			if ( supportNodes.inside == 0 )
+			{
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: warning: the plasma support is EMPTY -- no potential node\n"
+					"     lies between the two labels inside abs( z ) <= %g -- so this\n"
+					"     is a converged VACUUM and not a plasma. Look at the two label\n"
+					"     points, at [source] PsiAxis, and at the profiles' amplitude.\n",
+					config->getSource().axialEdge );
 			}
 		}
 
@@ -5996,6 +6201,20 @@ int main( int argc, char **argv )
 		 * writes none of the three, which is the annulus branch and the warning
 		 * on stderr above.
 		 */
+		/*
+		 * AND WHERE A PRESCRIBED psi_axis WAS READ, which is the whole of what
+		 * can be said about it: it is a label, the flux at the point the file
+		 * named, and `axis_normalised_flux` is absent because no magnetic axis
+		 * was asked for.
+		 */
+		if ( normalised
+		     && solver->axisConstraint()
+		        == meq::GradShafranovSolver::AxisConstraint::PrescribedPoint )
+		{
+			writer.attribute( "axis_constraint", "prescribed point" );
+			writer.attribute( "axis_point_r", solver->axisR() );
+			writer.attribute( "axis_point_z", solver->axisZ() );
+		}
 		if ( axisChecked && axisCheck.located )
 		{
 			writer.attribute( "axis_normalised_flux", axisCheck.normalisedFlux );
@@ -6081,7 +6300,26 @@ int main( int argc, char **argv )
 			                      == meq::ConductorModel::Filament
 			                  ? "filament" : "subtracted" );
 		}
-		if ( config->getSource().confinesToPlasma() )
+		if ( config->getSource().supportIsBox() )
+		{
+			writer.attribute( "plasma_support", "box (F = 0 outside 0 < Psi <= 1 "
+			                  "and abs(z) <= plasma_support_axial_edge)" );
+			writer.attribute( "plasma_support_axial_edge",
+			                  config->getSource().axialEdge );
+			writer.attribute( "plasma_support_nodes", supportNodes.inside );
+			writer.attribute( "plasma_support_nodes_total", supportNodes.total );
+			// THE CUTOFF'S CURRENT, so a consumer can judge the approximation
+			// without the log: F/R is mu0 j_phi, so these are current densities
+			// in those units and the ratio is units-free.
+			if ( axialCutoff.applies )
+			{
+				writer.attribute( "axial_cutoff_peak", axialCutoff.peak );
+				writer.attribute( "axial_cutoff_value", axialCutoff.atCutoff );
+				writer.attribute( "axial_cutoff_relative", axialCutoff.relative );
+				writer.attribute( "axial_cutoff_samples", axialCutoff.cutoffSamples );
+			}
+		}
+		else if ( config->getSource().confinesToPlasma() )
 			writer.attribute( "plasma_support", "moving (F = 0 where Psi <= 0)" );
 
 		// FREE BOUNDARY, and the file has to say so: without these a reader

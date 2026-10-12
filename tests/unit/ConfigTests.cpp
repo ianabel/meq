@@ -3523,3 +3523,419 @@ BOOST_AUTO_TEST_CASE( the_seven_machines_wired_as_circuits_carry_the_same_curren
 	}
 	BOOST_TEST( circuited == 3, "MAST, TCV and MAST-U are the machines with circuits" );
 }
+
+// ---------------------------------------------------------------------------
+// A mirror from a file: [source.axis], SupportShape, AxialEdge, AlignPlasma.
+// MIRROR-PLAN.md MR-5.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	/// The [source] scalars of a normalised, confined, boxed source: a
+	/// mirror's, short only of its inner label.
+	std::string const boxScalars =
+		"Normalised = true\n"
+		"PsiAxis = 5.6e-3\n"
+		"ConfineToPlasma = true\n"
+		"SupportShape = \"box\"\n"
+		"AxialEdge = 1.5\n";
+
+	std::string const axisTable = "\n[source.axis]\nR = 0.1\nZ = 0.0\n";
+	std::string const limiterTable = "\n[boundary.limiter]\nR = 0.35\nZ = 0.0\n";
+
+	/// The two source types that carry a normalisation, each taking the
+	/// [source] scalars as @a head and whatever follows the source -- a
+	/// [source.axis], the [boundary] blocks -- as @a tail. Every refusal below
+	/// is asserted through BOTH, because a key read by one path and listed by
+	/// the other is accepted and ignored on the second (CLAUDE_DRIVER.md,
+	/// "A reserved key is only reserved on the paths that call the refusal").
+	std::string mhdSource( std::string const & head, std::string const & tail )
+	{
+		return withSource(
+			"[source]\n"
+			"Type = \"mhd\"\n"
+			"PPrimeFile = \"profiles/pprime.dat\"\n"
+			"GGPrimeFile = \"profiles/ggprime.dat\"\n" + head + tail );
+	}
+
+	std::string rotatingSource( std::string const & head, std::string const & tail )
+	{
+		return rotating( head, "", tail );
+	}
+
+	using SourceBuilder = std::string ( * )( std::string const &, std::string const & );
+
+	struct NamedBuilder
+	{
+		char const * name;
+		SourceBuilder build;
+	};
+
+	std::vector< NamedBuilder > const & normalisedSources()
+	{
+		static std::vector< NamedBuilder > const builders = {
+			{ "mhd", &mhdSource }, { "rotating", &rotatingSource } };
+		return builders;
+	}
+
+	/// The key a refusal names, or "" if the text parsed.
+	std::string refusedKey( std::string const & text )
+	{
+		try
+		{
+			parse( text );
+		}
+		catch ( ConfigError const & e )
+		{
+			return e.getKey();
+		}
+		return "";
+	}
+
+	/// The whole message of a refusal, or "" if the text parsed -- for the
+	/// refusals whose key is shared with a more general one behind it, where
+	/// the key alone cannot say which fired.
+	std::string refusalMessage( std::string const & text )
+	{
+		try
+		{
+			parse( text );
+		}
+		catch ( ConfigError const & e )
+		{
+			return e.what();
+		}
+		return "";
+	}
+
+	std::string readShipped( std::string const & name )
+	{
+		std::ifstream in( examplesDirectory() / name );
+		BOOST_TEST_REQUIRE( in.good(), "cannot open examples/" << name );
+		return std::string( std::istreambuf_iterator< char >( in ),
+		                    std::istreambuf_iterator< char >() );
+	}
+
+	/// The shipped mirror with one unique line replaced -- the file a user
+	/// would have after one edit, which is what the generator refusals are
+	/// about.
+	std::string shippedMirrorWith( std::string const & line, std::string const & replacement )
+	{
+		std::string text = readShipped( "mirror-rotating.toml" );
+		std::size_t const at = text.find( "\n" + line + "\n" );
+		BOOST_TEST_REQUIRE( at != std::string::npos,
+			"examples/mirror-rotating.toml has no line '" << line << "'" );
+		BOOST_TEST_REQUIRE( text.find( "\n" + line + "\n", at + 1 ) == std::string::npos,
+			"examples/mirror-rotating.toml has the line '" << line << "' twice" );
+		text.replace( at + 1, line.size(), replacement );
+		return text;
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( mirror_keys )
+
+/// THE SHIPPED MIRROR PARSES TO THE PROBLEM IT CLAIMS TO POSE, and the two new
+/// numbers accept an integer node -- the asFloat() trap, which is what a user
+/// writing `AxialEdge = 2` meets first.
+BOOST_AUTO_TEST_CASE( a_mirror_parses )
+{
+	meq::Configuration const shipped( ( examplesDirectory() / "mirror-rotating.toml" ).string() );
+	meq::SourceConfig const & s = shipped.getSource();
+	BOOST_TEST( ( s.type == meq::SourceType::Rotating ) );
+	BOOST_TEST( s.isNormalised() );
+	BOOST_TEST( s.confinesToPlasma() );
+	BOOST_TEST( s.supportIsBox() );
+	BOOST_TEST( s.axialEdge == 1.5 );
+	BOOST_TEST( s.axisPoint.given );
+	BOOST_TEST( s.axisPoint.radius == 0.1 );
+	BOOST_TEST( s.axisPoint.z == 0.0 );
+	BOOST_TEST( s.plasmaCurrent() == 0.0 );
+	BOOST_TEST( s.getRotating().referenceRadius == 0.213 );
+	BOOST_TEST( s.getRotating().species.size() == 2u );
+	BOOST_TEST( s.getRotating().species[ 1 ].neutralising );
+
+	meq::BoundaryConfig const & b = shipped.getBoundary();
+	BOOST_TEST( b.limiter.given );
+	BOOST_TEST( b.limiter.radius == 0.35 );
+	BOOST_TEST( b.limiter.z == 0.0 );
+	BOOST_TEST( b.limiter.surfaceAttribute == 0 );
+	BOOST_TEST( !b.xpoint.given );
+	BOOST_TEST( b.exterior.given );
+	BOOST_TEST( b.exterior.radius == 3.0 );
+	BOOST_TEST( b.exterior.modes == 32 );
+
+	BOOST_TEST( ( shipped.getConductors().model == meq::ConductorModel::Filament ) );
+	BOOST_TEST_REQUIRE( shipped.getCoils().coils.size() == 2u );
+	for ( meq::CoilParameters const & coil : shipped.getCoils().coils )
+	{
+		BOOST_TEST( coil.filamentsR == 1 );
+		BOOST_TEST( coil.filamentsZ == 10 );
+	}
+	BOOST_TEST( shipped.getCoils().coils[ 0 ].centreZ == -1.5 );
+	BOOST_TEST( shipped.getCoils().coils[ 1 ].centreZ == 1.5 );
+
+	meq::MeshGeneratorConfig const & g = shipped.getMesh().generate;
+	BOOST_TEST( g.given );
+	BOOST_TEST( g.alignPlasma );
+	BOOST_TEST( g.plasmaZMin == -1.5 );
+	BOOST_TEST( g.plasmaZMax == 1.5 );
+
+	// Integer nodes, read as the numbers they are.
+	for ( NamedBuilder const & source : normalisedSources() )
+	{
+		std::string const integers =
+			"Normalised = true\nPsiAxis = 5.6e-3\nConfineToPlasma = true\n"
+			"SupportShape = \"box\"\nAxialEdge = 2\n";
+		meq::Configuration const c = parse( source.build( integers,
+			"\n[source.axis]\nR = 1\nZ = 0\n" + limiterTable ) );
+		BOOST_TEST( c.getSource().axialEdge == 2.0, source.name );
+		BOOST_TEST( c.getSource().axisPoint.radius == 1.0, source.name );
+		BOOST_TEST( c.getSource().axisPoint.z == 0.0, source.name );
+	}
+
+	// "one-sided" spelled out is the default, and parses beside nothing else.
+	for ( NamedBuilder const & source : normalisedSources() )
+	{
+		meq::Configuration const c = parse( source.build(
+			"Normalised = true\nPsiAxis = 1.0\nSupportShape = \"one-sided\"\n", "" ) );
+		BOOST_TEST( !c.getSource().supportIsBox(), source.name );
+		BOOST_TEST( !c.getSource().axisPoint.given, source.name );
+	}
+}
+
+/// EVERY MIRROR KEY IS REFUSED, WITH ITS OWN KEY NAMED, ON BOTH SOURCE TYPES
+/// THAT CAN CARRY IT -- the pairing, not the refusal, is the assertion -- and
+/// is an unknown key on the two that cannot.
+BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_carry_them )
+{
+	std::string const normalisedOnly = "Normalised = true\nPsiAxis = 5.6e-3\n";
+	std::string const boxed = normalisedOnly + "ConfineToPlasma = true\nSupportShape = \"box\"\n";
+
+	struct Refusal
+	{
+		char const * what;
+		std::string head;
+		std::string tail;
+		char const * key;
+	};
+
+	std::vector< Refusal > const refusals = {
+		{ "[source.axis] without Normalised", "", axisTable, "source.axis.R" },
+		{ "SupportShape without Normalised", "SupportShape = \"box\"\n", "", "source.SupportShape" },
+		{ "AxialEdge without Normalised", "AxialEdge = 1.5\n", "", "source.AxialEdge" },
+		{ "box without ConfineToPlasma",
+		  normalisedOnly + "SupportShape = \"box\"\nAxialEdge = 1.5\n", axisTable,
+		  "source.SupportShape" },
+		{ "box without AxialEdge", boxed, axisTable, "source.AxialEdge" },
+		{ "AxialEdge = 0", boxed + "AxialEdge = 0\n", axisTable, "source.AxialEdge" },
+		{ "AxialEdge = -1", boxed + "AxialEdge = -1\n", axisTable, "source.AxialEdge" },
+		{ "AxialEdge = inf", boxed + "AxialEdge = inf\n", axisTable, "source.AxialEdge" },
+		{ "AxialEdge without box", normalisedOnly + "ConfineToPlasma = true\nAxialEdge = 1.5\n",
+		  axisTable, "source.AxialEdge" },
+		{ "a misspelt SupportShape",
+		  normalisedOnly + "ConfineToPlasma = true\nSupportShape = \"Box\"\n", "",
+		  "source.SupportShape" },
+		{ "box without [source.axis]", boxScalars, limiterTable, "source.SupportShape" },
+		{ "box with ExcludeAttributes", boxScalars + "ExcludeAttributes = [ 30 ]\n",
+		  axisTable, "source.ExcludeAttributes" },
+		{ "box with PlasmaCurrent", boxScalars + "PlasmaCurrent = 1.0e5\n", axisTable,
+		  "source.PlasmaCurrent" },
+		{ "[source.axis] R only", normalisedOnly, "\n[source.axis]\nR = 0.1\n", "source.axis.Z" },
+		{ "[source.axis] Z only", normalisedOnly, "\n[source.axis]\nZ = 0.0\n", "source.axis.R" },
+		{ "[source.axis] R = 0", normalisedOnly, "\n[source.axis]\nR = 0\nZ = 0.0\n",
+		  "source.axis.R" },
+		{ "[source.axis] Z = nan", normalisedOnly, "\n[source.axis]\nR = 0.1\nZ = nan\n",
+		  "source.axis.Z" },
+		{ "a [source] key written under [source.axis]", normalisedOnly,
+		  "\n[source.axis]\nR = 0.1\nZ = 0.0\nAxialEdge = 1.5\n", "source.axis.AxialEdge" } };
+
+	for ( Refusal const & r : refusals )
+		for ( NamedBuilder const & source : normalisedSources() )
+		{
+			std::string const key = refusedKey( source.build( r.head, r.tail ) );
+			BOOST_TEST( key == r.key,
+				source.name << ", " << r.what << ": refused at '" << key
+				<< "' where the refusal belongs at '" << r.key << "'"
+				<< ( key.empty() ? " -- it PARSED" : "" ) );
+		}
+
+	// Without its own refusal a box with no AxialEdge would still be refused
+	// at the same key, by getFloat()'s "is required" -- so the message is what
+	// says the box's reason was given.
+	for ( NamedBuilder const & source : normalisedSources() )
+		BOOST_TEST( refusalMessage( source.build( boxed, axisTable ) ).find( "throat" )
+		            != std::string::npos, source.name );
+
+	// THE q-DRIVEN LOOP IS mhd'S ALONE, so this one has no pair.
+	{
+		std::string const text = withSource(
+			"[source]\nType = \"mhd\"\nPPrimeFile = \"p.dat\"\n"
+			"SafetyFactorFile = \"q.dat\"\nToroidalFieldGuess = 1.0\n"
+			+ boxScalars + axisTable + limiterTable );
+		BOOST_TEST( refusedKey( text ) == "source.SafetyFactorFile" );
+	}
+
+	// AND ON THE TWO SOURCE TYPES WITH NO NORMALISATION, THEY ARE NOT KEYS.
+	std::string const solovievHead = "[source]\nType = \"soloviev\"\nA = -0.52\n";
+	std::string const manufacturedHead =
+		"[source]\nType = \"manufactured\"\nR0 = -0.5\nKr = 3.6\nKz = 1.15\n";
+	for ( std::string const & head : { solovievHead, manufacturedHead } )
+	{
+		BOOST_TEST( refusedKey( withSource( head + axisTable ) ) == "source.axis" );
+		BOOST_TEST( refusedKey( withSource( head + "SupportShape = \"box\"\n" ) )
+		            == "source.SupportShape" );
+		BOOST_TEST( refusedKey( withSource( head + "AxialEdge = 1.5\n" ) )
+		            == "source.AxialEdge" );
+	}
+}
+
+/// THE LABELS AGAINST THE [boundary] BLOCKS: the box's outer label is the
+/// limiter POINT, never a found contact or an X-point, and the two labels may
+/// not be one point. A prescribed axis WITHOUT the box -- MR-2's tokamak use --
+/// composes with either.
+BOOST_AUTO_TEST_CASE( the_mirrors_labels_compose_with_the_boundary_blocks )
+{
+	std::string const tokamakAxis = "Normalised = true\nPsiAxis = 5.6e-3\n";
+	for ( NamedBuilder const & source : normalisedSources() )
+	{
+		std::string const name = source.name;
+		BOOST_TEST( refusedKey( source.build( boxScalars, axisTable ) ) == "boundary.limiter.R",
+		            name << ": the box without [boundary.limiter]" );
+		BOOST_TEST( refusedKey( source.build( boxScalars,
+			axisTable + "\n[boundary.limiter]\nSurfaceAttribute = 20\n" ) )
+			== "boundary.limiter.SurfaceAttribute", name << ": the box with a limiter surface" );
+		BOOST_TEST( refusedKey( source.build( boxScalars,
+			axisTable + limiterTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) )
+			== "boundary.xpoint.R", name << ": the box with an X-point" );
+		// The limiter pairing would refuse it at the same key; the message is
+		// what says it was the box's refusal.
+		BOOST_TEST( refusalMessage( source.build( boxScalars,
+			axisTable + limiterTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) )
+			.find( "SupportShape" ) != std::string::npos, name );
+		BOOST_TEST( refusedKey( source.build( boxScalars,
+			axisTable + "\n[boundary.limiter]\nR = 0.1\nZ = 0.0\n" ) )
+			== "boundary.limiter.R", name << ": both labels at one point, boxed" );
+		BOOST_TEST( refusedKey( source.build( tokamakAxis,
+			axisTable + "\n[boundary.limiter]\nR = 0.1\nZ = 0.0\n" ) )
+			== "boundary.limiter.R", name << ": both labels at one point, unboxed" );
+
+		BOOST_TEST( refusedKey( source.build( boxScalars, axisTable + limiterTable ) ).empty(),
+		            name << ": the mirror itself" );
+		BOOST_TEST( refusedKey( source.build( tokamakAxis, axisTable + limiterTable ) ).empty(),
+		            name << ": a prescribed axis with a limiter, no box" );
+		BOOST_TEST( refusedKey( source.build( tokamakAxis,
+			axisTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) ).empty(),
+			name << ": a prescribed axis with an X-point, no box" );
+	}
+}
+
+/// WHAT THE BOX HAS NO STATE FOR: the support loop judges a sweep settled by
+/// the connectivity fill's component, which the box switches off; the flux
+/// surface file traces closed surfaces about an axis; the X-point border's
+/// own controls have no X-point. And PicardSweeps, refused beside any
+/// [source.axis] for a measured reason -- asserted on a tokamak's prescribed
+/// axis too, below, so the refusal is not read as the box's.
+BOOST_AUTO_TEST_CASE( the_box_refuses_what_it_has_no_state_for )
+{
+	struct Case
+	{
+		char const * what;
+		std::string after;
+		char const * key;  ///< "" for accepted
+	};
+	std::vector< Case > const cases = {
+		{ "PlasmaSupportSweeps", "\n[solver]\nPlasmaSupportSweeps = 1\n", "solver.PlasmaSupportSweeps" },
+		{ "PicardSweeps", "\n[solver]\nPicardSweeps = 2\n", "solver.PicardSweeps" },
+		{ "PlasmaSupportSweeps = 0", "\n[solver]\nPlasmaSupportSweeps = 0\n", "" },
+		{ "FluxSurfaces", "\n[output]\nFluxSurfaces = true\n", "output.FluxSurfaces" },
+		{ "UpDownSymmetry", "\n[solver]\nUpDownSymmetry = true\n", "solver.UpDownSymmetry" },
+		{ "TopologyRetry", "\n[solver]\nTopologyRetry = 1\n", "solver.TopologyRetry" },
+		{ "BorderRegularisation", "\n[solver]\nBorderRegularisation = 1.0e-3\n",
+		  "solver.BorderRegularisation" },
+		{ "[inverse]", "\n[[inverse.isoflux]]\nR1 = 0.3\nZ1 = 0.0\nR2 = 0.3\nZ2 = 1.0\n",
+		  "inverse.isoflux" } };
+
+	for ( Case const & c : cases )
+		for ( NamedBuilder const & source : normalisedSources() )
+		{
+			std::string const key = refusedKey( source.build( boxScalars,
+				axisTable + limiterTable + c.after ) );
+			BOOST_TEST( key == c.key, source.name << ", " << c.what << ": '" << key
+			            << "' where '" << c.key << "' was expected" );
+		}
+
+	// [inverse] has its own refusals at the same key behind this one -- no
+	// Free current here -- so the message is what says the box refused it.
+	for ( NamedBuilder const & source : normalisedSources() )
+		BOOST_TEST( refusalMessage( source.build( boxScalars, axisTable + limiterTable
+			+ "\n[[inverse.isoflux]]\nR1 = 0.3\nZ1 = 0.0\nR2 = 0.3\nZ2 = 1.0\n" ) )
+			.find( "SupportShape" ) != std::string::npos, source.name );
+
+	for ( NamedBuilder const & source : normalisedSources() )
+	{
+		BOOST_TEST( refusedKey( source.build( "Normalised = true\nPsiAxis = 1.0\n",
+			axisTable + limiterTable + "\n[solver]\nPicardSweeps = 2\n" ) )
+			== "solver.PicardSweeps", source.name << ": PicardSweeps beside a prescribed axis" );
+		BOOST_TEST( refusedKey( source.build( "Normalised = true\nPsiAxis = 1.0\n",
+			limiterTable + "\n[solver]\nPicardSweeps = 2\n" ) ).empty(),
+			source.name << ": PicardSweeps beside a located axis" );
+	}
+
+	// The controls refused beside the box stay legal beside an X-point, where
+	// the driver applies them: the refusal is about the box, not the keys.
+	BOOST_TEST( refusedKey( rotatingSource( "Normalised = true\nPsiAxis = 1.0\n",
+		"\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n[solver]\nTopologyRetry = 1\n" ) ).empty() );
+}
+
+/// THE MESH GENERATOR'S AlignPlasma, AND THE BOX ALIGNED BEING THE CUTOFF.
+/// Built by editing one line of the shipped mirror, which is the file a user
+/// has after one edit.
+BOOST_AUTO_TEST_CASE( align_plasma_is_checked_against_the_cutoff )
+{
+	BOOST_TEST( refusedKey( shippedMirrorWith( "AlignPlasma = true", "" ) )
+	            == "mesh.generate.AlignPlasma" );
+	BOOST_TEST( refusedKey( shippedMirrorWith( "AlignPlasma = true", "AlignPlasma = false" ) )
+	            == "mesh.generate.AlignPlasma" );
+	BOOST_TEST( refusedKey( shippedMirrorWith( "PlasmaZMax = 1.5", "PlasmaZMax = 1.4" ) )
+	            == "mesh.generate.PlasmaZMax" );
+	BOOST_TEST( refusedKey( shippedMirrorWith( "PlasmaZMin = -1.5", "PlasmaZMin = -1.6" ) )
+	            == "mesh.generate.PlasmaZMin" );
+	// The box and the edge moved TOGETHER is the same problem at a new throat.
+	{
+		std::string text = shippedMirrorWith( "PlasmaZMin = -1.5", "PlasmaZMin = -1.25" );
+		text.replace( text.find( "\nPlasmaZMax = 1.5\n" ) + 1, 16, "PlasmaZMax = 1.25" );
+		text.replace( text.find( "\nAxialEdge = 1.5\n" ) + 1, 15, "AxialEdge = 1.25" );
+		BOOST_TEST( refusedKey( text ).empty() );
+	}
+
+	// The generator's own refusals, at parse time.
+	std::string const noBox =
+		"[mesh]\nFile = \"m.msh\"\n\n[mesh.generate]\nTool = \"halfdisc\"\n"
+		  "Radius = 3.4\nSize = 0.4\nAlignPlasma = true\n\n"
+		  "[discretisation]\nPolynomialDegree = 2\n\n"
+		  "[source]\nType = \"soloviev\"\nA = -0.52\n";
+	BOOST_TEST( refusedKey( noBox ) == "mesh.generate.AlignPlasma" );
+
+	std::string const box =
+		"[mesh]\nFile = \"m.msh\"\n\n[mesh.generate]\nTool = \"halfdisc\"\n"
+		"Radius = 3.4\nSize = 0.4\nAlignPlasma = true\n"
+		"PlasmaRMin = 0.0\nPlasmaRMax = 0.75\nPlasmaSize = 0.1\n";
+	std::string const rest =
+		"\n[discretisation]\nPolynomialDegree = 2\n\n[source]\nType = \"soloviev\"\nA = -0.52\n";
+	BOOST_TEST( refusedKey( box + "PlasmaZMin = -1.5\nPlasmaZMax = 1.0\nSymmetric = true\n" + rest )
+	            == "mesh.generate.AlignPlasma" );
+	BOOST_TEST( refusedKey( box + "PlasmaZMin = -1.5\nPlasmaZMax = 3.4\n" + rest )
+	            == "mesh.generate.AlignPlasma" );
+	{
+		meq::Configuration const c = parse( box + "PlasmaZMin = -1.5\nPlasmaZMax = 1.5\n"
+		                                    "Symmetric = true\n" + rest );
+		BOOST_TEST( c.getMesh().generate.alignPlasma );
+		BOOST_TEST( c.getMesh().generate.symmetric );
+	}
+	{
+		meq::Configuration const c = parse( box + "PlasmaZMin = -1.5\nPlasmaZMax = 1.0\n" + rest );
+		BOOST_TEST( c.getMesh().generate.alignPlasma );
+	}
+}
+
+BOOST_AUTO_TEST_SUITE_END()

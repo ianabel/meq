@@ -360,6 +360,54 @@ worked example, and it is the same plasma as ``examples/rotating-rectangle.toml`
 re-expressed — which is a good way to see what the two formulations do and do
 not have in common.
 
+.. _rotation-mirror:
+
+A magnetic mirror
+-----------------
+
+``examples/mirror-rotating.toml`` solves a rotating mirror free boundary from a
+file:
+
+.. code-block:: sh
+
+   ./build/meq-run examples/mirror-rotating.toml
+
+It is ``geq``'s machine and ``geq``'s problem — two coil packs carried as twenty
+point filaments, electrons and deuterons in rigid rotation — which the test
+suite also poses through the library and compares with the binary's answer
+degree of freedom for degree of freedom.
+
+**A mirror has no magnetic axis.** Its plasma is an annulus between two
+prescribed flux surfaces, so both labels are read at points:
+:math:`\psi_{\mathrm{ax}}` at ``[source.axis] R, Z``, the inner one, and
+:math:`\psi_{\mathrm{bnd}}` at ``[boundary.limiter] R, Z``, the outer one.
+Both float with the solve, as ``geq``'s do. The inner label is the *smaller*
+flux, so the span :math:`\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}}` is
+**negative**, and nothing needs saying about that: :math:`\Psi` is written in
+the span.
+
+**The profiles are in** :math:`\Psi`, **which is** :math:`1 - \psi_N` in
+``geq``'s convention: :math:`\Psi = 1` at the inner label and 0 at the outer.
+A table carried over from a code that labels the other way round has to have
+its abscissa reversed and its slopes negated. Their slopes, and so the source
+:math:`F`, must vanish at **both** labels, because :math:`\Psi = 1` is an edge
+of the support as well as :math:`\Psi = 0`; the example's slopes fall as
+:math:`(1 - \Psi)^2` and :math:`\Psi^3` at the two.
+
+**The support is a box**, ``[source] SupportShape = "box"``:
+:math:`0 < \Psi \le 1` and :math:`|z| \le` ``AxialEdge``. The axial end is a
+prescribed modelling cutoff at the throat — beyond it the same :math:`\Psi`
+recurs in the expander, where the centrifugal potential no longer confines —
+so the run reports the current density it cuts through (``axial cutoff`` on the
+console, ``axial_cutoff_relative`` in the ``.nc``). ``[mesh.generate]
+AlignPlasma`` puts the cutoff on element faces, since a jump across a line that
+cuts elements costs the order. :ref:`configuration-mirror-support` has the keys
+and what is refused beside them.
+
+``GGPrime = 0``: a mirror has no toroidal field, and that is also what lets the
+plasma's flux reach :math:`R = 0` without an infinite current density there
+(:ref:`running-refusals`).
+
 Output
 ------
 

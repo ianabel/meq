@@ -756,6 +756,122 @@ namespace meq
 				source.fail( "PlasmaCurrent", "must be finite" );
 		}
 
+		/*
+		 * `[source.axis] R, Z` -- psi_ax AT A PRESCRIBED POINT. See
+		 * AxisPointConfig.
+		 *
+		 * ONE HELPER FOR BOTH NORMALISED SOURCE TYPES, for the reason
+		 * refuseReservedVariableKeys() is one: a key that one path reads and
+		 * another lists without reading is accepted and ignored on the second.
+		 *
+		 * A SUB-TABLE, SO ITS KEYS ARE ITS OWN. TOML puts every key after
+		 * `[source.axis]` into it until the next header, so a `[source]` key
+		 * written below it by mistake lands here -- and rejectUnknownKeys() says
+		 * so rather than letting it vanish.
+		 */
+		void readAxisPoint( Table const & source, std::string const & configFile,
+		                    bool normalised, AxisPointConfig & point )
+		{
+			Table axis( source, "axis", configFile, false );
+			axis.rejectUnknownKeys( { "R", "Z" } );
+			if ( !axis.isPresent() )
+				return;
+
+			if ( !normalised )
+				axis.fail( "R", "pins psi_ax at a point, and psi_ax is an unknown only when Normalised = true; without it the profiles are functions of psi itself and there is no psi_ax to pin" );
+
+			// BOTH OR NEITHER, on [boundary.limiter]'s precedent: a point given
+			// only its height sits on R = 0, where psi = 0 by construction.
+			point.radius = axis.getFloat( "R" );
+			point.z = axis.getFloat( "Z" );
+			point.given = true;
+
+			if ( !( point.radius > 0.0 ) || !std::isfinite( point.radius ) )
+				axis.fail( "R", "the axis label must be at a finite R > 0: psi( 0, z ) = 0 exactly, so a label on the symmetry axis would pin psi_ax to zero whatever the plasma does" );
+			if ( !std::isfinite( point.z ) )
+				axis.fail( "Z", "must be finite" );
+		}
+
+		/*
+		 * `[source] SupportShape` and `AxialEdge` -- THE SHAPE OF THE PLASMA
+		 * SUPPORT. See SourceConfig::supportShape.
+		 *
+		 * Every refusal here is a combination that would otherwise be accepted
+		 * and ignored, or that poses a problem nothing has measured, and each
+		 * is asserted on both source types that can carry the keys.
+		 */
+		void readSupportShape( Table const & source, bool normalised, bool confine,
+		                       bool qDriven, double plasmaCurrent,
+		                       SourceConfig & options )
+		{
+			bool const shapeGiven = source.has( "SupportShape" );
+			bool const edgeGiven = source.has( "AxialEdge" );
+
+			if ( !normalised )
+			{
+				if ( shapeGiven )
+					source.fail( "SupportShape", "shapes the PLASMA SUPPORT, which is decided on the normalised flux Psi; without Normalised = true there is no Psi and no support" );
+				if ( edgeGiven )
+					source.fail( "AxialEdge", "is the axial end of a SupportShape = \"box\" support, and a source that is not Normalised has no support at all" );
+				return;
+			}
+
+			std::string const shape = source.getStringOr( "SupportShape", "one-sided" );
+			if ( shape == "one-sided" )
+				options.supportShape = PlasmaSupportShapeType::OneSided;
+			else if ( shape == "box" )
+				options.supportShape = PlasmaSupportShapeType::Box;
+			else
+				source.fail( "SupportShape", "must be \"one-sided\" or \"box\", but is \"" + shape + "\"" );
+
+			if ( !options.supportIsBox() )
+			{
+				// ACCEPTED AND IGNORED IS THE OUTCOME THIS FILE REFUSES: a
+				// one-sided support has no axial end, so an edge beside it is a
+				// number nothing reads.
+				if ( edgeGiven )
+					source.fail( "AxialEdge", "is the axial end of a box support and means nothing without SupportShape = \"box\"; the one-sided support is Psi > 0 alone" );
+				return;
+			}
+
+			// A SHAPE OF THE CONFINEMENT, so it does not switch confinement on
+			// by implication: every consumer of confinesToPlasma() reads one
+			// flag, and a support with a shape but no switch is a contradiction
+			// to refuse rather than a default to guess.
+			if ( !confine )
+				source.fail( "SupportShape", "\"box\" is a shape of the plasma support, and the support is off: set ConfineToPlasma = true as well" );
+
+			if ( !edgeGiven )
+				source.fail( "AxialEdge", "is required with SupportShape = \"box\": the box stops the plasma at the throat, |z| <= AxialEdge, and a mirror support without it is the flux-only mask M-168 measured putting the end-plane current five orders above the midplane's" );
+			options.axialEdge = source.getFloat( "AxialEdge" );
+			if ( !( options.axialEdge > 0.0 ) || !std::isfinite( options.axialEdge ) )
+				source.fail( "AxialEdge", "must be finite and positive: it is the throat, in metres from z = 0" );
+
+			// THE BOX'S UPPER BOUND, Psi <= 1, IS A RING CUT OFF A TOKAMAK'S
+			// CORE: psi_h overshoots a located psi_ax by a discretisation error.
+			// So the box is posed only with the inner label at a point.
+			if ( !options.axisPoint.given )
+				source.fail( "SupportShape", "\"box\" bounds the support by Psi <= 1, which is right between a mirror's two prescribed labels and cuts a ring off the core around a LOCATED axis; give the inner label as [source.axis] R and Z" );
+
+			// INERT UNDER THE BOX, SO REFUSED. Exclusion acts through the
+			// element mask the connectivity fill builds, and the fill is off
+			// under the box by a stated branch -- so the attributes would be
+			// read and would remove nothing.
+			if ( !options.excludeAttributes.empty() )
+				source.fail( "ExcludeAttributes", "acts through the connectivity fill's element mask, and SupportShape = \"box\" switches the fill off: the box is pointwise. Remove one of the two" );
+
+			// The q-driven loop extracts flux surfaces about an O-point every
+			// map evaluation, and a mirror has none.
+			if ( qDriven )
+				source.fail( "SafetyFactorFile", "drives g g' through q on closed flux surfaces about a magnetic axis, and a SupportShape = \"box\" plasma has neither" );
+
+			// NOT MEASURED ON THE BOX, AND THE CURRENT BORDER'S ROW IS
+			// ASSEMBLED ON THE CONNECTIVITY FILL'S SUPPORT, which the box
+			// switches off. Refused until a measured case lifts it.
+			if ( plasmaCurrent != 0.0 )
+				source.fail( "PlasmaCurrent", "is not measured beside SupportShape = \"box\": the current border has not been solved on a mirror. Remove it, and the profiles' own amplitude sets the current" );
+		}
+
 		SourceType toSourceType( Table const & source, std::string const & spelling )
 		{
 			static std::map< std::string, SourceType > const types =
@@ -1384,7 +1500,7 @@ namespace meq
 				                              "PlasmaRMin", "PlasmaRMax", "PlasmaZMin", "PlasmaZMax",
 				                              "PlasmaSize", "LimiterR", "LimiterZ", "LimiterRadius",
 				                              "Vessel", "Transition", "Check",
-				                              "Symmetric" } );
+				                              "Symmetric", "AlignPlasma" } );
 
 				MeshGeneratorConfig & g = meshOptions.generate;
 				g.given = generate.has( "Tool" );
@@ -1418,6 +1534,7 @@ namespace meq
 					g.transition = generate.getFloatOr( "Transition", 0.0 );
 					g.check = generate.getBooleanOr( "Check", true );
 					g.symmetric = generate.getBooleanOr( "Symmetric", false );
+					g.alignPlasma = generate.getBooleanOr( "AlignPlasma", false );
 
 					if ( !( g.radius > 0.0 ) )
 						generate.fail( "Radius", "the disc's radius must be positive. NOTE it is the BACKGROUND's radius and not Gamma's: with an exterior coupling, D_h is cut from this mesh at [boundary.exterior] Radius, which has to fit strictly inside it" );
@@ -1472,6 +1589,23 @@ namespace meq
 							generate.fail( "PlasmaZMax", "must be greater than PlasmaZMin" );
 						if ( !( g.plasmaSize > 0.0 ) )
 							generate.fail( "PlasmaSize", "the element size in the refined box must be positive" );
+					}
+
+					/*
+					 * `AlignPlasma` -- THE BOX AS GEOMETRY, and halfdisc.py's own
+					 * refusals made again at parse time, where they cost nothing:
+					 * there is a box to align, it stays inside the arc, and
+					 * under Symmetric it is its own reflection, since aligned it
+					 * is geometry rather than a size field.
+					 */
+					if ( g.alignPlasma )
+					{
+						if ( !g.plasmaGiven )
+							generate.fail( "AlignPlasma", "aligns the mesh to the Plasma* box, and there is none: give PlasmaRMin, PlasmaRMax, PlasmaZMin, PlasmaZMax and PlasmaSize" );
+						if ( std::hypot( g.plasmaRMax, std::max( std::abs( g.plasmaZMin ), std::abs( g.plasmaZMax ) ) ) >= g.radius )
+							generate.fail( "AlignPlasma", "the Plasma* box reaches the disc's arc at Radius = " + std::to_string( g.radius ) + ", and an aligned box is geometry that has to lie inside it" );
+						if ( g.symmetric && g.plasmaZMin != -g.plasmaZMax )
+							generate.fail( "AlignPlasma", "makes the Plasma* box geometry, so Symmetric = true needs it symmetric about z = 0, PlasmaZMin = -PlasmaZMax; it is z in [ " + std::to_string( g.plasmaZMin ) + ", " + std::to_string( g.plasmaZMax ) + " ]" );
 					}
 
 					// THE LIMITER, FRAGMENTED IN RATHER THAN CUT. Written as
@@ -1572,7 +1706,7 @@ namespace meq
 					                            "SafetyFactorFile", "SafetyFactorDegree",
 					                            "ToroidalFieldGuess",
 					                            "Normalised", "PsiAxis", "ConfineToPlasma", "PlasmaCurrent",
-					                            "ExcludeAttributes",
+					                            "ExcludeAttributes", "axis", "SupportShape", "AxialEdge",
 					                            "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					// The "mhd" source has no constant form for either profile,
@@ -1602,6 +1736,10 @@ namespace meq
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
 					readPlasmaExclusion( source, parameters.normalised, sourceOptions.excludeAttributes );
 					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
+					readAxisPoint( source, sourceName, parameters.normalised, sourceOptions.axisPoint );
+					readSupportShape( source, parameters.normalised, parameters.confineToPlasma,
+					                  !parameters.safetyFactorFile.empty(),
+					                  parameters.plasmaCurrent, sourceOptions );
 					sourceOptions.parameters = parameters;
 					break;
 				}
@@ -1612,7 +1750,8 @@ namespace meq
 					                            "GGPrime", "GGPrimeFile", "GGPrimeScale",
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "ReferenceRadius", "Mu0", "Normalised", "PsiAxis",
-					                            "ConfineToPlasma", "ExcludeAttributes", "PlasmaCurrent", "ProfileFile" } );
+					                            "ConfineToPlasma", "ExcludeAttributes", "PlasmaCurrent", "ProfileFile",
+					                            "axis", "SupportShape", "AxialEdge" } );
 					refuseReservedProfileFile( source );
 					RotatingParameters parameters;
 
@@ -1638,6 +1777,9 @@ namespace meq
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
 					readPlasmaExclusion( source, parameters.normalised, sourceOptions.excludeAttributes );
 					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
+					readAxisPoint( source, sourceName, parameters.normalised, sourceOptions.axisPoint );
+					readSupportShape( source, parameters.normalised, parameters.confineToPlasma,
+					                  false, parameters.plasmaCurrent, sourceOptions );
 
 					std::vector< Table > const species = source.getTableArrayOr( "species" );
 					if ( species.size() < 2 )
@@ -1723,6 +1865,28 @@ namespace meq
 					sourceOptions.parameters = parameters;
 					break;
 				}
+			}
+
+			/*
+			 * THE BOX'S CUTOFF AND THE MESH, WHERE THE MESH IS THIS FILE'S OWN
+			 * BUILD PRODUCT. The source JUMPS at |z| = AxialEdge, and a jump
+			 * across a line that cuts elements costs the order silently --
+			 * theAlignedCutoffKeepsTheOrder, M-262. Where the file also says how
+			 * the mesh is made, MEQ can see whether the line will be a set of
+			 * element faces, so it is checked here rather than measured later;
+			 * SurfaceAttribute against LimiterR is the precedent. A mesh made
+			 * somewhere else is left alone, since this parser cannot read it.
+			 */
+			if ( sourceOptions.supportIsBox() && meshOptions.generate.given )
+			{
+				MeshGeneratorConfig const & g = meshOptions.generate;
+				double const edge = sourceOptions.axialEdge;
+				if ( !g.alignPlasma )
+					throw ConfigError( sourceName, "mesh.generate.AlignPlasma", "SupportShape = \"box\" cuts the source off at |z| = AxialEdge, where it jumps, and [mesh.generate] would cut elements across that line, which costs the order silently. Set [mesh.generate] AlignPlasma = true with PlasmaZMin = -AxialEdge and PlasmaZMax = AxialEdge" );
+				if ( g.plasmaZMin != -edge )
+					throw ConfigError( sourceName, "mesh.generate.PlasmaZMin", "is " + std::to_string( g.plasmaZMin ) + ", and the box support's cutoff is at z = -AxialEdge = " + std::to_string( -edge ) + ": the aligned box has to BE the cutoff for its faces to carry the jump" );
+				if ( g.plasmaZMax != edge )
+					throw ConfigError( sourceName, "mesh.generate.PlasmaZMax", "is " + std::to_string( g.plasmaZMax ) + ", and the box support's cutoff is at z = AxialEdge = " + std::to_string( edge ) + ": the aligned box has to BE the cutoff for its faces to carry the jump" );
 			}
 		}
 
@@ -1834,6 +1998,26 @@ namespace meq
 				if ( l.given && !sourceOptions.isNormalised() )
 					limiter.fail( surfaceGiven ? "SurfaceAttribute" : "R",
 					              "a limiter pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.limiter]" );
+
+				// A MIRROR'S OUTER LABEL IS THIS POINT. The box is posed between
+				// two labels read at prescribed points, and a contact FOUND on a
+				// limiter surface is a maximum over a curve -- a tokamak's
+				// question, with no meaning on a negative span.
+				if ( sourceOptions.supportIsBox() )
+				{
+					if ( surfaceGiven )
+						limiter.fail( "SurfaceAttribute", "[source] SupportShape = \"box\" reads the outer label at a PRESCRIBED point; give [boundary.limiter] R and Z instead of a surface" );
+					if ( !pointGiven )
+						limiter.fail( "R", "is required with [source] SupportShape = \"box\": the box lies between two labels at prescribed points, [source.axis] the inner and [boundary.limiter] R, Z the outer" );
+				}
+
+				// THE TWO LABELS AT ONE POINT make the span identically zero, and
+				// Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ) is then undefined
+				// everywhere.
+				if ( pointGiven && sourceOptions.axisPoint.given
+				     && l.radius == sourceOptions.axisPoint.radius
+				     && l.z == sourceOptions.axisPoint.z )
+					limiter.fail( "R", "is the same point as [source.axis], so psi_ax and psi_bnd are the same flux and the normalised flux is undefined; the two labels must be different points" );
 			}
 
 			// [boundary.xpoint] -- psi_bnd at an X-POINT THAT IS ITSELF TWO
@@ -1856,6 +2040,12 @@ namespace meq
 
 					if ( !( x.radius > 0.0 ) )
 						xpoint.fail( "R", "the X-point seed must be at R > 0; the symmetry axis carries near-zeros of q that are not X-points, and the flux mass ( R q, v ) degenerates there" );
+
+					// BEFORE the limiter pairing below, so that a mirror file
+					// is told about its box rather than about the limiter it
+					// was required to give.
+					if ( sourceOptions.supportIsBox() )
+						xpoint.fail( "R", "[source] SupportShape = \"box\" reads psi_bnd at the prescribed point [boundary.limiter] R, Z, and a mirror's outer label is not a separatrix; remove [boundary.xpoint]" );
 
 					// ALL THREE ROUTES PIN ONE UNKNOWN. GradShafranovSolver
 					// refuses the combination too, but arriving there would
@@ -1979,6 +2169,8 @@ namespace meq
 				inverse.fail( "isoflux", "[inverse] names no target: give [[inverse.isoflux]] or [[inverse.xpoint]] blocks, which are what determine the Free currents" );
 			if ( v.given && !sourceOptions.isNormalised() )
 				inverse.fail( v.isoflux.empty() ? "xpoint" : "isoflux", "an inverse solve's currents are border unknowns of the bordered Newton, which runs only on a normalised source; set [source] Normalised = true" );
+			if ( v.given && sourceOptions.supportIsBox() )
+				inverse.fail( v.isoflux.empty() ? "xpoint" : "isoflux", "an inverse solve has not been measured on a [source] SupportShape = \"box\" plasma -- a mirror -- and its targets are posed on a tokamak's separatrix; remove [inverse]" );
 			if ( v.given && conductorOptions.subtracts() )
 				inverse.fail( v.isoflux.empty() ? "xpoint" : "isoflux", "free currents are solved for MESHED conductors only: under [conductors] Model = \"subtracted\" or \"filament\" a current also enters the analytic conductor field, which the inverse border's column does not measure" );
 			if ( v.given && !coilOptions.anyFree() )
@@ -2080,6 +2272,21 @@ namespace meq
 					solver.fail( "LineSearchMerit", "must be \"augmented\" or \"field\"" );
 			}
 
+			/*
+			 * THE X-POINT BORDER'S OWN CONTROLS, WHICH THE DRIVER SETS ONLY
+			 * BESIDE THAT BORDER -- so on a mirror, which has no X-point and
+			 * refuses [boundary.xpoint], each would be accepted and ignored.
+			 */
+			if ( sourceOptions.supportIsBox() )
+			{
+				if ( solverOptions.upDownSymmetry )
+					solver.fail( "UpDownSymmetry", "is applied with the X-point border, and a [source] SupportShape = \"box\" run has none, so the key would be read and do nothing. Remove it" );
+				if ( solverOptions.topologyRetry > 0 )
+					solver.fail( "TopologyRetry", "is applied with the X-point border, and a [source] SupportShape = \"box\" run has none, so the key would be read and do nothing. Remove it" );
+				if ( solverOptions.borderRegularisation > 0.0 )
+					solver.fail( "BorderRegularisation", "is applied with the X-point border, and a [source] SupportShape = \"box\" run has none, so the key would be read and do nothing. Remove it" );
+			}
+
 			if ( solver.has( "XPointMeritWeight" ) && !boundaryOptions.xpoint.given )
 				solver.fail( "XPointMeritWeight", "weights the X-point rows of the bordered Newton, and this file has no [boundary.xpoint] for them to weight" );
 			if ( solverOptions.plasmaSupportSweeps < 0 )
@@ -2093,6 +2300,22 @@ namespace meq
 			// the identical problem until the iteration cap.
 			if ( solverOptions.plasmaSupportSweeps > 0 && !sourceOptions.confinesToPlasma() )
 				solver.fail( "PlasmaSupportSweeps", "freezes the plasma SUPPORT between solves, and there is no support to freeze unless the source is confined to one: set [source] ConfineToPlasma = true or remove this key" );
+
+			/*
+			 * AND NOT UNDER THE BOX, WHICH HAS NO DISCRETE STATE TO SETTLE.
+			 *
+			 * The loop freezes an ELEMENT-GRANULAR moving support -- XP-1's
+			 * connectivity component -- and judges a sweep settled by that
+			 * component repeating. The box switches the fill off by a stated
+			 * branch, so the component is identically empty and the loop would
+			 * "settle" at its second sweep whatever the labels did; and the
+			 * labels themselves are doubles, which never repeat exactly, so
+			 * judging by them would need a tolerance -- a new solver knob. The
+			 * box needs neither: F vanishes at both labels, so a live edge
+			 * leaves the Jacobian nothing to miss, and MR-4b converged that way.
+			 */
+			if ( solverOptions.plasmaSupportSweeps > 0 && sourceOptions.supportIsBox() )
+				solver.fail( "PlasmaSupportSweeps", "freezes and re-decides the connectivity fill's element support, and [source] SupportShape = \"box\" has none -- the box is pointwise and its edge stays live within Newton. Remove this key" );
 
 			// PicardSweeps -- the basin, before the border. See SolverConfig.
 			solverOptions.picardSweeps = solver.getIntegerOr( "PicardSweeps", solverOptions.picardSweeps );
@@ -2110,6 +2333,21 @@ namespace meq
 			// so the loop would re-solve the identical problem N times.
 			if ( solverOptions.picardSweeps > 0 && !sourceOptions.isNormalised() )
 				solver.fail( "PicardSweeps", "iterates the NORMALISATION, and an unnormalised source has none: set [source] Normalised = true or remove this key" );
+
+			/*
+			 * NOT BESIDE A PRESCRIBED AXIS, WHICH IS MEASURED RATHER THAN
+			 * ARGUED. Each sweep solves the unbordered problem at frozen labels
+			 * under Picard-then-Newton, and on both configurations tried with
+			 * [source.axis] that solve does not do its job: on the shipped mirror
+			 * every sweep's solve diverges -- a non-finite first Newton residual
+			 * of 5e+47 -- while the bordered Newton needs no initialiser there,
+			 * converging from the cold start in four steps; on
+			 * examples/limited-tokamak.toml with its axis pinned the run ends at
+			 * exit 2. An initialiser that cannot be shown to help a constraint
+			 * is refused beside it until a case measures one.
+			 */
+			if ( solverOptions.picardSweeps > 0 && sourceOptions.axisPoint.given )
+				solver.fail( "PicardSweeps", "is not measured to work beside [source.axis]: on a mirror every sweep's frozen-label solve diverges, and on a tokamak with its axis pinned the run fails. The bordered Newton reads psi_ax at the point from the first step; remove this key" );
 
 			// AssemblyMode and TraceSolver. Both are performance keys and
 			// neither may change the answer, which is why they can be exposed at
@@ -2246,6 +2484,13 @@ namespace meq
 			if ( !( outputOptions.fluxInnerCut < outputOptions.fluxOuterCut ) )
 				output.fail( "FluxInnerCut", "must be less than FluxOuterCut; the two are "
 				             "the ends of the range of normalised flux the family covers" );
+
+			// The ( Psi, theta ) file traces CLOSED surfaces about a magnetic
+			// axis, and a mirror's are open field lines through the throat with
+			// no axis among them; refused here rather than discovered after
+			// the solve.
+			if ( outputOptions.fluxSurfaces && sourceOptions.supportIsBox() )
+				output.fail( "FluxSurfaces", "traces closed flux surfaces about a magnetic axis, and a [source] SupportShape = \"box\" plasma -- a mirror -- has neither" );
 		}
 
 		// [initialguess]

@@ -217,6 +217,17 @@ with every printed number looking exactly as it should.
        exception and may be asymmetric: it is a size field, not geometry, so
        the meshed half is refined as asked and the other half gets the
        reflection.
+   * - ``AlignPlasma``
+     - ``false``
+     - **Fragment the** ``Plasma*`` **box into the geometry**, so its four edges
+       are element faces and uniform refinement keeps them so. This is what a
+       mirror's ``[source] SupportShape = "box"`` wants: the source is cut off
+       at :math:`|z| =` ``AxialEdge``, where it jumps, and a jump across a line
+       that cuts elements costs a full order of convergence. Requires the
+       ``Plasma*`` box, inside the disc, and under ``Symmetric`` symmetric about
+       :math:`z = 0` — aligned, the box is geometry rather than a size field.
+       With ``SupportShape = "box"`` it is **required**, and ``PlasmaZMin`` and
+       ``PlasmaZMax`` must be exactly ``-AxialEdge`` and ``AxialEdge``.
 
 .. note::
 
@@ -236,6 +247,10 @@ with every printed number looking exactly as it should.
    is a centre and half-extents, ``halfdisc.py`` takes a corner and two extents,
    and the refined box is four bounds here and a corner plus extents there. The
    driver converts. One file does not get to hold two meanings of four numbers.
+
+``examples/diverted-tokamak-generated.toml`` is the worked example for a
+tokamak, and ``examples/mirror-rotating.toml`` for a mirror, whose
+``AlignPlasma`` box is the support's axial cutoff.
 
 .. warning::
 
@@ -392,6 +407,20 @@ under a Solov'ev source is an unknown key, not an ignored one.
        not carry is **refused** rather than ignored: a silently empty exclusion
        would converge, report nothing unusual, and describe a machine with a
        current channel behind its own wall.
+   * - ``SupportShape``
+     - ``"one-sided"``
+     - What ``ConfineToPlasma`` confines the source to. ``"one-sided"`` is the
+       tokamak's :math:`\Psi > 0`. ``"box"`` is a **magnetic mirror's**:
+       :math:`0 < \Psi \le 1` between two labels, and
+       :math:`|z| \le` ``AxialEdge``. Requires ``ConfineToPlasma = true``,
+       ``AxialEdge``, the inner label at a point (:ref:`configuration-axis-point`)
+       and the outer one at ``[boundary.limiter] R, Z``. See
+       :ref:`configuration-mirror-support`.
+   * - ``AxialEdge``
+     - —
+     - **Required with** ``SupportShape = "box"``, **refused otherwise.** The
+       throat, in metres from :math:`z = 0`: a prescribed cutoff of the
+       support, finite and positive.
 
 .. note::
 
@@ -472,7 +501,8 @@ under a Solov'ev source is an unknown key, not an ignored one.
        and therefore at which each ``Density`` is the physical density. A
        constant radius — not the magnetic axis, not a flux-surface average. See
        :doc:`rotation`.
-   * - ``Mu0``, ``Normalised``, ``PsiAxis``, ``ConfineToPlasma``
+   * - ``Mu0``, ``Normalised``, ``PsiAxis``, ``ConfineToPlasma``,
+       ``ExcludeAttributes``, ``SupportShape``, ``AxialEdge``
      - as ``"mhd"``
      - 
 
@@ -520,6 +550,118 @@ profile is an error; a ``*Scale`` with nothing to scale is an error; the species
 must carry charges of both signs; and ``*Variable``/``*Fit`` keys are reserved
 for a facility that does not exist yet and are refused rather than ignored, on
 this source type and on every other.
+
+.. _configuration-axis-point:
+
+``[source.axis]`` — :math:`\psi_{\mathrm{ax}}` at a prescribed point
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default :math:`\psi_{\mathrm{ax}}` is the flux at the **located** magnetic
+axis. This sub-table pins it at a point instead:
+:math:`\psi_{\mathrm{ax}} = \psi_h(R, Z)`, the same exact row
+``[boundary.limiter] R, Z`` gives :math:`\psi_{\mathrm{bnd}}`. It is a
+statement of the **problem** — where the label is read — and not a solver
+setting.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``R``, ``Z``
+     - *both required*
+     - The point, in metres. ``R`` must be strictly positive:
+       :math:`\psi(0, z) = 0` exactly, so a label on the symmetry axis would
+       pin :math:`\psi_{\mathrm{ax}}` to zero.
+
+**A magnetic mirror has no magnetic axis**, so this is how its inner label is
+posed — see :ref:`configuration-mirror-support`. On a tokamak, pinned at the
+located axis it reproduces the default's equilibrium; pinned anywhere else it
+is a different equilibrium, and nothing checks that the point is an axis. The
+run says so: the magnetic-axis check is **not asked** of a prescribed point,
+and the ``.nc`` carries ``axis_constraint = "prescribed point"`` with
+``axis_point_r`` and ``axis_point_z`` in place of ``axis_normalised_flux``.
+
+It goes under ``[source]`` because :math:`\psi_{\mathrm{ax}}` enters only
+through the source's normalisation, beside ``PsiAxis``, its starting value —
+which stays required. **A sub-table, so every key written after its header
+belongs to it** until the next header; a ``[source]`` key written there by
+mistake is refused by name.
+
+Refused without ``Normalised = true``; refused at the same point as
+``[boundary.limiter] R, Z``, where the span would be zero; and refused beside
+``[solver] PicardSweeps``, whose frozen-label sweeps are measured not to work
+with it — on a mirror every sweep's solve diverges, and on a tokamak with its
+axis pinned the run fails.
+
+.. _configuration-mirror-support:
+
+A mirror's support: ``SupportShape = "box"``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A mirror's plasma is an **annulus between two prescribed flux surfaces**: the
+inner label :math:`\psi_{\mathrm{ax}}` at ``[source.axis]`` and the outer
+label :math:`\psi_{\mathrm{bnd}}` at ``[boundary.limiter] R, Z``. Its span
+:math:`\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}}` is **negative** — the
+inner label is the smaller flux — and nothing about that needs a key, since
+:math:`\Psi` is written in the span itself. What does need one is the
+support's shape: :math:`\Psi > 0` alone would admit everything inside the
+inner surface down to :math:`R = 0` and, beyond the throat, the expander.
+``SupportShape = "box"`` adds :math:`\Psi \le 1` and
+:math:`|z| \le` ``AxialEdge``.
+
+.. code-block:: toml
+
+   [source]
+   Normalised = true
+   ConfineToPlasma = true
+   SupportShape = "box"
+   AxialEdge = 1.5
+   PsiAxis = 0.0056378011613958832    # the starting value of the inner label
+
+   [source.axis]                      # the inner label
+   R = 0.1
+   Z = 0.0
+
+   [boundary.limiter]                 # the outer label
+   R = 0.35
+   Z = 0.0
+
+``examples/mirror-rotating.toml`` is the worked example, and
+:doc:`rotation` explains it.
+
+.. warning::
+
+   **The source must vanish at both labels.** :math:`\Psi = 1` is an edge of
+   the box as well as :math:`\Psi = 0`, so ``ConfineToPlasma``'s precondition
+   — :math:`F \to 0` at the edge, or the Newton Jacobian is missing the edge
+   term — holds at the inner label too. Nothing can check that for you.
+
+**The cutoff is a modelling approximation.** ``AxialEdge`` is prescribed, and
+where current still flows at the throat it is a jump in :math:`F`. Every mirror
+run reports the current density on the cutoff beside the peak (``axial
+cutoff``, and ``axial_cutoff_relative`` in the ``.nc``); no threshold is
+calibrated to refuse on. With ``[mesh.generate]`` the cutoff is aligned to,
+by ``AlignPlasma``.
+
+**Refused beside the box**, each because it would be accepted and do nothing or
+poses a problem not measured on a mirror: ``ExcludeAttributes`` (it acts
+through the connectivity fill, which the box switches off), ``PlasmaCurrent``,
+``SafetyFactorFile``, ``[boundary.limiter] SurfaceAttribute``,
+``[boundary.xpoint]``, ``[solver] PlasmaSupportSweeps`` (the loop judges a
+sweep settled by the fill's component, which the box does not have — its edge
+stays live within Newton, which is right because :math:`F` vanishes at both
+labels), ``[solver] UpDownSymmetry``, ``TopologyRetry`` and
+``BorderRegularisation`` (applied only with an X-point), ``[inverse]`` and
+``[output] FluxSurfaces`` (a mirror has no closed surfaces about an axis).
+
+The run starts :math:`\psi_{\mathrm{bnd}}` at the starting state's flux at the
+outer label rather than at zero, where the first span would come out positive
+and put the box around the axis. That is a fixed rule of the box, not a key.
+Adaptivity and ``--device`` are accepted beside the box and are not yet
+measured on a mirror.
 
 ``PlasmaCurrent`` — the third border
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1425,6 +1567,13 @@ envelope theorem removes the position term, as it does for
 
    Where the contact was actually found is reported on the run and written into
    the ``.nc`` as ``limiter_r``, ``limiter_z`` and ``limiter_contact_located``.
+
+.. note::
+
+   **On a magnetic mirror this point is the outer label**, and with
+   ``[source] SupportShape = "box"`` it is required — as a point, since a
+   mirror's labels are both read where the problem pins them.  See
+   :ref:`configuration-mirror-support`.
 
 .. warning::
 

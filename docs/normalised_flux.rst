@@ -124,10 +124,12 @@ zero. That locality is measured, not assumed.
    the point and selects it, and :math:`\psiax` is then :math:`\psi_h` there:
    the same exact row a prescribed limiter contact gives :math:`\psibnd`, with
    nothing located and nothing differenced. Choosing it without a point is
-   refused, and it is not yet a configuration key. On a tokamak pinned at the
+   refused. From a file it is ``[source.axis] R, Z`` —
+   :ref:`configuration-axis-point`. On a tokamak pinned at the
    located axis it reproduces ``LocatedAxis``'s equilibrium; pinned anywhere
    else it is a different equilibrium, normalised by a flux below the axis's,
-   and nothing checks that the point is an axis.
+   and nothing checks that the point is an axis — the driver's magnetic-axis
+   check is not asked of it.
 
 **The located axis costs nothing in the Jacobian, which is the envelope
 theorem.** :math:`x^*` moves with the solution, so the chain rule gives

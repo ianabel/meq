@@ -2605,6 +2605,23 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	            "border did not close" );
 
 	/*
+	 * AND IT GETS THERE IN THE NUMBER OF STEPS IT TAKES, because the iteration
+	 * count is the one symptom of two defects that move no answer. Measured 12
+	 * in double at MKL_NUM_THREADS 1 and 4, and 9 in single. psi_bnd seeded at
+	 * the limiter's starting flux -- the mirror's rule, widened past the box --
+	 * takes this file to 129 steps at the same psi_ax to every printed digit,
+	 * which is FREE-BOUNDARY-PLAN.md section 10.5's drift; a locator that warm
+	 * starts from the wrong element took it to 32, MEASUREMENTS.md M-176. Both
+	 * left every assertion above green.
+	 */
+	BOOST_TEST( iterations <= 20.0,
+	            "the bordered Newton took " << iterations << " steps on the "
+	            "limited tokamak, measured 12. If the log says 'psi_bnd starts at', "
+	            "the mirror's psi_bnd seed has reached a tokamak: it is the box "
+	            "path's rule and only the box's, makeSolver() in apps/meq.cpp. "
+	            "Otherwise look at the warm start's point location" );
+
+	/*
 	 * AND THE REPORTED psi_ax HAS TO BE A VALUE A CONSUMER OF THE ANSWER CAN
 	 * SEE. This is the assertion that is NOT a comparison with freegs4e, and it
 	 * is here because psi_ax is the largest NODAL value of psi_h -- a definition
@@ -4027,6 +4044,19 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
 	             psiBoundary, referencePsiBoundary, boundaryError,
 	             axisR, axisZ, axisApart, scale, settled );
 	std::fflush( stdout );
+
+	/*
+	 * A TOKAMAK'S psi_bnd STARTS AT ZERO, the mirror's seed at the outer label
+	 * being the box path's rule and nothing else's. Asserted on the log because
+	 * on this file the seed costs one Newton step ( 3 against 2 ), which no
+	 * bound on the count separates from scatter; theDriverSolvesALimitedTokamak
+	 * asserts what it costs where it costs 129.
+	 */
+	BOOST_TEST( log.find( "psi_bnd starts at" ) == std::string::npos,
+		"the driver seeded psi_bnd from the starting state on a limited tokamak. "
+		"That is a mirror's rule, gated on [source] SupportShape = \"box\" in "
+		"makeSolver() in apps/meq.cpp; on examples/limited-tokamak.toml it "
+		"takes the bordered Newton from 12 steps to 129" );
 
 	/*
 	 * THE SPAN'S SIGN IS THE ASSERTION WITH THE MOST TEETH AND IT IS NOT A

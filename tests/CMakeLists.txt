@@ -658,6 +658,19 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 	set_tests_properties(RotatingMirror RotatingMirrorResolution PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
+	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
+	# binary, against the library on geq's problem. It needs the driver and its
+	# wrapper, so the suite is compiled in only where both are built -- the
+	# paths are passed rather than guessed, DriverAcceptance's reason.
+	if(TARGET meq)
+		target_compile_definitions(RotatingMirror PRIVATE
+			MEQ_DRIVER_PATH="$<TARGET_FILE:meq>"
+			MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
+		add_test(NAME RotatingMirrorDriver COMMAND RotatingMirror --run_test=driver
+			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+		set_tests_properties(RotatingMirrorDriver PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1")
+	endif()
 else()
 	message(STATUS "meq: RotatingMirror not registered")
 endif()

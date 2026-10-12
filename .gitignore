@@ -94,6 +94,7 @@ docs/doctrees/
 examples/diverted-tokamak-generated.msh
 examples/limited-tokamak-filament.msh
 examples/limited-tokamak-filament-curve.msh
+examples/mirror-rotating.msh
 # The freegs4e benchmark's seven machine cases, whose meshes tools/freegs4e-
 # benchmark/make_all.sh regenerates from the references along with everything
 # else in them.
@@ -127,6 +128,9 @@ driver-acceptance-*.toml
 # devices and keeps each run's transcript, which is what the case asserts on.
 # Anchored, per the note below.
 /device-parity-scratch/
+# And RotatingMirrorDriver's, which runs the shipped examples/mirror-rotating.toml
+# with its output redirected here. Anchored, per the note below.
+/mirror-driver-scratch/
 visit_dump*/
 ParaView/
 
