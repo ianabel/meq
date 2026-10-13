@@ -16166,8 +16166,9 @@ is the vacuum field.
 **The plasma area.** ITER Example 2 at `k = 2` on the box `R` [0.60, 1.40],
 `z` [−0.70, 0.75], which stops above the X-point at −0.704. The source is
 confined and one-sided, and the fill is refreshed. The exact area of
-`{ ψ < 0 }` is 0.617473648416547. It is computed as root pairs integrated in
-`t = √( z_top − z )`, and 64 panels agree with 32 to 8.9e-16.
+`{ ψ < 0 }` is 0.617473648416548. It is computed as root pairs integrated in
+`t = √( z_top − z )` with Boost.Math's 20-point Gauss rule in double, and 64
+panels agree with 32 to 1.1e-16.
 
 | `n` | elements | plasma area | error | rate | `plasma_boundary` | ratio |
 |---|---|---|---|---|---|---|
@@ -16483,3 +16484,41 @@ solves that do not converge (`PrescribedAxisPoint`, `MirrorSupport`). No test
 that ran in single at M-242 changed state.
 `RotatingMirror.cpp` also did not compile in single: a `std::max` over a
 `real_t` norm and two `double`s, now cast.
+
+
+### M-272
+
+**THE MIRROR AND ELEMENT-REGION TESTS IN SINGLE: 70 OF 77. EVERY ONE OF THE
+NINE NEW REDS WAS A TEST AND NOT AN ANSWER, EXCEPT ONE THAT IS UPSTREAM'S.**
+
+[M-271](#m-271)'s nine, each repaired by a precondition, by a helper from
+`RoundOffFloor.hpp` that is a `std::max` against the historical bound or is
+`#ifdef`'d, or by a loud skip where the signal is under the floor. The double
+suite stays at 76 of 77 throughout.
+
+| test | what failed in single | measured | repair |
+|---|---|---|---|
+| `PrescribedAxisPoint`, `MirrorSupport` | the reference solves never converged | literal `setNewtonControl( 1e-12, 1e-14 )`; the residual stalls at 8e-08 | `meq::newtonTolerance()`, M-217's trap at three new sites |
+| `PrescribedAxisPoint` | pinned against located `psi_ax`, `psi_h` | 8.2e-06 and 2.2e-05 at `n = 8` on the stiff case, against controls of 5.5e-04 and up | 1024 eps, and the control must also clear it. The located point is known to `sqrt( eps )` and `grad psi_h` is O( h^k ) there (M-120) |
+| `PrescribedAxisPoint` | the tail lands at round-off | threshold 1.2e-06, one decade above round-off | skipped loudly in single |
+| `ElementRegions`, `DriverAcceptance` | areas to 1e-12 | 0.2 eps of the box, 11 eps of a coil | `scalarAgreementFloor` |
+| `ElementRegions` | the exact area's own reference | MFEM's segment rule is `real_t` | Boost.Math's double Gauss rule: 1.1e-16 between 32 and 64 panels in both builds |
+| `OutputTests`, `DriverAcceptance` | VTK cell values against the record | the GridFunction holds `real_t` | compared against the record rounded to `real_t`, exactly |
+| `VacuumMirror` | the table against `potentialError()` | 2.3e-08 relative | `scalarAgreementFloor` |
+| `VacuumMirror` | the mode sweep's 2% "it stops" | the plateau is 5.9e-05 against double's 2.07e-05 and moves 3% with N | single holds it to the 5% band the plateau is defined by |
+| `RotatingMirror` | the labels against the field at their points | 6e-11 on a span of 0.06 | `scalarAgreementFloor` |
+| `RotatingMirror` | `quadraticTail` | three residuals, no triple | M-219's notice, skipped; the wrong-Jacobian control still runs |
+| `RotatingMirror` | the wrong Jacobian moves the answer | 1.25e-06 | `exactAgreementFloor` |
+| `RotatingMirror` | the tighter stopping target | `1e-15` cannot converge in single, where the default is the floor | skipped loudly in single |
+| `RotatingMirrorDriver` | driver against library, bit for bit | 1.578e-06, peaking at Gamma | `4 eps/fd_step x psi_bnd` in single: the extension's own floor, measured at 1.01 of it |
+| `RotatingMirrorResolution` | aligned against cut cutoff; MEQ against geq | aligned psi* 5.5e-08 and geq's 257-513 difference 3.5e-08, both under 16 eps x psi_bnd = 1.25e-07 | skipped by `aboveTheFormatsFloor()`; MEQ - geq 3.1e-07 is held to `exactAgreementFloor`, and the Hagenow control's rms still runs |
+
+**`VacuumMirror` stays red in single, and it is MFEM's.** At level 2,
+`ExtensionBoundaryQuadrature` differences `Endpoint()` at `xi +- fd_step` without
+staying on the face. The 21-point rule's first point is `0.0031` against a step
+of `5e-3`, so face 264 is evaluated at `xi = 1.001876`. That maps to
+`( 2.58955908, 1.51478744 )`, where `phi = +6.63e-05`, outside Gamma. Its vertex
+is 5.3e-05 inside, and every true Gamma_h point is inside in both builds. That
+is bit for bit the point `VertexConePath::Endpoint()` aborts on. Filed as
+`../mfem-hdg-dev/doc/HDG-EXTENSION-FD-FACE-END-FROM-MEQ.md`. **The single suite
+reads 70 of 77**: M-242's six and this.

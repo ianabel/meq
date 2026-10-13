@@ -185,7 +185,8 @@ namespace
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                         meq::newtonTolerance( 1.0e-14 ), 40 );
 
 		Solved out;
 		out.converged = true;
@@ -225,7 +226,8 @@ namespace
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                         meq::newtonTolerance( 1.0e-14 ), 40 );
 
 		Solved out;
 		out.converged = true;
@@ -332,23 +334,39 @@ namespace
 		 * stopping points, and nothing else. 1e-9 is HighBetaConvergence's own
 		 * bound for a LocatedAxis constraint residual, for the same reason.
 		 */
-		BOOST_TEST( axisGap < 1.0e-9,
+		//
+		// IN SINGLE THE LOCATED POINT IS KNOWN TO sqrt( eps ), AND grad psi_h
+		// IS NOT ZERO THERE. A stationary point's position costs half the
+		// digits (M-220), so x* is good to about 3e-04, and M-120's O( h^k )
+		// gradient turns that into psi: measured 8.2e-06 in psi_ax and 2.2e-05
+		// in psi_h at n = 8 on the stiff case, 1e-07 to 1e-06 elsewhere, against
+		// controls that move 5.5e-04 to 1.5e-01. So the bound is 1024 eps,
+		// 1.2e-04: 5.5 above the worst agreement and 4.5 below the nearest
+		// control, which is also required below. M-272.
+#ifdef MFEM_USE_SINGLE
+		double const agreementBound = 1024.0*static_cast<double>(
+			std::numeric_limits<mfem::real_t>::epsilon() );
+#else
+		double const agreementBound = 1.0e-9;
+#endif
+		BOOST_TEST( axisGap < agreementBound,
 		            name << ", n = " << n << ": psi_ax came out "
 		            << pinned.psiAxis << " pinned at the located axis against "
 		            << located.psiAxis << " located -- " << axisGap
 		            << " relative. At the located point the two constraints are "
 		            "the same equation, so this is a wrong row, a wrong point or "
 		            "psi_c added on one path and not the other" );
-		BOOST_TEST( boundaryGap < 1.0e-9,
+		BOOST_TEST( boundaryGap < agreementBound,
 		            name << ", n = " << n << ": psi_bnd came out "
 		            << pinned.psiBoundary << " against " << located.psiBoundary );
-		BOOST_TEST( gap < 1.0e-9,
+		BOOST_TEST( gap < agreementBound,
 		            name << ", n = " << n << ": psi_h differs from LocatedAxis's "
 		            "by " << gap << " in relative L2" );
 
 		// The constraint closes as an exact row should: no root search stands
 		// between it and machine zero, so it is held to Newton's own floor.
-		BOOST_TEST( std::abs( pinned.constraint ) < 1.0e-12*scale,
+		BOOST_TEST( std::abs( pinned.constraint )
+		            < meq::tests::scalarAgreementFloor( 1.0e-12*scale, scale ),
 		            name << ", n = " << n << ": the prescribed constraint reads "
 		            << pinned.constraint << ". The row is exact, so it closes to "
 		            "round-off or it is not the row" );
@@ -395,11 +413,20 @@ namespace
 		double const last = pinned.residuals.empty()
 		                    ? std::numeric_limits<double>::infinity()
 		                    : pinned.residuals.back();
-		BOOST_TEST( last < 1.0e-14,
-		            name << ", n = " << n << ": the prescribed-point Newton "
-		            "stopped at " << last << ", just under its threshold rather "
-		            "than at round-off. That is a linear tail, and with a row and "
-		            "a corner that are both exact it means one of them is not" );
+		//
+		// In single the threshold, meq::newtonTolerance( 1e-14 ) = 1.2e-06, sits
+		// one decade above round-off, so a linear tail and a quadratic one stop
+		// in the same decade -- measured 4.5e-07 and 7.9e-08 on the exact row.
+		// A double-build acceptance; the order above still runs. M-272.
+		if ( meq::tests::newtonOrderCeilingIsMeasurable() )
+			BOOST_TEST( last < 1.0e-14,
+			            name << ", n = " << n << ": the prescribed-point Newton "
+			            "stopped at " << last << ", just under its threshold rather "
+			            "than at round-off. That is a linear tail, and with a row and "
+			            "a corner that are both exact it means one of them is not" );
+		else
+			std::printf( "    *** SKIPPED where the tail lands: this build's stopping "
+			             "threshold is one decade above its round-off. M-272\n" );
 
 		// THE CONTROL HAS TO DISAGREE, or the agreement above is not evidence.
 		BOOST_TEST( control.converged,
@@ -408,7 +435,7 @@ namespace
 		            "solve rather than a different equilibrium" );
 		double const controlAxisGap =
 			std::abs( control.psiAxis - located.psiAxis )/scale;
-		BOOST_TEST( controlAxisGap > 1.0e-6,
+		BOOST_TEST( controlAxisGap > std::max( 1.0e-6, agreementBound ),
 		            name << ", n = " << n << ": pinning psi_ax a quarter element "
 		            "from the axis moved it by only " << controlAxisGap
 		            << " relative. Then the agreement above would hold whatever "

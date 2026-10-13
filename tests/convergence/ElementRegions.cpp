@@ -32,6 +32,7 @@
 
 #define BOOST_TEST_MODULE ElementRegions
 #include <boost/test/unit_test.hpp>
+#include <boost/math/quadrature/gauss.hpp>
 
 #include <algorithm>
 #include <array>
@@ -47,6 +48,7 @@
 #include "mfem.hpp"
 
 #include "MirrorMachine.hpp"
+#include "RoundOffFloor.hpp"
 
 #include "meq/Coils.hpp"
 #include "meq/ConductorField.hpp"
@@ -319,9 +321,9 @@ namespace
 	 * integral is taken in t with z = zTop - t^2: w vanishes like the square
 	 * root of zTop - z at the high point, so in t the integrand is smooth and
 	 * Gauss-Legendre converges spectrally. @a panels composite panels of
-	 * order @a order.
+	 * twenty points each.
 	 */
-	double exactArea( double z0, int panels, int order )
+	double exactArea( double z0, int panels )
 	{
 		// zTop: where the core's minimum in R reaches zero.
 		double lo = 0.5;
@@ -338,20 +340,21 @@ namespace
 		double const zTop = 0.5*( lo + hi );
 		double const span = std::sqrt( zTop - z0 );
 
-		mfem::IntegrationRule const &rule =
-			mfem::IntRules.Get( mfem::Geometry::SEGMENT, order );
+		// Boost.Math's Gauss-Legendre rule and not MFEM's, because MFEM's points
+		// are real_t: in single they are floats, and a closed form integrated on
+		// float abscissae is good to 1e-9, not to the 1e-12 asserted below.
 		double area = 0.0;
 		for ( int p = 0; p < panels; ++p )
-			for ( int q = 0; q < rule.GetNPoints(); ++q )
-			{
-				double const t = span*( p + rule.IntPoint( q ).x )/panels;
-				double const z = zTop - t*t;
-				double centre = 0.0;
-				if ( coreMinimum( z, centre ) >= 0.0 )
-					continue;
-				double const width = rootInR( z, centre, 1.45 ) - rootInR( z, 0.55, centre );
-				area += rule.IntPoint( q ).weight*span/panels*width*2.0*t;
-			}
+			area += boost::math::quadrature::gauss< double, 20 >::integrate(
+				[ & ]( double t )
+				{
+					double const z = zTop - t*t;
+					double centre = 0.0;
+					if ( coreMinimum( z, centre ) >= 0.0 )
+						return 0.0;
+					return ( rootInR( z, centre, 1.45 ) - rootInR( z, 0.55, centre ) )*2.0*t;
+				},
+				span*p/panels, span*( p + 1 )/panels );
 		return area;
 	}
 
@@ -459,8 +462,8 @@ BOOST_AUTO_TEST_CASE( thePlasmaAreaConvergesOnTheExactSoloviev )
 {
 	double const r0 = 0.6, r1 = 1.4, z0 = -0.70, z1 = 0.75;
 
-	double const reference = exactArea( z0, 64, 20 );
-	double const check = exactArea( z0, 32, 20 );
+	double const reference = exactArea( z0, 64 );
+	double const check = exactArea( z0, 32 );
 	std::printf( "\n  ER-0: THE PLASMA AREA ON ITER EXAMPLE 2, box R [%.2f, %.2f] "
 	             "z [%.2f, %.2f], k = 2\n", r0, r1, z0, z1 );
 	std::printf( "    exact area %.15f (64 panels), %.3e from 32 panels\n",
@@ -506,8 +509,11 @@ BOOST_AUTO_TEST_CASE( thePlasmaAreaConvergesOnTheExactSoloviev )
 		// RELATIVE, and not round-off of one sum: MakeCartesian2D's vertices
 		// are i*h + r0, rounded, so the elements tile a box within an ulp of
 		// the one named.
-		BOOST_TEST( std::abs( totalArea( record ) - ( r1 - r0 )*( z1 - z0 ) )
-		            <= 1.0e-11*( r1 - r0 )*( z1 - z0 ), "the element areas are the box's: "
+		// And the weights and Jacobians are real_t: 0.2 eps of the box in single.
+		double const boxArea = ( r1 - r0 )*( z1 - z0 );
+		BOOST_TEST( std::abs( totalArea( record ) - boxArea )
+		            <= meq::tests::scalarAgreementFloor( 1.0e-11*boxArea, boxArea ),
+		            "the element areas are the box's: "
 		            << totalArea( record ) - ( r1 - r0 )*( z1 - z0 ) );
 		BOOST_TEST( record.faults == 0 );
 		BOOST_TEST( record.regionCount( ElementRegion::Mixed ) == 0 );
@@ -788,10 +794,14 @@ BOOST_AUTO_TEST_CASE( theConductorsAndTheCutoffOnTheMirror )
 		             pureRecord.materialArea[ static_cast< std::size_t >( row ) ],
 		             rectangle,
 		             edgesCut( *cut.domain->sub, cutRecord, row, table.coil( i ) ) );
+		// An area is a sum of real_t weights and Jacobians: one eps of the
+		// format, relatively, which is 3e-07 here in single. M-272.
+		double const areaBound = meq::tests::scalarAgreementFloor( 1.0e-12*rectangle,
+		                                                           rectangle );
 		BOOST_TEST( std::abs( meshedRecord.materialArea[ static_cast< std::size_t >( row ) ]
-		                      - rectangle ) <= 1.0e-12*rectangle );
+		                      - rectangle ) <= areaBound );
 		BOOST_TEST( std::abs( pureRecord.materialArea[ static_cast< std::size_t >( row ) ]
-		                      - rectangle ) <= 1.0e-12*rectangle );
+		                      - rectangle ) <= areaBound );
 
 		int disagree = 0;
 		for ( int e = 0; e < meshedRecord.elementCount(); ++e )
@@ -1042,7 +1052,8 @@ BOOST_AUTO_TEST_CASE( alignConductorsCost )
 				double const rectangle = table.coil( i ).area();
 				double const area = records[ 1 ].materialArea[
 					static_cast< std::size_t >( table.coilMaterial( i ) ) ];
-				BOOST_TEST( std::abs( area - rectangle ) <= 1.0e-12*rectangle,
+				BOOST_TEST( std::abs( area - rectangle )
+				            <= meq::tests::scalarAgreementFloor( 1.0e-12*rectangle, rectangle ),
 				            "coil " << i << ": " << area << " against " << rectangle );
 			}
 		}

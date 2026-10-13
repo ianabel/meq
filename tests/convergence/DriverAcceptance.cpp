@@ -450,7 +450,9 @@ namespace
 		std::printf( "    %s: %d elements, material areas %.15e against the mesh's "
 		             "%.15e, %.1e apart\n", stem.c_str(), mesh.first, total,
 		             mesh.second, domainError );
-		BOOST_TEST( domainError <= 1.0e-12,
+		// An area is a sum of ip.weight x |J|, both real_t, so it carries one
+		// eps of the format relatively: 8.8e-09 here in single. M-272.
+		BOOST_TEST( domainError <= meq::tests::scalarAgreementFloor( 1.0e-12, 1.0 ),
 		            "the material areas sum to " << total << " and the domain is "
 		            << mesh.second );
 
@@ -473,7 +475,9 @@ namespace
 			if ( std::isfinite( want.alignedArea ) )
 			{
 				double const area = headerAttribute( header, "material_area_" + want.name );
-				BOOST_TEST( std::fabs( area - want.alignedArea ) <= 1.0e-12*want.alignedArea,
+				BOOST_TEST( std::fabs( area - want.alignedArea )
+				            <= meq::tests::scalarAgreementFloor( 1.0e-12*want.alignedArea,
+				                                                 want.alignedArea ),
 				            want.name << "'s area is " << area << " and its rectangle's "
 				            << want.alignedArea << " on a mesh aligned to it" );
 			}
@@ -589,9 +593,13 @@ namespace
 			            << " do not carry one value at all their points" );
 			BOOST_TEST( shared == 0, shared << " points of " << vtu << " are not in "
 			            "exactly one cell, so an order-0 field is smeared across faces" );
+			// The .vtu holds the record in this build's real_t and the .nc in
+			// double, so the exact comparison is against the record rounded to
+			// real_t -- the identity in double, float's rounding in single.
 			int wrong = 0;
 			for ( std::size_t c = 0; c < cells.size(); ++c )
-				wrong += cells[ c ] != want.values.at( c ) ? 1 : 0;
+				wrong += cells[ c ] != static_cast<double>(
+					static_cast<mfem::real_t>( want.values.at( c ) ) ) ? 1 : 0;
 			BOOST_TEST( wrong == 0, want.array << " disagrees with " << nc << " in "
 			            << wrong << " of " << cells.size() << " cells" );
 			if ( regions.empty() )

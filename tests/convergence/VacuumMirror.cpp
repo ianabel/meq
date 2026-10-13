@@ -280,7 +280,11 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 					return reference->psi( x( 0 ), x( 1 ) );
 				} );
 				double const direct = s->solver->potentialError( exact );
-				BOOST_TEST_REQUIRE( std::abs( direct - e.global ) <= 1.0e-10*direct,
+				// The table sums in double and potentialError() in real_t, so
+				// in single they part at a few eps of the error. M-272.
+				BOOST_TEST_REQUIRE( std::abs( direct - e.global )
+				                    <= meq::tests::scalarAgreementFloor( 1.0e-10*direct,
+				                                                         direct ),
 					"the error table reads " << e.global << " where "
 					"potentialError() reads " << direct );
 			}
@@ -439,7 +443,18 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	// AND IT STOPS: past the plateau N buys nothing, so the error left is the
 	// discretisation's. A rising last row would be the coupling degrading with
 	// N; a still-falling one would mean (a) is reading the truncation.
-	BOOST_TEST( std::abs( global[ last ]/at( global, defaultModes ) - 1.0 ) < 0.02,
+	//
+	// In single the plateau is the format's and not the discretisation's: the
+	// error over D_h stops at 5.9e-05 where double stops at 2.07e-05, the
+	// trace tail floors at 1.1e-06, and past N = 16 the reading moves by +-3%
+	// from one N to the next with nothing left to resolve. So single holds
+	// "it stops" to the 5% band the plateau above is defined by. M-272.
+#ifdef MFEM_USE_SINGLE
+	double const stillBand = 0.05;
+#else
+	double const stillBand = 0.02;
+#endif
+	BOOST_TEST( std::abs( global[ last ]/at( global, defaultModes ) - 1.0 ) < stillBand,
 		"between N = " << defaultModes << " and N = " << sweep[ last ]
 		<< " the error over D_h moved from " << at( global, defaultModes )
 		<< " to " << global[ last ] << ", so it has not stopped falling" );

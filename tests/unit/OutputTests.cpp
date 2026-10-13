@@ -527,14 +527,19 @@ namespace
 			                    field.name << " has " << values.size() << " values for "
 			                    << pointCount << " points" );
 			BOOST_TEST( meq::tests::vtuArrayIsPointData( vtu, field.name ) );
+			// The cell data are GridFunctions, so they hold the record's double
+			// in this build's real_t: in single a fraction arrives rounded to
+			// float, exactly. Comparing against that rounding keeps the check
+			// exact in both formats, and in double the cast is the identity.
 			int wrong = 0;
 			for ( std::size_t c = 0; c < offsets.size(); ++c )
 			{
 				std::size_t const begin = c == 0 ? 0 : static_cast<std::size_t>( offsets[ c - 1 ] );
 				std::size_t const end = static_cast<std::size_t>( offsets[ c ] );
+				double const want = static_cast<double>(
+					static_cast<mfem::real_t>( ( *field.expected )[ c ] ) );
 				for ( std::size_t k = begin; k < end; ++k )
-					if ( values[ static_cast<std::size_t>( connectivity[ k ] ) ]
-					     != ( *field.expected )[ c ] )
+					if ( values[ static_cast<std::size_t>( connectivity[ k ] ) ] != want )
 					{
 						++wrong;
 						break;

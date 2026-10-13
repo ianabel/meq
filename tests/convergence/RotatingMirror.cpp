@@ -951,11 +951,21 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 			             meq::tests::bestNewtonOrder( history ) );
 			std::fflush( stdout );
 
-			std::string why;
-			BOOST_TEST( quadraticTail( history, why ),
-				"k = " << order << ", level " << level << ": " << why << "a tail "
-				"that does not land where a quadratic model puts it is a Jacobian "
-				"that does not match the residual" );
+			// In single the solve reaches the format's floor in three residuals,
+			// so there is no triple past the guess's own step to read a tail
+			// from. That is the format and not the Jacobian, and it is skipped
+			// loudly; aWrongJacobianIsVisibleInTheHistory still runs, because a
+			// wrong Jacobian's history is long. M-272.
+			if ( history.size() < 4 && meq::tests::newtonOrderIsUnmeasurable( 0.0 ) )
+				std::printf( "%s\n", meq::tests::newtonOrderNotice().c_str() );
+			else
+			{
+				std::string why;
+				BOOST_TEST( quadraticTail( history, why ),
+					"k = " << order << ", level " << level << ": " << why << "a tail "
+					"that does not land where a quadratic model puts it is a Jacobian "
+					"that does not match the residual" );
+			}
 
 			std::vector<meq::GradShafranovSolver::BorderStep> const &steps =
 				run->solver->borderSteps();
@@ -972,7 +982,10 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 			BOOST_TEST( m.span < 0.0,
 				"a mirror's span is negative -- the inner label is the smaller "
 				"flux -- and this one is " << m.span );
-			double const labelTolerance = 1.0e-12*std::abs( m.span );
+			// Two routes to one number: the border unknown, and the field read
+			// at its point. Round-off of the format on the span. M-272.
+			double const labelTolerance = meq::tests::scalarAgreementFloor(
+				1.0e-12*std::abs( m.span ), m.span );
 			BOOST_TEST( std::abs( m.psiAxis - m.fieldAtAxisPoint ) <= labelTolerance,
 				"psi_ax " << m.psiAxis << " is not the field at its point, "
 				<< m.fieldAtAxisPoint );
@@ -1017,6 +1030,15 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
  */
 BOOST_AUTO_TEST_CASE( theStoppingTargetIsNotLooseAgainstThePlasmasOwnFlux )
 {
+#ifdef MFEM_USE_SINGLE
+	// The default target is meq::newtonTolerance(), which in single IS the
+	// format's floor, so there is no tighter target to compare it with: a
+	// solve asked for 1e-15 cannot converge. A double-build acceptance. M-272.
+	std::printf( "\n  *** SKIPPED: in single the default stopping target is the "
+	             "format's own floor, so no tighter target exists to compare it "
+	             "against. M-272\n" );
+	return;
+#endif
 	Options base;
 	std::unique_ptr<MirrorRun> const reference = runMirror( base );
 	Options tight = base;
@@ -1081,7 +1103,12 @@ BOOST_AUTO_TEST_CASE( aWrongJacobianIsVisibleInTheHistory )
 
 	mfem::GridFunction difference( wrong->solver->potential() );
 	difference -= reference->solver->potential();
-	BOOST_TEST( difference.Normlinf() < 1.0e-9*std::abs( reference->solver->psiBoundary() ),
+	// Two solves stopped at the same target by different routes: in single
+	// each is good to the format's floor, which a whole solve reaches at a few
+	// thousand eps (exactAgreementFloor()'s argument). M-272.
+	double const scale = std::abs( reference->solver->psiBoundary() );
+	BOOST_TEST( difference.Normlinf()
+	            < std::max( 1.0e-9*scale, meq::tests::exactAgreementFloor( scale ) ),
 		"a Jacobian error moved the ANSWER by " << difference.Normlinf()
 		<< "; it should move only the route" );
 
@@ -1351,6 +1378,16 @@ BOOST_AUTO_TEST_CASE( theAlignedCutoffKeepsTheOrder )
 	             meq::tests::rate( cut[ 0 ], cut[ 1 ], 2.0 ),
 	             meq::tests::rate( cut[ 1 ], cut[ 2 ], 2.0 ) );
 	std::fflush( stdout );
+	// In single both columns end under the format's floor -- aligned 5.5e-08
+	// against 16 eps x psi_bnd = 1.25e-07 -- so the factor between them is
+	// round-off. A double-build acceptance there, skipped loudly. M-272.
+	if ( !meq::tests::aboveTheFormatsFloor( aligned.back(), ref.psiBoundary ) )
+	{
+		std::printf( "    *** SKIPPED: the aligned column ends at %.3e, under this "
+		             "build's floor on psi*, so the factor to the cut one is not "
+		             "measurable. M-272\n", aligned.back() );
+		return;
+	}
 	BOOST_TEST( aligned.back() < 0.2*cut.back(),
 		"aligning the cutoff to element faces leaves psi* at " << aligned.back()
 		<< " against " << cut.back() << " cut, so the alignment is not what "
@@ -1408,9 +1445,27 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqAsGeqRefines )
 	             finiteCount( best.psiStar ), best.psiStar.size() );
 	BOOST_TEST_REQUIRE( finiteCount( best.psiStar ) == static_cast<int>( best.psiStar.size() ) );
 
+	/*
+	 * IN SINGLE, geq'S OWN RESOLUTION IS UNDER MEQ'S FLOOR. geq's 257-against-
+	 * 513 difference is 3.5e-08 at most, and MEQ's psi* in single is good to
+	 * about 3e-07 there, so MEQ - geq stops falling at MEQ's floor and the
+	 * corners' shares are MEQ's error over a small plasma flux. Every claim
+	 * below that needs geq's resolution is then a double-build acceptance and
+	 * is skipped loudly. What a conversion error would produce -- 1e-03 and up
+	 * -- is still asserted, as is the Hagenow control's rms. M-272.
+	 */
+	double const fluxScale = std::abs( best.psiBoundary );
+	bool const resolvable = meq::tests::aboveTheFormatsFloor(
+		difference( withoutCorners( g257 ), g513 ).max, fluxScale );
+	if ( !resolvable )
+		std::printf( "    *** SKIPPED: geq's own 257 - 513 difference is under this "
+		             "build's floor on psi*, so the matrix, its rates and the corners "
+		             "are not measurable. The conversion bound and the Hagenow control "
+		             "still run. M-272\n" );
+
 	// The corners, asserted as found, on the direct solves: the Hagenow
 	// control's carry its bias besides.
-	for ( std::size_t i : gridCorners() )
+	for ( std::size_t i : resolvable ? gridCorners() : std::vector<std::size_t>() )
 		for ( auto const *g : { &g129, &g257, &g513 } )
 		{
 			double const share = 1.0 - ( best.psiStar[ i ] - ( *g )[ i ] )/best.plasma[ i ];
@@ -1469,6 +1524,17 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqAsGeqRefines )
 		             best.starAxis - l.axis, best.starBoundary - l.boundary );
 	}
 	std::fflush( stdout );
+
+	if ( !resolvable )
+	{
+		BOOST_TEST( d513.max < meq::tests::exactAgreementFloor( fluxScale ),
+			"MEQ - geq 513 reads " << d513.max << ", which is a conversion and not "
+			"a resolution: the labels, R_ref and the gauge, Psi's sense, J against eV" );
+		BOOST_TEST( std::abs( dControl.rms - geqBias.rms ) < 0.05*geqBias.rms,
+			"MEQ reads the Hagenow reference " << dControl.rms << " rms away where geq's "
+			"own direct-to-Hagenow difference is " << geqBias.rms );
+		return;
+	}
 
 	for ( auto const &norm : { std::make_tuple( "max", d129.max, d257.max, d513.max,
 	                                            geqFine.max, geqMax, own.max ),
@@ -1759,7 +1825,21 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	std::printf( "    psi_ax printed %.6e, library %.12e\n", driverAxis, m.psiAxis );
 	std::fflush( stdout );
 
-	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, largest ),
+	// IN SINGLE THE TWO ROUTES MEET AT THE EXTENSION'S OWN FLOOR. The transfer
+	// differences its path endpoints at extensionFdStep(), so it carries
+	// eps/fd_step of the field it moves -- 2.4e-05 relative in single -- and
+	// the driver and the library reach their endpoints through two
+	// expressions of one level set. Measured 1.578e-06, peaking at Gamma, against
+	// eps/fd_step x |psi_bnd| = 1.556e-06: a ratio of 1.01. Applied in single
+	// only, since in double that floor would loosen the bit-identity this
+	// asserts there. M-272.
+	double driverBound = meq::tests::scalarAgreementFloor( 1.0e-12, largest );
+#ifdef MFEM_USE_SINGLE
+	driverBound = std::max( driverBound, 4.0*std::abs( m.psiBoundary )
+	                        *static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
+	                        /meq::extensionFdStep() );
+#endif
+	BOOST_TEST( worst < driverBound,
 		"the driver's psi_h differs from the library's on geq's problem by " << worst
 		<< ", so the shipped file does not pose that problem" );
 	BOOST_TEST( driverSteps == librarySteps,
@@ -1771,7 +1851,8 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 
 	// ---- MR-4b's labels and diagnostics, on the library run ----------------
 	BOOST_TEST( m.span < 0.0 );
-	double const labelTolerance = 1.0e-12*std::abs( m.span );
+	double const labelTolerance = meq::tests::scalarAgreementFloor(
+		1.0e-12*std::abs( m.span ), m.span );
 	BOOST_TEST( std::abs( m.psiAxis - m.fieldAtAxisPoint ) <= labelTolerance );
 	BOOST_TEST( std::abs( m.psiBoundary - m.fieldAtBoundaryPoint ) <= labelTolerance );
 	BOOST_TEST( !m.axis.axisInsidePlasma );
