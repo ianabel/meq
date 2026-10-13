@@ -16429,3 +16429,57 @@ holds 0 plasma nodes, 393 of the far nodes disagree and 555 disagree anywhere,
 and `DriverAcceptance` goes red on both the disagreement and the empty mask.
 
 The variable costs 4 bytes per node, 66564 B on a 129² grid, uncompressed.
+
+
+### M-271
+
+**`81ecf3281e`: CUDSS NO LONGER DOWNLOADS THE GRADIENT'S I, AND
+`TransformBack()`'S SINGLE DEFAULT IS MEQ'S OWN TOLERANCE.**
+
+Both installs are rebuilt from `meq-integration` at `81ecf3281e`, which adds
+upstream's `cudss-solver-configuration` at `45117b684b`,
+`transformback-single-tolerance` at `d10e8c48e7` and `densematrixsvd-ldvt` at
+`cee6a378af` to [M-243](#m-243)'s `4929772e95`. All sixteen branches are
+contained, both `libmfem.a` are newer than the tip, and the installed
+`darcyhybridization.hpp` and `eltrans.hpp` match the branch. The headers were
+touched, and both MEQ trees were rebuilt `--clean-first`.
+
+`machine-f-diiid`, `--device cuda`, `MKL = OMP = 1`, `nsys` over the run,
+copies counted by exact size from the SQLite export:
+
+| | [M-243](#m-243) + `rTr` | `81ecf3281e` |
+|---|---|---|
+| host to device | 83.4 MB, 343 | **83.35 MB, 343** |
+| device to host | 48.9 MB, 414 | **47.88 MB, 414** |
+| 87,760 B (the gradient's I), down | 12 | **0** |
+
+The count is unchanged and the bytes fall by 12 × 87,756. **`SetMatrix()` now
+reads the non-zero count as one 4-byte copy**, so the twelve whole-array
+downloads became twelve 4-byte ones. `psi_ax = 3.759850e-01` and the
+constraint `-6.466e-12` are M-243's.
+
+**`TransformBack()`'s default `tol_0` is `1e-6` in single**, read from the
+installed header. That is the value `meq::inverseTransformTolerance()` already
+passes at MEQ's five sites, so the default and MEQ's call are the same
+arithmetic and the 108, 240 and 95 fallbacks of [M-222](#m-222) cannot recur
+through either.
+
+**The double suite is 76 of 77**, red only at the deliberate
+`PlasmaEdgeConvergence`.
+
+**The single suite is 62 of 77.** The six reds [M-242](#m-242) lists fail with
+M-242's signatures: `PlasmaEdgeConvergence`; `DeviceRowsTests` and
+`ResidentIterateTests`, which are double-only bit identities; and `XPointBorder`
+(`psi_ax = 8.05e-02` against `8.27e-02`), `XPointOuter` and
+`FreeBoundaryCoupling`'s 4 of 5, which are M-222's knife edge. **The other nine
+are every test added since the single suite last ran**: `MirrorSupport`,
+`PrescribedAxisPoint`, `VacuumMirror`, `RotatingMirror`,
+`RotatingMirrorResolution` and `RotatingMirrorDriver` from MR-1 to MR-5;
+`ElementRegions` and `OutputTests` from ER-0 to ER-3; and `DriverAcceptance`'s
+three element-table cases. They fail on floors written for double, for example
+an area to `1e-12` relative against single's `2e-8`, a label tolerance of
+`6e-14`, or a Newton history too short for a rate triple. Two are reference
+solves that do not converge (`PrescribedAxisPoint`, `MirrorSupport`). No test
+that ran in single at M-242 changed state.
+`RotatingMirror.cpp` also did not compile in single: a `std::max` over a
+`real_t` norm and two `double`s, now cast.

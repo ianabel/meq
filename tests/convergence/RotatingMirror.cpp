@@ -1031,7 +1031,7 @@ BOOST_AUTO_TEST_CASE( theStoppingTargetIsNotLooseAgainstThePlasmasOwnFlux )
 	difference -= reference->solver->potential();
 	double const plasmaFlux = std::abs( reference->solver->psiBoundary()
 	                                    - reference->vacuumBoundary );
-	double const moved = std::max( { difference.Normlinf(),
+	double const moved = std::max( { static_cast<double>( difference.Normlinf() ),
 		std::abs( tighter->solver->psiAxis() - reference->solver->psiAxis() ),
 		std::abs( tighter->solver->psiBoundary() - reference->solver->psiBoundary() ) } );
 

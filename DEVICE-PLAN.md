@@ -51,8 +51,9 @@ shipped examples at the host's every printed digit; with item 3 below fixed,
    * `ComputeH()`'s read-only syncs, 24 MB down: upstream's, and open;
    * the load's re-uploads, 11.2 MB up: MEQ's, item 2;
    * `CuDSSSolver::SetMatrix()` downloading the gradient's whole I through
-     `NumNonZeroElems()`, 12 times, 1.05 MB: upstream's, and new on
-     `4929772e95` because I now lives on the device.
+     `NumNonZeroElems()`, 12 times, 1.05 MB: **fixed upstream and installed at
+     `81ecf3281e`**, where the twelve are 4-byte copies and the run moves
+     47.88 MB down -> [M-271](MEASUREMENTS.md#m-271).
 
    MEQ's largest remaining item is its own: the exterior columns, uploaded
    once per SOLVE (26.2 MB over three sweeps) when they are constant for the

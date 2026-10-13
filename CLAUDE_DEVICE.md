@@ -865,7 +865,10 @@ Jacobian while staying in the residual.
     * The warm start's lost nodes were cured by *constructing* the inverse, not
       by the better initial guess they were credited to. *A fix that works is
       not an explanation of why.*
-  * Reported upstream.
+  * **Fixed upstream**: `tol_0` is `1e-6` in single from `meq-integration`
+    `81ecf3281e`, which is MEQ's own value, so the explicit argument and the
+    default agree. MEQ keeps the argument, so it does not depend on the install
+    -> [M-271](MEASUREMENTS.md#m-271).
 * **`mfem::VertexConePath` aborts on a vertex lying exactly on `Γ`**. It
   differences a mean of ray endpoints from the vertex, and gets the zero vector.
   `meq::markingOffset()` keeps `MarkLevelSetSubdomain()` off the set that

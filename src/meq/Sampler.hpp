@@ -87,12 +87,13 @@ namespace meq
 	}
 
 	/**
-	 * The physical relative tolerance to hand `TransformBack()`, because its
-	 * own default is BELOW ONE `float` EPSILON and therefore unreachable.
+	 * The physical relative tolerance to hand `TransformBack()`, because on an
+	 * install older than meq-integration 81ecf3281e its own single default is
+	 * BELOW ONE `float` EPSILON and therefore unreachable.
 	 *
-	 * **`ElementTransformation::TransformBack( v, ip, phys_rel_tol = tol_0 )`
-	 * DEFAULTS TO A TIGHTER NUMBER THAN THE CLASS IT CONSTRUCTS.**
-	 * `eltrans.hpp:62` carries `tol_0 = 1e-15` in double and `1e-7` in single,
+	 * **THERE, `ElementTransformation::TransformBack( v, ip, phys_rel_tol =
+	 * tol_0 )` DEFAULTS TO A TIGHTER NUMBER THAN THE CLASS IT CONSTRUCTS.**
+	 * `eltrans.hpp` carries `tol_0 = 1e-15` in double and `1e-7` in single,
 	 * while `InverseElementTransformation`'s own constructor carries
 	 * `phys_rtol( 4e-15 )` and `phys_rtol( 1e-6 )`. The two disagree in both
 	 * formats and only in one does the disagreement bite: `1e-15` is **4.5
@@ -115,11 +116,13 @@ namespace meq
 	 *
 	 * So this is `samplerInsideTolerance()`'s sibling with the sign of the
 	 * finding reversed. There, MFEM already scaled `ip_tol` with the format and
-	 * MEQ's own floor was six times TIGHTER than upstream's; here upstream's
-	 * own default is the thing that does not survive the format, and copying it
-	 * is what must not be done. The class default is taken instead -- 8.4 eps,
-	 * comfortably reachable -- and the double arm is `tol_0` itself, so every
-	 * double call is the call it always was, to the bit. M-222.
+	 * MEQ's own floor was six times TIGHTER than upstream's; here a default of
+	 * 1e-7 is the thing that does not survive the format. The class default is
+	 * taken instead -- 8.4 eps, comfortably reachable -- and the double arm is
+	 * `tol_0` itself, so every double call is the call it always was, to the
+	 * bit. M-222. Upstream's single `tol_0` is this same 1e-6 from
+	 * meq-integration 81ecf3281e (M-271); the argument stays explicit so that
+	 * MEQ is right against an install older than that.
 	 */
 	inline double inverseTransformTolerance()
 	{

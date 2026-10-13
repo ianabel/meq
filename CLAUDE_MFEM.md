@@ -254,14 +254,15 @@ it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
 **BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../mfem/install` and
-on `../mfem/install-single` against `meq-integration` at `4929772e95`, and the
+on `../mfem/install-single` against `meq-integration` at `81ecf3281e`, and the
 DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of `-6.466e-12`
-under `--device cuda` on the double one, as it did on the install before --
-[M-243](MEASUREMENTS.md#m-243), where the double suite is 65 of 66. **The
-single suite read 60 of 66 at `969569440e` and no answer moved**, and it has
-not been re-run since -> [M-242](MEASUREMENTS.md#m-242): two device-route tests
-assert bit-identity that only a double build can give, and three solves sit on
-M-222's knife edge at `MKL_NUM_THREADS = 1`. The single install is a
+under `--device cuda` on the double one, as it did on the install before ->
+[M-271](MEASUREMENTS.md#m-271), where the double suite is 76 of 77. **The
+single suite is 62 of 77 and no answer moved**: M-242's six reds stand with
+M-242's signatures (two device-route tests assert bit-identity that only a
+double build can give, and three solves sit on M-222's knife edge at
+`MKL_NUM_THREADS = 1`), and the other nine are the mirror and element-region
+tests, whose floors are written for double. The single install is a
 **second** tree with the same obligation and its own reason to move first:
 `sundials-real-t` is in the merge because MFEM does not compile **at all** in
 the `MFEM_PRECISION = single` + `MFEM_USE_SUNDIALS` pairing without it.
