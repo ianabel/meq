@@ -137,6 +137,17 @@
 #     operator and GradShafranovSolver::setExteriorCoupling is how it is
 #     attached; it is not reachable from a configuration file yet.
 #
+# AND SO EVERY RUN OF IT WARNS ABOUT PLASMA IN COPPER, CORRECTLY. The output
+# says what each element is made of, and plasma current inside a conductor is
+# a FAULT there: the `regions:` line counts 32 faulted elements, the run warns,
+# and the .nc carries `region_faults = 32`. That is this file being described
+# accurately rather than a defect. The source is not normalised, so it has no
+# plasma support to keep out of the coils -- ConfineToPlasma and
+# ExcludeAttributes both need Normalised = true, and these profiles do not
+# vanish at the edge. The count is the same at zero current, because a fault
+# is where the copper is and not what it carries. theDriverAddsTheCoilsToF
+# pins it. A machine with its coils in a vacuum region counts 0.
+#
 #
 # AND THE CONDUCTORS NEED NOT BE MESHED AT ALL: ADD [conductors]
 # ---------------------------------------------------------------

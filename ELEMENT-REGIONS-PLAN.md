@@ -230,8 +230,10 @@ asserts each bullet below. Three are met in a nearby form, for these reasons:
 * The mirror is classified on the vacuum field at MR-4's labels and not on the
   rotating solve. The cutoff is the same line either way.
 * "The shipped examples count 0" is measured through the driver's `regions:`
-  line, which ER-0 adds with §2.1b's warnings. It is not 0: `coils-rectangle`'s
-  unconfined source faults in 32 elements (M-267).
+  line, which ER-0 adds with §2.1b's warnings. It is 0 on every example but
+  `coils-rectangle`, whose unnormalised source fills a box that holds its coils
+  and faults in 32 elements (M-267). That is the problem it poses, so its
+  header says so and `theDriverAddsTheCoilsToF` pins the count.
 
 The bullets, each asserted against something the classifier cannot fake:
 

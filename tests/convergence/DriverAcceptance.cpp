@@ -1704,7 +1704,14 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
  *
  * The equilibrium itself is not compared against anything: examples/
  * coils-rectangle.toml is a fixed-boundary rectangle with the conductors inside
- * the plasma, so there is no closed form to hold it to. What the coils are
+ * the plasma, so there is no closed form to hold it to.
+ *
+ * AND THE FILE SAYS SO. Plasma current inside copper is a fault in the
+ * element record (ELEMENT-REGIONS-PLAN.md §2.1b), and this example poses it on
+ * purpose: its source is not normalised, so it has no support to keep out of
+ * the coils. `region_faults` is pinned at the 32 elements M-267 measured, at
+ * zero current as well, since a fault is geometry and not current, and at 0
+ * with the coil blocks deleted. What the coils are
  * worth on a SOLVE is measured in FreeBoundaryCoupling.cpp, against Ampere's
  * law, on the half-disc geometry the technique is for.
  */
@@ -1775,6 +1782,15 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
 	BOOST_TEST( control.Normlinf() == 0.0,
 	            "coils carrying no current changed the answer by "
 	            << control.Normlinf() << ", so the wrapper is not inert" );
+
+	// THE FAULTS ARE THE EXAMPLE'S, AND THE FILE REPORTS THEM.
+	for ( auto const &[ path, faults ] :
+	      { std::pair< char const *, double >{ "coils-rectangle.nc", 32.0 },
+	        std::pair< char const *, double >{ "zerocoil.nc", 32.0 },
+	        std::pair< char const *, double >{ "nocoil.nc", 0.0 } } )
+		BOOST_TEST( headerAttribute( ncdumpHeader( path ), "region_faults" ) == faults,
+		            path << " does not report the plasma current inside its coils "
+		            "that examples/coils-rectangle.toml poses" );
 
 	// AND A REAL CURRENT DOES REAL WORK. 3.0e5 A moves psi by 22% in L2
 	// on this configuration; the gate is well below that and well above the
