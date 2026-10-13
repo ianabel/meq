@@ -1445,12 +1445,22 @@ namespace
 	 * the potential block stays linear, and every local elimination is a linear
 	 * solve -- which is the ordering Nguyen, Peraire & Cockburn use and MEQ's
 	 * Newton path does not. See CLAUDE.md.
+	 *
+	 * **AT THE TOTAL FLUX, AS SourceIntegrator IS.** Under a conductor split the
+	 * iterate is the remainder psi_p, and F is a function of the physical
+	 * psi_p + psi_c. Without the shift the Picard paths iterate F( psi_p )
+	 * against a datum shifted by -psi_c, which is a fixed point of a different
+	 * equation, reached at the full rate: ConductorSubtraction's
+	 * thePicardPathsFreezeTheSourceAtTheTotalFlux, M-265. The solver is held
+	 * rather than a ConductorField, because setConductorField() may come after
+	 * this is built, and conductorPsi() is exactly zero without a split.
 	 */
 	class FrozenSource : public mfem::Coefficient
 	{
 		public:
-			FrozenSource( Source const &sourceIn, mfem::GridFunction const &psiIn )
-				: source( sourceIn ), psi( psiIn )
+			FrozenSource( Source const &sourceIn, mfem::GridFunction const &psiIn,
+			              GradShafranovSolver const &solverIn )
+				: source( sourceIn ), psi( psiIn ), solver( solverIn )
 			{
 			}
 
@@ -1460,12 +1470,15 @@ namespace
 			{
 				mfem::Vector x;
 				tr.Transform( ip, x );
-				return source.f( x( 0 ), x( 1 ), psi.GetValue( tr, ip ) );
+				return source.f( x( 0 ), x( 1 ),
+				                 psi.GetValue( tr, ip )
+				                 + solver.conductorPsi( x( 0 ), x( 1 ) ) );
 			}
 
 		private:
 			Source const &source;
 			mfem::GridFunction const &psi;
+			GradShafranovSolver const &solver;
 	};
 
 	/*
@@ -5961,7 +5974,7 @@ namespace
 			}
 			if ( !frozenSource )
 				frozenSource = std::make_unique<FrozenSource>( *nonlinearSource,
-				                                              *picardIterate );
+				                                              *picardIterate, *this );
 			rhsSource = frozenSource.get();
 
 			// The same -1/R that setSource( Coefficient & ) applies, and for the

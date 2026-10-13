@@ -333,6 +333,111 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 	            "psi_c + psi_p" );
 }
 
+// AND SO DOES THE SOURCE A PICARD PATH FREEZES, which is a different object.
+//
+// The case above runs Newton, where F reaches the assembly through
+// SourceIntegrator, and SourceIntegrator adds psi_c from its cache. The Picard
+// paths do not use it at all: Globalisation::PicardOnly and AndersonPicard put
+// F on the RIGHT HAND SIDE through a coefficient frozen at the previous
+// iterate (FrozenSource in GradShafranov.cpp), so whether that coefficient
+// adds psi_c is a separate question with a separate answer. If it does not,
+// the Picard paths iterate F( psi_p ) against a datum shifted by -psi_c -- a
+// fixed point of a DIFFERENT equation, reached at the full rate and reported
+// as converged.
+//
+// THE REFERENCE IS THE NEWTON SPLIT, which the case above pins against a
+// control that runs none of the split's code. The discretisation is the same,
+// so the paths must agree to the Picard paths' own stopping tolerance.
+// PicardThenNewton is in the list to show the handoff's second stage does not
+// hide a wrong first stage: it ends in Newton, so it agrees whatever stage 1
+// did, and it is NOT what this case relies on.
+BOOST_AUTO_TEST_CASE( thePicardPathsFreezeTheSourceAtTheTotalFlux )
+{
+	using G = meq::GradShafranovSolver::Globalisation;
+	meq::ConductorField const conductors = insideFilament();
+
+	// The case above's source: linear in psi, so a flux off by psi_c is a
+	// source off by 0.8 R psi_c, and nowhere zero.
+	struct LinearSource : public meq::Source
+	{
+		double f( double radius, double, double psi ) const override
+		{
+			return 0.8*radius*psi;
+		}
+
+		double dFdPsi( double radius, double, double ) const override
+		{
+			return 0.8*radius;
+		}
+	};
+
+	mfem::FunctionCoefficient physicalDatum(
+		[ &conductors ]( mfem::Vector const &x )
+		{
+			return 0.05 + conductors.psi( x( 0 ), x( 1 ) );
+		} );
+
+	LinearSource const plain;
+
+	auto solveBy = [ & ]( G globalisation, double damping )
+		-> std::unique_ptr<mfem::GridFunction>
+	{
+		mfem::Mesh mesh = makeBox( 8 );
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setSource( plain );
+		solver.setBoundaryData( physicalDatum );
+		solver.setConductorField( conductors );
+		solver.setGlobalisation( globalisation );
+		solver.setPicardDamping( damping );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                         meq::newtonTolerance( 1.0e-15 ), 500 );
+		solver.solve();
+		return std::make_unique<mfem::GridFunction>( solver.potential() );
+	};
+
+	std::unique_ptr<mfem::GridFunction> const newton = solveBy( G::None, 1.0 );
+	double const scale = maxAbs( *newton );
+	BOOST_TEST_REQUIRE( scale > 1.0e-3, "the reference is trivial, so this proves nothing" );
+
+	struct Run { char const *name; G globalisation; double damping; };
+	Run const runs[] = {
+		{ "Anderson-Picard", G::AndersonPicard,   1.0 },
+		{ "Picard, w = 0.5", G::PicardOnly,       0.5 },
+		{ "Picard->Newton ", G::PicardThenNewton, 1.0 },
+	};
+
+	std::printf( "\n  the frozen source under the split, against the Newton split "
+	             "( scale %.3e )\n", scale );
+	for ( Run const &run : runs )
+	{
+		std::unique_ptr<mfem::GridFunction> path;
+		try
+		{
+			path = solveBy( run.globalisation, run.damping );
+		}
+		catch ( std::exception const &error )
+		{
+			BOOST_FAIL( run.name << " threw: " << error.what() );
+		}
+
+		double worst = 0.0;
+		for ( int i = 0; i < newton->Size(); ++i )
+			worst = std::max( worst, static_cast<double>(
+				std::fabs( ( *path )( i ) - ( *newton )( i ) ) ) );
+		std::printf( "    %s  max |path - Newton| = %.3e\n", run.name, worst );
+		std::fflush( stdout );
+
+		// A Picard path stops where picardTolerance() lets it, which in double
+		// is far below 1e-8 relative; a missing psi_c is O( 1 ) relative here.
+		BOOST_TEST( worst < std::max( 1.0e-8*scale,
+		                              meq::tests::exactAgreementFloor( scale ) ),
+		            run.name << " reached a different discrete solution under the "
+		            "conductor split, max difference " << worst << " on a scale of "
+		            << scale << ": the frozen source is not evaluated at psi_p + "
+		            "psi_c (FrozenSource in GradShafranov.cpp)" );
+	}
+}
+
 // THE EVALUATION ABSTRACTION: FREE WHEN THE SPLIT IS OFF, CORRECT WHEN IT IS ON.
 //
 // COIL-SUBTRACTION-PLAN.md §8.1 counts about sixty-eight places that read the

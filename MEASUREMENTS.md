@@ -16130,3 +16130,27 @@ Swapping the two `[[coils]]` blocks is correctly not caught: it moves `ψ_h` by
 7.28e-16, only the summation order. `DriverAcceptance` bounds
 `limited-tokamak`'s Newton count at 20, so the seed spreading to a tokamak is
 caught there.
+
+### M-265
+
+**THE PICARD PATHS FROZE THE SOURCE AT THE REMAINDER UNDER A CONDUCTOR SPLIT,
+AND CONVERGED TO A DIFFERENT DISCRETE SOLUTION.** `FrozenSource` evaluated
+`F( ψ_p )` where `SourceIntegrator` evaluates `F( ψ_p + ψ_c )`. The setting is
+`ConductorSubtraction`'s `thePicardPathsFreezeTheSourceAtTheTotalFlux`: an
+`8 × 8` box, `k = 2`, an inside filament, a linear source `0.8 R ψ`. Each path
+is compared with the Newton split, which the case before it pins to a control
+that runs none of the split's code:
+
+| path | before | after |
+|---|---|---|
+| `AndersonPicard` | 3.971e-03 | 1.052e-14 |
+| `PicardOnly`, `w = 0.5` | 3.971e-03 | 1.284e-14 |
+| `PicardThenNewton` | 9.090e-15 | 9.097e-15 |
+
+The scale is 5.590e-02, so before the fix both Picard paths were 7.1% off,
+agreeing with each other on the wrong fixed point. `PicardThenNewton` agreed
+throughout, because its second stage is Newton. That is the only route the
+driver takes, so no driver answer moved: what the defect cost was its first
+stage iterating the wrong map, on the unbordered fallback rung and in
+`PicardSweeps`. Without a split `conductorPsi()` is exactly zero, so every
+other run is bit-identical.
