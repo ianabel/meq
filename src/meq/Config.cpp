@@ -5,6 +5,8 @@
 // meq::filamentStack three layers down. MFEM-free, like everything Config
 // reaches: Coils.hpp pulls Source.hpp and Profiles.hpp and nothing else.
 #include "Coils.hpp"
+// defaultCircuitName, the one circuit name [[circuits]] may not take.
+#include "Materials.hpp"
 #include "RotatingSource.hpp"
 
 #include <algorithm>
@@ -1246,6 +1248,11 @@ namespace meq
 
 				CircuitParameters circuit;
 				circuit.name = one.getString( "Name" );
+				// "default" IS THE OUTPUT'S NAME FOR THE UNWIRED COILS, a
+				// grouping with no supply (meq::defaultCircuitName). A supplied
+				// circuit of that name would merge with them in the file.
+				if ( circuit.name == defaultCircuitName )
+					one.fail( "Name", "\"" + circuit.name + "\" is reserved: the output groups every coil outside a [[circuits]] block into a circuit of that name, which has no supply, and a supplied circuit called the same would merge with it. Choose another name" );
 				if ( std::find( circuitNames.begin(), circuitNames.end(), circuit.name )
 				     != circuitNames.end() )
 					one.fail( "Name", "\"" + circuit.name + "\" names a second circuit; circuit names must be distinct, because they are how a result reports which current it chose" );
@@ -1500,7 +1507,7 @@ namespace meq
 				                              "PlasmaRMin", "PlasmaRMax", "PlasmaZMin", "PlasmaZMax",
 				                              "PlasmaSize", "LimiterR", "LimiterZ", "LimiterRadius",
 				                              "Vessel", "Transition", "Check",
-				                              "Symmetric", "AlignPlasma" } );
+				                              "Symmetric", "AlignPlasma", "AlignConductors" } );
 
 				MeshGeneratorConfig & g = meshOptions.generate;
 				g.given = generate.has( "Tool" );
@@ -1535,6 +1542,7 @@ namespace meq
 					g.check = generate.getBooleanOr( "Check", true );
 					g.symmetric = generate.getBooleanOr( "Symmetric", false );
 					g.alignPlasma = generate.getBooleanOr( "AlignPlasma", false );
+					g.alignConductors = generate.getBooleanOr( "AlignConductors", false );
 
 					if ( !( g.radius > 0.0 ) )
 						generate.fail( "Radius", "the disc's radius must be positive. NOTE it is the BACKGROUND's radius and not Gamma's: with an exterior coupling, D_h is cut from this mesh at [boundary.exterior] Radius, which has to fit strictly inside it" );
@@ -1560,6 +1568,14 @@ namespace meq
 					// exactly the wrong thing to leave sitting in the file.
 					if ( generate.has( "CoilSize" ) && conductorOptions.subtracts() )
 						generate.fail( "CoilSize", "[conductors] Model takes the conductors OUT of the mesh, so the generator is never told where they are and there is nothing for this element size to grade. Remove the key -- the background Size is what meshes that region now -- or set Model = \"meshed\" to carry the conductors as a domain source again" );
+					// ALIGNCONDUCTORS IS THE SUBTRACTING MODELS' --coil, AS
+					// GEOMETRY ONLY. Under "meshed" every rectangle is already
+					// fragmented in with its attribute, so the key would be
+					// accepted and do nothing. A subtracting model with no
+					// [[coils]] is refused above, so there is always something
+					// to align when this passes.
+					if ( g.alignConductors && !conductorOptions.subtracts() )
+						generate.fail( "AlignConductors", "aligns the mesh to the [[coils]] rectangles under a subtracting [conductors] Model, and Model = \"meshed\" already fragments every one of them in as a --coil with its own attribute. Remove the key, or set Model = \"subtracted\" or \"filament\"" );
 					if ( g.transition < 0.0 )
 						generate.fail( "Transition", "the graded transition's width must not be negative; omit it for four background sizes" );
 

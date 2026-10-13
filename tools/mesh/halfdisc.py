@@ -572,7 +572,8 @@ def _reflect_msh(path, attributes, tolerance):
 
 def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
           coil_size=None, transition=None, limiter=None, vessel=None,
-          symmetric=False, partner=None, align_plasma=False):
+          symmetric=False, partner=None, align_plasma=False,
+          align_coils=None):
     """A half-disc of radius `rho` about the origin, R >= 0, with `coils` a list
     of (Rmin, zmin, width, height) rectangles fragmented into it.
 
@@ -614,6 +615,15 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
     cutoff, `PlasmaSupportShape::Box` -- which caps the order like a source
     stepping at a plasma edge wherever the line cuts elements, and costs
     nothing where it lies on their faces.  Uniform refinement keeps it there.
+
+    `align_coils` is a list of (Rmin, zmin, width, height) rectangles fragmented
+    in as GEOMETRY ONLY: their pieces keep the vacuum attribute and the size
+    field does not grade them.  It is for a conductor the solve SUBTRACTS --
+    `[conductors] Model = "subtracted"` or `"filament"`, under which no --coil
+    is emitted at all -- so that the cells the copper occupies are whole cells
+    of it, which is what `[mesh.generate] AlignConductors` asks for and what
+    ELEMENT-REGIONS-PLAN.md's material record reads.  The solve itself does not
+    need it: the copper is vacuum to the remainder equation.
 
     `symmetric` meshes the half z >= 0 and reflects it, so that the result is
     its own mirror image dof for dof and `[solver] UpDownSymmetry` will take
@@ -687,6 +697,16 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
             box = _upper_half_of(plasma) if symmetric else plasma
             if box is not None:
                 R, z, w, h = box
+                tags.append(occ.addRectangle(R, z, 0, w, h))
+        for rectangle in (align_coils or []):
+            # THE CONDUCTOR AS GEOMETRY AND NOTHING ELSE.  No attribute -- its
+            # pieces are told vacuum below, since no --coil contains them --
+            # and no size field, so what it costs is exactly the elements its
+            # edges force.  Under --symmetric the half below the midplane
+            # arrives as the reflection, as a conductor's does.
+            kept = _upper_half_of(rectangle) if symmetric else rectangle
+            if kept is not None:
+                R, z, w, h = kept
                 tags.append(occ.addRectangle(R, z, 0, w, h))
         if vessel is not None:
             # A PLANE SURFACE FROM ITS OWN POINTS, not addPolygon: the OCC
@@ -1225,6 +1245,14 @@ def main():
                         "wherever the line cuts elements. The box keeps the "
                         "vacuum attribute and must lie inside the disc, clear "
                         "of every conductor")
+    p.add_argument("--align-coil", type=float, nargs=4, action="append",
+                   metavar=("RMIN", "ZMIN", "WIDTH", "HEIGHT"), default=None,
+                   help="a conductor rectangle fragmented in as GEOMETRY ONLY, "
+                        "repeatable: its edges become mesh lines, its pieces "
+                        "keep the vacuum attribute and no size field grades "
+                        "it. For a conductor the solve subtracts, so that the "
+                        "cells its copper occupies are whole; [mesh.generate] "
+                        "AlignConductors emits it. May not overlap a --coil")
     p.add_argument("--vessel", type=float, nargs="+", default=None,
                    metavar="R Z",
                    help="a closed vessel polygon, given as alternating R and Z "
@@ -1280,6 +1308,28 @@ def main():
                     "rho = %g. The exterior expansion assumes the field is "
                     "Delta*-harmonic outside Gamma, and a current there is not"
                     % (R + w, max(abs(z), abs(z + h)), a.rho))
+    align_coils = a.align_coil or []
+    for (R, z, w, h) in align_coils:
+        # --coil's own refusals, for --coil's reasons: the rectangle is
+        # fragmented into the disc, so it must be inside it and clear of the
+        # axis, and it must have an area.
+        if R <= 0.0:
+            p.error("an --align-coil at RMIN = %g reaches or crosses the axis, "
+                    "which a [[coils]] block may not" % R)
+        if w <= 0.0 or h <= 0.0:
+            p.error("an --align-coil of WIDTH %g HEIGHT %g has no "
+                    "cross-section" % (w, h))
+        if math.hypot(max(abs(R), abs(R + w)), max(abs(z), abs(z + h))) >= a.rho:
+            p.error("an --align-coil reaches R = %g z = %g, outside or on the "
+                    "arc at rho = %g" % (R + w, max(abs(z), abs(z + h)), a.rho))
+        # AND NOT OVER A --coil, whose pieces are told by their centre of mass:
+        # a piece of both would take the coil's attribute for part of a
+        # rectangle that is meant to carry none.
+        for (cR, cz, cw, ch) in coils:
+            if (R < cR + cw and cR < R + w and z < cz + ch and cz < z + h):
+                p.error("an --align-coil overlaps the --coil at ( %g, %g ). "
+                        "A meshed conductor is already aligned to; the option "
+                        "is for one the solve subtracts" % (cR, cz))
     if (a.plasma is None) != (a.plasma_size is None):
         p.error("--plasma and --plasma-size go together: a region with no size "
                 "refines nothing, and a size with no region has nowhere to act")
@@ -1351,7 +1401,7 @@ def main():
             p.error("a limiter reaching R = %g z = %g is outside Gamma at "
                     "rho = %g; the plasma has to be inside the coupled domain"
                     % (lr + la, abs(lz) + la, a.rho))
-        for (R, z, w, h) in coils:
+        for (R, z, w, h) in coils + align_coils:
             nearest_r = min(max(lr, R), R + w)
             nearest_z = min(max(lz, z), z + h)
             if math.hypot(nearest_r - lr, nearest_z - lz) < la:
@@ -1405,6 +1455,10 @@ def main():
         tolerance = SYMMETRY_TOLERANCE*max(a.rho, 1.0)
         try:
             partner, worst = _mirror_partners(coils, tolerance)
+            # An aligned rectangle is geometry, so it is reflected as a
+            # conductor is and must be paired as one; only the pairing's
+            # existence matters, since it carries no attribute to map.
+            _mirror_partners(align_coils, tolerance)
         except ValueError as failure:
             p.error(str(failure))
         if a.limiter is not None and a.limiter[1] != 0.0:
@@ -1439,7 +1493,7 @@ def main():
     transition = a.transition if a.transition is not None else 4.0 * a.size
     rep = build(a.rho, coils, a.size, a.out, a.order, a.plasma, a.plasma_size,
                 a.coil_size, transition, a.limiter, vessel, a.symmetric,
-                partner, a.align_plasma)
+                partner, a.align_plasma, align_coils)
     print("  %s: %d elements, %d nodes, %d surfaces (%d coil, %d limiter, "
           "%d outside the vessel), %d arc curves, %d axis curves"
           % (a.out, rep["elements"], rep["nodes"], rep["surfaces"],

@@ -631,12 +631,14 @@ both `mhd` and `rotating`. `ConfigTests`' `mirror_keys` is the list.
   With the labels read at their points, every sweep's Picard-then-Newton
   diverges on the mirror, and a pinned tokamak exits 2.
 
-**Not done:**
+**The `.nc` support mask** is `node_material`, `ELEMENT-REGIONS-PLAN.md`
+ER-3 ([M-270](MEASUREMENTS.md#m-270)). **Adaptivity** runs on the mirror through
+the driver, three cycles in `DriverAcceptance`'s
+`everyAdaptiveFrameSaysWhatEachElementIsMadeOf`, but nothing judges its
+estimator there.
 
-* the `.nc` `plasma` support mask (the docs warn that `n_s` and `e_phi_0` are
-  evaluated outside the support);
-* adaptivity, `--device` and the bordered retry rung, which are accepted beside
-  the box but have not been run on a mirror.
+**Not done:** `--device` and the bordered retry rung, which are accepted beside
+the box but have not been run on a mirror.
 
 ## Risks, in the order they are likely to hurt
 

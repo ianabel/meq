@@ -7795,6 +7795,149 @@ namespace
 		return total;
 	}
 
+	ElementMaterials GradShafranovSolver::elementMaterials(
+		MaterialTable const &table, std::vector< ClassifiedPoint > *points ) const
+	{
+		if ( !potentialFes )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::elementMaterials: prepare() has not "
+				"been called, so there is no potential to classify against" );
+
+		/*
+		 * THE SAME POINTS, THE SAME FLUX AND THE SAME TEST AS THE ASSEMBLY.
+		 *
+		 * assemblePlasmaCurrent() is the template, deliberately: sourceRule()
+		 * at sourceQuadratureExtra, `psi_h` from the potential's own dofs plus
+		 * conductorPsiAtQuadrature() from meq::SourceIntegrator's cache, and
+		 * elementInPlasma() before anything pointwise. Where the integrator
+		 * evaluates `F` through the source, this asks the source's
+		 * insidePlasma() of the same arguments -- which is the test `f()`
+		 * itself applies -- so the set called plasma here is the set the
+		 * plasma current was integrated over, and ElementRegions.cpp checks
+		 * exactly that by summing `F/R` over it.
+		 */
+		mfem::GridFunction const &solved = potential();
+		countedHostRead( solved, __LINE__ );
+		mfem::real_t const *const values = solved.HostRead();
+
+		int const elementTotal = mesh.GetNE();
+
+		// Sizes first, serially, as buildConductorCache() does: the point
+		// offsets are a prefix sum and the rule lookup is a table read.
+		std::vector< int > pointOffset( static_cast< std::size_t >( elementTotal ) + 1, 0 );
+		for ( int e = 0; e < elementTotal; ++e )
+		{
+			mfem::IsoparametricTransformation shapeOnly;
+			mesh.GetElementTransformation( e, &shapeOnly );
+			pointOffset[ static_cast< std::size_t >( e ) + 1 ]
+				= pointOffset[ static_cast< std::size_t >( e ) ]
+				  + sourceRule( *potentialFes->GetFE( e ), shapeOnly,
+				                sourceQuadratureExtra ).GetNPoints();
+		}
+		if ( points != nullptr )
+			points->assign( static_cast< std::size_t >(
+				pointOffset[ static_cast< std::size_t >( elementTotal ) ] ),
+				ClassifiedPoint() );
+
+		std::vector< std::vector< ElementMaterials::Weight > > weights(
+			static_cast< std::size_t >( elementTotal ) );
+		std::vector< char > faulted( static_cast< std::size_t >( elementTotal ), 0 );
+
+		MEQ_OMP_ELEMENT_LOOP
+		for ( int e = 0; e < elementTotal; ++e )
+		{
+			// Every piece of scratch inside the body, for the reasons
+			// assemblePlasmaCurrent() gives, and the transformation per thread.
+			mfem::Array< int > dofs;
+			mfem::DofTransformation doftrans;
+			mfem::Vector shape;
+			mfem::Vector point;
+
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			potentialFes->GetElementDofs( e, dofs, doftrans );
+			int const dof = el.GetDof();
+			shape.SetSize( dof );
+
+			mfem::IntegrationRule const &ir =
+				sourceRule( el, scratch, sourceQuadratureExtra );
+			std::vector< ElementMaterials::Weight > &own =
+				weights[ static_cast< std::size_t >( e ) ];
+			own.reserve( static_cast< std::size_t >( ir.GetNPoints() ) );
+			std::size_t const base = static_cast< std::size_t >(
+				pointOffset[ static_cast< std::size_t >( e ) ] );
+
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				scratch.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				scratch.Transform( ip, point );
+
+				double const radius = point( 0 );
+				double const z = point( 1 );
+				double const weight = ip.weight*scratch.Weight();
+
+				double psi = 0.0;
+				for ( int j = 0; j < dof; ++j )
+					psi += shape( j )*values[ dofs[ j ] ];
+				// THE TOTAL, as the integrator's sourceValue() is handed it.
+				psi += conductorPsiAtQuadrature( e, i );
+
+				bool fault = false;
+				int const material = materialAt( table, e, radius, z, psi, &fault );
+				if ( fault )
+					faulted[ static_cast< std::size_t >( e ) ] = 1;
+
+				own.push_back( ElementMaterials::Weight{ material, weight } );
+
+				if ( points != nullptr )
+				{
+					ClassifiedPoint &out = ( *points )[ base + static_cast< std::size_t >( i ) ];
+					out.element = e;
+					out.radius = radius;
+					out.z = z;
+					out.weight = weight;
+					out.psi = psi;
+					out.material = material;
+				}
+			}
+		}
+
+		// IN ELEMENT ORDER, serially, so the record and its sums are the same
+		// bits at every thread count.
+		ElementMaterials record;
+		record.materialArea.assign( static_cast< std::size_t >( table.size() ), 0.0 );
+		for ( int e = 0; e < elementTotal; ++e )
+			record.addElement( table, std::move( weights[ static_cast< std::size_t >( e ) ] ),
+			                   faulted[ static_cast< std::size_t >( e ) ] != 0,
+			                   plasmaComponentMask.isExcluded( e ),
+			                   mesh.GetAttribute( e ) );
+		return record;
+	}
+
+	int GradShafranovSolver::materialAt( MaterialTable const &table, int element,
+	                                     double radius, double z, double totalPsi,
+	                                     bool *fault ) const
+	{
+		// The fill and the exclusions, at element granularity, exactly as
+		// SourceIntegrator::elementCarriesPlasma() reads the same mask; then
+		// the support at the total flux, which is the test `f()` applies.
+		bool const plasma = elementInPlasma( element )
+		                    && ( normalisedSource == nullptr
+		                         || normalisedSource->insidePlasma( radius, z, totalPsi ) );
+		int const conductor = table.conductorContaining( radius, z );
+
+		if ( fault != nullptr )
+			*fault = plasma && conductor >= 0;
+		// §2.1b: copper wins over vacuum, and plasma in copper is a fault that
+		// is counted and still goes to the copper.
+		if ( conductor >= 0 )
+			return conductor;
+		return plasma ? MaterialTable::plasma : MaterialTable::vacuum;
+	}
+
 	void GradShafranovSolver::assembleCurrentColumn( mfem::Vector const &state,
 	                                                 mfem::Vector &out ) const
 	{

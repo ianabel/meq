@@ -16,6 +16,7 @@
 // includes it exactly as a device build does.
 #include "DeviceNPC.hpp"
 #include "ExteriorDtN.hpp"
+#include "Materials.hpp"
 #include "PlasmaComponent.hpp"
 #include "ResidentIterate.hpp"
 #include "Source.hpp"
@@ -1739,6 +1740,86 @@ namespace meq
 			/// granularity. Always true when no fill is live, so the assembly
 			/// tests it unconditionally.
 			bool elementInPlasma( int element ) const;
+
+			/// One quadrature point as elementMaterials() classified it: where
+			/// it is, its `ip.weight * |J|`, the TOTAL flux it was judged at
+			/// (`psi_h + psi_c`), and the material-table row it went to.
+			struct ClassifiedPoint
+			{
+				int element = 0;
+				double radius = 0.0;
+				double z = 0.0;
+				double weight = 0.0;
+				double psi = 0.0;
+				int material = 0;
+			};
+
+			/**
+			 * **WHAT EACH ELEMENT IS MADE OF, BY THIS SOLVER'S OWN SUPPORT
+			 * DECISION AT THIS SOLVER'S OWN POINTS.** `ELEMENT-REGIONS-PLAN.md`
+			 * §2.2: per element, the non-zero `( material, fraction )` pairs,
+			 * the region they derive, and the fault count.
+			 *
+			 * **ONE IMPLEMENTATION, HERE, AND NOT RE-DERIVED BY A WRITER.** Two
+			 * readers of "is this plasma" is how a written mask comes to
+			 * disagree with the current that was integrated. So the predicate
+			 * is meq::SourceIntegrator's: elementInPlasma() -- the fill and the
+			 * exclusions -- and the normalised source's insidePlasma() at the
+			 * TOTAL flux `psi_h + psi_c`, with whatever edge it currently
+			 * carries, frozen or not. The points are the source rule's,
+			 * `2k + OrderW + extra`, weighted by `ip.weight * |J|`, and `psi_c`
+			 * is read from the integrator's own cache at them.
+			 *
+			 * **WITHOUT A SUPPORT THE PLASMA IS EVERYWHERE THE PLASMA TERM IS
+			 * EVALUATED**: an unconfined or un-normalised source integrates its
+			 * plasma term over all of `Omega_h` but the excluded elements, so
+			 * that is where its plasma fraction is 1.
+			 *
+			 * **CONDUCTORS ARE GEOMETRIC**: MaterialTable::conductorContaining()
+			 * at the same points, whatever the conductor model. A conductor
+			 * wins a point over vacuum; a point that is plasma AND conductor
+			 * is a FAULT, counted per element, and goes to the conductor.
+			 *
+			 * Computed on the host from the potential as it stands -- the
+			 * converged answer after solve(), or whatever a caller wrote into
+			 * potential() after prepare(). The element loop is threaded and
+			 * each element writes only its own slot.
+			 *
+			 * @param table the materials; its coil rows' rectangles are what
+			 *        conductor membership asks.
+			 * @param points if given, receives every point in element order --
+			 *        which is what lets a caller check that the points called
+			 *        plasma here are the ones the plasma current was integrated
+			 *        over.
+			 * @throws std::logic_error before prepare().
+			 */
+			ElementMaterials elementMaterials(
+				MaterialTable const &table,
+				std::vector< ClassifiedPoint > *points = nullptr ) const;
+
+			/**
+			 * **elementMaterials()'s DECISION AT ONE POINT**, which that method
+			 * makes at every quadrature point through this and nothing else:
+			 * the material-table row a point of @a element at ( @a radius,
+			 * @a z ) goes to, with the plasma judged at @a totalPsi.
+			 *
+			 * It is how a writer asks the classifier about a point that is not
+			 * a quadrature point -- the `.nc`'s `node_material`, judged on the
+			 * flux the grid carries (`psi* + psi_c`) -- without a second copy of
+			 * the rule. `ELEMENT-REGIONS-PLAN.md` §2.3.
+			 *
+			 * @param element  the element holding the point, whose fill and
+			 *                 exclusions gate the plasma (elementInPlasma());
+			 *                 for a point continued across the curved path's
+			 *                 band, the element of its foot.
+			 * @param totalPsi the PHYSICAL flux there: `psi + psi_c`.
+			 * @param fault    if given, set when the point is plasma AND inside
+			 *                 a conductor -- §2.1b's fault, which goes to the
+			 *                 conductor.
+			 */
+			int materialAt( MaterialTable const &table, int element,
+			                double radius, double z, double totalPsi,
+			                bool *fault = nullptr ) const;
 
 			/**
 			 * A REGION OF THE MESH THAT CAN NEVER BE PLASMA, BY ELEMENT

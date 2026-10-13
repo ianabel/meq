@@ -26,7 +26,8 @@ there is a fourth file, which is not the equilibrium in another resolution but a
    * - ``<stem>/<name>.pvd`` and ``<stem>/Cycle000000/``
      - ParaView, VisIt
      - **The picture.** VTK Lagrange cells at degree :math:`k+1`, with the mesh
-       boundary bent onto the true :math:`\Gamma`.
+       boundary bent onto the true :math:`\Gamma`, and what each cell is made
+       of.
    * - ``<stem>.nc``
      - anything that reads NetCDF
      - **The interchange format.** :math:`\psi` and :math:`\mathbf{B}` sampled on
@@ -159,6 +160,11 @@ never saw.
    either way, and it costs nothing, since the post-processing has already been
    done for the estimator by the time each frame is written.
 
+   Each frame also carries the cell arrays of :ref:`output-vtk-cells`,
+   classified on that cycle's own solve, so the plasma boundary can be watched
+   as the mesh refines. The last frame's ``region`` is the answer's
+   ``element_region``.
+
 .. note::
 
    One frame per cycle is easy to get *almost* right, and the near miss is
@@ -168,6 +174,43 @@ never saw.
    single frame, reports no error, and all the data is present on disk. The
    collection appends to its index and never scans the directory, so it has to
    survive between frames and be rebound to each new mesh.
+
+.. _output-vtk-cells:
+
+What each cell is made of
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Beside ``psi`` and ``B``, every cell carries the summary of the ``.nc``'s
+element record (see :ref:`output-element-materials`):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Array
+     - What it is
+   * - ``region``
+     - the ``.nc``'s ``element_region``: 0 ``vacuum``, 1 ``plasma``, 2
+       ``coil``, 3 ``passive``, 4 ``ferromagnetic``, 5 ``plasma_boundary``, 6
+       ``conductor_boundary``, 7 ``mixed``
+   * - ``plasma_fraction``
+     - the plasma's share of the element
+   * - ``conductor_material``
+     - the material-table row of the conductor holding the largest share of
+       the element, or −1 where there is none. A tie goes to the lower row
+   * - ``conductor_fraction``
+     - that conductor's share, or 0
+   * - ``attribute``
+     - the element's attribute in the ``.mesh``. ParaView's data collection
+       writes it as true cell data
+
+The first four are written as point data, at each cell's own Lagrange points.
+**No two cells share a point**, so each value is constant on its cell and
+nothing is averaged across a face: colour by ``region`` and the cells come out
+flat, and a threshold on ``region = 5`` picks out the cells the plasma boundary
+cuts. The test suite reads the files back to check this, on curved cells as
+well as straight ones. VTK has no ragged cell arrays, so a cell holding
+two conductors names only the larger. The full record is in the ``.nc``.
 
 .. _output-netcdf:
 
@@ -181,7 +224,8 @@ finite element code.
 
 Variables: the grid coordinates; ``psi`` (which is :math:`\psi^\star` — see
 :ref:`output-which-potential`); ``B_R`` and ``B_Z``; a byte mask ``inside``; a
-byte mask ``extrapolated``; and the boundary curve as a pair of coordinate
+byte mask ``extrapolated``; ``node_material``, what each node is made of (see
+:ref:`output-node-material`); and the boundary curve as a pair of coordinate
 arrays. A rotating run additionally carries a density for each species
 and the electrostatic potential. Nodes outside the plasma are ``NaN`` *and*
 carry ``inside = 0``, so a reader that checks either one is safe.
@@ -251,16 +295,14 @@ A magnetic mirror's run (``[source] SupportShape = "box"``) also carries:
        samples along the cutoff lay in the mesh. A report of how much current
        the prescribed cutoff cuts through, not a verdict
 
-.. warning::
+.. note::
 
    **A rotating run's** ``n_<species>`` **and** ``e_phi_0`` **are evaluated at
-   every located node**, inside the support or not: they are algebraic in
-   :math:`(R, \psi)`, and the profiles hold their end values outside
-   :math:`[0, 1]`. Outside the plasma they are what the closure would give
-   there, not a density anyone has; mask them with the support — on a mirror,
-   :math:`0 < \Psi \le 1` and :math:`|z| \le` ``plasma_support_axial_edge``,
-   computed from ``psi``, ``psi_axis`` and ``psi_boundary`` — before reading
-   them as a plasma.
+   every located node**, inside the support or not, because they are algebraic
+   in :math:`(R, \psi)`. Outside the plasma they are what the closure would
+   give there, not a density anyone has. Keep the nodes where
+   ``node_material`` is 1, the plasma row, before reading them as a plasma
+   (see :ref:`output-node-material`).
 
 **The two-dimensional variables are indexed** ``(Z, R)``, **with** ``R``
 **varying fastest.** That is C row-major order, and it is the layout a transport
@@ -323,6 +365,178 @@ of the same answer:
    A run under a split also writes ``<stem>_psi_total.gf``, holding
    :math:`\psi_h + I_h(\psi_c)` — exact at the nodes and interpolated between
    them. It is for **looking at**, and its name says so.
+
+.. _output-element-materials:
+
+What each element is made of
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``<stem>.nc`` also records, for every element of ``<stem>.mesh``, the fraction
+of it occupied by each **material**: vacuum, plasma, each ``[[coils]]`` block,
+and two kinds reserved for later, passive structures and iron. The element
+index is the element's index in the ``.mesh`` that ``mesh_file`` names.
+
+The classification is the solver's own. Plasma is decided by the test the
+source integrates with: the connectivity fill, ``[source] ExcludeAttributes``,
+and the support (one-sided or a mirror's box) on :math:`\psi_h + \psi_c`.
+Copper is decided by each coil's rectangle, whichever ``[conductors] Model``
+carried its current. Both are asked at the solve's own quadrature points, and
+a fraction is the quadrature-weighted share of the element's area. The run's
+``regions:`` line reports the same record, the VTK carries a summary of it per
+cell (:ref:`output-vtk-cells`), and the grid carries the same test at each node
+(:ref:`output-node-material`).
+
+**The fractions are a CF contiguous ragged array**, because almost every
+element holds one material:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Variable
+     - What it is
+   * - ``element_material_count(element)``
+     - how many materials the element holds. Its ``sample_dimension`` attribute
+       names ``element_entry``
+   * - ``element_material(element_entry)``
+     - a row of the material table
+   * - ``element_fraction(element_entry)``
+     - that material's share of the element. An element's fractions sum to 1
+
+Element :math:`e`'s entries are the ``element_material_count[e]`` that follow
+those of the elements before it, so a reader takes a running sum of the counts
+to find where each element starts. Beside them, one value per element:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Variable
+     - What it is
+   * - ``element_region(element)``
+     - a byte for plotting, derived from the fractions, with CF
+       ``flag_values`` and ``flag_meanings``: ``vacuum``, ``plasma``, ``coil``,
+       ``passive`` and ``ferromagnetic`` where one material fills the element;
+       ``plasma_boundary`` where plasma and vacuum share it;
+       ``conductor_boundary`` where conductors and vacuum share it; ``mixed``
+       for anything else
+   * - ``element_plasma_fraction(element)``
+     - the plasma's share, which is also in the ragged array
+   * - ``element_excluded(element)``
+     - 1 where ``[source] ExcludeAttributes`` names the element's attribute
+   * - ``element_attribute(element)``
+     - the element's attribute in the ``.mesh``
+
+**The material table**, on the dimension ``material``. Row 0 is vacuum, row 1
+plasma, and the coils follow in ``[[coils]]`` order. A column that does not
+apply to a row holds its fill value:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Variable
+     - What it is
+   * - ``material_name``
+     - the name: ``vacuum``, ``plasma``, or the ``[[coils]]`` block's ``Name``
+   * - ``material_kind``
+     - 0 vacuum, 1 plasma, 2 coil, 3 passive, 4 ferromagnetic, with CF flags
+   * - ``material_circuit``
+     - a row of the circuit table, or −1 for none
+   * - ``material_current``
+     - a coil's resolved current, in amperes. After an inverse solve this is
+       the solved current
+   * - ``material_resistivity``
+     - a passive structure's, in Ω m
+   * - ``material_relative_permeability``
+     - 1, except for iron. It is the fill (``NaN``) for an iron whose
+       permeability is a curve
+   * - ``material_permeability_curve``
+     - a row of the permeability curve table, or −1 for none
+
+**The circuit table**, on ``circuit``, holds ``circuit_name``,
+``circuit_current`` and ``circuit_supplied``. A ``[[circuits]]`` block is one
+supplied row. Every coil outside such a block belongs to a single row named
+``default``. That row is a grouping and not a supply: its members carry
+independent currents, so ``circuit_supplied`` is 0 and ``circuit_current`` is
+the fill. Each coil's own current is its ``material_current``. The ``default``
+row appears only when some coil is unwired, which is why ``[[circuits]] Name =
+"default"`` is refused (:ref:`config-circuits`). A run with no coils has no
+circuit table.
+
+**The permeability curve table** describes non-linear iron, which MEQ does not
+produce yet. It is on ``permeability_curve``, as a second ragged array:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Variable
+     - What it is
+   * - ``permeability_curve_material``
+     - the ``material_name`` of the row the curve belongs to
+   * - ``permeability_curve_point_count``
+     - how many points the curve has, with ``sample_dimension =
+       "permeability_curve_point"``
+   * - ``permeability_curve_h``, ``permeability_curve_b``
+     - :math:`H` in A/m and :math:`B` in T, increasing in :math:`H` from
+       :math:`(0, 0)`. The ``interpolation`` attribute on
+       ``permeability_curve_b`` names the rule used between the points
+
+.. important::
+
+   **Check that a curve's name matches the row that points to it.**
+   ``permeability_curve_material[material_permeability_curve[m]]`` must equal
+   ``material_name[m]``. The name is repeated so that an index error can be
+   caught. A curve belongs to one material, so two regions of the same steel
+   each hold their own copy.
+
+**Global attributes** give the totals: ``region_elements_<region>`` for every
+region, ``material_area_<name>`` for every row in m² (the name made into a legal
+attribute name, with ``_<row>`` appended where two rows would collide), and
+``region_faults``.
+
+.. note::
+
+   **A fault is plasma current inside a conductor** at some quadrature point.
+   The run warns, ``region_faults`` counts the elements, and the fractions keep
+   it: the point is counted as the conductor. The usual cause is an unconfined
+   source whose plasma term reaches the coils. A ``mixed`` element without a
+   fault holds plasma and copper at different points. ``[mesh.generate]
+   AlignConductors`` splits such cells along the copper's edges. Under a
+   subtracting ``[conductors] Model``, ``conductor_boundary`` cells are
+   expected: the mesh is not aligned to the copper, which is the point of
+   subtracting it.
+
+.. _output-node-material:
+
+And at each grid node
+^^^^^^^^^^^^^^^^^^^^^
+
+``node_material(Z, R)`` is an ``int`` on the grid: the row of the material
+table at each node, with ``-1`` (its ``_FillValue``) where ``inside`` is 0.
+It is the mask to read a rotating run's densities through, and the support a
+reader would otherwise have to rebuild from ``psi`` and the labels.
+
+It is decided by the same test as the element record, asked at the node.
+Copper is decided by each coil's rectangle. Plasma is decided by the
+connectivity fill and ``[source] ExcludeAttributes`` of the element holding
+the node, and by the support on ``psi`` as this file writes it
+(:math:`\psi^\star + \psi_c`). A node in the band of a curved run is judged
+in the element its value was continued from. A point has no fraction, so
+nothing here is a boundary or a fault: a node in copper is that coil's row.
+
+On a mirror, the plasma rows agree with :math:`0 < \Psi \le 1` and
+:math:`|z| \le` ``plasma_support_axial_edge``, computed from ``psi``,
+``psi_axis`` and ``psi_boundary``. ``DriverAcceptance`` checks this at every
+node more than one grid spacing from an edge.
+
+The variable is ``node_material`` and not ``material``, because ``material``
+is the material table's dimension. In NetCDF, a variable named after a
+dimension is read as that dimension's coordinate variable.
+
+The ``.gf`` files carry none of this. They are the exact restart format and are
+unchanged.
 
 .. _output-grid-cost:
 

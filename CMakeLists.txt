@@ -224,6 +224,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Inverse.cpp
+	src/meq/Materials.cpp
 	src/meq/Output.cpp
 	src/meq/PlasmaComponent.cpp
 	src/meq/PointLocator.cpp
@@ -317,6 +318,11 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # caller loops over the mesh's vertices and nodes. That is not a limitation
 # worked around, it is what keeps the physics unit-testable and puts the mesh
 # walking where meshes already live.
+
+# src/meq/Materials.cpp is ABSENT from it too: ELEMENT-REGIONS-PLAN.md's
+# material table, the region rule and the bookkeeping that turns per-element
+# weights into fractions are plain doubles in and out. Which material a
+# quadrature point belongs to is asked by the solver, which is where MFEM enters.
 
 # src/meq/ExteriorDtN.cpp is ABSENT from that list for the same reasons, and it
 # is the newest member of the MFEM-free half: it is the exterior

@@ -38,6 +38,7 @@
 #include "meq/FluxSurfaces.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Inverse.hpp"
+#include "meq/Materials.hpp"
 #include "meq/Output.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/RotatingSource.hpp"

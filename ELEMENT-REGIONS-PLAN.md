@@ -5,16 +5,19 @@ occupied by each material: vacuum, plasma, each coil, and, reserved for later,
 passive and ferromagnetic structures. Each coil's circuit is named too. From
 these the file derives a region per element for plotting, with the cells the
 plasma boundary cuts marked. It all goes in the `.nc` and the VTK. The grid
-also gets a **pointwise** `material` mask, which is MR-5's deferred `.nc`
+also gets a **pointwise** `node_material` mask, which is MR-5's deferred `.nc`
 support mask.
 
-**Status: designed, not started.** The stages are ER-0 to ER-3.
+**Status: DONE.** ER-0 → **[M-266](MEASUREMENTS.md#m-266)**,
+**[M-267](MEASUREMENTS.md#m-267)**; ER-1 → **[M-268](MEASUREMENTS.md#m-268)**;
+ER-2 → **[M-269](MEASUREMENTS.md#m-269)**; ER-3 →
+**[M-270](MEASUREMENTS.md#m-270)**.
 
-## 1. What a reader cannot get today
+## 1. What a reader cannot get from the rest of the output
 
-* **Plasma.** The `.nc` says which grid nodes are `inside` `Ω_h`, but not which
-  carry plasma current. A mirror's `n_s` and `e_phi_0` are evaluated outside the
-  support, and `docs/output.rst` can only warn about it. A tokamak reader
+* **Plasma.** The `.nc`'s `inside` says which grid nodes are in `Ω_h`, but not
+  which carry plasma current. A mirror's `n_s` and `e_phi_0` are evaluated
+  outside the support, and need a mask to be read by. A tokamak reader
   recovers the plasma by thresholding `psi` at `psi_bnd`. That threshold is
   wrong wherever the connectivity fill or `ExcludeAttributes` removed a lobe,
   and wrong on a mirror, where the support is a box in `( Ψ, z )`.
@@ -190,18 +193,23 @@ integrated. CS-4 and `totalFluxAt()` are the precedents.
     `ConductorField`'s members, expanded to filaments under
     `Model = "filament"` (geq's two packs are twenty there). A coil row here is
     a `[[coils]]` block.
-* **`.nc`, on the grid (pointwise).** `material( Z, R )` is an int, the
-  material table's index at that node. Plasma is judged by the same predicate,
-  on the field the grid carries (`ψ* + ψ_c`); conductors by `contains()`. No
-  fraction and no boundary exist at a point. This is MR-5's F8, and it replaces `docs/output.rst`'s
-  warning about `n_s` outside the support with a mask to drop by.
-* **VTK.** The cell data on `<stem>.pvd` are `region`,
-  `plasma_fraction`, the dominant conductor's material index and its fraction,
-  and `attribute`. They are L2 order-0 `GridFunction`s registered beside
-  `psi` and `B`. The full ragged record stays in the `.nc`, since VTK has no
-  ragged cell data; and on each
-  `<stem>_cycles` frame, so the plasma boundary can be watched under
-  adaptivity.
+* **`.nc`, on the grid (pointwise).** `node_material( Z, R )` is an int, the
+  material table's index at that node, and −1 where `inside` is 0. Plasma is
+  judged by the same predicate, `GradShafranovSolver::materialAt()`, on the
+  field the grid carries (`ψ* + ψ_c`) and in the element holding the node (its
+  foot's, in the band); conductors by `contains()`. No fraction and no boundary
+  exist at a point. It is not named `material`, which is the table's
+  dimension and would read as its coordinate variable. This is MR-5's F8, and
+  `docs/output.rst` points a reader of `n_s` to it.
+* **VTK.** The cell data on `<stem>.pvd`, and on each `<stem>_cycles` frame so
+  the plasma boundary can be watched under adaptivity, are `region`,
+  `plasma_fraction`, `conductor_material` (the dominant conductor's row, −1
+  for none) and `conductor_fraction`: `meq::ElementCellData`, L2 order-0
+  `GridFunction`s registered beside `psi` and `B`. `ParaViewDataCollection`
+  writes them as point data at each cell's own Lagrange points, which no two
+  cells share, so each is one constant per cell. `attribute` is the
+  collection's own cell data. The full ragged record stays in the `.nc`, since
+  VTK has no ragged cell data.
 * **Not the `.gf` trio.** Those three files are the exact restart and stay
   byte for byte what they are. The element arrays in the `.nc` are already
   exact against the `.mesh`.
@@ -210,8 +218,22 @@ integrated. CS-4 and `totalFluxAt()` are the precedents.
 
 Each stage ends at a measured number.
 
-**ER-0: the classification in the library.** `elementMaterials()`, asserted
-against things it cannot fake:
+**ER-0: the classification in the library. DONE** →
+**[M-266](MEASUREMENTS.md#m-266)**, **[M-267](MEASUREMENTS.md#m-267)**.
+`elementMaterials()` takes a `meq::MaterialTable` (`src/meq/Materials.hpp`,
+MFEM-free: the kinds, the rows with every §2.1 column, the region rule) and
+returns a `meq::ElementMaterials`. `tests/convergence/ElementRegions.cpp`
+asserts each bullet below. Three are met in a nearby form, for these reasons:
+
+* The fill and the exclusions use a Solov'ev private-flux lobe, ITER Example 2
+  below its X-point, in place of `PlasmaConnectivity`'s solved half-disc lobe.
+* The mirror is classified on the vacuum field at MR-4's labels and not on the
+  rotating solve. The cutoff is the same line either way.
+* "The shipped examples count 0" is measured through the driver's `regions:`
+  line, which ER-0 adds with §2.1b's warnings. It is not 0: `coils-rectangle`'s
+  unconfined source faults in 32 elements (M-267).
+
+The bullets, each asserted against something the classifier cannot fake:
 
 * **The partition.** In every element the fractions sum to 1 to round-off.
   The plasma area, `Σ plasma_fraction × |e|`, converges to the area of
@@ -238,8 +260,16 @@ against things it cannot fake:
   classifier calls plasma reproduces the assembled plasma load. Mutation:
   classify on `ψ_h` without `ψ_c` under a split, and this must go red.
 
-**ER-1: the `.nc`.** The ragged array, the material and circuit tables, and
-the attributes of §2.3. The writer gains string vectors, and the parser
+**ER-1: the `.nc`. DONE** → **[M-268](MEASUREMENTS.md#m-268)**.
+`NetCDFWriter::materials()` writes the record the driver's `regions:` line
+reports, classified once on the converged solve; `meq::buildMaterialTable()`
+makes the table from `[[coils]]` and `[[circuits]]`, with the solved currents.
+The `DriverAcceptance` bullets are met on the three runs named. The diverted
+tokamak is wired in the test, not in `examples/`: `P2L` and `P2U` on one
+supply and `P1L` and `P1U` unwired. The mirror's coil areas are not asserted,
+since its mesh is not aligned to them. It writes the ragged array, the
+material and circuit tables, and the attributes of §2.3. The writer gains
+string vectors, and the parser
 reserves `default`. `DriverAcceptance` reads them back on `limited-tokamak`,
 `diverted-tokamak` (with circuits and unwired coils, so both kinds of circuit
 row appear) and `mirror-rotating`:
@@ -260,17 +290,24 @@ points round-trip exactly. `docs/output.rst` tells a reader to make the same
 check. Also `docs/output.rst`, and
 `tools/plot_equilibrium.py` drawing the regions.
 
-**ER-2: VTK.** The cell data on the answer and on every cycle frame, asserted
-by reading the `.vtu` back. **Open until measured:** whether
-`ParaViewDataCollection`'s high-order output writes an L2-0 field as
-per-element-duplicated points, so that it renders as a constant, or smears it
-across shared nodes.
+**ER-2: VTK. DONE** → **[M-269](MEASUREMENTS.md#m-269)**. The cell data on the
+answer and on every cycle frame, asserted by reading the `.vtu` back by hand
+(`tests/convergence/VtuReader.hpp`) in `OutputTests` and `DriverAcceptance`.
+**The high-order output does not smear an L2-0 field**: every element's
+Lagrange points are its own, so the point count is the cell count times the
+points of a cell, and each array is one value per cell, on curved cells too.
+The adaptive frames are the rotating mirror with `[adaptivity]` added, which
+holds both boundary kinds. Its estimator refines away from the plasma
+boundary, so the frames show the record per cycle without showing that
+boundary move.
 
-**ER-3: the grid mask.** `material( Z, R )`. On the mirror the plasma entries
-must agree with `0 < Ψ ≤ 1, |z| ≤ AxialEdge`, evaluated independently from the
-written `psi` and the labels, at every node more than one grid spacing from an
-edge. The `docs/output.rst` warning about `n_s` outside the support becomes a
-pointer to the mask.
+**ER-3: the grid mask. DONE** → **[M-270](MEASUREMENTS.md#m-270)**.
+`node_material( Z, R )`. On the mirror the plasma entries agree with
+`0 < Ψ ≤ 1, |z| ≤ AxialEdge`, evaluated independently from the written `psi`
+and the labels, and the copper entries with the rectangles, at every node more
+than one grid spacing from an edge. No node disagrees anywhere on the shipped
+run. The `docs/output.rst` note about `n_s` outside the support points to the
+mask.
 
 ## 4. Decided
 

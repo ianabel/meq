@@ -271,6 +271,26 @@ namespace meq
 		 * about `z = 0`: aligned, the box is geometry and not a size field.
 		 */
 		bool alignPlasma = false;
+
+		/**
+		 * `AlignConductors` -- FRAGMENT THE `[[coils]]` RECTANGLES INTO THE
+		 * GEOMETRY AS GEOMETRY ONLY, under a subtracting `[conductors] Model`:
+		 * no coil attribute and no `CoilSize` grading, and the remainder
+		 * equation sees no source there. `AlignPlasma`'s idea, for the copper.
+		 *
+		 * **WHAT IT BUYS IS A PURE CELL, NOT A BETTER SOLVE.** Under
+		 * subtraction `psi_c` is evaluated analytically and the copper is
+		 * vacuum to the remainder equation, so a cell the rectangle cuts costs
+		 * nothing numerically; it costs `ELEMENT-REGIONS-PLAN.md`'s record a
+		 * `conductor_boundary` cell, and a plasma boundary passing through such
+		 * a cell a `mixed` one. Off by default, to keep the subtraction's
+		 * point -- a mesh that need not resolve the conductors -- and its price
+		 * in elements is measured (MEASUREMENTS.md).
+		 *
+		 * Refused under `Model = "meshed"`, whose `--coil` already fragments
+		 * every rectangle in with its attribute.
+		 */
+		bool alignConductors = false;
 	};
 
 	/// The element attribute `tools/mesh/halfdisc.py` writes the interior of a

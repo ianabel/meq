@@ -3146,6 +3146,57 @@ BOOST_AUTO_TEST_CASE( coil_size_is_refused_beside_a_subtracting_conductor_model 
 		parse( base + tail + "\n[conductors]\nModel = \"subtracted\"\n" ) );
 }
 
+// [mesh.generate] AlignConductors -- THE RECTANGLES AS GEOMETRY ONLY, UNDER A
+// SUBTRACTING MODEL AND ONLY THERE.
+//
+// ELEMENT-REGIONS-PLAN.md §2.1b. Off by default, so every existing file means
+// what it meant; accepted under "subtracted" and "filament"; refused under
+// "meshed", whose --coil already fragments every rectangle in, so the key
+// would be accepted and do nothing.
+BOOST_AUTO_TEST_CASE( align_conductors_is_a_subtracting_models_key )
+{
+	std::string const base =
+		"[mesh]\n"
+		"File = \"m.msh\"\n"
+		"\n[mesh.generate]\n"
+		"Tool = \"halfdisc\"\nRadius = 2.6\nSize = 0.18\n";
+
+	std::string const tail =
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n";
+
+	BOOST_TEST( !parse( base + tail ).getMesh().generate.alignConductors );
+	BOOST_TEST( !parse( base + tail + "\n[conductors]\nModel = \"subtracted\"\n" )
+	                 .getMesh().generate.alignConductors );
+
+	for ( char const *model : { "subtracted", "filament" } )
+	{
+		Configuration const c = parse( base + "AlignConductors = true\n" + tail
+		                               + "\n[conductors]\nModel = \"" + model + "\"\n" );
+		BOOST_TEST( c.getMesh().generate.alignConductors, model );
+	}
+
+	BOOST_CHECK_EXCEPTION(
+		parse( base + "AlignConductors = true\n" + tail ),
+		ConfigError,
+		[]( ConfigError const & e )
+		{ return e.getKey() == "mesh.generate.AlignConductors"; } );
+	BOOST_CHECK_EXCEPTION(
+		parse( base + "AlignConductors = true\n" + tail
+		       + "\n[conductors]\nModel = \"meshed\"\n" ),
+		ConfigError,
+		[]( ConfigError const & e )
+		{ return e.getKey() == "mesh.generate.AlignConductors"; } );
+
+	// A boolean, as AlignPlasma is.
+	BOOST_CHECK_THROW( parse( base + "AlignConductors = 1\n" + tail
+	                          + "\n[conductors]\nModel = \"subtracted\"\n" ),
+	                   ConfigError );
+}
+
 // [initialguess] Content -- WHAT A STORED .gf HOLDS, WHICH THE FILE CANNOT SAY.
 //
 // COIL-SUBTRACTION-PLAN.md section 8.3. The default is load bearing for the
@@ -3445,6 +3496,13 @@ BOOST_AUTO_TEST_CASE( an_ambiguous_circuit_is_refused_naming_its_key )
 	                      + "\n[[circuits]]\nName = \"P\"\nCurrent = 1.0\n"
 	                        "Coils = [ { Name = \"PL\", Multiplier = 1.0 } ]\n" ),
 	         "circuits[1].Name" );
+
+	// "default" is the output's grouping of the unwired coils, so a supplied
+	// circuit may not take it: it would merge with them in the .nc. Any other
+	// spelling is an ordinary name.
+	refuses( withCircuit( both, "[[circuits]]\nName = \"default\"\nCurrent = 1.0e5\n" + members ),
+	         "circuits[0].Name" );
+	BOOST_CHECK_NO_THROW( parse( withCircuit( both, "[[circuits]]\nName = \"Default\"\nCurrent = 1.0e5\n" + members ) ) );
 
 	// A member left with no current because no circuit took it is the ordinary
 	// refusal, unchanged.

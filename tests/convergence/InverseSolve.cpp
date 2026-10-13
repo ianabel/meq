@@ -913,6 +913,44 @@ namespace
 		return std::string( std::istreambuf_iterator<char>( stream ),
 		                    std::istreambuf_iterator<char>() );
 	}
+
+	/// One variable's values from `ncdump -p 9,17`, as the text between its
+	/// `name =` and `;`, split on commas, with string quotes and blanks
+	/// dropped.
+	std::vector<std::string> ncdumpValues( std::string const &path,
+	                                       std::string const &name )
+	{
+		std::string const scratch = "inverse-solve-ncdump.txt";
+		std::string const command = "ncdump -p 9,17 -v " + name + " " + path
+		                            + " > " + scratch + " 2>/dev/null";
+		std::vector<std::string> out;
+		int const status = std::system( command.c_str() );
+		std::string const text = readAll( scratch );
+		std::remove( scratch.c_str() );
+		if ( status != 0 )
+			return out;
+		std::size_t at = text.find( "\ndata:" );
+		if ( at == std::string::npos )
+			return out;
+		at = text.find( "\n " + name + " =", at );
+		if ( at == std::string::npos )
+			return out;
+		std::size_t const end = text.find( ';', at );
+		std::string const body = text.substr( at + name.size() + 4,
+		                                      end - at - name.size() - 4 );
+		std::string one;
+		for ( char const c : body + "," )
+		{
+			if ( c == ',' )
+			{
+				out.push_back( one );
+				one.clear();
+			}
+			else if ( c != '"' && c != ' ' && c != '\n' )
+				one += c;
+		}
+		return out;
+	}
 }
 
 BOOST_AUTO_TEST_CASE( theDriverSolvesAnInverseProblem )
@@ -974,6 +1012,36 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesAnInverseProblem )
 	BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-12, largest ) );
 	BOOST_TEST( worstCurrent < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 ) );
 	BOOST_TEST( m.solver->inverseNullity() == 0 );
+
+	// THE FILE'S MATERIAL TABLE CARRIES THE SOLVED CURRENTS, not the
+	// currents the run started from: each free coil's material_current is
+	// its circuit's solved current times its multiplier.
+	std::vector<std::string> const names =
+		ncdumpValues( "machine-f-diiid-inverse.nc", "material_name" );
+	std::vector<std::string> const written =
+		ncdumpValues( "machine-f-diiid-inverse.nc", "material_current" );
+	BOOST_TEST_REQUIRE( names.size() == written.size() );
+	BOOST_TEST_REQUIRE( !names.empty(), "the .nc has no material table" );
+	int checked = 0;
+	for ( std::size_t k = 0; k < circuits.size(); ++k )
+		for ( std::size_t j = 0; j < circuits[ k ].coils.size(); ++j )
+		{
+			std::string const &coil =
+				m.config->getCoils().coils[ circuits[ k ].coils[ j ] ].name;
+			auto const row = std::find( names.begin(), names.end(), coil );
+			BOOST_TEST_REQUIRE( ( row != names.end() ),
+			                    coil << " has no row in the material table" );
+			double const current = std::strtod(
+				written[ static_cast<std::size_t>( row - names.begin() ) ].c_str(),
+				nullptr );
+			double const expected = circuits[ k ].multipliers[ j ]*solved[ k ];
+			BOOST_TEST( std::abs( current - expected )
+			            < meq::tests::scalarAgreementFloor( 1.0e-8, std::abs( expected ) ),
+			            coil << "'s material_current is " << current
+			            << " and its solved current " << expected );
+			++checked;
+		}
+	BOOST_TEST( checked == 4 );
 }
 
 /*

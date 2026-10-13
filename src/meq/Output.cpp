@@ -1,8 +1,10 @@
 #include "Output.hpp"
 
 #include "Crossings.hpp"
+#include "Materials.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <map>
 #include <set>
@@ -71,10 +73,56 @@ namespace meq
 		postProcessed.Save( out );
 	}
 
+	ElementCellData::ElementCellData( mfem::Mesh &mesh, MaterialTable const &table,
+	                                  ElementMaterials const &record )
+		: collection( 0, mesh.Dimension() ),
+		  space( &mesh, &collection ),
+		  region( &space ), plasmaFraction( &space ),
+		  conductorMaterial( &space ), conductorFraction( &space )
+	{
+		if ( record.elementCount() != mesh.GetNE() )
+			throw std::invalid_argument(
+				"meq::ElementCellData: the record holds "
+				+ std::to_string( record.elementCount() ) + " elements and the mesh "
+				+ std::to_string( mesh.GetNE() )
+				+ "; it was classified on another mesh" );
+		if ( record.materialArea.size() != static_cast<std::size_t>( table.size() ) )
+			throw std::invalid_argument(
+				"meq::ElementCellData: the record holds "
+				+ std::to_string( record.materialArea.size() )
+				+ " materials and the table " + std::to_string( table.size() )
+				+ "; it was made with another table" );
+
+		// One dof per element, asked of the space rather than assumed to be
+		// the element's index.
+		mfem::Array<int> dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			space.GetElementDofs( e, dofs );
+			int const at = dofs[ 0 ] >= 0 ? dofs[ 0 ] : -1 - dofs[ 0 ];
+			std::size_t const element = static_cast<std::size_t>( e );
+			MaterialFraction const conductor = record.dominantConductor( e, table );
+			region( at ) = static_cast<double>( static_cast<int>( record.region[ element ] ) );
+			plasmaFraction( at ) = record.plasmaFraction[ element ];
+			conductorMaterial( at ) = static_cast<double>( conductor.material );
+			conductorFraction( at ) = conductor.fraction;
+		}
+	}
+
+	std::vector< std::pair< std::string, mfem::GridFunction * > >
+	ElementCellData::fields() const
+	{
+		return { { "region", &region },
+		         { "plasma_fraction", &plasmaFraction },
+		         { "conductor_material", &conductorMaterial },
+		         { "conductor_fraction", &conductorFraction } };
+	}
+
 	void writeVtu( std::string const &stem, mfem::Mesh &mesh,
 	               mfem::GridFunction const &potential,
 	               mfem::GridFunction const &field,
-	               int levelsOfDetail )
+	               int levelsOfDetail,
+	               ElementCellData const *cells )
 	{
 		// ParaViewDataCollection takes a name and a prefix path and joins them
 		// itself, so the stem has to be split rather than handed over whole --
@@ -109,6 +157,9 @@ namespace meq
 			const_cast<mfem::GridFunction *>( &potential ) );
 		collection.RegisterField( "B",
 			const_cast<mfem::GridFunction *>( &field ) );
+		if ( cells != nullptr )
+			for ( auto const &named : cells->fields() )
+				collection.RegisterField( named.first, named.second );
 
 		// A single steady state, not a time series. Cycle 0 and time 0 are what
 		// ParaView shows for a file with no time axis; an adaptive run could
@@ -146,7 +197,8 @@ namespace meq
 	void VtuSeries::append( mfem::Mesh &mesh,
 	                        mfem::GridFunction const &potential,
 	                        mfem::GridFunction const &field,
-	                        int cycle, double time )
+	                        int cycle, double time,
+	                        ElementCellData const *cells )
 	{
 		// ONE COLLECTION, KEPT ALIVE ACROSS THE WHOLE SERIES. Rebuilding it per
 		// frame was tried first and is wrong in a way that looks right: the
@@ -178,6 +230,9 @@ namespace meq
 			const_cast<mfem::GridFunction *>( &potential ) );
 		state->collection->RegisterField( "B",
 			const_cast<mfem::GridFunction *>( &field ) );
+		if ( cells != nullptr )
+			for ( auto const &named : cells->fields() )
+				state->collection->RegisterField( named.first, named.second );
 
 		state->collection->SetCycle( cycle );
 		state->collection->SetTime( time );
@@ -189,6 +244,9 @@ namespace meq
 		// which the next append rebinds before touching.
 		state->collection->DeregisterField( "psi" );
 		state->collection->DeregisterField( "B" );
+		if ( cells != nullptr )
+			for ( auto const &named : cells->fields() )
+				state->collection->DeregisterField( named.first );
 		++state->written;
 	}
 
@@ -620,6 +678,27 @@ namespace meq
 		var.putVar( values.data() );
 	}
 
+	void NetCDFWriter::nodeMaterial( std::vector<int> const &rows )
+	{
+		std::size_t const expected = static_cast<std::size_t>( state->nR )*state->nZ;
+		if ( rows.size() != expected )
+			throw std::runtime_error( "meq::NetCDFWriter::nodeMaterial: "
+			                          + std::to_string( rows.size() )
+			                          + " values where the grid has "
+			                          + std::to_string( expected ) );
+
+		std::vector<netCDF::NcDim> const shape{ state->zDim, state->rDim };
+		netCDF::NcVar var = state->file.addVar( "node_material", netCDF::ncInt, shape );
+		var.putAtt( "long_name", "the material table's row at the node: the "
+		                         "classifier's test at a point, plasma judged on "
+		                         "psi as written here" );
+		var.putAtt( "comment", "an index into the material dimension "
+		                       "(material_name, material_kind); -1 outside the "
+		                       "domain, where inside = 0" );
+		var.putAtt( "_FillValue", netCDF::ncInt, -1 );
+		var.putVar( rows.data() );
+	}
+
 	void NetCDFWriter::boundary( std::vector<double> const &radius,
 	                             std::vector<double> const &z )
 	{
@@ -701,6 +780,249 @@ namespace meq
 		var.putVar( values.data() );
 	}
 
+	void NetCDFWriter::vector( std::string const &dimension,
+	                           std::string const &name,
+	                           std::vector<std::string> const &values,
+	                           std::string const &longName )
+	{
+		if ( values.empty() )
+			throw std::runtime_error( "meq::NetCDFWriter::vector: " + name
+			                          + " is empty; see the double overload" );
+
+		netCDF::NcDim dim = sharedDimension( state->file, dimension,
+		                                     values.size() );
+		netCDF::NcVar var = state->file.addVar( name, netCDF::ncString, dim );
+		var.putAtt( "long_name", longName );
+		std::vector<char const *> pointers;
+		pointers.reserve( values.size() );
+		for ( std::string const &one : values )
+			pointers.push_back( one.c_str() );
+		var.putVar( pointers.data() );
+	}
+
+	namespace
+	{
+		/// A one-dimensional variable, written whole. The _FillValue goes on
+		/// BEFORE the data, which NetCDF-4 requires.
+		template <typename T>
+		netCDF::NcVar column( netCDF::NcFile &file, std::string const &name,
+		                      netCDF::NcType const &type, netCDF::NcDim const &dim,
+		                      std::vector<T> const &values,
+		                      std::string const &longName,
+		                      std::string const &units = std::string(),
+		                      bool fillNaN = false )
+		{
+			netCDF::NcVar var = file.addVar( name, type, dim );
+			var.putAtt( "long_name", longName );
+			if ( !units.empty() )
+				var.putAtt( "units", units );
+			if ( fillNaN )
+				var.putAtt( "_FillValue", netCDF::ncDouble,
+				            std::numeric_limits<double>::quiet_NaN() );
+			var.putVar( values.data() );
+			return var;
+		}
+
+		/// A name made a legal NetCDF attribute suffix: letters, digits and
+		/// underscores, the driver's variableName() rule.
+		std::string attributeSuffix( std::string const &name )
+		{
+			std::string safe;
+			for ( char const c : name )
+				safe += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' )
+					? c : '_';
+			return safe.empty() ? std::string( "unnamed" ) : safe;
+		}
+
+		/// CF's `flag_values` / `flag_meanings` pair for an enumeration of
+		/// @a count values named by @a nameOf.
+		template <typename T, typename Name>
+		void flags( netCDF::NcVar &var, netCDF::NcType const &type, int count,
+		            Name const &nameOf )
+		{
+			std::vector<T> values;
+			std::string meanings;
+			for ( int i = 0; i < count; ++i )
+			{
+				values.push_back( static_cast<T>( i ) );
+				meanings += ( i == 0 ? "" : " " ) + std::string( nameOf( i ) );
+			}
+			var.putAtt( "flag_values", type, values.size(), values.data() );
+			var.putAtt( "flag_meanings", meanings );
+		}
+	}
+
+	void NetCDFWriter::materials( MaterialTable const &table,
+	                              ElementMaterials const &record )
+	{
+		int const elements = record.elementCount();
+		if ( elements <= 0 )
+			throw std::invalid_argument( "meq::NetCDFWriter::materials: the record has no elements" );
+		if ( record.materialArea.size() != static_cast<std::size_t>( table.size() ) )
+			throw std::invalid_argument( "meq::NetCDFWriter::materials: the record holds "
+			                             + std::to_string( record.materialArea.size() )
+			                             + " materials and the table "
+			                             + std::to_string( table.size() )
+			                             + "; it was made with another table" );
+
+		netCDF::NcFile &file = state->file;
+		std::size_t const n = static_cast<std::size_t>( elements );
+
+		// ---- the ragged record, CF's contiguous ragged array ----
+		netCDF::NcDim const elementDim = sharedDimension( file, "element", n );
+		netCDF::NcDim const entryDim =
+			sharedDimension( file, "element_entry", record.entries.size() );
+
+		std::vector<int> counts( n );
+		for ( std::size_t e = 0; e < n; ++e )
+			counts[ e ] = record.offsets[ e + 1 ] - record.offsets[ e ];
+		netCDF::NcVar countVar = column( file, "element_material_count", netCDF::ncInt,
+		                                 elementDim, counts,
+		                                 "number of materials in the element, indexed "
+		                                 "as the elements of mesh_file" );
+		countVar.putAtt( "sample_dimension", "element_entry" );
+
+		std::vector<int> entryMaterial;
+		std::vector<double> entryFraction;
+		for ( MaterialFraction const &entry : record.entries )
+		{
+			entryMaterial.push_back( entry.material );
+			entryFraction.push_back( entry.fraction );
+		}
+		column( file, "element_material", netCDF::ncInt, entryDim, entryMaterial,
+		        "row of the material table" );
+		column( file, "element_fraction", netCDF::ncDouble, entryDim, entryFraction,
+		        "fraction of the element's area the material occupies, at the "
+		        "solve's quadrature points; an element's fractions sum to 1", "1" );
+
+		// ---- dense, one per element ----
+		std::vector<signed char> regions( n );
+		for ( std::size_t e = 0; e < n; ++e )
+			regions[ e ] = static_cast<signed char>( record.region[ e ] );
+		netCDF::NcVar regionVar = column( file, "element_region", netCDF::ncByte,
+		                                  elementDim, regions,
+		                                  "region derived from the element's fractions, "
+		                                  "for plotting" );
+		flags<signed char>( regionVar, netCDF::ncByte, elementRegionCount,
+		                    []( int i ) { return elementRegionName( static_cast<ElementRegion>( i ) ); } );
+
+		column( file, "element_plasma_fraction", netCDF::ncDouble, elementDim,
+		        record.plasmaFraction,
+		        "fraction of the element's area that carries plasma current", "1" );
+
+		std::vector<signed char> excluded( record.excluded.begin(), record.excluded.end() );
+		column( file, "element_excluded", netCDF::ncByte, elementDim, excluded,
+		        "1 where [source] ExcludeAttributes names the element's attribute" );
+		column( file, "element_attribute", netCDF::ncInt, elementDim, record.attribute,
+		        "the element's attribute in mesh_file" );
+
+		// ---- the material table, every column of section 2.1 ----
+		std::vector<Material> const &rows = table.materials();
+		std::vector<std::string> names;
+		std::vector<int> kinds, circuits, curveIndex;
+		std::vector<double> currents, resistivities, permeabilities;
+		for ( Material const &row : rows )
+		{
+			names.push_back( row.name );
+			kinds.push_back( static_cast<int>( row.kind ) );
+			circuits.push_back( row.circuit );
+			curveIndex.push_back( row.permeabilityCurve );
+			currents.push_back( row.current );
+			resistivities.push_back( row.resistivity );
+			permeabilities.push_back( row.relativePermeability );
+		}
+		vector( "material", "material_name", names, "material name" );
+		netCDF::NcDim const materialDim = file.getDim( "material" );
+		netCDF::NcVar kindVar = column( file, "material_kind", netCDF::ncInt,
+		                                materialDim, kinds, "kind of material" );
+		flags<int>( kindVar, netCDF::ncInt, 5,
+		            []( int i ) { return materialKindName( static_cast<MaterialKind>( i ) ); } );
+		column( file, "material_circuit", netCDF::ncInt, materialDim, circuits,
+		        "row of the circuit table, -1 for none" );
+		column( file, "material_current", netCDF::ncDouble, materialDim, currents,
+		        "the coil's resolved total current", "A", true );
+		column( file, "material_resistivity", netCDF::ncDouble, materialDim,
+		        resistivities, "resistivity of a passive structure", "ohm m", true );
+		column( file, "material_relative_permeability", netCDF::ncDouble, materialDim,
+		        permeabilities,
+		        "constant relative permeability; the fill where a curve holds it", "1",
+		        true );
+		column( file, "material_permeability_curve", netCDF::ncInt, materialDim,
+		        curveIndex, "row of the permeability curve table, -1 for none" );
+
+		// ---- the circuits, when there are any ----
+		if ( !table.circuits().empty() )
+		{
+			std::vector<std::string> circuitNames;
+			std::vector<double> circuitCurrents;
+			std::vector<signed char> supplied;
+			for ( Circuit const &row : table.circuits() )
+			{
+				circuitNames.push_back( row.name );
+				circuitCurrents.push_back( row.current );
+				supplied.push_back( row.supplied ? 1 : 0 );
+			}
+			vector( "circuit", "circuit_name", circuitNames,
+			        "circuit name; \"default\" groups the coils in no [[circuits]] block" );
+			netCDF::NcDim const circuitDim = file.getDim( "circuit" );
+			column( file, "circuit_current", netCDF::ncDouble, circuitDim,
+			        circuitCurrents,
+			        "the supply's current, each member carrying its multiplier "
+			        "times it; the fill for the unsupplied default group", "A", true );
+			column( file, "circuit_supplied", netCDF::ncByte, circuitDim, supplied,
+			        "1 for a [[circuits]] block, 0 for a grouping with no supply" );
+		}
+
+		// ---- the permeability curves, a second ragged array ----
+		std::vector<PermeabilityCurve> const &curves = table.permeabilityCurves();
+		if ( !curves.empty() )
+		{
+			std::vector<std::string> owners;
+			std::vector<int> pointCounts;
+			std::vector<double> h, b;
+			for ( PermeabilityCurve const &curve : curves )
+			{
+				owners.push_back( curve.material );
+				pointCounts.push_back( static_cast<int>( curve.fieldStrength.size() ) );
+				h.insert( h.end(), curve.fieldStrength.begin(), curve.fieldStrength.end() );
+				b.insert( b.end(), curve.fluxDensity.begin(), curve.fluxDensity.end() );
+			}
+			vector( "permeability_curve", "permeability_curve_material", owners,
+			        "material_name of the row this curve belongs to" );
+			netCDF::NcDim const curveDim = file.getDim( "permeability_curve" );
+			netCDF::NcVar pointVar = column( file, "permeability_curve_point_count",
+			                                 netCDF::ncInt, curveDim, pointCounts,
+			                                 "number of ( H, B ) points in the curve" );
+			pointVar.putAtt( "sample_dimension", "permeability_curve_point" );
+			netCDF::NcDim const pointDim =
+				sharedDimension( file, "permeability_curve_point", h.size() );
+			column( file, "permeability_curve_h", netCDF::ncDouble, pointDim, h,
+			        "magnetic field strength H, increasing from 0", "A/m" );
+			netCDF::NcVar bVar = column( file, "permeability_curve_b", netCDF::ncDouble,
+			                             pointDim, b, "flux density B at H", "T" );
+			bVar.putAtt( "interpolation", permeabilityInterpolation );
+		}
+
+		// ---- the global summary ----
+		for ( int r = 0; r < elementRegionCount; ++r )
+		{
+			ElementRegion const which = static_cast<ElementRegion>( r );
+			file.putAtt( std::string( "region_elements_" ) + elementRegionName( which ),
+			             netCDF::ncInt, record.regionCount( which ) );
+		}
+		std::set<std::string> used;
+		for ( std::size_t m = 0; m < rows.size(); ++m )
+		{
+			// A COIL MAY SHARE A NAME, with another coil or with "vacuum", and
+			// a second putAtt would overwrite the first without a word.
+			std::string const base = "material_area_" + attributeSuffix( rows[ m ].name );
+			std::string key = base;
+			for ( int suffix = 0; !used.insert( key ).second; ++suffix )
+				key = base + "_" + std::to_string( m ) + ( suffix == 0 ? "" : "_" + std::to_string( suffix ) );
+			file.putAtt( key, netCDF::ncDouble, record.materialArea[ m ] );
+		}
+		file.putAtt( "region_faults", netCDF::ncInt, record.faults );
+	}
 
 	struct FluxGridWriter::State
 	{
@@ -993,6 +1315,12 @@ namespace meq
 	void NetCDFWriter::vector( std::string const &, std::string const &,
 	                           std::vector<int> const &, std::string const & )
 	{ unavailable(); }
+	void NetCDFWriter::vector( std::string const &, std::string const &,
+	                           std::vector<std::string> const &, std::string const & )
+	{ unavailable(); }
+	void NetCDFWriter::materials( MaterialTable const &, ElementMaterials const & )
+	{ unavailable(); }
+	void NetCDFWriter::nodeMaterial( std::vector<int> const & ) { unavailable(); }
 	void NetCDFWriter::attribute( std::string const &, std::string const & ) { unavailable(); }
 	void NetCDFWriter::attribute( std::string const &, double ) { unavailable(); }
 	void NetCDFWriter::attribute( std::string const &, int ) { unavailable(); }

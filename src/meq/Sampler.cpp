@@ -613,6 +613,11 @@ namespace meq
 		return zMin + ( zMax - zMin )*j/( nZ - 1 );
 	}
 
+	int GridSampler::elementAt( int i, int j ) const
+	{
+		return element[ static_cast<std::size_t>( index( i, j ) ) ];
+	}
+
 	bool GridSampler::located( int i, int j ) const
 	{
 		return element[ static_cast<std::size_t>( index( i, j ) ) ] >= 0;

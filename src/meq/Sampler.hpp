@@ -362,6 +362,13 @@ namespace meq
 			/// the file distinguishes a solved node from a continued one.
 			bool wasExtended( int i, int j ) const;
 
+			/// The element holding this node, or -1 where it was not located.
+			/// For a node extendOutward() filled it is the element of its FOOT
+			/// on Gamma_h, which is the element its values were continued from
+			/// -- what the `.nc`'s `node_material` asks the fill and the
+			/// exclusions of.
+			int elementAt( int i, int j ) const;
+
 			/**
 			 * How far through the Gamma_h-to-Gamma band a node sits: 0 on
 			 * Gamma_h, 1 on Gamma, and 0 for every node that was found inside an

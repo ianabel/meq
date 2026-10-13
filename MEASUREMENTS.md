@@ -16154,3 +16154,278 @@ driver takes, so no driver answer moved: what the defect cost was its first
 stage iterating the wrong map, on the unbordered fallback rung and in
 `PicardSweeps`. Without a split `conductorPsi()` is exactly zero, so every
 other run is bit-identical.
+
+### M-266
+
+**ER-0: THE ELEMENT RECORD IS THE SOLVER'S OWN SUPPORT TEST, AND ITS PLASMA
+AREA CONVERGES TO THE CLOSED FORM'S.** `tests/convergence/ElementRegions.cpp`,
+`GradShafranovSolver::elementMaterials()`. No solve runs: each field is a closed
+form projected after `prepare()`, or a zero remainder under a split whose `ψ_c`
+is the vacuum field.
+
+**The plasma area.** ITER Example 2 at `k = 2` on the box `R` [0.60, 1.40],
+`z` [−0.70, 0.75], which stops above the X-point at −0.704. The source is
+confined and one-sided, and the fill is refreshed. The exact area of
+`{ ψ < 0 }` is 0.617473648416547. It is computed as root pairs integrated in
+`t = √( z_top − z )`, and 64 panels agree with 32 to 8.9e-16.
+
+| `n` | elements | plasma area | error | rate | `plasma_boundary` | ratio |
+|---|---|---|---|---|---|---|
+| 8 | 256 | 0.618527897789514 | 1.0542e-03 | | 65 | |
+| 16 | 1024 | 0.617676110849104 | 2.0246e-04 | 2.38 | 131 | 2.015 |
+| 32 | 4096 | 0.617340974175450 | 1.3267e-04 | 0.61 | 264 | 2.015 |
+| 64 | 16384 | 0.617506731198327 | 3.3083e-05 | 2.00 | 507 | 1.920 |
+| 128 | 65536 | 0.617488965011293 | 1.5317e-05 | 1.11 | 1007 | 1.986 |
+| 256 | 262144 | 0.617483151891067 | 9.5035e-06 | 0.69 | 2022 | 2.008 |
+
+The least-squares rate is 1.347. Each cut element integrates an indicator with
+an `O( h² )` error whose sign the mesh decides, so `O( 1/h )` of them give
+`O( h )` at worst and `O( h^1.5 )` uncorrelated. Single steps scatter about
+that. The test asserts a fitted slope of at least 1, every level under the
+first-order envelope from `n = 8`, and the boundary count's ratio in
+( 1.8, 2.2 ). The worst `| Σ fractions − 1 |` is 6.7e-16, and no element is
+`mixed` or faulted.
+
+**The fill and the exclusion.** The same equilibrium on a box reaching
+`z = −0.9`, `30 × 55`, has 38 elements wholly below `z = −0.78` in the private
+flux region. Under `PlasmaConnectivity::Component` none of them carries
+plasma. Under `Pointwise` all 38 carry it and 34 are whole. An excluded patch
+of 30 elements on the axis reads 0 and is flagged under both, while the 370
+core elements beside it read 1.
+
+**geq's mirror**, level 0 inside `Γ`. Labels on the vacuum field are
+5.637801e-03 at ( 0.1, 0 ) and 6.610117e-02 at ( 0.35, 0 ), with the box at
+`|z| ≤ 1.5`:
+
+| mesh | elements | vacuum | plasma | coil | `plasma_boundary` | `conductor_boundary` |
+|---|---|---|---|---|---|---|
+| packs a `--coil` each | 1696 | 1387 | 82 | 120 | 107 | 0 |
+| M-262 unaligned, no `--coil` | 1131 | 874 | 91 | 0 | 113 | 53 |
+| M-262 aligned, no `--coil` | 1175 | 916 | 92 | 0 | 106 | 61 |
+| aligned, `--align-coil` | 1214 | 971 | 88 | 42 | 113 | 0 |
+
+No mesh has a fault or a `mixed` cell. The rectangle is 7.056883581736939e-02.
+Meshed, the packs measure 7.056883581736935e-02 and 7.056883581736936e-02.
+Aligned, both measure 7.056883581736938e-02. The meshed packs' cells are exactly attribute `10 + i`. Unaligned,
+all 4 edges of each pack cut cells. No element straddles the aligned cutoff
+over `R < 0.75`, and 8 `plasma_boundary` elements straddle the unaligned one.
+
+**The predicate is the integrated one.** `F/R` summed over the points called
+plasma, against `assemblePlasmaCurrent()`:
+
+| | classified | assembled | relative |
+|---|---|---|---|
+| mirror, filaments subtracted | −1.968011591166521e-06 | −1.968011591166521e-06 | 0.000e+00 |
+| Solov'ev box | −1.528874414040716e+01 | −1.528874414040716e+01 | 0.000e+00 |
+
+**The mutations, each run once and restored:**
+
+| mutation | caught by |
+|---|---|
+| `ψ_c` dropped from the classified flux | mirror arm 0 against −1.968e-06; no plasma on any mirror mesh; no cutoff cells unaligned |
+| `elementInPlasma()` dropped | 38 lobe elements carry plasma under the fill; the excluded patch reads plasma |
+| `AlignConductors` refusal dropped | two `ConfigTests` failures |
+| `--align-coil` not fragmented | pack areas off by 4.2e-04 and 6.5e-05, 61 `conductor_boundary` cells; `limited-tokamak-filament` coils 0.0086 to 0.0106 against 0.01 |
+
+### M-267
+
+**ER-0: `AlignConductors` COSTS 3% OF THE ELEMENTS AND MAKES THE SUBTRACTED
+COPPER WHOLE; THE SHIPPED EXAMPLES FAULT IN ONE PLACE.** `ElementRegions`'s
+`alignConductorsCost` meshes each shipped file through `meq --mesh-command`,
+with `File` redirected and the key off and on. "In `Γ`" counts element centres
+inside `[boundary.exterior] Radius`:
+
+| example | off | on | off in `Γ` | on in `Γ` | cost in `Γ` |
+|---|---|---|---|---|---|
+| `mirror-rotating` | 1290 | 1330 | 1217 | 1254 | +3.0% |
+| `limited-tokamak-filament` | 2033 | 2091 | 1878 | 1933 | +2.9% |
+
+On the driver's own cut of the mirror the counts are 1175 and 1214, and that
+1175 is M-262's mesh. With no `CoilSize`, both background counts with the key
+equal the `Model = "meshed"` mesh's, 1330 and 2091, since the geometry is the
+same. On `limited-tokamak-filament` the copper alone has 15
+`conductor_boundary` cells without the key, classified at `k = 1` on the
+background mesh. The driver's run below reads 19 at the example's `k = 3`,
+since a sliver of copper is seen only where a quadrature point lands in it.
+With the key there are 0, and each
+coil's area is 0.01 to 1e-12 relative. The key is worth offering for the
+record and not for the solve, since subtracted copper is vacuum to the
+remainder equation.
+
+**The shipped examples, through the driver's new `regions:` line**, at
+`MKL_NUM_THREADS=1`, `OMP_NUM_THREADS=4`. These are the ones carrying conductors
+or a plasma boundary:
+
+| example | vacuum | plasma | coil | `plasma_boundary` | `conductor_boundary` | faults |
+|---|---|---|---|---|---|---|
+| `coils-rectangle` | 0 | 736 | 4 | 0 | 0 | **32** (28 `mixed`) |
+| `diverted-tokamak` | 2106 | 343 | 104 | 89 | 0 | 0 |
+| `diverted-tokamak-generated` | 2099 | 336 | 104 | 87 | 0 | 0 |
+| `limited-tokamak` | 1420 | 84 | 56 | 41 | 0 | 0 |
+| `limited-tokamak-filament` | 1389 | 332 | 0 | 83 | 19 | 0 |
+| `machine-f-diiid` | 4014 | 273 | 468 | 93 | 0 | 0 |
+| `machine-f-diiid-filament` | 1118 | 228 | 0 | 77 | 87 | 0 |
+| `machine-g-mastu` | 5201 | 394 | 992 | 120 | 0 | 0 |
+| `mastu-nke` | 6837 | 1022 | 1024 | 169 | 0 | 0 |
+| `mirror-rotating` | 914 | 91 | 0 | 109 | 61 | 0 |
+
+Every other example that converged reads 0 faults and no `mixed` cell. Those
+are `diverted-tokamak-xpoint`, `limited-tokamak-filament-curve`,
+`machine-a-testtokamak` and its `-shaped` twin, `machine-c-mast-shaped`,
+`machine-e-diamagnetic` and its `-shaped` twin, `machine-f-diiid-shaped`,
+`machine-f-diiid-inverse`, and every fixed-boundary and rectangle file. A
+fixed-boundary file is plasma throughout, and so is an unconfined
+`free-boundary-halfdisc` or `limiter-halfdisc`: the plasma term is evaluated
+on all of `Ω_h`.
+
+**`coils-rectangle` puts plasma current in its copper, and the record is
+right to say so.** Its `mhd` source is unconfined, so `F_plasma` is evaluated
+inside both PF coils. The `regions:` line shows it and the driver warns. The
+example is not changed here.
+
+Six examples did not converge on this run and exited 2 before the line is
+printed: `machine-b-ffprime` and its `-shaped` twin, `machine-c-mast`,
+`machine-d-tcv` and its `-shaped` twin, and `machine-g-mastu-shaped`.
+`manufactured` exits 1, because `Type = "exact"` is a test device. The
+classifier runs after the solve, so none of these exits is its doing, and none
+of them was compared against `HEAD`.
+
+### M-268
+
+**ER-1: THE `.nc` CARRIES THE ELEMENT RECORD, AND IT READS BACK AS THE MESH
+IT INDEXES.** `DriverAcceptance`'s `theDriverSolvesALimitedTokamak` and
+`theFileSaysWhatEachElementIsMadeOf`, read through `ncdump -p 9,17` and the
+`.mesh` as text, at `MKL_NUM_THREADS=1`, `OMP_NUM_THREADS=4`. The domain's area
+is the shoelace over each element of the written `.mesh`, which is linear in
+all three. The diverted tokamak is the shipped file with `P2L` and `P2U` wired
+into one `[[circuits]]` block, `P2`, at the multiplier that reproduces their
+currents, and `P1L` and `P1U` left unwired.
+
+| run | elements (`.nc` = `.mesh`) | `element_entry` | Σ `material_area_*` | shoelace | relative |
+|---|---|---|---|---|---|
+| `limited-tokamak` | 1601 | 1642 | 8.204378289062591 | 8.204378289062586 | 6.5e-16 |
+| diverted, wired | 2642 | 2731 | 8.499819522414086 | 8.499819522414086 | 0.0 |
+| `mirror-rotating` | 1175 | 1345 | 12.24156293880462 | 12.24156293880464 | 2.0e-15 |
+
+| run | `circuit_name` | coils in it | worst coil area against its rectangle | faults | plasma area |
+|---|---|---|---|---|---|
+| `limited-tokamak` | `default` | all four | 2e-15 (0.01, meshed) | 0 | 0.343413939406042 |
+| diverted, wired | `P2`, `default` | `P2L`, `P2U`; `P1L`, `P1U` | 1e-15 (0.01, meshed) | 0 | 0.769888246244847 |
+| `mirror-rotating` | `default` | both | not aligned: 0.0709886 and 0.0705033 against 0.0705688 | 0 | 0.544827282478467 |
+
+`circuit_current` reads −99444.48228215592 for `P2`, its first member's
+current over a multiplier of 1, and the fill for `default`. Every element's
+fractions sum to 1 within 1e-14, and every `element_plasma_fraction` equals
+that element's plasma entry exactly. **Wiring the diverted tokamak moves no
+element**: its region counts, 2106 vacuum, 343 plasma, 104 coil and 89
+`plasma_boundary`, are the shipped file's in M-267.
+
+**What the record costs on disk**, the same run written with and without
+`NetCDFWriter::materials()`:
+
+| run | without | with | added |
+|---|---|---|---|
+| `limited-tokamak` | 855119 B | 916981 B | +61862 B, +7.2% |
+| diverted, wired | 850435 B | 943209 B | +92774 B, +10.9% |
+| `mirror-rotating` | 1260997 B | 1313784 B | +52787 B, +4.2% |
+
+The payload is 18 bytes per element and 12 per entry. A NetCDF-4 variable's
+own metadata makes up the rest, which is why the smaller mesh pays the larger
+share.
+
+**The reserved kinds read back.** `OutputTests` writes a passive wall, a linear
+iron at `μ_r = 750` and an iron with a five-point curve, in that order. The
+curve's `permeability_curve_material` equals the `material_name` of the row
+that points to it. Its points, chosen not to survive a float (1/3, 100/7,
+1000√2), come back bit for bit at 17 digits. The curve row's
+`material_relative_permeability` reads the fill.
+
+**The mutations, each run once and restored:**
+
+| mutation | caught by |
+|---|---|
+| `permeability_curve_h` written as `float` | `OutputTests`: H[1], H[2] and H[3] did not round-trip |
+| `material_permeability_curve` written from the circuit column | `OutputTests`: the iron's index reads −1 |
+| `default` added when every coil is wired | `MaterialsTests`: two circuit rows for an all-wired set |
+| a `[[circuits]]` block's members left in `default` | `DriverAcceptance`: `P2L` and `P2U` read `default` and were wired into `P2` |
+| the `[[circuits]] Name = "default"` refusal dropped | `ConfigTests`: no `ConfigError` raised |
+
+### M-269
+
+**ER-2: THE VTK CARRIES WHAT EACH ELEMENT IS MADE OF, ONE VALUE PER CELL, AND
+AN ORDER-0 FIELD IS NOT SMEARED.** `ParaViewDataCollection` under
+`SetHighOrderOutput( true )` writes every GridFunction as point data, at each
+element's own Lagrange points, and **no point belongs to two cells**: the point
+count is the cell count times the points of one cell. So an L2 order-0 field
+takes one value at all of a cell's points and renders as a constant. Read back
+by hand (`tests/convergence/VtuReader.hpp`: XML, base64 and zlib, no VTK and no
+MFEM), at `MKL_NUM_THREADS=1`, `OMP_NUM_THREADS=4`:
+
+| `.vtu` | cells | points | points per cell | points not in exactly one cell | cells whose points disagree, any of the four arrays | cells unlike the `.nc` record |
+|---|---|---|---|---|---|---|
+| `mirror-rotating` (k = 2, drawn at 3) | 1175 | 11750 | 10 | 0 | 0 | 0 |
+| diverted, wired (M-268's) | 2642 | 26420 | 10 | 0 | 0 | 0 |
+| `miller-curved`, curved cells | 450 | 4500 | 10 | 0 | 0 | — (unconfined: all `plasma`) |
+| `OutputTests`, a degree-3 curved mesh at 4 levels | 24 | 360 | 15 | 0 | 0 | 0 |
+
+The arrays are `region`, `plasma_fraction`, `conductor_material` and
+`conductor_fraction`; the `.nc` columns they are compared with are
+`element_region`, `element_plasma_fraction` and the largest conductor entry of
+the ragged record, ties to the lower row. `attribute` is the collection's own
+**cell** data and equals `element_attribute` on every element, so it is not
+written a second time.
+
+**Every adaptive frame carries its own cycle's record.** The rotating mirror
+with `[adaptivity] MaxIterations = 3`, `Theta = 0.5`
+(`everyAdaptiveFrameSaysWhatEachElementIsMadeOf`):
+
+| frame | cells | `plasma_boundary` | `conductor_boundary` |
+|---|---|---|---|
+| 0 | 1175 | 109 | 61 |
+| 1 | 1285 | 109 | 61 |
+| 2 | 1418 | 109 | 61 |
+
+The estimator spends its elements away from the plasma boundary on this run,
+so the boundary count does not move. In every frame each cell's `region` is the
+one its two fractions give. The last frame's `region` equals the answer's
+`element_region` element for element.
+
+**What it costs on disk**, the answer's `.vtu` with and without the four arrays
+(zlib-compressed, which a per-cell constant suits): `mirror-rotating` 531735 →
+535744 B (+0.75%), `miller-curved` 201613 → 202542 B (+0.46%).
+
+**The mutations, each run once and restored:**
+
+| mutation | caught by |
+|---|---|
+| `region` written from the next element's record | `OutputTests`: 19 of 24 cells; `DriverAcceptance`: 262 cells per frame carry a region their fractions do not give, and the last frame is not `element_region` |
+| the adaptive frames written without the cell data | `DriverAcceptance`: the frame has no array `region` |
+| `SetHighOrderOutput( false )` | `OutputTests`: 384 cells for 24 elements. Low-order output subdivides each element into linear cells, so a cell is no longer an element |
+
+### M-270
+
+**ER-3: `node_material( Z, R )` IS THE CLASSIFIER'S TEST AT EACH GRID NODE,
+AND ON THE MIRROR IT IS THE SUPPORT.** `GradShafranovSolver::materialAt()` at
+each located node of the 129² grid, given the node's element (its foot's in the
+band) and the flux the grid writes, `ψ* + ψ_c`. It is compared against
+`0 < Ψ ≤ 1, |z| ≤ AxialEdge` and the two pack rectangles, evaluated in the test
+from the written `psi`, `psi_axis`, `psi_boundary` and the example's numbers
+(`theFileSaysWhatEachElementIsMadeOf`):
+
+| run | inside | −1 (fill) | vacuum | plasma | `lower` | `upper` | nodes more than one spacing from an edge | of them disagreeing | disagreeing anywhere |
+|---|---|---|---|---|---|---|---|---|---|
+| `mirror-rotating` | 12449 | 4192 | 11756 | 555 | 69 | 69 | 11395 | **0** | 0 |
+
+The fill is −1 at exactly the nodes where `inside` is 0. 1054 nodes are within
+one spacing of a support edge, a rectangle's edge or the domain's; the
+assertion leaves them out, and none of them disagrees on this run either.
+
+On the curved path (`miller-curved`, an unconfined Solov'ev source) all 12605
+inside nodes read `plasma`, including the 1667 band nodes, which are judged in
+the element of their foot.
+
+**The mutation:** the mask judged on `ψ*` without `ψ_c`. The mirror's mask then
+holds 0 plasma nodes, 393 of the far nodes disagree and 555 disagree anywhere,
+and `DriverAcceptance` goes red on both the disagreement and the empty mask.
+
+The variable costs 4 bytes per node, 66564 B on a 129² grid, uncompressed.

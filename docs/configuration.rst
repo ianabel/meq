@@ -228,6 +228,20 @@ with every printed number looking exactly as it should.
        :math:`z = 0` — aligned, the box is geometry rather than a size field.
        With ``SupportShape = "box"`` it is **required**, and ``PlasmaZMin`` and
        ``PlasmaZMax`` must be exactly ``-AxialEdge`` and ``AxialEdge``.
+   * - ``AlignConductors``
+     - ``false``
+     - **Fragment the** ``[[coils]]`` **rectangles into the geometry as
+       geometry only**, under a subtracting ``[conductors] Model``: their edges
+       become element faces, with no coil attribute and no ``CoilSize``
+       grading, and the solve still sees no source there. It changes no
+       answer — the subtracted copper is vacuum to the remainder equation — and
+       buys whole conductor cells in the element record, where an unaligned
+       mesh has cells the copper only partly fills. Off by default, since the
+       point of subtracting is a mesh that need not resolve the conductors;
+       its price is a few per cent more elements, measured on the shipped
+       mirror and ``limited-tokamak-filament`` — measure it on your own
+       machine. Refused under ``Model = "meshed"``, which already fragments
+       every rectangle in.
 
 .. note::
 
@@ -1034,6 +1048,8 @@ needs to.
 ``examples/coils-rectangle.toml`` is the worked example, and it writes its two
 currents one each way so that both spellings are exercised.
 
+.. _config-circuits:
+
 ``[[circuits]]``
 ----------------
 
@@ -1079,7 +1095,9 @@ is wired in circuits gives such a solve freedoms the machine does not have.
      - Meaning
    * - ``Name``
      - *required*
-     - Distinct across circuits.
+     - Distinct across circuits, and not ``default``: the output groups every
+       coil outside a ``[[circuits]]`` block into a circuit of that name, which
+       has no supply (:ref:`output-element-materials`).
    * - ``Current``
      - *required*
      - The supply's current, amperes, signed.

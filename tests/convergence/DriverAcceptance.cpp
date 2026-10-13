@@ -4,6 +4,7 @@
 #include "mfem.hpp"
 
 #include "RoundOffFloor.hpp"
+#include "VtuReader.hpp"
 
 #include "meq/BoundaryShape.hpp"
 #include "meq/Coils.hpp"
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -209,6 +211,511 @@ namespace
 		if ( at == std::string::npos )
 			return std::nan( "" );
 		return std::strtod( header.c_str() + at + needle.size(), nullptr );
+	}
+
+	/*
+	 * ---- ELEMENT-REGIONS-PLAN.md ER-1: THE ELEMENT TABLES, READ BACK ----
+	 *
+	 * Through ncdump at 17 digits and through the `.mesh` as text, so nothing
+	 * here shares code with the writer or with MFEM's reader.
+	 */
+
+	/// One variable's values as ncdump prints them after `data:`, at 17
+	/// significant digits: a quoted string loses its quotes, and a fill stays
+	/// as `_` rather than being dropped, so positions survive.
+	std::vector<std::string> ncdumpTokens( std::string const &path,
+	                                       std::string const &name )
+	{
+		std::string const scratch = "driver-acceptance-tokens.txt";
+		std::string const command = "ncdump -p 9,17 -v " + name + " " + path
+		                            + " > " + scratch + " 2>/dev/null";
+		std::vector<std::string> out;
+		if ( std::system( command.c_str() ) != 0 )
+			return out;
+		std::string const text = slurp( scratch );
+		std::remove( scratch.c_str() );
+
+		std::size_t at = text.find( "\ndata:" );
+		if ( at == std::string::npos )
+			return out;
+		// " =" and not " = ": a two-dimensional variable's values start on
+		// the next line, and the loop below skips the whitespace either way.
+		at = text.find( "\n " + name + " =", at );
+		if ( at == std::string::npos )
+			return out;
+		at += name.size() + 4;
+		while ( at < text.size() && text[ at ] != ';' )
+		{
+			char const c = text[ at ];
+			if ( c == '"' )
+			{
+				std::size_t const end = text.find( '"', at + 1 );
+				out.push_back( text.substr( at + 1, end - at - 1 ) );
+				at = end + 1;
+			}
+			else if ( c == ',' || c == ' ' || c == '\n' )
+				++at;
+			else
+			{
+				std::size_t end = at;
+				while ( end < text.size() && text[ end ] != ',' && text[ end ] != ';'
+				        && text[ end ] != ' ' && text[ end ] != '\n' )
+					++end;
+				out.push_back( text.substr( at, end - at ) );
+				at = end;
+			}
+		}
+		return out;
+	}
+
+	std::vector<double> ncdumpNumbers( std::string const &path,
+	                                   std::string const &name )
+	{
+		std::vector<double> out;
+		for ( std::string const &one : ncdumpTokens( path, name ) )
+			out.push_back( one == "_" ? std::nan( "" )
+			                          : std::strtod( one.c_str(), nullptr ) );
+		return out;
+	}
+
+	/// A linear MFEM mesh's element count and area, read as TEXT -- the
+	/// `elements` and `vertices` sections, with the shoelace over each
+	/// element's vertex polygon. A mesh with a `nodes` section is curved and
+	/// this cannot measure it, which the caller is told by a negative area.
+	std::pair<int, double> linearMeshArea( std::string const &path )
+	{
+		std::ifstream in( path );
+		std::string word;
+		std::vector<std::vector<int>> elements;
+		std::vector<double> x, y;
+		bool curved = false;
+		while ( in >> word )
+		{
+			if ( word == "elements" )
+			{
+				int count = 0;
+				in >> count;
+				for ( int e = 0; e < count; ++e )
+				{
+					int attribute = 0, geometry = 0;
+					in >> attribute >> geometry;
+					int const corners = geometry == 2 ? 3 : geometry == 3 ? 4 : 0;
+					if ( corners == 0 )
+						return { -1, -1.0 };
+					std::vector<int> v( static_cast<std::size_t>( corners ) );
+					for ( int &one : v )
+						in >> one;
+					elements.push_back( v );
+				}
+			}
+			else if ( word == "boundary" )
+			{
+				int count = 0;
+				in >> count;
+				std::string line;
+				std::getline( in, line );
+				for ( int b = 0; b < count; ++b )
+					std::getline( in, line );
+			}
+			else if ( word == "vertices" )
+			{
+				int count = 0, dimension = 0;
+				in >> count >> dimension;
+				x.resize( static_cast<std::size_t>( count ) );
+				y.resize( static_cast<std::size_t>( count ) );
+				for ( int v = 0; v < count; ++v )
+					in >> x[ static_cast<std::size_t>( v ) ] >> y[ static_cast<std::size_t>( v ) ];
+			}
+			else if ( word == "nodes" )
+				curved = true;
+		}
+		if ( curved || x.empty() )
+			return { static_cast<int>( elements.size() ), -1.0 };
+
+		double area = 0.0;
+		for ( std::vector<int> const &v : elements )
+		{
+			double twice = 0.0;
+			for ( std::size_t i = 0; i < v.size(); ++i )
+			{
+				std::size_t const a = static_cast<std::size_t>( v[ i ] );
+				std::size_t const b = static_cast<std::size_t>( v[ ( i + 1 ) % v.size() ] );
+				twice += x[ a ]*y[ b ] - x[ b ]*y[ a ];
+			}
+			area += 0.5*std::fabs( twice );
+		}
+		return { static_cast<int>( elements.size() ), area };
+	}
+
+	/// What a case knows about its own coils: the circuit each is wired into
+	/// by name, and its rectangle's area where the mesh is aligned to it.
+	struct ExpectedCoil
+	{
+		std::string name;
+		std::string circuit;
+		double alignedArea;   ///< 4 HalfWidth HalfHeight, or NaN where not aligned
+	};
+
+	/// What the read-back found, for the case-specific assertions.
+	struct ElementTables
+	{
+		double plasmaArea = std::nan( "" );
+		double plasmaElements = std::nan( "" );
+		double faults = std::nan( "" );
+	};
+
+	/**
+	 * ER-1's BULLETS ON ONE `.nc`: the element count is the `.mesh`'s and the
+	 * ragged counts sum to the entries; every element's fractions sum to one
+	 * and its dense plasma fraction is its plasma entry; the material areas
+	 * sum to the domain's, measured off the `.mesh` by the shoelace; each
+	 * aligned coil's area is its rectangle's; and each coil's circuit is the
+	 * one it is wired into, by name.
+	 */
+	ElementTables checkElementTables( std::string const &stem,
+	                                  std::vector<ExpectedCoil> const &coils )
+	{
+		ElementTables found;
+		std::string const nc = stem + ".nc";
+		std::string const header = ncdumpHeader( nc );
+		BOOST_TEST_REQUIRE( !header.empty(), nc << " is unreadable" );
+
+		std::pair<int, double> const mesh = linearMeshArea( stem + ".mesh" );
+		BOOST_TEST_REQUIRE( mesh.first > 0, stem << ".mesh has no elements this can read" );
+		BOOST_TEST_REQUIRE( mesh.second > 0.0,
+		                    stem << ".mesh is curved, so the shoelace cannot measure "
+		                    "its area; this check needs another reference" );
+
+		std::vector<double> const count = ncdumpNumbers( nc, "element_material_count" );
+		std::vector<double> const material = ncdumpNumbers( nc, "element_material" );
+		std::vector<double> const fraction = ncdumpNumbers( nc, "element_fraction" );
+		std::vector<double> const plasma = ncdumpNumbers( nc, "element_plasma_fraction" );
+		std::vector<double> const region = ncdumpNumbers( nc, "element_region" );
+		BOOST_TEST_REQUIRE( static_cast<int>( count.size() ) == mesh.first,
+		                    nc << " has " << count.size() << " element records and "
+		                    << stem << ".mesh " << mesh.first << " elements; the "
+		                    "record is indexed as the mesh's elements and must be of it" );
+		BOOST_TEST( static_cast<int>( plasma.size() ) == mesh.first );
+		BOOST_TEST( static_cast<int>( region.size() ) == mesh.first );
+		BOOST_TEST( headerAttribute( header, "elements" ) == mesh.first );
+
+		double entries = 0.0;
+		for ( double const c : count )
+			entries += c;
+		BOOST_TEST_REQUIRE( entries == static_cast<double>( material.size() ),
+		                    "the counts sum to " << entries << " and element_entry is "
+		                    << material.size() << " long" );
+		BOOST_TEST_REQUIRE( fraction.size() == material.size() );
+
+		std::size_t at = 0;
+		double worstSum = 0.0;
+		int plasmaMismatch = 0;
+		for ( std::size_t e = 0; e < count.size(); ++e )
+		{
+			double sum = 0.0;
+			double ownPlasma = 0.0;
+			for ( int i = 0; i < static_cast<int>( count[ e ] ); ++i, ++at )
+			{
+				sum += fraction[ at ];
+				if ( material[ at ] == 1.0 )
+					ownPlasma = fraction[ at ];
+			}
+			worstSum = std::max( worstSum, std::fabs( sum - 1.0 ) );
+			if ( e < plasma.size() && plasma[ e ] != ownPlasma )
+				++plasmaMismatch;
+		}
+		BOOST_TEST( worstSum <= 1.0e-14, "an element's fractions sum to 1 +/- " << worstSum );
+		BOOST_TEST( plasmaMismatch == 0, plasmaMismatch << " elements' element_plasma_fraction "
+		            "is not their plasma entry in the ragged record" );
+
+		// THE TABLE, and the areas by name.
+		std::vector<std::string> const names = ncdumpTokens( nc, "material_name" );
+		std::vector<double> const kinds = ncdumpNumbers( nc, "material_kind" );
+		std::vector<double> const circuitOf = ncdumpNumbers( nc, "material_circuit" );
+		std::vector<std::string> const circuitNames = ncdumpTokens( nc, "circuit_name" );
+		BOOST_TEST_REQUIRE( names.size() >= 2u );
+		BOOST_TEST_REQUIRE( kinds.size() == names.size() );
+		BOOST_TEST_REQUIRE( circuitOf.size() == names.size() );
+		BOOST_TEST( names[ 0 ] == "vacuum" );
+		BOOST_TEST( names[ 1 ] == "plasma" );
+
+		double total = 0.0;
+		for ( std::string const &name : names )
+		{
+			double const area = headerAttribute( header, "material_area_" + name );
+			BOOST_TEST_REQUIRE( std::isfinite( area ), nc << " has no material_area_" << name );
+			total += area;
+		}
+		double const domainError = std::fabs( total - mesh.second )/mesh.second;
+		std::printf( "    %s: %d elements, material areas %.15e against the mesh's "
+		             "%.15e, %.1e apart\n", stem.c_str(), mesh.first, total,
+		             mesh.second, domainError );
+		BOOST_TEST( domainError <= 1.0e-12,
+		            "the material areas sum to " << total << " and the domain is "
+		            << mesh.second );
+
+		BOOST_TEST( names.size() == coils.size() + 2u,
+		            nc << " has " << names.size() - 2u << " coil rows for "
+		            << coils.size() << " [[coils]] blocks" );
+		for ( std::size_t k = 0; k < coils.size() && k + 2 < names.size(); ++k )
+		{
+			ExpectedCoil const &want = coils[ k ];
+			std::size_t const row = k + 2;
+			BOOST_TEST( names[ row ] == want.name );
+			BOOST_TEST( kinds[ row ] == 2.0 );
+			int const c = static_cast<int>( circuitOf[ row ] );
+			BOOST_TEST_REQUIRE( ( c >= 0 && c < static_cast<int>( circuitNames.size() ) ),
+			                    want.name << "'s material_circuit is " << c << " of "
+			                    << circuitNames.size() << " circuits" );
+			BOOST_TEST( circuitNames[ static_cast<std::size_t>( c ) ] == want.circuit,
+			            want.name << " is in circuit \"" << circuitNames[ static_cast<std::size_t>( c ) ]
+			            << "\" and was wired into \"" << want.circuit << "\"" );
+			if ( std::isfinite( want.alignedArea ) )
+			{
+				double const area = headerAttribute( header, "material_area_" + want.name );
+				BOOST_TEST( std::fabs( area - want.alignedArea ) <= 1.0e-12*want.alignedArea,
+				            want.name << "'s area is " << area << " and its rectangle's "
+				            << want.alignedArea << " on a mesh aligned to it" );
+			}
+		}
+
+		// `default` APPEARS EXACTLY WHEN SOME COIL IS UNWIRED.
+		bool const anyUnwired = std::any_of( coils.begin(), coils.end(),
+			[]( ExpectedCoil const &one ) { return one.circuit == "default"; } );
+		BOOST_TEST( ( std::count( circuitNames.begin(), circuitNames.end(),
+		                          std::string( "default" ) ) == ( anyUnwired ? 1 : 0 ) ) );
+
+		found.plasmaArea = headerAttribute( header, "material_area_plasma" );
+		found.plasmaElements = headerAttribute( header, "region_elements_plasma" );
+		found.faults = headerAttribute( header, "region_faults" );
+		return found;
+	}
+
+	/**
+	 * ONE CELL ARRAY OF A `.vtu`, AS ONE VALUE PER CELL: the value at the
+	 * cell's first point, after counting the cells whose points disagree
+	 * (@a spread) and the points that belong to other than exactly one cell
+	 * (@a shared). Both counts zero is ER-2's "renders as a constant": an
+	 * order-0 field written at points no two cells share. Read by hand
+	 * (VtuReader.hpp), so nothing here is the writer's code.
+	 */
+	std::vector<double> vtuCellValues( std::string const &vtu, std::string const &name,
+	                                   int &spread, int &shared )
+	{
+		std::vector<double> const connectivity = meq::tests::readVtuArray( vtu, "connectivity" );
+		std::vector<double> const offsets = meq::tests::readVtuArray( vtu, "offsets" );
+		std::vector<double> const values = meq::tests::readVtuArray( vtu, name );
+		std::vector<double> out;
+		spread = 0;
+		shared = 0;
+		BOOST_TEST_REQUIRE( !values.empty(), vtu << " has no array " << name );
+		BOOST_TEST( meq::tests::vtuArrayIsPointData( vtu, name ) );
+		std::vector<int> owners( values.size(), 0 );
+		for ( std::size_t c = 0; c < offsets.size(); ++c )
+		{
+			std::size_t const begin = c == 0 ? 0 : static_cast<std::size_t>( offsets[ c - 1 ] );
+			std::size_t const end = static_cast<std::size_t>( offsets[ c ] );
+			double const first = values.at( static_cast<std::size_t>( connectivity.at( begin ) ) );
+			bool differs = false;
+			for ( std::size_t k = begin; k < end; ++k )
+			{
+				std::size_t const point = static_cast<std::size_t>( connectivity[ k ] );
+				++owners.at( point );
+				differs = differs || values[ point ] != first;
+			}
+			spread += differs ? 1 : 0;
+			out.push_back( first );
+		}
+		for ( int const n : owners )
+			shared += n != 1 ? 1 : 0;
+		return out;
+	}
+
+	/**
+	 * ER-2 ON ONE ANSWER: the cell data of `<stem>/Cycle000000/proc000000.vtu`
+	 * are the `.nc`'s element record, cell for cell -- `region` its
+	 * `element_region`, `plasma_fraction` its `element_plasma_fraction`, the
+	 * conductor columns the largest conductor entry of its ragged array (ties
+	 * to the lower row), and the collection's own `attribute` cell data its
+	 * `element_attribute`. Returns the region per cell.
+	 */
+	std::vector<double> checkVtuAgainstRecord( std::string const &stem )
+	{
+		std::string const nc = stem + ".nc";
+		std::string const name = stem.substr( stem.find_last_of( '/' ) + 1 );
+		std::string const vtu = stem + "/Cycle000000/proc000000.vtu";
+		std::vector<double> const count = ncdumpNumbers( nc, "element_material_count" );
+		std::vector<double> const material = ncdumpNumbers( nc, "element_material" );
+		std::vector<double> const fraction = ncdumpNumbers( nc, "element_fraction" );
+		std::vector<double> const kinds = ncdumpNumbers( nc, "material_kind" );
+		BOOST_TEST_REQUIRE( !count.empty(), nc << " has no element record" );
+
+		std::vector<double> conductor, share;
+		std::size_t at = 0;
+		for ( double const c : count )
+		{
+			double best = -1.0, bestShare = 0.0;
+			for ( int i = 0; i < static_cast<int>( c ); ++i, ++at )
+			{
+				double const kind = kinds.at( static_cast<std::size_t>( material[ at ] ) );
+				if ( kind < 2.0 )
+					continue;
+				if ( best < 0.0 || fraction[ at ] > bestShare
+				     || ( fraction[ at ] == bestShare && material[ at ] < best ) )
+				{
+					best = material[ at ];
+					bestShare = fraction[ at ];
+				}
+			}
+			conductor.push_back( best );
+			share.push_back( bestShare );
+		}
+
+		struct Expected { char const *array; std::vector<double> values; };
+		std::vector<Expected> const expected = {
+			{ "region", ncdumpNumbers( nc, "element_region" ) },
+			{ "plasma_fraction", ncdumpNumbers( nc, "element_plasma_fraction" ) },
+			{ "conductor_material", conductor },
+			{ "conductor_fraction", share } };
+		std::vector<double> regions;
+		for ( Expected const &want : expected )
+		{
+			int spread = 0, shared = 0;
+			std::vector<double> const cells = vtuCellValues( vtu, want.array, spread, shared );
+			BOOST_TEST_REQUIRE( cells.size() == count.size(),
+			                    vtu << " has " << cells.size() << " cells and " << nc
+			                    << " " << count.size() << " elements" );
+			BOOST_TEST( spread == 0, want.array << ": " << spread << " cells of " << vtu
+			            << " do not carry one value at all their points" );
+			BOOST_TEST( shared == 0, shared << " points of " << vtu << " are not in "
+			            "exactly one cell, so an order-0 field is smeared across faces" );
+			int wrong = 0;
+			for ( std::size_t c = 0; c < cells.size(); ++c )
+				wrong += cells[ c ] != want.values.at( c ) ? 1 : 0;
+			BOOST_TEST( wrong == 0, want.array << " disagrees with " << nc << " in "
+			            << wrong << " of " << cells.size() << " cells" );
+			if ( regions.empty() )
+				regions = cells;
+		}
+
+		std::vector<double> const attribute = meq::tests::readVtuArray( vtu, "attribute" );
+		BOOST_TEST( !meq::tests::vtuArrayIsPointData( vtu, "attribute" ) );
+		BOOST_TEST( ( attribute == ncdumpNumbers( nc, "element_attribute" ) ),
+		            "the VTK's attribute cell data are not the .nc's element_attribute" );
+		std::printf( "    %s/%s.pvd: %zu cells carry the .nc's element record, "
+		             "constant on every cell, no point shared\n",
+		             stem.c_str(), name.c_str(), regions.size() );
+		return regions;
+	}
+
+	/**
+	 * ER-3 ON THE ROTATING MIRROR: `node_material( Z, R )` against the
+	 * support and the copper, each evaluated HERE from what the file says.
+	 *
+	 * The plasma is `0 < Psi <= 1, |z| <= AxialEdge`, with
+	 * `Psi = ( psi - psi_boundary )/( psi_axis - psi_boundary )` from the
+	 * written `psi` and the two labels; the copper is the two rectangles of
+	 * examples/mirror-rotating.toml, REPEATED here for the reason the other
+	 * cases repeat their numbers. Both are asserted at every node more than
+	 * one grid spacing from an edge -- a support edge, a rectangle's edge, or
+	 * the domain's -- since a node within one spacing of a jump may round
+	 * either way. How many disagree anywhere is printed, and is M-270.
+	 */
+	void checkMirrorNodeMaterial( std::string const &nc )
+	{
+		std::string const header = ncdumpHeader( nc );
+		BOOST_TEST_REQUIRE( header.find( "int node_material(Z, R)" ) != std::string::npos,
+		                    nc << " has no node_material( Z, R )" );
+		double const axis = headerAttribute( header, "psi_axis" );
+		double const boundary = headerAttribute( header, "psi_boundary" );
+		double const axialEdge = headerAttribute( header, "plasma_support_axial_edge" );
+		BOOST_TEST_REQUIRE( std::isfinite( axis ) );
+		BOOST_TEST_REQUIRE( std::isfinite( boundary ) );
+		BOOST_TEST_REQUIRE( axialEdge == 1.5 );
+
+		std::vector<double> const radius = ncdumpNumbers( nc, "R" );
+		std::vector<double> const height = ncdumpNumbers( nc, "Z" );
+		std::vector<double> const psi = ncdumpNumbers( nc, "psi" );
+		std::vector<double> const rows = ncdumpNumbers( nc, "node_material" );
+		std::vector<double> const inside = ncdumpNumbers( nc, "inside" );
+		std::vector<std::string> const names = ncdumpTokens( nc, "material_name" );
+		int const nR = static_cast<int>( radius.size() );
+		int const nZ = static_cast<int>( height.size() );
+		std::size_t const nodes = static_cast<std::size_t>( nR )*static_cast<std::size_t>( nZ );
+		BOOST_TEST_REQUIRE( psi.size() == nodes );
+		BOOST_TEST_REQUIRE( rows.size() == nodes );
+		BOOST_TEST_REQUIRE( inside.size() == nodes );
+		BOOST_TEST_REQUIRE( ( names == std::vector<std::string>{ "vacuum", "plasma", "lower", "upper" } ) );
+
+		// What each node is, independently: 0 vacuum, 1 plasma, 2/3 a pack.
+		double const centreR = 0.82078441790868473, halfWidth = 0.035284417908684695;
+		double const halfHeight = 0.5;
+		auto independent = [ & ]( int i, int j ) -> int
+		{
+			std::size_t const at = static_cast<std::size_t>( j )*nR + i;
+			double const r = radius[ static_cast<std::size_t>( i ) ];
+			double const z = height[ static_cast<std::size_t>( j ) ];
+			for ( int pack = 0; pack < 2; ++pack )
+				if ( std::fabs( r - centreR ) <= halfWidth
+				     && std::fabs( z - ( pack == 0 ? -1.5 : 1.5 ) ) <= halfHeight )
+					return 2 + pack;
+			double const normalised = ( psi[ at ] - boundary )/( axis - boundary );
+			return normalised > 0.0 && normalised <= 1.0 && std::fabs( z ) <= axialEdge
+			       ? 1 : 0;
+		};
+
+		int fillWrong = 0, near = 0, far = 0, farWrong = 0, anyWrong = 0;
+		int plasmaNodes = 0, packNodes = 0;
+		for ( int j = 0; j < nZ; ++j )
+			for ( int i = 0; i < nR; ++i )
+			{
+				std::size_t const at = static_cast<std::size_t>( j )*nR + i;
+				bool const isInside = inside[ at ] == 1.0;
+				// -1 is the fill, which ncdump prints as `_`.
+				bool const filled = std::isnan( rows[ at ] );
+				if ( isInside == filled )
+					++fillWrong;
+				if ( !isInside || filled )
+					continue;
+				int const want = independent( i, j );
+				int const got = static_cast<int>( rows[ at ] );
+				plasmaNodes += got == 1 ? 1 : 0;
+				packNodes += got >= 2 ? 1 : 0;
+				anyWrong += got != want ? 1 : 0;
+
+				// MORE THAN ONE SPACING FROM AN EDGE: every neighbour inside,
+				// and judged the same as this node.
+				bool edge = i == 0 || j == 0 || i + 1 == nR || j + 1 == nZ;
+				for ( int dj = -1; dj <= 1 && !edge; ++dj )
+					for ( int di = -1; di <= 1 && !edge; ++di )
+					{
+						std::size_t const next =
+							static_cast<std::size_t>( j + dj )*nR + static_cast<std::size_t>( i + di );
+						edge = inside[ next ] != 1.0 || independent( i + di, j + dj ) != want;
+					}
+				if ( edge )
+				{
+					++near;
+					continue;
+				}
+				++far;
+				farWrong += got != want ? 1 : 0;
+			}
+
+		std::printf( "    %s node_material: %d plasma and %d copper nodes; %d of %d "
+		             "nodes away from an edge disagree with the support and the "
+		             "rectangles evaluated from the file, %d within one spacing "
+		             "of one, %d anywhere\n", nc.c_str(), plasmaNodes, packNodes,
+		             farWrong, far, near, anyWrong );
+		BOOST_TEST( fillWrong == 0, fillWrong << " nodes have node_material's fill "
+		            "where inside is 1, or a row where it is 0" );
+		BOOST_TEST( farWrong == 0, farWrong << " nodes more than a grid spacing from "
+		            "any edge are not what 0 < Psi <= 1, |z| <= AxialEdge and the "
+		            "rectangles make them. Plasma is judged on the written psi, "
+		            "psi* + psi_c: a mask judged on psi* alone is the first suspect" );
+		BOOST_TEST( plasmaNodes > 100, "the mirror's mask holds " << plasmaNodes
+		            << " plasma nodes, too few for the comparison to mean anything" );
+		BOOST_TEST( packNodes > 50 );
 	}
 
 	/*
@@ -2665,6 +3172,17 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	            "span and the scale with it. Read _psi.gf and find which element "
 	            "carries the value" );
 
+	// ER-1: WHAT EACH ELEMENT IS MADE OF. Four unwired coils, meshed to by
+	// halfdisc.py, so each is in `default` and covers its rectangle.
+	{
+		std::vector<ExpectedCoil> coils;
+		for ( char const *name : { "P1U", "P1L", "P2U", "P2L" } )
+			coils.push_back( ExpectedCoil{ name, "default", 4.0*0.05*0.05 } );
+		ElementTables const tables = checkElementTables( "limited-tokamak", coils );
+		BOOST_TEST( tables.faults == 0.0 );
+		BOOST_TEST( tables.plasmaArea > 0.0 );
+	}
+
 	/*
 	 * =================================================================
 	 * THE CONTROL: THE SAME EVERYTHING AT DEGREE 2
@@ -4422,4 +4940,247 @@ BOOST_AUTO_TEST_CASE( theSymmetricMeshOfMastKeepsItsVacuum )
 	std::remove( config.c_str() );
 	std::remove( mesh.c_str() );
 	std::remove( ( mesh + ".meq-mesh" ).c_str() );
+}
+
+/*
+ * ER-1: THE `.nc` SAYS WHAT EACH ELEMENT IS MADE OF, ON A WIRED MACHINE AND ON
+ * A MIRROR. ELEMENT-REGIONS-PLAN.md §2.3; the limited tokamak's read-back is in
+ * theDriverSolvesALimitedTokamak, beside the run it reads.
+ *
+ * THE DIVERTED TOKAMAK IS WIRED HERE, NOT IN examples/: P2L and P2U go on one
+ * supply, `P2`, at the multiplier that reproduces the shipped currents, and
+ * P1L and P1U stay unwired -- so both kinds of circuit row appear, a supplied
+ * `P2` and the `default` grouping. Text substitution on the shipped file, for
+ * the reason the other variants here are made that way: a copy would drift.
+ *
+ * THE MIRROR'S COILS ARE SUBTRACTED, so its mesh is not aligned to them and
+ * their areas are not asserted; what is asserted is that its plasma is there
+ * and touches no copper.
+ */
+BOOST_AUTO_TEST_CASE( theFileSaysWhatEachElementIsMadeOf )
+{
+	if ( !meq::hasNetCDF() )
+	{
+		BOOST_TEST_MESSAGE( "  built without netcdf-cxx4, skipping" );
+		return;
+	}
+
+	// ---- the diverted tokamak, two coils on one supply ----
+	{
+		// The shipped currents, as the file spells them.
+		std::string const p2lText = "-99444.48228215592";
+		std::string const p2uText = "-67660.81780068338";
+		double const p2l = std::strtod( p2lText.c_str(), nullptr );
+		double const p2u = std::strtod( p2uText.c_str(), nullptr );
+		std::string text = slurp( "examples/diverted-tokamak.toml" );
+		BOOST_TEST_REQUIRE( !text.empty() );
+		for ( std::string const &value : { p2lText, p2uText } )
+		{
+			std::string const line = "Current = " + value + "\n";
+			std::size_t const at = text.find( line );
+			BOOST_TEST_REQUIRE( at != std::string::npos,
+			                    "examples/diverted-tokamak.toml no longer carries '"
+			                    << line << "'" );
+			text.erase( at, line.size() );
+		}
+		std::string const prefix = "Prefix = \"diverted-tokamak\"";
+		BOOST_TEST_REQUIRE( text.find( prefix ) != std::string::npos );
+		text = replaceAll( text, prefix, "Prefix = \"driver-acceptance-circuits\"" );
+		std::ostringstream circuit;
+		circuit << std::setprecision( 17 )
+		        << "\n[[circuits]]\nName = \"P2\"\nCurrent = " << p2lText
+		        << "\nCoils = [ { Name = \"P2L\", Multiplier = 1.0 }, "
+		           "{ Name = \"P2U\", Multiplier = " << p2u/p2l << " } ]\n";
+		text += circuit.str();
+
+		std::string const config = "driver-acceptance-circuits.toml";
+		{
+			std::ofstream out( config );
+			out << text;
+		}
+		BOOST_TEST_REQUIRE( run( config ) == 0,
+		                    "the wired diverted tokamak did not solve; run meq on "
+		                    << config << " for the diagnosis" );
+
+		double const square = 4.0*0.05*0.05;
+		ElementTables const tables = checkElementTables(
+			"driver-acceptance-circuits",
+			{ ExpectedCoil{ "P1L", "default", square }, ExpectedCoil{ "P1U", "default", square },
+			  ExpectedCoil{ "P2L", "P2", square }, ExpectedCoil{ "P2U", "P2", square } } );
+		BOOST_TEST( tables.faults == 0.0 );
+		BOOST_TEST( tables.plasmaArea > 0.0 );
+
+		// THE SUPPLY'S ROW: its current, and the grouping's fill beside it.
+		std::vector<std::string> const names =
+			ncdumpTokens( "driver-acceptance-circuits.nc", "circuit_name" );
+		std::vector<double> const currents =
+			ncdumpNumbers( "driver-acceptance-circuits.nc", "circuit_current" );
+		std::vector<double> const supplied =
+			ncdumpNumbers( "driver-acceptance-circuits.nc", "circuit_supplied" );
+		BOOST_TEST_REQUIRE( names.size() == 2u );
+		BOOST_TEST_REQUIRE( currents.size() == 2u );
+		BOOST_TEST_REQUIRE( supplied.size() == 2u );
+		BOOST_TEST( names[ 0 ] == "P2" );
+		BOOST_TEST( currents[ 0 ] == p2l );
+		BOOST_TEST( supplied[ 0 ] == 1.0 );
+		BOOST_TEST( names[ 1 ] == "default" );
+		BOOST_TEST( std::isnan( currents[ 1 ] ) );
+		BOOST_TEST( supplied[ 1 ] == 0.0 );
+
+		// ER-2: the answer's VTK carries the same record, cell for cell.
+		std::vector<double> const regions =
+			checkVtuAgainstRecord( "driver-acceptance-circuits" );
+		BOOST_TEST( std::count( regions.begin(), regions.end(), 5.0 ) > 0,
+		            "the diverted tokamak's VTK has no plasma_boundary cell" );
+
+		std::remove( config.c_str() );
+	}
+
+	// ---- the rotating mirror, through the wrapper that meshes it ----
+	{
+		int status = -1;
+		std::string const log = captureStdout(
+			std::string( wrapper() ) + " examples/mirror-rotating.toml", &status );
+		BOOST_TEST_REQUIRE( status == 0,
+		                    "the wrapper exited " << status << " on "
+		                    "examples/mirror-rotating.toml. Its stdout was:\n" << log );
+
+		double const unaligned = std::nan( "" );
+		ElementTables const tables = checkElementTables(
+			"mirror-rotating",
+			{ ExpectedCoil{ "lower", "default", unaligned },
+			  ExpectedCoil{ "upper", "default", unaligned } } );
+		BOOST_TEST( tables.faults == 0.0,
+		            "the mirror's plasma reaches its copper in " << tables.faults
+		            << " elements" );
+		BOOST_TEST( tables.plasmaArea > 0.0, "the mirror's plasma is empty" );
+		BOOST_TEST( tables.plasmaElements > 0.0 );
+
+		// ER-2: and its VTK, which holds plasma_boundary and
+		// conductor_boundary cells both -- the subtracted packs cut elements.
+		std::vector<double> const regions = checkVtuAgainstRecord( "mirror-rotating" );
+		BOOST_TEST( std::count( regions.begin(), regions.end(), 5.0 ) > 0 );
+		BOOST_TEST( std::count( regions.begin(), regions.end(), 6.0 ) > 0 );
+
+		checkMirrorNodeMaterial( "mirror-rotating.nc" );
+	}
+}
+
+/*
+ * ER-2 UNDER ADAPTIVITY: EVERY CYCLE'S FRAME SAYS WHAT EACH ELEMENT IS MADE
+ * OF, so the plasma boundary can be watched under refinement.
+ * ELEMENT-REGIONS-PLAN.md §2.3.
+ *
+ * The rotating mirror with [adaptivity] added by text substitution, because
+ * it is the shipped run with a confined support and conductors both -- so a
+ * frame holds plasma_boundary AND conductor_boundary cells -- and it solves
+ * in seconds. Each frame's cells are that cycle's mesh, one value per cell at
+ * points no cell shares; and the LAST frame is the answer's record, element
+ * for element, since the answer is that cycle's solve.
+ */
+BOOST_AUTO_TEST_CASE( everyAdaptiveFrameSaysWhatEachElementIsMadeOf )
+{
+	if ( !meq::hasNetCDF() )
+	{
+		BOOST_TEST_MESSAGE( "  built without netcdf-cxx4, skipping" );
+		return;
+	}
+
+	std::string const stem = "driver-acceptance-mirror-adaptive";
+	std::string const config = stem + ".toml";
+	{
+		std::string text = slurp( "examples/mirror-rotating.toml" );
+		std::string const prefix = "Prefix = \"mirror-rotating\"";
+		std::size_t const at = text.find( prefix );
+		BOOST_TEST_REQUIRE( at != std::string::npos );
+		text.replace( at, prefix.size(), "Prefix = \"" + stem + "\"" );
+		std::size_t const output = text.find( "[output]" );
+		BOOST_TEST_REQUIRE( output != std::string::npos );
+		text.insert( output, "[adaptivity]\nEnabled = true\nMaxIterations = 3\n"
+		                     "Theta = 0.5\n\n" );
+		std::ofstream out( config );
+		out << text;
+	}
+
+	int status = -1;
+	std::string const log = captureStdout( std::string( wrapper() ) + " " + config, &status );
+	BOOST_TEST_REQUIRE( status == 0, "the adaptive mirror exited " << status
+	                    << ". Its stdout was:\n" << log );
+
+	std::vector<int> cycleElements;
+	{
+		std::size_t const at = log.find( "cycle     elem" );
+		BOOST_TEST_REQUIRE( at != std::string::npos, "no cycle table in:\n" << log );
+		std::istringstream stream( log.substr( at ) );
+		std::string line;
+		std::getline( stream, line );
+		while ( std::getline( stream, line ) )
+		{
+			std::istringstream fields( line );
+			int cycle = 0, elements = 0;
+			if ( !( fields >> cycle >> elements ) )
+				break;
+			cycleElements.push_back( elements );
+		}
+	}
+	BOOST_TEST_REQUIRE( cycleElements.size() == 3u );
+	BOOST_TEST( cycleElements.back() > cycleElements.front(), "the loop did not refine" );
+
+	for ( std::size_t c = 0; c < cycleElements.size(); ++c )
+	{
+		char directory[ 64 ];
+		std::snprintf( directory, sizeof( directory ), "Cycle%06zu", c );
+		std::string const vtu = stem + "_cycles/" + directory + "/proc000000.vtu";
+		int spread = 0, shared = 0;
+		std::vector<double> const region = vtuCellValues( vtu, "region", spread, shared );
+		BOOST_TEST( spread == 0 );
+		BOOST_TEST( shared == 0, shared << " points of frame " << c << " are shared" );
+		std::vector<double> const plasma =
+			vtuCellValues( vtu, "plasma_fraction", spread, shared );
+		BOOST_TEST( spread == 0 );
+		std::vector<double> const conductor =
+			vtuCellValues( vtu, "conductor_material", spread, shared );
+		BOOST_TEST( spread == 0 );
+		BOOST_TEST_REQUIRE( region.size() == plasma.size() );
+		BOOST_TEST_REQUIRE( region.size() == conductor.size() );
+		BOOST_TEST( static_cast<int>( region.size() ) == cycleElements[ c ],
+		            "frame " << c << " has " << region.size() << " cells and the cycle "
+		            << cycleElements[ c ] << " elements" );
+
+		int plasmaBoundary = 0, conductorBoundary = 0, inconsistent = 0;
+		for ( std::size_t e = 0; e < region.size(); ++e )
+		{
+			plasmaBoundary += region[ e ] == 5.0 ? 1 : 0;
+			conductorBoundary += region[ e ] == 6.0 ? 1 : 0;
+			// What the region says, against the two fractions beside it.
+			bool const agrees =
+				region[ e ] == 0.0 ? plasma[ e ] == 0.0 && conductor[ e ] < 0.0
+				: region[ e ] == 1.0 ? plasma[ e ] == 1.0
+				: region[ e ] == 5.0 ? plasma[ e ] > 0.0 && plasma[ e ] < 1.0
+				                       && conductor[ e ] < 0.0
+				: region[ e ] == 6.0 ? plasma[ e ] == 0.0 && conductor[ e ] >= 2.0
+				: false;
+			inconsistent += agrees ? 0 : 1;
+		}
+		std::printf( "    frame %zu: %zu cells, %d plasma_boundary, %d conductor_boundary\n",
+		             c, region.size(), plasmaBoundary, conductorBoundary );
+		BOOST_TEST( plasmaBoundary > 0, "frame " << c << " has no plasma_boundary cell" );
+		BOOST_TEST( conductorBoundary > 0 );
+		BOOST_TEST( inconsistent == 0, inconsistent << " cells of frame " << c
+		            << " carry a region their fractions do not give" );
+
+		if ( c + 1 == cycleElements.size() )
+			BOOST_TEST( ( region == ncdumpNumbers( stem + ".nc", "element_region" ) ),
+			            "the last frame's regions are not the answer's element_region" );
+	}
+
+	// And the answer's own VTK, which is the last cycle's mesh bent onto Gamma.
+	checkVtuAgainstRecord( stem );
+
+	std::remove( config.c_str() );
+	std::filesystem::remove_all( stem );
+	std::filesystem::remove_all( stem + "_cycles" );
+	for ( char const *suffix : { ".nc", ".mesh", "_psi.gf", "_grad_psi.gf",
+	                             "_psistar.gf", "_psi_total.gf" } )
+		std::remove( ( stem + suffix ).c_str() );
 }

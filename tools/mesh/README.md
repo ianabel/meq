@@ -118,6 +118,26 @@ inside a coil would be told a coil by its centre of mass — and under
 `--symmetric` it is geometry, so it must be symmetric about `z = 0`. Each is
 refused rather than resolved.
 
+## `--align-coil`, a conductor as geometry only
+
+`--align-coil RMIN ZMIN WIDTH HEIGHT`, repeatable, fragments a rectangle in as
+`--align-plasma` fragments the box: its edges become element faces, its pieces
+keep the vacuum attribute, and no size field grades it. It is for a conductor
+the solve **subtracts** — `[conductors] Model = "subtracted"` or `"filament"`,
+under which `meq --mesh-command` emits no `--coil` — so that the cells its
+copper occupies are whole cells of it, which is what
+`ELEMENT-REGIONS-PLAN.md`'s element record reads. `[mesh.generate]
+AlignConductors = true` emits one per `[[coils]]` block. The solve does not
+need it: subtracted copper is vacuum to the remainder equation.
+
+Without `--coil-size` the geometry is the one `--coil` would build, and on
+the shipped mirror and `limited-tokamak-filament` the element counts agree
+with `--coil`'s; only the attribute differs. On those two machines it costs 3%
+of the elements →
+**[M-267](../../MEASUREMENTS.md#m-267)**. `--coil`'s refusals apply — inside the
+arc, clear of the axis, an area — and an `--align-coil` may not overlap a
+`--coil`, cut a `--limiter`, or go unpaired under `--symmetric`.
+
 ## What the attributes mean
 
 | | |

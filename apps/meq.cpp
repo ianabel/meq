@@ -294,6 +294,22 @@ namespace
 				number( 2.0 * coil.halfHeight );
 			}
 		}
+		// [mesh.generate] AlignConductors: under a split, the same rectangles
+		// as GEOMETRY ONLY -- fragmented in so their edges are element faces,
+		// with no attribute and no grading, which is what --align-coil means to
+		// the generator. ELEMENT-REGIONS-PLAN.md §2.1b; the parse refuses the
+		// key under "meshed", where the --coil above already does this.
+		else if ( g.alignConductors )
+		{
+			for ( meq::CoilParameters const &coil : config.getCoils().coils )
+			{
+				word( "--align-coil" );
+				number( coil.centreR - coil.halfWidth );
+				number( coil.centreZ - coil.halfHeight );
+				number( 2.0 * coil.halfWidth );
+				number( 2.0 * coil.halfHeight );
+			}
+		}
 		// AFTER the conductors, because --symmetric checks them: the generator
 		// pairs every --coil about z = 0 and refuses an unpaired one, so the
 		// flag is a statement about the argv it follows. Under a split there
@@ -693,6 +709,57 @@ namespace
 			std::printf( "\n" );
 		}
 		std::printf( "\n" );
+	}
+
+	/**
+	 * WHAT EACH ELEMENT IS MADE OF, AS A COUNT: `ELEMENT-REGIONS-PLAN.md`
+	 * §2.1b's driver half, from GradShafranovSolver::elementMaterials() and
+	 * nothing re-derived here. The same record is what the `.nc` carries.
+	 *
+	 * Two things are worth a warning and neither is a refusal. A FAULT is
+	 * plasma current inside a conductor at some quadrature point -- the
+	 * fractions keep it, and the count says where to look. A MIXED cell holds
+	 * plasma and copper without sharing a point, which a mesh aligned to the
+	 * copper would split, so the warning names the key that does.
+	 */
+	void reportRegions( meq::ElementMaterials const &record )
+	{
+		using meq::ElementRegion;
+		std::printf( "     regions: %d vacuum, %d plasma, %d coil, %d plasma_boundary, "
+		             "%d conductor_boundary, %d mixed; %d faults\n",
+		             record.regionCount( ElementRegion::Vacuum ),
+		             record.regionCount( ElementRegion::Plasma ),
+		             record.regionCount( ElementRegion::Coil ),
+		             record.regionCount( ElementRegion::PlasmaBoundary ),
+		             record.regionCount( ElementRegion::ConductorBoundary ),
+		             record.regionCount( ElementRegion::Mixed ), record.faults );
+
+		if ( record.faults > 0 )
+		{
+			std::fflush( stdout );
+			std::fprintf( stderr,
+				"MEQ: warning: %d elements carry PLASMA CURRENT INSIDE A CONDUCTOR\n"
+				"     at one or more quadrature points. The plasma's support reaches\n"
+				"     the copper of a [[coils]] block: look at the labels, at\n"
+				"     [source] ConfineToPlasma, and at where the coils are.\n",
+				record.faults );
+		}
+		int mixed = 0;
+		for ( int e = 0; e < record.elementCount(); ++e )
+			if ( record.region[ static_cast<std::size_t>( e ) ] == ElementRegion::Mixed
+			     && !record.faulted[ static_cast<std::size_t>( e ) ]
+			     && record.plasmaFraction[ static_cast<std::size_t>( e ) ] > 0.0 )
+				++mixed;
+		if ( mixed > 0 )
+		{
+			std::fflush( stdout );
+			std::fprintf( stderr,
+				"MEQ: warning: %d elements hold plasma and a conductor without a\n"
+				"     fault -- a plasma boundary crossing the vacuum part of a cell\n"
+				"     the copper also cuts. [mesh.generate] AlignConductors = true\n"
+				"     splits those cells along the conductor's edges.\n",
+				mixed );
+		}
 	}
 
 	/**
@@ -4710,12 +4777,23 @@ int main( int argc, char **argv )
 		// a few lines below they are destroyed so the mesh can be refined.
 		// postProcess() ran above, for the estimator, so psi* is current here
 		// and costs this nothing.
+		//
+		// AND WHAT EACH ELEMENT IS MADE OF, classified on THIS cycle's solve,
+		// so the plasma boundary can be watched moving under refinement
+		// (ELEMENT-REGIONS-PLAN.md §2.3). The table needs only the geometry
+		// here -- the frame carries rows, not currents -- so the file's
+		// currents stand in for the solved ones the `.nc` gets.
 		if ( series )
 		{
 			mfem::GridFunction cycleField( solver->flux().FESpace() );
 			meq::poloidalField( solver->flux(), cycleField );
+			meq::MaterialTable const frameTable =
+				meq::buildMaterialTable( config->getCoils() );
+			meq::ElementCellData const frameCells( *solveMesh, frameTable,
+				solver->elementMaterials( frameTable ) );
 			series->append( *solveMesh, solver->postProcessedPotential(),
-			                cycleField, cycle, static_cast<double>( cycle ) );
+			                cycleField, cycle, static_cast<double>( cycle ),
+			                &frameCells );
 		}
 
 		if ( reachedTarget )
@@ -4813,6 +4891,11 @@ int main( int argc, char **argv )
 	/// reason: reported below and written into the `.nc`.
 	meq::GradShafranovSolver::AxialCutoffCheck axialCutoff;
 	meq::GradShafranovSolver::PlasmaSupportNodes supportNodes;
+	/// What each element is made of, and the table its rows index: classified
+	/// ONCE, on the converged solve, then reported below and written into the
+	/// `.nc` -- one record, so the log and the file cannot disagree.
+	meq::MaterialTable materialTable;
+	std::optional<meq::ElementMaterials> elementRecord;
 	// Deferred rather than acted on where it is found, so that the SOURCE
 	// check below can speak first: a psi_ax that is not an axis is the
 	// CONSEQUENCE of an unbounded axis current and its advice -- look at the
@@ -5704,6 +5787,19 @@ int main( int argc, char **argv )
 		}
 
 		reportResiduals( solver->newtonResiduals() );
+
+		// THE SOLVED CURRENTS, which an inverse solve has moved off the
+		// file's: the set the source or psi_c carries, in [[coils]] order.
+		// Under Model = "filament" that set holds no rectangles and the
+		// file's currents stand, which is all a filament run can have.
+		std::vector<double> solvedCurrents;
+		if ( conductorGeometry
+		     && conductorGeometry->size() == config->getCoils().coils.size() )
+			for ( std::size_t i = 0; i < conductorGeometry->size(); ++i )
+				solvedCurrents.push_back( conductorGeometry->coil( i ).current() );
+		materialTable = meq::buildMaterialTable( config->getCoils(), solvedCurrents );
+		elementRecord = solver->elementMaterials( materialTable );
+		reportRegions( *elementRecord );
 	}
 
 	solveSeconds = elapsedSince( started ) - setupSeconds;
@@ -6006,6 +6102,38 @@ int main( int argc, char **argv )
 					conductorField->poloidalField( radius, z, dbR, dbZ );
 					bR[ node ] += dbR;
 					bZ[ node ] += dbZ;
+				}
+		}
+
+		/*
+		 * WHAT EACH NODE IS MADE OF: `node_material`, ELEMENT-REGIONS-PLAN.md
+		 * §2.3's pointwise half, and MR-5's support mask.
+		 *
+		 * ASKED OF THE CLASSIFIER, NOT RE-DERIVED HERE: materialAt() is the
+		 * decision elementMaterials() makes at each quadrature point, handed
+		 * the node's element (its foot's, in the band) for the fill and the
+		 * exclusions, and the flux this grid carries -- psi* + psi_c, the
+		 * `psi` above, now that psi_c has been added back. So the mask agrees
+		 * with the written psi to the node, and a reader thresholding `psi`
+		 * by the support's rule gets the same set away from its edges.
+		 *
+		 * -1 wherever `inside` is 0, or psi came back NaN: no row is claimed
+		 * where the file claims no data.
+		 */
+		std::vector<int> nodeMaterials;
+		if ( elementRecord )
+		{
+			nodeMaterials.assign( psi.size(), -1 );
+			for ( int j = 0; j < sampler.nodesZ(); ++j )
+				for ( int i = 0; i < sampler.nodesR(); ++i )
+				{
+					std::size_t const at =
+						static_cast<std::size_t>( j )*sampler.nodesR() + i;
+					if ( !sampler.located( i, j ) || !std::isfinite( psi[ at ] ) )
+						continue;
+					nodeMaterials[ at ] = solver->materialAt( materialTable,
+						sampler.elementAt( i, j ), sampler.rAt( i ),
+						sampler.zAt( j ), psi[ at ] );
 				}
 		}
 
@@ -6471,6 +6599,8 @@ int main( int argc, char **argv )
 			              "R = ReferenceRadius by the gauge",
 			              "J" );
 		}
+		if ( !nodeMaterials.empty() )
+			writer.nodeMaterial( nodeMaterials );
 
 		/*
 		 * ---- CS-6: THE RESTART REPRESENTATION, BESIDE THE RASTERIZATION ----
@@ -6698,6 +6828,16 @@ int main( int argc, char **argv )
 				writer.attribute( "input_file", argument );
 			}
 		}
+
+		/*
+		 * ---- WHAT EACH ELEMENT IS MADE OF: ELEMENT-REGIONS-PLAN.md §2.3 ----
+		 *
+		 * Indexed as the elements of `mesh_file`, which is the mesh the solver
+		 * classified: the record is the one reported above, not recomputed,
+		 * and it is taken before curveBoundaryOnto() moves anything.
+		 */
+		if ( elementRecord )
+			writer.materials( materialTable, *elementRecord );
 
 		writer.close();
 
@@ -7049,8 +7189,18 @@ int main( int argc, char **argv )
 		// the post-processing was done to gain. The picture would look like a
 		// slightly coarse mesh, which is the failure mode SetHighOrderOutput()
 		// exists to prevent, one degree further along.
+		//
+		// WITH WHAT EACH ELEMENT IS MADE OF, from the record the `.nc` holds.
+		// Built after the bending, on the mesh as it is drawn: an order-0
+		// field has one value per element and no geometry to bend, and the
+		// element numbering the record is indexed by does not move.
+		std::unique_ptr<meq::ElementCellData> cells;
+		if ( elementRecord )
+			cells = std::make_unique<meq::ElementCellData>( *solveMesh,
+				materialTable, *elementRecord );
 		meq::writeVtu( stem, *solveMesh, solver->postProcessedPotential(), field,
-		               config->getDiscretisation().polynomialDegree + 1 );
+		               config->getDiscretisation().polynomialDegree + 1,
+		               cells.get() );
 
 		// The description goes FIRST on each line and the path last, because
 		// the path can be long and absolute and any attempt to align a

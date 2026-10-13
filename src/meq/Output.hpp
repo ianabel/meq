@@ -33,6 +33,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "mfem.hpp"
 
@@ -41,6 +42,9 @@
 
 namespace meq
 {
+	class MaterialTable;
+	struct ElementMaterials;
+
 	/// True when MEQ was built with netcdf-cxx4. Everything in
 	/// NetCDFWriter throws without it.
 	bool hasNetCDF();
@@ -86,6 +90,56 @@ namespace meq
 	                         mfem::GridFunction const &postProcessed );
 
 	/**
+	 * WHAT EACH ELEMENT IS MADE OF, AS VTK CELL DATA: `ELEMENT-REGIONS-PLAN.md`
+	 * §2.3's VTK half, from a meq::ElementMaterials and nothing re-derived.
+	 *
+	 *     region              ElementRegion's value, the `.nc`'s element_region
+	 *     plasma_fraction     element_plasma_fraction
+	 *     conductor_material  the dominant conductor's material row, -1 for none
+	 *     conductor_fraction  its share of the element, 0 for none
+	 *
+	 * Each is an L2 order-0 GridFunction on the mesh it is built for, so its
+	 * one dof per element is the element's value. The element's ATTRIBUTE is
+	 * not among them: ParaViewDataCollection already writes `attribute` as
+	 * true VTK cell data, and a second array of that name would be a point
+	 * array beside it.
+	 *
+	 * **THEY RENDER AS ONE CONSTANT PER CELL, WHICH IS MEASURED AND NOT
+	 * ASSUMED.** The collection writes every GridFunction as POINT data, at
+	 * each element's own Lagrange points -- and under SetHighOrderOutput()
+	 * those points are written per element and shared by none, so an order-0
+	 * field takes one value at all of a cell's points and nothing is averaged
+	 * across a face. DriverAcceptance reads the `.vtu` back and asserts both
+	 * halves; M-269.
+	 *
+	 * Owns its space and its fields, and must outlive any collection they are
+	 * registered on until that collection has saved.
+	 *
+	 * @throws std::invalid_argument if @a record is not of @a mesh's
+	 *         elements, or was made with another table.
+	 */
+	class ElementCellData
+	{
+		public:
+			ElementCellData( mfem::Mesh &mesh, MaterialTable const &table,
+			                 ElementMaterials const &record );
+
+			ElementCellData( ElementCellData const & ) = delete;
+			ElementCellData &operator=( ElementCellData const & ) = delete;
+
+			/// The name and field of each array, in the order above.
+			std::vector< std::pair< std::string, mfem::GridFunction * > > fields() const;
+
+		private:
+			mfem::L2_FECollection collection;
+			mfem::FiniteElementSpace space;
+			mutable mfem::GridFunction region;
+			mutable mfem::GridFunction plasmaFraction;
+			mutable mfem::GridFunction conductorMaterial;
+			mutable mfem::GridFunction conductorFraction;
+	};
+
+	/**
 	 * The same discrete solution as VTK, for ParaView and VisIt.
 	 *
 	 * Written through mfem::ParaViewDataCollection, which produces a
@@ -123,11 +177,14 @@ namespace meq
 	 *                        exact q is in "<stem>_grad_psi.gf".
 	 * @param levelsOfDetail  subdivision per element; the degree of @a potential
 	 *                        is the right value. Clamped to at least 1.
+	 * @param cells           what each element is made of, registered beside
+	 *                        psi and B; null writes the two fields alone.
 	 */
 	void writeVtu( std::string const &stem, mfem::Mesh &mesh,
 	               mfem::GridFunction const &potential,
 	               mfem::GridFunction const &field,
-	               int levelsOfDetail );
+	               int levelsOfDetail,
+	               ElementCellData const *cells = nullptr );
 
 	/**
 	 * A VTK TIME SERIES, one frame per adaptive cycle.
@@ -162,11 +219,15 @@ namespace meq
 
 			/// One frame. @a field is the poloidal field B, as writeVtu().
 			/// @a time is what ParaView's slider shows; the cycle index is the
-			/// natural choice and there is no physical time here.
+			/// natural choice and there is no physical time here. @a cells is
+			/// THIS cycle's classification, so the plasma boundary can be
+			/// watched under adaptivity; like the fields, it is dropped once
+			/// the frame is written.
 			void append( mfem::Mesh &mesh,
 			             mfem::GridFunction const &potential,
 			             mfem::GridFunction const &field,
-			             int cycle, double time );
+			             int cycle, double time,
+			             ElementCellData const *cells = nullptr );
 
 			/// How many frames have been written.
 			int frames() const;
@@ -337,6 +398,79 @@ namespace meq
 			void vector( std::string const &dimension, std::string const &name,
 			             std::vector<int> const &values,
 			             std::string const &longName );
+
+			/// The same, for a column of names, as NetCDF-4 `string`s -- the
+			/// material and circuit tables' names, which have no length a
+			/// fixed-width character array could be sized to in advance.
+			void vector( std::string const &dimension, std::string const &name,
+			             std::vector<std::string> const &values,
+			             std::string const &longName );
+
+			/**
+			 * WHAT EVERY ELEMENT IS MADE OF, AND THE TABLES THAT SAY WHAT THE
+			 * MATERIALS ARE: `ELEMENT-REGIONS-PLAN.md` §2.1 and §2.3, from
+			 * meq::GradShafranovSolver::elementMaterials() and nothing
+			 * re-derived here. `docs/output.rst` is the reader's account.
+			 *
+			 *     dimensions  element, element_entry, material, circuit,
+			 *                 permeability_curve, permeability_curve_point
+			 *     int     element_material_count( element )
+			 *                     sample_dimension = "element_entry"
+			 *     int     element_material( element_entry )   a material row
+			 *     double  element_fraction( element_entry )
+			 *     byte    element_region( element )    CF flag_values/meanings
+			 *     double  element_plasma_fraction( element )
+			 *     byte    element_excluded( element )
+			 *     int     element_attribute( element )
+			 *     string  material_name( material ), and material_kind,
+			 *             material_circuit, material_current,
+			 *             material_resistivity, material_relative_permeability,
+			 *             material_permeability_curve
+			 *     string  circuit_name( circuit ), circuit_current,
+			 *             circuit_supplied                 when there are any
+			 *     string  permeability_curve_material( permeability_curve ),
+			 *             permeability_curve_point_count, and
+			 *             permeability_curve_h / _b( permeability_curve_point )
+			 *                                              when there are any
+			 *
+			 * **THE FRACTIONS ARE A CF CONTIGUOUS RAGGED ARRAY**: element `e`'s
+			 * entries are the `element_material_count( e )` that follow those of
+			 * the elements before it. A dense element-by-material matrix is
+			 * hundreds of megabytes on a machine of passive filaments, where
+			 * almost every element has one entry.
+			 *
+			 * THE ELEMENT INDEX IS THE ELEMENT'S INDEX IN `<stem>.mesh`, which
+			 * the file names in `mesh_file`; the record must therefore be of
+			 * the mesh that file holds.
+			 *
+			 * And the global attributes `region_elements_<region>` for every
+			 * region, `material_area_<name>` for every row (m^2, the name made
+			 * a legal attribute name, and `_<row>` appended where two rows
+			 * would collide) and `region_faults`.
+			 *
+			 * @throws std::invalid_argument if the record has no elements or
+			 *         was made with a table of another size.
+			 */
+			void materials( MaterialTable const &table,
+			                ElementMaterials const &record );
+
+			/**
+			 * THE MATERIAL AT EACH GRID NODE: `node_material( Z, R )`, an int,
+			 * the material table's row there and -1 (the `_FillValue`) where
+			 * `inside` is 0. `ELEMENT-REGIONS-PLAN.md` §2.3's pointwise half,
+			 * and the mask a rotating run's `n_<species>` and `e_phi_0` are
+			 * read through.
+			 *
+			 * The rows are decided by the caller through
+			 * GradShafranovSolver::materialAt(), the classifier's own test at
+			 * a point; this only writes them. NAMED `node_material` AND NOT
+			 * `material`, which is the dimension of the material table:
+			 * a variable named after a dimension is that dimension's
+			 * coordinate variable by NetCDF convention, and this is not one.
+			 *
+			 * @throws std::runtime_error if @a rows is not one per node.
+			 */
+			void nodeMaterial( std::vector<int> const &rows );
 
 			/// Flush and close. Called by the destructor; call it explicitly to
 			/// see an error rather than have it thrown from a destructor.

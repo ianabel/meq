@@ -217,6 +217,24 @@ directory; `theAdaptiveSeriesIndexesEveryFrame` asserts on the **index**, not
 the pieces.
 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Rebuilding the ParaView collection per frame*
 
+**THE `.nc` CARRIES WHAT EACH ELEMENT IS MADE OF, AND THE DRIVER DOES NOT
+CLASSIFY.** After the solve the driver builds the material table with
+`meq::buildMaterialTable()` from `[[coils]]`, `[[circuits]]` and the solved
+currents. It asks `GradShafranovSolver::elementMaterials()` once, and that
+record is both the `regions:` line and `NetCDFWriter::materials()`'s
+variables, so the two cannot disagree. It is taken before
+`curveBoundaryOnto()` and is indexed as `<stem>.mesh`'s elements. The
+classification rule, the fault and `AlignConductors` are
+`ELEMENT-REGIONS-PLAN.md`'s. The layout is `docs/output.rst`'s, *What each
+element is made of*. `[[circuits]] Name = "default"` is refused, because the
+output groups the unwired coils under that name
+(→ **[M-268](MEASUREMENTS.md#m-268)**). The same record is the VTK's cell data,
+`meq::ElementCellData`, built after the bending. Each adaptive frame gets its
+own cycle's classification (→ **[M-269](MEASUREMENTS.md#m-269)**). The grid's
+`node_material` asks `GradShafranovSolver::materialAt()`, the same decision at
+a point, on the sampled `ψ* + ψ_c`, after `ψ_c` is added back. Judged before
+that, the mirror's mask is empty (→ **[M-270](MEASUREMENTS.md#m-270)**).
+
 `tools/README.md` is the guide to which format goes with which reader.
 `DriverAcceptance.cpp` asserts the driver reproduces the *library* on the same
 configuration — 1.189e-16 over 15,360 dofs — rather than comparing against a

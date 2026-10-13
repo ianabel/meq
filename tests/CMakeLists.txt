@@ -22,6 +22,8 @@ set(MEQ_UNIT_TESTS
 	ConfigTests
 	ExteriorDtNTests
 	FluxFamilyTests
+	MaterialsTests
+	OutputTests
 	AxisSearchTests
 	DeviceBasisTests
 	DeviceQuadratureTests
@@ -673,6 +675,35 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	endif()
 else()
 	message(STATUS "meq: RotatingMirror not registered")
+endif()
+
+# ElementRegions is ELEMENT-REGIONS-PLAN.md's ER-0: what each element is made
+# of, by the solver's own support test at its own points. It meshes geq's
+# mirror four ways through convergence/MirrorMachine.hpp, so it has that
+# header's needs -- python3 with gmsh at test time, the meshes into the build
+# tree -- and, where the driver is built, measures AlignConductors through the
+# driver's own --mesh-command.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ElementRegions.cpp")
+	add_executable(ElementRegions "convergence/ElementRegions.cpp")
+	target_include_directories(ElementRegions PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(ElementRegions PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(ElementRegions PRIVATE
+		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
+		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+	if(TARGET meq)
+		target_compile_definitions(ElementRegions PRIVATE
+			MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
+	endif()
+	add_test(NAME ElementRegions COMMAND ElementRegions
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(ElementRegions PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: ElementRegions not registered")
 endif()
 
 # ---------------------------------------------------------------------------

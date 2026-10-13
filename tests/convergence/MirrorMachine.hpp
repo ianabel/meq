@@ -239,6 +239,10 @@ namespace mirror
 	{
 		double axialEdge = 0.0;  ///< > 0 asks for a plasma mesh, refined to |z| <= this
 		bool aligned = false;    ///< z = +-axialEdge on element faces
+		/// The packs fragmented in as GEOMETRY ONLY -- halfdisc.py's
+		/// --align-coil, which is [mesh.generate] AlignConductors: their edges
+		/// on element faces, no attribute, no grading.
+		bool alignConductors = false;
 	};
 
 	/**
@@ -274,9 +278,19 @@ namespace mirror
 		double const width = m.outerRadius - m.innerRadius;
 		char geometry[ 512 ];
 		if ( plasma.axialEdge > 0.0 )
+		{
+			char packs[ 256 ] = "";
+			if ( plasma.alignConductors )
+				std::snprintf( packs, sizeof packs,
+					" --align-coil %.17g %.17g %.17g %.17g"
+					" --align-coil %.17g %.17g %.17g %.17g",
+					m.innerRadius, -m.centreZ - 0.5*m.length, width, m.length,
+					m.innerRadius, m.centreZ - 0.5*m.length, width, m.length );
 			std::snprintf( geometry, sizeof geometry,
-				"--plasma 0.0 %.17g 0.75 %.17g%s", -plasma.axialEdge,
-				2.0*plasma.axialEdge, plasma.aligned ? " --align-plasma" : "" );
+				"--plasma 0.0 %.17g 0.75 %.17g%s%s", -plasma.axialEdge,
+				2.0*plasma.axialEdge, plasma.aligned ? " --align-plasma" : "",
+				packs );
+		}
 		else
 			std::snprintf( geometry, sizeof geometry,
 				"--coil %.17g %.17g %.17g %.17g"

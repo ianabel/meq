@@ -9,7 +9,7 @@ wrong one is the usual way to waste an afternoon.**
 |---|---|---|
 | `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; MEQ itself, for an exact restart |
 | `<stem>/<stem>.pvd` | VTK, at the solve's own polynomial degree | ParaView, VisIt |
-| `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary MEQ was given | `plot_equilibrium.py`; any downstream tool |
+| `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary MEQ was given and what each element is made of | `plot_equilibrium.py`; any downstream tool |
 | `<stem>_surfaces.nc` | the flux surfaces and the flux-surface averages, against a flux label. **Only when asked for** | a 1-D transport code; `plot_equilibrium.py` |
 
 ## The three, and when each is the right one
@@ -119,6 +119,17 @@ the curved path, sampled from the shape itself at 512 points; `mesh boundary` on
 the fitted path, where Γ *is* the mesh boundary and is walked out of it as an
 ordered loop. The loop is **not** closed — a reader appends the first point,
 which `plot_equilibrium.py` does.
+
+**The `.nc` also says what each element of `<stem>.mesh` is made of**: the
+fraction of it that is vacuum, plasma and each coil, a region derived from those
+fractions, and the material, circuit and permeability-curve tables they index.
+`docs/output.rst`, *What each element is made of*, is the layout. These are
+indexed by the `.mesh`'s elements, not by the grid, so a reader needs the
+`.mesh` beside the file. `plot_equilibrium.py --what regions` draws them:
+
+```sh
+tools/plot_equilibrium.py run.nc --what regions -o regions.png
+```
 
 ### The band between Γ_h and Γ, and how far to trust it
 
