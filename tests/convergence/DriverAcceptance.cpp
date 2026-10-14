@@ -1010,6 +1010,92 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesTheSolovievBenchmarkAndWritesIt )
 }
 
 /*
+ * [output] GridRMin..GridZMax PUT THE GRID ON NODES SOMEBODY ELSE NAMED.
+ *
+ * The shipped Solov'ev case with a box well inside Gamma: the .nc's R and Z
+ * must be exactly min + ( max - min ) i/( n - 1 ), meq::GridSampler's form, and psi at each node must
+ * be the written psi* evaluated there by MFEM's own point search, a route that
+ * shares nothing with meq::GridSampler. A driver that ignored the keys would
+ * write Gamma's box; one that took them and sampled elsewhere would put the
+ * right coordinates on the wrong values.
+ *
+ * THE EXTENTS ARE NOT ROUND ON PURPOSE. psi* is discontinuous between
+ * elements, so a node on an edge has two values and the two point searches
+ * may pick different elements: at 0.6 .. 1.4 the gap read 2.5e-09, a jump and
+ * not a defect, and a symmetric box about R = 1 put its middle column on the
+ * edge at R = 1.0 and read 1.6e-09 there and 3e-15 everywhere else. Off every
+ * edge it is round-off.
+ */
+BOOST_AUTO_TEST_CASE( theGridCanBePlacedOnAnotherCodesNodes )
+{
+	std::string const shipped = slurp( "examples/soloviev-nstx.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+	double const rMin = 0.6123, rMax = 1.3911, zMin = -0.8123, zMax = 0.7531;
+	int const nR = 9, nZ = 7;
+	std::string text = replaceAll( shipped, "Prefix = \"soloviev-nstx\"",
+	                               "Prefix = \"driver-acceptance-grid\"\n"
+	                               "GridRMin = 0.6123\nGridRMax = 1.3911\n"
+	                               "GridZMin = -0.8123\nGridZMax = 0.7531\n"
+	                               "GridNR = 9\nGridNZ = 7" );
+	BOOST_TEST_REQUIRE( text != shipped, "the prefix substitution matched nothing" );
+	{
+		std::ofstream file( "driver-acceptance-grid.toml" );
+		file << text;
+	}
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-grid.toml" ) == 0 );
+	std::remove( "driver-acceptance-grid.toml" );
+
+	std::vector<double> const radius = ncdumpNumbers( "driver-acceptance-grid.nc", "R" );
+	std::vector<double> const height = ncdumpNumbers( "driver-acceptance-grid.nc", "Z" );
+	std::vector<double> const psi = ncdumpNumbers( "driver-acceptance-grid.nc", "psi" );
+	std::vector<double> const inside = ncdumpNumbers( "driver-acceptance-grid.nc", "inside" );
+	BOOST_TEST_REQUIRE( radius.size() == static_cast<std::size_t>( nR ) );
+	BOOST_TEST_REQUIRE( height.size() == static_cast<std::size_t>( nZ ) );
+	BOOST_TEST_REQUIRE( psi.size() == static_cast<std::size_t>( nR*nZ ) );
+	for ( int i = 0; i < nR; ++i )
+		BOOST_TEST( radius[ static_cast<std::size_t>( i ) ]
+		            == rMin + ( rMax - rMin )*i/( nR - 1 ),
+		            "R[ " << i << " ] is " << radius[ static_cast<std::size_t>( i ) ] );
+	for ( int j = 0; j < nZ; ++j )
+		BOOST_TEST( height[ static_cast<std::size_t>( j ) ]
+		            == zMin + ( zMax - zMin )*j/( nZ - 1 ),
+		            "Z[ " << j << " ] is " << height[ static_cast<std::size_t>( j ) ] );
+
+	mfem::Mesh mesh( "driver-acceptance-grid.mesh", 1, 1 );
+	std::ifstream stream( "driver-acceptance-grid_psistar.gf" );
+	BOOST_TEST_REQUIRE( stream.good() );
+	mfem::GridFunction const star( &mesh, stream );
+	mfem::DenseMatrix points( 2, nR*nZ );
+	for ( int j = 0; j < nZ; ++j )
+		for ( int i = 0; i < nR; ++i )
+		{
+			points( 0, j*nR + i ) = radius[ static_cast<std::size_t>( i ) ];
+			points( 1, j*nR + i ) = height[ static_cast<std::size_t>( j ) ];
+		}
+	mfem::Array<int> elements;
+	mfem::Array<mfem::IntegrationPoint> ips;
+	mesh.FindPoints( points, elements, ips, false );
+	double worst = 0.0, largest = 0.0;
+	int found = 0;
+	for ( int k = 0; k < nR*nZ; ++k )
+	{
+		BOOST_TEST_REQUIRE( inside[ static_cast<std::size_t>( k ) ] == 1.0,
+		                    "node " << k << " of a box inside Gamma is not inside" );
+		if ( elements[ k ] < 0 )
+			continue;
+		++found;
+		double const direct = star.GetValue( elements[ k ], ips[ k ] );
+		worst = std::max( worst, std::abs( direct - psi[ static_cast<std::size_t>( k ) ] ) );
+		largest = std::max( largest, std::abs( direct ) );
+	}
+	std::printf( "\n  the grid on named nodes: %d of %d found by FindPoints, psi to "
+	             "%.3e of %.3e\n", found, nR*nZ, worst, largest );
+	BOOST_TEST( found == nR*nZ );
+	BOOST_TEST( worst <= meq::tests::scalarAgreementFloor( 1.0e-12*largest, largest ),
+	            "the .nc's psi is not the written psi* at its own nodes" );
+}
+
+/*
  * The NON-LINEAR path through the driver.
  *
  * The Solov'ev case above is linear in psi -- dF/dpsi is identically zero and

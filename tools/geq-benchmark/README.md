@@ -331,3 +331,51 @@ About eleven minutes, nine and a half of them the 513² direct solve (5 s at
 Picard runs with `atol = 0` and `rtol = 2e-09`, because geq's default
 `atol = 1e-06` is what actually stops it. `--cache DIR` keeps each solve and
 reuses it.
+
+## The race: `race_geq.py`
+
+MEQ and geq solving **the same rotating mirror**, `reference/rotating/`'s
+problem, each driven the way a user drives it, and timed.
+
+* **geq** runs `export_rotating.solve( n, "direct", ... )` in a fresh process:
+  geq's direct free-boundary Picard on an `n × n` grid, with this directory's
+  three changes (see *The rotating mirror*). `n` is 65, 129, 257 or 513, each
+  holding the 65 grid. It runs at two Picard tolerances: `1e-6`, geq's own
+  stopping scale, and `2e-9`, the reference's.
+* **MEQ** runs `examples/mirror-rotating.toml` through `build/meq`, with only
+  `[mesh] RefinementLevels`, `[discretisation] PolynomialDegree`, the threads
+  and the output grid changed, plus `[mesh.generate] PlasmaSize` with
+  `--plasma-size`. The mesh is generated once by `meq-run --mesh-only` and is
+  not timed. **PlasmaSize is the knob that matters**: MEQ's error peaks inside
+  the plasma near the midplane, and uniform refinement also refines the vacuum
+  out to Γ. Run the ladder at 0.1, 0.05 and 0.025, with `--geq ""` for the
+  extra two.
+
+**The error is measured at geq's nodes.** `[output] GridRMin` to `GridZMax`
+put MEQ's grid exactly on geq's 65 × 65 common nodes, sampled from the exact
+`ψ*` rather than interpolated. The harness checks the two node sets agree
+before anything is timed. geq's four corners are dropped, for the reason above.
+The reference is MEQ at level 2, `k = 4`, bounded at 2.4e-08 (M-263), and it
+is not a race entry. So no target below 1e-07 is set.
+
+**Two tables, as in `race_desc.py`, and only the second decides anything.**
+*Matched unknowns* sets geq's `n²` against MEQ's `faces × ( k + 1 )` trace
+unknowns, which is a choice. *Time to accuracy* takes the cheapest run of each
+code that reaches each max-error target.
+
+**The protocol is `race_nke.py`'s.** Each run is a fresh process, the arms are
+interleaved, a configuration's time is the median of three takes (one for a run
+over two minutes), and every row carries provenance. The load average is waited
+on once, before anything runs. Before each run the gate is the cores busy at
+that moment, read from `/proc/stat` over two seconds, because after a
+multithreaded run the one-minute average mostly measures that run. Both codes run at one thread and at the physical core
+count, with OMP, MKL and OpenBLAS all set to it.
+
+```sh
+cd /home/ian/projects/meq
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
+```
+
+It takes about an hour, most of it geq's 513² solves. The results go to
+`runs/<stamp>/race.md` and `race.json`, which git ignores, and the published
+table is M-274.

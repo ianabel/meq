@@ -1839,6 +1839,32 @@ BOOST_AUTO_TEST_CASE( initialGuessAndAdaptivityParse )
 		meq::Configuration( write( "[output]\nGridNR = 1\n" ) ),
 		meq::ConfigError );
 
+	// THE GRID'S EXTENT: unset by default, read in pairs, and refused as half
+	// a pair, a non-positive extent, or a negative radius. Integers are read
+	// as numbers (the find_or<double> trap).
+	{
+		meq::Configuration const unset( write( "" ) );
+		BOOST_TEST( !unset.getOutput().hasGridRadii() );
+		BOOST_TEST( !unset.getOutput().hasGridHeights() );
+		meq::Configuration const set( write(
+			"[output]\nGridRMin = 0.05\nGridRMax = 0.63\nGridZMin = -1.5\nGridZMax = 2\n" ) );
+		BOOST_TEST( set.getOutput().hasGridRadii() );
+		BOOST_TEST( set.getOutput().gridRMin == 0.05 );
+		BOOST_TEST( set.getOutput().gridRMax == 0.63 );
+		BOOST_TEST( set.getOutput().gridZMin == -1.5 );
+		BOOST_TEST( set.getOutput().gridZMax == 2.0 );
+		meq::Configuration const radiiOnly( write(
+			"[output]\nGridRMin = 0.0\nGridRMax = 1.0\n" ) );
+		BOOST_TEST( radiiOnly.getOutput().hasGridRadii() );
+		BOOST_TEST( !radiiOnly.getOutput().hasGridHeights() );
+	}
+	for ( char const *bad : { "GridRMin = 0.1\n", "GridZMax = 1.0\n",
+	                          "GridRMin = 0.5\nGridRMax = 0.5\n",
+	                          "GridZMin = 1.0\nGridZMax = -1.0\n",
+	                          "GridRMin = -0.1\nGridRMax = 1.0\n" } )
+		BOOST_CHECK_THROW( meq::Configuration( write( std::string( "[output]\n" ) + bad ) ),
+		                   meq::ConfigError );
+
 	// Enabled is a boolean, and a string that looks like one is not one. This
 	// is the find_or<double> trap in the other direction, recorded at the top
 	// of Config.cpp: a silently defaulted false would disable adaptivity for a

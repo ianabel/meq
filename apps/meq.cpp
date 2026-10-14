@@ -5968,6 +5968,18 @@ int main( int argc, char **argv )
 			gridRMin = low( 0 ); gridRMax = high( 0 );
 			gridZMin = low( 1 ); gridZMax = high( 1 );
 		}
+		// [output] GridRMin..GridZMax, each pair overriding the box above.
+		// Validated as pairs at parse.
+		if ( output.hasGridRadii() )
+		{
+			gridRMin = output.gridRMin;
+			gridRMax = output.gridRMax;
+		}
+		if ( output.hasGridHeights() )
+		{
+			gridZMin = output.gridZMin;
+			gridZMax = output.gridZMax;
+		}
 
 		meq::GridSampler sampler( *solveMesh,
 			gridRMin, gridRMax, output.gridNR,

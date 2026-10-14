@@ -68,6 +68,8 @@
  * case the example file says so.
  */
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -1773,6 +1775,19 @@ namespace meq
 		// mesh, and give a 4x5 grid for a 1536-element solve.
 		int gridNR = 129;
 		int gridNZ = 129;
+
+		// GridRMin, GridRMax and GridZMin, GridZMax: the grid's extent, each
+		// pair optional and given together. Unset, the grid spans Gamma's
+		// bounding box, or the mesh's when there is no Gamma. Set, it is
+		// exactly that box, so another code's nodes can be asked for by name
+		// rather than interpolated -- tools/geq-benchmark/race_geq.py puts
+		// MEQ's grid on geq's. NaN means unset.
+		double gridRMin = std::numeric_limits<double>::quiet_NaN();
+		double gridRMax = std::numeric_limits<double>::quiet_NaN();
+		double gridZMin = std::numeric_limits<double>::quiet_NaN();
+		double gridZMax = std::numeric_limits<double>::quiet_NaN();
+		bool hasGridRadii() const { return !std::isnan( gridRMin ); }
+		bool hasGridHeights() const { return !std::isnan( gridZMin ); }
 
 		// <Directory>/<Prefix>.mesh, the mesh actually solved on.
 		std::string getMeshFile() const;

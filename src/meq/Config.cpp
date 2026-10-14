@@ -2447,6 +2447,7 @@ namespace meq
 		{
 			Table output( document, "output", sourceName, false );
 			output.rejectUnknownKeys( { "Directory", "Prefix", "GridNR", "GridNZ",
+			                            "GridRMin", "GridRMax", "GridZMin", "GridZMax",
 			                            "FluxSurfaces", "FluxSurfaceCount",
 			                            "FluxAngleCount", "FluxInnerCut",
 			                            "FluxOuterCut" } );
@@ -2464,6 +2465,35 @@ namespace meq
 			if ( outputOptions.gridNZ < 2 )
 				output.fail( "GridNZ", "must be at least 2: these are grid NODES, so the "
 				             "spacing is ( ZMax - ZMin )/( GridNZ - 1 )" );
+
+			// THE EXTENT, IN PAIRS. One end without the other would leave the
+			// grid half the default box and half the author's, which is a
+			// box nobody wrote down.
+			auto extent = [ &output ]( char const *lowKey, char const *highKey,
+			                           double &low, double &high )
+			{
+				if ( output.has( lowKey ) != output.has( highKey ) )
+					output.fail( output.has( lowKey ) ? highKey : lowKey,
+					             std::string( "must be given with " )
+					             + ( output.has( lowKey ) ? lowKey : highKey )
+					             + ": the grid's extent is set as a pair or not at all" );
+				if ( !output.has( lowKey ) )
+					return;
+				low = output.getFloat( lowKey );
+				high = output.getFloat( highKey );
+				if ( !std::isfinite( low ) )
+					output.fail( lowKey, "must be finite" );
+				if ( !std::isfinite( high ) )
+					output.fail( highKey, "must be finite" );
+				if ( !( high > low ) )
+					output.fail( highKey, std::string( "must exceed " ) + lowKey
+					             + ": the grid's extent must be positive" );
+			};
+			extent( "GridRMin", "GridRMax", outputOptions.gridRMin, outputOptions.gridRMax );
+			extent( "GridZMin", "GridZMax", outputOptions.gridZMin, outputOptions.gridZMax );
+			if ( outputOptions.hasGridRadii() && outputOptions.gridRMin < 0.0 )
+				output.fail( "GridRMin", "must not be negative: R is the major radius, "
+				             "and the solve is the half-plane R >= 0" );
 
 			// The ( Psi, theta ) file: INVERSION-PLAN.md stage IN-6. See
 			// OutputConfig for why it is off by default and why both ends of

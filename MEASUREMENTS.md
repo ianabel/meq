@@ -16562,3 +16562,86 @@ M-222's knife edge, and both are green at `MKL = 2` and `4`.
 `PlasmaEdgeConvergence`, and `VacuumMirror`, the open upstream request of
 [M-272](#m-272). The three changed tests pass in double, where every floor
 added here is exactly zero.
+
+
+### M-274
+
+**MEQ AGAINST geq ON THE ROTATING MIRROR, ONE INPUT, BOTH DRIVEN AS SHIPPED.
+ON ONE THREAD geq IS FASTER FROM 1e-05 TO ABOUT 2e-07 AND MEQ BELOW THAT. ON
+EIGHT THREADS MEQ IS FASTER AT EVERY TARGET BUT 1e-06, WHERE geq LEADS BY
+1.1x.**
+
+`tools/geq-benchmark/race_geq.py` on MR-4's problem:
+* geq is `export_rotating.solve( n, "direct" )` in a fresh process;
+* MEQ is `examples/mirror-rotating.toml` through `build/meq`, with only the
+  resolution, the threads and the output grid changed;
+* the error is the max over geq's 65 x 65 common nodes, without its four
+  corners. MEQ samples ψ* exactly on those nodes through `[output] GridRMin` to
+  `GridZMax`, and the harness checks the two node sets agree to 0.00e+00 m;
+* the reference is MEQ at L2, `k = 4` on the shipped mesh.
+
+Each configuration is the median of three fresh processes, one for a run over
+120 s. Nothing ran on the machine before each run, under half a core busy by
+`/proc/stat`. MEQ `6386d88` with the grid-extent keys uncommitted, geq
+`73b9a72`, freegs4e `9a1ee0c`, `libmfem.a` of 2026-10-13 14:03, 8 physical
+cores. Wall is the whole process; MEQ's includes its output files, and geq's
+its Python start-up, about 1.1 s.
+
+| geq | max error | 1 thread | 8 threads | solve alone, 1 thread |
+|---|---|---|---|---|
+| 65², rtol 1e-6 | 8.64e-07 | 1.92 s | 2.03 s | 0.78 s |
+| 129² | 1.55e-07 | 5.48 | 5.35 | 3.95 |
+| 257² | 4.82e-08 | 30.85 | 31.57 | 27.67 |
+| 513² | 1.35e-08 | 244.13 | 244.45 | 228.98 |
+
+| MEQ, PlasmaSize, level, `k` | max error | 1 thread | 8 threads |
+|---|---|---|---|
+| 0.1, L0, 1 | 5.21e-05 | 1.08 s | 0.64 s |
+| 0.1, L0, 4 | 3.03e-06 | 2.88 | 1.34 |
+| 0.05, L0, 2 | 8.33e-06 | 3.19 | 1.51 |
+| 0.05, L0, 3 | 7.66e-07 | 5.07 | 2.28 |
+| 0.05, L0, 4 | 4.75e-08 | 8.01 | 3.36 |
+| 0.025, L0, 3 | 9.37e-09 | 16.65 | 7.27 |
+| 0.05, L1, 3 | 1.02e-08 | 20.75 | 9.47 |
+| 0.05, L1, 4 | 1.69e-09 | 32.35 | 13.72 |
+
+**Time to accuracy**, the cheapest run of each code reaching each target:
+
+| target | geq, 1 thread | MEQ, 1 thread | geq/MEQ | geq, 8 | MEQ, 8 | geq/MEQ |
+|---|---|---|---|---|---|---|
+| 1e-04 | 65², 1.92 s | 0.1 L0 k=1, 1.08 | 1.8 | 2.03 | 0.64 | 3.2 |
+| 1e-05 | 65², 1.92 | 0.1 L0 k=4, 2.88 | 0.7 | 2.03 | 1.34 | 1.5 |
+| 1e-06 | 65², 1.92 | 0.05 L0 k=3, 5.07 | 0.4 | 2.03 | 2.28 | 0.9 |
+| 1e-07 | 257², 30.85 | 0.05 L0 k=4, 8.01 | 3.9 | 31.57 | 3.36 | 9.4 |
+
+**What the numbers say.**
+* **geq's 65² grid is unusually good on this problem**: 8.6e-07 in 2 s. Its
+  grid covers only the 0.58 x 3 m box the plasma sits in, and the free boundary
+  is a Green's function sum, where MEQ meshes the whole half-disc to Γ at
+  radius 3.
+* **But geq converges at order 1.8, and its cost grows 5.6x and then 7.9x per
+  doubling of n.** So 1e-07 costs it 257², 31 s, and 1.35e-08 costs it 513²,
+  244 s. MEQ reaches 9.4e-09 in
+  16.7 s and 1.7e-09 in 32 s, on one thread.
+* **The crossover on one thread is near 2e-07.** At that target geq's 129²
+  takes 5.5 s against MEQ's 8.0 s.
+* **geq does not thread**: eight threads take 0.98 to 1.06 of one thread's
+  time. MEQ runs 1.7x to 2.4x faster on eight, which leaves geq ahead only at
+  1e-06.
+* **geq's Picard rtol buys nothing below 1e-6**. 2e-9 gives the same error at
+  every grid and costs 2.1x at 513².
+* **MEQ's resolution knob is PlasmaSize, not uniform refinement.** MEQ's error
+  peaks inside the plasma, at R = 0.24 to 0.29 near the midplane where the
+  current does, and the shipped 0.1 m elements under-resolve it. That is why
+  its errors are not monotone at L0 and L1. Uniform refinement also refines the
+  vacuum out to Γ. Halving PlasmaSize to 0.05 is what makes MEQ's 1e-06 and
+  1e-07 rows; refinement levels alone reach 1e-07 only at L1, `k = 4`, in
+  11.1 s.
+
+**THE REFERENCE IS MEQ'S, AND TWO THINGS SAY IT IS NOT FLATTERING MEQ.**
+* PlasmaSize 0.05 at L1, `k = 4`, a different mesh family, agrees with it to
+  1.69e-09, inside its 2.4e-08 bound (M-263).
+* geq converges onto it at a steady order 1.8: 8.6e-07, 1.55e-07, 4.82e-08,
+  1.35e-08.
+No target is set below 1e-07, where the reference's own bound would start to
+count.

@@ -219,8 +219,11 @@ The gridded format
 
 :math:`\psi` and :math:`\mathbf{B}` sampled onto a uniform :math:`(R, Z)` grid,
 whose extent is :math:`\Gamma`'s bounding box when there is a shape and the
-``[mesh]`` box otherwise. This is the format to give to anything that is not a
-finite element code.
+mesh's box otherwise, unless ``[output] GridRMin`` to ``GridZMax`` name it. Node
+:math:`i` is at :math:`R_{\min} + (R_{\max} - R_{\min})\,i/(\texttt{GridNR} - 1)`,
+so naming another code's grid puts MEQ's samples on that code's nodes, read
+from the exact field rather than interpolated. This is the format to give to
+anything that is not a finite element code.
 
 Variables: the grid coordinates; ``psi`` (which is :math:`\psi^\star` — see
 :ref:`output-which-potential`); ``B_R`` and ``B_Z``; a byte mask ``inside``; a

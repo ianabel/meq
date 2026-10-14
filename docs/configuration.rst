@@ -1758,6 +1758,13 @@ limiter; ``examples/limited-tokamak.toml`` and
      - Sampling **nodes** for the gridded output, so the spacing is
        :math:`(R_{\max} - R_{\min})/(\texttt{GridNR} - 1)`. Nothing to do with
        ``[mesh] NR``.
+   * - ``GridRMin``, ``GridRMax``, ``GridZMin``, ``GridZMax``
+     - unset
+     - The grid's extent, in metres. Each pair is given together or not at
+       all; unset, the grid spans :math:`\Gamma`'s bounding box, or the mesh's.
+       ``GridRMin`` must not be negative, and each maximum must exceed its
+       minimum. Use it to sample on another code's nodes. A node outside the
+       solved region reads ``inside = 0``, exactly as on the default grid.
    * - ``FluxSurfaces``
      - ``false``
      - Write ``<stem>_surfaces.nc``, the flux-surface geometry and the
