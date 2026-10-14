@@ -42,6 +42,15 @@ OMP, MKL and OpenBLAS all set to it.
     cd /home/ian/projects/meq
     tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
 
+THE DEVICE ARM is `--meq-device cuda`, with `--meq-build build-single` for
+single precision and `--geq ""` to reuse a host race's geq rows. geq has no
+device path: it is NumPy and SciPy, with numba CPU JIT in two freegs4e
+helpers. So the comparison is MEQ on the GPU against geq on the host. The
+driver's device defaults apply: cuDSS, serial assembly, one host thread. The
+reference stays build/ on the host. CLAUDE.md's caveat stands: this machine's
+GPU is consumer silicon, with FP64 at 1/32 to 1/64 of FP32, so a double device
+time here is evidence about this card and not about a device.
+
 Results go to tools/geq-benchmark/runs/<stamp>/, which git ignores.
 """
 import argparse
@@ -152,13 +161,18 @@ def trace_unknowns(mesh_path, order):
     return elements, ((3*elements + boundary)//2)*(order + 1)
 
 
-def run_meq(directory, mesh, level, order, threads, tag, plasma_size=0.1):
+def run_meq(directory, mesh, level, order, threads, tag, plasma_size=0.1,
+            build="build", device=None):
     os.makedirs(directory, exist_ok=True)
     config = meq_config(directory, mesh, level, order, tag, plasma_size)
     started = time.perf_counter()
     # --mesh-ready: the mesh was made once by meq-run --mesh-only from the same
-    # [mesh.generate] block, which no variant changes.
-    done = subprocess.run([os.path.join(MEQ, "build", "meq"), "--mesh-ready", config],
+    # [mesh.generate] block, which no variant changes. --device cuda takes the
+    # driver's device defaults: cuDSS, serial assembly, one host thread.
+    command = [os.path.join(MEQ, build, "meq"), "--mesh-ready", config]
+    if device:
+        command[1:1] = ["--device", device]
+    done = subprocess.run(command,
                           capture_output=True, text=True,
                           env=thread_env(threads), cwd=MEQ)
     seconds = time.perf_counter() - started
@@ -280,6 +294,13 @@ def main(argv=None):
                     help="MEQ's uniform refinements; L2 at k = 4 is the reference "
                          "and is never a race entry")
     ap.add_argument("--orders", default="1,2,3,4")
+    ap.add_argument("--meq-device", default=None,
+                    help="run MEQ's ladder under this mfem::Device, e.g. cuda. The "
+                         "driver refuses threaded assembly there, so MEQ runs at one "
+                         "host thread; geq has no device path and stays on the host")
+    ap.add_argument("--meq-build", default="build",
+                    help="MEQ's build tree for the ladder, e.g. build-single. The "
+                         "reference is always build/ on the host")
     ap.add_argument("--plasma-size", type=float, default=0.1,
                     help="[mesh.generate] PlasmaSize for MEQ's ladder, the element "
                          "size inside the plasma box; the shipped 0.1 by default. "
@@ -351,16 +372,20 @@ def main(argv=None):
         for rtol in (float(x) for x in args.geq_rtol.split(",")):
             for t in threads:
                 entries.append(("geq", dict(n=n, rtol=rtol, threads=t)))
+    meq_arm = ("meq" + (f"-{args.meq_device}" if args.meq_device else "")
+               + ("-single" if args.meq_build.endswith("single") else ""))
+    meq_threads = [1] if args.meq_device else threads
     for level in (int(x) for x in args.levels.split(",")):
         for order in (int(x) for x in args.orders.split(",")):
-            if ( level, order ) == ( 2, 4 ) and args.plasma_size == 0.1:
+            if ( ( level, order ) == ( 2, 4 ) and args.plasma_size == 0.1
+                 and meq_arm == "meq" ):
                 continue
-            for t in threads:
-                entries.append(("meq", dict(level=level, order=order, threads=t,
-                                            plasma_size=args.plasma_size)))
+            for t in meq_threads:
+                entries.append((meq_arm, dict(level=level, order=order, threads=t,
+                                              plasma_size=args.plasma_size)))
     # INTERLEAVED: alternate the arms, cheap to expensive within each.
     geq_list = [e for e in entries if e[0] == "geq"]
-    meq_list = [e for e in entries if e[0] == "meq"]
+    meq_list = [e for e in entries if e[0] != "geq"]
     order = []
     while geq_list or meq_list:
         if meq_list:
@@ -381,16 +406,17 @@ def main(argv=None):
                 r = run_geq(cfg["n"], cfg["rtol"], cfg["threads"],
                             os.path.join(out, f"geq-{cfg['n']}-{cfg['rtol']:g}-t{cfg['threads']}.npz"))
             else:
-                tag = (f"meq-ps{cfg['plasma_size']:g}-L{cfg['level']}-k{cfg['order']}"
+                tag = (f"{arm}-ps{cfg['plasma_size']:g}-L{cfg['level']}-k{cfg['order']}"
                        f"-t{cfg['threads']}-r{repeat}")
                 r = run_meq(os.path.join(out, tag), ladder, cfg["level"], cfg["order"],
-                            cfg["threads"], tag, cfg["plasma_size"])
+                            cfg["threads"], tag, cfg["plasma_size"],
+                            args.meq_build, args.meq_device)
             row = dict(arm=arm, repeat=repeat, load=load, **cfg)
             if r["ok"]:
                 row.update(seconds=r["seconds"], solve=r["solve"],
                            iterations=r["iterations"], unknowns=r["unknowns"])
                 row["max"], row["rms"] = error(r["psi"], reference)
-                if arm == "meq":
+                if arm != "geq":
                     row.update(elements=r["elements"], setup=r["setup"], output=r["output"])
                 else:
                     row["relchange"] = r["relchange"]
@@ -402,7 +428,7 @@ def main(argv=None):
             with open(os.path.join(out, "race.json"), "w") as handle:
                 json.dump(record, handle, indent=1)
             label = (f"geq {cfg['n']:4d}^2 rtol {cfg['rtol']:.0e}" if arm == "geq"
-                     else f"MEQ ps{cfg['plasma_size']:g} L{cfg['level']} k={cfg['order']}")
+                     else f"{arm} ps{cfg['plasma_size']:g} L{cfg['level']} k={cfg['order']}")
             print(f"  [{repeat}] {label:24s} t={cfg['threads']:2d}  "
                   + (f"{row['seconds']:8.2f} s (solve {row['solve']:8.2f})  "
                      f"max {row['max']:.3e}  rms {row['rms']:.3e}  busy {load:.2f}"
@@ -445,35 +471,40 @@ def summarise(record, out):
                   "MEQ run whose faces x ( k + 1 ) is nearest its n^2", "",
                   "| geq | unknowns | s | max err | MEQ | unknowns | s | max err |",
                   "|---|---|---|---|---|---|---|---|"]
-        meqs = [t for t in table if t["arm"] == "meq" and t["threads"] == threads]
+        meqs = [t for t in table if t["arm"] != "geq" and t["threads"] == threads]
         for g in (t for t in table if t["arm"] == "geq" and t["threads"] == threads):
             if not meqs:
                 break
-            m = min(meqs, key=lambda t: abs(np.log(t["unknowns"]/g["unknowns"])))
+            m = min(meqs, key=lambda t: abs(np.log(t["unknowns"]/g["unknowns"])))  # noqa
             lines.append(f"| {g['key'][1]}^2 rtol {g['key'][2]:.0e} | {g['unknowns']} | "
-                         f"{g['seconds']:.2f} | {g['max']:.2e} | ps {m['ps']:g} L{m['key'][1]} k={m['key'][2]} | "
+                         f"{g['seconds']:.2f} | {g['max']:.2e} | {m['arm']} ps {m['ps']:g} L{m['key'][1]} k={m['key'][2]} | "
                          f"{m['unknowns']} | {m['seconds']:.2f} | {m['max']:.2e} |")
-    for threads in sorted({t["threads"] for t in table}):
-        lines += ["", f"## Time to accuracy, {threads} thread(s): the cheapest run "
-                  "reaching each max-error target", "",
-                  "| target | geq | s | MEQ | s | ratio geq/MEQ |", "|---|---|---|---|---|---|"]
-        for target in TARGETS:
-            best = {}
-            for arm in ("geq", "meq"):
-                hits = [t for t in table if t["arm"] == arm and t["threads"] == threads
-                        and t["max"] <= target]
-                best[arm] = min(hits, key=lambda t: t["seconds"]) if hits else None
-            def cell(t):
-                if t is None:
-                    return "not reached", "-"
-                k = t["key"]
-                res = (f"{k[1]}^2 rtol {k[2]:.0e}" if t["arm"] == "geq"
-                       else f"ps {t['ps']:g} L{k[1]} k={k[2]}")
-                return res, f"{t['seconds']:.2f}"
-            g, m = cell(best["geq"]), cell(best["meq"])
-            ratio = (f"{best['geq']['seconds']/best['meq']['seconds']:.1f}"
-                     if best["geq"] and best["meq"] else "-")
-            lines.append(f"| {target:.0e} | {g[0]} | {g[1]} | {m[0]} | {m[1]} | {ratio} |")
+    def cell(t):
+        if t is None:
+            return "not reached", "-"
+        k = t["key"]
+        res = (f"{k[1]}^2 rtol {k[2]:.0e}" if t["arm"] == "geq"
+               else f"ps {t['ps']:g} L{k[1]} k={k[2]}")
+        return res, f"{t['seconds']:.2f}"
+
+    # ONE TABLE PER MEQ ARM AND THREAD COUNT, against geq at the same count.
+    # A device arm runs at one host thread, and geq has no device path.
+    for arm in sorted({t["arm"] for t in table} - {"geq"}):
+        for threads in sorted({t["threads"] for t in table if t["arm"] == arm}):
+            lines += ["", f"## Time to accuracy, {arm} at {threads} thread(s) against "
+                      f"geq at {threads}: the cheapest run reaching each max-error target",
+                      "", "| target | geq | s | MEQ | s | ratio geq/MEQ |",
+                      "|---|---|---|---|---|---|"]
+            for target in TARGETS:
+                best = {}
+                for side in ("geq", arm):
+                    hits = [t for t in table if t["arm"] == side and t["threads"] == threads
+                            and t["max"] <= target]
+                    best[side] = min(hits, key=lambda t: t["seconds"]) if hits else None
+                g, m = cell(best["geq"]), cell(best[arm])
+                ratio = (f"{best['geq']['seconds']/best[arm]['seconds']:.1f}"
+                         if best["geq"] and best[arm] else "-")
+                lines.append(f"| {target:.0e} | {g[0]} | {g[1]} | {m[0]} | {m[1]} | {ratio} |")
     with open(os.path.join(out, "race.md"), "w") as handle:
         handle.write("\n".join(lines) + "\n")
     print("\n".join(lines))

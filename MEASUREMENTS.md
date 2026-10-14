@@ -16697,3 +16697,62 @@ differences its path endpoints at `extensionFdStep()`, so it carries
 **Double is 76 of 77 and single 74 of 77.** Single's three reds are the
 deliberate `PlasmaEdgeConvergence` and two knife-edge solves, `XPointBorder` and
 `FreeBoundaryCoupling` ([M-273](#m-273)).
+
+
+### M-276
+
+**MEQ ON THE GPU AGAINST geq ON THE HOST, THE SAME RACE AS [M-274](#m-274).
+geq HAS NO DEVICE PATH. ON THIS CARD THE DEVICE SITS BETWEEN MEQ'S ONE-THREAD
+AND EIGHT-THREAD HOST RUNS, AND THE RACE AGAINST geq COMES OUT AS M-274's
+ONE-THREAD RACE.**
+
+**Setup.**
+* `race_geq.py --meq-device cuda`, with `--meq-build build-single` for the
+  single arm. Each run uses the driver's device defaults: cuDSS, serial
+  assembly, one host thread.
+* geq has no device path. It is NumPy and SciPy, with numba CPU JIT in two
+  freegs4e helpers, so it stays on the host. Its control was re-run in the same
+  session: 65², 129² and 257² at rtol 1e-6, read 1.72, 4.93 and 28.61 s on one
+  thread, within 10% of M-274.
+* The reference is host double at L2, `k = 4`. The device double run of the
+  same configuration reproduces it to **2.0e-15**.
+* MEQ `358c225` with that day's test and harness edits uncommitted;
+  `meq-integration` `17383013b0`; RTX 2070 SUPER.
+* Three takes ran with about one core busy, from another project's test; they
+  are one of three takes each, and their medians are unaffected.
+
+**THIS CARD'S FP64 IS 1/32 OF ITS FP32**, so the double device times are a
+statement about this card and not about a device (CLAUDE.md).
+
+Cheapest run reaching each max-error target, wall seconds, against geq at one
+thread:
+
+| target | geq, 1 thread | MEQ host, 1 thread | MEQ host, 8 threads | MEQ cuda, double | MEQ cuda, single |
+|---|---|---|---|---|---|
+| 1e-04 | 65², 1.72 | 1.08 | 0.64 | 0.1 L0 k=1, **1.38** | 0.1 L0 k=1, **1.29** |
+| 1e-05 | 65², 1.72 | 2.88 | 1.34 | 0.1 L0 k=4, **2.70** | 0.1 L0 k=4, **2.29** |
+| 1e-06 | 65², 1.72 | 5.07 | 2.28 | 0.05 L0 k=3, **4.28** | 0.05 L0 k=3, **3.59** |
+| 1e-07 | 257², 28.61 | 8.01 | 3.36 | 0.05 L0 k=4, **6.26** | 0.025 L0 k=3, **9.96** |
+
+Against geq that is 1.2x and 1.3x MEQ's way at 1e-04; 0.64x and 0.75x at 1e-05;
+0.40x and 0.48x at 1e-06; and **4.6x and 2.9x** at 1e-07.
+
+**What the device buys here.**
+* **Little.** Solve alone, device double is 1.5x MEQ's one-thread host at
+  PlasmaSize 0.05, L0, `k = 4` (3.80 s against 5.84 s), and **slower than its
+  eight-thread host** (2.38 s).
+* **Device single is 1.15x to 1.4x device double** in solve time, not the FP32/FP64 ratio. The
+  device route here is limited by what it does on the host and by launches, not
+  by arithmetic, which is CLAUDE.md's standing finding: the remaining cost of a
+  device run is host threading it has to give up.
+* **Setup and output take about 0.7 s of wall on the device**, against 0.4 s
+  on the host. That accounts for the difference at 1e-04, where the solve
+  itself is shorter on the device (0.64 s against 0.71 s).
+
+**Single precision floors at about 1e-07 on this problem.** At the finer
+configurations the single errors stop falling, scattering from 5.7e-08 to
+4.5e-07 and rising with `k`: 0.1 L2 `k = 4` reads 2.18e-07, where double reads
+2.0e-15. Single's 1e-07 row
+is PlasmaSize 0.025, L0, `k = 3` at 4.05e-08, the one configuration that
+reaches it, so it sits at the format's edge. Device single answers the first
+three targets at the same errors as double, to two or three figures.

@@ -376,6 +376,11 @@ cd /home/ian/projects/meq
 tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
 ```
 
+**MEQ on the GPU**: `--meq-device cuda`, with `--meq-build build-single` for
+single precision. geq has no device path, so it stays on the host. This
+machine's GPU is consumer silicon, with FP64 at 1/32 to 1/64 of FP32, so a
+double device time here says something about this card and not about devices.
+
 It takes about an hour, most of it geq's 513² solves. The results go to
-`runs/<stamp>/race.md` and `race.json`, which git ignores, and the published
-table is M-274.
+`runs/<stamp>/race.md` and `race.json`, which git ignores. The published
+tables are M-274 for the host race and M-276 for the device race.
