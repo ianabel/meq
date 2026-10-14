@@ -70,8 +70,12 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#include "SourceTree.hpp"
 
 namespace
 {
@@ -98,7 +102,7 @@ namespace
 	struct Case
 	{
 		char const *stem;      ///< examples/<stem>.toml
-		bool meshReady;        ///< carries [mesh.generate], so --mesh-ready
+		bool meshReady;        ///< carries [mesh.generate]: made here, then --mesh-ready
 		char const *what;
 		/// Whether to pay for the `debug` arm. It is the expensive one -- it
 		/// `mprotect`s every host page -- and a case added for a defect the
@@ -110,36 +114,94 @@ namespace
 		char const *strip = nullptr;
 	};
 
-	/// The file to hand the driver: the shipped one, or a copy with
-	/// `which.strip`'s line removed.
+	/// The file to hand the driver: the shipped one, or a copy in the scratch
+	/// directory with `which.strip`'s line removed and, where the file
+	/// generates its mesh, that mesh redirected into the scratch directory and
+	/// made there -- once per process, since every arm reads the same one.
+	///
+	/// THE MESH IS MADE HERE BECAUSE A GENERATED [mesh] File IS THE RUN'S
+	/// PRODUCT, written relative to the working directory, so nothing ships it;
+	/// and into this test's own scratch because the working directory is shared
+	/// with every other test, InverseSolve's meq-run among them, which makes the
+	/// same file under the same name. Made the way meq-run makes it: the
+	/// command `meq --mesh-command` prints, run by tools/mesh/halfdisc.py.
 	std::string configFor( Case const &which )
 	{
-		std::string const shipped = "examples/" + std::string( which.stem ) + ".toml";
-		if ( which.strip == nullptr )
+		std::string const relative = "examples/" + std::string( which.stem ) + ".toml";
+		std::string const shipped = meq::test::sourcePath( relative );
+		if ( which.strip == nullptr && !which.meshReady )
 			return shipped;
+
+		static std::map<std::string, std::string> prepared;
+		auto const found = prepared.find( which.stem );
+		if ( found != prepared.end() )
+			return found->second;
+
 		std::string const copy = std::string( scratch() ) + "/" + which.stem
-		                         + "-without-" + which.strip + ".toml";
-		std::ifstream in( shipped );
-		std::ofstream out( copy );
+		                         + ( which.strip ? std::string( "-without-" ) + which.strip
+		                                         : std::string() )
+		                         + ".toml";
+		std::istringstream in( meq::test::shippedConfig( relative ) );
+		std::ostringstream text;
 		std::string line;
+		std::string table;
 		bool removed = false;
+		bool redirected = false;
 		while ( std::getline( in, line ) )
 		{
 			std::size_t const first = line.find_first_not_of( " \t" );
-			if ( first != std::string::npos
+			if ( first != std::string::npos && line[ first ] == '[' )
+				table = line.substr( first );
+			if ( which.strip != nullptr && first != std::string::npos
 			     && line.compare( first, std::string( which.strip ).size(),
 			                      which.strip ) == 0 )
 			{
 				removed = true;
 				continue;
 			}
-			out << line << '\n';
+			if ( which.meshReady && table == "[mesh]" && first != std::string::npos
+			     && line.compare( first, 7, "File = " ) == 0 )
+			{
+				line = "File = \"" + std::string( scratch() ) + "/" + which.stem + ".msh\"";
+				redirected = true;
+			}
+			text << line << '\n';
 		}
-		if ( !removed )
+		if ( which.strip != nullptr && !removed )
 			throw std::runtime_error(
 				shipped + " has no " + which.strip + " line to remove, so this "
 				"case would run the shipped configuration and test nothing it "
 				"was added for" );
+		if ( which.meshReady && !redirected )
+			throw std::runtime_error( shipped + " has no [mesh] File line to redirect" );
+		{
+			std::ofstream out( copy );
+			out << text.str();
+		}
+
+		if ( which.meshReady )
+		{
+			std::string const commandFile = copy + ".mesh-command";
+			std::string const commandLog = copy + ".mesh-command-log";
+			if ( std::system( ( std::string( driver() ) + " --mesh-command " + copy
+			                    + " > " + commandFile + " 2> " + commandLog ).c_str() ) != 0 )
+				throw std::runtime_error( "meq --mesh-command " + copy + " failed: "
+				                          + slurp( commandLog ) );
+			std::istringstream commandText( slurp( commandFile ) );
+			std::string command;
+			std::getline( commandText, command );
+			if ( command.rfind( "halfdisc ", 0 ) != 0 )
+				throw std::runtime_error( "meq --mesh-command " + copy + " printed '"
+				                          + command + "', not a halfdisc command" );
+			std::string const meshLog = copy + ".mesh-log";
+			if ( std::system( ( "python3 " + meq::test::sourcePath( "tools/mesh/halfdisc.py" )
+			                    + " " + command.substr( 9 ) + " > " + meshLog
+			                    + " 2>&1" ).c_str() ) != 0 )
+				throw std::runtime_error( "the mesh generator failed for " + copy + ": "
+				                          + slurp( meshLog ) );
+		}
+
+		prepared.emplace( which.stem, copy );
 		return copy;
 	}
 

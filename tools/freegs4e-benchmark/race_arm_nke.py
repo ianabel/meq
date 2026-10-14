@@ -77,6 +77,7 @@ import numpy as np                                              # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import benchpaths                                               # noqa: E402
 
 LADDER = [65, 129, 257]
 ROW_TOL = 1e-8
@@ -542,9 +543,9 @@ def main():
         code_version="freegsnke %s on freegs4e %s" % (
             getattr(freegsnke, "__version__", "?"),
             getattr(freegs4e, "__version__", "?")),
-        tree=dict(freegsnke=sha("/home/ian/projects/freegsnke"),
-                  freegs4e=sha("/home/ian/projects/freegs4e"),
-                  meq=sha(os.path.join(HERE, "..", ".."))),
+        tree=dict(freegsnke=sha(benchpaths.FREEGSNKE),
+                  freegs4e=sha(benchpaths.FREEGS4E),
+                  meq=sha(benchpaths.SOURCE)),
         notes=("no patches to freegsnke or freegs4e; freegsnke 3.1.0 pins "
                "freegs4e>=0.14 and runs on 0.12. Harness: analytic-profile "
                "subclass of GeneralPprimeFFprime; shaped conductors a %dx%d "

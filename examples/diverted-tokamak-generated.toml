@@ -1,6 +1,6 @@
 # THE SAME DIVERTED TOKAMAK, MESHING ITSELF.  One file, one command:
 #
-#     build/meq-run examples/diverted-tokamak-generated.toml
+#     meq-run ../../source/examples/diverted-tokamak-generated.toml
 #
 # WHAT THIS FILE IS FOR.  Every other free-boundary example here names a mesh
 # somebody made earlier, with the command that made it written in a COMMENT --
@@ -39,7 +39,7 @@
 # construction, since [mesh.generate] has nowhere else to put it.  It is a
 # BUILD PRODUCT and is gitignored; meq-run remakes it whenever the block below
 # changes and skips it when it has not.
-File = "examples/diverted-tokamak-generated.msh"
+File = "diverted-tokamak-generated.msh"
 
 [mesh.generate]
 Tool = "halfdisc"
@@ -87,8 +87,8 @@ ConfineToPlasma = true
 PsiAxis = 0.0827
 PlasmaCurrent = 2.0e5
 Mu0 = 1.25663706212e-6
-PPrimeFile = "examples/diverted-tokamak-pprime.dat"
-GGPrimeFile = "examples/diverted-tokamak-ggprime.dat"
+PPrimeFile = "diverted-tokamak-pprime.dat"
+GGPrimeFile = "diverted-tokamak-ggprime.dat"
 
 # THE CONDUCTORS, WRITTEN ONCE.  These four blocks are what the solve
 # integrates over AND what the mesh is aligned to: [mesh.generate] emits
@@ -140,8 +140,8 @@ Modes = 10
 
 [initialguess]
 Type = "gridfunction"
-File = "examples/diverted-tokamak-guess.gf"
-MeshFile = "examples/diverted-tokamak-guess.mesh"
+File = "diverted-tokamak-guess.gf"
+MeshFile = "diverted-tokamak-guess.mesh"
 
 [output]
 Prefix = "diverted-tokamak-generated"

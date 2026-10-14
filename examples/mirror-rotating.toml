@@ -1,6 +1,6 @@
 # A ROTATING MAGNETIC MIRROR, FREE BOUNDARY, FROM A FILE.  One command:
 #
-#     build/meq-run examples/mirror-rotating.toml
+#     meq-run ../../source/examples/mirror-rotating.toml
 #
 # WHAT IT POSES.  The rotating mirror of MIRROR-PLAN.md MR-4: geq's machine --
 # two coil packs at z = -1.5 and +1.5, each carried as ten point filaments --
@@ -38,7 +38,7 @@
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it
 # whenever the block changes.
-File = "examples/mirror-rotating.msh"
+File = "mirror-rotating.msh"
 
 [mesh.generate]
 Tool = "halfdisc"
@@ -80,21 +80,21 @@ PsiAxis = 0.0056378011613958832
 ReferenceRadius = 0.213
 Mu0 = 1.2566370614359173e-06
 GGPrime = 0.0
-OmegaFile = "tools/geq-benchmark/reference/rotating/omega.dat"
+OmegaFile = "../tools/geq-benchmark/reference/rotating/omega.dat"
 
 # In meta.txt's order, electrons first.
 [[source.species]]
 Name = "electron"
 Mass = 9.1093837139e-31
 Charge = -1.0
-TemperatureFile = "tools/geq-benchmark/reference/rotating/T_electron.dat"
-DensityFile = "tools/geq-benchmark/reference/rotating/n_electron.dat"
+TemperatureFile = "../tools/geq-benchmark/reference/rotating/T_electron.dat"
+DensityFile = "../tools/geq-benchmark/reference/rotating/n_electron.dat"
 
 [[source.species]]
 Name = "deuterium"
 Mass = 3.3435837768e-27
 Charge = 1.0
-TemperatureFile = "tools/geq-benchmark/reference/rotating/T_deuterium.dat"
+TemperatureFile = "../tools/geq-benchmark/reference/rotating/T_deuterium.dat"
 Neutralising = true
 
 # THE INNER LABEL.  A sub-table, so every key below this header belongs to it

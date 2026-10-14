@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 os.environ.setdefault("FGSREF_OUT", "/tmp")
 
+from benchpaths import OUT                     # noqa: E402
 from fgsref import CASES                       # noqa: E402
 
 MACHINES = [("A_testtokamak_classic", "machine-a-testtokamak"),
@@ -102,7 +103,7 @@ def main():
     cases = {c["name"]: c for c in CASES}
 
     for ref, stem in MACHINES:
-        d = np.load(os.path.join(HERE, ref + ".npz"), allow_pickle=True)
+        d = np.load(os.path.join(OUT, ref + ".npz"), allow_pickle=True)
         labels = [str(x) for x in d["coil_labels"]]
         R, Z = d["coil_R"], d["coil_Z"]
         hw, hh = d["coil_half_width"], d["coil_half_height"]

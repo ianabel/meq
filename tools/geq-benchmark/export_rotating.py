@@ -45,14 +45,20 @@ charge numbers, and densities n_s0( Psi ) ON THE CURVE R = R_ref -- MEQ's
 fixed-R gauge phi_0( R_ref, psi ) = 0 -- transferred pointwise exactly as
 export_mirror.py does. geq's own-gauge N_s are written too, as Nraw_*.dat.
 
-USAGE
+USAGE, from source/
 
     PYTHONPATH=/home/ian/projects/geq/src \\
-    tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_rotating.py \\
-        --out tools/geq-benchmark/reference/rotating
+    tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_rotating.py
 
 About eleven minutes on this machine, most of it the 513^2 direct solve.
 `--cache DIR` keeps each solve as an .npz and reuses it on a re-run.
+
+geq's ANSWER, psi_direct_<n>.dat, psi_hagenow_<n>.dat and solution.txt, goes to
+--out, default runs/geq-benchmark/reference/rotating/, the path the C++ tests
+read. THE PROBLEM, meta.txt, filaments.dat and the tables, goes to --tables,
+default the same directory, and is reported against the tracked
+tools/geq-benchmark/reference/rotating/, which
+`--tables tools/geq-benchmark/reference/rotating` refreshes.
 """
 
 import argparse
@@ -82,7 +88,8 @@ from geq.machine import make_mirror_machine_from_field
 from geq.solver import solve_equilibrium
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from export_mirror import transfer_to_reference_radius  # noqa: E402
+from export_mirror import (against_tracked, answers_dir,  # noqa: E402
+                           transfer_to_reference_radius)
 
 qe = constants.elementary_charge
 MU0 = 4.0e-7 * np.pi
@@ -628,7 +635,13 @@ def git_dirty(path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None,
+                    help="geq's answer, psi_*.dat and solution.txt; default "
+                         "runs/geq-benchmark/reference/rotating")
+    ap.add_argument("--tables", default=None,
+                    help="the problem, meta.txt, filaments.dat and the tables; "
+                         "default --out. tools/geq-benchmark/reference/rotating "
+                         "refreshes the tracked copy")
     ap.add_argument("--mach", type=float, default=2.0,
                     help="geq's Mach, omega R/sqrt( 2 T_D/m_D ), at the "
                          "profiles' peak and R = R_MACH")
@@ -653,6 +666,8 @@ def main(argv=None):
     ap.add_argument("--shape", choices=tuple(SHAPES), default="skew",
                     help="profile shape; the reference is the skew")
     args = ap.parse_args(argv)
+    args.out = args.out or answers_dir("rotating")
+    args.tables = args.tables or args.out
     SHAPE["name"] = args.shape
     x_peak = SHAPES[args.shape][0]
     R_MACH["value"] = args.r_mach if args.r_mach is not None else SHAPES[args.shape][1]
@@ -814,23 +829,24 @@ def main(argv=None):
     mach_167 = np.sqrt(DEUTERON_MASS * omega_half ** 2 * r_half ** 2 / (TE_PEAK * qe))
 
     # --- write ---------------------------------------------------------------
-    out = args.out
+    out, tables = args.out, args.tables
     os.makedirs(out, exist_ok=True)
+    os.makedirs(tables, exist_ok=True)
 
-    write_table(os.path.join(out, "omega.dat"), *tk["omega"],
+    write_table(os.path.join(tables, "omega.dat"), *tk["omega"],
                 "omega( Psi ) in rad/s, Psi = 1 - psi_n ( 1 at the inner label\n"
                 "( 0.10, 0 ), 0 at the outer ( 0.35, 0 ) ). Rigid rotation, the\n"
                 "analytic profile geq was run with; the slope is d/dPsi.")
     for name in NAMES:
-        write_table(os.path.join(out, f"T_{name}.dat"), *tk[f"T_{name}"],
+        write_table(os.path.join(tables, f"T_{name}.dat"), *tk[f"T_{name}"],
                     f"T_{name}( Psi ) in JOULES, Psi = 1 - psi_n. The analytic\n"
                     "profile geq was run with ( in eV there ); slope d/dPsi.")
-        write_table(os.path.join(out, f"n_{name}.dat"), *tk[f"n_{name}"],
+        write_table(os.path.join(tables, f"n_{name}.dat"), *tk[f"n_{name}"],
                     f"n_{name}( Psi ) in m^-3 ON THE CURVE R = R_ref = {r_ref:.17e},\n"
                     "MEQ's gauge phi_0( R_ref, psi ) = 0: geq's prescribed N_s carried\n"
                     "to R_ref by quasineutrality there, slope by implicit\n"
                     "differentiation. Psi = 1 - psi_n; slope d/dPsi.")
-        write_table(os.path.join(out, f"Nraw_{name}.dat"), *tk[f"Nraw_{name}"],
+        write_table(os.path.join(tables, f"Nraw_{name}.dat"), *tk[f"Nraw_{name}"],
                     f"N_{name}( Psi ) IN geq'S OWN GAUGE: the prescribed flux function,\n"
                     "n_s = N_s exp( -( Z_s e phi_0 - m_s omega^2 R^2/2 )/T_s ).\n"
                     "NOT what meq::Species wants. Psi = 1 - psi_n; slope d/dPsi.")
@@ -846,7 +862,7 @@ def main(argv=None):
 
     machine, info = make_machine()
     filaments = machine_record(eqf, info)
-    with open(os.path.join(out, "filaments.dat"), "w") as fh:
+    with open(os.path.join(tables, "filaments.dat"), "w") as fh:
         fh.write("# geq's 2 x 10 point filaments, FIXED ( control = False ), as\n")
         fh.write("# given: R z current-per-filament ( A ). The same machine as\n")
         fh.write("# reference/vacuum, i.e. meq::filamentStack( pack, 1, 10 ).\n")
@@ -858,7 +874,7 @@ def main(argv=None):
         os.path.abspath(sys.modules["geq.solver"].__file__))))
     fgs_dir = os.path.dirname(os.path.dirname(
         os.path.abspath(sys.modules["freegs4e.species"].__file__)))
-    with open(os.path.join(out, "meta.txt"), "w") as fh:
+    with open(os.path.join(tables, "meta.txt"), "w") as fh:
         fh.write("case rotating\n")
         fh.write(f"geq_commit {git_commit(geq_dir)} {git_dirty(geq_dir)}\n")
         fh.write(f"freegs4e_commit {git_commit(fgs_dir)} {git_dirty(fgs_dir)}\n")
@@ -908,7 +924,7 @@ def main(argv=None):
 
     # WHAT geq SOLVED, apart from what it was given. meta.txt and the tables are
     # the problem; this file and psi_*.dat are geq's answer to it, regenerated
-    # by a run and never committed ( .gitignore ).
+    # by a run into runs/ and never committed.
     with open(os.path.join(out, "solution.txt"), "w") as fh:
         fh.write("# geq's converged state for meta.txt's problem. An OUTPUT of\n")
         fh.write("# export_rotating.py, beside psi_*.dat; not tracked.\n")
@@ -933,7 +949,9 @@ def main(argv=None):
     print(f"coil currents unchanged: "
           f"{all(abs(c - recf['vacuum_current']) == 0.0 for c in recf['coil_currents'])}")
     print(f"N_s rebuilds refused in the last solve: {recf['rebuilds_refused']}")
-    print(f"written to {out}")
+    print(f"answer written to {out}")
+    print(f"problem written to {tables}")
+    against_tracked(tables, "rotating")
     return 0
 
 

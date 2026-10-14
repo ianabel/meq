@@ -74,6 +74,7 @@ in `--check`.
 import argparse
 import json
 import os
+import re
 import sys
 
 import numpy as np
@@ -84,10 +85,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "freegs4e-benchmark"))
 from mxh import mxh_boundary                                  # noqa: E402
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import meqpaths                                               # noqa: E402
+
 MU0 = 4.0e-7 * np.pi
 HERE = os.path.dirname(os.path.abspath(__file__))
-MEQ = os.path.abspath(os.path.join(HERE, "..", ".."))
-REFDIR = os.path.join(MEQ, "tools", "freegs4e-benchmark", "ref-n257")
+#: The source tree: examples/ and the meta files are read from here.
+MEQ = meqpaths.SOURCE
+
+
+def freegs4e_reference(name):
+	"""One of freegs4e-benchmark's reference directories, ref-n257 or ref-n513.
+
+	They are freegs4e's OUTPUT, so they belong under runs/freegs4e-benchmark/;
+	the old place beside that harness's scripts is read only while nothing has
+	been written to the new one.
+	"""
+	moved = meqpaths.runs("freegs4e-benchmark", name, create=False)
+	legacy = meqpaths.source("tools", "freegs4e-benchmark", name)
+	return moved if os.path.isdir(moved) or not os.path.isdir(legacy) else legacy
+
+
+REFDIR = freegs4e_reference("ref-n257")
 
 #: stem -> the freegs4e reference it was generated from, out of make_fixed.sh.
 CASES = {
@@ -120,9 +139,40 @@ CASES = {
 #: between 129^2 and 513^2.  A case carrying one grid's currents against
 #: another grid's answer is two different machines.
 REFDIRS = {
-	"limited-tokamak-filament": os.path.join(MEQ, "tools",
-	                                         "freegs4e-benchmark", "ref-n513"),
+	"limited-tokamak-filament": freegs4e_reference("ref-n513"),
 }
+
+
+#: Every input-path key a configuration can carry: the profile tables
+#: ( <Profile>File ), [initialguess] File and MeshFile, [mesh] File.  CacheFile
+#: is an OUTPUT and is not one of them.
+_PATH_KEY = re.compile(r'^(\s*(\w*File)\s*=\s*")([^"]+)"', re.M)
+
+
+def absolute_inputs(text, base=None):
+	"""A configuration's text with its INPUT paths made absolute against `base`,
+	default examples/, so that a variant can be written under runs/.
+
+	A configuration reads its input paths against its own directory and its
+	output paths against the run's; a copy written anywhere else reads the
+	first wrongly and the second rightly.  So the inputs are pinned and the
+	outputs left alone: [conductors] CacheFile, and [mesh] File when
+	[mesh.generate] makes it, are written by the run.
+	"""
+	base = base or os.path.join(MEQ, "examples")
+	generated = re.search(r"^\s*\[mesh\.generate\]", text, re.M) is not None
+	out, section = [], ""
+	for line in text.split("\n"):
+		head = re.match(r"^\s*\[\[?\s*([^\]]+?)\s*\]", line)
+		if head:
+			section = head.group(1)
+		m = _PATH_KEY.match(line)
+		if (m and m.group(2) != "CacheFile" and not os.path.isabs(m.group(3))
+		        and not (generated and section == "mesh" and m.group(2) == "File")):
+			line = (m.group(1) + os.path.normpath(os.path.join(base, m.group(3)))
+			        + '"' + line[m.end():])
+		out.append(line)
+	return "\n".join(out)
 
 
 def read_profile_table(path):

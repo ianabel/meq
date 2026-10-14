@@ -1,7 +1,7 @@
 # A PLASMA IN SONIC TOROIDAL ROTATION, on a rectangle: the simplest complete
 # run of meq's rotating source.
 #
-#     meq examples/rotating-rectangle.toml
+#     meq ../../source/examples/rotating-rectangle.toml
 #
 # The equation is eq (136) of refs/RotatingGK.pdf -- Abel, Plunk, Wang, Barnes,
 # Cowley, Dorland & Schekochihin, "Multiscale gyrokinetics for rotating tokamak
@@ -133,7 +133,7 @@ TemperatureScale = 1.602176634e-16
 # constant would make dp/dpsi vanish and the rotation would reach n_s and phi_0
 # but not psi. examples/rotating-density.dat documents the format, which nothing
 # else in examples/ does. Its values are in 1e20 m^-3 and the scale converts.
-DensityFile = "examples/rotating-density.dat"
+DensityFile = "rotating-density.dat"
 DensityScale = 1.0e20
 
 # Electrons, at 0.8 keV. Unequal temperatures deliberately: with T_i = T_e the

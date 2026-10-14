@@ -15,7 +15,15 @@ instances of — see :doc:`examples`.
 
 .. code-block:: sh
 
-   ./build/meq examples/soloviev-nstx.toml
+   mkdir -p runs/soloviev && cd runs/soloviev
+   ../../install/double/bin/meq ../../source/examples/soloviev-nstx.toml
+
+A run is made from a directory under the project's ``runs/`` (see
+:ref:`install-layout`), because that is where it writes: every output file, and
+a mesh ``meq-run`` generates, lands relative to the working directory. A path
+the configuration *reads* is relative to the configuration file instead, so a
+shipped example finds its profile tables wherever it is run from — see
+:ref:`configuration-paths`.
 
 ``--version`` reports four things, and two of them are not MEQ's own choices:
 
@@ -52,10 +60,12 @@ equilibrium, and ``meq-run`` is the one command that makes it and then solves:
 
 .. code-block:: sh
 
-   ./build/meq-run examples/diverted-tokamak-generated.toml
+   ../../install/double/bin/meq-run ../../source/examples/diverted-tokamak-generated.toml
 
-``meq-run`` is a script, built into the build directory beside the binary it
-runs. That is a decision rather than a stage: ``meq`` links MFEM and not gmsh —
+``meq-run`` is a script, configured into the build tree beside the binary it
+runs and installed beside it in ``install/<name>/bin``, with the generator under
+``install/<name>/share/meq/tools``; the installed copy finds both relative to
+itself, so it keeps working after the build tree is deleted. That is a decision rather than a stage: ``meq`` links MFEM and not gmsh —
 ``tools/mesh/README.md`` has the reasoning — so *something* outside the solver
 has to run the generator, and this is that something. It is deliberately thin,
 and in particular it does **not** parse the configuration. There is one reader

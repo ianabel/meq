@@ -160,8 +160,10 @@ Building MEQ at one precision or the other is therefore a matter of which MFEM
 
 .. code-block:: sh
 
-   cmake -B build        -DMFEM_DIR=/path/to/mfem-double/install
-   cmake -B build-single -DMFEM_DIR=/path/to/mfem-single/install
+   cmake -S source -B builds/double -DMFEM_DIR=/path/to/mfem-double/install
+   cmake -S source -B builds/single -DMFEM_DIR=/path/to/mfem-single/install
+
+Each installs to its own prefix, ``install/double`` and ``install/single``.
 
 Both work and both pass the test suite. What differs:
 
@@ -192,22 +194,52 @@ Both work and both pass the test suite. What differs:
 Whichever is built, ``meq --version`` and every output file's
 ``meq_precision`` attribute say which one produced a given answer.
 
+.. _install-layout:
+
+The project directory
+---------------------
+
+The git checkout is one of four directories in a *project directory*, and
+nothing is built, tested or run inside it:
+
+.. code-block:: text
+
+   <project>/source/            the git checkout
+   <project>/builds/<name>/     one CMake build tree per configuration
+   <project>/install/<name>/    what cmake --install builds/<name> puts there
+   <project>/runs/              everything a run of meq or of tools/ writes
+
+The last three are untracked and can be deleted whenever their contents are no
+longer wanted. **CMake refuses a build tree inside the source tree**, rather
+than leaving one to be gitignored, so untracked output in ``git status`` is a
+bug in whatever wrote it.
+
 Building
 --------
 
+From the project directory:
+
 .. code-block:: sh
 
-   git submodule update --init --recursive     # extern/toml11
-   cmake -B build
-   cmake --build build -j4
+   git -C source submodule update --init --recursive     # extern/toml11
+   cmake -S source -B builds/double
+   cmake --build builds/double -j4
+   cmake --install builds/double
+
+The default install prefix is ``install/<name>`` for ``builds/<name>``, so the
+last line puts ``meq`` and ``meq-run`` in ``install/double/bin``, and the mesh
+generator ``meq-run`` calls under ``install/double/share/meq/tools``. The
+installed ``meq-run`` finds both relative to itself, so the build tree can be
+deleted once it is installed.
 
 ``MFEM_DIR`` is how the MFEM install is found. It is a cache variable, it also
-reads the environment, and it defaults to ``../mfem/install`` relative to the
-source tree, so on a machine laid out that way the ``-D`` is unnecessary:
+reads the environment, and it defaults to ``mfem/install`` beside the project
+directory — ``../../mfem/install`` from ``source/`` — so on a machine laid out
+that way the ``-D`` is unnecessary:
 
 .. code-block:: sh
 
-   cmake -B build -DMFEM_DIR=/path/to/mfem/install
+   cmake -S source -B builds/double -DMFEM_DIR=/path/to/mfem/install
 
 The finder accepts either layout an MFEM build leaves behind — an installed tree
 with ``include/``, ``lib/`` and ``share/mfem/config.mk``, or an in-source make
@@ -245,7 +277,7 @@ Configure-time options
      - Instrument with ``--coverage -O0 -g``. See :ref:`testing-coverage` for
        why this is an option rather than a build type.
    * - ``MFEM_DIR``
-     - ``../mfem/install``
+     - ``../../mfem/install`` from ``source/``
      - Where to find MFEM. Cache variable, environment variable, or ``-D``.
    * - ``TOML11_DIR``
      - ``extern/toml11``
@@ -297,16 +329,17 @@ Checking the build
 
 .. code-block:: sh
 
-   cd build && ctest --output-on-failure
+   cd builds/double && ctest --output-on-failure
 
-The full suite takes several minutes. Nothing needs to be set in the
-environment: the test registration puts ``MKL_NUM_THREADS=1`` on every test
-itself, which is the one variable MEQ needs and a no-op on a machine without
-MKL. Running a test binary by hand needs the same one thing:
+The full suite takes several minutes, runs in the build tree, and writes nothing
+into ``source/``. Nothing needs to be set in the environment: the test
+registration puts ``MKL_NUM_THREADS=1`` on every test itself, which is the one
+variable MEQ needs and a no-op on a machine without MKL. Running a test binary
+by hand needs the same one thing, from a directory it may write into:
 
 .. code-block:: sh
 
-   MKL_NUM_THREADS=1 ./tests/SolovievConvergence
+   cd builds/double/tests && MKL_NUM_THREADS=1 ./SolovievConvergence
 
 .. warning::
 
@@ -330,10 +363,13 @@ These pages are Sphinx, and their dependencies are pinned in
 
 .. code-block:: sh
 
-   python3 -m venv /tmp/docsvenv
-   /tmp/docsvenv/bin/pip install -r docs/requirements.txt
-   /tmp/docsvenv/bin/sphinx-build -W -b html docs docs/_build/html
+   cd source
+   python3 -m venv .venv-docs
+   .venv-docs/bin/pip install -r docs/requirements.txt
+   .venv-docs/bin/sphinx-build -W -b html docs ../builds/docs/html
 
-or, equivalently, ``make -C docs html``. The ``-W`` is deliberate and matches
+or, equivalently, ``cmake --build builds/double --target docs``, which creates
+the same virtual environment if it is missing and writes to
+``builds/double/docs/html``. The ``-W`` is deliberate and matches
 what Read the Docs runs, so a broken cross-reference fails the build here rather
 than publishing a page with a dead link.

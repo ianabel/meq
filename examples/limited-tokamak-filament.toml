@@ -2,7 +2,7 @@
 # WITH ITS FOUR CONDUCTORS TAKEN OUT OF THE MESH AND EVALUATED ANALYTICALLY,
 # POSED AGAINST THE 513^2 REFERENCE, AND STARTED COLD.
 #
-#     ./build/meq-run examples/limited-tokamak-filament.toml
+#     meq-run ../../source/examples/limited-tokamak-filament.toml
 #
 # WHY IT IS SHIPPED, AND IT IS NOT FOR THE GEOMETRY.  It is the one
 # configuration in examples/ that is FREE BOUNDARY, LIMITED and SUBTRACTING at
@@ -82,7 +82,7 @@
 # against the reference's own array to 5.9e-16 before writing.
 
 [mesh]
-File = "examples/limited-tokamak-filament.msh"
+File = "limited-tokamak-filament.msh"
 
 # THE DISC IS NOT GAMMA.  D_h is cut from this mesh at [boundary.exterior]
 # Radius = 2.40, which has to fit strictly inside.  There is no CoilSize:
@@ -129,8 +129,8 @@ ConfineToPlasma = true
 PsiAxis = 7.543374292e-02
 PlasmaCurrent = 3.0e5
 Mu0 = 1.25663706212e-6
-PPrimeFile = "examples/limited-tokamak-filament-pprime.dat"
-GGPrimeFile = "examples/limited-tokamak-filament-ggprime.dat"
+PPrimeFile = "limited-tokamak-filament-pprime.dat"
+GGPrimeFile = "limited-tokamak-filament-ggprime.dat"
 
 # THE FOUR POLOIDAL FIELD COILS, AT ref-n513/'s CURRENTS.  Vertical field only,
 # placed so that no null exists anywhere in the box: with no divertor coils
@@ -217,8 +217,8 @@ Modes = 10
 # 27 steps onto a branch with psi_bnd > psi_ax and no O-point at all.
 [initialguess]
 Type = "gridfunction"
-File = "examples/limited-tokamak-filament-guess.gf"
-MeshFile = "examples/limited-tokamak-filament-guess.mesh"
+File = "limited-tokamak-filament-guess.gf"
+MeshFile = "limited-tokamak-filament-guess.mesh"
 
 [conductors]
 Model = "filament"

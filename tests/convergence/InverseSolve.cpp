@@ -55,9 +55,11 @@
 
 #include "RoundOffFloor.hpp"
 
+#include "SourceTree.hpp"
+
 namespace
 {
-	char const *const machineFile = "examples/machine-f-diiid.toml";
+	std::string const machineFile = meq::test::sourcePath( "examples/machine-f-diiid.toml" );
 
 	/// Negative inside: the semicircle about the axis that is Gamma.
 	mfem::PositionFunction semicircle( double radius, double centreZ )
@@ -120,7 +122,7 @@ namespace
 
 	/// The mesh is a build product of the file, so it is made the way the
 	/// driver's users make it rather than assumed to be on disk.
-	void ensureMesh( char const *file = machineFile )
+	void ensureMesh( std::string const &file = machineFile )
 	{
 		std::string const command = std::string( MEQ_RUN_PATH )
 		                            + " --mesh-only " + file
@@ -133,7 +135,7 @@ namespace
 	/// from the half disc at Gamma, wrap the plasma source around the coils and
 	/// confine it ON THE WRAPPER, then the X-point border, the prescribed
 	/// current and the exterior coupling, and the stored guess interpolated in.
-	Machine buildMachine( char const *file = machineFile )
+	Machine buildMachine( std::string const &file = machineFile )
 	{
 		Machine m;
 		m.config = std::make_unique<meq::Configuration>( file );
@@ -903,7 +905,7 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
  */
 namespace
 {
-	char const *const inverseFile = "examples/machine-f-diiid-inverse.toml";
+	std::string const inverseFile = meq::test::sourcePath( "examples/machine-f-diiid-inverse.toml" );
 
 	/// Run the shipped wrapper, capturing everything it prints.
 	int runDriver( std::string const &file, std::string const &log )
@@ -1064,7 +1066,9 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesAnInverseProblem )
 BOOST_AUTO_TEST_CASE( aTargetSetTheCurrentsCannotMeetIsABestFitAndExitsFour )
 {
 	ensureMesh( inverseFile );
-	std::string text = readAll( inverseFile );
+	// Its tables and guess by absolute paths, since the variant is written into
+	// the working directory and away from them.
+	std::string text = meq::test::shippedConfig( "examples/machine-f-diiid-inverse.toml" );
 	for ( char const *name : { "F2A", "F2B", "F6B" } )
 	{
 		std::size_t const block = text.find( std::string( "Name = \"" ) + name + "\"" );

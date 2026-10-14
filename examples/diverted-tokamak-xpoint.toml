@@ -38,7 +38,7 @@
 # and for the one deliberate deviation from the reference's profiles.
 
 [mesh]
-File = "examples/diverted-tokamak.msh"
+File = "diverted-tokamak.msh"
 
 [discretisation]
 PolynomialDegree = 2
@@ -66,8 +66,8 @@ ConfineToPlasma = true
 PsiAxis = 0.0827
 PlasmaCurrent = 2.0e5
 Mu0 = 1.25663706212e-6
-PPrimeFile = "examples/diverted-tokamak-pprime.dat"
-GGPrimeFile = "examples/diverted-tokamak-ggprime.dat"
+PPrimeFile = "diverted-tokamak-pprime.dat"
+GGPrimeFile = "diverted-tokamak-ggprime.dat"
 
 [[coils]]
 Name = "P1L"
@@ -119,8 +119,8 @@ Modes = 10
 
 [initialguess]
 Type = "gridfunction"
-File = "examples/diverted-tokamak-guess.gf"
-MeshFile = "examples/diverted-tokamak-guess.mesh"
+File = "diverted-tokamak-guess.gf"
+MeshFile = "diverted-tokamak-guess.mesh"
 
 [output]
 Prefix = "diverted-tokamak-xpoint"

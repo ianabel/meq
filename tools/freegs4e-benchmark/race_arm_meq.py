@@ -43,10 +43,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 os.environ.setdefault("FGSREF_OUT", "/tmp")
 
+import benchpaths                                               # noqa: E402
 from fgsref import CASES                                        # noqa: E402
 from circuits import wiring                                     # noqa: E402
 from inverse import rewire, set_key                             # noqa: E402
@@ -79,14 +79,15 @@ def table_value(text, table, key):
 
 
 def provenance():
-    sha = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"],
+    git = ["git", "-C", benchpaths.SOURCE]
+    sha = subprocess.run(git + ["rev-parse", "--short", "HEAD"],
                          capture_output=True, text=True).stdout.strip()
-    dirty = subprocess.run(["git", "-C", ROOT, "status", "--porcelain",
-                            "--untracked-files=no"],
+    dirty = subprocess.run(git + ["status", "--porcelain",
+                                  "--untracked-files=no"],
                            capture_output=True, text=True).stdout.strip()
-    version = subprocess.run([os.path.join(ROOT, "build", "meq"), "--version"],
+    version = subprocess.run([benchpaths.meq(), "--version"],
                              capture_output=True, text=True).stdout.strip()
-    lib = os.path.join(ROOT, "..", "mfem", "install", "lib", "libmfem.a")
+    lib = benchpaths.LIBMFEM
     return dict(code_version=version, tree=sha + ("-dirty" if dirty else ""),
                 libmfem_mtime=os.path.getmtime(lib) if os.path.exists(lib) else None,
                 notes="shipped shaped example; [inverse] Track = false rows")
@@ -109,16 +110,17 @@ def main():
     t0 = time.time()
     problem = {p["config"]: p for p in json.load(open(a.problem))}[a.config]
     rung = rungs()[a.rung]
+    # THE RUN IS MADE IN `out`, so Prefix and the generated mesh are relative
+    # to it and the shipped file's inputs are pinned absolute.
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)
-    rel = os.path.relpath(out, ROOT)
     stem = "meq"
 
     case = {c["name"]: c for c in CASES}[problem["fgsref_case"]]
     wires = wiring(case["make"]())
     free = [s["name"] for s in problem["supplies"] if s["free"]]
     currents = {s["name"]: s["reference_current"] for s in problem["supplies"]}
-    text = open(problem["meq_example"]).read()
+    text = benchpaths.read_example(problem["meq_example"])
 
     if a.start == "warm":
         state = json.load(open(os.path.join(a.state, "state.json")))
@@ -150,8 +152,7 @@ def main():
         text = set_key(text, "boundary.xpoint", "R", "%.10f" % state["xpoint"][0])
         text = set_key(text, "boundary.xpoint", "Z", "%.10f" % state["xpoint"][1])
     else:
-        text = set_key(text, "mesh", "File",
-                       '"%s"' % os.path.join(rel, stem + ".msh"))
+        text = set_key(text, "mesh", "File", '"%s"' % (stem + ".msh"))
         # The cold guess: the design blob plus every conductor at the start's
         # currents, which mkcoldguess.py takes as per-conductor totals.
         totals = {}
@@ -174,7 +175,7 @@ def main():
         text = set_key(text, "initialguess", "MeshFile", '"%s"' % gmesh)
         text = set_key(text, "source", "PsiAxis",
                        "%.10e" % float(peak[0].split()[1]))
-    text = set_key(text, "output", "Prefix", '"%s"' % os.path.join(rel, stem))
+    text = set_key(text, "output", "Prefix", '"%s"' % stem)
 
     targets = ["", "[inverse]", ""]
     for R, Z in xpts:
@@ -191,8 +192,8 @@ def main():
 
     log = os.path.join(out, stem + ".log")
     with open(log, "w") as fh:
-        code = subprocess.run([os.path.join(ROOT, "build", "meq-run"), toml],
-                              cwd=ROOT, stdout=fh, stderr=subprocess.STDOUT
+        code = subprocess.run([benchpaths.meq_run(), toml],
+                              cwd=out, stdout=fh, stderr=subprocess.STDOUT
                               ).returncode
     wall = time.time() - t0
     body = open(log).read()

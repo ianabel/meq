@@ -859,7 +859,7 @@ BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
 	 * documented route is a NewtonSolver::ComputeScalingFactor subclass
 	 * backtracking on the full residual, which is deliberately not in the
 	 * library and which meq does not yet have. See
-	 * ../mfem-hdg-dev/doc/HDG-ORDERING-API.md section 3.1.
+	 * ../../mfem-hdg-dev/doc/HDG-ORDERING-API.md section 3.1.
 	 */
 	// KIN_NONE, because NPC is the only ordering meq has. This used to branch
 	// on meq::tests::defaultOrdering(), which could only ever answer NPC once
@@ -1210,7 +1210,7 @@ BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 	            "this is a regression rather than a known gap. The last time it "
 	            "went red the cause was MFEM's linearisation point taking a fixed "
 	            "two local corrections -- see "
-	            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md -- so "
+	            "../../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md -- so "
 	            "compare the two orderings first: if condense-first still "
 	            "converges here, it is that class of defect again" );
 	// AND THE COUNT IS AN ARTEFACT OF THE FORMAT, where converging is not:

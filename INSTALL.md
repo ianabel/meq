@@ -10,12 +10,23 @@ your distribution has.
 ## The short version
 
 ```sh
-git clone --recursive github:ianabel/meq.git
-cd meq
-cmake -B build -DMFEM_DIR=/path/to/mfem/install
-cmake --build build -j4
-cd build && ctest --output-on-failure
+mkdir meq && cd meq                       # the project directory
+git clone --recursive github:ianabel/meq.git source
+cmake -S source -B builds/double -DMFEM_DIR=/path/to/mfem/install
+cmake --build builds/double -j4
+cmake --install builds/double             # -> install/double/bin/meq, meq-run
+cd builds/double && ctest --output-on-failure
 ```
+
+The checkout is `source/`, one of four directories in the project directory,
+and nothing is built, tested or run inside it: `builds/<name>/` holds one CMake
+build tree per configuration, `install/<name>/` what `cmake --install
+builds/<name>` puts there, and `runs/` everything a run of `meq` or of `tools/`
+writes. The last three are untracked and deletable. **CMake refuses a build
+tree inside the source tree.** The default install prefix is
+`install/<name>` for `builds/<name>`; the installed `meq-run` finds `meq` beside
+itself and the mesh generator under `share/meq/tools/`, so the build tree can be
+deleted once it is installed.
 
 If you do not have the right MFEM, that still works — it just builds and tests
 about half of MEQ. See [Without MFEM](#without-mfem).
@@ -73,8 +84,9 @@ Two checks from it are worth repeating here because they have both fired:
   out of date has already cost this project a set of measurements:
 
   ```sh
-  diff <( git -C ../mfem/mfem-src show meq-integration:fem/darcy/darcyhybridization.hpp ) \
-       ../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp \
+  # from source/
+  diff <( git -C ../../mfem/mfem-src show meq-integration:fem/darcy/darcyhybridization.hpp ) \
+       ../../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp \
     && echo "install is current"
   ```
 
@@ -108,12 +120,15 @@ MFEM build leaves behind — an installed tree, or an in-source `make` build wit
 ### Two installs, two questions
 
 `MFEM_PRECISION` is settled when MFEM is configured, so a precision is chosen by
-pointing at a different MFEM:
+pointing at a different MFEM. From the project directory, with MFEM checked out
+beside it:
 
 ```sh
-cmake -B build        -DMFEM_DIR=../mfem/install          # double
-cmake -B build-single -DMFEM_DIR=../mfem/install-single   # single
+cmake -S source -B builds/double -DMFEM_DIR=../mfem/install          # double
+cmake -S source -B builds/single -DMFEM_DIR=../mfem/install-single   # single
 ```
+
+Each installs to its own prefix, `install/double` and `install/single`.
 
 **The double build is the reference and the single one is validated against
 it.** MEQ's acceptance criteria are measured convergence rates, and a rate needs
@@ -145,8 +160,8 @@ build produced a given answer, which is the whole reason they carry it.
 ## Building MEQ
 
 `MFEM_DIR` is a cache variable, also reads the environment, and defaults to
-`../mfem/install` relative to the source tree — so on a machine laid out that
-way the `-D` is unnecessary.
+`mfem/install` beside the project directory — `../../mfem/install` from
+`source/` — so on a machine laid out that way the `-D` is unnecessary.
 
 The rest of the dependencies:
 
@@ -166,15 +181,18 @@ MFEM rather than found separately.
 ### Running the tests
 
 ```sh
-cd build && ctest --output-on-failure
+cd builds/double && ctest --output-on-failure
 ```
 
-Nothing needs to be set in the environment: the test registration puts
-`MKL_NUM_THREADS=1` on every test itself. Running a test binary **by hand** needs
-that same one variable:
+The tests run in their build tree and write nothing into `source/`; they read
+the source tree's files through the path CMake compiles into them. Nothing needs
+to be set in the environment: the test registration puts `MKL_NUM_THREADS=1` on
+every test itself. Running a test binary **by hand** needs that same one
+variable, and a working directory it may write into — the build tree's `tests/`
+or a directory under `runs/`:
 
 ```sh
-MKL_NUM_THREADS=1 ./tests/SolovievConvergence
+cd builds/double/tests && MKL_NUM_THREADS=1 ./SolovievConvergence
 ```
 
 > **That variable is not cosmetic.** MEQ's inner loop factorises a great many
@@ -197,7 +215,7 @@ and skips every test that needs a solver, printing a status line for each thing
 it left out.
 
 ```sh
-cmake -B build -DMFEM_DIR=/nonexistent
+cmake -S source -B builds/nomfem -DMFEM_DIR=/nonexistent
 ```
 
 This is not a convenience. It is what makes continuous integration possible at

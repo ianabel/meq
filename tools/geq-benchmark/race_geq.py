@@ -9,10 +9,12 @@ fixed filaments, the skew profiles, the two labels at ( 0.10, 0 ) and
         direct free-boundary Picard on an n x n grid, with export_rotating.py's
         three changes (the direct boundary, analytic profiles, phi_0 tightened
         every step).  See README.md, *The rotating mirror*.
-  MEQ   `examples/mirror-rotating.toml` through `build/meq`, with only the
+  MEQ   `examples/mirror-rotating.toml` through the installed `meq`, with only the
         resolution ( [mesh] RefinementLevels, [discretisation]
-        PolynomialDegree ), the threads and the output grid changed.  The mesh
-        is generated once by `meq-run --mesh-only` and is not timed.
+        PolynomialDegree ), the threads and the output grid changed, and its
+        input tables named by absolute path, since the variant is written
+        under runs/.  The mesh is generated once by `meq-run --mesh-only` and
+        is not timed.
 
 TWO RACES, as race_desc.py has them, and only the second decides anything.
 
@@ -39,19 +41,20 @@ seconds, and not the load average, which after a multi-threaded run is mostly
 that run (race_nke.py's own finding) and would add a minute's wait to each.  Both arms run at one thread and at the physical core count, with
 OMP, MKL and OpenBLAS all set to it.
 
-    cd /home/ian/projects/meq
+    cd /home/ian/projects/meq/source
     tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
 
-THE DEVICE ARM is `--meq-device cuda`, with `--meq-build build-single` for
+THE DEVICE ARM is `--meq-device cuda`, with `--meq-build single` for
 single precision and `--geq ""` to reuse a host race's geq rows. geq has no
 device path: it is NumPy and SciPy, with numba CPU JIT in two freegs4e
 helpers. So the comparison is MEQ on the GPU against geq on the host. The
 driver's device defaults apply: cuDSS, serial assembly, one host thread. The
-reference stays build/ on the host. CLAUDE.md's caveat stands: this machine's
+reference stays install/double on the host. CLAUDE.md's caveat stands: this machine's
 GPU is consumer silicon, with FP64 at 1/32 to 1/64 of FP32, so a double device
 time here is evidence about this card and not about a device.
 
-Results go to tools/geq-benchmark/runs/<stamp>/, which git ignores.
+MEQ is the INSTALLED binary, install/<name>/bin/meq (tools/meqpaths.py), and
+results go to runs/geq-benchmark/race/<stamp>/, outside the source tree.
 """
 import argparse
 import json
@@ -65,12 +68,17 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MEQ = os.path.abspath(os.path.join(HERE, "..", ".."))
-GEQ_SRC = os.path.abspath(os.path.join(MEQ, "..", "geq", "src"))
-VENV = os.path.join(MEQ, "tools", "freegs4e-benchmark", "venv", "bin", "python")
-EXAMPLE = os.path.join(MEQ, "examples", "mirror-rotating.toml")
-sys.path.insert(0, os.path.join(MEQ, "tools", "freegs4e-benchmark"))
+sys.path.insert(0, os.path.join(HERE, ".."))
+import meqpaths                                                 # noqa: E402
+
+GEQ_SRC = meqpaths.sibling("geq", "src")
+VENV = meqpaths.source("tools", "freegs4e-benchmark", "venv", "bin", "python")
+EXAMPLE = meqpaths.source("examples", "mirror-rotating.toml")
+sys.path.insert(0, meqpaths.source("tools", "freegs4e-benchmark"))
 from cores import physical_cores                                # noqa: E402
+
+#: The reference's install: double precision, on the host, whatever the ladder.
+REFERENCE_BUILD = "double"
 
 COARSE = 65
 GRID = dict(rmin=0.05, rmax=0.63, zmin=-1.5, zmax=1.5)
@@ -108,7 +116,8 @@ def run_geq(n, rtol, threads, out):
     started = time.perf_counter()
     done = subprocess.run([VENV, os.path.abspath(__file__), "--geq-child",
                            str(n), str(rtol), out],
-                          capture_output=True, text=True, env=env, cwd=MEQ)
+                          capture_output=True, text=True, env=env,
+                          cwd=os.path.dirname(os.path.abspath(out)))
     seconds = time.perf_counter() - started
     if done.returncode != 0:
         return dict(ok=False, seconds=seconds, why=done.stderr[-400:])
@@ -124,13 +133,33 @@ def run_geq(n, rtol, threads, out):
 # The MEQ arm, through the driver
 # ---------------------------------------------------------------------------
 
+def install_binary(build, name):
+    """`name` from an install: `build` is an install name under install/
+    ( double, single ), a prefix holding bin/, or None for meqpaths' default."""
+    prefix = build if build and os.sep in build else meqpaths.install(build)
+    return os.path.join(os.path.abspath(prefix), "bin", name)
+
+
+#: The example's input tables, relative to examples/ as a configuration's input
+#: paths are; a variant written under runs/ names them absolutely.
+INPUT_TABLE = re.compile(r'^((?:Omega|Temperature|Density)File = ")([^"/][^"]*)"',
+                         re.MULTILINE)
+
+
 def meq_config(directory, mesh, level, order, prefix, plasma_size=0.1):
     """The shipped example with the resolution, the mesh's path and the output
-    changed and nothing else.  Every substitution must match exactly once."""
+    changed and its input tables made absolute, and nothing else.  Every
+    substitution must match exactly once."""
     with open(EXAMPLE) as handle:
         text = handle.read()
+    examples = os.path.dirname(EXAMPLE)
+    text, tables = INPUT_TABLE.subn(
+        lambda m: m.group(1) + os.path.normpath(os.path.join(examples, m.group(2))) + '"',
+        text)
+    if tables != 4:
+        raise SystemExit(f"{EXAMPLE}: {tables} input tables, expected 4")
     subs = [
-        ('File = "examples/mirror-rotating.msh"',
+        ('File = "mirror-rotating.msh"',
          f'File = "{mesh}"\nRefinementLevels = {level}'),
         ("PolynomialDegree = 2", f"PolynomialDegree = {order}"),
         ("PlasmaSize = 0.1", f"PlasmaSize = {plasma_size}"),
@@ -162,19 +191,19 @@ def trace_unknowns(mesh_path, order):
 
 
 def run_meq(directory, mesh, level, order, threads, tag, plasma_size=0.1,
-            build="build", device=None):
+            build=REFERENCE_BUILD, device=None):
     os.makedirs(directory, exist_ok=True)
     config = meq_config(directory, mesh, level, order, tag, plasma_size)
     started = time.perf_counter()
     # --mesh-ready: the mesh was made once by meq-run --mesh-only from the same
     # [mesh.generate] block, which no variant changes. --device cuda takes the
     # driver's device defaults: cuDSS, serial assembly, one host thread.
-    command = [os.path.join(MEQ, build, "meq"), "--mesh-ready", config]
+    command = [install_binary(build, "meq"), "--mesh-ready", config]
     if device:
         command[1:1] = ["--device", device]
     done = subprocess.run(command,
                           capture_output=True, text=True,
-                          env=thread_env(threads), cwd=MEQ)
+                          env=thread_env(threads), cwd=directory)
     seconds = time.perf_counter() - started
     if done.returncode != 0:
         return dict(ok=False, seconds=seconds, why=done.stdout[-400:] + done.stderr[-400:])
@@ -260,7 +289,7 @@ def wait_for_idle(threshold, timeout):
     return False
 
 
-def provenance():
+def provenance(ladder):
     def sha(path):
         out = subprocess.run(["git", "-C", path, "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True)
@@ -268,12 +297,16 @@ def provenance():
                                 "--untracked-files=no"],
                                capture_output=True, text=True).stdout.strip()
         return (out.stdout.strip() or "?") + ("-dirty" if dirty else "")
-    lib = "/home/ian/projects/mfem/install/lib/libmfem.a"
-    version = subprocess.run([os.path.join(MEQ, "build", "meq"), "--version"],
-                             capture_output=True, text=True).stdout.strip()
-    return {"meq": sha(MEQ), "meq_version": version,
-            "geq": sha(os.path.join(MEQ, "..", "geq")),
-            "freegs4e": sha(os.path.join(MEQ, "..", "freegs4e")),
+    def version(build):
+        return subprocess.run([install_binary(build, "meq"), "--version"],
+                              capture_output=True, text=True).stdout.strip()
+    lib = meqpaths.sibling("mfem", "install", "lib", "libmfem.a")
+    return {"meq": sha(meqpaths.SOURCE),
+            "meq_version": version(REFERENCE_BUILD),
+            "meq_ladder": install_binary(ladder, "meq"),
+            "meq_ladder_version": version(ladder),
+            "geq": sha(meqpaths.sibling("geq")),
+            "freegs4e": sha(meqpaths.sibling("freegs4e")),
             "libmfem_mtime": time.strftime("%Y-%m-%d %H:%M",
                                            time.localtime(os.path.getmtime(lib)))
             if os.path.exists(lib) else "?",
@@ -298,9 +331,11 @@ def main(argv=None):
                     help="run MEQ's ladder under this mfem::Device, e.g. cuda. The "
                          "driver refuses threaded assembly there, so MEQ runs at one "
                          "host thread; geq has no device path and stays on the host")
-    ap.add_argument("--meq-build", default="build",
-                    help="MEQ's build tree for the ladder, e.g. build-single. The "
-                         "reference is always build/ on the host")
+    ap.add_argument("--meq-build", default=None,
+                    help="MEQ's install for the ladder: a name under install/, e.g. "
+                         "single, or a prefix; default $MEQ_INSTALL, else "
+                         "install/$MEQ_BUILD, else install/double. The reference "
+                         "is always install/double on the host")
     ap.add_argument("--plasma-size", type=float, default=0.1,
                     help="[mesh.generate] PlasmaSize for MEQ's ladder, the element "
                          "size inside the plasma box; the shipped 0.1 by default. "
@@ -325,18 +360,20 @@ def main(argv=None):
           flush=True)
     if not wait_for_quiet(args.quiet, 60, 3600):
         print("  (it never did; running anyway, and saying so)", flush=True)
-    out = args.out or os.path.join(HERE, "runs", time.strftime("%Y%m%d-%H%M%S"))
+    out = os.path.abspath(args.out or meqpaths.runs(
+        "geq-benchmark", "race", time.strftime("%Y%m%d-%H%M%S")))
     os.makedirs(out, exist_ok=True)
     threads = ([int(t) for t in args.threads.split(",")] if args.threads
                else sorted({1, physical_cores()}))
-    record = dict(provenance=provenance(), threads=threads, runs=[])
+    record = dict(provenance=provenance(args.meq_build), threads=threads, runs=[])
     print(json.dumps(record["provenance"], indent=1), flush=True)
 
     # THE MESH, ONCE, UNTIMED: meq-run's generator on the shipped block.
     def make_mesh(path, size):
         probe = meq_config(out, path, 0, 2, f"mesh-probe-{size:g}", size)
-        done = subprocess.run([os.path.join(MEQ, "build", "meq-run"), "--mesh-only", probe],
-                              capture_output=True, text=True, cwd=MEQ)
+        done = subprocess.run([install_binary(REFERENCE_BUILD, "meq-run"),
+                               "--mesh-only", probe],
+                              capture_output=True, text=True, cwd=out)
         if done.returncode != 0:
             raise SystemExit("meq-run --mesh-only failed:\n" + done.stdout + done.stderr)
     mesh = os.path.join(out, "mirror.msh")
@@ -373,7 +410,8 @@ def main(argv=None):
             for t in threads:
                 entries.append(("geq", dict(n=n, rtol=rtol, threads=t)))
     meq_arm = ("meq" + (f"-{args.meq_device}" if args.meq_device else "")
-               + ("-single" if args.meq_build.endswith("single") else ""))
+               + ("-single" if os.path.dirname(os.path.dirname(
+                   install_binary(args.meq_build, "meq"))).endswith("single") else ""))
     meq_threads = [1] if args.meq_device else threads
     for level in (int(x) for x in args.levels.split(",")):
         for order in (int(x) for x in args.orders.split(",")):

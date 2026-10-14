@@ -39,8 +39,11 @@ for a minimum wall time.
 import argparse, contextlib, io as _io, json, os, pickle, resource, subprocess, sys, time
 import numpy as np
 
-MACHINE = "/home/ian/projects/freegsnke/machine_configs/MAST-U"
-CURRENTS = "/home/ian/projects/freegsnke/examples/data/simple_diverted_currents_PaxisIp.pk"
+import benchpaths
+
+MACHINE = os.path.join(benchpaths.FREEGSNKE, "machine_configs", "MAST-U")
+CURRENTS = os.path.join(benchpaths.FREEGSNKE, "examples", "data",
+                        "simple_diverted_currents_PaxisIp.pk")
 
 # example02's profile, verbatim.  Changing any of these makes a different
 # reference and the npz files must be regenerated together.
@@ -63,13 +66,13 @@ def provenance():
                                   capture_output=True, text=True).stdout.strip() or "?"
         except Exception:
             return "?"
-    out = {"freegsnke": sha("/home/ian/projects/freegsnke"),
-           "freegs4e": sha("/home/ian/projects/freegs4e"),
-           "meq": sha("/home/ian/projects/meq")}
+    out = {"freegsnke": sha(benchpaths.FREEGSNKE),
+           "freegs4e": sha(benchpaths.FREEGS4E),
+           "meq": sha(benchpaths.SOURCE)}
     try:
         out["libmfem_mtime"] = time.strftime(
             "%Y-%m-%d %H:%M",
-            time.localtime(os.path.getmtime("/home/ian/projects/mfem/install/lib/libmfem.a")))
+            time.localtime(os.path.getmtime(benchpaths.LIBMFEM)))
     except OSError:
         out["libmfem_mtime"] = "?"
     return out
@@ -139,7 +142,8 @@ def write_npz(path, eq, profiles, nx, ny):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=".", help="where to write the npz and the timings")
+    ap.add_argument("--out", default=os.path.join(benchpaths.OUT, "mastu"),
+                    help="where to write the npz and the timings")
     ap.add_argument("--tolerance", type=float, default=1e-9)
     ap.add_argument("--repeats", type=int, default=3,
                     help="timed repeats per level; the MEDIAN is reported")

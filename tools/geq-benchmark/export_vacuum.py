@@ -34,14 +34,16 @@ So the reference is a closed-form sum and not a solve: with no plasma geq's
 asserts that rather than trusting it. That is what lets the test attribute
 whatever MEQ's disagreement with it turns out to be.
 
-USAGE
+USAGE, from source/
 
     PYTHONPATH=/home/ian/projects/geq/src \\
-    tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_vacuum.py \\
-        --out tools/geq-benchmark/reference/vacuum
+    tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_vacuum.py
 
-Written: meta.txt (the machine, as geq computed it) and points.dat (R z psi on
-every --stride'th node of geq's grid).
+Written: points.dat (R z psi on every --stride'th node of geq's grid), geq's
+ANSWER, to --out, default runs/geq-benchmark/reference/vacuum/, the path the
+C++ tests read; and meta.txt (the machine, as geq computed it), THE PROBLEM, to
+--tables, default the same directory, reported against the tracked
+tools/geq-benchmark/reference/vacuum/meta.txt.
 """
 
 import argparse
@@ -59,6 +61,9 @@ from freegs4e.equilibrium import Equilibrium
 from freegs4e.gradshafranov import Greens
 
 from geq.machine import make_mirror_machine_from_field
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from export_mirror import against_tracked, answers_dir  # noqa: E402
 
 MU0 = 4.0e-7 * np.pi
 
@@ -79,8 +84,16 @@ def main():
     p.add_argument("--stride", type=int, default=2,
                    help="write every stride'th node in each direction; 2 keeps "
                         "the corners and the midplane of a 65 x 65 grid")
-    p.add_argument("--out", required=True)
+    p.add_argument("--out", default=None,
+                   help="geq's answer, points.dat; default "
+                        "runs/geq-benchmark/reference/vacuum")
+    p.add_argument("--tables", default=None,
+                   help="the problem, meta.txt; default --out. "
+                        "tools/geq-benchmark/reference/vacuum refreshes the "
+                        "tracked copy")
     args = p.parse_args()
+    args.out = args.out or answers_dir("vacuum")
+    args.tables = args.tables or args.out
 
     machine, info = make_mirror_machine_from_field(
         field=FIELD, L=COIL_LENGTH, ri=COIL_INNER_RADIUS, dz=COIL_SEPARATION,
@@ -123,7 +136,8 @@ def main():
         return 1
 
     os.makedirs(args.out, exist_ok=True)
-    with open(os.path.join(args.out, "meta.txt"), "w") as fh:
+    os.makedirs(args.tables, exist_ok=True)
+    with open(os.path.join(args.tables, "meta.txt"), "w") as fh:
         fh.write("case vacuum\n")
         fh.write(f"mu0 {MU0:.17e}\n")
         fh.write(f"field {FIELD:.17e}\n")
@@ -160,6 +174,8 @@ def main():
     print(f"psi on the grid     {psi.min():.6e} .. {psi.max():.6e}")
     print(f"filament sum        {agreement:.3e} relative to geq's own psi()")
     print(f"written             {len(sel_r) * len(sel_z)} points to {args.out}")
+    print(f"problem written to  {args.tables}")
+    against_tracked(args.tables, "vacuum")
     return 0
 
 

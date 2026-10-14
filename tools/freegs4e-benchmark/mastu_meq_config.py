@@ -42,8 +42,11 @@ disappointing order on it is the PROFILE rather than the solver.
 import argparse, os, pickle, sys
 import numpy as np
 
-M = "/home/ian/projects/freegsnke/machine_configs/MAST-U"
-CURRENTS = "/home/ian/projects/freegsnke/examples/data/simple_diverted_currents_PaxisIp.pk"
+import benchpaths
+
+M = os.path.join(benchpaths.FREEGSNKE, "machine_configs", "MAST-U")
+CURRENTS = os.path.join(benchpaths.FREEGSNKE, "examples", "data",
+                        "simple_diverted_currents_PaxisIp.pk")
 MU0 = 1.25663706212e-6
 
 
@@ -99,7 +102,7 @@ def write_table(path, psi, value, derivative, title):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default="/home/ian/projects/meq/examples")
+    ap.add_argument("--out", default=benchpaths.EXAMPLES)
     ap.add_argument("--stem", default="mastu-nke")
     ap.add_argument("--nx", type=int, default=65)
     ap.add_argument("--ny", type=int, default=129)
@@ -196,7 +199,7 @@ Current = {total:+.10e}
 # achievable order at k <= 1.2 -- see the generator's header.
 
 [mesh]
-File = "examples/{args.stem}.msh"
+File = "{args.stem}.msh"
 
 [mesh.generate]
 Tool = "halfdisc"
@@ -270,8 +273,8 @@ ConfineToPlasma = true
 PsiAxis = {psi_ax:.9e}
 PlasmaCurrent = {float(eq.plasmaCurrent()):.10e}
 Mu0 = {MU0}
-PPrimeFile = "examples/{args.stem}-pprime.dat"
-GGPrimeFile = "examples/{args.stem}-ggprime.dat"
+PPrimeFile = "{args.stem}-pprime.dat"
+GGPrimeFile = "{args.stem}-ggprime.dat"
 
 {''.join(blocks)}"""
     path = os.path.join(args.out, f"{args.stem}.toml")

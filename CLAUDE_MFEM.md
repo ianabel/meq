@@ -1,25 +1,25 @@
 # MFEM: which build, the integration branch, upstream, and MFEM's API traps
 
-**`CLAUDE.md`'s MFEM half** — the install MEQ links and its options, turning CUDA on, `meq-integration` and how to refresh it, the receive-only rule for `../mfem-hdg-dev` and what is open there, the old-to-new HDG API mapping, and the traps in MFEM's API and build that have cost MEQ time.
+**`CLAUDE.md`'s MFEM half** — the install MEQ links and its options, turning CUDA on, `meq-integration` and how to refresh it, the receive-only rule for `../../mfem-hdg-dev` and what is open there, the old-to-new HDG API mapping, and the traps in MFEM's API and build that have cost MEQ time.
 
 **The standing rules are `CLAUDE.md`'s.** Measurement tables live in `MEASUREMENTS.md` under stable `M-nn` anchors, which are not renumbered. A hypothesis that was measured and falsified stays; the history of the file does not — present tense, no "used to", no dated "now fixed". What was decided against is `CLAUDE_DECLINED.md`.
 ## Which MFEM, and why not master
 
-**MEQ builds against `../mfem/install`** — MFEM **4.10.1** on branch
-**`meq-integration`**, CMake-built in `../mfem/build` from sources in
-`../mfem/mfem-src`. The options actually set, read out of
+**MEQ builds against `../../mfem/install`** — MFEM **4.10.1** on branch
+**`meq-integration`**, CMake-built in `../../mfem/build` from sources in
+`../../mfem/mfem-src`. The options actually set, read out of
 `share/mfem/config.mk` and re-checked 2026-09-01 rather than remembered:
 
 | | |
 |---|---|
-| `MFEM_USE_SUNDIALS` | KINSol, so `KINSolver(KIN_LINESEARCH)` is reachable. **Now `../sundials/cuda-install`, not `../sundials/install`** — see the CUDA row |
-| `MFEM_USE_GSLIB` | `FindPointsGSLIB`; gslib v1.0.9 built alongside at `../mfem/gslib` |
-| `MFEM_USE_SUITESPARSE` | UMFPACK, the direct solver MEQ's own solver runs on. **`../suitesparse/install`, not Debian's** — v7.12.2, the same version Debian ships, built against oneAPI MKL. Debian's carried a `NEEDED` on `libblas.so.3` -> `libmkl_rt.so`; see `CLAUDE_HDGGS.md`, *PARDISO and the MKL link line* |
+| `MFEM_USE_SUNDIALS` | KINSol, so `KINSolver(KIN_LINESEARCH)` is reachable. **Now `../../sundials/cuda-install`, not `../../sundials/install`** — see the CUDA row |
+| `MFEM_USE_GSLIB` | `FindPointsGSLIB`; gslib v1.0.9 built alongside at `../../mfem/gslib` |
+| `MFEM_USE_SUITESPARSE` | UMFPACK, the direct solver MEQ's own solver runs on. **`../../suitesparse/install`, not Debian's** — v7.12.2, the same version Debian ships, built against oneAPI MKL. Debian's carried a `NEEDED` on `libblas.so.3` -> `libmkl_rt.so`; see `CLAUDE_HDGGS.md`, *PARDISO and the MKL link line* |
 | `MFEM_USE_MKL_PARDISO` | `PardisoSolver`, oneAPI MKL 2026.1, **on the threaded `mkl_gnu_thread` layer**. Resolving it to Debian's `mkl_sequential` instead is a bigger deal than it sounds — see *Rebuilding MFEM* below |
 | `MFEM_USE_EXCEPTIONS` | `MFEM_ERROR_THROW` by default, which is what makes the driver's exit code 2 reachable |
 | `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | **both, and both load bearing.** `DarcyHybridization::SetAssemblyMode( Threaded )` needs both and **aborts** rather than falling back without them. MEQ reaches it through `setAssemblyMode()` |
 | `MFEM_USE_LAPACK`, `MFEM_USE_ZLIB`, `MFEM_USE_DOUBLE`, `MFEM_USE_MEMALLOC` | |
-| `MFEM_USE_MPI = NO` | MEQ is serial throughout; `../mfem-hdg-dev-par` exists for parallel work |
+| `MFEM_USE_MPI = NO` | MEQ is serial throughout; `../../mfem-hdg-dev-par` exists for parallel work |
 | **`MFEM_USE_CUDA = YES`**, `CUDA_ARCH = sm_75` | CUDA 13.3. **`sm_75` because the card is compute capability 7.5**; MFEM's cache defaulted to `sm_60`, which is wrong here and nothing warns you |
 | **`MFEM_USE_CUDSS = YES`** | cuDSS 0.8.0 from Debian (`/usr/include/cudss.h`), found with `-DCUDSS_DIR=/usr`. `mfem::CuDSSSolver` agrees with UMFPACK to 3.5e-14; its **timings on this machine are not reproducible** and MEQ's solver does not use it. See `CLAUDE_HDGGS.md`, *Threading, measured* |
 | `RAJA`, `OCCA`, `CEED`, `SIMD`, `AMGX` all `NO` | |
@@ -30,7 +30,7 @@
   with `MFEM_USE_CUDA=TRUE requires SUNDIALS to be built with CUDA support`,
   testing `SUNDIALS_NVECTOR_CUDA`. MEQ cannot drop SUNDIALS — `KINSolver` backs
   `AndersonPicard` and `PicardThenNewton` — so the answer is a second SUNDIALS.
-  `../sundials/cuda-install` is 7.5.0 configured `-DENABLE_CUDA=ON
+  `../../sundials/cuda-install` is 7.5.0 configured `-DENABLE_CUDA=ON
   -DCMAKE_CUDA_ARCHITECTURES=75`, otherwise matching the old one.
 * **`MFEM_ENABLE_TESTING` is ON, and it needed an upstream fix to be.** A
   serial CUDA build would not generate at all: the bug was that a device test loop merged the serial and parallel example lists and
@@ -43,7 +43,7 @@
   `config.mk`, so it changes nothing MEQ's finder reads.
 
   **These notes claimed the bug was "filed as
-  `../mfem-hdg-dev/doc/CMAKE-SERIAL-CUDA-SUNDIALS.md`". IT WAS NOT.** That path
+  `../../mfem-hdg-dev/doc/CMAKE-SERIAL-CUDA-SUNDIALS.md`". IT WAS NOT.** That path
   has never existed in that tree's history and exists nowhere on disk — the
   report was never written. Treat a "filed as" claim in these notes as needing a
   check, not as evidence.
@@ -91,8 +91,8 @@ Without CUDA those seven compile to host stubs and the build is host-only and
 correct, which is what CI builds. → **[M-223](MEASUREMENTS.md#m-223)**.
 
 **AND IT IS NOT FREE — IT COSTS 7% OF THE WALL CLOCK ON THE CPU PATH, MEASURED
-AGAINST AN OTHERWISE IDENTICAL INSTALL.** `../mfem/install-nocuda` differs from
-`../mfem/install` in `MFEM_USE_CUDA` and the `MFEM_USE_CUDSS` that must follow
+AGAINST AN OTHERWISE IDENTICAL INSTALL.** `../../mfem/install-nocuda` differs from
+`../../mfem/install` in `MFEM_USE_CUDA` and the `MFEM_USE_CUDSS` that must follow
 it, and in nothing else; the two produce **byte-identical output** on the machine
 case, so this is cost and not answers.
 
@@ -107,7 +107,7 @@ MFEM's ordinary per-element temporaries and are not CUDA's doing. So the flag is
 a prerequisite that currently charges rent, and a CPU-only production build has
 a measured reason to be a separate install.
 
-**`../mfem-hdg-dev` is now the development tree and not what MEQ links.** That
+**`../../mfem-hdg-dev` is now the development tree and not what MEQ links.** That
 split exists because the alternative was demonstrated: mid-session that tree was
 switched to `gf-hdg-dev`, which has no `fem/darcy/extension_hdg.{hpp,cpp}`, and
 MEQ's `naming` check failed on a tree MEQ had not touched. A library MEQ depends
@@ -160,8 +160,8 @@ is not a development branch and must not be pushed anywhere: it will be
 re-created whenever any of them moves, so anything committed directly to it is
 lost. Do the work on the branch it belongs to and re-merge.
 
-**It lives in `../mfem/mfem-src`, which is MEQ's own clone — never in
-`../mfem-hdg-dev`.** See the rule below.
+**It lives in `../../mfem/mfem-src`, which is MEQ's own clone — never in
+`../../mfem-hdg-dev`.** See the rule below.
 
 **Expect the fetch to be a forced update.** Two of the four were rebased between
 2026-08-29 and 08-30, so a merge *into* the existing `meq-integration` is not
@@ -169,7 +169,7 @@ the operation you want; re-create it. Tag the old one first — the tree carries
 `meq-integration-before-2026-08-30` for exactly that reason — because a bad
 re-merge is otherwise unrecoverable without redoing the conflict resolution.
 
-Refreshing it, from `../mfem/mfem-src`:
+Refreshing it, from `../../mfem/mfem-src`:
 
 ```sh
 git fetch hdgdev gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
@@ -222,7 +222,7 @@ rather than `hdgdev` and which the `hdgdev/`-anchored pattern below would itself
 have missed. Match both:
 
 ```sh
-git -C ../mfem/mfem-src log --merges --format=%s meq-integration \
+git -C ../../mfem/mfem-src log --merges --format=%s meq-integration \
   | grep -oE "hdgdev/[a-z0-9-]+|memory-manager-[a-z-]+" | sort -u
 ```
 
@@ -232,8 +232,8 @@ merge comes from that remote, and the first branch that does not is invisible to
 it. Widen the pattern or read the merge subjects unfiltered.
 
 **BUT THE LOOP CHECKS THE BRANCH, NOT THE INSTALL, AND THAT GAP HAS ALREADY
-BITTEN.** Every command in it runs in `../mfem/mfem-src` and says nothing
-whatever about `../mfem/install`, which is what MEQ actually links. On
+BITTEN.** Every command in it runs in `../../mfem/mfem-src` and says nothing
+whatever about `../../mfem/install`, which is what MEQ actually links. On
 2026-09-01 the loop reported **all four contained** while the installed library
 was `fa65a2f932` and `meq-integration` had moved to `d244329d8c` — **514 changed
 lines in `fem/darcy/` across seven files**, including *"The HDG face quadrature
@@ -247,14 +247,14 @@ day out of date.
 LAYOUT.** Anything that moves a member behind `#ifndef MFEM_THREAD_SAFE` — which
 MEQ's build defines, and MEQ constructs such objects itself — changes an object's
 size without changing a signature, so an incremental link is an ODR violation
-with no diagnostic. **MEQ must be fully rebuilt too**, `cmake --build build -j6
---clean-first`, and the absolute timing tables are historical afterwards:
+with no diagnostic. **MEQ must be fully rebuilt too**, `cmake --build ../builds/double -j6
+--clean-first` and the same for every other tree under `../builds`, and the absolute timing tables are historical afterwards:
 [M-138](MEASUREMENTS.md#m-138)'s budget is the one that wants re-taking, since
 it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
-**BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../mfem/install` and
-on `../mfem/install-single` against `meq-integration` at `17383013b0`, and the
+**BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../../mfem/install` and
+on `../../mfem/install-single` against `meq-integration` at `17383013b0`, and the
 DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of `-6.466e-12`
 under `--device cuda` on the double one, as it did on the install before ->
 [M-275](MEASUREMENTS.md#m-275), where the double suite is 76 of 77. **The
@@ -268,7 +268,7 @@ the `MFEM_PRECISION = single` + `MFEM_USE_SUNDIALS` pairing without it.
 
 **AND REFRESHING IT IS NOT FREE: THE LAST REFRESH TOOK A CASE RED BY SEVEN
 ORDERS, AND THE ANSWER IT MEASURES HAD NOT MOVED AT ALL**
-→ **[M-189](MEASUREMENTS.md#m-189)**. `../mfem/install` rebuilt from
+→ **[M-189](MEASUREMENTS.md#m-189)**. `../../mfem/install` rebuilt from
 `meq-integration` at `6d05189467` takes `FreeBoundaryCoupling` red at
 `theTransmissionRowIsTheBoundaryIntegralItClaims`, which has read 7.8e-16 to
 1.4e-13 since it was written and now reads **1.27e-06**. Bisected to one default
@@ -294,8 +294,8 @@ M-165. And MEQ's first report of this blamed the production Jacobian: it was one
 **Check the install too, and it is one command:**
 
 ```sh
-diff <( git -C ../mfem/mfem-src show meq-integration:fem/darcy/darcyhybridization.hpp ) \
-     ../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp \
+diff <( git -C ../../mfem/mfem-src show meq-integration:fem/darcy/darcyhybridization.hpp ) \
+     ../../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp \
   && echo "install is current"
 ```
 
@@ -309,12 +309,12 @@ The check passed on a library missing the fix MEQ had asked for.
 **Ask the TIMESTAMPS instead, which cannot miss a translation unit:**
 
 ```sh
-test ../mfem/install/lib/libmfem.a -nt \
-     <( git -C ../mfem/mfem-src log -1 --format=%cd --date=iso meq-integration >/dev/null; \
+test ../../mfem/install/lib/libmfem.a -nt \
+     <( git -C ../../mfem/mfem-src log -1 --format=%cd --date=iso meq-integration >/dev/null; \
         echo ) 2>/dev/null
 # or, plainly:
-[ "$( date -r ../mfem/install/lib/libmfem.a +%s )" -ge \
-  "$( git -C ../mfem/mfem-src log -1 --format=%ct meq-integration )" ] \
+[ "$( date -r ../../mfem/install/lib/libmfem.a +%s )" -ge \
+  "$( git -C ../../mfem/mfem-src log -1 --format=%ct meq-integration )" ] \
   && echo "install is newer than the branch tip" || echo "INSTALL IS STALE"
 ```
 
@@ -397,12 +397,12 @@ Then rebuild:
 cd /home/ian/projects/mfem && cmake --build build -j4 && cmake --install build
 ```
 
-## `../mfem-hdg-dev` is receive-only
+## `../../mfem-hdg-dev` is receive-only
 
-**Write MFEM development *requests* into `../mfem-hdg-dev/doc/` and nothing
+**Write MFEM development *requests* into `../../mfem-hdg-dev/doc/` and nothing
 else.** No branches, no commits, no checkouts, no builds. Another agent works in
 that tree and it is theirs; MEQ consumes it through `git fetch` from
-`../mfem/mfem-src` and in no other way.
+`../../mfem/mfem-src` and in no other way.
 
 This is written down because it was got wrong: `meq-integration` was first
 created *in* the dev tree, given two merge commits and a fix commit, and that
@@ -417,7 +417,7 @@ is not.
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | **`SetIntegratorsThreadSafe()`'s SCOPE, which is the durable half and is now upstream's doxygen** | **CLOSED.** MEQ reported that `mfem::NormalTraceJumpIntegrator` carries `Vector face_shape, normal, shape1_n, shape2_n` and two `DenseMatrix` unguarded (`fem/bilininteg.hpp:4872`), that MEQ installs exactly one as the object handed to `EnableHybridization()`, and that `DarcyForm::ReconstructFluxAndPot()` takes it per face inside its element loop. **Guarded upstream, on the trunk**, so all five branches take it — and a clean MFEM rebuild is owed here, since the class layout moves in a `MFEM_THREAD_SAFE` build. **MEQ's report overstated one thing and the correction is the tense**: it said the class is reached by "the loop you are threading", and there is no such loop — `darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly and both reconstruction entry points are serial. MEQ inferred that from being told the work was in progress and wrote the inference as an observation. What upstream took as the real defect was **theirs and not the class**: `SetIntegratorsThreadSafe()` made a promise whose scope was written down nowhere, so threading one more loop silently widens what a caller who set it months earlier has undertaken. Its doxygen now says the promise is about **every integrator installed on the hybridization** rather than about whichever loops happen to be threaded |
 | ~~**`mfem::HDGExtensionIntegrator` carries unguarded scratch**~~ | **CLOSED, and MEQ's own files went on asserting it afterwards.** Upstream's `26fccc9f3d` put `shape, shape_ext, nor, x, xbar, m, y, CTm`, `Cmat`, `L` and `ext` behind `#ifndef MFEM_THREAD_SAFE` (`extension_hdg.hpp:24`), and `git merge-base --is-ancestor` confirms it is in the `meq-integration` MEQ links. The row that stood here, and the matching comment at MEQ's `SetIntegratorsThreadSafe()` call, both described the window between the eight-class commit and that one — **a true conclusion resting on a premise that had expired**. Neither was re-read against the tree. *A claim about somebody else's code is only as fresh as the last time it was checked* |
-| ~~**`Reconstruct()` aborts under `Device("debug")`**~~ — **CLOSED, and neither project's mechanism was right** | Fixed at `86b0b0fd13`, **contained and installed**, and `DeviceParity` is green on it. The abort is `CheckHostMemoryType_` at `mem_manager.cpp:1778`, from `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` with `e == 0` aliasing `b_z`'s base pointer exactly. **MEQ's mechanism was wrong and so was upstream's first one, in the same way.** Both said `Wrap( ptr, n, own = false )` takes `GetHostMemoryType()` so `std_delete` is false and `Delete_` evicts — but `Delete_` opens `if (!mm.exists \|\| !registered) { return; }`, so an unregistered wrap is **inert** and `h_mt` decides nothing. What actually registers the view is **`Memory<T>::MakeAlias()`**, whose "Register 'base'" branch fires whenever `IsDeviceMemory( GetDeviceMemoryType() )` — true under `debug` and `cuda` — setting `Registered \| OWNS_INTERNAL` on the **view**; `MemoryManager::Insert()`'s `emplace` then keeps the existing entry **silently**, and the view's destructor takes the `Known` branch and erases the **owner's**. In `ReconstructTotalFlux` the trigger is `b_zi.MakeRef( b_ze, ... )` and needs no device flag. **Both of MEQ's candidate fixes fail**, measured: keying on `flags & Registered` is a no-op because `registered` IS true by then, and making `Wrap` take `HOST` when `!own` aborts on a different assertion. What landed is MEQ's **third** option, the one it did not recommend — build the sub-views with `MakeRef` into the owner rather than wrapping a raw `GetData()` — which also syncs, where a raw `GetData()` is a host read of a buffer whose live copy may be on the device. **Scope: 2 of 5 branches**, `gf-hdg-linearise-first` and `gf-interp-hdg-dev`, both of which `meq-integration` merges. **"Why `cuda` never met this" has now been wrong three times and this is the version with evidence**: not that the destructor is inert (`h_mt` decides nothing), and not that the eviction "erases a key that is not there" (`Erase` does `if (mem_map_iter == maps->memories.end()) { mfem_error( "Unknown pointer!" ); }`, so a missing key **aborts**). Under `cuda`, `GetHostMemoryType() == HOST` leaves the **owner** unregistered, so the view's own lazy registration is what **creates** the entry and erasing it on destruction is **balanced**. The immunity is a property of the host memory type, and it is the same observation that makes a reference count the right shape: one registration one erase is already correct, and it is two registrations of one address where today's first erase takes the second's entry. **A second question is live and is upstream's user's**: whether to close the trap in `Memory` rather than per caller. MEQ said yes, in `../mfem-hdg-dev/doc/HDG-MEMORY-OWNERSHIP-FROM-MEQ.md`, and its addendum argues the change is **smaller than either project first thought** — `maps->aliases` is already reference-counted against exactly this hazard (`InsertAlias` does `alias.counter++` on a collision, `EraseAlias` does `if (--alias.counter) return;`) and `maps->memories` is not (`Insert` discards the `emplace` result, and the `auto res =` is itself inside `#ifdef MFEM_DEBUG`; `Erase` erases unconditionally). The lazy registrations the counter must be correct over are **four routes across five call sites** — `MakeAlias`'s "Register 'base'", `SetDeviceMemoryType()`, and `Read`/`Write`/`ReadWrite`; the two `Wrap` sites need a caller ownership error first. So a counter on `internal::Memory` closes it **without touching ownership semantics or any call site**, where the proposed `own_internal` flag cannot: the call site cannot know whether the address was already registered, so no constant value of it is right. Upstream verified the shape on their trunk, confirmed `mem_manager.cpp` is unmodified from MFEM master in that family, and **withdrew the flag**. **The counter's own cost is bounded rather than hypothetical**: an unbalanced register/erase already leaks a `memories` entry today — `Memory<T>::Reset()` sets `flags = 0` without going near `Delete_`, and `Vector::StealData` is `*p = data; data.Reset(); size = 0;` on a `Memory` that may be registered, with `linalg/hypre.cpp` and `linalg/petsc.cpp` doing the same — so a counter **extends** that class rather than creating it, and turns an unbalanced pair from *an entry erased out from under its owner* into *an entry that stays*. Strictly milder and still silent |
+| ~~**`Reconstruct()` aborts under `Device("debug")`**~~ — **CLOSED, and neither project's mechanism was right** | Fixed at `86b0b0fd13`, **contained and installed**, and `DeviceParity` is green on it. The abort is `CheckHostMemoryType_` at `mem_manager.cpp:1778`, from `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` with `e == 0` aliasing `b_z`'s base pointer exactly. **MEQ's mechanism was wrong and so was upstream's first one, in the same way.** Both said `Wrap( ptr, n, own = false )` takes `GetHostMemoryType()` so `std_delete` is false and `Delete_` evicts — but `Delete_` opens `if (!mm.exists \|\| !registered) { return; }`, so an unregistered wrap is **inert** and `h_mt` decides nothing. What actually registers the view is **`Memory<T>::MakeAlias()`**, whose "Register 'base'" branch fires whenever `IsDeviceMemory( GetDeviceMemoryType() )` — true under `debug` and `cuda` — setting `Registered \| OWNS_INTERNAL` on the **view**; `MemoryManager::Insert()`'s `emplace` then keeps the existing entry **silently**, and the view's destructor takes the `Known` branch and erases the **owner's**. In `ReconstructTotalFlux` the trigger is `b_zi.MakeRef( b_ze, ... )` and needs no device flag. **Both of MEQ's candidate fixes fail**, measured: keying on `flags & Registered` is a no-op because `registered` IS true by then, and making `Wrap` take `HOST` when `!own` aborts on a different assertion. What landed is MEQ's **third** option, the one it did not recommend — build the sub-views with `MakeRef` into the owner rather than wrapping a raw `GetData()` — which also syncs, where a raw `GetData()` is a host read of a buffer whose live copy may be on the device. **Scope: 2 of 5 branches**, `gf-hdg-linearise-first` and `gf-interp-hdg-dev`, both of which `meq-integration` merges. **"Why `cuda` never met this" has now been wrong three times and this is the version with evidence**: not that the destructor is inert (`h_mt` decides nothing), and not that the eviction "erases a key that is not there" (`Erase` does `if (mem_map_iter == maps->memories.end()) { mfem_error( "Unknown pointer!" ); }`, so a missing key **aborts**). Under `cuda`, `GetHostMemoryType() == HOST` leaves the **owner** unregistered, so the view's own lazy registration is what **creates** the entry and erasing it on destruction is **balanced**. The immunity is a property of the host memory type, and it is the same observation that makes a reference count the right shape: one registration one erase is already correct, and it is two registrations of one address where today's first erase takes the second's entry. **A second question is live and is upstream's user's**: whether to close the trap in `Memory` rather than per caller. MEQ said yes, in `../../mfem-hdg-dev/doc/HDG-MEMORY-OWNERSHIP-FROM-MEQ.md`, and its addendum argues the change is **smaller than either project first thought** — `maps->aliases` is already reference-counted against exactly this hazard (`InsertAlias` does `alias.counter++` on a collision, `EraseAlias` does `if (--alias.counter) return;`) and `maps->memories` is not (`Insert` discards the `emplace` result, and the `auto res =` is itself inside `#ifdef MFEM_DEBUG`; `Erase` erases unconditionally). The lazy registrations the counter must be correct over are **four routes across five call sites** — `MakeAlias`'s "Register 'base'", `SetDeviceMemoryType()`, and `Read`/`Write`/`ReadWrite`; the two `Wrap` sites need a caller ownership error first. So a counter on `internal::Memory` closes it **without touching ownership semantics or any call site**, where the proposed `own_internal` flag cannot: the call site cannot know whether the address was already registered, so no constant value of it is right. Upstream verified the shape on their trunk, confirmed `mem_manager.cpp` is unmodified from MFEM master in that family, and **withdrew the flag**. **The counter's own cost is bounded rather than hypothetical**: an unbalanced register/erase already leaks a `memories` entry today — `Memory<T>::Reset()` sets `flags = 0` without going near `Delete_`, and `Vector::StealData` is `*p = data; data.Reset(); size = 0;` on a `Memory` that may be registered, with `linalg/hypre.cpp` and `linalg/petsc.cpp` doing the same — so a counter **extends** that class rather than creating it, and turns an unbalanced pair from *an entry erased out from under its owner* into *an entry that stays*. Strictly milder and still silent |
 
 **AND THE BATCHED LOCAL RESIDUAL THAT TAKES A CALLER'S INTEGRAND IS BUILT ON
 BOTH SIDES AND CLOSED** → **[M-197](MEASUREMENTS.md#m-197)**,
@@ -453,7 +453,7 @@ not blocked on request 1; request 1 is done. It is blocked on an interface, and
 the interface is ours"* — and ends by asking MEQ for the one thing only MEQ can
 supply: *"Send us the POD and the signature you want to write `F` and `F'` in and
 we will build the other side."* **Sent**, as
-`../mfem-hdg-dev/doc/HDG-BATCHED-RESIDUAL-SEAM-FROM-MEQ.md`: `meq::SourceView`
+`../../mfem-hdg-dev/doc/HDG-BATCHED-RESIDUAL-SEAM-FROM-MEQ.md`: `meq::SourceView`
 and its two POD companions, the `MFEM_HOST_DEVICE` evaluators, the
 element-local `sourceResidualAtPoint()` / `sourceGradientAtPoint()` pair, and the
 four constraints that are not decoration — `radius` unpre-divided because `F/R`
@@ -477,7 +477,7 @@ legs that are 6% there are 30.6% here. *A share is a property of a problem, not
 of a loop.*
 
 **AND IT IS NOW IN THE LIBRARY MEQ LINKS, AND MEASURED** →
-**[M-135](MEASUREMENTS.md#m-135)**. `../mfem/install` is rebuilt from
+**[M-135](MEASUREMENTS.md#m-135)**. `../../mfem/install` is rebuilt from
 `meq-integration` at `3424f33bd5`, the install is verified against the branch,
 and an interleaved pair on a quiet machine — a pre-upgrade binary kept aside,
 `libmfem.a` being static, so the library is the only variable — reads the leg at
@@ -535,7 +535,7 @@ operational facts are worth the space and the rest is not:
   is wrong. What a request established survives in upstream's own plan documents
   and in the doxygen; the correspondence does not.
 * **SO THE ONLY TEST OF "LANDED" IS THE CODE MEQ BUILDS AGAINST.** Look for the
-  symbol in `../mfem/install/include`, not for the document. That was always the
+  symbol in `../../mfem/install/include`, not for the document. That was always the
   only test MEQ could apply and it is now the only one that exists.
 * **Which documents exist is a question for `git`, not for `ls`** — a listing
   reports whatever branch that tree is checked out on, which is not MEQ's to
@@ -551,7 +551,7 @@ a branch that is done. Measure it if it is useful to know, keep the numbers in
 MEQ, and wait to be told it is ready before writing anything into that tree about
 how it behaves.
 
-Rebuilding the install, after fetching whatever is wanted into `../mfem/mfem-src`:
+Rebuilding the install, after fetching whatever is wanted into `../../mfem/mfem-src`:
 
 ```sh
 cd /home/ian/projects/mfem
@@ -638,16 +638,16 @@ this applies only to the MFEM tree.
 
 **AND `cmake --install` PRESERVES THE SOURCE FILE'S MTIME, SO A REFRESHED MFEM
 INSTALL LEAVES MEQ SILENTLY UP TO DATE ACROSS A CLASS-LAYOUT CHANGE.** The
-installed header carries the mtime of the file in `../mfem/mfem-src`, which is
+installed header carries the mtime of the file in `../../mfem/mfem-src`, which is
 when that tree was last checked out — routinely EARLIER than MEQ's existing
 objects. Measured after one ordinary reinstall: **all 317 installed headers read
-older than MEQ's objects**, `cmake --build build` reported nothing to do, and
+older than MEQ's objects**, `cmake --build` of MEQ reported nothing to do, and
 `DarcyHybridization` had just gained a member. That links MEQ objects built
 against the old layout to a `libmfem.a` built against the new one — an ODR
 violation with no error anywhere, which is the failure MEQ's own header tracking
 is supposed to make impossible. **Touch the installed headers after every
-install** — `find ../mfem/install/include -name '*.hpp' -exec touch {} +` — and
-check the dry run reports work: `make -n` in `build` going from 0 to 57 is the
+install** — `find ../../mfem/install/include -name '*.hpp' -exec touch {} +` — and
+check the dry run reports work: `make -n` in MEQ's build tree going from 0 to 57 is the
 confirmation. This is why "MEQ must then be fully rebuilt too" appears wherever
 the install is refreshed; the mechanism is the mtime, not the flags.
 
@@ -855,7 +855,7 @@ was broken on the MFEM branch until recently: `EliminateTraceTrueDofsInRHS`
 returned early for nonlinear problems and the essential BC was silently ignored,
 so the solver was solving a different problem than asked. **It is fixed**
 (`fem/darcy/darcyhybridization.cpp`, and the reasoning is commented there), but
-`../mfem-hdg-dev/CLAUDE.md` records that **no regression covers the combination**.
+`../../mfem-hdg-dev/CLAUDE.md` records that **no regression covers the combination**.
 If stage 4 produces a converged-but-wrong answer near the boundary, look here
 first rather than at MEQ's assembly.
 

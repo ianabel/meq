@@ -2,9 +2,9 @@
 
 `RACE-ARMS.md` is the contract and `INVERSE-RACE-PLAN.md` the design. This
 writes the list of configurations every arm reads, from a set of `freegs4e`
-references -- `ref-interp/` by default, `fgsref.py --shaped
---interpolating-profiles`, so every code solves the analytic profile MEQ's
-tables carry (MEASUREMENTS.md M-254, M-255).
+references -- runs/freegs4e-benchmark/ref-interp/ by default, `fgsref.py
+--shaped --interpolating-profiles`, so every code solves the analytic profile
+MEQ's tables carry (MEASUREMENTS.md M-254, M-255).
 
 WHAT EACH CONFIGURATION FIXES, AND WHY.
 
@@ -26,6 +26,9 @@ USAGE
 
     venv/bin/python inverse_problem.py OUT.json [--reference DIR] [C D ...]
 
+OUT.json is conventionally runs/freegs4e-benchmark/ref-interp/problem.json,
+which race_inverse.py reads by default.
+
 The default cases are the five INVERSE-RACE-PLAN.md section 2 races.
 """
 
@@ -36,10 +39,10 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 os.environ.setdefault("FGSREF_OUT", "/tmp")
 
+import benchpaths                                              # noqa: E402
 from fgsref import CASES                                       # noqa: E402
 from circuits import MACHINES, wiring                          # noqa: E402
 from inverse import target_response                            # noqa: E402
@@ -103,7 +106,7 @@ def configuration(case, stem, refdir, wires):
         config="machine-%s-shaped" % stem[len("machine-"):],
         fgsref_case=case["name"], shaped=True,
         reference_npz=npz_path, reference_json=json_path,
-        meq_example=os.path.join(ROOT, "examples",
+        meq_example=os.path.join(benchpaths.EXAMPLES,
                                  "machine-%s-shaped.toml" % stem[len("machine-"):]),
         supplies=[dict(name=n, members=[dict(conductor=l, multiplier=m)
                                         for l, m in mem],
@@ -131,7 +134,7 @@ def main():
         raise SystemExit(__doc__)
     out = sys.argv[1]
     args = sys.argv[2:]
-    refdir = os.path.join(HERE, "ref-interp")
+    refdir = os.path.join(benchpaths.OUT, "ref-interp")
     if "--reference" in args:
         at = args.index("--reference")
         refdir = os.path.abspath(args[at + 1])

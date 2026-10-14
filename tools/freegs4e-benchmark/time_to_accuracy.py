@@ -39,9 +39,9 @@ race_nke.py's header for what pinning it hands away.
 import argparse, json, os, re, subprocess, sys, time
 import numpy as np
 
-MEQ = "/home/ian/projects/meq"
-VENV = f"{MEQ}/tools/freegs4e-benchmark/venv/bin/python"
+import benchpaths
 from cores import physical_cores
+VENV = benchpaths.VENV
 THREADS = str(physical_cores())
 TARGETS = [1e-2, 1e-3, 1e-4, 1e-5]
 
@@ -58,13 +58,13 @@ def meq_variant(base_toml, out_dir, degree, size, stem):
     edge length and the count follows from the geometry, so asking for a count
     would be asking the mesher a question it does not answer.
     """
-    text = open(base_toml).read()
+    text = benchpaths.read_example(base_toml)
     text = re.sub(r"^PolynomialDegree = .*$", f"PolynomialDegree = {degree}",
                   text, flags=re.M)
     text = re.sub(r"^Size = .*$", f"Size = {size:.4f}", text, flags=re.M)
     text = re.sub(r"^PlasmaSize = .*$", f"PlasmaSize = {size/5.0:.4f}",
                   text, flags=re.M)
-    text = re.sub(r'^File = "examples/.*\.msh"$',
+    text = re.sub(r'^File = "[^"]*\.msh"$',
                   f'File = "{out_dir}/{stem}.msh"', text, flags=re.M)
     text = re.sub(r"^Prefix = .*$", f'Prefix = "{out_dir}/{stem}"', text,
                   flags=re.M)
@@ -77,7 +77,7 @@ def meq_variant(base_toml, out_dir, degree, size, stem):
 
 def run_meq(config, stem, out_dir):
     started = time.perf_counter()
-    done = subprocess.run([f"{MEQ}/build/meq-run", config],
+    done = subprocess.run([benchpaths.meq_run(), config], cwd=out_dir,
                           capture_output=True, text=True, env=env(), timeout=7200)
     seconds = time.perf_counter() - started
     elements = 0
@@ -106,7 +106,7 @@ def error_against(nc_path, truth_npz):
     on a curved case.  Reimplementing the norm here would be reimplementing that
     too, and getting it wrong is silent.
     """
-    done = subprocess.run([VENV, f"{MEQ}/tools/freegs4e-benchmark/compare.py",
+    done = subprocess.run([VENV, os.path.join(benchpaths.HERE, "compare.py"),
                            truth_npz, nc_path, "--core", "0.9"],
                           capture_output=True, text=True, env=env())
     match = re.search(r"([0-9.]+e[-+][0-9]+)", done.stdout)
@@ -131,12 +131,14 @@ def error_against(nc_path, truth_npz):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--case", default=f"{MEQ}/examples/mastu-nke.toml",
+    ap.add_argument("--case",
+                    default=os.path.join(benchpaths.EXAMPLES, "mastu-nke.toml"),
                     help="the MEQ TOML the sweep varies k and h on")
     ap.add_argument("--truth", default="",
                     help="npz to measure error against; default is the finest "
                          "freegsnke level in --out")
-    ap.add_argument("--out", default="/tmp/tta")
+    ap.add_argument("--out", default=os.path.join(benchpaths.OUT,
+                                                  "time-to-accuracy"))
     ap.add_argument("--degrees", default="1,2,3,4")
     ap.add_argument("--sizes", default="0.60,0.45,0.30,0.20",
                     help="halfdisc target edge lengths, COARSE FIRST -- the "
@@ -145,6 +147,7 @@ def main():
     ap.add_argument("--repeats", type=int, default=3)
     args = ap.parse_args()
 
+    args.out = os.path.abspath(args.out)
     os.makedirs(args.out, exist_ok=True)
     print(f"time-to-accuracy, {THREADS} threads on both axes and both arms\n")
 
@@ -152,7 +155,7 @@ def main():
     nke_rows = []
     for nx in [int(v) for v in args.nke_levels.split(",")]:
         started = time.perf_counter()
-        subprocess.run([VENV, f"{MEQ}/tools/freegs4e-benchmark/mastu_reference.py",
+        subprocess.run([VENV, os.path.join(benchpaths.HERE, "mastu_reference.py"),
                         "--out", args.out, "--levels", str(nx),
                         "--repeats", str(args.repeats)],
                        capture_output=True, text=True, env=env(), timeout=7200)

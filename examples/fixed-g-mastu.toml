@@ -1,6 +1,6 @@
 # A MACHINE-SHAPED FIXED-BOUNDARY EQUILIBRIUM: fixed-g-mastu
 #
-#     meq examples/fixed-g-mastu.toml
+#     meq ../../source/examples/fixed-g-mastu.toml
 #
 # GENERATED -- edit tools/freegs4e-benchmark/make_case.py, not this file, and
 # re-run tools/freegs4e-benchmark/make_fixed.sh.
@@ -152,8 +152,8 @@ Type = "mhd"
 # headers, and tools/freegs4e-benchmark/convert.py, which records both the
 # docstring error in freegs4e that this conversion survives and the reason the
 # normalised form is the one that can be shipped.
-PPrimeFile = "examples/fixed-g-mastu-pprime.dat"
-GGPrimeFile = "examples/fixed-g-mastu-ggprime.dat"
+PPrimeFile = "fixed-g-mastu-pprime.dat"
+GGPrimeFile = "fixed-g-mastu-ggprime.dat"
 
 # psi_ax IS AN UNKNOWN OF THE SOLVE AND THIS IS ITS STARTING VALUE.
 #

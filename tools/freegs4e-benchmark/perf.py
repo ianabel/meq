@@ -13,6 +13,12 @@ a given accuracy with fewer degrees of freedom than a 2nd/4th-order finite
 difference grid?  Wall clock is reported beside it and should be read only as an
 order of magnitude, per this project's standing rule that a timing here is a
 measurement about this machine.
+
+    python3 perf.py CASEDIR stem [stem ...]
+
+CASEDIR holds what make_case.py wrote -- <stem>.toml and its tables -- and the
+reference <stem>.npz, <stem>.json and <stem>-meta.json beside them. Each run is
+a variant written to runs/freegs4e-benchmark/perf/<stem>/ and made there.
 """
 import json
 import os
@@ -22,15 +28,17 @@ import time
 
 import numpy as np
 
+import benchpaths
 from compare import compare
 
-MEQ = "/home/ian/projects/meq/build/meq"
+MEQ = benchpaths.meq()
 
 
 def run_one(stem, outdir, degree, refine, grid=129, env=None):
     """One MEQ solve at a given degree and refinement; returns its cost and error."""
     base = os.path.join(outdir, f"{stem}.toml")
-    text = open(base).read()
+    work = benchpaths.out("perf", stem)
+    text = benchpaths.read_example(base)
     text = re.sub(r"^PolynomialDegree = .*$", f"PolynomialDegree = {degree}",
                   text, flags=re.M)
     text = re.sub(r"^RefinementLevels = .*$", f"RefinementLevels = {refine}",
@@ -38,7 +46,7 @@ def run_one(stem, outdir, degree, refine, grid=129, env=None):
     text = re.sub(r"^GridNR = .*$", f"GridNR = {grid}", text, flags=re.M)
     text = re.sub(r"^GridNZ = .*$", f"GridNZ = {grid}", text, flags=re.M)
     text = text.replace(f'Prefix = "{stem}"', 'Prefix = "perf"')
-    path = os.path.join(outdir, "perf.toml")
+    path = os.path.join(work, "perf.toml")
     open(path, "w").write(text)
 
     e = dict(os.environ)
@@ -49,7 +57,7 @@ def run_one(stem, outdir, degree, refine, grid=129, env=None):
 
     t0 = time.perf_counter()
     proc = subprocess.run([MEQ, path], capture_output=True, text=True,
-                          cwd=outdir, env=e, timeout=1800)
+                          cwd=work, env=e, timeout=1800)
     wall = time.perf_counter() - t0
     if proc.returncode != 0:
         return dict(ok=False, wall=wall, log=proc.stdout + proc.stderr)
@@ -69,7 +77,7 @@ def run_one(stem, outdir, degree, refine, grid=129, env=None):
     result = dict(ok=True, wall=wall, iters=iters, elements=elements, dofs=dofs)
     if grid > 17:
         comparison = compare(os.path.join(outdir, f"{stem}.npz"),
-                    os.path.join(outdir, "perf.nc"),
+                    os.path.join(work, "perf.nc"),
                     os.path.join(outdir, f"{stem}-meta.json"))
         result["rel_l2"] = comparison["rel_l2"]
     return result

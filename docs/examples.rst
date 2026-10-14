@@ -6,12 +6,14 @@ are known to work and known to stay working. Each carries a long header
 explaining what it demonstrates and — usually more usefully — what it does
 *not*.
 
-Run them from the repository root, since several name their profile tables by
-relative path:
+Run them from a directory under ``runs/``, where the output lands. A profile
+table or mesh an example reads is named relative to the example itself, so it
+is found from any working directory:
 
 .. code-block:: sh
 
-   ./build/meq examples/soloviev-nstx.toml
+   mkdir -p runs/soloviev && cd runs/soloviev
+   ../../install/double/bin/meq ../../source/examples/soloviev-nstx.toml
 
 .. list-table::
    :header-rows: 1
@@ -89,7 +91,8 @@ relative path:
        support cut off at the throat, ``geq``'s twenty coil filaments
        subtracted, and the mesh aligned to the cutoff by ``[mesh.generate]``.
        Its profile tables are ``geq``'s reference, named in place under
-       ``tools/geq-benchmark/reference/rotating/``. Run it with ``meq-run``;
+       ``tools/geq-benchmark/reference/rotating/`` in the source tree. Run it with
+       ``meq-run``;
        :ref:`rotation-mirror`.
    * - ``fixed-h-circular.toml``, ``fixed-a-testtokamak.toml``,
        ``fixed-e-diamagnetic.toml``, ``fixed-d-tcv.toml``,

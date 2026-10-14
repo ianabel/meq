@@ -2,7 +2,7 @@
 # which is how every equilibrium code poses them, and which makes psi on the
 # magnetic axis an UNKNOWN of the non-linear system rather than an input.
 #
-#     meq examples/rotating-normalised.toml
+#     meq ../../source/examples/rotating-normalised.toml
 #
 # The physics, the species and the gauge are examples/rotating-rectangle.toml's;
 # read that file first. The equation is eq (136) of refs/RotatingGK.pdf -- Abel,
@@ -117,7 +117,7 @@ Temperature = 1.0              # keV
 TemperatureScale = 1.602176634e-16
 # The density on R = ReferenceRadius as a function of NORMALISED flux. A
 # constant here would make dp/dPsi vanish and rotation would never reach psi.
-DensityFile = "examples/rotating-density-normalised.dat"
+DensityFile = "rotating-density-normalised.dat"
 DensityScale = 1.0e20
 
 [[source.species]]

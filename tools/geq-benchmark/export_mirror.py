@@ -59,13 +59,18 @@ condition gives Phi' in closed form, so the tables carry exact slopes and
 meq::Profile's Hermite cubic reproduces geq's own splines rather than a
 difference of them.
 
-USAGE
+USAGE, from source/
 
     PYTHONPATH=/home/ian/projects/geq/src \
     tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_mirror.py \
-        --case two --out tools/geq-benchmark/reference/two
+        --case two
 
-Written per case: meta.txt, omega.dat, T_<name>.dat, n_<name>.dat, points.dat.
+Written per case: geq's ANSWER, points.dat and points_tight.dat, to --out,
+default runs/geq-benchmark/reference/<case>/, the path the C++ tests read; and
+THE PROBLEM, meta.txt, omega.dat, T_<name>.dat, n_<name>.dat and
+Nraw_<name>.dat, to --tables, default the same directory. The tracked problem
+is tools/geq-benchmark/reference/<case>/; each table written is reported
+against it, and `--tables tools/geq-benchmark/reference/<case>` refreshes it.
 See README.md for the file formats and for what the numbers came out at.
 """
 
@@ -88,6 +93,9 @@ from freegs4e.species import AllSpecies, SingleSpecies
 
 from geq.machine import make_mirror_machine_from_field
 from geq.profiles import generate_density_z0_profile, generate_temperature_profile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import meqpaths  # noqa: E402
 
 qe = constants.elementary_charge
 MU0 = 4.0e-7 * np.pi
@@ -362,10 +370,49 @@ def write_table(path, x, value, slope, header):
             fh.write(f"{a:.17e} {b:.17e} {c:.17e}\n")
 
 
+#: The TRACKED problem, one directory per case. geq's answers are not here.
+TRACKED = meqpaths.source("tools", "geq-benchmark", "reference")
+
+
+def answers_dir(case):
+    """runs/geq-benchmark/reference/<case>/: where geq's ANSWER to `case` goes,
+    under the file names the C++ tests read."""
+    return meqpaths.runs("geq-benchmark", "reference", case, create=False)
+
+
+def against_tracked(tables, case):
+    """Report the problem tables just written to `tables` against the tracked
+    ones. The tests pair the TRACKED problem with the answer under runs/, so an
+    answer regenerated from a problem that has moved answers a different one."""
+    tracked = os.path.join(TRACKED, case)
+    if not os.path.isdir(tracked) or os.path.realpath(tables) == os.path.realpath(tracked):
+        return
+    names = sorted(n for n in os.listdir(tracked)
+                   if os.path.isfile(os.path.join(tables, n)))
+    differ = []
+    for n in names:
+        with open(os.path.join(tables, n), "rb") as a, \
+                open(os.path.join(tracked, n), "rb") as b:
+            if a.read() != b.read():
+                differ.append(n)
+    where = os.path.relpath(tracked, meqpaths.SOURCE)
+    if differ:
+        print(f"THE PROBLEM MOVED: {' '.join(differ)} differ from the tracked {where}/,"
+              f" which the tests read. Refresh it with --tables {tracked}")
+    else:
+        print(f"problem tables      {len(names)} identical to the tracked {where}/")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--case", choices=("two", "three"), default="two")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None,
+                    help="geq's answer, points*.dat; default "
+                         "runs/geq-benchmark/reference/<case>")
+    ap.add_argument("--tables", default=None,
+                    help="the problem, meta.txt and the profile tables; default "
+                         "--out. tools/geq-benchmark/reference/<case> refreshes "
+                         "the tracked copy")
     ap.add_argument("--nx", type=int, default=65)
     ap.add_argument("--ny", type=int, default=65)
     ap.add_argument("--knots", type=int, default=513,
@@ -382,6 +429,8 @@ def main(argv=None):
                     help="half-height of the domain; the default ends it at the "
                          "coil planes, larger keeps the expander inside")
     args = ap.parse_args(argv)
+    args.out = args.out or answers_dir(args.case)
+    args.tables = args.tables or args.out
 
     eq, all_species, psi_ax, psi_bnd, names = build_state(
         args.case, args.nx, args.ny, args.omega_axis,
@@ -419,6 +468,7 @@ def main(argv=None):
         /(all_species.species_dict["electron"].get_temp(0.5)*qe)))
 
     os.makedirs(args.out, exist_ok=True)
+    os.makedirs(args.tables, exist_ok=True)
 
     # geq's own current density at its own converged state -- the reference.
     psi2d = eq.psi()
@@ -458,19 +508,19 @@ def main(argv=None):
             fh.write(f"{R:.17e} {z:.17e} {p:.17e} {f:.17e}\n")
 
     write_table(
-        os.path.join(args.out, "omega.dat"), psi, omega, domega,
+        os.path.join(args.tables, "omega.dat"), psi, omega, domega,
         "omega( psi ) in rad/s, sampled from geq's own spline so that both\n"
         "codes read one definition of the rotation.",
     )
     for name in names:
         a = arrays[name]
         write_table(
-            os.path.join(args.out, f"T_{name}.dat"), psi, a["temp"], a["dT_dpsi"],
+            os.path.join(args.tables, f"T_{name}.dat"), psi, a["temp"], a["dT_dpsi"],
             f"T_{name}( psi ) in JOULES -- geq tabulates eV and meq::Species\n"
             "documents joules, so the conversion is here and not in the TOML.",
         )
         write_table(
-            os.path.join(args.out, f"n_{name}.dat"), psi, n0[name], dn0[name],
+            os.path.join(args.tables, f"n_{name}.dat"), psi, n0[name], dn0[name],
             f"n_{name}( psi ) in m^-3 ON THE CURVE R = {args.R_ref:.17e}, which\n"
             "is what meq's gauge phi_0( R_ref, psi ) = 0 makes N_s of (96) mean.\n"
             "NOT geq's N_s: see the module docstring for why no single rescaling\n"
@@ -482,14 +532,14 @@ def main(argv=None):
         # to meq is the mistake the module docstring warns about, and a test that
         # cannot tell the two apart is not testing the gauge.
         write_table(
-            os.path.join(args.out, f"Nraw_{name}.dat"), psi,
+            os.path.join(args.tables, f"Nraw_{name}.dat"), psi,
             a["flux_density"], a["dlnN_dpsi"] * a["flux_density"],
             f"N_{name}( psi ) IN geq'S OWN GAUGE -- phi_0 pinned at one global\n"
             "point, psi_n = 0.5 on the midplane. NOT what meq::Species wants.\n"
             "Present so the comparison can assert that using it is WRONG.",
         )
 
-    with open(os.path.join(args.out, "meta.txt"), "w") as fh:
+    with open(os.path.join(args.tables, "meta.txt"), "w") as fh:
         fh.write(f"case {args.case}\n")
         fh.write(f"mach_at_half {mach_half:.17e}\n")
         fh.write(f"R_ref {args.R_ref:.17e}\n")
@@ -537,7 +587,9 @@ def main(argv=None):
     print(f"|F_ref|             max {np.max(np.abs(f_ref[sel])):.6e}")
     print(f"phi_0 tightening    {shift:.6e} relative in geq's OWN F -- the floor"
           " of any comparison against points.dat")
-    print(f"written to          {args.out}")
+    print(f"answer written to   {args.out}")
+    print(f"problem written to  {args.tables}")
+    against_tracked(args.tables, args.case)
     return 0
 
 

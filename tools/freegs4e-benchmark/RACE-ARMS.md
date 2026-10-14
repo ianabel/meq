@@ -9,9 +9,10 @@ reports what it computed and the orchestrator applies every acceptance test.
 
 ## The problem file
 
-`inverse_problem.py` writes it from a reference set (`ref-interp/` by default:
-`fgsref.py --shaped --interpolating-profiles`, so every code solves the analytic
-profile). It is a list of configurations in the format M-254's `problem.json`
+`inverse_problem.py` writes it from a reference set
+(`runs/freegs4e-benchmark/ref-interp/` by default: `fgsref.py --shaped
+--interpolating-profiles`, so every code solves the analytic profile). It is a
+list of configurations in the format M-254's `problem.json`
 introduced, plus:
 
 | field | what |

@@ -54,6 +54,10 @@ USAGE
                                    [--psit 1e-9] [--reg 1e-8] [--quad 6]
     venv/bin/python inverse_nke.py OUTDIR --table
     venv/bin/python inverse_nke.py OUTDIR --one CONFIG --nx N --arm ARM
+
+The problem is $INVCMP_PROBLEM, default runs/freegs4e-benchmark/ref-interp/
+problem.json; --table reads MEQ's inverse logs from $INVCMP_MEQ_RUNS, default
+interp/ beside the problem file.
 """
 import argparse
 import contextlib
@@ -68,11 +72,16 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import benchpaths                                               # noqa: E402
+
+# The problem file, inverse_problem.py's, and the directory of MEQ's
+# inverse_compare.py runs whose logs --table reads beside it.
 PROBLEM = os.environ.get(
     "INVCMP_PROBLEM",
-    "/tmp/claude-1000/-home-ian-projects-meq/91553931-83b4-4f7b-8d5d-9a1e25e12e16"
-    "/scratchpad/invcmp/problem.json")
-MEQ_RUNS = os.path.join(os.path.dirname(PROBLEM), "interp")
+    os.path.join(benchpaths.OUT, "ref-interp", "problem.json"))
+MEQ_RUNS = os.environ.get("INVCMP_MEQ_RUNS",
+                          os.path.join(os.path.dirname(PROBLEM), "interp"))
 
 # freegs4e.machine's solenoid turn counts; problem.json gives the extent only.
 SOLENOID_NS = {"machine-c-mast": {"P1": 100},

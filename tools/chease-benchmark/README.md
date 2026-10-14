@@ -602,18 +602,23 @@ draws it — the same gap `tools/desc-benchmark` records.
 ## Running it
 
 ```sh
-cd tools/chease-benchmark          # from the MEQ checkout
+cd /home/ian/projects/meq/source/tools/chease-benchmark
 V=../freegs4e-benchmark/venv/bin/python
+R=/home/ian/projects/meq/runs/chease-benchmark      # what these scripts write
 
 $V convert_chease.py fixed-h-circular --check         # the posing, audited
-$V cheaserun.py      fixed-h-circular --ns 40 --nt 40 # one CHEASE solve
+$V cheaserun.py      fixed-h-circular --ns 40 --nt 40 # one CHEASE solve, into $R
+( mkdir -p $R/meq && cd $R/meq && /home/ian/projects/meq/install/double/bin/meq \
+      /home/ian/projects/meq/source/examples/fixed-h-circular.toml )
 $V compare_chease.py fixed-h-circular \
-      --chease runs/fixed-h-circular-chease-NS40NT40NPSI100.npz \
-      --meq /tmp/x/fixed-h-circular.nc
-$V converge.py       fixed-h-circular --mapping-control
+      --chease $R/fixed-h-circular-chease-NS40NT40NPSI100.npz \
+      --meq $R/meq/fixed-h-circular.nc
+$V converge.py       fixed-h-circular --mapping-control   # into $R/converge
 ```
 
-`CHEASE_EXE` overrides the binary's path.
+`CHEASE_EXE` overrides the binary's path. The MEQ arm of `converge.py` is the
+installed `install/double/bin/meq`, through `race_desc.run_meq`; `MEQ_BUILD` or
+`MEQ_INSTALL` selects another install.
 
 **CHEASE reads `EXPEQ` and `chease_namelist` from the working directory by
 hard-coded name and writes twenty-odd files beside them**, so every run gets its

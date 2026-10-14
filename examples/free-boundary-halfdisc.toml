@@ -84,8 +84,8 @@ PsiAxis = 0.1
 # makes this a readable example rather than an SI one spanning eleven orders.
 # The two tables are written against Psi and say so in their headers.
 Mu0 = 1.0
-PPrimeFile = "examples/fb-pprime.dat"
-GGPrimeFile = "examples/fb-ggprime.dat"
+PPrimeFile = "fb-pprime.dat"
+GGPrimeFile = "fb-ggprime.dat"
 # THE TABLES SPAN Psi IN [ -0.6, 1.4 ] AND THAT RANGE IS LOAD BEARING.
 # meq::SplineProfile CLAMPS outside its knots -- value held at the endpoint,
 # derivative zero -- which is deliberate, since a Newton iterate routinely

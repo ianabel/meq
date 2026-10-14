@@ -52,8 +52,8 @@ USAGE
 `--set` overrides one key of the shipped file in every arm -- the resolution
 study is `--set discretisation.PolynomialDegree=3`,
 `--set mesh.generate.PlasmaSize=0.0634` and `--set boundary.exterior.Modes=20`.
-A [mesh.generate] override sends the mesh to OUTDIR, so the shipped .msh is
-never regenerated in place.
+Every run is made in OUTDIR, so the meshes meq-run generates land there; a
+[mesh.generate] override gives each arm its own.
 
 `--guess exact` starts every arm from the REFERENCE's own equilibrium,
 rebuilt by Green's functions over MEQ's half-disc (mkexactguess.py at n = 128,
@@ -62,7 +62,7 @@ psi_axis. It separates "MEQ cannot solve this problem" from "MEQ's cold start
 lands in another basin": the answer is in the starting position.
 
 `--reference DIR` reads the freegs4e references -- currents, psi, axis,
-X-points -- from DIR rather than from beside this script.
+X-points -- from DIR rather than from runs/freegs4e-benchmark/.
 `fgsref.py --interpolating-profiles` writes a set solved with the analytic
 profile MEQ's tables carry, where the committed set solved a smoothing
 spline of it that moves ff' by about 1.3e-02; THAT is the same-profile
@@ -81,10 +81,10 @@ import numpy as np
 import scipy.linalg
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 os.environ.setdefault("FGSREF_OUT", "/tmp")
 
+import benchpaths                                              # noqa: E402
 from fgsref import CASES                                       # noqa: E402
 from circuits import MACHINES, wiring                          # noqa: E402
 from inverse import (NUM, rewire, run, reference_rows,         # noqa: E402
@@ -150,7 +150,7 @@ def main():
         at = args.index("--arms")
         arms = args[at + 1].split(",")
         del args[at:at + 2]
-    refdir = HERE
+    refdir = benchpaths.OUT
     if "--reference" in args:
         at = args.index("--reference")
         refdir = os.path.abspath(args[at + 1])
@@ -170,7 +170,6 @@ def main():
         overrides.append((table, key, value))
         del args[at:at + 2]
     want = args
-    rel_out = os.path.relpath(out, ROOT)
     os.makedirs(out, exist_ok=True)
     cases = {c["name"]: c for c in CASES}
     results = []
@@ -191,7 +190,8 @@ def main():
             if not os.path.exists(npz_path):
                 continue        # a --reference set need not carry every case
             npz = np.load(npz_path, allow_pickle=True)
-            shipped = open(os.path.join(ROOT, "examples", name + ".toml")).read()
+            shipped = benchpaths.read_example(
+                os.path.join(benchpaths.EXAMPLES, name + ".toml"))
 
             A, supplies, _ = target_response(npz_path, case, wires)
             current = supply_currents(os.path.join(refdir, npz_name + ".json"),
@@ -232,10 +232,10 @@ def main():
                 for table, key, value in overrides:
                     text = put_key(text, table, key, value)
                 if any(t == "mesh.generate" for t, _, _ in overrides):
-                    text = set_key(text, "mesh", "File", '"%s"' % os.path.join(
-                        rel_out, "%s-%s.msh" % (name, arm)))
-                text = set_key(text, "output", "Prefix", '"%s"' % os.path.join(
-                    rel_out, "%s-%s" % (name, arm)))
+                    text = set_key(text, "mesh", "File",
+                                   '"%s-%s.msh"' % (name, arm))
+                text = set_key(text, "output", "Prefix",
+                               '"%s-%s"' % (name, arm))
                 head = ("# %s, %s arm, by inverse_compare.py: edit the script,"
                         " not this.\n# Free: %s\n\n" % (
                             name, arm, ", ".join(free) if arm != "forward"

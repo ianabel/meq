@@ -53,7 +53,7 @@
 # A gmsh half-disc reaching R = 0 EXACTLY, with the four conductors meshed to
 # rather than cut.  tools/mesh/halfdisc.py writes it; mfem::Mesh::MakeCartesian2D
 # cannot make this geometry and the exterior expansion is valid on no other.
-File = "examples/limited-tokamak.msh"
+File = "limited-tokamak.msh"
 
 [discretisation]
 PolynomialDegree = 3
@@ -85,8 +85,8 @@ Mu0 = 1.25663706212e-6
 # NORMALISED flux.  Their headers record the factor of the span that separates
 # them from freegs4e's own arrays, and why getting it wrong is invisible while
 # PlasmaCurrent is set.
-PPrimeFile = "examples/limited-tokamak-pprime.dat"
-GGPrimeFile = "examples/limited-tokamak-ggprime.dat"
+PPrimeFile = "limited-tokamak-pprime.dat"
+GGPrimeFile = "limited-tokamak-ggprime.dat"
 
 # The four poloidal field coils, as rectangles of half-width 0.05.  freegs4e's
 # are FILAMENTS, which differ by a quadrupole term of order ( w/d )^2 -- about
@@ -168,8 +168,8 @@ Modes = 10
 
 [initialguess]
 Type = "gridfunction"
-File = "examples/limited-tokamak-guess.gf"
-MeshFile = "examples/limited-tokamak-guess.mesh"
+File = "limited-tokamak-guess.gf"
+MeshFile = "limited-tokamak-guess.mesh"
 
 [output]
 Prefix = "limited-tokamak"

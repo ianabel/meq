@@ -83,6 +83,7 @@ os.environ.setdefault("FGSREF_OUT", "/tmp")
 # for this fork rather than choices of ours: freegs4e split Jtor into
 # Jtor_part1/part2 and left no Profile.Jtor() for its own solve path
 # (WORKAROUND 2), and freegs4e.picard.solve has no status return.
+import benchpaths                                               # noqa: E402
 from fgsref import CASES, GeneralProfile, picard_loop          # noqa: E402
 
 from freegs4e import equilibrium, machine                       # noqa: E402
@@ -511,7 +512,7 @@ The reference itself is an INVERSE solve, so its currents are an output; this
 is the forward re-solve of them, and it must reproduce the reference.  See
 CLAUDE_FB.md, *Standing rule: compare in the same mode MEQ solves in*.
 
-    PYTHONPATH=/home/ian/projects/freegs4e python3 {stem}_forward.py [nx]
+    PYTHONPATH={freegs4e} python3 {stem}_forward.py [nx]
 """
 import os
 import sys
@@ -522,7 +523,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, {bench!r})
 import forward
 
-NPZ = os.path.join({bench!r}, "{name}.npz")
+NPZ = os.path.join({refs!r}, "{name}.npz")
 
 
 def main():
@@ -557,17 +558,20 @@ def write_input(name, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "%s_forward.py" % name)
     with open(path, "w") as fh:
-        fh.write(TEMPLATE.format(name=name, stem=name, bench=HERE))
+        fh.write(TEMPLATE.format(name=name, stem=name, bench=HERE,
+                                 refs=benchpaths.OUT,
+                                 freegs4e=benchpaths.FREEGS4E))
     return path
 
 
 def references():
-    """Every reference .npz beside this script, filaments and shaped."""
+    """Every reference .npz in runs/freegs4e-benchmark/, filaments and
+    shaped."""
     found = []
     for c in CASES:
         for suffix in ("", "_shaped"):
             name = c["name"] + suffix
-            if os.path.exists(os.path.join(HERE, name + ".npz")):
+            if os.path.exists(os.path.join(benchpaths.OUT, name + ".npz")):
                 found.append((name, c))
     return found
 
@@ -634,7 +638,8 @@ def main():
 
     if trace:
         for name, case in rows:
-            npz = np.load(os.path.join(HERE, name + ".npz"), allow_pickle=True)
+            npz = np.load(os.path.join(benchpaths.OUT, name + ".npz"),
+                          allow_pickle=True)
             for nx in (grids or [None]):
                 print("\n  %s   FORWARD, axis watched%s"
                       % (name,
@@ -698,7 +703,8 @@ def main():
                  "psi_axis", "psi_bndry", "axis m", "dI", "wall s"),
               flush=True)
         for name, case in rows:
-            npz = np.load(os.path.join(HERE, name + ".npz"), allow_pickle=True)
+            npz = np.load(os.path.join(benchpaths.OUT, name + ".npz"),
+                          allow_pickle=True)
             try:
                 R = solve_from_cold(npz, case, grids[0] if grids else None,
                                     native_name=name if native else None)
@@ -741,7 +747,8 @@ def main():
           % ("case", "nx", "status", "its", "L", "psi_axis", "vs inverse",
              "max |dI|"), flush=True)
     for name, case in rows:
-        npz = np.load(os.path.join(HERE, name + ".npz"), allow_pickle=True)
+        npz = np.load(os.path.join(benchpaths.OUT, name + ".npz"),
+                      allow_pickle=True)
         for nx in (grids or [None]):
             try:
                 if cold_forward:

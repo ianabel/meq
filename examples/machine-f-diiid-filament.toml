@@ -2,7 +2,7 @@
 # examples/machine-f-diiid.toml WITH ITS 18 CONDUCTORS TAKEN OUT OF THE
 # MESH AND EVALUATED ANALYTICALLY, AND STARTED COLD.
 #
-#     ./build/meq-run examples/machine-f-diiid-filament.toml
+#     meq-run ../../source/examples/machine-f-diiid-filament.toml
 #
 # DIFF IT AGAINST examples/machine-f-diiid.toml: four lines differ and
 # every one of them has to, which is COIL-SUBTRACTION-PLAN.md's own list.
@@ -72,7 +72,7 @@
 # tools/freegs4e-benchmark/make_all.sh and re-apply the four lines above.
 
 [mesh]
-File = "examples/machine-f-diiid-filament.msh"
+File = "machine-f-diiid-filament.msh"
 
 # THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
 # [boundary.exterior] Radius = 3.4, which has to fit strictly inside.
@@ -112,8 +112,8 @@ ConfineToPlasma = true
 PsiAxis = 2.887839087e-01
 PlasmaCurrent = 1.0000000003e+06
 Mu0 = 1.25663706212e-6
-PPrimeFile = "examples/machine-f-diiid-pprime.dat"
-GGPrimeFile = "examples/machine-f-diiid-ggprime.dat"
+PPrimeFile = "machine-f-diiid-pprime.dat"
+GGPrimeFile = "machine-f-diiid-ggprime.dat"
 
 # THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
 # --coil rectangles from these blocks, in this order, so the mesh is
@@ -305,8 +305,8 @@ Modes = 10
 # from a guess that knows only the machine's design.
 [initialguess]
 Type = "gridfunction"
-File = "examples/machine-f-diiid-filament-guess.gf"
-MeshFile = "examples/machine-f-diiid-filament-guess.mesh"
+File = "machine-f-diiid-filament-guess.gf"
+MeshFile = "machine-f-diiid-filament-guess.mesh"
 
 [conductors]
 Model = "filament"

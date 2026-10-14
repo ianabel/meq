@@ -472,7 +472,7 @@ def main():
 	                                        < args.self_consistent_tol),
 	           g_boundary=args.g_boundary, p_boundary=args.p_boundary)
 
-	out = args.out or os.path.join(HERE, "runs")
+	out = args.out or convert.meqpaths.runs("desc-benchmark")
 	os.makedirs(out, exist_ok=True)
 	if not args.no_field:
 		field, _ = flux_on_grid(eq, R, Z, n_rho=args.cloud,

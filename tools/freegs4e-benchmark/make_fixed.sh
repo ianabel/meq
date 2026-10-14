@@ -1,7 +1,7 @@
 #!/bin/sh
 # Half a dozen MACHINE-RELEVANT FIXED-BOUNDARY cases -> examples/.
 #
-#     sh tools/freegs4e-benchmark/make_fixed.sh [examples-dir] [reference-dir]
+#     sh source/tools/freegs4e-benchmark/make_fixed.sh [examples-dir] [reference-dir]
 #
 # THE RECIPE IS IAN'S: solve a machine FREE boundary in freegs4e, fit MXH to its
 # psi_n = 0.95 surface, and hand MEQ that curve with psi = 0 on it.  psi is
@@ -15,8 +15,10 @@
 # which is everything a run needs; the .npz is needed only to COMPARE against
 # freegs4e afterwards.  Rebuild them with
 #
-#     FGSREF_OUT=/some/where PYTHONPATH=../freegs4e \
+#     PYTHONPATH=<project>/../freegs4e \
 #         venv/bin/python fgsref.py --shaped --nx=257 --seed-from=auto
+#
+# into runs/freegs4e-benchmark/ref-n257/ ( FGSREF_OUT=DIR for DIR/n257/ ).
 #
 # which is about six minutes for all nine machines because --seed-from spends
 # the grid nesting.  257^2 rather than the committed 129^2 because the MXH fit
@@ -44,14 +46,17 @@
 #                                                  near double null
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-out=${1:-$here/../../examples}
+src=$(cd "$here/../.." && pwd)
+runs=${MEQ_RUNS_DIR:-$src/../runs}
+out=${1:-$src/examples}
 # The fixed-boundary rung reads the 257^2 shaped references it was BUILT from,
-# kept apart in ref-n257-fixed-boundary/ when ref-n257/ was regenerated with
-# shaped.py's turns and quadrature fixes (MEASUREMENTS.md M-255). A
+# kept apart in runs/freegs4e-benchmark/ref-n257-fixed-boundary/ when
+# ref-n257/ was regenerated with shaped.py's turns and quadrature fixes
+# (MEASUREMENTS.md M-255). A
 # fixed-boundary case uses only the reference's boundary and profiles, which
 # are a self-consistent equilibrium whatever the coils were, so the shipped
 # fixed-* cases stand; this keeps them reproducible.
-refs=${2:-$here/ref-n257-fixed-boundary}
+refs=${2:-$runs/freegs4e-benchmark/ref-n257-fixed-boundary}
 
 if [ ! -d "$refs" ]; then
 	echo "no reference directory $refs -- see the header for how to build it" >&2

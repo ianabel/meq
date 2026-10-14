@@ -24,7 +24,7 @@ potential, for an arbitrary number of species in a local gauge.
    Charge = 1.0
    Temperature = 1.0
    TemperatureScale = 1.602176634e-16
-   DensityFile = "examples/rotating-density.dat"
+   DensityFile = "rotating-density.dat"
    DensityScale = 1.0e20
 
    [[source.species]]
@@ -370,7 +370,7 @@ file:
 
 .. code-block:: sh
 
-   ./build/meq-run examples/mirror-rotating.toml
+   ../../install/double/bin/meq-run ../../source/examples/mirror-rotating.toml
 
 It is ``geq``'s machine and ``geq``'s problem — two coil packs carried as twenty
 point filaments, electrons and deuterons in rigid rotation — which the test

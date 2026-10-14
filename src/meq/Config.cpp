@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <initializer_list>
 #include <limits>
 #include <map>
@@ -1061,6 +1062,44 @@ namespace meq
 	Configuration::Configuration( std::string const & fileName )
 		: Configuration( parseFile( fileName ), fileName )
 	{
+		resolveInputPaths( std::filesystem::path( fileName ).parent_path().string() );
+	}
+
+	void Configuration::resolveInputPaths( std::string const & directory )
+	{
+		if ( directory.empty() )
+			return;
+
+		auto resolve = [ &directory ]( std::string & path )
+		{
+			if ( path.empty() || std::filesystem::path( path ).is_absolute() )
+				return;
+			path = ( std::filesystem::path( directory ) / path ).lexically_normal().string();
+		};
+
+		// A generated mesh is the run's product, not the file's input.
+		if ( !meshOptions.generate.given )
+			resolve( meshOptions.file );
+
+		if ( auto * mhd = std::get_if<MHDParameters>( &sourceOptions.parameters ) )
+		{
+			resolve( mhd->pPrimeFile );
+			resolve( mhd->ggPrimeFile );
+			resolve( mhd->safetyFactorFile );
+		}
+		if ( auto * rotating = std::get_if<RotatingParameters>( &sourceOptions.parameters ) )
+		{
+			resolve( rotating->omegaFile );
+			resolve( rotating->ggPrimeFile );
+			for ( SpeciesParameters & one : rotating->species )
+			{
+				resolve( one.temperatureFile );
+				resolve( one.densityFile );
+			}
+		}
+
+		resolve( initialGuessOptions.file );
+		resolve( initialGuessOptions.meshFile );
 	}
 
 	Configuration::Configuration( toml::value const & document, std::string const & source )

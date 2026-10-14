@@ -2,7 +2,7 @@
 # pair of external conductors added, and the only example in which a current
 # that is DATA rather than a function of psi enters F.
 #
-#     meq examples/coils-rectangle.toml
+#     meq ../../source/examples/coils-rectangle.toml
 #
 # Stage FB-2 of FREE-BOUNDARY-PLAN.md. The equation is unchanged --
 #
@@ -212,9 +212,9 @@ Tau = 1.0
 # The plasma half, identical to examples/mhd-rectangle.toml. Its header
 # documents both tables and both scales; nothing here changes them.
 Type = "mhd"
-PPrimeFile = "examples/mhd-pprime.dat"
+PPrimeFile = "mhd-pprime.dat"
 PPrimeScale = 1.0e6
-GGPrimeFile = "examples/mhd-ggprime.dat"
+GGPrimeFile = "mhd-ggprime.dat"
 
 # A VERTICAL-FIELD PAIR, OUTBOARD, up-down symmetric. Written as two blocks
 # because that is what a machine description is: one [[coils]] block per

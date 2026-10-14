@@ -35,10 +35,10 @@
 #
 # RUN IT WITH meq-run, WHICH MAKES THE MESH:
 #
-#     ./build/meq-run examples/machine-b-ffprime-shaped.toml
+#     meq-run ../../source/examples/machine-b-ffprime-shaped.toml
 
 [mesh]
-File = "examples/machine-b-ffprime-shaped.msh"
+File = "machine-b-ffprime-shaped.msh"
 
 # THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
 # [boundary.exterior] Radius = 2.4, which has to fit strictly inside.
@@ -80,8 +80,8 @@ ConfineToPlasma = true
 PsiAxis = 7.608769356e-02
 PlasmaCurrent = 2.4999999854e+05
 Mu0 = 1.25663706212e-6
-PPrimeFile = "examples/machine-b-ffprime-shaped-pprime.dat"
-GGPrimeFile = "examples/machine-b-ffprime-shaped-ggprime.dat"
+PPrimeFile = "machine-b-ffprime-shaped-pprime.dat"
+GGPrimeFile = "machine-b-ffprime-shaped-ggprime.dat"
 
 # THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
 # --coil rectangles from these blocks, in this order, so the mesh is
@@ -156,8 +156,8 @@ Modes = 10
 # and is a different benchmark.
 [initialguess]
 Type = "gridfunction"
-File = "examples/machine-b-ffprime-shaped-guess.gf"
-MeshFile = "examples/machine-b-ffprime-shaped-guess.mesh"
+File = "machine-b-ffprime-shaped-guess.gf"
+MeshFile = "machine-b-ffprime-shaped-guess.mesh"
 
 [output]
 Prefix = "machine-b-ffprime-shaped"

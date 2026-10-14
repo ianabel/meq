@@ -25,8 +25,15 @@
 # version of that section aborted.
 #
 # Usage:  tests/performance/inversion-scan.sh [build-dir] [repeats]
+#
+# Runs from any working directory. build-dir defaults to the project's
+# builds/double, found from this script's own location (source/tests/performance
+# under the project); a relative build-dir is taken from the working directory.
+# Nothing is written: the binary reads no file and prints its tables.
 
-BUILD="${1:-build}"
+HERE=$(cd "$(dirname "$0")" && pwd -P)
+PROJECT=$(cd "$HERE/../../.." && pwd -P)
+BUILD="${1:-$PROJECT/builds/double}"
 REPEATS="${2:-2}"
 BIN="$BUILD/tests/InversionScaling"
 

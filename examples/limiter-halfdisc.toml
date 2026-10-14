@@ -39,7 +39,7 @@
 # A gmsh half-disc reaching R = 0 EXACTLY.  mfem::Mesh::MakeCartesian2D cannot
 # make this geometry, and the limiter circle has to be fragmented in rather than
 # cut, which is the whole point of the file.
-File = "examples/limiter-halfdisc.msh"
+File = "limiter-halfdisc.msh"
 
 [discretisation]
 PolynomialDegree = 2
@@ -54,8 +54,8 @@ PsiAxis = 0.30
 Mu0 = 1.0
 # NO ConfineToPlasma: the support does not move here, so a constant p' -- j = 0
 # at the edge -- is admissible.  See the header of the pprime table.
-PPrimeFile = "examples/limiter-halfdisc-pprime.dat"
-GGPrimeFile = "examples/limiter-halfdisc-ggprime.dat"
+PPrimeFile = "limiter-halfdisc-pprime.dat"
+GGPrimeFile = "limiter-halfdisc-ggprime.dat"
 
 [boundary]
 Type = "zero"

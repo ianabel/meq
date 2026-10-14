@@ -5,11 +5,17 @@ implements; inverse_problem.py writes the problem file they all read. This is
 the orchestrator: it decides nothing about any code's answer except by the
 acceptance test below, and it records everything.
 
-    venv/bin/python race_inverse.py run OUTDIR --config machine-f-diiid-shaped
-        [--problem ref-interp/problem.json] [--codes meq,nice,freegs4e,freegsnke]
+    venv/bin/python race_inverse.py run STAGE --config machine-f-diiid-shaped
+        [--problem PROBLEM] [--codes meq,nice,freegs4e,freegsnke]
         [--starts cold,warm] [--repeats 3] [--max-rung N] [--row-tol 1e-6]
         [--load-max 1.0] [--quiet-wait 900] [--dry-run]
-    venv/bin/python race_inverse.py summarise OUTDIR
+    venv/bin/python race_inverse.py summarise STAGE
+
+A bare STAGE name is runs/freegs4e-benchmark/race-runs/STAGE/; anything with a
+slash in it is a directory. `summarise` also finds a stage recorded in this
+directory's tracked race-runs/, and writes its summary under runs/ rather than
+over the record. PROBLEM defaults to runs/freegs4e-benchmark/ref-interp/
+problem.json, inverse_problem.py's output.
 
 THE PROTOCOL, each clause of which this tree learned once ( race.py,
 race_nke.py, MEASUREMENTS.md M-102, M-111, M-155, M-157 ).
@@ -56,15 +62,16 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 
+import benchpaths                                               # noqa: E402
 from cores import physical_cores                                # noqa: E402
 
-VENV = os.path.join(HERE, "venv", "bin", "python")
+VENV = benchpaths.VENV
 ARMS = {
     "meq": [VENV, os.path.join(HERE, "race_arm_meq.py")],
-    "nice": [VENV, "/home/ian/projects/nice/meq-race/inverse/race_arm.py"],
+    "nice": [VENV, os.path.join(benchpaths.NICE, "meq-race", "inverse",
+                                "race_arm.py")],
     "freegs4e": [VENV, os.path.join(HERE, "race_arm_fgs.py")],
     "freegsnke": [VENV, os.path.join(HERE, "race_arm_nke.py")],
 }
@@ -74,7 +81,7 @@ TARGETS = [1e-2, 1e-3, 1e-4, 1e-5]
 def env():
     threads = str(physical_cores())
     return dict(os.environ, OMP_NUM_THREADS=threads, MKL_NUM_THREADS=threads,
-                PYTHONPATH="/home/ian/projects/freegs4e", MPLBACKEND="Agg",
+                PYTHONPATH=benchpaths.FREEGS4E, MPLBACKEND="Agg",
                 FGSREF_OUT=os.environ.get("FGSREF_OUT", "/tmp"))
 
 
@@ -114,7 +121,7 @@ def run_arm(code, problem, config, rung, start, outdir, state, args, log):
     t0 = time.time()
     with open(os.path.join(outdir, "arm.log"), "w") as fh:
         rc = subprocess.run(cmd, stdout=fh, stderr=subprocess.STDOUT, env=env(),
-                            cwd=HERE).returncode
+                            cwd=outdir).returncode
     outer = time.time() - t0
     path = os.path.join(outdir, "record.json")
     record = json.load(open(path)) if os.path.exists(path) else dict(
@@ -141,8 +148,24 @@ def plan(args):
     return rungs, top
 
 
+def stage(name, recorded=False):
+    """A stage's directory: a bare name is runs/freegs4e-benchmark/race-runs/
+    <name>/, anything with a separator a path. `recorded` takes the tracked
+    race-runs/<name>/ beside this script instead when only it holds the
+    records -- a stage summarised again, whose run products are under runs/."""
+    if os.sep in name or (os.altsep and os.altsep in name):
+        return os.path.abspath(name)
+    here = os.path.join(benchpaths.OUT, "race-runs", name)
+    tracked = os.path.join(HERE, "race-runs", name)
+    records = "records.jsonl"
+    if (recorded and not os.path.exists(os.path.join(here, records))
+            and os.path.exists(os.path.join(tracked, records))):
+        return tracked
+    return here
+
+
 def cmd_run(args):
-    out = os.path.abspath(args.outdir)
+    out = stage(args.outdir)
     os.makedirs(out, exist_ok=True)
     rungs, top = plan(args)
     print("config %s, codes %s, starts %s, repeats %d" % (
@@ -203,10 +226,20 @@ def current_error(a, b, free):
 
 
 def cmd_summarise(args):
-    out = os.path.abspath(args.outdir)
+    out = stage(args.outdir, recorded=True)
     recs = [r for r in load_records(out) if r.get("start") != "seeded"]
     plan_ = json.load(open(os.path.join(out, "plan.json")))
-    problem = {p["config"]: p for p in json.load(open(plan_["problem"]))}
+    # A recorded plan names the problem file where it was written, which for
+    # the tracked stages is this directory's old ref-interp/.
+    path = plan_["problem"]
+    if not os.path.exists(path):
+        path = os.path.join(benchpaths.OUT, "ref-interp", os.path.basename(path))
+    problem = {p["config"]: p for p in json.load(open(path))}
+    # NOTHING IS WRITTEN INTO THE SOURCE TREE: a tracked stage's summary goes
+    # to its namesake under runs/.
+    written = out
+    if os.path.commonpath([out, benchpaths.SOURCE]) == benchpaths.SOURCE:
+        written = benchpaths.out("race-runs", os.path.basename(out))
     lines, summary = [], {}
     for config in sorted({r["config"] for r in recs}):
         free = [s["name"] for s in problem[config]["supplies"] if s["free"]]
@@ -286,8 +319,8 @@ def cmd_summarise(args):
                              "codes' ANSWERS; the table above compares each "
                              "code with itself.\n" % max(floor.values()))
     text = "\n".join(lines)
-    open(os.path.join(out, "summary.md"), "w").write(text)
-    json.dump(summary, open(os.path.join(out, "summary.json"), "w"), indent=1,
+    open(os.path.join(written, "summary.md"), "w").write(text)
+    json.dump(summary, open(os.path.join(written, "summary.json"), "w"), indent=1,
               default=str)
     print(text)
 
@@ -299,7 +332,8 @@ def main():
     r.add_argument("outdir")
     r.add_argument("--config", required=True)
     r.add_argument("--problem",
-                   default=os.path.join(HERE, "ref-interp", "problem.json"))
+                   default=os.path.join(benchpaths.OUT, "ref-interp",
+                                        "problem.json"))
     r.add_argument("--codes", default="meq,nice,freegs4e,freegsnke")
     r.add_argument("--starts", default="cold,warm")
     r.add_argument("--repeats", type=int, default=3)

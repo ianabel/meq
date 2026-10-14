@@ -3,14 +3,19 @@ Testing and verification
 
 .. code-block:: sh
 
-   cd build && ctest --output-on-failure
+   cd builds/double && ctest --output-on-failure
    ctest -R Soloviev                       # one, or a family
-   MKL_NUM_THREADS=1 ./tests/SolovievConvergence     # a binary directly
+   cd tests && MKL_NUM_THREADS=1 ./SolovievConvergence     # a binary directly
 
-Every registered test sets ``MKL_NUM_THREADS=1`` for itself and runs with the
-source tree as its working directory, because several of them open
-``examples/*.toml`` by relative path. Running a binary by hand needs the same
-variable set — see the warning in :doc:`install`.
+Every registered test sets ``MKL_NUM_THREADS=1`` for itself and runs in its
+build tree — ``builds/<name>/tests``, ctest's default working directory — and
+writes only there, never into the source tree. What a test reads from the
+source tree, a shipped ``examples/*.toml`` among it, it names through the
+absolute path CMake compiles in as ``MEQ_SOURCE_DIR``; an independent code's
+answer that a test compares against it reads from under ``runs/``, through
+``MEQ_RUNS_DIR``. Running a binary by hand needs the same variable set, and a
+working directory it may write into — the build tree or a directory under
+``runs/`` — see the warning in :doc:`install`.
 
 .. _testing-stance:
 
@@ -198,9 +203,13 @@ Coverage
 
 .. code-block:: sh
 
-   cmake -B build-cov -DMEQ_ENABLE_COVERAGE=ON && cmake --build build-cov -j4
-   cd build-cov && ctest
-   gcovr --root .. --filter 'src/meq/' --print-summary
+   cmake -S source -B builds/coverage -DMEQ_ENABLE_COVERAGE=ON
+   cmake --build builds/coverage -j4
+   (cd builds/coverage && ctest)
+   cd source && gcovr --root . ../builds/coverage --filter 'src/meq/' --print-summary
+
+``gcovr`` runs from ``source/`` because it reads a relative ``--filter``
+against its working directory; any report it writes belongs outside it.
 
 ``MEQ_ENABLE_COVERAGE`` is an option rather than a build type on purpose: a
 coverage build wants ``-O0`` and a release build wants ``-O3``, and that

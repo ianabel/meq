@@ -33,11 +33,13 @@
 #include <cmath>
 #include <fstream>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "mfem.hpp"
 
 #include "RoundOffFloor.hpp"
+#include "SourceTree.hpp"
 
 #include "meq/Coils.hpp"
 #include "meq/Config.hpp"
@@ -54,7 +56,7 @@ namespace meqtest
 	/// The diverted machine, taken whole: mesh, profiles, coil currents,
 	/// limiter contact, exterior expansion and guess. Nothing here is designed
 	/// or tuned -- see the header for why that matters.
-	inline char const *const machineFile = "examples/diverted-tokamak.toml";
+	inline std::string const machineFile = meq::test::sourcePath( "examples/diverted-tokamak.toml" );
 
 	/// freegs4e's own answer for this machine, from
 	/// tools/freegs4e-benchmark/A_testtokamak_classic.json. The ACTIVE null is

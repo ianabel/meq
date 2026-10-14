@@ -1,6 +1,0 @@
-# Outputs, not sources.  `runs/` is cheaserun.py's default --out and holds one
-# .npz of psi( R, z ) per ( case, resolution ) at a couple of megabytes each --
-# a 999^2 box is larger still.  The root .gitignore's `/runs/` is anchored on
-# purpose and does not reach here, so this is the same rule tools/desc-benchmark
-# states for itself.
-runs/

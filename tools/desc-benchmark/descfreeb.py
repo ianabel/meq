@@ -380,7 +380,7 @@ def main():
 	R, Z = np.array(case["ref"]["R"]), np.array(case["ref"]["Z"])
 	psi_meq, _ = descrun.flux_on_grid(eq, R, Z)
 	out = args.out or os.path.join(
-		HERE, "runs", "%s-descfreeb-M%d-%s.npz"
+		convert.meqpaths.runs("desc-benchmark"), "%s-descfreeb-M%d-%s.npz"
 		% (args.stem, args.M,
 		   args.boundary if args.blend is None
 		   else "blend%.3f" % args.blend))

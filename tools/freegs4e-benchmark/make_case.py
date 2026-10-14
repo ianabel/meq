@@ -367,8 +367,8 @@ Type = "mhd"
 # headers, and tools/freegs4e-benchmark/convert.py, which records both the
 # docstring error in freegs4e that this conversion survives and the reason the
 # normalised form is the one that can be shipped.
-PPrimeFile = "examples/{pp_name}"
-GGPrimeFile = "examples/{gg_name}"
+PPrimeFile = "{pp_name}"
+GGPrimeFile = "{gg_name}"
 
 # psi_ax IS AN UNKNOWN OF THE SOLVE AND THIS IS ITS STARTING VALUE.
 #

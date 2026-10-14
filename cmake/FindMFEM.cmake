@@ -1,15 +1,16 @@
 # FindMFEM.cmake -- locate MFEM and describe it as the imported target MFEM::MFEM.
 #
-# meq builds against an *installed* MFEM: ../mfem/install, produced by a CMake
-# build in ../mfem/build from sources in ../mfem/mfem-src, which sits on the
-# gf-hdg-subdomains-dev branch. That library is built with everything meq wants
+# meq builds against an *installed* MFEM: mfem/install beside the project
+# directory (../../mfem/install from the source tree), produced by a CMake
+# build in ../../mfem/build from sources in ../../mfem/mfem-src, which sits on
+# the meq-integration branch. That library is built with everything meq wants
 # -- SUNDIALS for KINSol, GSLIB for FindPoints, SuiteSparse for UMFPACK, LAPACK
-# -- and is meant to stay put while ../mfem-hdg-dev continues to be rebuilt for
+# -- and is meant to stay put while ../../mfem-hdg-dev continues to be rebuilt for
 # development. Pointing meq at a tree somebody is actively editing is how you
 # get a suite that fails for reasons that have nothing to do with meq.
 #
 # It still works against an in-source make build, and that is deliberate: a
-# hand-built ../mfem-hdg-dev has libmfem.a and mfem.hpp together at the top of
+# hand-built ../../mfem-hdg-dev has libmfem.a and mfem.hpp together at the top of
 # the tree, and this module handles both layouts. Set MFEM_DIR to whichever is
 # wanted.
 #
@@ -28,8 +29,8 @@
 #
 #   MFEM_DIR       Root of the MFEM tree. Cache variable, so -DMFEM_DIR=... on
 #                  the command line wins; otherwise the environment variable
-#                  MFEM_DIR is used if set; otherwise ../mfem/install next to
-#                  this project.
+#                  MFEM_DIR is used if set; otherwise mfem/install beside the
+#                  project directory, ../../mfem/install from the source tree.
 #
 # Result variables:
 #
@@ -55,7 +56,9 @@ include(FindPackageHandleStandardArgs)
 if(NOT DEFINED MFEM_DIR AND DEFINED ENV{MFEM_DIR})
 	set(_mfem_dir_default "$ENV{MFEM_DIR}")
 else()
-	set(_mfem_dir_default "${CMAKE_SOURCE_DIR}/../mfem/install")
+	# Beside the project directory, which holds source/, builds/, install/ and
+	# runs/ -- so two levels up from the source tree.
+	set(_mfem_dir_default "${CMAKE_SOURCE_DIR}/../../mfem/install")
 endif()
 
 set(MFEM_DIR "${_mfem_dir_default}" CACHE PATH

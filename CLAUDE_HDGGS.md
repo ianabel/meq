@@ -330,7 +330,7 @@ That was a breaking change for MEQ, whose default ordering it was.
 with `mfem::DarcyNPCSolver`, Newton on the full `(q, ψ, ψ̂)` system with the
 Jacobian solved by hybridized elimination, Nguyen, Peraire & Cockburn eqs
 (14)–(18). `CondenseThenLinearise` is kept as the **backup**, and the reference
-is `../mfem-hdg-dev/doc/HDG-ORDERING-API.md`.
+is `../../mfem-hdg-dev/doc/HDG-ORDERING-API.md`.
 
 **The port cost MEQ almost nothing structurally, and the reason is an accident
 worth knowing.** `solution` has always been a three-block
@@ -1402,7 +1402,7 @@ globalisation; `PicardThenNewton` switches twice inside one `solve()`.
 
 `mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`)
 and is reachable through `setGlobalisation()`; `SetJFNK` and `EnableAndersonAcc`
-come with it. SUNDIALS 7.5.0 is built in at `../sundials/cuda-install`.
+come with it. SUNDIALS 7.5.0 is built in at `../../sundials/cuda-install`.
 
 **IT IS NOT A DROP-IN, AND THE DIFFERENCE IS SILENT.** `NewtonSolver::Mult(b,x)`
 forms `R = oper(x) − b`, while **`KINSolver::Mult` declares its first argument
@@ -1816,7 +1816,7 @@ does not survive them.
 **AND UPSTREAM IS ABOUT TO REFUSE THIS CONFIGURATION ON THE WRONG PREDICATE.**
 A proposed abort keys on *did `CopyLinearGradBlocks()` decline* — which MEQ does
 on every run, for the second of two unrelated reasons. Filed back as
-`../mfem-hdg-dev/doc/HDG-THREADED-REFUSAL-FROM-MEQ.md`; **expect an MFEM update
+`../../mfem-hdg-dev/doc/HDG-THREADED-REFUSAL-FROM-MEQ.md`; **expect an MFEM update
 to abort every threaded MEQ run until it lands.**
 
 **AND WITHOUT IT `--profile`'s `cores` COLUMN INVERTS.** A serial leg reads
@@ -2077,8 +2077,8 @@ is a Debian alternatives symlink to **`libmkl_rt.so`**. So Debian's MKL 2020
 loaded at runtime whatever the link line said. **Editing the link line alone
 would have looked like a fix and left the real one in place.**
 
-**The fix is MEQ's own SuiteSparse**, at `../suitesparse`, exactly as
-`../sundials/cuda-install` is MEQ's own SUNDIALS. It is built from **v7.12.2 —
+**The fix is MEQ's own SuiteSparse**, at `../../suitesparse`, exactly as
+`../../sundials/cuda-install` is MEQ's own SUNDIALS. It is built from **v7.12.2 —
 the same version Debian ships** — so the only variable that changes is the BLAS,
 not the numerics:
 
@@ -2233,7 +2233,7 @@ resolves to on this machine — whose default threading layer silently corrupted
 UMFPACK's BLAS-3: you got numbers, and they were wrong. MEQ no longer loads it,
 building against its own SuiteSparse; see `CLAUDE_DECLINED.md`,
 *MKL_THREADING_LAYER=GNU*, for why the variable was dropped rather than kept. **The trap is still live for
-anyone using Debian's SuiteSparse**, and `../mfem-hdg-dev/CLAUDE.md` records it.
+anyone using Debian's SuiteSparse**, and `../../mfem-hdg-dev/CLAUDE.md` records it.
 
 `MKL_NUM_THREADS=1` is the **factor of 140** one. Measured, one
 process, nothing else running: `SolovievConvergence` **1.24 s** against

@@ -7,11 +7,13 @@
 # hand -- kept, because the two agreeing is the check that this script is
 # writing the same machine somebody once wrote out themselves.
 #
-#     sh tools/freegs4e-benchmark/make_all.sh [examples-dir]
-#     sh tools/freegs4e-benchmark/make_all.sh [examples-dir] --shaped
+#     sh source/tools/freegs4e-benchmark/make_all.sh [examples-dir]
+#     sh source/tools/freegs4e-benchmark/make_all.sh [examples-dir] --shaped
 #
 # Re-runnable: it overwrites the TOML, the two profile tables and the guess for
-# each case, all of which are derived from the .npz beside this script.
+# each case, all of which are derived from the .npz in
+# runs/freegs4e-benchmark/ -- fgsref.py's output, $FGS_REFS to read another.
+# examples-dir defaults to source/examples, which is where they are tracked.
 #
 # --shaped READS THE OTHER SET OF REFERENCES and writes the other set of stems:
 # <ref>_shaped.npz -> machine-x-...-shaped.*, the machines whose conductors are
@@ -22,7 +24,10 @@
 # once the conductors have extent -- so neither is derivable from the other.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-out=${1:-$here/../../examples}
+src=$(cd "$here/../.." && pwd)
+runs=${MEQ_RUNS_DIR:-$src/../runs}
+refs=${FGS_REFS:-$runs/freegs4e-benchmark}
+out=${1:-$src/examples}
 suffix=""
 case "${2:-}" in
 	--shaped) suffix="_shaped" ;;
@@ -45,6 +50,6 @@ do
 	echo "============================================================"
 	echo "$ref$suffix -> $stem${suffix:+-shaped}"
 	"$here/venv/bin/python" "$here/make_diverted_case.py" \
-		"$here/$ref$suffix.npz" "$here/$ref$suffix.json" "$out" \
+		"$refs/$ref$suffix.npz" "$refs/$ref$suffix.json" "$out" \
 		"$stem${suffix:+-shaped}"
 done

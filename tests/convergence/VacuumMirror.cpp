@@ -133,8 +133,8 @@ namespace
 
 	std::vector<GeqPoint> readGeqPoints()
 	{
-		std::string const path = referenceDirectory() + "/points.dat";
-		std::ifstream in = meqtest::geq::openOutput( referenceDirectory(), "points.dat" );
+		std::string const path = answerDirectory() + "/points.dat";
+		std::ifstream in = meqtest::geq::openOutput( answerDirectory(), "points.dat" );
 		std::vector<GeqPoint> points;
 		std::string line;
 		while ( std::getline( in, line ) )

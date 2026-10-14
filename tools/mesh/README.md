@@ -23,7 +23,8 @@ reads gmsh's format natively, with no converter.
 equilibrium, and `meq-run` makes the mesh and then solves:
 
 ```sh
-./build/meq-run examples/diverted-tokamak-generated.toml
+mkdir -p ../runs/mesh && cd ../runs/mesh      # from source/: the mesh is written here
+../../install/double/bin/meq-run ../../source/examples/diverted-tokamak-generated.toml
 ```
 
 **The conductors are then written once.** The `--coil` rectangles are derived

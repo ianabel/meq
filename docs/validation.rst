@@ -434,25 +434,30 @@ harness needs a Python environment with it importable, and its ``README.md``
 records the dependency pins that do and do not work, along with two defects in
 that library worth knowing before trusting a result from it.
 
+Every product lands under the project's ``runs/freegs4e-benchmark/``, never
+beside the scripts; the virtual environment is the one thing kept there. From
+the project directory:
+
 .. code-block:: sh
 
-   cd tools/freegs4e-benchmark
+   cd source/tools/freegs4e-benchmark
    python3 -m venv venv
    venv/bin/pip install numpy scipy matplotlib h5py shapely numba netCDF4 contourpy
    PYTHONPATH=/path/to/freegs4e venv/bin/python fgsref.py     # the references
-   venv/bin/python make_case.py out/*.npz                     # TOML + profiles
-   for f in out/*.toml; do meq "$f"; done
-   venv/bin/python compare.py out/*.npz
+   OUT=../../../runs/freegs4e-benchmark
+   venv/bin/python make_case.py $OUT/*.npz                    # TOML + profiles, beside them
+   (cd $OUT && for f in *.toml; do ../../install/double/bin/meq "$f"; done)
+   venv/bin/python compare.py $OUT/*.npz
 
 The six **shipped** fixed-boundary machine cases are built by the same two
 scripts, from references refined a level further:
 
 .. code-block:: sh
 
-   cd tools/freegs4e-benchmark
-   FGSREF_OUT=$PWD PYTHONPATH=/path/to/freegs4e \
+   cd source/tools/freegs4e-benchmark
+   PYTHONPATH=/path/to/freegs4e \
        venv/bin/python fgsref.py --shaped --nx=257 --seed-from=auto
-   sh make_fixed.sh                                    # -> examples/fixed-*
+   sh make_fixed.sh                                    # -> source/examples/fixed-*
 
 ``--seed-from`` is what makes the refinement affordable: the grids are
 :math:`2^n + 1` and therefore nest, so a :math:`257^2` run starts from the

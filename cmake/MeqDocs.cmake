@@ -23,7 +23,7 @@ if(_need_build)
 	if(NOT _docs_python)
 		message(FATAL_ERROR
 			"${VENV_PYTHON} not found. Install it, or name another interpreter:\n"
-			"    cmake -B build -DMEQ_VENV_PYTHON=python3.12")
+			"    cmake -S <source> -B <project>/builds/<name> -DMEQ_VENV_PYTHON=python3.12")
 	endif()
 	message(STATUS "Creating ${DOCS_VENV} from docs/requirements.txt")
 	execute_process(COMMAND "${_docs_python}" -m venv "${DOCS_VENV}" RESULT_VARIABLE _rc)

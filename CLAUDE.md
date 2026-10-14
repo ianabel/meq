@@ -26,7 +26,7 @@ companion, **read when working on that subject and not before**:
 | **`CLAUDE_FLOW.md`** | toroidal flow, FL-0 to FL-8 — RoPP (136), the species closure, and Maschke & Perrin |
 | **`CLAUDE_DRIVER.md`** | `apps/meq.cpp` and `meq-run`, the output files and the band between `Γ_h` and `Γ`, the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the warm start, the configuration parser's traps |
 | **`CLAUDE_DEVICE.md`** | running under an `mfem::Device` — every defect found, the instruments, residency, cuDSS, the threaded-assembly promise, the integrator inventory and the batched routes, and **single precision** |
-| **`CLAUDE_MFEM.md`** | which MFEM MEQ links and how it is configured, `meq-integration` and how to refresh it, `../mfem-hdg-dev` and what is open upstream, the old-to-new HDG API mapping, and MFEM's API traps |
+| **`CLAUDE_MFEM.md`** | which MFEM MEQ links and how it is configured, `meq-integration` and how to refresh it, `../../mfem-hdg-dev` and what is open upstream, the old-to-new HDG API mapping, and MFEM's API traps |
 | **`CLAUDE_TRAPS.md`** | the long form of the *Traps* checklist below — build, provenance, code hygiene, shell tooling, and reading a red test |
 | **`CLAUDE_DECLINED.md`** | what was considered and decided against, with its measurement. **Read it before proposing a route**, since most obvious ones are in it |
 
@@ -63,7 +63,7 @@ the production source, reachable as `[source] Type = "mhd"`, `Normalised = true`
 
 **MEQ is a program.** `meq config.toml` parses, meshes, solves — adaptively if
 asked — and writes the equilibrium three ways, plus an optional reduction of it;
-exit codes 0–4 are `docs/running.rst`'s. `build/meq-run config.toml` runs the
+exit codes 0–4 are `docs/running.rst`'s. `meq-run config.toml` runs the
 `[mesh.generate]` generator first and then execs `meq`; it is a script because
 `meq` links MFEM and not gmsh, and it **does not parse the configuration** — it
 asks `meq --mesh-command`, so there is one reader of the schema.
@@ -125,13 +125,39 @@ the next, for a third of the Newton work (→ **[M-01](MEASUREMENTS.md#m-01)**).
 
 Each stage ends at a **measured convergence rate**, not at "it runs".
 
+## Where things go
+
+**THIS REPOSITORY IS `source/`, AND NOTHING WRITES INTO IT.** The project
+directory holds four things, and only `source/` is tracked:
+
+| | |
+|---|---|
+| `source/` | this repository — the session's working directory |
+| `builds/<name>/` | one CMake build tree per configuration (`double`, `single`, `coverage`); deletable |
+| `install/<name>/` | `cmake --install builds/<name>`: `bin/meq`, `bin/meq-run`, `share/meq/tools/`; what runs and tools execute |
+| `runs/` | everything a run writes, a tool's under `runs/<tool>/`; deletable |
+
+CMake **refuses** a build tree inside `source/`. Tests run in their build tree
+and read the source through `MEQ_SOURCE_DIR` (`tests/SourceTree.hpp`); tools run
+the installed binary and write under `runs/` through `tools/meqpaths.py`. **A
+path a configuration READS is relative to the TOML file; a path the run WRITES
+— `[output] Directory`, `CacheFile`, a `[mesh.generate]` mesh — is relative to
+the working directory**, so a run is made from a directory under `runs/`:
+`../../install/double/bin/meq ../../source/examples/x.toml`. **Untracked
+output in `git status` is a bug in whatever wrote it**; `.gitignore` does not
+hide run products. Sibling checkouts (`mfem`, `mfem-hdg-dev`, `freegs4e`,
+`geq`) sit beside the project directory, so `../../<name>` from here.
+
 ## Commands
 
+From the project directory, `..`:
+
 ```sh
-git submodule update --init --recursive     # extern/toml11
-cmake -B build
-cmake --build build -j6
-cd build && OMP_NUM_THREADS=4 ctest -j4
+git -C source submodule update --init --recursive     # extern/toml11
+cmake -S source -B builds/double
+cmake --build builds/double -j6
+cmake --install builds/double                         # -> install/double
+cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 ```
 
 **`-j4` with `OMP_NUM_THREADS=4`** holds the product at the core count, since
@@ -145,8 +171,9 @@ whole on purpose) and then `naming` (one single-threaded clang-tidy run).
 read 1.16× to 1.6× apart here, so read ratios.
 
 **ctest sets `MKL_NUM_THREADS=1` on every test**; run a binary directly the same
-way — `MKL_NUM_THREADS=1 ./tests/SolovievConvergence`. Without it the suite takes
-over an hour (see *Traps*).
+way, from the build tree, since a test writes into its working directory —
+`cd builds/double/tests && MKL_NUM_THREADS=1 ./SolovievConvergence`. Without it
+the suite takes over an hour (see *Traps*).
 
 `DeviceParity` runs three arms, `cpu`, `debug` and `cuda`, and skips loudly
 where no device is configured (→ **[M-228](MEASUREMENTS.md#m-228)**).
@@ -163,21 +190,22 @@ tests/performance/newton-step-profile.sh build 5   # where a Newton step's time 
 suppresses its own threading inside the OpenMP region (`CLAUDE_HDGGS.md`,
 *Threading, measured*).
 
-`MFEM_DIR` defaults to `../mfem/install` and reads the environment.
+`MFEM_DIR` defaults to `../../mfem/install` from `source/` and reads the
+environment; the single build takes `-DMFEM_DIR=` its own install.
 
 ### Coverage and CI
 
 ```sh
-cmake -B build-cov -DMEQ_ENABLE_COVERAGE=ON && cmake --build build-cov -j6
-cd build-cov && ctest
-gcovr --root .. --filter 'src/meq/' --print-summary        # or --html-details
+cmake -S source -B builds/coverage -DMEQ_ENABLE_COVERAGE=ON
+cmake --build builds/coverage -j6 && (cd builds/coverage && ctest)
+cd source && gcovr --root . ../builds/coverage --filter 'src/meq/' --print-summary
 ```
 
 `MEQ_ENABLE_COVERAGE` is an option and not a build type so that `-O0` is chosen
 rather than inherited. **A debug build revives no assertion**: `MFEM_ASSERT` is
 gated on `MFEM_DEBUG`, which the install sets `NO`, and MEQ has no `assert()`
 (`CLAUDE_MFEM.md`). `gcovr` is not installed here — use a venv, with
-`--merge-mode-functions=separate`, from the repo root.
+`--merge-mode-functions=separate`, from `source/`.
 
 **CI CANNOT BUILD THE SOLVER, AND THIS IS STRUCTURAL.** `meq-integration` is a
 local merge published nowhere, so `find_package(MFEM)` is not `REQUIRED` and CI
@@ -194,7 +222,8 @@ because 22 of `GradShafranovSolver`'s 51 methods were called by nothing.
 ### Docs
 
 ```sh
-.venv-docs/bin/sphinx-build -W -b html docs docs/_build/html
+.venv-docs/bin/sphinx-build -W -b html docs ../builds/docs/html
+make -C docs/manual                       # the LaTeX manual, into ../builds/manual
 ```
 
 `.venv-docs` carries exactly `docs/requirements.txt` — sphinx 7.4.7 and
@@ -226,8 +255,8 @@ the zero axis spread must not move.
 
 ## MFEM → `CLAUDE_MFEM.md`
 
-**MEQ links `../mfem/install`**: MFEM 4.10.1 built from branch
-**`meq-integration`** in `../mfem/mfem-src`, a local merge of fourteen branches
+**MEQ links `../../mfem/install`**: MFEM 4.10.1 built from branch
+**`meq-integration`** in `../../mfem/mfem-src`, a local merge of fourteen branches
 that exists only to be built against — never pushed, re-created rather than
 merged into, tagged before each re-creation. `mfem/master` will not do.
 `CLAUDE_MFEM.md` has the options, the CUDA obstacles, the branch table, the
@@ -240,11 +269,11 @@ install's timestamp against the branch tip **and** diff an installed header
 the installed headers, and rebuild MEQ `--clean-first`. A class-layout change
 behind `MFEM_THREAD_SAFE` is otherwise a silent ODR violation.
 
-**`../mfem-hdg-dev` IS RECEIVE-ONLY.** Write MFEM development *requests* into
+**`../../mfem-hdg-dev` IS RECEIVE-ONLY.** Write MFEM development *requests* into
 its `doc/` and nothing else — no branches, commits, checkouts or builds; another
 agent works there. Upstream does not track `*-FROM-*.md` in git, so a request
 appears as an untracked file by design, and an absent document means nothing.
-**The only test of "landed" is the symbol in `../mfem/install/include`.** Do not
+**The only test of "landed" is the symbol in `../../mfem/install/include`.** Do not
 file findings against unfinished work.
 
 ## Traps
@@ -265,7 +294,7 @@ The checklist; the measurement and the story of each is in the file named.
 **Build and provenance** (`CLAUDE_TRAPS.md`, `CLAUDE_MFEM.md`)
 
 * **`cmake --install` keeps source mtimes**, so MEQ looks up to date across an
-  MFEM layout change: `find ../mfem/install/include -name '*.hpp' -exec touch {} +`.
+  MFEM layout change: `find ../../mfem/install/include -name '*.hpp' -exec touch {} +`.
 * **A fresh configure re-searches cached results** (`BLAS_LIBRARIES`,
   `MKL_PARDISO_*`, MEQ's own copied link line): copy them from the reference
   cache and diff `MFEM_EXT_LIBS` token by token before comparing two installs.
@@ -412,13 +441,14 @@ src/meq/     the library: Config, Profiles, Source, SourceFactory,
              DeviceBasis, AxisSearch, ResidentIterate (device routes);
              Crossings, StageChecksum (device instruments, not part of the
              solve). See CLAUDE_DEVICE.md for the device files.
-apps/        meq.cpp, and meq-run.in -- configured and file(GENERATE)d into
-             the build directory as `meq-run`, not runnable from apps/.
-tests/       unit/ (Boost.Test), convergence/ (rate assertions), analytic/
+apps/        meq.cpp, and meq-run.in -- configured twice: into the build
+             directory as `meq-run`, and for install/<name>/bin, paths
+             relative to itself. Not runnable from apps/.
+tests/       SourceTree.hpp (how a test names a source file), unit/ (Boost.Test), convergence/ (rate assertions), analytic/
              (closed forms), performance/ (timings, none a ctest:
              TraceSolverScaling, NpcThreadScaling, NewtonStepProfile,
              InversionScaling).
-tools/       plot_equilibrium.py (both NetCDF files; tools/README.md says which
+tools/       meqpaths.py (the layout, for every tool), plot_equilibrium.py (both NetCDF files; tools/README.md says which
              format goes with which reader), mesh/halfdisc.py (FB-6's gmsh
              geometry; --symmetric meshes z >= 0 and reflects it for
              [solver] UpDownSymmetry, --symmetry-check asks it of any mesh,

@@ -2,7 +2,7 @@
 # of meq's general source, and the only example in which Newton has real work to
 # do.
 #
-#     meq examples/mhd-rectangle.toml
+#     meq ../../source/examples/mhd-rectangle.toml
 #
 # The equation is the fixed-boundary Grad-Shafranov equation, eqs (1)-(4) of
 # refs/HDG-GradShafranov.pdf:
@@ -185,7 +185,7 @@ Type = "mhd"
 # pressure peaked on the magnetic axis whose GRADIENT vanishes at the plasma
 # edge, which is both physical and the source of every bit of psi-dependence in
 # dF/dpsi. See the file's own header before editing it.
-PPrimeFile = "examples/mhd-pprime.dat"
+PPrimeFile = "mhd-pprime.dat"
 PPrimeScale = 1.0e6
 
 # g dg/dpsi, tabulated in T^2 m^2 per Wb/rad, which is already meq's unit for
@@ -194,7 +194,7 @@ PPrimeScale = 1.0e6
 # diamagnetic direction. Positive over the whole solution, so F > 0 and psi > 0
 # in the interior by the maximum principle, and nonzero at psi = 0, which is
 # what keeps this run off the trivial branch.
-GGPrimeFile = "examples/mhd-ggprime.dat"
+GGPrimeFile = "mhd-ggprime.dat"
 
 # Mu0 defaults to meq::vacuumPermeability, 4.0e-7 pi = 1.2566370614e-6, and
 # multiplies ONLY the R^2 dp/dpsi term. Set it to 1.0 to work in units where the

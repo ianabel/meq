@@ -3,6 +3,9 @@
 
     ../freegs4e-benchmark/venv/bin/python converge.py fixed-h-circular
 
+runs MEQ's INSTALLED driver ( race_desc.DRIVER ) and writes under
+runs/chease-benchmark/converge/ in the project directory.
+
 **THIS IS THE ACCEPTANCE AND NOT THE DEMONSTRATION.**  `CLAUDE.md`'s *Testing
 stance* records the hazard that makes a single-resolution agreement worth
 nothing: *a wrong sign convention converges, at the right rate, to the wrong
@@ -39,7 +42,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import time
 
 import numpy as np
@@ -53,7 +55,7 @@ import race_desc                                               # noqa: E402
 import compare_chease                                          # noqa: E402
 import cheaserun                                               # noqa: E402
 import convert_chease as conv                                  # noqa: E402
-from convert_desc import CASES, MEQ, load_case                 # noqa: E402
+from convert_desc import CASES, MEQ, load_case, meqpaths       # noqa: E402
 
 
 def meq_rungs(text):
@@ -86,12 +88,13 @@ def main():
 	ap.add_argument("--mapping-control", action="store_true",
 	                help="re-run the finest CHEASE rung at twice NPSI and at "
 	                     "twice NRBOX, to show neither is what is being measured")
-	ap.add_argument("--out",
-	                default=os.path.join(tempfile.gettempdir(),
-	                                     "chease-converge"))
+	ap.add_argument("--out", default="",
+	                help="default runs/chease-benchmark/converge under the project")
 	args = ap.parse_args()
 
 	case = load_case(args.stem)
+	args.out = os.path.abspath(args.out or meqpaths.runs("chease-benchmark",
+	                                                     "converge"))
 	os.makedirs(args.out, exist_ok=True)
 	report = dict(stem=args.stem, meq=args.meq, chease=args.chease,
 	              npsi=args.npsi, nrbox=args.nrbox, grid=args.grid)

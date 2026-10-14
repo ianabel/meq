@@ -27,15 +27,17 @@ USAGE
 
     python3 make_freeb_profiles.py <reference.npz> <stem> [psi_min] [psi_max] [n]
 
-which writes `../../examples/<stem>-{pprime,ggprime}.dat`.
+which writes `source/examples/<stem>-{pprime,ggprime}.dat`.
 """
 import os
 import sys
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-EXAMPLES = os.path.abspath(os.path.join(HERE, "..", "..", "examples"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import benchpaths                                              # noqa: E402
+
+EXAMPLES = benchpaths.EXAMPLES
 
 #: The abscissa `examples/limited-tokamak-*.dat` carry, kept so the two pairs
 #: are differenced row for row.  It runs BELOW zero and ABOVE one on purpose:

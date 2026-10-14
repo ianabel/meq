@@ -45,6 +45,8 @@
 #include "Config.hpp"
 #include "SourceFactory.hpp"
 
+#include "SourceTree.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -194,27 +196,17 @@ namespace
 			+ electron );
 	}
 
-	// The directory holding the shipped examples. A build system that knows
-	// where the source tree is can say so with -DMEQ_EXAMPLES_DIR="..."; failing
-	// that, walk up from the working directory looking for it, so the tests run
-	// from the source root, from build/, or from build/tests alike.
+	// The directory holding the shipped examples, in the source tree.
 	std::filesystem::path examplesDirectory()
 	{
-#ifdef MEQ_EXAMPLES_DIR
-		return std::filesystem::path( MEQ_EXAMPLES_DIR );
-#else
-		std::filesystem::path here = std::filesystem::current_path();
-		for ( int level = 0; level < 6; ++level )
-		{
-			std::filesystem::path candidate = here / "examples" / "soloviev-nstx.toml";
-			if ( std::filesystem::exists( candidate ) )
-				return here / "examples";
-			if ( !here.has_parent_path() || here.parent_path() == here )
-				break;
-			here = here.parent_path();
-		}
-		return std::filesystem::path( "examples" );
-#endif
+		return std::filesystem::path( meq::test::sourcePath( "examples" ) );
+	}
+
+	// A shipped data file by its absolute path, for a configuration given to
+	// fromString(), which has no file to resolve a relative path against.
+	std::string exampleData( std::string const & name )
+	{
+		return meq::test::sourcePath( "examples/" + name );
 	}
 
 	// Writes TOML to a real file and removes it again, for the paths that only
@@ -252,6 +244,59 @@ namespace
 			};
 
 			std::filesystem::path path;
+	};
+
+	// A fresh directory under the system's temporary one, with the
+	// configuration written into a subdirectory of it -- so that "relative to
+	// the file" and "relative to the working directory" cannot coincide --
+	// and removed with everything in it.
+	class TemporaryConfigDirectory
+	{
+		public:
+			TemporaryConfigDirectory()
+				: root( std::filesystem::temp_directory_path() / uniqueName() ),
+				  directory( root / "case" )
+			{
+				std::filesystem::create_directories( directory );
+			};
+
+			~TemporaryConfigDirectory()
+			{
+				std::error_code ignored;
+				std::filesystem::remove_all( root, ignored );
+			};
+
+			TemporaryConfigDirectory( TemporaryConfigDirectory const & ) = delete;
+			TemporaryConfigDirectory & operator=( TemporaryConfigDirectory const & ) = delete;
+
+			/// Writes `contents` as a configuration file in the subdirectory.
+			std::string write( std::string const & contents ) const
+			{
+				std::filesystem::path const file = directory / "config.toml";
+				std::ofstream out( file );
+				out << contents;
+				return file.string();
+			};
+
+			/// `relative` as the file's own directory resolves it.
+			std::string resolved( std::string const & relative ) const
+			{
+				return ( directory / relative ).lexically_normal().string();
+			};
+
+		private:
+			static std::string uniqueName()
+			{
+				static std::random_device entropy;
+				static unsigned const run = entropy();
+				static int counter = 0;
+				return "meq-config-paths-" + std::to_string( run ) + "-" + std::to_string( counter++ );
+			};
+
+			std::filesystem::path const root;
+
+		public:
+			std::filesystem::path const directory;
 	};
 
 	bool mentions( std::exception const & error, std::string const & needle )
@@ -1024,6 +1069,187 @@ BOOST_AUTO_TEST_CASE( a_good_file_on_disk_reads_the_same_as_the_same_text_in_mem
 	BOOST_TEST( fromFile.getDiscretisation().polynomialDegree == fromString.getDiscretisation().polynomialDegree );
 	BOOST_TEST( fromFile.getSource().getSoloviev().a == fromString.getSource().getSoloviev().a );
 }
+
+/*
+ * A FILE'S INPUT PATHS ARE RESOLVED AGAINST THE FILE'S OWN DIRECTORY, and
+ * nothing else is.
+ *
+ * A configuration and the tables, mesh and guess it reads travel together, so
+ * a run can be made from any working directory -- the build tree a test runs
+ * in, a scratch directory a run writes into. What a run WRITES stays where the
+ * run is: [output] Directory, [conductors] CacheFile, and a [mesh] File that a
+ * [mesh.generate] block makes. Text given to fromString() has no file, so its
+ * paths are left exactly as written.
+ */
+namespace
+{
+	std::string const mhdReadingEverything =
+		"[mesh]\n"
+		"File = \"machine.msh\"\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"pprime.dat\"\n"
+		"GGPrimeFile = \"tables/ggprime.dat\"\n"
+		"\n[initialguess]\n"
+		"Type = \"gridfunction\"\n"
+		"File = \"guess.gf\"\n"
+		"MeshFile = \"../shared/guess.mesh\"\n";
+}
+
+BOOST_AUTO_TEST_CASE( a_file_resolves_the_paths_it_reads_against_its_own_directory )
+{
+	TemporaryConfigDirectory const here;
+
+	// THE CONTROL: the directory is not the working directory, so a resolution
+	// against the working directory could not pass the assertions below.
+	BOOST_TEST_REQUIRE( std::filesystem::absolute( here.directory ).lexically_normal()
+	                    != std::filesystem::current_path().lexically_normal() );
+
+	{
+		Configuration const config( here.write( mhdReadingEverything ) );
+		BOOST_TEST( config.getMesh().file == here.resolved( "machine.msh" ) );
+		BOOST_TEST( config.getSource().getMHD().pPrimeFile == here.resolved( "pprime.dat" ) );
+		BOOST_TEST( config.getSource().getMHD().ggPrimeFile
+		            == here.resolved( "tables/ggprime.dat" ) );
+		BOOST_TEST( config.getInitialGuess().file == here.resolved( "guess.gf" ) );
+		// Normalised, so a ".." in the file is not carried into the path.
+		BOOST_TEST( config.getInitialGuess().meshFile
+		            == ( here.directory.parent_path() / "shared" / "guess.mesh" ).lexically_normal().string() );
+	}
+
+	// The q-driven route's table.
+	{
+		Configuration const config( here.write( withSource(
+			"[source]\n"
+			"Type = \"mhd\"\n"
+			"PPrimeFile = \"pprime.dat\"\n"
+			"Normalised = true\nPsiAxis = 0.3\n"
+			"SafetyFactorFile = \"q.dat\"\n"
+			"ToroidalFieldGuess = 2.2\n" ) ) );
+		BOOST_TEST( config.getSource().getMHD().safetyFactorFile == here.resolved( "q.dat" ) );
+	}
+
+	// The rotating source's tables, a species' as well as the source's own.
+	{
+		Configuration const config( here.write( withSource(
+			"[source]\n"
+			"Type = \"rotating\"\n"
+			"OmegaFile = \"omega.dat\"\n"
+			"GGPrimeFile = \"ggprime.dat\"\n"
+			"\n[[source.species]]\n"
+			"Name = \"deuterium\"\n"
+			"Mass = 3.344e-27\n"
+			"Charge = 1.0\n"
+			"TemperatureFile = \"T_deuterium.dat\"\n"
+			"DensityFile = \"n_deuterium.dat\"\n"
+			"\n[[source.species]]\n"
+			"Name = \"electrons\"\n"
+			"Mass = 9.109e-31\n"
+			"Charge = -1.0\n"
+			"Temperature = 1.6e-16\n"
+			"Neutralising = true\n" ) ) );
+		meq::RotatingParameters const & rotating = config.getSource().getRotating();
+		BOOST_TEST( rotating.omegaFile == here.resolved( "omega.dat" ) );
+		BOOST_TEST( rotating.ggPrimeFile == here.resolved( "ggprime.dat" ) );
+		BOOST_TEST_REQUIRE( rotating.species.size() == 2u );
+		BOOST_TEST( rotating.species[ 0 ].temperatureFile == here.resolved( "T_deuterium.dat" ) );
+		BOOST_TEST( rotating.species[ 0 ].densityFile == here.resolved( "n_deuterium.dat" ) );
+		// A species given by constants has no path to resolve.
+		BOOST_TEST( rotating.species[ 1 ].temperatureFile.empty() );
+		BOOST_TEST( rotating.species[ 1 ].densityFile.empty() );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( an_absolute_input_path_is_left_as_written )
+{
+	TemporaryConfigDirectory const here;
+	std::string const elsewhere = ( std::filesystem::temp_directory_path() / "elsewhere" ).string();
+
+	Configuration const config( here.write(
+		"[mesh]\n"
+		"File = \"" + elsewhere + "/machine.msh\"\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"" + elsewhere + "/pprime.dat\"\n"
+		"GGPrimeFile = \"ggprime.dat\"\n"
+		"\n[initialguess]\n"
+		"Type = \"gridfunction\"\n"
+		"File = \"" + elsewhere + "/guess.gf\"\n"
+		"MeshFile = \"" + elsewhere + "/guess.mesh\"\n" ) );
+
+	BOOST_TEST( config.getMesh().file == elsewhere + "/machine.msh" );
+	BOOST_TEST( config.getSource().getMHD().pPrimeFile == elsewhere + "/pprime.dat" );
+	BOOST_TEST( config.getInitialGuess().file == elsewhere + "/guess.gf" );
+	BOOST_TEST( config.getInitialGuess().meshFile == elsewhere + "/guess.mesh" );
+	// The control, in the same file: a relative path beside them is resolved.
+	BOOST_TEST( config.getSource().getMHD().ggPrimeFile == here.resolved( "ggprime.dat" ) );
+}
+
+BOOST_AUTO_TEST_CASE( what_a_run_writes_stays_relative_to_the_working_directory )
+{
+	TemporaryConfigDirectory const here;
+
+	// [output] Directory and [conductors] CacheFile.
+	{
+		Configuration const config( here.write(
+			"[mesh]\n"
+			"RMin = 1.2\nRMax = 2.2\nZMin = -0.7\nZMax = 0.7\n"
+			"\n[discretisation]\nPolynomialDegree = 2\n"
+			"\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+			"\n[initialguess]\n"
+			"Type = \"gridfunction\"\n"
+			"File = \"guess.gf\"\nMeshFile = \"guess.mesh\"\n"
+			"\n[[coils]]\n"
+			"CentreR = 2.10\nCentreZ = 0.60\n"
+			"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n"
+			"\n[conductors]\n"
+			"Model = \"filament\"\n"
+			"CacheFile = \"cache/psi-c.nc\"\n"
+			"\n[output]\n"
+			"Directory = \"results\"\n" ) );
+		BOOST_TEST( config.getOutput().directory == "results" );
+		BOOST_TEST( config.getConductors().cacheFile == "cache/psi-c.nc" );
+		// The control: the same file's inputs are resolved.
+		BOOST_TEST( config.getInitialGuess().file == here.resolved( "guess.gf" ) );
+	}
+
+	// A [mesh] File that [mesh.generate] makes is the run's product.
+	{
+		Configuration const config( here.write(
+			"[mesh]\n"
+			"File = \"machine.msh\"\n"
+			"\n[mesh.generate]\n"
+			"Tool = \"halfdisc\"\nRadius = 2.6\nSize = 0.18\n"
+			"\n[discretisation]\nPolynomialDegree = 2\n"
+			"\n[source]\n"
+			"Type = \"mhd\"\n"
+			"Normalised = true\n"
+			"PsiAxis = 0.1\n"
+			"PPrimeFile = \"pprime.dat\"\n"
+			"GGPrimeFile = \"ggprime.dat\"\n" ) );
+		BOOST_TEST_REQUIRE( config.getMesh().generate.given );
+		BOOST_TEST( config.getMesh().file == "machine.msh" );
+		BOOST_TEST( config.getSource().getMHD().pPrimeFile == here.resolved( "pprime.dat" ) );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( text_from_a_string_keeps_its_paths_as_written )
+{
+	// Even when the name it is given has a directory in it: that name is for
+	// messages, and there is no file to be relative to.
+	TemporaryConfigDirectory const here;
+	Configuration const config = Configuration::fromString(
+		mhdReadingEverything, ( here.directory / "config.toml" ).string() );
+
+	BOOST_TEST( config.getMesh().file == "machine.msh" );
+	BOOST_TEST( config.getSource().getMHD().pPrimeFile == "pprime.dat" );
+	BOOST_TEST( config.getSource().getMHD().ggPrimeFile == "tables/ggprime.dat" );
+	BOOST_TEST( config.getInitialGuess().file == "guess.gf" );
+	BOOST_TEST( config.getInitialGuess().meshFile == "../shared/guess.mesh" );
+}
+
 
 /*
  * [boundary.shape] -- the curved Gamma of stage 5, as configuration.
@@ -2147,14 +2373,14 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 		"Type = \"mhd\"\n"
 		"Normalised = true\n"
 		"PsiAxis = 0.1\n"
-		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
-		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+		"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+		"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
 
 	std::string const plainSource =
 		"[source]\n"
 		"Type = \"mhd\"\n"
-		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
-		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+		"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+		"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
 
 	// THE COUPLING ALONE IS ACCEPTED, which is the control: without it the
 	// refusals below would pass on a schema that refuses everything.
@@ -2293,13 +2519,13 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_loop_needs_a_support_to_freeze )
 	std::string const confined =
 		"[source]\nType = \"mhd\"\nNormalised = true\nConfineToPlasma = true\n"
 		"PsiAxis = 0.1\n"
-		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
-		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+		"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+		"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
 
 	std::string const unconfined =
 		"[source]\nType = \"mhd\"\nNormalised = true\nPsiAxis = 0.1\n"
-		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
-		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+		"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+		"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
 
 	Configuration const looped =
 		parse( head + confined + "\n[solver]\nPlasmaSupportSweeps = 4\n" );
@@ -2399,8 +2625,8 @@ BOOST_AUTO_TEST_CASE( the_prescribed_plasma_current_is_amperes_and_needs_a_norma
 		return withSource(
 			"[source]\n"
 			"Type = \"mhd\"\n"
-			"PPrimeFile = \"examples/fb-pprime.dat\"\n"
-			"GGPrimeFile = \"examples/fb-ggprime.dat\"\n" + extra );
+			"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+			"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n" + extra );
 	};
 
 	Configuration const good = parse( mhd(
@@ -2519,17 +2745,17 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 		return withSource(
 			"[source]\n"
 			"Type = \"mhd\"\n"
-			"PPrimeFile = \"examples/fb-pprime.dat\"\n" + extra );
+			"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n" + extra );
 	};
 
 	std::string const driven =
 		"Normalised = true\nPsiAxis = 0.3\n"
-		"SafetyFactorFile = \"examples/q-driven-q.dat\"\n"
+		"SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n"
 		"ToroidalFieldGuess = 2.2\n";
 
 	Configuration const good = parse( mhd( driven ) );
 	BOOST_TEST( good.getSource().getMHD().safetyFactorFile
-	            == "examples/q-driven-q.dat" );
+	            == exampleData( "q-driven-q.dat" ) );
 	BOOST_TEST( good.getSource().getMHD().toroidalFieldGuess == 2.2 );
 	BOOST_TEST( good.getSource().getMHD().safetyFactorDegree == 2u );
 	BOOST_TEST( good.getSource().getMHD().ggPrimeFile.empty(),
@@ -2539,13 +2765,13 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	// THE ORDINARY ROUTE IS UNTOUCHED, which is what says the alternative was
 	// added rather than substituted.
 	Configuration const prescribed = parse( mhd(
-		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n" ) );
+		"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n" ) );
 	BOOST_TEST( prescribed.getSource().getMHD().safetyFactorFile.empty() );
 	BOOST_TEST( !prescribed.getSource().getMHD().ggPrimeFile.empty() );
 
 	// BOTH IS REFUSED. One prescribes the toroidal field and the other asks for
 	// whichever field delivers a given q; there is no safe precedence.
-	refuses( mhd( driven + "GGPrimeFile = \"examples/fb-ggprime.dat\"\n" ),
+	refuses( mhd( driven + "GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n" ),
 	         "source.SafetyFactorFile" );
 
 	// NEITHER IS REFUSED TOO, and against GGPrimeFile, because that is the key
@@ -2553,7 +2779,7 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n" ), "source.GGPrimeFile" );
 
 	// THE TARGET IS q( Psi ), so without the normalisation there is no Psi.
-	refuses( mhd( "SafetyFactorFile = \"examples/q-driven-q.dat\"\n"
+	refuses( mhd( "SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n"
 	              "ToroidalFieldGuess = 2.2\n" ),
 	         "source.SafetyFactorFile" );
 
@@ -2562,12 +2788,12 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	// a user has and inventing one here would start the loop somewhere nobody
 	// chose.
 	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n"
-	              "SafetyFactorFile = \"examples/q-driven-q.dat\"\n" ),
+	              "SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n" ),
 	         "source.ToroidalFieldGuess" );
 	// A duplicate key would be refused by the TOML parser rather than by MEQ,
 	// so the negative case is built WITHOUT the good guess rather than beside it.
 	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n"
-	              "SafetyFactorFile = \"examples/q-driven-q.dat\"\n"
+	              "SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n"
 	              "ToroidalFieldGuess = -1.0\n" ),
 	         "source.ToroidalFieldGuess" );
 
@@ -2619,8 +2845,8 @@ BOOST_AUTO_TEST_CASE( the_generated_mesh_is_checked_against_the_file_that_makes_
 		"Type = \"mhd\"\n"
 		"Normalised = true\n"
 		"PsiAxis = 0.1\n"
-		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
-		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+		"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+		"GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
 
 	auto const mesh = []( std::string const & generate )
 	{
@@ -3570,7 +3796,7 @@ BOOST_AUTO_TEST_CASE( the_seven_machines_wired_as_circuits_carry_the_same_curren
 	                            "machine-d-tcv", "machine-e-diamagnetic", "machine-f-diiid",
 	                            "machine-g-mastu" } )
 	{
-		std::string const base = std::string( "tests/unit/circuits/" ) + stem;
+		std::string const base = meq::test::sourcePath( "tests/unit/circuits/" + std::string( stem ) );
 		Configuration const flat = parse( withCircuit( read( base + "-flattened.toml" ), "" ) );
 		Configuration const wired = parse( withCircuit( read( base + "-circuited.toml" ), "" ) );
 
@@ -3692,12 +3918,13 @@ namespace
 		return "";
 	}
 
+	/// A shipped example's text, its input paths made absolute so that the
+	/// text means the same problem away from the file.
 	std::string readShipped( std::string const & name )
 	{
-		std::ifstream in( examplesDirectory() / name );
-		BOOST_TEST_REQUIRE( in.good(), "cannot open examples/" << name );
-		return std::string( std::istreambuf_iterator< char >( in ),
-		                    std::istreambuf_iterator< char >() );
+		std::string const text = meq::test::shippedConfig( "examples/" + name );
+		BOOST_TEST_REQUIRE( !text.empty(), "examples/" << name << " is empty" );
+		return text;
 	}
 
 	/// The shipped mirror with one unique line replaced -- the file a user

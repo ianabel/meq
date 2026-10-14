@@ -9,7 +9,7 @@
 # quadrature and a critical-point search by a code that does not have q. meq has
 # q, so meq does it once.
 #
-#     meq examples/flux-surfaces.toml
+#     meq ../../source/examples/flux-surfaces.toml
 #
 # THE BOUNDARY IS CURVED ON PURPOSE. On a fitted rectangle Gamma IS the mesh
 # boundary and the outer surfaces run into the corners; on the curved path

@@ -68,11 +68,12 @@ import argparse, json, os, pickle, statistics, subprocess, sys, time
 # M-78 sizes it: the MKL threads are worth a further 7 to 9 per cent. Pinning
 # them to 1 for a timed run hands that away and flatters whatever it is raced
 # against.
+import benchpaths
 from cores import physical_cores
 THREADS = str(physical_cores())
-MEQ = "/home/ian/projects/meq"
-VENV = f"{MEQ}/tools/freegs4e-benchmark/venv/bin/python"
-CURRENTS = "/home/ian/projects/freegsnke/examples/data/simple_diverted_currents_PaxisIp.pk"
+VENV = benchpaths.VENV
+CURRENTS = os.path.join(benchpaths.FREEGSNKE, "examples", "data",
+                        "simple_diverted_currents_PaxisIp.pk")
 LADDER = [(33, 65), (65, 129), (129, 257), (257, 513)]
 
 
@@ -107,9 +108,9 @@ def provenance():
         out = subprocess.run(["git", "-C", path, "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True)
         return out.stdout.strip() or "?"
-    lib = "/home/ian/projects/mfem/install/lib/libmfem.a"
-    return {"meq": sha(MEQ), "freegsnke": sha("/home/ian/projects/freegsnke"),
-            "freegs4e": sha("/home/ian/projects/freegs4e"),
+    lib = benchpaths.LIBMFEM
+    return {"meq": sha(benchpaths.SOURCE), "freegsnke": sha(benchpaths.FREEGSNKE),
+            "freegs4e": sha(benchpaths.FREEGS4E),
             "libmfem_mtime": time.strftime(
                 "%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(lib)))
             if os.path.exists(lib) else "?"}
@@ -119,7 +120,7 @@ def run_freegsnke(nx, ny, tolerance, out):
     """One freegsnke forward solve, timed, through mastu_reference.py."""
     started = time.perf_counter()
     done = subprocess.run(
-        [VENV, f"{MEQ}/tools/freegs4e-benchmark/mastu_reference.py",
+        [VENV, os.path.join(benchpaths.HERE, "mastu_reference.py"),
          "--out", out, "--levels", str(nx), "--repeats", "1",
          "--tolerance", str(tolerance)],
         capture_output=True, text=True,
@@ -136,11 +137,12 @@ def run_meq(config, out):
     same way and a comparison of a solve against a solve-plus-output would
     flatter whichever side was measured more narrowly.  `mastu_reference.py`
     starts its clock after the machine is built for the same reason -- MEQ pays
-    that cost as meshing, outside this timer.
+    that cost as meshing, outside this timer.  It is made in `out`, so the
+    mesh meq-run generates and the outputs land there.
     """
     started = time.perf_counter()
-    done = subprocess.run([f"{MEQ}/build/meq-run", config],
-                          capture_output=True, text=True,
+    done = subprocess.run([benchpaths.meq_run(), os.path.abspath(config)],
+                          capture_output=True, text=True, cwd=out,
                           env={**os.environ, "OMP_NUM_THREADS": THREADS,
                                "MKL_NUM_THREADS": THREADS})
     seconds = time.perf_counter() - started
@@ -155,7 +157,7 @@ def main():
                     help="MEQ TOML for THIS machine. Absent, only the freegsnke "
                          "arm runs and the race says so rather than comparing "
                          "against a different machine's config")
-    ap.add_argument("--out", default="/tmp/race-nke")
+    ap.add_argument("--out", default=os.path.join(benchpaths.OUT, "race-nke"))
     ap.add_argument("--tolerance", type=float, default=1e-9)
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--levels", default="33,65,129")
@@ -191,6 +193,7 @@ def main():
     per_level_limit = args.quiet_threshold + 1.5
     intruded = []
 
+    args.out = os.path.abspath(args.out)
     os.makedirs(args.out, exist_ok=True)
     wanted = [int(v) for v in args.levels.split(",") if v.strip()]
     ladder = [g for g in LADDER if g[0] in wanted]

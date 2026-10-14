@@ -27,6 +27,51 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # For clangd and everything else that wants to know how a file is compiled.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ---------------------------------------------------------------------------
+# Where things go
+# ---------------------------------------------------------------------------
+#
+# THE SOURCE TREE IS THE CHECKOUT AND NOTHING ELSE. It is one of four
+# directories in a project directory, and the other three are untracked and
+# can be deleted whenever their contents are no longer wanted:
+#
+#     <project>/source/            this repository
+#     <project>/builds/<name>/     one build tree per configuration
+#     <project>/install/<name>/    what `cmake --install` of builds/<name> puts there
+#     <project>/runs/              everything a run of meq or of tools/ writes
+#
+# Nothing builds, tests or runs in source/. A build tree inside it is refused
+# rather than gitignored, because an ignore pattern is how a tree fills with
+# output nobody notices. The tests run in their own build tree (tests/
+# CMakeLists.txt), and the tools write under runs/ (tools/meqpaths.py).
+get_filename_component(MEQ_PROJECT_DIR "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
+file(RELATIVE_PATH _meq_binary_from_source "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}")
+if(NOT _meq_binary_from_source MATCHES "^\\.\\.(/|$)")
+	message(FATAL_ERROR
+		"meq: the build tree ${PROJECT_BINARY_DIR} is inside the source tree. "
+		"Build out of it, in ${MEQ_PROJECT_DIR}/builds/<name>:\n"
+		"    cmake -S ${PROJECT_SOURCE_DIR} -B ${MEQ_PROJECT_DIR}/builds/double\n"
+		"and delete the CMakeCache.txt and CMakeFiles/ this attempt left in "
+		"${PROJECT_BINARY_DIR}.")
+endif()
+unset(_meq_binary_from_source)
+
+# install/<name> for builds/<name>, so a double and a single build install side
+# by side and either build tree can then be deleted.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+	get_filename_component(_meq_build_name "${PROJECT_BINARY_DIR}" NAME)
+	set(CMAKE_INSTALL_PREFIX "${MEQ_PROJECT_DIR}/install/${_meq_build_name}"
+		CACHE PATH "Install prefix" FORCE)
+	unset(_meq_build_name)
+endif()
+
+# The installed binary must find the shared libraries it was linked against
+# (cuDSS, the hand-built SuiteSparse) after the build tree has gone.
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
+
+set(MEQ_RUNS_DIR "${MEQ_PROJECT_DIR}/runs" CACHE PATH
+	"Where tools/ write their run products; tests that read a tool's answer look here")
+
 option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 
 # ON since stage 7e: apps/meq.cpp is the driver now, not the legacy vacuum-field
@@ -775,6 +820,25 @@ if(MEQ_BUILD_APP)
 			OWNER_READ OWNER_WRITE OWNER_EXECUTE
 			GROUP_READ GROUP_EXECUTE
 			WORLD_READ WORLD_EXECUTE)
+
+	# The install: bin/meq, bin/meq-run, and the generators meq-run names under
+	# share/meq/tools, so the installed pair works with the build tree gone. The
+	# installed meq-run is configured a second time with paths relative to
+	# itself rather than into this build tree.
+	include(GNUInstallDirs)
+	install(TARGETS meq RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+	set(MEQ_RUN_BINARY "meq")
+	file(RELATIVE_PATH MEQ_RUN_TOOLS
+		"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"
+		"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/meq/tools")
+	configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/apps/meq-run.in"
+		"${CMAKE_CURRENT_BINARY_DIR}/install/meq-run"
+		@ONLY)
+	install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/install/meq-run"
+		DESTINATION "${CMAKE_INSTALL_BINDIR}")
+	install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/mesh/halfdisc.py"
+		DESTINATION "${CMAKE_INSTALL_DATADIR}/meq/tools/mesh")
 endif()
 
 if(MEQ_BUILD_TESTS)
@@ -799,7 +863,7 @@ endif()
 # rather than being generated from it.
 set(MEQ_DOCS_VENV "${PROJECT_SOURCE_DIR}/.venv-docs" CACHE PATH
     "Virtualenv holding Sphinx and its theme")
-set(MEQ_DOCS_HTML "${PROJECT_SOURCE_DIR}/docs/_build/html" CACHE PATH
+set(MEQ_DOCS_HTML "${PROJECT_BINARY_DIR}/docs/html" CACHE PATH
     "Where the `docs` target writes the rendered HTML")
 set(MEQ_VENV_PYTHON "python3" CACHE STRING
     "Interpreter used to create the documentation virtualenv")

@@ -1,6 +1,6 @@
 # The `geq` benchmark: MEQ's rotating source against an independent implementation
 
-`../geq` drives `../freegs4e`'s `ProfilesCentrifugalMirror` for **rotating
+`geq` drives `freegs4e`'s `ProfilesCentrifugalMirror` for **rotating
 magnetic mirrors** — Python, finite differences on a uniform `(R, Z)` grid,
 Picard with adaptive blending. It implements Abel et al. 2013,
 Rep. Prog. Phys. 76 116201, **eq (136)** closed by its **(96)** and **(97)**:
@@ -109,7 +109,8 @@ so it is not a tuning failure.
 Per case: `meta.txt` (species constants, `R_ref`, `mu0`, the flux range),
 `omega.dat`, `T_<name>.dat`, `n_<name>.dat` in MEQ's own three-column
 `psi f f'` profile format, `Nraw_<name>.dat`, and two point sets, which are
-geq's OUTPUT and are regenerated rather than tracked —
+geq's OUTPUT, regenerated into `runs/geq-benchmark/reference/<case>/` rather
+than tracked —
 
 | | |
 |---|---|
@@ -137,24 +138,33 @@ state identically is solved harder.
 
 ## Regenerating the reference
 
-Needs `../geq`, `../freegs4e` and the benchmark venv. **The point sets are
-geq's answer and are not tracked**, so `GeqSourceComparison` needs this run
-before it can read them; the tables it is given are tracked. Every reference in
+Needs `geq` and `freegs4e` beside the project directory and the benchmark venv.
+**The point sets are geq's answer and are not tracked**, so
+`GeqSourceComparison` needs this run before it can read them; the tables it is
+given are tracked. Every reference in
 this directory was generated at geq `73b9a72` and freegs4e `9a1ee0c`, both
 clean; `export_rotating.py` records that in its `meta.txt`, and a regeneration
 at any other commit is a different reference.
 
 ```sh
-cd /home/ian/projects/meq
+cd /home/ian/projects/meq/source
 PYTHONPATH=/home/ian/projects/geq/src \
 tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_mirror.py \
-    --case two --knots 2049 --omega-axis 4.758e6 \
-    --out tools/geq-benchmark/reference/two
+    --case two --knots 2049 --omega-axis 4.758e6
 
 PYTHONPATH=/home/ian/projects/geq/src \
 tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_mirror.py \
-    --case three --knots 1025 --out tools/geq-benchmark/reference/three
+    --case three --knots 1025
 ```
+
+**EVERY EXPORT SCRIPT WRITES THE ANSWER AND THE PROBLEM TO DIFFERENT PLACES.**
+geq's answer goes to `--out`, default `runs/geq-benchmark/reference/<case>/`
+under the project directory, which is where the tests read it. The problem —
+`meta.txt` and the tables — goes to `--tables`, default the same directory, and
+each table is then reported against the tracked one in `reference/<case>/`. The
+tests read the TRACKED problem, so `THE PROBLEM MOVED` means the answer just
+written answers a different one; `--tables tools/geq-benchmark/reference/<case>`
+refreshes the tracked copy, and that is a change to commit.
 
 `geq`'s own `CLAUDE.md` names a conda env and `/Users/...` paths; that is
 another machine's recipe. Here both packages import from the venv at
@@ -194,15 +204,14 @@ is compared with is a **coil model**, read off freegs4e rather than assumed:
 
 `reference/vacuum/` holds `meta.txt`, the machine as geq computed it — pack radii,
 length, centre, current, filament count, which the test **reads** rather than
-re-deriving geq's tape-and-turn arithmetic — and `points.dat`, geq's output and
-not tracked, `R z psi` on every other node of geq's 65 × 65 grid (`R ∈ [0.05, 0.63]`, `|z| ≤ 1.5`, the corners
+re-deriving geq's tape-and-turn arithmetic — and `points.dat`, geq's output,
+not tracked and written to `runs/geq-benchmark/reference/vacuum/`, `R z psi` on every other node of geq's 65 × 65 grid (`R ∈ [0.05, 0.63]`, `|z| ≤ 1.5`, the corners
 and the midplane kept). Regenerate with
 
 ```sh
-cd /home/ian/projects/meq
+cd /home/ian/projects/meq/source
 PYTHONPATH=/home/ian/projects/geq/src \
-tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_vacuum.py \
-    --out tools/geq-benchmark/reference/vacuum
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_vacuum.py
 ```
 
 and `MEQ_GEQ_VACUUM_REFERENCE` points the test elsewhere.
@@ -224,7 +233,7 @@ constraint. Unlike `reference/two/` this is a solve, not a prescribed state.
 MR-4b and MR-4d's ctests read it.
 
 **IT IS NOT SHIPPED geq**, for the three facts `MIRROR-PLAN.md` records, and
-the script changes nothing in `../geq` or `../freegs4e` — every change is a
+the script changes nothing in geq or freegs4e — every change is a
 monkeypatch from the script:
 
 1. **The direct `freeBoundary`, not von Hagenow.** Shipped Hagenow's fixed
@@ -304,8 +313,8 @@ points, the machine under `export_vacuum.py`'s keys and the species under
 twenty fixed filaments). With both `N_s` prescribed, the transfer to `R_ref` is
 pointwise quasineutrality on the prescribed profiles, so the tables do not
 depend on geq's solve; `R_ref` was chosen on the solved state and is fixed here
-as a setting. Written by a run and ignored by git, because they are geq's
-output: `solution.txt` — the labels by `psiRZ` at the two points for each
+as a setting. Written by a run to `runs/geq-benchmark/reference/rotating/`,
+outside the source tree, because they are geq's output: `solution.txt` — the labels by `psiRZ` at the two points for each
 resolution, the optimal `R_ref`, the Mach numbers on the converged state and
 the fitted edge orders — and `psi_direct_{129,257,513}.dat` and
 `psi_hagenow_257.dat`, total `ψ` as `R z psi` on the 65 × 65 nodes every
@@ -320,10 +329,9 @@ resolution, direct and Hagenow alike, while neighbouring nodes agree with MEQ to
 excludes them (MEASUREMENTS.md M-263).
 
 ```sh
-cd /home/ian/projects/meq
+cd /home/ian/projects/meq/source
 PYTHONPATH=/home/ian/projects/geq/src \
-tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_rotating.py \
-    --out tools/geq-benchmark/reference/rotating
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_rotating.py
 ```
 
 About eleven minutes, nine and a half of them the 513² direct solve (5 s at
@@ -342,10 +350,11 @@ problem, each driven the way a user drives it, and timed.
   three changes (see *The rotating mirror*). `n` is 65, 129, 257 or 513, each
   holding the 65 grid. It runs at two Picard tolerances: `1e-6`, geq's own
   stopping scale, and `2e-9`, the reference's.
-* **MEQ** runs `examples/mirror-rotating.toml` through `build/meq`, with only
-  `[mesh] RefinementLevels`, `[discretisation] PolynomialDegree`, the threads
-  and the output grid changed, plus `[mesh.generate] PlasmaSize` with
-  `--plasma-size`. The mesh is generated once by `meq-run --mesh-only` and is
+* **MEQ** runs `examples/mirror-rotating.toml` through the installed
+  `install/double/bin/meq`, with only `[mesh] RefinementLevels`,
+  `[discretisation] PolynomialDegree`, the threads and the output grid changed,
+  plus `[mesh.generate] PlasmaSize` with `--plasma-size`. The variant is written
+  under `runs/`, so its input tables are named by absolute path. The mesh is generated once by `meq-run --mesh-only` and is
   not timed. **PlasmaSize is the knob that matters**: MEQ's error peaks inside
   the plasma near the midplane, and uniform refinement also refines the vacuum
   out to Γ. Run the ladder at 0.1, 0.05 and 0.025, with `--geq ""` for the
@@ -372,15 +381,17 @@ multithreaded run the one-minute average mostly measures that run. Both codes ru
 count, with OMP, MKL and OpenBLAS all set to it.
 
 ```sh
-cd /home/ian/projects/meq
+cd /home/ian/projects/meq/source
 tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
 ```
 
-**MEQ on the GPU**: `--meq-device cuda`, with `--meq-build build-single` for
-single precision. geq has no device path, so it stays on the host. This
+**MEQ on the GPU**: `--meq-device cuda`, with `--meq-build single` for
+single precision; `--meq-build` takes an install name under `install/` or a
+prefix, and the reference is always `install/double` on the host. geq has no device path, so it stays on the host. This
 machine's GPU is consumer silicon, with FP64 at 1/32 to 1/64 of FP32, so a
 double device time here says something about this card and not about devices.
 
 It takes about an hour, most of it geq's 513² solves. The results go to
-`runs/<stamp>/race.md` and `race.json`, which git ignores. The published
+`runs/geq-benchmark/race/<stamp>/race.md` and `race.json`, under the project
+directory. The published
 tables are M-274 for the host race and M-276 for the device race.

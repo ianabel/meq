@@ -16,6 +16,10 @@ Code organisation
    (attic/      removed 2026-09-07 -- the original von Hagenow / Lackner
                 free-boundary code, superseded by the exterior DtN coupling)
 
+That is the git checkout, ``source/`` in the project directory, and nothing is
+built, tested or run inside it: build trees, installs and run output live
+beside it, in ``builds/``, ``install/`` and ``runs/`` (:ref:`install-layout`).
+
 The library
 -----------
 

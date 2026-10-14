@@ -12,6 +12,19 @@
 # link fails with an undefined reference to main.
 find_package(Boost CONFIG REQUIRED COMPONENTS unit_test_framework)
 
+# EVERY TEST RUNS IN THIS BUILD TREE AND WRITES NOTHING INTO THE SOURCE TREE.
+# Each runs in output/<test>/ of this directory's binary dir (set at the end
+# of this file), so whatever a test writes -- a driver run's .nc, a variant
+# TOML, a generated mesh -- lands there and goes when the build tree does. What a test
+# READS from the source tree it names through MEQ_SOURCE_DIR, through
+# tests/SourceTree.hpp, and never by a path relative to the working directory.
+# MEQ_RUNS_DIR is where tools/ write an independent code's answer that a test
+# compares against (geq's, through tools/geq-benchmark); a test that needs one
+# says which command writes it when it is absent.
+add_compile_definitions(
+	MEQ_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+	MEQ_RUNS_DIR="${MEQ_RUNS_DIR}")
+
 # Each entry is the base name of a file in unit/, and by convention tests the
 # unit of the same name: ConfigTests.cpp tests src/meq/Config.cpp.
 set(MEQ_UNIT_TESTS
@@ -64,12 +77,7 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 		# copy of the Example 5 source has not drifted from the fixture's.
 		target_include_directories(${_test} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
-		# WORKING_DIRECTORY is load-bearing, not tidiness: ConfigTests opens
-		# examples/*.toml by a path relative to the source tree, so without
-		# this it passes from build/ and fails from anywhere else. Pinning it
-		# makes an out-of-tree build behave the same as an in-tree one.
-		add_test(NAME ${_test} COMMAND ${_test}
-			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+		add_test(NAME ${_test} COMMAND ${_test})
 
 		# MKL_THREADING_LAYER=GNU USED TO BE SET HERE AND IS DELIBERATELY
 		# NOT ANY MORE. It guarded a real trap: libblas.so.3 on the
@@ -300,12 +308,7 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 			meq_core
 			Boost::unit_test_framework)
 
-		# WORKING_DIRECTORY is load-bearing, not tidiness: ConfigTests opens
-		# examples/*.toml by a path relative to the source tree, so without
-		# this it passes from build/ and fails from anywhere else. Pinning it
-		# makes an out-of-tree build behave the same as an in-tree one.
-		add_test(NAME ${_test} COMMAND ${_test}
-			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+		add_test(NAME ${_test} COMMAND ${_test})
 
 		# Not optional, and least optional here of anywhere in the tree: the
 		# hybridized trace system is solved by UMFPACK, whose BLAS-3 calls MKL
@@ -356,8 +359,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	# for not having one.
 	add_test(NAME cuDSSTraceSolver
 		COMMAND TraceSolverScaling --device cuda --orders 2 --sizes 8,16
-		        --no-assembly-timing --repeats 1
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+		        --no-assembly-timing --repeats 1)
 	set_tests_properties(cuDSSTraceSolver PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 endif()
@@ -483,10 +485,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptan
 		# fixed by the same file(GENERATE) call in the top-level CMakeLists.
 		MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
 
-	# The source tree, so examples/*.toml resolve -- and so the driver's output
-	# lands somewhere predictable for the read-back.
-	add_test(NAME DriverAcceptance COMMAND DriverAcceptance
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME DriverAcceptance COMMAND DriverAcceptance)
 	set_tests_properties(DriverAcceptance PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -507,8 +506,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/InverseSolve.c
 		Boost::unit_test_framework)
 	target_compile_definitions(InverseSolve PRIVATE
 		MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
-	add_test(NAME InverseSolve COMMAND InverseSolve
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME InverseSolve COMMAND InverseSolve)
 	set_tests_properties(InverseSolve PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -516,9 +514,7 @@ else()
 endif()
 
 # MachineFixedBoundary runs the SHIPPED examples/fixed-*.toml through the
-# shipped binary, so it needs the same two things DriverAcceptance does: the
-# driver's path, and the source tree as its working directory because those
-# files name their profile tables as `examples/...`.
+# shipped binary, so it needs the driver's path, as DriverAcceptance does.
 #
 # IT IS A DRIVER TEST ON PURPOSE. What rots about an example is the FILE -- a
 # key renamed, a default moved, a table's path -- and a library-level fixture
@@ -547,8 +543,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DeviceParity.c
 		Boost::unit_test_framework)
 	target_compile_definitions(DeviceParity PRIVATE
 		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
-	add_test(NAME DeviceParity COMMAND DeviceParity
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME DeviceParity COMMAND DeviceParity)
 	set_tests_properties(DeviceParity PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -564,8 +559,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/MachineFixedBo
 		Boost::unit_test_framework)
 	target_compile_definitions(MachineFixedBoundary PRIVATE
 		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
-	add_test(NAME MachineFixedBoundary COMMAND MachineFixedBoundary
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME MachineFixedBoundary COMMAND MachineFixedBoundary)
 	set_tests_properties(MachineFixedBoundary PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -593,10 +587,7 @@ if(TARGET meq_core AND NOT _rotating_index EQUAL -1
 		meq_core
 		Boost::unit_test_framework)
 
-	# The source tree, because the reference is named by a path relative to it --
-	# the same reason ConfigTests needs it for examples/*.toml.
-	add_test(NAME GeqSourceComparison COMMAND GeqSourceComparison
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME GeqSourceComparison COMMAND GeqSourceComparison)
 	set_tests_properties(GeqSourceComparison PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -609,9 +600,8 @@ endif()
 #
 # IT MAKES ITS MESH, as InverseSolve does through meq-run: the geometry is a
 # build product of halfdisc.py's command line, written once in the test, so it
-# needs python3 with gmsh at test time. The mesh goes to the BUILD tree rather
-# than the source tree, which is the working directory only because the geq
-# reference is named relative to it -- GeqSourceComparison's reason.
+# needs python3 with gmsh at test time. The mesh goes to the build tree, as
+# everything a test writes does.
 list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
 if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/VacuumMirror.cpp")
@@ -624,8 +614,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_compile_definitions(VacuumMirror PRIVATE
 		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
 		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
-	add_test(NAME VacuumMirror COMMAND VacuumMirror
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME VacuumMirror COMMAND VacuumMirror)
 	set_tests_properties(VacuumMirror PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -654,10 +643,8 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_compile_definitions(RotatingMirror PRIVATE
 		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
 		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
-	add_test(NAME RotatingMirror COMMAND RotatingMirror --run_test=solve
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-	add_test(NAME RotatingMirrorResolution COMMAND RotatingMirror --run_test=resolution
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME RotatingMirror COMMAND RotatingMirror --run_test=solve)
+	add_test(NAME RotatingMirrorResolution COMMAND RotatingMirror --run_test=resolution)
 	set_tests_properties(RotatingMirror RotatingMirrorResolution PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
@@ -668,8 +655,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		target_compile_definitions(RotatingMirror PRIVATE
 			MEQ_DRIVER_PATH="$<TARGET_FILE:meq>"
 			MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
-		add_test(NAME RotatingMirrorDriver COMMAND RotatingMirror --run_test=driver
-			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+		add_test(NAME RotatingMirrorDriver COMMAND RotatingMirror --run_test=driver)
 		set_tests_properties(RotatingMirrorDriver PROPERTIES
 			ENVIRONMENT "MKL_NUM_THREADS=1")
 	endif()
@@ -698,8 +684,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		target_compile_definitions(ElementRegions PRIVATE
 			MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
 	endif()
-	add_test(NAME ElementRegions COMMAND ElementRegions
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	add_test(NAME ElementRegions COMMAND ElementRegions)
 	set_tests_properties(ElementRegions PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
@@ -772,3 +757,22 @@ else()
 			--warnings-as-errors=readability-identifier-naming
 			${_naming_sources})
 endif()
+
+# ---------------------------------------------------------------------------
+# Each test's working directory: output/<test>/ in this build tree
+# ---------------------------------------------------------------------------
+#
+# ONE PER TEST, NOT ONE SHARED, because under `ctest -j` two tests writing the
+# same name into one directory race: InverseSolve and DriverAcceptance both have
+# meq-run generate machine-f-diiid.msh and its stamp into the working directory,
+# and a driver run's outputs are named by the configuration's Prefix, not by the
+# test. A directory per test makes a test's products its own and says, on
+# disk, which test left what. The directory is made at configure time because
+# ctest does not make a WORKING_DIRECTORY that is missing.
+get_property(_meq_tests DIRECTORY PROPERTY TESTS)
+foreach(_test IN LISTS _meq_tests)
+	set(_work "${CMAKE_CURRENT_BINARY_DIR}/output/${_test}")
+	file(MAKE_DIRECTORY "${_work}")
+	set_tests_properties(${_test} PROPERTIES WORKING_DIRECTORY "${_work}")
+endforeach()
+unset(_meq_tests)

@@ -444,7 +444,7 @@ not to smuggle in.
 ### Methods that need Jᵀ: merit-gradient Armijo, dogleg, trust region, JFNK, full-space SQP
 
 **Declined.** `mfem::DarcyNPCOperator::Jacobian::Mult` **aborts**
-(`../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp:3756-3761`):
+(`../../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp:3756-3761`):
 after `ComputeH()` the local arrays hold factored blocks, so the Jacobian can be
 solved with and cannot be applied. There is no `Jᵀ` either.
 
@@ -624,7 +624,7 @@ for the first measurement**, because `apps/meq.cpp:1634` initialises
 
 **MFEM stays out of tree**, hand-built, found through `MFEM_DIR`. Its history is
 enormous, so a submodule would make every clone of MEQ expensive; it needs an
-out-of-tree configure-and-build of its own anyway; and `../mfem-hdg-dev` is a
+out-of-tree configure-and-build of its own anyway; and `../../mfem-hdg-dev` is a
 working tree with its own active development on `gf-hdg-subdomains-dev`, which a
 submodule pin would fight rather than help.
 
@@ -692,7 +692,7 @@ is MFEM `Vector` arithmetic and allocator churn inside the Newton loop:
 * **The measured MEQ-side lever is the build, not a loop.**
   [M-77](MEASUREMENTS.md#m-77) measures the CUDA-enabled install at **1.07× the
   wall and +55.4 M allocations** against an otherwise identical
-  `../mfem/install-nocuda`, with byte-identical output, and attributes 24% of the
+  `../../mfem/install-nocuda`, with byte-identical output, and attributes 24% of the
   allocation traffic to `mfem::forall`'s host-lambda wrapper. **7% of the whole
   run for one CMake variable is larger than every item `THREADING-PLAN.md` built
   except A**, and it costs nothing to take for a production CPU build.
@@ -1138,7 +1138,7 @@ a coarse and a refined ladder alike, with every converged rung degenerate
 (`ψ < 0` across the midplane, scale ≤ 5.7e-04).
 
 **THE REAL LESSON IS THAT §7.14's FAILURE WAS NOT A CONTINUATION PROBLEM.**
-`../freegs4e` never meets it, and checking why is decisive: its `constrain`
+`../../freegs4e` never meets it, and checking why is decisive: its `constrain`
 object is a **control system that solves for the coil currents inside every
 Picard iteration** — `control.py` assembles a least-squares system over the coil
 currents against shape constraints (`Br = 0` and `Bz = 0` at a prescribed
@@ -2091,7 +2091,7 @@ they stay where they are; this index makes the catalogue complete.
 - `BORDERED-GLOBALISATION-PLAN.md` §12: removing the line search's full re-assembly, deferred at a 1.05× ceiling (M-138).
 - `CLAUDE_DEVICE.md` *Single precision*, single precision's setup loss: `extensionFdStep()` as the suspect (falsified); `meq::pathTolerance()` built, swept and reverted whole, upstream's bisection termination taken instead (M-242).
 - `CLAUDE_DEVICE.md` *Which integrators need device offload, and the batched routes*: `AssemblyMode::Batched` a 15 to 27% host loss (closed, M-99); `LocalFactorMode::Batched` not the host default (declined); `AssemblyMode::Batched` under a Device (declined, M-215, M-209); the ordered list's items 2 and 3 (closed), "`HDGExtensionIntegrator` disqualifies the condensation cache" (falsified), nothing for the linear-form integrators (declined) (M-185).
-- `CLAUDE_MFEM.md` *`../mfem-hdg-dev` is receive-only*, the `Reconstruct()` row: MEQ's two candidate fixes (falsified, measured); upstream's `own_internal` flag (withdrawn); three explanations of why `cuda` never met it (falsified).
+- `CLAUDE_MFEM.md` *`../../mfem-hdg-dev` is receive-only*, the `Reconstruct()` row: MEQ's two candidate fixes (falsified, measured); upstream's `own_internal` flag (withdrawn); three explanations of why `cuda` never met it (falsified).
 - `CLAUDE_FB.md` *FB-6 is beaten* (the limiter pinned to a dof): `LimiterConstraint::NearestDof` replaced and kept as a control, and the analogy that excused it falsified (M-08).
 - `CLAUDE_FB.md` *FB-6 is beaten*, and `FREE-BOUNDARY-PLAN.md` §7.20 *What is left*: *Painting the limiter by centroid, and a precedence rule* — painting falsified (an `O(h)` staircase), cutting elements for a smooth limiter declined, a `SurfaceAttribute`/`R`-`Z` precedence rule declined (both refused).
 - `CLAUDE_FB.md` *At `j = 0` the question does not arise* (the tiling paragraphs): *Lost coverage as the cause of the red tiling, and relaxing the gate* — withdrawn and declined (M-12).

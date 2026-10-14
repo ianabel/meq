@@ -1,6 +1,6 @@
 # A MACHINE-SHAPED FIXED-BOUNDARY EQUILIBRIUM: fixed-a-testtokamak
 #
-#     meq examples/fixed-a-testtokamak.toml
+#     meq ../../source/examples/fixed-a-testtokamak.toml
 #
 # GENERATED -- edit tools/freegs4e-benchmark/make_case.py, not this file, and
 # re-run tools/freegs4e-benchmark/make_fixed.sh.
@@ -152,8 +152,8 @@ Type = "mhd"
 # headers, and tools/freegs4e-benchmark/convert.py, which records both the
 # docstring error in freegs4e that this conversion survives and the reason the
 # normalised form is the one that can be shipped.
-PPrimeFile = "examples/fixed-a-testtokamak-pprime.dat"
-GGPrimeFile = "examples/fixed-a-testtokamak-ggprime.dat"
+PPrimeFile = "fixed-a-testtokamak-pprime.dat"
+GGPrimeFile = "fixed-a-testtokamak-ggprime.dat"
 
 # psi_ax IS AN UNKNOWN OF THE SOLVE AND THIS IS ITS STARTING VALUE.
 #

@@ -27,42 +27,62 @@
 #include "meq/Profiles.hpp"
 #include "meq/RotatingSource.hpp"
 
+#include "SourceTree.hpp"
+
 namespace meqtest
 {
 namespace geq
 {
 	/**
-	 * THE COMMAND THAT REGENERATES A CASE'S OUTPUT, by the case's directory
-	 * name, as tools/geq-benchmark/README.md gives it.
-	 *
 	 * WHAT IS TRACKED IS WHAT MEQ IS GIVEN, AND WHAT IS NOT IS geq'S ANSWER.
-	 * meta.txt and the tables are committed; the point sets, the psi files and
-	 * solution.txt are a geq run's output and are gitignored, so a fresh clone
-	 * has none of them and a reader of one must say how to make it rather than
-	 * fail to open a file.
+	 * meta.txt, filaments.dat and the tables are committed, under the source
+	 * tree's tools/geq-benchmark/reference/<case>; the point sets, the psi files
+	 * and solution.txt are a geq run's output, written by the export into the
+	 * runs directory's geq-benchmark/reference/<case> under the SAME names, so
+	 * a fresh clone has none of them and a reader of one must say how to make
+	 * it rather than fail to open a file.
+	 *
+	 * Each consumer's override environment variable names ONE directory that
+	 * holds a whole export, inputs and answer together, and replaces both.
+	 */
+	inline std::string inputDirectory( std::string const &caseName )
+	{
+		return meq::test::sourcePath( "tools/geq-benchmark/reference/" + caseName );
+	}
+
+	/// Where the export writes a case's answer. See inputDirectory().
+	inline std::string answerDirectory( std::string const &caseName )
+	{
+		return meq::test::runsPath( "geq-benchmark/reference/" + caseName );
+	}
+
+	/**
+	 * THE COMMAND THAT REGENERATES A CASE'S OUTPUT, by the case's directory
+	 * name, as tools/geq-benchmark/README.md gives it, and where it lands.
 	 */
 	inline std::string regenerationCommand( std::string directory )
 	{
 		while ( !directory.empty() && directory.back() == '/' )
 			directory.pop_back();
 		std::string const name = directory.substr( directory.find_last_of( '/' ) + 1 );
-		std::string const run = "PYTHONPATH=../geq/src tools/freegs4e-benchmark/venv/bin/python "
+		std::string const run = "( cd " + meq::test::sourcePath( "" )
+		                      + " && PYTHONPATH=../../geq/src tools/freegs4e-benchmark/venv/bin/python "
 		                        "tools/geq-benchmark/";
-		std::string const out = " --out tools/geq-benchmark/reference/" + name;
+		std::string const lands = " ), which writes geq's answer into " + answerDirectory( name );
 		if ( name == "two" )
-			return run + "export_mirror.py --case two --knots 2049 --omega-axis 4.758e6" + out;
+			return run + "export_mirror.py --case two --knots 2049 --omega-axis 4.758e6" + lands;
 		if ( name == "three" )
-			return run + "export_mirror.py --case three --knots 1025" + out;
+			return run + "export_mirror.py --case three --knots 1025" + lands;
 		if ( name == "vacuum" )
-			return run + "export_vacuum.py" + out;
+			return run + "export_vacuum.py" + lands;
 		if ( name == "rotating" )
-			return run + "export_rotating.py" + out + " ( about eleven minutes )";
+			return run + "export_rotating.py" + lands + " ( about eleven minutes )";
 		return "the export script tools/geq-benchmark/README.md names for " + directory;
 	}
 
 	/**
-	 * Opens one of a case's OUTPUT files -- geq's answer, untracked -- from the
-	 * source tree, which is ctest's working directory.
+	 * Opens one of a case's OUTPUT files -- geq's answer, untracked -- from
+	 * @a directory, which is answerDirectory() unless an override names one.
 	 *
 	 * @throws std::runtime_error naming the file and the command that
 	 *         regenerates it, when it cannot be opened.
@@ -75,8 +95,8 @@ namespace geq
 		if ( !in )
 			throw std::runtime_error( "cannot open " + path + ". It is geq's ANSWER, an "
 				"untracked output of the export rather than part of the committed "
-				"reference, so a fresh clone does not have it. Regenerate it, from the "
-				"repository root, with: " + regenerationCommand( directory ) );
+				"reference, so a fresh clone does not have it. Regenerate it with: "
+				+ regenerationCommand( directory ) );
 		return in;
 	}
 
@@ -118,7 +138,8 @@ namespace geq
 		std::vector<SpeciesEntry> species;
 	};
 
-	/// @param directory the case's directory, with or without a trailing '/'.
+	/// @param directory the case's INPUT directory -- inputDirectory(), or an
+	///        override -- with or without a trailing '/'.
 	/// @throws std::runtime_error naming meta.txt when it cannot be opened.
 	inline GeqCase readCase( std::string directory )
 	{
@@ -132,9 +153,9 @@ namespace geq
 		if ( !meta )
 			throw std::runtime_error(
 				"cannot open " + metaPath + " -- the exported geq reference is missing. "
-				"It is committed, so a build tree that lacks it is running from the "
-				"wrong working directory; ctest pins CMAKE_SOURCE_DIR. To regenerate "
-				"it see tools/geq-benchmark/README.md." );
+				"It is committed, under the source tree's tools/geq-benchmark/reference, "
+				"so a checkout that lacks it is incomplete. To regenerate it see "
+				"tools/geq-benchmark/README.md." );
 
 		std::string line;
 		while ( std::getline( meta, line ) )

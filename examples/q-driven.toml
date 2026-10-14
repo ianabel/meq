@@ -39,14 +39,14 @@ Normalised = true
 PsiAxis = 0.30
 
 Mu0 = 1.0
-PPrimeFile = "examples/q-driven-pprime.dat"
+PPrimeFile = "q-driven-pprime.dat"
 
 # THE TARGET, AND NOTE THAT THERE IS NO GGPrimeFile. The two are alternatives
 # and naming both is refused: one prescribes the toroidal field and the other
 # asks for whichever field delivers a given q, so a precedence rule would decide
 # which physics the run did on the strength of key order -- and both spellings
 # converge, to different equilibria.
-SafetyFactorFile = "examples/q-driven-q.dat"
+SafetyFactorFile = "q-driven-q.dat"
 
 # The degree of the g^2 polynomial the loop iterates on. Two or three is the
 # usual. Higher is not better: a degree the surface family does not determine

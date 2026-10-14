@@ -134,13 +134,13 @@ import convert_desc as desc                                    # noqa: E402
 from convert_desc import CASES, MEQ, REFDIR, MU0, load_case     # noqa: E402
 from mxh import mxh_boundary                                    # noqa: E402
 
-#: Where the built binary lives, defaulted BESIDE the MEQ checkout in the same
-#: way `race_desc.py` defaults `DESC_DIR` and `MFEM_DIR` -- so a tree cloned
+#: Where the built binary lives, defaulted BESIDE the project directory in the
+#: same way `race_desc.py` defaults `DESC_DIR` and `MFEM_DIR` -- so a tree cloned
 #: anywhere finds it without an absolute path being baked in, and `CHEASE_EXE`
 #: overrides it.  `README.md` has the build commands.
 CHEASE = os.environ.get(
 	"CHEASE_EXE",
-	os.path.join(os.path.dirname(MEQ), "chease", "src-f90", "chease"))
+	desc.meqpaths.sibling("chease", "src-f90", "chease"))
 
 
 def gamma(meta, n=512):

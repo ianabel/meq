@@ -59,6 +59,8 @@
 
 #include "analytic/Soloviev.hpp"
 
+#include "SourceTree.hpp"
+
 using meq::ElementMaterials;
 using meq::ElementRegion;
 using meq::GradShafranovSolver;
@@ -965,12 +967,9 @@ BOOST_AUTO_TEST_CASE( alignConductorsCost )
 		{
 			std::string const stem = std::string( MEQ_TEST_OUTPUT_DIR ) + "/er-cost-"
 			                         + ex.name + ( on ? "-on" : "-off" );
-			std::ifstream in( std::string( "examples/" ) + ex.name + ".toml" );
-			BOOST_TEST_REQUIRE( in.good() );
-			std::stringstream text;
-			text << in.rdbuf();
-			std::string config = text.str();
-			std::string const file = std::string( "File = \"examples/" ) + ex.name + ".msh\"";
+			std::string config = meq::test::shippedConfig( std::string( "examples/" ) + ex.name + ".toml" );
+			// A generated [mesh] File is the run's product and names no directory.
+			std::string const file = std::string( "File = \"" ) + ex.name + ".msh\"";
 			std::size_t const at = config.find( file );
 			BOOST_TEST_REQUIRE( at != std::string::npos );
 			config.replace( at, file.size(), "File = \"" + stem + ".msh\"" );

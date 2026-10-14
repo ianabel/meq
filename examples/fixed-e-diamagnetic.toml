@@ -1,6 +1,6 @@
 # A MACHINE-SHAPED FIXED-BOUNDARY EQUILIBRIUM: fixed-e-diamagnetic
 #
-#     meq examples/fixed-e-diamagnetic.toml
+#     meq ../../source/examples/fixed-e-diamagnetic.toml
 #
 # GENERATED -- edit tools/freegs4e-benchmark/make_case.py, not this file, and
 # re-run tools/freegs4e-benchmark/make_fixed.sh.
@@ -152,8 +152,8 @@ Type = "mhd"
 # headers, and tools/freegs4e-benchmark/convert.py, which records both the
 # docstring error in freegs4e that this conversion survives and the reason the
 # normalised form is the one that can be shipped.
-PPrimeFile = "examples/fixed-e-diamagnetic-pprime.dat"
-GGPrimeFile = "examples/fixed-e-diamagnetic-ggprime.dat"
+PPrimeFile = "fixed-e-diamagnetic-pprime.dat"
+GGPrimeFile = "fixed-e-diamagnetic-ggprime.dat"
 
 # psi_ax IS AN UNKNOWN OF THE SOLVE AND THIS IS ITS STARTING VALUE.
 #

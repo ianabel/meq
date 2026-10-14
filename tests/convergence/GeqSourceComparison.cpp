@@ -76,13 +76,24 @@
 
 namespace
 {
-	/// The committed reference. MEQ_GEQ_REFERENCE overrides it, which is how the
-	/// knot study under tools/geq-benchmark/README.md sweeps the tabulation
-	/// without touching what is committed.
-	std::string referenceRootPath()
+	enum class Part
+	{
+		Inputs,  ///< meta.txt and the tables, committed
+		Answer   ///< points.dat and points_tight.dat, geq's output
+	};
+
+	/// The committed reference and geq's answer to it. MEQ_GEQ_REFERENCE
+	/// overrides both, which is how the knot study under
+	/// tools/geq-benchmark/README.md sweeps the tabulation without touching
+	/// what is committed: it names a root holding whole exports, <root>/<case>,
+	/// inputs and answer together.
+	std::string caseDirectory( std::string const & caseName, Part const part )
 	{
 		char const * const override = std::getenv( "MEQ_GEQ_REFERENCE" );
-		return override ? std::string( override ) + "/" : std::string( "tools/geq-benchmark/reference/" );
+		if ( override )
+			return std::string( override ) + "/" + caseName;
+		return part == Part::Inputs ? meqtest::geq::inputDirectory( caseName )
+		                            : meqtest::geq::answerDirectory( caseName );
 	}
 
 	/// One exported prescribed state: meta.txt, read by GeqReference.hpp's one
@@ -102,12 +113,13 @@ namespace
 	{
 		Reference reference;
 		static_cast<meqtest::geq::GeqCase &>( reference ) =
-			meqtest::geq::readCase( referenceRootPath() + caseName );
+			meqtest::geq::readCase( caseDirectory( caseName, Part::Inputs ) );
 
-		auto const readPoints = [ &reference ]( std::string const & name,
+		std::string const answers = caseDirectory( caseName, Part::Answer );
+		auto const readPoints = [ &answers ]( std::string const & name,
 			std::vector<Reference::Point> & into )
 		{
-			std::ifstream points = meqtest::geq::openOutput( reference.directory, name );
+			std::ifstream points = meqtest::geq::openOutput( answers, name );
 
 			std::string line;
 			while ( std::getline( points, line ) )

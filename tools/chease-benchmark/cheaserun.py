@@ -3,7 +3,8 @@
 
     ../freegs4e-benchmark/venv/bin/python cheaserun.py fixed-h-circular --ns 40 --nt 40
 
-writes `runs/<stem>-chease-NS<ns>NT<nt>.npz` -- 1-D `R`, `Z` and `psi[ iR, iZ ]`
+writes `runs/chease-benchmark/<stem>-chease-NS<ns>NT<nt>NPSI<npsi>.npz`, under the
+project directory -- 1-D `R`, `Z` and `psi[ iR, iZ ]`
 in the freegs4e gauge, which is the layout `tools/freegs4e-benchmark/compare.py`
 and `tools/desc-benchmark/compare_desc.py` already read -- plus a `.json` of
 everything the run reported.
@@ -127,7 +128,8 @@ def main():
 	                help="put the EQDSK box on the case's own mesh rectangle, "
 	                     "so the grid comparison needs no interpolation")
 	ap.add_argument("--trial", type=float, default=1.0)
-	ap.add_argument("--out", default="", help="the .npz; default runs/<stem>-...")
+	ap.add_argument("--out", default="",
+	                help="the .npz; default runs/chease-benchmark/<stem>-...")
 	ap.add_argument("--rundir", default="", help="scratch; default <tempdir>/chease-bench/<tag>")
 	ap.add_argument("--keep", action="store_true", help="keep the scratch dir")
 	args = ap.parse_args()
@@ -152,7 +154,8 @@ def main():
 	            nrbox=args.nrbox, nzbox=args.nzbox, box=box)
 
 	grid = conv.eqdsk_to_grid(run["eqdsk_path"], meta)
-	out = args.out or os.path.join(HERE, "runs", f"{tag}.npz")
+	out = args.out or os.path.join(conv.desc.meqpaths.runs("chease-benchmark"),
+	                               f"{tag}.npz")
 	os.makedirs(os.path.dirname(out), exist_ok=True)
 	np.savez(out, R=grid["R"], Z=grid["Z"], psi=grid["psi"])
 

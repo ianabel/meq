@@ -13,6 +13,12 @@ The C++ shape of the TOML schema documented in :doc:`../configuration`.
    .. cpp:function:: Configuration( toml::value const & document, std::string const & source )
    .. cpp:function:: static Configuration fromString( std::string const & text, std::string const & source = std::string( "<string>" ) )
 
+   The file constructor resolves every relative path the file *reads* against
+   the file's own directory; the other two have no file to be relative to and
+   leave such paths to resolve against the working directory. A path the run
+   *writes* is relative to the working directory in all three. See
+   :ref:`configuration-paths`.
+
    .. important::
 
       **Construction either succeeds and leaves every accessor meaningful, or

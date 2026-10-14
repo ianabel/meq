@@ -13,7 +13,7 @@
 # achievable order at k <= 1.2 -- see the generator's header.
 
 [mesh]
-File = "examples/mastu-nke.msh"
+File = "mastu-nke.msh"
 
 [mesh.generate]
 Tool = "halfdisc"
@@ -86,8 +86,8 @@ ConfineToPlasma = true
 PsiAxis = 9.187209931e-02
 PlasmaCurrent = 6.0000000000e+05
 Mu0 = 1.25663706212e-06
-PPrimeFile = "examples/mastu-nke-pprime.dat"
-GGPrimeFile = "examples/mastu-nke-ggprime.dat"
+PPrimeFile = "mastu-nke-pprime.dat"
+GGPrimeFile = "mastu-nke-ggprime.dat"
 
 [[coils]]
 Name = "Solenoid"

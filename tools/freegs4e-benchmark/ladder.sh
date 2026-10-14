@@ -9,7 +9,9 @@
 # endpoints.  The grids are 2^n + 1 so each is a point-for-point subset of the
 # next, which is what a reference refinement study needs.
 #
-#   FGSREF_OUT=<dir> ladder.sh <case-prefix> [n ...]
+#   FGSREF_OUT=<dir> FGS_VENV=<python> ladder.sh <case-prefix> [n ...]
+#
+# <dir> belongs under runs/freegs4e-benchmark/; it gets <dir>/n<N>/ per grid.
 set -u
 CASE="${1:-A_}"
 shift || true
@@ -17,7 +19,8 @@ LEVELS=${*:-"129 257 513 1025 2049"}
 HERE="$( cd "$( dirname "$0" )" && pwd )"
 OUT="${FGSREF_OUT:?set FGSREF_OUT to a scratch directory}"
 VENV="${FGS_VENV:?set FGS_VENV to the python that can import freegs4e}"
-FGS="${FREEGS4E:-/home/ian/projects/freegs4e}"
+# freegs4e is the checkout beside the project directory: source/../../freegs4e.
+FGS="${FREEGS4E:-${MEQ_SIBLINGS:-$HERE/../../../..}/freegs4e}"
 
 mkdir -p "$OUT"
 printf "%6s %12s %10s %10s %8s\n" n wall_s peak_MB picard status | tee "$OUT/ladder.txt"

@@ -846,7 +846,7 @@ datum-given pair differs only in Dirichlet data; the coupled pair differs in tha
 Same physical quantity two ways, and **a Neumann half inconsistent with its own
 Dirichlet twin would separate them while every border still converged.**
 
-**WHY A FILAMENT AT ALL, AND IT IS NOT THAT IT IS BETTER.** `../freegs4e`'s
+**WHY A FILAMENT AT ALL, AND IT IS NOT THAT IT IS BETTER.** `../../freegs4e`'s
 default `Coil` **is** an exact filament — `controlPsi` returns
 `Greens( R, Z, · )*turns`, its `area` only imposing a current-density limit and
 never entering the field — and so is FreeGS's. `meq::Coil` is a rectangle with
@@ -3036,7 +3036,7 @@ TOML and its guess all carried TCV's solenoid at 220× its current →
 
 
 **`tools/freegs4e-benchmark/`.** The first check of MEQ against a
-code that shares the equation and essentially no code — `../freegs4e`, a FreeGS
+code that shares the equation and essentially no code — `../../freegs4e`, a FreeGS
 derivative: free boundary by von Hagenow Green's functions, 2nd/4th-order finite
 differences on a uniform `(R,Z)` grid, Picard with adaptive blending, in Python.
 `docs/validation.rst` is the user-facing account; this is the record.
@@ -3238,7 +3238,7 @@ the one stored.
   are needed, which should cut the matrix by about an order of magnitude — at
   the cost of tracking a support that moves as Picard runs.
 
-  **`../freegs4e` IS NOT EDITED — IT IS CACHED FROM `fgsref.py`, AS
+  **`../../freegs4e` IS NOT EDITED — IT IS CACHED FROM `fgsref.py`, AS
   WORKAROUND 6.** `M` is built once and kept on the Equilibrium; the Romberg
   weights come from `romb( I )` rather than a reimplementation, so the rule
   cannot drift from the shipped loop's. Measured: the boundary values agree to

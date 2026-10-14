@@ -1851,13 +1851,23 @@ namespace meq
 		public:
 			// Parse a TOML file. Throws ConfigError if it cannot be read, does
 			// not parse, or does not describe a runnable problem.
+			//
+			// A relative path the file READS -- a profile table, a mesh it does
+			// not generate, an initial guess -- is resolved against the
+			// directory the file is in, so a configuration and its data move
+			// together and a run can be made from any working directory. A path
+			// the run WRITES -- [output] Directory, [conductors] CacheFile, the
+			// [mesh] File a [mesh.generate] block makes -- stays relative to the
+			// working directory, which is where a run's products belong.
 			explicit Configuration( std::string const & fileName );
 
 			// Parse an already-loaded document. `source` is used only in error
 			// messages, to say where the document came from.
 			Configuration( toml::value const & document, std::string const & source );
 
-			// Parse TOML held in memory -- for tests, and for embedding.
+			// Parse TOML held in memory -- for tests, and for embedding. There
+			// is no file to be relative to, so input paths are left as given
+			// and resolve against the working directory.
 			static Configuration fromString( std::string const & text, std::string const & source = "<string>" );
 
 			MeshConfig const & getMesh() const noexcept { return meshOptions; };
@@ -1889,6 +1899,10 @@ namespace meq
 
 		private:
 			void parse( toml::value const & document );
+
+			/// Prefix every relative INPUT path with `directory`. See the file
+			/// constructor for which paths are inputs.
+			void resolveInputPaths( std::string const & directory );
 
 			std::string sourceName;
 

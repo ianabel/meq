@@ -109,8 +109,8 @@ THE BUILD DIRECTORY IS CONFIGURED — WHICH IS HOW A BINARY STOPS KNOWING WHICH
 TREE IT CAME FROM** → **[M-224](MEASUREMENTS.md#m-224)**. The commit was
 captured that way and `configure_file`d into `meq_version.hpp`, so a long-lived
 build directory stamped **every** binary it produced, and every `.nc` those
-binaries wrote, with whatever `HEAD` was the day somebody first ran
-`cmake -B build`. Measured at five commits stale, and the string is *plausible*
+binaries wrote, with whatever `HEAD` was the day somebody first configured
+it. Measured at five commits stale, and the string is *plausible*
 — a real commit of this repository, merely not this one.
 
 **IT IS A PROVENANCE DEFECT AND THREE THINGS IN THESE NOTES REST ON IT**: the
@@ -244,8 +244,10 @@ ALREADY THE DELIBERATE RED.** `PlasmaEdgeConvergence` is red by design while the
 staircase `Γ_{p,h}` stands, so "PlasmaEdgeConvergence fails" carried no
 information. What settled it was **building `HEAD` in a `git worktree` and
 diffing the failure inventories**: 4 errors in one case against 318 across seven.
-`git worktree add <dir> HEAD --detach` plus `-DMFEM_DIR=` and `-DTOML11_DIR=`
-pointed at the main checkout is the whole recipe, and it is the only check that
+`git worktree add <dir> HEAD --detach`, configured out of it into
+`../builds/<name>` with `-DMFEM_DIR=` and `-DTOML11_DIR=` pointed at the main
+checkout and `-DMEQ_RUNS_DIR=` at `../runs` — all three defaults are derived
+from the worktree's own parent — is the whole recipe, and it is the only check that
 distinguishes *this was already failing* from *I broke it*. **A red test cannot
 also serve as a regression on something else**, and a tree-wide rename touches
 every test including the red ones.
@@ -281,6 +283,25 @@ baseline", which was true and did not cover any of the cases that had moved. Six
 of fifty-eight is a sample, and a sample chosen for being easy to diff is chosen
 against exactly the tests whose output is geometry.
 
+## Paths: read beside the file, written beside the run
+
+**A RELATIVE PATH A CONFIGURATION READS IS RELATIVE TO THE TOML FILE; ONE THE
+RUN WRITES IS RELATIVE TO THE WORKING DIRECTORY.** Read: the profile tables,
+`[initialguess] File` and `MeshFile`, and `[mesh] File` when nothing generates
+it. Written: `[output] Directory`, `[conductors] CacheFile`, and the `[mesh]
+File` a `[mesh.generate]` block makes. `docs/configuration.rst`, *Relative
+paths*, is the list. Two consequences bite:
+
+* **A copy of a configuration moves away from its data.** A test or a tool that
+  edits a shipped TOML and writes the variant into its own directory has
+  changed what every relative input resolves against; `meq::test::shippedConfig()`
+  (`tests/SourceTree.hpp`) re-anchors them, and a hand-rolled copy must do the
+  same. `Configuration::fromString()` has no file at all, so its inputs resolve
+  against the working directory.
+* **Run from a directory under `../runs/`, never from `source/`**: the output,
+  a generated mesh and its `.meq-mesh` stamp land in the working directory, and
+  untracked output in `git status` is a bug in whatever wrote it.
+
 ## Shell and tooling
 
 **Four tooling traps that cost one session six idle polling loops**, and the
@@ -288,8 +309,8 @@ reason they are worth writing down is that a polling loop which can never
 terminate is *invisible* when the thing it polls for is also reported some other
 way.
 
-* **`cd` persists between Bash tool calls**, so a `cd x && ...` that assumes the
-  repo root silently runs somewhere else. Use absolute paths.
+* **`cd` persists between Bash tool calls**, so a `cd x && ...` that assumes
+  `source/` silently runs somewhere else. Use absolute paths.
 * **Shell VARIABLES do not persist**, only the working directory does — the same
   trap read the other way round, and the more dangerous half. `L=...` in one call
   is gone by the next, so `until grep -q '^EXIT=' "$LOG"` with an unset `LOG`

@@ -45,7 +45,7 @@ USAGE
 
     python3 make_freeb_meta.py <reference.npz> <case.toml> [n_harmonics]
 
-which writes `../../examples/<stem>-meta.json`, the stem being the TOML's.
+which writes `source/examples/<stem>-meta.json`, the stem being the TOML's.
 """
 import json
 import os
@@ -55,10 +55,19 @@ import tomllib
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import benchpaths                                              # noqa: E402
 from mxh import fit_mxh, worst_distance                        # noqa: E402
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-EXAMPLES = os.path.abspath(os.path.join(HERE, "..", "..", "examples"))
+EXAMPLES = benchpaths.EXAMPLES
+
+
+def from_source(toml_path, path):
+	"""A path the TOML reads -- relative to the TOML -- as one relative to the
+	source tree, which is how the meta records it for its readers."""
+	if not path:
+		return path
+	where = os.path.join(os.path.dirname(os.path.abspath(toml_path)), path)
+	return os.path.relpath(os.path.normpath(where), benchpaths.SOURCE)
 
 
 def main():
@@ -134,7 +143,7 @@ def main():
 		stem=stem,
 		reference=os.path.splitext(os.path.basename(npz_path))[0],
 		reference_grid=int(np.asarray(d["R"]).size),
-		reference_path=os.path.relpath(os.path.abspath(npz_path), HERE),
+		reference_path=os.path.relpath(os.path.abspath(npz_path), benchpaths.OUT),
 		boundary_kind=kind,
 		free_boundary=True,
 		psi_axis=psi_axis,
@@ -178,8 +187,8 @@ def main():
 		# examples/limited-tokamak-*.dat: the shapes are analytic and the
 		# amplitudes are absorbed by [source] PlasmaCurrent, so there is one
 		# pair of tables for two case files and the stem does not name them.
-		pprime_file=source.get("PPrimeFile"),
-		ggprime_file=source.get("GGPrimeFile"),
+		pprime_file=from_source(toml_path, source.get("PPrimeFile")),
+		ggprime_file=from_source(toml_path, source.get("GGPrimeFile")),
 		plasma_current=float(source["PlasmaCurrent"]),
 		units=dict(
 			psi_axis="Wb/rad", psi_bndry="Wb/rad", psi_surface="Wb/rad",

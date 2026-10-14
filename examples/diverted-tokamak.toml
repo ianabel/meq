@@ -52,7 +52,7 @@
 [mesh]
 # The gmsh half-disc: rho = 2.6, reaching R = 0 EXACTLY, with the four
 # conductors meshed to rather than cut.  2870 elements, 1475 nodes.
-File = "examples/diverted-tokamak.msh"
+File = "diverted-tokamak.msh"
 
 [discretisation]
 # DEGREE 2 AND NOT 3, WHICH IS A COST DECISION AND IS THE ONE KEY HERE CHOSEN
@@ -95,8 +95,8 @@ Mu0 = 1.25663706212e-6
 # Both tables are dp/dPsi and dgg/dPsi against MEQ's NORMALISED flux, which runs
 # the other way from freegs4e's: Psi = 1 - psi_n, 1 on the axis and 0 on the
 # boundary.  Their headers carry the conversion and the span it costs.
-PPrimeFile = "examples/diverted-tokamak-pprime.dat"
-GGPrimeFile = "examples/diverted-tokamak-ggprime.dat"
+PPrimeFile = "diverted-tokamak-pprime.dat"
+GGPrimeFile = "diverted-tokamak-ggprime.dat"
 
 # The four poloidal field coils, at the currents freegs4e's control system
 # solved for.  P1L and P1U are freegs4e ShapedCoils and ARE 0.1 x 0.1
@@ -154,8 +154,8 @@ Modes = 10
 
 [initialguess]
 Type = "gridfunction"
-File = "examples/diverted-tokamak-guess.gf"
-MeshFile = "examples/diverted-tokamak-guess.mesh"
+File = "diverted-tokamak-guess.gf"
+MeshFile = "diverted-tokamak-guess.mesh"
 
 [output]
 Prefix = "diverted-tokamak"

@@ -91,17 +91,29 @@
 #include "meq/GradShafranov.hpp"
 #include "meq/Sampler.hpp"
 
+#include "convergence/GeqReference.hpp"
+
 namespace meqtest
 {
 namespace mirror
 {
-	/// The committed geq reference, or MEQ_GEQ_VACUUM_REFERENCE -- the same
-	/// override GeqSourceComparison takes, for a regenerated one.
+	/// The committed geq reference -- meta.txt, in the source tree -- or
+	/// MEQ_GEQ_VACUUM_REFERENCE, the same override GeqSourceComparison takes,
+	/// for a regenerated one: a directory holding a whole export.
 	inline std::string referenceDirectory()
 	{
 		char const *override = std::getenv( "MEQ_GEQ_VACUUM_REFERENCE" );
 		return override ? std::string( override )
-		                : std::string( "tools/geq-benchmark/reference/vacuum" );
+		                : meqtest::geq::inputDirectory( "vacuum" );
+	}
+
+	/// geq's answer -- points.dat, untracked, in the runs directory -- or the
+	/// same override as referenceDirectory().
+	inline std::string answerDirectory()
+	{
+		char const *override = std::getenv( "MEQ_GEQ_VACUUM_REFERENCE" );
+		return override ? std::string( override )
+		                : meqtest::geq::answerDirectory( "vacuum" );
 	}
 
 	/// geq's machine, as geq computed it. See the file comment.

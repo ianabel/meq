@@ -4,6 +4,7 @@
 #include "mfem.hpp"
 
 #include "RoundOffFloor.hpp"
+#include "SourceTree.hpp"
 #include "VtuReader.hpp"
 
 #include "meq/BoundaryShape.hpp"
@@ -72,6 +73,9 @@
  * against a closed form, and it imposes the exact trace to do it.
  *
  */
+
+using meq::test::shippedConfig;
+using meq::test::sourcePath;
 
 namespace
 {
@@ -940,7 +944,7 @@ namespace
 
 BOOST_AUTO_TEST_CASE( theDriverSolvesTheSolovievBenchmarkAndWritesIt )
 {
-	BOOST_TEST_REQUIRE( run( "examples/soloviev-nstx.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/soloviev-nstx.toml" ) ) == 0,
 	                    "the driver did not exit 0 on its own shipped example" );
 
 	BOOST_TEST_REQUIRE( exists( "soloviev-nstx.mesh" ) );
@@ -1028,7 +1032,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesTheSolovievBenchmarkAndWritesIt )
  */
 BOOST_AUTO_TEST_CASE( theGridCanBePlacedOnAnotherCodesNodes )
 {
-	std::string const shipped = slurp( "examples/soloviev-nstx.toml" );
+	std::string const shipped = shippedConfig( "examples/soloviev-nstx.toml" );
 	BOOST_TEST_REQUIRE( !shipped.empty() );
 	double const rMin = 0.6123, rMax = 1.3911, zMin = -0.8123, zMax = 0.7531;
 	int const nR = 9, nZ = 7;
@@ -1110,7 +1114,7 @@ BOOST_AUTO_TEST_CASE( theGridCanBePlacedOnAnotherCodesNodes )
  */
 BOOST_AUTO_TEST_CASE( theDriverRunsTheNonlinearPath )
 {
-	BOOST_TEST_REQUIRE( run( "examples/manufactured-driver.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/manufactured-driver.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the non-linear example" );
 
 	BOOST_TEST( exists( "manufactured-driver.mesh" ) );
@@ -1151,7 +1155,7 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheNonlinearPath )
  */
 BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 {
-	BOOST_TEST_REQUIRE( run( "examples/miller-curved.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/miller-curved.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the curved example" );
 
 	BOOST_TEST_REQUIRE( exists( "miller-curved.mesh" ) );
@@ -1297,7 +1301,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
  */
 BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 {
-	BOOST_TEST_REQUIRE( run( "examples/miller-adaptive.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/miller-adaptive.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the adaptive example" );
 
 	BOOST_TEST_REQUIRE( exists( "miller-adaptive.mesh" ) );
@@ -1504,7 +1508,7 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
  */
 BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 {
-	BOOST_TEST_REQUIRE( run( "examples/rotating-rectangle.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/rotating-rectangle.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the rotating example" );
 
 	BOOST_TEST_REQUIRE( exists( "rotating-rectangle.mesh" ) );
@@ -1518,7 +1522,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	// The same run, by hand, with the numbers repeated from the file.
 	mfem::Mesh mesh = rotatingMesh();
 	meq::RotatingSource const source(
-		rotatingSpecies( "examples/rotating-density.dat" ),
+		rotatingSpecies( sourcePath( "examples/rotating-density.dat" ) ),
 		constantProfile( rotatingOmega ),
 		constantProfile( rotatingGGPrime ),
 		rotatingReferenceRadius );
@@ -1565,7 +1569,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	 * Same species, same mesh, same everything, and no rotation.
 	 */
 	meq::RotatingSource const still(
-		rotatingSpecies( "examples/rotating-density.dat" ),
+		rotatingSpecies( sourcePath( "examples/rotating-density.dat" ) ),
 		nullptr,                              // omega = 0
 		constantProfile( rotatingGGPrime ),
 		rotatingReferenceRadius );
@@ -1633,7 +1637,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
  */
 BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 {
-	BOOST_TEST_REQUIRE( run( "examples/rotating-normalised.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/rotating-normalised.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the normalised example" );
 
 	BOOST_TEST_REQUIRE( exists( "rotating-normalised.mesh" ) );
@@ -1649,7 +1653,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	double const psiAxisGuess = 0.08;
 	mfem::Mesh mesh = rotatingMesh();
 	meq::NormalisedRotatingSource source(
-		rotatingSpecies( "examples/rotating-density-normalised.dat" ),
+		rotatingSpecies( sourcePath( "examples/rotating-density-normalised.dat" ) ),
 		constantProfile( rotatingOmega ),
 		constantProfile( rotatingNormalisedGGPrime ),
 		rotatingReferenceRadius, psiAxisGuess );
@@ -1811,7 +1815,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
  */
 BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
 {
-	BOOST_TEST_REQUIRE( run( "examples/coils-rectangle.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/coils-rectangle.toml" ) ) == 0,
 	                    "the driver did not exit 0 on its own shipped coil example" );
 
 	// The provenance, so a reader differencing two files can tell a run with
@@ -1833,7 +1837,7 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
 	 * because they are controls rather than examples -- and edited by text
 	 * substitution on the shipped file so that they cannot drift away from it.
 	 */
-	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	std::string const shipped = shippedConfig( "examples/coils-rectangle.toml" );
 	BOOST_TEST_REQUIRE( !shipped.empty() );
 
 	auto write = []( std::string const &path, std::string text,
@@ -1933,7 +1937,7 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
  */
 BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
 {
-	BOOST_TEST_REQUIRE( run( "examples/coils-rectangle.toml" ) == 0 );
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/coils-rectangle.toml" ) ) == 0 );
 	mfem::Mesh meshedMesh( "coils-rectangle.mesh", 1, 1 );
 	mfem::GridFunction const meshed =
 		readGridFunction( "coils-rectangle_psi.gf", meshedMesh );
@@ -1942,7 +1946,7 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
 	// one so that the two cannot drift apart. `[boundary]` is line-anchored for
 	// the reason theDriverAddsTheCoilsToF records: this file's own prose names
 	// the table several times before it appears.
-	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	std::string const shipped = shippedConfig( "examples/coils-rectangle.toml" );
 	BOOST_TEST_REQUIRE( !shipped.empty() );
 	std::string split = replaceAll( shipped, "\n[boundary]\n",
 	                                "\n[conductors]\nModel = \"subtracted\"\n"
@@ -2074,7 +2078,7 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
  */
 BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 {
-	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	std::string const shipped = shippedConfig( "examples/coils-rectangle.toml" );
 	BOOST_TEST_REQUIRE( !shipped.empty() );
 	std::string split = replaceAll( shipped, "\n[boundary]\n",
 	                                "\n[conductors]\nModel = \"subtracted\"\n"
@@ -2654,7 +2658,7 @@ BOOST_AUTO_TEST_CASE( theDriverHasAUsableCommandLine )
  */
 BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 {
-	BOOST_TEST_REQUIRE( run( "examples/free-boundary-halfdisc.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/free-boundary-halfdisc.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the free-boundary example" );
 
 	BOOST_TEST_REQUIRE( exists( "free-boundary-halfdisc.mesh" ) );
@@ -2721,9 +2725,9 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	gammaHMarker[ gammaH - 1 ] = 1;
 
 	auto pPrime = std::make_shared<meq::SplineProfile const>(
-		meq::SplineProfile::fromFile( "examples/fb-pprime.dat" ) );
+		meq::SplineProfile::fromFile( sourcePath( "examples/fb-pprime.dat" ) ) );
 	auto ggPrime = std::make_shared<meq::SplineProfile const>(
-		meq::SplineProfile::fromFile( "examples/fb-ggprime.dat" ) );
+		meq::SplineProfile::fromFile( sourcePath( "examples/fb-ggprime.dat" ) ) );
 
 	mfem::ConstantCoefficient zero( 0.0 );
 	mfem::FunctionCoefficient bump( []( mfem::Vector const &x )
@@ -2840,8 +2844,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 		     << "NR = 8\nNZ = 16\n\n[discretisation]\nPolynomialDegree = 1\n"
 		     << "\n[source]\nType = \"mhd\"\nNormalised = true\nPsiAxis = 0.1\n"
 		     << "Mu0 = 1.0\n"
-		     << "PPrimeFile = \"examples/fb-pprime.dat\"\n"
-		     << "GGPrimeFile = \"examples/fb-ggprime.dat\"\n"
+		     << "PPrimeFile = \"" << sourcePath( "examples/fb-pprime.dat" ) << "\"\n"
+		     << "GGPrimeFile = \"" << sourcePath( "examples/fb-ggprime.dat" ) << "\"\n"
 		     << "\n[boundary.exterior]\nRadius = 1.0\nModes = 4\n"
 		     << "\n[output]\nPrefix = \"driver-acceptance-axis\"\n";
 	}
@@ -2877,10 +2881,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 BOOST_AUTO_TEST_CASE( theDriverRefinesOverAnExteriorCoupling )
 {
 	{
-		std::ifstream source( "examples/free-boundary-halfdisc.toml" );
-		BOOST_TEST_REQUIRE( source.good() );
-		std::string text( ( std::istreambuf_iterator<char>( source ) ),
-		                    std::istreambuf_iterator<char>() );
+		std::string text = shippedConfig( "examples/free-boundary-halfdisc.toml" );
+		BOOST_TEST_REQUIRE( !text.empty() );
 
 		std::string const marker = "[output]";
 		std::size_t const at = text.find( marker );
@@ -3114,7 +3116,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	// factor and the current border absorbs it.
 	double const referenceScale = 1.0;
 
-	BOOST_TEST_REQUIRE( run( "examples/limited-tokamak.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/limited-tokamak.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the limited tokamak" );
 
 	std::string const header = ncdumpHeader( "limited-tokamak.nc" );
@@ -3330,7 +3332,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	 * tables -- and converges in 8 steps to 9.676040e-02, on the physical branch.
 	 * What this case does is fail if it returns.
 	 */
-	std::string const shipped = slurp( "examples/limited-tokamak.toml" );
+	std::string const shipped = shippedConfig( "examples/limited-tokamak.toml" );
 	BOOST_TEST_REQUIRE( !shipped.empty() );
 
 	// LINE-ANCHORED, because the file's own prose discusses degree 2 and degree
@@ -3460,7 +3462,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesADivertedTokamak )
 	double const seedR = 1.143144118182931;
 	double const seedZ = -0.5539650838688502;
 
-	BOOST_TEST_REQUIRE( run( "examples/diverted-tokamak-xpoint.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/diverted-tokamak-xpoint.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the diverted tokamak" );
 
 	std::string const header = ncdumpHeader( "diverted-tokamak-xpoint.nc" );
@@ -3689,8 +3691,10 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesADivertedTokamak )
  */
 BOOST_AUTO_TEST_CASE( theDriverMeshesTheMachineItSolves )
 {
-	std::string const config = "examples/diverted-tokamak-generated.toml";
-	std::string const mesh = "examples/diverted-tokamak-generated.msh";
+	// The configuration is read from the source tree; the mesh it generates is
+	// an OUTPUT, so [mesh] File names it relative to the working directory.
+	std::string const config = sourcePath( "examples/diverted-tokamak-generated.toml" );
+	std::string const mesh = "diverted-tokamak-generated.msh";
 	std::string const stamp = mesh + ".meq-mesh";
 
 	// ---- 1. the command, derived from the file ------------------------
@@ -3765,7 +3769,8 @@ BOOST_AUTO_TEST_CASE( theDriverMeshesTheMachineItSolves )
 	// ordinary configuration look like a broken one.
 	int borrowedStatus = -1;
 	std::string const nothing = captureStdout(
-		std::string( driver() ) + " --mesh-command examples/diverted-tokamak-xpoint.toml",
+		std::string( driver() ) + " --mesh-command "
+		+ sourcePath( "examples/diverted-tokamak-xpoint.toml" ),
 		&borrowedStatus );
 	BOOST_TEST( borrowedStatus == 0,
 	            "meq --mesh-command exited " << borrowedStatus << " on a file "
@@ -4054,7 +4059,7 @@ BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
 	int const segments = 19;
 	double const inradius = wall*std::cos( M_PI/segments );
 
-	BOOST_TEST_REQUIRE( run( "examples/limiter-halfdisc.toml" ) == 0,
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/limiter-halfdisc.toml" ) ) == 0,
 	                    "the driver did not exit 0 on the meshed limiter" );
 
 	std::string const header = ncdumpHeader( "limiter-halfdisc.nc" );
@@ -4113,9 +4118,7 @@ BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
 	 */
 	{
 		std::string const config = "driver-acceptance-limiter-point.toml";
-		std::ifstream source( "examples/limiter-halfdisc.toml" );
-		std::string text( ( std::istreambuf_iterator<char>( source ) ),
-		                  std::istreambuf_iterator<char>() );
+		std::string text = shippedConfig( "examples/limiter-halfdisc.toml" );
 		std::string const from = "SurfaceAttribute = 20";
 		std::size_t const at = text.find( from );
 		BOOST_TEST_REQUIRE( at != std::string::npos,
@@ -4218,7 +4221,7 @@ namespace
 		{
 			std::remove( "q-driven.nc" );
 			std::remove( "q-driven_surfaces.nc" );
-			return run( "examples/q-driven.toml" ) == 0;
+			return run( sourcePath( "examples/q-driven.toml" ) ) == 0;
 		}();
 		return outcome;
 	}
@@ -4396,7 +4399,7 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 	BOOST_TEST_REQUIRE( reached.size() == label.size() );
 
 	meq::SplineProfile const target(
-		meq::SplineProfile::fromFile( "examples/q-driven-q.dat" ) );
+		meq::SplineProfile::fromFile( sourcePath( "examples/q-driven-q.dat" ) ) );
 
 	std::printf( "\n  THE q THE RUN REACHED, AGAINST THE q IT WAS ASKED FOR\n" );
 	std::printf( "      Psi_N    Psi_source      reached       target"
@@ -4492,8 +4495,9 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
  */
 BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedMachine )
 {
-	std::string const config = "examples/machine-f-diiid-filament.toml";
-	std::string const mesh = "examples/machine-f-diiid-filament.msh";
+	// [mesh.generate] writes the mesh into the working directory.
+	std::string const config = sourcePath( "examples/machine-f-diiid-filament.toml" );
+	std::string const mesh = "machine-f-diiid-filament.msh";
 
 	// The reference's own answer, out of that file's header.
 	double const referencePsiAxis = 3.758545304947274e-01;   // Wb/rad
@@ -4621,8 +4625,9 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedMachine )
  */
 BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
 {
-	std::string const config = "examples/limited-tokamak-filament.toml";
-	std::string const mesh = "examples/limited-tokamak-filament.msh";
+	// [mesh.generate] writes the mesh into the working directory.
+	std::string const config = sourcePath( "examples/limited-tokamak-filament.toml" );
+	std::string const mesh = "limited-tokamak-filament.msh";
 
 	// ref-n513/H_limited_circular's own answer, out of that file's header.
 	double const referencePsiAxis = 9.308752051236113e-02;   // Wb/rad
@@ -4785,12 +4790,12 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
  */
 BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
 {
-	BOOST_TEST_REQUIRE( run( "examples/coils-rectangle.toml" ) == 0 );
+	BOOST_TEST_REQUIRE( run( sourcePath( "examples/coils-rectangle.toml" ) ) == 0 );
 	mfem::Mesh meshedMesh( "coils-rectangle.mesh", 1, 1 );
 	mfem::GridFunction const meshed =
 		readGridFunction( "coils-rectangle_psi.gf", meshedMesh );
 
-	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	std::string const shipped = shippedConfig( "examples/coils-rectangle.toml" );
 	BOOST_TEST_REQUIRE( !shipped.empty() );
 
 	// ONE ARM PER CONDUCTOR MODEL, from the SAME shipped text, so the only
@@ -4954,7 +4959,7 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 	                        Case{ "machine-a-testtokamak", 8.271751444840184e-02,
 	                              1.351273, 0.062226, 1.0e-01, 1.2e-01 } } )
 	{
-		std::string const config = std::string( "examples/" ) + c.stem + ".toml";
+		std::string const config = sourcePath( std::string( "examples/" ) + c.stem + ".toml" );
 		int status = -1;
 		std::string const log = captureStdout(
 			std::string( wrapper() ) + " " + config, &status );
@@ -5019,8 +5024,8 @@ BOOST_AUTO_TEST_CASE( theSymmetricMeshOfMastKeepsItsVacuum )
 	std::string const config = "machine-c-mast-shaped-symmetric.toml";
 	std::string const mesh = "machine-c-mast-shaped-symmetric.msh";
 
-	std::string text = slurp( "examples/machine-c-mast-shaped.toml" );
-	std::string const file = "File = \"examples/machine-c-mast-shaped.msh\"";
+	std::string text = shippedConfig( "examples/machine-c-mast-shaped.toml" );
+	std::string const file = "File = \"machine-c-mast-shaped.msh\"";
 	std::size_t const at = text.find( file );
 	BOOST_TEST_REQUIRE( at != std::string::npos,
 	                    "examples/machine-c-mast-shaped.toml no longer names its "
@@ -5082,7 +5087,7 @@ BOOST_AUTO_TEST_CASE( theFileSaysWhatEachElementIsMadeOf )
 		std::string const p2uText = "-67660.81780068338";
 		double const p2l = std::strtod( p2lText.c_str(), nullptr );
 		double const p2u = std::strtod( p2uText.c_str(), nullptr );
-		std::string text = slurp( "examples/diverted-tokamak.toml" );
+		std::string text = shippedConfig( "examples/diverted-tokamak.toml" );
 		BOOST_TEST_REQUIRE( !text.empty() );
 		for ( std::string const &value : { p2lText, p2uText } )
 		{
@@ -5150,7 +5155,8 @@ BOOST_AUTO_TEST_CASE( theFileSaysWhatEachElementIsMadeOf )
 	{
 		int status = -1;
 		std::string const log = captureStdout(
-			std::string( wrapper() ) + " examples/mirror-rotating.toml", &status );
+			std::string( wrapper() ) + " " + sourcePath( "examples/mirror-rotating.toml" ),
+			&status );
 		BOOST_TEST_REQUIRE( status == 0,
 		                    "the wrapper exited " << status << " on "
 		                    "examples/mirror-rotating.toml. Its stdout was:\n" << log );
@@ -5199,7 +5205,7 @@ BOOST_AUTO_TEST_CASE( everyAdaptiveFrameSaysWhatEachElementIsMadeOf )
 	std::string const stem = "driver-acceptance-mirror-adaptive";
 	std::string const config = stem + ".toml";
 	{
-		std::string text = slurp( "examples/mirror-rotating.toml" );
+		std::string text = shippedConfig( "examples/mirror-rotating.toml" );
 		std::string const prefix = "Prefix = \"mirror-rotating\"";
 		std::size_t const at = text.find( prefix );
 		BOOST_TEST_REQUIRE( at != std::string::npos );

@@ -2,9 +2,9 @@
 
 **An independent check by a different algorithm**, which is the thing
 `FREE-BOUNDARY-PLAN.md` FB-6 wants and a fine-mesh self-comparison cannot be.
-`../freegs4e` is FreeGS-derived: free boundary by von Hagenow Green's functions,
-2nd/4th-order finite differences on a uniform `(R,Z)` grid, Picard with adaptive
-blending. MEQ is HDG with Newton. They share the equation and essentially no
+`freegs4e`, the checkout beside the project directory, is FreeGS-derived: free
+boundary by von Hagenow Green's functions, 2nd/4th-order finite differences on
+a uniform `(R,Z)` grid, Picard with adaptive blending. MEQ is HDG with Newton. They share the equation and essentially no
 code.
 
 **Result, seven configurations** — TestTokamak (three profile shapes), MAST,
@@ -24,6 +24,41 @@ MAST-U, TCV, DIII-D — each seeded from its own reference:
 almost certainly geometric rather than either solver's: the MXH fit of the
 boundary is 2–4e-04 m on a minor radius of 0.24–0.61 m, which is 5e-04 to 1e-03
 relative, and the contour it fits is itself extracted from freegs4e's 129² grid.
+
+## Where it runs from, and where it writes
+
+**Nothing is written beside these scripts.** They find everything through
+`benchpaths.py`, on top of `tools/meqpaths.py`, so they run from any working
+directory. The commands below are from the project directory — the one holding
+`source/`, `install/` and `runs/` — with
+
+```sh
+S=$PWD/source                              # the repository
+B=$S/tools/freegs4e-benchmark              # these scripts, and their venv
+R=$PWD/runs/freegs4e-benchmark             # everything they write
+MEQ=$PWD/install/double/bin                # meq and meq-run
+export PYTHONPATH=$PWD/../freegs4e         # freegs4e is not pip-installed; see below
+```
+
+| | |
+|---|---|
+| `$R/<case>.npz`, `<case>.json`, `summary*.json` | `fgsref.py`'s 129² references |
+| `$R/ref-n<N>/` | `fgsref.py --nx=N`; with `FGSREF_OUT=DIR`, `DIR/n<N>/` instead |
+| `$R/ref-n257-fixed-boundary/` | the 257² set `examples/fixed-*.toml` were built from |
+| `$R/ref-interp/` | `fgsref.py --interpolating-profiles`, and the inverse race's `problem.json` |
+| `$R/race-runs/<stage>/` | `race_inverse.py run <stage>`; `race-runs/` here holds the tracked records of earlier stages |
+| `$R/<script>/` | other scripts' default output: `race-nke/`, `time-to-accuracy/`, `mastu/`, `perf/<stem>/` |
+
+The solver is the installed `install/double/bin/meq` and `meq-run`
+(`MEQ_BUILD=single` or `MEQ_INSTALL=<prefix>` for another), never a build tree.
+**Every solve is made with a directory under `runs/` as its working
+directory**, so the meshes `meq-run` generates land there, and a variant TOML
+written there has its input paths made absolute first
+(`benchpaths.absolutise()`), since a configuration reads them against its own
+directory. **The tracked problem statements are the exception, and are
+source**: `make_all.sh`, `make_fixed.sh`, `make_freeb_*.py` and
+`mastu_meq_config.py` write `examples/*.toml`, their tables and their guesses
+into `source/examples/`, every path in them relative to the TOML.
 
 ## STANDING RULE: run freegs4e in the SAME mode as MEQ
 
@@ -68,15 +103,16 @@ own ladder and one start, and writing one record whose target rows are evaluated
 from the converged field. On a quiet machine, one configuration per invocation:
 
 ```sh
-PYTHONPATH=/home/ian/projects/freegs4e FGSREF_OUT=/tmp \
-    venv/bin/python fgsref.py --shaped --interpolating-profiles C_ D_ E_ F_ G_
-venv/bin/python inverse_problem.py ref-interp/problem.json
-venv/bin/python race_inverse.py run /tmp/race-f --config machine-f-diiid-shaped
-venv/bin/python race_inverse.py summarise /tmp/race-f
+$B/venv/bin/python $B/fgsref.py --shaped --interpolating-profiles C_ D_ E_ F_ G_
+$B/venv/bin/python $B/inverse_problem.py $R/ref-interp/problem.json
+$B/venv/bin/python $B/race_inverse.py run race-f --config machine-f-diiid-shaped
+$B/venv/bin/python $B/race_inverse.py summarise race-f
 ```
 
-`run --dry-run` prints every arm's ladder and runs nothing; `--max-rung`,
-`--codes` and `--starts` cut the race down for a smoke test.
+A bare stage name is `$R/race-runs/<stage>/`; `summarise` also reads a stage
+tracked in `race-runs/` here, and writes its summary under `$R` rather than
+over the record. `run --dry-run` prints every arm's ladder and runs nothing;
+`--max-rung`, `--codes` and `--starts` cut the race down for a smoke test.
 
 ### And the other direction: MEQ inverse against `freegs4e` inverse, `inverse_compare.py`
 
@@ -98,16 +134,15 @@ Corrected, MEQ, NICE and `freegs4e` agree on the shaped currents to about
 which is what separates a basin from a disagreement.
 
 ```sh
-PYTHONPATH=/home/ian/projects/freegs4e FGSREF_OUT=/some/dir \
-    venv/bin/python fgsref.py --interpolating-profiles [--shaped]
-PYTHONPATH=/home/ian/projects/freegs4e \
-    venv/bin/python inverse_compare.py OUTDIR --reference /some/dir/interp [F ...]
+$B/venv/bin/python $B/fgsref.py --interpolating-profiles [--shaped]
+$B/venv/bin/python $B/inverse_compare.py $R/inverse-compare \
+    --reference $R/ref-interp [F ...]
 ```
 
 `--interpolating-profiles` is the reference-side cure the *profile fit*
 section below names: the profile splines are rebuilt with `s = 0`, so the
 reference solves the analytic shape MEQ's tables carry, and it writes to
-`FGSREF_OUT/interp` — never over the committed set.
+`$R/ref-interp/`, or `FGSREF_OUT/interp/` — never over the 129² set.
 
 ## Running freegs4e forward: `forward.py`
 
@@ -117,10 +152,10 @@ the plasma current still prescribed, and **no constraint object** — which is t
 problem MEQ is given.
 
 ```sh
-PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python forward.py          # the set
-PYTHONPATH=... venv/bin/python forward.py --pin                            # ... vertically pinned
-PYTHONPATH=... venv/bin/python forward.py --trace --every 20 F_diiid       # the axis, per pass
-PYTHONPATH=... venv/bin/python forward.py --write out/                     # one script per case
+$B/venv/bin/python $B/forward.py                          # the set
+$B/venv/bin/python $B/forward.py --pin                    # ... vertically pinned
+$B/venv/bin/python $B/forward.py --trace --every 20 F_diiid   # the axis, per pass
+$B/venv/bin/python $B/forward.py --write $R/forward/      # one script per case
 ```
 
 **THE ELONGATED MACHINES DO NOT CONVERGE FORWARD, AND THE REASON IS NOT THE
@@ -174,12 +209,12 @@ reproduce the field inside.
    `ψ_ax` is not a magnetic axis**; see below.
 
 ```sh
-python3 -m venv venv
-venv/bin/pip install numpy scipy matplotlib h5py shapely numba netCDF4 contourpy
-PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python fgsref.py
-venv/bin/python make_case.py out/*.npz
-for f in out/*.toml; do meq "$f"; done
-venv/bin/python compare.py out/*.npz
+python3 -m venv $B/venv
+$B/venv/bin/pip install numpy scipy matplotlib h5py shapely numba netCDF4 contourpy
+$B/venv/bin/python $B/fgsref.py                     # -> $R/<case>.npz
+$B/venv/bin/python $B/make_case.py $R/*.npz         # TOMLs beside them
+for f in $R/*.toml; do (cd $R && $MEQ/meq "$f"); done
+$B/venv/bin/python $B/compare.py $R/*.npz
 ```
 
 **Do not `pip install -e` freegs4e** — its `requirements.txt` pins `numpy<2`,
@@ -208,9 +243,9 @@ the shape, 18–30 per cent off a uniform rectangle on a tall conductor, so each
 conductor gets `rectangle_rule`, a tensor Gauss–Legendre rule good to 1e-07.
 
 ```sh
-PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python fgsref.py --shaped
-venv/bin/python make_diverted_case.py X_case_shaped.npz X_case_shaped.json \
-    ../../examples machine-x-shaped
+$B/venv/bin/python $B/fgsref.py --shaped
+$B/venv/bin/python $B/make_diverted_case.py $R/X_case_shaped.npz \
+    $R/X_case_shaped.json $S/examples machine-x-shaped
 ```
 
 **It writes `<case>_shaped.npz`, never `<case>.npz`.** The two describe
@@ -839,15 +874,15 @@ this reason.
 **The recipe, coarsest first:**
 
 ```sh
-export FGSREF_OUT=$SCRATCH/fgsref
-python3 fgsref.py --nx=129                     # the coarse rung, cold
-python3 fgsref.py --nx=257 --seed-from=auto    # from n129
-python3 fgsref.py --nx=513 --seed-from=auto    # from n257
+$B/venv/bin/python $B/fgsref.py --nx=129                    # the coarse rung, cold
+$B/venv/bin/python $B/fgsref.py --nx=257 --seed-from=auto   # from ref-n129/
+$B/venv/bin/python $B/fgsref.py --nx=513 --seed-from=auto   # from ref-n257/
 ```
 
 `--seed-from=auto` derives the coarse directory one doubling down by the same
-naming rule `--nx` uses for its output, so a scan is a loop over `--nx` with
-nothing else to keep in step. `--seed-from=DIR` names one explicitly.
+naming rule `--nx` uses for its output — `$R/ref-n<N>/`, or `FGSREF_OUT/n<N>/`
+when that is set — so a scan is a loop over `--nx` with nothing else to keep in
+step. `--seed-from=DIR` names one explicitly.
 
 **IT IS WORTH 8 PICARD STEPS, NOT AN ORDER OF MAGNITUDE, AND THIS SECTION
 PREDICTED THE WRONG THING.** Measured on `H_limited_circular`, 129² → 257²:
@@ -1083,28 +1118,29 @@ above as a statement about either code's discretisation.
 ### Regenerating the fixture
 
 Three files in `examples/` come from this directory and none of them can be
-rebuilt at test time, because the reference `.npz` they are built from is
-gitignored and needs freegs4e, scipy and a Picard solve to recreate.
+rebuilt at test time, because the reference `.npz` they are built from is a
+run product under `$R`, untracked, and needs freegs4e, scipy and a Picard solve
+to recreate.
 
 ```sh
-# 1. the reference, if it is not already here
-python3 fgsref.py --case=H_limited_circular
+# 1. the reference, if it is not already in $R
+$B/venv/bin/python $B/fgsref.py --case=H_limited_circular
 
 # 2. the two profile tables.  freegs4e's arrays are dp/dpsi and MEQ's tables
 #    are dp/dPsi, so the conversion MULTIPLIES by the span -- see below.
 #    convert.py's header is the recipe; the tables carry it in their own.
 
 # 3. the initial guess, over MEQ's half-disc rather than freegs4e's box
-python3 mkexactguess.py H_limited_circular.npz \
-        ../../examples/limited-tokamak-guess.mesh \
-        ../../examples/limited-tokamak-guess.gf 2.60 32
+$B/venv/bin/python $B/mkexactguess.py $R/H_limited_circular.npz \
+        $S/examples/limited-tokamak-guess.mesh \
+        $S/examples/limited-tokamak-guess.gf 2.60 32
 
 # 4. the mesh -- BUT SEE BELOW BEFORE REGENERATING IT
-python3 ../mesh/halfdisc.py --rho 2.6 --size 0.30 --coil-size 0.05 \
+python3 $S/tools/mesh/halfdisc.py --rho 2.6 --size 0.30 --coil-size 0.05 \
         --coil 1.70  0.85 0.10 0.10  --coil 1.70 -0.95 0.10 0.10 \
         --coil 0.50  1.05 0.10 0.10  --coil 0.50 -1.15 0.10 0.10 \
         --plasma 0.60 -0.45 0.85 0.90 --plasma-size 0.09 --check \
-        -o ../../examples/limited-tokamak.msh
+        -o $S/examples/limited-tokamak.msh
 ```
 
 **THE SHIPPED `.msh` IS THE FIXTURE AND THAT COMMAND DOES NOT REPRODUCE IT.**
@@ -1227,13 +1263,13 @@ the seed in the TOML selects.
 ### Running it
 
 ```sh
-mkdir -p out && sed 's|^Prefix = .*|Directory = "out"\nPrefix = "A_testtokamak_classic"|' \
-    ../../examples/diverted-tokamak-xpoint.toml > out/case.toml
-../../build/meq out/case.toml
-cp A_testtokamak_classic.npz out/
-python3 compare.py --free-boundary \
+mkdir -p $R/xpoint && cd $R/xpoint
+$MEQ/meq $S/examples/diverted-tokamak-xpoint.toml     # its outputs land here
+cp $R/A_testtokamak_classic.npz .
+cp diverted-tokamak-xpoint.nc A_testtokamak_classic.nc   # compare.py's <stem>.nc
+$B/venv/bin/python $B/compare.py --free-boundary \
     --exclude-box 1.75,-0.60,0.10,0.10 --exclude-box 1.75,0.60,0.10,0.10 \
-    out/A_testtokamak_classic.npz
+    A_testtokamak_classic.npz
 ```
 
 **`--free-boundary` says there is no gauge shift and no `-meta.json`.** The

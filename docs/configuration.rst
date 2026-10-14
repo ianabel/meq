@@ -70,6 +70,33 @@ fully-qualified key — including array elements, as
 ``source.species[2].Mass``. **Construction either succeeds and leaves every
 accessor meaningful, or throws**; there is no partially valid configuration.
 
+.. _configuration-paths:
+
+Relative paths
+--------------
+
+**A path the configuration READS is relative to the configuration file; a path
+the run WRITES is relative to the working directory.** So a configuration and
+its data move together, and a run's products land where the run was made:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 50 50
+
+   * - Relative to the TOML file
+     - Relative to the working directory
+   * - ``[source] PPrimeFile``, ``GGPrimeFile``, ``SafetyFactorFile``,
+       ``OmegaFile``; ``[[source.species]] TemperatureFile``, ``DensityFile``;
+       ``[initialguess] File`` and ``MeshFile``; ``[mesh] File`` when the file
+       has no ``[mesh.generate]``
+     - ``[output] Directory``; ``[conductors] CacheFile``; ``[mesh] File``
+       when ``[mesh.generate]`` makes it
+
+An absolute path is used as given. A configuration built from a string rather
+than a file — :cpp:func:`meq::Configuration::fromString` — has no file to be
+relative to, and every relative path in it resolves against the working
+directory.
+
 ``[mesh]``
 ----------
 
@@ -104,7 +131,9 @@ The background mesh: either a box that MEQ triangulates, or a file.
    * - ``File``
      - ``""``
      - Any mesh format MFEM reads. Non-empty selects file mode, in which the box
-       keys and ``NR``/``NZ`` are not used.
+       keys and ``NR``/``NZ`` are not used. Relative to the configuration file,
+       or to the working directory when ``[mesh.generate]`` makes it — see
+       :ref:`configuration-paths`.
 
 .. note::
 
@@ -130,8 +159,8 @@ The background mesh: either a box that MEQ triangulates, or a file.
 
 The mesh as **this file's own build product** rather than as an input. With
 this block present, ``File`` is where a generator *writes* and where the solve
-then reads, and ``meq-run`` — :doc:`running` — is the one command that does
-both.
+then reads — relative to the working directory, since it is the run's product —
+and ``meq-run`` — :doc:`running` — is the one command that does both.
 
 MEQ links MFEM and not gmsh, deliberately (``tools/mesh/README.md`` has the
 reasoning; the short form is that the coupling between MEQ and a mesher is a
@@ -140,7 +169,7 @@ command the block describes:
 
 .. code-block:: sh
 
-   ./build/meq --mesh-command examples/diverted-tokamak-generated.toml
+   meq --mesh-command ../../source/examples/diverted-tokamak-generated.toml
 
 and **refuse to solve** such a configuration unless the caller passes
 ``--mesh-ready`` to say the mesh has been made from it. Without that refusal an
@@ -438,8 +467,9 @@ under a Solov'ev source is an unknown key, not an ignored one.
 
 .. note::
 
-   Profile paths are resolved against the **working directory of the run**, not
-   against the directory the configuration file lives in.
+   Profile paths are resolved against the **directory the configuration file
+   lives in**, not against the working directory of the run; see
+   :ref:`configuration-paths`.
 
 .. warning::
 
@@ -1219,7 +1249,8 @@ default is what every file written before this table existed already means.
    * - ``CacheFile``
      - none
      - A netCDF file holding :math:`\psi_c` at this run's own points, read if
-       it is there and matches and written if it is not. Refused under
+       it is there and matches and written if it is not. Relative to the
+       working directory, since the run writes it. Refused under
        ``"meshed"``, which subtracts nothing. See below.
    * - ``InterpolatedFlux``
      - ``false``
@@ -1749,7 +1780,8 @@ limiter; ``examples/limited-tokamak.toml`` and
      - Meaning
    * - ``Directory``
      - ``"."``
-     - **Not created by MEQ.** A missing directory is exit code 3.
+     - **Not created by MEQ.** A missing directory is exit code 3. Relative to
+       the working directory.
    * - ``Prefix``
      - ``"meq"``
      - The stem of every output name; must not be empty.
@@ -1824,7 +1856,7 @@ See :doc:`output` for what gets written.
    * - ``File``, ``MeshFile``
      - *required for* ``"gridfunction"``
      - The stored grid function and the mesh it lives on — a grid function
-       cannot be read without its mesh.
+       cannot be read without its mesh. Relative to the configuration file.
    * - ``Content``
      - ``"remainder"``
      - What that file *holds*: ``"total"`` for :math:`\psi` or ``"remainder"``

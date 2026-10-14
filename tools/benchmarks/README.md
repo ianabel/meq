@@ -16,6 +16,9 @@ that works, the traps that cost real time, and — the part that matters most �
 The harnesses themselves stay where they are — `tools/freegs4e-benchmark/`,
 `tools/desc-benchmark/`, `tools/chease-benchmark/`, and `meq-race/` inside the
 NICE and TSC trees. These are notes about driving them, not a fifth harness.
+The commands in these pages run from `source/`, the checkout; MEQ's harnesses
+run the installed `install/double/bin/meq` and write under the project's
+`runs/<harness>/`, never into the checkout.
 
 ## The one lesson that is common to all five
 

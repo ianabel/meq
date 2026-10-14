@@ -45,6 +45,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The project layout, as on a workstation: the checkout is source/
+          # and the build is out of it, in builds/<name> -- CMake refuses a
+          # build tree inside the source tree.
+          path: source
           # toml11 is a pinned submodule. Without this the configure fails with
           # a message telling you exactly this, which is the intended behaviour
           # but a waste of a CI minute.
@@ -61,16 +65,16 @@ jobs:
         # checkout, which on a runner would either not exist (fine) or, worse,
         # exist as something unrelated. Being explicit makes the intent legible
         # in the log.
-        run: cmake -B build -DMFEM_DIR=/nonexistent -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S source -B builds/release -DMFEM_DIR=/nonexistent -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build -j"$(nproc)"
+        run: cmake --build builds/release -j"$(nproc)"
 
       - name: Test
         # No MKL environment is needed. MKL_NUM_THREADS=1 is set by CMake on
         # every registered test and is a no-op on a runner, which links no MKL;
         # MKL_THREADING_LAYER is no longer set anywhere, see tests/CMakeLists.txt.
-        run: ctest --test-dir build --output-on-failure -E '^GeqSourceComparison$'
+        run: ctest --test-dir builds/release --output-on-failure -E '^GeqSourceComparison$'
 
   coverage:
     name: coverage (no MFEM)
@@ -78,6 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: source
           submodules: recursive
 
       - name: Install dependencies
@@ -88,13 +93,13 @@ jobs:
           pipx install gcovr
 
       - name: Configure with instrumentation
-        run: cmake -B build-cov -DMFEM_DIR=/nonexistent -DMEQ_ENABLE_COVERAGE=ON
+        run: cmake -S source -B builds/coverage -DMFEM_DIR=/nonexistent -DMEQ_ENABLE_COVERAGE=ON
 
       - name: Build
-        run: cmake --build build-cov -j"$(nproc)"
+        run: cmake --build builds/coverage -j"$(nproc)"
 
       - name: Test
-        run: ctest --test-dir build-cov --output-on-failure -E '^GeqSourceComparison$'
+        run: ctest --test-dir builds/coverage --output-on-failure -E '^GeqSourceComparison$'
 
       # The gate is on the units CI actually exercises. A threshold computed
       # over the whole of src/meq would be meaningless here: GradShafranov.cpp
@@ -105,15 +110,18 @@ jobs:
       # that adding a branch does not fail the build, tight enough that
       # deleting a test does.
       - name: Coverage report and threshold
+        # From the checkout, because gcovr reads a relative --filter against
+        # its working directory; the reports go beside it, not into it.
+        working-directory: source
         run: |
-          gcovr --root . \
+          gcovr --root . ../builds/coverage \
                 --filter 'src/meq/Config' \
                 --filter 'src/meq/Profiles' \
                 --filter 'src/meq/Source' \
                 --exclude-unreachable-branches \
                 --print-summary \
-                --xml-pretty --output coverage.xml \
-                --html-details coverage.html \
+                --xml-pretty --output ../coverage.xml \
+                --html-details ../coverage.html \
                 --fail-under-line 90
 
       - name: Upload coverage report
@@ -145,20 +153,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          path: source
           submodules: recursive
 
       - name: Configure
         # MFEM_DIR is expected in the runner's environment, pointing at a built
         # checkout of the HDG branch.
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S source -B builds/release -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build -j4
+        run: cmake --build builds/release -j4
 
       - name: Test
         # The convergence tests take minutes, not seconds, and they are the
         # point of this job. The three that read geq's answers are excluded for
         # the reason at the top of this file.
         run: >-
-          ctest --test-dir build --output-on-failure --timeout 1800
+          ctest --test-dir builds/release --output-on-failure --timeout 1800
           -E '^(GeqSourceComparison|VacuumMirror|RotatingMirrorResolution)$'

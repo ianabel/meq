@@ -11,8 +11,11 @@
 >     fixed-h-circular fixed-a-testtokamak fixed-e-diamagnetic \
 >     fixed-g-mastu fixed-f-diiid \
 >     --mode accuracy --self-consistent 12 \
->     --require-quiet --repeats 3 --out /tmp/race-desc
+>     --require-quiet --repeats 3
 > ```
+>
+> run from this directory; it writes `runs/desc-benchmark/race/` under the
+> project directory and runs the installed `install/double/bin/meq`.
 >
 > **`--self-consistent 12` IS THE PROTOCOL AND NOT AN OPTION.** It splits each
 > DESC arm in two. **Phase A, UNTIMED:** iterate the flux-label map to its fixed
@@ -71,9 +74,10 @@ tar cf - desc setup.py setup.cfg pyproject.toml requirements.txt \
 
 # 2. Its own venv.  NOT tools/freegs4e-benchmark/venv, which is pinned tight
 #    and which other work depends on.
-python3 -m venv /home/ian/projects/meq/tools/desc-benchmark/venv
-tools/desc-benchmark/venv/bin/python -m pip install --upgrade pip setuptools wheel
-tools/desc-benchmark/venv/bin/python -m pip install $S/desc-0.17.3+8.g7582fb387
+V=/home/ian/projects/meq/source/tools/desc-benchmark/venv
+python3 -m venv $V
+$V/bin/python -m pip install --upgrade pip setuptools wheel
+$V/bin/python -m pip install $S/desc-0.17.3+8.g7582fb387
 ```
 
 That installed `desc-opt 0.17.3+8.g7582fb387` with **jax 0.9.2 / jaxlib 0.9.2,
@@ -444,12 +448,15 @@ compiled at build time.
 ## Running it
 
 ```sh
-cd /home/ian/projects/meq/tools/desc-benchmark
+cd /home/ian/projects/meq/source/tools/desc-benchmark
+R=/home/ian/projects/meq/runs/desc-benchmark      # what these scripts write
 
 ./venv/bin/python convert_desc.py fixed-h-circular --check    # the posing, audited
-./venv/bin/python descrun.py fixed-h-circular -M 12      # one DESC solve
+./venv/bin/python descrun.py fixed-h-circular -M 12      # one DESC solve, into $R
+( mkdir -p $R/meq && cd $R/meq && /home/ian/projects/meq/install/double/bin/meq \
+      /home/ian/projects/meq/source/examples/fixed-h-circular.toml )
 ./venv/bin/python compare_desc.py fixed-h-circular \
-      --desc runs/fixed-h-circular-desc-M12.npz --meq /tmp/x/fixed-h-circular.nc
+      --desc $R/fixed-h-circular-desc-M12.npz --meq $R/meq/fixed-h-circular.nc
 
 ./venv/bin/python race_desc.py fixed-h-circular --mode accuracy --require-quiet
 ./venv/bin/python race_desc.py fixed-h-circular --mode wall --match dofs
@@ -548,11 +555,14 @@ and DESC is handed a surface fitted to it. `descfreeb.py` is the other
 comparison: both codes solve for the plasma boundary, from a coil set.
 
 ```sh
+R=/home/ian/projects/meq/runs/desc-benchmark
 ./venv/bin/python convert_desc.py limited-tokamak-filament --check
 ./venv/bin/python descfreeb.py limited-tokamak-filament -M 10 --boundary reference
+( mkdir -p $R/meq && cd $R/meq && /home/ian/projects/meq/install/double/bin/meq-run \
+      /home/ian/projects/meq/source/examples/limited-tokamak-filament.toml )
 ./venv/bin/python compare_desc.py limited-tokamak-filament \
-      --desc runs/limited-tokamak-filament-descfreeb-M10-reference.npz \
-      --meq ../../limited-tokamak-filament.nc
+      --desc $R/limited-tokamak-filament-descfreeb-M10-reference.npz \
+      --meq $R/meq/limited-tokamak-filament.nc
 ```
 
 **ONE CASE, AND WHICH ONE IS NOT A CHOICE.** `BoundaryError` constrains the

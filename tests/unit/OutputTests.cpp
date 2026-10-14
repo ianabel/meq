@@ -40,7 +40,7 @@ using meq::MaterialTable;
 namespace
 {
 	/// A path in the system's temporary directory, removed when this goes out
-	/// of scope, so a red run leaves nothing in the source tree.
+	/// of scope, so a red run leaves nothing behind in the build tree.
 	struct Scratch
 	{
 		std::string path;

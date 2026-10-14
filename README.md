@@ -120,10 +120,25 @@ build the solver, only the MFEM-free half. [INSTALL.md](INSTALL.md) is the whole
 story: which branches, why each is needed, what happens without them, and the
 unresolved question of where the merge should live.
 
+The checkout is one of four directories in a *project directory*, and nothing
+is built, tested or run inside it:
+
+```
+<project>/source/            this repository
+<project>/builds/<name>/     one CMake build tree per configuration
+<project>/install/<name>/    what `cmake --install builds/<name>` puts there
+<project>/runs/              everything a run of meq or of tools/ writes
+```
+
+The last three are untracked and can be deleted whenever their contents are no
+longer wanted. CMake refuses a build tree inside the source tree. From the
+project directory:
+
 ```sh
-git submodule update --init --recursive
-cmake -B build -DMFEM_DIR=/path/to/mfem/install
-cmake --build build -j4
+git -C source submodule update --init --recursive
+cmake -S source -B builds/double -DMFEM_DIR=/path/to/mfem/install
+cmake --build builds/double -j4
+cmake --install builds/double          # -> install/double/bin/meq, meq-run
 ```
 
 Never a bare `make -j` or `cmake --build -j` with no number: unbounded, the job
@@ -134,8 +149,9 @@ toml11 is a pinned submodule, so `--recursive` is not optional. MFEM is not a
 submodule — its history is very large and it needs its own out-of-tree build —
 so point `MFEM_DIR` at a checkout you have built yourself.
 
-`MFEM_DIR` defaults to `../mfem/install` and also reads the environment, so on
-a machine laid out that way the `-D` is unnecessary. The finder accepts either
+`MFEM_DIR` defaults to `mfem/install` beside the project directory
+(`../../mfem/install` from `source/`) and also reads the environment, so on a
+machine laid out that way the `-D` is unnecessary. The finder accepts either
 layout an MFEM build leaves behind — an installed tree or an in-source make
 build — and reads the enabled features out of MFEM's own `config.mk`.
 
@@ -149,8 +165,13 @@ those layers and nothing else.**
 ## Running
 
 ```sh
-./build/meq examples/soloviev-nstx.toml
+mkdir -p runs/soloviev && cd runs/soloviev
+../../install/double/bin/meq ../../source/examples/soloviev-nstx.toml
 ```
+
+The output lands in the working directory. A path the configuration *reads* —
+a profile table, a mesh, an initial guess — is relative to the configuration
+file; a path the run *writes* is relative to the working directory.
 
 One positional argument and no other flags, apart from `--help` and `--version`:
 everything about a run is in the configuration file, which is a record of what
@@ -172,8 +193,10 @@ itself; a direct invocation does not.
 ## Testing
 
 ```sh
-cd build && ctest --output-on-failure
+cd builds/double && ctest --output-on-failure
 ```
+
+The tests run in their build tree and write nothing into `source/`.
 
 The suite is in three layers, described in full in the
 [testing chapter](https://meq.readthedocs.io/en/latest/testing.html):

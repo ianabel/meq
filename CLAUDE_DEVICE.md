@@ -619,7 +619,7 @@ the same flag, so two sets of integrators are covered:
 * `VectorMassIntegrator` and `VectorDivergenceIntegrator`, which upstream guarded.
 
 The `HDGExtensionIntegrator` and `NormalTraceJumpIntegrator` scratch are guarded
-upstream too (`CLAUDE_MFEM.md`, *`../mfem-hdg-dev` is receive-only*).
+upstream too (`CLAUDE_MFEM.md`, *`../../mfem-hdg-dev` is receive-only*).
 
 **It is not decorative, and that is falsified rather than argued.** Comment out
 the one line and `machine-f-diiid` exits **2** with *"AssemblyMode::Threaded is

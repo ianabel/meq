@@ -62,6 +62,8 @@
 // three lines of preprocessor rather than the whole of `mfem.hpp`.
 #include "mfem/config/config.hpp"
 
+#include "SourceTree.hpp"
+
 namespace
 {
 	/// Where the driver binary is. CMake passes it, for the reason
@@ -79,10 +81,10 @@ namespace
 		                      std::istreambuf_iterator<char>() );
 	}
 
-	/// The scratch directory every run below writes into, so that a test run
-	/// does not litter the repository root the way a bare `meq examples/x.toml`
-	/// would. Relative, because ctest sets the working directory to the source
-	/// tree and the shipped files name their profile tables `examples/...`.
+	/// The scratch directory every run below writes into, relative to the
+	/// working directory, which is the build tree. The variants written there
+	/// read the shipped profile tables by the absolute paths shippedConfig()
+	/// gives them.
 	char const *scratch()
 	{
 		return "machine-fixed-boundary-scratch";
@@ -97,9 +99,10 @@ namespace
 	std::string configure( std::string const &stem, int refinement,
 	                       std::string const &prefix )
 	{
-		std::string text = slurp( "examples/" + stem + ".toml" );
+		std::string const shipped = "examples/" + stem + ".toml";
+		std::string text = meq::test::shippedConfig( shipped );
 		BOOST_TEST_REQUIRE( !text.empty(),
-		                    "examples/" + stem + ".toml is missing or empty" );
+		                    meq::test::sourcePath( shipped ) + " is empty" );
 
 		auto replaceLine = [ &text ]( std::string const &key,
 		                              std::string const &line )

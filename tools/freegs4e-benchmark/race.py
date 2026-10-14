@@ -47,8 +47,11 @@ it is.
 
 THE RACE TO RUN ON A QUIET MACHINE, and it is the `--filament` one:
 
-    cd tools/freegs4e-benchmark
-    nice -n 10 ./venv/bin/python race.py /tmp/race-fil F --filament
+    nice -n 10 source/tools/freegs4e-benchmark/venv/bin/python \
+        source/tools/freegs4e-benchmark/race.py runs/freegs4e-benchmark/race-fil F --filament
+
+from the project directory.  Every run is made with the scratch directory as
+its working directory, so the meshes meq-run generates land there too.
 
 **COLD-STARTED FORWARD FILAMENTS, BOTH SIDES.**  freegs4e's DIII-D reference
 carries its 18 conductors as point filaments and MEQ now carries the same 18 at
@@ -108,13 +111,13 @@ import numpy as np
 from netCDF4 import Dataset
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import benchpaths
 import conductors
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-MEQ_RUN = os.path.join(ROOT, "build", "meq-run")
-EXAMPLES = os.path.join(ROOT, "examples")
-VENV = os.path.join(HERE, "venv", "bin", "python")
+MEQ_RUN = benchpaths.meq_run()
+EXAMPLES = benchpaths.EXAMPLES
+VENV = benchpaths.VENV
 
 # reference stem -> MEQ example stem
 # --shaped: RACE THE SAME CONDUCTOR MODEL ON BOTH SIDES.
@@ -307,7 +310,8 @@ def filament_guess(stem, ref, scratch):
     rho = float(re.search(r"^\[mesh\.generate\][^\[]*?^Radius = ([-\d.eE+]+)",
                           text, re.M | re.S).group(1))
     argv = [sys.executable, os.path.join(HERE, "mkcoldguess.py"), "--remainder",
-            os.path.join(HERE, "%s.npz" % ref), mesh, gf, "%g" % rho, "32"]
+            os.path.join(benchpaths.OUT, "%s.npz" % ref), mesh, gf, "%g" % rho,
+            "32"]
     done = subprocess.run(argv, capture_output=True, text=True)
     if done.returncode != 0:
         raise SystemExit("the filament guess could not be built for %s:\n%s"
@@ -320,12 +324,14 @@ def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
     # WHICH FILE, AND IT IS NOT ALWAYS THE CASE'S.  See FILAMENT_FILE.
     shipped = FILAMENT_FILE.get(stem) if FILAMENT else None
     source = shipped or stem
-    text = open(os.path.join(EXAMPLES, "%s.toml" % source)).read()
+    # Its input paths made absolute, since the variant is written to `scratch`.
+    text = benchpaths.read_example(os.path.join(EXAMPLES, "%s.toml" % source))
     text = re.sub(r"^PolynomialDegree = .*$", "PolynomialDegree = %d" % degree,
                   text, flags=re.M)
     # RefinementLevels is not in the generated file, so it is inserted into
-    # [mesh] rather than substituted.
-    text = re.sub(r'^(File = "examples/%s\.msh")$' % re.escape(source),
+    # [mesh] rather than substituted.  A committed mesh's path is absolute by
+    # now ( read_example ), a generated one's is bare.
+    text = re.sub(r'^(File = "(?:[^"]*/)?%s\.msh")$' % re.escape(source),
                   r"\1\nRefinementLevels = %d" % refine, text, flags=re.M)
     # THE SAMPLING GRID IS THE COMPARISON'S AND NOT THE RUN'S. MEQ's .nc
     # covers the whole half-disc, so 129^2 over a radius of 3.7 m is 0.029 m in
@@ -353,14 +359,14 @@ def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
         # mesh around conductors the generator is no longer told about.
         text = re.sub(r"^CoilSize = .*\n", "", text, flags=re.M)
         # (2) its own mesh, so the two arms do not share a .meq-mesh stamp.
-        text = re.sub(r'^File = "examples/%s\.msh"$' % re.escape(stem),
+        text = re.sub(r'^File = "(?:[^"]*/)?%s\.msh"$' % re.escape(stem),
                       'File = "%s/%s-filament.msh"' % (scratch, stem),
                       text, flags=re.M)
         # (3) the guess is psi_p and is COLD; see filament_guess().
         mesh_path, gf_path = filament_guess(stem, ref, scratch)
-        text = re.sub(r'^File = "examples/[^"]*-guess\.gf"$',
+        text = re.sub(r'^File = "[^"]*-guess\.gf"$',
                       'File = "%s"' % gf_path, text, flags=re.M)
-        text = re.sub(r'^MeshFile = "examples/[^"]*-guess\.mesh"$',
+        text = re.sub(r'^MeshFile = "[^"]*-guess\.mesh"$',
                       'MeshFile = "%s"' % mesh_path, text, flags=re.M)
         # (4) and the key itself.
         text += '\n[conductors]\nModel = "filament"\n'
@@ -383,7 +389,7 @@ def run_meq(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
     path, label = meq_toml(stem, degree, refine, scratch, sample, adaptive, ref)
     started = time.perf_counter()
     done = subprocess.run([MEQ_RUN, path], capture_output=True, text=True,
-                          cwd=ROOT, env=environment(), timeout=7200)
+                          cwd=scratch, env=environment(), timeout=7200)
     wall = time.perf_counter() - started
     row = dict(label=label, degree=degree, refine=refine, wall=wall,
                ok=done.returncode == 0, log=done.stdout + done.stderr)
@@ -436,7 +442,7 @@ def run_freegs(ref, nx, scratch):
     out = os.path.join(scratch, "fgs")
     env = environment()
     env["FGSREF_OUT"] = out
-    env["PYTHONPATH"] = os.path.abspath(os.path.join(ROOT, "..", "freegs4e"))
+    env["PYTHONPATH"] = benchpaths.FREEGS4E
     where = os.path.join(out, "n%d" % nx)
     npz = os.path.join(where, "%s.npz" % ref)
     if not os.path.exists(npz):
@@ -444,7 +450,7 @@ def run_freegs(ref, nx, scratch):
         done = subprocess.run([VENV, os.path.join(HERE, "fgsref.py"),
                                "--nx=%d" % nx]
                               + (["--shaped"] if SHAPED else []) + [ref[0]],
-                              capture_output=True, text=True, cwd=HERE,
+                              capture_output=True, text=True, cwd=scratch,
                               env=env, timeout=14400)
         wall = time.perf_counter() - started
         if not os.path.exists(npz):
@@ -558,7 +564,7 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
     # in the first place, and asserts the label order against the machine
     # rather than assuming it.
     from mkcoldguess import with_design
-    reference = os.path.join(HERE, "%s.npz" % ref)
+    reference = os.path.join(benchpaths.OUT, "%s.npz" % ref)
     flat = conductors.from_npz(with_design(np.load(reference,
                                                    allow_pickle=True),
                                            reference))
@@ -616,7 +622,7 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
 
 
 if __name__ == "__main__":
-    scratch = sys.argv[1]
+    scratch = os.path.abspath(sys.argv[1])
     want = [a.upper() for a in sys.argv[2:]] or [c[0] for c in CASES]
     os.makedirs(scratch, exist_ok=True)
     # THE BANNER HAS TO NAME THE CONDUCTOR MODEL CORRECTLY, because it is the

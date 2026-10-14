@@ -38,12 +38,12 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 os.environ.setdefault("FGSREF_OUT", "/tmp")
 
 import numpy as np                                               # noqa: E402
 
+import benchpaths                                                # noqa: E402
 import fgsref                                                    # noqa: E402
 import shaped                                                    # noqa: E402
 import conductors                                                # noqa: E402
@@ -71,7 +71,7 @@ def provenance():
     import freegs4e
     return dict(code_version="freegs4e %s" % getattr(freegs4e, "__version__", "?"),
                 tree=sha(os.path.dirname(os.path.dirname(freegs4e.__file__))),
-                meq_tree=sha(ROOT),
+                meq_tree=sha(benchpaths.SOURCE),
                 notes="fgsref.py's solve; shaped.py turns fold and "
                       "rectangle_rule; interpolating profile splines; cached "
                       "boundary matrix; no blend or reseed retries")

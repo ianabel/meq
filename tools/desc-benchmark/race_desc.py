@@ -81,7 +81,8 @@ from cores import physical_cores                               # noqa: E402
 
 THREADS = str(physical_cores())
 VENV = os.path.join(HERE, "venv", "bin", "python")
-DRIVER = os.path.join(convert.MEQ, "build", "meq")
+#: The INSTALLED driver, install/$MEQ_BUILD/bin/meq; MEQ_INSTALL overrides it.
+DRIVER = convert.meqpaths.meq()
 TARGETS = [1e-3, 1e-4, 1e-5, 1e-6]
 
 
@@ -149,16 +150,14 @@ def load_average():
 
 #: Where DESC's source lives, for the provenance SHA only -- the venv holds the
 #: installed copy and this is never imported from.  `DESC_DIR` overrides it.
-DESC_DIR = os.environ.get("DESC_DIR",
-                          os.path.join(os.path.dirname(convert.MEQ), "DESC"))
+DESC_DIR = os.environ.get("DESC_DIR", convert.meqpaths.sibling("DESC"))
 
 #: The MFEM MEQ links.  The same default and the same environment variable
 #: MEQ's own CMake finder uses -- CLAUDE_MFEM.md, *Which MFEM, and why not master* --
 #: so a tree configured with a different MFEM_DIR is recorded correctly here
 #: without being told twice.
 MFEM_DIR = os.environ.get("MFEM_DIR",
-                          os.path.join(os.path.dirname(convert.MEQ), "mfem",
-                                       "install"))
+                          convert.meqpaths.sibling("mfem", "install"))
 
 
 def provenance():
@@ -169,8 +168,8 @@ def provenance():
 	a hardcoded `/home/ian/...` makes the harness silently report `?` on any
 	other machine -- which looks like a missing checkout rather than a wrong
 	path.  `MFEM_DIR` is the variable MEQ's own finder reads, and `DESC_DIR`
-	is offered for the same reason; both default beside the MEQ tree, which is
-	where this repository's sibling checkouts live.
+	is offered for the same reason; both default beside the project directory,
+	which is where this repository's sibling checkouts live.
 	"""
 	def sha(path):
 		if not os.path.isdir(path):
@@ -180,7 +179,7 @@ def provenance():
 		return out.stdout.strip() or "?"
 	lib = os.path.join(MFEM_DIR, "lib", "libmfem.a")
 	return dict(meq=sha(convert.MEQ), desc=sha(DESC_DIR),
-	            desc_dir=DESC_DIR, mfem_dir=MFEM_DIR,
+	            desc_dir=DESC_DIR, mfem_dir=MFEM_DIR, driver=DRIVER,
 	            threads=THREADS,
 	            libmfem_mtime=(time.strftime("%Y-%m-%d %H:%M",
 	                                         time.localtime(os.path.getmtime(lib)))
@@ -189,7 +188,8 @@ def provenance():
 
 # ---------------------------------------------------------------- the MEQ arm
 def meq_config(stem, out, degree, refine, grid=257):
-	"""The shipped TOML with three keys edited and the paths absolutised.
+	"""The shipped TOML with three keys edited and the input paths absolutised,
+	since the variant is written under `out` and not beside its tables.
 
 	`RefinementLevels` IS THE h KNOB and NR/NZ are not, for the reason the
 	shipped file's own comment gives: bisection of triangles is exact, so a
@@ -202,7 +202,7 @@ def meq_config(stem, out, degree, refine, grid=257):
 	              text, flags=re.M)
 	text = re.sub(r"^RefinementLevels = .*$", f"RefinementLevels = {refine}",
 	              text, flags=re.M)
-	text = text.replace('"examples/', f'"{convert.MEQ}/examples/')
+	text = convert.absolute_inputs(text)
 	text = re.sub(r"^Directory = .*$", f'Directory = "{out}"', text, flags=re.M)
 	stemmed = f"{stem}-k{degree}-r{refine}"
 	text = re.sub(r"^Prefix = .*$", f'Prefix = "{stemmed}"', text, flags=re.M)
@@ -217,7 +217,7 @@ def run_meq(config, timeout=7200):
 	started = time.perf_counter()
 	done = subprocess.run(pinned([DRIVER, config]), capture_output=True,
 	                      text=True, env=environment(), timeout=timeout,
-	                      cwd=convert.MEQ)
+	                      cwd=os.path.dirname(os.path.abspath(config)))
 	seconds = time.perf_counter() - started
 	elements = newton = 0
 	found = re.search(r"converged in (\d+) Newton iterations on (\d+) elements",
@@ -331,7 +331,8 @@ def main():
 		formatter_class=argparse.RawDescriptionHelpFormatter)
 	ap.add_argument("stems", nargs="*", default=["fixed-h-circular"])
 	ap.add_argument("--mode", choices=("wall", "accuracy"), default="accuracy")
-	ap.add_argument("--out", default="/tmp/race-desc")
+	ap.add_argument("--out", default="",
+	                help="default runs/desc-benchmark/race under the project")
 	ap.add_argument("--degrees", default="1,2,3")
 	ap.add_argument("--refinements", default="0,1")
 	ap.add_argument("--modes", default="6,8,10,12,16,20",
@@ -363,6 +364,8 @@ def main():
 	ap.add_argument("--json", default="")
 	args = ap.parse_args()
 
+	args.out = os.path.abspath(args.out or convert.meqpaths.runs("desc-benchmark",
+	                                                             "race"))
 	os.makedirs(args.out, exist_ok=True)
 	before = load_average()
 	if args.require_quiet and before >= args.quiet_threshold:

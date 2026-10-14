@@ -44,11 +44,15 @@ import shlex
 import subprocess
 import sys
 
-# Filled in by CMake.  This script is generated into the build directory beside
-# the binary it runs, so neither path is searched for and neither can be the
-# wrong one from an older build sitting earlier on PATH.
-MEQ = "@MEQ_RUN_BINARY@"
-TOOLS = "@MEQ_RUN_TOOLS@"
+# Filled in by CMake, once for the build tree -- absolute paths to the binary
+# beside this script and to the source tree's tools/ -- and once for the
+# install, relative to this script: bin/meq and share/meq/tools/.  Either way
+# neither path is searched for, so neither can be the wrong one from an older
+# build sitting earlier on PATH, and the installed copy keeps working after the
+# build tree is deleted.
+HERE = os.path.dirname(os.path.realpath(__file__))
+MEQ = os.path.join(HERE, "@MEQ_RUN_BINARY@")
+TOOLS = os.path.join(HERE, "@MEQ_RUN_TOOLS@")
 
 # The generators `[mesh.generate] Tool` can name, and where they live.  MEQ's
 # own refusal is the authority on which names are legal; this is only the map

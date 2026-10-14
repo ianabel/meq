@@ -102,6 +102,8 @@
 #include "convergence/MirrorMachine.hpp"
 #include "convergence/RoundOffFloor.hpp"
 
+#include "SourceTree.hpp"
+
 namespace
 {
 	using namespace meqtest::mirror;
@@ -111,13 +113,24 @@ namespace
 	char const *const solveStem = "RotatingMirror";
 	char const *const ladderStem = "RotatingMirrorLadder";
 
-	/// The committed problem, or MEQ_GEQ_ROTATING_REFERENCE for a regenerated
-	/// one -- the override GeqSourceComparison and MirrorMachine.hpp take.
+	/// The committed problem -- meta.txt, filaments.dat and the tables, in the
+	/// source tree -- or MEQ_GEQ_ROTATING_REFERENCE for a regenerated one, a
+	/// directory holding a whole export: the override GeqSourceComparison and
+	/// MirrorMachine.hpp take.
 	std::string rotatingDirectory()
 	{
 		char const *override = std::getenv( "MEQ_GEQ_ROTATING_REFERENCE" );
 		return override ? std::string( override )
-		                : std::string( "tools/geq-benchmark/reference/rotating" );
+		                : meqtest::geq::inputDirectory( "rotating" );
+	}
+
+	/// geq's answer -- the psi files and solution.txt, untracked, in the runs
+	/// directory -- or the same override as rotatingDirectory().
+	std::string rotatingAnswerDirectory()
+	{
+		char const *override = std::getenv( "MEQ_GEQ_ROTATING_REFERENCE" );
+		return override ? std::string( override )
+		                : meqtest::geq::answerDirectory( "rotating" );
 	}
 
 	meqtest::geq::GeqCase readProblem()
@@ -774,8 +787,8 @@ namespace
 	/// One of geq's untracked psi files, R z psi on geqNodes() in order.
 	std::vector<double> readGeqPsi( std::string const &name )
 	{
-		std::string const path = rotatingDirectory() + "/" + name;
-		std::ifstream in = meqtest::geq::openOutput( rotatingDirectory(), name );
+		std::string const path = rotatingAnswerDirectory() + "/" + name;
+		std::ifstream in = meqtest::geq::openOutput( rotatingAnswerDirectory(), name );
 		Nodes const &nodes = geqNodes();
 		std::vector<double> psi;
 		std::string line;
@@ -813,8 +826,8 @@ namespace
 
 	Labels readGeqLabels( std::string const &key )
 	{
-		std::string const path = rotatingDirectory() + "/solution.txt";
-		std::ifstream in = meqtest::geq::openOutput( rotatingDirectory(), "solution.txt" );
+		std::string const path = rotatingAnswerDirectory() + "/solution.txt";
+		std::ifstream in = meqtest::geq::openOutput( rotatingAnswerDirectory(), "solution.txt" );
 		std::string line;
 		while ( std::getline( in, line ) )
 		{
@@ -829,7 +842,7 @@ namespace
 			return out;
 		}
 		BOOST_TEST_REQUIRE( false, path << " has no " << key << "; regenerate it "
-			"with " << meqtest::geq::regenerationCommand( rotatingDirectory() ) );
+			"with " << meqtest::geq::regenerationCommand( rotatingAnswerDirectory() ) );
 		return Labels();
 	}
 }
@@ -1610,10 +1623,12 @@ BOOST_AUTO_TEST_SUITE_END()
  */
 namespace
 {
-	char const *const mirrorExample = "examples/mirror-rotating.toml";
-	char const *const mirrorMesh = "examples/mirror-rotating.msh";
-	/// Relative, because ctest runs from the source tree and the example names
-	/// its tables tools/...; anchored in .gitignore.
+	std::string const mirrorExample = meq::test::sourcePath( "examples/mirror-rotating.toml" );
+	/// The example GENERATES its mesh, and a generated [mesh] File is the run's
+	/// product, so meq-run writes it relative to the working directory -- the
+	/// build tree -- where the library side reads it back.
+	char const *const mirrorMesh = "mirror-rotating.msh";
+	/// Relative to the working directory, which is the build tree.
 	char const *const driverScratch = "mirror-driver-scratch";
 
 	std::string readText( std::string const &path )
@@ -1632,11 +1647,12 @@ namespace
 	/// The shipped example with [output] redirected into the scratch directory
 	/// under @a prefix, and @a solverLines added under [solver]. TEXT
 	/// SUBSTITUTION ON THE SHIPPED FILE, because a copy would drift and a
-	/// drifted copy passing is worse than no test.
+	/// drifted copy passing is worse than no test; shippedConfig() makes the
+	/// tables it reads absolute, since the variant is written away from them.
 	std::string configureMirror( std::string const &prefix,
 	                             std::string const &solverLines )
 	{
-		std::string text = readText( mirrorExample );
+		std::string text = meq::test::shippedConfig( "examples/mirror-rotating.toml" );
 		BOOST_TEST_REQUIRE( !text.empty(), mirrorExample << " is missing or empty" );
 
 		auto replaceLine = [ &text ]( std::string const &key, std::string const &line )
@@ -1743,7 +1759,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 		int const status = runLogged( std::string( MEQ_DRIVER_PATH ) + " --mesh-command "
 		                              + mirrorExample, log );
 		std::string const command = readText( log );
-		std::printf( "\n  MR-5: meq --mesh-command %s\n    %s", mirrorExample,
+		std::printf( "\n  MR-5: meq --mesh-command %s\n    %s", mirrorExample.c_str(),
 		             command.c_str() );
 		BOOST_TEST_REQUIRE( status == 0, command );
 		BOOST_TEST( says( command, "--align-plasma" ),

@@ -7,7 +7,8 @@
 SPHINXOPTS    ?= -W --keep-going -j auto
 SPHINXBUILD   ?= sphinx-build
 SOURCEDIR     = .
-BUILDDIR      = _build
+# Out of the source tree, like every other build: <project>/builds/docs.
+BUILDDIR      = ../../builds/docs
 
 .PHONY: help html linkcheck clean Makefile
 

@@ -149,8 +149,8 @@ own benchmarks can see it**, because both have `dC/dψ = 0`. And their (6) omits
 the `μ₀` their (9) carries.
 
 **AND THERE IS AN INDEPENDENT IMPLEMENTATION OF (136) ON THIS MACHINE, WHICH
-WOULD BE THE FIRST OUTSIDE CHECK OF THAT GAP.** `../freegs4e`'s
-`ProfilesCentrifugalMirror` — driven by `../geq`, a rotating-mirror wrapper —
+WOULD BE THE FIRST OUTSIDE CHECK OF THAT GAP.** `../../freegs4e`'s
+`ProfilesCentrifugalMirror` — driven by `../../geq`, a rotating-mirror wrapper —
 implements Abel (136) closed by its (96) and (97), the same paper from the same
 equations, in Python, by finite differences and Picard. So it and
 `meq::RotatingSource` are two independent implementations of one equation, which

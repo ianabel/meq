@@ -28,10 +28,9 @@
  */
 namespace
 {
-	/// A scratch path that cleans itself up. The unit tests run with the
-	/// SOURCE tree as their working directory -- tests/CMakeLists.txt pins it
-	/// so ConfigTests can open examples/*.toml -- so a file written relatively
-	/// would land in the checkout.
+	/// A scratch path that cleans itself up, under the system's temporary
+	/// directory, so that a red run leaves nothing behind in the build tree
+	/// the unit tests run in.
 	class ScratchFile
 	{
 		public:

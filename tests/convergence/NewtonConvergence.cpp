@@ -1079,7 +1079,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
  * nl_src IS PER ELEMENT, so the corruption is too, and that is what makes this
  * ordinary rather than exotic: any tabulated profile with a flat segment gives
  * dF/dpsi == 0 on part of the domain. Filed with line numbers as
- * ../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md.
+ * ../../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md.
  *
  * WHEN IT GOES GREEN, take setPotential( Potential::Raw ) out of apps/meq.cpp
  * and out of DriverAcceptance.cpp's hand-rolled loop: the driver can use the
@@ -1168,7 +1168,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes
 		            "post-processing of psi_h. ReconstructFluxAndPot() is skipping "
 		            "its mean-value regularisation and factoring a singular local "
 		            "matrix; see the comment above and "
-		            "../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md. "
+		            "../../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md. "
 		            "WHEN THIS PASSES, drop setPotential( Potential::Raw ) from "
 		            "apps/meq.cpp and DriverAcceptance.cpp" );
 	}

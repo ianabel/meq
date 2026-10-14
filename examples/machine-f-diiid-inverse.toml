@@ -18,7 +18,7 @@
 # support sweeps -- is examples/machine-f-diiid.toml's, unchanged. Run it
 # with meq-run, which makes the mesh:
 #
-#     ./build/meq-run examples/machine-f-diiid-inverse.toml
+#     meq-run ../../source/examples/machine-f-diiid-inverse.toml
 #
 # The targets were written by solving machine-f-diiid.toml forward through
 # the library and bisecting psi_h = psi_bnd along 24 rays from the axis,
@@ -26,7 +26,7 @@
 # tests/convergence/InverseSolve.cpp's separatrixPoints().
 
 [mesh]
-File = "examples/machine-f-diiid.msh"
+File = "machine-f-diiid.msh"
 
 # THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
 # [boundary.exterior] Radius = 3.4, which has to fit strictly inside.
@@ -68,8 +68,8 @@ ConfineToPlasma = true
 PsiAxis = 2.887839087e-01
 PlasmaCurrent = 1.0000000003e+06
 Mu0 = 1.25663706212e-6
-PPrimeFile = "examples/machine-f-diiid-pprime.dat"
-GGPrimeFile = "examples/machine-f-diiid-ggprime.dat"
+PPrimeFile = "machine-f-diiid-pprime.dat"
+GGPrimeFile = "machine-f-diiid-ggprime.dat"
 
 # THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
 # --coil rectangles from these blocks, in this order, so the mesh is
@@ -260,8 +260,8 @@ Modes = 10
 # and is a different benchmark.
 [initialguess]
 Type = "gridfunction"
-File = "examples/machine-f-diiid-guess.gf"
-MeshFile = "examples/machine-f-diiid-guess.mesh"
+File = "machine-f-diiid-guess.gf"
+MeshFile = "machine-f-diiid-guess.mesh"
 
 [output]
 Prefix = "machine-f-diiid-inverse"

@@ -6,7 +6,9 @@ Produces converged free-boundary equilibria with a TABULATED (p', ff') source
 function of normalised flux, and dumps each to a portable .npz + JSON sidecar.
 
 Run as:
-    PYTHONPATH=/home/ian/projects/freegs4e <venv-python> fgsref.py [case ...]
+    PYTHONPATH=<project>/../freegs4e <venv-python> fgsref.py [case ...]
+
+and writes under runs/freegs4e-benchmark/ ( benchpaths.py ), never here.
 
 Three things about freegs4e had to be worked around; all are documented at the
 point of use below:
@@ -33,10 +35,12 @@ from scipy import interpolate as sinterp
 
 from freegs4e import machine, jtor, equilibrium, control, critical
 
+import benchpaths
 import conductors
 from freegs4e.gradshafranov import GSElliptic, GSsparse4thOrder, mu0
 
-OUTDIR = os.path.dirname(os.path.abspath(__file__))
+# The 129^2 references; --nx and --interpolating-profiles go beside them.
+OUTDIR = benchpaths.OUT
 
 # Multigrid levels for the linear solve, or None for freegs4e's own default.
 #
@@ -543,7 +547,7 @@ def _free_boundary_cached(eq, Jtor, psi):
 # log singularity subtracted and integrated in closed form, which is a real
 # boundary-element method and is not this.
 #
-# Transcribed from ../freegs4e/freegs4e/boundary.py with the one constant
+# Transcribed from freegs4e/boundary.py in the freegs4e checkout with the one constant
 # lifted out and nothing else changed.  freegs4e is not MEQ's to edit.
 # ----------------------------------------------------------------------------
 def _hagenow_scaled_eps(eq, Jtor, psi):
@@ -1623,8 +1627,7 @@ def main():
         # says and not into the repository beside the 129^2 ones.
         base = os.environ.get("FGSREF_OUT")
         OUTDIR = (os.path.join(base, "n%d" % n) if base
-                  else os.path.join(os.path.dirname(OUTDIR) or ".",
-                                    os.path.basename(OUTDIR) + "-n%d" % n))
+                  else os.path.join(benchpaths.OUT, "ref-n%d" % n))
         os.makedirs(OUTDIR, exist_ok=True)
         print("resolution override: %d x %d, writing to %s" % (n, n, OUTDIR),
               flush=True)
@@ -1654,14 +1657,12 @@ def main():
             n = nx if nx % 2 == 1 else nx + 1
             coarse = (n - 1)//2 + 1
             base = os.environ.get("FGSREF_OUT")
-            here = os.path.dirname(os.path.abspath(__file__))
+            here = benchpaths.OUT
             SEED_FROM = (os.path.join(base, "n%d" % coarse) if base
-                         else os.path.join(os.path.dirname(here) or ".",
-                                           os.path.basename(here)
-                                           + "-n%d" % coarse))
+                         else os.path.join(here, "ref-n%d" % coarse))
             if coarse == 129:
                 # 129^2 is the case table's own resolution, so its output is
-                # the undecorated directory rather than a -n129 one.
+                # the undecorated directory rather than ref-n129/.
                 # ANY case's own 129^2 output, not one case's by name. This
                 # read "H_limited_circular.npz" while H was the only case that
                 # had ever been laddered, which silently seeds the wrong case
