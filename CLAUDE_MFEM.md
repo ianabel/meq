@@ -254,15 +254,14 @@ it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
 **BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../mfem/install` and
-on `../mfem/install-single` against `meq-integration` at `81ecf3281e`, and the
+on `../mfem/install-single` against `meq-integration` at `17383013b0`, and the
 DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of `-6.466e-12`
 under `--device cuda` on the double one, as it did on the install before ->
-[M-271](MEASUREMENTS.md#m-271), where the double suite is 76 of 77. **The
-single suite is 73 of 77 and no answer moved** -> [M-272](MEASUREMENTS.md#m-272),
-[M-273](MEASUREMENTS.md#m-273): the deliberate `PlasmaEdgeConvergence`; two
-solves on M-222's knife edge at `MKL_NUM_THREADS = 1`, `XPointBorder` and
-`FreeBoundaryCoupling`; and `VacuumMirror`, the open
-`ExtensionBoundaryQuadrature` request below. The single install is a
+[M-275](MEASUREMENTS.md#m-275), where the double suite is 76 of 77. **The
+single suite is 74 of 77 and no answer moved**: the deliberate
+`PlasmaEdgeConvergence`, and two solves on M-222's knife edge at
+`MKL_NUM_THREADS = 1`, `XPointBorder` and `FreeBoundaryCoupling`
+([M-273](MEASUREMENTS.md#m-273)). The single install is a
 **second** tree with the same obligation and its own reason to move first:
 `sundials-real-t` is in the merge because MFEM does not compile **at all** in
 the `MFEM_PRECISION = single` + `MFEM_USE_SUNDIALS` pairing without it.
@@ -415,7 +414,6 @@ is not.
 
 | | |
 |---|---|
-| **`ExtensionBoundaryQuadrature`'s central difference steps off the face** | **OPEN**, `../mfem-hdg-dev/doc/HDG-EXTENSION-FD-FACE-END-FROM-MEQ.md`. The face-parameter difference evaluates `Endpoint()` at `xi +- fd_step` without staying in `[0, 1]`, so near a face's end the stencil point is extrapolated past the vertex. In single `fd_step` is about `5e-3` and a 21-point rule's first point is at `0.0031`, so where a Gamma_h vertex sits within about 1e-4 of Gamma the point lands OUTSIDE Gamma and `VertexConePath::Endpoint()`'s `MFEM_VERIFY` aborts. Reproduced bit for bit on `VacuumMirror`'s level-2 mesh, which is red in single for this and nothing else. Double's step is 6e-6 and cannot reach it -> [M-272](MEASUREMENTS.md#m-272) |
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | **`SetIntegratorsThreadSafe()`'s SCOPE, which is the durable half and is now upstream's doxygen** | **CLOSED.** MEQ reported that `mfem::NormalTraceJumpIntegrator` carries `Vector face_shape, normal, shape1_n, shape2_n` and two `DenseMatrix` unguarded (`fem/bilininteg.hpp:4872`), that MEQ installs exactly one as the object handed to `EnableHybridization()`, and that `DarcyForm::ReconstructFluxAndPot()` takes it per face inside its element loop. **Guarded upstream, on the trunk**, so all five branches take it — and a clean MFEM rebuild is owed here, since the class layout moves in a `MFEM_THREAD_SAFE` build. **MEQ's report overstated one thing and the correction is the tense**: it said the class is reached by "the loop you are threading", and there is no such loop — `darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly and both reconstruction entry points are serial. MEQ inferred that from being told the work was in progress and wrote the inference as an observation. What upstream took as the real defect was **theirs and not the class**: `SetIntegratorsThreadSafe()` made a promise whose scope was written down nowhere, so threading one more loop silently widens what a caller who set it months earlier has undertaken. Its doxygen now says the promise is about **every integrator installed on the hybridization** rather than about whichever loops happen to be threaded |
 | ~~**`mfem::HDGExtensionIntegrator` carries unguarded scratch**~~ | **CLOSED, and MEQ's own files went on asserting it afterwards.** Upstream's `26fccc9f3d` put `shape, shape_ext, nor, x, xbar, m, y, CTm`, `Cmat`, `L` and `ext` behind `#ifndef MFEM_THREAD_SAFE` (`extension_hdg.hpp:24`), and `git merge-base --is-ancestor` confirms it is in the `meq-integration` MEQ links. The row that stood here, and the matching comment at MEQ's `SetIntegratorsThreadSafe()` call, both described the window between the eight-class commit and that one — **a true conclusion resting on a premise that had expired**. Neither was re-read against the tree. *A claim about somebody else's code is only as fresh as the last time it was checked* |

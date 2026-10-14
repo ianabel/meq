@@ -16645,3 +16645,55 @@ its Python start-up, about 1.1 s.
   1.35e-08.
 No target is set below 1e-07, where the reference's own bound would start to
 count.
+
+
+### M-275
+
+**`17383013b0`: UPSTREAM'S FACE-DIFFERENCE FIX TAKES `VacuumMirror` GREEN IN
+SINGLE, AND THE SINGLE SUITE IS 74 OF 77.**
+
+Both installs were rebuilt from `meq-integration` at `17383013b0`, which adds
+`gf-hdg-subdomains-dev` `599762a82b`. That commit makes the extension's face
+derivative one-sided at a face's ends instead of stepping off the face. All
+sixteen branches are contained, both `libmfem.a` are newer than the tip, the
+installed `extension_hdg.hpp` matches the branch, and both MEQ trees were
+rebuilt `--clean-first`.
+
+`VacuumMirror`'s solve now reaches level 2 in single, where at `81ecf3281e` it
+aborted there ([M-272](#m-272)). L2 over D_h:
+
+| k | level 1 | level 2 | rate |
+|---|---|---|---|
+| 1 | 2.9970e-03 | 6.8149e-04 | 2.137 |
+| 2 | 1.6206e-04 | 1.9714e-05 | 3.039 |
+| 3 | 6.8095e-05 | 1.5628e-04 | −1.199 |
+
+**`k = 3` is the format's floor, and its size is known.** The transfer
+differences its path endpoints at `extensionFdStep()`, so it carries
+`eps/fd_step` of the field: 2.4e-05 relative in single, 6.6e-05 on this
+`‖ψ‖`. That is where `k = 3` sits at level 1.
+
+**Two repairs follow from that floor.**
+* **The mode sweep's "it stops".** At `k = 3` in single its plateau reads
+  5.5e-05 to 6.8e-05 and moves by up to 20% from one N to the next.
+  [M-272](#m-272)'s 5% band was a tolerance widened to meet that, and it held
+  only because the arithmetic before the fix happened to land inside it. It is
+  replaced by a precondition: "it stops" is asserted only where the plateau
+  stands above 4 eps/fd_step x `‖ψ‖`, and is skipped loudly where it does not.
+  That is single only; in double the same floor is 6.1e-10 and the assertion
+  always runs at 2%. Running the sweep at `k = 2` in single was tried first.
+  "It stops" then held at 1.5%, but the machine region's fall from N = 4 read
+  55x against the 100x the case asserts, because the plateau there is `k = 2`'s.
+  Changing the order moves the failure rather than removing it.
+* **`InverseSolve`'s `theXPointTargetMovesTheTrackedSaddle`** went red in
+  single at `MKL_NUM_THREADS = 1`. Its two X-point rows' currents agree to
+  3.5e-05, 2.0e-05 and 2.5e-06 at `MKL_NUM_THREADS` = 1, 2 and 4, against
+  `scalarAgreementFloor`'s 7.6e-06. That is a coin toss under a bound the
+  quantity cannot meet. The currents leave a border corner of condition about
+  3.4e+08 (M-250), and double's two rows agree only to 5.7e-11, 2.6e+05 eps.
+  The bound is now `exactAgreementFloor`, 4.9e-04, which is zero in double;
+  single is green at all three MKL counts.
+
+**Double is 76 of 77 and single 74 of 77.** Single's three reds are the
+deliberate `PlasmaEdgeConvergence` and two knife-edge solves, `XPointBorder` and
+`FreeBoundaryCoupling` ([M-273](#m-273)).

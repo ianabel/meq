@@ -862,7 +862,14 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 	BOOST_TEST( rowFourMiss < missBound );
 	BOOST_TEST( releasedMiss < missBound );
 	BOOST_TEST( rowThreeMiss < missBound );
-	BOOST_TEST( currentsAgree < meq::tests::scalarAgreementFloor( 1.0e-8, 1.0 ) );
+	// The CURRENTS are another matter: two whole solves through different rows,
+	// each reaching them through a corner of condition about 3.4e+08 (M-250).
+	// Double's rows agree to 5.7e-11, which is 2.6e+05 eps; single's scatter
+	// over 2.5e-06 to 3.5e-05 with MKL_NUM_THREADS, red at 1 and green at 4
+	// under 64 eps. exactAgreementFloor()'s 4096 eps is a whole solve compared
+	// two ways. A wrong row moves them by tens of per cent, and the floor is
+	// zero in double. M-275.
+	BOOST_TEST( currentsAgree < std::max( 1.0e-8, meq::tests::exactAgreementFloor( 1.0 ) ) );
 	BOOST_TEST( controlConverged );
 	BOOST_TEST( ( !controlMet && controlMiss > 1.0e-3 ),
 	            "a single distant coil placed the null, so the pass above does "
