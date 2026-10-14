@@ -693,27 +693,51 @@ BOOST_AUTO_TEST_CASE( theBatchedFillIsEveryHostArmToTheBit )
 		mfem::Vector const &v = columns[ c ];
 		v.HostRead();
 
-		// psi_ax's arm.
+		// psi_ax's arm. Each arm also keeps the sum of its terms' magnitudes,
+		// which is what its round-off scales with when the terms cancel.
 		double axis = 0.0;
+		double magnitude[ 4 ] = { 0.0, 0.0, 0.0, 0.0 };
 		for ( int k = 0; k < 4; ++k )
+		{
 			axis += shortWeights[ k ]*v( shortIndices[ k ] );
+			magnitude[ 0 ] += std::abs( shortWeights[ k ]*v( shortIndices[ k ] ) );
+		}
 		// psi_bnd's: limiterValue(), then negated.
 		mfem::real_t limiter = 0.0;
 		for ( int k = 4; k < 7; ++k )
+		{
 			limiter += shortWeights[ k ]*v( shortIndices[ k ] );
+			magnitude[ 1 ] += std::abs( shortWeights[ k ]*v( shortIndices[ k ] ) );
+		}
 		double const boundary = -limiter;
 		// The compressed rows: CompressedRows::dot() on the gathered column.
 		double compressed[ 2 ] = { 0.0, 0.0 };
 		for ( int r = 0; r < 2; ++r )
 			for ( std::size_t k = 0; k < support.size(); ++k )
+			{
 				compressed[ r ] += values[ r*support.size() + k ]*v( support[ k ] );
+				magnitude[ 2 + r ] += std::abs( values[ r*support.size() + k ]*v( support[ k ] ) );
+			}
 
+		/*
+		 * TO THE BIT IN DOUBLE, AND TO THE FORMAT IN SINGLE, for the reason
+		 * this file's first case gives: the host arms accumulate in double, and
+		 * psi_ax's and the compressed rows' weights are double, where the
+		 * launch is real_t throughout. In single the two are different
+		 * arithmetic and part by about one eps of the row (measured 1.5e-08 to
+		 * 3.2e-08 on entries near 0.25 to 0.8). exactAgreementFloor() is
+		 * exactly zero in double, so there the check, sign bit included, is
+		 * the bit equality it always was. M-273.
+		 */
 		double const want[ 4 ] = { axis, boundary, compressed[ 0 ], compressed[ 1 ] };
 		for ( int r = 0; r < 4; ++r )
 		{
 			double const got = dots( r + 4*c );
-			BOOST_TEST( ( got == want[ r ]
-			              && std::signbit( got ) == std::signbit( want[ r ] ) ),
+			double const floor = meq::tests::exactAgreementFloor( magnitude[ r ] );
+			BOOST_TEST( ( floor == 0.0
+			              ? ( got == want[ r ]
+			                  && std::signbit( got ) == std::signbit( want[ r ] ) )
+			              : std::abs( got - want[ r ] ) <= floor ),
 			            "row " << r << " against column " << c << ": the launch "
 			            "gives " << got << " and the host arm " << want[ r ] );
 		}
@@ -746,10 +770,18 @@ BOOST_AUTO_TEST_CASE( theBatchedFillIsEveryHostArmToTheBit )
 		mfem::Vector const &v = columns[ c ];
 		v.HostRead();
 		double total = 0.0;
+		double magnitude = 0.0;
 		for ( int k = 4; k < 7; ++k )
+		{
 			total -= shortWeights[ k ]*v( shortIndices[ k ] );
-		BOOST_TEST( ( dots( c ) == total
-		              && std::signbit( dots( c ) ) == std::signbit( total ) ),
+			magnitude += std::abs( shortWeights[ k ]*v( shortIndices[ k ] ) );
+		}
+		// The host's double against the launch's real_t, as above. M-273.
+		double const floor = meq::tests::exactAgreementFloor( magnitude );
+		BOOST_TEST( ( floor == 0.0
+		              ? ( dots( c ) == total
+		                  && std::signbit( dots( c ) ) == std::signbit( total ) )
+		              : std::abs( dots( c ) - total ) <= floor ),
 		            "XP-3's row against column " << c << ": " << dots( c )
 		            << " against the host's " << total );
 	}

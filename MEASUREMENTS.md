@@ -16522,3 +16522,43 @@ is 5.3e-05 inside, and every true Gamma_h point is inside in both builds. That
 is bit for bit the point `VertexConePath::Endpoint()` aborts on. Filed as
 `../mfem-hdg-dev/doc/HDG-EXTENSION-FD-FACE-END-FROM-MEQ.md`. **The single suite
 reads 70 of 77**: M-242's six and this.
+
+
+### M-273
+
+**THE THREE SINGLE-PRECISION REDS THAT OVER-CONSTRAINED AN OUTPUT, FLOORED:
+`DeviceRowsTests`, `ResidentIterateTests` AND `XPointOuter`.** Each is red in
+single and green in double, and each asserted a bound that only double can meet.
+
+* **`DeviceRowsTests::theBatchedFillIsEveryHostArmToTheBit`, and
+  `ResidentIterateTests`' two `...MatchTheirHostLoopsToTheBit`.** The host arms
+  accumulate in `double`, and evaluate the source in MEQ's MFEM-free `double`
+  half. The device routes are `real_t`. In single they are different
+  arithmetic and part by about one eps: 1.5e-08 to 3.2e-08 on launch entries
+  of 0.2 to 1.9, up to 1.6e-07 on the scatters. Both now compare to
+  `exactAgreementFloor()`, scaled by the sum of a row's term magnitudes, or by
+  the vector's largest entry for the per-element loops. That is the trade
+  DeviceRowsTests' first case already makes (M-219): single gives up the
+  reassociation check and keeps the layout. The floor is exactly zero in
+  double, so the bit equality, sign bit included, is unchanged there.
+  **Mutated in single**: swapping the two compressed rows gives 6 failures,
+  and scaling the host's per-element current by 1.001 gives 1.
+* **`XPointOuter`'s contraction by a thousand.** The X-point is a root of
+  `q_h`, so the step between sweeps floors at eps of the coordinate. In single
+  the loop comes to rest at 1.55e-06 to 2.1e-06, 12 to 16 eps of `R = 1.09`,
+  from a first step of 1.9e-03. "A thousand" then sat on the floor and passed
+  or failed with `MKL_NUM_THREADS` (M-242). The bound is now the larger of a
+  thousand and `rootedPositionFloor()`, 8.3e-06 here. A loop contracting
+  slower than about 0.5 a sweep still fails, and the floor is zero in double.
+  Green in single at `MKL_NUM_THREADS` = 1, 2 and 4.
+
+**Not changed, because they are not bounds on an output.** `XPointBorder`'s
+merit weight 4 converges to another basin at `MKL = 1` (`psi_ax = 8.05e-02`
+against `8.27e-02`). `FreeBoundaryCoupling`'s physical fixture does not
+converge at one limiter radius at `MKL = 1`. Both are a solve's behaviour on
+M-222's knife edge, and both are green at `MKL = 2` and `4`.
+
+**The single suite is 73 of 77**: those two, the deliberate
+`PlasmaEdgeConvergence`, and `VacuumMirror`, the open upstream request of
+[M-272](#m-272). The three changed tests pass in double, where every floor
+added here is exactly zero.

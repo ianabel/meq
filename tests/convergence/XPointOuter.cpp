@@ -447,8 +447,17 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		<< " metres on its last sweep, so psi_bnd is whatever the loop happened "
 		"to stop at rather than the flux at the saddle." );
 
-	// TWO: IT CONTRACTS.
-	BOOST_TEST( last.step < 1.0e-3*sweeps.front().step,
+	// TWO: IT CONTRACTS -- by a thousand, or to where the arithmetic stops it.
+	//
+	// The X-point is ROOTED, as a zero of q_h, so the step between sweeps
+	// floors at eps of the coordinate rather than sqrt( eps ): in single the
+	// loop comes to rest moving 1.55e-06 to 2.1e-06, 12 to 16 eps of R = 1.09,
+	// from a first step of 1.9e-03. A thousand is then the floor itself and
+	// passes or fails on MKL's draw (M-242). rootedPositionFloor() is 64 eps,
+	// 8.3e-06 here, and still fails a loop contracting slower than about 0.5 a
+	// sweep. It is EXACTLY ZERO in double. M-273.
+	BOOST_TEST( last.step < std::max( 1.0e-3*sweeps.front().step,
+	                                  meq::tests::rootedPositionFloor( last.radius ) ),
 		"the outer step went from " << sweeps.front().step << " to "
 		<< last.step << " over " << sweeps.size() << " sweeps. XP-2 is a "
 		"fixed-point iteration and a slow one is a different algorithm from a "

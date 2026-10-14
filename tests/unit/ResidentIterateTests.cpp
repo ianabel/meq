@@ -33,6 +33,8 @@
 
 #include "mfem.hpp"
 
+#include "convergence/RoundOffFloor.hpp"
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -192,20 +194,41 @@ namespace
 		}
 	};
 
-	/// Bitwise: the count of entries that differ, and the largest difference.
+	/**
+	 * The count of entries that differ, and the largest difference: BITWISE IN
+	 * DOUBLE, AND TO THE FORMAT IN SINGLE.
+	 *
+	 * The host loops evaluate the source in MEQ's MFEM-free double half and
+	 * accumulate in double; the device routes are real_t throughout. In single
+	 * those are different arithmetic, which no edit to a kernel could make
+	 * agree, and they part at about one eps of the vector (measured 1.5e-08 to
+	 * 1.6e-07). So an entry counts as differing when it is further than
+	 * exactAgreementFloor() of the vector's largest entry, which is EXACTLY ZERO
+	 * in double, where this stays the bit equality it always was. What single
+	 * gives up is the reassociation check; what it keeps is the layout -- a
+	 * wrong element, a dropped point, a transposed scatter is O( 1 ). DeviceRowsTests
+	 * makes the same trade. M-273.
+	 */
 	int differing( mfem::Vector const &got, mfem::Vector const &want,
 	               double &largest )
 	{
 		got.HostRead();
 		want.HostRead();
+		double scale = 0.0;
+		for ( int i = 0; i < want.Size(); ++i )
+			scale = std::max( scale, double( std::fabs( want( i ) ) ) );
+		double const floor = meq::tests::exactAgreementFloor( scale );
 		largest = 0.0;
 		int count = 0;
 		for ( int i = 0; i < want.Size(); ++i )
-			if ( got( i ) != want( i ) )
+		{
+			double const gap = std::fabs( double( got( i ) ) - double( want( i ) ) );
+			if ( floor == 0.0 ? got( i ) != want( i ) : gap > floor )
 			{
 				++count;
-				largest = std::max( largest, double( std::fabs( got( i ) - want( i ) ) ) );
+				largest = std::max( largest, gap );
 			}
+		}
 		return count;
 	}
 }

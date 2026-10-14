@@ -258,10 +258,10 @@ on `../mfem/install-single` against `meq-integration` at `81ecf3281e`, and the
 DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of `-6.466e-12`
 under `--device cuda` on the double one, as it did on the install before ->
 [M-271](MEASUREMENTS.md#m-271), where the double suite is 76 of 77. **The
-single suite is 70 of 77 and no answer moved** -> [M-272](MEASUREMENTS.md#m-272):
-M-242's six reds stand with M-242's signatures (two device-route tests assert
-bit-identity that only a double build can give, and three solves sit on M-222's
-knife edge at `MKL_NUM_THREADS = 1`), and `VacuumMirror` is the open
+single suite is 73 of 77 and no answer moved** -> [M-272](MEASUREMENTS.md#m-272),
+[M-273](MEASUREMENTS.md#m-273): the deliberate `PlasmaEdgeConvergence`; two
+solves on M-222's knife edge at `MKL_NUM_THREADS = 1`, `XPointBorder` and
+`FreeBoundaryCoupling`; and `VacuumMirror`, the open
 `ExtensionBoundaryQuadrature` request below. The single install is a
 **second** tree with the same obligation and its own reason to move first:
 `sundials-real-t` is in the merge because MFEM does not compile **at all** in
