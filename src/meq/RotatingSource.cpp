@@ -20,7 +20,7 @@ namespace
 	// The root find for (97). The residual is compared against the sum of the
 	// magnitudes it cancels, so the test is relative and does not care what units
 	// the densities are in.
-	int const potentialIterations = 100;
+	int const potentialIterations = 300;
 	double const potentialTolerance = 1.0e-14;
 
 	void requireProfile( std::shared_ptr<meq::Profile const> const & profile, char const * what )
@@ -544,6 +544,7 @@ namespace meq
 
 		double y = 0.5*( lo + hi );
 		bool converged = false;
+		double previousStep = hi - lo;
 
 		for ( int i = 0; i < potentialIterations; ++i )
 		{
@@ -571,12 +572,29 @@ namespace meq
 			else
 				hi = y;
 
+			// THE BRACKET HAS CLOSED: the root lies between two adjacent
+			// doubles. Far from a plasma's reference curve at high Mach, y/T_s is
+			// so large that one ulp of y moves the residual by more than the
+			// relative tolerance above, which then cannot pass -- MEASURED on
+			// examples/mirror-three-species.toml's output grid, with
+			// RotatingSourceTests' theRootFindEndsWhenItsBracketDoes the
+			// regression. The root is known to the last bit, which is the answer.
+			if ( hi - lo <= 4.0*std::numeric_limits<double>::epsilon()*std::max( std::fabs( lo ), std::fabs( hi ) ) )
+			{
+				converged = true;
+				break;
+			}
+
 			// Newton on G, which is y + numer/denom because G' = -denom. Bisect
 			// whenever that leaves the bracket, which is what makes it safeguarded
-			// rather than merely fast.
+			// rather than merely fast -- AND whenever it has not halved the step
+			// before it. Where one species' exponential dominates the sum, G'/G
+			// is that species' Z/T and Newton walks by T a step across a bracket
+			// of thousands of T: inside the bracket every time, and never there.
 			double next = y + numer/denom;
-			if ( !( next > lo && next < hi ) )
+			if ( !( next > lo && next < hi ) || 2.0*std::fabs( next - y ) > std::fabs( previousStep ) )
 				next = 0.5*( lo + hi );
+			previousStep = next - y;
 
 			if ( next == y )
 			{

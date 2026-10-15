@@ -1840,3 +1840,43 @@ BOOST_AUTO_TEST_CASE( theNormalisedSourceTabulatesInPsiAndKeepsItsColumnsAnalyti
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * THE ROOT FIND ENDS WHEN ITS BRACKET DOES. Far from a plasma's crossings at
+ * high Mach the potential that balances (97) is so large against T that one
+ * ulp of it moves Sum_s Z_s n_s by more than the relative tolerance the
+ * residual test asks for, so the residual can never pass and the bracket
+ * collapses onto two adjacent doubles first. MEASURED on
+ * examples/mirror-three-species.toml, whose output pass evaluates the
+ * densities at every grid node and threw at the first node far enough out.
+ * The root is then known to the last bit, which is the answer.
+ */
+BOOST_AUTO_TEST_CASE( theRootFindEndsWhenItsBracketDoes )
+{
+	meq::RotatingSource const source = makeImpuritySource( 12.0 );
+	int balanced = 0;
+	for ( double radius : { 0.6, 1.4, 2.0, 2.6 } )
+		for ( double psi : testFluxes )
+		{
+			double phi = 0.0;
+			BOOST_CHECK_NO_THROW( phi = source.potential( radius, psi ) );
+			BOOST_TEST( std::isfinite( phi ), "R = " << radius << ", psi = " << psi );
+			// Where the densities themselves still fit a double, they balance.
+			// Out at R = 2 at this Mach they do not -- exp( A_s ) passes
+			// exp( 709.8 ) -- and only the potential is asked for.
+			double sum = 0.0, scale = 0.0;
+			for ( std::size_t s = 0; s < 3; ++s )
+			{
+				double const n = source.density( s, radius, psi );
+				sum += source.species()[ s ].charge*n;
+				scale += std::fabs( source.species()[ s ].charge*n );
+			}
+			if ( std::isfinite( scale ) )
+			{
+				++balanced;
+				BOOST_TEST( std::fabs( sum ) <= 1.0e-10*scale,
+					"quasineutrality at R = " << radius << ", psi = " << psi << ": " << sum/scale );
+			}
+		}
+	BOOST_TEST( balanced >= 6 );
+}
