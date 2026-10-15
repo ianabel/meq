@@ -112,6 +112,11 @@ namespace
 	/// mesh that cuts the cutoff adds "Cut".
 	char const *const solveStem = "RotatingMirror";
 	char const *const ladderStem = "RotatingMirrorLadder";
+	/// The midplane suite's ladder, its own ctest and so its own files.
+	char const *const midplaneStem = "RotatingMirrorMidplane";
+	/// The stem sampled() meshes under: the resolution suite's, unless the
+	/// midplane suite -- which runs in its own process -- has claimed it.
+	char const *ladderStemInUse = ladderStem;
 
 	/// The committed problem -- meta.txt, filaments.dat and the tables, in the
 	/// source tree -- or MEQ_GEQ_ROTATING_REFERENCE for a regenerated one, a
@@ -155,12 +160,14 @@ namespace
 		return p;
 	}
 
-	/// What the source is built from: the species, omega and R_ref.
+	/// What the source is built from: the species, omega, the gauge they are
+	/// tabulated in, and R_ref -- zero under the midplane gauge, which has none.
 	struct MirrorProfiles
 	{
 		std::vector<meq::Species> species;
 		std::shared_ptr<meq::Profile const> omega;
 		double referenceRadius = 0.0;
+		meq::RotatingSource::Gauge gauge = meq::RotatingSource::Gauge::FixedRadius;
 	};
 
 	/// The reference's tables in MEQ's gauge: n_s on R = R_ref, never the raw
@@ -268,6 +275,10 @@ namespace
 		/// file marks Neutralising -- rather than read from the reference's own
 		/// table, which agrees with it to 4e-16.
 		bool neutraliseDeuterium = false;
+		/// Profiles to solve with in place of the reference's own -- another
+		/// gauge's tables of the same plasma, or another plasma -- on the same
+		/// machine, labels and box. Null takes mirrorProfiles().
+		MirrorProfiles const *profiles = nullptr;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -341,7 +352,7 @@ namespace
 		double const axisStart = o.coldStart ? o.axisGuess : run->vacuumAxis;
 		BOOST_TEST_REQUIRE( std::isfinite( axisStart ) );
 
-		MirrorProfiles profiles = mirrorProfiles();
+		MirrorProfiles profiles = o.profiles ? *o.profiles : mirrorProfiles();
 		if ( o.neutraliseDeuterium )
 		{
 			BOOST_TEST_REQUIRE( problem().species[ 1 ].name == "deuterium" );
@@ -354,7 +365,8 @@ namespace
 			run->source = std::make_unique<meq::NormalisedRotatingSource>(
 				profiles.species, profiles.omega,
 				std::make_shared<meq::ConstantProfile const>( 0.0 ),
-				profiles.referenceRadius, axisStart, machine().mu0 );
+				profiles.referenceRadius, axisStart, machine().mu0,
+				meq::RotatingSource::Closure::Automatic, profiles.gauge );
 		run->source->setPlasmaSupportShape( meq::PlasmaSupportShape::Box, p.axialEdge );
 
 		run->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, o.modes );
@@ -702,34 +714,32 @@ namespace
 		/// psiBoundary() read by psi_h.
 		double starAxis = 0.0;
 		double starBoundary = 0.0;
+		/// The merit history, and how often the midplane gauge re-tabulated
+		/// its crossings -- zero under the fixed radius.
+		std::vector<double> history;
+		int midplaneRefreshes = 0;
+		int midplaneHolds = 0;  ///< iterations that kept the previous table
 	};
 
-	/// Each ( level, k, aligned ) solved once per process, since MR-4d's best
-	/// run is MR-4c's finest.
-	Sampled const &sampled( int level, int order, bool aligned )
+	/// A converged @a run of @a o, reduced to a Sampled. The run is left
+	/// post-processed and otherwise as it was.
+	Sampled reduce( std::unique_ptr<MirrorRun> const &run, Options const &o )
 	{
-		static std::map<std::tuple<int, int, bool>, Sampled> cache;
-		auto const key = std::make_tuple( level, order, aligned );
-		auto const found = cache.find( key );
-		if ( found != cache.end() )
-			return found->second;
-
-		Options o;
-		o.level = level;
-		o.order = order;
-		o.aligned = aligned;
-		o.stem = ladderStem;
-		std::unique_ptr<MirrorRun> const run = runMirror( o );
-		BOOST_TEST_REQUIRE( run->converged, "k = " << order << ", level " << level
-			<< ( aligned ? ", aligned" : ", cut" ) << ": " << run->failure );
+		if ( !run->converged )
+			printHistory( *run );
+		BOOST_TEST_REQUIRE( run->converged, "k = " << o.order << ", level " << o.level
+			<< ( o.aligned ? ", aligned" : ", cut" ) << ": " << run->failure );
 
 		Sampled s;
-		s.order = order;
-		s.level = level;
-		s.aligned = aligned;
+		s.order = o.order;
+		s.level = o.level;
+		s.aligned = o.aligned;
 		s.elements = run->domain->sub->GetNE();
 		s.h = run->domain->h;
 		s.newtonSteps = static_cast<int>( run->solver->newtonResiduals().size() ) - 1;
+		s.history = run->solver->newtonResiduals();
+		s.midplaneRefreshes = run->solver->midplaneGaugeRefreshes();
+		s.midplaneHolds = run->solver->midplaneGaugeHolds();
 		s.psiAxis = run->solver->psiAxis();
 		s.psiBoundary = run->solver->psiBoundary();
 		Nodes const &nodes = geqNodes();
@@ -744,7 +754,40 @@ namespace
 		s.starAxis = labels[ 0 ];
 		s.starBoundary = labels[ 1 ];
 		s.seconds = run->vacuumSeconds + run->plasmaSeconds;
-		return cache.emplace( key, std::move( s ) ).first->second;
+		return s;
+	}
+
+	/// One converged run of @a o, reduced to a Sampled.
+	Sampled sample( Options const &o )
+	{
+		return reduce( runMirror( o ), o );
+	}
+
+	/// sampled()'s runs, by ( level, k, aligned ): a case that has had to
+	/// keep a run of its own -- the midplane transfer reads the best one's
+	/// field -- files its reduction here rather than solving it twice.
+	std::map<std::tuple<int, int, bool>, Sampled> &sampledCache()
+	{
+		static std::map<std::tuple<int, int, bool>, Sampled> cache;
+		return cache;
+	}
+
+	/// Each ( level, k, aligned ) solved once per process, since MR-4d's best
+	/// run is MR-4c's finest.
+	Sampled const &sampled( int level, int order, bool aligned )
+	{
+		std::map<std::tuple<int, int, bool>, Sampled> &cache = sampledCache();
+		auto const key = std::make_tuple( level, order, aligned );
+		auto const found = cache.find( key );
+		if ( found != cache.end() )
+			return found->second;
+
+		Options o;
+		o.level = level;
+		o.order = order;
+		o.aligned = aligned;
+		o.stem = ladderStemInUse;
+		return cache.emplace( key, sample( o ) ).first->second;
 	}
 
 	/// max and rms of a - b over the nodes where both are finite.
@@ -1919,3 +1962,592 @@ BOOST_AUTO_TEST_CASE( aMirrorWithPicardSweepsIsRefusedAtParse )
 
 BOOST_AUTO_TEST_SUITE_END()
 #endif
+
+/*
+ * THE MIDPLANE GAUGE ON THE MIRROR. MIRROR-PLAN.md section 5.
+ *
+ * meq::RotatingSource::Gauge::Midplane pins phi_0 where each flux surface
+ * crosses z = 0, R_0( psi ), which the solver re-tabulates once per Newton
+ * iteration and freezes within it. Three things are asked of it here, one
+ * ctest -- RotatingMirrorMidplane -- for the three:
+ *
+ *   1. THE SAME EQUILIBRIUM IN BOTH GAUGES. geq's problem, given to MEQ in the
+ *      fixed-radius gauge as MR-4 gives it, is transferred to the midplane
+ *      gauge on MEQ's own best answer and solved again: the two must be one
+ *      equilibrium to within MEQ's discretisation error, and the difference
+ *      must fall as the mesh refines. MEQ-only, so it needs nothing of geq's.
+ *   2. AGAINST geq, IN THE MIDPLANE GAUGE. export_rotating.py's midplane
+ *      tables, the same plasma transferred on geq's own 513^2 crossings, and
+ *      MR-4d's matrix against geq's direct solves -- to M-263's resolution.
+ *   3. THE CASE THE FIXED RADIUS CANNOT POSE: electrons, deuterium and carbon
+ *      at M = 6, whose fixed-radius densities span hundreds of decades. It
+ *      solves, its n_s0 are the physical midplane densities, and it
+ *      self-converges as the mesh refines.
+ */
+namespace
+{
+	/// The two densities of the reference's two-species plasma, tabulated in
+	/// the midplane gauge from @a run's own crossings, at the knots of the
+	/// fixed-radius tables. Two species share one exponent, the closed form's
+	///
+	///     A = C( Psi )( R^2 - R_ref^2 )/2,
+	///     C = omega^2 ( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 ),
+	///
+	/// so the density where a surface crosses z = 0 is n_s0 e^A at R = R_0, and
+	/// its slope is the chain rule through C and R_0:
+	///
+	///     d/dPsi ( n e^A ) = e^A [ n' + n( C' ( R_0^2 - R_ref^2 )/2 + C R_0 R_0' ) ].
+	///
+	/// R_0 and R_0' are tabulateMidplaneCrossing()'s, on the solver's own
+	/// midplane field at the answer -- the same reading the solver gives the
+	/// source at every iterate.
+	MirrorProfiles transferToMidplane( MirrorRun &run, MirrorProfiles const &fixed )
+	{
+		BOOST_TEST_REQUIRE( fixed.species.size() == 2u );
+		BOOST_TEST_REQUIRE( ( fixed.gauge == meq::RotatingSource::Gauge::FixedRadius ) );
+		meq::GradShafranovSolver &solver = *run.solver;
+		double const axis = solver.psiAxis();
+		double const boundary = solver.psiBoundary();
+		double rMin = 0.0, rMax = 0.0;
+		meq::MidplaneField const physical = solver.midplaneField( rMin, rMax );
+		meq::MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
+		{
+			double psi = 0.0, slope = 0.0;
+			if ( !physical( radius, psi, slope ) )
+				return false;
+			x = ( psi - boundary )/( axis - boundary );
+			dXdR = slope/( axis - boundary );
+			return true;
+		};
+
+		auto const *electron = dynamic_cast<meq::SplineProfile const *>(
+			fixed.species[ 0 ].density.get() );
+		BOOST_TEST_REQUIRE( electron != nullptr );
+		std::vector<meq::Knot> const &knots = electron->knots();
+		BOOST_TEST_REQUIRE( electron->uniformKnots() );
+		BOOST_TEST_REQUIRE( knots.front().psi == 0.0 );
+		BOOST_TEST_REQUIRE( knots.back().psi == 1.0 );
+		std::shared_ptr<meq::SplineProfile const> const crossing = meq::tabulateMidplaneCrossing(
+			normalised, rMin, rMax, 0.0, 1.0, static_cast<unsigned int>( knots.size() - 1 ) );
+
+		meq::Species const &one = fixed.species[ 0 ];
+		meq::Species const &two = fixed.species[ 1 ];
+		meq::Profile const &omega = *fixed.omega;
+		double const k = one.charge*two.mass - two.charge*one.mass;
+		double const rRef2 = fixed.referenceRadius*fixed.referenceRadius;
+
+		std::vector<meq::Knot> table;
+		for ( std::size_t i = 0; i < knots.size(); ++i )
+		{
+			double const x = knots[ i ].psi;
+			double const w = omega( x )*omega( x );
+			double const wPrime = 2.0*omega( x )*omega.prime( x );
+			double const d = one.charge*( *two.temperature )( x ) - two.charge*( *one.temperature )( x );
+			double const dPrime = one.charge*two.temperature->prime( x ) - two.charge*one.temperature->prime( x );
+			double const c = k*w/d;
+			double const cPrime = k*( wPrime/d - w*dPrime/( d*d ) );
+
+			meq::Knot const &r = crossing->knots()[ i ];
+			BOOST_TEST_REQUIRE( r.psi == x );
+			double const half = ( r.value*r.value - rRef2 )/2.0;
+			double const factor = std::exp( c*half );
+			double const n = ( *one.density )( x );
+			double const nPrime = one.density->prime( x );
+			table.push_back( meq::Knot{ x, n*factor,
+				factor*( nPrime + n*( cPrime*half + c*r.value*r.derivative ) ) } );
+		}
+
+		MirrorProfiles out = fixed;
+		out.species[ 0 ].density = std::make_shared<meq::SplineProfile const>( std::move( table ) );
+		out.species[ 1 ].density = meq::neutralisingDensity( out.species, 1 );
+		out.referenceRadius = 0.0;
+		out.gauge = meq::RotatingSource::Gauge::Midplane;
+		return out;
+	}
+
+	/// The fixed-radius answer the midplane problem is transferred on, and
+	/// that transfer: MR-4c's best run, level 2 at k = 4, whose own error
+	/// M-263 bounds at 2.4e-08.
+	struct Transferred
+	{
+		MirrorProfiles profiles;
+		double largestTransfer = 0.0;  ///< max | ln( n_mid/n_fixed ) | over the knots
+	};
+
+	Transferred const &transferredOnMeq()
+	{
+		static Transferred const t = []
+		{
+			ladderStemInUse = midplaneStem;
+			Options o;
+			o.level = bestLevel;
+			o.order = bestOrder;
+			o.stem = midplaneStem;
+			std::unique_ptr<MirrorRun> const run = runMirror( o );
+			BOOST_TEST_REQUIRE( run->converged, run->failure );
+			Transferred out;
+			MirrorProfiles const fixed = mirrorProfiles();
+			out.profiles = transferToMidplane( *run, fixed );
+			// The same run is MR-4c's reference(), so it is filed rather than
+			// solved again.
+			sampledCache().emplace( std::make_tuple( bestLevel, bestOrder, true ),
+			                        reduce( run, o ) );
+			for ( double x = 0.0; x <= 1.0; x += 1.0/256.0 )
+				out.largestTransfer = std::max( out.largestTransfer,
+					std::abs( std::log( ( *out.profiles.species[ 0 ].density )( x )
+					                    /( *fixed.species[ 0 ].density )( x ) ) ) );
+			return out;
+		}();
+		return t;
+	}
+
+	void printHistoryLine( char const *label, Sampled const &s )
+	{
+		std::printf( "    %-24s %2d steps, %2d crossings tabulated, %d held:", label,
+		             s.newtonSteps, s.midplaneRefreshes, s.midplaneHolds );
+		for ( double r : s.history )
+			std::printf( " %.2e", r );
+		std::printf( "\n" );
+	}
+
+	// ------------------------------------------------------------------
+	// The three-species plasma at M = 6
+	// ------------------------------------------------------------------
+
+	/// f( Psi ) = edge + ( peak - edge ) C psi_n^3 ( 1 - psi_n )^4 with
+	/// psi_n = 1 - Psi, export_rotating.py's skew shape: flat to order 2 at the
+	/// inner label and 3 at the outer, and exact at all three derivative
+	/// levels. Clamped outside [ 0, 1 ], where the box gates the source anyway.
+	class SkewProfile : public meq::Profile
+	{
+		public:
+			SkewProfile( double peakIn, double edgeIn ) : peak( peakIn ), edge( edgeIn ) {}
+
+			double operator()( double psi ) const override
+			{
+				double const x = 1.0 - clamp( psi );
+				return edge + ( peak - edge )*shape*x*x*x*std::pow( 1.0 - x, 4 );
+			}
+
+			double prime( double psi ) const override
+			{
+				if ( psi < 0.0 || psi > 1.0 )
+					return 0.0;
+				double const x = 1.0 - psi;
+				// d/dPsi = -d/dx.
+				return -( peak - edge )*shape*x*x*std::pow( 1.0 - x, 3 )*( 3.0 - 7.0*x );
+			}
+
+			double doublePrime( double psi ) const override
+			{
+				if ( psi < 0.0 || psi > 1.0 )
+					return 0.0;
+				double const x = 1.0 - psi;
+				double const y = 1.0 - x;
+				double const u = 2.0*x*y*y*y*( 3.0 - 7.0*x ) - 3.0*x*x*y*y*( 3.0 - 7.0*x )
+				                 - 7.0*x*x*y*y*y;
+				return ( peak - edge )*shape*u;
+			}
+
+		private:
+			static double clamp( double psi ) { return std::min( 1.0, std::max( 0.0, psi ) ); }
+			double peak, edge;
+			static constexpr double shape = 1.0/( ( 27.0/343.0 )*( 256.0/2401.0 ) );
+	};
+
+	double const elementaryCharge = 1.602176634e-19;
+	double const electronMass = 9.1093837139e-31;
+	double const deuteronMass = 3.3435837768e-27;
+	/// C6+: twelve atomic mass units less six electrons.
+	double const carbonMass = 12.0*1.66053906892e-27 - 6.0*electronMass;
+
+	/// M-167's Mach number, M^2 = m_D omega^2 R^2/T_e, set to 6 at the
+	/// profiles' peak on the radius MR-4's peak crosses the midplane at, and
+	/// re-read on the solved state at psi_n = 0.5, where M-167 defines it.
+	double const machTarget = 6.0;
+	double const machRadius = 0.24;
+	/// The drift of M-167's two-species omega, 1.30x across the plasma, so
+	/// the labels rotate nearly as fast as the core -- which is what puts the
+	/// fixed-radius exponents of section 7 at the labels.
+	double const omegaDrift = 1.30;
+	/// The midplane densities fall to 1e-6 of their peak at the labels. The
+	/// box's precondition is F vanishing there, and under this gauge a flat n_s0
+	/// still carries -n m_s omega^2 R_0 R_0'/T_s at a label, where omega does
+	/// not vanish: so it is the density that does, to a millionth.
+	double const densityFloor = 1.0e-6;
+	/// The electrons' midplane peak, MEQ_MIDPLANE_DENSITY to sweep it.
+	double const densityPeak = std::getenv( "MEQ_MIDPLANE_DENSITY" )
+		? std::atof( std::getenv( "MEQ_MIDPLANE_DENSITY" ) ) : 5.0e18;
+
+	MirrorProfiles threeSpecies()
+	{
+		double const tElectronPeak = 1.28e3*elementaryCharge;
+		double const omegaPeak = machTarget*std::sqrt( tElectronPeak/deuteronMass )/machRadius;
+
+		auto temperature = [ & ]( double peakEv )
+		{
+			return std::make_shared<SkewProfile const>( peakEv*elementaryCharge,
+			                                            0.1*peakEv*elementaryCharge );
+		};
+
+		MirrorProfiles out;
+		out.omega = std::make_shared<SkewProfile const>( omegaPeak, omegaPeak/omegaDrift );
+		out.referenceRadius = 0.0;
+		out.gauge = meq::RotatingSource::Gauge::Midplane;
+		out.species.resize( 3 );
+		out.species[ 0 ].mass = electronMass;
+		out.species[ 0 ].charge = -1.0;
+		out.species[ 0 ].temperature = temperature( 1.28e3 );
+		out.species[ 0 ].density = std::make_shared<SkewProfile const>( densityPeak, densityFloor*densityPeak );
+		out.species[ 1 ].mass = deuteronMass;
+		out.species[ 1 ].charge = 1.0;
+		out.species[ 1 ].temperature = temperature( 1.53e3 );
+		out.species[ 2 ].mass = carbonMass;
+		out.species[ 2 ].charge = 6.0;
+		out.species[ 2 ].temperature = temperature( 1.53e3 );
+		out.species[ 2 ].density = std::make_shared<SkewProfile const>( 0.01*densityPeak, densityFloor*0.01*densityPeak );
+		out.species[ 1 ].density = meq::neutralisingDensity( out.species, 1 );
+		return out;
+	}
+
+	char const *const threeNames[] = { "electron", "deuterium", "carbon" };
+}
+
+BOOST_AUTO_TEST_SUITE( midplane )
+
+/*
+ * 1. ONE EQUILIBRIUM, TWO GAUGES.
+ *
+ * geq's problem in the fixed-radius gauge is MR-4's. Transferred to the
+ * midplane gauge on MEQ's best fixed-radius answer -- the closed form's shared
+ * exponent at that answer's own crossings -- it is the SAME plasma, so a
+ * midplane solve must land on the same field. It cannot land exactly: the
+ * midplane solve tabulates its crossings on its OWN iterate, at its own
+ * discretisation error, where the transfer used the best answer's. So the
+ * difference is of the order of MEQ's own error at that level and falls with
+ * it, which is the assertion; a wrong Jacobian term, a wrong sign on the
+ * crossing's slope or a transfer the gauge did not mean would all leave a
+ * difference that stays.
+ *
+ * k = 3 over levels 0..2, MR-4c's asymptotic rung.
+ */
+BOOST_AUTO_TEST_CASE( theMirrorPosedInBothGaugesIsOneEquilibrium )
+{
+	Transferred const &t = transferredOnMeq();
+	std::printf( "\n  ONE EQUILIBRIUM, TWO GAUGES: the reference's densities transferred to the "
+	             "midplane on MEQ's level %d, k = %d answer; | ln( n_mid/n_fixed ) | reaches %.4f\n",
+	             bestLevel, bestOrder, t.largestTransfer );
+	BOOST_TEST( t.largestTransfer > 0.1,
+		"the transfer moves the densities by only " << t.largestTransfer << " in the log, so "
+		"the two gauges' tables are nearly one table and this case cannot tell them apart" );
+
+	int const order = 3;
+	std::vector<Difference> gauge, own;
+	std::vector<double> scale;
+	for ( int level : { 0, 1, 2 } )
+	{
+		Sampled const &fixed = sampled( level, order, true );
+		Options o;
+		o.level = level;
+		o.order = order;
+		o.stem = midplaneStem;
+		o.profiles = &t.profiles;
+		Sampled const midplane = sample( o );
+
+		std::printf( "\n    level %d, k = %d, %d elements\n", level, order, midplane.elements );
+		printHistoryLine( "fixed radius", fixed );
+		printHistoryLine( "midplane", midplane );
+		BOOST_TEST( midplane.midplaneRefreshes + midplane.midplaneHolds == midplane.newtonSteps + 1,
+			"the crossings were tabulated " << midplane.midplaneRefreshes << " times and held "
+			<< midplane.midplaneHolds << " over " << midplane.newtonSteps << " Newton steps: "
+			"once before the first residual and once per iteration after it is the contract" );
+		BOOST_TEST( fixed.midplaneRefreshes == 0 );
+
+		gauge.push_back( difference( midplane.psiStar, fixed.psiStar ) );
+		own.push_back( difference( fixed.psiStar, reference().psiStar ) );
+		scale.push_back( std::abs( fixed.psiAxis - fixed.psiBoundary ) );
+		printDifference( "midplane - fixed radius, psi*", gauge.back() );
+		printDifference( "fixed radius - best, psi*", own.back() );
+		std::printf( "    labels: psi_ax %+.3e, psi_bnd %+.3e between the gauges\n",
+		             midplane.psiAxis - fixed.psiAxis, midplane.psiBoundary - fixed.psiBoundary );
+	}
+	std::printf( "\n    rates of midplane - fixed radius, max: %.3f then %.3f; rms: %.3f then %.3f\n",
+	             std::log2( gauge[ 0 ].max/gauge[ 1 ].max ), std::log2( gauge[ 1 ].max/gauge[ 2 ].max ),
+	             std::log2( gauge[ 0 ].rms/gauge[ 1 ].rms ), std::log2( gauge[ 1 ].rms/gauge[ 2 ].rms ) );
+	std::fflush( stdout );
+
+	for ( std::size_t i = 0; i < gauge.size(); ++i )
+		BOOST_TEST( gauge[ i ].max < own[ i ].max,
+			"level " << i << ": the two gauges differ by " << gauge[ i ].max << ", more than "
+			"the fixed-radius answer's own distance from the best, " << own[ i ].max
+			<< " -- so the difference is not discretisation" );
+	BOOST_TEST( ( gauge[ 0 ].rms > gauge[ 1 ].rms && gauge[ 1 ].rms > gauge[ 2 ].rms ),
+		"the gauges' difference does not fall with the mesh: " << gauge[ 0 ].rms << ", "
+		<< gauge[ 1 ].rms << ", " << gauge[ 2 ].rms );
+}
+
+/*
+ * 2. MEQ AGAINST geq IN THE MIDPLANE GAUGE: MR-4d's matrix, on tables
+ * export_rotating.py transfers on geq's own 513^2 crossings -- untracked,
+ * since they are made from geq's answer, beside it in the runs directory.
+ *
+ * WHAT THE TRANSFER IS, AND IT IS NOT AN IDENTITY. MR-4a holds geq's N_s as
+ * prescribed flux functions, which are geq's ZERO-POTENTIAL densities, not its
+ * midplane ones, so the midplane tables are geq's own quasineutrality solved
+ * at each surface's crossing on geq's solved state. They therefore carry
+ * geq's 513^2 error in R_0 into the problem -- and the matrix is asserted on
+ * MR-4d's own terms regardless: falling at every step, at geq's rate, and at
+ * 513 below geq's own 257 - 513 difference. MEASURED, it lands at 0.39 of it,
+ * against the fixed-radius gauge's 0.44 ( M-263 ).
+ */
+BOOST_AUTO_TEST_CASE( meqAgreesWithGeqInTheMidplaneGauge )
+{
+	std::vector<double> const g129 = readGeqPsi( "psi_direct_129.dat" );
+	std::vector<double> const g257 = readGeqPsi( "psi_direct_257.dat" );
+	std::vector<double> const g513 = readGeqPsi( "psi_direct_513.dat" );
+	std::string const directory = rotatingAnswerDirectory();
+	for ( char const *name : { "nmid_electron.dat", "nmid_deuterium.dat" } )
+		meqtest::geq::openOutput( directory, name );
+
+	MirrorProfiles geqMidplane = mirrorProfiles();
+	geqMidplane.species[ 0 ].density = std::make_shared<meq::SplineProfile const>(
+		meq::SplineProfile::fromFile( directory + "/nmid_electron.dat" ) );
+	geqMidplane.species[ 1 ].density = std::make_shared<meq::SplineProfile const>(
+		meq::SplineProfile::fromFile( directory + "/nmid_deuterium.dat" ) );
+	geqMidplane.referenceRadius = 0.0;
+	geqMidplane.gauge = meq::RotatingSource::Gauge::Midplane;
+
+	// geq's transfer against MEQ's, on the same plasma: both are the physical
+	// midplane density, read on two codes' crossings.
+	Transferred const &onMeq = transferredOnMeq();
+	double tableGap = 0.0;
+	for ( double x = 0.0; x <= 1.0; x += 1.0/512.0 )
+		tableGap = std::max( tableGap, std::abs( std::log(
+			( *geqMidplane.species[ 0 ].density )( x )/( *onMeq.profiles.species[ 0 ].density )( x ) ) ) );
+	std::printf( "\n  MR-4d IN THE MIDPLANE GAUGE: geq's midplane table against MEQ's, max "
+	             "| ln ratio | %.3e\n", tableGap );
+
+	Options o;
+	o.level = bestLevel;
+	o.order = bestOrder;
+	o.stem = midplaneStem;
+	o.profiles = &geqMidplane;
+	Sampled const best = sample( o );
+	printHistoryLine( "midplane, geq's tables", best );
+
+	std::vector<double> const meq = withoutCorners( best.psiStar );
+	Difference const d129 = difference( meq, g129 );
+	Difference const d257 = difference( meq, g257 );
+	Difference const d513 = difference( meq, g513 );
+	Difference const geqCoarse = difference( withoutCorners( g129 ), g257 );
+	Difference const geqFine = difference( withoutCorners( g257 ), g513 );
+	Difference const fixedRadius = difference( meq, withoutCorners( reference().psiStar ) );
+	printDifference( "MEQ midplane - geq direct 129", d129 );
+	printDifference( "MEQ midplane - geq direct 257", d257 );
+	printDifference( "MEQ midplane - geq direct 513", d513 );
+	printDifference( "geq 257 - geq 513", geqFine );
+	printDifference( "MEQ midplane - MEQ fixed radius", fixedRadius );
+	std::printf( "    rates, max: MEQ - geq %.3f then %.3f; geq's own %.3f\n",
+	             std::log2( d129.max/d257.max ), std::log2( d257.max/d513.max ),
+	             std::log2( geqCoarse.max/geqFine.max ) );
+	std::printf( "    rates, rms: MEQ - geq %.3f then %.3f; geq's own %.3f\n",
+	             std::log2( d129.rms/d257.rms ), std::log2( d257.rms/d513.rms ),
+	             std::log2( geqCoarse.rms/geqFine.rms ) );
+	std::printf( "    at 513: %.3f ( max ) and %.3f ( rms ) of geq's own 257 - 513\n",
+	             d513.max/geqFine.max, d513.rms/geqFine.rms );
+	std::fflush( stdout );
+
+	double const fluxScale = std::abs( best.psiBoundary );
+	if ( !meq::tests::aboveTheFormatsFloor( geqFine.max, fluxScale ) )
+	{
+		std::printf( "    *** SKIPPED: geq's own 257 - 513 difference is under this build's "
+		             "floor; the conversion bound alone is asserted. M-272\n" );
+		BOOST_TEST( d513.max < meq::tests::exactAgreementFloor( fluxScale ) );
+		return;
+	}
+	for ( auto const &norm : { std::make_tuple( "max", d129.max, d257.max, d513.max, geqFine.max,
+	                                            std::log2( geqCoarse.max/geqFine.max ) ),
+	                           std::make_tuple( "rms", d129.rms, d257.rms, d513.rms, geqFine.rms,
+	                                            std::log2( geqCoarse.rms/geqFine.rms ) ) } )
+	{
+		char const *name = std::get<0>( norm );
+		double const a = std::get<1>( norm ), b = std::get<2>( norm ), c = std::get<3>( norm );
+		BOOST_TEST( ( a > b && b > c ),
+			name << ": MEQ under the midplane gauge against geq reads " << a << ", " << b << ", "
+			<< c << " at 129, 257, 513 and does not fall, so it is a conversion -- the transfer, "
+			"the crossings, the slope of R_0 -- and not geq's resolution" );
+		for ( auto const &step : { std::make_pair( a, b ), std::make_pair( b, c ) } )
+			BOOST_TEST( std::log2( step.first/step.second ) > std::get<5>( norm ) - 0.30,
+				name << ": MEQ under the midplane gauge falls at "
+				<< std::log2( step.first/step.second ) << " against geq where geq converges at "
+				<< std::get<5>( norm ) );
+		BOOST_TEST( c < std::get<4>( norm ),
+			name << ": at 513 MEQ under the midplane gauge is " << c << " from geq, above geq's "
+			"own 257 - 513 difference " << std::get<4>( norm ) );
+	}
+}
+
+/*
+ * 3. THE CASE THE FIXED RADIUS CANNOT POSE: ELECTRONS, DEUTERIUM AND CARBON
+ * AT M = 6 ON THE MIRROR.
+ *
+ * M-167 section 7 measured why it could not be: the fixed-radius transfer's
+ * exponent is linear in the species mass, +187 to -310 for carbon at M = 6, and
+ * a double ends at exp( 709.8 ). Those are the phi_0 = 0 bound; with phi_0 in,
+ * on THIS solved plasma at the best single R_ref, carbon's fixed-radius table
+ * spans about 1e117 -- inside a double, but a Hermite table holds it to
+ * ( E'h )^4/384 relative, thousands of knots, and away from that one radius the
+ * closure cannot even be evaluated. Here the densities are given where they
+ * are physical -- at each surface's midplane crossing -- and the solve is asked
+ * three things:
+ *
+ *   it converges, from the vacuum, at every level -- at a midplane peak of
+ *   5e18 m^-3. At 5e19 the frozen crossings' own dependence on the field is
+ *   too strong for the iteration and it stalls near 8e-05, MEASURED: the
+ *   coupling the freeze leaves out scales with the pressure;
+ *   its n_s0 range is the physical one: every n_s0 is its species' density
+ *   where its surface crosses z = 0, to round-off, on the solved state; and the
+ *   fixed-radius tables of the SAME solved plasma, at the best single R_ref,
+ *   are recomputed and printed as M-167's table -- in the log, since they do
+ *   not fit in a double;
+ *   it self-converges: psi* at geq's nodes, level against level.
+ */
+BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixSolveInTheMidplaneGauge )
+{
+	MirrorProfiles const profiles = threeSpecies();
+	int const order = 3;
+
+	std::printf( "\n  THREE SPECIES AT M = %.1f, MIDPLANE GAUGE: omega %.4e .. %.4e rad/s, "
+	             "carbon at 1%% of the electrons\n", machTarget, ( *profiles.omega )( 0.0 ),
+	             ( *profiles.omega )( 4.0/7.0 ) );
+
+	std::vector<Sampled> runs;
+	std::unique_ptr<MirrorRun> finest;
+	for ( int level : { 0, 1, 2 } )
+	{
+		Options o;
+		o.level = level;
+		o.order = order;
+		o.stem = midplaneStem;
+		o.profiles = &profiles;
+		if ( level == 2 )
+		{
+			finest = runMirror( o );
+			runs.push_back( reduce( finest, o ) );
+		}
+		else
+			runs.push_back( sample( o ) );
+		std::printf( "    level %d, %d elements:", level, runs.back().elements );
+		printHistoryLine( "", runs.back() );
+	}
+
+	// SELF-CONVERGENCE.
+	Difference const d01 = difference( runs[ 0 ].psiStar, runs[ 1 ].psiStar );
+	Difference const d12 = difference( runs[ 1 ].psiStar, runs[ 2 ].psiStar );
+	printDifference( "psi*, level 0 - level 1", d01 );
+	printDifference( "psi*, level 1 - level 2", d12 );
+	std::printf( "    rate: max %.3f, rms %.3f; labels psi_ax %.10e %.10e %.10e\n",
+	             std::log2( d01.max/d12.max ), std::log2( d01.rms/d12.rms ),
+	             runs[ 0 ].psiAxis, runs[ 1 ].psiAxis, runs[ 2 ].psiAxis );
+	BOOST_TEST( d12.rms < 0.25*d01.rms,
+		"psi* does not self-converge: level to level " << d01.rms << " then " << d12.rms );
+	BOOST_TEST( d12.max < 0.25*d01.max,
+		"psi* does not self-converge in max: " << d01.max << " then " << d12.max );
+
+	// THE n_s0 RANGE, ON THE SOLVED STATE.
+	meq::NormalisedRotatingSource &source = *finest->source;
+	meq::GradShafranovSolver &solver = *finest->solver;
+	source.setNormalisation( solver.psiAxis(), solver.psiBoundary() );
+	meq::RotatingSource const &inner = source.unnormalised();
+	meq::Profile const *crossing = inner.midplaneCrossing();
+	BOOST_TEST_REQUIRE( crossing != nullptr );
+
+	// Every n_s0 is the density at its crossing: the transfer factor is ONE.
+	double worstAtCrossing = 0.0;
+	for ( std::size_t s = 0; s < 3; ++s )
+		for ( double x = 0.0; x <= 1.0; x += 1.0/128.0 )
+			worstAtCrossing = std::max( worstAtCrossing,
+				std::abs( inner.densityExponent( s, ( *crossing )( x ), x ) ) );
+
+	// M-167's Mach on the solved state, at psi_n = 0.5.
+	double const machSolved = std::sqrt( deuteronMass*std::pow( ( *profiles.omega )( 0.5 ), 2 )
+		*std::pow( ( *crossing )( 0.5 ), 2 )/( *profiles.species[ 0 ].temperature )( 0.5 ) );
+
+	// The fixed-radius gauge's exponent at a radius: ln( n_s0^fixed/n_s0^mid ),
+	// which is the midplane gauge's own exponent evaluated at R_ref. The best
+	// R_ref minimises its largest magnitude, which M-167 section 7 shows is
+	// already what the export picks. Far enough from a crossing the closure
+	// itself gives up -- the densities it would balance span past what its
+	// root find can bracket -- and that radius then reads as unusable.
+	auto exponent = [ & ]( std::size_t s, double rRef, double x )
+	{
+		try
+		{
+			return inner.densityExponent( s, rRef, x );
+		}
+		catch ( std::runtime_error const & )
+		{
+			return std::numeric_limits<double>::infinity();
+		}
+	};
+	auto worstAt = [ & ]( double rRef )
+	{
+		double worst = 0.0;
+		for ( std::size_t s = 0; s < 3; ++s )
+			for ( double x = 0.0; x <= 1.0; x += 1.0/128.0 )
+				worst = std::max( worst, std::abs( exponent( s, rRef, x ) ) );
+		return worst;
+	};
+	double bestRef = 0.1, bestWorst = std::numeric_limits<double>::infinity();
+	for ( double r = 0.10; r <= 0.35; r += 0.0005 )
+		if ( worstAt( r ) < bestWorst )
+		{
+			bestWorst = worstAt( r );
+			bestRef = r;
+		}
+
+	std::printf( "\n    M-167's M on the solved state at psi_n = 0.5: %.3f; R_0 runs %.4f .. %.4f m\n",
+	             machSolved, ( *crossing )( 0.0 ), ( *crossing )( 1.0 ) );
+	std::printf( "    ln( n_s( R_0 )/n_s0 ) under the midplane gauge, worst over species and "
+	             "surfaces: %.3e\n", worstAtCrossing );
+	std::printf( "    the SAME plasma's fixed-radius exponent ln( n_s0^fixed/n_s0^mid ) at the best "
+	             "R_ref = %.4f m, at psi_n = 0.05 / 0.5 / 0.95:\n", bestRef );
+	double carbonDecades = 0.0;
+	for ( std::size_t s = 0; s < 3; ++s )
+	{
+		std::printf( "      %-10s", threeNames[ s ] );
+		for ( double psiN : { 0.05, 0.5, 0.95 } )
+			std::printf( " %+9.1f", exponent( s, bestRef, 1.0 - psiN ) );
+		double lnMin = std::numeric_limits<double>::infinity();
+		double lnMax = -lnMin, midMin = lnMin, midMax = -lnMin;
+		for ( double x = 0.0; x <= 1.0; x += 1.0/128.0 )
+		{
+			double const lnMid = std::log( ( *inner.species()[ s ].density )( x ) );
+			double const lnFixed = lnMid + exponent( s, bestRef, x );
+			lnMin = std::min( lnMin, lnFixed );
+			lnMax = std::max( lnMax, lnFixed );
+			midMin = std::min( midMin, lnMid );
+			midMax = std::max( midMax, lnMid );
+		}
+		double const decades = ( lnMax - lnMin )/std::log( 10.0 );
+		std::printf( "   n_s0 spans 1e%.1f in the fixed-radius gauge and 1e%.1f in the midplane gauge\n",
+		             decades, ( midMax - midMin )/std::log( 10.0 ) );
+		if ( s == 2 )
+			carbonDecades = decades;
+		// The midplane gauge's table spans what was prescribed and no more:
+		// the density floor's six decades.
+		BOOST_TEST( ( midMax - midMin )/std::log( 10.0 ) < 6.0 + 1.0e-6 );
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( worstAtCrossing < 1.0e-10,
+		"a density under the midplane gauge is not its table's value where its surface "
+		"crosses z = 0: the exponent there reads " << worstAtCrossing );
+	BOOST_TEST( std::abs( machSolved - machTarget ) < 1.5,
+		"the solved state sits at M = " << machSolved << ", not the operating point" );
+	BOOST_TEST( carbonDecades > 100.0,
+		"carbon's fixed-radius densities span only 1e" << carbonDecades << ", so this case "
+		"does not exercise what the midplane gauge is for" );
+}
+
+BOOST_AUTO_TEST_SUITE_END()

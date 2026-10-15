@@ -645,7 +645,12 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 	add_test(NAME RotatingMirror COMMAND RotatingMirror --run_test=solve)
 	add_test(NAME RotatingMirrorResolution COMMAND RotatingMirror --run_test=resolution)
-	set_tests_properties(RotatingMirror RotatingMirrorResolution PROPERTIES
+	# MIRROR-PLAN.md section 5: the midplane gauge on the same machine -- the
+	# one equilibrium in both gauges, geq's in the midplane gauge, and the
+	# three-species case at M = 6 the fixed radius cannot pose. Its own suite
+	# and its own mesh stem, so it runs beside the resolution study.
+	add_test(NAME RotatingMirrorMidplane COMMAND RotatingMirror --run_test=midplane)
+	set_tests_properties(RotatingMirror RotatingMirrorResolution RotatingMirrorMidplane PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
 	# binary, against the library on geq's problem. It needs the driver and its
