@@ -1806,15 +1806,30 @@ namespace meq
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "ReferenceRadius", "Mu0", "Normalised", "PsiAxis",
 					                            "ConfineToPlasma", "ExcludeAttributes", "PlasmaCurrent", "ProfileFile",
-					                            "axis", "SupportShape", "AxialEdge" } );
+					                            "axis", "SupportShape", "AxialEdge", "Gauge" } );
 					refuseReservedProfileFile( source );
 					RotatingParameters parameters;
 
-					parameters.referenceRadius = source.getFloatOr( "ReferenceRadius", parameters.referenceRadius );
+					std::string const gauge = source.getStringOr( "Gauge", "fixed-radius" );
+					if ( gauge == "fixed-radius" )
+						parameters.gauge = RotatingGaugeType::FixedRadius;
+					else if ( gauge == "midplane" )
+						parameters.gauge = RotatingGaugeType::Midplane;
+					else
+						source.fail( "Gauge", "must be \"fixed-radius\" or \"midplane\", but is \"" + gauge + "\"" );
+					bool const midplane = parameters.gauge == RotatingGaugeType::Midplane;
+
+					// REFUSED RATHER THAN IGNORED: the midplane gauge pins phi_0
+					// where each surface crosses z = 0 and reads no radius, so a
+					// ReferenceRadius beside it would parse and do nothing.
+					if ( midplane && source.has( "ReferenceRadius" ) )
+						source.fail( "ReferenceRadius", "is the fixed-radius gauge's constant R_ref, and Gauge = \"midplane\" pins phi_0 at each flux surface's own midplane crossing instead, so there is no radius to give. Remove one of the two" );
+					parameters.referenceRadius = midplane ? 0.0
+						: source.getFloatOr( "ReferenceRadius", parameters.referenceRadius );
 					parameters.mu0 = source.getFloatOr( "Mu0", parameters.mu0 );
 					parameters.normalised = source.getBooleanOr( "Normalised", false );
 
-					if ( !( parameters.referenceRadius > 0.0 ) )
+					if ( !midplane && !( parameters.referenceRadius > 0.0 ) )
 						source.fail( "ReferenceRadius", "must be positive: it is the radius at which phi_0 vanishes and at which each Density is the physical density" );
 					if ( !( parameters.mu0 > 0.0 ) )
 						source.fail( "Mu0", "must be positive" );
@@ -1835,6 +1850,17 @@ namespace meq
 					readAxisPoint( source, sourceName, parameters.normalised, sourceOptions.axisPoint );
 					readSupportShape( source, parameters.normalised, parameters.confineToPlasma,
 					                  false, parameters.plasmaCurrent, sourceOptions );
+
+					// THE MIDPLANE GAUGE IS A MIRROR'S, and both refusals say why.
+					// Its crossings are re-tabulated once per Newton iteration of
+					// the BORDERED solve, which a source without Normalised does
+					// not take; and it needs psi monotone along z = 0, which a box
+					// between two midplane labels has and a tokamak -- whose
+					// midplane crosses every surface twice -- does not.
+					if ( midplane && !parameters.normalised )
+						source.fail( "Gauge", "\"midplane\" needs Normalised = true: the solver re-tabulates each surface's midplane crossing once per iteration of the bordered Newton, which is the normalised path" );
+					if ( midplane && sourceOptions.supportShape != PlasmaSupportShapeType::Box )
+						source.fail( "Gauge", "\"midplane\" is a mirror's gauge and needs SupportShape = \"box\": it pins phi_0 where each flux surface crosses z = 0, which is one condition per surface only where psi is monotone along the midplane. A tokamak's midplane crosses every surface twice; use the fixed-radius gauge" );
 
 					std::vector< Table > const species = source.getTableArrayOr( "species" );
 					if ( species.size() < 2 )

@@ -50,6 +50,29 @@
  * (2021) 107264) make the same choice independently, referencing their exponent
  * to the magnetic axis.
  *
+ * A MIRROR TAKES THE OTHER LOCAL GAUGE, Gauge::Midplane:
+ *
+ *     phi_0( R_0( psi ), psi ) = 0
+ *
+ * with R_0( psi ) each surface's own crossing of z = 0, so n_s0 is the density
+ * where the surface crosses the midplane. MIRROR-PLAN.md section 5 measured why:
+ * the fixed-radius transfer carries exp( m_s omega^2 ( R_ref^2 - R_0^2 )/2T_s ),
+ * an exponent LINEAR IN THE SPECIES MASS, and at M = 6 carbon's n_s0 spans 1e216
+ * against a double's exp( 709.8 ); under the midplane gauge that exponent is
+ * zero on every surface by construction. It is a mirror's gauge only, because
+ * z = 0 crosses a tokamak surface twice and the condition is then not one per
+ * surface; a mirror's psi is monotone along the midplane, which is the
+ * PRECONDITION tabulateMidplaneCrossing() checks rather than assumes.
+ *
+ * WHAT IT COSTS IS THE PROPERTY THE PARAGRAPH ABOVE ADVERTISES. R_0( psi ) is a
+ * functional of the solution, so F stops being a pointwise function of
+ * ( R, z, psi ) alone. The solver tabulates R_0 once per Newton iteration,
+ * through NormalisedSource::setMidplaneField(), and FREEZES it within the
+ * iteration -- the support freeze's precedent -- so that within one iteration F
+ * is again pointwise and every derivative below is exact for it. What the
+ * Jacobian does not carry is R_0's dependence on the field, which the freeze
+ * leaves to the next iteration.
+ *
  * THE PRICE OF THE GAUGE IS THAT TWO SETS OF n_s0 DIFFERING BY IT DESCRIBE THE
  * SAME PLASMA. Anyone comparing profiles against RoPP's own notation, against a
  * gyrokinetic code or against a transport code has to know which convention each
@@ -109,10 +132,49 @@ namespace meq
 		std::shared_ptr<Profile const> temperature;
 
 		/// n_s0( psi ) in m^-3: the density of this species ON THE CURVE
-		/// R = R_ref, which in the local gauge of this file is what N_s of RoPP
-		/// (96) reduces to. Must not be null.
+		/// R = R_ref -- or, under RotatingSource::Gauge::Midplane, where each
+		/// flux surface crosses z = 0 -- which in the local gauges of this file
+		/// is what N_s of RoPP (96) reduces to. Must not be null.
 		std::shared_ptr<Profile const> density;
 	};
+
+	/**
+	 * THE MIDPLANE CROSSING R_0( x ) OF EVERY FLUX SURFACE x IN [ lower, upper ],
+	 * as a Hermite table on uniform knots: each knot's R_0 by a ROOT FIND on
+	 * x( R, 0 ) = x_i, and its slope by the inverse function theorem,
+	 * dR_0/dx = 1/( dx/dR ) at R_0, with dx/dR read off the field rather than
+	 * differenced. MIRROR-PLAN.md section 5.
+	 *
+	 * @param field  x( R, 0 ) and dx/dR in the flux variable the caller's
+	 *               profiles take -- PHYSICAL psi for meq::RotatingSource, Psi
+	 *               for the normalised one, which converts before calling this.
+	 * @param rMin, rMax  the radii along z = 0 to search.
+	 * @param lower, upper  the range of x to tabulate; [ 0, 1 ] for a support.
+	 * @param intervals  the knot count less one. The Hermite error is
+	 *               h^4 R_0''''/384, and R_0 behaves like sqrt( x ) near the
+	 *               inner label; the default holds it far below the
+	 *               discretisation's error, which RotatingMirror's midplane
+	 *               suite measures by doubling it.
+	 * @param samples  how many points along [ rMin, rMax ] bracket the roots
+	 *               and judge monotonicity.
+	 *
+	 * **THE PRECONDITION IS CHECKED, NOT ASSUMED.** The samples carrying x in
+	 * [ lower, upper ], with one beyond each end, must lie in the domain without
+	 * a gap, x must be STRICTLY monotone across them, and dx/dR must carry that
+	 * sense at every one inside: then each surface crosses z = 0 once and R_0 is
+	 * a function. A tokamak fails it -- z = 0 crosses each surface inboard and
+	 * outboard of the axis -- and so does a mirror whose midplane flux has
+	 * folded.
+	 *
+	 * @throws std::invalid_argument for a non-finite or empty range, or fewer
+	 *         than two intervals or samples.
+	 * @throws std::runtime_error if the precondition fails, or if the midplane
+	 *         inside [ rMin, rMax ] does not reach every x in [ lower, upper ].
+	 */
+	std::shared_ptr<SplineProfile const> tabulateMidplaneCrossing(
+		MidplaneField const &field, double rMin, double rMax,
+		double lower, double upper,
+		unsigned int intervals = 1024, unsigned int samples = 4096 );
 
 	/**
 	 * Sum_s Z_s n_s0( psi ), which charge neutrality on R = R_ref requires to
@@ -188,6 +250,20 @@ namespace meq
 			};
 
 			/**
+			 * WHERE phi_0 IS PINNED ON EACH FLUX SURFACE, and so where each
+			 * n_s0 is the physical density. See the file comment.
+			 */
+			enum class Gauge
+			{
+				/// phi_0( R_ref, psi ) = 0 at a CONSTANT R_ref. The default,
+				/// and every tokamak's.
+				FixedRadius,
+				/// phi_0( R_0( psi ), psi ) = 0 at each surface's own midplane
+				/// crossing, tabulated by setMidplaneCrossing(). A mirror's.
+				Midplane
+			};
+
+			/**
 			 * @param species  exactly two, of opposite charge sign, satisfying
 			 *                 charge neutrality on R = R_ref.
 			 * @param omega    the rigid rotation frequency omega( psi ) in rad/s.
@@ -201,12 +277,19 @@ namespace meq
 			 * @param mu0      so that a run in normalised units can set it to 1.
 			 *
 			 * @param closure  which route through (97); see Closure.
+			 * @param gauge    where phi_0 is pinned; see Gauge. Under
+			 *                 Gauge::Midplane @a referenceRadius MUST BE ZERO:
+			 *                 the gauge has no constant radius, and a radius
+			 *                 accepted and not read would be a promise it does not
+			 *                 keep. The source then answers nothing until
+			 *                 setMidplaneCrossing() has given it R_0( psi ).
 			 *
 			 * @throws std::invalid_argument for a null profile, a non-finite or
 			 *         non-positive mass, radius or mu0, a zero charge, fewer than
 			 *         two species or more than maxSpecies, a species set whose
-			 *         charges are all one sign, or Closure::ClosedForm asked for
-			 *         with more than two species.
+			 *         charges are all one sign, Closure::ClosedForm asked for
+			 *         with more than two species, or a non-zero radius under
+			 *         Gauge::Midplane.
 			 * @throws std::invalid_argument if charge neutrality on R = R_ref is
 			 *         violated. It is checked by sampling n_s0 over [ 0, 1 ], the
 			 *         range meq::Profile documents itself on, because the closed
@@ -219,7 +302,31 @@ namespace meq
 				std::shared_ptr<Profile const> ggPrime,
 				double referenceRadius,
 				double mu0 = vacuumPermeability,
-				Closure closure = Closure::Automatic );
+				Closure closure = Closure::Automatic,
+				Gauge gauge = Gauge::FixedRadius );
+
+			/**
+			 * R_0( psi ), THE MIDPLANE GAUGE'S CROSSINGS, in the flux variable
+			 * this source takes, with its two derivatives -- which is what
+			 * the midplane gauge differentiates: the exponent's centrifugal
+			 * half is m_s omega^2 ( R^2 - R_0^2 )/2T_s, so dA_s/dpsi gains
+			 * -m_s omega^2 R_0 R_0'/T_s, and d2A_s/dpsi2 the next term down.
+			 * tabulateMidplaneCrossing() builds the one the solver installs;
+			 * any meq::Profile serves, which is what lets a test install a
+			 * closed form.
+			 *
+			 * Replaced once per Newton iteration by the solver, on the master
+			 * thread, between assemblies, so a threaded assembly never sees it
+			 * move. Held by shared pointer so the replacement is one store.
+			 *
+			 * @throws std::logic_error under Gauge::FixedRadius, which has no
+			 *         crossing to be given.
+			 * @throws std::invalid_argument for a null table.
+			 */
+			void setMidplaneCrossing( std::shared_ptr<Profile const> table );
+
+			/// The table setMidplaneCrossing() last gave, or null.
+			Profile const *midplaneCrossing() const;
 
 			/// F at ( R, z ) for the flux value psi, in the units of
 			/// meq::Source::f: mu0 R^2 dp/dpsi|_r + g g', no 1/R applied.
@@ -235,10 +342,12 @@ namespace meq
 			/// e phi_0( R, psi ) in JOULES -- the potential of (97) times the
 			/// elementary charge, which is the combination that appears in every
 			/// exponent and the one that carries no factor of e. Zero at R = R_ref
-			/// by construction, exactly.
+			/// -- at R = R_0( psi ) under Gauge::Midplane -- by construction,
+			/// exactly.
 			double potential( double radius, double psi ) const;
 
-			/// n_s( R, psi ) in m^-3, from (96). At R = R_ref this is n_s0( psi ).
+			/// n_s( R, psi ) in m^-3, from (96). At R = R_ref, or R_0( psi ), this
+			/// is n_s0( psi ).
 			/// @throws std::out_of_range if @a index is not a species.
 			double density( std::size_t index, double radius, double psi ) const;
 
@@ -269,8 +378,10 @@ namespace meq
 
 			std::vector<Species> const & species() const;
 			Closure closure() const;
+			Gauge gauge() const;
 			Profile const * omega() const;
 			Profile const & ggPrime() const;
+			/// R_ref; zero under Gauge::Midplane, which has none.
 			double referenceRadius() const;
 			double mu0() const;
 
@@ -293,6 +404,13 @@ namespace meq
 			State closedFormState( double radius, double psi ) const;
 			State rootFindState( double radius, double psi ) const;
 
+			// ( R^2 - R_*^2 )/2 and its two psi-derivatives at fixed R, R_* the
+			// gauge's radius: the constant R_ref, whose derivatives vanish, or
+			// the tabulated R_0( psi ), whose do not. The one place the two
+			// gauges differ; everything downstream is the chain rule through it.
+			void halfDelta( double radius, double psi, double & value,
+				double & prime, double & doublePrime ) const;
+
 			// p, dp/dpsi and d2p/dpsi2 at fixed R, from a State.
 			void pressureFrom( State const & state, double psi,
 				double & p, double & pPrime, double & pDoublePrime ) const;
@@ -303,6 +421,8 @@ namespace meq
 			double refRadius;
 			double permeability;
 			Closure closureChoice;
+			Gauge gaugeChoice;
+			std::shared_ptr<Profile const> midplaneTable;
 	};
 
 	/**
@@ -340,7 +460,30 @@ namespace meq
 				double referenceRadius,
 				double psiAxis,
 				double mu0 = vacuumPermeability,
-				RotatingSource::Closure closure = RotatingSource::Closure::Automatic );
+				RotatingSource::Closure closure = RotatingSource::Closure::Automatic,
+				RotatingSource::Gauge gauge = RotatingSource::Gauge::FixedRadius );
+
+			/// True under RotatingSource::Gauge::Midplane, which is what makes
+			/// the solver call setMidplaneField().
+			bool readsMidplane() const override;
+
+			/**
+			 * TABULATE R_0( Psi ) OVER [ 0, 1 ] FROM THE FIELD ALONG z = 0, at
+			 * the normalisation in force, and hand it to the source underneath.
+			 *
+			 * IN Psi, NOT IN psi, AND THAT KEEPS THIS CLASS A PURE WRAPPER. The
+			 * inner source's argument is Psi, so a table in Psi keeps
+			 * F = S H( Psi )/span with H a function of Psi alone, and
+			 * normalisationDerivatives() stays exact for the frozen table
+			 * without a term in R_0. Within an iteration it is R_0( Psi ) that
+			 * is frozen; at convergence the two readings are one table.
+			 *
+			 * @throws std::logic_error under Gauge::FixedRadius.
+			 * @throws std::runtime_error as tabulateMidplaneCrossing() does, for
+			 *         a midplane on which psi is not monotone across the support.
+			 */
+			void setMidplaneField( MidplaneField const &field, double rMin,
+			                       double rMax ) override;
 
 			/// Both honour setPlasmaSupport(): `F` and `dF/dpsi` are zero
 			/// wherever `Psi <= 0`, as meq::NormalisedMHDSource's are -- and,
@@ -400,6 +543,11 @@ namespace meq
 
 			/// The source underneath, whose arguments are Psi rather than psi.
 			RotatingSource const & unnormalised() const;
+
+			/// The same, to install a midplane table by hand -- what a test of
+			/// the gauge does where there is no solver to call
+			/// setMidplaneField().
+			RotatingSource & unnormalised();
 
 		private:
 			RotatingSource inner;

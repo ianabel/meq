@@ -16839,3 +16839,146 @@ with a different answer. `RotatingMirrorDriver`'s
 `aMirrorWhoseFirstAttemptFailsIsNotRetried` runs the 0.2 start and asserts
 exit 2. The binary before the skip exits 0 on that start, which is what the
 case catches.
+
+
+### M-GAUGE
+
+**THE MIDPLANE GAUGE ON THE ROTATING MIRROR: ONE EQUILIBRIUM IN BOTH GAUGES,
+geq's IN THE MIDPLANE GAUGE TO M-263's RESOLUTION, AND THREE SPECIES AT `M = 6`.**
+`MIRROR-PLAN.md` §5; `RotatingMirrorMidplane` is the acceptance and
+`RotatingSourceTests`' `midplane_gauge` suite the pointwise half. MEQ at this
+branch, `meq-integration` as installed, double, host; geq `73b9a72` and freegs4e
+`9a1ee0c`, both clean, the reference regenerated bit-identical to the one M-263
+read, with `nmid_*.dat` added beside it.
+
+#### 1. The new Jacobian terms, pointwise
+
+Under `Gauge::Midplane` the exponent's half-delta is `( R² − R₀( ψ )² )/2`, so
+`dA_s/dψ` gains `−m_s ω² R₀ R₀′/T_s` (the residual) and `d²A_s/dψ²` the term
+`−( R₀′² + R₀ R₀″ )` times the same (the Jacobian). Against central differences,
+`R₀²` quadratic in `ψ` so that `R₀″` is exercised, over `testRadii × testFluxes`:
+
+| | ω × 0.5 | ω × 1 | ω × 2 |
+|---|---|---|---|
+| two species, `ClosedForm`, worst `\|dF/dψ − difference\|`/max( 1, `\|difference\|` ) | 2.1e-08 | 2.2e-08 | 3.1e-07 |
+| three species, `RootFind` | 2.1e-08 | 2.2e-08 | 6.8e-07 |
+
+— the fixed-radius checks' own `O( h² )` floor, at `h = 1e-4`. **The control**:
+the same source with `R₀′` and `R₀″` zeroed misses `dp/dψ` by **1.7e+02**
+relative, so the check sees the term. **One plasma in two gauges**, closed form
+(constant `T` and `ω`, so the transfer is `exp( C( R₀² − R_ref² )/2 )` exactly):
+`n_s`, `p`, `F` and `dF/dψ` agree at every point to **4.3e-15** in `dF/dψ`, and
+`φ₀` differs by a flux function. `tabulateMidplaneCrossing()` on
+`ψ = B R²( 1 + 0.3 R )/2`, 1024 intervals: knots on the root to 8.9e-16 in `Ψ`,
+slopes to 2.2e-16, between knots `R₀` to 4.8e-12 m and its slope to 6.8e-11. The
+border columns stay analytic for the frozen table, to 1.9e-11.
+
+#### 2. `ψ` along the midplane must be `q` integrated, not `ψ_h` read
+
+On the mirror's level-0 mesh, `k = 3`, the converged fixed-radius answer's
+`ψ_h( R, 0 )` jumps by **1.3e-03** at `R = 0.2465` and 8e-04 at 0.2585 — the
+plasma's own flux is 8.7e-04 — and inside the element between them its slope is
+0.175 against `R q_R = 0.26`. A crossing table read off `ψ_h` then has knot slopes
+its knot values disagree with by **100%** (`Δ R₀` against the trapezoid of the
+slopes, worst interval), and per-iteration refresh stalls the solve near 3e-04
+for 30 steps. Integrating `R q_R` from the midplane's first point, element by
+element over panels bisected onto the faces: **2e-04**, and the solve converges
+(section 3). The same solve with the vacuum's table frozen throughout converges
+in 6 steps, which is what said the source's Jacobian was right and the table
+was not.
+
+#### 3. One equilibrium, two gauges
+
+geq's problem in the fixed-radius gauge (MR-4), transferred to the midplane
+gauge on MEQ's level-2, `k = 4` answer — `max |ln( n_mid/n_fixed )|` = 1.1669 —
+and solved again at `k = 3`:
+
+| level | elements | fixed radius, steps | midplane, steps | midplane − fixed, `ψ*` max / rms | fixed − best, `ψ*` max / rms |
+|---|---|---|---|---|---|
+| 0 | 1175 | 3 | 6 | 4.54e-07 / 1.47e-07 | 1.49e-05 / 2.28e-06 |
+| 1 | 4795 | 3 | 6 | 2.07e-08 / 6.69e-09 | 6.74e-07 / 4.93e-08 |
+| 2 | 19276 | 3 | 6 | 3.08e-10 / 1.02e-10 | 7.24e-09 / 5.73e-10 |
+
+The gauges' difference falls at **4.46 then 6.07** (max), 25× to 30× under the
+fixed-radius answer's own error at every level; labels agree to 3e-11 and 3e-10
+at level 2. **Newton is linear under the midplane gauge**: 9.56e-05, 1.92e-06,
+3.29e-08, 5.35e-10, 8.64e-12, 1.39e-13 at level 0, about 50–60× a step, where the
+fixed radius is quadratic in 3. The table's own dependence on the field is what
+the frozen Jacobian leaves out. No iterate held its table.
+
+#### 4. geq's mirror in the midplane gauge
+
+`nmid_*.dat`: geq's held `N_s` carried by quasineutrality to each surface's
+crossing on geq's 513² direct state, slope along the crossing; Hermite error
+9.5e-12 / 1.0e-08 at 2049 knots, neutrality 6.9e-16. **Not near-identity**:
+`max |ln( n_mid/N_s )|` = 2.368 against 1.167 for the fixed-radius tables, since
+geq's `N_s` are zero-potential densities. geq's table against MEQ's own transfer
+of the same plasma: 5.9e-07 in the log. MEQ at level 2, `k = 4`, `ψ*`, geq's four
+corners out:
+
+| | max | rms |
+|---|---|---|
+| MEQ midplane − geq 129 | 1.554e-07 | 5.385e-09 |
+| MEQ midplane − geq 257 | 4.819e-08 | 1.707e-09 |
+| MEQ midplane − geq 513 | 1.353e-08 | 4.873e-10 |
+| geq 257 − geq 513 | 3.466e-08 | 1.229e-09 |
+| MEQ midplane − MEQ fixed radius | 4.617e-10 | 1.508e-10 |
+
+Rates **1.689 then 1.832** (max) and 1.658 then 1.808 (rms) against geq's own
+1.629 and 1.598; at 513 **0.391** (max) and 0.396 (rms) of geq's own 257 − 513,
+where M-263 has the fixed-radius gauge at 0.44. Newton: 6 steps, linear.
+
+#### 5. Three species at `M = 6`, which the fixed radius cannot carry
+
+Electrons, deuterium and C⁶⁺ (1% of the electrons) on geq's machine and labels,
+the densities given where each surface crosses `z = 0`: export_rotating.py's
+skew shape for every profile, `T` 1.28/1.53 keV falling to a tenth at the labels,
+`ω` 6.19e6 rad/s at the peak drifting 1.30× (M-167's), and the midplane
+densities falling to **1e-6** of their peak at the labels — under this gauge a
+flat `n_s0` still carries `−n m ω² R₀ R₀′/T` at a label where `ω` does not vanish,
+so it is the density that must. `k = 3`:
+
+| level | steps | merit history |
+|---|---|---|
+| 0 | 7 | 5.45e-01 3.20e-05 1.30e-06 5.34e-08 2.19e-09 9.00e-11 3.69e-12 1.52e-13 |
+| 1 | 7 | 3.92e-01 1.65e-05 6.51e-07 2.60e-08 1.04e-09 4.16e-11 1.66e-12 6.65e-14 |
+| 2 | 7 | 2.82e-01 8.29e-06 3.30e-07 1.33e-08 5.33e-10 2.14e-11 8.61e-13 3.46e-14 |
+
+**Self-convergence**: `ψ*` level 0 − 1 is 5.69e-07 max, 4.40e-08 rms; level
+1 − 2 is 1.11e-08 and 1.12e-09 — **5.68** and **5.29**. `ψ_ax` 5.5910079e-03,
+5.5914920e-03, 5.5915409e-03. M-167's `M` on the solved state at `ψ_n = 0.5`:
+**6.49**. **The `n_s0` range**: every `n_s0` is its density at the crossing to
+**4.5e-14** in the log; the same solved plasma's fixed-radius tables at the best
+single `R_ref = 0.3095` m:
+
+| | `ψ_n` = 0.05 / 0.5 / 0.95 | fixed-radius span | midplane span |
+|---|---|---|---|
+| electron | +111.3 / +7.7 / −17.5 | 1e68.0 | 1e6.0 |
+| deuterium | +19.8 / +1.8 / −17.5 | 1e22.7 | 1e6.0 |
+| carbon | **+114.1 / +10.5 / −103.4** | **1e117.2** | 1e6.0 |
+
+These are the exponents with `φ₀` in, which M-167 §7's +187/−310 bound from above.
+1e117 fits a double; what it does not fit is a Hermite table at
+`( E′h )⁴/384`. No other single radius does better: the scan is 0.10 to 0.35 m
+in 0.5 mm steps.
+
+**AND THE FREEZE HAS A PRICE IN PRESSURE.** The same case at a midplane peak of
+**5e19** m⁻³ stalls: damped from the first step, its merit falls to 8.4e-05 by
+step 16 and sits there to the 30-step cap, the table refreshed at every step and
+never held. At **2e19** it takes two full steps to 1.1e-04, then stalls at
+1.5e-05 under damping down to 5e-04 for the rest of the 30. The field's pull on
+`R₀` is the term the Jacobian leaves out, and it scales with the plasma's
+pressure: somewhere between 5e18 and 2e19 here the frozen iteration stops
+contracting.
+
+**From a file**: `examples/mirror-three-species.toml`, the same plasma as
+257-knot tables, runs through `meq-run` at level 0, `k = 2`, in 7 linear steps
+(6.41e-01 to 2.26e-13) and exits 0. **Its first run did not**: the output pass
+evaluates every species' density at every grid node, and far outside the plasma
+the three-species root find for `φ₀` ran out of its 100 iterations — one
+species' exponential dominating the sum, so Newton crawled by `T_s` a step
+across a bracket of thousands of `T_s`, inside the bracket every time, and with
+`y/T_s` that large one ulp of `y` moved the residual past its tolerance anyway.
+Bisecting whenever Newton has not halved the previous step, and accepting a
+bracket collapsed onto adjacent doubles, fixes it; `RotatingSourceTests`'
+`theRootFindEndsWhenItsBracketDoes` threw before and passes after.

@@ -93,7 +93,7 @@ passing comparison.
 | `reference/two/` | electron + deuterium at **M = 6.0**, the mirror operating point. MEQ takes `Closure::ClosedForm` |
 | `reference/three/` | + carbon at `Z = 6`, at **M = 0.76**. MEQ takes `Closure::RootFind`, and the charge weighting stops being a plain sum |
 | `export_vacuum.py`, `reference/vacuum/` | the **vacuum** machine, no plasma, for MR-3's solve. See *The vacuum mirror* below |
-| `export_rotating.py`, `reference/rotating/` | the **solved** free-boundary rotating mirror, for MR-4. See *The rotating mirror* below |
+| `export_rotating.py`, `reference/rotating/` | the **solved** free-boundary rotating mirror, for MR-4, and its midplane-gauge tables. See *The rotating mirror* below |
 
 **THE TWO MACH NUMBERS ARE FORCED, NOT CHOSEN**, with
 `M² = m_i ω² R( z=0 )²/T_e` on the `ψ_n = 0.5` surface and `meta.txt` recording
@@ -320,6 +320,18 @@ the fitted edge orders — and `psi_direct_{129,257,513}.dat` and
 `psi_hagenow_257.dat`, total `ψ` as `R z psi` on the 65 × 65 nodes every
 resolution shares. A test that compares against them needs the script run
 first.
+
+**AND THE SAME PLASMA IN MEQ'S MIDPLANE GAUGE**, `nmid_<name>.dat`, written
+beside geq's answer and not tracked: the density where each surface crosses
+`z = 0`, which `[source] Gauge = "midplane"` takes (`MIRROR-PLAN.md` §5). It is
+**not** the near-identity §5 expected. geq's `N_s` here are held as its
+ZERO-POTENTIAL densities, so the midplane tables are geq's quasineutrality solved
+at each surface's own crossing `R_0( ψ )`, with the slope carried along the
+crossing, and `R_0` is read off geq's solved 513² state — max `|ln( n_mid/N_s )|`
+is 2.37, against 1.17 for the fixed-radius tables. Because they need geq's
+answer they are an output; `RotatingMirrorMidplane` reads them and fails naming
+the command when they are absent. `solution.txt` records their Hermite error and
+both log ranges under `midplane_*`.
 
 **geq's four grid corners carry exactly half the plasma's own flux** — a share
 of 0.500000 at `( 0.05, ±1.5 )` and 0.500002 at `( 0.63, ±1.5 )`, at every

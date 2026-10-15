@@ -200,6 +200,19 @@ the operating point and impurities are the reason to run three species at all.
 
 ### The fix: a fixed-`z` gauge for mirrors, and the fixed-`R` one stays for tokamaks
 
+**BUILT AND MEASURED** → [M-GAUGE](MEASUREMENTS.md#m-gauge). `[source] Gauge =
+"midplane"`, `meq::RotatingSource::Gauge::Midplane`, refused off a boxed
+normalised source and beside `ReferenceRadius`. **geq's mirror solved in the
+midplane gauge agrees with geq as MR-4d asks**: falling at 1.69 then 1.83 against
+geq's 1.63, and at 513² 0.39 of geq's own 257-against-513 difference, where the
+fixed-radius gauge sits at 0.44. **The same plasma in the two gauges is one
+equilibrium** to 3e-10 at level 2, 25× under MEQ's own error there and falling
+faster than it. **Three species at `M = 6.5` solve** and self-converge, with
+every `n_s0` the physical midplane density to 5e-14 in the log, where the same
+plasma's fixed-radius carbon table would span 1e117. `RotatingMirrorMidplane` is
+the acceptance. Three findings the paragraphs below did not anticipate are
+recorded beside the paragraph each corrects.
+
 **THE DECISION IS TAKEN.** A tokamak keeps
 `φ₀( R_ref, ψ ) = 0` — a constant radius, exactly as today. A mirror uses
 
@@ -268,10 +281,26 @@ Newton iteration.
 read off the answer rather than differenced — the same argument that lets the
 `.nc` band continue at `q`'s order.
 
+**AND `ψ` ALONG THE MIDPLANE IS `q` INTEGRATED, NOT `ψ_h` READ — MEASURED.** `ψ_h`
+is discontinuous between elements, and on the mirror's level-0 mesh at `k = 3` it
+jumps by 1.3e-03 across a face — the plasma's own flux is 8.7e-04 — with a slope
+inside an element 30% off `R q_R`. A crossing table read off it has knot values
+its own slopes disagree with by 100%, and a source gauged on it moves by that
+much at every refresh: Newton stalled near 3e-04. With `ψ( R, 0 )` the integral
+of `R q_R` from the midplane's first point, panel by panel over the elements, the
+mismatch is 2e-04 and the same solve converges.
+
 **FREEZE `R₀( ψ )` WITHIN A NEWTON ITERATION.** The tree's own precedent is
 `setPlasmaSupportFrozen` and XP-2's frozen plasma edge: a reference that moves
 inside a Jacobian makes a difference straddle a kink instead of measuring a
 derivative. Refresh it once per iteration, beside the support freeze.
+**BUILT, AND IT MAKES NEWTON LINEAR**: the field's pull on `R₀` is the one term
+the Jacobian does not carry, so geq's problem takes 6 steps where the fixed
+radius takes 3, contracting about 50× a step. **It also bounds what the gauge can
+solve**: the left-out term scales with the pressure, and three species at
+`M = 6` stall near 8e-05 at a midplane peak of 5e19 m⁻³, and near 1.5e-05 at
+2e19, where they converge in 7 steps at 5e18. An iterate whose midplane has folded keeps the previous table for
+an iteration; converging on a held table is refused.
 
 **THE INTERFACE SHAPE** is a gauge policy on the source rather than a second
 class — `enum class Gauge { FixedRadius, Midplane }`, `FixedRadius` carrying
@@ -279,13 +308,37 @@ today's `referenceRadius` and remaining the default so every tokamak caller is
 untouched, `Midplane` carrying the tabulated `R₀( ψ )` the solver refreshes.
 
 **AND IT MAKES THE BENCHMARK EASIER, WHICH IS A CHECK ON THE DESIGN RATHER THAN
-A BONUS.** geq's `get_flux_density_qn` already references each surface to its own
+A BONUS — FALSIFIED, AND THE REASON IS MR-4a's HOLD.** MR-4a holds geq's `N_s`
+as prescribed flux functions, which are geq's ZERO-POTENTIAL densities, not its
+midplane ones; the midplane tables are geq's quasineutrality solved at each
+surface's crossing on geq's 513² state, `max |ln( n_mid/N_s )|` = 2.37 against
+1.17 for the fixed-radius transfer, and since they need geq's answer they are an
+output, `nmid_*.dat`, beside it. What follows was written expecting otherwise: geq's `get_flux_density_qn` already references each surface to its own
 midplane radius, so under the fixed-`z` gauge MEQ's `n_s0` and geq's `N_s` are
 the same quantity up to geq's single global offset at `ψ_n = 0.5`. The transfer
 in `tools/geq-benchmark/export_mirror.py` becomes near-identity, and the
 reference should be regenerated under the new gauge once this lands —
 `theGaugeTransferIsLoadBearing` will then be asserting something much weaker and
 should be re-pointed at the fixed-`R` gauge, which is where the trap still lives.
+**Re-pointed by name, and the refusal asserted under the midplane gauge too**,
+since geq's raw `N_s` are no closer to the midplane densities than to `R_ref`'s.
+
+**AND "FLAT AT A LABEL" MEANS SOMETHING DIFFERENT UNDER THIS GAUGE.** The box's
+precondition is `F` vanishing at both labels. A midplane-gauged `n_s0` flat at a
+label still carries `−n_s m_s ω² R₀ R₀′/T_s` in `∂n_s/∂ψ|_R` wherever `ω` does
+not vanish there, and `R₀′` is the solution's. So a profile family written in
+this gauge has to let the densities or the rotation fall away at the labels —
+the three-species case takes its densities to 1e-6 of their peak there — or be
+transferred from a fixed-radius statement of the same plasma, as geq's is.
+
+**THE `M = 6` THREE-SPECIES CASE, MEASURED RATHER THAN BOUNDED.** On the solved
+plasma — `T` to a tenth at the labels, `ω` drifting 1.3×, carbon at 1% — the best
+single `R_ref` is 0.31 m, where carbon's fixed-radius `n_s0` spans **1e117**, the
+electrons' 1e68 and the deuterons' 1e23. That is inside a double; it is the
+Hermite table at `( E′h )⁴/384` that cannot carry it, at thousands of knots.
+Under the midplane gauge each
+species spans the 1e6 it was given. `examples/mirror-three-species.toml` runs
+it from a file.
 
 ### What does NOT bite, which is worth saying
 
@@ -677,7 +730,13 @@ the branch.
    published interface rather than to solver internals, and the only one found by
    running the benchmark rather than by reading the code. **Not on MR-4's path**:
    its exponent is half what §5 first quoted, and two species at geq-Mach 2 to 4
-   are comfortably representable.
+   are comfortably representable. **BUILT** → [M-GAUGE](MEASUREMENTS.md#m-gauge):
+   geq's mirror in the midplane gauge meets MR-4d's matrix, and three species at
+   `M = 6` solve. **What remains is the freeze's price**: Newton is linear under
+   the midplane gauge, and the left-out pull of the field on `R₀` scales with the
+   pressure, so the same three species stall at ten times the density. Carrying
+   that term would be `R₀` at the table's knots as border unknowns, rows like the
+   label rows' at each crossing — not built.
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,

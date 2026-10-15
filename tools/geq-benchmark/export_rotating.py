@@ -53,6 +53,12 @@ USAGE, from source/
 About eleven minutes on this machine, most of it the 513^2 direct solve.
 `--cache DIR` keeps each solve as an .npz and reuses it on a re-run.
 
+AND THE MIDPLANE GAUGE'S TABLES, nmid_<name>.dat: the same densities where each
+surface crosses z = 0, MEQ's Gauge::Midplane (MIRROR-PLAN.md section 5). geq's
+N_s are its zero-potential densities, so the transfer needs the crossings of
+geq's solved state -- the finest direct one -- and these tables are an OUTPUT,
+written beside geq's answer rather than with the tracked problem.
+
 geq's ANSWER, psi_direct_<n>.dat, psi_hagenow_<n>.dat and solution.txt, goes to
 --out, default runs/geq-benchmark/reference/rotating/, the path the C++ tests
 read. THE PROBLEM, meta.txt, filaments.dat and the tables, goes to --tables,
@@ -552,6 +558,83 @@ def tables_at(Psi, omega_peak, r_ref):
     return out
 
 
+def midplane_crossings(eq, pa, pb, psi_n):
+    """R_0( psi_n ), where each surface of geq's solved state crosses z = 0, by
+    a root find on psiRZ along the midplane, and dR_0/dpsi_n = 1/( dpsi_n/dR )
+    there, with dpsi/dR = R B_z read off geq's own field rather than
+    differenced. MIRROR-PLAN.md section 5's crossing, on geq's state."""
+    span = pb - pa
+    lo, hi = R_INNER - 0.02, R_OUTER + 0.02
+    r0 = np.empty_like(psi_n)
+    for i, target in enumerate(psi_n):
+        f = lambda r, t=target: (eq.psiRZ(r, 0.0) - pa) / span - t
+        r0[i] = brentq(f, lo, hi, xtol=1e-15, rtol=1e-15)
+    slope = np.array([r * float(eq.Bz(r, 0.0)) for r in r0]) / span
+    return r0, 1.0 / slope
+
+
+def transfer_to_midplane(psi_n, omega_peak, r0, dr0):
+    """The densities MEQ's MIDPLANE gauge wants, n_s( R_0( psi ), psi ), and
+    their slope d/dpsi_n along the crossing.
+
+    geq's N_s are its ZERO-POTENTIAL densities, held as prescribed flux
+    functions, so this is NOT the near-identity MIRROR-PLAN.md section 5
+    expected: it is geq's quasineutrality solved at each surface's own crossing,
+    transfer_to_reference_radius() point by point with R_ref = R_0, plus the
+    crossing's own motion,
+
+        dn_s/dpsi_n = dn_s/dpsi_n |_R + dn_s/dR |_psi R_0',
+        dn_s/dR |_psi = n_s ( m_s omega^2 R - Z_s e dphi_0/dR )/T_s,
+
+    with dphi_0/dR by implicit differentiation of Sum_s Z_s n_s = 0 at fixed
+    psi. It depends on R_0, which is geq's ANSWER, so these tables are an
+    output and are not tracked."""
+    arrays, omega, domega = species_arrays(psi_n, omega_peak)
+    n0 = {name: np.zeros_like(psi_n) for name in NAMES}
+    dn0 = {name: np.zeros_like(psi_n) for name in NAMES}
+    for i in range(len(psi_n)):
+        at = {name: {k: (v[i:i + 1] if isinstance(v, np.ndarray) else v)
+                     for k, v in arrays[name].items()} for name in NAMES}
+        n, dn, phi = transfer_to_reference_radius(at, NAMES, omega[i:i + 1],
+                                                  domega[i:i + 1], float(r0[i]))
+        wsq = omega[i] ** 2
+        num, den = 0.0, 0.0
+        for name in NAMES:
+            a = at[name]
+            num += a["z"] * n[name][0] * a["mass"] * wsq * r0[i] / a["temp"][0]
+            den += a["z"] ** 2 * qe * n[name][0] / a["temp"][0]
+        dphi_dr = num / den
+        for name in NAMES:
+            a = at[name]
+            dn_dr = n[name][0] * (a["mass"] * wsq * r0[i]
+                                  - a["z"] * qe * dphi_dr) / a["temp"][0]
+            n0[name][i] = n[name][0]
+            dn0[name][i] = dn[name][0] + dn_dr * dr0[i]
+    return n0, dn0
+
+
+def midplane_tables(eq, pa, pb, omega_peak, knots):
+    """The midplane gauge's density tables on `knots` points of Psi, ascending,
+    and the Hermite error of each against the transfer at the midpoints."""
+    Psi = np.linspace(0.0, 1.0, knots)
+    mid = 0.5 * (Psi[1:] + Psi[:-1])
+    out, exact = {}, {}
+    for where, x in (("knots", Psi), ("mid", mid)):
+        psi_n = 1.0 - x
+        r0, dr0 = midplane_crossings(eq, pa, pb, psi_n)
+        n0, dn0 = transfer_to_midplane(psi_n, omega_peak, r0, dr0)
+        for name in NAMES:
+            (out if where == "knots" else exact)[f"nmid_{name}"] = (x, n0[name], -dn0[name])
+    errors = {}
+    for stem, (xk, fk, dk) in out.items():
+        v, s = hermite(exact[stem][0], xk, fk, dk)
+        ev, es = exact[stem][1], exact[stem][2]
+        errors[stem] = (float(np.max(np.abs(v - ev) / np.abs(ev))),
+                        float(np.max(np.abs(s - es)) / np.max(np.abs(es))))
+    return out, errors
+
+
+
 def hermite(x, xk, fk, dk):
     """meq::SplineProfile's interpolant: the cubic Hermite through ( f, f' )."""
     i = np.clip(np.searchsorted(xk, x, side="right") - 1, 0, len(xk) - 2)
@@ -817,6 +900,26 @@ def main(argv=None):
     # Every slope at both labels, which is the precondition F = 0 there rests on.
     end_slopes = {s: (float(v[2][0]), float(v[2][-1])) for s, v in tk.items()}
 
+    # --- the midplane gauge's tables, on geq's finest crossings -------------
+    # MIRROR-PLAN.md section 5: n_s0 is the density where each surface crosses
+    # z = 0. On geq's held N_s that needs geq's solved R_0( psi ), so these are
+    # made from geq's answer and go beside it, untracked.
+    mk, merr = midplane_tables(eqf, pa, pb, omega_peak, knots)
+    print("\nthe midplane gauge's tables, on geq's " f"{finest}^2 crossings:")
+    midplane_from = {}
+    for name in NAMES:
+        nmid = mk[f"nmid_{name}"][1]
+        midplane_from[name] = (
+            float(np.max(np.abs(np.log(nmid / tk[f"Nraw_{name}"][1])))),
+            float(np.max(np.abs(np.log(nmid / tk[f"n_{name}"][1])))))
+        v, d = merr[f"nmid_{name}"]
+        print(f"  {name:10s} Hermite {v:.1e}/{d:.1e};  max | ln( n_mid/N_geq ) |"
+              f" {midplane_from[name][0]:.4f},  max | ln( n_mid/n_R_ref ) |"
+              f" {midplane_from[name][1]:.4f}")
+    nmid_e, nmid_d = mk["nmid_electron"][1], mk["nmid_deuterium"][1]
+    midplane_neutrality = float(np.max(np.abs(nmid_d - nmid_e) / (nmid_d + nmid_e)))
+    print(f"  neutrality at the crossings {midplane_neutrality:.3e}")
+
     # Neutrality at R_ref, what meq::RotatingSource's constructor checks.
     ne, nd = tk["n_electron"][1], tk["n_deuterium"][1]
     neutrality = float(np.max(np.abs(nd - ne) / (nd + ne)))
@@ -854,6 +957,13 @@ def main(argv=None):
     for n in ns:
         write_psi(os.path.join(out, f"psi_direct_{n}.dat"), runs[("direct", n)],
                   f"direct freeBoundary, {n} x {n}")
+    for name in NAMES:
+        write_table(os.path.join(out, f"nmid_{name}.dat"), *mk[f"nmid_{name}"],
+                    f"n_{name}( Psi ) in m^-3 WHERE EACH FLUX SURFACE CROSSES z = 0, MEQ's\n"
+                    "MIDPLANE gauge phi_0( R_0( psi ), psi ) = 0: geq's prescribed N_s\n"
+                    f"carried by quasineutrality to the crossings R_0 of geq's {finest}^2\n"
+                    "direct state, slope along the crossing. MADE FROM geq's ANSWER, so\n"
+                    "an output beside psi_*.dat and not tracked. Psi = 1 - psi_n; d/dPsi.")
     if args.control:
         write_psi(os.path.join(out, f"psi_hagenow_{args.control}.dat"),
                   runs[("hagenow", args.control)],
@@ -940,6 +1050,13 @@ def main(argv=None):
         fh.write(f"mach_evaluated_at_R {r_half:.17e}\n")
         for label, (p_all, p_small) in edge_orders.items():
             fh.write(f"edge_order_{label} {p_all:.4f} {p_small:.4f}\n")
+        fh.write(f"midplane_tables_on {finest}\n")
+        fh.write(f"midplane_neutrality {midplane_neutrality:.3e}\n")
+        for name in NAMES:
+            v, d = merr[f"nmid_{name}"]
+            fh.write(f"midplane_hermite_error_{name} {v:.3e} {d:.3e}\n")
+            fh.write(f"midplane_max_abs_log_from_geq_{name} {midplane_from[name][0]:.17e}\n")
+            fh.write(f"midplane_max_abs_log_from_R_ref_{name} {midplane_from[name][1]:.17e}\n")
 
     print(f"\nknots {knots}; slopes at Psi = 0, 1: " + "  ".join(
         f"{s} {a:+.1e}/{b:+.1e}" for s, (a, b) in end_slopes.items()))

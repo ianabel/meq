@@ -360,6 +360,16 @@ BOOST_AUTO_TEST_CASE( meqsRotatingSourceReproducesGeqsCurrentDensity )
  * THROW rather than a large error is the stronger statement -- MEQ cannot be
  * handed geq's tables by accident at all -- and it is also why
  * meq::chargeNeutralityResidual is public.
+ *
+ * POINTED AT THE FIXED-RADIUS GAUGE BY NAME, which is where the trap lives:
+ * Gauge::FixedRadius is the default and this is the gauge every table here is
+ * transferred to. MIRROR-PLAN.md section 5 expected the midplane gauge to make
+ * geq's N_s and MEQ's n_s0 nearly one quantity, and so this assertion weak; it
+ * does not. geq's N_s are its ZERO-POTENTIAL densities, and the midplane
+ * gauge's are the densities where each surface crosses z = 0, which differ by
+ * exp( m_s omega^2 R_0^2/2T_s - Z_s e phi_0/T_s ) -- 2.37 in the log on MR-4's
+ * state, export_rotating.py's solution.txt. So the same refusal stands under
+ * Gauge::Midplane, and is asserted below too.
  */
 BOOST_AUTO_TEST_CASE( theGaugeTransferIsLoadBearing )
 {
@@ -383,7 +393,15 @@ BOOST_AUTO_TEST_CASE( theGaugeTransferIsLoadBearing )
 	BOOST_CHECK_THROW(
 		meq::RotatingSource( raw, omegaFrom( reference ),
 			std::make_shared<meq::ConstantProfile const>( 0.0 ),
-			reference.referenceRadius, reference.mu0 ),
+			reference.referenceRadius, reference.mu0,
+			meq::RotatingSource::Closure::Automatic,
+			meq::RotatingSource::Gauge::FixedRadius ),
+		std::invalid_argument );
+	BOOST_CHECK_THROW(
+		meq::RotatingSource( raw, omegaFrom( reference ),
+			std::make_shared<meq::ConstantProfile const>( 0.0 ),
+			0.0, reference.mu0, meq::RotatingSource::Closure::Automatic,
+			meq::RotatingSource::Gauge::Midplane ),
 		std::invalid_argument );
 
 	// And the transferred set, on the same tables, constructs and agrees. Both
@@ -392,5 +410,7 @@ BOOST_AUTO_TEST_CASE( theGaugeTransferIsLoadBearing )
 	BOOST_CHECK_NO_THROW(
 		meq::RotatingSource( speciesFrom( reference, false ), omegaFrom( reference ),
 			std::make_shared<meq::ConstantProfile const>( 0.0 ),
-			reference.referenceRadius, reference.mu0 ) );
+			reference.referenceRadius, reference.mu0,
+			meq::RotatingSource::Closure::Automatic,
+			meq::RotatingSource::Gauge::FixedRadius ) );
 }

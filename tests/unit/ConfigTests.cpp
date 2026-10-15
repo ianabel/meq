@@ -4198,6 +4198,75 @@ BOOST_AUTO_TEST_CASE( the_box_refuses_what_it_has_no_state_for )
 		"\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n[solver]\nTopologyRetry = 1\n" ) ).empty() );
 }
 
+/// `[source] Gauge`: THE MIDPLANE GAUGE IS A MIRROR'S, AND EVERYWHERE ELSE IT IS
+/// REFUSED BY NAME. MIRROR-PLAN.md section 5. It parses on the boxed rotating
+/// source and carries no radius; it is refused beside a ReferenceRadius it
+/// would not read, without Normalised (no bordered Newton to re-tabulate it),
+/// on a one-sided support (a tokamak's, whose midplane crosses every surface
+/// twice), misspelt -- and it is not a key at all on the other source types.
+BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
+{
+	std::string const gauge = "Gauge = \"midplane\"\n";
+
+	{
+		meq::Configuration const c = parse( rotatingSource( boxScalars + gauge, axisTable + limiterTable ) );
+		BOOST_TEST( ( c.getSource().getRotating().gauge == meq::RotatingGaugeType::Midplane ) );
+		BOOST_TEST( c.getSource().getRotating().referenceRadius == 0.0 );
+	}
+	{
+		// The default, and spelled out.
+		meq::Configuration const d = parse( rotatingSource( boxScalars, axisTable + limiterTable ) );
+		BOOST_TEST( ( d.getSource().getRotating().gauge == meq::RotatingGaugeType::FixedRadius ) );
+		meq::Configuration const e = parse( rotatingSource(
+			boxScalars + "Gauge = \"fixed-radius\"\nReferenceRadius = 0.213\n", axisTable + limiterTable ) );
+		BOOST_TEST( ( e.getSource().getRotating().gauge == meq::RotatingGaugeType::FixedRadius ) );
+		BOOST_TEST( e.getSource().getRotating().referenceRadius == 0.213 );
+	}
+
+	struct Refusal
+	{
+		char const * what;
+		std::string head;
+		std::string tail;
+		char const * key;
+	};
+	std::vector< Refusal > const refusals = {
+		{ "beside a ReferenceRadius", boxScalars + gauge + "ReferenceRadius = 0.213\n",
+		  axisTable + limiterTable, "source.ReferenceRadius" },
+		{ "without Normalised", gauge, "", "source.Gauge" },
+		{ "on a tokamak's one-sided support", "Normalised = true\nPsiAxis = 1.0\nConfineToPlasma = true\n" + gauge,
+		  "", "source.Gauge" },
+		{ "on a prescribed axis without the box", "Normalised = true\nPsiAxis = 1.0\n" + gauge,
+		  axisTable + limiterTable, "source.Gauge" },
+		{ "misspelt", boxScalars + "Gauge = \"Midplane\"\n", axisTable + limiterTable, "source.Gauge" } };
+	for ( Refusal const & r : refusals )
+	{
+		std::string const key = refusedKey( rotatingSource( r.head, r.tail ) );
+		BOOST_TEST( key == r.key, "Gauge = \"midplane\" " << r.what << ": refused at '" << key
+		            << "' where the refusal belongs at '" << r.key << "'"
+		            << ( key.empty() ? " -- it PARSED" : "" ) );
+	}
+	BOOST_TEST( refusalMessage( rotatingSource(
+		"Normalised = true\nPsiAxis = 1.0\nConfineToPlasma = true\n" + gauge, "" ) ).find( "twice" )
+		!= std::string::npos, "the tokamak refusal must say why" );
+
+	// The shipped three-species mirror is posed in it.
+	{
+		meq::Configuration const shipped(
+			( examplesDirectory() / "mirror-three-species.toml" ).string() );
+		meq::RotatingParameters const & r = shipped.getSource().getRotating();
+		BOOST_TEST( ( r.gauge == meq::RotatingGaugeType::Midplane ) );
+		BOOST_TEST( r.referenceRadius == 0.0 );
+		BOOST_TEST( r.species.size() == 3u );
+		BOOST_TEST( shipped.getSource().supportIsBox() );
+	}
+
+	// Not a key on the sources that have no species and no phi_0.
+	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, axisTable + limiterTable ) ) == "source.Gauge" );
+	BOOST_TEST( refusedKey( withSource( "[source]\nType = \"soloviev\"\nA = -0.52\n" + gauge ) )
+	            == "source.Gauge" );
+}
+
 /// THE MESH GENERATOR'S AlignPlasma, AND THE BOX ALIGNED BEING THE CUTOFF.
 /// Built by editing one line of the shipped mirror, which is the file a user
 /// has after one edit.

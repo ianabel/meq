@@ -1347,6 +1347,16 @@ namespace meq
 			/// source's, which is the one thing here that does not delegate.
 			CoilSet const * conductors() const override;
 
+			/// FORWARDED, AND FOR THE REASON setPlasmaSupport() IS: the gauge
+			/// belongs to the profiles, and the profiles to the wrapped source.
+			/// Unforwarded, a midplane-gauged plasma wrapped with meshed coils
+			/// would never be given its crossing and would throw at its first
+			/// evaluation. The field handed down is the total flux, which is
+			/// what a meshed coil's state already is.
+			bool readsMidplane() const override;
+			void setMidplaneField( MidplaneField const &field, double rMin,
+			                       double rMax ) override;
+
 			/// FORWARDED, for the third time and for the same reason: the scale
 			/// belongs to the plasma term and a COIL IS NOT SCALED. Its current
 			/// is amperes and is prescribed input, so scaling it would make the

@@ -225,6 +225,17 @@ so its `omega_profile` callable is the only way to hand both codes the same
 `GGPrime = 0` and the trivial-branch warning in
 `examples/rotating-rectangle.toml`.
 
+**A MIRROR CAN TAKE THE OTHER LOCAL GAUGE**, `[source] Gauge = "midplane"`:
+`φ₀ = 0` where each surface crosses `z = 0`, so the densities are midplane
+densities and stay within a double at high Mach with impurities, which the
+fixed radius does not (`MIRROR-PLAN.md` §5, → [M-GAUGE](MEASUREMENTS.md#m-gauge)).
+Three traps from building it. **Read the midplane flux off `q`, not `ψ_h`**:
+`ψ_h` jumps between elements by more than the plasma's own flux on a coarse
+mirror mesh, and a crossing table built on it stalls Newton. **The frozen
+crossings make Newton linear**, and the term the freeze leaves out scales with
+the pressure, so a dense enough plasma stops converging. **A density flat at a
+label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
+
 **Both run here**, in MEQ's own benchmark venv at
 `tools/freegs4e-benchmark/venv` with `geq/src` on `PYTHONPATH`; geq's own
 `tests/test_jtor_abel.py` passes. `pint` and `xarray` are absent, so `geq.utils`

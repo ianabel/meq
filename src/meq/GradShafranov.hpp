@@ -1692,6 +1692,60 @@ namespace meq
 			/// Whether setPlasmaSupportFrozen() is in force.
 			bool plasmaSupportFrozen() const;
 
+			/**
+			 * HOW MANY TIMES THE LAST SOLVE TABULATED THE MIDPLANE GAUGE'S
+			 * CROSSINGS: once before its first residual and once at the head of
+			 * every Newton iteration after the first, and zero for a source
+			 * that does not read the midplane. MIRROR-PLAN.md section 5.
+			 *
+			 * The crossings are FROZEN within an iteration, beside the support
+			 * freeze and for its reason; the Jacobian is exact for the frozen
+			 * table and does not carry R_0's own dependence on the field, which
+			 * the next iteration's table takes up. No switch turns this off:
+			 * a midplane-gauged source has no answer without it.
+			 *
+			 * **THE PRECONDITION IS CHECKED HERE, AT EVERY REFRESH, BEFORE ANY
+			 * RESIDUAL READS THE TABLE.** `psi` must be monotone along `z = 0`
+			 * across the support, so that each surface crosses the midplane
+			 * once; a tokamak's does not, and neither does a mirror whose flux
+			 * has folded. meq::tabulateMidplaneCrossing() throws, and solve()
+			 * then throws with it rather than gauging on a multi-valued
+			 * crossing.
+			 */
+			int midplaneGaugeRefreshes() const;
+
+			/**
+			 * HOW MANY ITERATIONS OF THE LAST SOLVE KEPT THE PREVIOUS TABLE
+			 * because their iterate failed the precondition. The precondition is
+			 * a property of the ANSWER, and a damped step at high Mach can fold
+			 * an iterate's midplane flux that later steps unfold -- measured on
+			 * three species at M = 6 -- so an intermediate failure holds the
+			 * crossings frozen one iteration longer rather than ending the
+			 * solve. Converging on a held table is refused: the answer must
+			 * give its own crossings.
+			 */
+			int midplaneGaugeHolds() const;
+
+			/**
+			 * THE TOTAL FIELD ALONG `z = 0` AT THE SOLUTION, as the midplane
+			 * gauge reads it at every iterate: `dpsi/dR` as `R q_R` plus psi_c's
+			 * own, and `psi` as the INTEGRAL of that slope from the midplane's
+			 * first point, anchored on `psi_h` there -- not `psi_h` read
+			 * pointwise, which is discontinuous between elements by more than
+			 * the plasma's own flux on a coarse mesh (see midplaneFieldOf()).
+			 * Valid after solve(), for as
+			 * long as this solver and its solution are unchanged; it reads them
+			 * by reference.
+			 *
+			 * PUBLIC SO THAT AN ANSWER'S CROSSINGS CAN BE TABULATED, with
+			 * meq::tabulateMidplaneCrossing(), whatever gauge the answer was
+			 * solved in -- which is what transferring a fixed-radius problem to
+			 * the midplane gauge needs.
+			 *
+			 * @param rMin, rMax  set to the radii along `z = 0` the mesh spans.
+			 */
+			MidplaneField midplaneField( double &rMin, double &rMax );
+
 			/// Elements the fill reached: the plasma. Zero when no fill is live.
 			int plasmaComponentElements() const;
 
@@ -5418,6 +5472,49 @@ namespace meq
 			/// setPlasmaSupportFrozen(). Off by default, so solve() refreshes
 			/// the component itself and nothing existing moves.
 			bool plasmaSupportFrozenValue = false;
+
+			/**
+			 * THE MIDPLANE GAUGE'S REFRESH. Hands the normalised source the
+			 * total field along `z = 0` at @a state -- midplaneFieldOf(), the
+			 * solved q integrated along the midplane, plus psi_c exactly -- after
+			 * which the source tabulates its crossings at the
+			 * normalisation in force. A no-op unless the source
+			 * readsMidplane(). See midplaneGaugeRefreshes().
+			 */
+			void refreshMidplaneGauge( mfem::Vector const &state );
+
+			/// The runs below, built if they are not.
+			void buildMidplaneRuns();
+
+			/// Whether ( R, 0 ) is inside @a element, and where, by an
+			/// unprojected inverse map.
+			bool midplaneReference( int element, double radius,
+			                        mfem::IntegrationPoint &reference ) const;
+
+			/// The field along `z = 0` of @a state, which it reads by reference.
+			/// What refreshMidplaneGauge() and midplaneField() both hand out.
+			MidplaneField midplaneFieldOf( mfem::Vector const &state ) const;
+
+			/// midplaneGaugeRefreshes() and midplaneGaugeHolds().
+			int midplaneRefreshCount = 0;
+			int midplaneHoldCount = 0;
+
+			/**
+			 * THE ELEMENTS ALONG `z = 0`, as runs of a fine sampling by
+			 * meq::PointLocator: `midplaneRunStart[ i ]` is where z = 0 enters
+			 * `midplaneRunElement[ i ]`, bisected onto the face, so that each run
+			 * is a panel the flux along the midplane is integrated over. Built at a solve's first
+			 * refresh and kept for the solve, since the mesh does not move
+			 * within one; it is what makes a point on the midplane an
+			 * `O( log n )` lookup rather than the whole-mesh scan
+			 * locateFieldPoint() falls back to.
+			 */
+			std::vector<double> midplaneRunStart;
+			std::vector<int> midplaneRunElement;
+			double midplaneRMin = 0.0;
+			double midplaneRMax = 0.0;
+			/// The last sampled radius found in the mesh: the field ends there.
+			double midplaneRunEnd = 0.0;
 
 			/// setLimiterConstraint().
 			LimiterConstraint limiterConstraintChoice = LimiterConstraint::ExactPoint;

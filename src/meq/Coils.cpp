@@ -1808,6 +1808,17 @@ namespace meq
 		return coilSet.get();
 	}
 
+	bool CoilAugmentedNormalisedSource::readsMidplane() const
+	{
+		return plasmaSource->readsMidplane();
+	}
+
+	void CoilAugmentedNormalisedSource::setMidplaneField( MidplaneField const &field,
+	                                                       double rMin, double rMax )
+	{
+		plasmaSource->setMidplaneField( field, rMin, rMax );
+	}
+
 	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }
 	CoilSet const & CoilAugmentedNormalisedSource::coils() const { return *coilSet; }
 

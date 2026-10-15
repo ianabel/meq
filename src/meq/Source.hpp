@@ -2,6 +2,7 @@
 #define MEQ_SOURCE_HPP
 
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <memory>
 
@@ -226,6 +227,24 @@ namespace meq
 		/// GradShafranovSolver::PlasmaConnectivity for why XP-1's fill is off.
 		Box
 	};
+
+	/**
+	 * THE FIELD ALONG THE MIDPLANE, `z = 0`, AT THE SOLVER'S CURRENT ITERATE:
+	 * `psi( R, 0 )` and `dpsi/dR` there, both PHYSICAL flux and TOTAL flux --
+	 * the remainder plus any subtracted conductor field.
+	 *
+	 * What a source in meq::RotatingSource::Gauge::Midplane reads to find each
+	 * flux surface's midplane crossing. MIRROR-PLAN.md section 5.
+	 *
+	 * **`dpsi/dR` IS READ OFF THE SOLVED `q`, NOT DIFFERENCED**, as
+	 * `R q_R( R, 0 )` since `grad_bar( psi ) = R q`: `q` is an unknown at the
+	 * same order as `psi`, so the slope costs no accuracy the value has.
+	 *
+	 * @return false where `( R, 0 )` is not in the domain; the outputs are then
+	 *         unread.
+	 */
+	using MidplaneField = std::function<bool( double radius, double &psi,
+	                                          double &dPsiDR )>;
 
 	/**
 	 * A source whose profiles are functions of NORMALISED flux,
@@ -710,6 +729,42 @@ namespace meq
 
 			/// And the boundary value; zero unless it has been set.
 			virtual double boundaryNormalisation() const = 0;
+
+			/**
+			 * WHETHER THIS SOURCE READS THE MIDPLANE, so that the solver must
+			 * hand it setMidplaneField() before its first residual and once per
+			 * Newton iteration after that. False here, and for every source
+			 * but a meq::RotatingSource in Gauge::Midplane.
+			 *
+			 * VIRTUAL FOR THE REASON setPlasmaSupport() IS: a wrapper answers
+			 * for the source that evaluates the profiles.
+			 */
+			virtual bool readsMidplane() const
+			{
+				return false;
+			}
+
+			/**
+			 * THE FIELD ALONG `z = 0` AT THE CURRENT ITERATE, over
+			 * `[ rMin, rMax ]`, read once per Newton iteration and FROZEN
+			 * within it -- setPlasmaSupportFrozen()'s precedent: a reference
+			 * that moves inside a Jacobian makes a difference straddle a kink
+			 * rather than measure a derivative. MIRROR-PLAN.md section 5.
+			 *
+			 * Called by GradShafranovSolver after setNormalisation(), so the
+			 * source tabulates against the normalisation in force.
+			 *
+			 * @throws std::runtime_error if the source cannot be gauged on this
+			 *         field -- for the midplane gauge, `psi` not monotone along
+			 *         `z = 0` across the support, which is the PRECONDITION and
+			 *         a tokamak's case. The base does nothing and is never
+			 *         called, since readsMidplane() is false.
+			 */
+			virtual void setMidplaneField( MidplaneField const &field,
+			                               double rMin, double rMax )
+			{
+				(void)field; (void)rMin; (void)rMax;
+			}
 
 		private:
 			/// setPlasmaSupport(). Off by default; see it for why.

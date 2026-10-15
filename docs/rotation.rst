@@ -157,6 +157,8 @@ equation exactly, and MEQ checks that it does — both pointwise against the
 static source and end to end through the solver, where it reproduces the static
 benchmark's errors to every printed digit.
 
+.. _rotation-gauge:
+
 The gauge
 ---------
 
@@ -182,6 +184,63 @@ the magnetic axis and not a flux-surface quantity at all.
    plasma*. So "our density disagrees with yours" is a statement about
    ``ReferenceRadius`` until proved otherwise, and two codes must agree on it
    before their profiles can be compared at all.
+
+The midplane gauge
+~~~~~~~~~~~~~~~~~~
+
+A mirror takes the other local gauge, ``[source] Gauge = "midplane"``:
+
+.. math::
+
+   \phi_0(R_0(\psi), \psi) = 0,
+
+with :math:`R_0(\psi)` the radius at which the surface :math:`\psi` crosses the
+midplane :math:`z = 0`. Each ``Density`` is then the physical density **where its
+surface crosses the midplane**.
+
+**Why a mirror needs it.** The fixed-radius gauge carries every surface's
+densities to one radius through
+:math:`\exp\bigl(m_s\omega^2(r_{\text{ref}}^2 - R_0^2)/2T_s\bigr)`, an exponent
+*linear in the species mass*. On a mirror at Mach 6 that factor spans hundreds of
+decades for carbon, past a double's :math:`e^{709.8}`, so a three-species mirror
+at its operating point cannot be written down in the fixed-radius gauge at all.
+Under the midplane gauge the factor is one on every surface by construction, and
+each ``Density`` table spans only the physical density range.
+
+**Why it is a mirror's only.** It is one condition per surface only where
+:math:`\psi` is monotone along :math:`z = 0`. A tokamak's midplane crosses every
+surface twice, inboard and outboard of the magnetic axis, so the parse refuses
+``Gauge = "midplane"`` without ``SupportShape = "box"``, and the solver checks
+the monotonicity itself, on every iterate, rather than assuming it.
+
+**What it costs.** :math:`R_0(\psi)` is a functional of the solution, so the
+source is no longer a pointwise function of :math:`(R, z, \psi)`. MEQ tabulates
+:math:`R_0(\Psi)` by a root find along the midplane once per Newton iteration of
+the bordered solve and *freezes* it within the iteration; its slope
+:math:`R_0' = 1/(R_0 q_R)` is read off the solved flux :math:`q`, and the flux
+along the midplane is :math:`q` integrated rather than :math:`\psi_h` read
+pointwise, since :math:`\psi_h` is discontinuous between elements. The source's
+Jacobian is exact for the frozen table, and the table's own dependence on the
+field is taken up by the next iteration — so Newton converges **linearly**
+rather than quadratically under this gauge. An iterate whose midplane flux is
+not monotone keeps the previous table for one more iteration; a solve may not
+*converge* on a table its own answer cannot give, and is refused instead.
+
+**And it changes what "flat at a label" means.** The support's precondition is
+that :math:`F` vanish at both labels. Under the midplane gauge a ``Density``
+flat at a label still carries :math:`-m_s\omega^2 R_0 R_0'/T_s` in its
+:math:`\psi`-derivative at fixed :math:`R` wherever :math:`\omega` does not
+vanish there, so it is the densities themselves, or the rotation, that must
+fall away at the labels — or the tables must be transferred from a
+fixed-radius statement of the same plasma, as the test suite's mirror cases are.
+
+``examples/mirror-three-species.toml`` is the worked example: electrons,
+deuterons and carbon at Mach 6 on the mirror of :ref:`rotation-mirror`, with
+densities that fall to a millionth of their peak at the labels.
+
+.. code-block:: sh
+
+   ../../install/double/bin/meq-run ../../source/examples/mirror-three-species.toml
 
 Species
 -------
@@ -412,7 +471,8 @@ Output
 ------
 
 A rotating run writes a density field per species and the electrostatic
-potential beside :math:`\psi` and :math:`\mathbf{B}` in the NetCDF file. The
+potential beside :math:`\psi` and :math:`\mathbf{B}` in the NetCDF file, each
+field's description saying which gauge pinned it. The
 potential is written as :math:`e\phi_0` in **joules** rather than volts, because
 that is the combination every exponent above contains.
 
