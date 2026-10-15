@@ -539,12 +539,22 @@ under a Solov'ev source is an unknown key, not an ignored one.
    * - ``OmegaScale``, ``GGPrimeScale``
      - ``1.0``
      - Scales for whichever form was given.
+   * - ``Gauge``
+     - ``"fixed-radius"``
+     - **Where the electrostatic potential is pinned on each flux surface**, and
+       so where each ``Density`` is the physical density: ``"fixed-radius"`` at
+       ``ReferenceRadius``, or ``"midplane"`` where each surface crosses
+       :math:`z = 0`. ``"midplane"`` is a mirror's — it is refused without
+       ``Normalised = true`` and ``SupportShape = "box"`` — and is what keeps a
+       high-Mach, multi-species mirror's densities within a double. See
+       :ref:`rotation-gauge`.
    * - ``ReferenceRadius``
      - ``1.0``
-     - **The gauge**: the radius at which the electrostatic potential vanishes,
-       and therefore at which each ``Density`` is the physical density. A
-       constant radius — not the magnetic axis, not a flux-surface average. See
-       :doc:`rotation`.
+     - **The fixed-radius gauge's radius**: where the electrostatic potential
+       vanishes, and therefore where each ``Density`` is the physical density. A
+       constant radius — not the magnetic axis, not a flux-surface average.
+       **Refused beside** ``Gauge = "midplane"``, which has no radius to give.
+       See :doc:`rotation`.
    * - ``Mu0``, ``Normalised``, ``PsiAxis``, ``ConfineToPlasma``,
        ``ExcludeAttributes``, ``SupportShape``, ``AxialEdge``
      - as ``"mhd"``
@@ -579,7 +589,8 @@ under a Solov'ev source is an unknown key, not an ignored one.
    * - ``Density`` / ``DensityFile``
      - *required unless* ``Neutralising``
      - :math:`n_{s0}` in :math:`\mathrm{m}^{-3}`, **on the curve**
-       :math:`R = \texttt{ReferenceRadius}`.
+       :math:`R = \texttt{ReferenceRadius}` — or, under ``Gauge = "midplane"``,
+       **where each flux surface crosses** :math:`z = 0`.
    * - ``DensityScale``
      - ``1.0``
      - 

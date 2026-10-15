@@ -115,15 +115,171 @@ namespace meq
 		return std::make_shared<CombinationProfile const>( std::move( weights ), std::move( parts ) );
 	}
 
+	std::shared_ptr<SplineProfile const> tabulateMidplaneCrossing(
+		MidplaneField const &field, double rMin, double rMax,
+		double lower, double upper, unsigned int intervals, unsigned int samples )
+	{
+		if ( !field )
+			throw std::invalid_argument( "meq::tabulateMidplaneCrossing: the field is empty" );
+		if ( !std::isfinite( rMin ) || !std::isfinite( rMax ) || !( rMin < rMax ) )
+			throw std::invalid_argument( "meq::tabulateMidplaneCrossing: [ rMin, rMax ] must be finite and non-empty" );
+		if ( !std::isfinite( lower ) || !std::isfinite( upper ) || !( lower < upper ) )
+			throw std::invalid_argument( "meq::tabulateMidplaneCrossing: [ lower, upper ] must be finite and non-empty" );
+		if ( intervals < 2 || samples < 2 )
+			throw std::invalid_argument( "meq::tabulateMidplaneCrossing: at least two intervals and two samples" );
+
+		// THE SAMPLES, which bracket every root and are what monotonicity is
+		// judged on.
+		std::size_t const count = static_cast<std::size_t>( samples ) + 1;
+		std::vector<double> radius( count ), x( count ), slope( count );
+		std::vector<char> found( count, 0 );
+		for ( std::size_t j = 0; j < count; ++j )
+		{
+			radius[ j ] = rMin + ( rMax - rMin )*static_cast<double>( j )/samples;
+			found[ j ] = field( radius[ j ], x[ j ], slope[ j ] )
+			             && std::isfinite( x[ j ] ) && std::isfinite( slope[ j ] );
+		}
+
+		// The run carrying x in [ lower, upper ], first to last.
+		std::size_t first = count, last = 0;
+		for ( std::size_t j = 0; j < count; ++j )
+			if ( found[ j ] && x[ j ] >= lower && x[ j ] <= upper )
+			{
+				first = std::min( first, j );
+				last = std::max( last, j );
+			}
+		if ( first == count )
+			throw std::runtime_error( "meq::tabulateMidplaneCrossing: no point of the midplane in [ "
+				+ std::to_string( rMin ) + ", " + std::to_string( rMax ) + " ] carries a flux in [ "
+				+ std::to_string( lower ) + ", " + std::to_string( upper ) + " ], so no flux surface of the support crosses z = 0" );
+
+		// One sample beyond each end, where there is one in the domain, so the
+		// end surfaces are bracketed.
+		std::size_t const a = ( first > 0 && found[ first - 1 ] ) ? first - 1 : first;
+		std::size_t const b = ( last + 1 < count && found[ last + 1 ] ) ? last + 1 : last;
+
+		/*
+		 * THE PRECONDITION. Strictly monotone across the run, without a gap, and
+		 * with the field's own slope agreeing in sense at every sample inside --
+		 * the second test is what catches a fold the samples straddle, and a
+		 * slope of the wrong SIGN, which is what a q read with the wrong
+		 * orientation would give.
+		 */
+		double const sense = x[ b ] > x[ a ] ? 1.0 : -1.0;
+		for ( std::size_t j = a; j < b; ++j )
+		{
+			if ( !found[ j + 1 ] )
+				throw std::runtime_error( "meq::tabulateMidplaneCrossing: the midplane leaves the domain at R = "
+					+ std::to_string( radius[ j + 1 ] ) + " inside the support, so a flux surface's crossing is not defined there" );
+			if ( !( sense*( x[ j + 1 ] - x[ j ] ) > 0.0 ) )
+				throw std::runtime_error( "meq::tabulateMidplaneCrossing: psi is NOT MONOTONE along z = 0 across the support -- it turns between R = "
+					+ std::to_string( radius[ j ] ) + " and " + std::to_string( radius[ j + 1 ] )
+					+ " -- so z = 0 crosses a flux surface more than once and the midplane gauge is not one condition per surface. That is a tokamak's midplane, or a mirror whose midplane flux has folded; use the fixed-radius gauge" );
+		}
+		for ( std::size_t j = first; j <= last; ++j )
+			if ( !( sense*slope[ j ] > 0.0 ) )
+				throw std::runtime_error( "meq::tabulateMidplaneCrossing: dpsi/dR read off the field at R = "
+					+ std::to_string( radius[ j ] ) + " is " + std::to_string( slope[ j ] )
+					+ ", against the sense of psi along the midplane, so the crossing's slope 1/( dpsi/dR ) is not defined there" );
+
+		double const xLo = std::min( x[ a ], x[ b ] );
+		double const xHi = std::max( x[ a ], x[ b ] );
+		if ( xLo > lower || xHi < upper )
+			throw std::runtime_error( "meq::tabulateMidplaneCrossing: the midplane inside the domain reaches fluxes [ "
+				+ std::to_string( xLo ) + ", " + std::to_string( xHi ) + " ] and not the whole of [ "
+				+ std::to_string( lower ) + ", " + std::to_string( upper ) + " ], so some surface of the support does not cross z = 0 in the domain" );
+
+		/*
+		 * EACH KNOT BY A SAFEGUARDED NEWTON on its bracketing samples. Newton
+		 * takes the field's slope, which is q's and not exactly the derivative
+		 * of psi_h, so it converges fast rather than quadratically; the bracket
+		 * is what makes it certain. psi_h is discontinuous across element faces
+		 * at its own discretisation error, so the end condition is the bracket's
+		 * width as well as the residual's size.
+		 */
+		std::vector<Knot> knots;
+		knots.reserve( intervals + 1 );
+		for ( unsigned int i = 0; i <= intervals; ++i )
+		{
+			double const target = lower + ( upper - lower )*static_cast<double>( i )/intervals;
+
+			// The bracket: the samples either side of target, by bisection over
+			// a run that is monotone in the sense found above.
+			std::size_t lo = a, hi = b;
+			while ( hi - lo > 1 )
+			{
+				std::size_t const mid = lo + ( hi - lo )/2;
+				if ( sense*( x[ mid ] - target ) <= 0.0 )
+					lo = mid;
+				else
+					hi = mid;
+			}
+
+			double rLo = radius[ lo ], rHi = radius[ hi ];
+			double r = 0.0, value = 0.0, d = 0.0;
+			bool done = false;
+			if ( x[ lo ] == target )
+			{
+				r = radius[ lo ];
+				d = slope[ lo ];
+				done = true;
+			}
+			else if ( x[ hi ] == target )
+			{
+				r = radius[ hi ];
+				d = slope[ hi ];
+				done = true;
+			}
+			else
+			{
+				r = rLo + ( rHi - rLo )*( target - x[ lo ] )/( x[ hi ] - x[ lo ] );
+			}
+
+			for ( int k = 0; k < 100 && !done; ++k )
+			{
+				if ( !field( r, value, d ) )
+					throw std::runtime_error( "meq::tabulateMidplaneCrossing: the field was not found at R = "
+						+ std::to_string( r ) + ", between two samples it was found at" );
+
+				double const residual = value - target;
+				if ( std::fabs( residual ) <= 4.0*std::numeric_limits<double>::epsilon()*std::max( 1.0, std::fabs( target ) ) )
+					break;
+
+				if ( sense*residual < 0.0 )
+					rLo = r;
+				else
+					rHi = r;
+				if ( rHi - rLo <= 4.0*std::numeric_limits<double>::epsilon()*rHi )
+					break;
+
+				double next = r - residual/d;
+				if ( !( next > rLo && next < rHi ) )
+					next = 0.5*( rLo + rHi );
+				r = next;
+			}
+
+			if ( !done && !field( r, value, d ) )
+				throw std::runtime_error( "meq::tabulateMidplaneCrossing: the field was not found at R = " + std::to_string( r ) );
+			if ( !( sense*d > 0.0 ) )
+				throw std::runtime_error( "meq::tabulateMidplaneCrossing: dpsi/dR at the crossing R = " + std::to_string( r )
+					+ " has the wrong sense, so 1/( dpsi/dR ) is not the crossing's slope" );
+
+			knots.push_back( Knot{ target, r, 1.0/d } );
+		}
+
+		return std::make_shared<SplineProfile const>( std::move( knots ) );
+	}
+
 	RotatingSource::RotatingSource( std::vector<Species> species,
 		std::shared_ptr<Profile const> omega,
 		std::shared_ptr<Profile const> ggPrime,
 		double referenceRadius,
 		double mu0,
-		Closure closure )
+		Closure closure,
+		Gauge gauge )
 		: speciesData( std::move( species ) ), omegaProfile( std::move( omega ) ),
 		  ggPrimeProfile( std::move( ggPrime ) ), refRadius( referenceRadius ), permeability( mu0 ),
-		  closureChoice( closure )
+		  closureChoice( closure ), gaugeChoice( gauge )
 	{
 		if ( speciesData.size() < 2 )
 			throw std::invalid_argument( "meq::RotatingSource: quasineutrality needs at least two species" );
@@ -137,7 +293,12 @@ namespace meq
 
 		requireProfile( ggPrimeProfile, "the g dg/dpsi profile" );
 
-		if ( !std::isfinite( refRadius ) || refRadius <= 0.0 )
+		if ( gaugeChoice == Gauge::Midplane )
+		{
+			if ( refRadius != 0.0 )
+				throw std::invalid_argument( "meq::RotatingSource: Gauge::Midplane pins phi_0 at each flux surface's own midplane crossing and has no reference radius; pass 0 rather than a radius it would not read" );
+		}
+		else if ( !std::isfinite( refRadius ) || refRadius <= 0.0 )
 			throw std::invalid_argument( "meq::RotatingSource: the reference radius must be finite and positive" );
 		if ( !std::isfinite( permeability ) )
 			throw std::invalid_argument( "meq::RotatingSource: mu0 must be finite" );
@@ -201,8 +362,6 @@ namespace meq
 		Species const & one = speciesData[ 0 ];
 		Species const & two = speciesData[ 1 ];
 
-		double const halfDelta = ( radius*radius - refRadius*refRadius )/2.0;
-
 		if ( !omegaProfile )
 		{
 			state.potential = 0.0;
@@ -246,11 +405,17 @@ namespace meq
 		double const cDoublePrime = k*( wDoublePrime/d - 2.0*wPrime*dPrime/( d*d ) - w*dDoublePrime/( d*d )
 			+ 2.0*w*dPrime*dPrime/( d*d*d ) );
 
+		// ( R^2 - R_*^2 )/2 and its derivatives: constant in psi under the
+		// fixed-radius gauge, so the h' and h'' terms below are exactly zero
+		// there and every fixed-radius answer is the product it always was.
+		double h = 0.0, hPrime = 0.0, hDoublePrime = 0.0;
+		halfDelta( radius, psi, h, hPrime, hDoublePrime );
+
 		for ( std::size_t s = 0; s < 2; ++s )
 		{
-			state.exponent[ s ] = c*halfDelta;
-			state.exponentPrime[ s ] = cPrime*halfDelta;
-			state.exponentDoublePrime[ s ] = cDoublePrime*halfDelta;
+			state.exponent[ s ] = c*h;
+			state.exponentPrime[ s ] = cPrime*h + c*hPrime;
+			state.exponentDoublePrime[ s ] = cDoublePrime*h + 2.0*cPrime*hPrime + c*hDoublePrime;
 		}
 
 		// e phi_0 and its derivatives, from the same denominator. The numerator is
@@ -266,9 +431,14 @@ namespace meq
 		double const ratioDoublePrime = numDoublePrime/d - 2.0*numPrime*dPrime/( d*d )
 			- num*dDoublePrime/( d*d ) + 2.0*num*dPrime*dPrime/( d*d*d );
 
-		state.potential = w*halfDelta*ratio;
-		state.potentialPrime = halfDelta*( wPrime*ratio + w*ratioPrime );
-		state.potentialDoublePrime = halfDelta*( wDoublePrime*ratio + 2.0*wPrime*ratioPrime + w*ratioDoublePrime );
+		// e phi_0 = u h with u = omega^2 num/d, differentiated as a product.
+		double const u = w*ratio;
+		double const uPrime = wPrime*ratio + w*ratioPrime;
+		double const uDoublePrime = wDoublePrime*ratio + 2.0*wPrime*ratioPrime + w*ratioDoublePrime;
+
+		state.potential = u*h;
+		state.potentialPrime = uPrime*h + u*hPrime;
+		state.potentialDoublePrime = uDoublePrime*h + 2.0*uPrime*hPrime + u*hDoublePrime;
 
 		return state;
 	}
@@ -285,7 +455,8 @@ namespace meq
 		// runs from +infinity to -infinity, so the root exists, is unique, and can
 		// be bracketed -- a safeguarded Newton cannot fail.
 		std::size_t const n = speciesData.size();
-		double const halfDelta = ( radius*radius - refRadius*refRadius )/2.0;
+		double h = 0.0, hPrime = 0.0, hDoublePrime = 0.0;
+		halfDelta( radius, psi, h, hPrime, hDoublePrime );
 
 		std::array<double, maxSpecies> t{}, tPrime{}, tDoublePrime{};
 		std::array<double, maxSpecies> nRef{}, nRefPrime{}, nRefDoublePrime{};
@@ -326,7 +497,7 @@ namespace meq
 			double top = -std::numeric_limits<double>::infinity();
 			for ( std::size_t s = 0; s < n; ++s )
 			{
-				value[ s ] = speciesData[ s ].mass*w*halfDelta/t[ s ] - speciesData[ s ].charge*y/t[ s ];
+				value[ s ] = speciesData[ s ].mass*w*h/t[ s ] - speciesData[ s ].charge*y/t[ s ];
 				top = std::max( top, value[ s ] );
 			}
 			for ( std::size_t s = 0; s < n; ++s )
@@ -444,8 +615,10 @@ namespace meq
 			double const m = speciesData[ s ].mass;
 			double const ti = t[ s ], tp = tPrime[ s ];
 
-			// B_s = dA_s/dpsi at FIXED y.
-			b[ s ] = m*halfDelta*( wPrime/ti - w*tp/( ti*ti ) ) + z*y*tp/( ti*ti );
+			// B_s = dA_s/dpsi at FIXED y. The centrifugal half is m u_s h with
+			// u_s = omega^2/T_s, so its derivative is m( u_s' h + u_s h' ), and
+			// h' is the midplane gauge's -R_0 R_0' -- zero under a fixed radius.
+			b[ s ] = m*( h*( wPrime/ti - w*tp/( ti*ti ) ) + hPrime*w/ti ) + z*y*tp/( ti*ti );
 
 			double const e = nRef[ s ] == 0.0 ? 0.0 : v[ s ]/nRef[ s ];
 			firstNumer += z*( nRefPrime[ s ] + nRef[ s ]*b[ s ] )*e;
@@ -464,8 +637,9 @@ namespace meq
 
 			l[ s ] = b[ s ] - z*yPrime/ti;
 
-			bPrime[ s ] = m*halfDelta*( wDoublePrime/ti - 2.0*wPrime*tp/( ti*ti )
+			bPrime[ s ] = m*( h*( wDoublePrime/ti - 2.0*wPrime*tp/( ti*ti )
 					- w*tpp/( ti*ti ) + 2.0*w*tp*tp/( ti*ti*ti ) )
+					+ 2.0*hPrime*( wPrime/ti - w*tp/( ti*ti ) ) + hDoublePrime*w/ti )
 				+ z*yPrime*tp/( ti*ti ) + z*y*( tpp/( ti*ti ) - 2.0*tp*tp/( ti*ti*ti ) );
 
 			double const e = nRef[ s ] == 0.0 ? 0.0 : v[ s ]/nRef[ s ];
@@ -481,12 +655,60 @@ namespace meq
 			double const z = speciesData[ s ].charge;
 			double const ti = t[ s ], tp = tPrime[ s ];
 
-			state.exponent[ s ] = speciesData[ s ].mass*w*halfDelta/ti - z*y/ti;
+			state.exponent[ s ] = speciesData[ s ].mass*w*h/ti - z*y/ti;
 			state.exponentPrime[ s ] = l[ s ];
 			state.exponentDoublePrime[ s ] = bPrime[ s ] - z*yDoublePrime/ti + z*yPrime*tp/( ti*ti );
 		}
 
 		return state;
+	}
+
+	void RotatingSource::halfDelta( double radius, double psi, double & value,
+		double & prime, double & doublePrime ) const
+	{
+		if ( gaugeChoice == Gauge::FixedRadius )
+		{
+			value = ( radius*radius - refRadius*refRadius )/2.0;
+			prime = 0.0;
+			doublePrime = 0.0;
+			return;
+		}
+
+		// THE MIDPLANE GAUGE. h = ( R^2 - R_0^2 )/2 at fixed R, so
+		//
+		//     h'  = -R_0 R_0'
+		//     h'' = -( R_0'^2 + R_0 R_0'' )
+		//
+		// with R_0' = 1/( dpsi/dR ) at the crossing, which is the table's slope
+		// column and was read off q rather than differenced. The table is a
+		// Hermite cubic, so R_0'' is its own second derivative: piecewise linear,
+		// jumping at the knots, and exactly the derivative of the R_0' that h'
+		// uses -- so dFdPsi() is the derivative of f() for the frozen table.
+		if ( !midplaneTable )
+			throw std::logic_error( "meq::RotatingSource: Gauge::Midplane has no midplane crossing R_0( psi ) yet. GradShafranovSolver supplies it through NormalisedSource::setMidplaneField() once per Newton iteration of the bordered solve, so a midplane-gauged source is solved as a meq::NormalisedRotatingSource; elsewhere call setMidplaneCrossing() first" );
+
+		double const r0 = ( *midplaneTable )( psi );
+		double const r0Prime = midplaneTable->prime( psi );
+		double const r0DoublePrime = midplaneTable->doublePrime( psi );
+
+		value = ( radius*radius - r0*r0 )/2.0;
+		prime = -r0*r0Prime;
+		doublePrime = -( r0Prime*r0Prime + r0*r0DoublePrime );
+	}
+
+	void RotatingSource::setMidplaneCrossing( std::shared_ptr<Profile const> table )
+	{
+		if ( gaugeChoice != Gauge::Midplane )
+			throw std::logic_error( "meq::RotatingSource::setMidplaneCrossing: this source is in Gauge::FixedRadius, which pins phi_0 at a constant radius and reads no crossing" );
+		if ( !table )
+			throw std::invalid_argument( "meq::RotatingSource::setMidplaneCrossing: the table must not be null" );
+
+		midplaneTable = std::move( table );
+	}
+
+	Profile const * RotatingSource::midplaneCrossing() const
+	{
+		return midplaneTable.get();
 	}
 
 	RotatingSource::State RotatingSource::stateAt( double radius, double psi ) const
@@ -606,6 +828,11 @@ namespace meq
 		return *ggPrimeProfile;
 	}
 
+	RotatingSource::Gauge RotatingSource::gauge() const
+	{
+		return gaugeChoice;
+	}
+
 	double RotatingSource::referenceRadius() const
 	{
 		return refRadius;
@@ -622,8 +849,10 @@ namespace meq
 		double referenceRadius,
 		double psiAxis,
 		double mu0,
-		RotatingSource::Closure closure )
-		: inner( std::move( species ), std::move( omega ), std::move( ggPrime ), referenceRadius, mu0, closure ),
+		RotatingSource::Closure closure,
+		RotatingSource::Gauge gauge )
+		: inner( std::move( species ), std::move( omega ), std::move( ggPrime ), referenceRadius, mu0,
+		         closure, gauge ),
 		  psiAxisValue( 1.0 )
 	{
 		// Validation lives in setNormalisation, in one place, exactly as
@@ -774,6 +1003,40 @@ namespace meq
 	RotatingSource const & NormalisedRotatingSource::unnormalised() const
 	{
 		return inner;
+	}
+
+	RotatingSource & NormalisedRotatingSource::unnormalised()
+	{
+		return inner;
+	}
+
+	bool NormalisedRotatingSource::readsMidplane() const
+	{
+		return inner.gauge() == RotatingSource::Gauge::Midplane;
+	}
+
+	void NormalisedRotatingSource::setMidplaneField( MidplaneField const &field,
+	                                                 double rMin, double rMax )
+	{
+		if ( !readsMidplane() )
+			throw std::logic_error( "meq::NormalisedRotatingSource::setMidplaneField: this source is in Gauge::FixedRadius and reads no midplane" );
+
+		// The field is in PHYSICAL psi; the inner source's argument is Psi, so
+		// the table is taken in Psi at the normalisation in force -- see the
+		// declaration for why that keeps this class a pure wrapper.
+		double const base = psiBoundaryValue;
+		double const span = psiAxisValue - psiBoundaryValue;
+		MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
+		{
+			double psi = 0.0, dPsiDR = 0.0;
+			if ( !field( radius, psi, dPsiDR ) )
+				return false;
+			x = ( psi - base )/span;
+			dXdR = dPsiDR/span;
+			return true;
+		};
+
+		inner.setMidplaneCrossing( tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0 ) );
 	}
 
 }

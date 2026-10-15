@@ -2,7 +2,10 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
+#include <cstdio>
 #include <limits>
+#include <string>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -1346,3 +1349,494 @@ BOOST_AUTO_TEST_CASE( aBoxWithoutAFinitePositiveEdgeIsRefused )
 	BOOST_CHECK_THROW( source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box ),
 	                   std::invalid_argument );
 }
+
+// ---------------------------------------------------------------------------
+// THE MIDPLANE GAUGE. MIRROR-PLAN.md section 5: phi_0 pinned where each flux
+// surface crosses z = 0, R_0( psi ), rather than at a constant R_ref.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	/*
+	 * A CROSSING IN CLOSED FORM: R_0^2 = a + b psi + c psi^2, falling from 1.4
+	 * at psi = 0 to 0.6 at psi = 1 across testRadii, as a mirror's does from
+	 * its outer label to its inner. QUADRATIC IN R_0^2 ON PURPOSE: the midplane
+	 * gauge's half-delta is ( R^2 - R_0^2 )/2, and with R_0^2 linear in psi its
+	 * SECOND derivative would vanish identically and the h'' term of the
+	 * Jacobian would be checked against nothing.
+	 */
+	double const crossingA = 1.96;
+	double const crossingB = -1.2;
+	double const crossingC = -0.4;
+
+	double crossingSquared( double psi ) { return crossingA + crossingB*psi + crossingC*psi*psi; }
+	double crossingSquaredPrime( double psi ) { return crossingB + 2.0*crossingC*psi; }
+
+	double crossing( double psi ) { return std::sqrt( crossingSquared( psi ) ); }
+	double crossingPrime( double psi ) { return crossingSquaredPrime( psi )/( 2.0*crossing( psi ) ); }
+	double crossingDoublePrime( double psi )
+	{
+		double const r = crossing( psi );
+		double const q = crossingSquaredPrime( psi );
+		return crossingC/r - q*q/( 4.0*r*r*r );
+	}
+
+	std::shared_ptr<meq::Profile const> crossingProfile()
+	{
+		return analytic( crossing, crossingPrime, crossingDoublePrime );
+	}
+
+	/// The control: R_0 right, its slope and curvature dropped -- the
+	/// midplane gauge as it would be with the new Jacobian terms missing.
+	std::shared_ptr<meq::Profile const> crossingWithoutSlope()
+	{
+		return analytic( crossing, []( double ) { return 0.0; }, []( double ) { return 0.0; } );
+	}
+
+	meq::RotatingSource midplaneSource( std::vector<meq::Species> species, double omegaScale,
+	                                    std::shared_ptr<meq::Profile const> table )
+	{
+		meq::RotatingSource source( std::move( species ),
+			omegaScale == 0.0 ? nullptr : rotationProfile( omegaScale ),
+			ggPrimeProfile(), 0.0, meq::vacuumPermeability,
+			meq::RotatingSource::Closure::Automatic, meq::RotatingSource::Gauge::Midplane );
+		source.setMidplaneCrossing( std::move( table ) );
+		return source;
+	}
+
+	/// The midplane of a mirror in closed form: psi( R, 0 ) = B R^2 ( 1 + k R )/2,
+	/// which rises monotonically from the axis, normalised between an inner
+	/// label at 0.1 and an outer at 0.35 so that Psi = 1 inside and 0 outside,
+	/// as MR-4's.
+	double const mirrorField = 4.0;
+	double const mirrorBend = 0.3;
+	double const mirrorInner = 0.1;
+	double const mirrorOuter = 0.35;
+
+	double mirrorPsi( double radius )
+	{
+		return mirrorField*radius*radius*( 1.0 + mirrorBend*radius )/2.0;
+	}
+
+	double mirrorPsiPrime( double radius )
+	{
+		return mirrorField*radius*( 1.0 + 1.5*mirrorBend*radius );
+	}
+
+	meq::MidplaneField mirrorNormalised()
+	{
+		return []( double radius, double &x, double &dXdR )
+		{
+			double const span = mirrorPsi( mirrorInner ) - mirrorPsi( mirrorOuter );
+			x = ( mirrorPsi( radius ) - mirrorPsi( mirrorOuter ) )/span;
+			dXdR = mirrorPsiPrime( radius )/span;
+			return true;
+		};
+	}
+
+	/// R with Psi( R ) = x, by bisection on the closed form -- the
+	/// independent inverse a tabulated crossing is held to.
+	double mirrorCrossing( double x )
+	{
+		double lo = 0.05, hi = 0.5;
+		double const span = mirrorPsi( mirrorInner ) - mirrorPsi( mirrorOuter );
+		for ( int i = 0; i < 200; ++i )
+		{
+			double const mid = 0.5*( lo + hi );
+			double const value = ( mirrorPsi( mid ) - mirrorPsi( mirrorOuter ) )/span;
+			( value > x ? lo : hi ) = mid;
+		}
+		return 0.5*( lo + hi );
+	}
+
+	/// The message a refusal carries, or "" when there was none.
+	template<typename Call>
+	std::string refusal( Call call )
+	{
+		try
+		{
+			call();
+		}
+		catch ( std::exception const &e )
+		{
+			return e.what();
+		}
+		return "";
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( midplane_gauge )
+
+/*
+ * THE GAUGE IS WHAT IT SAYS: phi_0 vanishes and every density is its table's
+ * value WHERE THE SURFACE CROSSES THE MIDPLANE, and nowhere else in general.
+ */
+BOOST_AUTO_TEST_CASE( theMidplaneGaugePinsThePotentialAtEachCrossing )
+{
+	for ( bool three : { false, true } )
+	{
+		std::vector<meq::Species> const species = three ? impuritySpecies() : hydrogenicSpecies();
+		meq::RotatingSource const source = midplaneSource( species, 1.0, crossingProfile() );
+		BOOST_TEST( ( source.gauge() == meq::RotatingSource::Gauge::Midplane ) );
+		BOOST_TEST( source.referenceRadius() == 0.0 );
+
+		for ( double psi : testFluxes )
+		{
+			double const r0 = crossing( psi );
+			checkClose( source.potential( r0, psi )/keV, 0.0, 1.0e-12,
+				three ? "e phi_0 at the crossing, three species" : "e phi_0 at the crossing", psi );
+			for ( std::size_t s = 0; s < species.size(); ++s )
+				checkRelative( source.density( s, r0, psi ), ( *species[ s ].density )( psi ), 1.0e-13,
+					"n_s at the crossing against n_s0", r0, psi );
+			// Off the crossing it is not pinned: a source that ignored R_0 and
+			// pinned nothing would pass the two checks above at phi_0 = 0
+			// everywhere, and fails this.
+			BOOST_TEST( std::fabs( source.potential( r0 + 0.2, psi ) ) > 1.0e-6*keV,
+				"phi_0 vanishes off the crossing at psi = " << psi );
+		}
+	}
+}
+
+/*
+ * ACCEPTANCE 1: THE NEW JACOBIAN TERM AGAINST A CENTRAL DIFFERENCE.
+ *
+ * Under the midplane gauge dA_s/dpsi gains -m_s omega^2 R_0 R_0'/T_s, and
+ * d2A_s/dpsi2 the term below it, -( R_0'^2 + R_0 R_0'' ) times the same. F is
+ * mu0 R^2 dp/dpsi, so the first enters the RESIDUAL and the second the
+ * Jacobian. Both closures, over a Mach sweep, against a central difference of
+ * pressure(), f() and potential() -- exactly as the fixed-radius gauge's FD
+ * checks above, and at their tolerances.
+ *
+ * AND THE CHECK IS SHOWN TO SEE THE TERM: the same source handed R_0 with its
+ * slope and curvature zeroed -- the gauge with the new terms missing -- is
+ * asserted to FAIL the pressure comparison by orders of magnitude.
+ */
+BOOST_AUTO_TEST_CASE( theMidplaneJacobianAgreesWithACentralDifference )
+{
+	double worstControl = 0.0;
+	std::printf( "\n  THE MIDPLANE GAUGE'S DERIVATIVES AGAINST CENTRAL DIFFERENCES\n" );
+
+	for ( bool three : { false, true } )
+		for ( double omegaScale : { 0.5, 1.0, 2.0 } )
+		{
+			std::vector<meq::Species> const species = three ? impuritySpecies() : hydrogenicSpecies();
+			meq::RotatingSource const source = midplaneSource( species, omegaScale, crossingProfile() );
+			meq::RotatingSource const control = midplaneSource( species, omegaScale, crossingWithoutSlope() );
+			BOOST_TEST_REQUIRE( ( source.closure() == ( three ? meq::RotatingSource::Closure::RootFind
+			                                                  : meq::RotatingSource::Closure::ClosedForm ) ) );
+
+			double worstHere = 0.0;
+			for ( double radius : testRadii )
+				for ( double psi : testFluxes )
+				{
+					double const hp = 1.0e-6;
+					double const dp = ( source.pressure( radius, psi + hp ) - source.pressure( radius, psi - hp ) )/( 2.0*hp );
+					checkRelative( source.dPressureDPsi( radius, psi ), dp, 1.0e-7,
+						"midplane gauge, dp/dpsi against a central difference", radius, psi );
+
+					double const dphi = ( source.potential( radius, psi + hp ) - source.potential( radius, psi - hp ) )/( 2.0*hp );
+					checkRelative( source.dPotentialDPsi( radius, psi ), dphi, 1.0e-6,
+						"midplane gauge, dphi_0/dpsi against a central difference", radius, psi, keV );
+
+					double const dpControl = ( control.pressure( radius, psi + hp ) - control.pressure( radius, psi - hp ) )/( 2.0*hp );
+					worstControl = std::max( worstControl, std::fabs( control.dPressureDPsi( radius, psi ) - dpControl )
+						/std::max( std::fabs( dpControl ), 1.0e-300 ) );
+
+					for ( double h : { 1.0e-5, 1.0e-4 } )
+					{
+						double const difference = ( source.f( radius, 0.0, psi + h ) - source.f( radius, 0.0, psi - h ) )/( 2.0*h );
+						double const analyticValue = source.dFdPsi( radius, 0.0, psi );
+						double const error = std::fabs( analyticValue - difference )/std::max( 1.0, std::fabs( difference ) );
+						worstHere = std::max( worstHere, error );
+						BOOST_CHECK_MESSAGE( error <= 1.0e-6,
+							( three ? "three species" : "two species" ) << ", omega scale " << omegaScale
+							<< ", h = " << h << ": the midplane gauge's dFdPsi disagrees with a central "
+							"difference at R = " << radius << ", psi = " << psi << ": analytic "
+							<< analyticValue << ", difference " << difference );
+					}
+				}
+			std::printf( "    %-13s omega x %.1f: worst | dF/dpsi - difference |/max( 1, |difference| ) %.3e\n",
+			             three ? "three species" : "two species", omegaScale, worstHere );
+		}
+
+	std::printf( "    control, R_0' and R_0'' dropped: worst relative dp/dpsi error %.3e\n", worstControl );
+	std::fflush( stdout );
+	BOOST_TEST( worstControl > 1.0e-2,
+		"dropping R_0' and R_0'' moves dp/dpsi by only " << worstControl << " relative, so the "
+		"central-difference check above cannot see the midplane gauge's Jacobian term" );
+}
+
+/*
+ * THE TWO GAUGES DESCRIBE ONE PLASMA. Two species with constant T and omega,
+ * so the shared exponent is C( R^2 - R_*^2 )/2 with C constant and the gauge
+ * transfer is closed form:
+ *
+ *     n_s0^mid( psi ) = n_s0^fixed( psi ) exp( C ( R_0( psi )^2 - R_ref^2 )/2 ),
+ *
+ * which with R_0^2 quadratic in psi has both derivatives in closed form too. So
+ * every PHYSICAL quantity -- n_s, p, F and dF/dpsi -- must agree between the two
+ * at every ( R, psi ), and phi_0 must differ by a function of psi alone, which
+ * is what a gauge is.
+ *
+ * It tests the R_0 chain rule against a second route that does not go through
+ * it: the fixed-radius source has no R_0 anywhere.
+ */
+BOOST_AUTO_TEST_CASE( theTwoGaugesDescribeOnePlasma )
+{
+	double const tIon = 1.8*keV;
+	double const tElectron = 1.3*keV;
+	double const omega = 1.3*sonicOmega;
+	double const c = omega*omega*( electronMass + deuteronMass )/( tElectron + tIon );
+
+	auto transfer = [ c ]( double psi )
+	{
+		return std::exp( c*( crossingSquared( psi ) - referenceRadius*referenceRadius )/2.0 );
+	};
+	auto midplaneDensity = analytic(
+		[ transfer ]( double psi ) { return ionDensity( psi )*transfer( psi ); },
+		[ transfer, c ]( double psi )
+		{
+			double const g = c*crossingSquaredPrime( psi )/2.0;
+			return ( ionDensityPrime( psi ) + ionDensity( psi )*g )*transfer( psi );
+		},
+		[ transfer, c ]( double psi )
+		{
+			double const g = c*crossingSquaredPrime( psi )/2.0;
+			double const gPrime = c*crossingC;
+			return ( ionDensityDoublePrime( psi ) + 2.0*ionDensityPrime( psi )*g
+			         + ionDensity( psi )*( g*g + gPrime ) )*transfer( psi );
+		} );
+
+	auto pair = [ & ]( std::shared_ptr<meq::Profile const> ionDensityTable )
+	{
+		std::vector<meq::Species> species( 2 );
+		species[ 0 ].mass = deuteronMass;
+		species[ 0 ].charge = 1.0;
+		species[ 0 ].temperature = std::make_shared<meq::ConstantProfile const>( tIon );
+		species[ 0 ].density = std::move( ionDensityTable );
+		species[ 1 ].mass = electronMass;
+		species[ 1 ].charge = -1.0;
+		species[ 1 ].temperature = std::make_shared<meq::ConstantProfile const>( tElectron );
+		species[ 1 ].density = meq::neutralisingDensity( species, 1 );
+		return species;
+	};
+
+	auto rotationConstant = std::make_shared<meq::ConstantProfile const>( omega );
+	meq::RotatingSource const fixed( pair( ionDensityProfile() ), rotationConstant, ggPrimeProfile(),
+	                                 referenceRadius );
+	meq::RotatingSource midplane( pair( midplaneDensity ), rotationConstant, ggPrimeProfile(), 0.0,
+	                              meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+	                              meq::RotatingSource::Gauge::Midplane );
+	midplane.setMidplaneCrossing( crossingProfile() );
+
+	double worst = 0.0;
+	for ( double psi : testFluxes )
+	{
+		double const offset = fixed.potential( testRadii[ 0 ], psi ) - midplane.potential( testRadii[ 0 ], psi );
+		for ( double radius : testRadii )
+		{
+			for ( std::size_t s = 0; s < 2; ++s )
+				checkRelative( midplane.density( s, radius, psi ), fixed.density( s, radius, psi ), 1.0e-13,
+					"n_s, midplane against fixed-radius gauge", radius, psi );
+			checkRelative( midplane.pressure( radius, psi ), fixed.pressure( radius, psi ), 1.0e-13,
+				"p, midplane against fixed-radius gauge", radius, psi );
+			checkRelative( midplane.f( radius, 0.0, psi ), fixed.f( radius, 0.0, psi ), 1.0e-12,
+				"F, midplane against fixed-radius gauge", radius, psi );
+			checkRelative( midplane.dFdPsi( radius, 0.0, psi ), fixed.dFdPsi( radius, 0.0, psi ), 1.0e-11,
+				"dF/dpsi, midplane against fixed-radius gauge", radius, psi );
+			checkRelative( fixed.potential( radius, psi ) - midplane.potential( radius, psi ), offset, 1.0e-12,
+				"phi_0's gauge offset, which must not depend on R", radius, psi, keV );
+			worst = std::max( worst, std::fabs( midplane.dFdPsi( radius, 0.0, psi ) - fixed.dFdPsi( radius, 0.0, psi ) )
+				/std::max( std::fabs( fixed.dFdPsi( radius, 0.0, psi ) ), 1.0e-300 ) );
+		}
+	}
+	std::printf( "\n  ONE PLASMA IN TWO GAUGES: worst relative dF/dpsi difference %.3e\n", worst );
+}
+
+/*
+ * tabulateMidplaneCrossing() ON A MIRROR'S MIDPLANE IN CLOSED FORM: every knot
+ * on the root to round-off, its slope the inverse function theorem's, and the
+ * Hermite interpolant between knots against an independent bisection.
+ */
+BOOST_AUTO_TEST_CASE( theCrossingIsTabulatedOnAMirrorsMidplane )
+{
+	std::shared_ptr<meq::SplineProfile const> const table =
+		meq::tabulateMidplaneCrossing( mirrorNormalised(), 0.0, 3.0, 0.0, 1.0 );
+	BOOST_TEST_REQUIRE( table->knots().size() == 1025u );
+	BOOST_TEST( table->uniformKnots() );
+
+	double const span = mirrorPsi( mirrorInner ) - mirrorPsi( mirrorOuter );
+	double worstKnot = 0.0, worstSlope = 0.0, worstBetween = 0.0, worstBetweenSlope = 0.0;
+	for ( meq::Knot const &k : table->knots() )
+	{
+		double const x = ( mirrorPsi( k.value ) - mirrorPsi( mirrorOuter ) )/span;
+		worstKnot = std::max( worstKnot, std::fabs( x - k.psi ) );
+		double const slope = span/mirrorPsiPrime( k.value );
+		worstSlope = std::max( worstSlope, std::fabs( k.derivative - slope )/std::fabs( slope ) );
+	}
+	for ( std::size_t i = 0; i + 1 < table->knots().size(); ++i )
+	{
+		double const x = 0.5*( table->knots()[ i ].psi + table->knots()[ i + 1 ].psi );
+		double const r = mirrorCrossing( x );
+		worstBetween = std::max( worstBetween, std::fabs( ( *table )( x ) - r ) );
+		double const slope = span/mirrorPsiPrime( r );
+		worstBetweenSlope = std::max( worstBetweenSlope, std::fabs( table->prime( x ) - slope )/std::fabs( slope ) );
+	}
+	std::printf( "\n  THE MIDPLANE CROSSING, 1024 INTERVALS: knot residual in Psi %.3e, knot slope %.3e "
+	             "relative; between knots R_0 %.3e m and its slope %.3e relative\n",
+	             worstKnot, worstSlope, worstBetween, worstBetweenSlope );
+
+	BOOST_TEST( worstKnot < 1.0e-14 );
+	BOOST_TEST( worstSlope < 1.0e-13 );
+	BOOST_TEST( worstBetween < 1.0e-11 );
+	BOOST_TEST( worstBetweenSlope < 1.0e-7 );
+	BOOST_TEST( ( *table )( 1.0 ) == mirrorInner, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( ( *table )( 0.0 ) == mirrorOuter, boost::test_tools::tolerance( 1.0e-14 ) );
+}
+
+/*
+ * THE PRECONDITION IS CHECKED, AND EACH WAY IT FAILS IS REFUSED BY NAME.
+ *
+ * A tokamak's midplane, Psi = 1 - ( ( R - 1 )/0.4 )^2: every surface crosses
+ * z = 0 twice, inboard and outboard, so R_0 is not a function. A slope of the
+ * wrong sign -- what a q read with the wrong orientation gives. A midplane that
+ * stops short of a label, and one with a hole in it.
+ */
+BOOST_AUTO_TEST_CASE( aMidplaneThatIsNotMonotoneIsRefused )
+{
+	meq::MidplaneField const tokamak = []( double radius, double &x, double &dXdR )
+	{
+		x = 1.0 - ( radius - 1.0 )*( radius - 1.0 )/0.16;
+		dXdR = -2.0*( radius - 1.0 )/0.16;
+		return true;
+	};
+	std::string const folded = refusal( [ & ]
+		{ meq::tabulateMidplaneCrossing( tokamak, 0.3, 1.8, 0.0, 1.0 ); } );
+	BOOST_TEST( folded.find( "NOT MONOTONE" ) != std::string::npos, folded );
+
+	meq::MidplaneField const mirror = mirrorNormalised();
+	meq::MidplaneField const wrongSign = [ & ]( double radius, double &x, double &dXdR )
+	{
+		mirror( radius, x, dXdR );
+		dXdR = -dXdR;
+		return true;
+	};
+	std::string const sense = refusal( [ & ]
+		{ meq::tabulateMidplaneCrossing( wrongSign, 0.0, 3.0, 0.0, 1.0 ); } );
+	BOOST_TEST( sense.find( "against the sense" ) != std::string::npos, sense );
+
+	std::string const shortOf = refusal( [ & ]
+		{ meq::tabulateMidplaneCrossing( mirror, 0.0, 0.3, 0.0, 1.0 ); } );
+	BOOST_TEST( shortOf.find( "not the whole of" ) != std::string::npos, shortOf );
+
+	meq::MidplaneField const holed = [ & ]( double radius, double &x, double &dXdR )
+	{
+		mirror( radius, x, dXdR );
+		return !( radius > 0.2 && radius < 0.21 );
+	};
+	std::string const hole = refusal( [ & ]
+		{ meq::tabulateMidplaneCrossing( holed, 0.0, 3.0, 0.0, 1.0 ); } );
+	BOOST_TEST( hole.find( "leaves the domain" ) != std::string::npos, hole );
+
+	// And the one that is right, so the four above are refusals of their own
+	// defects and not of the mirror.
+	BOOST_TEST( refusal( [ & ] { meq::tabulateMidplaneCrossing( mirror, 0.0, 3.0, 0.0, 1.0 ); } ).empty() );
+}
+
+/*
+ * WHAT THE GAUGE REFUSES, AND THAT THE FIXED RADIUS IS UNTOUCHED.
+ */
+BOOST_AUTO_TEST_CASE( theMidplaneGaugeRefusesWhatItCannotMean )
+{
+	// A radius beside the midplane gauge would be accepted and not read.
+	BOOST_CHECK_THROW( meq::RotatingSource( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(), 1.0,
+		meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+		meq::RotatingSource::Gauge::Midplane ), std::invalid_argument );
+
+	// No crossing yet: it says so rather than evaluating at some radius.
+	meq::RotatingSource bare( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(), 0.0,
+		meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+		meq::RotatingSource::Gauge::Midplane );
+	BOOST_TEST( bare.midplaneCrossing() == nullptr );
+	BOOST_CHECK_THROW( bare.f( 1.0, 0.0, 0.5 ), std::logic_error );
+	BOOST_CHECK_THROW( bare.setMidplaneCrossing( nullptr ), std::invalid_argument );
+
+	// The fixed radius has no crossing to be given, and is the default.
+	meq::RotatingSource fixed = makeSource();
+	BOOST_TEST( ( fixed.gauge() == meq::RotatingSource::Gauge::FixedRadius ) );
+	BOOST_CHECK_THROW( fixed.setMidplaneCrossing( crossingProfile() ), std::logic_error );
+
+	meq::NormalisedRotatingSource normalised( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(),
+		referenceRadius, 1.0 );
+	BOOST_TEST( !normalised.readsMidplane() );
+	BOOST_CHECK_THROW( normalised.setMidplaneField( mirrorNormalised(), 0.0, 3.0 ), std::logic_error );
+}
+
+/*
+ * THE NORMALISED SOURCE TABULATES IN Psi, AT THE NORMALISATION IN FORCE, from a
+ * field in PHYSICAL psi -- and its normalisation derivatives stay analytic for
+ * the frozen table, which is the property the table being in Psi buys.
+ */
+BOOST_AUTO_TEST_CASE( theNormalisedSourceTabulatesInPsiAndKeepsItsColumnsAnalytic )
+{
+	double const psiInner = mirrorPsi( mirrorInner );
+	double const psiOuter = mirrorPsi( mirrorOuter );
+
+	meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(),
+		0.0, psiInner, meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+		meq::RotatingSource::Gauge::Midplane );
+	BOOST_TEST_REQUIRE( source.readsMidplane() );
+	source.setNormalisation( psiInner, psiOuter );
+
+	meq::MidplaneField const physical = []( double radius, double &psi, double &dPsiDR )
+	{
+		psi = mirrorPsi( radius );
+		dPsiDR = mirrorPsiPrime( radius );
+		return true;
+	};
+	source.setMidplaneField( physical, 0.0, 3.0 );
+	meq::Profile const *table = source.unnormalised().midplaneCrossing();
+	BOOST_TEST_REQUIRE( table != nullptr );
+	for ( double x : { 0.0, 0.25, 0.5, 0.75, 1.0 } )
+		BOOST_TEST( ( *table )( x ) == mirrorCrossing( x ), boost::test_tools::tolerance( 1.0e-11 ) );
+
+	// phi_0 vanishes at each surface's crossing, read in physical psi.
+	for ( double x : { 0.1, 0.5, 0.9 } )
+	{
+		double const psi = psiOuter + x*( psiInner - psiOuter );
+		checkClose( source.potential( mirrorCrossing( x ), psi )/keV, 0.0, 1.0e-10,
+			"normalised midplane source, e phi_0 at the crossing", x );
+	}
+
+	// The border columns, against a Richardson difference over the
+	// normalisation with the table held -- the freeze.
+	double const z = 0.0;
+	double worst = 0.0;
+	for ( double radius : { 0.15, 0.22, 0.3 } )
+		for ( double x : { 0.2, 0.5, 0.8 } )
+		{
+			double const psi = psiOuter + x*( psiInner - psiOuter );
+			source.setNormalisation( psiInner, psiOuter );
+			double dAxis = 0.0, dBoundary = 0.0;
+			BOOST_TEST_REQUIRE( source.normalisationDerivatives( radius, z, psi, dAxis, dBoundary ) );
+			auto at = [ & ]( double step, bool axis )
+			{
+				double const scale = psiInner - psiOuter;
+				source.setNormalisation( psiInner + ( axis ? step*scale : 0.0 ), psiOuter + ( axis ? 0.0 : step*scale ) );
+				double const plus = source.f( radius, z, psi );
+				source.setNormalisation( psiInner - ( axis ? step*scale : 0.0 ), psiOuter - ( axis ? 0.0 : step*scale ) );
+				double const minus = source.f( radius, z, psi );
+				return ( plus - minus )/( 2.0*step*scale );
+			};
+			double const h = 1.0e-4;
+			double const numericAxis = ( 4.0*at( h/2.0, true ) - at( h, true ) )/3.0;
+			double const numericBoundary = ( 4.0*at( h/2.0, false ) - at( h, false ) )/3.0;
+			worst = std::max( { worst, std::fabs( dAxis - numericAxis )/std::fabs( numericAxis ),
+			                    std::fabs( dBoundary - numericBoundary )/std::fabs( numericBoundary ) } );
+		}
+	source.setNormalisation( psiInner, psiOuter );
+	std::printf( "\n  MIDPLANE GAUGE, THE BORDER COLUMNS FOR THE FROZEN TABLE: worst relative %.3e\n", worst );
+	BOOST_TEST( worst < 1.0e-7 );
+}
+
+BOOST_AUTO_TEST_SUITE_END()

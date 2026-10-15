@@ -6654,6 +6654,210 @@ namespace
 		return plasmaSupportFrozenValue;
 	}
 
+	int GradShafranovSolver::midplaneGaugeRefreshes() const
+	{
+		return midplaneRefreshCount;
+	}
+
+	int GradShafranovSolver::midplaneGaugeHolds() const
+	{
+		return midplaneHoldCount;
+	}
+
+	bool GradShafranovSolver::midplaneReference( int element, double radius,
+	                                             mfem::IntegrationPoint &reference ) const
+	{
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		thread_local mfem::IsoparametricTransformation scratch;
+		mesh.GetElementTransformation( element, &scratch );
+		mfem::InverseElementTransformation inverse( &scratch );
+		// UNPROJECTED, for locateFieldPoint()'s reason: the default clamps, and
+		// a clamped point reads as inside wherever it is.
+		inverse.SetSolverType( mfem::InverseElementTransformation::Newton );
+		mfem::Vector point( 2 );
+		point( 0 ) = radius;
+		point( 1 ) = 0.0;
+		return inverse.Transform( point, reference ) == mfem::InverseElementTransformation::Inside;
+	}
+
+	void GradShafranovSolver::buildMidplaneRuns()
+	{
+		if ( !midplaneRunStart.empty() )
+			return;
+
+		/*
+		 * THE ELEMENTS ALONG z = 0, ONCE PER SOLVE: a fine sampling located in
+		 * one batch by meq::PointLocator's bin grid, compressed into runs, and
+		 * each run's start then bisected onto the face where the midplane
+		 * enters it. The runs are the PANELS the flux is integrated over, so
+		 * each must lie in one element: a panel straddling a face would
+		 * integrate one element's polynomial across another's.
+		 */
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Vector lower, upper;
+		mesh.GetBoundingBox( lower, upper );
+		midplaneRMin = std::max( 0.0, static_cast<double>( lower( 0 ) ) );
+		midplaneRMax = upper( 0 );
+
+		int const count = 16384;
+		mfem::Vector positions( 2*count );
+		for ( int i = 0; i < count; ++i )
+		{
+			positions( i ) = midplaneRMin + ( midplaneRMax - midplaneRMin )*i/( count - 1.0 );
+			positions( count + i ) = 0.0;
+		}
+		PointLocator locator( mesh );
+		locator.locate( positions );
+		double previous = -1.0;
+		for ( int i = 0; i < count; ++i )
+		{
+			if ( locator.codes()[ i ] == 2 )
+				continue;
+			int const element = locator.elements()[ i ];
+			if ( midplaneRunElement.empty() || midplaneRunElement.back() != element )
+			{
+				double start = positions( i );
+				if ( !midplaneRunElement.empty() && previous >= 0.0 )
+				{
+					// The face lies between the last sample of the run before
+					// and this one: bisect on membership of the element before.
+					double lo = previous, hi = start;
+					mfem::IntegrationPoint reference;
+					for ( int k = 0; k < 60 && hi - lo > 4.0*std::numeric_limits<double>::epsilon()*hi; ++k )
+					{
+						double const mid = 0.5*( lo + hi );
+						( midplaneReference( midplaneRunElement.back(), mid, reference ) ? lo : hi ) = mid;
+					}
+					start = hi;
+				}
+				midplaneRunStart.push_back( start );
+				midplaneRunElement.push_back( element );
+			}
+			previous = positions( i );
+		}
+		if ( midplaneRunStart.empty() )
+			throw std::runtime_error( "meq::GradShafranovSolver: the midplane gauge reads z = 0, and no point of z = 0 lies in the mesh" );
+		midplaneRunEnd = previous;
+	}
+
+	MidplaneField GradShafranovSolver::midplaneFieldOf( mfem::Vector const &state ) const
+	{
+		/*
+		 * THE FLUX ALONG z = 0 IS INTEGRATED FROM THE SOLVED q, NOT READ OFF
+		 * psi_h, AND THAT IS MEASURED RATHER THAN A PREFERENCE.
+		 *
+		 * dpsi/dR = R q_R, q = grad_bar( psi )/R, and DarcyForm's flux block
+		 * holds -q -- the sign refreshXPoint() undoes the same way. psi_h is
+		 * discontinuous between elements, and on the mirror's level-0 mesh at
+		 * k = 3 it jumps by 1.3e-03 Wb/rad across a face -- the plasma's own
+		 * flux is 8.7e-04 -- with a slope within an element 30% off R q_R. A
+		 * crossing table read off psi_h then has knot values its own slopes
+		 * disagree with by 100%, and a midplane-gauged source evaluated on it
+		 * moves by that much every time the table is refreshed. So psi along
+		 * the midplane is
+		 *
+		 *     psi( R ) = psi_h( R_start ) + int_{R_start}^{R} r q_R( r ) dr + psi_c( R ),
+		 *
+		 * continuous, with dpsi/dR EXACTLY the slope handed back, element by
+		 * element by Gauss-Legendre over the panels buildMidplaneRuns() bisected
+		 * onto the faces. It differs from psi_h by psi_h's own error, which
+		 * falls at the method's rate. psi_c is exact, as the label rows read it.
+		 *
+		 * The panel sums are taken once here, per state, and the field reads
+		 * them; the scratch is the field's own, so it can be copied and called
+		 * without touching the solver's state.
+		 */
+		std::shared_ptr<mfem::Vector> fluxShape = std::make_shared<mfem::Vector>();
+		std::shared_ptr<mfem::Array<int>> fluxDofs = std::make_shared<mfem::Array<int>>();
+		auto qR = [ this, &state, fluxShape, fluxDofs ]( int element, double radius ) -> double
+		{
+			mfem::IntegrationPoint reference;
+			midplaneReference( element, radius, reference );
+			mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+			fluxShape->SetSize( fluxFe->GetDof() );
+			fluxFe->CalcShape( reference, *fluxShape );
+			fluxFes->GetElementDofs( element, *fluxDofs );
+			fluxFes->DofsToVDofs( 0, *fluxDofs );
+			double value = 0.0;
+			for ( int i = 0; i < fluxDofs->Size(); ++i )
+				value -= ( *fluxShape )( i )*state( ( *fluxDofs )[ i ] );
+			return value;
+		};
+
+		mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::SEGMENT,
+			2*( order() + 1 ) + 3 );
+		auto integral = [ qR, &rule ]( int element, double from, double to )
+		{
+			double sum = 0.0;
+			for ( int i = 0; i < rule.GetNPoints(); ++i )
+			{
+				double const r = from + ( to - from )*rule.IntPoint( i ).x;
+				sum += rule.IntPoint( i ).weight*r*qR( element, r );
+			}
+			return sum*( to - from );
+		};
+
+		// The anchor: psi_h at the first panel's start, inside its element.
+		double anchor = 0.0;
+		{
+			int const element = midplaneRunElement.front();
+			mfem::IntegrationPoint reference;
+			midplaneReference( element, midplaneRunStart.front(), reference );
+			mfem::FiniteElement const *potentialFe = potentialFes->GetFE( element );
+			mfem::Vector shape( potentialFe->GetDof() );
+			potentialFe->CalcShape( reference, shape );
+			mfem::Array<int> dofs;
+			potentialFes->GetElementDofs( element, dofs );
+			for ( int i = 0; i < dofs.Size(); ++i )
+				anchor += shape( i )*state( blockOffsets[ 1 ] + dofs[ i ] );
+		}
+		std::vector<double> cumulative( midplaneRunStart.size() );
+		cumulative[ 0 ] = anchor;
+		for ( std::size_t i = 0; i + 1 < midplaneRunStart.size(); ++i )
+			cumulative[ i + 1 ] = cumulative[ i ] + integral( midplaneRunElement[ i ],
+				midplaneRunStart[ i ], midplaneRunStart[ i + 1 ] );
+
+		return [ this, qR, integral, cumulative ]( double radius, double &psi, double &dPsiDR ) -> bool
+		{
+			if ( !( radius >= midplaneRunStart.front() && radius <= midplaneRunEnd ) )
+				return false;
+			std::size_t const run = static_cast<std::size_t>(
+				std::upper_bound( midplaneRunStart.begin(), midplaneRunStart.end(), radius )
+				- midplaneRunStart.begin() - 1 );
+			int const element = midplaneRunElement[ run ];
+			psi = cumulative[ run ] + integral( element, midplaneRunStart[ run ], radius )
+			      + conductorPsi( radius, 0.0 );
+			dPsiDR = radius*qR( element, radius );
+			if ( conductorFieldSet && radius > 0.0 )
+			{
+				double gradR = 0.0, gradZ = 0.0;
+				conductorFieldSet->gradPsi( radius, 0.0, gradR, gradZ );
+				dPsiDR += gradR;
+			}
+			return true;
+		};
+	}
+
+	void GradShafranovSolver::refreshMidplaneGauge( mfem::Vector const &state )
+	{
+		if ( !normalisedSource || !normalisedSource->readsMidplane() )
+			return;
+
+		buildMidplaneRuns();
+		countedHostRead( state, __LINE__ );
+		normalisedSource->setMidplaneField( midplaneFieldOf( state ), midplaneRMin, midplaneRMax );
+		++midplaneRefreshCount;
+	}
+
+	MidplaneField GradShafranovSolver::midplaneField( double &rMin, double &rMax )
+	{
+		buildMidplaneRuns();
+		countedHostRead( solution, __LINE__ );
+		rMin = midplaneRMin;
+		rMax = midplaneRMax;
+		return midplaneFieldOf( solution );
+	}
+
 	void GradShafranovSolver::buildConductorNodalCache()
 	{
 		/*
@@ -11621,6 +11825,25 @@ namespace
 		refreshXPoint( unknown );
 		double constraintB = boundaryFluxIsUnknown
 		                     ? sB - limiterTotal( unknown ) : 0.0;
+
+		/*
+		 * THE MIDPLANE GAUGE'S FIRST TABLE, BEFORE THE FIRST RESIDUAL READS IT.
+		 * MIRROR-PLAN.md section 5: R_0( Psi ) from the starting iterate at the
+		 * starting normalisation, and refreshed at the head of every iteration
+		 * below. The runs along z = 0 are re-taken per solve, since an adaptive
+		 * cycle refines the mesh this solver holds by reference.
+		 */
+		midplaneRunStart.clear();
+		midplaneRunElement.clear();
+		midplaneRefreshCount = 0;
+		midplaneHoldCount = 0;
+		std::string midplaneHeldReason;
+		bool const midplaneGauge = normalisedSource && normalisedSource->readsMidplane();
+		if ( midplaneGauge )
+		{
+			normalisedSource->setNormalisation( s, sB );
+			refreshMidplaneGauge( unknown );
+		}
 		fieldResidual( unknown, s, residual );
 
 		/*
@@ -12625,6 +12848,49 @@ namespace
 		{
 			if ( phase == 0 )
 				borderedPicardIterationCount = phaseIteration;
+
+			/*
+			 * THE MIDPLANE GAUGE, RE-TABULATED ONCE PER ITERATION AND FROZEN
+			 * WITHIN IT. MIRROR-PLAN.md section 5, beside the support freeze
+			 * and for its reason: R_0 moving inside the line search would make
+			 * every trial a different function. The residual carried in from
+			 * the accepted trial was taken against the previous table, so it is
+			 * re-taken here -- and with it the plasma current, the one border
+			 * row the source enters -- which is what makes the merit below,
+			 * and the convergence test on it, an answer judged against its own
+			 * crossings.
+			 *
+			 * **AN ITERATE THAT FAILS THE PRECONDITION KEEPS THE TABLE IT HAD.**
+			 * The precondition is a property of the ANSWER: a damped first step
+			 * at high Mach can fold the midplane flux of an iterate that the
+			 * next steps unfold, MEASURED on three species at M = 6. So the
+			 * previous crossings stay frozen for one more iteration -- the
+			 * residual is then the one already in hand -- and the refusal is
+			 * kept for the answer: a solve may not CONVERGE on a table its own
+			 * state could not have given. The starting state's refresh, above
+			 * the loop, refuses at once.
+			 */
+			if ( midplaneGauge && iteration > 0 )
+			{
+				normalisedSource->setNormalisation( s, sB );
+				try
+				{
+					refreshMidplaneGauge( unknown );
+					midplaneHeldReason.clear();
+				}
+				catch ( std::runtime_error const &folded )
+				{
+					midplaneHeldReason = folded.what();
+					++midplaneHoldCount;
+				}
+				if ( midplaneHeldReason.empty() )
+				{
+					if ( currentIsUnknown )
+						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
+					fieldResidual( unknown, s, residual );
+				}
+			}
+
 			double const fieldReference = residual.Norml2();
 			double const norm = augmentedNorm( fieldReference, constraint,
 			                                   constraintB, constraintL,
@@ -12701,6 +12967,11 @@ namespace
 					borderStepHistory.back().handedOff = true;
 				if ( norm <= phaseTarget )
 				{
+					if ( !midplaneHeldReason.empty() )
+						throw std::runtime_error( "meq::GradShafranovSolver::solve: the "
+							"iteration converged on midplane crossings its own answer could "
+							"not give, since the midplane gauge's precondition fails there: "
+							+ midplaneHeldReason );
 					inverseTargetsMetValue = true;
 					converged = true;
 					break;

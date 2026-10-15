@@ -6592,12 +6592,18 @@ int main( int argc, char **argv )
 		if ( !ePhi.empty() )
 		{
 			meq::RotatingParameters const &rotating = config->getSource().getRotating();
+			// Where each Density is the physical density, which the gauge
+			// decides: a constant radius, or each surface's midplane crossing.
+			bool const midplane = rotating.gauge == meq::RotatingGaugeType::Midplane;
+			std::string const where = midplane
+				? "where its flux surface crosses z = 0"
+				: "R = ReferenceRadius";
 			for ( std::size_t sp = 0; sp < densities.size(); ++sp )
 				writer.field( "n_" + variableName( rotating.species[ sp ].name ),
 				              densities[ sp ],
 				              "number density of " + rotating.species[ sp ].name
-				                  + ", RoPP (96); equals its Density profile on "
-				                    "R = ReferenceRadius",
+				                  + ", RoPP (96); equals its Density profile "
+				                  + ( midplane ? "" : "on " ) + where,
 				              "m^-3" );
 
 			// e phi_0 AND NOT phi_0, in JOULES AND NOT VOLTS. It is the
@@ -6607,8 +6613,9 @@ int main( int argc, char **argv )
 			// 1.602176634e-19 for volts.
 			writer.field( "e_phi_0", ePhi,
 			              "elementary charge times the electrostatic potential "
-			              "phi_0 of RoPP (97), in JOULES not volts; zero on "
-			              "R = ReferenceRadius by the gauge",
+			              "phi_0 of RoPP (97), in JOULES not volts; zero "
+			              + std::string( midplane ? "" : "on " ) + where
+			              + " by the gauge",
 			              "J" );
 		}
 		if ( !nodeMaterials.empty() )

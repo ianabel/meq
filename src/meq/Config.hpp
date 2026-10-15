@@ -523,8 +523,9 @@ namespace meq
 		std::string temperatureFile;
 		double temperatureScale = 1.0;
 		// Density / DensityFile: n_s0 [m^-3], the density of this species ON
-		// THE CURVE R = ReferenceRadius. Both are absent when Neutralising, and
-		// so is DensityScale.
+		// THE CURVE R = ReferenceRadius -- or, under Gauge = "midplane", where
+		// each flux surface crosses z = 0. Both are absent when Neutralising,
+		// and so is DensityScale.
 		double density = 0.0;
 		std::string densityFile;
 		double densityScale = 1.0;
@@ -535,6 +536,16 @@ namespace meq
 		// independent ones; this is where that missing one comes from, and
 		// asking for n profiles that happen to balance invites n that do not.
 		bool neutralising = false;
+	};
+
+	// `[source] Gauge` -- WHERE phi_0 IS PINNED ON EACH FLUX SURFACE. The
+	// configuration's spelling of meq::RotatingSource::Gauge, which this layer
+	// does not name for the reason PlasmaSupportShapeType gives; SourceFactory
+	// maps one onto the other in one switch with no default.
+	enum class RotatingGaugeType
+	{
+		FixedRadius,  // "fixed-radius": phi_0( ReferenceRadius ) = 0, the default
+		Midplane      // "midplane": phi_0 = 0 where each surface crosses z = 0
 	};
 
 	// A plasma in sonic toroidal rotation: refs/RotatingGK.pdf eq (136), closed
@@ -566,8 +577,17 @@ namespace meq
 		// is a CONSTANT -- the geometric axis -- not the magnetic axis and not
 		// a flux-surface average. Two sets of densities differing by the gauge
 		// describe the same plasma, so a comparison against another code has to
-		// agree on this first.
+		// agree on this first. Zero, and refused if given, under the midplane
+		// gauge, which has no constant radius.
 		double referenceRadius = 1.0;
+		// Gauge: "fixed-radius" (the default) or "midplane", MIRROR-PLAN.md
+		// section 5. The midplane gauge makes each Density the physical density
+		// where its flux surface crosses z = 0, which keeps a high-Mach,
+		// multi-species mirror's densities within a double; it needs psi
+		// monotone along z = 0, so it is accepted only on a mirror --
+		// Normalised, SupportShape = "box" -- and refused on a tokamak, whose
+		// midplane crosses every surface twice.
+		RotatingGaugeType gauge = RotatingGaugeType::FixedRadius;
 		// Mu0, Normalised, PsiAxis, ConfineToPlasma: as MHDParameters, and
 		// meaning the same.
 		double mu0 = 4.0e-7*3.14159265358979323846;

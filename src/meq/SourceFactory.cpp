@@ -178,6 +178,21 @@ namespace meq
 			return pieces;
 		}
 
+		/// `[source] Gauge`, mapped in ONE switch with no default -- see
+		/// meq::RotatingGaugeType -- so a third value fails to compile here
+		/// rather than falling through to the fixed radius.
+		RotatingSource::Gauge rotatingGauge( RotatingParameters const &parameters )
+		{
+			switch ( parameters.gauge )
+			{
+				case RotatingGaugeType::FixedRadius:
+					return RotatingSource::Gauge::FixedRadius;
+				case RotatingGaugeType::Midplane:
+					return RotatingSource::Gauge::Midplane;
+			}
+			throw std::logic_error( "meq::makeSource: no mapping for this [source] Gauge" );
+		}
+
 		/// meq::RotatingSource and friends validate their own arguments and throw
 		/// std::invalid_argument. That is right for a library call and wrong for
 		/// a configuration file, whose author wants to know which key to edit --
@@ -261,7 +276,8 @@ namespace meq
 				{
 					return std::make_shared<RotatingSource const>( std::move( pieces.species ),
 						std::move( pieces.omega ), std::move( pieces.ggPrime ),
-						parameters.referenceRadius, parameters.mu0 );
+						parameters.referenceRadius, parameters.mu0,
+						RotatingSource::Closure::Automatic, rotatingGauge( parameters ) );
 				}, configFileName, "source.species" );
 			}
 		}
@@ -324,7 +340,8 @@ namespace meq
 				{
 					return std::make_shared<NormalisedRotatingSource>( std::move( pieces.species ),
 						std::move( pieces.omega ), std::move( pieces.ggPrime ),
-						parameters.referenceRadius, psiAxis, parameters.mu0 );
+						parameters.referenceRadius, psiAxis, parameters.mu0,
+						RotatingSource::Closure::Automatic, rotatingGauge( parameters ) );
 				}, configFileName, "source.species" );
 			}
 
