@@ -102,6 +102,11 @@ invisible to the others. Reach for them in this order.
 * It runs a copy of `diverted-tokamak` with `PlasmaSupportSweeps` stripped, so
   that a **moving** support stays covered (M-239). *A device test's cases have to
   exercise every way host state can move, not only every leg.*
+* **The mirror is `RotatingMirrorDevice`'s, not one of its cases**: the box,
+  two labels at points and subtracted filaments, `cpu` against `cuda` on the
+  exact `ψ_h` and `q_h` within 1e-12 of their largest values. A tolerance and
+  not printed digits, because the card differs from itself between takes
+  → **[M-DEVICE](MEASUREMENTS.md#m-device)**.
 
 **THREE PATTERNS RECUR, AND RECOGNISING THEM IS MOST OF THE WORK.**
 

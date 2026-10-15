@@ -633,12 +633,23 @@ both `mhd` and `rotating`. `ConfigTests`' `mirror_keys` is the list.
 
 **The `.nc` support mask** is `node_material`, `ELEMENT-REGIONS-PLAN.md`
 ER-3 ([M-270](MEASUREMENTS.md#m-270)). **Adaptivity** runs on the mirror through
-the driver, three cycles in `DriverAcceptance`'s
-`everyAdaptiveFrameSaysWhatEachElementIsMadeOf`, but nothing judges its
-estimator there.
+the driver, and its estimator tracks the flux error there.
+`RotatingMirrorAdaptive` measures `η / ‖q − q_h‖` against a `k = 4` reference
+at every cycle and on the uniform L1 mesh. It holds the index in
+`AdaptiveRefinement`'s `( 5, 40 )`, reading 7.7, 13.6 and 13.1 over three
+cycles, with `η` and the error both falling at every cycle
+→ [M-ADAPT](MEASUREMENTS.md#m-adapt). Judging it found two defects of the
+split, both repaired. `η₅` compared against the physical modal sum rather than
+the remainder's datum. `η₁` read `F` at `ψ_p` rather than at `ψ_p + ψ_c`.
 
-**Not done:** `--device` and the bordered retry rung, which are accepted beside
-the box but have not been run on a mirror.
+**`--device cuda` reproduces the host on the mirror.** M-276 raced it at 2.0e-15
+([M-276](MEASUREMENTS.md#m-276)). `RotatingMirrorDevice` runs the shipped file
+under `--device cpu` and `--device cuda`. It asserts `ψ_h` and `q_h` within
+1e-12 of their largest values and the same Newton count, and skips loudly
+without a card → [M-DEVICE](MEASUREMENTS.md#m-device).
+
+**Not done:** the bordered retry rung, which is accepted beside the box but has
+not been run on a mirror.
 
 ## Risks, in the order they are likely to hurt
 

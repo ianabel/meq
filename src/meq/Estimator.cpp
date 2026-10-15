@@ -143,8 +143,23 @@ namespace meq
 	                                       mfem::IntegrationPoint const &ip,
 	                                       double radius, double z, double psi ) const
 	{
+		/*
+		 * UNDER [conductors] F IS EVALUATED AT THE TOTAL FLUX, psi_p + psi_c,
+		 * because that is where the solve evaluates it. The potential this
+		 * class reads is the REMAINDER, and a normalised source reads its
+		 * argument against labels that are the TOTAL flux at their points, so
+		 * F( psi_p ) is a different function: its residual against div q_h is
+		 * O( 1 ) and eta_1, weighted by h_K, falls at FIRST order whatever k
+		 * is. Measured on examples/mirror-rotating.toml at k = 2 under uniform
+		 * refinement, eta read 1.48e-02, 7.46e-03, 3.69e-03 while the flux
+		 * error fell at 3.0 and 3.2, so the effectivity index went 17, 68,
+		 * 308. MEASUREMENTS.md M-ADAPT.
+		 *
+		 * conductorPsi() is EXACTLY ZERO with no conductor field, so every
+		 * other configuration sums the same numbers it always did.
+		 */
 		if ( source )
-			return source->f( radius, z, psi );
+			return source->f( radius, z, psi + solver->conductorPsi( radius, z ) );
 		return sourceCoeff->Eval( tr, ip );
 	}
 

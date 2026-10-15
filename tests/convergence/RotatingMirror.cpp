@@ -848,10 +848,12 @@ namespace
 }
 
 /*
- * THREE SUITES, ONE ctest EACH, so that the solve's acceptance does not wait on
+ * FIVE SUITES, ONE ctest EACH, so that the solve's acceptance does not wait on
  * the resolution study: `solve` is MR-4b and its controls, `resolution` is
  * MR-4c and MR-4d, which share their runs through sampled(), and `driver` is
  * MR-5 -- the shipped example through the shipped binary, against the library.
+ * `adaptive` judges the estimator on that example and `device` runs it on the
+ * card; both need the binary, as `driver` does.
  */
 BOOST_AUTO_TEST_SUITE( solve )
 
@@ -1649,8 +1651,15 @@ namespace
 	/// SUBSTITUTION ON THE SHIPPED FILE, because a copy would drift and a
 	/// drifted copy passing is worse than no test; shippedConfig() makes the
 	/// tables it reads absolute, since the variant is written away from them.
+	///
+	/// @param lines   further lines replaced whole: the first line beginning
+	///                with each key, which must exist, becomes its text.
+	/// @param tables  text inserted before [output], for a table the example
+	///                does not carry.
 	std::string configureMirror( std::string const &prefix,
-	                             std::string const &solverLines )
+	                             std::string const &solverLines,
+	                             std::vector<std::pair<std::string, std::string>> const &lines = {},
+	                             std::string const &tables = "" )
 	{
 		std::string text = meq::test::shippedConfig( "examples/mirror-rotating.toml" );
 		BOOST_TEST_REQUIRE( !text.empty(), mirrorExample << " is missing or empty" );
@@ -1666,11 +1675,19 @@ namespace
 		};
 		replaceLine( "Directory = ", "Directory = \"" + std::string( driverScratch ) + "\"" );
 		replaceLine( "Prefix = ", "Prefix = \"" + prefix + "\"" );
+		for ( auto const &line : lines )
+			replaceLine( line.first, line.second );
 		if ( !solverLines.empty() )
 		{
 			std::size_t const at = text.find( "\n[solver]\n" );
 			BOOST_TEST_REQUIRE( at != std::string::npos );
 			text.insert( at + 10, solverLines );
+		}
+		if ( !tables.empty() )
+		{
+			std::size_t const at = text.find( "\n[output]\n" );
+			BOOST_TEST_REQUIRE( at != std::string::npos );
+			text.insert( at + 1, tables );
 		}
 
 		std::filesystem::create_directories( driverScratch );
@@ -1720,6 +1737,168 @@ namespace
 	bool says( std::string const &text, std::string const &phrase )
 	{
 		return text.find( phrase ) != std::string::npos;
+	}
+
+	/// meq-run on a variant of the shipped file, @a arguments after it, with
+	/// @a environment before it.
+	DriverRun runVariant( std::string const &prefix,
+	                      std::vector<std::pair<std::string, std::string>> const &lines,
+	                      std::string const &tables = "",
+	                      std::string const &arguments = "",
+	                      std::string const &environment = "" )
+	{
+		DriverRun out;
+		std::string const config = configureMirror( prefix, "", lines, tables );
+		out.stem = std::string( driverScratch ) + "/" + prefix;
+		out.status = runLogged( environment + " MKL_NUM_THREADS=1 "
+		                        + std::string( MEQ_RUN_PATH ) + " " + config
+		                        + ( arguments.empty() ? "" : " " + arguments ),
+		                        out.stem + ".log" );
+		out.log = readText( out.stem + ".log" );
+		return out;
+	}
+
+	/// A run's exact files read back: Omega_h, psi_h and the HDG flux q_h --
+	/// `_grad_psi.gf` is the solved q = grad psi / R, not B (docs/output.rst).
+	/// Under [conductors] both are the REMAINDER's, and so is what the
+	/// estimator measures.
+	struct StoredAnswer
+	{
+		std::unique_ptr<mfem::Mesh> mesh;
+		std::unique_ptr<mfem::GridFunction> psi;
+		std::unique_ptr<mfem::GridFunction> flux;
+	};
+
+	StoredAnswer readAnswer( std::string const &stem )
+	{
+		StoredAnswer out;
+		out.mesh = std::make_unique<mfem::Mesh>( ( stem + ".mesh" ).c_str(), 1, 1 );
+		std::ifstream psi( stem + "_psi.gf" );
+		BOOST_TEST_REQUIRE( psi.good(), "no " << stem << "_psi.gf" );
+		out.psi = std::make_unique<mfem::GridFunction>( out.mesh.get(), psi );
+		std::ifstream flux( stem + "_grad_psi.gf" );
+		BOOST_TEST_REQUIRE( flux.good(), "no " << stem << "_grad_psi.gf" );
+		out.flux = std::make_unique<mfem::GridFunction>( out.mesh.get(), flux );
+		BOOST_TEST_REQUIRE( out.flux->FESpace()->GetVDim() == 2 );
+		return out;
+	}
+
+	/// || q_a - q_b || in L2 over Omega_h of @a a, at the rule of order 2k + 4
+	/// GradShafranovSolver::fluxError() takes, and || q_b || on the same points.
+	///
+	/// THE TWO MESHES ARE DIFFERENT POLYGONS INSIDE ONE Gamma. Each is cut from
+	/// its own background, so a sliver of Omega_h( a ) next to Gamma_h can lie
+	/// outside Omega_h( b ); its points are dropped, and their measure returned
+	/// so that a caller can say how much was.
+	struct FluxDifference
+	{
+		double error = 0.0;
+		double norm = 0.0;
+		double area = 0.0;
+		double uncovered = 0.0;
+	};
+
+	FluxDifference fluxDifference( StoredAnswer const &a, StoredAnswer const &b, int order )
+	{
+		mfem::Mesh &meshA = *a.mesh;
+		std::vector<double> radius, z, weight, valueR, valueZ;
+		mfem::Vector value( 2 );
+		for ( int e = 0; e < meshA.GetNE(); ++e )
+		{
+			mfem::ElementTransformation *transformation = meshA.GetElementTransformation( e );
+			mfem::IntegrationRule const &rule =
+				mfem::IntRules.Get( meshA.GetElementBaseGeometry( e ), 2*order + 4 );
+			for ( int i = 0; i < rule.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &point = rule.IntPoint( i );
+				transformation->SetIntPoint( &point );
+				mfem::Vector x;
+				transformation->Transform( point, x );
+				a.flux->GetVectorValue( *transformation, point, value );
+				radius.push_back( x( 0 ) );
+				z.push_back( x( 1 ) );
+				weight.push_back( point.weight*transformation->Weight() );
+				valueR.push_back( value( 0 ) );
+				valueZ.push_back( value( 1 ) );
+			}
+		}
+
+		// q_b one component at a time, since PointLocator interpolates a
+		// scalar field: the component's coefficients copied into the scalar
+		// space of the same collection.
+		mfem::FiniteElementSpace const &vector = *b.flux->FESpace();
+		mfem::FiniteElementSpace scalar( b.mesh.get(), vector.FEColl(), 1 );
+		mfem::GridFunction componentR( &scalar ), componentZ( &scalar );
+		for ( int i = 0; i < scalar.GetNDofs(); ++i )
+		{
+			componentR( i ) = ( *b.flux )( vector.DofToVDof( i, 0 ) );
+			componentZ( i ) = ( *b.flux )( vector.DofToVDof( i, 1 ) );
+		}
+
+		int const count = static_cast<int>( radius.size() );
+		mfem::Vector positions( 2*count );
+		for ( int i = 0; i < count; ++i )
+		{
+			positions( i ) = radius[ static_cast<std::size_t>( i ) ];
+			positions( count + i ) = z[ static_cast<std::size_t>( i ) ];
+		}
+		meq::PointLocator locator( *b.mesh );
+		locator.locate( positions );
+		mfem::Vector atR, atZ;
+		locator.interpolate( componentR, atR );
+		locator.interpolate( componentZ, atZ );
+
+		FluxDifference out;
+		for ( int i = 0; i < count; ++i )
+		{
+			std::size_t const p = static_cast<std::size_t>( i );
+			out.area += weight[ p ];
+			if ( locator.codes()[ i ] == 2 )
+			{
+				out.uncovered += weight[ p ];
+				continue;
+			}
+			double const dR = valueR[ p ] - atR( i );
+			double const dZ = valueZ[ p ] - atZ( i );
+			out.error += weight[ p ]*( dR*dR + dZ*dZ );
+			out.norm += weight[ p ]*( atR( i )*atR( i ) + atZ( i )*atZ( i ) );
+		}
+		out.error = std::sqrt( out.error );
+		out.norm = std::sqrt( out.norm );
+		return out;
+	}
+
+	/// One row of the driver's adaptive table.
+	struct CycleRow
+	{
+		int elements = 0;
+		int trace = 0;
+		int marked = 0;
+		double eta = 0.0;
+	};
+
+	/// The adaptive table the driver prints, `cycle elem trace marked wide eta
+	/// it`, one row per cycle.
+	std::vector<CycleRow> cycleTable( std::string const &log )
+	{
+		std::vector<CycleRow> rows;
+		std::size_t const at = log.find( "cycle     elem" );
+		if ( at == std::string::npos )
+			return rows;
+		std::istringstream stream( log.substr( at ) );
+		std::string line;
+		std::getline( stream, line );
+		while ( std::getline( stream, line ) )
+		{
+			std::istringstream fields( line );
+			int cycle = 0, wide = 0;
+			CycleRow row;
+			if ( !( fields >> cycle >> row.elements >> row.trace >> row.marked >> wide
+			        >> row.eta ) )
+				break;
+			rows.push_back( row );
+		}
+		return rows;
 	}
 }
 
@@ -1915,6 +2094,365 @@ BOOST_AUTO_TEST_CASE( aMirrorWithPicardSweepsIsRefusedAtParse )
 	std::string const text = readText( log );
 	BOOST_TEST( status == 1, "exit " << status << ":\n" << text );
 	BOOST_TEST( says( text, "solver.PicardSweeps" ), text );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+BOOST_AUTO_TEST_SUITE( adaptive )
+
+/*
+ * THE ESTIMATOR, JUDGED ON THE MIRROR: eta AGAINST THE TRUE ERROR, CYCLE BY
+ * CYCLE, THROUGH THE DRIVER.
+ *
+ * DriverAcceptance's everyAdaptiveFrameSaysWhatEachElementIsMadeOf runs this
+ * file adaptively for its frames and asks nothing of eta. Everything that
+ * judges the estimator -- EstimatorConvergence, AdaptiveRefinement,
+ * FreeBoundaryCoupling -- does it against a closed form, and none of them has
+ * the split, the box or the labels. So here: the shipped file with three
+ * Doerfler cycles at 0.5, DriverAcceptance's block, and each cycle's answer
+ * against MR-4c's reference -- MEQ against itself, RefinementLevels = 2 at
+ * k = 4 through the same binary -- in the quantity eta estimates, the flux:
+ *
+ *     effectivity = eta / || q - q_h ||,
+ *
+ * which AdaptiveRefinement holds in ( 5, 40 ) at k = 2 on graded meshes, 15.3
+ * on uniform ones. The same band here, at every cycle and on the uniform L1
+ * mesh too, whose eta is a one-cycle adaptive run's; it is not widened for a
+ * mirror. And eta and the true error both fall at every cycle.
+ *
+ * EACH CYCLE'S ANSWER IS A RUN STOPPED THERE. A run writes the last cycle's
+ * exact files and only VTK frames before it, so MaxIterations = 1, 2 and 3
+ * are three runs; the loop is deterministic, and the element counts being the
+ * long run's table is asserted, so the fields measured are its cycles.
+ *
+ * BOTH SIDES ARE THE REMAINDER: [conductors] subtracts the filaments, so the
+ * solved q_h is psi_p's, and so is the residual eta is built on.
+ *
+ * WHAT IT FOUND, TWICE, AND BOTH WERE THE SPLIT. MEASUREMENTS.md M-ADAPT.
+ *   eta_5's datum was the exterior's modal sum, the PHYSICAL flux on Gamma,
+ *   where the load the solve imposes is that less psi_c: eta_5 read 2.68,
+ *   3.58, 4.49 over the cycles, eta ROSE, and the marking chased it.
+ *   apps/meq.cpp shifts the datum.
+ *   And eta_1 read F at psi_p rather than at psi_p + psi_c, so its residual
+ *   was O( 1 ) and eta fell at FIRST order: 1.48e-02, 7.46e-03, 3.69e-03
+ *   under uniform refinement against a flux error falling at 3, an
+ *   effectivity of 17, 68, 308. ResidualEstimator reads the total flux.
+ * With the first repaired alone the cycles read 16.9, 32.7, 41.2 -- out of
+ * the band only at the last -- which is why the uniform L1 index is asserted
+ * beside them: it reads 68 there.
+ *
+ * THE REFERENCE RESOLVES WHAT IS MEASURED AGAINST IT. Its own flux error is
+ * bounded from L1 at k = 4 as referenceError() bounds psi*'s, and must sit
+ * below a tenth of every error asserted on. The uniform L2 row is printed
+ * and not asserted: its error is within a factor three of that bound.
+ *
+ * THE COST AGAINST UNIFORM REFINEMENT IS PRINTED AND NOT ASSERTED, since
+ * nothing in this tree asserts an adaptive loop against uniform refinement:
+ * the last cycle's error beside the uniform L0 -> L1 line, log-log in trace
+ * dofs, at the same count.
+ */
+BOOST_AUTO_TEST_CASE( theEstimatorTracksTheErrorOnTheAdaptiveMirror )
+{
+	int const order = 2;   // the shipped degree
+	int const cycles = 3;
+	// AdaptiveRefinement's band at k = 2.
+	double const lowest = 5.0;
+	double const highest = 40.0;
+	// Its own mesh, so that this ctest and RotatingMirrorDriver never generate
+	// one file at once.
+	std::string const mesh = "File = \"mirror-adaptive.msh\"";
+	auto adaptivity = []( int n )
+	{
+		return "[adaptivity]\nEnabled = true\nMaxIterations = " + std::to_string( n )
+		       + "\nTheta = 0.5\n\n";
+	};
+	auto uniform = [ & ]( int level, int degree )
+	{
+		return std::vector<std::pair<std::string, std::string>>{
+			{ "File = ", mesh + "\nRefinementLevels = " + std::to_string( level ) },
+			{ "PolynomialDegree = ", "PolynomialDegree = " + std::to_string( degree ) } };
+	};
+
+	// ---- the runs ------------------------------------------------------------
+	std::vector<DriverRun> stopped;
+	for ( int n = 1; n <= cycles; ++n )
+	{
+		stopped.push_back( runVariant( "mirror-adaptive-" + std::to_string( n ),
+		                               { { "File = ", mesh } }, adaptivity( n ) ) );
+		BOOST_TEST_REQUIRE( stopped.back().status == 0,
+			"the adaptive mirror stopped at " << n << " cycles exited "
+			<< stopped.back().status << ":\n" << stopped.back().log );
+	}
+	DriverRun const reference = runVariant( "mirror-adaptive-reference", uniform( 2, 4 ) );
+	DriverRun const below = runVariant( "mirror-adaptive-reference-L1", uniform( 1, 4 ) );
+	// One cycle each, which estimates and does not refine: the uniform meshes' eta.
+	std::vector<DriverRun> uniformRuns;
+	for ( int level = 1; level <= 2; ++level )
+		uniformRuns.push_back( runVariant( "mirror-adaptive-uniform-L"
+		                                   + std::to_string( level ), uniform( level, order ),
+		                                   adaptivity( 1 ) ) );
+	for ( DriverRun const *run : std::vector<DriverRun const *>{
+		&reference, &below, &uniformRuns[ 0 ], &uniformRuns[ 1 ] } )
+		BOOST_TEST_REQUIRE( run->status == 0, run->stem << " exited " << run->status
+		                    << ":\n" << run->log );
+
+	// ---- the reference, and its own error -----------------------------------
+	StoredAnswer const fine = readAnswer( reference.stem );
+	StoredAnswer const coarse = readAnswer( below.stem );
+	FluxDifference const step = fluxDifference( coarse, fine, 4 );
+	// The flux converges with psi_h, capped by the inner edge at
+	// potentialRate( 4 ) = 3.5 (MR-4c), so this over-states the reference's
+	// error, as referenceError() does for psi*.
+	double const referenceBound = step.error/( std::pow( 2.0, potentialRate( 4 ) ) - 1.0 );
+
+	// ---- each answer against it ---------------------------------------------
+	struct Row
+	{
+		std::string name;
+		int elements = 0;
+		int trace = 0;
+		int marked = 0;
+		double eta = 0.0;
+		FluxDifference truth;
+	};
+	// @a cycle of @a run's table, against the reference.
+	auto measured = [ & ]( std::string const &name, DriverRun const &run,
+	                       std::size_t cycle )
+	{
+		std::vector<CycleRow> const table = cycleTable( run.log );
+		BOOST_TEST_REQUIRE( table.size() == cycle + 1, "no last cycle " << cycle
+		                    << " in " << run.stem << "'s table:\n" << run.log );
+		StoredAnswer const answer = readAnswer( run.stem );
+		Row row;
+		row.name = name;
+		row.elements = answer.mesh->GetNE();
+		row.trace = table[ cycle ].trace;
+		row.eta = table[ cycle ].eta;
+		row.truth = fluxDifference( answer, fine, order );
+		BOOST_TEST_REQUIRE( row.elements == table[ cycle ].elements,
+			run.stem << " wrote " << row.elements << " elements where its last "
+			"cycle had " << table[ cycle ].elements );
+		return row;
+	};
+	std::vector<CycleRow> const longRun = cycleTable( stopped.back().log );
+	BOOST_TEST_REQUIRE( longRun.size() == static_cast<std::size_t>( cycles ),
+	                    "no " << cycles << "-row table in:\n" << stopped.back().log );
+	std::vector<Row> rows;
+	for ( std::size_t c = 0; c < longRun.size(); ++c )
+	{
+		rows.push_back( measured( std::to_string( c ), stopped[ c ], c ) );
+		BOOST_TEST_REQUIRE( rows.back().elements == longRun[ c ].elements,
+			"the run stopped at " << c + 1 << " cycles ends on " << rows.back().elements
+			<< " elements where the long run's cycle " << c << " had "
+			<< longRun[ c ].elements << ", so its answer is not that cycle's" );
+		// What the long run marked, since a stopped run marks nothing last.
+		rows.back().marked = longRun[ c ].marked;
+	}
+	std::vector<Row> uniformRows;
+	for ( std::size_t i = 0; i < uniformRuns.size(); ++i )
+		uniformRows.push_back( measured( "L" + std::to_string( i + 1 ), uniformRuns[ i ], 0 ) );
+
+	std::printf( "\n  THE ESTIMATOR ON THE ADAPTIVE MIRROR, k = %d, Doerfler 0.5, against "
+	             "L2 k = 4 ( %d elements )\n", order, fine.mesh->GetNE() );
+	std::printf( "    the reference's own flux error, bounded from L1 at rate %.1f: %.3e, "
+	             "%.3e of || q ||\n", potentialRate( 4 ), referenceBound,
+	             referenceBound/step.norm );
+	std::printf( "    %6s %7s %8s %7s %11s %11s %11s %9s %10s\n", "cycle", "elem", "trace",
+	             "marked", "eta", "L2(q-q_h)", "relative", "eta/err", "uncovered" );
+	auto print = []( Row const &r )
+	{
+		std::printf( "    %6s %7d %8d %7d %11.4e %11.4e %11.4e %9.3f %10.3e\n",
+		             r.name.c_str(), r.elements, r.trace, r.marked, r.eta, r.truth.error,
+		             r.truth.error/r.truth.norm, r.eta/r.truth.error,
+		             r.truth.uncovered/r.truth.area );
+	};
+	for ( Row const &r : rows )
+		print( r );
+	std::printf( "    uniform refinement, one cycle each:\n" );
+	for ( Row const &r : uniformRows )
+		print( r );
+
+	// The cost: the uniform L0 -> L1 line at the last cycle's trace count.
+	Row const &first = rows.front();
+	Row const &last = rows.back();
+	double const slope = std::log( uniformRows[ 0 ].truth.error/first.truth.error )
+	                     /std::log( static_cast<double>( uniformRows[ 0 ].trace )/first.trace );
+	double const uniformThere = first.truth.error
+	                            *std::pow( static_cast<double>( last.trace )/first.trace, slope );
+	double const uniformCount = first.trace
+	                            *std::pow( last.truth.error/first.truth.error, 1.0/slope );
+	std::printf( "    cost: cycle %d reaches %.3e on %d trace dofs; uniform refinement, "
+	             "error ~ dofs^%.2f from L0 to L1, reads %.3e there and needs %.0f dofs "
+	             "for %.3e\n", cycles - 1, last.truth.error, last.trace, slope,
+	             uniformThere, uniformCount, last.truth.error );
+	std::fflush( stdout );
+
+	// ---- what holds ------------------------------------------------------------
+	std::vector<Row> asserted = rows;
+	asserted.push_back( uniformRows[ 0 ] );
+	for ( Row const &r : asserted )
+	{
+		BOOST_TEST( referenceBound < 0.1*r.truth.error,
+			r.name << ": the reference's own error, bounded at " << referenceBound
+			<< ", is not below a tenth of the " << r.truth.error << " measured "
+			"against it, so the effectivity index is not this answer's" );
+		BOOST_TEST( r.truth.uncovered < 1.0e-3*r.truth.area,
+			r.name << ": " << r.truth.uncovered << " of Omega_h's " << r.truth.area
+			<< " lies outside the reference's, so the true error is not over the "
+			"domain eta is" );
+		double const index = r.eta/r.truth.error;
+		BOOST_TEST( ( index > lowest && index < highest ),
+			r.name << ": the effectivity index is " << index << " against "
+			"AdaptiveRefinement's ( " << lowest << ", " << highest << " ) at k = 2. "
+			"Above it with eta FALLING AT FIRST ORDER under uniform refinement, F "
+			"is being read at the remainder and not at psi_p + psi_c; with eta_5 "
+			"carrying it and RISING over the cycles, eta_5's datum is the physical "
+			"modal sum and not the remainder's. MEASUREMENTS.md M-ADAPT" );
+	}
+	for ( std::size_t c = 1; c < rows.size(); ++c )
+	{
+		BOOST_TEST( rows[ c ].eta < rows[ c - 1 ].eta,
+			"eta went from " << rows[ c - 1 ].eta << " to " << rows[ c ].eta
+			<< " at cycle " << c );
+		BOOST_TEST( rows[ c ].truth.error < rows[ c - 1 ].truth.error,
+			"the flux error went from " << rows[ c - 1 ].truth.error << " to "
+			<< rows[ c ].truth.error << " at cycle " << c << " -- eta came down "
+			"and the true error did not, which is what a misleading indicator "
+			"looks like" );
+	}
+	// And the loop is adaptive rather than uniform.
+	for ( std::size_t c = 0; c + 1 < rows.size(); ++c )
+		BOOST_TEST( ( rows[ c ].marked > 0 && rows[ c ].marked < rows[ c ].elements ),
+			"cycle " << c << " marked " << rows[ c ].marked << " of "
+			<< rows[ c ].elements << " elements" );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+BOOST_AUTO_TEST_SUITE( device )
+
+/*
+ * THE SHIPPED MIRROR ON THE CARD IS THE HOST'S, dof for dof.
+ *
+ * MEASUREMENTS.md M-276 raced this file under --device cuda through
+ * tools/geq-benchmark/race_geq.py and found device double reproducing the
+ * host to 2.0e-15 in psi* at geq's nodes, at L2, k = 4. Nothing asserted it,
+ * and DeviceParity's cases are tokamaks: none has a box support, two labels
+ * at points or a subtracted filament, which are the paths this file is the
+ * only route to. So the shipped file, through meq-run, twice --
+ *
+ *   --device cpu and --device cuda, OMP_NUM_THREADS = 1 on BOTH, which is
+ *   DeviceParity's reason: the driver refuses threaded assembly above one
+ *   thread under a Device, and pinning the host too leaves the device the
+ *   only difference;
+ *
+ * and the exact psi_h written by each compared over every dof, with the
+ * Newton count beside it (M-187: a device can be right on more work).
+ *
+ * THE BOUND IS THE ONE THE DRIVER-AGAINST-LIBRARY COMPARISON ABOVE USES,
+ * 1e-12 of the largest value, on psi_h and on q_h. The two arms are not
+ * bit-identical and are not run to be -- the card takes the driver's device
+ * defaults, cuDSS and the batched local factorisation -- and the card is not
+ * even bit-reproducible run to run, so a printed-digit comparison is the
+ * wrong instrument; what separates the two is round-off in two
+ * factorisations of one system. M-276 read 2.0e-15 in psi* against a flux of
+ * order 7e-02, 3e-14 of it; three takes here read 4.8e-14 to 1.2e-13 of
+ * max |psi_h| and 5.7e-14 to 1.0e-13 of max |q_h| (M-DEVICE). So the bound
+ * sits a factor eight above the worst take and twelve orders below the
+ * defects the device path has had: M-206 was a factor of two. In single it takes the
+ * driver comparison's floor too, unmeasured on a card here.
+ *
+ * SKIPPED LOUDLY, NOT FAILED, without CUDA in the build or a card that MFEM
+ * configures -- read off MFEM's own `Device configuration:` line, which is
+ * DeviceParity's test for the same question.
+ */
+BOOST_AUTO_TEST_CASE( theShippedMirrorOnTheCardIsTheHosts )
+{
+#ifndef MFEM_USE_CUDA
+	BOOST_TEST_MESSAGE( "  *** SKIPPED: this build has no CUDA" );
+	std::printf( "\n  THE MIRROR ON THE CARD: SKIPPED -- this build has no CUDA\n" );
+	return;
+#else
+	// Its own mesh, as the adaptive suite has, so the three ctests on this
+	// file never generate one at once.
+	std::vector<std::pair<std::string, std::string>> const lines =
+		{ { "File = ", "File = \"mirror-device.msh\"" } };
+	DriverRun const host = runVariant( "mirror-device-cpu", lines, "", "--device cpu",
+	                                   "OMP_NUM_THREADS=1" );
+	BOOST_TEST_REQUIRE( host.status == 0,
+		"the mirror under --device cpu exited " << host.status << ":\n" << host.log );
+	DriverRun const card = runVariant( "mirror-device-cuda", lines, "", "--device cuda",
+	                                   "OMP_NUM_THREADS=1" );
+	if ( !says( card.log, "Device configuration: cuda" ) )
+	{
+		std::printf( "\n  THE MIRROR ON THE CARD: SKIPPED -- built with CUDA, no device "
+		             "configured (exit %d)\n", card.status );
+		BOOST_TEST_MESSAGE( "  *** SKIPPED: built with CUDA, and MFEM configured no "
+		                    "cuda device on this machine" );
+		return;
+	}
+	BOOST_TEST_REQUIRE( card.status == 0,
+		"the mirror exits " << card.status << " under --device cuda and 0 on the "
+		"host:\n" << card.log );
+
+	StoredAnswer const onHost = readAnswer( host.stem );
+	StoredAnswer const onCard = readAnswer( card.stem );
+	BOOST_TEST_REQUIRE( onHost.mesh->GetNE() == onCard.mesh->GetNE() );
+	BOOST_TEST_REQUIRE( onHost.psi->Size() == onCard.psi->Size() );
+	double worst = 0.0;
+	double largest = 0.0;
+	for ( int i = 0; i < onHost.psi->Size(); ++i )
+	{
+		worst = std::max( worst, static_cast<double>(
+			std::abs( ( *onCard.psi )( i ) - ( *onHost.psi )( i ) ) ) );
+		largest = std::max( largest, static_cast<double>( std::abs( ( *onHost.psi )( i ) ) ) );
+	}
+	double fluxWorst = 0.0;
+	double fluxLargest = 0.0;
+	for ( int i = 0; i < onHost.flux->Size(); ++i )
+	{
+		fluxWorst = std::max( fluxWorst, static_cast<double>(
+			std::abs( ( *onCard.flux )( i ) - ( *onHost.flux )( i ) ) ) );
+		fluxLargest = std::max( fluxLargest,
+		                        static_cast<double>( std::abs( ( *onHost.flux )( i ) ) ) );
+	}
+	int const hostSteps = static_cast<int>( numberAfter( host.log, "converged in " ) );
+	int const cardSteps = static_cast<int>( numberAfter( card.log, "converged in " ) );
+	double const hostAxis = numberAfter( host.log, "     psi_ax = " );
+	double const cardAxis = numberAfter( card.log, "     psi_ax = " );
+
+	std::printf( "\n  THE MIRROR ON THE CARD against --device cpu, %d elements, one host "
+	             "thread each\n", onHost.mesh->GetNE() );
+	std::printf( "    psi_h: %.3e over %d dofs, %.3e of max |psi_h| %.3e\n", worst,
+	             onHost.psi->Size(), worst/largest, largest );
+	std::printf( "    q_h:   %.3e over %d dofs, %.3e of max |q_h| %.3e\n", fluxWorst,
+	             onHost.flux->Size(), fluxWorst/fluxLargest, fluxLargest );
+	std::printf( "    Newton %d on the host, %d on the card; psi_ax printed %.6e and %.6e\n",
+	             hostSteps, cardSteps, hostAxis, cardAxis );
+	std::fflush( stdout );
+
+	double bound = meq::tests::scalarAgreementFloor( 1.0e-12*largest, largest );
+	double fluxBound = meq::tests::scalarAgreementFloor( 1.0e-12*fluxLargest, fluxLargest );
+#ifdef MFEM_USE_SINGLE
+	// The driver comparison's own floor in single, the extension's
+	// eps/fd_step of the field it moves (theShippedMirrorSolvesThroughTheDriver).
+	double const extension = 4.0*static_cast<double>(
+		std::numeric_limits<mfem::real_t>::epsilon() )/meq::extensionFdStep();
+	bound = std::max( bound, extension*largest );
+	fluxBound = std::max( fluxBound, extension*fluxLargest );
+#endif
+	BOOST_TEST( worst < bound,
+		"psi_h under --device cuda differs from the host's by " << worst << " of a "
+		"largest " << largest << ", above round-off in two factorisations. Walk it "
+		"with MEQ_STAGE_CHECKSUM=1 on both arms and diff: the first stage that "
+		"disagrees names it (CLAUDE_DEVICE.md)" );
+	BOOST_TEST( fluxWorst < fluxBound,
+		"q_h under --device cuda differs from the host's by " << fluxWorst
+		<< " of a largest " << fluxLargest );
+	BOOST_TEST( cardSteps == hostSteps,
+		cardSteps << " Newton steps on the card against " << hostSteps << " on the "
+		"host -- the answer may be right and the work is not (MEASUREMENTS.md M-187)" );
+#endif
 }
 
 BOOST_AUTO_TEST_SUITE_END()

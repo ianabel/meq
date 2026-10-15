@@ -656,7 +656,14 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 			MEQ_DRIVER_PATH="$<TARGET_FILE:meq>"
 			MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
 		add_test(NAME RotatingMirrorDriver COMMAND RotatingMirror --run_test=driver)
-		set_tests_properties(RotatingMirrorDriver PROPERTIES
+		# The estimator judged on the same file run adaptively, against MR-4c's
+		# reference through the binary; and the file under --device cuda against
+		# the host, skipped loudly without a card. Their own ctests and their
+		# own generated meshes, so all three run side by side.
+		add_test(NAME RotatingMirrorAdaptive COMMAND RotatingMirror --run_test=adaptive)
+		add_test(NAME RotatingMirrorDevice COMMAND RotatingMirror --run_test=device)
+		set_tests_properties(RotatingMirrorDriver RotatingMirrorAdaptive
+			RotatingMirrorDevice PROPERTIES
 			ENVIRONMENT "MKL_NUM_THREADS=1")
 	endif()
 else()
