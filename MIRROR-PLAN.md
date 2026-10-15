@@ -637,8 +637,18 @@ the driver, three cycles in `DriverAcceptance`'s
 `everyAdaptiveFrameSaysWhatEachElementIsMadeOf`, but nothing judges its
 estimator there.
 
-**Not done:** `--device` and the bordered retry rung, which are accepted beside
-the box but have not been run on a mirror.
+**Not done:** `--device`, which is accepted beside the box but has not been run
+on a mirror.
+
+**The bordered retry rung is skipped beside the box**, and a failed first
+attempt exits 2 as it is → **[M-RETRY](MEASUREMENTS.md#m-retry)**. Run on the
+mirror, it agrees with the first attempt to 7.3e-13 where both converge. But
+from two of the four `PsiAxis` starts that reach it, it converges to a different
+equilibrium: a second discrete root with a spike in one element of the box, and
+an answer accepted against a cold residual of 1e+12. The annulus trigger cannot
+fire on a box run, since `[boundary.xpoint]` is refused beside it.
+`RotatingMirrorDriver`'s `aMirrorWhoseFirstAttemptFailsIsNotRetried` asserts
+the branch.
 
 ## Risks, in the order they are likely to hurt
 

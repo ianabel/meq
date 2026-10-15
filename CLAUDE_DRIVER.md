@@ -315,7 +315,7 @@ first**, because a bad `ψ_ax` is its consequence and the `ψ_ax` message's advi
 exit 1 and write nothing; `docs/running.rst`'s gloss on code 1 is amended, since
 it said *"nothing was attempted"*.
 
-**A MIRROR GOES THROUGH THE SAME DRIVER, AND FOUR TOKAMAK ASSUMPTIONS ARE
+**A MIRROR GOES THROUGH THE SAME DRIVER, AND FIVE TOKAMAK ASSUMPTIONS ARE
 BRANCHED OR REFUSED BESIDE IT** (`MIRROR-PLAN.md` MR-5,
 → **[M-264](MEASUREMENTS.md#m-264)**). `[source] SupportShape = "box"` with
 `[source.axis]` poses two labels at prescribed points:
@@ -332,6 +332,12 @@ BRANCHED OR REFUSED BESIDE IT** (`MIRROR-PLAN.md` MR-5,
   no state to read there.
 * **`PicardSweeps` is refused beside any `[source.axis]`.** That is measured,
   not argued: each sweep's Picard-then-Newton diverges.
+* **The retry rung is skipped beside the box**, and the first failure exits 2
+  as it is → **[M-RETRY](MEASUREMENTS.md#m-retry)**. Where both converge the
+  rung's answer is the first attempt's to round-off, but from two of the four
+  `PsiAxis` starts that reach it, it converges to a different equilibrium. The
+  annulus trigger cannot fire on a box run at all, since `[boundary.xpoint]` is
+  refused beside it.
 
 `RotatingMirrorDriver` runs the shipped example and compares it dof for dof
 with the library.

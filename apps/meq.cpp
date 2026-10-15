@@ -4386,6 +4386,12 @@ int main( int argc, char **argv )
 			 * A PRESCRIBED POINT IS NOT ASKED, here as in the report: under
 			 * [source.axis] checkSolvedAxis() answers std::nullopt, so a run
 			 * whose psi_ax is a label is never retried for lacking an axis.
+			 * AND A BOX RUN NEVER REACHES THE QUESTION: [boundary.xpoint] is
+			 * refused beside [source] SupportShape = "box", so
+			 * xPointIsAnUnknown() is false before checkSolvedAxis() is asked.
+			 * The mirror's one route to the rung is the failure below, and
+			 * that is closed beside the box. theShippedMirrorSolvesThroughTheDriver
+			 * and aMirrorWhoseFirstAttemptFailsIsNotRetried assert both.
 			 */
 			if ( normalised && solver->xPointIsAnUnknown()
 			     && config->getBoundary().exterior.given )
@@ -4494,7 +4500,35 @@ int main( int argc, char **argv )
 			 * excursion, and only the first two are shapes a field-block
 			 * preconditioner can address. Do not read a rung that closes half
 			 * the failures as a partial success.
+			 *
+			 * **NOT BESIDE THE BOX, WHICH IS MEASURED.** On the shipped mirror
+			 * the rung is reached from four of ten [source] PsiAxis starts and
+			 * converges from all four, but to the problem's equilibrium from
+			 * two: from 0.2 it reaches a second discrete root, well converged,
+			 * with one element of the box at -7.9e-02 where the answer's largest
+			 * |psi_h| is 6.6e-03, and from 0.5 it stops 5e-02 of that from the
+			 * answer because its tolerance is relative to a first residual of
+			 * 1e+12. Where the first attempt also converges it agrees to
+			 * round-off -- but a fallback that turns an exit 2 into an exit 0
+			 * with a different answer is not the same problem solved another
+			 * way. Neither of its tokamak reasons is here either: a box run has
+			 * no X-point to cap, and the annulus trigger above cannot fire on
+			 * one. So the first failure is reported as it is. MEASUREMENTS.md
+			 * M-RETRY.
 			 */
+			if ( normalised && config->getSource().supportIsBox() )
+			{
+				std::fprintf( stderr,
+					"MEQ: the bordered Newton did not converge: %s\n"
+					"     The bordered Picard-then-Newton retry is not run beside\n"
+					"     [source] SupportShape = \"box\": on a mirror it reaches a\n"
+					"     different equilibrium from half the starts that reach it, so\n"
+					"     this failure is reported as it is. The lever is the start:\n"
+					"     [source] PsiAxis at the conductors' own flux at [source.axis],\n"
+					"     then RESOLUTION.\n",
+					firstAttempt.what() );
+				return SolveFailed;
+			}
 			if ( normalised )
 			{
 				std::fprintf( stderr,

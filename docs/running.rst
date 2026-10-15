@@ -342,6 +342,13 @@ Holding the X-point is a choice about *which* equilibrium is found, so MEQ makes
 it only on a run that has already failed: applied from the start, the same
 restriction changes the answer on machines that converge without it.
 
+**A mirror has no second rung.** Beside ``[source] SupportShape = "box"`` a
+failed first attempt is reported as it is and the run exits 2. On the shipped
+mirror the rung was measured to converge from starts the first attempt cannot,
+but to a different equilibrium from some of them, so a retry there would turn a
+failure into a wrong answer. Start ``[source] PsiAxis`` at the conductors' own
+flux at ``[source.axis]``, as ``examples/mirror-rotating.toml`` does.
+
 The ladder is deliberately never *predictive*. Nothing is inferred from the
 source about which strategy to use, and two plausible cheap indicators — the
 size of the reaction term relative to the operator's first eigenvalue, and

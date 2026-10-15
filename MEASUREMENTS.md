@@ -16756,3 +16756,86 @@ configurations the single errors stop falling, scattering from 5.7e-08 to
 is PlasmaSize 0.025, L0, `k = 3` at 4.05e-08, the one configuration that
 reaches it, so it sits at the format's edge. Device single answers the first
 three targets at the same errors as double, to two or three figures.
+
+
+### M-RETRY
+
+**MR-5: THE BORDERED RETRY RUNG ON THE ROTATING MIRROR. WHERE THE FIRST
+ATTEMPT ALSO CONVERGES THE RUNG REACHES THE SAME EQUILIBRIUM TO ROUND-OFF. BUT
+FROM TWO OF THE FOUR STARTS THAT REACH IT, IT CONVERGES TO A DIFFERENT ONE, SO
+THE DRIVER SKIPS IT BESIDE THE BOX.**
+
+**Setup.**
+* `examples/mirror-rotating.toml` through `meq-run`, run from a scratch
+  directory with the reference tables' paths made absolute. Every run reads the
+  same generated mesh: `k = 2`, 1175 elements, 7050 `ψ_h` dofs.
+* MEQ `55ab9ee` before the skip, so the rung still runs. MFEM `meq-integration`
+  `81ecf3281e`. `OMP_NUM_THREADS=2`, `MKL_NUM_THREADS=1`.
+* The rung is forced two ways. `NewtonMaxIterations = 3` keeps the shipped start
+  and fails the first attempt one step short, at 5.12e-12 against 1e-12. The
+  other way is a ladder of `[source] PsiAxis` starts.
+* Each answer's `_psi.gf` is compared with the shipped run's, dof for dof.
+* **Neither of the rung's tokamak reasons applies.** `[boundary.xpoint]` is
+  refused beside the box, so `xPointIsAnUnknown()` is false. The X-point cap is
+  therefore 0, and the annulus trigger is false before `checkSolvedAxis()` is
+  asked. The failure is the only route to the rung.
+
+**Where both converge, the answers agree.** The shipped start, with
+`NewtonMaxIterations = 3`: the first attempt fails, and the rung takes one
+Picard step and three Newton steps.
+
+| field | dofs | max difference | max value | relative |
+|---|---|---|---|---|
+| `ψ_h` | 7050 | 4.853e-15 | 6.646e-03 | 7.3e-13 |
+| `∇ψ_h` | 14100 | 4.269e-15 | 5.329e-02 | 8.0e-14 |
+| `ψ*` | 11750 | 3.865e-16 | 9.415e-04 | 4.1e-13 |
+
+`ψ_ax` is 5.53641756663025e-03 against 5.53641756663026e-03, and `ψ_bnd` is the
+same to every printed digit. With `NewtonMaxIterations = 2` the rung fails as
+well: its Newton phase has the same budget.
+
+**The `PsiAxis` ladder.** The shipped start is 5.6378e-03, the filaments' own
+flux at `[source.axis]`.
+
+| `PsiAxis` | first attempt | rung | steps | `ψ_ax` | max `|Δψ_h|` / max `|ψ_h|` | dofs off by > 1e-6 |
+|---|---|---|---|---|---|---|
+| shipped | converges | — | 4 | 5.536418e-03 | 0 | 0 |
+| 0.01 | converges | — | 4 | 5.536418e-03 | 7.9e-13 | 0 |
+| 0.02 | converges | — | 6 | 5.536418e-03 | 9.8e-12 | 0 |
+| −0.005 | converges | — | 4 | 5.536418e-03 | 3.6e-10 | 0 |
+| −0.02 | converges | — | 5 | 5.536418e-03 | 7.8e-14 | 0 |
+| −0.1 | converges | — | 5 | 5.536418e-03 | 1.1e-13 | 0 |
+| 0.05 | fails | converges | 7 | 5.536418e-03 | 5.8e-12 | 0 |
+| 0.1 | fails | converges | 8 | 5.536418e-03 | 6.3e-14 | 0 |
+| **0.2** | fails | converges | 8 | **5.513342e-03** | **11.8** | 6407 |
+| **0.5** | fails | converges | 3 | **5.535591e-03** | **5.3e-02** | 1030 |
+
+`PsiAxis = 0` is refused at parse.
+
+**From 0.2 the rung reaches a second discrete root.**
+* It is well converged: 3.64e-12 against a first residual of 4.54e+02.
+* `ψ_h` has one spike. Element 108, with vertices ( 0.49, 0.05 ), ( 0.49, 0.15 )
+  and ( 0.404, 0.10 ), inside the box, carries −7.9e-02 where the shipped
+  answer has −7.6e-04. Its two neighbours are off by up to 1.1e-03.
+* The rest of the field moves too: 1329 dofs by more than 1e-04, and 5058 by
+  more than 1e-05.
+* `ψ_bnd` is 6.493361e-02 against 6.525577e-02.
+* The odd exterior mode `a3` is −1.21e-05 against −1.91e-07.
+* The support holds 846 nodes against 847, and there are 110 `plasma_boundary`
+  elements against 109.
+* The first attempt from 0.2 still fails with `NewtonMaxIterations = 300`, and
+  the rung's answer then is bit-identical.
+
+**From 0.5 the rung stops short.** Its first residual is 1.11e+12, so the
+relative target of 1e-12 accepts 9.11e-05. That is CLAUDE.md's trap of a
+target scaled to the cold residual, met from the other side, and not a second
+root. But the run still exits 0, with an answer 5.3e-02 of max `|ψ_h|` from the
+problem's.
+
+**So the rung is skipped beside the box.** A failed first attempt is reported
+as it is and exits 2, with `[source] PsiAxis` named as the lever. That loses
+0.05 and 0.1, which the rung closed correctly. It stops 0.2 and 0.5 exiting 0
+with a different answer. `RotatingMirrorDriver`'s
+`aMirrorWhoseFirstAttemptFailsIsNotRetried` runs the 0.2 start and asserts
+exit 2. The binary before the skip exits 0 on that start, which is what the
+case catches.

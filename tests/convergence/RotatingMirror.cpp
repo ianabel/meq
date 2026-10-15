@@ -85,6 +85,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "mfem.hpp"
@@ -1645,12 +1646,14 @@ namespace
 	}
 
 	/// The shipped example with [output] redirected into the scratch directory
-	/// under @a prefix, and @a solverLines added under [solver]. TEXT
-	/// SUBSTITUTION ON THE SHIPPED FILE, because a copy would drift and a
-	/// drifted copy passing is worse than no test; shippedConfig() makes the
-	/// tables it reads absolute, since the variant is written away from them.
-	std::string configureMirror( std::string const &prefix,
-	                             std::string const &solverLines )
+	/// under @a prefix, @a solverLines added under [solver], and each line
+	/// starting with a key in @a lines replaced whole. TEXT SUBSTITUTION ON
+	/// THE SHIPPED FILE, because a copy would drift and a drifted copy passing
+	/// is worse than no test; shippedConfig() makes the tables it reads
+	/// absolute, since the variant is written away from them.
+	std::string configureMirror(
+		std::string const &prefix, std::string const &solverLines,
+		std::vector<std::pair<std::string, std::string>> const &lines = {} )
 	{
 		std::string text = meq::test::shippedConfig( "examples/mirror-rotating.toml" );
 		BOOST_TEST_REQUIRE( !text.empty(), mirrorExample << " is missing or empty" );
@@ -1666,6 +1669,8 @@ namespace
 		};
 		replaceLine( "Directory = ", "Directory = \"" + std::string( driverScratch ) + "\"" );
 		replaceLine( "Prefix = ", "Prefix = \"" + prefix + "\"" );
+		for ( auto const &[ key, line ] : lines )
+			replaceLine( key, line );
 		if ( !solverLines.empty() )
 		{
 			std::size_t const at = text.find( "\n[solver]\n" );
@@ -1795,7 +1800,8 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	                             "the plasma support is the BOX" } )
 		BOOST_TEST( says( run.log, phrase ), "the driver did not say '" << phrase << "'" );
 	for ( char const *phrase : { "no interior extremum", "wall-hugging",
-	                             "NOT a magnetic axis", "did not converge", "Retrying",
+	                             "NOT a magnetic axis", "NO interior extremum",
+	                             "did not converge", "Retrying",
 	                             "support is EMPTY" } )
 		BOOST_TEST( !says( run.log, phrase ),
 			"the driver said '" << phrase << "' of a mirror:\n" << run.log );
@@ -1915,6 +1921,49 @@ BOOST_AUTO_TEST_CASE( aMirrorWithPicardSweepsIsRefusedAtParse )
 	std::string const text = readText( log );
 	BOOST_TEST( status == 1, "exit " << status << ":\n" << text );
 	BOOST_TEST( says( text, "solver.PicardSweeps" ), text );
+}
+
+/*
+ * A MIRROR WHOSE FIRST ATTEMPT FAILS IS NOT RETRIED: beside the box the
+ * bordered Picard-then-Newton rung is skipped and the failure exits 2 as it
+ * is. MEASUREMENTS.md M-RETRY.
+ *
+ * From [source] PsiAxis = 0.2 the bordered Newton fails -- in 30 steps, and
+ * 300 do no better -- and the rung, run, converges in eight to a SECOND
+ * DISCRETE ROOT: well converged, with one element of the box at -7.9e-02
+ * where the shipped answer's largest |psi_h| is 6.6e-03. So exit 2 is the
+ * assertion that matters: putting the rung back turns it into an exit 0
+ * reporting that root.
+ *
+ * Of the rung's two triggers this is the failure. The annulus cannot fire on
+ * a box run, since [boundary.xpoint] is refused beside it, and
+ * theShippedMirrorSolvesThroughTheDriver asserts that on a converged one.
+ */
+BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
+{
+	std::string const prefix = "mirror-driver-no-retry";
+	std::string const config = configureMirror( prefix, "",
+	                                            { { "PsiAxis = ", "PsiAxis = 0.2" } } );
+	std::string const stem = std::string( driverScratch ) + "/" + prefix;
+	std::remove( ( stem + ".nc" ).c_str() );
+	int const status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
+	                              + " " + config, stem + ".log" );
+	std::string const text = readText( stem + ".log" );
+	BOOST_TEST( status == 2,
+		"meq-run exited " << status << " on a mirror whose bordered Newton cannot "
+		"converge from PsiAxis = 0.2. An exit 0 is the retry rung run beside the "
+		"box and reporting the root it reaches from there, which is not the "
+		"shipped equilibrium:\n" << text );
+	BOOST_TEST( says( text, "the bordered Newton did not converge" ),
+		"the first attempt's failure is not reported:\n" << text );
+	BOOST_TEST( says( text, "retry is not run beside" ),
+		"the driver did not say why the rung was skipped:\n" << text );
+	for ( char const *phrase : { "Retrying", "bordered-picard-then-newton",
+	                             "did not converge either", "NO interior extremum" } )
+		BOOST_TEST( !says( text, phrase ),
+			"the driver said '" << phrase << "' of a mirror:\n" << text );
+	BOOST_TEST( !std::filesystem::exists( stem + ".nc" ),
+		"a failed mirror wrote " << stem << ".nc" );
 }
 
 BOOST_AUTO_TEST_SUITE_END()
