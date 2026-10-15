@@ -4250,6 +4250,17 @@ BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
 		"Normalised = true\nPsiAxis = 1.0\nConfineToPlasma = true\n" + gauge, "" ) ).find( "twice" )
 		!= std::string::npos, "the tokamak refusal must say why" );
 
+	// The shipped three-species mirror is posed in it.
+	{
+		meq::Configuration const shipped(
+			( examplesDirectory() / "mirror-three-species.toml" ).string() );
+		meq::RotatingParameters const & r = shipped.getSource().getRotating();
+		BOOST_TEST( ( r.gauge == meq::RotatingGaugeType::Midplane ) );
+		BOOST_TEST( r.referenceRadius == 0.0 );
+		BOOST_TEST( r.species.size() == 3u );
+		BOOST_TEST( shipped.getSource().supportIsBox() );
+	}
+
 	// Not a key on the sources that have no species and no phi_0.
 	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, axisTable + limiterTable ) ) == "source.Gauge" );
 	BOOST_TEST( refusedKey( withSource( "[source]\nType = \"soloviev\"\nA = -0.52\n" + gauge ) )

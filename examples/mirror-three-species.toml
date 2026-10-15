@@ -1,0 +1,147 @@
+# THREE SPECIES ON A ROTATING MIRROR AT M = 6, IN THE MIDPLANE GAUGE.  One command:
+#
+#     meq-run ../../source/examples/mirror-three-species.toml
+#
+# WHAT IT POSES.  examples/mirror-rotating.toml's machine and labels -- geq's two
+# coil packs as twenty filaments, the inner label at ( 0.1, 0 ) and the outer at
+# ( 0.35, 0 ), the box support to the throat -- with electrons, deuterons and
+# fully stripped carbon at 1% of the electrons, rotating at M = 6 (M-167's Mach,
+# on T_e).  tests/convergence/RotatingMirror.cpp's midplane suite poses the same
+# plasma through the library.  docs/rotation.rst, "The midplane gauge".
+#
+# WHY THE MIDPLANE GAUGE.  [source] Gauge = "midplane" pins phi_0 where each flux
+# surface crosses z = 0, so every DensityFile is the density THERE.  The fixed-
+# radius gauge would carry each surface's densities to one ReferenceRadius by a
+# factor exponential in the species mass: on this plasma carbon's table would
+# span about 1e117 at the best radius, where here it spans the 1e6 it is given
+# (MEASUREMENTS.md M-GAUGE).  There is no ReferenceRadius, and one is refused.
+#
+# THE PROFILES fall to a millionth of their peak at the labels.  Under this
+# gauge a density flat at a label still carries -n m omega^2 R_0 R_0'/T in its
+# psi-derivative where omega does not vanish, and the box needs F to vanish at
+# both labels -- so it is the density that does.  The tables are in
+# Psi = 1 - psi_n, written by tools/mirror_three_species_tables.py.
+#
+# WHAT TO EXPECT.  Newton is LINEAR under the midplane gauge -- the crossings are
+# re-tabulated once per iteration and frozen within it -- so about seven steps
+# where the fixed radius takes three or four.  At ten times this density the
+# frozen iteration stops contracting (M-GAUGE).
+
+[mesh]
+# A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it
+# whenever the block changes.
+File = "mirror-three-species.msh"
+
+[mesh.generate]
+Tool = "halfdisc"
+# THE BACKGROUND'S ARC, NOT GAMMA: D_h is cut from this disc at
+# [boundary.exterior] Radius = 3.0.
+Radius = 3.4
+Size = 0.4
+# The plasma box, and with AlignPlasma its edges are ELEMENT FACES.  The
+# support's cutoff at |z| = AxialEdge is a jump in F, and a jump across a line
+# that cuts elements costs the order (M-262); the [source] parse refuses a box
+# that is not exactly -AxialEdge .. AxialEdge.
+PlasmaRMin = 0.0
+PlasmaRMax = 0.75
+PlasmaZMin = -1.5
+PlasmaZMax = 1.5
+PlasmaSize = 0.1
+AlignPlasma = true
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonRelativeTolerance = 1.0e-12
+NewtonAbsoluteTolerance = 1.0e-14
+NewtonMaxIterations = 30
+
+[source]
+Type = "rotating"
+Normalised = true
+ConfineToPlasma = true
+SupportShape = "box"
+AxialEdge = 1.5
+Gauge = "midplane"
+# THE STARTING VALUE OF THE INNER LABEL, the filaments' own flux there, as in
+# examples/mirror-rotating.toml.  psi_ax is an unknown.
+PsiAxis = 0.0056378011613958832
+Mu0 = 1.2566370614359173e-06
+GGPrime = 0.0
+OmegaFile = "mirror-three-species-omega.dat"
+
+[[source.species]]
+Name = "electron"
+Mass = 9.1093837139e-31
+Charge = -1.0
+TemperatureFile = "mirror-three-species-T-electron.dat"
+TemperatureScale = 1.602176634e-19
+DensityFile = "mirror-three-species-n-electron.dat"
+
+[[source.species]]
+Name = "deuterium"
+Mass = 3.3435837768e-27
+Charge = 1.0
+TemperatureFile = "mirror-three-species-T-ion.dat"
+TemperatureScale = 1.602176634e-19
+Neutralising = true
+
+[[source.species]]
+Name = "carbon"
+Mass = 1.9921003191e-26
+Charge = 6.0
+TemperatureFile = "mirror-three-species-T-ion.dat"
+TemperatureScale = 1.602176634e-19
+DensityFile = "mirror-three-species-n-carbon.dat"
+
+# THE INNER LABEL.  A sub-table, so every key below this header belongs to it
+# until the next one -- a [source] key written here is refused by name.
+[source.axis]
+R = 0.1
+Z = 0.0
+
+[boundary]
+Type = "zero"
+
+# THE OUTER LABEL, read at a prescribed point exactly as a limiter contact is.
+[boundary.limiter]
+R = 0.35
+Z = 0.0
+
+[boundary.exterior]
+Radius = 3.0
+Modes = 32
+
+# geq's coils as geq carries them: each pack a column of ten filaments at its
+# radial centre, subtracted rather than meshed (M-260).  LOWER FIRST, the
+# order the library fixture adds them in, so the two filament sums agree to
+# the bit.
+[conductors]
+Model = "filament"
+
+[[coils]]
+Name = "lower"
+CentreR = 0.82078441790868473
+CentreZ = -1.5
+HalfWidth = 0.035284417908684695
+HalfHeight = 0.5
+Current = 5927782.2086590333
+FilamentsR = 1
+FilamentsZ = 10
+
+[[coils]]
+Name = "upper"
+CentreR = 0.82078441790868473
+CentreZ = 1.5
+HalfWidth = 0.035284417908684695
+HalfHeight = 0.5
+Current = 5927782.2086590333
+FilamentsR = 1
+FilamentsZ = 10
+
+[output]
+Directory = "."
+Prefix = "mirror-three-species"
+GridNR = 129
+GridNZ = 129

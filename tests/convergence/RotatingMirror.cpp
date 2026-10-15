@@ -2396,8 +2396,7 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqInTheMidplaneGauge )
  * a double ends at exp( 709.8 ). Those are the phi_0 = 0 bound; with phi_0 in,
  * on THIS solved plasma at the best single R_ref, carbon's fixed-radius table
  * spans about 1e117 -- inside a double, but a Hermite table holds it to
- * ( E'h )^4/384 relative, thousands of knots, and away from that one radius the
- * closure cannot even be evaluated. Here the densities are given where they
+ * ( E'h )^4/384 relative, thousands of knots. Here the densities are given where they
  * are physical -- at each surface's midplane crossing -- and the solve is asked
  * three things:
  *
@@ -2476,9 +2475,8 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixSolveInTheMidplaneGauge )
 	// The fixed-radius gauge's exponent at a radius: ln( n_s0^fixed/n_s0^mid ),
 	// which is the midplane gauge's own exponent evaluated at R_ref. The best
 	// R_ref minimises its largest magnitude, which M-167 section 7 shows is
-	// already what the export picks. Far enough from a crossing the closure
-	// itself gives up -- the densities it would balance span past what its
-	// root find can bracket -- and that radius then reads as unusable.
+	// already what the export picks. A radius at which the closure cannot be
+	// evaluated on some surface reads as unusable rather than ending the case.
 	auto exponent = [ & ]( std::size_t s, double rRef, double x )
 	{
 		try

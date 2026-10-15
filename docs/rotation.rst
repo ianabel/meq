@@ -234,6 +234,14 @@ vanish there, so it is the densities themselves, or the rotation, that must
 fall away at the labels — or the tables must be transferred from a
 fixed-radius statement of the same plasma, as the test suite's mirror cases are.
 
+``examples/mirror-three-species.toml`` is the worked example: electrons,
+deuterons and carbon at Mach 6 on the mirror of :ref:`rotation-mirror`, with
+densities that fall to a millionth of their peak at the labels.
+
+.. code-block:: sh
+
+   ../../install/double/bin/meq-run ../../source/examples/mirror-three-species.toml
+
 Species
 -------
 

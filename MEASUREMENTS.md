@@ -16864,7 +16864,7 @@ so it is the density that must. `k = 3`:
 1 − 2 is 1.11e-08 and 1.12e-09 — **5.68** and **5.29**. `ψ_ax` 5.5910079e-03,
 5.5914920e-03, 5.5915409e-03. M-167's `M` on the solved state at `ψ_n = 0.5`:
 **6.49**. **The `n_s0` range**: every `n_s0` is its density at the crossing to
-**5.6e-16** in the log; the same solved plasma's fixed-radius tables at the best
+**4.5e-14** in the log; the same solved plasma's fixed-radius tables at the best
 single `R_ref = 0.3095` m:
 
 | | `ψ_n` = 0.05 / 0.5 / 0.95 | fixed-radius span | midplane span |
@@ -16875,8 +16875,8 @@ single `R_ref = 0.3095` m:
 
 These are the exponents with `φ₀` in, which M-167 §7's +187/−310 bound from above.
 1e117 fits a double; what it does not fit is a Hermite table at
-`( E′h )⁴/384`, and below 0.3095 m the closure's own root find gives out on some
-surface.
+`( E′h )⁴/384`. No other single radius does better: the scan is 0.10 to 0.35 m
+in 0.5 mm steps.
 
 **AND THE FREEZE HAS A PRICE IN PRESSURE.** The same case at a midplane peak of
 **5e19** m⁻³ stalls: damped from the first step, its merit falls to 8.4e-05 by
@@ -16886,3 +16886,15 @@ never held. At **2e19** it takes two full steps to 1.1e-04, then stalls at
 `R₀` is the term the Jacobian leaves out, and it scales with the plasma's
 pressure: somewhere between 5e18 and 2e19 here the frozen iteration stops
 contracting.
+
+**From a file**: `examples/mirror-three-species.toml`, the same plasma as
+257-knot tables, runs through `meq-run` at level 0, `k = 2`, in 7 linear steps
+(6.41e-01 to 2.26e-13) and exits 0. **Its first run did not**: the output pass
+evaluates every species' density at every grid node, and far outside the plasma
+the three-species root find for `φ₀` ran out of its 100 iterations — one
+species' exponential dominating the sum, so Newton crawled by `T_s` a step
+across a bracket of thousands of `T_s`, inside the bracket every time, and with
+`y/T_s` that large one ulp of `y` moved the residual past its tolerance anyway.
+Bisecting whenever Newton has not halved the previous step, and accepting a
+bracket collapsed onto adjacent doubles, fixes it; `RotatingSourceTests`'
+`theRootFindEndsWhenItsBracketDoes` threw before and passes after.

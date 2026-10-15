@@ -208,7 +208,7 @@ geq's 1.63, and at 513² 0.39 of geq's own 257-against-513 difference, where the
 fixed-radius gauge sits at 0.44. **The same plasma in the two gauges is one
 equilibrium** to 3e-10 at level 2, 25× under MEQ's own error there and falling
 faster than it. **Three species at `M = 6.5` solve** and self-converge, with
-every `n_s0` the physical midplane density to 6e-16 in the log, where the same
+every `n_s0` the physical midplane density to 5e-14 in the log, where the same
 plasma's fixed-radius carbon table would span 1e117. `RotatingMirrorMidplane` is
 the acceptance. Three findings the paragraphs below did not anticipate are
 recorded beside the paragraph each corrects.
@@ -335,9 +335,10 @@ transferred from a fixed-radius statement of the same plasma, as geq's is.
 plasma — `T` to a tenth at the labels, `ω` drifting 1.3×, carbon at 1% — the best
 single `R_ref` is 0.31 m, where carbon's fixed-radius `n_s0` spans **1e117**, the
 electrons' 1e68 and the deuterons' 1e23. That is inside a double; it is the
-Hermite table at `( E′h )⁴/384` that cannot carry it, and away from that one
-radius the closure's own root find gives out. Under the midplane gauge each
-species spans the 1e6 it was given.
+Hermite table at `( E′h )⁴/384` that cannot carry it, at thousands of knots.
+Under the midplane gauge each
+species spans the 1e6 it was given. `examples/mirror-three-species.toml` runs
+it from a file.
 
 ### What does NOT bite, which is worth saying
 
