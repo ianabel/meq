@@ -4712,20 +4712,35 @@ int main( int argc, char **argv )
 			 *
 			 * Rebuilt every cycle for the reason above: `a` moves with the
 			 * Newton, so a hoisted lambda would carry the previous cycle's trace.
+			 *
+			 * AND UNDER [conductors] THE DATUM IS THE REMAINDER'S, `sum a_n C_n
+			 * - psi_c`, BECAUSE THAT IS WHAT THE LOAD CARRIES. The modal sum is
+			 * the PHYSICAL flux on Gamma, and prepare() transfers it less psi_c
+			 * since the solved field is psi_p (CS-3's Dirichlet half). Left
+			 * physical, eta_5 compares psi*_p against a trace the solve never
+			 * imposed, off by psi_c on Gamma, and it is the divergence above
+			 * again: on examples/mirror-rotating.toml with three adaptive
+			 * cycles, eta_5 read 2.68, 3.58, 4.49 against eta_1's 1.48e-02, so
+			 * eta ROSE, the marking chased eta_5's faces, and eta_1 to eta_4
+			 * did not move in the fifth digit. Shifted, eta_5 is 2.0e-05.
+			 * RotatingMirrorAdaptive is the regression, MEASUREMENTS.md
+			 * M-ADAPT. conductorPsi() is EXACTLY ZERO without a split, so every
+			 * other run builds the datum it always built.
 			 */
 			if ( exterior )
 			{
 				meq::ExteriorDtN const *dtn = exterior.get();
 				std::vector<double> const *a = &solver->exteriorCoefficients();
+				meq::GradShafranovSolver const *solved = solver.get();
 				datum = solver->transferredDatum(
-					[ dtn, a ]( mfem::Vector const &x )
+					[ dtn, a, solved ]( mfem::Vector const &x )
 				{
 					double total = 0.0;
 					for ( std::size_t m = 0; m < a->size(); ++m )
 						total += ( *a )[ m ]*dtn->basis(
 							meq::ExteriorDtN::firstMode() + static_cast<int>( m ),
 							x( 0 ), x( 1 ) );
-					return total;
+					return total - solved->conductorPsi( x( 0 ), x( 1 ) );
 				} );
 			}
 			else

@@ -16982,3 +16982,144 @@ across a bracket of thousands of `T_s`, inside the bracket every time, and with
 Bisecting whenever Newton has not halved the previous step, and accepting a
 bracket collapsed onto adjacent doubles, fixes it; `RotatingSourceTests`'
 `theRootFindEndsWhenItsBracketDoes` threw before and passes after.
+
+
+### M-ADAPT
+
+**THE RESIDUAL ESTIMATOR ON THE ROTATING MIRROR. JUDGING IT FOUND TWO DEFECTS,
+BOTH IN HOW THE ESTIMATOR TREATS SUBTRACTED CONDUCTORS. WITH BOTH REPAIRED, η
+TRACKS THE FLUX ERROR AT AN EFFECTIVITY OF 8 TO 14, AND BOTH FALL AT EVERY
+CYCLE.**
+
+**Setup.**
+* `RotatingMirrorAdaptive` runs `examples/mirror-rotating.toml` at `k = 2`,
+  with `DriverAcceptance`'s `[adaptivity]` block: Doerfler, `Theta = 0.5`,
+  three cycles.
+* A run writes only its last cycle's exact files, so each cycle's answer comes
+  from a run stopped at that cycle. Its element count is asserted equal to the
+  long run's table.
+* The reference is MR-4c's: the same file at `RefinementLevels = 2`, `k = 4`,
+  through the same binary, on 19,276 elements. Its flux error is bounded from
+  L1 at `k = 4` at the edge-capped rate 3.5, giving **4.06e-06**, which is
+  4.3e-04 of `‖q‖`.
+* The true error is `‖q − q_h‖` in L2 over the run's `Ω_h`, on the `2k + 4`
+  rule. The reference is read at each point by `meq::PointLocator`. The
+  reference's `Ω_h` covers every point of every cycle's `Ω_h`.
+* Both sides are the remainder, `ψ_p`.
+* MEQ `55ab9ee` with this change, double. The runs are on the host.
+
+**As found, `η₅` dominated η by two orders, and η ROSE:**
+
+| cycle | elements | marked | η | η₁ | η₅ |
+|---|---|---|---|---|---|
+| 0 | 1175 | 11 | 2.6798e+00 | 1.4801e-02 | 2.6798e+00 |
+| 1 | 1285 | 19 | 3.5828e+00 | 1.4801e-02 | 3.5828e+00 |
+| 2 | 1418 | 0 | 4.4892e+00 | 1.4801e-02 | 4.4891e+00 |
+
+* **`η₅`'s datum was the exterior's modal sum.** That is the PHYSICAL flux on
+  `Γ`. What the solve imposes there is that sum less `ψ_c`, because the solved
+  field is the remainder.
+* So `η₅` read `ψ_c` on every face of `Γ_h`. It is the `√faces` divergence
+  that `apps/meq.cpp` records for a zero datum.
+* The marking chased it. `η₁` to `η₄` did not move in the fifth digit, and the
+  effectivity at cycle 0 was 3,048.
+* The driver now subtracts `ψ_c` from the datum. With that alone, `η₅` is
+  2.04e-05 and `η₁` carries η.
+
+**`η₁` then fell at FIRST order.** Its residual read `F` at `ψ_p`, while the
+solve evaluates `F` at `ψ_p + ψ_c`. The normalised source reads its argument
+against labels that are total flux, so the residual was `O( 1 )`, and the
+`h_K` weight made `η₁` first order:
+
+| | elements | η | `‖q − q_h‖` | index |
+|---|---|---|---|---|
+| uniform L0 | 1175 | 1.4844e-02 | 8.7932e-04 | 16.9 |
+| uniform L1 | 4795 | 7.4600e-03 | 1.0974e-04 | 68.0 |
+| uniform L2 | 19276 | 3.6888e-03 | 1.1985e-05 | 307.8 |
+| cycle 1 | 1238 | 1.0365e-02 | 3.1658e-04 | 32.7 |
+| cycle 2 | 1392 | 7.5437e-03 | 1.8327e-04 | 41.2 |
+
+* **The adaptive cycles alone barely see this.** They leave the band only at
+  the last cycle, where the uniform L1 mesh reads 68. So the test asserts the
+  L1 index beside the cycles.
+* `meq::ResidualEstimator` now evaluates `F` at `ψ_p + ψ_c`.
+* `conductorPsi()` is exactly zero without a conductor field. Every other
+  configuration therefore sums the same numbers as before.
+  `EstimatorConvergence`, `AdaptiveRefinement` and the three adaptive
+  `DriverAcceptance` cases pass. The mirror's frames there now come from
+  1175, 1242 and 1356 elements.
+
+**With both repaired:**
+
+| | elements | trace dofs | marked | η | `‖q − q_h‖` | relative | index |
+|---|---|---|---|---|---|---|---|
+| cycle 0 | 1175 | 5397 | 8 | 6.8130e-03 | 8.7932e-04 | 9.33e-02 | **7.75** |
+| cycle 1 | 1242 | 5703 | 15 | 3.9087e-03 | 2.8814e-04 | 3.06e-02 | **13.57** |
+| cycle 2 | 1356 | 6222 | — | 2.3315e-03 | 1.7784e-04 | 1.89e-02 | **13.11** |
+| uniform L1 | 4795 | 21804 | — | 1.2794e-03 | 1.0974e-04 | 1.16e-02 | **11.66** |
+| uniform L2 | 19276 | 87201 | — | 1.7190e-04 | 1.1985e-05 | 1.27e-03 | 14.34 |
+
+* **What is asserted.** Every index except L2's lies in `AdaptiveRefinement`'s
+  `( 5, 40 )` band at `k = 2`. η and the error both fall at every cycle. Each
+  non-final cycle marks some elements but not all. The reference's bound is
+  below a tenth of every error it is asserted against.
+* **L2 is printed, not asserted.** Its error is within a factor of three of the
+  reference's bound.
+* **The uniform index rises.** It reads 7.7, 11.7 and 14.3, towards the
+  Solov'ev uniform value of 15.3 at this `k`. Its drift is not asserted,
+  because levels 0 to 2 at `k = 2` are pre-asymptotic on this problem (MR-4c's
+  `rungs()`).
+* **Mutation.** With `ψ_c` dropped from `F` again, the test fails at cycle 2
+  (41.2) and at L1 (68.0).
+
+**The cost, printed and not asserted.** Nothing in the tree asserts an adaptive
+loop against uniform refinement. Uniform refinement falls as `dofs^−1.49` from
+L0 to L1. At cycle 2's 6,222 trace dofs that line reads 7.11e-04, against the
+cycle's 1.78e-04. Reaching 1.78e-04 uniformly would take 15,772 dofs, so the
+loop uses **2.5× fewer** trace dofs for the same error.
+
+### M-DEVICE
+
+**THE SHIPPED MIRROR UNDER `--device cuda` IS THE HOST'S TO ABOUT 1e-13 OF ITS
+LARGEST VALUE, IN THE SAME FOUR NEWTON STEPS. THE CARD IS NOT
+BIT-REPRODUCIBLE FROM RUN TO RUN.**
+
+**Setup.**
+* `RotatingMirrorDevice` runs `meq-run` on `examples/mirror-rotating.toml`
+  twice, under `--device cpu` and under `--device cuda`.
+* Both arms run at `OMP_NUM_THREADS=1`, for `DeviceParity`'s reason: the
+  driver refuses threaded assembly above one thread under a Device, and
+  pinning the host as well leaves the device as the only difference.
+* The card takes the driver's device defaults, so the log reports batched
+  local factorisation on it and not on the host.
+* The run is `k = 2` on 1175 elements.
+* The exact `_psi.gf` and `_grad_psi.gf` of the two arms are compared over
+  every dof.
+* RTX 2070 SUPER. MEQ `55ab9ee` with this change. MFEM 4.10.1 from
+  `../../mfem/install`, double, CUDA arch 75.
+
+| take | `ψ_h`, max difference | of max `|ψ_h|` = 6.646e-03 | `q_h`, max difference | of max `|q_h|` = 5.329e-02 | Newton, host and card |
+|---|---|---|---|---|---|
+| 1 | 8.035e-16 | 1.21e-13 | 3.037e-15 | 5.70e-14 | 4, 4 |
+| 2 | 3.215e-16 | 4.84e-14 | 3.027e-15 | 5.68e-14 | 4, 4 |
+| 3 | 5.939e-16 | 8.94e-14 | 5.496e-15 | 1.03e-13 | 4, 4 |
+
+`ψ_ax` prints 5.536418e-03 on both arms in every take.
+
+**The bound is 1e-12 of the largest value, on both fields.** It is the bound
+`RotatingMirrorDriver` uses for the driver against the library on this file.
+* It sits a factor of 8 above the worst take.
+* It sits twelve orders below the defects the device path has had: M-206 was a
+  factor of two.
+* M-276's figure is consistent with it. That race read 2.0e-15 in `ψ*` at geq's
+  nodes, at L2 and `k = 4`, against a flux of order 7e-02, which is about
+  3e-14.
+
+**A printed-digit comparison, as `DeviceParity` uses, is the wrong instrument
+here.** The three takes give three different differences, so the card's
+answer moves in its last bits from run to run.
+
+**What is not measured.**
+* Single precision on the card. The test applies the driver comparison's
+  single-precision floor there, the extension's `eps/fd_step`.
+* `MEQ_AXIS_DEVICE=force`, `DeviceParity`'s fourth arm.

@@ -262,6 +262,11 @@ regime it is analysed in — and calls `setTransferredBoundary()` automatically.
 it against the same loop driven through the library at **1.666e-16 over 2694
 dofs**, and separately asserts that it refined, that it refined *adaptively*,
 that η came down, and that assumption P.1 survived the graded `Γ_h`.
+**Under `[conductors]` the estimator reads the remainder's problem**: η₁ takes
+`F` at `ψ_p + ψ_c`, as the solve does, and η₅'s datum on `Γ_h` is the exterior
+trace less `ψ_c`. Either one left physical puts η orders wrong on the mirror;
+`RotatingMirrorAdaptive` holds the effectivity index in `( 5, 40 )` there
+→ **[M-ADAPT](MEASUREMENTS.md#m-adapt)**.
 
 **The driver's non-linear path is a reactive ladder**: Newton, and on *observed*
 failure `PicardThenNewton`, rebuilding the solver because a caught
