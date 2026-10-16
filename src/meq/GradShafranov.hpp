@@ -501,6 +501,82 @@ namespace meq
 	};
 
 	/**
+	 * A HDG STABILISATION SCALED BY THE DIFFUSION COEFFICIENT:
+	 * tau( x ) = tau0 nu( x ), with nu = 1/R.
+	 *
+	 * WHAT nu IS, EXACTLY. The flux equation is ( R q, v ) + ... = 0, so
+	 * q = ( 1/R ) grad_bar( psi ) and the operator is -div_bar( nu grad_bar psi )
+	 * with nu = 1/R -- in metres^-1, with no mu_0 in it: mu_0 lives in F. The
+	 * face term < tau( psi_h - psihat_h ), w > has the units of q.n times psi,
+	 * so tau is in m^-2 and tau0 here is in m^-1: it is the 1/ell of Nguyen,
+	 * Peraire and Cockburn's tau = kappa/ell, a fixed length and not a mesh
+	 * size. A constant tau = 1 is tau0 = R in this form, which is weakest
+	 * relative to the operator exactly where nu is largest, at small R.
+	 *
+	 * WHY IT IS WANTED. The element-local problem is singular at tau = 0 on
+	 * the degree-k modes orthogonal to P_{k-1}: those have no discrete gradient,
+	 * so the face term is the whole of their energy, and the lowest local
+	 * eigenvalue is ( k + 1 ) tau |dK|/|K| -- measured exact on any triangle --
+	 * while tau h/nu is small; for k >= 3 it saturates at the cubic bubble's
+	 * Dirichlet eigenvalue ~ nu/h^2 when tau h/nu is large. A reaction
+	 * ( 1/R ) dF/dpsi = nu dF/dpsi > 0 reaching it makes the local solve
+	 * singular, which is the element-local fold of the rotating mirror. With
+	 * tau = tau0 nu the nu cancels: the criterion reads
+	 * dF/dpsi < ( k + 1 ) tau0 |dK|/|K|, the same at every radius.
+	 * CLAUDE_HDGGS.md has the derivation and MEASUREMENTS.md M-TAUDESIGN-A to
+	 * M-TAUDESIGN-C the measurement.
+	 *
+	 * EXACT AT THE QUADRATURE POINT. Eval() reads the physical point off the
+	 * transformation it is handed, which every MFEM route -- the per-face loop,
+	 * the batched face tables and the nonlinear residual and gradient -- passes
+	 * with the element's integration point set. The two sides of an interior
+	 * face are the same physical point, so tau is single valued on a face.
+	 *
+	 * THE AXIS. The operator never evaluates 1/R where R = 0, because its 1/R
+	 * sits only at element-interior quadrature points; a face lying ON the
+	 * symmetry axis has every point at R = 0, and there nu is infinite. Such a
+	 * face is a fitted Dirichlet face with psihat = 0 exact, so any positive tau
+	 * is consistent there and a larger one only imposes the datum more strongly;
+	 * at R <= 0 this takes nu at the CENTROID of the element whose side it is,
+	 * which is finite for any element with a vertex off the axis.
+	 * GradShafranovSolver::setTauScaling() refuses a mesh with any point at
+	 * R < 0, where nu < 0 and the operator itself is meaningless.
+	 *
+	 * IsConstant() is TRUE, and that is a statement about the STATE: MFEM's
+	 * contract is "s depends on neither the potential nor its trace", and
+	 * position is neither. So EvalGrad() is never called and is not needed,
+	 * and the bilinear and batched assembly paths accept it.
+	 *
+	 * Thread safe in the sense GradShafranovSolver::setAssemblyMode() asks:
+	 * one double, and stack storage per call on the caller's transformation.
+	 */
+	class DiffusionScaledStabilization : public mfem::HDGStabilization
+	{
+		public:
+			explicit DiffusionScaledStabilization( double tau0In );
+
+			/// MFEM's spelling, from HDGStabilization. True: position
+			/// dependent, state independent.
+			bool IsConstant() const override; // NOLINT(readability-identifier-naming)
+
+			/// MFEM's spelling, from HDGStabilization. Only @a tr is read.
+			mfem::real_t Eval( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
+			                   mfem::real_t uhat,
+			                   mfem::ElementTransformation &tr ) const override;
+
+			/// tau0, in m^-1.
+			double tau0() const;
+
+			/// tau at a face point of radius @a radius, on the side of the
+			/// element whose centroid sits at @a centroidRadius -- the rule
+			/// Eval() applies, exposed so that it can be tested without a mesh.
+			double at( double radius, double centroidRadius ) const;
+
+		private:
+			double tau0Value;
+	};
+
+	/**
 	 * The psi-dependent source, as a domain integrator on the potential space.
 	 *
 	 * This is the whole of what makes the problem semi-linear, and the only
@@ -842,13 +918,48 @@ namespace meq
 			/// @param orderIn  the polynomial degree k, used for all three spaces.
 			///                 Hybridization removes the inf-sup condition that
 			///                 would otherwise force them apart.
-			/// @param tauIn    the HDG stabilisation, constant. tau = 1 is both
-			///                 papers' choice and the measured optimum here; the
+			/// @param tauIn    the HDG stabilisation, constant, in m^-2 -- or
+			///                 tau0 in tau = tau0/R, in m^-1, once
+			///                 setTauScaling( TauScaling::Diffusion ) is called.
+			///                 Constant tau = 1 is both papers' choice and a
+			///                 measured balance rather than an optimum: smaller
+			///                 buys q a few percent and costs psi, larger the
+			///                 reverse (MEASUREMENTS.md M-TAUDESIGN-B). The
 			///                 pre-port code used 5.0 with no recorded reason.
 			GradShafranovSolver( mfem::Mesh &meshIn, int orderIn, double tauIn = 1.0 );
 
 			GradShafranovSolver( GradShafranovSolver const & ) = delete;
 			GradShafranovSolver &operator=( GradShafranovSolver const & ) = delete;
+
+			/// What the constructor's tau MEANS. See setTauScaling().
+			enum class TauScaling
+			{
+				Constant,  ///< tau( x ) = tau, in m^-2. The default.
+				Diffusion  ///< tau( x ) = tau nu( x ) = tau/R, tau in m^-1
+			};
+
+			/**
+			 * SCALE tau BY THE DIFFUSION COEFFICIENT, or not. Constant is the
+			 * default and every rate in the suite is measured with it;
+			 * Diffusion takes the constructor's tau as tau0 in
+			 * tau( x ) = tau0/R -- meq::DiffusionScaledStabilization, which
+			 * carries the definition, the axis rule and why it is wanted.
+			 *
+			 * It changes the DISCRETISATION, and so the answer at fixed h: it is
+			 * a modelling choice of the same kind as tau itself, not a
+			 * performance key. Gamma_h keeps tau = 0 either way, because that is
+			 * which faces carry the integrator and not what it returns.
+			 *
+			 * @throws std::logic_error once the forms are built -- set it before
+			 *         the first solve, like the source.
+			 * @throws std::invalid_argument for Diffusion on a mesh with any
+			 *         vertex or node at R < 0, where nu is negative and the
+			 *         operator is not the Grad-Shafranov one.
+			 */
+			void setTauScaling( TauScaling choice );
+
+			/// setTauScaling().
+			TauScaling tauScaling() const;
 
 			/// The right hand side F( R, z ) of a source that does not depend on
 			/// psi -- NOT F/R. The 1/R belongs to the weak form and is applied
@@ -2933,7 +3044,9 @@ namespace meq
 			/// MEQ's side of that is discharged and asserted.
 			/// meq::SourceIntegrator and meq::PoloidalFieldCoefficient guard their
 			/// scratch on MFEM_THREAD_SAFE, exactly as MFEM's own HDG integrators
-			/// now do; meq::ConstantStabilization holds one double and reads it;
+			/// now do; meq::ConstantStabilization holds one double and reads it,
+			/// and meq::DiffusionScaledStabilization holds one and transforms
+			/// into stack storage on the transformation it is handed;
 			/// and every meq::Source and meq::Profile behind them is immutable
 			/// during evaluation -- no interval memo in SplineProfile, no cached
 			/// previous root in RotatingSource, which is why meq::maxSpecies is a
@@ -5397,6 +5510,8 @@ namespace meq
 			int numTraceDofs() const;
 
 			int order() const;
+			/// The constructor's tau: tau itself under TauScaling::Constant,
+			/// tau0 under TauScaling::Diffusion.
 			double tau() const;
 
 		private:
@@ -5416,6 +5531,10 @@ namespace meq
 			std::unique_ptr<mfem::DarcyForm> darcy;
 
 			ConstantStabilization stabilization;
+			/// The same number read as tau0; buildForms() installs whichever
+			/// tauScalingChoice names.
+			DiffusionScaledStabilization scaledStabilization;
+			TauScaling tauScalingChoice;
 
 			/// R, the weight of the flux mass form. The diffusion coefficient of
 			/// the operator is 1/R, and DarcyForm's flux mass form wants its

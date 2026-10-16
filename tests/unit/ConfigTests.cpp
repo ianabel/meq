@@ -119,6 +119,7 @@ using meq::BoundaryDataType;
 using meq::ConfigError;
 using meq::Configuration;
 using meq::SourceType;
+using meq::TauScalingType;
 using meq::TraceSolverType;
 
 namespace
@@ -753,6 +754,46 @@ BOOST_AUTO_TEST_CASE( an_inverted_or_negative_box_is_rejected )
 
 	BOOST_CHECK_EXCEPTION( parse( negativeRadius ), ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "mesh.RMin"; } );
+}
+
+/// [discretisation] TauScaling: absent is "constant", so every file written
+/// before the key existed means what it meant; "diffusion" reads Tau as tau0;
+/// anything else, a misspelling or a non-string, is refused by name.
+BOOST_AUTO_TEST_CASE( tau_scaling_defaults_to_constant_and_refuses_an_unknown_value )
+{
+	auto withScaling = []( std::string const & line )
+	{
+		return
+			"[mesh]\n"
+			"RMin = 0.2\n"
+			"RMax = 1.8\n"
+			"ZMin = -1.6\n"
+			"ZMax = 1.6\n"
+			"\n"
+			"[discretisation]\n"
+			"PolynomialDegree = 2\n"
+			"Tau = 3.0\n"
+			+ line +
+			"\n"
+			"[source]\n"
+			"Type = \"soloviev\"\n"
+			"A = -0.52\n";
+	};
+
+	BOOST_TEST( ( parse( minimal() ).getDiscretisation().tauScaling == TauScalingType::Constant ) );
+
+	Configuration constant = parse( withScaling( "TauScaling = \"constant\"\n" ) );
+	BOOST_TEST( ( constant.getDiscretisation().tauScaling == TauScalingType::Constant ) );
+	BOOST_TEST( constant.getDiscretisation().tau == 3.0 );
+
+	Configuration diffusion = parse( withScaling( "TauScaling = \"diffusion\"\n" ) );
+	BOOST_TEST( ( diffusion.getDiscretisation().tauScaling == TauScalingType::Diffusion ) );
+	BOOST_TEST( diffusion.getDiscretisation().tau == 3.0 );
+
+	for ( std::string const bad : { "TauScaling = \"Diffusion\"\n", "TauScaling = \"mesh\"\n",
+	                                "TauScaling = 1\n" } )
+		BOOST_CHECK_EXCEPTION( parse( withScaling( bad ) ), ConfigError,
+			[]( ConfigError const & e ) { return e.getKey() == "discretisation.TauScaling"; } );
 }
 
 BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )

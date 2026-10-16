@@ -166,6 +166,9 @@ supplies on top:
    * - :cpp:class:`meq::ConstantStabilization`
      - The library's default stabilisation is the LDG choice, which costs an
        order in the flux. See :ref:`formulation-tau`.
+   * - :cpp:class:`meq::DiffusionScaledStabilization`
+     - :math:`\tau = \tau_0/R`, the opt-in alternative, exact at each face
+       quadrature point. See :ref:`formulation-tau`.
    * - :cpp:class:`meq::SourceIntegrator`
      - :math:`F` and :math:`\partial F/\partial\psi` in the weak form's
        :math:`1/R` weighting.

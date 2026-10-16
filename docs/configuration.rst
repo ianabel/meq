@@ -330,8 +330,18 @@ tokamak, and ``examples/mirror-rotating.toml`` for a mirror, whose
        correctly.
    * - ``Tau``
      - ``1.0``
-     - The HDG stabilisation, dimensionless and positive. Optimal order needs
-       only :math:`\tau = O(1)`. See :ref:`formulation-tau` before changing it.
+     - The HDG stabilisation, positive: :math:`\tau` in :math:`\mathrm{m}^{-2}`
+       under ``TauScaling = "constant"``, and :math:`\tau_0` in
+       :math:`\tau = \tau_0/R`, in :math:`\mathrm{m}^{-1}`, under
+       ``"diffusion"``. Optimal order needs only :math:`\tau = O(1)`. See
+       :ref:`formulation-tau` before changing it.
+   * - ``TauScaling``
+     - ``"constant"``
+     - ``"constant"`` or ``"diffusion"``: whether :math:`\tau` is ``Tau`` or
+       ``Tau`` times the diffusion coefficient :math:`1/R`. Anything else is
+       refused, and so is ``"diffusion"`` on a mesh reaching :math:`R < 0`. It
+       changes the discretisation, so the answer at a fixed mesh. See
+       :ref:`formulation-tau`.
 
 ``[source]``
 ------------

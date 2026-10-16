@@ -104,6 +104,183 @@ BOOST_AUTO_TEST_CASE( theConstructorRejectsWhatItCannotSolve )
 }
 
 /*
+ * tau's SCALING IS SET BEFORE THE FORMS, AND REFUSED WHERE IT HAS NO MEANING.
+ *
+ * Constant is the default, so every caller written before the choice existed
+ * solves what it solved. Diffusion leaves tau() reading the constructor's
+ * number -- it is tau0 now, not a different tau -- and it TAKES: the same
+ * problem solved both ways is a different discrete answer. After a solve the
+ * setter refuses, like setSource(), rather than rebuilding under the caller.
+ * A mesh reaching R < 0 is refused for Diffusion, where 1/R is negative, and
+ * accepted for Constant, which never reads R.
+ */
+BOOST_AUTO_TEST_CASE( theTauScalingIsSetBeforeTheFormsAndRefusedWhereItIsMeaningless )
+{
+	using S = meq::GradShafranovSolver::TauScaling;
+
+	meq::analytic::SolovievEquilibrium const eq = meq::analytic::SolovievEquilibrium::nstx();
+	EquilibriumSource<meq::analytic::SolovievEquilibrium> const source( eq );
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	mfem::Mesh mesh = makeMesh( 4 );
+	meq::GradShafranovSolver constant( mesh, 2, 1.5 );
+	BOOST_TEST( static_cast<int>( constant.tauScaling() ) == static_cast<int>( S::Constant ),
+	            "the default tau scaling is not Constant" );
+	constant.setSource( source );
+	constant.setBoundaryData( exact );
+	constant.solve();
+	BOOST_CHECK_THROW( constant.setTauScaling( S::Diffusion ), std::logic_error );
+
+	mfem::Mesh scaledMesh = makeMesh( 4 );
+	meq::GradShafranovSolver scaled( scaledMesh, 2, 1.5 );
+	scaled.setTauScaling( S::Diffusion );
+	BOOST_TEST( static_cast<int>( scaled.tauScaling() ) == static_cast<int>( S::Diffusion ),
+	            "setTauScaling( Diffusion ) did not take" );
+	BOOST_TEST( scaled.tau() == 1.5, "tau() under Diffusion reported " << scaled.tau()
+	            << ", not the tau0 the constructor was given" );
+	scaled.setSource( source );
+	scaled.setBoundaryData( exact );
+	scaled.solve();
+
+	mfem::Vector difference( scaled.potential() );
+	difference -= constant.potential();
+	BOOST_TEST( difference.Normlinf() > 1.0e-8,
+	            "the two scalings gave the same psi_h to " << difference.Normlinf()
+	            << ", so the scaled stabilisation was never installed" );
+	BOOST_TEST( scaled.potentialError( exact ) < 3.0*constant.potentialError( exact ),
+	            "Diffusion's psi error " << scaled.potentialError( exact )
+	            << " is not of the size of Constant's " << constant.potentialError( exact ) );
+
+	mfem::Mesh across = meq::tests::makeMesh( meq::tests::Rectangle{ -0.2, 0.6, -0.4, 0.4 }, 4 );
+	meq::GradShafranovSolver negative( across, 1 );
+	BOOST_CHECK_THROW( negative.setTauScaling( S::Diffusion ), std::invalid_argument );
+	BOOST_CHECK_NO_THROW( negative.setTauScaling( S::Constant ) );
+}
+
+/*
+ * THE ASSEMBLED FACE TERM IS < ( tau0/R ) psi, w > AT EVERY QUADRATURE POINT.
+ *
+ * MFEM's own HDGDiffusionIntegrator, handed meq::DiffusionScaledStabilization,
+ * assembles every face of a mesh REACHING THE AXIS, and each block is compared
+ * with the same rule summed here from tau0/R at the face's physical point --
+ * which is what would catch Eval() reading the reference point, the wrong
+ * side's point or a stale one. Where the face lies on R = 0 the radius is the
+ * owning element's centroid's, and that is checked too, on faces that exist:
+ * the count of axis faces is asserted, not assumed.
+ *
+ * And it is assembled as a BILINEAR form, which MFEM refuses for a
+ * stabilisation reporting IsConstant() false -- "a state dependent
+ * stabilization makes the face term nonlinear" -- so getting here at all is
+ * the statement that position dependence is not state dependence and no
+ * EvalGrad() is owed. IsConstant() is asserted directly as well.
+ */
+BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoint )
+{
+	double const tau0 = 2.5;
+	int const order = 2;
+	mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::Rectangle{ 0.0, 0.8, -0.4, 0.4 }, 4 );
+	mfem::L2_FECollection potentialColl( order, 2, mfem::BasisType::GaussLobatto );
+	mfem::DG_Interface_FECollection traceColl( order, 2 );
+	mfem::FiniteElementSpace potentialSpace( &mesh, &potentialColl );
+	mfem::FiniteElementSpace traceSpace( &mesh, &traceColl );
+
+	meq::DiffusionScaledStabilization const stab( tau0 );
+	BOOST_TEST( stab.IsConstant(), "a position-dependent tau reported itself state dependent" );
+	BOOST_TEST( stab.tau0() == tau0 );
+	BOOST_TEST( stab.at( 0.5, 0.25 ) == tau0/0.5 );
+	BOOST_TEST( stab.at( 0.0, 0.25 ) == tau0/0.25 );
+
+	mfem::ConstantCoefficient one( 1.0 );
+	mfem::HDGDiffusionIntegrator integrator( one, 1.0 );
+	integrator.SetStabilization( stab );
+	mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::SEGMENT, 2*order + 2 );
+	integrator.SetIntRule( &rule );
+
+	int axisFaces = 0, interiorFaces = 0;
+	double worst = 0.0;
+	for ( int f = 0; f < mesh.GetNumFaces(); ++f )
+	{
+		mfem::FaceElementTransformations *ft = mesh.GetFaceElementTransformations( f );
+		mfem::FiniteElement const &el1 = *potentialSpace.GetFE( ft->Elem1No );
+		bool const interior = ft->Elem2No >= 0;
+		mfem::FiniteElement const &el2 = interior ? *potentialSpace.GetFE( ft->Elem2No ) : el1;
+		mfem::FiniteElement const &traceEl = *traceSpace.GetFaceElement( f );
+		mfem::DenseMatrix elmat;
+		integrator.AssembleHDGFaceMatrix( traceEl, el1, el2, *ft, elmat );
+
+		int const n1 = el1.GetDof(), n2 = interior ? el2.GetDof() : 0, nt = traceEl.GetDof();
+		mfem::DenseMatrix expected( n1 + n2 + nt );
+		expected = 0.0;
+		mfem::Vector shape1( n1 ), shape2( n2 ), traceShape( nt ), x, centre1, centre2;
+		ft->Elem1->Transform( mfem::Geometries.GetCenter( ft->Elem1->GetGeometryType() ), centre1 );
+		if ( interior )
+			ft->Elem2->Transform( mfem::Geometries.GetCenter( ft->Elem2->GetGeometryType() ), centre2 );
+		bool onAxis = true;
+		for ( int q = 0; q < rule.GetNPoints(); ++q )
+		{
+			mfem::IntegrationPoint const &ip = rule.IntPoint( q );
+			ft->SetAllIntPoints( &ip );
+			ft->Transform( ip, x );
+			onAxis = onAxis && x( 0 ) == 0.0;
+			double const faceWeight = ip.weight*ft->Weight();
+			el1.CalcPhysShape( *ft->Elem1, shape1 );
+			traceEl.CalcShape( ip, traceShape );
+			double const tau1 = tau0/( x( 0 ) > 0.0 ? x( 0 ) : centre1( 0 ) );
+			double tauSum = tau1;
+			for ( int i = 0; i < n1; ++i )
+			{
+				for ( int j = 0; j < n1; ++j )
+					expected( i, j ) += faceWeight*tau1*shape1( i )*shape1( j );
+				for ( int j = 0; j < nt; ++j )
+					expected( i, n1 + n2 + j ) -= faceWeight*tau1*shape1( i )*traceShape( j );
+			}
+			if ( interior )
+			{
+				el2.CalcPhysShape( *ft->Elem2, shape2 );
+				double const tau2 = tau0/( x( 0 ) > 0.0 ? x( 0 ) : centre2( 0 ) );
+				tauSum += tau2;
+				for ( int i = 0; i < n2; ++i )
+				{
+					for ( int j = 0; j < n2; ++j )
+						expected( n1 + i, n1 + j ) += faceWeight*tau2*shape2( i )*shape2( j );
+					for ( int j = 0; j < nt; ++j )
+						expected( n1 + i, n1 + n2 + j ) -= faceWeight*tau2*shape2( i )*traceShape( j );
+				}
+			}
+			for ( int i = 0; i < nt; ++i )
+				for ( int j = 0; j < nt; ++j )
+					expected( n1 + n2 + i, n1 + n2 + j ) -= faceWeight*tauSum*traceShape( i )*traceShape( j );
+		}
+		axisFaces += onAxis;
+		interiorFaces += interior;
+
+		// The potential-potential and potential-trace blocks and the trace
+		// block; the trace-potential block is MFEM's negated transpose and is
+		// not a separate claim.
+		double scale = 0.0, error = 0.0;
+		for ( int i = 0; i < n1 + n2 + nt; ++i )
+			for ( int j = 0; j < n1 + n2 + nt; ++j )
+			{
+				if ( i >= n1 + n2 && j < n1 + n2 )
+					continue;
+				scale = std::max( scale, std::abs( expected( i, j ) ) );
+				error = std::max( error, std::abs( elmat( i, j ) - expected( i, j ) ) );
+			}
+		BOOST_TEST( error <= 1.0e-13*scale,
+		            "face " << f << ( onAxis ? " (on the axis)" : "" ) << ": the assembled face term is "
+		            << error << " from tau0/R summed at its points, against " << scale );
+		worst = std::max( worst, error/scale );
+	}
+	BOOST_TEST( axisFaces == 4, axisFaces << " faces on R = 0, not the 4 a 4 x 4 grid has there" );
+	BOOST_TEST( interiorFaces > 0 );
+	BOOST_TEST_MESSAGE( "worst relative face-term difference " << worst << " over "
+	                    << mesh.GetNumFaces() << " faces, " << axisFaces << " on the axis" );
+}
+
+/*
  * THE CONFIGURATION ROUND-TRIPS, and the ones with a valid range enforce it.
  */
 BOOST_AUTO_TEST_CASE( theConfigurationRoundTrips )
@@ -778,19 +955,30 @@ BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyOnANonlinearSource
 	             omp_get_max_threads() > 1 ? ""
 	             : "  <- ONE THREAD: this run cannot exhibit a race" );
 
+	// Both stabilisations: meq::DiffusionScaledStabilization evaluates on the
+	// transformation each thread is handed, which is a different claim from a
+	// constant's holding one double.
+	for ( bool const scaled : { false, true } )
 	for ( int order : { 1, 2 } )
 	{
 		for ( int n : { 4, 16 } )
 		{
 			mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), n );
+			double const tau = scaled ? 3.0 : 1.0;
+			auto const scaling = scaled ? meq::GradShafranovSolver::TauScaling::Diffusion
+			                            : meq::GradShafranovSolver::TauScaling::Constant;
+			if ( order == 1 && n == 4 )
+				std::printf( "    tau %s\n", scaled ? "= 3/R" : "= 1" );
 
-			auto serialSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			auto serialSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order, tau );
+			serialSolver->setTauScaling( scaling );
 			serialSolver->setAssemblyMode( AM::Serial );
 			serialSolver->setSource( source );
 			serialSolver->setBoundaryData( psi );
 			serialSolver->solve();
 
-			auto threadedSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			auto threadedSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order, tau );
+			threadedSolver->setTauScaling( scaling );
 			threadedSolver->setAssemblyMode( AM::Threaded );
 			threadedSolver->setSource( source );
 			threadedSolver->setBoundaryData( psi );

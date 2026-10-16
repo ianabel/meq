@@ -1725,10 +1725,19 @@ namespace meq
 		// [discretisation]
 		{
 			Table discretisation( document, "discretisation", sourceName, true );
-			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau" } );
+			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau", "TauScaling" } );
 
 			discretisationOptions.polynomialDegree = discretisation.getInteger( "PolynomialDegree" );
 			discretisationOptions.tau = discretisation.getFloatOr( "Tau", 1.0 );
+
+			std::string const scaling = discretisation.getStringOr( "TauScaling", "constant" );
+			if ( scaling == "constant" )
+				discretisationOptions.tauScaling = TauScalingType::Constant;
+			else if ( scaling == "diffusion" )
+				discretisationOptions.tauScaling = TauScalingType::Diffusion;
+			else
+				discretisation.fail( "TauScaling", "must be one of constant, diffusion, but is \""
+				                     + scaling + "\"" );
 
 			if ( discretisationOptions.polynomialDegree < 0 )
 				discretisation.fail( "PolynomialDegree", "must not be negative" );

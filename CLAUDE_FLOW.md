@@ -260,7 +260,12 @@ error; under the midplane gauge the same check can only be made on the answer,
 which the driver reports. **The pressure cap is not the freeze**: on the
 vacuum's curve, with an exact Jacobian, three species at `M = 6` stall on the
 coarsest mesh at the density where the midplane gauge does and converge on the
-finer ones. Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
+finer ones. **That cap is the HDG stabilisation's, not the plasma's**: an
+element-local fold at constant `τ = 1`, which `[discretisation] TauScaling =
+"diffusion"` with `Tau = 3` lifts on the coarsest mesh to the posed problem's
+own, mesh-converged fold near 4.15e19 (`CLAUDE_HDGGS.md`, *A constant `τ`
+folds inside one element*, → [M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)).
+Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
 solved crossing (→ [M-282](MEASUREMENTS.md#m-282)).
 
 **Both run here**, in MEQ's own benchmark venv at
