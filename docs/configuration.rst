@@ -340,8 +340,9 @@ tokamak, and ``examples/mirror-rotating.toml`` for a mirror, whose
      - ``"constant"`` or ``"diffusion"``: whether :math:`\tau` is ``Tau`` or
        ``Tau`` times the diffusion coefficient :math:`1/R`. Anything else is
        refused, and so is ``"diffusion"`` on a mesh reaching :math:`R < 0`. It
-       changes the discretisation, so the answer at a fixed mesh. See
-       :ref:`formulation-tau`.
+       changes the discretisation, so the answer at a fixed mesh. On a mesh
+       reaching :math:`R = 0` it costs the flux half an order and can stop a
+       solve at round-off. See :ref:`formulation-tau`.
 
 ``[source]``
 ------------

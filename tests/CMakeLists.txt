@@ -651,8 +651,9 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	# and its own mesh stem, so it runs beside the resolution study.
 	add_test(NAME RotatingMirrorMidplane COMMAND RotatingMirror --run_test=midplane)
 	# And on a FIXED curve, the vacuum's crossing: Newton quadratic, why the
-	# frozen table was not, three species at M = 6, and the true-midplane
-	# densities relabelled off the answer posing the same plasma.
+	# frozen table was not, three species at M = 6, the true-midplane
+	# densities relabelled off the answer posing the same plasma, and the
+	# coarsest mesh's three-species ceiling as constant tau's local fold.
 	add_test(NAME RotatingMirrorVacuumGauge COMMAND RotatingMirror --run_test=vacuum_gauge)
 	# The same gauge with its crossings as border unknowns of the Newton --
 	# GradShafranovSolver::setMidplaneGaugeKnots() -- against the frozen

@@ -324,6 +324,12 @@ namespace
 		/// setMidplaneCrossingInitial() with no state: the bordered gauge's
 		/// knots start on this table, and the iterate where it would anyway.
 		std::shared_ptr<meq::Profile const> crossingStart;
+		/// The plasma solve's HDG stabilisation: the constructor's tau, read
+		/// as tau0 in tau = tau0/R when diffusionScaledTau. The solver's own
+		/// default, constant tau = 1, unless a case says otherwise; the
+		/// vacuum solve keeps the default either way.
+		double tau = 1.0;
+		bool diffusionScaledTau = false;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -427,8 +433,10 @@ namespace
 
 		run->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, o.modes );
 		run->solver = std::make_unique<meq::GradShafranovSolver>( *run->domain->sub,
-		                                                          o.order );
+		                                                          o.order, o.tau );
 		meq::GradShafranovSolver &solver = *run->solver;
+		if ( o.diffusionScaledTau )
+			solver.setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion );
 		solver.setAxisFluxPoint( p.axisPointR, p.axisPointZ );
 		solver.setBoundaryFluxPoint( p.boundaryPointR, p.boundaryPointZ );
 		if ( o.seedBoundary )
@@ -3630,7 +3638,9 @@ BOOST_AUTO_TEST_SUITE_END()
  *   3. three species at M = 6 at two densities, and how far the plasma
  *      moves its crossings from the vacuum's;
  *   4. the true-midplane densities relabelled off a vacuum-gauge answer,
- *      posed again in the midplane gauge, are the same plasma.
+ *      posed again in the midplane gauge, are the same plasma;
+ *   5. the three-species ceiling on the coarsest mesh is constant tau's
+ *      element-local fold, which tau = tau0/R lifts.
  */
 namespace
 {
@@ -4052,6 +4062,74 @@ BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge 
 		BOOST_TEST( dOther.max > 1.0e2*dShipped.max,
 			"the tables as given and the relabelled ones solve within " << dOther.max << " of each other, so "
 			"this case cannot tell one plasma from another" );
+	}
+	std::fflush( stdout );
+}
+
+/*
+ * 5. THE THREE-SPECIES CEILING ON THE COARSEST MESH IS CONSTANT tau'S, NOT THE
+ * PLASMA'S, AND tau = tau0/R LIFTS IT.
+ *
+ * At the default constant tau = 1 one element's local HDG block goes singular
+ * when the reaction ( 1/R ) dF/dpsi reaches its lowest eigenvalue,
+ * ( k + 1 ) tau |dK|/|K|: the discrete problem folds inside that element, near
+ * 1.37e19 on level 0 in the vacuum-midplane gauge, so case 3 stalls at 2e19
+ * there and converges on level 1, and the midplane gauge does the same.
+ * tau = tau0/R at tau0 = 3 m^-1 makes the criterion
+ * dF/dpsi < ( k + 1 ) tau0 |dK|/|K| at every radius and moves the element's
+ * fold past what the plasma allows: the vacuum-midplane problem's own fold,
+ * mesh converged near 4.15e19, and none below 9.1e19 under the midplane
+ * gauge. So 2e19 on level 0 must converge under it, in BOTH midplane gauges,
+ * quadratically and in about the three steps level 1 takes at tau = 1 -- and the
+ * default, the control that makes this a statement about tau, must not.
+ * [M-FOLD](MEASUREMENTS.md#m-fold), [M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a).
+ */
+BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsIt )
+{
+	ladderStemInUse = vacuumStem;
+	double const peak = 2.0e19;
+	struct Case
+	{
+		char const *name;
+		meq::RotatingSource::Gauge gauge;
+	};
+	for ( Case const &c : { Case{ "vacuum-midplane", meq::RotatingSource::Gauge::FixedCurve },
+	                        Case{ "midplane, 32 knots", meq::RotatingSource::Gauge::Midplane } } )
+	{
+		MirrorProfiles const three = threeSpecies( peak, c.gauge );
+		std::printf( "\n  THREE SPECIES AT M = %.1f, %.1e m^-3, %s gauge, level 0, k = 3\n",
+		             machTarget, peak, c.name );
+
+		Options o;
+		o.level = 0;
+		o.order = 3;
+		o.stem = vacuumStem;
+		o.profiles = &three;
+		o.tau = 3.0;
+		o.diffusionScaledTau = true;
+		std::unique_ptr<MirrorRun> const scaled = runMirror( o );
+		BOOST_TEST_REQUIRE( scaled->converged, c.name << ": tau = 3/R does not converge at " << peak
+			<< " on level 0, so the local fold is not what stops constant tau: " << scaled->failure );
+		std::vector<double> const &history = scaled->solver->newtonResiduals();
+		std::printf( "    %-32s %2zu steps:", "tau = 3/R", history.size() - 1 );
+		for ( double r : history )
+			std::printf( " %.2e", r );
+		std::printf( "\n" );
+		std::string why;
+		if ( tailIsReadable( history ) )
+			BOOST_TEST( quadraticTail( history, why ), c.name << ": " << why );
+		BOOST_TEST( history.size() - 1 <= 4u, c.name << ": " << history.size() - 1 << " steps" );
+
+		Options d = o;
+		d.tau = 1.0;
+		d.diffusionScaledTau = false;
+		std::unique_ptr<MirrorRun> const constant = runMirror( d );
+		std::vector<double> const &control = constant->solver->newtonResiduals();
+		std::printf( "    %-32s %s after %zu steps, merit %.2e\n", "constant tau = 1, the control",
+		             constant->converged ? "CONVERGED" : "stalls", control.size() - 1, control.back() );
+		BOOST_TEST( !constant->converged, c.name << ": the default tau = 1 converges at " << peak
+			<< " on level 0, so this case no longer separates the stabilisation's fold from the "
+			"plasma's; re-measure the ceiling (M-FOLD) before moving the density" );
 	}
 	std::fflush( stdout );
 }

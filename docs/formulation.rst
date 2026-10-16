@@ -190,6 +190,14 @@ largest, at small :math:`R`; scaling by :math:`\nu` makes the criterion read
 A larger :math:`\tau` costs the flux and the post-processed :math:`\psi^*` a
 constant, not an order, while :math:`\tau h/\nu` stays small.
 
+**Except at the axis.** :math:`\tau_0/R` grows without bound on the faces that
+touch :math:`R = 0`, so on a mesh reaching the axis — a mirror, or a
+free-boundary domain closed on it — the flux loses half an order there at every :math:`k`,
+and the round-off floor can rise above Newton's stopping target, so that a
+solve which converges under a constant :math:`\tau` stops without converging.
+Both were measured on MEQ's own suite; check the flux's rate and Newton's
+history on your own axis-reaching problem before relying on it.
+
 **The default stays constant**, which is what every rate in the suite is
 measured with. The ceiling, the scaled stabilisation's reach on the rotating
 mirror and its cost on the analytic benchmarks are in ``MEASUREMENTS.md``;

@@ -306,6 +306,18 @@ in pressure, and converge at 2e19 on levels 1 and 2; differencing the border
 columns, or taking `F` at the labels down to 1e-13 of its peak, leaves every
 stall where it was → [M-281](MEASUREMENTS.md#m-281). The held table
 with nothing moving stalls there too → [M-285](MEASUREMENTS.md#m-285).
+**And the mesh's cap is the STABILISATION's**: at the default constant `τ = 1`
+one element's local HDG block goes singular when the reaction `(1/R) ∂F/∂ψ`
+reaches its lowest eigenvalue `(k + 1) τ |∂K|/|K|`, so the discrete problem
+folds inside that element — at 1.367e19 on level 0, the step between
+neighbours living in one element and growing as `(n_c − n)^(−1/2)`. The
+ceiling scales with `τ`, and `[discretisation] TauScaling = "diffusion"` with
+`Tau = 3` (`τ = 3/R`) lifts it: 2e19 converges in three steps on level 0 in
+both midplane gauges. **What is left differs by gauge.** On the vacuum's
+curve it is the posed problem's own fold, smooth, global and mesh converged
+near **4.15e19**, so 5e19 there has no equilibrium on any mesh; under the
+midplane gauge there is no fold below 9.1e19 on level 0, and 5e19 converges on
+levels 0 and 1 in four steps → [M-FOLD](MEASUREMENTS.md#m-fold).
 
 **THE CROSSINGS ARE BORDER UNKNOWNS — BUILT, AND WHAT SHIPS**
 → [M-283](MEASUREMENTS.md#m-283). `GradShafranovSolver` makes `R₀`
@@ -437,8 +449,9 @@ on the same tables, so nothing is missing from the Jacobian with the table
 fixed, and the refresh was the whole of the old midplane gauge's linear rate. Three
 species at `M = 6`: three quadratic steps at 5e18 on every level and at 2e19 on
 levels 1 and 2; carbon's exponent to the solved crossing is 0.74 at 5e18 and 3.3
-at 2e19 against the best fixed radius's 134. The pressure cap is the mesh's
-(above).
+at 2e19 against the best fixed radius's 134. The pressure cap on level 0 is
+constant `τ`'s element-local fold, and 5e19 is past the plasma's own
+(above, → [M-FOLD](MEASUREMENTS.md#m-fold)).
 
 **OUTPUT.** Every rotating mirror's `.nc`, in any gauge, carries `R₀( Ψ )` and
 `n_s( R₀( Ψ ), Ψ )` with slopes on the solved crossing, as `DensityFile`
@@ -840,12 +853,18 @@ the branch.
   it. Neither `--device` nor the adaptive loop has been run under
   `Gauge = "midplane"` or `"vacuum-midplane"`, and the knots' rows have no
   device twin, so under a Device their dot products take the host route.
-* **The three-species pressure ceiling** (risk 5): stalls at 2e19 on level 0
-  and at 5e19 on levels 0 and 1, in every gauge, from every start, with the
-  Jacobian exact and nothing moving; it rises with the mesh. A fold, the label
-  floor, a second support region and the freeze are ruled out; the root find
-  and its implicit derivatives at high pressure, and a non-smooth residual,
-  are not. 5e19 on level 2 under the knots is not run.
+* **The three-species pressure ceiling** (risk 5) is constant `τ = 1`'s
+  element-local fold of the discretisation in every stall measured but one:
+  `TauScaling = "diffusion"`, `Tau = 3` converges 2e19 on level 0 in both
+  midplane gauges and 5e19 on levels 0 and 1 under the midplane gauge, which
+  reaches 9.1e19 on level 0 without folding. The one that is the plasma's is
+  the vacuum-midplane gauge at 5e19: that posed problem folds, mesh converged,
+  near 4.15e19 (→ [M-FOLD](MEASUREMENTS.md#m-fold)). **Open**: the default is
+  still constant `τ = 1`, so a user's coarse mirror meets the first fold unless
+  the key is set, and `τ = τ₀/R` as built costs half an order in `q` and the
+  round-off floor on a mesh reaching the axis
+  ([M-TAUCOMPARE](MEASUREMENTS.md#m-taucompare) is what changing the default
+  costs).
 * **32 knots are fixed for every mesh.** At level 2 their error is 170× under
   the discretisation error, but between knots they move the
   `.nc`'s true-midplane densities off the input tables by up to 7e-05
@@ -905,8 +924,11 @@ the branch.
    three species converge at 5e18 everywhere and at 2e19 from level 1, and
    stall at 2e19 on level 0 and at 5e19 on levels 0 and 1, in every gauge and
    from every start measured, with the Jacobian exact and nothing moving
-   ([M-285](MEASUREMENTS.md#m-285)). It rises with the mesh; what it
-   is remains open.
+   ([M-285](MEASUREMENTS.md#m-285)). **It is the HDG stabilisation's**: one
+   element's local block going singular at constant `τ = 1`, which rises with
+   the mesh and which `τ = 3/R` lifts — to 5e19 and beyond under the midplane
+   gauge. Only the vacuum-midplane gauge's 5e19 is the posed problem's own
+   fold, mesh converged near 4.15e19 ([M-FOLD](MEASUREMENTS.md#m-fold)).
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,

@@ -312,6 +312,22 @@ analytic benchmark too**: Example 5's reaction `∂F/∂ψ ≈ 14` fails Newton 
 4-cell mesh at `k = 1` for constant `τ = 0.3` and for `τ₀ = 0.3` alike, which
 is the same local criterion.
 
+**AND AT THE AXIS IT COSTS AN ORDER OF ITS OWN, WHICH IS WHY IT IS NOT THE
+DEFAULT.** `τ₀/R` is unbounded on the faces that touch `R = 0`, so in the strip
+of elements there it is MFEM's `h⁻¹` scaling: on `AxisConvergence`'s vacuum
+`q` converges at `k + 1/2` at every `k` (3.49 at `k = 3` under `τ₀ = 3`), and
+the round-off floor rises to about six times Newton's `1e-12` target, so the
+vacuum mirror, the mirror's `k = 4` reference and the adaptive mirror stop
+without converging. Bounded, `τ₀/max(R, 0.1 m)` — measured through an
+uncommitted override, not an option — keeps `k+1` there, solves all three, and
+on the mirror is better than constant `τ = 10` in `ψ_h` and `ψ_ax`. `τ₀ = 1`
+is under-stabilised wherever `R > 1 m` and fails as constant `τ = 0.3` does
+(→ **[M-TAUCOMPARE](MEASUREMENTS.md#m-taucompare)**). And the mirror's
+"ceiling" was this fold in every stall measured but one: under `τ = 3/R` the
+midplane gauge solves 5e19 and does not fold below 9.1e19, and only the
+vacuum-midplane gauge has a fold of its own, near 4.15e19
+(→ **[M-FOLD](MEASUREMENTS.md#m-fold)**).
+
 ### Post-processing is back, and it was free
 
 Stage 3 dropped `ψ*` on the grounds that `q` already gives the physical quantity

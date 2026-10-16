@@ -239,7 +239,8 @@ linear, at a contraction that grows with the pressure. **That the left-out
 term is what stops a dense plasma converging was believed and is FALSIFIED**:
 the bordered gauge stalls where the freeze did, at the same peak density and
 merit, and so does a held table with nothing moving
-(→ [M-283](MEASUREMENTS.md#m-283), [M-285](MEASUREMENTS.md#m-285)).
+(→ [M-283](MEASUREMENTS.md#m-283), [M-285](MEASUREMENTS.md#m-285)); what does
+is the stabilisation, below.
 **A nearer start does not pay**: the same densities solved first on the
 vacuum's crossing held save one bordered step of three at most and cost more
 than they save (→ [M-284](MEASUREMENTS.md#m-284)). **A density flat at a
@@ -264,7 +265,15 @@ finer ones. **That cap is the HDG stabilisation's, not the plasma's**: an
 element-local fold at constant `τ = 1`, which `[discretisation] TauScaling =
 "diffusion"` with `Tau = 3` lifts on the coarsest mesh to the posed problem's
 own, mesh-converged fold near 4.15e19 (`CLAUDE_HDGGS.md`, *A constant `τ`
-folds inside one element*, → [M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)).
+folds inside one element*, → [M-FOLD](MEASUREMENTS.md#m-fold),
+[M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)). **So two stalls look alike
+and are not**: 2e19 on level 0 is the discretisation's in both gauges, and
+`τ = 3/R` solves it; 5e19 on this curve is past the plasma's own fold and
+nothing numerical does — while the SAME tables under the midplane gauge, a
+different plasma, converge at 5e19 under `τ = 3/R` and do not fold below 9.1e19.
+A ceiling is located by creeping up the primary branch in small steps, since a
+long continuation jump near either fold can land on an up-down asymmetric
+branch.
 Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
 solved crossing (→ [M-282](MEASUREMENTS.md#m-282)).
 

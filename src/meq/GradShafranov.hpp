@@ -540,7 +540,12 @@ namespace meq
 	 * at R <= 0 this takes nu at the CENTROID of the element whose side it is,
 	 * which is finite for any element with a vertex off the axis.
 	 * GradShafranovSolver::setTauScaling() refuses a mesh with any point at
-	 * R < 0, where nu < 0 and the operator itself is meaningless.
+	 * R < 0, where nu < 0 and the operator itself is meaningless. WHAT THE AXIS
+	 * COSTS is measured: on the faces that TOUCH R = 0, tau0/R is unbounded,
+	 * which in that strip of elements is MFEM's h^-1 scaling -- q converges at
+	 * k + 1/2 on a mesh reaching the axis, and the round-off floor rises above
+	 * Newton's target on the mirror's k = 4 and vacuum solves (MEASUREMENTS.md
+	 * M-TAUCOMPARE). That, and not the fold, is why this is not the default.
 	 *
 	 * IsConstant() is TRUE, and that is a statement about the STATE: MFEM's
 	 * contract is "s depends on neither the potential nor its trace", and

@@ -17258,7 +17258,13 @@ fixed-radius `n_s0` spans 1e117.
 These four were scratch variants of `threeSpeciesAtMachSixOnTheVacuumCurve` —
 the floor as a parameter, a run started from another's answer — and are not in the
 suite. So the midplane gauge's 2e19 and 5e19 stalls in M-278 are this cap, which
-an exact Jacobian shares; what the cap is remains open.
+an exact Jacobian shares; what the cap is remains open. **Answered by
+[M-FOLD](MEASUREMENTS.md#m-fold)**: at 2e19 on level 0 it is constant `τ = 1`'s
+element-local fold of the discretisation, at 1.367e19, which moves with the mesh
+because its mode is one element wide and which `τ = 3/R` lifts; at 5e19 on
+this curve it is the posed problem's own fold, mesh converged near 4.15e19. The
+midplane gauge's 5e19 stalls are NOT that fold: under `τ = 3/R` it converges
+there.
 
 ### M-282
 
@@ -17507,7 +17513,10 @@ answer through `setInitialState()`:
 * The finer rungs between, ×1.02 apiece, read the same.
 * The onset is **abrupt and common to both routes**. The frozen refresh slows
   from 9 to 13 steps on the way while the bordered gauge holds at 3 or 4. The
-  border's condition is flat, so this is not a fold.
+  border's condition is flat, so this is not a fold. **It is one, inside an
+  element** ([M-FOLD](MEASUREMENTS.md#m-fold)): one element's local HDG block
+  goes singular at constant `τ = 1`, and it is eliminated before the trace
+  system or the border is formed, so the border's condition cannot see it.
 
 **Ruled out, measured:**
 * **The freeze's left-out term.** The bordered gauge has it and stalls
@@ -17521,7 +17530,10 @@ answer through `setInitialState()`:
   the annulus is inside it. The largest `Ψ` beyond 0.45 m is −0.67 at every
   rung.
 
-**What stops it is open.**
+**What stops it is open.** → **[M-FOLD](MEASUREMENTS.md#m-fold)**: constant
+`τ = 1`'s element-local fold, at both peaks: under `τ = 3/R` the bordered
+gauge converges at 2e19 on level 0 in 3 steps, at 5e19 on levels 0 and 1 in 4,
+and does not fold below 9.1e19 on level 0.
 
 #### 7. geq's mirror under the bordered gauge
 
@@ -17637,7 +17649,11 @@ wanted. The bordered Newton's first merit from it rises with it, 3.3e-05 to
 | three, 5e19 | 1 | stalls | stalls at 2.30e-07, 23 damped | stalls at 1.93e-03 |
 
 Where every start stalls the held solve stalls first and highest, so the route
-never reaches its bordered phase; (a) gets furthest. Level 2 at 5e19 is not
+never reaches its bordered phase; (a) gets furthest. No start could have
+helped: every row is past constant `τ = 1`'s element-local fold, and under
+`τ = 3/R` (a) converges at all three ([M-FOLD](MEASUREMENTS.md#m-fold)); the
+held phase at 5e19 is the vacuum-midplane gauge's problem, which is past its
+own fold. Level 2 at 5e19 is not
 measured under the knots; on the vacuum's curve it diverges
 ([M-281](MEASUREMENTS.md#m-281)).
 
@@ -17731,7 +17747,9 @@ level 0 too (1.60e-05), and at 2e19 on level 1, where the frozen refresh took 14
 steps, every route converges. So the line search fought no moving residual: a
 fixed residual with an exact Jacobian stalls at the same pressure on the same
 mesh, which is the mesh-dependent ceiling of
-[M-281](MEASUREMENTS.md#m-281) §4.
+[M-281](MEASUREMENTS.md#m-281) §4 — constant `τ = 1`'s element-local fold at
+2e19 on level 0, and the posed problem's own past 4.15e19
+([M-FOLD](MEASUREMENTS.md#m-fold)).
 
 ### M-TAUSURVEY
 
@@ -18233,3 +18251,384 @@ costs `q` at most 2.6× and `ψ*` 2.5× where `ν` hardly varies
 accuracy-neutral choice on a tokamak box and leaves the coarse mirror at 78% of
 its fold; `τ₀ = 10` buys nothing more on the mirror and costs `q` up to 8.4×.
 The default is unchanged.
+
+### M-TAUCOMPARE
+
+**THE DIFFUSION-SCALED `τ` BESIDE THE CONSTANT ONE, ACROSS
+[M-TAUSURVEY](MEASUREMENTS.md#m-tausurvey)'s SUITE. AWAY FROM THE AXIS
+`τ = 3/R` IS CONSTANT `τ = 3` ON EVERY TOKAMAK FIXTURE — NO CELL MORE THAN 8%
+WORSE, SOME UP TO 21% BETTER — KEEPS EVERY ORDER AND NEWTON'S FOUR STEPS, AND ON THE MIRROR LIFTS THE CEILING. AS BUILT IT
+IS UNBOUNDED AT `R = 0`: ON A MESH REACHING THE AXIS `q` LOSES HALF AN ORDER AT
+EVERY `k`, AND THE ROUND-OFF FLOOR RISES ABOVE NEWTON'S TARGET, SO THE VACUUM
+MIRROR, THE MIRROR'S `k = 4` REFERENCE AND THE ADAPTIVE MIRROR DO NOT SOLVE.
+BOUNDED AS `τ₀/max(R, 0.1 m)` IT KEEPS `k+1` IN `q` THERE AND SOLVES ALL THREE,
+AND IS THEN THE BEST STABILISATION MEASURED ON THE MIRROR. `τ₀ = 1` IS
+UNDER-STABILISED WHERE `R > 1 m`.**
+
+**Setup.** `main` at the merge of M-TAUSURVEY and M-TAUDESIGN-A to C, double,
+Release, configured as `builds/double`. **The sweep used an UNCOMMITTED
+override**, as [M-TAUSURVEY](MEASUREMENTS.md#m-tausurvey)'s did:
+`GradShafranovSolver`'s constructor read `τ` from an environment variable,
+`buildForms()` installed `meq::DiffusionScaledStabilization` on every solver
+when a second was set, and for the bounded column
+`DiffusionScaledStabilization::at()` took `max(R, R_f)` with `R_f` from a
+third; `SolovievConvergence` carried the `ψ*` column. So every solver in every
+test took the swept stabilisation, including those built with an explicit `τ`,
+and two cases fail by construction: `SolverContract` (as in M-TAUSURVEY, and
+its scaled-face-term case once `R_f` is set) and, in the bounded run,
+[M-FOLD](MEASUREMENTS.md#m-fold)'s regression, whose control asserts that the
+default does NOT converge. The same 56 tests, `ctest -j4`,
+`OMP_NUM_THREADS=2`, `MKL_NUM_THREADS=1`. The constant columns are
+M-TAUSURVEY's runs: the merge leaves the constant path alone, and the sweep's
+`3/R` Solov'ev rows reproduce [M-TAUDESIGN-B](MEASUREMENTS.md#m-taudesign-b)'s
+"diff 3" to every printed digit. Wall clock on a shared machine, against
+constant `τ = 1`: 1.01 for `1/R`, 1.15 for `3/R`, 1.04 bounded. "`1/R`" is
+`τ₀ = 1`, the accuracy-neutral choice of
+[M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c); "`3/R`" its recommended
+`τ₀ = 3`.
+
+**1. The fixed-boundary fixtures**, finest mesh as in M-TAUSURVEY §1, the rate
+over the finest pair in brackets. Newton takes 4 steps on every Example 5 and
+K–T mesh in every column. The bounded column differs from `3/R` only on the
+axis-reaching vacuum, the one fixture with `R < 0.1`.
+
+| `ψ_h` | k | const 1 | `1/R` | const 3 | `3/R` | `3/max(R, 0.1)` |
+|---|---|---|---|---|---|---|
+| Solov'ev | 1 | 3.60e-05 (2.00) | 3.53e-05 (2.00) | 2.53e-05 (2.00) | 2.52e-05 (2.00) | 2.52e-05 (2.00) |
+| Solov'ev | 2 | 1.92e-07 (3.00) | 1.89e-07 (3.00) | 1.86e-07 (3.00) | 1.86e-07 (3.00) | 1.86e-07 (3.00) |
+| Solov'ev | 3 | 5.51e-10 (4.00) | 5.06e-10 (4.00) | 4.66e-10 (4.00) | 4.61e-10 (4.00) | 4.61e-10 (4.00) |
+| Example 5 | 1 | 4.39e-04 (2.04) | 4.83e-04 (2.04) | 2.21e-04 (2.00) | 2.30e-04 (2.00) | 2.30e-04 (2.00) |
+| Example 5 | 2 | 3.65e-06 (3.03) | 3.12e-06 (3.02) | 1.85e-06 (3.00) | 1.74e-06 (3.00) | 1.74e-06 (3.00) |
+| Example 5 | 3 | 2.26e-08 (4.02) | 2.34e-08 (4.01) | 1.31e-08 (4.00) | 1.32e-08 (4.00) | 1.32e-08 (4.00) |
+| K–T exponential | 1 | 1.10e-04 (2.01) | 1.11e-04 (2.00) | 8.81e-05 (2.00) | 8.81e-05 (2.00) | 8.81e-05 (2.00) |
+| K–T exponential | 2 | 8.63e-07 (3.01) | 8.41e-07 (3.00) | 4.98e-07 (3.00) | 4.93e-07 (3.00) | 4.93e-07 (3.00) |
+| K–T exponential | 3 | 1.00e-08 (4.00) | 1.05e-08 (4.00) | 5.22e-09 (3.99) | 5.32e-09 (3.99) | 5.32e-09 (3.99) |
+| McCarthy | 2 | 5.22e-06 (3.03) | 5.18e-06 (3.02) | 2.86e-06 (3.00) | 2.85e-06 (3.00) | 2.85e-06 (3.00) |
+| Maschke–Perrin | 1 | 1.52e-04 (2.00) | 1.67e-04 (2.00) | 1.18e-04 (2.00) | 1.21e-04 (2.00) | 1.21e-04 (2.00) |
+| Maschke–Perrin | 2 | 9.15e-07 (3.00) | 9.75e-07 (3.00) | 7.99e-07 (3.00) | 8.07e-07 (3.00) | 8.07e-07 (3.00) |
+| Maschke–Perrin | 3 | 3.56e-09 (4.00) | 3.82e-09 (4.00) | 3.13e-09 (4.00) | 3.17e-09 (4.00) | 3.17e-09 (4.00) |
+| curved Solov'ev | 1 | 7.40e-05 (2.00) | 7.43e-05 (2.00) | 6.11e-05 (1.99) | 6.12e-05 (1.99) | 6.12e-05 (1.99) |
+| curved Solov'ev | 2 | 3.59e-07 (3.07) | 3.50e-07 (3.08) | 3.47e-07 (3.10) | 3.45e-07 (3.08) | 3.45e-07 (3.08) |
+| curved Solov'ev | 3 | 2.79e-09 (5.02) | 2.73e-09 (5.05) | 2.73e-09 (5.07) | 2.74e-09 (5.08) | 2.74e-09 (5.08) |
+| axis-reaching vacuum | 1 | 3.61e-05 (2.00) | 3.61e-05 (2.00) | 3.61e-05 (2.00) | 3.62e-05 (2.00) | 3.61e-05 (2.00) |
+| axis-reaching vacuum | 2 | 9.22e-08 (3.00) | 9.22e-08 (3.00) | 9.22e-08 (3.00) | 9.23e-08 (3.00) | 9.22e-08 (3.00) |
+| axis-reaching vacuum | 3 | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.19e-10 (4.00) |
+
+| `q_h` | k | const 1 | `1/R` | const 3 | `3/R` | `3/max(R, 0.1)` |
+|---|---|---|---|---|---|---|
+| Solov'ev | 1 | 6.08e-05 (1.99) | 5.87e-05 (1.99) | 1.00e-04 (1.98) | 8.86e-05 (1.98) | 8.86e-05 (1.98) |
+| Solov'ev | 2 | 2.51e-07 (2.99) | 2.40e-07 (3.00) | 6.91e-07 (2.98) | 6.55e-07 (2.98) | 6.55e-07 (2.98) |
+| Solov'ev | 3 | 8.82e-10 (3.99) | 9.14e-10 (3.99) | 1.86e-09 (3.99) | 2.00e-09 (3.98) | 2.00e-09 (3.98) |
+| Example 5 | 1 | 7.52e-04 (2.01) | 7.61e-04 (2.01) | 9.51e-04 (1.99) | 9.99e-04 (1.99) | 9.99e-04 (1.99) |
+| Example 5 | 2 | 6.65e-06 (3.00) | 6.69e-06 (3.00) | 8.41e-06 (2.99) | 8.68e-06 (2.99) | 8.68e-06 (2.99) |
+| Example 5 | 3 | 4.07e-08 (4.00) | 4.14e-08 (4.00) | 5.78e-08 (3.99) | 6.15e-08 (4.00) | 6.15e-08 (4.00) |
+| K–T exponential | 1 | 2.31e-04 (2.00) | 2.35e-04 (2.00) | 3.63e-04 (1.99) | 3.88e-04 (1.99) | 3.88e-04 (1.99) |
+| K–T exponential | 2 | 2.00e-06 (3.00) | 2.01e-06 (3.00) | 2.50e-06 (2.99) | 2.53e-06 (2.99) | 2.53e-06 (2.99) |
+| K–T exponential | 3 | 2.45e-08 (4.00) | 2.46e-08 (4.00) | 2.89e-08 (4.00) | 2.94e-08 (4.00) | 2.94e-08 (4.00) |
+| McCarthy | 2 | 1.41e-05 (3.00) | 1.41e-05 (3.00) | 1.64e-05 (2.99) | 1.62e-05 (2.99) | 1.62e-05 (2.99) |
+| Maschke–Perrin | 1 | 2.54e-04 (1.99) | 2.44e-04 (1.99) | 4.62e-04 (1.97) | 4.11e-04 (1.98) | 4.11e-04 (1.98) |
+| Maschke–Perrin | 2 | 1.26e-06 (2.99) | 1.18e-06 (2.99) | 2.99e-06 (2.98) | 2.67e-06 (2.98) | 2.67e-06 (2.98) |
+| Maschke–Perrin | 3 | 5.32e-09 (3.99) | 5.01e-09 (3.99) | 1.20e-08 (3.98) | 1.09e-08 (3.98) | 1.09e-08 (3.98) |
+| curved Solov'ev | 1 | 1.15e-04 (2.02) | 1.05e-04 (2.04) | 2.23e-04 (1.94) | 1.77e-04 (1.96) | 1.77e-04 (1.96) |
+| curved Solov'ev | 2 | 6.24e-07 (3.24) | 5.90e-07 (3.26) | 1.30e-06 (3.02) | 1.15e-06 (3.05) | 1.15e-06 (3.05) |
+| curved Solov'ev | 3 | 1.69e-08 (4.50) | 1.70e-08 (4.50) | 1.73e-08 (4.49) | 1.76e-08 (4.48) | 1.76e-08 (4.48) |
+| axis-reaching vacuum | 1 | 1.46e-04 (1.79) | 3.06e-04 (1.59) | 1.85e-04 (1.88) | 8.23e-04 (1.54) | 3.01e-04 (1.95) |
+| axis-reaching vacuum | 2 | 1.28e-06 (2.51) | 2.05e-06 (2.49) | 1.31e-06 (2.54) | 4.86e-06 (2.48) | 1.58e-06 (2.72) |
+| axis-reaching vacuum | 3 | 2.71e-10 (4.00) | 8.58e-09 (3.49) | 8.13e-10 (4.00) | 2.57e-08 (3.49) | 3.55e-09 (4.00) |
+
+| `ψ*` | k | const 1 | `1/R` | const 3 | `3/R` | `3/max(R, 0.1)` |
+|---|---|---|---|---|---|---|
+| Solov'ev | 1 | 3.50e-07 (3.00) | 3.27e-07 (2.99) | 7.12e-07 (2.98) | 6.13e-07 (2.98) | 6.13e-07 (2.98) |
+| Solov'ev | 2 | 9.33e-10 (4.00) | 8.50e-10 (4.00) | 2.42e-09 (3.99) | 2.13e-09 (3.99) | 2.13e-09 (3.99) |
+| Solov'ev | 3 | 1.56e-12 (5.01) | 1.53e-12 (5.00) | 3.95e-12 (5.00) | 3.84e-12 (5.00) | 3.84e-12 (5.00) |
+| Example 5 | 1 | 7.08e-06 (3.03) | 7.89e-06 (3.03) | 7.21e-06 (2.98) | 6.99e-06 (2.98) | 6.99e-06 (2.98) |
+| Example 5 | 2 | 1.90e-08 (4.00) | 1.89e-08 (4.00) | 2.55e-08 (4.00) | 2.46e-08 (4.00) | 2.46e-08 (4.00) |
+| Example 5 | 3 | 1.05e-10 (4.99) | 1.05e-10 (4.99) | 1.37e-10 (5.00) | 1.39e-10 (5.00) | 1.39e-10 (5.00) |
+| curved Solov'ev | 1 | 3.87e-06 (3.08) | 3.74e-06 (3.09) | 4.87e-06 (3.06) | 4.39e-06 (3.06) | 4.39e-06 (3.06) |
+| curved Solov'ev | 2 | 6.61e-08 (4.15) | 6.45e-08 (4.16) | 7.31e-08 (4.12) | 6.74e-08 (4.14) | 6.74e-08 (4.14) |
+
+**Read.** On the boxes `3/R` sits between constant `τ = 1` and 3 and nearer 3:
+`ψ_h` 1.0× to 2.1× better than constant `τ = 1`, `q_h` 1.0× to 2.6× worse
+(Solov'ev `k = 2` 2.6×, `k = 3` 2.3×), `ψ*` 1.0× to 2.5× worse (Solov'ev
+`k = 3`). Against constant `τ = 3` no cell is more than 8% worse, and `q_h` and
+`ψ*` are up to 21% better (curved Solov'ev `k = 1`) where `ν = 1/R` stays
+under 1.7. Off the axis `1/R` is constant `τ = 1` to within 15% in every
+cell. **The axis is where they part.**
+`τ₀/R` grows without bound on the faces that touch `R = 0` — `ν` does too, but
+the flux `q = ∇ψ/R` is what the face term is weighed against — and on
+`AxisConvergence`'s vacuum `q_h` converges at `k + 1/2` at every `k` (1.54,
+2.48, 3.49 under `3/R`; 1.59, 2.49, 3.49 under `1/R`) where constant `τ`
+reaches 4.00 at `k = 3`; at `k = 3` the constant is 95× constant `τ = 1`'s. A
+full order lost in a strip one element wide is half an order in L2, which is
+what this reads as, and it is MFEM's `h⁻¹` LDG cost
+(`SolovievConvergence.cpp`'s header) confined to that strip, since there
+`τ ≈ τ₀/h`. **Bounded, the order comes back**: 1.95, 2.72, 3.999 — better than
+constant `τ = 1`'s 1.79 and 2.51 at `k = 1, 2` — at 13× its constant at
+`k = 3`; with `R_f` = 0.05 and 0.2 the `k = 3` rows are 5.10e-09 (3.99) and
+2.44e-09 (4.00), so the bound sets the constant, not the order. `ψ_h` does not
+move in any column.
+
+**2. The rotating mirror.** `RotatingMirrorResolution` (MR-4c against the
+level-2 `k = 4` `ψ*` of the SAME `τ`, MR-4d against geq's direct 513 grid), max
+errors; `VacuumMirror`'s L2 error over `D_h` at `k = 3`, level 2; the
+three-species suites at `k = 3`.
+
+| | const 1 | const 3 | `3/R` | `3/max(R, 0.1)` |
+|---|---|---|---|---|
+| `ψ_h`, `k = 1`, level 3 | 2.21e-04 | 7.85e-05 | **no solve** | 2.13e-05 |
+| `ψ_h`, `k = 3`, level 2 | 1.44e-05 | 5.06e-06 | **no solve** | 1.27e-06 |
+| `ψ*`, `k = 2`, level 3 | 1.44e-08 | 1.02e-08 | **no solve** | 8.77e-09 |
+| `ψ*`, `k = 2`, rate over levels 1–3 | 4.62 | 4.52 | **no solve** | 4.13 |
+| `ψ*`, `k = 3`, level 2 | 7.24e-09 | 5.22e-09 | **no solve** | 5.15e-09 |
+| `ψ_h` − geq 513 | 1.94e-06 | 6.49e-07 | **no solve** | 9.28e-08 |
+| `ψ*` − geq 513 | 1.35e-08 | 1.35e-08 | **no solve** | 1.35e-08 |
+| `ψ_ax` − geq 513 | −5.5e-10 | −1.8e-10 | **no solve** | −1.1e-11 |
+| `ψ_bnd` − geq 513 | −1.6e-08 | −5.2e-09 | **no solve** | −1.8e-09 |
+| vacuum mirror, `k = 3`, level 2 | 1.33e-06 | 1.43e-06 | **no solve** | 1.35e-06 |
+| three species at 2e19 on the vacuum's curve, level 0 | stalls | 4 steps | 3 steps | 3 steps |
+| three species at 5e18, midplane gauge, `ψ*` level 1 − 2 | 1.12e-08 | 7.78e-09 | 8.25e-09 | 8.25e-09 |
+| `RotatingMirrorAdaptive` | passes | passes | the driver exits 2 | passes |
+
+**The "no solve" is the round-off floor, not a fold**: the `k = 4`, level-1
+solve that MR-4c's reference is bounded from reaches 4.2e-12 in four steps from
+a first merit of 0.35 and then wanders between 1.4e-12 and 3.2e-12 for the rest
+of its 30, about six times the `1e-12` relative target; the vacuum mirror and
+the adaptive mirror's reference solve stop without converging too, and `1/R`
+fails the same three. Bounded, every one solves, and the mirror is better than
+at constant `τ = 10` in `ψ_h` and `ψ_ax` (M-TAUSURVEY §2) and within 20% of it
+in `ψ_bnd`: against geq, `ψ_h` 21× closer than constant `τ = 1`, `ψ_ax` 48× and
+`ψ_bnd` 8.6×, with `ψ*` geq-limited as before. The
+vacuum mirror does not move. The ceiling and the gauges are
+[M-FOLD](MEASUREMENTS.md#m-fold)'s.
+
+**3. The other benchmarks.**
+
+| | const 1 | `1/R` | const 3 | `3/R` | `3/max(R, 0.1)` |
+|---|---|---|---|---|---|
+| `fixed-h-circular` L0 against freegs4e (Newton) | 1.15e-04 (13) | 1.22e-04 (16) | 3.80e-05 (14) | 3.99e-05 (13) | 3.99e-05 (13) |
+| the same at L2, freegs4e's floor (Newton) | 1.60e-05 (11) | 1.60e-05 (11) | 1.56e-05 (10) | 1.56e-05 (10) | 1.56e-05 (10) |
+| limited tokamak `ψ_ax` against freegs4e (Newton) | 1.3e-04 (12) | 1.3e-04 (12) | 8.7e-05 (12) | 2.7e-05 (12) | 2.7e-05 (12) |
+| diverted tokamak `ψ_ax` against freegs4e | 6.8e-04 | 6.5e-04 | 7.1e-04 | 6.8e-04 | 6.8e-04 |
+| FB-5, worst error in `a`, n = 24 | 1.31e-04 | 1.32e-04 | 1.28e-04 | 1.30e-04 | 1.30e-04 |
+| pedestal 4.2, `k = 1`, finest `Δ(ψ)` (Newton by level) | 9.2e-04 (28/10/9) | 1.2e-03 (**60**/8/9) | 2.3e-04 (17/9/8) | 2.7e-04 (10/9/8) | 2.7e-04 (10/9/8) |
+| pedestal 4.5, `k = 2`, finest `Δ(ψ)` (Newton by level) | 4.9e-04 (55/15/12) | 4.7e-04 (**60**/28/11) | 1.4e-04 (9/11/12) | 1.3e-04 (10/12/12) | 1.3e-04 (10/12/12) |
+
+**`1/R` is under-stabilised on a tokamak**: where `R > 1 m` it is a constant
+`τ` below 1, and it fails as M-TAUSURVEY's `τ = 0.3` does — the pedestal's
+coarse meshes run to the 60-iteration cap, `HighBetaConvergence`'s `ν = 4`
+bordered Newton does not converge, and `DriverAcceptance`'s conductors taken
+out of the mesh land 9.9e-02 from the meshed equilibrium (1.6e-01 at constant
+0.3, under the test's bound at 1). `τ₀` is an inverse length, so it is not
+scale free: it has to be large enough for the largest-`R` plasma a
+configuration poses as well as for the mirror's.
+
+**4. Which tests fail**, of 54 (`SolverContract` and `PlasmaEdgeConvergence`
+left out, as in M-TAUSURVEY):
+
+| | const 1 | `1/R` | const 3 | `3/R` | `3/max(R, 0.1)` |
+|---|---|---|---|---|---|
+| tests failing | 0 | 11 | 9 | 13 | 10, and the regression's control |
+
+The bounded column's ten, which is what a default of `3/max(R, 0.1)` would
+cost:
+* **Fixtures measured AT `τ = 1`** — `DriverAcceptance`'s
+  `theDriverSolvesForTheToroidalField` (`examples/q-driven-q.dat`, worst `g`
+  error 3.9e-04) and `InverseSolve`'s targets (exit 4) — fail at every `τ ≠ 1`
+  and are to be re-measured, not widened. So is `SolovievGeometryConvergence`'s
+  FRC `q` ceiling at `k = 3`, set at 3× a `τ = 1` value: 7.1e-10 against
+  6.6e-10.
+* **Instruments M-TAUSURVEY found constant `τ = 3` moving past**, the same
+  cases: `PedestalConvergence`'s `Δ(q)` bands and its resolution threshold
+  (the coarse mesh is no longer the expensive one, 9 steps against 10),
+  `RotatingNewtonConvergence`'s best order (1.70), `PrescribedAxisPoint`'s
+  Newton stopping just under its threshold, and `EstimatorConvergence`'s
+  printed-`η₅` floor.
+* **Behaviour**: `FreeBoundaryCoupling`'s two-border limiter fixture is healthy
+  at 4 of its 5 radii and its coil-free control does not run, and Ampère's law
+  through the band at `k = 1` is off by 1.5e-02 on the coarsest mesh against
+  the 1e-03 the test expects (unbounded, the mesh-boundary integral itself
+  falls to order 0.98 at `k = 1`); `PlasmaConnectivity`'s limiter case loses
+  the layer on the symmetry axis it was built on (5.4e-03 there against an
+  axis at 0.126), as constant `τ = 10` does; and `XPointBorder`'s bootstrap
+  tail reads order 1.005, as at constant 10 and 30, not diagnosed.
+
+Constant `τ = 3`'s `CriticalPointConvergence` audit and
+`SurfaceAverageConvergence` failures are not in it, and neither is its
+`DriverAcceptance` retry rung; `1/R`'s eleven are its under-stabilisation above
+and the three axis failures of §2.
+
+**5. The recommendation. Do not change the default yet, and do not make
+`τ₀/R` as built the default at any `τ₀`**: it loses half an order in `q` on
+every mesh reaching the axis — as every mirror's does, and the suite's
+free-boundary domains' — and stops three mirror solves at the round-off floor. **The
+candidate is `τ = τ₀/max(R, R_f)` at `τ₀ = 3 m⁻¹`, `R_f = 0.1 m`**: it is the
+only stabilisation measured that keeps every order in the suite, reaches the
+mirror's fold on the coarsest mesh in both gauges
+([M-FOLD](MEASUREMENTS.md#m-fold)), is the most accurate on the mirror, and on
+a tokamak is constant `τ = 3`'s answer — so it costs the tokamak fixtures what
+`τ = 3` costs: `q_h` and `ψ*` up to 2.6× and 2.5× worse on Solov'ev, for `ψ_h`
+up to 2.1× better. To adopt it: build the bound into
+`meq::DiffusionScaledStabilization` (it is an override here, and `R_f` = 0.1 m
+is one value tried, not an optimum); re-measure the two `τ = 1` fixtures and
+the ceilings `checkCeilings()` and the `q` bands set from `τ = 1`, rather than
+widen them; and decide `FreeBoundaryCoupling`'s and `PlasmaConnectivity`'s
+fixtures, which are behaviour. Until then a mirror wants `TauScaling =
+"diffusion"`, `Tau = 3` on a fixed, non-adaptive run below `k = 4`, where every
+case measured solves.
+
+### M-FOLD
+
+**THE ROTATING MIRROR'S THREE-SPECIES PRESSURE CEILING AT `τ = 1` IS AN
+ELEMENT-LOCAL FOLD OF THE DISCRETISATION, NOT A PROPERTY OF THE PLASMA: ONE
+ELEMENT'S LOCAL HDG BLOCK GOES SINGULAR WHEN THE REACTION REACHES ITS LOWEST
+EIGENVALUE, `(k + 1) τ |∂K|/|K|`. THE CEILING SCALES WITH `τ`. WHAT IS LEFT AT
+LARGE OR DIFFUSION-SCALED `τ` DEPENDS ON THE GAUGE: ON THE VACUUM'S CURVE THE
+POSED PROBLEM FOLDS, MESH CONVERGED, NEAR 4.15e19 m⁻³, SO 5e19 THERE HAS NO
+EQUILIBRIUM ON ANY MESH; UNDER THE MIDPLANE GAUGE NOTHING FOLDS BELOW 9.1e19 ON
+LEVEL 0, AND EVERY STALL MEASURED IN THAT GAUGE WAS `τ`'S.** It answers what [M-281](MEASUREMENTS.md#m-281),
+[M-283](MEASUREMENTS.md#m-283) §6, [M-284](MEASUREMENTS.md#m-284) §3 and
+[M-285](MEASUREMENTS.md#m-285) left open.
+
+**Setup.** `main` at `3f22bf2`, double, Release, as `builds/double`; an
+uncommitted probe harness on `RotatingMirror.cpp` — continuation in the peak
+from 5e18 by ×1.25 rungs, bisection between a converged and a failed peak, a
+creep by a fixed relative step, and a stall probe that prints Newton's history
+and where the step between converged neighbours lives on a 151 × 301 grid over
+the box. Three species (e, D, C⁶⁺) at `M = 6` as `threeSpecies()`,
+vacuum-midplane gauge, `k = 3`, each rung started from the last answer's whole
+state. Two species are the same with carbon removed and deuterium neutralising
+the electrons. The mechanism is [M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a)'s,
+measured independently of MEQ's solver. §3a and the regression were taken
+after the merge that brings in `TauScaling`, with the same harness and the
+committed test, `OMP_NUM_THREADS=2`.
+
+**1. At `τ = 1` the ceiling is a fold, one element wide.** By fine
+continuation the three-species branch on level 0 ends at **1.366936e19**,
+located to 2e-06 relative. Past it Newton's minimum residual grows with the
+distance: 3e-11, 5e-10, 1.2e-09, 6.7e-09, 1.8e-08 going away from the fold.
+Approaching it, the first step's contraction climbs steeply, and the step
+between converged neighbours concentrates in **48 of the 45451 grid points**,
+near `(0.321, −0.050)` — about one element — and grows like
+`(n_c − n)^(−1/2)`, a fold's square root. The element is
+[M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a)'s 452, whose local
+`λ_min(S) = 272.6` at `τ = 1` against `4 × |∂K|/|K| = 273.0`.
+
+| case, `τ = 1` | level 0 | level 1 | level 2 | level 3 |
+|---|---|---|---|---|
+| three species, `M = 6` | **1.366936e19** | 2.0e19 – 3.0e19 ([M-281](MEASUREMENTS.md#m-281)) | — | — |
+| two species, `M = 6`, primary branch | 1.69e19 | 3.2e19 – 3.5e19 | **4.3661e19**, the step in 6 of 45451 points at `(0.276, −0.020)` | **5.2365e19**, at the same point |
+| three species, `M = 3` | 1.28e20 | — | — | — |
+| three species, `M = 0.3` | 3.44e20 | — | — | — |
+
+The mode is about one element wide at every level, so the ceiling rises with
+the mesh — which is [M-281](MEASUREMENTS.md#m-281)'s "it moves with the mesh",
+and why level 1 converges at 2e19 where level 0 does not.
+
+**2. It scales with `τ`, then saturates.** Level 0, three species, ceilings
+bracketed by bisection (m⁻³); the constant rows were taken twice, by this
+harness and by [M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)'s, and agree:
+
+| `τ` | 0.3 | 1 | 3 | 10 | 30 |
+|---|---|---|---|---|---|
+| constant `τ` | 4.61–4.69e18 | 1.3669e19 | 2.971–2.980e19 | 4.104–4.118e19 | 4.147–4.162e19 |
+| `τ₀/R`, `τ₀` = | 1.440–1.445e19 (0.3) | 3.236–3.248e19 (1) | 4.104–4.118e19 (3) | 4.147–4.162e19 (10) | — |
+
+`∝ τ` at small `τ`, as a local eigenvalue linear in `τ` puts it, and flat from
+`τ ≈ 10`. `τ₀/R` matches constant `τ = τ₀/0.3`, the plasma's radius.
+
+**3. What is left on the vacuum's curve is the posed problem's own fold.** At constant `τ = 30` the
+ceiling is 4.147–4.162e19 on level 0, 4.162–4.176e19 on level 1 and
+4.147–4.162e19 on level 2; `τ₀/R` at `τ₀ = 10` on level 0 and at `τ₀ = 1` on
+level 1 land in the same bracket ([M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)).
+It is approached SMOOTHLY AND GLOBALLY — the step between converged neighbours
+spread over the plasma, its sensitivity growing 0.35, 0.57, 0.98, 2.7 towards
+the fold — where the `τ = 1` fold is abrupt and local. **So 5e19 on the
+vacuum's curve has no equilibrium with these profiles and labels pinned**:
+from the vacuum at 5e19, `τ = 3/R` and `τ = 10/R` stall on level 0 at 4.1e-03
+and 3.4e-03 and on level 1 at 1.8e-03 and 1.7e-03, as constant `τ = 1` does — the 5e19 rows of
+[M-281](MEASUREMENTS.md#m-281) and of [M-285](MEASUREMENTS.md#m-285)'s held
+table.
+
+**3a. Under the midplane gauge there is no such fold below 9.1e19.** The same
+tables read as densities at the SOLVED crossing (`Gauge::Midplane`, 32 knots)
+are a different plasma, and every stall [M-283](MEASUREMENTS.md#m-283) §6 and
+[M-284](MEASUREMENTS.md#m-284) §3 report in it is `τ`'s. From the vacuum,
+level 0 and 1, `k = 3`, Newton steps or the stall's merit:
+
+| peak | level | constant `τ = 1` | `τ = 3/R` | `τ = 10/R` |
+|---|---|---|---|---|
+| 2e19 | 0 | stalls, 1.57e-05 | **3** | — |
+| 2e19 | 1 | 3 | 3 | — |
+| 5e19 | 0 | stalls, 2.66e-05 | **4** | **4** |
+| 5e19 | 1 | stalls, 2.29e-07 | **4** | **4** |
+
+and by continuation on level 0 in ×1.25 rungs from 5e18, every rung to 9.09e19
+converges in 3 or 4 steps under both `3/R` and `10/R`, the first step's
+contraction growing smoothly from 1.5e-04 at 6.25e18 to 2.9e-02 at 9.09e19; it
+was not continued further. The two `τ₀` agree at 5e19 to 2.9e-07 in `ψ_ax` on
+level 0 and 1.0e-08 on level 1. **Why the two gauges differ is a
+reading, not a measurement**: the vacuum's curve pins each density where the
+VACUUM's surface crosses the midplane, so as the pressure displaces the
+surfaces the density at the solved crossing is multiplied by
+`exp(m ω² (R_vac² − R₀²)/2T)` — carbon's exponent is 0.74 at 5e18 and 3.3 at
+2e19 ([M-281](MEASUREMENTS.md#m-281)) — a feedback the midplane gauge, pinned
+on the solved crossing, does not have.
+
+**4. The mechanism**, [M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a) in brief.
+A `ψ ∈ P_k` orthogonal to `P_{k−1}` has no discrete gradient, so the face term
+is all of its local energy and the local block's lowest eigenvalue is exactly
+`(k + 1) τ |∂K|/|K|` while `τ h/ν` is small (`ν = 1/R`). A positive reaction
+`(1/R) ∂F/∂ψ` reaching it makes the element's local solve singular, and the
+discrete problem folds there. The fold comes slightly before the smooth
+reaction reaches it, because the soft mode, once excited, raises the reaction in
+its own element: the margin `λ_min(S − M_c)` on the `τ = 1` branch's own states
+goes 110, 79, 54, 31, 14.7 as the peak goes 1.2e19 to 1.366e19. The global
+linearised operator's lowest plasma mode agrees with the one element's to under
+1%, so the border's condition, which [M-283](MEASUREMENTS.md#m-283) §6 read as
+flat, cannot see it: the singular block is eliminated inside the element before
+the trace system or the border is formed. **A constant `τ` is weakest relative
+to the operator where `ν` is largest**, at small `R`, which is where a mirror's
+plasma sits — 1/R of 3 to 10, where Solov'ev's box has 0.7 to 1.7.
+
+**5. Ruled out**, each measured:
+* **The three-species closure**: two species fold the same way (§1).
+* **`∂F/∂ψ`**: a central difference of the assembled source agrees with the
+  analytic `∂F/∂ψ` to 2e-08 at the stalled iterate.
+* **The linear solve**: UMFPack gives PARDISO's history to the digits printed.
+* **The support's edge**: `F` within 0.02 of `Ψ = 0` or 1 is about 1e-05 of its
+  peak.
+* **An up-down odd mode**: the symmetric mesh (`halfdisc.py --symmetric`) under
+  `setUpDownSymmetry()` folds at the same level-0 density. But **large
+  continuation jumps near the fold can land on an ASYMMETRIC branch** — one
+  bisection on level 2 reached 4.598e19 on an odd-dominated branch — so a
+  ceiling is crept up to in small steps, from the primary branch.
+* With [M-281](MEASUREMENTS.md#m-281) and [M-283](MEASUREMENTS.md#m-283): the
+  gauge, the freeze, the Jacobian (differenced border columns stall where the
+  analytic ones do), the label floor, a reversed field and a second support
+  region.
+
+**6. And it costs accuracy where it does not fold.** Two species at 5e18, the
+error in `(ψ_ax, ψ_bnd)` against level 3 at `τ = 1` (5.58921091e-03,
+6.58259883e-02):
+
+| `τ` | level 0 | level 1 | level 2 |
+|---|---|---|---|
+| 1 | (−5.4e-07, +2.6e-06) | (−4.4e-08, −6.7e-07) | (−8.7e-10, +1.3e-09) |
+| 3 | (−1.8e-07, +8.6e-07) | (−1.5e-08, −2.2e-07) | — |
+| 10 | (−5.4e-08, +2.6e-07) | (−4.2e-09, −6.4e-08) | — |
+| 30 | (−1.9e-08, +8.3e-08) | (−1.2e-09, −2.0e-08) | (−1.0e-10, +2.0e-09) |
+
+About `1/τ` at fixed mesh, 30× from `τ = 1` to 30; the level-2 `ψ_bnd` entries
+are the reference's own error ([M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)
+takes a scaled level-3 reference, against which constant `τ = 1` is not
+monotone in `ψ_bnd` at level 3). [M-TAUSURVEY](MEASUREMENTS.md#m-tausurvey) §2
+has the same `1/τ` in `ψ_h` against geq.
+
+**The regression.** `RotatingMirrorVacuumGauge`'s
+`theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsIt`: three species at
+2e19 on level 0, `k = 3`, converge quadratically under `τ = 3/R` in both
+midplane gauges — 5.54e-01 8.15e-05 7.91e-08 6.62e-14 on the vacuum's curve,
+5.54e-01 2.39e-05 1.89e-08 6.70e-16 under the knots — and the default `τ = 1`,
+the control, stalls after 30 steps at 7.6e-05 and 1.6e-05; the two stalls are
+most of its cost. The midplane-gauge rows of §3a are an uncommitted probe on
+the same harness.
