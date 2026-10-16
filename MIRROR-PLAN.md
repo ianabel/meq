@@ -300,12 +300,20 @@ radius takes 3, contracting about 50× a step. **It also bounds what the gauge c
 solve**: the left-out term scales with the pressure, and three species at
 `M = 6` stall near 8e-05 at a midplane peak of 5e19 m⁻³, and near 1.5e-05 at
 2e19, where they converge in 7 steps at 5e18. An iterate whose midplane has folded keeps the previous table for
-an iteration; converging on a held table is refused.
+an iteration; converging on a held table is refused. **CORRECTED, MEASURED: THE
+CAP IS THE MESH, NOT THE FREEZE.** On the vacuum's fixed curve below, with an
+exact Jacobian, the same three species stall on level 0 between 1.25e19 and
+1.5e19 even by continuation in pressure, and converge in three quadratic steps
+at 2e19 on levels 1 and 2 — where the refreshed midplane gauge converges too,
+in 14 linear steps at level 1 — then stall at 3e19 on level 1. Differencing the
+border columns, or taking `F` at the labels down to 1e-13 of its peak, leaves
+every stall where it was. → [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)
 
 **THE INTERFACE SHAPE** is a gauge policy on the source rather than a second
-class — `enum class Gauge { FixedRadius, Midplane }`, `FixedRadius` carrying
+class — `enum class Gauge { FixedRadius, Midplane, FixedCurve }`, `FixedRadius` carrying
 today's `referenceRadius` and remaining the default so every tokamak caller is
-untouched, `Midplane` carrying the tabulated `R₀( ψ )` the solver refreshes.
+untouched, `Midplane` carrying the tabulated `R₀( ψ )` the solver refreshes,
+`FixedCurve` the curve it installs once.
 
 **AND IT MAKES THE BENCHMARK EASIER, WHICH IS A CHECK ON THE DESIGN RATHER THAN
 A BONUS — FALSIFIED, AND THE REASON IS MR-4a's HOLD.** MR-4a holds geq's `N_s`
@@ -330,6 +338,11 @@ not vanish there, and `R₀′` is the solution's. So a profile family written i
 this gauge has to let the densities or the rotation fall away at the labels —
 the three-species case takes its densities to 1e-6 of their peak there — or be
 transferred from a fixed-radius statement of the same plasma, as geq's is.
+**On a fixed curve it is checked before the solve and refused** (below); under
+this gauge it cannot be, since `R₀′` at a label is the answer's and the
+vacuum's is not an estimate to refuse on — measured, geq's midplane tables read
+8.3e-08 of their peak at a label on their own crossings and 2.8e-05 on the
+vacuum's — so the driver reports it on the answer instead.
 
 **THE `M = 6` THREE-SPECIES CASE, MEASURED RATHER THAN BOUNDED.** On the solved
 plasma — `T` to a tenth at the labels, `ω` drifting 1.3×, carbon at 1% — the best
@@ -339,6 +352,57 @@ Hermite table at `( E′h )⁴/384` that cannot carry it, at thousands of knots.
 Under the midplane gauge each
 species spans the 1e6 it was given. `examples/mirror-three-species.toml` runs
 it from a file.
+
+### A fixed curve is a gauge: the vacuum's crossing — BUILT AND MEASURED
+
+→ [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge), [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+**A GAUGE PIN DOES NOT HAVE TO LIE ON THE SURFACE**: quasineutrality fixes
+`φ₀( R, ψ )` pointwise for any `( R, ψ )`, which is why `R_ref` is a gauge on a
+mirror. So any fixed, known curve `R_g( Ψ )` is one, with `F` pointwise in
+`( R, z, ψ )` and an exact Jacobian. `RotatingSource::Gauge::FixedCurve` is
+that gauge, and `[source] Gauge = "vacuum-midplane"` ships it on
+`R_g = R₀vac( Ψ )`, the vacuum's midplane crossing: the solver tabulates it
+once, before the first residual, from `ψ_c` and a zero remainder through the
+same `R q_R` integration as the midplane table, normalised by `ψ_c` at the two
+label points, and never refreshes it — not per iteration, not per adaptive
+cycle. The exponent from a `Density` to the solved crossing is then
+`m_s ω²( R₀vac² − R₀² )/2T_s`, the plasma's own displacement of its surfaces.
+
+**WHAT IT NEEDS.** The vacuum is `ψ_c`, so it is refused without
+`[conductors]` subtracting and beside data on `Γ`; a curve from anything else —
+the guess, a previous answer — would make what each `Density` means depend on
+it. **No key for a user's own curve**, for that reason →
+[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md), *A user-supplied gauge curve*.
+
+**THE BOX'S PRECONDITION IS CHECKED AT SETUP**, `RotatingSource::labelCheck()`:
+`|F|/R` at each label over every radius that label's surface reaches, against
+its peak along the curve, refused above `meq::labelTolerance` = 1e-6 as a
+configuration error naming the label. That is MR-4a's amplitude, and what it
+guards is the edge's order: measured, `F` at a label at 1e-3 of its peak still
+leaves Newton three quadratic steps.
+
+**WHAT IT MEASURED.** geq's plasma on the vacuum's curve is the fixed-radius
+plasma — three steps, the same history to every printed digit, `ψ*` together
+to 2e-13 — and the differenced border columns give the same history. **M-278
+§2's six steps on a frozen vacuum table are not reproduced**: the midplane gauge
+keeping its first table, and the fixed curve, both take three quadratic steps
+on the same tables, so nothing is missing from the Jacobian with the table
+fixed, and the refresh is the whole of the midplane gauge's linear rate. Three
+species at `M = 6`: three quadratic steps at 5e18 on every level and at 2e19 on
+levels 1 and 2; carbon's exponent to the solved crossing is 0.74 at 5e18 and 3.3
+at 2e19 against the best fixed radius's 134. The pressure cap is the mesh's
+(above).
+
+**OUTPUT.** Every rotating mirror's `.nc`, in any gauge, carries `R₀( Ψ )` and
+`n_s( R₀( Ψ ), Ψ )` with slopes on the solved crossing, as `DensityFile`
+tables; under the midplane gauge they are its own tables back to 5e-14, and off
+a vacuum-gauge answer they pose the same plasma in the midplane gauge to 3e-10
+of `ψ*`.
+
+**STILL OPEN: TRUE-MIDPLANE DENSITIES WITH A QUADRATIC NEWTON.** The intended
+route stands: solve on the vacuum's curve to a start near the answer, convert,
+then a few bordered steps of the midplane gauge with `R₀` at the table's knots
+as border unknowns. Not built.
 
 ### What does NOT bite, which is worth saying
 

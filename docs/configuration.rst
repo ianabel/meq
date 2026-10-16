@@ -543,17 +543,23 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - ``"fixed-radius"``
      - **Where the electrostatic potential is pinned on each flux surface**, and
        so where each ``Density`` is the physical density: ``"fixed-radius"`` at
-       ``ReferenceRadius``, or ``"midplane"`` where each surface crosses
-       :math:`z = 0`. ``"midplane"`` is a mirror's — it is refused without
-       ``Normalised = true`` and ``SupportShape = "box"`` — and is what keeps a
-       high-Mach, multi-species mirror's densities within a double. See
-       :ref:`rotation-gauge`.
+       ``ReferenceRadius``, ``"midplane"`` where each surface crosses
+       :math:`z = 0`, or ``"vacuum-midplane"`` where the *vacuum's* surface of
+       the same :math:`\Psi` crosses it — a fixed curve, so Newton keeps an
+       exact Jacobian. Both midplane gauges are a mirror's — refused without
+       ``Normalised = true`` and ``SupportShape = "box"`` — and are what keep a
+       high-Mach, multi-species mirror's densities within a double.
+       ``"vacuum-midplane"`` reads the vacuum as the conductors' own field, so it
+       is also refused unless ``[conductors]`` subtracts them and
+       ``[boundary] Type = "zero"``, and a run whose profiles leave :math:`F`
+       standing at a label of the box on that curve is refused before it
+       solves. See :ref:`rotation-gauge`.
    * - ``ReferenceRadius``
      - ``1.0``
      - **The fixed-radius gauge's radius**: where the electrostatic potential
        vanishes, and therefore where each ``Density`` is the physical density. A
        constant radius — not the magnetic axis, not a flux-surface average.
-       **Refused beside** ``Gauge = "midplane"``, which has no radius to give.
+       **Refused beside** either midplane gauge, which has no radius to give.
        See :doc:`rotation`.
    * - ``Mu0``, ``Normalised``, ``PsiAxis``, ``ConfineToPlasma``,
        ``ExcludeAttributes``, ``SupportShape``, ``AxialEdge``
@@ -590,7 +596,9 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - *required unless* ``Neutralising``
      - :math:`n_{s0}` in :math:`\mathrm{m}^{-3}`, **on the curve**
        :math:`R = \texttt{ReferenceRadius}` — or, under ``Gauge = "midplane"``,
-       **where each flux surface crosses** :math:`z = 0`.
+       **where each flux surface crosses** :math:`z = 0`, and under
+       ``"vacuum-midplane"`` where the vacuum's surface of the same
+       :math:`\Psi` crosses it.
    * - ``DensityScale``
      - ``1.0``
      - 

@@ -298,6 +298,44 @@ A magnetic mirror's run (``[source] SupportShape = "box"``) also carries:
        samples along the cutoff lay in the mesh. A report of how much current
        the prescribed cutoff cuts through, not a verdict
 
+.. _output-midplane:
+
+**A rotating mirror's run** — ``[source] Type = "rotating"`` with
+``SupportShape = "box"``, in any gauge — **also carries its true midplane**, on
+a dimension ``midplane`` of its own: where each *solved* surface crosses
+:math:`z = 0`, and each species' density there. Every gauge states its
+``Density`` tables somewhere else — on ``ReferenceRadius``, on the vacuum's
+crossing, or on the solved crossing itself — and this is the one statement of
+the plasma that does not depend on which.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Variable
+     - What it is
+   * - ``midplane_Psi(midplane)``
+     - :math:`\Psi` at each knot, uniform from 0 (the outer label) to 1 (the
+       inner)
+   * - ``midplane_R``, ``midplane_dR_dPsi``
+     - :math:`R_0(\Psi)`, where the solved surface crosses :math:`z = 0`, and
+       its slope :math:`1/(\partial\Psi/\partial R)` — the crossing the
+       midplane gauge reads, from the solved :math:`q` integrated along the
+       midplane
+   * - ``midplane_n_<species>``, ``midplane_dn_<species>_dPsi``
+     - :math:`n_s(R_0(\Psi), \Psi)` in :math:`\mathrm{m}^{-3}` and its
+       :math:`\Psi`-derivative along the crossing, both from the closure at that
+       radius and exact on the solved state
+
+The three columns ``midplane_Psi``, ``midplane_n_<species>`` and
+``midplane_dn_<species>_dPsi`` are a ``DensityFile`` table as they stand
+(``Psi f df/dPsi``): under ``Gauge = "midplane"`` they reproduce the run's own
+tables, and from a run in any other gauge they pose **the same plasma** in the
+midplane gauge — which is how to state, from a run in the vacuum-midplane or
+fixed-radius gauge, the densities at the true midplane. A solved midplane on
+which :math:`\psi` is not monotone has no crossing; the run then warns and the
+columns are left out.
+
 .. note::
 
    **A rotating run's** ``n_<species>`` **and** ``e_phi_0`` **are evaluated at

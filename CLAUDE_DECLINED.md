@@ -1880,6 +1880,26 @@ need no current border, and treat needing one as a finding.
 
 *From `MIRROR-PLAN.md`, What does NOT bite, which is worth saying.*
 
+### A user-supplied gauge curve, as a table file
+
+**Declined.** `Gauge::FixedCurve` takes any fixed `R_g( Ψ )`, and the
+configuration ships one, the vacuum's crossing (`[source] Gauge =
+"vacuum-midplane"`). A key naming a curve of the user's own — "from a previous
+solve" — was weighed and not added. **THE CURVE SAYS WHAT EVERY `Density`
+MEANS**, so a curve read off an answer makes the problem's statement depend on
+an earlier run's mesh, order and tolerances, which is the failure the vacuum's
+curve is defined to avoid: it is `ψ_c` exactly, independent of the mesh and the
+start. And the two things such a curve would be for are met another way: the
+`.nc` carries every rotating mirror's densities at its *solved* crossing, as a
+`DensityFile` table that poses the same plasma in `Gauge = "midplane"`
+(→ [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity)), and the vacuum's curve already
+keeps the transfer exponent to the plasma's own displacement
+(→ [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)). Posing true-midplane densities
+with a quadratic Newton is the bordered route — `R_0` at the knots as border
+unknowns — not a frozen copy of someone's answer.
+
+*From `MIRROR-PLAN.md` §5.*
+
 ## Interpolatory HDG
 
 ### The interpolatory source: seven hypotheses rejected

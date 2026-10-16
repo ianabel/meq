@@ -544,8 +544,9 @@ namespace meq
 	// maps one onto the other in one switch with no default.
 	enum class RotatingGaugeType
 	{
-		FixedRadius,  // "fixed-radius": phi_0( ReferenceRadius ) = 0, the default
-		Midplane      // "midplane": phi_0 = 0 where each surface crosses z = 0
+		FixedRadius,    // "fixed-radius": phi_0( ReferenceRadius ) = 0, the default
+		Midplane,       // "midplane": phi_0 = 0 where each surface crosses z = 0
+		VacuumMidplane  // "vacuum-midplane": where the VACUUM's surface crosses it
 	};
 
 	// A plasma in sonic toroidal rotation: refs/RotatingGK.pdf eq (136), closed
@@ -577,16 +578,20 @@ namespace meq
 		// is a CONSTANT -- the geometric axis -- not the magnetic axis and not
 		// a flux-surface average. Two sets of densities differing by the gauge
 		// describe the same plasma, so a comparison against another code has to
-		// agree on this first. Zero, and refused if given, under the midplane
-		// gauge, which has no constant radius.
+		// agree on this first. Zero, and refused if given, under the two
+		// midplane gauges, which have no constant radius.
 		double referenceRadius = 1.0;
-		// Gauge: "fixed-radius" (the default) or "midplane", MIRROR-PLAN.md
-		// section 5. The midplane gauge makes each Density the physical density
-		// where its flux surface crosses z = 0, which keeps a high-Mach,
-		// multi-species mirror's densities within a double; it needs psi
+		// Gauge: "fixed-radius" (the default), "midplane" or "vacuum-midplane",
+		// MIRROR-PLAN.md section 5. The midplane gauge makes each Density the
+		// physical density where its flux surface crosses z = 0, which keeps a
+		// high-Mach, multi-species mirror's densities within a double; it needs psi
 		// monotone along z = 0, so it is accepted only on a mirror --
 		// Normalised, SupportShape = "box" -- and refused on a tokamak, whose
-		// midplane crosses every surface twice.
+		// midplane crosses every surface twice. "vacuum-midplane" pins phi_0
+		// on a FIXED curve instead, the vacuum's crossing R_0vac( Psi ), so each
+		// Density is the density there and Newton keeps an exact Jacobian; it
+		// reads the vacuum as the subtracted conductors' field and is refused
+		// without [conductors] subtracting.
 		RotatingGaugeType gauge = RotatingGaugeType::FixedRadius;
 		// Mu0, Normalised, PsiAxis, ConfineToPlasma: as MHDParameters, and
 		// meaning the same.

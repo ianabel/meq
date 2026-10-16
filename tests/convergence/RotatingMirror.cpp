@@ -72,6 +72,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -280,6 +281,72 @@ namespace
 		/// gauge's tables of the same plasma, or another plasma -- on the same
 		/// machine, labels and box. Null takes mirrorProfiles().
 		MirrorProfiles const *profiles = nullptr;
+		/// A fixed-curve source's curve, installed before the solve so that
+		/// the solver's own -- the vacuum's, label-checked -- is never asked
+		/// for: what reproduces a plasma posed on one curve and gauged on
+		/// another. Null leaves the solver to install the vacuum's.
+		std::shared_ptr<meq::Profile const> gaugeCurve;
+		/// The border columns differenced rather than analytic, the control
+		/// that sees what the analytic columns leave out.
+		bool differencedColumns = false;
+		/// A midplane-gauged source that keeps the FIRST crossing table it is
+		/// given and ignores every refresh: M-278 section 2's frozen table,
+		/// through the midplane gauge's own code path.
+		bool freezeFirstCrossing = false;
+		/// Non-zero: a midplane-gauged source tabulating its crossings on this
+		/// many intervals, FineCrossing, in place of the default.
+		unsigned int crossingIntervals = 0;
+	};
+
+	/// Options::freezeFirstCrossing's source.
+	class FrozenCrossing : public meq::NormalisedRotatingSource
+	{
+		public:
+			using meq::NormalisedRotatingSource::NormalisedRotatingSource;
+
+			void setMidplaneField( meq::MidplaneField const &field, double rMin,
+			                       double rMax ) override
+			{
+				if ( unnormalised().midplaneCrossing() )
+					return;
+				meq::NormalisedRotatingSource::setMidplaneField( field, rMin, rMax );
+			}
+	};
+
+	/// Options::crossingIntervals' source: the midplane gauge's own refresh,
+	/// on a table of a chosen size rather than the default 1024 intervals.
+	class FineCrossing : public meq::NormalisedRotatingSource
+	{
+		public:
+			FineCrossing( unsigned int intervalsIn, std::vector<meq::Species> species,
+			              std::shared_ptr<meq::Profile const> omega, double psiAxis, double mu0 )
+				: meq::NormalisedRotatingSource( std::move( species ), std::move( omega ),
+				      std::make_shared<meq::ConstantProfile const>( 0.0 ), 0.0, psiAxis, mu0,
+				      meq::RotatingSource::Closure::Automatic, meq::RotatingSource::Gauge::Midplane ),
+				  intervals( intervalsIn )
+			{
+			}
+
+			void setMidplaneField( meq::MidplaneField const &field, double rMin,
+			                       double rMax ) override
+			{
+				double const base = boundaryNormalisation();
+				double const span = normalisation() - base;
+				meq::MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
+				{
+					double psi = 0.0, dPsiDR = 0.0;
+					if ( !field( radius, psi, dPsiDR ) )
+						return false;
+					x = ( psi - base )/span;
+					dXdR = dPsiDR/span;
+					return true;
+				};
+				unnormalised().setMidplaneCrossing(
+					meq::tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0, intervals ) );
+			}
+
+		private:
+			unsigned int intervals;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -362,6 +429,15 @@ namespace
 		if ( o.jacobianFactor != 1.0 )
 			run->source = std::make_unique<SkewedJacobian>(
 				o.jacobianFactor, profiles, axisStart, machine().mu0 );
+		else if ( o.crossingIntervals > 0 )
+			run->source = std::make_unique<FineCrossing>( o.crossingIntervals,
+				profiles.species, profiles.omega, axisStart, machine().mu0 );
+		else if ( o.freezeFirstCrossing )
+			run->source = std::make_unique<FrozenCrossing>(
+				profiles.species, profiles.omega,
+				std::make_shared<meq::ConstantProfile const>( 0.0 ),
+				profiles.referenceRadius, axisStart, machine().mu0,
+				meq::RotatingSource::Closure::Automatic, profiles.gauge );
 		else
 			run->source = std::make_unique<meq::NormalisedRotatingSource>(
 				profiles.species, profiles.omega,
@@ -369,6 +445,8 @@ namespace
 				profiles.referenceRadius, axisStart, machine().mu0,
 				meq::RotatingSource::Closure::Automatic, profiles.gauge );
 		run->source->setPlasmaSupportShape( meq::PlasmaSupportShape::Box, p.axialEdge );
+		if ( o.gaugeCurve )
+			run->source->unnormalised().setMidplaneCrossing( o.gaugeCurve );
 
 		run->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, o.modes );
 		run->solver = std::make_unique<meq::GradShafranovSolver>( *run->domain->sub,
@@ -388,6 +466,8 @@ namespace
 		if ( o.relativeTolerance > 0.0 )
 			solver.setNewtonControl( o.relativeTolerance, o.absoluteTolerance,
 			                         o.maxIterations );
+		if ( o.differencedColumns )
+			solver.setBorderColumn( meq::GradShafranovSolver::BorderColumn::Differenced );
 
 		auto const t2 = std::chrono::steady_clock::now();
 		try
@@ -892,12 +972,13 @@ namespace
 }
 
 /*
- * FIVE SUITES, ONE ctest EACH, so that the solve's acceptance does not wait on
+ * SEVEN SUITES, ONE ctest EACH, so that the solve's acceptance does not wait on
  * the resolution study: `solve` is MR-4b and its controls, `resolution` is
  * MR-4c and MR-4d, which share their runs through sampled(), and `driver` is
  * MR-5 -- the shipped example through the shipped binary, against the library.
  * `adaptive` judges the estimator on that example and `device` runs it on the
- * card; both need the binary, as `driver` does.
+ * card; both need the binary, as `driver` does. `midplane` and `vacuum_gauge`
+ * are the two crossing gauges, MIRROR-PLAN.md section 5.
  */
 BOOST_AUTO_TEST_SUITE( solve )
 
@@ -2183,7 +2264,242 @@ BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
 	BOOST_TEST( !std::filesystem::exists( stem + ".nc" ),
 		"a failed mirror wrote " << stem << ".nc" );
 }
+/*
+ * THE TRUE MIDPLANE IN THE .nc, AND THAT IT POSES THE PLASMA AGAIN.
+ * [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+ *
+ * examples/mirror-three-species.toml through meq-run three ways, on one
+ * generated mesh:
+ *
+ *   1. AS SHIPPED, in the midplane gauge: the .nc's midplane_n_* -- the
+ *      densities where each SOLVED surface crosses z = 0 -- are the DensityFile
+ *      tables back, at every crossing knot, values and slopes;
+ *   2. THE SAME TABLES ON THE VACUUM'S CURVE, Gauge = "vacuum-midplane": a
+ *      different plasma, solved in fewer steps, whose .nc relabels it onto its
+ *      own solved midplane;
+ *   3. THOSE RELABELLED COLUMNS WRITTEN AS DensityFile TABLES and solved in the
+ *      midplane gauge: the same plasma as 2, so the same psi_h, to the
+ *      solver's tolerance -- which is what makes the columns a statement of
+ *      the plasma rather than a picture of it.
+ *
+ * Read through ncdump, FluxGridConvergence's reason: the check does not share
+ * code with the writer it checks.
+ */
+namespace
+{
+	char const *const threeSpeciesExample = "examples/mirror-three-species.toml";
 
+	/// The values of one variable out of an `ncdump -v` dump.
+	std::vector<double> dumpedValues( std::string const &text, std::string const &name )
+	{
+		std::size_t const data = text.find( "\ndata:" );
+		BOOST_TEST_REQUIRE( data != std::string::npos, "ncdump printed no data section" );
+		std::size_t const at = text.find( " " + name + " =", data );
+		BOOST_TEST_REQUIRE( at != std::string::npos, "ncdump printed no values for " << name );
+		std::size_t const begin = text.find( '=', at ) + 1;
+		std::size_t const end = text.find( ';', begin );
+		BOOST_TEST_REQUIRE( end != std::string::npos );
+		std::vector<double> values;
+		std::string const body = text.substr( begin, end - begin );
+		std::size_t cursor = 0;
+		while ( cursor < body.size() )
+		{
+			while ( cursor < body.size() && ( body[ cursor ] == ','
+			        || std::isspace( static_cast<unsigned char>( body[ cursor ] ) ) ) )
+				++cursor;
+			if ( cursor >= body.size() )
+				break;
+			std::size_t used = 0;
+			values.push_back( std::stod( body.substr( cursor ), &used ) );
+			cursor += used;
+		}
+		return values;
+	}
+
+	/// The three-species example with [output] and its generated mesh in the
+	/// scratch directory, each of @a lines' first line beginning with its key
+	/// replaced whole, and each DensityFile whose path names @a files' first
+	/// pointed at its second.
+	std::string configureThreeSpecies( std::string const &prefix,
+	                                   std::vector<std::pair<std::string, std::string>> lines,
+	                                   std::vector<std::pair<std::string, std::string>> const &files = {} )
+	{
+		std::string text = meq::test::shippedConfig( threeSpeciesExample );
+		BOOST_TEST_REQUIRE( !text.empty() );
+		lines.emplace_back( "Directory = ", "Directory = \"" + std::string( driverScratch ) + "\"" );
+		lines.emplace_back( "Prefix = ", "Prefix = \"" + prefix + "\"" );
+		lines.emplace_back( "File = \"mirror-three-species.msh\"",
+		                    "File = \"" + std::string( driverScratch ) + "/three-species.msh\"" );
+		for ( auto const &line : lines )
+		{
+			std::size_t at = text.find( "\n" + line.first );
+			BOOST_TEST_REQUIRE( at != std::string::npos, threeSpeciesExample << " has no " << line.first << " line" );
+			++at;
+			text.replace( at, text.find( '\n', at ) - at, line.second );
+		}
+		for ( auto const &file : files )
+		{
+			std::size_t const name = text.find( file.first );
+			BOOST_TEST_REQUIRE( name != std::string::npos, threeSpeciesExample << " reads no " << file.first );
+			std::size_t const at = text.rfind( '\n', name ) + 1;
+			text.replace( at, text.find( '\n', at ) - at, "DensityFile = \"" + file.second + "\"" );
+		}
+		std::filesystem::create_directories( driverScratch );
+		std::string const path = std::string( driverScratch ) + "/" + prefix + ".toml";
+		std::ofstream out( path );
+		out << text;
+		return path;
+	}
+
+	/// One run of a three-species variant, and its .nc's midplane columns.
+	struct MidplaneColumns
+	{
+		DriverRun run;
+		int newtonIterations = -1;
+		std::vector<double> psi, radius;
+		std::map<std::string, std::vector<double>> value, slope;
+	};
+
+	MidplaneColumns runThreeSpecies( std::string const &prefix,
+	                                 std::vector<std::pair<std::string, std::string>> const &lines,
+	                                 std::vector<std::pair<std::string, std::string>> const &files = {} )
+	{
+		MidplaneColumns out;
+		std::string const config = configureThreeSpecies( prefix, lines, files );
+		out.run.stem = std::string( driverScratch ) + "/" + prefix;
+		out.run.status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH ) + " " + config,
+		                            out.run.stem + ".log" );
+		out.run.log = readText( out.run.stem + ".log" );
+		if ( out.run.status != 0 )
+			return out;
+		std::string variables = "midplane_Psi,midplane_R";
+		for ( char const *s : { "electron", "deuterium", "carbon" } )
+			variables += std::string( ",midplane_n_" ) + s + ",midplane_dn_" + s + "_dPsi";
+		std::string const dump = out.run.stem + ".dump";
+		BOOST_TEST_REQUIRE( runLogged( "ncdump -v " + variables + " " + out.run.stem + ".nc", dump ) == 0,
+		                    readText( dump ) );
+		std::string const text = readText( dump );
+		out.newtonIterations = static_cast<int>( numberAfter( text, ":newton_iterations = " ) );
+		out.psi = dumpedValues( text, "midplane_Psi" );
+		out.radius = dumpedValues( text, "midplane_R" );
+		for ( char const *s : { "electron", "deuterium", "carbon" } )
+		{
+			out.value[ s ] = dumpedValues( text, std::string( "midplane_n_" ) + s );
+			out.slope[ s ] = dumpedValues( text, std::string( "midplane_dn_" ) + s + "_dPsi" );
+			BOOST_TEST_REQUIRE( out.value[ s ].size() == out.psi.size() );
+			BOOST_TEST_REQUIRE( out.slope[ s ].size() == out.psi.size() );
+		}
+		return out;
+	}
+
+	/// One species' columns as a DensityFile, `Psi f df/dPsi`.
+	std::string writeDensityTable( MidplaneColumns const &c, std::string const &species, std::string const &name )
+	{
+		std::string const path = std::filesystem::absolute(
+			std::filesystem::path( driverScratch ) / name ).string();
+		std::ofstream out( path );
+		out << "# midplane_n_" << species << " and its slope, relabelled from " << c.run.stem << ".nc\n";
+		char line[ 128 ];
+		for ( std::size_t i = 0; i < c.psi.size(); ++i )
+		{
+			std::snprintf( line, sizeof line, "%.17e %.17e %.17e\n", c.psi[ i ],
+			               c.value.at( species )[ i ], c.slope.at( species )[ i ] );
+			out << line;
+		}
+		return path;
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain )
+{
+	// 1. As shipped: the midplane gauge's own tables, back.
+	MidplaneColumns const shipped = runThreeSpecies( "three-midplane", {} );
+	BOOST_TEST_REQUIRE( shipped.run.status == 0, shipped.run.log );
+	std::printf( "\n  THE TRUE MIDPLANE IN THE .nc: %zu crossing knots, R_0 %.6f .. %.6f m; midplane gauge "
+	             "%d Newton steps\n", shipped.psi.size(), shipped.radius.front(), shipped.radius.back(),
+	             shipped.newtonIterations );
+	BOOST_TEST( std::abs( shipped.radius.front() - 0.35 ) < 1.0e-4 );
+	BOOST_TEST( std::abs( shipped.radius.back() - 0.1 ) < 1.0e-4 );
+	for ( char const *s : { "electron", "carbon" } )
+	{
+		meq::SplineProfile const table = meq::SplineProfile::fromFile(
+			meq::test::sourcePath( std::string( "examples/mirror-three-species-n-" ) + s + ".dat" ) );
+		double peak = 0.0, peakSlope = 0.0;
+		for ( std::size_t i = 0; i < shipped.psi.size(); ++i )
+		{
+			peak = std::max( peak, table( shipped.psi[ i ] ) );
+			peakSlope = std::max( peakSlope, std::abs( table.prime( shipped.psi[ i ] ) ) );
+		}
+		double worstValue = 0.0, worstSlope = 0.0;
+		for ( std::size_t i = 0; i < shipped.psi.size(); ++i )
+		{
+			double const x = shipped.psi[ i ];
+			worstValue = std::max( worstValue, std::abs( shipped.value.at( s )[ i ] - table( x ) )/table( x ) );
+			worstSlope = std::max( worstSlope, std::abs( shipped.slope.at( s )[ i ] - table.prime( x ) )/peakSlope );
+		}
+		std::printf( "    %-9s midplane_n against its DensityFile: value %.3e relative, slope %.3e of its peak\n",
+		             s, worstValue, worstSlope );
+		BOOST_TEST( worstValue < 1.0e-12, s << ": the midplane gauge's relabelled density is not its own table" );
+		BOOST_TEST( worstSlope < 1.0e-9, s << ": the midplane gauge's relabelled slope is not its own table's" );
+	}
+
+	// 2. The same tables on the vacuum's curve: another plasma, and quadratic.
+	MidplaneColumns const vacuum = runThreeSpecies( "three-vacuum",
+		{ { "Gauge = ", "Gauge = \"vacuum-midplane\"" } } );
+	BOOST_TEST_REQUIRE( vacuum.run.status == 0, vacuum.run.log );
+	std::printf( "    vacuum-midplane gauge: %d Newton steps\n", vacuum.newtonIterations );
+	BOOST_TEST( vacuum.newtonIterations < shipped.newtonIterations );
+	double moved = 0.0;
+	for ( std::size_t i = 0; i < vacuum.psi.size(); ++i )
+		moved = std::max( moved, std::abs( std::log( vacuum.value.at( "carbon" )[ i ]
+			/meq::SplineProfile::fromFile( meq::test::sourcePath(
+				"examples/mirror-three-species-n-carbon.dat" ) )( vacuum.psi[ i ] ) ) ) );
+	std::printf( "    its true-midplane carbon against the table it was given: | ln ratio | up to %.3e\n", moved );
+	BOOST_TEST( moved > 1.0e-3, "the vacuum curve's plasma relabels onto its own midplane as the "
+		"table it was given, so the two gauges are not being told apart" );
+
+	// 3. Its relabelled columns as tables, in the midplane gauge: the same plasma.
+	std::string const electron = writeDensityTable( vacuum, "electron", "three-relabelled-n-electron.dat" );
+	std::string const carbon = writeDensityTable( vacuum, "carbon", "three-relabelled-n-carbon.dat" );
+	MidplaneColumns const again = runThreeSpecies( "three-relabelled", {},
+		{ { "mirror-three-species-n-electron.dat", electron }, { "mirror-three-species-n-carbon.dat", carbon } } );
+	BOOST_TEST_REQUIRE( again.run.status == 0, again.run.log );
+	// psi*, the field the run reports, and psi_h beside it, dof for dof on the
+	// one mesh; against the shipped run, which is another plasma.
+	auto largestGap = []( std::string const &first, std::string const &second, double &scale )
+	{
+		StoredAnswer const a = readAnswer( first );
+		StoredAnswer const b = readAnswer( second );
+		std::ifstream starA( first + "_psistar.gf" ), starB( second + "_psistar.gf" );
+		BOOST_TEST_REQUIRE( ( starA.good() && starB.good() ), "no _psistar.gf beside " << first );
+		mfem::GridFunction const a2( a.mesh.get(), starA ), b2( b.mesh.get(), starB );
+		BOOST_TEST_REQUIRE( a2.Size() == b2.Size(), "the two runs are not on one mesh" );
+		double worst = 0.0;
+		scale = 0.0;
+		for ( int i = 0; i < a2.Size(); ++i )
+		{
+			worst = std::max( worst, std::abs( a2( i ) - b2( i ) ) );
+			scale = std::max( scale, std::abs( a2( i ) ) );
+		}
+		return worst;
+	};
+	double scale = 0.0, shippedScale = 0.0;
+	double const worst = largestGap( vacuum.run.stem, again.run.stem, scale );
+	double const other = largestGap( vacuum.run.stem, shipped.run.stem, shippedScale );
+	double worstColumn = 0.0;
+	for ( std::size_t i = 0; i < again.psi.size(); ++i )
+		worstColumn = std::max( worstColumn, std::abs( again.value.at( "carbon" )[ i ] - vacuum.value.at( "carbon" )[ i ] )
+			/vacuum.value.at( "carbon" )[ i ] );
+	std::printf( "    posed again in the midplane gauge, %d Newton steps: psi* differs by %.3e of its largest "
+	             "%.3e, where the shipped tables' plasma differs by %.3e; the relabelled carbon by %.3e "
+	             "relative\n", again.newtonIterations, worst/scale, scale, other/scale, worstColumn );
+	BOOST_TEST( worst <= 1.0e-9*scale,
+		"the relabelled densities posed in the midplane gauge solve to a different psi*, " << worst/scale
+		<< " of its largest, so the .nc's midplane columns do not state the plasma that was solved" );
+	BOOST_TEST( other > 1.0e4*worst,
+		"the two gauges' plasmas on the same tables solve within " << other << " of each other, so this "
+		"case cannot tell one plasma from another" );
+}
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE( adaptive )
@@ -2569,49 +2885,28 @@ BOOST_AUTO_TEST_SUITE_END()
  */
 namespace
 {
-	/// The two densities of the reference's two-species plasma, tabulated in
-	/// the midplane gauge from @a run's own crossings, at the knots of the
-	/// fixed-radius tables. Two species share one exponent, the closed form's
+	/// The two densities of the reference's two-species plasma, tabulated on
+	/// the curve @a crossing in @a gauge, at the knots of the fixed-radius
+	/// tables -- which the crossing must share. Two species share one
+	/// exponent, the closed form's
 	///
 	///     A = C( Psi )( R^2 - R_ref^2 )/2,
 	///     C = omega^2 ( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 ),
 	///
-	/// so the density where a surface crosses z = 0 is n_s0 e^A at R = R_0, and
-	/// its slope is the chain rule through C and R_0:
+	/// so the density where a surface meets the curve is n_s0 e^A at R = R_c,
+	/// and its slope is the chain rule through C and R_c:
 	///
-	///     d/dPsi ( n e^A ) = e^A [ n' + n( C' ( R_0^2 - R_ref^2 )/2 + C R_0 R_0' ) ].
-	///
-	/// R_0 and R_0' are tabulateMidplaneCrossing()'s, on the solver's own
-	/// midplane field at the answer -- the same reading the solver gives the
-	/// source at every iterate.
-	MirrorProfiles transferToMidplane( MirrorRun &run, MirrorProfiles const &fixed )
+	///     d/dPsi ( n e^A ) = e^A [ n' + n( C' ( R_c^2 - R_ref^2 )/2 + C R_c R_c' ) ].
+	MirrorProfiles transferOnto( MirrorProfiles const &fixed, meq::SplineProfile const &crossing,
+	                             meq::RotatingSource::Gauge gauge )
 	{
 		BOOST_TEST_REQUIRE( fixed.species.size() == 2u );
 		BOOST_TEST_REQUIRE( ( fixed.gauge == meq::RotatingSource::Gauge::FixedRadius ) );
-		meq::GradShafranovSolver &solver = *run.solver;
-		double const axis = solver.psiAxis();
-		double const boundary = solver.psiBoundary();
-		double rMin = 0.0, rMax = 0.0;
-		meq::MidplaneField const physical = solver.midplaneField( rMin, rMax );
-		meq::MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
-		{
-			double psi = 0.0, slope = 0.0;
-			if ( !physical( radius, psi, slope ) )
-				return false;
-			x = ( psi - boundary )/( axis - boundary );
-			dXdR = slope/( axis - boundary );
-			return true;
-		};
-
 		auto const *electron = dynamic_cast<meq::SplineProfile const *>(
 			fixed.species[ 0 ].density.get() );
 		BOOST_TEST_REQUIRE( electron != nullptr );
 		std::vector<meq::Knot> const &knots = electron->knots();
-		BOOST_TEST_REQUIRE( electron->uniformKnots() );
-		BOOST_TEST_REQUIRE( knots.front().psi == 0.0 );
-		BOOST_TEST_REQUIRE( knots.back().psi == 1.0 );
-		std::shared_ptr<meq::SplineProfile const> const crossing = meq::tabulateMidplaneCrossing(
-			normalised, rMin, rMax, 0.0, 1.0, static_cast<unsigned int>( knots.size() - 1 ) );
+		BOOST_TEST_REQUIRE( crossing.knots().size() == knots.size() );
 
 		meq::Species const &one = fixed.species[ 0 ];
 		meq::Species const &two = fixed.species[ 1 ];
@@ -2630,7 +2925,7 @@ namespace
 			double const c = k*w/d;
 			double const cPrime = k*( wPrime/d - w*dPrime/( d*d ) );
 
-			meq::Knot const &r = crossing->knots()[ i ];
+			meq::Knot const &r = crossing.knots()[ i ];
 			BOOST_TEST_REQUIRE( r.psi == x );
 			double const half = ( r.value*r.value - rRef2 )/2.0;
 			double const factor = std::exp( c*half );
@@ -2644,8 +2939,50 @@ namespace
 		out.species[ 0 ].density = std::make_shared<meq::SplineProfile const>( std::move( table ) );
 		out.species[ 1 ].density = meq::neutralisingDensity( out.species, 1 );
 		out.referenceRadius = 0.0;
-		out.gauge = meq::RotatingSource::Gauge::Midplane;
+		out.gauge = gauge;
 		return out;
+	}
+
+	/// @a run's own midplane crossings at its answer, tabulateMidplaneCrossing()
+	/// on the solver's midplane field -- the same reading the solver gives a
+	/// midplane-gauged source at every iterate -- on @a intervals.
+	std::shared_ptr<meq::SplineProfile const> answerCrossing( MirrorRun &run, unsigned int intervals )
+	{
+		meq::GradShafranovSolver &solver = *run.solver;
+		double const axis = solver.psiAxis();
+		double const boundary = solver.psiBoundary();
+		double rMin = 0.0, rMax = 0.0;
+		meq::MidplaneField const physical = solver.midplaneField( rMin, rMax );
+		meq::MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
+		{
+			double psi = 0.0, slope = 0.0;
+			if ( !physical( radius, psi, slope ) )
+				return false;
+			x = ( psi - boundary )/( axis - boundary );
+			dXdR = slope/( axis - boundary );
+			return true;
+		};
+		return meq::tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0, intervals );
+	}
+
+	/// The knot count less one of the reference's fixed-radius tables.
+	unsigned int tableIntervals( MirrorProfiles const &fixed )
+	{
+		auto const *electron = dynamic_cast<meq::SplineProfile const *>(
+			fixed.species[ 0 ].density.get() );
+		BOOST_TEST_REQUIRE( electron != nullptr );
+		BOOST_TEST_REQUIRE( electron->uniformKnots() );
+		BOOST_TEST_REQUIRE( electron->knots().front().psi == 0.0 );
+		BOOST_TEST_REQUIRE( electron->knots().back().psi == 1.0 );
+		return static_cast<unsigned int>( electron->knots().size() - 1 );
+	}
+
+	/// The reference's plasma in the midplane gauge, on @a run's own crossings
+	/// at its answer.
+	MirrorProfiles transferToMidplane( MirrorRun &run, MirrorProfiles const &fixed )
+	{
+		return transferOnto( fixed, *answerCrossing( run, tableIntervals( fixed ) ),
+		                     meq::RotatingSource::Gauge::Midplane );
 	}
 
 	/// The fixed-radius answer the midplane problem is transferred on, and
@@ -2661,11 +2998,14 @@ namespace
 	{
 		static Transferred const t = []
 		{
-			ladderStemInUse = midplaneStem;
+			// The suite running claims the ladder's stem; the midplane suite
+			// unless another, in its own process, already has.
+			if ( ladderStemInUse == ladderStem )
+				ladderStemInUse = midplaneStem;
 			Options o;
 			o.level = bestLevel;
 			o.order = bestOrder;
-			o.stem = midplaneStem;
+			o.stem = ladderStemInUse;
 			std::unique_ptr<MirrorRun> const run = runMirror( o );
 			BOOST_TEST_REQUIRE( run->converged, run->failure );
 			Transferred out;
@@ -2762,7 +3102,8 @@ namespace
 	double const densityPeak = std::getenv( "MEQ_MIDPLANE_DENSITY" )
 		? std::atof( std::getenv( "MEQ_MIDPLANE_DENSITY" ) ) : 5.0e18;
 
-	MirrorProfiles threeSpecies()
+	MirrorProfiles threeSpecies( double peak = densityPeak,
+		meq::RotatingSource::Gauge gauge = meq::RotatingSource::Gauge::Midplane )
 	{
 		double const tElectronPeak = 1.28e3*elementaryCharge;
 		double const omegaPeak = machTarget*std::sqrt( tElectronPeak/deuteronMass )/machRadius;
@@ -2776,19 +3117,19 @@ namespace
 		MirrorProfiles out;
 		out.omega = std::make_shared<SkewProfile const>( omegaPeak, omegaPeak/omegaDrift );
 		out.referenceRadius = 0.0;
-		out.gauge = meq::RotatingSource::Gauge::Midplane;
+		out.gauge = gauge;
 		out.species.resize( 3 );
 		out.species[ 0 ].mass = electronMass;
 		out.species[ 0 ].charge = -1.0;
 		out.species[ 0 ].temperature = temperature( 1.28e3 );
-		out.species[ 0 ].density = std::make_shared<SkewProfile const>( densityPeak, densityFloor*densityPeak );
+		out.species[ 0 ].density = std::make_shared<SkewProfile const>( peak, densityFloor*peak );
 		out.species[ 1 ].mass = deuteronMass;
 		out.species[ 1 ].charge = 1.0;
 		out.species[ 1 ].temperature = temperature( 1.53e3 );
 		out.species[ 2 ].mass = carbonMass;
 		out.species[ 2 ].charge = 6.0;
 		out.species[ 2 ].temperature = temperature( 1.53e3 );
-		out.species[ 2 ].density = std::make_shared<SkewProfile const>( 0.01*densityPeak, densityFloor*0.01*densityPeak );
+		out.species[ 2 ].density = std::make_shared<SkewProfile const>( 0.01*peak, densityFloor*0.01*peak );
 		out.species[ 1 ].density = meq::neutralisingDensity( out.species, 1 );
 		return out;
 	}
@@ -3155,6 +3496,442 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixSolveInTheMidplaneGauge )
 	BOOST_TEST( carbonDecades > 100.0,
 		"carbon's fixed-radius densities span only 1e" << carbonDecades << ", so this case "
 		"does not exercise what the midplane gauge is for" );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * THE VACUUM-MIDPLANE GAUGE ON THE MIRROR. MIRROR-PLAN.md section 5,
+ * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+ *
+ * meq::RotatingSource::Gauge::FixedCurve pins phi_0 on a curve R_g( Psi ) that
+ * never moves, and the solver gives it the VACUUM's midplane crossing once,
+ * before the first residual. F is then a pointwise function of ( R, z, psi )
+ * and the Jacobian is exact with nothing frozen. One ctest,
+ * RotatingMirrorVacuumGauge, asks:
+ *
+ *   1. geq's plasma posed on the vacuum's curve is the fixed-radius plasma,
+ *      and Newton is QUADRATIC on it, analytic border columns or differenced;
+ *   2. M-278 section 2's frozen vacuum table, again: three quadratic steps
+ *      through either route, so a fixed table leaves nothing out of the
+ *      Jacobian -- and why the vacuum's crossing is no estimate to check the
+ *      midplane gauge's precondition on;
+ *   3. three species at M = 6 at two densities, and how far the plasma
+ *      moves its crossings from the vacuum's;
+ *   4. the true-midplane densities relabelled off a vacuum-gauge answer,
+ *      posed again in the midplane gauge, are the same plasma.
+ */
+namespace
+{
+	char const *const vacuumStem = "RotatingMirrorVacuumGauge";
+
+	/// The vacuum's crossing R_0vac( Psi ) from the filaments alone: psi_c
+	/// along z = 0 and its slope, normalised by psi_c at the two label points.
+	/// What GradShafranovSolver::installVacuumGauge() gives a fixed-curve
+	/// source, built here without a solver so that profiles can be stated on
+	/// it before one exists; theVacuumCurveIsTheConductorsOwnCrossing holds
+	/// the two together.
+	std::shared_ptr<meq::SplineProfile const> vacuumCrossing( unsigned int intervals )
+	{
+		meqtest::geq::GeqCase const &p = problem();
+		meq::ConductorField const filaments = geqFilaments();
+		double const axis = filaments.psi( p.axisPointR, p.axisPointZ );
+		double const boundary = filaments.psi( p.boundaryPointR, p.boundaryPointZ );
+		meq::MidplaneField const field = [ & ]( double radius, double &x, double &dXdR )
+		{
+			double gradR = 0.0, gradZ = 0.0;
+			filaments.gradPsi( radius, 0.0, gradR, gradZ );
+			x = ( filaments.psi( radius, 0.0 ) - boundary )/( axis - boundary );
+			dXdR = gradR/( axis - boundary );
+			return true;
+		};
+		return meq::tabulateMidplaneCrossing( field, 0.0, rhoGamma, 0.0, 1.0, intervals );
+	}
+
+	/// The fixed-curve source @a profiles would build, carrying @a curve: what
+	/// labelCheck() is asked of.
+	meq::RotatingSource::LabelCheck labelCheckOn( MirrorProfiles const &profiles,
+	                                              std::shared_ptr<meq::Profile const> curve )
+	{
+		meq::RotatingSource const source( profiles.species, profiles.omega,
+			std::make_shared<meq::ConstantProfile const>( 0.0 ), 0.0, machine().mu0,
+			meq::RotatingSource::Closure::Automatic,
+			profiles.gauge == meq::RotatingSource::Gauge::FixedRadius
+				? meq::RotatingSource::Gauge::FixedCurve : profiles.gauge );
+		return source.labelCheck( std::move( curve ) );
+	}
+
+	void printLabelCheck( char const *label, meq::RotatingSource::LabelCheck const &c )
+	{
+		std::printf( "    %-44s F at a label %.3e of its peak ( Psi = %g, R = %.4f )\n", label,
+		             c.relative, c.label, c.radius );
+	}
+
+	/// The last triple's order of a merit history, or NaN.
+	double lastOrder( std::vector<double> const &history )
+	{
+		std::size_t const n = history.size();
+		return n >= 4 ? meq::tests::newtonOrder( history[ n - 3 ], history[ n - 2 ], history[ n - 1 ] )
+		              : std::numeric_limits<double>::quiet_NaN();
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( vacuum_gauge )
+
+/*
+ * 1. geq's PLASMA ON THE VACUUM'S CURVE IS THE FIXED-RADIUS PLASMA, AND NEWTON
+ * IS QUADRATIC ON IT.
+ *
+ * Two fixed curves -- R = R_ref and R = R_0vac( Psi ) -- describe one plasma
+ * with no solve between them: the transfer is the fixed-radius density read at
+ * the vacuum's radius, exact at every knot. So the vacuum-gauge solve must land
+ * on the fixed-radius answer to round-off rather than to the discretisation,
+ * in the fixed radius's own three steps. The solver installs the curve once,
+ * from the filaments, and refreshes nothing; and the border columns
+ * DIFFERENCED -- which carry whatever moving the labels does to R_g( Psi ),
+ * analytic or not -- give the same history, which is the FD check of the
+ * columns on the assembled residual.
+ *
+ * k = 3 over levels 0..2, the midplane suite's rung.
+ */
+BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadraticNewton )
+{
+	ladderStemInUse = vacuumStem;
+	MirrorProfiles const fixed = mirrorProfiles();
+	std::shared_ptr<meq::SplineProfile const> const vacuum = vacuumCrossing( tableIntervals( fixed ) );
+	MirrorProfiles const onVacuum = transferOnto( fixed, *vacuum, meq::RotatingSource::Gauge::FixedCurve );
+	meq::RotatingSource::LabelCheck const check = labelCheckOn( onVacuum, vacuum );
+	std::printf( "\n  geq'S PLASMA ON THE VACUUM'S CURVE: R_0vac runs %.6f .. %.6f m\n", ( *vacuum )( 0.0 ),
+	             ( *vacuum )( 1.0 ) );
+	printLabelCheck( "on the vacuum's curve", check );
+	BOOST_TEST( check.relative <= meq::labelTolerance );
+
+	int const order = 3;
+	for ( int level : { 0, 1, 2 } )
+	{
+		Sampled const &radius = sampled( level, order, true );
+		Options o;
+		o.level = level;
+		o.order = order;
+		o.stem = vacuumStem;
+		o.profiles = &onVacuum;
+		std::unique_ptr<MirrorRun> run = runMirror( o );
+		BOOST_TEST_REQUIRE( run->converged, run->failure );
+		BOOST_TEST( run->solver->vacuumGaugeInstalls() == 1 );
+		BOOST_TEST( run->solver->midplaneGaugeRefreshes() == 0 );
+		meq::Profile const *installed = run->source->unnormalised().midplaneCrossing();
+		BOOST_TEST_REQUIRE( installed != nullptr );
+		double worstCurve = 0.0;
+		for ( double x = 0.0; x <= 1.0; x += 1.0/1024.0 )
+			worstCurve = std::max( worstCurve, std::abs( ( *installed )( x ) - ( *vacuum )( x ) ) );
+		Sampled const v = reduce( run, o );
+		Difference const gauges = difference( v.psiStar, radius.psiStar );
+		double const scale = std::abs( radius.psiBoundary );
+
+		std::printf( "\n    level %d, k = %d, %d elements; the installed curve against the filaments' own "
+		             "%.3e m\n", level, order, v.elements, worstCurve );
+		printHistoryLine( "fixed radius", radius );
+		printHistoryLine( "vacuum curve", v );
+		printDifference( "vacuum curve - fixed radius, psi*", gauges );
+		BOOST_TEST( worstCurve < 1.0e-12, "the solver installed a curve " << worstCurve
+			<< " m from the filaments' own crossing, so it is not the vacuum's" );
+		BOOST_TEST( v.newtonSteps == radius.newtonSteps );
+		std::string why;
+		BOOST_TEST( quadraticTail( v.history, why ), "level " << level << ": " << why
+			<< "the vacuum-curve Newton is not quadratic, so its Jacobian is not the residual's" );
+		BOOST_TEST( gauges.max <= std::max( 1.0e-9*scale, meq::tests::exactAgreementFloor( scale ) ),
+			"level " << level << ": the one plasma on two fixed curves solves to answers "
+			<< gauges.max << " apart, which is not round-off" );
+
+		if ( level == 0 )
+		{
+			Options d = o;
+			d.differencedColumns = true;
+			Sampled const dv = sample( d );
+			printHistoryLine( "vacuum curve, differenced", dv );
+			Difference const columns = difference( dv.psiStar, v.psiStar );
+			printDifference( "differenced - analytic columns, psi*", columns );
+			BOOST_TEST_REQUIRE( dv.history.size() == v.history.size() );
+			for ( std::size_t i = 0; i < v.history.size(); ++i )
+				BOOST_TEST( std::abs( dv.history[ i ] - v.history[ i ] )
+				            <= 1.0e-6*v.history[ i ] + 1.0e-15*v.history.front(),
+					"step " << i << ": the differenced columns' merit " << dv.history[ i ]
+					<< " against the analytic " << v.history[ i ] );
+			BOOST_TEST( columns.max <= std::max( 1.0e-9*scale, meq::tests::exactAgreementFloor( scale ) ) );
+		}
+	}
+	std::fflush( stdout );
+}
+
+/*
+ * 2. M-278 SECTION 2's FROZEN TABLE, AGAIN: QUADRATIC, SO A FIXED TABLE LEAVES
+ * NOTHING OUT OF THE JACOBIAN.
+ *
+ * M-278 says the midplane problem with the vacuum's table frozen throughout
+ * converged in 6 steps where the fixed radius takes 3, which read as a term
+ * still missing with the table fixed -- the table's dependence on the labels
+ * through Psi, say. Reproduced two ways at level 0, k = 3, on the same
+ * true-midplane tables: the midplane gauge's own refresh path keeping its
+ * first table, FrozenCrossing, and the fixed curve given the filaments'
+ * crossing. BOTH TAKE 3 QUADRATIC STEPS, the same history, so at this commit
+ * the frozen table costs nothing and the six steps are not reproduced; the
+ * refresh is the whole of the midplane gauge's linear rate. The control is
+ * that rate, on the same tables.
+ *
+ * AND THE TABLES SAY WHY THE MIDPLANE GAUGE CANNOT BE CHECKED BEFORE ITS SOLVE.
+ * F vanishes at their labels on their own solved crossings, below
+ * meq::labelTolerance, and does not on the vacuum's: an estimate of R_0' from
+ * the vacuum would refuse a problem that meets the precondition.
+ */
+BOOST_AUTO_TEST_CASE( aFrozenCrossingIsQuadraticSoAFixedTableLeavesNothingOut )
+{
+	ladderStemInUse = vacuumStem;
+	Transferred const &t = transferredOnMeq();
+	std::shared_ptr<meq::SplineProfile const> const vacuum = vacuumCrossing( 2048 );
+	MirrorProfiles onCurve = t.profiles;
+	onCurve.gauge = meq::RotatingSource::Gauge::FixedCurve;
+
+	int const order = 3;
+	Options base;
+	base.level = 0;
+	base.order = order;
+	base.stem = vacuumStem;
+
+	Options frozen = base;
+	frozen.profiles = &t.profiles;
+	frozen.freezeFirstCrossing = true;
+	Sampled const f = sample( frozen );
+
+	Options curve = base;
+	curve.profiles = &onCurve;
+	curve.gaugeCurve = vacuum;
+	Sampled const c = sample( curve );
+
+	// The midplane gauge's own answer, whose crossings the tables were
+	// transferred to be read on.
+	Options refreshed = base;
+	refreshed.profiles = &t.profiles;
+	std::unique_ptr<MirrorRun> refreshedRun = runMirror( refreshed );
+	BOOST_TEST_REQUIRE( refreshedRun->converged, refreshedRun->failure );
+	std::shared_ptr<meq::SplineProfile const> const ownCrossing = answerCrossing( *refreshedRun, 1024 );
+	Sampled const r = reduce( refreshedRun, refreshed );
+
+	std::printf( "\n  M-278 SECTION 2, AT THIS COMMIT: the true-midplane tables, level 0, k = %d\n", order );
+	printHistoryLine( "midplane, first table kept", f );
+	printHistoryLine( "fixed curve, the vacuum's", c );
+	printHistoryLine( "midplane, refreshed", r );
+	std::string why;
+	BOOST_TEST( quadraticTail( f.history, why ), why );
+	BOOST_TEST( quadraticTail( c.history, why ), why );
+	BOOST_TEST( f.newtonSteps == c.newtonSteps );
+	BOOST_TEST( f.newtonSteps < r.newtonSteps,
+		"the frozen table takes " << f.newtonSteps << " steps and the refreshed " << r.newtonSteps
+		<< ", so the refresh is not what makes the midplane gauge linear" );
+	BOOST_TEST( !quadraticTail( r.history, why ),
+		"the refreshed midplane gauge reads quadratic, so this case cannot see what freezing changes" );
+
+	meq::RotatingSource::LabelCheck const onVacuum = labelCheckOn( t.profiles, vacuum );
+	meq::RotatingSource::LabelCheck const onOwn = labelCheckOn( t.profiles, ownCrossing );
+	printLabelCheck( "on the vacuum's crossing", onVacuum );
+	printLabelCheck( "on the solved crossing", onOwn );
+	BOOST_TEST( onOwn.relative <= meq::labelTolerance );
+	BOOST_TEST( onVacuum.relative > meq::labelTolerance,
+		"the vacuum's crossing reads these tables as meeting the box's precondition too, so it would "
+		"serve the midplane gauge as an estimate after all" );
+	std::fflush( stdout );
+}
+
+/*
+ * 3. ELECTRONS, DEUTERIUM AND C6+ AT M = 6 ON THE VACUUM'S CURVE: the midplane
+ * suite's profiles, read on R_0vac, at a midplane peak of 5e18 m^-3 and four
+ * times it. The profile set meets the box's precondition there. At 5e18 every
+ * level takes three quadratic steps, where the midplane gauge takes seven
+ * linear ones, and the answer self-converges; at 2e19 levels 1 and 2 do, where
+ * the midplane gauge takes fourteen at level 1. Level 0 at 2e19 does NOT
+ * converge, and is printed rather than asserted: with the Jacobian exact --
+ * analytic and differenced columns stall alike -- and F at the labels taken
+ * down to 1e-13 of its peak it stalls the same, so it is not the gauge;
+ * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+ *
+ * AND WHAT THE GAUGE COSTS IN RANGE: the transfer to the solved crossing,
+ * max | m_s omega^2 ( R_0vac^2 - R_0^2 )/2T_s | per species, against the same
+ * solved plasma's fixed-radius exponent at the best single R_ref.
+ */
+BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixOnTheVacuumCurve )
+{
+	ladderStemInUse = vacuumStem;
+	std::shared_ptr<meq::SplineProfile const> const vacuum = vacuumCrossing( 2048 );
+	int const order = 3;
+	for ( double peak : { 5.0e18, 2.0e19 } )
+	{
+		MirrorProfiles const three = threeSpecies( peak, meq::RotatingSource::Gauge::FixedCurve );
+		meq::RotatingSource::LabelCheck const check = labelCheckOn( three, vacuum );
+		std::printf( "\n  THREE SPECIES AT M = %.1f ON THE VACUUM'S CURVE, midplane peak %.1e m^-3\n",
+		             machTarget, peak );
+		printLabelCheck( "the profile set", check );
+		BOOST_TEST( check.relative <= meq::labelTolerance );
+
+		std::vector<Sampled> runs;
+		for ( int level : { 0, 1, 2 } )
+		{
+			Options o;
+			o.level = level;
+			o.order = order;
+			o.stem = vacuumStem;
+			o.profiles = &three;
+			std::unique_ptr<MirrorRun> run = runMirror( o );
+			if ( !run->converged )
+			{
+				std::printf( "    level %d: NOT CONVERGED, merit %.3e after %zu steps: %s\n", level,
+				             run->solver->newtonResiduals().back(),
+				             run->solver->newtonResiduals().size() - 1, run->failure.c_str() );
+				BOOST_TEST( ( peak == 2.0e19 && level == 0 ),
+					"three species at " << peak << " do not converge at level " << level << ": " << run->failure );
+				continue;
+			}
+			BOOST_TEST( run->solver->vacuumGaugeInstalls() == 1 );
+			std::shared_ptr<meq::SplineProfile const> const own = answerCrossing( *run, 1024 );
+			meq::RotatingSource const &inner = run->source->unnormalised();
+			double shift = 0.0, fixedWorst = 0.0;
+			std::vector<double> centrifugal( 3, 0.0 );
+			for ( double x = 0.0; x <= 1.0; x += 1.0/1024.0 )
+			{
+				double const r0 = ( *own )( x ), rg = ( *vacuum )( x );
+				shift = std::max( shift, std::abs( r0 - rg ) );
+				double const w = std::pow( ( *three.omega )( x ), 2 );
+				for ( std::size_t s = 0; s < 3; ++s )
+					centrifugal[ s ] = std::max( centrifugal[ s ], std::abs( three.species[ s ].mass*w
+						*( rg*rg - r0*r0 )/( 2.0*( *three.species[ s ].temperature )( x ) ) ) );
+			}
+			// The best single R_ref, as the midplane suite scans it: the fixed
+			// radius's exponent ln( n_s( R_ref )/n_s( R_0 ) ) on this answer, a
+			// radius the closure cannot be evaluated at reading as unusable.
+			double bestWorst = std::numeric_limits<double>::infinity();
+			for ( double rRef = 0.10; rRef <= 0.35; rRef += 0.0025 )
+			{
+				double worst = 0.0;
+				try
+				{
+					for ( std::size_t s = 0; s < 3; ++s )
+						for ( double x = 0.0; x <= 1.0; x += 1.0/128.0 )
+							worst = std::max( worst, std::abs( inner.densityExponent( s, rRef, x )
+							                                   - inner.densityExponent( s, ( *own )( x ), x ) ) );
+				}
+				catch ( std::runtime_error const & )
+				{
+					worst = std::numeric_limits<double>::infinity();
+				}
+				bestWorst = std::min( bestWorst, worst );
+			}
+			fixedWorst = bestWorst;
+			runs.push_back( reduce( run, o ) );
+			std::printf( "    level %d:", level );
+			printHistoryLine( "", runs.back() );
+			std::printf( "      max | R_0 - R_0vac | %.4e m; max | m omega^2 ( R_0vac^2 - R_0^2 )/2T |: "
+			             "electron %.3e, deuterium %.3e, carbon %.3e; the best fixed radius's %.1f\n",
+			             shift, centrifugal[ 0 ], centrifugal[ 1 ], centrifugal[ 2 ], fixedWorst );
+			std::string why;
+			BOOST_TEST( quadraticTail( runs.back().history, why ), "level " << level << ": " << why );
+			BOOST_TEST( runs.back().newtonSteps <= 4 );
+			BOOST_TEST( centrifugal[ 2 ] < 1.0e-1*fixedWorst,
+				"carbon's transfer to the solved crossing is " << centrifugal[ 2 ] << " against the "
+				"fixed radius's " << fixedWorst << ", so the vacuum's curve does not keep the range down" );
+		}
+		if ( runs.size() == 3 )
+		{
+			Difference const d01 = difference( runs[ 0 ].psiStar, runs[ 1 ].psiStar );
+			Difference const d12 = difference( runs[ 1 ].psiStar, runs[ 2 ].psiStar );
+			printDifference( "psi*, level 0 - level 1", d01 );
+			printDifference( "psi*, level 1 - level 2", d12 );
+			if ( meq::tests::aboveTheFormatsFloor( d12.rms, std::abs( runs[ 2 ].psiBoundary ) ) )
+				BOOST_TEST( d12.rms < 0.25*d01.rms );
+		}
+	}
+	std::fflush( stdout );
+}
+
+/*
+ * 4. THE TRUE-MIDPLANE DENSITIES RELABELLED OFF A VACUUM-GAUGE ANSWER POSE THE
+ * SAME PLASMA IN THE MIDPLANE GAUGE: meq::densityOnCurve() on the answer's own
+ * crossing -- what the .nc writes -- and the tables solved again at the same
+ * level, k = 3, under Gauge::Midplane. geq's two species and the three at
+ * 5e18. At the midplane gauge's own 1024 intervals the two-species difference
+ * is that table's interpolation, and four times the intervals takes it to the
+ * floor the three species sit on from the start; the control is the SAME
+ * tables read as midplane densities, which is another plasma.
+ * [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+ */
+BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge )
+{
+	ladderStemInUse = vacuumStem;
+	int const order = 3;
+	MirrorProfiles const fixed = mirrorProfiles();
+	MirrorProfiles const two = transferOnto( fixed, *vacuumCrossing( tableIntervals( fixed ) ),
+	                                         meq::RotatingSource::Gauge::FixedCurve );
+	MirrorProfiles const three = threeSpecies( 5.0e18, meq::RotatingSource::Gauge::FixedCurve );
+	for ( MirrorProfiles const *p : { &two, &three } )
+	{
+		Options o;
+		o.level = 0;
+		o.order = order;
+		o.stem = vacuumStem;
+		o.profiles = p;
+		std::unique_ptr<MirrorRun> run = runMirror( o );
+		BOOST_TEST_REQUIRE( run->converged, run->failure );
+		meq::RotatingSource const inner = run->source->unnormalised();
+		std::shared_ptr<meq::SplineProfile const> const shipped = answerCrossing( *run, 1024 );
+		std::shared_ptr<meq::SplineProfile const> const finer = answerCrossing( *run, 4096 );
+		Sampled const v = reduce( run, o );
+		double scale = 0.0;
+		for ( double x : v.plasma )
+			if ( std::isfinite( x ) )
+				scale = std::max( scale, std::abs( x ) );
+
+		auto relabelled = [ & ]( meq::SplineProfile const &crossing )
+		{
+			MirrorProfiles out = *p;
+			out.gauge = meq::RotatingSource::Gauge::Midplane;
+			for ( std::size_t s = 0; s < out.species.size(); ++s )
+				if ( s != 1 )
+					out.species[ s ].density = meq::densityOnCurve( inner, s, crossing );
+			out.species[ 1 ].density = meq::neutralisingDensity( out.species, 1 );
+			return out;
+		};
+		MirrorProfiles const atShipped = relabelled( *shipped );
+		MirrorProfiles const atFiner = relabelled( *finer );
+		MirrorProfiles asGiven = *p;
+		asGiven.gauge = meq::RotatingSource::Gauge::Midplane;
+
+		Options m = o;
+		m.profiles = &atShipped;
+		Sampled const a = sample( m );
+		m.profiles = &atFiner;
+		m.crossingIntervals = 4096;
+		Sampled const b = sample( m );
+		m.profiles = &asGiven;
+		m.crossingIntervals = 0;
+		Sampled const c = sample( m );
+		Difference const dShipped = difference( a.psiStar, v.psiStar );
+		Difference const dFiner = difference( b.psiStar, v.psiStar );
+		Difference const dOther = difference( c.psiStar, v.psiStar );
+
+		std::printf( "\n  RELABELLED AND POSED AGAIN, %zu species, level 0, k = %d: the plasma's own psi* "
+		             "reaches %.3e\n", p->species.size(), order, scale );
+		printHistoryLine( "vacuum curve", v );
+		printHistoryLine( "midplane, relabelled", a );
+		printDifference( "relabelled at 1024 - vacuum curve, psi*", dShipped );
+		printDifference( "relabelled at 4096 - vacuum curve, psi*", dFiner );
+		printDifference( "the tables as given - vacuum curve", dOther );
+		BOOST_TEST( dFiner.max <= 1.0e-9*scale,
+			"the relabelled densities on 4096 intervals pose a plasma " << dFiner.max/scale
+			<< " of its own flux from the one they were read off" );
+		BOOST_TEST( dFiner.max <= 1.5*dShipped.max );
+		BOOST_TEST( dShipped.max <= 2.0e-9*scale );
+		BOOST_TEST( dOther.max > 1.0e4*dShipped.max,
+			"the tables as given and the relabelled ones solve within " << dOther.max << " of each other, so "
+			"this case cannot tell one plasma from another" );
+	}
+	std::fflush( stdout );
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -4267,6 +4267,78 @@ BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
 	            == "source.Gauge" );
 }
 
+/// `[source] Gauge = "vacuum-midplane"`: THE MIDPLANE GAUGE'S REFUSALS, AND ONE
+/// OF ITS OWN -- IT NEEDS THE VACUUM KNOWN BEFORE THE SOLVE. MIRROR-PLAN.md
+/// section 5. It parses on the shipped three-species mirror with the one line
+/// changed, and carries no radius. Refused beside a ReferenceRadius, without
+/// Normalised, without the box -- the midplane gauge's three -- and, its own,
+/// without the conductors subtracted (the vacuum is then a solve of its own)
+/// and beside non-zero data on Gamma (the vacuum's remainder is then not
+/// zero). Not a key on the other source types.
+BOOST_AUTO_TEST_CASE( the_vacuum_midplane_gauge_needs_the_vacuum_and_is_refused_elsewhere )
+{
+	std::string const gauge = "Gauge = \"vacuum-midplane\"\n";
+	auto edited = []( std::string text, std::string const & line, std::string const & replacement )
+	{
+		std::size_t const at = text.find( "\n" + line + "\n" );
+		BOOST_TEST_REQUIRE( at != std::string::npos,
+			"examples/mirror-three-species.toml has no line '" << line << "'" );
+		BOOST_TEST_REQUIRE( text.find( "\n" + line + "\n", at + 1 ) == std::string::npos );
+		text.replace( at + 1, line.size(), replacement );
+		return text;
+	};
+	std::string const vacuum = edited( readShipped( "mirror-three-species.toml" ),
+		"Gauge = \"midplane\"", "Gauge = \"vacuum-midplane\"" );
+	{
+		meq::Configuration const c = parse( vacuum );
+		BOOST_TEST( ( c.getSource().getRotating().gauge == meq::RotatingGaugeType::VacuumMidplane ) );
+		BOOST_TEST( c.getSource().getRotating().referenceRadius == 0.0 );
+		BOOST_TEST( c.getConductors().subtracts() );
+	}
+
+	// The conductors cut out: [conductors] and [[coils]] are the file's last
+	// blocks before [output].
+	std::string unsubtracted = vacuum;
+	{
+		std::size_t const from = unsubtracted.find( "\n[conductors]\n" );
+		std::size_t const to = unsubtracted.find( "\n[output]\n" );
+		BOOST_TEST_REQUIRE( ( from != std::string::npos && to != std::string::npos && from < to ) );
+		unsubtracted.erase( from + 1, to - from );
+	}
+
+	struct Refusal
+	{
+		char const * what;
+		std::string text;
+		char const * key;
+	};
+	std::vector< Refusal > const refusals = {
+		{ "beside a ReferenceRadius",
+		  edited( vacuum, "Gauge = \"vacuum-midplane\"", "Gauge = \"vacuum-midplane\"\nReferenceRadius = 0.213" ),
+		  "source.ReferenceRadius" },
+		{ "without Normalised", rotatingSource( gauge, "" ), "source.Gauge" },
+		{ "on a tokamak's one-sided support",
+		  rotatingSource( "Normalised = true\nPsiAxis = 1.0\nConfineToPlasma = true\n" + gauge, "" ),
+		  "source.Gauge" },
+		{ "without the conductors subtracted", unsubtracted, "source.Gauge" },
+		{ "beside exact data on Gamma", edited( vacuum, "Type = \"zero\"", "Type = \"exact\"" ),
+		  "boundary.Type" },
+		{ "misspelt", edited( vacuum, "Gauge = \"vacuum-midplane\"", "Gauge = \"vacuum\"" ),
+		  "source.Gauge" } };
+	for ( Refusal const & r : refusals )
+	{
+		std::string const key = refusedKey( r.text );
+		BOOST_TEST( key == r.key, "Gauge = \"vacuum-midplane\" " << r.what << ": refused at '" << key
+		            << "' where the refusal belongs at '" << r.key << "'"
+		            << ( key.empty() ? " -- it PARSED" : "" ) );
+	}
+	BOOST_TEST( refusalMessage( unsubtracted ).find( "subtracted" ) != std::string::npos,
+		"the refusal without subtraction must say why" );
+
+	// Not a key on the sources that have no species and no phi_0.
+	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, axisTable + limiterTable ) ) == "source.Gauge" );
+}
+
 /// THE MESH GENERATOR'S AlignPlasma, AND THE BOX ALIGNED BEING THE CUTOFF.
 /// Built by editing one line of the shipped mirror, which is the file a user
 /// has after one edit.

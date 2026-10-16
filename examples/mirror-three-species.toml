@@ -24,8 +24,12 @@
 #
 # WHAT TO EXPECT.  Newton is LINEAR under the midplane gauge -- the crossings are
 # re-tabulated once per iteration and frozen within it -- so about seven steps
-# where the fixed radius takes three or four.  At ten times this density the
-# frozen iteration stops contracting (M-278).
+# where the fixed radius takes three or four.  Gauge = "vacuum-midplane" reads
+# the same tables on the VACUUM's crossing instead, a slightly different plasma,
+# in three quadratic steps; the .nc's midplane_n_* columns state either at its
+# solved crossing.  At four times this density the test suite's coarsest mesh
+# stops converging in either gauge, and finer ones converge
+# ([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)).
 
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it

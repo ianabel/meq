@@ -1819,6 +1819,19 @@ namespace meq
 		plasmaSource->setMidplaneField( field, rMin, rMax );
 	}
 
+	bool CoilAugmentedNormalisedSource::readsVacuumMidplane() const
+	{
+		return plasmaSource->readsVacuumMidplane();
+	}
+
+	void CoilAugmentedNormalisedSource::setVacuumMidplaneField( MidplaneField const &field,
+	                                                             double rMin, double rMax,
+	                                                             double psiAxis,
+	                                                             double psiBoundary )
+	{
+		plasmaSource->setVacuumMidplaneField( field, rMin, rMax, psiAxis, psiBoundary );
+	}
+
 	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }
 	CoilSet const & CoilAugmentedNormalisedSource::coils() const { return *coilSet; }
 

@@ -242,6 +242,73 @@ densities that fall to a millionth of their peak at the labels.
 
    ../../install/double/bin/meq-run ../../source/examples/mirror-three-species.toml
 
+The vacuum-midplane gauge
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``[source] Gauge = "vacuum-midplane"`` pins the potential on a **fixed** curve
+instead,
+
+.. math::
+
+   \phi_0(R_g(\Psi), \Psi) = 0, \qquad R_g = R_{0,\text{vac}},
+
+where :math:`R_{0,\text{vac}}(\Psi)` is the radius at which the *vacuum's*
+surface of normalised flux :math:`\Psi` crosses :math:`z = 0` — the conductors'
+own field, normalised by its own flux at the two label points, so that the
+curve passes through both. Each ``Density`` is then the density **where the
+vacuum's surface crossed the midplane**.
+
+**Why it is a gauge at all.** A gauge pin does not have to lie on the surface
+it labels: quasineutrality fixes :math:`\phi_0(R, \psi)` pointwise, at any
+:math:`(R, \psi)`, which is also why ``ReferenceRadius`` is a gauge on a mirror
+whose surfaces never reach it. Any curve known before the solve is one.
+
+**What it buys.** The curve is fixed, so the source is again a pointwise
+function of :math:`(R, z, \psi)` and the Newton Jacobian is exact, border
+columns included: Newton is **quadratic**, where the midplane gauge's frozen
+crossings make it linear. And it keeps what the midplane gauge is for. The
+transfer from a ``Density`` to the density where the *solved* surface crosses
+:math:`z = 0` is
+:math:`\exp\bigl(m_s\omega^2(R_{0,\text{vac}}^2 - R_0^2)/2T_s\bigr)` with
+:math:`\phi_0` aside — an exponent set by how far the plasma moves its own
+surfaces, not by the machine's span of radii.
+
+**What it costs.** The tables are stated at the vacuum's crossing, which is not
+where the solved surface crosses, so the same tables pose a slightly different
+plasma in the two midplane gauges. The ``.nc`` carries every rotating mirror's
+densities at its solved crossing (:ref:`the true midplane <output-midplane>`),
+and those columns, written as ``DensityFile`` tables, pose the same plasma in
+``Gauge = "midplane"``.
+
+**What it needs.** The vacuum is read as the subtracted conductors' own field
+:math:`\psi_c`, which is known before the solve only when ``[conductors]``
+subtracts them and :math:`\Gamma`'s data is zero, so the gauge is refused
+otherwise. With the coils meshed the vacuum would be a solve of its own, and a
+curve read off anything else — the starting guess, a previous answer — would
+make what each ``Density`` means depend on it. For the same reason there is no
+key for a curve of the user's own.
+
+**And the box's precondition is checked before the solve.** The support needs
+:math:`F` to vanish at both labels: a jump there, across a contour that cuts
+elements, caps the convergence order as a plasma edge does, and the Jacobian
+misses its edge term — the lesser cost, which Newton barely notices. On the
+vacuum's curve a ``Density`` flat at a label still carries
+:math:`-n_s m_s\omega^2 R_g R_g'/T_s` in its :math:`\psi`-derivative wherever
+:math:`\omega` does not vanish there; but the curve is known in advance, so
+whether the profiles meet the precondition is too. A run whose :math:`F` at a
+label exceeds a millionth of its peak, at any radius that label's surface can
+reach, is refused before it solves, exit code 1, naming the label. The midplane
+gauge cannot be checked the same way: its :math:`R_0'` at a label is the
+answer's, and the vacuum's is not close enough to it to refuse on — a profile
+set that meets the precondition on its own solved crossings can fail it on the
+vacuum's.
+
+.. code-block:: toml
+
+   [source]
+   Gauge = "vacuum-midplane"
+   # no ReferenceRadius; [conductors] Model = "filament" or "subtracted"
+
 Species
 -------
 
@@ -474,7 +541,10 @@ A rotating run writes a density field per species and the electrostatic
 potential beside :math:`\psi` and :math:`\mathbf{B}` in the NetCDF file, each
 field's description saying which gauge pinned it. The
 potential is written as :math:`e\phi_0` in **joules** rather than volts, because
-that is the combination every exponent above contains.
+that is the combination every exponent above contains. A rotating *mirror*, in
+any gauge, also writes each species' density where each solved surface crosses
+the midplane, as a table that can be fed back as a ``DensityFile``
+(:ref:`the true midplane <output-midplane>`).
 
 .. warning::
 

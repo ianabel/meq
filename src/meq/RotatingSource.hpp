@@ -73,6 +73,23 @@
  * Jacobian does not carry is R_0's dependence on the field, which the freeze
  * leaves to the next iteration.
  *
+ * A FIXED CURVE IS A GAUGE TOO, AND IT KEEPS F POINTWISE: Gauge::FixedCurve,
+ *
+ *     phi_0( R_g( psi ), psi ) = 0
+ *
+ * on a curve R_g given once and never moved. A gauge pin does not have to lie
+ * on the surface it labels -- quasineutrality fixes phi_0( R, psi ) pointwise
+ * for any ( R, psi ), which is why R = R_ref is a gauge on a mirror whose
+ * surfaces never reach it -- so any KNOWN R_g( psi ) is one, F is again a
+ * pointwise function of ( R, z, psi ), and the derivatives below are exact
+ * for it with nothing frozen. The solver gives a curveless normalised source
+ * the VACUUM field's own midplane crossing, R_0vac( Psi ), before its first
+ * residual and never again: n_s0 is then the density where the vacuum's
+ * surface crossed z = 0, and the transfer to the true midplane is
+ * exp( m_s omega^2 ( R_0vac^2 - R_0^2 )/2T_s ) -- only the plasma's own
+ * displacement of its surfaces, not the machine's span of radii.
+ * MIRROR-PLAN.md section 5, [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+ *
  * THE PRICE OF THE GAUGE IS THAT TWO SETS OF n_s0 DIFFERING BY IT DESCRIBE THE
  * SAME PLASMA. Anyone comparing profiles against RoPP's own notation, against a
  * gyrokinetic code or against a transport code has to know which convention each
@@ -133,7 +150,8 @@ namespace meq
 
 		/// n_s0( psi ) in m^-3: the density of this species ON THE CURVE
 		/// R = R_ref -- or, under RotatingSource::Gauge::Midplane, where each
-		/// flux surface crosses z = 0 -- which in the local gauges of this file
+		/// flux surface crosses z = 0, and under Gauge::FixedCurve on R = R_g
+		/// ( psi ), the vacuum's crossing -- which in the local gauges of this file
 		/// is what N_s of RoPP (96) reduces to. Must not be null.
 		std::shared_ptr<Profile const> density;
 	};
@@ -177,6 +195,19 @@ namespace meq
 		unsigned int intervals = 1024, unsigned int samples = 4096 );
 
 	/**
+	 * HOW LARGE F MAY STAND AT A LABEL, against its own peak, before
+	 * NormalisedRotatingSource::setVacuumMidplaneField() refuses the profiles:
+	 * the bound on RotatingSource::LabelCheck::relative, and the amplitude MR-4a
+	 * accepts geq's own state at. What it guards is the ORDER: F jumping across
+	 * a label's contour, which cuts elements, caps the convergence rate as a
+	 * plasma edge does (CLAUDE_FB.md, *The plasma edge caps the order*). The
+	 * Jacobian's missing edge term is the lesser cost -- MEASURED, F at a label
+	 * at 1e-3 of its peak leaves Newton quadratic in three steps;
+	 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+	 */
+	inline constexpr double labelTolerance = 1.0e-6;
+
+	/**
 	 * Sum_s Z_s n_s0( psi ), which charge neutrality on R = R_ref requires to
 	 * vanish.
 	 *
@@ -211,6 +242,23 @@ namespace meq
 	 *         nominated one is null.
 	 */
 	std::shared_ptr<Profile const> neutralisingDensity( std::vector<Species> const & species, std::size_t index );
+
+	class RotatingSource;
+
+	/**
+	 * n_s( R_c( x ), x ) ALONG A CURVE, as a Hermite table on the curve's own
+	 * knots: one species' density where the curve meets each surface, its
+	 * slope the chain rule dn_s/dpsi + ( dn_s/dR ) R_c' with both partials
+	 * analytic. On the solved state's own midplane crossing it is the TRUE
+	 * midplane density whatever gauge the source was posed in -- which is the
+	 * relabelling the output carries, and the table that poses the same
+	 * plasma in Gauge::Midplane. [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+	 *
+	 * @param curve  R_c at each knot, in @a source's flux variable.
+	 * @throws std::out_of_range if @a index is not a species.
+	 */
+	std::shared_ptr<SplineProfile const> densityOnCurve( RotatingSource const &source,
+		std::size_t index, SplineProfile const &curve );
 
 	/**
 	 * The rotating Grad-Shafranov source.
@@ -260,7 +308,30 @@ namespace meq
 				FixedRadius,
 				/// phi_0( R_0( psi ), psi ) = 0 at each surface's own midplane
 				/// crossing, tabulated by setMidplaneCrossing(). A mirror's.
-				Midplane
+				Midplane,
+				/// phi_0( R_g( psi ), psi ) = 0 on a FIXED curve, given once by
+				/// setMidplaneCrossing() and never replaced; the solver gives a
+				/// normalised source the vacuum's midplane crossing. A mirror's,
+				/// with an exact Jacobian.
+				FixedCurve
+			};
+
+			/**
+			 * THE BOX'S PRECONDITION ON A CURVE, F -> 0 AT BOTH LABELS, as
+			 * labelCheck() measures it. |F|/R is mu0 j_phi.
+			 */
+			struct LabelCheck
+			{
+				/// max |F|/R along the curve, at ( R_g( x ), x ) for x in [ 0, 1 ].
+				double peak = 0.0;
+				/// max |F|/R at x = 0 and at x = 1, over R in ( 0, R_g( x ) ]: each label
+				/// at every radius its surface can reach.
+				double worst = 0.0;
+				/// worst/peak; zero where both vanish.
+				double relative = 0.0;
+				/// Where worst is: the label, 0 or 1, and the radius.
+				double label = 0.0;
+				double radius = 0.0;
 			};
 
 			/**
@@ -278,18 +349,19 @@ namespace meq
 			 *
 			 * @param closure  which route through (97); see Closure.
 			 * @param gauge    where phi_0 is pinned; see Gauge. Under
-			 *                 Gauge::Midplane @a referenceRadius MUST BE ZERO:
-			 *                 the gauge has no constant radius, and a radius
-			 *                 accepted and not read would be a promise it does not
-			 *                 keep. The source then answers nothing until
-			 *                 setMidplaneCrossing() has given it R_0( psi ).
+			 *                 Gauge::Midplane and Gauge::FixedCurve
+			 *                 @a referenceRadius MUST BE ZERO: neither has a
+			 *                 constant radius, and a radius accepted and not
+			 *                 read would be a promise it does not keep. The
+			 *                 source then answers nothing until
+			 *                 setMidplaneCrossing() has given it its curve.
 			 *
 			 * @throws std::invalid_argument for a null profile, a non-finite or
 			 *         non-positive mass, radius or mu0, a zero charge, fewer than
 			 *         two species or more than maxSpecies, a species set whose
 			 *         charges are all one sign, Closure::ClosedForm asked for
 			 *         with more than two species, or a non-zero radius under
-			 *         Gauge::Midplane.
+			 *         Gauge::Midplane or Gauge::FixedCurve.
 			 * @throws std::invalid_argument if charge neutrality on R = R_ref is
 			 *         violated. It is checked by sampling n_s0 over [ 0, 1 ], the
 			 *         range meq::Profile documents itself on, because the closed
@@ -319,11 +391,38 @@ namespace meq
 			 * thread, between assemblies, so a threaded assembly never sees it
 			 * move. Held by shared pointer so the replacement is one store.
 			 *
+			 * UNDER Gauge::FixedCurve IT IS THE CURVE R_g( psi ), given once:
+			 * the solver installs the vacuum's crossing only where none has
+			 * been given, and replaces nothing.
+			 *
 			 * @throws std::logic_error under Gauge::FixedRadius, which has no
 			 *         crossing to be given.
 			 * @throws std::invalid_argument for a null table.
 			 */
 			void setMidplaneCrossing( std::shared_ptr<Profile const> table );
+
+			/**
+			 * F -> 0 AT BOTH LABELS, x = 0 AND x = 1, ON A CURVE: the box's
+			 * precondition, which setPlasmaSupport() documents -- where F does
+			 * not vanish at an edge of the support it jumps across a contour
+			 * that cuts elements, which caps the order, and the Jacobian
+			 * misses the edge term F delta( Psi ).
+			 *
+			 * CHECKABLE BEFORE THE SOLVE ON A FIXED CURVE ONLY. In the gauge
+			 * on R_g a density flat at a label still carries
+			 * -n_s m_s omega^2 R_g R_g'/T_s in dn_s/dpsi wherever omega does
+			 * not vanish there, and on a fixed curve R_g' is known in advance,
+			 * so whether a profile set meets the precondition is too. Under
+			 * Gauge::Midplane the R_0' at a label is the ANSWER's, and the
+			 * vacuum's is not an estimate of it good enough to refuse on --
+			 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+			 *
+			 * @param curve  R at each x, in this source's flux variable. The
+			 *               source's own table is neither read nor replaced.
+			 * @throws std::logic_error under Gauge::FixedRadius.
+			 * @throws std::invalid_argument for a null curve.
+			 */
+			LabelCheck labelCheck( std::shared_ptr<Profile const> curve ) const;
 
 			/// The table setMidplaneCrossing() last gave, or null.
 			Profile const *midplaneCrossing() const;
@@ -342,7 +441,7 @@ namespace meq
 			/// e phi_0( R, psi ) in JOULES -- the potential of (97) times the
 			/// elementary charge, which is the combination that appears in every
 			/// exponent and the one that carries no factor of e. Zero at R = R_ref
-			/// -- at R = R_0( psi ) under Gauge::Midplane -- by construction,
+			/// -- on R_0( psi ) or R_g( psi ) under the other gauges -- by construction,
 			/// exactly.
 			double potential( double radius, double psi ) const;
 
@@ -350,6 +449,15 @@ namespace meq
 			/// is n_s0( psi ).
 			/// @throws std::out_of_range if @a index is not a species.
 			double density( std::size_t index, double radius, double psi ) const;
+
+			/// n_s( R, psi ) with its two partial derivatives, d/dR at fixed
+			/// psi and d/dpsi at fixed R -- the first through d( e phi_0 )/dR,
+			/// by implicit differentiation of (97) as dPotentialDPsi() is. What
+			/// densityOnCurve() gives a table's slopes from.
+			/// @throws std::out_of_range if @a index is not a species.
+			void densityDerivatives( std::size_t index, double radius, double psi,
+			                         double &value, double &dRadius,
+			                         double &dPsi ) const;
 
 			/// d( e phi_0 )/dpsi at fixed R, by implicit differentiation of (97)
 			/// rather than by differencing it. Differencing an inner root find
@@ -381,7 +489,7 @@ namespace meq
 			Gauge gauge() const;
 			Profile const * omega() const;
 			Profile const & ggPrime() const;
-			/// R_ref; zero under Gauge::Midplane, which has none.
+			/// R_ref; zero under Gauge::Midplane and FixedCurve, which have none.
 			double referenceRadius() const;
 			double mu0() const;
 
@@ -540,6 +648,35 @@ namespace meq
 			double potential( double radius, double psi ) const;
 			double density( std::size_t index, double radius, double psi ) const;
 			double pressure( double radius, double psi ) const;
+
+			/// True under RotatingSource::Gauge::FixedCurve while the source
+			/// underneath has no curve, which is what makes the solver call
+			/// setVacuumMidplaneField() -- once.
+			bool readsVacuumMidplane() const override;
+
+			/**
+			 * TABULATE THE GAUGE CURVE R_g( Psi ) OVER [ 0, 1 ] FROM THE
+			 * VACUUM ALONG z = 0, NORMALISED BY THE VACUUM'S OWN LABELS, check
+			 * the box's precondition on it, and give it to the source
+			 * underneath for good.
+			 *
+			 * In Psi, for setMidplaneField()'s reason: the class stays a pure
+			 * wrapper, so normalisationDerivatives() is exact -- and with the
+			 * curve fixed there is nothing frozen for it to leave out. Against
+			 * @a psiAxis and @a psiBoundary, the vacuum's flux at the label
+			 * points, so R_g( 1 ) and R_g( 0 ) ARE those points where they lie
+			 * on z = 0, whatever normalisation the solve starts from.
+			 *
+			 * @throws std::logic_error under any gauge but FixedCurve, or once
+			 *         the curve is in.
+			 * @throws std::runtime_error as tabulateMidplaneCrossing() does.
+			 * @throws std::invalid_argument if labelCheck() on the curve finds
+			 *         F at a label above meq::labelTolerance of its peak, naming
+			 *         the label; the curve is then NOT installed.
+			 */
+			void setVacuumMidplaneField( MidplaneField const &field, double rMin,
+			                             double rMax, double psiAxis,
+			                             double psiBoundary ) override;
 
 			/// The source underneath, whose arguments are Psi rather than psi.
 			RotatingSource const & unnormalised() const;

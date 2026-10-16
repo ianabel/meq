@@ -766,6 +766,40 @@ namespace meq
 				(void)field; (void)rMin; (void)rMax;
 			}
 
+			/**
+			 * WHETHER THIS SOURCE WANTS THE VACUUM'S MIDPLANE, ONCE: a
+			 * meq::RotatingSource in Gauge::FixedCurve that has no curve yet.
+			 * The solver then hands it setVacuumMidplaneField() before its
+			 * first residual and never again -- not per iteration, not per
+			 * adaptive cycle -- so the curve the profiles are stated on is
+			 * fixed for the run. False here and once the curve is in.
+			 * MIRROR-PLAN.md section 5, [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+			 */
+			virtual bool readsVacuumMidplane() const
+			{
+				return false;
+			}
+
+			/**
+			 * THE VACUUM FIELD ALONG `z = 0`, with the vacuum's own flux at the
+			 * two label points, so that the source tabulates its gauge curve
+			 * `R_g( Psi )` against the VACUUM's normalisation rather than the
+			 * solve's starting one -- which is a guess and must not decide what
+			 * the profiles mean.
+			 *
+			 * @throws std::invalid_argument if the profiles cannot be posed on
+			 *         that curve: for the box, `F` not vanishing at both labels
+			 *         -- a precondition that a fixed curve makes checkable
+			 *         before the solve. The base does nothing and is never
+			 *         called, since readsVacuumMidplane() is false.
+			 */
+			virtual void setVacuumMidplaneField( MidplaneField const &field,
+			                                     double rMin, double rMax,
+			                                     double psiAxis, double psiBoundary )
+			{
+				(void)field; (void)rMin; (void)rMax; (void)psiAxis; (void)psiBoundary;
+			}
+
 		private:
 			/// setPlasmaSupport(). Off by default; see it for why.
 			bool confinedToPlasma = false;

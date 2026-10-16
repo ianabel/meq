@@ -189,6 +189,10 @@ namespace meq
 					return RotatingSource::Gauge::FixedRadius;
 				case RotatingGaugeType::Midplane:
 					return RotatingSource::Gauge::Midplane;
+				// The library's gauge is any fixed curve; the vacuum's crossing
+				// is the one the solver gives a source that has none.
+				case RotatingGaugeType::VacuumMidplane:
+					return RotatingSource::Gauge::FixedCurve;
 			}
 			throw std::logic_error( "meq::makeSource: no mapping for this [source] Gauge" );
 		}

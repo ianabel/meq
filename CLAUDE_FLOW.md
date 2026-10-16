@@ -236,6 +236,24 @@ crossings make Newton linear**, and the term the freeze leaves out scales with
 the pressure, so a dense enough plasma stops converging. **A density flat at a
 label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
 
+**AND A FIXED CURVE IS A GAUGE TOO**, `[source] Gauge = "vacuum-midplane"`,
+`RotatingSource::Gauge::FixedCurve`: `φ₀ = 0` on the vacuum's crossing
+`R_0vac( Ψ )`, installed once by `GradShafranovSolver::installVacuumGauge()`
+from `ψ_c` and a zero remainder, normalised by `ψ_c` at the label points, and
+never refreshed. `F` is pointwise again and Newton quadratic; the transfer to
+the solved crossing is only the plasma's own displacement of its surfaces
+(→ [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)). Three things to know. **The
+vacuum is `ψ_c`**, so the gauge is refused without `[conductors]` subtracting.
+**The box's precondition is checked before the solve** —
+`RotatingSource::labelCheck()`, each label swept only over the radii its surface
+reaches, `meq::labelTolerance` of the peak — and refused as a configuration
+error; under the midplane gauge the same check can only be made on the answer,
+which the driver reports. **The pressure cap is not the freeze**: on the
+vacuum's curve, with an exact Jacobian, three species at `M = 6` stall on the
+coarsest mesh at the density where the midplane gauge does and converge on the
+finer ones. Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
+solved crossing (→ [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity)).
+
 **Both run here**, in MEQ's own benchmark venv at
 `tools/freegs4e-benchmark/venv` with `geq/src` on `PYTHONPATH`; geq's own
 `tests/test_jtor_abel.py` passes. `pint` and `xarray` are absent, so `geq.utils`

@@ -1746,6 +1746,51 @@ namespace meq
 			 */
 			MidplaneField midplaneField( double &rMin, double &rMax );
 
+			/**
+			 * THE VACUUM ALONG `z = 0`: midplaneField()'s reading of a ZERO
+			 * remainder, which is `psi_c` along the midplane and its radial
+			 * derivative EXACTLY -- the `R q_R` integral of nothing, anchored
+			 * on nothing -- with @a psiAxis and @a psiBoundary set to `psi_c`
+			 * at the two label points, which is what the label rows read on
+			 * that state. Independent of the mesh and of the starting guess.
+			 *
+			 * **THE VACUUM IS THE CONDUCTORS' OWN FIELD ONLY UNDER THE SPLIT**,
+			 * and only with homogeneous data for the remainder -- every
+			 * conductor subtracted, so the remainder's vacuum problem has the
+			 * zero solution. That is the mirror's configuration, and what
+			 * `[source] Gauge = "vacuum-midplane"` is refused without.
+			 *
+			 * @throws std::logic_error without setConductorField(), or unless
+			 *         both labels are prescribed points --
+			 *         AxisConstraint::PrescribedPoint and
+			 *         setBoundaryFluxPoint() -- which is the box's pairing.
+			 */
+			MidplaneField vacuumMidplaneField( double &rMin, double &rMax,
+			                                   double &psiAxis, double &psiBoundary );
+
+			/**
+			 * THE FIXED-CURVE GAUGE'S CURVE, FROM THE VACUUM, ONCE: hands a
+			 * source that readsVacuumMidplane() the field vacuumMidplaneField()
+			 * gives, so that it tabulates `R_g( Psi )` and checks the box's
+			 * precondition on it. A no-op for any other source, and for one
+			 * that already has its curve -- so it is never refreshed, not per
+			 * iteration and not per adaptive cycle. MIRROR-PLAN.md section 5,
+			 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+			 *
+			 * solve() calls it before its first residual; it is public so that
+			 * a driver can call it first and report a refused profile set as
+			 * the configuration error it is, rather than as a failed solve.
+			 *
+			 * @throws std::invalid_argument if the source refuses the profiles
+			 *         on the curve -- `F` not vanishing at a label.
+			 * @throws std::logic_error as vacuumMidplaneField() does.
+			 */
+			void installVacuumGauge();
+
+			/// Whether installVacuumGauge() gave the source its curve in this
+			/// solver's lifetime; what a test asserts "once" with.
+			int vacuumGaugeInstalls() const;
+
 			/// Elements the fill reached: the plasma. Zero when no fill is live.
 			int plasmaComponentElements() const;
 
@@ -5498,6 +5543,11 @@ namespace meq
 			/// midplaneGaugeRefreshes() and midplaneGaugeHolds().
 			int midplaneRefreshCount = 0;
 			int midplaneHoldCount = 0;
+			/// vacuumGaugeInstalls().
+			int vacuumInstallCount = 0;
+			/// The zero remainder vacuumMidplaneField() reads, kept because the
+			/// field it hands out reads its state by reference.
+			mfem::Vector midplaneVacuumState;
 
 			/**
 			 * THE ELEMENTS ALONG `z = 0`, as runs of a fine sampling by

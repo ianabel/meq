@@ -4347,6 +4347,28 @@ int main( int argc, char **argv )
 			 */
 		};
 
+		/*
+		 * THE VACUUM-MIDPLANE GAUGE'S CURVE, BEFORE ANY SOLVE, so that a profile
+		 * set the box cannot carry on it is reported as the configuration error
+		 * it is. solve() would install the same curve at its first residual and
+		 * throw the same refusal from inside the Newton, where it would read as
+		 * a failed solve. Once in the source's life: every later cycle's solver
+		 * finds the curve in and installs nothing. [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+		 */
+		if ( normalised && normalised->readsVacuumMidplane() )
+		{
+			try
+			{
+				solver->installVacuumGauge();
+			}
+			catch ( std::exception const &refused )
+			{
+				std::fprintf( stderr, "MEQ: %s: [source] Gauge = \"vacuum-midplane\": %s\n",
+				              argument.c_str(), refused.what() );
+				return ConfigurationError;
+			}
+		}
+
 		try
 		{
 			// THE BASIN FIRST, WHEN ASKED FOR, AND THE SOLVER IS REBUILT AFTER
@@ -6274,6 +6296,89 @@ int main( int argc, char **argv )
 				}
 		}
 
+		/*
+		 * THE TRUE MIDPLANE: R_0( Psi ) AND n_s( R_0( Psi ), Psi ), ON EVERY
+		 * ROTATING MIRROR, WHATEVER ITS GAUGE.
+		 *
+		 * Each gauge states its Densities somewhere else -- on R = R_ref, on the
+		 * vacuum's crossing, on the solved one -- and the density a reader of a
+		 * mirror wants is where each SOLVED surface crosses z = 0. Relabelling
+		 * onto it is exact on a solved state: the crossing is the midplane
+		 * gauge's own reading of the answer, tabulateMidplaneCrossing() on the
+		 * solved q integrated along z = 0, and each density is the closure's at
+		 * that radius with its slope by the chain rule, so the columns are a
+		 * Hermite table a DensityFile can be written from. Under Gauge =
+		 * "midplane" they reproduce the input tables; under any other gauge they
+		 * are that plasma's midplane statement. A midplane on which psi is not
+		 * monotone has no crossing, and the columns are left out with a warning.
+		 * [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+		 */
+		std::shared_ptr<meq::SplineProfile const> trueCrossing;
+		std::vector<std::shared_ptr<meq::SplineProfile const>> trueDensities;
+		if ( config->getSource().type == meq::SourceType::Rotating
+		     && config->getSource().supportIsBox() )
+		{
+			meq::Source const *rotatingHandle =
+				plasmaSource ? plasmaSource.get() : source.get();
+			meq::NormalisedRotatingSource const *scaled =
+				dynamic_cast<meq::NormalisedRotatingSource const *>( rotatingHandle );
+			if ( scaled )
+			{
+				double const axis = solver->psiAxis();
+				double const boundary = solver->psiBoundary();
+				try
+				{
+					double rMin = 0.0, rMax = 0.0;
+					meq::MidplaneField const physical = solver->midplaneField( rMin, rMax );
+					meq::MidplaneField const inPsi =
+						[ & ]( double radius, double &x, double &dXdR )
+					{
+						double value = 0.0, slope = 0.0;
+						if ( !physical( radius, value, slope ) )
+							return false;
+						x = ( value - boundary )/( axis - boundary );
+						dXdR = slope/( axis - boundary );
+						return true;
+					};
+					trueCrossing = meq::tabulateMidplaneCrossing( inPsi, rMin, rMax,
+					                                              0.0, 1.0 );
+					for ( std::size_t sp = 0; sp < scaled->unnormalised().species().size(); ++sp )
+						trueDensities.push_back( meq::densityOnCurve( scaled->unnormalised(),
+						                                              sp, *trueCrossing ) );
+
+					// THE BOX'S PRECONDITION ON THE ANSWER, under the midplane
+					// gauge, which cannot be checked before the solve: its R_0'
+					// at a label is the answer's. A report rather than a
+					// refusal, since the answer is the residual's root either
+					// way; what F standing at a label costs is the order, and
+					// the Jacobian's edge term. The vacuum-midplane gauge
+					// refused at setup.
+					if ( config->getSource().getRotating().gauge == meq::RotatingGaugeType::Midplane )
+					{
+						meq::RotatingSource::LabelCheck const check =
+							scaled->unnormalised().labelCheck( trueCrossing );
+						if ( !( check.relative <= meq::labelTolerance ) )
+							std::fprintf( stderr,
+								"MEQ: warning: on the solved midplane crossings F at the %s label "
+								"is %.3e of its peak, at R = %.4g m, above the %.0e the box's "
+								"precondition allows: the jump caps the convergence order and the "
+								"Newton Jacobian misses its edge term. Let the densities or the "
+								"rotation fall away at the labels\n",
+								check.label == 1.0 ? "inner" : "outer", check.relative,
+								check.radius, meq::labelTolerance );
+					}
+				}
+				catch ( std::runtime_error const &folded )
+				{
+					trueCrossing.reset();
+					trueDensities.clear();
+					std::fprintf( stderr,
+						"MEQ: warning: the solved midplane has no crossing table, so the "
+						"true-midplane densities are not written: %s\n", folded.what() );
+				}
+			}
+		}
+
 		meq::NetCDFWriter writer( stem + ".nc", sampler );
 		writer.attribute( "title", "MEQ equilibrium" );
 		writer.attribute( "meq_version", MEQ_VERSION );
@@ -6642,17 +6747,18 @@ int main( int argc, char **argv )
 		{
 			meq::RotatingParameters const &rotating = config->getSource().getRotating();
 			// Where each Density is the physical density, which the gauge
-			// decides: a constant radius, or each surface's midplane crossing.
-			bool const midplane = rotating.gauge == meq::RotatingGaugeType::Midplane;
-			std::string const where = midplane
-				? "where its flux surface crosses z = 0"
-				: "R = ReferenceRadius";
+			// decides: a constant radius, each surface's midplane crossing, or
+			// the vacuum's.
+			std::string where = "on R = ReferenceRadius";
+			if ( rotating.gauge == meq::RotatingGaugeType::Midplane )
+				where = "where its flux surface crosses z = 0";
+			else if ( rotating.gauge == meq::RotatingGaugeType::VacuumMidplane )
+				where = "where the vacuum's flux surface of the same Psi crosses z = 0";
 			for ( std::size_t sp = 0; sp < densities.size(); ++sp )
 				writer.field( "n_" + variableName( rotating.species[ sp ].name ),
 				              densities[ sp ],
 				              "number density of " + rotating.species[ sp ].name
-				                  + ", RoPP (96); equals its Density profile "
-				                  + ( midplane ? "" : "on " ) + where,
+				                  + ", RoPP (96); equals its Density profile " + where,
 				              "m^-3" );
 
 			// e phi_0 AND NOT phi_0, in JOULES AND NOT VOLTS. It is the
@@ -6662,10 +6768,49 @@ int main( int argc, char **argv )
 			// 1.602176634e-19 for volts.
 			writer.field( "e_phi_0", ePhi,
 			              "elementary charge times the electrostatic potential "
-			              "phi_0 of RoPP (97), in JOULES not volts; zero "
-			              + std::string( midplane ? "" : "on " ) + where
+			              "phi_0 of RoPP (97), in JOULES not volts; zero " + where
 			              + " by the gauge",
 			              "J" );
+
+			// The true midplane, on a dimension of its own: the crossing's
+			// knots, each column a value and its Psi-slope.
+			if ( trueCrossing )
+			{
+				std::vector<double> knotPsi, knotR, knotSlope;
+				for ( meq::Knot const &k : trueCrossing->knots() )
+				{
+					knotPsi.push_back( k.psi );
+					knotR.push_back( k.value );
+					knotSlope.push_back( k.derivative );
+				}
+				writer.vector( "midplane", "midplane_Psi", knotPsi,
+				               "normalised flux Psi of each solved surface, 0 at the outer "
+				               "label and 1 at the inner", "1" );
+				writer.vector( "midplane", "midplane_R", knotR,
+				               "R_0( Psi ), where the solved surface crosses z = 0", "m" );
+				writer.vector( "midplane", "midplane_dR_dPsi", knotSlope,
+				               "dR_0/dPsi, 1/( dPsi/dR ) along z = 0 from the solved q", "m" );
+				for ( std::size_t sp = 0; sp < trueDensities.size(); ++sp )
+				{
+					std::string const name = variableName( rotating.species[ sp ].name );
+					std::vector<double> value, slope;
+					for ( meq::Knot const &k : trueDensities[ sp ]->knots() )
+					{
+						value.push_back( k.value );
+						slope.push_back( k.derivative );
+					}
+					writer.vector( "midplane", "midplane_n_" + name, value,
+					               "number density of " + rotating.species[ sp ].name
+					                   + " where the solved surface crosses z = 0, "
+					                     "n_s( R_0( Psi ), Psi ), whatever the gauge",
+					               "m^-3" );
+					writer.vector( "midplane", "midplane_dn_" + name + "_dPsi", slope,
+					               "d/dPsi of midplane_n_" + name + " along the crossing, "
+					               "so that ( midplane_Psi, midplane_n, this ) is a Hermite "
+					               "table a DensityFile can be written from",
+					               "m^-3" );
+				}
+			}
 		}
 		if ( !nodeMaterials.empty() )
 			writer.nodeMaterial( nodeMaterials );

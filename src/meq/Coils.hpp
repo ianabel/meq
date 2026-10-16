@@ -1356,6 +1356,10 @@ namespace meq
 			bool readsMidplane() const override;
 			void setMidplaneField( MidplaneField const &field, double rMin,
 			                       double rMax ) override;
+			bool readsVacuumMidplane() const override;
+			void setVacuumMidplaneField( MidplaneField const &field, double rMin,
+			                             double rMax, double psiAxis,
+			                             double psiBoundary ) override;
 
 			/// FORWARDED, for the third time and for the same reason: the scale
 			/// belongs to the plasma term and a COIL IS NOT SCALED. Its current

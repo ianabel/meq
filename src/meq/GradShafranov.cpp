@@ -6849,6 +6849,60 @@ namespace
 		++midplaneRefreshCount;
 	}
 
+	MidplaneField GradShafranovSolver::vacuumMidplaneField( double &rMin, double &rMax,
+	                                                        double &psiAxis,
+	                                                        double &psiBoundary )
+	{
+		if ( !conductorFieldSet )
+			throw std::logic_error( "meq::GradShafranovSolver::vacuumMidplaneField: the vacuum is "
+				"read as the subtracted conductors' own field psi_c, and no conductor field is set. "
+				"With the coils meshed the vacuum is a solve of its own, and a curve taken from "
+				"anything else -- the starting guess, a previous answer -- would make what the "
+				"profiles mean depend on it; setConductorField() first" );
+		if ( !axisFluxPointIsSet || axisConstraintChoice != AxisConstraint::PrescribedPoint )
+			throw std::logic_error( "meq::GradShafranovSolver::vacuumMidplaneField: the vacuum's "
+				"labels are psi_c at the two label points, and psi_ax is not pinned at a prescribed "
+				"one; setAxisFluxPoint() and AxisConstraint::PrescribedPoint, the box's pairing" );
+		if ( !boundaryFluxIsUnknown || xPointIsUnknown
+		     || limiterConstraintChoice != LimiterConstraint::ExactPoint )
+			throw std::logic_error( "meq::GradShafranovSolver::vacuumMidplaneField: the vacuum's "
+				"labels are psi_c at the two label points, and psi_bnd is not pinned at a prescribed "
+				"one; setBoundaryFluxPoint(), the box's pairing" );
+
+		/*
+		 * A ZERO REMAINDER THROUGH midplaneFieldOf(), so the vacuum is read by
+		 * the same integration the midplane gauge reads every iterate by: the
+		 * anchor and every panel are zero and what is left is psi_c and its
+		 * gradient, exactly. The labels are what the label rows read on the
+		 * same state, the remainder's polynomial at each point -- zero -- plus
+		 * psi_c there.
+		 */
+		buildMidplaneRuns();
+		midplaneVacuumState.SetSize( blockOffsets.Last() );
+		midplaneVacuumState = 0.0;
+		rMin = midplaneRMin;
+		rMax = midplaneRMax;
+		psiAxis = conductorPsi( axisFluxR, axisFluxZ );
+		psiBoundary = conductorPsi( boundaryFluxR, boundaryFluxZ );
+		return midplaneFieldOf( midplaneVacuumState );
+	}
+
+	void GradShafranovSolver::installVacuumGauge()
+	{
+		if ( !normalisedSource || !normalisedSource->readsVacuumMidplane() )
+			return;
+
+		double rMin = 0.0, rMax = 0.0, psiAxis = 0.0, psiBoundary = 0.0;
+		MidplaneField const vacuum = vacuumMidplaneField( rMin, rMax, psiAxis, psiBoundary );
+		normalisedSource->setVacuumMidplaneField( vacuum, rMin, rMax, psiAxis, psiBoundary );
+		++vacuumInstallCount;
+	}
+
+	int GradShafranovSolver::vacuumGaugeInstalls() const
+	{
+		return vacuumInstallCount;
+	}
+
 	MidplaneField GradShafranovSolver::midplaneField( double &rMin, double &rMax )
 	{
 		buildMidplaneRuns();
@@ -11838,6 +11892,9 @@ namespace
 		midplaneRefreshCount = 0;
 		midplaneHoldCount = 0;
 		std::string midplaneHeldReason;
+		// THE FIXED CURVE, FROM THE VACUUM, IF THE SOURCE HAS NONE: once in
+		// the source's life, and never refreshed below. A no-op otherwise.
+		installVacuumGauge();
 		bool const midplaneGauge = normalisedSource && normalisedSource->readsMidplane();
 		if ( midplaneGauge )
 		{

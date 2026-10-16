@@ -1842,6 +1842,317 @@ BOOST_AUTO_TEST_CASE( theNormalisedSourceTabulatesInPsiAndKeepsItsColumnsAnalyti
 BOOST_AUTO_TEST_SUITE_END()
 
 /*
+ * THE FIXED-CURVE GAUGE, meq::RotatingSource::Gauge::FixedCurve: phi_0 pinned on
+ * a curve R_g( Psi ) given once and never replaced -- the vacuum's crossing, in
+ * the solver. MIRROR-PLAN.md section 5, [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+ */
+namespace
+{
+	/// Densities that vanish with their slope at both labels, so F does too
+	/// whatever omega is: n = 16 n_peak Psi^2 ( 1 - Psi )^2.
+	std::shared_ptr<meq::Profile const> vanishingDensity( double peak )
+	{
+		return analytic(
+			[ peak ]( double x ) { return 16.0*peak*x*x*( 1.0 - x )*( 1.0 - x ); },
+			[ peak ]( double x ) { return 32.0*peak*x*( 1.0 - x )*( 1.0 - 2.0*x ); },
+			[ peak ]( double x ) { return 32.0*peak*( ( 1.0 - 2.0*x )*( 1.0 - 2.0*x ) - 2.0*x*( 1.0 - x ) ); } );
+	}
+
+	/// Densities FLAT at both labels and not vanishing there: n' = 0 at
+	/// Psi = 0 and 1, n = n_peak there and 1.5 n_peak between.
+	std::shared_ptr<meq::Profile const> flatDensity( double peak )
+	{
+		return analytic(
+			[ peak ]( double x ) { return peak*( 1.0 + 0.5*x*x*( 3.0 - 2.0*x ) ); },
+			[ peak ]( double x ) { return peak*3.0*x*( 1.0 - x ); },
+			[ peak ]( double x ) { return peak*3.0*( 1.0 - 2.0*x ); } );
+	}
+
+	/// Two species at constant temperatures on @a ionDensity.
+	std::vector<meq::Species> labelledPair( std::shared_ptr<meq::Profile const> ionDensity )
+	{
+		std::vector<meq::Species> species( 2 );
+		species[ 0 ].mass = deuteronMass;
+		species[ 0 ].charge = 1.0;
+		species[ 0 ].temperature = std::make_shared<meq::ConstantProfile const>( 1.8*keV );
+		species[ 0 ].density = std::move( ionDensity );
+		species[ 1 ].mass = electronMass;
+		species[ 1 ].charge = -1.0;
+		species[ 1 ].temperature = std::make_shared<meq::ConstantProfile const>( 1.3*keV );
+		species[ 1 ].density = meq::neutralisingDensity( species, 1 );
+		return species;
+	}
+
+	/// The closed-form mirror's midplane in PHYSICAL psi.
+	meq::MidplaneField mirrorPhysical()
+	{
+		return []( double radius, double &psi, double &dPsiDR )
+		{
+			psi = mirrorPsi( radius );
+			dPsiDR = mirrorPsiPrime( radius );
+			return true;
+		};
+	}
+
+	/// A normalised fixed-curve source, g g' = 0 as on a mirror, at a STARTING
+	/// normalisation that is not the vacuum's -- what the solve may start from.
+	meq::NormalisedRotatingSource fixedCurveSource( std::vector<meq::Species> species,
+	                                                std::shared_ptr<meq::Profile const> omega )
+	{
+		double const psiInner = mirrorPsi( mirrorInner );
+		double const psiOuter = mirrorPsi( mirrorOuter );
+		meq::NormalisedRotatingSource source( std::move( species ), std::move( omega ),
+			std::make_shared<meq::ConstantProfile const>( 0.0 ), 0.0, 1.3*psiInner,
+			meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+			meq::RotatingSource::Gauge::FixedCurve );
+		source.setNormalisation( 1.3*psiInner, 0.7*psiOuter );
+		return source;
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( fixed_curve_gauge )
+
+/*
+ * ON THE SAME TABLE THE FIXED CURVE IS THE MIDPLANE GAUGE'S ALGEBRA, VALUE FOR
+ * VALUE -- so theMidplaneJacobianAgreesWithACentralDifference covers its
+ * derivatives -- and what differs is who may replace the table: nobody.
+ */
+BOOST_AUTO_TEST_CASE( theFixedCurveIsTheMidplaneAlgebraOnATableNobodyReplaces )
+{
+	for ( bool three : { false, true } )
+	{
+		std::vector<meq::Species> const species = three ? impuritySpecies() : hydrogenicSpecies();
+		meq::RotatingSource const midplane = midplaneSource( species, 1.0, crossingProfile() );
+		meq::RotatingSource curve( species, rotationProfile(), ggPrimeProfile(), 0.0,
+			meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+			meq::RotatingSource::Gauge::FixedCurve );
+		BOOST_CHECK_THROW( curve.f( 1.0, 0.0, 0.5 ), std::logic_error );
+		curve.setMidplaneCrossing( crossingProfile() );
+		for ( double radius : testRadii )
+			for ( double psi : testFluxes )
+			{
+				BOOST_TEST( curve.f( radius, 0.0, psi ) == midplane.f( radius, 0.0, psi ) );
+				BOOST_TEST( curve.dFdPsi( radius, 0.0, psi ) == midplane.dFdPsi( radius, 0.0, psi ) );
+			}
+		for ( double psi : testFluxes )
+			checkClose( curve.potential( crossing( psi ), psi )/keV, 0.0, 1.0e-12,
+				"e phi_0 on the fixed curve", psi );
+	}
+
+	// A radius beside a curve would be accepted and not read.
+	BOOST_CHECK_THROW( meq::RotatingSource( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(), 1.0,
+		meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+		meq::RotatingSource::Gauge::FixedCurve ), std::invalid_argument );
+	// The fixed radius has no curve to check on.
+	BOOST_CHECK_THROW( makeSource().labelCheck( crossingProfile() ), std::logic_error );
+}
+
+/*
+ * THE VACUUM'S CURVE IS TABULATED AGAINST THE VACUUM'S LABELS, NOT THE
+ * NORMALISATION THE SOLVE STARTS FROM, AND IS NEVER REPLACED. And with the curve
+ * fixed, the border columns -- where moving psi_ax or psi_bnd moves Psi and so
+ * R_g( Psi ) -- are EXACT, against Richardson differences over the labels at
+ * two normalisations, with nothing frozen; so is dF/dpsi in physical psi.
+ */
+BOOST_AUTO_TEST_CASE( theVacuumCurveIsTheVacuumsAndItsColumnsAreExact )
+{
+	double const psiInner = mirrorPsi( mirrorInner );
+	double const psiOuter = mirrorPsi( mirrorOuter );
+	meq::NormalisedRotatingSource source = fixedCurveSource( labelledPair( vanishingDensity( 1.0e19 ) ),
+	                                                         rotationProfile( 2.0 ) );
+	BOOST_TEST( source.readsVacuumMidplane() );
+	BOOST_TEST( !source.readsMidplane() );
+	BOOST_CHECK_THROW( source.setMidplaneField( mirrorPhysical(), 0.0, 3.0 ), std::logic_error );
+
+	source.setVacuumMidplaneField( mirrorPhysical(), 0.0, 3.0, psiInner, psiOuter );
+	BOOST_TEST( !source.readsVacuumMidplane() );
+	meq::Profile const *table = source.unnormalised().midplaneCrossing();
+	BOOST_TEST_REQUIRE( table != nullptr );
+	for ( double x : { 0.0, 0.25, 0.5, 0.75, 1.0 } )
+		BOOST_TEST( ( *table )( x ) == mirrorCrossing( x ), boost::test_tools::tolerance( 1.0e-11 ) );
+	BOOST_TEST( ( *table )( 1.0 ) == mirrorInner, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( ( *table )( 0.0 ) == mirrorOuter, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_CHECK_THROW( source.setVacuumMidplaneField( mirrorPhysical(), 0.0, 3.0, psiInner, psiOuter ),
+	                   std::logic_error );
+	BOOST_TEST( table == source.unnormalised().midplaneCrossing() );
+
+	double const z = 0.0;
+	double worstColumn = 0.0, worstField = 0.0;
+	for ( double scale : { 1.0, 1.1 } )
+	{
+		double const axis = scale*psiInner;
+		double const boundary = psiOuter/scale;
+		double const span = axis - boundary;
+		for ( double radius : { 0.15, 0.22, 0.3 } )
+			for ( double x : { 0.2, 0.5, 0.8 } )
+			{
+				double const psi = boundary + x*span;
+				source.setNormalisation( axis, boundary );
+				double dAxis = 0.0, dBoundary = 0.0;
+				BOOST_TEST_REQUIRE( source.normalisationDerivatives( radius, z, psi, dAxis, dBoundary ) );
+				double const dField = source.dFdPsi( radius, z, psi );
+				auto labels = [ & ]( double step, bool onAxis )
+				{
+					source.setNormalisation( axis + ( onAxis ? step*span : 0.0 ), boundary + ( onAxis ? 0.0 : step*span ) );
+					double const plus = source.f( radius, z, psi );
+					source.setNormalisation( axis - ( onAxis ? step*span : 0.0 ), boundary - ( onAxis ? 0.0 : step*span ) );
+					double const minus = source.f( radius, z, psi );
+					source.setNormalisation( axis, boundary );
+					return ( plus - minus )/( 2.0*step*span );
+				};
+				auto field = [ & ]( double step )
+				{
+					return ( source.f( radius, z, psi + step*span ) - source.f( radius, z, psi - step*span ) )/( 2.0*step*span );
+				};
+				double const h = 1.0e-4;
+				double const numericAxis = ( 4.0*labels( h/2.0, true ) - labels( h, true ) )/3.0;
+				double const numericBoundary = ( 4.0*labels( h/2.0, false ) - labels( h, false ) )/3.0;
+				double const numericField = ( 4.0*field( h/2.0 ) - field( h ) )/3.0;
+				worstColumn = std::max( { worstColumn, std::fabs( dAxis - numericAxis )/std::fabs( numericAxis ),
+				                          std::fabs( dBoundary - numericBoundary )/std::fabs( numericBoundary ) } );
+				worstField = std::max( worstField, std::fabs( dField - numericField )/std::fabs( numericField ) );
+			}
+	}
+	std::printf( "\n  FIXED CURVE, THE BORDER COLUMNS AND dF/dpsi WITH NOTHING FROZEN: worst relative %.3e and %.3e\n",
+	             worstColumn, worstField );
+	BOOST_TEST( worstColumn < 1.0e-7 );
+	BOOST_TEST( worstField < 1.0e-7 );
+}
+
+/*
+ * THE BOX'S PRECONDITION, CHECKED BEFORE THE SOLVE. On the vacuum's curve a
+ * density FLAT at a label still carries -n m omega^2 R_g R_g'/T in dn/dpsi where
+ * omega does not vanish, so the flat profile set is refused at rotation and
+ * accepted without it -- which is exactly the claim -- and refused WITHOUT the
+ * curve going in. Densities vanishing with their slope pass at any rotation.
+ */
+BOOST_AUTO_TEST_CASE( aDensityFlatAtALabelIsRefusedOnTheVacuumCurve )
+{
+	double const psiInner = mirrorPsi( mirrorInner );
+	double const psiOuter = mirrorPsi( mirrorOuter );
+	auto rotationConstant = std::make_shared<meq::ConstantProfile const>( sonicOmega );
+
+	meq::NormalisedRotatingSource flat = fixedCurveSource( labelledPair( flatDensity( 1.0e19 ) ), rotationConstant );
+	std::string const refused = refusal( [ & ]
+		{ flat.setVacuumMidplaneField( mirrorPhysical(), 0.0, 3.0, psiInner, psiOuter ); } );
+	std::printf( "\n  A DENSITY FLAT AT A LABEL, ROTATING: %s\n", refused.c_str() );
+	BOOST_TEST( refused.find( "label" ) != std::string::npos, refused );
+	BOOST_TEST( flat.readsVacuumMidplane(), "a refused curve must not be installed" );
+
+	meq::NormalisedRotatingSource still = fixedCurveSource( labelledPair( flatDensity( 1.0e19 ) ), nullptr );
+	BOOST_TEST( refusal( [ & ] { still.setVacuumMidplaneField( mirrorPhysical(), 0.0, 3.0, psiInner, psiOuter ); } ).empty() );
+
+	meq::NormalisedRotatingSource vanishing = fixedCurveSource( labelledPair( vanishingDensity( 1.0e19 ) ),
+	                                                            rotationProfile( 2.0 ) );
+	BOOST_TEST( refusal( [ & ] { vanishing.setVacuumMidplaneField( mirrorPhysical(), 0.0, 3.0, psiInner, psiOuter ); } ).empty() );
+
+	// What the check measured, on the curve the solver would have installed.
+	meq::NormalisedRotatingSource probe = fixedCurveSource( labelledPair( flatDensity( 1.0e19 ) ), rotationConstant );
+	meq::RotatingSource::LabelCheck const c = probe.unnormalised().labelCheck(
+		meq::tabulateMidplaneCrossing( mirrorNormalised(), 0.0, 3.0, 0.0, 1.0 ) );
+	std::printf( "    flat and rotating: F at the label %.3e of the peak, at Psi = %g, R = %.4f\n",
+	             c.relative, c.label, c.radius );
+	BOOST_TEST( c.relative > 1.0e3*meq::labelTolerance );
+	BOOST_TEST( c.radius <= ( c.label == 1.0 ? mirrorInner : mirrorOuter )*( 1.0 + 1.0e-12 ),
+		"a label must be swept only over the radii its surface reaches" );
+}
+
+/*
+ * dn_s/dR AND dn_s/dpsi AGAINST CENTRAL DIFFERENCES, both closures and the two
+ * gauges with a radius dependence of their own: the partials densityOnCurve()
+ * builds a table's slopes from.
+ */
+BOOST_AUTO_TEST_CASE( theDensityDerivativesAgreeWithCentralDifferences )
+{
+	std::vector<meq::RotatingSource> sources;
+	sources.push_back( makeSource() );
+	sources.push_back( makeImpuritySource() );
+	sources.push_back( midplaneSource( hydrogenicSpecies(), 1.0, crossingProfile() ) );
+	sources.push_back( midplaneSource( impuritySpecies(), 1.0, crossingProfile() ) );
+	double worst = 0.0;
+	for ( meq::RotatingSource const &source : sources )
+		for ( std::size_t s = 0; s < source.species().size(); ++s )
+			for ( double radius : testRadii )
+				for ( double psi : { 0.15, 0.4, 0.62, 0.85 } )
+				{
+					double value = 0.0, dRadius = 0.0, dPsi = 0.0;
+					source.densityDerivatives( s, radius, psi, value, dRadius, dPsi );
+					checkRelative( value, source.density( s, radius, psi ), 1.0e-14, "n_s", radius, psi );
+					double const h = 1.0e-5;
+					double const byR = ( source.density( s, radius + h, psi ) - source.density( s, radius - h, psi ) )/( 2.0*h );
+					double const byPsi = ( source.density( s, radius, psi + h ) - source.density( s, radius, psi - h ) )/( 2.0*h );
+					checkRelative( dRadius, byR, 1.0e-7, "dn_s/dR against a central difference", radius, psi, value );
+					checkRelative( dPsi, byPsi, 1.0e-7, "dn_s/dpsi against a central difference", radius, psi, value );
+					worst = std::max( { worst, std::fabs( dRadius - byR )/std::max( std::fabs( byR ), value ),
+					                    std::fabs( dPsi - byPsi )/std::max( std::fabs( byPsi ), value ) } );
+				}
+	std::printf( "\n  dn_s/dR AND dn_s/dpsi AGAINST CENTRAL DIFFERENCES: worst relative %.3e\n", worst );
+}
+
+/*
+ * A DENSITY RELABELLED ONTO ITS OWN GAUGE'S CURVE IS ITS TABLE: the exponent is
+ * zero along the curve, so the value at each knot is n_s0 and the slope -- the
+ * chain rule dn/dpsi + ( dn/dR ) R_c' -- is n_s0', the two partials cancelling
+ * against each other to what their own accuracy allows. And the fixed-radius
+ * plasma relabelled onto the same curve is the closed-form transfer.
+ */
+BOOST_AUTO_TEST_CASE( aDensityRelabelledOntoItsOwnCurveIsItsTable )
+{
+	std::vector<meq::Knot> knots;
+	for ( int i = 0; i <= 64; ++i )
+	{
+		double const x = i/64.0;
+		knots.push_back( meq::Knot{ x, crossing( x ), crossingPrime( x ) } );
+	}
+	meq::SplineProfile const curve( knots );
+
+	double worstValue = 0.0, worstSlope = 0.0;
+	for ( bool three : { false, true } )
+	{
+		std::vector<meq::Species> const species = three ? impuritySpecies() : hydrogenicSpecies();
+		meq::RotatingSource const source = midplaneSource( species, 1.0, crossingProfile() );
+		for ( std::size_t s = 0; s < species.size(); ++s )
+		{
+			std::shared_ptr<meq::SplineProfile const> const table = meq::densityOnCurve( source, s, curve );
+			BOOST_TEST_REQUIRE( table->knots().size() == knots.size() );
+			for ( meq::Knot const &k : table->knots() )
+			{
+				double const n = ( *species[ s ].density )( k.psi );
+				double const nPrime = species[ s ].density->prime( k.psi );
+				worstValue = std::max( worstValue, std::fabs( k.value - n )/n );
+				worstSlope = std::max( worstSlope, std::fabs( k.derivative - nPrime )/std::max( std::fabs( nPrime ), n ) );
+			}
+		}
+	}
+
+	// The fixed-radius plasma at constant T and omega, onto the curve: the
+	// transfer exp( C ( R_0^2 - R_ref^2 )/2 ) of theTwoGaugesDescribeOnePlasma.
+	double const tIon = 1.8*keV, tElectron = 1.3*keV, omega = 1.3*sonicOmega;
+	double const c = omega*omega*( electronMass + deuteronMass )/( tElectron + tIon );
+	std::vector<meq::Species> pair = labelledPair( ionDensityProfile() );
+	meq::RotatingSource const fixed( pair, std::make_shared<meq::ConstantProfile const>( omega ),
+	                                 ggPrimeProfile(), referenceRadius );
+	std::shared_ptr<meq::SplineProfile const> const transferred = meq::densityOnCurve( fixed, 0, curve );
+	double worstTransfer = 0.0;
+	for ( meq::Knot const &k : transferred->knots() )
+	{
+		double const factor = std::exp( c*( crossingSquared( k.psi ) - referenceRadius*referenceRadius )/2.0 );
+		double const g = c*crossingSquaredPrime( k.psi )/2.0;
+		worstTransfer = std::max( { worstTransfer,
+			std::fabs( k.value - ionDensity( k.psi )*factor )/( ionDensity( k.psi )*factor ),
+			std::fabs( k.derivative - ( ionDensityPrime( k.psi ) + ionDensity( k.psi )*g )*factor )
+				/( ionDensity( k.psi )*factor ) } );
+	}
+	std::printf( "\n  RELABELLED ONTO ITS OWN CURVE: value %.3e, slope %.3e relative; the fixed radius onto "
+	             "it against the closed-form transfer %.3e\n", worstValue, worstSlope, worstTransfer );
+	BOOST_TEST( worstValue < 1.0e-13 );
+	BOOST_TEST( worstSlope < 1.0e-12 );
+	BOOST_TEST( worstTransfer < 1.0e-13 );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+/*
  * THE ROOT FIND ENDS WHEN ITS BRACKET DOES. Far from a plasma's crossings at
  * high Mach the potential that balances (97) is so large against T that one
  * ulp of it moves Sum_s Z_s n_s by more than the relative tolerance the

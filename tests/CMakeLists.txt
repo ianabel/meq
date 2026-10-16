@@ -650,7 +650,12 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	# three-species case at M = 6 the fixed radius cannot pose. Its own suite
 	# and its own mesh stem, so it runs beside the resolution study.
 	add_test(NAME RotatingMirrorMidplane COMMAND RotatingMirror --run_test=midplane)
-	set_tests_properties(RotatingMirror RotatingMirrorResolution RotatingMirrorMidplane PROPERTIES
+	# And on a FIXED curve, the vacuum's crossing: Newton quadratic, why the
+	# frozen table was not, three species at M = 6, and the true-midplane
+	# densities relabelled off the answer posing the same plasma.
+	add_test(NAME RotatingMirrorVacuumGauge COMMAND RotatingMirror --run_test=vacuum_gauge)
+	set_tests_properties(RotatingMirror RotatingMirrorResolution RotatingMirrorMidplane
+		RotatingMirrorVacuumGauge PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
 	# binary, against the library on geq's problem. It needs the driver and its

@@ -17123,3 +17123,174 @@ answer moves in its last bits from run to run.
 * Single precision on the card. The test applies the driver comparison's
   single-precision floor there, the extension's `eps/fd_step`.
 * `MEQ_AXIS_DEVICE=force`, `DeviceParity`'s fourth arm.
+
+
+### M-VACGAUGE
+
+**THE VACUUM-MIDPLANE GAUGE: A FIXED CURVE, AN EXACT JACOBIAN, QUADRATIC NEWTON.
+M-278 §2's SIX FROZEN-TABLE STEPS ARE NOT REPRODUCED, AND THE THREE-SPECIES
+PRESSURE CAP IS THE MESH'S, NOT THE FREEZE'S.** `MIRROR-PLAN.md` §5, *A fixed curve
+is a gauge*. `RotatingMirrorVacuumGauge` is the acceptance and `RotatingSourceTests`'
+`fixed_curve_gauge` suite the pointwise half. MEQ on `fb0756e` plus this change,
+`meq-integration` as installed, double, host, `OMP_NUM_THREADS=2`,
+`MKL_NUM_THREADS=1`. geq's committed reference, `tools/geq-benchmark/reference/rotating`.
+
+#### 1. Pointwise, with the curve fixed
+
+`Gauge::FixedCurve` on the midplane gauge's table gives `F` and `dF/dψ` equal to
+`Gauge::Midplane`'s **bit for bit**, two and three species, so M-278 §1's central
+differences cover it. On the closed-form mirror midplane, the curve tabulated by
+`setVacuumMidplaneField()` against the vacuum's labels from a starting
+normalisation 1.3× and 0.7× off: `R_g( 1 )`, `R_g( 0 )` the label points to 1e-14.
+**The border columns and `dF/dψ` with nothing frozen**, against Richardson
+differences over the labels at two normalisations — moving `ψ_ax` or `ψ_bnd`
+moves `Ψ` and so `R_g( Ψ )`: worst relative **3.1e-09** and **2.5e-09**. `∂n_s/∂R`
+and `∂n_s/∂ψ` against central differences, both closures and both radius-carrying
+gauges: 3.2e-09. `densityOnCurve()` onto a source's own curve: value 2.9e-14,
+slope 1.8e-14 relative; the fixed-radius plasma onto the curve against the closed
+transfer, 3.7e-15.
+
+**The label check** on the closed-form mirror, two species, `T` constant: a
+density FLAT at both labels and rotating at constant `ω` reads `F` at the outer
+label **1.86e-01** of its peak, at `R` = 0.35 m, and is refused, the curve not
+installed; the same without rotation, and densities vanishing with their slope
+at any rotation, are accepted. Swept first over every radius up to the curve's
+widest, it read **3e+68** of the peak for the three species below — the inner
+label read at the outer one's radius, where carbon's centrifugal factor is
+astronomical — so each label is swept only to its own `R_g`.
+
+#### 2. geq's plasma on the vacuum's curve is the fixed-radius plasma
+
+The reference's fixed-radius tables transferred to `R_0vac`, exact at every knot
+(two fixed curves, no solve between them); `F` at a label **1.2e-20** of its
+peak. `k = 3`:
+
+| level | fixed radius | vacuum curve | `ψ*` max / rms apart | installed curve against the filaments' |
+|---|---|---|---|---|
+| 0 | 5.48e-01 1.48e-05 4.98e-09 1.49e-14 | the same | 2.07e-13 / 4.02e-14 | 5.0e-16 m |
+| 1 | 3.93e-01 3.49e-06 1.22e-11 1.16e-16 | … 1.50e-16 | 8.88e-14 / 1.39e-14 | 4.7e-16 m |
+| 2 | 2.82e-01 1.93e-06 6.67e-13 9.29e-17 | … 1.03e-16 | 5.72e-14 / 6.58e-15 | 4.9e-16 m |
+
+The curve is installed once and the crossings never tabulated again. **The
+border columns differenced** — which carry whatever moving the labels does to
+`R_g( Ψ )` whether or not the analytic ones do — give the same history to every
+printed digit and `ψ*` within 1.1e-16, at level 0.
+
+#### 3. M-278 §2's frozen table, again
+
+M-278's midplane tables (transferred on MEQ's level-2, `k = 4` fixed-radius
+answer), level 0, `k = 3`:
+
+| | steps | merit history |
+|---|---|---|
+| midplane gauge, first table kept, refreshes ignored | **3** | 5.48e-01 1.61e-05 6.15e-09 2.36e-14 |
+| fixed curve, the filaments' crossing | **3** | 5.48e-01 1.61e-05 6.15e-09 2.36e-14 |
+| midplane gauge, refreshed (M-278 §3) | 6 | 5.48e-01 9.56e-05 1.92e-06 3.29e-08 5.35e-10 8.64e-12 1.39e-13 |
+
+The kept table is the vacuum solve's, 1.5e-12 m from the filaments'. **So M-278
+§2's six steps are not reproduced at this commit, and nothing is missing from the
+Jacobian with the table fixed** — the labels' pull on `R_g` through `Ψ` included:
+the refresh is the whole of the midplane gauge's linear rate. These tables on the
+vacuum's curve leave `F` at a label **2.8e-05** of its peak, against **8.3e-08** on
+the midplane answer's own crossings, and cost nothing visible: 1.61e-05 against
+the exact plasma's 1.48e-05 after the first step. **Nor does a thousand times the
+check's bound**: geq's fixed-radius tables read on the vacuum's curve untransferred
+— `F` at the outer label 1.08e-03 of its peak — take three quadratic steps,
+5.46e-01 2.17e-06 1.08e-10 2.17e-16 at level 0 and 3.92e-01 7.64e-07 2.43e-13 at
+level 1 (a scratch run). So `meq::labelTolerance` guards the edge's ORDER, MR-4a's
+amplitude, and not the Newton rate. The same numbers say the
+vacuum's crossing is no estimate for checking the midplane gauge's precondition
+before its solve: it would refuse tables that meet it. geq's plasma moves its
+crossings by up to 1.22e-03 m from the vacuum's.
+
+#### 4. Three species at `M = 6` on the vacuum's curve
+
+The midplane suite's profiles (M-278 §5) read on `R_0vac`: `F` at a label
+**7.7e-07** of its peak, at the outer label, at every density (it scales out).
+`k = 3`, from the vacuum:
+
+| peak m⁻³ | level | steps | merit history | max `\|R_0 − R_0vac\|` |
+|---|---|---|---|---|
+| 5e18 | 0 | 3 | 5.45e-01 1.03e-06 1.57e-11 1.74e-16 | 5.37e-04 m |
+| 5e18 | 1 | 3 | 3.92e-01 4.45e-07 5.91e-13 1.28e-16 | 5.31e-04 m |
+| 5e18 | 2 | 3 | 2.82e-01 2.25e-07 3.08e-13 8.84e-17 | 5.33e-04 m |
+| 2e19 | 0 | — | stalls, 7.6e-05 after 30 damped steps | |
+| 2e19 | 1 | 3 | 3.95e-01 4.03e-05 3.64e-08 7.08e-14 | 2.50e-03 m |
+| 2e19 | 2 | 3 | 2.83e-01 2.04e-05 1.90e-08 1.45e-14 | 2.51e-03 m |
+| 5e19 | 0, 1, 2 | — | stall at 6.9e-03 and 2.0e-03; level 2 diverges | |
+
+The midplane gauge at 5e18 takes 7 linear steps (M-278 §5), and at 2e19 on level
+1 converges in **14**. At 5e18 `ψ*` level 0 − 1 is 7.41e-07 max, 8.92e-08 rms, and
+1 − 2 is 5.24e-08 and 1.22e-08. **The range**, the transfer exponent to the solved
+crossing `max |m_s ω²( R_0vac² − R_0² )/2T_s|` (`φ₀` aside), against the same
+solved plasma's fixed-radius exponent at the best single `R_ref`, `max |ln(
+n_s( R_ref )/n_s( R_0 ) )|` over surfaces and species, scanned 0.10 to 0.35 m:
+
+| peak | level | electron | deuterium | carbon | best fixed radius |
+|---|---|---|---|---|---|
+| 5e18 | 0 / 1 / 2 | 4.0e-05 / 3.9e-05 / 3.9e-05 | 0.124 / 0.119 / 0.120 | **0.739 / 0.706 / 0.714** | 134.2 |
+| 2e19 | 1 / 2 | 1.8e-04 / 1.8e-04 | 0.552 / 0.560 | **3.29 / 3.34** | 134.2 |
+
+with `φ₀` in, `max |ln( n_s( R_0 )/n_s0 )|` at 5e18, level 0, is 7.8e-02, 5.9e-02 and
+0.346, and at 2e19, level 1, carbon's is 1.43. On M-278 §5's table carbon's
+fixed-radius `n_s0` spans 1e117.
+
+**THE PRESSURE CAP, MEASURED FOUR WAYS, IS NOT THE GAUGE.**
+* **The Jacobian is exact**: at level 0 the differenced border columns stall
+  where the analytic ones do, 7.9e-05 at 2e19 and 8.5e-03 at 5e19.
+* **Not the box's edge term**: the density floor taken from 1e-6 to 1e-9 and
+  1e-12 — `F` at the labels 7.7e-10 and 7.7e-13 of its peak — leaves every stall
+  where it was, from the vacuum: 7.50e-05, 7.50e-05, 7.52e-05 at 2e19 on level 0;
+  8.48e-07, 8.46e-07, 8.46e-07 at 3e19 on level 1; 1.97e-03, 2.07e-03, 1.82e-03 at
+  5e19 on level 1.
+* **It moves with the mesh**: by continuation in pressure, each solve started
+  from the last's answer and labels, level 0 converges at 5e18, 1e19 and 1.25e19
+  and stalls at 1.5e19, at 8.2e-06; level 1 converges at 2e19 and stalls at 3e19,
+  at 7.7e-07.
+* **Not a reversed field**: on the midplane `B_z/B_z,vac` reads at least 0.990 at
+  5e18 and 0.956 at 2e19, converged or stalled; 0.83 on 5e19's last level-0 iterate.
+
+These four were scratch variants of `threeSpeciesAtMachSixOnTheVacuumCurve` —
+the floor as a parameter, a run started from another's answer — and are not in the
+suite. So the midplane gauge's 2e19 and 5e19 stalls in M-278 are this cap, which
+an exact Jacobian shares; what the cap is remains open.
+
+### M-NCDENSITY
+
+**THE TRUE MIDPLANE IN THE `.nc`: `R_0( Ψ )` AND `n_s( R_0( Ψ ), Ψ )` ON EVERY
+ROTATING MIRROR, AS `DensityFile` TABLES. UNDER THE MIDPLANE GAUGE THEY ARE ITS
+OWN TABLES BACK; OFF A VACUUM-GAUGE ANSWER THEY POSE THE SAME PLASMA.**
+`docs/output.rst`, *The true midplane*. `RotatingMirrorDriver`'s
+`theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain` and
+`RotatingMirrorVacuumGauge`'s `theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge`.
+Same build as [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+
+**Through the driver**, `examples/mirror-three-species.toml` at level 0, `k = 2`,
+on one generated mesh, read back by `ncdump`, 1025 crossing knots:
+
+| run | steps | |
+|---|---|---|
+| as shipped, `Gauge = "midplane"` | 7 | `midplane_n` against its `DensityFile` at every knot: electron 1.4e-14 relative, slope 4.6e-15 of its peak; carbon 5.0e-14 and 1.8e-14 |
+| the same tables, `"vacuum-midplane"` | 3 | carbon's true-midplane density against the table it was given: `\|ln ratio\|` up to 0.367 |
+| run 2's columns as `DensityFile`s, `"midplane"` | 7 | `ψ*` against run 2's, dof for dof: **3.3e-10** of its largest, 3.14e-04; run 1's plasma is 4.2e-02 from it |
+
+`R_0` runs 0.350016 to 0.100006 m: the label points to the solved midplane's own
+reading, `q` integrated, which is not `ψ_h` at the points. `ψ_h` itself, the field
+that answers to the source at each quadrature point, is 3.0e-09 apart; tightening
+both solves to `NewtonRelativeTolerance = 1e-15`, absolute 1e-20 — 3 and 9 steps —
+leaves it at 2.9e-09 and moves the midplane solve's own `ψ_h` by 5.9e-10.
+
+**Through the library**, level 0, `k = 3`, `ψ*` at geq's nodes against the
+vacuum-gauge answer the tables were read off, the midplane gauge tabulating on
+the stated intervals:
+
+| | 1024 (shipped) | 4096 | 16384 | the same tables read as midplane densities |
+|---|---|---|---|---|
+| geq's two species, of 8.79e-04 | 8.42e-13 | 8.08e-14 | 5.31e-14 | 1.57e-05 |
+| three species at 5e18, of 3.15e-04 | 9.89e-14 | 9.60e-14 | 9.46e-14 | 1.30e-05 |
+
+and at `k = 2`, 2.05e-12, 1.26e-13, 1.28e-13 and 1.12e-13, 1.30e-13, 1.30e-13. **At
+the shipped 1024 intervals the two-species difference is the crossing table's own
+interpolation** — `R_0` at 1024 against 16384 intervals is 2.4e-08 m apart between
+knots there, 1.4e-09 m for the three species — and four times the intervals takes
+it to the floor the three species sit on from the start.

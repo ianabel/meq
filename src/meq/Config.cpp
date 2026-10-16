@@ -1815,15 +1815,20 @@ namespace meq
 						parameters.gauge = RotatingGaugeType::FixedRadius;
 					else if ( gauge == "midplane" )
 						parameters.gauge = RotatingGaugeType::Midplane;
+					else if ( gauge == "vacuum-midplane" )
+						parameters.gauge = RotatingGaugeType::VacuumMidplane;
 					else
-						source.fail( "Gauge", "must be \"fixed-radius\" or \"midplane\", but is \"" + gauge + "\"" );
-					bool const midplane = parameters.gauge == RotatingGaugeType::Midplane;
+						source.fail( "Gauge", "must be \"fixed-radius\", \"midplane\" or \"vacuum-midplane\", but is \"" + gauge + "\"" );
+					bool const vacuum = parameters.gauge == RotatingGaugeType::VacuumMidplane;
+					// Both crossing gauges, which share every refusal below but
+					// one: neither has a radius, and both are a mirror's.
+					bool const midplane = parameters.gauge == RotatingGaugeType::Midplane || vacuum;
 
-					// REFUSED RATHER THAN IGNORED: the midplane gauge pins phi_0
-					// where each surface crosses z = 0 and reads no radius, so a
-					// ReferenceRadius beside it would parse and do nothing.
+					// REFUSED RATHER THAN IGNORED: the midplane gauges pin phi_0
+					// on a crossing of z = 0 and read no radius, so a
+					// ReferenceRadius beside one would parse and do nothing.
 					if ( midplane && source.has( "ReferenceRadius" ) )
-						source.fail( "ReferenceRadius", "is the fixed-radius gauge's constant R_ref, and Gauge = \"midplane\" pins phi_0 at each flux surface's own midplane crossing instead, so there is no radius to give. Remove one of the two" );
+						source.fail( "ReferenceRadius", "is the fixed-radius gauge's constant R_ref, and Gauge = \"" + gauge + "\" pins phi_0 where flux surfaces cross z = 0 instead, so there is no radius to give. Remove one of the two" );
 					parameters.referenceRadius = midplane ? 0.0
 						: source.getFloatOr( "ReferenceRadius", parameters.referenceRadius );
 					parameters.mu0 = source.getFloatOr( "Mu0", parameters.mu0 );
@@ -1858,9 +1863,18 @@ namespace meq
 					// between two midplane labels has and a tokamak -- whose
 					// midplane crosses every surface twice -- does not.
 					if ( midplane && !parameters.normalised )
-						source.fail( "Gauge", "\"midplane\" needs Normalised = true: the solver re-tabulates each surface's midplane crossing once per iteration of the bordered Newton, which is the normalised path" );
+						source.fail( "Gauge", "\"" + gauge + "\" needs Normalised = true: the solver tabulates the surfaces' midplane crossings in Psi, at the labels of the bordered Newton, which is the normalised path" );
 					if ( midplane && sourceOptions.supportShape != PlasmaSupportShapeType::Box )
-						source.fail( "Gauge", "\"midplane\" is a mirror's gauge and needs SupportShape = \"box\": it pins phi_0 where each flux surface crosses z = 0, which is one condition per surface only where psi is monotone along the midplane. A tokamak's midplane crosses every surface twice; use the fixed-radius gauge" );
+						source.fail( "Gauge", "\"" + gauge + "\" is a mirror's gauge and needs SupportShape = \"box\": it pins phi_0 where each flux surface crosses z = 0, which is one condition per surface only where psi is monotone along the midplane. A tokamak's midplane crosses every surface twice; use the fixed-radius gauge" );
+
+					// THE VACUUM IS THE SUBTRACTED CONDUCTORS' OWN FIELD, psi_c,
+					// and only under the split is it known before the solve:
+					// meshed coils make the vacuum a solve of its own, and a
+					// curve read off anything else -- the starting guess, a
+					// previous answer -- would make what each Density means
+					// depend on it. MIRROR-PLAN.md section 5.
+					if ( vacuum && !conductorOptions.subtracts() )
+						source.fail( "Gauge", "\"vacuum-midplane\" states each Density where the VACUUM's flux surface crosses z = 0, and reads the vacuum as the conductors' own field, which is known before the solve only when they are subtracted; set [conductors] Model = \"filament\" or \"subtracted\", or use Gauge = \"midplane\"" );
 
 					std::vector< Table > const species = source.getTableArrayOr( "species" );
 					if ( species.size() < 2 )
@@ -1980,6 +1994,11 @@ namespace meq
 
 			if ( boundaryOptions.type == BoundaryDataType::Exact && sourceOptions.type == SourceType::MHD )
 				boundary.fail( "Type", "\"exact\" needs a source with a known exact solution; the \"mhd\" source has none" );
+			// THE VACUUM GAUGE READS THE VACUUM AS psi_c WITH A ZERO REMAINDER,
+			// which non-zero data on Gamma would make false.
+			if ( boundaryOptions.type != BoundaryDataType::Zero && sourceOptions.type == SourceType::Rotating
+			     && sourceOptions.getRotating().gauge == RotatingGaugeType::VacuumMidplane )
+				boundary.fail( "Type", "is not \"zero\", and [source] Gauge = \"vacuum-midplane\" reads the vacuum as the subtracted conductors' field with a ZERO remainder, which data on Gamma would contradict" );
 
 			// [boundary.shape]
 			{

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -297,6 +298,11 @@ namespace meq
 		{
 			if ( refRadius != 0.0 )
 				throw std::invalid_argument( "meq::RotatingSource: Gauge::Midplane pins phi_0 at each flux surface's own midplane crossing and has no reference radius; pass 0 rather than a radius it would not read" );
+		}
+		else if ( gaugeChoice == Gauge::FixedCurve )
+		{
+			if ( refRadius != 0.0 )
+				throw std::invalid_argument( "meq::RotatingSource: Gauge::FixedCurve pins phi_0 on a curve R_g( psi ) and has no reference radius; pass 0 rather than a radius it would not read" );
 		}
 		else if ( !std::isfinite( refRadius ) || refRadius <= 0.0 )
 			throw std::invalid_argument( "meq::RotatingSource: the reference radius must be finite and positive" );
@@ -692,7 +698,8 @@ namespace meq
 			return;
 		}
 
-		// THE MIDPLANE GAUGE. h = ( R^2 - R_0^2 )/2 at fixed R, so
+		// THE MIDPLANE GAUGE, AND THE FIXED CURVE, WHICH IS THE SAME
+		// ALGEBRA ON A TABLE NOBODY REPLACES. h = ( R^2 - R_0^2 )/2 at fixed R, so
 		//
 		//     h'  = -R_0 R_0'
 		//     h'' = -( R_0'^2 + R_0 R_0'' )
@@ -702,6 +709,8 @@ namespace meq
 		// Hermite cubic, so R_0'' is its own second derivative: piecewise linear,
 		// jumping at the knots, and exactly the derivative of the R_0' that h'
 		// uses -- so dFdPsi() is the derivative of f() for the frozen table.
+		if ( !midplaneTable && gaugeChoice == Gauge::FixedCurve )
+			throw std::logic_error( "meq::RotatingSource: Gauge::FixedCurve has no curve R_g( psi ) yet. GradShafranovSolver supplies the vacuum's midplane crossing through NormalisedSource::setVacuumMidplaneField() before the first residual of a normalised solve; elsewhere call setMidplaneCrossing() first" );
 		if ( !midplaneTable )
 			throw std::logic_error( "meq::RotatingSource: Gauge::Midplane has no midplane crossing R_0( psi ) yet. GradShafranovSolver supplies it through NormalisedSource::setMidplaneField() once per Newton iteration of the bordered solve, so a midplane-gauged source is solved as a meq::NormalisedRotatingSource; elsewhere call setMidplaneCrossing() first" );
 
@@ -716,7 +725,7 @@ namespace meq
 
 	void RotatingSource::setMidplaneCrossing( std::shared_ptr<Profile const> table )
 	{
-		if ( gaugeChoice != Gauge::Midplane )
+		if ( gaugeChoice == Gauge::FixedRadius )
 			throw std::logic_error( "meq::RotatingSource::setMidplaneCrossing: this source is in Gauge::FixedRadius, which pins phi_0 at a constant radius and reads no crossing" );
 		if ( !table )
 			throw std::invalid_argument( "meq::RotatingSource::setMidplaneCrossing: the table must not be null" );
@@ -727,6 +736,60 @@ namespace meq
 	Profile const * RotatingSource::midplaneCrossing() const
 	{
 		return midplaneTable.get();
+	}
+
+	RotatingSource::LabelCheck RotatingSource::labelCheck( std::shared_ptr<Profile const> curve ) const
+	{
+		if ( gaugeChoice == Gauge::FixedRadius )
+			throw std::logic_error( "meq::RotatingSource::labelCheck: this source is in Gauge::FixedRadius, which has no curve to measure on" );
+		if ( !curve )
+			throw std::invalid_argument( "meq::RotatingSource::labelCheck: the curve must not be null" );
+
+		/*
+		 * ON A COPY CARRYING THE CURVE, so this source's own table is neither
+		 * read nor replaced. The peak is taken ALONG the curve, where on a
+		 * mirror every surface is widest and its centrifugal density largest.
+		 * Each label is swept over every radius it can reach, ( 0, R_g( label ) ]
+		 * -- a mirror's surface is widest where it crosses z = 0, and the
+		 * solved label surface passes through the label point -- because the
+		 * solved surface does not lie on the vacuum's off the midplane, and a
+		 * profile set meeting the precondition makes F vanish there at EVERY
+		 * radius: at two species F's bracket is linear in ( R^2 - R_g^2 )/2,
+		 * and both its coefficients must vanish. NOT beyond R_g( label ),
+		 * which no label surface reaches and where the centrifugal factor of
+		 * a heavy species is astronomical -- MEASURED, 3e+68 of the peak at the
+		 * inner label read at the outer one's radius, for profiles whose
+		 * densities fall to 1e-6 there.
+		 */
+		RotatingSource probe( *this );
+		probe.midplaneTable = std::move( curve );
+
+		int const along = 256;
+		int const across = 128;
+		LabelCheck out;
+		for ( int i = 0; i <= along; ++i )
+		{
+			double const x = static_cast<double>( i )/along;
+			double const radius = ( *probe.midplaneTable )( x );
+			if ( !( radius > 0.0 ) )
+				continue;
+			out.peak = std::max( out.peak, std::fabs( probe.f( radius, 0.0, x ) )/radius );
+		}
+		for ( double label : { 0.0, 1.0 } )
+			for ( int k = 1; k <= across; ++k )
+			{
+				double const radius = ( *probe.midplaneTable )( label )*static_cast<double>( k )/across;
+				double const value = std::fabs( probe.f( radius, 0.0, label ) )/radius;
+				if ( value > out.worst )
+				{
+					out.worst = value;
+					out.label = label;
+					out.radius = radius;
+				}
+			}
+		out.relative = out.peak > 0.0 ? out.worst/out.peak
+		                              : ( out.worst > 0.0 ? std::numeric_limits<double>::infinity() : 0.0 );
+		return out;
 	}
 
 	RotatingSource::State RotatingSource::stateAt( double radius, double psi ) const
@@ -792,6 +855,51 @@ namespace meq
 			throw std::out_of_range( "meq::RotatingSource::density: no such species" );
 
 		return ( *speciesData[ index ].density )( psi )*std::exp( stateAt( radius, psi ).exponent[ index ] );
+	}
+
+	void RotatingSource::densityDerivatives( std::size_t index, double radius, double psi,
+	                                         double &value, double &dRadius, double &dPsi ) const
+	{
+		if ( index >= speciesData.size() )
+			throw std::out_of_range( "meq::RotatingSource::densityDerivatives: no such species" );
+
+		State const state = stateAt( radius, psi );
+		Species const &species = speciesData[ index ];
+		double const nRef = ( *species.density )( psi );
+		double const e = std::exp( state.exponent[ index ] );
+		value = nRef*e;
+		dPsi = ( species.density->prime( psi ) + nRef*state.exponentPrime[ index ] )*e;
+
+		/*
+		 * d/dR AT FIXED psi. The centrifugal half of A_s is m_s omega^2 h/T_s
+		 * with dh/dR = R in every gauge, and the potential's half is
+		 * -Z_s y/T_s, so dA_s/dR = ( m_s omega^2 R - Z_s y_R )/T_s with y_R
+		 * from (97) held along R:
+		 *
+		 *     Sum_s Z_s n_s ( m_s omega^2 R - Z_s y_R )/T_s = 0,
+		 *
+		 * the same denominator Sum_s Z_s^2 n_s/T_s the root find's Newton
+		 * step uses. At two species it is the closed form's omega^2 R num/d.
+		 * The n_s enter only as ratios, so they are taken with the largest
+		 * exponent factored out, which a high Mach number cannot overflow.
+		 */
+		double const w0 = omegaProfile ? ( *omegaProfile )( psi ) : 0.0;
+		double const w = w0*w0;
+		double top = -std::numeric_limits<double>::infinity();
+		for ( std::size_t s = 0; s < speciesData.size(); ++s )
+			top = std::max( top, state.exponent[ s ] );
+		double numer = 0.0, denom = 0.0;
+		for ( std::size_t s = 0; s < speciesData.size(); ++s )
+		{
+			Species const &other = speciesData[ s ];
+			double const t = ( *other.temperature )( psi );
+			double const v = ( *other.density )( psi )*std::exp( state.exponent[ s ] - top );
+			numer += other.charge*v*other.mass*w*radius/t;
+			denom += other.charge*other.charge*v/t;
+		}
+		double const yR = denom > 0.0 ? numer/denom : 0.0;
+		double const t = ( *species.temperature )( psi );
+		dRadius = value*( species.mass*w*radius - species.charge*yR )/t;
 	}
 
 	double RotatingSource::pressure( double radius, double psi ) const
@@ -1037,7 +1145,7 @@ namespace meq
 	                                                 double rMin, double rMax )
 	{
 		if ( !readsMidplane() )
-			throw std::logic_error( "meq::NormalisedRotatingSource::setMidplaneField: this source is in Gauge::FixedRadius and reads no midplane" );
+			throw std::logic_error( "meq::NormalisedRotatingSource::setMidplaneField: this source is not in Gauge::Midplane and reads no midplane per iteration" );
 
 		// The field is in PHYSICAL psi; the inner source's argument is Psi, so
 		// the table is taken in Psi at the normalisation in force -- see the
@@ -1055,6 +1163,81 @@ namespace meq
 		};
 
 		inner.setMidplaneCrossing( tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0 ) );
+	}
+
+	bool NormalisedRotatingSource::readsVacuumMidplane() const
+	{
+		return inner.gauge() == RotatingSource::Gauge::FixedCurve && !inner.midplaneCrossing();
+	}
+
+	void NormalisedRotatingSource::setVacuumMidplaneField( MidplaneField const &field,
+	                                                       double rMin, double rMax,
+	                                                       double psiAxis, double psiBoundary )
+	{
+		if ( inner.gauge() != RotatingSource::Gauge::FixedCurve )
+			throw std::logic_error( "meq::NormalisedRotatingSource::setVacuumMidplaneField: this source is not in Gauge::FixedCurve and has no fixed curve to be given" );
+		if ( inner.midplaneCrossing() )
+			throw std::logic_error( "meq::NormalisedRotatingSource::setVacuumMidplaneField: the fixed curve is already in, and a fixed curve is never replaced -- replacing it would change what every Density means" );
+		if ( !std::isfinite( psiAxis ) || !std::isfinite( psiBoundary ) || psiAxis == psiBoundary )
+			throw std::invalid_argument( "meq::NormalisedRotatingSource::setVacuumMidplaneField: the vacuum's labels must be finite and must differ" );
+
+		// In Psi, against the VACUUM's labels and not the normalisation in
+		// force: the solve's starting labels are a guess, and the curve says
+		// what the profiles mean.
+		double const span = psiAxis - psiBoundary;
+		MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
+		{
+			double psi = 0.0, dPsiDR = 0.0;
+			if ( !field( radius, psi, dPsiDR ) )
+				return false;
+			x = ( psi - psiBoundary )/span;
+			dXdR = dPsiDR/span;
+			return true;
+		};
+		std::shared_ptr<SplineProfile const> const curve =
+			tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0 );
+
+		/*
+		 * THE BOX'S PRECONDITION, CHECKED BECAUSE IT NOW CAN BE. F must vanish
+		 * at both labels -- a jump across a label's contour caps the order,
+		 * and the Jacobian misses its edge term -- and on a fixed curve
+		 * whether it does is a property of the profiles and R_g alone, so a
+		 * set that fails it is a configuration error and is refused as one.
+		 * See meq::labelTolerance for what the bound guards, MEASURED --
+		 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+		 */
+		RotatingSource::LabelCheck const check = inner.labelCheck( curve );
+		if ( !( check.relative <= labelTolerance ) )
+		{
+			char buffer[ 768 ];
+			std::snprintf( buffer, sizeof buffer,
+				"F at the %s label, Psi = %g, is %.3e of its peak at R = %.4g m on the "
+				"vacuum's midplane crossing, above the %.0e the box allows: the support "
+				"needs F to vanish at both labels, since a jump across a label's contour "
+				"caps the convergence order and the Newton Jacobian misses its edge "
+				"term. On this gauge's curve R_g a Density flat at a label still "
+				"carries -n m omega^2 R_g R_g'/T in its psi-derivative wherever omega "
+				"does not vanish there, so let the densities or the rotation fall away "
+				"at the labels, or give each Density the slope that cancels it",
+				check.label == 1.0 ? "inner" : "outer", check.label, check.relative,
+				check.radius, labelTolerance );
+			throw std::invalid_argument( buffer );
+		}
+		inner.setMidplaneCrossing( curve );
+	}
+
+	std::shared_ptr<SplineProfile const> densityOnCurve( RotatingSource const &source,
+		std::size_t index, SplineProfile const &curve )
+	{
+		std::vector<Knot> knots;
+		knots.reserve( curve.knots().size() );
+		for ( Knot const &k : curve.knots() )
+		{
+			double value = 0.0, dRadius = 0.0, dPsi = 0.0;
+			source.densityDerivatives( index, k.value, k.psi, value, dRadius, dPsi );
+			knots.push_back( Knot{ k.psi, value, dPsi + dRadius*k.derivative } );
+		}
+		return std::make_shared<SplineProfile const>( std::move( knots ) );
 	}
 
 }
