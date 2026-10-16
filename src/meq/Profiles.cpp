@@ -439,4 +439,233 @@ namespace meq
 		return os;
 	}
 
+
+	CardinalSpline::CardinalSpline( double lower, double upper, std::size_t knots )
+		: xLower( lower ), xUpper( upper ), spacing( 0.0 ), count( knots )
+	{
+		if ( knots < 4 )
+			throw std::invalid_argument( "meq::CardinalSpline: not-a-knot needs at least four knots" );
+		if ( !std::isfinite( lower ) || !std::isfinite( upper ) || !( lower < upper ) )
+			throw std::invalid_argument( "meq::CardinalSpline: the range must be finite and increasing" );
+		spacing = ( upper - lower )/static_cast<double>( knots - 1 );
+
+		/*
+		 * THE CURVATURE MAP, BY ONE DENSE ELIMINATION ON THE SPLINE'S OWN SYSTEM.
+		 *
+		 * Interior rows are C^2 continuity on uniform knots,
+		 *
+		 *     M_{i-1} + 4 M_i + M_{i+1} = 6( f_{i-1} - 2 f_i + f_{i+1} )/h^2,
+		 *
+		 * and the end rows not-a-knot -- f''' continuous across knots 1 and
+		 * K - 2, so M_0 - 2 M_1 + M_2 = 0 and its mirror. Solved once for the
+		 * identity right hand side, which is every phi_j's curvatures at once.
+		 * Partial pivoting: the end rows are not diagonally dominant.
+		 */
+		std::size_t const n = count;
+		std::vector<double> system( n*n, 0.0 ), right( n*n, 0.0 );
+		auto at = [ n ]( std::vector<double> &m, std::size_t i, std::size_t j ) -> double &
+		{
+			return m[ i*n + j ];
+		};
+		double const scale = 6.0/( spacing*spacing );
+		at( system, 0, 0 ) = 1.0;
+		at( system, 0, 1 ) = -2.0;
+		at( system, 0, 2 ) = 1.0;
+		at( system, n - 1, n - 3 ) = 1.0;
+		at( system, n - 1, n - 2 ) = -2.0;
+		at( system, n - 1, n - 1 ) = 1.0;
+		for ( std::size_t i = 1; i + 1 < n; ++i )
+		{
+			at( system, i, i - 1 ) = 1.0;
+			at( system, i, i ) = 4.0;
+			at( system, i, i + 1 ) = 1.0;
+			at( right, i, i - 1 ) = scale;
+			at( right, i, i ) = -2.0*scale;
+			at( right, i, i + 1 ) = scale;
+		}
+		for ( std::size_t c = 0; c < n; ++c )
+		{
+			std::size_t pivot = c;
+			for ( std::size_t r = c + 1; r < n; ++r )
+				if ( std::fabs( at( system, r, c ) ) > std::fabs( at( system, pivot, c ) ) )
+					pivot = r;
+			if ( pivot != c )
+				for ( std::size_t j = 0; j < n; ++j )
+				{
+					std::swap( at( system, c, j ), at( system, pivot, j ) );
+					std::swap( at( right, c, j ), at( right, pivot, j ) );
+				}
+			double const d = at( system, c, c );
+			for ( std::size_t r = c + 1; r < n; ++r )
+			{
+				double const factor = at( system, r, c )/d;
+				if ( factor == 0.0 )
+					continue;
+				for ( std::size_t j = c; j < n; ++j )
+					at( system, r, j ) -= factor*at( system, c, j );
+				for ( std::size_t j = 0; j < n; ++j )
+					at( right, r, j ) -= factor*at( right, c, j );
+			}
+		}
+		for ( std::size_t c = n; c-- > 0; )
+			for ( std::size_t j = 0; j < n; ++j )
+			{
+				double value = at( right, c, j );
+				for ( std::size_t k = c + 1; k < n; ++k )
+					value -= at( system, c, k )*at( right, k, j );
+				at( right, c, j ) = value/at( system, c, c );
+			}
+		curvatureMap = std::move( right );
+	}
+
+	std::size_t CardinalSpline::size() const
+	{
+		return count;
+	}
+
+	double CardinalSpline::lower() const
+	{
+		return xLower;
+	}
+
+	double CardinalSpline::upper() const
+	{
+		return xUpper;
+	}
+
+	double CardinalSpline::knot( std::size_t k ) const
+	{
+		return k + 1 == count ? xUpper : xLower + spacing*static_cast<double>( k );
+	}
+
+	std::size_t CardinalSpline::interval( double x ) const
+	{
+		double const t = ( x - xLower )/spacing;
+		if ( !( t > 0.0 ) )
+			return 0;
+		return std::min( static_cast<std::size_t>( t ), count - 2 );
+	}
+
+	void CardinalSpline::basis( double x, double *value, double *slope, double *curvature ) const
+	{
+		// Clamped outside, with the derivatives of the constant extension.
+		bool const outside = x < xLower || x > xUpper;
+		double const xc = std::min( xUpper, std::max( xLower, x ) );
+		std::size_t const i = interval( xc );
+		double const h = spacing;
+		double const b = ( xc - knot( i ) )/h;
+		double const a = 1.0 - b;
+
+		/*
+		 * S( x ) = a f_i + b f_{i+1} + ( a^3 - a ) h^2 M_i/6 + ( b^3 - b ) h^2 M_{i+1}/6
+		 *
+		 * on [ x_i, x_{i+1} ], with M = A f, so phi_k reads rows i and i + 1 of
+		 * A and the two unit values.
+		 */
+		double const cA = ( a*a*a - a )*h*h/6.0, cB = ( b*b*b - b )*h*h/6.0;
+		double const sA = -( 3.0*a*a - 1.0 )*h/6.0, sB = ( 3.0*b*b - 1.0 )*h/6.0;
+		double const *rowA = &curvatureMap[ i*count ];
+		double const *rowB = &curvatureMap[ ( i + 1 )*count ];
+		for ( std::size_t k = 0; k < count; ++k )
+		{
+			if ( value )
+				value[ k ] = cA*rowA[ k ] + cB*rowB[ k ];
+			if ( slope )
+				slope[ k ] = outside ? 0.0 : sA*rowA[ k ] + sB*rowB[ k ];
+			if ( curvature )
+				curvature[ k ] = outside ? 0.0 : a*rowA[ k ] + b*rowB[ k ];
+		}
+		if ( value )
+		{
+			value[ i ] += a;
+			value[ i + 1 ] += b;
+		}
+		if ( slope && !outside )
+		{
+			slope[ i ] -= 1.0/h;
+			slope[ i + 1 ] += 1.0/h;
+		}
+	}
+
+	std::vector<double> CardinalSpline::curvatures( std::vector<double> const &values ) const
+	{
+		if ( values.size() != count )
+			throw std::invalid_argument( "meq::CardinalSpline::curvatures: one value per knot" );
+		std::vector<double> out( count, 0.0 );
+		for ( std::size_t k = 0; k < count; ++k )
+		{
+			double total = 0.0;
+			for ( std::size_t j = 0; j < count; ++j )
+				total += curvatureMap[ k*count + j ]*values[ j ];
+			out[ k ] = total;
+		}
+		return out;
+	}
+
+	void CardinalSpline::evaluate( std::vector<double> const &values,
+	                               std::vector<double> const &curvatures, double x,
+	                               double &value, double &slope, double &curvature ) const
+	{
+		bool const outside = x < xLower || x > xUpper;
+		double const xc = std::min( xUpper, std::max( xLower, x ) );
+		std::size_t const i = interval( xc );
+		double const h = spacing;
+		double const b = ( xc - knot( i ) )/h;
+		double const a = 1.0 - b;
+		double const mA = curvatures[ i ], mB = curvatures[ i + 1 ];
+		value = a*values[ i ] + b*values[ i + 1 ]
+		        + ( ( a*a*a - a )*mA + ( b*b*b - b )*mB )*h*h/6.0;
+		if ( outside )
+		{
+			slope = 0.0;
+			curvature = 0.0;
+			return;
+		}
+		slope = ( values[ i + 1 ] - values[ i ] )/h
+		        + ( -( 3.0*a*a - 1.0 )*mA + ( 3.0*b*b - 1.0 )*mB )*h/6.0;
+		curvature = a*mA + b*mB;
+	}
+
+	CardinalSplineProfile::CardinalSplineProfile( std::shared_ptr<CardinalSpline const> basis,
+	                                              std::vector<double> values )
+		: splineBasis( std::move( basis ) ), valueData( std::move( values ) )
+	{
+		if ( !splineBasis )
+			throw std::invalid_argument( "meq::CardinalSplineProfile: the basis must not be null" );
+		if ( valueData.size() != splineBasis->size() )
+			throw std::invalid_argument( "meq::CardinalSplineProfile: one value per knot" );
+		curvatureData = splineBasis->curvatures( valueData );
+	}
+
+	double CardinalSplineProfile::operator()( double psi ) const
+	{
+		double v = 0.0, s = 0.0, c = 0.0;
+		splineBasis->evaluate( valueData, curvatureData, psi, v, s, c );
+		return v;
+	}
+
+	double CardinalSplineProfile::prime( double psi ) const
+	{
+		double v = 0.0, s = 0.0, c = 0.0;
+		splineBasis->evaluate( valueData, curvatureData, psi, v, s, c );
+		return s;
+	}
+
+	double CardinalSplineProfile::doublePrime( double psi ) const
+	{
+		double v = 0.0, s = 0.0, c = 0.0;
+		splineBasis->evaluate( valueData, curvatureData, psi, v, s, c );
+		return c;
+	}
+
+	CardinalSpline const & CardinalSplineProfile::basis() const
+	{
+		return *splineBasis;
+	}
+
+	std::vector<double> const & CardinalSplineProfile::values() const
+	{
+		return valueData;
+	}
+
 }

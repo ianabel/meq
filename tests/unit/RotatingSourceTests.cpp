@@ -1839,6 +1839,187 @@ BOOST_AUTO_TEST_CASE( theNormalisedSourceTabulatesInPsiAndKeepsItsColumnsAnalyti
 	BOOST_TEST( worst < 1.0e-7 );
 }
 
+/*
+ * THE BORDERED GAUGE'S COLUMNS, POINTWISE: dF/dW AND dF/dW' AGAINST CENTRAL
+ * DIFFERENCES OF f(), W = R_0^2/2. [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+ *
+ * The table is moved by a constant in W -- which moves W and not W' -- and by a
+ * slope through the evaluation point -- which moves W' and not W there -- so
+ * each difference measures one derivative. Both closures, the root find forced
+ * at two species as the cross-check it is elsewhere, over the Mach sweep. AND
+ * THE CHECK IS SHOWN TO SEE THE SLOPE TERM: dropping dF/dW' misses the
+ * difference by orders of magnitude.
+ */
+BOOST_AUTO_TEST_CASE( theCrossingDerivativesAgreeWithACentralDifference )
+{
+	// R_0 for W = crossingSquared/2 + value + slope ( psi - at ).
+	auto moved = []( double value, double slope, double at )
+	{
+		auto w = [ = ]( double psi ) { return 0.5*crossingSquared( psi ) + value + slope*( psi - at ); };
+		auto wPrime = [ = ]( double psi ) { return 0.5*crossingSquaredPrime( psi ) + slope; };
+		return analytic( [ = ]( double psi ) { return std::sqrt( 2.0*w( psi ) ); },
+			[ = ]( double psi ) { return wPrime( psi )/std::sqrt( 2.0*w( psi ) ); },
+			[ = ]( double psi )
+			{
+				double const r = std::sqrt( 2.0*w( psi ) );
+				double const s = wPrime( psi )/r;
+				return ( crossingC - s*s )/r;
+			} );
+	};
+
+	std::printf( "\n  THE BORDERED GAUGE'S dF/dW AND dF/dW' AGAINST CENTRAL DIFFERENCES\n" );
+	double worstControl = 0.0;
+	struct Arm
+	{
+		bool three;
+		meq::RotatingSource::Closure closure;
+		char const *name;
+	};
+	for ( Arm const arm : { Arm{ false, meq::RotatingSource::Closure::ClosedForm, "two, closed form" },
+	                        Arm{ false, meq::RotatingSource::Closure::RootFind, "two, root find" },
+	                        Arm{ true, meq::RotatingSource::Closure::RootFind, "three, root find" } } )
+		for ( double omegaScale : { 0.5, 1.0, 2.0 } )
+		{
+			auto make = [ & ]( std::shared_ptr<meq::Profile const> table )
+			{
+				meq::RotatingSource source( arm.three ? impuritySpecies() : hydrogenicSpecies(),
+					rotationProfile( omegaScale ), ggPrimeProfile(), 0.0, meq::vacuumPermeability,
+					arm.closure, meq::RotatingSource::Gauge::Midplane );
+				source.setMidplaneCrossing( std::move( table ) );
+				return source;
+			};
+			meq::RotatingSource const source = make( crossingProfile() );
+			double worst = 0.0;
+			for ( double radius : testRadii )
+				for ( double psi : testFluxes )
+				{
+					double dFdW = 0.0, dFdWPrime = 0.0;
+					source.crossingDerivatives( radius, psi, dFdW, dFdWPrime );
+					for ( double h : { 1.0e-5, 1.0e-4 } )
+					{
+						double const byValue = ( make( moved( h, 0.0, psi ) ).f( radius, 0.0, psi )
+							- make( moved( -h, 0.0, psi ) ).f( radius, 0.0, psi ) )/( 2.0*h );
+						double const bySlope = ( make( moved( 0.0, h, psi ) ).f( radius, 0.0, psi )
+							- make( moved( 0.0, -h, psi ) ).f( radius, 0.0, psi ) )/( 2.0*h );
+						double const errorValue = std::fabs( dFdW - byValue )/std::max( 1.0, std::fabs( byValue ) );
+						double const errorSlope = std::fabs( dFdWPrime - bySlope )/std::max( 1.0, std::fabs( bySlope ) );
+						worst = std::max( { worst, errorValue, errorSlope } );
+						BOOST_CHECK_MESSAGE( errorValue <= 1.0e-6 && errorSlope <= 1.0e-6,
+							arm.name << ", omega x " << omegaScale << ", h = " << h << ", R = " << radius
+							<< ", psi = " << psi << ": dF/dW " << dFdW << " against " << byValue
+							<< ", dF/dW' " << dFdWPrime << " against " << bySlope );
+						worstControl = std::max( worstControl,
+							std::fabs( bySlope )/std::max( 1.0, std::fabs( bySlope ) ) );
+					}
+				}
+			std::printf( "    %-17s omega x %.1f: worst | analytic - difference |/max( 1, |difference| ) %.3e\n",
+			             arm.name, omegaScale, worst );
+		}
+	std::printf( "    control, dF/dW' dropped: worst relative miss %.3e\n", worstControl );
+	std::fflush( stdout );
+	BOOST_TEST( worstControl > 1.0e-2,
+		"dropping dF/dW' misses the slope difference by only " << worstControl
+		<< ", so the check above cannot see it" );
+
+	// THE NORMALISED SOURCE: the inner one's at Psi, times the scale over the
+	// span, as f() is -- and zero outside the plasma.
+	double const axis = 2.0, boundary = 0.5, scale = 1.7;
+	auto normalised = [ & ]( std::shared_ptr<meq::Profile const> table )
+	{
+		meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(),
+			0.0, axis, meq::vacuumPermeability, meq::RotatingSource::Closure::Automatic,
+			meq::RotatingSource::Gauge::Midplane );
+		source.setNormalisation( axis, boundary );
+		source.setCurrentScale( scale );
+		source.setPlasmaSupport( true );
+		source.setMidplaneCrossing( std::move( table ) );
+		return source;
+	};
+	meq::NormalisedRotatingSource const wrapped = normalised( crossingProfile() );
+	for ( double radius : { 0.85, 1.2 } )
+		for ( double x : { 0.15, 0.62 } )
+		{
+			double const psi = boundary + x*( axis - boundary );
+			double dFdW = 0.0, dFdWPrime = 0.0;
+			BOOST_TEST_REQUIRE( wrapped.crossingDerivatives( radius, 0.0, psi, dFdW, dFdWPrime ) );
+			double const h = 1.0e-5;
+			double const byValue = ( normalised( moved( h, 0.0, x ) ).f( radius, 0.0, psi )
+				- normalised( moved( -h, 0.0, x ) ).f( radius, 0.0, psi ) )/( 2.0*h );
+			double const bySlope = ( normalised( moved( 0.0, h, x ) ).f( radius, 0.0, psi )
+				- normalised( moved( 0.0, -h, x ) ).f( radius, 0.0, psi ) )/( 2.0*h );
+			checkRelative( dFdW, byValue, 1.0e-6, "normalised dF/dW", radius, x );
+			checkRelative( dFdWPrime, bySlope, 1.0e-6, "normalised dF/dW'", radius, x );
+		}
+	double outW = 1.0, outWPrime = 1.0;
+	BOOST_TEST( wrapped.crossingDerivatives( 1.0, 0.0, boundary - 0.1, outW, outWPrime ) );
+	BOOST_TEST( outW == 0.0 );
+	BOOST_TEST( outWPrime == 0.0 );
+}
+
+/*
+ * crossingThroughKnots() IS THE SPLINE OF W READ BACK AS R_0: the three
+ * combinations the half-delta reads -- R_0^2/2, R_0 R_0' and
+ * R_0'^2 + R_0 R_0'' -- are W, W' and W'' to round-off, so the source sees the
+ * C^2 interpolant of W and nothing of the square root.
+ */
+BOOST_AUTO_TEST_CASE( theCrossingThroughKnotsIsTheSplineOfItsHalfSquare )
+{
+	auto const basis = std::make_shared<meq::CardinalSpline const>( 0.0, 1.0, std::size_t( 12 ) );
+	std::vector<double> radii( basis->size() ), half( basis->size() );
+	for ( std::size_t k = 0; k < radii.size(); ++k )
+	{
+		radii[ k ] = crossing( basis->knot( k ) );
+		half[ k ] = 0.5*radii[ k ]*radii[ k ];
+	}
+	std::shared_ptr<meq::Profile const> const table = meq::crossingThroughKnots( basis, radii );
+	meq::CardinalSplineProfile const w( basis, half );
+	for ( double x = 0.0; x <= 1.0; x += 0.0371 )
+	{
+		double const r = ( *table )( x ), rp = table->prime( x ), rpp = table->doublePrime( x );
+		BOOST_TEST( std::fabs( 0.5*r*r - w( x ) ) < 1.0e-14 );
+		BOOST_TEST( std::fabs( r*rp - w.prime( x ) ) < 1.0e-13 );
+		BOOST_TEST( std::fabs( rp*rp + r*rpp - w.doublePrime( x ) ) < 1.0e-12 );
+	}
+	// W is quadratic in psi here, so the not-a-knot spline is exact for it.
+	for ( double x : { 0.05, 0.5, 0.95 } )
+		BOOST_TEST( std::fabs( ( *table )( x ) - crossing( x ) ) < 1.0e-13 );
+
+	BOOST_CHECK_THROW( meq::crossingThroughKnots( nullptr, radii ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::crossingThroughKnots( basis, std::vector<double>( 5, 1.0 ) ),
+	                   std::invalid_argument );
+	std::vector<double> bad = radii;
+	bad[ 3 ] = 0.0;
+	BOOST_CHECK_THROW( meq::crossingThroughKnots( basis, bad ), std::invalid_argument );
+	bad[ 3 ] = std::numeric_limits<double>::quiet_NaN();
+	BOOST_CHECK_THROW( meq::crossingThroughKnots( basis, bad ), std::invalid_argument );
+}
+
+/*
+ * AND THE BORDERED GAUGE'S TWO ENTRY POINTS REFUSE WHERE THEY MEAN NOTHING: a
+ * fixed-radius source has no crossing to be handed or differentiated, and a
+ * source that reads no midplane at all -- the static MHD one -- refuses the
+ * table and answers false for the derivatives, which the solver turns into a
+ * refusal of its own.
+ */
+BOOST_AUTO_TEST_CASE( theCrossingEntryPointsRefuseWhereTheyMeanNothing )
+{
+	meq::RotatingSource const fixed = makeSource();
+	double dFdW = 0.0, dFdWPrime = 0.0;
+	BOOST_CHECK_THROW( fixed.crossingDerivatives( 1.0, 0.5, dFdW, dFdWPrime ), std::logic_error );
+
+	meq::NormalisedRotatingSource normalisedFixed( hydrogenicSpecies(), rotationProfile(), ggPrimeProfile(),
+		referenceRadius, 1.0 );
+	BOOST_CHECK_THROW( normalisedFixed.setMidplaneCrossing( crossingProfile() ), std::logic_error );
+	BOOST_CHECK_THROW( normalisedFixed.crossingDerivatives( 1.0, 0.0, 0.5, dFdW, dFdWPrime ),
+	                   std::logic_error );
+
+	meq::NormalisedMHDSource mhd( std::make_shared<meq::ConstantProfile const>( 1.0 ),
+		std::make_shared<meq::ConstantProfile const>( 0.0 ), 1.0 );
+	BOOST_TEST( !mhd.readsMidplane() );
+	BOOST_CHECK_THROW( mhd.setMidplaneCrossing( crossingProfile() ), std::logic_error );
+	BOOST_TEST( !mhd.crossingDerivatives( 1.0, 0.0, 0.5, dFdW, dFdWPrime ) );
+}
+
 BOOST_AUTO_TEST_SUITE_END()
 
 /*

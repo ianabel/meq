@@ -71,7 +71,9 @@
  * iteration -- the support freeze's precedent -- so that within one iteration F
  * is again pointwise and every derivative below is exact for it. What the
  * Jacobian does not carry is R_0's dependence on the field, which the freeze
- * leaves to the next iteration.
+ * leaves to the next iteration. GradShafranovSolver::setMidplaneGaugeKnots()
+ * carries it instead: R_0 at a set of knots become unknowns of the Newton,
+ * crossingThroughKnots() is the table, and crossingDerivatives() the columns.
  *
  * A FIXED CURVE IS A GAUGE TOO, AND IT KEEPS F POINTWISE: Gauge::FixedCurve,
  *
@@ -206,6 +208,26 @@ namespace meq
 	 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
 	 */
 	inline constexpr double labelTolerance = 1.0e-6;
+
+	/**
+	 * R_0( x ) THROUGH ITS VALUES AT @a basis's KNOTS, as the bordered midplane
+	 * gauge's table (GradShafranovSolver::setMidplaneGaugeKnots()): the C^2
+	 * spline of W = R_0^2/2 through W_k = R_0k^2/2, read back as
+	 * R_0 = sqrt( 2W ), R_0' = W'/R_0 and R_0'' = ( W'' - R_0'^2 )/R_0. So
+	 * RotatingSource's half-delta, which reads R_0^2/2, R_0 R_0' and
+	 * R_0'^2 + R_0 R_0'', sees W, W' and W'' to round-off, and
+	 * dW/dR_0k = R_0k phi_k exactly.
+	 *
+	 * W AND NOT R_0 BECAUSE W IS NEARLY LINEAR IN THE FLUX: psi ~ B R^2/2 in a
+	 * uniform field, so the interpolant's h^4 error is set by the field's
+	 * curvature and the plasma's own, not by the square root.
+	 * [M-R0BORDER](MEASUREMENTS.md#m-r0border) measures the two.
+	 *
+	 * @throws std::invalid_argument for a null basis, a count that is not its
+	 *         size, or a crossing that is not finite and positive.
+	 */
+	std::shared_ptr<Profile const> crossingThroughKnots(
+		std::shared_ptr<CardinalSpline const> basis, std::vector<double> const &crossings );
 
 	/**
 	 * Sum_s Z_s n_s0( psi ), which charge neutrality on R = R_ref requires to
@@ -427,6 +449,28 @@ namespace meq
 			/// The table setMidplaneCrossing() last gave, or null.
 			Profile const *midplaneCrossing() const;
 
+			/**
+			 * dF/dW AND dF/dW' AT FIXED ( R, psi ), W( psi ) = R_0( psi )^2/2
+			 * the HALF SQUARED CROSSING -- the derivatives of f() with respect
+			 * to the table's value and slope at this point's psi, the other
+			 * profiles and R held. MIRROR-PLAN.md section 5, and the columns of
+			 * the bordered midplane gauge, GradShafranovSolver::
+			 * setMidplaneGaugeKnots(): with R_0 at a set of knots as border
+			 * unknowns, F depends on each knot through W and W' alone, and the
+			 * chain rule through the interpolant is the solver's.
+			 *
+			 * W AND NOT R_0, BECAUSE THE EXPONENT READS W. The half-delta is
+			 * h = R^2/2 - W and h' = -W', so f() reads the table through W and W'
+			 * and nothing else -- R_0'' enters dFdPsi() only. Analytic: the
+			 * closed form's shared exponent is C h, and the root find's is
+			 * differentiated implicitly through (97) as dPotentialDPsi() is.
+			 *
+			 * @throws std::logic_error under Gauge::FixedRadius, whose F reads no
+			 *         crossing, and as halfDelta() does before a table is set.
+			 */
+			void crossingDerivatives( double radius, double psi, double &dFdW,
+			                          double &dFdWPrime ) const;
+
 			/// F at ( R, z ) for the flux value psi, in the units of
 			/// meq::Source::f: mu0 R^2 dp/dpsi|_r + g g', no 1/R applied.
 			double f( double radius, double z, double psi ) const override;
@@ -592,6 +636,18 @@ namespace meq
 			 */
 			void setMidplaneField( MidplaneField const &field, double rMin,
 			                       double rMax ) override;
+
+			/// R_0( Psi ) handed to the source underneath as it stands -- the
+			/// bordered gauge's interpolant through its knots. In Psi, for the
+			/// reason setMidplaneField() tabulates in Psi.
+			/// @throws std::logic_error under Gauge::FixedRadius.
+			void setMidplaneCrossing( std::shared_ptr<Profile const> crossing ) override;
+
+			/// RotatingSource::crossingDerivatives() at Psi, times the scale and
+			/// over the span as f() is; zero outside the plasma.
+			/// @throws std::logic_error under Gauge::FixedRadius.
+			bool crossingDerivatives( double radius, double z, double psi,
+			                          double &dFdW, double &dFdWPrime ) const override;
 
 			/// Both honour setPlasmaSupport(): `F` and `dF/dpsi` are zero
 			/// wherever `Psi <= 0`, as meq::NormalisedMHDSource's are -- and,

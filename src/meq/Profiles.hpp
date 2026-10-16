@@ -373,6 +373,101 @@ namespace meq
 	/// Write a profile in the format SplineProfile::fromStream() reads.
 	std::ostream & operator<<( std::ostream & os, SplineProfile const & profile );
 
+
+	/**
+	 * THE NOT-A-KNOT CUBIC SPLINE THROUGH VALUES AT UNIFORM KNOTS, AS A LINEAR
+	 * MAP OF THOSE VALUES: its CARDINAL BASIS, phi_k( x ) being the spline
+	 * through one at knot k and zero at every other.
+	 *
+	 * WHY IT EXISTS BESIDE SplineProfile. A Hermite table takes its slopes as
+	 * data, so a function of its knot VALUES alone has to make the slopes up,
+	 * and the interpolant is then C^1 with a second derivative that jumps at
+	 * every knot. This one is C^2 and depends on the values and nothing else:
+	 * f( x ) = sum_k f_k phi_k( x ) exactly, so d f( x )/d f_k = phi_k( x ) at
+	 * every derivative level. That is what the bordered midplane gauge needs
+	 * of its crossings when R_0 at the knots are unknowns of the Newton
+	 * (GradShafranovSolver::setMidplaneGaugeKnots()): the source's column for
+	 * knot k is the chain rule through phi_k, and phi_k is this.
+	 *
+	 * NOT-A-KNOT and not natural: a natural spline puts f'' = 0 at both ends,
+	 * which is an O( h^2 ) error there; not-a-knot keeps the O( h^4 ) of the
+	 * interior to the ends. Each phi_k spans the whole range, decaying by about
+	 * 2 - sqrt( 3 ) = 0.27 a knot away from k.
+	 *
+	 * Outside [ lower, upper ] the value is clamped to the nearer end and both
+	 * derivatives are zero -- SplineProfile's convention.
+	 */
+	class CardinalSpline
+	{
+		public:
+			/// @throws std::invalid_argument for fewer than four knots, which
+			///         not-a-knot needs, or a range that is not finite and
+			///         increasing.
+			CardinalSpline( double lower, double upper, std::size_t knots );
+
+			std::size_t size() const;
+			double lower() const;
+			double upper() const;
+			/// The k-th knot's abscissa, lower + k ( upper - lower )/( size - 1 ).
+			double knot( std::size_t k ) const;
+
+			/**
+			 * phi_k( x ), phi_k'( x ) and phi_k''( x ) for every k, into arrays
+			 * of size() entries; any of the three may be null.
+			 */
+			void basis( double x, double *value, double *slope, double *curvature ) const;
+
+			/// The spline's knot second derivatives, sum_j A_kj f_j: what
+			/// evaluate() reads, so a caller holding values takes them once.
+			std::vector<double> curvatures( std::vector<double> const &values ) const;
+
+			/// The spline through @a values, whose curvatures() are
+			/// @a curvatures, and its two derivatives at x.
+			void evaluate( std::vector<double> const &values,
+			               std::vector<double> const &curvatures, double x,
+			               double &value, double &slope, double &curvature ) const;
+
+		private:
+			// The interval holding x, clamped into [ 0, size - 2 ].
+			std::size_t interval( double x ) const;
+
+			double xLower, xUpper, spacing;
+			std::size_t count;
+			// A_kj, row k: the knot curvature M_k as a combination of the
+			// values. Dense and K^2, since every phi_j reaches every knot.
+			std::vector<double> curvatureMap;
+	};
+
+	/**
+	 * A meq::CardinalSpline through given values, as a meq::Profile.
+	 *
+	 * The curvatures are taken once at construction, so an evaluation is one
+	 * interval's cubic. Shares its basis by pointer: the bordered midplane
+	 * gauge builds one of these per Newton trial on the same knots.
+	 */
+	class CardinalSplineProfile : public Profile
+	{
+		public:
+			/// @throws std::invalid_argument for a null basis or a value count
+			///         that is not its size().
+			CardinalSplineProfile( std::shared_ptr<CardinalSpline const> basis,
+			                       std::vector<double> values );
+
+			double operator()( double psi ) const override;
+			double prime( double psi ) const override;
+			/// Continuous: the spline is C^2, so unlike SplineProfile's this does
+			/// not jump at a knot.
+			double doublePrime( double psi ) const override;
+
+			CardinalSpline const & basis() const;
+			std::vector<double> const & values() const;
+
+		private:
+			std::shared_ptr<CardinalSpline const> splineBasis;
+			std::vector<double> valueData;
+			std::vector<double> curvatureData;
+	};
+
 }
 
 #endif // MEQ_PROFILES_HPP

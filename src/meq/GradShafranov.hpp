@@ -1791,6 +1791,90 @@ namespace meq
 			/// solver's lifetime; what a test asserts "once" with.
 			int vacuumGaugeInstalls() const;
 
+			/**
+			 * THE MIDPLANE GAUGE WITH ITS CROSSINGS AS BORDER UNKNOWNS, so that
+			 * Newton is quadratic where the frozen refresh is linear.
+			 * MIRROR-PLAN.md section 5; [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+			 *
+			 * With @a knots >= 4, R_0 at @a knots uniform knots Psi_k over
+			 * [ 0, 1 ] are unknowns of the bordered Newton beside psi_ax,
+			 * psi_bnd and the exterior modes, and the source's table at every
+			 * residual -- line-search trials included -- is the C^2
+			 * meq::CardinalSpline through W_k = R_0k^2/2, W being what the
+			 * exponent reads. So F is pointwise in ( R, z, psi ) and the knots,
+			 * and the Jacobian is the whole one:
+			 *
+			 *   row k     psi( R_0k, 0 ) - psi_bnd - Psi_k ( psi_ax - psi_bnd ) = 0,
+			 *             psi along z = 0 as midplaneField() reads it -- psi_h at
+			 *             the midplane's first point plus R q_R integrated --
+			 *             so its covector is the anchor's shape functions and
+			 *             the integration weights on q, its corner is
+			 *             dpsi/dR there against R_0k and -Psi_k, -( 1 - Psi_k )
+			 *             against the labels;
+			 *   column k  dR/dR_0k, the assembly of
+			 *             ( dF/dW phi_k + dF/dW' phi_k' ) R_0k from
+			 *             NormalisedSource::crossingDerivatives().
+			 *
+			 * K more backsolves a step against the one factorisation, which is
+			 * what it costs. Zero, the default, is the frozen refresh exactly as
+			 * midplaneGaugeRefreshes() describes it. solve() refuses knots for a
+			 * source that does not read the midplane, a prescribed plasma
+			 * current beside them -- whose row reads the crossings and has no
+			 * corner against them here -- and a source whose
+			 * crossingDerivatives() cannot answer. Under an mfem::Device the
+			 * border's dot products take the host route, the crossing rows
+			 * having no device twin.
+			 *
+			 * The knots start at setMidplaneCrossingInitial()'s table if one was
+			 * given and otherwise at the starting iterate's own crossings, found
+			 * as the refresh finds them; the precondition is checked there and
+			 * again on the converged answer, which may not converge on
+			 * crossings its own field could not give.
+			 *
+			 * @throws std::invalid_argument for 1, 2 or 3 knots, or a negative
+			 *         count.
+			 */
+			void setMidplaneGaugeKnots( int knots );
+
+			/// setMidplaneGaugeKnots()'s count; zero for the frozen refresh.
+			int midplaneGaugeKnots() const;
+
+			/**
+			 * WHERE THE BORDERED GAUGE'S KNOTS START: R_0( Psi ) sampled at the
+			 * knots, in place of the starting iterate's crossings. What a start
+			 * from another solve hands over -- a solve in a fixed-curve gauge
+			 * close to the answer, or the frozen iteration's own table --
+			 * beside setInitialState(). Read by every solve with knots until a
+			 * null clears it.
+			 */
+			void setMidplaneCrossingInitial( std::shared_ptr<Profile const> crossing );
+
+			/// R_0 at the bordered gauge's knots where the last solve left them;
+			/// empty after a solve without them.
+			std::vector<double> const &midplaneGaugeCrossings() const;
+
+			/**
+			 * THE WHOLE ITERATE TO START THE NEXT SOLVE FROM: ( q, psi, psihat )
+			 * as state() returned it from a solve on this mesh, and the exterior
+			 * coefficients as exteriorCoefficients() did. Overrides the initial
+			 * guess's seeding at the next solve's preparation and is consumed by
+			 * that solve; the labels are setSource()'s guess and
+			 * setBoundaryFluxInitial(), as on every solve. So a solve in one
+			 * gauge can be continued in another on a solver of its own -- one
+			 * solver holds one source -- with nothing re-derived from psi_h.
+			 *
+			 * @throws std::invalid_argument for a coefficient count that is not
+			 *         the exterior coupling's mode count (zero without one).
+			 *         A state of the wrong size is refused at the solve, which
+			 *         is where the mesh is known.
+			 */
+			void setInitialState( mfem::Vector const &state,
+			                      std::vector<double> const &exteriorCoefficients );
+
+			/// The whole iterate ( q, psi, psihat ) after solve(), for
+			/// setInitialState() on another solver over the same mesh.
+			mfem::Vector const &state() const;
+
 			/// Elements the fill reached: the plasma. Zero when no fill is live.
 			int plasmaComponentElements() const;
 
@@ -4734,6 +4818,9 @@ namespace meq
 				/// IV-3's targets, `gamma` times their weighted norm: the share of
 				/// the merit an inverse solve's targets carry. Zero without one.
 				double targets = 0.0;
+				/// gamma * || G_k ||, the bordered midplane gauge's crossing rows
+				/// together -- setMidplaneGaugeKnots(). Zero without them.
+				double gauge = 0.0;
 				/// The damping finally applied, 1.0 for a full Newton step.
 				double damping = 0.0;
 				/// Which linearisation the field block of this step's Jacobian
@@ -5536,10 +5623,6 @@ namespace meq
 			bool midplaneReference( int element, double radius,
 			                        mfem::IntegrationPoint &reference ) const;
 
-			/// The field along `z = 0` of @a state, which it reads by reference.
-			/// What refreshMidplaneGauge() and midplaneField() both hand out.
-			MidplaneField midplaneFieldOf( mfem::Vector const &state ) const;
-
 			/// midplaneGaugeRefreshes() and midplaneGaugeHolds().
 			int midplaneRefreshCount = 0;
 			int midplaneHoldCount = 0;
@@ -5565,6 +5648,17 @@ namespace meq
 			double midplaneRMax = 0.0;
 			/// The last sampled radius found in the mesh: the field ends there.
 			double midplaneRunEnd = 0.0;
+
+			/// setMidplaneGaugeKnots(), setMidplaneCrossingInitial() and
+			/// midplaneGaugeCrossings().
+			int midplaneGaugeKnotCount = 0;
+			std::shared_ptr<Profile const> midplaneCrossingStart;
+			std::vector<double> midplaneGaugeCrossingValues;
+
+			/// setInitialState(), consumed by the next solve.
+			mfem::Vector initialStateValue;
+			std::vector<double> initialStateCoefficients;
+			bool initialStateGiven = false;
 
 			/// setLimiterConstraint().
 			LimiterConstraint limiterConstraintChoice = LimiterConstraint::ExactPoint;
@@ -5859,6 +5953,41 @@ namespace meq
 			bool assembleNormalisationColumn( mfem::Vector const &state,
 			                                  bool axis,
 			                                  mfem::Vector &out ) const;
+
+			/**
+			 * psi( R, 0 ) AS A COVECTOR ON THE WHOLE STATE, midplaneFieldOf()'s
+			 * own sum written out: the anchor's potential shape functions, then
+			 * every panel's Gauss-Legendre weights times r against the flux
+			 * block's R component -- DarcyForm's -q undone -- up to @a radius.
+			 * psi_c( R, 0 ) is not in it; the field adds it exactly. The
+			 * bordered gauge's rows. Indices are into the state, and an index
+			 * appears once.
+			 *
+			 * @return false where ( R, 0 ) is not on the midplane's runs, which
+			 *         a solve that reads the midplane builds.
+			 */
+			bool midplaneCovector( double radius, std::vector<int> &dofs,
+			                       std::vector<double> &weights ) const;
+
+			/// The field along `z = 0` of @a state, which it reads by reference:
+			/// what refreshMidplaneGauge() and midplaneField() both hand out, and
+			/// what the bordered gauge's rows are read off. Like
+			/// midplaneCovector(), on the runs a solve that reads the midplane
+			/// builds.
+			MidplaneField midplaneFieldOf( mfem::Vector const &state ) const;
+
+			/**
+			 * THE BORDERED GAUGE'S COLUMNS, dR/dR_0k for every knot, into the
+			 * potential block as assembleNormalisationColumn() puts dR/ds:
+			 * -w ( dF/dR_0k )/R against the shape functions, by
+			 * SourceIntegrator's rule, at the normalisation and table in force.
+			 *
+			 * @return false if the source's crossingDerivatives() refuses.
+			 */
+			bool assembleGaugeColumns( mfem::Vector const &state,
+			                           CardinalSpline const &basis,
+			                           std::vector<double> const &crossings,
+			                           std::vector<mfem::Vector> &out ) const;
 
 			/// `int F_plasma/R` over the domain at @a state, i.e. `mu0 I_p`.
 			double assemblePlasmaCurrent( mfem::Vector const &state ) const;

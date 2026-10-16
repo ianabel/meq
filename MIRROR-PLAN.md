@@ -309,6 +309,25 @@ in 14 linear steps at level 1 — then stall at 3e19 on level 1. Differencing th
 border columns, or taking `F` at the labels down to 1e-13 of its peak, leaves
 every stall where it was. → [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)
 
+**THE CROSSINGS AS BORDER UNKNOWNS — BUILT, QUADRATIC, AND IT DOES NOT LIFT THE
+STALL** → [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+`GradShafranovSolver::setMidplaneGaugeKnots( K )` makes `R₀` at `K` knots in `Ψ`
+unknowns beside the labels and the exterior modes, the table the `C²` spline of
+`R₀²/2` through them, one row per knot — `ψ( R₀ₖ, 0 ) = ψ_bnd + Ψₖ( ψ_ax − ψ_bnd )`,
+`ψ` along the midplane as the refresh reads it. geq's problem converges in 3
+steps where the frozen refresh takes 6, from the vacuum or in 2 from the frozen
+answer perturbed, and three species at 5e18 in 3 where it takes 7. **The
+stall above is not the freeze**: at 2e19 and 5e19 the bordered gauge stalls at
+the same merit from every start tried, and by continuation in the peak both
+routes fail together between 1.63e19 and 1.67e19 with the border's condition
+flat. The label floor and a second support region are ruled out too. **M-278
+§2's six steps with the vacuum's table held are not this tree's**: held, it
+converges in the fixed radius's 3, so a fixed table's Jacobian is the whole
+one. The library carries both routes; `meq` uses the frozen refresh and has no
+key for the bordered one, which moves the answer by the interpolant's error and
+so is a choice of discrete problem. `setInitialState()` and
+`setMidplaneCrossingInitial()` take a start from another solve.
+
 **THE INTERFACE SHAPE** is a gauge policy on the source rather than a second
 class — `enum class Gauge { FixedRadius, Midplane, FixedCurve }`, `FixedRadius` carrying
 today's `referenceRadius` and remaining the default so every tokamak caller is

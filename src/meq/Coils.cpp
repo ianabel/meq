@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 /*
  * WHAT IS DECIDED IN THIS FILE, AND WHY EACH WAY
@@ -1830,6 +1831,17 @@ namespace meq
 	                                                             double psiBoundary )
 	{
 		plasmaSource->setVacuumMidplaneField( field, rMin, rMax, psiAxis, psiBoundary );
+	}
+
+	void CoilAugmentedNormalisedSource::setMidplaneCrossing( std::shared_ptr<Profile const> crossing )
+	{
+		plasmaSource->setMidplaneCrossing( std::move( crossing ) );
+	}
+
+	bool CoilAugmentedNormalisedSource::crossingDerivatives( double radius, double z, double psi,
+	                                                         double &dFdW, double &dFdWPrime ) const
+	{
+		return plasmaSource->crossingDerivatives( radius, z, psi, dFdW, dFdWPrime );
 	}
 
 	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }

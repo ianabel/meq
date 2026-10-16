@@ -654,8 +654,12 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	# frozen table was not, three species at M = 6, and the true-midplane
 	# densities relabelled off the answer posing the same plasma.
 	add_test(NAME RotatingMirrorVacuumGauge COMMAND RotatingMirror --run_test=vacuum_gauge)
+	# The same gauge with its crossings as border unknowns of the Newton --
+	# GradShafranovSolver::setMidplaneGaugeKnots() -- against the frozen
+	# refresh, and geq. Its own suite and mesh stem, so it runs beside the rest.
+	add_test(NAME RotatingMirrorBorder COMMAND RotatingMirror --run_test=border)
 	set_tests_properties(RotatingMirror RotatingMirrorResolution RotatingMirrorMidplane
-		RotatingMirrorVacuumGauge PROPERTIES
+		RotatingMirrorVacuumGauge RotatingMirrorBorder PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
 	# binary, against the library on geq's problem. It needs the driver and its

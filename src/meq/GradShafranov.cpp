@@ -24,6 +24,9 @@
 // samplerInsideTolerance() -- locatePotentialPoint() asks the same question
 // meq::GridSampler does, so it uses the same expression. M-165, M-221.
 #include "Sampler.hpp"
+// The bordered midplane gauge: the crossings' root find for its start and the
+// table through its knots.
+#include "RotatingSource.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -5840,6 +5843,21 @@ namespace
 				seedFluxFromGuess( *initialGuessField );
 		}
 
+		/*
+		 * setInitialState()'s WHOLE ITERATE, OVER THE GUESS: q, psi and psihat as
+		 * another solve left them, so a continuation re-derives nothing from
+		 * psi_h. The essential trace values are re-imposed below as on every
+		 * preparation, and they are the values that solve had.
+		 */
+		if ( initialStateGiven && seedFromGuess )
+		{
+			if ( initialStateValue.Size() != solution.Size() )
+				throw std::invalid_argument( "meq::GradShafranovSolver::prepare: setInitialState() gave "
+					+ std::to_string( initialStateValue.Size() ) + " entries for a state of "
+					+ std::to_string( solution.Size() ) + "; it belongs to another mesh or order" );
+			static_cast<mfem::Vector &>( solution ) = initialStateValue;
+		}
+
 		// The Dirichlet datum lives on the trace, and only on the trace: the flux
 		// right hand side stays zero because the essential trace condition, not a
 		// boundary linear form, is what imposes psi = g_D here. On the non-linear
@@ -6742,6 +6760,9 @@ namespace
 
 	MidplaneField GradShafranovSolver::midplaneFieldOf( mfem::Vector const &state ) const
 	{
+		// Public, so a caller can arrive before any run exists.
+		if ( midplaneRunStart.empty() )
+			throw std::logic_error( "meq::GradShafranovSolver::midplaneFieldOf: the runs along z = 0 are not built; a solve that reads the midplane, or midplaneField(), builds them" );
 		/*
 		 * THE FLUX ALONG z = 0 IS INTEGRATED FROM THE SOLVED q, NOT READ OFF
 		 * psi_h, AND THAT IS MEASURED RATHER THAN A PREFERENCE.
@@ -6910,6 +6931,51 @@ namespace
 		rMin = midplaneRMin;
 		rMax = midplaneRMax;
 		return midplaneFieldOf( solution );
+	}
+
+	void GradShafranovSolver::setMidplaneGaugeKnots( int knots )
+	{
+		if ( knots < 0 || ( knots > 0 && knots < 4 ) )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setMidplaneGaugeKnots: zero for the frozen refresh, or at least four knots, which the not-a-knot interpolant needs" );
+		midplaneGaugeKnotCount = knots;
+	}
+
+	int GradShafranovSolver::midplaneGaugeKnots() const
+	{
+		return midplaneGaugeKnotCount;
+	}
+
+	void GradShafranovSolver::setMidplaneCrossingInitial( std::shared_ptr<Profile const> crossing )
+	{
+		midplaneCrossingStart = std::move( crossing );
+	}
+
+	std::vector<double> const &GradShafranovSolver::midplaneGaugeCrossings() const
+	{
+		return midplaneGaugeCrossingValues;
+	}
+
+	void GradShafranovSolver::setInitialState( mfem::Vector const &state,
+	                                           std::vector<double> const &exteriorCoefficients )
+	{
+		std::size_t const modes = exteriorCoupling
+		                          ? static_cast<std::size_t>( exteriorCoupling->modeCount() ) : 0;
+		if ( exteriorCoefficients.size() != modes )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setInitialState: "
+				+ std::to_string( exteriorCoefficients.size() ) + " exterior coefficients for "
+				+ std::to_string( modes ) + " modes; set the exterior coupling first" );
+		state.HostRead();
+		initialStateValue.SetSize( state.Size() );
+		initialStateValue = state;
+		initialStateCoefficients = exteriorCoefficients;
+		initialStateGiven = true;
+		prepared = false;
+	}
+
+	mfem::Vector const &GradShafranovSolver::state() const
+	{
+		solution.HostRead();
+		return solution;
 	}
 
 	void GradShafranovSolver::buildConductorNodalCache()
@@ -9071,6 +9137,193 @@ namespace
 				columns.back()( i ) = -load( i );
 		}
 		return true;
+	}
+
+	bool GradShafranovSolver::midplaneCovector( double radius, std::vector<int> &dofs,
+	                                            std::vector<double> &weights ) const
+	{
+		dofs.clear();
+		weights.clear();
+		if ( midplaneRunStart.empty()
+		     || !( radius >= midplaneRunStart.front() && radius <= midplaneRunEnd ) )
+			return false;
+
+		/*
+		 * midplaneFieldOf()'s SUM, TERM BY TERM: psi_h at the first run's start
+		 * through its element's potential shape functions, then each panel
+		 * from its start to the next one's -- or to @a radius on the last --
+		 * by the same Gauss-Legendre rule, r q_R( r ) with q_R the flux block's
+		 * R component negated. The rows are therefore the derivative of that
+		 * field's psi with respect to the state, exactly: it is linear in it.
+		 */
+		mfem::IntegrationPoint reference;
+		{
+			int const element = midplaneRunElement.front();
+			midplaneReference( element, midplaneRunStart.front(), reference );
+			mfem::FiniteElement const *fe = potentialFes->GetFE( element );
+			mfem::Vector shape( fe->GetDof() );
+			fe->CalcShape( reference, shape );
+			mfem::Array<int> elementDofs;
+			potentialFes->GetElementDofs( element, elementDofs );
+			for ( int i = 0; i < elementDofs.Size(); ++i )
+			{
+				dofs.push_back( blockOffsets[ 1 ] + elementDofs[ i ] );
+				weights.push_back( shape( i ) );
+			}
+		}
+
+		mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::SEGMENT,
+			2*( order() + 1 ) + 3 );
+		std::size_t const last = static_cast<std::size_t>(
+			std::upper_bound( midplaneRunStart.begin(), midplaneRunStart.end(), radius )
+			- midplaneRunStart.begin() - 1 );
+		mfem::Vector shape;
+		mfem::Array<int> fluxDofs;
+		for ( std::size_t run = 0; run <= last; ++run )
+		{
+			int const element = midplaneRunElement[ run ];
+			double const from = midplaneRunStart[ run ];
+			double const to = run == last ? radius : midplaneRunStart[ run + 1 ];
+			mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+			shape.SetSize( fluxFe->GetDof() );
+			fluxFes->GetElementDofs( element, fluxDofs );
+			fluxFes->DofsToVDofs( 0, fluxDofs );
+			std::vector<double> local( static_cast<std::size_t>( fluxDofs.Size() ), 0.0 );
+			for ( int i = 0; i < rule.GetNPoints(); ++i )
+			{
+				double const r = from + ( to - from )*rule.IntPoint( i ).x;
+				midplaneReference( element, r, reference );
+				fluxFe->CalcShape( reference, shape );
+				double const w = rule.IntPoint( i ).weight*( to - from )*r;
+				for ( int j = 0; j < fluxDofs.Size(); ++j )
+					local[ static_cast<std::size_t>( j ) ] -= w*shape( j );
+			}
+			for ( int j = 0; j < fluxDofs.Size(); ++j )
+			{
+				dofs.push_back( fluxDofs[ j ] );
+				weights.push_back( local[ static_cast<std::size_t>( j ) ] );
+			}
+		}
+		return true;
+	}
+
+	bool GradShafranovSolver::assembleGaugeColumns( mfem::Vector const &state,
+	                                                CardinalSpline const &basis,
+	                                                std::vector<double> const &crossings,
+	                                                std::vector<mfem::Vector> &out ) const
+	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds,
+		                      profile.borderAssemblyCalls );
+		std::size_t const knots = basis.size();
+		out.resize( knots );
+		for ( mfem::Vector &column : out )
+		{
+			column.SetSize( state.Size() );
+			zeroOnHost( column );
+		}
+		countedHostRead( state, __LINE__ );
+
+		double const axis = normalisedSource->normalisation();
+		double const boundary = normalisedSource->boundaryNormalisation();
+		double const span = axis - boundary;
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		int const potentialStart = blockOffsets[ 1 ];
+		int const elementTotal = mesh.GetNE();
+		std::exception_ptr failure;
+		int refused = 0;
+
+		/*
+		 * dF/dR_0k = ( dF/dW phi_k( Psi ) + dF/dW' phi_k'( Psi ) ) R_0k, since
+		 * W = sum_j R_0j^2 phi_j/2 -- the chain rule through the interpolant,
+		 * and the only place the representation enters. Every phi_k reaches
+		 * every Psi, so a quadrature point adds to every column; the scatter is
+		 * into each element's own potential dofs, disjoint across elements, so
+		 * threaded it is bit-identical to serial as assembleNormalisationColumn()
+		 * is.
+		 */
+		MEQ_OMP_ELEMENT_LOOP
+		for ( int e = 0; e < elementTotal; ++e )
+		{
+			try
+			{
+				if ( !elementInPlasma( e ) )
+					continue;
+
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				mfem::ElementTransformation &tr = scratch;
+
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
+				std::vector<double> phi( knots ), phiPrime( knots );
+
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
+
+				// SourceIntegrator's rule, for assembleNormalisationColumn()'s
+				// reason: the column of the ASSEMBLED residual.
+				int const quadratureOrder = 2*el.GetOrder() + tr.OrderW()
+				                            + sourceQuadratureExtra;
+				mfem::IntegrationRule const &ir =
+					mfem::IntRules.Get( el.GetGeomType(), quadratureOrder );
+
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					tr.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					tr.Transform( ip, point );
+
+					double const radius = point( 0 );
+					double const z = point( 1 );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
+
+					double dFdW = 0.0, dFdWPrime = 0.0;
+					if ( !normalisedSource->crossingDerivatives( radius, z, psi, dFdW, dFdWPrime ) )
+					{
+						MEQ_OMP( atomic write )
+						refused = 1;
+						break;
+					}
+					if ( dFdW == 0.0 && dFdWPrime == 0.0 )
+						continue;
+
+					basis.basis( ( psi - boundary )/span, phi.data(), phiPrime.data(), nullptr );
+					double const weight = ip.weight*tr.Weight();
+					for ( std::size_t k = 0; k < knots; ++k )
+					{
+						double const derivative = ( dFdW*phi[ k ] + dFdWPrime*phiPrime[ k ] )*crossings[ k ];
+						if ( derivative == 0.0 )
+							continue;
+						// SourceIntegrator's -w F/R, differentiated.
+						double const factor = -weight*derivative/radius;
+						mfem::Vector &column = out[ k ];
+						for ( int j = 0; j < dof; ++j )
+							column( potentialStart + dofs[ j ] ) += factor*shape( j );
+					}
+				}
+			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
+			}
+		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
+		return refused == 0;
 	}
 
 	bool GradShafranovSolver::assembleNormalisationColumn( mfem::Vector const &state,
@@ -11896,10 +12149,113 @@ namespace
 		// the source's life, and never refreshed below. A no-op otherwise.
 		installVacuumGauge();
 		bool const midplaneGauge = normalisedSource && normalisedSource->readsMidplane();
+
+		/*
+		 * OR THE CROSSINGS AS BORDER UNKNOWNS -- setMidplaneGaugeKnots(),
+		 * [M-R0BORDER](MEASUREMENTS.md#m-r0border). R_0 at K knots in Psi, the
+		 * source's table the interpolant through them at every residual, and
+		 * one row per knot:
+		 *
+		 *     G_k = psi( R_0k, 0 ) - psi_bnd - Psi_k ( psi_ax - psi_bnd ),
+		 *
+		 * psi along z = 0 as midplaneFieldOf() reads it. In psi's units, like
+		 * the label rows, so gamma weighs them as it weighs those. Placed after
+		 * the exterior modes in the border, so every index below nBorders +
+		 * nModes means what it meant.
+		 */
+		int const nGauge = midplaneGauge ? midplaneGaugeKnotCount : 0;
+		bool const gaugeBordered = nGauge > 0;
+		std::shared_ptr<CardinalSpline const> gaugeBasis;
+		std::vector<double> gaugeR;
+		std::vector<double> gaugeConstraint( static_cast<std::size_t>( nGauge ), 0.0 );
+		// Per step: the columns dR/dR_0k and their backsolves, each row's
+		// covector on the state, and its corner dpsi/dR at R_0k.
+		std::vector<mfem::Vector> gaugeColumns;
+		std::vector<mfem::Vector> gaugeZ( static_cast<std::size_t>( nGauge ) );
+		std::vector<std::vector<int>> gaugeRowDofs( static_cast<std::size_t>( nGauge ) );
+		std::vector<std::vector<double>> gaugeRowWeights( static_cast<std::size_t>( nGauge ) );
+		std::vector<double> gaugeSlope( static_cast<std::size_t>( nGauge ), 0.0 );
+		midplaneGaugeCrossingValues.clear();
+		// psi( R, 0 ) in Psi at the normalisation in force, as
+		// NormalisedRotatingSource::setMidplaneField() tabulates it.
+		auto normalisedMidplane = [ & ]( mfem::Vector const &state ) -> MidplaneField
+		{
+			MidplaneField const physical = midplaneFieldOf( state );
+			double const base = sB;
+			double const span = s - sB;
+			return [ physical, base, span ]( double radius, double &x, double &dXdR )
+			{
+				double psi = 0.0, slope = 0.0;
+				if ( !physical( radius, psi, slope ) )
+					return false;
+				x = ( psi - base )/span;
+				dXdR = slope/span;
+				return true;
+			};
+		};
+		auto installGauge = [ & ]()
+		{
+			normalisedSource->setMidplaneCrossing( crossingThroughKnots( gaugeBasis, gaugeR ) );
+		};
+		// Every G_k on @a state, at the labels and knots in force. Throws where
+		// a knot has left the midplane, which a trial then counts as a step
+		// that broke the topology.
+		auto gaugeAll = [ & ]( mfem::Vector const &state, std::vector<double> &out )
+		{
+			MidplaneField const field = midplaneFieldOf( state );
+			for ( int k = 0; k < nGauge; ++k )
+			{
+				std::size_t const at = static_cast<std::size_t>( k );
+				double psi = 0.0, slope = 0.0;
+				if ( !field( gaugeR[ at ], psi, slope ) )
+					throw std::runtime_error( "meq::GradShafranovSolver::solve: the midplane gauge's knot "
+						+ std::to_string( k ) + " has its crossing at R = " + std::to_string( gaugeR[ at ] )
+						+ ", off the midplane" );
+				out[ at ] = psi - sB - gaugeBasis->knot( at )*( s - sB );
+			}
+		};
+
 		if ( midplaneGauge )
 		{
 			normalisedSource->setNormalisation( s, sB );
-			refreshMidplaneGauge( unknown );
+			if ( gaugeBordered )
+			{
+				if ( currentIsUnknown )
+					throw std::logic_error( "meq::GradShafranovSolver::solve: the bordered midplane gauge "
+						"with a prescribed plasma current is not implemented -- int F/R reads the crossings, "
+						"and its corner against them is not assembled. setMidplaneGaugeKnots( 0 ) is the "
+						"frozen refresh, which carries a current" );
+				double probeW = 0.0, probeWPrime = 0.0;
+				if ( !normalisedSource->crossingDerivatives( 1.0, 0.0, 0.0, probeW, probeWPrime ) )
+					throw std::logic_error( "meq::GradShafranovSolver::solve: setMidplaneGaugeKnots() needs "
+						"the source's crossingDerivatives() for its columns, and this source does not supply "
+						"them" );
+				buildMidplaneRuns();
+				gaugeBasis = std::make_shared<CardinalSpline const>( 0.0, 1.0,
+					static_cast<std::size_t>( nGauge ) );
+				gaugeR.resize( static_cast<std::size_t>( nGauge ) );
+				if ( midplaneCrossingStart )
+				{
+					for ( std::size_t k = 0; k < gaugeR.size(); ++k )
+						gaugeR[ k ] = ( *midplaneCrossingStart )( gaugeBasis->knot( k ) );
+				}
+				else
+				{
+					// The starting iterate's crossings, found as the refresh
+					// finds them -- which checks the precondition on it.
+					countedHostRead( unknown, __LINE__ );
+					std::shared_ptr<SplineProfile const> const start = tabulateMidplaneCrossing(
+						normalisedMidplane( unknown ), midplaneRMin, midplaneRMax, 0.0, 1.0,
+						static_cast<unsigned int>( nGauge - 1 ) );
+					for ( std::size_t k = 0; k < gaugeR.size(); ++k )
+						gaugeR[ k ] = start->knots()[ k ].value;
+					++midplaneRefreshCount;
+				}
+				installGauge();
+				gaugeAll( unknown, gaugeConstraint );
+			}
+			else
+				refreshMidplaneGauge( unknown );
 		}
 		fieldResidual( unknown, s, residual );
 
@@ -12524,6 +12880,11 @@ namespace
 				                 *targetValues[ static_cast< std::size_t >( m ) ];
 				total += gamma*gamma*v*v;
 			}
+			// The bordered gauge's rows, flux like the labels'. READ FROM
+			// gaugeConstraint, as the targets are, which every caller refreshes
+			// on the state it measures; empty without them.
+			for ( double v : gaugeConstraint )
+				total += gamma*gamma*v*v;
 			return std::sqrt( total );
 		};
 
@@ -12678,6 +13039,13 @@ namespace
 			// vanishes identically and q_h( x ) = 0 wherever x is. They are
 			// therefore absent from the reference by arithmetic rather than by
 			// omission, and the target this sets is the field's and psi's.
+			//
+			// THE BORDERED GAUGE'S ROWS ARE ABSENT BY OMISSION, deliberately:
+			// the cold state has no midplane flux but psi_c's, and a crossing
+			// row read there measures the coils rather than the problem. So
+			// the target is the one the frozen refresh sets on the same plasma.
+			std::vector<double> const gaugeHeld = gaugeConstraint;
+			std::fill( gaugeConstraint.begin(), gaugeConstraint.end(), 0.0 );
 			reference = augmentedNorm( coldResidual.Norml2(),
 			                           hasNormalisation ? s - coldPeak : 0.0,
 			                           boundaryFluxIsUnknown
@@ -12686,6 +13054,7 @@ namespace
 			                             ? assemblePlasmaCurrent( coldState )
 			                               - targetMuZeroCurrent : 0.0,
 			                           coldModes );
+			gaugeConstraint = gaugeHeld;
 		}
 		/*
 		 * AND THE ITERATE IS *NOT* RE-ESTABLISHED AFTER IT, WHICH IS A MEASURED
@@ -12859,6 +13228,9 @@ namespace
 
 		// Back on the iterate, after the cold reference read them at zero.
 		targetsAll( unknown, targetValues );
+		// And the bordered gauge's, on the iterate as it now stands.
+		if ( gaugeBordered )
+			gaugeAll( unknown, gaugeConstraint );
 
 		/// `gamma^2 sum ( w_m T_m )^2`: the targets' share of the merit, squared.
 		auto targetMeritSquared = [ & ]()
@@ -12927,7 +13299,10 @@ namespace
 			 * state could not have given. The starting state's refresh, above
 			 * the loop, refuses at once.
 			 */
-			if ( midplaneGauge && iteration > 0 )
+			//
+			// NOT UNDER THE BORDERED GAUGE, whose table is its knots: they and
+			// their rows are taken with every other border below.
+			if ( midplaneGauge && !gaugeBordered && iteration > 0 )
 			{
 				normalisedSource->setNormalisation( s, sB );
 				try
@@ -12987,6 +13362,12 @@ namespace
 					}
 					record.targets = gamma*std::sqrt( squared );
 				}
+				{
+					double squared = 0.0;
+					for ( double v : gaugeConstraint )
+						squared += v*v;
+					record.gauge = gamma*std::sqrt( squared );
+				}
 				record.xR = xR;
 				record.xZ = xZ;
 				record.norm = norm;
@@ -13029,6 +13410,24 @@ namespace
 							"iteration converged on midplane crossings its own answer could "
 							"not give, since the midplane gauge's precondition fails there: "
 							+ midplaneHeldReason );
+					// The bordered gauge's knots satisfy their rows, but a fold
+					// BETWEEN them would give a surface two crossings: the
+					// precondition, asked of the answer as the refresh asks it.
+					if ( gaugeBordered )
+					{
+						try
+						{
+							countedHostRead( unknown, __LINE__ );
+							tabulateMidplaneCrossing( normalisedMidplane( unknown ), midplaneRMin,
+								midplaneRMax, 0.0, 1.0, static_cast<unsigned int>( nGauge - 1 ) );
+						}
+						catch ( std::runtime_error const &folded )
+						{
+							throw std::runtime_error( std::string( "meq::GradShafranovSolver::solve: "
+								"the bordered midplane gauge converged on a field whose midplane "
+								"fails the gauge's precondition: " ) + folded.what() );
+						}
+					}
 					inverseTargetsMetValue = true;
 					converged = true;
 					break;
@@ -13518,6 +13917,32 @@ namespace
 				       coilZ[ static_cast<std::size_t>( k ) ] );
 
 			/*
+			 * THE BORDERED GAUGE'S K, at the table and normalisation in force --
+			 * both set above, and the support the residual was taken on. The
+			 * columns are element loops into vectors, so they queue with the
+			 * rest; the rows are the covector of psi( R_0k, 0 ) on the state and
+			 * the field's own dpsi/dR there, the derivative of the same sum.
+			 */
+			if ( gaugeBordered )
+			{
+				if ( !assembleGaugeColumns( unknown, *gaugeBasis, gaugeR, gaugeColumns ) )
+					throw std::logic_error( "meq::GradShafranovSolver::solve: the source's "
+						"crossingDerivatives() refused inside the plasma" );
+				MidplaneField const field = midplaneFieldOf( unknown );
+				for ( int k = 0; k < nGauge; ++k )
+				{
+					std::size_t const at = static_cast<std::size_t>( k );
+					double psi = 0.0;
+					if ( !midplaneCovector( gaugeR[ at ], gaugeRowDofs[ at ], gaugeRowWeights[ at ] )
+					     || !field( gaugeR[ at ], psi, gaugeSlope[ at ] ) )
+						throw std::runtime_error( "meq::GradShafranovSolver::solve: the midplane "
+							"gauge's knot " + std::to_string( k ) + " is off the midplane" );
+					gaugeZ[ at ].SetSize( n );
+					queue( gaugeColumns[ at ], gaugeZ[ at ] );
+				}
+			}
+
+			/*
 			 * THE BORDERED ELIMINATION, IN ITS GENERAL FORM.
 			 *
 			 * The system Newton solves is
@@ -13545,7 +13970,13 @@ namespace
 			 * is a refactor that has to be argued about; keeping the division is
 			 * cheaper than the argument.
 			 */
-			int const nBorderTotal = nBorders + nModes;
+			// The bordered gauge's K last, at gaugeBase onward.
+			int const gaugeBase = nBorders + nModes;
+			int const nBorderTotal = gaugeBase + nGauge;
+			auto isGaugeRow = [ & ]( int i )
+			{
+				return i >= gaugeBase && i < nBorderTotal;
+			};
 			std::vector<double> step( static_cast<std::size_t>( nBorderTotal ), 0.0 );
 			// IV-3: the step in each free circuit current, in amperes.
 			std::vector<double> currentStep( static_cast<std::size_t>( nFree ), 0.0 );
@@ -13623,6 +14054,19 @@ namespace
 				countedHostRead( border, __LINE__ );
 				countedHostRead( borderDofs, __LINE__ );
 
+				// The bordered gauge's: psi( R_0k, 0 )'s covector, exact since
+				// that psi is linear in the state.
+				if ( isGaugeRow( i ) )
+				{
+					std::size_t const at = static_cast<std::size_t>( i - gaugeBase );
+					std::vector<int> const &dofs = gaugeRowDofs[ at ];
+					std::vector<double> const &weights = gaugeRowWeights[ at ];
+					double total = 0.0;
+					for ( std::size_t j = 0; j < dofs.size(); ++j )
+						total += weights[ j ]*v( dofs[ j ] );
+					return total;
+				}
+
 				if ( i == 0 )
 				{
 					double total = 0.0;
@@ -13679,6 +14123,27 @@ namespace
 			// The corner block, row by row.
 			auto cornerEntry = [ & ]( int i, int j )
 			{
+				/*
+				 * THE BORDERED GAUGE'S CORNER. Row k reads its own knot -- through
+				 * psi( R_0k, 0 ), whose slope is dpsi/dR there -- and the two
+				 * labels through Psi_k's flux, and nothing else; and no other row
+				 * reads a knot, since the current row, the one that would, is
+				 * refused beside this gauge.
+				 */
+				if ( isGaugeRow( i ) )
+				{
+					std::size_t const at = static_cast<std::size_t>( i - gaugeBase );
+					double const knot = gaugeBasis->knot( at );
+					if ( j == i )
+						return gaugeSlope[ at ];
+					if ( j == 0 )
+						return -knot;
+					if ( boundaryFluxIsUnknown && j == boundaryIndex )
+						return -( 1.0 - knot );
+					return 0.0;
+				}
+				if ( isGaugeRow( j ) )
+					return 0.0;
 				if ( i < nBorders || j < nBorders )
 				{
 					// THE CURRENT ROW IS NOT DIAGONAL. int F/R depends on
@@ -13749,6 +14214,8 @@ namespace
 			// The constraint residual, row by row.
 			auto constraintAt = [ & ]( int i )
 			{
+				if ( isGaugeRow( i ) )
+					return gaugeConstraint[ static_cast<std::size_t>( i - gaugeBase ) ];
 				if ( i == 0 ) return constraint;
 				if ( boundaryFluxIsUnknown && i == boundaryIndex ) return constraintB;
 				// UNSCALED, where the augmented norm scales it. The equation is
@@ -13762,6 +14229,8 @@ namespace
 			// z_j, the backsolved column.
 			auto columnZ = [ & ]( int j ) -> mfem::Vector const &
 			{
+				if ( isGaugeRow( j ) )
+					return gaugeZ[ static_cast<std::size_t>( j - gaugeBase ) ];
 				if ( j == 0 ) return z;
 				if ( boundaryFluxIsUnknown && j == boundaryIndex ) return zB;
 				/*
@@ -13880,7 +14349,11 @@ namespace
 				&& ( transmissionRows.rowCount() == 0
 				     || transmissionRowsDevice.valid() )
 				&& ( currentRows.rowCount() == 0
-				     || currentRowsDevice.valid() );
+				     || currentRowsDevice.valid() )
+				// The bordered gauge's rows have no device twin -- a RowView
+				// table per step is not built for them -- so its steps take the
+				// host dots, which funnel for themselves.
+				&& !gaugeBordered;
 
 			// Every column of the step is assembled by here, so this is the one
 			// ArrayMult on the ordinary path. See the lambda for what it saves.
@@ -14699,6 +15172,22 @@ namespace
 			double const savedXz = xZ;
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 			std::vector<double> const savedCurrents = freeCircuitCurrentValues;
+			std::vector<double> const savedGaugeR = gaugeR;
+			// The bordered gauge's knots at @a damping, their table installed and
+			// the field moved along their columns -- with every other border, so
+			// the line search compares ONE state.
+			auto applyGauge = [ & ]( double damping )
+			{
+				for ( int k = 0; k < nGauge; ++k )
+				{
+					std::size_t const at = static_cast<std::size_t>( k );
+					double const delta = step[ static_cast<std::size_t>( gaugeBase + k ) ];
+					gaugeR[ at ] = savedGaugeR[ at ] + damping*delta;
+					unknown.Add( -damping*delta, gaugeZ[ at ] );
+				}
+				if ( gaugeBordered )
+					installGauge();
+			};
 
 			double bestNorm = std::numeric_limits<double>::infinity();
 			double bestDamping = 0.0;
@@ -14790,6 +15279,7 @@ namespace
 						}
 						applyFreeCircuitCurrents();
 					}
+					applyGauge( damping );
 
 					// XP-3's two move only themselves -- no field direction to
 					// add -- and are damped with everything else, because the
@@ -14872,6 +15362,8 @@ namespace
 					fieldResidual( unknown, s, residual );
 					transmissionAll( unknown, transmission );
 					targetsAll( unknown, targetValues );
+					if ( gaugeBordered )
+						gaugeAll( unknown, gaugeConstraint );
 					// BOTH constraints, or the line search is blind to the one it
 					// is not told about and will happily accept a step that has
 					// wrecked psi_bnd to improve psi_ax.
@@ -15056,6 +15548,7 @@ namespace
 					}
 					applyFreeCircuitCurrents();
 				}
+				applyGauge( bestDamping );
 				if ( xPointIsUnknown )
 				{
 					xR = savedXr + bestDamping*deltaXr;
@@ -15087,6 +15580,8 @@ namespace
 				fieldResidual( unknown, s, residual );
 				transmissionAll( unknown, transmission );
 				targetsAll( unknown, targetValues );
+				if ( gaugeBordered )
+					gaugeAll( unknown, gaugeConstraint );
 			}
 
 			/*
@@ -15131,6 +15626,9 @@ namespace
 
 		psiAxisValue = s;
 		psiBoundaryValue = sB;
+		// The knots where the solve left them, whose table the source holds.
+		if ( gaugeBordered )
+			midplaneGaugeCrossingValues = gaugeR;
 		// Where the constraint ended up, so a caller can tell a located axis from
 		// the annulus-branch fallback without re-running a search of its own.
 		axisLocatedValue = constraintLocated;
@@ -15183,6 +15681,14 @@ namespace
 
 	void GradShafranovSolver::solve()
 	{
+		// The bordered midplane gauge's knots are crossings of a source that
+		// reads the midplane; on any other they would be a promise not kept.
+		if ( midplaneGaugeKnotCount > 0 && !( normalisedSource && normalisedSource->readsMidplane() ) )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::solve: setMidplaneGaugeKnots() asks for the midplane "
+				"gauge's crossings as border unknowns, and this solve's source reads no midplane "
+				"-- set it on a meq::NormalisedRotatingSource in Gauge::Midplane, or leave it at 0" );
+
 		// IV-3's unknowns are border unknowns, and only the bordered path has a
 		// border. Refused before any dispatch, since two of them return early.
 		if ( ( !freeCircuitList.empty() || !inverseTargetList.empty() )
@@ -15373,7 +15879,13 @@ namespace
 			LegTimer const timer( profile.prepareSeconds,
 			                      profile.prepareCpuSeconds,
 			                      profile.prepareCalls );
+			// setInitialState()'s coefficients BEFORE the preparation, since the
+			// datum it assembles reads them live.
+			if ( initialStateGiven && exteriorCoupling )
+				exteriorCoefficientValues = initialStateCoefficients;
 			prepare();
+			// Consumed by this solve: a later one seeds from the guess again.
+			initialStateGiven = false;
 		}
 
 		if ( normalisedSource || exteriorCoupling )
