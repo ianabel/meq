@@ -2945,6 +2945,10 @@ int main( int argc, char **argv )
 		auto fresh = std::make_unique<meq::GradShafranovSolver>(
 			mesh, config->getDiscretisation().polynomialDegree,
 			config->getDiscretisation().tau );
+		// Before any source, so before the forms can exist; a mesh reaching
+		// R < 0 is refused here with the solver's own message.
+		if ( config->getDiscretisation().tauScaling == meq::TauScalingType::Diffusion )
+			fresh->setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion );
 
 		if ( gammaHMarker )
 			fresh->setExtension( *path, *gammaHMarker );

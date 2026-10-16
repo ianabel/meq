@@ -681,6 +681,46 @@ namespace
 		return tauValue;
 	}
 
+	DiffusionScaledStabilization::DiffusionScaledStabilization( double tau0In )
+		: tau0Value( tau0In )
+	{
+	}
+
+	bool DiffusionScaledStabilization::IsConstant() const
+	{
+		return true;
+	}
+
+	double DiffusionScaledStabilization::at( double radius, double centroidRadius ) const
+	{
+		return tau0Value/( radius > 0.0 ? radius : centroidRadius );
+	}
+
+	mfem::real_t DiffusionScaledStabilization::Eval( mfem::real_t, mfem::real_t, mfem::real_t,
+	                                                 mfem::real_t,
+	                                                 mfem::ElementTransformation &tr ) const
+	{
+		// Stack storage: this is on the element-local hot path -- the
+		// nonlinear residual calls it per face point per evaluation -- and a
+		// default Vector would allocate there.
+		mfem::real_t xData[ 3 ];
+		mfem::Vector x( xData, tr.GetSpaceDim() );
+		tr.Transform( tr.GetIntPoint(), x );
+		if ( x( 0 ) > 0.0 )
+			return static_cast<mfem::real_t>( at( x( 0 ), 0.0 ) );
+		// On the axis. Transform() of another point leaves the transformation's
+		// own integration point, and the Jacobian it caches, alone.
+		mfem::real_t centroidData[ 3 ];
+		mfem::Vector centroid( centroidData, tr.GetSpaceDim() );
+		tr.Transform( mfem::Geometries.GetCenter( tr.GetGeometryType() ), centroid );
+		return static_cast<mfem::real_t>( at( x( 0 ), centroid( 0 ) ) );
+	}
+
+	double DiffusionScaledStabilization::tau0() const
+	{
+		return tau0Value;
+	}
+
 	SourceIntegrator::SourceIntegrator( Source const &sourceIn, int extraOrderIn )
 		: source( &sourceIn ),
 		  normalised( dynamic_cast< NormalisedSource const * >( &sourceIn ) ),
@@ -1166,6 +1206,8 @@ namespace
 		: mesh( meshIn ),
 		  orderValue( orderIn ),
 		  stabilization( tauIn ),
+		  scaledStabilization( tauIn ),
+		  tauScalingChoice( TauScaling::Constant ),
 		  radiusCoefficient( []( mfem::Vector const &x ) { return x( 0 ); } ),
 		  negativeInverseRadius( []( mfem::Vector const &x ) { return -1.0/x( 0 ); } ),
 		  linearSource( nullptr ),
@@ -2254,6 +2296,39 @@ namespace
 	GradShafranovSolver::traceSolver() const
 	{
 		return traceSolverChoice;
+	}
+
+	void GradShafranovSolver::setTauScaling( TauScaling choice )
+	{
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setTauScaling: the forms are already built; tau's scaling is part of the discretisation and has to be set before the first solve" );
+		if ( choice == TauScaling::Diffusion )
+		{
+			// The vertices bound every face point from below on a straight
+			// element, and a curved mesh's nodes do to within its curvature;
+			// R < 0 anywhere is a mesh the operator is wrong on, not one to
+			// scale.
+			double smallest = std::numeric_limits<double>::infinity();
+			for ( int v = 0; v < mesh.GetNV(); ++v )
+				smallest = std::min( smallest, static_cast<double>( mesh.GetVertex( v )[ 0 ] ) );
+			if ( mfem::GridFunction const *nodes = mesh.GetNodes() )
+			{
+				mfem::FiniteElementSpace const *nodeSpace = nodes->FESpace();
+				for ( int i = 0; i < nodeSpace->GetNDofs(); ++i )
+					smallest = std::min( smallest, static_cast<double>(
+						( *nodes )( nodeSpace->DofToVDof( i, 0 ) ) ) );
+			}
+			if ( smallest < 0.0 )
+				throw std::invalid_argument( "meq::GradShafranovSolver::setTauScaling: the mesh reaches R = "
+				                             + std::to_string( smallest ) + " < 0, where the diffusion coefficient 1/R "
+				                             "is negative; a diffusion-scaled tau is meaningless there" );
+		}
+		tauScalingChoice = choice;
+	}
+
+	GradShafranovSolver::TauScaling GradShafranovSolver::tauScaling() const
+	{
+		return tauScalingChoice;
 	}
 
 	void GradShafranovSolver::setLocalSolver( LocalSolver choice )
@@ -5330,12 +5405,19 @@ namespace
 		// < tau( psi_h - psihat_h ), w > on every face of every element, interior
 		// and boundary alike. The coefficient handed to HDGDiffusionIntegrator is
 		// dead weight once SetStabilization() is called -- the hook replaces the
-		// built-in expression entirely -- but it is the diffusion coefficient the
-		// integrator is documented to take, so it is the honest thing to pass.
+		// built-in expression entirely, and neither MEQ stabilisation reads the
+		// s_diff it is folded into. (R is the INVERSE of the diffusion
+		// coefficient, so it is not even the coefficient the integrator
+		// documents.) tau is constant or tau0/R as setTauScaling() chose; both
+		// are state independent.
+		mfem::HDGStabilization const &stab =
+			tauScalingChoice == TauScaling::Diffusion
+				? static_cast<mfem::HDGStabilization const &>( scaledStabilization )
+				: static_cast<mfem::HDGStabilization const &>( stabilization );
 		auto *interior = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
 		auto *boundary = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
-		interior->SetStabilization( stabilization );
-		boundary->SetStabilization( stabilization );
+		interior->SetStabilization( stab );
+		boundary->SetStabilization( stab );
 
 		if ( usesNonlinearForms() )
 		{

@@ -342,6 +342,17 @@ namespace meq
 		MeshGeneratorConfig generate;
 	};
 
+	// [discretisation] TauScaling. Mirrors
+	// meq::GradShafranovSolver::TauScaling, which this MFEM-free header cannot
+	// name.
+	enum class TauScalingType
+	{
+		// "constant": tau( x ) = Tau. The default.
+		Constant,
+		// "diffusion": tau( x ) = Tau/R, Tau read as tau0.
+		Diffusion
+	};
+
 	// [discretisation]
 	struct DiscretisationConfig
 	{
@@ -349,11 +360,18 @@ namespace meq
 		// >= 0). Both papers report results for k = 1 ... 5.
 		int polynomialDegree = 1;
 
-		// Tau: the HDG stabilisation. Dimensionless, > 0. Both papers take
-		// tau = 1 and note that optimal convergence needs only tau = O(1), so
-		// 1.0 is the default and there is rarely a reason to change it. (The
-		// code this replaces used 5.0, with no justification recorded.)
+		// Tau: the HDG stabilisation, > 0. Under TauScaling = "constant" it is
+		// tau itself, in m^-2 -- the face term < tau( psi - psihat ), w > has
+		// the units of q.n with q = grad psi/R -- and under "diffusion" it is
+		// tau0 in tau = tau0/R, in m^-1. Both papers take tau = 1 and note
+		// that optimal convergence needs only tau = O(1), so 1.0 is the default
+		// and there is rarely a reason to change it. (The code this replaces
+		// used 5.0, with no justification recorded.)
 		double tau = 1.0;
+
+		// TauScaling: "constant" (the default) or "diffusion". See
+		// meq::DiffusionScaledStabilization.
+		TauScalingType tauScaling = TauScalingType::Constant;
 	};
 
 	// [source] -- which right-hand side F( R, z, psi ), and its parameters.

@@ -102,9 +102,18 @@ namespace
 		return mesh;
 	}
 
+	/// The stabilisation a sweep runs under: the solver's default, constant
+	/// tau = 1, unless a case says otherwise.
+	struct Stabilisation
+	{
+		double tau = 1.0;
+		bool diffusionScaled = false;
+	};
+
 	/// Solve once and measure. The source is F, not F/R: the solver applies the
 	/// 1/R itself, and the Dirichlet datum is the exact psi on all four sides.
-	Measurement measure( meq::analytic::SolovievEquilibrium const &eq, int order, int n )
+	Measurement measure( meq::analytic::SolovievEquilibrium const &eq, int order, int n,
+	                     Stabilisation const &stabilisation )
 	{
 		mfem::Mesh mesh = makeMesh( n );
 
@@ -133,7 +142,9 @@ namespace
 		value( 1 ) = fluxZ;
 		} );
 
-		meq::GradShafranovSolver solver( mesh, order );
+		meq::GradShafranovSolver solver( mesh, order, stabilisation.tau );
+		if ( stabilisation.diffusionScaled )
+			solver.setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion );
 		solver.setSource( sourceCoeff );
 		solver.setBoundaryData( psiCoeff );
 		solver.solve();
@@ -156,10 +167,12 @@ namespace
 	/// The whole diagnostic. An assertion message says which number was wrong; a
 	/// rate table says why, so it is printed unconditionally and ctest's
 	/// --output-on-failure decides whether anyone sees it.
-	void printTable( int order, std::vector<Measurement> const &points )
+	void printTable( int order, std::vector<Measurement> const &points,
+	                 Stabilisation const &stabilisation )
 	{
-		std::printf( "\n  Solov'ev NSTX, k = %d, triangles on [%.1f,%.1f]x[%.1f,%.1f]\n",
-		             order, minRadius, maxRadius, zMin, zMax );
+		std::printf( "\n  Solov'ev NSTX, k = %d, triangles on [%.1f,%.1f]x[%.1f,%.1f], tau = %s%g\n",
+		             order, minRadius, maxRadius, zMin, zMax,
+		             stabilisation.diffusionScaled ? "tau0/R, tau0 = " : "", stabilisation.tau );
 		std::printf( "  %8s %9s %14s %7s %14s %7s\n",
 		             "h", "trace", "L2(psi)", "rate", "L2(q)", "rate" );
 		for ( std::size_t i = 0; i < points.size(); ++i )
@@ -191,7 +204,8 @@ namespace
 	/// k+1, less the slack allowed for a two-mesh rate estimate.
 	double const rateSlack = 0.15;
 
-	void checkOrder( int order, double psiCeiling, double fluxCeiling )
+	void checkOrder( int order, double psiCeiling, double fluxCeiling,
+	                 Stabilisation const &stabilisation = Stabilisation() )
 	{
 		meq::analytic::SolovievEquilibrium const eq
 			= meq::analytic::SolovievEquilibrium::nstx();
@@ -199,9 +213,9 @@ namespace
 		std::vector<Measurement> points;
 		points.reserve( meshSizes.size() );
 		for ( int n : meshSizes )
-			points.push_back( measure( eq, order, n ) );
+			points.push_back( measure( eq, order, n, stabilisation ) );
 
-		printTable( order, points );
+		printTable( order, points, stabilisation );
 
 		double const expected = order + 1.0 - rateSlack;
 
@@ -318,4 +332,27 @@ BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 {
 	// Measured: psi 5.510e-10, q 8.816e-10.
 	checkOrder( 3, 1.7e-9, 2.7e-9 );
+}
+
+/*
+ * THE DIFFUSION-SCALED tau KEEPS k+1 IN BOTH psi AND q, at tau0 = 3 m^-1 --
+ * the value MEASUREMENTS.md M-TAUDESIGN-C recommends for it. Not a claim that
+ * it is the better choice here: on this box nu = 1/R stays within [0.7, 1.7],
+ * so tau = 3/R is two to five times the default everywhere, and the flux
+ * pays for that in its constant (2.6x at k = 2), not in its order. What is
+ * pinned is the order and the size of the answer, so that the option cannot
+ * drift into MFEM's h^-1 LDG scaling -- which keeps psi at k+1 and loses an
+ * order in q -- without this going red.
+ */
+BOOST_AUTO_TEST_CASE( theDiffusionScaledTauKeepsTheOrder )
+{
+	Stabilisation scaled;
+	scaled.tau = 3.0;
+	scaled.diffusionScaled = true;
+	// Ceilings at 3x the measured finest-mesh errors, as above. Measured:
+	// k = 1 psi 2.524e-05, q 8.858e-05; k = 2 psi 1.859e-07, q 6.554e-07;
+	// k = 3 psi 4.607e-10, q 1.999e-09.
+	checkOrder( 1, 7.6e-5, 2.7e-4, scaled );
+	checkOrder( 2, 5.6e-7, 2.0e-6, scaled );
+	checkOrder( 3, 1.4e-9, 6.0e-9, scaled );
 }

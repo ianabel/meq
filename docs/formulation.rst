@@ -163,7 +163,37 @@ The stabilisation :math:`\tau`
 
 :math:`\tau` is a constant, and its default is **1**. Both source papers set it
 there and note that optimal order requires only :math:`\tau = O(1)`. It is
-configurable as ``[discretisation] Tau``.
+configurable as ``[discretisation] Tau``. It is not dimensionless: the face term
+:math:`\langle \tau(\psi_h - \hat\psi_h), w\rangle` has the units of
+:math:`q\cdot n` with :math:`q = \bar\nabla\psi/R`, so :math:`\tau` is in
+:math:`\mathrm{m}^{-2}`.
+
+``[discretisation] TauScaling = "diffusion"`` scales it by the operator's
+diffusion coefficient instead, :math:`\tau(x) = \tau_0\,\nu(x)` with
+:math:`\nu = 1/R` and ``Tau`` read as :math:`\tau_0`, in :math:`\mathrm{m}^{-1}`
+(:cpp:class:`meq::DiffusionScaledStabilization`). It depends on position and
+not on the solution, so it needs no derivative of its own. On a face lying on
+the symmetry axis, where :math:`1/R` is infinite, it takes :math:`R` at the
+centroid of the element whose side it is.
+
+**Why the choice exists.** The element-local HDG problem has modes — the
+degree-:math:`k` polynomials orthogonal to degree :math:`k-1` — whose whole
+energy is the face term, so the lowest local eigenvalue is about
+:math:`(k+1)\,\tau\,|\partial K|/|K|` while :math:`\tau h/\nu` is small. A
+source whose reaction :math:`(1/R)\,\partial F/\partial\psi` is positive and
+reaches that value makes the local solve singular, and the discrete problem
+folds inside one element: a pressure ceiling that is an artefact of the
+discretisation, and that rises with :math:`\tau` and under refinement. A
+constant :math:`\tau` is weakest relative to the operator where :math:`\nu` is
+largest, at small :math:`R`; scaling by :math:`\nu` makes the criterion read
+:math:`\partial F/\partial\psi < (k+1)\,\tau_0\,|\partial K|/|K|` everywhere.
+A larger :math:`\tau` costs the flux and the post-processed :math:`\psi^*` a
+constant, not an order, while :math:`\tau h/\nu` stays small.
+
+**The default stays constant**, which is what every rate in the suite is
+measured with. The ceiling, the scaled stabilisation's reach on the rotating
+mirror and its cost on the analytic benchmarks are in ``MEASUREMENTS.md``;
+measure on your own problem before choosing.
 
 .. warning::
 
@@ -186,8 +216,10 @@ configurable as ``[discretisation] Tau``.
    Newton convergence" — a failure that survives a passing regression suite. A
    constant :math:`\tau` never reaches that code path at all.
 
-   Deriving :math:`\tau` from the local coefficient is specifically not
-   advised.
+   Deriving :math:`\tau` from the local *solution* is specifically not
+   advised. Scaling it by the diffusion coefficient, above, is position
+   dependent and state independent, and is the one coefficient-derived choice
+   MEQ offers.
 
 .. _sign-conventions:
 

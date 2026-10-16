@@ -248,7 +248,69 @@ header warns that omitting `EvalGrad` for a *non-constant* stabilisation gives
 passing regression suite". A constant `τ` never calls it. One more reason to
 keep `τ` constant unless something measured says otherwise, which is also the
 sibling project's standing advice: **do not derive `τ` from the local
-coefficient.**
+coefficient.** That advice is about a SOLUTION-dependent coefficient; the one
+exception MEQ offers, scaling by the position-dependent `ν = 1/R`, needs no
+`EvalGrad` and is the next section — measured, and still not the default.
+
+### A constant `τ` folds inside one element, and `τ = τ₀/R` is the opt-in remedy
+
+**THE ELEMENT-LOCAL PROBLEM IS SINGULAR ON THE TOP-DEGREE MODES AT `τ = 0`**,
+whatever the mesh: a `ψ ∈ P_k` orthogonal to `P_{k−1}` has no discrete gradient
+(`(Rq, v) = −(ψ, div v) = 0` for every `v ∈ P_k²`), so the face term is the
+whole of its energy. The lowest eigenvalue of the local block with `ψ̂ = 0`,
+`S = Gᵀ M_R⁻¹ G + T_τ` against the `ψ` mass, is therefore
+
+```
+λ_min = (k + 1) τ |∂K|/|K|        while τ h/ν is small          (k + 1 exact, any triangle)
+λ_min → c_K ν/h²                   for k ≥ 3 as τ h/ν → ∞        (the cubic bubble; never for k ≤ 2)
+```
+
+with `ν = 1/R` the operator's diffusion coefficient — the `R` the flux mass
+form carries is its inverse, and `μ₀` is in `F`, not in `ν` — so `τ` is in
+`m⁻²`, not dimensionless. A positive reaction `c = (1/R) ∂F/∂ψ` reaching
+`λ_min` makes the local solve singular, and the DISCRETE problem folds inside
+that one element: Newton's minimum residual grows past it, the step between
+converged neighbours lives in one element and grows like `(n_c − n)^(−1/2)`.
+**The fold arrives before the smooth reaction reaches `λ_min`**, because the
+state's own soft mode is excited and inflates `c` in that element — on the
+rotating mirror's three-species `M = 6` case the element-local margin
+`λ_min(S − M_c)` computed on the `τ = 1` branch's own states falls to zero at
+the measured ceiling, while computed on a stiffly stabilised branch's states it
+only bounds it from above. The global linearised operator's lowest plasma mode
+agrees with the one element's to under 1%: the trace coupling does not move it
+(→ **[M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a)**).
+
+**A constant `τ` is weakest relative to the operator where `ν` is largest**, at
+small `R`, which is where a mirror's plasma sits. `τ = τ₀ ν` makes the
+criterion `∂F/∂ψ < (k + 1) τ₀ |∂K|/|K|`, the same at every radius and in
+`m⁻¹` throughout — `τ₀` is the `1/ℓ` of Nguyen, Peraire and Cockburn's
+`κ/ℓ`. **It is `GradShafranovSolver::setTauScaling( TauScaling::Diffusion )`,
+`[discretisation] TauScaling = "diffusion"`, and NOT the default.**
+`meq::DiffusionScaledStabilization` reads the physical point off the
+transformation MFEM hands `Eval()`, which every route sets — the per-face
+loop, the batched face tables, the nonlinear residual and gradient — so it is
+exact at each quadrature point; on a face lying on the axis it takes `R` at the
+owning element's centroid. **It is position dependent and state independent**,
+so `IsConstant()` is true and no `EvalGrad()` is owed: the bilinear path, which
+refuses a state-dependent stabilisation, assembles it, and Newton stays at four
+steps on Example 5.
+
+**What it buys, measured on the mirror.** Matched at the plasma's radius
+`R ≈ 0.3`, `τ₀ = 0.3 τ` reproduces the constant-`τ` ceiling to within 10% and
+`ψ_bnd`'s error to within 25%, and `τ₀ = 3` reaches the posed problem's own fold on the
+coarsest mesh where `τ = 1` stops at a third of it; on the next mesh `τ₀ = 1`
+does. The requirement scales like `h`, so under
+refinement a fixed `τ₀` only gets safer; **`h`-scaling `τ` is not warranted**,
+and MFEM's `h⁻¹` precedent costs an order in `q` (above). **What it costs**:
+`τ h/ν = τ₀ h` small keeps `ψ`, `q` and `ψ*` at `k+1`, `k+1` and `k+2`, but a
+larger `τ` buys `ψ` and costs `q` and `ψ*` a constant — on Solov'ev `τ₀ = 3` is
+up to 2.6× in `q` and 2.5× in `ψ*`, `τ₀ = 10` up to 8.4× — while near the axis
+`ψ` improves 10–24× and `q` does not move
+(→ **[M-TAUDESIGN-B](MEASUREMENTS.md#m-taudesign-b)**,
+**[M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)**). **Too small a `τ` folds an
+analytic benchmark too**: Example 5's reaction `∂F/∂ψ ≈ 14` fails Newton on the
+4-cell mesh at `k = 1` for constant `τ = 0.3` and for `τ₀ = 0.3` alike, which
+is the same local criterion.
 
 ### Post-processing is back, and it was free
 

@@ -17989,3 +17989,247 @@ pedestal's `Δ(q)` bands and the order instruments are mechanical, and
 retry rung on `machine-e-diamagnetic` are behaviour. **No constant `τ` is
 optimal for both `ψ_h` and `q_h`, and none is optimal for both the tokamak and
 the mirror.**
+
+### M-TAUDESIGN-A
+
+**THE ROTATING MIRROR'S CONSTANT-`τ` PRESSURE CEILING IS THE ELEMENT-LOCAL HDG
+BLOCK GOING SINGULAR IN ONE ELEMENT: ITS LOWEST EIGENVALUE IS `(k + 1) τ |∂K|/|K|`
+EXACTLY WHILE `τ h/ν` IS SMALL, AND THE MARGIN AGAINST THE REACTION, TAKEN ON
+THE `τ = 1` BRANCH'S OWN STATES, FALLS TO ZERO AT THE MEASURED CEILING.**
+
+**Setup.** Two independent instruments, neither MEQ's solver. (1) A dense
+evaluation of one straight triangle's local block with `ψ̂ = 0`,
+`S = Gᵀ M_R⁻¹ G + T_τ` with `(Rq, v) = (∇ψ, v) − ⟨ψ, v·n⟩`, `M_R` weighted by
+the exact `R`, monomials of degree `k`, collapsed Gauss 12 × 12; `λ_min` of
+`S x = λ M x`. (2) The mirror's own states, dumped per element — vertices, and
+`c = (1/R) ∂F/∂ψ` from `NormalisedRotatingSource::dFdPsi` on the total flux at
+6 × 6 points — along continuation from 5e18, three species (e, D, C⁶⁺) at
+`M = 6`, vacuum-midplane gauge, level 0 (1176 elements, 204 carrying `F`),
+`k = 3`; the margin `μ = λ_min(S − M_c, M)` per element, `τ = 0` on `Γ_h`'s
+faces as in MEQ. And the GLOBAL linearised HDG operator on the same dump
+(every element and interior trace, `ψ̂ = 0` on the boundary, `q` eliminated),
+`K x = μ blockdiag(M_ψ, 0) x` by shift-invert, for the lowest mode whose `ψ`
+mass is in the plasma.
+
+**The local eigenvalue.** `γ_k = λ_min/(τ|∂K|/|K|)` at `τ = 10⁻³`, `R = 0.32`:
+
+| element | `k = 1` | `k = 2` | `k = 3` | `k = 3`, `τ → ∞`: `λ h² R` (`h` its longest side) |
+|---|---|---|---|---|
+| equilateral, side 0.1 | 2.0000 | 3.0000 | 4.0000 | 56.2 |
+| right isosceles, legs 0.1 | 2.0000 | 3.0000 | 4.0000 | 117.9 |
+| 1 : 4 sliver | 2.0000 | 3.0000 | 4.0000 | 368.6 |
+
+and against `τ`, equilateral, side 0.1, `ν = 3.125`, `k = 3`:
+
+| `τ` | 0.3 | 1 | 3 | 10 | 30 | 100 | 10³ | 10⁵ |
+|---|---|---|---|---|---|---|---|---|
+| `τ h/ν` | 0.0096 | 0.032 | 0.096 | 0.32 | 0.96 | 3.2 | 32 | 3200 |
+| `λ_min` | 83.1 | 276.7 | 827 | 2720 | 7685 | 14954 | 17103 | 17565 |
+
+Linear in `τ` to 2% up to `τ h/ν ≈ 0.3`, saturating at the cubic bubble's
+Dirichlet energy. At `k = 1, 2` it never saturates — no `P_k` polynomial
+vanishes on all of `∂K` — and keeps rising with `τ`.
+
+**The mirror's element.** The fold's step lives at `(0.321, −0.050)`, which is
+a vertex of element 452 (centroid `(0.266, −0.047)`, `|∂K|/|K| = 68.25 m⁻¹`);
+its `λ_min(S)` at `τ = 1` is 272.6 against `4 × 68.25 = 273.0`. Its margin:
+
+| peak (m⁻³) | on the `τ = 1` branch: max `c` | `μ` | on the `τ = 30` branch: max `c` | `μ` at `τ = 1` |
+|---|---|---|---|---|
+| 1.0e19 | 166.5 | 141.5 | 163.9 | 139.4 |
+| 1.2e19 | 210.4 | 110.4 | 202.9 | 108.2 |
+| 1.3e19 | 265.8 | 78.9 | 223.4 | 91.8 |
+| 1.34e19 | 340.4 | 54.4 | — | — |
+| 1.36e19 | 416.8 | 31.1 | — | — |
+| 1.366e19 | 473.4 | **14.7** | — | — |
+| 1.37e19 | — | — | 238.2 | 80.0 |
+| 1.6e19 | — | — | 289.5 | 39.3 |
+
+The `τ = 1` branch ends at 1.3669e19 by fine continuation (bracketed
+1.3638e19 – 1.3685e19 in [M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)). On
+its own states the margin falls steeply to zero there, and `c` in that one
+element grows 2.25× from 1.2e19 while its neighbour 514's grows 1.21×, and
+13.6% over the last 0.4% in density against 514's 0.7%: the soft mode is
+excited and feeds its own reaction. On the stiffly stabilised branch's states,
+the same element's margin at `τ = 1` would reach zero only near 1.8e19 —
+**an upper bound, not the ceiling**. The global operator at 1.6e19 on those
+states has its lowest plasma mode at `μ = 39.005` with 1.00 of its `ψ` mass in
+element 452, against 39.294 for the element alone: **the trace coupling moves
+the local mode by under 1%, so the fold is the element's**.
+
+**Reproduce.** A scratch `ceiling/spectrum` case on `RotatingMirror`, never
+committed, writes the dumps; the two instruments are a page of numpy each.
+
+### M-TAUDESIGN-B
+
+**`τ = τ₀/R` KEEPS `ψ`, `q` AND `ψ*` AT `k+1`, `k+1` AND `k+2` ON SOLOV'EV AND
+EXAMPLE 5 FOR `τ₀` FROM 0.3 TO 30; A LARGER `τ` BUYS `ψ` AND COSTS `q` AND `ψ*`
+A CONSTANT — ROUGHLY LINEAR IN `τ` ONCE `τ` PASSES 1 — AND NEAR THE AXIS THE
+PURCHASE IS 10–24× IN `ψ` FOR NOTHING IN `q`.**
+
+**Setup.** `tests/convergence`'s `makeMesh()` triangles, `n = 4, 8, 16, 32`
+cells a side; Solov'ev NSTX on the linear path, on the standard box
+`[0.6, 1.4] × [−0.6, 0.6]` (`ν ∈ [0.71, 1.67]`) and on `[0.1, 0.9] × [−0.6, 0.6]`
+(`ν ∈ [1.1, 10]`); Example 5 by Newton on the standard box. L2 errors against
+the closed form at `n = 32` (`h = 0.025`), and the rates over the last two
+refinements; `ψ*` from `postProcess()`. "const" is `TauScaling::Constant`,
+"diff" `TauScaling::Diffusion` with that `τ₀`.
+
+Solov'ev, standard box:
+
+| `k` | `τ` | `ψ` | rates | `q` | rates | `ψ*` | rates |
+|---|---|---|---|---|---|---|---|
+| 1 | const 1 | 3.597e-05 | 1.99 2.00 | 6.084e-05 | 1.98 1.99 | 3.496e-07 | 2.99 3.00 |
+| 1 | const 10 | 2.393e-05 | 2.04 2.01 | 2.768e-04 | 1.86 1.93 | 2.134e-06 | 2.87 2.93 |
+| 1 | diff 0.3 | 9.044e-05 | 2.00 2.00 | 5.426e-05 | 1.99 1.99 | 2.749e-07 | 2.98 2.99 |
+| 1 | diff 1 | 3.529e-05 | 2.00 2.00 | 5.868e-05 | 1.98 1.99 | 3.268e-07 | 2.98 2.99 |
+| 1 | diff 3 | 2.524e-05 | 2.00 2.00 | 8.858e-05 | 1.96 1.98 | 6.132e-07 | 2.96 2.98 |
+| 1 | diff 10 | 2.390e-05 | 2.03 2.01 | 2.348e-04 | 1.89 1.94 | 1.804e-06 | 2.89 2.94 |
+| 1 | diff 30 | 2.422e-05 | 2.13 2.06 | 6.352e-04 | 1.73 1.84 | 4.959e-06 | 2.74 2.85 |
+| 2 | const 1 | 1.916e-07 | 3.00 3.00 | 2.510e-07 | 2.98 2.99 | 9.331e-10 | 4.00 4.00 |
+| 2 | const 10 | 1.857e-07 | 3.01 3.00 | 2.221e-06 | 2.90 2.95 | 7.710e-09 | 3.91 3.95 |
+| 2 | diff 0.3 | 2.199e-07 | 2.99 3.00 | 1.210e-07 | 3.00 3.00 | 5.316e-10 | 4.01 4.00 |
+| 2 | diff 1 | 1.888e-07 | 3.00 3.00 | 2.401e-07 | 2.99 3.00 | 8.497e-10 | 4.00 4.00 |
+| 2 | diff 3 | 1.859e-07 | 3.00 3.00 | 6.554e-07 | 2.97 2.99 | 2.131e-09 | 3.98 3.99 |
+| 2 | diff 10 | 1.856e-07 | 3.01 3.00 | 2.109e-06 | 2.91 2.95 | 6.781e-09 | 3.92 3.96 |
+| 2 | diff 30 | 1.864e-07 | 3.05 3.02 | 5.924e-06 | 2.78 2.87 | 1.910e-08 | 3.81 3.89 |
+| 3 | const 1 | 5.511e-10 | 3.99 4.00 | 8.816e-10 | 3.98 3.99 | 1.560e-12 | 5.01 5.01 |
+| 3 | const 10 | 4.553e-10 | 4.00 4.00 | 5.709e-09 | 3.93 3.96 | 1.258e-11 | 4.94 4.97 |
+| 3 | diff 0.3 | 8.667e-10 | 4.00 4.00 | 6.881e-10 | 3.97 3.99 | 9.490e-13 | 4.99 5.00 |
+| 3 | diff 1 | 5.065e-10 | 4.01 4.00 | 9.142e-10 | 3.97 3.99 | 1.528e-12 | 5.01 5.00 |
+| 3 | diff 3 | 4.607e-10 | 4.00 4.00 | 1.999e-09 | 3.97 3.98 | 3.845e-12 | 5.00 5.00 |
+| 3 | diff 10 | 4.549e-10 | 4.01 4.00 | 6.216e-09 | 3.92 3.96 | 1.227e-11 | 4.95 4.97 |
+| 3 | diff 30 | 4.552e-10 | 4.03 4.01 | 1.765e-08 | 3.82 3.90 | 3.476e-11 | 4.83 4.90 |
+
+Solov'ev, `[0.1, 0.9]` — where `ν` varies tenfold:
+
+| `k` | `τ` | `ψ` | rates | `q` | rates | `ψ*` | rates |
+|---|---|---|---|---|---|---|---|
+| 1 | const 1 | 1.441e-04 | 1.91 1.97 | 2.709e-04 | 1.89 1.96 | 2.792e-07 | 2.95 2.97 |
+| 1 | const 10 | 1.752e-05 | 1.95 1.99 | 2.899e-04 | 1.88 1.95 | 3.886e-07 | 2.92 2.96 |
+| 1 | diff 1 | 3.036e-05 | 1.96 1.99 | 2.716e-04 | 1.86 1.95 | 2.797e-07 | 2.92 2.96 |
+| 1 | diff 3 | 1.368e-05 | 1.96 1.98 | 2.870e-04 | 1.87 1.94 | 3.026e-07 | 2.91 2.95 |
+| 1 | diff 10 | 1.028e-05 | 2.00 2.00 | 4.293e-04 | 1.90 1.94 | 4.955e-07 | 2.88 2.94 |
+| 2 | const 1 | 4.113e-06 | 2.74 2.90 | 7.560e-06 | 2.73 2.90 | 2.752e-09 | 3.91 3.97 |
+| 2 | const 10 | 4.226e-07 | 2.76 2.91 | 7.639e-06 | 2.73 2.90 | 3.551e-09 | 3.93 3.97 |
+| 2 | diff 1 | 5.502e-07 | 2.88 2.96 | 7.534e-06 | 2.69 2.88 | 2.752e-09 | 3.86 3.96 |
+| 2 | diff 3 | 2.056e-07 | 2.93 2.99 | 7.593e-06 | 2.69 2.88 | 2.911e-09 | 3.87 3.96 |
+| 2 | diff 10 | 1.094e-07 | 3.00 3.01 | 8.371e-06 | 2.68 2.87 | 4.300e-09 | 3.90 3.96 |
+| 3 | const 1 | 1.569e-07 | 3.54 3.82 | 2.871e-07 | 3.52 3.80 | 6.393e-11 | 4.76 4.90 |
+| 3 | const 10 | 1.573e-08 | 3.55 3.82 | 2.872e-07 | 3.52 3.80 | 6.447e-11 | 4.77 4.91 |
+| 3 | diff 1 | 1.909e-08 | 3.70 3.89 | 2.858e-07 | 3.48 3.79 | 6.345e-11 | 4.68 4.87 |
+| 3 | diff 3 | 6.463e-09 | 3.73 3.91 | 2.857e-07 | 3.48 3.79 | 6.372e-11 | 4.68 4.87 |
+| 3 | diff 10 | 2.154e-09 | 3.81 3.95 | 2.905e-07 | 3.48 3.78 | 6.688e-11 | 4.71 4.88 |
+
+Example 5, Newton, standard box — every converged row in 4 Newton steps:
+
+| `k` | `τ` | `ψ` | rates | `q` | rates | `ψ*` | rates |
+|---|---|---|---|---|---|---|---|
+| 1 | const 0.3 | **Newton fails at `n = 4`** (non-finite norm) | | | | | |
+| 1 | const 1 | 4.393e-04 | 2.08 2.04 | 7.522e-04 | 2.03 2.01 | 7.084e-06 | 3.05 3.03 |
+| 1 | const 10 | 1.845e-04 | 2.12 2.04 | 2.154e-03 | 1.94 1.96 | 2.867e-05 | 2.88 2.94 |
+| 1 | diff 0.3 | **Newton fails at `n = 4`** (non-finite norm) | | | | | |
+| 1 | diff 1 | 4.832e-04 | 2.08 2.04 | 7.606e-04 | 2.04 2.01 | 7.893e-06 | 3.06 3.03 |
+| 1 | diff 3 | 2.302e-04 | 2.00 2.00 | 9.995e-04 | 1.99 1.99 | 6.992e-06 | 2.97 2.98 |
+| 1 | diff 10 | 1.853e-04 | 2.12 2.04 | 2.364e-03 | 1.93 1.96 | 2.870e-05 | 2.89 2.95 |
+| 1 | diff 30 | 1.965e-04 | 2.39 2.24 | 6.317e-03 | 1.79 1.87 | 8.181e-05 | 2.74 2.86 |
+| 2 | const 0.3 | 1.195e-05 | 3.35 3.14 | 6.517e-06 | 3.28 3.06 | 1.875e-08 | 4.86 4.26 |
+| 2 | const 1 | 3.653e-06 | 3.06 3.03 | 6.649e-06 | 3.02 3.01 | 1.903e-08 | 4.04 4.00 |
+| 2 | diff 1 | 3.124e-06 | 3.03 3.02 | 6.688e-06 | 3.01 3.00 | 1.892e-08 | 4.01 4.00 |
+| 2 | diff 3 | 1.743e-06 | 2.99 2.99 | 8.684e-06 | 2.99 2.99 | 2.461e-08 | 4.01 4.00 |
+| 2 | diff 10 | 1.520e-06 | 3.00 3.00 | 2.020e-05 | 2.92 2.96 | 5.679e-08 | 4.00 3.99 |
+| 3 | const 1 | 2.265e-08 | 4.03 4.02 | 4.069e-08 | 4.00 4.00 | 1.049e-10 | 4.98 4.99 |
+| 3 | diff 1 | 2.343e-08 | 4.02 4.01 | 4.137e-08 | 4.01 4.00 | 1.053e-10 | 4.99 4.99 |
+| 3 | diff 3 | 1.319e-08 | 3.99 4.00 | 6.152e-08 | 3.99 4.00 | 1.389e-10 | 5.00 5.00 |
+| 3 | diff 10 | 1.153e-08 | 4.00 4.00 | 1.625e-07 | 3.93 3.97 | 3.273e-10 | 4.95 4.97 |
+
+**Read.** No `τ₀` costs an order: where a rate sags (diff 30, 1.84 at `k = 1`)
+it is `τ₀ h = 0.75` at the finest mesh, and it climbs back towards `k+1` under
+refinement as `τ₀ h → 0`. On the standard box diff 1 is const 1 to within 15%
+in every column. **The failures at `τ = 0.3` are this lane's fold on an
+analytic benchmark**: Example 5's `∂F/∂ψ ≈ 14.4` gives `c ≈ 24` at `R = 0.6`
+against a `k = 1` local `λ_min ≈ 2 τ |∂K|/|K| ≈ 20` on the 4-cell mesh, and
+constant and scaled `τ` fail alike. The near-axis box is where the scaling
+differs from a constant: `ψ` improves 10× (`k = 1`), 20× (`k = 2`) and 24×
+(`k = 3`) from const 1 to diff 3, `q` moves by under 6% and `ψ*` by under 9%.
+
+**Reproduce.** A scratch Boost.Test module linked like `SolovievConvergence`
+(never committed); `theDiffusionScaledTauKeepsTheOrder` pins the diff-3
+standard-box rows.
+
+### M-TAUDESIGN-C
+
+**ON THE ROTATING MIRROR `τ = τ₀/R` MATCHES CONSTANT `τ = τ₀/0.3` — THE
+PLASMA'S RADIUS — IN BOTH THE CEILING AND THE LABEL ERROR, AND `τ₀ = 3`
+REACHES THE POSED PROBLEM'S OWN FOLD ON THE COARSEST MESH. THE REQUIREMENT
+HALVES WITH `h`: ON LEVEL 1 `τ₀ = 1` ALREADY REACHES IT.**
+
+**Setup.** `ceiling-probes.patch` on `RotatingMirror` (scratch), `k = 3`,
+vacuum-midplane gauge. Ceilings: three species (e, D, C⁶⁺) at `M = 6`,
+`ceiling/continuation` — ×1.25 steps from 5e18, then seven bisections, so each
+is bracketed to under 0.4%. Labels: two species (e, D) at 5e18, error in
+`(ψ_ax, ψ_bnd)` against level 3 at `τ₀ = 10` (5.589210850012e-03,
+6.582599021039e-02). 2 threads per process, up to four at once, on a shared
+machine.
+
+Three-species ceiling (m⁻³):
+
+| level | `τ` | ceiling between |
+|---|---|---|
+| 0 | const 1 | 1.3638e19 – 1.3685e19 |
+| 0 | const 3 | 2.9709e19 – 2.9802e19 |
+| 0 | const 10 | 4.1036e19 – 4.1182e19 |
+| 0 | const 30 | 4.1473e19 – 4.1619e19 |
+| 0 | diff 0.3 | 1.4400e19 – 1.4448e19 |
+| 0 | diff 1 | 3.2364e19 – 3.2480e19 |
+| 0 | diff 3 | 4.1036e19 – 4.1182e19 |
+| 0 | diff 10 | 4.1473e19 – 4.1619e19 |
+| 1 | diff 0.3 | 2.8685e19 – 2.8778e19 |
+| 1 | diff 1 | 4.1473e19 – 4.1619e19 |
+
+Two-species labels at 5e18, error against the reference:
+
+| `τ` | level 0 | level 1 | level 2 |
+|---|---|---|---|
+| const 1 | (−5.39e-07, +2.59e-06) | (−4.41e-08, −6.75e-07) | (−8.07e-10, −6.44e-10) |
+| const 3 | (−1.79e-07, +8.56e-07) | (−1.45e-08, −2.23e-07) | — |
+| const 10 | (−5.41e-08, +2.54e-07) | (−4.14e-09, −6.62e-08) | — |
+| const 30 | (−1.87e-08, +8.13e-08) | (−1.18e-09, −2.15e-08) | (−4.22e-11, +6.42e-11) |
+| diff 0.3 | (−2.45e-07, +3.16e-06) | (−1.05e-08, −7.56e-07) | (−2.55e-10, −7.55e-10) |
+| diff 1 | (−7.33e-08, +9.33e-07) | (−2.94e-09, −2.25e-07) | (−8.80e-11, −1.64e-10) |
+| diff 3 | (−2.51e-08, +3.06e-07) | (−7.82e-10, −7.41e-08) | (−4.02e-11, +4.74e-12) |
+| diff 10 | (−8.37e-09, +8.67e-08) | (−2.09e-11, −2.16e-08) | (−2.36e-11, +6.38e-11) |
+| diff 30 | (−3.86e-09, +2.13e-08) | (+2.11e-10, −6.76e-09) | (−1.92e-11, +8.06e-11) |
+
+Every row converged in 2 Newton steps but const 1 and diff 0.3 at level 0
+(3). Level 3 at const 1 reads (+5.65e-11, −1.89e-09) against the same
+reference: every level-2 answer at `τ₀ ≥ 3` and at const 30 agrees with the
+reference to 8e-11 in `ψ_bnd`, and const 1's level 2 and 3 do not, so the
+reference is taken from the scaled run and the constant-`τ` answer at
+level 3 is not yet monotone in `ψ_bnd`.
+
+**Read.** `τ₀ = 0.3 τ` pairs the rows — diff 0.3 with const 1, diff 1 with
+const 3, diff 3 with const 10, diff 10 with const 30. In the ceiling the two
+larger pairs land in the same bisection bracket and the two smaller within 6%
+and 9%, diff the higher; in `ψ_bnd`'s error they agree to 25%, and diff is 2×
+to 5× better in `ψ_ax` on levels 0 and 1. The fold and the labels are set where the plasma is,
+at `R ≈ 0.3`. The label error falls about as `1/τ` at fixed mesh. diff 3's
+ceiling is within 1% of diff 10's, the posed problem's fold, which diff 10 and
+const 30 put at the same bracket on level 0 and diff 1 on level 1. The
+criterion of [M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a) puts the
+requirement at `τ₀ ≳ ∂F/∂ψ |K|/((k + 1)|∂K|)`, which is `c/λ_min(S)` at
+`τ₀ = 1`: on the stiff branch at 4.14e19 the critical element is 514 (centroid
+`(0.296, 0.003)`), carrying `c = 2368` against `λ_min(S) = 968.5`, so
+`τ₀ ≳ 2.4` on level 0 — a lower bound, since the branch's own soft mode lowers
+the fold — and half that on level 1. That is where diff 3 and diff 1
+respectively reach the fold.
+
+**Recommendation: `τ₀ = 3 m⁻¹`** for `TauScaling = "diffusion"`. It is the
+smallest of the values tried that reaches the mirror's own fold on the coarsest
+mesh; its label error there is 21× smaller than constant `τ = 1`'s in `ψ_ax`
+and 8.5× in `ψ_bnd`; it holds every order on the analytic benchmarks; and it
+costs `q` at most 2.6× and `ψ*` 2.5× where `ν` hardly varies
+([M-TAUDESIGN-B](MEASUREMENTS.md#m-taudesign-b)). `τ₀ = 1` is the
+accuracy-neutral choice on a tokamak box and leaves the coarse mirror at 78% of
+its fold; `τ₀ = 10` buys nothing more on the mirror and costs `q` up to 8.4×.
+The default is unchanged.
