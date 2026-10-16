@@ -239,10 +239,10 @@ linear, at a contraction that grows with the pressure. **That the left-out
 term is what stops a dense plasma converging was believed and is FALSIFIED**:
 the bordered gauge stalls where the freeze did, at the same peak density and
 merit, and so does a held table with nothing moving
-(→ [M-R0BORDER](MEASUREMENTS.md#m-r0border), [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop)).
+(→ [M-283](MEASUREMENTS.md#m-283), [M-285](MEASUREMENTS.md#m-285)).
 **A nearer start does not pay**: the same densities solved first on the
 vacuum's crossing held save one bordered step of three at most and cost more
-than they save (→ [M-R0START](MEASUREMENTS.md#m-r0start)). **A density flat at a
+than they save (→ [M-284](MEASUREMENTS.md#m-284)). **A density flat at a
 label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
 
 **AND A FIXED CURVE IS A GAUGE TOO**, `[source] Gauge = "vacuum-midplane"`,
@@ -251,7 +251,7 @@ label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
 from `ψ_c` and a zero remainder, normalised by `ψ_c` at the label points, and
 never refreshed. `F` is pointwise again and Newton quadratic; the transfer to
 the solved crossing is only the plasma's own displacement of its surfaces
-(→ [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)). Three things to know. **The
+(→ [M-281](MEASUREMENTS.md#m-281)). Three things to know. **The
 vacuum is `ψ_c`**, so the gauge is refused without `[conductors]` subtracting.
 **The box's precondition is checked before the solve** —
 `RotatingSource::labelCheck()`, each label swept only over the radii its surface
@@ -261,7 +261,7 @@ which the driver reports. **The pressure cap is not the freeze**: on the
 vacuum's curve, with an exact Jacobian, three species at `M = 6` stall on the
 coarsest mesh at the density where the midplane gauge does and converge on the
 finer ones. Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
-solved crossing (→ [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity)).
+solved crossing (→ [M-282](MEASUREMENTS.md#m-282)).
 
 **Both run here**, in MEQ's own benchmark venv at
 `tools/freegs4e-benchmark/venv` with `geq/src` on `PYTHONPATH`; geq's own

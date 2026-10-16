@@ -1892,9 +1892,9 @@ curve is defined to avoid: it is `ψ_c` exactly, independent of the mesh and the
 start. And the two things such a curve would be for are met another way: the
 `.nc` carries every rotating mirror's densities at its *solved* crossing, as a
 `DensityFile` table that poses the same plasma in `Gauge = "midplane"`
-(→ [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity)), and the vacuum's curve already
+(→ [M-282](MEASUREMENTS.md#m-282)), and the vacuum's curve already
 keeps the transfer exponent to the plasma's own displacement
-(→ [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)). Posing true-midplane densities
+(→ [M-281](MEASUREMENTS.md#m-281)). Posing true-midplane densities
 with a quadratic Newton is the bordered route — `R_0` at the knots as border
 unknowns, which is how `Gauge = "midplane"` solves — not a frozen copy of
 someone's answer.
@@ -1913,7 +1913,7 @@ them at most and none at 2e19, and the route costs 1.35× to 1.66× the bordered
 Newton alone — 1.06× to 1.36× with the held solve stopped at the derived
 hand-over. Its start's distance from the answer grows with the pressure, 2% to
 22% of the plasma's flux, and where every start stalls the held solve stalls
-first (→ [M-R0START](MEASUREMENTS.md#m-r0start)). So the knots start on the
+first (→ [M-284](MEASUREMENTS.md#m-284)). So the knots start on the
 starting iterate's own crossings.
 
 *From `MIRROR-PLAN.md` §5.*
@@ -1928,7 +1928,7 @@ the same fixed point with its inner solves converged: linear at the same
 contraction, 0.016 to 0.18 and rising with the pressure, at 3 to 6 times the
 knots' cost. It stays a test-side harness. Neither lifts the pressure ceiling:
 a fixed residual with an exact Jacobian stalls where they did
-(→ [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop)).
+(→ [M-285](MEASUREMENTS.md#m-285)).
 
 *From `MIRROR-PLAN.md` §5.*
 

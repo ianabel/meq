@@ -753,7 +753,7 @@ namespace meq
 			 * first residual and never again -- not per iteration, not per
 			 * adaptive cycle -- so the curve the profiles are stated on is
 			 * fixed for the run. False here and once the curve is in.
-			 * MIRROR-PLAN.md section 5, [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+			 * MIRROR-PLAN.md section 5, [M-281](MEASUREMENTS.md#m-281).
 			 */
 			virtual bool readsVacuumMidplane() const
 			{

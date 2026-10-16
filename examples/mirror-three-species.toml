@@ -30,7 +30,7 @@
 # state either at its solved crossing.  At four times this density the test
 # suite's coarsest mesh stops converging in every gauge, and the next one
 # converges; at ten times it, none of them does
-# ([M-R0START](MEASUREMENTS.md#m-r0start)).
+# ([M-284](MEASUREMENTS.md#m-284)).
 
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it

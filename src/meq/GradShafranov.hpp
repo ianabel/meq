@@ -1758,7 +1758,7 @@ namespace meq
 			 * precondition on it. A no-op for any other source, and for one
 			 * that already has its curve -- so it is never refreshed, not per
 			 * iteration and not per adaptive cycle. MIRROR-PLAN.md section 5,
-			 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+			 * [M-281](MEASUREMENTS.md#m-281).
 			 *
 			 * solve() calls it before its first residual; it is public so that
 			 * a driver can call it first and report a refused profile set as
@@ -1777,7 +1777,7 @@ namespace meq
 			/**
 			 * THE MIDPLANE GAUGE'S CROSSINGS ARE BORDER UNKNOWNS, so that F is
 			 * pointwise and Newton quadratic. MIRROR-PLAN.md section 5;
-			 * [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+			 * [M-283](MEASUREMENTS.md#m-283).
 			 *
 			 * R_0 at @a knots uniform knots Psi_k over
 			 * [ 0, 1 ] are unknowns of the bordered Newton beside psi_ax,
@@ -1819,7 +1819,7 @@ namespace meq
 			 * not give. MEASURED: a start nearer the answer, the same plasma
 			 * solved first on the vacuum's crossing held, saves one step of
 			 * three at most and costs more than it saves --
-			 * [M-R0START](MEASUREMENTS.md#m-r0start).
+			 * [M-284](MEASUREMENTS.md#m-284).
 			 *
 			 * @throws std::invalid_argument for fewer than four knots.
 			 */

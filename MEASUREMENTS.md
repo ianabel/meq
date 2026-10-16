@@ -16885,7 +16885,9 @@ for 30 steps. Integrating `R q_R` from the midplane's first point, element by
 element over panels bisected onto the faces: **2e-04**, and the solve converges
 (section 3). The same solve with the vacuum's table frozen throughout converges
 in 6 steps, which is what said the source's Jacobian was right and the table
-was not.
+was not. **Not reproduced**: held, the vacuum's table converges in
+the fixed radius's 3 quadratic steps, so the six were the refresh's
+→ [M-281](#m-281) §3, [M-283](#m-283) §3.
 
 #### 3. One equilibrium, two gauges
 
@@ -16969,7 +16971,10 @@ never held. At **2e19** it takes two full steps to 1.1e-04, then stalls at
 1.5e-05 under damping down to 5e-04 for the rest of the 30. The field's pull on
 `R₀` is the term the Jacobian leaves out, and it scales with the plasma's
 pressure: somewhere between 5e18 and 2e19 here the frozen iteration stops
-contracting.
+contracting. **That attribution is FALSIFIED**: with the crossings as border
+unknowns and the Jacobian exact, the same case stalls at the same merit, and
+the ceiling rises with the mesh → [M-281](#m-281) §4, [M-283](#m-283) §6,
+[M-285](#m-285).
 
 **From a file**: `examples/mirror-three-species.toml`, the same plasma as
 257-knot tables, runs through `meq-run` at level 0, `k = 2`, in 7 linear steps
@@ -17125,7 +17130,7 @@ answer moves in its last bits from run to run.
 * `MEQ_AXIS_DEVICE=force`, `DeviceParity`'s fourth arm.
 
 
-### M-VACGAUGE
+### M-281
 
 **THE VACUUM-MIDPLANE GAUGE: A FIXED CURVE, AN EXACT JACOBIAN, QUADRATIC NEWTON.
 M-278 §2's SIX FROZEN-TABLE STEPS ARE NOT REPRODUCED, AND THE THREE-SPECIES
@@ -17255,7 +17260,7 @@ the floor as a parameter, a run started from another's answer — and are not in
 suite. So the midplane gauge's 2e19 and 5e19 stalls in M-278 are this cap, which
 an exact Jacobian shares; what the cap is remains open.
 
-### M-NCDENSITY
+### M-282
 
 **THE TRUE MIDPLANE IN THE `.nc`: `R_0( Ψ )` AND `n_s( R_0( Ψ ), Ψ )` ON EVERY
 ROTATING MIRROR, AS `DensityFile` TABLES. UNDER THE MIDPLANE GAUGE THEY ARE ITS
@@ -17263,7 +17268,7 @@ OWN TABLES BACK; OFF A VACUUM-GAUGE ANSWER THEY POSE THE SAME PLASMA.**
 `docs/output.rst`, *The true midplane*. `RotatingMirrorDriver`'s
 `theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain` and
 `RotatingMirrorVacuumGauge`'s `theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge`.
-Same build as [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+Same build as [M-281](MEASUREMENTS.md#m-281).
 
 **Through the driver**, `examples/mirror-three-species.toml` at level 0, `k = 2`,
 on one generated mesh, read back by `ncdump`, 1025 crossing knots:
@@ -17295,12 +17300,13 @@ interpolation** — `R_0` at 1024 against 16384 intervals is 2.4e-08 m apart bet
 knots there, 1.4e-09 m for the three species — and four times the intervals takes
 it to the floor the three species sit on from the start.
 
-### M-R0BORDER
+### M-283
 
 **THE MIDPLANE GAUGE WITH ITS CROSSINGS AS BORDER UNKNOWNS: QUADRATIC WHERE THE
 FROZEN REFRESH IS LINEAR, THE SAME ANSWER, AND geq's MIRROR TO M-278's DIGITS —
 BUT IT DOES NOT LIFT THE THREE-SPECIES STALL, SO THE FREEZE IS NOT WHAT CAUSES
-IT.**
+IT.** The frozen refresh it is measured against is retired, and these knots
+are how `Gauge = "midplane"` solves → [M-284](#m-284).
 
 **Setup.**
 * `MIRROR-PLAN.md` §5. `GradShafranovSolver::setMidplaneGaugeKnots( K )` makes
@@ -17539,7 +17545,7 @@ frozen refresh takes 6.
 * Against the fixed radius the bordered gauge reads 4.85e-10, where the frozen
   refresh read 4.62e-10. Both are about 70× under geq's own 257 − 513 in max.
 
-### M-R0START
+### M-284
 
 **THE MIDPLANE GAUGE'S BORDERED NEWTON FROM THE VACUUM IS ALREADY QUADRATIC IN
 THREE STEPS. THE GUESSED START — THE SAME DENSITIES SOLVED FIRST ON THE VACUUM'S
@@ -17633,7 +17639,7 @@ wanted. The bordered Newton's first merit from it rises with it, 3.3e-05 to
 Where every start stalls the held solve stalls first and highest, so the route
 never reaches its bordered phase; (a) gets furthest. Level 2 at 5e19 is not
 measured under the knots; on the vacuum's curve it diverges
-([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)).
+([M-281](MEASUREMENTS.md#m-281)).
 
 #### 4. What ships, and what the knots cost the gauge's statement
 
@@ -17668,10 +17674,10 @@ measured under the knots; on the vacuum's curve it diverges
   32 knots and to 2.83e-09 and 8.38e-11 at 128: the knots' error, which falls
   with them. For scale, the plasma's largest displacement of a crossing from
   the vacuum's reads 5.37e-04, 5.31e-04 and 5.33e-04 m at levels 0, 1 and 2 on
-  the vacuum's curve ([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge) §4): the
+  the vacuum's curve ([M-281](MEASUREMENTS.md#m-281) §4): the
   discretisation moves a crossing by microns, ten times the knots' gap.
 
-### M-OUTERLOOP
+### M-285
 
 **THE OUTER LOOP — WHOLE HELD-TABLE SOLVES, THE TABLE EACH TIME THE LAST
 ANSWER'S CROSSINGS — IS LINEAR AT THE RETIRED FROZEN REFRESH'S OWN CONTRACTION,
@@ -17685,7 +17691,7 @@ on the previous answer's crossings (`tabulateMidplaneCrossing()`, 1024
 intervals, on `q` integrated along `z = 0`), warm-started from that answer's
 whole state; the first is on the filaments' crossing from the vacuum, which is
 the vacuum-midplane gauge. It stops once the table moves by less than 1e-12 m.
-Build, profiles and machine as [M-R0START](MEASUREMENTS.md#m-r0start), `k = 3`;
+Build, profiles and machine as [M-284](MEASUREMENTS.md#m-284), `k = 3`;
 wall clock on a shared machine.
 
 | case | level | contraction per outer step | outer steps | inner steps | its cost | the bordered gauge's |
@@ -17700,7 +17706,7 @@ The first outer step moves the table by the plasma's displacement of its
 surfaces — 1.25e-03, 5.37e-04 and 2.50e-03 m — and every later one by the same
 fraction of the last, to three digits from the third on. The frozen refresh
 contracted by 0.016 a step on geq's plasma from any start
-([M-R0BORDER](MEASUREMENTS.md#m-r0border) §4): **the outer loop is the frozen
+([M-283](MEASUREMENTS.md#m-283) §4): **the outer loop is the frozen
 refresh with its inner solves converged**, and converging them buys nothing.
 Its fixed point is the midplane gauge's answer on the 1024-interval table: it
 lands on the bordered answer to 1.31e-08, 1.79e-10 and 2.22e-10 in `ψ*` — 1.5e-05,
@@ -17725,4 +17731,4 @@ level 0 too (1.60e-05), and at 2e19 on level 1, where the frozen refresh took 14
 steps, every route converges. So the line search fought no moving residual: a
 fixed residual with an exact Jacobian stalls at the same pressure on the same
 mesh, which is the mesh-dependent ceiling of
-[M-VACGAUGE](MEASUREMENTS.md#m-vacgauge) §4.
+[M-281](MEASUREMENTS.md#m-281) §4.

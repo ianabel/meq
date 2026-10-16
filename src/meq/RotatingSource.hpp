@@ -73,7 +73,7 @@
  * the table in hand and the Jacobian carries R_0's dependence on the field.
  * Freezing a table tabulated once per iteration instead leaves that dependence
  * out and makes Newton linear -- MEASURED and retired,
- * [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+ * [M-283](MEASUREMENTS.md#m-283).
  *
  * A FIXED CURVE IS A GAUGE TOO, AND IT KEEPS F POINTWISE: Gauge::FixedCurve,
  *
@@ -90,7 +90,7 @@
  * surface crossed z = 0, and the transfer to the true midplane is
  * exp( m_s omega^2 ( R_0vac^2 - R_0^2 )/2T_s ) -- only the plasma's own
  * displacement of its surfaces, not the machine's span of radii.
- * MIRROR-PLAN.md section 5, [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+ * MIRROR-PLAN.md section 5, [M-281](MEASUREMENTS.md#m-281).
  *
  * THE PRICE OF THE GAUGE IS THAT TWO SETS OF n_s0 DIFFERING BY IT DESCRIBE THE
  * SAME PLASMA. Anyone comparing profiles against RoPP's own notation, against a
@@ -205,7 +205,7 @@ namespace meq
 	 * plasma edge does (CLAUDE_FB.md, *The plasma edge caps the order*). The
 	 * Jacobian's missing edge term is the lesser cost -- MEASURED, F at a label
 	 * at 1e-3 of its peak leaves Newton quadratic in three steps;
-	 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+	 * [M-281](MEASUREMENTS.md#m-281).
 	 */
 	inline constexpr double labelTolerance = 1.0e-6;
 
@@ -221,7 +221,7 @@ namespace meq
 	 * W AND NOT R_0 BECAUSE W IS NEARLY LINEAR IN THE FLUX: psi ~ B R^2/2 in a
 	 * uniform field, so the interpolant's h^4 error is set by the field's
 	 * curvature and the plasma's own, not by the square root.
-	 * [M-R0BORDER](MEASUREMENTS.md#m-r0border) measures the two.
+	 * [M-283](MEASUREMENTS.md#m-283) measures the two.
 	 *
 	 * @throws std::invalid_argument for a null basis, a count that is not its
 	 *         size, or a crossing that is not finite and positive.
@@ -274,7 +274,7 @@ namespace meq
 	 * analytic. On the solved state's own midplane crossing it is the TRUE
 	 * midplane density whatever gauge the source was posed in -- which is the
 	 * relabelling the output carries, and the table that poses the same
-	 * plasma in Gauge::Midplane. [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+	 * plasma in Gauge::Midplane. [M-282](MEASUREMENTS.md#m-282).
 	 *
 	 * @param curve  R_c at each knot, in @a source's flux variable.
 	 * @throws std::out_of_range if @a index is not a species.
@@ -438,7 +438,7 @@ namespace meq
 			 * so whether a profile set meets the precondition is too. Under
 			 * Gauge::Midplane the R_0' at a label is the ANSWER's, and the
 			 * vacuum's is not an estimate of it good enough to refuse on --
-			 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+			 * [M-281](MEASUREMENTS.md#m-281).
 			 *
 			 * @param curve  R at each x, in this source's flux variable. The
 			 *               source's own table is neither read nor replaced.

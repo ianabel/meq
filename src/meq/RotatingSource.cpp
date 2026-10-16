@@ -1380,7 +1380,7 @@ namespace meq
 		 * whether it does is a property of the profiles and R_g alone, so a
 		 * set that fails it is a configuration error and is refused as one.
 		 * See meq::labelTolerance for what the bound guards, MEASURED --
-		 * [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+		 * [M-281](MEASUREMENTS.md#m-281).
 		 */
 		RotatingSource::LabelCheck const check = inner.labelCheck( curve );
 		if ( !( check.relative <= labelTolerance ) )

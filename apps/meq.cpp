@@ -4353,7 +4353,7 @@ int main( int argc, char **argv )
 		 * it is. solve() would install the same curve at its first residual and
 		 * throw the same refusal from inside the Newton, where it would read as
 		 * a failed solve. Once in the source's life: every later cycle's solver
-		 * finds the curve in and installs nothing. [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+		 * finds the curve in and installs nothing. [M-281](MEASUREMENTS.md#m-281).
 		 */
 		if ( normalised && normalised->readsVacuumMidplane() )
 		{
@@ -6311,7 +6311,7 @@ int main( int argc, char **argv )
 		 * "midplane" they reproduce the input tables; under any other gauge they
 		 * are that plasma's midplane statement. A midplane on which psi is not
 		 * monotone has no crossing, and the columns are left out with a warning.
-		 * [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+		 * [M-282](MEASUREMENTS.md#m-282).
 		 */
 		std::shared_ptr<meq::SplineProfile const> trueCrossing;
 		std::vector<std::shared_ptr<meq::SplineProfile const>> trueDensities;

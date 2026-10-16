@@ -12133,7 +12133,7 @@ namespace
 
 		/*
 		 * THE CROSSINGS ARE BORDER UNKNOWNS -- setMidplaneGaugeKnots(),
-		 * [M-R0BORDER](MEASUREMENTS.md#m-r0border). R_0 at K knots in Psi, the
+		 * [M-283](MEASUREMENTS.md#m-283). R_0 at K knots in Psi, the
 		 * source's table the interpolant through them at every residual, and
 		 * one row per knot:
 		 *
@@ -13018,7 +13018,8 @@ namespace
 			// THE BORDERED GAUGE'S ROWS ARE ABSENT BY OMISSION, deliberately:
 			// the cold state has no midplane flux but psi_c's, and a crossing
 			// row read there measures the coils rather than the problem. So
-			// the target is the one the frozen refresh sets on the same plasma.
+			// the target is the field's and the labels', as it is for a gauge
+			// with no knots on the same plasma.
 			std::vector<double> const gaugeHeld = gaugeConstraint;
 			std::fill( gaugeConstraint.begin(), gaugeConstraint.end(), 0.0 );
 			reference = augmentedNorm( coldResidual.Norml2(),

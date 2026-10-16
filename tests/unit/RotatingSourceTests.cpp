@@ -1841,7 +1841,7 @@ BOOST_AUTO_TEST_CASE( theNormalisedSourceTabulatesInPsiAndKeepsItsColumnsAnalyti
 
 /*
  * THE BORDERED GAUGE'S COLUMNS, POINTWISE: dF/dW AND dF/dW' AGAINST CENTRAL
- * DIFFERENCES OF f(), W = R_0^2/2. [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+ * DIFFERENCES OF f(), W = R_0^2/2. [M-283](MEASUREMENTS.md#m-283).
  *
  * The table is moved by a constant in W -- which moves W and not W' -- and by a
  * slope through the evaluation point -- which moves W' and not W there -- so
@@ -2025,7 +2025,7 @@ BOOST_AUTO_TEST_SUITE_END()
 /*
  * THE FIXED-CURVE GAUGE, meq::RotatingSource::Gauge::FixedCurve: phi_0 pinned on
  * a curve R_g( Psi ) given once and never replaced -- the vacuum's crossing, in
- * the solver. MIRROR-PLAN.md section 5, [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge).
+ * the solver. MIRROR-PLAN.md section 5, [M-281](MEASUREMENTS.md#m-281).
  */
 namespace
 {
