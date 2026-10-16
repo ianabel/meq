@@ -228,7 +228,7 @@ so its `omega_profile` callable is the only way to hand both codes the same
 **A MIRROR CAN TAKE THE OTHER LOCAL GAUGE**, `[source] Gauge = "midplane"`:
 `φ₀ = 0` where each surface crosses `z = 0`, so the densities are midplane
 densities and stay within a double at high Mach with impurities, which the
-fixed radius does not (`MIRROR-PLAN.md` §5, → [M-GAUGE](MEASUREMENTS.md#m-gauge)).
+fixed radius does not (`MIRROR-PLAN.md` §5, → [M-278](MEASUREMENTS.md#m-278)).
 Three traps from building it. **Read the midplane flux off `q`, not `ψ_h`**:
 `ψ_h` jumps between elements by more than the plasma's own flux on a coarse
 mirror mesh, and a crossing table built on it stalls Newton. **The frozen

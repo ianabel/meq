@@ -16758,7 +16758,7 @@ reaches it, so it sits at the format's edge. Device single answers the first
 three targets at the same errors as double, to two or three figures.
 
 
-### M-RETRY
+### M-277
 
 **MR-5: THE BORDERED RETRY RUNG ON THE ROTATING MIRROR. WHERE THE FIRST
 ATTEMPT ALSO CONVERGES THE RUNG REACHES THE SAME EQUILIBRIUM TO ROUND-OFF. BUT
@@ -16841,7 +16841,7 @@ exit 2. The binary before the skip exits 0 on that start, which is what the
 case catches.
 
 
-### M-GAUGE
+### M-278
 
 **THE MIDPLANE GAUGE ON THE ROTATING MIRROR: ONE EQUILIBRIUM IN BOTH GAUGES,
 geq's IN THE MIDPLANE GAUGE TO M-263's RESOLUTION, AND THREE SPECIES AT `M = 6`.**
@@ -16984,7 +16984,7 @@ bracket collapsed onto adjacent doubles, fixes it; `RotatingSourceTests`'
 `theRootFindEndsWhenItsBracketDoes` threw before and passes after.
 
 
-### M-ADAPT
+### M-279
 
 **THE RESIDUAL ESTIMATOR ON THE ROTATING MIRROR. JUDGING IT FOUND TWO DEFECTS,
 BOTH IN HOW THE ESTIMATOR TREATS SUBTRACTED CONDUCTORS. WITH BOTH REPAIRED, η
@@ -17078,7 +17078,7 @@ L0 to L1. At cycle 2's 6,222 trace dofs that line reads 7.11e-04, against the
 cycle's 1.78e-04. Reaching 1.78e-04 uniformly would take 15,772 dofs, so the
 loop uses **2.5× fewer** trace dofs for the same error.
 
-### M-DEVICE
+### M-280
 
 **THE SHIPPED MIRROR UNDER `--device cuda` IS THE HOST'S TO ABOUT 1e-13 OF ITS
 LARGEST VALUE, IN THE SAME FOUR NEWTON STEPS. THE CARD IS NOT

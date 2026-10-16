@@ -106,7 +106,7 @@ invisible to the others. Reach for them in this order.
   two labels at points and subtracted filaments, `cpu` against `cuda` on the
   exact `ψ_h` and `q_h` within 1e-12 of their largest values. A tolerance and
   not printed digits, because the card differs from itself between takes
-  → **[M-DEVICE](MEASUREMENTS.md#m-device)**.
+  → **[M-280](MEASUREMENTS.md#m-280)**.
 
 **THREE PATTERNS RECUR, AND RECOGNISING THEM IS MOST OF THE WORK.**
 

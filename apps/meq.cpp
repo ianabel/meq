@@ -4514,7 +4514,7 @@ int main( int argc, char **argv )
 			 * way. Neither of its tokamak reasons is here either: a box run has
 			 * no X-point to cap, and the annulus trigger above cannot fire on
 			 * one. So the first failure is reported as it is. MEASUREMENTS.md
-			 * M-RETRY.
+			 * M-277.
 			 */
 			if ( normalised && config->getSource().supportIsBox() )
 			{
@@ -4724,7 +4724,7 @@ int main( int argc, char **argv )
 			 * eta ROSE, the marking chased eta_5's faces, and eta_1 to eta_4
 			 * did not move in the fifth digit. Shifted, eta_5 is 2.0e-05.
 			 * RotatingMirrorAdaptive is the regression, MEASUREMENTS.md
-			 * M-ADAPT. conductorPsi() is EXACTLY ZERO without a split, so every
+			 * M-279. conductorPsi() is EXACTLY ZERO without a split, so every
 			 * other run builds the datum it always built.
 			 */
 			if ( exterior )

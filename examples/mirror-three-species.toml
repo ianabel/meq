@@ -14,7 +14,7 @@
 # radius gauge would carry each surface's densities to one ReferenceRadius by a
 # factor exponential in the species mass: on this plasma carbon's table would
 # span about 1e117 at the best radius, where here it spans the 1e6 it is given
-# (MEASUREMENTS.md M-GAUGE).  There is no ReferenceRadius, and one is refused.
+# (MEASUREMENTS.md M-278).  There is no ReferenceRadius, and one is refused.
 #
 # THE PROFILES fall to a millionth of their peak at the labels.  Under this
 # gauge a density flat at a label still carries -n m omega^2 R_0 R_0'/T in its
@@ -25,7 +25,7 @@
 # WHAT TO EXPECT.  Newton is LINEAR under the midplane gauge -- the crossings are
 # re-tabulated once per iteration and frozen within it -- so about seven steps
 # where the fixed radius takes three or four.  At ten times this density the
-# frozen iteration stops contracting (M-GAUGE).
+# frozen iteration stops contracting (M-278).
 
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it

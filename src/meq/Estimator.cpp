@@ -153,7 +153,7 @@ namespace meq
 		 * is. Measured on examples/mirror-rotating.toml at k = 2 under uniform
 		 * refinement, eta read 1.48e-02, 7.46e-03, 3.69e-03 while the flux
 		 * error fell at 3.0 and 3.2, so the effectivity index went 17, 68,
-		 * 308. MEASUREMENTS.md M-ADAPT.
+		 * 308. MEASUREMENTS.md M-279.
 		 *
 		 * conductorPsi() is EXACTLY ZERO with no conductor field, so every
 		 * other configuration sums the same numbers it always did.

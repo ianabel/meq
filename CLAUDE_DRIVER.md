@@ -266,7 +266,7 @@ that η came down, and that assumption P.1 survived the graded `Γ_h`.
 `F` at `ψ_p + ψ_c`, as the solve does, and η₅'s datum on `Γ_h` is the exterior
 trace less `ψ_c`. Either one left physical puts η orders wrong on the mirror;
 `RotatingMirrorAdaptive` holds the effectivity index in `( 5, 40 )` there
-→ **[M-ADAPT](MEASUREMENTS.md#m-adapt)**.
+→ **[M-279](MEASUREMENTS.md#m-279)**.
 
 **The driver's non-linear path is a reactive ladder**: Newton, and on *observed*
 failure `PicardThenNewton`, rebuilding the solver because a caught
@@ -338,7 +338,7 @@ BRANCHED OR REFUSED BESIDE IT** (`MIRROR-PLAN.md` MR-5,
 * **`PicardSweeps` is refused beside any `[source.axis]`.** That is measured,
   not argued: each sweep's Picard-then-Newton diverges.
 * **The retry rung is skipped beside the box**, and the first failure exits 2
-  as it is → **[M-RETRY](MEASUREMENTS.md#m-retry)**. Where both converge the
+  as it is → **[M-277](MEASUREMENTS.md#m-277)**. Where both converge the
   rung's answer is the first attempt's to round-off, but from two of the four
   `PsiAxis` starts that reach it, it converges to a different equilibrium. The
   annulus trigger cannot fire on a box run at all, since `[boundary.xpoint]` is

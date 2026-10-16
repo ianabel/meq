@@ -2144,7 +2144,7 @@ BOOST_AUTO_TEST_CASE( aMirrorWithPicardSweepsIsRefusedAtParse )
 /*
  * A MIRROR WHOSE FIRST ATTEMPT FAILS IS NOT RETRIED: beside the box the
  * bordered Picard-then-Newton rung is skipped and the failure exits 2 as it
- * is. MEASUREMENTS.md M-RETRY.
+ * is. MEASUREMENTS.md M-277.
  *
  * From [source] PsiAxis = 0.2 the bordered Newton fails -- in 30 steps, and
  * 300 do no better -- and the rung, run, converges in eight to a SECOND
@@ -2216,7 +2216,7 @@ BOOST_AUTO_TEST_SUITE( adaptive )
  * BOTH SIDES ARE THE REMAINDER: [conductors] subtracts the filaments, so the
  * solved q_h is psi_p's, and so is the residual eta is built on.
  *
- * WHAT IT FOUND, TWICE, AND BOTH WERE THE SPLIT. MEASUREMENTS.md M-ADAPT.
+ * WHAT IT FOUND, TWICE, AND BOTH WERE THE SPLIT. MEASUREMENTS.md M-279.
  *   eta_5's datum was the exterior's modal sum, the PHYSICAL flux on Gamma,
  *   where the load the solve imposes is that less psi_c: eta_5 read 2.68,
  *   3.58, 4.49 over the cycles, eta ROSE, and the marking chased it.
@@ -2395,7 +2395,7 @@ BOOST_AUTO_TEST_CASE( theEstimatorTracksTheErrorOnTheAdaptiveMirror )
 			"Above it with eta FALLING AT FIRST ORDER under uniform refinement, F "
 			"is being read at the remainder and not at psi_p + psi_c; with eta_5 "
 			"carrying it and RISING over the cycles, eta_5's datum is the physical "
-			"modal sum and not the remainder's. MEASUREMENTS.md M-ADAPT" );
+			"modal sum and not the remainder's. MEASUREMENTS.md M-279" );
 	}
 	for ( std::size_t c = 1; c < rows.size(); ++c )
 	{
@@ -2445,7 +2445,7 @@ BOOST_AUTO_TEST_SUITE( device )
  * wrong instrument; what separates the two is round-off in two
  * factorisations of one system. M-276 read 2.0e-15 in psi* against a flux of
  * order 7e-02, 3e-14 of it; three takes here read 4.8e-14 to 1.2e-13 of
- * max |psi_h| and 5.7e-14 to 1.0e-13 of max |q_h| (M-DEVICE). So the bound
+ * max |psi_h| and 5.7e-14 to 1.0e-13 of max |q_h| (M-280). So the bound
  * sits a factor eight above the worst take and twelve orders below the
  * defects the device path has had: M-206 was a factor of two. In single it takes the
  * driver comparison's floor too, unmeasured on a card here.
@@ -2864,6 +2864,19 @@ BOOST_AUTO_TEST_CASE( theMirrorPosedInBothGaugesIsOneEquilibrium )
 			"level " << i << ": the two gauges differ by " << gauge[ i ].max << ", more than "
 			"the fixed-radius answer's own distance from the best, " << own[ i ].max
 			<< " -- so the difference is not discretisation" );
+	// In single the finer two differences sit under the format's floor --
+	// 7.6e-08 and 8.2e-08 rms against 16 eps x |psi_bnd|, where double reads
+	// 6.7e-09 and 1.0e-10 -- so whether they fall is round-off. A double-build
+	// acceptance there, skipped loudly; the bound against the answer's own
+	// error above still runs. M-272.
+	double const fluxScale = std::abs( sampled( 2, order, true ).psiBoundary );
+	if ( !meq::tests::aboveTheFormatsFloor( gauge.back().rms, fluxScale ) )
+	{
+		std::printf( "    *** SKIPPED: the gauges' difference ends at %.3e rms, under this "
+		             "build's floor on psi*, so whether it falls is not measurable. M-272\n",
+		             gauge.back().rms );
+		return;
+	}
 	BOOST_TEST( ( gauge[ 0 ].rms > gauge[ 1 ].rms && gauge[ 1 ].rms > gauge[ 2 ].rms ),
 		"the gauges' difference does not fall with the mesh: " << gauge[ 0 ].rms << ", "
 		<< gauge[ 1 ].rms << ", " << gauge[ 2 ].rms );
@@ -3031,10 +3044,23 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixSolveInTheMidplaneGauge )
 	std::printf( "    rate: max %.3f, rms %.3f; labels psi_ax %.10e %.10e %.10e\n",
 	             std::log2( d01.max/d12.max ), std::log2( d01.rms/d12.rms ),
 	             runs[ 0 ].psiAxis, runs[ 1 ].psiAxis, runs[ 2 ].psiAxis );
-	BOOST_TEST( d12.rms < 0.25*d01.rms,
-		"psi* does not self-converge: level to level " << d01.rms << " then " << d12.rms );
-	BOOST_TEST( d12.max < 0.25*d01.max,
-		"psi* does not self-converge in max: " << d01.max << " then " << d12.max );
+	// In single the solves stop at the format's floor and the level 1 - 2
+	// difference is round-off: 5.4e-08 rms against 16 eps x |psi_bnd|, and
+	// 3.2e-07 in max where double reads 1.1e-08. Neither norm of a field under
+	// the floor measures the discretisation, so the self-convergence is a
+	// double-build acceptance there, skipped loudly; the n_s0 range below still
+	// runs. M-272.
+	if ( !meq::tests::aboveTheFormatsFloor( d12.rms, std::abs( runs[ 2 ].psiBoundary ) ) )
+		std::printf( "    *** SKIPPED: the level 1 - 2 difference is %.3e rms, under this "
+		             "build's floor on psi*, so the self-convergence is not measurable. "
+		             "M-272\n", d12.rms );
+	else
+	{
+		BOOST_TEST( d12.rms < 0.25*d01.rms,
+			"psi* does not self-converge: level to level " << d01.rms << " then " << d12.rms );
+		BOOST_TEST( d12.max < 0.25*d01.max,
+			"psi* does not self-converge in max: " << d01.max << " then " << d12.max );
+	}
 
 	// THE n_s0 RANGE, ON THE SOLVED STATE.
 	meq::NormalisedRotatingSource &source = *finest->source;

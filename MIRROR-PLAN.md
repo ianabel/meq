@@ -200,7 +200,7 @@ the operating point and impurities are the reason to run three species at all.
 
 ### The fix: a fixed-`z` gauge for mirrors, and the fixed-`R` one stays for tokamaks
 
-**BUILT AND MEASURED** → [M-GAUGE](MEASUREMENTS.md#m-gauge). `[source] Gauge =
+**BUILT AND MEASURED** → [M-278](MEASUREMENTS.md#m-278). `[source] Gauge =
 "midplane"`, `meq::RotatingSource::Gauge::Midplane`, refused off a boxed
 normalised source and beside `ReferenceRadius`. **geq's mirror solved in the
 midplane gauge agrees with geq as MR-4d asks**: falling at 1.69 then 1.83 against
@@ -691,7 +691,7 @@ the driver, and its estimator tracks the flux error there.
 at every cycle and on the uniform L1 mesh. It holds the index in
 `AdaptiveRefinement`'s `( 5, 40 )`, reading 7.7, 13.6 and 13.1 over three
 cycles, with `η` and the error both falling at every cycle
-→ [M-ADAPT](MEASUREMENTS.md#m-adapt). Judging it found two defects of the
+→ [M-279](MEASUREMENTS.md#m-279). Judging it found two defects of the
 split, both repaired. `η₅` compared against the physical modal sum rather than
 the remainder's datum. `η₁` read `F` at `ψ_p` rather than at `ψ_p + ψ_c`.
 
@@ -699,10 +699,10 @@ the remainder's datum. `η₁` read `F` at `ψ_p` rather than at `ψ_p + ψ_c`.
 ([M-276](MEASUREMENTS.md#m-276)). `RotatingMirrorDevice` runs the shipped file
 under `--device cpu` and `--device cuda`. It asserts `ψ_h` and `q_h` within
 1e-12 of their largest values and the same Newton count, and skips loudly
-without a card → [M-DEVICE](MEASUREMENTS.md#m-device).
+without a card → [M-280](MEASUREMENTS.md#m-280).
 
 **The bordered retry rung is skipped beside the box**, and a failed first
-attempt exits 2 as it is → **[M-RETRY](MEASUREMENTS.md#m-retry)**. Run on the
+attempt exits 2 as it is → **[M-277](MEASUREMENTS.md#m-277)**. Run on the
 mirror, it agrees with the first attempt to 7.3e-13 where both converge. But
 from two of the four `PsiAxis` starts that reach it, it converges to a different
 equilibrium: a second discrete root with a spike in one element of the box, and
@@ -710,6 +710,26 @@ an answer accepted against a cold residual of 1e+12. The annulus trigger cannot
 fire on a box run, since `[boundary.xpoint]` is refused beside it.
 `RotatingMirrorDriver`'s `aMirrorWhoseFirstAttemptFailsIsNotRetried` asserts
 the branch.
+
+**Open:**
+* **A start the rung closed correctly now exits 2.** `PsiAxis` 0.05 and 0.1 were
+  rescued to the shipped answer; the skip trades them for not reporting the
+  other two roots. Whether the 0.2 root is reachable by the plain bordered
+  Newton from some start, or survives refinement, is untried.
+* **The bordered target is relative to the cold residual**, so a bad enough
+  start is accepted loose: from `PsiAxis = 0.5` a first residual of 1.1e+12
+  accepts 9.1e-05. That bites any first attempt, not only the rung's, and is
+  not fixed.
+* **The device on the mirror is measured in double only**: device against host
+  in single, and `DeviceParity`'s `MEQ_AXIS_DEVICE=force` arm, are not run on
+  it. Neither `--device` nor the adaptive loop has been run under
+  `Gauge = "midplane"`.
+* **The estimator's uniform effectivity settling is not asserted**: 7.7, 11.7,
+  14.3 over levels 0 to 2 at `k = 2`, which is pre-asymptotic there.
+* **A curved boundary with subtracted conductors and no `[boundary.exterior]`**
+  takes η₅ against `transferredDatum()` with `g = 0`. That matches what the
+  solve imposes; whether that combination poses the intended problem is
+  unexamined.
 
 ## Risks, in the order they are likely to hurt
 
@@ -738,13 +758,14 @@ the branch.
    published interface rather than to solver internals, and the only one found by
    running the benchmark rather than by reading the code. **Not on MR-4's path**:
    its exponent is half what §5 first quoted, and two species at geq-Mach 2 to 4
-   are comfortably representable. **BUILT** → [M-GAUGE](MEASUREMENTS.md#m-gauge):
+   are comfortably representable. **BUILT** → [M-278](MEASUREMENTS.md#m-278):
    geq's mirror in the midplane gauge meets MR-4d's matrix, and three species at
    `M = 6` solve. **What remains is the freeze's price**: Newton is linear under
    the midplane gauge, and the left-out pull of the field on `R₀` scales with the
    pressure, so the same three species stall at ten times the density. Carrying
    that term would be `R₀` at the table's knots as border unknowns, rows like the
-   label rows' at each crossing — not built.
+   label rows' at each crossing — not built, and a departure from the decided
+   freeze that needs a decision before it is.
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,
