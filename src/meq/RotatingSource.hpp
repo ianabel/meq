@@ -66,14 +66,14 @@
  *
  * WHAT IT COSTS IS THE PROPERTY THE PARAGRAPH ABOVE ADVERTISES. R_0( psi ) is a
  * functional of the solution, so F stops being a pointwise function of
- * ( R, z, psi ) alone. The solver tabulates R_0 once per Newton iteration,
- * through NormalisedSource::setMidplaneField(), and FREEZES it within the
- * iteration -- the support freeze's precedent -- so that within one iteration F
- * is again pointwise and every derivative below is exact for it. What the
- * Jacobian does not carry is R_0's dependence on the field, which the freeze
- * leaves to the next iteration. GradShafranovSolver::setMidplaneGaugeKnots()
- * carries it instead: R_0 at a set of knots become unknowns of the Newton,
- * crossingThroughKnots() is the table, and crossingDerivatives() the columns.
+ * ( R, z, psi ) alone. The solver makes it one again by making R_0 at a set of
+ * knots unknowns of the Newton -- GradShafranovSolver::setMidplaneGaugeKnots()
+ * -- with crossingThroughKnots() the table at every residual and
+ * crossingDerivatives() the columns, so every derivative below is exact for
+ * the table in hand and the Jacobian carries R_0's dependence on the field.
+ * Freezing a table tabulated once per iteration instead leaves that dependence
+ * out and makes Newton linear -- MEASURED and retired,
+ * [M-R0BORDER](MEASUREMENTS.md#m-r0border).
  *
  * A FIXED CURVE IS A GAUGE TOO, AND IT KEEPS F POINTWISE: Gauge::FixedCurve,
  *
@@ -405,13 +405,14 @@ namespace meq
 			 * the midplane gauge differentiates: the exponent's centrifugal
 			 * half is m_s omega^2 ( R^2 - R_0^2 )/2T_s, so dA_s/dpsi gains
 			 * -m_s omega^2 R_0 R_0'/T_s, and d2A_s/dpsi2 the next term down.
-			 * tabulateMidplaneCrossing() builds the one the solver installs;
+			 * crossingThroughKnots() builds the one the solver installs;
 			 * any meq::Profile serves, which is what lets a test install a
 			 * closed form.
 			 *
-			 * Replaced once per Newton iteration by the solver, on the master
-			 * thread, between assemblies, so a threaded assembly never sees it
-			 * move. Held by shared pointer so the replacement is one store.
+			 * Replaced at every residual by the solver -- its knots'
+			 * interpolant -- on the master thread, between assemblies, so a
+			 * threaded assembly never sees it move. Held by shared pointer so
+			 * the replacement is one store.
 			 *
 			 * UNDER Gauge::FixedCurve IT IS THE CURVE R_g( psi ), given once:
 			 * the solver installs the vacuum's crossing only where none has
@@ -616,26 +617,27 @@ namespace meq
 				RotatingSource::Gauge gauge = RotatingSource::Gauge::FixedRadius );
 
 			/// True under RotatingSource::Gauge::Midplane, which is what makes
-			/// the solver call setMidplaneField().
+			/// the solver's crossings border unknowns.
 			bool readsMidplane() const override;
 
 			/**
-			 * TABULATE R_0( Psi ) OVER [ 0, 1 ] FROM THE FIELD ALONG z = 0, at
-			 * the normalisation in force, and hand it to the source underneath.
+			 * TABULATE R_0( Psi ) OVER [ 0, 1 ] FROM A FIELD ALONG z = 0, at
+			 * the normalisation in force, and hand it to the source underneath:
+			 * a table read off a given field -- an answer's, to evaluate on it.
+			 * The solver does not call it; its table is its knots'.
 			 *
 			 * IN Psi, NOT IN psi, AND THAT KEEPS THIS CLASS A PURE WRAPPER. The
 			 * inner source's argument is Psi, so a table in Psi keeps
 			 * F = S H( Psi )/span with H a function of Psi alone, and
-			 * normalisationDerivatives() stays exact for the frozen table
-			 * without a term in R_0. Within an iteration it is R_0( Psi ) that
-			 * is frozen; at convergence the two readings are one table.
+			 * normalisationDerivatives() stays exact for the table in hand
+			 * without a term in R_0.
 			 *
 			 * @throws std::logic_error under Gauge::FixedRadius.
 			 * @throws std::runtime_error as tabulateMidplaneCrossing() does, for
 			 *         a midplane on which psi is not monotone across the support.
 			 */
 			void setMidplaneField( MidplaneField const &field, double rMin,
-			                       double rMax ) override;
+			                       double rMax );
 
 			/// R_0( Psi ) handed to the source underneath as it stands -- the
 			/// bordered gauge's interpolant through its knots. In Psi, for the

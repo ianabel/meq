@@ -1694,37 +1694,20 @@ namespace meq
 
 			/**
 			 * HOW MANY TIMES THE LAST SOLVE TABULATED THE MIDPLANE GAUGE'S
-			 * CROSSINGS: once before its first residual and once at the head of
-			 * every Newton iteration after the first, and zero for a source
-			 * that does not read the midplane. MIRROR-PLAN.md section 5.
+			 * CROSSINGS OFF AN ITERATE: once, before the first residual, when
+			 * the knots start on the starting iterate's own crossings -- see
+			 * setMidplaneGaugeKnots() -- and zero when they start on
+			 * setMidplaneCrossingInitial()'s table or the source reads no
+			 * midplane. MIRROR-PLAN.md section 5.
 			 *
-			 * The crossings are FROZEN within an iteration, beside the support
-			 * freeze and for its reason; the Jacobian is exact for the frozen
-			 * table and does not carry R_0's own dependence on the field, which
-			 * the next iteration's table takes up. No switch turns this off:
-			 * a midplane-gauged source has no answer without it.
-			 *
-			 * **THE PRECONDITION IS CHECKED HERE, AT EVERY REFRESH, BEFORE ANY
-			 * RESIDUAL READS THE TABLE.** `psi` must be monotone along `z = 0`
-			 * across the support, so that each surface crosses the midplane
-			 * once; a tokamak's does not, and neither does a mirror whose flux
-			 * has folded. meq::tabulateMidplaneCrossing() throws, and solve()
-			 * then throws with it rather than gauging on a multi-valued
-			 * crossing.
+			 * **THE PRECONDITION IS CHECKED THERE, AND AGAIN ON THE ANSWER.**
+			 * `psi` must be monotone along `z = 0` across the support, so that
+			 * each surface crosses the midplane once; a tokamak's does not, and
+			 * neither does a mirror whose flux has folded.
+			 * meq::tabulateMidplaneCrossing() throws, and solve() then throws
+			 * with it rather than gauging on a multi-valued crossing.
 			 */
 			int midplaneGaugeRefreshes() const;
-
-			/**
-			 * HOW MANY ITERATIONS OF THE LAST SOLVE KEPT THE PREVIOUS TABLE
-			 * because their iterate failed the precondition. The precondition is
-			 * a property of the ANSWER, and a damped step at high Mach can fold
-			 * an iterate's midplane flux that later steps unfold -- measured on
-			 * three species at M = 6 -- so an intermediate failure holds the
-			 * crossings frozen one iteration longer rather than ending the
-			 * solve. Converging on a held table is refused: the answer must
-			 * give its own crossings.
-			 */
-			int midplaneGaugeHolds() const;
 
 			/**
 			 * THE TOTAL FIELD ALONG `z = 0` AT THE SOLUTION, as the midplane
@@ -1792,11 +1775,11 @@ namespace meq
 			int vacuumGaugeInstalls() const;
 
 			/**
-			 * THE MIDPLANE GAUGE WITH ITS CROSSINGS AS BORDER UNKNOWNS, so that
-			 * Newton is quadratic where the frozen refresh is linear.
-			 * MIRROR-PLAN.md section 5; [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+			 * THE MIDPLANE GAUGE'S CROSSINGS ARE BORDER UNKNOWNS, so that F is
+			 * pointwise and Newton quadratic. MIRROR-PLAN.md section 5;
+			 * [M-R0BORDER](MEASUREMENTS.md#m-r0border).
 			 *
-			 * With @a knots >= 4, R_0 at @a knots uniform knots Psi_k over
+			 * R_0 at @a knots uniform knots Psi_k over
 			 * [ 0, 1 ] are unknowns of the bordered Newton beside psi_ax,
 			 * psi_bnd and the exterior modes, and the source's table at every
 			 * residual -- line-search trials included -- is the C^2
@@ -1816,28 +1799,37 @@ namespace meq
 			 *             NormalisedSource::crossingDerivatives().
 			 *
 			 * K more backsolves a step against the one factorisation, which is
-			 * what it costs. Zero, the default, is the frozen refresh exactly as
-			 * midplaneGaugeRefreshes() describes it. solve() refuses knots for a
-			 * source that does not read the midplane, a prescribed plasma
-			 * current beside them -- whose row reads the crossings and has no
-			 * corner against them here -- and a source whose
-			 * crossingDerivatives() cannot answer. Under an mfem::Device the
-			 * border's dot products take the host route, the crossing rows
+			 * what it costs, and the count is read only by a source that reads
+			 * the midplane. 32 BY DEFAULT, MEASURED: 16 is the fewest whose
+			 * interpolant sits under the discretisation error at level 2 of the
+			 * mirror suite, and 32 is 170x under it there, at 1.6x the cost of
+			 * a fixed-radius solve. A library setter and not a TOML key, since
+			 * it moves the answer by the interpolant's error. solve() refuses a
+			 * prescribed plasma current beside the knots -- whose row reads the
+			 * crossings and has no corner against them here -- and a source
+			 * whose crossingDerivatives() cannot answer. Under an mfem::Device
+			 * the border's dot products take the host route, the crossing rows
 			 * having no device twin.
 			 *
-			 * The knots start at setMidplaneCrossingInitial()'s table if one was
-			 * given and otherwise at the starting iterate's own crossings, found
-			 * as the refresh finds them; the precondition is checked there and
-			 * again on the converged answer, which may not converge on
-			 * crossings its own field could not give.
+			 * THE KNOTS START at setMidplaneCrossingInitial()'s table if one was
+			 * given and otherwise at the starting iterate's own crossings -- on
+			 * a cold start the vacuum's, on an adaptive cycle the warm start's;
+			 * the precondition is checked there and again on the converged
+			 * answer, which may not converge on crossings its own field could
+			 * not give. MEASURED: a start nearer the answer, the same plasma
+			 * solved first on the vacuum's crossing held, saves one step of
+			 * three at most and costs more than it saves --
+			 * [M-R0START](MEASUREMENTS.md#m-r0start).
 			 *
-			 * @throws std::invalid_argument for 1, 2 or 3 knots, or a negative
-			 *         count.
+			 * @throws std::invalid_argument for fewer than four knots.
 			 */
 			void setMidplaneGaugeKnots( int knots );
 
-			/// setMidplaneGaugeKnots()'s count; zero for the frozen refresh.
+			/// setMidplaneGaugeKnots()'s count.
 			int midplaneGaugeKnots() const;
+
+			/// The knot count a solver starts with; see setMidplaneGaugeKnots().
+			static constexpr int defaultMidplaneGaugeKnots = 32;
 
 			/**
 			 * WHERE THE BORDERED GAUGE'S KNOTS START: R_0( Psi ) sampled at the
@@ -5605,16 +5597,6 @@ namespace meq
 			/// the component itself and nothing existing moves.
 			bool plasmaSupportFrozenValue = false;
 
-			/**
-			 * THE MIDPLANE GAUGE'S REFRESH. Hands the normalised source the
-			 * total field along `z = 0` at @a state -- midplaneFieldOf(), the
-			 * solved q integrated along the midplane, plus psi_c exactly -- after
-			 * which the source tabulates its crossings at the
-			 * normalisation in force. A no-op unless the source
-			 * readsMidplane(). See midplaneGaugeRefreshes().
-			 */
-			void refreshMidplaneGauge( mfem::Vector const &state );
-
 			/// The runs below, built if they are not.
 			void buildMidplaneRuns();
 
@@ -5623,9 +5605,8 @@ namespace meq
 			bool midplaneReference( int element, double radius,
 			                        mfem::IntegrationPoint &reference ) const;
 
-			/// midplaneGaugeRefreshes() and midplaneGaugeHolds().
+			/// midplaneGaugeRefreshes().
 			int midplaneRefreshCount = 0;
-			int midplaneHoldCount = 0;
 			/// vacuumGaugeInstalls().
 			int vacuumInstallCount = 0;
 			/// The zero remainder vacuumMidplaneField() reads, kept because the
@@ -5637,7 +5618,7 @@ namespace meq
 			 * meq::PointLocator: `midplaneRunStart[ i ]` is where z = 0 enters
 			 * `midplaneRunElement[ i ]`, bisected onto the face, so that each run
 			 * is a panel the flux along the midplane is integrated over. Built at a solve's first
-			 * refresh and kept for the solve, since the mesh does not move
+			 * reading of the midplane and kept for the solve, since the mesh does not move
 			 * within one; it is what makes a point on the midplane an
 			 * `O( log n )` lookup rather than the whole-mesh scan
 			 * locateFieldPoint() falls back to.
@@ -5651,7 +5632,7 @@ namespace meq
 
 			/// setMidplaneGaugeKnots(), setMidplaneCrossingInitial() and
 			/// midplaneGaugeCrossings().
-			int midplaneGaugeKnotCount = 0;
+			int midplaneGaugeKnotCount = defaultMidplaneGaugeKnots;
 			std::shared_ptr<Profile const> midplaneCrossingStart;
 			std::vector<double> midplaneGaugeCrossingValues;
 
@@ -5970,7 +5951,7 @@ namespace meq
 			                       std::vector<double> &weights ) const;
 
 			/// The field along `z = 0` of @a state, which it reads by reference:
-			/// what refreshMidplaneGauge() and midplaneField() both hand out, and
+			/// what the knots start from and midplaneField() hands out, and
 			/// what the bordered gauge's rows are read off. Like
 			/// midplaneCovector(), on the runs a solve that reads the midplane
 			/// builds.

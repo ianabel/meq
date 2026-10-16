@@ -211,40 +211,35 @@ each ``Density`` table spans only the physical density range.
 :math:`\psi` is monotone along :math:`z = 0`. A tokamak's midplane crosses every
 surface twice, inboard and outboard of the magnetic axis, so the parse refuses
 ``Gauge = "midplane"`` without ``SupportShape = "box"``, and the solver checks
-the monotonicity itself, on every iterate, rather than assuming it.
+the monotonicity itself rather than assuming it.
 
 **What it costs.** :math:`R_0(\psi)` is a functional of the solution, so the
-source is no longer a pointwise function of :math:`(R, z, \psi)`. MEQ tabulates
-:math:`R_0(\Psi)` by a root find along the midplane once per Newton iteration of
-the bordered solve and *freezes* it within the iteration; its slope
-:math:`R_0' = 1/(R_0 q_R)` is read off the solved flux :math:`q`, and the flux
-along the midplane is :math:`q` integrated rather than :math:`\psi_h` read
-pointwise, since :math:`\psi_h` is discontinuous between elements. The source's
-Jacobian is exact for the frozen table, and the table's own dependence on the
-field is taken up by the next iteration — so Newton converges **linearly**
-rather than quadratically under this gauge. An iterate whose midplane flux is
-not monotone keeps the previous table for one more iteration; a solve may not
-*converge* on a table its own answer cannot give, and is refused instead.
+source is no longer a pointwise function of :math:`(R, z, \psi)` alone. MEQ makes
+it one again by making :math:`R_0` at 32 uniform knots in :math:`\Psi` unknowns
+of the bordered Newton, beside :math:`\psi_{\text{ax}}`, :math:`\psi_{\text{bnd}}`
+and the exterior modes. Each knot carries one equation, that the flux along the
+midplane at :math:`R_0` be its surface's — the flux along the midplane is
+:math:`q` integrated rather than :math:`\psi_h` read pointwise, since
+:math:`\psi_h` is discontinuous between elements — and the source's table at
+every residual is the :math:`C^2` cubic spline of :math:`R_0^2/2` through the
+knots. The Jacobian is then the whole one and Newton is **quadratic**, in about
+the fixed-radius gauge's three steps; each knot costs one more backsolve per step
+against the same factorisation, so a step costs about one and a half fixed-radius
+steps. The knots start on the starting iterate's own crossings — the vacuum's on
+a cold start, the previous cycle's answer on an adaptive one — where the solver
+also checks the monotonicity, and checks it again on the answer: a solve may not
+converge on crossings its own field could not give.
 
-**The crossings as unknowns, in the library.** The frozen table is what makes
-Newton linear, and the library therefore also solves the
-midplane gauge with :math:`R_0` at a set of knots in :math:`\Psi` as unknowns of
-the bordered Newton, beside :math:`\psi_{\text{ax}}`, :math:`\psi_{\text{bnd}}` and
-the exterior modes —
-:cpp:func:`meq::GradShafranovSolver::setMidplaneGaugeKnots`. Each knot carries
-one equation, that the flux along the midplane at :math:`R_0` be its surface's;
-the source's table at every residual is the :math:`C^2` cubic spline of
-:math:`R_0^2/2` through the knots, so the source is again a pointwise function
-of :math:`(R, z, \psi)` and the knots, and the Jacobian is the whole one: Newton
-is quadratic. It costs one more backsolve per knot per step against the same
-factorisation. ``meq`` itself solves with the frozen table, and there is no key
-for the bordered one: it moves the answer by the interpolant's error between the
-knots, which is a choice of discrete problem rather than of speed. A run can
-start from another solve's whole state and crossings —
-:cpp:func:`meq::GradShafranovSolver::setInitialState` and
-:cpp:func:`meq::GradShafranovSolver::setMidplaneCrossingInitial` — so a cheaper
-solve can supply the start. Measure the knot count against your own mesh's
-error before relying on one.
+The knot count is a library setting,
+:cpp:func:`meq::GradShafranovSolver::setMidplaneGaugeKnots`, and not a key: the
+interpolant between the knots is part of the discrete problem, so the count moves
+the answer, by an amount that was measured well under the discretisation error
+on the test suite's meshes. Measure it against your own mesh's error before
+relying on a finer one. Freezing a table tabulated once per iteration instead —
+which MEQ did — leaves the table's pull by the field out of the Jacobian and
+makes Newton linear, slower by a factor that grows with the pressure; and
+starting the knots from the same densities solved first on the vacuum's
+crossing saves at most one step and costs more than it saves.
 
 **And it changes what "flat at a label" means.** The support's precondition is
 that :math:`F` vanish at both labels. Under the midplane gauge a ``Density``
@@ -285,8 +280,8 @@ whose surfaces never reach it. Any curve known before the solve is one.
 
 **What it buys.** The curve is fixed, so the source is again a pointwise
 function of :math:`(R, z, \psi)` and the Newton Jacobian is exact, border
-columns included: Newton is **quadratic**, where the midplane gauge's frozen
-crossings make it linear. And it keeps what the midplane gauge is for. The
+columns included: Newton is **quadratic**, with no knots to carry. And it keeps
+what the midplane gauge is for. The
 transfer from a ``Density`` to the density where the *solved* surface crosses
 :math:`z = 0` is
 :math:`\exp\bigl(m_s\omega^2(R_{0,\text{vac}}^2 - R_0^2)/2T_s\bigr)` with

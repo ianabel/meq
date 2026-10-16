@@ -22,14 +22,15 @@
 # both labels -- so it is the density that does.  The tables are in
 # Psi = 1 - psi_n, written by tools/mirror_three_species_tables.py.
 #
-# WHAT TO EXPECT.  Newton is LINEAR under the midplane gauge -- the crossings are
-# re-tabulated once per iteration and frozen within it -- so about seven steps
-# where the fixed radius takes three or four.  Gauge = "vacuum-midplane" reads
-# the same tables on the VACUUM's crossing instead, a slightly different plasma,
-# in three quadratic steps; the .nc's midplane_n_* columns state either at its
-# solved crossing.  At four times this density the test suite's coarsest mesh
-# stops converging in either gauge, and finer ones converge
-# ([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)).
+# WHAT TO EXPECT.  Newton is QUADRATIC under the midplane gauge, in about the
+# fixed radius's three steps: the crossings R_0 at 32 knots in Psi are unknowns
+# of the Newton beside the labels, so the Jacobian carries their pull by the
+# field.  Gauge = "vacuum-midplane" reads the same tables on the VACUUM's
+# crossing instead, a slightly different plasma; the .nc's midplane_n_* columns
+# state either at its solved crossing.  At four times this density the test
+# suite's coarsest mesh stops converging in every gauge, and the next one
+# converges; at ten times it, none of them does
+# ([M-R0START](MEASUREMENTS.md#m-r0start)).
 
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it

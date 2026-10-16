@@ -6677,11 +6677,6 @@ namespace
 		return midplaneRefreshCount;
 	}
 
-	int GradShafranovSolver::midplaneGaugeHolds() const
-	{
-		return midplaneHoldCount;
-	}
-
 	bool GradShafranovSolver::midplaneReference( int element, double radius,
 	                                             mfem::IntegrationPoint &reference ) const
 	{
@@ -6859,17 +6854,6 @@ namespace
 		};
 	}
 
-	void GradShafranovSolver::refreshMidplaneGauge( mfem::Vector const &state )
-	{
-		if ( !normalisedSource || !normalisedSource->readsMidplane() )
-			return;
-
-		buildMidplaneRuns();
-		countedHostRead( state, __LINE__ );
-		normalisedSource->setMidplaneField( midplaneFieldOf( state ), midplaneRMin, midplaneRMax );
-		++midplaneRefreshCount;
-	}
-
 	MidplaneField GradShafranovSolver::vacuumMidplaneField( double &rMin, double &rMax,
 	                                                        double &psiAxis,
 	                                                        double &psiBoundary )
@@ -6935,8 +6919,8 @@ namespace
 
 	void GradShafranovSolver::setMidplaneGaugeKnots( int knots )
 	{
-		if ( knots < 0 || ( knots > 0 && knots < 4 ) )
-			throw std::invalid_argument( "meq::GradShafranovSolver::setMidplaneGaugeKnots: zero for the frozen refresh, or at least four knots, which the not-a-knot interpolant needs" );
+		if ( knots < 4 )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setMidplaneGaugeKnots: at least four knots, which the not-a-knot interpolant needs" );
 		midplaneGaugeKnotCount = knots;
 	}
 
@@ -12134,24 +12118,21 @@ namespace
 		                     ? sB - limiterTotal( unknown ) : 0.0;
 
 		/*
-		 * THE MIDPLANE GAUGE'S FIRST TABLE, BEFORE THE FIRST RESIDUAL READS IT.
-		 * MIRROR-PLAN.md section 5: R_0( Psi ) from the starting iterate at the
-		 * starting normalisation, and refreshed at the head of every iteration
-		 * below. The runs along z = 0 are re-taken per solve, since an adaptive
-		 * cycle refines the mesh this solver holds by reference.
+		 * THE MIDPLANE GAUGE'S KNOTS, BEFORE THE FIRST RESIDUAL READS THEM.
+		 * MIRROR-PLAN.md section 5. The runs along z = 0 are re-taken per
+		 * solve, since an adaptive cycle refines the mesh this solver holds by
+		 * reference.
 		 */
 		midplaneRunStart.clear();
 		midplaneRunElement.clear();
 		midplaneRefreshCount = 0;
-		midplaneHoldCount = 0;
-		std::string midplaneHeldReason;
 		// THE FIXED CURVE, FROM THE VACUUM, IF THE SOURCE HAS NONE: once in
 		// the source's life, and never refreshed below. A no-op otherwise.
 		installVacuumGauge();
 		bool const midplaneGauge = normalisedSource && normalisedSource->readsMidplane();
 
 		/*
-		 * OR THE CROSSINGS AS BORDER UNKNOWNS -- setMidplaneGaugeKnots(),
+		 * THE CROSSINGS ARE BORDER UNKNOWNS -- setMidplaneGaugeKnots(),
 		 * [M-R0BORDER](MEASUREMENTS.md#m-r0border). R_0 at K knots in Psi, the
 		 * source's table the interpolant through them at every residual, and
 		 * one row per knot:
@@ -12215,47 +12196,41 @@ namespace
 			}
 		};
 
-		if ( midplaneGauge )
+		if ( gaugeBordered )
 		{
 			normalisedSource->setNormalisation( s, sB );
-			if ( gaugeBordered )
+			if ( currentIsUnknown )
+				throw std::logic_error( "meq::GradShafranovSolver::solve: the midplane gauge with a "
+					"prescribed plasma current is not implemented -- int F/R reads the crossings, and "
+					"its corner against the knots is not assembled" );
+			double probeW = 0.0, probeWPrime = 0.0;
+			if ( !normalisedSource->crossingDerivatives( 1.0, 0.0, 0.0, probeW, probeWPrime ) )
+				throw std::logic_error( "meq::GradShafranovSolver::solve: the midplane gauge's knots "
+					"need the source's crossingDerivatives() for their columns, and this source does not "
+					"supply them" );
+			buildMidplaneRuns();
+			gaugeBasis = std::make_shared<CardinalSpline const>( 0.0, 1.0,
+				static_cast<std::size_t>( nGauge ) );
+			gaugeR.resize( static_cast<std::size_t>( nGauge ) );
+			if ( midplaneCrossingStart )
 			{
-				if ( currentIsUnknown )
-					throw std::logic_error( "meq::GradShafranovSolver::solve: the bordered midplane gauge "
-						"with a prescribed plasma current is not implemented -- int F/R reads the crossings, "
-						"and its corner against them is not assembled. setMidplaneGaugeKnots( 0 ) is the "
-						"frozen refresh, which carries a current" );
-				double probeW = 0.0, probeWPrime = 0.0;
-				if ( !normalisedSource->crossingDerivatives( 1.0, 0.0, 0.0, probeW, probeWPrime ) )
-					throw std::logic_error( "meq::GradShafranovSolver::solve: setMidplaneGaugeKnots() needs "
-						"the source's crossingDerivatives() for its columns, and this source does not supply "
-						"them" );
-				buildMidplaneRuns();
-				gaugeBasis = std::make_shared<CardinalSpline const>( 0.0, 1.0,
-					static_cast<std::size_t>( nGauge ) );
-				gaugeR.resize( static_cast<std::size_t>( nGauge ) );
-				if ( midplaneCrossingStart )
-				{
-					for ( std::size_t k = 0; k < gaugeR.size(); ++k )
-						gaugeR[ k ] = ( *midplaneCrossingStart )( gaugeBasis->knot( k ) );
-				}
-				else
-				{
-					// The starting iterate's crossings, found as the refresh
-					// finds them -- which checks the precondition on it.
-					countedHostRead( unknown, __LINE__ );
-					std::shared_ptr<SplineProfile const> const start = tabulateMidplaneCrossing(
-						normalisedMidplane( unknown ), midplaneRMin, midplaneRMax, 0.0, 1.0,
-						static_cast<unsigned int>( nGauge - 1 ) );
-					for ( std::size_t k = 0; k < gaugeR.size(); ++k )
-						gaugeR[ k ] = start->knots()[ k ].value;
-					++midplaneRefreshCount;
-				}
-				installGauge();
-				gaugeAll( unknown, gaugeConstraint );
+				for ( std::size_t k = 0; k < gaugeR.size(); ++k )
+					gaugeR[ k ] = ( *midplaneCrossingStart )( gaugeBasis->knot( k ) );
 			}
 			else
-				refreshMidplaneGauge( unknown );
+			{
+				// The starting iterate's crossings -- which checks the
+				// precondition on it.
+				countedHostRead( unknown, __LINE__ );
+				std::shared_ptr<SplineProfile const> const start = tabulateMidplaneCrossing(
+					normalisedMidplane( unknown ), midplaneRMin, midplaneRMax, 0.0, 1.0,
+					static_cast<unsigned int>( nGauge - 1 ) );
+				for ( std::size_t k = 0; k < gaugeR.size(); ++k )
+					gaugeR[ k ] = start->knots()[ k ].value;
+				++midplaneRefreshCount;
+			}
+			installGauge();
+			gaugeAll( unknown, gaugeConstraint );
 		}
 		fieldResidual( unknown, s, residual );
 
@@ -13278,51 +13253,6 @@ namespace
 			if ( phase == 0 )
 				borderedPicardIterationCount = phaseIteration;
 
-			/*
-			 * THE MIDPLANE GAUGE, RE-TABULATED ONCE PER ITERATION AND FROZEN
-			 * WITHIN IT. MIRROR-PLAN.md section 5, beside the support freeze
-			 * and for its reason: R_0 moving inside the line search would make
-			 * every trial a different function. The residual carried in from
-			 * the accepted trial was taken against the previous table, so it is
-			 * re-taken here -- and with it the plasma current, the one border
-			 * row the source enters -- which is what makes the merit below,
-			 * and the convergence test on it, an answer judged against its own
-			 * crossings.
-			 *
-			 * **AN ITERATE THAT FAILS THE PRECONDITION KEEPS THE TABLE IT HAD.**
-			 * The precondition is a property of the ANSWER: a damped first step
-			 * at high Mach can fold the midplane flux of an iterate that the
-			 * next steps unfold, MEASURED on three species at M = 6. So the
-			 * previous crossings stay frozen for one more iteration -- the
-			 * residual is then the one already in hand -- and the refusal is
-			 * kept for the answer: a solve may not CONVERGE on a table its own
-			 * state could not have given. The starting state's refresh, above
-			 * the loop, refuses at once.
-			 */
-			//
-			// NOT UNDER THE BORDERED GAUGE, whose table is its knots: they and
-			// their rows are taken with every other border below.
-			if ( midplaneGauge && !gaugeBordered && iteration > 0 )
-			{
-				normalisedSource->setNormalisation( s, sB );
-				try
-				{
-					refreshMidplaneGauge( unknown );
-					midplaneHeldReason.clear();
-				}
-				catch ( std::runtime_error const &folded )
-				{
-					midplaneHeldReason = folded.what();
-					++midplaneHoldCount;
-				}
-				if ( midplaneHeldReason.empty() )
-				{
-					if ( currentIsUnknown )
-						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
-					fieldResidual( unknown, s, residual );
-				}
-			}
-
 			double const fieldReference = residual.Norml2();
 			double const norm = augmentedNorm( fieldReference, constraint,
 			                                   constraintB, constraintL,
@@ -13405,14 +13335,9 @@ namespace
 					borderStepHistory.back().handedOff = true;
 				if ( norm <= phaseTarget )
 				{
-					if ( !midplaneHeldReason.empty() )
-						throw std::runtime_error( "meq::GradShafranovSolver::solve: the "
-							"iteration converged on midplane crossings its own answer could "
-							"not give, since the midplane gauge's precondition fails there: "
-							+ midplaneHeldReason );
-					// The bordered gauge's knots satisfy their rows, but a fold
-					// BETWEEN them would give a surface two crossings: the
-					// precondition, asked of the answer as the refresh asks it.
+					// The knots satisfy their rows, but a fold BETWEEN them would
+					// give a surface two crossings: the precondition, asked of the
+					// answer as the knots' start asks it of the starting iterate.
 					if ( gaugeBordered )
 					{
 						try
@@ -15681,14 +15606,6 @@ namespace
 
 	void GradShafranovSolver::solve()
 	{
-		// The bordered midplane gauge's knots are crossings of a source that
-		// reads the midplane; on any other they would be a promise not kept.
-		if ( midplaneGaugeKnotCount > 0 && !( normalisedSource && normalisedSource->readsMidplane() ) )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::solve: setMidplaneGaugeKnots() asks for the midplane "
-				"gauge's crossings as border unknowns, and this solve's source reads no midplane "
-				"-- set it on a meq::NormalisedRotatingSource in Gauge::Midplane, or leave it at 0" );
-
 		// IV-3's unknowns are border unknowns, and only the bordered path has a
 		// border. Refused before any dispatch, since two of them return early.
 		if ( ( !freeCircuitList.empty() || !inverseTargetList.empty() )

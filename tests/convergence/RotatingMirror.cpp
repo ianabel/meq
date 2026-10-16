@@ -262,36 +262,12 @@ namespace
 		std::shared_ptr<meq::Profile const> crossing;
 	};
 
-	/// The midplane-gauged source with its crossings HELD: the first table
-	/// it is given, or @a held if one is, whatever the solver hands it later.
-	/// Not a gauge MEQ offers -- it is the control that says which term of the
-	/// frozen refresh's Jacobian is missing, since with the table held F is
-	/// pointwise and its Jacobian exact.
-	class HeldCrossingSource : public meq::NormalisedRotatingSource
-	{
-		public:
-			HeldCrossingSource( MirrorProfiles const &p, double psiAxis, double mu0,
-			                    std::shared_ptr<meq::Profile const> heldIn )
-				: meq::NormalisedRotatingSource( p.species, p.omega,
-				      std::make_shared<meq::ConstantProfile const>( 0.0 ),
-				      p.referenceRadius, psiAxis, mu0,
-				      meq::RotatingSource::Closure::Automatic, p.gauge ),
-				  held( std::move( heldIn ) )
-			{
-			}
+	/// The filaments' own midplane crossing, defined with the vacuum-gauge
+	/// suite.
+	std::shared_ptr<meq::SplineProfile const> vacuumCrossing( unsigned int intervals );
 
-			void setMidplaneField( meq::MidplaneField const &field, double rMin,
-			                       double rMax ) override
-			{
-				if ( held )
-					unnormalised().setMidplaneCrossing( held );
-				else if ( !unnormalised().midplaneCrossing() )
-					meq::NormalisedRotatingSource::setMidplaneField( field, rMin, rMax );
-			}
-
-		private:
-			std::shared_ptr<meq::Profile const> held;
-	};
+	/// The midplane suite's three species, defined with it.
+	MirrorProfiles threeSpecies( double peak, meq::RotatingSource::Gauge gauge, double floor );
 
 	/// How one run is driven. The defaults are MR-4b's sequence as written.
 	struct Options
@@ -333,72 +309,21 @@ namespace
 		/// The border columns differenced rather than analytic, the control
 		/// that sees what the analytic columns leave out.
 		bool differencedColumns = false;
-		/// A midplane-gauged source that keeps the FIRST crossing table it is
-		/// given and ignores every refresh: M-278 section 2's frozen table,
-		/// through the midplane gauge's own code path.
-		bool freezeFirstCrossing = false;
-		/// Non-zero: a midplane-gauged source tabulating its crossings on this
-		/// many intervals, FineCrossing, in place of the default.
-		unsigned int crossingIntervals = 0;
-		/// setMidplaneGaugeKnots(): the bordered gauge's knots, zero for the
-		/// frozen refresh.
+		/// setMidplaneGaugeKnots(), the midplane gauge's knots; zero keeps
+		/// the solver's own count.
 		int gaugeKnots = 0;
 		/// A whole state to start from, with no vacuum solve.
 		Start const *start = nullptr;
-		/// HeldCrossingSource: the first table held throughout, or this one.
+		/// The profiles posed on a HELD table, @a heldCrossing or the
+		/// filaments' own crossing -- Gauge::FixedCurve on it, so F is
+		/// pointwise and there are no knots: what the midplane gauge's
+		/// crossings would give if they never moved. Not a gauge for the
+		/// midplane densities, and the control on the bordered one.
 		bool holdCrossing = false;
 		std::shared_ptr<meq::Profile const> heldCrossing;
-	};
-
-	/// Options::freezeFirstCrossing's source.
-	class FrozenCrossing : public meq::NormalisedRotatingSource
-	{
-		public:
-			using meq::NormalisedRotatingSource::NormalisedRotatingSource;
-
-			void setMidplaneField( meq::MidplaneField const &field, double rMin,
-			                       double rMax ) override
-			{
-				if ( unnormalised().midplaneCrossing() )
-					return;
-				meq::NormalisedRotatingSource::setMidplaneField( field, rMin, rMax );
-			}
-	};
-
-	/// Options::crossingIntervals' source: the midplane gauge's own refresh,
-	/// on a table of a chosen size rather than the default 1024 intervals.
-	class FineCrossing : public meq::NormalisedRotatingSource
-	{
-		public:
-			FineCrossing( unsigned int intervalsIn, std::vector<meq::Species> species,
-			              std::shared_ptr<meq::Profile const> omega, double psiAxis, double mu0 )
-				: meq::NormalisedRotatingSource( std::move( species ), std::move( omega ),
-				      std::make_shared<meq::ConstantProfile const>( 0.0 ), 0.0, psiAxis, mu0,
-				      meq::RotatingSource::Closure::Automatic, meq::RotatingSource::Gauge::Midplane ),
-				  intervals( intervalsIn )
-			{
-			}
-
-			void setMidplaneField( meq::MidplaneField const &field, double rMin,
-			                       double rMax ) override
-			{
-				double const base = boundaryNormalisation();
-				double const span = normalisation() - base;
-				meq::MidplaneField const normalised = [ & ]( double radius, double &x, double &dXdR )
-				{
-					double psi = 0.0, dPsiDR = 0.0;
-					if ( !field( radius, psi, dPsiDR ) )
-						return false;
-					x = ( psi - base )/span;
-					dXdR = dPsiDR/span;
-					return true;
-				};
-				unnormalised().setMidplaneCrossing(
-					meq::tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0, intervals ) );
-			}
-
-		private:
-			unsigned int intervals;
+		/// setMidplaneCrossingInitial() with no state: the bordered gauge's
+		/// knots start on this table, and the iterate where it would anyway.
+		std::shared_ptr<meq::Profile const> crossingStart;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -486,27 +411,19 @@ namespace
 		if ( o.jacobianFactor != 1.0 )
 			run->source = std::make_unique<SkewedJacobian>(
 				o.jacobianFactor, profiles, axisStart, machine().mu0 );
-		else if ( o.crossingIntervals > 0 )
-			run->source = std::make_unique<FineCrossing>( o.crossingIntervals,
-				profiles.species, profiles.omega, axisStart, machine().mu0 );
-		else if ( o.freezeFirstCrossing )
-			run->source = std::make_unique<FrozenCrossing>(
-				profiles.species, profiles.omega,
-				std::make_shared<meq::ConstantProfile const>( 0.0 ),
-				profiles.referenceRadius, axisStart, machine().mu0,
-				meq::RotatingSource::Closure::Automatic, profiles.gauge );
-		else if ( o.holdCrossing )
-			run->source = std::make_unique<HeldCrossingSource>(
-				profiles, axisStart, machine().mu0, o.heldCrossing );
 		else
 			run->source = std::make_unique<meq::NormalisedRotatingSource>(
 				profiles.species, profiles.omega,
 				std::make_shared<meq::ConstantProfile const>( 0.0 ),
 				profiles.referenceRadius, axisStart, machine().mu0,
-				meq::RotatingSource::Closure::Automatic, profiles.gauge );
+				meq::RotatingSource::Closure::Automatic,
+				o.holdCrossing ? meq::RotatingSource::Gauge::FixedCurve : profiles.gauge );
 		run->source->setPlasmaSupportShape( meq::PlasmaSupportShape::Box, p.axialEdge );
 		if ( o.gaugeCurve )
 			run->source->unnormalised().setMidplaneCrossing( o.gaugeCurve );
+		else if ( o.holdCrossing )
+			run->source->unnormalised().setMidplaneCrossing(
+				o.heldCrossing ? o.heldCrossing : vacuumCrossing( 1024 ) );
 
 		run->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, o.modes );
 		run->solver = std::make_unique<meq::GradShafranovSolver>( *run->domain->sub,
@@ -523,12 +440,15 @@ namespace
 		solver.setExteriorCoupling( *run->dtn );
 		if ( run->vacuum )
 			solver.setInitialGuess( run->vacuum->solver->potential() );
-		solver.setMidplaneGaugeKnots( o.gaugeKnots );
+		if ( o.gaugeKnots > 0 )
+			solver.setMidplaneGaugeKnots( o.gaugeKnots );
 		if ( o.start )
 		{
 			solver.setInitialState( o.start->state, o.start->coefficients );
 			solver.setMidplaneCrossingInitial( o.start->crossing );
 		}
+		else if ( o.crossingStart )
+			solver.setMidplaneCrossingInitial( o.crossingStart );
 		if ( o.relativeTolerance > 0.0 )
 			solver.setNewtonControl( o.relativeTolerance, o.absoluteTolerance,
 			                         o.maxIterations );
@@ -861,11 +781,10 @@ namespace
 		/// psiBoundary() read by psi_h.
 		double starAxis = 0.0;
 		double starBoundary = 0.0;
-		/// The merit history, and how often the midplane gauge re-tabulated
-		/// its crossings -- zero under the fixed radius.
+		/// The merit history, and how often the midplane gauge tabulated
+		/// its crossings off an iterate -- zero under the fixed radius.
 		std::vector<double> history;
 		int midplaneRefreshes = 0;
-		int midplaneHolds = 0;  ///< iterations that kept the previous table
 	};
 
 	/// A converged @a run of @a o, reduced to a Sampled. The run is left
@@ -886,7 +805,6 @@ namespace
 		s.newtonSteps = static_cast<int>( run->solver->newtonResiduals().size() ) - 1;
 		s.history = run->solver->newtonResiduals();
 		s.midplaneRefreshes = run->solver->midplaneGaugeRefreshes();
-		s.midplaneHolds = run->solver->midplaneGaugeHolds();
 		s.psiAxis = run->solver->psiAxis();
 		s.psiBoundary = run->solver->psiBoundary();
 		Nodes const &nodes = geqNodes();
@@ -2289,6 +2207,39 @@ BOOST_AUTO_TEST_CASE( aMirrorWithPicardSweepsIsRefusedAtParse )
 }
 
 /*
+ * THE SHIPPED MIRROR IN THE MIDPLANE GAUGE, THROUGH THE DRIVER: its fixed-radius
+ * tables read as midplane densities, which is another plasma and one the box's
+ * precondition does not suit. ReferenceRadius out, Gauge = "midplane" in.
+ *
+ *   NEWTON IS QUADRATIC, in the fixed radius's steps or one more: the crossings
+ *   are border unknowns. [M-R0START](MEASUREMENTS.md#m-r0start).
+ *
+ *   AND THE DRIVER WARNS ON THE ANSWER. geq's densities are flat at the outer
+ *   label at fixed R_ref, so at fixed R_0 they carry -n m omega^2 R_0 R_0'/T
+ *   there and F does not vanish at the label: the midplane gauge's
+ *   precondition can only be read on the solved crossings, and the run says
+ *   so -- exit 0, since a jump at a label costs the order, not the answer.
+ */
+BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnItsLabel )
+{
+	DriverRun const midplane = runVariant( "mirror-driver-midplane",
+		{ { "ReferenceRadius = ", "Gauge = \"midplane\"" } } );
+	BOOST_TEST_REQUIRE( midplane.status == 0, midplane.log );
+	DriverRun const &fixed = shippedDriverRun();
+	BOOST_TEST_REQUIRE( fixed.status == 0, fixed.log );
+	double const steps = numberAfter( midplane.log, "converged in " );
+	double const fixedSteps = numberAfter( fixed.log, "converged in " );
+	std::printf( "\n  THE SHIPPED MIRROR IN THE MIDPLANE GAUGE: %g Newton steps, the fixed radius %g\n",
+	             steps, fixedSteps );
+	BOOST_TEST( steps <= fixedSteps + 1,
+		"the midplane gauge took " << steps << " steps against the fixed radius's " << fixedSteps
+		<< ", so its Newton is not quadratic:\n" << midplane.log );
+	BOOST_TEST( says( midplane.log, "on the solved midplane crossings F at the outer label" ),
+		"the driver did not warn that F stands at a label on the answer:\n" << midplane.log );
+	BOOST_TEST( !says( fixed.log, "on the solved midplane crossings" ), fixed.log );
+}
+
+/*
  * A MIRROR WHOSE FIRST ATTEMPT FAILS IS NOT RETRIED: beside the box the
  * bordered Picard-then-Newton rung is skipped and the failure exits 2 as it
  * is. MEASUREMENTS.md M-277.
@@ -2339,13 +2290,16 @@ BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
  *
  *   1. AS SHIPPED, in the midplane gauge: the .nc's midplane_n_* -- the
  *      densities where each SOLVED surface crosses z = 0 -- are the DensityFile
- *      tables back, at every crossing knot, values and slopes;
+ *      tables back EXACTLY AT THE GAUGE'S KNOTS, where the solver's crossings
+ *      are the solved ones; between them the potential is pinned on the knots'
+ *      interpolant, within a micron of the crossing, and the tables come back
+ *      to what that gap moves them by -- the knots' own statement of the
+ *      gauge, [M-R0START](MEASUREMENTS.md#m-r0start);
  *   2. THE SAME TABLES ON THE VACUUM'S CURVE, Gauge = "vacuum-midplane": a
- *      different plasma, solved in fewer steps, whose .nc relabels it onto its
- *      own solved midplane;
+ *      different plasma, whose .nc relabels it onto its own solved midplane;
  *   3. THOSE RELABELLED COLUMNS WRITTEN AS DensityFile TABLES and solved in the
- *      midplane gauge: the same plasma as 2, so the same psi_h, to the
- *      solver's tolerance -- which is what makes the columns a statement of
+ *      midplane gauge: the same plasma as 2, to what the knots' interpolant
+ *      moves a density by -- which is what makes the columns a statement of
  *      the plasma rather than a picture of it.
  *
  * Read through ncdump, FluxGridConvergence's reason: the check does not share
@@ -2422,9 +2376,19 @@ namespace
 	{
 		DriverRun run;
 		int newtonIterations = -1;
-		std::vector<double> psi, radius;
+		std::vector<double> psi, radius, radiusSlope;
 		std::map<std::string, std::vector<double>> value, slope;
 	};
+
+	/// A .nc column and its slope column as a Hermite table on the .nc's knots.
+	meq::SplineProfile columnTable( std::vector<double> const &psi, std::vector<double> const &value,
+	                                std::vector<double> const &slope )
+	{
+		std::vector<meq::Knot> knots;
+		for ( std::size_t i = 0; i < psi.size(); ++i )
+			knots.push_back( meq::Knot{ psi[ i ], value[ i ], slope[ i ] } );
+		return meq::SplineProfile( std::move( knots ) );
+	}
 
 	MidplaneColumns runThreeSpecies( std::string const &prefix,
 	                                 std::vector<std::pair<std::string, std::string>> const &lines,
@@ -2438,7 +2402,7 @@ namespace
 		out.run.log = readText( out.run.stem + ".log" );
 		if ( out.run.status != 0 )
 			return out;
-		std::string variables = "midplane_Psi,midplane_R";
+		std::string variables = "midplane_Psi,midplane_R,midplane_dR_dPsi";
 		for ( char const *s : { "electron", "deuterium", "carbon" } )
 			variables += std::string( ",midplane_n_" ) + s + ",midplane_dn_" + s + "_dPsi";
 		std::string const dump = out.run.stem + ".dump";
@@ -2448,6 +2412,7 @@ namespace
 		out.newtonIterations = static_cast<int>( numberAfter( text, ":newton_iterations = " ) );
 		out.psi = dumpedValues( text, "midplane_Psi" );
 		out.radius = dumpedValues( text, "midplane_R" );
+		out.radiusSlope = dumpedValues( text, "midplane_dR_dPsi" );
 		for ( char const *s : { "electron", "deuterium", "carbon" } )
 		{
 			out.value[ s ] = dumpedValues( text, std::string( "midplane_n_" ) + s );
@@ -2486,27 +2451,60 @@ BOOST_AUTO_TEST_CASE( theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain )
 	             shipped.newtonIterations );
 	BOOST_TEST( std::abs( shipped.radius.front() - 0.35 ) < 1.0e-4 );
 	BOOST_TEST( std::abs( shipped.radius.back() - 0.1 ) < 1.0e-4 );
-	for ( char const *s : { "electron", "carbon" } )
+	BOOST_TEST( shipped.newtonIterations <= 4,
+		"the midplane gauge took " << shipped.newtonIterations << " steps, so its Newton is not quadratic" );
+
+	// THE GAP THE KNOTS LEAVE: the solved crossing, a Hermite table on the
+	// .nc's own knots and slopes, against the interpolant through its values
+	// at the solver's knots -- which is the table the potential was pinned on.
+	meq::SplineProfile const crossing = columnTable( shipped.psi, shipped.radius, shipped.radiusSlope );
+	auto const basis = std::make_shared<meq::CardinalSpline const>( 0.0, 1.0,
+		static_cast<std::size_t>( meq::GradShafranovSolver::defaultMidplaneGaugeKnots ) );
+	std::vector<double> atKnots;
+	for ( std::size_t k = 0; k < basis->size(); ++k )
+		atKnots.push_back( crossing( basis->knot( k ) ) );
+	std::shared_ptr<meq::Profile const> const interpolant = meq::crossingThroughKnots( basis, atKnots );
+	double knotGap = 0.0;
+	for ( std::size_t i = 0; i < shipped.psi.size(); ++i )
+		knotGap = std::max( knotGap, std::abs( ( *interpolant )( shipped.psi[ i ] ) - shipped.radius[ i ] ) );
+	std::printf( "    the crossings against their %zu knots' interpolant: %.3e m at most\n", basis->size(), knotGap );
+
+	BOOST_TEST( knotGap < 1.0e-5, "the crossings sit " << knotGap << " m from their knots' interpolant" );
+
+	/*
+	 * BETWEEN THE KNOTS THE TABLES COME BACK MOVED BY THE GAP, EXACTLY: a
+	 * density read at the solved crossing R_0 is its table times exp( A_s ),
+	 * A_s the exponent at R_0 of the source pinned on the interpolant -- which
+	 * the test's closed-form statement of the same plasma, threeSpecies(),
+	 * evaluates without the .nc. So the columns are the tables, transferred
+	 * from the interpolant to the crossing, and nothing else.
+	 */
+	MirrorProfiles const closed = threeSpecies( 5.0e18, meq::RotatingSource::Gauge::Midplane, 1.0e-6 );
+	meq::RotatingSource pinned( closed.species, closed.omega,
+		std::make_shared<meq::ConstantProfile const>( 0.0 ), 0.0, machine().mu0,
+		meq::RotatingSource::Closure::Automatic, meq::RotatingSource::Gauge::Midplane );
+	pinned.setMidplaneCrossing( interpolant );
+	std::map<std::string, double> worstOf;
+	for ( std::size_t index : { std::size_t( 0 ), std::size_t( 2 ) } )
 	{
+		std::string const s = index == 0 ? "electron" : "carbon";
 		meq::SplineProfile const table = meq::SplineProfile::fromFile(
-			meq::test::sourcePath( std::string( "examples/mirror-three-species-n-" ) + s + ".dat" ) );
-		double peak = 0.0, peakSlope = 0.0;
-		for ( std::size_t i = 0; i < shipped.psi.size(); ++i )
-		{
-			peak = std::max( peak, table( shipped.psi[ i ] ) );
-			peakSlope = std::max( peakSlope, std::abs( table.prime( shipped.psi[ i ] ) ) );
-		}
-		double worstValue = 0.0, worstSlope = 0.0;
+			meq::test::sourcePath( "examples/mirror-three-species-n-" + s + ".dat" ) );
+		double worstValue = 0.0, worstAgainstGap = 0.0;
 		for ( std::size_t i = 0; i < shipped.psi.size(); ++i )
 		{
 			double const x = shipped.psi[ i ];
-			worstValue = std::max( worstValue, std::abs( shipped.value.at( s )[ i ] - table( x ) )/table( x ) );
-			worstSlope = std::max( worstSlope, std::abs( shipped.slope.at( s )[ i ] - table.prime( x ) )/peakSlope );
+			double const stated = shipped.value.at( s )[ i ]/table( x ) - 1.0;
+			double const fromGap = std::expm1( pinned.densityExponent( index, shipped.radius[ i ], x ) );
+			worstValue = std::max( worstValue, std::abs( stated ) );
+			worstAgainstGap = std::max( worstAgainstGap, std::abs( stated - fromGap ) );
 		}
-		std::printf( "    %-9s midplane_n against its DensityFile: value %.3e relative, slope %.3e of its peak\n",
-		             s, worstValue, worstSlope );
-		BOOST_TEST( worstValue < 1.0e-12, s << ": the midplane gauge's relabelled density is not its own table" );
-		BOOST_TEST( worstSlope < 1.0e-9, s << ": the midplane gauge's relabelled slope is not its own table's" );
+		worstOf[ s ] = worstValue;
+		std::printf( "    %-9s midplane_n against its DensityFile: %.3e relative at most; against the table "
+		             "moved by the gap, %.3e\n", s.c_str(), worstValue, worstAgainstGap );
+		BOOST_TEST( worstAgainstGap < 1.0e-3*worstValue + 1.0e-9,
+			s << ": the .nc's midplane density is not its table moved from the knots' interpolant to the "
+			"solved crossing -- off by " << worstAgainstGap << " where the gap moves it by " << worstValue );
 	}
 
 	// 2. The same tables on the vacuum's curve: another plasma, and quadratic.
@@ -2514,7 +2512,7 @@ BOOST_AUTO_TEST_CASE( theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain )
 		{ { "Gauge = ", "Gauge = \"vacuum-midplane\"" } } );
 	BOOST_TEST_REQUIRE( vacuum.run.status == 0, vacuum.run.log );
 	std::printf( "    vacuum-midplane gauge: %d Newton steps\n", vacuum.newtonIterations );
-	BOOST_TEST( vacuum.newtonIterations < shipped.newtonIterations );
+	BOOST_TEST( vacuum.newtonIterations <= 4 );
 	double moved = 0.0;
 	for ( std::size_t i = 0; i < vacuum.psi.size(); ++i )
 		moved = std::max( moved, std::abs( std::log( vacuum.value.at( "carbon" )[ i ]
@@ -2559,9 +2557,14 @@ BOOST_AUTO_TEST_CASE( theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain )
 	std::printf( "    posed again in the midplane gauge, %d Newton steps: psi* differs by %.3e of its largest "
 	             "%.3e, where the shipped tables' plasma differs by %.3e; the relabelled carbon by %.3e "
 	             "relative\n", again.newtonIterations, worst/scale, scale, other/scale, worstColumn );
-	BOOST_TEST( worst <= 1.0e-9*scale,
+	// The relabelled tables are stated at the vacuum run's crossings, and the
+	// midplane gauge pins on its knots' interpolant: the densities the two
+	// plasmas carry differ by what part 1's gap moves a density by, and the
+	// field by no more of its own scale than the electrons' share of that.
+	BOOST_TEST( worst <= worstOf.at( "electron" )*scale,
 		"the relabelled densities posed in the midplane gauge solve to a different psi*, " << worst/scale
-		<< " of its largest, so the .nc's midplane columns do not state the plasma that was solved" );
+		<< " of its largest, beyond the " << worstOf.at( "electron" ) << " the knots' interpolant moves the "
+		"electrons by -- so the .nc's midplane columns do not state the plasma that was solved" );
 	BOOST_TEST( other > 1.0e4*worst,
 		"the two gauges' plasmas on the same tables solve within " << other << " of each other, so this "
 		"case cannot tell one plasma from another" );
@@ -3092,8 +3095,8 @@ namespace
 
 	void printHistoryLine( char const *label, Sampled const &s )
 	{
-		std::printf( "    %-24s %2d steps, %2d crossings tabulated, %d held:", label,
-		             s.newtonSteps, s.midplaneRefreshes, s.midplaneHolds );
+		std::printf( "    %-24s %2d steps, %2d crossings tabulated:", label,
+		             s.newtonSteps, s.midplaneRefreshes );
 		for ( double r : s.history )
 			std::printf( " %.2e", r );
 		std::printf( "\n" );
@@ -3250,11 +3253,14 @@ BOOST_AUTO_TEST_CASE( theMirrorPosedInBothGaugesIsOneEquilibrium )
 		std::printf( "\n    level %d, k = %d, %d elements\n", level, order, midplane.elements );
 		printHistoryLine( "fixed radius", fixed );
 		printHistoryLine( "midplane", midplane );
-		BOOST_TEST( midplane.midplaneRefreshes + midplane.midplaneHolds == midplane.newtonSteps + 1,
-			"the crossings were tabulated " << midplane.midplaneRefreshes << " times and held "
-			<< midplane.midplaneHolds << " over " << midplane.newtonSteps << " Newton steps: "
-			"once before the first residual and once per iteration after it is the contract" );
+		BOOST_TEST( midplane.midplaneRefreshes == 1,
+			"the crossings were tabulated " << midplane.midplaneRefreshes << " times over "
+			<< midplane.newtonSteps << " Newton steps: once, where the knots start, is the "
+			"contract -- they are unknowns after that" );
 		BOOST_TEST( fixed.midplaneRefreshes == 0 );
+		std::string why;
+		BOOST_TEST( quadraticTail( midplane.history, why ), "level " << level << ": " << why
+			<< "the midplane gauge's Newton is not quadratic, so its Jacobian is not the residual's" );
 
 		gauge.push_back( difference( midplane.psiStar, fixed.psiStar ) );
 		own.push_back( difference( fixed.psiStar, reference().psiStar ) );
@@ -3739,13 +3745,12 @@ BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadra
  * M-278 says the midplane problem with the vacuum's table frozen throughout
  * converged in 6 steps where the fixed radius takes 3, which read as a term
  * still missing with the table fixed -- the table's dependence on the labels
- * through Psi, say. Reproduced two ways at level 0, k = 3, on the same
- * true-midplane tables: the midplane gauge's own refresh path keeping its
- * first table, FrozenCrossing, and the fixed curve given the filaments'
- * crossing. BOTH TAKE 3 QUADRATIC STEPS, the same history, so at this commit
- * the frozen table costs nothing and the six steps are not reproduced; the
- * refresh is the whole of the midplane gauge's linear rate. The control is
- * that rate, on the same tables.
+ * through Psi, say. Reproduced at level 0, k = 3, on the same true-midplane
+ * tables, by the fixed curve given the filaments' crossing: 3 QUADRATIC STEPS,
+ * so the six are not reproduced and a fixed table leaves nothing out. The
+ * retired per-iteration refresh was the whole of the old midplane gauge's
+ * linear rate ([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)); the midplane gauge
+ * beside it, its crossings border unknowns, is quadratic too.
  *
  * AND THE TABLES SAY WHY THE MIDPLANE GAUGE CANNOT BE CHECKED BEFORE ITS SOLVE.
  * F vanishes at their labels on their own solved crossings, below
@@ -3766,38 +3771,29 @@ BOOST_AUTO_TEST_CASE( aFrozenCrossingIsQuadraticSoAFixedTableLeavesNothingOut )
 	base.order = order;
 	base.stem = vacuumStem;
 
-	Options frozen = base;
-	frozen.profiles = &t.profiles;
-	frozen.freezeFirstCrossing = true;
-	Sampled const f = sample( frozen );
-
 	Options curve = base;
 	curve.profiles = &onCurve;
 	curve.gaugeCurve = vacuum;
 	Sampled const c = sample( curve );
 
 	// The midplane gauge's own answer, whose crossings the tables were
-	// transferred to be read on.
-	Options refreshed = base;
-	refreshed.profiles = &t.profiles;
-	std::unique_ptr<MirrorRun> refreshedRun = runMirror( refreshed );
-	BOOST_TEST_REQUIRE( refreshedRun->converged, refreshedRun->failure );
-	std::shared_ptr<meq::SplineProfile const> const ownCrossing = answerCrossing( *refreshedRun, 1024 );
-	Sampled const r = reduce( refreshedRun, refreshed );
+	// transferred to be read on: its knots are unknowns, so it is
+	// quadratic too.
+	Options midplane = base;
+	midplane.profiles = &t.profiles;
+	std::unique_ptr<MirrorRun> midplaneRun = runMirror( midplane );
+	BOOST_TEST_REQUIRE( midplaneRun->converged, midplaneRun->failure );
+	std::shared_ptr<meq::SplineProfile const> const ownCrossing = answerCrossing( *midplaneRun, 1024 );
+	Sampled const r = reduce( midplaneRun, midplane );
 
 	std::printf( "\n  M-278 SECTION 2, AT THIS COMMIT: the true-midplane tables, level 0, k = %d\n", order );
-	printHistoryLine( "midplane, first table kept", f );
 	printHistoryLine( "fixed curve, the vacuum's", c );
-	printHistoryLine( "midplane, refreshed", r );
+	printHistoryLine( "midplane, knots", r );
 	std::string why;
-	BOOST_TEST( quadraticTail( f.history, why ), why );
 	BOOST_TEST( quadraticTail( c.history, why ), why );
-	BOOST_TEST( f.newtonSteps == c.newtonSteps );
-	BOOST_TEST( f.newtonSteps < r.newtonSteps,
-		"the frozen table takes " << f.newtonSteps << " steps and the refreshed " << r.newtonSteps
-		<< ", so the refresh is not what makes the midplane gauge linear" );
-	BOOST_TEST( !quadraticTail( r.history, why ),
-		"the refreshed midplane gauge reads quadratic, so this case cannot see what freezing changes" );
+	BOOST_TEST( quadraticTail( r.history, why ), why );
+	BOOST_TEST( c.newtonSteps <= 3,
+		"a fixed table takes " << c.newtonSteps << " steps, so its Jacobian is not the whole one" );
 
 	meq::RotatingSource::LabelCheck const onVacuum = labelCheckOn( t.profiles, vacuum );
 	meq::RotatingSource::LabelCheck const onOwn = labelCheckOn( t.profiles, ownCrossing );
@@ -3924,11 +3920,11 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixOnTheVacuumCurve )
  * SAME PLASMA IN THE MIDPLANE GAUGE: meq::densityOnCurve() on the answer's own
  * crossing -- what the .nc writes -- and the tables solved again at the same
  * level, k = 3, under Gauge::Midplane. geq's two species and the three at
- * 5e18. At the midplane gauge's own 1024 intervals the two-species difference
- * is that table's interpolation, and four times the intervals takes it to the
- * floor the three species sit on from the start; the control is the SAME
- * tables read as midplane densities, which is another plasma.
- * [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity).
+ * 5e18. The difference is the midplane gauge's knots': it pins the potential
+ * on their interpolant, within a micron of the crossing the tables were read
+ * at, and four times the knots takes it down by more than half; the control is
+ * the SAME tables read as midplane densities, which is another plasma.
+ * [M-NCDENSITY](MEASUREMENTS.md#m-ncdensity), [M-R0START](MEASUREMENTS.md#m-r0start).
  */
 BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge )
 {
@@ -3975,10 +3971,10 @@ BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge 
 		m.profiles = &atShipped;
 		Sampled const a = sample( m );
 		m.profiles = &atFiner;
-		m.crossingIntervals = 4096;
+		m.gaugeKnots = 128;
 		Sampled const b = sample( m );
 		m.profiles = &asGiven;
-		m.crossingIntervals = 0;
+		m.gaugeKnots = 0;
 		Sampled const c = sample( m );
 		Difference const dShipped = difference( a.psiStar, v.psiStar );
 		Difference const dFiner = difference( b.psiStar, v.psiStar );
@@ -3988,15 +3984,13 @@ BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge 
 		             "reaches %.3e\n", p->species.size(), order, scale );
 		printHistoryLine( "vacuum curve", v );
 		printHistoryLine( "midplane, relabelled", a );
-		printDifference( "relabelled at 1024 - vacuum curve, psi*", dShipped );
-		printDifference( "relabelled at 4096 - vacuum curve, psi*", dFiner );
+		printDifference( "relabelled, 32 knots - vacuum curve, psi*", dShipped );
+		printDifference( "relabelled, 128 knots - vacuum curve, psi*", dFiner );
 		printDifference( "the tables as given - vacuum curve", dOther );
-		BOOST_TEST( dFiner.max <= 1.0e-9*scale,
-			"the relabelled densities on 4096 intervals pose a plasma " << dFiner.max/scale
-			<< " of its own flux from the one they were read off" );
-		BOOST_TEST( dFiner.max <= 1.5*dShipped.max );
-		BOOST_TEST( dShipped.max <= 2.0e-9*scale );
-		BOOST_TEST( dOther.max > 1.0e4*dShipped.max,
+		BOOST_TEST( dFiner.max < 0.5*dShipped.max,
+			"128 knots leave the relabelled plasma " << dFiner.max << " from the one it was read off, "
+			"against 32 knots' " << dShipped.max << ", so the difference is not the knots'" );
+		BOOST_TEST( dOther.max > 1.0e2*dShipped.max,
 			"the tables as given and the relabelled ones solve within " << dOther.max << " of each other, so "
 			"this case cannot tell one plasma from another" );
 	}
@@ -4019,16 +4013,16 @@ BOOST_AUTO_TEST_SUITE_END()
  *      psi -- exact, since the midplane's flux is linear in the state -- and
  *      against the knot; the rows' meaning at convergence; the columns against
  *      a central difference of the assembled source.
- *   2. QUADRATIC WHERE THE FROZEN REFRESH IS LINEAR, on geq's two-species
- *      plasma, and to the frozen refresh's answer: from the vacuum, from that
- *      answer perturbed, and from the frozen iteration stopped early. With the
- *      held-table control that says a FIXED table's Jacobian is complete.
+ *   2. QUADRATIC, on geq's two-species plasma, and to one answer from the
+ *      vacuum, from that answer perturbed, and from the vacuum's table held;
+ *      with the held-table control that says a FIXED table's Jacobian is
+ *      complete.
  *   3. THREE SPECIES AT M = 6 AND 5e18, the same.
- *   4. geq's MIRROR UNDER IT, as MR-4d asks of the frozen refresh.
+ *   4. geq's MIRROR UNDER IT, as MR-4d asks.
  *   5. THE REFUSALS.
  *
  * K = 32, the count the knot sweep of [M-R0BORDER](MEASUREMENTS.md#m-r0border)
- * puts 170x under the discretisation error at level 2 and at the frozen table's
+ * puts 170x under the discretisation error at level 2 and at the 1024-interval table's
  * own agreement with the answer.
  */
 namespace
@@ -4228,173 +4222,127 @@ BOOST_AUTO_TEST_CASE( theCrossingRowsAndColumnsAreTheirOwnDerivatives )
 }
 
 /*
- * 2. QUADRATIC WHERE THE FROZEN REFRESH IS LINEAR, AND TO ITS ANSWER.
+ * 2. QUADRATIC, AND FROM ANY NEAR START TO THE SAME ANSWER.
  *
- * geq's two-species plasma at k = 3 on levels 0 and 1. From the vacuum the
- * frozen refresh takes 6 linear steps and the bordered gauge 3, as the fixed
- * radius does; its answer is the frozen one to well under that level's own
- * discretisation error, read off as the level 0 - level 1 difference. From the
- * frozen answer perturbed, and from the frozen iteration stopped at a merit of
- * 1e-05, it lands on the answer it reaches from the vacuum in two steps,
- * contracting faster at the second -- where the frozen refresh, continued from
- * the same starts, contracts by the same factor every step.
- *
- * AND THE CONTROL THAT SAYS WHAT THE FROZEN REFRESH LEAVES OUT: the vacuum's own
- * table HELD throughout converges in the fixed radius's 3, so a fixed table's
- * Jacobian is complete and it is the refresh -- the table moving with the
- * field -- that is linear.
+ * geq's two-species plasma at k = 3 on levels 0 and 1: from the vacuum, three
+ * steps, as the fixed radius takes. At level 0, from the answer perturbed --
+ * every entry, the labels and the crossings -- and from the plasma solved on
+ * the vacuum's crossing HELD, it lands on the answer from the vacuum in two.
+ * The held table converges in three itself, which is the control that says a
+ * FIXED table's Jacobian is complete: the term the retired per-iteration
+ * refresh left out is the table's pull by the field, and the knots carry it.
  */
 BOOST_AUTO_TEST_CASE( theBorderedGaugeIsQuadraticWhereTheFrozenRefreshIsLinear )
 {
 	MirrorProfiles const geq = geqMidplaneProfiles();
-	std::printf( "\n  geq's TWO SPECIES, k = 3: frozen refresh against the bordered gauge, %d knots\n",
-	             borderKnots );
-	std::vector<std::vector<double>> frozenStar, borderedStar;
+	std::printf( "\n  geq's TWO SPECIES, k = 3, the bordered gauge, %d knots\n", borderKnots );
 	for ( int level : { 0, 1 } )
 	{
-		Options o;
-		o.level = level;
-		o.order = 3;
-		o.stem = borderStem;
-		o.profiles = &geq;
-		std::unique_ptr<MirrorRun> frozen = runMirror( o );
-		BOOST_TEST_REQUIRE( frozen->converged, frozen->failure );
-		Options b = o;
+		Options b;
+		b.level = level;
+		b.order = 3;
+		b.stem = borderStem;
+		b.profiles = &geq;
 		b.gaugeKnots = borderKnots;
 		std::unique_ptr<MirrorRun> bordered = runMirror( b );
 		BOOST_TEST_REQUIRE( bordered->converged, bordered->failure );
 		std::printf( "\n    level %d\n", level );
-		printMerits( "frozen refresh, from the vacuum", *frozen );
 		printMerits( "bordered, from the vacuum", *bordered );
 		BOOST_TEST( stepsOf( *bordered ) <= 3 );
-		BOOST_TEST( stepsOf( *frozen ) >= 5,
-			"the frozen refresh took " << stepsOf( *frozen ) << " steps, so this case no "
-			"longer shows the linear iteration the bordered gauge replaces" );
+		std::string why;
+		BOOST_TEST( quadraticTail( bordered->solver->newtonResiduals(), why ), why );
+		if ( level > 0 )
+			continue;
 
-		if ( level == 0 )
+		Options held = b;
+		held.holdCrossing = true;
+		std::unique_ptr<MirrorRun> vacuumHeld = runMirror( held );
+		BOOST_TEST_REQUIRE( vacuumHeld->converged, vacuumHeld->failure );
+		printMerits( "the vacuum's table held, from the vacuum", *vacuumHeld );
+		BOOST_TEST( stepsOf( *vacuumHeld ) <= 3,
+			"a held table took " << stepsOf( *vacuumHeld ) << " steps: a fixed table's "
+			"Jacobian is not the whole one" );
+		Start fromHeld = startOf( *vacuumHeld );
+		fromHeld.crossing = answerCrossing( *vacuumHeld, 1024 );
+
+		// The answer perturbed: every entry by 1e-3 of itself, the labels by
+		// 1e-4, the crossings by 1e-4 m.
+		Start perturbed = startOf( *bordered );
+		for ( int i = 0; i < perturbed.state.Size(); ++i )
+			perturbed.state( i ) *= 1.0 + 1.0e-3*std::sin( 1.7*i + 0.4 );
+		perturbed.psiAxis *= 1.0 + 1.0e-4;
+		perturbed.psiBoundary *= 1.0 - 1.0e-4;
+		std::shared_ptr<meq::Profile const> const table = perturbed.crossing;
+		perturbed.crossing = std::make_shared<meq::SplineProfile const>(
+			[ table ]( double x ) { return ( *table )( x ) + 1.0e-4*std::sin( 7.0*x ); },
+			[ table ]( double x ) { return table->prime( x ) + 7.0e-4*std::cos( 7.0*x ); }, 1024 );
+
+		for ( auto const &start : { std::make_pair( "from the answer perturbed", static_cast<Start const *>( &perturbed ) ),
+		                            std::make_pair( "from the vacuum's table held", static_cast<Start const *>( &fromHeld ) ) } )
 		{
-			Options held = o;
-			held.holdCrossing = true;
-			std::unique_ptr<MirrorRun> const vacuumHeld = runMirror( held );
-			BOOST_TEST_REQUIRE( vacuumHeld->converged, vacuumHeld->failure );
-			printMerits( "the vacuum's table held, from the vacuum", *vacuumHeld );
-			BOOST_TEST( stepsOf( *vacuumHeld ) <= 3,
-				"a held table took " << stepsOf( *vacuumHeld ) << " steps: a fixed table's "
-				"Jacobian is not the whole one" );
-
-			// The frozen answer perturbed: every entry by 1e-3 of itself, the
-			// labels by 1e-4, the crossings by 1e-4 m.
-			Start perturbed = startOf( *frozen );
-			for ( int i = 0; i < perturbed.state.Size(); ++i )
-				perturbed.state( i ) *= 1.0 + 1.0e-3*std::sin( 1.7*i + 0.4 );
-			perturbed.psiAxis *= 1.0 + 1.0e-4;
-			perturbed.psiBoundary *= 1.0 - 1.0e-4;
-			std::shared_ptr<meq::Profile const> const table = perturbed.crossing;
-			perturbed.crossing = std::make_shared<meq::SplineProfile const>(
-				[ table ]( double x ) { return ( *table )( x ) + 1.0e-4*std::sin( 7.0*x ); },
-				[ table ]( double x ) { return table->prime( x ) + 7.0e-4*std::cos( 7.0*x ); }, 1024 );
-
-			Options early = o;
-			early.relativeTolerance = 1.0e-12;
-			early.absoluteTolerance = 1.0e-5;
-			std::unique_ptr<MirrorRun> const stopped = runMirror( early );
-			BOOST_TEST_REQUIRE( stopped->converged, stopped->failure );
-			Start const fromEarly = startOf( *stopped );
-
-			for ( auto const &start : { std::make_pair( "from the answer perturbed", static_cast<Start const *>( &perturbed ) ),
-			                            std::make_pair( "from the frozen iteration at 1e-05", &fromEarly ) } )
-			{
-				Options rb = b;
-				rb.start = start.second;
-				std::unique_ptr<MirrorRun> const restarted = runMirror( rb );
-				Options rf = o;
-				rf.start = start.second;
-				std::unique_ptr<MirrorRun> const continued = runMirror( rf );
-				BOOST_TEST_REQUIRE( restarted->converged, restarted->failure );
-				BOOST_TEST_REQUIRE( continued->converged, continued->failure );
-				printMerits( ( std::string( "bordered, " ) + start.first ).c_str(), *restarted );
-				printMerits( ( std::string( "frozen refresh, " ) + start.first ).c_str(), *continued );
-				double const lands = maxDifference( *restarted, *bordered );
-				std::printf( "      lands on the bordered answer from the vacuum to %.3e\n", lands );
-				BOOST_TEST( stepsOf( *restarted ) <= 2 );
-				BOOST_TEST( lands < 1.0e-11 );
-				std::pair<double, double> const linear = lastContractions( continued->solver->newtonResiduals() );
-				std::printf( "      frozen refresh's last two contractions %.3e, %.3e\n",
-				             linear.first, linear.second );
-				BOOST_TEST( linear.second > 0.5*linear.first,
-					"the frozen refresh's contraction fell from " << linear.first << " to "
-					<< linear.second << ", so the control is no longer linear" );
-			}
+			// The vacuum start's target: a restart takes its cold reference at
+			// its own labels, which moves the target enough to add a step.
+			Options rb = b;
+			rb.start = start.second;
+			rb.relativeTolerance = 1.0e-30;
+			rb.absoluteTolerance = 1.0e-12*bordered->solver->newtonResiduals().front();
+			std::unique_ptr<MirrorRun> const restarted = runMirror( rb );
+			BOOST_TEST_REQUIRE( restarted->converged, restarted->failure );
+			printMerits( ( std::string( "bordered, " ) + start.first ).c_str(), *restarted );
+			double const lands = maxDifference( *restarted, *bordered );
+			std::printf( "      lands on the bordered answer from the vacuum to %.3e\n", lands );
+			BOOST_TEST( stepsOf( *restarted ) <= 2 );
+			BOOST_TEST( lands < 1.0e-11 );
 		}
-
-		Sampled const f = reduce( frozen, o );
-		Sampled const s = reduce( bordered, b );
-		frozenStar.push_back( f.psiStar );
-		borderedStar.push_back( s.psiStar );
-	}
-
-	Difference const own = difference( frozenStar[ 0 ], frozenStar[ 1 ] );
-	for ( std::size_t level = 0; level < 2; ++level )
-	{
-		Difference const gap = difference( borderedStar[ level ], frozenStar[ level ] );
-		std::printf( "    level %zu: bordered - frozen, psi*: max %.3e rms %.3e; level 0 - level 1 is "
-		             "max %.3e\n", level, gap.max, gap.rms, own.max );
-		BOOST_TEST( gap.max < 1.0e-2*own.max,
-			"level " << level << ": the bordered gauge's answer is " << gap.max << " from the "
-			"frozen refresh's, against the discretisation's " << own.max );
 	}
 	std::fflush( stdout );
 }
 
 /*
- * 3. THREE SPECIES AT M = 6, at the midplane peak of 5e18 where the frozen
- * refresh converges -- in 7 linear steps -- the bordered gauge converges in 3 to
- * the same answer, and from the frozen iteration's answer in one.
+ * 3. THREE SPECIES AT M = 6, at the midplane peak of 5e18 where the retired
+ * frozen refresh took 7 linear steps: the bordered gauge converges in 3, and
+ * from the plasma solved on the vacuum's crossing held in 2, to the same
+ * answer.
  *
- * WHAT IT DOES NOT DO, MEASURED AND NOT ASSERTED: carry the case to 2e19 or 5e19,
- * where the frozen refresh stalls. The bordered gauge stalls there too, at the
- * same merit, from the vacuum, from the frozen iterate and by continuation in
- * the peak -- both routes fail together between 1.63e19 and 1.67e19 -- so the
- * left-out term is not what stops the frozen refresh. Open; see
- * [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+ * WHAT IT DOES NOT DO, MEASURED AND NOT ASSERTED: carry the case to 2e19 or
+ * 5e19 on this level. Both stall, from every start, as the frozen refresh did
+ * and as the held table does -- so the left-out term is not what stops them.
+ * Level 1 carries 2e19; see [M-R0START](MEASUREMENTS.md#m-r0start).
  */
 BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixAreQuadraticUnderTheBorderedGauge )
 {
 	MirrorProfiles const three = threeSpecies( 5.0e18 );
-	Options o;
-	o.level = 0;
-	o.order = 3;
-	o.stem = borderStem;
-	o.profiles = &three;
-	std::unique_ptr<MirrorRun> const frozen = runMirror( o );
-	BOOST_TEST_REQUIRE( frozen->converged, frozen->failure );
-	Options b = o;
+	Options b;
+	b.level = 0;
+	b.order = 3;
+	b.stem = borderStem;
+	b.profiles = &three;
 	b.gaugeKnots = borderKnots;
 	std::unique_ptr<MirrorRun> const bordered = runMirror( b );
 	BOOST_TEST_REQUIRE( bordered->converged, bordered->failure );
-	Start const fromFrozen = startOf( *frozen );
+	Options h = b;
+	h.holdCrossing = true;
+	std::unique_ptr<MirrorRun> held = runMirror( h );
+	BOOST_TEST_REQUIRE( held->converged, held->failure );
+	Start fromHeld = startOf( *held );
+	fromHeld.crossing = answerCrossing( *held, 1024 );
 	Options c = b;
-	c.start = &fromFrozen;
+	c.start = &fromHeld;
+	c.relativeTolerance = 1.0e-30;
+	c.absoluteTolerance = 1.0e-12*bordered->solver->newtonResiduals().front();
 	std::unique_ptr<MirrorRun> const continued = runMirror( c );
 	BOOST_TEST_REQUIRE( continued->converged, continued->failure );
 
 	std::printf( "\n  THREE SPECIES AT M = 6, 5e18, level 0, k = 3\n" );
-	printMerits( "frozen refresh, from the vacuum", *frozen );
 	printMerits( "bordered, from the vacuum", *bordered );
-	printMerits( "bordered, from the frozen answer", *continued );
-	Sampled const f = reduce( frozen, o );
-	Sampled const s = reduce( bordered, b );
-	Difference const gap = difference( s.psiStar, f.psiStar );
+	printMerits( "the vacuum's table held", *held );
+	printMerits( "bordered, from the held answer", *continued );
 	double const lands = maxDifference( *continued, *bordered );
-	std::printf( "    bordered - frozen, psi*: max %.3e rms %.3e; the two bordered answers %.3e\n",
-	             gap.max, gap.rms, lands );
+	std::printf( "    the two bordered answers %.3e apart\n", lands );
 	std::fflush( stdout );
 	BOOST_TEST( stepsOf( *bordered ) <= 3 );
-	BOOST_TEST( stepsOf( *frozen ) >= 6 );
 	BOOST_TEST( stepsOf( *continued ) <= 2 );
 	BOOST_TEST( lands < 1.0e-11 );
-	// M-278 section 5's level 0 - level 1 difference is 5.7e-07.
-	BOOST_TEST( gap.max < 5.7e-9 );
 }
 
 /*
@@ -4458,10 +4406,9 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqUnderTheBorderedGauge )
 }
 
 /*
- * 5. WHAT THE BORDERED GAUGE REFUSES: a knot count not-a-knot cannot take, knots
- * for a source that reads no crossing -- the fixed radius -- a prescribed plasma
- * current beside them, whose row reads the crossings and has no corner against
- * them, and a start that is not this machine's.
+ * 5. WHAT THE BORDERED GAUGE REFUSES: a knot count not-a-knot cannot take, a
+ * prescribed plasma current beside the knots, whose row reads the crossings and
+ * has no corner against them, and a start that is not this machine's.
  */
 BOOST_AUTO_TEST_CASE( theBorderedGaugeRefusesWhatItCannotCarry )
 {
@@ -4476,7 +4423,7 @@ BOOST_AUTO_TEST_CASE( theBorderedGaugeRefusesWhatItCannotCarry )
 	o.absoluteTolerance = 1.0e-14;
 	std::unique_ptr<MirrorRun> const run = runMirror( o );
 	meq::GradShafranovSolver &solver = *run->solver;
-	for ( int bad : { -1, 1, 2, 3 } )
+	for ( int bad : { -1, 0, 1, 2, 3 } )
 		BOOST_CHECK_THROW( solver.setMidplaneGaugeKnots( bad ), std::invalid_argument );
 	BOOST_CHECK_THROW( solver.setInitialState( solver.state(), std::vector<double>( 3, 0.0 ) ),
 	                   std::invalid_argument );
@@ -4496,14 +4443,6 @@ BOOST_AUTO_TEST_CASE( theBorderedGaugeRefusesWhatItCannotCarry )
 		            refused.what() );
 	}
 
-	// The fixed radius reads no crossing.
-	Options fixed = o;
-	fixed.profiles = nullptr;
-	fixed.gaugeKnots = borderKnots;
-	std::unique_ptr<MirrorRun> const fixedRun = runMirror( fixed );
-	BOOST_TEST( !fixedRun->converged );
-	BOOST_TEST( fixedRun->failure.find( "reads no midplane" ) != std::string::npos, fixedRun->failure );
-
 	// A start from another mesh.
 	Start wrong = startOf( *run );
 	wrong.state.SetSize( wrong.state.Size() + 1 );
@@ -4513,6 +4452,318 @@ BOOST_AUTO_TEST_CASE( theBorderedGaugeRefusesWhatItCannotCarry )
 	std::unique_ptr<MirrorRun> const misfitRun = runMirror( misfit );
 	BOOST_TEST( !misfitRun->converged );
 	BOOST_TEST( misfitRun->failure.find( "another mesh" ) != std::string::npos, misfitRun->failure );
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * THE MIDPLANE GAUGE'S START, AND THE OUTER LOOP. MIRROR-PLAN.md section 5;
+ * [M-R0START](MEASUREMENTS.md#m-r0start) and
+ * [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop).
+ *
+ * THE GUESS, MEASURED AND NOT TAKEN: that the same densities solved first on
+ * the vacuum's crossing HELD -- the vacuum-midplane gauge, cheap and quadratic
+ * -- is a start close enough that the bordered Newton then needs only a very
+ * few of its dearer steps. It saves one bordered step of three at most, none
+ * at 2e19, and its own three steps cost more than the one saved: the bordered
+ * Newton from the vacuum is already quadratic, and its first step does what
+ * the whole held solve does. One ctest, RotatingMirrorRoute:
+ *
+ *   1. the bordered gauge from the vacuum -- what ships -- against the held
+ *      start then the bordered Newton, and the held start stopped where its
+ *      merit meets the bordered problem's; and how far each start is from
+ *      the answer, by pressure;
+ *   2. the OUTER LOOP: whole held-table solves, the table each time the last
+ *      answer's crossings -- Picard on the curve, with no knots. Linear, at
+ *      the retired frozen refresh's own contraction, which grows with the
+ *      pressure.
+ */
+namespace
+{
+	char const *const routeStem = "RotatingMirrorRoute";
+
+	int dampedSteps( MirrorRun const &run )
+	{
+		int count = 0;
+		for ( meq::GradShafranovSolver::BorderStep const &s : run.solver->borderSteps() )
+			if ( s.damping > 0.0 && s.damping < 1.0 )
+				++count;
+		return count;
+	}
+
+	void printRun( char const *label, MirrorRun const &run, double seconds )
+	{
+		std::vector<double> const &h = run.solver->newtonResiduals();
+		std::printf( "    %-36s %s %2d steps (damped %d), order %5.2f, %.3f s:", label,
+		             run.converged ? "converged" : "FAILED   ", stepsOf( run ), dampedSteps( run ),
+		             lastOrder( h ), seconds );
+		for ( double v : h )
+			std::printf( " %.2e", v );
+		std::printf( "\n" );
+		std::fflush( stdout );
+	}
+
+	double median( std::vector<double> v )
+	{
+		std::sort( v.begin(), v.end() );
+		return v.empty() ? std::numeric_limits<double>::quiet_NaN() : v[ v.size()/2 ];
+	}
+
+	/// The worst | R_0 | apart of a table and the bordered answer's knots.
+	double crossingGap( meq::Profile const &a, std::vector<double> const &knots )
+	{
+		double worst = 0.0;
+		for ( std::size_t k = 0; k < knots.size(); ++k )
+			worst = std::max( worst, std::abs( a( static_cast<double>( k )/( knots.size() - 1 ) ) - knots[ k ] ) );
+		return worst;
+	}
+
+	/// The worst | R_0 | apart of two tables, over 1025 points.
+	double crossingGap( meq::Profile const &a, meq::Profile const &b )
+	{
+		double worst = 0.0;
+		for ( int k = 0; k <= 1024; ++k )
+			worst = std::max( worst, std::abs( a( k/1024.0 ) - b( k/1024.0 ) ) );
+		return worst;
+	}
+
+	/// psi* + psi_c of the vacuum a run started from, at geq's nodes.
+	std::vector<double> vacuumStar( MirrorRun &run )
+	{
+		BOOST_TEST_REQUIRE( static_cast<bool>( run.vacuum ) );
+		run.vacuum->solver->postProcess();
+		Nodes const &nodes = geqNodes();
+		return totalAt( run, run.vacuum->solver->postProcessedPotential(), nodes.radius, nodes.z );
+	}
+
+	double largest( std::vector<double> const &v )
+	{
+		double out = 0.0;
+		for ( double x : v )
+			if ( std::isfinite( x ) )
+				out = std::max( out, std::abs( x ) );
+		return out;
+	}
+
+	/// The cases, at the coarsest level each converges on.
+	struct RouteCase
+	{
+		std::string name;
+		MirrorProfiles profiles;
+		int level;
+	};
+
+	std::vector<RouteCase> routeCases()
+	{
+		return { { "geq's two species", geqMidplaneProfiles(), 0 },
+		         { "three species at 5e18", threeSpecies( 5.0e18 ), 0 },
+		         { "three species at 2e19", threeSpecies( 2.0e19 ), 1 } };
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( route )
+
+/*
+ * 1. THE BORDERED GAUGE FROM THE VACUUM, AND THE HELD START IT WAS GUESSED TO
+ * NEED. Per case, k = 3, the default knots, each solve three times for a
+ * median wall clock (printed, never asserted: the machine is shared):
+ *
+ *   (a) the bordered Newton from the vacuum, its knots on the vacuum's
+ *       crossings -- what solve() does;
+ *   (b) the held table from the vacuum, then the bordered Newton from that
+ *       answer, its knots on that answer's crossings;
+ *   (b') the same with the held solve stopped once its merit is under the
+ *       merit the bordered problem has at its answer, which (b) measures --
+ *       the derived hand-over, below which held steps buy nothing.
+ *
+ * ASSERTED: (a) is quadratic in three steps; every route lands on one answer;
+ * and the held start saves at most one bordered step, so its own steps -- at
+ * two thirds of a bordered step's cost -- cannot pay for it.
+ */
+BOOST_AUTO_TEST_CASE( theHeldStartSavesAtMostOneBorderedStep )
+{
+	int const repeats = 3;
+	std::shared_ptr<meq::SplineProfile const> const vacuum = vacuumCrossing( 1024 );
+	for ( RouteCase const &c : routeCases() )
+	{
+		std::printf( "\n  %s, level %d, k = 3\n", c.name.c_str(), c.level );
+		Options b;
+		b.level = c.level;
+		b.order = 3;
+		b.stem = routeStem;
+		b.profiles = &c.profiles;
+		Options h = b;
+		h.holdCrossing = true;
+		h.heldCrossing = vacuum;
+
+		std::vector<double> coldTimes, heldTimes, afterTimes, earlyTimes, afterEarlyTimes;
+		std::unique_ptr<MirrorRun> cold, held, after, early, afterEarly;
+		Start fromHeld, fromEarly;
+		for ( int take = 0; take < repeats; ++take )
+		{
+			cold = runMirror( b );
+			BOOST_TEST_REQUIRE( cold->converged, cold->failure );
+			coldTimes.push_back( cold->plasmaSeconds );
+			// ONE STOPPING TARGET FOR EVERY BORDERED SOLVE: (a)'s, which its
+			// cold reference sets. A restart takes its reference at its own
+			// labels, which moves the target by a factor near one -- enough to
+			// add a step on a quadratic tail.
+			double const target = 1.0e-12*cold->solver->newtonResiduals().front();
+
+			held = runMirror( h );
+			BOOST_TEST_REQUIRE( held->converged, held->failure );
+			heldTimes.push_back( held->plasmaSeconds );
+			fromHeld = startOf( *held );
+			fromHeld.crossing = answerCrossing( *held, 1024 );
+			Options a = b;
+			a.start = &fromHeld;
+			a.relativeTolerance = 1.0e-30;
+			a.absoluteTolerance = target;
+			after = runMirror( a );
+			BOOST_TEST_REQUIRE( after->converged, after->failure );
+			afterTimes.push_back( after->plasmaSeconds );
+
+			// THE HAND-OVER: the held solve stopped at the merit the bordered
+			// problem reads at the held answer.
+			Options he = h;
+			he.relativeTolerance = 1.0e-30;
+			he.absoluteTolerance = after->solver->newtonResiduals().front();
+			early = runMirror( he );
+			BOOST_TEST_REQUIRE( early->converged, early->failure );
+			earlyTimes.push_back( early->plasmaSeconds );
+			fromEarly = startOf( *early );
+			fromEarly.crossing = answerCrossing( *early, 1024 );
+			Options ae = a;
+			ae.start = &fromEarly;
+			afterEarly = runMirror( ae );
+			BOOST_TEST_REQUIRE( afterEarly->converged, afterEarly->failure );
+			afterEarlyTimes.push_back( afterEarly->plasmaSeconds );
+		}
+
+		double const tCold = median( coldTimes );
+		double const tHeld = median( heldTimes ), tAfter = median( afterTimes );
+		double const tEarly = median( earlyTimes ), tAfterEarly = median( afterEarlyTimes );
+		printRun( "(a) bordered, from the vacuum", *cold, tCold );
+		printRun( "(b) held, from the vacuum", *held, tHeld );
+		printRun( "    then bordered", *after, tAfter );
+		printRun( "(b') held to the hand-over", *early, tEarly );
+		printRun( "    then bordered", *afterEarly, tAfterEarly );
+		double const heldStep = tHeld/stepsOf( *held );
+		double const borderedStep = tCold/stepsOf( *cold );
+		std::printf( "    total: (a) %.3f s, (b) %.3f s, (b') %.3f s; a held step %.3f s, a bordered step "
+		             "%.3f s, %.2fx\n", tCold, tHeld + tAfter, tEarly + tAfterEarly, heldStep,
+		             borderedStep, borderedStep/heldStep );
+
+		// How far each start is from the answer.
+		std::vector<double> const knots = cold->solver->midplaneGaugeCrossings();
+		Sampled const answer = reduce( cold, b );
+		double const scale = largest( answer.plasma );
+		Difference const dVacuum = difference( vacuumStar( *cold ), answer.psiStar );
+		Sampled const heldAnswer = reduce( held, h );
+		Difference const dHeld = difference( heldAnswer.psiStar, answer.psiStar );
+		Sampled const earlyAnswer = reduce( early, h );
+		Difference const dEarly = difference( earlyAnswer.psiStar, answer.psiStar );
+		std::printf( "    from the answer: the vacuum psi* %.3e ( %.3f of the plasma's ), R_0 %.3e m\n",
+		             dVacuum.max, dVacuum.max/scale, crossingGap( *vacuum, knots ) );
+		std::printf( "                     the held answer %.3e ( %.3f ), R_0 %.3e m\n", dHeld.max,
+		             dHeld.max/scale, crossingGap( *fromHeld.crossing, knots ) );
+		std::printf( "                     the hand-over %.3e ( %.3f ), R_0 %.3e m\n", dEarly.max,
+		             dEarly.max/scale, crossingGap( *fromEarly.crossing, knots ) );
+		double const lands = std::max( maxDifference( *after, *cold ), maxDifference( *afterEarly, *cold ) );
+		std::printf( "    the three answers within %.3e\n", lands );
+		std::fflush( stdout );
+
+		std::string why;
+		BOOST_TEST( stepsOf( *cold ) <= 3, c.name );
+		BOOST_TEST( quadraticTail( cold->solver->newtonResiduals(), why ), c.name << ": " << why );
+		BOOST_TEST( lands < 1.0e-11, c.name );
+		BOOST_TEST( stepsOf( *after ) >= stepsOf( *cold ) - 1,
+			c.name << ": from the held answer the bordered Newton took " << stepsOf( *after )
+			<< " steps against " << stepsOf( *cold ) << " from the vacuum, so the held start may now "
+			"pay for itself -- measure the totals again; M-R0START" );
+		BOOST_TEST( stepsOf( *afterEarly ) >= stepsOf( *cold ) - 1, c.name );
+	}
+}
+
+/*
+ * 2. THE OUTER LOOP ON THE CURVE: the held table solved whole, its table the
+ * vacuum's crossing first and each time after the last answer's, warm-started
+ * from that answer -- the frozen refresh with every inner solve converged. Its
+ * fixed point is the midplane gauge's answer. Per case, how fast the table
+ * stops moving, and what it costs against the bordered gauge on the same
+ * case. The contraction is the frozen refresh's: about 0.016 for geq's two
+ * species, 0.04 for three at 5e18, 0.18 at 2e19 -- the left-out pull of the
+ * field on R_0 grows with the pressure.
+ *
+ * ASSERTED: it converges, it is LINEAR -- the last contraction within a factor
+ * of two of the first -- and it lands on the bordered answer to that answer's
+ * own knot interpolation: 1.5e-05 of the plasma's flux at most, for geq's two
+ * species at level 0, where that level's discretisation error is 1.7e-02 of
+ * it (M-278 section 3).
+ */
+BOOST_AUTO_TEST_CASE( theOuterLoopOnTheCurveIsLinear )
+{
+	std::shared_ptr<meq::SplineProfile const> const vacuum = vacuumCrossing( 1024 );
+	for ( RouteCase const &c : routeCases() )
+	{
+		std::printf( "\n  OUTER LOOP, %s, level %d, k = 3\n", c.name.c_str(), c.level );
+		Options b;
+		b.level = c.level;
+		b.order = 3;
+		b.stem = routeStem;
+		b.profiles = &c.profiles;
+		std::unique_ptr<MirrorRun> bordered = runMirror( b );
+		BOOST_TEST_REQUIRE( bordered->converged, bordered->failure );
+		Sampled const answer = reduce( bordered, b );
+		printRun( "bordered, from the vacuum", *bordered, bordered->plasmaSeconds );
+
+		Options o = b;
+		o.holdCrossing = true;
+		std::shared_ptr<meq::Profile const> curve = vacuum;
+		std::unique_ptr<Start> previous;
+		std::vector<double> contractions;
+		double lastGap = std::numeric_limits<double>::quiet_NaN();
+		int inner = 0;
+		double seconds = 0.0;
+		bool settled = false;
+		std::unique_ptr<MirrorRun> run;
+		for ( int outer = 0; outer < 25 && !settled; ++outer )
+		{
+			Options step = o;
+			step.heldCrossing = curve;
+			step.start = previous.get();
+			run = runMirror( step );
+			BOOST_TEST_REQUIRE( run->converged, "outer step " << outer << ": " << run->failure );
+			inner += stepsOf( *run );
+			seconds += run->plasmaSeconds;
+			std::shared_ptr<meq::Profile const> const next = answerCrossing( *run, 1024 );
+			double const gap = crossingGap( *next, *curve );
+			if ( std::isfinite( lastGap ) )
+				contractions.push_back( gap/lastGap );
+			std::printf( "    outer %2d: %d inner steps, the table moved %.3e m, contraction %.3e\n", outer,
+			             stepsOf( *run ), gap, gap/lastGap );
+			lastGap = gap;
+			curve = next;
+			previous = std::make_unique<Start>( startOf( *run ) );
+			settled = gap < 1.0e-12;
+		}
+		Sampled const outerAnswer = reduce( run, o );
+		Difference const gap = difference( outerAnswer.psiStar, answer.psiStar );
+		std::printf( "    total: %d inner steps, %.2f s, against the bordered gauge's %d steps, %.2f s; "
+		             "the two answers psi* %.3e ( %.2e of the plasma's )\n", inner, seconds,
+		             stepsOf( *bordered ), bordered->plasmaSeconds, gap.max, gap.max/largest( answer.plasma ) );
+		std::fflush( stdout );
+
+		BOOST_TEST( settled, c.name << ": the outer loop's table was still moving by " << lastGap << " m" );
+		BOOST_TEST_REQUIRE( contractions.size() >= 3u );
+		// The last ratio above the floor, against the first.
+		double const first = contractions.front();
+		double const last = contractions[ contractions.size() - 2 ];
+		BOOST_TEST( ( last > 0.5*first && last < 2.0*first ),
+			c.name << ": the contraction went from " << first << " to " << last << ", so the loop is not linear" );
+		BOOST_TEST( inner > stepsOf( *bordered ) );
+		BOOST_TEST( gap.max < 1.0e-4*largest( answer.plasma ), c.name );
+	}
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -1896,7 +1896,39 @@ start. And the two things such a curve would be for are met another way: the
 keeps the transfer exponent to the plasma's own displacement
 (→ [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)). Posing true-midplane densities
 with a quadratic Newton is the bordered route — `R_0` at the knots as border
-unknowns — not a frozen copy of someone's answer.
+unknowns, which is how `Gauge = "midplane"` solves — not a frozen copy of
+someone's answer.
+
+*From `MIRROR-PLAN.md` §5.*
+
+### The midplane gauge's knots started from a vacuum-gauge solve
+
+**Measured and declined.** The guess: solve the same densities first on the
+vacuum's crossing held — the vacuum-midplane gauge, quadratic and cheap — and
+start the bordered Newton, `R₀` at the knots as unknowns, from that answer and
+its crossings, so that only a very few of its dearer steps are needed. **The
+bordered Newton from the vacuum is already quadratic in three steps**, and its
+first step does what the whole held solve does; the held start saves one of
+them at most and none at 2e19, and the route costs 1.35× to 1.66× the bordered
+Newton alone — 1.06× to 1.36× with the held solve stopped at the derived
+hand-over. Its start's distance from the answer grows with the pressure, 2% to
+22% of the plasma's flux, and where every start stalls the held solve stalls
+first (→ [M-R0START](MEASUREMENTS.md#m-r0start)). So the knots start on the
+starting iterate's own crossings.
+
+*From `MIRROR-PLAN.md` §5.*
+
+### The frozen midplane table, and the outer loop on the curve
+
+**Retired, measured.** A crossing table tabulated once per Newton iteration and
+frozen within it makes Newton linear — 6 steps where the knots take 3, 14 at
+2e19 — and converged nowhere the knots do not, so it is gone. **The outer loop**
+— whole held-table solves, the table each time the last answer's crossings — is
+the same fixed point with its inner solves converged: linear at the same
+contraction, 0.016 to 0.18 and rising with the pressure, at 3 to 6 times the
+knots' cost. It stays a test-side harness. Neither lifts the pressure ceiling:
+a fixed residual with an exact Jacobian stalls where they did
+(→ [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop)).
 
 *From `MIRROR-PLAN.md` §5.*
 

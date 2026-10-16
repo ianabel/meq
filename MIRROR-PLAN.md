@@ -290,49 +290,78 @@ much at every refresh: Newton stalled near 3e-04. With `ψ( R, 0 )` the integral
 of `R q_R` from the midplane's first point, panel by panel over the elements, the
 mismatch is 2e-04 and the same solve converges.
 
-**FREEZE `R₀( ψ )` WITHIN A NEWTON ITERATION.** The tree's own precedent is
-`setPlasmaSupportFrozen` and XP-2's frozen plasma edge: a reference that moves
-inside a Jacobian makes a difference straddle a kink instead of measuring a
-derivative. Refresh it once per iteration, beside the support freeze.
-**BUILT, AND IT MAKES NEWTON LINEAR**: the field's pull on `R₀` is the one term
-the Jacobian does not carry, so geq's problem takes 6 steps where the fixed
-radius takes 3, contracting about 50× a step. **It also bounds what the gauge can
-solve**: the left-out term scales with the pressure, and three species at
-`M = 6` stall near 8e-05 at a midplane peak of 5e19 m⁻³, and near 1.5e-05 at
-2e19, where they converge in 7 steps at 5e18. An iterate whose midplane has folded keeps the previous table for
-an iteration; converging on a held table is refused. **CORRECTED, MEASURED: THE
-CAP IS THE MESH, NOT THE FREEZE.** On the vacuum's fixed curve below, with an
-exact Jacobian, the same three species stall on level 0 between 1.25e19 and
-1.5e19 even by continuation in pressure, and converge in three quadratic steps
-at 2e19 on levels 1 and 2 — where the refreshed midplane gauge converges too,
-in 14 linear steps at level 1 — then stall at 3e19 on level 1. Differencing the
-border columns, or taking `F` at the labels down to 1e-13 of its peak, leaves
-every stall where it was. → [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)
+**FREEZE `R₀( ψ )` WITHIN A NEWTON ITERATION — BUILT, MEASURED LINEAR, AND
+RETIRED.** The tree's own precedent is `setPlasmaSupportFrozen` and XP-2's
+frozen plasma edge: a reference that moves inside a Jacobian makes a difference
+straddle a kink instead of measuring a derivative, so the table was refreshed
+once per iteration, beside the support freeze. **It made Newton linear**: the
+field's pull on `R₀` is the one term that Jacobian does not carry, so geq's
+problem took 6 steps where the fixed radius takes 3, contracting about 50× a
+step. **That the left-out term is what capped the pressure — three species at
+`M = 6` stalling near 1.5e-05 at a midplane peak of 2e19 m⁻³ and 8e-05 at
+5e19, where they converge at 5e18 — was believed and is FALSIFIED**: the cap is
+the mesh's. On the vacuum's fixed curve below, with an exact Jacobian, the same
+three species stall on level 0 between 1.25e19 and 1.5e19 even by continuation
+in pressure, and converge at 2e19 on levels 1 and 2; differencing the border
+columns, or taking `F` at the labels down to 1e-13 of its peak, leaves every
+stall where it was → [M-VACGAUGE](MEASUREMENTS.md#m-vacgauge). The held table
+with nothing moving stalls there too → [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop).
 
-**THE CROSSINGS AS BORDER UNKNOWNS — BUILT, QUADRATIC, AND IT DOES NOT LIFT THE
-STALL** → [M-R0BORDER](MEASUREMENTS.md#m-r0border).
-`GradShafranovSolver::setMidplaneGaugeKnots( K )` makes `R₀` at `K` knots in `Ψ`
-unknowns beside the labels and the exterior modes, the table the `C²` spline of
-`R₀²/2` through them, one row per knot — `ψ( R₀ₖ, 0 ) = ψ_bnd + Ψₖ( ψ_ax − ψ_bnd )`,
-`ψ` along the midplane as the refresh reads it. geq's problem converges in 3
-steps where the frozen refresh takes 6, from the vacuum or in 2 from the frozen
-answer perturbed, and three species at 5e18 in 3 where it takes 7. **The
-stall above is not the freeze**: at 2e19 and 5e19 the bordered gauge stalls at
-the same merit from every start tried, and by continuation in the peak both
-routes fail together between 1.63e19 and 1.67e19 with the border's condition
-flat. The label floor and a second support region are ruled out too. **M-278
-§2's six steps with the vacuum's table held are not this tree's**: held, it
-converges in the fixed radius's 3, so a fixed table's Jacobian is the whole
-one. The library carries both routes; `meq` uses the frozen refresh and has no
-key for the bordered one, which moves the answer by the interpolant's error and
-so is a choice of discrete problem. `setInitialState()` and
-`setMidplaneCrossingInitial()` take a start from another solve.
+**THE CROSSINGS ARE BORDER UNKNOWNS — BUILT, AND WHAT SHIPS**
+→ [M-R0BORDER](MEASUREMENTS.md#m-r0border). `GradShafranovSolver` makes `R₀`
+at `K` knots in `Ψ` unknowns beside the labels and the exterior modes — 32 by
+default, `setMidplaneGaugeKnots()` in the library and no key — the table the
+`C²` spline of `R₀²/2` through them, one row per knot,
+`ψ( R₀ₖ, 0 ) = ψ_bnd + Ψₖ( ψ_ax − ψ_bnd )` with `ψ` along the midplane `q`
+integrated. The knots start on the starting iterate's crossings: the vacuum's
+from cold, the warm start's on an adaptive cycle. geq's problem converges in 3
+steps where the frozen refresh took 6, three species at 5e18 in 3 where it took
+7, and at 2e19 on level 1 in 3 where it took 14, landing on the frozen refresh's
+answer to 1.3e-08 in `ψ*` at level 0 — the interpolant's error, a thousandth
+of that level's discretisation error. **It does not lift the stall**: at 2e19
+and 5e19 on level 0 it stalls at the frozen refresh's merit from every start
+tried, and by continuation in the peak both fail together between 1.63e19 and
+1.67e19 with the border's condition flat. **M-278 §2's six steps with the
+vacuum's table held are not this tree's**: held, it converges in the fixed
+radius's 3, so a fixed table's Jacobian is the whole one. **Nothing only the
+frozen refresh could do was found** — it converged nowhere the knots do not, in
+2 to 5 times the steps — **so it is retired**, and with it the per-iteration
+`NormalisedSource::setMidplaneField()` hook. A prescribed plasma current beside
+the knots is refused (its corner against them is not assembled); the frozen
+refresh carried one in the library, and the driver refuses a current beside the
+box, so no run loses it.
+
+**THE START THE KNOTS WERE GUESSED TO NEED — MEASURED, AND NOT TAKEN.** The
+guess: solve the same densities first on the vacuum's crossing held — the
+vacuum-midplane gauge, quadratic and cheap — so that the bordered Newton then
+needs only a very few of its dearer steps. **It saves one bordered step of three
+at most, none at 2e19, and costs more than it saves**: the whole held-then-
+bordered route takes 1.35× to 1.66× the wall clock of the bordered Newton from
+the vacuum, and still 1.06× to 1.36× with the held solve stopped at the derived
+hand-over, the merit the bordered problem reads at the held answer. The
+bordered Newton from the vacuum is already quadratic in three steps; its first
+step does what the whole held solve does, and the held answer's distance from
+the true one grows with the pressure — 1.9%, 4.3% and 22% of the plasma's flux
+for geq's two species, three at 5e18 and three at 2e19 — exactly where a better
+start would be wanted. Where every start stalls, the held solve stalls first.
+→ [M-R0START](MEASUREMENTS.md#m-r0start)
+
+**AND THE OUTER LOOP — Picard on the curve, whole held-table solves with the
+table each time the last answer's crossings, no knots — IS THE FROZEN REFRESH
+WITH ITS INNER SOLVES CONVERGED, AND NO BETTER.** It is linear at the frozen
+refresh's own contraction, 0.016 for geq's two species, 0.041 for three at
+5e18 and 0.18 at 2e19 on level 1, so the left-out term grows about linearly in
+the pressure; it costs 3 to 6 times the bordered gauge, and its first inner
+solve at 2e19 on level 0, a fixed residual, stalls where the bordered and the
+frozen ones do. **So the hypothesis that the 2e19 stall was the line search
+fighting a moving residual is FALSIFIED**: nothing moves in that solve. It is a
+test-side harness → [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop).
 
 **THE INTERFACE SHAPE** is a gauge policy on the source rather than a second
 class — `enum class Gauge { FixedRadius, Midplane, FixedCurve }`, `FixedRadius` carrying
 today's `referenceRadius` and remaining the default so every tokamak caller is
-untouched, `Midplane` carrying the tabulated `R₀( ψ )` the solver refreshes,
-`FixedCurve` the curve it installs once.
+untouched, `Midplane` carrying the interpolant through the solver's knots,
+replaced at every residual, `FixedCurve` the curve it installs once.
 
 **AND IT MAKES THE BENCHMARK EASIER, WHICH IS A CHECK ON THE DESIGN RATHER THAN
 A BONUS — FALSIFIED, AND THE REASON IS MR-4a's HOLD.** MR-4a holds geq's `N_s`
@@ -404,9 +433,9 @@ leaves Newton three quadratic steps.
 plasma — three steps, the same history to every printed digit, `ψ*` together
 to 2e-13 — and the differenced border columns give the same history. **M-278
 §2's six steps on a frozen vacuum table are not reproduced**: the midplane gauge
-keeping its first table, and the fixed curve, both take three quadratic steps
+keeping its first table, and the fixed curve, both took three quadratic steps
 on the same tables, so nothing is missing from the Jacobian with the table
-fixed, and the refresh is the whole of the midplane gauge's linear rate. Three
+fixed, and the refresh was the whole of the old midplane gauge's linear rate. Three
 species at `M = 6`: three quadratic steps at 5e18 on every level and at 2e19 on
 levels 1 and 2; carbon's exponent to the solved crossing is 0.74 at 5e18 and 3.3
 at 2e19 against the best fixed radius's 134. The pressure cap is the mesh's
@@ -414,14 +443,18 @@ at 2e19 against the best fixed radius's 134. The pressure cap is the mesh's
 
 **OUTPUT.** Every rotating mirror's `.nc`, in any gauge, carries `R₀( Ψ )` and
 `n_s( R₀( Ψ ), Ψ )` with slopes on the solved crossing, as `DensityFile`
-tables; under the midplane gauge they are its own tables back to 5e-14, and off
-a vacuum-gauge answer they pose the same plasma in the midplane gauge to 3e-10
-of `ψ*`.
+tables; under the midplane gauge they are its own tables back at its knots and,
+between them, the tables moved by the knots' interpolant's gap from the crossing
+— 7e-05 relative for carbon, 1.5e-07 m of gap — and off a vacuum-gauge answer
+they pose the same plasma in the midplane gauge to 1.2e-06 of `ψ*`, the same
+gap's (→ [M-R0START](MEASUREMENTS.md#m-r0start) §4).
 
-**STILL OPEN: TRUE-MIDPLANE DENSITIES WITH A QUADRATIC NEWTON.** The intended
-route stands: solve on the vacuum's curve to a start near the answer, convert,
-then a few bordered steps of the midplane gauge with `R₀` at the table's knots
-as border unknowns. Not built.
+**TRUE-MIDPLANE DENSITIES WITH A QUADRATIC NEWTON — DONE, AND NOT BY THE
+INTENDED ROUTE.** `Gauge = "midplane"` is quadratic itself with `R₀` at its
+knots as border unknowns, from the vacuum. The route intended here — solve on
+the vacuum's curve to a start near the answer, convert, then a few bordered
+steps — was built and measured, and loses: see *The start the knots were
+guessed to need*, above → [M-R0START](MEASUREMENTS.md#m-r0start).
 
 ### What does NOT bite, which is worth saying
 
@@ -843,12 +876,16 @@ the branch.
    its exponent is half what §5 first quoted, and two species at geq-Mach 2 to 4
    are comfortably representable. **BUILT** → [M-278](MEASUREMENTS.md#m-278):
    geq's mirror in the midplane gauge meets MR-4d's matrix, and three species at
-   `M = 6` solve. **What remains is the freeze's price**: Newton is linear under
-   the midplane gauge, and the left-out pull of the field on `R₀` scales with the
-   pressure, so the same three species stall at ten times the density. Carrying
-   that term would be `R₀` at the table's knots as border unknowns, rows like the
-   label rows' at each crossing — not built, and a departure from the decided
-   freeze that needs a decision before it is.
+   `M = 6` solve. **The freeze's price is paid and the freeze retired**: `R₀` at
+   32 knots are border unknowns, so Newton is quadratic under the midplane gauge,
+   in 3 steps from the vacuum at every pressure that converges
+   ([M-R0BORDER](MEASUREMENTS.md#m-r0border), [M-R0START](MEASUREMENTS.md#m-r0start)).
+   **What remains is a pressure ceiling that is not the freeze's**: the same
+   three species converge at 5e18 everywhere and at 2e19 from level 1, and
+   stall at 2e19 on level 0 and at 5e19 on levels 0 and 1, in every gauge and
+   from every start measured, with the Jacobian exact and nothing moving
+   ([M-OUTERLOOP](MEASUREMENTS.md#m-outerloop)). It rises with the mesh; what it
+   is remains open.
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,

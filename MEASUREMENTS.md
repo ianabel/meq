@@ -17538,3 +17538,191 @@ frozen refresh takes 6.
   aside: 4.857e-10 against 4.873e-10.
 * Against the fixed radius the bordered gauge reads 4.85e-10, where the frozen
   refresh read 4.62e-10. Both are about 70× under geq's own 257 − 513 in max.
+
+### M-R0START
+
+**THE MIDPLANE GAUGE'S BORDERED NEWTON FROM THE VACUUM IS ALREADY QUADRATIC IN
+THREE STEPS. THE GUESSED START — THE SAME DENSITIES SOLVED FIRST ON THE VACUUM'S
+CROSSING HELD — SAVES ONE BORDERED STEP AT MOST, NONE AT 2e19, AND COSTS MORE
+THAN IT SAVES: THE GUESS DOES NOT HOLD. THE FROZEN REFRESH CONVERGES NOWHERE THE
+KNOTS DO NOT, SO IT IS RETIRED, AND `meq` SOLVES THE MIDPLANE GAUGE WITH 32
+KNOTS.**
+
+**Setup.**
+* `MIRROR-PLAN.md` §5. `RotatingMirrorRoute`'s
+  `theHeldStartSavesAtMostOneBorderedStep` is the acceptance; `RotatingMirrorBorder`,
+  `RotatingMirrorMidplane`, `RotatingMirrorVacuumGauge` and
+  `RotatingMirrorDriver`'s two midplane cases carry the gauge as shipped.
+* MEQ at `ced0ed1` with `e25a4c1` merged and this change, double, host,
+  `OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`, `k = 3`, 32 knots. geq's
+  two-species midplane tables (M-278 §4) and the three species of M-278 §5.
+* The starts, on one mesh and to one target, `1e-12` of the bordered run's
+  first merit:
+  * **(a) cold**: the bordered Newton from the vacuum, its knots on the vacuum's
+    crossings;
+  * **(b) the route**: the held table — `Gauge::FixedCurve` on the filaments'
+    crossing, the vacuum-midplane gauge on the same densities — solved, then
+    the bordered Newton from that answer, its knots on that answer's crossings;
+  * **(b′)** the same with the held solve stopped at the derived hand-over: once
+    its merit is under the merit the bordered problem reads at the held answer,
+    held steps buy nothing;
+  * **(c)** the frozen refresh stopped at that merit, then the bordered Newton.
+* (c) and the frozen refresh's own runs were measured before the retirement,
+  on the same build with the route in the solver; (a), (b) and (b′) after it,
+  built from the library's parts. (a) reads the same digits on both.
+* **Every time is wall clock, median of three, on a shared machine** (a
+  clang-tidy run beside the second set): read the ratios.
+
+#### 1. Steps, order and total cost
+
+| case | level | frozen refresh | (a) cold | (b) held, then bordered | (b′) | (c) frozen, then bordered |
+|---|---|---|---|---|---|---|
+| geq two species | 0 | 6 | **3**, 1.28 s | 3 + 2, 1.74 s | 1 + 2, 1.37 s | 2 + 2, 1.93 s |
+| geq two species | 1 | 6 | **3**, 5.26 s | 3 + 2, 7.29 s | — | 2 + 2, 7.28 s |
+| three, 5e18 | 0 | 7 | **3**, 1.27 s | 3 + 2, 1.72 s | 1 + 2, 1.35 s | 1 + 2, 1.65 s |
+| three, 5e18 | 1 | 7 | **3**, 4.84 s | 3 + 2, 6.76 s | — | 1 + 2, 5.94 s |
+| three, 2e19 | 1 | 14 | **3**, 5.06 s | 3 + 3, 8.38 s | 1 + 3, 6.88 s | 1 + 3, 7.03 s |
+
+Merit histories, (a): two species level 0 `5.48e-01 1.57e-05 4.80e-09 1.08e-14`;
+5e18 level 0 `5.45e-01 3.83e-07 1.94e-11 1.36e-16`; 2e19 level 1 `3.95e-01
+1.25e-05 1.01e-08 3.88e-16`. The bordered phase of (b): `8.71e-05 1.32e-08
+1.06e-14`, `3.29e-05 7.49e-10 2.08e-16`, `3.41e-04 6.26e-07 2.36e-11 1.48e-16`.
+No step of any converged run was damped. The level-1 rows of (b) and (c) are the
+in-solver route's, whose bordered phase shared the held phase's target.
+
+* **(b) costs 1.35× to 1.66× (a)**, and (b′) 1.06× to 1.36×. A held step costs
+  0.28 s at level 0 and 1.0 to 1.2 s at level 1; a bordered step 0.41 to 0.43 s
+  and 1.6 to 1.7 s — **1.40× to 1.57× a held step**, the 32 extra backsolves.
+* **Why the guess fails**: (a)'s first step does what the whole held solve does
+  — 1.57e-05 against the held solve's 1.61e-05 after one step — and Newton is
+  then quadratic from there. A start can save at most the steps before the
+  quadratic tail, and (a) has one.
+* **All starts land on one answer**: (b) and (b′) on (a) to 5.1e-13, 2.2e-15
+  and 4.1e-15 in `ψ_h` and the labels; (c) on (b) to 4.2e-13 and below.
+* **Against the frozen refresh, where it converged**, `ψ*` max at geq's nodes:
+  1.3e-08 and 2.1e-10 for two species at levels 0 and 1, 1.8e-10 and 1.4e-11
+  for 5e18, 2.2e-10 at 2e19 level 1. The level-0 figure is the 32 knots'
+  interpolant against the frozen refresh's 1024-interval table, a thousandth of
+  that level's discretisation error, 1.5e-05 (M-278 §3).
+
+#### 2. The distance from each start, and how it grows with pressure
+
+`ψ*` max at geq's nodes against the answer, over the plasma's own `ψ*`, and the
+worst `|R₀|` against the answer's knots:
+
+| case | (a) the vacuum | (b) the held answer | (b′) the hand-over | (c) |
+|---|---|---|---|---|
+| two species, level 0 | 1, 1.22e-03 m | **0.019**, 2.28e-05 m | 0.021, 2.73e-05 m | 4.1e-04, 5.1e-07 m |
+| three, 5e18, level 0 | 1, 5.15e-04 m | **0.043**, 2.17e-05 m | 0.042, 2.10e-05 m | 0.042, 2.1e-05 m |
+| three, 2e19, level 1 | 1, 2.05e-03 m | **0.216**, 4.42e-04 m | 0.185, 3.77e-04 m | 0.185, 3.8e-04 m |
+
+The held answer is the nearby problem's, so its distance is the plasma's own
+displacement of its surfaces — and it grows with the pressure, from 2% to 22%
+of the plasma's flux between 5e18 and 2e19, where a better start would be
+wanted. The bordered Newton's first merit from it rises with it, 3.3e-05 to
+3.4e-04.
+
+#### 3. Where nothing converges
+
+| case | level | frozen refresh | (a) cold | (b) the held phase |
+|---|---|---|---|---|
+| three, 2e19 | 0 | stalls | stalls at 1.60e-05, 28 of 30 steps damped | stalls at 7.5e-05 |
+| three, 5e19 | 0 | stalls | stalls at 2.67e-05, 23 damped | stalls at 1.43e-02 |
+| three, 5e19 | 1 | stalls | stalls at 2.30e-07, 23 damped | stalls at 1.93e-03 |
+
+Where every start stalls the held solve stalls first and highest, so the route
+never reaches its bordered phase; (a) gets furthest. Level 2 at 5e19 is not
+measured under the knots; on the vacuum's curve it diverges
+([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge)).
+
+#### 4. What ships, and what the knots cost the gauge's statement
+
+* `GradShafranovSolver` makes a midplane-gauged source's crossings border
+  unknowns at `defaultMidplaneGaugeKnots` = 32, starting on the starting
+  iterate's crossings; the per-iteration refresh, its holds and
+  `NormalisedSource::setMidplaneField()` are gone. No key.
+* **Through the driver**, on 1175 elements at `k = 2`:
+  `examples/mirror-three-species.toml` converges in **3** steps where it took 7,
+  `6.41e-01 6.94e-07 4.38e-11 2.00e-16`, solve 0.91 s (median of three, `meq-run`
+  wall 1.82 s). `examples/mirror-rotating.toml` with `ReferenceRadius` replaced
+  by `Gauge = "midplane"` — geq's fixed-radius tables read as midplane
+  densities — converges in 3 where the fixed radius takes 4, and warns that `F`
+  at the outer label is 1.06e-03 of its peak on the solved crossings: the
+  midplane gauge's post-solve label check, now asserted.
+* **geq's mirror, M-278 §4's matrix**, level 2, `k = 4`: 3 steps, `2.48e-01
+  1.86e-06 1.58e-10 9.50e-17`; MEQ − geq falls at **1.689 then 1.832** (max)
+  against geq's 1.629, and at 513 sits at **0.390** of geq's own 257 − 513.
+  Two gauges, one equilibrium (M-278 §3): the midplane − fixed-radius difference
+  falls at 4.43 then 6.12, 4.5e-07, 2.1e-08, 3.0e-10.
+* **The potential is pinned on the knots' interpolant, not on the crossing.** On
+  the three-species example the solved crossing sits up to **1.46e-07 m** from
+  the interpolant through its own values at the knots. So the `.nc`'s
+  `midplane_n_*`, read at the solved crossing, are the input tables to 1.5e-05
+  (electrons) and 6.9e-05 (carbon) relative between the knots, where the frozen
+  refresh's 1024-interval table gave 5e-14 — and they are exactly the tables
+  moved by that gap, through the closure, to 5.8e-12 and 2.6e-11. Posed again,
+  the vacuum-gauge run's relabelled columns give the same plasma to 1.2e-06 of
+  its `ψ*`, where the frozen refresh gave 3.3e-10; the two gauges' plasmas on
+  one set of tables are 4.2e-02 apart. In the library at level 0 the same
+  relabelled plasma comes back to 1.31e-08 (two species) and 2.85e-10 (three) at
+  32 knots and to 2.83e-09 and 8.38e-11 at 128: the knots' error, which falls
+  with them. For scale, the plasma's largest displacement of a crossing from
+  the vacuum's reads 5.37e-04, 5.31e-04 and 5.33e-04 m at levels 0, 1 and 2 on
+  the vacuum's curve ([M-VACGAUGE](MEASUREMENTS.md#m-vacgauge) §4): the
+  discretisation moves a crossing by microns, ten times the knots' gap.
+
+### M-OUTERLOOP
+
+**THE OUTER LOOP — WHOLE HELD-TABLE SOLVES, THE TABLE EACH TIME THE LAST
+ANSWER'S CROSSINGS — IS LINEAR AT THE RETIRED FROZEN REFRESH'S OWN CONTRACTION,
+WHICH GROWS WITH THE PRESSURE, AND COSTS 3 TO 6 TIMES THE BORDERED GAUGE. ITS
+FIRST INNER SOLVE AT 2e19 ON LEVEL 0, WITH NOTHING MOVING, STALLS WHERE THE
+OTHERS DO: THE STALL WAS NOT THE LINE SEARCH FIGHTING A MOVING RESIDUAL.**
+
+**Setup.** `RotatingMirrorRoute`'s `theOuterLoopOnTheCurveIsLinear`, a test-side
+harness and not a solver route. Each outer step is a `Gauge::FixedCurve` solve
+on the previous answer's crossings (`tabulateMidplaneCrossing()`, 1024
+intervals, on `q` integrated along `z = 0`), warm-started from that answer's
+whole state; the first is on the filaments' crossing from the vacuum, which is
+the vacuum-midplane gauge. It stops once the table moves by less than 1e-12 m.
+Build, profiles and machine as [M-R0START](MEASUREMENTS.md#m-r0start), `k = 3`;
+wall clock on a shared machine.
+
+| case | level | contraction per outer step | outer steps | inner steps | its cost | the bordered gauge's |
+|---|---|---|---|---|---|---|
+| geq two species | 0 | 1.87e-02 → **1.61e-02** | 7 | 12 | 3.79 s | 3 steps, 1.19 s |
+| geq two species | 1 | 1.79e-02 → **1.52e-02** | 7 | 11 | 18.6 s | 3 steps, 5.26 s |
+| three, 5e18 | 0 | 4.21e-02 → **4.10e-02** | 8 | 12 | 4.05 s | 3 steps, 1.24 s |
+| three, 5e18 | 1 | 4.11e-02 → **4.00e-02** | 8 | 12 | 20.1 s | 3 steps, 4.84 s |
+| three, 2e19 | 1 | 2.09e-01 → **1.84e-01** | 14 | 24 | 31.4 s | 3 steps, 4.99 s |
+
+The first outer step moves the table by the plasma's displacement of its
+surfaces — 1.25e-03, 5.37e-04 and 2.50e-03 m — and every later one by the same
+fraction of the last, to three digits from the third on. The frozen refresh
+contracted by 0.016 a step on geq's plasma from any start
+([M-R0BORDER](MEASUREMENTS.md#m-r0border) §4): **the outer loop is the frozen
+refresh with its inner solves converged**, and converging them buys nothing.
+Its fixed point is the midplane gauge's answer on the 1024-interval table: it
+lands on the bordered answer to 1.31e-08, 1.79e-10 and 2.22e-10 in `ψ*` — 1.5e-05,
+5.9e-07 and 1.9e-07 of the plasma's flux, the 32 knots' interpolant.
+
+**The contraction grows with the pressure**: ×4.5 from 5e18 to 2e19, for four
+times the density, so the field's pull on `R₀` the held table leaves out is about
+linear in the pressure. At 5e19 the loop never takes its second step.
+
+**The hypothesis, and why it is falsified.** The frozen refresh's 2e19 stall was
+read as its line search fighting a residual that moves with the table. The
+outer loop's inner solves move nothing:
+
+| case | level | first inner solve, the vacuum's crossing held |
+|---|---|---|
+| three, 2e19 | 0 | stalls at 7.44e-05 after 30 steps: `5.54e-01 1.41e-04 1.29e-04 … 7.46e-05 7.44e-05` |
+| three, 5e19 | 0 | stalls at 6.39e-03 |
+| three, 5e19 | 1 | stalls at 3.72e-03 |
+
+The bordered gauge, whose residual does not move either, stalls at 2e19 on
+level 0 too (1.60e-05), and at 2e19 on level 1, where the frozen refresh took 14
+steps, every route converges. So the line search fought no moving residual: a
+fixed residual with an exact Jacobian stalls at the same pressure on the same
+mesh, which is the mesh-dependent ceiling of
+[M-VACGAUGE](MEASUREMENTS.md#m-vacgauge) §4.

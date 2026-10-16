@@ -231,12 +231,18 @@ densities and stay within a double at high Mach with impurities, which the
 fixed radius does not (`MIRROR-PLAN.md` §5, → [M-278](MEASUREMENTS.md#m-278)).
 Three traps from building it. **Read the midplane flux off `q`, not `ψ_h`**:
 `ψ_h` jumps between elements by more than the plasma's own flux on a coarse
-mirror mesh, and a crossing table built on it stalls Newton. **The frozen
-crossings make Newton linear**; with them as border unknowns,
-`GradShafranovSolver::setMidplaneGaugeKnots()`, it is quadratic. **That the
-left-out term is what stops a dense plasma converging was believed and is
-FALSIFIED**: the bordered gauge stalls where the freeze does, at the same peak
-density and merit (→ [M-R0BORDER](MEASUREMENTS.md#m-r0border)). **A density flat at a
+mirror mesh, and a crossing table built on it stalls Newton. **The crossings
+are border unknowns**, `R₀` at 32 knots in `Ψ` by default
+(`GradShafranovSolver::setMidplaneGaugeKnots()`), and Newton is quadratic; a
+table re-tabulated once per iteration and frozen within it — retired — makes it
+linear, at a contraction that grows with the pressure. **That the left-out
+term is what stops a dense plasma converging was believed and is FALSIFIED**:
+the bordered gauge stalls where the freeze did, at the same peak density and
+merit, and so does a held table with nothing moving
+(→ [M-R0BORDER](MEASUREMENTS.md#m-r0border), [M-OUTERLOOP](MEASUREMENTS.md#m-outerloop)).
+**A nearer start does not pay**: the same densities solved first on the
+vacuum's crossing held save one bordered step of three at most and cost more
+than they save (→ [M-R0START](MEASUREMENTS.md#m-r0start)). **A density flat at a
 label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
 
 **AND A FIXED CURVE IS A GAUGE TOO**, `[source] Gauge = "vacuum-midplane"`,

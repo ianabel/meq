@@ -1814,12 +1814,6 @@ namespace meq
 		return plasmaSource->readsMidplane();
 	}
 
-	void CoilAugmentedNormalisedSource::setMidplaneField( MidplaneField const &field,
-	                                                       double rMin, double rMax )
-	{
-		plasmaSource->setMidplaneField( field, rMin, rMax );
-	}
-
 	bool CoilAugmentedNormalisedSource::readsVacuumMidplane() const
 	{
 		return plasmaSource->readsVacuumMidplane();

@@ -658,8 +658,11 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	# GradShafranovSolver::setMidplaneGaugeKnots() -- against the frozen
 	# refresh, and geq. Its own suite and mesh stem, so it runs beside the rest.
 	add_test(NAME RotatingMirrorBorder COMMAND RotatingMirror --run_test=border)
+	# The bordered gauge's route from the vacuum through the held table,
+	# against the starts it replaces, and the outer loop on the curve.
+	add_test(NAME RotatingMirrorRoute COMMAND RotatingMirror --run_test=route)
 	set_tests_properties(RotatingMirror RotatingMirrorResolution RotatingMirrorMidplane
-		RotatingMirrorVacuumGauge RotatingMirrorBorder PROPERTIES
+		RotatingMirrorVacuumGauge RotatingMirrorBorder RotatingMirrorRoute PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
 	# binary, against the library on geq's problem. It needs the driver and its

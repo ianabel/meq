@@ -330,8 +330,10 @@ the plasma that does not depend on which.
 The three columns ``midplane_Psi``, ``midplane_n_<species>`` and
 ``midplane_dn_<species>_dPsi`` are a ``DensityFile`` table as they stand
 (``Psi f df/dPsi``): under ``Gauge = "midplane"`` they reproduce the run's own
-tables, and from a run in any other gauge they pose **the same plasma** in the
-midplane gauge — which is how to state, from a run in the vacuum-midplane or
+tables at the gauge's knots, and between them up to the small shift the knots'
+interpolant leaves (:ref:`the midplane gauge <rotation-gauge>`); from a run in
+any other gauge they pose **the same plasma** in the midplane gauge, to the same
+shift — which is how to state, from a run in the vacuum-midplane or
 fixed-radius gauge, the densities at the true midplane. A solved midplane on
 which :math:`\psi` is not monotone has no crossing; the run then warns and the
 columns are left out.

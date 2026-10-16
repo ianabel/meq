@@ -732,10 +732,11 @@ namespace meq
 			virtual double boundaryNormalisation() const = 0;
 
 			/**
-			 * WHETHER THIS SOURCE READS THE MIDPLANE, so that the solver must
-			 * hand it setMidplaneField() before its first residual and once per
-			 * Newton iteration after that. False here, and for every source
-			 * but a meq::RotatingSource in Gauge::Midplane.
+			 * WHETHER THIS SOURCE READS THE MIDPLANE, so that the solver makes
+			 * its crossings border unknowns -- GradShafranovSolver::
+			 * setMidplaneGaugeKnots() -- and hands it their interpolant through
+			 * setMidplaneCrossing() at every residual. False here, and for
+			 * every source but a meq::RotatingSource in Gauge::Midplane.
 			 *
 			 * VIRTUAL FOR THE REASON setPlasmaSupport() IS: a wrapper answers
 			 * for the source that evaluates the profiles.
@@ -743,28 +744,6 @@ namespace meq
 			virtual bool readsMidplane() const
 			{
 				return false;
-			}
-
-			/**
-			 * THE FIELD ALONG `z = 0` AT THE CURRENT ITERATE, over
-			 * `[ rMin, rMax ]`, read once per Newton iteration and FROZEN
-			 * within it -- setPlasmaSupportFrozen()'s precedent: a reference
-			 * that moves inside a Jacobian makes a difference straddle a kink
-			 * rather than measure a derivative. MIRROR-PLAN.md section 5.
-			 *
-			 * Called by GradShafranovSolver after setNormalisation(), so the
-			 * source tabulates against the normalisation in force.
-			 *
-			 * @throws std::runtime_error if the source cannot be gauged on this
-			 *         field -- for the midplane gauge, `psi` not monotone along
-			 *         `z = 0` across the support, which is the PRECONDITION and
-			 *         a tokamak's case. The base does nothing and is never
-			 *         called, since readsMidplane() is false.
-			 */
-			virtual void setMidplaneField( MidplaneField const &field,
-			                               double rMin, double rMax )
-			{
-				(void)field; (void)rMin; (void)rMax;
 			}
 
 			/**

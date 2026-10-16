@@ -754,15 +754,14 @@ namespace meq
 		//     h'  = -R_0 R_0'
 		//     h'' = -( R_0'^2 + R_0 R_0'' )
 		//
-		// with R_0' = 1/( dpsi/dR ) at the crossing, which is the table's slope
-		// column and was read off q rather than differenced. The table is a
-		// Hermite cubic, so R_0'' is its own second derivative: piecewise linear,
-		// jumping at the knots, and exactly the derivative of the R_0' that h'
-		// uses -- so dFdPsi() is the derivative of f() for the frozen table.
+		// with R_0', R_0'' the table's own derivatives -- the knots' C^2
+		// spline, or a Hermite table whose R_0'' is piecewise linear and jumps
+		// at its knots -- exactly the derivatives of the R_0 that h uses, so
+		// dFdPsi() is the derivative of f() for the table in hand.
 		if ( !midplaneTable && gaugeChoice == Gauge::FixedCurve )
 			throw std::logic_error( "meq::RotatingSource: Gauge::FixedCurve has no curve R_g( psi ) yet. GradShafranovSolver supplies the vacuum's midplane crossing through NormalisedSource::setVacuumMidplaneField() before the first residual of a normalised solve; elsewhere call setMidplaneCrossing() first" );
 		if ( !midplaneTable )
-			throw std::logic_error( "meq::RotatingSource: Gauge::Midplane has no midplane crossing R_0( psi ) yet. GradShafranovSolver supplies it through NormalisedSource::setMidplaneField() once per Newton iteration of the bordered solve, so a midplane-gauged source is solved as a meq::NormalisedRotatingSource; elsewhere call setMidplaneCrossing() first" );
+			throw std::logic_error( "meq::RotatingSource: Gauge::Midplane has no midplane crossing R_0( psi ) yet. GradShafranovSolver supplies it at every residual of the bordered solve, as the interpolant through its crossings' knots, so a midplane-gauged source is solved as a meq::NormalisedRotatingSource; elsewhere call setMidplaneCrossing() first" );
 
 		double const r0 = ( *midplaneTable )( psi );
 		double const r0Prime = midplaneTable->prime( psi );
@@ -1322,7 +1321,7 @@ namespace meq
 	                                                 double rMin, double rMax )
 	{
 		if ( !readsMidplane() )
-			throw std::logic_error( "meq::NormalisedRotatingSource::setMidplaneField: this source is not in Gauge::Midplane and reads no midplane per iteration" );
+			throw std::logic_error( "meq::NormalisedRotatingSource::setMidplaneField: this source is not in Gauge::Midplane and reads no midplane" );
 
 		// The field is in PHYSICAL psi; the inner source's argument is Psi, so
 		// the table is taken in Psi at the normalisation in force -- see the

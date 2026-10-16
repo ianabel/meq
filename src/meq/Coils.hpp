@@ -1350,12 +1350,9 @@ namespace meq
 			/// FORWARDED, AND FOR THE REASON setPlasmaSupport() IS: the gauge
 			/// belongs to the profiles, and the profiles to the wrapped source.
 			/// Unforwarded, a midplane-gauged plasma wrapped with meshed coils
-			/// would never be given its crossing and would throw at its first
-			/// evaluation. The field handed down is the total flux, which is
-			/// what a meshed coil's state already is.
+			/// would never have its crossings made border unknowns and would
+			/// throw at its first evaluation.
 			bool readsMidplane() const override;
-			void setMidplaneField( MidplaneField const &field, double rMin,
-			                       double rMax ) override;
 			bool readsVacuumMidplane() const override;
 			void setVacuumMidplaneField( MidplaneField const &field, double rMin,
 			                             double rMax, double psiAxis,
