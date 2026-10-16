@@ -226,6 +226,26 @@ rather than quadratically under this gauge. An iterate whose midplane flux is
 not monotone keeps the previous table for one more iteration; a solve may not
 *converge* on a table its own answer cannot give, and is refused instead.
 
+**The crossings as unknowns, in the library.** The frozen table is what makes
+Newton linear, and the library therefore also solves the
+midplane gauge with :math:`R_0` at a set of knots in :math:`\Psi` as unknowns of
+the bordered Newton, beside :math:`\psi_{\text{ax}}`, :math:`\psi_{\text{bnd}}` and
+the exterior modes —
+:cpp:func:`meq::GradShafranovSolver::setMidplaneGaugeKnots`. Each knot carries
+one equation, that the flux along the midplane at :math:`R_0` be its surface's;
+the source's table at every residual is the :math:`C^2` cubic spline of
+:math:`R_0^2/2` through the knots, so the source is again a pointwise function
+of :math:`(R, z, \psi)` and the knots, and the Jacobian is the whole one: Newton
+is quadratic. It costs one more backsolve per knot per step against the same
+factorisation. ``meq`` itself solves with the frozen table, and there is no key
+for the bordered one: it moves the answer by the interpolant's error between the
+knots, which is a choice of discrete problem rather than of speed. A run can
+start from another solve's whole state and crossings —
+:cpp:func:`meq::GradShafranovSolver::setInitialState` and
+:cpp:func:`meq::GradShafranovSolver::setMidplaneCrossingInitial` — so a cheaper
+solve can supply the start. Measure the knot count against your own mesh's
+error before relying on one.
+
 **And it changes what "flat at a label" means.** The support's precondition is
 that :math:`F` vanish at both labels. Under the midplane gauge a ``Density``
 flat at a label still carries :math:`-m_s\omega^2 R_0 R_0'/T_s` in its

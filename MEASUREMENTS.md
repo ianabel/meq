@@ -17123,3 +17123,248 @@ answer moves in its last bits from run to run.
 * Single precision on the card. The test applies the driver comparison's
   single-precision floor there, the extension's `eps/fd_step`.
 * `MEQ_AXIS_DEVICE=force`, `DeviceParity`'s fourth arm.
+
+
+### M-R0BORDER
+
+**THE MIDPLANE GAUGE WITH ITS CROSSINGS AS BORDER UNKNOWNS: QUADRATIC WHERE THE
+FROZEN REFRESH IS LINEAR, THE SAME ANSWER, AND geq's MIRROR TO M-278's DIGITS —
+BUT IT DOES NOT LIFT THE THREE-SPECIES STALL, SO THE FREEZE IS NOT WHAT CAUSES
+IT.**
+
+**Setup.**
+* `MIRROR-PLAN.md` §5. `GradShafranovSolver::setMidplaneGaugeKnots( K )` makes
+  `R₀` at `K` uniform knots in `Ψ` unknowns of the bordered Newton, after the
+  exterior modes. The source's table at every residual, line-search trials
+  included, is `meq::crossingThroughKnots()`: the not-a-knot `C²` spline of
+  `W = R₀²/2` through `W_k`, read back as `R₀`.
+* Row `k` is `ψ( R₀ₖ, 0 ) − ψ_bnd − Ψₖ( ψ_ax − ψ_bnd )`, with `ψ` along the
+  midplane as `midplaneFieldOf()` reads it. Its covector is the anchor's
+  potential shapes and the panels' integration weights on `q_R`. Its corner is
+  `dψ/dR` at `R₀ₖ`, `−Ψₖ` and `−( 1 − Ψₖ )`.
+* Column `k` is the assembly of `( ∂F/∂W φₖ + ∂F/∂W′ φₖ′ ) R₀ₖ`, from
+  `NormalisedSource::crossingDerivatives()`, analytic for both closures.
+* `RotatingMirrorBorder` is the acceptance; `RotatingSourceTests`'
+  `midplane_gauge` and `ProfilesTests`' `cardinal_spline` are the pointwise half.
+* MEQ `fb0756e` with this change, `meq-integration` as installed, double, host,
+  `OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`. geq's tables and answer as
+  M-278 read them. **Every time below is wall clock on a shared machine**,
+  with another agent building beside it: read ratios, not seconds.
+
+#### 1. The new blocks against their own derivatives
+
+`∂F/∂W` and `∂F/∂W′` against central differences of `f()`, the table moved by a
+constant in `W` and by a slope through the point, over `testRadii ×
+testFluxes`, worst `|analytic − difference|/max( 1, |difference| )`:
+
+| | ω × 0.5 | ω × 1 | ω × 2 |
+|---|---|---|---|
+| two species, closed form | 3.5e-12 | 1.1e-09 | 1.8e-07 |
+| two species, root find forced | 3.5e-12 | 1.1e-09 | 1.8e-07 |
+| three species, root find | 2.0e-11 | 4.5e-08 | 6.4e-07 |
+
+The two closures agree at two species to every printed digit. Dropping
+`∂F/∂W′` misses its difference by 100%.
+
+On a converged bordered solve, geq's plasma, level 0, `k = 3`, 16 knots:
+
+| | worst |
+|---|---|
+| row covector against `midplaneFieldOf()`, on the answer | 0 |
+| the same, every state entry perturbed by 1e-3 of the largest | 0 |
+| corner `dψ/dR` against a central difference of the row in `R₀ₖ` | 1.8e-10 |
+| each knot's `Ψ` against its knot, at convergence | 2.0e-15 |
+| column against a central difference of the assembled source, relative | 4.1e-08 |
+
+The rows are exact because `ψ` along the midplane is linear in the state.
+
+#### 2. Spline `W`, not `R₀`
+
+The level 0 frozen answer's 1024-knot table, interpolated at `K` knots: worst
+error in `R₀` (m) and in `R₀ R₀′`, over 4096 points.
+
+| K | `R₀` spline: `R₀`, `R₀R₀′` | `W` spline: `R₀`, `R₀R₀′` |
+|---|---|---|
+| 8 | 6.8e-04, 3.9e-03 | **2.9e-05, 1.7e-04** |
+| 16 | 1.1e-04, 1.2e-03 | 3.9e-06, 6.5e-05 |
+| 32 | 1.4e-05, 2.9e-04 | 1.0e-06, 4.1e-05 |
+| 64 | 1.3e-06, 5.3e-05 | 4.7e-07, 2.6e-05 |
+| 128 | 2.3e-07, 2.5e-05 | 2.3e-07, 2.5e-05 |
+
+`W` is nearly linear in the flux, `ψ ≈ B R²/2`. Both columns floor at the
+reference table's own slope error, which is q's against ψ's (M-278 §2).
+
+#### 3. A HELD table's Jacobian is complete: M-278 §2's six steps are not reproduced
+
+geq's plasma, level 0, `k = 3`, merit history:
+
+| | steps | merits |
+|---|---|---|
+| fixed radius | 3 | 5.48e-01 1.48e-05 4.98e-09 1.49e-14 |
+| frozen refresh | 6 | 5.48e-01 9.56e-05 1.92e-06 3.29e-08 5.35e-10 8.64e-12 1.39e-13 |
+| **the vacuum's table held throughout** | **3** | 5.48e-01 1.61e-05 6.15e-09 2.36e-14 |
+| the frozen answer's table held | 3 | 5.48e-01 1.48e-05 4.85e-09 1.39e-14 |
+
+So with a fixed table nothing is missing from the Jacobian. The frozen refresh
+is linear because its table moves with the field. M-278 §2 has the held vacuum
+table at six steps; on this tree it takes three.
+
+**What does slow a held table is a table whose slopes disagree with its
+values.** The vacuum's Hermite table, its knot slopes multiplied alternately by
+`1 ± δ`:
+
+| δ | 0 | 1e-3 | 1e-2 | 1e-1 | 1 |
+|---|---|---|---|---|---|
+| steps | 3 | 4 | 5 | stalls at 3.6e-03 | stalls at 2.1e-01 |
+
+`R₀″` of a Hermite table jumps at every knot by the slope mismatch over `h`, so
+the Jacobian is exact and not Lipschitz. The `C²` spline has no jumps.
+
+#### 4. Quadratic, and to the frozen refresh's answer
+
+geq's plasma, `k = 3`, 32 knots:
+
+| | steps | merits |
+|---|---|---|
+| level 0, bordered, from the vacuum | 3 | 5.48e-01 1.57e-05 4.80e-09 1.08e-14 |
+| level 0, bordered, from the frozen answer perturbed | **2** | 4.18e-05 7.36e-09 5.33e-16 |
+| level 0, frozen refresh, from the same | 6 | 1.07e-05 8.16e-07 1.51e-08 2.49e-10 4.02e-12 6.50e-14 1.75e-15 |
+| level 0, bordered, from the frozen iteration stopped at 1e-05 | **2** | 1.96e-06 7.72e-12 1.92e-16 |
+| level 0, frozen refresh, from the same | 5 | 1.92e-06 3.29e-08 5.36e-10 8.64e-12 1.39e-13 2.63e-15 |
+| level 1, frozen refresh | 6 | 3.93e-01 4.70e-05 7.99e-07 1.25e-08 1.90e-10 2.88e-12 4.36e-14 |
+| level 1, bordered | 3 | 3.93e-01 4.29e-06 3.70e-10 1.48e-16 |
+| level 2, `k = 4`, bordered | 3 | 2.48e-01 1.86e-06 1.58e-10 9.50e-17 |
+
+* "Perturbed" means every state entry times `1 + 1e-3 sin( 1.7 i + 0.4 )`,
+  the labels by 1e-4 relative, and `R₀` by `1e-4 sin( 7Ψ )` m.
+* Both restarts land on the bordered answer from the vacuum to **5.1e-13** in
+  `ψ_h` and the labels.
+* The frozen refresh contracts by 0.016 a step from either start, the same
+  factor every step.
+* **Bordered against frozen, `ψ*` max**: 1.3e-08 at level 0 and 2.1e-10 at
+  level 1. The level 0 − level 1 difference is 1.4e-05.
+
+#### 5. How many knots, and what they cost
+
+`ψ*` at geq's nodes, `k = 3`, against the same solve at 256 knots. Every row
+converged in 3 steps. The frozen refresh against 256 knots reads 1.8e-09,
+9.1e-11 and 8.2e-12 at the three levels.
+
+| K | level 0 | level 1 | level 2 |
+|---|---|---|---|
+| 8 | 1.5e-07 | 6.2e-08 | **5.9e-08** |
+| 16 | 2.1e-08 | 8.8e-10 | 5.7e-10 |
+| 32 | 1.3e-08 | 2.0e-10 | **4.2e-11** |
+| 64 | 2.8e-09 | 2.7e-10 | 1.8e-11 |
+| 128 | 2.8e-09 | 1.5e-10 | 1.4e-11 |
+
+* **The criterion is the discretisation error, because it is the looser of the
+  two.** M-278 §3 puts the fixed radius against the best answer at 1.5e-05,
+  6.7e-07 and 7.2e-09 at levels 0 to 2. The table's own Hermite level is
+  1e-10 to 1e-12 in `R₀`.
+* **8 knots fails it at level 2**: 5.9e-08 is above that level's 7.2e-09.
+* **16 knots is the smallest that passes**, at 13× under the discretisation
+  error at level 2.
+* **32 knots is what the suite takes.** It is 170× under at level 2, and
+  4.2e-11 is the frozen table's own distance from the answer there.
+* Beyond 32 the differences stop falling at `h⁴`. They plateau at 1e-11 to
+  3e-09. The midplane flux is `C⁰` in `R`, since `q_h` jumps at every face, so
+  `R₀( Ψ )` has kinks the spline cannot follow. That plateau is the field's,
+  and it falls with the mesh.
+
+**Cost**, the bordered Newton step's legs in seconds, 3 steps each (2 threads,
+shared machine):
+
+| level 2, `k = 3` | trace solve | NPC traversal | border assembly | dense border | whole solve |
+|---|---|---|---|---|---|
+| fixed radius | 1.45 | 1.42 | 0.70 | 0.004 | 21.2 |
+| frozen refresh, 6 steps | 1.45 | 1.07 | 0.61 | 0.003 | 37.4 |
+| 8 knots | 1.79 | 1.80 | 0.93 | 0.005 | 25.1 |
+| 16 knots | 2.20 | 2.24 | 0.87 | 0.005 | 27.1 |
+| 32 knots | 2.90 | 3.04 | 1.00 | 0.008 | 33.2 |
+| 64 knots | 5.49 | 5.51 | 1.33 | 0.015 | 50.9 |
+| 128 knots | 8.38 | 9.62 | 1.69 | 0.035 | 74.4 |
+| 256 knots | 14.5 | 14.1 | 1.84 | 0.087 | 106.5 |
+
+* **A knot costs what an exterior mode does**: one backsolve against the step's
+  factorisation. The trace solve and the NPC traversal grow linearly with
+  `K + N + 3` beside the 32 modes, about 45 ms and 50 ms a column at level 2.
+* The columns' assembly and the dense border are small at every `K`.
+* At level 0 the whole solve is 1.31 s for the fixed radius, 3.23 s for the
+  frozen refresh, and 1.47, 1.58, 1.79 and 2.23 s at 8, 16, 32 and 64 knots.
+* **So at 16 or 32 knots the bordered gauge costs 1.3× to 1.6× the fixed
+  radius, and is cheaper than the frozen refresh's six steps.** No reduced basis
+  is needed.
+
+#### 6. Three species at `M = 6`: quadratic at 5e18, and the stall is not the freeze
+
+Level 0, `k = 3`, 32 knots.
+
+**At 5e18 the bordered gauge works:**
+* Frozen refresh: 7 steps, 5.45e-01 → 1.52e-13.
+* Bordered, from the vacuum: **3 steps**, 5.45e-01 3.83e-07 1.94e-11 1.36e-16.
+* Bordered, from the frozen answer: 1 step.
+* The two agree to 1.8e-10 in `ψ*`, against M-278 §5's level 0 − level 1
+  difference of 5.7e-07.
+
+**At 2e19 and 5e19 the bordered gauge stalls with the frozen refresh, from every
+start tried**:
+
+| peak | frozen refresh, from the vacuum | bordered, from the vacuum | bordered, from the frozen's last iterate |
+|---|---|---|---|
+| 2e19 | stalls, 1.52e-05 | stalls, 1.57e-05 | stalls, 1.49e-05 |
+| 5e19 | stalls, 8.46e-05 | stalls, 2.66e-05 | stalls, 8.23e-05 |
+
+Each stall runs the 30-step cap with dampings down to 5e-04. The merit is the
+field residual alone; the crossing rows are satisfied.
+
+**By continuation in the peak density**, each rung started from the last
+answer through `setInitialState()`:
+
+| peak | bordered steps | frozen steps | border's condition, bordered / frozen |
+|---|---|---|---|
+| 1.400e19 | 4 | 11 | 5.04e+04 / 2.77e+03 |
+| 1.546e19 | 3 | 12 | 5.23e+04 / 2.84e+03 |
+| 1.632e19 | 4 | 13 | 5.41e+04 / 2.92e+03 |
+| **1.665e19** | **stalls** | **stalls** | — |
+
+* The finer rungs between, ×1.02 apiece, read the same.
+* The onset is **abrupt and common to both routes**. The frozen refresh slows
+  from 9 to 13 steps on the way while the bordered gauge holds at 3 or 4. The
+  border's condition is flat, so this is not a fold.
+
+**Ruled out, measured:**
+* **The freeze's left-out term.** The bordered gauge has it and stalls
+  identically. M-278 §5 and the MIRROR-PLAN paragraph attributed the stall to
+  it, and that attribution is FALSIFIED.
+* **The box's label precondition.** The density floor at the labels lowered
+  from 1e-6 to 1e-8, 1e-10 and 1e-12 moves `|F|` just inside each label by the
+  same factor. It moves neither stall: 1.57e-05 to 1.60e-05 at 2e19.
+* **A second region entering the box's `Ψ`-range.** Sampled from `R` = 0.36 to
+  2.3 m, `|z| ≤ 1.5`, at every rung including the stalled one, no point beyond
+  the annulus is inside it. The largest `Ψ` beyond 0.45 m is −0.67 at every
+  rung.
+
+**What stops it is open.**
+
+#### 7. geq's mirror under the bordered gauge
+
+M-278 §4's matrix: MEQ at level 2, `k = 4`, 32 knots, on geq's midplane
+tables, `ψ*`, geq's four corners out. It converges in **3 steps** where the
+frozen refresh takes 6.
+
+| | max | rms |
+|---|---|---|
+| MEQ bordered − geq 129 | 1.554e-07 | 5.385e-09 |
+| MEQ bordered − geq 257 | 4.819e-08 | 1.706e-09 |
+| MEQ bordered − geq 513 | 1.353e-08 | 4.857e-10 |
+| geq 257 − geq 513 | 3.466e-08 | 1.229e-09 |
+| MEQ bordered − MEQ fixed radius | 4.846e-10 | 1.584e-10 |
+
+* Rates are **1.689 then 1.832** (max), against geq's own 1.629.
+* At 513 the difference is **0.391** (max) and 0.395 (rms) of geq's own
+  257 − 513.
+* The geq rows are M-278 §4's frozen-refresh rows to four digits, rms at 513
+  aside: 4.857e-10 against 4.873e-10.
+* Against the fixed radius the bordered gauge reads 4.85e-10, where the frozen
+  refresh read 4.62e-10. Both are about 70× under geq's own 257 − 513 in max.

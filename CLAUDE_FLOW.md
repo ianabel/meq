@@ -232,8 +232,11 @@ fixed radius does not (`MIRROR-PLAN.md` §5, → [M-278](MEASUREMENTS.md#m-278))
 Three traps from building it. **Read the midplane flux off `q`, not `ψ_h`**:
 `ψ_h` jumps between elements by more than the plasma's own flux on a coarse
 mirror mesh, and a crossing table built on it stalls Newton. **The frozen
-crossings make Newton linear**, and the term the freeze leaves out scales with
-the pressure, so a dense enough plasma stops converging. **A density flat at a
+crossings make Newton linear**; with them as border unknowns,
+`GradShafranovSolver::setMidplaneGaugeKnots()`, it is quadratic. **That the
+left-out term is what stops a dense plasma converging was believed and is
+FALSIFIED**: the bordered gauge stalls where the freeze does, at the same peak
+density and merit (→ [M-R0BORDER](MEASUREMENTS.md#m-r0border)). **A density flat at a
 label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
 
 **Both run here**, in MEQ's own benchmark venv at

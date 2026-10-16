@@ -24,6 +24,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -691,3 +692,131 @@ BOOST_AUTO_TEST_CASE( resamplingAUniformProfileIsAlreadyExactAtItsOwnSpacing )
 		            "a uniform profile moved under resampling at x = " << x );
 	}
 }
+
+// ---------------------------------------------------------------------------
+// meq::CardinalSpline: the not-a-knot cubic through knot values, as a linear
+// map of them -- the bordered midplane gauge's interpolant, whose columns are
+// the chain rule through its cardinal basis.
+// ---------------------------------------------------------------------------
+
+BOOST_AUTO_TEST_SUITE( cardinal_spline )
+
+/*
+ * EXACT PROPERTIES FIRST. phi_k is one at knot k and zero at every other; the
+ * basis sums to one with derivatives summing to zero, since a constant is
+ * reproduced; and NOT-A-KNOT REPRODUCES ANY CUBIC, so a cubic's knot values
+ * give back the cubic and its two derivatives everywhere -- the sharp test, as
+ * the Hermite cubic's is above. A natural spline fails the last: its end
+ * curvature is zero.
+ */
+BOOST_AUTO_TEST_CASE( theBasisIsCardinalAndReproducesACubic )
+{
+	for ( std::size_t knots : { std::size_t( 4 ), std::size_t( 7 ), std::size_t( 33 ) } )
+	{
+		meq::CardinalSpline const spline( -0.5, 1.5, knots );
+		std::vector<double> value( knots ), slope( knots ), curvature( knots );
+		for ( std::size_t j = 0; j < knots; ++j )
+		{
+			spline.basis( spline.knot( j ), value.data(), nullptr, nullptr );
+			for ( std::size_t k = 0; k < knots; ++k )
+				BOOST_TEST( std::fabs( value[ k ] - ( j == k ? 1.0 : 0.0 ) ) < 1.0e-13 );
+		}
+		for ( double x : { -0.5, -0.31, 0.2, 0.77, 1.5 } )
+		{
+			spline.basis( x, value.data(), slope.data(), curvature.data() );
+			double sum = 0.0, slopeSum = 0.0, curvatureSum = 0.0;
+			for ( std::size_t k = 0; k < knots; ++k )
+			{
+				sum += value[ k ];
+				slopeSum += slope[ k ];
+				curvatureSum += curvature[ k ];
+			}
+			BOOST_TEST( sum == 1.0, boost::test_tools::tolerance( 1.0e-13 ) );
+			BOOST_TEST( std::fabs( slopeSum ) < 1.0e-10*knots*knots );
+			BOOST_TEST( std::fabs( curvatureSum ) < 1.0e-8*knots*knots*knots );
+		}
+
+		std::vector<double> values( knots );
+		for ( std::size_t k = 0; k < knots; ++k )
+			values[ k ] = cubic( spline.knot( k ) );
+		std::shared_ptr<meq::CardinalSpline const> const shared =
+			std::make_shared<meq::CardinalSpline const>( spline );
+		meq::CardinalSplineProfile const profile( shared, values );
+		for ( double x = -0.5; x <= 1.5; x += 0.0173 )
+		{
+			BOOST_TEST( std::fabs( profile( x ) - cubic( x ) ) < 1.0e-11 );
+			BOOST_TEST( std::fabs( profile.prime( x ) - cubicPrime( x ) ) < 1.0e-10 );
+			BOOST_TEST( std::fabs( profile.doublePrime( x ) - ( 12.0*x - 2.0 ) ) < 1.0e-8 );
+			// And the basis route agrees with the profile's.
+			spline.basis( x, value.data(), slope.data(), nullptr );
+			double v = 0.0, s = 0.0;
+			for ( std::size_t k = 0; k < knots; ++k )
+			{
+				v += values[ k ]*value[ k ];
+				s += values[ k ]*slope[ k ];
+			}
+			BOOST_TEST( std::fabs( v - profile( x ) ) < 1.0e-12 );
+			BOOST_TEST( std::fabs( s - profile.prime( x ) ) < 1.0e-11 );
+		}
+	}
+}
+
+/*
+ * C^2 AT EVERY KNOT, which is what the Hermite table is not, and h^4 on a
+ * smooth function at the ends as in the interior, which is what not-a-knot is
+ * for.
+ */
+BOOST_AUTO_TEST_CASE( theSplineIsTwiceContinuousAndFourthOrder )
+{
+	auto f = []( double x ) { return std::sin( 3.0*x ) + 0.3*x*x; };
+	std::vector<double> errors;
+	for ( std::size_t knots : { std::size_t( 9 ), std::size_t( 17 ), std::size_t( 33 ), std::size_t( 65 ) } )
+	{
+		auto const spline = std::make_shared<meq::CardinalSpline const>( 0.0, 1.0, knots );
+		std::vector<double> values( knots );
+		for ( std::size_t k = 0; k < knots; ++k )
+			values[ k ] = f( spline->knot( k ) );
+		meq::CardinalSplineProfile const profile( spline, values );
+		double const h = 1.0/( knots - 1.0 );
+		for ( std::size_t k = 1; k + 1 < knots; ++k )
+		{
+			double const x = spline->knot( k );
+			double const left = profile.doublePrime( x - 1.0e-9*h );
+			double const right = profile.doublePrime( x + 1.0e-9*h );
+			BOOST_TEST( std::fabs( left - right ) < 1.0e-6,
+				"the curvature jumps by " << left - right << " at knot " << k << " of " << knots );
+		}
+		double worst = 0.0;
+		for ( double x = 0.0; x <= 1.0; x += 1.0/2048.0 )
+			worst = std::max( worst, std::fabs( profile( x ) - f( x ) ) );
+		errors.push_back( worst );
+	}
+	for ( std::size_t i = 1; i < errors.size(); ++i )
+	{
+		double const rate = std::log2( errors[ i - 1 ]/errors[ i ] );
+		BOOST_TEST( rate > 3.7, "the not-a-knot spline converges at " << rate << ", not h^4" );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theSplineClampsOutsideAndRefusesWhatItCannotBuild )
+{
+	auto const spline = std::make_shared<meq::CardinalSpline const>( 0.0, 1.0, std::size_t( 9 ) );
+	std::vector<double> values( 9 );
+	for ( std::size_t k = 0; k < values.size(); ++k )
+		values[ k ] = cubic( spline->knot( k ) );
+	meq::CardinalSplineProfile const profile( spline, values );
+	BOOST_TEST( profile( -0.3 ) == profile( 0.0 ) );
+	BOOST_TEST( profile( 1.7 ) == profile( 1.0 ) );
+	BOOST_TEST( profile.prime( -0.3 ) == 0.0 );
+	BOOST_TEST( profile.doublePrime( 1.7 ) == 0.0 );
+
+	BOOST_CHECK_THROW( meq::CardinalSpline( 0.0, 1.0, 3 ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CardinalSpline( 1.0, 0.0, 8 ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CardinalSpline( 0.0, std::numeric_limits<double>::infinity(), 8 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CardinalSplineProfile( nullptr, values ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CardinalSplineProfile( spline, std::vector<double>( 8, 1.0 ) ),
+	                   std::invalid_argument );
+}
+
+BOOST_AUTO_TEST_SUITE_END()

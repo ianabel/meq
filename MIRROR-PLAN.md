@@ -296,11 +296,29 @@ inside a Jacobian makes a difference straddle a kink instead of measuring a
 derivative. Refresh it once per iteration, beside the support freeze.
 **BUILT, AND IT MAKES NEWTON LINEAR**: the field's pull on `R₀` is the one term
 the Jacobian does not carry, so geq's problem takes 6 steps where the fixed
-radius takes 3, contracting about 50× a step. **It also bounds what the gauge can
-solve**: the left-out term scales with the pressure, and three species at
-`M = 6` stall near 8e-05 at a midplane peak of 5e19 m⁻³, and near 1.5e-05 at
-2e19, where they converge in 7 steps at 5e18. An iterate whose midplane has folded keeps the previous table for
-an iteration; converging on a held table is refused.
+radius takes 3, contracting about 50× a step. Three species at `M = 6` stall
+near 8e-05 at a midplane peak of 5e19 m⁻³, and near 1.5e-05 at 2e19, where they
+converge in 7 steps at 5e18. An iterate whose midplane has folded keeps the
+previous table for an iteration; converging on a held table is refused.
+
+**THE CROSSINGS AS BORDER UNKNOWNS — BUILT, QUADRATIC, AND IT DOES NOT LIFT THE
+STALL** → [M-R0BORDER](MEASUREMENTS.md#m-r0border).
+`GradShafranovSolver::setMidplaneGaugeKnots( K )` makes `R₀` at `K` knots in `Ψ`
+unknowns beside the labels and the exterior modes, the table the `C²` spline of
+`R₀²/2` through them, one row per knot — `ψ( R₀ₖ, 0 ) = ψ_bnd + Ψₖ( ψ_ax − ψ_bnd )`,
+`ψ` along the midplane as the refresh reads it. geq's problem converges in 3
+steps where the frozen refresh takes 6, from the vacuum or in 2 from the frozen
+answer perturbed, and three species at 5e18 in 3 where it takes 7. **The
+stall above is not the freeze**: at 2e19 and 5e19 the bordered gauge stalls at
+the same merit from every start tried, and by continuation in the peak both
+routes fail together between 1.63e19 and 1.67e19 with the border's condition
+flat. The label floor and a second support region are ruled out too. **M-278
+§2's six steps with the vacuum's table held are not this tree's**: held, it
+converges in the fixed radius's 3, so a fixed table's Jacobian is the whole
+one. The library carries both routes; `meq` uses the frozen refresh and has no
+key for the bordered one, which moves the answer by the interpolant's error and
+so is a choice of discrete problem. `setInitialState()` and
+`setMidplaneCrossingInitial()` take a start from another solve.
 
 **THE INTERFACE SHAPE** is a gauge policy on the source rather than a second
 class — `enum class Gauge { FixedRadius, Midplane }`, `FixedRadius` carrying

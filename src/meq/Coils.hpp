@@ -1356,6 +1356,11 @@ namespace meq
 			bool readsMidplane() const override;
 			void setMidplaneField( MidplaneField const &field, double rMin,
 			                       double rMax ) override;
+			/// And the bordered gauge's two, for the same reason: the coil
+			/// term reads no crossing, so the plasma's answer is the whole one.
+			void setMidplaneCrossing( std::shared_ptr<Profile const> crossing ) override;
+			bool crossingDerivatives( double radius, double z, double psi,
+			                          double &dFdW, double &dFdWPrime ) const override;
 
 			/// FORWARDED, for the third time and for the same reason: the scale
 			/// belongs to the plasma term and a COIL IS NOT SCALED. Its current

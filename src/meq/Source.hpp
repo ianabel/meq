@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 
 #include "Profiles.hpp"
 
@@ -764,6 +765,47 @@ namespace meq
 			                               double rMin, double rMax )
 			{
 				(void)field; (void)rMin; (void)rMax;
+			}
+
+			/**
+			 * THE CROSSINGS R_0( Psi ) GIVEN RATHER THAN READ: the table the
+			 * source evaluates until the next call, in Psi. What the BORDERED
+			 * midplane gauge hands down -- GradShafranovSolver::
+			 * setMidplaneGaugeKnots(), where R_0 at a set of knots are unknowns
+			 * of the Newton and the interpolant through them is the table at
+			 * every residual, line-search trials included.
+			 *
+			 * @throws std::logic_error here, and for every source whose
+			 *         readsMidplane() is false: a crossing it does not read
+			 *         would be a promise it does not keep.
+			 */
+			virtual void setMidplaneCrossing( std::shared_ptr<Profile const> crossing )
+			{
+				(void)crossing;
+				throw std::logic_error( "meq::NormalisedSource::setMidplaneCrossing: this source reads no midplane crossing" );
+			}
+
+			/**
+			 * dF/dW AND dF/dW' AT FIXED ( R, z, psi ), W( Psi ) = R_0( Psi )^2/2
+			 * the half squared crossing and W' = dW/dPsi, both at this point's
+			 * Psi: the bordered midplane gauge's COLUMNS, as
+			 * normalisationDerivatives() gives psi_ax's. F reads the table
+			 * through W and W' alone -- R_0'' enters dFdPsi() only -- so with
+			 * W = sum_k W_k phi_k( Psi ) the column of knot k is
+			 * dF/dW phi_k + dF/dW' phi_k', and the interpolant is the solver's.
+			 *
+			 * Zero outside the plasma, as f() is.
+			 *
+			 * @return false here, and for every source whose readsMidplane() is
+			 *         false. Not differenced as a fallback: the bordered gauge
+			 *         refuses a source that cannot answer.
+			 */
+			virtual bool crossingDerivatives( double radius, double z, double psi,
+			                                  double &dFdW, double &dFdWPrime ) const
+			{
+				(void)radius; (void)z; (void)psi;
+				(void)dFdW; (void)dFdWPrime;
+				return false;
 			}
 
 		private:

@@ -72,6 +72,37 @@ namespace
 			std::vector<std::shared_ptr<meq::Profile const>> partData;
 	};
 
+	// R_0 = sqrt( 2W ) over a CardinalSplineProfile of W; see
+	// meq::crossingThroughKnots().
+	class SquaredCrossingProfile : public meq::Profile
+	{
+		public:
+			explicit SquaredCrossingProfile( meq::CardinalSplineProfile half )
+				: halfSquare( std::move( half ) )
+			{
+			}
+
+			double operator()( double psi ) const override
+			{
+				return std::sqrt( 2.0*halfSquare( psi ) );
+			}
+
+			double prime( double psi ) const override
+			{
+				return halfSquare.prime( psi )/( *this )( psi );
+			}
+
+			double doublePrime( double psi ) const override
+			{
+				double const r = ( *this )( psi );
+				double const slope = halfSquare.prime( psi )/r;
+				return ( halfSquare.doublePrime( psi ) - slope*slope )/r;
+			}
+
+		private:
+			meq::CardinalSplineProfile halfSquare;
+	};
+
 }
 
 namespace meq
@@ -113,6 +144,25 @@ namespace meq
 		}
 
 		return std::make_shared<CombinationProfile const>( std::move( weights ), std::move( parts ) );
+	}
+
+	std::shared_ptr<Profile const> crossingThroughKnots(
+		std::shared_ptr<CardinalSpline const> basis, std::vector<double> const &crossings )
+	{
+		if ( !basis )
+			throw std::invalid_argument( "meq::crossingThroughKnots: the basis must not be null" );
+		if ( crossings.size() != basis->size() )
+			throw std::invalid_argument( "meq::crossingThroughKnots: one crossing per knot" );
+		std::vector<double> half( crossings.size() );
+		for ( std::size_t k = 0; k < crossings.size(); ++k )
+		{
+			if ( !std::isfinite( crossings[ k ] ) || !( crossings[ k ] > 0.0 ) )
+				throw std::invalid_argument( "meq::crossingThroughKnots: a crossing radius must be finite and positive, and knot "
+					+ std::to_string( k ) + "'s is " + std::to_string( crossings[ k ] ) );
+			half[ k ] = 0.5*crossings[ k ]*crossings[ k ];
+		}
+		return std::make_shared<SquaredCrossingProfile const>(
+			CardinalSplineProfile( std::move( basis ), std::move( half ) ) );
 	}
 
 	std::shared_ptr<SplineProfile const> tabulateMidplaneCrossing(
@@ -729,6 +779,133 @@ namespace meq
 		return midplaneTable.get();
 	}
 
+	void RotatingSource::crossingDerivatives( double radius, double psi, double &dFdW,
+	                                          double &dFdWPrime ) const
+	{
+		if ( gaugeChoice != Gauge::Midplane )
+			throw std::logic_error( "meq::RotatingSource::crossingDerivatives: this source is in Gauge::FixedRadius, whose F reads no crossing" );
+
+		dFdW = 0.0;
+		dFdWPrime = 0.0;
+		if ( !omegaProfile )
+			return;
+
+		/*
+		 * dp'/dh AND dp'/dh' AT FIXED ( R, psi ), h = R^2/2 - W.
+		 *
+		 * p' = Sum_s e^A_s [ ( n_s0' + n_s0 A_s' ) T_s + n_s0 T_s' ], so with
+		 * alpha_s = dA_s/dh, and A_s independent of h' -- (97) holds at each
+		 * point and h' is not in it --
+		 *
+		 *     dp'/dh  = Sum_s e^A_s [ alpha_s ( ( n_s0' + n_s0 A_s' ) T_s + n_s0 T_s' )
+		 *                             + n_s0 T_s dA_s'/dh ]
+		 *     dp'/dh' = Sum_s e^A_s n_s0 T_s dA_s'/dh'
+		 *
+		 * and the closures differ only in alpha_s, dA_s'/dh and dA_s'/dh'.
+		 * W = R_0^2/2 enters as -h, so both derivatives change sign at the end.
+		 */
+		State const state = stateAt( radius, psi );
+		std::size_t const n = speciesData.size();
+		std::array<double, maxSpecies> alpha{}, lH{}, lHPrime{};
+
+		double const w0 = ( *omegaProfile )( psi );
+		double const wPrime0 = omegaProfile->prime( psi );
+		double const w = w0*w0;
+		double const wPrime = 2.0*w0*wPrime0;
+
+		if ( closureChoice == Closure::ClosedForm )
+		{
+			// A = C h and A' = C' h + C h', so alpha = C, dA'/dh = C' and
+			// dA'/dh' = C -- closedFormState()'s C, rebuilt here.
+			Species const & one = speciesData[ 0 ];
+			Species const & two = speciesData[ 1 ];
+			double const k = one.charge*two.mass - two.charge*one.mass;
+			double const d = one.charge*( *two.temperature )( psi ) - two.charge*( *one.temperature )( psi );
+			double const dPrime = one.charge*two.temperature->prime( psi ) - two.charge*one.temperature->prime( psi );
+			double const c = k*w/d;
+			double const cPrime = k*( wPrime/d - w*dPrime/( d*d ) );
+			for ( std::size_t s = 0; s < 2; ++s )
+			{
+				alpha[ s ] = c;
+				lH[ s ] = cPrime;
+				lHPrime[ s ] = c;
+			}
+		}
+		else
+		{
+			/*
+			 * THE ROOT FIND, DIFFERENTIATED IMPLICITLY AS rootFindState() IS.
+			 *
+			 * y = e phi_0 solves G = Sum_s Z_s n_s0 e^A_s = 0 with
+			 * A_s = m_s W_s h - Z_s y/T_s, W_s = omega^2/T_s, so at fixed psi
+			 *
+			 *     dy/dh = Sum_s Z_s n_s m_s W_s / D,   D = Sum_s Z_s^2 n_s/T_s
+			 *
+			 * and alpha_s = m_s W_s - Z_s y_h/T_s. The exponent's slope is
+			 * A_s' = b_s - Z_s y'/T_s with y' = N/D, N = Sum_s Z_s ( n_s0' + n_s0 b_s ) e^A_s
+			 * and b_s rootFindState()'s B_s, whose h- and y-dependence is
+			 * m_s beta_s h + m_s W_s h' + Z_s y T_s'/T_s^2. Every sum is over
+			 * n_s = n_s0 e^A_s, so a common factor cancels from every ratio.
+			 */
+			std::array<double, maxSpecies> e{}, b{}, nRef{}, nRefPrime{}, t{}, tPrime{}, beta{};
+			double denom = 0.0, yH = 0.0;
+			for ( std::size_t s = 0; s < n; ++s )
+			{
+				double const z = speciesData[ s ].charge;
+				double const m = speciesData[ s ].mass;
+				t[ s ] = ( *speciesData[ s ].temperature )( psi );
+				tPrime[ s ] = speciesData[ s ].temperature->prime( psi );
+				nRef[ s ] = ( *speciesData[ s ].density )( psi );
+				nRefPrime[ s ] = speciesData[ s ].density->prime( psi );
+				e[ s ] = std::exp( state.exponent[ s ] );
+				beta[ s ] = wPrime/t[ s ] - w*tPrime[ s ]/( t[ s ]*t[ s ] );
+				b[ s ] = state.exponentPrime[ s ] + z*state.potentialPrime/t[ s ];
+				double const ns = nRef[ s ]*e[ s ];
+				denom += z*z*ns/t[ s ];
+				yH += z*ns*m*w/t[ s ];
+			}
+			yH /= denom;
+
+			double dNdH = 0.0, dDdH = 0.0, dNdHPrime = 0.0;
+			for ( std::size_t s = 0; s < n; ++s )
+			{
+				double const z = speciesData[ s ].charge;
+				double const m = speciesData[ s ].mass;
+				alpha[ s ] = m*w/t[ s ] - z*yH/t[ s ];
+				double const bH = m*beta[ s ] + z*tPrime[ s ]*yH/( t[ s ]*t[ s ] );
+				dNdH += z*( nRef[ s ]*bH + ( nRefPrime[ s ] + nRef[ s ]*b[ s ] )*alpha[ s ] )*e[ s ];
+				dDdH += z*z*nRef[ s ]*e[ s ]*alpha[ s ]/t[ s ];
+				dNdHPrime += z*nRef[ s ]*e[ s ]*m*w/t[ s ];
+			}
+			double const yPrimeH = ( dNdH - state.potentialPrime*dDdH )/denom;
+			double const yPrimeHPrime = dNdHPrime/denom;
+			for ( std::size_t s = 0; s < n; ++s )
+			{
+				double const z = speciesData[ s ].charge;
+				double const m = speciesData[ s ].mass;
+				lH[ s ] = m*beta[ s ] + z*tPrime[ s ]*yH/( t[ s ]*t[ s ] ) - z*yPrimeH/t[ s ];
+				lHPrime[ s ] = m*w/t[ s ] - z*yPrimeHPrime/t[ s ];
+			}
+		}
+
+		double pH = 0.0, pHPrime = 0.0;
+		for ( std::size_t s = 0; s < n; ++s )
+		{
+			double const nRef = ( *speciesData[ s ].density )( psi );
+			double const nRefPrime = speciesData[ s ].density->prime( psi );
+			double const t = ( *speciesData[ s ].temperature )( psi );
+			double const tPrime = speciesData[ s ].temperature->prime( psi );
+			double const e = std::exp( state.exponent[ s ] );
+			double const l = state.exponentPrime[ s ];
+
+			pH += e*( alpha[ s ]*( ( nRefPrime + nRef*l )*t + nRef*tPrime ) + nRef*t*lH[ s ] );
+			pHPrime += e*nRef*t*lHPrime[ s ];
+		}
+
+		dFdW = -permeability*radius*radius*pH;
+		dFdWPrime = -permeability*radius*radius*pHPrime;
+	}
+
 	RotatingSource::State RotatingSource::stateAt( double radius, double psi ) const
 	{
 		return closureChoice == Closure::ClosedForm ? closedFormState( radius, psi ) : rootFindState( radius, psi );
@@ -1055,6 +1232,31 @@ namespace meq
 		};
 
 		inner.setMidplaneCrossing( tabulateMidplaneCrossing( normalised, rMin, rMax, 0.0, 1.0 ) );
+	}
+
+	void NormalisedRotatingSource::setMidplaneCrossing( std::shared_ptr<Profile const> crossing )
+	{
+		inner.setMidplaneCrossing( std::move( crossing ) );
+	}
+
+	bool NormalisedRotatingSource::crossingDerivatives( double radius, double z, double psi,
+	                                                    double &dFdW, double &dFdWPrime ) const
+	{
+		if ( !readsMidplane() )
+			throw std::logic_error( "meq::NormalisedRotatingSource::crossingDerivatives: this source is in Gauge::FixedRadius, whose F reads no crossing" );
+		dFdW = 0.0;
+		dFdWPrime = 0.0;
+		if ( !insidePlasma( radius, z, psi ) )
+			return true;
+
+		// F = S H( Psi )/span with W a function of Psi, so the span enters
+		// once, as it does in f(): W and W' are the table's at Psi and are
+		// held while they move.
+		double const span = psiAxisValue - psiBoundaryValue;
+		inner.crossingDerivatives( radius, ( psi - psiBoundaryValue )/span, dFdW, dFdWPrime );
+		dFdW *= currentScale()/span;
+		dFdWPrime *= currentScale()/span;
+		return true;
 	}
 
 }
