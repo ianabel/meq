@@ -17732,3 +17732,260 @@ steps, every route converges. So the line search fought no moving residual: a
 fixed residual with an exact Jacobian stalls at the same pressure on the same
 mesh, which is the mesh-dependent ceiling of
 [M-281](MEASUREMENTS.md#m-281) §4.
+
+### M-TAUSURVEY
+
+**A CONSTANT `τ` ACROSS THE SUITE. `τ = 1` IS THE OPTIMUM FOR `q_h` AND `ψ*`
+ON THE TOKAMAK FIXTURES AND FOR NOTHING ELSE: `ψ_h` GAINS UP TO 3× BY `τ = 3`
+TO 10 THERE AND THEN SATURATES, WHILE ON THE ROTATING MIRROR — WHOSE DIFFUSION
+COEFFICIENT `1/R` IS 3 TO 10 — `ψ_h`'s ERROR AND BOTH LABELS FALL AS `1/τ` ALL
+THE WAY TO `τ = 100`. ABOVE `τ ≈ 3` THE FLUX ERROR GROWS AS `τ`; NO ASYMPTOTIC
+ORDER IS LOST, BUT THE `q` RATE IS PRE-ASYMPTOTIC WHILE `τh ≳ 1` AND READS 1.60
+AT `k = 1`, `τ = 100`. `τ = 0.3` BREAKS NEWTON ACROSS THE NON-LINEAR SUITE. NO
+`τ` BUT 1 PASSES THE SUITE, AND A LARGE SHARE OF THE REDS ARE FIXTURES AND
+CEILINGS MEASURED AT `τ = 1`.**
+
+**Setup.** `main` at `3f22bf2`, double, Release, configured as `builds/double`.
+**The survey used an UNCOMMITTED override**: `GradShafranovSolver`'s
+constructor read `τ` from an environment variable in place of its argument, so
+every solver in every test took the swept value — including those built with an
+explicit `τ` (`SolverContract` passes 2.5 and asserts `tau()` reads it back, so
+it fails at every swept value, `τ = 1` included; `DriverAcceptance` passes 1.0
+at seven library-side sites, swept together with the driver side, so its
+driver-against-library comparisons stay like for like) and the driver, whose
+`[discretisation] Tau` reaches the same constructor. `InverseSolve` and
+`DivertedMachine.hpp` build their solvers with the default rather than the
+configuration's `Tau`. `SolovievConvergence` also carried an uncommitted `ψ*`
+column (`postProcessedPotentialError()` after `postProcess()`). The suite ran
+under `ctest -j4` at `OMP_NUM_THREADS=2`, `MKL_NUM_THREADS=1`, without `naming`,
+the unit suites and the device arms (`DeviceParity`, `cuDSSTraceSolver`,
+`RotatingMirrorDevice`): 56 tests at each `τ`. Wall clock on a shared machine,
+against `τ = 1`: 1.57 at 0.3 (Newton running to its caps), 1.16 at 3, 1.00 at
+10, 1.08 at 30, 1.06 at 100.
+
+**1. The fixed-boundary fixtures**: the error on the finest mesh (h = 0.025;
+0.0266 for `ExtensionConvergence`'s curved Solov'ev, 0.0156 for
+`AxisConvergence`'s vacuum), with the rate over the finest pair in brackets.
+Newton takes 4 steps on every Example 5 and K–T mesh at every `τ ≥ 1`.
+
+| `ψ_h` | k | τ = 0.3 | τ = 1 | τ = 3 | τ = 10 | τ = 30 | τ = 100 |
+|---|---|---|---|---|---|---|---|
+| Solov'ev | 1 | 9.36e-05 (2.00) | 3.60e-05 (2.00) | 2.53e-05 (2.00) | 2.39e-05 (2.01) | 2.44e-05 (2.08) | 2.77e-05 (2.21) |
+| Solov'ev | 2 | 2.44e-07 (3.00) | 1.92e-07 (3.00) | 1.86e-07 (3.00) | 1.86e-07 (3.00) | 1.87e-07 (3.02) | 1.94e-07 (3.10) |
+| Solov'ev | 3 | 1.13e-09 (3.99) | 5.51e-10 (4.00) | 4.66e-10 (4.00) | 4.55e-10 (4.00) | 4.55e-10 (4.01) | 4.65e-10 (4.06) |
+| Example 5 | 1 | **diverges** | 4.39e-04 (2.04) | 2.21e-04 (2.00) | 1.84e-04 (2.04) | 1.96e-04 (2.24) | 2.83e-04 (2.47) |
+| Example 5 | 2 | 1.20e-05 (3.14) | 3.65e-06 (3.03) | 1.85e-06 (3.00) | 1.53e-06 (3.00) | 1.51e-06 (3.02) | 1.56e-06 (3.10) |
+| Example 5 | 3 | 6.87e-08 (4.08) | 2.26e-08 (4.02) | 1.31e-08 (4.00) | 1.15e-08 (4.00) | 1.14e-08 (4.01) | 1.16e-08 (4.05) |
+| K–T exponential | 1 | 2.56e-04 (2.06) | 1.10e-04 (2.01) | 8.81e-05 (2.00) | 8.58e-05 (2.02) | 8.85e-05 (2.10) | 1.05e-04 (2.26) |
+| K–T exponential | 2 | 2.60e-06 (3.05) | 8.63e-07 (3.01) | 4.98e-07 (3.00) | 4.40e-07 (3.00) | 4.39e-07 (3.03) | 4.63e-07 (3.12) |
+| K–T exponential | 3 | 3.11e-08 (4.04) | 1.00e-08 (4.00) | 5.22e-09 (3.99) | 4.38e-09 (4.00) | 4.31e-09 (4.01) | 4.41e-09 (4.07) |
+| McCarthy | 2 | 1.68e-05 (3.16) | 5.22e-06 (3.03) | 2.86e-06 (3.00) | 2.47e-06 (3.00) | 2.46e-06 (3.03) | 2.59e-06 (3.12) |
+| Maschke–Perrin | 1 | 3.55e-04 (2.00) | 1.52e-04 (2.00) | 1.18e-04 (2.00) | 1.14e-04 (2.01) | 1.17e-04 (2.07) | 1.32e-04 (2.21) |
+| Maschke–Perrin | 2 | 1.77e-06 (3.00) | 9.15e-07 (3.00) | 7.99e-07 (3.00) | 7.85e-07 (3.00) | 7.89e-07 (3.02) | 8.24e-07 (3.10) |
+| Maschke–Perrin | 3 | 6.74e-09 (4.00) | 3.56e-09 (4.00) | 3.13e-09 (4.00) | 3.08e-09 (4.00) | 3.08e-09 (4.01) | 3.16e-09 (4.07) |
+| curved Solov'ev | 1 | 1.58e-04 (2.00) | 7.40e-05 (2.00) | 6.11e-05 (1.99) | 5.99e-05 (2.03) | 6.29e-05 (2.18) | 8.13e-05 (2.44) |
+| curved Solov'ev | 2 | 4.84e-07 (3.01) | 3.59e-07 (3.07) | 3.47e-07 (3.10) | 3.54e-07 (3.17) | 4.00e-07 (3.31) | 5.69e-07 (3.27) |
+| curved Solov'ev | 3 | 3.84e-09 (4.67) | 2.79e-09 (5.02) | 2.73e-09 (5.07) | 2.86e-09 (5.08) | 3.27e-09 (5.08) | 4.56e-09 (5.02) |
+| vacuum to the axis | 1 | 3.61e-05 (2.00) | 3.61e-05 (2.00) | 3.61e-05 (2.00) | 3.62e-05 (2.00) | 3.65e-05 (2.02) | 3.80e-05 (2.11) |
+| vacuum to the axis | 3 | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.19e-10 (4.00) | 2.20e-10 (4.01) |
+
+| `q_h` | k | τ = 0.3 | τ = 1 | τ = 3 | τ = 10 | τ = 30 | τ = 100 |
+|---|---|---|---|---|---|---|---|
+| Solov'ev | 1 | 5.45e-05 (2.00) | 6.08e-05 (1.99) | 1.00e-04 (1.98) | 2.77e-04 (1.93) | 7.40e-04 (1.81) | 1.87e-03 (1.60) |
+| Solov'ev | 2 | 1.23e-07 (3.00) | 2.51e-07 (2.99) | 6.91e-07 (2.98) | 2.22e-06 (2.95) | 6.20e-06 (2.86) | 1.68e-05 (2.68) |
+| Solov'ev | 3 | 6.85e-10 (3.99) | 8.82e-10 (3.99) | 1.86e-09 (3.99) | 5.71e-09 (3.96) | 1.62e-08 (3.90) | 4.63e-08 (3.75) |
+| Example 5 | 1 | **diverges** | 7.52e-04 (2.01) | 9.51e-04 (1.99) | 2.15e-03 (1.96) | 5.73e-03 (1.88) | 1.55e-02 (1.69) |
+| Example 5 | 2 | 6.52e-06 (3.06) | 6.65e-06 (3.00) | 8.41e-06 (2.99) | 1.89e-05 (2.96) | 5.05e-05 (2.87) | 1.38e-04 (2.71) |
+| Example 5 | 3 | 3.85e-08 (4.02) | 4.07e-08 (4.00) | 5.78e-08 (3.99) | 1.48e-07 (3.96) | 4.10e-07 (3.90) | 1.17e-06 (3.75) |
+| K–T exponential | 1 | 2.11e-04 (2.01) | 2.31e-04 (2.00) | 3.63e-04 (1.99) | 9.85e-04 (1.94) | 2.66e-03 (1.84) | 6.96e-03 (1.64) |
+| K–T exponential | 3 | 2.41e-08 (4.00) | 2.45e-08 (4.00) | 2.89e-08 (4.00) | 5.79e-08 (3.96) | 1.52e-07 (3.89) | 4.24e-07 (3.72) |
+| McCarthy | 2 | 1.40e-05 (3.04) | 1.41e-05 (3.00) | 1.64e-05 (2.99) | 3.18e-05 (2.95) | 8.10e-05 (2.86) | 2.15e-04 (2.67) |
+| Maschke–Perrin | 1 | 2.18e-04 (1.99) | 2.54e-04 (1.99) | 4.62e-04 (1.97) | 1.33e-03 (1.92) | 3.58e-03 (1.81) | 9.00e-03 (1.58) |
+| Maschke–Perrin | 3 | 3.86e-09 (3.99) | 5.32e-09 (3.99) | 1.20e-08 (3.98) | 3.77e-08 (3.96) | 1.07e-07 (3.89) | 3.01e-07 (3.73) |
+| curved Solov'ev | 1 | 9.40e-05 (2.05) | 1.15e-04 (2.02) | 2.23e-04 (1.94) | 6.59e-04 (1.86) | 1.78e-03 (1.74) | 4.50e-03 (1.51) |
+| curved Solov'ev | 2 | 4.90e-07 (3.37) | 6.24e-07 (3.24) | 1.30e-06 (3.02) | 3.96e-06 (2.92) | 1.10e-05 (2.83) | 3.01e-05 (2.65) |
+| curved Solov'ev | 3 | 1.68e-08 (4.50) | 1.69e-08 (4.50) | 1.73e-08 (4.49) | 1.98e-08 (4.42) | 3.22e-08 (4.18) | 7.83e-08 (3.87) |
+| vacuum to the axis | 1 | 1.41e-04 (1.78) | 1.46e-04 (1.79) | 1.85e-04 (1.88) | 4.22e-04 (1.96) | 1.17e-03 (1.94) | 3.57e-03 (1.85) |
+| vacuum to the axis | 3 | 8.14e-11 (4.00) | 2.71e-10 (4.00) | 8.13e-10 (4.00) | 2.70e-09 (3.99) | 7.99e-09 (3.97) | 2.55e-08 (3.92) |
+
+| `ψ*` | k | τ = 0.3 | τ = 1 | τ = 3 | τ = 10 | τ = 30 | τ = 100 |
+|---|---|---|---|---|---|---|---|
+| Solov'ev | 1 | 2.78e-07 (2.99) | 3.50e-07 (3.00) | 7.12e-07 (2.98) | 2.13e-06 (2.93) | 5.79e-06 (2.82) | 1.49e-05 (2.61) |
+| Solov'ev | 2 | 5.44e-10 (4.00) | 9.33e-10 (4.00) | 2.42e-09 (3.99) | 7.71e-09 (3.95) | 2.15e-08 (3.87) | 5.86e-08 (3.70) |
+| Solov'ev | 3 | 9.56e-13 (5.00) | 1.56e-12 (5.01) | 3.95e-12 (5.00) | 1.26e-11 (4.97) | 3.55e-11 (4.89) | 9.88e-11 (4.72) |
+| Example 5 | 1 | **diverges** | 7.08e-06 (3.03) | 7.21e-06 (2.98) | 2.87e-05 (2.94) | 8.15e-05 (2.85) | 2.21e-04 (2.67) |
+| Example 5 | 2 | not run | 1.90e-08 (4.00) | 2.55e-08 (4.00) | 6.10e-08 (3.97) | 1.64e-07 (3.89) | 4.49e-07 (3.73) |
+| Example 5 | 3 | not run | 1.05e-10 (4.99) | 1.37e-10 (5.00) | 3.18e-10 (4.97) | 8.59e-10 (4.90) | 2.39e-09 (4.72) |
+| curved Solov'ev | 1 | 3.58e-06 (3.10) | 3.87e-06 (3.08) | 4.87e-06 (3.06) | 9.01e-06 (3.04) | 2.11e-05 (2.97) | 5.57e-05 (2.76) |
+| curved Solov'ev | 2 | 6.42e-08 (4.16) | 6.61e-08 (4.15) | 7.31e-08 (4.12) | 1.08e-07 (4.00) | 2.14e-07 (3.78) | 4.57e-07 (3.39) |
+
+The three tables say one thing. **`ψ_h` is best at `τ = 3` to 10** — up to
+2.4× below `τ = 1` on the plasma fixtures, flat beyond, 2 to 3× worse at 0.3 —
+and the vacuum does not move at all. **`q_h` and `ψ*` are best at `τ ≤ 1`**, 0.3
+being up to 2× better again on the linear fixtures, and **from `τ ≈ 3` their
+error grows as `τ`**, ×2.5 to ×3 a step from `τ = 10` on. **The order is not lost**: at
+`τ = 100`, `k = 1`, Solov'ev's `q` reads 1.30, 1.45, 1.60 down the ladder,
+rising towards `k+1` as `τh` falls towards 1 (it is 2.5 on the finest mesh);
+MFEM's LDG `h⁻¹` scaling instead holds `q` at `k` on every mesh
+(`SolovievConvergence.cpp`'s header). `ψ_h` overshoots `k+1` by up to 0.47 at
+large `τ`, the same pre-asymptote seen from the potential. **`τ = 0.3` does not
+solve Example 5 at `k = 1`** — Newton's residual reaches `inf` and MFEM's
+`IsFinite` check throws, which also stops the `ψ*` case before `k = 2` — and
+McCarthy's coarsest mesh at `k = 2` lands at an L2 error of 6.2e-01 in two
+steps: the element-local problem losing invertibility, as in §3.
+
+**2. The rotating mirror** (`RotatingMirrorResolution`, geq's two-species
+plasma: MR-4c against the level-2 `k = 4` `ψ*` of the SAME `τ`, MR-4d against
+geq's direct 513 grid). Max errors.
+
+| | τ = 0.3 | τ = 1 | τ = 3 | τ = 10 | τ = 30 | τ = 100 |
+|---|---|---|---|---|---|---|
+| `ψ_h`, k = 1, level 3 | no solve | 2.21e-04 | 7.85e-05 | 2.49e-05 | 9.20e-06 | 3.63e-06 |
+| `ψ_h`, k = 3, level 2 | no solve | 1.44e-05 | 5.06e-06 | 1.54e-06 | 5.11e-07 | 1.48e-07 |
+| `ψ*`, k = 1, level 3 | no solve | 8.89e-07 | 3.72e-07 | 1.85e-07 | 1.17e-07 | 1.47e-07 |
+| `ψ*`, k = 2, level 3 | no solve | 1.44e-08 | 1.02e-08 | 8.73e-09 | 8.24e-09 | 7.82e-09 |
+| `ψ*`, k = 2, rate over levels 1–3 | no solve | 4.62 | 4.52 | 4.17 | 3.90 | **3.84** |
+| `ψ*`, k = 3, level 2 | no solve | 7.24e-09 | 5.22e-09 | 5.09e-09 | 5.34e-09 | 5.64e-09 |
+| `ψ_h` − geq 513 | 6.47e-06 | 1.94e-06 | 6.49e-07 | 1.96e-07 | 6.62e-08 | 2.09e-08 |
+| `ψ*` − geq 513 | 1.35e-08 | 1.35e-08 | 1.35e-08 | 1.35e-08 | 1.35e-08 | 1.36e-08 |
+| `ψ_ax` − geq 513 | −1.8e-09 | −5.5e-10 | −1.8e-10 | −5.3e-11 | −1.6e-11 | −3.2e-12 |
+| `ψ_bnd` − geq 513 | −5.2e-08 | −1.6e-08 | −5.2e-09 | −1.5e-09 | −5.0e-10 | −1.3e-10 |
+| bordered Newton at level 0 from the vacuum | 8 steps, three stalled near 1.2e-04 | 3 | 3 | 3 | 3 | 3 |
+
+**Here `ψ_h` and both labels fall as `1/τ` across the whole sweep** —
+`ψ_h − geq` by ×3.33, 2.99, 3.31, 2.96, 3.17 for steps of `τ` of ×3.33, 3, 3.33,
+3, 3.33 — and `ψ*` improves to `τ ≈ 10`–30 and then flattens; against geq it is
+geq-limited at every `τ`. The mirror does not report `q`. At `τ = 100` the
+`k = 2` `ψ*` rate falls below the band and `psiConvergesAtTheRateItsEdgesAllow`
+fails; at 0.3 the `k = 1` ladder does not converge at level 1. **The contrast
+with §1 is the diffusion coefficient**: Solov'ev's box has `1/R` from 0.7 to
+1.7, so `τ = 1` is `τ ~ 1/R` there, while the mirror's plasma has `1/R` of 3 to
+10, so `τ = 1` is `τ ≪ 1/R` and `ψ_h` sits where its error is the
+stabilisation's. That is a reading of the two tables, not a measurement of the
+mechanism. The vacuum mirror goes the other way: `VacuumMirror`'s L2 error over
+`D_h` at `k = 3`, level 2 is 1.29e-06, 1.33e-06, 1.43e-06, 1.77e-06, 2.52e-06,
+3.88e-06 from `τ = 0.3` to 100, and at 30 its finest pair reads 3.55 against 4.
+
+**3. The three-species ceiling against `τ`**, taken this session with an
+uncommitted probe harness on `RotatingMirror.cpp` (fine continuation,
+bisection, creep) and not re-run by the survey: e, D and C⁶⁺ at `M = 6`,
+vacuum-midplane gauge, `k = 3`.
+
+| `τ` | 0.3 | 1 | 3 | 10 | 30 |
+|---|---|---|---|---|---|
+| level 0 ceiling (m⁻³) | 4.61–4.69e18 | 1.366936e19 | 2.971–2.980e19 | 4.104–4.118e19 | 4.147–4.162e19 |
+
+At `τ = 1` the ceiling is an element-local fold: past it the step between
+converged neighbours concentrates in ~48 of 45451 grid points near
+(0.321, −0.050), about one element, and diverges as `(n_c − n)^(−1/2)`; two
+species fold the same way (level 0 1.69e19, level 2 4.3661e19 and level 3
+5.2365e19, each one element wide). The ceiling is `∝ τ` at small `τ` and
+saturates: at `τ = 30` it is mesh converged — level 1 4.162–4.176e19, level 2
+4.147–4.162e19 — and approached smoothly and globally, so **5e19 with these
+profiles and pinned labels has no equilibrium**, while the `τ = 1` ceiling of
+[M-281](MEASUREMENTS.md#m-281) and [M-285](MEASUREMENTS.md#m-285) is a
+discretisation artefact. The hypothesis consistent with all of it: the
+element-local HDG problem is Robin-type with coefficient `τ`, its lowest
+eigenvalue is about `τ |∂K|/|K|`, and the local solve goes singular where the
+reaction `(1/R) ∂F/∂ψ > 0` reaches it. `τ = 0.3`'s Newton failures in this
+survey — Example 5, McCarthy's coarse mesh, the pedestal, the mirror on geq's
+plasma — are consistent with it. Ruled out there: the species closure (two
+species fold too), `∂F/∂ψ` (a central difference agrees to 2e-08 at the stalled
+iterate), the linear solve (UMFPack and PARDISO agree), the support edge, and
+an up-down odd mode (the symmetric mesh under `UpDownSymmetry` folds at the
+same level-0 density). Two species at 5e18, the labels against level 3 at
+`τ = 1` (5.58921091e-03, 6.58259883e-02): `τ = 1` level 0 (−5.4e-07, 2.6e-06),
+level 1 (−4.4e-08, −6.7e-07); `τ = 30` level 0 (−1.9e-08, 8.3e-08), level 1
+(−1.2e-09, −2.0e-08) — 30× closer, which is §2's `1/τ`.
+
+**4. The other benchmarks.**
+
+| | τ = 0.3 | τ = 1 | τ = 3 | τ = 10 | τ = 30 | τ = 100 |
+|---|---|---|---|---|---|---|
+| `fixed-h-circular` L0 against freegs4e (Newton) | 7.0e-04 (13) | 1.15e-04 (13) | 3.8e-05 (14) | 1.6e-05 (21) | 1.1e-05 (21) | 1.1e-05 (15) |
+| the same at L2, freegs4e's own floor (Newton) | 1.75e-05 (11) | 1.60e-05 (11) | 1.56e-05 (10) | 1.55e-05 (10) | 1.55e-05 (10) | 1.55e-05 (10) |
+| limited tokamak `ψ_ax` against freegs4e (Newton) | driver fails | 1.3e-04 (12) | 8.7e-05 (12) | 2.8e-04 (12) | 7.4e-04 (11) | 1.6e-03 (11) |
+| diverted tokamak `ψ_ax` against freegs4e | 5.1e-04 | 6.8e-04 | 7.1e-04 | 6.6e-04 | 4.9e-04 | 1.6e-04 |
+| q-driven run, worst `g²` coefficient | 7.3e-04 | **5.0e-06** | 6.6e-04 | 3.6e-03 | 1.3e-02 | 3.4e-02 |
+| FB-5, worst error in the exterior coefficients `a`, n = 24 | 1.32e-04 | 1.31e-04 | 1.28e-04 | 1.17e-04 | 1.18e-04 | 2.39e-04 |
+| pedestal 4.2, k = 1, finest `Δ(ψ)` (Newton by level) | no solve (60/60/28) | 9.2e-04 (28/10/9) | 2.3e-04 (17/9/8) | 8.8e-05 (10/7/7) | 6.7e-05 (9/9/8) | 7.4e-05 (9/10/8) |
+| pedestal 4.5, k = 2, finest `Δ(ψ)` (Newton by level) | no solve (60/60/60) | 4.9e-04 (55/15/12) | 1.4e-04 (9/11/12) | 4.2e-05 (13/12/13) | 1.9e-05 (14/12/12) | 1.6e-05 (9/11/12) |
+| pedestal 4.2, k = 1, finest `Δ(q)` | – | 2.4e-03 | 1.9e-03 | 1.9e-03 | 2.5e-03 | 5.2e-03 |
+
+`fixed-h-circular`'s level-0 gap to freegs4e closes 7× by `τ = 10` and its
+level 2 does not move, which is freegs4e's own floor. The pedestal's columns
+are self-convergence differences, not errors, but they behave as the mirror's
+`ψ_h` does, and its coarse Newton is easier at every `τ ≥ 3`. **The q-driven
+row is not a property of `τ`**: its target, `examples/q-driven-q.dat`, is the
+`q` of a `τ = 1` solve on the same mesh, so only `τ = 1` can recover the closed
+form exactly.
+
+**5. Which tests fail, and why** — the list that matters for a change of
+default. `SolverContract` (the override, above) and `PlasmaEdgeConvergence`
+(red at `τ = 1`) are left out of the counts.
+
+| `τ` | 0.3 | 1 | 3 | 10 | 30 | 100 |
+|---|---|---|---|---|---|---|
+| tests failing, of 54 | 22 | 0 | 9 | 24 | 30 | 34 |
+
+* **Fixtures and ceilings measured AT `τ = 1`.** `DriverAcceptance`'s
+  `theDriverSolvesForTheToroidalField` and
+  `theQDrivenRunReportsTheSafetyFactorItReached` (`examples/q-driven-q.dat`)
+  fail at every `τ ≠ 1`; `InverseSolve`'s `theDriverSolvesAnInverseProblem`,
+  whose targets are read off a converged equilibrium, is not met at any
+  `τ ≠ 1` (exit 4, largest target residual 1.0e-04 at `τ = 3`). The absolute
+  ceilings of `checkCeilings()` are set at about 3× their `τ = 1` values, and the `q`
+  ceilings of `SolovievConvergence`, `NewtonConvergence`,
+  `RotatingSourceConvergence`, `RotatingSolovievConvergence`,
+  `RotatingNewtonConvergence`, `MaschkePerrinConvergence`,
+  `VaryingCentrifugalConvergence`, `SolovievGeometryConvergence` and
+  `ExtensionConvergence` fail from `τ = 10` (Solov'ev `k = 3`: 1.62e-08 at 30
+  against 2.7e-09); `SamplerConvergence`'s and `OutputConvergence`'s `B` bound
+  of 4e-06 fails from `τ = 10` (3.3e-05 at 30). Eleven example TOMLs pin
+  `Tau = 1.0`, several with the comment "1.0 is the default".
+* **Rate bands the pre-asymptotic `q` dip crosses**: the `k+1 − 0.15` of the
+  fixtures above from `τ = 10`, `NewtonConvergence`'s `ψ*` from 10 (`k+2`, and
+  at 30 `ψ*` no longer below `ψ_h` by the extra order: 8.1e-05 against
+  1.96e-04 at `k = 1`), `AxisConvergence`, `MillerConvergence` and
+  `VacuumMirror` from 30, `FieldConvergence` at 100, and
+  `PedestalConvergence`'s `Δ(q)` bands from 3.
+* **Regime changes: an algorithm stops working.** From `τ = 10`
+  `CriticalPointFinder`'s sweep finds no zero of `q_h` at all — "0 maxima, 0
+  minima and 0 saddles" — on meshes where it finds one at `τ ≤ 3`
+  (`CriticalPointConvergence` at `h = 0.2` and 0.133, `SurfaceAverageConvergence`,
+  and from 30 `FluxSurfaceConvergence` and `SurfaceFitConvergence`): the jump
+  in `q_h` grows with `τ` until the zero belongs to no element, which the test's
+  own message expects only at `h = 0.4`. At `τ = 3` the audit's located extremum
+  on the NSTX diverted case (`k = 1`, `h = 0.075`) is 8.2e-03 from the closed
+  form's axis. `FreeBoundaryCoupling`'s two-border limiter fixture is healthy
+  at 3 of its five radii at `τ = 3` and 100 and 4 at 0.3, 10 and 30 (the axis
+  layer of `FREE-BOUNDARY-PLAN.md` §11.3, and at 3 the limiter-constraint
+  solve not converging); `DriverAcceptance`'s retry rung does not settle
+  `machine-e-diamagnetic` at `τ = 3`, 30 and 100; `PlasmaConnectivity`'s
+  limiter case loses its second lobe from `τ = 10`; `XPointBorder` fails at 10
+  and 30 and passes at 100. At `τ = 0.3` Example 5 `k = 1` diverges, the
+  pedestal's coarse meshes run to the 60-iteration cap, `HighBetaConvergence`'s
+  `ν = 4` bordered Newton fails, every `RotatingMirror*` suite fails to
+  converge somewhere, and `FreeBoundaryCoupling`, `XPointBorder`,
+  `PlasmaConnectivity`, `PrescribedAxisPoint` and `DriverAcceptance`'s limited
+  tokamak do not solve.
+* **Assertions of a property that larger `τ` moves past.**
+  `MachineFixedBoundary`'s "one refinement halves the distance to freegs4e"
+  (from `τ = 10` level 0 is already at freegs4e's floor);
+  `PlasmaEdgeConvergence`'s `ψ*` cap `j + 2.5` is exceeded from `τ = 10` —
+  "either the cap is wrong"; Newton-order instruments starved of a pair because
+  Newton got faster (`RotatingNewtonConvergence` at `τ = 3`: `6.4e-03, 9.9e-07,
+  2.8e-14`, best order read 1.74; `LimiterCurve`'s and `XPointBorder`'s tail
+  orders); `PrescribedAxisPoint`'s Newton stopping just under its threshold
+  from `τ = 3`; `EstimatorConvergence`'s `η₂(ψ_h)/η₂(ψ*)` and printed-`η₅`
+  floors from `τ = 3`; `WarmStartConvergence` at 100, where warm and cold differ
+  by 2.4e-07 relative.
+
+**`τ = 3` is the nearest candidate**: `ψ_h` 1.0 to 2× better on the tokamak
+fixtures and 3× on the mirror, `q_h` and `ψ*` 1.0 to 3× worse, the mirror's
+ceiling ×2.2, and nine red tests — of which the two `τ = 1` fixtures, the
+pedestal's `Δ(q)` bands and the order instruments are mechanical, and
+`FreeBoundaryCoupling`'s limiter fixture, the critical-point audit and the
+retry rung on `machine-e-diamagnetic` are behaviour. **No constant `τ` is
+optimal for both `ψ_h` and `q_h`, and none is optimal for both the tokamak and
+the mirror.**
