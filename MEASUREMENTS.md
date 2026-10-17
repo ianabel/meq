@@ -18635,3 +18635,157 @@ midplane gauges — 5.54e-01 8.15e-05 7.91e-08 6.62e-14 on the vacuum's curve,
 the control, stalls after 30 steps at 7.6e-05 and 1.6e-05; the two stalls are
 most of its cost. The midplane-gauge rows of §3a are an uncommitted probe on
 the same harness.
+
+### M-TAUCAP
+
+**WHY `τ = τ₀/max(R, R_f)` FIXES THE AXIS. UNBOUNDED, `τ₀/R` FAILS THERE IN
+TWO UNRELATED WAYS. ON A FACE MEETING `R = 0` AT A VERTEX ITS INTEGRAL DIVERGES,
+SO `∫_e τ ds` — `τh` — IS A CONSTANT OF 13 TO 18 THAT REFINEMENT NEVER
+REDUCES, AND `q` LOSES HALF AN ORDER. ON A FACE LYING ON THE AXIS A GMSH MESH
+PUTS QUADRATURE POINTS AT `R ≈ 2e-18`, NOT ZERO, WHERE `τ ≈ 1e18`, AND NEWTON
+STALLS NEAR `1e-2` — WHICH IS M-290's "ROUND-OFF FLOOR", NOT CONDITIONING. THE
+FLOOR REMOVES BOTH. `R_f` IS A LENGTH: `k = 3` KEEPS `q` AT 3.92 TO 4.00 FOR
+EVERY `R_f` FROM 0.025 TO 0.2 m, A FIFTH OF AN ELEMENT TO TWENTY-FIVE, AND
+`R_f` SETS ONLY THE CONSTANT, ABOUT AS `R_f^{-1/2}`. BUILT INTO THE LIBRARY AT
+`R_f = 0.1 m`, IT REPRODUCES [M-290](MEASUREMENTS.md#m-290)'s OVERRIDE ON THE
+MIRROR TO EVERY PRINTED DIGIT.**
+
+**Setup.** The branch carrying `TauFloorRadius`, double, Release, configured as
+`builds/double`. Three uncommitted harnesses: a Boost module solving
+`AxisConvergence`'s vacuum (`VacuumHarmonic::mixed()` on `[0, 1] × [−0.5, 0.5]`,
+`n = 8 … 128` cells a side, `h = 0.125 … 0.0078`) through the committed
+`setTauScaling( Diffusion, R_f )`, which also integrates `τ` over each face
+under MFEM's default face rule (`k + 1` Gauss points) and reads the linear
+path's trace diagonal ratio, `AxisConvergence`'s condition proxy;
+`VacuumMirror` (a) compiled against a copy of `MirrorMachine.hpp` whose
+`solveMeshed()` takes `τ` from an environment variable and prints Newton's
+history and the radii of the face quadrature points; and `RotatingMirror`'s
+`resolution` suite compiled with `Options` defaulting to `τ = 3`, scaled. The
+unbounded form as `main` ships it (`df883c0`, `R ≤ 0` taking the element
+centroid) was rebuilt from `git archive` in a separate tree for the vacuum
+mirror. `τ₀ = 3` in every scaled column; `R_f = 10⁻⁶` is the reachable stand-in
+for the unbounded form. `OMP_NUM_THREADS` 1 to 8, `MKL_NUM_THREADS=1`.
+
+**1. The face meeting the axis at a vertex.** The largest `∫_e τ ds` over faces
+not lying on the axis — on this mesh a diagonal face from an axis vertex —
+against `h`:
+
+| `k` | `R_f = 10⁻⁶` at every `h` | `√2 τ₀ Σ_q w_q/x_q`, `k + 1` points | `R_f = 0.025`: `h` = 0.125, 0.0625, 0.03125, 0.0156 |
+|---|---|---|---|
+| 1 | 12.73 | 12.73 | 12.73, 7.99, 5.30, 2.65 |
+| 2 | 15.56 | 15.56 | 10.99, 8.05, 5.16, 2.65 |
+| 3 | 17.68 | 17.68 | 10.74, 8.16, 5.17, 2.65 |
+
+The unbounded integral is `τ₀ ∫₀¹ φ²/t dt` along the face, divergent for any
+shape function that does not vanish at the axis vertex, so what is assembled is
+the rule's sum: independent of `h`, and larger for a finer rule (`Σ w/x` = 3.00,
+3.67, 4.17, 4.57, 4.90 for 2 to 6 points). In the strip of elements touching
+the axis `τh` therefore never falls, and HDG's flux estimate, which carries
+`τ h^{k+1} |ψ|_{k+1}` beside `h^{k+1} |q|_{k+1}`, gives `q` at `k` there — a
+strip of width `h`, so `k + 1/2` in L2. Floored, `τh ≤ τ₀ |e|/R_f` falls as `h`
+once `R_f` lies above the rule's first point (at `k = 1`, `h = 0.125` it does
+not: 0.025 against `0.211 h = 0.026`).
+
+**2. `q` on the axis box.** L2 error at `h = 0.0078` and the rate over the
+finest pair; `ψ_h` is the same in every column to three digits (9.03e-06,
+1.152e-08, 1.367e-11 at `k = 1, 2, 3`, rates 2.00, 3.00, 4.00).
+
+| `k` | const 1 | const 3 | `R_f = 10⁻⁶` | `R_f = 0.025` | 0.05 | 0.1 | 0.2 |
+|---|---|---|---|---|---|---|---|
+| 1 | 4.47e-05 (1.71) | 5.30e-05 (1.80) | 5.43e-04 (1.50) | 1.20e-04 (1.95) | 9.52e-05 (1.94) | 7.97e-05 (1.92) | 7.00e-05 (1.89) |
+| 2 | 2.25e-07 (2.50) | 2.28e-07 (2.52) | 1.33e-06 (2.49) | 3.22e-07 (2.79) | 2.78e-07 (2.71) | 2.54e-07 (2.64) | 2.41e-07 (2.59) |
+| 3 | 1.70e-11 (4.00) | 5.09e-11 (4.00) | 3.56e-09 (3.50) | 4.55e-10 (4.00) | 3.18e-10 (4.00) | 2.22e-10 (4.00) | 1.53e-10 (4.00) |
+
+and the rates down the ladder (`h` = 0.0625, …, 0.0078):
+
+| | `k = 1` | `k = 2` | `k = 3` |
+|---|---|---|---|
+| const 1 | 1.93 1.87 1.79 1.71 | 2.53 2.52 2.51 2.50 | 3.99 4.00 4.00 4.00 |
+| `R_f = 10⁻⁶` | 1.50 1.50 1.50 1.50 | 2.43 2.46 2.48 2.49 | 3.46 3.48 3.49 3.50 |
+| `R_f = 0.025` | 1.89 1.87 1.96 1.95 | 2.83 2.77 2.84 2.79 | 3.96 3.92 3.99 3.995 |
+| `R_f = 0.1` | 1.96 1.96 1.95 1.92 | 2.83 2.79 2.72 2.64 | 3.97 3.99 4.00 4.00 |
+| `R_f = 0.2` | 1.95 1.96 1.94 1.89 | 2.79 2.72 2.65 2.59 | 3.98 3.995 3.997 3.999 |
+
+**Read.** `k = 3` is the clean statement, because there the constant-`τ`
+method is at `k + 1` on this fixture: the unbounded form reads `k + 1/2`
+exactly, and every floor reads 3.92 to 4.00 on every pair and 4.00 on the
+finest — from `R_f = h/5` on the coarsest mesh to `25 h` on the finest — at a
+constant growing ×1.45, 1.43, 1.43 per halving of `R_f` from 0.2 m, about
+`R_f^{-1/2}`: the floored strip is `R_f` wide and carries
+`τ ≈ τ₀/R_f`, so its share of the L2 error goes as `τ₀ R_f^{-1} · R_f^{1/2}`. At
+`k = 1, 2` the fixture's own axis layer (`AxisConvergence`'s header: the flux
+mass `(R q, v)` has a weight vanishing at the axis) holds even constant `τ` to
+`k + 1/2` asymptotically — 1.71 and falling, 2.50 — and the floored columns sit
+above it and fall towards it, faster for larger `R_f`, which covers more of the
+axis region with a constant `τ₀/R_f`. **So `R_f` does not need to be an element**:
+what restores the order is that `τ`'s bound does not grow as `h` falls. The
+floor does not touch the conditioning this proxy measures or the Newton floor
+on this mesh — the diagonal ratio reads 923–926 at `k = 1`, `h = 0.0078` in
+every column, and every last merit is 0.7e-15 to 1.3e-15 — because a
+Cartesian mesh's axis points are exactly zero.
+
+**3. The face lying on the axis.** The vacuum mirror's half-disc is a gmsh
+mesh, and its axis faces' quadrature points are not at zero: on level 0, 14
+face points from `k = 1`'s rule lie in `(0, 10⁻⁸)`, the smallest at
+`R = 2.1e-18`, and 78 at exactly 0; under `k = 2`'s rule 14 lie BELOW zero.
+`main`'s rule takes the centroid at `R ≤ 0` and `τ₀/R` otherwise, so those 14
+points carry `τ ≈ 1.4e18`. Its level-0 `k = 1` solve, merits:
+
+| | merits |
+|---|---|
+| `main`, unbounded `3/R` | 7.85e-01 1.59e-02 1.21e-02 9.81e-03 … thirty steps between 7.1e-03 and 1.6e-02, and `solve()` throws |
+| constant `τ = 1`, `main` | 7.85e-01 1.19e-13 |
+| `R_f = 10⁻⁶`, 0.1 | 7.85e-01 1.17e-13 |
+
+So the stall is the face term evaluated at `τ ~ 1e18` — round-off in the
+residual, not an ill-conditioned trace system — and it needs only `τ` to be
+finite at those points: `R_f = 10⁻⁶` (`τ ≤ 3e6`) already solves every level
+and order of (a) with the floored columns' history to two digits (`k = 3`,
+level 2: 1.68e-01 1.25e-12 3.9e-15), and every `R_f` measured does the same.
+This is what stopped [M-290](MEASUREMENTS.md#m-290)'s vacuum mirror; its
+`k = 4` reference, which wandered at six times Newton's target, solves under
+the floor too (§5); the adaptive mirror was not re-run here.
+
+**4. The vacuum mirror's flux** — `VacuumMirror` (a)'s new columns, against
+`CoilSet::flux()` over the machine region, level 2 and the rate from level 1:
+
+| `k` | const 1 | const 3 | `R_f = 10⁻⁶` | 0.025 | 0.05 | 0.1 | 0.2 |
+|---|---|---|---|---|---|---|---|
+| 1 | 4.50e-04 (1.94) | 4.93e-04 (1.94) | 5.06e-03 (1.48) | 1.92e-03 (1.88) | 1.43e-03 (1.98) | 1.07e-03 (1.98) | 8.16e-04 (1.97) |
+| 2 | 7.09e-06 (3.11) | 7.23e-06 (3.10) | 2.06e-05 (2.59) | 8.67e-06 (3.05) | 8.02e-06 (3.09) | 7.67e-06 (3.10) | 7.49e-06 (3.10) |
+| 3 | 3.55e-07 (4.10) | 3.80e-07 (4.06) | 3.71e-07 (4.08) | 3.63e-07 (4.10) | 3.63e-07 (4.10) | 3.63e-07 (4.10) | 3.63e-07 (4.10) |
+
+The same picture on a real axis mesh: the unbounded form half an order short
+at `k = 1, 2`, every floor back at constant `τ`'s rate, the constant falling
+with `R_f`. Over the whole of `D_h` `q` reads about 2 at `k = 2, 3` in every
+column, constant `τ = 1` included (5.70e-04, 1.85e-04 at level 2): the packs'
+corners, which `D_h` meshes to. `ψ_h` over `D_h` at `k = 3`, level 2 is
+1.353e-06 at every `R_f` against 1.329e-06 at constant `τ = 1`. `ψ*` buys
+nothing over `ψ_h` here in any column (machine region `k = 3`: 3.05e-08
+against 3.06e-08), which this entry does not explain.
+
+**5. Built in, on the rotating mirror.** `RotatingMirrorResolution` at
+`τ = 3/max(R, 0.1 m)` through the committed path reproduces
+[M-290](MEASUREMENTS.md#m-290)'s bounded column to every printed digit —
+`ψ_h` at `k = 1` level 3 2.134e-05, at `k = 3` level 2 1.267e-06; `ψ*` at `k = 2`
+level 3 8.769e-09 at 4.134 over levels 1–3, at `k = 3` level 2 5.148e-09;
+`ψ_h − geq 513` 9.28e-08; `ψ_ax − geq 513` −1.1e-11 and `ψ_bnd` −1.8e-09 — and
+the `k = 4` reference solves. Its new `q_h` column, max and rms over geq's
+nodes against the reference's `q_h`:
+
+| `k`, levels | const 1: rms by level | rate over the ladder | `3/max(R, 0.1)`: rms by level | rate |
+|---|---|---|---|---|
+| 1, 1–3 | 4.53e-04 8.34e-05 2.33e-05 | 2.14 | 2.63e-04 7.02e-05 2.22e-05 | 1.78 |
+| 2, 1–3 | 7.08e-05 7.65e-06 1.11e-06 | 3.00 | 5.97e-05 7.33e-06 1.11e-06 | 2.87 |
+| 3, 0–2 | 1.64e-04 1.24e-05 1.12e-06 | 3.60 | 1.42e-04 1.20e-05 1.11e-06 | 3.50 |
+
+**The finest rungs are the reference's, not either stabilisation's**: the
+reference's `q_h` differs from the same run at level 1 by 3.3e-06 to 3.5e-06
+rms, both
+columns stop at 1.1e-06 at `k = 2` and 3 alike, and `grad_bar(ψ*)/R` of the
+reference reads within 1.2e-07 rms of its `q_h`, so it is no better a
+reference. `q_h` on the mirror cannot be compared between stabilisations
+without a finer reference than level 2 at `k = 4`.
+
+**Reproduce.** The three harnesses are scratch and not committed; the face
+radii and Newton histories are a print in `solveMeshed()`.

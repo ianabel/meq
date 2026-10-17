@@ -252,7 +252,7 @@ coefficient.** That advice is about a SOLUTION-dependent coefficient; the one
 exception MEQ offers, scaling by the position-dependent `ν = 1/R`, needs no
 `EvalGrad` and is the next section — measured, and still not the default.
 
-### A constant `τ` folds inside one element, and `τ = τ₀/R` is the opt-in remedy
+### A constant `τ` folds inside one element, and `τ = τ₀/max(R, R_f)` is the opt-in remedy
 
 **THE ELEMENT-LOCAL PROBLEM IS SINGULAR ON THE TOP-DEGREE MODES AT `τ = 0`**,
 whatever the mesh: a `ψ ∈ P_k` orthogonal to `P_{k−1}` has no discrete gradient
@@ -284,13 +284,14 @@ agrees with the one element's to under 1%: the trace coupling does not move it
 small `R`, which is where a mirror's plasma sits. `τ = τ₀ ν` makes the
 criterion `∂F/∂ψ < (k + 1) τ₀ |∂K|/|K|`, the same at every radius and in
 `m⁻¹` throughout — `τ₀` is the `1/ℓ` of Nguyen, Peraire and Cockburn's
-`κ/ℓ`. **It is `GradShafranovSolver::setTauScaling( TauScaling::Diffusion )`,
-`[discretisation] TauScaling = "diffusion"`, and NOT the default.**
-`meq::DiffusionScaledStabilization` reads the physical point off the
-transformation MFEM hands `Eval()`, which every route sets — the per-face
+`κ/ℓ`. Below a floor radius `R_f` it stops growing: `τ = τ₀/max(R, R_f)`, for
+the axis's reasons below. **It is `GradShafranovSolver::setTauScaling(
+TauScaling::Diffusion[, R_f] )`, `[discretisation] TauScaling = "diffusion"`
+with `TauFloorRadius = R_f`, `R_f` = 0.1 m unless given, and NOT the
+default.** `meq::DiffusionScaledStabilization` reads the physical point off
+the transformation MFEM hands `Eval()`, which every route sets — the per-face
 loop, the batched face tables, the nonlinear residual and gradient — so it is
-exact at each quadrature point; on a face lying on the axis it takes `R` at the
-owning element's centroid. **It is position dependent and state independent**,
+exact at each quadrature point. **It is position dependent and state independent**,
 so `IsConstant()` is true and no `EvalGrad()` is owed: the bilinear path, which
 refuses a state-dependent stabilisation, assembles it, and Newton stays at four
 steps on Example 5.
@@ -312,21 +313,46 @@ analytic benchmark too**: Example 5's reaction `∂F/∂ψ ≈ 14` fails Newton 
 4-cell mesh at `k = 1` for constant `τ = 0.3` and for `τ₀ = 0.3` alike, which
 is the same local criterion.
 
-**AND AT THE AXIS IT COSTS AN ORDER OF ITS OWN, WHICH IS WHY IT IS NOT THE
-DEFAULT.** `τ₀/R` is unbounded on the faces that touch `R = 0`, so in the strip
-of elements there it is MFEM's `h⁻¹` scaling: on `AxisConvergence`'s vacuum
-`q` converges at `k + 1/2` at every `k` (3.49 at `k = 3` under `τ₀ = 3`), and
-the round-off floor rises to about six times Newton's `1e-12` target, so the
-vacuum mirror, the mirror's `k = 4` reference and the adaptive mirror stop
-without converging. Bounded, `τ₀/max(R, 0.1 m)` — measured through an
-uncommitted override, not an option — keeps `k+1` there, solves all three, and
-on the mirror is better than constant `τ = 10` in `ψ_h` and `ψ_ax`. `τ₀ = 1`
-is under-stabilised wherever `R > 1 m` and fails as constant `τ = 0.3` does
-(→ **[M-290](MEASUREMENTS.md#m-290)**). And the mirror's
-"ceiling" was this fold in every stall measured but one: under `τ = 3/R` the
+**UNBOUNDED, `τ₀/R` FAILS AT THE AXIS TWICE, AND THE FLOOR IS WHAT FIXES
+BOTH.** (→ **[M-290](MEASUREMENTS.md#m-290)**, **[M-TAUCAP](MEASUREMENTS.md#m-taucap)**)
+
+* **On a face meeting `R = 0` at a vertex** `∫ τ₀/R φ²` diverges like
+  `log(1/R)`, so what is assembled is the face rule's sum: `∫_e τ ds`, which is
+  `τh`, is `√2 τ₀ Σ w_q/x_q` on a diagonal face — 12.7, 15.6, 17.7 at
+  `k = 1, 2, 3`, `τ₀ = 3` — at EVERY `h`, and larger for a finer rule. HDG's
+  flux estimate carries `τ h^{k+1} |ψ|_{k+1}` beside `h^{k+1} |q|_{k+1}`, so
+  with `τ ~ 1/h` the strip of elements touching the axis has `q` at `k`, and a
+  strip of width `h` reads `k + 1/2` in L2: 1.50, 2.49, 3.49 on
+  `AxisConvergence`'s vacuum — MFEM's `h⁻¹` LDG cost confined to the strip.
+* **On a face lying ON `R = 0`** a gmsh mesh's transformation puts quadrature
+  points at `|R| ~ 1e-18`, of either sign, not at zero. A rule for the axis
+  face that tests `R ≤ 0` — the owning element's centroid's `R` there —
+  misses `R = +2e-18`, where `τ ~ 1e18` swamps the residual in round-off:
+  the vacuum mirror's level-0 `k = 1` solve stalls near `1e-2` for thirty
+  steps. That, not conditioning, is "the
+  round-off floor" — the trace system's diagonal ratio and the floor of a
+  Cartesian axis mesh, whose points ARE exactly zero, do not move with `R_f`.
+
+Floored, `τ ≤ τ₀/R_f` at every point whatever `h` and whatever the rule, so
+`τh → 0`, and the axis face needs no rule of its own. What is
+left at the axis is what a constant `τ` has there: at `k = 3` `q` reads 4.00
+for every `R_f` from 0.025 to 0.2 m on meshes from `h = 0.125` to 0.0078, so
+from a fifth of an element to twenty-five — **`R_f` is a length, and need not be
+an element** — and costs a constant growing about as `R_f^{-1/2}`, the floored
+strip being `R_f` wide. At `k ≤ 2` that fixture's own axis layer (the
+`( R q, v )` weight vanishing, `AxisConvergence`'s header) holds even constant
+`τ = 1` to `k + 1/2`, and the floored rates sit above it and drift towards it;
+on the vacuum mirror's machine region the floor returns `q` to constant `τ`'s
+rates, 1.94 and 3.10 at `k = 1, 2`, where `R_f → 0` reads 1.48 and 2.59.
+**`R_f = 0` is refused, not offered**; a tiny one is reachable, and at
+`1e-6` m it is the first defect without the second. `τ₀ = 1` is under-stabilised wherever
+`R > 1 m` and fails as constant `τ = 0.3` does
+(→ **[M-290](MEASUREMENTS.md#m-290)**). And the mirror's "ceiling" was the
+element-local fold in every stall measured but one: under `τ = 3/R` the
 midplane gauge solves 5e19 and does not fold below 9.1e19, and only the
 vacuum-midplane gauge has a fold of its own, near 4.15e19
-(→ **[M-291](MEASUREMENTS.md#m-291)**).
+(→ **[M-291](MEASUREMENTS.md#m-291)**). The tokamak default stays constant
+`τ = 1`.
 
 ### Post-processing is back, and it was free
 

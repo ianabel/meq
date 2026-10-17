@@ -18,6 +18,7 @@
 
 #include "RoundOffFloor.hpp"
 
+#include "meq/Config.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -113,6 +114,15 @@ BOOST_AUTO_TEST_CASE( theConstructorRejectsWhatItCannotSolve )
  * setter refuses, like setSource(), rather than rebuilding under the caller.
  * A mesh reaching R < 0 is refused for Diffusion, where 1/R is negative, and
  * accepted for Constant, which never reads R.
+ *
+ * THE FLOOR RADIUS R_f in tau0/max( R, R_f ) defaults to
+ * DiffusionScaledStabilization::defaultFloorRadius -- the same number the
+ * configuration's TauFloorRadius defaults to, asserted here because the
+ * MFEM-free header cannot name the solver's -- and the two-argument form sets
+ * it. It refuses, and leaves the solver as it was: a floor beside Constant,
+ * which would ignore it; R_f <= 0 or not finite, R_f = 0 being the unbounded
+ * tau0/R measured defective at the axis (MEASUREMENTS.md M-290); and any call
+ * once the forms are built.
  */
 BOOST_AUTO_TEST_CASE( theTauScalingIsSetBeforeTheFormsAndRefusedWhereItIsMeaningless )
 {
@@ -133,6 +143,7 @@ BOOST_AUTO_TEST_CASE( theTauScalingIsSetBeforeTheFormsAndRefusedWhereItIsMeaning
 	constant.setBoundaryData( exact );
 	constant.solve();
 	BOOST_CHECK_THROW( constant.setTauScaling( S::Diffusion ), std::logic_error );
+	BOOST_CHECK_THROW( constant.setTauScaling( S::Diffusion, 0.2 ), std::logic_error );
 
 	mfem::Mesh scaledMesh = makeMesh( 4 );
 	meq::GradShafranovSolver scaled( scaledMesh, 2, 1.5 );
@@ -157,19 +168,51 @@ BOOST_AUTO_TEST_CASE( theTauScalingIsSetBeforeTheFormsAndRefusedWhereItIsMeaning
 	mfem::Mesh across = meq::tests::makeMesh( meq::tests::Rectangle{ -0.2, 0.6, -0.4, 0.4 }, 4 );
 	meq::GradShafranovSolver negative( across, 1 );
 	BOOST_CHECK_THROW( negative.setTauScaling( S::Diffusion ), std::invalid_argument );
+	BOOST_CHECK_THROW( negative.setTauScaling( S::Diffusion, 0.2 ), std::invalid_argument );
 	BOOST_CHECK_NO_THROW( negative.setTauScaling( S::Constant ) );
+
+	// The floor radius.
+	double const fallback = meq::DiffusionScaledStabilization::defaultFloorRadius;
+	BOOST_TEST( meq::DiscretisationConfig().tauFloorRadius == fallback,
+	            "[discretisation] TauFloorRadius defaults to " << meq::DiscretisationConfig().tauFloorRadius
+	            << " m and the solver to " << fallback << " m; a run through the driver and one through "
+	            "the library would solve different problems" );
+	BOOST_TEST( scaled.tauFloorRadius() == fallback );
+
+	mfem::Mesh flooredMesh = makeMesh( 4 );
+	meq::GradShafranovSolver floored( flooredMesh, 2, 1.5 );
+	BOOST_TEST( floored.tauFloorRadius() == fallback );
+	BOOST_CHECK_THROW( floored.setTauScaling( S::Constant, 0.2 ), std::invalid_argument );
+	for ( double bad : { 0.0, -0.1, std::numeric_limits<double>::infinity(),
+	                     std::numeric_limits<double>::quiet_NaN() } )
+	{
+		BOOST_CHECK_THROW( floored.setTauScaling( S::Diffusion, bad ), std::invalid_argument );
+		BOOST_CHECK_THROW( meq::DiffusionScaledStabilization( 1.5, bad ), std::invalid_argument );
+	}
+	BOOST_TEST( static_cast<int>( floored.tauScaling() ) == static_cast<int>( S::Constant ),
+	            "a refused floor radius changed the scaling" );
+	BOOST_TEST( floored.tauFloorRadius() == fallback, "a refused floor radius was kept" );
+	floored.setTauScaling( S::Diffusion, 0.25 );
+	BOOST_TEST( static_cast<int>( floored.tauScaling() ) == static_cast<int>( S::Diffusion ) );
+	BOOST_TEST( floored.tauFloorRadius() == 0.25 );
+	BOOST_TEST( floored.tau() == 1.5, "setting the floor moved tau0 to " << floored.tau() );
 }
 
 /*
- * THE ASSEMBLED FACE TERM IS < ( tau0/R ) psi, w > AT EVERY QUADRATURE POINT.
+ * THE ASSEMBLED FACE TERM IS < ( tau0/max( R, R_f ) ) psi, w > AT EVERY
+ * QUADRATURE POINT.
  *
- * MFEM's own HDGDiffusionIntegrator, handed meq::DiffusionScaledStabilization,
- * assembles every face of a mesh REACHING THE AXIS, and each block is compared
- * with the same rule summed here from tau0/R at the face's physical point --
+ * Eval() itself first: at every face quadrature point of a mesh REACHING THE
+ * AXIS, from both sides, it returns tau0/max( R, R_f ) EXACTLY, R read off
+ * the side's own transformation -- with R_f = 0.3 on a 0.2 m mesh, so the
+ * floor binds on the first two columns of elements and not beyond, both
+ * counts asserted. Then MFEM's own HDGDiffusionIntegrator, handed
+ * meq::DiffusionScaledStabilization, assembles every face, and each block is
+ * compared with the same rule summed here at the face's physical point --
  * which is what would catch Eval() reading the reference point, the wrong
- * side's point or a stale one. Where the face lies on R = 0 the radius is the
- * owning element's centroid's, and that is checked too, on faces that exist:
- * the count of axis faces is asserted, not assumed.
+ * side's point or a stale one. Faces lying on R = 0 take tau0/R_f with no
+ * rule of their own, and are checked on faces that exist: the count of axis
+ * faces is asserted, not assumed.
  *
  * And it is assembled as a BILINEAR form, which MFEM refuses for a
  * stabilisation reporting IsConstant() false -- "a state dependent
@@ -177,9 +220,10 @@ BOOST_AUTO_TEST_CASE( theTauScalingIsSetBeforeTheFormsAndRefusedWhereItIsMeaning
  * the statement that position dependence is not state dependence and no
  * EvalGrad() is owed. IsConstant() is asserted directly as well.
  */
-BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoint )
+BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverTheFlooredRadiusAtEveryQuadraturePoint )
 {
 	double const tau0 = 2.5;
+	double const floorRadius = 0.3;
 	int const order = 2;
 	mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::Rectangle{ 0.0, 0.8, -0.4, 0.4 }, 4 );
 	mfem::L2_FECollection potentialColl( order, 2, mfem::BasisType::GaussLobatto );
@@ -187,17 +231,49 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoin
 	mfem::FiniteElementSpace potentialSpace( &mesh, &potentialColl );
 	mfem::FiniteElementSpace traceSpace( &mesh, &traceColl );
 
-	meq::DiffusionScaledStabilization const stab( tau0 );
+	meq::DiffusionScaledStabilization const stab( tau0, floorRadius );
 	BOOST_TEST( stab.IsConstant(), "a position-dependent tau reported itself state dependent" );
 	BOOST_TEST( stab.tau0() == tau0 );
-	BOOST_TEST( stab.at( 0.5, 0.25 ) == tau0/0.5 );
-	BOOST_TEST( stab.at( 0.0, 0.25 ) == tau0/0.25 );
+	BOOST_TEST( stab.floorRadius() == floorRadius );
+	BOOST_TEST( stab.at( 0.5 ) == tau0/0.5 );
+	BOOST_TEST( stab.at( 0.1 ) == tau0/floorRadius );
+	BOOST_TEST( stab.at( 0.0 ) == tau0/floorRadius );
+	BOOST_TEST( meq::DiffusionScaledStabilization( tau0 ).floorRadius()
+	            == meq::DiffusionScaledStabilization::defaultFloorRadius );
 
 	mfem::ConstantCoefficient one( 1.0 );
 	mfem::HDGDiffusionIntegrator integrator( one, 1.0 );
 	integrator.SetStabilization( stab );
 	mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::SEGMENT, 2*order + 2 );
 	integrator.SetIntRule( &rule );
+
+	// Eval(), sampled: every face point, from each side's own transformation.
+	int flooredPoints = 0, scaledPoints = 0;
+	for ( int f = 0; f < mesh.GetNumFaces(); ++f )
+	{
+		mfem::FaceElementTransformations *ft = mesh.GetFaceElementTransformations( f );
+		for ( int q = 0; q < rule.GetNPoints(); ++q )
+		{
+			ft->SetAllIntPoints( &rule.IntPoint( q ) );
+			for ( int side = 0; side < ( ft->Elem2No >= 0 ? 2 : 1 ); ++side )
+			{
+				mfem::ElementTransformation &tr = side == 0 ? *ft->Elem1 : *ft->Elem2;
+				mfem::Vector x;
+				tr.Transform( tr.GetIntPoint(), x );
+				double const wanted = tau0/std::max( static_cast<double>( x( 0 ) ), floorRadius );
+				double const got = stab.Eval( 0.0, 0.0, 0.0, 0.0, tr );
+				BOOST_TEST( got == static_cast<mfem::real_t>( wanted ),
+				            "face " << f << ", point " << q << " at R = " << x( 0 ) << ": tau is "
+				            << got << ", not tau0/max( R, R_f ) = " << wanted );
+				if ( x( 0 ) < floorRadius )
+					++flooredPoints;
+				else
+					++scaledPoints;
+			}
+		}
+	}
+	BOOST_TEST( flooredPoints > 0, "no face point sits below R_f, so the floor was not sampled" );
+	BOOST_TEST( scaledPoints > 0, "every face point sits below R_f, so tau0/R was not sampled" );
 
 	int axisFaces = 0, interiorFaces = 0;
 	double worst = 0.0;
@@ -214,10 +290,7 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoin
 		int const n1 = el1.GetDof(), n2 = interior ? el2.GetDof() : 0, nt = traceEl.GetDof();
 		mfem::DenseMatrix expected( n1 + n2 + nt );
 		expected = 0.0;
-		mfem::Vector shape1( n1 ), shape2( n2 ), traceShape( nt ), x, centre1, centre2;
-		ft->Elem1->Transform( mfem::Geometries.GetCenter( ft->Elem1->GetGeometryType() ), centre1 );
-		if ( interior )
-			ft->Elem2->Transform( mfem::Geometries.GetCenter( ft->Elem2->GetGeometryType() ), centre2 );
+		mfem::Vector shape1( n1 ), shape2( n2 ), traceShape( nt ), x;
 		bool onAxis = true;
 		for ( int q = 0; q < rule.GetNPoints(); ++q )
 		{
@@ -228,7 +301,7 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoin
 			double const faceWeight = ip.weight*ft->Weight();
 			el1.CalcPhysShape( *ft->Elem1, shape1 );
 			traceEl.CalcShape( ip, traceShape );
-			double const tau1 = tau0/( x( 0 ) > 0.0 ? x( 0 ) : centre1( 0 ) );
+			double const tau1 = tau0/std::max( static_cast<double>( x( 0 ) ), floorRadius );
 			double tauSum = tau1;
 			for ( int i = 0; i < n1; ++i )
 			{
@@ -240,7 +313,7 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoin
 			if ( interior )
 			{
 				el2.CalcPhysShape( *ft->Elem2, shape2 );
-				double const tau2 = tau0/( x( 0 ) > 0.0 ? x( 0 ) : centre2( 0 ) );
+				double const tau2 = tau0/std::max( static_cast<double>( x( 0 ) ), floorRadius );
 				tauSum += tau2;
 				for ( int i = 0; i < n2; ++i )
 				{
@@ -273,7 +346,7 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoin
 		// the whole difference; a tau read off the wrong point is orders above it.
 		BOOST_TEST( ( error <= 1.0e-13*scale || !meq::tests::aboveTheFormatsFloor( error, scale ) ),
 		            "face " << f << ( onAxis ? " (on the axis)" : "" ) << ": the assembled face term is "
-		            << error << " from tau0/R summed at its points, against " << scale );
+		            << error << " from tau0/max( R, R_f ) summed at its points, against " << scale );
 		worst = std::max( worst, error/scale );
 	}
 	BOOST_TEST( axisFaces == 4, axisFaces << " faces on R = 0, not the 4 a 4 x 4 grid has there" );

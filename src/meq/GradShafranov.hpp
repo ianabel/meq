@@ -501,8 +501,9 @@ namespace meq
 	};
 
 	/**
-	 * A HDG STABILISATION SCALED BY THE DIFFUSION COEFFICIENT:
-	 * tau( x ) = tau0 nu( x ), with nu = 1/R.
+	 * A HDG STABILISATION SCALED BY THE DIFFUSION COEFFICIENT, FLOORED AT THE
+	 * AXIS: tau( x ) = tau0/max( R, R_f ), which is tau0 nu( x ) with
+	 * nu = 1/R wherever R >= R_f.
 	 *
 	 * WHAT nu IS, EXACTLY. The flux equation is ( R q, v ) + ... = 0, so
 	 * q = ( 1/R ) grad_bar( psi ) and the operator is -div_bar( nu grad_bar psi )
@@ -532,20 +533,39 @@ namespace meq
 	 * with the element's integration point set. The two sides of an interior
 	 * face are the same physical point, so tau is single valued on a face.
 	 *
-	 * THE AXIS. The operator never evaluates 1/R where R = 0, because its 1/R
-	 * sits only at element-interior quadrature points; a face lying ON the
-	 * symmetry axis has every point at R = 0, and there nu is infinite. Such a
-	 * face is a fitted Dirichlet face with psihat = 0 exact, so any positive tau
-	 * is consistent there and a larger one only imposes the datum more strongly;
-	 * at R <= 0 this takes nu at the CENTROID of the element whose side it is,
-	 * which is finite for any element with a vertex off the axis.
-	 * GradShafranovSolver::setTauScaling() refuses a mesh with any point at
-	 * R < 0, where nu < 0 and the operator itself is meaningless. WHAT THE AXIS
-	 * COSTS is measured: on the faces that TOUCH R = 0, tau0/R is unbounded,
-	 * which in that strip of elements is MFEM's h^-1 scaling -- q converges at
-	 * k + 1/2 on a mesh reaching the axis, and the round-off floor rises above
-	 * Newton's target on the mirror's k = 4 and vacuum solves (MEASUREMENTS.md
-	 * M-290). That, and not the fold, is why this is not the default.
+	 * THE AXIS, AND WHY R IS FLOORED. Unbounded, tau0/R fails at the axis in
+	 * two separate ways, and the floor removes both (MEASUREMENTS.md M-290,
+	 * M-TAUCAP):
+	 *
+	 *   * ON A FACE MEETING R = 0 AT A VERTEX, the integral of tau0/R against
+	 *     a shape function that does not vanish there diverges like log( 1/R ),
+	 *     so what is assembled is the face rule's sum, tau0 sum_q w_q/x_q
+	 *     times |e|/h, and int_e tau ds -- tau h -- is a constant of 13 to 18
+	 *     at tau0 = 3 that refinement never reduces and a finer rule makes
+	 *     larger. HDG's flux estimate carries tau h^( k+1 ) | psi |_( k+1 )
+	 *     beside h^( k+1 ) | q |_( k+1 ), so in that strip of elements q
+	 *     converges at k, and a strip of width h makes that k + 1/2 in L2:
+	 *     MFEM's h^-1 LDG cost, confined to the strip.
+	 *   * ON A FACE LYING ON R = 0, the transformation puts quadrature points
+	 *     at | R | ~ 1e-18 -- either sign -- rather than at zero on a gmsh
+	 *     mesh, and tau0/R there is ~1e18: the face term then swamps the
+	 *     residual in round-off and Newton stalls near 1e-2.
+	 *
+	 * Floored, tau <= tau0/R_f at every point whatever h and whatever the
+	 * rule, tau h -> 0 under refinement, and what is left at the axis is what
+	 * a constant tau has there: R_f sets the flux's constant near the axis --
+	 * about as R_f^-1/2, the strip it covers being R_f wide -- not its order.
+	 * It is a fixed LENGTH, not a number of elements: what restores the order
+	 * is that tau's bound does not grow as h falls, and measured, q holds it
+	 * with R_f from a fifth of an element to twenty-five. R_f > 0 is
+	 * required: R_f = 0 is the unbounded form, and a stabilisation measured
+	 * defective is not offered as an option. A face lying ON the axis is a fitted Dirichlet face with
+	 * psihat = 0 exact, so the tau0/R_f it takes is consistent there, and the
+	 * floor makes tau finite on it with no rule of its own. Off the axis --
+	 * R >= R_f everywhere, as on every tokamak box -- the floor never binds
+	 * and this is tau0/R exactly. GradShafranovSolver::setTauScaling()
+	 * refuses a mesh with any vertex or node at R < 0, where nu < 0 and the
+	 * operator itself is meaningless.
 	 *
 	 * IsConstant() is TRUE, and that is a statement about the STATE: MFEM's
 	 * contract is "s depends on neither the potential nor its trace", and
@@ -553,12 +573,25 @@ namespace meq
 	 * and the bilinear and batched assembly paths accept it.
 	 *
 	 * Thread safe in the sense GradShafranovSolver::setAssemblyMode() asks:
-	 * one double, and stack storage per call on the caller's transformation.
+	 * two doubles, and stack storage per call on the caller's transformation.
 	 */
 	class DiffusionScaledStabilization : public mfem::HDGStabilization
 	{
 		public:
-			explicit DiffusionScaledStabilization( double tau0In );
+			/// @param tau0In        tau0, in m^-1.
+			/// @param floorRadiusIn R_f, in m: tau = tau0/max( R, R_f ).
+			/// @throws std::invalid_argument unless @a floorRadiusIn is
+			///         finite and positive -- 0 would be the unbounded tau0/R
+			///         that MEASUREMENTS.md M-290 measured defective at the
+			///         axis, and a negative floor is no floor.
+			explicit DiffusionScaledStabilization( double tau0In,
+			                                       double floorRadiusIn = defaultFloorRadius );
+
+			/// R_f's default, 0.1 m: the one value measured with the mirror
+			/// suite (MEASUREMENTS.md M-290, M-TAUCAP), not an optimum.
+			/// meq::DiscretisationConfig's TauFloorRadius default is this
+			/// number, which that MFEM-free header cannot name.
+			static constexpr double defaultFloorRadius = 0.1;
 
 			/// MFEM's spelling, from HDGStabilization. True: position
 			/// dependent, state independent.
@@ -572,13 +605,17 @@ namespace meq
 			/// tau0, in m^-1.
 			double tau0() const;
 
-			/// tau at a face point of radius @a radius, on the side of the
-			/// element whose centroid sits at @a centroidRadius -- the rule
-			/// Eval() applies, exposed so that it can be tested without a mesh.
-			double at( double radius, double centroidRadius ) const;
+			/// R_f, in m.
+			double floorRadius() const;
+
+			/// tau at a face point of radius @a radius, tau0/max( R, R_f ) --
+			/// the rule Eval() applies, exposed so that it can be tested
+			/// without a mesh.
+			double at( double radius ) const;
 
 		private:
 			double tau0Value;
+			double floorRadiusValue;
 	};
 
 	/**
@@ -924,7 +961,7 @@ namespace meq
 			///                 Hybridization removes the inf-sup condition that
 			///                 would otherwise force them apart.
 			/// @param tauIn    the HDG stabilisation, constant, in m^-2 -- or
-			///                 tau0 in tau = tau0/R, in m^-1, once
+			///                 tau0 in tau = tau0/max( R, R_f ), in m^-1, once
 			///                 setTauScaling( TauScaling::Diffusion ) is called.
 			///                 Constant tau = 1 is both papers' choice and a
 			///                 measured balance rather than an optimum: smaller
@@ -940,15 +977,18 @@ namespace meq
 			enum class TauScaling
 			{
 				Constant,  ///< tau( x ) = tau, in m^-2. The default.
-				Diffusion  ///< tau( x ) = tau nu( x ) = tau/R, tau in m^-1
+				Diffusion  ///< tau( x ) = tau/max( R, R_f ), tau in m^-1
 			};
 
 			/**
 			 * SCALE tau BY THE DIFFUSION COEFFICIENT, or not. Constant is the
 			 * default and every rate in the suite is measured with it;
 			 * Diffusion takes the constructor's tau as tau0 in
-			 * tau( x ) = tau0/R -- meq::DiffusionScaledStabilization, which
-			 * carries the definition, the axis rule and why it is wanted.
+			 * tau( x ) = tau0/max( R, R_f ), R_f at
+			 * DiffusionScaledStabilization::defaultFloorRadius --
+			 * meq::DiffusionScaledStabilization, which carries the
+			 * definition, why R is floored and why it is wanted. The
+			 * two-argument form sets R_f.
 			 *
 			 * It changes the DISCRETISATION, and so the answer at fixed h: it is
 			 * a modelling choice of the same kind as tau itself, not a
@@ -963,8 +1003,25 @@ namespace meq
 			 */
 			void setTauScaling( TauScaling choice );
 
+			/**
+			 * Diffusion, with the floor radius R_f in
+			 * tau = tau0/max( R, R_f ) given rather than defaulted.
+			 *
+			 * @throws std::invalid_argument for Constant, which never reads
+			 *         R and would ignore the floor; and unless
+			 *         @a floorRadius is finite and positive, as
+			 *         DiffusionScaledStabilization's constructor says.
+			 *         Otherwise as the one-argument form.
+			 */
+			void setTauScaling( TauScaling choice, double floorRadius );
+
 			/// setTauScaling().
 			TauScaling tauScaling() const;
+
+			/// R_f, in m: the floor Diffusion applies, the default until the
+			/// two-argument setTauScaling() sets it. Read nowhere under
+			/// Constant.
+			double tauFloorRadius() const;
 
 			/// The right hand side F( R, z ) of a source that does not depend on
 			/// psi -- NOT F/R. The 1/R belongs to the weak form and is applied
@@ -5516,7 +5573,8 @@ namespace meq
 
 			int order() const;
 			/// The constructor's tau: tau itself under TauScaling::Constant,
-			/// tau0 under TauScaling::Diffusion.
+			/// tau0 under TauScaling::Diffusion, whose floor radius is
+			/// tauFloorRadius().
 			double tau() const;
 
 		private:
@@ -5536,8 +5594,8 @@ namespace meq
 			std::unique_ptr<mfem::DarcyForm> darcy;
 
 			ConstantStabilization stabilization;
-			/// The same number read as tau0; buildForms() installs whichever
-			/// tauScalingChoice names.
+			/// The same number read as tau0, with the floor radius; buildForms()
+			/// installs whichever tauScalingChoice names.
 			DiffusionScaledStabilization scaledStabilization;
 			TauScaling tauScalingChoice;
 

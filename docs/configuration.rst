@@ -332,17 +332,26 @@ tokamak, and ``examples/mirror-rotating.toml`` for a mirror, whose
      - ``1.0``
      - The HDG stabilisation, positive: :math:`\tau` in :math:`\mathrm{m}^{-2}`
        under ``TauScaling = "constant"``, and :math:`\tau_0` in
-       :math:`\tau = \tau_0/R`, in :math:`\mathrm{m}^{-1}`, under
+       :math:`\tau = \tau_0/\max(R, R_f)`, in :math:`\mathrm{m}^{-1}`, under
        ``"diffusion"``. Optimal order needs only :math:`\tau = O(1)`. See
        :ref:`formulation-tau` before changing it.
    * - ``TauScaling``
      - ``"constant"``
      - ``"constant"`` or ``"diffusion"``: whether :math:`\tau` is ``Tau`` or
-       ``Tau`` times the diffusion coefficient :math:`1/R`. Anything else is
-       refused, and so is ``"diffusion"`` on a mesh reaching :math:`R < 0`. It
-       changes the discretisation, so the answer at a fixed mesh. On a mesh
-       reaching :math:`R = 0` it costs the flux half an order and can stop a
-       solve at round-off. See :ref:`formulation-tau`.
+       ``Tau`` times the diffusion coefficient :math:`1/R`, floored at
+       ``TauFloorRadius``. Anything else is refused, and so is
+       ``"diffusion"`` on a mesh reaching :math:`R < 0`. It changes the
+       discretisation, so the answer at a fixed mesh. See
+       :ref:`formulation-tau`.
+   * - ``TauFloorRadius``
+     - ``0.1``
+     - :math:`R_f`, in metres, in :math:`\tau = \tau_0/\max(R, R_f)`: the
+       radius below which the diffusion-scaled :math:`\tau` stops growing.
+       Positive; zero, the unbounded :math:`\tau_0/R`, is refused, because it
+       costs the flux half an order on a mesh reaching :math:`R = 0`. Refused
+       too unless ``TauScaling = "diffusion"``, since a constant :math:`\tau`
+       never reads :math:`R`. It matters only where the mesh comes within
+       :math:`R_f` of the axis. See :ref:`formulation-tau`.
 
 ``[source]``
 ------------

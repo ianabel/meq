@@ -169,12 +169,13 @@ configurable as ``[discretisation] Tau``. It is not dimensionless: the face term
 :math:`\mathrm{m}^{-2}`.
 
 ``[discretisation] TauScaling = "diffusion"`` scales it by the operator's
-diffusion coefficient instead, :math:`\tau(x) = \tau_0\,\nu(x)` with
-:math:`\nu = 1/R` and ``Tau`` read as :math:`\tau_0`, in :math:`\mathrm{m}^{-1}`
-(:cpp:class:`meq::DiffusionScaledStabilization`). It depends on position and
-not on the solution, so it needs no derivative of its own. On a face lying on
-the symmetry axis, where :math:`1/R` is infinite, it takes :math:`R` at the
-centroid of the element whose side it is.
+diffusion coefficient instead, floored at a radius :math:`R_f`,
+:math:`\tau(x) = \tau_0/\max(R, R_f)` — which is :math:`\tau_0\,\nu(x)` with
+:math:`\nu = 1/R` wherever :math:`R \ge R_f` — with ``Tau`` read as
+:math:`\tau_0`, in :math:`\mathrm{m}^{-1}`, and ``TauFloorRadius`` as
+:math:`R_f`, 0.1 m unless given (:cpp:class:`meq::DiffusionScaledStabilization`).
+It depends on position and not on the solution, so it needs no derivative of
+its own.
 
 **Why the choice exists.** The element-local HDG problem has modes — the
 degree-:math:`k` polynomials orthogonal to degree :math:`k-1` — whose whole
@@ -190,13 +191,23 @@ largest, at small :math:`R`; scaling by :math:`\nu` makes the criterion read
 A larger :math:`\tau` costs the flux and the post-processed :math:`\psi^*` a
 constant, not an order, while :math:`\tau h/\nu` stays small.
 
-**Except at the axis.** :math:`\tau_0/R` grows without bound on the faces that
-touch :math:`R = 0`, so on a mesh reaching the axis — a mirror, or a
-free-boundary domain closed on it — the flux loses half an order there at every :math:`k`,
-and the round-off floor can rise above Newton's stopping target, so that a
-solve which converges under a constant :math:`\tau` stops without converging.
-Both were measured on MEQ's own suite; check the flux's rate and Newton's
-history on your own axis-reaching problem before relying on it.
+**Why the floor.** Unbounded, :math:`\tau_0/R` has no definite value at the
+axis. On a face meeting :math:`R = 0` at a vertex, :math:`\int \tau_0/R` against
+a shape function that does not vanish there diverges logarithmically, so what
+is assembled depends on the face quadrature rule, and :math:`\tau h` there is a
+constant that refinement never reduces: in the strip of elements touching the
+axis the flux converges an order slower, which over the whole mesh is half an
+order. And a quadrature point on a face lying on the axis is computed at
+:math:`R` of order :math:`10^{-18}` rather than exactly zero, where
+:math:`\tau_0/R` is so large that the residual cannot be evaluated to Newton's
+stopping target. Floored, :math:`\tau \le \tau_0/R_f` everywhere and both go away:
+what is left at the axis is what a constant :math:`\tau` has there, and
+:math:`R_f` sets the size of the flux's error near the axis rather than its
+order. :math:`R_f = 0` is refused for that reason. On a mesh that stays
+farther than :math:`R_f` from the axis — every tokamak box — the floor never
+binds. Both effects, and the choice of :math:`R_f`, were measured on MEQ's own
+suite; check the flux's rate and Newton's history on your own axis-reaching
+problem before relying on it.
 
 **The default stays constant**, which is what every rate in the suite is
 measured with. The ceiling, the scaled stabilisation's reach on the rotating

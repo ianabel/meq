@@ -861,10 +861,12 @@ the branch.
   the vacuum-midplane gauge at 5e19: that posed problem folds, mesh converged,
   near 4.15e19 (→ [M-291](MEASUREMENTS.md#m-291)). **Open**: the default is
   still constant `τ = 1`, so a user's coarse mirror meets the first fold unless
-  the key is set, and `τ = τ₀/R` as built costs half an order in `q` and the
-  round-off floor on a mesh reaching the axis
-  ([M-290](MEASUREMENTS.md#m-290) is what changing the default
-  costs).
+  the key is set. `τ = τ₀/max(R, R_f)` floors the radius at
+  `TauFloorRadius`, 0.1 m unless given, which removes the unbounded form's
+  half order in `q` and its round-off stall on a mesh reaching the axis
+  ([M-TAUCAP](MEASUREMENTS.md#m-taucap)); 0.1 m is one value measured on the
+  mirror, not an optimum, and [M-290](MEASUREMENTS.md#m-290) is what changing
+  the default costs.
 * **32 knots are fixed for every mesh.** At level 2 their error is 170× under
   the discretisation error, but between knots they move the
   `.nc`'s true-midplane densities off the input tables by up to 7e-05
