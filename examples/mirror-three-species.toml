@@ -37,7 +37,7 @@
 # with Tau = 3 converges at both densities in this gauge, in three or four
 # steps.  Under "vacuum-midplane" the same tables are a different plasma, and
 # it has no equilibrium past about 4.15e19 m^-3 on any mesh or Tau
-# (MEASUREMENTS.md M-FOLD).
+# (MEASUREMENTS.md M-291).
 
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it

@@ -336,7 +336,7 @@ BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 
 /*
  * THE DIFFUSION-SCALED tau KEEPS k+1 IN BOTH psi AND q, at tau0 = 3 m^-1 --
- * the value MEASUREMENTS.md M-TAUDESIGN-C recommends for it. Not a claim that
+ * the value MEASUREMENTS.md M-289 recommends for it. Not a claim that
  * it is the better choice here: on this box nu = 1/R stays within [0.7, 1.7],
  * so tau = 3/R is two to five times the default everywhere, and the flux
  * pays for that in its constant (2.6x at k = 2), not in its order. What is

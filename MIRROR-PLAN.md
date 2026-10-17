@@ -317,7 +317,7 @@ both midplane gauges. **What is left differs by gauge.** On the vacuum's
 curve it is the posed problem's own fold, smooth, global and mesh converged
 near **4.15e19**, so 5e19 there has no equilibrium on any mesh; under the
 midplane gauge there is no fold below 9.1e19 on level 0, and 5e19 converges on
-levels 0 and 1 in four steps → [M-FOLD](MEASUREMENTS.md#m-fold).
+levels 0 and 1 in four steps → [M-291](MEASUREMENTS.md#m-291).
 
 **THE CROSSINGS ARE BORDER UNKNOWNS — BUILT, AND WHAT SHIPS**
 → [M-283](MEASUREMENTS.md#m-283). `GradShafranovSolver` makes `R₀`
@@ -451,7 +451,7 @@ species at `M = 6`: three quadratic steps at 5e18 on every level and at 2e19 on
 levels 1 and 2; carbon's exponent to the solved crossing is 0.74 at 5e18 and 3.3
 at 2e19 against the best fixed radius's 134. The pressure cap on level 0 is
 constant `τ`'s element-local fold, and 5e19 is past the plasma's own
-(above, → [M-FOLD](MEASUREMENTS.md#m-fold)).
+(above, → [M-291](MEASUREMENTS.md#m-291)).
 
 **OUTPUT.** Every rotating mirror's `.nc`, in any gauge, carries `R₀( Ψ )` and
 `n_s( R₀( Ψ ), Ψ )` with slopes on the solved crossing, as `DensityFile`
@@ -859,11 +859,11 @@ the branch.
   midplane gauges and 5e19 on levels 0 and 1 under the midplane gauge, which
   reaches 9.1e19 on level 0 without folding. The one that is the plasma's is
   the vacuum-midplane gauge at 5e19: that posed problem folds, mesh converged,
-  near 4.15e19 (→ [M-FOLD](MEASUREMENTS.md#m-fold)). **Open**: the default is
+  near 4.15e19 (→ [M-291](MEASUREMENTS.md#m-291)). **Open**: the default is
   still constant `τ = 1`, so a user's coarse mirror meets the first fold unless
   the key is set, and `τ = τ₀/R` as built costs half an order in `q` and the
   round-off floor on a mesh reaching the axis
-  ([M-TAUCOMPARE](MEASUREMENTS.md#m-taucompare) is what changing the default
+  ([M-290](MEASUREMENTS.md#m-290) is what changing the default
   costs).
 * **32 knots are fixed for every mesh.** At level 2 their error is 170× under
   the discretisation error, but between knots they move the
@@ -928,7 +928,7 @@ the branch.
    element's local block going singular at constant `τ = 1`, which rises with
    the mesh and which `τ = 3/R` lifts — to 5e19 and beyond under the midplane
    gauge. Only the vacuum-midplane gauge's 5e19 is the posed problem's own
-   fold, mesh converged near 4.15e19 ([M-FOLD](MEASUREMENTS.md#m-fold)).
+   fold, mesh converged near 4.15e19 ([M-291](MEASUREMENTS.md#m-291)).
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,

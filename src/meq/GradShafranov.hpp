@@ -523,8 +523,8 @@ namespace meq
 	 * singular, which is the element-local fold of the rotating mirror. With
 	 * tau = tau0 nu the nu cancels: the criterion reads
 	 * dF/dpsi < ( k + 1 ) tau0 |dK|/|K|, the same at every radius.
-	 * CLAUDE_HDGGS.md has the derivation and MEASUREMENTS.md M-TAUDESIGN-A to
-	 * M-TAUDESIGN-C the measurement.
+	 * CLAUDE_HDGGS.md has the derivation and MEASUREMENTS.md M-287 to
+	 * M-289 the measurement.
 	 *
 	 * EXACT AT THE QUADRATURE POINT. Eval() reads the physical point off the
 	 * transformation it is handed, which every MFEM route -- the per-face loop,
@@ -545,7 +545,7 @@ namespace meq
 	 * which in that strip of elements is MFEM's h^-1 scaling -- q converges at
 	 * k + 1/2 on a mesh reaching the axis, and the round-off floor rises above
 	 * Newton's target on the mirror's k = 4 and vacuum solves (MEASUREMENTS.md
-	 * M-TAUCOMPARE). That, and not the fold, is why this is not the default.
+	 * M-290). That, and not the fold, is why this is not the default.
 	 *
 	 * IsConstant() is TRUE, and that is a statement about the STATE: MFEM's
 	 * contract is "s depends on neither the potential nor its trace", and
@@ -929,7 +929,7 @@ namespace meq
 			///                 Constant tau = 1 is both papers' choice and a
 			///                 measured balance rather than an optimum: smaller
 			///                 buys q a few percent and costs psi, larger the
-			///                 reverse (MEASUREMENTS.md M-TAUDESIGN-B). The
+			///                 reverse (MEASUREMENTS.md M-288). The
 			///                 pre-port code used 5.0 with no recorded reason.
 			GradShafranovSolver( mfem::Mesh &meshIn, int orderIn, double tauIn = 1.0 );
 

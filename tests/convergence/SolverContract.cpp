@@ -266,10 +266,12 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverRAtEveryQuadraturePoin
 			{
 				if ( i >= n1 + n2 && j < n1 + n2 )
 					continue;
-				scale = std::max( scale, std::abs( expected( i, j ) ) );
-				error = std::max( error, std::abs( elmat( i, j ) - expected( i, j ) ) );
+				scale = std::max( scale, static_cast<double>( std::abs( expected( i, j ) ) ) );
+				error = std::max( error, static_cast<double>( std::abs( elmat( i, j ) - expected( i, j ) ) ) );
 			}
-		BOOST_TEST( error <= 1.0e-13*scale,
+		// The same sum in another order, so in single the format's floor is
+		// the whole difference; a tau read off the wrong point is orders above it.
+		BOOST_TEST( ( error <= 1.0e-13*scale || !meq::tests::aboveTheFormatsFloor( error, scale ) ),
 		            "face " << f << ( onAxis ? " (on the axis)" : "" ) << ": the assembled face term is "
 		            << error << " from tau0/R summed at its points, against " << scale );
 		worst = std::max( worst, error/scale );

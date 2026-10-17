@@ -278,7 +278,7 @@ rotating mirror's three-species `M = 6` case the element-local margin
 the measured ceiling, while computed on a stiffly stabilised branch's states it
 only bounds it from above. The global linearised operator's lowest plasma mode
 agrees with the one element's to under 1%: the trace coupling does not move it
-(→ **[M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a)**).
+(→ **[M-287](MEASUREMENTS.md#m-287)**).
 
 **A constant `τ` is weakest relative to the operator where `ν` is largest**, at
 small `R`, which is where a mirror's plasma sits. `τ = τ₀ ν` makes the
@@ -306,8 +306,8 @@ and MFEM's `h⁻¹` precedent costs an order in `q` (above). **What it costs**:
 larger `τ` buys `ψ` and costs `q` and `ψ*` a constant — on Solov'ev `τ₀ = 3` is
 up to 2.6× in `q` and 2.5× in `ψ*`, `τ₀ = 10` up to 8.4× — while near the axis
 `ψ` improves 10–24× and `q` does not move
-(→ **[M-TAUDESIGN-B](MEASUREMENTS.md#m-taudesign-b)**,
-**[M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)**). **Too small a `τ` folds an
+(→ **[M-288](MEASUREMENTS.md#m-288)**,
+**[M-289](MEASUREMENTS.md#m-289)**). **Too small a `τ` folds an
 analytic benchmark too**: Example 5's reaction `∂F/∂ψ ≈ 14` fails Newton on the
 4-cell mesh at `k = 1` for constant `τ = 0.3` and for `τ₀ = 0.3` alike, which
 is the same local criterion.
@@ -322,11 +322,11 @@ without converging. Bounded, `τ₀/max(R, 0.1 m)` — measured through an
 uncommitted override, not an option — keeps `k+1` there, solves all three, and
 on the mirror is better than constant `τ = 10` in `ψ_h` and `ψ_ax`. `τ₀ = 1`
 is under-stabilised wherever `R > 1 m` and fails as constant `τ = 0.3` does
-(→ **[M-TAUCOMPARE](MEASUREMENTS.md#m-taucompare)**). And the mirror's
+(→ **[M-290](MEASUREMENTS.md#m-290)**). And the mirror's
 "ceiling" was this fold in every stall measured but one: under `τ = 3/R` the
 midplane gauge solves 5e19 and does not fold below 9.1e19, and only the
 vacuum-midplane gauge has a fold of its own, near 4.15e19
-(→ **[M-FOLD](MEASUREMENTS.md#m-fold)**).
+(→ **[M-291](MEASUREMENTS.md#m-291)**).
 
 ### Post-processing is back, and it was free
 

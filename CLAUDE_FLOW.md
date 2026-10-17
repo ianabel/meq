@@ -265,8 +265,8 @@ finer ones. **That cap is the HDG stabilisation's, not the plasma's**: an
 element-local fold at constant `τ = 1`, which `[discretisation] TauScaling =
 "diffusion"` with `Tau = 3` lifts on the coarsest mesh to the posed problem's
 own, mesh-converged fold near 4.15e19 (`CLAUDE_HDGGS.md`, *A constant `τ`
-folds inside one element*, → [M-FOLD](MEASUREMENTS.md#m-fold),
-[M-TAUDESIGN-C](MEASUREMENTS.md#m-taudesign-c)). **So two stalls look alike
+folds inside one element*, → [M-291](MEASUREMENTS.md#m-291),
+[M-289](MEASUREMENTS.md#m-289)). **So two stalls look alike
 and are not**: 2e19 on level 0 is the discretisation's in both gauges, and
 `τ = 3/R` solves it; 5e19 on this curve is past the plasma's own fold and
 nothing numerical does — while the SAME tables under the midplane gauge, a

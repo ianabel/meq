@@ -4082,7 +4082,7 @@ BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge 
  * gauge. So 2e19 on level 0 must converge under it, in BOTH midplane gauges,
  * quadratically and in about the three steps level 1 takes at tau = 1 -- and the
  * default, the control that makes this a statement about tau, must not.
- * [M-FOLD](MEASUREMENTS.md#m-fold), [M-TAUDESIGN-A](MEASUREMENTS.md#m-taudesign-a).
+ * [M-291](MEASUREMENTS.md#m-291), [M-287](MEASUREMENTS.md#m-287).
  */
 BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsIt )
 {
@@ -4129,7 +4129,7 @@ BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsI
 		             constant->converged ? "CONVERGED" : "stalls", control.size() - 1, control.back() );
 		BOOST_TEST( !constant->converged, c.name << ": the default tau = 1 converges at " << peak
 			<< " on level 0, so this case no longer separates the stabilisation's fold from the "
-			"plasma's; re-measure the ceiling (M-FOLD) before moving the density" );
+			"plasma's; re-measure the ceiling (M-291) before moving the density" );
 	}
 	std::fflush( stdout );
 }

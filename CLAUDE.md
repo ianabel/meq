@@ -119,7 +119,7 @@ the next, for a third of the Newton work (→ **[M-01](MEASUREMENTS.md#m-01)**).
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst`, `CLAUDE_FLOW.md` |
 | solution inversion | IN-A to IN-P, **done** | `INVERSION-PLAN.md`, `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 done or answered, FB-6 met, XP-0 to XP-4 done — MEQ reproduces `freegs4e`'s diverted equilibrium | `FREE-BOUNDARY-PLAN.md`, `CLAUDE_FB.md` |
-| rotating mirror | MR-0 to MR-5 and §5's midplane gauge done — MEQ solves geq's rotating mirror and agrees with it to geq's own resolution in either gauge (M-261 to M-263, M-278); `examples/mirror-rotating.toml` runs it through the driver (M-264), adaptively under a judged estimator (M-279), on the card (M-280), and with no retry rung beside the box (M-277); `examples/mirror-three-species.toml` solves e, D and C⁶⁺ at `M = 6` in the midplane gauge (M-278), quadratic with `R₀` at 32 knots as border unknowns (M-283, M-284); `Gauge = "vacuum-midplane"` pins the potential on the vacuum's crossing, quadratic with an exact Jacobian (M-281), and the `.nc` carries the true-midplane densities (M-282). Open: a three-species pressure ceiling that is not the freeze and rises with the mesh (M-281, M-285), and both midplane gauges untried under `--device` and adaptivity | `MIRROR-PLAN.md`, `CLAUDE_FLOW.md` |
+| rotating mirror | MR-0 to MR-5 and §5's midplane gauge done — MEQ solves geq's rotating mirror and agrees with it to geq's own resolution in either gauge (M-261 to M-263, M-278); `examples/mirror-rotating.toml` runs it through the driver (M-264), adaptively under a judged estimator (M-279), on the card (M-280), and with no retry rung beside the box (M-277); `examples/mirror-three-species.toml` solves e, D and C⁶⁺ at `M = 6` in the midplane gauge (M-278), quadratic with `R₀` at 32 knots as border unknowns (M-283, M-284); `Gauge = "vacuum-midplane"` pins the potential on the vacuum's crossing, quadratic with an exact Jacobian (M-281), and the `.nc` carries the true-midplane densities (M-282). the three-species ceiling at the default constant `τ = 1` is the stabilisation's fold inside one element — under `τ = 3/R` the midplane gauge solves past 9e19, and only the vacuum-midplane gauge has a fold of its own, near 4.15e19 (M-291). Open: a default stabilisation that lifts it — `τ = 3/max(R, 0.1 m)` is the candidate, measured only through an override, while the shipped `TauScaling = "diffusion"` costs `q` half an order at the axis (M-290) — and both midplane gauges untried under `--device` and adaptivity | `MIRROR-PLAN.md`, `CLAUDE_FLOW.md` |
 | element regions | ER-0 to ER-3 done — each element's material fractions, the material, circuit and permeability curve tables in the `.nc`, VTK cell data and the `node_material` grid mask, classified by the solver's own source predicate (M-266 to M-270) | `ELEMENT-REGIONS-PLAN.md`, `CLAUDE_DRIVER.md` |
 | inverse solve | IV-0 to IV-6 done — coil currents are border unknowns, `[inverse]` runs through the driver and exits 4 on a best fit (M-250 to M-253) | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, `CLAUDE_FB.md` |
 
@@ -355,6 +355,12 @@ The checklist; the measurement and the story of each is in the file named.
   it in zero iterations; `setInitialGuess()` is the way out.
 * **No residual evaluation between `NPCGradient()` and the solves it
   entitles.**
+* **The suite's fixtures and bounds were measured at `τ = 1`**: no constant `τ`
+  is best for both `ψ_h` and `q_h`, `τ = 0.3` breaks Newton across the
+  non-linear suite, and from `τ = 10` `CriticalPointFinder` finds no zero of
+  `q_h`, so a user's `Tau = 10` loses the axis search (M-286). Under
+  `TauScaling = "diffusion"` the unbounded `τ₀/R` costs `q` half an order on
+  any mesh touching `R = 0` (M-290).
 
 **Configuration and seams** (`CLAUDE_DRIVER.md`, `CLAUDE_FB.md`)
 
