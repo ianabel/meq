@@ -476,7 +476,9 @@ namespace mirror
 
 	/**
 	 * L2( psi_h - psi_coil ) over D_h and over the machine region, from ONE
-	 * evaluation of the reference.
+	 * evaluation of the reference -- and the same for the flux,
+	 * L2( q_h - q_coil ) with q_coil = CoilSet::flux(), tabulated at the same
+	 * points, and for any other potential on the mesh, psi* included.
 	 *
 	 * The reference is what costs -- coilPsi() at every quadrature point, a
 	 * Gauss rule over each pack per point -- so it is tabulated once per mesh
@@ -514,12 +516,16 @@ namespace mirror
 					}
 				}
 				exact.resize( radius.size() );
+				exactFluxR.resize( radius.size() );
+				exactFluxZ.resize( radius.size() );
 				long const n = static_cast<long>( radius.size() );
 				#pragma omp parallel for schedule( dynamic, 256 )
 				for ( long i = 0; i < n; ++i )
-					exact[ static_cast<std::size_t>( i ) ] = reference.psi(
-						radius[ static_cast<std::size_t>( i ) ],
-						height[ static_cast<std::size_t>( i ) ] );
+				{
+					std::size_t const j = static_cast<std::size_t>( i );
+					exact[ j ] = reference.psi( radius[ j ], height[ j ] );
+					reference.flux( radius[ j ], height[ j ], exactFluxR[ j ], exactFluxZ[ j ] );
+				}
 			}
 
 			/// @param psi a potential on the mesh this table was built on, at
@@ -558,6 +564,48 @@ namespace mirror
 				return out;
 			}
 
+			/// errors() for the flux: @a q a vector field on this table's
+			/// mesh, q_h in MEQ's sign convention, against CoilSet::flux().
+			/// Every point is off the axis -- they are element-interior
+			/// quadrature points -- so q_coil is finite at each.
+			Errors fluxErrors( mfem::GridFunction const &q ) const
+			{
+				BOOST_TEST_REQUIRE( q.FESpace()->GetMesh() == &mesh );
+				BOOST_TEST_REQUIRE( q.VectorDim() == 2 );
+				Errors out;
+				mfem::IsoparametricTransformation transformation;
+				mfem::Vector value( 2 );
+				std::size_t i = 0;
+				for ( int e = 0; e < mesh.GetNE(); ++e )
+				{
+					mesh.GetElementTransformation( e, &transformation );
+					mfem::IntegrationRule const &ir = rule( e );
+					for ( int p = 0; p < ir.GetNPoints(); ++p, ++i )
+					{
+						mfem::IntegrationPoint const &ip = ir.IntPoint( p );
+						transformation.SetIntPoint( &ip );
+						q.GetVectorValue( transformation, ip, value );
+						double const dR = value( 0 ) - exactFluxR[ i ];
+						double const dZ = value( 1 ) - exactFluxZ[ i ];
+						double const d2 = weight[ i ]*( dR*dR + dZ*dZ );
+						double const n2 = weight[ i ]*( exactFluxR[ i ]*exactFluxR[ i ]
+						                                + exactFluxZ[ i ]*exactFluxZ[ i ] );
+						out.global += d2;
+						out.globalNorm += n2;
+						if ( region[ i ] )
+						{
+							out.region += d2;
+							out.regionNorm += n2;
+						}
+					}
+				}
+				out.global = std::sqrt( out.global );
+				out.region = std::sqrt( out.region );
+				out.globalNorm = std::sqrt( out.globalNorm );
+				out.regionNorm = std::sqrt( out.regionNorm );
+				return out;
+			}
+
 		private:
 			mfem::IntegrationRule const &rule( int e ) const
 			{
@@ -571,6 +619,8 @@ namespace mirror
 			std::vector<double> height;
 			std::vector<double> weight;
 			std::vector<double> exact;
+			std::vector<double> exactFluxR;
+			std::vector<double> exactFluxZ;
 			std::vector<char> region;
 	};
 }

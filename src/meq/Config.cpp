@@ -1725,7 +1725,7 @@ namespace meq
 		// [discretisation]
 		{
 			Table discretisation( document, "discretisation", sourceName, true );
-			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau", "TauScaling" } );
+			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau", "TauScaling", "TauFloorRadius" } );
 
 			discretisationOptions.polynomialDegree = discretisation.getInteger( "PolynomialDegree" );
 			discretisationOptions.tau = discretisation.getFloatOr( "Tau", 1.0 );
@@ -1738,6 +1738,18 @@ namespace meq
 			else
 				discretisation.fail( "TauScaling", "must be one of constant, diffusion, but is \""
 				                     + scaling + "\"" );
+
+			if ( discretisation.has( "TauFloorRadius" ) )
+			{
+				if ( discretisationOptions.tauScaling != TauScalingType::Diffusion )
+					discretisation.fail( "TauFloorRadius", "means nothing unless TauScaling = \"diffusion\": it is R_f in "
+					                     "tau = Tau/max( R, R_f ), and a constant tau never reads R" );
+				discretisationOptions.tauFloorRadius = discretisation.getFloat( "TauFloorRadius" );
+				if ( !( std::isfinite( discretisationOptions.tauFloorRadius )
+				        && discretisationOptions.tauFloorRadius > 0.0 ) )
+					discretisation.fail( "TauFloorRadius", "must be a positive length in m; R_f = 0 is the unbounded "
+					                     "tau = Tau/R, which costs the flux half an order on a mesh reaching the axis" );
+			}
 
 			if ( discretisationOptions.polynomialDegree < 0 )
 				discretisation.fail( "PolynomialDegree", "must not be negative" );

@@ -189,6 +189,12 @@ namespace
  * and k = 1's first pair there reads 1.27 before reaching 2.14. Both norms reach
  * k+1 at k = 3 as well, which says the r^2 log r at the packs' corners -- which
  * caps a cut conductor's rate -- is not limiting a conductor meshed to.
+ *
+ * q_h AND psi* ARE PRINTED, NOT ASSERTED, against the same closed form --
+ * CoilSet::flux() and coilPsi() -- in a second table: the flux is what a
+ * choice of the stabilisation trades psi_h against, and this half-disc
+ * reaches the axis, where an unbounded tau0/R costs q half an order
+ * (MEASUREMENTS.md M-290).
  */
 BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 {
@@ -228,6 +234,8 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 	int const orders = 3;
 	std::vector<std::vector<double>> global( orders );
 	std::vector<std::vector<double>> region( orders );
+	std::vector<std::vector<Errors>> flux( orders );
+	std::vector<std::vector<Errors>> star( orders );
 	double normGlobal = 0.0;
 	double normRegion = 0.0;
 	double controlRatio = 0.0;
@@ -244,6 +252,9 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 			std::size_t const k = static_cast<std::size_t>( order - 1 );
 			global[ k ].push_back( e.global );
 			region[ k ].push_back( e.region );
+			flux[ k ].push_back( table.fluxErrors( s->solver->flux() ) );
+			s->solver->postProcess();
+			star[ k ].push_back( table.errors( s->solver->postProcessedPotential() ) );
 			normGlobal = e.globalNorm;
 			normRegion = e.regionNorm;
 
@@ -309,6 +320,40 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 
 	std::printf( "\n    |psi_coil|: %.4e over D_h, %.4e over the machine region\n",
 	             normGlobal, normRegion );
+
+	// The flux and psi*, printed and not asserted.
+	std::printf( "\n    q_h and psi* against the same closed form, printed:\n" );
+	std::printf( "    %2s %5s %13s %7s %13s %7s %13s %7s %13s %7s\n", "k", "level",
+	             "L2 q D_h", "rate", "L2 q machine", "rate", "L2 psi* D_h", "rate",
+	             "psi* machine", "rate" );
+	for ( int order = 1; order <= orders; ++order )
+	{
+		std::size_t const k = static_cast<std::size_t>( order - 1 );
+		for ( int level = 0; level < levels; ++level )
+		{
+			Errors const &q = flux[ k ][ static_cast<std::size_t>( level ) ];
+			Errors const &p = star[ k ][ static_cast<std::size_t>( level ) ];
+			double rates[ 4 ] = { std::numeric_limits<double>::quiet_NaN(),
+			                      std::numeric_limits<double>::quiet_NaN(),
+			                      std::numeric_limits<double>::quiet_NaN(),
+			                      std::numeric_limits<double>::quiet_NaN() };
+			if ( level > 0 )
+			{
+				Errors const &qc = flux[ k ][ static_cast<std::size_t>( level - 1 ) ];
+				Errors const &pc = star[ k ][ static_cast<std::size_t>( level - 1 ) ];
+				rates[ 0 ] = meq::tests::rate( qc.global, q.global, 2.0 );
+				rates[ 1 ] = meq::tests::rate( qc.region, q.region, 2.0 );
+				rates[ 2 ] = meq::tests::rate( pc.global, p.global, 2.0 );
+				rates[ 3 ] = meq::tests::rate( pc.region, p.region, 2.0 );
+			}
+			std::printf( "    %2d %5d %13.4e %7.3f %13.4e %7.3f %13.4e %7.3f %13.4e %7.3f\n",
+			             order, level, q.global, rates[ 0 ], q.region, rates[ 1 ], p.global,
+			             rates[ 2 ], p.region, rates[ 3 ] );
+		}
+	}
+	std::printf( "    |q_coil|: %.4e over D_h, %.4e over the machine region\n",
+	             flux[ 0 ].back().globalNorm, flux[ 0 ].back().regionNorm );
+	std::fflush( stdout );
 
 	for ( int order = 1; order <= orders; ++order )
 	{

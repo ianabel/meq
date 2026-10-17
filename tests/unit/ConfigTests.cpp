@@ -796,6 +796,55 @@ BOOST_AUTO_TEST_CASE( tau_scaling_defaults_to_constant_and_refuses_an_unknown_va
 			[]( ConfigError const & e ) { return e.getKey() == "discretisation.TauScaling"; } );
 }
 
+/// [discretisation] TauFloorRadius: R_f in tau = Tau/max( R, R_f ). Absent it
+/// is 0.1 m, the solver's own default (SolverContract asserts the two agree);
+/// an integer is a length too. It is refused beside a constant tau -- absent
+/// TauScaling as well as "constant" -- which never reads R and would ignore
+/// it, and refused at R_f <= 0: zero is the unbounded Tau/R that costs the
+/// flux half an order at the axis, so it is not reachable from a file.
+BOOST_AUTO_TEST_CASE( tau_floor_radius_defaults_and_is_refused_beside_a_constant_tau )
+{
+	auto withLines = []( std::string const & lines )
+	{
+		return
+			"[mesh]\n"
+			"RMin = 0.2\n"
+			"RMax = 1.8\n"
+			"ZMin = -1.6\n"
+			"ZMax = 1.6\n"
+			"\n"
+			"[discretisation]\n"
+			"PolynomialDegree = 2\n"
+			"Tau = 3.0\n"
+			+ lines +
+			"\n"
+			"[source]\n"
+			"Type = \"soloviev\"\n"
+			"A = -0.52\n";
+	};
+
+	BOOST_TEST( parse( minimal() ).getDiscretisation().tauFloorRadius == 0.1 );
+	BOOST_TEST( parse( withLines( "TauScaling = \"diffusion\"\n" ) ).getDiscretisation().tauFloorRadius
+	            == 0.1 );
+
+	Configuration floored = parse( withLines( "TauScaling = \"diffusion\"\nTauFloorRadius = 0.05\n" ) );
+	BOOST_TEST( ( floored.getDiscretisation().tauScaling == TauScalingType::Diffusion ) );
+	BOOST_TEST( floored.getDiscretisation().tauFloorRadius == 0.05 );
+	BOOST_TEST( floored.getDiscretisation().tau == 3.0 );
+	BOOST_TEST( parse( withLines( "TauScaling = \"diffusion\"\nTauFloorRadius = 1\n" ) )
+	            .getDiscretisation().tauFloorRadius == 1.0 );
+
+	for ( std::string const bad : { "TauFloorRadius = 0.05\n",
+	                                "TauScaling = \"constant\"\nTauFloorRadius = 0.05\n",
+	                                "TauScaling = \"diffusion\"\nTauFloorRadius = 0.0\n",
+	                                "TauScaling = \"diffusion\"\nTauFloorRadius = -0.1\n",
+	                                "TauScaling = \"diffusion\"\nTauFloorRadius = inf\n",
+	                                "TauScaling = \"diffusion\"\nTauFloorRadius = nan\n",
+	                                "TauScaling = \"diffusion\"\nTauFloorRadius = \"0.1\"\n" } )
+		BOOST_CHECK_EXCEPTION( parse( withLines( bad ) ), ConfigError,
+			[]( ConfigError const & e ) { return e.getKey() == "discretisation.TauFloorRadius"; } );
+}
+
 BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 {
 	std::string const zeroTau =

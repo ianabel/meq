@@ -365,6 +365,36 @@ namespace
 		return values;
 	}
 
+	/// totalAt() for the flux: q_p + q_c at the points, R component first,
+	/// each the remainder's polynomial there plus ConductorField::flux()
+	/// exactly there. MEQ's sign convention, which flux() and the filaments'
+	/// flux() share.
+	std::pair<std::vector<double>, std::vector<double>>
+	totalFluxAt( MirrorRun const &run, mfem::GridFunction const &remainder,
+	             std::vector<double> const &radius, std::vector<double> const &z )
+	{
+		mfem::FiniteElementSpace const &space = *remainder.FESpace();
+		BOOST_TEST_REQUIRE( space.GetVDim() == 2 );
+		BOOST_TEST_REQUIRE( space.GetOrdering() == mfem::Ordering::byNODES );
+		mfem::FiniteElementSpace scalar( space.GetMesh(), space.FEColl() );
+		std::vector<double> component[ 2 ];
+		for ( int c = 0; c < 2; ++c )
+		{
+			mfem::GridFunction part( &scalar );
+			for ( int i = 0; i < part.Size(); ++i )
+				part( i ) = remainder( c*part.Size() + i );
+			component[ c ] = valuesAt( part, radius, z );
+		}
+		for ( std::size_t i = 0; i < radius.size(); ++i )
+		{
+			double qR = 0.0, qZ = 0.0;
+			run.filaments.flux( radius[ i ], z[ i ], qR, qZ );
+			component[ 0 ][ i ] += qR;
+			component[ 1 ][ i ] += qZ;
+		}
+		return { component[ 0 ], component[ 1 ] };
+	}
+
 	std::unique_ptr<MirrorRun> runMirror( Options const &o )
 	{
 		meqtest::geq::GeqCase const &p = problem();
@@ -801,6 +831,8 @@ namespace
 		std::vector<double> psi;      ///< psi_h + psi_c at geqNodes(), NaN where not found
 		std::vector<double> psiStar;  ///< psi* + psi_c
 		std::vector<double> plasma;   ///< psi* alone: the remainder, the plasma's own flux
+		std::vector<double> fluxR;    ///< q_h + q_c, the R component, at geqNodes()
+		std::vector<double> fluxZ;    ///< and the z component
 		/// psi* + psi_c at the two label points, which psiAxis() and
 		/// psiBoundary() read by psi_h.
 		double starAxis = 0.0;
@@ -833,6 +865,8 @@ namespace
 		s.psiBoundary = run->solver->psiBoundary();
 		Nodes const &nodes = geqNodes();
 		s.psi = totalAt( *run, run->solver->potential(), nodes.radius, nodes.z );
+		std::tie( s.fluxR, s.fluxZ ) = totalFluxAt( *run, run->solver->flux(), nodes.radius,
+		                                            nodes.z );
 		run->solver->postProcess();
 		mfem::GridFunction const &star = run->solver->postProcessedPotential();
 		s.psiStar = totalAt( *run, star, nodes.radius, nodes.z );
@@ -908,6 +942,18 @@ namespace
 		}
 		d.rms = d.count > 0 ? std::sqrt( sum/d.count ) : 0.0;
 		return d;
+	}
+
+	/// difference() for the flux: max and rms of | q_a - q_b |, the
+	/// Euclidean length of the difference, over the nodes where both are
+	/// finite.
+	Difference nodalFluxDifference( Sampled const &a, Sampled const &b )
+	{
+		BOOST_TEST_REQUIRE( a.fluxR.size() == b.fluxR.size() );
+		std::vector<double> length( a.fluxR.size() );
+		for ( std::size_t i = 0; i < length.size(); ++i )
+			length[ i ] = std::hypot( a.fluxR[ i ] - b.fluxR[ i ], a.fluxZ[ i ] - b.fluxZ[ i ] );
+		return difference( length, std::vector<double>( length.size(), 0.0 ) );
 	}
 
 	int finiteCount( std::vector<double> const &v )
@@ -1395,6 +1441,16 @@ BOOST_AUTO_TEST_SUITE( resolution )
  * minutes ); at k = 2, 2.83 and 2.86. Those rows are printed against their
  * design and not asserted -- the precondition, the asymptotic regime, is
  * what is missing, and level 4 is what it costs.
+ *
+ * q_h IS PRINTED BESIDE THEM AND NOT ASSERTED: | q_h - q_ref |, q = grad psi/R
+ * with the filaments' own q_c added exactly, against the reference run's q_h
+ * -- what a choice of the stabilisation trades psi_h against, and no rate the
+ * edges allow it has been measured yet. ITS FINEST RUNGS READ THE REFERENCE:
+ * the reference's q_h differs from level 1's at k = 4 by about 3e-06 rms, and
+ * k = 2 at level 3 and k = 3 at level 2 both stop near 1.1e-06 rms under
+ * constant tau = 1 and tau = 3/max( R, 0.1 m ) alike. grad_bar( psi* )/R
+ * reads within 1.2e-07 rms of the reference's q_h, so it is no better a
+ * reference; a finer one is ( MEASUREMENTS.md M-TAUCAP ).
  */
 BOOST_AUTO_TEST_CASE( psiConvergesAtTheRateItsEdgesAllow )
 {
@@ -1409,35 +1465,45 @@ BOOST_AUTO_TEST_CASE( psiConvergesAtTheRateItsEdgesAllow )
 	std::printf( "    the reference's own error, bounded from level %d at rate %.0f: "
 	             "max %.3e, rms %.3e\n", bestLevel - 1,
 	             postProcessedRate( bestOrder ), own.max, own.rms );
+	Difference const ownFlux = nodalFluxDifference( sampled( bestLevel - 1, bestOrder, true ), ref );
+	std::printf( "    the reference's q_h, level %d against %d at k = %d: max %.3e, rms %.3e\n",
+	             bestLevel - 1, bestLevel, bestOrder, ownFlux.max, ownFlux.rms );
 
-	std::printf( "\n    %2s %5s %7s %6s | %10s %10s %6s | %10s %10s %6s | %10s %10s\n",
+	std::printf( "\n    %2s %5s %7s %6s | %10s %10s %6s | %10s %10s %6s | %10s %10s %6s | %10s %10s\n",
 	             "k", "level", "NE", "s", "psi_h max", "rms", "rate", "psi* max", "rms",
-	             "rate", "psi*( ax )", "psi*( bnd )" );
+	             "rate", "q_h max", "rms", "rate", "psi*( ax )", "psi*( bnd )" );
 	for ( int order = 1; order <= 3; ++order )
 	{
-		std::vector<double> potential, post;
+		std::vector<double> potential, post, flux;
 		std::vector<int> const levels = rungs( order );
 		for ( int level : levels )
 		{
 			Sampled const &s = sampled( level, order, true );
 			Difference const h = difference( s.psi, ref.psiStar );
 			Difference const star = difference( s.psiStar, ref.psiStar );
+			Difference const q = nodalFluxDifference( s, ref );
 			potential.push_back( h.rms );
 			post.push_back( star.rms );
+			flux.push_back( q.rms );
 			double hRate = std::numeric_limits<double>::quiet_NaN();
 			double starRate = std::numeric_limits<double>::quiet_NaN();
+			double qRate = std::numeric_limits<double>::quiet_NaN();
 			std::size_t const n = potential.size();
 			if ( n > 1 )
 			{
 				hRate = meq::tests::rate( potential[ n - 2 ], potential[ n - 1 ], 2.0 );
 				starRate = meq::tests::rate( post[ n - 2 ], post[ n - 1 ], 2.0 );
+				qRate = meq::tests::rate( flux[ n - 2 ], flux[ n - 1 ], 2.0 );
 			}
 			std::printf( "    %2d %5d %7d %6.1f | %10.3e %10.3e %6.3f | %10.3e %10.3e "
-			             "%6.3f | %10.2e %10.2e\n", order, level, s.elements, s.seconds,
-			             h.max, h.rms, hRate, star.max, star.rms, starRate,
-			             s.starAxis - ref.starAxis, s.starBoundary - ref.starBoundary );
+			             "%6.3f | %10.3e %10.3e %6.3f | %10.2e %10.2e\n", order, level, s.elements,
+			             s.seconds, h.max, h.rms, hRate, star.max, star.rms, starRate, q.max, q.rms,
+			             qRate, s.starAxis - ref.starAxis, s.starBoundary - ref.starBoundary );
 			std::fflush( stdout );
 		}
+		std::printf( "       %-5s %.3f over the ladder, printed, not asserted\n", "q_h",
+		             meq::tests::rate( flux.front(), flux.back(),
+		                               std::pow( 2.0, levels.back() - levels.front() ) ) );
 
 		double const span = std::pow( 2.0, levels.back() - levels.front() );
 		struct Quantity

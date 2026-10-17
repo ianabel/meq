@@ -681,9 +681,16 @@ namespace
 		return tauValue;
 	}
 
-	DiffusionScaledStabilization::DiffusionScaledStabilization( double tau0In )
-		: tau0Value( tau0In )
+	DiffusionScaledStabilization::DiffusionScaledStabilization( double tau0In,
+	                                                            double floorRadiusIn )
+		: tau0Value( tau0In ),
+		  floorRadiusValue( floorRadiusIn )
 	{
+		if ( !( std::isfinite( floorRadiusIn ) && floorRadiusIn > 0.0 ) )
+			throw std::invalid_argument( "meq::DiffusionScaledStabilization: the floor radius R_f in tau = tau0/max( R, R_f ) is "
+			                             + std::to_string( floorRadiusIn ) + ", and it must be a finite length > 0; "
+			                             "R_f = 0 is the unbounded tau0/R, which costs q half an order on a mesh reaching "
+			                             "the axis (MEASUREMENTS.md M-290)" );
 	}
 
 	bool DiffusionScaledStabilization::IsConstant() const
@@ -691,9 +698,9 @@ namespace
 		return true;
 	}
 
-	double DiffusionScaledStabilization::at( double radius, double centroidRadius ) const
+	double DiffusionScaledStabilization::at( double radius ) const
 	{
-		return tau0Value/( radius > 0.0 ? radius : centroidRadius );
+		return tau0Value/std::max( radius, floorRadiusValue );
 	}
 
 	mfem::real_t DiffusionScaledStabilization::Eval( mfem::real_t, mfem::real_t, mfem::real_t,
@@ -706,19 +713,17 @@ namespace
 		mfem::real_t xData[ 3 ];
 		mfem::Vector x( xData, tr.GetSpaceDim() );
 		tr.Transform( tr.GetIntPoint(), x );
-		if ( x( 0 ) > 0.0 )
-			return static_cast<mfem::real_t>( at( x( 0 ), 0.0 ) );
-		// On the axis. Transform() of another point leaves the transformation's
-		// own integration point, and the Jacobian it caches, alone.
-		mfem::real_t centroidData[ 3 ];
-		mfem::Vector centroid( centroidData, tr.GetSpaceDim() );
-		tr.Transform( mfem::Geometries.GetCenter( tr.GetGeometryType() ), centroid );
-		return static_cast<mfem::real_t>( at( x( 0 ), centroid( 0 ) ) );
+		return static_cast<mfem::real_t>( at( x( 0 ) ) );
 	}
 
 	double DiffusionScaledStabilization::tau0() const
 	{
 		return tau0Value;
+	}
+
+	double DiffusionScaledStabilization::floorRadius() const
+	{
+		return floorRadiusValue;
 	}
 
 	SourceIntegrator::SourceIntegrator( Source const &sourceIn, int extraOrderIn )
@@ -2326,9 +2331,30 @@ namespace
 		tauScalingChoice = choice;
 	}
 
+	void GradShafranovSolver::setTauScaling( TauScaling choice, double floorRadius )
+	{
+		if ( choice != TauScaling::Diffusion )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setTauScaling: a floor radius means nothing under "
+			                             "TauScaling::Constant, which never reads R; it is the R_f of "
+			                             "tau = tau0/max( R, R_f ) under Diffusion" );
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setTauScaling: the forms are already built; tau's scaling is part of the discretisation and has to be set before the first solve" );
+		// The constructor refuses the floor before the mesh is looked at, and
+		// the one-argument form refuses the mesh; neither touches this solver
+		// until both have passed.
+		DiffusionScaledStabilization const floored( scaledStabilization.tau0(), floorRadius );
+		setTauScaling( choice );
+		scaledStabilization = floored;
+	}
+
 	GradShafranovSolver::TauScaling GradShafranovSolver::tauScaling() const
 	{
 		return tauScalingChoice;
+	}
+
+	double GradShafranovSolver::tauFloorRadius() const
+	{
+		return scaledStabilization.floorRadius();
 	}
 
 	void GradShafranovSolver::setLocalSolver( LocalSolver choice )
@@ -5408,8 +5434,8 @@ namespace
 		// built-in expression entirely, and neither MEQ stabilisation reads the
 		// s_diff it is folded into. (R is the INVERSE of the diffusion
 		// coefficient, so it is not even the coefficient the integrator
-		// documents.) tau is constant or tau0/R as setTauScaling() chose; both
-		// are state independent.
+		// documents.) tau is constant or tau0/max( R, R_f ) as setTauScaling()
+		// chose; both are state independent.
 		mfem::HDGStabilization const &stab =
 			tauScalingChoice == TauScaling::Diffusion
 				? static_cast<mfem::HDGStabilization const &>( scaledStabilization )

@@ -349,7 +349,8 @@ namespace meq
 	{
 		// "constant": tau( x ) = Tau. The default.
 		Constant,
-		// "diffusion": tau( x ) = Tau/R, Tau read as tau0.
+		// "diffusion": tau( x ) = Tau/max( R, TauFloorRadius ), Tau read as
+		// tau0.
 		Diffusion
 	};
 
@@ -363,15 +364,23 @@ namespace meq
 		// Tau: the HDG stabilisation, > 0. Under TauScaling = "constant" it is
 		// tau itself, in m^-2 -- the face term < tau( psi - psihat ), w > has
 		// the units of q.n with q = grad psi/R -- and under "diffusion" it is
-		// tau0 in tau = tau0/R, in m^-1. Both papers take tau = 1 and note
-		// that optimal convergence needs only tau = O(1), so 1.0 is the default
-		// and there is rarely a reason to change it. (The code this replaces
-		// used 5.0, with no justification recorded.)
+		// tau0 in tau = tau0/max( R, R_f ), in m^-1. Both papers take
+		// tau = 1 and note that optimal convergence needs only tau = O(1), so
+		// 1.0 is the default and there is rarely a reason to change it. (The
+		// code this replaces used 5.0, with no justification recorded.)
 		double tau = 1.0;
 
 		// TauScaling: "constant" (the default) or "diffusion". See
 		// meq::DiffusionScaledStabilization.
 		TauScalingType tauScaling = TauScalingType::Constant;
+
+		// TauFloorRadius: R_f in tau = tau0/max( R, R_f ), in m, > 0, and only
+		// beside TauScaling = "diffusion" -- under "constant" it is refused,
+		// not ignored. The default is
+		// meq::DiffusionScaledStabilization::defaultFloorRadius, which this
+		// MFEM-free header cannot name: 0.1 m, the value the mirror suite was
+		// measured at (MEASUREMENTS.md M-290, M-TAUCAP).
+		double tauFloorRadius = 0.1;
 	};
 
 	// [source] -- which right-hand side F( R, z, psi ), and its parameters.

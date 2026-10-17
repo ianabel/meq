@@ -2948,7 +2948,8 @@ int main( int argc, char **argv )
 		// Before any source, so before the forms can exist; a mesh reaching
 		// R < 0 is refused here with the solver's own message.
 		if ( config->getDiscretisation().tauScaling == meq::TauScalingType::Diffusion )
-			fresh->setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion );
+			fresh->setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
+			                      config->getDiscretisation().tauFloorRadius );
 
 		if ( gammaHMarker )
 			fresh->setExtension( *path, *gammaHMarker );
