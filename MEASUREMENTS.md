@@ -18789,3 +18789,224 @@ without a finer reference than level 2 at `k = 4`.
 
 **Reproduce.** The three harnesses are scratch and not committed; the face
 radii and Newton histories are a print in `solveMeshed()`.
+
+### M-MIRRORTAU
+
+**THE MIRROR'S STABILISATION, `τ = τ₀/max(R, R_f)` SWEPT OVER `τ₀` = 1, 2, 3, 5,
+10 m⁻¹ AND `R_f` = 0.05, 0.1, 0.2 m ON EVERY MIRROR SUITE, BESIDE CONSTANT
+`τ = 1`. EVERY CELL CONVERGES EVERY MIRROR SOLVE IN DOUBLE AND KEEPS EVERY
+ORDER; NEWTON'S COST DOES NOT MOVE. WHAT SEPARATES THEM IS THE FOLD AND THE
+ACCURACY: `τ₀ = 1` STILL STOPS 22% BELOW THE VACUUM-MIDPLANE GAUGE'S OWN
+LIMIT ON THE COARSEST MESH; FROM `τ₀ = 3` THE COARSEST MESH IS ABOUT 1% SHORT
+OF IT AND LEVEL 1 REACHES IT, AND THE MIDPLANE GAUGE'S ONLY FOLD IS `τ`'s, LINEAR IN `τ₀` AND 4× ABOVE 5e19 AT
+`τ₀ = 3`. `ψ_h` AND THE LABELS AGAINST geq FALL AS `1/τ₀`, `ψ*`'s `k = 2` RATE
+AND THE VACUUM'S `q_h` PAY FOR IT, AND `R_f` MATTERS ONLY BELOW `R = R_f`. THE
+CHOICE IS `τ₀ = 3 m⁻¹`, `R_f = 0.1 m`, WITH `τ₀ = 5` THE RUNNER-UP. IN SINGLE
+THE VACUUM MIRROR'S NEWTON STALLS JUST ABOVE ITS `10 ε` TARGET FOR ANY
+`τ ≳ 2` — CONSTANT `τ` TOO — SO SINGLE IS THE ONE OPEN ROBUSTNESS ITEM.**
+
+**Setup.** The branch carrying `TauFloorRadius` (`1bdaa97`), double and single,
+Release, configured as `builds/double` and `builds/single`. **Every cell is an
+UNCOMMITTED override**: `GradShafranovSolver::buildForms()` took the
+stabilisation from an environment variable, so every solver in every mirror
+suite took the swept cell — the plasma solve, the vacuum solves the fixtures
+keep at the default, and the driver's solves through `meq` and `meq-run` —
+and `solve()` printed Newton's step count. So the vacuum gauge's regression
+`theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsIt` fails by
+construction in every cell: its control, constant `τ = 1`, is overridden too
+and converges, and at constant `τ = 1` its scaled half is overridden and stalls.
+A scratch `sweepceil` suite on `RotatingMirror.cpp` is [M-291](MEASUREMENTS.md#m-291)'s
+probe: three species (e, D, C⁶⁺) at `M = 6`, `k = 3`, from the vacuum at 2e19
+and 5e19 on levels 0 and 1 in both gauges, then continuation from 5e18 in
+×1.25 rungs, each from the last answer's whole state, and seven bisections.
+Every suite in its own directory, four cells at once at `OMP_NUM_THREADS=3`,
+`MKL_NUM_THREADS=1`, on a shared machine; walls are not compared.
+
+**1. `VacuumMirror` (a)**, against the coil field's closed form over the
+machine region on level 2, the rate from level 1 in brackets; `ψ_h` over the
+whole of `D_h` in the last column. `ψ_h` at `k = 1, 2` reads 6.38e-05 to
+6.65e-05 and 5.21e-07 to 5.47e-07 in every cell, at 2.02–2.08 and 3.22–3.23.
+
+| `τ` | `ψ_h`, `k = 3` | `q_h`, `k = 1` | `q_h`, `k = 2` | `q_h`, `k = 3` | `ψ*`, `k = 1` | `ψ*`, `k = 3` | `ψ_h` over `D_h`, `k = 3` |
+|---|---|---|---|---|---|---|---|
+| const 1 | 3.06e-08 (4.11) | 4.50e-04 (1.94) | 7.09e-06 (3.11) | 3.55e-07 (4.10) | 1.67e-05 (2.23) | 3.05e-08 (4.12) | 1.33e-06 |
+| 1/max(R, 0.05) | 3.00e-08 (4.13) | 6.36e-04 (1.96) | 7.17e-06 (3.11) | 3.49e-07 (4.11) | 1.72e-05 (2.27) | 2.99e-08 (4.13) | 1.30e-06 |
+| 1/max(R, 0.1) | 3.00e-08 (4.13) | 5.51e-04 (1.96) | 7.13e-06 (3.11) | 3.49e-07 (4.12) | 1.70e-05 (2.27) | 2.99e-08 (4.13) | 1.30e-06 |
+| 1/max(R, 0.2) | 3.00e-08 (4.13) | 5.00e-04 (1.95) | 7.10e-06 (3.11) | 3.49e-07 (4.11) | 1.68e-05 (2.25) | 2.99e-08 (4.13) | 1.30e-06 |
+| 2/max(R, 0.05) | 3.06e-08 (4.12) | 1.01e-03 (1.98) | 7.51e-06 (3.10) | 3.56e-07 (4.11) | 1.80e-05 (2.31) | 3.05e-08 (4.12) | 1.33e-06 |
+| 2/max(R, 0.1) | 3.06e-08 (4.12) | 7.88e-04 (1.97) | 7.34e-06 (3.10) | 3.56e-07 (4.11) | 1.76e-05 (2.29) | 3.05e-08 (4.12) | 1.33e-06 |
+| 2/max(R, 0.2) | 3.06e-08 (4.12) | 6.38e-04 (1.97) | 7.26e-06 (3.10) | 3.56e-07 (4.11) | 1.72e-05 (2.27) | 3.05e-08 (4.12) | 1.33e-06 |
+| 3/max(R, 0.05) | 3.12e-08 (4.11) | 1.43e-03 (1.98) | 8.02e-06 (3.09) | 3.63e-07 (4.10) | 1.89e-05 (2.33) | 3.11e-08 (4.11) | 1.35e-06 |
+| 3/max(R, 0.1) | 3.12e-08 (4.11) | 1.07e-03 (1.98) | 7.67e-06 (3.10) | 3.63e-07 (4.10) | 1.83e-05 (2.31) | 3.11e-08 (4.11) | 1.35e-06 |
+| 3/max(R, 0.2) | 3.12e-08 (4.11) | 8.16e-04 (1.97) | 7.49e-06 (3.10) | 3.63e-07 (4.10) | 1.76e-05 (2.28) | 3.11e-08 (4.11) | 1.35e-06 |
+| 5/max(R, 0.05) | 3.24e-08 (4.09) | 2.30e-03 (1.97) | 9.43e-06 (3.07) | 3.77e-07 (4.08) | 2.06e-05 (2.38) | 3.23e-08 (4.10) | 1.40e-06 |
+| 5/max(R, 0.1) | 3.24e-08 (4.10) | 1.68e-03 (1.98) | 8.59e-06 (3.08) | 3.77e-07 (4.08) | 1.95e-05 (2.34) | 3.23e-08 (4.10) | 1.40e-06 |
+| 5/max(R, 0.2) | 3.23e-08 (4.09) | 1.22e-03 (1.98) | 8.15e-06 (3.08) | 3.76e-07 (4.08) | 1.85e-05 (2.30) | 3.22e-08 (4.09) | 1.40e-06 |
+| 10/max(R, 0.05) | 3.52e-08 (4.06) | 4.48e-03 (1.96) | 1.42e-05 (3.03) | 4.13e-07 (4.05) | 2.48e-05 (2.45) | 3.51e-08 (4.06) | 1.53e-06 |
+| 10/max(R, 0.1) | 3.52e-08 (4.06) | 3.23e-03 (1.96) | 1.19e-05 (3.04) | 4.11e-07 (4.05) | 2.27e-05 (2.41) | 3.51e-08 (4.06) | 1.53e-06 |
+| 10/max(R, 0.2) | 3.51e-08 (4.05) | 2.29e-03 (1.97) | 1.06e-05 (3.05) | 4.10e-07 (4.04) | 2.06e-05 (2.34) | 3.50e-08 (4.05) | 1.53e-06 |
+
+Every order holds in every cell. `ψ_h` moves by at most 15%; `q_h` at `k = 1` is
+what the stabilisation costs, growing with `τ₀/R_f` — 2.4× constant `τ = 1`'s at
+`3/max(R, 0.1)`, 3.7× at `5/max(R, 0.1)`, 10× at `10/max(R, 0.05)` — 2× at
+`k = 2` at most, and `ψ*` at `k = 1` 1.5×; at `k = 3` everything is within
+16%. Newton: 14 solves, 28 steps, in every cell.
+
+**2. `RotatingMirrorResolution`**, max errors: MR-4c against the level-2 `k = 4`
+`ψ*` of the same cell, `q_h` rms against the reference's `q_h` (`k = 1`, 2 on
+level 3, `k = 3` on level 2), MR-4d against geq's direct 513 grid. MEQ − geq at
+129 and 257 is 1.55e-07 and 4.82e-08 in every cell.
+
+| `τ` | `ψ_h`, `k = 1`, L3 | `ψ_h`, `k = 3`, L2 | `ψ*`, `k = 2`, L3 (rate) | `ψ*`, `k = 3`, L2 | `q_h` rms, `k = 1, 2, 3` | `ψ*` − geq 513 | `ψ_h` − geq 513 | `ψ_ax`, `ψ_bnd` − geq 513 | `ψ*(ax)`, `ψ*(bnd)` − geq 513 |
+|---|---|---|---|---|---|---|---|---|---|
+| const 1 | 2.21e-04 | 1.44e-05 | 1.44e-08 (4.62) | 7.24e-09 | 2.33e-05 1.11e-06 1.12e-06 | 1.35e-08 | 1.94e-06 | -5.5e-10, -1.6e-08 | 5.7e-11, 7.8e-10 |
+| 1/max(R, 0.05) | 6.05e-05 | 3.77e-06 | 9.96e-09 (4.46) | 5.09e-09 | 2.23e-05 1.11e-06 1.11e-06 | 1.35e-08 | 2.76e-07 | -3.3e-11, -5.5e-09 | 2.3e-11, 3.0e-10 |
+| 1/max(R, 0.1) | 6.05e-05 | 3.77e-06 | 9.96e-09 (4.46) | 5.09e-09 | 2.23e-05 1.11e-06 1.11e-06 | 1.35e-08 | 2.76e-07 | -3.9e-11, -5.5e-09 | 2.3e-11, 3.0e-10 |
+| 1/max(R, 0.2) | 6.05e-05 | 3.77e-06 | 9.96e-09 (4.46) | 5.09e-09 | 2.23e-05 1.11e-06 1.12e-06 | 1.35e-08 | 3.90e-07 | -9.9e-11, -5.5e-09 | 2.3e-11, 3.0e-10 |
+| 2/max(R, 0.05) | 3.12e-05 | 1.90e-06 | 9.07e-09 (4.27) | 5.00e-09 | 2.22e-05 1.11e-06 1.11e-06 | 1.35e-08 | 1.39e-07 | -1.5e-11, -2.7e-09 | 1.3e-11, 1.7e-10 |
+| 2/max(R, 0.1) | 3.12e-05 | 1.90e-06 | 9.07e-09 (4.27) | 5.00e-09 | 2.22e-05 1.11e-06 1.11e-06 | 1.35e-08 | 1.39e-07 | -1.8e-11, -2.7e-09 | 1.3e-11, 1.7e-10 |
+| 2/max(R, 0.2) | 3.12e-05 | 1.90e-06 | 9.07e-09 (4.27) | 5.00e-09 | 2.22e-05 1.11e-06 1.12e-06 | 1.35e-08 | 1.96e-07 | -4.8e-11, -2.7e-09 | 1.3e-11, 1.7e-10 |
+| 3/max(R, 0.05) | 2.13e-05 | 1.27e-06 | 8.77e-09 (4.13) | 5.15e-09 | 2.22e-05 1.11e-06 1.11e-06 | 1.35e-08 | 9.28e-08 | -9.3e-12, -1.8e-09 | 9.1e-12, 1.3e-10 |
+| 3/max(R, 0.1) | 2.13e-05 | 1.27e-06 | 8.77e-09 (4.13) | 5.15e-09 | 2.22e-05 1.11e-06 1.11e-06 | 1.35e-08 | 9.28e-08 | -1.1e-11, -1.8e-09 | 9.1e-12, 1.3e-10 |
+| 3/max(R, 0.2) | 2.13e-05 | 1.27e-06 | 8.77e-09 (4.13) | 5.15e-09 | 2.22e-05 1.11e-06 1.12e-06 | 1.35e-08 | 1.31e-07 | -3.1e-11, -1.8e-09 | 9.2e-12, 1.3e-10 |
+| 5/max(R, 0.05) | 1.34e-05 | 7.59e-07 | 8.51e-09 (3.99) | 5.28e-09 | 2.23e-05 1.11e-06 1.11e-06 | 1.35e-08 | 5.63e-08 | -4.7e-12, -1.1e-09 | 6.4e-12, 9.1e-11 |
+| 5/max(R, 0.1) | 1.34e-05 | 7.59e-07 | 8.51e-09 (3.99) | 5.28e-09 | 2.22e-05 1.11e-06 1.11e-06 | 1.35e-08 | 5.63e-08 | -5.9e-12, -1.1e-09 | 6.4e-12, 9.1e-11 |
+| 5/max(R, 0.2) | 1.34e-05 | 7.59e-07 | 8.51e-09 (3.99) | 5.28e-09 | 2.22e-05 1.11e-06 1.12e-06 | 1.35e-08 | 7.92e-08 | -1.8e-11, -1.1e-09 | 6.5e-12, 9.1e-11 |
+| 10/max(R, 0.05) | 7.33e-06 | 3.76e-07 | 8.26e-09 (3.89) | 5.43e-09 | 2.24e-05 1.12e-06 1.12e-06 | 1.35e-08 | 2.88e-08 | -1.2e-12, -5.3e-10 | 4.4e-12, 6.5e-11 |
+| 10/max(R, 0.1) | 7.33e-06 | 3.76e-07 | 8.26e-09 (3.89) | 5.43e-09 | 2.24e-05 1.12e-06 1.12e-06 | 1.35e-08 | 2.88e-08 | -1.8e-12, -5.3e-10 | 4.4e-12, 6.5e-11 |
+| 10/max(R, 0.2) | 7.34e-06 | 3.76e-07 | 8.26e-09 (3.89) | 5.43e-09 | 2.24e-05 1.12e-06 1.12e-06 | 1.35e-08 | 4.03e-08 | -7.7e-12, -5.3e-10 | 4.4e-12, 6.5e-11 |
+
+Against geq's own last refinement the `ψ*` difference at 513 is 0.390 (max)
+and 0.438 (rms) at constant `τ = 1` — [M-263](MEASUREMENTS.md#m-263)'s 0.39 and
+0.44 — and 0.390–0.391 and 0.387–0.395 in every scaled cell: geq-limited.
+**`ψ_h` and the labels fall as `1/τ₀`**: `ψ_h − geq` 1.94e-06 at constant 1,
+then 2.76e-07, 1.39e-07, 9.28e-08, 5.63e-08, 2.88e-08 for `τ₀` = 1 to 10 at
+`R_f ≤ 0.1`, and `ψ_bnd` the same. `R_f = 0.2` costs `ψ_h − geq` 1.4× and
+`ψ_ax` 2.5× to 4× at every `τ₀` — the worst node is at `(0.150, 1.453)` in every
+cell, under that floor — and `R_f = 0.05` buys `ψ_ax` 1.2× to 1.5× over 0.1
+and nothing else here. **`ψ*`'s `k = 2` rate falls with `τ₀`**: 4.62, 4.46, 4.27, 4.13, 3.99, 3.89 against a design of 4
+and an assertion at 3.85, so `τ₀ = 10` passes 0.04 from the edge — the
+`τ₀ h` pre-asymptote of [M-288](MEASUREMENTS.md#m-288). `ψ*` at `k = 3` rises 7%
+from `τ₀ = 1` to 10. `q_h` is the reference's on every rung but `k = 1`, level 3,
+as [M-TAUCAP](MEASUREMENTS.md#m-taucap) found, and its ladder rates (2.14,
+3.00, 3.60 at constant 1; 1.78–1.82, 2.87–2.89, 3.49–3.51 scaled) rank nothing.
+
+**3. The three-species ceiling**, `k = 3`. Brackets in m⁻³, the same at every `R_f`
+where more than one was run. The level-1 column, and the midplane column from
+`τ₀ = 3`, were run at `R_f = 0.1` only; at 0.05 and 0.2 those midplane ladders
+converged every rung to 1.78e20, a first probe's cap.
+
+| `τ₀` | vacuum-midplane, L0 | vacuum-midplane, L1 | midplane, L0 | from the vacuum at 5e19, midplane L0, L1 |
+|---|---|---|---|---|
+| const `τ = 1` | 1.3648–1.3672e19 | — | 1.6475–1.6504e19 | stall 2.7e-05, stall 2.3e-07 |
+| 1 | 3.2403–3.2460e19 (3.2460–3.2517e19 at 0.2) | — | 6.1654–6.1762e19 at 0.1 and 0.2 | 4, 4 |
+| 2 | 4.0293–4.0363e19 | 4.1650–4.1723e19 | 1.4161–1.4186e20 | 4, 4 |
+| 3 | 4.1073–4.1145e19 | 4.1650–4.1723e19 | 2.1519–2.1556e20 | 4, 4 |
+| 5 | 4.1289–4.1361e19 | 4.1577–4.1650e19 | 3.6813–3.6877e20 | 4, 4 |
+| 10 | 4.1433–4.1505e19 | 4.1577–4.1650e19 | 6.4310–6.4422e20 | 4, 4 |
+
+**On the vacuum's curve the posed problem's fold is near 4.16e19** — the
+level-1 brackets of `τ₀` = 2 to 10 agree to within one bisection (the larger
+two did not take the 3.73e19-to-4.17e19 jump the smaller two took in 7 and 8
+steps, and crept up from below), as constant `τ = 30` did in
+[M-291](MEASUREMENTS.md#m-291). On level 0 the deficit from constant `τ = 30`'s
+level-0 bracket, 4.147–4.162e19, is 22%, 2.9%, 1.1%, 0.5% and 0.2% for
+`τ₀` = 1, 2, 3, 5, 10. `τ₀ = 1`'s stop is `τ`'s — doubling `τ₀` recovers 19 of
+its 22 points, and [M-289](MEASUREMENTS.md#m-289) has 1.44e19 at `τ₀ = 0.3` —
+while from 2 on the deficit falls by 2.7×, 2.0× and 2.8× a step, faster than
+the `τ₀⁻¹` a local eigenvalue linear in `τ` would give, as a discretisation
+error at fixed mesh does: the ceiling there is the posed fold, approached.
+From the vacuum 5e19 stalls in this gauge in every cell, on both levels, at a merit of 1.6e-03 to
+1.0e-01. **Under the midplane gauge every fold measured is `τ`'s**: linear in
+`τ₀` — 6.2, 7.1, 7.2, 7.4 and 6.4e19 per unit of `τ₀` — and independent of
+`R_f`, since the plasma sits at `R > 0.2`; no posed-problem fold below 6.4e20.
+2e19 from the vacuum converges in 3 steps in both gauges on both levels in
+every scaled cell, and 5e19 under the midplane gauge in 4. `R_f` moves no
+bracket but one: `1/max(R, 0.05)`'s midplane ladder took 23 steps at 7.28e19
+and reached 7.69–7.71e19, a branch jump ([M-291](MEASUREMENTS.md#m-291) §5),
+not a fold of its own.
+
+**4. Every mirror suite, as is.** Pass or fail, and Newton's steps summed over
+every `solve()` the suite makes (linear solves included), constant `τ = 1`
+against the fifteen scaled cells:
+
+| suite | const `τ = 1` | the scaled cells | Newton, const 1 | Newton, scaled |
+|---|---|---|---|---|
+| `VacuumMirror` | passes | all pass | 28 | 28 |
+| `RotatingMirror` | passes | all pass | 32 | 26–27 |
+| `RotatingMirrorResolution` | passes | all pass | 43 | 42–44 |
+| `RotatingMirrorMidplane` | passes | all pass | 33 | 33–37 |
+| `RotatingMirrorVacuumGauge` | the regression, by construction | the regression's control, by construction | 129, two 30-step stalls | 84–86 |
+| `RotatingMirrorBorder` | passes | all pass | 30 | 30–34 |
+| `RotatingMirrorRoute` | passes | all pass | 137 | 136 |
+| `RotatingMirrorDriver` | passes | all pass but `2/max(R, 0.2)` | 4 in the library, 79 in the driver's runs | 3; 72–74, and 59 where the no-retry run converges |
+| `RotatingMirrorAdaptive` | passes | all pass | (in the driver's runs) | |
+| `RotatingMirrorDevice` | passes | all pass | 4 on the host, 4 on the card | 3, 3 |
+
+The spread of one or two steps is a vacuum solve taking 2 steps rather than 1.
+**The one failure that is not by construction**, `2/max(R, 0.2)`'s
+`aMirrorWhoseFirstAttemptFailsIsNotRetried`, is a premise measured at `τ = 1`:
+from `PsiAxis = 0.2` that cell's bordered Newton CONVERGES, in 17 steps, to
+`ψ_ax` = 5.546728e-03 — the shipped equilibrium of the same cell to the
+printed digit — where the test requires the start to fail. No cell regresses.
+`RotatingMirrorAdaptive`'s effectivity `η/‖q − q_h‖`, against its (5, 40):
+
+| | cycle 0 | 1 | 2 | uniform L1 | L2 | `‖q − q_h‖` at cycle 2 |
+|---|---|---|---|---|---|---|
+| const `τ = 1` | 7.75 | 13.57 | 13.11 | 11.66 | 14.34 | 1.78e-04 |
+| the scaled cells | 13.37–14.58 | 13.80–13.93 | 13.42–13.61 | 12.95–13.05 | 14.59–14.68 | 1.71e-04 – 1.75e-04 |
+
+`RotatingMirrorDevice`, the shipped file under `--device cuda` against
+`--device cpu`: `ψ_h` within 8.1e-16 (7.9e-13 of its largest) and `q_h` within
+7.8e-15 in every cell.
+
+**5. Single precision**, built against `install-single`, at the cells that
+lead and their neighbours. Newton's target there is `newtonTolerance()`'s
+`10 ε` = 1.19e-06.
+
+| | const 1 | const 3 | const 10 | `1/max(R, 0.1)` | `2/max(R, 0.1)` | `3/max(R, 0.05)` | `3/max(R, 0.1)` | `5/max(R, 0.1)` |
+|---|---|---|---|---|---|---|---|---|
+| `VacuumMirror`, last merits | passes, 1.13e-06 – 1.19e-06 | stalls, 1.6e-06 – 2.0e-06 | stalls, 4.8e-06 – 5.4e-06 | passes, 1.13e-06 – 1.17e-06 | two solves stall, 1.25e-06 – 1.27e-06 | stalls, 1.45e-06 – 1.65e-06 | stalls, 1.43e-06 – 1.66e-06 | stalls, 2.2e-06 – 2.4e-06 |
+| `RotatingMirror` | passes | — | — | — | — | passes | passes | passes |
+| `RotatingMirrorResolution`, `ψ*` − geq 513 at `MKL_NUM_THREADS` 1, 2 | passes; 3.6e-07, 1.8e-07 | — | — | — | — | passes; 5.0e-07, 2.9e-07 | **fails, then passes**; 1.04e-06, 2.0e-07 | passes; 1.8e-07, 2.4e-07 |
+
+**The vacuum mirror's single-precision floor rises with `τ`**, by however `τ`
+is made — constant 3 and 10 stall as `τ₀` = 3 and 5 do — and constant `τ = 1`
+already needs 5 to 8 Newton steps on a LINEAR solve to scrape under the target:
+the `10 ε` target was measured on a suite at `τ = 1`, and a mirror's vacuum
+under any `τ ≳ 2` stops 1.05× to 4.5× above it. It is the format's floor and
+not the scaling: constant `τ` puts it at the same size, and double converges
+every one of these solves in one or two steps. **The resolution failure is a
+coin toss at the format's floor**: `theAlignedCutoffKeepsTheOrder` reads its
+aligned column 2.74e-07 against 2.93e-07 cut and fails, and under
+`MKL_NUM_THREADS=2` the same cell passes with its `ψ*` differences five to seven
+times smaller; every single-precision `ψ*` − geq above is the format's, 1.8e-07
+to 1.0e-06, against double's 1.35e-08.
+
+**6. The choice: `τ₀ = 3 m⁻¹`, `R_f = 0.1 m`.** In the stated order:
+* **Robustness.** Every scaled cell converges every mirror suite in double
+  and holds every order, so the fold decides: `τ₀ = 1` stops 22% below the
+  posed limit on the coarsest mesh, by `τ`, and is out; `τ₀ = 2` is 2.9%
+  short there; `τ₀ = 3` is the smallest about 1% short, and reaches the posed
+  fold on level 1. `τ₀ = 10` keeps `ψ*`'s `k = 2` rate only 0.04 inside its band and is
+  out on margin. Single costs every `τ₀ ≥ 2` the vacuum mirror alike, least the
+  smallest `τ₀`, so it orders 3 before 5 and does not separate either from a
+  constant `τ` of the same size.
+* **Accuracy**, between 3 and 5: 5 is 1.65× to 1.9× closer to geq in `ψ_h` and
+  the labels; 3 is 1.6× better in the vacuum's `q_h` at `k = 1`, 0.14 higher in
+  `ψ*`'s `k = 2` rate, 3% better in `ψ*` at `k = 3`, and under half 5's
+  distance above the single-precision target. `ψ*` against geq does not separate them.
+* **`R_f`**: 0.2 costs `ψ_h − geq` 1.4× and `ψ_ax` 2.5× to 4× for a vacuum
+  `q_h` at `k = 1` 1.3× better; 0.05 buys `ψ_ax` 1.2× to 1.5× for that `q_h`
+  1.3× worse and the
+  [M-TAUCAP](MEASUREMENTS.md#m-taucap) constant near the axis. 0.1 is between
+  them in every column, and equal to the better in `ψ_h − geq`.
+* **Newton** does not separate any two scaled cells.
+
+**The runner-up is `τ₀ = 5`, `R_f = 0.1`**, for a configuration that wants the
+labels more than `q`. Dominated, as measured: every `τ₀ = 1` cell (the fold),
+`τ₀ = 10` (the `ψ*` margin, `q_h` 3× `τ₀ = 3`'s), and `R_f = 0.2` at every `τ₀`
+(`ψ_h` and `ψ_ax`).
+
+**Reproduce.** The override, the `sweepceil` probe and the run scripts are
+scratch and not committed.
