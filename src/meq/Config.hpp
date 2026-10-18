@@ -347,11 +347,37 @@ namespace meq
 	// name.
 	enum class TauScalingType
 	{
-		// "constant": tau( x ) = Tau. The default.
+		// "constant": tau( x ) = Tau. The default, except beside a box support.
 		Constant,
 		// "diffusion": tau( x ) = Tau/max( R, TauFloorRadius ), Tau read as
-		// tau0.
+		// tau0. A [source] SupportShape = "box" run's default.
 		Diffusion
+	};
+
+	/**
+	 * THE MIRROR'S STABILISATION: tau = tau0/max( R, floorRadius ), what a
+	 * `[source] SupportShape = "box"` run gets when `[discretisation]` does not
+	 * say, and THE ONE PLACE ITS TWO NUMBERS ARE WRITTEN. Config.cpp reads them
+	 * for the driver and tests/convergence/MirrorMachine.hpp for the mirror
+	 * fixtures, so a library solve and a driver run of the same mirror cannot
+	 * drift apart -- RotatingMirrorDriver compares the two dof for dof.
+	 *
+	 * WHY A MIRROR AND NOT A TOKAMAK. A mirror's plasma sits at R ~ 0.1 to
+	 * 0.35 m, where nu = 1/R is 3 to 10 and a constant tau = 1 is weakest
+	 * against the operator: one element's local HDG block goes singular there
+	 * and the discrete problem folds (meq::DiffusionScaledStabilization). Swept
+	 * over tau0 in { 1, 2, 3, 5, 10 } m^-1 and R_f in { 0.05, 0.1, 0.2 } m on
+	 * every mirror suite, tau0 = 3 is the smallest that reaches the posed
+	 * problem's own fold on the coarsest mesh to about 1%, and 0.1 m is between
+	 * its neighbours in every column (MEASUREMENTS.md M-MIRRORTAU). A tokamak
+	 * keeps constant tau = 1: its fixtures and bounds were measured there.
+	 */
+	struct MirrorStabilisation
+	{
+		/// tau0, in m^-1.
+		static constexpr double tau0 = 3.0;
+		/// R_f, in m.
+		static constexpr double floorRadius = 0.1;
 	};
 
 	// [discretisation]
@@ -368,19 +394,31 @@ namespace meq
 		// tau = 1 and note that optimal convergence needs only tau = O(1), so
 		// 1.0 is the default and there is rarely a reason to change it. (The
 		// code this replaces used 5.0, with no justification recorded.)
+		//
+		// BESIDE A BOX SUPPORT -- [source] SupportShape = "box", a mirror --
+		// THE DEFAULT IS MirrorStabilisation: TauScaling "diffusion", Tau
+		// MirrorStabilisation::tau0 and TauFloorRadius
+		// MirrorStabilisation::floorRadius, each unless the file gives it.
+		// There Tau WITHOUT TauScaling is refused: it would be tau0 in m^-1 by
+		// the box's default and a constant tau in m^-2 by every other run's,
+		// and a file that means the second would get a stabilisation 1/R
+		// times what it asked for. "diffusion" without Tau takes the mirror's
+		// tau0, and "constant" without Tau the constant 1.0.
 		double tau = 1.0;
 
-		// TauScaling: "constant" (the default) or "diffusion". See
-		// meq::DiffusionScaledStabilization.
+		// TauScaling: "constant" (the default) or "diffusion" (the default
+		// beside a box support). See meq::DiffusionScaledStabilization.
 		TauScalingType tauScaling = TauScalingType::Constant;
 
 		// TauFloorRadius: R_f in tau = tau0/max( R, R_f ), in m, > 0, and only
-		// beside TauScaling = "diffusion" -- under "constant" it is refused,
-		// not ignored. The default is
-		// meq::DiffusionScaledStabilization::defaultFloorRadius, which this
-		// MFEM-free header cannot name: 0.1 m, the value the mirror suite was
-		// measured at (MEASUREMENTS.md M-290, M-TAUCAP).
-		double tauFloorRadius = 0.1;
+		// under a diffusion-scaled tau -- TauScaling = "diffusion", or a box
+		// support's default -- and refused, not ignored, under a constant
+		// one. The default is MirrorStabilisation::floorRadius on every path,
+		// the one value measured to choose it (MEASUREMENTS.md M-TAUCAP,
+		// M-MIRRORTAU); meq::DiffusionScaledStabilization::defaultFloorRadius
+		// is the same number, which this MFEM-free header cannot name and
+		// SolverContract holds equal.
+		double tauFloorRadius = MirrorStabilisation::floorRadius;
 	};
 
 	// [source] -- which right-hand side F( R, z, psi ), and its parameters.

@@ -77,6 +77,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -86,6 +87,7 @@
 
 #include "meq/Coils.hpp"
 #include "meq/ConductorField.hpp"
+#include "meq/Config.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
@@ -423,6 +425,22 @@ namespace mirror
 		std::unique_ptr<meq::GradShafranovSolver> solver;
 	};
 
+	/// A solver on @a mesh at THE MIRROR'S STABILISATION, the one a
+	/// [source] SupportShape = "box" file gets from the driver:
+	/// tau = tau0/max( R, R_f ) at meq::MirrorStabilisation's two numbers,
+	/// read from where Config reads them, so that a fixture and the same
+	/// mirror through meq cannot drift apart. Every vacuum solve here is built
+	/// through it; RotatingMirror's plasma solves take the same numbers as
+	/// their Options' defaults.
+	inline std::unique_ptr<meq::GradShafranovSolver> mirrorSolver( mfem::Mesh &mesh, int order )
+	{
+		auto solver = std::make_unique<meq::GradShafranovSolver>(
+			mesh, order, meq::MirrorStabilisation::tau0 );
+		solver->setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
+		                       meq::MirrorStabilisation::floorRadius );
+		return solver;
+	}
+
 	/// The meshed route: the packs are a domain source, the [[coils]] route.
 	/// @param coupled false drops the exterior coupling, leaving psi = 0 on
 	///        Gamma_h -- VacuumMirror (a)'s control.
@@ -435,12 +453,29 @@ namespace mirror
 		s->source = std::make_unique<meq::CoilAugmentedSource>(
 			std::make_shared<EmptyInterior>(), s->coils );
 		s->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, modes );
-		s->solver = std::make_unique<meq::GradShafranovSolver>( *d.sub, order );
+		s->solver = mirrorSolver( *d.sub, order );
 		s->solver->setSource( *s->source );
 		s->solver->setBoundaryData( s->zero );
 		s->solver->setExtension( *d.path, d.gammaHMarker );
 		if ( coupled )
 			s->solver->setExteriorCoupling( *s->dtn );
+#ifdef MFEM_USE_SINGLE
+		// IN SINGLE THE MESHED PACKS' FLOOR IS ABOVE THE DEFAULT TARGET. The
+		// solve is affine, but 5.9 MA meshed into a few elements leaves the
+		// first exact step at 6e-05 to 7e-04 and every later one stagnant at
+		// 1.4e-06 to 2.3e-06 under the mirror's stabilisation -- 2.8e-06 at a
+		// constant tau = 3, so it is tau's size and not its scaling, and at
+		// tau = 1 it already sat at the 10 eps = 1.19e-06 the solver floors
+		// its absolute target at. 64 eps, 7.6e-06, clears the worst stagnant
+		// residual by 3.3 and is four orders under the 0.17 to 0.79 a step
+		// that had not converged would leave. The subtracted route has no
+		// such source and reaches 9e-09. Double asks the solver's own default.
+		// MEASUREMENTS.md M-MIRRORDEFAULT.
+		s->solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		                             64.0*static_cast<double>(
+			                             std::numeric_limits<mfem::real_t>::epsilon() ),
+		                             30 );
+#endif
 		s->solver->solve();
 		return s;
 	}
@@ -456,7 +491,7 @@ namespace mirror
 		s->source = std::make_unique<EmptyInterior>();
 		s->subtracted = std::make_unique<meq::ConductorField>( field );
 		s->dtn = std::make_unique<meq::ExteriorDtN>( 0.0, rhoGamma, modes );
-		s->solver = std::make_unique<meq::GradShafranovSolver>( *d.sub, order );
+		s->solver = mirrorSolver( *d.sub, order );
 		s->solver->setSource( *s->source );
 		s->solver->setBoundaryData( s->zero );
 		s->solver->setExtension( *d.path, d.gammaHMarker );

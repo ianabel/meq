@@ -142,7 +142,8 @@ poloidal variation,
 with :math:`\phi_0` determined by quasineutrality :math:`\sum_s Z_s n_s = 0`.
 Everything else about MEQ — the operator, the discretisation, :math:`\tau`, the
 hybridization, the estimator, the adaptive loop, the curved boundary — is
-untouched.
+untouched; a mirror's box support, not the rotation, is what changes
+:math:`\tau`'s default (:ref:`rotation-mirror`).
 
 .. note::
 
@@ -544,6 +545,19 @@ console, ``axial_cutoff_relative`` in the ``.nc``). ``[mesh.generate]
 AlignPlasma`` puts the cutoff on element faces, since a jump across a line that
 cuts elements costs the order. :ref:`configuration-mirror-support` has the keys
 and what is refused beside them.
+
+**The stabilisation is the mirror's own.** Beside the box the HDG stabilisation
+defaults to :math:`\tau = 3/\max(R, 0.1\,\mathrm{m})` rather than the constant
+:math:`\tau = 1` of every other run, with no key in the file
+(:ref:`formulation-tau`). At :math:`\tau = 1` the mirror's plasma, which sits
+where the diffusion coefficient :math:`1/R` is 3 to 10, folds inside a single
+element at a pressure set by the discretisation and not by the plasma: the
+three-species example's plasma then stops converging on the test suite's
+coarsest mesh at a few times the example's density. Under the mirror's default
+that fold moves far above it, and in the midplane gauge the same mesh solves
+ten times the example's density.
+In the vacuum-midplane gauge the posed problem has a fold of its own, near
+eight times the shipped density, which no stabilisation or mesh moves.
 
 ``GGPrime = 0``: a mirror has no toroidal field, and that is also what lets the
 plasma's flux reach :math:`R = 0` without an infinite current density there

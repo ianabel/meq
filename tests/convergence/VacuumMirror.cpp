@@ -190,11 +190,18 @@ namespace
  * k+1 at k = 3 as well, which says the r^2 log r at the packs' corners -- which
  * caps a cut conductor's rate -- is not limiting a conductor meshed to.
  *
- * q_h AND psi* ARE PRINTED, NOT ASSERTED, against the same closed form --
- * CoilSet::flux() and coilPsi() -- in a second table: the flux is what a
- * choice of the stabilisation trades psi_h against, and this half-disc
- * reaches the axis, where an unbounded tau0/R costs q half an order
- * (MEASUREMENTS.md M-290).
+ * q_h AND psi* AGAINST THE SAME CLOSED FORM -- CoilSet::flux() and coilPsi()
+ * -- in a second table, at the mirror's stabilisation, tau = 3/max( R, 0.1 m ),
+ * which every solve here takes from mirrorSolver(): the flux is what a choice
+ * of the stabilisation trades psi_h against, and this half-disc reaches the
+ * axis, where an unbounded tau0/R costs q half an order (MEASUREMENTS.md
+ * M-290, M-TAUCAP). Over the MACHINE REGION q_h is asserted at k+1 by the same
+ * two-tier rule as psi_h. psi* is asserted at k+1 on the finest pair -- the
+ * coarse pair at k = 1 reads 1.43, pre-asymptotic, as D_h's does -- and NOT at
+ * the k+2 a post-processing promises: here it gains nothing over psi_h at
+ * k = 2 and 3, which is measured and not explained. Over the whole of D_h q
+ * reads about 2 at k = 2 and 3, the packs' corners, and is printed only
+ * (MEASUREMENTS.md M-MIRRORDEFAULT).
  */
 BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 {
@@ -321,8 +328,8 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 	std::printf( "\n    |psi_coil|: %.4e over D_h, %.4e over the machine region\n",
 	             normGlobal, normRegion );
 
-	// The flux and psi*, printed and not asserted.
-	std::printf( "\n    q_h and psi* against the same closed form, printed:\n" );
+	// The flux and psi*, printed; asserted over the machine region below.
+	std::printf( "\n    q_h and psi* against the same closed form:\n" );
 	std::printf( "    %2s %5s %13s %7s %13s %7s %13s %7s %13s %7s\n", "k", "level",
 	             "L2 q D_h", "rate", "L2 q machine", "rate", "L2 psi* D_h", "rate",
 	             "psi* machine", "rate" );
@@ -392,6 +399,31 @@ BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 		BOOST_TEST( finestGlobal > wanted - 0.30,
 			"k = " << order << ": over the whole of D_h the finest pair reads "
 			<< finestGlobal << " against k+1 = " << wanted );
+
+		// q_h over the machine region, by psi_h's rule; psi* on its finest
+		// pair, at k+1.
+		for ( int level = 1; level < levels; ++level )
+		{
+			double const pair = meq::tests::rate( flux[ k ][ level - 1 ].region,
+			                                      flux[ k ][ level ].region, 2.0 );
+			BOOST_TEST( pair > wanted - 0.30,
+				"k = " << order << ": q_h converges on the coil field's flux at " << pair
+				<< " over the machine region between levels " << level - 1 << " and " << level
+				<< ", against k+1 = " << wanted << ". The stabilisation is the first suspect: "
+				"an unbounded tau0/R, or a floor gone, reads k + 1/2 here" );
+		}
+		double const fluxOverall = meq::tests::rate( flux[ k ].front().region,
+		                                             flux[ k ].back().region,
+		                                             std::pow( 2.0, levels - 1 ) );
+		BOOST_TEST( fluxOverall > wanted - 0.15,
+			"k = " << order << ": q_h's machine-region rate over the whole ladder is "
+			<< fluxOverall << " against k+1 = " << wanted );
+		double const starFinest = meq::tests::rate( star[ k ][ levels - 2 ].region,
+		                                            star[ k ][ levels - 1 ].region, 2.0 );
+		BOOST_TEST( starFinest > wanted - 0.30,
+			"k = " << order << ": psi* over the machine region reads " << starFinest
+			<< " on the finest pair, against k+1 = " << wanted << ", so it is worse than "
+			"the psi_h it is post-processed from" );
 	}
 
 	BOOST_TEST( controlRatio > 50.0,
@@ -443,6 +475,7 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	std::vector<double> global;
 	std::vector<double> globalNorm;
 	std::vector<double> region;
+	std::vector<double> regionNorm;
 	for ( int modes : sweep )
 	{
 		std::unique_ptr<VacuumSolve> const s =
@@ -451,6 +484,7 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 		global.push_back( e.global );
 		globalNorm.push_back( e.globalNorm );
 		region.push_back( e.region );
+		regionNorm.push_back( e.regionNorm );
 		std::printf( "    %3d %13.4e %13.4e %13.4e %13.4e %13.4e\n", modes,
 		             tail[ static_cast<std::size_t>( modes ) ], e.global,
 		             e.global/e.globalNorm, e.region, e.region/e.regionNorm );
@@ -496,8 +530,11 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	// field: 2.4e-05 relative in single, 6.6e-05 on this || psi ||, where the
 	// single plateau sits at 6.8e-05 and moves by up to 20% from one N to the
 	// next. That is round-off with nothing left to resolve, and the 2% band
-	// cannot be asked of it. In double the floor is eleven orders down and
-	// this always runs. M-275.
+	// cannot be asked of it, nor where the plateau starts, which is read off
+	// the same 5% band: under the mirror's stabilisation the single rows from
+	// N = 16 move by up to 1.5x, and the plateau's start lands anywhere from
+	// N = 16 to 48 as MKL_NUM_THREADS moves ( M-MIRRORDEFAULT ). In double
+	// the floor is eleven orders down and this always runs. M-275.
 	bool const plateauIsResolved = global[ last ]
 		> 4.0*globalNorm[ last ]
 		  *static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
@@ -516,16 +553,30 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 			"between N = " << defaultModes << " and N = " << sweep[ last ]
 			<< " the error over D_h moved from " << at( global, defaultModes )
 			<< " to " << global[ last ] << ", so it has not stopped falling" );
+		BOOST_TEST( sweep[ plateau ] <= defaultModes,
+			"the plateau starts at N = " << sweep[ plateau ] << ", beyond the "
+			<< defaultModes << " every other case here runs at" );
 	}
-	BOOST_TEST( sweep[ plateau ] <= defaultModes,
-		"the plateau starts at N = " << sweep[ plateau ] << ", beyond the "
-		<< defaultModes << " every other case here runs at" );
 
 	// AND THE MACHINE REGION PLATEAUS FIRST, which is the statement MR-4 can
 	// spend: the plasma sees the truncation through ( rho/rho_Gamma )^n.
-	BOOST_TEST( region[ 1 ] < 1.2*region[ last ],
-		"the machine region is still " << region[ 1 ]/region[ last ]
-		<< "x its plateau at N = " << sweep[ 1 ] );
+	//
+	// ONLY WHERE THAT PLATEAU IS RESOLVED, by the same floor on the region's
+	// own norm. In single under the mirror's stabilisation the machine rows
+	// from N = 8 read 1.0e-06 to 2.3e-06, moving by up to 1.5x from one N to
+	// the next, against double's 5.4e-07: round-off, under 4 eps/fd_step x
+	// || psi || = 3.1e-05 there ( M-MIRRORDEFAULT ). Double always runs it.
+	double const regionFloor = 4.0*regionNorm[ last ]
+		*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
+		/meq::extensionFdStep();
+	if ( !( region[ last ] > regionFloor ) )
+		std::printf( "    *** SKIPPED \"the machine region plateaus first\": its plateau, %.3e, "
+		             "is under 4 eps/fd_step x || psi || = %.3e, the extension's own floor "
+		             "in this format. M-275\n", region[ last ], regionFloor );
+	else
+		BOOST_TEST( region[ 1 ] < 1.2*region[ last ],
+			"the machine region is still " << region[ 1 ]/region[ last ]
+			<< "x its plateau at N = " << sweep[ 1 ] );
 }
 
 /*

@@ -161,9 +161,10 @@ performance and robustness lever in the code.
 The stabilisation :math:`\tau`
 ------------------------------
 
-:math:`\tau` is a constant, and its default is **1**. Both source papers set it
-there and note that optimal order requires only :math:`\tau = O(1)`. It is
-configurable as ``[discretisation] Tau``. It is not dimensionless: the face term
+:math:`\tau` is a constant, and its default is **1** — except beside a
+mirror's box support, below. Both source papers set it there and note that
+optimal order requires only :math:`\tau = O(1)`. It is configurable as
+``[discretisation] Tau``. It is not dimensionless: the face term
 :math:`\langle \tau(\psi_h - \hat\psi_h), w\rangle` has the units of
 :math:`q\cdot n` with :math:`q = \bar\nabla\psi/R`, so :math:`\tau` is in
 :math:`\mathrm{m}^{-2}`.
@@ -209,10 +210,19 @@ binds. Both effects, and the choice of :math:`R_f`, were measured on MEQ's own
 suite; check the flux's rate and Newton's history on your own axis-reaching
 problem before relying on it.
 
-**The default stays constant**, which is what every rate in the suite is
-measured with. The ceiling, the scaled stabilisation's reach on the rotating
-mirror and its cost on the analytic benchmarks are in ``MEASUREMENTS.md``;
-measure on your own problem before choosing.
+**The default is constant, except on a mirror.** Every run keeps
+:math:`\tau = 1`, which is what every tokamak rate in the suite is measured with,
+unless ``[source] SupportShape = "box"``: a mirror defaults to
+:math:`\tau = 3/\max(R, 0.1\,\mathrm{m})`, because its plasma sits where
+:math:`\nu` is 3 to 10 and a constant :math:`\tau = 1` folds there far below the
+pressure the posed problem allows (:ref:`configuration-mirror-support`). On a
+tokamak the scaled form at the mirror's :math:`\tau_0` behaves as a constant
+:math:`\tau` of the same size — a better :math:`\psi_h` for a worse flux and
+:math:`\psi^*` — and a smaller :math:`\tau_0` is too weak where
+:math:`R > 1\,\mathrm{m}`, so a tokamak is not given it. The ceiling, the
+scaled stabilisation's reach on the rotating mirror, the sweep that chose the
+mirror's two numbers and the cost on the analytic benchmarks are in
+``MEASUREMENTS.md``; measure on your own problem before choosing.
 
 .. warning::
 

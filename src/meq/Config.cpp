@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1722,39 +1723,15 @@ namespace meq
 			}
 		}
 
-		// [discretisation]
+		// [discretisation] -- the degree here, the stabilisation after
+		// [source], since a box support changes its default.
 		{
 			Table discretisation( document, "discretisation", sourceName, true );
 			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau", "TauScaling", "TauFloorRadius" } );
 
 			discretisationOptions.polynomialDegree = discretisation.getInteger( "PolynomialDegree" );
-			discretisationOptions.tau = discretisation.getFloatOr( "Tau", 1.0 );
-
-			std::string const scaling = discretisation.getStringOr( "TauScaling", "constant" );
-			if ( scaling == "constant" )
-				discretisationOptions.tauScaling = TauScalingType::Constant;
-			else if ( scaling == "diffusion" )
-				discretisationOptions.tauScaling = TauScalingType::Diffusion;
-			else
-				discretisation.fail( "TauScaling", "must be one of constant, diffusion, but is \""
-				                     + scaling + "\"" );
-
-			if ( discretisation.has( "TauFloorRadius" ) )
-			{
-				if ( discretisationOptions.tauScaling != TauScalingType::Diffusion )
-					discretisation.fail( "TauFloorRadius", "means nothing unless TauScaling = \"diffusion\": it is R_f in "
-					                     "tau = Tau/max( R, R_f ), and a constant tau never reads R" );
-				discretisationOptions.tauFloorRadius = discretisation.getFloat( "TauFloorRadius" );
-				if ( !( std::isfinite( discretisationOptions.tauFloorRadius )
-				        && discretisationOptions.tauFloorRadius > 0.0 ) )
-					discretisation.fail( "TauFloorRadius", "must be a positive length in m; R_f = 0 is the unbounded "
-					                     "tau = Tau/R, which costs the flux half an order on a mesh reaching the axis" );
-			}
-
 			if ( discretisationOptions.polynomialDegree < 0 )
 				discretisation.fail( "PolynomialDegree", "must not be negative" );
-			if ( !( discretisationOptions.tau > 0.0 ) )
-				discretisation.fail( "Tau", "must be positive; the HDG stabilisation is tau = O(1) and defaults to 1.0" );
 		}
 
 		// [source]
@@ -2004,6 +1981,64 @@ namespace meq
 				if ( g.plasmaZMax != edge )
 					throw ConfigError( sourceName, "mesh.generate.PlasmaZMax", "is " + std::to_string( g.plasmaZMax ) + ", and the box support's cutoff is at z = AxialEdge = " + std::to_string( edge ) + ": the aligned box has to BE the cutoff for its faces to carry the jump" );
 			}
+		}
+
+		/*
+		 * [discretisation]'s STABILISATION, READ AFTER [source] BECAUSE A BOX
+		 * SUPPORT CHANGES ITS DEFAULT. A mirror's plasma sits where nu = 1/R is
+		 * 3 to 10 and a constant tau = 1 folds inside one element there, so a
+		 * SupportShape = "box" run defaults to MirrorStabilisation, the
+		 * diffusion-scaled tau the mirror suites were swept to choose
+		 * (MEASUREMENTS.md M-MIRRORTAU); every other run keeps constant
+		 * tau = 1, which its fixtures were measured at. Beside the box, Tau
+		 * without TauScaling is AMBIGUOUS -- tau0 in m^-1 by the box's
+		 * default, a constant tau in m^-2 by every other run's, a factor 1/R
+		 * between them -- so it is refused rather than read either way.
+		 */
+		{
+			Table discretisation( document, "discretisation", sourceName, true );
+			bool const box = sourceOptions.supportIsBox();
+			bool const scalingGiven = discretisation.has( "TauScaling" );
+			std::string const scaling = discretisation.getStringOr( "TauScaling",
+				box ? "diffusion" : "constant" );
+			if ( scaling == "constant" )
+				discretisationOptions.tauScaling = TauScalingType::Constant;
+			else if ( scaling == "diffusion" )
+				discretisationOptions.tauScaling = TauScalingType::Diffusion;
+			else
+				discretisation.fail( "TauScaling", "must be one of constant, diffusion, but is \""
+				                     + scaling + "\"" );
+			bool const diffusion = discretisationOptions.tauScaling == TauScalingType::Diffusion;
+
+			if ( box && !scalingGiven && discretisation.has( "Tau" ) )
+			{
+				std::ostringstream mirror;
+				mirror << "tau = " << MirrorStabilisation::tau0 << "/max( R, "
+				       << MirrorStabilisation::floorRadius << " m )";
+				discretisation.fail( "Tau", "is ambiguous beside [source] SupportShape = \"box\" without TauScaling: "
+				                     "a box support's default stabilisation reads it as tau0 in "
+				                     "tau = Tau/max( R, R_f ), in m^-1, and every other run as a constant tau in "
+				                     "m^-2. Say which with TauScaling = \"diffusion\" or \"constant\"; with "
+				                     "neither key the mirror's default is " + mirror.str() );
+			}
+			discretisationOptions.tau = discretisation.getFloatOr( "Tau",
+				box && diffusion ? MirrorStabilisation::tau0 : 1.0 );
+
+			if ( discretisation.has( "TauFloorRadius" ) )
+			{
+				if ( !diffusion )
+					discretisation.fail( "TauFloorRadius", "means nothing under a constant tau: it is R_f in "
+					                     "tau = Tau/max( R, R_f ), which TauScaling = \"diffusion\" -- or a box "
+					                     "support's default -- applies, and a constant tau never reads R" );
+				discretisationOptions.tauFloorRadius = discretisation.getFloat( "TauFloorRadius" );
+				if ( !( std::isfinite( discretisationOptions.tauFloorRadius )
+				        && discretisationOptions.tauFloorRadius > 0.0 ) )
+					discretisation.fail( "TauFloorRadius", "must be a positive length in m; R_f = 0 is the unbounded "
+					                     "tau = Tau/R, which costs the flux half an order on a mesh reaching the axis" );
+			}
+
+			if ( !( discretisationOptions.tau > 0.0 ) )
+				discretisation.fail( "Tau", "must be positive; the HDG stabilisation is tau = O(1) and defaults to 1.0" );
 		}
 
 		// [boundary]

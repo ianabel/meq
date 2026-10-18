@@ -29,15 +29,18 @@
 # crossing instead, a slightly different plasma; the .nc's midplane_n_* columns
 # state either at its solved crossing.
 #
-# HOW DENSE IT CAN GO.  At four times this density the test suite's coarsest
-# mesh (k = 3) stops converging in either gauge, and the next one converges;
-# at ten times it neither of the two coarsest does.  Both are the
-# DISCRETISATION, not the plasma: at the default constant Tau = 1 one element's
-# local HDG block goes singular, and [discretisation] TauScaling = "diffusion"
-# with Tau = 3 converges at both densities in this gauge, in three or four
-# steps.  Under "vacuum-midplane" the same tables are a different plasma, and
-# it has no equilibrium past about 4.15e19 m^-3 on any mesh or Tau
-# (MEASUREMENTS.md M-291).
+# HOW DENSE IT CAN GO, AND THE STABILISATION.  [discretisation] gives no Tau:
+# beside SupportShape = "box" the default is the mirror's, tau = 3/max( R, 0.1 m )
+# -- TauScaling = "diffusion", Tau = 3.0, TauFloorRadius = 0.1 -- and not the
+# constant tau = 1 every other run takes.  At a constant tau = 1 one element's
+# local HDG block goes singular where this plasma sits, and the test suite's
+# coarsest mesh (k = 3) stops converging at four times this density in either
+# gauge: the DISCRETISATION, not the plasma.  Under the mirror's default that
+# mesh solves ten times this density in this gauge, in four steps.  Under
+# "vacuum-midplane" the same tables are a different plasma, and it has no
+# equilibrium past about 4.16e19 m^-3 on any mesh or Tau (MEASUREMENTS.md
+# M-291, M-MIRRORTAU).  Tau alone is refused here, since beside the box it
+# could be either tau or tau0: write TauScaling with it.
 
 [mesh]
 # A BUILD PRODUCT of [mesh.generate] below, gitignored; meq-run remakes it

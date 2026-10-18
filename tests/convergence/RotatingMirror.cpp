@@ -325,11 +325,13 @@ namespace
 		/// knots start on this table, and the iterate where it would anyway.
 		std::shared_ptr<meq::Profile const> crossingStart;
 		/// The plasma solve's HDG stabilisation: the constructor's tau, read
-		/// as tau0 in tau = tau0/R when diffusionScaledTau. The solver's own
-		/// default, constant tau = 1, unless a case says otherwise; the
-		/// vacuum solve keeps the default either way.
-		double tau = 1.0;
-		bool diffusionScaledTau = false;
+		/// as tau0 in tau = tau0/max( R, R_f ) when diffusionScaledTau. THE
+		/// MIRROR'S, meq::MirrorStabilisation -- what the driver gives a box
+		/// file -- unless a case says otherwise; the vacuum solve is
+		/// mirrorSolver()'s, at the same numbers, either way.
+		double tau = meq::MirrorStabilisation::tau0;
+		bool diffusionScaledTau = true;
+		double tauFloorRadius = meq::MirrorStabilisation::floorRadius;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -466,7 +468,8 @@ namespace
 		                                                          o.order, o.tau );
 		meq::GradShafranovSolver &solver = *run->solver;
 		if ( o.diffusionScaledTau )
-			solver.setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion );
+			solver.setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
+			                      o.tauFloorRadius );
 		solver.setAxisFluxPoint( p.axisPointR, p.axisPointZ );
 		solver.setBoundaryFluxPoint( p.boundaryPointR, p.boundaryPointZ );
 		if ( o.seedBoundary )
@@ -755,8 +758,15 @@ namespace
 		std::size_t const n = history.size() - 1;
 		double const order = meq::tests::newtonOrder( history[ n - 2 ],
 		                                              history[ n - 1 ], history[ n ] );
+		// Ending within one eps of the first residual is ending at the
+		// format's floor, where the last triple straddles it: in single a
+		// four-residual history does, 3.1e-08 at three species and 5e19
+		// (M-MIRRORDEFAULT). In double eps is under the 2e-15 this always
+		// asked, so nothing moves there.
 		double const relative = history[ n ]/history.front();
-		if ( order > 1.5 || relative <= 2.0e-15 )
+		double const floor = std::max( 2.0e-15, static_cast<double>(
+			std::numeric_limits<mfem::real_t>::epsilon() ) );
+		if ( order > 1.5 || relative <= floor )
 			return true;
 		char buffer[ 256 ];
 		std::snprintf( buffer, sizeof buffer, "the last triple's order is %.3f and "
@@ -1442,15 +1452,23 @@ BOOST_AUTO_TEST_SUITE( resolution )
  * design and not asserted -- the precondition, the asymptotic regime, is
  * what is missing, and level 4 is what it costs.
  *
- * q_h IS PRINTED BESIDE THEM AND NOT ASSERTED: | q_h - q_ref |, q = grad psi/R
- * with the filaments' own q_c added exactly, against the reference run's q_h
- * -- what a choice of the stabilisation trades psi_h against, and no rate the
- * edges allow it has been measured yet. ITS FINEST RUNGS READ THE REFERENCE:
- * the reference's q_h differs from level 1's at k = 4 by about 3e-06 rms, and
- * k = 2 at level 3 and k = 3 at level 2 both stop near 1.1e-06 rms under
- * constant tau = 1 and tau = 3/max( R, 0.1 m ) alike. grad_bar( psi* )/R
- * reads within 1.2e-07 rms of the reference's q_h, so it is no better a
- * reference; a finer one is ( MEASUREMENTS.md M-TAUCAP ).
+ * q_h IS PRINTED BESIDE THEM: | q_h - q_ref |, q = grad psi/R with the
+ * filaments' own q_c added exactly, against the reference run's q_h -- what a
+ * choice of the stabilisation trades psi_h against. ITS FINEST RUNGS READ THE
+ * REFERENCE: the reference's q_h differs from level 1's at k = 4 by about
+ * 3e-06 rms, and k = 2 at level 3 and k = 3 at level 2 both stop near
+ * 1.1e-06 rms under constant tau = 1 and the mirror's tau = 3/max( R, 0.1 m )
+ * alike. grad_bar( psi* )/R reads within 1.2e-07 rms of the reference's q_h,
+ * so it is no better a reference; a finer one is ( MEASUREMENTS.md
+ * M-TAUCAP ). So q_h is asserted where psi_h is -- k = 3, the asymptotic
+ * rung -- and on the one pair the reference does not reach, levels 0 and 1,
+ * at the edge's rate for psi_h with the pair's 0.30 of slack: 3.56 against
+ * 3.5, MEASURED ( M-MIRRORDEFAULT ). It does NOT see the axis: with the
+ * plasma solve's floor at 1e-6 m, the unbounded tau0/R's stand-in, no error
+ * column here moves by more than 4%, since geq's nodes stay at
+ * R >= 0.05 -- VacuumMirror (a)'s q_h is the check that catches that. The
+ * ladders at k <= 2 and the k = 3 rung at level 2 are printed and not
+ * asserted.
  */
 BOOST_AUTO_TEST_CASE( psiConvergesAtTheRateItsEdgesAllow )
 {
@@ -1504,6 +1522,19 @@ BOOST_AUTO_TEST_CASE( psiConvergesAtTheRateItsEdgesAllow )
 		std::printf( "       %-5s %.3f over the ladder, printed, not asserted\n", "q_h",
 		             meq::tests::rate( flux.front(), flux.back(),
 		                               std::pow( 2.0, levels.back() - levels.front() ) ) );
+		if ( order >= 3 && meq::tests::rateOfOrderIsMeasurable( potentialRate( order ) ) )
+		{
+			double const firstPair = meq::tests::rate( flux[ 0 ], flux[ 1 ], 2.0 );
+			std::printf( "       %-5s %.3f between levels %d and %d against %.1f, the pair the "
+			             "reference does not reach\n", "q_h", firstPair, levels[ 0 ], levels[ 1 ],
+			             potentialRate( order ) );
+			BOOST_TEST( firstPair > potentialRate( order ) - 0.30,
+				"k = " << order << ": q_h converges at " << firstPair << " between levels "
+				<< levels[ 0 ] << " and " << levels[ 1 ] << " against the " << potentialRate( order )
+				<< " the edges allow psi_h. A change to the stabilisation, the support or the "
+				"coupling is the first suspect; the axis is not, since geq's nodes stay at "
+				"R >= 0.05 and VacuumMirror (a) is the axis's check" );
+		}
 
 		double const span = std::pow( 2.0, levels.back() - levels.front() );
 		struct Quantity
@@ -1592,10 +1623,15 @@ BOOST_AUTO_TEST_CASE( theAlignedCutoffKeepsTheOrder )
 	             meq::tests::rate( cut[ 0 ], cut[ 1 ], 2.0 ),
 	             meq::tests::rate( cut[ 1 ], cut[ 2 ], 2.0 ) );
 	std::fflush( stdout );
-	// In single both columns end under the format's floor -- aligned 5.5e-08
-	// against 16 eps x psi_bnd = 1.25e-07 -- so the factor between them is
-	// round-off. A double-build acceptance there, skipped loudly. M-272.
-	if ( !meq::tests::aboveTheFormatsFloor( aligned.back(), ref.psiBoundary ) )
+	// In single both columns end on the format's floor, so the factor between
+	// them is round-off: a double-build acceptance there, skipped loudly. The
+	// floor rises with tau. At constant tau = 1 the aligned column ended at
+	// 5.5e-08, under 16 eps x psi_bnd = 1.25e-07 ( M-272 ); under the mirror's
+	// stabilisation every psi* rung from level 1 reads 2.4e-07 to 2.7e-07 rms,
+	// flat, 35 eps x psi_bnd, so the guard is 128 eps x psi_bnd = 1.0e-06,
+	// 3.6 above it, where double's aligned column is 5e-09
+	// ( M-MIRRORDEFAULT ).
+	if ( !meq::tests::aboveTheFormatsFloor( aligned.back(), ref.psiBoundary, 128.0 ) )
 	{
 		std::printf( "    *** SKIPPED: the aligned column ends at %.3e, under this "
 		             "build's floor on psi*, so the factor to the cut one is not "
@@ -2335,11 +2371,17 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnIts
  * is. MEASUREMENTS.md M-277.
  *
  * From [source] PsiAxis = 0.2 the bordered Newton fails -- in 30 steps, and
- * 300 do no better -- and the rung, run, converges in eight to a SECOND
- * DISCRETE ROOT: well converged, with one element of the box at -7.9e-02
- * where the shipped answer's largest |psi_h| is 6.6e-03. So exit 2 is the
- * assertion that matters: putting the rung back turns it into an exit 0
- * reporting that root.
+ * 300 do no better, at constant tau = 1 and under the mirror's
+ * stabilisation alike, and under the mirror's from every PsiAxis measured
+ * between 0.18 and 0.5. Of the neighbouring stabilisations only
+ * tau = 2/max( R, 0.2 m ) converges from 0.2, to the shipped answer, so the
+ * premise is the default's and not tau's in general
+ * ( M-MIRRORDEFAULT ). At constant tau = 1 the rung, run, converges in eight
+ * to a SECOND DISCRETE ROOT: well converged, with one element of the box at
+ * -7.9e-02 where the shipped answer's largest |psi_h| is 6.6e-03 ( M-277;
+ * not re-run under the mirror's stabilisation, since the rung is not built
+ * beside the box ). So exit 2 is the assertion that matters: putting the rung
+ * back turns it into an exit 0 reporting that root.
  *
  * Of the rung's two triggers this is the failure. The annulus cannot fire on
  * a box run, since [boundary.xpoint] is refused beside it, and
@@ -3523,9 +3565,10 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqInTheMidplaneGauge )
  * three things:
  *
  *   it converges, from the vacuum, at every level -- at a midplane peak of
- *   5e18 m^-3. At 5e19 it stalls near 8e-05, MEASURED -- and not for the
- *   freeze: the bordered gauge, whose Jacobian has the term the freeze
- *   leaves out, stalls there too ( the border suite below );
+ *   5e18 m^-3. At constant tau = 1 the coarsest mesh stalled at 5e19, and that
+ *   was the stabilisation's element-local fold, not the gauge; under the
+ *   mirror's stabilisation 5e19 converges there, which the vacuum-gauge
+ *   suite's case 5 asserts;
  *   its n_s0 range is the physical one: every n_s0 is its species' density
  *   where its surface crosses z = 0, to round-off, on the solved state; and the
  *   fixed-radius tables of the SAME solved plasma, at the best single R_ref,
@@ -3705,8 +3748,8 @@ BOOST_AUTO_TEST_SUITE_END()
  *      moves its crossings from the vacuum's;
  *   4. the true-midplane densities relabelled off a vacuum-gauge answer,
  *      posed again in the midplane gauge, are the same plasma;
- *   5. the three-species ceiling on the coarsest mesh is constant tau's
- *      element-local fold, which tau = tau0/R lifts.
+ *   5. the three-species ceiling on the coarsest mesh was constant tau's
+ *      element-local fold, which the mirror's stabilisation lifts.
  */
 namespace
 {
@@ -3933,14 +3976,13 @@ BOOST_AUTO_TEST_CASE( aFrozenCrossingIsQuadraticSoAFixedTableLeavesNothingOut )
 /*
  * 3. ELECTRONS, DEUTERIUM AND C6+ AT M = 6 ON THE VACUUM'S CURVE: the midplane
  * suite's profiles, read on R_0vac, at a midplane peak of 5e18 m^-3 and four
- * times it. The profile set meets the box's precondition there. At 5e18 every
- * level takes three quadratic steps, where the midplane gauge takes seven
- * linear ones, and the answer self-converges; at 2e19 levels 1 and 2 do, where
- * the midplane gauge takes fourteen at level 1. Level 0 at 2e19 does NOT
- * converge, and is printed rather than asserted: with the Jacobian exact --
- * analytic and differenced columns stall alike -- and F at the labels taken
- * down to 1e-13 of its peak it stalls the same, so it is not the gauge;
- * [M-281](MEASUREMENTS.md#m-281).
+ * times it. The profile set meets the box's precondition there. At both
+ * densities every level converges in three quadratic steps and the answer
+ * self-converges. At constant tau = 1 level 0 at 2e19 did not, which was the
+ * stabilisation's element-local fold and not the gauge (case 5,
+ * [M-281](MEASUREMENTS.md#m-281), [M-291](MEASUREMENTS.md#m-291)); under the
+ * mirror's default it is asserted like the rest
+ * ([M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)).
  *
  * AND WHAT THE GAUGE COSTS IN RANGE: the transfer to the solved crossing,
  * max | m_s omega^2 ( R_0vac^2 - R_0^2 )/2T_s | per species, against the same
@@ -3974,8 +4016,10 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixOnTheVacuumCurve )
 				std::printf( "    level %d: NOT CONVERGED, merit %.3e after %zu steps: %s\n", level,
 				             run->solver->newtonResiduals().back(),
 				             run->solver->newtonResiduals().size() - 1, run->failure.c_str() );
-				BOOST_TEST( ( peak == 2.0e19 && level == 0 ),
-					"three species at " << peak << " do not converge at level " << level << ": " << run->failure );
+				BOOST_TEST( run->converged,
+					"three species at " << peak << " do not converge at level " << level << " under the "
+					"mirror's stabilisation, which lifts constant tau's fold on level 0 (case 5): "
+					<< run->failure );
 				continue;
 			}
 			BOOST_TEST( run->solver->vacuumGaugeInstalls() == 1 );
@@ -4133,51 +4177,58 @@ BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge 
 }
 
 /*
- * 5. THE THREE-SPECIES CEILING ON THE COARSEST MESH IS CONSTANT tau'S, NOT THE
- * PLASMA'S, AND tau = tau0/R LIFTS IT.
+ * 5. THE THREE-SPECIES CEILING ON THE COARSEST MESH WAS CONSTANT tau'S, NOT THE
+ * PLASMA'S, AND THE MIRROR'S STABILISATION LIFTS IT.
  *
- * At the default constant tau = 1 one element's local HDG block goes singular
- * when the reaction ( 1/R ) dF/dpsi reaches its lowest eigenvalue,
+ * At a constant tau = 1 one element's local HDG block goes singular when the
+ * reaction ( 1/R ) dF/dpsi reaches its lowest eigenvalue,
  * ( k + 1 ) tau |dK|/|K|: the discrete problem folds inside that element, near
- * 1.37e19 on level 0 in the vacuum-midplane gauge, so case 3 stalls at 2e19
- * there and converges on level 1, and the midplane gauge does the same.
- * tau = tau0/R at tau0 = 3 m^-1 makes the criterion
- * dF/dpsi < ( k + 1 ) tau0 |dK|/|K| at every radius and moves the element's
- * fold past what the plasma allows: the vacuum-midplane problem's own fold,
- * mesh converged near 4.15e19, and none below 9.1e19 under the midplane
- * gauge. So 2e19 on level 0 must converge under it, in BOTH midplane gauges,
- * quadratically and in about the three steps level 1 takes at tau = 1 -- and the
- * default, the control that makes this a statement about tau, must not.
- * [M-291](MEASUREMENTS.md#m-291), [M-287](MEASUREMENTS.md#m-287).
+ * 1.37e19 on level 0 in the vacuum-midplane gauge, so case 3 stalled at 2e19
+ * there and converged on level 1, and the midplane gauge did the same.
+ * tau = tau0/max( R, R_f ) makes the criterion dF/dpsi < ( k + 1 ) tau0 |dK|/|K|
+ * wherever R >= R_f and moves the element's fold past what the plasma allows:
+ * the vacuum-midplane problem's own fold, mesh converged near 4.16e19, and in
+ * the midplane gauge tau's own, linear in tau0 and near 2.15e20 at the
+ * mirror's tau0 = 3. So under the mirror's default -- every case's Options --
+ * 2e19 on level 0 converges in BOTH midplane gauges, and 5e19, the density
+ * the constant-tau ceiling stalled at on levels 0 and 1, converges on level 0
+ * in the midplane gauge: quadratically, in the steps level 1 takes. The
+ * control that makes this a statement about tau is constant tau = 1 at 2e19,
+ * which must stall. 5e19 has no control, since constant tau stalls there
+ * already at 2e19, and none on the vacuum's curve, where it is past the posed
+ * problem's fold. [M-291](MEASUREMENTS.md#m-291),
+ * [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau),
+ * [M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault).
  */
-BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsIt )
+BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingWasConstantTausAndTheMirrorsStabilisationLiftsIt )
 {
 	ladderStemInUse = vacuumStem;
-	double const peak = 2.0e19;
 	struct Case
 	{
 		char const *name;
 		meq::RotatingSource::Gauge gauge;
+		double peak;
+		bool control;
 	};
-	for ( Case const &c : { Case{ "vacuum-midplane", meq::RotatingSource::Gauge::FixedCurve },
-	                        Case{ "midplane, 32 knots", meq::RotatingSource::Gauge::Midplane } } )
+	for ( Case const &c : { Case{ "vacuum-midplane", meq::RotatingSource::Gauge::FixedCurve, 2.0e19, true },
+	                        Case{ "midplane, 32 knots", meq::RotatingSource::Gauge::Midplane, 2.0e19, true },
+	                        Case{ "midplane, 32 knots", meq::RotatingSource::Gauge::Midplane, 5.0e19, false } } )
 	{
-		MirrorProfiles const three = threeSpecies( peak, c.gauge );
+		MirrorProfiles const three = threeSpecies( c.peak, c.gauge );
 		std::printf( "\n  THREE SPECIES AT M = %.1f, %.1e m^-3, %s gauge, level 0, k = 3\n",
-		             machTarget, peak, c.name );
+		             machTarget, c.peak, c.name );
 
 		Options o;
 		o.level = 0;
 		o.order = 3;
 		o.stem = vacuumStem;
 		o.profiles = &three;
-		o.tau = 3.0;
-		o.diffusionScaledTau = true;
 		std::unique_ptr<MirrorRun> const scaled = runMirror( o );
-		BOOST_TEST_REQUIRE( scaled->converged, c.name << ": tau = 3/R does not converge at " << peak
-			<< " on level 0, so the local fold is not what stops constant tau: " << scaled->failure );
+		BOOST_TEST_REQUIRE( scaled->converged, c.name << ": the mirror's stabilisation, tau = " << o.tau
+			<< "/max( R, " << o.tauFloorRadius << " m ), does not converge at " << c.peak
+			<< " on level 0, so it does not lift constant tau's local fold: " << scaled->failure );
 		std::vector<double> const &history = scaled->solver->newtonResiduals();
-		std::printf( "    %-32s %2zu steps:", "tau = 3/R", history.size() - 1 );
+		std::printf( "    %-32s %2zu steps:", "the mirror's stabilisation", history.size() - 1 );
 		for ( double r : history )
 			std::printf( " %.2e", r );
 		std::printf( "\n" );
@@ -4186,6 +4237,8 @@ BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsI
 			BOOST_TEST( quadraticTail( history, why ), c.name << ": " << why );
 		BOOST_TEST( history.size() - 1 <= 4u, c.name << ": " << history.size() - 1 << " steps" );
 
+		if ( !c.control )
+			continue;
 		Options d = o;
 		d.tau = 1.0;
 		d.diffusionScaledTau = false;
@@ -4193,7 +4246,7 @@ BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingIsConstantTausAndTheScaledTauLiftsI
 		std::vector<double> const &control = constant->solver->newtonResiduals();
 		std::printf( "    %-32s %s after %zu steps, merit %.2e\n", "constant tau = 1, the control",
 		             constant->converged ? "CONVERGED" : "stalls", control.size() - 1, control.back() );
-		BOOST_TEST( !constant->converged, c.name << ": the default tau = 1 converges at " << peak
+		BOOST_TEST( !constant->converged, c.name << ": constant tau = 1 converges at " << c.peak
 			<< " on level 0, so this case no longer separates the stabilisation's fold from the "
 			"plasma's; re-measure the ceiling (M-291) before moving the density" );
 	}
@@ -4555,10 +4608,14 @@ BOOST_AUTO_TEST_CASE( theBorderedGaugeIsQuadraticWhereTheFrozenRefreshIsLinear )
  * from the plasma solved on the vacuum's crossing held in 2, to the same
  * answer.
  *
- * WHAT IT DOES NOT DO, MEASURED AND NOT ASSERTED: carry the case to 2e19 or
- * 5e19 on this level. Both stall, from every start, as the frozen refresh did
- * and as the held table does -- so the left-out term is not what stops them.
- * Level 1 carries 2e19; see [M-284](MEASUREMENTS.md#m-284).
+ * WHAT IT DOES NOT CARRY HIGHER: at constant tau = 1, 2e19 and 5e19 stalled on
+ * this level from every start, as the frozen refresh did and as the held table
+ * does -- so the left-out term was not what stopped them; the stabilisation's
+ * element-local fold was ( [M-284](MEASUREMENTS.md#m-284),
+ * [M-291](MEASUREMENTS.md#m-291) ). Under the mirror's stabilisation the
+ * bordered gauge converges from the vacuum at both on this level, which the
+ * vacuum-gauge suite's case 5 asserts; the held table at 5e19 is past the
+ * vacuum-midplane problem's own fold and has no answer to start from.
  */
 BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixAreQuadraticUnderTheBorderedGauge )
 {
@@ -4796,7 +4853,9 @@ namespace
 		return out;
 	}
 
-	/// The cases, at the coarsest level each converges on.
+	/// The cases, at the coarsest level each converges on: level 0 for all
+	/// three under the mirror's stabilisation, where constant tau = 1 took
+	/// three species at 2e19 to level 1 (vacuum-gauge suite, case 5).
 	struct RouteCase
 	{
 		std::string name;
@@ -4808,7 +4867,7 @@ namespace
 	{
 		return { { "geq's two species", geqMidplaneProfiles(), 0 },
 		         { "three species at 5e18", threeSpecies( 5.0e18 ), 0 },
-		         { "three species at 2e19", threeSpecies( 2.0e19 ), 1 } };
+		         { "three species at 2e19", threeSpecies( 2.0e19 ), 0 } };
 	}
 }
 

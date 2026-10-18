@@ -261,16 +261,22 @@ error; under the midplane gauge the same check can only be made on the answer,
 which the driver reports. **The pressure cap is not the freeze**: on the
 vacuum's curve, with an exact Jacobian, three species at `M = 6` stall on the
 coarsest mesh at the density where the midplane gauge does and converge on the
-finer ones. **That cap is the HDG stabilisation's, not the plasma's**: an
-element-local fold at constant `τ = 1`, which `[discretisation] TauScaling =
-"diffusion"` with `Tau = 3` lifts on the coarsest mesh to the posed problem's
-own, mesh-converged fold near 4.15e19 (`CLAUDE_HDGGS.md`, *A constant `τ`
-folds inside one element*, → [M-291](MEASUREMENTS.md#m-291),
-[M-289](MEASUREMENTS.md#m-289)). **So two stalls look alike
-and are not**: 2e19 on level 0 is the discretisation's in both gauges, and
-`τ = 3/R` solves it; 5e19 on this curve is past the plasma's own fold and
+finer ones at constant `τ = 1`. **That cap is the HDG stabilisation's, not the
+plasma's**: an element-local fold at constant `τ = 1`, which is why **a box
+support defaults to the mirror's stabilisation**, `τ = 3/max(R, 0.1 m)`
+(`meq::MirrorStabilisation`, the one place its two numbers are written —
+`Config` reads it for the driver and `MirrorMachine.hpp` for the fixtures).
+Under it the coarsest mesh reaches the posed problem's own, mesh-converged fold
+near 4.16e19 to about 1% (`CLAUDE_HDGGS.md`, *A constant `τ` folds inside one
+element*, → [M-291](MEASUREMENTS.md#m-291),
+[M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau)). **So two stalls looked alike
+and are not**: 2e19 on level 0 was the discretisation's in both gauges, and the
+mirror's default solves it; 5e19 on this curve is past the plasma's own fold and
 nothing numerical does — while the SAME tables under the midplane gauge, a
-different plasma, converge at 5e19 under `τ = 3/R` and do not fold below 9.1e19.
+different plasma, converge at 5e19 on the coarsest mesh, which the suite now
+asserts, and fold only where `τ` does, linearly in `τ₀` and near 2.15e20 at
+`τ₀ = 3`. A tokamak keeps constant `τ = 1`; beside the box `Tau` without
+`TauScaling` is refused, since it could be either `τ` or `τ₀`.
 A ceiling is located by creeping up the primary branch in small steps, since a
 long continuation jump near either fold can land on an up-down asymmetric
 branch.

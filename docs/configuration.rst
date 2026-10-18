@@ -329,29 +329,36 @@ tokamak, and ``examples/mirror-rotating.toml`` for a mirror, whose
        round-off dominates and a table that flattens there is behaving
        correctly.
    * - ``Tau``
-     - ``1.0``
+     - ``1.0``; ``3.0`` beside a box support
      - The HDG stabilisation, positive: :math:`\tau` in :math:`\mathrm{m}^{-2}`
        under ``TauScaling = "constant"``, and :math:`\tau_0` in
        :math:`\tau = \tau_0/\max(R, R_f)`, in :math:`\mathrm{m}^{-1}`, under
-       ``"diffusion"``. Optimal order needs only :math:`\tau = O(1)`. See
+       ``"diffusion"``. Optimal order needs only :math:`\tau = O(1)`. Beside
+       ``[source] SupportShape = "box"`` it is **refused without**
+       ``TauScaling``, which there would decide whether it is :math:`\tau` or
+       :math:`\tau_0`, a factor :math:`1/R` apart; ``"diffusion"`` alone takes
+       the mirror's 3.0, ``"constant"`` alone the constant 1.0. See
        :ref:`formulation-tau` before changing it.
    * - ``TauScaling``
-     - ``"constant"``
+     - ``"constant"``; ``"diffusion"`` beside a box support
      - ``"constant"`` or ``"diffusion"``: whether :math:`\tau` is ``Tau`` or
        ``Tau`` times the diffusion coefficient :math:`1/R`, floored at
        ``TauFloorRadius``. Anything else is refused, and so is
        ``"diffusion"`` on a mesh reaching :math:`R < 0`. It changes the
-       discretisation, so the answer at a fixed mesh. See
-       :ref:`formulation-tau`.
+       discretisation, so the answer at a fixed mesh. A mirror —
+       ``[source] SupportShape = "box"`` — defaults to
+       :math:`\tau = 3/\max(R, 0.1\,\mathrm{m})`, and every other run to the
+       constant :math:`\tau = 1`. See :ref:`formulation-tau`.
    * - ``TauFloorRadius``
      - ``0.1``
      - :math:`R_f`, in metres, in :math:`\tau = \tau_0/\max(R, R_f)`: the
        radius below which the diffusion-scaled :math:`\tau` stops growing.
        Positive; zero, the unbounded :math:`\tau_0/R`, is refused, because it
        costs the flux half an order on a mesh reaching :math:`R = 0`. Refused
-       too unless ``TauScaling = "diffusion"``, since a constant :math:`\tau`
-       never reads :math:`R`. It matters only where the mesh comes within
-       :math:`R_f` of the axis. See :ref:`formulation-tau`.
+       too under a constant :math:`\tau` — ``TauScaling = "constant"``, or
+       ``TauScaling`` absent from a run whose support is not a box — since a
+       constant :math:`\tau` never reads :math:`R`. It matters only where the
+       mesh comes within :math:`R_f` of the axis. See :ref:`formulation-tau`.
 
 ``[source]``
 ------------
@@ -728,6 +735,19 @@ run reports the current density on the cutoff beside the peak (``axial
 cutoff``, and ``axial_cutoff_relative`` in the ``.nc``); no threshold is
 calibrated to refuse on. With ``[mesh.generate]`` the cutoff is aligned to,
 by ``AlignPlasma``.
+
+**The stabilisation defaults to the mirror's.** A box run that gives no
+``[discretisation]`` stabilisation key solves at
+:math:`\tau = 3/\max(R, 0.1\,\mathrm{m})` — ``TauScaling = "diffusion"``,
+``Tau = 3.0``, ``TauFloorRadius = 0.1`` — where every other run keeps the
+constant :math:`\tau = 1`. A mirror's plasma sits at small :math:`R`, where the
+diffusion coefficient :math:`1/R` is 3 to 10 and a constant :math:`\tau = 1`
+lets one element's local problem go singular well below the pressure the
+problem itself allows (:ref:`formulation-tau`). Each key the file gives
+replaces its own part of the default; ``Tau`` alone is refused, since beside
+the box it could mean either :math:`\tau` or :math:`\tau_0`. The two numbers
+were chosen by sweeping MEQ's own mirror suites; measure your own mirror before
+relying on them.
 
 **Refused beside the box**, each because it would be accepted and do nothing or
 poses a problem not measured on a mirror: ``ExcludeAttributes`` (it acts

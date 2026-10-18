@@ -250,9 +250,10 @@ keep `τ` constant unless something measured says otherwise, which is also the
 sibling project's standing advice: **do not derive `τ` from the local
 coefficient.** That advice is about a SOLUTION-dependent coefficient; the one
 exception MEQ offers, scaling by the position-dependent `ν = 1/R`, needs no
-`EvalGrad` and is the next section — measured, and still not the default.
+`EvalGrad` and is the next section — measured, and the default only beside a
+mirror's box support.
 
-### A constant `τ` folds inside one element, and `τ = τ₀/max(R, R_f)` is the opt-in remedy
+### A constant `τ` folds inside one element, and `τ = τ₀/max(R, R_f)` is the mirror's default
 
 **THE ELEMENT-LOCAL PROBLEM IS SINGULAR ON THE TOP-DEGREE MODES AT `τ = 0`**,
 whatever the mesh: a `ψ ∈ P_k` orthogonal to `P_{k−1}` has no discrete gradient
@@ -287,11 +288,13 @@ criterion `∂F/∂ψ < (k + 1) τ₀ |∂K|/|K|`, the same at every radius and 
 `κ/ℓ`. Below a floor radius `R_f` it stops growing: `τ = τ₀/max(R, R_f)`, for
 the axis's reasons below. **It is `GradShafranovSolver::setTauScaling(
 TauScaling::Diffusion[, R_f] )`, `[discretisation] TauScaling = "diffusion"`
-with `TauFloorRadius = R_f`, `R_f` = 0.1 m unless given, and NOT the
-default.** `meq::DiffusionScaledStabilization` reads the physical point off
-the transformation MFEM hands `Eval()`, which every route sets — the per-face
-loop, the batched face tables, the nonlinear residual and gradient — so it is
-exact at each quadrature point. **It is position dependent and state independent**,
+with `TauFloorRadius = R_f`, `R_f` = 0.1 m unless given — and the DEFAULT
+BESIDE A BOX SUPPORT, at `τ₀ = 3 m⁻¹`, `R_f = 0.1 m`
+(`meq::MirrorStabilisation`, below); every other run keeps constant
+`τ = 1`.** `meq::DiffusionScaledStabilization` reads the physical point off the
+transformation MFEM hands `Eval()`, which every route sets — the per-face loop,
+the batched face tables, the nonlinear residual and gradient — so it is exact
+at each quadrature point. **It is position dependent and state independent**,
 so `IsConstant()` is true and no `EvalGrad()` is owed: the bilinear path, which
 refuses a state-dependent stabilisation, assembles it, and Newton stays at four
 steps on Example 5.
@@ -351,8 +354,31 @@ rates, 1.94 and 3.10 at `k = 1, 2`, where `R_f → 0` reads 1.48 and 2.59.
 element-local fold in every stall measured but one: under `τ = 3/R` the
 midplane gauge solves 5e19 and does not fold below 9.1e19, and only the
 vacuum-midplane gauge has a fold of its own, near 4.15e19
-(→ **[M-291](MEASUREMENTS.md#m-291)**). The tokamak default stays constant
-`τ = 1`.
+(→ **[M-291](MEASUREMENTS.md#m-291)**).
+
+**THE MIRROR'S DEFAULT, AND WHERE ITS TWO NUMBERS LIVE.** A `[source]
+SupportShape = "box"` run defaults to `TauScaling = "diffusion"`, `Tau = 3`,
+`TauFloorRadius = 0.1`, each part replaced by a key the file gives; `Tau`
+without `TauScaling` is refused beside the box, since it would be `τ₀` in `m⁻¹`
+by the box's default and a constant `τ` in `m⁻²` by every other run's.
+`meq::MirrorStabilisation` in `Config.hpp` is the one place the numbers are
+written: `Config` reads it for the driver, `MirrorMachine.hpp`'s
+`mirrorSolver()` and `RotatingMirror`'s `Options` for the fixtures, and
+`RotatingMirrorDriver` compares the two dof for dof, so they cannot drift.
+Swept over `τ₀` ∈ {1, 2, 3, 5, 10} and `R_f` ∈ {0.05, 0.1, 0.2} on every mirror
+suite, every cell converges and keeps every order in double, so the fold
+chose: `τ₀ = 1` stops 22% short of the vacuum-midplane gauge's own fold on the
+coarsest mesh, `τ₀ = 3` is the smallest within about 1% of it, `τ₀ = 10` keeps
+`ψ*`'s `k = 2` rate only 0.04 inside its band, and `R_f = 0.2` costs `ψ_h` and
+`ψ_ax` against geq (→ **[M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau)**). The
+mirror suites' bounds were re-measured under it
+(→ **[M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)**); **in single the
+round-off floor rises with `τ`'s size**, scaled or constant alike, so a
+meshed-coil solve sits above the solver's `10 ε` target and three fixture
+floors set at `τ = 1` were re-measured for it. **The tokamak
+default stays constant `τ = 1`**: its fixtures and bounds were measured there,
+and on a tokamak box `3/max(R, 0.1)` is constant `τ = 3`'s answer and cost
+(M-290).
 
 ### Post-processing is back, and it was free
 

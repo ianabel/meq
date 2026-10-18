@@ -5011,6 +5011,13 @@ int main( int argc, char **argv )
 			             conductorField->size() == 1 ? "" : "s",
 			             conductorField->totalCurrent() );
 
+		// A diffusion-scaled stabilisation is said, because a box support
+		// takes the mirror's with no key in the file to show it.
+		if ( config->getDiscretisation().tauScaling == meq::TauScalingType::Diffusion )
+			std::printf( "MEQ: the HDG stabilisation is tau = %g/max( R, %g m )\n",
+			             config->getDiscretisation().tau,
+			             config->getDiscretisation().tauFloorRadius );
+
 		if ( config->getSource().supportIsBox() )
 			std::printf( "MEQ: the plasma support is the BOX 0 < Psi <= 1, "
 			             "abs( z ) <= %g, live within Newton\n",

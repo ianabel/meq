@@ -311,13 +311,17 @@ one element's local HDG block goes singular when the reaction `(1/R) ∂F/∂ψ`
 reaches its lowest eigenvalue `(k + 1) τ |∂K|/|K|`, so the discrete problem
 folds inside that element — at 1.367e19 on level 0, the step between
 neighbours living in one element and growing as `(n_c − n)^(−1/2)`. The
-ceiling scales with `τ`, and `[discretisation] TauScaling = "diffusion"` with
-`Tau = 3` (`τ = 3/R`) lifts it: 2e19 converges in three steps on level 0 in
-both midplane gauges. **What is left differs by gauge.** On the vacuum's
-curve it is the posed problem's own fold, smooth, global and mesh converged
-near **4.15e19**, so 5e19 there has no equilibrium on any mesh; under the
-midplane gauge there is no fold below 9.1e19 on level 0, and 5e19 converges on
-levels 0 and 1 in four steps → [M-291](MEASUREMENTS.md#m-291).
+ceiling scales with `τ`, and **a box support therefore defaults to the
+mirror's stabilisation**, `τ = 3/max(R, 0.1 m)` (`meq::MirrorStabilisation`;
+→ [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau) chose the two numbers): 2e19
+converges in three steps on level 0 in both midplane gauges. **What is left
+differs by gauge.** On the vacuum's curve it is the posed problem's own fold,
+smooth, global and mesh converged near **4.16e19**, so 5e19 there has no
+equilibrium on any mesh; under the midplane gauge the only fold is `τ`'s,
+linear in `τ₀` and near 2.15e20 on level 0 at `τ₀ = 3`, and 5e19 converges on
+level 0 in four steps, which `RotatingMirrorVacuumGauge` asserts
+→ [M-291](MEASUREMENTS.md#m-291),
+[M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault).
 
 **THE CROSSINGS ARE BORDER UNKNOWNS — BUILT, AND WHAT SHIPS**
 → [M-283](MEASUREMENTS.md#m-283). `GradShafranovSolver` makes `R₀`
@@ -842,8 +846,12 @@ the branch.
 **Open:**
 * **A start the rung closed correctly now exits 2.** `PsiAxis` 0.05 and 0.1 were
   rescued to the shipped answer; the skip trades them for not reporting the
-  other two roots. Whether the 0.2 root is reachable by the plain bordered
-  Newton from some start, or survives refinement, is untried.
+  other two roots. Under the mirror's stabilisation a second root IS reachable
+  by the plain bordered Newton: from `PsiAxis = 0.15` it converges in 27 steps
+  to `ψ_ax` = 4.5747e-03, `ψ_bnd` = 4.980e-02, where the shipped answer is
+  5.5473e-03 and 6.530e-02, and exits 0 reporting it (constant `τ = 1` fails
+  from the same start). Whether that is M-277's 0.2 root, and whether it
+  survives refinement, is untried (M-MIRRORDEFAULT).
 * **The bordered target is relative to the cold residual**, so a bad enough
   start is accepted loose: from `PsiAxis = 0.5` a first residual of 1.1e+12
   accepts 9.1e-05. That bites any first attempt, not only the rung's, and is
@@ -853,20 +861,23 @@ the branch.
   it. Neither `--device` nor the adaptive loop has been run under
   `Gauge = "midplane"` or `"vacuum-midplane"`, and the knots' rows have no
   device twin, so under a Device their dot products take the host route.
-* **The three-species pressure ceiling** (risk 5) is constant `τ = 1`'s
-  element-local fold of the discretisation in every stall measured but one:
-  `TauScaling = "diffusion"`, `Tau = 3` converges 2e19 on level 0 in both
-  midplane gauges and 5e19 on levels 0 and 1 under the midplane gauge, which
-  reaches 9.1e19 on level 0 without folding. The one that is the plasma's is
-  the vacuum-midplane gauge at 5e19: that posed problem folds, mesh converged,
-  near 4.15e19 (→ [M-291](MEASUREMENTS.md#m-291)). **Open**: the default is
-  still constant `τ = 1`, so a user's coarse mirror meets the first fold unless
-  the key is set. `τ = τ₀/max(R, R_f)` floors the radius at
-  `TauFloorRadius`, 0.1 m unless given, which removes the unbounded form's
-  half order in `q` and its round-off stall on a mesh reaching the axis
-  ([M-TAUCAP](MEASUREMENTS.md#m-taucap)); 0.1 m is one value measured on the
-  mirror, not an optimum, and [M-290](MEASUREMENTS.md#m-290) is what changing
-  the default costs.
+* **The three-species pressure ceiling** (risk 5) was constant `τ = 1`'s
+  element-local fold of the discretisation in every stall measured but one,
+  and **a box support now defaults to `τ = 3/max(R, 0.1 m)`**, under which
+  the coarsest mesh converges 2e19 in both midplane gauges and 5e19 under the
+  midplane gauge, asserted. The one stall that is the plasma's is the
+  vacuum-midplane gauge at 5e19: that posed problem folds, mesh converged,
+  near 4.16e19, and the default reaches it to about 1% on level 0
+  (→ [M-291](MEASUREMENTS.md#m-291), [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau),
+  [M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)). **Open**: in single
+  the format's floor rises with `τ`'s size — constant or scaled alike — so a
+  solve with a meshed coil sits above the solver's `10 ε` absolute target
+  under the default; the vacuum mirror's fixture asks single for 64 `ε`, while
+  a meshed-pack mirror through the driver in a single build would meet the
+  default target, which is unmeasured (the shipped files' filaments are
+  subtracted, and they converge in two steps). The midplane gauge's posed-problem fold, if it has one, lies above
+  6.4e20; and `q_h` on the rotating mirror is reference-limited on its finest
+  rungs.
 * **32 knots are fixed for every mesh.** At level 2 their error is 170× under
   the discretisation error, but between knots they move the
   `.nc`'s true-midplane densities off the input tables by up to 7e-05
@@ -922,15 +933,18 @@ the branch.
    32 knots are border unknowns, so Newton is quadratic under the midplane gauge,
    in 3 steps from the vacuum at every pressure that converges
    ([M-283](MEASUREMENTS.md#m-283), [M-284](MEASUREMENTS.md#m-284)).
-   **What remains is a pressure ceiling that is not the freeze's**: the same
-   three species converge at 5e18 everywhere and at 2e19 from level 1, and
-   stall at 2e19 on level 0 and at 5e19 on levels 0 and 1, in every gauge and
+   **What remained was a pressure ceiling that is not the freeze's**: the same
+   three species converged at 5e18 everywhere and at 2e19 from level 1, and
+   stalled at 2e19 on level 0 and at 5e19 on levels 0 and 1, in every gauge and
    from every start measured, with the Jacobian exact and nothing moving
-   ([M-285](MEASUREMENTS.md#m-285)). **It is the HDG stabilisation's**: one
+   ([M-285](MEASUREMENTS.md#m-285)). **It was the HDG stabilisation's**: one
    element's local block going singular at constant `τ = 1`, which rises with
-   the mesh and which `τ = 3/R` lifts — to 5e19 and beyond under the midplane
-   gauge. Only the vacuum-midplane gauge's 5e19 is the posed problem's own
-   fold, mesh converged near 4.15e19 ([M-291](MEASUREMENTS.md#m-291)).
+   the mesh. **A box support defaults to `τ = 3/max(R, 0.1 m)`**, which lifts
+   it — 5e19 converges on level 0 under the midplane gauge, asserted — and
+   only the vacuum-midplane gauge's 5e19 is the posed problem's own fold, mesh
+   converged near 4.16e19 ([M-291](MEASUREMENTS.md#m-291),
+   [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau),
+   [M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)).
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,

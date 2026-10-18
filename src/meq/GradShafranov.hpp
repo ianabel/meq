@@ -587,10 +587,12 @@ namespace meq
 			explicit DiffusionScaledStabilization( double tau0In,
 			                                       double floorRadiusIn = defaultFloorRadius );
 
-			/// R_f's default, 0.1 m: the one value measured with the mirror
-			/// suite (MEASUREMENTS.md M-290, M-TAUCAP), not an optimum.
-			/// meq::DiscretisationConfig's TauFloorRadius default is this
-			/// number, which that MFEM-free header cannot name.
+			/// R_f's default, 0.1 m: the floor the mirror suites were swept to
+			/// choose (MEASUREMENTS.md M-TAUCAP, M-MIRRORTAU).
+			/// meq::MirrorStabilisation::floorRadius, the mirror's default and
+			/// meq::DiscretisationConfig's TauFloorRadius default, is this
+			/// number, which that MFEM-free header writes and this one cannot
+			/// name; SolverContract holds the two equal.
 			static constexpr double defaultFloorRadius = 0.1;
 
 			/// MFEM's spelling, from HDGStabilization. True: position
@@ -982,7 +984,10 @@ namespace meq
 
 			/**
 			 * SCALE tau BY THE DIFFUSION COEFFICIENT, or not. Constant is the
-			 * default and every rate in the suite is measured with it;
+			 * solver's default and every tokamak rate in the suite is measured
+			 * with it; the driver gives a [source] SupportShape = "box" run
+			 * Diffusion at meq::MirrorStabilisation's tau0 and R_f, and so do
+			 * the mirror fixtures.
 			 * Diffusion takes the constructor's tau as tau0 in
 			 * tau( x ) = tau0/max( R, R_f ), R_f at
 			 * DiffusionScaledStabilization::defaultFloorRadius --

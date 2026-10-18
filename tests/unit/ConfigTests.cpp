@@ -4102,6 +4102,99 @@ BOOST_AUTO_TEST_CASE( a_mirror_parses )
 		BOOST_TEST( !c.getSource().supportIsBox(), source.name );
 		BOOST_TEST( !c.getSource().axisPoint.given, source.name );
 	}
+
+	// Both shipped mirrors give no stabilisation key, so they run at the
+	// mirror's default -- which is what RotatingMirrorDriver holds the
+	// library fixtures, built at the same numbers, against.
+	for ( char const * name : { "mirror-rotating.toml", "mirror-three-species.toml" } )
+	{
+		meq::Configuration const c( ( examplesDirectory() / name ).string() );
+		BOOST_TEST( ( c.getDiscretisation().tauScaling == TauScalingType::Diffusion ), name );
+		BOOST_TEST( c.getDiscretisation().tau == meq::MirrorStabilisation::tau0, name );
+		BOOST_TEST( c.getDiscretisation().tauFloorRadius == meq::MirrorStabilisation::floorRadius, name );
+	}
+}
+
+/// A BOX SUPPORT DEFAULTS TO THE MIRROR'S STABILISATION, meq::MirrorStabilisation:
+/// TauScaling "diffusion" at its tau0 and floor, each key the file gives taking
+/// precedence. Tau WITHOUT TauScaling is refused beside the box, since it would
+/// be tau0 in m^-1 by the box's default and a constant tau in m^-2 by every
+/// other run's; "diffusion" alone takes the mirror's tau0 and "constant" alone
+/// the constant 1.0. The same keys beside a one-sided support mean what they
+/// always did, and that is asserted too, on both source types that carry a
+/// support. MEASUREMENTS.md M-MIRRORTAU chose the two numbers, which are
+/// pinned here so that moving them is a decision and not an accident.
+BOOST_AUTO_TEST_CASE( a_box_support_defaults_to_the_mirrors_stabilisation )
+{
+	BOOST_TEST( meq::MirrorStabilisation::tau0 == 3.0,
+		"the mirror's tau0 is not M-MIRRORTAU's 3 m^-1: re-measure the mirror suites at the new value" );
+	BOOST_TEST( meq::MirrorStabilisation::floorRadius == 0.1,
+		"the mirror's floor is not M-MIRRORTAU's 0.1 m: re-measure the mirror suites at the new value" );
+	BOOST_TEST( meq::DiscretisationConfig().tauFloorRadius == meq::MirrorStabilisation::floorRadius );
+
+	auto withDiscretisation = []( std::string text, std::string const & lines )
+	{
+		std::string const degree = "PolynomialDegree = 2\n";
+		std::size_t const at = text.find( degree );
+		BOOST_TEST_REQUIRE( at != std::string::npos );
+		text.insert( at + degree.size(), lines );
+		return text;
+	};
+	std::string const oneSided = "Normalised = true\nPsiAxis = 1.0\n";
+
+	struct Accepted
+	{
+		char const * lines;
+		TauScalingType scaling;
+		double tau;
+		double floor;
+	};
+	double const tau0 = meq::MirrorStabilisation::tau0;
+	double const floor = meq::MirrorStabilisation::floorRadius;
+	for ( NamedBuilder const & source : normalisedSources() )
+	{
+		std::string const box = source.build( boxScalars, axisTable + limiterTable );
+		for ( Accepted const & a : {
+			Accepted{ "", TauScalingType::Diffusion, tau0, floor },
+			Accepted{ "TauFloorRadius = 0.05\n", TauScalingType::Diffusion, tau0, 0.05 },
+			Accepted{ "TauScaling = \"diffusion\"\n", TauScalingType::Diffusion, tau0, floor },
+			Accepted{ "TauScaling = \"diffusion\"\nTau = 5\n", TauScalingType::Diffusion, 5.0, floor },
+			Accepted{ "TauScaling = \"diffusion\"\nTau = 1.0\nTauFloorRadius = 0.2\n",
+			          TauScalingType::Diffusion, 1.0, 0.2 },
+			Accepted{ "TauScaling = \"constant\"\n", TauScalingType::Constant, 1.0, floor },
+			Accepted{ "TauScaling = \"constant\"\nTau = 2.0\n", TauScalingType::Constant, 2.0, floor } } )
+		{
+			meq::DiscretisationConfig const d = parse( withDiscretisation( box, a.lines ) ).getDiscretisation();
+			BOOST_TEST( ( d.tauScaling == a.scaling ), source.name << ", box, '" << a.lines << "'" );
+			BOOST_TEST( d.tau == a.tau, source.name << ", box, '" << a.lines << "'" );
+			BOOST_TEST( d.tauFloorRadius == a.floor, source.name << ", box, '" << a.lines << "'" );
+		}
+
+		for ( std::string const bad : { "Tau = 3.0\n", "Tau = 1.0\n", "Tau = 3\nTauFloorRadius = 0.1\n" } )
+			BOOST_TEST( refusedKey( withDiscretisation( box, bad ) ) == "discretisation.Tau",
+				source.name << ", box, '" << bad << "'" );
+		BOOST_TEST( refusalMessage( withDiscretisation( box, "Tau = 3.0\n" ) ).find( "TauScaling" )
+		            != std::string::npos, source.name );
+		for ( std::string const bad : { "TauScaling = \"constant\"\nTauFloorRadius = 0.1\n",
+		                                "TauFloorRadius = 0.0\n", "TauFloorRadius = -0.1\n" } )
+			BOOST_TEST( refusedKey( withDiscretisation( box, bad ) ) == "discretisation.TauFloorRadius",
+				source.name << ", box, '" << bad << "'" );
+
+		// Beside a one-sided support nothing moves: constant tau = 1, and Tau
+		// alone a constant.
+		std::string const tokamak = source.build( oneSided, "" );
+		meq::DiscretisationConfig const plain = parse( tokamak ).getDiscretisation();
+		BOOST_TEST( ( plain.tauScaling == TauScalingType::Constant ), source.name );
+		BOOST_TEST( plain.tau == 1.0, source.name );
+		meq::DiscretisationConfig const given = parse( withDiscretisation( tokamak, "Tau = 3.0\n" ) )
+			.getDiscretisation();
+		BOOST_TEST( ( given.tauScaling == TauScalingType::Constant ), source.name );
+		BOOST_TEST( given.tau == 3.0, source.name );
+		BOOST_TEST( parse( withDiscretisation( tokamak, "TauScaling = \"diffusion\"\n" ) )
+		            .getDiscretisation().tau == 1.0, source.name );
+		BOOST_TEST( refusedKey( withDiscretisation( tokamak, "TauFloorRadius = 0.1\n" ) )
+		            == "discretisation.TauFloorRadius", source.name );
+	}
 }
 
 /// EVERY MIRROR KEY IS REFUSED, WITH ITS OWN KEY NAMED, ON BOTH SOURCE TYPES
