@@ -470,7 +470,7 @@ namespace mirror
 		// residual by 3.3 and is four orders under the 0.17 to 0.79 a step
 		// that had not converged would leave. The subtracted route has no
 		// such source and reaches 9e-09. Double asks the solver's own default.
-		// MEASUREMENTS.md M-MIRRORDEFAULT.
+		// MEASUREMENTS.md M-294.
 		s->solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
 		                             64.0*static_cast<double>(
 			                             std::numeric_limits<mfem::real_t>::epsilon() ),

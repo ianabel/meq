@@ -369,7 +369,7 @@ namespace meq
 	 * over tau0 in { 1, 2, 3, 5, 10 } m^-1 and R_f in { 0.05, 0.1, 0.2 } m on
 	 * every mirror suite, tau0 = 3 is the smallest that reaches the posed
 	 * problem's own fold on the coarsest mesh to about 1%, and 0.1 m is between
-	 * its neighbours in every column (MEASUREMENTS.md M-MIRRORTAU). A tokamak
+	 * its neighbours in every column (MEASUREMENTS.md M-293). A tokamak
 	 * keeps constant tau = 1: its fixtures and bounds were measured there.
 	 */
 	struct MirrorStabilisation
@@ -414,8 +414,8 @@ namespace meq
 		// under a diffusion-scaled tau -- TauScaling = "diffusion", or a box
 		// support's default -- and refused, not ignored, under a constant
 		// one. The default is MirrorStabilisation::floorRadius on every path,
-		// the one value measured to choose it (MEASUREMENTS.md M-TAUCAP,
-		// M-MIRRORTAU); meq::DiffusionScaledStabilization::defaultFloorRadius
+		// the one value measured to choose it (MEASUREMENTS.md M-292,
+		// M-293); meq::DiffusionScaledStabilization::defaultFloorRadius
 		// is the same number, which this MFEM-free header cannot name and
 		// SolverContract holds equal.
 		double tauFloorRadius = MirrorStabilisation::floorRadius;

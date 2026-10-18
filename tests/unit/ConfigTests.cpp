@@ -4122,14 +4122,14 @@ BOOST_AUTO_TEST_CASE( a_mirror_parses )
 /// other run's; "diffusion" alone takes the mirror's tau0 and "constant" alone
 /// the constant 1.0. The same keys beside a one-sided support mean what they
 /// always did, and that is asserted too, on both source types that carry a
-/// support. MEASUREMENTS.md M-MIRRORTAU chose the two numbers, which are
+/// support. MEASUREMENTS.md M-293 chose the two numbers, which are
 /// pinned here so that moving them is a decision and not an accident.
 BOOST_AUTO_TEST_CASE( a_box_support_defaults_to_the_mirrors_stabilisation )
 {
 	BOOST_TEST( meq::MirrorStabilisation::tau0 == 3.0,
-		"the mirror's tau0 is not M-MIRRORTAU's 3 m^-1: re-measure the mirror suites at the new value" );
+		"the mirror's tau0 is not M-293's 3 m^-1: re-measure the mirror suites at the new value" );
 	BOOST_TEST( meq::MirrorStabilisation::floorRadius == 0.1,
-		"the mirror's floor is not M-MIRRORTAU's 0.1 m: re-measure the mirror suites at the new value" );
+		"the mirror's floor is not M-293's 0.1 m: re-measure the mirror suites at the new value" );
 	BOOST_TEST( meq::DiscretisationConfig().tauFloorRadius == meq::MirrorStabilisation::floorRadius );
 
 	auto withDiscretisation = []( std::string text, std::string const & lines )

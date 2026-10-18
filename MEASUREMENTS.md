@@ -18636,7 +18636,7 @@ the control, stalls after 30 steps at 7.6e-05 and 1.6e-05; the two stalls are
 most of its cost. The midplane-gauge rows of §3a are an uncommitted probe on
 the same harness.
 
-### M-TAUCAP
+### M-292
 
 **WHY `τ = τ₀/max(R, R_f)` FIXES THE AXIS. UNBOUNDED, `τ₀/R` FAILS THERE IN
 TWO UNRELATED WAYS. ON A FACE MEETING `R = 0` AT A VERTEX ITS INTEGRAL DIVERGES,
@@ -18790,7 +18790,7 @@ without a finer reference than level 2 at `k = 4`.
 **Reproduce.** The three harnesses are scratch and not committed; the face
 radii and Newton histories are a print in `solveMeshed()`.
 
-### M-MIRRORTAU
+### M-293
 
 **THE MIRROR'S STABILISATION, `τ = τ₀/max(R, R_f)` SWEPT OVER `τ₀` = 1, 2, 3, 5,
 10 m⁻¹ AND `R_f` = 0.05, 0.1, 0.2 m ON EVERY MIRROR SUITE, BESIDE CONSTANT
@@ -18888,7 +18888,7 @@ and nothing else here. **`ψ*`'s `k = 2` rate falls with `τ₀`**: 4.62, 4.46, 
 and an assertion at 3.85, so `τ₀ = 10` passes 0.04 from the edge — the
 `τ₀ h` pre-asymptote of [M-288](MEASUREMENTS.md#m-288). `ψ*` at `k = 3` rises 7%
 from `τ₀ = 1` to 10. `q_h` is the reference's on every rung but `k = 1`, level 3,
-as [M-TAUCAP](MEASUREMENTS.md#m-taucap) found, and its ladder rates (2.14,
+as [M-292](MEASUREMENTS.md#m-292) found, and its ladder rates (2.14,
 3.00, 3.60 at constant 1; 1.78–1.82, 2.87–2.89, 3.49–3.51 scaled) rank nothing.
 
 **3. The three-species ceiling**, `k = 3`. Brackets in m⁻³, the same at every `R_f`
@@ -18999,7 +18999,7 @@ to 1.0e-06, against double's 1.35e-08.
 * **`R_f`**: 0.2 costs `ψ_h − geq` 1.4× and `ψ_ax` 2.5× to 4× for a vacuum
   `q_h` at `k = 1` 1.3× better; 0.05 buys `ψ_ax` 1.2× to 1.5× for that `q_h`
   1.3× worse and the
-  [M-TAUCAP](MEASUREMENTS.md#m-taucap) constant near the axis. 0.1 is between
+  [M-292](MEASUREMENTS.md#m-292) constant near the axis. 0.1 is between
   them in every column, and equal to the better in `ψ_h − geq`.
 * **Newton** does not separate any two scaled cells.
 
@@ -19011,7 +19011,7 @@ labels more than `q`. Dominated, as measured: every `τ₀ = 1` cell (the fold),
 **Reproduce.** The override, the `sweepceil` probe and the run scripts are
 scratch and not committed.
 
-### M-MIRRORDEFAULT
+### M-294
 
 **THE MIRROR'S STABILISATION, `τ = 3/max(R, 0.1 m)`, AS THE DEFAULT OF EVERY
 `[source] SupportShape = "box"` RUN, AND THE MIRROR SUITES' BOUNDS THAT WERE
@@ -19028,7 +19028,7 @@ AND THE MODE COUNT'S PLATEAU GUARD — AND A DOUBLE-ONLY ROUND-OFF CONSTANT IN
 THE QUADRATIC-TAIL CHECK IS MADE THE FORMAT'S. THE SINGLE FLOOR RISES WITH
 `τ`'s SIZE, NOT ITS SCALING: CONSTANT `τ = 3` SITS WHERE `3/max(R, 0.1)` DOES.**
 
-**Setup.** `main` at the merge of M-TAUCAP and M-MIRRORTAU (`df2278c`) with
+**Setup.** `main` at the merge of M-292 and M-293 (`df2278c`) with
 the default built in: `meq::MirrorStabilisation` in `Config.hpp` holds
 `τ₀ = 3 m⁻¹` and `R_f = 0.1 m`, `Config` gives them to a box run whose
 `[discretisation]` does not say, and the mirror fixtures read the same two
@@ -19037,7 +19037,7 @@ constants — `MirrorMachine.hpp`'s `mirrorSolver()` for every vacuum solve, and
 configured as `builds/double`; single against `install-single`, as
 `builds/single`. Each mirror suite run alone, `OMP_NUM_THREADS=4`,
 `MKL_NUM_THREADS=1`, beside the full `ctest -j4` at `OMP_NUM_THREADS=3`.
-Constant-`τ` figures not run here are [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau)'s
+Constant-`τ` figures not run here are [M-293](MEASUREMENTS.md#m-293)'s
 `const 1` cell, the same code at the old default. `RotatingMirrorDriver`
 compares the library's solve with the driver's on the shipped file dof for dof:
 0.000e+00 over 7050 dofs, 3 Newton steps each, so the fixtures and `meq` pose
@@ -19056,7 +19056,7 @@ level 0, `k = 3`, from the vacuum:
 
 So the regression keeps its control at 2e19 in both gauges and gains a 5e19
 case with none: constant `τ` already fails below it, and on the vacuum's curve
-5e19 is past the posed problem's own fold (M-MIRRORTAU §3), so it has no
+5e19 is past the posed problem's own fold (M-293 §3), so it has no
 answer to assert. The bound on the steps, `≤ 4`, is the case's own: 3 and 4
 are measured.
 
@@ -19073,7 +19073,7 @@ shipped mesh, `k = 2`, `NewtonMaxIterations = 30` unless said:
 and from 0.2 at the neighbouring cells: `2/max(R, 0.05)`, `2/max(R, 0.1)`,
 `3/max(R, 0.05)`, `3/max(R, 0.2)`, and `5/max(R, R_f)` at all three floors
 exit 2; `2/max(R, 0.2)` converges in 17 steps to the shipped answer
-(M-MIRRORTAU §4); constant `τ = 1` exits 2 from 0.2 and from 0.15. **The
+(M-293 §4); constant `τ = 1` exits 2 from 0.2 and from 0.15. **The
 premise is the default's**, so the test stands as written, at 0.2; 0.15 is a
 second discrete root a plain bordered Newton reaches under the mirror's
 stabilisation, which the driver reports with exit 0, recorded in MIRROR-PLAN's
@@ -19102,8 +19102,8 @@ above `k + 1 − 0.15` — and clears it by 0.26 at worst (`k = 1`, 1.961 agains
 1.70). `ψ*` is asserted at `k + 1 − 0.30` on the finest pair only: `k = 1`'s
 coarse pair, 1.43, is pre-asymptotic, as `ψ_h` over `D_h` is there. It is not
 asserted at the `k + 2` a post-processing promises — it gains nothing over
-`ψ_h` here, which is measured and not explained (M-TAUCAP). **The mutation**:
-`mirrorSolver()` at `R_f = 10⁻⁶`, [M-TAUCAP](MEASUREMENTS.md#m-taucap)'s
+`ψ_h` here, which is measured and not explained (M-292). **The mutation**:
+`mirrorSolver()` at `R_f = 10⁻⁶`, [M-292](MEASUREMENTS.md#m-292)'s
 stand-in for the unbounded `τ₀/R`, fails six `q_h` assertions — `k = 1` at
 1.489, 1.483 and 1.486 over the ladder, `k = 2` at 2.678, 2.590 and 2.634 —
 and passes `k = 3` (4.163, 4.078), where the machine region does not see the
@@ -19114,7 +19114,7 @@ printed only.
 `RotatingMirrorResolution`, `q_h` rms against the level-2 `k = 4` reference's
 `q_h`: at `k = 3`, 1.417e-04, 1.199e-05, 1.114e-06 on levels 0 to 2, rates
 3.563 and 3.428. Level 2 reads the reference, whose own `q_h` moves by 3.34e-06
-rms between its levels 1 and 2 (M-TAUCAP), so only the first pair is asserted,
+rms between its levels 1 and 2 (M-292), so only the first pair is asserted,
 at `ψ_h`'s `k = 3` edge rate 3.5 less the pair slack, 0.30: 3.563 against
 3.20. The mutation that catches the axis in `VacuumMirror` does not catch it
 here: with the plasma solve's floor at 10⁻⁶ m no error column moves by more
@@ -19154,7 +19154,7 @@ against cold residuals of 0.17 to 0.79 and a target of `max(10 ε, 10 ε ‖r₀
 = 1.19e-06 absolute. The first exact step leaves 666 to 33,891 `ε` of the cold
 residual, under `oneExactStepReachedTheFloor`'s 65,536, which still passes;
 the second is iterative refinement onto a floor that does not move after it.
-[M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau) §5 has constant `τ = 1` at
+[M-293](MEASUREMENTS.md#m-293) §5 has constant `τ = 1` at
 1.13e-06 to 1.19e-06, already on the target. The subtracted route, no meshed
 source, reaches 9.3e-09. **So `solveMeshed()` asks single for 64 `ε`
 absolute, 7.6e-06**: 3.3 above the worst stagnant merit at the default, 2.7
@@ -19172,7 +19172,7 @@ at `MKL_NUM_THREADS=1`. The plateau's start now sits under the same guard as
 the band, and the machine-region claim under the same floor on the region's
 own norm, 3.1e-05; both skip loudly in single and always run in double.
 
-*`theAlignedCutoffKeepsTheOrder`*, M-MIRRORTAU's coin toss: aligned 2.740e-07
+*`theAlignedCutoffKeepsTheOrder`*, M-293's coin toss: aligned 2.740e-07
 against 2.934e-07 cut at level 2. Every `ψ*` rung from level 1 reads 2.4e-07 to
 2.7e-07 rms, flat — rates 0.315 and −0.015 aligned — so both columns are the
 floor, 35 `ε |ψ_bnd|`, where at constant `τ = 1` the aligned column was

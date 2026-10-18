@@ -64,7 +64,7 @@ PolynomialDegree = 2
 # TauFloorRadius = 0.1 -- where every other run keeps the constant tau = 1.
 # This plasma sits where 1/R is 3 to 10, and there a constant tau = 1 is the
 # weakest stabilisation relative to the operator: geq's labels come 8.6x
-# closer at the default (MEASUREMENTS.md M-290, M-MIRRORTAU).  A Tau written
+# closer at the default (MEASUREMENTS.md M-290, M-293).  A Tau written
 # here needs TauScaling beside it, which says whether it is tau or tau0.
 
 [solver]

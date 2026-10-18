@@ -535,7 +535,7 @@ namespace meq
 	 *
 	 * THE AXIS, AND WHY R IS FLOORED. Unbounded, tau0/R fails at the axis in
 	 * two separate ways, and the floor removes both (MEASUREMENTS.md M-290,
-	 * M-TAUCAP):
+	 * M-292):
 	 *
 	 *   * ON A FACE MEETING R = 0 AT A VERTEX, the integral of tau0/R against
 	 *     a shape function that does not vanish there diverges like log( 1/R ),
@@ -588,7 +588,7 @@ namespace meq
 			                                       double floorRadiusIn = defaultFloorRadius );
 
 			/// R_f's default, 0.1 m: the floor the mirror suites were swept to
-			/// choose (MEASUREMENTS.md M-TAUCAP, M-MIRRORTAU).
+			/// choose (MEASUREMENTS.md M-292, M-293).
 			/// meq::MirrorStabilisation::floorRadius, the mirror's default and
 			/// meq::DiscretisationConfig's TauFloorRadius default, is this
 			/// number, which that MFEM-free header writes and this one cannot

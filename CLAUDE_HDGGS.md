@@ -317,7 +317,7 @@ analytic benchmark too**: Example 5's reaction `∂F/∂ψ ≈ 14` fails Newton 
 is the same local criterion.
 
 **UNBOUNDED, `τ₀/R` FAILS AT THE AXIS TWICE, AND THE FLOOR IS WHAT FIXES
-BOTH.** (→ **[M-290](MEASUREMENTS.md#m-290)**, **[M-TAUCAP](MEASUREMENTS.md#m-taucap)**)
+BOTH.** (→ **[M-290](MEASUREMENTS.md#m-290)**, **[M-292](MEASUREMENTS.md#m-292)**)
 
 * **On a face meeting `R = 0` at a vertex** `∫ τ₀/R φ²` diverges like
   `log(1/R)`, so what is assembled is the face rule's sum: `∫_e τ ds`, which is
@@ -370,9 +370,9 @@ suite, every cell converges and keeps every order in double, so the fold
 chose: `τ₀ = 1` stops 22% short of the vacuum-midplane gauge's own fold on the
 coarsest mesh, `τ₀ = 3` is the smallest within about 1% of it, `τ₀ = 10` keeps
 `ψ*`'s `k = 2` rate only 0.04 inside its band, and `R_f = 0.2` costs `ψ_h` and
-`ψ_ax` against geq (→ **[M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau)**). The
+`ψ_ax` against geq (→ **[M-293](MEASUREMENTS.md#m-293)**). The
 mirror suites' bounds were re-measured under it
-(→ **[M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)**); **in single the
+(→ **[M-294](MEASUREMENTS.md#m-294)**); **in single the
 round-off floor rises with `τ`'s size**, scaled or constant alike, so a
 meshed-coil solve sits above the solver's `10 ε` target and three fixture
 floors set at `τ = 1` were re-measured for it. **The tokamak

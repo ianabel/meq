@@ -1989,7 +1989,7 @@ namespace meq
 		 * 3 to 10 and a constant tau = 1 folds inside one element there, so a
 		 * SupportShape = "box" run defaults to MirrorStabilisation, the
 		 * diffusion-scaled tau the mirror suites were swept to choose
-		 * (MEASUREMENTS.md M-MIRRORTAU); every other run keeps constant
+		 * (MEASUREMENTS.md M-293); every other run keeps constant
 		 * tau = 1, which its fixtures were measured at. Beside the box, Tau
 		 * without TauScaling is AMBIGUOUS -- tau0 in m^-1 by the box's
 		 * default, a constant tau in m^-2 by every other run's, a factor 1/R

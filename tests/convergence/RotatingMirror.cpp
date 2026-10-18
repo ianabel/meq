@@ -761,7 +761,7 @@ namespace
 		// Ending within one eps of the first residual is ending at the
 		// format's floor, where the last triple straddles it: in single a
 		// four-residual history does, 3.1e-08 at three species and 5e19
-		// (M-MIRRORDEFAULT). In double eps is under the 2e-15 this always
+		// (M-294). In double eps is under the 2e-15 this always
 		// asked, so nothing moves there.
 		double const relative = history[ n ]/history.front();
 		double const floor = std::max( 2.0e-15, static_cast<double>(
@@ -1460,10 +1460,10 @@ BOOST_AUTO_TEST_SUITE( resolution )
  * 1.1e-06 rms under constant tau = 1 and the mirror's tau = 3/max( R, 0.1 m )
  * alike. grad_bar( psi* )/R reads within 1.2e-07 rms of the reference's q_h,
  * so it is no better a reference; a finer one is ( MEASUREMENTS.md
- * M-TAUCAP ). So q_h is asserted where psi_h is -- k = 3, the asymptotic
+ * M-292 ). So q_h is asserted where psi_h is -- k = 3, the asymptotic
  * rung -- and on the one pair the reference does not reach, levels 0 and 1,
  * at the edge's rate for psi_h with the pair's 0.30 of slack: 3.56 against
- * 3.5, MEASURED ( M-MIRRORDEFAULT ). It does NOT see the axis: with the
+ * 3.5, MEASURED ( M-294 ). It does NOT see the axis: with the
  * plasma solve's floor at 1e-6 m, the unbounded tau0/R's stand-in, no error
  * column here moves by more than 4%, since geq's nodes stay at
  * R >= 0.05 -- VacuumMirror (a)'s q_h is the check that catches that. The
@@ -1630,7 +1630,7 @@ BOOST_AUTO_TEST_CASE( theAlignedCutoffKeepsTheOrder )
 	// stabilisation every psi* rung from level 1 reads 2.4e-07 to 2.7e-07 rms,
 	// flat, 35 eps x psi_bnd, so the guard is 128 eps x psi_bnd = 1.0e-06,
 	// 3.6 above it, where double's aligned column is 5e-09
-	// ( M-MIRRORDEFAULT ).
+	// ( M-294 ).
 	if ( !meq::tests::aboveTheFormatsFloor( aligned.back(), ref.psiBoundary, 128.0 ) )
 	{
 		std::printf( "    *** SKIPPED: the aligned column ends at %.3e, under this "
@@ -2376,7 +2376,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnIts
  * between 0.18 and 0.5. Of the neighbouring stabilisations only
  * tau = 2/max( R, 0.2 m ) converges from 0.2, to the shipped answer, so the
  * premise is the default's and not tau's in general
- * ( M-MIRRORDEFAULT ). At constant tau = 1 the rung, run, converges in eight
+ * ( M-294 ). At constant tau = 1 the rung, run, converges in eight
  * to a SECOND DISCRETE ROOT: well converged, with one element of the box at
  * -7.9e-02 where the shipped answer's largest |psi_h| is 6.6e-03 ( M-277;
  * not re-run under the mirror's stabilisation, since the rung is not built
@@ -3982,7 +3982,7 @@ BOOST_AUTO_TEST_CASE( aFrozenCrossingIsQuadraticSoAFixedTableLeavesNothingOut )
  * stabilisation's element-local fold and not the gauge (case 5,
  * [M-281](MEASUREMENTS.md#m-281), [M-291](MEASUREMENTS.md#m-291)); under the
  * mirror's default it is asserted like the rest
- * ([M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)).
+ * ([M-294](MEASUREMENTS.md#m-294)).
  *
  * AND WHAT THE GAUGE COSTS IN RANGE: the transfer to the solved crossing,
  * max | m_s omega^2 ( R_0vac^2 - R_0^2 )/2T_s | per species, against the same
@@ -4197,8 +4197,8 @@ BOOST_AUTO_TEST_CASE( theRelabelledDensitiesPoseTheSamePlasmaInTheMidplaneGauge 
  * which must stall. 5e19 has no control, since constant tau stalls there
  * already at 2e19, and none on the vacuum's curve, where it is past the posed
  * problem's fold. [M-291](MEASUREMENTS.md#m-291),
- * [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau),
- * [M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault).
+ * [M-293](MEASUREMENTS.md#m-293),
+ * [M-294](MEASUREMENTS.md#m-294).
  */
 BOOST_AUTO_TEST_CASE( theCoarsestMeshsCeilingWasConstantTausAndTheMirrorsStabilisationLiftsIt )
 {

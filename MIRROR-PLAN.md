@@ -313,7 +313,7 @@ folds inside that element — at 1.367e19 on level 0, the step between
 neighbours living in one element and growing as `(n_c − n)^(−1/2)`. The
 ceiling scales with `τ`, and **a box support therefore defaults to the
 mirror's stabilisation**, `τ = 3/max(R, 0.1 m)` (`meq::MirrorStabilisation`;
-→ [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau) chose the two numbers): 2e19
+→ [M-293](MEASUREMENTS.md#m-293) chose the two numbers): 2e19
 converges in three steps on level 0 in both midplane gauges. **What is left
 differs by gauge.** On the vacuum's curve it is the posed problem's own fold,
 smooth, global and mesh converged near **4.16e19**, so 5e19 there has no
@@ -321,7 +321,7 @@ equilibrium on any mesh; under the midplane gauge the only fold is `τ`'s,
 linear in `τ₀` and near 2.15e20 on level 0 at `τ₀ = 3`, and 5e19 converges on
 level 0 in four steps, which `RotatingMirrorVacuumGauge` asserts
 → [M-291](MEASUREMENTS.md#m-291),
-[M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault).
+[M-294](MEASUREMENTS.md#m-294).
 
 **THE CROSSINGS ARE BORDER UNKNOWNS — BUILT, AND WHAT SHIPS**
 → [M-283](MEASUREMENTS.md#m-283). `GradShafranovSolver` makes `R₀`
@@ -851,7 +851,7 @@ the branch.
   to `ψ_ax` = 4.5747e-03, `ψ_bnd` = 4.980e-02, where the shipped answer is
   5.5473e-03 and 6.530e-02, and exits 0 reporting it (constant `τ = 1` fails
   from the same start). Whether that is M-277's 0.2 root, and whether it
-  survives refinement, is untried (M-MIRRORDEFAULT).
+  survives refinement, is untried (M-294).
 * **The bordered target is relative to the cold residual**, so a bad enough
   start is accepted loose: from `PsiAxis = 0.5` a first residual of 1.1e+12
   accepts 9.1e-05. That bites any first attempt, not only the rung's, and is
@@ -868,8 +868,8 @@ the branch.
   midplane gauge, asserted. The one stall that is the plasma's is the
   vacuum-midplane gauge at 5e19: that posed problem folds, mesh converged,
   near 4.16e19, and the default reaches it to about 1% on level 0
-  (→ [M-291](MEASUREMENTS.md#m-291), [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau),
-  [M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)). **Open**: in single
+  (→ [M-291](MEASUREMENTS.md#m-291), [M-293](MEASUREMENTS.md#m-293),
+  [M-294](MEASUREMENTS.md#m-294)). **Open**: in single
   the format's floor rises with `τ`'s size — constant or scaled alike — so a
   solve with a meshed coil sits above the solver's `10 ε` absolute target
   under the default; the vacuum mirror's fixture asks single for 64 `ε`, while
@@ -943,8 +943,8 @@ the branch.
    it — 5e19 converges on level 0 under the midplane gauge, asserted — and
    only the vacuum-midplane gauge's 5e19 is the posed problem's own fold, mesh
    converged near 4.16e19 ([M-291](MEASUREMENTS.md#m-291),
-   [M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau),
-   [M-MIRRORDEFAULT](MEASUREMENTS.md#m-mirrordefault)).
+   [M-293](MEASUREMENTS.md#m-293),
+   [M-294](MEASUREMENTS.md#m-294)).
 6. **geq is a moving reference in a second sense**: shipped, it is biased by its
    own von Hagenow offset, and its source steps at both labels. MR-4a builds a
    reference that is neither, so it is a geq the shipped tools do not produce,

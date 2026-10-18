@@ -269,7 +269,7 @@ support defaults to the mirror's stabilisation**, `τ = 3/max(R, 0.1 m)`
 Under it the coarsest mesh reaches the posed problem's own, mesh-converged fold
 near 4.16e19 to about 1% (`CLAUDE_HDGGS.md`, *A constant `τ` folds inside one
 element*, → [M-291](MEASUREMENTS.md#m-291),
-[M-MIRRORTAU](MEASUREMENTS.md#m-mirrortau)). **So two stalls looked alike
+[M-293](MEASUREMENTS.md#m-293)). **So two stalls looked alike
 and are not**: 2e19 on level 0 was the discretisation's in both gauges, and the
 mirror's default solves it; 5e19 on this curve is past the plasma's own fold and
 nothing numerical does — while the SAME tables under the midplane gauge, a

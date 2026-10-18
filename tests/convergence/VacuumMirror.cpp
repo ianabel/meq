@@ -195,13 +195,13 @@ namespace
  * which every solve here takes from mirrorSolver(): the flux is what a choice
  * of the stabilisation trades psi_h against, and this half-disc reaches the
  * axis, where an unbounded tau0/R costs q half an order (MEASUREMENTS.md
- * M-290, M-TAUCAP). Over the MACHINE REGION q_h is asserted at k+1 by the same
+ * M-290, M-292). Over the MACHINE REGION q_h is asserted at k+1 by the same
  * two-tier rule as psi_h. psi* is asserted at k+1 on the finest pair -- the
  * coarse pair at k = 1 reads 1.43, pre-asymptotic, as D_h's does -- and NOT at
  * the k+2 a post-processing promises: here it gains nothing over psi_h at
  * k = 2 and 3, which is measured and not explained. Over the whole of D_h q
  * reads about 2 at k = 2 and 3, the packs' corners, and is printed only
- * (MEASUREMENTS.md M-MIRRORDEFAULT).
+ * (MEASUREMENTS.md M-294).
  */
 BOOST_AUTO_TEST_CASE( theVacuumMirrorConvergesOnTheCoilFieldAtKPlusOne )
 {
@@ -533,7 +533,7 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	// cannot be asked of it, nor where the plateau starts, which is read off
 	// the same 5% band: under the mirror's stabilisation the single rows from
 	// N = 16 move by up to 1.5x, and the plateau's start lands anywhere from
-	// N = 16 to 48 as MKL_NUM_THREADS moves ( M-MIRRORDEFAULT ). In double
+	// N = 16 to 48 as MKL_NUM_THREADS moves ( M-294 ). In double
 	// the floor is eleven orders down and this always runs. M-275.
 	bool const plateauIsResolved = global[ last ]
 		> 4.0*globalNorm[ last ]
@@ -565,7 +565,7 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	// own norm. In single under the mirror's stabilisation the machine rows
 	// from N = 8 read 1.0e-06 to 2.3e-06, moving by up to 1.5x from one N to
 	// the next, against double's 5.4e-07: round-off, under 4 eps/fd_step x
-	// || psi || = 3.1e-05 there ( M-MIRRORDEFAULT ). Double always runs it.
+	// || psi || = 3.1e-05 there ( M-294 ). Double always runs it.
 	double const regionFloor = 4.0*regionNorm[ last ]
 		*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
 		/meq::extensionFdStep();

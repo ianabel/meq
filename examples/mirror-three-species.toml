@@ -39,7 +39,7 @@
 # mesh solves ten times this density in this gauge, in four steps.  Under
 # "vacuum-midplane" the same tables are a different plasma, and it has no
 # equilibrium past about 4.16e19 m^-3 on any mesh or Tau (MEASUREMENTS.md
-# M-291, M-MIRRORTAU).  Tau alone is refused here, since beside the box it
+# M-291, M-293).  Tau alone is refused here, since beside the box it
 # could be either tau or tau0: write TauScaling with it.
 
 [mesh]
