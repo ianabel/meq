@@ -124,8 +124,9 @@ zero. That locality is measured, not assumed.
    the point and selects it, and :math:`\psiax` is then :math:`\psi_h` there:
    the same exact row a prescribed limiter contact gives :math:`\psibnd`, with
    nothing located and nothing differenced. Choosing it without a point is
-   refused. From a file it is ``[source.axis] R, Z`` —
-   :ref:`configuration-axis-point`. On a tokamak pinned at the
+   refused. From a file it is a mirror's electrode, ``[boundary.electrode] R,
+   Z`` (:ref:`configuration-electrode`), or a tokamak's ``[source.axis] R, Z``
+   (:ref:`configuration-axis-point`). On a tokamak pinned at the
    located axis it reproduces ``LocatedAxis``'s equilibrium; pinned anywhere
    else it is a different equilibrium, normalised by a flux below the axis's,
    and nothing checks that the point is an axis — the driver's magnetic-axis

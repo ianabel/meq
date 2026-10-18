@@ -13,10 +13,13 @@
 #
 # A MIRROR HAS NO MAGNETIC AXIS, AND THAT IS WHAT THE THREE MIRROR KEYS SAY.
 # Its plasma is an annulus between two prescribed flux surfaces: the inner
-# label psi_ax is read at [source.axis], the outer label psi_bnd at
-# [boundary.limiter] R, Z, and both float with the solve.  The span
-# psi_ax - psi_bnd is NEGATIVE -- the inner label is the smaller flux -- and the
-# support is the box 0 < Psi <= 1, |z| <= AxialEdge: SupportShape = "box".
+# label psi_inner is the flux at the limiting electrode, [boundary.electrode]
+# R, Z, the outer label psi_bnd is read at [boundary.limiter] R, Z, and both
+# float with the solve.  Neither has a starting value to give: the machine's
+# geometry sets both, and each starts at the starting state's flux at its
+# point -- the vacuum's, here.  The span
+# psi_inner - psi_bnd is NEGATIVE -- the inner label is the smaller flux -- and
+# the support is the box 0 < Psi <= 1, |z| <= AxialEdge: SupportShape = "box".
 # AxialEdge is the throat, a PRESCRIBED cutoff, and the run reports the current
 # density it cuts through ("axial cutoff").
 #
@@ -78,12 +81,6 @@ Normalised = true
 ConfineToPlasma = true
 SupportShape = "box"
 AxialEdge = 1.5
-# THE STARTING VALUE OF THE INNER LABEL: the filaments' own flux at
-# [source.axis], psi_c( 0.1, 0 ), which is the vacuum's there since the
-# remainder starts at zero.  It is an initial value and not the problem --
-# psi_ax is an unknown -- and starting exactly on it makes the axis row read
-# zero at the first step.
-PsiAxis = 0.0056378011613958832
 ReferenceRadius = 0.213
 Mu0 = 1.2566370614359173e-06
 GGPrime = 0.0
@@ -104,14 +101,13 @@ Charge = 1.0
 TemperatureFile = "../tools/geq-benchmark/reference/rotating/T_deuterium.dat"
 Neutralising = true
 
-# THE INNER LABEL.  A sub-table, so every key below this header belongs to it
-# until the next one -- a [source] key written here is refused by name.
-[source.axis]
-R = 0.1
-Z = 0.0
-
 [boundary]
 Type = "zero"
+
+# THE INNER LABEL, psi_inner: the flux at the limiting electrode.
+[boundary.electrode]
+R = 0.1
+Z = 0.0
 
 # THE OUTER LABEL, read at a prescribed point exactly as a limiter contact is.
 [boundary.limiter]

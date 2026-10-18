@@ -271,8 +271,9 @@ Both are on ``<stem>_surfaces.nc`` as well.
 A normalised run carries ``psi_axis``, and says what it is. With
 :math:`\psi_{\mathrm{ax}}` at the located magnetic axis — the default —
 ``axis_normalised_flux``, ``axis_r`` and ``axis_z`` give the axis the check
-found, and :math:`\Psi` there must read 1. With ``[source.axis]`` it is a
-**label** at a prescribed point, and the file carries
+found, and :math:`\Psi` there must read 1. With ``[source.axis]``, or a
+mirror's ``[boundary.electrode]``, it is a **label** at a prescribed point — a
+mirror's :math:`\psi_{\mathrm{inner}}` — and the file carries
 ``axis_constraint = "prescribed point"`` with ``axis_point_r`` and
 ``axis_point_z`` instead: no magnetic axis was asked for, so none is reported.
 A magnetic mirror's run (``[source] SupportShape = "box"``) also carries:

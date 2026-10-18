@@ -508,7 +508,9 @@ namespace meq
 		// Normalised is true and refused otherwise. It is a guess in the Newton
 		// sense and not a scale factor: the iteration has to start inside a
 		// basin, and at a fixed psi_ax the equation generally has a second,
-		// non-physical solution the iteration can reach instead.
+		// non-physical solution the iteration can reach instead. REFUSED beside
+		// SupportShape = "box", where the inner label psi_inner starts at the
+		// starting state's flux at [boundary.electrode]; see psiAxisGuess().
 		double psiAxis = 0.0;
 		// ConfineToPlasma: whether F and dF/dpsi are ZERO wherever the
 		// normalised flux is non-positive, so that the plasma's SUPPORT moves
@@ -686,22 +688,25 @@ namespace meq
 	};
 
 	/**
-	 * `[source.axis]` -- `psi_ax` PINNED AT A PRESCRIBED POINT, and not at a
-	 * located magnetic axis.
+	 * THE INNER LABEL AT A PRESCRIBED POINT, and not at a located magnetic
+	 * axis. Two keys fill it, one per kind of machine.
 	 *
 	 * meq::GradShafranovSolver::setAxisFluxPoint: `psi_ax = psi_h( R, Z )` is a
-	 * border row, the twin of `[boundary.limiter] R, Z` for `psi_bnd`. A MIRROR
-	 * HAS NO MAGNETIC AXIS -- its plasma is an annulus between two prescribed
-	 * flux surfaces, `psi_ax` the inner label and `psi_bnd` the outer -- so
-	 * this is how a mirror's inner label is posed. It is also how a tokamak's
-	 * axis can be pinned where it is known, MR-2's use.
+	 * border row, the twin of `[boundary.limiter] R, Z` for `psi_bnd`.
 	 *
-	 * **UNDER `[source]` AND NOT `[boundary]`**, because `psi_ax` enters only
-	 * through the source's normalisation and its starting value, `PsiAxis`, is
-	 * already there; `[boundary]` is `Gamma` and `psi_bnd`.
+	 * **`[boundary.electrode]` -- A MIRROR'S, `psi_inner`.** A mirror has no
+	 * magnetic axis: its plasma is an annulus between two prescribed flux
+	 * surfaces, and the inner one is set by where the limiting electrode is.
+	 * Required beside `SupportShape = "box"` and refused without it. Under
+	 * `[boundary]` because it is the machine, and its starting value is not a
+	 * key: the driver reads it off the starting state at the point, as it does
+	 * `psi_bnd` at `[boundary.limiter]`, so `[source] PsiAxis` is refused.
+	 *
+	 * **`[source.axis]` -- A TOKAMAK'S AXIS PINNED WHERE IT IS KNOWN**, MR-2's
+	 * use, with `PsiAxis` its starting value. Refused beside the box.
 	 *
 	 * A statement of the PROBLEM -- where the label is read -- and not of the
-	 * iteration, so it is not a solver knob. Refused without
+	 * iteration, so neither is a solver knob. Refused without
 	 * `Normalised = true`, where `psi_ax` is not an unknown.
 	 */
 	struct AxisPointConfig
@@ -721,9 +726,10 @@ namespace meq
 		SourceType type = SourceType::Soloviev;
 		SourceParameters parameters = SolovievParameters{};
 
-		/// `[source.axis]`. See AxisPointConfig. Beside `parameters` rather
-		/// than inside one, because it means the same thing for both source
-		/// types that have a normalisation.
+		/// `[source.axis]`, or a mirror's `[boundary.electrode]`. See
+		/// AxisPointConfig. Beside `parameters` rather than inside one,
+		/// because it means the same thing for both source types that have a
+		/// normalisation.
 		AxisPointConfig axisPoint;
 
 		/**
@@ -735,9 +741,10 @@ namespace meq
 		 * **A SHAPE OF THE CONFINEMENT, NOT A SECOND CONFINEMENT**, so "box"
 		 * requires `ConfineToPlasma = true` explicitly and every consumer of
 		 * confinesToPlasma() reads it unchanged. It also requires
-		 * `[source.axis]` -- a box around a LOCATED axis would cut a ring off a
-		 * tokamak's core, which meq::PlasmaSupportShape records -- and
-		 * `[boundary.limiter] R, Z`, the outer label.
+		 * `[boundary.electrode] R, Z`, the inner label -- a box around a LOCATED
+		 * axis would cut a ring off a tokamak's core, which
+		 * meq::PlasmaSupportShape records -- and `[boundary.limiter] R, Z`, the
+		 * outer label.
 		 *
 		 * `axialEdge` is zero unless the shape is Box.
 		 */
@@ -790,7 +797,11 @@ namespace meq
 		/// without duplicating the switch over type.
 		bool isNormalised() const;
 
-		/// The starting psi_ax, meaningful only when isNormalised().
+		/// The starting psi_ax, meaningful only when isNormalised(). Beside a
+		/// box it is 1, the normalisation every normalised source is
+		/// constructed at, and NOT a guess: the driver starts psi_inner at the
+		/// starting state's flux at `[boundary.electrode]` before the first
+		/// residual, through GradShafranovSolver::setAxisFluxInitial().
 		double psiAxisGuess() const;
 
 		/// Whether the source is confined to `{ Psi > 0 }`, so that the

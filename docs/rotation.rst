@@ -521,12 +521,15 @@ degree of freedom for degree of freedom.
 
 **A mirror has no magnetic axis.** Its plasma is an annulus between two
 prescribed flux surfaces, so both labels are read at points:
-:math:`\psi_{\mathrm{ax}}` at ``[source.axis] R, Z``, the inner one, and
-:math:`\psi_{\mathrm{bnd}}` at ``[boundary.limiter] R, Z``, the outer one.
-Both float with the solve, as ``geq``'s do. The inner label is the *smaller*
-flux, so the span :math:`\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}}` is
-**negative**, and nothing needs saying about that: :math:`\Psi` is written in
-the span.
+:math:`\psi_{\mathrm{inner}}` at the limiting electrode,
+``[boundary.electrode] R, Z``, and :math:`\psi_{\mathrm{bnd}}` at
+``[boundary.limiter] R, Z``, the outer one. Both float with the solve, as
+``geq``'s do, and neither has a starting value to give: the machine's geometry
+sets them, and each starts at the starting state's flux at its point — the
+vacuum's here — so ``[source] PsiAxis`` is refused beside the box. The inner
+label is the *smaller* flux, so the span
+:math:`\psi_{\mathrm{inner}} - \psi_{\mathrm{bnd}}` is **negative**, and
+nothing needs saying about that: :math:`\Psi` is written in the span.
 
 **The profiles are in** :math:`\Psi`, **which is** :math:`1 - \psi_N` in
 ``geq``'s convention: :math:`\Psi = 1` at the inner label and 0 at the outer.

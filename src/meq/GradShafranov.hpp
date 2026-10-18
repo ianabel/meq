@@ -4326,6 +4326,29 @@ namespace meq
 			 */
 			void setBoundaryFluxInitial( double psiBoundary );
 
+			/**
+			 * Start the bordered Newton's `psi_ax` at @a psiAxis, overriding
+			 * the guess setSource() was given.
+			 *
+			 * **A MIRROR'S INNER LABEL HAS NO GUESS TO GIVE.** It is the flux at
+			 * the limiting electrode, read at a prescribed point
+			 * (setAxisFluxPoint()), and the one start that is not a choice is
+			 * the starting state's own flux there -- which is only known once
+			 * prepare() has put the guess into potential(), after setSource().
+			 * The driver reads it there and calls this, as it calls
+			 * setBoundaryFluxInitial() for the outer label, so both label rows
+			 * read zero at the first step. `[source] PsiAxis` is refused beside
+			 * the box for the same reason.
+			 *
+			 * Nothing between setSource() and solve() reads `psi_ax`, prepare()
+			 * included, so a value set here is the one the first residual sees.
+			 *
+			 * @throws std::logic_error if no normalised source is set.
+			 * @throws std::invalid_argument if @a psiAxis is not finite or is
+			 *         zero, setSource()'s own condition on its guess.
+			 */
+			void setAxisFluxInitial( double psiAxis );
+
 			/// The converged `psi_bnd`. Zero unless setBoundaryFluxPoint() was
 			/// called. Valid after solve().
 			///

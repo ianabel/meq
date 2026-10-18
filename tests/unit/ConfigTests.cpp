@@ -3925,21 +3925,23 @@ BOOST_AUTO_TEST_CASE( the_seven_machines_wired_as_circuits_carry_the_same_curren
 }
 
 // ---------------------------------------------------------------------------
-// A mirror from a file: [source.axis], SupportShape, AxialEdge, AlignPlasma.
+// A mirror from a file: [boundary.electrode], SupportShape, AxialEdge, AlignPlasma.
 // MIRROR-PLAN.md MR-5.
 // ---------------------------------------------------------------------------
 
 namespace
 {
 	/// The [source] scalars of a normalised, confined, boxed source: a
-	/// mirror's, short only of its inner label.
+	/// mirror's, short only of its inner label. No PsiAxis, which the box
+	/// refuses: psi_inner starts at the state's flux at the electrode.
 	std::string const boxScalars =
 		"Normalised = true\n"
-		"PsiAxis = 5.6e-3\n"
 		"ConfineToPlasma = true\n"
 		"SupportShape = \"box\"\n"
 		"AxialEdge = 1.5\n";
 
+	/// A mirror's inner label, and a tokamak's pinned axis at the same point.
+	std::string const electrodeTable = "\n[boundary.electrode]\nR = 0.1\nZ = 0.0\n";
 	std::string const axisTable = "\n[source.axis]\nR = 0.1\nZ = 0.0\n";
 	std::string const limiterTable = "\n[boundary.limiter]\nR = 0.35\nZ = 0.0\n";
 
@@ -4085,10 +4087,10 @@ BOOST_AUTO_TEST_CASE( a_mirror_parses )
 	for ( NamedBuilder const & source : normalisedSources() )
 	{
 		std::string const integers =
-			"Normalised = true\nPsiAxis = 5.6e-3\nConfineToPlasma = true\n"
+			"Normalised = true\nConfineToPlasma = true\n"
 			"SupportShape = \"box\"\nAxialEdge = 2\n";
 		meq::Configuration const c = parse( source.build( integers,
-			"\n[source.axis]\nR = 1\nZ = 0\n" + limiterTable ) );
+			"\n[boundary.electrode]\nR = 1\nZ = 0\n" + limiterTable ) );
 		BOOST_TEST( c.getSource().axialEdge == 2.0, source.name );
 		BOOST_TEST( c.getSource().axisPoint.radius == 1.0, source.name );
 		BOOST_TEST( c.getSource().axisPoint.z == 0.0, source.name );
@@ -4153,7 +4155,7 @@ BOOST_AUTO_TEST_CASE( a_box_support_defaults_to_the_mirrors_stabilisation )
 	double const floor = meq::MirrorStabilisation::floorRadius;
 	for ( NamedBuilder const & source : normalisedSources() )
 	{
-		std::string const box = source.build( boxScalars, axisTable + limiterTable );
+		std::string const box = source.build( boxScalars, electrodeTable + limiterTable );
 		for ( Accepted const & a : {
 			Accepted{ "", TauScalingType::Diffusion, tau0, floor },
 			Accepted{ "TauFloorRadius = 0.05\n", TauScalingType::Diffusion, tau0, 0.05 },
@@ -4202,8 +4204,11 @@ BOOST_AUTO_TEST_CASE( a_box_support_defaults_to_the_mirrors_stabilisation )
 /// is an unknown key on the two that cannot.
 BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_carry_them )
 {
+	// A one-sided support needs its PsiAxis and a box refuses one, so the two
+	// heads differ by it.
 	std::string const normalisedOnly = "Normalised = true\nPsiAxis = 5.6e-3\n";
-	std::string const boxed = normalisedOnly + "ConfineToPlasma = true\nSupportShape = \"box\"\n";
+	std::string const boxNormalised = "Normalised = true\n";
+	std::string const boxed = boxNormalised + "ConfineToPlasma = true\nSupportShape = \"box\"\n";
 
 	struct Refusal
 	{
@@ -4218,21 +4223,39 @@ BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_car
 		{ "SupportShape without Normalised", "SupportShape = \"box\"\n", "", "source.SupportShape" },
 		{ "AxialEdge without Normalised", "AxialEdge = 1.5\n", "", "source.AxialEdge" },
 		{ "box without ConfineToPlasma",
-		  normalisedOnly + "SupportShape = \"box\"\nAxialEdge = 1.5\n", axisTable,
+		  boxNormalised + "SupportShape = \"box\"\nAxialEdge = 1.5\n", electrodeTable,
 		  "source.SupportShape" },
-		{ "box without AxialEdge", boxed, axisTable, "source.AxialEdge" },
-		{ "AxialEdge = 0", boxed + "AxialEdge = 0\n", axisTable, "source.AxialEdge" },
-		{ "AxialEdge = -1", boxed + "AxialEdge = -1\n", axisTable, "source.AxialEdge" },
-		{ "AxialEdge = inf", boxed + "AxialEdge = inf\n", axisTable, "source.AxialEdge" },
+		{ "box without AxialEdge", boxed, electrodeTable, "source.AxialEdge" },
+		{ "AxialEdge = 0", boxed + "AxialEdge = 0\n", electrodeTable, "source.AxialEdge" },
+		{ "AxialEdge = -1", boxed + "AxialEdge = -1\n", electrodeTable, "source.AxialEdge" },
+		{ "AxialEdge = inf", boxed + "AxialEdge = inf\n", electrodeTable, "source.AxialEdge" },
 		{ "AxialEdge without box", normalisedOnly + "ConfineToPlasma = true\nAxialEdge = 1.5\n",
 		  axisTable, "source.AxialEdge" },
 		{ "a misspelt SupportShape",
 		  normalisedOnly + "ConfineToPlasma = true\nSupportShape = \"Box\"\n", "",
 		  "source.SupportShape" },
-		{ "box without [source.axis]", boxScalars, limiterTable, "source.SupportShape" },
+		{ "box without [boundary.electrode]", boxScalars, limiterTable, "boundary.electrode.R" },
+		{ "box with PsiAxis", boxScalars + "PsiAxis = 5.6e-3\n", electrodeTable + limiterTable,
+		  "source.PsiAxis" },
+		{ "box with [source.axis]", boxScalars, axisTable + limiterTable, "source.axis" },
+		{ "box with [source.axis] and [boundary.electrode]", boxScalars,
+		  axisTable + electrodeTable + limiterTable, "source.axis" },
+		{ "[boundary.electrode] without the box", normalisedOnly, electrodeTable + limiterTable,
+		  "boundary.electrode.R" },
+		{ "[boundary.electrode] R only", boxScalars, "\n[boundary.electrode]\nR = 0.1\n" + limiterTable,
+		  "boundary.electrode.Z" },
+		{ "[boundary.electrode] Z only", boxScalars, "\n[boundary.electrode]\nZ = 0.0\n" + limiterTable,
+		  "boundary.electrode.R" },
+		{ "[boundary.electrode] R = 0", boxScalars,
+		  "\n[boundary.electrode]\nR = 0\nZ = 0.0\n" + limiterTable, "boundary.electrode.R" },
+		{ "[boundary.electrode] Z = nan", boxScalars,
+		  "\n[boundary.electrode]\nR = 0.1\nZ = nan\n" + limiterTable, "boundary.electrode.Z" },
+		{ "a [source] key written under [boundary.electrode]", boxScalars,
+		  "\n[boundary.electrode]\nR = 0.1\nZ = 0.0\nAxialEdge = 1.5\n" + limiterTable,
+		  "boundary.electrode.AxialEdge" },
 		{ "box with ExcludeAttributes", boxScalars + "ExcludeAttributes = [ 30 ]\n",
-		  axisTable, "source.ExcludeAttributes" },
-		{ "box with PlasmaCurrent", boxScalars + "PlasmaCurrent = 1.0e5\n", axisTable,
+		  electrodeTable, "source.ExcludeAttributes" },
+		{ "box with PlasmaCurrent", boxScalars + "PlasmaCurrent = 1.0e5\n", electrodeTable,
 		  "source.PlasmaCurrent" },
 		{ "[source.axis] R only", normalisedOnly, "\n[source.axis]\nR = 0.1\n", "source.axis.Z" },
 		{ "[source.axis] Z only", normalisedOnly, "\n[source.axis]\nZ = 0.0\n", "source.axis.R" },
@@ -4257,7 +4280,7 @@ BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_car
 	// at the same key, by getFloat()'s "is required" -- so the message is what
 	// says the box's reason was given.
 	for ( NamedBuilder const & source : normalisedSources() )
-		BOOST_TEST( refusalMessage( source.build( boxed, axisTable ) ).find( "throat" )
+		BOOST_TEST( refusalMessage( source.build( boxed, electrodeTable ) ).find( "throat" )
 		            != std::string::npos, source.name );
 
 	// THE q-DRIVEN LOOP IS mhd'S ALONE, so this one has no pair.
@@ -4265,7 +4288,7 @@ BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_car
 		std::string const text = withSource(
 			"[source]\nType = \"mhd\"\nPPrimeFile = \"p.dat\"\n"
 			"SafetyFactorFile = \"q.dat\"\nToroidalFieldGuess = 1.0\n"
-			+ boxScalars + axisTable + limiterTable );
+			+ boxScalars + electrodeTable + limiterTable );
 		BOOST_TEST( refusedKey( text ) == "source.SafetyFactorFile" );
 	}
 
@@ -4276,6 +4299,7 @@ BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_car
 	for ( std::string const & head : { solovievHead, manufacturedHead } )
 	{
 		BOOST_TEST( refusedKey( withSource( head + axisTable ) ) == "source.axis" );
+		BOOST_TEST( refusedKey( withSource( head + electrodeTable ) ) == "boundary.electrode.R" );
 		BOOST_TEST( refusedKey( withSource( head + "SupportShape = \"box\"\n" ) )
 		            == "source.SupportShape" );
 		BOOST_TEST( refusedKey( withSource( head + "AxialEdge = 1.5\n" ) )
@@ -4283,37 +4307,37 @@ BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_car
 	}
 }
 
-/// THE LABELS AGAINST THE [boundary] BLOCKS: the box's outer label is the
-/// limiter POINT, never a found contact or an X-point, and the two labels may
-/// not be one point. A prescribed axis WITHOUT the box -- MR-2's tokamak use --
-/// composes with either.
+/// THE LABELS AGAINST THE [boundary] BLOCKS: the box's inner label is the
+/// electrode and its outer label the limiter POINT, never a found contact or an
+/// X-point, and the two labels may not be one point. A prescribed axis WITHOUT
+/// the box -- MR-2's tokamak use, [source.axis] -- composes with either.
 BOOST_AUTO_TEST_CASE( the_mirrors_labels_compose_with_the_boundary_blocks )
 {
 	std::string const tokamakAxis = "Normalised = true\nPsiAxis = 5.6e-3\n";
 	for ( NamedBuilder const & source : normalisedSources() )
 	{
 		std::string const name = source.name;
-		BOOST_TEST( refusedKey( source.build( boxScalars, axisTable ) ) == "boundary.limiter.R",
+		BOOST_TEST( refusedKey( source.build( boxScalars, electrodeTable ) ) == "boundary.limiter.R",
 		            name << ": the box without [boundary.limiter]" );
 		BOOST_TEST( refusedKey( source.build( boxScalars,
-			axisTable + "\n[boundary.limiter]\nSurfaceAttribute = 20\n" ) )
+			electrodeTable + "\n[boundary.limiter]\nSurfaceAttribute = 20\n" ) )
 			== "boundary.limiter.SurfaceAttribute", name << ": the box with a limiter surface" );
 		BOOST_TEST( refusedKey( source.build( boxScalars,
-			axisTable + limiterTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) )
+			electrodeTable + limiterTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) )
 			== "boundary.xpoint.R", name << ": the box with an X-point" );
 		// The limiter pairing would refuse it at the same key; the message is
 		// what says it was the box's refusal.
 		BOOST_TEST( refusalMessage( source.build( boxScalars,
-			axisTable + limiterTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) )
+			electrodeTable + limiterTable + "\n[boundary.xpoint]\nR = 0.5\nZ = -1.0\n" ) )
 			.find( "SupportShape" ) != std::string::npos, name );
 		BOOST_TEST( refusedKey( source.build( boxScalars,
-			axisTable + "\n[boundary.limiter]\nR = 0.1\nZ = 0.0\n" ) )
-			== "boundary.limiter.R", name << ": both labels at one point, boxed" );
+			electrodeTable + "\n[boundary.limiter]\nR = 0.1\nZ = 0.0\n" ) )
+			== "boundary.electrode.R", name << ": both labels at one point, boxed" );
 		BOOST_TEST( refusedKey( source.build( tokamakAxis,
 			axisTable + "\n[boundary.limiter]\nR = 0.1\nZ = 0.0\n" ) )
 			== "boundary.limiter.R", name << ": both labels at one point, unboxed" );
 
-		BOOST_TEST( refusedKey( source.build( boxScalars, axisTable + limiterTable ) ).empty(),
+		BOOST_TEST( refusedKey( source.build( boxScalars, electrodeTable + limiterTable ) ).empty(),
 		            name << ": the mirror itself" );
 		BOOST_TEST( refusedKey( source.build( tokamakAxis, axisTable + limiterTable ) ).empty(),
 		            name << ": a prescribed axis with a limiter, no box" );
@@ -4353,7 +4377,7 @@ BOOST_AUTO_TEST_CASE( the_box_refuses_what_it_has_no_state_for )
 		for ( NamedBuilder const & source : normalisedSources() )
 		{
 			std::string const key = refusedKey( source.build( boxScalars,
-				axisTable + limiterTable + c.after ) );
+				electrodeTable + limiterTable + c.after ) );
 			BOOST_TEST( key == c.key, source.name << ", " << c.what << ": '" << key
 			            << "' where '" << c.key << "' was expected" );
 		}
@@ -4361,7 +4385,7 @@ BOOST_AUTO_TEST_CASE( the_box_refuses_what_it_has_no_state_for )
 	// [inverse] has its own refusals at the same key behind this one -- no
 	// Free current here -- so the message is what says the box refused it.
 	for ( NamedBuilder const & source : normalisedSources() )
-		BOOST_TEST( refusalMessage( source.build( boxScalars, axisTable + limiterTable
+		BOOST_TEST( refusalMessage( source.build( boxScalars, electrodeTable + limiterTable
 			+ "\n[[inverse.isoflux]]\nR1 = 0.3\nZ1 = 0.0\nR2 = 0.3\nZ2 = 1.0\n" ) )
 			.find( "SupportShape" ) != std::string::npos, source.name );
 
@@ -4392,16 +4416,16 @@ BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
 	std::string const gauge = "Gauge = \"midplane\"\n";
 
 	{
-		meq::Configuration const c = parse( rotatingSource( boxScalars + gauge, axisTable + limiterTable ) );
+		meq::Configuration const c = parse( rotatingSource( boxScalars + gauge, electrodeTable + limiterTable ) );
 		BOOST_TEST( ( c.getSource().getRotating().gauge == meq::RotatingGaugeType::Midplane ) );
 		BOOST_TEST( c.getSource().getRotating().referenceRadius == 0.0 );
 	}
 	{
 		// The default, and spelled out.
-		meq::Configuration const d = parse( rotatingSource( boxScalars, axisTable + limiterTable ) );
+		meq::Configuration const d = parse( rotatingSource( boxScalars, electrodeTable + limiterTable ) );
 		BOOST_TEST( ( d.getSource().getRotating().gauge == meq::RotatingGaugeType::FixedRadius ) );
 		meq::Configuration const e = parse( rotatingSource(
-			boxScalars + "Gauge = \"fixed-radius\"\nReferenceRadius = 0.213\n", axisTable + limiterTable ) );
+			boxScalars + "Gauge = \"fixed-radius\"\nReferenceRadius = 0.213\n", electrodeTable + limiterTable ) );
 		BOOST_TEST( ( e.getSource().getRotating().gauge == meq::RotatingGaugeType::FixedRadius ) );
 		BOOST_TEST( e.getSource().getRotating().referenceRadius == 0.213 );
 	}
@@ -4415,13 +4439,13 @@ BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
 	};
 	std::vector< Refusal > const refusals = {
 		{ "beside a ReferenceRadius", boxScalars + gauge + "ReferenceRadius = 0.213\n",
-		  axisTable + limiterTable, "source.ReferenceRadius" },
+		  electrodeTable + limiterTable, "source.ReferenceRadius" },
 		{ "without Normalised", gauge, "", "source.Gauge" },
 		{ "on a tokamak's one-sided support", "Normalised = true\nPsiAxis = 1.0\nConfineToPlasma = true\n" + gauge,
 		  "", "source.Gauge" },
 		{ "on a prescribed axis without the box", "Normalised = true\nPsiAxis = 1.0\n" + gauge,
 		  axisTable + limiterTable, "source.Gauge" },
-		{ "misspelt", boxScalars + "Gauge = \"Midplane\"\n", axisTable + limiterTable, "source.Gauge" } };
+		{ "misspelt", boxScalars + "Gauge = \"Midplane\"\n", electrodeTable + limiterTable, "source.Gauge" } };
 	for ( Refusal const & r : refusals )
 	{
 		std::string const key = refusedKey( rotatingSource( r.head, r.tail ) );
@@ -4445,7 +4469,7 @@ BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
 	}
 
 	// Not a key on the sources that have no species and no phi_0.
-	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, axisTable + limiterTable ) ) == "source.Gauge" );
+	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, electrodeTable + limiterTable ) ) == "source.Gauge" );
 	BOOST_TEST( refusedKey( withSource( "[source]\nType = \"soloviev\"\nA = -0.52\n" + gauge ) )
 	            == "source.Gauge" );
 }
@@ -4519,7 +4543,7 @@ BOOST_AUTO_TEST_CASE( the_vacuum_midplane_gauge_needs_the_vacuum_and_is_refused_
 		"the refusal without subtraction must say why" );
 
 	// Not a key on the sources that have no species and no phi_0.
-	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, axisTable + limiterTable ) ) == "source.Gauge" );
+	BOOST_TEST( refusedKey( mhdSource( boxScalars + gauge, electrodeTable + limiterTable ) ) == "source.Gauge" );
 }
 
 /// THE MESH GENERATOR'S AlignPlasma, AND THE BOX ALIGNED BEING THE CUTOFF.

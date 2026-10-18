@@ -448,9 +448,11 @@ under a Solov'ev source is an unknown key, not an ignored one.
        :math:`\psi`. See :doc:`normalised_flux`.
    * - ``PsiAxis``
      - —
-     - **Required when** ``Normalised = true``, **refused otherwise.** A
-       starting guess for the Newton iteration, not a scale factor. Must be
-       finite and non-zero.
+     - **Required when** ``Normalised = true``, **refused otherwise** — and
+       refused beside ``SupportShape = "box"``, whose inner label starts at
+       the electrode's flux (:ref:`configuration-electrode`). A starting guess
+       for the Newton iteration, not a scale factor. Must be finite and
+       non-zero.
    * - ``ConfineToPlasma``
      - ``false``
      - :math:`F` and :math:`\partial F/\partial\psi` are **zero outside the
@@ -483,8 +485,9 @@ under a Solov'ev source is an unknown key, not an ignored one.
        tokamak's :math:`\Psi > 0`. ``"box"`` is a **magnetic mirror's**:
        :math:`0 < \Psi \le 1` between two labels, and
        :math:`|z| \le` ``AxialEdge``. Requires ``ConfineToPlasma = true``,
-       ``AxialEdge``, the inner label at a point (:ref:`configuration-axis-point`)
-       and the outer one at ``[boundary.limiter] R, Z``. See
+       ``AxialEdge``, the inner label at the electrode,
+       ``[boundary.electrode] R, Z`` (:ref:`configuration-electrode`), and the
+       outer one at ``[boundary.limiter] R, Z``. See
        :ref:`configuration-mirror-support`.
    * - ``AxialEdge``
      - —
@@ -646,8 +649,8 @@ this source type and on every other.
 ``[source.axis]`` — :math:`\psi_{\mathrm{ax}}` at a prescribed point
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default :math:`\psi_{\mathrm{ax}}` is the flux at the **located** magnetic
-axis. This sub-table pins it at a point instead:
+By default a tokamak's :math:`\psi_{\mathrm{ax}}` is the flux at the
+**located** magnetic axis. This sub-table pins it at a point instead:
 :math:`\psi_{\mathrm{ax}} = \psi_h(R, Z)`, the same exact row
 ``[boundary.limiter] R, Z`` gives :math:`\psi_{\mathrm{bnd}}`. It is a
 statement of the **problem** — where the label is read — and not a solver
@@ -666,8 +669,9 @@ setting.
        :math:`\psi(0, z) = 0` exactly, so a label on the symmetry axis would
        pin :math:`\psi_{\mathrm{ax}}` to zero.
 
-**A magnetic mirror has no magnetic axis**, so this is how its inner label is
-posed — see :ref:`configuration-mirror-support`. On a tokamak, pinned at the
+**A magnetic mirror has no magnetic axis**, and its inner label is not posed
+here but at its electrode, ``[boundary.electrode]``; this sub-table is refused
+beside ``SupportShape = "box"``. On a tokamak, pinned at the
 located axis it reproduces the default's equilibrium; pinned anywhere else it
 is a different equilibrium, and nothing checks that the point is an axis. The
 run says so: the magnetic-axis check is **not asked** of a prescribed point,
@@ -692,9 +696,10 @@ A mirror's support: ``SupportShape = "box"``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A mirror's plasma is an **annulus between two prescribed flux surfaces**: the
-inner label :math:`\psi_{\mathrm{ax}}` at ``[source.axis]`` and the outer
-label :math:`\psi_{\mathrm{bnd}}` at ``[boundary.limiter] R, Z``. Its span
-:math:`\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}}` is **negative** — the
+inner label :math:`\psi_{\mathrm{inner}}`, the flux at the limiting electrode
+``[boundary.electrode] R, Z``, and the outer label :math:`\psi_{\mathrm{bnd}}`
+at ``[boundary.limiter] R, Z``. Its span
+:math:`\psi_{\mathrm{inner}} - \psi_{\mathrm{bnd}}` is **negative** — the
 inner label is the smaller flux — and nothing about that needs a key, since
 :math:`\Psi` is written in the span itself. What does need one is the
 support's shape: :math:`\Psi > 0` alone would admit everything inside the
@@ -708,10 +713,9 @@ inner surface down to :math:`R = 0` and, beyond the throat, the expander.
    Normalised = true
    ConfineToPlasma = true
    SupportShape = "box"
-   AxialEdge = 1.5
-   PsiAxis = 0.0056378011613958832    # the starting value of the inner label
+   AxialEdge = 1.5                    # no PsiAxis: it is refused here
 
-   [source.axis]                      # the inner label
+   [boundary.electrode]               # the inner label, psi_inner
    R = 0.1
    Z = 0.0
 
@@ -760,11 +764,13 @@ labels), ``[solver] UpDownSymmetry``, ``TopologyRetry`` and
 ``BorderRegularisation`` (applied only with an X-point), ``[inverse]`` and
 ``[output] FluxSurfaces`` (a mirror has no closed surfaces about an axis).
 
-The run starts :math:`\psi_{\mathrm{bnd}}` at the starting state's flux at the
-outer label rather than at zero, where the first span would come out positive
-and put the box around the axis. That is a fixed rule of the box, not a key.
-Adaptivity and ``--device`` are accepted beside the box and are not yet
-measured on a mirror.
+**Both labels start at the starting state's flux at their own points** — the
+vacuum's on a cold start — and neither is a key. :math:`\psi_{\mathrm{bnd}}`
+would otherwise start at zero, where the first span would come out positive and
+put the box around the axis; :math:`\psi_{\mathrm{inner}}` is set by where the
+electrode is, so a free starting value could only select a branch, and
+``[source] PsiAxis`` is refused beside the box. Both midplane gauges are
+accepted under adaptivity and ``--device`` and are not yet measured there.
 
 ``PlasmaCurrent`` — the third border
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1690,6 +1696,46 @@ envelope theorem removes the position term, as it does for
    that does not read it the border would be solved and its answer discarded —
    and the run would converge, at full order, to the equilibrium the file did
    not describe.
+
+.. _configuration-electrode:
+
+``[boundary.electrode]`` — a mirror's inner label
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A mirror's inner label :math:`\psi_{\mathrm{inner}}` is the flux at its
+**limiting electrode**: this point. It is an unknown of the bordered Newton,
+:math:`\psi_{\mathrm{inner}} = \psi_h(R, Z)`, the same exact row
+``[boundary.limiter] R, Z`` gives :math:`\psi_{\mathrm{bnd}}`, so it floats
+with the solve.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``R``, ``Z``
+     - *both required*
+     - The electrode, in metres. ``R`` must be strictly positive:
+       :math:`\psi(0, z) = 0` exactly, so a label on the symmetry axis would
+       pin :math:`\psi_{\mathrm{inner}}` to zero.
+
+**Its starting value is not a key.** The run reads it off the starting state at
+the point — the vacuum's flux there on a cold start, a warm start's or the
+previous adaptive cycle's otherwise — exactly as it starts
+:math:`\psi_{\mathrm{bnd}}` at ``[boundary.limiter]``, so both label rows read
+zero at the first step. ``[source] PsiAxis`` is refused beside it: the
+electrode's position sets the label, and a starting value chosen elsewhere
+could only select which discrete root the run reaches. The run prints where
+both labels started, and reports the converged one as ``psi_inner``.
+
+**Required with** ``[source] SupportShape = "box"`` **and refused without it** —
+a tokamak's inner label is its magnetic axis, located or pinned with
+``[source.axis]`` (:ref:`configuration-axis-point`), which is in turn refused
+beside the box. Also refused at the same point as ``[boundary.limiter] R, Z``,
+where the span would be zero, and beside ``[solver] PicardSweeps``. See
+:ref:`configuration-mirror-support`.
 
 ``[boundary.xpoint]``
 ~~~~~~~~~~~~~~~~~~~~~

@@ -3702,6 +3702,20 @@ namespace
 		boundaryFluxInitialGiven = true;
 	}
 
+	void GradShafranovSolver::setAxisFluxInitial( double psiAxis )
+	{
+		if ( !normalisedSource )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setAxisFluxInitial: psi_ax is an unknown "
+				"only of a normalised source; setSource( NormalisedSource &, double ) "
+				"first" );
+		if ( !std::isfinite( psiAxis ) || psiAxis == 0.0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setAxisFluxInitial: psi_ax must start "
+				"finite and non-zero, as setSource()'s guess must" );
+		psiAxisValue = psiAxis;
+	}
+
 	void GradShafranovSolver::setLimiterSurface( int attribute )
 	{
 		if ( attribute <= 0 )

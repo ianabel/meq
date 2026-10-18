@@ -660,12 +660,30 @@ namespace meq
 		/// un-normalised case is deliberate: a file carrying a PsiAxis that
 		/// nothing reads is a file whose author believed something false about
 		/// what the run was doing.
+		///
+		/// **AND REFUSED BESIDE A MIRROR'S BOX**, where nothing can choose it.
+		/// A mirror's inner label psi_inner is the flux at its limiting
+		/// electrode, `[boundary.electrode] R, Z`, so the machine's geometry
+		/// sets it, and the driver starts it at the starting state's flux there
+		/// -- the vacuum's on a cold start. A free guess beside it only selects
+		/// a branch: on the shipped mirror one from 0.2 reaches a second
+		/// discrete root (M-277). The stored value is then 1, the normalisation
+		/// every normalised source is constructed at, and the driver replaces
+		/// it before the first residual.
 		void readNormalisation( Table const & source, bool normalised, double & psiAxis )
 		{
 			if ( !normalised )
 			{
 				if ( source.has( "PsiAxis" ) )
 					source.fail( "PsiAxis", "means nothing unless Normalised = true, when psi_ax becomes an unknown of the system; without it the profiles are functions of psi itself" );
+				return;
+			}
+
+			if ( source.getStringOr( "SupportShape", "one-sided" ) == "box" )
+			{
+				if ( source.has( "PsiAxis" ) )
+					source.fail( "PsiAxis", "is not chosen beside SupportShape = \"box\": a mirror's inner label psi_inner is the flux at its limiting electrode, [boundary.electrode] R, Z, and starts at the starting state's flux there -- the vacuum's on a cold start. Remove the key" );
+				psiAxis = 1.0;
 				return;
 			}
 
@@ -853,9 +871,13 @@ namespace meq
 
 			// THE BOX'S UPPER BOUND, Psi <= 1, IS A RING CUT OFF A TOKAMAK'S
 			// CORE: psi_h overshoots a located psi_ax by a discretisation error.
-			// So the box is posed only with the inner label at a point.
-			if ( !options.axisPoint.given )
-				source.fail( "SupportShape", "\"box\" bounds the support by Psi <= 1, which is right between a mirror's two prescribed labels and cuts a ring off the core around a LOCATED axis; give the inner label as [source.axis] R and Z" );
+			// So the box is posed only with the inner label at a point, and
+			// that point is the limiting electrode's, [boundary.electrode],
+			// which the [boundary] parse requires. [source.axis] pins a
+			// TOKAMAK's axis where it is known; beside a box it would be the
+			// same row under a name that says something else.
+			if ( options.axisPoint.given )
+				source.fail( "axis", "pins a tokamak's magnetic axis at a point. A SupportShape = \"box\" mirror has no axis: its inner label psi_inner is the flux at the limiting electrode, so give it as [boundary.electrode] R and Z" );
 
 			// INERT UNDER THE BOX, SO REFUSED. Exclusion acts through the
 			// element mask the connectivity fill builds, and the fill is off
@@ -2044,7 +2066,7 @@ namespace meq
 		// [boundary]
 		{
 			Table boundary( document, "boundary", sourceName, false );
-			boundary.rejectUnknownKeys( { "Type", "shape", "limiter", "xpoint", "exterior" } );
+			boundary.rejectUnknownKeys( { "Type", "shape", "limiter", "electrode", "xpoint", "exterior" } );
 
 			boundaryOptions.type = toBoundaryDataType( boundary, boundary.getStringOr( "Type", "zero" ) );
 
@@ -2164,16 +2186,65 @@ namespace meq
 					if ( surfaceGiven )
 						limiter.fail( "SurfaceAttribute", "[source] SupportShape = \"box\" reads the outer label at a PRESCRIBED point; give [boundary.limiter] R and Z instead of a surface" );
 					if ( !pointGiven )
-						limiter.fail( "R", "is required with [source] SupportShape = \"box\": the box lies between two labels at prescribed points, [source.axis] the inner and [boundary.limiter] R, Z the outer" );
+						limiter.fail( "R", "is required with [source] SupportShape = \"box\": the box lies between two labels at prescribed points, [boundary.electrode] R, Z the inner and [boundary.limiter] R, Z the outer" );
 				}
 
 				// THE TWO LABELS AT ONE POINT make the span identically zero, and
 				// Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ) is then undefined
-				// everywhere.
+				// everywhere. Here a tokamak's [source.axis]; the electrode's
+				// twin of this check is below, where the electrode is read.
 				if ( pointGiven && sourceOptions.axisPoint.given
 				     && l.radius == sourceOptions.axisPoint.radius
 				     && l.z == sourceOptions.axisPoint.z )
 					limiter.fail( "R", "is the same point as [source.axis], so psi_ax and psi_bnd are the same flux and the normalised flux is undefined; the two labels must be different points" );
+			}
+
+			/*
+			 * [boundary.electrode] -- A MIRROR'S INNER LABEL, psi_inner, AT ITS
+			 * LIMITING ELECTRODE. The twin of [boundary.limiter] R, Z for the
+			 * outer label, and the same row underneath as [source.axis]: the
+			 * solver's AxisConstraint::PrescribedPoint, filled into
+			 * SourceConfig::axisPoint so that there is one record of where the
+			 * inner label is read.
+			 *
+			 * UNDER [boundary] BECAUSE IT IS THE MACHINE. Where the electrode
+			 * is decides psi_inner; the label floats with the solve, and its
+			 * starting value is the starting state's flux there, which is why
+			 * [source] PsiAxis is refused beside it.
+			 */
+			{
+				Table electrode( boundary, "electrode", sourceName, false );
+				electrode.rejectUnknownKeys( { "R", "Z" } );
+				bool const pointGiven = electrode.has( "R" ) || electrode.has( "Z" );
+
+				if ( pointGiven && !sourceOptions.supportIsBox() )
+					electrode.fail( "R", "is a mirror's inner label and is read only beside [source] SupportShape = \"box\". A tokamak's inner label is its magnetic axis, located by the solve or pinned with [source.axis]" );
+
+				if ( sourceOptions.supportIsBox() )
+				{
+					if ( !pointGiven )
+						electrode.fail( "R", "is required with [source] SupportShape = \"box\": the box lies between two labels at prescribed points, and the inner one, psi_inner, is the flux at the limiting electrode. Give [boundary.electrode] R and Z" );
+
+					// BOTH OR NEITHER, on [boundary.limiter]'s precedent: a point
+					// given only its height sits on R = 0, where psi = 0 by
+					// construction.
+					AxisPointConfig & point = sourceOptions.axisPoint;
+					point.radius = electrode.getFloat( "R" );
+					point.z = electrode.getFloat( "Z" );
+					point.given = true;
+
+					if ( !( point.radius > 0.0 ) || !std::isfinite( point.radius ) )
+						electrode.fail( "R", "the electrode must be at a finite R > 0: psi( 0, z ) = 0 exactly, so a label on the symmetry axis would pin psi_inner to zero whatever the plasma does" );
+					if ( !std::isfinite( point.z ) )
+						electrode.fail( "Z", "must be finite" );
+
+					// THE TWO LABELS AT ONE POINT make the span identically zero,
+					// and Psi = ( psi - psi_bnd )/( psi_inner - psi_bnd ) is then
+					// undefined everywhere.
+					LimiterConfig const & l = boundaryOptions.limiter;
+					if ( point.radius == l.radius && point.z == l.z )
+						electrode.fail( "R", "is the same point as [boundary.limiter], so psi_inner and psi_bnd are the same flux and the normalised flux is undefined; the two labels must be different points" );
+				}
 			}
 
 			// [boundary.xpoint] -- psi_bnd at an X-POINT THAT IS ITSELF TWO
@@ -2503,7 +2574,7 @@ namespace meq
 			 * is refused beside it until a case measures one.
 			 */
 			if ( solverOptions.picardSweeps > 0 && sourceOptions.axisPoint.given )
-				solver.fail( "PicardSweeps", "is not measured to work beside [source.axis]: on a mirror every sweep's frozen-label solve diverges, and on a tokamak with its axis pinned the run fails. The bordered Newton reads psi_ax at the point from the first step; remove this key" );
+				solver.fail( "PicardSweeps", "is not measured to work with the inner label at a point, [boundary.electrode] or [source.axis]: on a mirror every sweep's frozen-label solve diverges, and on a tokamak with its axis pinned the run fails. The bordered Newton reads the label at the point from the first step; remove this key" );
 
 			// AssemblyMode and TraceSolver. Both are performance keys and
 			// neither may change the answer, which is why they can be exposed at

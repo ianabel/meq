@@ -79,9 +79,6 @@ ConfineToPlasma = true
 SupportShape = "box"
 AxialEdge = 1.5
 Gauge = "midplane"
-# THE STARTING VALUE OF THE INNER LABEL, the filaments' own flux there, as in
-# examples/mirror-rotating.toml.  psi_ax is an unknown.
-PsiAxis = 0.0056378011613958832
 Mu0 = 1.2566370614359173e-06
 GGPrime = 0.0
 OmegaFile = "mirror-three-species-omega.dat"
@@ -110,14 +107,14 @@ TemperatureFile = "mirror-three-species-T-ion.dat"
 TemperatureScale = 1.602176634e-19
 DensityFile = "mirror-three-species-n-carbon.dat"
 
-# THE INNER LABEL.  A sub-table, so every key below this header belongs to it
-# until the next one -- a [source] key written here is refused by name.
-[source.axis]
-R = 0.1
-Z = 0.0
-
 [boundary]
 Type = "zero"
+
+# THE INNER LABEL, psi_inner: the flux at the limiting electrode, and like the
+# outer label it starts at the starting state's flux at its point.
+[boundary.electrode]
+R = 0.1
+Z = 0.0
 
 # THE OUTER LABEL, read at a prescribed point exactly as a limiter contact is.
 [boundary.limiter]

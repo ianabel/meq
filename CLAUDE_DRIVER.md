@@ -323,24 +323,32 @@ it said *"nothing was attempted"*.
 **A MIRROR GOES THROUGH THE SAME DRIVER, AND FIVE TOKAMAK ASSUMPTIONS ARE
 BRANCHED OR REFUSED BESIDE IT** (`MIRROR-PLAN.md` MR-5,
 → **[M-264](MEASUREMENTS.md#m-264)**). `[source] SupportShape = "box"` with
-`[source.axis]` poses two labels at prescribed points:
+`[boundary.electrode]` and `[boundary.limiter]` poses two labels at prescribed
+points, `ψ_inner` at the electrode and `ψ_bnd` at the limiter:
 
 * **The axis check is not asked under `PrescribedPoint`.**
   `checkSolvedAxis()` returns `std::nullopt`, so the report and the annulus
   retry cannot disagree about it.
-* **On the box path only, `ψ_bnd` starts at the starting state's total flux at
-  the outer label.** `totalFluxAt()` is the one reader of a point's flux off a
-  state; `edgeFluxOf()` uses it too. The seed is a fixed rule, not a key, and
-  it does not spread to a tokamak: on `limited-tokamak` it costs 12 steps →
-  129, and `DriverAcceptance` bounds that count.
+* **On the box path only, both labels start at the starting state's total flux
+  at their points**: `ψ_bnd` through `setBoundaryFluxInitial()`, and `ψ_inner`
+  through `setAxisFluxInitial()`, overriding the placeholder 1 that
+  `setSource()` was handed, since `[source] PsiAxis` is refused beside the box.
+  The electrode's position sets `ψ_inner`, so a free start could only select a
+  root. `totalFluxAt()` is the one reader of a point's flux off a state;
+  `edgeFluxOf()` uses it too. The seeds are a fixed rule, not a key, and the
+  `ψ_bnd` one does not spread to a tokamak: on `limited-tokamak` it costs 12
+  steps → 129, and `DriverAcceptance` bounds that count.
 * **`PlasmaSupportSweeps` is refused beside the box.** Its "settled" test has
   no state to read there.
-* **`PicardSweeps` is refused beside any `[source.axis]`.** That is measured,
-  not argued: each sweep's Picard-then-Newton diverges.
+* **`PicardSweeps` is refused beside any inner label at a point**,
+  `[boundary.electrode]` or `[source.axis]`. That is measured, not argued: each
+  sweep's Picard-then-Newton diverges.
 * **The retry rung is skipped beside the box**, and the first failure exits 2
   as it is → **[M-277](MEASUREMENTS.md#m-277)**. Where both converge the
   rung's answer is the first attempt's to round-off, but from two of the four
-  `PsiAxis` starts that reach it, it converges to a different equilibrium. The
+  free `ψ_inner` starts that reach it, it converges to a different equilibrium.
+  The file can no longer pose those starts, but an `[initialguess]` far from
+  the answer can. The
   annulus trigger cannot fire on a box run at all, since `[boundary.xpoint]` is
   refused beside it.
 

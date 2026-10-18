@@ -790,7 +790,11 @@ tables in `tools/geq-benchmark/reference/rotating/` rather than copying them.
 
 **The schema.** Every new key states the problem; none is a solver knob:
 
-* `[source.axis] R, Z` is the inner label, through `setAxisFluxPoint()`.
+* `[boundary.electrode] R, Z` is the inner label `ψ_inner`, the flux at the
+  limiting electrode, through `setAxisFluxPoint()`. It has no starting value
+  to give: the driver starts it at the starting state's flux there through
+  `setAxisFluxInitial()`, and `[source] PsiAxis` and `[source.axis]` are
+  refused beside the box.
 * `[source] SupportShape = "box"` and `AxialEdge` give the support.
 * `[mesh.generate] AlignPlasma` makes the box's edges element faces.
 * The outer label is `[boundary.limiter] R, Z`, which already existed.
@@ -804,15 +808,16 @@ both `mhd` and `rotating`. `ConfigTests`' `mirror_keys` is the list.
 * **`checkAxis()`** is not asked under `PrescribedPoint`.
   `checkSolvedAxis()` answers `std::nullopt`, for both the report and the
   annulus retry.
-* **The starting `ψ_bnd`** is the starting state's total flux at the outer
-  label, on the box path only. It is a fixed rule, not a key. Spreading it to a
-  tokamak costs `limited-tokamak` 12 steps → 129, and `DriverAcceptance` now
-  bounds that count.
+* **The starting labels** are the starting state's total flux at each label's
+  point, on the box path only. It is a fixed rule, not a key. Spreading the
+  `ψ_bnd` seed to a tokamak costs `limited-tokamak` 12 steps → 129, and
+  `DriverAcceptance` now bounds that count.
 * **The support loop** is refused beside the box. Under the box the fill is
   off, so the loop would read settled whatever the labels did. Judging it by
   the labels would need a tolerance, which would be a knob. The live edge
   converges.
-* **The Picard pre-stage** is refused beside any `[source.axis]`, as measured.
+* **The Picard pre-stage** is refused beside any inner label at a point, as
+  measured.
   With the labels read at their points, every sweep's Picard-then-Newton
   diverges on the mirror, and a pinned tokamak exits 2.
 
@@ -836,7 +841,8 @@ without a card → [M-280](MEASUREMENTS.md#m-280).
 **The bordered retry rung is skipped beside the box**, and a failed first
 attempt exits 2 as it is → **[M-277](MEASUREMENTS.md#m-277)**. Run on the
 mirror, it agrees with the first attempt to 7.3e-13 where both converge. But
-from two of the four `PsiAxis` starts that reach it, it converges to a different
+from two of the four free `ψ_inner` starts that reach it, starts a file cannot
+pose since `ψ_inner` begins at the electrode's flux, it converges to a different
 equilibrium: a second discrete root with a spike in one element of the box, and
 an answer accepted against a cold residual of 1e+12. The annulus trigger cannot
 fire on a box run, since `[boundary.xpoint]` is refused beside it.
@@ -844,18 +850,17 @@ fire on a box run, since `[boundary.xpoint]` is refused beside it.
 the branch.
 
 **Open:**
-* **A start the rung closed correctly now exits 2.** `PsiAxis` 0.05 and 0.1 were
-  rescued to the shipped answer; the skip trades them for not reporting the
-  other two roots. Under the mirror's stabilisation a second root IS reachable
-  by the plain bordered Newton: from `PsiAxis = 0.15` it converges in 27 steps
-  to `ψ_ax` = 4.5747e-03, `ψ_bnd` = 4.980e-02, where the shipped answer is
-  5.5473e-03 and 6.530e-02, and exits 0 reporting it (constant `τ = 1` fails
-  from the same start). Whether that is M-277's 0.2 root, and whether it
-  survives refinement, is untried (M-294).
+* **A second discrete root exists, and only a far `[initialguess]` can reach it
+  now.** Under the mirror's stabilisation the plain bordered Newton started at
+  `ψ_inner = 0.15` converges in 27 steps to `ψ_inner` = 4.5747e-03, `ψ_bnd` =
+  4.980e-02, where the shipped answer is 5.5473e-03 and 6.530e-02 (M-294).
+  `ψ_inner` now starts at the electrode's flux, 5.64e-03 on a cold start, so a
+  file cannot pose that start; whether the root is M-277's 0.2 root, and
+  whether it survives refinement, is untried.
 * **The bordered target is relative to the cold residual**, so a bad enough
-  start is accepted loose: from `PsiAxis = 0.5` a first residual of 1.1e+12
+  start is accepted loose: from `ψ_inner = 0.5` a first residual of 1.1e+12
   accepts 9.1e-05. That bites any first attempt, not only the rung's, and is
-  not fixed.
+  not fixed; on a mirror only a far `[initialguess]` now poses such a start.
 * **The device on the mirror is measured in double only**: device against host
   in single, and `DeviceParity`'s `MEQ_AXIS_DEVICE=force` arm, are not run on
   it. Neither `--device` nor the adaptive loop has been run under

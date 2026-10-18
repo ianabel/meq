@@ -288,7 +288,8 @@ a source that does not vanish on the symmetry axis
    :math:`\psi_{\mathrm{bnd}}` is an unknown of it.
 
 **A prescribed** :math:`\psi_{\mathrm{ax}}` **is not checked as an axis.** With
-``[source.axis]`` the label is the flux at the point the file names, so the
+``[source.axis]``, or a mirror's ``[boundary.electrode]``, the label is the flux
+at the point the file names, so the
 magnetic-axis check above is not asked and the run prints that it was not; a
 magnetic mirror has no axis to locate. A mirror's own refusals —
 ``[source] SupportShape = "box"`` beside a key it has no state for — are made
@@ -346,8 +347,10 @@ restriction changes the answer on machines that converge without it.
 failed first attempt is reported as it is and the run exits 2. On the shipped
 mirror the rung was measured to converge from starts the first attempt cannot,
 but to a different equilibrium from some of them, so a retry there would turn a
-failure into a wrong answer. Start ``[source] PsiAxis`` at the conductors' own
-flux at ``[source.axis]``, as ``examples/mirror-rotating.toml`` does.
+failure into a wrong answer. A mirror's labels start at the starting state's
+flux at ``[boundary.electrode]`` and ``[boundary.limiter]``, so the start is
+moved only by an ``[initialguess]``; ``[source] PsiAxis`` is refused beside the
+box.
 
 The ladder is deliberately never *predictive*. Nothing is inferred from the
 source about which strategy to use, and two plausible cheap indicators — the

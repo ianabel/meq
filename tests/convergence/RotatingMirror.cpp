@@ -2158,8 +2158,9 @@ BOOST_AUTO_TEST_SUITE( driver )
  *   field at its point, the symmetry axis outside the box, a non-empty
  *   support and a cutoff that lies in the mesh. And the .nc says so.
  *
- *   AND THE FILE'S PsiAxis IS THE FILAMENTS' OWN FLUX AT THE INNER POINT, so
- *   the axis row reads zero at the first step.
+ *   AND psi_inner STARTS AT THE FILAMENTS' OWN FLUX AT THE ELECTRODE, read
+ *   off the cold state there by the driver -- the file has no PsiAxis to give
+ *   it -- so the inner label row reads zero at the first step.
  */
 BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 {
@@ -2188,11 +2189,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	// ---- the file poses the reference's problem --------------------------
 	meq::SourceConfig const &source = file.getSource();
 	double const filamentsAtAxis = geqFilaments().psi( p.axisPointR, p.axisPointZ );
-	BOOST_TEST( std::abs( source.psiAxisGuess() - filamentsAtAxis )
-	            <= 1.0e-12*std::abs( filamentsAtAxis ),
-		"[source] PsiAxis is " << source.psiAxisGuess() << " where the filaments' "
-		"flux at the inner point is " << filamentsAtAxis << "; print it with "
-		"meq::ConductorField over geqFilaments() at %.17g" );
+	BOOST_TEST( source.axisPoint.given );
 	BOOST_TEST( source.axisPoint.radius == p.axisPointR );
 	BOOST_TEST( source.axisPoint.z == p.axisPointZ );
 	BOOST_TEST( file.getBoundary().limiter.radius == p.boundaryPointR );
@@ -2205,7 +2202,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	BOOST_TEST_REQUIRE( run.status == 0,
 		"meq-run " << mirrorExample << " exited " << run.status << ":\n" << run.log );
 	for ( char const *phrase : { "converged in ", "at the prescribed point",
-	                             "psi_bnd starts at", "axial cutoff",
+	                             "psi_inner starts at", "psi_bnd starts at", "axial cutoff",
 	                             "the plasma support is the BOX" } )
 		BOOST_TEST( says( run.log, phrase ), "the driver did not say '" << phrase << "'" );
 	for ( char const *phrase : { "no interior extremum", "wall-hugging",
@@ -2215,7 +2212,12 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 		BOOST_TEST( !says( run.log, phrase ),
 			"the driver said '" << phrase << "' of a mirror:\n" << run.log );
 	int const driverSteps = static_cast<int>( numberAfter( run.log, "converged in " ) );
-	double const driverAxis = numberAfter( run.log, "     psi_ax = " );
+	double const driverAxis = numberAfter( run.log, "     psi_inner = " );
+	double const innerStart = numberAfter( run.log, "MEQ: psi_inner starts at " );
+	BOOST_TEST( std::abs( innerStart - filamentsAtAxis ) <= 1.0e-6*std::abs( filamentsAtAxis ),
+		"psi_inner started at " << innerStart << " where the filaments' flux at the "
+		"electrode is " << filamentsAtAxis << ": the driver did not read the cold "
+		"state at [boundary.electrode]" );
 
 	// ---- the library, on geq's problem and the driver's mesh ---------------
 	Options o;
@@ -2225,7 +2227,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	o.modes = defaultModes;
 	o.coldStart = true;
 	o.neutraliseDeuterium = true;
-	o.axisGuess = source.psiAxisGuess();
+	o.axisGuess = filamentsAtAxis;
 	std::unique_ptr<MirrorRun> const library = runMirror( o );
 	printHistory( *library );
 	BOOST_TEST_REQUIRE( library->converged, library->failure );
@@ -2253,7 +2255,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	             "wall %.2f s, library solve %.2f s\n", storedMesh.GetNE(), worst,
 	             stored.Size(), largest, worst/largest, driverSteps, librarySteps,
 	             run.seconds, library->plasmaSeconds );
-	std::printf( "    psi_ax printed %.6e, library %.12e\n", driverAxis, m.psiAxis );
+	std::printf( "    psi_inner printed %.6e, library %.12e\n", driverAxis, m.psiAxis );
 	std::fflush( stdout );
 
 	// IN SINGLE THE TWO ROUTES MEET AT THE EXTENSION'S OWN FLOOR. The transfer
@@ -2278,7 +2280,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 		<< librarySteps << "; a mirror's psi_bnd seeded anywhere but at the outer "
 		"label costs steps, so look first at that" );
 	BOOST_TEST( std::abs( driverAxis - m.psiAxis ) <= 1.0e-6*std::abs( m.psiAxis ),
-		"the driver printed psi_ax = " << driverAxis << " against " << m.psiAxis );
+		"the driver printed psi_inner = " << driverAxis << " against " << m.psiAxis );
 
 	// ---- MR-4b's labels and diagnostics, on the library run ----------------
 	BOOST_TEST( m.span < 0.0 );
@@ -2370,18 +2372,17 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnIts
  * bordered Picard-then-Newton rung is skipped and the failure exits 2 as it
  * is. MEASUREMENTS.md M-277.
  *
- * From [source] PsiAxis = 0.2 the bordered Newton fails -- in 30 steps, and
- * 300 do no better, at constant tau = 1 and under the mirror's
- * stabilisation alike, and under the mirror's from every PsiAxis measured
- * between 0.18 and 0.5. Of the neighbouring stabilisations only
- * tau = 2/max( R, 0.2 m ) converges from 0.2, to the shipped answer, so the
- * premise is the default's and not tau's in general
- * ( M-294 ). At constant tau = 1 the rung, run, converges in eight
- * to a SECOND DISCRETE ROOT: well converged, with one element of the box at
- * -7.9e-02 where the shipped answer's largest |psi_h| is 6.6e-03 ( M-277;
- * not re-run under the mirror's stabilisation, since the rung is not built
- * beside the box ). So exit 2 is the assertion that matters: putting the rung
- * back turns it into an exit 0 reporting that root.
+ * WHY NOT: started from psi_inner = 0.2 rather than at the electrode's
+ * flux, the rung converges in eight to a SECOND DISCRETE ROOT, well
+ * converged, with one element of the box at -7.9e-02 where the shipped
+ * answer's largest |psi_h| is 6.6e-03 ( M-277, at constant tau = 1 ). A
+ * file cannot pose that start -- [source] PsiAxis is refused beside the box
+ * and psi_inner starts at the state's flux at [boundary.electrode] -- but an
+ * [initialguess] far from the answer can, and the rung would then report the
+ * root it reaches. So the failure here is made the plainest way, a Newton
+ * cap of 2 against the four steps the shipped file converges in, and exit 2
+ * is the assertion that matters: putting the rung back turns it into an
+ * exit 0.
  *
  * Of the rung's two triggers this is the failure. The annulus cannot fire on
  * a box run, since [boundary.xpoint] is refused beside it, and
@@ -2391,17 +2392,18 @@ BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
 {
 	std::string const prefix = "mirror-driver-no-retry";
 	std::string const config = configureMirror( prefix, "",
-	                                            { { "PsiAxis = ", "PsiAxis = 0.2" } } );
+	                                            { { "NewtonMaxIterations = ",
+	                                                "NewtonMaxIterations = 2" } } );
 	std::string const stem = std::string( driverScratch ) + "/" + prefix;
 	std::remove( ( stem + ".nc" ).c_str() );
 	int const status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
 	                              + " " + config, stem + ".log" );
 	std::string const text = readText( stem + ".log" );
 	BOOST_TEST( status == 2,
-		"meq-run exited " << status << " on a mirror whose bordered Newton cannot "
-		"converge from PsiAxis = 0.2. An exit 0 is the retry rung run beside the "
-		"box and reporting the root it reaches from there, which is not the "
-		"shipped equilibrium:\n" << text );
+		"meq-run exited " << status << " on a mirror whose bordered Newton is "
+		"capped at 2 steps. An exit 0 is the retry rung run beside the box, which "
+		"from a poor start reports a root that is not the shipped equilibrium:\n"
+		<< text );
 	BOOST_TEST( says( text, "the bordered Newton did not converge" ),
 		"the first attempt's failure is not reported:\n" << text );
 	BOOST_TEST( says( text, "retry is not run beside" ),
@@ -3042,8 +3044,8 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorOnTheCardIsTheHosts )
 	}
 	int const hostSteps = static_cast<int>( numberAfter( host.log, "converged in " ) );
 	int const cardSteps = static_cast<int>( numberAfter( card.log, "converged in " ) );
-	double const hostAxis = numberAfter( host.log, "     psi_ax = " );
-	double const cardAxis = numberAfter( card.log, "     psi_ax = " );
+	double const hostAxis = numberAfter( host.log, "     psi_inner = " );
+	double const cardAxis = numberAfter( card.log, "     psi_inner = " );
 
 	std::printf( "\n  THE MIRROR ON THE CARD against --device cpu, %d elements, one host "
 	             "thread each\n", onHost.mesh->GetNE() );
@@ -3051,7 +3053,7 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorOnTheCardIsTheHosts )
 	             onHost.psi->Size(), worst/largest, largest );
 	std::printf( "    q_h:   %.3e over %d dofs, %.3e of max |q_h| %.3e\n", fluxWorst,
 	             onHost.flux->Size(), fluxWorst/fluxLargest, fluxLargest );
-	std::printf( "    Newton %d on the host, %d on the card; psi_ax printed %.6e and %.6e\n",
+	std::printf( "    Newton %d on the host, %d on the card; psi_inner printed %.6e and %.6e\n",
 	             hostSteps, cardSteps, hostAxis, cardAxis );
 	std::fflush( stdout );
 

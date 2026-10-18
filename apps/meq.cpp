@@ -3011,11 +3011,12 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * `[source.axis]` -- psi_ax AT A PRESCRIBED POINT, AxisConstraint::
-		 * PrescribedPoint, the twin of the limiter point above. A mirror's
-		 * inner label. The setter refuses a point outside this mesh, which the
-		 * caller turns into exit 1: the file named a point the mesh does not
-		 * reach.
+		 * THE INNER LABEL AT A PRESCRIBED POINT, AxisConstraint::
+		 * PrescribedPoint, the twin of the limiter point above: a mirror's
+		 * psi_inner at [boundary.electrode], or a tokamak's axis pinned by
+		 * [source.axis]. The setter refuses a point outside this mesh, which
+		 * the caller turns into exit 1: the file named a point the mesh does
+		 * not reach.
 		 */
 		meq::AxisPointConfig const &axisPoint = config->getSource().axisPoint;
 		if ( bordered && axisPoint.given )
@@ -3307,7 +3308,7 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * A MIRROR'S STARTING psi_bnd IS READ OFF THE STATE IT STARTS FROM.
+		 * A MIRROR'S STARTING LABELS ARE READ OFF THE STATE IT STARTS FROM.
 		 *
 		 * psi_bnd starts every bordered solve at zero on a fresh solver. On a
 		 * tokamak that is the right place: section 10.5 of
@@ -3327,6 +3328,16 @@ int main( int argc, char **argv )
 		 * previous adaptive cycle's included -- into potential(); it costs one
 		 * assembly, and solve() repeats it. The Picard pre-stage, which sets
 		 * its guess after this lambda returns, is refused beside the box.
+		 *
+		 * AND THE INNER LABEL, psi_inner, BY THE SAME RULE AT THE ELECTRODE.
+		 * It is not a choice either: the electrode's position sets it, and it
+		 * floats with the solve from the starting state's flux there. A free
+		 * start only selects a branch -- from a file's
+		 * PsiAxis = 0.2 the shipped mirror reached a second discrete root
+		 * (M-277) -- so [source] PsiAxis is refused beside the box, and
+		 * psiAxisGuess, which setSource() was handed above, is the placeholder
+		 * this replaces. On an adaptive cycle it is the previous answer, and
+		 * the state read here is that answer transferred.
 		 */
 		if ( bordered && normalised && config->getSource().supportIsBox() )
 		{
@@ -3338,14 +3349,25 @@ int main( int argc, char **argv )
 					"[boundary.limiter] R, Z -- the outer label -- is not inside the mesh" );
 			fresh->setBoundaryFluxInitial( seed );
 
-			double atAxis = std::numeric_limits<double>::quiet_NaN();
-			totalFluxAt( fresh->potential(), axisPoint.radius, axisPoint.z, atAxis );
-			std::printf( "MEQ: psi_bnd starts at %.6e, the starting state's flux at "
-			             "the outer label ( %g, %g );\n"
-			             "     psi_ax starts at %.6e, and the state reads %.6e at "
-			             "the inner label ( %g, %g )\n",
-			             seed, outer.radius, outer.z, psiAxisGuess, atAxis,
-			             axisPoint.radius, axisPoint.z );
+			double inner = 0.0;
+			if ( !totalFluxAt( fresh->potential(), axisPoint.radius, axisPoint.z, inner ) )
+				throw std::runtime_error(
+					"[boundary.electrode] R, Z -- the inner label -- is not inside the mesh" );
+			if ( inner == 0.0 || inner == seed )
+				throw std::runtime_error(
+					"the starting state's flux is the same at [boundary.electrode] and "
+					"[boundary.limiter], so the starting span psi_inner - psi_bnd is "
+					"zero and the normalised flux is undefined: the starting state has "
+					"no field between the two labels. Check [conductors] and "
+					"[initialguess]" );
+			fresh->setAxisFluxInitial( inner );
+
+			std::printf( "MEQ: psi_inner starts at %.6e, the starting state's flux at "
+			             "the electrode ( %g, %g );\n"
+			             "     psi_bnd starts at %.6e, the starting state's flux at "
+			             "the outer label ( %g, %g )\n",
+			             inner, axisPoint.radius, axisPoint.z,
+			             seed, outer.radius, outer.z );
 			std::fflush( stdout );
 		}
 
@@ -4529,7 +4551,7 @@ int main( int argc, char **argv )
 			 * the failures as a partial success.
 			 *
 			 * **NOT BESIDE THE BOX, WHICH IS MEASURED.** On the shipped mirror
-			 * the rung is reached from four of ten [source] PsiAxis starts and
+			 * the rung is reached from four of ten psi_inner starts and
 			 * converges from all four, but to the problem's equilibrium from
 			 * two: from 0.2 it reaches a second discrete root, well converged,
 			 * with one element of the box at -7.9e-02 where the answer's largest
@@ -4550,9 +4572,10 @@ int main( int argc, char **argv )
 					"     The bordered Picard-then-Newton retry is not run beside\n"
 					"     [source] SupportShape = \"box\": on a mirror it reaches a\n"
 					"     different equilibrium from half the starts that reach it, so\n"
-					"     this failure is reported as it is. The lever is the start:\n"
-					"     [source] PsiAxis at the conductors' own flux at [source.axis],\n"
-					"     then RESOLUTION.\n",
+					"     this failure is reported as it is. The levers are an\n"
+					"     [initialguess] nearer the answer, since both labels start at\n"
+					"     its flux at [boundary.electrode] and [boundary.limiter], and\n"
+					"     RESOLUTION.\n",
 					firstAttempt.what() );
 				return SolveFailed;
 			}
@@ -5111,7 +5134,13 @@ int main( int argc, char **argv )
 		bool const axisPrescribed = normalised && solver
 			&& solver->axisConstraint()
 			   == meq::GradShafranovSolver::AxisConstraint::PrescribedPoint;
-		if ( axisPrescribed )
+		// A mirror's inner label is psi_inner, the electrode's, in its own name.
+		if ( axisPrescribed && config->getSource().supportIsBox() )
+			std::printf( "     psi_inner = %.6e Wb/rad, constraint psi_inner - psi_h( %g, %g ) "
+			             "= %.3e\n",
+			             solver->psiAxis(), solver->axisR(), solver->axisZ(),
+			             solver->normalisationResidual() );
+		else if ( axisPrescribed )
 			std::printf( "     psi_ax = %.6e Wb/rad, constraint psi_ax - psi_h( %g, %g ) "
 			             "= %.3e\n",
 			             solver->psiAxis(), solver->axisR(), solver->axisZ(),
@@ -5840,7 +5869,8 @@ int main( int argc, char **argv )
 					"MEQ: warning: the plasma support is EMPTY -- no potential node\n"
 					"     lies between the two labels inside abs( z ) <= %g -- so this\n"
 					"     is a converged VACUUM and not a plasma. Look at the two label\n"
-					"     points, at [source] PsiAxis, and at the profiles' amplitude.\n",
+					"     points, [boundary.electrode] and [boundary.limiter], and at the\n"
+					"     profiles' amplitude.\n",
 					config->getSource().axialEdge );
 			}
 		}
