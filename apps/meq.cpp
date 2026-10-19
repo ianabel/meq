@@ -2836,6 +2836,26 @@ int main( int argc, char **argv )
 							"MEQ: WARNING: that file holds a REMAINDER, psi - psi_c, and\n"
 							"     this run does not subtract its conductors, so the guess\n"
 							"     starts one whole conductor field away from psi.\n" );
+
+					/*
+					 * AND psi_ax FROM THE SAME FILE, NOT FROM THE TOML. The
+					 * bordered unknown starts where the stored field has its
+					 * axis, so a restart from a converged answer starts at that
+					 * answer rather than one Newton step away from it: [source]
+					 * PsiAxis is the starting value for a run that has nothing
+					 * better, and a file that solved this problem is better.
+					 * Only where the file recorded one -- a normalised run's
+					 * psi_axis -- and the run will use it: a box support seeds
+					 * its labels from the starting state at its electrodes.
+					 */
+					if ( stored.hasPsiAxis() && config->getSource().isNormalised()
+					     && !config->getSource().supportIsBox() )
+					{
+						std::printf( "     psi_ax starts at the file's %.12e Wb/rad, "
+						             "not [source] PsiAxis = %.12e\n",
+						             stored.psiAxis(), psiAxisGuess );
+						psiAxisGuess = stored.psiAxis();
+					}
 				}
 				else
 				{

@@ -414,7 +414,9 @@ happens:
   ``Type = "gridfunction"``, ``File = "<stem>.nc"`` — which carries its own
   mesh and says what field it holds, or a stored grid function and the mesh it
   lives on, ``File`` and ``MeshFile``. The two read the same coefficients and
-  restart identically. If the stored mesh matches the one being solved on, the
+  restart identically, except that a ``.nc`` also starts :math:`\psiax`, the
+  bordered unknown of a normalised run, at the file's converged ``psi_axis``
+  rather than at ``[source] PsiAxis``, and says so. If the stored mesh matches the one being solved on, the
   restart is *exact* — every polynomial coefficient, not an interpolation. If
   it does not, the guess is interpolated onto the new mesh, which is the
   ordinary way to restart a run at a different resolution.

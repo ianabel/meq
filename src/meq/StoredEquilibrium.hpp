@@ -69,6 +69,12 @@ namespace meq
 			bool holdsTotal() const { return total; }
 			std::string const &content() const { return contentText; }
 
+			/// The converged axis flux, psi_ax, which a normalised run records
+			/// as its `psi_axis` attribute and a restart starts its bordered
+			/// unknown from; hasPsiAxis() is false for a run without one.
+			bool hasPsiAxis() const { return axisGiven; }
+			double psiAxis() const { return axis; }
+
 			/// [discretisation] PolynomialDegree, k.
 			int polynomialDegree() const { return degree; }
 
@@ -96,6 +102,8 @@ namespace meq
 
 			std::unique_ptr<BoundaryShape> curve;
 			bool total = true;
+			bool axisGiven = false;
+			double axis = 0.0;
 			std::string contentText;
 			int degree = 0;
 

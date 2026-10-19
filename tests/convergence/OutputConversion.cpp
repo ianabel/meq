@@ -117,11 +117,13 @@ namespace
 		return -1;
 	}
 
-	std::string psiAxisLine( std::string const &log )
+	/// The converged psi_ax as the driver prints it, without the constraint
+	/// residual beside it: that is round-off, and differs with the start.
+	std::string psiAxisValue( std::string const &log )
 	{
 		std::smatch match;
-		if ( std::regex_search( log, match, std::regex( "psi_ax = [^\n]*" ) ) )
-			return match.str();
+		if ( std::regex_search( log, match, std::regex( "psi_ax = ([^ ]+) Wb/rad" ) ) )
+			return match[ 1 ];
 		return std::string();
 	}
 }
@@ -203,8 +205,9 @@ BOOST_AUTO_TEST_CASE( theConverterWritesTheRunsOwnFiles )
 }
 
 // THE `.nc` RESTARTS A RUN EXACTLY AS THE `.gf` AND `.mesh` PAIR DOES: the same
-// Newton steps to the same printed psi_ax, from the same stored field. On a
-// non-linear case, so that a wrong restart costs iterations and shows.
+// Newton steps to the same printed psi_ax, from the same stored field -- with
+// psi_ax itself started from the file's psi_axis, which the .gf cannot carry.
+// On a non-linear case, so that a wrong restart costs iterations and shows.
 BOOST_AUTO_TEST_CASE( theNetCDFRestartsLikeTheGridFunction )
 {
 	std::string const directory = fresh( "restart" );
@@ -244,6 +247,8 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsLikeTheGridFunction )
 
 	BOOST_TEST( fromNc.find( "warm start from" ) != std::string::npos,
 	            "the .nc restart did not say what it read" );
+	BOOST_TEST( fromNc.find( "psi_ax starts at the file's" ) != std::string::npos,
+	            "the .nc restart did not start psi_ax from the file's psi_axis" );
 	BOOST_TEST( newtonSteps( fromNc ) == newtonSteps( fromGf ),
 	            "the .nc restart took " << newtonSteps( fromNc ) << " Newton steps and "
 	            "the .gf one " << newtonSteps( fromGf ) << ": they did not start from "
@@ -251,7 +256,8 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsLikeTheGridFunction )
 	BOOST_TEST( newtonSteps( fromNc ) < cold,
 	            "a restart from the converged answer took " << newtonSteps( fromNc )
 	            << " steps against the cold run's " << cold );
-	BOOST_TEST( psiAxisLine( fromNc ) == psiAxisLine( fromGf ) );
+	BOOST_TEST( !psiAxisValue( fromNc ).empty() );
+	BOOST_TEST( psiAxisValue( fromNc ) == psiAxisValue( fromGf ) );
 }
 
 // AND THE CONVERTER REFUSES WHAT IT CANNOT READ, with meq's own exit codes.

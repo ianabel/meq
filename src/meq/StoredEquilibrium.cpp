@@ -109,6 +109,9 @@ namespace meq
 		meshPointer = std::make_unique<mfem::Mesh>( meshStream, 1, 0, false );
 
 		degree = integerAttribute( file, "polynomial_degree", path );
+		axisGiven = !file.getAtt( "psi_axis" ).isNull();
+		if ( axisGiven )
+			axis = doubleAttribute( file, "psi_axis", path );
 		contentText = textAttribute( file, "content", path );
 		total = contentText.rfind( "total", 0 ) == 0;
 

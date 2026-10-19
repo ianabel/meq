@@ -19462,10 +19462,20 @@ relative while each run's own conversion is exact.
 **THE RESTART.** `fixed-h-circular` restarted from its own `.nc` and from its
 own `.gf` pair: 2 Newton steps each, against 5 cold, to the same printed
 `psi_ax` and the same constraint residual, 7.305e-13.
-`theNetCDFRestartsLikeTheGridFunction` asserts it. **2 and not 0**, on either
-route, because the bordered unknown `psi_ax` starts from the TOML's `PsiAxis`
-and not from the stored answer — a restart's remaining cost, and the same on
-both.
+`theNetCDFRestartsLikeTheGridFunction` asserts it.
+
+**2 AND NOT 0, AND IT IS NOT `psi_ax` — MEASURED AND FALSIFIED.** The first
+reading was that the bordered unknown starting from the TOML's `PsiAxis`
+(6.354434e-02, the reference's) rather than the stored answer (6.353706e-02)
+cost the step. The `.nc` restart now starts `psi_ax` from the file's
+`psi_axis`, and the first residual moves in its fourth digit — 2.190996e-03
+against the `.gf` restart's 2.192457e-03 — to the same 2 steps and the same
+2.3e-07 after one. **What the restart is missing is the rest of the iterate**:
+`setInitialGuess( GridFunction )` seeds `psi_h` and re-derives `q` as the
+weighted projection of `grad psi_h`, which is not the solved `q_h`, and the
+trace `psihat` is not stored at all. A restart at the answer would carry the
+whole state `( q, psi, psihat )` — the `.nc` holds the first two exactly and
+not the third.
 
 **Reproduce.** Per case and arm in turn, from a directory under `runs/`:
 `meq --profile examples/fixed-<c>.toml` on each binary, the third arm with `--gf
