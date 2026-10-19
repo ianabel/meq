@@ -19199,3 +19199,102 @@ the history of a solve asked for an unreachable target. The no-retry starts
 are `aMirrorWhoseFirstAttemptFailsIsNotRetried`'s configuration with `PsiAxis` and `[discretisation]` edited, run through
 `meq --mesh-ready`; the mutations are one-line edits of `mirrorSolver()` and of
 `Options::tauFloorRadius`, reverted. None is committed.
+
+### M-295
+
+**MEQ AND geq ON FOUR PROFILE SHAPES, EACH CODE RUN ONLY THROUGH ITS OWN
+USER'S FRONT END: geq'S CASE SCRIPT BY PATH, MEQ'S `meq.toml` THROUGH THE
+INSTALLED `meq`. ON EVERY SHAPE geq'S 513² ANSWER LIES WITHIN 2.4e-08 OF MEQ'S
+REFERENCE AT geq'S 65 × 65 NODES, AND ON EVERY SHAPE THAT IS AS FAR AS THE
+REFERENCE RESOLVES ITSELF, OR WITHIN 7.2× OF IT: THE TWO CODES AGREE TO THE
+LIMIT OF THE MEASUREMENT. TIMED, AS A USER SEES IT, MEQ REACHES 1e-07 FIRST ON
+EVERY SHAPE: 2.6× ON THE SKEW, 6.5× ON THE QUARTIC AND THE DOUBLE PEAK AND 37×
+ON THE FLAT-TOP AT 8 THREADS, AND 1.3 TO 16× AT ONE. AT 1e-06 AND ABOVE geq's
+65² TAKES THE SKEW AT ONE THREAD. geq'S PICARD DOES NOT CONVERGE ON THE
+FLAT-TOP AT 65², IN 400 STEPS AT EITHER TOLERANCE, AND ITS OWN STOPPING SCALE
+`rtol = 1e-6` IS ALREADY PAST ITS DISCRETISATION ERROR ON EVERY GRID.**
+
+**Setup.** `tools/geq-benchmark/shapes.py`'s four cases (its README, *The
+shape cases*): geq's machine, electrons and deuterons, the electron density
+given at `z = 0` and the deuterons by quasineutrality — MEQ's
+`Gauge = "midplane"` with the deuteron `Neutralising` — and one shape `g` per
+case for `T_e`, `T_D`, `n_e( z = 0 )` and `ω`, the density falling to 1e-6 of its
+peak at both labels. geq `73b9a72` and freegs4e `9a1ee0c`, both clean, run
+unpatched; MEQ the tree committed as `77997c8`, installed double, on the host.
+`race_geq.py --repeats 1 --threads 4 --geq 129,257,513 --geq-rtol 2e-9
+--levels 0,1,2 --orders 2,3,4`, with the quiet gates off: an AGREEMENT pass,
+untimed, beside other work on the machine. The error is max `| ψ − ψ_ref |`
+over geq's 65 × 65 common nodes less its corners, `ψ_ref` MEQ at level 2,
+`k = 4`; "resolves" is MEQ at level 2, `k = 3`, against it.
+
+| case | `j` | geq 129² | geq 257² | geq 513² | resolves | MEQ L1 `k = 4` |
+|---|---|---|---|---|---|---|
+| flattop | 1, 1 | 1.42e-05 | 3.24e-07 | 2.39e-08 | 2.42e-08 | 9.10e-08 |
+| quartic | 1, 1 | 8.08e-07 | 5.56e-08 | 7.32e-09 | 8.93e-09 | 1.95e-08 |
+| skew | 2, 3 | 5.72e-08 | 1.62e-08 | 4.45e-09 | 6.18e-10 | 4.34e-09 |
+| double | 2, 2 | 1.03e-07 | 2.55e-08 | 7.18e-09 | 3.57e-09 | 2.47e-08 |
+
+**geq closes on MEQ's reference at every shape**, by 3.5 to 4× a doubling on
+the `j = 2` shapes, 14.5 then 7.6× on the quartic, and 44 then 13.5× on the
+flat-top. Only the skew
+separates the two codes below the reference's resolution: there geq's 513² is
+4.45e-09 away where the reference resolves 6.2e-10, 7.2× less, so that 4e-09
+is geq's.
+**The flat-top's 129² is the outlier**, 44× worse than its 257², 14× worse than
+the quartic's 129², and 65² does not converge at all: geq's relative change
+stays between 0.5 and 1.7 for 400 Picard steps with the blend at its 0.95 cap.
+geq's Picard steps to `rtol = 2e-9` at 129², 257² and 513²: 9, 8, 26
+(flattop), 8, 8, 13 (quartic), 9, 9, 11 (skew), 9, 9, 15 (double). MEQ's
+Newton takes 3 steps on every rung of every case.
+
+**MEQ's rate follows `j`.** At level 0 raising `k` from 3 to 4 buys 1.3× on the
+flat-top and 3× on the quartic, against 9× on the skew; the reference itself
+resolves 40× worse on the flat-top than on the skew.
+
+**What the cases cannot do, found posing them.** geq cannot start from
+`ω = 0` at a label: its first `φ₀` guess is a shape times `m_e ω² R²/2e`. On the
+skew at 129², `ω`'s edge at 0.2 and 0.01 of its peak solves in 13 and 14
+steps, and 1e-4 raises `Can't find a phi0 guess` before the first. Under the
+midplane statement a flat density then leaves `−n m ω² R₀R₀′/T` in the source
+at a label, so the density, not `ω`, carries the label condition.
+
+**The race.** `race_geq.py --case <shape>` at its defaults, the four in
+sequence, starting 2026-10-18 21:34: one thread and the physical core count,
+8, with OMP, MKL and OpenBLAS set to it; geq at 65², 129², 257² and 513² at
+`rtol` 1e-6 and 2e-9; MEQ at levels 0 to 2 and `k = 1` to 4 less the
+reference; three takes a configuration, one for a run over 120 s, the median
+timed; the arms interleaved. Neither gate timed out: the busy cores before
+each run read median 0.03 and at most 0.17 over 424 rows, but for one take of
+geq's 129² at 8 threads in the double race, at 1.23, which its median of three
+absorbs. The time is the PROCESS'S wall clock, as its user sees it — Python's
+start and geq's imports, MEQ's setup and output — and the mesh is made once,
+untimed. The binary is `77997c8`, clean; the source sha reads `-dirty` for this
+entry's draft alone. The cheapest run of each code reaching each max error,
+wall seconds, and geq/MEQ:
+
+| case | 1e-05 | 1e-06 | 1e-07 at 8 threads | 1e-07 at 1 thread |
+|---|---|---|---|---|
+| flattop | 26.06 / 0.90 = 29 | 26.06 / 2.51 = 10.4 | geq 513² 207.91 / L1 `k = 4` 5.57 = **37** | 205.72 / 12.80 = 16.1 |
+| quartic | 4.37 / 0.68 = 6.4 | 4.37 / 1.26 = 3.5 | geq 257² 25.29 / L1 `k = 3` 3.92 = **6.5** | 26.05 / 8.58 = 3.0 |
+| skew | 1.58 / 0.89 = 1.8 | 1.58 / 1.24 = 1.3 | geq 129² 4.41 / L0 `k = 4` 1.68 = **2.6** | 4.32 / 3.35 = 1.3 |
+| double | 1.73 / 0.73 = 2.4 | 4.56 / 1.31 = 3.5 | geq 257² 26.26 / L1 `k = 3` 3.98 = **6.6** | 26.65 / 8.73 = 3.1 |
+
+The 1e-05 and 1e-06 columns are at 8 threads. At one thread the skew's 1e-06
+goes to geq, 1.58 s at 65² against MEQ's 2.30 at L0 `k = 3`, 0.7. **No 1e-08
+target is set**: it is under the flat-top's reference and within 3× of the
+quartic's and the double's.
+
+**geq does not use the threads**: its 129² takes 4.40 s at one and 4.39 at
+eight on the flat-top, and every geq configuration's one-thread time is 0.96
+to 1.12 of its eight-thread time. MEQ's is 1.9 to 2.3× its eight-thread time
+from L1 up, and 1.5 to 2.0× on L0. **geq's two tolerances give the same
+error to three figures on every grid of every shape**, so its 2e-9 is cost
+alone: 1.8 to 4.2× the time at 513². Every time-to-accuracy cell geq wins or
+reaches is at `rtol = 1e-6`.
+
+**geq's coarse grids are the shape's.** 65² is 3.1e-07 on the skew, 4.5e-06 on
+the double, 5.2e-04 on the quartic, and does not converge on the flat-top.
+
+**Reproduce.** The agreement pass, `race_geq.py --case <shape>` with the
+arguments above; the race, `race_geq.py --case <shape>`. Each writes
+`race.md` and `race.json` under `runs/geq-benchmark/race/`.
