@@ -2755,6 +2755,45 @@ namespace meq
 			/// setTopologyRetry().
 			int topologyRetry() const;
 
+			/**
+			 * GIVE UP ON A BORDERED NEWTON THAT HAS STOPPED MOVING, rather
+			 * than running it to the iteration cap.
+			 *
+			 * A CRAWL is a step the line search shortened below 1/64 of the
+			 * Newton step. After `steps` of them in a row the bordered Newton
+			 * throws, saying so, and the driver's retry rung takes over at
+			 * once; a bordered Picard phase hands off to Newton instead. Any
+			 * step at 1/64 or longer resets the count.
+			 *
+			 * The step length and not the Armijo test, because DIII-D shaped's
+			 * cold start alternates accepted and refused steps at a damping
+			 * near 1e-3 for 188 steps in a row -- a count of Armijo failures
+			 * never fires on it -- and not the residuals' collinearity, which
+			 * the stall does not need.
+			 *
+			 * @param steps consecutive crawls before giving up; zero is off.
+			 *
+			 * @throws std::invalid_argument if negative.
+			 */
+			void setStallLimit( int steps );
+
+			/// setStallLimit().
+			int stallLimit() const;
+
+			/**
+			 * THE LONGEST RUN OF CRAWLS IN THE LAST BORDERED solve(), whether
+			 * or not setStallLimit() acted on it. Zero on every other path.
+			 *
+			 * A CONVERGED SOLVE THAT CRAWLED IS A DEFECT REPORT, NOT A SUCCESS
+			 * TO BE QUIET ABOUT: a step that the line search must cut below
+			 * 1/64 says the direction or the merit is wrong somewhere, and the
+			 * iteration got out by luck. Measured over the suite, 8 of 539
+			 * converging bordered solves crawl 9 to 69 steps first, all in
+			 * FreeBoundaryCoupling and XPointBorder. The driver prints it and
+			 * writes it to the `.nc` as `newton_longest_crawl`.
+			 */
+			int longestCrawl() const;
+
 			/// Which linearisation of the axis constraint the border carries.
 			AxisRow axisRow() const;
 
@@ -3282,6 +3321,30 @@ namespace meq
 
 			/// The trace solver solve() will use.
 			TraceSolver traceSolver() const;
+
+			/**
+			 * LET THE TRACE SOLVER REPORT ON ITSELF, FOR A DIAGNOSTIC RUN.
+			 *
+			 * PARDISO prints its own statistics for every phase at message
+			 * level 1 -- among them the number of PERTURBED PIVOTS in each
+			 * factorisation and the ITERATIVE REFINEMENT steps each solve took.
+			 * Those two decide what the backsolve leg costs: MFEM configures
+			 * PARDISO with pivot perturbation on (`iparm[9] = 13`) and up to two
+			 * refinement steps (`iparm[7] = 2`), and MKL refines only when a
+			 * factorisation perturbed a pivot, each step a product with the
+			 * matrix and another solve of every column. On TCV shaped that leg
+			 * is 15 to 19 per cent of the run over about twenty columns a step,
+			 * and whether refinement is in it is not something MEQ can read:
+			 * the iparm outputs are private to mfem::PardisoSolver.
+			 *
+			 * Off by default, since the report is several lines per phase.
+			 * Read by the next trace solver built, so it is set before
+			 * prepare() or solve(). PARDISO only: the other packages ignore it.
+			 */
+			void setTraceSolverStatistics( bool on );
+
+			/// setTraceSolverStatistics().
+			bool traceSolverStatistics() const;
 
 			/// Whether this build can honour a given choice. Lets a caller offer
 			/// only what is there instead of catching to find out.
@@ -6008,6 +6071,13 @@ namespace meq
 
 			/// setTopologyRetry(). Zero is off.
 			int topologyRetryValue = 0;
+
+			/// setStallLimit(). Zero is off.
+			int stallStepsValue = 0;
+			/// longestCrawl().
+			int longestCrawlValue = 0;
+			/// setTraceSolverStatistics().
+			bool traceSolverStatisticsValue = false;
 
 			/**
 			 * WHICH LINEARISATION THE FIELD BLOCK IS ASSEMBLED WITH RIGHT NOW.

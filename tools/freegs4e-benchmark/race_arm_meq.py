@@ -243,6 +243,12 @@ def main():
         record["support_sweeps"] = (int(d.getncattr("plasma_support_sweeps"))
                                     if "plasma_support_sweeps" in d.ncattrs()
                                     else None)
+        # A CRAWL IS A DEFECT REPORT, and a converged run that crawled is kept
+        # but flagged: the answer stands, the iteration that found it did not
+        # behave. GradShafranovSolver::longestCrawl() in MEQ says why.
+        record["newton_longest_crawl"] = (
+            int(d.getncattr("newton_longest_crawl"))
+            if "newton_longest_crawl" in d.ncattrs() else None)
         record["finished"] = bool(located) and settled and \
             set(free) <= set(names)
         record["status"] = ("converged" if code == 0 else "best fit") \

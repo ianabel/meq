@@ -421,8 +421,11 @@ namespace
 	 * structure still hits the reuse.
 	 */
 	std::unique_ptr<mfem::Solver>
-	makeTraceSolver( GradShafranovSolver::TraceSolver choice, bool reuseSymbolic )
+	makeTraceSolver( GradShafranovSolver::TraceSolver choice, bool reuseSymbolic,
+	                 bool statistics )
 	{
+		// Read by PARDISO alone, so a build without it has nothing to read it.
+		(void)statistics;
 		switch ( choice )
 		{
 			case GradShafranovSolver::TraceSolver::UMFPack:
@@ -448,7 +451,9 @@ namespace
 				// both. So this is the type that is right for MEQ's headline
 				// configuration as well as for the easy one.
 				solver->SetMatrixType( mfem::PardisoSolver::REAL_STRUCTURE_SYMMETRIC );
-				solver->SetPrintLevel( 0 );
+				// setTraceSolverStatistics(): MKL's own report of every phase,
+				// perturbed pivots and refinement steps among it, or silence.
+				solver->SetPrintLevel( statistics ? 1 : 0 );
 				if ( reuseSymbolic )
 					solver->SetReuseSymbolic();
 				return solver;
@@ -2063,7 +2068,7 @@ namespace
 		// it documents accepting "a matrix rebuilt into a fresh object with the
 		// same structure" -- so the analysis survives that.
 		if ( !picardSolver )
-			picardSolver = makeTraceSolver( traceSolverChoice, true );
+			picardSolver = makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue );
 		picardSolver->SetOperator( *reduced.Ptr() );
 		picardSolver->Mult( traceB, traceX );
 #else
@@ -2441,6 +2446,35 @@ namespace
 	int GradShafranovSolver::topologyRetry() const
 	{
 		return topologyRetryValue;
+	}
+
+	void GradShafranovSolver::setStallLimit( int steps )
+	{
+		if ( steps < 0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setStallLimit: the number of "
+				"steps cannot be negative; zero is off" );
+		stallStepsValue = steps;
+	}
+
+	int GradShafranovSolver::stallLimit() const
+	{
+		return stallStepsValue;
+	}
+
+	int GradShafranovSolver::longestCrawl() const
+	{
+		return longestCrawlValue;
+	}
+
+	void GradShafranovSolver::setTraceSolverStatistics( bool on )
+	{
+		traceSolverStatisticsValue = on;
+	}
+
+	bool GradShafranovSolver::traceSolverStatistics() const
+	{
+		return traceSolverStatisticsValue;
 	}
 
 	void GradShafranovSolver::setUpDownSymmetry( bool wanted )
@@ -13204,7 +13238,7 @@ namespace
 		// The sparsity of the trace system does not change between Newton steps
 		// and this object outlives the loop, so the analysis is done once.
 		std::unique_ptr<mfem::Solver> const linearOwned =
-			makeTraceSolver( traceSolverChoice, true );
+			makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue );
 		mfem::Solver &linear = *linearOwned;
 #else
 		mfem::GMRESSolver linear;
@@ -13313,6 +13347,12 @@ namespace
 		// a reference because `residual` is overwritten in place every trial.
 		mfem::Vector previousResidual;
 		bool havePreviousResidual = false;
+
+		// THE STALL TEST's state: how many steps in a row have been crawls --
+		// see setStallLimit() -- and whether it ended the iteration.
+		int crawlSteps = 0;
+		int longestCrawl = 0;
+		bool stalled = false;
 
 		// THE MIRROR MAPS, ONCE PER MESH AND ONLY WHEN ASKED FOR. They refuse a
 		// mesh that is not symmetric rather than projecting its asymmetry away.
@@ -15633,6 +15673,38 @@ namespace
 			}
 
 			/*
+			 * THE STALL TEST, setStallLimit()'s. A crawl is a step the line
+			 * search shortened below `stallDamping` of the Newton step, Armijo
+			 * or not: on DIII-D shaped's cold start the iteration alternates
+			 * accepted and refused steps at a damping of 1e-3 for 188 steps in
+			 * a row, so a count of Armijo failures never fires and the step
+			 * length is what says it has stopped moving.
+			 */
+			{
+				double const stallDamping = 1.0/64.0;
+				if ( borderStepHistory.back().damping < stallDamping )
+					++crawlSteps;
+				else
+					crawlSteps = 0;
+				longestCrawl = std::max( longestCrawl, crawlSteps );
+				if ( stallStepsValue > 0 && crawlSteps >= stallStepsValue )
+				{
+					// A PICARD PHASE THAT CRAWLS HANDS OFF, as one that runs
+					// out of budget does: it is a globalisation, not a solver.
+					if ( handOffToNewton( false ) )
+					{
+						borderStepHistory.back().handedOff = true;
+						crawlSteps = 0;
+					}
+					else
+					{
+						stalled = true;
+						break;
+					}
+				}
+			}
+
+			/*
 			 * THE STEP IS SETTLED, SO THE ELEMENT-LOCAL SOLVES ARE GIVEN A FRESH
 			 * STARTING POINT -- and under the condensation this is the single
 			 * thing that makes the border a derivative rather than noise.
@@ -15723,12 +15795,18 @@ namespace
 		                         numericFactorisationCount );
 #endif
 
+		longestCrawlValue = longestCrawl;
+		if ( stalled )
+			throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Newton has stopped moving: "
+			                          + std::to_string( crawlSteps ) + " steps in a row took less than 1/64 of the "
+			                          "Newton step" );
 		if ( !converged )
 			throw std::runtime_error( "meq::GradShafranovSolver::solve: the non-linear iteration did not converge" );
 	}
 
 	void GradShafranovSolver::solve()
 	{
+		longestCrawlValue = 0;
 		// IV-3's unknowns are border unknowns, and only the bordered path has a
 		// border. Refused before any dispatch, since two of them return early.
 		if ( ( !freeCircuitList.empty() || !inverseTargetList.empty() )
@@ -15983,7 +16061,7 @@ namespace
 			// The pattern is compared entry by entry rather than assumed, so a
 			// pattern that did change is re-analysed and the answer is unaffected.
 			std::unique_ptr<mfem::Solver> const linearOwned =
-				makeTraceSolver( traceSolverChoice, true );
+				makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue );
 			mfem::Solver &linear = *linearOwned;
 #else
 			mfem::GMRESSolver linear;
@@ -16320,7 +16398,7 @@ namespace
 			// this object is destroyed straight after, so retaining the analysis
 			// would buy nothing and cost a copy of the pattern.
 			std::unique_ptr<mfem::Solver> const solver =
-				makeTraceSolver( traceSolverChoice, false );
+				makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue );
 			solver->SetOperator( *reduced.Ptr() );
 			solver->Mult( traceB, traceX );
 #else

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 #include "mfem.hpp"
@@ -656,6 +657,102 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 	            "solvable at all -- if the gap has closed, either the border has "
 	            "stopped being used or the control has stopped being a control, "
 	            "and the second is the more likely" );
+}
+
+/*
+ * A BORDERED NEWTON THAT HAS STOPPED MOVING SAYS SO, AND SAYS IT EARLY.
+ *
+ * The decoupled control above is the cheapest iteration known not to move: it
+ * starts at 1.71e-1 and sits at 1.63e-1 for fourteen steps, every one of them
+ * cut below 1/64 by the line search. setStallLimit( 8 ) must end it at the
+ * eighth such step with its own message rather than at the budget with the
+ * cap's -- that is the whole of what lets the driver reach its retry rung in
+ * ten steps where DIII-D shaped's cold start spent two hundred. And
+ * longestCrawl() must read the crawl whether or not anything acted on it,
+ * because a converged run that crawled is a defect report: zero on the
+ * coupled solve, which converges in four full steps, and the full fourteen on
+ * the control with the limit off.
+ */
+BOOST_AUTO_TEST_CASE( aBorderedNewtonThatHasStoppedMovingSaysSo )
+{
+	int const order = 2;
+	int const n = 8;
+	int const nu = 2;
+	double const amplitude = 1.0;
+	double const estimate = axisEstimate( nu, amplitude );
+	int const budget = 15;
+	int const limit = 8;
+
+	struct Outcome
+	{
+		bool converged = true;
+		std::string message;
+		int iterations = 0;
+		int crawl = 0;
+	};
+	auto run = [ & ]( bool decoupled, int stallLimit )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( standardBox(), n );
+		NormalisedEquilibriumSource<HighBetaPoloidal> source(
+			HighBetaPoloidal::peaked( nu, amplitude, estimate ) );
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::FunctionCoefficient guess = bump( estimate );
+
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setSource( source, estimate );
+		solver.setBoundaryData( zero );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
+		                  meq::newtonTolerance( 1.0e-14 ), budget );
+		solver.setStallLimit( stallLimit );
+		BOOST_TEST( solver.stallLimit() == stallLimit );
+		if ( decoupled )
+			solver.setNormalisationCoupling(
+				meq::GradShafranovSolver::Normalisation::Decoupled );
+
+		Outcome outcome;
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::exception const &failure )
+		{
+			outcome.converged = false;
+			outcome.message = failure.what();
+		}
+		outcome.iterations = solver.newtonIterations();
+		outcome.crawl = solver.longestCrawl();
+		return outcome;
+	};
+
+	Outcome const coupled = run( false, limit );
+	Outcome const unlimited = run( true, 0 );
+	Outcome const limited = run( true, limit );
+	std::printf( "\n  the stall test, k = %d, n = %d: coupled %s in %d, crawl %d; "
+	             "decoupled, no limit, %d steps, crawl %d; limit %d, %d steps, "
+	             "crawl %d\n", order, n,
+	             coupled.converged ? "converged" : "FAILED", coupled.iterations,
+	             coupled.crawl, unlimited.iterations, unlimited.crawl, limit,
+	             limited.iterations, limited.crawl );
+
+	BOOST_TEST( coupled.converged, "the coupled solve failed: " << coupled.message );
+	BOOST_TEST( coupled.crawl == 0,
+	            "the coupled solve crawled " << coupled.crawl << " steps; it "
+	            "converges in four full Newton steps and should take none" );
+	BOOST_TEST( !unlimited.converged );
+	BOOST_TEST( unlimited.crawl > limit,
+	            "the decoupled control crawled only " << unlimited.crawl
+	            << " steps without a limit, so a limit of " << limit
+	            << " no longer tests anything" );
+	BOOST_TEST( !limited.converged );
+	BOOST_TEST( limited.message.find( "has stopped moving" ) != std::string::npos,
+	            "the limited control failed with \"" << limited.message
+	            << "\", not the stall test's message" );
+	BOOST_TEST( limited.crawl == limit );
+	BOOST_TEST( limited.iterations < unlimited.iterations );
+	mfem::Mesh small = meq::tests::makeMesh( standardBox(), 2 );
+	meq::GradShafranovSolver refusing( small, order );
+	BOOST_CHECK_THROW( refusing.setStallLimit( -1 ), std::invalid_argument );
 }
 
 /*

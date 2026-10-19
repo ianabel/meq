@@ -106,6 +106,10 @@ namespace
 			"                       timers are always on; this only prints them.\n"
 			"                       A leg share is only a measurement on an idle\n"
 			"                       machine.\n"
+			"  --trace-solver-stats let PARDISO print its own statistics for\n"
+			"                       every phase, perturbed pivots and refinement\n"
+			"                       steps among them -- what decides the\n"
+			"                       backsolve leg. Several lines a phase.\n"
 			"\n"
 			"  --device <name>      run under an mfem::Device: cpu (the\n"
 			"                       default), cuda, or debug. Answers agree with\n"
@@ -776,7 +780,10 @@ namespace
 	 * direction is being REJECTED rather than the problem being hard. `A` is
 	 * `NO` when Armijo refused and the fallback to the least-bad damping took a
 	 * non-improving step, which is how the residual rises from one row to the
-	 * next. `||y||` is the field direction, whose finiteness nothing checked.
+	 * next. `cos` is BorderStep::residualCollinearity, this iterate's field
+	 * residual against the previous one's. A `damp` below 1/64 is a CRAWL,
+	 * which GradShafranovSolver::setStallLimit() counts. `||y||` is the field
+	 * direction, whose finiteness nothing checked.
 	 *
 	 * IT IS PRINTED ON FAILURE TOO, which is the point: the run that needs it is
 	 * the one that did not converge.
@@ -787,17 +794,18 @@ namespace
 			return;
 
 		std::printf( "\n   it     ||r||    g*axis     g*bnd     g*Ip"
-		             "   g*ext    g*xpt    g*targ      damp  n   A       ||y||"
+		             "   g*ext    g*xpt    g*targ      damp  n   A       cos       ||y||"
 		             "        X-point\n" );
 		auto const &steps = solver->borderSteps();
 		for ( std::size_t i = 0; i < steps.size(); ++i )
 		{
 			meq::GradShafranovSolver::BorderStep const &b = steps[ i ];
 			std::printf( "  %3zu  %9.3e %9.2e %9.2e %9.2e %8.1e %8.1e %8.1e"
-			             "  %8.2e %2d %4s  %10.3e  ( %7.4f, %7.4f )%s\n",
+			             "  %8.2e %2d %4s  %8.5f  %10.3e  ( %7.4f, %7.4f )%s\n",
 			             i, b.fieldNorm, b.axis, b.boundary, b.current,
 			             b.exterior, b.xPoint, b.targets, b.damping, b.trials,
-			             b.armijo ? "yes" : "NO", b.directionNorm,
+			             b.armijo ? "yes" : "NO", b.residualCollinearity,
+			             b.directionNorm,
 			             b.xR, b.xZ,
 			             b.directionFinite ? "" : "  <- DIRECTION NOT FINITE" );
 		}
@@ -956,6 +964,12 @@ namespace
 	/// nothing, so this sits in the middle of the range that works rather than
 	/// at either end of it. Not a key: it is a branch control.
 	constexpr double xPointRelocationFraction = 0.05;
+
+	/// Consecutive crawls -- steps below 1/64 of the Newton step -- after which
+	/// the first attempt gives up for the retry rung, and at which a converged
+	/// answer's report warns. Eight of them move the iterate less than an
+	/// eighth of one Newton step; GradShafranovSolver::setStallLimit().
+	constexpr int crawlWarning = 8;
 }
 
 int main( int argc, char **argv )
@@ -992,6 +1006,7 @@ int main( int argc, char **argv )
 	bool wantMeshCommand = false;
 	bool meshReady = false;
 	bool wantProfile = false;
+	bool wantTraceSolverStats = false;
 	bool badUsage = false;
 
 	for ( int i = 1; i < argc; ++i )
@@ -1007,6 +1022,8 @@ int main( int argc, char **argv )
 			meshReady = true;
 		else if ( arg == "--profile" )
 			wantProfile = true;
+		else if ( arg == "--trace-solver-stats" )
+			wantTraceSolverStats = true;
 		else if ( arg == "--device" )
 		{
 			if ( i + 1 >= argc )
@@ -2381,6 +2398,10 @@ int main( int argc, char **argv )
 
 	int sweepsRun = 0;
 	bool supportSettled = false;
+	// The longest crawl among the solves that produced the answer -- the
+	// first attempt's, or the retry's once it starts -- for the report and
+	// the .nc. GradShafranovSolver::longestCrawl() says why it is reported.
+	int answerCrawl = 0;
 
 	/*
 	 * THE EDGE THE FIRST ATTEMPT STARTED FROM, so the retry can start there too.
@@ -2945,6 +2966,18 @@ int main( int argc, char **argv )
 		auto fresh = std::make_unique<meq::GradShafranovSolver>(
 			mesh, config->getDiscretisation().polynomialDegree,
 			config->getDiscretisation().tau );
+		/*
+		 * GIVE UP ON A BORDERED NEWTON THAT HAS STOPPED MOVING, WHERE A RUNG
+		 * STANDS BEHIND IT. Eight steps in a row below 1/64 of the Newton step
+		 * have moved the iterate less than an eighth of one step, and the retry
+		 * rung reaches the same fixed point by another iteration. DIII-D
+		 * shaped's cold start crawled 188 steps to the cap at 1e-3 before the
+		 * rung converged in 15. runRetryRung() turns it off for itself, and a
+		 * box support has no rung (M-277), so there it stays off: the library's
+		 * own suite has bordered solves that crawl 69 steps and then converge.
+		 */
+		if ( !config->getSource().supportIsBox() )
+			fresh->setStallLimit( crawlWarning );
 		// Before any source, so before the forms can exist; a mesh reaching
 		// R < 0 is refused here with the solver's own message.
 		if ( config->getDiscretisation().tauScaling == meq::TauScalingType::Diffusion )
@@ -3216,6 +3249,7 @@ int main( int argc, char **argv )
 				? meq::GradShafranovSolver::TraceAssemblyMode::Batched
 				: meq::GradShafranovSolver::TraceAssemblyMode::Serial );
 		fresh->setTraceSolver( traceSolver );
+		fresh->setTraceSolverStatistics( wantTraceSolverStats );
 
 		if ( !firstCycle && previousPotential )
 		{
@@ -3925,6 +3959,7 @@ int main( int argc, char **argv )
 				runToroidalLoop();
 			else
 				solver->solve();
+			answerCrawl = std::max( answerCrawl, solver->longestCrawl() );
 		};
 
 		/// The support loop, or the single solve it degenerates to at zero
@@ -4197,6 +4232,9 @@ int main( int argc, char **argv )
 			solver = makeSolver( *solveMesh, cycle == 0 );
 			solver->setGlobalisation(
 				meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton );
+			// The last rung: nothing stands behind it, so a crawl runs on.
+			solver->setStallLimit( 0 );
+			answerCrawl = 0;
 			if ( firstFreezeTaken )
 				normalised->freezePlasmaEdge( firstFreezeAxis, firstFreezeBoundary );
 
@@ -4211,6 +4249,7 @@ int main( int argc, char **argv )
 				             cap, xPointSeedR, xPointSeedZ, xPointRelocationFraction );
 			}
 			solver->solve();
+			answerCrawl = std::max( answerCrawl, solver->longestCrawl() );
 			if ( cap > 0.0 )
 				std::printf( "     the cap rejected %ld line-search trials\n",
 				             solver->xPointCapRejections() );
@@ -4411,6 +4450,7 @@ int main( int argc, char **argv )
 			}
 
 			firstFreezeTaken = false;
+			answerCrawl = 0;
 			runSolveWithSupportLoop( false );
 
 			/*
@@ -5385,6 +5425,18 @@ int main( int argc, char **argv )
 				                   "PlasmaSupportSweeps, and see whether it is "
 				                   "alternating rather than converging" );
 		}
+		// Every bordered run, fixed boundary too, and outside the block above.
+		if ( answerCrawl >= crawlWarning )
+			std::printf( "     WARNING: the bordered Newton CRAWLED %d steps in a row below "
+			             "1/64 of the Newton step\n"
+			             "     before converging. A crawl means the step direction or the "
+			             "merit is wrong\n"
+			             "     somewhere; the answer stands, but the run is a defect report.\n",
+			             answerCrawl );
+		else if ( answerCrawl > 0 )
+			std::printf( "     the bordered Newton's longest crawl below 1/64 of the "
+			             "Newton step: %d step%s\n",
+			             answerCrawl, answerCrawl == 1 ? "" : "s" );
 
 		/*
 		 * AND THAT CONSTRAINT CANNOT TELL AN AXIS FROM A SPIKE, WHICH IS WHY THE
@@ -6720,6 +6772,8 @@ int main( int argc, char **argv )
 			writer.attribute( "plasma_support_sweeps", sweepsRun );
 			writer.attribute( "plasma_support_settled", supportSettled ? 1 : 0 );
 		}
+		if ( normalised )
+			writer.attribute( "newton_longest_crawl", answerCrawl );
 
 		// A reader is entitled to know which nodes are the solution and which
 		// are a continuation of it past Gamma_h. Zero on the fitted path.

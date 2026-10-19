@@ -216,6 +216,12 @@ That third entry is the surprise, and it is why the axes must be separated.
    ``meq --profile`` prints the leg split, including that one, so you can see
    where your own case sits rather than assume it matches.
 
+   ``meq --trace-solver-stats`` lets PARDISO print its own report of every
+   factorisation and solve. Read it for two numbers: how many pivots each
+   factorisation perturbed, and how many iterative-refinement steps each solve
+   then took. A refinement step is a product with the matrix and another solve
+   of every border column, so it multiplies the backsolve leg.
+
 .. warning::
 
    **UMFPACK can never take MKL threads**, whatever the assembly mode. Its BLAS
