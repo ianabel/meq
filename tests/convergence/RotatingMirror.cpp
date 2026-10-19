@@ -2201,14 +2201,18 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	DriverRun const &run = shippedDriverRun();
 	BOOST_TEST_REQUIRE( run.status == 0,
 		"meq-run " << mirrorExample << " exited " << run.status << ":\n" << run.log );
-	for ( char const *phrase : { "converged in ", "at the prescribed point",
+	// THE INNER LABEL IS REPORTED ONCE, AS psi_inner AT THE ELECTRODE. A mirror
+	// has no magnetic axis, so the tokamak's prescribed-point line -- psi_ax,
+	// and the axis check that does not apply -- is not printed beside it.
+	for ( char const *phrase : { "converged in ", "constraint psi_inner - psi_h(",
 	                             "psi_inner starts at", "psi_bnd starts at", "axial cutoff",
 	                             "the plasma support is the BOX" } )
 		BOOST_TEST( says( run.log, phrase ), "the driver did not say '" << phrase << "'" );
 	for ( char const *phrase : { "no interior extremum", "wall-hugging",
 	                             "NOT a magnetic axis", "NO interior extremum",
 	                             "did not converge", "Retrying",
-	                             "support is EMPTY" } )
+	                             "support is EMPTY", "at the prescribed point",
+	                             "     psi_ax = " } )
 		BOOST_TEST( !says( run.log, phrase ),
 			"the driver said '" << phrase << "' of a mirror:\n" << run.log );
 	int const driverSteps = static_cast<int>( numberAfter( run.log, "converged in " ) );
