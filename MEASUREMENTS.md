@@ -19405,3 +19405,69 @@ files, C the current binary on `examples/fixed-<c>.toml`. `make_fixed.sh`
 regenerates the shipped TOMLs, and only their `[initialguess]` block differs
 from `cb8be9e`'s.
 
+### M-297
+
+**THE `.nc` IS THE DEFAULT OUTPUT AND THE OTHER FORMATS ARE MADE FROM IT: THE
+OUTPUT STAGE FALLS 4.1× TO 4.8× ON THE THREE LARGEST MACHINES AND DIII-D RUNS
+IN 17.6 s AGAINST 28.0 s, WITH THE SAME FILES A COMMAND AWAY AND BYTE FOR BYTE
+WHAT THE RUN WOULD HAVE WRITTEN.**
+
+[M-296](#m-296)'s profile of `fixed-f-diiid` put the bend onto `Gamma` at 5.1
+s and the VTU writer at 4.1 s of the main thread's 27.7, with the `.gf` saves
+another 1.6 — **most of the output stage, for files most runs are never opened
+in.** So `meq` writes `<stem>.nc` alone unless `--gf`/`--vtk` or `[output]
+GridFunctions`/`VTK` ask, and the `.nc` carries what those formats are made of:
+the solve's mesh as MFEM's own text (`mesh`, `meq::meshText()`, the bytes
+`<stem>.mesh` holds), `psistar_coefficients` beside `psi_` and
+`flux_coefficients`, the `[boundary.shape]` curve, and each element's dominant
+conductor. `meq-convert <stem>.nc` writes the `.mesh`, the four `.gf`s and the
+bent VTK from it; it is the restart, `[initialguess] File = "<stem>.nc"`.
+
+**Three arms per case, interleaved**, `OMP = MKL = 8`, passive wait, the
+machine otherwise idle (load 2.2 to 3.4 from the runs themselves): A the
+`d7981f6` binary, which writes every format; B this tree, default; C this tree
+with `--gf --vtk`. Seconds.
+
+| case | elements | wall A | wall B | wall C | output A | output B | `.nc` A → B | `meq-convert` |
+|---|---|---|---|---|---|---|---|---|
+| `fixed-h-circular` | 1,086 | 0.38 | 0.31 | 0.39 | 0.124 | 0.062 | 0.7 → 0.9 MB | 0.26 |
+| `fixed-a-testtokamak` | 2,480 | 0.77 | 0.61 | 0.79 | 0.330 | 0.112 | 1.0 → 1.3 MB | 0.43 |
+| `fixed-e-diamagnetic` | 6,033 | 1.82 | 1.28 | 1.81 | 0.762 | 0.191 | 1.6 → 2.3 MB | 0.74 |
+| `fixed-d-tcv` | 16,406 | 4.09 | 2.82 | 4.03 | 1.712 | 0.460 | 3.3 → 5.4 MB | 1.44 |
+| `fixed-g-mastu` | 39,399 | 10.37 | 7.31 | 10.43 | 4.076 | 1.059 | 7.2 → 12.4 MB | 3.32 |
+| `fixed-f-diiid` | 102,840 | 27.96 | **17.62** | 27.41 | 12.883 | **2.710** | 18.0 → 31.4 MB | 10.53 |
+
+**C IS WITHIN 2.5 PER CENT OF A ON EVERY CASE, EITHER SIDE**, so asking for the formats costs
+exactly what writing them always did, and the saving is the formats and
+nothing else. **What B's output stage still holds is the post-processing**:
+`postProcess` is 2.58 s of DIII-D's 2.71, and 1.02 of MAST-U's 1.09 on a
+repeat of its B arm, the `.nc` itself the rest. The `.nc` grows by the mesh text and psi* — 13.4 MB on DIII-D
+— against the 97 MB of `.mesh`, `.gf` and VTK it replaces, so a default run
+writes a quarter of what it did.
+
+**IDENTITY, NOT AGREEMENT.** `meq-convert` on a run's own `.nc` against that
+run's `--gf --vtk` files: every `.mesh`, `.gf`, `.pvd`, `.pvtu` and `.vtu`
+byte-identical on `soloviev-nstx`, `miller-curved`, `miller-adaptive`,
+`coils-rectangle`, `rotating-normalised`, `q-driven`, `flux-surfaces`,
+`limited-tokamak`, `machine-f-diiid-filament`, `mirror-rotating`,
+`mirror-three-species`, `fixed-g-mastu` and `fixed-h-circular` — curved,
+adaptive, conductor, filament-split, mirror and free-boundary cases.
+`OutputConversion` asserts it on two, and fails on the VTU when the converter
+is made to skip the bend. **Two files only the run can write**: an adaptive
+run's per-cycle series and a split run's `_psi_total.gf`. **Two runs are not
+the comparison**: threaded assembly makes two solves of one file differ in the
+last bits, so `soloviev-nstx`'s `_psi.gf` from two runs differs at 4e-12
+relative while each run's own conversion is exact.
+
+**THE RESTART.** `fixed-h-circular` restarted from its own `.nc` and from its
+own `.gf` pair: 2 Newton steps each, against 5 cold, to the same printed
+`psi_ax` and the same constraint residual, 7.305e-13.
+`theNetCDFRestartsLikeTheGridFunction` asserts it. **2 and not 0**, on either
+route, because the bordered unknown `psi_ax` starts from the TOML's `PsiAxis`
+and not from the stored answer — a restart's remaining cost, and the same on
+both.
+
+**Reproduce.** Per case and arm in turn, from a directory under `runs/`:
+`meq --profile examples/fixed-<c>.toml` on each binary, the third arm with `--gf
+--vtk`, then `meq-convert fixed-<c>.nc` beside B's output, timed.
+

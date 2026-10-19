@@ -5,8 +5,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <map>
+#include <sstream>
 #include <set>
 #include <limits>
 #include <stdexcept>
@@ -26,7 +29,24 @@ namespace meq
 #endif
 	}
 
+	std::string meshText( mfem::Mesh &mesh )
+	{
+		// Precision 17 for writeMfem()'s reason, below: the vertices are read
+		// back for an exact restart.
+		std::ostringstream out;
+		out.precision( 17 );
+		mesh.Print( out );
+		return out.str();
+	}
+
 	void writeMfem( std::string const &stem, mfem::Mesh &mesh,
+	                mfem::GridFunction const &potential,
+	                mfem::GridFunction const &flux )
+	{
+		writeMfem( stem, meshText( mesh ), potential, flux );
+	}
+
+	void writeMfem( std::string const &stem, std::string const &text,
 	                mfem::GridFunction const &potential,
 	                mfem::GridFunction const &flux )
 	{
@@ -53,7 +73,7 @@ namespace meq
 			return out;
 		};
 
-		{ std::ofstream out = open( ".mesh" );          mesh.Print( out ); }
+		{ std::ofstream out = open( ".mesh" );          out << text; }
 		{ std::ofstream out = open( "_psi.gf" );        potential.Save( out ); }
 		{ std::ofstream out = open( "_grad_psi.gf" );   flux.Save( out ); }
 	}
@@ -106,6 +126,39 @@ namespace meq
 			plasmaFraction( at ) = record.plasmaFraction[ element ];
 			conductorMaterial( at ) = static_cast<double>( conductor.material );
 			conductorFraction( at ) = conductor.fraction;
+		}
+	}
+
+	ElementCellData::ElementCellData( mfem::Mesh &mesh,
+	                                  std::vector<double> const &regionColumn,
+	                                  std::vector<double> const &plasmaFractionColumn,
+	                                  std::vector<double> const &conductorMaterialColumn,
+	                                  std::vector<double> const &conductorFractionColumn )
+		: collection( 0, mesh.Dimension() ),
+		  space( &mesh, &collection ),
+		  region( &space ), plasmaFraction( &space ),
+		  conductorMaterial( &space ), conductorFraction( &space )
+	{
+		std::size_t const elements = static_cast<std::size_t>( mesh.GetNE() );
+		for ( std::vector<double> const *column : { &regionColumn, &plasmaFractionColumn,
+		                                            &conductorMaterialColumn,
+		                                            &conductorFractionColumn } )
+			if ( column->size() != elements )
+				throw std::invalid_argument(
+					"meq::ElementCellData: a column holds "
+					+ std::to_string( column->size() ) + " elements and the mesh "
+					+ std::to_string( elements ) + "; it is of another mesh" );
+
+		mfem::Array<int> dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			space.GetElementDofs( e, dofs );
+			int const at = dofs[ 0 ] >= 0 ? dofs[ 0 ] : -1 - dofs[ 0 ];
+			std::size_t const element = static_cast<std::size_t>( e );
+			region( at ) = regionColumn[ element ];
+			plasmaFraction( at ) = plasmaFractionColumn[ element ];
+			conductorMaterial( at ) = conductorMaterialColumn[ element ];
+			conductorFraction( at ) = conductorFractionColumn[ element ];
 		}
 	}
 
@@ -475,6 +528,61 @@ namespace meq
 		return moved;
 	}
 
+	std::function<void( double, double, double &, double & )>
+	radialProjection( BoundaryShape const &shape )
+	{
+		BoundaryShape const *curve = &shape;
+		return [ curve ]( double radius, double z, double &outR, double &outZ )
+		{
+			double const centreR = curve->majorRadius();
+			double const centreZ = curve->centreHeight();
+			double const vR = radius - centreR, vZ = z - centreZ;
+			double const rho = std::hypot( vR, vZ );
+			outR = radius;
+			outZ = z;
+			if ( rho <= 0.0 )
+				return;
+			double const gap = curve->levelSet( radius, z );
+			outR = radius - vR*gap/rho;
+			outZ = z - vZ*gap/rho;
+		};
+	}
+
+	void writeEquilibriumVtu( std::string const &stem, mfem::Mesh &mesh,
+	                          BoundaryShape const *shape, int geometryOrder,
+	                          mfem::GridFunction const &potential,
+	                          mfem::GridFunction const &field, int degree,
+	                          ElementCellData const *cells )
+	{
+		// On the curved path the boundary is bent out onto the true Gamma, so
+		// the drawn domain is Omega rather than the inscribed polygon Omega_h.
+		// writeVtu() already emits VTK Lagrange cells, so a curvilinear mesh
+		// needs nothing further from the format.
+		if ( shape )
+		{
+			double curved = 0.0;
+			int const curvedNodes = curveBoundaryOnto( mesh, geometryOrder,
+			                                           radialProjection( *shape ),
+			                                           curved );
+
+			// Not a warning below 100%: a face that cannot reach Gamma without
+			// folding its element is a statement about the mesh being coarse
+			// there, and the rest of the boundary still reaches. It is reported
+			// because the VTK boundary is then not uniformly Gamma, which a
+			// reader comparing it against the .nc boundary_R/Z would notice.
+			if ( curvedNodes > 0 && curved < 1.0 )
+				std::printf( "MEQ: %.0f%% of the boundary reached Gamma; the "
+				             "rest was held back to keep its elements from "
+				             "folding\n", 100.0*curved );
+			else if ( curvedNodes == 0 )
+				std::fprintf( stderr,
+					"MEQ: warning: could not bend the boundary onto Gamma "
+					"without tangling an element. The VTK boundary is the "
+					"polygon Gamma_h.\n" );
+		}
+		writeVtu( stem, mesh, potential, field, degree, cells );
+	}
+
 	void boundaryPolyline( mfem::Mesh &mesh,
 	                       std::vector<double> &radius, std::vector<double> &z,
 	                       int &unreached )
@@ -648,6 +756,15 @@ namespace meq
 	void NetCDFWriter::attribute( std::string const &name, double value )
 	{
 		state->file.putAtt( name, netCDF::ncDouble, value );
+	}
+
+	void NetCDFWriter::text( std::string const &name, std::string const &value,
+	                         std::string const &longName )
+	{
+		netCDF::NcVar var = state->file.addVar( name, netCDF::ncString );
+		var.putAtt( "long_name", longName );
+		char const *pointer = value.c_str();
+		var.putVar( &pointer );
 	}
 
 	void NetCDFWriter::attribute( std::string const &name, int value )
@@ -879,7 +996,7 @@ namespace meq
 		netCDF::NcVar countVar = column( file, "element_material_count", netCDF::ncInt,
 		                                 elementDim, counts,
 		                                 "number of materials in the element, indexed "
-		                                 "as the elements of mesh_file" );
+		                                 "as the elements of the mesh variable" );
 		countVar.putAtt( "sample_dimension", "element_entry" );
 
 		std::vector<int> entryMaterial;
@@ -910,11 +1027,32 @@ namespace meq
 		        record.plasmaFraction,
 		        "fraction of the element's area that carries plasma current", "1" );
 
+		// THE DOMINANT CONDUCTOR, which the VTK's cells draw. Derivable from the
+		// ragged entries and material_kind, and written anyway so that
+		// meq-convert draws exactly the cells the run would have drawn
+		// without a second implementation of the rule that picks it.
+		std::vector<int> conductorRows( n );
+		std::vector<double> conductorShares( n );
+		for ( std::size_t e = 0; e < n; ++e )
+		{
+			MaterialFraction const conductor =
+				record.dominantConductor( static_cast<int>( e ), table );
+			conductorRows[ e ] = conductor.material;
+			conductorShares[ e ] = conductor.fraction;
+		}
+		column( file, "element_conductor_material", netCDF::ncInt, elementDim,
+		        conductorRows,
+		        "row of the material table of the element's largest conductor, "
+		        "-1 for none" );
+		column( file, "element_conductor_fraction", netCDF::ncDouble, elementDim,
+		        conductorShares, "that conductor's fraction of the element, 0 for none",
+		        "1" );
+
 		std::vector<signed char> excluded( record.excluded.begin(), record.excluded.end() );
 		column( file, "element_excluded", netCDF::ncByte, elementDim, excluded,
 		        "1 where [source] ExcludeAttributes names the element's attribute" );
 		column( file, "element_attribute", netCDF::ncInt, elementDim, record.attribute,
-		        "the element's attribute in mesh_file" );
+		        "the element's attribute in the mesh variable" );
 
 		// ---- the material table, every column of section 2.1 ----
 		std::vector<Material> const &rows = table.materials();
@@ -1328,6 +1466,8 @@ namespace meq
 	                          std::string const &, std::string const & ) { unavailable(); }
 	void NetCDFWriter::boundary( std::vector<double> const &,
 	                             std::vector<double> const & ) { unavailable(); }
+	void NetCDFWriter::text( std::string const &, std::string const &,
+	                         std::string const & ) { unavailable(); }
 
 
 	struct FluxGridWriter::State { };

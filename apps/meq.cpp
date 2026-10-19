@@ -45,6 +45,7 @@
 #include "meq/SafetyFactorSolve.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
+#include "meq/StoredEquilibrium.hpp"
 #include "meq/WarmStart.hpp"
 
 #include <algorithm>
@@ -110,6 +111,15 @@ namespace
 			"                       every phase, perturbed pivots and refinement\n"
 			"                       steps among them -- what decides the\n"
 			"                       backsolve leg. Several lines a phase.\n"
+			"\n"
+			"  --gf                 also write the GLVis files -- <stem>.mesh,\n"
+			"                       _psi.gf, _grad_psi.gf, _psistar.gf -- as\n"
+			"                       [output] GridFunctions = true does.\n"
+			"  --vtk                also write the ParaView files, as [output]\n"
+			"                       VTK = true does. Without either only the\n"
+			"                       .nc is written: it carries the mesh and\n"
+			"                       every coefficient, it is the restart, and\n"
+			"                       meq-convert makes both formats from it.\n"
 			"\n"
 			"  --device <name>      run under an mfem::Device: cpu (the\n"
 			"                       default), cuda, or debug. Answers agree with\n"
@@ -997,6 +1007,11 @@ int main( int argc, char **argv )
 	 *   --mesh-ready    a claim by the CALLER about the state of the working
 	 *                   directory, which is exactly what a file describing an
 	 *                   equilibrium cannot carry.
+	 *   --gf, --vtk     which FILES to write beside the .nc, and so about what
+	 *                   this caller wants to look at rather than about the
+	 *                   physics. They only ever ADD a format: [output]
+	 *                   GridFunctions and VTK say the same in the file, and
+	 *                   either asking is enough.
 	 */
 	std::string configPath;
 	std::string deviceName;
@@ -1007,6 +1022,8 @@ int main( int argc, char **argv )
 	bool meshReady = false;
 	bool wantProfile = false;
 	bool wantTraceSolverStats = false;
+	bool wantGridFunctions = false;
+	bool wantVtk = false;
 	bool badUsage = false;
 
 	for ( int i = 1; i < argc; ++i )
@@ -1024,6 +1041,10 @@ int main( int argc, char **argv )
 			wantProfile = true;
 		else if ( arg == "--trace-solver-stats" )
 			wantTraceSolverStats = true;
+		else if ( arg == "--gf" )
+			wantGridFunctions = true;
+		else if ( arg == "--vtk" )
+			wantVtk = true;
 		else if ( arg == "--device" )
 		{
 			if ( i + 1 >= argc )
@@ -1498,6 +1519,11 @@ int main( int argc, char **argv )
 	{
 		config = std::make_unique<meq::Configuration>( argument );
 
+		// THE FORMATS BESIDE THE .nc: the file's keys or the command line's,
+		// either one asking being enough. OutputConfig says why both are off.
+		wantGridFunctions = wantGridFunctions || config->getOutput().gridFunctions;
+		wantVtk = wantVtk || config->getOutput().vtk;
+
 		/*
 		 * A GENERATED MESH IS A BUILD PRODUCT, AND MEQ WILL NOT SOLVE ONE IT
 		 * WAS NOT TOLD IS CURRENT.
@@ -1694,6 +1720,7 @@ int main( int argc, char **argv )
 
 			if ( config->getInitialGuess().type
 			         == meq::InitialGuessType::GridFunction
+			     && !config->getInitialGuess().fromNetCDF()
 			     && config->getInitialGuess().content
 			        == meq::GuessContent::Remainder )
 				std::printf(
@@ -2302,6 +2329,9 @@ int main( int argc, char **argv )
 	std::unique_ptr<mfem::FunctionCoefficient> ramp;
 	std::unique_ptr<mfem::Mesh> guessMesh;
 	std::unique_ptr<mfem::GridFunction> guess;
+	// What the stored guess holds: [initialguess] Content for a .gf, the file's
+	// own content attribute for a .nc.
+	meq::GuessContent guessContent = config->getInitialGuess().content;
 
 	/*
 	 * REBUILT EVERY ADAPTIVE CYCLE, AND THE LAST ONE IS WHAT THE WRITE PHASE
@@ -2784,13 +2814,39 @@ int main( int argc, char **argv )
 			}
 			case meq::InitialGuessType::GridFunction:
 			{
-				guessMesh = std::make_unique<mfem::Mesh>(
-					config->getInitialGuess().meshFile.c_str(), 1, 1 );
-				std::ifstream stream( config->getInitialGuess().file );
-				if ( !stream )
-					throw std::runtime_error( "cannot read [initialguess] File \""
-					                          + config->getInitialGuess().file + "\"" );
-				guess = std::make_unique<mfem::GridFunction>( guessMesh.get(), stream );
+				if ( config->getInitialGuess().fromNetCDF() )
+				{
+					// A .nc MEQ WROTE: its own mesh, read as written (see
+					// StoredEquilibrium.hpp for why not refined or reoriented),
+					// psi_h on it, and what that field is, from the file.
+					meq::StoredEquilibrium const stored( config->getInitialGuess().file );
+					std::istringstream meshStream( stored.meshText() );
+					guessMesh = std::make_unique<mfem::Mesh>( meshStream, 1, 0, false );
+					std::stringstream fieldStream;
+					fieldStream.precision( 17 );
+					stored.potential().Save( fieldStream );
+					guess = std::make_unique<mfem::GridFunction>( guessMesh.get(), fieldStream );
+					guessContent = stored.holdsTotal() ? meq::GuessContent::Total
+					                                   : meq::GuessContent::Remainder;
+					std::printf( "MEQ: warm start from %s: %s on its own %d elements\n",
+					             config->getInitialGuess().file.c_str(),
+					             stored.content().c_str(), guessMesh->GetNE() );
+					if ( !conductorField && !stored.holdsTotal() )
+						std::printf(
+							"MEQ: WARNING: that file holds a REMAINDER, psi - psi_c, and\n"
+							"     this run does not subtract its conductors, so the guess\n"
+							"     starts one whole conductor field away from psi.\n" );
+				}
+				else
+				{
+					guessMesh = std::make_unique<mfem::Mesh>(
+						config->getInitialGuess().meshFile.c_str(), 1, 1 );
+					std::ifstream stream( config->getInitialGuess().file );
+					if ( !stream )
+						throw std::runtime_error( "cannot read [initialguess] File \""
+						                          + config->getInitialGuess().file + "\"" );
+					guess = std::make_unique<mfem::GridFunction>( guessMesh.get(), stream );
+				}
 
 				/*
 				 * A STORED TOTAL BECOMES THE REMAINDER HERE, ONCE, ON THE
@@ -2822,8 +2878,7 @@ int main( int argc, char **argv )
 				 * rather than refused.
 				 */
 				if ( conductorField
-				     && config->getInitialGuess().content
-				        == meq::GuessContent::Total )
+				     && guessContent == meq::GuessContent::Total )
 				{
 					mfem::FiniteElementSpace const &space = *guess->FESpace();
 					mfem::Array<int> dofs;
@@ -3331,7 +3386,9 @@ int main( int argc, char **argv )
 				             "stored mesh\n"
 				             "     psi over the stored guess [ %.6e, %.6e ], "
 				             "over the transferred one [ %.6e, %.6e ]\n",
-				             config->getInitialGuess().meshFile.c_str(),
+				             config->getInitialGuess().fromNetCDF()
+				                 ? config->getInitialGuess().file.c_str()
+				                 : config->getInitialGuess().meshFile.c_str(),
 				             guessMesh->GetNE(), mesh.GetNE(), missed,
 				             transfer.queried(),
 				             static_cast<double>( guess->Min() ),
@@ -3428,7 +3485,7 @@ int main( int argc, char **argv )
 	// whose last frame disagreed with the answer for no stated reason would be
 	// a small trap of its own.
 	std::unique_ptr<meq::VtuSeries> series;
-	if ( adapt.enabled )
+	if ( adapt.enabled && wantVtk )
 		series = std::make_unique<meq::VtuSeries>(
 			config->getOutput().directory + "/" + config->getOutput().prefix,
 			config->getDiscretisation().polynomialDegree + 1 );
@@ -6045,13 +6102,20 @@ int main( int argc, char **argv )
 		}
 
 		// psi_h AND NOT psi*, AND THAT ASYMMETRY IS DELIBERATE. These three files
-		// are the exact restart format: "<stem>_psi.gf" is read back into the
+		// are the .gf restart format: "<stem>_psi.gf" is read back into the
 		// degree-k potential space of a solver built from the same configuration,
 		// and psi* is degree k+1 -- it does not fit, and a "consistency" edit
 		// putting it here would break restart rather than improve it. psi* is
 		// written beside them, in its own file, on the next line.
-		meq::writeMfem( stem, *solveMesh, solver->potential(), solver->flux() );
-		meq::writePostProcessed( stem, solver->postProcessedPotential() );
+		//
+		// ONLY WHEN ASKED FOR. The .nc below carries the same mesh text and the
+		// same coefficients, so it is the restart too, and meq-convert writes
+		// these four from it byte for byte.
+		if ( wantGridFunctions )
+		{
+			meq::writeMfem( stem, *solveMesh, solver->potential(), solver->flux() );
+			meq::writePostProcessed( stem, solver->postProcessedPotential() );
+		}
 
 		/*
 		 * AND UNDER A SPLIT, A FOURTH `.gf` THAT IS THE PHYSICAL FLUX -- FOR
@@ -6075,7 +6139,7 @@ int main( int argc, char **argv )
 		 * NAMED `_psi_total.gf` so that the name says which it is, which is
 		 * the whole complaint §8.3 makes about the format.
 		 */
-		if ( conductorField )
+		if ( conductorField && wantGridFunctions )
 		{
 			mfem::GridFunction total;
 			solver->totalPotential( total );
@@ -6945,14 +7009,16 @@ int main( int argc, char **argv )
 		 * existing reader of `psi( Z, R )` is untouched. One file, two
 		 * representations.
 		 *
-		 * WHAT IS DELIBERATELY *NOT* HERE. The MESH is named rather than
-		 * embedded -- `mesh_file` below -- which is §9.2's first open question
-		 * answered the cheap way round: embedding it is MEQ re-implementing a
-		 * serialiser MFEM already has, and the `.mesh` is written beside this
-		 * file by the same run. The PROFILE TABLES are named the same way, for
-		 * the same reason and with the same consequence: a `.nc` moved away
-		 * from its directory regenerates a configuration that cannot be run,
-		 * and it says which files it wanted.
+		 * THE MESH IS EMBEDDED, as the `mesh` variable, which answers §9.2's
+		 * first open question the self-contained way round -- and without MEQ
+		 * re-implementing a serialiser, because the text IS MFEM's own,
+		 * meq::meshText(), the bytes `<stem>.mesh` would hold. That is what
+		 * makes this file the restart and the one output a run writes by
+		 * default: meq::StoredEquilibrium reads it back, and `meq-convert`
+		 * makes the `.mesh`, the `.gf`s and the VTK from it. The PROFILE TABLES
+		 * are still named rather than embedded: a `.nc` moved away from its
+		 * directory regenerates a configuration that cannot be run, and it
+		 * says which files it wanted.
 		 */
 		{
 			mfem::GridFunction const &potentialField = solver->potential();
@@ -6998,7 +7064,42 @@ int main( int argc, char **argv )
 			                  fluxField.FESpace()->GetOrdering()
 			                      == mfem::Ordering::byNODES
 			                  ? "byNODES" : "byVDIM" );
-			writer.attribute( "mesh_file", output.prefix + ".mesh" );
+			if ( wantGridFunctions )
+				writer.attribute( "mesh_file", output.prefix + ".mesh" );
+
+			// THE MESH, as MFEM's own text, and psi* beside psi_h: with these
+			// the file is the whole discrete answer rather than a reference to
+			// files beside it. Taken here, before the VTK stage bends the mesh.
+			writer.text( "mesh", meq::meshText( *solveMesh ),
+			             "the mesh the solve ran on, in MFEM's mesh format: "
+			             "write it to a .mesh file to read it with MFEM or GLVis" );
+
+			mfem::GridFunction const &starField = solver->postProcessedPotential();
+			starField.HostRead();
+			std::vector<double> const starCoefficients(
+				starField.GetData(), starField.GetData() + starField.Size() );
+			writer.vector( "psistar_dof", "psistar_coefficients", starCoefficients,
+			               "every coefficient of the post-processed potential psi*, "
+			               "in the space named by psistar_collection",
+			               "Wb/rad" );
+			writer.attribute( "psistar_collection",
+			                  std::string( starField.FESpace()->FEColl()->Name() ) );
+
+			// AND THE CURVE THE VTK IS BENT ONTO, so meq-convert bends it
+			// without the configuration.
+			if ( shape )
+			{
+				writer.attribute( "shape_major_radius", shape->majorRadius() );
+				writer.attribute( "shape_centre_height", shape->centreHeight() );
+				writer.attribute( "shape_minor_radius", shape->minorRadius() );
+				writer.attribute( "shape_elongation", shape->elongation() );
+				if ( !shape->cosines().empty() )
+					writer.vector( "shape_cosine", "shape_cosines", shape->cosines(),
+					               "MXH c_0 ... c_N of the boundary curve", "" );
+				if ( !shape->sines().empty() )
+					writer.vector( "shape_sine", "shape_sines", shape->sines(),
+					               "MXH s_1 ... s_N of the boundary curve", "" );
+			}
 
 			/*
 			 * **WHICH FIELD THE COEFFICIENTS ARE**, and this one attribute is
@@ -7143,7 +7244,7 @@ int main( int argc, char **argv )
 		/*
 		 * ---- WHAT EACH ELEMENT IS MADE OF: ELEMENT-REGIONS-PLAN.md §2.3 ----
 		 *
-		 * Indexed as the elements of `mesh_file`, which is the mesh the solver
+		 * Indexed as the elements of the embedded `mesh`, which is the mesh the solver
 		 * classified: the record is the one reported above, not recomputed,
 		 * and it is taken before curveBoundaryOnto() moves anything.
 		 */
@@ -7443,75 +7544,35 @@ int main( int argc, char **argv )
 
 		// VTK LAST, AND FOR A REASON. Curving the mesh changes the map from
 		// reference to physical space, so everything that reads geometry --
-		// writeMfem(), the sampler -- has to have finished. Nothing below
-		// touches the mesh again.
+		// writeMfem(), the sampler, the .nc's mesh -- has to have finished.
+		// Nothing below touches the mesh again.
 		//
-		// On the curved path the boundary is bent out onto the true Gamma, so
-		// the drawn domain is Omega rather than the inscribed polygon
-		// Omega_h. writeVtu() already emits VTK Lagrange cells, so a
-		// curvilinear mesh needs nothing further from the format.
-		double curved = 0.0;
-		int curvedNodes = 0;
-		if ( shape )
-		{
-			meq::BoundaryShape const *curve = shape.get();
-			curvedNodes = meq::curveBoundaryOnto( *solveMesh,
-				config->getDiscretisation().polynomialDegree,
-				[ curve ]( double radius, double z, double &outR, double &outZ )
-				{
-					// Radial projection onto Gamma. levelSet() IS the radial
-					// gap -- |p - centre| minus the curve's radius at the same
-					// polar angle -- so subtracting it along the ray lands
-					// exactly on the curve. Exact for a star shaped boundary,
-					// which BoundaryShape's constructor already requires.
-					double const centreR = curve->majorRadius();
-					double const centreZ = curve->centreHeight();
-					double const vR = radius - centreR, vZ = z - centreZ;
-					double const rho = std::hypot( vR, vZ );
-					outR = radius;
-					outZ = z;
-					if ( rho <= 0.0 )
-						return;
-					double const gap = curve->levelSet( radius, z );
-					outR = radius - vR*gap/rho;
-					outZ = z - vZ*gap/rho;
-				}, curved );
-
-			// Not a warning below 100%: a face that cannot reach Gamma without
-			// folding its element is a statement about the mesh being coarse
-			// there, and the rest of the boundary still reaches. It is reported
-			// because the VTK boundary is then not uniformly Gamma, which a
-			// reader comparing it against the .nc boundary_R/Z would notice.
-			if ( curvedNodes > 0 && curved < 1.0 )
-				std::printf( "MEQ: %.0f%% of the boundary reached Gamma; the "
-				             "rest was held back to keep its elements from "
-				             "folding\n", 100.0*curved );
-			else if ( curvedNodes == 0 )
-				std::fprintf( stderr,
-					"MEQ: warning: could not bend the boundary onto Gamma "
-					"without tangling an element. The VTK boundary is the "
-					"polygon Gamma_h.\n" );
-		}
-
-		// psi* AGAIN, AND THE SUBDIVISION GOES UP WITH IT. writeVtu()'s last
-		// argument is the Lagrange-cell subdivision, and it must be the degree of
-		// the field being drawn: psi* is P_(k+1), so passing k would sample a
-		// degree-(k+1) field at degree-k nodes and throw away exactly the order
-		// the post-processing was done to gain. The picture would look like a
-		// slightly coarse mesh, which is the failure mode SetHighOrderOutput()
-		// exists to prevent, one degree further along.
+		// psi* AGAIN, AND THE SUBDIVISION GOES UP WITH IT. writeVtu()'s
+		// subdivision must be the degree of the field being drawn: psi* is
+		// P_(k+1), so passing k would sample a degree-(k+1) field at degree-k
+		// nodes and throw away exactly the order the post-processing was done
+		// to gain.
 		//
 		// WITH WHAT EACH ELEMENT IS MADE OF, from the record the `.nc` holds.
 		// Built after the bending, on the mesh as it is drawn: an order-0
 		// field has one value per element and no geometry to bend, and the
 		// element numbering the record is indexed by does not move.
-		std::unique_ptr<meq::ElementCellData> cells;
-		if ( elementRecord )
-			cells = std::make_unique<meq::ElementCellData>( *solveMesh,
-				materialTable, *elementRecord );
-		meq::writeVtu( stem, *solveMesh, solver->postProcessedPotential(), field,
-		               config->getDiscretisation().polynomialDegree + 1,
-		               cells.get() );
+		//
+		// ONLY WHEN ASKED FOR, and meq::writeEquilibriumVtu() is the whole
+		// stage, so that meq-convert draws from the .nc exactly what this
+		// would have drawn.
+		if ( wantVtk )
+		{
+			std::unique_ptr<meq::ElementCellData> cells;
+			if ( elementRecord )
+				cells = std::make_unique<meq::ElementCellData>( *solveMesh,
+					materialTable, *elementRecord );
+			meq::writeEquilibriumVtu( stem, *solveMesh, shape.get(),
+			                          config->getDiscretisation().polynomialDegree,
+			                          solver->postProcessedPotential(), field,
+			                          config->getDiscretisation().polynomialDegree + 1,
+			                          cells.get() );
+		}
 
 		// The description goes FIRST on each line and the path last, because
 		// the path can be long and absolute and any attempt to align a
@@ -7527,24 +7588,28 @@ int main( int argc, char **argv )
 		std::printf(
 			"MEQ: wall %.3f s = setup %.3f + solve %.3f + output %.3f\n"
 			"MEQ: wrote\n"
-			"  exact, for GLVis and restart:  %s.mesh\n"
-			"                                 %s_psi.gf        (psi_h, degree %d)\n"
-			"                                 %s_grad_psi.gf\n"
-			"  post-processed, GLVis:         %s_psistar.gf    (psi*, degree %d)\n"
-			"  VTK at degree %d, ParaView:     %s/%s.pvd\n"
-			"  (R, Z) grid, %d/%d inside:  %s.nc\n"
-			"  psi in the last two is psi*; _psi.gf keeps psi_h, which is what a\n"
-			"  restart reads back.\n",
+			"  the equilibrium and its restart:  %s.nc\n"
+			"    psi* and B on the (R, Z) grid, %d/%d nodes inside, with the\n"
+			"    mesh and every coefficient of psi_h, q and psi*. meq-convert\n"
+			"    makes the GLVis and ParaView files from it.\n",
 			elapsedSince( started ), setupSeconds, solveSeconds,
 			elapsedSince( started ) - setupSeconds - solveSeconds,
 			stem.c_str(),
-			stem.c_str(), config->getDiscretisation().polynomialDegree,
-			stem.c_str(),
-			stem.c_str(), config->getDiscretisation().polynomialDegree + 1,
-			config->getDiscretisation().polynomialDegree + 1,
-			stem.c_str(), name.c_str(),
-			sampler.locatedCount(), sampler.nodesR()*sampler.nodesZ(),
-			stem.c_str() );
+			sampler.locatedCount(), sampler.nodesR()*sampler.nodesZ() );
+		if ( wantGridFunctions )
+			std::printf(
+				"  exact, for GLVis and restart:  %s.mesh\n"
+				"                                 %s_psi.gf        (psi_h, degree %d)\n"
+				"                                 %s_grad_psi.gf\n"
+				"  post-processed, GLVis:         %s_psistar.gf    (psi*, degree %d)\n",
+				stem.c_str(),
+				stem.c_str(), config->getDiscretisation().polynomialDegree,
+				stem.c_str(),
+				stem.c_str(), config->getDiscretisation().polynomialDegree + 1 );
+		if ( wantVtk )
+			std::printf( "  VTK at degree %d, ParaView:     %s/%s.pvd\n",
+			             config->getDiscretisation().polynomialDegree + 1,
+			             stem.c_str(), name.c_str() );
 		if ( series && series->frames() > 0 )
 			std::printf( "  %d refinement frames, scrubbable:  %s_cycles/%s_cycles.pvd\n",
 			             series->frames(), stem.c_str(), name.c_str() );
@@ -7562,7 +7627,7 @@ int main( int argc, char **argv )
 		 * suggest -- the lossy `.nc` carries the physically exact field,
 		 * because it samples, and the exact `.gf` carries a difference.
 		 */
-		if ( conductorField )
+		if ( conductorField && wantGridFunctions )
 			std::printf(
 				"  UNDER [conductors] Model THE THREE EXACT FILES HOLD psi_p,\n"
 				"  the REMAINDER, and psi* with them. For a picture of the\n"

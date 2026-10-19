@@ -287,6 +287,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
 	src/meq/StageChecksum.cpp
+	src/meq/StoredEquilibrium.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/SurfaceFit.cpp
 	src/meq/WarmStart.cpp
@@ -326,6 +327,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
 	src/meq/StageChecksum.cpp
+	src/meq/StoredEquilibrium.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
 
@@ -397,7 +399,8 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # but the grid writer.
 set(MEQ_CORE_SOURCES_NEEDING_NETCDF
 	src/meq/ConductorStore.cpp
-	src/meq/Output.cpp)
+	src/meq/Output.cpp
+	src/meq/StoredEquilibrium.cpp)
 
 # Boost.Math, header only, for meq_core rather than only for the tests.
 #
@@ -769,6 +772,12 @@ if(MEQ_BUILD_APP)
 	add_executable(meq apps/meq.cpp)
 	target_link_libraries(meq PRIVATE meq_core)
 
+	# meq-convert: the GLVis and ParaView files of a run, from its .nc. A
+	# separate program because the .nc is MEQ's one default output and these
+	# formats are views of it, made after the run by the same library calls.
+	add_executable(meq-convert apps/meq-convert.cpp)
+	target_link_libraries(meq-convert PRIVATE meq_core)
+
 	# The commit, so a run can be traced back to the tree that produced it. Not
 	# fatal when git is absent or this is an unpacked tarball -- the version
 	# falls back to the project version alone.
@@ -821,12 +830,12 @@ if(MEQ_BUILD_APP)
 			GROUP_READ GROUP_EXECUTE
 			WORLD_READ WORLD_EXECUTE)
 
-	# The install: bin/meq, bin/meq-run, and the generators meq-run names under
+	# The install: bin/meq, bin/meq-convert, bin/meq-run, and the generators meq-run names under
 	# share/meq/tools, so the installed pair works with the build tree gone. The
 	# installed meq-run is configured a second time with paths relative to
 	# itself rather than into this build tree.
 	include(GNUInstallDirs)
-	install(TARGETS meq RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+	install(TARGETS meq meq-convert RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 	set(MEQ_RUN_BINARY "meq")
 	file(RELATIVE_PATH MEQ_RUN_TOOLS
 		"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}"

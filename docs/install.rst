@@ -227,7 +227,7 @@ From the project directory:
    cmake --install builds/double
 
 The default install prefix is ``install/<name>`` for ``builds/<name>``, so the
-last line puts ``meq`` and ``meq-run`` in ``install/double/bin``, and the mesh
+last line puts ``meq``, ``meq-convert`` and ``meq-run`` in ``install/double/bin``, and the mesh
 generator ``meq-run`` calls under ``install/double/share/meq/tools``. The
 installed ``meq-run`` finds both relative to itself, so the build tree can be
 deleted once it is installed.

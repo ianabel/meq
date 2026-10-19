@@ -264,9 +264,10 @@ AssemblyMode = "threaded"
 # shipped EXAMPLE should not. M-221.
 
 [output]
-# Writes ./coils-rectangle.mesh and the two .gf files for GLVis and restart,
-# ./coils-rectangle/coils-rectangle.pvd at degree 3 for ParaView, and
-# ./coils-rectangle.nc on a 129 x 129 grid. The .nc additionally carries
+# Writes ./coils-rectangle.nc on a 129 x 129 grid, with the mesh and every
+# coefficient beside it: the restart, and what `meq-convert` makes the GLVis
+# .mesh/.gf files and the ParaView .pvd (degree 3) from -- or ask the run for
+# them with --gf and --vtk. The .nc additionally carries
 # `coils` and `coil_current`, so a reader differencing two files can tell a run
 # with conductors from one without.
 Directory = "."

@@ -62,18 +62,23 @@ the production source, reachable as `[source] Type = "mhd"`, `Normalised = true`
 `v0-legacy` has the pre-port tree.
 
 **MEQ is a program.** `meq config.toml` parses, meshes, solves — adaptively if
-asked — and writes the equilibrium three ways, plus an optional reduction of it;
-exit codes 0–4 are `docs/running.rst`'s. `meq-run config.toml` runs the
+asked — and writes the equilibrium to **one file by default, the `.nc`**, plus
+an optional reduction of it; exit codes 0–4 are `docs/running.rst`'s. `meq-run config.toml` runs the
 `[mesh.generate]` generator first and then execs `meq`; it is a script because
 `meq` links MFEM and not gmsh, and it **does not parse the configuration** — it
 asks `meq --mesh-command`, so there is one reader of the schema.
 
 | | |
 |---|---|
-| `.mesh`, `_psi.gf`, `_grad_psi.gf` | exact, every coefficient. GLVis, and MEQ's own restart |
-| `<stem>/<stem>.pvd` | VTK at the degree of the field it draws (`k+1`, since `ψ*` is that field), boundary bent onto `Γ`. ParaView |
-| `.nc` | `ψ` and **B** on a uniform `(R, Z)` grid, with `inside` and `extrapolated` masks — **drop `extrapolated` nodes before an error norm or a diff**. The interchange format |
+| `.nc` | **always.** `ψ*` and **B** on a uniform `(R, Z)` grid, with `inside` and `extrapolated` masks — **drop `extrapolated` nodes before an error norm or a diff** — and beside it the mesh as MFEM's own text and every coefficient of `ψ_h`, `q` and `ψ*`. The interchange format **and the restart** (`[initialguess] File = "<stem>.nc"`) |
+| `.mesh`, `_psi.gf`, `_grad_psi.gf`, `_psistar.gf` | `--gf` / `[output] GridFunctions`. Exact, every coefficient. GLVis, and the `.gf` restart |
+| `<stem>/<stem>.pvd` | `--vtk` / `[output] VTK`. VTK at the degree of the field it draws (`k+1`, since `ψ*` is that field), boundary bent onto `Γ`. ParaView |
 | `_surfaces.nc` | flux surfaces and averages against `ρ = √Ψ_N`, only with `[output] FluxSurfaces` |
+
+**`meq-convert <stem>.nc` makes the `--gf` and `--vtk` files from the `.nc`,
+byte for byte what the run would have written** — `OutputConversion` asserts it
+— except an adaptive run's per-cycle series and a split run's `_psi_total.gf`,
+which only the run can make (→ **[M-297](MEASUREMENTS.md#m-297)**).
 
 `CLAUDE_DRIVER.md` has all of it: the band and why `B` is continued with its
 gradient, the curved and adaptive paths through the driver, the reactive ladder
@@ -448,14 +453,17 @@ on.**
 ```
 src/meq/     the library: Config, Profiles, Source, SourceFactory,
              GradShafranov, BoundaryShape, Estimator, Field, Sampler,
-             WarmStart, Output, Materials (the element material table and
+             WarmStart, Output, StoredEquilibrium (the .nc read back as
+             mesh and fields: the restart and meq-convert's input),
+             Materials (the element material table and
              its record, MFEM-free); CriticalPoints, FluxSurfaces, SurfaceAverage,
              SurfaceFit, Zernike (the inversion); ConductorStore (psi_c on
              disk, MFEM-free, a CACHE at the solver's own points -- CS-6);
              DeviceBasis, AxisSearch, ResidentIterate (device routes);
              Crossings, StageChecksum (device instruments, not part of the
              solve). See CLAUDE_DEVICE.md for the device files.
-apps/        meq.cpp, and meq-run.in -- configured twice: into the build
+apps/        meq.cpp, meq-convert.cpp (the GLVis and ParaView files from a
+             .nc), and meq-run.in -- configured twice: into the build
              directory as `meq-run`, and for install/<name>/bin, paths
              relative to itself. Not runnable from apps/.
 tests/       SourceTree.hpp (how a test names a source file), unit/ (Boost.Test), convergence/ (rate assertions), analytic/

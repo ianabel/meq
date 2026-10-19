@@ -910,8 +910,10 @@ namespace
 	/// Run the shipped wrapper, capturing everything it prints.
 	int runDriver( std::string const &file, std::string const &log )
 	{
+		// --gf: the case below reads the run's .mesh and _psi.gf back, and the
+		// driver writes only the .nc unless asked.
 		std::string const command = "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
-		                            + " " + file + " > " + log + " 2>&1";
+		                            + " " + file + " --gf > " + log + " 2>&1";
 		int const status = std::system( command.c_str() );
 		return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
 	}

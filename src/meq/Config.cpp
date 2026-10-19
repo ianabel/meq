@@ -2659,6 +2659,7 @@ namespace meq
 			Table output( document, "output", sourceName, false );
 			output.rejectUnknownKeys( { "Directory", "Prefix", "GridNR", "GridNZ",
 			                            "GridRMin", "GridRMax", "GridZMin", "GridZMax",
+			                            "GridFunctions", "VTK",
 			                            "FluxSurfaces", "FluxSurfaceCount",
 			                            "FluxAngleCount", "FluxInnerCut",
 			                            "FluxOuterCut" } );
@@ -2705,6 +2706,11 @@ namespace meq
 			if ( outputOptions.hasGridRadii() && outputOptions.gridRMin < 0.0 )
 				output.fail( "GridRMin", "must not be negative: R is the major radius, "
 				             "and the solve is the half-plane R >= 0" );
+
+			// The formats beside the .nc; OutputConfig says why both are off.
+			outputOptions.gridFunctions =
+				output.getBooleanOr( "GridFunctions", outputOptions.gridFunctions );
+			outputOptions.vtk = output.getBooleanOr( "VTK", outputOptions.vtk );
 
 			// The ( Psi, theta ) file: INVERSION-PLAN.md stage IN-6. See
 			// OutputConfig for why it is off by default and why both ends of
@@ -2788,9 +2794,22 @@ namespace meq
 			{
 				if ( initialGuessOptions.file.empty() )
 					guess.fail( "File", "is required when Type = \"gridfunction\"" );
-				if ( initialGuessOptions.meshFile.empty() )
-					guess.fail( "MeshFile", "is required when Type = \"gridfunction\": a "
-					            "GridFunction cannot be read without the mesh it lives on" );
+				// A .nc MEQ WROTE CARRIES ITS MESH AND SAYS WHAT IT HOLDS, so the
+				// two keys a .gf needs beside it would only be a second answer to
+				// questions the file already answers.
+				if ( initialGuessOptions.fromNetCDF() )
+				{
+					if ( guess.has( "MeshFile" ) )
+						guess.fail( "MeshFile", "is not read beside a .nc File: the .nc carries "
+						            "the mesh its coefficients live on" );
+					if ( guess.has( "Content" ) )
+						guess.fail( "Content", "is not read beside a .nc File: the .nc says "
+						            "what it holds, in its content attribute" );
+				}
+				else if ( initialGuessOptions.meshFile.empty() )
+					guess.fail( "MeshFile", "is required when Type = \"gridfunction\" reads a "
+					            ".gf: a GridFunction cannot be read without the mesh it lives on. "
+					            "A .nc MEQ wrote carries its own" );
 			}
 
 			// WHAT THE STORED FILE HOLDS. See Config.hpp for why a .gf cannot

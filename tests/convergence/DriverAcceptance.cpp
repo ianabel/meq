@@ -87,13 +87,20 @@ namespace
 		return MEQ_DRIVER_PATH;
 	}
 
+	/// THE FORMATS BESIDE THE `.nc`, ASKED FOR ON EVERY SOLVE IN THIS FILE.
+	/// The driver writes only the `.nc` by default; the cases here read the
+	/// `.mesh`, the `.gf`s and the VTK back, so they ask for them as a user
+	/// would. What the default writes, and that meq-convert makes the same
+	/// files from it, is OutputConversion's to assert.
+	char const *const formats = " --gf --vtk";
+
 	int run( std::string const &configFile )
 	{
 		// MKL_NUM_THREADS=1 is inherited from the ctest environment, which
 		// CMake sets for exactly the reason the other convergence tests record.
 		// MKL_THREADING_LAYER is deliberately not set anywhere any more; see
 		// tests/CMakeLists.txt.
-		std::string const command = std::string( driver() ) + " " + configFile
+		std::string const command = std::string( driver() ) + formats + " " + configFile
 		                            + " > /dev/null 2>&1";
 		int const status = std::system( command.c_str() );
 		return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
@@ -2071,10 +2078,11 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
  * repeated from the TOML -- and requires that the coefficients plus that field
  * reproduce the physical flux. If any column is wrong the sum is wrong.
  *
- * The only thing taken from outside the `.nc` is the mesh, which the file
- * NAMES in `mesh_file` rather than embedding. §9.2 left that open and this is
- * it answered the cheap way round: embedding it is MEQ re-implementing a
- * serialiser MFEM already has.
+ * The only thing taken from outside the `.nc` here is the mesh, read from the
+ * `.mesh` the run wrote beside it under `--gf`. The `.nc` EMBEDS that mesh too,
+ * as its `mesh` variable -- §9.2 answered the self-contained way round, with
+ * MFEM's own text rather than a serialiser of MEQ's -- and OutputConversion is
+ * where the two are asserted to be the same bytes.
  */
 BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 {
@@ -2101,8 +2109,10 @@ BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 	// leaves them.
 	BOOST_TEST( header.find( "content = \"remainder" ) != std::string::npos,
 	            "the restart file does not say that it holds a remainder" );
+	BOOST_TEST( header.find( "string mesh ;" ) != std::string::npos,
+	            "the restart file does not carry the mesh its coefficients live on" );
 	BOOST_TEST( header.find( "mesh_file = \"cs6.mesh\"" ) != std::string::npos,
-	            "the restart file does not name the mesh its coefficients live on" );
+	            "a run asked for --gf does not name the .mesh it wrote beside the .nc" );
 	BOOST_TEST( header.find( "fe_collection" ) != std::string::npos,
 	            "the restart file does not describe its finite element space" );
 
@@ -2899,7 +2909,7 @@ BOOST_AUTO_TEST_CASE( theDriverRefinesOverAnExteriorCoupling )
 	// the non-adaptive case uses. That is fine -- both are regenerated -- and it
 	// is why this case reads eta from the REPORT rather than from a file.
 	std::string const command = std::string( driver() )
-		+ " driver-acceptance-fb-adaptive.toml > driver-acceptance-fb-adaptive.log 2>&1";
+		+ formats + " driver-acceptance-fb-adaptive.toml > driver-acceptance-fb-adaptive.log 2>&1";
 	int const status = std::system( command.c_str() );
 	BOOST_TEST_REQUIRE( ( WIFEXITED( status ) && WEXITSTATUS( status ) == 0 ),
 	                    "the driver did not exit 0 on an adaptive free-boundary run" );
@@ -3837,7 +3847,7 @@ BOOST_AUTO_TEST_CASE( theDriverMeshesTheMachineItSolves )
 	double const committedPsiBoundary = 3.237931762e-02;
 
 	BOOST_TEST_REQUIRE( std::system(
-		( std::string( wrapper() ) + " " + config + " > /dev/null 2>&1" ).c_str() ) == 0,
+		( std::string( wrapper() ) + " " + config + formats + " > /dev/null 2>&1" ).c_str() ) == 0,
 		"the wrapper did not solve the machine it had just meshed" );
 
 	std::string const header = ncdumpHeader( "diverted-tokamak-generated.nc" );
@@ -4514,7 +4524,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedMachine )
 	 */
 	int status = -1;
 	std::string const log = captureStdout(
-		std::string( wrapper() ) + " " + config, &status );
+		std::string( wrapper() ) + " " + config + formats, &status );
 
 	BOOST_TEST_REQUIRE( status == 0,
 	                    "the wrapper exited " << status << " on " << config
@@ -4637,7 +4647,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
 
 	int status = -1;
 	std::string const log = captureStdout(
-		std::string( wrapper() ) + " " + config, &status );
+		std::string( wrapper() ) + " " + config + formats, &status );
 
 	BOOST_TEST_REQUIRE( status == 0,
 	                    "the wrapper exited " << status << " on " << config
@@ -4962,7 +4972,7 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 		std::string const config = sourcePath( std::string( "examples/" ) + c.stem + ".toml" );
 		int status = -1;
 		std::string const log = captureStdout(
-			std::string( wrapper() ) + " " + config, &status );
+			std::string( wrapper() ) + " " + config + formats, &status );
 		BOOST_TEST_REQUIRE( status == 0,
 		                    "the wrapper exited " << status << " on " << config
 		                    << ". captureStdout() discards stderr, so re-run it by "
@@ -5155,7 +5165,7 @@ BOOST_AUTO_TEST_CASE( theFileSaysWhatEachElementIsMadeOf )
 	{
 		int status = -1;
 		std::string const log = captureStdout(
-			std::string( wrapper() ) + " " + sourcePath( "examples/mirror-rotating.toml" ),
+			std::string( wrapper() ) + " " + sourcePath( "examples/mirror-rotating.toml" ) + formats,
 			&status );
 		BOOST_TEST_REQUIRE( status == 0,
 		                    "the wrapper exited " << status << " on "
@@ -5219,7 +5229,7 @@ BOOST_AUTO_TEST_CASE( everyAdaptiveFrameSaysWhatEachElementIsMadeOf )
 	}
 
 	int status = -1;
-	std::string const log = captureStdout( std::string( wrapper() ) + " " + config, &status );
+	std::string const log = captureStdout( std::string( wrapper() ) + " " + config + formats, &status );
 	BOOST_TEST_REQUIRE( status == 0, "the adaptive mirror exited " << status
 	                    << ". Its stdout was:\n" << log );
 

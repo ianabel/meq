@@ -46,7 +46,9 @@ documentation is what a user needs; `CLAUDE.md` is what a maintainer needs.
 exact Solov'ev equilibrium and a manufactured non-linear solution at order
 $k+1$ in both $\psi$ and the flux $\boldsymbol{q}$, with Newton converging
 quadratically. It is a program as well as a library: `meq config.toml` builds
-the mesh and the source, solves, and writes the equilibrium in three formats.
+the mesh and the source, solves, and writes the equilibrium to a NetCDF file
+that is both the interchange format and the exact restart; `meq-convert` makes
+the GLVis and ParaView files from it.
 
 What is present, in addition to the linear solve:
 

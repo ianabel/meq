@@ -1,22 +1,31 @@
 # Looking at what MEQ wrote
 
-A run writes the same equilibrium three times, in three formats, for three
-different readers, and on request a fourth file that is not the equilibrium at
-all but a **reduction** of it. **They are not interchangeable, and picking the
-wrong one is the usual way to waste an afternoon.**
+A run writes **one file by default, `<stem>.nc`**, which is the whole answer:
+a rasterization for any downstream tool and, beside it, the mesh and every
+coefficient, so it is also the restart. The GLVis and ParaView files are views
+of it — written by the run under `--gf` and `--vtk`, or made from it at any
+time by `meq-convert`, byte for byte the same. On request there is also a file
+that is not the equilibrium at all but a **reduction** of it. **They are not
+interchangeable, and picking the wrong one is the usual way to waste an
+afternoon.**
 
-| file | what it is | read it with |
-|---|---|---|
-| `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; MEQ itself, for an exact restart |
-| `<stem>/<stem>.pvd` | VTK, at the solve's own polynomial degree | ParaView, VisIt |
-| `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary MEQ was given and what each element is made of | `plot_equilibrium.py`; any downstream tool |
-| `<stem>_surfaces.nc` | the flux surfaces and the flux-surface averages, against a flux label. **Only when asked for** | a 1-D transport code; `plot_equilibrium.py` |
+| file | written | what it is | read it with |
+|---|---|---|---|
+| `<stem>.nc` | always | ψ* and **B** on a uniform `(R, Z)` grid, the boundary MEQ was given and what each element is made of — and the mesh and every coefficient | `plot_equilibrium.py`; any downstream tool; MEQ itself, for a restart; `meq-convert` |
+| `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf`, `<stem>_psistar.gf` | `--gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; MEQ itself, for an exact restart |
+| `<stem>/<stem>.pvd` | `--vtk` | VTK, at the degree of the field it draws | ParaView, VisIt |
+| `<stem>_surfaces.nc` | `[output] FluxSurfaces` | the flux surfaces and the flux-surface averages, against a flux label | a 1-D transport code; `plot_equilibrium.py` |
+
+```sh
+meq-convert run.nc          # run.mesh, run_*.gf and run/run.pvd, from the .nc
+```
 
 ## The three, and when each is the right one
 
-**The MFEM files are the only lossless ones.** `_psi.gf` carries the P_k
-coefficients, so a restart from them is bit-identical to the answer that was
-written. Nothing outside MFEM reads them. Note `_grad_psi.gf` is the HDG flux
+**The MFEM files and the `.nc`'s coefficients are the lossless ones.**
+`_psi.gf` and `psi_coefficients` carry the same P_k coefficients, so a restart
+from either is bit-identical to the answer that was written. Nothing outside
+MFEM reads the `.gf`s. Note `_grad_psi.gf` is the HDG flux
 `q`, in `DarcyForm`'s sign convention — **not** the poloidal field. The two
 differ by a relabelling (`B_R = −q_z`, `B_Z = +q_r`); see `src/meq/Field.hpp`.
 
@@ -43,7 +52,7 @@ principle, `psi_c` being logarithmic at the conductor.
 
 **The restart is therefore the `.nc` and not the `.gf` pair.** `content` says
 which field the coefficients are, `fe_collection` and `fe_order` say what space
-they live in, `mesh_file` names the mesh beside them, and the conductor table
+they live in, the `mesh` variable is the mesh they live on, and the conductor table
 plus `mu0` is everything `meq::ConductorField` needs to reconstruct `psi_c`
 exactly at any point. A flag would not have been enough: it tells a reader they
 hold the wrong field without letting them fix it.

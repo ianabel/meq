@@ -1902,6 +1902,16 @@ limiter; ``examples/limited-tokamak.toml`` and
        ``GridRMin`` must not be negative, and each maximum must exceed its
        minimum. Use it to sample on another code's nodes. A node outside the
        solved region reads ``inside = 0``, exactly as on the default grid.
+   * - ``GridFunctions``
+     - ``false``
+     - Also write ``<Prefix>.mesh``, ``_psi.gf``, ``_grad_psi.gf`` and
+       ``_psistar.gf`` for GLVis, as ``--gf`` does. Off because the ``.nc``
+       carries the same mesh and coefficients and ``meq-convert`` makes these
+       from it; see :doc:`output`.
+   * - ``VTK``
+     - ``false``
+     - Also write ``<Prefix>/<Prefix>.pvd`` for ParaView, and an adaptive run's
+       per-cycle series, as ``--vtk`` does. Off for the same reason.
    * - ``FluxSurfaces``
      - ``false``
      - Write ``<stem>_surfaces.nc``, the flux-surface geometry and the
@@ -1959,15 +1969,17 @@ See :doc:`output` for what gets written.
        whatever ``CentreR`` is.
 
    * - ``File``, ``MeshFile``
-     - *required for* ``"gridfunction"``
-     - The stored grid function and the mesh it lives on — a grid function
-       cannot be read without its mesh. Relative to the configuration file.
+     - *``File`` required for* ``"gridfunction"``
+     - A previous run's ``<stem>.nc``, which carries its mesh and says what it
+       holds — ``MeshFile`` and ``Content`` are then refused — or a stored grid
+       function and the mesh it lives on, since a ``.gf`` cannot be read
+       without its mesh. Relative to the configuration file.
    * - ``Content``
      - ``"remainder"``
      - What that file *holds*: ``"total"`` for :math:`\psi` or ``"remainder"``
        for :math:`\psi_p = \psi - \psi_c`. Read only with
-       ``Type = "gridfunction"``, and it matters only when this run subtracts —
-       see below.
+       ``Type = "gridfunction"`` and a ``.gf`` — a ``.nc`` says for itself —
+       and it matters only when this run subtracts; see below.
 
 ``Content`` says what a stored guess holds, because the file cannot
 --------------------------------------------------------------------
@@ -1975,7 +1987,9 @@ See :doc:`output` for what gets written.
 A ``.gf`` carries the finite-element space and the coefficients and nothing
 else, so a file written under ``[conductors] Model`` holds
 :math:`\psi_p = \psi - \psi_c` and looks exactly like one that holds
-:math:`\psi`. ``Content`` is where the file's author says which it is.
+:math:`\psi`. ``Content`` is where the file's author says which it is. **A**
+``.nc`` **needs no such key**: its ``content`` attribute says which it holds,
+the restart reads it from there, and ``Content`` beside a ``.nc`` is refused.
 
 ``"remainder"``, the default, is what a subtracting run writes and what every
 file written before this key existed means. ``"total"`` says the file holds the

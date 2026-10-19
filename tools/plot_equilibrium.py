@@ -44,11 +44,11 @@ panel of its own beside the averages.  The profile panels ring the surfaces
 over a surface with one band node is contaminated as a whole.
 
 THE REGIONS ARE DRAWN ON THE MESH, NOT THE GRID.  `--what regions` colours
-every element of the `.mesh` the grid file names in `mesh_file` by its
-`element_region` -- vacuum, plasma, coil, the cells the plasma boundary cuts,
-and so on (docs/output.rst, "What each element is made of").  The element
-index is the `.mesh`'s, so the mesh is read beside the `.nc`, as text and with
-straight sides: a mesh carrying curved `nodes` has no vertex coordinates to
+every element of the mesh the grid file embeds as its `mesh` variable (or,
+in a file from before MEQ embedded it, the `.mesh` it names in `mesh_file`)
+by its `element_region` -- vacuum, plasma, coil, the cells the plasma boundary
+cuts, and so on (docs/output.rst, "What each element is made of").  The
+element index is that mesh's, read as text and with straight sides: a mesh carrying curved `nodes` has no vertex coordinates to
 draw, and is refused rather than drawn wrong.  The region is a plotting
 convenience; the fractions in the file are the record.
 
@@ -131,6 +131,13 @@ def read_grid(path, ds):
         data["element_region"] = np.asarray(region[:], dtype=int)
         data["region_names"] = str(region.getncattr("flag_meanings")).split()
         data["mesh_file"] = data["attributes"].get("mesh_file")
+        # The solve's mesh itself, which MEQ embeds; mesh_file is only there
+        # when the run also wrote the .mesh beside it.
+        data["mesh_text"] = None
+        if "mesh" in ds.variables:
+            value = ds.variables["mesh"][...]
+            data["mesh_text"] = str(value.item() if hasattr(value, "item")
+                                    else value)
     else:
         data["element_region"] = None
 
@@ -278,12 +285,17 @@ def draw(ax, data, what, levels):
 
 
 def read_mfem_mesh(path):
-    """A linear MFEM mesh's element polygons, read as text: the `elements`
+    """read_mfem_mesh_text() of a `.mesh` file."""
+    with open(path) as stream:
+        return read_mfem_mesh_text(stream.read())
+
+
+def read_mfem_mesh_text(text):
+    """A linear MFEM mesh's element polygons, from its text: the `elements`
     and `vertices` sections.  None if the mesh is curved, whose vertex
     coordinates live in a `nodes` grid function this does not evaluate."""
     corners = {2: 3, 3: 4}   # MFEM's TRIANGLE and SQUARE
-    with open(path) as stream:
-        words = stream.read().split()
+    words = text.split()
     elements, vertices, at = [], None, 0
     while at < len(words):
         word = words[at]
@@ -329,15 +341,20 @@ def draw_regions(ax, data, path):
     if data["element_region"] is None:
         sys.exit(f"plot_equilibrium: {path} carries no element_region; it was "
                  "written before MEQ recorded what each element is made of")
-    name = data["mesh_file"]
-    if not name:
-        sys.exit(f"plot_equilibrium: {path} names no mesh_file")
-    mesh = os.path.join(os.path.dirname(os.path.abspath(path)),
-                        os.path.basename(str(name)))
-    if not os.path.exists(mesh):
-        sys.exit(f"plot_equilibrium: the mesh {mesh} that {path} indexes its "
-                 "elements against is not beside it")
-    polygons = read_mfem_mesh(mesh)
+    if data.get("mesh_text"):
+        mesh = f"the mesh embedded in {path}"
+        polygons = read_mfem_mesh_text(data["mesh_text"])
+    else:
+        name = data["mesh_file"]
+        if not name:
+            sys.exit(f"plot_equilibrium: {path} neither embeds a mesh nor names "
+                     "a mesh_file")
+        mesh = os.path.join(os.path.dirname(os.path.abspath(path)),
+                            os.path.basename(str(name)))
+        if not os.path.exists(mesh):
+            sys.exit(f"plot_equilibrium: the mesh {mesh} that {path} indexes "
+                     "its elements against is not beside it")
+        polygons = read_mfem_mesh(mesh)
     if polygons is None:
         sys.exit(f"plot_equilibrium: {mesh} is curved, and this draws "
                  "straight-sided elements only; open the VTK in ParaView")

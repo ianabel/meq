@@ -83,7 +83,8 @@ NewtonRelativeTolerance = 1.0e-8
 NewtonAbsoluteTolerance = 1.0e-12
 
 [output]
-# Writes ./soloviev-nstx.mesh, ./soloviev-nstx_psi.gf and
-# ./soloviev-nstx_grad_psi.gf.
+# Writes ./soloviev-nstx.nc, which carries the mesh and every coefficient;
+# --gf adds ./soloviev-nstx.mesh, ./soloviev-nstx_psi.gf and
+# ./soloviev-nstx_grad_psi.gf, as `meq-convert soloviev-nstx.nc` does after.
 Directory = "."
 Prefix = "soloviev-nstx"

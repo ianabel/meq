@@ -254,12 +254,12 @@ AssemblyMode = "threaded"
 # shipped EXAMPLE should not. M-221.
 
 [output]
-# Writes ./mhd-rectangle.mesh, ./mhd-rectangle_psi.gf and
-# ./mhd-rectangle_grad_psi.gf for GLVis and for meq's own restart;
-# ./mhd-rectangle/mhd-rectangle.pvd at degree 2 for ParaView; and
-# ./mhd-rectangle.nc with psi, B_R and B_Z on a 129 x 129 grid, which is the
-# interchange format tools/plot_equilibrium.py reads. tools/README.md says which
-# reader goes with which.
+# Writes ./mhd-rectangle.nc with psi, B_R and B_Z on a 129 x 129 grid, which is
+# the interchange format tools/plot_equilibrium.py reads, and the mesh and every
+# coefficient beside them, which is meq's restart. `meq-convert
+# mhd-rectangle.nc` -- or --gf and --vtk on the run -- makes the GLVis .mesh and
+# .gf files and the ParaView .pvd at degree 2. tools/README.md says which reader
+# goes with which.
 Directory = "."
 Prefix = "mhd-rectangle"
 GridNR = 129

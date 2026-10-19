@@ -49,7 +49,7 @@ os.environ.setdefault("FGSREF_OUT", "/tmp")
 import benchpaths                                               # noqa: E402
 from fgsref import CASES                                        # noqa: E402
 from circuits import wiring                                     # noqa: E402
-from inverse import rewire, set_key                             # noqa: E402
+from inverse import drop_key, rewire, set_key                   # noqa: E402
 from inverse_compare import put_key                             # noqa: E402
 from make_diverted_case import disc_radius                      # noqa: E402
 
@@ -145,9 +145,16 @@ def main():
 
     if a.start == "warm":
         text = set_key(text, "mesh", "File", '"%s"' % state["mesh"])
-        text = set_key(text, "initialguess", "File", '"%s"' % state["psi"])
-        text = set_key(text, "initialguess", "MeshFile",
-                       '"%s"' % state["guess_mesh"])
+        if "nc" in state:
+            # The previous arm's .nc, which carries its mesh and says what it
+            # holds, so MeshFile and Content are refused beside it.
+            text = set_key(text, "initialguess", "File", '"%s"' % state["nc"])
+            text = drop_key(text, "initialguess", "MeshFile")
+            text = drop_key(text, "initialguess", "Content")
+        else:
+            text = set_key(text, "initialguess", "File", '"%s"' % state["psi"])
+            text = set_key(text, "initialguess", "MeshFile",
+                           '"%s"' % state["guess_mesh"])
         text = set_key(text, "source", "PsiAxis", "%.12e" % state["psi_axis"])
         text = set_key(text, "boundary.xpoint", "R", "%.10f" % state["xpoint"][0])
         text = set_key(text, "boundary.xpoint", "Z", "%.10f" % state["xpoint"][1])
@@ -259,8 +266,7 @@ def main():
         record["state"] = out
         json.dump(dict(currents=record["currents"], psi_axis=record["psi_axis"],
                        xpoint=record["xpoints"][0],
-                       psi=os.path.join(out, stem + "_psi.gf"),
-                       guess_mesh=os.path.join(out, stem + ".mesh"),
+                       nc=os.path.join(out, stem + ".nc"),
                        mesh=(state["mesh"] if a.start == "warm"
                              else os.path.join(out, stem + ".msh"))),
                   open(os.path.join(out, "state.json"), "w"), indent=1)

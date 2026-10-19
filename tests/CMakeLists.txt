@@ -566,6 +566,26 @@ else()
 	message(STATUS "meq: MachineFixedBoundary not registered (needs MEQ_BUILD_APP=ON)")
 endif()
 
+# OutputConversion runs the shipped meq and meq-convert: the .nc is the default
+# output, the formats are made from it byte for byte, and it is the restart.
+if(TARGET meq AND TARGET meq-convert
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/OutputConversion.cpp")
+	add_executable(OutputConversion "convergence/OutputConversion.cpp")
+	target_include_directories(OutputConversion PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(OutputConversion PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(OutputConversion PRIVATE
+		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>"
+		MEQ_CONVERT_PATH="$<TARGET_FILE:meq-convert>")
+	add_test(NAME OutputConversion COMMAND OutputConversion)
+	set_tests_properties(OutputConversion PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: OutputConversion not registered (needs MEQ_BUILD_APP=ON)")
+endif()
+
 # GeqSourceComparison evaluates meq::RotatingSource at an exported geq state and
 # compares against geq's own current density. It is the only check in the tree
 # of MEQ's rotating source against an INDEPENDENT implementation of eq (136).

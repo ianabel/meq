@@ -7,9 +7,12 @@ Running MEQ
    meq --help           usage
    meq --version        the build this is
 
-There are no subcommands, and the four flags there are describe the *process*
-rather than the equilibrium: ``--device``, ``--mesh-command``, ``--mesh-ready``
-and ``--version``. Everything about a run is in the configuration file, which
+There are no subcommands, and the flags there are describe the *process*
+rather than the equilibrium: ``--device``, ``--mesh-command``, ``--mesh-ready``,
+``--version``, the two that print diagnostics, ``--profile`` and
+``--trace-solver-stats``, and the two that ask for files beside the ``.nc``,
+``--gf`` and ``--vtk`` (see :ref:`running-options`). Everything about a run is
+in the configuration file, which
 :doc:`configuration` documents key by key, and which ``examples/`` has worked
 instances of — see :doc:`examples`.
 
@@ -135,8 +138,30 @@ In order:
    :math:`\psiax` as an additional unknown. See :doc:`nonlinear`.
 #. **Post-processes**, building :math:`\psi^\star` — which is the potential
    every output but the restart file carries.
-#. **Writes the answer**, in three formats — and, if ``[output] FluxSurfaces``
-   is set, reduces it to flux surfaces and writes those too. See :doc:`output`.
+#. **Writes the answer** to ``<stem>.nc`` — and the GLVis and ParaView files
+   beside it when ``--gf``/``--vtk`` or ``[output] GridFunctions``/``VTK`` ask,
+   and, if ``[output] FluxSurfaces`` is set, reduces it to flux surfaces and
+   writes those too. See :doc:`output`.
+
+.. _running-options:
+
+The files beside the ``.nc``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: text
+
+   meq --gf  <config.toml>     also <stem>.mesh, _psi.gf, _grad_psi.gf, _psistar.gf
+   meq --vtk <config.toml>     also <stem>/<name>.pvd, bent onto Gamma
+   meq-convert <stem>.nc       either or both, afterwards, to the same bytes
+
+The ``.nc`` alone is what a run writes unless asked: it carries the mesh and
+every coefficient, so it is the restart, and ``meq-convert`` makes the other
+formats from it whenever they are wanted. ``--gf`` and ``--vtk`` say the same
+as ``[output] GridFunctions = true`` and ``[output] VTK = true``, and either
+asking is enough; ``meq-run f.toml --vtk`` passes them through. Ask the *run*
+for them when you need what ``meq-convert`` cannot make — an adaptive run's
+per-cycle VTK series, or a subtracting run's ``_psi_total.gf``. See
+:doc:`output`.
 
 What it prints
 --------------
@@ -385,11 +410,14 @@ Warm starts
 A run can start from a previously computed answer, and there are two ways it
 happens:
 
-* **Explicitly**, from ``[initialguess]``, naming a stored mesh and grid
-  function. If the stored mesh matches the one being solved on, the restart is
-  *exact* — every polynomial coefficient, not an interpolation. If it does not,
-  the guess is interpolated onto the new mesh, which is the ordinary way to
-  restart a run at a different resolution.
+* **Explicitly**, from ``[initialguess]``, naming a previous run's ``.nc`` —
+  ``Type = "gridfunction"``, ``File = "<stem>.nc"`` — which carries its own
+  mesh and says what field it holds, or a stored grid function and the mesh it
+  lives on, ``File`` and ``MeshFile``. The two read the same coefficients and
+  restart identically. If the stored mesh matches the one being solved on, the
+  restart is *exact* — every polynomial coefficient, not an interpolation. If
+  it does not, the guess is interpolated onto the new mesh, which is the
+  ordinary way to restart a run at a different resolution.
 * **Automatically**, between cycles of an adaptive run. Each cycle after the
   first begins from the previous cycle's converged answer, interpolated onto the
   refined mesh, with the Dirichlet datum as the fallback at any node the coarse
@@ -509,5 +537,7 @@ count, Newton iterations, adaptive cycles, final residual — read from the
 attributes in the file rather than supplied on the command line.
 
 For anything else, use the format that suits it: GLVis for the exact solution,
-ParaView or VisIt for the high-order VTK, and any NetCDF reader for the gridded
-interchange file. :doc:`output` says which is which and what each one loses.
+ParaView or VisIt for the high-order VTK — both made from the ``.nc`` by
+``meq-convert``, or by the run under ``--gf`` and ``--vtk`` — and any NetCDF
+reader for the gridded interchange file. :doc:`output` says which is which and
+what each one loses.

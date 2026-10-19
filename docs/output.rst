@@ -1,42 +1,69 @@
 Output
 ======
 
-Every run writes the same equilibrium **three times**, in three formats. That is
-not redundancy: no single format is simultaneously exact, portable and
-convenient, and each of the three gives up a different one of those. On request
-there is a fourth file, which is not the equilibrium in another resolution but a
-**reduction** of it: the flux surfaces and the integrals over them.
+Every run writes **one file**, ``<stem>.nc``, and it is the whole answer:
+:math:`\psi^\star` and :math:`\mathbf{B}` sampled on a uniform
+:math:`(R, Z)` grid for anything that reads NetCDF, **and** the solve's mesh,
+every coefficient of :math:`\psi_h`, :math:`q` and :math:`\psi^\star`, and the
+boundary curve, exactly. So it is also the **restart**, and the GLVis and
+ParaView files are made from it — by the run when asked, or afterwards by
+``meq-convert``, to the same bytes. On request there is one more file, which is
+not the equilibrium in another resolution but a **reduction** of it: the flux
+surfaces and the integrals over them.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 22 48
+   :widths: 30 18 52
 
    * - Files
-     - Read by
+     - Written
      - What it is
+   * - ``<stem>.nc``
+     - always
+     - **The equilibrium.** The interchange grid, read by anything that reads
+       NetCDF, and beside it the exact solution and the mesh it lives on — the
+       restart. See :ref:`output-gridded`.
    * - ``<stem>.mesh``, ``<stem>_psi.gf``, ``<stem>_grad_psi.gf``
-     - GLVis; MEQ itself
-     - **Exact.** Every polynomial coefficient of the finite element solution.
-       This is the restart format, and the only one from which MEQ can resume a
-       run. It carries :math:`\psi_h`.
+     - ``--gf``, or ``[output] GridFunctions``
+     - **Exact,** in MFEM's own format, for GLVis. Every polynomial coefficient
+       of the finite element solution; carries :math:`\psi_h`, and is a
+       restart too.
    * - ``<stem>_psistar.gf``
-     - GLVis
+     - the same
      - The **post-processed** potential :math:`\psi^\star`, in
        :math:`P_{k+1}`. See :ref:`output-which-potential`.
    * - ``<stem>/<name>.pvd`` and ``<stem>/Cycle000000/``
-     - ParaView, VisIt
-     - **The picture.** VTK Lagrange cells at degree :math:`k+1`, with the mesh
-       boundary bent onto the true :math:`\Gamma`, and what each cell is made
-       of.
-   * - ``<stem>.nc``
-     - anything that reads NetCDF
-     - **The interchange format.** :math:`\psi` and :math:`\mathbf{B}` sampled on
-       a uniform :math:`(R, Z)` grid. Lossy, and portable.
+     - ``--vtk``, or ``[output] VTK``
+     - **The picture,** for ParaView and VisIt. VTK Lagrange cells at degree
+       :math:`k+1`, with the mesh boundary bent onto the true :math:`\Gamma`,
+       and what each cell is made of.
    * - ``<stem>_surfaces.nc``
-     - a 1-D transport code; ``plot_equilibrium.py``
+     - ``[output] FluxSurfaces``
      - **The reduction.** The flux surfaces themselves and the flux-surface
-       averages over them, against a flux label. Written only when
-       ``[output] FluxSurfaces`` is set. See :ref:`output-flux-surfaces`.
+       averages over them, against a flux label. See
+       :ref:`output-flux-surfaces`.
+
+.. important::
+
+   **The GLVis and ParaView files are views of the** ``.nc`` **and are not
+   written unless asked for.** On a large mesh they were most of a run's output
+   time — the VTK bends the mesh onto :math:`\Gamma` before it draws it — for
+   files most runs are never opened in. Ask the run for them with ``--gf`` and
+   ``--vtk`` (see :ref:`running-options`), or make them from the ``.nc`` at any
+   time:
+
+   .. code-block:: sh
+
+      meq-convert run.nc               # both
+      meq-convert --vtk run.nc         # the VTK only
+      meq-convert --gf --output elsewhere/run run.nc
+
+   ``meq-convert`` writes exactly the files the run would have written, byte
+   for byte — the curved VTK included — with two exceptions it cannot make
+   from the ``.nc``: an adaptive run's per-cycle series ``<stem>_cycles/``,
+   whose meshes only the run sees, and a subtracting run's
+   ``<stem>_psi_total.gf``, which evaluates the conductor field on the mesh.
+   Ask the run for those with ``--vtk`` and ``--gf``.
 
 ``<stem>`` is the output directory and prefix from the ``[output]`` table. MEQ
 does **not** create the output directory; if it does not exist the run exits 3
@@ -44,8 +71,8 @@ does **not** create the output directory; if it does not exist the run exits 3
 
 .. note::
 
-   **None of the first three carries the flux surfaces**, and that is what the
-   fourth file is for. A consumer wanting :math:`V'`,
+   **No equilibrium file carries the flux surfaces**, and that is what
+   ``<stem>_surfaces.nc`` is for. A consumer wanting :math:`V'`,
    :math:`\langle R^{-2}\rangle` or the shape of a surface reads
    ``<stem>_surfaces.nc``; one wanting the family as a differentiable map from a
    disc, or wanting to drive the extraction itself, links against the library —
@@ -64,11 +91,13 @@ Which potential each file carries
    :math:`\psi_h` at essentially no cost, so there is no reason to report the
    worse field.
 
-   **The one exception is** ``<stem>_psi.gf``, **which keeps** :math:`\psi_h`
-   deliberately. That file is the restart format and is read back into a
-   degree-\ :math:`k` potential space; :math:`\psi^\star` lives in
-   :math:`P_{k+1}` and would not fit. Making the two consistent would break
-   restart, which is why the asymmetry is commented at the write site.
+   **The exception is the restart field**, ``<stem>_psi.gf`` and the
+   ``.nc``'s ``psi_coefficients``, **which keep** :math:`\psi_h` deliberately.
+   A restart reads it back into a degree-\ :math:`k` potential space;
+   :math:`\psi^\star` lives in :math:`P_{k+1}` and would not fit. Making the
+   two consistent would break restart, which is why the asymmetry is commented
+   at the write site. The ``.nc`` carries :math:`\psi^\star`'s coefficients
+   too, as ``psistar_coefficients``.
 
 Two consequences for anyone reading MEQ's output:
 
@@ -94,7 +123,9 @@ Two consequences for anyone reading MEQ's output:
 The exact format
 ----------------
 
-MFEM's own mesh and grid-function files, written at full precision. ``_psi.gf``
+Written with ``--gf`` or ``[output] GridFunctions = true``, or by
+``meq-convert`` from the ``.nc``. MFEM's own mesh and grid-function files,
+written at full precision. ``_psi.gf``
 is the solved potential :math:`\psi_h`; ``_psistar.gf`` is the post-processed
 :math:`\psi^\star`; ``_grad_psi.gf`` is the HDG flux
 :math:`q = \gradbar\psi / R` — the solved unknown, **not** the magnetic field,
@@ -113,8 +144,9 @@ on, which is what a restart needs.
 The VTK format
 --------------
 
-Written through ParaView's data collection format, as **Lagrange cells at the
-degree of the field being drawn** — which is :math:`k+1`, since what is drawn is
+Written with ``--vtk`` or ``[output] VTK = true``, or by ``meq-convert`` from
+the ``.nc``, through ParaView's data collection format, as **Lagrange cells at
+the degree of the field being drawn** — which is :math:`k+1`, since what is drawn is
 :math:`\psi^\star`.
 
 That is a deliberate choice with a quiet failure mode behind it. VTK's native
@@ -213,6 +245,8 @@ well as straight ones. VTK has no ragged cell arrays, so a cell holding
 two conductors names only the larger. The full record is in the ``.nc``.
 
 .. _output-netcdf:
+
+.. _output-gridded:
 
 The gridded format
 ------------------
@@ -376,9 +410,21 @@ of the same answer:
        ``flux_ordering``
      - the spaces those coefficients live in, spelled as MFEM's
        ``FiniteElementCollection::New()`` takes them back
+   * - ``psistar_coefficients(psistar_dof)``, ``psistar_collection``
+     - the post-processed :math:`\psi^\star` and its space, which is what the
+       grid above samples and what the VTK draws
+   * - ``mesh``
+     - the mesh the solve ran on, as one string in **MFEM's own mesh format**:
+       write it to a file and MFEM or GLVis reads it as a ``.mesh``. It is
+       byte for byte the ``<stem>.mesh`` the run writes under ``--gf``, and
+       the element index of every ``element_*`` variable below is its
+   * - ``shape_major_radius``, ``shape_centre_height``, ``shape_minor_radius``,
+       ``shape_elongation``, ``shape_cosines``, ``shape_sines``
+     - the ``[boundary.shape]`` curve, as MXH coefficients, when the run had
+       one — what the VTK is bent onto
    * - ``mesh_file``
-     - the ``.mesh`` written beside this file. The mesh is **named, not
-       embedded**
+     - the ``.mesh`` written beside this file, present only when the run wrote
+       one
    * - ``content``
      - ``"total (psi)"`` or ``"remainder (psi - psi_c)"``
    * - ``conductor_kind``, ``conductor_R``, ``conductor_Z``,
@@ -603,8 +649,9 @@ because the loss does not shrink when the solve improves.
    the degree and the grid has to be refined quadratically to keep pace; the
    exact route never has to be.
 
-That is the whole reason MEQ writes three formats rather than one, and it is why
-a warm start reads ``.gf`` and not ``.nc`` — see :ref:`running-warm-start`. It is
+That is the whole reason the ``.nc`` carries the coefficients beside the grid,
+and why a warm start reads those coefficients — from the ``.nc`` or a ``.gf`` —
+and never the grid; see :ref:`running-warm-start`. It is
 not an argument against the gridded file, which is the right thing for its job:
 an outside code has to produce or consume :math:`\psi` on a rectangle and nothing
 else, with no finite element library, no mesh format and no agreement about

@@ -8,15 +8,16 @@
 
 **MEQ is runnable.** `apps/meq.cpp` is the driver, `MEQ_BUILD_APP` defaults
 `ON`, and `meq config.toml` parses, builds the mesh and source, solves — with
-the adaptive loop if asked — and writes the same equilibrium **three times**,
-with exit codes 0/1/2/3/4 as `docs/running.rst` specifies — plus, on request, a
-fourth file that is not the equilibrium at all but a **reduction** of it:
+the adaptive loop if asked — and writes the equilibrium to **one file by
+default, the `.nc`**, with exit codes 0/1/2/3/4 as `docs/running.rst`
+specifies — plus, on request, the exact and VTK formats beside it, and a file
+that is not the equilibrium at all but a **reduction** of it:
 
 | | |
 |---|---|
-| `.mesh`, `_psi.gf`, `_grad_psi.gf` | exact — every P_k coefficient. GLVis, and MEQ's own restart |
-| `<stem>/<stem>.pvd` + `Cycle000000/` | VTK, **at the degree of the field it draws**, which is `k+1` since `ψ*` became that field — `apps/meq.cpp` passes `polynomialDegree + 1` at four sites. ParaView, VisIt |
-| `.nc` | ψ and **B** on a uniform `(R, Z)` grid. Lossy, and the interchange format |
+| `.nc` | **always.** ψ* and **B** on a uniform `(R, Z)` grid — lossy, the interchange format — and beside it the `mesh` (MFEM's own text, `meq::meshText()`, the bytes `<stem>.mesh` holds), `psi_`, `flux_` and `psistar_coefficients`, and the `[boundary.shape]` curve. So it is the restart, `meq::StoredEquilibrium` reads it back, and `meq-convert` makes the other two rows from it |
+| `.mesh`, `_psi.gf`, `_grad_psi.gf`, `_psistar.gf` | `--gf` or `[output] GridFunctions`. Exact — every P_k coefficient. GLVis, and the `.gf` restart |
+| `<stem>/<stem>.pvd` + `Cycle000000/` | `--vtk` or `[output] VTK`. VTK, **at the degree of the field it draws**, which is `k+1` since `ψ*` became that field. ParaView, VisIt. `meq::writeEquilibriumVtu()` is the whole stage, bending included, and the driver and `meq-convert` both call it |
 | `_surfaces.nc` | the flux surfaces and the flux-surface averages, against `ρ = √Ψ_N`. **Only with `[output] FluxSurfaces`**, because it costs a trace and a fit per surface and is the one output that can be impossible on a run that solved perfectly well. IN-6, and `CLAUDE_INVERSION.md` |
 
 **AND `meq-run` MAKES THE MESH FIRST, FROM THE SAME FILE.** `[mesh.generate]`
@@ -70,6 +71,22 @@ the background's outer edge and Gamma is the smaller semicircle within it.
 `theDriverMeshesTheMachineItSolves` is the acceptance; it reaches the committed
 mesh's answer to **1.6e-06 m in the X-point and 3.1e-06 in `psi_ax`**, on a mesh
 gmsh rebuilt from the TOML at 2854 elements against the committed 2870.
+
+**THE FORMATS BESIDE THE `.nc` ARE OFF BY DEFAULT BECAUSE THEY ARE VIEWS OF
+IT, AND THEY WERE MOST OF THE OUTPUT STAGE.** On `fixed-f-diiid` the bend onto
+`Γ` alone was 5.1 s and the VTU writer 4.1 s of a 28 s run, for files most runs
+are never opened in (→ **[M-297](MEASUREMENTS.md#m-297)**). `meq-convert` on a
+run's own `.nc` writes byte for byte what `--gf --vtk` writes — the bent VTU
+included — because the mesh text is stored verbatim, the coefficients as
+doubles, and the VTK stage is one library call; `OutputConversion` asserts the
+bytes. **Two things only the run can make**: an adaptive run's per-cycle
+series, whose meshes the `.nc` does not hold, and a split run's
+`_psi_total.gf`, which evaluates `ψ_c` on the mesh. **The `.nc` restart is the
+`.gf` restart**: the same Newton steps to the same printed `psi_ax`
+(`theNetCDFRestartsLikeTheGridFunction`). It reads the embedded mesh with
+`refine = 0, fix_orientation = false`, so a mesh is never reordered under its
+coefficients; on the shipped meshes MFEM's default reading reorders nothing
+either, so that is a guarantee rather than a defect seen.
 
 **The VTK is written high-order deliberately**, and it is the one thing in that
 row that can be silently wrong: VTK's native cells are linear, so the default

@@ -3587,6 +3587,52 @@ BOOST_AUTO_TEST_CASE( the_guess_content_says_which_field_a_stored_file_holds )
 		{ return e.getKey() == "initialguess.Content"; } );
 }
 
+// A .nc MEQ WROTE CARRIES ITS MESH AND SAYS WHAT IT HOLDS, so the two keys a
+// .gf needs beside it are refused rather than allowed to disagree with it --
+// and a .gf still needs its mesh.
+BOOST_AUTO_TEST_CASE( a_stored_netcdf_guess_carries_its_own_mesh_and_content )
+{
+	std::string const base =
+		"[mesh]\n"
+		"RMin = 1.2\nRMax = 2.2\nZMin = -0.7\nZMax = 0.7\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		"\n[initialguess]\nType = \"gridfunction\"\n";
+
+	Configuration const nc = parse( base + "File = \"run.nc\"\n" );
+	BOOST_TEST( nc.getInitialGuess().fromNetCDF() );
+	BOOST_TEST( nc.getInitialGuess().meshFile.empty() );
+
+	auto const refuses = [ & ]( std::string const & extra, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( base + extra ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+	refuses( "File = \"run.nc\"\nMeshFile = \"run.mesh\"\n", "initialguess.MeshFile" );
+	refuses( "File = \"run.nc\"\nContent = \"total\"\n", "initialguess.Content" );
+	refuses( "File = \"run_psi.gf\"\n", "initialguess.MeshFile" );
+
+	Configuration const gf = parse( base + "File = \"a.gf\"\nMeshFile = \"a.mesh\"\n" );
+	BOOST_TEST( !gf.getInitialGuess().fromNetCDF() );
+}
+
+// THE FORMATS BESIDE THE .nc ARE OFF BY DEFAULT, and each is one key.
+BOOST_AUTO_TEST_CASE( the_formats_beside_the_netcdf_are_off_by_default )
+{
+	Configuration const plain = parse( minimal() );
+	BOOST_TEST( !plain.getOutput().gridFunctions );
+	BOOST_TEST( !plain.getOutput().vtk );
+
+	Configuration const asked = parse( minimal()
+		+ "\n[output]\nGridFunctions = true\nVTK = true\n" );
+	BOOST_TEST( asked.getOutput().gridFunctions );
+	BOOST_TEST( asked.getOutput().vtk );
+
+	Configuration const one = parse( minimal() + "\n[output]\nVTK = true\n" );
+	BOOST_TEST( !one.getOutput().gridFunctions );
+	BOOST_TEST( one.getOutput().vtk );
+}
+
 /*
  * ============================================================================
  * [[circuits]] AND Free -- INVERSE-AND-RECONSTRUCTION-PLAN.md IV-1

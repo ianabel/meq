@@ -1951,7 +1951,7 @@ namespace
 			out.stem = std::string( driverScratch ) + "/" + prefix;
 			auto const t0 = std::chrono::steady_clock::now();
 			out.status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
-			                        + " " + config, out.stem + ".log" );
+			                        + " " + config + " --gf", out.stem + ".log" );
 			out.seconds = std::chrono::duration<double>(
 				std::chrono::steady_clock::now() - t0 ).count();
 			out.log = readText( out.stem + ".log" );
@@ -1986,7 +1986,7 @@ namespace
 		std::string const config = configureMirror( prefix, "", lines, tables );
 		out.stem = std::string( driverScratch ) + "/" + prefix;
 		out.status = runLogged( environment + " MKL_NUM_THREADS=1 "
-		                        + std::string( MEQ_RUN_PATH ) + " " + config
+		                        + std::string( MEQ_RUN_PATH ) + " " + config + " --gf"
 		                        + ( arguments.empty() ? "" : " " + arguments ),
 		                        out.stem + ".log" );
 		out.log = readText( out.stem + ".log" );
@@ -2401,7 +2401,7 @@ BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
 	std::string const stem = std::string( driverScratch ) + "/" + prefix;
 	std::remove( ( stem + ".nc" ).c_str() );
 	int const status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
-	                              + " " + config, stem + ".log" );
+	                              + " " + config + " --gf", stem + ".log" );
 	std::string const text = readText( stem + ".log" );
 	BOOST_TEST( status == 2,
 		"meq-run exited " << status << " on a mirror whose bordered Newton is "
@@ -2535,7 +2535,7 @@ namespace
 		MidplaneColumns out;
 		std::string const config = configureThreeSpecies( prefix, lines, files );
 		out.run.stem = std::string( driverScratch ) + "/" + prefix;
-		out.run.status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH ) + " " + config,
+		out.run.status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH ) + " " + config + " --gf",
 		                            out.run.stem + ".log" );
 		out.run.log = readText( out.run.stem + ".log" );
 		if ( out.run.status != 0 )

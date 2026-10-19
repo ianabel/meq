@@ -143,6 +143,10 @@ namespace meq
 			double centreHeight() const { return z0; }
 			double minorRadius() const { return minor; }
 			double elongation() const { return elongationValue; }
+			/// c_0 ... c_N and s_1 ... s_N, exactly as the constructor took them,
+			/// so the curve can be written down and rebuilt.
+			std::vector<double> const &cosines() const { return cosCoefficients; }
+			std::vector<double> const &sines() const { return sinCoefficients; }
 
 			/// The bounding box, for checking that the background mesh contains
 			/// the surface with room for the transfer paths to reach past it.

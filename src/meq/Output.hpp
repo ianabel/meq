@@ -37,6 +37,7 @@
 
 #include "mfem.hpp"
 
+#include "BoundaryShape.hpp"
 #include "FluxFamily.hpp"
 #include "Sampler.hpp"
 
@@ -52,6 +53,15 @@ namespace meq
 	/// The mesh and the grid functions, in MFEM's own formats. Exact, and
 	/// readable only by MFEM.
 	///
+	/**
+	 * THE MESH AS MFEM'S OWN TEXT, AT PRECISION 17: exactly the bytes
+	 * writeMfem() puts in "<stem>.mesh", and exactly what the `.nc` embeds as
+	 * its `mesh` variable. One function for both, so a `.mesh` that
+	 * `meq-convert` writes from the `.nc` is the `.mesh` the run would have
+	 * written -- by construction, not by a comparison that might drift.
+	 */
+	std::string meshText( mfem::Mesh &mesh );
+
 	/// @param stem       the path stem: "<stem>.mesh", "<stem>_psi.gf" and
 	///                   "<stem>_grad_psi.gf" are written.
 	/// @param potential  psi_h, THE SOLVED POTENTIAL IN P_k -- not psi*. This
@@ -61,6 +71,13 @@ namespace meq
 	/// @param flux       q in MEQ's sign convention -- what
 	///                   GradShafranovSolver::flux() returns, not the raw block.
 	void writeMfem( std::string const &stem, mfem::Mesh &mesh,
+	                mfem::GridFunction const &potential,
+	                mfem::GridFunction const &flux );
+
+	/// The same three files with the mesh given as its text -- meshText()'s,
+	/// or the `.nc`'s embedded copy of it, which `meq-convert` writes verbatim
+	/// rather than re-printing a mesh it read back.
+	void writeMfem( std::string const &stem, std::string const &meshText,
 	                mfem::GridFunction const &potential,
 	                mfem::GridFunction const &flux );
 
@@ -123,6 +140,18 @@ namespace meq
 		public:
 			ElementCellData( mfem::Mesh &mesh, MaterialTable const &table,
 			                 ElementMaterials const &record );
+
+			/// The same four arrays given as columns, one entry per element in
+			/// the mesh's order -- what a `.nc` holds as `element_region`,
+			/// `element_plasma_fraction`, `element_conductor_material` and
+			/// `element_conductor_fraction`, so `meq-convert` draws the cells
+			/// the run would have drawn without rebuilding the material table.
+			///
+			/// @throws std::invalid_argument if a column is not one per element.
+			ElementCellData( mfem::Mesh &mesh, std::vector<double> const &regionColumn,
+			                 std::vector<double> const &plasmaFractionColumn,
+			                 std::vector<double> const &conductorMaterialColumn,
+			                 std::vector<double> const &conductorFractionColumn );
 
 			ElementCellData( ElementCellData const & ) = delete;
 			ElementCellData &operator=( ElementCellData const & ) = delete;
@@ -311,6 +340,34 @@ namespace meq
 	                                           double &, double & )> const &project,
 	                       double &applied );
 
+	/**
+	 * THE PROJECTION curveBoundaryOnto() IS GIVEN ON THE CURVED PATH: the
+	 * radial one onto @a shape. BoundaryShape::levelSet() IS the radial gap --
+	 * | p - centre | less the curve's radius at the same polar angle -- so
+	 * subtracting it along the ray lands on the curve, exactly for the star
+	 * shaped surfaces the class admits. The driver and `meq-convert` take the
+	 * same one, so the two bend the same mesh onto the same curve.
+	 *
+	 * The returned function holds a pointer to @a shape, which must outlive it.
+	 */
+	std::function<void( double, double, double &, double & )>
+	radialProjection( BoundaryShape const &shape );
+
+	/**
+	 * THE WHOLE VTK STAGE OF A RUN: bend @a mesh onto @a shape when there is
+	 * one, then write "<stem>/<name>.pvd" at @a degree with @a cells beside
+	 * it, saying on stdout or stderr how far the bending got. Shared by the
+	 * driver and `meq-convert` so the two cannot draw different pictures.
+	 *
+	 * Mutates @a mesh, as curveBoundaryOnto() does, so it is the last reader
+	 * of the geometry.
+	 */
+	void writeEquilibriumVtu( std::string const &stem, mfem::Mesh &mesh,
+	                          BoundaryShape const *shape, int geometryOrder,
+	                          mfem::GridFunction const &potential,
+	                          mfem::GridFunction const &field, int degree,
+	                          ElementCellData const *cells );
+
 	/*
 	 * The ( R, Z ) grid file.
 	 *
@@ -367,6 +424,12 @@ namespace meq
 			/// re-deriving it from the configuration.
 			void boundary( std::vector<double> const &radius,
 			               std::vector<double> const &z );
+
+			/// One scalar NetCDF-4 `string` variable: a text that is DATA rather
+			/// than provenance -- the mesh, which is megabytes on a machine and
+			/// is read back, where an attribute is a label.
+			void text( std::string const &name, std::string const &value,
+			           std::string const &longName );
 
 			/**
 			 * A ONE-DIMENSIONAL ARRAY ON A DIMENSION OF ITS OWN, WHICH IS WHAT
@@ -439,9 +502,11 @@ namespace meq
 			 * hundreds of megabytes on a machine of passive filaments, where
 			 * almost every element has one entry.
 			 *
-			 * THE ELEMENT INDEX IS THE ELEMENT'S INDEX IN `<stem>.mesh`, which
-			 * the file names in `mesh_file`; the record must therefore be of
-			 * the mesh that file holds.
+			 * THE ELEMENT INDEX IS THE ELEMENT'S INDEX IN THE `mesh` VARIABLE,
+			 * the solve's mesh embedded in this same file; the record must
+			 * therefore be of that mesh. `element_conductor_material` and
+			 * `element_conductor_fraction` are each element's largest conductor
+			 * and its share, -1 and 0 for none -- what the VTK cells draw.
 			 *
 			 * And the global attributes `region_elements_<region>` for every
 			 * region, `material_area_<name>` for every row (m^2, the name made

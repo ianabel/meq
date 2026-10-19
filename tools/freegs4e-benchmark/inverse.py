@@ -158,6 +158,19 @@ def set_key(text, table, key, value):
     return text[:m.end()] + body + text[end:]
 
 
+def drop_key(text, table, key):
+    """Remove `key = ...` from `[table]` if it is there. A `.nc` restart is
+    refused beside MeshFile and Content -- the file carries its mesh and says
+    what it holds -- so a shipped .gf restart's keys have to go."""
+    m = re.search(r"(?m)^\[%s\]\s*$" % re.escape(table), text)
+    if not m:
+        return text
+    nxt = re.search(r"(?m)^\[", text[m.end():])
+    end = m.end() + nxt.start() if nxt else len(text)
+    body = re.sub(r"(?m)^%s = .*\n?" % re.escape(key), "", text[m.end():end])
+    return text[:m.end()] + body + text[end:]
+
+
 def target_response(npz_path, case, wires):
     """The vacuum response of freegs4e's target rows to one ampere in each
     supply -- B_R and B_Z at each design X-point, psi1 - psi2 per isoflux
@@ -371,10 +384,12 @@ def main():
             # THE RELEASE: the inverse's currents as data, from its own answer.
             rel = rewire(shipped, wires, solved, free=False)
             rel = set_key(rel, "source", "PsiAxis", "%.10e" % irow["pa"])
+            # The inverse's own answer, from its .nc: MEQ's restart, carrying
+            # its mesh and saying what it holds.
             rel = set_key(rel, "initialguess", "File",
-                          '"%s"' % os.path.join(out, name + "-inverse_psi.gf"))
-            rel = set_key(rel, "initialguess", "MeshFile",
-                          '"%s"' % os.path.join(out, name + "-inverse.mesh"))
+                          '"%s"' % os.path.join(out, name + "-inverse.nc"))
+            rel = drop_key(rel, "initialguess", "MeshFile")
+            rel = drop_key(rel, "initialguess", "Content")
             if np.isfinite(irow["xR"]):
                 rel = set_key(rel, "boundary.xpoint", "R", "%.10f" % irow["xR"])
                 rel = set_key(rel, "boundary.xpoint", "Z", "%.10f" % irow["xZ"])

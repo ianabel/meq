@@ -14,7 +14,7 @@ mkdir meq && cd meq                       # the project directory
 git clone --recursive github:ianabel/meq.git source
 cmake -S source -B builds/double -DMFEM_DIR=/path/to/mfem/install
 cmake --build builds/double -j4
-cmake --install builds/double             # -> install/double/bin/meq, meq-run
+cmake --install builds/double             # -> install/double/bin/meq, meq-convert, meq-run
 cd builds/double && ctest --output-on-failure
 ```
 

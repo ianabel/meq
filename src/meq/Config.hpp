@@ -1779,6 +1779,14 @@ namespace meq
 		std::string file;
 		std::string meshFile;
 
+		/// Whether `File` is a `.nc` MEQ wrote rather than a `.gf`. Such a file
+		/// carries its mesh and says what it holds, so `MeshFile` and `Content`
+		/// are refused beside it rather than allowed to disagree with it.
+		bool fromNetCDF() const
+		{
+			return file.size() > 3 && file.compare( file.size() - 3, 3, ".nc" ) == 0;
+		}
+
 		/**
 		 * `Content` -- `"total"` or `"remainder"`, and it exists because a
 		 * `.gf` CANNOT SAY WHICH IT HOLDS.
@@ -1904,6 +1912,25 @@ namespace meq
 		// potential space an exact restart reads back into. _psi.gf therefore
 		// keeps psi_h and this carries psi*; see apps/meq.cpp's write block.
 		std::string getPsiStarFile() const;
+
+		// ------------------------------------------------------------------
+		// [output] GridFunctions and VTK: the two FORMATS beside the .nc.
+		//
+		// OFF BY DEFAULT, BECAUSE THE .nc IS THE ANSWER AND THESE ARE VIEWS OF
+		// IT. The .nc carries the mesh, every coefficient of psi_h, q and psi*,
+		// and the boundary curve, so it is the restart ([initialguess] File =
+		// "<stem>.nc") and `meq-convert` makes either format from it after the
+		// run, byte for byte what these keys would have written. Writing them
+		// in the run costs the output stage most of its time on a large mesh
+		// -- the VTK bends the mesh onto Gamma first -- for files most runs are
+		// never opened in. MEASUREMENTS.md M-297.
+		//
+		// GridFunctions: <Prefix>.mesh, _psi.gf, _grad_psi.gf, _psistar.gf, and
+		// under a split _psi_total.gf. GLVis, and the .gf restart.
+		bool gridFunctions = false;
+		// VTK: <Prefix>/<Prefix>.pvd, and an adaptive run's per-cycle series.
+		// ParaView.
+		bool vtk = false;
 
 		// ------------------------------------------------------------------
 		// [output] FluxSurfaces and its four sizes: the ( Psi, theta ) file,
