@@ -20,10 +20,15 @@ project = "meq"
 copyright = "2019-2026 Ian G. Abel; see the COPYRIGHT file"
 author = "Ian G. Abel"
 
-# meq carries no version number anywhere in the tree -- there is no VERSION
-# file and no version macro -- so there is nothing to read one from. Leave it
-# unset rather than invent a number that would immediately be wrong.
-release = ""
+# The version lives in exactly one place, CMakeLists.txt's project() call, which
+# is also what `meq --version` and every output file's meq_version attribute
+# print. Read it from there rather than restating it, so the two cannot drift.
+import pathlib
+import re
+
+_cmakelists = (pathlib.Path(__file__).parent.parent / "CMakeLists.txt").read_text()
+release = re.search(r"project\(meq\s+VERSION\s+(\S+)", _cmakelists).group(1)
+version = ".".join(release.split(".")[:2])
 
 extensions = [
     "sphinx.ext.mathjax",
