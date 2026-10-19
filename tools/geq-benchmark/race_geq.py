@@ -1,20 +1,27 @@
 #!/usr/bin/env python
-"""MEQ AGAINST geq ON THE ROTATING MIRROR: A STRAIGHT RACE ON ONE INPUT.
+"""MEQ AGAINST geq ON THE ROTATING MIRROR, EACH THROUGH ITS USER'S FRONT END.
 
-The input is MR-4's problem, `reference/rotating/`: geq's two packs as twenty
-fixed filaments, the skew profiles, the two labels at ( 0.10, 0 ) and
-( 0.35, 0 ), R_ref and Gamma.  Each code is driven the way a user drives it:
+The input is one of shapes.py's cases, tools/geq-benchmark/cases/<case>/: geq's
+machine, electrons and deuterons with the electron density given at z = 0, the
+labels at the electrode ( 0.10, 0 ) and the limiter ( 0.35, 0 ), and one
+profile shape. `--case` names it; skew is the default. Each code is run the way
+its user runs it, and the harness changes only what that user would change to
+refine a run:
 
-  geq   `export_rotating.solve( n, "direct", ... )` in a fresh process: geq's
-        direct free-boundary Picard on an n x n grid, with export_rotating.py's
-        three changes (the direct boundary, analytic profiles, phi_0 tightened
-        every step).  See README.md, *The rotating mirror*.
-  MEQ   `examples/mirror-rotating.toml` through the installed `meq`, with only the
+  geq   the case's geq_<case>.py, a geq user's script in the shape of geq's own
+        tools/run.py, run by path in a fresh process. geq has no input file, so
+        the script IS its input; the harness writes a copy with its N, RTOL and
+        OUTPUT lines changed and nothing else. No geq or freegs4e function is
+        imported or patched by this harness.
+  MEQ   the case's meq.toml through the installed `meq`, with only the
         resolution ( [mesh] RefinementLevels, [discretisation]
-        PolynomialDegree ), the threads and the output grid changed, and its
-        input tables named by absolute path, since the variant is written
-        under runs/.  The mesh is generated once by `meq-run --mesh-only` and
-        is not timed.
+        PolynomialDegree, [mesh.generate] PlasmaSize ), the threads and the
+        output grid changed, and its input tables named by absolute path, since
+        the variant is written under runs/. The mesh is generated once by
+        `meq-run --mesh-only` and is not timed.
+
+Before anything runs, shapes.py --check must find the tracked case current, so
+the two inputs state one problem.
 
 TWO RACES, as race_desc.py has them, and only the second decides anything.
 
@@ -29,10 +36,12 @@ shares, R in [ 0.05, 0.63 ] and |z| <= 1.5, less geq's four grid corners
 (README.md: there geq carries half the plasma's flux, M-263).  MEQ samples
 them exactly: [output] GridRMin..GridZMax put its grid on those nodes, read from
 psi*, with no interpolation.  The reference is MEQ at RefinementLevels = 2,
-k = 4, MR-4c's reference, bounded at 2.4e-08 max (M-263), and it is NOT a race
-entry.  So targets below about 1e-07 are not resolvable here and none is set.
-NEITHER CODE IS THE TRUTH; this one is the finer of the two by two orders, and
-geq's 513 is checked against it before anything is timed.
+k = 4, and it is NOT a race entry. ITS OWN ERROR IS NOT KNOWN IN ADVANCE on
+these cases, so the summary prints the nearest rungs below it, L2 k = 3 and
+L1 k = 4, against it: a target below those is not resolved by this reference.
+NEITHER CODE IS THE TRUTH, and geq run as its user runs it -- its phi_0 as its
+own global solve leaves it, its profiles through its splines -- converges to
+its own limit, which this race shows rather than corrects.
 
 THE PROTOCOL is race_nke.py's: fresh processes, the arms interleaved, the
 median of repeats, quiet waited for before anything runs, provenance on every
@@ -42,7 +51,7 @@ that run (race_nke.py's own finding) and would add a minute's wait to each.  Bot
 OMP, MKL and OpenBLAS all set to it.
 
     cd /home/ian/projects/meq/source
-    tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
+    tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py --case double
 
 THE DEVICE ARM is `--meq-device cuda`, with `--meq-build single` for
 single precision and `--geq ""` to reuse a host race's geq rows. geq has no
@@ -54,7 +63,7 @@ GPU is consumer silicon, with FP64 at 1/32 to 1/64 of FP32, so a double device
 time here is evidence about this card and not about a device.
 
 MEQ is the INSTALLED binary, install/<name>/bin/meq (tools/meqpaths.py), and
-results go to runs/geq-benchmark/race/<stamp>/, outside the source tree.
+results go to runs/geq-benchmark/race/<stamp>-<case>/, outside the source tree.
 """
 import argparse
 import json
@@ -73,9 +82,10 @@ import meqpaths                                                 # noqa: E402
 
 GEQ_SRC = meqpaths.sibling("geq", "src")
 VENV = meqpaths.source("tools", "freegs4e-benchmark", "venv", "bin", "python")
-EXAMPLE = meqpaths.source("examples", "mirror-rotating.toml")
 sys.path.insert(0, meqpaths.source("tools", "freegs4e-benchmark"))
 from cores import physical_cores                                # noqa: E402
+sys.path.insert(0, HERE)
+import shapes                                                   # noqa: E402
 
 #: The reference's install: double precision, on the host, whatever the ladder.
 REFERENCE_BUILD = "double"
@@ -86,22 +96,25 @@ TARGETS = (1e-4, 1e-5, 1e-6, 1e-7)
 
 
 # ---------------------------------------------------------------------------
-# The geq arm, in its own process
+# The geq arm: the case's script, run by path
 # ---------------------------------------------------------------------------
 
-def geq_child(n, rtol, out):
-    """One geq solve: export_rotating.py's solve(), exactly as the reference
-    is generated, timed inside the process as well as around it."""
-    sys.path.insert(0, HERE)
-    import export_rotating as er
-    er.SHAPE["name"] = "skew"
-    er.R_MACH["value"] = er.SHAPES["skew"][1]
-    omega_peak = er.omega_peak_for(2.0)
-    _, _, rec = er.solve(n, "direct", omega_peak, rtol, 400, cache=None)
-    np.savez(out, psi65=rec["psi65"], R65=rec["R65"], Z65=rec["Z65"],
-             wall=rec["wall"], iterations=rec["iterations"],
-             relchange=rec["relchange"], psi_axis=rec["psi_axis"],
-             psi_bndry=rec["psi_bndry"])
+def geq_script(case, directory, n, rtol, output):
+    """The case's geq script with its grid, its Picard tolerance and its output
+    changed, and nothing else.  Every substitution must match exactly once."""
+    source = os.path.join(shapes.CASES, case, f"geq_{case}.py")
+    with open(source) as handle:
+        text = handle.read()
+    for old, new in (("\nN = 257\n", f"\nN = {n}\n"),
+                     ("\nRTOL = 1.0e-10\n", f"\nRTOL = {rtol!r}\n"),
+                     (f'\nOUTPUT = "geq-{case}.npz"\n', f'\nOUTPUT = "{output}"\n')):
+        if text.count(old) != 1:
+            raise SystemExit(f"{source}: '{old.strip()}' matched {text.count(old)} times")
+        text = text.replace(old, new)
+    path = os.path.join(directory, f"geq_{case}_n{n}_r{rtol:g}.py")
+    with open(path, "w") as handle:
+        handle.write(text)
+    return path
 
 
 def thread_env(threads):
@@ -110,23 +123,28 @@ def thread_env(threads):
             "OPENBLAS_NUM_THREADS": t, "MPLBACKEND": "Agg"}
 
 
-def run_geq(n, rtol, threads, out):
+def run_geq(case, directory, n, rtol, threads, tag):
+    """One geq solve, `python <script>` in `directory`: timed around the
+    process, and inside it by the script's own clock around solve_equilibrium."""
+    os.makedirs(directory, exist_ok=True)
+    output = tag + ".npz"
+    script = geq_script(case, directory, n, rtol, output)
     env = thread_env(threads)
     env["PYTHONPATH"] = GEQ_SRC + os.pathsep + env.get("PYTHONPATH", "")
     started = time.perf_counter()
-    done = subprocess.run([VENV, os.path.abspath(__file__), "--geq-child",
-                           str(n), str(rtol), out],
-                          capture_output=True, text=True, env=env,
-                          cwd=os.path.dirname(os.path.abspath(out)))
+    done = subprocess.run([VENV, script], capture_output=True, text=True, env=env,
+                          cwd=directory)
     seconds = time.perf_counter() - started
     if done.returncode != 0:
-        return dict(ok=False, seconds=seconds, why=done.stderr[-400:])
-    data = np.load(out)
-    return dict(ok=True, seconds=seconds, solve=float(data["wall"]),
-                iterations=int(data["iterations"]),
-                relchange=float(data["relchange"]),
-                psi=np.asarray(data["psi65"]), R=np.asarray(data["R65"]),
-                Z=np.asarray(data["Z65"]), unknowns=n*n)
+        return dict(ok=False, seconds=seconds, why=done.stdout[-400:] + done.stderr[-400:])
+    data = np.load(os.path.join(directory, output))
+    step = (n - 1)//(COARSE - 1)
+    psi, R, Z = (np.asarray(data[k])[::step, ::step] for k in ("psi", "R", "Z"))
+    relchange = re.findall(r"psi_relchange=([0-9.eE+-]+)", done.stdout)
+    return dict(ok=True, seconds=seconds, solve=float(data["solve_seconds"]),
+                iterations=len(re.findall(r"^iter \d+:", done.stdout, re.MULTILINE)),
+                relchange=float(relchange[-1]) if relchange else float("nan"),
+                psi=psi, R=R, Z=Z, unknowns=n*n)
 
 
 # ---------------------------------------------------------------------------
@@ -146,25 +164,26 @@ INPUT_TABLE = re.compile(r'^((?:Omega|Temperature|Density)File = ")([^"/][^"]*)"
                          re.MULTILINE)
 
 
-def meq_config(directory, mesh, level, order, prefix, plasma_size=0.1):
-    """The shipped example with the resolution, the mesh's path and the output
+def meq_config(case, directory, mesh, level, order, prefix, plasma_size=0.1):
+    """The case's meq.toml with the resolution, the mesh's path and the output
     changed and its input tables made absolute, and nothing else.  Every
     substitution must match exactly once."""
-    with open(EXAMPLE) as handle:
+    source = os.path.join(shapes.CASES, case, "meq.toml")
+    with open(source) as handle:
         text = handle.read()
-    examples = os.path.dirname(EXAMPLE)
+    here = os.path.dirname(source)
     text, tables = INPUT_TABLE.subn(
-        lambda m: m.group(1) + os.path.normpath(os.path.join(examples, m.group(2))) + '"',
+        lambda m: m.group(1) + os.path.normpath(os.path.join(here, m.group(2))) + '"',
         text)
     if tables != 4:
-        raise SystemExit(f"{EXAMPLE}: {tables} input tables, expected 4")
+        raise SystemExit(f"{source}: {tables} input tables, expected 4")
     subs = [
-        ('File = "mirror-rotating.msh"',
+        (f'File = "mirror-{case}.msh"',
          f'File = "{mesh}"\nRefinementLevels = {level}'),
         ("PolynomialDegree = 2", f"PolynomialDegree = {order}"),
         ("PlasmaSize = 0.1", f"PlasmaSize = {plasma_size}"),
         ('Directory = "."', f'Directory = "{directory}"'),
-        ('Prefix = "mirror-rotating"', f'Prefix = "{prefix}"'),
+        (f'Prefix = "mirror-{case}"', f'Prefix = "{prefix}"'),
         ("GridNR = 129", f"GridNR = {COARSE}\n"
                          f"GridRMin = {GRID['rmin']}\nGridRMax = {GRID['rmax']}"),
         ("GridNZ = 129", f"GridNZ = {COARSE}\n"
@@ -172,7 +191,7 @@ def meq_config(directory, mesh, level, order, prefix, plasma_size=0.1):
     ]
     for old, new in subs:
         if text.count(old) != 1:
-            raise SystemExit(f"{EXAMPLE}: '{old}' matched {text.count(old)} times")
+            raise SystemExit(f"{source}: '{old}' matched {text.count(old)} times")
         text = text.replace(old, new)
     path = os.path.join(directory, prefix + ".toml")
     with open(path, "w") as handle:
@@ -190,10 +209,10 @@ def trace_unknowns(mesh_path, order):
     return elements, ((3*elements + boundary)//2)*(order + 1)
 
 
-def run_meq(directory, mesh, level, order, threads, tag, plasma_size=0.1,
+def run_meq(case, directory, mesh, level, order, threads, tag, plasma_size=0.1,
             build=REFERENCE_BUILD, device=None):
     os.makedirs(directory, exist_ok=True)
-    config = meq_config(directory, mesh, level, order, tag, plasma_size)
+    config = meq_config(case, directory, mesh, level, order, tag, plasma_size)
     started = time.perf_counter()
     # --mesh-ready: the mesh was made once by meq-run --mesh-only from the same
     # [mesh.generate] block, which no variant changes. --device cuda takes the
@@ -315,8 +334,8 @@ def provenance(ladder):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--geq-child", nargs=3, metavar=("N", "RTOL", "OUT"),
-                    help=argparse.SUPPRESS)
+    ap.add_argument("--case", choices=tuple(shapes.SHAPES), default="skew",
+                    help="the profile shape: tools/geq-benchmark/cases/<case>/")
     ap.add_argument("--out", default=None)
     ap.add_argument("--geq", default="65,129,257,513",
                     help="geq grids; each must contain the 65 grid")
@@ -352,25 +371,28 @@ def main(argv=None):
                          "before each run")
     args = ap.parse_args(argv)
 
-    if args.geq_child:
-        geq_child(int(args.geq_child[0]), float(args.geq_child[1]), args.geq_child[2])
-        return
+    stale = shapes.check([args.case])
+    if stale:
+        raise SystemExit("the tracked case is not what shapes.py writes: "
+                         + " ".join(stale) + "; run tools/geq-benchmark/shapes.py")
+    case = args.case
 
     print(f"waiting for the load average to stay under {args.quiet} for 60 s ...",
           flush=True)
     if not wait_for_quiet(args.quiet, 60, 3600):
         print("  (it never did; running anyway, and saying so)", flush=True)
     out = os.path.abspath(args.out or meqpaths.runs(
-        "geq-benchmark", "race", time.strftime("%Y%m%d-%H%M%S")))
+        "geq-benchmark", "race", time.strftime("%Y%m%d-%H%M%S") + "-" + case))
     os.makedirs(out, exist_ok=True)
     threads = ([int(t) for t in args.threads.split(",")] if args.threads
                else sorted({1, physical_cores()}))
-    record = dict(provenance=provenance(args.meq_build), threads=threads, runs=[])
+    record = dict(case=case, provenance=provenance(args.meq_build), threads=threads,
+                  runs=[])
     print(json.dumps(record["provenance"], indent=1), flush=True)
 
     # THE MESH, ONCE, UNTIMED: meq-run's generator on the shipped block.
     def make_mesh(path, size):
-        probe = meq_config(out, path, 0, 2, f"mesh-probe-{size:g}", size)
+        probe = meq_config(case, out, path, 0, 2, f"mesh-probe-{size:g}", size)
         done = subprocess.run([install_binary(REFERENCE_BUILD, "meq-run"),
                                "--mesh-only", probe],
                               capture_output=True, text=True, cwd=out)
@@ -385,22 +407,20 @@ def main(argv=None):
 
     # THE REFERENCE, UNTIMED: MEQ at level 2, k = 4.
     print("\nreference: MEQ, RefinementLevels = 2, k = 4", flush=True)
-    ref = run_meq(os.path.join(out, "reference"), mesh, 2, 4, max(threads), "reference")
+    ref = run_meq(case, os.path.join(out, "reference"), mesh, 2, 4, max(threads),
+                  "reference")
     if not ref["ok"]:
         raise SystemExit("the reference did not solve:\n" + ref["why"])
     if not np.all(ref["inside"] == 1):
         raise SystemExit("a geq node is outside MEQ's domain")
     reference = ref["psi"]
 
-    # geq's NODES ARE MEQ's NODES, checked rather than assumed, on one cheap run.
-    first = run_geq(65, 1e-6, 1, os.path.join(out, "geq-nodes.npz"))
-    if not first["ok"]:
-        raise SystemExit("geq did not run:\n" + first["why"])
-    node_gap = max(float(np.max(np.abs(first["R"] - ref["R"][:, None]))),
-                   float(np.max(np.abs(first["Z"] - ref["Z"][None, :]))))
-    print(f"geq's 65 x 65 nodes against MEQ's grid: {node_gap:.2e} m", flush=True)
-    if node_gap > 1e-12:
-        raise SystemExit("MEQ's grid is not on geq's nodes")
+    # geq's NODES ARE MEQ's NODES, checked rather than assumed, on every geq
+    # run that solves: a geq grid that does not converge is a race row, FAILED,
+    # and does not stop the race.
+    def node_gap(r):
+        return max(float(np.max(np.abs(r["R"] - ref["R"][:, None]))),
+                   float(np.max(np.abs(r["Z"] - ref["Z"][None, :]))))
 
     entries = []
     for n in (int(x) for x in args.geq.split(",") if x):
@@ -441,15 +461,19 @@ def main(argv=None):
                 print("  (the machine never went idle; running anyway, and saying so)")
             load = busy_cores()
             if arm == "geq":
-                r = run_geq(cfg["n"], cfg["rtol"], cfg["threads"],
-                            os.path.join(out, f"geq-{cfg['n']}-{cfg['rtol']:g}-t{cfg['threads']}.npz"))
+                tag = f"geq-{cfg['n']}-{cfg['rtol']:g}-t{cfg['threads']}-r{repeat}"
+                r = run_geq(case, os.path.join(out, tag), cfg["n"], cfg["rtol"],
+                            cfg["threads"], tag)
             else:
                 tag = (f"{arm}-ps{cfg['plasma_size']:g}-L{cfg['level']}-k{cfg['order']}"
                        f"-t{cfg['threads']}-r{repeat}")
-                r = run_meq(os.path.join(out, tag), ladder, cfg["level"], cfg["order"],
+                r = run_meq(case, os.path.join(out, tag), ladder, cfg["level"], cfg["order"],
                             cfg["threads"], tag, cfg["plasma_size"],
                             args.meq_build, args.meq_device)
             row = dict(arm=arm, repeat=repeat, load=load, **cfg)
+            if r["ok"] and arm == "geq" and node_gap(r) > 1e-12:
+                raise SystemExit(f"geq's {cfg['n']}^2 nodes are not MEQ's grid:"
+                                 f" {node_gap(r):.2e} m")
             if r["ok"]:
                 row.update(seconds=r["seconds"], solve=r["solve"],
                            iterations=r["iterations"], unknowns=r["unknowns"])
@@ -493,7 +517,7 @@ def summarise(record, out):
                           max=first["max"], rms=first["rms"],
                           unknowns=first["unknowns"],
                           ps=first.get("plasma_size", float("nan"))))
-    lines = ["# MEQ against geq on the rotating mirror", "",
+    lines = [f"# MEQ against geq on the rotating mirror, case {record['case']}", "",
              "```", json.dumps(record["provenance"], indent=1), "```", "",
              "| arm | resolution | threads | takes | wall s | solve s | unknowns | max err | rms err |",
              "|---|---|---|---|---|---|---|---|---|"]
@@ -504,6 +528,16 @@ def summarise(record, out):
         lines.append(f"| {t['arm']} | {res} | {t['threads']} | {t['takes']} | "
                      f"{t['seconds']:.2f} | {t['solve']:.2f} | {t['unknowns']} | "
                      f"{t['max']:.2e} | {t['rms']:.2e} |")
+    # WHAT THE REFERENCE RESOLVES: its own error is not known on these cases,
+    # so its nearest rungs are read against it.
+    rungs = {(t["key"][1], t["key"][2]): t["max"] for t in table
+             if t["arm"] == "meq" and t["ps"] == 0.1
+             and (t["key"][1], t["key"][2]) in ((2, 3), (1, 4))}
+    if rungs:
+        lines += ["", "The reference, L2 k = 4, has no error bound of its own here: its "
+                  "nearest rungs read " + ", ".join(
+                      f"L{lv} k = {k} {e:.2e}" for (lv, k), e in sorted(rungs.items()))
+                  + " max against it, and a target below those is not resolved."]
     for threads in sorted({t["threads"] for t in table}):
         lines += ["", f"## Matched unknowns, {threads} thread(s): each geq grid against the "
                   "MEQ run whose faces x ( k + 1 ) is nearest its n^2", "",

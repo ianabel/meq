@@ -352,32 +352,88 @@ Picard runs with `atol = 0` and `rtol = 2e-09`, because geq's default
 `atol = 1e-06` is what actually stops it. `--cache DIR` keeps each solve and
 reuses it.
 
+## The shape cases: `shapes.py` and `cases/`
+
+One mirror, four profile shapes, each written as **a geq user's script and a
+MEQ user's configuration** of the same problem. `shapes.py` is the one place
+they are defined; it writes `cases/<shape>/`, and `--check` asserts the tracked
+files are what it would write.
+
+| | |
+|---|---|
+| `geq_<shape>.py` | geq's input. geq has no input file: its user poses a case in a script, as geq's own `tools/run.py` does, and this is one in that shape, calling only geq's and freegs4e's interface with nothing patched |
+| `meq.toml` | MEQ's input, for `meq-run` |
+| `*.dat` | MEQ's profile tables, in `Ψ = 1 − ψ_n` with their slopes |
+
+**The problem is geq's own statement of a mirror**: the electron density is
+given where each flux surface crosses `z = 0` (`density_Z0`) and the deuterons
+follow by quasineutrality, which is MEQ's `Gauge = "midplane"` with the deuteron
+`Neutralising`. geq's machine, the labels at the electrode `( 0.10, 0 )` and the
+limiter `( 0.35, 0 )`, `T_e` and `T_D` peaking at 1.28 and 1.53 keV, `n_e( z = 0 )`
+at 2e19, and `ω` at geq-Mach 2 on `R = 0.25 m`. Every profile is
+`f_edge + ( f_peak − f_edge ) g( ψ_n )` with one shape `g` per case:
+
+| case | `g( ψ_n )` | edge order `j` |
+|---|---|---|
+| `flattop` | `( 1 − u⁴ )²`, `u = 2ψ_n − 1`: broad, flat across the middle | 1, 1 |
+| `quartic` | `16 ψ_n²( 1 − ψ_n )²`: singly peaked | 1, 1 |
+| `skew` | `C ψ_n³( 1 − ψ_n )⁴`, peak at 3/7: MR-4's shape | 2, 3 |
+| `double` | `C ψ_n³( 1 − ψ_n )³[ ( ψ_n − 0.55 )² + 0.01 ]`: peaks of 1 and 0.485, a dip to 0.222 | 2, 2 |
+
+**The source must vanish at both labels**, and every `g` is flat there. A
+parabola `1 − u²` is not, which is why the flat-top stands in for it. Under the
+midplane statement a flat density still carries `−n m ω² R₀R₀′/T` in `dp/dψ`
+wherever `ω` does not vanish, so **the density falls to 1e-6 of its peak at both
+labels** (geq's own habit: `tools/run.py`'s edge is 1e14 against 5e19) and the
+source there is about 1e-7 of its peak.
+
+**`ω` cannot vanish at the labels here, and that is geq's limit, not the
+problem's.** geq's first `φ₀` guess (`solve_quasineutrality_global_no_phi0`) is a
+shape times `m_e ω² R²/2e`, which vanishes with `ω`: on the skew at 129², `ω`'s
+edge at 0.2 and 0.01 of its peak solves in 13 and 14 Picard steps, and at 1e-4
+raises `Can't find a phi0 guess` before the first. So `ω`'s edge is 0.1 of its
+peak.
+
+```sh
+cd /home/ian/projects/meq/source
+python3 tools/geq-benchmark/shapes.py            # rewrite cases/
+python3 tools/geq-benchmark/shapes.py --check    # assert they are current
+```
+
 ## The race: `race_geq.py`
 
-MEQ and geq solving **the same rotating mirror**, `reference/rotating/`'s
-problem, each driven the way a user drives it, and timed.
+MEQ and geq solving **the same rotating mirror**, one of `cases/`, each run
+**through its own user's front end** and timed. `--case` names the shape, and
+`skew` is the default.
 
-* **geq** runs `export_rotating.solve( n, "direct", ... )` in a fresh process:
-  geq's direct free-boundary Picard on an `n × n` grid, with this directory's
-  three changes (see *The rotating mirror*). `n` is 65, 129, 257 or 513, each
-  holding the 65 grid. It runs at two Picard tolerances: `1e-6`, geq's own
-  stopping scale, and `2e-9`, the reference's.
-* **MEQ** runs `examples/mirror-rotating.toml` through the installed
+* **geq** runs the case's `geq_<shape>.py` by path in a fresh process. The
+  harness writes a copy with its `N`, `RTOL` and `OUTPUT` lines changed and
+  nothing else, and imports nothing of geq's itself. `N` is 65, 129, 257 or
+  513, each holding the 65 grid, at two Picard tolerances: `1e-6`, geq's own
+  stopping scale, and `2e-9`.
+* **MEQ** runs the case's `meq.toml` through the installed
   `install/double/bin/meq`, with only `[mesh] RefinementLevels`,
   `[discretisation] PolynomialDegree`, the threads and the output grid changed,
   plus `[mesh.generate] PlasmaSize` with `--plasma-size`. The variant is written
-  under `runs/`, so its input tables are named by absolute path. The mesh is generated once by `meq-run --mesh-only` and is
-  not timed. **PlasmaSize is the knob that matters**: MEQ's error peaks inside
-  the plasma near the midplane, and uniform refinement also refines the vacuum
-  out to Γ. Run the ladder at 0.1, 0.05 and 0.025, with `--geq ""` for the
-  extra two.
+  under `runs/`, so its input tables are named by absolute path. The mesh is
+  generated once by `meq-run --mesh-only` and is not timed. **PlasmaSize is the
+  knob that matters**: MEQ's error peaks inside the plasma near the midplane,
+  and uniform refinement also refines the vacuum out to Γ.
+
+**geq is run as its user runs it**, so it converges to its own limit: its `φ₀`
+as its global solve leaves it, its profiles through its splines, the boundary
+freegs4e's default direct integral. That is what the race shows; the
+controlled comparison of the two codes' equations is `export_rotating.py`'s,
+below, and it is not a race.
 
 **The error is measured at geq's nodes.** `[output] GridRMin` to `GridZMax`
 put MEQ's grid exactly on geq's 65 × 65 common nodes, sampled from the exact
 `ψ*` rather than interpolated. The harness checks the two node sets agree
-before anything is timed. geq's four corners are dropped, for the reason above.
-The reference is MEQ at level 2, `k = 4`, bounded at 2.4e-08 (M-263), and it
-is not a race entry. So no target below 1e-07 is set.
+on every geq run that solves; a geq run that does not converge is a FAILED row,
+not the end of the race. geq's four corners are dropped, for the reason above.
+The reference is MEQ at level 2, `k = 4`, and it is not a race entry. Its own
+error is not known on these cases, so `race.md` reads its nearest rungs, L2
+`k = 3` and L1 `k = 4`, against it; a target below those is not resolved.
 
 **Two tables, as in `race_desc.py`, and only the second decides anything.**
 *Matched unknowns* sets geq's `n²` against MEQ's `faces × ( k + 1 )` trace
@@ -394,7 +450,7 @@ count, with OMP, MKL and OpenBLAS all set to it.
 
 ```sh
 cd /home/ian/projects/meq/source
-tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/race_geq.py --case double
 ```
 
 **MEQ on the GPU**: `--meq-device cuda`, with `--meq-build single` for
@@ -404,6 +460,8 @@ machine's GPU is consumer silicon, with FP64 at 1/32 to 1/64 of FP32, so a
 double device time here says something about this card and not about devices.
 
 It takes about an hour, most of it geq's 513² solves. The results go to
-`runs/geq-benchmark/race/<stamp>/race.md` and `race.json`, under the project
-directory. The published
-tables are M-274 for the host race and M-276 for the device race.
+`runs/geq-benchmark/race/<stamp>-<case>/race.md` and `race.json`, under the
+project directory. M-274 (host) and M-276 (device) raced
+`reference/rotating/`'s problem with a geq arm that called
+`export_rotating.solve()` inside the harness, not a geq script, so their tables
+are not this protocol's and are not comparable with it.
