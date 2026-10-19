@@ -5437,7 +5437,9 @@ int main( int argc, char **argv )
 					axisCheck = *asked;
 					axisChecked = true;
 				}
-				else
+				// A mirror's label was reported above as psi_inner, and a mirror
+				// has no axis for the check to be about.
+				else if ( !config->getSource().supportIsBox() )
 					std::printf( "     psi_ax = %.6e at the prescribed point ( %g, %g ), a "
 					             "label and not a located magnetic axis: the magnetic-axis "
 					             "check does not apply\n",
