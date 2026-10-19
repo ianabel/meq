@@ -228,7 +228,7 @@ def build(npz_path, outdir, stem=None, degree=2, target_elements=4000,
 
     toml = f"""# {header}
 #
-#     meq examples/{stem}.toml
+#     meq ../../source/examples/{stem}.toml
 #
 # GENERATED -- edit tools/freegs4e-benchmark/make_case.py, not this file, and
 # re-run tools/freegs4e-benchmark/make_fixed.sh.
@@ -347,18 +347,28 @@ Elongation = {kappa:.10f}
 CosCoefficients = {cos_list}
 SinCoefficients = {sin_list}
 
-# THE RAMP IS PART OF THE PROBLEM STATEMENT, NOT A TUNING PARAMETER.
+# THE GUESS IS A CORE, BUILT FROM NOTHING BUT [boundary.shape] AND PsiAxis.
 #
 # These sources do not vanish at psi = 0 -- see the two numbers at the top of
 # this file -- so this is not the trivial branch of CLAUDE.md's Traps section.
 # It is the SECOND SOLUTION beside it, which that file records for the
 # high-beta source: "this equation has a small positive solution and a large
-# one ... Newton from the Dirichlet datum walks straight onto it". The
-# amplitude is the axis height the reference itself has, so the iterate starts
-# at the right SCALE and Psi starts inside its own table.
+# one ... Newton from the Dirichlet datum walks straight onto it". So the
+# iterate starts at the axis height the reference itself has, and Psi starts
+# inside its own table.
+#
+# A PARABOLOID ON THE CURVE'S OWN ELLIPSE AND NOT A RAMP IN z. A ramp is odd
+# in z and these equilibria are not, so Newton spends its first steps undoing
+# it: on the circular case it crawls four steps under 1/64 of a Newton step
+# and takes 13 to converge, against 5 from this. Same psi_ax to every printed
+# digit on all six machines; MEASUREMENTS.md M-296.
 [initialguess]
-Type = "ramp"
+Type = "bump"
 Amplitude = {psi_ax:.10e}
+CentreR = {R0:.10f}
+CentreZ = {Z0:.10f}
+RadiusR = {a:.10f}
+RadiusZ = {kappa * a:.10f}
 
 [source]
 Type = "mhd"

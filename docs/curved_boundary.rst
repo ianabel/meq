@@ -142,8 +142,8 @@ implemented by :cpp:class:`meq::BoundaryShape`:
 Both refuse rather than approximate. A surface is rejected if it reaches or
 crosses the axis — the operator's :math:`1/R` is not integrable through
 :math:`R = 0` — and if it is **not star-shaped** about its own centre, since
-the level set is evaluated by bisecting on the poloidal angle and that is only
-legitimate when the polar angle increases monotonically. The message names the
+the level set is evaluated by a bracketed root find on the poloidal angle and
+that is only legitimate when the polar angle increases monotonically. The message names the
 angle at which monotonicity failed.
 
 .. note::

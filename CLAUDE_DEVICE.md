@@ -908,12 +908,15 @@ Jacobian while staying in the residual.
     switches the whole coil term on or off. That is a boundary predicate, not a
     tolerance.
 * **`#ifdef MFEM_USE_SINGLE` in a translation unit that includes no MFEM header
-  is silently false.** `MachineFixedBoundary.cpp` did exactly that.
+  is silently false.** A test that drives the shipped binary and includes
+  nothing of the library is exactly that translation unit.
   `mfem/config/config.hpp` defines the macro.
-* **Coin tosses**, measured with M-186's instrument. `pedestalSelfConverges`,
-  `fixed-h-circular` and `PlasmaConnectivity`'s confined half each fail at
-  `MKL_NUM_THREADS=1` and converge at higher values. All were repaired by
-  relaxing a **precondition**, two of them by skipping a case by name.
+* **Coin tosses**, measured with M-186's instrument. `pedestalSelfConverges`
+  and `PlasmaConnectivity`'s confined half each fail at `MKL_NUM_THREADS=1` and
+  converge at higher values, and both are repaired by relaxing a
+  **precondition**. `fixed-h-circular` crawls from a ramp at every draw and
+  converges in 4 steps from a core at every draw, so `MachineFixedBoundary`
+  asserts it in single with no skip (M-296).
   `diverted-tokamak` lands on a branch the driver's axis-source guard refuses —
   *the safety net works; the branch does not* — while `diverted-tokamak-xpoint`,
   on the same machine and mesh, solves.

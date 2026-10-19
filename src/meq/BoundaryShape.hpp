@@ -117,12 +117,21 @@ namespace meq
 			/// distance: MarkLevelSetSubdomain wants a sign at the vertices and
 			/// VertexConePath wants a root along a ray, and both are unaffected.
 			///
-			/// The curve radius at a given polar angle is found by bisecting on
-			/// theta, which is legitimate exactly when the polar angle is strictly
-			/// increasing in theta -- that is, when the curve is star shaped about
-			/// its centre. The constructor checks it, because a curve that is not
-			/// would give bisection several roots to choose between and it would
-			/// return one of them without complaint.
+			/// The curve radius at a given polar angle is found by a bracketed
+			/// Newton iteration on theta, which is legitimate exactly when the
+			/// polar angle is strictly increasing in theta -- that is, when the
+			/// curve is star shaped about its centre. The constructor checks it,
+			/// because a curve that is not would give the iteration several roots
+			/// to choose between and it would return one of them without
+			/// complaint.
+			///
+			/// THIS IS THE HOT FUNCTION OF A CURVED RUN. VertexConePath marches
+			/// and bisects along a fan of rays from every vertex of Gamma_h,
+			/// MarkLevelSetSubdomain samples every background element, and the
+			/// extension integrator finds an endpoint at every face quadrature
+			/// point, each one call here. So the root is found from a table of the
+			/// polar angle by Newton with a bisection safeguard, a few curve
+			/// evaluations, rather than by fifty halvings of [ 0, 2 pi ].
 			double levelSet( double radius, double z ) const;
 
 			/// The polar angle about the centre of the curve point at @a theta,
@@ -141,18 +150,33 @@ namespace meq
 			                  double &zMin, double &zMax ) const;
 
 		private:
-			/// theta_R, MXH eq (3).
-			double shiftedAngle( double theta ) const;
+			/// theta_R, MXH eq (3), and its derivative in theta.
+			///
+			/// cos( n theta ) and sin( n theta ) come from the angle-addition
+			/// recurrence off one cos and sin of theta, rather than from a call
+			/// each: the sum is the whole cost of a curve evaluation, and at the
+			/// twenty harmonics the shipped machines carry the recurrence is 40
+			/// fewer trigonometric calls for an error growing like n eps.
+			double shiftedAngle( double theta, double &slope ) const;
 
-			/// Bisect for the theta whose point has polar angle @a target.
+			/// The theta whose point has polar angle @a target, in [ 0, 2 pi ].
 			double parameterAtPolarAngle( double target ) const;
 
 			/// Throws unless the polar angle increases strictly with theta.
 			void requireStarShaped() const;
 
+			/// The polar angle at tableSize + 1 equally spaced theta on
+			/// [ 0, 2 pi ], ends pinned at 0 and 2 pi: the bracket and the
+			/// starting point for parameterAtPolarAngle(). Increasing, since it is
+			/// built after requireStarShaped().
+			void buildPolarTable();
+
+			static int const tableSize = 256;
+
 			double radius0, z0, minor, elongationValue;
 			std::vector<double> cosCoefficients;   ///< c_0 ... c_N
 			std::vector<double> sinCoefficients;   ///< s_1 ... s_N
+			std::vector<double> polarTable;
 	};
 }
 

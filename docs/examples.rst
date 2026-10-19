@@ -185,7 +185,8 @@ and the claim is measured: :math:`k+2` in :math:`\psi^{*}`.
    domain larger than the plasma; ``coils-rectangle.toml`` is the small one that
    does.
 
-**What they cost and what they agree to** is in ``MEASUREMENTS.md`` M-147, and
+**What they cost and what they agree to** is in ``MEASUREMENTS.md`` M-147 and
+M-296, and
 ``tests/convergence/MachineFixedBoundary.cpp`` is the acceptance — it runs the
 shipped files through the shipped binary, because what rots about an example is
 the *file*.
@@ -257,11 +258,16 @@ Coverage gaps
 
 For completeness, since a reader looking for an example of these will not find
 one. No shipped example uses ``[mesh] File``, ``Strategy = "maximum"``, a
-tabulated ``Omega`` or ``Temperature``, or more than two species.
+tabulated ``Omega`` or ``Temperature``, more than two species, or
+``[initialguess] Type = "ramp"``.
 
-``[boundary.shape] Type = "mxh"`` and ``[initialguess] Type = "ramp"`` were on
-that list until the six machine cases above were added, and both are now
-exercised by all six.
+``[boundary.shape] Type = "mxh"`` was on that list until the six machine cases
+above were added, and is now exercised by all six. They start from a
+``"bump"`` on their own curve's ellipse — ``CentreR``, ``CentreZ`` at its
+centre, ``RadiusR`` its minor radius and ``RadiusZ`` that times its
+elongation — rather than from a ramp: a ramp is odd in :math:`z`, these
+equilibria are not, and Newton spends its first steps undoing it. The answer is
+the same either way; the iteration count is not (``MEASUREMENTS.md`` M-296).
 
 Those spellings come from :doc:`configuration` and from
 ``tests/unit/ConfigTests.cpp``, which does exercise all of them and is a good

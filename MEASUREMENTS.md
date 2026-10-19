@@ -6015,6 +6015,11 @@ THE ORDER THEY REACH.** `examples/fixed-*.toml`, written by
 **The whole set is 5 minutes 32 seconds**, against `FreeBoundaryCoupling`'s 809
 to 1550 s for one binary.
 
+**The `Newton` and `wall` columns are the ramp guess and the bisected level set,
+and neither is what ships**: [M-296](#m-296) has the same six with both
+changed — the same `psi_ax` to every printed digit, 4 to 5 Newton steps, and
+the whole set 3.9× faster.
+
 and over the whole `129²` output grid, dropping the band, through
 `tools/freegs4e-benchmark/compare.py`:
 
@@ -6750,6 +6755,12 @@ as `M` rises, which is the posing getting easier as the representation improves.
 | `fixed-g-mastu` | 1e-03 | 11.35 | k1r0 | 33.70 | M=12 | 3.87 | **2.97×** |
 | `fixed-f-diiid` | 1e-03 | 9.95 | k1r0 | 31.26 | M=16 | 2.43 | **3.14×** |
 | `fixed-f-diiid` | **1e-04** | **10.99** | k2r0 | **103.21** | M=20 | 38.11 | **9.39×** |
+
+**MEQ'S COLUMN IS THE CODE BEFORE [M-296](#m-296)**, which takes the
+curved-boundary setup that dominated every MEQ arm here from seconds to
+tenths of a second and the guess from a ramp to a core. The ratios below are
+therefore an UNDERSTATEMENT of the shipped code's, and a re-race is what
+would replace them.
 
 **THE MARGIN WIDENS WITH ACCURACY, AND THAT IS THE RESULT RATHER THAN THE
 RATIO.** MEQ buys an order on DIII-D for **1.04 s** — 9.95 s at k1r0 to 10.99 s
@@ -12110,6 +12121,10 @@ problem in this format and not of the install — and the same statement M-186
 made about `XPointBorder` and M-78 about `PedestalConvergence`, now for a third
 case and a third reason.
 
+**[M-296](#m-296) takes this case off the knife edge**: the shipped file starts
+from a core on its own ellipse rather than a ramp, and in single converges in 3
+to 4 Newton steps at all four draws, with no crawl.
+
 **WHAT THE TOLERANCE WORK IS WORTH, AND THE FIRST ONE IS THE CLEANEST RESULT IN
 THIS SECTION.**
 
@@ -12903,6 +12918,8 @@ the same repair M-186 and `pedestalConvergenceIsAResolutionThreshold` already
 made. Two of them are skipped **by name** — `fixed-h-circular` alone, and only
 in single — so any other machine that fails still fails and a second one joining
 it on the plateau would have to be measured and added rather than absorbed.
+**`MachineFixedBoundary`'s skip is retired by [M-296](#m-296)**, where the case
+no longer reaches the plateau from its shipped guess.
 
 **AND WHERE THEY LAND THEY LAND ON THE RIGHT ANSWER**, which is what says the
 plateau is about the route and not about the format: `PlasmaConnectivity`'s
@@ -19298,3 +19315,93 @@ the double, 5.2e-04 on the quartic, and does not converge on the flat-top.
 **Reproduce.** The agreement pass, `race_geq.py --case <shape>` with the
 arguments above; the race, `race_geq.py --case <shape>`. Each writes
 `race.md` and `race.json` under `runs/geq-benchmark/race/`.
+
+### M-296
+
+**THE FIXED-BOUNDARY MACHINES WERE A CURVED-BOUNDARY SETUP WITH A SOLVE
+ATTACHED: 62 TO 80% OF EVERY RUN WAS `meq::BoundaryShape::levelSet()`, ON ONE
+CORE, AND THE GUESS WAS A RAMP ODD IN `z` ON EQUILIBRIA THAT ARE NOT. BOTH
+FIXED, THE SIX RUN 3.9× FASTER AS A SET — 10.5× ON THE SMALLEST AND 4.0× ON
+DIII-D — TO THE SAME `psi_ax` IN EVERY PRINTED DIGIT, IN 4 TO 5 NEWTON STEPS
+WHERE THEY TOOK 7 TO 13.**
+
+**The level set.** `perf` on `fixed-h-circular` put 66% of all cycles under
+`levelSet()` and 55% in `shiftedAngle()`'s twenty sine and twenty-one cosine
+calls: every call bisected `[ 0, 2 pi ]` fifty times, and every halving summed
+the whole MXH series. Its callers are `mfem::VertexConePath`'s fan of rays from
+each vertex of `Gamma_h` (47% of cycles), the extension integrator's endpoint at
+each face quadrature point (9%, the `re-assembly` leg), `MarkLevelSetSubdomain`
+over every background element (7%, the part that grows with the element count)
+and the output's `extendOutward` (4%). It is now a Newton iteration on the polar
+angle, bracketed and started by a 257-point table built at construction, with a
+bisection safeguard, and the series is summed by the angle-addition recurrence
+off one sine and cosine. **67 to 89× faster per call on the six shipped shapes,
+and within 2.7e-15 m of the bisection on 200,000 random points each**;
+`theLevelSetAgreesWithBisectionOnAManyHarmonicShape` asserts 1e-14 on a
+twenty-harmonic tilted asymmetric shape, through the cut at `0 = 2 pi`, and
+fails at 9.2e-03 with the wrap removed. **Every field in the `.nc` moves by
+round-off** between arms A and B below, which differ only in the level set:
+`psi` by at most 2.5e-15 against peaks of 1.8e-02 to 2.9e-01, **B** by at most
+8.3e-13 against 0.07 to 0.46 T, and no grid node changes mask, on all six.
+
+**The guess.** `[initialguess] Type = "ramp"` is `A ( z - z_mid )/span`. On the
+up-down symmetric circular case Newton spends steps 3 to 6 at damping 7.8e-03
+down to 4.9e-04 with the step direction unchanged (cosine 0.97 to 0.99999) and
+two failed line searches before a full step breaks out: 13 iterations, a crawl
+of 4, and 17 with a crawl of 6 at `RefinementLevels = 1`. Degree 1 and 3 take 12
+and 11, and amplitudes of 0.5, 0.9 and 1.5 of the reference's axis height 10, 9
+and 8 — **the shipped amplitude, the right answer, was the worst of them.**
+`Type = "bump"` on the curve's own ellipse — `CentreR`, `CentreZ` its centre,
+`RadiusR` its minor radius, `RadiusZ` that times its elongation, `Amplitude`
+the file's own `PsiAxis` — uses nothing the file did not already carry. 5
+iterations, and 6 at `RefinementLevels = 1`, with no crawl.
+
+**In single**, on the same binary built from this tree, `OMP = 4`, the same
+file under each guess and [M-221](#m-221)'s instrument:
+
+| `MKL_NUM_THREADS` | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| ramp: Newton, longest crawl | 13, 5 | 12, 5 | 13, 5 | 13, 4 |
+| core: Newton, longest crawl | **4, 0** | **4, 0** | **4, 0** | **4, 0** |
+
+The ramp no longer exits 2 at `MKL = 1` on this tree, so the plateau M-221
+recorded is not reproduced here and is not claimed as the ramp's; what is
+measured is that the ramp crawls at every draw and the core at none.
+`MachineFixedBoundary` in single at `MKL = 1` converges every rung from the
+core in 3 or 4 steps — levels 0, 1 and 2 of the circular case included — so
+its by-name skip of `fixed-h-circular` is retired and the case is asserted in
+both formats.
+
+**Three arms, interleaved per case**: A is `cb8be9e` with the shipped ramp, B
+this level set with the same ramp, C this level set with the bump.
+`OMP = MKL = 8`, `OMP_WAIT_POLICY = passive`. **THE MACHINE WAS NOT QUIET** —
+the load average read 9.6 to 19.0 at the start of the arms, from other work —
+so the seconds are contended and the ratios are what is claimed; setup is one
+core and the least sensitive column.
+
+| case | elements | Newton A, B / C | wall A | wall B | wall C | setup A | setup C | A / C |
+|---|---|---|---|---|---|---|---|---|
+| `fixed-h-circular` | 1,086 | 13 / 5 | 6.24 | 1.26 | 0.59 | 4.18 | 0.08 | **10.5×** |
+| `fixed-a-testtokamak` | 2,480 | 7 / 4 | 9.11 | 1.40 | 1.13 | 6.51 | 0.15 | **8.1×** |
+| `fixed-e-diamagnetic` | 6,033 | 7 / 5 | 16.50 | 2.57 | 2.27 | 11.92 | 0.21 | **7.3×** |
+| `fixed-d-tcv` | 16,406 | 7 / 4 | 39.32 | 9.75 | 8.90 | 23.21 | 0.50 | **4.4×** |
+| `fixed-g-mastu` | 39,399 | 9 / 5 | 59.57 | 20.32 | 20.62 | 35.38 | 0.87 | **2.9×** |
+| `fixed-f-diiid` | 102,840 | 10 / 4 | 159.99 | 91.14 | 40.47 | 74.58 | 1.89 | **4.0×** |
+| the set | | | 290.7 | 126.4 | 74.0 | | | **3.9×** |
+
+`psi_ax` is 6.353706e-02, 4.778900e-02, 4.354586e-02, 1.755694e-02,
+8.043321e-02 and 2.897815e-01 in all three arms.
+
+**WHAT IS LEFT IS THE SOLVE AND THE OUTPUT, AND ON DIII-D THEY ARE NOW HALF
+EACH**: 20.1 s and 18.4 s of 40.5 s, against a setup of 1.9 s. MAST-U's C reads
+no faster than its B on four fewer Newton steps, which at load 13 to 14 is not
+a measurement of either. **A quiet-machine re-run of this table is owed**, and
+[M-147](#m-147)'s and [M-157](#m-157)'s MEQ columns are the A arm.
+
+**Reproduce.** `meq --profile` from a directory under `runs/`, per case and arm
+in turn: A the `cb8be9e` binary on `git show cb8be9e:examples/fixed-<c>.toml`
+(beside copies of its two `.dat` tables), B the current binary on those same
+files, C the current binary on `examples/fixed-<c>.toml`. `make_fixed.sh`
+regenerates the shipped TOMLs, and only their `[initialguess]` block differs
+from `cb8be9e`'s.
+

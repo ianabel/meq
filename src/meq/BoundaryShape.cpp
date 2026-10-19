@@ -1,5 +1,6 @@
 #include "BoundaryShape.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -16,6 +17,16 @@ namespace meq
 			if ( angle < 0.0 )
 				angle += twoPi;
 			return angle;
+		}
+
+		/// @a angle less a multiple of 2 pi, into [ -pi, pi ): a difference of
+		/// polar angles that is continuous through the cut at 0 = 2 pi.
+		double wrappedDifference( double angle )
+		{
+			double difference = std::fmod( angle + M_PI, twoPi );
+			if ( difference < 0.0 )
+				difference += twoPi;
+			return difference - M_PI;
 		}
 	}
 
@@ -50,6 +61,7 @@ namespace meq
 		}
 
 		requireStarShaped();
+		buildPolarTable();
 	}
 
 	BoundaryShape BoundaryShape::miller( double radius0In, double z0In, double minorIn,
@@ -69,26 +81,42 @@ namespace meq
 		return BoundaryShape( radius0In, z0In, minorIn, elongationIn, {}, sines );
 	}
 
-	double BoundaryShape::shiftedAngle( double theta ) const
+	double BoundaryShape::shiftedAngle( double theta, double &slope ) const
 	{
 		double shifted = theta;
+		slope = 1.0;
 		if ( !cosCoefficients.empty() )
 			shifted += cosCoefficients[ 0 ];                 // c_0, the tilt
 
-		for ( std::size_t n = 1; n < cosCoefficients.size(); ++n )
-			shifted += cosCoefficients[ n ]*std::cos( static_cast<double>( n )*theta );
-
-		for ( std::size_t i = 0; i < sinCoefficients.size(); ++i )
+		std::size_t const harmonics = std::max(
+			cosCoefficients.empty() ? std::size_t( 0 ) : cosCoefficients.size() - 1,
+			sinCoefficients.size() );
+		double const cosine = std::cos( theta ), sine = std::sin( theta );
+		double cosN = 1.0, sinN = 0.0;
+		for ( std::size_t n = 1; n <= harmonics; ++n )
 		{
-			double const n = static_cast<double>( i + 1 );   // s_1 is index 0
-			shifted += sinCoefficients[ i ]*std::sin( n*theta );
+			double const cosNext = cosN*cosine - sinN*sine;
+			sinN = sinN*cosine + cosN*sine;
+			cosN = cosNext;
+			double const order = static_cast<double>( n );
+			if ( n < cosCoefficients.size() )
+			{
+				shifted += cosCoefficients[ n ]*cosN;
+				slope -= order*cosCoefficients[ n ]*sinN;
+			}
+			if ( n <= sinCoefficients.size() )             // s_1 is index 0
+			{
+				shifted += sinCoefficients[ n - 1 ]*sinN;
+				slope += order*sinCoefficients[ n - 1 ]*cosN;
+			}
 		}
 		return shifted;
 	}
 
 	void BoundaryShape::point( double theta, double &radius, double &z ) const
 	{
-		radius = radius0 + minor*std::cos( shiftedAngle( theta ) );
+		double slope = 0.0;
+		radius = radius0 + minor*std::cos( shiftedAngle( theta, slope ) );
 		z = z0 + elongationValue*minor*std::sin( theta );
 	}
 
@@ -107,7 +135,8 @@ namespace meq
 		// closed form; 2000 points put the box within O( 1e-6 ) of the true one,
 		// which is far inside the margin any caller checks it against.
 		int const samples = 2000;
-		minRadius = maxRadius = radius0 + minor*std::cos( shiftedAngle( 0.0 ) );
+		double slope = 0.0;
+		minRadius = maxRadius = radius0 + minor*std::cos( shiftedAngle( 0.0, slope ) );
 		zMin = zMax = z0;
 
 		for ( int i = 0; i <= samples; ++i )
@@ -131,9 +160,10 @@ namespace meq
 		// construction, because these parameters come from a user rather than
 		// from a paper.
 		//
-		// This is not a technicality. levelSet() inverts the polar angle by
-		// bisection, and on a curve that folds back there are several roots; it
-		// would return one of them and the domain would be quietly wrong.
+		// This is not a technicality. levelSet() inverts the polar angle by a
+		// bracketed root find, and on a curve that folds back there are several
+		// roots; it would return one of them and the domain would be quietly
+		// wrong.
 		int const samples = 4000;
 		double previous = 0.0;
 
@@ -158,25 +188,75 @@ namespace meq
 		}
 	}
 
+	void BoundaryShape::buildPolarTable()
+	{
+		polarTable.resize( tableSize + 1 );
+		polarTable[ 0 ] = 0.0;
+		polarTable[ tableSize ] = twoPi;
+		for ( int i = 1; i < tableSize; ++i )
+			polarTable[ i ] = polarAngle( twoPi*static_cast<double>( i )
+			                              /static_cast<double>( tableSize ) );
+	}
+
 	double BoundaryShape::parameterAtPolarAngle( double target ) const
 	{
-		// Bisection on [ 0, 2 pi ], where the polar angle runs 0 to 2 pi
-		// monotonically -- guaranteed by requireStarShaped() at construction.
-		// Fifty halvings take the bracket to 2 pi * 2^-50, far below anything the
-		// caller can resolve.
-		double low = 0.0;
-		double high = twoPi;
-
-		for ( int i = 0; i < 50; ++i )
+		// The bracket is the table interval holding the target, and the start
+		// is the linear interpolant across it. The polar angle runs 0 to 2 pi
+		// monotonically in theta -- requireStarShaped() at construction -- so
+		// the root is unique and stays bracketed.
+		int low = 0, high = tableSize;
+		while ( high - low > 1 )
 		{
-			double const middle = 0.5*( low + high );
-			double const angle = polarAngle( middle );
-			if ( angle < target )
+			int const middle = ( low + high )/2;
+			if ( polarTable[ middle ] < target )
 				low = middle;
 			else
 				high = middle;
 		}
-		return 0.5*( low + high );
+		double const spacing = twoPi/static_cast<double>( tableSize );
+		double lower = spacing*static_cast<double>( low );
+		double upper = spacing*static_cast<double>( high );
+		double theta = lower + ( upper - lower )*( target - polarTable[ low ] )
+		                       /( polarTable[ high ] - polarTable[ low ] );
+
+		// Newton on the polar angle, falling back to bisection whenever a step
+		// would leave the bracket. Newton is quadratic from the interpolant and
+		// stops in three or four evaluations; the fallback alone would take the
+		// bracket below the tolerance in under 45, so 64 is never reached by a
+		// root that exists. 1e-15 in theta is below anything the caller resolves
+		// and at the round-off of the curve evaluation itself.
+		double const tolerance = 1.0e-15;
+		for ( int iteration = 0; iteration < 64; ++iteration )
+		{
+			double slope = 0.0;
+			double const shifted = shiftedAngle( theta, slope );
+			double const dr = minor*std::cos( shifted );
+			double const dz = elongationValue*minor*std::sin( theta );
+			double const drdTheta = -minor*std::sin( shifted )*slope;
+			double const dzdTheta = elongationValue*minor*std::cos( theta );
+
+			double const mismatch = wrappedDifference( std::atan2( dz, dr ) - target );
+			if ( mismatch == 0.0 )
+				return theta;
+			if ( mismatch < 0.0 )
+				lower = theta;
+			else
+				upper = theta;
+
+			// d/dtheta of atan2( dz, dr ), positive on a star shaped curve.
+			double const derivative = ( dr*dzdTheta - dz*drdTheta )/( dr*dr + dz*dz );
+			double const step = mismatch/derivative;
+			if ( std::abs( step ) <= tolerance )
+				return theta - step;
+
+			double next = theta - step;
+			if ( !( next > lower && next < upper ) )
+				next = 0.5*( lower + upper );
+			if ( upper - lower <= tolerance )
+				return next;
+			theta = next;
+		}
+		return theta;
 	}
 
 	double BoundaryShape::levelSet( double radius, double z ) const

@@ -127,6 +127,70 @@ BOOST_AUTO_TEST_CASE( theLevelSetVanishesOnTheCurve )
 	BOOST_TEST( worst < 1.0e-12 );
 }
 
+/*
+ * THE ROOT FIND AGAINST PLAIN BISECTION, ON A MACHINE-SIZED SERIES.
+ *
+ * levelSet() inverts the polar angle by a table-started Newton with a bisection
+ * safeguard, because it is the hot function of every curved run. Fifty halvings
+ * of [ 0, 2 pi ] on the public polarAngle() is the obviously correct inverse, so
+ * the two must agree to round-off -- on a twenty-harmonic shape with a tilt and
+ * up-down asymmetry, which is what examples/fixed-*.toml carry, and on rays
+ * either side of the cut at 0 = 2 pi, where a polar-angle difference that is not
+ * wrapped would send Newton the wrong way.
+ */
+BOOST_AUTO_TEST_CASE( theLevelSetAgreesWithBisectionOnAManyHarmonicShape )
+{
+	std::vector<double> cosines{ 0.02 }, sines{ 0.3, -0.05 };
+	for ( int n = 1; n <= 20; ++n )
+	{
+		double const size = 2.0e-3/static_cast<double>( n );
+		if ( n > 1 )
+			cosines.push_back( ( n % 2 ? 1.0 : -1.0 )*size );
+		if ( n > 2 )
+			sines.push_back( ( n % 3 ? -1.0 : 1.0 )*size );
+	}
+	meq::BoundaryShape const shape( 1.7, 0.05, 0.6, 1.5, cosines, sines );
+
+	auto bisected = [ &shape ]( double radius, double z )
+	{
+		double const dr = radius - 1.7, dz = z - 0.05;
+		double target = std::atan2( dz, dr );
+		if ( target < 0.0 )
+			target += 2.0*pi;
+		double low = 0.0, high = 2.0*pi;
+		for ( int i = 0; i < 50; ++i )
+		{
+			double const middle = 0.5*( low + high );
+			if ( shape.polarAngle( middle ) < target )
+				low = middle;
+			else
+				high = middle;
+		}
+		double br = 0.0, bz = 0.0;
+		shape.point( 0.5*( low + high ), br, bz );
+		return std::hypot( dr, dz ) - std::hypot( br - 1.7, bz - 0.05 );
+	};
+
+	double worst = 0.0;
+	for ( int i = 0; i < 2000; ++i )
+	{
+		double const angle = 2.0*pi*i/2000.0 + 1.0e-3;
+		double const reach = 0.1 + 1.2*( i % 37 )/37.0;
+		double const radius = 1.7 + reach*0.6*std::cos( angle );
+		double const z = 0.05 + reach*0.9*std::sin( angle );
+		worst = std::max( worst, std::abs( shape.levelSet( radius, z ) - bisected( radius, z ) ) );
+	}
+	for ( double offset : { -1.0e-12, -1.0e-15, 0.0, 1.0e-15, 1.0e-12 } )
+	{
+		for ( double reach : { 0.3, 1.0, 1.4 } )
+		{
+			double const radius = 1.7 + reach*0.6, z = 0.05 + offset;
+			worst = std::max( worst, std::abs( shape.levelSet( radius, z ) - bisected( radius, z ) ) );
+		}
+	}
+	BOOST_TEST( worst < 1.0e-14 );
+}
+
 BOOST_AUTO_TEST_CASE( theLevelSetIsNegativeInsideAndPositiveOutside )
 {
 	meq::BoundaryShape const shape = iterLike();
