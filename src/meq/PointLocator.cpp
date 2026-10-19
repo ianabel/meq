@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>
 
 namespace meq
@@ -304,10 +305,28 @@ namespace meq
 
 		if ( !deviceUsed )
 		{
-			mfem::IsoparametricTransformation transformation;
-			mfem::Vector physical( 2 );
-
-			for ( int p = 0; p < points; ++p )
+			/*
+			 * ONE POINT AT A TIME, AND EVERY POINT IS ITS OWN QUESTION.
+			 *
+			 * A point reads the bins, the element maps and the mesh, none of
+			 * which it writes, and writes only its own entries of `element`,
+			 * `code`, `reference` and `distance`. So the loop below is threaded
+			 * over points with nothing shared but read-only state, and the
+			 * answer does not depend on the thread count: each point's search
+			 * is the same arithmetic in the same order whichever thread runs
+			 * it. The two pieces of scratch the search needs -- the element
+			 * transformation and the physical point -- are per thread, and the
+			 * transformation is filled through the CALLER-ALLOCATED
+			 * GetElementTransformation( e, & ), which CLAUDE.md's traps require
+			 * of anything threaded.
+			 *
+			 * WHAT IT IS FOR: the cold start's warm-start transfer locates every
+			 * quadrature point of the new mesh in the stored guess -- 61,116 of
+			 * them on TCV shaped at k = 2 -- serially, inside makeSolver(),
+			 * which --profile reads at one core.
+			 */
+			auto locateOne = [ & ]( int p, mfem::IsoparametricTransformation &transformation,
+			                        mfem::Vector &physical )
 			{
 				mfem::real_t const r = positions( p );
 				mfem::real_t const z = positions( points + p );
@@ -587,11 +606,51 @@ namespace meq
 				}
 
 				if ( element[ p ] < 0 )
-				{
 					code[ p ] = 2u;
-					++misses;
+			};
+
+			// Serial under an mfem::Device, which reaches this loop only for a
+			// curved or degenerate mesh: the element transformations read mesh
+			// nodes through MFEM's memory manager, which nothing documents as
+			// reentrant, and a device run is a correctness instrument anyway.
+			bool const hostThreads = !mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
+			int notFound = 0;
+			std::exception_ptr failure;
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+			#pragma omp parallel if ( hostThreads ) reduction( + : notFound )
+#endif
+			{
+				mfem::IsoparametricTransformation transformation;
+				mfem::Vector physical( 2 );
+				// Dynamic, because a point near nothing walks rings of bins and
+				// one in a full bin stops at the first element: the work per
+				// point is uneven, and a static split would leave threads idle.
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+				#pragma omp for schedule( dynamic, 256 )
+#endif
+				for ( int p = 0; p < points; ++p )
+				{
+					// An exception may not leave a parallel region, so the first
+					// one is kept and rethrown once the region has closed.
+					try
+					{
+						locateOne( p, transformation, physical );
+						if ( element[ p ] < 0 )
+							++notFound;
+					}
+					catch ( ... )
+					{
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+						#pragma omp critical( meqPointLocatorFailure )
+#endif
+						if ( !failure )
+							failure = std::current_exception();
+					}
 				}
 			}
+			if ( failure )
+				std::rethrow_exception( failure );
+			misses += notFound;
 		}
 		else
 		{

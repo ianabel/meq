@@ -6,6 +6,10 @@
 #include <cstdio>
 #include <vector>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #include "mfem.hpp"
 
 #include "RoundOffFloor.hpp"
@@ -229,6 +233,79 @@ BOOST_AUTO_TEST_CASE( theTransferIsExactOntoARefinedMesh )
 		            "solution, so this transfer has an exact answer and is not "
 		            "producing it" );
 	}
+}
+
+/*
+ * THE TRANSFER IS THE SAME TRANSFER AT EVERY THREAD COUNT, TO THE BIT.
+ *
+ * meq::PointLocator::locate() and both of meq::FieldTransfer::transfer()'s
+ * element loops are threaded, and the claim that licenses it is that each point
+ * and each element is its own arithmetic in its own order, written to its own
+ * place. So one thread and four must agree exactly -- not to round-off -- and
+ * any difference is a write that two threads share. The meshes are NOT nested,
+ * so the locator searches rather than finding every point in its first bin.
+ *
+ * It can only fail where the regions are compiled in, which the line it prints
+ * says; a build without MFEM_USE_OPENMP and MFEM_THREAD_SAFE runs both arms
+ * serially and agrees by construction.
+ */
+BOOST_AUTO_TEST_CASE( theTransferIsTheSameAtEveryThreadCount )
+{
+	int const order = 2;
+	meq::analytic::ManufacturedNonlinear const eq = equilibrium();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	Solved const coarse = solve( order, 8, source, exact );
+	mfem::Mesh target = makeMesh( 11 );
+	meq::GradShafranovSolver targetSolver( target, order );
+
+	auto transferAt = [ & ]( int threads, int &missed )
+	{
+#ifdef _OPENMP
+		int const previous = omp_get_max_threads();
+		omp_set_num_threads( threads );
+#else
+		(void)threads;
+#endif
+		mfem::GridFunction out( &targetSolver.potentialSpace() );
+		out = 0.0;
+		meq::FieldTransfer transfer( *coarse.mesh );
+		missed = transfer.transfer( coarse.solver->potential(), exact, out );
+#ifdef _OPENMP
+		omp_set_num_threads( previous );
+#endif
+		return out;
+	};
+
+	int missedSerial = 0, missedThreaded = 0;
+	mfem::GridFunction const serial = transferAt( 1, missedSerial );
+	mfem::GridFunction const threaded = transferAt( 4, missedThreaded );
+
+	int differing = 0;
+	for ( int i = 0; i < serial.Size(); ++i )
+		if ( serial( i ) != threaded( i ) )
+			++differing;
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+	char const *const compiled = "threaded";
+#else
+	char const *const compiled = "serial in both arms";
+#endif
+	std::printf( "\n  the transfer at 1 and 4 threads, k = %d, %s: %d of %d "
+	             "coefficients differ, missed %d and %d\n", order, compiled,
+	             differing, serial.Size(), missedSerial, missedThreaded );
+
+	BOOST_TEST( differing == 0,
+	            differing << " of " << serial.Size() << " transferred coefficients "
+	            "differ between one thread and four. Each point and each element "
+	            "is meant to be its own arithmetic written to its own place, so "
+	            "some write in PointLocator::locate() or FieldTransfer::transfer() "
+	            "is shared between threads" );
+	BOOST_TEST( missedSerial == missedThreaded );
 }
 
 /*

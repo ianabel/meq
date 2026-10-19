@@ -523,9 +523,9 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# OpenMP, ASKED FOR RATHER THAN INHERITED.
 	#
 	# -fopenmp is already on meq_core's compile line today, but it arrives
-	# through MFEM_CXXFLAGS -- so meq's own `#pragma omp parallel for` regions,
-	# in src/meq/GradShafranov.cpp and src/meq/CriticalPoints.cpp, depend on a
-	# flag belonging to a dependency. Rebuild MFEM without OpenMP and those
+	# through MFEM_CXXFLAGS -- so meq's own `#pragma omp` regions, in
+	# src/meq/PointLocator.cpp and src/meq/WarmStart.cpp, depend on a flag
+	# belonging to a dependency. Rebuild MFEM without OpenMP and those
 	# pragmas would become unknown-pragma warnings and every loop would
 	# silently serialise, which is slow rather than wrong, but is a change of
 	# behaviour nothing would report.

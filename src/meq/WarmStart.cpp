@@ -2,6 +2,7 @@
 #include "Crossings.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <stdexcept>
 #include <vector>
 
@@ -112,32 +113,77 @@ namespace meq
 		 * around 1e-8 relative is not the limiting factor in anything a starting
 		 * point is used for.
 		 */
-		mfem::IntegrationRule const **rules = nullptr;
-		(void)rules;
+		/*
+		 * THE RULES AND THE OFFSETS FIRST, SERIALLY, AND THE TWO ELEMENT LOOPS
+		 * AFTER THEM THREADED.
+		 *
+		 * Both loops below are one element at a time with nothing shared but
+		 * read-only state, so they are threaded, and the answer does not depend
+		 * on the thread count: every element's arithmetic is the same in the
+		 * same order whichever thread does it. Three things make that true and
+		 * each is a trap the serial version never had to know about:
+		 *
+		 *   * mfem::IntRules.Get() may BUILD a rule the first time it is asked
+		 *     for one, into a process-wide table. It is called here, before any
+		 *     thread exists, and the threads read the pointers.
+		 *   * Mesh::GetElementTransformation( int ) returns SHARED SCRATCH, so
+		 *     each thread fills its own through the caller-allocated overload
+		 *     (CLAUDE.md, *Traps*).
+		 *   * Each thread's point lands at an offset fixed in advance, rather
+		 *     than at the end of a growing vector, so the cloud is the same
+		 *     cloud in the same order as the serial loop built.
+		 *
+		 * WHAT IT IS FOR: a cold start interpolates its guess through here, on
+		 * every quadrature point of the new mesh, inside makeSolver() -- which
+		 * --profile reads at one core and 0.9 to 1.5 s on TCV shaped.
+		 *
+		 * AND SERIAL UNDER AN mfem::Device. Vector writes and mesh-node reads
+		 * there pass through MFEM's memory manager, which nothing documents as
+		 * reentrant, and a device run is a correctness instrument rather than
+		 * a timing (CLAUDE.md), so it is not worth finding out.
+		 */
+		bool const hostThreads = !mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
 
-		std::vector<double> radius, z;
+		std::vector<mfem::IntegrationRule const *> rules(
+			static_cast<std::size_t>( elements ) );
 		std::vector<int> firstPoint( elements + 1, 0 );
-
-		mfem::Vector node( 2 );
 		for ( int e = 0; e < elements; ++e )
 		{
 			mfem::FiniteElement const *fe = targetSpace->GetFE( e );
-			mfem::ElementTransformation *tr = targetMesh.GetElementTransformation( e );
 			// 2k + 2 integrates the mass matrix of a degree-k space exactly and
 			// leaves room for the source, which is the same degree on a mesh that
 			// does not line up with this one.
-			mfem::IntegrationRule const &ir =
-				mfem::IntRules.Get( fe->GetGeomType(), 2*fe->GetOrder() + 2 );
+			rules[ static_cast<std::size_t>( e ) ] =
+				&mfem::IntRules.Get( fe->GetGeomType(), 2*fe->GetOrder() + 2 );
+			firstPoint[ e + 1 ] = firstPoint[ e ]
+				+ rules[ static_cast<std::size_t>( e ) ]->GetNPoints();
+		}
 
-			firstPoint[ e ] = static_cast<int>( radius.size() );
-			for ( int q = 0; q < ir.GetNPoints(); ++q )
+		std::vector<double> radius( static_cast<std::size_t>( firstPoint[ elements ] ) );
+		std::vector<double> z( radius.size() );
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		#pragma omp parallel if ( hostThreads )
+#endif
+		{
+			mfem::IsoparametricTransformation tr;
+			mfem::Vector node( 2 );
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+			#pragma omp for schedule( static )
+#endif
+			for ( int e = 0; e < elements; ++e )
 			{
-				tr->Transform( ir.IntPoint( q ), node );
-				radius.push_back( node( 0 ) );
-				z.push_back( node( 1 ) );
+				targetMesh.GetElementTransformation( e, &tr );
+				mfem::IntegrationRule const &ir = *rules[ static_cast<std::size_t>( e ) ];
+				for ( int q = 0; q < ir.GetNPoints(); ++q )
+				{
+					tr.Transform( ir.IntPoint( q ), node );
+					std::size_t const at = static_cast<std::size_t>( firstPoint[ e ] + q );
+					radius[ at ] = node( 0 );
+					z[ at ] = node( 1 );
+				}
 			}
 		}
-		firstPoint[ elements ] = static_cast<int>( radius.size() );
 
 		points = static_cast<int>( radius.size() );
 		misses = 0;
@@ -199,60 +245,110 @@ namespace meq
 		countedHostRead( code, __LINE__ );
 		countedHostRead( distance, __LINE__ );
 
-		mfem::Array<int> elementDofs;
-		mfem::DenseMatrix mass;
-		mfem::Vector shape, rhs, coefficients;
+		/*
+		 * THREADED ONLY WHERE THE ELEMENTS' DOFS ARE DISJOINT. On a
+		 * discontinuous space -- every space MEQ transfers into -- each element
+		 * writes only its own dofs, so the order the elements are done in
+		 * cannot matter. On a continuous one two elements write a shared dof
+		 * and the serial loop's last writer wins; that order is kept by keeping
+		 * the loop serial there.
+		 */
+		bool const disjoint = dynamic_cast<mfem::L2_FECollection const *>(
+			targetSpace->FEColl() ) != nullptr;
+		int notFound = 0;
+		double farthest = 0.0;
+		std::exception_ptr failure;
 
-		for ( int e = 0; e < elements; ++e )
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		#pragma omp parallel if ( disjoint && hostThreads ) reduction( + : notFound ) reduction( max : farthest )
+#endif
 		{
-			mfem::FiniteElement const *fe = targetSpace->GetFE( e );
-			mfem::ElementTransformation *tr = targetMesh.GetElementTransformation( e );
-			mfem::IntegrationRule const &ir =
-				mfem::IntRules.Get( fe->GetGeomType(), 2*fe->GetOrder() + 2 );
+			mfem::IsoparametricTransformation tr;
+			mfem::Array<int> elementDofs;
+			// The THREE-argument GetElementDofs() and its own DofTransformation:
+			// the two-argument overload fills one the space owns, a shared
+			// Array copy-assignment that upstream records as benign only by
+			// accident of the space (doc/HDG-ELEMENT-LOCAL-PARALLELISM.md).
+			mfem::DofTransformation dofTransformation;
+			mfem::DenseMatrix mass;
+			mfem::Vector shape, rhs, coefficients;
 
-			int const ndof = fe->GetDof();
-			mass.SetSize( ndof );
-			mass = 0.0;
-			rhs.SetSize( ndof );
-			rhs = 0.0;
-			shape.SetSize( ndof );
-
-			for ( int q = 0; q < ir.GetNPoints(); ++q )
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+			#pragma omp for schedule( static )
+#endif
+			for ( int e = 0; e < elements; ++e )
 			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( q );
-				tr->SetIntPoint( &ip );
-				fe->CalcShape( ip, shape );
-
-				double const weight = ip.weight*tr->Weight();
-				mfem::AddMult_a_VVt( weight, shape, mass );
-
-				int const point = firstPoint[ e ] + q;
-				double value = 0.0;
-				if ( code[ point ] == 2 )
+				// An exception may not leave a parallel region, so the first one
+				// is kept and rethrown once the region has closed.
+				try
 				{
-					// Nothing there to read. The fallback is the Dirichlet datum
-					// in every caller MEQ has, which is what a cold start would
-					// have had at that point anyway.
-					++misses;
-					value = fallback.Eval( *tr, ip );
-				}
-				else
-				{
-					value = values( point );
-					worstDist = std::max( worstDist, double( distance( point ) ) );
-				}
+					mfem::FiniteElement const *fe = targetSpace->GetFE( e );
+					targetMesh.GetElementTransformation( e, &tr );
+					mfem::IntegrationRule const &ir = *rules[ static_cast<std::size_t>( e ) ];
 
-				rhs.Add( weight*value, shape );
+					int const ndof = fe->GetDof();
+					mass.SetSize( ndof );
+					mass = 0.0;
+					rhs.SetSize( ndof );
+					rhs = 0.0;
+					shape.SetSize( ndof );
+
+					for ( int q = 0; q < ir.GetNPoints(); ++q )
+					{
+						mfem::IntegrationPoint const &ip = ir.IntPoint( q );
+						tr.SetIntPoint( &ip );
+						fe->CalcShape( ip, shape );
+
+						double const weight = ip.weight*tr.Weight();
+						mfem::AddMult_a_VVt( weight, shape, mass );
+
+						int const point = firstPoint[ e ] + q;
+						double value = 0.0;
+						if ( code[ point ] == 2 )
+						{
+							// Nothing there to read. The fallback is the Dirichlet
+							// datum in every caller MEQ has, which is what a cold
+							// start would have had at that point anyway. ONE
+							// THREAD AT A TIME: it is any mfem::Coefficient, and
+							// nothing promises that one is reentrant. A point is
+							// missed rarely enough that the lock costs nothing.
+							++notFound;
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+							#pragma omp critical( meqFieldTransferFallback )
+#endif
+							value = fallback.Eval( tr, ip );
+						}
+						else
+						{
+							value = values( point );
+							farthest = std::max( farthest, double( distance( point ) ) );
+						}
+
+						rhs.Add( weight*value, shape );
+					}
+
+					mfem::DenseMatrixInverse inverse( mass );
+					coefficients.SetSize( ndof );
+					inverse.Mult( rhs, coefficients );
+
+					targetSpace->GetElementDofs( e, elementDofs, dofTransformation );
+					target.SetSubVector( elementDofs, coefficients );
+				}
+				catch ( ... )
+				{
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+					#pragma omp critical( meqFieldTransferFailure )
+#endif
+					if ( !failure )
+						failure = std::current_exception();
+				}
 			}
-
-			mfem::DenseMatrixInverse inverse( mass );
-			coefficients.SetSize( ndof );
-			inverse.Mult( rhs, coefficients );
-
-			targetSpace->GetElementDofs( e, elementDofs );
-			target.SetSubVector( elementDofs, coefficients );
 		}
+		if ( failure )
+			std::rethrow_exception( failure );
 
+		misses = notFound;
+		worstDist = farthest;
 		return misses;
 
 	}
