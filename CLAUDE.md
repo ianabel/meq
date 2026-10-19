@@ -517,7 +517,13 @@ like everything else.
 
 ## Git
 
-Branch **`main`**; remote **`origin` = `github:ianabel/meq.git`** (private;
-`github` is an `~/.ssh/config` alias). **Tag `v0-legacy` is the pre-modernisation
-tree** — reach for it before concluding something was lost. **History is not
-rewritten.** Commit messages end with the `Co-Authored-By` trailer.
+Branch **`main`**; remote **`origin` = `github:ianabel/meq.git`** (**public**;
+`github` is an `~/.ssh/config` alias), so a push or a GitHub release publishes.
+**Tag `v0-legacy` is the pre-modernisation tree** — reach for it before
+concluding something was lost. **History is not rewritten.** Commit messages end
+with the `Co-Authored-By` trailer.
+
+**The version is set once, in `project(meq VERSION …)` in `CMakeLists.txt`**;
+`meq --version`, the outputs' `meq_version` and `docs/conf.py`'s `release` all
+read it. A release bumps that line, commits, and tags `vX.Y.Z` annotated, with a
+GitHub release on the tag.
