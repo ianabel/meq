@@ -12643,7 +12643,7 @@ standing refusal rather than a finding here.
 | `limited-tokamak` | 0 | 0 | 9.483092e-02 / 9.484400e-02 — 1.4e-04 |
 | `limiter-halfdisc` | 0 | 0 | 7.459902e-01 / 7.459870e-01 — 4.3e-06 |
 | `q-driven` | 0 | 0 | 3.461169e-01 / 3.457380e-01 — 1.1e-03 |
-| `rotating-normalised` | 0 | 0 | 1.039297e-01 / 1.039325e-01 — 2.7e-05 |
+| `rotating-normalised` | 0 | 0 | 1.039297e-01 / 1.039325e-01 — 2.7e-05; not the format but two twins of an axis on a mesh line, [M-299](#m-299) |
 | `miller-curved`, `miller-adaptive`, `soloviev-nstx`, `flux-surfaces`, `rotating-rectangle`, `manufactured-driver` | 0 | 0 | no `psi_ax` reported |
 | `coils-rectangle` | 0 | **1** | UMFPACK, below |
 | `mhd-rectangle` | 0 | **1** | UMFPACK, below |
@@ -14271,7 +14271,9 @@ it, and its own post-solve check then reads normalised flux 0.9999. That is the
 difference `AxisSearch.hpp` states and leaves to `DeviceParity` -- nearest
 clean root globally against the first productive ring -- and `DeviceParity`'s
 cases had never met it, the two-row borders having agreed throughout. It is a
-768-element rectangle, the coarsest case in the tree. **Owed: which of the two
+768-element rectangle, the coarsest case in the tree. **[M-299](#m-299)
+answers it: the device's, which is the sweep's twin, and the host now takes it
+too. Owed until then: which of the two
 the constraint should take**, and the device's is the one the run's own check
 agrees with.
 
@@ -19563,7 +19565,8 @@ search finds the zero of `q_h` at 1.039297e-01, and it prints "constrained at
 the located magnetic axis". Restarted — by the `.nc` OR the `.gf`, on this
 tree OR `494d4aa` — the solve does locate the axis and converges to
 1.039297e-01. So the restart reports the consistent answer and the cold run
-does not; the defect is the cold solve's silent fallback. Open.
+does not. **Not a fallback, as read here: two twins of an axis on a mesh line,
+named differently by the warm and the cold search. Fixed in [M-299](#m-299).**
 
 **(d) A DIVERTED RUN STARTED AT ITS ANSWER LEAVES IT — PRE-EXISTING, AND
 WORSE BEFORE.** `diverted-tokamak-xpoint`'s first support sweep, frozen from
@@ -19575,7 +19578,10 @@ answer ENDS ON ANOTHER ONE, `psi_ax = 1.302949e-01` against 8.266088e-02.**
 Removing each restored quantity in turn does not cure sweep 0, and removing
 `psi_bnd` ends on yet another, 8.052202e-02. What would cure it is freezing
 the first sweep at the stored support — the file carries
-`element_plasma_fraction` — which the solver has no way to be given. Open.
+`element_plasma_fraction` — which the solver has no way to be given. **Not the
+support as read here: the first fill's SEED, a coil's O-point winning the
+fill's own argmax on a solver that has located no axis. Fixed in
+[M-299](#m-299).**
 
 **(e) `machine-c-mast` does not converge cold, on this tree or on `494d4aa`**:
 the bordered Newton stalls, and Picard-then-Newton trips the X-point
@@ -19585,4 +19591,154 @@ restart.
 **Reproduce.** Each example through `meq-run`, then again with
 `[initialguess] Type = "gridfunction"`, `File = "<stem>.nc"` in place of its
 own guess and every other key unchanged.
+
+### M-300
+
+**D AND F SHAPED PROFILED ON AN IDLE MACHINE UNDER A PASSIVE WAIT: PARDISO
+REFINES EVERY SOLVE TO ITS CAP OF TWO STEPS WITH NO PIVOT PERTURBED, AND ITS
+"ADDITIONAL CALCULATIONS" COST 4.5 TO 6.0 TIMES THE DIRECT SOLVE; AND THE
+BACKSOLVE AND NPC REDUCE+RECOVER LEGS RUN ON 2.9 TO 4.2 OF EIGHT CORES, WELL
+UNDER WHAT A SPINNING TEAM MADE THEM READ.** The plan of `PERFORMANCE_TODO.md`
+as it stood at `06a22b7`, section 1,
+for `../../mfem-hdg-dev/doc/HDG-TRACE-SOLVE-AND-NPC-REDUCE-FROM-MEQ.md`.
+
+**Setup.** `06a22b7`, installed and clean. The race arm's ten directories —
+`machine-d-tcv-shaped` and `machine-f-diiid-shaped`, cold and warm, at
+k2 h1.00 and k3 h1.00, and F at k3 h0.50 — each re-run in place three times,
+interleaved, `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive` for the profile. Every
+timed run waited for under 6% busy CPU from anything else, sampled from
+`/proc/stat` over 10 s (`runs/perf-profile/queue.sh`). **The warm column is
+the whole-state `.nc` restart of [M-298](#m-298)**, so it is not the warm
+column of the request, which predates it. Seconds and cores are medians of
+the three.
+
+| directory | wall | Newton by sweep | residual | backsolve | factorisation | reduce+recover |
+|---|---|---|---|---|---|---|
+| D k2 h1.00 cold | 4.94 | 8+4+3+2 | 0.80 s, 6.81 | 0.95 s, **3.05** | 0.36 s, 3.38 | 0.96 s, **3.34** |
+| D k2 h1.00 warm | 3.46 | 5+3+3 | 0.75 s, 6.82 | 0.64 s, 3.07 | 0.24 s, 3.45 | 0.49 s, 4.01 |
+| D k3 h1.00 cold | 7.59 | 7+4+3+2 | 1.38 s, 7.17 | 1.36 s, **2.87** | 0.56 s, 4.22 | 1.40 s, **3.28** |
+| D k3 h1.00 warm | 5.83 | 4+3+3 | 1.22 s, 7.16 | 0.81 s, 2.88 | 0.37 s, 4.05 | 0.84 s, 3.36 |
+| F k2 h1.00 cold | 7.68 | 10+3+2 | 0.61 s, 6.77 | 0.67 s, 3.38 | 0.26 s, 3.36 | 0.57 s, 4.18 |
+| F k2 h1.00 warm | 3.05 | 4+3+3 | 0.68 s, 6.74 | 0.55 s, 3.02 | 0.21 s, 3.17 | 0.43 s, 3.90 |
+| F k3 h1.00 cold | 13.60 | 11+3+2 | 1.09 s, 7.13 | 1.10 s, 3.10 | 0.40 s, 4.40 | 0.97 s, 4.17 |
+| F k3 h1.00 warm | 5.44 | 4+3+3 | 1.13 s, 7.12 | 0.79 s, 2.86 | 0.32 s, 3.86 | 0.82 s, 3.46 |
+| F k3 h0.50 cold | 31.17 | 10+3+2 | 2.43 s, 7.44 | 2.76 s, 3.13 | 1.06 s, 4.47 | 2.21 s, 4.21 |
+| F k3 h0.50 warm | 13.13 | 4+3+3 | 2.63 s, 7.44 | 2.03 s, 2.90 | 0.84 s, 3.99 | 1.93 s, 3.41 |
+
+On D k3 h1.00 cold the backsolve is 16.1% of the run and reduce+recover 17.9%,
+against the residual's 17.0% at 7.15 cores; on F k3 h0.50 cold, 8.7% and 7.0%.
+**The request read the backsolve at 5.5 to 6.8 cores and reduce+recover at 4.0
+to 6.0**, on a shared machine with the default wait; under `passive` both are
+half of eight or less, so both legs are thread-bound rather than merely large.
+
+**PARDISO, `--trace-solver-stats`, once per directory:**
+
+| directory | solves | refinement steps | direct solve | additional | right-hand sides |
+|---|---|---|---|---|---|
+| D k2 h1.00 cold | 17 | 2 on all 17 | 0.172 s | 0.782 s | 20 |
+| D k3 h1.00 cold | 16 | 2 on all 16 | 0.195 s | 1.022 s | 20 |
+| F k2 h1.00 cold | 26 | 2 on all 26 | 0.264 s | 1.108 s | 20 |
+| F k3 h1.00 cold | 26 | 2 on all 26 | 0.310 s | 1.662 s | 20 |
+| F k3 h0.50 cold | 25 | 2 on all 25 | 0.790 s | 4.475 s | 20 |
+
+and the warm directories alike, 10 or 11 solves each, 2 steps on every one.
+**No perturbed-pivot line was printed in any of them.** So `iparm[7] = 2` is
+a cap that every solve reaches, not a step taken only after a perturbed pivot
+— upstream's reading, against the request's — and the additional calculations
+are where the backsolve leg goes: on D k3 h1.00 cold, 0.195 s + 1.022 s against
+the profile's 1.232 s. MKL's report gives the backward error after refinement
+at about 2.5e-16 on `fixed-h-circular` (the same two steps there). **One
+caveat**: the statistics run is MKL at message level 1, whose own bookkeeping
+may sit inside "additional calculations"; the clean measurement is the same
+runs with refinement capped at zero, which wants the setter the request asks
+for.
+
+**Reproduce.** `git show 06a22b7:PERFORMANCE_TODO.md`, section 1: the race arm
+builds each directory, cold then warm from it, and `meq --mesh-ready` runs in
+each three ways -- plain, `--profile` under `passive`, `--trace-solver-stats`.
+
+### M-299
+
+**TWO DEFECTS [M-298](#m-298) EXPOSED AND MISREAD, AND THE FIX FOR EACH. AN
+AXIS ON A MESH LINE HAS A TWIN IN EACH NEIGHBOUR, AND THE WARM AND COLD AXIS
+SEARCHES NAMED DIFFERENT ONES, SO `rotating-normalised` SOLVED A START-
+DEPENDENT PROBLEM; AND A FRESH SOLVER'S FIRST PLASMA FILL, WITH NO LOCATED
+AXIS TO SEED IT, CAN BE WON BY A COIL, SO `diverted-tokamak-xpoint`
+RESTARTED AT ITS ANSWER POSED ITS FIRST SWEEP AROUND ONE.**
+
+**(1) The twins.** `rotating-normalised` is up-down symmetric on a box whose
+mesh carries the line `z = 0`, so its axis lies on a face, and `q_h`'s jump
+there gives one zero in each neighbour. At the cold run's converged state,
+from a `meq::StoredEquilibrium` of its `.nc`:
+
+| | element | `psi` | `z` | overshoot |
+|---|---|---|---|---|
+| twin above | 354 | 1.0393250657e-01 | +1.24e-05 | +2.47e-04 |
+| twin below | 423 | 1.0392688528e-01 | -3.96e-06 | +7.92e-05 |
+
+`sweep()` merges the two and keeps the one least outside its element — the
+twin below. `tryFindCriticalPointFrom()` called `pointsFrom()` once per ring,
+and `pointsFrom()` merges only within a call, so the twins from ring 0 and
+ring 1 were never compared and the nearest-to-the-seed rule FOLLOWED
+WHICHEVER SIDE THE SEED WAS ON: seeded above it returned the twin above. The
+cold solve's continuation followed that one and constrained `psi_ax` to
+1.039325e-01, and its own post-solve check, a sweep, reported the axis at
+1.039269e-01 and normalised flux 0.9999; a restart, which sweeps first,
+converged to 1.039297e-01. **Moving the box's top to `z = 0.65`, so that no
+mesh line runs through the axis, made the cold run self-consistent and its
+restart converge in 0 steps** — the test that named the face.
+
+**The fix merges twins across rings by `pointsFrom()`'s own rule** — same
+type, within an element, least overshoot kept, ties to the lower element
+index — before the nearest-seed choice, so distinct critical points are
+still followed as before. Seeded above, below or on the line, the warm search
+now returns the sweep's twin. `rotating-normalised` cold reads 1.039297e-01,
+constrained at `( 1.0919, -0.0000 )`, normalised flux 1.0000, and its restart
+converges in 0 steps; **and the host now agrees with `--device debug`**, which
+read 1.039297e-01 all along — the axis routes' "one semantic difference" this
+file left owed, and the single-precision row's 2.7e-05, were this.
+`anAxisOnAMeshLineIsOnePointOnEveryRoute` asserts it and fails three ways with
+the merge disabled.
+
+**(2) The first fill's seed.** `diverted-tokamak-xpoint` restarted from its
+own `.nc` — whole iterate, every border unknown at the file's — started its
+first support sweep with every border row at round-off and the FIELD residual
+at 1.134e-02, and converged in 7 steps to `psi_ax = -8.8e-02`. The support is
+a flood fill from the element holding the located axis, and a solver that
+has not solved has located none, so its first `refreshPlasmaComponent()`
+competed an argmax of `Psi` — which this machine's coil O-point wins (the
+note beside the axis constraint measures one at `psi = 1.21e-01` against the
+axis's 8.3e-02). `GradShafranovSolver::setPlasmaAxisSeed( R, z )` takes the
+file's `axis_r`/`axis_z` on an exact restart; the restart then goes **1 + 2
+Newton steps over two sweeps, against 14 + 3 + 2 cold, with no retry**, to
+the same `psi_ax` and `psi_bnd`. `theRestartCarriesTheWholeState` asserts it
+and fails twice with the seed removed.
+
+**MEASURED AND FALSIFIED, ON THE WAY.** Each restored quantity removed in turn
+(`profile_scale`, `psi_boundary`, `xpoint_located`, `psi_axis`, the trace)
+did not cure the first sweep, because none of them was it. Nor was the
+decoupled first Newton step: coupling iteration 0 to the located axis on a
+whole-state restart was built, took the retry rung from 4 steps to 1, and with
+the seed in place changed nothing — 1 + 2 on `diverted-tokamak-xpoint`, 2 on
+`fixed-f-diiid`, with it or without it — so it was taken out again. [M-298](#m-298)'s
+readings of (c) as a nodal fallback and (d) as the support's freeze were both
+wrong in the same way: each named the place a symptom showed rather than the
+choice that made it.
+
+**WHAT ELSE MOVED: NOTHING.** Thirteen normalised examples on `06a22b7` and on
+this tree, cold through `meq-run`: the six `fixed-*`, `limited-tokamak`,
+`limiter-halfdisc`, `free-boundary-halfdisc`, `diverted-tokamak-xpoint`,
+`machine-f-diiid`, `q-driven` and `rotating-normalised`. Twelve read the same
+`psi_ax` in the same Newton steps; `rotating-normalised` alone moves,
+1.039325e-01 to 1.039297e-01, in the same seven. The full suite, with
+`FreeBoundaryCoupling` and `DeviceParity`, is 83 of 84 with the deliberate
+`PlasmaEdgeConvergence` the one red.
+
+**AND A REPORT.** A solve that converges on its first residual — a restart
+at its answer — never located the axis, iteration 0's evaluation being the
+cold reference's, so it printed "the largest NODAL value: NO O-point was
+reachable" at `( 0, 0 )` with `psi_ax` exactly at the O-point, and seeded the
+next solve with nothing. It now locates once on the converged iterate, which
+takes no Newton step and moves no number; and the report gives where the
+constraint was located, `( R, z )`, beside the post-solve check's own.
 

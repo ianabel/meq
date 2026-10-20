@@ -332,10 +332,10 @@ rather than a derivative of one — and reports the normalised flux there:
 
 .. code-block:: text
 
-   psi_ax = 1.039325e-01 Wb/rad, constraint psi_ax - max psi_h = -5.551e-17
-   psi_ax is constrained at the located magnetic axis, a zero of q_h
-   the axis, as a zero of q_h: psi = 1.039269e-01 at ( 1.0919, -0.0000 ),
-        normalised flux 0.9999
+   psi_ax = 1.039297e-01 Wb/rad, constraint psi_ax - max psi_h = -1.388e-16
+   psi_ax is constrained at the located magnetic axis, a zero of q_h, at ( 1.0919, -0.0000 )
+   the axis, as a zero of q_h: psi = 1.039297e-01 at ( 1.0919, -0.0000 ),
+        normalised flux 1.0000
 
 **That last number must be 1.** :math:`\Psi` at the magnetic axis is 1 by
 definition when :math:`\psiax` is the axis flux, so the reading is a direct

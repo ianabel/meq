@@ -7418,6 +7418,15 @@ namespace
 		return conductorCacheSignature() == pendingConductorCache.signature;
 	}
 
+	void GradShafranovSolver::setPlasmaAxisSeed( double radius, double z )
+	{
+		int element = -1;
+		mfem::Vector shape;
+		mfem::Array<int> dofs;
+		locatePotentialPoint( radius, z, element, shape, dofs );
+		plasmaSeedElement = element;
+	}
+
 	void GradShafranovSolver::refreshPlasmaComponent( mfem::Vector const &state )
 	{
 		refreshPlasmaComponentMask( state );
@@ -13188,6 +13197,7 @@ namespace
 			                           coldModes );
 			gaugeConstraint = gaugeHeld;
 		}
+
 		/*
 		 * AND THE ITERATE IS *NOT* RE-ESTABLISHED AFTER IT, WHICH IS A MEASURED
 		 * DECISION AND NOT AN OVERSIGHT.
@@ -15749,6 +15759,27 @@ namespace
 		// The knots where the solve left them, whose table the source holds.
 		if ( gaugeBordered )
 			midplaneGaugeCrossingValues = gaugeR;
+		/*
+		 * A SOLVE THAT CONVERGED ON ITS FIRST RESIDUAL HAS NOT LOCATED ANYTHING
+		 * YET, AND IS LOCATED ONCE HERE, ON ITS ANSWER.
+		 *
+		 * Iteration 0's constraint is the cold reference's, evaluated on a state
+		 * with no axis, so the flag reads false for it by construction -- and
+		 * the note beside `target` records why that evaluation is left alone.
+		 * A solve that ends there, a restart at its own answer, then reported
+		 * "the largest NODAL value: NO O-point was reachable" at ( 0, 0 ) while
+		 * psi_ax sat exactly at the O-point, and handed the next solve no seed.
+		 * One search on the converged iterate takes no Newton step and changes
+		 * no number; it makes the report and the next solve's seed true.
+		 */
+		if ( hasNormalisation && !constraintLocated && !axisIsPrescribed
+		     && axisConstraintChoice == AxisConstraint::LocatedAxis )
+		{
+			double located = 0.0;
+			if ( locateAxisPoint( unknown, s, located, nullptr, nullptr ) )
+				constraintLocated = true;
+		}
+
 		// Where the constraint ended up, so a caller can tell a located axis from
 		// the annulus-branch fallback without re-running a search of its own.
 		axisLocatedValue = constraintLocated;

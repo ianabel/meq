@@ -105,6 +105,12 @@ namespace meq
 			bool hasXPoint() const { return xPointGiven; }
 			double xPointR() const { return xPointRadius; }
 			double xPointZ() const { return xPointHeight; }
+			/// The located magnetic axis the run reported, `axis_r`/`axis_z`,
+			/// when it found one: what seeds a restart's first plasma fill.
+			bool hasAxisPoint() const { return axisPointGiven; }
+			double axisPointR() const { return axisPointRadius; }
+			double axisPointZ() const { return axisPointHeight; }
+
 			/// psi_bnd, the boundary label of a limited or diverted run.
 			bool hasPsiBoundary() const { return boundaryGiven; }
 			double psiBoundary() const { return boundary; }
@@ -149,6 +155,8 @@ namespace meq
 			bool total = true;
 			std::vector<double> trace, exterior;
 			bool xPointGiven = false, scaleGiven = false, boundaryGiven = false;
+			bool axisPointGiven = false;
+			double axisPointRadius = 0.0, axisPointHeight = 0.0;
 			double boundary = 0.0;
 			double xPointRadius = 0.0, xPointHeight = 0.0, scale = 1.0;
 			std::vector<double> currents, gSquared;

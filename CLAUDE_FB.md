@@ -2144,8 +2144,11 @@ harmless for a position and fatal for a row of shape functions.
 
 **WHAT IT MOVED**: every bordered `ψ_ax`, by the `O( h² )` gap between the
 definitions — `limited-tokamak` 9.455354e-02 → 9.466087e-02,
-`rotating-normalised` 1.039163e-01 → 1.039325e-01 — and all of them now read a
+`rotating-normalised` 1.039163e-01 → 1.039297e-01 — and all of them now read a
 normalised flux of **1.0000** at the located axis, which they did not before.
+`rotating-normalised` read 1.039325e-01 and 0.9999 until its axis, which sits
+on the mesh line `z = 0`, had both of its twins named the same way by the warm
+and the cold search (→ **[M-299](MEASUREMENTS.md#m-299)**).
 
 **AND IT WEAKENS `checkAxis()` DELIBERATELY.** `Ψ` there is now nearly 1 by
 construction, so that guard is close to checking a solve against the formula it

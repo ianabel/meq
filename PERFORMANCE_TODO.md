@@ -1,91 +1,28 @@
 # Performance runs owed
 
-Two pieces of measurement, in this order: **profile D and F shaped first**,
-then **re-run every MEQ arm the inverse-race doc reports** (F, C and D shaped).
-The profiles come first because they decide whether anything changes in the
-solver or in MFEM before the race numbers are taken, and the race numbers
-should be taken once, on the code they will be quoted for.
+**Re-run every MEQ arm the inverse-race doc reports** (F, C and D shaped). The
+profiles that were to come first are done, M-300: PARDISO refines every solve
+to its cap and the backsolve and reduce+recover legs run on three to four of
+eight cores, both now with `../../mfem-hdg-dev` as a request. Nothing in the
+solver changed on them, so the race numbers can be taken on the code as it is.
 
 The doc is the Claude Docs artifact *Inverse race: F, C and D shaped*
 (`claude.ai/artifact/WAq3D1udMQakGMYyvHdL1g`). Its MEQ rows predate the stall
 test, and C has no MEQ row at all.
 
-## Before either
+## Before it
 
-* **A quiet machine.** Nothing else running — the last profiles shared the box
-  with an `xcql3d` run and a MaNTA build, and the k = 3 cold profile read twice
-  its uncontended wall. `uptime` under 1 before starting; the race enforces
-  this itself (`--load-max`, `--quiet-wait`), the profiles do not.
+* **A quiet machine.** Nothing else running; the race enforces this itself
+  (`--load-max`, `--quiet-wait`).
 * **Commit what is being measured, then build and install from it**, so
   `meq --version` and every record's `provenance.tree` name a commit rather
-  than `-dirty`. The working tree carries the stall test and crawl report,
-  the threaded cold-start transfer and `--trace-solver-stats`, none of which
-  any recorded race number has seen.
-* **`OMP_WAIT_POLICY=passive` for every profile**, or the `cores` column is
-  meaningless: a spinning team makes a serial leg read high
-  (`docs/linear_solvers.rst`). Leave the race arms at their default, as every
-  run already in the doc was.
+  than `-dirty`.
+* **The race arms at the default `OMP_WAIT_POLICY`**, as every run already in
+  the doc was; passive is for a profile's `cores` column.
 * **`OMP_NUM_THREADS=8 MKL_NUM_THREADS=8`**, the physical core count
   (`tools/freegs4e-benchmark/cores.py`), as the race uses.
 
-## 1. Profiled D and F shaped
-
-**What it answers.**
-
-| question | read from | what it decides |
-| --- | --- | --- |
-| Does PARDISO refine? Per step the ~20-column solve costs ~3× the factorisation | `--trace-solver-stats`: perturbed pivots per factorisation, refinement steps per solve | item 1 of `../../mfem-hdg-dev/doc/HDG-TRACE-SOLVE-AND-NPC-REDUCE-FROM-MEQ.md`: closed if it never refines |
-| How threaded are the legs, honestly? | `--profile` under `passive`: `cores` per leg | whether reduce+recover (15–21%) and the backsolve (15–19%) are thread-bound; item 2 of the same request |
-| Did threading the cold-start transfer pay? | `--profile`: `outside solve() → makeSolver`, cold runs | was 0.86 s (k = 2) and 1.45 s (k = 3) at 1.00 core on D; warm reads 0.008 s |
-| What does the stall test cost F's cold start now? | `--profile` legs, and the log's "stopped moving" line | single runs read 14.8 s / 20.8 s / 43.5 s at k2 h1 / k3 h1 / k3 h0.5 against 80 / 128 / 307 s before |
-| Does a converged answer crawl? | the converged report's crawl line; `newton_longest_crawl` in the `.nc` | any warning here is a defect report, not a pass (`TODO`, *Bordered solves that CRAWL*) |
-
-**The runs.** Both configurations, both starts, at the rungs the doc's
-1e-3 and 1e-4 rows are decided on: k2 h1.00 and k3 h1.00 for both, and k3
-h0.50 for F, which is F's 1e-4 rung. That is 2 × 2 × 2 + 2 = 10 configurations.
-
-Each configuration gets a directory from the race arm — a cold run first, then
-a warm one restarted from it — and is then re-run by hand under the
-instruments, so the profile is of exactly the file the race times:
-
-```sh
-cd source/tools/freegs4e-benchmark
-P=../../../runs/freegs4e-benchmark/ref-interp/problem.json
-OUT=../../../runs/perf-profile          # under runs/, never in source/
-export OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
-for cfg in machine-d-tcv-shaped machine-f-diiid-shaped; do
-  for r in 0 2 $( [ $cfg = machine-f-diiid-shaped ] && echo 3 ); do
-    c=$OUT/$cfg/r$r/cold; w=$OUT/$cfg/r$r/warm; mkdir -p $c $w
-    venv/bin/python race_arm_meq.py --problem $P --config $cfg --rung $r --start cold --out $c
-    venv/bin/python race_arm_meq.py --problem $P --config $cfg --rung $r --start warm --state $c --out $w
-  done
-done
-```
-
-Then in each of those directories, three times each and interleaved across
-the ten so drift spreads over all of them, with `$MEQ` the installed binary the
-arm itself runs (`venv/bin/python -c 'import benchpaths; print(benchpaths.meq())'`):
-
-```sh
-$MEQ --mesh-ready meq.toml                                        # plain wall
-OMP_WAIT_POLICY=passive $MEQ --mesh-ready --profile meq.toml      # the legs
-$MEQ --mesh-ready --trace-solver-stats meq.toml                   # once is enough
-```
-
-A warm directory's `meq.toml` names its mesh and guess by absolute path into
-the cold one, so re-running in place is right; copy a directory only with its
-paths rewritten.
-
-**Not measurable from MEQ, and asked upstream instead:** reduce and recover
-separately. `GetNPCTraversalTime()` times them together, and the request's
-item 2 asks for the split and the colour count.
-
-**Record** the leg tables as an `M-nn` entry in `MEASUREMENTS.md`, and put the
-two numbers the upstream request asks for — refinement steps, and the passive
-`cores` of the backsolve and of reduce+recover — into that request as a reply
-section rather than a new file.
-
-## 2. Re-run the MEQ arms the doc reports
+## Re-run the MEQ arms the doc reports
 
 **All of it**: F, C and D shaped, cold and warm, three repeats, every rung of
 the ladder including the k4 h0.35 datum. One configuration per invocation, as

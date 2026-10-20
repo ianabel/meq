@@ -155,6 +155,12 @@ namespace meq
 			xPointRadius = doubleAttribute( file, "xpoint_r", path );
 			xPointHeight = doubleAttribute( file, "xpoint_z", path );
 		}
+		axisPointGiven = !file.getAtt( "axis_r" ).isNull() && !file.getAtt( "axis_z" ).isNull();
+		if ( axisPointGiven )
+		{
+			axisPointRadius = doubleAttribute( file, "axis_r", path );
+			axisPointHeight = doubleAttribute( file, "axis_z", path );
+		}
 		boundaryGiven = !file.getAtt( "psi_boundary" ).isNull();
 		if ( boundaryGiven )
 			boundary = doubleAttribute( file, "psi_boundary", path );

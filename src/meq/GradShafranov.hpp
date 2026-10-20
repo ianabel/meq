@@ -1834,6 +1834,29 @@ namespace meq
 			void refreshPlasmaComponent( mfem::Vector const &state );
 
 			/**
+			 * WHERE THE MAGNETIC AXIS IS, FOR THE NEXT PLASMA FILL, WHEN THE
+			 * CALLER KNOWS AND THIS SOLVER DOES NOT YET.
+			 *
+			 * The fill is seeded at the element holding the axis the constraint
+			 * last located (`plasmaSeedElement`), and a solver that has not
+			 * solved has none, so its first refreshPlasmaComponent() competes
+			 * an argmax of Psi instead -- which a coil's O-point can win. From a
+			 * cold start that costs nothing the first sweep was not going to
+			 * redo; from a restart AT an answer it poses the first sweep around
+			 * a coil: examples/diverted-tokamak-xpoint.toml restarted from its
+			 * own .nc started at a field residual of 1.1e-02 and left the
+			 * branch for psi_ax = -8.8e-02. MEASUREMENTS.md M-299.
+			 *
+			 * The seed is consumed as plasmaSeedElement is: the next evaluation
+			 * of the axis constraint overwrites it, so it decides only the fill
+			 * that comes before the first solve.
+			 *
+			 * @throws std::runtime_error, locatePotentialPoint()'s, if the point
+			 *         is not in the mesh; the solver is then as it was.
+			 */
+			void setPlasmaAxisSeed( double radius, double z );
+
+			/**
 			 * **STOP solve() REFRESHING THE SUPPORT, SO IT IS FIXED WITHIN A
 			 * NEWTON AND RE-DECIDED BETWEEN SOLVES.** XP-2 of
 			 * `FREE-BOUNDARY-PLAN.md` §10.6, and §10.5's own prescription

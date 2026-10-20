@@ -513,8 +513,11 @@ Forced open, 126 of 126 evaluations equal their host loops.
   `+0`.*
 * **Of 29 shipped examples, two differ under CUDA.**
   * `diverted-tokamak` is the stale-snapshot defect above (M-239), now fixed.
-  * `rotating-normalised` locates a different axis on the device. That is the
-    axis routes' one stated semantic difference, and it is **owed**.
+  * `rotating-normalised` located a different axis on the host: its axis sits
+    on the mesh line `z = 0`, and the host's warm ring walk followed one twin
+    of it where the device and the sweep took the other. The ring walk now
+    merges twins by the sweep's rule, and host and `--device debug` both read
+    1.039297e-01 (→ **[M-299](MEASUREMENTS.md#m-299)**).
 
 ### The first evaluation of a solve → [M-240](MEASUREMENTS.md#m-240)
 

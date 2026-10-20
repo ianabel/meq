@@ -1540,6 +1540,59 @@ namespace meq
 		if ( points.empty() )
 			return false;
 
+		/*
+		 * TWINS ARE MERGED ACROSS RINGS, BY pointsFrom()'s OWN RULE, BEFORE
+		 * ANYTHING IS CHOSEN BY DISTANCE TO THE SEED.
+		 *
+		 * pointsFrom() merges one physical critical point found from two
+		 * neighbouring elements -- the two versions q_h's jump across a face
+		 * gives it -- but only within one call, and the loop above calls it
+		 * once per ring. A point ON a mesh line has one version in each
+		 * neighbour, the seed's element offers the first and the next ring the
+		 * second, and the nearest-to-the-seed rule below then FOLLOWED
+		 * WHICHEVER SIDE THE SEED WAS ON, where sweep() keeps the one least
+		 * outside its own element. The two routes disagreed about which twin is
+		 * the point, and a bordered solve constrains psi_ax at it: measured on
+		 * examples/rotating-normalised.toml, whose up-down symmetric axis sits
+		 * on the mesh line z = 0, the twins carry psi = 1.0393250657e-01 (above,
+		 * 2.5e-04 outside its element) and 1.0392688528e-01 (below, 7.9e-05
+		 * outside), the cold solve's continuation followed the first, and a
+		 * restart -- which sweeps -- converged to a different equilibrium,
+		 * 2.7e-05 away in psi_ax. MEASUREMENTS.md M-299.
+		 *
+		 * The rule is the one the sweep applies, so the two routes now name the
+		 * same twin: same type and within an element, the one least outside
+		 * its element kept, ties to the lower element index. Distinct critical
+		 * points are further apart than an element and are still chosen by
+		 * distance below, so following one axis among several is unchanged.
+		 */
+		{
+			std::vector<CriticalPoint> merged;
+			for ( CriticalPoint const &point : points )
+			{
+				double const reach = point.element >= 0
+					? meshRef.GetElementSize( point.element ) : 0.0;
+				bool duplicate = false;
+				for ( CriticalPoint &kept : merged )
+				{
+					double const dr = kept.radius - point.radius;
+					double const dz = kept.z - point.z;
+					if ( kept.type == point.type && std::sqrt( dr*dr + dz*dz ) < reach )
+					{
+						duplicate = true;
+						if ( point.overshoot < kept.overshoot
+						     || ( point.overshoot == kept.overshoot
+						          && point.element < kept.element ) )
+							kept = point;
+						break;
+					}
+				}
+				if ( !duplicate )
+					merged.push_back( point );
+			}
+			points.swap( merged );
+		}
+
 		// STRICTLY INSIDE ITS ELEMENT FIRST, THEN NEAREST THE SEED.
 		//
 		// The first key is the one above: a root its own element actually holds

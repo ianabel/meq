@@ -3480,6 +3480,27 @@ int main( int argc, char **argv )
 							// that it lands there.
 							if ( storedGuess->hasPsiBoundary() )
 								fresh->setBoundaryFluxInitial( storedGuess->psiBoundary() );
+
+							// AND THE FIRST PLASMA FILL SEEDED AT THE FILE'S AXIS,
+							// which this fresh solver has not located: its own
+							// fallback is an argmax a coil's O-point can win, and
+							// the first sweep's support is then not the answer's.
+							// See setPlasmaAxisSeed().
+							if ( storedGuess->hasAxisPoint() )
+							{
+								try
+								{
+									fresh->setPlasmaAxisSeed( storedGuess->axisPointR(),
+									                          storedGuess->axisPointZ() );
+								}
+								catch ( std::runtime_error const & )
+								{
+									// Not reachable on this route -- the mesh prints
+									// as the file's, so its axis is in it -- and if it
+									// were, the fill's own fallback is what a restart
+									// without the seed had.
+								}
+							}
 							std::printf( "     the whole iterate ( q, psi, psihat ) from that "
 							             "file: an exact restart\n" );
 						}
@@ -5707,10 +5728,11 @@ int main( int argc, char **argv )
 		if ( normalised && solver
 		     && solver->axisConstraint()
 		        == meq::GradShafranovSolver::AxisConstraint::LocatedAxis )
-			std::printf( "     psi_ax is constrained at %s\n",
+			std::printf( "     psi_ax is constrained at %s ( %.4f, %.4f )\n",
 			             solver->axisWasLocated()
-			                 ? "the located magnetic axis, a zero of q_h"
-			                 : "the largest NODAL value: NO O-point was reachable" );
+			                 ? "the located magnetic axis, a zero of q_h, at"
+			                 : "the largest NODAL value: NO O-point was reachable; at",
+			             solver->axisR(), solver->axisZ() );
 
 		if ( axisChecked && axisCheck.located )
 		{

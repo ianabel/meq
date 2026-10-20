@@ -37,6 +37,7 @@
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -117,6 +118,29 @@ namespace
 		if ( std::regex_search( log, match, std::regex( "converged in ([0-9]+) Newton" ) ) )
 			return std::stoi( match[ 1 ] );
 		return -1;
+	}
+
+	/// Newton steps over a whole run: the sum of the support sweeps' `its`
+	/// where the run swept, which is what a restart is meant to save, and the
+	/// single solve's count where it did not.
+	int totalSteps( std::string const &log )
+	{
+		std::size_t at = log.find( "sweep     its" );
+		if ( at == std::string::npos )
+			return newtonSteps( log );
+		int total = 0;
+		std::regex const row( "^ {5}(\\d+) +(\\d+) " );
+		std::istringstream in( log.substr( at ) );
+		std::string line;
+		std::getline( in, line );
+		while ( std::getline( in, line ) )
+		{
+			std::smatch m;
+			if ( !std::regex_search( line, m, row ) )
+				break;
+			total += std::stoi( m[ 2 ] );
+		}
+		return total;
 	}
 
 	/// Whether the driver under test is a single-precision build, from its own
@@ -304,15 +328,17 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsAtTheAnswer )
 }
 
 // AND THE REST OF THE STATE: a run whose only unknowns are the field, on the
-// plain Newton path, and a free-boundary run whose border carries psi_bnd and
-// the I_p profile scale as well as psi_ax. Each restarted from its own .nc
+// plain Newton path; a free-boundary run whose border carries psi_bnd and the
+// I_p profile scale as well as psi_ax; and a diverted one, with an X-point and
+// coils, whose first support sweep is seeded at the file's axis. Each restarted from its own .nc
 // starts at its answer, or a step from it -- the support's edge is frozen at
 // the answer's own labels where the cold run froze it at the sweep before's --
 // and reaches the same equilibrium. MEASUREMENTS.md M-298.
 BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 {
 	struct Case { char const *example; int most; };
-	for ( Case const &c : { Case{ "coils-rectangle", 0 }, Case{ "limited-tokamak", 1 } } )
+	for ( Case const &c : { Case{ "coils-rectangle", 0 }, Case{ "limited-tokamak", 1 },
+	                        Case{ "diverted-tokamak-xpoint", 3 } } )
 	{
 		std::string const stem = c.example;
 		std::string const directory = fresh( "state-" + stem );
@@ -345,14 +371,75 @@ BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 		// One step more in single, measured on limited-tokamak: its stored state
 		// is at single's floor rather than at round-off.
 		int const most = c.most + ( singlePrecision() ? 1 : 0 );
-		BOOST_TEST( newtonSteps( warm ) <= most,
-		            stem << ": restarted from its own answer it took " << newtonSteps( warm )
-		            << " Newton steps, against " << newtonSteps( cold ) << " cold" );
-		BOOST_TEST( newtonSteps( warm ) < newtonSteps( cold ) );
+		BOOST_TEST( totalSteps( warm ) <= most,
+		            stem << ": restarted from its own answer it took " << totalSteps( warm )
+		            << " Newton steps, against " << totalSteps( cold ) << " cold" );
+		BOOST_TEST( totalSteps( warm ) < totalSteps( cold ) );
+		// A restart at the answer that needs the retry rung has left the branch
+		// on its first sweep: diverted-tokamak-xpoint did, when its first plasma
+		// fill was seeded at a coil rather than at the file's axis.
+		BOOST_TEST( warm.find( "Retrying" ) == std::string::npos,
+		            stem << ": restarted at its own answer, the run needed the retry "
+		            "rung:\n" << warm );
 		BOOST_TEST( sameAxis( psiAxisValue( warm ), psiAxisValue( cold ) ),
 		            stem << ": the restart reached psi_ax = " << psiAxisValue( warm )
 		            << " where the run it came from reached " << psiAxisValue( cold ) );
 	}
+}
+
+// AN AXIS ON A MESH LINE IS ONE POINT ON EVERY ROUTE. examples/rotating-
+// normalised.toml is up-down symmetric on a box whose mesh has the line z = 0,
+// so its axis sits on a face and q_h's jump gives it a twin in each neighbour,
+// O( h^(k+1) ) apart in psi. The bordered solve's warm search, the sweep that
+// reports the axis afterwards, and a restart's cold search must all name the
+// same twin, or the equilibrium reported depends on where the solve started:
+// it did, 2.7e-05 apart in psi_ax. MEASUREMENTS.md M-299.
+BOOST_AUTO_TEST_CASE( anAxisOnAMeshLineIsOnePointOnEveryRoute )
+{
+	std::string const directory = fresh( "axis-on-a-line" );
+	std::string const original = variant( directory, "rotating-normalised", "original",
+		[]( std::string const &text ) { return text; } );
+	BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + original ) == 0,
+	                    slurp( directory + "/log" ) );
+	std::string const cold = slurp( directory + "/log" );
+
+	// The constrained psi_ax against the sweep's axis, as the run reports both.
+	std::smatch reported;
+	BOOST_TEST_REQUIRE( std::regex_search( cold, reported,
+		std::regex( "the axis, as a zero of q_h: psi = ([^ ]+) at \\([^)]*\\), normalised flux ([0-9.]+)" ) ),
+		cold );
+	BOOST_TEST( sameAxis( reported[ 1 ].str(), psiAxisValue( cold ) ),
+	            "the solve constrained psi_ax = " << psiAxisValue( cold ) << " and the "
+	            "sweep finds the axis at psi = " << reported[ 1 ].str() << ": the two "
+	            "routes took different twins of an axis on a mesh line" );
+	BOOST_TEST( reported[ 2 ].str() == "1.0000" );
+	BOOST_TEST( cold.find( "NO O-point was reachable" ) == std::string::npos );
+
+	std::string const here = std::filesystem::absolute( directory ).string();
+	static std::string guessBlock;
+	guessBlock = "[initialguess]\nType = \"gridfunction\"\nFile = \"" + here
+	             + "/rotating-normalised.nc\"\n";
+	std::string const restarted = variant( directory, "rotating-normalised", "restarted",
+		[]( std::string const &text )
+		{
+			std::string out = std::regex_replace( text, std::regex( "\n\\[source\\]\n" ),
+			                                      "\n" + guessBlock + "\n[source]\n" );
+			return std::regex_replace( out, std::regex( "Prefix = \"[^\"]*\"" ),
+			                           "Prefix = \"restarted\"" );
+		} );
+	BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + restarted ) == 0,
+	                    slurp( directory + "/log" ) );
+	std::string const warm = slurp( directory + "/log" );
+	BOOST_TEST( newtonSteps( warm ) <= ( singlePrecision() ? 1 : 0 ),
+	            "restarted at its own answer, the run took " << newtonSteps( warm )
+	            << " Newton steps: its axis constraint is not the cold run's" );
+	BOOST_TEST( sameAxis( psiAxisValue( warm ), psiAxisValue( cold ) ),
+	            "restarted, psi_ax = " << psiAxisValue( warm ) << " against the cold "
+	            "run's " << psiAxisValue( cold ) );
+	// And a solve that converged at once still says where its axis is.
+	BOOST_TEST( warm.find( "NO O-point was reachable" ) == std::string::npos,
+	            "a solve converged on its first residual reports the nodal fallback:\n"
+	            << warm );
 }
 
 // AND THE CONVERTER REFUSES WHAT IT CANNOT READ, with meq's own exit codes.
