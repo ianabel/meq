@@ -81,9 +81,13 @@ included — because the mesh text is stored verbatim, the coefficients as
 doubles, and the VTK stage is one library call; `OutputConversion` asserts the
 bytes. **Two things only the run can make**: an adaptive run's per-cycle
 series, whose meshes the `.nc` does not hold, and a split run's
-`_psi_total.gf`, which evaluates `ψ_c` on the mesh. **The `.nc` restart is the
-`.gf` restart**: the same Newton steps to the same printed `psi_ax`
-(`theNetCDFRestartsLikeTheGridFunction`). It reads the embedded mesh with
+`_psi_total.gf`, which evaluates `ψ_c` on the mesh. **The `.nc` restart starts at the answer**:
+on the mesh it was solved on it takes the whole iterate `( q, psi, psihat )`
+— the flux block being `DarcyForm`'s `-q`, so the reassembly is bit for bit —
+and the border's unknowns as the run left them, `psi_bnd` among them on this
+route only (`theNetCDFRestartsAtTheAnswer`, `theRestartCarriesTheWholeState`,
+→ **[M-298](MEASUREMENTS.md#m-298)**, whose (c) to (e) are three defects it
+exposed and did not cause). It reads the embedded mesh with
 `refine = 0, fix_orientation = false`, so a mesh is never reordered under its
 coefficients; on the shipped meshes MFEM's default reading reorders nothing
 either, so that is a guarantee rather than a defect seen.

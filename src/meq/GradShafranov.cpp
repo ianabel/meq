@@ -16003,6 +16003,9 @@ namespace
 				exteriorCoefficientValues = initialStateCoefficients;
 			prepare();
 			// Consumed by this solve: a later one seeds from the guess again.
+			// Remembered, because the cold reference below prepares twice more
+			// and the second of those is the one Newton starts from.
+			stateGivenThisSolve = initialStateGiven;
 			initialStateGiven = false;
 		}
 
@@ -16047,8 +16050,16 @@ namespace
 
 				coldReference = coldNorm();
 
+				// AND THE WHOLE ITERATE AGAIN, IF THERE WAS ONE. The cold
+				// preparation above is cold by construction -- the state was
+				// consumed before it -- but this one is what Newton starts
+				// from, and without the flag it would seed from psi_h alone and
+				// discard setInitialState()'s q and psihat: a restart at the
+				// answer then started worse than a cold run. M-298.
 				initialGuess = guess;
+				initialStateGiven = stateGivenThisSolve;
 				prepare();
+				initialStateGiven = false;
 			}
 
 			ResidualRecorder recorder( newtonResidualHistory );

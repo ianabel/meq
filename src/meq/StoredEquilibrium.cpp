@@ -148,10 +148,61 @@ namespace meq
 				doubleAttribute( file, "shape_elongation", path ),
 				column( file, "shape_cosines" ), column( file, "shape_sines" ) );
 
+		if ( !file.getAtt( "xpoint_located" ).isNull()
+		     && integerAttribute( file, "xpoint_located", path ) == 1 )
+		{
+			xPointGiven = true;
+			xPointRadius = doubleAttribute( file, "xpoint_r", path );
+			xPointHeight = doubleAttribute( file, "xpoint_z", path );
+		}
+		boundaryGiven = !file.getAtt( "psi_boundary" ).isNull();
+		if ( boundaryGiven )
+			boundary = doubleAttribute( file, "psi_boundary", path );
+		scaleGiven = !file.getAtt( "profile_scale" ).isNull();
+		if ( scaleGiven )
+			scale = doubleAttribute( file, "profile_scale", path );
+		if ( !file.getAtt( "inverse_currents" ).isNull() )
+		{
+			std::istringstream in( textAttribute( file, "inverse_currents", path ) );
+			double value = 0.0;
+			while ( in >> value )
+				currents.push_back( value );
+		}
+
+		if ( !file.getAtt( "g_squared_coefficients" ).isNull() )
+		{
+			std::istringstream in( textAttribute( file, "g_squared_coefficients", path ) );
+			double value = 0.0;
+			while ( in >> value )
+				gSquared.push_back( value );
+		}
+
+		trace = column( file, "trace_coefficients" );
+		if ( !file.getAtt( "exterior_modes" ).isNull() )
+		{
+			int const modes = integerAttribute( file, "exterior_modes", path );
+			for ( int m = 0; m < modes; ++m )
+				exterior.push_back( doubleAttribute(
+					file, "exterior_a" + std::to_string( m + 2 ), path ) );
+		}
+
 		region = column( file, "element_region" );
 		plasmaFraction = column( file, "element_plasma_fraction" );
 		conductorMaterial = column( file, "element_conductor_material" );
 		conductorFraction = column( file, "element_conductor_fraction" );
+	}
+	void StoredEquilibrium::wholeState( mfem::Vector &state ) const
+	{
+		int const nFlux = fluxField->Size(), nPotential = potentialField->Size();
+		int const nTrace = static_cast<int>( trace.size() );
+		state.SetSize( nFlux + nPotential + nTrace );
+		mfem::real_t *const to = state.HostWrite();
+		mfem::real_t const *const q = fluxField->HostRead();
+		mfem::real_t const *const psi = potentialField->HostRead();
+		for ( int i = 0; i < nFlux; ++i )
+			to[ i ] = -q[ i ];                                // DarcyForm's -q
+		std::copy( psi, psi + nPotential, to + nFlux );
+		std::copy( trace.begin(), trace.end(), to + nFlux + nPotential );
 	}
 #else
 	StoredEquilibrium::StoredEquilibrium( std::string const &path )
@@ -159,5 +210,6 @@ namespace meq
 		throw std::runtime_error( "cannot read " + path
 		                          + ": MEQ was built without netcdf-cxx4" );
 	}
+	void StoredEquilibrium::wholeState( mfem::Vector & ) const { }
 #endif
 }

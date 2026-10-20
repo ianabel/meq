@@ -17,7 +17,7 @@
  *   * `meq-convert` on a run's own `.nc` writes BYTE FOR BYTE the files that
  *     run wrote -- the `.mesh`, the three `.gf`s and the VTK, bent onto Gamma
  *     -- on a curved case and on one with conductors;
- *   * the `.nc` restarts a run exactly as the `.gf` and `.mesh` pair does.
+ *   * the `.nc` restarts a run at its answer, from the solver's whole iterate.
  *
  * BYTES AND NOT A TOLERANCE, because nothing in the conversion should touch a
  * number: the mesh text is stored verbatim, the coefficients as doubles, and
@@ -30,6 +30,7 @@
 #define BOOST_TEST_MODULE OutputConversion
 #include <boost/test/unit_test.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -100,7 +101,8 @@ namespace
 	{
 		std::string text = slurp( meq::test::sourcePath( "examples/" + example + ".toml" ) );
 		std::string const examples = meq::test::sourcePath( "examples" ) + "/";
-		text = std::regex_replace( text, std::regex( "(File = \")([^\"/]+\\.dat\")" ),
+		text = std::regex_replace( text,
+		                           std::regex( "(File = \")([^\"/]+\\.(dat|msh|mesh|gf)\")" ),
 		                           "$1" + examples + "$2" );
 		text = edit( text );
 		std::string const path = directory + "/" + name + ".toml";
@@ -115,6 +117,34 @@ namespace
 		if ( std::regex_search( log, match, std::regex( "converged in ([0-9]+) Newton" ) ) )
 			return std::stoi( match[ 1 ] );
 		return -1;
+	}
+
+	/// Whether the driver under test is a single-precision build, from its own
+	/// --version. A re-solve from another start lands within the format's
+	/// floor of the first, and in single that floor is measured and not
+	/// assumed to be double's (CLAUDE.md, the single-precision traps).
+	bool singlePrecision()
+	{
+		std::string const scratch = "output-conversion-version.txt";
+		if ( std::system( ( std::string( driver() ) + " --version > " + scratch ).c_str() ) != 0 )
+			return false;
+		bool const single = slurp( scratch ).find( ", single," ) != std::string::npos;
+		std::remove( scratch.c_str() );
+		return single;
+	}
+
+	/// The same psi_ax: the same printed digits in double, and in single within
+	/// 5e-5 relative -- measured, a re-solve there lands 2.7e-6 (fixed-h-circular
+	/// from its .gf) and 1.1e-5 (limited-tokamak from its .nc) from the first,
+	/// where single's own answer for the latter is 1.2e-4 from double's.
+	bool sameAxis( std::string const &a, std::string const &b )
+	{
+		if ( a.empty() || b.empty() )
+			return a == b;
+		if ( !singlePrecision() )
+			return a == b;
+		double const x = std::stod( a ), y = std::stod( b );
+		return std::abs( x - y ) <= 5.0e-5*std::abs( y );
 	}
 
 	/// The converged psi_ax as the driver prints it, without the constraint
@@ -204,24 +234,29 @@ BOOST_AUTO_TEST_CASE( theConverterWritesTheRunsOwnFiles )
 	}
 }
 
-// THE `.nc` RESTARTS A RUN EXACTLY AS THE `.gf` AND `.mesh` PAIR DOES: the same
-// Newton steps to the same printed psi_ax, from the same stored field -- with
-// psi_ax itself started from the file's psi_axis, which the .gf cannot carry.
-// On a non-linear case, so that a wrong restart costs iterations and shows.
-BOOST_AUTO_TEST_CASE( theNetCDFRestartsLikeTheGridFunction )
+// THE `.nc` RESTARTS A RUN AT ITS ANSWER. It carries the solver's whole
+// iterate ( q, psi, psihat ), so a restart on the mesh it was solved on starts
+// there: no Newton step, and the run that results writes the same psi_h and
+// psi* to the byte. The `.gf` pair carries psi_h alone -- q is re-derived and
+// psihat projected -- and still takes a step or two to the same answer, which
+// is the control. On a non-linear case, so that a restart that is not exact
+// costs iterations and shows. MEASUREMENTS.md M-298.
+BOOST_AUTO_TEST_CASE( theNetCDFRestartsAtTheAnswer )
 {
 	std::string const directory = fresh( "restart" );
 	BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " --gf "
 	                           + meq::test::sourcePath( "examples/fixed-h-circular.toml" ) )
 	                    == 0 );
-	int const cold = newtonSteps( slurp( directory + "/log" ) );
+	std::string const original = slurp( directory + "/log" );
+	int const cold = newtonSteps( original );
 	BOOST_TEST_REQUIRE( cold > 0 );
 	std::string const here = std::filesystem::absolute( directory ).string();
 
-	static std::string guessBlock;
+	static std::string guessBlock, prefix;
 	auto restart = [ & ]( std::string const &name, std::string const &block )
 	{
 		guessBlock = block;
+		prefix = name;
 		std::string const config = variant( directory, "fixed-h-circular", name,
 			[]( std::string const &text )
 			{
@@ -230,10 +265,10 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsLikeTheGridFunction )
 				out = std::regex_replace( out, std::regex( "\n\\[source\\]\n" ),
 				                          "\n" + guessBlock + "\n[source]\n" );
 				return std::regex_replace( out, std::regex( "Prefix = \"[^\"]*\"" ),
-				                           "Prefix = \"restarted\"" );
+				                           "Prefix = \"" + prefix + "\"" );
 			} );
-		BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + config ) == 0,
-		                    slurp( directory + "/log" ) );
+		BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " --gf " + config )
+		                    == 0, slurp( directory + "/log" ) );
 		return slurp( directory + "/log" );
 	};
 
@@ -245,19 +280,79 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsLikeTheGridFunction )
 		+ "/fixed-h-circular_psi.gf\"\nMeshFile = \"" + here
 		+ "/fixed-h-circular.mesh\"\nContent = \"total\"\n" );
 
-	BOOST_TEST( fromNc.find( "warm start from" ) != std::string::npos,
-	            "the .nc restart did not say what it read" );
 	BOOST_TEST( fromNc.find( "psi_ax starts at the file's" ) != std::string::npos,
 	            "the .nc restart did not start psi_ax from the file's psi_axis" );
-	BOOST_TEST( newtonSteps( fromNc ) == newtonSteps( fromGf ),
-	            "the .nc restart took " << newtonSteps( fromNc ) << " Newton steps and "
-	            "the .gf one " << newtonSteps( fromGf ) << ": they did not start from "
-	            "the same field" );
-	BOOST_TEST( newtonSteps( fromNc ) < cold,
-	            "a restart from the converged answer took " << newtonSteps( fromNc )
-	            << " steps against the cold run's " << cold );
+	BOOST_TEST( fromNc.find( "an exact restart" ) != std::string::npos,
+	            "the .nc restart did not take the file's whole iterate:\n" << fromNc );
+	BOOST_TEST( newtonSteps( fromNc ) == 0,
+	            "a restart from the file's own iterate took " << newtonSteps( fromNc )
+	            << " Newton steps; at the answer it takes none" );
+	for ( char const *suffix : { "_psi.gf", "_grad_psi.gf", "_psistar.gf" } )
+		BOOST_TEST( slurp( directory + "/from-nc" + suffix )
+		            == slurp( directory + "/fixed-h-circular" + suffix ),
+		            "the run restarted at the answer did not write the answer's "
+		            << suffix );
+
+	// The control: psi_h alone is a restart, and not an exact one.
+	BOOST_TEST( newtonSteps( fromGf ) > 0 );
+	BOOST_TEST( newtonSteps( fromGf ) < cold );
 	BOOST_TEST( !psiAxisValue( fromNc ).empty() );
-	BOOST_TEST( psiAxisValue( fromNc ) == psiAxisValue( fromGf ) );
+	BOOST_TEST( psiAxisValue( fromNc ) == psiAxisValue( original ) );
+	BOOST_TEST( sameAxis( psiAxisValue( fromGf ), psiAxisValue( original ) ),
+	            "the .gf restart reached psi_ax = " << psiAxisValue( fromGf )
+	            << " where the run it came from reached " << psiAxisValue( original ) );
+}
+
+// AND THE REST OF THE STATE: a run whose only unknowns are the field, on the
+// plain Newton path, and a free-boundary run whose border carries psi_bnd and
+// the I_p profile scale as well as psi_ax. Each restarted from its own .nc
+// starts at its answer, or a step from it -- the support's edge is frozen at
+// the answer's own labels where the cold run froze it at the sweep before's --
+// and reaches the same equilibrium. MEASUREMENTS.md M-298.
+BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
+{
+	struct Case { char const *example; int most; };
+	for ( Case const &c : { Case{ "coils-rectangle", 0 }, Case{ "limited-tokamak", 1 } } )
+	{
+		std::string const stem = c.example;
+		std::string const directory = fresh( "state-" + stem );
+		std::string const original = variant( directory, stem, "original",
+			[]( std::string const &text ) { return text; } );
+		BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + original ) == 0,
+		                    slurp( directory + "/log" ) );
+		std::string const cold = slurp( directory + "/log" );
+		std::string const here = std::filesystem::absolute( directory ).string();
+
+		static std::string guessBlock;
+		guessBlock = "[initialguess]\nType = \"gridfunction\"\nFile = \"" + here + "/"
+		             + stem + ".nc\"\n";
+		std::string const restarted = variant( directory, stem, "restarted",
+			[]( std::string const &text )
+			{
+				std::string out = std::regex_replace(
+					text, std::regex( "\n\\[initialguess\\]\n(?:[A-Za-z]+ = [^\n]*\n)+" ), "\n" );
+				out = std::regex_replace( out, std::regex( "\n\\[source\\]\n" ),
+				                          "\n" + guessBlock + "\n[source]\n" );
+				return std::regex_replace( out, std::regex( "Prefix = \"[^\"]*\"" ),
+				                           "Prefix = \"restarted\"" );
+			} );
+		BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + restarted ) == 0,
+		                    slurp( directory + "/log" ) );
+		std::string const warm = slurp( directory + "/log" );
+
+		BOOST_TEST( warm.find( "an exact restart" ) != std::string::npos,
+		            stem << ": the restart did not take the whole iterate:\n" << warm );
+		// One step more in single, measured on limited-tokamak: its stored state
+		// is at single's floor rather than at round-off.
+		int const most = c.most + ( singlePrecision() ? 1 : 0 );
+		BOOST_TEST( newtonSteps( warm ) <= most,
+		            stem << ": restarted from its own answer it took " << newtonSteps( warm )
+		            << " Newton steps, against " << newtonSteps( cold ) << " cold" );
+		BOOST_TEST( newtonSteps( warm ) < newtonSteps( cold ) );
+		BOOST_TEST( sameAxis( psiAxisValue( warm ), psiAxisValue( cold ) ),
+		            stem << ": the restart reached psi_ax = " << psiAxisValue( warm )
+		            << " where the run it came from reached " << psiAxisValue( cold ) );
+	}
 }
 
 // AND THE CONVERTER REFUSES WHAT IT CANNOT READ, with meq's own exit codes.

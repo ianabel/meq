@@ -2329,6 +2329,10 @@ int main( int argc, char **argv )
 	std::unique_ptr<mfem::FunctionCoefficient> ramp;
 	std::unique_ptr<mfem::Mesh> guessMesh;
 	std::unique_ptr<mfem::GridFunction> guess;
+	// The .nc a guess came from, kept for its whole iterate: an exact restart
+	// on the mesh it was solved on starts from ( q, psi, psihat ) and not from
+	// psi_h alone. Null for a .gf guess.
+	std::unique_ptr<meq::StoredEquilibrium> storedGuess;
 	// What the stored guess holds: [initialguess] Content for a .gf, the file's
 	// own content attribute for a .nc.
 	meq::GuessContent guessContent = config->getInitialGuess().content;
@@ -2819,7 +2823,9 @@ int main( int argc, char **argv )
 					// A .nc MEQ WROTE: its own mesh, read as written (see
 					// StoredEquilibrium.hpp for why not refined or reoriented),
 					// psi_h on it, and what that field is, from the file.
-					meq::StoredEquilibrium const stored( config->getInitialGuess().file );
+					storedGuess = std::make_unique<meq::StoredEquilibrium>(
+						config->getInitialGuess().file );
+					meq::StoredEquilibrium const &stored = *storedGuess;
 					std::istringstream meshStream( stored.meshText() );
 					guessMesh = std::make_unique<mfem::Mesh>( meshStream, 1, 0, false );
 					std::stringstream fieldStream;
@@ -2855,6 +2861,57 @@ int main( int argc, char **argv )
 						             "not [source] PsiAxis = %.12e\n",
 						             stored.psiAxis(), psiAxisGuess );
 						psiAxisGuess = stored.psiAxis();
+					}
+
+					/*
+					 * AND THE BORDER'S OTHER UNKNOWNS, BY THE ADAPTIVE LOOP'S
+					 * RULE: what one cycle hands the next -- the located null,
+					 * the free currents, and the I_p profile scale, which lives
+					 * on the shared source -- is what a restart takes from the
+					 * file. Without them the whole iterate starts at the answer
+					 * and the border does not, which costs the steps it was
+					 * meant to save. Each only where this run has that unknown.
+					 */
+					if ( stored.hasXPoint() && config->getBoundary().xpoint.given )
+					{
+						xPointSeedR = stored.xPointR();
+						xPointSeedZ = stored.xPointZ();
+						std::printf( "     the X-point starts at the file's ( %.6f, %.6f )\n",
+						             xPointSeedR, xPointSeedZ );
+					}
+					if ( stored.hasProfileScale() && normalised
+					     && config->getSource().plasmaCurrent() != 0.0 )
+					{
+						normalised->setCurrentScale( stored.profileScale() );
+						std::printf( "     the I_p profile scale starts at the file's %.12e\n",
+						             stored.profileScale() );
+					}
+					if ( !stored.gSquaredCoefficients().empty() && toroidalDriven )
+					{
+						if ( stored.gSquaredCoefficients().size() == toroidalCoefficients.size() )
+						{
+							toroidalCoefficients = stored.gSquaredCoefficients();
+							std::printf( "     the q-driven loop's g^2 starts at the file's\n" );
+						}
+						else
+							std::printf( "     the file's g^2 has %zu coefficients and this "
+							             "run %zu; the loop opens at a constant g\n",
+							             stored.gSquaredCoefficients().size(),
+							             toroidalCoefficients.size() );
+					}
+					if ( !stored.inverseCurrents().empty() )
+					{
+						if ( stored.inverseCurrents().size() == inverseCurrents.size() )
+						{
+							inverseCurrents = stored.inverseCurrents();
+							std::printf( "     the %zu free currents start at the file's\n",
+							             inverseCurrents.size() );
+						}
+						else
+							std::printf( "     the file has %zu free currents and this run "
+							             "%zu; they start at this file's seeds\n",
+							             stored.inverseCurrents().size(),
+							             inverseCurrents.size() );
 					}
 				}
 				else
@@ -3378,6 +3435,64 @@ int main( int argc, char **argv )
 			{
 				// The EXACT restart: same mesh, same degree, every coefficient.
 				fresh->setInitialGuess( *guess );
+
+				/*
+				 * AND FROM A .nc, THE WHOLE ITERATE: ( q, psi, psihat ) as the
+				 * run that wrote it held them, so the solve starts AT that
+				 * answer instead of from psi_h with q re-derived and psihat
+				 * projected -- which was a Newton step on every restart
+				 * (MEASUREMENTS.md M-297, M-298).
+				 *
+				 * THREE CONDITIONS, EACH A WAY THE ITERATE WOULD BE ANOTHER
+				 * PROBLEM'S. The mesh must print as the stored one does, since
+				 * the trace is numbered by faces and an equal element count
+				 * says nothing about that; the field must be the one this run
+				 * solves for, psi_p under a split and psi without one, since
+				 * only psi_h is converted between the two; and the exterior
+				 * coupling must have as many modes. Failing any, the psi_h
+				 * route above stands, and the reason is printed.
+				 */
+				if ( storedGuess && storedGuess->hasTrace() )
+				{
+					char const *refusal = nullptr;
+					if ( storedGuess->holdsTotal() == static_cast<bool>( conductorField ) )
+						refusal = storedGuess->holdsTotal()
+						          ? "it holds psi and this run solves for psi - psi_c"
+						          : "it holds psi - psi_c and this run solves for psi";
+					else if ( meq::meshText( mesh ) != storedGuess->meshText() )
+						refusal = "this run's mesh is not the mesh it was solved on";
+					if ( !refusal )
+					{
+						try
+						{
+							mfem::Vector state;
+							storedGuess->wholeState( state );
+							fresh->setInitialState( state,
+							                        storedGuess->exteriorCoefficients() );
+
+							// AND psi_bnd AT THE FILE'S, ON THIS ROUTE ONLY. A
+							// fresh solver starts it at zero on purpose:
+							// FREE-BOUNDARY-PLAN.md section 10.5 measured a start
+							// NEAR the answer drifting or changing branch. This is
+							// a start AT it, the whole iterate with it, so the
+							// border row is satisfied rather than seeded nearby,
+							// and the branch is the file's own. M-298 measures
+							// that it lands there.
+							if ( storedGuess->hasPsiBoundary() )
+								fresh->setBoundaryFluxInitial( storedGuess->psiBoundary() );
+							std::printf( "     the whole iterate ( q, psi, psihat ) from that "
+							             "file: an exact restart\n" );
+						}
+						catch ( std::invalid_argument const &mismatch )
+						{
+							std::printf( "     psi_h alone from that file, not its whole "
+							             "iterate: %s\n", mismatch.what() );
+						}
+					}
+					else
+						std::printf( "     psi_h alone from that file, not its whole "
+						             "iterate: %s\n", refusal );
+				}
 			}
 			else
 			{
@@ -6647,9 +6762,10 @@ int main( int argc, char **argv )
 		 */
 		if ( !toroidalCoefficients.empty() && toroidalDriven )
 		{
+			// 17 significant digits: a restart starts the outer loop from these.
 			std::ostringstream coefficients;
 			coefficients.setf( std::ios::scientific );
-			coefficients.precision( 10 );
+			coefficients.precision( 16 );
 			for ( std::size_t i = 0; i < toroidalCoefficients.size(); ++i )
 				coefficients << ( i == 0 ? "" : " " ) << toroidalCoefficients[ i ];
 
@@ -6723,11 +6839,14 @@ int main( int argc, char **argv )
 		 */
 		if ( solver->inverseIsPosed() )
 		{
+			// Precision 16 in scientific -- 17 significant digits -- because a
+			// restart starts the inverse's currents from these, and fewer do
+			// not recover a double (writeMfem()'s measurement).
 			auto joined = []( std::vector<double> const &values )
 			{
 				std::ostringstream out;
 				out.setf( std::ios::scientific );
-				out.precision( 12 );
+				out.precision( 16 );
 				for ( std::size_t i = 0; i < values.size(); ++i )
 					out << ( i == 0 ? "" : " " ) << values[ i ];
 				return out.str();
@@ -7104,6 +7223,24 @@ int main( int argc, char **argv )
 			               "Wb/rad" );
 			writer.attribute( "psistar_collection",
 			                  std::string( starField.FESpace()->FEColl()->Name() ) );
+
+			// AND THE TRACE, psihat, so the file is the solver's WHOLE iterate:
+			// with the flux and potential above it is state() exactly, the
+			// flux block being -q (DarcyForm's sign; flux() is its Neg()). A
+			// restart on the same mesh then starts AT the answer rather than
+			// from psi_h with q re-derived and psihat projected.
+			mfem::GridFunction const &traceField = solver->trace();
+			traceField.HostRead();
+			std::vector<double> const traceCoefficients(
+				traceField.GetData(), traceField.GetData() + traceField.Size() );
+			writer.vector( "trace_dof", "trace_coefficients", traceCoefficients,
+			               "every coefficient of the solved trace psihat on the mesh "
+			               "faces, in the space named by trace_collection; with "
+			               "-flux_coefficients and psi_coefficients it is the "
+			               "solver's whole iterate",
+			               "Wb/rad" );
+			writer.attribute( "trace_collection",
+			                  std::string( traceField.FESpace()->FEColl()->Name() ) );
 
 			// AND THE CURVE THE VTK IS BENT ONTO, so meq-convert bends it
 			// without the configuration.

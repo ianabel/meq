@@ -19475,9 +19475,114 @@ against the `.gf` restart's 2.192457e-03 — to the same 2 steps and the same
 weighted projection of `grad psi_h`, which is not the solved `q_h`, and the
 trace `psihat` is not stored at all. A restart at the answer would carry the
 whole state `( q, psi, psihat )` — the `.nc` holds the first two exactly and
-not the third.
+not the third. [M-298](#m-298) is that restart.
 
 **Reproduce.** Per case and arm in turn, from a directory under `runs/`:
 `meq --profile examples/fixed-<c>.toml` on each binary, the third arm with `--gf
 --vtk`, then `meq-convert fixed-<c>.nc` beside B's output, timed.
+
+### M-298
+
+**THE `.nc` RESTART STARTS FROM THE SOLVER'S WHOLE STATE: THE ITERATE
+`( q, psi, psihat )` AND THE BORDER'S UNKNOWNS. A CONVERGED RUN RESTARTED
+FROM ITS OWN FILE TAKES 0 NEWTON STEPS ON SIX OF FOURTEEN EXAMPLES AND 1 OR 3
+ON THREE FREE-BOUNDARY ONES THAT TOOK 12, TO THE SAME EQUILIBRIUM — AND THE CASES WHERE IT DOES NOT
+ARE THREE DEFECTS THAT WERE THERE BEFORE IT, EACH NAMED BELOW.**
+
+**What is carried.** The `.nc` gains `trace_coefficients`, so with the flux and
+potential coefficients it is `GradShafranovSolver::state()` exactly — the
+flux block is `DarcyForm`'s `-q`, and `flux()` is its `Neg()`, so the
+reassembly is bit for bit. On an exact restart — this run's mesh printing as
+the file's `mesh`, and the stored field the one this run solves for —
+`setInitialState()` takes it, with the exterior coefficients. And the border:
+`psi_ax` from `psi_axis`, the X-point from `xpoint_r`/`xpoint_z` when
+`xpoint_located`, the I_p profile scale from `profile_scale`, the free
+currents from `inverse_currents`, a q-driven run's `g_squared_coefficients`
+(the last two now written to 17 digits), and `psi_bnd` from `psi_boundary` on
+the exact route only (§10.5 of `FREE-BOUNDARY-PLAN.md` measured a start NEAR
+the answer drifting; this is a start AT it).
+
+**A LIBRARY DEFECT, FOUND BY THE FIRST UNBORDERED CASE.** On the plain
+non-linear path `solve()` prepares once, consuming the state, then twice more
+to take the cold reference — and the second of those, which Newton starts
+from, seeded from `psi_h` alone. `coils-rectangle` restarted at its answer
+started at `|| r_0 || = 0.298` against the cold run's 0.063. The flag now
+survives to that preparation; the cold one stays cold.
+
+**Each example solved, then restarted from its own `.nc`.** Newton steps
+summed over the support sweeps where there are any. `OMP = 8`, `MKL = 1`.
+
+| example | path | cold | restart | answer |
+|---|---|---|---|---|
+| `fixed-h-circular` | bordered, curved | 5 | **0** | bit for bit |
+| `fixed-a-testtokamak` | bordered, curved | 4 | **0** | same `psi_ax` |
+| `fixed-f-diiid` | bordered, curved | 4 | 2 | same `psi_ax`; see (a) |
+| `coils-rectangle` | plain, meshed coils | 5 | **0** | |
+| `miller-curved` | linear, curved | 1 | **0** | |
+| `mirror-rotating` | box, split | 3 | **0** | |
+| `mirror-three-species` | box, split | 3 | **0** | |
+| `limited-tokamak` | free, limiter | 12 | **1** | same `psi_ax` |
+| `machine-f-diiid` | free, X-point, sweeps | 7 + 3 + 2 | **1 + 2** | same `psi_ax`, `psi_bnd` |
+| `machine-f-diiid-filament` | the same, split | 7 + 3 + 2 | **1 + 2** | same `psi_ax`, `psi_bnd` |
+| `q-driven` | outer loop on `g` | 12 KINSOL, 43 solves | **1, 10** | `psi_ax` +1e-6; see (b) |
+| `rotating-normalised` | bordered, rotating | 7 | 2 | **moves**; see (c) |
+| `diverted-tokamak-xpoint` | free, X-point, sweeps | 14 + 3 + 2 | 7, then 14 + 3 + 2 | same; see (d) |
+| `machine-c-mast` | free | **does not converge** | — | see (e) |
+
+`fixed-h-circular`'s restarted `.nc` equals the original's in every numeric
+variable, and its `_psi.gf`, `_grad_psi.gf` and `_psistar.gf` byte for byte;
+`theNetCDFRestartsAtTheAnswer` asserts it, and fails at 3 Newton steps with
+the flux block's sign flipped. `theRestartCarriesTheWholeState` asserts the
+plain path and the free-boundary border on `coils-rectangle` and
+`limited-tokamak`.
+
+**IN SINGLE THE RESTART LANDS AT SINGLE'S FLOOR, NOT AT ROUND-OFF.**
+`fixed-h-circular` still restarts in 0 steps to the same bytes; its `.gf`
+control lands 2.7e-6 from the original. `limited-tokamak` restarts in 2
+steps against 10 cold and lands 1.1e-5 from single's own cold answer —
+which is itself 1.2e-4 from double's (9.483221e-02 against 9.484404e-02), so
+both are inside what single resolves on that case. The two assertions take a
+single-precision bound for exactly these, measured: 5e-5 in `psi_ax` and one
+step more.
+
+**(a) THE LOCATED AXIS IS RE-LOCATED.** `fixed-f-diiid` restarts with the
+field residual at 1.4e-16 and the `psi_ax` row alone at 2.46e-10: the axis
+search starts afresh on the restart and lands a hair from where the cold
+solve's tracked one was, and `psi` near an extremum moves quadratically with
+that. Two steps of size 2e-11 close it. Seeding the axis search from the
+stored location would; the solver has no setter for it.
+
+**(b) THE COLD RUN WAS THE LOOSER ONE.** The q-driven outer loop stopped at a
+norm of 1.9e-06 cold and at 4.6e-12 restarted from that answer, so `psi_ax`
+moves in its seventh digit toward the tighter solution.
+
+**(c) A COLD SOLVE THAT CONSTRAINS AT THE NODAL MAXIMUM WHILE SAYING IT
+CONSTRAINS AT THE LOCATED AXIS — PRE-EXISTING.** `rotating-normalised` cold
+reports `psi_ax = 1.039325e-01`, which is `max psi_h`, while its own post-solve
+search finds the zero of `q_h` at 1.039297e-01, and it prints "constrained at
+the located magnetic axis". Restarted — by the `.nc` OR the `.gf`, on this
+tree OR `494d4aa` — the solve does locate the axis and converges to
+1.039297e-01. So the restart reports the consistent answer and the cold run
+does not; the defect is the cold solve's silent fallback. Open.
+
+**(d) A DIVERTED RUN STARTED AT ITS ANSWER LEAVES IT — PRE-EXISTING, AND
+WORSE BEFORE.** `diverted-tokamak-xpoint`'s first support sweep, frozen from
+the restart state, is not the support the answer converged under, and from
+it the solve reaches `psi_ax = -8.8e-02` and stalls; the retry rung then
+solves as the cold run did, so the restart costs 7 more steps than cold and
+ends on the right equilibrium. **On `494d4aa`, the `.gf` restart from the same
+answer ENDS ON ANOTHER ONE, `psi_ax = 1.302949e-01` against 8.266088e-02.**
+Removing each restored quantity in turn does not cure sweep 0, and removing
+`psi_bnd` ends on yet another, 8.052202e-02. What would cure it is freezing
+the first sweep at the stored support — the file carries
+`element_plasma_fraction` — which the solver has no way to be given. Open.
+
+**(e) `machine-c-mast` does not converge cold, on this tree or on `494d4aa`**:
+the bordered Newton stalls, and Picard-then-Newton trips the X-point
+relocation cap at 0.1229 m against 0.1225. Open, and nothing to do with a
+restart.
+
+**Reproduce.** Each example through `meq-run`, then again with
+`[initialguess] Type = "gridfunction"`, `File = "<stem>.nc"` in place of its
+own guess and every other key unchanged.
 

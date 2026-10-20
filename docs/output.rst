@@ -410,6 +410,10 @@ of the same answer:
        ``flux_ordering``
      - the spaces those coefficients live in, spelled as MFEM's
        ``FiniteElementCollection::New()`` takes them back
+   * - ``trace_coefficients(trace_dof)``, ``trace_collection``
+     - the solved trace :math:`\hat\psi` on the mesh faces. With the two above
+       it is the solver's whole iterate, which is what a restart on the same
+       mesh starts from
    * - ``psistar_coefficients(psistar_dof)``, ``psistar_collection``
      - the post-processed :math:`\psi^\star` and its space, which is what the
        grid above samples and what the VTK draws

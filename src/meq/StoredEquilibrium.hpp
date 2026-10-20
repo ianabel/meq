@@ -69,6 +69,51 @@ namespace meq
 			bool holdsTotal() const { return total; }
 			std::string const &content() const { return contentText; }
 
+			/**
+			 * THE SOLVER'S WHOLE ITERATE, ( q, psi, psihat ) as
+			 * GradShafranovSolver::state() lays it out -- the flux block being
+			 * DarcyForm's -q, which flux() negates -- assembled from the file's
+			 * flux, potential and trace coefficients, bit for bit what the run
+			 * held. Empty when the file carries no trace, from before it did.
+			 *
+			 * VALID ONLY ON THE MESH IT WAS SOLVED ON, NUMBERED AS THAT SOLVE
+			 * NUMBERED IT: the trace lives on the faces, and a mesh read back
+			 * from text may number its faces differently. So a caller hands it
+			 * to setInitialState() only for a solve whose own mesh prints as
+			 * meshText() does, and that solver then numbers the faces as the
+			 * one that wrote this did.
+			 */
+			bool hasTrace() const { return !trace.empty(); }
+			void wholeState( mfem::Vector &state ) const;
+
+			/// The exterior coupling's coefficients, `exterior_a2` ... in order,
+			/// empty without one: setInitialState()'s second argument.
+			std::vector<double> const &exteriorCoefficients() const { return exterior; }
+
+			/**
+			 * THE BORDER'S OTHER UNKNOWNS, AS THE RUN SOLVED THEM: what the
+			 * adaptive loop hands one cycle's solver from the last, read from
+			 * the file so a restart starts there rather than at the TOML's
+			 * seeds. Each is present only where the run had it.
+			 *
+			 *   xPoint      the null, when it was an unknown and still located
+			 *   profileScale  the I_p border's profile scale
+			 *   inverseCurrents  the free circuits' currents, in the run's
+			 *                order of `inverse_circuits`
+			 *   gSquaredCoefficients  a q-driven run's g^2 polynomial
+			 */
+			bool hasXPoint() const { return xPointGiven; }
+			double xPointR() const { return xPointRadius; }
+			double xPointZ() const { return xPointHeight; }
+			/// psi_bnd, the boundary label of a limited or diverted run.
+			bool hasPsiBoundary() const { return boundaryGiven; }
+			double psiBoundary() const { return boundary; }
+			bool hasProfileScale() const { return scaleGiven; }
+			double profileScale() const { return scale; }
+			std::vector<double> const &inverseCurrents() const { return currents; }
+			/// A q-driven run's g^2( Psi ) coefficients, its outer unknowns.
+			std::vector<double> const &gSquaredCoefficients() const { return gSquared; }
+
 			/// The converged axis flux, psi_ax, which a normalised run records
 			/// as its `psi_axis` attribute and a restart starts its bordered
 			/// unknown from; hasPsiAxis() is false for a run without one.
@@ -102,6 +147,11 @@ namespace meq
 
 			std::unique_ptr<BoundaryShape> curve;
 			bool total = true;
+			std::vector<double> trace, exterior;
+			bool xPointGiven = false, scaleGiven = false, boundaryGiven = false;
+			double boundary = 0.0;
+			double xPointRadius = 0.0, xPointHeight = 0.0, scale = 1.0;
+			std::vector<double> currents, gSquared;
 			bool axisGiven = false;
 			double axis = 0.0;
 			std::string contentText;

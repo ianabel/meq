@@ -6116,6 +6116,9 @@ namespace meq
 			/// so the transferred boundary condition follows the iterate.
 			ExteriorDtN const *exteriorCoupling;
 			std::vector<double> exteriorCoefficientValues;
+			/// Whether this solve() was handed setInitialState()'s iterate: its
+			/// preparations after the first must apply it too. See solve().
+			bool stateGivenThisSolve = false;
 
 			/// Extra quadrature order for meq::SourceIntegrator; see
 			/// setSourceQuadratureOrder().
