@@ -2639,10 +2639,8 @@ namespace meq
 					solverOptions.traceSolver = TraceSolverType::Pardiso;
 				else if ( trace == "cudss" )
 					solverOptions.traceSolver = TraceSolverType::cuDSS;
-				else if ( trace == "gmres" )
-					solverOptions.traceSolver = TraceSolverType::GMRES;
 				else
-					solver.fail( "TraceSolver", "must be one of umfpack, pardiso, cudss, gmres, "
+					solver.fail( "TraceSolver", "must be one of umfpack, pardiso, cudss, "
 					             "but is \"" + trace + "\"" );
 			}
 

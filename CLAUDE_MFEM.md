@@ -116,9 +116,11 @@ the dev tree deliberately when testing a fix; otherwise leave it alone.
 
 ## `meq-integration`: the branch MEQ builds from, and why it is local only
 
-MEQ needs work from **fifteen branches**, fourteen of them `hdgdev`'s and one off
-MFEM master, and for as long as this section existed it named four. See the warning under the containment loop for how the
-other five were found and why no check built from this table could find them:
+MEQ needs work from **seventeen branches**, all fetched from `hdgdev`. Several
+are fixes branched off MFEM master rather than the HDG line, and two are merged
+under their local names rather than as `hdgdev/<name>`. See the warning under the
+containment loop for how branches missing from this table were found and why no
+check built from the table could find them:
 
 | branch | what MEQ needs from it | |
 |---|---|---|
@@ -130,13 +132,15 @@ other five were found and why no check built from this table could find them:
 | **`pardiso-device-host-sync`** | ***"PardisoSolver: synchronise the vectors, not just the matrix"*** — the other half of M-79's device chain, on the default trace solver | merge 5 |
 | **`sundials-ida-integration`** | `mfem::IDASolver`, and the `IDAS` component that broke every MEQ test binary's link when the cache went stale — see the CUDA section's fourth bullet | merge 6 |
 | **`gf-hdg-p-adaptivity`** | upstream's own §2 work; MEQ calls nothing from it, and it is in this table because it is in the merge, which is the point of the table | merge 7 |
-| **`memory-manager-registration-refcount`** | **NOT an `hdgdev` branch — it is off MFEM master**, which is why a recipe built from the `hdgdev` list cannot see it. `internal::Memory` gains the reference count `internal::Alias` always had, so registering one address twice no longer lets the first holder's `Delete` evict the second's entry. Four routines register lazily and reach it: `MakeAlias` on an unregistered base, the device-class arms of `Read`/`Write`/`ReadWrite`, and `SetDeviceMemoryType`. MEQ proposed this shape after both projects' first mechanism proved wrong; see the `Reconstruct()` row above | merge 9 |
+| **`memory-manager-registration-refcount`** | **Off MFEM master, not the HDG line**, though `hdgdev` carries it, which is why a recipe built from the HDG list cannot see it. `internal::Memory` gains the reference count `internal::Alias` always had, so registering one address twice no longer lets the first holder's `Delete` evict the second's entry. Four routines register lazily and reach it: `MakeAlias` on an unregistered base, the device-class arms of `Read`/`Write`/`ReadWrite`, and `SetDeviceMemoryType`. MEQ proposed this shape after both projects' first mechanism proved wrong; see the `Reconstruct()` row above | merge 9 |
 | **`cmake-find-package-component-cache`** | the fix to the defect MEQ reported when `SUNDIALS_LIBRARIES` short-circuited on a stale cached list and `-lsundials_idas` never reached the link line — see the CUDA section's fourth bullet. **It is in the merge because MEQ asked for it**, and its absence is a link failure rather than a silent one | merge 10 |
 | **`cudss-solver-configuration`** | `CuDSSSolver`'s setters, including the one that refuses `CUDSS_MTYPE_SYMMETRIC` by name rather than returning an exactly zero solution every phase reports as success. MEQ does not call cuDSS from a config file and still wants this: `TraceSolverScaling` constructs one | merge 11 |
 | **`intrules-triangle-high-order`** | `c6693d5f09`, the simplex-rule ceiling. Triangle rules are tabulated to **order 25** and above that `GrundmannMollerSimplexRule()` returns partly NEGATIVE weights — correct in exact arithmetic, destructive in double, and returned with a one-time warning rather than refused. **MEQ is clear and it was checked rather than assumed**: `SourceIntegrator::rule()` asks for `2k + OrderW + 4`, which is 12 at the suite's `k = 4`, and `PlasmaEdgeConvergence`'s triangle rules are `2k + 14` over `k <= 3`, so 20. `setSourceQuadratureOrder()`'s doxygen already stated the bound | merge 12 |
 | **`gf-interp-hdg-dev`** | **CCSZ INTERPOLATORY HDG** — `fem/darcy/reaction_hdg.{hpp,cpp}` with `HDGInterpolatoryReactionIntegrator`, `NodalReactionFunction` and a quadrature control, plus `HDGPostprocessBlocks` in `postprocess_hdg.*` and `DarcyHybridization::Bg_data`. **15,024 insertions across `fem/darcy/`**, verified in `libmfem.a` by `nm`. MEQ does not call any of it yet; `INTERPOLATORY-HDG-PLAN.md` is the plan | merge 8 |
-| **`sundials-real-t`** | **`linalg/sundials.{hpp,cpp}` in `real_t` rather than `double`**, plus a `static_assert` that `real_t` and `sunrealtype` agree and a makefile that stops refusing SUNDIALS in a single-precision build. **MEQ reported it and MEQ needs it**: without it MFEM does not compile at all in the `MFEM_PRECISION = single` + `MFEM_USE_SUNDIALS` pairing, which is `install-single`, and KINSOL is what backs `AndersonPicard` and `PicardThenNewton`. MEQ's own six sites were the ones that stop the compile; upstream found **73**. It is a branch off `origin/master` rather than one of the HDG line, so it is the second one the `hdgdev/`-anchored pattern below cannot see | merge 13 |
+| **`sundials-real-t`** | **`linalg/sundials.{hpp,cpp}` in `real_t` rather than `double`**, plus a `static_assert` that `real_t` and `sunrealtype` agree and a makefile that stops refusing SUNDIALS in a single-precision build. **MEQ reported it and MEQ needs it**: without it MFEM does not compile at all in the `MFEM_PRECISION = single` + `MFEM_USE_SUNDIALS` pairing, which is `install-single`, and KINSOL is what backs `AndersonPicard` and `PicardThenNewton`. MEQ's own six sites were the ones that stop the compile; upstream found **73**. It is a branch off `origin/master` rather than one of the HDG line, merged as `hdgdev/sundials-real-t` | merge 13 |
 | **`pardiso-refinement-control`** | `PardisoSolver::SetMaxRefinementSteps()`, `GetNumRefinementSteps()` and `GetNumPerturbedPivots()` — `iparm[7]` settable, `iparm[6]` and `iparm[13]` readable. MEQ asked for it ([M-300](MEASUREMENTS.md#m-300)): `setTraceRefinementCap()` and `StepProfile`'s refinement counts call it, so **its absence is a compile error**. The same refresh carries `DarcyHybridization::GetNPCReduceTime()`, `GetNPCRecoverTime()` and `GetNumElementColours()`, on `gf-hdg-linearise-first` and `gf-interp-hdg-dev` | merge 14 |
+| **`transformback-single-tolerance`** | `d10e8c48e7`: `TransformBack()`'s default `tol_0` is `1e-6` in single, the value `meq::inverseTransformTolerance()` passes at MEQ's own sites, so the default and MEQ's call are the same arithmetic ([M-271](MEASUREMENTS.md#m-271); `CLAUDE_DEVICE.md`, *What was not a tolerance*). MEQ passes its own tolerance, so its absence moves nothing MEQ calls. Merged as `transformback-single-tolerance`, not `hdgdev/…`, so the `hdgdev/`-anchored half of the pattern below cannot see it | merge 15 |
+| **`densematrixsvd-ldvt`** | `cee6a378af`: `DenseMatrixSVD` with `jobvt = 'S'` hands LAPACK an `LDVT` equal to `Vt`'s height, where it wrote past its own buffer for a wide matrix. MEQ reported it ([M-249](MEASUREMENTS.md#m-249)) and calls nothing from it, the inverse corner being Eigen's `JacobiSVD`. Merged under its local name, like merge 15 | merge 16 |
 
 **THE TOPOLOGY HAS NOW CHANGED THREE TIMES AND THIS ROW HAS BEEN WRONG TWICE.**
 It has read "pairwise independent", then "an ANCESTOR of both, so it needs no
@@ -173,36 +177,41 @@ re-merge is otherwise unrecoverable without redoing the conflict resolution.
 Refreshing it, from `../../mfem/mfem-src`:
 
 ```sh
-git fetch hdgdev gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
-          gf-hdg-linearise-first gf-hdg-dev
+git fetch hdgdev                                 # every branch below, not a subset
 git tag -f meq-integration-before-$(date +%F) meq-integration
 git checkout -B meq-integration hdgdev/gf-hdg-subdomains-dev
-git merge hdgdev/direct-solver-symbolic-reuse     # 3 conflicts; see below
-git merge hdgdev/gf-hdg-linearise-first           # 3 conflicts; see below
-git merge hdgdev/gf-hdg-dev                       # 1 conflict as of 2026-09-05
-git merge hdgdev/pardiso-multi-rhs                # M-98 depends on this
-git merge hdgdev/pardiso-device-host-sync
-git merge hdgdev/sundials-ida-integration
-git merge hdgdev/gf-hdg-p-adaptivity
-git merge hdgdev/gf-interp-hdg-dev                # the interpolatory half
-git merge hdgdev/sundials-real-t                 # single precision needs it
-git merge memory-manager-registration-refcount   # NOT hdgdev's -- off master
-git merge hdgdev/pardiso-refinement-control      # MEQ's setTraceRefinementCap()
+git merge hdgdev/direct-solver-symbolic-reuse     # 1; 3 conflicts, see below
+git merge hdgdev/gf-hdg-linearise-first           # 2; 3 conflicts, see below
+git merge hdgdev/gf-hdg-dev                       # 3; 1 conflict as of 2026-09-05
+git merge hdgdev/pardiso-multi-rhs                # 4; M-98 depends on this
+git merge hdgdev/pardiso-device-host-sync         # 5
+git merge hdgdev/sundials-ida-integration         # 6
+git merge hdgdev/gf-hdg-p-adaptivity              # 7
+git merge hdgdev/gf-interp-hdg-dev                # 8; the interpolatory half
+git merge hdgdev/memory-manager-registration-refcount   # 9; off master
+git merge hdgdev/cmake-find-package-component-cache     # 10; else a link failure
+git merge hdgdev/cudss-solver-configuration       # 11; TraceSolverScaling
+git merge hdgdev/intrules-triangle-high-order     # 12
+git merge hdgdev/sundials-real-t                  # 13; single precision needs it
+git merge hdgdev/pardiso-refinement-control       # 14; MEQ's setTraceRefinementCap()
+git merge hdgdev/transformback-single-tolerance   # 15
+git merge hdgdev/densematrixsvd-ldvt              # 16
 # ALWAYS finish with this, and believe it over the table above:
 for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
          gf-hdg-linearise-first gf-hdg-dev pardiso-multi-rhs \
          pardiso-device-host-sync sundials-ida-integration \
-         gf-hdg-p-adaptivity gf-interp-hdg-dev sundials-real-t \
+         gf-hdg-p-adaptivity gf-interp-hdg-dev \
+         memory-manager-registration-refcount \
          cmake-find-package-component-cache cudss-solver-configuration \
-         intrules-triangle-high-order pardiso-refinement-control; do
+         intrules-triangle-high-order sundials-real-t \
+         pardiso-refinement-control transformback-single-tolerance \
+         densematrixsvd-ldvt; do
   git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained" \
                                               || echo "$b NOT CONTAINED"
 done
-git merge-base --is-ancestor memory-manager-registration-refcount HEAD \
-  && echo "memory-manager contained" || echo "memory-manager NOT CONTAINED"
 ```
 
-**Run that last loop.** It is nine cheap commands and it is the only thing that
+**Run that last loop.** It is seventeen cheap commands and it is the only thing that
 catches a branch having moved out from under the recipe — which is precisely
 what happened to the three-branch version of this section.
 
@@ -218,14 +227,19 @@ in `reaction_hdg.hpp` yet. The build stays green, the answers do not move, and
 the solver gets slower.
 
 **Ask the tree the other question instead.** It needs no list, which is the
-whole point, and it is what found this — **and it has now found a tenth branch
-the same way**, `memory-manager-registration-refcount`, which is off MFEM master
-rather than `hdgdev` and which the `hdgdev/`-anchored pattern below would itself
-have missed. Match both:
+whole point. It is what found `memory-manager-registration-refcount`, and it
+finds `transformback-single-tolerance` and `densematrixsvd-ldvt` (merges 15 and
+16), which are merged under their local names and which an `hdgdev/`-anchored
+pattern misses. It also shows one merge of `origin/master` itself, which is the
+trunk and no branch of the table. Match every form, over the merges this branch
+made rather than MFEM's whole history:
 
 ```sh
-git -C ../../mfem/mfem-src log --merges --format=%s meq-integration \
-  | grep -oE "hdgdev/[a-z0-9-]+|memory-manager-[a-z-]+" | sort -u
+git -C ../../mfem/mfem-src log --first-parent --merges --format=%s \
+    hdgdev/gf-hdg-subdomains-dev..meq-integration \
+  | grep -oE "hdgdev/[a-z0-9-]+|branch '[a-z0-9/-]+'|^Merge [a-z0-9-]+( into|:)" \
+  | sed -E "s/^branch '(.*)'$/\1/; s/^Merge ([a-z0-9-]+)( into|:)$/\1/; s|^hdgdev/||" \
+  | sort -u
 ```
 
 **The pattern is as much a list as the loop was**, which is the lesson repeating
@@ -420,7 +434,7 @@ is not.
 |---|---|
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | ~~**`DarcyNPCSolver::ArrayMult()`'s per-column staging**~~ | **CLOSED.** MEQ measured it as the NPC leg less upstream's two halves, 32 ms a call at every thread count ([M-301](MEASUREMENTS.md#m-301)). Upstream timed it (`DarcyNPCSolver::GetStagingTime()`, which `--profile` prints) and replaced the copies with views of the caller's columns, at `f3f4fe1ea7`. It is now about 7 ms a call, the three timers close the leg, and the leg at eight threads on TCV is 44% shorter. The views give the same answer on a real card ([M-304](MEASUREMENTS.md#m-304)). The refinement cap is MEQ's `--trace-refinement-cap`, 0 by default, and the colour-free reduce was not wanted |
-| **`SetIntegratorsThreadSafe()`'s SCOPE, which is the durable half and is now upstream's doxygen** | **CLOSED.** MEQ reported that `mfem::NormalTraceJumpIntegrator` carries `Vector face_shape, normal, shape1_n, shape2_n` and two `DenseMatrix` unguarded (`fem/bilininteg.hpp:4872`), that MEQ installs exactly one as the object handed to `EnableHybridization()`, and that `DarcyForm::ReconstructFluxAndPot()` takes it per face inside its element loop. **Guarded upstream, on the trunk**, so all five branches take it — and a clean MFEM rebuild is owed here, since the class layout moves in a `MFEM_THREAD_SAFE` build. **MEQ's report overstated one thing and the correction is the tense**: it said the class is reached by "the loop you are threading", and there is no such loop — `darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly and both reconstruction entry points are serial. MEQ inferred that from being told the work was in progress and wrote the inference as an observation. What upstream took as the real defect was **theirs and not the class**: `SetIntegratorsThreadSafe()` made a promise whose scope was written down nowhere, so threading one more loop silently widens what a caller who set it months earlier has undertaken. Its doxygen now says the promise is about **every integrator installed on the hybridization** rather than about whichever loops happen to be threaded |
+| **`SetIntegratorsThreadSafe()`'s SCOPE, which is the durable half and is now upstream's doxygen** | **CLOSED.** MEQ reported that `mfem::NormalTraceJumpIntegrator` carries `Vector face_shape, normal, shape1_n, shape2_n` and two `DenseMatrix` unguarded (`fem/bilininteg.hpp:4872`), that MEQ installs exactly one as the object handed to `EnableHybridization()`, and that `DarcyForm::ReconstructFluxAndPot()` takes it per face inside its element loop. **Guarded upstream, on the trunk**, so all five branches take it. The class layout moves in a `MFEM_THREAD_SAFE` build, so it needs a clean MFEM rebuild, and the `f3f4fe1ea7` installs are that rebuild, verified (*Both installs are current*); the installed `bilininteg.hpp` carries the guard. **MEQ's report overstated one thing and the correction is the tense**: it said the class is reached by "the loop you are threading", and there is no such loop — `darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly and both reconstruction entry points are serial. MEQ inferred that from being told the work was in progress and wrote the inference as an observation. What upstream took as the real defect was **theirs and not the class**: `SetIntegratorsThreadSafe()` made a promise whose scope was written down nowhere, so threading one more loop silently widens what a caller who set it months earlier has undertaken. Its doxygen now says the promise is about **every integrator installed on the hybridization** rather than about whichever loops happen to be threaded |
 | ~~**`mfem::HDGExtensionIntegrator` carries unguarded scratch**~~ | **CLOSED, and MEQ's own files went on asserting it afterwards.** Upstream's `26fccc9f3d` put `shape, shape_ext, nor, x, xbar, m, y, CTm`, `Cmat`, `L` and `ext` behind `#ifndef MFEM_THREAD_SAFE` (`extension_hdg.hpp:24`), and `git merge-base --is-ancestor` confirms it is in the `meq-integration` MEQ links. The row that stood here, and the matching comment at MEQ's `SetIntegratorsThreadSafe()` call, both described the window between the eight-class commit and that one — **a true conclusion resting on a premise that had expired**. Neither was re-read against the tree. *A claim about somebody else's code is only as fresh as the last time it was checked* |
 | ~~**`Reconstruct()` aborts under `Device("debug")`**~~ — **CLOSED, and neither project's mechanism was right** | Fixed at `86b0b0fd13`, **contained and installed**, and `DeviceParity` is green on it. The abort is `CheckHostMemoryType_` at `mem_manager.cpp:1778`, from `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` with `e == 0` aliasing `b_z`'s base pointer exactly. **MEQ's mechanism was wrong and so was upstream's first one, in the same way.** Both said `Wrap( ptr, n, own = false )` takes `GetHostMemoryType()` so `std_delete` is false and `Delete_` evicts — but `Delete_` opens `if (!mm.exists \|\| !registered) { return; }`, so an unregistered wrap is **inert** and `h_mt` decides nothing. What actually registers the view is **`Memory<T>::MakeAlias()`**, whose "Register 'base'" branch fires whenever `IsDeviceMemory( GetDeviceMemoryType() )` — true under `debug` and `cuda` — setting `Registered \| OWNS_INTERNAL` on the **view**; `MemoryManager::Insert()`'s `emplace` then keeps the existing entry **silently**, and the view's destructor takes the `Known` branch and erases the **owner's**. In `ReconstructTotalFlux` the trigger is `b_zi.MakeRef( b_ze, ... )` and needs no device flag. **Both of MEQ's candidate fixes fail**, measured: keying on `flags & Registered` is a no-op because `registered` IS true by then, and making `Wrap` take `HOST` when `!own` aborts on a different assertion. What landed is MEQ's **third** option, the one it did not recommend — build the sub-views with `MakeRef` into the owner rather than wrapping a raw `GetData()` — which also syncs, where a raw `GetData()` is a host read of a buffer whose live copy may be on the device. **Scope: 2 of 5 branches**, `gf-hdg-linearise-first` and `gf-interp-hdg-dev`, both of which `meq-integration` merges. **"Why `cuda` never met this" has now been wrong three times and this is the version with evidence**: not that the destructor is inert (`h_mt` decides nothing), and not that the eviction "erases a key that is not there" (`Erase` does `if (mem_map_iter == maps->memories.end()) { mfem_error( "Unknown pointer!" ); }`, so a missing key **aborts**). Under `cuda`, `GetHostMemoryType() == HOST` leaves the **owner** unregistered, so the view's own lazy registration is what **creates** the entry and erasing it on destruction is **balanced**. The immunity is a property of the host memory type, and it is the same observation that makes a reference count the right shape: one registration one erase is already correct, and it is two registrations of one address where today's first erase takes the second's entry. **A second question is live and is upstream's user's**: whether to close the trap in `Memory` rather than per caller. MEQ said yes, in `../../mfem-hdg-dev/doc/HDG-MEMORY-OWNERSHIP-FROM-MEQ.md`, and its addendum argues the change is **smaller than either project first thought** — `maps->aliases` is already reference-counted against exactly this hazard (`InsertAlias` does `alias.counter++` on a collision, `EraseAlias` does `if (--alias.counter) return;`) and `maps->memories` is not (`Insert` discards the `emplace` result, and the `auto res =` is itself inside `#ifdef MFEM_DEBUG`; `Erase` erases unconditionally). The lazy registrations the counter must be correct over are **four routes across five call sites** — `MakeAlias`'s "Register 'base'", `SetDeviceMemoryType()`, and `Read`/`Write`/`ReadWrite`; the two `Wrap` sites need a caller ownership error first. So a counter on `internal::Memory` closes it **without touching ownership semantics or any call site**, where the proposed `own_internal` flag cannot: the call site cannot know whether the address was already registered, so no constant value of it is right. Upstream verified the shape on their trunk, confirmed `mem_manager.cpp` is unmodified from MFEM master in that family, and **withdrew the flag**. **The counter's own cost is bounded rather than hypothetical**: an unbalanced register/erase already leaks a `memories` entry today — `Memory<T>::Reset()` sets `flags = 0` without going near `Delete_`, and `Vector::StealData` is `*p = data; data.Reset(); size = 0;` on a `Memory` that may be registered, with `linalg/hypre.cpp` and `linalg/petsc.cpp` doing the same — so a counter **extends** that class rather than creating it, and turns an unbalanced pair from *an entry erased out from under its owner* into *an entry that stays*. Strictly milder and still silent |
 
@@ -441,24 +455,24 @@ is below, because the SHAPE of the seam is the transferable part.
 `HDG-DEVICE-RESIDENCY-FROM-MEQ.md`, request 3.
 `CanBatchLinearResidual()` refuses MEQ on two clauses — `m_nlfi_p` not being
 linear, and `lop_type == LocalOpType::PotNL` — and **both refusals are
-correct**, so MEQ asks for a *sibling* rather than a loosening: a batched
+correct**, so what MEQ asked for is a *sibling* rather than a loosening: a batched
 residual for the `PotNL` case in which the element-local nonlinearity is
 supplied by the caller. The shape proposed is a **header template over a
 callable**, instantiated in MEQ's own device translation unit, so that upstream
 owns the element loop and the block layout while MEQ owns only the integrand
 and neither header names the other's types — the same seam
 `meq::PointLocator` already uses one level down. MEQ's half is built and tested
-→ **[M-177](MEASUREMENTS.md#m-177)**. **It is the last route MEQ's
-configuration needs**: upstream's own audit puts MEQ at YES on the other seven
-`CanBatch*` predicates.
+→ **[M-177](MEASUREMENTS.md#m-177)**. **It was the last route MEQ's
+configuration needed**: upstream's own audit put MEQ at YES on the other seven
+`CanBatch*` predicates, and with it all eight read yes (above).
 
-**AND IT IS NO LONGER BLOCKED ON ANYTHING OF UPSTREAM'S EXCEPT THE BUILD ITSELF.**
-Upstream's reply is explicit that this does not wait on their request 1 — *"it is
-not blocked on request 1; request 1 is done. It is blocked on an interface, and
-the interface is ours"* — and ends by asking MEQ for the one thing only MEQ can
-supply: *"Send us the POD and the signature you want to write `F` and `F'` in and
-we will build the other side."* **Sent**, as
-`../../mfem-hdg-dev/doc/HDG-BATCHED-RESIDUAL-SEAM-FROM-MEQ.md`: `meq::SourceView`
+**THE SEAM, AS SENT AND AS BUILT.** Upstream's reply put it on an interface
+rather than on their request 1 — *"it is not blocked on request 1; request 1 is
+done. It is blocked on an interface, and the interface is ours"* — and asked
+MEQ for the one thing only MEQ could supply: *"Send us the POD and the
+signature you want to write `F` and `F'` in and we will build the other side."*
+What MEQ sent, `../../mfem-hdg-dev/doc/HDG-BATCHED-RESIDUAL-SEAM-FROM-MEQ.md`,
+is what upstream built the other side against: `meq::SourceView`
 and its two POD companions, the `MFEM_HOST_DEVICE` evaluators, the
 element-local `sourceResidualAtPoint()` / `sourceGradientAtPoint()` pair, and the
 four constraints that are not decoration — `radius` unpre-divided because `F/R`

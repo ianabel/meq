@@ -152,6 +152,16 @@ if(NOT MFEM_FOUND)
 	message(STATUS "meq: MFEM not found -- building the MFEM-free subset only.")
 	message(STATUS "meq:   excluded: the solver, the estimator, every convergence test")
 	message(STATUS "meq:   set MFEM_DIR to a built MFEM to get the whole library")
+elseif(NOT MFEM_USE_SUITESPARSE AND NOT MFEM_USE_MKL_PARDISO)
+	# A DIRECT TRACE SOLVER ON THE HOST IS A REQUIREMENT, NOT AN OPTION. There
+	# is no iterative fallback: GMRES on MEQ's trace system was measured
+	# unviable (M-179), and cuDSS alone needs a Device for every run.
+	message(FATAL_ERROR
+		"meq: the MFEM at ${MFEM_DIR} has neither SuiteSparse (UMFPack) nor "
+		"oneMKL PARDISO. MEQ needs one of them to solve on the host. Build MFEM "
+		"with MFEM_USE_SUITESPARSE=YES (install SuiteSparse, e.g. "
+		"libsuitesparse-dev) or MFEM_USE_MKL_PARDISO=YES (install oneMKL), "
+		"then reconfigure. cuDSS alone is not enough: it needs a device.")
 endif()
 
 # NetCDF, for the driver's output grid. Optional in the same spirit as MFEM: a

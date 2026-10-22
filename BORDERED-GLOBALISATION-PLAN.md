@@ -8,10 +8,9 @@ are the stage record this one continues from, and `MEASUREMENTS.md` M-103 is the
 measurement that makes it worth writing.
 
 **Line numbers in `src/meq/GradShafranov.cpp` and `apps/meq.cpp` are as read on
-2026-09-15, and `GradShafranov.{hpp,cpp}` are under uncommitted edit at that
-moment** — the working tree deletes `NonlinearOrdering` entirely, so NPC is the
-only ordering and every "under the condensation" branch below is dead code
-waiting to be removed. Every citation also names the function or the lambda,
+2026-09-15** and have moved since. `NonlinearOrdering` is deleted, so NPC is
+the only ordering and every "under the condensation" branch below describes a
+route that is not in MEQ (`GradShafranov.hpp`, *NPC is the only ordering*). Every citation also names the function or the lambda,
 which is the durable half; `grep` for the name rather than trusting the number.
 
 **The change in one sentence.** Make a globalisation reachable when `ψ_ax` is an
@@ -957,8 +956,10 @@ Any one of these kills the route, and each is cheaper than the stage it gates.
 Eleven things, each with the measurement that would settle it. **No number
 below appears anywhere in this tree and none is invented here.**
 
-1. **Whether the exit-2 failures are path failures.** BG-0. Everything else is
-   conditional on it.
+1. ~~**Whether the exit-2 failures are path failures.**~~ **ANSWERED by BG-0**
+   → [M-117](MEASUREMENTS.md#m-117): §0.1's gate does not fire,
+   `directionFinite` being true on every step of all six. Two are one fatal
+   step, one is chronic and three are X-point excursions (the STATUS table).
 2. **Whether `DarcyNPCOperator::Mult` is defined when the potential block is on
    the linear form.** Read `darcyhybridization.cpp`'s `NPCResidual` and its
    preconditions. It decides whether §3.2's rejected route was even available.
@@ -975,7 +976,11 @@ below appears anywhere in this tree and none is invented here.**
    first iterate so the printed history compares like with like
    (`GradShafranov.cpp:6150-6182`). A phase whose first iterate is a different
    state gets a different `γ`, and the handoff would then print two histories in
-   two scales. Decide it before BG-4 prints anything an order is read off.
+   two scales. ~~Decide it before BG-4 prints anything an order is read off.~~
+   **DECIDED by BG-4**: both phases are iterations of one loop inside
+   `solveWithNormalisation()`, which keeps `γ` frozen at the first iterate
+   across both, so the printed history is one merit end to end (`CLAUDE_FB.md`,
+   on BG-4's two departures from this plan).
 6. **Whether to freeze at the last accepted iterate or the last trial.** The
    Armijo loop evaluates up to twelve trials per step; freezing at the accepted
    one is the defensible choice and costs one extra copy. Not measured.

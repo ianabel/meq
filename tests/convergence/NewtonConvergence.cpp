@@ -1414,10 +1414,6 @@ BOOST_AUTO_TEST_CASE( similarityOrderThreeConvergesAtFour )
  */
 BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
 {
-#if !defined( MFEM_USE_SUITESPARSE ) && !defined( MFEM_USE_MKL_PARDISO )
-	BOOST_TEST_MESSAGE( "no direct trace solver in this build, so there is no "
-	                    "analysis to reuse -- the GMRES fallback has none" );
-#else
 	meq::analytic::ManufacturedNonlinear const eq
 		= meq::analytic::ManufacturedNonlinear::example5();
 	EquilibriumSource<meq::analytic::ManufacturedNonlinear> source( eq );
@@ -1463,5 +1459,4 @@ BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
 	            "only " << solver.numericFactorisations() << " numeric "
 	            "factorisations for " << solver.newtonIterations()
 	            << " iterations -- reuse must never skip one of these" );
-#endif
 }

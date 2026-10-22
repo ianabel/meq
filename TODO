@@ -1230,39 +1230,34 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
      PlasmaCurrent with PicardSweeps or with adaptivity, so carrying it changes
      trajectories nothing measures yet.  Wants a case first, then the hand-off.
 
-  2. boundaryFluxInitialGiven IS NEVER CLEARED.  So every support sweep of a
-     restarted run restarts psi_bnd at the file's value, not at the previous
-     sweep's.  The scale's seed (item 1) is consumed once; this one should be
-     too, unless a sweep is meant to restart it.  Decide, and assert it on
-     diverted-tokamak-xpoint, whose restart takes one more support sweep.
-
-  3. XPointBorder: A 1.1e-4 GAP IN SINGLE BETWEEN BORDERED PICARD AND BORDERED
+  2. XPointBorder: A 1.1e-4 GAP IN SINGLE BETWEEN BORDERED PICARD AND BORDERED
      NEWTON, two routes that both END in Newton.  The case cited
      picardTolerance() as the reason, but that tolerance is never consulted on
      that path, so the gap is unexplained.  It is noted in the case's comment as
      an open finding.  Two converged answers of one discrete system should
      agree to the stop.
 
-  4. SafetyFactorSolver's MAP IS NOT SMOOTH AT A 4.4e-4 STEP.  Its residual
+  3. SafetyFactorSolver's MAP IS NOT SMOOTH AT A 4.4e-4 STEP.  Its residual
      jumps by 2.6e-05 between c1 + 2.4e-4 and c1 + 2.4e-3, though both inner
      solves converge to 1e-14, so the jump is in the extraction, not the solve.
      It coincides with the inner Newton taking 4 iterations rather than 3 from
      the same warm start.  It is why the outer loop's difference step is
      max( 1e-4, 100 x floor ) and not the textbook floor^(1/3) (M-303).
 
-  5. A CRAWL STILL ASSERTED AS A FINDING.  At k = 1 PedestalConvergence's
+  4. THE PEDESTAL'S COARSE MESHES CRAWL.  At k = 1 PedestalConvergence's
      coarse meshes have several discrete roots (2 at n = 16, 5 at n = 24,
      differing in where the pedestal layer sits), and Newton wanders between
      them: 226 and 26 steps in double, and 500 without converging in single at
-     n = 16 (M-303).  The Newton-Picard comparison no longer poses those
-     meshes, but pedestalConvergenceIsAResolutionThreshold still asserts that
-     n = 16 costs at least twice n = 32.  Under "crawling is a bug" that is
-     green on a crawl.  Four step controls were tried and declined
+     n = 16 (M-303).  No case asserts that crawl any more: the Newton-Picard
+     comparison is posed on n = 32, 48 and 64, and
+     pedestalConvergenceIsAResolutionThreshold asserts only the two cures and
+     does not solve n = 16.  The crawl itself is still there wherever a coarse
+     k = 1 pedestal is posed.  Four step controls were tried and declined
      (CLAUDE_DECLINED.md, "Step controls for the unbordered Newton").  What is
-     left is a continuation start or a resolution precondition, not a step
-     control.
+     left is a continuation start, or a resolution precondition that refuses or
+     warns on a mesh with several roots, not a step control.
 
-  6. SINGLE NEWTON'S ABSOLUTE FLOOR IS 15 TIMES ITS ROUND-OFF.
+  5. SINGLE NEWTON'S ABSOLUTE FLOOR IS 15 TIMES ITS ROUND-OFF.
      newtonTolerance( 1e-14 ) is 1.19e-06 absolute, against a reachable floor
      near 7.8e-08.  At PedestalConvergence's n = 32 it stops one quadratic step
      short: the iterate is about 1e-5 off locally near psi = 0, and one more
@@ -1270,7 +1265,7 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
      newtonTolerance), so it is a policy
      change and wants the whole single suite measured before and after.
 
-  7. BORDER FOLDING IS SKIPPED UNDER A DEVICE, so single on a card keeps the
+  6. BORDER FOLDING IS SKIPPED UNDER A DEVICE, so single on a card keeps the
      shelf M-303 removed on the host.  MFEM's batched NPCGradient() assembles
      and factors each element's local block in one call, and the fold is a
      rank-one row on one block, which no pointwise integrand expresses.  It
@@ -1280,13 +1275,13 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
      fold on the host integrand under a Device today, but no shipped
      normalised source takes that route.
 
-  8. THE FOLD'S kappa WINDOW IS MEASURED, NOT DERIVED.  x1 and x10 of the
+  7. THE FOLD'S kappa WINDOW IS MEASURED, NOT DERIVED.  x1 and x10 of the
      reaction term over the row work, x0.1 and x100 do not.  The header comment
      explains both edges -- the low edge leaves 1/( 1 + kappa phi ) of the
      shelf, the high edge lets the folded row dominate the matrix norm -- but
      not the constants at them.
 
-  9. THE DEFAULT LOCATED-AXIS ROW CARRIES NO ENVELOPE TERM, so the axis piece
+  8. THE DEFAULT LOCATED-AXIS ROW CARRIES NO ENVELOPE TERM, so the axis piece
      of a bordered solve converges only linearly, in both formats.  Found while
      building the fold, which needed the envelope as a second border unknown.
      The envelope row exists as AxisRow::WithEnvelope, and M-121 measured it
@@ -1294,22 +1289,61 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
      the envelope as a second border unknown; whether that changes M-121's
      finding is untested.  If it does not, close this.
 
-  10. RotatingMirrorDevice's SINGLE BOUND IS UNMEASURED ON A CARD.  Under
-      ctest -j4 load the card-against-host psi_h difference once read 1.3e-04
-      of max |psi_h|, against a bound between 6.3e-05 and 1.3e-04; alone it
-      reads 5.4e-05 to 6.3e-05 over three runs.  It poses no plasma current.
-      Measure the spread on the card, and bound it from that rather than from
-      the host.
+  9. AN EXCEPTION CAN CROSS KINSOL'S C FRAMES.  solveForToroidalField()'s
+      residual and Jacobian callbacks are called from KINSOL, and they can
+      throw: the residual throws std::invalid_argument when a map returns the
+      wrong number of coefficients (SafetyFactorSolve.cpp, around 385), and
+      MFEM_VERIFY throws.  Unwinding through C frames is undefined behaviour;
+      it works today only because GCC emits unwind tables for C.  The driver
+      converts whatever escapes into ToroidalLoopFailed (exit 2), and nothing
+      tests that path, because no valid run reaches it.  The fix is to catch
+      inside each callback, hand KINSOL its error flag, and report the loop
+      as not converged with the message.  That also makes the path testable:
+      a unit case with a map that throws.
 
-  11. TWO TEST GAPS FROM THIS ROUND.  (a) PlasmaConnectivity's split-support
-      case: dropping the fill's boundary ring only while the support is split
-      costs nothing (6 against 6 steps, psi_h 7e-11), so that mutant survives.
-      (b) The driver rethrows any exception out of solveForToroidalField as
-      ToroidalLoopFailed, so the run exits 2 rather than reaching the retry
-      rung; no case covers that path (found through an MFEM_VERIFY).
+  10. MR-0's DIAGNOSTIC WAS NEVER BUILT.  MIRROR-PLAN.md's MR-0 measured its
+      choice of rho_Gamma and N (M-169, M-260), but its MEQ-side diagnostic,
+      the fraction of int |F|/R outside Gamma, has no code in src/ or apps/.
+      MR-0 is marked "DONE BUT FOR THE DIAGNOSTIC" there.
+
+  11. meq-integration CARRIES A MERGE THE RECIPE DOES NOT.  Besides its
+      seventeen branches it holds one merge of origin/master (2026-09-22) that
+      is not in CLAUDE_MFEM.md's table, so re-creating the branch from the
+      recipe would drop it.  Find what it brought, then add it to the table
+      and the recipe, or say why it is not needed.
 
   12. THE RECOVER SCALES BETTER AT f3f4fe1ea7 AND NOBODY KNOWS WHY.  At eight
       threads on TCV it is 0.324 s against 0.520 (4.64x against 3.20x) between
       M-301 and M-304, but upstream's views removed copies around NPCRecover(),
       not work inside it, and MEQ's solver changed in between.  Asked of
       upstream in the reply of 2026-10-21; read their answer when it comes.
+
+
+================================================================================
+A CUDA-only build: cuDSS as the only trace solver
+Raised 2026-10-22. After a real GPU-only pathway exists, not before.
+================================================================================
+
+  WHY IT IS NOT POSSIBLE TODAY.  CMakeLists.txt refuses an MFEM with neither
+  SuiteSparse nor oneMKL PARDISO, because CuDSSSolver without an mfem::Device
+  reads host pointers through the device-aware accessors and aborts inside CUDA
+  (apps/meq.cpp, the cuDSS refusal), so a host run would have no trace solver.
+  defaultTraceSolver() never returns cuDSS, and the driver switches to it only
+  under an active CUDA device.
+
+  THE SHAPE, AS DECIDED.  A build whose MFEM has cuDSS and no host direct
+  solver ASSUMES --device cuda instead of requiring it on every run, and its
+  default trace solver is cuDSS.  It is tested with the GPU suite that already
+  exists (DeviceParity, TraceSolverScaling, cuDSSTraceSolver and the other
+  device arms), not with a new set of host tests made device-aware.
+
+  WHAT IT WAITS ON.  A real GPU-only pathway: the solve resident on the device
+  end to end, rather than a host solve with device kernels around it.  The
+  open residency items are in DEVICE-PLAN.md.  A CUDA-only build before that
+  would be a build whose every run pays the host round trips that pathway is
+  meant to remove.
+
+  KNOWN COST.  cuDSS is non-deterministic run to run (up to 3.6e-15 for 16
+  columns), and its deterministic mode takes one right-hand side only, so
+  every run of such a build gives up the bit-exactness instrument; M-228 banked
+  the exact baseline for that.

@@ -4559,8 +4559,14 @@ critical point of `psi`. So an axis position taken that way on a machine with
 meshed conductors is about a conductor, and **§10.5's own `6.9e-02 m` should be
 re-checked against the coil list before it is quoted again**.
 
-**WHAT IS LEFT OF FB-R**: a conductor-excluded axis location, a topology
-diagnostic saying which equilibrium each row is, and a fourth level. What is
+**WHAT IS LEFT OF FB-R**: a topology diagnostic saying which equilibrium each
+row is, and a fourth level. ~~A conductor-excluded axis location~~ is
+**BUILT**: `meq::CriticalPointFinder::setExcluded()` takes a predicate saying
+where an axis cannot be, which the driver's post-solve check passes over its
+conductors and `AxisAgreement` asserts, and the solver's own axis constraint
+and the plasma fill's seed refuse a candidate inside a conductor through
+`GradShafranovSolver::filterConductors()`, on the meshed and the subtracted
+route alike (`COIL-SUBTRACTION-PLAN.md` §13). What is
 settled is that the phenomenon is **not** an artefact of the driver's guess
 handling — it reproduces in a bare fixture — and that `setBoundaryFluxInitial()`
 must stay a library setter, since a file key that moved `psi_bnd`'s start by
@@ -4730,6 +4736,6 @@ is this file's to answer alone:
 
 | | |
 |---|---|
-| **FB-R** | a **conductor-excluded** axis location, a topology diagnostic saying which equilibrium each row is, and a fourth level. §10.5's own `6.9e-02 m` must be re-checked against the coil list before it is quoted again, since the instrument that produced it found a coil's O-point |
+| **FB-R** | a topology diagnostic saying which equilibrium each row is, and a fourth level; the **conductor-excluded** axis location is built (`CriticalPointFinder::setExcluded()`, `GradShafranovSolver::filterConductors()`). §10.5's own `6.9e-02 m` must be re-checked against the coil list before it is quoted again, since the instrument that produced it found a coil's O-point |
 | **FB-S** | nothing. It is best approximation, it bounds what any method on these spaces can do, and the solved half is XP-3's and is green |
 | **FB-T** | what the confinement is doing, given that it is not the amplitude alone. `theTwoBordersConvergeTogether` keeps §11.2's retraction and is not going to be repaired by the current border |

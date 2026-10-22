@@ -201,9 +201,12 @@ always a descent direction, so `merit(α) ≈ merit(0)(1 − α)` and *any* smal
 enough `α` passes: upstream swept it and `α = 1.2e-4` still "succeeds",
 improving the merit by 1e-4 relative. **So where `α = 1` is rejected the search
 does not fail — it creeps**, which is exactly the 1%-a-step crawl MEQ measured.
-An Armijo test would reject those steps and fail honestly. Fixing it is open
-upstream, and **it would not make MEQ's problem converge**; it would stop the
-globalisation disguising its own failure. **KINSOL's `KIN_LINESEARCH` does use
+An Armijo test would reject those steps and fail honestly. **Upstream has fixed
+it by deleting the search**: the HDG Navier–Stokes miniapp takes its
+globalisation from KINSOL's `KIN_LINESEARCH`, sufficient decrease and a
+minimum-step test included (`miniapps/hdg/navierstokes.cpp` in
+`meq-integration`). **It does not make MEQ's problem converge**; it stops the globalisation disguising
+its own failure. **KINSOL's `KIN_LINESEARCH` does use
 an Armijo condition and fails on the same cases**, which is why the two rows of
 [M-28](MEASUREMENTS.md#m-28) agree.
 
@@ -520,7 +523,7 @@ not re-derive it.**
 
 **Declined.** M-36 and `CLAUDE_HDGGS.md` both say plain Picard needs damping and Anderson at
 depth 1 does not. MEQ gets Anderson from `mfem::KINSolver( KIN_FP )`
-(`solveByPicard()`, `GradShafranov.cpp:1309-1370`).
+(`GradShafranovSolver::solveByPicard()` in `GradShafranov.cpp`).
 
 **KINSOL cannot be handed this fixed point.** `KINSolver::Mult` drives
 `oper( x ) = 0` or `u = G( u )` over one vector; the bordered iteration's state
@@ -2246,7 +2249,7 @@ they stay where they are; this index makes the catalogue complete.
 - `ROADMAP.md` plan-file table: the `THREADING-PLAN.md` row (E and F declined, M-137, M-138), the `BORDERED-GLOBALISATION-PLAN.md` row (the ladder closes none of six; do not start its §8; M-116, M-117, M-119), the `COIL-SUBTRACTION-PLAN.md` row (caching `psi_c` alone superseded, M-170; subdividing filaments moves MEQ away from `freegs4e`, M-166), the `FREE-BOUNDARY-PLAN.md` row (FB-T does not cure confinement, M-134) and the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-134, M-137, M-138, M-166, M-170)
 - `ROADMAP.md` *So what is next* item 1 (l.80-117): `η₆` in the marking does nothing; coils the wrong instinct, a vertical field makes no core, vacuum start meaningless, continuation not needed; the §7.12 / §7.13 attempts (falsified / declined) (M-05)
 - `ROADMAP.md` *So what is next* item 1, *The conductor model is what is left*: no `Γ` excludes the conductors on any of seven machines, and the mixed case cascades (falsified) (M-95, M-96)
-- `ROADMAP.md` *Division of labour*: auxiliary globally-coupled unknowns no longer worth asking for (M-98); BEM coupling not wanted, ExteriorDtN instead; the local-solve seed not filed (deferred)
+- `ROADMAP.md` *Division of labour*: auxiliary globally-coupled unknowns no longer worth asking for (M-98); BEM coupling not wanted, ExteriorDtN instead; the local-solve seed never filed (moot under NPC)
 - `ROADMAP.md` item 1: predictive solver selection killed, and continuation must not go in (falsified / declined) (M-24)
 - `ROADMAP.md` item 4: upstream's "under 6%" (withdrawn, M-126); host `LocalFactorMode::Batched` (declined); "`ψ_ax` borders need condense-first" (falsified); the `LineariseThenCondense` investigation deleted (falsified / reverted)
 - `ROADMAP.md` item 6: `mkl_set_num_threads_local` and `LocalFactorMode::Batched` neither needed; two configurations to avoid; the PARDISO `n ≈ 3000` ceiling and run-time trace choice no longer worth an item (closed)

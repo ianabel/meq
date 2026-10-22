@@ -3500,24 +3500,7 @@ namespace meq
 				/// author's capitalisation, as UMFPack and Pardiso do above. The
 				/// rule this suppresses is house style, and house style does not
 				/// get to rename other people's products.
-				cuDSS, // NOLINT(readability-identifier-naming)
-				/// GMRES with a Gauss-Seidel smoother -- native MFEM, so it is
-				/// available in every build and needs no package.
-				///
-				/// **IT IS HERE TO BE MEASURED, NOT BECAUSE IT IS RECOMMENDED.**
-				/// The linear solve carries this exact configuration as its
-				/// no-direct-solver fallback, where no machine case ever reaches
-				/// it. The number that decides whether an iterative trace
-				/// solve is worth pursuing on a device is how many Krylov
-				/// iterations MEQ's trace system needs, and nothing recorded it.
-				/// The solver reports its own counts on destruction for that
-				/// reason.
-				///
-				/// **It gives up the two things the direct solvers are chosen
-				/// for**: one factorisation amortised over the bordered step's
-				/// fourteen columns (M-98's 1.34x), and the symbolic reuse kept
-				/// across Newton steps.
-				GMRES
+				cuDSS // NOLINT(readability-identifier-naming)
 			};
 
 			/// Choose it. Throws std::invalid_argument when the library was built
@@ -4311,10 +4294,10 @@ namespace meq
 			 * run's own.
 			 * OutputConversion's theRestartCarriesTheWholeState.
 			 *
-			 * CONSUMED by the solve that reads it, unlike
-			 * setBoundaryFluxInitial(): a support loop re-solves on the same
-			 * solver, and each sweep after the first continues from the
-			 * previous sweep's scale as an ordinary re-solve does.
+			 * CONSUMED by the solve that reads it, as setBoundaryFluxInitial()
+			 * is: a support loop re-solves on the same solver, and each sweep
+			 * after the first continues from the previous sweep's scale as an
+			 * ordinary re-solve does.
 			 *
 			 * @throws std::invalid_argument if @a scale is not finite or zero:
 			 *         the scale multiplies the whole plasma source, and zero is
@@ -4630,7 +4613,9 @@ namespace meq
 			 * `psi_bnd` is an unknown of the bordered Newton and starts every
 			 * solve at `psiBoundary()` -- zero on a fresh solver, and the
 			 * previous answer on a second solve, which is the warm start an
-			 * adaptive cycle wants. This overrides that for one solver.
+			 * adaptive cycle wants. This overrides that for the NEXT solve
+			 * only: the solve that reads it consumes it, so a support loop's
+			 * later sweeps on the same solver start from the sweep before.
 			 *
 			 * **IT IS NOT A TOLERANCE AND IT IS NOT A DEFAULT WAITING TO BE
 			 * FILLED IN.** `FREE-BOUNDARY-PLAN.md` section 10.5 measures both
@@ -5421,11 +5406,16 @@ namespace meq
 				 * takes no step, off the last evaluation's -- so a support that
 				 * split and re-joined on the way to the root is visible in the
 				 * history rather than only in its step count.
-				 * Both zero where no fill is live -- PlasmaConnectivity::
+				 * `supportRingElements` is how many of the kept elements are the
+				 * straddling band the watershed gave the plasma's component
+				 * (PlasmaComponentMask::ringNodes()), so a fill that kept only
+				 * the interior on some iterate is visible too.
+				 * All zero where no fill is live -- PlasmaConnectivity::
 				 * Pointwise, or a source with setPlasmaSupport() off.
 				 */
 				int supportComponents = 0;
 				int supportElements = 0;
+				int supportRingElements = 0;
 
 				/// Whether the Picard phase handed off to Newton AT this step.
 				/// True on exactly one step of a two-phase solve, and reading

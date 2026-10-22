@@ -50,12 +50,13 @@
 // condition is stated once and CriticalPoints.cpp is gated on the same pair.
 #include "Threading.hpp"
 
-// Whether this build has ANY direct trace solver. The fallback paths below are
-// guarded on this rather than on MFEM_USE_SUITESPARSE alone, which was the same
-// question only while UMFPack was the only choice.
-#if defined( MFEM_USE_SUITESPARSE ) || defined( MFEM_USE_MKL_PARDISO ) \
-	|| defined( MFEM_USE_CUDSS )
-#define MEQ_HAVE_DIRECT_TRACE_SOLVER 1
+// MEQ NEEDS A DIRECT TRACE SOLVER ON THE HOST: UMFPack (SuiteSparse) or oneMKL
+// PARDISO. CMakeLists.txt refuses to configure without one, and this is the
+// same rule for a build that bypasses it. cuDSS alone is not enough: it needs
+// an mfem::Device, and a host run would have no solver. There is no iterative
+// fallback -- an iterative trace solve was measured unviable (M-179).
+#if !defined( MFEM_USE_SUITESPARSE ) && !defined( MFEM_USE_MKL_PARDISO )
+#error "MEQ needs MFEM built with SuiteSparse (UMFPack) or oneMKL PARDISO"
 #endif
 
 namespace meq
@@ -310,98 +311,7 @@ namespace
 #endif
 	}
 
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
-	/**
-	 * GMRES with a Gauss-Seidel smoother, as a trace solver.
-	 *
-	 * **THIS IS NOT NEW CODE, IT IS AN EXISTING PATH MADE REACHABLE.**
-	 * It is the configuration -- GMRES, GSSmoother, rel_tol 1e-12, 5000
-	 * iterations -- that the linear solve carries as the `#else` of
-	 * MEQ_HAVE_DIRECT_TRACE_SOLVER, which runs only in a build with no direct
-	 * package at all. Nobody has measured it on a machine case, and the
-	 * question it answers is the one that decides whether an iterative trace
-	 * solve is worth pursuing on a device: **how many Krylov iterations does
-	 * MEQ's trace system need.** Nothing in the tree records that number.
-	 *
-	 * **THE COUNTERS ARE THE POINT OF THE CLASS.** A direct solver has nothing
-	 * to report; an iterative one that is not reporting its iteration count is
-	 * not being measured, it is being hoped about. They are mutable because
-	 * Solver::Mult is const.
-	 *
-	 * **AND IT LOSES TWO THINGS THE DIRECT SOLVERS HAVE, WHICH IS THE TRADE THE
-	 * MEASUREMENT EXISTS TO PRICE.** MEQ's bordered step applies J^-1 to
-	 * FOURTEEN columns, and a direct solver factors once and back-solves
-	 * fourteen times -- M-98's 1.34x is exactly that blocking. An iterative
-	 * solver has no factorisation to amortise, so fourteen columns is fourteen
-	 * independent Krylov solves, and Operator::ArrayMult's base loop over Mult()
-	 * is then the RIGHT behaviour rather than the trap it is for the others. It
-	 * also loses the symbolic reuse that direct-solver-symbolic-reuse is a whole
-	 * branch of meq-integration for.
-	 */
-	class IterativeTraceSolver : public mfem::Solver
-	{
-		public:
 
-			IterativeTraceSolver()
-			{
-				gmres.SetRelTol( 1.0e-12 );
-				gmres.SetAbsTol( 0.0 );
-				gmres.SetMaxIter( 5000 );
-				gmres.SetKDim( 50 );
-				gmres.SetPrintLevel( -1 );
-			}
-
-			~IterativeTraceSolver() override
-			{
-				if ( solves > 0 )
-					mfem::out << "MEQ: trace GMRES -- " << solves << " solves, "
-					          << totalIterations << " iterations, mean "
-					          << ( static_cast<double>( totalIterations )/solves )
-					          << ", worst " << worst << ", " << failures
-					          << " did not converge\n";
-			}
-
-			void SetOperator( mfem::Operator const &op ) override
-			{
-				height = op.Height();
-				width = op.Width();
-
-				// The smoother needs the MATRIX, not an Operator, which is why
-				// this cannot simply be an mfem::GMRESSolver handed back by the
-				// factory the way the three direct solvers are.
-				auto const *matrix = dynamic_cast<mfem::SparseMatrix const *>( &op );
-				MFEM_VERIFY( matrix != nullptr,
-				             "meq::IterativeTraceSolver: the trace operator is not a "
-				             "SparseMatrix, so a Gauss-Seidel smoother cannot be built "
-				             "from it" );
-
-				smoother = std::make_unique<mfem::GSSmoother>(
-					const_cast<mfem::SparseMatrix &>( *matrix ) );
-				gmres.SetOperator( op );
-				gmres.SetPreconditioner( *smoother );
-			}
-
-			void Mult( mfem::Vector const &b, mfem::Vector &x ) const override
-			{
-				gmres.Mult( b, x );
-				++solves;
-				int const taken = gmres.GetNumIterations();
-				totalIterations += taken;
-				if ( taken > worst )
-					worst = taken;
-				if ( !gmres.GetConverged() )
-					++failures;
-			}
-
-		private:
-
-			mutable mfem::GMRESSolver gmres;
-			std::unique_ptr<mfem::GSSmoother> smoother;
-			mutable long solves = 0;
-			mutable long totalIterations = 0;
-			mutable int worst = 0;
-			mutable long failures = 0;
-	};
 
 	/*
 	 * Build the chosen direct solver, configured as MEQ wants it.
@@ -465,8 +375,6 @@ namespace
 				break;
 #endif
 			}
-			case GradShafranovSolver::TraceSolver::GMRES:
-				return std::make_unique<IterativeTraceSolver>();
 			case GradShafranovSolver::TraceSolver::cuDSS:
 			{
 #ifdef MFEM_USE_CUDSS
@@ -520,7 +428,6 @@ namespace
 		symbolic = 0;
 		numeric = 0;
 	}
-#endif // MEQ_HAVE_DIRECT_TRACE_SOLVER
 }
 
 
@@ -1782,9 +1689,9 @@ namespace
 			           mfem::Vector &x ) const override
 			{
 				// FORWARDED, because a wrapper that swallows it would change the
-				// answer rather than only the timing. A direct solver ignores the
-				// flag, but the GMRES fallback this same wrapper covers does not,
-				// and a decorator has no business deciding which one it wraps.
+				// answer rather than only the timing. The direct solvers ignore
+				// the flag today, and a decorator has no business deciding that
+				// for whatever it wraps.
 				inner.iterative_mode = iterative_mode;
 
 				double const t0 = profileNow();
@@ -2136,20 +2043,12 @@ namespace
 		// Newton's own operator and elimination: see solve(). `darcyRhs` is held
 		// by reference and is a member, so it outlives both.
 		mfem::DarcyNPCOperator npc( *darcy->GetHybridization(), blockOffsets, darcyRhs );
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 		// Held across iterations so its symbolic analysis is reused: the trace
 		// system's sparsity does not change between them.
 		std::unique_ptr<mfem::Solver> const traceOwned =
 			makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue,
 			                 traceRefinementCapValue );
 		mfem::Solver &trace = *traceOwned;
-#else
-		mfem::GMRESSolver trace;
-		trace.SetRelTol( 1.0e-14 );
-		trace.SetAbsTol( 0.0 );
-		trace.SetMaxIter( 5000 );
-		trace.SetPrintLevel( -1 );
-#endif
 		mfem::DarcyNPCSolver correction( trace );
 
 		mfem::Vector residual( npc.Height() );
@@ -2333,9 +2232,6 @@ namespace
 #else
 				return false;
 #endif
-			case TraceSolver::GMRES:
-				// Native MFEM: no package to be missing.
-				return true;
 			case TraceSolver::cuDSS:
 #ifdef MFEM_USE_CUDSS
 				return true;
@@ -10063,12 +9959,15 @@ namespace
 		{
 			// THE DEFAULT IS THE LAST SOLVE'S ANSWER, which is zero on a fresh
 			// solver and a warm start on a second call -- what an adaptive
-			// cycle wants. setBoundaryFluxInitial() overrides it, and the
-			// header says at length why that is a library setter and not a
-			// TOML key: it selects between discrete equilibria rather than
-			// changing how well one is reached.
+			// cycle wants. setBoundaryFluxInitial() overrides it for the next
+			// solve only, as setPlasmaCurrentScaleInitial() does the scale:
+			// a support loop's later sweeps continue from the sweep before,
+			// not from the seed. The header says at length why it is a library
+			// setter and not a TOML key: it selects between discrete
+			// equilibria rather than changing how well one is reached.
 			sB = boundaryFluxInitialGiven ? boundaryFluxInitialValue
 			                              : psiBoundaryValue;
+			boundaryFluxInitialGiven = false;
 
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
 				// INTO THE FULL VECTOR, not into the potential space. peakAt()
@@ -13363,20 +13262,12 @@ namespace
 		double const target = std::max( newtonAbsoluteTolerance,
 		                                newtonRelativeTolerance*reference );
 
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 		// The sparsity of the trace system does not change between Newton steps
 		// and this object outlives the loop, so the analysis is done once.
 		std::unique_ptr<mfem::Solver> const linearOwned =
 			makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue,
 			                 traceRefinementCapValue );
 		mfem::Solver &linear = *linearOwned;
-#else
-		mfem::GMRESSolver linear;
-		linear.SetRelTol( 1.0e-14 );
-		linear.SetAbsTol( 0.0 );
-		linear.SetMaxIter( 5000 );
-		linear.SetPrintLevel( -1 );
-#endif
 
 		// Under NPC the border is solved against the FULL Jacobian, and A^-1 is
 		// the hybridized elimination -- reduce to the trace, solve there with
@@ -13598,6 +13489,7 @@ namespace
 				{
 					record.supportComponents = plasmaComponentMask.componentCount();
 					record.supportElements = plasmaComponentMask.componentNodes();
+					record.supportRingElements = plasmaComponentMask.ringNodes();
 				}
 
 				/*
@@ -14238,6 +14130,8 @@ namespace
 						plasmaComponentMask.componentCount();
 					borderStepHistory.back().supportElements =
 						plasmaComponentMask.componentNodes();
+					borderStepHistory.back().supportRingElements =
+						plasmaComponentMask.ringNodes();
 				}
 				prepareFold();
 				if ( foldActive )
@@ -16143,10 +16037,8 @@ namespace
 		if ( normalisedSource )
 			normalisedSource->setNormalisation( s, sB );
 
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 		readFactorisationCounts( linear, symbolicFactorisationCount,
 		                         numericFactorisationCount );
-#endif
 
 		longestCrawlValue = longestCrawl;
 		if ( stalled )
@@ -16422,7 +16314,6 @@ namespace
 
 			ResidualRecorder recorder( newtonResidualHistory );
 
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 			// NewtonSolver::Mult calls prec->SetOperator( *grad ) on THIS object
 			// once per iteration, and the trace system's sparsity does not change
 			// between them -- so without the reuse the ordering is recomputed and
@@ -16433,13 +16324,6 @@ namespace
 				makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue,
 				                 traceRefinementCapValue );
 			mfem::Solver &linear = *linearOwned;
-#else
-			mfem::GMRESSolver linear;
-			linear.SetRelTol( 1.0e-14 );
-			linear.SetAbsTol( 0.0 );
-			linear.SetMaxIter( 5000 );
-			linear.SetPrintLevel( -1 );
-#endif
 
 			// The trace leg. Wrapped HERE, before mfem::DarcyNPCSolver receives
 			// it, so that the factorisation and the backsolve are timed wherever
@@ -16759,12 +16643,10 @@ namespace
 			nonlinear->Mult( newtonRhs, unknown );
 			newtonIterationCount = nonlinear->GetNumIterations();
 
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 			// Recorded so the reuse can be asserted on rather than timed: a Newton
 			// solve refactorises once per iteration and must analyse ONCE.
 			readFactorisationCounts( linear, symbolicFactorisationCount,
 			                         numericFactorisationCount );
-#endif
 
 			// Loudly, and without a recovered solution: an iteration that ran out
 			// of steps has produced a vector, not an equilibrium.
@@ -16773,7 +16655,6 @@ namespace
 		}
 		else
 		{
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 			// No reuse here, deliberately: the linear path factorises once and
 			// this object is destroyed straight after, so retaining the analysis
 			// would buy nothing and cost a copy of the pattern.
@@ -16782,22 +16663,6 @@ namespace
 				                 traceRefinementCapValue );
 			solver->SetOperator( *reduced.Ptr() );
 			solver->Mult( traceB, traceX );
-#else
-			// Only a fallback. The hybridized trace system is small but not symmetric
-			// positive definite in this sign convention, so GMRES rather than CG.
-			mfem::SparseMatrix &reducedMatrix = *reduced.As<mfem::SparseMatrix>();
-			mfem::GSSmoother preconditioner( reducedMatrix );
-			mfem::GMRESSolver solver;
-			solver.SetOperator( reducedMatrix );
-			solver.SetPreconditioner( preconditioner );
-			solver.SetRelTol( 1.0e-12 );
-			solver.SetAbsTol( 0.0 );
-			solver.SetMaxIter( 5000 );
-			solver.SetPrintLevel( -1 );
-			solver.Mult( traceB, traceX );
-			if ( !solver.GetConverged() )
-				throw std::runtime_error( "meq::GradShafranovSolver::solve: the trace solve did not converge" );
-#endif
 		}
 
 		if ( !fieldsAreState )

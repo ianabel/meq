@@ -15,8 +15,10 @@ against is `CLAUDE_DECLINED.md`.
 ## Where it stands
 
 * **`--device cuda` reproduces `--device cpu` to every printed digit** on the
-  production cases, 27 of 29 shipped examples among them (M-238; the two
-  exceptions are below). Three of upstream's four element-local groups run on
+  production cases. Of the 29 shipped examples M-238 ran, 27 agreed and the
+  two exceptions are both resolved (M-239, M-299; below). The 29 are that
+  sweep's set; `examples/` holds 44 `.toml` files now, and the sweep has not
+  been re-taken over them. Three of upstream's four element-local groups run on
   the device — local factorisation, the NPC traversal, the trace assembly — and
   MEQ's integrand does too. The solve leg is at parity with the host; what a
   device run loses, 1.07–1.13× on the wall, is host threading it has to give up
@@ -30,8 +32,8 @@ against is `CLAUDE_DECLINED.md`.
   search and the bordered columns have device routes that open by themselves
   once their input is device-valid. Over a `machine-f-diiid` run the bus carries
   508 MB up and 78.6 MB down (M-240).
-* **Single precision builds and runs at parity with double** (62 of 63 in each
-  build, the same deliberate red), and its accuracy is qualified **per problem**.
+* **Single precision builds and runs at parity with double** (83 of 84 in each
+  build, the same deliberate red, single on MKL 2026.2 included, M-303), and its accuracy is qualified **per problem**.
 * **This machine's GPU is an RTX 2070 SUPER** — evidence about correctness,
   never a timing (see the last section).
 
@@ -519,7 +521,8 @@ Forced open, 126 of 126 evaluations equal their host loops.
   because `psi_bnd`'s `-limiterValue()` is a flag on the finished sum and not a
   negated weight. *`-( +0 )` is `-0`, and a sum of negated terms from `+0` is
   `+0`.*
-* **Of 29 shipped examples, two differ under CUDA.**
+* **Of the 29 shipped examples M-238 ran, two differed under CUDA, and both
+  are resolved.**
   * `diverted-tokamak` is the stale-snapshot defect above (M-239), now fixed.
   * `rotating-normalised` located a different axis on the host: its axis sits
     on the mesh line `z = 0`, and the host's warm ring walk followed one twin
@@ -796,8 +799,11 @@ build, which needs no device.
     (→ **[M-221](MEASUREMENTS.md#m-221)**).
   * `NewtonRelativeTolerance = 1.0e-10` cannot be met. The run stalls at 3.3e-07
     and burns 400 iterations.
-* **Both builds read 62 of 63, the same deliberate red**
-  → **[M-222](MEASUREMENTS.md#m-222)**.
+* **Both builds read 83 of 84, the same deliberate red**
+  → **[M-303](MEASUREMENTS.md#m-303)**; parity was first reached at 62 of 63
+  each → **[M-222](MEASUREMENTS.md#m-222)**. MKL 2026.2 and PARDISO's
+  refinement cap move single's knife edges both ways
+  (→ **[M-302](MEASUREMENTS.md#m-302)**).
   * `k+1` above `k = 1` is a double-build acceptance: round-off contaminates the
     flux by 203× at `k = 2` and by 1.5× on the coarsest mesh at `k = 3`. So it is
     skipped by degree, loudly, with the absolute ceiling still asserted.

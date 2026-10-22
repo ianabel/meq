@@ -2060,7 +2060,6 @@ int main( int argc, char **argv )
 		case meq::TraceSolverType::UMFPack: traceSolver = TS::UMFPack; break;
 		case meq::TraceSolverType::Pardiso: traceSolver = TS::Pardiso; break;
 		case meq::TraceSolverType::cuDSS:   traceSolver = TS::cuDSS;   break;
-		case meq::TraceSolverType::GMRES:   traceSolver = TS::GMRES;   break;
 	}
 
 	/*
@@ -2341,9 +2340,8 @@ int main( int argc, char **argv )
 		 * The downgrade is to UMFPack unconditionally rather than to whatever
 		 * the library's defaultTraceSolver() would pick, because that function
 		 * has already picked -- it is what put PARDISO here. UMFPack is the
-		 * fallback in both places, and a build with neither package never
-		 * reaches makeTraceSolver() at all: MEQ_HAVE_DIRECT_TRACE_SOLVER is
-		 * unset and the GMRES path takes the solve.
+		 * fallback in both places, and a build with neither package does not
+		 * configure: MEQ needs UMFPack or PARDISO on the host.
 		 */
 		if ( config->getSolver().traceSolverWasGiven )
 		{

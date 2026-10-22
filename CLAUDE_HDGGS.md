@@ -459,8 +459,10 @@ That was a breaking change for MEQ, whose default ordering it was.
 **MEQ's default is now `NonlinearOrdering::NPC`** — `mfem::DarcyNPCOperator`
 with `mfem::DarcyNPCSolver`, Newton on the full `(q, ψ, ψ̂)` system with the
 Jacobian solved by hybridized elimination, Nguyen, Peraire & Cockburn eqs
-(14)–(18). `CondenseThenLinearise` is kept as the **backup**, and the reference
-is `../../mfem-hdg-dev/doc/HDG-ORDERING-API.md`.
+(14)–(18). **It is the only ordering**: `CondenseThenLinearise`, the
+condensation it was measured against below, is not in MEQ (`GradShafranov.hpp`,
+*NPC is the only ordering*). The reference is
+`../../mfem-hdg-dev/doc/HDG-ORDERING-API.md`.
 
 **The port cost MEQ almost nothing structurally, and the reason is an accident
 worth knowing.** `solution` has always been a three-block
@@ -475,13 +477,14 @@ residual with the gradient under the deleted mode — was deleted with it.
 
 **`GetNumLocalNLIterations()` is exactly zero**, which is the acceptance signal
 that this is NPC and not a condensation wearing the name.
-`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally` asserts it on
-Example 5 and prints the comparison:
+`SolverContract::theOrderingNeverIteratesInsideAnElement` asserts it on
+Example 5, beside the L2 against the exact solution. Against the condensation,
+measured while MEQ carried both:
 
 → **[M-16](MEASUREMENTS.md#m-16)** — `k` · NPC local NL its · condense local NL its · L2 vs exact · relative in `ψ`
 
-Same L2 to seven figures, same 4 Newton iterations, ψ agreeing to round-off.
-That is what says the backup is a backup and not a different problem.
+Same L2 to seven figures, same 4 Newton iterations, ψ agreeing to round-off:
+the two orderings solved the same problem.
 
 **AND AN NPC ITERATION IS THREE TO FOUR TIMES CHEAPER THAN A CONDENSATION
 ONE**, which is what the iteration-count tables everywhere else in this file do
@@ -666,16 +669,19 @@ without a measurement that separates those fourteen rows.
 **No.** It costs 1.4× to 3.1× on everything that already works
 ([M-25](MEASUREMENTS.md#m-25)), it does not cover the barrier, and — decisively —
 it silently changes which discrete solution is reported, three routes reaching
-`max ψ_h` **9.4%** apart on an under-resolved mesh ([M-26](MEASUREMENTS.md#m-26));
+`max ψ_h` **9.4%** apart on an under-resolved mesh ([M-26](MEASUREMENTS.md#m-26);
+a dated reading: its third route, condense-first, is not in MEQ, and its two NPC
+routes read 1.0% apart; no test prints the comparison on the current Picard map,
+M-303);
 `CondenseThenLinearise` is not a cheaper rung either ([M-27](MEASUREMENTS.md#m-27)).
 So `Globalisation::None` stays the default and the ladder stays reactive.
 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *`PicardThenNewton` as the default, and `CondenseThenLinearise` as a cheaper rung*
 
 **A corollary for anyone comparing the two orderings**: do it on a *resolved*
 mesh. A disagreement at `k = 2, n = 16` is this, not a defect.
-`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally` runs on Example 5
-at `n = 8` where both converge in 4 steps, and asserts 1e-9 — that bound is
-only reachable because the discretisation there has one solution.
+M-16's comparison ran on Example 5 at `n = 8`, where both converged in 4 steps
+and agreed to 1e-9 — reachable only because the discretisation there has one
+solution.
 
 ### KINSOL: the two orderings are exact opposites
 
@@ -1455,11 +1461,22 @@ the local problems at that trace well posed.
 
    | method | outcome |
    |---|---|
-   | Newton | 42 iterations |
+   | Newton | fails at a cap of 60; 226 iterations at a cap of 500 |
    | Picard, undamped | stalls |
    | Picard, `ω = 0.5` | 248 iterations |
    | **Anderson, depth 1, undamped** | **162 iterations** |
    | Anderson, depth 2 and above | fails |
+
+   **The Newton row is read on the current Picard map and Newton**:
+   `PedestalConvergence`'s `pedestalConvergenceIsAResolutionThreshold` prints
+   `FAILED 60` at `k = 1, n = 16` in double and in single, and at a cap of 500
+   Newton wanders between this mesh's two discrete roots for 226 steps in
+   double ([M-303](MEASUREMENTS.md#m-303)). Anderson depth 1's 162 is
+   `andersonPicardReachesTheSameSolutionAsNewton`'s own record on the current
+   map. **The two Picard rows and the depth-2 row predate M-303's map** and no
+   test prints them, so they are not re-measured. On the resolved meshes the
+   same case prints Newton 9, 9, 9 against Anderson 240, 48, 34 at `n = 32`,
+   48, 64 in double, and 8, 9, 8 against 112, 31, 17 in single.
 
    **Two surprises, both defaults now set from measurement rather than from the
    papers.** Plain Picard *needs* damping and Anderson does not — so
@@ -1469,8 +1486,9 @@ the local problems at that trace well posed.
    conditioning or KINSOL's implementation is not established, and raising it
    expecting the papers' behaviour will not work.
 
-   It is a **robustness route, not a faster one**: 162 iterations against
-   Newton's 42, each one a full linear solve.
+   It is a **robustness route, not a faster one**: 162 iterations on a mesh
+   where Newton does not converge in 60, and 34 to 240 against Newton's 9 on
+   the resolved ones, each one a full linear solve.
    `andersonPicardReachesTheSameSolutionAsNewton` pins that both reach the same
    discrete solution — `ψ` agreeing to seven figures — which is what makes it an
    alternative rather than a different problem.
@@ -1579,7 +1597,9 @@ identical arithmetic, different summation order, `O(1e-16)`. **And the BLAS here
 is threaded MKL**, whose reduction order depends on the thread count, so whether
 that local Newton converges is machine- and environment-dependent. Do not treat
 42 iterations as reproducible. An intermediate claim in this file that LAPACK
-had fixed a third of the globalisation problem was wrong.
+had fixed a third of the globalisation problem was wrong. That reading is
+condense-first's, which had a local Newton; under NPC there is none, and the
+coarse mesh's trouble is its several discrete roots (M-303).
 
 **`MFEM_USE_EXCEPTIONS` is enabled** and does what the driver's exit codes need:
 `MFEM_ERROR_THROW` is the default error action and `mfem::ErrorException`
@@ -1659,20 +1679,20 @@ benchmark. That table was calibrated against a solver that no longer exists, and
 the red assertion was the calibration going stale rather than anything about
 MEQ. Re-measure it after any change to the ordering or the globalisation.
 
-**`pedestalConvergenceIsAResolutionThreshold` ASSERTS THE CURES, NOT THE KNIFE
-EDGE**, and nothing is entitled to assert the edge in either direction: 42
-iterations against a LAPACK build and a failure at 60 against
-`install-nolapack` is one flag's difference in threaded-MKL reduction order, so
-an assertion on it is an assertion about this machine today. It asserts the two independent refinement cures, each with a
-factor of four in it:
+**`pedestalConvergenceIsAResolutionThreshold` ASSERTS THE CURES, AND DOES NOT
+SOLVE THE COARSE MESH.** At `k = 1, n = 16` the discrete problem has two roots
+and Newton wanders between them, failing at the cap of 60 in both formats
+([M-303](MEASUREMENTS.md#m-303)); nothing is entitled to assert that crawl, in
+either direction, and it is open in `TODO`. The case asserts the two independent
+refinement cures:
 
 → **[M-40](MEASUREMENTS.md#m-40)** — `k = 1, n = 16`
 
 That two independent paths both cure it is what identifies the cause as
 under-resolution. §4.4 is the control: it fails at every order and mesh tried,
-because its trouble is that the problem is multi-valued. The threshold itself
-is still asserted, as `iterations(n = 16) ≥ 2 × iterations(n = 32)`, which holds
-whichever side the rounding falls on.
+because its trouble is that the problem is multi-valued. The threshold is not
+asserted as a cost: "the coarse mesh takes at least twice the steps" would make
+a crawl the green state.
 
 **THESE COARSE DISCRETISATIONS CARRY MORE THAN ONE SOLUTION, and it is measured
 from three directions now.** `andersonPicardReachesTheSameSolutionAsNewton`
@@ -1713,8 +1733,7 @@ face-coupled trace system, one for the small dense per-cell systems. MEQ has a
 
 | | what MEQ uses | |
 |---|---|---|
-| global trace | **selectable**: `UMFPackSolver` (METIS ordering, the default), `PardisoSolver` (`REAL_STRUCTURE_SYMMETRIC`), `CuDSSSolver` (`NONSYMMETRIC` + `FULL`) | three unsymmetric sparse LUs, agreeing to 5e-14; `setTraceSolver()` |
-| *fallback, no direct solver at all* | GMRES | **unpreconditioned** on the Newton path, `GSSmoother` on the linear path |
+| global trace | **selectable**: `PardisoSolver` (`REAL_STRUCTURE_SYMMETRIC`, the default where the build has it, refinement cap 0, M-301), `UMFPackSolver` (METIS ordering, the default otherwise), `CuDSSSolver` (`NONSYMMETRIC` + `FULL`); a direct solver is required, there is no iterative one | three unsymmetric sparse LUs, agreeing to 5e-14; `setTraceSolver()` |
 | per-cell dense | MFEM `LUFactors`, partial-pivot LU | as a 2×2 block: LU on the flux block `A`, local Schur `S`, LU on `S` |
 | **per-cell nonlinear** | element-local `NewtonSolver`, 100 iters, rtol 1e-12, `LPrecType::LU` | one iteration *per element per residual evaluation* — **and MEQ's default ordering no longer reaches it**, see below |
 
@@ -1732,12 +1751,13 @@ nonlinear. NPC, which is **MEQ's default**, differentiates the full
 `(q, ψ, ψ̂)` system first and hybridizes the linear system that results, so every
 element-local operation is a linear solve and `GetNumLocalNLIterations()` stays
 at **zero** — asserted, not assumed, by
-`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally`, which reads 0
-against the condensation's 3644/3560/3412 at `k = 1, 2, 3`.
+`SolverContract::theOrderingNeverIteratesInsideAnElement`, where the
+condensation read 3644/3560/3412 at `k = 1, 2, 3` (M-16).
 
-So the row above is what MEQ *has*, and it is one `setNonlinearOrdering()` call
-away rather than unreachable — `CondenseThenLinearise` is the **backup**, and on
-stiff under-resolved meshes it is the one that works. See *The NPC port*.
+So the row above is a solver MEQ's code does not reach: condense-first is not
+in MEQ (`GradShafranov.hpp`, *NPC is the only ordering*), though on stiff
+under-resolved meshes it was measured to be the ordering that works. See *The
+NPC port*.
 
 **And there is a fifth thing that is not a solver at all but decides how fast
 the third and fourth run**: `setAssemblyMode()`, which threads the element loop
@@ -1764,9 +1784,9 @@ configuring.
 single most important thing in this section, and it was nearly missed by
 measuring only the easy configuration.
 
-`GradShafranov.cpp` justifies GMRES over CG with "the hybridized trace system is
-small but not symmetric positive definite in this sign convention". Measured on
-the **fitted** benchmark that is true as written and misleading:
+The removed GMRES fallback was justified over CG with "the hybridized trace
+system is small but not symmetric positive definite in this sign convention".
+Measured on the **fitted** benchmark that is true as written and misleading:
 
 → **[M-54](MEASUREMENTS.md#m-54)** — `k` · `n` · nnz/row · rel `\|A_ij − A_ji\|` · Rayleigh quotients, free subspace
 
@@ -2177,10 +2197,13 @@ MKL threads at all.
 Cholesky highly is what measurements taken only on the fitted path suggest, and
 it is wrong wherever `Γ` is curved.
 
-1. **Precondition the Newton path's GMRES fallback.** It has none, while the
-   linear path's fallback has a `GSSmoother`. That inconsistency is a plain bug
-   and is worth fixing whatever else happens; without SuiteSparse the Newton
-   path is currently running unpreconditioned GMRES on every step.
+1. **There is no iterative trace solver, and MEQ does not build without a
+   direct one.** GMRES with a Gauss-Seidel smoother took 4,179 Krylov
+   iterations on DIII-D's first solve and did not finish in 1,800 s (M-179), so
+   it is not a fallback worth keeping. `CMakeLists.txt` refuses an MFEM with
+   neither SuiteSparse nor oneMKL PARDISO, `GradShafranov.cpp` has the same rule
+   as an `#error`, and `[solver] TraceSolver` is one of umfpack, pardiso and
+   cudss. cuDSS alone is not enough: it needs a device for every run.
 
 The rest of the ranking is what NOT to reach for — symmetric methods and
 CHOLMOD, Cholesky on the flux block, AMG, and re-timing cuDSS on this machine:

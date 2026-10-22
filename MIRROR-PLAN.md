@@ -493,7 +493,19 @@ decides how MR-4 writes them, and how geq's profiles are transferred.
 
 Each ends at a measured acceptance, not at "it runs".
 
-### MR-0 — pick `ρ_Γ` and `N`, and keep the diagnostic
+### MR-0 — pick `ρ_Γ` and `N`, and keep the diagnostic — DONE BUT FOR THE DIAGNOSTIC
+
+**THE CHOICE IS DONE AND THE DIAGNOSTIC IS NOT BUILT.** `ρ_Γ = 3.0` with
+`N = 32` is measured and on the plateau, the copper setting `N`
+([M-169](MEASUREMENTS.md#m-169), [M-260](MEASUREMENTS.md#m-260)). No code
+reports the fraction of `∫|F|/R` outside `Γ`: nothing in `src/meq` or
+`apps/meq.cpp` computes it, and no measurement reads it on a MEQ answer. The
+nearest instrument is MR-1's `GradShafranovSolver::checkAxialCutoff()`, which
+reports the current density reached at `|z| = z_edge`, a different quantity;
+under the box support `F` is zero beyond the cutoff by construction. So of the
+acceptance below, the mode-count sweep is M-260's on MEQ's own vacuum solve,
+where the copper rather than the plasma sets the trend, and the diagnostic's
+half is not met.
 
 **THIS STAGE WAS THE CAMPAIGN'S FALSIFYING EXPERIMENT AND
 [M-169](MEASUREMENTS.md#m-169) HAS RUN IT.** The exterior is admissible at every

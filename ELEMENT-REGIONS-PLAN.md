@@ -13,6 +13,16 @@ support mask.
 ER-2 → **[M-269](MEASUREMENTS.md#m-269)**; ER-3 →
 **[M-270](MEASUREMENTS.md#m-270)**.
 
+**THIS IS A CLOSED CAMPAIGN AND THE FILE IS NOW ITS DESIGN RECORD, NOT A PLAN.**
+Nothing here is scheduled and nothing here is waiting. The passive and
+ferromagnetic kinds are reserved rows of a table that nothing produces, which
+is a schema decision (§4, item 4) and not work; producing them is a new plan
+that brings its own input. **It is kept rather than converted**, as
+`INVERSION-PLAN.md` is: the user-facing half is `docs/output.rst`, and
+`src/meq`, `tests/`, `apps/`, `tools/` and `examples/` cite this file by
+section at 26 sites across 15 files, so deleting it would dangle every one.
+Read §2 for why the output is shaped as it is.
+
 ## 1. What a reader cannot get from the rest of the output
 
 * **Plasma.** The `.nc`'s `inside` says which grid nodes are in `Ω_h`, but not

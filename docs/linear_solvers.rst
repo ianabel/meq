@@ -14,7 +14,7 @@ a **third**, and it is not an oversight — it is the price of using Newton.
      - Notes
    * - Global trace
      - A sparse direct solver, selectable at run time
-     - See below. Falls back to GMRES if the build has no direct solver.
+     - See below. MEQ needs UMFPack or PARDISO in MFEM, and does not configure without one.
    * - Per-element dense
      - Partial-pivot LU, as a :math:`2\times 2` block
      - LU on the flux block, a local Schur complement, LU on that.

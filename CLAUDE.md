@@ -88,10 +88,15 @@ run), the bordered retry rung that is MEQ's one branch control
 
 **THE TWO PERFORMANCE KEYS ARE THE ONLY SOLVER KNOBS IN THE TOML, AND THE LINE
 IS DRAWN ON PURPOSE.** `AssemblyMode` and `TraceSolver` cannot change the answer
-where both converge. **`Globalisation` and `NonlinearOrdering` are not exposed
-and must not be**: three solve routes reach discrete solutions **9.4% apart** on
-an under-resolved mesh, which is exactly where an adaptive run starts
-(`CLAUDE_HDGGS.md`, *Should `PicardThenNewton` simply be the default?*). A key
+where both converge. **`Globalisation` is not exposed and must not
+be** (and there is no `NonlinearOrdering` to expose: NPC is the only
+ordering): three solve routes reached discrete solutions **9.4% apart** on an
+under-resolved mesh, which is exactly where an adaptive run starts
+(→ **[M-26](MEASUREMENTS.md#m-26)**; `CLAUDE_HDGGS.md`, *Should
+`PicardThenNewton` simply be the default?*). That is a dated measurement: its
+third route, condense-first, is not in MEQ, and its two NPC routes, plain and
+`PicardThenNewton`, read `max ψ_h` 1.0% apart; no test prints the comparison
+on the current Picard map (M-303). A key
 that silently changes which equilibrium is reported is not a performance key.
 
 **The device path reproduces the host.** Under `--device cuda` the production
@@ -124,7 +129,7 @@ the next, for a third of the Newton work (→ **[M-01](MEASUREMENTS.md#m-01)**).
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst`, `CLAUDE_FLOW.md` |
 | solution inversion | IN-A to IN-P, **done** | `INVERSION-PLAN.md`, `CLAUDE_INVERSION.md` |
 | free boundary | FB-A to FB-7 done or answered, FB-6 met, XP-0 to XP-4 done — MEQ reproduces `freegs4e`'s diverted equilibrium | `FREE-BOUNDARY-PLAN.md`, `CLAUDE_FB.md` |
-| rotating mirror | MR-0 to MR-5 and §5's midplane gauge done — MEQ solves geq's rotating mirror and agrees with it to geq's own resolution in either gauge (M-261 to M-263, M-278); `examples/mirror-rotating.toml` runs it through the driver (M-264) with the inner label `ψ_inner` at the limiting electrode, `[boundary.electrode]`, started like `ψ_bnd` at the starting state's flux at its point (so `PsiAxis` and `[source.axis]` are refused beside the box), adaptively under a judged estimator (M-279), on the card (M-280), and with no retry rung beside the box (M-277); `examples/mirror-three-species.toml` solves e, D and C⁶⁺ at `M = 6` in the midplane gauge (M-278), quadratic with `R₀` at 32 knots as border unknowns (M-283, M-284); `Gauge = "vacuum-midplane"` pins the potential on the vacuum's crossing, quadratic with an exact Jacobian (M-281), and the `.nc` carries the true-midplane densities (M-282). A box support defaults to `τ = 3/max(R, 0.1 m)` (`meq::MirrorStabilisation`, M-293): the three-species ceiling at constant `τ = 1` was the stabilisation's fold inside one element (M-291), and under the default 2e19 converges on level 0 in both midplane gauges and 5e19 in the midplane gauge, asserted; only the vacuum-midplane gauge has a fold of its own, near 4.16e19 (M-294). Open: a second discrete root reached from `ψ_inner = 0.15` under the default, which only a far `[initialguess]` can now pose; a meshed-pack mirror through the driver in single, whose floor is above the solver's target; `q_h` reference-limited on the rotating mirror's finest rungs; `ψ*` gaining nothing over `ψ_h` on the vacuum mirror; both midplane gauges untried under `--device` and adaptivity | `MIRROR-PLAN.md`, `CLAUDE_FLOW.md` |
+| rotating mirror | MR-0 to MR-5 and §5's midplane gauge done, but for MR-0's diagnostic (the fraction of the current outside `Γ`, not built) — MEQ solves geq's rotating mirror and agrees with it to geq's own resolution in either gauge (M-261 to M-263, M-278); `examples/mirror-rotating.toml` runs it through the driver (M-264) with the inner label `ψ_inner` at the limiting electrode, `[boundary.electrode]`, started like `ψ_bnd` at the starting state's flux at its point (so `PsiAxis` and `[source.axis]` are refused beside the box), adaptively under a judged estimator (M-279), on the card (M-280), and with no retry rung beside the box (M-277); `examples/mirror-three-species.toml` solves e, D and C⁶⁺ at `M = 6` in the midplane gauge (M-278), quadratic with `R₀` at 32 knots as border unknowns (M-283, M-284); `Gauge = "vacuum-midplane"` pins the potential on the vacuum's crossing, quadratic with an exact Jacobian (M-281), and the `.nc` carries the true-midplane densities (M-282). A box support defaults to `τ = 3/max(R, 0.1 m)` (`meq::MirrorStabilisation`, M-293): the three-species ceiling at constant `τ = 1` was the stabilisation's fold inside one element (M-291), and under the default 2e19 converges on level 0 in both midplane gauges and 5e19 in the midplane gauge, asserted; only the vacuum-midplane gauge has a fold of its own, near 4.16e19 (M-294). Open: a second discrete root reached from `ψ_inner = 0.15` under the default, which only a far `[initialguess]` can now pose; a meshed-pack mirror through the driver in single, whose floor is above the solver's target; `q_h` reference-limited on the rotating mirror's finest rungs; `ψ*` gaining nothing over `ψ_h` on the vacuum mirror; both midplane gauges untried under `--device` and adaptivity | `MIRROR-PLAN.md`, `CLAUDE_FLOW.md` |
 | element regions | ER-0 to ER-3 done — each element's material fractions, the material, circuit and permeability curve tables in the `.nc`, VTK cell data and the `node_material` grid mask, classified by the solver's own source predicate (M-266 to M-270) | `ELEMENT-REGIONS-PLAN.md`, `CLAUDE_DRIVER.md` |
 | inverse solve | IV-0 to IV-6 done — coil currents are border unknowns, `[inverse]` runs through the driver and exits 4 on a best fit (M-250 to M-253) | `INVERSE-AND-RECONSTRUCTION-PLAN.md`, `CLAUDE_FB.md` |
 
@@ -261,7 +266,7 @@ the zero axis spread must not move.
 ## MFEM → `CLAUDE_MFEM.md`
 
 **MEQ links `../../mfem/install`**: MFEM 4.10.1 built from branch
-**`meq-integration`** in `../../mfem/mfem-src`, a local merge of fifteen branches
+**`meq-integration`** in `../../mfem/mfem-src`, a local merge of seventeen branches
 that exists only to be built against — never pushed, re-created rather than
 merged into, tagged before each re-creation. `mfem/master` will not do.
 `CLAUDE_MFEM.md` has the options, the CUDA obstacles, the branch table, the

@@ -2002,6 +2002,9 @@ namespace
 		std::unique_ptr<mfem::Mesh> mesh;
 		std::unique_ptr<mfem::GridFunction> psi;
 		std::unique_ptr<mfem::GridFunction> flux;
+		/// The physical flux psi_c + psi_h, where the run wrote one -- under
+		/// [conductors] -- and null otherwise.
+		std::unique_ptr<mfem::GridFunction> total;
 	};
 
 	StoredAnswer readAnswer( std::string const &stem )
@@ -2015,6 +2018,9 @@ namespace
 		BOOST_TEST_REQUIRE( flux.good(), "no " << stem << "_grad_psi.gf" );
 		out.flux = std::make_unique<mfem::GridFunction>( out.mesh.get(), flux );
 		BOOST_TEST_REQUIRE( out.flux->FESpace()->GetVDim() == 2 );
+		std::ifstream total( stem + "_psi_total.gf" );
+		if ( total.good() )
+			out.total = std::make_unique<mfem::GridFunction>( out.mesh.get(), total );
 		return out;
 	}
 
@@ -3085,6 +3091,20 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorOnTheCardIsTheHosts )
 		std::numeric_limits<mfem::real_t>::epsilon() )/meq::extensionFdStep();
 	bound = std::max( bound, extension*largest );
 	fluxBound = std::max( fluxBound, extension*fluxLargest );
+	// AND psi_h IS A REMAINDER, SO ITS ROUND-OFF IS THE PHYSICAL FLUX'S. The
+	// conductors are out of the mesh, psi_h = psi - psi_c is about 1e-3 at its
+	// largest, and the terms it is made from are the size of psi, 1.73. On a
+	// card-against-host pair the physical flux differs by 1.2e-07, which is
+	// 0.6 eps of it, and psi_h by up to 1.1e-07, which against psi_h's own size
+	// is 550 to 900 eps and failed one run in three against the floor above.
+	if ( onHost.total )
+	{
+		double totalLargest = 0.0;
+		for ( int i = 0; i < onHost.total->Size(); ++i )
+			totalLargest = std::max( totalLargest,
+			                         static_cast<double>( std::abs( ( *onHost.total )( i ) ) ) );
+		bound = std::max( bound, meq::tests::scalarAgreementFloor( 0.0, totalLargest ) );
+	}
 #endif
 	BOOST_TEST( worst < bound,
 		"psi_h under --device cuda differs from the host's by " << worst << " of a "

@@ -44,7 +44,9 @@ in a released MFEM, and `mfem/master` will not work** — the older
 `HDGBilinearForm` API that MEQ was originally written against has been removed,
 and its replacement is the branch work below.
 
-MEQ needs pieces from **four** branches:
+MEQ needs pieces from **seventeen** branches. The four below are the core;
+`CLAUDE_MFEM.md`'s branch table lists all seventeen, in merge order, with what
+each contributes and what breaks without it:
 
 | branch | what MEQ needs from it |
 |---|---|
@@ -64,15 +66,13 @@ that catches it; if that test is green, your MFEM has the fix.
 
 ### The integration branch
 
-The four are combined into a local branch called `meq-integration`, which
+They are combined into a local branch called `meq-integration`, which
 exists **only to be built against**. It is not a development branch, it is
 published on no remote, and it must never be pushed: it is re-created whenever
-any of the four moves, so anything committed directly to it is lost.
+any of its branches moves, so anything committed directly to it is lost.
 
-The recipe, the current merge topology, and the three conflict resolutions
-(which are decided rather than fiddly, but include one seam where "keep both
-sides" leaves the file a brace short) are in **`CLAUDE.md`**, under
-*`meq-integration`: the branch MEQ builds from*. Read that before rebuilding.
+The recipe, the current merge topology and the conflict resolutions are in
+**`CLAUDE_MFEM.md`**, under *`meq-integration`*. Read that before rebuilding.
 
 Two checks from it are worth repeating here because they have both fired:
 
@@ -90,6 +90,9 @@ Two checks from it are worth repeating here because they have both fired:
     && echo "install is current"
   ```
 
+  That diff is blind to a fix in a `.cpp`, which is most of them, so check the
+  library's timestamp against the branch tip too (`CLAUDE_MFEM.md` has both).
+
 ## Building MFEM
 
 Out of tree, installed to a prefix MEQ can point at. MFEM is deliberately **not**
@@ -102,12 +105,12 @@ The options MEQ reads, and what each buys:
 | option | required? | what MEQ does with it |
 |---|---|---|
 | `MFEM_PRECISION` | **a decision, not a tick box** | `double` or `single`, deciding `mfem::real_t` for the whole library. **MEQ has no key for it and cannot have one** — it is inherited through `MFEM_DIR`, so choosing a precision means choosing an MFEM. Both build and both pass the suite; see *Two installs, two questions* below. |
-| `MFEM_USE_SUITESPARSE` | optional | UMFPACK, one of the trace solvers. Without **any** direct solver MEQ falls back to GMRES, which `MEASUREMENTS.md` M-179 measures as unviable. SuiteSparse ships no single-precision build, so a `single` install has none and runs PARDISO. |
+| `MFEM_USE_SUITESPARSE` | **this or PARDISO is required** | UMFPACK, one of the trace solvers. MEQ does not configure without UMFPACK or PARDISO: there is no iterative fallback, since GMRES on the trace system is unviable (`MEASUREMENTS.md` M-179), and cuDSS alone needs a device for every run. SuiteSparse ships no single-precision build, so a `single` install has none and runs PARDISO. |
 | `MFEM_USE_EXCEPTIONS` | **yes, for the driver** | Makes an MFEM error a C++ exception rather than an abort. Without it a failed solve is a `SIGABRT` instead of exit code 2. |
 | `MFEM_USE_SUNDIALS` | for globalisation | KINSOL, behind the Anderson–Picard and Picard-then-Newton paths. Must itself be built at the same precision — MFEM `static_assert`s it. |
 | `MFEM_USE_GSLIB` | optional | `FindPointsGSLIB`. MEQ's warm start uses `meq::PointLocator`, its own, which reproduces gslib to every printed digit; gslib has no floating-point abstraction and cannot be built beside `MFEM_PRECISION = single`. |
 | `MFEM_USE_LAPACK` | recommended | Also gates MFEM's cut-element quadrature |
-| `MFEM_USE_MKL_PARDISO` | recommended | A trace solver, and MEQ's default wherever it is present |
+| `MFEM_USE_MKL_PARDISO` | **this or SuiteSparse is required**; recommended | A trace solver, and MEQ's default wherever it is present |
 | `MFEM_USE_CUDA`, `MFEM_USE_CUDSS` | for the device path | Three things, not one: the `cuDSS` trace solver; MFEM's batched element and face kernels, reached through `[solver] AssemblyMode`, `LocalFactorMode` and `TraceAssemblyMode`, which **are** the device route; and MEQ's own device translation units, which CMake hands to `nvcc` at the architecture it reads out of `config.mk`. Without CUDA those compile to host stubs and the build is host-only and correct. |
 | `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | optional, **both or neither** | Threaded element assembly, which MEQ exposes as an opt-in. It *aborts* rather than falling back if only one is set. |
 | `MFEM_USE_MPI` | **no** | MEQ is serial. Detected only so that a parallel MFEM fails intelligibly. |
@@ -227,7 +230,7 @@ and every convergence claim are exercised only by a local build.
 ## Where the MFEM branch should live — unresolved
 
 **Today, an outside user cannot build MEQ's solver at all.** `meq-integration`
-is a local merge of four branches from a working tree on one machine. There is
+is a local merge of seventeen branches from a working tree on one machine. There is
 nothing to clone, so caching does not help and neither does a submodule: there
 is nothing to point one at.
 
@@ -237,9 +240,9 @@ covers. The options, none of which has been chosen:
 
 * **Publish the merge**, as a tag or branch on a fork of MFEM, and pin MEQ to
   the commit. Cheapest to consume; the cost is that it must be re-published
-  whenever any of the four moves, and a stale pin is worse than none.
-* **Upstream the four branches**, which is the real fix and is not MEQ's to do.
-* **Ship a build script** that fetches the four and performs the merge, with the
+  whenever any of them moves, and a stale pin is worse than none.
+* **Upstream the branches**, which is the real fix and is not MEQ's to do.
+* **Ship a build script** that fetches them and performs the merge, with the
   conflict resolutions encoded. Honest about the situation, but it bakes in a
   topology that belongs to somebody else's tree and has already changed once.
 * **A container or binary MFEM install** published alongside MEQ.

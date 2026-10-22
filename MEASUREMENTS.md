@@ -19592,71 +19592,6 @@ restart.
 `[initialguess] Type = "gridfunction"`, `File = "<stem>.nc"` in place of its
 own guess and every other key unchanged.
 
-### M-300
-
-**D AND F SHAPED PROFILED ON AN IDLE MACHINE UNDER A PASSIVE WAIT: PARDISO
-REFINES EVERY SOLVE TO ITS CAP OF TWO STEPS WITH NO PIVOT PERTURBED, AND ITS
-"ADDITIONAL CALCULATIONS" COST 4.5 TO 6.0 TIMES THE DIRECT SOLVE; AND THE
-BACKSOLVE AND NPC REDUCE+RECOVER LEGS RUN ON 2.9 TO 4.2 OF EIGHT CORES, WELL
-UNDER WHAT A SPINNING TEAM MADE THEM READ.** The plan of `PERFORMANCE_TODO.md`
-as it stood at `06a22b7`, section 1,
-for `../../mfem-hdg-dev/doc/HDG-TRACE-SOLVE-AND-NPC-REDUCE-FROM-MEQ.md`.
-
-**Setup.** `06a22b7`, installed and clean. The race arm's ten directories —
-`machine-d-tcv-shaped` and `machine-f-diiid-shaped`, cold and warm, at
-k2 h1.00 and k3 h1.00, and F at k3 h0.50 — each re-run in place three times,
-interleaved, `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive` for the profile. Every
-timed run waited for under 6% busy CPU from anything else, sampled from
-`/proc/stat` over 10 s (`runs/perf-profile/queue.sh`). **The warm column is
-the whole-state `.nc` restart of [M-298](#m-298)**, so it is not the warm
-column of the request, which predates it. Seconds and cores are medians of
-the three.
-
-| directory | wall | Newton by sweep | residual | backsolve | factorisation | reduce+recover |
-|---|---|---|---|---|---|---|
-| D k2 h1.00 cold | 4.94 | 8+4+3+2 | 0.80 s, 6.81 | 0.95 s, **3.05** | 0.36 s, 3.38 | 0.96 s, **3.34** |
-| D k2 h1.00 warm | 3.46 | 5+3+3 | 0.75 s, 6.82 | 0.64 s, 3.07 | 0.24 s, 3.45 | 0.49 s, 4.01 |
-| D k3 h1.00 cold | 7.59 | 7+4+3+2 | 1.38 s, 7.17 | 1.36 s, **2.87** | 0.56 s, 4.22 | 1.40 s, **3.28** |
-| D k3 h1.00 warm | 5.83 | 4+3+3 | 1.22 s, 7.16 | 0.81 s, 2.88 | 0.37 s, 4.05 | 0.84 s, 3.36 |
-| F k2 h1.00 cold | 7.68 | 10+3+2 | 0.61 s, 6.77 | 0.67 s, 3.38 | 0.26 s, 3.36 | 0.57 s, 4.18 |
-| F k2 h1.00 warm | 3.05 | 4+3+3 | 0.68 s, 6.74 | 0.55 s, 3.02 | 0.21 s, 3.17 | 0.43 s, 3.90 |
-| F k3 h1.00 cold | 13.60 | 11+3+2 | 1.09 s, 7.13 | 1.10 s, 3.10 | 0.40 s, 4.40 | 0.97 s, 4.17 |
-| F k3 h1.00 warm | 5.44 | 4+3+3 | 1.13 s, 7.12 | 0.79 s, 2.86 | 0.32 s, 3.86 | 0.82 s, 3.46 |
-| F k3 h0.50 cold | 31.17 | 10+3+2 | 2.43 s, 7.44 | 2.76 s, 3.13 | 1.06 s, 4.47 | 2.21 s, 4.21 |
-| F k3 h0.50 warm | 13.13 | 4+3+3 | 2.63 s, 7.44 | 2.03 s, 2.90 | 0.84 s, 3.99 | 1.93 s, 3.41 |
-
-On D k3 h1.00 cold the backsolve is 16.1% of the run and reduce+recover 17.9%,
-against the residual's 17.0% at 7.15 cores; on F k3 h0.50 cold, 8.7% and 7.0%.
-**The request read the backsolve at 5.5 to 6.8 cores and reduce+recover at 4.0
-to 6.0**, on a shared machine with the default wait; under `passive` both are
-half of eight or less, so both legs are thread-bound rather than merely large.
-
-**PARDISO, `--trace-solver-stats`, once per directory:**
-
-| directory | solves | refinement steps | direct solve | additional | right-hand sides |
-|---|---|---|---|---|---|
-| D k2 h1.00 cold | 17 | 2 on all 17 | 0.172 s | 0.782 s | 20 |
-| D k3 h1.00 cold | 16 | 2 on all 16 | 0.195 s | 1.022 s | 20 |
-| F k2 h1.00 cold | 26 | 2 on all 26 | 0.264 s | 1.108 s | 20 |
-| F k3 h1.00 cold | 26 | 2 on all 26 | 0.310 s | 1.662 s | 20 |
-| F k3 h0.50 cold | 25 | 2 on all 25 | 0.790 s | 4.475 s | 20 |
-
-and the warm directories alike, 10 or 11 solves each, 2 steps on every one.
-**No perturbed-pivot line was printed in any of them.** So `iparm[7] = 2` is
-a cap that every solve reaches, not a step taken only after a perturbed pivot
-— upstream's reading, against the request's — and the additional calculations
-are where the backsolve leg goes: on D k3 h1.00 cold, 0.195 s + 1.022 s against
-the profile's 1.232 s. MKL's report gives the backward error after refinement
-at about 2.5e-16 on `fixed-h-circular` (the same two steps there). **One
-caveat**: the statistics run is MKL at message level 1, whose own bookkeeping
-may sit inside "additional calculations"; the clean measurement is the same
-runs with refinement capped at zero, which wants the setter the request asks
-for.
-
-**Reproduce.** `git show 06a22b7:PERFORMANCE_TODO.md`, section 1: the race arm
-builds each directory, cold then warm from it, and `meq --mesh-ready` runs in
-each three ways -- plain, `--profile` under `passive`, `--trace-solver-stats`.
-
 ### M-299
 
 **TWO DEFECTS [M-298](#m-298) EXPOSED AND MISREAD, AND THE FIX FOR EACH. AN
@@ -19742,6 +19677,71 @@ next solve with nothing. It now locates once on the converged iterate, which
 takes no Newton step and moves no number; and the report gives where the
 constraint was located, `( R, z )`, beside the post-solve check's own.
 
+
+### M-300
+
+**D AND F SHAPED PROFILED ON AN IDLE MACHINE UNDER A PASSIVE WAIT: PARDISO
+REFINES EVERY SOLVE TO ITS CAP OF TWO STEPS WITH NO PIVOT PERTURBED, AND ITS
+"ADDITIONAL CALCULATIONS" COST 4.5 TO 6.0 TIMES THE DIRECT SOLVE; AND THE
+BACKSOLVE AND NPC REDUCE+RECOVER LEGS RUN ON 2.9 TO 4.2 OF EIGHT CORES, WELL
+UNDER WHAT A SPINNING TEAM MADE THEM READ.** The plan of `PERFORMANCE_TODO.md`
+as it stood at `06a22b7`, section 1,
+for `../../mfem-hdg-dev/doc/HDG-TRACE-SOLVE-AND-NPC-REDUCE-FROM-MEQ.md`.
+
+**Setup.** `06a22b7`, installed and clean. The race arm's ten directories —
+`machine-d-tcv-shaped` and `machine-f-diiid-shaped`, cold and warm, at
+k2 h1.00 and k3 h1.00, and F at k3 h0.50 — each re-run in place three times,
+interleaved, `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive` for the profile. Every
+timed run waited for under 6% busy CPU from anything else, sampled from
+`/proc/stat` over 10 s (`runs/perf-profile/queue.sh`). **The warm column is
+the whole-state `.nc` restart of [M-298](#m-298)**, so it is not the warm
+column of the request, which predates it. Seconds and cores are medians of
+the three.
+
+| directory | wall | Newton by sweep | residual | backsolve | factorisation | reduce+recover |
+|---|---|---|---|---|---|---|
+| D k2 h1.00 cold | 4.94 | 8+4+3+2 | 0.80 s, 6.81 | 0.95 s, **3.05** | 0.36 s, 3.38 | 0.96 s, **3.34** |
+| D k2 h1.00 warm | 3.46 | 5+3+3 | 0.75 s, 6.82 | 0.64 s, 3.07 | 0.24 s, 3.45 | 0.49 s, 4.01 |
+| D k3 h1.00 cold | 7.59 | 7+4+3+2 | 1.38 s, 7.17 | 1.36 s, **2.87** | 0.56 s, 4.22 | 1.40 s, **3.28** |
+| D k3 h1.00 warm | 5.83 | 4+3+3 | 1.22 s, 7.16 | 0.81 s, 2.88 | 0.37 s, 4.05 | 0.84 s, 3.36 |
+| F k2 h1.00 cold | 7.68 | 10+3+2 | 0.61 s, 6.77 | 0.67 s, 3.38 | 0.26 s, 3.36 | 0.57 s, 4.18 |
+| F k2 h1.00 warm | 3.05 | 4+3+3 | 0.68 s, 6.74 | 0.55 s, 3.02 | 0.21 s, 3.17 | 0.43 s, 3.90 |
+| F k3 h1.00 cold | 13.60 | 11+3+2 | 1.09 s, 7.13 | 1.10 s, 3.10 | 0.40 s, 4.40 | 0.97 s, 4.17 |
+| F k3 h1.00 warm | 5.44 | 4+3+3 | 1.13 s, 7.12 | 0.79 s, 2.86 | 0.32 s, 3.86 | 0.82 s, 3.46 |
+| F k3 h0.50 cold | 31.17 | 10+3+2 | 2.43 s, 7.44 | 2.76 s, 3.13 | 1.06 s, 4.47 | 2.21 s, 4.21 |
+| F k3 h0.50 warm | 13.13 | 4+3+3 | 2.63 s, 7.44 | 2.03 s, 2.90 | 0.84 s, 3.99 | 1.93 s, 3.41 |
+
+On D k3 h1.00 cold the backsolve is 16.1% of the run and reduce+recover 17.9%,
+against the residual's 17.0% at 7.15 cores; on F k3 h0.50 cold, 8.7% and 7.0%.
+**The request read the backsolve at 5.5 to 6.8 cores and reduce+recover at 4.0
+to 6.0**, on a shared machine with the default wait; under `passive` both are
+half of eight or less, so both legs are thread-bound rather than merely large.
+
+**PARDISO, `--trace-solver-stats`, once per directory:**
+
+| directory | solves | refinement steps | direct solve | additional | right-hand sides |
+|---|---|---|---|---|---|
+| D k2 h1.00 cold | 17 | 2 on all 17 | 0.172 s | 0.782 s | 20 |
+| D k3 h1.00 cold | 16 | 2 on all 16 | 0.195 s | 1.022 s | 20 |
+| F k2 h1.00 cold | 26 | 2 on all 26 | 0.264 s | 1.108 s | 20 |
+| F k3 h1.00 cold | 26 | 2 on all 26 | 0.310 s | 1.662 s | 20 |
+| F k3 h0.50 cold | 25 | 2 on all 25 | 0.790 s | 4.475 s | 20 |
+
+and the warm directories alike, 10 or 11 solves each, 2 steps on every one.
+**No perturbed-pivot line was printed in any of them.** So `iparm[7] = 2` is
+a cap that every solve reaches, not a step taken only after a perturbed pivot
+— upstream's reading, against the request's — and the additional calculations
+are where the backsolve leg goes: on D k3 h1.00 cold, 0.195 s + 1.022 s against
+the profile's 1.232 s. MKL's report gives the backward error after refinement
+at about 2.5e-16 on `fixed-h-circular` (the same two steps there). **One
+caveat**: the statistics run is MKL at message level 1, whose own bookkeeping
+may sit inside "additional calculations"; the clean measurement is the same
+runs with refinement capped at zero, which wants the setter the request asks
+for.
+
+**Reproduce.** `git show 06a22b7:PERFORMANCE_TODO.md`, section 1: the race arm
+builds each directory, cold then warm from it, and `meq --mesh-ready` runs in
+each three ways -- plain, `--profile` under `passive`, `--trace-solver-stats`.
 
 ### M-301
 

@@ -455,3 +455,77 @@ BOOST_AUTO_TEST_CASE( aMirrorsAxisIsOutsideItsBoxAndTheDiagnosticAgrees )
 	BOOST_TEST( empty.inside == 0 );
 	BOOST_TEST( empty.total == counted.total );
 }
+
+/*
+ * THE psi_bnd SEED IS CONSUMED BY THE SOLVE THAT READS IT.
+ *
+ * setBoundaryFluxInitial() overrides where psi_bnd starts for the next solve
+ * only, as setPlasmaCurrentScaleInitial() does the scale. A support loop
+ * re-solves on the same solver, and a sweep after the first must continue
+ * from the sweep before, not restart psi_bnd at a restart file's value.
+ *
+ * The fixture is the mirror above, because there the seed is mandatory and
+ * far from zero. The first solve starts at the seed. The second starts from
+ * the first's whole iterate (setInitialState(); psi_ax continues by itself),
+ * so only psi_bnd decides where it starts: consumed, it is the first answer,
+ * the first residual is the first solve's last and no step is taken; had the
+ * seed persisted, psi_bnd would start back at outerLabel, 4.8e-03 away.
+ */
+BOOST_AUTO_TEST_CASE( theBoundaryFluxSeedIsConsumedByOneSolve )
+{
+	double const width = 1.4;
+	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( 28, 60, mfem::Element::TRIANGLE,
+	                                               false, width, 2.0*halfHeight );
+	for ( int v = 0; v < mesh.GetNV(); ++v )
+		mesh.GetVertex( v )[ 1 ] -= halfHeight;
+
+	meq::NormalisedMHDSource source( std::make_shared<BumpProfile const>(),
+	                                 std::make_shared<meq::ConstantProfile const>( 0.0 ),
+	                                 innerLabel, 0.1 );
+	source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, 1.0 );
+
+	mfem::FunctionCoefficient vacuum( [ ]( mfem::Vector const &x )
+	{
+		return x( 0 )*x( 0 );
+	} );
+
+	GradShafranovSolver solver( mesh, 2 );
+	solver.setAxisFluxPoint( std::sqrt( innerLabel ), 0.0 );
+	solver.setBoundaryFluxPoint( std::sqrt( outerLabel ), 0.0 );
+	solver.setBoundaryFluxInitial( outerLabel );
+	solver.setSource( source, innerLabel );
+	solver.setBoundaryData( vacuum );
+	solver.setInitialGuess( vacuum );
+	solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+	                         meq::newtonTolerance( 1.0e-14 ), 40 );
+	solver.solve();
+	double const firstBoundary = solver.psiBoundary();
+	double const firstLast = solver.newtonResiduals().back();
+	int const firstSteps = solver.newtonIterations();
+
+	mfem::Vector const answer( solver.state() );
+	solver.setInitialState( answer, {} );
+	solver.solve();
+	double const secondFirst = solver.newtonResiduals().front();
+	int const secondSteps = solver.newtonIterations();
+
+	std::printf( "\n  THE psi_bnd SEED, CONSUMED: first solve %d steps to %.3e, "
+	             "psi_bnd %.10f (seed %.4f); re-solve starts at %.3e and takes %d\n",
+	             firstSteps, firstLast, firstBoundary, outerLabel, secondFirst,
+	             secondSteps );
+	std::fflush( stdout );
+
+	BOOST_TEST_REQUIRE( std::abs( firstBoundary - outerLabel )
+	                        > 1.0e3*meq::newtonTolerance( 1.0e-14 ),
+	                    "the answer's psi_bnd is the seed itself, so a re-solve "
+	                    "cannot tell a consumed seed from a persistent one" );
+	BOOST_TEST( secondSteps == 0,
+	            "the re-solve took " << secondSteps << " Newton steps from the "
+	            "first solve's answer. If psi_bnd restarted at the seed, the "
+	            "seed was not consumed" );
+	BOOST_TEST( secondFirst
+	                <= std::max( 4.0*firstLast, meq::newtonTolerance( 1.0e-14 ) ),
+	            "the re-solve's first residual is " << secondFirst << " against "
+	            "the first solve's last " << firstLast << ": the second solve "
+	            "did not start where the first ended" );
+}

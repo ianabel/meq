@@ -225,9 +225,11 @@ degree, same guess — the mis-scaled table gives **44 Newton steps,
 9.676040e-02, scale 1.0222**. So `p`-refinement is not the cure and the degree
 was never the variable. **The tell is the profile scale**: `O(1)` when the table
 is right, and nothing else in the output moves. `FREE-BOUNDARY-PLAN.md` §7.16 is
-the record; the second, independent diagnostic — `ψ_ax` against the field's own
-maximum, or against `meq::CriticalPointFinder`'s O-point, which IN-A already
-built — is being wired.
+the record; the second, independent diagnostic — `ψ_ax` against
+`meq::CriticalPointFinder`'s O-point — is built:
+`CriticalPointFinder::checkAxis()` compares the solved `ψ_ax` with the located
+O-point, and the driver's `checkSolvedAxis` runs it on every converged answer whose
+axis is not a prescribed point, with conductors excluded.
 
 **What is still open** is everything that decides WHICH equilibrium a
 free-boundary solve reports: a guess that is not already the answer does not
@@ -590,16 +592,18 @@ that would have thrown half of it away silently:
 → **[M-98](MEASUREMENTS.md#m-98)**. That is the same price the
 condensation path already pays for its own reasons.
 
-**AND WHAT IS LEFT OF THAT TRAVERSAL IS THE BORDERED STEP'S SERIAL SPINE.**
-Blocking it made it one pass instead of `N + 2`; it did not make that pass
-parallel, and `NPCReduce()` / `NPCRecover()` are the only element loops in
-`DarcyHybridization` without an `omp parallel`. What is left is
-`O( elements × columns )` against integrator loops that are `O( elements )` and
-already threaded, so on DIII-D at 10 modes it reads **0.212 s at one thread and
-0.212 s at eight — 30.6% of a threaded step and the largest leg in it**. It has
-a `StepProfile` leg of its own, and `other` fell from 45% to 14% when it got
-one. `CLAUDE_HDGGS.md`, *Threading, measured*, and
-→ **[M-126](MEASUREMENTS.md#m-126)**. Assembling the load directly
+**AND THAT TRAVERSAL IS THREADED, UPSTREAM.** Blocking it made it one pass
+instead of `N + 2`; the pass is `O( elements × columns )` against integrator
+loops that are `O( elements )`. Serial, on DIII-D at 10 modes, it read
+**0.212 s at one thread and 0.212 s at eight — 30.6% of a threaded step and
+the largest leg in it** → **[M-126](MEASUREMENTS.md#m-126)**, which is what
+put the request upstream. Upstream threaded `NPCReduce()` and `NPCRecover()`,
+2.61× on the leg and 1.25× on the whole run → **[M-135](MEASUREMENTS.md#m-135)**,
+and on TCV at eight threads reduce reaches **5.0×** and recover **4.6×**, with
+the staging around them in `DarcyNPCSolver::ArrayMult()` timed apart and the
+leg accounted for → **[M-304](MEASUREMENTS.md#m-304)**. It has a `StepProfile`
+leg of its own, and `other` fell from 45% to 14% when it got one.
+`CLAUDE_HDGGS.md`, *Threading, measured*. Assembling the load directly
 would remove it and would have to be checked against the differenced column
 first, since `FormLinearSystem` transforms the right-hand side the residual is
 measured against.
@@ -2779,9 +2783,11 @@ pages**, which is the standing rule for this pair.
 **AND THE PUBLISHED ITER PROFILE IS A `k = 1` CASE.** The vanishing order at the
 plasma edge is `j = γ` exactly, so `γ = 1.395` caps `ψ*` at `j + 2.5 = 3.895` and
 `k+2` survives only at `k = 1`. Worse, `γ < 2` makes `∂F/∂ψ ~ (1−Ψ)^{γ−2}`
-**unbounded** at the edge, where §7.10's fixture merely jumps. **Open FB-6 at
-`γ = 2` or 3** — one number in the same family — and bring `γ = 1.395` in
-afterwards as the published case, expecting `k ≥ 2` not to hold `k+2` on it.
+**unbounded** at the edge, where §7.10's fixture merely jumps. **FB-6 is met without it**, on
+`examples/limited-tokamak.toml` against `freegs4e` (*FB-6 is beaten* above), so
+this family is the next *harder* case rather than FB-6's. **Open it at `γ = 2`
+or 3** — one number in the same family — and bring `γ = 1.395` in afterwards as
+the published case, expecting `k ≥ 2` not to hold `k+2` on it.
 
 **`freegs4e` has no ITER**: `TestTokamak`, `DIIID`, `MAST`, `MAST_sym`, `TCV`,
 `MASTU_simple`, `MASTU`. Any serves, and the fixed-boundary rehearsal already

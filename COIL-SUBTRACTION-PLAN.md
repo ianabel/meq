@@ -465,12 +465,16 @@ Three things it deliberately does **not** do, each belonging to a later stage:
 | **no rectangles** | `CS-1b`, and it is the same code with a quadrature rule around it: `meq::CoilSet` already answers `psi`/`gradPsi`/`flux` for MEQ's rectangles, so CS-1b is a second `add()` and a second loop rather than new physics |
 | **nothing reads it** | no solver, datum, output writer or estimator consults it yet, which is **CS-2 to CS-4** and is where the plan's real cost lives — §3's *"every place that reads `psi` must read `psi_c + psi_p`"*, with a test per consumer |
 
-**The refusal is written but not yet CALLED**, which is the one gap a reader
-should not mistake for an oversight: `coincides()` exists and is tested, and the
-site that loops it over a mesh arrives with the first caller in CS-2. Until then
-a coincident node is still caught — by `meq::filamentPsi()`'s own throw, at the
-first evaluation instead of at setup. **The early check is a better message, not
-a missing guard.**
+**The refusal is CALLED, at setup, by CS-2's `setConductorField()`**: it walks
+every mesh vertex and, on a curved mesh, every node through
+`requireNoConductorOnAMeshPoint()` in `GradShafranov.cpp`, which asks
+`ConductorField::indexAt()` — the index-returning form of `coincides()`, so the
+message can name the filament — at the mesh's own coincidence tolerance, and
+throws naming both. `ConductorSubtraction`'s
+`aFilamentOnAMeshVertexIsRefusedAndOneNearItIsNot` asserts it. `coincides()`
+itself, a wrapper over `indexAt()`, has no caller in `src` and is exercised by
+the unit tests alone. A point the setup walk cannot see is still caught by
+`meq::filamentPsi()`'s own throw, at the first evaluation.
 
 ### 7.4 CS-2, and why its acceptance is an identity rather than a rate
 
@@ -798,14 +802,13 @@ into a field that nothing writes back, the accepted-and-ignored shape.
 
 ### 9.2 What is open, and it is the geometry rather than the fields
 
-* **the mesh.** A `GridFunction` is meaningless without one, and GLVis needs
-  `.mesh` beside `.gf` — so either the `.nc` embeds the mesh (vertices,
-  connectivity, attributes, boundary) and the emitter script writes both, or the
-  `.mesh` stays a separate file named in an attribute. **Embedding is what makes
-  the file self-contained**, which is the whole design; it is also MEQ
-  re-implementing a mesh serialiser, and `[mesh.generate]` already makes the
-  mesh a build product of the TOML for the generated cases but not for the
-  hand-made ones.
+* ~~**the mesh.**~~ **EMBEDDED** → [M-297](MEASUREMENTS.md#m-297),
+  [M-298](MEASUREMENTS.md#m-298). The `.nc` carries the solve's mesh as MFEM's
+  own text (`mesh`, `meq::meshText()`, the bytes `<stem>.mesh` holds), so no
+  serialiser of MEQ's is involved; `meq-convert` writes the `.mesh` and the
+  `.gf`s from it byte for byte, and `[initialguess] File = "<stem>.nc"`
+  restarts from it, with the solver's whole state and border unknowns on an
+  exact restart ([M-305](MEASUREMENTS.md#m-305)).
 * **the profile tables.** `<stem>-pprime.dat` and `-ggprime.dat` are named by
   the configuration and read by `meq::SplineProfile`. An output that regenerates
   its input has to carry them too, or it regenerates a file that cannot be run.

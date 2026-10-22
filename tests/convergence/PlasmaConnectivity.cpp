@@ -1863,6 +1863,7 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
 		std::vector<GradShafranovSolver::BorderStep> steps;
 		int mostComponents = 0;
 		int fewestElements = 0;
+		int splitWithoutRing = 0;   ///< split iterates whose fill kept no band
 	};
 
 	auto run = [ & ]( GradShafranovSolver::PlasmaConnectivity choice )
@@ -1892,6 +1893,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
 			out.mostComponents = std::max( out.mostComponents, step.supportComponents );
 			if ( step.supportComponents > 0 )
 				out.fewestElements = std::min( out.fewestElements, step.supportElements );
+			if ( step.supportComponents >= 2 && step.supportRingElements == 0 )
+				++out.splitWithoutRing;
 		}
 		return out;
 	};
@@ -1936,6 +1939,14 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
 	            "the fill never saw more than " << component.mostComponents
 	            << " piece( s ) on this route, so the guess's pocket did not "
 	            "separate and this case is the control over again" );
+	// AND WHILE IT IS SPLIT, THE FILL KEEPS ITS COMPONENT'S STRADDLING BAND.
+	// The root is one lobe, so a fill that kept only the interior on a split
+	// iterate reaches the same answer in the same steps -- measured, 6 against
+	// 6 and psi_h 7e-11 -- and only the band count at those iterates can see it.
+	BOOST_TEST( component.splitWithoutRing == 0,
+	            component.splitWithoutRing << " split iterates kept no straddling "
+	            "band: the fill dropped the elements the watershed gives the "
+	            "plasma's component" );
 	BOOST_TEST( component.fewestElements < mesh.GetNE(),
 	            "the fill kept every element at every iterate, so it dropped "
 	            "nothing and the two routes were never on different problems" );

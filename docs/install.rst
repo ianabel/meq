@@ -84,7 +84,7 @@ it.
 
 .. important::
 
-   **What MEQ needs is a local merge of four MFEM development branches, and it
+   **What MEQ needs is a local merge of seventeen MFEM development branches, and it
    is published on no remote.** This page assumes you already have it. If you do
    not, ``INSTALL.md`` in the source tree is the account of which branches they
    are, what each one contributes, what breaks silently if one is missing, and
@@ -111,8 +111,9 @@ The MFEM features MEQ reads out of the configuration, and what each buys:
        so choosing it means choosing which MFEM to point at. Both build and
        both pass the test suite. See :ref:`install-precision`.
    * - ``MFEM_USE_SUITESPARSE``
-     - UMFPACK, one of the direct solvers for the global trace system. Without
-       any direct solver MEQ falls back to GMRES; see :doc:`linear_solvers`.
+     - UMFPACK, one of the direct solvers for the global trace system. **MEQ
+       needs this or** ``MFEM_USE_MKL_PARDISO``, and does not configure without
+       one of them; there is no iterative fallback. See :doc:`linear_solvers`.
        SuiteSparse ships no single-precision build, so a
        ``MFEM_PRECISION = single`` install has no UMFPACK and MEQ's default
        trace solver there is PARDISO.

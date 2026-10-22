@@ -408,9 +408,10 @@ with the library.
 
 ## The two performance keys, and what the TOML may choose
 
-**AND `TraceSolver = "gmres"` IS A FOURTH CHOICE, EXPOSED TO BE MEASURED AND
-MEASURED AS UNVIABLE** → **[M-179](MEASUREMENTS.md#m-179)**, so an iterative
-trace solve is closed rather than pending.
+**THERE IS NO ITERATIVE TRACE SOLVER.** GMRES was exposed as `TraceSolver =
+"gmres"` to be measured, and measured unviable → **[M-179](MEASUREMENTS.md#m-179)**,
+so it is gone: `TraceSolver` is one of umfpack, pardiso and cudss, and MEQ does
+not configure against an MFEM without UMFPack or PARDISO.
 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *An iterative trace solve: GMRES, and Ginkgo*
 
 **THE TWO PERFORMANCE KEYS ARE THE ONLY SOLVER KNOBS EXPOSED TO TOML, AND THE
@@ -431,18 +432,14 @@ prints `Newton alone : FAILED in 60 iterations` for a neighbouring case under
 **both** solvers, so unglobalised non-convergence there is the problem's
 property and not the package's. See **[M-78](MEASUREMENTS.md#m-78)**.
 
-**AND THE RED WAS THE TEST'S, NOT PARDISO'S.** `k = 1, n = 16` is the knife edge
-`pedestalConvergenceIsAResolutionThreshold` spends forty lines establishing must
-never be asserted on — whether that one element-local Newton converges is decided
-by a threaded BLAS-3's summation order at O(1e-16), so the same source converges
-in 42 iterations against one MFEM build and fails at the cap against another
-differing by a single flag. The comparison case was taking it as a hard
-precondition, which is the one thing its sibling forbids, and in the more brittle
-direction: a `BOOST_TEST_REQUIRE` abandons the whole sweep on the first mesh. It
-now skips a mesh either path fails, sweeps `{ 16, 24, 32, 48 }`, and requires
-three of the four to produce a comparison — so the knife edge may fall either way
-and two dropouts is still a finding. **Green, and the agreement is better than
-the assertion needs**: best 9.068e-14, worst 3.894e-12. **Changing the default
+**AND THE RED WAS THE TEST'S, NOT PARDISO'S.** At `k = 1` the pedestal's coarse
+meshes have several discrete roots — 2 at `n = 16`, 5 at `n = 24` — and Newton
+from the cold start wanders between them ([M-303](MEASUREMENTS.md#m-303)), so
+whether `n = 16` converges, and to which root, is not a property of the solver
+package. The comparison case was taking it as a hard precondition. It is now
+posed only on meshes with one root, `{ 32, 48, 64 }`, fails a Newton over 18
+steps, and requires agreement on every mesh: 3.4e-11 to 6.9e-14 in double,
+9.9e-08 in single. **Changing the default
 did not change which problems MEQ can solve; it changed which mesh a test's
 precondition landed on.** This is
 still much weaker than the `Globalisation` hazard below, which reports one of
@@ -589,9 +586,9 @@ INITIALISED, SILENTLY KEEPS THE INITIALISER — AND `-Wswitch` DID NOT CATCH IT.
 over `config->getSolver().traceSolver` with one case per choice and no
 `default`. Add a `TraceSolverType` and forget the case, and every run naming it
 **runs UMFPack instead**, converging normally to the right answer with no
-diagnostic anywhere. Measured: a run with `TraceSolver = "gmres"` before the
-case existed clocked 5.621 s against UMFPack's 5.547 s and PARDISO's 3.006 s,
-and **the wall time was the only tell**.
+diagnostic anywhere. Measured, with a fourth choice since removed: a run naming
+it before its case existed clocked 5.621 s against UMFPack's 5.547 s and
+PARDISO's 3.006 s, and **the wall time was the only tell**.
 
 `CMakeLists.txt:556` sets `-Wall -Wextra`, the subject is a scoped enum
 (`Config.hpp:1136`), and the switch has no `default` — so `-Wswitch` should

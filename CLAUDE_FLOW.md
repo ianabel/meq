@@ -189,12 +189,15 @@ author and a reading of the paper with MEQ. geq's state drifts `C` by **7.58×**
 against that fixture's 2.50×, and nothing in it came from MEQ — so this is the
 first **outside** confirmation rather than the only check.
 
-**AND THE NEXT RUNG IS A MIRROR SOLVE RATHER THAN A SOURCE COMPARISON.**
+**AND THE RUNG AFTER THE SOURCE COMPARISON IS A MIRROR SOLVE, AND IT IS BUILT.**
 `MIRROR-PLAN.md` is the plan — MR-0 to MR-5 — and its first stage, the
 falsifying experiment on whether MEQ's semicircular exterior is admissible for a
 machine whose flux tube leaves the domain, is run and passed →
 [M-169](MEASUREMENTS.md#m-169). With `Γ` put outside the machine no current lies
-beyond it at any Mach number, and what is left is a mode count.
+beyond it at any Mach number, and the mode count is measured: the copper, not
+the plasma, sets it, 24 to 32 at `ρ_Γ = 3.0` → [M-260](MEASUREMENTS.md#m-260).
+MR-0's MEQ-side diagnostic, the fraction of the current outside `Γ` reported on
+the answer, is not built.
 [M-168](MEASUREMENTS.md#m-168)'s contrary reading measured the current beyond a
 radius inside the machine and is superseded; *an admissibility test is a
 statement about where `Γ` was put, not about the machine*.

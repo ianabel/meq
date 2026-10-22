@@ -37,15 +37,18 @@ dense fill contracts every border row against every column in one launch,
 bit-identical to the host `rowDot()`; MEQ's residual operator stops downloading
 its own output; and the exterior columns go up once per solve. Unforced, every
 route opens by itself, and the whole run's device-to-host traffic falls from
-259 MB to 101 MB and host-to-device from 692 MB to 543 MB, with 27 of 29
-shipped examples at the host's every printed digit; with item 3 below fixed,
-28 -- the other is item 4.
+259 MB to 101 MB and host-to-device from 692 MB to 543 MB, with 27 of the 29
+shipped examples it ran at the host's every printed digit. The other two are
+items 3 and 4 below, and both are resolved.
 
 **SO WHAT IS NEXT IS WHAT THE BUS STILL SHOWS, AND MOST OF IT IS UPSTREAM'S.**
 
 1. **Upstream's three are ANSWERED AND INSTALLED** ->
-   [M-241](MEASUREMENTS.md#m-241), [M-243](MEASUREMENTS.md#m-243). Both
-   installs are at `meq-integration` `4929772e95`. `machine-f-diiid` moves
+   [M-241](MEASUREMENTS.md#m-241), [M-243](MEASUREMENTS.md#m-243). These
+   figures are on `meq-integration` `4929772e95`; both installs are at
+   `f3f4fe1ea7` (`CLAUDE_MFEM.md`, *Both installs are current*), where
+   `machine-f-diiid` under `--device cuda` reads the same `psi_ax` and
+   constraint ([M-304](MEASUREMENTS.md#m-304)). `machine-f-diiid` moves
    83 MB up and 49 MB down, from 508 and 79, with every printed answer
    unchanged. What is left, as reported in `HDG-DEVICE-BUS-4929-FROM-MEQ.md`:
    * `ComputeH()`'s read-only syncs, 24 MB down: upstream's, and open;
@@ -80,11 +83,15 @@ shipped examples at the host's every printed digit; with item 3 below fixed,
    flags, and `DeviceParity` runs the case with its support left moving. The
    shipped example now freezes the support, which puts it on the benchmarked
    branch.
-4. **`rotating-normalised` locates a different axis under a device** --
-   the routes' one stated semantic difference, nearest clean root globally
-   against the host's first productive ring, met on a shipped case once the
-   one-row border opened. The device's agrees with the run's own post-solve
-   check. Owed: which the constraint should take. MEQ's.
+4. ~~**`rotating-normalised` locates a different axis under a device**~~
+   **RESOLVED** -> [M-299](MEASUREMENTS.md#m-299). It was not a semantic
+   difference between the routes: the axis sits on the mesh line `z = 0`, so
+   `q_h` has a zero in each neighbour, and the host's warm ring walk followed
+   whichever twin the seed was nearest while the device and the sweep took the
+   one least outside its element. The ring walk now merges twins across rings
+   by the sweep's rule, and the host reads 1.039297e-01, the value
+   `--device debug` and CUDA read all along. The device's was the right one.
+   `anAxisOnAMeshLineIsOnePointOnEveryRoute` asserts it.
 5. **Phase D's double download is FIXED** and **the phase-C scalars are
    MEASURED AND LEFT** -> [M-240](MEASUREMENTS.md#m-240): 247 copies of 4 KB
    or less over `machine-f-diiid`, 0.29 ms of copy time in all.
@@ -923,7 +930,7 @@ file worth keeping*. What a reader needs first is the state:
 | 5 · the host branches | **needed no kernel** → [M-195](MEASUREMENTS.md#m-195) |
 | 6 · cuDSS as the device default | **DONE** → [M-229](MEASUREMENTS.md#m-229). The driver defaults to cuDSS when `Backend::CUDA_MASK` is allowed and the file named no trace solver — `CUDA_MASK` and not `DEVICE_MASK`, because `--device debug` is a Device with no GPU execution for a CUDA library to run on. **Two things came out the opposite way from this plan's prediction.** The instrument SURVIVES: cuDSS varies the bordered constraint run to run at ~1e-15, and over eight repeats every field `DeviceParity` compares is identical, because the driver prints seven significant figures of a quantity perturbed at the fifteenth. And it bought **no residency at all** — the columns stayed `H+ D-`, because `mfem::Vector v( n )` has `UseDevice()` FALSE and no trace solver can change that |
 | 7 · `mem_manager` thread safety | **OPTIONAL for MEQ, and RE-SIZED UPWARDS ON THIS CASE** → [M-216](MEASUREMENTS.md#m-216), [M-223](MEASUREMENTS.md#m-223). M-216 put it under 2% of a device run and expected it to shrink as the routes wire up; the opposite happened, because the routes wiring up is what removed everything else. With the solve leg at parity, the serial `Reconstruct()` this gate forces is **the whole of the 1.07–1.13× a device run loses**, about 10% of the wall. *A transition cost is a property of which legs have kernels yet, so it grows as a share every time another leg stops being the problem.* MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188) |
-| 8 · single precision | last — and **the whole of it has now been run, not only the early experiment** → [M-204](MEASUREMENTS.md#m-204), [M-222](MEASUREMENTS.md#m-222). The bordered Newton survives FP32 on both bordered machines; the single suite reads **62 of 63** against the double control's 62/63, the one red in each being the deliberate `PlasmaEdgeConvergence`; and the cost was one solver constant, four laws about where a floor comes from, and a per-case accuracy that ranges over 560× |
+| 8 · single precision | last — and **the whole of it has now been run, not only the early experiment** → [M-204](MEASUREMENTS.md#m-204), [M-222](MEASUREMENTS.md#m-222). The bordered Newton survives FP32 on both bordered machines; the single suite is at parity with the double control, **83 of 84** in each on MKL 2026.2 ([M-303](MEASUREMENTS.md#m-303); 62 of 63 each when parity was first reached, M-222), the one red in each being the deliberate `PlasmaEdgeConvergence`; and the cost was one solver constant, four laws about where a floor comes from, and a per-case accuracy that ranges over 560× |
 
 **AND THE STATE OF THE PARTIAL PATH ITSELF HAS CHANGED, WHICH THIS TABLE'S ITEMS
 1, 2 AND 7 ADD UP TO** → **[M-223](MEASUREMENTS.md#m-223)**. On
@@ -2128,8 +2135,12 @@ would tell us whether the rest of the plan is worth writing. It is.
    question was answered per test, as this item said it had to be: `k+1` above
    `k = 1` is a double-build acceptance and is skipped by DEGREE in single with
    the absolute ceiling still asserted, and every other repair relaxed a
-   precondition rather than a tolerance. On `4929772e95` the single suite reads
-   60 of 66 ([M-242](MEASUREMENTS.md#m-242)).
+   precondition rather than a tolerance. On `4929772e95` the single suite read
+   60 of 66 ([M-242](MEASUREMENTS.md#m-242)); on `f3f4fe1ea7` both suites
+   read 83 of 84, the deliberate `PlasmaEdgeConvergence`, single on MKL
+   2026.2 included ([M-303](MEASUREMENTS.md#m-303)). MKL 2026.2 and
+   PARDISO's refinement cap both move single's knife edges, in both
+   directions ([M-302](MEASUREMENTS.md#m-302)).
 2. **WHETHER 1.5e-04 ON `psi_ax` IS ACCEPTABLE PHYSICS**, which is a question
    for the person reading the equilibrium and not for this file. §7.5 measures
    it as a per-case number spanning 560×, so the answer cannot be a single

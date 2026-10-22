@@ -491,8 +491,12 @@ What MEQ must be able to do, reduced to a list:
       transposes — never assembled
 - [ ] Report $\partial R/\partial(\text{transport DOFs})$ on the physics nodes,
       using MaNTA's quadrature weights
-- [ ] Evaluate flux-surface-averaged geometry at an arbitrary point, cheaply
-      enough to serve one node per call (so: cached, keyed on $\psi$)
+- [x] Evaluate flux-surface-averaged geometry at an arbitrary point, cheaply
+      enough to serve one node per call (so: cached, keyed on $\psi$) —
+      `meq::GeometryCache` in `src/meq/FluxFamily.hpp`: one extraction per
+      distinct $\psi$, then `at( psi, label, of )` per node, 3.3× at 40 nodes
+      over 12 surfaces against locating one surface per node (`ROADMAP.md`,
+      item 2)
 - [ ] Differentiate that geometry with respect to every $\psi$ DOF, **including
       the moving-surface term**, and finite-difference test it
 - [ ] Throw rather than return nonsense when the state is not one it can evaluate

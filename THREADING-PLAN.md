@@ -5,6 +5,16 @@ PARALLELISING. THE PLAN IS COMPLETE: A, B, C AND D ARE BUILT AND THE PAYOFF IS
 MEASURED AT `1.16×`** → **[M-137](MEASUREMENTS.md#m-137)**, against the `1.14×`
 this file predicted.
 
+**THIS IS A CLOSED CAMPAIGN AND THE FILE IS NOW ITS DESIGN RECORD, NOT A PLAN.**
+Nothing here is scheduled and nothing here is waiting: E and F are declined
+standing, and G moved to `BORDERED-GLOBALISATION-PLAN.md` §12. **It is kept
+rather than converted**, as `INVERSION-PLAN.md` is: the user-facing half is
+`docs/configuration.rst`'s `AssemblyMode` and its thread-count advice,
+`CLAUDE_HDGGS.md`'s *Threading, measured* is the maintainer's record, and
+`src/meq`, `tests/` and `apps/` cite this file by item and section at 8 sites across 4
+files. Read it for the budget the work was sized against and for the design
+rejections inside A to D.
+
 **THE BUDGET BELOW IS THE ONE THE WORK WAS SIZED AGAINST AND IT IS NO LONGER THE
 BUDGET.** Read **[M-138](MEASUREMENTS.md#m-138)** for the current one; what
 follows is kept because every estimate in this file is against it and a reader

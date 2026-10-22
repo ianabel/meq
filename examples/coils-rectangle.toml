@@ -253,8 +253,8 @@ NewtonAbsoluteTolerance = 1.0e-14
 AssemblyMode = "threaded"
 # **NO TraceSolver HERE, AND THAT IS DELIBERATE RATHER THAN AN OMISSION.**
 # There is no named trace solver every build MEQ supports has: "umfpack" needs
-# MFEM_USE_SUITESPARSE, "pardiso" needs MFEM_USE_MKL_PARDISO, "cudss" needs
-# CUDA, and "gmres" is measured unviable in M-179. UMFPACK in particular is
+# MFEM_USE_SUITESPARSE, "pardiso" needs MFEM_USE_MKL_PARDISO, and "cudss" needs
+# CUDA. UMFPACK in particular is
 # DOUBLE ONLY -- SuiteSparse has no single-precision build at all -- so an
 # example naming it cannot run under MFEM_PRECISION = single, and the driver
 # refuses it rather than substituting silently, which is correct and is what

@@ -1406,11 +1406,7 @@ namespace meq
 		Pardiso,
 		// NVIDIA cuDSS. Correct, and not recommended on the strength of any
 		// timing taken on this machine. Needs MFEM_USE_CUDSS and an mfem::Device.
-		cuDSS, // NOLINT(readability-identifier-naming)
-		// GMRES + Gauss-Seidel, native MFEM, so present in every build.
-		// Exposed to be MEASURED rather than recommended: see
-		// meq::GradShafranovSolver::TraceSolver::GMRES.
-		GMRES
+		cuDSS // NOLINT(readability-identifier-naming)
 	};
 
 	// [solver] -- Newton on the outside, a linear solve on the inside.

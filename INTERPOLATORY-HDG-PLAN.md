@@ -937,7 +937,7 @@ upstream's `RunAffine()` even had to raise the local solve tolerances
 (`SetLocalNLSolver( Newton, 1000, 1e-13, 1e-16 )`) to stop the local rtol of
 1e-6 capping the outer Newton at ~1e-5. **MEQ must do the same in the
 interpolatory arm if it runs the condensation at all**, and `SolverContract`'s
-`theOrderingsAgreeAndOnlyOneIteratesLocally` is where that is checked.
+`theOrderingNeverIteratesInsideAnElement` is where that is checked.
 
 **AND THE GAP WORTH NAMING: UPSTREAM HAS NO NPC TEST FOR THE INTERPOLATORY
 TERM.** `tests/unit/fem/test_darcy_reaction.cpp` drives everything through
