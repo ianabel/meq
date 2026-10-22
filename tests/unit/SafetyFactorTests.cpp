@@ -443,3 +443,45 @@ BOOST_AUTO_TEST_CASE( a_map_without_a_solve_or_a_target_is_refused )
 	for ( double value : out )
 		BOOST_TEST( std::isfinite( value ) );
 }
+
+/*
+ * THE MAP'S FLOOR IS THE FIT'S OWN PROPAGATION OF THE SOLVE'S ACCURACY, AND
+ * IT IS CHECKED HERE WHERE IT CAN BE CHECKED BY HAND.
+ *
+ * Two surfaces and a degree-one fit: the fit then INTERPOLATES, so its
+ * pseudo-inverse is the inverse of the 2 x 2 design matrix and each row norm
+ * is arithmetic. `meq::toroidalMapFloor()` is 4 x 4 x accuracy x the largest
+ * row norm weighted by each surface's g^2 -- the 4 for g^2's two averages
+ * squared, the other 4 standard deviations -- and the outer Newton is judged
+ * against it, so a wrong constant or an unweighted row is a loop that
+ * reports converged too early or never.
+ */
+BOOST_AUTO_TEST_CASE( the_map_floor_is_the_fit_propagating_the_solve )
+{
+	meq::ToroidalField field;
+	field.normalisedFlux = { 0.25, 0.75 };   // Psi = 0.75 and 0.25
+	field.gSquared = { 5.0, 7.0 };
+	field.g = { std::sqrt( 5.0 ), std::sqrt( 7.0 ) };
+	field.safetyFactor = { 0.0, 0.0 };
+
+	// c0 + c1 Psi through ( 0.75, 5 ) and ( 0.25, 7 ). A = [ 1 0.75; 1 0.25 ],
+	// det -0.5, so A^-1 = [ -0.5 1.5; 2 -2 ].
+	double const row0 = std::hypot( -0.5*5.0, 1.5*7.0 );
+	double const row1 = std::hypot( 2.0*5.0, -2.0*7.0 );
+	double const accuracy = 1.0e-6;
+	double const expected = 16.0*accuracy*std::max( row0, row1 );
+
+	double const floor = meq::toroidalMapFloor( field, 1, accuracy );
+	BOOST_TEST( floor == expected, boost::test_tools::tolerance( 1.0e-12 ) );
+
+	// Linear in the accuracy, and zero for an exact solve.
+	BOOST_TEST( meq::toroidalMapFloor( field, 1, 2.0*accuracy )
+	            == 2.0*expected, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( meq::toroidalMapFloor( field, 1, 0.0 ) == 0.0 );
+
+	// And refused where the fit is.
+	BOOST_CHECK_THROW( meq::toroidalMapFloor( field, 2, accuracy ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::toroidalMapFloor( field, 0, accuracy ),
+	                   std::invalid_argument );
+}

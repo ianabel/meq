@@ -38,6 +38,7 @@ or that code cites by section number, stay where they are and are indexed under
 * **Newton, globalisation and solver selection**
   * *Border scaling: a per-border ruler for the bordered merit*
   * *A backtracking line search on the full residual*
+  * *Step controls for the unbordered Newton*
   * *Predictive solver selection: the killed detectors*
   * *`PicardThenNewton` as the default, and `CondenseThenLinearise` as a cheaper rung*
   * *Fixing `ψ_ax`, or closing it outside the solver*
@@ -232,6 +233,33 @@ here is to damp the non-linear block without un-doing the exact annihilation of
 the linear ones — different, and unattempted.
 
 *From `CLAUDE_HDGGS.md`, “Why it fails, measured — and why a line search does not fix it”.*
+
+### Step controls for the unbordered Newton
+
+**Four measured, none kept.** The target was the pedestal's crawl, GS-2 §4.2
+at `k = 1`: undamped Newton from the cold iterate takes 226, 26, 9 and 9 steps
+at `n = 16, 24, 32, 48` in double and 500 (the cap), 16, 8 and 9 in single.
+Each control below is measured against that row, and against
+`NewtonConvergence` and the rest of `PedestalConvergence`:
+
+| control | outcome |
+|---|---|
+| **Error-oriented damping** — Deuflhard's restricted monotonicity test on the simplified correction `J(x_k)⁻¹R(x_k − λc)`, the NLEQ-ERR step rule, `ℓ²` over the whole state | **fails on every mesh, the resolved ones included.** The first correction from the cold iterate has norm 381 and `θ = 224` at `λ = 1`; accepted `λ` fall to 1e-3 with `θ` at 0.95–0.999, and the step is refused below 1e-4. From the datum's ramp `n = 32` and 48 converge in 9 and 8 where undamped Newton takes 6, `n = 32` to a different root, and `n = 16`, 24 fail |
+| **Pseudo-transient continuation on the reaction** — field block `−(F′ − σ_k)/R·M`, `σ_k = σ₀(‖R_k‖/‖R₀‖)^p`, `σ₀` the largest `F′` at the start | **converges monotonically on every mesh and slows the resolved ones.** `p = 1`: 33, 27, 30, 21; `p = 2` capped at `σ₀`: 18, 16, 16, 14; `σ₀ × 0.03`: 70, 32, 36, 15. Several settings move `n = 32` to another root (max ψ 2.99949420e-01 or 2.99947595e-01 against 2.99948577e-01) |
+| **A Newton–Picard blend** — reaction weighted by `1 − θ_k`, `θ_k = min(1, ‖R_k‖/‖R₀‖)^p`, so the first step is Picard's | resolved meshes 9 → 6–7 and `n = 24` 26 → 8–12, but `n = 16` reads 50 to 231; and it **breaks `NewtonConvergence`**: McCarthy's affine source must converge in exactly one Newton step and gets a Picard step (four reds), Example 5 at `k = 2, n = 16` goes from 4 to 7 |
+| **Refusing a step that multiplies the residual** — more than 10× (also 2×, 1×, and against the best so far), the Picard step taken instead, the accepted trial residual reused so a taken step costs nothing | resolved meshes 9 → 7 in double and 8–9 → 6 in single, `n = 24` 26 → 10; `n = 16` 226 → 304 at 10× and 13 at 2× in double, 500 → 82 in single. But **`k = 2, n = 16` stops converging** (17 steps → fails at 60), and `k = 1, n = 24` in `pedestalSelfConverges` lands on another root, moving that table's `k = 1` rate from 3.10 to 2.00. `NewtonConvergence` is bit-identical under it |
+
+**Why none cures the coarse meshes, and why none could be kept, is the same
+fact.** At `k = 1` those meshes have several discrete roots: two at `n = 16`,
+five at `n = 24`, three at `n = 32`, one at `n = 48` among everything tried.
+They differ in where the pedestal layer around `ψ = 0` sits, and the two that
+`n = 24` reaches most often are mirror images, equally far from the resolved
+answer (`andersonPicardReachesTheSameSolutionAsNewton` lists them). Every
+iteration wanders between them, so a step control can only change which one it
+lands on. On a problem with several roots a step control is a branch control,
+which is the M-26 lesson from *Border scaling* above: the converging cases'
+answers moved under two of the four. The cure is resolution, which
+`pedestalConvergenceIsAResolutionThreshold` measures.
 
 ### Predictive solver selection: the killed detectors
 

@@ -691,6 +691,14 @@ rule applies with full force: it would change which equilibrium is reported on
 runs that converge today. It must be opt-in or reactive, and it needs its own
 measurement. Listed here so it is not confused with a globalisation.
 
+**It is built, as BS-5, and it is reactive**: `setXPointRelocationCap()` at
+`0.05 × [boundary.exterior] Radius` from the `[boundary.xpoint]` seed, on the
+retry rung only, where it closes A, A shaped, E and E shaped and moves nothing;
+from the first solve it loses MAST and MAST-U → **[M-247](MEASUREMENTS.md#m-247)**,
+**[M-248](MEASUREMENTS.md#m-248)**, `CLAUDE_DECLINED.md`, *Border scaling*.
+**On the inverse race's C shaped it is what stops three rungs**: the retry's
+every trial lands 0.09 to 1.9 mm past C's 0.1225 m cap (`PERFORMANCE_TODO.md`).
+
 ### 6.3 The topology guard's refusal
 
 C under filaments converges in 3 Newton steps to a well-located axis and is
@@ -984,9 +992,9 @@ below appears anywhere in this tree and none is invented here.**
 9. **Whether the degenerate axis row should refuse.** §6.1. It is a
    branch-selection decision, it is `FREE-BOUNDARY-PLAN.md` §11's, and it is the
    only thing that addresses three of M-103's fourteen rows.
-10. **Whether the X-point wants an excursion cap.** §6.2. Three lines, and it
-    changes which equilibrium converging runs report, so it needs its own
-    measurement on `DivertedMachine.hpp` before it is entertained.
+10. ~~**Whether the X-point wants an excursion cap.**~~ **Built as BS-5, on the
+    retry rung only** — §6.2, [M-247](MEASUREMENTS.md#m-247). What is open is
+    the cap's size on C shaped, where it stops three rungs of the inverse race.
 11. **Whether the shipped machine inputs are themselves consistent.** M-103 runs
     them untuned and `CLAUDE_FB.md` §7.15's conclusion is that consistent inputs
     are the cheap fix — Shafranov's `B_v` for the prescribed `I_p`. `PsiAxis`

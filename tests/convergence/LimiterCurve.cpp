@@ -636,11 +636,34 @@ BOOST_AUTO_TEST_CASE( theBorderRowKeepsNewtonsQuadraticOrder )
 		double const floorLevel = std::max( 1.0e-13*found.residuals.front(),
 		                                    meq::newtonTolerance( 0.0 ) );
 		double tail = 0.0;
+		std::size_t last = 0;
 		for ( std::size_t i = 2; i < found.residuals.size(); ++i )
 			if ( found.residuals[ i ] > floorLevel )
+			{
 				tail = meq::tests::newtonOrder( found.residuals[ i - 2 ],
 				                                found.residuals[ i - 1 ],
 				                                found.residuals[ i ] );
+				last = i;
+			}
+		// **AND THE STEP THAT CROSSES THE FLOOR IS A LOWER BOUND ON THE ORDER.**
+		// Round-off stops a residual above where the quadratic step would have
+		// put it, so the triple ending below the floor can only read LOW. Where
+		// even that reads superlinear it is the tail: in single, n = 48 ends
+		// 4.07e-04, 1.32e-06 on one MKL and 4.02e-04, 1.14e-06 on another,
+		// either side of 1.19e-06, and without this the second reads only the
+		// pre-asymptotic triple's 12.6 where the crossing one reads 1.77. Where
+		// it reads low it is round-off and not the method -- 0.61 in double,
+		// 0.30 in single at n = 24 -- and the triple before it stands. A linear
+		// Jacobian reads near 1 on both and still fails.
+		if ( last >= 2 && last + 1 < found.residuals.size() )
+		{
+			double const crossing
+				= meq::tests::newtonOrder( found.residuals[ last - 1 ],
+				                           found.residuals[ last ],
+				                           found.residuals[ last + 1 ] );
+			if ( crossing >= 1.5 )
+				tail = crossing;
+		}
 
 		std::printf( "      tail order %.3f\n", tail );
 

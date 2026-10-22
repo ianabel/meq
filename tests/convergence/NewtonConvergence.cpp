@@ -747,14 +747,14 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
  * EVERY NON-LINEAR PATH REACHES THE SAME EXACT SOLUTION.
  *
  * meq now has four ways to close the semi-linear problem, and they have
- * genuinely different nonlinear structure -- Newton puts F on the non-linear
- * potential mass, where hybridization makes each element's elimination its own
- * Newton; the two Picard paths freeze F at the previous iterate and put it on
- * the right hand side, so the potential block is linear and no element-local
- * non-linear solve exists at all. PicardThenNewton is BOTH, in sequence, and it
- * rebuilds the forms in the middle of one solve() to change from one to the
- * other -- which is the reason it is pinned here rather than trusted to be a
- * composition of two paths that are pinned separately. See CLAUDE.md.
+ * genuinely different nonlinear structure -- Newton steps on the NPC residual
+ * with the exact Jacobian; the two Picard paths iterate the classical map, F
+ * frozen at the previous iterate, as a correction on that same residual with
+ * the reaction left out of the Jacobian, under KINSOL's fixed point and on the
+ * potential alone. PicardThenNewton is BOTH, in sequence, and it rebuilds the
+ * forms in the middle of one solve() to change from one to the other -- which
+ * is the reason it is pinned here rather than trusted to be a composition of
+ * two paths that are pinned separately. See solveByPicard().
  *
  * Agreeing with each other would not be enough -- three routes through the same
  * wrong sign would agree perfectly. Example 5 has a closed form, so this
@@ -762,11 +762,13 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
  * and the L2 error must come out at the DISCRETISATION error, identically,
  * because the discretisation is identical and only the path to it differs.
  *
- * This is what would catch FrozenSource getting the -1/R or the sign convention
- * wrong. Those are applied in setSource( Coefficient & ) for the linear path and
- * re-applied for the frozen one; a mismatch would leave the Picard paths
- * converging beautifully to the wrong function, which is precisely the failure
- * mode this project's testing stance exists for.
+ * This is what would catch a Picard map that stops being a correction on
+ * Newton's own residual. A correction x - M^-1 R( x ) has the zeros of R as its
+ * fixed points whatever non-singular M is, so a wrong Jacobian only slows it;
+ * a source assembled separately for the Picard route, with its own -1/R and
+ * its own sign, is how a fixed point of a DIFFERENT equation arises, and it
+ * leaves the Picard paths converging beautifully to the wrong function --
+ * precisely the failure mode this project's testing stance exists for.
  */
 BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 {
@@ -840,34 +842,34 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 		// are not a reason to reach for a tolerance.
 
 		/*
-		 * **AND A FIXED-POINT ITERATION CANNOT REACH THE DISCRETE SOLUTION AS
-		 * CLOSELY AS NEWTON IN A NARROW FORMAT, WHICH IS A PROPERTY OF THE
-		 * METHOD AND NOT OF THE PROBLEM.** Newton's last step squares the
-		 * residual and lands on the discrete solution to `eps`; Picard
-		 * contracts by a fixed factor and stops where
-		 * `meq::picardTolerance()` lets it, which is `4096 eps` scaled.
-		 * Measured here in single, the three Picard arms reach 1.04e-04,
-		 * 2.16e-04 and 2.98e-05 in `L2` against Newton's 2.98e-05, where in
-		 * double all four agree to seven figures.
+		 * **A FIXED-POINT ITERATION REACHES THE DISCRETE SOLUTION AS CLOSELY AS
+		 * NEWTON IN A NARROW FORMAT ONLY IF ITS MAP IS EVALUATED AS A
+		 * CORRECTION**, and this is the assertion that says so in single.
+		 * Measured here, the Picard arms reach L2 errors of 2.984631e-05 and
+		 * 2.9850e-05 to 2.9855e-05 over runs, and the handoff 2.984625e-05,
+		 * against Newton's 2.984652e-05 -- 8.3e-09 apart at worst, on a
+		 * potential of norm 0.67.
+		 * The bound is the solution's own round-off, 64 eps of that norm, which
+		 * is 5.1e-06: a difference of L2 errors is bounded by the distance
+		 * between the two solutions, and round-off is what two routes to one
+		 * discrete solution may differ by.
 		 *
-		 * **THE SOLUTIONS STILL AGREE; IT IS THE ERRORS THAT DO NOT.** The
-		 * largest gap is 1.9e-04 on a potential of norm 6.7e-01 -- 2.8e-04
-		 * relative, inside exactAgreementFloor()'s 4096 eps -- so what this
-		 * case exists to rule out survives: the hazard is a path landing on a
-		 * DIFFERENT discrete solution, which `CLAUDE_HDGGS.md` records at
-		 * 9.4 per cent apart, four orders above this. The bound is therefore
-		 * the solution's own round-off rather than a fraction of an error
-		 * that is itself smaller than it. In double the floor is exactly zero
-		 * and the historical `1e-6 x reference` is what runs, to the bit.
+		 * THE MEASUREMENT THIS EXISTS FOR: with the map solving the condensed
+		 * system for the whole field each step, the arms read 1.04e-04 and
+		 * 2.16e-04, because the element-local eliminations' forward error
+		 * stalls that iteration at 5.80e-05 and it needs a 4096 eps target to
+		 * stop at all -- see meq::picardTolerance() and solveByPicard(). At
+		 * 4096 eps with the corrected map it reads 7.56e-05, so a target
+		 * loosened back is red here too. In double the floor is under the
+		 * historical `1e-6 x reference`, which is what runs, to the bit.
 		 * M-220.
 		 */
 		if ( reference < 0.0 )
 			reference = error;
 		else
 			BOOST_TEST( std::abs( error - reference )
-			            <= std::max( 1.0e-6*reference,
-			                         meq::tests::exactAgreementFloor(
-				                         solver.exactPotentialNorm( exact ) ) ),
+			            <= meq::tests::scalarAgreementFloor(
+				            1.0e-6*reference, solver.exactPotentialNorm( exact ) ),
 			            "path " << run.name << " reached L2 error " << error
 			            << " where Newton reached " << reference
 			            << " -- the same discretisation should give the same error "

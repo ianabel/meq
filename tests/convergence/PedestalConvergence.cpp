@@ -628,13 +628,11 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
 /*
  * ANDERSON-ACCELERATED PICARD, WHICH IS THE PAPERS' OWN METHOD AND WORKS.
  *
- * Both GS papers solve the semi-linear problem by Anderson-accelerated Picard,
- * and CLAUDE.md explains why that is a coherent choice rather than a timid one:
- * evaluating F at the previous iterate puts it on the RIGHT HAND SIDE, so the
- * potential block stays linear and every element-local elimination is a linear
- * solve. meq's Newton puts F on the non-linear potential mass, where
- * hybridization turns each element's elimination into its own Newton -- and
- * those are what fail on the stiff sources.
+ * Both GS papers solve the semi-linear problem by Anderson-accelerated Picard:
+ * F evaluated at the previous iterate, so each step is a linear problem. meq
+ * evaluates that map as a correction on Newton's own NPC residual, with the
+ * reaction left out of the Jacobian, which is what puts its fixed point on
+ * Newton's root to round-off in single as well as double (solveByPicard()).
  *
  * Globalisation::AndersonPicard is KINSolver( KIN_FP ) over that map. Measured
  * here on section 4.2 at k = 1, h = 0.05 -- the case Newton manages only by
@@ -651,11 +649,10 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
  * Anderson does not; and HDG-GS-1's own m = 2 fails here where m = 1 works.
  *
  * WHAT IS ASSERTED. That the Picard path reaches the SAME discrete solution as
- * Newton, which is what makes it an alternative rather than a different problem,
- * and that it does so with no element-local non-linear solves -- the property
- * the whole approach exists for. Not an iteration count: they sit on the same
- * rounding knife edge as everything else in this file, and Picard's is in the
- * hundreds where Newton's is in the tens. This is a robustness route, not a
+ * Newton on every mesh that has only one, which is what makes it an
+ * alternative rather than a different problem, and that Newton reaches it
+ * without crawling. Not Picard's iteration count: it is in the tens to the
+ * hundreds where Newton's is single figures. This is a robustness route, not a
  * faster one.
  */
 BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
@@ -665,52 +662,59 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 	using G = meq::GradShafranovSolver::Globalisation;
 
 	/*
-	 * OVER A SWEEP OF MESHES, NOT ON ONE, AND THE REASON IS A FINDING.
+	 * ON THE RESOLVED MESHES, n = 32, 48 AND 64. THE COARSE ONES ARE LEFT OUT ON
+	 * PURPOSE: AT k = 1 THEY HAVE SEVERAL DISCRETE SOLUTIONS, SO "THE SAME
+	 * SOLUTION BY TWO ROUTES" IS NOT A PROPERTY THEY CAN HAVE.
 	 *
-	 * A single mesh at a tolerance of 1e-6 passes and means nothing: measured
-	 * across a sweep, agreement has NO TREND IN THE MESH, so which mesh is
-	 * chosen decides what the number is. The spread on the meshes that can be
-	 * compared today is round-off throughout --
+	 * Measured, in double, each root converged to 1e-10 or better and named by
+	 * its max psi:
 	 *
-	 *     n = 24   9.068e-14        n = 32   3.894e-12        n = 48   4.685e-13
+	 *     n = 16   two      3.00024935e-01   2.99997624e-01
+	 *     n = 24   five     2.99954239e-01   2.99956059e-01   2.99956859e-01
+	 *                       2.99957525e-01   2.99959240e-01
+	 *     n = 32   three    2.99947595e-01   2.99948577e-01   2.99949420e-01
+	 *     n = 48   one      every route tried, 2.99908277e-01 to 1e-13
 	 *
-	 * -- and that is the good case rather than the only one. Agreement of about
-	 * 1e-5 has been measured on this same sweep, and it is NOT a
-	 * stopping-tolerance artifact, which was the first guess: tightening rtol
-	 * from 1e-8 to 1e-12 left those numbers BIT IDENTICAL, at 230 Anderson
-	 * iterations instead of 162. Both iterations are fully converged; their
-	 * fixed points differ.
+	 * reached by undamped Newton, Anderson-Picard and the step controls
+	 * CLAUDE_DECLINED.md records, from the cold iterate and from the datum's
+	 * ramp. WHICH ONE IS PHYSICAL is answered by symmetry: the datum is odd in z
+	 * and F is odd in psi, so the continuous solution is odd, and what separates
+	 * the roots is where the pedestal layer around psi = 0 sits. Against
+	 * n = 48, the mean error over the band |z| < 0.12 is
 	 *
-	 * The reading that fits is that the discrete problem has more than one
-	 * solution on these meshes -- which is what this file records elsewhere
-	 * about the GS-2 sources, a trivial branch at psi = 0 and a multi-valued
-	 * continuous problem at section 4.4 -- and that two iterations with
-	 * different nonlinear structure occasionally land on different nearby ones.
-	 * When they land on the same one they agree to 1e-13, which is the
-	 * interesting half.
+	 *     n = 24   2.99954239e-01   -1.1e-02 and -1.3e-02   rms 8.1e-03
+	 *              2.99959240e-01   +1.3e-02 and +1.1e-02   rms 8.1e-03
+	 *     n = 32   2.99948577e-01   +2.8e-04 and +2.1e-04   rms 2.1e-03
+	 *              2.99949420e-01   +5.5e-03 and +5.2e-03   rms 3.9e-03
 	 *
-	 * SO THE WORST-AGREEMENT BOUND STAYS LOOSE ON PURPOSE. Tightening it to the
-	 * 1e-12 the sweep currently reads would turn "the two paths found two
-	 * neighbouring solutions of one discrete system", which is understood and
-	 * is not a defect, into a red. What it is for is the other thing entirely:
-	 * separating a neighbouring SOLUTION from a neighbouring PROBLEM.
+	 * so on n = 24 the two roots Newton and Picard most often reach are mirror
+	 * images, the layer displaced by the same amount up or down, 0.13 apart at
+	 * worst and equally far from the resolved answer: NEITHER is the physical
+	 * branch, and which one an iteration reaches is decided by its path. n = 16
+	 * is the same pair, displaced 2e-02. On n = 32 the near-symmetric root,
+	 * 2.99948577e-01, is the physical one -- continuous with n = 48 -- and it is
+	 * the one both paths reach from the cold iterate, in both formats and on
+	 * both MKLs; the displaced roots there are reached only by other iterations
+	 * or from other starts.
 	 *
-	 * So the assertions are the two that are actually entailed:
+	 * THAT IS ALSO WHY NEWTON CRAWLS ON THE COARSE MESHES, and why no step
+	 * control cures it. Undamped Newton takes 226 and 26 steps at n = 16 and 24
+	 * in double and 97 to 500 and 16 to 500 in single, and Anderson-Picard 162
+	 * and 203: both wander between these roots. Four step controls were
+	 * measured against it -- CLAUDE_DECLINED.md, *Step controls for the
+	 * unbordered Newton* -- and each either fails, or slows the resolved
+	 * meshes, or moves a converging solve elsewhere in this file to another
+	 * root, while n = 16 stays in the hundreds under every one. It is
+	 * under-resolution, and pedestalConvergenceIsAResolutionThreshold is where
+	 * it is measured: raising k or refining h cures it.
 	 *
-	 *   * the BEST agreement over the sweep is at round-off, which says the two
-	 *     paths can reach one discrete solution exactly and therefore that the
-	 *     Picard path solves meq's problem rather than a neighbouring one. That
-	 *     is the check the original was reaching for: the frozen source carries
-	 *     the same -1/R and the same sign convention, and getting either wrong
-	 *     would show up here and nowhere else, at O(1) rather than 1e-5.
-	 *   * the WORST agreement is small in absolute terms, which bounds "a
-	 *     different nearby solution" away from "a different problem".
-	 *
-	 * A per-mesh gate at 1e-6 is NOT reinstatable: it is a statement about which
-	 * branch each iteration happens to find, and it was green before only
-	 * because the pre-fix Newton was slow enough -- 134 iterations on a Jacobian
-	 * that did not belong to its residual -- to drift onto Picard's branch.
+	 * SO ON THESE THREE MESHES EVERYTHING IS REQUIRED. Both paths converge;
+	 * Newton within twice the resolved meshes' nine steps, so a crawl FAILS the
+	 * case rather than printing; and the two agree to round-off on every mesh,
+	 * not merely on the best one.
 	 */
+	int const newtonCeiling = 18;
+
 	std::printf( "\n  section 4.2 k = 1: Newton against Anderson-Picard\n" );
 	std::printf( "    %4s %8s %8s   %-16s %-16s %11s\n",
 	             "n", "Newton", "Picard", "Newton max psi", "Picard max psi",
@@ -718,37 +722,8 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 
 	double bestAgreement = 1.0e300;
 	double worstAgreement = 0.0;
-	int comparisons = 0;
 
-	/*
-	 * A MESH ON WHICH EITHER PATH FAILS IS SKIPPED AND NOT REQUIRED, AND THAT
-	 * IS NOT A RELAXED ASSERTION -- IT IS THIS FILE'S OWN FINDING APPLIED.
-	 *
-	 * pedestalConvergenceIsAResolutionThreshold says, at length and with the
-	 * measurement behind it, that k = 1, n = 16 sits on a knife edge: whether
-	 * that one element-local Newton converges is decided by the summation order
-	 * of a threaded BLAS-3 at O(1e-16), so the SAME code converges in 42
-	 * iterations against one MFEM build and fails at the cap against another
-	 * differing by a single flag. That case therefore prints the coarse point
-	 * and deliberately asserts nothing about whether it converges, and the
-	 * preamble above this one already records it "fails outright at some thread
-	 * counts". Requiring it to converge HERE, as the precondition of a
-	 * comparison, asserts exactly the thing that was ruled unassertable -- and
-	 * it does it in the more brittle direction, since a BOOST_TEST_REQUIRE
-	 * abandons the whole sweep on the first mesh rather than losing one row.
-	 *
-	 * What the sweep is FOR survives untouched. The finding it exists to carry
-	 * is that agreement has no trend in the mesh -- round-off on some, about
-	 * 1e-5 on others -- so it needs SEVERAL meshes and not any PARTICULAR one.
-	 * n = 48 joins the sweep so that three usable rows remain when the knife
-	 * edge falls the other way; the preamble's own table already measured it.
-	 *
-	 * AND THE SKIP IS ITSELF BOUNDED, which is what keeps the teeth in. At most
-	 * one mesh of the four may drop out. Two would mean the failure is no longer
-	 * the knife edge -- Anderson stalling across the sweep, or Newton losing a
-	 * mesh that was never marginal -- and that is a finding rather than a flake.
-	 */
-	for ( int n : { 16, 24, 32, 48 } )
+	for ( int n : { 32, 48, 64 } )
 	{
 		SelfMeasurement const newton = meq::tests::measureSelf(
 			eq, standardBox(), 1, n, cloud(), pedestalDatum, 500, 1.0e-8,
@@ -759,13 +734,18 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 
 		if ( !newton.converged || !anderson.converged )
 		{
-			std::printf( "    %4d %8d %8d   %-16s %-16s %11s  %s\n",
+			std::printf( "    %4d %8d %8d   %-16s %-16s\n",
 			             n, newton.newtonIterations, anderson.newtonIterations,
 			             newton.converged ? "--" : "FAILED",
-			             anderson.converged ? "--" : "FAILED", "skipped",
-			             !newton.converged ? "Newton did not converge"
-			                               : "Anderson-Picard did not converge" );
+			             anderson.converged ? "--" : "FAILED" );
 			std::fflush( stdout );
+			BOOST_TEST( newton.converged,
+			            "Newton did not converge at k = 1, n = " << n << " in "
+			            << newton.newtonIterations << " iterations, on a mesh "
+			            "where it takes 8 or 9" );
+			BOOST_TEST( anderson.converged,
+			            "Anderson-Picard did not converge at k = 1, n = " << n
+			            << ", on a resolved mesh: the robustness route failing" );
 			continue;
 		}
 
@@ -774,46 +754,52 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 			/std::max( 1.0e-300, std::fabs( newton.psiMax ) );
 		bestAgreement = std::min( bestAgreement, relative );
 		worstAgreement = std::max( worstAgreement, relative );
-		++comparisons;
 
 		std::printf( "    %4d %8d %8d   %.8e %.8e %11.3e\n",
 		             n, newton.newtonIterations, anderson.newtonIterations,
 		             newton.psiMax, anderson.psiMax, relative );
 		std::fflush( stdout );
+
+		// THE CRAWL, AS A FAILURE. Measured 8 and 9 on all three meshes in both
+		// formats, quadratic from the third step; 26 to 500 is what the coarse
+		// meshes read, so the ceiling separates the two by a factor of 1.4 at
+		// the least.
+		BOOST_TEST( newton.newtonIterations <= newtonCeiling,
+		            "Newton CRAWLED at k = 1, n = " << n << ": "
+		            << newton.newtonIterations << " iterations against the 8 or 9 "
+		            "this resolved mesh takes and a ceiling of " << newtonCeiling
+		            << ". A converging Newton that crawls is a defect report: look "
+		            "for a root that has split in two before looking at the step" );
+
+		// EVERY MESH, at round-off. Measured 3.4e-11 at worst in double, where
+		// Anderson-Picard stops at a relative update of 1e-8, and 9.94e-08 -- one
+		// ulp of max psi -- in single.
+		BOOST_TEST( relative < meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 ),
+		            "Newton and Anderson-Picard disagree by " << relative
+		            << " relative at k = 1, n = " << n << ", a mesh with one "
+		            "discrete solution. Either one path has found a second root -- "
+		            "then this mesh is no longer resolved -- or the Picard path is "
+		            "solving a neighbouring problem" );
 	}
 
-	std::printf( "    best %.3e, worst %.3e, over %d of 4 meshes\n",
-	             bestAgreement, worstAgreement, comparisons );
-
-	BOOST_TEST_REQUIRE( comparisons >= 3,
-	                    "only " << comparisons << " of the four meshes produced "
-	                    "a comparison at all, where three is the floor. One mesh "
-	                    "dropping out is the k = 1, n = 16 knife edge that "
-	                    "pedestalConvergenceIsAResolutionThreshold documents and "
-	                    "is expected; two means something that was never marginal "
-	                    "has stopped converging. The skipped rows above say which "
-	                    "path it was -- if it is Anderson-Picard, that is the "
-	                    "robustness route failing and is the more serious of the "
-	                    "two" );
+	std::printf( "    best %.3e, worst %.3e\n", bestAgreement, worstAgreement );
 
 	// TO ROUND-OFF, AND ROUND-OFF IS A PROPERTY OF THE FORMAT: the best
-	// agreement reads 9.93e-08 relative in single -- 0.8 eps -- against
-	// 9.07e-14 in double. A Picard path solving a NEIGHBOURING PROBLEM, which
-	// is what this guards, disagrees by O( 1 ). M-220.
+	// agreement reads 0.0 to 9.94e-08 relative in single -- one ulp of max psi
+	// at most -- against 6.9e-14 in double. A Picard path solving a
+	// NEIGHBOURING PROBLEM, which is what this guards, disagrees by O( 1 ); and
+	// so, at a much smaller scale, does a Picard map evaluated by solving the
+	// condensed system for the whole field, whose fixed point sits a thousand
+	// eps from Newton's root in either format and reads 1.6e-05 to 3.1e-05 here
+	// in single, which is this assertion red. solveByPicard() in
+	// GradShafranov.cpp has the measurement. M-220.
 	BOOST_TEST( bestAgreement
 	            < meq::tests::scalarAgreementFloor( 1.0e-10, 1.0 ),
 	            "the two paths never agree better than " << bestAgreement
 	            << " over the sweep. At least one mesh should see them reach the "
 	            "SAME discrete solution to round-off; that they never do means "
 	            "the Picard path is solving a neighbouring problem rather than "
-	            "finding a neighbouring solution. Check the frozen source's sign "
-	            "and its 1/R first -- this is the only test that sees them" );
-
-	BOOST_TEST( worstAgreement < 1.0e-3,
-	            "the two paths disagree by " << worstAgreement << " at worst, "
-	            "which is too large for two solutions of the same discrete "
-	            "system. Landing on different branches costs about 1e-5 here; "
-	            "1e-3 is a different problem" );
+	            "finding a neighbouring solution" );
 }
 
 BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )

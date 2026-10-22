@@ -1500,9 +1500,11 @@ BOOST_AUTO_TEST_CASE( theConnectivityChangeIsNotAJumpAtTheSizeThatMatters )
 	 *
 	 * So the end-to-end statement available today is the one
 	 * theFillDoesNotMoveASingleLobeAnswer makes: on a confined solve whose
-	 * converged support IS connected, the fill costs nothing -- the same answer
-	 * to 9.5e-10 against a stopping tolerance of 1e-9, in 24 Newton steps
-	 * against 47. A confined solve that converges AND whose converged support is
+	 * converged support IS connected, the fill does not move the answer -- bit
+	 * for bit in both formats on a route whose support stays one piece -- and
+	 * theFillReachesTheSameRootAcrossASplitSupport adds that it reaches the
+	 * same root on a route whose support splits. A confined solve that
+	 * converges AND whose converged support is
 	 * disconnected is what would close the gap, and MEQ has no such case; the
 	 * two properties have never yet been met together.
 	 */
@@ -1561,7 +1563,6 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 
 	struct Result
 	{
-		bool converged = true;
 		double axis = 0.0;
 		int iterations = 0;
 		int candidates = 0;
@@ -1662,17 +1663,40 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			mesh.GetVertex( v )[ 1 ] -= 0.8;
 		}
 
-		mfem::FunctionCoefficient guess( [ ]( mfem::Vector const &x )
+		/*
+		 * STARTED AT psi_ax = 0.2, ABOVE THE ROOT'S 0.178, SO THAT THE SUPPORT
+		 * NEVER SPLITS ON THE WAY -- AND THAT IS THE POINT OF THIS HALF, NOT A
+		 * CONVENIENCE. This is the control: the fill must not move an answer
+		 * it does not separate, and the question is only fair on a route along
+		 * which it separates nothing. From 0.2 the field block is definite at
+		 * the first step, both formats take one route, and `{ Psi > 0 }` is
+		 * one piece at every evaluation.
+		 *
+		 * From 0.1, which this half used to start at, it is not. The first
+		 * bordered step's corner `1 - b . z` is -0.12 in single and -0.14 in
+		 * double -- b . z differs by 1.7% at one dof, and the corner turns that
+		 * into 15% in d psi_ax -- so the two formats part at the first step,
+		 * and single's route then splits the support into up to three pieces
+		 * while double's never does. A route that splits is a different
+		 * question, and theFillReachesTheSameRootAcrossASplitSupport asks it on
+		 * purpose, from a start that splits in both formats.
+		 *
+		 * Measured from 0.2: 5 steps in single on both MKLs at
+		 * `MKL_NUM_THREADS` 1, 2 and 4, and 6 in double, with the two
+		 * connectivity choices bit-identical in every one.
+		 */
+		double const start = 0.2;
+		mfem::FunctionCoefficient guess( [ start ]( mfem::Vector const &x )
 		{
 			double const dr = x( 0 ) - 1.0;
 			double const dz = x( 1 );
 			double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
-			return t > 0.0 ? 0.1*t : 0.0;
+			return t > 0.0 ? start*t : 0.0;
 		} );
 
 		auto run = [ & ]( GradShafranovSolver::PlasmaConnectivity choice )
 		{
-			meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, 1.0 );
+			meq::NormalisedMHDSource source( pPrime, ggPrime, start, 1.0 );
 			source.setPlasmaSupport( true );
 
 			GradShafranovSolver solver( mesh, order );
@@ -1680,57 +1704,21 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			solver.setInitialGuess( guess );
 			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
 		                  meq::newtonTolerance( 1.0e-12 ), 60 );
-			solver.setSource( source, 0.1 );
+			solver.setSource( source, start );
 			solver.setBoundaryData( zero );
 
 			/*
-			 * **THIS SOLVE IS ON M-186'S PLATEAU IN A NARROW FORMAT, AND THAT
-			 * IS MEASURED RATHER THAN INFERRED FROM ITS FAILING.** It is a
-			 * bordered Newton on a confined normalised source, which the double
-			 * build closes in **10** iterations against a cap of 60. With
-			 * `MKL_NUM_THREADS` the only thing moving -- a blocked BLAS-3
-			 * reassociating, and nothing else -- the single build reads
-			 *
-			 *     MKL = 1   does not converge in 60
-			 *     MKL = 2   does not converge in 60
-			 *     MKL = 4   converges in 11, psi_ax 1.778463e-01
-			 *
-			 * against double's 1.778464e-01, so where it lands it lands on the
-			 * same equilibrium to seven digits. Two arms of three is a worse
-			 * draw than `fixed-h-circular`'s one of four and it is the same
-			 * coin.
-			 *
-			 * **HALF ONE IS UNTOUCHED AND IS THE HALF WITH TEETH.** The
-			 * unconfined control above reads a worst difference of **exactly
-			 * 0.000e+00** between the two connectivity choices in this format,
-			 * which is the property this case exists for; what half two adds is
-			 * that the same holds where the fill actually RUNS. Losing it in
-			 * one format on one draw is a cost, and letting a plateau abandon
-			 * the half that works is a larger one. M-186, M-222.
+			 * NO SKIP, IN EITHER FORMAT. This half used to skip in single when
+			 * the solve threw, on M-186's plateau: it did not converge in 60 at
+			 * `MKL_NUM_THREADS` 1 and 2, or took 16 steps where pointwise took
+			 * 10, the residual sitting at 1.1e-05 against a target of 1.19e-06.
+			 * That was the bordered elimination's shelf, which
+			 * theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem names and
+			 * GradShafranovSolver::setBorderFolding() removes -- never the
+			 * fill, whose support held all 512 elements for the whole of the
+			 * plateau. A solve that does not converge now is a failure.
 			 */
-			try
-			{
-				solver.solve();
-			}
-			catch ( std::runtime_error const &e )
-			{
-#ifdef MFEM_USE_SINGLE
-				Result failed;
-				failed.converged = false;
-				std::printf( "    CONFINED fitted rectangle: SKIPPED -- %s\n",
-				             e.what() );
-				BOOST_TEST_MESSAGE(
-					"  *** the confined half did not converge in this format. "
-					"It closes in 10 iterations in double and in 11 at "
-					"MKL_NUM_THREADS = 4, to the same psi_ax to seven digits, "
-					"so this is M-186's plateau and not the fill. Half one, "
-					"which reads exactly 0.000e+00 here, is the assertion with "
-					"teeth. M-222" );
-				return failed;
-#else
-				throw;
-#endif
-			}
+			solver.solve();
 
 			Result out;
 			out.axis = solver.psiAxis();
@@ -1748,8 +1736,6 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			run( GradShafranovSolver::PlasmaConnectivity::Pointwise );
 		Result const component =
 			run( GradShafranovSolver::PlasmaConnectivity::Component );
-		if ( !pointwise.converged || !component.converged )
-			return;
 		double const worst = worstDifference( pointwise, component );
 
 		std::printf( "    CONFINED fitted rectangle, %d elements, %zu dofs\n",
@@ -1781,46 +1767,524 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 		            "support, so it dropped elements it had no reason to" );
 
 		/*
-		 * AND THE ANSWER DID NOT MOVE -- BUT TO THE SOLVER'S OWN TOLERANCE AND
-		 * NOT BIT FOR BIT, AND THE DIFFERENCE IS INSTRUCTIVE RATHER THAN A
-		 * WEAKENING.
-		 *
-		 * At CONVERGENCE the fill holds all 512 elements, so the assembled
-		 * system is identical and the two are converged solutions of one
-		 * problem. What differs is the PATH: the support is refreshed before
-		 * every residual, and at some intermediate iterate -- where psi is still
-		 * a long way from the answer -- the level psi = psi_bnd really did cut
-		 * the domain into pieces, and the fill really did drop one. So the two
-		 * runs take different routes to the same root and agree to 9.5e-10
-		 * against a stopping tolerance of 1e-9, which is where two converged
-		 * answers to one system are entitled to agree.
-		 *
-		 * AND THE ROUTE WITH THE FILL IS THE SHORTER ONE: 24 Newton steps
-		 * against 47. That is not what this case was written to find and it is
-		 * not asserted as a benefit -- one configuration is not a result -- but
-		 * it is the opposite of the cost the fill was suspected of, and it is
-		 * the same mechanism: a pointwise support switches the source on in
-		 * pockets the iterate throws up, and the iterate then has to un-do them.
+		 * AND THE ANSWER DID NOT MOVE. On a route whose support is one piece
+		 * at every evaluation the fill holds every element it is offered, the
+		 * assembled systems are identical at every step, and the two choices
+		 * are bit-identical -- measured so in every draw of both formats. The
+		 * bound is floored at round-off on psi_ax anyway, because bit-identity
+		 * across two code paths is a property of the build and not of the fill.
 		 */
-		BOOST_TEST( worst < 1.0e-8,
+		BOOST_TEST( worst < meq::tests::scalarAgreementFloor( 1.0e-8, pointwise.axis ),
 		            "the connectivity test moved a CONFINED single-lobe solve by "
-		            << worst << ". At convergence the fill holds every element, "
-		            "so the two are converged solutions of the SAME discrete "
-		            "system and must agree to about the stopping tolerance" );
+		            << worst << ". The support never splits on this route, so the "
+		            "two choices assemble the same system at every step" );
 		BOOST_TEST( component.iterations <= pointwise.iterations,
 		            "the confined solve took " << pointwise.iterations
 		            << " Newton steps without the fill and "
-		            << component.iterations << " with it. The fill is refreshed "
-		            "before every residual, so a support that fragments and "
-		            "re-joins mid-iteration is a discontinuity Newton has to "
-		            "step over -- and if that is now costing steps rather than "
-		            "saving them, the jump measured in "
-		            "theConnectivityChangeIsNotAJumpAtTheSizeThatMatters has grown" );
+		            << component.iterations << " with it, on a route whose "
+		            "support is one piece throughout -- so the fill had nothing "
+		            "to drop and cost steps anyway" );
 		BOOST_TEST( std::abs( pointwise.axis - component.axis ) < 1.0e-8,
 		            "psi_ax came out " << pointwise.axis << " without the fill "
 		            "and " << component.axis << " with it" );
 	}
 }
+
+/*
+ * THE SAME ROOT ACROSS A SUPPORT THAT SPLITS ON THE WAY -- THE QUESTION
+ * theFillDoesNotMoveASingleLobeAnswer DELIBERATELY DOES NOT ASK.
+ *
+ * The confined control's fixture again -- p' = 0.6 Psi, gg' = 0, psi = 0 on a
+ * fitted rectangle, one lobe at the root by construction -- started from a
+ * guess with a SECOND positive pocket, cut off from the main lobe by a band of
+ * small negative flux. At the first evaluation `{ Psi > 0 }` is two pieces in
+ * either format, so the fill drops the pocket where the pointwise support
+ * switches the source on in it, and the two routes are on different problems
+ * until the iterate has dissolved it.
+ *
+ * WHAT IS ASSERTED: that the split happens (the fill reports more than one
+ * piece at some iterate), that both routes reach the same root to round-off,
+ * and that neither crawls. What the fill COSTS is printed, and asserted only
+ * as far as it was measured stable.
+ *
+ * Measured. The fill keeps 226 of 512 elements at the first iterate, in two
+ * pieces, and 510 at the second, and the support is one piece of 512 from
+ * the third on. Both routes then close with every step a full one:
+ *
+ *     single, MKL 2026.1 and 2026.2, MKL_NUM_THREADS 1, 2, 4
+ *         5 steps each route in all six; psi_ax 1.4e-09 to 6.5e-09 apart,
+ *         psi_h 1.6e-07 to 2.2e-07
+ *     double, both MKLs
+ *         6 steps each route; psi_ax 2.8e-17 apart, psi_h 3.9e-13
+ *
+ * So the cost is zero steps on every draw, and that is stable enough to
+ * assert: the fill may not cost a step here. The crawl bound is 8 against
+ * the measured 5 and 6 -- two steps of room, where a crawl is tens.
+ */
+BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
+{
+	int const order = 2;
+	double const start = 0.2;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.0, 1 );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+		16, 16, mfem::Element::TRIANGLE, false, 0.8, 1.6 );
+	for ( int v = 0; v < mesh.GetNV(); ++v )
+	{
+		mesh.GetVertex( v )[ 0 ] += 0.6;
+		mesh.GetVertex( v )[ 1 ] -= 0.8;
+	}
+
+	// The main lobe, a pocket three elements clear of it, and a moat of
+	// small negative flux between them and everywhere else.
+	mfem::FunctionCoefficient guess( [ start ]( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 1.0;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		if ( t > 0.0 )
+			return start*t;
+		double const pr = x( 0 ) - 1.20;
+		double const pz = x( 1 ) - 0.62;
+		double const tp = 1.0 - ( pr*pr + pz*pz )/( 0.10*0.10 );
+		if ( tp > 0.0 )
+			return 0.5*start*tp;
+		return -0.05*start;
+	} );
+
+	struct Run
+	{
+		int iterations = 0;
+		double axis = 0.0;
+		std::vector<double> potential;
+		std::vector<GradShafranovSolver::BorderStep> steps;
+		int mostComponents = 0;
+		int fewestElements = 0;
+	};
+
+	auto run = [ & ]( GradShafranovSolver::PlasmaConnectivity choice )
+	{
+		meq::NormalisedMHDSource source( pPrime, ggPrime, start, 1.0 );
+		source.setPlasmaSupport( true );
+
+		GradShafranovSolver solver( mesh, order );
+		solver.setPlasmaConnectivity( choice );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                         meq::newtonTolerance( 1.0e-12 ), 60 );
+		solver.setSource( source, start );
+		solver.setBoundaryData( zero );
+		solver.solve();
+
+		Run out;
+		out.iterations = solver.newtonIterations();
+		out.axis = solver.psiAxis();
+		mfem::GridFunction const &potential = solver.potential();
+		out.potential.assign( potential.GetData(),
+		                      potential.GetData() + potential.Size() );
+		out.steps = solver.borderSteps();
+		out.fewestElements = mesh.GetNE();
+		for ( auto const &step : out.steps )
+		{
+			out.mostComponents = std::max( out.mostComponents, step.supportComponents );
+			if ( step.supportComponents > 0 )
+				out.fewestElements = std::min( out.fewestElements, step.supportElements );
+		}
+		return out;
+	};
+
+	auto print = [ & ]( char const *label, Run const &r )
+	{
+		std::printf( "    %-9s newton %2d  psi_ax %.9e\n", label, r.iterations, r.axis );
+		std::printf( "      merit:     " );
+		for ( auto const &step : r.steps )
+			std::printf( " %.2e", step.norm );
+		std::printf( "\n      damping:   " );
+		for ( auto const &step : r.steps )
+			std::printf( " %8.4g", step.damping );
+		std::printf( "\n      pieces:    " );
+		for ( auto const &step : r.steps )
+			std::printf( " %8d", step.supportComponents );
+		std::printf( "\n      elements:  " );
+		for ( auto const &step : r.steps )
+			std::printf( " %8d", step.supportElements );
+		std::printf( "\n" );
+	};
+
+	std::printf( "\n  A SUPPORT THAT SPLITS ON THE WAY TO A ONE-LOBE ROOT\n" );
+	Run const pointwise = run( GradShafranovSolver::PlasmaConnectivity::Pointwise );
+	Run const component = run( GradShafranovSolver::PlasmaConnectivity::Component );
+	print( "pointwise", pointwise );
+	print( "component", component );
+
+	double worst = 0.0;
+	BOOST_TEST_REQUIRE( pointwise.potential.size() == component.potential.size() );
+	for ( std::size_t i = 0; i < pointwise.potential.size(); ++i )
+		worst = std::max( worst, std::abs( pointwise.potential[ i ] - component.potential[ i ] ) );
+	std::printf( "    the fill's cost: %d Newton steps against %d; psi_ax %.3e apart, "
+	             "worst psi_h %.3e; at most %d pieces, as few as %d elements kept\n",
+	             component.iterations, pointwise.iterations,
+	             std::abs( pointwise.axis - component.axis ), worst,
+	             component.mostComponents, component.fewestElements );
+	std::fflush( stdout );
+
+	// THE SPLIT HAPPENED, or nothing below is about a split.
+	BOOST_TEST( component.mostComponents >= 2,
+	            "the fill never saw more than " << component.mostComponents
+	            << " piece( s ) on this route, so the guess's pocket did not "
+	            "separate and this case is the control over again" );
+	BOOST_TEST( component.fewestElements < mesh.GetNE(),
+	            "the fill kept every element at every iterate, so it dropped "
+	            "nothing and the two routes were never on different problems" );
+
+	// THE SAME ROOT. At convergence the support is one piece on both routes,
+	// so the two are converged solutions of one discrete system.
+	BOOST_TEST( std::abs( pointwise.axis - component.axis )
+	                <= meq::tests::scalarAgreementFloor( 1.0e-10, pointwise.axis ),
+	            "psi_ax came out " << pointwise.axis << " pointwise and "
+	            << component.axis << " with the fill, on a root whose support "
+	            "is one piece" );
+	BOOST_TEST( worst <= meq::tests::scalarAgreementFloor( 1.0e-10, pointwise.axis ),
+	            "the fill moved psi_h by " << worst << " across a split it "
+	            "should only have changed the route through" );
+
+	// AND NEITHER ROUTE CRAWLS.
+	int const crawlBound = 8;
+	BOOST_TEST( pointwise.iterations <= crawlBound,
+	            "the pointwise route took " << pointwise.iterations
+	            << " Newton steps against a bound of " << crawlBound
+	            << " (measured 5 in single, 6 in double). A Newton that crawls "
+	               "and then converges is a defect report, not a pass" );
+	BOOST_TEST( component.iterations <= crawlBound,
+	            "the fill's route took " << component.iterations
+	            << " Newton steps against a bound of " << crawlBound
+	            << " (measured 5 in single, 6 in double) across a support that "
+	               "split. A Newton that crawls and then converges is a defect "
+	               "report, not a pass" );
+
+	// AND THE FILL COSTS NOTHING HERE, which is what was measured on every
+	// draw of both formats.
+	BOOST_TEST( component.iterations <= pointwise.iterations,
+	            "the fill's route took " << component.iterations
+	            << " Newton steps against the pointwise route's "
+	            << pointwise.iterations << ". The support splits at the first "
+	               "two iterates and re-joins at the third, and on every measured "
+	               "draw of both formats that cost nothing" );
+}
+/*
+ * THE CONFINED CONTROL IS AN EIGENPROBLEM, AND ON ONE THE BORDERED NEWTON HAD A
+ * SHELF ABOVE ITS OWN TARGET IN SINGLE PRECISION.
+ *
+ * theFillDoesNotMoveASingleLobeAnswer's half two is p' = 0.6 Psi, gg' = 0 and
+ * psi = 0 on a fitted rectangle. Psi = psi/psi_ax there, so F is LINEAR in psi
+ * at fixed psi_ax and R( t psi ) = t R( psi ): by Euler, J psi = R exactly. The
+ * bordered elimination's `y = J^-1 R` is then the iterate itself, J is singular
+ * at the root, and the step is the difference of two iterate-sized vectors --
+ * so the residual after a step is the solves' backward error on |psi| and not
+ * on the step. GradShafranovSolver::setBorderFolding() has the measurements and
+ * the repair.
+ *
+ * WHAT THIS ASSERTS IS THE BEHAVIOUR, NOT THE MECHANISM: that the terminal
+ * phase is a Newton one. Once the field residual is under 1e-3 of the first
+ * iterate's, every step is a full step and lands at or below the larger of a
+ * thirtieth of where it started and a tenth of the absolute target. A shelf
+ * fails it -- the step that reaches 1.1e-05 in single starts from 1.15e-05
+ * or from 2e-04 and cannot leave it by a factor of thirty -- and quadratic
+ * convergence clears it by orders of magnitude until it meets the format's
+ * floor, which the target term is there to allow.
+ *
+ * STARTED AT psi_ax = 0.2, ABOVE THE ROOT'S 0.178, and that is deliberate
+ * rather than convenient. The field block is then definite at the first step
+ * and the route is one route in both formats, so what is measured is the
+ * terminal phase and nothing upstream of it. From the control's own 0.1 the
+ * first step is ill conditioned and the single and double routes part there;
+ * theFillDoesNotMoveASingleLobeAnswer records what that does.
+ *
+ * Measured, single, both MKLs at MKL_NUM_THREADS 1, 2 and 4, as the worst of
+ * ( landing / bound ) over the terminal steps:
+ *
+ *     folded (the default)          0.38 to 0.40     5 steps
+ *     unfolded                      8.2 to 10.1      6 steps
+ *
+ * and in double 0.002 folded and 0.032 unfolded, 6 steps each, because the
+ * shelf there is under every target. It is THERE, and the same mechanism: the
+ * unfolded double solve ends at a field residual of 2.09e-14 and the folded
+ * one at 1.46e-16. So in double the case checks the fold is exact algebra
+ * rather than that it is needed -- the same answer, psi_ax equal to the bit
+ * and psi_h to 3.0e-14, no more steps, and a fold that actually engaged.
+ */
+BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
+{
+	int const order = 2;
+	double const start = 0.2;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.0, 1 );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+		16, 16, mfem::Element::TRIANGLE, false, 0.8, 1.6 );
+	for ( int v = 0; v < mesh.GetNV(); ++v )
+	{
+		mesh.GetVertex( v )[ 0 ] += 0.6;
+		mesh.GetVertex( v )[ 1 ] -= 0.8;
+	}
+
+	mfem::FunctionCoefficient guess( [ start ]( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 1.0;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? start*t : 0.0;
+	} );
+
+	double const absoluteTarget = meq::newtonTolerance( 1.0e-12 );
+
+	struct Run
+	{
+		bool folding = false;
+		int iterations = 0;
+		double axis = 0.0;
+		std::vector<double> potential;
+		std::vector<GradShafranovSolver::BorderStep> steps;
+	};
+
+	// -1 is the solver's own default, which is the configuration that ships.
+	// The envelope row puts a half of the axis row on the flux dofs, which is
+	// what the fold carries as its second border unknown; the default row has
+	// none, so without this the 2 x 2's second row would never be exercised.
+	auto run = [ & ]( int folding, bool envelope )
+	{
+		meq::NormalisedMHDSource source( pPrime, ggPrime, start, 1.0 );
+		source.setPlasmaSupport( true );
+
+		GradShafranovSolver solver( mesh, order );
+		if ( folding >= 0 )
+			solver.setBorderFolding( folding == 1 );
+		if ( envelope )
+			solver.setAxisRow( GradShafranovSolver::AxisRow::WithEnvelope );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		                         absoluteTarget, 60 );
+		solver.setSource( source, start );
+		solver.setBoundaryData( zero );
+		solver.solve();
+
+		Run out;
+		out.folding = solver.borderFolding();
+		out.iterations = solver.newtonIterations();
+		out.axis = solver.psiAxis();
+		mfem::GridFunction const &potential = solver.potential();
+		out.potential.assign( potential.GetData(),
+		                      potential.GetData() + potential.Size() );
+		out.steps = solver.borderSteps();
+		return out;
+	};
+
+	/// The terminal phase: the worst ( landing / bound ) over the steps taken
+	/// from under 1e-3 of the first iterate's field residual, and how many of
+	/// them were damped.
+	struct Tail
+	{
+		double worst = 0.0;
+		int counted = 0;
+		int damped = 0;
+	};
+	auto terminal = [ & ]( Run const &r )
+	{
+		Tail t;
+		if ( r.steps.empty() )
+			return t;
+		double const first = r.steps.front().fieldNorm;
+		for ( std::size_t k = 0; k + 1 < r.steps.size(); ++k )
+		{
+			if ( !( r.steps[ k ].fieldNorm < 1.0e-3*first ) )
+				continue;
+			double const bound = std::max( r.steps[ k ].fieldNorm/30.0,
+			                               absoluteTarget/10.0 );
+			t.worst = std::max( t.worst, r.steps[ k + 1 ].fieldNorm/bound );
+			++t.counted;
+			if ( r.steps[ k ].damping != 1.0 )
+				++t.damped;
+		}
+		return t;
+	};
+
+	auto print = [ & ]( char const *label, Run const &r, Tail const &t )
+	{
+		std::printf( "    %-9s folding %d  newton %2d  psi_ax %.9e  terminal steps %d, "
+		             "worst landing/bound %.3f, damped %d\n",
+		             label, r.folding ? 1 : 0, r.iterations, r.axis, t.counted,
+		             t.worst, t.damped );
+		std::printf( "      field:" );
+		for ( auto const &step : r.steps )
+			std::printf( " %.2e", step.fieldNorm );
+		std::printf( "\n      rho:  " );
+		for ( auto const &step : r.steps )
+			std::printf( " %.3f", step.foldRho );
+		std::printf( "\n" );
+	};
+
+	std::printf( "\n  THE CONFINED EIGENPROBLEM'S TERMINAL PHASE, psi_ax started at %.2f\n",
+	             start );
+
+	Run const shipped = run( -1, false );
+	Run const other = run( shipped.folding ? 0 : 1, false );
+	Run const &folded = shipped.folding ? shipped : other;
+	Run const &unfolded = shipped.folding ? other : shipped;
+	Tail const shippedTail = terminal( shipped );
+	Tail const foldedTail = terminal( folded );
+	Tail const unfoldedTail = terminal( unfolded );
+
+	print( "folded", folded, foldedTail );
+	print( "unfolded", unfolded, unfoldedTail );
+
+	double worst = 0.0;
+	BOOST_TEST_REQUIRE( folded.potential.size() == unfolded.potential.size() );
+	for ( std::size_t i = 0; i < folded.potential.size(); ++i )
+		worst = std::max( worst, std::abs( folded.potential[ i ] - unfolded.potential[ i ] ) );
+	std::printf( "    folded against unfolded: psi_ax %.3e apart, worst psi_h %.3e\n",
+	             std::abs( folded.axis - unfolded.axis ), worst );
+	std::fflush( stdout );
+
+	// THE CONFIGURATION THAT SHIPS, in this build's format. Counted steps
+	// first, so that a history which never reaches the terminal phase cannot
+	// pass by having nothing to check.
+	BOOST_TEST( shippedTail.counted >= 1,
+	            "the shipped solve never brought its field residual under 1e-3 "
+	            "of its first, so its terminal phase was not measured" );
+	BOOST_TEST( shippedTail.worst <= 1.0,
+	            "a terminal step of the shipped bordered Newton landed "
+	            << shippedTail.worst << " times above max( 1/30 of where it "
+	            "started, a tenth of the target ). On this problem that is the "
+	            "elimination's shelf: J psi = R, so y = J^-1 R is the iterate and "
+	            "the step inherits the solves' backward error on |psi|. "
+	            "GradShafranovSolver::setBorderFolding() is the repair, and is "
+	            "on by default" );
+	BOOST_TEST( shippedTail.damped == 0,
+	            shippedTail.damped << " terminal steps of the shipped solve were "
+	            "damped. A line search cutting a step this close to the root is "
+	            "a Newton direction that is wrong, which is a crawl" );
+
+	// AND THE FOLDED SOLVE AS SUCH, whatever the default: the shipped run is
+	// it today, and this is what holds if the default ever moves.
+	BOOST_TEST( foldedTail.counted >= 1 );
+	BOOST_TEST( foldedTail.worst <= 1.0,
+	            "a terminal step of the FOLDED bordered Newton landed "
+	            << foldedTail.worst << " times above its bound, so the fold is "
+	            "not removing the shelf it exists for" );
+	BOOST_TEST( foldedTail.damped == 0 );
+
+	// THE FOLD IS A ROW OPERATION ON THE NEWTON SYSTEM, NOT A NEW PROBLEM:
+	// the same answer to round-off and never more steps.
+	BOOST_TEST( std::abs( folded.axis - unfolded.axis )
+	                <= meq::tests::scalarAgreementFloor( 1.0e-12, unfolded.axis ),
+	            "psi_ax came out " << folded.axis << " folded and "
+	            << unfolded.axis << " unfolded. The fold adds a multiple of the "
+	            "border row to one field row and the same multiple to the "
+	            "right-hand side, so it cannot move the root" );
+	BOOST_TEST( worst <= meq::tests::scalarAgreementFloor( 1.0e-12, unfolded.axis ),
+	            "folding moved psi_h by " << worst );
+	BOOST_TEST( folded.iterations <= unfolded.iterations,
+	            "the folded solve took " << folded.iterations
+	            << " Newton steps against the unfolded one's "
+	            << unfolded.iterations );
+
+	// AND IT ENGAGED: every step folded, and rho at the last one near 1,
+	// which is the fold carrying a field block that has gone singular. A fold
+	// that silently stopped applying would leave double's histories as they
+	// are and could not be seen any other way there.
+	bool everyStep = folded.steps.size() >= 2;
+	for ( std::size_t k = 0; k + 1 < folded.steps.size(); ++k )
+		everyStep = everyStep && folded.steps[ k ].folded;
+	BOOST_TEST( everyStep,
+	            "a step of the folded solve was not folded, on a problem whose "
+	            "border is psi_ax alone on one element's row" );
+
+	// AND THE FOLDED BLOCK WAS NEVER ITSELF NEAR SINGULAR. J'^-1 is J^-1
+	// amplified by | 1 - rho |, so that is the number to bound; kappa's sign
+	// is chosen from the previous step's rho to keep it near 1, and the first
+	// step, which has no previous, is not held to it. Measured: at most 0.91
+	// over the steps after the first, in both formats; with the sign held
+	// fixed, one step at rho = -7.2, an amplification of 8.2.
+	double worstAmplification = 0.0;
+	for ( std::size_t k = 1; k + 1 < folded.steps.size(); ++k )
+		worstAmplification = std::max( worstAmplification,
+		                               std::abs( 1.0 - folded.steps[ k ].foldRho ) );
+	BOOST_TEST( worstAmplification <= 2.0,
+	            "a folded step's block amplified J^-1 by " << worstAmplification
+	            << ": 1 + kappa b . J^-1 e_j came near zero, which is what "
+	            "choosing kappa's sign from the previous rho is for" );
+	BOOST_TEST_REQUIRE( folded.steps.size() >= 2 );
+	BOOST_TEST( folded.steps[ folded.steps.size() - 2 ].foldRho > 0.9,
+	            "rho at the last folded step is "
+	            << folded.steps[ folded.steps.size() - 2 ].foldRho
+	            << ". J psi = R makes the field block singular at the root, "
+	            "where rho = b . J'^-1( kappa e_j ) must approach 1" );
+
+	/*
+	 * THE FOLDED STEP IS THE NEWTON STEP, AND THE EARLY HISTORY SAYS SO
+	 * DIRECTLY. Far from the root the field block is regular, the two
+	 * eliminations are two orderings of one exact solve, and the merits they
+	 * produce agree to the arithmetic. Under the envelope row this is the check
+	 * with teeth on eta, the row's flux half: it is 0.03 to 0.16 per cent of
+	 * the row (M-120), so a fold that dropped it would still converge -- at a
+	 * rate the tail could not tell from Newton's -- and would leave the first
+	 * steps a few parts in ten thousand away from the unfolded ones.
+	 *
+	 * Measured: the first three merits agree to 2.3e-12 relative in double,
+	 * and 1.5e-12 under the envelope row. In single they agree only to
+	 * 4.0e-04 and 2.4e-03 -- the field block's conditioning at the start times
+	 * eps, and the same between any two orderings of the solve -- which is
+	 * above what a dropped eta would move. So the bound is 1e-9 and floored at
+	 * 65536 eps (7.8e-03) for the narrow format, and THE TEETH ARE DOUBLE'S:
+	 * in single this half only says the two routes are one route.
+	 */
+	Run const envelopeFolded = run( 1, true );
+	Run const envelopeUnfolded = run( 0, true );
+	print( "envelope folded", envelopeFolded, terminal( envelopeFolded ) );
+	print( "envelope unfolded", envelopeUnfolded, terminal( envelopeUnfolded ) );
+
+	double const historyBound = std::max(
+		1.0e-9, 65536.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() ) );
+	auto earlyAgreement = [ & ]( Run const &a, Run const &b )
+	{
+		double worstRelative = 0.0;
+		for ( std::size_t k = 1; k <= 3 && k < a.steps.size() && k < b.steps.size(); ++k )
+			worstRelative = std::max( worstRelative,
+			                          std::abs( a.steps[ k ].norm - b.steps[ k ].norm )
+			                          /b.steps[ k ].norm );
+		return worstRelative;
+	};
+	double const early = earlyAgreement( folded, unfolded );
+	double const envelopeEarly = earlyAgreement( envelopeFolded, envelopeUnfolded );
+	std::printf( "    first three merits, folded against unfolded: %.3e relative, "
+	             "%.3e under the envelope row (bound %.1e)\n",
+	             early, envelopeEarly, historyBound );
+	std::fflush( stdout );
+
+	BOOST_TEST( early <= historyBound,
+	            "the folded and unfolded merits part by " << early
+	            << " relative in the first three steps, where the field block "
+	            "is regular and the two are one exact solve ordered twice" );
+	BOOST_TEST( envelopeEarly <= historyBound,
+	            "under AxisRow::WithEnvelope the folded and unfolded merits part "
+	            "by " << envelopeEarly << " relative in the first three steps. "
+	            "The fold carries the row's flux half as a second border "
+	            "unknown, eta; a step that loses it is not the Newton step" );
+	BOOST_TEST( std::abs( envelopeFolded.axis - envelopeUnfolded.axis )
+	                <= meq::tests::scalarAgreementFloor( 1.0e-12, envelopeUnfolded.axis ) );
+	BOOST_TEST( envelopeFolded.iterations <= envelopeUnfolded.iterations );
+	Tail const envelopeTail = terminal( envelopeFolded );
+	BOOST_TEST( envelopeTail.counted >= 1 );
+	BOOST_TEST( envelopeTail.worst <= 1.0,
+	            "a terminal step of the folded solve under the envelope row "
+	            "landed " << envelopeTail.worst << " times above its bound" );
+}
+
 /*
  * CAN THE FILL REACH THE SYMMETRY AXIS, AND DOES IT MATTER?
  *

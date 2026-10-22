@@ -83,6 +83,48 @@
  * The dense truncated-SVD solve is kept regardless: it is the right solver for
  * a small dense system, and it bounds a Jacobian that goes singular partway
  * through, where the pre-flight check cannot see it.
+ *
+ *
+ * 5. CONVERGED MEANS THE RESIDUAL REACHED max( TOLERANCE, FLOOR ), AND THE
+ *    FLOOR IS THE MAP'S
+ *
+ * Every map evaluation is a whole equilibrium solved to a relative accuracy,
+ * and a surface extraction of it, so the map is NOISY: asked twice at the same
+ * coefficients from two warm starts it answers differently, by up to 1.3e-04
+ * in single on `examples/q-driven.toml`. No residual below that means
+ * anything, so the loop is judged against the larger of the caller's tolerance
+ * and the map's own floor -- `OuterNewtonOptions::mapFloor`, which for the
+ * q-driven map is meq::toroidalMapFloor(), derived there from the inner
+ * solve's accuracy -- plus the floor of holding the iterate in `real_t` at all.
+ * At or below that the loop is converged, whatever KINSOL's flag; above it, it
+ * is not, whatever KINSOL's flag. `KIN_STEP_LT_STPTOL` above the floor is a
+ * STALL, and `mfem::KINSolver::GetConverged()` counts it as success.
+ *
+ * Three settings follow from taking the floor seriously, and each was a
+ * measured defect on `examples/q-driven.toml` in single before it was set:
+ *
+ *   - THE TOLERANCE IS ABSOLUTE AND IT IS KINSOL'S. MFEM's relative tolerance
+ *     gave way to its default absolute one, `eps^( 1/3 )` -- 4.9e-03 in
+ *     single -- so the loop reported success there, at g^2 1-2% from the
+ *     closed form.
+ *   - THE DIFFERENCE STEP IS SET BY THE FLOOR -- the least at which the
+ *     noise costs a column 1%, `100 floor` -- not a fixed `1e-4`, which
+ *     beside a noise of 1e-4 made Jacobian columns wrong at O( 1 ). In double
+ *     the `1e-4` is the larger and is what is used.
+ *   - A FRESH JACOBIAN EVERY ITERATION, and its product given to KINSOL. Its
+ *     default keeps a Jacobian ten iterations -- here the vacuum start's, so
+ *     the loop crawled linearly -- and forms `J p` for the line search by a
+ *     difference of its own: an equilibrium per iteration spent on a slope
+ *     made of noise.
+ *
+ * Together, over both MKLs and one, two and four MKL threads in single: 4
+ * KINSOL iterations and 30 equilibria in every draw, to a residual of 1.6e-05
+ * to 1.4e-04 against a floor of 3.8e-04, the coefficients of g^2 1.3e-05 to
+ * 2.4e-04 from the closed form. The same six draws had stopped in 8 to 13
+ * iterations and 33 to 87 equilibria, at 2.9e-04 once and 2.2e-03 to 4.6e-03
+ * otherwise, the coefficients 6.3e-04 to 4.4e-02 out -- and three of the six
+ * then failed the q the run reports. In double: 5 iterations and 36
+ * equilibria to 3.5e-10, where it had stopped in 12 and 43 at 1.8e-06.
  */
 
 namespace meq
@@ -90,18 +132,33 @@ namespace meq
 
 	struct OuterNewtonOptions
 	{
-		/// Passed to KINSOL as its function-norm and step tolerances.
+		/// The residual the answer must reach: `|| G( c ) - c ||_inf`, in the
+		/// units of the coefficients, ABSOLUTE. The loop is converged when the
+		/// residual at the point it returns is at or below the larger of this
+		/// and mapFloor()'s value there, and not otherwise.
 		double functionTolerance = 1.0e-9;
-		double stepTolerance = 0.0;      ///< zero leaves KINSOL's own default
+
+		/// KINSOL's scaled step tolerance; zero leaves KINSOL's own,
+		/// `eps^( 2/3 )`. A step below it STOPS the iteration, and that stop
+		/// is judged by the residual like any other.
+		double stepTolerance = 0.0;
 		int maxIterations = 30;
 
 		/// Column step for the differenced Jacobian, relative to each
-		/// coefficient with this as the floor. Central differences: two map
-		/// evaluations a column, for the reason this tree gives everywhere else
-		/// it differences a residual -- a forward difference leaves an
-		/// `O( step )` truncation on top of the map's own noise, and here that
-		/// noise is a surface extraction's.
+		/// coefficient: the LEAST step, raised where the map's floor needs it
+		/// to `100 floor` -- see section 5. Central
+		/// differences: two map evaluations a column, for the reason this tree
+		/// gives everywhere else it differences a residual -- a forward
+		/// difference leaves an `O( step )` truncation on top of the map's own
+		/// noise, and here that noise is a surface extraction's.
 		double difference = 1.0e-4;
+
+		/// THE MAP'S OWN ROUND-OFF FLOOR, asked after each evaluation: the
+		/// level, in the same norm and units as @ref functionTolerance, below
+		/// which the residual just returned is noise. For the q-driven map
+		/// that is meq::ToroidalFieldMap::floor(). Empty is a map exact to
+		/// working precision -- a floor of zero.
+		std::function<double()> mapFloor;
 
 		/// KIN_LINESEARCH by default. KIN_NONE is kept as the control: it is
 		/// what says the line search is doing the work rather than the Newton
@@ -124,21 +181,20 @@ namespace meq
 		/// has, both of which are the caller's.
 		double jacobianConditioning = 1.0;
 
-		/// The residual norm KINSOL stopped at.
+		/// `|| G( c ) - c ||_inf` at the coefficients returned -- the number
+		/// @ref converged is judged on, against max( tolerance, @ref floor ).
 		///
 		/// **THE ANSWER IS WORTH THE RESIDUAL IT STOPPED AT, DIVIDED BY THE
 		/// CONDITIONING BESIDE IT**, and a caller that wants to know whether
-		/// its recovered `g` means anything has no other way to ask. It is not
-		/// the tolerance that was REQUESTED: KINSOL stops on a step that has
-		/// become too small as readily as on a function norm that has become
-		/// small enough, reports `converged` either way, and the two cases are
-		/// told apart only by this number against @a status. Measured on
-		/// `SafetyFactorSolver`'s closed-form case, where the map is a whole
-		/// equilibrium solve and a surface extraction: **3.68e-06 in double
-		/// against a requested 1e-09, and 3.71e-03 in single** -- the second
-		/// being the flux-surface average's own `eps/h^2` carried through the
-		/// fit, and the reason the recovered `g` there is 7.0e-03 out.
+		/// its recovered `g` means anything has no other way to ask.
 		double finalResidual = 0.0;
+
+		/// The round-off floor at the coefficients returned: the map's own,
+		/// from OuterNewtonOptions::mapFloor, plus that of holding the
+		/// coefficients in `real_t` at all -- `|| J || eps || c ||`, which is
+		/// what an EXACT map has in single. @ref converged is
+		/// @ref finalResidual against max( tolerance, this ).
+		double floor = 0.0;
 
 		/// KINSOL's own account of how it stopped, for a caller that has to
 		/// report rather than only branch.

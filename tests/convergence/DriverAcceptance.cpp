@@ -16,6 +16,7 @@
 #include "meq/Output.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/RotatingSource.hpp"
+#include "meq/SafetyFactor.hpp"
 #include "meq/Source.hpp"
 #include "meq/Sampler.hpp"
 
@@ -31,6 +32,7 @@
 #include <limits>
 #include <utility>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -1269,10 +1271,12 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 /*
  * Exit codes, which are the driver's actual interface to a scan script.
  *
- * 1 is checked and not 2 or 3: a solve that fails to converge needs a source
- * that does not converge, and the only one meq has is GS-2 section 4.4, which
- * takes minutes. That belongs in a slower test than this one if it is ever
- * worth pinning.
+ * 1 is theDriverReportsConfigurationErrorsAsExitOne's. 2 needs a solve that
+ * fails, and a source that genuinely does not converge -- GS-2 section 4.4 --
+ * takes minutes, so 2 is asserted where a cap makes the failure cheap and
+ * deterministic: aQDrivenRunWhoseOuterLoopFailsExitsTwo caps the q-driven
+ * outer loop, and RotatingMirror's aMirrorWhoseFirstAttemptFailsIsNotRetried
+ * caps the Newton.
  */
 /*
  * THE ADAPTIVE LOOP, THROUGH THE DRIVER, ON A CURVED BOUNDARY.
@@ -1306,9 +1310,154 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
  *     being optimal. The hand-rolled loop below uses meq::AdaptiveDomain, so a
  *     driver that reached for a plain SubMesh would disagree at once.
  */
+namespace
+{
+	/*
+	 * HOW FAR A DOERFLER MARKING IS FROM CHANGING, AGAINST HOW FAR ROUND-OFF
+	 * MOVES THE INDICATORS IT IS DECIDED ON.
+	 *
+	 * meq::markDoerfler sorts eta_K and takes the largest until the sum of
+	 * their squares reaches theta times the total. Two things decide the set,
+	 * and either can be a tie:
+	 *
+	 *   - THE COUNT, decided by where the running sum crosses theta T. If it
+	 *     crosses within round-off of the last element's square, a perturbation
+	 *     marks one element more or one fewer;
+	 *   - WHICH ELEMENTS, decided by the sort at the cut. If the last element
+	 *     marked and the first left out are within round-off of each other, a
+	 *     perturbation swaps them and the count does not move at all.
+	 *
+	 * Each margin is held against its own NOISE, which is measured rather than
+	 * assumed: @a other is the same mesh's indicators from a second solve
+	 * started elsewhere, which is the perturbation a warm start applies. The
+	 * sort's noise is the largest |eta - eta'| among the ranks around the cut,
+	 * and the count's is how far the same two margins move between the two
+	 * sets of indicators.
+	 */
+	struct MarkingClearance
+	{
+		int marked = 0;
+		double total = 0.0;      ///< sum of eta_K^2
+		double cutEta = 0.0;     ///< eta of the last element marked
+		double nextEta = 0.0;    ///< eta of the first element left out
+		double sortNoise = 0.0;  ///< largest |eta - eta'| within ten ranks of the cut
+		double bulkBelow = 0.0;  ///< theta T - S_{n-1}: how far one fewer falls short
+		double bulkAbove = 0.0;  ///< S_n - theta T: how far the set overshoots
+		double bulkNoise = 0.0;  ///< how far either moves, eta -> eta'
+
+		/// Each gap in units of its noise, the smaller. Below one the other
+		/// solve's indicators would mark a different set.
+		double clearance() const
+		{
+			return std::min( ( cutEta - nextEta )/( 2.0*sortNoise ),
+			                 std::min( bulkBelow, bulkAbove )/bulkNoise );
+		}
+	};
+
+	MarkingClearance doerflerClearance( mfem::Vector const &eta,
+	                                    mfem::Vector const &other, double theta )
+	{
+		int const count = eta.Size();
+		std::vector<int> order( count );
+		std::iota( order.begin(), order.end(), 0 );
+		std::stable_sort( order.begin(), order.end(), [ &eta ]( int a, int b )
+		{
+			return eta( a ) > eta( b );
+		} );
+
+		MarkingClearance c;
+		double otherTotal = 0.0;
+		for ( int e = 0; e < count; ++e )
+		{
+			c.total += eta( e )*eta( e );
+			otherTotal += other( e )*other( e );
+		}
+
+		// The same accumulation as markDoerfler's, carried for both sets of
+		// indicators over ONE order -- so what moves is the margin and not the
+		// set it is a margin of.
+		double const wanted = theta*c.total, otherWanted = theta*otherTotal;
+		double before = 0.0, at = 0.0, otherBefore = 0.0, otherAt = 0.0;
+		while ( c.marked < count && at < wanted )
+		{
+			int const e = order[ c.marked ];
+			before = at;
+			otherBefore = otherAt;
+			at += eta( e )*eta( e );
+			otherAt += other( e )*other( e );
+			++c.marked;
+		}
+		c.cutEta = eta( order[ c.marked - 1 ] );
+		c.nextEta = c.marked < count ? eta( order[ c.marked ] ) : 0.0;
+		for ( int i = std::max( 0, c.marked - 10 ); i < std::min( count, c.marked + 10 ); ++i )
+			c.sortNoise = std::max( c.sortNoise,
+			                        std::abs( static_cast<double>( eta( order[ i ] ) )
+			                                  - static_cast<double>( other( order[ i ] ) ) ) );
+		c.bulkBelow = wanted - before;
+		c.bulkAbove = at - wanted;
+		c.bulkNoise = std::max( std::abs( ( otherWanted - otherBefore ) - c.bulkBelow ),
+		                        std::abs( ( otherAt - otherWanted ) - c.bulkAbove ) );
+
+		// Two solves can agree to the last bit in double. One eps of the
+		// quantity is then the noise, so the clearance stays finite.
+		double const eps = std::numeric_limits<mfem::real_t>::epsilon();
+		c.sortNoise = std::max( c.sortNoise, eps*c.cutEta );
+		c.bulkNoise = std::max( c.bulkNoise, eps*c.total );
+		return c;
+	}
+}
+
 BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 {
-	BOOST_TEST_REQUIRE( run( sourcePath( "examples/miller-adaptive.toml" ) ) == 0,
+	/*
+	 * THE SHIPPED EXAMPLE AT Theta = 0.45 AND NOT ITS OWN 0.6, BECAUSE 0.6
+	 * MARKS ON A TIE IN SINGLE PRECISION.
+	 *
+	 * The driver warm-starts each cycle and the loop below starts cold, so the
+	 * two mark from indicators that differ by the solve's round-off -- and in
+	 * single that is not small: measured by the second solve below, eta_K near
+	 * the cut moves by 0.13% to 0.15% of itself between two starts where it is
+	 * 4e-05, and by 2% where it is 4e-06 -- the same absolute round-off --
+	 * against gaps between the last element marked and the first left out that
+	 * are typically 0.2% to 1%. At 0.6 the third marking's cut is at 4.4e-06,
+	 * its gap is 0.067% of the cut and its bulk sum overshoots theta T by
+	 * 3.5e-04 of T: a clearance of 0.017. So on one run the driver marked 49
+	 * and the loop 50 ( 606 elements against 614 ), and on the next both
+	 * marked 49 and refined a different one of the tied pair, and the answers
+	 * parted by 0.109 dof by dof -- a diverged loop by every assertion below,
+	 * from a fixture sitting on a tie.
+	 *
+	 * Swept over Theta = 0.300 to 0.700 in steps of 0.025, single, MKL
+	 * 2026.2, the least clearance over the two warm cycles is 5.5 at 0.450,
+	 * 4.2 at 0.550, 2.7 at 0.400 and 2.3 at 0.350, and below 2 at the other
+	 * thirteen -- 0.017 at the shipped 0.6. 0.450 is the best of them and it
+	 * is an ISLAND: 0.425 reads 0.80 and 0.475 reads 0.66. That is what a
+	 * margin drawn from a hundred-odd sorted indicators looks like, and it is
+	 * why the clearance is asserted below rather than trusted from this
+	 * sweep. Cycle 0 is cold in both and clears by orders everywhere. In
+	 * double the indicators move by 1e-10 of themselves and every value
+	 * clears, the shipped 0.6 included.
+	 *
+	 * THE TOML IS THE SHIPPED ONE WITH ONE KEY CHANGED, by text, so that an
+	 * example whose Theta moves is refused here rather than silently tested at
+	 * a value it no longer has.
+	 */
+	double const theta = 0.45;
+	std::string const config = "driver-acceptance-adaptive.toml";
+	{
+		std::string text = shippedConfig( "examples/miller-adaptive.toml" );
+		std::string const shipped = "Theta = 0.6";
+		std::size_t const at = text.find( shipped );
+		BOOST_TEST_REQUIRE( at != std::string::npos,
+			"examples/miller-adaptive.toml no longer sets Theta = 0.6, so this "
+			"case would not know which value it replaces" );
+		text.replace( at, shipped.size(), "Theta = 0.45" );
+		std::ofstream out( config );
+		out << text;
+	}
+	std::remove( "miller-adaptive.mesh" );
+	std::remove( "miller-adaptive_psi.gf" );
+	BOOST_TEST_REQUIRE( run( config ) == 0,
 	                    "the driver did not exit 0 on the adaptive example" );
 
 	BOOST_TEST_REQUIRE( exists( "miller-adaptive.mesh" ) );
@@ -1324,7 +1473,6 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	// silent divergence.
 	int const order = 2;
 	int const cycles = 4;
-	double const theta = 0.6;
 	double const minRadius = 0.7, maxRadius = 2.3, zMin = -1.9, zMax = 1.9;
 
 	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
@@ -1348,7 +1496,14 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 
 	meq::AdaptiveDomain domain( background, levelSet );
 
-	struct Turn { int elements; int marked; int widened; double eta; };
+	struct Turn
+	{
+		int elements;
+		int marked;
+		int widened;
+		double eta;
+		MarkingClearance clearance;
+	};
 	std::vector<Turn> history;
 	std::unique_ptr<meq::GradShafranovSolver> solver;
 	std::unique_ptr<mfem::VertexConePath> path;
@@ -1356,7 +1511,7 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	for ( int cycle = 0; cycle < cycles; ++cycle )
 	{
 		mfem::Array<int> marked;
-		Turn turn{ 0, 0, 0, -1.0 };
+		Turn turn{ 0, 0, 0, -1.0, {} };
 
 		// Twelve times the LARGEST element, as the driver uses: on a graded mesh
 		// the coarse part needs the long search.
@@ -1396,6 +1551,44 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 		{
 			meq::markDoerfler( local, theta, marked );
 			turn.marked = marked.Size();
+
+			/*
+			 * THE SAME MESH, SOLVED AGAIN FROM WHERE THE DRIVER STARTS IT, FOR
+			 * THE NOISE ALONE.
+			 *
+			 * Cold at cycle 0, which is where the driver starts too, so what
+			 * is measured there is only whatever the two solves' arithmetic
+			 * does not share. From cycle 1 on, at 0.99 of the answer: the
+			 * problem is linear, so Newton lands on the same discrete
+			 * solution to the solve's round-off from anywhere, and a start one
+			 * percent off is the kind of perturbation the driver's warm start
+			 * applies -- the previous cycle's answer, interpolated, which is
+			 * off by that cycle's discretisation error. It steers nothing: the
+			 * loop goes on from the cold solve's marking, and this solver is
+			 * released at the end of the block. It is the hand loop's warm
+			 * start only in the sense that a thermometer is the weather.
+			 */
+			mfem::GridFunction start( solver->potential() );
+			start *= 0.99;
+			meq::GradShafranovSolver again( domain.computational(), order, 1.0 );
+			again.setSource( source );
+			again.setBoundaryData( zero );
+			again.setExtension( *path, domain.gammaHMarker() );
+			if ( cycle > 0 )
+				again.setInitialGuess( start );
+			again.solve();
+			again.postProcess();
+			meq::ResidualEstimator againEstimator( again, source );
+			std::unique_ptr<mfem::Coefficient> const againDatum =
+				again.transferredDatum();
+			againEstimator.setTransferredBoundary( domain.gammaHMarker(),
+			                                       againDatum.get() );
+			turn.clearance = doerflerClearance( local, againEstimator.GetLocalErrors(),
+			                                    theta );
+			BOOST_TEST_REQUIRE( turn.clearance.marked == marked.Size(),
+				"doerflerClearance() marks " << turn.clearance.marked << " where "
+				"meq::markDoerfler marks " << marked.Size() << " at cycle " << cycle
+				<< ", so it is measuring the margin of some other criterion" );
 		}
 		history.push_back( turn );
 
@@ -1414,6 +1607,21 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	for ( std::size_t c = 0; c < history.size(); ++c )
 		std::printf( "  %6zu %8d %8d %6d %12.4e\n", c, history[ c ].elements,
 		             history[ c ].marked, history[ c ].widened, history[ c ].eta );
+
+	std::printf( "\n  the marking at each cycle, against its round-off (theta = %.3f)\n", theta );
+	std::printf( "  %6s %7s %12s %12s %10s %10s %10s %10s %10s %9s\n", "cycle", "marked",
+	             "eta cut", "eta next", "gap/cut", "noise/cut", "short/T", "over/T",
+	             "noise/T", "clearance" );
+	double leastClearance = std::numeric_limits<double>::infinity();
+	for ( std::size_t c = 0; c + 1 < history.size(); ++c )
+	{
+		MarkingClearance const &m = history[ c ].clearance;
+		std::printf( "  %6zu %7d %12.6e %12.6e %10.3e %10.3e %10.3e %10.3e %10.3e %9.3g\n",
+		             c, m.marked, m.cutEta, m.nextEta, ( m.cutEta - m.nextEta )/m.cutEta,
+		             m.sortNoise/m.cutEta, m.bulkBelow/m.total, m.bulkAbove/m.total,
+		             m.bulkNoise/m.total, m.clearance() );
+		leastClearance = std::min( leastClearance, m.clearance() );
+	}
 	std::fflush( stdout );
 
 	// IT REFINED, AND IT REFINED ADAPTIVELY.
@@ -1443,6 +1651,25 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 		BOOST_TEST( history[ c ].widened == 0,
 		            "cycle " << c << ": " << history[ c ].widened
 		            << " vertices of Gamma_h needed a widened fan" );
+
+	/*
+	 * AND NO MARKING SAT ON A TIE, which is the precondition of everything
+	 * below: a mesh or a dof that differs from a marking round-off could have
+	 * flipped says nothing about the loop. Clearance is each margin over its
+	 * measured noise, the smaller -- below 1 the second solve's own indicators
+	 * mark a different set -- and 2 is asked so that one sample of the noise
+	 * is not taken as its bound. Measured at Theta = 0.45: 5.5 and 10 on the
+	 * warm cycles in single, and in double every cycle clears by orders.
+	 */
+	double const wantedClearance = 2.0;
+	BOOST_TEST_REQUIRE( leastClearance >= wantedClearance,
+		"the fixture sits on a tie: at Theta = " << theta << " some cycle's "
+		"Doerfler marking clears its round-off by only " << leastClearance
+		<< " (the table above), so the driver's warm-started indicators and "
+		"this loop's cold ones can mark different elements, and a mesh or dof "
+		"mismatch below would be that tie and not a diverged loop. Move Theta "
+		"to a value whose table clears " << wantedClearance << " in both "
+		"precisions" );
 
 	// AND THE DRIVER LANDED IN THE SAME PLACE.
 	BOOST_TEST_REQUIRE( storedMesh.GetNE() == history.back().elements,
@@ -4292,33 +4519,51 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 	std::printf( "    worst %.3e\n", worst );
 
 	/*
-	 * **THE MAP THIS LOOP ROOTS IS A FLUX-SURFACE AVERAGE, AND THE FIT FROM IT
-	 * TO THE COEFFICIENTS AMPLIFIES BY A FACTOR THE TWO BUILDS AGREE ON.**
-	 * M-220's fourth law sets the map's own noise -- `q` is an average, so its
-	 * floor rises as `eps/h^2`, and `q-driven.toml` runs `n_R = 8` on a box of
-	 * 0.8 with one refinement, so `h = 0.05` and `averagedMetricFloor()` is
-	 * **1.9e-04**. What that costs the coefficients is the conditioning of a
-	 * degree-2 fit through 24 surfaces, and this run measures it twice:
+	 * **THE LOOP IS CONVERGED AT ITS MAP'S FLOOR, SO THE COEFFICIENTS ARE
+	 * WORTH THAT FLOOR WORKED ON BY THE OUTER JACOBIAN.** The driver judges
+	 * the outer residual against max( 1e-09, meq::toroidalMapFloor() ), the
+	 * inner solve's relative accuracy -- `newtonTolerance( 1e-12 )`, ten eps
+	 * in single -- carried through the inversion and the fit; the floor is
+	 * recomputed here, at the answer, exactly as the driver computes it. And
+	 * the worst coefficient's relative error is measured at up to 13 times
+	 * the residual the loop rests at, over both MKLs and one, two and four MKL
+	 * threads in single:
 	 *
-	 *     double   q 4.77e-08 -> g 5.04e-06      amplification 106
-	 *     single   q 3.93e-05 -> g 1.29e-02      amplification 330
+	 *     double   residual 3.5e-10                coefficients 1.7e-06 out
+	 *     single   residual 1.6e-05 to 1.4e-04     coefficients 1.3e-05 to 2.4e-04
+	 *              floor 3.8e-04
 	 *
-	 * -- the same order in both, which is what says it is the FIT and not the
-	 * format. The constant is 512, above the worse of the two by 1.6.
+	 * So the bound is 32 floors: the residual at most one floor, 13 for the
+	 * Jacobian, and a margin of 2.5 -- and 50 over the worst coefficient
+	 * measured. In double the floor is 3e-10 and the 1e-04 is what std::max
+	 * picks, unchanged.
 	 *
-	 * **AND THIS IS A WEAKER CLAIM THAN THE DOUBLE BUILD'S, WHICH IS WORTH
-	 * SAYING PLAINLY RATHER THAN LEAVING TO BE INFERRED.** The bound comes out
-	 * near 1e-01, so a ten per cent error in `g` would pass here. What it still
-	 * catches is what the message below names and what the case was written
-	 * for: a loop that converged to the WRONG fixed point returns coefficients
-	 * that are O( 1 ) out or of the wrong sign, and a reversed `Psi` reverses
-	 * the profile outright. In double `averagedMetricFloor()` is 3.6e-13 at
-	 * this `h`, so std::max picks the 1e-04 and nothing there moves.
+	 * **THIS REPLACES 512 x averagedMetricFloor(), 0.098 at this h, WHICH WAS
+	 * FITTED TO A LOOP THAT HAD NOT CONVERGED.** It read the single build's
+	 * 1.29e-02 as the fit amplifying an `eps/h^2` average 330 times; that run
+	 * had stopped on MFEM's default absolute tolerance, `eps^( 1/3 )` = 4.9e-03,
+	 * with its g^2 1-2% out, and the map's noise is not `eps/h^2` but flat in
+	 * `h` at about the inner solve's own accuracy. A loop that converged to the
+	 * WRONG fixed point is still what this case is for, and it is O( 1 ) out.
 	 */
-	double const qDrivenH = 0.8/8.0/2.0;   // NR = 8 over 0.8, RefinementLevels = 1
-	BOOST_TEST( worst < std::max(
-		            1.0e-04,
-		            512.0*meq::tests::averagedMetricFloor( qDrivenH ) ),
+	std::vector<double> const familyLabel =
+		ncdumpVariable( "q-driven_surfaces.nc", "normalised_flux" );
+	BOOST_TEST_REQUIRE( familyLabel.size() >= 3u,
+		"the surfaces file carries no family to recompute the loop's floor on" );
+	meq::ToroidalField answer;
+	answer.normalisedFlux = familyLabel;
+	for ( double label : familyLabel )
+	{
+		double const psi = 1.0 - label;
+		double const g = g0 + g1*psi;
+		answer.g.push_back( g );
+		answer.gSquared.push_back( g*g );
+		answer.safetyFactor.push_back( 0.0 );
+	}
+	double const loopFloor = meq::toroidalMapFloor(
+		answer, 2, meq::newtonTolerance( 1.0e-12 ) );
+	std::printf( "    the loop's floor at the answer %.3e\n", loopFloor );
+	BOOST_TEST( worst < std::max( 1.0e-04, 32.0*loopFloor ),
 		"the loop did not recover the closed-form g its target was measured "
 		"from: worst relative error " << worst << ". A loop that converged to "
 		"the WRONG fixed point reports success and looks exactly like this, so "
@@ -4445,11 +4690,15 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 	// MOVES. The extraction of V' and < R^-2 > is a flux-surface average, whose
 	// floor rises as eps/h^2 -- M-220's fourth law -- so what is "largely
 	// common" between the target and the answer in double stops being so once
-	// the average itself is at round-off. Measured in single: 7.47e-05 over 24
-	// surfaces against a floor of 1.9e-04 at this example's h = 0.05, where the
-	// double build reads 4.77e-08. A reversed Psi, which is what the message
-	// below warns about, is O( 1 ) and smooth. averagedMetricFloor() is
-	// 3.6e-13 in double at the same h, so the 1e-05 there is untouched.
+	// the average itself is at round-off. Measured in single, over both MKLs
+	// and one, two and four MKL threads: 1.9e-06 to 5.3e-06 over 24 surfaces
+	// against a floor of 1.9e-04 at this example's h = 0.05, where the double
+	// build reads 4.4e-07. Before the outer loop was held to its own floor
+	// the single figure was 3.6e-05 to 4.1e-04 and failed this bound on three
+	// draws in six -- the loop stopping at MFEM's default tolerance, 4.9e-03,
+	// and not the average. A reversed Psi, which is what the message below
+	// warns about, is O( 1 ) and smooth. averagedMetricFloor() is 3.6e-13 in
+	// double at the same h, so the 1e-05 there is untouched.
 	double const qDrivenH = 0.8/8.0/2.0;   // NR = 8 over 0.8, RefinementLevels = 1
 	BOOST_TEST( worstQ < std::max( 1.0e-05,
 	                               meq::tests::averagedMetricFloor( qDrivenH ) ),
@@ -4471,6 +4720,108 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 	BOOST_TEST( reached.back() > 1.05*reached.front(),
 		"the safety factor barely varies across the family, which is what a "
 		"g( psi ) lambda ignoring its argument would produce" );
+}
+
+/*
+ * A q-DRIVEN RUN WHOSE OUTER LOOP DOES NOT CONVERGE EXITS 2 AND WRITES NOTHING.
+ *
+ * The run solves FOR g, so the equilibrium it owes is the one at the g its
+ * outer loop converged to. The bordered retry rung re-solves ONE equilibrium at
+ * whatever g g' the loop last installed, and it converges -- so with the rung
+ * run, an outer failure became an exit 0. Measured on examples/q-driven.toml in
+ * single under --trace-refinement-cap 2, where KINSOL's line search stalls at
+ * 1.29e-02 after 11 iterations: the rung converged in 4 Newton steps, the run
+ * exited 0, and the file's g^2 was the guess's ( 4.84, 0, 0 ) against the
+ * answer's ( 4.84, 2.42, 0.3025 ), with q 21% from the target and the header
+ * saying g had been solved for.
+ *
+ * THAT STALL WAS THE OUTER NEWTON'S AND IS REPAIRED -- a Jacobian kept from
+ * the start and differenced at a step the map's noise swamped; the same run
+ * now converges in 4 iterations to 1.7e-04 against its floor of 3.8e-04 -- so
+ * it is not the fixture. The
+ * failure is made the plainest way instead: --q-iteration-cap 1, one KINSOL
+ * iteration from a constant g, which no precision can converge in -- the first
+ * step from gg' = 0 is a differenced Newton step on a non-linear map, and the
+ * loop's threshold is 1e-09 in double and its floor, 1.6e-04, in single;
+ * measured, the max norm after it is 0.251 in single and 0.252 in double, from
+ * 8 equilibria. Everything else is the shipped file, so
+ * the cap is the only thing between this run and
+ * theDriverSolvesForTheToroidalField's.
+ *
+ * THE EXIT CODE IS THE ASSERTION THAT MATTERS: putting the rung back for this
+ * failure turns it into an exit 0 with a q-driven-capped.nc. The rung's own
+ * messages are asserted absent so that a red here says which way it went.
+ */
+BOOST_AUTO_TEST_CASE( aQDrivenRunWhoseOuterLoopFailsExitsTwo )
+{
+	std::string text = shippedConfig( "examples/q-driven.toml" );
+	std::string const prefix = "Prefix = \"q-driven\"";
+	std::size_t const at = text.find( prefix );
+	BOOST_TEST_REQUIRE( at != std::string::npos,
+		"examples/q-driven.toml no longer names its output prefix" );
+	text.replace( at, prefix.size(), "Prefix = \"q-driven-capped\"" );
+
+	std::string const config = "driver-acceptance-q-capped.toml";
+	{
+		std::ofstream out( config );
+		out << text;
+	}
+	for ( char const *stale : { "q-driven-capped.nc", "q-driven-capped_surfaces.nc" } )
+		std::remove( stale );
+
+	std::string const logFile = "driver-acceptance-q-capped.log";
+	int const raw = std::system( ( std::string( driver() ) + " --q-iteration-cap 1 "
+	                               + config + " > " + logFile + " 2>&1" ).c_str() );
+	int const status = WIFEXITED( raw ) ? WEXITSTATUS( raw ) : -1;
+	std::string const log = slurp( logFile );
+	auto says = [ &log ]( char const *phrase )
+	{
+		return log.find( phrase ) != std::string::npos;
+	};
+
+	// THE PRECONDITION: the failure is the outer loop's, at the cap. Anything
+	// else stopping the run would make every assertion below about a
+	// different failure.
+	BOOST_TEST_REQUIRE( says( "q-driven outer loop: did not converge" ),
+		"the capped run did not report an outer loop that failed to converge, "
+		"so this case is not testing what it says. Its log:\n" << log );
+
+	std::printf( "\n  A q-DRIVEN RUN CAPPED AT ONE OUTER ITERATION: exit %d\n", status );
+	BOOST_TEST( status == 2,
+		"meq exited " << status << " on a q-driven run whose outer loop did not "
+		"converge. An exit 0 is the bordered retry rung run for an outer "
+		"failure: it re-solves one equilibrium at the g g' the loop last tried "
+		"and reports it, a g nobody asked for and a q that is not the target. "
+		"See ToroidalLoopFailed in apps/meq.cpp. Its log:\n" << log );
+	BOOST_TEST( says( "MEQ: the q-driven outer loop did not converge" ),
+		"the driver did not say the outer loop is why the run failed:\n" << log );
+	BOOST_TEST( says( "retry is not run" ),
+		"the driver did not say why the retry rung was skipped:\n" << log );
+	for ( char const *phrase : { "Retrying", "bordered-picard-then-newton",
+	                             "MEQ: converged in" } )
+		BOOST_TEST( !says( phrase ),
+			"the driver said '" << phrase << "' of a q-driven run whose outer "
+			"loop did not converge:\n" << log );
+	for ( char const *written : { "q-driven-capped.nc", "q-driven-capped_surfaces.nc" } )
+		BOOST_TEST( !exists( written ),
+			"a q-driven run whose outer loop did not converge wrote " << written
+			<< ", an equilibrium at a g the loop never converged to" );
+
+	// AND THE CAP IS REFUSED WHERE THERE IS NO OUTER LOOP TO CAP, and where
+	// it is not a count -- exit 1 in both, before any solve.
+	for ( char const *bad : { " --q-iteration-cap 0 ", " --q-iteration-cap x ",
+	                          " --q-iteration-cap 1 --q-iteration-cap " } )
+	{
+		int const refused = std::system( ( std::string( driver() ) + bad + config
+		                                   + " > /dev/null 2>&1" ).c_str() );
+		BOOST_TEST( ( WIFEXITED( refused ) ? WEXITSTATUS( refused ) : -1 ) == 1,
+			"meq" << bad << config << " was not refused as a usage error" );
+	}
+	int const refusedRaw = std::system( ( std::string( driver() ) + " --q-iteration-cap 1 "
+	                                      + sourcePath( "examples/soloviev-nstx.toml" )
+	                                      + " > /dev/null 2>&1" ).c_str() );
+	BOOST_TEST( ( WIFEXITED( refusedRaw ) ? WEXITSTATUS( refusedRaw ) : -1 ) == 1,
+		"--q-iteration-cap was not refused on a run with no SafetyFactorFile" );
 }
 
 

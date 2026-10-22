@@ -157,10 +157,14 @@ namespace
 		return single;
 	}
 
-	/// The same psi_ax: the same printed digits in double, and in single within
-	/// 5e-5 relative -- measured, a re-solve there lands 2.7e-6 (fixed-h-circular
-	/// from its .gf) and 1.1e-5 (limited-tokamak from its .nc) from the first,
-	/// where single's own answer for the latter is 1.2e-4 from double's.
+	/// The same psi_ax from a re-solve that does NOT start at the answer: the
+	/// same printed digits in double, and in single within 1e-5 relative.
+	/// Measured on MKL 2026.2 and 2026.1, the one such re-solve that moves is
+	/// fixed-h-circular restarted from psi_h alone, its .gf, which takes a
+	/// step and lands 3.5e-06 and 3.0e-06 from the first (30 and 25 eps); the
+	/// axis on a mesh line moves by nothing. A restart AT the answer -- the
+	/// .nc's whole state -- takes no step and is asserted to the digit, not
+	/// through this.
 	bool sameAxis( std::string const &a, std::string const &b )
 	{
 		if ( a.empty() || b.empty() )
@@ -168,7 +172,40 @@ namespace
 		if ( !singlePrecision() )
 			return a == b;
 		double const x = std::stod( a ), y = std::stod( b );
-		return std::abs( x - y ) <= 5.0e-5*std::abs( y );
+		return std::abs( x - y ) <= 1.0e-5*std::abs( y );
+	}
+
+	/// The plasma current as the driver prints it, or empty without one.
+	std::string plasmaCurrentValue( std::string const &log )
+	{
+		std::smatch match;
+		if ( std::regex_search( log, match, std::regex( "I_p = ([^ ]+) A against" ) ) )
+			return match[ 1 ];
+		return std::string();
+	}
+
+	/// How far the support loop's LAST sweep moved psi_ax, from the table
+	/// the driver prints, or -1 for a run that did not sweep. The digits are
+	/// the table's, which are psi_ax's own.
+	double lastSweepMove( std::string const &log )
+	{
+		std::size_t const at = log.find( "sweep     its" );
+		if ( at == std::string::npos )
+			return -1.0;
+		std::regex const row( "^ {5}\\d+ +\\d+ +([^ ]+) " );
+		std::istringstream in( log.substr( at ) );
+		std::string line;
+		std::getline( in, line );
+		std::vector<double> axes;
+		while ( std::getline( in, line ) )
+		{
+			std::smatch m;
+			if ( !std::regex_search( line, m, row ) )
+				break;
+			axes.push_back( std::stod( m[ 1 ] ) );
+		}
+		return axes.size() < 2 ? -1.0
+		                       : std::abs( axes.back() - axes[ axes.size() - 2 ] );
 	}
 
 	/// The converged psi_ax as the driver prints it, without the constraint
@@ -330,15 +367,34 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsAtTheAnswer )
 // AND THE REST OF THE STATE: a run whose only unknowns are the field, on the
 // plain Newton path; a free-boundary run whose border carries psi_bnd and the
 // I_p profile scale as well as psi_ax; and a diverted one, with an X-point and
-// coils, whose first support sweep is seeded at the file's axis. Each restarted from its own .nc
-// starts at its answer, or a step from it -- the support's edge is frozen at
-// the answer's own labels where the cold run froze it at the sweep before's --
-// and reaches the same equilibrium. MEASUREMENTS.md M-298.
+// coils, whose first support sweep is seeded at the file's axis. MEASUREMENTS.md
+// M-298.
+//
+// THE TWO THAT DO NOT SWEEP RESTART AT THEIR ANSWER, IN EITHER PRECISION: no
+// Newton step, and the psi_ax and I_p the run that wrote the file printed, to
+// the digit. That is what a whole state is. The stored iterate reads back at
+// exactly the field residual the run ended on, 1.433e-07 on limited-tokamak
+// in single, and every border row at the same value; what a restart can still
+// get wrong is a border unknown the file holds and the solver is not given.
+// The profile scale is the one measured: started at one rather than at the
+// file's 1.0009 (GradShafranovSolver::setPlasmaCurrentScaleInitial()), the
+// first field residual is 2.6e-05, the restart takes two steps, and psi_ax
+// moves by 3.1e-05 and 5.6e-05 relative (MKL 2026.2, 2026.1) -- inside a
+// 5e-05 band on one MKL and not the other, so no band is asserted here.
+//
+// THE DIVERTED ONE IS ONE MORE SUPPORT SWEEP, and is bounded by the loop's own
+// convergence rather than by a tolerance. Its first sweep starts at the answer
+// and takes no step; the second re-decides the support at the answer's labels,
+// where the cold run's last sweep froze it at the sweep before's, so it is a
+// different frozen problem and takes a step or two. It may move psi_ax by no
+// more than the cold run's last sweep did: measured in single, 4.4e-06 against
+// 8.3e-06 (2026.2) and 3.0e-06 against 5.2e-06 (2026.1); in double the last
+// sweep moved no printed digit, and nor does the restart.
 BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 {
 	struct Case { char const *example; int most; };
-	for ( Case const &c : { Case{ "coils-rectangle", 0 }, Case{ "limited-tokamak", 1 },
-	                        Case{ "diverted-tokamak-xpoint", 3 } } )
+	for ( Case const &c : { Case{ "coils-rectangle", 0 }, Case{ "limited-tokamak", 0 },
+	                        Case{ "diverted-tokamak-xpoint", 2 } } )
 	{
 		std::string const stem = c.example;
 		std::string const directory = fresh( "state-" + stem );
@@ -352,26 +408,34 @@ BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 		static std::string guessBlock;
 		guessBlock = "[initialguess]\nType = \"gridfunction\"\nFile = \"" + here + "/"
 		             + stem + ".nc\"\n";
-		std::string const restarted = variant( directory, stem, "restarted",
-			[]( std::string const &text )
-			{
-				std::string out = std::regex_replace(
-					text, std::regex( "\n\\[initialguess\\]\n(?:[A-Za-z]+ = [^\n]*\n)+" ), "\n" );
-				out = std::regex_replace( out, std::regex( "\n\\[source\\]\n" ),
-				                          "\n" + guessBlock + "\n[source]\n" );
-				return std::regex_replace( out, std::regex( "Prefix = \"[^\"]*\"" ),
-				                           "Prefix = \"restarted\"" );
-			} );
-		BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + restarted ) == 0,
-		                    slurp( directory + "/log" ) );
-		std::string const warm = slurp( directory + "/log" );
+		auto restartAs = [ & ]( std::string const &name,
+		                        std::string ( *edit )( std::string const & ) )
+		{
+			static std::string prefix;
+			prefix = name;
+			static std::string ( *more )( std::string const & );
+			more = edit;
+			std::string const config = variant( directory, stem, name,
+				[]( std::string const &text )
+				{
+					std::string out = std::regex_replace(
+						text, std::regex( "\n\\[initialguess\\]\n(?:[A-Za-z]+ = [^\n]*\n)+" ), "\n" );
+					out = std::regex_replace( out, std::regex( "\n\\[source\\]\n" ),
+					                          "\n" + guessBlock + "\n[source]\n" );
+					out = std::regex_replace( out, std::regex( "Prefix = \"[^\"]*\"" ),
+					                          "Prefix = \"" + prefix + "\"" );
+					return more( out );
+				} );
+			BOOST_TEST_REQUIRE( runIn( directory, std::string( driver() ) + " " + config ) == 0,
+			                    slurp( directory + "/log" ) );
+			return slurp( directory + "/log" );
+		};
+		std::string const warm = restartAs( "restarted",
+			[]( std::string const &text ) { return text; } );
 
 		BOOST_TEST( warm.find( "an exact restart" ) != std::string::npos,
 		            stem << ": the restart did not take the whole iterate:\n" << warm );
-		// One step more in single, measured on limited-tokamak: its stored state
-		// is at single's floor rather than at round-off.
-		int const most = c.most + ( singlePrecision() ? 1 : 0 );
-		BOOST_TEST( totalSteps( warm ) <= most,
+		BOOST_TEST( totalSteps( warm ) <= c.most,
 		            stem << ": restarted from its own answer it took " << totalSteps( warm )
 		            << " Newton steps, against " << totalSteps( cold ) << " cold" );
 		BOOST_TEST( totalSteps( warm ) < totalSteps( cold ) );
@@ -381,9 +445,57 @@ BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 		BOOST_TEST( warm.find( "Retrying" ) == std::string::npos,
 		            stem << ": restarted at its own answer, the run needed the retry "
 		            "rung:\n" << warm );
-		BOOST_TEST( sameAxis( psiAxisValue( warm ), psiAxisValue( cold ) ),
-		            stem << ": the restart reached psi_ax = " << psiAxisValue( warm )
-		            << " where the run it came from reached " << psiAxisValue( cold ) );
+
+		double const sweepMove = lastSweepMove( cold );
+		if ( sweepMove < 0.0 )
+		{
+			BOOST_TEST( psiAxisValue( warm ) == psiAxisValue( cold ),
+			            stem << ": the restart reached psi_ax = " << psiAxisValue( warm )
+			            << " where the run it came from reached " << psiAxisValue( cold ) );
+			BOOST_TEST( plasmaCurrentValue( warm ) == plasmaCurrentValue( cold ),
+			            stem << ": the restart reports I_p = " << plasmaCurrentValue( warm )
+			            << " where the run it came from reported "
+			            << plasmaCurrentValue( cold ) );
+		}
+		else
+		{
+			BOOST_TEST_REQUIRE( !psiAxisValue( warm ).empty() );
+			double const moved = std::abs( std::stod( psiAxisValue( warm ) )
+			                               - std::stod( psiAxisValue( cold ) ) );
+			BOOST_TEST( moved <= sweepMove,
+			            stem << ": the restart moved psi_ax by " << moved << " ( "
+			            << psiAxisValue( cold ) << " -> " << psiAxisValue( warm )
+			            << " ), more than the cold run's last support sweep did, "
+			            << sweepMove );
+		}
+
+		/*
+		 * AND AT ANOTHER CURRENT THE FILE IS NOT THE ANSWER. The field rows do
+		 * not read the target, so a restart at the answer meets every one of
+		 * them and only the current row can say the problem has changed --
+		 * which it did not, at the first iterate, until it was evaluated there:
+		 * limited-tokamak restarted at 3.3e5 A "converged in 0 Newton
+		 * iterations" to the 3.0e5 equilibrium and reported I_p = 0. Measured
+		 * since, 6 steps to 3.300000e+05 in single.
+		 */
+		if ( stem == "limited-tokamak" )
+		{
+			std::string const other = restartAs( "other-current",
+				[]( std::string const &text )
+				{
+					return std::regex_replace( text, std::regex( "\nPlasmaCurrent = [^\n]*\n" ),
+					                           "\nPlasmaCurrent = 3.3e5\n" );
+				} );
+			BOOST_TEST( other.find( "an exact restart" ) != std::string::npos, other );
+			BOOST_TEST( newtonSteps( other ) > 0,
+			            "restarted at another plasma current, the solve took no step:\n"
+			            << other );
+			BOOST_TEST_REQUIRE( !plasmaCurrentValue( other ).empty(), other );
+			BOOST_TEST( std::abs( std::stod( plasmaCurrentValue( other ) ) - 3.3e5 )
+			            <= 1.0e-5*3.3e5,
+			            "restarted at 3.3e5 A, the solve reports I_p = "
+			            << plasmaCurrentValue( other ) );
+		}
 	}
 }
 

@@ -138,14 +138,14 @@ is a real motivation and a much smaller one.
 **Is MEQ's cold-start failure actually a topology failure?** M-103's six exit-2
 rows report *"no damping of the bordered Newton step gave a finite residual —
 `psi_ax`"*, and `BORDERED-GLOBALISATION-PLAN.md` §0.1 establishes that **nothing
-in the code distinguishes a genuine excursion from a non-finite direction**, and
-that its BG-0 experiment has not been run.
+in the code distinguishes a genuine excursion from a non-finite direction**.
 
-**If BG-0 comes back "a non-finite direction" on most of the six, an inverse
-capability does not help them either** — the defect would be in the bordered
-elimination, and pinning the shape would not repair a `NaN` in `y`. So **BG-0 is
-a dependency of this document's motivation**, not merely a neighbour of it. §8
-says so again.
+**Had BG-0 come back "a non-finite direction" on most of the six, an inverse
+capability would not have helped them either** — the defect would be in the
+bordered elimination, and pinning the shape would not repair a `NaN` in `y`. So
+BG-0 was a dependency of this document's motivation, and **it is run and
+discharged** → **[M-117](MEASUREMENTS.md#m-117)**: the direction is finite on
+every step of all six, which are excursions of the path. §8.
 
 ---
 
@@ -1045,13 +1045,15 @@ What *has* moved cases is not a step rule at all —
 M-124, necessary together and neither sufficient — and an inverse solve is the
 same species of intervention: it changes what is being solved.
 
-**What none of that touches is §0.1.** The load-bearing claim here is still
-established for `freegs4e` and **assumed for MEQ**, and the experiment that
-would settle it still costs no MEQ code and has still not been run.
+**§0.1's experiment is IV-0**, run and passing → **[M-244](MEASUREMENTS.md#m-244)**:
+`freegs4e`'s inverse finds the basin from cold on thirteen of fourteen
+configurations. Whether MEQ's own inverse is a basin finder is IV-6's question,
+and it converts one of the forward table's five reds, TCV
+([M-253](MEASUREMENTS.md#m-253)).
 
 | | | |
 |---|---|---|
-| **`BORDERED-GLOBALISATION-PLAN.md`** | **complementary, and its BG-0 gates this document's motivation** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its §2.2 is load bearing here — no `Jᵀ` — and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |
+| **`BORDERED-GLOBALISATION-PLAN.md`** | **complementary, and its BG-0 gated this document's motivation — run, discharged, [M-117](MEASUREMENTS.md#m-117)** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its §2.2 is load bearing here — no `Jᵀ` — and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |
 | **Border scaling**, BS-0 to BS-5 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Border scaling: a per-border ruler for the bordered merit* | **complementary** | **BS-1, a per-border merit scale, is reverted** ([M-245](MEASUREMENTS.md#m-245) — a per-border ruler moves which equilibrium is reported), so an inverse border's scale, `1/M_c` (§4.4), is a candidate to measure rather than a datum to slot in. **BS-5, the X-point relocation cap, is landed on the retry rung** ([M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248)). Its BS-0 gate is BG-0 restated |
 
 **Is an inverse capability a superset of either? No, and the claim should not be

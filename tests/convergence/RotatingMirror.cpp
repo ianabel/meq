@@ -2384,9 +2384,12 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnIts
  * and psi_inner starts at the state's flux at [boundary.electrode] -- but an
  * [initialguess] far from the answer can, and the rung would then report the
  * root it reaches. So the failure here is made the plainest way, a Newton
- * cap of 2 against the four steps the shipped file converges in, and exit 2
- * is the assertion that matters: putting the rung back turns it into an
- * exit 0.
+ * cap one below the steps the shipped file converges in, and exit 2 is the
+ * assertion that matters: putting the rung back turns it into an exit 0.
+ *
+ * THE CAP IS READ FROM THE SHIPPED RUN, NOT WRITTEN DOWN. That count is three
+ * in double and two in single, whose Newton stops at a looser residual, so a
+ * fixed cap of 2 converged in single and the case failed for the wrong reason.
  *
  * Of the rung's two triggers this is the failure. The annulus cannot fire on
  * a box run, since [boundary.xpoint] is refused beside it, and
@@ -2394,10 +2397,22 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnIts
  */
 BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
 {
+	DriverRun const &shipped = shippedDriverRun();
+	BOOST_TEST_REQUIRE( shipped.status == 0, shipped.log );
+	int const shippedSteps
+		= static_cast<int>( numberAfter( shipped.log, "converged in " ) );
+	BOOST_TEST_REQUIRE( shippedSteps >= 2,
+		"the shipped mirror converges in " << shippedSteps << " Newton steps, so "
+		"no smaller cap can make its first attempt fail:\n" << shipped.log );
+	int const cap = shippedSteps - 1;
+	std::printf( "\n  A MIRROR WHOSE FIRST ATTEMPT FAILS: the shipped file converges in "
+	             "%d, capped at %d\n", shippedSteps, cap );
+
 	std::string const prefix = "mirror-driver-no-retry";
 	std::string const config = configureMirror( prefix, "",
 	                                            { { "NewtonMaxIterations = ",
-	                                                "NewtonMaxIterations = 2" } } );
+	                                                "NewtonMaxIterations = "
+	                                                + std::to_string( cap ) } } );
 	std::string const stem = std::string( driverScratch ) + "/" + prefix;
 	std::remove( ( stem + ".nc" ).c_str() );
 	int const status = runLogged( "MKL_NUM_THREADS=1 " + std::string( MEQ_RUN_PATH )
@@ -2405,7 +2420,7 @@ BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
 	std::string const text = readText( stem + ".log" );
 	BOOST_TEST( status == 2,
 		"meq-run exited " << status << " on a mirror whose bordered Newton is "
-		"capped at 2 steps. An exit 0 is the retry rung run beside the box, which "
+		"capped at " << cap << " steps. An exit 0 is the retry rung run beside the box, which "
 		"from a poor start reports a root that is not the shipped equilibrium:\n"
 		<< text );
 	BOOST_TEST( says( text, "the bordered Newton did not converge" ),

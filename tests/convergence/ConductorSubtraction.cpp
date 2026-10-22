@@ -333,17 +333,19 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 	            "psi_c + psi_p" );
 }
 
-// AND SO DOES THE SOURCE A PICARD PATH FREEZES, which is a different object.
+// AND SO DOES THE SOURCE A PICARD PATH FREEZES, which is reached by a
+// different route.
 //
 // The case above runs Newton, where F reaches the assembly through
-// SourceIntegrator, and SourceIntegrator adds psi_c from its cache. The Picard
-// paths do not use it at all: Globalisation::PicardOnly and AndersonPicard put
-// F on the RIGHT HAND SIDE through a coefficient frozen at the previous
-// iterate (FrozenSource in GradShafranov.cpp), so whether that coefficient
-// adds psi_c is a separate question with a separate answer. If it does not,
-// the Picard paths iterate F( psi_p ) against a datum shifted by -psi_c -- a
-// fixed point of a DIFFERENT equation, reached at the full rate and reported
-// as converged.
+// SourceIntegrator, and SourceIntegrator adds psi_c from its cache.
+// Globalisation::PicardOnly and AndersonPicard reach the same integrator, but
+// through a KINSOL fixed point on the potential that freezes F at the previous
+// iterate and corrects the state on the NPC residual with the reaction left
+// out of the Jacobian (solveByPicard() in GradShafranov.cpp). Whether that
+// route carries psi_c through is a separate question with a separate answer:
+// if it does not, the Picard paths iterate F( psi_p ) against a datum shifted
+// by -psi_c -- a fixed point of a DIFFERENT equation, reached at the full rate
+// and reported as converged.
 //
 // THE REFERENCE IS THE NEWTON SPLIT, which the case above pins against a
 // control that runs none of the split's code. The discretisation is the same,
@@ -434,7 +436,7 @@ BOOST_AUTO_TEST_CASE( thePicardPathsFreezeTheSourceAtTheTotalFlux )
 		            run.name << " reached a different discrete solution under the "
 		            "conductor split, max difference " << worst << " on a scale of "
 		            << scale << ": the frozen source is not evaluated at psi_p + "
-		            "psi_c (FrozenSource in GradShafranov.cpp)" );
+		            "psi_c (solveByPicard() in GradShafranov.cpp)" );
 	}
 }
 

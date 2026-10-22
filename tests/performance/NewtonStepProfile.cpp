@@ -562,8 +562,9 @@ int main( int argc, char **argv )
 			// NPCReduce()/NPCRecover() around the trace solve, DISJOINT from the
 			// backsolve column and taken out of `other` since it got a leg. It
 			// is zero on the fixed-boundary rows, which queue no border column,
-			// and it does not thread -- which is why it is printed rather than
-			// left inside a remainder. See MEASUREMENTS.md M-126.
+			// and it scales worse than the residual -- which is why it is
+			// printed rather than left inside a remainder. See MEASUREMENTS.md
+			// M-126 and M-301.
 			std::printf( "    %-9s %-9s prepare() %.4f (outside total), "
 			             "component fill %.4f x%ld, NPC reduce+recover %.4f x%ld,"
 			             " spread total %.4f-%.4f\n",

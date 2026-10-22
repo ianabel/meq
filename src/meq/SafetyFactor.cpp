@@ -144,6 +144,8 @@ namespace meq
 		lastGood = coefficients;
 		std::vector<double> const fitted =
 			fitToroidalFieldSquared( inverted, options.degree );
+		lastFloor = toroidalMapFloor( inverted, options.degree,
+		                              options.solveAccuracy );
 		stageChecksum( "toroidalMap.out", fitted );
 		return fitted;
 	}
@@ -394,6 +396,58 @@ namespace meq
 		for ( std::size_t j = 0; j < terms; ++j )
 			out[ j ] = solution( static_cast<Eigen::Index>( j ) );
 		return out;
+	}
+
+	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,
+	                         double solveAccuracy )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::toroidalMapFloor: a degree of zero is not a fit" );
+		std::size_t const terms = degree + 1;
+		if ( field.size() < terms || field.gSquared.size() != field.size() )
+			throw std::invalid_argument(
+				"meq::toroidalMapFloor: the family has fewer surfaces than the "
+				"fit has coefficients, or no g^2 on each of them" );
+		requireAscending( field.normalisedFlux, "meq::toroidalMapFloor" );
+
+		// THE SAME DESIGN MATRIX AS fitToroidalFieldSquared(), in the source's
+		// Psi, so P below is that fit's own pseudo-inverse and not a model of
+		// it.
+		Eigen::MatrixXd design( field.size(), terms );
+		for ( std::size_t i = 0; i < field.size(); ++i )
+		{
+			double const psi = 1.0 - field.normalisedFlux[ i ];
+			double power = 1.0;
+			for ( std::size_t j = 0; j < terms; ++j )
+			{
+				design( static_cast<Eigen::Index>( i ),
+				        static_cast<Eigen::Index>( j ) ) = power;
+				power *= psi;
+			}
+		}
+		Eigen::MatrixXd const pseudoInverse =
+			design.completeOrthogonalDecomposition().pseudoInverse();
+
+		// Row k of P, each surface's entry weighted by that surface's g^2 --
+		// the relative error is per surface, so the absolute one is g^2 times
+		// it -- and summed in quadrature, the surfaces' errors being
+		// independent. The worst coefficient is the one the max norm sees.
+		double worst = 0.0;
+		for ( Eigen::Index k = 0; k < pseudoInverse.rows(); ++k )
+		{
+			double sum = 0.0;
+			for ( Eigen::Index i = 0; i < pseudoInverse.cols(); ++i )
+			{
+				double const term = pseudoInverse( k, i )
+				                    *field.gSquared[ static_cast<std::size_t>( i ) ];
+				sum += term*term;
+			}
+			worst = std::max( worst, std::sqrt( sum ) );
+		}
+
+		// 4 for g^2's two averages, each squared; 4 standard deviations.
+		return 4.0*4.0*std::abs( solveAccuracy )*worst;
 	}
 
 	std::vector<Knot> ggPrimeKnotsFromFit( ToroidalField const &field,

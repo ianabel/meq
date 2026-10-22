@@ -338,10 +338,18 @@ lie about where the data is; it does not fix the data being in the wrong place.*
 
 **It is not the NPC fault.** Forcing `makeDeviceNPCOperator()` to return null
 removes that fault and leaves this answer wrong. With all five seams fixed, CUDA
-matches the host on every printed number:
-* 12 KINSOL iterations and 43 map evaluations.
-* Final norm `1.94945e-06` and conditioning `1.386e-02`.
-* `psi_ax = 3.457380e-01`.
+matches the host:
+* 5 KINSOL iterations and 36 map evaluations, on both.
+* Conditioning `6.440e-03`, the `g²` coefficients and `psi_ax = 3.457383e-01`
+  to every printed digit.
+* Final max norm `3.28e-10` against the host's `3.54e-10`, both under the
+  `1e-9` threshold — the last Newton step squares a residual whose rounding
+  differs.
+
+The outer Newton's own Jacobian-vector product for KINSOL's line search
+(`OuterKINSolver::jacobianTimes`) is a sixth crossing of the same kind, and is
+written to the same pattern: `countedHostRead` the direction, `HostWrite` the
+product, `Read()` it back up.
 
 `q-driven` is the only example that re-enters `solve()` from an outer Newton.
 *A defect in re-entry needs a case that re-enters.*
@@ -830,11 +838,15 @@ Jacobian while staying in the residual.
   and `extensionFdStep()` precedent.
 * ***A tolerance a solver was GIVEN is the floor on what it can achieve.*** Seven
   sites asserted `< 1e-8` on a solve whose target floors at ten `eps`.
-* ***A fixed-point iteration cannot be asked for a Newton's tolerance.*** Newton
+* ***A fixed-point iteration's floor is its map's, not Picard's.*** Newton
   squares its residual across the target; Picard contracts by a fixed factor and
-  stalls at 5.80e-05. So `meq::picardTolerance()` is `4096 eps` in single. SUNDIALS
-  has no compensated-summation route into KINSOL: that option is ARKODE SPRK's
-  alone, and checked.
+  approaches its floor from above. Solving the condensed system for the whole
+  field each step, Anderson-Picard stalls at 5.80e-05, because the element-local
+  eliminations' forward error is in every iterate at full size. Evaluated as a
+  correction on the NPC residual it stalls at 1 to 2.5 `eps`, so
+  `meq::picardTolerance()` is `newtonTolerance()`'s `10 eps` (`solveByPicard()`).
+  SUNDIALS has no compensated-summation route into KINSOL: that option is ARKODE
+  SPRK's alone, and checked.
 * ***A difference is not a derivative.*** Two exact routes agree to `eps`; a
   finite difference agrees only to `eps^(2/3)` to `sqrt( eps )`.
 * ***A stationary point's POSITION costs half the digits and its VALUE costs

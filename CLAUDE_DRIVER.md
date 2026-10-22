@@ -87,7 +87,17 @@ on the mesh it was solved on it takes the whole iterate `( q, psi, psihat )`
 and the border's unknowns as the run left them, `psi_bnd` among them on this
 route only (`theNetCDFRestartsAtTheAnswer`, `theRestartCarriesTheWholeState`,
 → **[M-298](MEASUREMENTS.md#m-298)**, whose (c) to (e) are three defects it
-exposed and did not cause). It reads the embedded mesh with
+exposed and did not cause). **The profile scale goes to the SOLVER**
+(`setPlasmaCurrentScaleInitial()`), not only to the shared source: a fresh
+solver starts the scale at one and tells the source so before its first
+residual, and the answer's iterate at another scale is not the answer —
+`limited-tokamak` in single, restarted at scale one, takes two steps and
+moves `psi_ax` by up to 5.6e-05 relative, where carried it takes none and
+prints the cold run's digits. **The current row is read on the starting
+iterate**, as every other border row is, so a restart at another
+`PlasmaCurrent` is not taken for the answer: the field rows do not read the
+target, and with that row unread a restart at 3.3e5 A from a 3.0e5 A file
+converges in no step to the file's current. It reads the embedded mesh with
 `refine = 0, fix_orientation = false`, so a mesh is never reordered under its
 coefficients; on the shipped meshes MFEM's default reading reorders nothing
 either, so that is a guarantee rather than a defect seen.
@@ -316,6 +326,26 @@ not a solve in place of the loop** (`runSolveWithSupportLoop( true )`): a rung
 that solves once reports the support frozen from the cold guess — every row met,
 the `.nc` silent on sweeps, and a different equilibrium, self-consistent across
 refinement so a ladder does not show it → **[M-257](MEASUREMENTS.md#m-257)**.
+
+**A q-DRIVEN RUN'S OUTER-LOOP FAILURE NEVER REACHES THE RUNG**: it is thrown as
+`ToroidalLoopFailed` and exits 2 with nothing written. The rung re-solves one
+equilibrium at whichever `gg'` KINSOL last installed and converges, so it turned
+a stalled outer loop into an exit 0 — measured on `q-driven.toml` in single
+under `--trace-refinement-cap 2`, `g²` written as the guess's `( 4.84, 0, 0 )`
+against `( 4.84, 2.42, 0.3025 )`, `q` 21% off. The map already absorbs inner
+failures as refusals, so no inner globalisation moves an outer failure. A loop
+that converges and whose answer then fails to re-solve is an ordinary exception
+and is retried, at the converged `g`. `--q-iteration-cap N` (a flag, not a key)
+makes the failure reachable on purpose; `aQDrivenRunWhoseOuterLoopFailsExitsTwo`.
+**An exception out of `solveForToroidalField` is an outer failure too** and is
+rethrown as `ToroidalLoopFailed`: reaching the ladder as anything else gave it
+the rung — measured with an `MFEM_VERIFY` inside the outer Newton's KINSOL setup,
+the run went on to *"converged in 4 Newton iterations (via
+bordered-picard-then-newton)"* and wrote `q-driven.nc`, exit 0, the loop never having run. **And
+"converged" is the residual at the answer against `max( tolerance, floor )`**, the
+floor being the map's own (`meq::toroidalMapFloor()`, from the inner
+`NewtonRelativeTolerance`); a stop above it exits 2 whatever KINSOL's flag says.
+`CLAUDE_INVERSION.md` has the floor and what made the loop stall.
 
 **What the driver refuses rather than approximates**: `[boundary] Type =
 "exact"` needs a closed form `meq::Source` does not carry, and exits 1 with an

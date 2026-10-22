@@ -843,36 +843,32 @@ namespace tests
 	 * solver actually STOPPED at.
 	 *
 	 * **THE SIBLING OF [[achievedToleranceFloor]] WITH THE REQUESTED NUMBER
-	 * REPLACED BY THE ACHIEVED ONE, AND THE DIFFERENCE MATTERS WHENEVER A
-	 * SOLVER CAN STOP FOR A SECOND REASON.** That one says a solver cannot beat
-	 * the tolerance it was given. This one is needed where it did not MEET that
-	 * tolerance and returned anyway: KINSOL stops on a step that has become too
-	 * small exactly as readily as on a function norm that has become small
-	 * enough, reports `converged` for both, and the two are told apart only by
-	 * the norm it came to rest at.
+	 * REPLACED BY THE ACHIEVED ONE, AND THE DIFFERENCE MATTERS WHEREVER A
+	 * SOLVER IS JUDGED AGAINST A FLOOR AS WELL AS A TOLERANCE.** That one says
+	 * a solver cannot beat the tolerance it was given. This one is for a
+	 * solver that may legitimately stop above it: the q-driven outer Newton is
+	 * converged at max( tolerance, the map's own round-off floor ) and not
+	 * below, so in single it rests at the floor, and the answer is worth the
+	 * residual it rested at, worked on by the outer Jacobian's conditioning.
 	 *
 	 * Measured on `SafetyFactorSolver`'s closed-form case, whose map is one
-	 * whole equilibrium solve and a flux-surface extraction. Asked for `1e-09`
-	 * in both builds:
+	 * whole equilibrium solve and a flux-surface extraction, asked for `1e-08`,
+	 * over both MKLs and one, two and four MKL threads in single:
 	 *
-	 *     double   final norm 3.68e-06   recovered g within 1e-04
-	 *     single   final norm 3.71e-03   recovered g out by 7.0e-03
+	 *     double   final norm 1.6e-09              recovered g 3.6e-10 out
+	 *     single   final norm 4.5e-05 to 4.6e-04   recovered g 3.1e-05 to 5.8e-04
 	 *
-	 * -- and `7.0e-03` is `1.9` times that residual, which is the outer
-	 * Jacobian's own conditioning working on it. **The single figure is not a
-	 * tolerance to be relaxed and is not KINSOL's**: a safety factor is a
-	 * flux-surface average, whose floor rises as `eps/h^2` (M-220), so at
-	 * `h = 1/24` the map's own evaluation noise is `6.9e-05` before the fit
-	 * amplifies it. Nothing downstream of that map can be asked for more.
+	 * -- the recovered g within `3.5` times the residual in every draw, which
+	 * is the outer Jacobian's own conditioning working on it. The single
+	 * floor there is 4.9e-04, meq::toroidalMapFloor(): the inner solve's
+	 * `10 eps` carried through the inversion and the fit.
 	 *
-	 * The constant is **8**, which clears the measured 1.9 by four. It
+	 * The constant is **8**, which clears the measured 3.5 by 2.3. It
 	 * `std::max`es against the caller's own value as everything here does, and
-	 * in double that is what it picks: `8 x 3.68e-06` is `2.9e-05` against a
-	 * bound of `1e-04`, so the double assertion is unchanged with a margin of
-	 * 3.4 -- stated rather than assumed, because unlike an `eps` expression
-	 * this one is inert in double by MEASUREMENT and not by construction. If a
-	 * double run ever comes to rest above `1.3e-05` this bound starts to give,
-	 * and that would itself be the finding. M-222.
+	 * in double that is what it picks: `8 x 1.6e-09` is far under the `1e-04`
+	 * bound, so the double assertion is the historical one -- stated rather
+	 * than assumed, because unlike an `eps` expression this one is inert in
+	 * double by MEASUREMENT and not by construction. M-222.
 	 */
 	inline double achievedResidualFloor( double historical, double finalResidual )
 	{

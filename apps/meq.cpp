@@ -12,7 +12,8 @@
  *
  *     0  solved, and everything asked for was written
  *     1  the configuration is wrong, or the run cannot be set up from it
- *     2  the non-linear solve did not converge
+ *     2  the non-linear solve did not converge -- including a q-driven
+ *        run's OUTER loop, whatever its last inner equilibrium did
  *     3  output could not be written
  *
  * Exit 2 is only reportable because ../mfem/install is built with
@@ -81,6 +82,23 @@ namespace
 		TargetsNotMet = 4
 	};
 
+	/*
+	 * A q-DRIVEN RUN'S OUTER LOOP DID NOT CONVERGE, AND THAT IS NOT A FAILURE
+	 * THE RETRY RUNG CAN ANSWER.
+	 *
+	 * Its own type so that the ladder can tell it from an inner Newton's
+	 * failure, which is what the rung exists for. The outer loop already
+	 * absorbs every inner failure as a refusal -- meq::ToroidalFieldMap
+	 * returns a residual pointing back at the last admissible point -- so by
+	 * the time this is thrown the inner solves were not what stopped it, and
+	 * the rung, which re-solves ONE equilibrium at whatever g g' the loop
+	 * last tried, would be answering a different question. See the ladder.
+	 */
+	struct ToroidalLoopFailed : std::runtime_error
+	{
+		using std::runtime_error::runtime_error;
+	};
+
 	void usage()
 	{
 		std::printf(
@@ -111,6 +129,20 @@ namespace
 			"                       every phase, perturbed pivots and refinement\n"
 			"                       steps among them -- what decides the\n"
 			"                       backsolve leg. Several lines a phase.\n"
+			"  --trace-refinement-cap N\n"
+			"                       PARDISO's iterative refinement cap, iparm[7]:\n"
+			"                       0 by default, which refines only after a\n"
+			"                       perturbed pivot; MFEM's own default is 2. A\n"
+			"                       diagnostic: --profile reports the steps each\n"
+			"                       solve took and the pivots perturbed.\n"
+			"  --q-iteration-cap N  the q-driven outer Newton's KINSOL iteration\n"
+			"                       cap, 30 by default. Each iteration costs\n"
+			"                       2 ( SafetyFactorDegree + 1 ) + 1 whole\n"
+			"                       equilibria, so this bounds the run. It cannot\n"
+			"                       change the g a converging loop reports, only\n"
+			"                       whether it reports one: a loop that has not\n"
+			"                       converged within it exits 2. Refused on a run\n"
+			"                       without [source] SafetyFactorFile.\n"
 			"\n"
 			"  --gf                 also write the GLVis files -- <stem>.mesh,\n"
 			"                       _psi.gf, _grad_psi.gf, _psistar.gf -- as\n"
@@ -1022,6 +1054,10 @@ int main( int argc, char **argv )
 	bool meshReady = false;
 	bool wantProfile = false;
 	bool wantTraceSolverStats = false;
+	// Unset leaves the solver's own default.
+	std::optional<int> traceRefinementCap;
+	// Unset leaves meq::OuterNewtonOptions' own default.
+	std::optional<int> qIterationCap;
 	bool wantGridFunctions = false;
 	bool wantVtk = false;
 	bool badUsage = false;
@@ -1041,6 +1077,42 @@ int main( int argc, char **argv )
 			wantProfile = true;
 		else if ( arg == "--trace-solver-stats" )
 			wantTraceSolverStats = true;
+		else if ( arg == "--trace-refinement-cap" )
+		{
+			// Any integer is MKL's to read, a negative one included, so only
+			// a missing or non-numeric value is refused.
+			char *end = nullptr;
+			long const value = ( i + 1 < argc )
+				? std::strtol( argv[ i + 1 ], &end, 10 ) : 0;
+			if ( i + 1 >= argc || end == argv[ i + 1 ] || *end != '\0' )
+			{
+				std::fprintf( stderr,
+					"MEQ: --trace-refinement-cap needs an integer, for example "
+					"--trace-refinement-cap 0.\n" );
+				return ConfigurationError;
+			}
+			traceRefinementCap = static_cast<int>( value );
+			++i;
+		}
+		else if ( arg == "--q-iteration-cap" )
+		{
+			// A count of KINSOL iterations, so it has to be one at least:
+			// KINSOL reads zero as "its own default" and a negative as an
+			// error, and neither is what a user writing 0 meant.
+			char *end = nullptr;
+			long const value = ( i + 1 < argc )
+				? std::strtol( argv[ i + 1 ], &end, 10 ) : 0;
+			if ( i + 1 >= argc || end == argv[ i + 1 ] || *end != '\0'
+			     || value < 1 || value > 100000 )
+			{
+				std::fprintf( stderr,
+					"MEQ: --q-iteration-cap needs a positive integer, for example "
+					"--q-iteration-cap 10.\n" );
+				return ConfigurationError;
+			}
+			qIterationCap = static_cast<int>( value );
+			++i;
+		}
 		else if ( arg == "--gf" )
 			wantGridFunctions = true;
 		else if ( arg == "--vtk" )
@@ -1852,6 +1924,17 @@ int main( int argc, char **argv )
 	catch ( std::exception const &error )
 	{
 		std::fprintf( stderr, "MEQ: %s\n", error.what() );
+		return ConfigurationError;
+	}
+
+	// REFUSED RATHER THAN IGNORED, as a second configuration file is: a cap
+	// on a loop the run does not have would read as having bounded something.
+	if ( qIterationCap && !toroidalDriven )
+	{
+		std::fprintf( stderr,
+			"MEQ: --q-iteration-cap caps the q-driven outer loop, and %s has\n"
+			"     none: it names no [source] SafetyFactorFile.\n",
+			argument.c_str() );
 		return ConfigurationError;
 	}
 
@@ -2866,11 +2949,15 @@ int main( int argc, char **argv )
 					/*
 					 * AND THE BORDER'S OTHER UNKNOWNS, BY THE ADAPTIVE LOOP'S
 					 * RULE: what one cycle hands the next -- the located null,
-					 * the free currents, and the I_p profile scale, which lives
-					 * on the shared source -- is what a restart takes from the
-					 * file. Without them the whole iterate starts at the answer
-					 * and the border does not, which costs the steps it was
-					 * meant to save. Each only where this run has that unknown.
+					 * the free currents, and the I_p profile scale -- is what a
+					 * restart takes from the file. Without them the whole
+					 * iterate starts at the answer and the border does not,
+					 * which costs the steps it was meant to save. Each only
+					 * where this run has that unknown. The scale set on the
+					 * shared source here is what the Picard pre-stage starts
+					 * from; the bordered solve starts its own from
+					 * setPlasmaCurrentScaleInitial(), on the exact restart
+					 * below, since a fresh solver overwrites the source's.
 					 */
 					if ( stored.hasXPoint() && config->getBoundary().xpoint.given )
 					{
@@ -3382,6 +3469,8 @@ int main( int argc, char **argv )
 				: meq::GradShafranovSolver::TraceAssemblyMode::Serial );
 		fresh->setTraceSolver( traceSolver );
 		fresh->setTraceSolverStatistics( wantTraceSolverStats );
+		if ( traceRefinementCap )
+			fresh->setTraceRefinementCap( *traceRefinementCap );
 
 		if ( !firstCycle && previousPotential )
 		{
@@ -3480,6 +3569,20 @@ int main( int argc, char **argv )
 							// that it lands there.
 							if ( storedGuess->hasPsiBoundary() )
 								fresh->setBoundaryFluxInitial( storedGuess->psiBoundary() );
+
+							// AND THE PROFILE SCALE AT THE FILE'S, ON THE SOLVER.
+							// Set on the shared source above, it reaches the
+							// Picard pre-stage and nothing else: a fresh solver
+							// starts the scale at one and tells the source so
+							// before its first residual. The answer's iterate at
+							// another scale is not the answer: on limited-tokamak,
+							// 9.1e-04 off, it is a first field residual 185x the
+							// run's last, two Newton steps and psi_ax moved by up
+							// to 5.6e-05 relative in single. M-298.
+							if ( storedGuess->hasProfileScale() && normalised
+							     && config->getSource().plasmaCurrent() != 0.0 )
+								fresh->setPlasmaCurrentScaleInitial(
+									storedGuess->profileScale() );
 
 							// AND THE FIRST PLASMA FILL SEEDED AT THE FILE'S AXIS,
 							// which this fresh solver has not located: its own
@@ -3822,15 +3925,48 @@ int main( int argc, char **argv )
 				return targetProfile( psi );
 			};
 
+			// THE MAP'S FLOOR IS ITS INNER SOLVE'S ACCURACY CARRIED THROUGH THE
+			// INVERSION AND THE FIT -- meq::toroidalMapFloor() -- and the
+			// solver below is converged to exactly the relative tolerance set
+			// on it in makeSolver(), floored there as here.
+			mapOptions.solveAccuracy =
+				meq::newtonTolerance( config->getSolver().newtonRelativeTolerance );
+
 			meq::ToroidalFieldMap map( step, mapOptions );
 
 			// std::ref AND NOT THE OBJECT. solveForToroidalField takes a
 			// std::function, which COPIES what it is given -- so the copy would
 			// do the solving and keep the counts, and the map here would report
 			// zero of everything afterwards. A reference_wrapper keeps one map.
-			meq::OuterNewtonResult const outcome =
-				meq::solveForToroidalField( toroidalCoefficients,
-				                            std::ref( map ) );
+			meq::OuterNewtonOptions outerOptions;
+			if ( qIterationCap )
+				outerOptions.maxIterations = *qIterationCap;
+			outerOptions.mapFloor = [ &map ]() { return map.floor(); };
+			/*
+			 * AN EXCEPTION OUT OF THE OUTER LOOP IS AN OUTER FAILURE TOO, and
+			 * reaching the ladder below as anything else gives it the rung:
+			 * one equilibrium at whichever g g' the loop last installed, an
+			 * exit 0, and a file whose header says g was solved for.
+			 * Measured, by an MFEM_VERIFY inside the outer Newton's own
+			 * KINSOL setup -- the run went on to "converged in 4 Newton
+			 * iterations (via bordered-picard-then-newton)" and wrote
+			 * q-driven.nc and exited 0, the loop never having run. The map cannot
+			 * throw (meq::ToroidalFieldMap), so whatever does is the loop's.
+			 */
+			meq::OuterNewtonResult const outcome = [ & ]
+			{
+				try
+				{
+					return meq::solveForToroidalField(
+						toroidalCoefficients, std::ref( map ), outerOptions );
+				}
+				catch ( std::exception const &error )
+				{
+					throw ToroidalLoopFailed(
+						std::string( "the outer Newton on the toroidal field "
+						             "failed: " ) + error.what() );
+				}
+			}();
 
 			std::printf( "  q-driven outer loop: %s\n", outcome.status.c_str() );
 			std::printf( "  %d equilibria solved, %d refused, outer Jacobian "
@@ -3839,7 +3975,7 @@ int main( int argc, char **argv )
 			             outcome.jacobianConditioning );
 
 			if ( !outcome.converged )
-				throw std::runtime_error(
+				throw ToroidalLoopFailed(
 					"the outer Newton on the toroidal field did not converge: "
 					+ outcome.status );
 
@@ -4778,6 +4914,52 @@ int main( int argc, char **argv )
 			reportResiduals( solver->newtonResiduals() );
 			if ( wantProfile )
 				reportBorderSteps( solver.get() );
+
+			/*
+			 * A q-DRIVEN RUN WHOSE OUTER LOOP DID NOT CONVERGE HAS NO ANSWER, AND
+			 * THE RUNG IS NOT RUN FOR IT.
+			 *
+			 * The run is solving FOR g, so the equilibrium it owes is the one
+			 * at the g the loop converged to, and there is none. The rung below
+			 * re-solves ONE equilibrium at whatever g g' the loop's last map
+			 * evaluation installed -- a line-search trial or a differencing
+			 * column -- and that is the equilibrium of a different problem: a
+			 * prescribed g that nobody asked for. Measured on
+			 * examples/q-driven.toml in single under --trace-refinement-cap 2,
+			 * where KINSOL's line search stalls at a residual of 1.29e-02 after
+			 * 11 iterations: the rung converged in 4 Newton steps, the run exited
+			 * 0, and the g^2 it wrote was the guess's, ( 4.84, 0, 0 ) against
+			 * the answer's ( 4.84, 2.42, 0.3025 ), with q 21% from the target.
+			 *
+			 * Nor is the rung a cure that has been withheld. The loop absorbs
+			 * every inner failure as a refusal (meq::ToroidalFieldMap), so an
+			 * outer failure is the OUTER iteration's -- a stalled line search, a
+			 * rank-deficient Jacobian, the iteration cap -- and a different
+			 * inner globalisation does not move it. A loop that converges and
+			 * whose own answer then fails to re-solve throws an ordinary
+			 * exception instead and IS retried: the rung's solve is then at the
+			 * converged g, which is the same problem.
+			 *
+			 * So it exits 2 and writes nothing, as any failed solve does, and
+			 * there is no key to accept the last iterate instead: what it would
+			 * write is an equilibrium whose q is not the target, under a header
+			 * saying g was solved for. DriverAcceptance's
+			 * aQDrivenRunWhoseOuterLoopFailsExitsTwo asserts this.
+			 */
+			if ( dynamic_cast<ToroidalLoopFailed const *>( &firstAttempt ) )
+			{
+				std::fprintf( stderr,
+					"MEQ: the q-driven outer loop did not converge: %s\n"
+					"     The run solves FOR g( Psi ), so without a converged g there is\n"
+					"     no equilibrium to report. The bordered Picard-then-Newton\n"
+					"     retry is not run: it would re-solve one equilibrium at the\n"
+					"     g g' the loop last tried, which is a different problem whose q\n"
+					"     is not the target. The levers are a [source] ToroidalFieldGuess\n"
+					"     nearer the machine's R0 B0, a lower SafetyFactorDegree, and\n"
+					"     RESOLUTION.\n",
+					firstAttempt.what() );
+				return SolveFailed;
+			}
 
 			/*
 			 * THE BORDERED PATH'S SECOND RUNG, AND IT IS ITS OWN.
@@ -7904,10 +8086,15 @@ int main( int argc, char **argv )
 		     p.traceSolveCalls );
 		// DISJOINT from the backsolve above, not a slice of it: the wall time
 		// of DarcyNPCSolver::ArrayMult() less the trace solve inside it, which
-		// is NPCReduce() and NPCRecover() alone. Zero off the bordered path,
-		// where nothing queues a column.
+		// is NPCReduce(), NPCRecover() and the staging around them. Zero off
+		// the bordered path, where nothing queues a column.
 		leg( "NPC reduce+recover", p.npcTraversalSeconds,
 		     p.npcTraversalCpuSeconds, p.npcTraversalCalls );
+		// Upstream's own three parts of the line above, on its clock and with
+		// no CPU counterpart, so no cores column. See StepProfile.
+		leg( "  of which reduce", p.npcReduceSeconds, 0.0, p.npcTraversalCalls );
+		leg( "  of which recover", p.npcRecoverSeconds, 0.0, p.npcTraversalCalls );
+		leg( "  of which staging", p.npcStagingSeconds, 0.0, p.npcTraversalCalls );
 		leg( "plasma fill", p.componentSeconds, p.componentCpuSeconds,
 		     p.componentCalls );
 		leg( "constraint location", p.constraintSeconds,
@@ -7967,6 +8154,18 @@ int main( int argc, char **argv )
 		             "cache %s\n",
 		             solver->fluxMassIsPrefactored() ? "yes" : "NO",
 		             solver->condensationCacheTaken() ? "yes" : "NO" );
+		// WHAT PARDISO DID, from its own outputs. Silent under any other trace
+		// solver, where there is nothing to read. See StepProfile.
+		if ( p.traceSolvePhases > 0 )
+			std::printf( "MEQ:   trace refinement %ld steps over %ld solve "
+			             "phases, at most %d in one, cap %d; %ld pivots perturbed "
+			             "over %ld factorisations\n",
+			             p.traceRefinementSteps, p.traceSolvePhases,
+			             p.traceRefinementMost, solver->traceRefinementCap(),
+			             p.tracePerturbedPivots, p.traceFactorCalls );
+		if ( p.elementColours > 0 )
+			std::printf( "MEQ:   element colours %d, the passes NPCReduce runs\n",
+			             p.elementColours );
 		/*
 		 * UPSTREAM'S CALLER-INTEGRAND ROUTE, ASKED OF THE LIBRARY AFTER THE
 		 * SOLVE RATHER THAN INFERRED FROM A PREDICATE LIST.

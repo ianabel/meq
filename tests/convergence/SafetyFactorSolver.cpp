@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -302,6 +305,7 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 	 * everywhere it is.
 	 */
 	std::vector<double> lastGood;
+	double mapFloor = 0.0;
 
 	auto unreachable = [ & ]( std::vector<double> const &c )
 	{
@@ -341,6 +345,10 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 		lastGood = c;
 		std::vector<double> const out =
 			meq::fitToroidalFieldSquared( inverted, degree );
+		// THE MAP'S OWN FLOOR, from the accuracy every solve here is converged
+		// to -- solveWith()'s relative tolerance, floored as it is there.
+		mapFloor = meq::toroidalMapFloor( inverted, degree,
+		                                  meq::newtonTolerance( 1.0e-12 ) );
 		return out;
 	};
 
@@ -372,6 +380,7 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 	meq::OuterNewtonOptions newtonOptions;
 	newtonOptions.functionTolerance = 1.0e-8;
 	newtonOptions.maxIterations = 20;
+	newtonOptions.mapFloor = [ &mapFloor ]() { return mapFloor; };
 	meq::OuterNewtonResult const result =
 		meq::solveForToroidalField( startCoefficients, picardStep,
 		                            newtonOptions );
@@ -409,18 +418,25 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 
 	/*
 	 * **AND THE ANSWER IS WORTH THE RESIDUAL THE LOOP CAME TO REST AT**, which
-	 * is not the residual it was asked for. KINSOL stops on a step that has
-	 * become too small as readily as on a function norm that has become small
-	 * enough and reports `converged` for both; asked for 1e-09 here, it rests
-	 * at 3.68e-06 in double and 3.71e-03 in single. That single figure is the
-	 * MAP's own noise and not the solver's: `q` is a flux-surface average, so
-	 * its floor rises as eps/h^2 -- 6.9e-05 at this h -- and the fit from `q`
-	 * to the coefficients of `g^2` amplifies it. The recovered g is 1.9 times
-	 * the resting residual out, which is the outer Jacobian's conditioning.
+	 * is now the residual it was asked for or the map's floor, whichever is
+	 * larger: the loop is converged only there (meq::solveForToroidalField).
+	 * Asked for 1e-08, it rests at 1.6e-09 in double -- 4 iterations, 29
+	 * solves -- and at 4.5e-05 to 4.6e-04 in single against a floor of
+	 * 4.9e-04, in 2 or 3 iterations and 15 or 22 solves on both MKLs and at
+	 * one, two and four MKL threads, with g 3.1e-05 to 5.8e-04 out.
+	 *
+	 * **THE FIGURES THIS USED TO QUOTE WERE KINSOL'S AND NOT THE MAP'S.**
+	 * 3.68e-06 in double and 3.71e-03 in single are under MFEM's default
+	 * absolute tolerance, eps^( 1/3 ) -- 6.1e-06 and 4.9e-03 -- which is
+	 * where the loop stopped, reporting success, before it was given a
+	 * tolerance of its own. The single one was read here as the map's eps/h^2
+	 * noise; measured, that noise is 1.5 to 4.6 times the inner solve's 10
+	 * eps per surface and flat in h, and the single loop's three failures in
+	 * six MKL draws ("no sufficiently distinct iterate") were its line search
+	 * working on a Jacobian differenced at 1e-4 against it.
 	 *
 	 * achievedResidualFloor() `std::max`es, so in double it picks the 1e-4 that
-	 * has always been asserted, with a margin of 3.4 stated in its doxygen.
-	 * M-220's first law read the other way round. M-222.
+	 * has always been asserted. M-222.
 	 */
 	double const settled =
 		meq::tests::achievedResidualFloor( 1.0e-4, result.finalResidual );
@@ -549,44 +565,77 @@ BOOST_AUTO_TEST_CASE( newton_finishes_an_unstable_affine_map_in_one_step )
 	};
 
 	std::vector<double> start = { 6.0, 3.4, 0.5 };
-	meq::OuterNewtonResult const result =
-		meq::solveForToroidalField( start, map );
 
-	BOOST_TEST( result.converged,
-		"Newton did not converge on an AFFINE map, where an exact Jacobian must "
-		"land on the root in one step" );
-	BOOST_TEST( result.iterations == 1,
-		"Newton took " << result.iterations << " steps on an affine map. One is "
-		"the whole assertion: more means the differenced Jacobian is not the "
-		"map's own slope." );
 	/*
-	 * **AND WHERE IT LANDS IS THE DIFFERENCE'S ACCURACY TIMES THE DISTANCE IT
+	 * ONE STEP, AND WHERE IT LANDS.
+	 *
+	 * **WHERE IT LANDS IS THE DIFFERENCE'S ACCURACY TIMES THE DISTANCE IT
 	 * TRAVELLED, NOT THE MAP'S EXACTNESS.** A central difference of a linear
 	 * function is that function's slope with no truncation remainder -- which
 	 * is the whole reason this fixture is affine -- but the CANCELLATION term
 	 * survives, and it is eps/step, so the best a differenced Jacobian can know
 	 * its slope to is sqrt( eps ). One Newton step with a Jacobian carrying a
-	 * relative error d lands within d times the distance it moved. Measured:
-	 * coefficient 0 travels 1.16 and comes back 2.25e-04 out, coefficient 1
-	 * travels 0.98 and comes back 2.08e-05 out, against sqrt( eps ) = 3.45e-04.
+	 * relative error d lands within d times the distance it moved. Measured at
+	 * a step of 1e-4: coefficient 0 travels 1.16 and comes back 2.25e-04 out,
+	 * coefficient 1 travels 0.98 and comes back 2.08e-05 out, against
+	 * sqrt( eps ) = 3.45e-04. M-219, M-222.
 	 *
-	 * The ONE-STEP assertion above is untouched and is the sharp one: a
-	 * Jacobian that was not the map's own slope would need more than one step
-	 * whatever the format. M-219, M-222.
+	 * AND IT COSTS ONE RESIDUAL, ONE JACOBIAN AND ONE TRIAL: 2n + 2
+	 * evaluations. KINSOL's own difference-quotient `J p` for the line search,
+	 * which is what it forms unless it is handed the Jacobian's product, is a
+	 * ninth -- an equilibrium per outer iteration on the real loop.
 	 */
+	meq::OuterNewtonOptions oneStep;
+	oneStep.maxIterations = 1;
+	meq::OuterNewtonResult const first =
+		meq::solveForToroidalField( start, map, oneStep );
+	BOOST_TEST( first.iterations == 1 );
+	BOOST_TEST( first.mapEvaluations == 2*static_cast<int>( start.size() ) + 2,
+		"one Newton step on a three-coefficient map cost "
+		<< first.mapEvaluations << " evaluations, against the 8 of a residual, "
+		"a Jacobian and a trial point. One more is KINSOL forming J p by a "
+		"difference of its own instead of from the Jacobian" );
 	for ( std::size_t i = 0; i < fixedPoint.size(); ++i )
 	{
 		double const travelled = std::abs( start[ i ] - fixedPoint[ i ] );
 		double const landing =
 			std::max( 1.0e-10,
 			          meq::tests::differencedAgreementFloor( 0.0 )*travelled );
-		BOOST_TEST( std::abs( result.coefficients[ i ] - fixedPoint[ i ] )
+		BOOST_TEST( std::abs( first.coefficients[ i ] - fixedPoint[ i ] )
 		            < landing,
-			"coefficient " << i << " came back " << result.coefficients[ i ]
+			"coefficient " << i << " came back " << first.coefficients[ i ]
 			<< " against the map's own fixed point " << fixedPoint[ i ]
 			<< ", outside the " << landing << " that a differenced Jacobian "
 			"leaves after one step over a distance of " << travelled );
 	}
+
+	/*
+	 * AND THE WHOLE SOLVE, JUDGED AGAINST ITS TOLERANCE.
+	 *
+	 * **ONE STEP IN DOUBLE, TWO IN SINGLE, AND THE SECOND IS THE FORMAT AND
+	 * NOT THE JACOBIAN.** The first step lands within sqrt( eps ) of the
+	 * distance it travelled, as above; the loop is converged only once the
+	 * residual is at max( tolerance, floor ), and the floor of an EXACT map is
+	 * the iterate's own rounding, `|| J || eps || c ||` -- 6e-07 in single and
+	 * 1e-15 in double, against a tolerance of 1e-09. Double's first landing is
+	 * below its tolerance; single's 2e-04 is not, and one more step with the
+	 * same Jacobian squares the relative error into the iterate's floor. A
+	 * Jacobian that was NOT the map's slope would converge linearly, taking
+	 * many more than two.
+	 */
+	meq::OuterNewtonResult const result =
+		meq::solveForToroidalField( start, map );
+	BOOST_TEST( result.converged,
+		"Newton did not converge on an AFFINE map: " << result.status );
+#ifdef MFEM_USE_SINGLE
+	int const steps = 2;
+#else
+	int const steps = 1;
+#endif
+	BOOST_TEST( result.iterations <= steps,
+		"Newton took " << result.iterations << " steps on an affine map, "
+		"against " << steps << " in this format. More means the differenced "
+		"Jacobian is not the map's own slope: " << result.status );
 
 	/*
 	 * THE CONTROL, AND IT IS THE REASON THE NEWTON IS HERE. The same map under
@@ -728,6 +777,189 @@ BOOST_AUTO_TEST_CASE( an_undetermined_outer_jacobian_is_refused )
 	};
 	BOOST_CHECK_THROW( meq::solveForToroidalField( start, ragged ),
 	                   std::invalid_argument );
+}
+
+namespace
+{
+	/*
+	 * A DETERMINISTIC NOISE IN [ -1, 1 ], a hash of the bits of the point and
+	 * the component. It is what a map built on a whole equilibrium solve looks
+	 * like from outside: smooth on the scale of a Newton step, rough on the
+	 * scale of round-off, and the same number every time it is asked at the
+	 * same point.
+	 */
+	double hashedNoise( std::vector<double> const &c, std::size_t component )
+	{
+		std::uint64_t h = 1469598103934665603ull;
+		for ( double value : c )
+		{
+			std::uint64_t bits = 0;
+			std::memcpy( &bits, &value, sizeof bits );
+			h = ( h ^ bits )*1099511628211ull;
+		}
+		h ^= ( component + 1 )*0x9E3779B97F4A7C15ull;
+		h ^= h >> 33;
+		h *= 0xff51afd7ed558ccdull;
+		h ^= h >> 33;
+		return static_cast<double>( h >> 11 )
+		       /static_cast<double>( 1ull << 53 )*2.0 - 1.0;
+	}
+
+	/// The unstable affine map of newton_finishes_an_unstable_affine_map_in_
+	/// one_step, made non-linear so that Newton takes several steps, and noisy
+	/// at @a noise.
+	std::function<std::vector<double>( std::vector<double> const & )>
+	noisyMap( double noise )
+	{
+		return [ noise ]( std::vector<double> const &c )
+		{
+			std::vector<double> const root = { 4.84, 2.42, 0.3025 };
+			std::vector<double> out( c.size() );
+			for ( std::size_t i = 0; i < c.size(); ++i )
+			{
+				double const away = c[ i ] - root[ i ];
+				out[ i ] = root[ i ] + 1.8*away + 0.3*away*away
+				           + noise*hashedNoise( c, i );
+			}
+			return out;
+		};
+	}
+}
+
+/*
+ * A LOOP THAT STALLS ABOVE ITS MAP'S FLOOR IS NOT CONVERGED, AND ONE THAT
+ * REACHES THE FLOOR IS -- WHATEVER KINSOL'S OWN FLAG SAYS ABOUT EITHER.
+ *
+ * **THE RULE: CONVERGED MEANS `|| G( c ) - c ||_inf` AT THE ANSWER IS AT OR
+ * BELOW max( TOLERANCE, FLOOR ).** `mfem::KINSolver::GetConverged()` is
+ * `flag >= 0`, which counts `KIN_STEP_LT_STPTOL` -- KINSOL's "the step got too
+ * small to move", its report that it can make no more progress -- as
+ * converged at any residual at all. And MFEM's default absolute tolerance,
+ * `eps^( 1/3 )`, is 4.9e-03 in single, so the q-driven loop on
+ * `examples/q-driven.toml` stopped there on `KIN_SUCCESS` and read "converged
+ * ... final norm 0.00502" beside a requested 1e-9, with g^2 1-2% out.
+ *
+ * Three maps, each asserted both ways round, because a rule that only ever
+ * says one thing passes half of this:
+ *
+ *   A STEP-TOLERANCE STALL, made deterministic: a smooth map, a step tolerance
+ *   of 1e-2, so KINSOL stops on `KIN_STEP_LT_STPTOL` at a residual well above
+ *   the 1e-12 asked for. Not converged -- and converged once the map declares
+ *   a floor above where it stopped, which is the control.
+ *
+ *   A NOISY MAP WITH ITS FLOOR STATED: noise 1e-4 and a floor of 1e-3. It
+ *   reaches the floor, in a handful of Newton steps.
+ *
+ *   THE SAME MAP WITH ITS FLOOR UNDERSTATED a hundredfold: no residual it can
+ *   reach is below the threshold, so whatever KINSOL stops on, it is not
+ *   converged -- and it must still stop, in a bounded number of evaluations.
+ */
+BOOST_AUTO_TEST_CASE( a_stall_above_the_floor_is_not_converged )
+{
+	std::vector<double> const start = { 6.0, 3.4, 0.5 };
+
+	// ---- a deterministic step-tolerance stop -----------------------------
+	meq::OuterNewtonOptions stalling;
+	stalling.functionTolerance = 1.0e-12;
+	stalling.stepTolerance = 1.0e-2;
+	meq::OuterNewtonResult const stalled =
+		meq::solveForToroidalField( start, noisyMap( 0.0 ), stalling );
+	std::printf( "\n  A STEP-TOLERANCE STOP: %s\n", stalled.status.c_str() );
+	BOOST_TEST( !stalled.converged,
+		"a loop that stopped on its step tolerance at a residual of "
+		<< stalled.finalResidual << ", above the 1e-12 asked for and with no "
+		"floor declared, reads as converged: " << stalled.status );
+	BOOST_TEST( stalled.finalResidual > stalling.functionTolerance,
+		"the precondition: KINSOL must have stopped ABOVE the tolerance, or "
+		"this case is not a stall" );
+
+	meq::OuterNewtonOptions excused = stalling;
+	double const declared = 2.0*stalled.finalResidual;
+	excused.mapFloor = [ declared ]() { return declared; };
+	meq::OuterNewtonResult const atFloor =
+		meq::solveForToroidalField( start, noisyMap( 0.0 ), excused );
+	BOOST_TEST( atFloor.converged,
+		"the same stop with a floor declared at " << declared << " above it "
+		"is not converged, so the floor is not part of the rule: "
+		<< atFloor.status );
+	BOOST_TEST( atFloor.floor >= declared );
+
+	// ---- a noisy map, its floor stated -----------------------------------
+	double const noise = 1.0e-4;
+	meq::OuterNewtonOptions honest;
+	honest.mapFloor = [ noise ]() { return 10.0*noise; };
+	meq::OuterNewtonResult const reached =
+		meq::solveForToroidalField( start, noisyMap( noise ), honest );
+	std::printf( "  A NOISY MAP, FLOOR STATED: %s\n", reached.status.c_str() );
+	BOOST_TEST( reached.converged, reached.status );
+	BOOST_TEST( reached.finalResidual <= 10.0*noise );
+	// A NEWTON, NOT A CRAWL: a fresh Jacobian at every iterate takes this
+	// quadratic map from 1.2 away to its floor in a handful of steps, where
+	// KINSOL's default -- a Jacobian kept for ten iterations -- contracts
+	// linearly.
+	BOOST_TEST( reached.iterations <= 6,
+		"the loop took " << reached.iterations << " iterations to reach a "
+		"floor of " << 10.0*noise << " on a quadratic map" );
+
+	// ---- the same map, its floor understated -----------------------------
+	meq::OuterNewtonOptions understated;
+	understated.functionTolerance = 1.0e-12;
+	understated.mapFloor = [ noise ]() { return noise/100.0; };
+	meq::OuterNewtonResult const lost =
+		meq::solveForToroidalField( start, noisyMap( noise ), understated );
+	std::printf( "  A NOISY MAP, FLOOR UNDERSTATED: %s\n", lost.status.c_str() );
+	BOOST_TEST( !lost.converged,
+		"a loop whose residual " << lost.finalResidual << " sits above the "
+		"threshold " << noise/100.0 << " reads as converged: " << lost.status );
+	BOOST_TEST( lost.finalResidual > noise/100.0 );
+	BOOST_TEST( lost.mapEvaluations
+	            <= ( understated.maxIterations + 1 )
+	               *( 2*static_cast<int>( start.size() ) + 6 ) );
+}
+
+/*
+ * THE OUTER NEWTON IS A NEWTON: A FRESH JACOBIAN AT EVERY ITERATE.
+ *
+ * KINSOL's default keeps a Jacobian for ten iterations, which on the q-driven
+ * loop meant the vacuum start's for the whole run: measured on
+ * `examples/q-driven.toml` in single, the max norm went 0.244, 0.191, 0.149,
+ * ..., 0.008, 0.0042 over eight iterations -- a linear crawl, which this tree
+ * treats as a defect rather than as convergence. This map makes the same
+ * mistake visible: cubic, so the slope at the start is eleven times the
+ * slope at the root, and a Jacobian kept from the start takes steps eleven
+ * times too short. Newton's own count on it is asserted, with the cost.
+ */
+BOOST_AUTO_TEST_CASE( the_outer_newton_forms_a_fresh_jacobian_every_iteration )
+{
+	std::vector<double> const root = { 4.84, 2.42, 0.3025 };
+	auto cubic = [ &root ]( std::vector<double> const &c )
+	{
+		std::vector<double> out( c.size() );
+		for ( std::size_t i = 0; i < c.size(); ++i )
+		{
+			double const away = c[ i ] - root[ i ];
+			out[ i ] = root[ i ] + 1.8*away + 2.0*away*away*away;
+		}
+		return out;
+	};
+
+	std::vector<double> const start = { 6.0, 3.4, 0.5 };
+	meq::OuterNewtonOptions options;
+	options.functionTolerance = 1.0e-6;
+	meq::OuterNewtonResult const result =
+		meq::solveForToroidalField( start, cubic, options );
+	std::printf( "\n  A CUBIC MAP: %s\n", result.status.c_str() );
+	BOOST_TEST( result.converged, result.status );
+	// Measured: 6 iterations and 43 evaluations, one residual and one fresh
+	// Jacobian each. With KINSOL's default the same run takes 9 and 64 -- MORE
+	// evaluations, not fewer, because a kept Jacobian's short steps are what
+	// its line search then spends equilibria on. One iteration of margin.
+	BOOST_TEST( result.iterations <= 7,
+		"the outer Newton took " << result.iterations << " iterations on a "
+		"cubic map that Newton itself finishes in 6: a Jacobian is being kept "
+		"from an earlier iterate. " << result.status );
+	BOOST_TEST( result.mapEvaluations
+	            <= 1 + 7*( 2*static_cast<int>( start.size() ) + 1 ) );
 }
 
 /*

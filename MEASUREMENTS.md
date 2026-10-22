@@ -19742,3 +19742,351 @@ next solve with nothing. It now locates once on the converged iterate, which
 takes no Newton step and moves no number; and the report gives where the
 constraint was located, `( R, z )`, beside the post-solve check's own.
 
+
+### M-301
+
+**UPSTREAM'S REDUCE AND RECOVER, TIMED APART ON TCV: REDUCE REACHES 4.6 TO
+4.8x AT EIGHT THREADS AND RECOVER 3.2 TO 3.5x, AS UPSTREAM MEASURED ON ITS
+OWN CASE, AND A FURTHER 32 ms A CALL THAT DOES NOT THREAD AT ALL SITS IN
+`DarcyNPCSolver::ArrayMult()` OUTSIDE BOTH. AND PARDISO'S REFINEMENT CAP AT
+ZERO CUTS THE BACKSOLVE 4.0 TO 5.2x AND THE WALL 10 TO 18% ON ALL TEN
+DIRECTORIES, WITH THE SAME NEWTON PATH AND THE ANSWER MOVED BY 1e-14.** The
+measurements `../../mfem-hdg-dev`'s reply 2 asked for, on the ten directories
+of [M-300](#m-300).
+
+**Setup.** `0e7177a` plus the uncommitted tree that reads upstream's new
+counters: `--profile` prints `DarcyHybridization::GetNPCReduceTime()` and
+`GetNPCRecoverTime()` under MEQ's own reduce+recover leg, the element colours,
+and PARDISO's `iparm[6]` and `iparm[13]` summed over every solve phase and
+factorisation; `--trace-refinement-cap N` sets `iparm[7]` through
+`PardisoSolver::SetMaxRefinementSteps()`. MFEM is `meq-integration` at
+`61aab37558`, both installs rebuilt and MEQ rebuilt `--clean-first`. **MKL is
+2026.2**, upgraded the same day from the 2026.1 that [M-300](#m-300) and every
+earlier timing ran on (see `CLAUDE_MFEM.md`). Each directory was copied from
+`runs/perf-profile` and run in place, the warm column restarting from M-300's
+cold `.nc`. Every run waited for under 6% busy CPU, as in M-300
+(`runs/hdg-reply-2/queue.sh`); all 84 exited 0.
+
+**A. TCV (`machine-d-tcv-shaped`, k3 h1.00), threads = `OMP = MKL`,
+`OMP_WAIT_POLICY=passive`, median of three.**
+
+| start | threads | reduce s | recover s | sum s | reduce x | recover x | sum x | MEQ's leg s | outside both s |
+|---|---|---|---|---|---|---|---|---|---|
+| cold | 1 | 1.567 | 1.662 | 3.229 | 1.00 | 1.00 | 1.00 | 3.75 | 0.52 |
+| cold | 2 | 0.844 | 1.007 | 1.851 | 1.86 | 1.65 | 1.74 | 2.35 | 0.50 |
+| cold | 4 | 0.511 | 0.653 | 1.164 | 3.07 | 2.55 | 2.77 | 1.78 | 0.56 |
+| cold | 8 | 0.341 | 0.520 | 0.861 | **4.60** | **3.20** | 3.75 | 1.36 | 0.52 |
+| warm | 1 | 0.995 | 1.044 | 2.039 | 1.00 | 1.00 | 1.00 | 2.37 | 0.33 |
+| warm | 2 | 0.539 | 0.630 | 1.169 | 1.85 | 1.66 | 1.74 | 1.49 | 0.32 |
+| warm | 4 | 0.301 | 0.400 | 0.701 | 3.31 | 2.61 | 2.91 | 1.02 | 0.32 |
+| warm | 8 | 0.207 | 0.297 | 0.504 | **4.81** | **3.52** | 4.05 | 0.84 | 0.32 |
+
+The element colours read **4** on every run, the triangle bound upstream gave.
+Upstream's own case read 4.64x and 3.62x at eight; TCV's reduce matches and its
+recover sits a little under. "MEQ's leg" is `ArrayMult()`'s wall less the
+trace solve inside it, the mean of three; "outside both" is that leg less
+upstream's two halves. **It is flat in the thread count**: 0.52 s over 16
+calls cold, 0.32 s over 10 warm, 32 ms a call, which is 14% of the leg at one
+thread and 38% at eight. `ArrayMult()`'s only work outside `NPCReduce()`,
+`NPCRecover()` and the trace solve is per column: a `BlockVector` for the
+local residual and one for the update allocated and sized, three block copies
+in, the trace update zero-filled, two copies out. That attribution is read
+from the code, not timed apart.
+
+**B. `iparm[7]` 2 against 0, `OMP = MKL = 8`, default wait, median of three.**
+
+| directory | wall cap 2 | wall cap 0 | backsolve cap 2 | backsolve cap 0 | refinement steps, cap 2 | relative dI | relative dpsi_ax |
+|---|---|---|---|---|---|---|---|
+| D k2 h1.00 cold | 4.70 | 3.83 | 0.926 | 0.197 | 34 over 17 phases | 1.2e-14 | 2.2e-15 |
+| D k2 h1.00 warm | 3.23 | 2.78 | 0.611 | 0.138 | 22 over 11 | 9.0e-15 | 9.4e-16 |
+| D k3 h1.00 cold | 7.55 | 6.51 | 1.237 | 0.244 | 32 over 16 | 4.2e-14 | 3.9e-15 |
+| D k3 h1.00 warm | 5.50 | 4.85 | 0.764 | 0.154 | 20 over 10 | 2.1e-14 | 1.1e-15 |
+| F k2 h1.00 cold | 7.55 | 6.47 | 0.663 | 0.164 | 30 over 15 | 7.5e-15 | 2.1e-15 |
+| F k2 h1.00 warm | 2.96 | 2.56 | 0.520 | 0.118 | 20 over 10 | 1.1e-14 | 8.9e-16 |
+| F k3 h1.00 cold | 12.52 | 11.06 | 1.005 | 0.218 | 32 over 16 | 2.0e-14 | 3.5e-15 |
+| F k3 h1.00 warm | 5.17 | 4.66 | 0.727 | 0.148 | 20 over 10 | 1.7e-14 | 4.5e-16 |
+| F k3 h0.50 cold | 28.87 | 25.77 | 2.400 | 0.517 | 30 over 15 | 3.5e-14 | 1.0e-15 |
+| F k3 h0.50 warm | 12.52 | 10.91 | 1.871 | 0.357 | 20 over 10 | 9.0e-14 | 8.8e-15 |
+
+Every phase at cap 2 took both steps, and **no pivot was perturbed in any
+factorisation of any run**, so cap 0 took no refinement step at all and is
+plain PARDISO. The cap-0 and cap-2 wall ranges do not overlap in any
+directory. dI is the largest change in a free current over the largest
+current, between the paired repeats; **the three cap-2 repeats of every
+directory are bit-identical**, so 1e-14 is the cap's own effect and not noise.
+Each directory converges in the same Newton iterations under both caps, and
+the residual histories agree to their round-off rows. The wall falls by the
+backsolve's saving within the spread on all but F's three cold directories,
+where it falls 0.6 to 1.2 s further, outside the spread and not explained.
+
+**Reproduce.** `runs/hdg-reply-2/queue.sh` and `summarise.py`, against an
+installed `meq` that accepts `--trace-refinement-cap`.
+
+### M-302
+
+**MKL 2026.2 TAKES FIVE SINGLE-PRECISION CASES RED AND NONE OF THEM IS LESS
+ACCURATE. FOUR ARE ROUND-OFF LANDING ON THE OTHER SIDE OF A THRESHOLD; THE
+FIFTH, AND TWO MORE CAP 0 SHOWED UP, ARE NOT ULPS: A CRAWL, A PLATEAU, AND A
+DRIVER THAT EXITS 0 WITH AN OUTER LOOP THAT NEVER CONVERGED.**
+
+**Setup.** oneAPI moved `mkl/latest` from 2026.1 to 2026.2 on 2026-10-20, and
+every MEQ and MFEM binary reaches MKL through that RUNPATH. One `builds/single`
+binary, `OMP = 4`, `MKL = 1`, run on each MKL by
+`LD_LIBRARY_PATH=/opt/intel/oneapi/mkl/<v>/lib` (`runs/mkl-compare`). MFEM's
+refresh to `61aab37558` in the same rebuild changes no arithmetic
+([M-301](#m-301)), and `80e1b30` fails the same five on 2026.2. Single eps is
+1.19e-07.
+
+| case | quantity | 2026.1 | 2026.2 | bound | what it is |
+|---|---|---|---|---|---|
+| `InverseSolve` | worst recovered current, relative | 7.38e-06 (62 eps) | 1.12e-05 (94 eps) | 7.63e-06 (64 eps) | the targets' 6–9 eps through the recovery's conditioning, ~10× on both |
+| `HighBetaConvergence` | assembled against differenced final residual, n = 16 | 2.6e-07, 3.0e-07 | 9.4e-07, 2.7e-07 | assembled ≤ 1.5 × differenced | both below the 1.19e-06 stop, so neither is a floor |
+| `LimiterCurve` | last residual, n = 48 | 1.32e-06 | 1.14e-06 | floor 1.19e-06 | either side of it; 2026.2 read the pre-asymptotic triple, 12.6 |
+| `DriverAcceptance`, adaptive loop | elements marked at cycle 2 | 50 | 49 | equal meshes | a marking tie broken by round-off |
+| `PedestalConvergence` | best Newton–Picard agreement over 4 meshes | 9.9e-08 | 1.6e-05 | 64 eps | see below |
+| `DriverAcceptance`, q-driven | g² coefficients | 1.4e-02 | stayed at the guess | 5% | see below |
+
+**The first three are fixed as instruments, not loosened past what they
+measure.** `InverseSolve`'s current floor takes the scale of the recovery's
+conditioning, 16, so it is 1.2e-04 in single and 1.0e-09 in double, as
+before. `HighBetaConvergence`'s two residual comparisons are bounded by the
+stop each solve was given. `LimiterCurve` reads the floor-crossing triple as a
+lower bound on the order and uses it when it reads superlinear: 1.77 at n = 48
+on 2026.2, 2.000 in double, unchanged.
+
+**`PedestalConvergence` is not round-off.** In single at k = 1, Newton takes 97
+to 162 steps on n = 16 and 24 on both MKLs, and 500 without converging at
+n = 24 on 2026.2. Newton and Anderson–Picard disagree by 1.6e-05 to 7.5e-05,
+130 to 600 eps, at n = 32 and 48, where each converges in 8 to 10. 2026.1
+passed only because n = 16 crawled to the same point on both paths.
+
+**The q-driven run exits 0 with an outer loop that did not converge.** At
+cap 2 on 2026.2 the outer KINSOL stalls at a norm of 1.3e-02 ("line search
+... unable to find an iterate sufficiently distinct"). The driver then runs
+the Picard-then-Newton retry, converges the equilibrium with g still at its
+guess, and reports success: q is 21% from the target. In single the outer
+loop otherwise ends at a norm of 2e-03 to 5e-03 and recovers the
+coefficients to 1–2%. At cap 0 it converges on both MKLs.
+
+**Cap 0 moves single's knife edges both ways.** At cap 0 on 2026.2 the single
+suite is 80 of 84. `XPointBorder` and `FreeBoundaryCoupling`, red since
+[M-273](#m-273), pass. `PlasmaConnectivity`'s confined fill takes 13 to 16
+Newton steps against the pointwise 10, on both MKLs; in double both take 10.
+That is M-186's plateau, which the case already skips when single fails to
+converge. Its 1.5e-07 to 1.6e-07 difference, 7 to 8 eps, is now floored at
+psi_ax's round-off. The adaptive loop's tie now gives the same element count
+and a different mesh, 0.109 apart dof by dof.
+
+**Reproduce.** `runs/mkl-compare`: `ctest -V` on the five cases under each
+`LD_LIBRARY_PATH`. The q-driven runs are `examples/q-driven.toml` through
+`meq-run`, with and without `--trace-refinement-cap 2`.
+
+### M-303
+
+**THE FOUR CASES M-302 FOUND PASSING BY ACCIDENT, FIXED AT THE CAUSE: A
+q-DRIVEN RUN THAT EXITED 0 ON A FAILED OUTER LOOP, AN OUTER LOOP STOPPED BY A
+TOLERANCE NOBODY SET, A PICARD MAP WHOSE FIXED POINT WAS NOT NEWTON'S ROOT,
+AND A BORDERED STEP THAT CANCELS ON AN EIGENPROBLEM. BOTH SUITES ARE 83 OF 84,
+THE DELIBERATE `PlasmaEdgeConvergence`, IN SINGLE ON MKL 2026.2 AS IN DOUBLE.**
+
+`meq-integration` at `f3f4fe1ea7`, `OMP = 4`, `MKL = 1`. [M-302](#m-302)
+measured the cases; these are the fixes.
+
+**1. A failed q-driven outer loop exits 2.** It threw a plain exception, which
+the bordered ladder took for an inner Newton's failure. The Picard-then-Newton
+retry then solved one equilibrium at the last trial g g', and the run exited
+0 with g² at its guess (4.84, 0, 0 against 4.84, 2.42, 0.3025) and q 21% from
+the target. It now throws `ToroidalLoopFailed`, which is never retried and
+writes nothing. Any other exception out of the loop is rethrown as one.
+`--q-iteration-cap N` caps the loop; at N = 1 the norm is 0.294 in single and
+0.301 in double, so `aQDrivenRunWhoseOuterLoopFailsExitsTwo` does not depend on
+precision.
+
+**2. The outer loop converged to `eps^(1/3)`.** `mfem::KINSolver::Mult` scales
+the relative tolerance by ‖F(c₀)‖∞ and takes MFEM's default absolute
+tolerance, `eps^(1/3)`, when that is larger. It was always larger: 4.9e-03 in
+single and 6.1e-06 in double, against the 1e-9 asked for. Three more defects
+stood behind it:
+- KINSOL kept the start's Jacobian (`msbset = 10`), so the loop contracted
+  linearly at 0.24 to 0.15 a step;
+- the fixed 1e-4 difference step sat under single's map noise, so a Jacobian
+  entry read −1.06 where 1e-3 and 1e-2 agree on −0.21 to −0.27;
+- each iteration paid one more equilibrium for KINSOL's own differenced J·p.
+
+"Converged" now means ‖G(c) − c‖∞ at or below max(tolerance, the map's floor),
+with the rank check kept. The floor (`meq::toroidalMapFloor`) is 4 × 4 × ε ×
+max‖P_k ∘ g²‖₂: ε is the inner Newton's tolerance, two squared averages give
+the first 4, four standard deviations the second, and P is the fit's
+pseudo-inverse. It reads 3.82e-04 in single on `q-driven.toml`, the same on
+both MKLs, against a measured map noise of 1.3e-04; 3.2e-10 in double.
+
+| `q-driven.toml` | iterations | map evaluations | ‖F‖∞ | q error |
+|---|---|---|---|---|
+| single before, six draws | 8–13 | 33–87 | 2.9e-04 – 4.6e-03 | 3.6e-05 – 4.1e-04 |
+| single after, six draws | 4 | 30 | 1.6e-05 – 1.4e-04 | 1.9e-06 – 5.3e-06 |
+| double before | 12 | 43 | 1.8e-06 | 4.5e-07 |
+| double after | 5 | 36 | 3.5e-10 | 4.4e-07 |
+
+`SafetyFactorSolver`'s single coin flip (3 failures in 6 draws) is gone, and
+no q bound was loosened. **Open:** at a difference step of 4.4e-4,
+`SafetyFactorSolver`'s map jumps by 2.6e-05 between two points whose inner
+solves both converge to 1e-14. It coincides with the inner Newton taking 4
+steps where it took 3, so the jump is in the extraction.
+
+**3. The Picard map's fixed point was not Newton's root.** `solveByPicard`
+solved the condensed system for the whole field each step. One map step from
+Newton's converged answer moved psi by 4.37e-05 in single and 1.04e-13 in
+double, about a thousand eps either way. It is not the trace solve: refinement
+caps 2 and −4 change nothing. It is the element-local elimination that
+recovers the potential. The map is now the correction x − A_lin⁻¹ R(x) on
+Newton's own residual, whose fixed point is R(x) = 0. The same one-step check
+then reads 1.49e-07 in single, 5 ulp, and 8.3e-16 in double; Picard converges
+to 10 eps, and `picardTolerance()` is `newtonTolerance()`.
+
+**Pedestal's coarse meshes have several roots, and that is the crawl.** At
+k = 1, converged to 1e-10 in double: 2 roots at n = 16, 5 at n = 24, 3 at
+n = 32 and 1 at n = 48. They differ in where the pedestal layer sits. Newton
+wanders between them from the cold start: 226 and 26 steps in double, and 500
+without converging in single at n = 16. Four step controls failed; they are in
+`CLAUDE_DECLINED.md`:
+- Deuflhard damping fails on every mesh;
+- pseudo-transient continuation runs 2 to 3 times slower;
+- a Newton–Picard blend breaks `NewtonConvergence`;
+- a Picard fallback stops k = 2, n = 16 converging.
+
+`andersonPicardReachesTheSameSolutionAsNewton` is now posed on n = 32, 48 and
+64, it says why n = 16 and 24 are left out, and it fails a Newton over 18
+steps. Agreement: 9.9e-08 in single on both MKLs; 3.4e-11 to 6.9e-14 in
+double.
+
+**4. The bordered step cancels on an eigenproblem.** `PlasmaConnectivity`'s
+confined control (p' = 0.6Ψ, gg' = 0, zero data) is linear in psi at fixed
+psi_ax. So J·psi = R exactly, Keller's y = J⁻¹R is the iterate (|y − x| was
+6e-13 to 3e-09 against |x| = 22.5), and J is singular at the root. The step is
+then the difference of two vectors the size of the iterate, and the residual
+stalls at the solves' backward error: 4.3 eps |y|, 1.1e-05 in single against a
+1.19e-06 target. Border folding adds κ times the psi_ax row into one potential
+row of the axis element. The algebra is exact and element-local, so it is the
+same Newton step without the cancellation: 4.25e-03, 2.68e-05, 8.3e-08 with no
+stall. It is on in both precisions: across the whole double suite folded
+against unfolded, no Newton count moves and no answer moves beyond its last
+digits, and `machine-f-diiid` reads 3.759850e-01. κ's window, ×1 to ×10 of the
+reaction term over the row, is measured, and its edges are explained but not
+derived. **Under a Device the fold is skipped**: MFEM's batched local gradient
+leaves no point between assembly and factorisation to add it.
+
+**And the adaptive loop sat on a Dörfler tie.** At Theta = 0.6, cycle 2's cut
+cleared its noise by 0.017; the noise was measured by re-solving the same mesh
+from 0.99 of the answer. The case now runs Theta = 0.45, which clears by at
+least 5.5 in single and 1.2e7 in double, and it fails "the fixture sits on a
+tie" below 2. Driver against library: 1.33e-06 in single, 3.4e-14 in double.
+
+**Suites, the merged tree:** double 83/84 and single 83/84 on MKL 2026.2,
+both failing only `PlasmaEdgeConvergence`.
+
+### M-304
+
+**UPSTREAM'S `ArrayMult()` VIEWS ON TCV: THE STAGING FALLS FROM 32 ms A CALL
+TO 7 ms, THE THREE TIMERS NOW CLOSE THE NPC LEG TO A FEW MILLISECONDS, AND THE
+LEG AT EIGHT THREADS IS 44% SHORTER. ON A REAL CARD THE VIEWS GIVE THE SAME
+ANSWER.** `../../mfem-hdg-dev`'s reply 3, measured.
+
+**Setup.** `meq-integration` at `f3f4fe1ea7`, which carries
+`DarcyNPCSolver::GetStagingTime()` and `ArrayMult()` building its local layout
+as views of the caller's columns instead of copies. Both installs rebuilt,
+MEQ rebuilt `--clean-first`, and the merged tree of [M-303](#m-303); MKL
+2026.2. `--profile` now prints the staging as a third part of the NPC leg.
+[M-301](#m-301)'s TCV directories (`machine-d-tcv-shaped`, k3 h1.00), cold
+and warm, threads = `OMP = MKL`, `OMP_WAIT_POLICY=passive`, every run after
+five minutes under 6% busy CPU, median of three (`runs/hdg-reply-3`). All 24
+exited 0. They take the same 16 and 10 NPC calls and the same Newton steps as
+M-301, and reach the same `psi_ax`, 2.251850e-02.
+
+| start | threads | leg s | reduce s | recover s | staging s | rest s | reduce x | recover x | leg x |
+|---|---|---|---|---|---|---|---|---|---|
+| cold | 1 | 3.172 | 1.560 | 1.502 | 0.108 | 0.002 | 1.00 | 1.00 | 1.00 |
+| cold | 2 | 1.787 | 0.827 | 0.849 | 0.110 | 0.001 | 1.89 | 1.77 | 1.78 |
+| cold | 4 | 1.056 | 0.458 | 0.484 | 0.114 | 0.000 | 3.41 | 3.10 | 3.00 |
+| cold | 8 | 0.759 | 0.310 | 0.324 | 0.124 | 0.001 | **5.03** | **4.64** | **4.18** |
+| warm | 1 | 2.014 | 0.982 | 0.961 | 0.068 | 0.003 | 1.00 | 1.00 | 1.00 |
+| warm | 2 | 1.123 | 0.514 | 0.539 | 0.069 | 0.001 | 1.91 | 1.78 | 1.79 |
+| warm | 4 | 0.661 | 0.288 | 0.301 | 0.071 | 0.001 | 3.41 | 3.19 | 3.05 |
+| warm | 8 | 0.487 | 0.191 | 0.212 | 0.079 | 0.005 | **5.14** | **4.53** | **4.14** |
+
+**The staging is 6.8 to 7.8 ms a call, against M-301's 32**, and it is still
+flat in the thread count. That is 4.2 to 4.8 times less, where upstream's own
+mesh read about 7; their estimate for TCV was 0.07 s and it reads 0.12 s at
+eight threads cold. "Rest" is MEQ's leg less the three timers, at most 5 ms,
+so **the leg is accounted for**. At eight threads cold the leg is 0.759 s
+against M-301's 1.363 s, and it scales 4.18 times against 2.75.
+
+**The recover scales better too, and that is not explained.** At eight it is
+0.324 s against M-301's 0.520, 4.64 times against 3.20; at one thread it is
+1.50 against 1.66. Views remove the copies around it, not work inside it, and
+the solver changed between the two measurements (M-303's border folding is on
+by default). So no cause is claimed. Whole-run walls are not compared: M-301's
+thread scan ran PARDISO's refinement at its old cap of 2.
+
+**On CUDA, the views are right.** `examples/machine-f-diiid.toml` under
+`--device cuda` reads `psi_ax = 3.759850e-01` and a constraint of
+`-6.466e-12`, as on every install before. The staging there is 0.005 s over 12
+calls. `DeviceParity` passes. Upstream had run the views only under
+`Device("debug")`.
+
+**Reproduce.** `runs/hdg-reply-3/queue.sh`, then `summarise.py`.
+
+### M-305
+
+**A `.nc` RESTART LANDED 260 TO 470 EPS FROM ITS OWN ANSWER IN SINGLE, AND THE
+FILE WAS NOT LOSSY: A FRESH SOLVER RESET THE I_p PROFILE SCALE TO 1 OVER THE
+FILE'S 1.000906. CARRIED, THE RESTART TAKES NO STEP AND REPRODUCES psi_ax TO
+THE LAST PRINTED DIGIT.**
+
+**The defect.** `OutputConversion`'s `theRestartCarriesTheWholeState`, on
+`examples/limited-tokamak.toml` in single:
+
+| MKL | cold psi_ax, Newton | restart, before | restart, after |
+|---|---|---|---|
+| 2026.2 | 9.483303e-02, 9 | 9.483602e-02, 2 (+3.1e-05) | 9.483303e-02, **0** |
+| 2026.1 | 9.483327e-02, 10 | 9.483855e-02, 2 (+5.6e-05) | 9.483327e-02, **0** |
+
+In double the same restart took 1 step and now takes 0.
+
+**The cause.** The driver put the file's `profile_scale` on the shared
+`NormalisedSource` only. `solveWithNormalisation()` starts the scale at
+`currentIsUnknown ? currentScaleValue : 1.0`, which is 1 on a fresh solver,
+and then writes it back to the source over the file's value. So every exact
+restart started 9e-4 off on that one border unknown. With the scale carried,
+the restart's first field residual is 1.433e-07, identical to the cold run's
+last. The psi_ax, psi_bnd and I_p rows are identical too, so the coefficients,
+trace, labels, exterior modes, support and axis all read back exactly. The
+5e-5 band in `sameAxis` was absorbing this.
+
+**Two defects behind it, exposed once the restart started at the answer:**
+- **No current term on the first step.** The current row was zero until the
+  first step assembled it, so iteration 0's merit had no I_p term. A restart
+  with `PlasmaCurrent` raised from 3.0e5 to 3.3e5 "converged in 0 Newton
+  iterations" to the 3.0e5 equilibrium.
+- **The reported I_p lagged a step.** It was the current integral from the
+  start of the last step, so the cold run printed 3.001027e5 for a state
+  carrying 3.000004e5.
+
+Now the scale is seeded once by `setPlasmaCurrentScaleInitial()`, the row is
+evaluated on the starting iterate, and the report is the row the last merit
+judged. The 3.3e5 restart takes 6 steps in single and 7 in double and lands on
+3.300000e+05. Cold runs are unchanged: limited-tokamak's iterates 1 to 9 are
+bit-identical, and only the printed r_0 moves.
+
+**`diverted-tokamak-xpoint` restarts in one step in single**: its psi_ax
+moves 3.0e-06 to 4.4e-06, under the cold run's own last support-sweep move of
+5.2e-06 to 8.3e-06. In double it takes 2 steps, against 3 before. That is a
+route effect and is legitimate: the restart decides the support once more at
+the answer's own labels. The case now bounds the move by that sweep. The
+other two cases must print identical psi_ax and I_p in both precisions, and
+`sameAxis`'s single band is 1e-05.
+
+**Open.** The scale is still overwritten on two other routes: the Picard
+pre-stage's estimate, and the adaptive loop's cycle-to-cycle hand-off. No
+shipped example combines `PlasmaCurrent` with either. `boundaryFluxInitialGiven`
+is never cleared, so every support sweep of a restarted run restarts psi_bnd
+at the file's value.

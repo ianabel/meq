@@ -206,12 +206,14 @@ That third entry is the surprise, and it is why the axes must be separated.
    **A free-boundary run does not scale like a fixed-boundary one, and the
    reason is not in MEQ.** With :math:`\psi_{ax}`, :math:`\psi_{bnd}`, the
    plasma current, the X-point and the exterior modes all unknowns of one
-   Newton, each step applies the Jacobian's inverse to every border column, and
-   the element loops either side of the trace solve are the one part of that
-   which does not thread. Measured on a diverted machine case at ten exterior
-   modes, they cost the same at one thread and at eight and are the largest
-   single leg of a threaded step; eight cores buy about 1.5 on the whole run
-   against about 4.5 on the residual alone.
+   Newton, each step applies the Jacobian's inverse to every border column, so
+   the trace backsolve and the element loops either side of it run once per
+   column. Measured on the TCV-shaped machine case at eight threads under
+   ``passive``: the residual runs on about 7 cores, but the elimination loop
+   (``NPCReduce``) speeds up about 5 times, the recovery loop (``NPCRecover``)
+   about 4.5 times, and the per-column staging around them (about 7 ms a call)
+   not at all. Eight cores buy about 3.3 on the whole run. See
+   ``MEASUREMENTS.md`` M-300 and M-304.
 
    ``meq --profile`` prints the leg split, including that one, so you can see
    where your own case sits rather than assume it matches.
@@ -220,7 +222,21 @@ That third entry is the surprise, and it is why the axes must be separated.
    factorisation and solve. Read it for two numbers: how many pivots each
    factorisation perturbed, and how many iterative-refinement steps each solve
    then took. A refinement step is a product with the matrix and another solve
-   of every border column, so it multiplies the backsolve leg.
+   of every border column, so it multiplies the backsolve leg. ``--profile``
+   prints the same two counts on one line, read from the solver rather than
+   from its report.
+
+   ``meq --trace-refinement-cap N`` sets PARDISO's refinement cap, ``iparm[7]``.
+   MEQ's default is ``0``, which refines only after a factorisation that
+   perturbed a pivot; MFEM's own default is 2, and a negative value is the cap
+   with the residual in extended precision. On the TCV- and DIII-D-shaped
+   machine cases no pivot is perturbed, so ``0`` takes no refinement step.
+   Against 2, the backsolve is 4 to 5 times faster and the whole run 10 to 18%
+   faster, and the answer moves by about ``1e-14`` relative. ``--profile``'s
+   line reports the perturbed pivots, so you can check that your own case is in
+   the same position, and ``--trace-refinement-cap 2`` reruns it the other way.
+   It is a diagnostic rather than a configuration key, because whether a
+   different cap changes your answer is a measurement.
 
 .. warning::
 

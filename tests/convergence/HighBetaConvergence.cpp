@@ -592,6 +592,7 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 	             order, n );
 
 	std::vector<double> reduction;
+	double reachable = 0.0;   ///< first/stop on the coupled arm
 	for ( int decoupled = 0; decoupled < 2; ++decoupled )
 	{
 		mfem::Mesh mesh = meq::tests::makeMesh( standardBox(), n );
@@ -632,6 +633,9 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 		std::fflush( stdout );
 
 		reduction.push_back( first > 0.0 && last > 0.0 ? first/last : 1.0 );
+		if ( !decoupled )
+			reachable = first/std::max( meq::newtonTolerance( 1.0e-10 )*first,
+			                            meq::newtonTolerance( 1.0e-14 ) );
 
 		if ( !decoupled )
 			BOOST_TEST( converged,
@@ -642,14 +646,16 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 
 	// The separation is between a bordered step that converges and one that
 	// barely moves; in single the converging arm can only reach the round-off
-	// floor, so it reduces by 1.1e6 rather than by 1e14 while the control still
-	// reduces by 1.047. The factor asked for is floored at what the format
-	// leaves: 1/eps is 8.4e6 in single and 4.5e15 in double, so this stays
-	// 1.0e8 there. M-219.
-	BOOST_TEST( reduction[ 0 ]
-	            > std::min( 1.0e8, 0.1/static_cast<double>(
-	                                     std::numeric_limits<mfem::real_t>::epsilon() ) )
-	              *reduction[ 1 ],
+	// floor, so it reduces by 1e5 to 1e6 rather than by 1e14 while the control
+	// still reduces by 1.047. The factor asked for is floored at what the
+	// SOLVE was asked for: the coupled arm stops the step it crosses
+	// max( rel*||r_0||, abs ), so first/stop is all it is promised, and a tenth
+	// of that keeps four orders between the arms in single. In single the stop
+	// is ten eps and the arm lands anywhere below it -- 3.1e-07 on one MKL and
+	// 1.5e-07 on another, the same binary -- so a floor of 0.1/eps, a sixth of
+	// the stop, asked for more than the solve was told to reach. In double
+	// first/stop is 1e10 and this stays 1.0e8. M-219.
+	BOOST_TEST( reduction[ 0 ] > std::min( 1.0e8, 0.1*reachable )*reduction[ 1 ],
 	            "the bordered Newton reduced the augmented residual by a factor of "
 	            << reduction[ 0 ] << " and the same iteration WITHOUT the two "
 	            "non-local terms reduced it by " << reduction[ 1 ]
@@ -1029,6 +1035,7 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		double axis;
 		double boundary;
 		double residual;
+		double stop;          ///< the threshold the solve stopped below
 		int iterations;
 	};
 
@@ -1058,6 +1065,10 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		out.iterations = solver.newtonIterations();
 		out.residual = solver.newtonResiduals().empty()
 		               ? 0.0 : solver.newtonResiduals().back();
+		out.stop = std::max( meq::newtonTolerance( 1.0e-12 )
+		                     *( solver.newtonResiduals().empty()
+		                        ? 0.0 : solver.newtonResiduals().front() ),
+		                     meq::newtonTolerance( 1.0e-14 ) );
 		return out;
 	};
 
@@ -1114,8 +1125,17 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		 * The floor is the point. A differenced column can only be as good as
 		 * the difference, and on a coupled free-boundary solve that floor is
 		 * what stops the iteration converging at all.
+		 *
+		 * **AND IT CAN ONLY BE SEEN ABOVE THE STOPPING THRESHOLD.** In single
+		 * that threshold is ten eps, 1.19e-06, and both columns stop the step
+		 * they cross it, so both finish somewhere below it: 9.4e-07 against
+		 * 2.7e-07 on one MKL and 2.6e-07 against 3.0e-07 on another, the same
+		 * binary. Below the threshold neither number is the column's floor.
+		 * In double the differenced column stops above its threshold, so the
+		 * bound is unchanged there.
 		 */
-		BOOST_TEST( analytic.residual <= 1.5*differenced.residual,
+		BOOST_TEST( analytic.residual
+		                <= std::max( 1.5*differenced.residual, differenced.stop ),
 		            "n = " << n << ": the assembled column finished at "
 		            << analytic.residual << " and the differenced one at "
 		            << differenced.residual

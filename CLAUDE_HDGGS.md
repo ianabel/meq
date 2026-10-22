@@ -1439,9 +1439,19 @@ the local problems at that trace well posed.
 
 3. **Picard, keeping the local problems linear — implemented, as a bridge.**
    `Globalisation::AndersonPicard` is `KINSolver(KIN_FP)` over the fixed point
-   `ψ^{k+1} = G(ψ^k)`, where `G` freezes `F` at the previous iterate, puts it on
-   the right-hand side and does one linear solve. The papers' own method, and it
-   works where Newton grinds. On §4.2 at `k = 1, h = 0.05`:
+   `ψ^{k+1} = G(ψ^k)`, where `G` freezes `F` at the previous iterate and does
+   one linear solve. The papers' own method, and it works where Newton grinds.
+   **`G` is evaluated as a correction on Newton's own NPC residual**, with the
+   reaction left out of the Jacobian (`FieldLinearisation::Picard`), not by
+   solving the condensed system for the whole field: the two are the same map
+   in exact arithmetic, but the second puts the whole field through the
+   element-local eliminations every step and parks the fixed point about a
+   thousand `eps` from Newton's root, in either format — one step of it at
+   Newton's converged answer moves `ψ` by 4.4e-05 against 0.3 in single, and
+   Anderson-Picard's `max ψ` then misses Newton's by 1.6e-05 to 3.1e-05. As a
+   correction its floor is Newton's, so `picardTolerance()` is
+   `newtonTolerance()` (`solveByPicard()` carries the measurement). On §4.2 at
+   `k = 1, h = 0.05`:
 
    | method | outcome |
    |---|---|

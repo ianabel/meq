@@ -69,6 +69,16 @@ namespace meq
 		 * shift here. That asymmetry is worth naming: NewtonSolver::Mult forms
 		 * `oper( x ) - b` and KINSolver::Mult does not, and a residual written
 		 * for one and handed to the other converges to a different problem.
+		 *
+		 * **IT REMEMBERS EVERY POINT IT EVALUATED, AND WHAT THE MAP SAID ITS
+		 * FLOOR WAS THERE**, for two reasons that are both about the answer
+		 * rather than about cost. The convergence test is on the max norm of
+		 * the residual AT THE POINT KINSOL RETURNS, against the floor AT THAT
+		 * POINT -- and KINSOL reports neither: its final norm is a scaled 2-norm
+		 * and the floor is not its notion at all. And a point asked for twice
+		 * is answered once, so KINSOL's own opening evaluation of the starting
+		 * coefficients -- which the rank check below has already made -- is not
+		 * a second equilibrium solve with a second draw of the map's noise.
 		 */
 		class FixedPointResidual : public mfem::Operator
 		{
@@ -77,14 +87,73 @@ namespace meq
 					int n,
 					std::function<std::vector<double>(
 						std::vector<double> const & )> const &map,
+					std::function<double()> const &floorOfMap,
 					double difference, int &evaluations )
-					: mfem::Operator( n ), map( map ), difference( difference ),
-					  evaluations( evaluations ), gradient( n, n )
+					: mfem::Operator( n ), map( map ), floorOfMap( floorOfMap ),
+					  difference( difference ), evaluations( evaluations ),
+					  gradient( n, n )
 				{
+				}
+
+				/// Called with the floor after every evaluation of the map.
+				/// solveForToroidalField() uses it to keep KINSOL's own
+				/// function-norm test at the floor of where it now is.
+				void onFloor( std::function<void( double )> hook )
+				{
+					floorChanged = std::move( hook );
+				}
+
+				/**
+				 * The residual's floor at @a x: the map's own, as it reported
+				 * it there -- or at the last point evaluated, if @a x was not
+				 * -- plus the floor of holding @a x at all.
+				 *
+				 * **THE ITERATE IS AN mfem::Vector, SO IT IS IN real_t, AND NO
+				 * MAP IS EXACTER THAN THE POINT IT IS GIVEN.** Rounding `c` to
+				 * the format moves it by up to half an ulp of each coefficient,
+				 * which moves the residual by the Jacobian times that:
+				 * `|| J ||_inf eps max( || c ||_inf, 1 )` bounds it, with a
+				 * factor of two in hand. In single it is what stops an EXACT
+				 * map short of a `1e-9` tolerance -- the unstable affine map
+				 * below lands at a residual of order `1e-7` and can get no
+				 * closer, since `4.84` itself is `4.84000015` there. In double
+				 * it is `1e-15` and nothing reaches it.
+				 */
+				double floorAt( mfem::Vector const &x ) const
+				{
+					Evaluation const *known = find( x );
+					double const ofMap =
+						known != nullptr ? known->floor
+						: history.empty() ? 0.0 : history.back().floor;
+					countedHostRead( x, __LINE__ );
+					double const ofIterate =
+						gradientNorm
+						*static_cast<double>(
+							std::numeric_limits<mfem::real_t>::epsilon() )
+						*std::max( static_cast<double>( x.Normlinf() ), 1.0 );
+					return ofMap + ofIterate;
+				}
+
+				/// `|| G( x ) - x ||_inf`, evaluating only if @a x never was.
+				double normAt( mfem::Vector const &x ) const
+				{
+					mfem::Vector y( x.Size() );
+					Mult( x, y );
+					countedHostRead( y, __LINE__ );
+					return y.Normlinf();
 				}
 
 				void Mult( mfem::Vector const &x, mfem::Vector &y ) const override
 				{
+					if ( Evaluation const *known = find( x ) )
+					{
+						y.HostWrite();
+						for ( int i = 0; i < x.Size(); ++i )
+							y( i ) = known->residual[ static_cast<std::size_t>( i ) ];
+						y.Read();
+						return;
+					}
+
 					/*
 					 * `y` IS KINSOL'S OWN WORK VECTOR AND UNDER A DEVICE IT IS
 					 * DEVICE-VALID WHEN IT ARRIVES.
@@ -123,6 +192,18 @@ namespace meq
 						y( i ) = image[ static_cast<std::size_t>( i ) ] - x( i );
 					y.Read();
 					stageChecksum( "outerResidual.y", y );
+
+					Evaluation record;
+					record.point = x;
+					record.point.HostReadWrite();
+					record.residual.resize( static_cast<std::size_t>( x.Size() ) );
+					for ( int i = 0; i < x.Size(); ++i )
+						record.residual[ static_cast<std::size_t>( i ) ] =
+							image[ static_cast<std::size_t>( i ) ] - x( i );
+					record.floor = floorOfMap ? std::abs( floorOfMap() ) : 0.0;
+					history.push_back( std::move( record ) );
+					if ( floorChanged )
+						floorChanged( floorAt( x ) );
 				}
 
 				/// The conditioning of the last Jacobian formed, as
@@ -141,6 +222,7 @@ namespace meq
 						return gradient;
 
 					int const n = x.Size();
+					double const relative = differenceAt( x );
 					mfem::Vector forward( n ), backward( n ), plus( n ), minus( n );
 					for ( int j = 0; j < n; ++j )
 					{
@@ -150,7 +232,7 @@ namespace meq
 						// would be far too large for the first and far too
 						// small for the last.
 						double const step =
-							difference*std::max( std::abs( x( j ) ), mfem::real_t( 1.0 ) );
+							relative*std::max( std::abs( x( j ) ), mfem::real_t( 1.0 ) );
 
 						/*
 						 * THE PERTURBATION HAS TO SURVIVE, AND UNDER A DEVICE
@@ -190,10 +272,78 @@ namespace meq
 					gradientPoint = x;
 					haveGradient = true;
 					lastConditioning = singularValueRatio( gradient );
+					gradientNorm = 0.0;
+					for ( int i = 0; i < n; ++i )
+					{
+						double row = 0.0;
+						for ( int j = 0; j < n; ++j )
+							row += std::abs( gradient( i, j ) );
+						gradientNorm = std::max( gradientNorm, row );
+					}
 					return gradient;
 				}
 
+				/**
+				 * The column step, relative to each coefficient, for a
+				 * Jacobian formed at @a x: the option, or the least step at
+				 * which the map's noise costs a column at most 1%, whichever
+				 * is the larger.
+				 *
+				 * **A COLUMN'S NOISE IS AT MOST `floor/s`**, the two ends each
+				 * carrying up to the floor and the difference dividing by `2s`.
+				 * `R = G - I`, so a Jacobian is of order one, and the column
+				 * is good to 1% from `s = 100 floor` up; the step below is
+				 * relative and multiplied by `max( |c_j|, 1 ) >= 1`, so
+				 * `100 floor` as the relative step reaches that on every
+				 * column, the smallest included. Above it the truncation,
+				 * `s^2 F'''/6`, is the error, and it is smallest at the
+				 * smallest step -- which is why this is the LEAST step that
+				 * meets the noise and not the textbook balance of the two.
+				 *
+				 * **THE BALANCE WAS TRIED AND IS WORSE, BECAUSE IT SPENDS A
+				 * MARGIN THE MAP DOES NOT HAVE.** `( floor/|G| )^( 1/3 )`,
+				 * Dennis and Schnabel section 5.4, is right for noise and a
+				 * smooth remainder. It put double's step at `4.4e-4`, four
+				 * times the option, on a floor that is an upper bound there by
+				 * three orders -- and SafetyFactorSolver's map is NOT smooth
+				 * at that scale: the residual steps by `2.6e-05` between
+				 * `c_1 + 2.4e-4` and `c_1 + 2.4e-3`, with both inner solves
+				 * converged to `1e-14`. A Jacobian straddling the step is 0.5%
+				 * wrong in its `( 1, 1 )` entry and the loop contracted
+				 * linearly at 0.19 a step: 8 iterations and 57 equilibria to
+				 * `7e-09`, against 4 and 29 at the option's `1e-4`.
+				 *
+				 * **IN SINGLE THE OPTION'S STEP WAS THE STALL.** `1e-4` of `c`
+				 * is `5e-4` on `c_0` and `1e-4` on `c_2`, against a map whose
+				 * noise is `1.3e-04`, so a column carried an error of order
+				 * one: measured on `examples/q-driven.toml`, the `( 2, 2 )`
+				 * entry differenced at `1e-4` read `-1.06` where steps of
+				 * `1e-3` and `1e-2` agree on `-0.21` to `-0.27`. Here the floor
+				 * is `3.8e-04` and the step `0.038`. In double the floor is
+				 * `3e-10` and the option is the larger by three orders, so the
+				 * double path differences exactly as it did.
+				 */
+				double differenceAt( mfem::Vector const &x ) const
+				{
+					return std::max( difference, 100.0*floorAt( x ) );
+				}
+
 			private:
+				struct Evaluation
+				{
+					mfem::Vector point;
+					std::vector<double> residual;
+					double floor = 0.0;
+				};
+
+				Evaluation const *find( mfem::Vector const &x ) const
+				{
+					for ( Evaluation const &known : history )
+						if ( sameAs( x, known.point ) )
+							return &known;
+					return nullptr;
+				}
+
 				static bool sameAs( mfem::Vector const &a, mfem::Vector const &b )
 				{
 					/*
@@ -242,12 +392,16 @@ namespace meq
 
 				std::function<std::vector<double>(
 					std::vector<double> const & )> const &map;
+				std::function<double()> const &floorOfMap;
+				std::function<void( double )> floorChanged;
 				double difference;
 				int &evaluations;
+				mutable std::vector<Evaluation> history;
 				mutable mfem::DenseMatrix gradient;
 				mutable mfem::Vector gradientPoint;
 				mutable bool haveGradient = false;
 				mutable double lastConditioning = 1.0;
+				mutable double gradientNorm = 0.0;
 		};
 
 		/**
@@ -366,6 +520,113 @@ namespace meq
 				double &conditioning;
 		};
 
+#ifdef MFEM_USE_SUNDIALS
+		/**
+		 * mfem::KINSolver with the outer loop's two settings that MFEM does not
+		 * expose: a Jacobian-vector product taken from the Jacobian, and a
+		 * function-norm tolerance that can move while KINSOL runs.
+		 *
+		 * **THE PRODUCT IS THE ONE THAT MATTERS, AND WITHOUT IT EVERY OUTER
+		 * ITERATION SPENT AN EQUILIBRIUM ON A NUMBER IT COULD NOT TRUST.**
+		 * `mfem::KINSolver` presents a custom linear solver to KINSOL as
+		 * `SUNLINEARSOLVER_MATRIX_ITERATIVE`, so KINSOL treats the solve as
+		 * inexact and, under its default forcing term, forms `J p` after every
+		 * one -- for the line search's slope `< F, J p >` and for the forcing
+		 * term's `|| J p ||`. MFEM installs a product only on the path WITHOUT
+		 * a custom solver, so here KINSOL fell back to its own difference
+		 * quotient: one map evaluation at `u + sigma p`, `sigma` of order
+		 * `sqrt( eps )`. Measured in the trace of `examples/q-driven.toml`:
+		 * one equilibrium per iteration at a point `3e-4` of a step from the
+		 * iterate, its residual differing from the iterate's by less than the
+		 * map's own noise. In single that is a slope made of noise, handed to
+		 * an Armijo test.
+		 *
+		 * The dense Jacobian already formed at that iterate IS `J`, so its
+		 * product is exact to the difference and costs nothing.
+		 */
+		class OuterKINSolver : public mfem::KINSolver
+		{
+			public:
+				OuterKINSolver( int strategy, FixedPointResidual const &residual )
+					: mfem::KINSolver( strategy, true ), residual( residual )
+				{
+				}
+
+				/// After SetSolver(), which is what attaches the linear solver
+				/// a product can be set on.
+				void takeProductsFromTheJacobian()
+				{
+					// KINSOL REFUSES A PRODUCT ON A LINEAR SOLVER THAT CANNOT
+					// TAKE ONE, and MFEM's wrapper declares no `setatimes`:
+					// its solve is the dense one below, which needs no
+					// products of its own. So the wrapper is given one that
+					// accepts and ignores them -- the product is for KINSOL's
+					// line search, not for the solve.
+					LSA->ops->setatimes = []( SUNLinearSolver, void *,
+					                          SUNATimesFn ) -> int
+					{
+						return 0;
+					};
+					flag = KINSetJacTimesVecFn( sundials_mem,
+					                            OuterKINSolver::jacobianTimes );
+					MFEM_VERIFY( flag == KIN_SUCCESS,
+					             "KINSetJacTimesVecFn() failed" );
+				}
+
+				/// KINSOL's own function-norm tolerance, changed mid-solve
+				/// as the map's floor is learned. It is read at each
+				/// iteration's stopping test, so a change takes effect there.
+				void setFunctionTolerance( double tolerance ) const
+				{
+					if ( sundials_mem != nullptr )
+						KINSetFuncNormTol( sundials_mem,
+						                   static_cast<sunrealtype>( tolerance ) );
+				}
+
+			private:
+				static int jacobianTimes( N_Vector v, N_Vector jv, N_Vector u,
+				                          sunbooleantype *newU, void *userData )
+				{
+					// userData is the mfem::KINSolver that KINSolver::SetOperator
+					// registered, which is this object.
+					auto *self = static_cast<OuterKINSolver *>(
+						static_cast<mfem::KINSolver *>( userData ) );
+
+					// THE SAME DEVICE SEAMS AS FixedPointResidual::Mult: all
+					// three are KINSOL's vectors, read and written on the host
+					// and pushed back up. MEASUREMENTS.md M-206.
+					mfem::SundialsNVector const point( u );
+					mfem::SundialsNVector const direction( v );
+					mfem::SundialsNVector product( jv );
+					if ( *newU )
+					{
+						// Cached on the point, and LinSysSetup has just formed
+						// it at this same iterate: no map evaluation.
+						self->jacobian = &self->residual.GetGradient( point );
+						*newU = SUNFALSE;
+					}
+					auto const *dense =
+						dynamic_cast<mfem::DenseMatrix const *>( self->jacobian );
+					if ( dense == nullptr )
+						return -1;
+
+					countedHostRead( direction, __LINE__ );
+					product.HostWrite();
+					for ( int i = 0; i < dense->Height(); ++i )
+					{
+						double sum = 0.0;
+						for ( int j = 0; j < dense->Width(); ++j )
+							sum += ( *dense )( i, j )*direction( j );
+						product( i ) = static_cast<mfem::real_t>( sum );
+					}
+					product.Read();
+					return 0;
+				}
+
+				FixedPointResidual const &residual;
+		};
+#endif
+
 	}
 
 	OuterNewtonResult solveForToroidalField(
@@ -381,7 +642,8 @@ namespace meq
 			throw std::invalid_argument(
 				"meq::solveForToroidalField: no map was given" );
 		if ( options.maxIterations < 1 || !( options.difference > 0.0 )
-		     || !( options.functionTolerance > 0.0 ) )
+		     || !( options.functionTolerance > 0.0 )
+		     || options.stepTolerance < 0.0 )
 			throw std::invalid_argument(
 				"meq::solveForToroidalField: the options do not describe an "
 				"iteration" );
@@ -390,8 +652,16 @@ namespace meq
 		OuterNewtonResult out;
 		out.coefficients = start;
 
-		FixedPointResidual residual( n, map, options.difference,
+		FixedPointResidual residual( n, map, options.mapFloor, options.difference,
 		                             out.mapEvaluations );
+
+		// THE CONVERGENCE THRESHOLD, at a point the map was evaluated at. The
+		// tolerance is the caller's; the floor is the map's own, and no
+		// residual below it is evidence of anything.
+		auto threshold = [ &options ]( double floor )
+		{
+			return std::max( options.functionTolerance, floor );
+		};
 
 		mfem::Vector solution( n );
 		for ( int i = 0; i < n; ++i )
@@ -404,6 +674,14 @@ namespace meq
 		 * Same obligation as FixedPointResidual::Mult; MEASUREMENTS.md M-206.
 		 */
 		solution.Read();
+
+		/*
+		 * THE RESIDUAL AT THE START FIRST, BECAUSE THE JACOBIAN'S STEP NEEDS
+		 * THE FLOOR AND THE FLOOR IS THE MAP'S ANSWER TO HAVING BEEN EVALUATED.
+		 * KINSOL's own first act is the same evaluation, which the residual
+		 * answers from what it remembers, so this costs nothing.
+		 */
+		double const normAtStart = residual.normAt( solution );
 
 		/*
 		 * THE RANK CHECK HAPPENS HERE AND NOT INSIDE KINSOL, AND IT IS NOT AN
@@ -448,19 +726,20 @@ namespace meq
 		residual.GetGradient( solution );
 		if ( residual.conditioning() <= rankFloor( n ) )
 		{
-			mfem::Vector atStart( n );
-			residual.Mult( solution, atStart );
 			out.jacobianConditioning = residual.conditioning();
+			out.floor = residual.floorAt( solution );
+			out.finalResidual = normAtStart;
 
 			std::ostringstream flat;
-			if ( atStart.Normlinf() <= options.functionTolerance )
+			if ( normAtStart <= threshold( out.floor ) )
 			{
 				out.converged = true;
-				out.finalResidual = atStart.Normlinf();
 				flat << "converged in 0 KINSOL iterations and "
 				     << out.mapEvaluations
 				     << " map evaluations: the starting coefficients are "
-				        "already a fixed point, to " << atStart.Normlinf();
+				        "already a fixed point, to " << normAtStart
+				     << " against a tolerance of " << options.functionTolerance
+				     << " and a floor of " << out.floor;
 			}
 			else
 			{
@@ -471,7 +750,7 @@ namespace meq
 				        "coefficients is RANK DEFICIENT, its smallest singular "
 				        "value being " << out.jacobianConditioning
 				     << " of its largest while the residual there is "
-				     << atStart.Normlinf()
+				     << normAtStart
 				     << ". The coefficients do not determine their own fixed "
 				        "point, so no step in the undetermined directions means "
 				        "anything -- fit g^2 in a lower degree, or give the "
@@ -482,8 +761,8 @@ namespace meq
 		}
 
 #ifdef MFEM_USE_SUNDIALS
-		mfem::KINSolver newton( options.lineSearch ? KIN_LINESEARCH : KIN_NONE,
-		                        true );
+		OuterKINSolver newton( options.lineSearch ? KIN_LINESEARCH : KIN_NONE,
+		                       residual );
 
 		double conditioning = residual.conditioning();
 		DenseJacobianSolver linear( conditioning );
@@ -493,11 +772,55 @@ namespace meq
 		// same order for the same reason.
 		newton.SetOperator( residual );
 		newton.SetSolver( linear );
+		newton.takeProductsFromTheJacobian();
 		newton.SetPrintLevel( 0 );
 		newton.SetMaxIter( options.maxIterations );
-		newton.SetRelTol( options.functionTolerance );
+
+		/*
+		 * **THE TOLERANCE IS ABSOLUTE, AND IT IS SET, BECAUSE THE ONE KINSOL WAS
+		 * GIVEN BEFORE WAS NEITHER ASKED FOR NOR SEEN.** `mfem::KINSolver::Mult`
+		 * turns a relative tolerance into an absolute one by multiplying it by
+		 * `|| F( c0 ) ||_inf` -- and then uses its OWN absolute tolerance
+		 * instead whenever that is the larger, which it was here every time:
+		 * `1e-9` times a starting residual of 3.9 is `3.9e-9`, and MFEM's
+		 * default absolute tolerance is `eps^( 1/3 )`, **4.9e-03 in single and
+		 * 6.1e-06 in double**. So the loop stopped on KINSOL's `KIN_SUCCESS` at
+		 * a norm nobody had asked for: measured on `examples/q-driven.toml` in
+		 * single, a max norm of 4.20e-03, its g^2 1-2% from the closed form,
+		 * reported as "converged ... final norm 0.00502" against a tolerance
+		 * that read 1e-9. And it cost an extra equilibrium, the residual MFEM
+		 * evaluates to scale by.
+		 *
+		 * So the relative path is switched off and the absolute one carries
+		 * max( tolerance, floor ) -- the threshold the answer is judged by --
+		 * kept at the floor of where the iterate now is by the hook below.
+		 */
+		newton.SetRelTol( 0.0 );
+		newton.SetAbsTol( threshold( residual.floorAt( solution ) ) );
+		residual.onFloor( [ &newton, &threshold ]( double floor )
+		{
+			newton.setFunctionTolerance( threshold( floor ) );
+		} );
 		if ( options.stepTolerance > 0.0 )
-			newton.SetAbsTol( options.stepTolerance );
+			newton.SetScaledStepTol( options.stepTolerance );
+
+		/*
+		 * A FRESH JACOBIAN AT EVERY ITERATE -- A NEWTON, AND NOT THE MODIFIED
+		 * NEWTON KINSOL DEFAULTS TO.
+		 *
+		 * KINSOL re-forms the Jacobian every ten iterations unless told
+		 * otherwise, which is a saving where a Jacobian is expensive beside a
+		 * residual. Here it is `2n` residuals against one, so the saving is
+		 * small and the price is the convergence rate: the Jacobian KINSOL kept
+		 * was the one at the START, the vacuum field `g^2 = const`, a different
+		 * equilibrium from the answer. Measured on `examples/q-driven.toml` in
+		 * single, the loop then contracted LINEARLY -- the max norm going
+		 * 0.244, 0.191, 0.149, ..., 0.017, 0.012, 0.010, 0.008, 0.0042 over
+		 * eight iterations on that one Jacobian -- which is the crawl this tree
+		 * treats as a defect and not as convergence. With a fresh Jacobian at
+		 * every iterate the same run reaches its floor in four.
+		 */
+		newton.SetMaxSetupCalls( 1 );
 
 		// KINSOL solves oper( x ) = 0, so the right-hand side is not used and
 		// iterative_mode carries the starting point in `solution`.
@@ -510,26 +833,60 @@ namespace meq
 		for ( int i = 0; i < n; ++i )
 			out.coefficients[ static_cast<std::size_t>( i ) ] = solution( i );
 		out.iterations = newton.GetNumIterations();
-		out.finalResidual = newton.GetFinalNorm();
 		out.jacobianConditioning = conditioning;
 
 		/*
-		 * A JACOBIAN THAT WENT SINGULAR MID-ITERATION IS NOT A CONVERGED SOLVE,
-		 * AND KINSOL'S OWN FLAG WOULD SAY IT WAS. The truncated SVD keeps the
-		 * step finite there rather than infinite, so the run ends instead of
-		 * hanging -- but it ends on a step it could not improve, which KINSOL
-		 * reports as `KIN_STEP_LT_STPTOL` and `mfem::KINSolver` turns into
-		 * `converged = ( flag >= 0 )`. The recorded conditioning is the only
-		 * thing that can tell that apart from a solve.
+		 * **CONVERGED MEANS THE RESIDUAL AT THE ANSWER IS AT OR BELOW
+		 * max( TOLERANCE, FLOOR ), AND NOTHING ELSE DOES.**
+		 *
+		 * `mfem::KINSolver::GetConverged()` is `flag >= 0`, which counts
+		 * `KIN_STEP_LT_STPTOL` -- the step became too small to move the
+		 * iterate, which is what KINSOL reports when it can make no more
+		 * progress -- as converged wherever the residual stalled. And it
+		 * counts as failure a line search that could not decrease a residual
+		 * already inside the map's noise, which is what a noisy map does once
+		 * it has been solved. Both are the same mistake: KINSOL's flag says
+		 * how it STOPPED, and the question is where it got to. So how it
+		 * stopped is reported and the norm is the test.
+		 *
+		 * The norm is the max norm, KINSOL's own stopping norm, at the point
+		 * KINSOL returned -- which it evaluated, so this is read from what the
+		 * residual remembers rather than solved for again. `GetFinalNorm()`
+		 * is not it: that is a scaled 2-norm, `sqrt( n )` times larger at
+		 * worst, and was what the status reported.
+		 *
+		 * A JACOBIAN THAT WENT SINGULAR MID-ITERATION IS STILL NOT A
+		 * CONVERGED SOLVE. The truncated SVD keeps the step finite there
+		 * rather than infinite, so the run ends instead of hanging -- but at
+		 * a point the coefficients do not determine, which no residual can
+		 * vouch for.
 		 */
+		out.finalResidual = residual.normAt( solution );
+		out.floor = residual.floorAt( solution );
+		double const judged = threshold( out.floor );
 		bool const deficient = out.jacobianConditioning <= rankFloor( n );
-		out.converged = newton.GetConverged() && !deficient;
+		bool const reached = out.finalResidual <= judged;
+		out.converged = reached && !deficient;
+
+		// HOW KINSOL STOPPED, said in words: the flag itself is overwritten
+		// by MFEM before it returns, but the three cases it can be are told
+		// apart by what is left.
+		char const *stopped =
+			reached ? "with the residual within the threshold"
+			: out.iterations >= options.maxIterations ? "at the iteration cap"
+			: newton.GetConverged()
+				? "on a step below KINSOL's step tolerance, the residual having "
+				  "stalled above the threshold"
+				: "on a line search that could not decrease the residual";
 
 		std::ostringstream status;
 		status << ( out.converged ? "converged" : "did not converge" ) << " in "
 		       << out.iterations << " KINSOL iterations and "
 		       << out.mapEvaluations << " map evaluations, final norm "
-		       << newton.GetFinalNorm();
+		       << out.finalResidual << " against a threshold of " << judged
+		       << " -- the larger of the tolerance " << options.functionTolerance
+		       << " and the round-off floor " << out.floor
+		       << "; KINSOL stopped " << stopped;
 		if ( deficient )
 			status << "; the outer Jacobian went RANK DEFICIENT during the "
 			          "iteration, its smallest singular value reaching "
@@ -538,7 +895,6 @@ namespace meq
 		out.status = status.str();
 		return out;
 #else
-		(void)residual;
 		out.status = "meq::safetyFactorSolve: the q-driven outer Newton needs KINSOL, and MFEM was built without MFEM_USE_SUNDIALS";
 		out.converged = false;
 		return out;

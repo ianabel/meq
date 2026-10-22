@@ -10,8 +10,12 @@ Running MEQ
 There are no subcommands, and the flags there are describe the *process*
 rather than the equilibrium: ``--device``, ``--mesh-command``, ``--mesh-ready``,
 ``--version``, the two that print diagnostics, ``--profile`` and
-``--trace-solver-stats``, and the two that ask for files beside the ``.nc``,
-``--gf`` and ``--vtk`` (see :ref:`running-options`). Everything about a run is
+``--trace-solver-stats``, one that sets a diagnostic of the trace solve,
+``--trace-refinement-cap`` (see :doc:`linear_solvers`), one that bounds a
+:math:`q`-driven run's outer loop, ``--q-iteration-cap`` (see
+:ref:`configuration-q-driven`), and the two that ask
+for files beside the ``.nc``, ``--gf`` and ``--vtk`` (see
+:ref:`running-options`). Everything about a run is
 in the configuration file, which
 :doc:`configuration` documents key by key, and which ``examples/`` has worked
 instances of — see :doc:`examples`.
@@ -224,7 +228,9 @@ Exit codes
      - solve failed
      - The configuration was good and the nonlinear iteration did not converge,
        including after the fallback. The residual history is printed, so the
-       failure is diagnosable rather than merely reported.
+       failure is diagnosable rather than merely reported. A
+       :math:`q`-driven run whose outer loop did not converge exits 2 too,
+       with no fallback and nothing written (:ref:`configuration-q-driven`).
    * - ``3``
      - output failed
      - The equilibrium was computed and something went wrong writing it — most
@@ -376,6 +382,11 @@ failure into a wrong answer. A mirror's labels start at the starting state's
 flux at ``[boundary.electrode]`` and ``[boundary.limiter]``, so the start is
 moved only by an ``[initialguess]``; ``[source] PsiAxis`` is refused beside the
 box.
+
+**Nor does a run driven by** :math:`q(\Psi)` **whose outer loop failed.** The rung would
+re-solve one equilibrium at the toroidal field the loop last tried, which is not
+the field the run was asked to find, so the run exits 2 and writes nothing. See
+:ref:`configuration-q-driven`.
 
 The ladder is deliberately never *predictive*. Nothing is inferred from the
 source about which strategy to use, and two plausible cheap indicators — the

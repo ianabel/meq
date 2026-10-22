@@ -315,10 +315,10 @@ namespace
 	 * GMRES with a Gauss-Seidel smoother, as a trace solver.
 	 *
 	 * **THIS IS NOT NEW CODE, IT IS AN EXISTING PATH MADE REACHABLE.**
-	 * picardStep() has carried exactly this -- GMRES, GSSmoother, rel_tol 1e-12,
-	 * 5000 iterations -- as the `#else` of MEQ_HAVE_DIRECT_TRACE_SOLVER since
-	 * there was a direct solver to be the `#if`, so it runs only in a build with
-	 * no direct package at all. Nobody has measured it on a machine case, and the
+	 * It is the configuration -- GMRES, GSSmoother, rel_tol 1e-12, 5000
+	 * iterations -- that the linear solve carries as the `#else` of
+	 * MEQ_HAVE_DIRECT_TRACE_SOLVER, which runs only in a build with no direct
+	 * package at all. Nobody has measured it on a machine case, and the
 	 * question it answers is the one that decides whether an iterative trace
 	 * solve is worth pursuing on a device: **how many Krylov iterations does
 	 * MEQ's trace system need.** Nothing in the tree records that number.
@@ -422,10 +422,11 @@ namespace
 	 */
 	std::unique_ptr<mfem::Solver>
 	makeTraceSolver( GradShafranovSolver::TraceSolver choice, bool reuseSymbolic,
-	                 bool statistics )
+	                 bool statistics, int refinementCap )
 	{
-		// Read by PARDISO alone, so a build without it has nothing to read it.
+		// Read by PARDISO alone, so a build without it has nothing to read them.
 		(void)statistics;
+		(void)refinementCap;
 		switch ( choice )
 		{
 			case GradShafranovSolver::TraceSolver::UMFPack:
@@ -454,6 +455,9 @@ namespace
 				// setTraceSolverStatistics(): MKL's own report of every phase,
 				// perturbed pivots and refinement steps among it, or silence.
 				solver->SetPrintLevel( statistics ? 1 : 0 );
+				// setTraceRefinementCap(): 0 unless a caller asked, where MFEM's
+				// constructor sets 2.
+				solver->SetMaxRefinementSteps( refinementCap );
 				if ( reuseSymbolic )
 					solver->SetReuseSymbolic();
 				return solver;
@@ -741,6 +745,11 @@ namespace
 	void SourceIntegrator::setFieldLinearisation( FieldLinearisation const *choice )
 	{
 		fieldLinearisation = choice;
+	}
+
+	void SourceIntegrator::setBorderFold( BorderFold const *fold )
+	{
+		borderFold = fold;
 	}
 
 	void SourceIntegrator::setPlasmaComponent( PlasmaComponent const *component )
@@ -1086,6 +1095,15 @@ namespace
 			mfem::AddMult_a_VVt( -weight*source->dFdPsi( radius, z, totalPsi )/radius,
 			                     shape, elmat );
 		}
+
+		// THE BORDER FOLD, on the one element it names. Not a term of F: it is
+		// a row operation on the Newton system, and the solver adds the
+		// matching multiple of the border row to the right-hand sides. See
+		// GradShafranovSolver::setBorderFolding().
+		if ( borderFold != nullptr && borderFold->element == tr.ElementNo
+		     && borderFold->row >= 0 && borderFold->row < dof )
+			for ( int j = 0; j < dof && j < borderFold->coefficients.Size(); ++j )
+				elmat( borderFold->row, j ) += borderFold->coefficients( j );
 	}
 
 	namespace
@@ -1491,52 +1509,6 @@ namespace
 	}
 
 	/*
-	 * F( R, z, psi^k( R, z ) ): the source frozen at the previous iterate.
-	 *
-	 * This is what makes a Picard path linear. setSource( Source const & ) puts
-	 * the source on the NON-LINEAR potential mass form, where hybridization
-	 * turns each element's elimination into its own Newton. Handing the same
-	 * Source through this coefficient instead puts it on the right hand side,
-	 * the potential block stays linear, and every local elimination is a linear
-	 * solve -- which is the ordering Nguyen, Peraire & Cockburn use and MEQ's
-	 * Newton path does not. See CLAUDE.md.
-	 *
-	 * **AT THE TOTAL FLUX, AS SourceIntegrator IS.** Under a conductor split the
-	 * iterate is the remainder psi_p, and F is a function of the physical
-	 * psi_p + psi_c. Without the shift the Picard paths iterate F( psi_p )
-	 * against a datum shifted by -psi_c, which is a fixed point of a different
-	 * equation, reached at the full rate: ConductorSubtraction's
-	 * thePicardPathsFreezeTheSourceAtTheTotalFlux, M-265. The solver is held
-	 * rather than a ConductorField, because setConductorField() may come after
-	 * this is built, and conductorPsi() is exactly zero without a split.
-	 */
-	class FrozenSource : public mfem::Coefficient
-	{
-		public:
-			FrozenSource( Source const &sourceIn, mfem::GridFunction const &psiIn,
-			              GradShafranovSolver const &solverIn )
-				: source( sourceIn ), psi( psiIn ), solver( solverIn )
-			{
-			}
-
-			/// MFEM's spelling, from mfem::Coefficient.
-			mfem::real_t Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
-			             mfem::IntegrationPoint const &ip ) override
-			{
-				mfem::Vector x;
-				tr.Transform( ip, x );
-				return source.f( x( 0 ), x( 1 ),
-				                 psi.GetValue( tr, ip )
-				                 + solver.conductorPsi( x( 0 ), x( 1 ) ) );
-			}
-
-		private:
-			Source const &source;
-			mfem::GridFunction const &psi;
-			GradShafranovSolver const &solver;
-	};
-
-	/*
 	 * The Picard map as an Operator, so KINSOL can iterate it.
 	 *
 	 * KINSOL reads Mult() differently by strategy: for KIN_NONE and
@@ -1780,6 +1752,9 @@ namespace
 				: mfem::Solver( solverIn.Height(), solverIn.Width() ),
 				  inner( solverIn ), profile( profileIn )
 			{
+#ifdef MFEM_USE_MKL_PARDISO
+				pardiso = dynamic_cast<mfem::PardisoSolver const *>( &inner );
+#endif
 			}
 
 			/// MFEM's spelling, from mfem::Solver.
@@ -1792,6 +1767,10 @@ namespace
 				profile.traceFactorSeconds += profileNow() - t0;
 				profile.traceFactorCpuSeconds += profileCpuNow() - c0;
 				++profile.traceFactorCalls;
+#ifdef MFEM_USE_MKL_PARDISO
+				if ( pardiso )
+					profile.tracePerturbedPivots += pardiso->GetNumPerturbedPivots();
+#endif
 				// The wrapper's own shape follows the wrapped solver's, which only
 				// becomes known here: a direct solver sizes itself on its matrix.
 				height = inner.Height();
@@ -1814,6 +1793,7 @@ namespace
 				profile.traceSolveSeconds += profileNow() - t0;
 				profile.traceSolveCpuSeconds += profileCpuNow() - c0;
 				++profile.traceSolveCalls;
+				countRefinement();
 			}
 
 			/**
@@ -1846,11 +1826,31 @@ namespace
 				profile.traceSolveSeconds += profileNow() - t0;
 				profile.traceSolveCpuSeconds += profileCpuNow() - c0;
 				profile.traceSolveCalls += b.Size();
+				countRefinement();
 			}
 
 		private:
+			/// One solve phase, however many columns it carried: `iparm[6]` is
+			/// the steps that phase took. StepProfile::traceSolvePhases.
+			void countRefinement() const
+			{
+#ifdef MFEM_USE_MKL_PARDISO
+				if ( !pardiso )
+					return;
+				int const steps = pardiso->GetNumRefinementSteps();
+				++profile.traceSolvePhases;
+				profile.traceRefinementSteps += steps;
+				profile.traceRefinementMost = std::max( profile.traceRefinementMost,
+				                                        steps );
+#endif
+			}
+
 			mfem::Solver &inner;
 			GradShafranovSolver::StepProfile &profile;
+#ifdef MFEM_USE_MKL_PARDISO
+			/// `inner` when it is PARDISO, whose counters the profile reads.
+			mfem::PardisoSolver const *pardiso = nullptr;
+#endif
 	};
 
 	class ComponentRefreshed : public mfem::Operator
@@ -2018,13 +2018,12 @@ namespace
 				"MFEM_USE_SUNDIALS, so no KINSOL strategy is available" );
 #endif
 		globalisationChoice = choice;
-		// built, not just prepared. usesNonlinearForms() reads globalisationChoice,
-		// and buildForms() branches on it to decide whether the potential block
-		// goes on the LINEAR or the NON-LINEAR form -- so switching a live solver
-		// between a Picard path and a Newton one while built stayed true would
-		// silently reuse the other path's blocks. Found while wiring
-		// PicardThenNewton, which switches twice in one solve(); setNonlinearOrdering
-		// and setLocalSolver beside it always did reset built, and this did not.
+		// built, not just prepared, as setNonlinearOrdering and setLocalSolver
+		// beside it do. Every globalisation assembles the same forms -- the
+		// Picard ones iterate on Newton's own NPC residual, see solveByPicard()
+		// -- so a change of path costs one fresh assembly and guarantees that
+		// PicardThenNewton, which switches twice in one solve(), carries no
+		// state from one stage's forms into the other's.
 		built = false;
 		prepared = false;
 	}
@@ -2044,53 +2043,6 @@ namespace
 	}
 
 	/*
-	 * One Picard step: freeze F at @a in, reassemble, solve, hand back the new
-	 * potential. This is the fixed point map, and KINSOL calls it once per
-	 * iteration.
-	 *
-	 * prepare() is re-entered deliberately. buildForms() is guarded by `built`,
-	 * so the bilinear forms are assembled once and only the right hand side and
-	 * the hybridization's reduction are redone -- which they must be, the source
-	 * having changed.
-	 */
-	void GradShafranovSolver::picardStep( mfem::Vector const &in, mfem::Vector &out )
-	{
-		*picardIterate = in;
-
-		prepared = false;
-		prepare();
-
-#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
-		// Held across calls rather than built per iteration, which is the whole
-		// point: Picard runs 122 to 290 of these, each a full factorisation of a
-		// matrix whose sparsity never changes. prepare() rebuilds `reduced` every
-		// iteration, but the reuse compares the pattern rather than the object --
-		// it documents accepting "a matrix rebuilt into a fresh object with the
-		// same structure" -- so the analysis survives that.
-		if ( !picardSolver )
-			picardSolver = makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue );
-		picardSolver->SetOperator( *reduced.Ptr() );
-		picardSolver->Mult( traceB, traceX );
-#else
-		mfem::SparseMatrix &matrix = *reduced.As<mfem::SparseMatrix>();
-		mfem::GSSmoother preconditioner( matrix );
-		mfem::GMRESSolver step;
-		step.SetOperator( matrix );
-		step.SetPreconditioner( preconditioner );
-		step.SetRelTol( 1.0e-12 );
-		step.SetAbsTol( 0.0 );
-		step.SetMaxIter( 5000 );
-		step.SetPrintLevel( -1 );
-		step.Mult( traceB, traceX );
-		if ( !step.GetConverged() )
-			throw std::runtime_error( "meq::GradShafranovSolver::picardStep: the trace solve did not converge" );
-#endif
-
-		darcy->RecoverFEMSolution( traceX, darcyRhs, darcySolution );
-		out = potentialGf;
-	}
-
-	/*
 	 * Anderson-accelerated Picard, which is the GS papers' own method.
 	 *
 	 * KINSOL's KIN_FP reads the operator as the fixed point map G( u ) and drives
@@ -2099,9 +2051,62 @@ namespace
 	 * it, so the same wrapper serves both readings -- which is convenient and is
 	 * also the trap recorded in setGlobalisation().
 	 *
-	 * The unknown is psi_h in W_h, not the trace. That is a different iteration
-	 * from every other path in this file, and it is why this is a separate
-	 * function rather than another case in solve()'s switch.
+	 * The unknown KINSOL sees is psi_h in W_h, not the trace. That is a
+	 * different iteration from every other path in this file, and it is why
+	 * this is a separate function rather than another case in solve()'s switch.
+	 *
+	 * **THE MAP IS THE CLASSICAL ONE AND IT IS EVALUATED AS A CORRECTION.**
+	 * G( u ) = A_lin^-1 b( u ) is the linear problem with F frozen at u. What
+	 * is computed is
+	 *
+	 *     x = ( q, u, psihat )        q and psihat from the last call
+	 *     G( u ) = the u block of  x - A_lin^-1 R( x )
+	 *
+	 * where R is the NPC residual Newton drives to zero and A_lin its Jacobian
+	 * with the reaction left out, which is FieldLinearisation::Picard. R is
+	 * affine in ( q, u, psihat ) once F is frozen at u, and A_lin is exactly its
+	 * derivative there, so one correction lands on A_lin^-1 b( u ) WHATEVER q AND
+	 * psihat WERE. In exact arithmetic this is the same map, step for step, as
+	 * putting F( u ) on the right hand side and solving the condensed system for
+	 * the whole field.
+	 *
+	 * **IN FLOATING POINT IT IS NOT, AND THE DIFFERENCE IS WHERE THE FIXED POINT
+	 * IS.** Solving for the whole field puts the whole field through the
+	 * element-local eliminations and the trace solve every step, so the map
+	 * carries their forward error at full size, and a fixed point sits wherever
+	 * that error lets it. Measured on GS-2 section 4.2 at k = 1, one application
+	 * of the condensed map AT NEWTON'S CONVERGED ANSWER moved psi by 3.06e-05 at
+	 * n = 32 and 4.37e-05 at n = 48 in single, against a psi of 0.3 -- about a
+	 * thousand eps -- and by 1.04e-13 at n = 48 in double, which is the same
+	 * thousand eps of that format: a property of the route, not of the
+	 * precision. PARDISO's iterative refinement, extended-precision residuals
+	 * included, moved neither figure, and rebuilding the whole trace through
+	 * the solve each step while correcting the potential still reaches
+	 * Newton's answer, so it is not the trace solve: it is the element-local
+	 * elimination that recovers the potential from the trace. In single
+	 * that left Anderson-Picard's answer 6.7e-05 (median over the sample cloud)
+	 * from Newton's on the n = 32 mesh, where Newton reproduces double to 4e-08,
+	 * and stalled the iteration at a scaled update of 1e-05 however long it ran.
+	 *
+	 * As a correction, the eliminations and the solve touch only the STEP, which
+	 * vanishes at the fixed point. What is left is the rounding of R, which is a
+	 * product and is Newton's own floor, because the fixed point is now
+	 * R( x ) = 0 -- the equation Newton solves, evaluated the same way. Measured
+	 * at the same point on n = 48, the corrected map moves psi by 1.49e-07 at
+	 * most and 3.8e-08 on an average element in single -- five ulps and one --
+	 * and by 8.3e-16 in double, against the condensed map's 4.37e-05 and
+	 * 1.04e-13. Anderson-Picard then reaches Newton's maximum of psi to 9.9e-08
+	 * relative in single on both resolved meshes, where the condensed map
+	 * leaves it 1.6e-05 to 3.1e-05 off; and the iteration counts in double are
+	 * the condensed map's to within the drift of a different rounding, 48 to
+	 * 240 against 48 to 210.
+	 *
+	 * Two further consequences, both structural. The Picard paths evaluate F
+	 * through SourceIntegrator, the integrator Newton uses, so the quadrature
+	 * and the conductor shift are the same code rather than a second coefficient
+	 * kept in step with it by hand. And A_lin carries no psi, so every
+	 * element-local operation is still one linear solve: the property the
+	 * Picard route exists for.
 	 */
 	void GradShafranovSolver::solveByPicard()
 	{
@@ -2111,24 +2116,70 @@ namespace
 			"but MFEM was built without MFEM_USE_SUNDIALS" );
 #else
 		// One assembly to size everything and to give the fixed point its start:
-		// the Dirichlet data extended inward, which is what Newton starts from too.
+		// the Dirichlet data, and the guess or the state when one was given --
+		// which is what Newton starts from too.
 		prepared = false;
 		prepare();
 
+		// The reaction leaves the Jacobian for this solve and comes back however
+		// it exits, so a throw cannot leave a later Newton solve on A_lin.
+		struct RestoreLinearisation
+		{
+			GradShafranovSolver *solver;
+			~RestoreLinearisation()
+			{
+				solver->fieldLinearisationChoice = FieldLinearisation::Newton;
+			}
+		} const restoreLinearisation { this };
+		fieldLinearisationChoice = FieldLinearisation::Picard;
+
+		// Newton's own operator and elimination: see solve(). `darcyRhs` is held
+		// by reference and is a member, so it outlives both.
+		mfem::DarcyNPCOperator npc( *darcy->GetHybridization(), blockOffsets, darcyRhs );
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
+		// Held across iterations so its symbolic analysis is reused: the trace
+		// system's sparsity does not change between them.
+		std::unique_ptr<mfem::Solver> const traceOwned =
+			makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue,
+			                 traceRefinementCapValue );
+		mfem::Solver &trace = *traceOwned;
+#else
+		mfem::GMRESSolver trace;
+		trace.SetRelTol( 1.0e-14 );
+		trace.SetAbsTol( 0.0 );
+		trace.SetMaxIter( 5000 );
+		trace.SetPrintLevel( -1 );
+#endif
+		mfem::DarcyNPCSolver correction( trace );
+
+		mfem::Vector residual( npc.Height() );
+		mfem::Vector step( npc.Height() );
+
+		// The map. `solution` is the state x, whose potential block potentialGf
+		// aliases; q and psihat are whatever the previous call left there.
+		auto picardStep = [ & ]( mfem::Vector const &in, mfem::Vector &out )
+		{
+			potentialGf = in;
+			potentialGf.SyncAliasMemory( solution );
+
+			npc.Mult( solution, residual );
+			// A_lin depends on nothing that moves, but the elimination factors
+			// the local blocks in place, so it is taken afresh each step exactly
+			// as Newton's NewtonSolver takes it.
+			correction.SetOperator( npc.GetGradient( solution ) );
+			step = 0.0;
+			correction.Mult( residual, step );
+			solution -= step;
+
+			solution.SyncToBlocks();
+			potentialGf.SyncMemory( solution.GetBlock( 1 ) );
+			out = potentialGf;
+		};
+
 		mfem::Vector iterate( potentialGf.Size() );
 		iterate = potentialGf;
-		if ( initialGuess )
-		{
-			mfem::GridFunction seeded( potentialFes.get() );
-			seeded.ProjectCoefficient( *initialGuess );
-			iterate = seeded;
-		}
 
-		PicardMap map( iterate.Size(),
-			[ this ]( mfem::Vector const &in, mfem::Vector &out )
-			{
-				picardStep( in, out );
-			} );
+		PicardMap map( iterate.Size(), picardStep );
 
 		mfem::KINSolver fixedPoint( KIN_FP, false );
 		// One damping, not two. KINSetDampingAA damps the Anderson combination and
@@ -2140,12 +2191,11 @@ namespace
 		else
 			fixedPoint.SetDamping( picardDamping );
 		fixedPoint.SetOperator( map );
-		// THE TARGET IS THE FIXED POINT'S AND NOT NEWTON'S, and in a narrow
-		// format those differ: a linearly convergent iteration approaches the
-		// arithmetic's floor from above and never crosses it, where Newton's
-		// last step squares the residual straight through. picardTolerance()
-		// carries the measurement. In double it is the caller's own value,
-		// unchanged.
+		// THE FIXED POINT'S TARGET, which is Newton's floor because the map is
+		// a correction: a linearly convergent iteration approaches its floor
+		// from above, so the floor has to sit clear of the target, and evaluated
+		// this way it does. picardTolerance() carries the measurement. In double
+		// it is the caller's own value, unchanged.
 		fixedPoint.SetRelTol( picardTolerance( newtonRelativeTolerance ) );
 		fixedPoint.SetAbsTol( picardTolerance( newtonAbsoluteTolerance ) );
 		fixedPoint.SetMaxIter( newtonMaxIterations );
@@ -2176,14 +2226,25 @@ namespace
 		}
 
 		// One last step at the converged iterate, so that the flux, the trace and
-		// the potential all come from the SAME assembly. Without it the flux would
+		// the potential all come from the SAME state. Without it the flux would
 		// be one iteration stale, which no rate would notice and every field plot
 		// would.
 		mfem::Vector settled( iterate.Size() );
 		picardStep( iterate, settled );
 
-		fluxGf = darcyFlux;
-		fluxGf.Neg();
+		// As solve() ends a Newton solve: the aliases' validity flags made
+		// honest, the answer downloaded once, and the flux's sign undone.
+		solution.SyncToBlocks();
+		darcyFlux.SyncMemory( solution.GetBlock( 0 ) );
+		potentialGf.SyncMemory( solution.GetBlock( 1 ) );
+		traceGf.SyncMemory( solution.GetBlock( 2 ) );
+		downloadSolution();
+		{
+			mfem::real_t const *const from = darcyFlux.HostRead();
+			mfem::real_t *const to = fluxGf.HostWrite();
+			for ( int i = 0; i < darcyFlux.Size(); ++i )
+				to[ i ] = -from[ i ];
+		}
 		postProcessed = false;
 #endif
 	}
@@ -2475,6 +2536,26 @@ namespace
 	bool GradShafranovSolver::traceSolverStatistics() const
 	{
 		return traceSolverStatisticsValue;
+	}
+
+	void GradShafranovSolver::setTraceRefinementCap( int steps )
+	{
+		traceRefinementCapValue = steps;
+	}
+
+	int GradShafranovSolver::traceRefinementCap() const
+	{
+		return traceRefinementCapValue;
+	}
+
+	void GradShafranovSolver::setBorderFolding( bool wanted )
+	{
+		borderFoldingWanted = wanted;
+	}
+
+	bool GradShafranovSolver::borderFolding() const
+	{
+		return borderFoldingWanted;
 	}
 
 	void GradShafranovSolver::setUpDownSymmetry( bool wanted )
@@ -5420,10 +5501,11 @@ namespace
 
 	bool GradShafranovSolver::usesNonlinearForms() const
 	{
-		if ( !nonlinearSource )
-			return false;
-		return globalisationChoice != Globalisation::AndersonPicard
-		    && globalisationChoice != Globalisation::PicardOnly;
+		// Every globalisation, the Picard ones included: they iterate the
+		// classical map as a correction on the same NPC residual Newton drives,
+		// which is what puts their fixed point where Newton's root is. See
+		// solveByPicard().
+		return nonlinearSource != nullptr;
 	}
 
 	void GradShafranovSolver::buildForms()
@@ -6135,30 +6217,10 @@ namespace
 			fluxRhs->Assemble();
 		}
 
-		// On a Picard path the source is the frozen coefficient, so the linear
-		// right hand side below is what assembles it. Built here rather than in
-		// buildForms() because it reads picardIterate, which changes every step.
+		// Only setSource( Coefficient & ) has a right hand side source. A
+		// meq::Source is on the non-linear potential mass on every path, the
+		// Picard ones included -- see solveByPicard().
 		mfem::Coefficient *rhsSource = linearSource;
-		if ( nonlinearSource && !usesNonlinearForms() )
-		{
-			if ( !picardIterate )
-			{
-				picardIterate = std::make_unique<mfem::GridFunction>( potentialFes.get() );
-				*picardIterate = 0.0;
-			}
-			if ( !frozenSource )
-				frozenSource = std::make_unique<FrozenSource>( *nonlinearSource,
-				                                              *picardIterate, *this );
-			rhsSource = frozenSource.get();
-
-			// The same -1/R that setSource( Coefficient & ) applies, and for the
-			// same two reasons -- the equation's 1/R and DarcyForm's sign. Built
-			// once; ProductCoefficient holds a reference, so the frozen source
-			// re-reads picardIterate on every assembly without rebuilding this.
-			if ( !potentialRhsCoeff )
-				potentialRhsCoeff = std::make_unique<mfem::ProductCoefficient>(
-					negativeInverseRadius, *rhsSource );
-		}
 
 		if ( rhsSource )
 		{
@@ -6467,6 +6529,17 @@ namespace
 	double GradShafranovSolver::plasmaCurrentScale() const
 	{
 		return currentScaleValue;
+	}
+
+	void GradShafranovSolver::setPlasmaCurrentScaleInitial( double scale )
+	{
+		if ( !std::isfinite( scale ) || scale == 0.0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setPlasmaCurrentScaleInitial: the "
+				"profile scale must start finite and non-zero -- it multiplies "
+				"the whole plasma source, and zero is the trivial branch" );
+		currentScaleInitialValue = scale;
+		currentScaleInitialGiven = true;
 	}
 
 	double GradShafranovSolver::plasmaCurrent() const
@@ -9913,6 +9986,20 @@ namespace
 		};
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
+		/*
+		 * THE FOLDED ELIMINATION'S OWN VECTORS -- see setBorderFolding(). Its
+		 * two right-hand sides and the column of its second border unknown,
+		 * and that column's solve. Allocated once with the rest, and touched
+		 * only on a step that folds.
+		 *
+		 * `foldSign` is kappa's sign, carried from step to step: the fold's
+		 * one hazard is `1 + kappa b . J^-1 e_j = 0`, and that product is the
+		 * last step's `rho/( 1 - rho )`, so the sign that kept it positive
+		 * then is the one most likely to keep it positive now.
+		 */
+		mfem::Vector foldY( n ), foldZ( n ), foldE( n ), foldSolved( n );
+		SourceIntegrator::BorderFold borderFoldSpec;
+		double foldSign = 1.0;
 		mfem::Vector columnL( n ), zL( n ), currentRow( n );
 
 		/*
@@ -11068,8 +11155,16 @@ namespace
 		};
 
 		// The scale starts where it was left, so a re-solve continues rather
-		// than restarting, and the source is told before any residual is taken.
-		double sL = currentIsUnknown ? currentScaleValue : 1.0;
+		// than restarting, and the source is told before any residual is taken
+		// -- or where setPlasmaCurrentScaleInitial() put it, once. NOT from the
+		// source: telling it here is what makes this the one place the scale
+		// is decided, and a fresh solver reading a scale somebody else left
+		// on a shared source would start the retry rung from a failed
+		// attempt's last trial.
+		double sL = currentIsUnknown ? ( currentScaleInitialGiven ? currentScaleInitialValue
+		                                                          : currentScaleValue )
+		                             : 1.0;
+		currentScaleInitialGiven = false;
 		if ( normalisedSource && currentIsUnknown )
 			normalisedSource->setCurrentScale( sL );
 
@@ -12944,6 +13039,30 @@ namespace
 		std::vector<double> transmission( static_cast<std::size_t>( nModes ), 0.0 );
 		transmissionAll( unknown, transmission );
 
+		/*
+		 * AND THE CURRENT ROW ON THE STARTING ITERATE, which every other border
+		 * row already has by this line. Left at zero until the first step
+		 * assembles it, iteration 0's merit has no current term -- the
+		 * omission the line search's own note records for its trials -- and a
+		 * start that meets every other row converges at once WHATEVER CURRENT
+		 * IT CARRIES. MEASURED through the exact restart, without these lines:
+		 * limited-tokamak's .nc restarted with PlasmaCurrent 3.0e5 -> 3.3e5
+		 * "converged in 0 Newton iterations" to the 3.0e5 equilibrium and
+		 * reported I_p = 0; with them, 6 steps to 3.300000e+05 in single and 7
+		 * in double. A cold start's trajectory is unchanged by them on
+		 * limited-tokamak -- its first step takes the same damping -- and only
+		 * the printed r_0 moves, 2.4116e-01 to 2.4347e-01.
+		 *
+		 * HERE, after the last fieldResidual() at ( unknown, s ) and before
+		 * the column and the cold reference move the support off the iterate,
+		 * so the mask it integrates over is the one `residual` was taken on.
+		 */
+		if ( currentIsUnknown )
+		{
+			currentIntegral = assemblePlasmaCurrent( unknown );
+			constraintL = currentIntegral - targetMuZeroCurrent;
+		}
+
 		// c at the starting iterate, computed whatever the coupling: it is both
 		// the first step's column and the scale gamma. gamma converts a
 		// perturbation of psi_ax into the units the trace residual is measured
@@ -13248,7 +13367,8 @@ namespace
 		// The sparsity of the trace system does not change between Newton steps
 		// and this object outlives the loop, so the analysis is done once.
 		std::unique_ptr<mfem::Solver> const linearOwned =
-			makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue );
+			makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue,
+			                 traceRefinementCapValue );
 		mfem::Solver &linear = *linearOwned;
 #else
 		mfem::GMRESSolver linear;
@@ -13474,6 +13594,11 @@ namespace
 				record.xR = xR;
 				record.xZ = xZ;
 				record.norm = norm;
+				if ( plasmaComponentMask.active() )
+				{
+					record.supportComponents = plasmaComponentMask.componentCount();
+					record.supportElements = plasmaComponentMask.componentNodes();
+				}
 
 				/*
 				 * cos( angle ) AGAINST THE PREVIOUS ITERATE'S FIELD RESIDUAL.
@@ -13952,6 +14077,9 @@ namespace
 						borderOut[ i ]->Write();
 					}
 				npcLinear.ArrayMult( borderRhs, borderOut );
+				if ( darcy && darcy->GetHybridization() )
+					profile.elementColours = std::max( profile.elementColours,
+						darcy->GetHybridization()->GetNumElementColours() );
 				profile.npcTraversalSeconds += profileNow() - t0
 					- ( profile.traceSolveSeconds - traceBefore );
 				profile.npcTraversalCpuSeconds += profileCpuNow() - c0
@@ -13985,6 +14113,114 @@ namespace
 				borderOut.SetSize( 0 );
 			};
 
+			/*
+			 * THE FOLD, IF THIS STEP TAKES ONE -- setBorderFolding() has the
+			 * argument. Decided AFTER the support refresh below and BEFORE the
+			 * gradient is assembled, because kappa's magnitude is the source's
+			 * reaction term at the folded dof, and that is zero on an element
+			 * the fill has not reached: read against the previous evaluation's
+			 * mask it is the wrong number, and on the first step of a filled
+			 * solve -- whose previous mask is the cold reference's, taken at
+			 * zero flux -- it is zero, which skips the fold on one route and
+			 * not the other. Measured, with the decision taken before the
+			 * refresh: PlasmaConnectivity's confined control, started at
+			 * psi_ax = 0.2, folded its first step under one connectivity
+			 * choice and not under the other, and
+			 * two runs that are otherwise bit-identical reached one equilibrium
+			 * in 5 steps and in 6.
+			 */
+			bool foldActive = false;
+			int foldIndex = -1;
+			auto prepareFold = [ & ]()
+			{
+				// Not under a Device: the device integrand's local blocks are
+				// assembled and factored inside one upstream call, with no seam
+				// to fold at. setBorderFolding() says what it would take.
+				if ( !borderFoldingWanted || nBorders + nModes + nGauge != 1
+				     || !coupled || inverseSolve || sourceIntegrator == nullptr
+				     || deviceIntegrandInUse || mfem::Device::IsEnabled()
+				     || fieldLinearisationChoice != FieldLinearisation::Newton
+				     || borderDofs.Size() == 0 )
+					return;
+
+				/*
+				 * THE ROW'S POTENTIAL HALF MUST LIE ON ONE ELEMENT, which is
+				 * what makes `kappa e_j b_p^T` element-local. The potential
+				 * space is discontinuous, so a dof has exactly one element;
+				 * everything off the potential block is the flux half and
+				 * travels as eta.
+				 */
+				int element = -1;
+				for ( int i = 0; i < borderDofs.Size(); ++i )
+				{
+					int const at = borderDofs[ i ];
+					if ( at < blockOffsets[ 1 ] || at >= blockOffsets[ 2 ]
+					     || border( i ) == 0.0 )
+						continue;
+					int const owner = potentialFes->GetElementForDof( at - blockOffsets[ 1 ] );
+					if ( element >= 0 && owner != element )
+						return;
+					element = owner;
+				}
+				if ( element < 0 )
+					return;
+
+				mfem::Array< int > dofs;
+				potentialFes->GetElementDofs( element, dofs );
+				mfem::Vector row( dofs.Size() );
+				row = 0.0;
+				for ( int i = 0; i < borderDofs.Size(); ++i )
+				{
+					int const at = borderDofs[ i ];
+					if ( at < blockOffsets[ 1 ] || at >= blockOffsets[ 2 ] )
+						continue;
+					row( potentialFes->GetLocalDofForDof( at - blockOffsets[ 1 ] ) )
+						+= border( i );
+				}
+
+				// j: the largest entry of the row, so the fold is applied where
+				// the constraint is most sensitive to the field.
+				int j = -1;
+				for ( int i = 0; i < row.Size(); ++i )
+					if ( row( i ) != 0.0
+					     && ( j < 0 || std::abs( row( i ) ) > std::abs( row( j ) ) ) )
+						j = i;
+				if ( j < 0 )
+					return;
+
+				// kappa's magnitude: this element's own reaction term at j, from
+				// the integrator that will carry the fold. Zero -- an element the
+				// fill dropped, or a source with no psi dependence there -- means
+				// there is no scale to fold at, and the step is the plain one.
+				mfem::IsoparametricTransformation transformation;
+				mesh.GetElementTransformation( element, &transformation );
+				mfem::Vector elfun( dofs.Size() );
+				for ( int i = 0; i < dofs.Size(); ++i )
+					elfun( i ) = unknown( blockOffsets[ 1 ] + dofs[ i ] );
+				mfem::DenseMatrix reaction;
+				sourceIntegrator->setBorderFold( nullptr );
+				sourceIntegrator->AssembleElementGrad( *potentialFes->GetFE( element ),
+				                                       transformation, elfun, reaction );
+				double const scale = std::abs( reaction( j, j ) );
+				if ( !( scale > 0.0 ) || !std::isfinite( scale ) )
+					return;
+
+				double const kappa = foldSign*scale/std::abs( row( j ) );
+				borderFoldSpec.element = element;
+				borderFoldSpec.row = j;
+				borderFoldSpec.coefficients = row;
+				borderFoldSpec.coefficients *= kappa;
+
+				foldIndex = blockOffsets[ 1 ] + dofs[ j ];
+				foldY = residual;
+				foldY( foldIndex ) += kappa*constraint;
+				foldZ = column;
+				foldZ( foldIndex ) += kappa*corner;
+				foldE = 0.0;
+				foldE( foldIndex ) = kappa;
+				foldActive = true;
+			};
+
 			{
 				// The same support the residual was evaluated at. See
 				// fieldResidual above -- including when that is the FROZEN one,
@@ -13993,15 +14229,41 @@ namespace
 				// level up from the moving support itself.
 				if ( !plasmaSupportFrozenValue )
 					refreshPlasmaComponent( unknown );
+				// The support this step is assembled on, read here rather than
+				// where the record was opened: that one is the mask of the last
+				// evaluation, which on the first step is the cold reference's.
+				if ( plasmaComponentMask.active() )
+				{
+					borderStepHistory.back().supportComponents =
+						plasmaComponentMask.componentCount();
+					borderStepHistory.back().supportElements =
+						plasmaComponentMask.componentNodes();
+				}
+				prepareFold();
+				if ( foldActive )
+					sourceIntegrator->setBorderFold( &borderFoldSpec );
 				double const tg = profileNow();
 				double const cg = profileCpuNow();
 				mfem::Operator &jacobian = npc->GetGradient( unknown );
 				profile.gradientSeconds += profileNow() - tg;
 				profile.gradientCpuSeconds += profileCpuNow() - cg;
 				++profile.gradientCalls;
+				// Cleared at once: the fold belongs to THIS assembly and to no
+				// other caller of the integrator.
+				if ( foldActive )
+					sourceIntegrator->setBorderFold( nullptr );
 				npcLinear.SetOperator( jacobian );
-				queue( residual, y );
-				queue( column, z );
+				if ( foldActive )
+				{
+					queue( foldY, y );
+					queue( foldZ, z );
+					queue( foldE, foldSolved );
+				}
+				else
+				{
+					queue( residual, y );
+					queue( column, z );
+				}
 			}
 
 			for ( int mode = 0; mode < nModes; ++mode )
@@ -14898,6 +15160,60 @@ namespace
 						currentStep[ static_cast<std::size_t>( j - nBorderTotal ) ] =
 							value*coilScale[ static_cast<std::size_t>( j - nBorderTotal ) ];
 				}
+			}
+			else if ( nBorderTotal == 1 && foldActive )
+			{
+				/*
+				 * THE FOLDED BORDER, A 2 x 2: dS and eta = b_q . dx_q. With
+				 * dx = -( y' + dS z' + eta e' ) the border row and eta's own
+				 * definition read
+				 *
+				 *     ( d - b.z' ) dS -        ( b.e' ) eta = b.y' - G
+				 *       -( q.z' )  dS - ( 1 + q.e' ) eta  = q.y'
+				 *
+				 * with q the row's off-potential half. The iterate's update
+				 * below reads `y` and `z`, so eta e' is folded into y and the
+				 * trial is the Newton step it always was.
+				 */
+				countedHostRead( y, __LINE__ );
+				countedHostRead( z, __LINE__ );
+				countedHostRead( foldSolved, __LINE__ );
+				double by = 0.0, bz = 0.0, be = 0.0;
+				double qy = 0.0, qz = 0.0, qe = 0.0;
+				for ( int i = 0; i < borderDofs.Size(); ++i )
+				{
+					int const at = borderDofs[ i ];
+					double const w = border( i );
+					by += w*y( at );
+					bz += w*z( at );
+					be += w*foldSolved( at );
+					if ( at < blockOffsets[ 1 ] || at >= blockOffsets[ 2 ] )
+					{
+						qy += w*y( at );
+						qz += w*z( at );
+						qe += w*foldSolved( at );
+					}
+				}
+				double const a11 = corner - bz;
+				double const a12 = -be;
+				double const a21 = -qz;
+				double const a22 = -( 1.0 + qe );
+				double const r1 = by - constraint;
+				double const r2 = qy;
+				double const determinant = a11*a22 - a12*a21;
+				if ( determinant == 0.0 || !std::isfinite( determinant ) )
+					throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in psi_ax" );
+				step[ 0 ] = ( r1*a22 - a12*r2 )/determinant;
+				double const eta = ( a11*r2 - a21*r1 )/determinant;
+				y.Add( eta, foldSolved );
+
+				borderStepHistory.back().folded = true;
+				borderStepHistory.back().foldRho = be;
+
+				// kappa b . J^-1 e_j = rho/( 1 - rho ); keep it positive next
+				// step. See setBorderFolding().
+				if ( be != 1.0 && be/( 1.0 - be ) < 0.0 )
+					foldSign = -foldSign;
 			}
 			else if ( nBorderTotal == 1 )
 			{
@@ -15808,7 +16124,13 @@ namespace
 		if ( currentIsUnknown )
 		{
 			currentScaleValue = sL;
-			plasmaCurrentValue = currentIntegral;
+			// THE ROW THE LAST MERIT JUDGED, which is the final iterate's: every
+			// accepted state re-reads constraintL. `currentIntegral` is the one
+			// the last STEP was assembled from, an iterate behind: reported, it
+			// gives the cold limited-tokamak run in single I_p = 3.001027e+05
+			// for a state carrying 3.000004e+05, and a solve that takes no
+			// step the starting iterate's.
+			plasmaCurrentValue = targetMuZeroCurrent + constraintL;
 			if ( normalisedSource )
 				normalisedSource->setCurrentScale( sL );
 		}
@@ -15854,9 +16176,9 @@ namespace
 		 * zero; the ones in phase B and phase D are the design.
 		 *
 		 * A SCOPE AND NOT AN ASSIGNMENT, because solve() is re-entrant:
-		 * solveByPicardThenNewton() calls it for its second stage, and
-		 * picardStep() re-enters prepare() -- which is phase B -- from inside
-		 * it. PhaseScope restores what it found rather than returning to a
+		 * solveByPicardThenNewton() calls it for its second stage, and every
+		 * path calls prepare() -- which is phase B -- from inside it.
+		 * PhaseScope restores what it found rather than returning to a
 		 * default, so the inner call cannot leave the outer one mislabelled.
 		 * Same hazard as `profileStart` being a local rather than a member,
 		 * three lines down.
@@ -15895,6 +16217,8 @@ namespace
 		// Level 2. Process-wide and static, so it is reset here beside the legs
 		// and read in the same destructor that closes the total. See StepProfile.
 		mfem::DarcyHybridization::ResetComputeHTime();
+		mfem::DarcyHybridization::ResetNPCTraversalTime();
+		mfem::DarcyNPCSolver::ResetStagingTime();
 
 		double const profileStart = profileNow();
 		/*
@@ -15935,15 +16259,17 @@ namespace
 				p.totalCpuSeconds = profileCpuNow() - c0;
 				p.computeHSeconds = mfem::DarcyHybridization::GetComputeHTime();
 				p.computeHCalls = mfem::DarcyHybridization::GetComputeHCalls();
+				p.npcReduceSeconds = mfem::DarcyHybridization::GetNPCReduceTime();
+				p.npcRecoverSeconds = mfem::DarcyHybridization::GetNPCRecoverTime();
+				p.npcStagingSeconds = mfem::DarcyNPCSolver::GetStagingTime();
 				if ( --depth == 0 )
 					run.add( p );
 			}
 		} const profileTotal{ profile, runProfile, solveDepth, profileStart };
 
-		// The Picard paths iterate a fixed point on the POTENTIAL, not a residual
-		// on the trace, so they do not go through prepare()-then-Newton at all --
-		// picardStep() re-enters prepare() itself, once per iteration.
-		// Stale on a solver reused across globalisations otherwise; the handoff
+		// The Picard paths iterate a fixed point on the POTENTIAL through KINSOL
+		// rather than a NewtonSolver, in solveByPicard(). This count is stale on
+		// a solver reused across globalisations otherwise; the handoff
 		// republishes it after stage 2.
 		picardIterationCount = 0;
 
@@ -15979,9 +16305,9 @@ namespace
 		 * for a connected plasma solving for a level set instead, which is the
 		 * whole defect XP-1 exists to fix, arrived at by a different route.
 		 *
-		 * The Picard paths above are already out: they never build the Jacobian
-		 * this refresh hangs off, and a fixed point on the potential re-enters
-		 * prepare() per iteration.
+		 * The Picard paths below are already out: the fill needs a normalised
+		 * source, and solve() refuses one beside any globalisation but None and
+		 * BorderedPicardThenNewton before it reaches here.
 		 */
 		if ( nonlinearSource && globalisationChoice == Globalisation::PicardThenNewton )
 		{
@@ -15989,7 +16315,8 @@ namespace
 			return;
 		}
 
-		if ( nonlinearSource && !usesNonlinearForms() )
+		if ( nonlinearSource && ( globalisationChoice == Globalisation::AndersonPicard
+		                          || globalisationChoice == Globalisation::PicardOnly ) )
 		{
 			solveByPicard();
 			return;
@@ -16103,7 +16430,8 @@ namespace
 			// The pattern is compared entry by entry rather than assumed, so a
 			// pattern that did change is re-analysed and the answer is unaffected.
 			std::unique_ptr<mfem::Solver> const linearOwned =
-				makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue );
+				makeTraceSolver( traceSolverChoice, true, traceSolverStatisticsValue,
+				                 traceRefinementCapValue );
 			mfem::Solver &linear = *linearOwned;
 #else
 			mfem::GMRESSolver linear;
@@ -16247,6 +16575,16 @@ namespace
 					// on the same merit function. What works is
 					// Globalisation::PicardThenNewton, which fixes WHERE the
 					// iterate is rather than how far it steps.
+					//
+					// NOR ANY OF FOUR OTHER STEP CONTROLS, each measured on
+					// GS-2 section 4.2 at k = 1 and recorded in CLAUDE_DECLINED.md,
+					// *Step controls for the unbordered Newton*: an
+					// error-oriented damping, pseudo-transient continuation on
+					// the reaction, a Newton-Picard blend and a refusal of steps
+					// that multiply the residual. Each either fails or slows the
+					// resolved meshes, or moves converging solves to different
+					// discrete roots, and none stops the coarse meshes wandering,
+					// because what they wander between is several roots.
 					nonlinear = std::make_unique<mfem::NewtonSolver>();
 					break;
 #ifdef MFEM_USE_SUNDIALS
@@ -16440,7 +16778,8 @@ namespace
 			// this object is destroyed straight after, so retaining the analysis
 			// would buy nothing and cost a copy of the pattern.
 			std::unique_ptr<mfem::Solver> const solver =
-				makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue );
+				makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue,
+				                 traceRefinementCapValue );
 			solver->SetOperator( *reduced.Ptr() );
 			solver->Mult( traceB, traceX );
 #else

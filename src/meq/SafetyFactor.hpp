@@ -216,6 +216,60 @@ namespace meq
 	std::vector<double> fitToroidalFieldSquared( ToroidalField const &field,
 	                                             unsigned int degree );
 
+	/**
+	 * THE ROUND-OFF FLOOR OF ONE PICARD STEP, in the units the outer Newton
+	 * measures its residual in: the max norm of `G( c ) - c` over the
+	 * coefficients of `g^2`.
+	 *
+	 * **THE MAP IS A WHOLE EQUILIBRIUM AND A SURFACE EXTRACTION, SO IT IS
+	 * NOISY, AND NO RESIDUAL BELOW ITS NOISE MEANS ANYTHING.** Evaluated twice
+	 * at the same coefficients from two different warm starts, it comes back
+	 * different -- by up to **1.3e-04** in single on `examples/q-driven.toml`,
+	 * and by **3.7e-14** in double -- because the inner solve stops at a
+	 * relative accuracy @a solveAccuracy and not at the exact discrete
+	 * solution. This is that noise carried through the steps that make the
+	 * map, and each step is linear in it:
+	 *
+	 *     V', < R^-2 >   each in error by about  solveAccuracy,  relatively
+	 *     g^2 = ( 4 pi^2 q/( V' < R^-2 > ) )^2   so  2( 1 + 1 ) = 4 x that
+	 *     c = P g^2      P the least-squares fit's pseudo-inverse, so
+	 *                    coefficient k carries || P_k o g^2 ||_2 of it
+	 *
+	 * -- the last a 2-norm because the surfaces' errors are independent, which
+	 * is measured rather than assumed: the three coefficients' noise stands
+	 * in the ratio of these row norms to within a factor of three, on both
+	 * fixtures below. And the floor is FOUR of
+	 * those standard deviations, because it is a CONVERGENCE test: the exact
+	 * root, evaluated once, must read converged.
+	 *
+	 *     floor = 4 x 4 x solveAccuracy x max_k || P_k o g^2 ||_2
+	 *
+	 * **THE PER-AVERAGE FACTOR IS THE ONE PIECE THAT IS MEASURED AND NOT
+	 * DERIVED**, and it is said so rather than hidden in the 16: an average's
+	 * relative error is "about" the solve's because both are round-off of the
+	 * same field, and how many units of it survive the tracer is a property of
+	 * the conditioning nothing here can compute. Measured, as the noise's
+	 * standard deviation over each coefficient's propagation and in units of
+	 * the single build's `solveAccuracy = 10 eps`, at the answer:
+	 *
+	 *     q-driven.toml   h = 0.1, 0.05, 0.025   0.7-1.2, 1.5-2.0, 1.3-2.4
+	 *                     k = 3 at h = 0.05      1.4-2.1
+	 *     SafetyFactorSolver, n = 24             1.5-4.6
+	 *
+	 * against the model's 4, with the worst single excursion over 11 to 23
+	 * draws at **10.0** against the floor's 16. In double the inner Newton's
+	 * last step squares its residual, so the map is three orders quieter
+	 * than its 1e-12 tolerance says and this is an upper bound there -- which
+	 * every outer tolerance in the tree already sits above.
+	 *
+	 * @param solveAccuracy the RELATIVE accuracy each equilibrium is solved to,
+	 *        which for MEQ's Newton is `meq::newtonTolerance()` of the
+	 *        relative tolerance it was given: ten eps at the least.
+	 * @throws std::invalid_argument as fitToroidalFieldSquared() does.
+	 */
+	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,
+	                         double solveAccuracy );
+
 	/// `gg'` knots from that fit, in the SOURCE's `Psi`, exact on the
 	/// polynomial. Same reflection and the same edge extension as
 	/// ggPrimeKnots(); @a samples knots are laid down uniformly over the
@@ -296,6 +350,11 @@ namespace meq
 
 				std::size_t knotSamples = 17;
 				EdgeExtension extension = EdgeExtension::Clamp;
+
+				/// The relative accuracy each equilibrium is solved to, from
+				/// which floor() is derived. Zero claims an exact solve and
+				/// so a floor of zero.
+				double solveAccuracy = 0.0;
 			};
 
 			ToroidalFieldMap( Solve solve, Options options );
@@ -313,6 +372,12 @@ namespace meq
 			/// one does.
 			std::vector<double> const &lastAdmissible() const { return lastGood; }
 
+			/// toroidalMapFloor() at the last step that produced an
+			/// equilibrium -- the noise on what operator() just returned,
+			/// which is what meq::OuterNewtonOptions::mapFloor asks for.
+			/// Zero until a step has.
+			double floor() const { return lastFloor; }
+
 		private:
 			std::vector<double> refuse(
 				std::vector<double> const &coefficients ) const;
@@ -320,6 +385,7 @@ namespace meq
 			Solve solve;
 			Options options;
 			std::vector<double> lastGood;
+			double lastFloor = 0.0;
 			int solveCount = 0;
 			int refusalCount = 0;
 	};

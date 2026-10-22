@@ -271,41 +271,38 @@ namespace meq
 
 
 	/**
-	 * The same, for a FIXED-POINT iteration, which cannot be asked for a
-	 * Newton's tolerance in a narrow format.
+	 * The same, for a FIXED-POINT iteration: the same floor, and the reason it
+	 * can be the same is a measurement.
 	 *
 	 * **A QUADRATICALLY CONVERGENT ITERATION OVERSHOOTS ITS TARGET AND A
-	 * LINEARLY CONVERGENT ONE STOPS EXACTLY AT IT.** Newton's last step
-	 * squares the residual, so a target within an order of the arithmetic's
-	 * own floor is met on the step that crosses it. Picard contracts by a
-	 * fixed factor, so it approaches the floor from above and never crosses
-	 * it -- and Anderson acceleration makes this worse rather than better,
-	 * since the least-squares combination it forms over the difference history
-	 * is a cancellation of vectors that are themselves at round-off.
+	 * LINEARLY CONVERGENT ONE STOPS AT IT.** Newton's last step squares the
+	 * residual, so a target within an order of the arithmetic's own floor is
+	 * met on the step that crosses it. Picard contracts by a fixed factor and
+	 * approaches its floor from above, so a fixed-point target is only
+	 * reachable if it sits clear of where the MAP's own error parks the
+	 * iterate -- which is a property of how the map is evaluated, not of
+	 * Picard.
 	 *
-	 * Measured on `NewtonConvergence`'s Example 5 at `k = 2, n = 16` in
-	 * single: Anderson-Picard runs the full 500 iterations and stops at a
-	 * scaled residual of **5.80e-05** against the `1.19e-06` that
-	 * [[newtonTolerance]] floors the target at -- 49 times short, where plain
-	 * Newton on the same problem finishes in three. `4096 eps` is `4.88e-04`,
-	 * eight times above the measured stall and three orders below the `O( 1 )`
-	 * an iteration that had not converged at all would leave.
+	 * Evaluated as a correction on the NPC residual, as solveByPicard() does,
+	 * that floor is Newton's. Measured in single, Anderson-Picard's scaled
+	 * update stalls at **2.98e-07** on `NewtonConvergence`'s Example 5 at
+	 * `k = 2, n = 16` and at **8.9e-08 to 1.2e-07** on GS-2 section 4.2 at
+	 * `k = 1, n = 16 to 48` -- one to two and a half `eps` -- so the `10 eps`
+	 * [[newtonTolerance]] floors at is reached with a margin of four, in 13
+	 * and 31 to 117 iterations, where double takes 57 to 210 on the second.
+	 * The map evaluated the other way -- the condensed system solved for the
+	 * whole field each step, which solveByPicard() records -- stalls the same
+	 * iteration at **5.80e-05**, 49 times short of `10 eps`, and needs a
+	 * `4096 eps` floor to converge at all; there the Picard arms of Example 5
+	 * reach an L2 error of 1.04e-04 and 2.16e-04 against Newton's 2.98e-05,
+	 * where at this floor all four agree to 2.9846e-05. M-220.
 	 *
-	 * **IT IS `#ifdef`'d RATHER THAN `std::max`'d, AND THAT IS NOT A STYLE
-	 * CHOICE.** `4096 eps` in double is `9.1e-13`, which is LARGER than
-	 * tolerances callers in this tree actually pass -- `FreeBoundaryCoupling`
-	 * asks for `1.0e-13` -- so a scaled version would loosen the double build
-	 * rather than leave it alone. M-220.
+	 * In double it is the caller's own value, since every caller in the tree
+	 * passes more than `10 eps`.
 	 */
 	inline double picardTolerance( double historical )
 	{
-#ifdef MFEM_USE_SINGLE
-		return std::max( historical,
-		                 4096.0*static_cast<double>(
-			                 std::numeric_limits<mfem::real_t>::epsilon() ) );
-#else
-		return historical;
-#endif
+		return newtonTolerance( historical );
 	}
 
 	/**
@@ -833,6 +830,30 @@ namespace meq
 			 */
 			void setFieldLinearisation( FieldLinearisation const *choice );
 
+			/**
+			 * ONE ROW OF ONE ELEMENT'S POTENTIAL BLOCK, ADDED TO THE GRADIENT
+			 * AND NOT TO THE RESIDUAL: `kappa e_j b_p^T`, the border row the
+			 * bordered Newton folds into the field block.
+			 * GradShafranovSolver::setBorderFolding() has the argument.
+			 *
+			 * HERE BECAUSE THIS IS THE ONE INTEGRATOR WHOSE GRADIENT IS
+			 * ASSEMBLED PER STEP: the rest of the element's local block is the
+			 * linear Darcy forms, built once. `coefficients` is in the
+			 * element's own dof order and `row` indexes it.
+			 */
+			struct BorderFold
+			{
+				int element = -1;
+				int row = -1;
+				mfem::Vector coefficients;
+			};
+
+			/// Borrowed and may be null, which is no fold and leaves this
+			/// class bit-unchanged. Only AssembleElementGrad reads it, after
+			/// the quadrature, and the solver sets it for exactly one assembly
+			/// and never under FieldLinearisation::Picard.
+			void setBorderFold( BorderFold const *fold );
+
 			/// MFEM's spelling, from NonlinearFormIntegrator.
 			void AssembleElementVector( mfem::FiniteElement const &el, // NOLINT(readability-identifier-naming)
 			                            mfem::ElementTransformation &tr,
@@ -880,6 +901,9 @@ namespace meq
 			/// setFieldLinearisation(). Borrowed; null is
 			/// FieldLinearisation::Newton.
 			FieldLinearisation const *fieldLinearisation = nullptr;
+
+			/// setBorderFold(). Borrowed; null is no fold.
+			BorderFold const *borderFold = nullptr;
 
 			int extraOrder;
 
@@ -1154,6 +1178,165 @@ namespace meq
 			/// number in the suite was measured with. Ignored unless psi_ax is an
 			/// unknown.
 			void setNormalisationCoupling( Normalisation choice );
+
+			/**
+			 * FOLD THE `psi_ax` ROW INTO ITS OWN ELEMENT BEFORE THE BORDERED
+			 * ELIMINATION -- ON BY DEFAULT, IN BOTH FORMATS.
+			 *
+			 * **THE ELIMINATION THIS REPLACES IS UNSTABLE WHEN THE FIELD BLOCK
+			 * IS SINGULAR, AND ON A HOMOGENEOUS PROBLEM IT IS SINGULAR AT THE
+			 * ROOT BY EULER'S THEOREM.** The bordered Newton solves `J y = R`
+			 * and `J z = c` and takes `dx = -( y + dS z )`. When `F` is
+			 * homogeneous of degree one in `psi` at fixed `psi_ax` -- linear
+			 * profiles, `psi_bnd = 0` and no inhomogeneous data, which is the
+			 * confined normalised eigenproblem -- `R( t psi ) = t R( psi )`, so
+			 * `J psi = R` exactly: `y` IS THE ITERATE, and `J` annihilates the
+			 * solution. Measured on PlasmaConnectivity's confined rectangle in
+			 * double: `|y - x|` is 6e-13 to 3e-9 against `|x| = 22.5` at every
+			 * step,
+			 * and `|z| |R|` holds at 14 to 17 from `|R| = 1e-4` to `4e-14`
+			 * while `|z|` reaches 4.4e+14.
+			 *
+			 * So the step is the difference of two iterate-sized vectors, and
+			 * the residual after it is the solves' backward error on them, not
+			 * on the step: **4.3 eps |y|, measured in both formats** -- 1.1e-05
+			 * in single, against a Newton target of 1.19e-06, and 2e-14 in
+			 * double, below every target there. It does not move with
+			 * PARDISO's refinement (cap 0, 2 and the extended-precision -2 all
+			 * read 5e-07 |y|), so it is not the trace solve. That is M-186's
+			 * plateau on this class of problem: below the shelf a step lands
+			 * under the target only when the computed `y`'s component along
+			 * the null vector happens to cancel the iterate, and over
+			 * `MKL_NUM_THREADS` and two MKLs `|y|` read anything from 0.02 to
+			 * 800 at the same residual -- 10 steps, 16, or none in 60.
+			 *
+			 * THE FOLD. Add `kappa` times the border row `b . dx + d dS = -G`
+			 * to one potential row `j` of the element the row's potential half
+			 * lives on. The field block becomes `J' = J + kappa e_j b_p^T`,
+			 * which is ELEMENT-LOCAL -- meq::SourceIntegrator adds it to that
+			 * element's gradient, so the NPC elimination and the trace solve
+			 * are untouched -- and the right-hand sides `R + kappa G e_j` and
+			 * `c + kappa d e_j`. The row's FLUX half `b_q` (the envelope term,
+			 * on the same element's flux dofs) has no integrator to carry it,
+			 * so `eta = b_q . dx_q` becomes a second border unknown with column
+			 * `kappa e_j` and the border is a 2 x 2. **It is exact algebra: the
+			 * same Newton step, not an approximation to it.** `J'` is
+			 * non-singular wherever the axis row sees the amplitude, which is
+			 * what makes the bordered system non-singular in the first place,
+			 * so every solve's answer is step-sized: `|y'|` falls to 0.03 to
+			 * 0.05 where `|y|` was 22.5, and `|z'|` stays at 1.3e+05 where
+			 * `|z|` ran to 2e+09.
+			 *
+			 * `rho = b . J'^-1( kappa e_j )` says what the fold is doing: 0 where
+			 * `J` is regular and the fold is inert, 1 where `J` is singular and
+			 * the fold is the whole repair (0.995 to 1.004 measured at the
+			 * last step), and
+			 * large where `J'` itself is near singular. By Sherman-Morrison
+			 * `J'` is singular exactly when `1 + kappa b . J^-1 e_j = 0`, and
+			 * that product is `rho/( 1 - rho )`, so KAPPA'S SIGN IS CHOSEN FROM
+			 * THE PREVIOUS STEP'S rho TO KEEP IT POSITIVE. Measured unsigned:
+			 * one step at `rho = -7.2`, `J'` amplifying eight times, and a step
+			 * that landed at 8.7e-05 where it should have reached 1e-05.
+			 * kappa's MAGNITUDE is the source's own reaction term at dof `j`
+			 * over `|b_j|`: the scale of the field block where `F` acts, so
+			 * there is no constant to choose -- and the measurements give no
+			 * reason to invent one. On PlasmaConnectivity's confined control,
+			 * from its ill-conditioned start, as the worst terminal landing
+			 * over the bound theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem
+			 * asserts (1 passes), single, six draws:
+			 *
+			 *     kappa x 0.1   2.5 to 9.5     the fold engages too late
+			 *     kappa x 1     1.5 to 2.0     pointwise in 9 or 10 steps
+			 *     kappa x 10    0.10 to 0.82   pointwise in 8 or 10 steps
+			 *     kappa x 100   0.24 to 30     J' dominated by its folded row;
+			 *                                  the shelf back on three draws
+			 *
+			 * and from that case's own well-conditioned start every scale reads
+			 * 0.38 to 0.68. The unfolded elimination reads 10 to 130 from the
+			 * first start and 8.2 to 10.1 from the second.
+			 *
+			 * WHY THERE IS A WINDOW, AS FAR AS IT CAN BE SAID WITHOUT A NUMBER
+			 * PRETENDING TO BE A DERIVATION. Both edges follow from what the
+			 * fold does to the size of the solves' answers. Below: the folded
+			 * `y'` keeps a fraction `1 - rho = 1/( 1 + kappa phi )` of the
+			 * iterate, with `phi = b . J^-1 e_j` growing like `1/sigma` as `J`
+			 * goes singular, so the shelf does not vanish at once -- it becomes
+			 * a floor `4.3 eps |x|/( 1 + kappa phi )` that falls in proportion
+			 * to the residual, i.e. a LINEAR rate of about `( shelf/|R| )/kappa`
+			 * in the transition. Too small a kappa makes that rate slower than
+			 * the thirtyfold the terminal bound asks for, which is the x 0.1
+			 * row. Above: `J'` carries `kappa b_p` in one row, and once that row
+			 * is larger than the rest of the matrix the solves' backward error
+			 * scales with it -- `eps |J'| |y'|` with `|J'| ~ kappa |b|` -- so the
+			 * shelf comes back in proportion to kappa, which is the x 100 row.
+			 * The reaction term at dof `j` is the scale at which the folded row
+			 * is the same size as the row it is added to, which is why x 1 sits
+			 * inside. **The edges' constants are not derived**: `sigma`'s
+			 * constant, `u_j` and `b . v` are not measured here, so where exactly
+			 * the window opens and closes is the table above and nothing more.
+			 *
+			 * ONLY WHERE IT APPLIES: one border unknown (`psi_ax`), coupled,
+			 * Newton in the field, no inverse targets, no Device, and a row
+			 * whose potential half lies on one element -- the located axis,
+			 * the nodal maximum and a prescribed point all do. Anywhere else
+			 * the elimination is the plain one. A `psi_bnd` or exterior border
+			 * breaks the homogeneity, so the field block there is not singular
+			 * at the root and has no shelf to remove.
+			 *
+			 * **UNDER A DEVICE THE STEP IS THE PLAIN ONE, AND THAT IS A GAP
+			 * RATHER THAN A CHOICE.** What folding there would take:
+			 *
+			 *   * THE DEVICE INTEGRAND, which a NormalisedMHDSource solve under
+			 *     a Device takes wherever upstream batches (meq::DeviceNPC). It
+			 *     hands upstream's
+			 *     batched `DarcyHybridization::NPCGradient()` a POINTWISE
+			 *     integrand, and the element's local block is assembled and
+			 *     factored in place inside that one call. The fold is a
+			 *     rank-one row on one element's block -- not a product of
+			 *     shape functions at quadrature points, so no integrand can
+			 *     express it -- and there is no seam between the assembly and
+			 *     the factorisation to add it at. It needs one upstream: a
+			 *     per-element correction to the local gradient before it is
+			 *     factored, or the local blocks exposed before factoring.
+			 *   * THE HOST INTEGRAND UNDER A DEVICE, for a source with no POD
+			 *     form, could fold today: SourceIntegrator is what carries the
+			 *     fold, and the cost is making the folded right-hand sides
+			 *     device-coherent and reading the 2 x 2's dots on the host. It
+			 *     is skipped with the rest because no shipped normalised
+			 *     source reaches it, and a route nothing runs is a route
+			 *     nothing tests.
+			 *
+			 * The skip leaves DeviceParity's comparison of a folded host against
+			 * an unfolded card, and it is green: every shipped example's
+			 * `psi_ax`, `psi_bnd`, X-point and Newton count agree to the printed
+			 * digit. The examples are not homogeneous, so the elimination there
+			 * is the plain one in all but its last bits.
+			 *
+			 * **ON IN DOUBLE TOO, SO THAT THERE IS ONE ALGORITHM.** The shelf
+			 * is there in double and is the same thing -- an unfolded double
+			 * solve of the eigenproblem ends at a field residual of 2.09e-14
+			 * and a folded one at 1.46e-16 -- but it sits under every tolerance
+			 * in the tree, so what the fold buys there is the agreement of the
+			 * two formats' algorithms and nothing a test could see. What it
+			 * costs is the last bits, and that was measured: the whole double
+			 * suite run folded and unfolded, every printed number compared.
+			 * No Newton count moved and no answer moved beyond round-off -- a
+			 * final residual's last digit (HighBetaConvergence 4.90e-12 to
+			 * 4.89e-12, PrescribedAxisPoint 7.82e-14 to 7.76e-14), a
+			 * round-off-level row or constraint (RotatingNormalised's 8.3e-17
+			 * to 1.8e-16, SafetyFactorSolver's outer residual entries between
+			 * 9e-15 and 5e-13 either way, its fixed-point check 2.07e-14 to
+			 * 2.10e-14), and nothing in
+			 * NewtonConvergence's rates, DeviceParity or `machine-f-diiid`
+			 * (`psi_ax = 3.759850e-01`, constraint -6.466e-12, which has a
+			 * `psi_bnd` border and does not fold). This switches it either
+			 * way, in either build, which is how PlasmaConnectivity's
+			 * theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem measures it.
+			 */
+			void setBorderFolding( bool wanted );
+
+			/// setBorderFolding().
+			bool borderFolding() const;
 
 			/**
 			 * WHAT `psi_ax` IS CONSTRAINED TO BE.
@@ -2586,7 +2769,7 @@ namespace meq
 			};
 
 			/// True when the potential block is assembled non-linearly, which is
-			/// the Newton paths and not the Picard ones.
+			/// every path with a meq::Source, the Picard ones included.
 			bool usesNonlinearForms() const;
 
 			/**
@@ -3322,9 +3505,9 @@ namespace meq
 				/// available in every build and needs no package.
 				///
 				/// **IT IS HERE TO BE MEASURED, NOT BECAUSE IT IS RECOMMENDED.**
-				/// picardStep() has carried this exact configuration as its
-				/// no-direct-solver fallback all along, where no machine case ever
-				/// reached it. The number that decides whether an iterative trace
+				/// The linear solve carries this exact configuration as its
+				/// no-direct-solver fallback, where no machine case ever reaches
+				/// it. The number that decides whether an iterative trace
 				/// solve is worth pursuing on a device is how many Krylov
 				/// iterations MEQ's trace system needs, and nothing recorded it.
 				/// The solver reports its own counts on destruction for that
@@ -3356,9 +3539,10 @@ namespace meq
 			 * refinement steps (`iparm[7] = 2`), and MKL refines only when a
 			 * factorisation perturbed a pivot, each step a product with the
 			 * matrix and another solve of every column. On TCV shaped that leg
-			 * is 15 to 19 per cent of the run over about twenty columns a step,
-			 * and whether refinement is in it is not something MEQ can read:
-			 * the iparm outputs are private to mfem::PardisoSolver.
+			 * is 15 to 19 per cent of the run over about twenty columns a step.
+			 * The counts themselves no longer need this report: StepProfile
+			 * carries the refinement steps of every solve phase and the
+			 * perturbed pivots of every factorisation, read from the solver.
 			 *
 			 * Off by default, since the report is several lines per phase.
 			 * Read by the next trace solver built, so it is set before
@@ -3368,6 +3552,34 @@ namespace meq
 
 			/// setTraceSolverStatistics().
 			bool traceSolverStatistics() const;
+
+			/**
+			 * PARDISO'S ITERATIVE REFINEMENT CAP, `iparm[7]`: 0 BY DEFAULT,
+			 * WHERE MFEM's CONSTRUCTOR SETS 2.
+			 *
+			 * A positive value refines every solve up to that many steps,
+			 * stopping early once the backward error is small; 0 refines only
+			 * after a factorisation that perturbed a pivot; a negative value is
+			 * the cap with extended-precision residuals. MKL's own reading.
+			 * Each step is a product with the trace matrix and another solve of
+			 * every column. At MFEM's 2, every solve of MEQ's trace systems
+			 * takes both steps with no pivot perturbed (MEASUREMENTS.md M-300).
+			 * At 0 the backsolve is 4.0 to 5.2 times faster, the wall 10 to 18%,
+			 * and the answer moves by 1e-14 relative, on the ten D and F
+			 * machine directories (M-301). So 0 is the default, and MKL still
+			 * refines after a perturbed pivot, which is the case refinement is
+			 * for; StepProfile's tracePerturbedPivots says when that happened.
+			 *
+			 * A DIAGNOSTIC AND NOT A KNOB, for the reason the two performance
+			 * keys are drawn where they are: whether a different cap changes
+			 * the answer is a measurement. StepProfile reports what each solve
+			 * did. Read by the next trace solver built, so it is set before
+			 * prepare() or solve(). PARDISO only: the other packages ignore it.
+			 */
+			void setTraceRefinementCap( int steps );
+
+			/// setTraceRefinementCap().
+			int traceRefinementCap() const;
 
 			/// Whether this build can honour a given choice. Lets a caller offer
 			/// only what is there instead of catching to find out.
@@ -4074,6 +4286,41 @@ namespace meq
 
 			/// The converged scale. One unless setPlasmaCurrent() was called.
 			double plasmaCurrentScale() const;
+
+			/**
+			 * WHERE THE PROFILE SCALE STARTS, FOR THE NEXT SOLVE ONLY.
+			 *
+			 * The scale is a border unknown and starts every solve at
+			 * plasmaCurrentScale() -- one on a fresh solver, the last answer on
+			 * a re-solve -- and solve() then TELLS THE SOURCE, so a scale a
+			 * caller put on the shared meq::NormalisedSource before solve() is
+			 * overwritten before the first residual reads it. This is how a
+			 * fresh solver starts somewhere else: the driver's exact restart
+			 * from a `.nc`, whose whole iterate is the answer's only together
+			 * with the scale that answer was solved at.
+			 *
+			 * **MEASURED, AND IT IS THE WHOLE OF A SINGLE-PRECISION RESTART'S
+			 * DRIFT.** `examples/limited-tokamak.toml` restarted from its own
+			 * `.nc` with the file's scale set on the source alone starts at
+			 * scale 1 against the answer's 1.000906: a first field residual of
+			 * 2.6e-05 where the run that wrote the file ended at 1.4e-07, two
+			 * Newton steps, and a psi_ax 3.1e-05 to 5.6e-05 relative from the
+			 * run's own (MKL 2026.2 and 2026.1). Started here, the first
+			 * field residual is the run's last to every printed digit, the
+			 * restart takes no step in either precision, and psi_ax is the
+			 * run's own.
+			 * OutputConversion's theRestartCarriesTheWholeState.
+			 *
+			 * CONSUMED by the solve that reads it, unlike
+			 * setBoundaryFluxInitial(): a support loop re-solves on the same
+			 * solver, and each sweep after the first continues from the
+			 * previous sweep's scale as an ordinary re-solve does.
+			 *
+			 * @throws std::invalid_argument if @a scale is not finite or zero:
+			 *         the scale multiplies the whole plasma source, and zero is
+			 *         the trivial branch.
+			 */
+			void setPlasmaCurrentScaleInitial( double scale );
 
 			/// `int F_plasma/R` over the domain at the converged state, which is
 			/// `mu0 I_p`. Zero unless setPlasmaCurrent() was called.
@@ -5155,6 +5402,31 @@ namespace meq
 				 */
 				double residualCollinearity = 0.0;
 
+				/*
+				 * WHETHER THIS STEP'S ELIMINATION WAS FOLDED, AND ITS rho --
+				 * see setBorderFolding(). `rho` is `b . J'^-1( kappa e_j )`:
+				 * near 0 where the field block was regular and the fold inert,
+				 * near 1 where it was singular and the fold carried the step,
+				 * and large where the folded block was itself near singular.
+				 * Zero and false on a step that was not folded.
+				 */
+				bool folded = false;
+				double foldRho = 0.0;
+
+				/*
+				 * THE PLASMA FILL AT THIS ITERATE: how many connected pieces
+				 * `{ Psi > 0 }` had, and how many elements the fill kept. Read
+				 * off the mask this step's Jacobian was assembled on, which is
+				 * the iterate's own -- and on the converged iterate, which
+				 * takes no step, off the last evaluation's -- so a support that
+				 * split and re-joined on the way to the root is visible in the
+				 * history rather than only in its step count.
+				 * Both zero where no fill is live -- PlasmaConnectivity::
+				 * Pointwise, or a source with setPlasmaSupport() off.
+				 */
+				int supportComponents = 0;
+				int supportElements = 0;
+
 				/// Whether the Picard phase handed off to Newton AT this step.
 				/// True on exactly one step of a two-phase solve, and reading
 				/// which one is how a reader tells the tolerance handoff from
@@ -5404,18 +5676,20 @@ namespace meq
 				 * in `otherSeconds()`, which is why that remainder was 45% of a
 				 * threaded step and named nothing.
 				 *
-				 * This leg is the two loops ALONE: the wall time of
-				 * `DarcyNPCSolver::ArrayMult()` MINUS the trace solve inside it,
-				 * so it is disjoint from `traceSolveSeconds` and adds with the
-				 * other legs rather than containing one.
+				 * This leg is the wall time of `DarcyNPCSolver::ArrayMult()`
+				 * MINUS the trace solve inside it, so it is disjoint from
+				 * `traceSolveSeconds` and adds with the other legs rather than
+				 * containing one. That is the two loops AND `ArrayMult()`'s own
+				 * per-column staging around them; `npcReduceSeconds`,
+				 * `npcRecoverSeconds` and `npcStagingSeconds` are upstream's
+				 * timers on the three, so they close the leg.
 				 *
-				 * IT DOES NOT THREAD, and that is the finding rather than the
-				 * instrument: neither routine carries an `omp parallel`, where
-				 * every other element-local loop in that class does. Its cost is
-				 * `O( elements x columns )`, so a bordered step with N exterior
-				 * modes pays it N + 4 times over where a fixed-boundary step pays
-				 * it once -- which is why upstream sized it at under 6% of a step
-				 * and MEQ measures it at a quarter. See MEASUREMENTS.md M-126.
+				 * Its cost is `O( elements x columns )`, so a bordered step with
+				 * N exterior modes pays it N + 4 times over where a
+				 * fixed-boundary step pays it once (MEASUREMENTS.md M-126). The
+				 * two loops thread, the reduce 5.0x and the recover 4.5 to 4.6x
+				 * at eight on TCV; the staging does not, about 7 ms a call
+				 * (M-304).
 				 *
 				 * ZERO OFF THE BORDERED PATH, where nothing queues a column and
 				 * `J^-1` is applied by MFEM's own NewtonSolver through a solver
@@ -5507,6 +5781,43 @@ namespace meq
 				 */
 				double computeHSeconds = 0.0;
 				long computeHCalls = 0;
+
+				/*
+				 * THE TWO HALVES OF `npcTraversalSeconds`, FROM UPSTREAM'S OWN
+				 * ACCUMULATORS: `DarcyHybridization::GetNPCReduceTime()` and
+				 * `GetNPCRecoverTime()`. Slices, not legs, and process-wide
+				 * statics with computeHSeconds' re-entry limitation. They are
+				 * threaded differently -- NPCReduce() scatters into the trace and
+				 * runs one pass per element colour, NPCRecover() writes only its
+				 * own element and runs as one static loop -- so a flat leg can
+				 * now say which half is flat. `elementColours` is the colouring
+				 * the threaded loops used, 0 where none ran.
+				 *
+				 * `npcStagingSeconds` is the rest of the leg, from
+				 * `DarcyNPCSolver::GetStagingTime()`: moving each column into
+				 * and out of the local layout, and the sign flip. It is the part
+				 * that does not thread: about 7 ms a call on TCV with upstream's
+				 * views, where the copies they replaced cost 32 (MEASUREMENTS.md
+				 * M-301, M-304).
+				 */
+				double npcReduceSeconds = 0.0;
+				double npcRecoverSeconds = 0.0;
+				double npcStagingSeconds = 0.0;
+				int elementColours = 0;
+
+				/*
+				 * WHAT PARDISO DID, READ FROM THE SOLVER RATHER THAN FROM ITS
+				 * PRINTED REPORT. One solve phase per Mult() or blocked
+				 * ArrayMult(), whatever its column count, and `iparm[6]` is the
+				 * steps that phase took; `iparm[13]` is the pivots each numerical
+				 * factorisation perturbed, summed. Zero under any other trace
+				 * solver, and on the Picard and linear paths, whose solvers the
+				 * profile does not wrap. See setTraceRefinementCap().
+				 */
+				long traceSolvePhases = 0;
+				long traceRefinementSteps = 0;
+				int traceRefinementMost = 0;
+				long tracePerturbedPivots = 0;
 
 				/// The remainder leg, which is never negative in practice but is
 				/// clamped so that a caller printing shares cannot get a negative
@@ -5607,6 +5918,15 @@ namespace meq
 					prepareCalls += other.prepareCalls;
 					npcTraversalCalls += other.npcTraversalCalls;
 					computeHCalls += other.computeHCalls;
+					npcReduceSeconds += other.npcReduceSeconds;
+					npcRecoverSeconds += other.npcRecoverSeconds;
+					npcStagingSeconds += other.npcStagingSeconds;
+					elementColours = std::max( elementColours, other.elementColours );
+					traceSolvePhases += other.traceSolvePhases;
+					traceRefinementSteps += other.traceRefinementSteps;
+					traceRefinementMost = std::max( traceRefinementMost,
+					                                other.traceRefinementMost );
+					tracePerturbedPivots += other.tracePerturbedPivots;
 					++solves;
 				}
 
@@ -5866,6 +6186,11 @@ namespace meq
 			double boundaryFluxInitialValue = 0.0;
 			bool boundaryFluxInitialGiven = false;
 
+			/// setPlasmaCurrentScaleInitial(), and whether the next solve has
+			/// still to consume it.
+			double currentScaleInitialValue = 1.0;
+			bool currentScaleInitialGiven = false;
+
 			/**
 			 * The element holding the LOCATED magnetic axis on the iterate
 			 * refreshPlasmaComponent() is about to read, or -1.
@@ -6101,6 +6426,11 @@ namespace meq
 			int longestCrawlValue = 0;
 			/// setTraceSolverStatistics().
 			bool traceSolverStatisticsValue = false;
+			/// setTraceRefinementCap().
+			int traceRefinementCapValue = 0;
+
+			/// setBorderFolding(). On in both formats: one algorithm.
+			bool borderFoldingWanted = true;
 
 			/**
 			 * WHICH LINEARISATION THE FIELD BLOCK IS ASSEMBLED WITH RIGHT NOW.
@@ -6164,30 +6494,10 @@ namespace meq
 			int andersonDepth;
 			double picardDamping;
 
-			/// The iterate the frozen source reads, on the Picard paths. Lives in
-			/// the potential space, which is also the fixed point's unknown.
-			std::unique_ptr<mfem::GridFunction> picardIterate;
-#if defined( MFEM_USE_SUITESPARSE ) || defined( MFEM_USE_MKL_PARDISO ) \
-	|| defined( MFEM_USE_CUDSS )
-			/// The Picard path's trace solver, held across iterations so that its
-			/// retained symbolic analysis has something to be reused by. Built on
-			/// first use; see picardStep().
-			/// Hoisted out of picardStep() so the symbolic analysis survives
-			/// between iterations. Typed as the base class since
-			/// setTraceSolver() decides which one it is.
-			std::unique_ptr<mfem::Solver> picardSolver;
-#endif
-
-			/// F( R, z, picardIterate ), as the right hand side coefficient the
-			/// linear path takes. Rebuilt with the spaces.
-			std::unique_ptr<mfem::Coefficient> frozenSource;
-
-			/// One Picard step: freeze F at @a in, assemble, solve, return the new
-			/// potential in @a out. The fixed point map KINSOL iterates.
-			void picardStep( mfem::Vector const &in, mfem::Vector &out );
-
 			/// The Picard paths' whole solve: a KINSOL fixed point on the
-			/// potential, optionally Anderson accelerated.
+			/// potential, optionally Anderson accelerated, each step a correction
+			/// on Newton's NPC residual with the reaction left out of the
+			/// Jacobian. See the .cpp for why a correction and not a solve.
 			void solveByPicard();
 
 			/// Globalisation::PicardThenNewton: stage 1 then stage 2, re-entering

@@ -189,8 +189,9 @@ loop, on KINSOL.
 `q = V′ g ⟨R⁻²⟩/4π²`, so `g = 4π² q/( V′ ⟨R⁻²⟩ )` — one division per surface at
 fixed geometry. What makes it a solver is that `V′` and `⟨R⁻²⟩` are functionals
 of the solution. **The round trip closes**: from a `g` 40% too large everywhere,
-**6 KINSOL iterations and 20 inner solves** recover the closed form to
-**2.5e-06** and `ψ_ax` to **2.35e-06**.
+**4 KINSOL iterations and 29 inner solves** recover the closed form to
+**3.6e-10** and `ψ_ax` to **3.5e-10** in double; in single, 2 or 3 iterations
+reach the map's floor with `g` 3.1e-05 to 5.8e-04 out.
 
 **THE TWO NORMALISED FLUXES RUN IN OPPOSITE DIRECTIONS**, and this is the trap
 the whole file is arranged around. `FluxSurfaceFamily`'s `Ψ_N` is **zero** on the
@@ -291,13 +292,72 @@ transferable part. Both failing configurations converged — to 3.5e-07 — and
 reported success. What separated them was measuring the residual at a point
 known independently to be right.
 
+**CONVERGED MEANS THE RESIDUAL REACHED max( TOLERANCE, FLOOR ), AND KINSOL'S
+FLAG DOES NOT SAY WHETHER IT DID.** `mfem::KINSolver::GetConverged()` is
+`flag >= 0`, which counts `KIN_STEP_LT_STPTOL` — no more progress possible — as
+success at any residual. So the outer loop is judged on `‖G(c) − c‖∞` at the
+coefficients it returns, against the larger of its tolerance and the map's own
+round-off floor, `meq::toroidalMapFloor()`: the inner solve's relative accuracy
+`ε` (`newtonTolerance()` of its `NewtonRelativeTolerance`, ten eps at the
+least), times 4 for `g²`'s two averages squared, times 4 standard deviations,
+times the fit pseudo-inverse's row norm `‖P_k ∘ g²‖₂` — the surfaces' errors
+being independent. **The per-average factor of one `ε` is the measured piece**:
+evaluated repeatedly at fixed coefficients from moving warm starts, the noise
+on each surface's `g²` is 0.7–4.6 `ε` against the model's 4, the worst single
+excursion 10 against the floor's 16, over `h = 0.1, 0.05, 0.025`, `k = 2, 3` and
+both fixtures, flat in `h` rather than `eps/h²`, insensitive to the inner
+tolerance at 1e-5 and below in single (the solve is at its floor) and three
+orders under its 1e-12 in double, where it is an upper bound. In single it is
+3.8e-04 on `q-driven.toml` against a worst measured excursion of 1.3e-04. The
+coefficients are `real_t`, so `‖J‖ eps ‖c‖` is added: what an exact map has.
+
+**THE LOOP REPORTED SUCCESS AT A TOLERANCE NOBODY ASKED FOR, AND STALLED WHEN
+ONE WAS ASKED.** Four defects, each measured on `q-driven.toml` in single before
+it was repaired:
+
+* **The tolerance was MFEM's.** A relative tolerance is scaled by `‖F(c₀)‖∞`,
+  and MFEM then takes its own absolute default, `eps^(1/3)`, whenever that is
+  larger — **4.9e-03 in single, 6.1e-06 in double**, every time here. So the
+  loop stopped on `KIN_SUCCESS` at 4.2e-03 with `g²` 1–2% out, reporting
+  *"converged … final norm 0.00502"* beside a requested 1e-9. The absolute
+  tolerance is now set, and moved to the floor as the floor is learned.
+* **The Jacobian was kept from the start.** KINSOL refreshes it every ten
+  iterations by default, so every step used the vacuum guess's: the max norm
+  went 0.244, 0.191, 0.149 … 0.0042 over eight iterations, linearly.
+  `SetMaxSetupCalls( 1 )` makes it a Newton.
+* **The difference step was fixed at 1e-4**, so a column's noise was
+  `1.3e-04/1e-4`: the `(2, 2)` entry read −1.06 where 1e-3 and 1e-2 steps agree
+  on −0.21 to −0.27. It is now `max( 1e-4, 100 × floor )` — the least step at
+  which noise costs a column 1%. **The truncation–noise balance,
+  `floor^(1/3)`, was tried and is worse**: it raised double's step to 4.4e-4,
+  where `SafetyFactorSolver`'s map is not smooth — its residual steps by
+  2.6e-05 between `c₁ + 2.4e-4` and `c₁ + 2.4e-3` with both inner solves at
+  1e-14 — and the loop contracted linearly at 0.19 a step, 8 iterations and 57
+  solves against 4 and 29. **That step in the map is open**: it is in the
+  extraction, not the solve, and it coincides with the inner Newton taking 4
+  iterations rather than 3 from the same warm start.
+* **KINSOL differenced `J p` itself.** MFEM declares its custom linear solver
+  iterative, so KINSOL forms `J p` for the line search's slope after every
+  solve, by one more map evaluation at `u + √eps p` — an equilibrium per
+  iteration spent on a slope made of noise. The dense Jacobian's own product is
+  installed instead.
+
+Together, over both MKLs and one, two and four MKL threads: **4 iterations and
+30 equilibria in every draw** to 1.6e-05–1.4e-04 against a floor of 3.8e-04,
+where the same draws stopped in 8–13 iterations and 33–87 equilibria at
+2.2e-03–4.6e-03 (once 2.9e-04), and three of six failed the reported `q`. A
+step-tolerance stop above the floor is now *not converged* and exits 2
+(`a_stall_above_the_floor_is_not_converged`). **An exception out of the outer
+loop is an outer failure too** (`CLAUDE_DRIVER.md`).
+
 **AND IT REACHES THE SOLVE FROM A FILE**, as `[source] SafetyFactorFile`, with
 `SafetyFactorDegree` and `ToroidalFieldGuess` beside it.
 `examples/q-driven.toml` is the worked example and
 `DriverAcceptance::theDriverSolvesForTheToroidalField` is the acceptance:
-**42.5 s, 12 outer iterations, 43 equilibria**, recovering a closed-form
-`g = 2.20 + 0.55Ψ` to **5.0e-06** in the worst of the three coefficients of
-`g²`.
+**15 s, 5 outer iterations, 36 equilibria**, recovering a closed-form
+`g = 2.20 + 0.55Ψ` to **1.7e-06** in the worst of the three coefficients of
+`g²` in double, and in single **4 iterations and 30 equilibria** in every MKL
+draw, to 1.3e-05 to 2.4e-04.
 
 **THE TARGET IS MEASURED RATHER THAN INVENTED, WHICH IS THE WHOLE OF WHY THAT
 IS AN ACCEPTANCE.** `examples/q-driven-q.dat` is the `q` of an equilibrium built

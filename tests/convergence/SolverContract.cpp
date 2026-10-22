@@ -1241,6 +1241,97 @@ BOOST_AUTO_TEST_CASE( theTraceSolversAgree )
 }
 
 /*
+ * PARDISO'S REFINEMENT CAP REACHES THE SOLVER, AND THE PROFILE READS WHAT IT DID.
+ *
+ * setTraceRefinementCap() writes `iparm[7]` through MFEM's setter and
+ * StepProfile reads back `iparm[6]` per solve phase and `iparm[13]` per
+ * factorisation. What is asserted is MKL's documented contract, not a timing:
+ * a cap of 1 never takes two steps, and a cap of 0 takes none unless a pivot
+ * was perturbed. The answer is asserted beside it, against MFEM's cap of 2,
+ * because a cap that changed the equilibrium would not be a diagnostic.
+ *
+ * The last arm sets nothing and asserts that the solver's own default is 0
+ * (MEASUREMENTS.md M-301), and that it takes no step either.
+ */
+BOOST_AUTO_TEST_CASE( theRefinementCapReachesPardisoAndTheProfileReadsIt )
+{
+	using TS = meq::GradShafranovSolver::TraceSolver;
+	if ( !meq::GradShafranovSolver::traceSolverAvailable( TS::Pardiso ) )
+	{
+		std::printf( "\n  PARDISO's refinement cap: SKIPPED -- no PARDISO in "
+		             "this build\n" );
+		return;
+	}
+
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	std::printf( "\n  PARDISO's refinement cap, Example 5, k = 2, n = 8\n" );
+	std::printf( "    %3s %7s %7s %6s %7s %14s\n",
+	             "cap", "phases", "steps", "most", "pivots", "vs cap 2" );
+
+	mfem::Mesh mesh = makeMesh( 8 );
+	std::unique_ptr<mfem::GridFunction> reference;
+	int const asShipped = std::numeric_limits<int>::min();
+	for ( int asked : { 2, 1, 0, asShipped } )
+	{
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setTraceSolver( TS::Pardiso );
+		if ( asked != asShipped )
+		{
+			solver.setTraceRefinementCap( asked );
+			BOOST_TEST( solver.traceRefinementCap() == asked,
+			            "setTraceRefinementCap did not take" );
+		}
+		else
+			BOOST_TEST( solver.traceRefinementCap() == 0,
+			            "the default refinement cap is "
+			            << solver.traceRefinementCap() << ", not 0: M-301 "
+			            "measured 0 as the same answer at a fifth of the "
+			            "backsolve" );
+		int const cap = solver.traceRefinementCap();
+		solver.setSource( source );
+		solver.setBoundaryData( exact );
+		solver.solve();
+
+		meq::GradShafranovSolver::StepProfile const &p = solver.stepProfile();
+		double relative = 0.0;
+		if ( !reference )
+			reference = std::make_unique<mfem::GridFunction>( solver.potential() );
+		else
+		{
+			mfem::GridFunction difference( solver.potential() );
+			difference -= *reference;
+			relative = difference.Norml2()
+			          /std::max( 1.0e-300,
+			                     static_cast<double>( reference->Norml2() ) );
+		}
+		std::printf( "    %3d %7ld %7ld %6d %7ld %14.3e\n", cap,
+		             p.traceSolvePhases, p.traceRefinementSteps,
+		             p.traceRefinementMost, p.tracePerturbedPivots, relative );
+		std::fflush( stdout );
+
+		BOOST_TEST( p.traceSolvePhases > 0L,
+		            "cap " << cap << ": the profile counted no PARDISO solve "
+		            "phase, so TimedSolver did not see PARDISO under Newton" );
+		BOOST_TEST( p.traceRefinementMost <= std::max( cap, 0 )
+		                + ( cap == 0 && p.tracePerturbedPivots > 0 ? 2 : 0 ),
+		            "cap " << cap << ": a solve phase took "
+		            << p.traceRefinementMost << " refinement steps, more than "
+		            "the cap allows. Either the cap did not reach iparm[7] or the "
+		            "profile is reading the wrong output" );
+		BOOST_TEST( relative < meq::tests::scalarAgreementFloor( 1.0e-10, 1.0 ),
+		            "cap " << cap << ": the equilibrium moved by " << relative
+		            << " relative against a cap of 2" );
+	}
+}
+
+/*
  * NOTHING ITERATES INSIDE AN ELEMENT, WHICH IS THE ACCEPTANCE SIGNAL THAT NPC
  * IS NPC.
  *

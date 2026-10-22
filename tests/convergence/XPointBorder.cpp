@@ -975,25 +975,31 @@ BOOST_AUTO_TEST_CASE( theBorderedPicardReachesTheSameEquilibriumAsTheBorderedNew
 	// trial steps, so the answers agree to round-off rather than merely closely.
 	//
 	/*
-	 * **AND ONE OF THE TWO ROUTES IS A FIXED-POINT ITERATION, SO THE PAIR
-	 * AGREES TO A PICARD'S TOLERANCE AND NOT TO A NEWTON'S.** M-220's second
-	 * law: Newton's last step squares the residual and crosses a target near
-	 * the floor, while Picard contracts by a fixed factor and approaches from
-	 * above -- so meq::picardTolerance() floors what the rung may be asked for
-	 * at 4096 eps in single, and an answer is worth the tolerance its own
-	 * iteration stopped at. Measured: psi_ax 1.1e-04 relative and psi_bnd
-	 * 1.6e-04, against that 4.9e-04; the X-point's R 4.6e-05 on 1.09.
+	 * **IN SINGLE THE PAIR IS HELD TO 4096 eps, AND THAT BOUND IS A
+	 * MEASUREMENT WITHOUT AN EXPLANATION.** Measured: psi_ax 1.1e-04 relative
+	 * and psi_bnd 1.6e-04, the X-point's R 4.6e-05 on 1.09, against a bound of
+	 * four times 4096 eps.
+	 *
+	 * It was argued from M-220's second law -- Picard approaches its floor from
+	 * above, so a fixed-point route is worth the tolerance it stopped at -- and
+	 * read off meq::picardTolerance(). That argument does not reach this rung:
+	 * the bordered Picard phase hands off to a bordered NEWTON phase, which
+	 * stops on Newton's own target, and never consults picardTolerance(), which
+	 * is the unbordered KINSOL fixed point's target and is Newton's 10 eps
+	 * floor (solveByPicard() measures why the unbordered route's own 1e-4 gap
+	 * was the map's evaluation and not Picard's). So the 4096 eps stays,
+	 * exactly as measured and no looser, and a 1e-4 gap between two routes
+	 * that both END in Newton is an open finding rather than a law.
 	 *
 	 * The merit-weight case above is TWO NEWTONS and keeps the 64 eps it always
-	 * had, which is the control on this: if the gap here were the format rather
-	 * than the iteration, both cases would need the same bound.
-	 * picardTolerance( 0.0 ) is exactly 0.0 in double, so `achieved` is the
-	 * 1e-9 and 1e-7 that have always been asserted there.
+	 * had, which is the control on this. exactAgreementFloor( 1.0 ) is exactly
+	 * 0.0 in double, so `achieved` is the 1e-9 and 1e-7 that have always been
+	 * asserted there.
 	 */
 	double const achieved = meq::tests::achievedToleranceFloor(
-		1.0e-9, meq::picardTolerance( 0.0 ) );
+		1.0e-9, meq::tests::exactAgreementFloor( 1.0 ) );
 	double const achievedPoint = meq::tests::achievedToleranceFloor(
-		1.0e-7, meq::picardTolerance( 0.0 )*std::abs( newton.xR ) );
+		1.0e-7, meq::tests::exactAgreementFloor( 1.0 )*std::abs( newton.xR ) );
 
 	BOOST_TEST( std::abs( picard.psiAxis - newton.psiAxis )
 	            <= achieved*std::abs( newton.psiAxis ),

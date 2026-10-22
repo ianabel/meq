@@ -2114,8 +2114,10 @@ What it costs
 ~~~~~~~~~~~~~
 
 **Every map evaluation is a whole equilibrium** — one per residual, and
-:math:`2(d+1)` more per Jacobian column. The shipped example converges in 12
-outer iterations and **43 equilibria**. It is affordable only because the
+:math:`2(d+1)` more per Jacobian, which is formed afresh at every outer
+iteration. The shipped example converges in 5 outer iterations and **36
+equilibria** in double, and in 4 and **30** in single. It is affordable only
+because the
 profile is *fitted*: the unknown is the handful of coefficients of
 :math:`g^2 = \sum_j c_j \Psi^j` rather than every degree of freedom of the
 field.
@@ -2145,6 +2147,53 @@ machine can have and which nothing downstream will look at twice.
 surface family does not determine leaves the outer Jacobian rank deficient,
 which MEQ reports — ``did not converge … the outer Jacobian is RANK
 DEFICIENT`` — rather than solving. Two or three is the usual.
+
+When the loop does not converge
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Converged means the outer residual reached its floor, and nothing else does.**
+The loop is judged on :math:`\lVert G(c) - c\rVert_\infty` — the change one
+Picard step would make to the coefficients of :math:`g^2` — at the coefficients
+it returns, against the larger of its tolerance, ``1e-9``, and **the map's own
+round-off floor**. Every map evaluation is an equilibrium solved only to
+``[solver] NewtonRelativeTolerance`` (floored at ten machine epsilon), so the
+map itself is noisy, and no residual below that noise means anything. MEQ
+derives the floor from that tolerance, carried through the inversion and the
+fit, and the status line reports both:
+
+.. code-block:: text
+
+   q-driven outer loop: converged in 4 KINSOL iterations and 30 map evaluations, final norm 2.59575e-05 against a threshold of 0.000382264 -- the larger of the tolerance 1e-09 and the round-off floor 0.000382264; KINSOL stopped with the residual within the threshold
+
+That line is a single-precision build, where the floor dominates; in double it
+is the tolerance. A loop that stops *above* its threshold — on a step too small
+to move the iterate, or a line search that cannot decrease the residual — has
+**not** converged, whatever the nonlinear solver's own flag says, and is
+reported as such. Loosening ``NewtonRelativeTolerance`` raises the floor with
+it: the outer loop cannot be asked for more than the solves it is made of.
+
+**The run exits 2 and writes nothing**, whatever the reason the loop stopped —
+a stalled line search, a rank-deficient Jacobian, or the iteration cap:
+
+.. code-block:: text
+
+   MEQ: the q-driven outer loop did not converge: the outer Newton on the toroidal field did not converge: ...
+
+The run is solving *for* :math:`g`, so without a converged :math:`g` there is no
+equilibrium it owes. The bordered retry rung of :ref:`running-failure` is **not**
+run for this failure: it re-solves one equilibrium at whichever :math:`gg'` the
+loop last tried — a line-search trial or a differencing column — which converges
+perfectly well to the equilibrium of a prescribed field nobody asked for, with a
+:math:`q` that is not the target. The loop already absorbs every failed inner
+solve as a rejected trial, so a different inner globalisation does not move an
+outer failure either. There is no key to accept the last iterate instead. A loop
+that *converges* and whose answer then fails to re-solve is retried as any other
+failed solve is, since the rung's solve is then at the converged :math:`g`.
+
+``meq --q-iteration-cap N`` caps the outer Newton at ``N`` iterations, 30 by
+default. Each iteration costs :math:`2(d+1)+1` equilibria, so this bounds the
+run's cost; it cannot change the :math:`g` a converging loop reports, only
+whether it reports one.
 
 What the run writes
 ~~~~~~~~~~~~~~~~~~~

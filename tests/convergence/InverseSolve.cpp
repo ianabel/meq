@@ -527,7 +527,12 @@ BOOST_AUTO_TEST_CASE( theInverseSolveRecoversAKnownCurrentSet )
 	// Targets are flux, so their scale is psi_ax's; currents are relative.
 	BOOST_TEST( got.worstTarget
 	            < meq::tests::scalarAgreementFloor( 1.0e-11, forwardAxis ) );
-	BOOST_TEST( got.worstCurrent < meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 ) );
+	// The currents are the targets' round-off through the recovery's own
+	// conditioning, about TEN times the targets' relative error in single, on
+	// both MKLs measured (9.8 and 10.4; the targets at 6 to 9 eps, the
+	// currents at 62 and 94). So their floor is the scalar floor at a scale of
+	// 16, not 1. In double the historical 1.0e-9 still selects.
+	BOOST_TEST( got.worstCurrent < meq::tests::scalarAgreementFloor( 1.0e-9, 16.0 ) );
 	BOOST_TEST( std::abs( solver.psiAxis() - forwardAxis )
 	            < meq::tests::scalarAgreementFloor( 1.0e-9*std::abs( forwardAxis ),
 	                                                forwardAxis ) );

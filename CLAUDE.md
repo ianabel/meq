@@ -261,7 +261,7 @@ the zero axis spread must not move.
 ## MFEM → `CLAUDE_MFEM.md`
 
 **MEQ links `../../mfem/install`**: MFEM 4.10.1 built from branch
-**`meq-integration`** in `../../mfem/mfem-src`, a local merge of fourteen branches
+**`meq-integration`** in `../../mfem/mfem-src`, a local merge of fifteen branches
 that exists only to be built against — never pushed, re-created rather than
 merged into, tagged before each re-creation. `mfem/master` will not do.
 `CLAUDE_MFEM.md` has the options, the CUDA obstacles, the branch table, the

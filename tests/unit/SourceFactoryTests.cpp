@@ -532,12 +532,9 @@ BOOST_AUTO_TEST_CASE( makeNormalisedSource_refuses_an_unnormalised_configuration
  * what makes a library rule read as the configuration error it is.
  *
  * ConfigTests asserts the same refusal at PARSE time, which is what Config.hpp
- * documents ("Between two and meq::maxSpecies"), and that assertion is RED --
- * the parser checks the floor and not the ceiling. This case is deliberately
- * kept beside it rather than instead of it: it pins the behaviour that exists,
- * and the red one names the behaviour that is wanted. When the parser gains the
- * check, this case goes on passing, because the factory is still entitled to
- * refuse a set nobody parsed.
+ * documents ("Between two and meq::maxSpecies"). This case is kept beside it
+ * rather than instead of it, because the factory is still entitled to refuse a
+ * set nobody parsed.
  */
 BOOST_AUTO_TEST_CASE( the_factory_refuses_more_species_than_maxSpecies )
 {
