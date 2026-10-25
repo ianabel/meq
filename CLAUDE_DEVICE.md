@@ -814,7 +814,7 @@ build, which needs no device.
     the `std::max`-against-the-historical-value construction is for. A guard in
     the wrong place cannot weaken double.
 
-### Tolerances and floors → [M-174](MEASUREMENTS.md#m-174), [M-217](MEASUREMENTS.md#m-217), [M-219](MEASUREMENTS.md#m-219), [M-220](MEASUREMENTS.md#m-220)
+### Tolerances and floors → [M-174](MEASUREMENTS.md#m-174), [M-217](MEASUREMENTS.md#m-217), [M-219](MEASUREMENTS.md#m-219), [M-220](MEASUREMENTS.md#m-220), [M-306](MEASUREMENTS.md#m-306)
 
 ***A tolerance that does not scale with `real_t` is a build-configuration bug
 wearing a numerical costume.*** Six constants were right for double, wrong for
@@ -839,11 +839,25 @@ Jacobian while staying in the residual.
   reached an assertion. This is a solver constant, not an assertion, and no
   assertion sweep could have found it.
 * ***A default is only a default on the paths that do not override it.***
-  `setNewtonControl()` was called at 39 sites with their own literals. There is
-  now one shared `meq::newtonTolerance()`, following the `limiterPolygonMaximum()`
-  and `extensionFdStep()` precedent.
+  `setNewtonControl()` is called at some fifty sites with their own literals, so the
+  floor is not theirs to apply: they pass the request, and the solver stops the
+  two Newton paths at the residual's round-off floor where the request is out of
+  the format's reach (`GradShafranovSolver::newtonStoppedAtRoundOff()`).
+  `meq::newtonTolerance()`'s ten `eps` is that stop's GATE, and still the floor
+  of the iterations with no stop of their own: the tracer, KINSOL, the Picard
+  fixed point and the toroidal map's statement of its inner accuracy.
+* ***A fixed floor on an absolute residual is a scale left out.*** Ten `eps`
+  was the stop on every single-precision Newton, and the floors it stood for
+  run from 0.07 to 4.2 `eps` over the suite: it sat 17 times over the median,
+  a quadratic step short. On `XPointBorder`'s machine that left the bordered
+  Picard route's every warm sweep one Picard step from its last answer, and the
+  two routes 1.1e-04 apart; at the floor they agree to 4e-06
+  (→ **[M-306](MEASUREMENTS.md#m-306)**). A one-ulp perturbation of the unknowns
+  measures the floor within 0.4 to 2.4 on a smooth source and is orders over
+  it where the source jumps at the plasma edge, so it decides only under the
+  gate, and a step that fails to halve the residual decides where it misses.
 * ***A tolerance a solver was GIVEN is the floor on what it can achieve.*** Seven
-  sites asserted `< 1e-8` on a solve whose target floors at ten `eps`.
+  sites asserted `< 1e-8` on a solve whose stop is the format's own floor.
 * ***A fixed-point iteration's floor is its map's, not Picard's.*** Newton
   squares its residual across the target; Picard contracts by a fixed factor and
   approaches its floor from above. Solving the condensed system for the whole

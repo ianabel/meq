@@ -236,31 +236,29 @@ namespace meq
 
 
 	/**
-	 * A Newton target this build's `real_t` can actually reach, floored from
-	 * the caller's own historical value.
+	 * A tolerance this build's `real_t` can actually reach, floored from the
+	 * caller's own historical value at ten `eps`.
 	 *
 	 * **A TOLERANCE THAT DOES NOT SCALE WITH `real_t` IS A BUILD-CONFIGURATION
-	 * BUG WEARING A NUMERICAL COSTUME**, which is M-184's sentence and this is
-	 * the seventh constant of that species -- the one M-174 NAMED and nobody
-	 * scaled. Single precision's residual floor is about **2.2e-06 relative**
-	 * (M-174), so a target of `1e-12` is seven orders under it and the solve
-	 * does not converge at all. The failure is a REFUSAL out of `solve()`
-	 * rather than a wrong number, so it reaches a test as *"the non-linear
-	 * iteration did not converge"* and never reaches the assertion the test
-	 * was written for. M-217's inventory puts **23 of 45** red single-precision
-	 * tests there.
+	 * BUG WEARING A NUMERICAL COSTUME**, which is M-184's sentence: single
+	 * precision cannot get within seven orders of a `1e-12`, and an iteration
+	 * asked for one is refused rather than answered (M-174, M-217).
 	 *
-	 * `10*eps` is **1.19e-6** in single, beside the `1e-6` M-204 measured
-	 * closing a bordered border at `-1.240e-07` -- FP32's own epsilon -- in the
-	 * same ten iterations as double, where `1e-10` stalls at `3.3e-07` and
-	 * burns 400. In double it is `2.2e-15`, under every historical value in
-	 * the tree, so **`std::max` returns the caller's own literal and the double
-	 * path is bit-for-bit unchanged.**
+	 * **IT IS NOT HOW GradShafranovSolver's NEWTON STOPS.** The two Newton
+	 * paths -- the plain one and the bordered one -- take the request
+	 * unfloored, use this floor as a GATE, and below it go on until a step
+	 * stops halving the residual (GradShafranovSolver::newtonStoppedAtRoundOff()).
+	 * A fixed `10 eps` is an ABSOLUTE residual, and the floors it stood in for
+	 * are not one number: measured over the single suite they run from
+	 * `0.07 eps` to `4.2 eps` (5th to 95th percentile), and `10 eps` sat over
+	 * them by 17 at the median -- a quadratic step short. M-306.
 	 *
-	 * **IT IS PUBLIC FOR THE REASON `extensionFdStep()` IS**: the tree sets
-	 * this through `setNewtonControl()` at **39 sites** carrying literals from
-	 * `1e-13` to `1e-8`, and a floor kept in step by hand across 39 sites is
-	 * the defect M-165 and M-189 both are. One expression, called at each.
+	 * What still floors here: the iterations that have no measured floor of
+	 * their own -- the contour tracer's corrector (a RELATIVE target, M-218),
+	 * the KINSOL globalisations and the Picard fixed point (picardTolerance()),
+	 * and the toroidal map's statement of its inner solve's accuracy. In double
+	 * it is `2.2e-15`, under every historical value in the tree, so
+	 * `std::max` returns the caller's own literal.
 	 */
 	inline double newtonTolerance( double historical )
 	{
@@ -4938,6 +4936,86 @@ namespace meq
 			 */
 			AxialCutoffCheck checkAxialCutoff( int samples = 513 ) const;
 
+			/**
+			 * **THE FRACTION OF THE SOURCE THE ANSWER WOULD PUT OUTSIDE `Gamma`**
+			 * -- MIRROR-PLAN.md MR-0's diagnostic, the mirror's analogue of
+			 * checkAxisSource(): one-sided, a positive detection is the finding.
+			 *
+			 * The exterior DtN is exact only where the exterior is current-free.
+			 * Whether it is is a property of the answer and not of the
+			 * configuration -- a source is a function of the flux, and the flux
+			 * beyond `Gamma` is the expansion's -- so this evaluates the PLASMA
+			 * source, NormalisedSource::scaledF(), on the exterior flux
+			 * `sum a_n ( rho/rhoGamma )^( 1 - n ) C_n + psi_coil` and reports
+			 *
+			 *     fraction = outside/( inside + outside ),
+			 *
+			 * `inside` and `outside` each `int | F |/R dR dz`, which is `mu_0`
+			 * times the toroidal current's magnitude. `inside` is over `D_h` on
+			 * the source's own quadrature and the total flux, as
+			 * assemblePlasmaCurrent() takes it; `outside` is
+			 * meq::exteriorSupportIntegral(), the exterior support CONNECTED TO
+			 * `Gamma`, whose header says why a mirror's far return branch is not
+			 * counted. The band between `Gamma_h` and `Gamma` is in neither: it
+			 * carries no assembled source, and it is the transfer's to answer
+			 * for.
+			 *
+			 * MEASUREMENTS.md M-169 is what it is the MEQ side of: geq's current
+			 * outside a semicircle at `rho_Gamma = 1.2` was 7.53e-04 to 7.09e-02
+			 * of the whole, and exactly zero once `Gamma` cleared the machine.
+			 */
+			struct ExteriorSourceCheck
+			{
+				/// A box support with an exterior coupling: a mirror solved free
+				/// boundary. FALSE otherwise, and every other field is then zero.
+				bool applies = false;
+
+				/// `int | F |/R` over `D_h`, and over the exterior component.
+				double inside = 0.0;
+				double outside = 0.0;
+				/// outside/( inside + outside ); zero where both are, and 1 when
+				/// `outside` is not finite.
+				double fraction = 0.0;
+
+				/// The exterior fill's cells, those on `Gamma`, and how far out
+				/// the component reached; meq::ExteriorSupportIntegral.
+				int exteriorCells = 0;
+				int touchingCells = 0;
+				double reach = 0.0;
+				bool bounded = true;
+				bool finite = true;
+
+				/**
+				 * **THE FRACTION ABOVE WHICH A RUN WARNS: 1e-4**, derived from
+				 * M-169 and not tuned. There, the field on `Gamma` of the current
+				 * outside it -- the error no mode count removes -- was 0.20 to
+				 * 0.30 of the outside fraction at all three Mach numbers
+				 * ( 2.09e-02 of 7.09e-02, 2.77e-03 of 1.41e-02, 1.70e-04 of
+				 * 7.53e-04 ). MR-0 chose `N = 32`, whose truncation at the
+				 * closest admissible `Gamma` and the worst Mach number M-169
+				 * tabulates is 2.65e-05 relative on `Gamma`. So above 1e-4 the
+				 * current outside `Gamma` costs at least what the mode count was
+				 * chosen to leave, and below it the modes and not the current
+				 * set the error there. MR-0's acceptance, below 1e-3 on a shipped
+				 * mirror, is the looser statement.
+				 */
+				static constexpr double warningFraction = 1.0e-4;
+			};
+
+			/**
+			 * Evaluate the above at the current iterate -- after solve(), the
+			 * converged answer.
+			 *
+			 * A source that throws at an exterior point -- meq::RotatingSource
+			 * can, past its tables -- counts as a point inside the support with
+			 * no finite value, so the report is `finite = false` and a fraction
+			 * of 1 rather than an exception out of a report.
+			 *
+			 * @param angularCells meq::exteriorSupportIntegral()'s resolution.
+			 * @throws std::logic_error if prepare() has not run.
+			 */
+			ExteriorSourceCheck checkExteriorSource( int angularCells = 512 ) const;
+
 			/// The outward flux of `q` through the true boundary `Gamma`:
 			/// `oint_Gamma q.nu dGamma`.
 			///
@@ -5043,6 +5121,16 @@ namespace meq
 			/// path. The defaults are tight on purpose: a Newton iteration that
 			/// stops early looks exactly like one that converges slowly, and this
 			/// solver is measured on the shape of its residual history.
+			///
+			/// **THE TWO TOLERANCES ARE A REQUEST AND ARE NOT FLOORED BY THE
+			/// CALLER.** The target is max( absolute, relative x the cold
+			/// reference ), and the Newton paths ALSO stop at the residual's
+			/// round-off floor -- see newtonStoppedAtRoundOff() -- so a request
+			/// below what this build's `real_t` can reach stops at that floor
+			/// instead of failing. Wrapping these in meq::newtonTolerance() puts
+			/// a fixed `10 eps` stop back, which is a quadratic step short of the
+			/// floor on most problems (M-306). The KINSOL globalisations and the
+			/// Picard fixed point floor the request themselves.
 			void setNewtonControl( double relativeToleranceIn,
 			                       double absoluteToleranceIn,
 			                       int maxIterationsIn );
@@ -5561,6 +5649,56 @@ namespace meq
 			/// linear path. One fewer than newtonResiduals().size(), since that
 			/// counts the residual at the initial guess too.
 			int newtonIterations() const;
+
+			/**
+			 * WHETHER THE LAST NEWTON SOLVE ENDED AT THE RESIDUAL'S ROUND-OFF
+			 * FLOOR RATHER THAN AT ITS REQUEST, AND WHAT THE REQUEST WAS.
+			 *
+			 * **A FIXED FLOOR IS A GATE, NOT A STOP.** Below the request floored
+			 * at ten eps -- meq::newtonTolerance() of each tolerance, so
+			 * max( 10 eps, 10 eps x reference ) in single -- an iterate is
+			 * converged when EITHER
+			 *
+			 *   - the residual is within 4 f, f being what one ulp of every
+			 *     unknown moves it by: || F( u (1 + eps xi) ) - F( u ) ||, xi a
+			 *     fixed +-1 pattern, u the field and, on the bordered path, the
+			 *     labels psi_ax and psi_bnd and the current scale; or
+			 *   - the last step failed to halve it, which a Newton step above
+			 *     the floor does not do; or the budget is spent.
+			 *
+			 * f is taken only under the gate and after a step, one or two
+			 * residual evaluations a solve. A solve that STARTS under the gate
+			 * takes no step, so a restart at its own answer reproduces it
+			 * exactly (M-305); a Newton phase handed such an iterate by a
+			 * bordered Picard phase has not started there, and takes its steps.
+			 *
+			 * **WHY BOTH.** The floors the gate stood in for as a stop are not
+			 * one number: over the single suite they run from 0.07 to 4.2 eps
+			 * absolute (the 5th to the 95th percentile), and the 10 eps stop
+			 * sat over them by 17 at the median and 6 to 79 between the
+			 * quartiles -- a quadratic step short, which put XPointBorder's two
+			 * bordered routes 1.1e-04 apart. The floor is 0.4 to 2.4 f on a
+			 * smooth source, so f stops a solve there with no step spent
+			 * showing it; but f is orders OVER the floor where the source is
+			 * discontinuous at the plasma edge, an ulp moving a quadrature
+			 * point across it, and alone it stopped a double free-boundary
+			 * solve at 2.3e-06. Under the gate that inflation can only fall
+			 * back on the gate. And the floor is 3 to 12 f on the rotating
+			 * mirror, whose centrifugal source rounds in ways no ulp of the
+			 * unknowns reproduces; there the stalled step stops it, one step
+			 * late. The stalled step alone takes an affine solve three steps
+			 * where one reaches the floor. M-306.
+			 *
+			 * In double the gate IS the request on every path, since every
+			 * request in the tree is above ten eps, so none of this fires and
+			 * the double path is unchanged bit for bit.
+			 *
+			 * newtonTarget() is the request, max( absolute, relative x
+			 * reference ); both read zero on the linear path, and the KINSOL
+			 * and Picard paths have no such stop.
+			 */
+			double newtonTarget() const;
+			bool newtonStoppedAtRoundOff() const;
 
 			/*
 			 * WHERE A NEWTON STEP'S TIME GOES, SPLIT INTO LEGS THAT DO NOT
@@ -6667,6 +6805,9 @@ namespace meq
 			double newtonAbsoluteTolerance;
 			int newtonMaxIterations;
 			int newtonIterationCount;
+			/// newtonTarget(), newtonStoppedAtRoundOff().
+			double newtonTargetValue = 0.0;
+			bool newtonStoppedAtRoundOffValue = false;
 			/// Stage 1's count under Globalisation::PicardThenNewton, zero elsewhere.
 			int picardIterationCount = 0;
 			long symbolicFactorisationCount = 0;

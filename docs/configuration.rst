@@ -740,6 +740,18 @@ cutoff``, and ``axial_cutoff_relative`` in the ``.nc``); no threshold is
 calibrated to refuse on. With ``[mesh.generate]`` the cutoff is aligned to,
 by ``AlignPlasma``.
 
+**The exterior must carry no current.** ``[boundary.exterior]`` represents
+everything beyond :math:`\Gamma` by current-free modes, so a free-boundary
+mirror run also reports how much of :math:`\int |F|/R` its answer would put
+beyond :math:`\Gamma` (``source outside Gamma`` on the console,
+``source_outside_gamma_fraction`` in the ``.nc``), counting the part of the
+support connected to :math:`\Gamma`: the box's labels recur far out on the
+midplane, beyond the expander along the same field lines, and that branch is
+not the plasma. It warns above :math:`10^{-4}`, where the field that current
+makes on :math:`\Gamma` is measured to be at least the truncation error the
+mode count was chosen to leave there. The cure is a ``Radius`` beyond the
+plasma; the shipped examples read exactly zero.
+
 **The stabilisation defaults to the mirror's.** A box run that gives no
 ``[discretisation]`` stabilisation key solves at
 :math:`\tau = 3/\max(R, 0.1\,\mathrm{m})` — ``TauScaling = "diffusion"``,
@@ -909,7 +921,9 @@ since that is an ellipse.
        :ref:`running-warm-start` for why that matters.
    * - ``NewtonAbsoluteTolerance``
      - ``1.0e-12``
-     - 
+     - Both tolerances are a request. Where the build's precision cannot reach
+       it — a single-precision build asked for ``1e-12`` — Newton stops at the
+       residual's own round-off floor instead of failing.
    * - ``PlasmaSupportSweeps``
      - ``0``
      - Freeze the plasma support within each solve and re-decide it between

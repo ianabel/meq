@@ -209,15 +209,20 @@ namespace meq
 	 *        against them, and return the coefficients that implies. Every
 	 *        solve lives inside this callable.
 	 *
-	 * @throws std::invalid_argument if @a start is empty, if the map returns a
-	 *         different number of coefficients than it was given, or if the
-	 *         options do not describe an iteration.
-	 * @throws whatever @a map throws -- in particular a failed inner solve,
-	 *         which is a state the caller knows how to describe and this does
-	 *         not. **A map that cannot be evaluated at a trial point should
-	 *         return a large finite residual rather than throw**: KINSOL is C,
-	 *         an exception unwinds through its frames, and the line search
-	 *         needs a value there to reject the step with.
+	 * @throws std::invalid_argument if @a start is empty, if there is no map,
+	 *         or if the options do not describe an iteration.
+	 *
+	 * **A MAP THAT THROWS, OR RETURNS A DIFFERENT NUMBER OF COEFFICIENTS THAN
+	 * IT WAS GIVEN, ENDS THE LOOP AND IS REPORTED, NOT THROWN.** Most of its
+	 * evaluations happen inside KINSOL, which is C, and an exception may not
+	 * unwind through its frames: every callback catches, hands KINSOL its
+	 * unrecoverable flag and records the message. So, wherever the map fails,
+	 * `converged` is false, `coefficients` is the last point the loop
+	 * accepted, `finalResidual` its residual (NaN if it was never evaluated),
+	 * and `status` carries the map's own message. **A map that cannot be
+	 * evaluated at a trial point should still return a large finite residual
+	 * rather than throw**: that ends the loop, where a finite value lets the
+	 * line search reject the step and go on.
 	 *
 	 * A target the coefficients do not determine -- a degree higher than the
 	 * surface family supports -- leaves the outer Jacobian rank deficient.

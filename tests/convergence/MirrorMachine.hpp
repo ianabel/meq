@@ -465,13 +465,15 @@ namespace mirror
 		// first exact step at 6e-05 to 7e-04 and every later one stagnant at
 		// 1.4e-06 to 2.3e-06 under the mirror's stabilisation -- 2.8e-06 at a
 		// constant tau = 3, so it is tau's size and not its scaling, and at
-		// tau = 1 it already sat at the 10 eps = 1.19e-06 the solver floors
-		// its absolute target at. 64 eps, 7.6e-06, clears the worst stagnant
-		// residual by 3.3 and is four orders under the 0.17 to 0.79 a step
-		// that had not converged would leave. The subtracted route has no
+		// tau = 1 it already sat at 10 eps = 1.19e-06, the gate under which
+		// the solver's round-off stop works (newtonStoppedAtRoundOff(), M-306),
+		// so that stop cannot see a floor above it. 64 eps, 7.6e-06, clears
+		// the worst stagnant residual by 3.3 and is four orders under the
+		// 0.17 to 0.79 a step that had not converged would leave. The
+		// subtracted route has no
 		// such source and reaches 9e-09. Double asks the solver's own default.
 		// MEASUREMENTS.md M-294.
-		s->solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
+		s->solver->setNewtonControl( 1.0e-12,
 		                             64.0*static_cast<double>(
 			                             std::numeric_limits<mfem::real_t>::epsilon() ),
 		                             30 );

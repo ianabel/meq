@@ -303,11 +303,12 @@ namespace meq
 	 *
 	 * 1. IT EXISTS BECAUSE THE MAP HAS TWO OBLIGATIONS THAT ARE EASY TO MISS
 	 *
-	 * **IT MUST BE TOTAL.** KINSOL is C, so an exception raised inside the
-	 * residual unwinds through its frames and denies the line search the finite
-	 * value it needs to reject a step with. Measured: with the map throwing,
-	 * the first full Newton step lands on `g^2 < 0` across the whole profile
-	 * and the run dies without backtracking once. So an inadmissible `c`
+	 * **IT MUST BE TOTAL.** An exception raised inside the residual ends the
+	 * outer loop -- KINSOL is C, so meq::solveForToroidalField catches it in
+	 * the callback and reports the loop as not converged -- and so denies the
+	 * line search the finite value it needs to reject a step with. Measured:
+	 * with the map throwing, the first full Newton step lands on `g^2 < 0`
+	 * across the whole profile and the run ends without backtracking once. So an inadmissible `c`
 	 * returns a residual pointing back at the last admissible one, which is
 	 * large there, vanishes nowhere, and can introduce no spurious root --
 	 * `g^2 < 0` is not an equilibrium.

@@ -1015,6 +1015,61 @@ namespace
 
 	namespace
 	{
+		/**
+		 * `state` with every entry moved by one `eps` of itself, up or down by
+		 * a fixed pattern: deterministic, so a run is reproducible bit for bit,
+		 * and with no structure an HDG block could line up with (Knuth's
+		 * multiplicative hash, one bit of it).
+		 */
+		void perturbByOneUlp( mfem::Vector const &state, mfem::Vector &perturbed )
+		{
+			perturbed.SetSize( state.Size() );
+			mfem::real_t const e = std::numeric_limits<mfem::real_t>::epsilon();
+			mfem::real_t const *const from = state.HostRead();
+			mfem::real_t *const to = perturbed.HostWrite();
+			for ( int i = 0; i < state.Size(); ++i )
+			{
+				unsigned const hash = static_cast<unsigned>( i )*2654435761u;
+				mfem::real_t const sign = ( ( hash >> 16 ) & 1u ) != 0u ? 1 : -1;
+				to[ i ] = from[ i ] + sign*e*from[ i ];
+			}
+		}
+
+		/**
+		 * WHEN A NEWTON SOLVE THAT HAS NOT MET ITS REQUEST HAS STILL CONVERGED:
+		 * GradShafranovSolver::newtonStoppedAtRoundOff()'s rule, and the one
+		 * place both Newton paths read it from, so the two cannot drift apart.
+		 *
+		 * @param gate      the request floored at ten eps, meq::newtonTolerance()
+		 *                  of each half -- the fixed floor, used as a GATE and
+		 *                  not as the stop
+		 * @param previous  the residual one step back, negative at the first
+		 *                  iterate
+		 * @param ulp       what one ulp of every unknown moves the residual by
+		 *                  at this iterate, or zero where it was not taken
+		 * @param lastStep  the iteration budget is spent
+		 */
+		bool convergedAtRoundOff( double norm, double previous, double gate,
+		                          double ulp, bool lastStep )
+		{
+			if ( !( norm <= gate ) )
+				return false;
+			// A solve that STARTS under the gate takes no step: a restart at
+			// its own answer is the case, and it must reproduce that answer
+			// exactly rather than move it by a step of noise (M-305).
+			if ( previous < 0.0 )
+				return true;
+			// Within four ulps' worth of residual: at the floor, no step needed
+			// to show it. Under the gate only, so where the ulp is inflated --
+			// a discontinuous source, an ulp moving a quadrature point across
+			// the plasma edge -- this is never looser than the gate.
+			if ( norm <= 4.0*ulp )
+				return true;
+			// A step that does not halve the residual is a step at the floor:
+			// Newton has nothing left to take.
+			return norm > 0.5*previous || lastStep;
+		}
+
 		/// Copies the l2 norm of the non-linear residual out of NewtonSolver at
 		/// every iteration. MFEM's own print level would put the same numbers on
 		/// stdout, but stage 4's acceptance criterion is an assertion on the
@@ -1087,6 +1142,7 @@ namespace
 				{
 					mfem::IterativeSolverMonitor::Reset();
 					history.clear();
+					stoppedAtRoundOff = false;
 				}
 
 				/// MFEM's spelling, from IterativeSolverController.
@@ -1102,6 +1158,9 @@ namespace
 				{
 					if ( !isFinal )
 						history.push_back( norm );
+					if ( roundOffGate > 0.0 && !isFinal && it > 0
+					     && static_cast<double>( norm ) <= roundOffGate )
+						lastResidual = r;
 					stage( "newton.residual", it, r );
 				}
 
@@ -1110,11 +1169,62 @@ namespace
 				/// the ITERATE, which is what a walk has to diff when two runs
 				/// agree on every norm and disagree on the work.
 				/// MEASUREMENTS.md M-203.
-				void MonitorSolution( int it, mfem::real_t, // NOLINT(readability-identifier-naming)
-				                      mfem::Vector const &x, bool ) override
+				void MonitorSolution( int it, mfem::real_t norm, // NOLINT(readability-identifier-naming)
+				                      mfem::Vector const &x, bool isFinal ) override
 				{
 					stage( "newton.iterate", it, x );
+					// AFTER MonitorResidual(), which NewtonSolver calls first with
+					// the same iterate, so the history already ends at `norm`.
+					if ( roundOffGate > 0.0 && !isFinal && !converged )
+					{
+						double const value = static_cast<double>( norm );
+						// The relative half of the gate is on || r_0 || when no
+						// cold reference was taken, as NewtonSolver's own is.
+						if ( it == 0 && gateOnFirst )
+							roundOffGate = std::max( roundOffGate,
+							                         gateRelative*value );
+						double const previous =
+							history.size() >= 2 ? history[ history.size() - 2 ] : -1.0;
+						// The ulp's worth of residual, only where it can decide:
+						// under the gate and after a step. lastResidual is F( x )
+						// at this iterate, less a right hand side that is zero on
+						// this path; the perturbed evaluation is on the operator
+						// INSIDE the component refresh, so on the support F( x )
+						// was taken on.
+						double ulp = 0.0;
+						if ( value <= roundOffGate && previous >= 0.0
+						     && ulpOperator != nullptr )
+						{
+							perturbByOneUlp( x, perturbed );
+							mfem::Vector shifted( lastResidual.Size() );
+							ulpOperator->Mult( perturbed, shifted );
+							shifted -= lastResidual;
+							ulp = shifted.Norml2();
+						}
+						if ( convergedAtRoundOff( value, previous, roundOffGate, ulp,
+						                          it >= maxIterations ) )
+						{
+							converged = true;
+							stoppedAtRoundOff = true;
+						}
+					}
 				}
+
+				/// THE ROUND-OFF STOP, for the plain Newton path.
+				/// @param gate          the floored absolute target
+				/// @param relative      the floored relative tolerance, applied
+				///                      to || r_0 || when @a onFirst
+				void setRoundOffStop( double gate, double relative, bool onFirst,
+				                      int maxIterationsIn, mfem::Operator const &op )
+				{
+					ulpOperator = &op;
+					roundOffGate = gate;
+					gateRelative = relative;
+					gateOnFirst = onFirst;
+					maxIterations = maxIterationsIn;
+				}
+
+				bool stoppedAtRoundOff = false;
 
 			private:
 
@@ -1130,10 +1240,15 @@ namespace
 					stageChecksum( label, v );
 				}
 
-			public:
-
 			private:
 				std::vector<double> &history;
+				double roundOffGate = 0.0;
+				mfem::Operator const *ulpOperator = nullptr;
+				mfem::Vector lastResidual;
+				mfem::Vector perturbed;
+				double gateRelative = 0.0;
+				bool gateOnFirst = false;
+				int maxIterations = 0;
 		};
 	}
 
@@ -1191,11 +1306,11 @@ namespace
 		  traceSolverChoice( defaultTraceSolver() ),
 		  andersonDepth( 1 ),
 		  picardDamping( 1.0 ),
-		  // BOTH TARGETS ARE FLOORED AT WHAT THIS BUILD'S real_t CAN REACH;
-		  // newtonTolerance() carries the argument and M-217 the measurement.
-		  // In double it returns these literals exactly.
-		  newtonRelativeTolerance( newtonTolerance( 1.0e-12 ) ),
-		  newtonAbsoluteTolerance( newtonTolerance( 1.0e-14 ) ),
+		  // REQUESTS, NOT FLOORED: below what this build's real_t can reach the
+		  // Newton paths stop at the residual's round-off floor instead
+		  // (newtonStoppedAtRoundOff(), M-306).
+		  newtonRelativeTolerance( 1.0e-12 ),
+		  newtonAbsoluteTolerance( 1.0e-14 ),
 		  newtonMaxIterations( 30 ),
 		  newtonIterationCount( 0 ),
 		  built( false ),
@@ -8237,6 +8352,105 @@ namespace
 		return total;
 	}
 
+	GradShafranovSolver::ExteriorSourceCheck
+	GradShafranovSolver::checkExteriorSource( int angularCells ) const
+	{
+		if ( !potentialFes )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::checkExteriorSource: prepare() has not "
+				"been called, so there is no answer to report on" );
+
+		ExteriorSourceCheck result;
+		if ( normalisedSource == nullptr || !normalisedSource->plasmaSupport()
+		     || normalisedSource->plasmaSupportShape() != PlasmaSupportShape::Box
+		     || exteriorCoupling == nullptr )
+			return result;
+		result.applies = true;
+
+		/*
+		 * INSIDE: assemblePlasmaCurrent()'s loop with | F | for F -- the same
+		 * rule, the same total flux, psi_c exact at the point. Serial and in
+		 * element order: a report run once, on the answer.
+		 */
+		mfem::GridFunction const &solved = potential();
+		countedHostRead( solved, __LINE__ );
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::DofTransformation doftrans;
+		mfem::Vector shape;
+		mfem::Vector point;
+		mfem::IsoparametricTransformation transformation;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			if ( !elementInPlasma( e ) )
+				continue;
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			mesh.GetElementTransformation( e, &transformation );
+			potentialFes->GetElementDofs( e, dofs, doftrans );
+			shape.SetSize( el.GetDof() );
+			mfem::IntegrationRule const &ir =
+				sourceRule( el, transformation, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				transformation.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				transformation.Transform( ip, point );
+				double psi = 0.0;
+				for ( int j = 0; j < el.GetDof(); ++j )
+					psi += shape( j )*solved( dofs[ j ] );
+				psi += conductorPsiAtQuadrature( e, i );
+				result.inside += ip.weight*transformation.Weight()
+				                 *std::abs( normalisedSource->scaledF(
+				                     point( 0 ), point( 1 ), psi ) )
+				                 /point( 0 );
+			}
+		}
+
+		/*
+		 * OUTSIDE: the physical flux beyond Gamma is the expansion plus FB-7's
+		 * exterior conductors -- exactly the datum setExteriorCoupling()
+		 * transfers, continued off Gamma. A subtracted conductor is inside
+		 * Gamma, so its field outside is already in the coefficients.
+		 */
+		ExteriorDtN const &dtn = *exteriorCoupling;
+		std::vector<double> const &coefficients = exteriorCoefficientValues;
+		ExteriorCoilSet const *outer = exteriorConductorSet;
+		NormalisedSource const &plasma = *normalisedSource;
+		ExteriorSupportIntegral const exterior = exteriorSupportIntegral( dtn,
+			[ & ]( double radius, double z )
+			{
+				double value = dtn.exterior( radius, z, coefficients );
+				if ( outer )
+					value += outer->psi( radius, z );
+				return value;
+			},
+			[ & ]( double radius, double z, double psi )
+			{
+				try
+				{
+					return plasma.scaledF( radius, z, psi );
+				}
+				catch ( std::exception const & )
+				{
+					return std::numeric_limits<double>::quiet_NaN();
+				}
+			},
+			angularCells );
+
+		result.outside = exterior.integral;
+		result.exteriorCells = exterior.cells;
+		result.touchingCells = exterior.touching;
+		result.reach = exterior.reach;
+		result.bounded = exterior.bounded;
+		result.finite = exterior.finite;
+		if ( !exterior.finite )
+			result.fraction = 1.0;
+		else if ( result.inside + result.outside > 0.0 )
+			result.fraction = result.outside/( result.inside + result.outside );
+		return result;
+	}
+
 	ElementMaterials GradShafranovSolver::elementMaterials(
 		MaterialTable const &table, std::vector< ClassifiedPoint > *points ) const
 	{
@@ -13261,6 +13475,7 @@ namespace
 
 		double const target = std::max( newtonAbsoluteTolerance,
 		                                newtonRelativeTolerance*reference );
+		newtonTargetValue = target;
 
 		// The sparsity of the trace system does not change between Newton steps
 		// and this object outlives the loop, so the analysis is done once.
@@ -13430,6 +13645,68 @@ namespace
 		 */
 		double penaltyWeight = 0.0;
 
+		/*
+		 * THE ROUND-OFF STOP, newtonStoppedAtRoundOff()'s. Newton's phase
+		 * only: a Picard phase hands off at a target of its own and is not
+		 * converging to anything.
+		 */
+		double const roundOffGate =
+			std::max( newtonTolerance( newtonAbsoluteTolerance ),
+			          newtonTolerance( newtonRelativeTolerance )*reference );
+		bool stoppedAtRoundOff = false;
+		auto roundOffMet = [ & ]( double current ) -> bool
+		{
+			if ( phase != 1 )
+				return false;
+			// THE PREVIOUS STEP IS THE PREVIOUS STEP OF EITHER PHASE. A Newton
+			// phase handed an iterate under the gate by a Picard phase has NOT
+			// started there: exempting it as a fresh start would accept the
+			// Picard iterate with no Newton step at all, which is what left
+			// XPointBorder's bordered Picard route 1.1e-04 from the bordered
+			// Newton's -- every warm sweep was one Picard step (M-306).
+			std::size_t const length = newtonResidualHistory.size();
+			double const previous = length >= 2 ? newtonResidualHistory[ length - 2 ] : -1.0;
+			/*
+			 * THE ULP'S WORTH OF RESIDUAL ON EVERY UNKNOWN: the field block by
+			 * one ulp of each entry, and the labels psi_ax and psi_bnd and the
+			 * current scale by one ulp of themselves, since they move the
+			 * source the field residual is evaluated with. BOTH evaluations
+			 * here, with npc->Mult() and no component refresh, rather than the
+			 * perturbed one against `residual`: on iteration 0 the cold
+			 * reference has left the support at the COLD state's, and the two
+			 * would differ by a support and not by an ulp. The labels are put
+			 * back as fieldResidual() left them.
+			 */
+			double ulp = 0.0;
+			if ( current <= roundOffGate && previous >= 0.0 )
+			{
+				mfem::Vector perturbed;
+				perturbByOneUlp( unknown, perturbed );
+				mfem::Vector base( residual.Size() );
+				mfem::Vector shifted( residual.Size() );
+				double const e = static_cast<double>(
+					std::numeric_limits<mfem::real_t>::epsilon() );
+				npc->Mult( unknown, base );
+				if ( normalisedSource )
+				{
+					normalisedSource->setNormalisation( s*( 1.0 + e ), sB*( 1.0 - e ) );
+					if ( currentIsUnknown )
+						normalisedSource->setCurrentScale( sL*( 1.0 + e ) );
+				}
+				npc->Mult( perturbed, shifted );
+				if ( normalisedSource )
+				{
+					normalisedSource->setNormalisation( s, sB );
+					if ( currentIsUnknown )
+						normalisedSource->setCurrentScale( sL );
+				}
+				shifted -= base;
+				ulp = shifted.Norml2();
+			}
+			return convergedAtRoundOff( current, previous, roundOffGate, ulp,
+			                            phaseIteration >= newtonMaxIterations );
+		};
+
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations*phaseCount;
 		      ++iteration, ++phaseIteration )
@@ -13512,7 +13789,7 @@ namespace
 				borderStepHistory.push_back( record );
 			}
 
-			if ( norm <= phaseTarget )
+			if ( norm <= phaseTarget || roundOffMet( norm ) )
 			{
 				// PHASE 0 HANDS OFF IN PLACE and does not re-enter the loop
 				// head: the state has not moved, so re-evaluating the merit
@@ -13523,8 +13800,10 @@ namespace
 				// a converged answer and not a handoff.
 				if ( handOffToNewton( true ) )
 					borderStepHistory.back().handedOff = true;
-				if ( norm <= phaseTarget )
+				bool const requested = norm <= phaseTarget;
+				if ( requested || roundOffMet( norm ) )
 				{
+					stoppedAtRoundOff = !requested;
 					// The knots satisfy their rows, but a fold BETWEEN them would
 					// give a surface two crossings: the precondition, asked of the
 					// answer as the knots' start asks it of the starting iterate.
@@ -15012,8 +15291,12 @@ namespace
 					}
 					double const others =
 						std::sqrt( std::max( 0.0, norm*norm - targetSquared ) );
-					bestFitReached = reducible <= phaseTarget
-					                 && others <= phaseTarget;
+					// AT THE GATE, NOT THE FLOOR: stationarity has no step
+					// that fails to halve the merit to show it, so in single
+					// the best fit stops at the request floored at ten eps
+					// (M-306); in double that is the request itself.
+					double const fitStop = std::max( phaseTarget, roundOffGate );
+					bestFitReached = reducible <= fitStop && others <= fitStop;
 
 					// THE SLOPE OF F^2/2 ALONG THE STEP, from the corner's own
 					// linearisation: a target row moves by A dp - b.
@@ -16041,6 +16324,7 @@ namespace
 		                         numericFactorisationCount );
 
 		longestCrawlValue = longestCrawl;
+		newtonStoppedAtRoundOffValue = converged && stoppedAtRoundOff;
 		if ( stalled )
 			throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Newton has stopped moving: "
 			                          + std::to_string( crawlSteps ) + " steps in a row took less than 1/64 of the "
@@ -16052,6 +16336,8 @@ namespace
 	void GradShafranovSolver::solve()
 	{
 		longestCrawlValue = 0;
+		newtonTargetValue = 0.0;
+		newtonStoppedAtRoundOffValue = false;
 		// IV-3's unknowns are border unknowns, and only the bordered path has a
 		// border. Refused before any dispatch, since two of them return early.
 		if ( ( !freeCircuitList.empty() || !inverseTargetList.empty() )
@@ -16612,20 +16898,45 @@ namespace
 			 * set. On this path that is a full set of element-local solves, which
 			 * is the price of the criterion meaning something.
 			 */
+			/*
+			 * KINSOL HAS NO ROUND-OFF STOP, so its request is floored at ten
+			 * eps by meq::newtonTolerance(). KINSolver runs its own loop and
+			 * never consults the monitor below; NPC's NewtonSolver does, and
+			 * stops at the round-off floor instead.
+			 */
+			double const relativeRequest =
+				kinsol ? newtonTolerance( newtonRelativeTolerance ) : newtonRelativeTolerance;
+			double const absoluteRequest =
+				kinsol ? newtonTolerance( newtonAbsoluteTolerance ) : newtonAbsoluteTolerance;
 			if ( coldReference >= 0.0 )
 			{
 				// A pure absolute target at the right scale. SetRelTol( 0 ) rather
 				// than leaving it, because MFEM takes the LARGER of the two and a
 				// live rel_tol would put || r_0 || back into the test.
 				nonlinear->SetRelTol( 0.0 );
-				nonlinear->SetAbsTol( std::max( newtonAbsoluteTolerance,
-				                                newtonRelativeTolerance*coldReference ) );
+				nonlinear->SetAbsTol( std::max( absoluteRequest,
+				                                relativeRequest*coldReference ) );
 			}
 			else
 			{
-				nonlinear->SetRelTol( newtonRelativeTolerance );
-				nonlinear->SetAbsTol( newtonAbsoluteTolerance );
+				nonlinear->SetRelTol( relativeRequest );
+				nonlinear->SetAbsTol( absoluteRequest );
 			}
+
+			/*
+			 * THE ROUND-OFF STOP, newtonStoppedAtRoundOff()'s: below the
+			 * request floored at ten eps, Newton goes on until the residual is
+			 * within four ulps' worth of itself or a step stops halving it.
+			 * KINSolver never consults the monitor.
+			 */
+			if ( !kinsol )
+				recorder.setRoundOffStop(
+					coldReference >= 0.0
+					? std::max( newtonTolerance( newtonAbsoluteTolerance ),
+					            newtonTolerance( newtonRelativeTolerance )*coldReference )
+					: newtonTolerance( newtonAbsoluteTolerance ),
+					newtonTolerance( newtonRelativeTolerance ), coldReference < 0.0,
+					newtonMaxIterations, timedOperator );
 			nonlinear->SetMaxIter( newtonMaxIterations );
 			nonlinear->SetPrintLevel( -1 );
 
@@ -16642,6 +16953,12 @@ namespace
 			// the condensation.
 			nonlinear->Mult( newtonRhs, unknown );
 			newtonIterationCount = nonlinear->GetNumIterations();
+			newtonStoppedAtRoundOffValue = recorder.stoppedAtRoundOff;
+			newtonTargetValue = coldReference >= 0.0
+				? std::max( absoluteRequest, relativeRequest*coldReference )
+				: std::max( absoluteRequest, relativeRequest
+				            *( newtonResidualHistory.empty() ? 0.0
+				                                             : newtonResidualHistory.front() ) );
 
 			// Recorded so the reuse can be asserted on rather than timed: a Newton
 			// solve refactorises once per iteration and must analyse ONCE.
@@ -16956,6 +17273,16 @@ namespace
 	int GradShafranovSolver::newtonIterations() const
 	{
 		return newtonIterationCount;
+	}
+
+	double GradShafranovSolver::newtonTarget() const
+	{
+		return newtonTargetValue;
+	}
+
+	bool GradShafranovSolver::newtonStoppedAtRoundOff() const
+	{
+		return newtonStoppedAtRoundOffValue;
 	}
 
 	GradShafranovSolver::StepProfile const &

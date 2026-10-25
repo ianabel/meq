@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -506,6 +508,135 @@ namespace meq
 			tail = std::max( tail, amplitudes[ amplitudes.size() - 2 ] );
 
 		return tail/largest;
+	}
+
+	/*
+	 * THE EXTERIOR'S SUPPORT, CONNECTED TO Gamma. See the header for what it is
+	 * and why only the connected part; this is the fill and the quadrature.
+	 *
+	 * u = ln( rho/rhoGamma ) and theta are both cut at the same step
+	 * delta = pi/angularCells, so a cell is square in the metric
+	 * d( ln rho )^2 + dtheta^2 -- the conformal one, in which a support of a
+	 * given shape costs the same number of cells at every radius. Ring 0 is the
+	 * one whose inner edge is Gamma.
+	 *
+	 * EVERY CELL IS EVALUATED AT MOST ONCE, the visited mark doubling as the
+	 * cache, and the fill is breadth-first from ring 0 in ( ring, angle )
+	 * order, so the sum is taken in an order fixed by the geometry alone.
+	 */
+	ExteriorSupportIntegral exteriorSupportIntegral(
+		ExteriorDtN const &exterior,
+		std::function<double( double, double )> const &psi,
+		std::function<double( double, double, double )> const &source,
+		int angularCells, double radiusRatio )
+	{
+		if ( angularCells < 4 )
+			throw std::invalid_argument(
+				"meq::exteriorSupportIntegral: at least four angular cells are "
+				"needed to resolve anything" );
+		if ( !( radiusRatio > 1.0 ) || !std::isfinite( radiusRatio ) )
+			throw std::invalid_argument(
+				"meq::exteriorSupportIntegral: the fill's outer limit must be a "
+				"finite radius beyond Gamma, rho/rhoGamma > 1" );
+
+		double const pi = std::acos( -1.0 );
+		double const delta = pi/static_cast<double>( angularCells );
+		int const rings = static_cast<int>( std::ceil( std::log( radiusRatio )/delta ) );
+		double const rhoGamma = exterior.rhoGamma();
+		double const zCentre = exterior.zCentre();
+
+		// Three-point Gauss-Legendre on [ 0, 1 ].
+		double const offset = 0.5*std::sqrt( 0.6 );
+		double const node[ 3 ] = { 0.5 - offset, 0.5, 0.5 + offset };
+		double const weight[ 3 ] = { 5.0/18.0, 8.0/18.0, 5.0/18.0 };
+
+		struct Cell
+		{
+			bool inSupport = false;
+			bool finite = true;
+			double sum = 0.0;
+		};
+
+		auto evaluate = [ & ]( int ring, int angle )
+		{
+			Cell cell;
+			for ( int a = 0; a < 3; ++a )
+			{
+				double const rho = rhoGamma*std::exp( ( ring + node[ a ] )*delta );
+				for ( int b = 0; b < 3; ++b )
+				{
+					double const theta = ( angle + node[ b ] )*delta;
+					double const radius = rho*std::sin( theta );
+					double const z = zCentre + rho*std::cos( theta );
+					double const value = source( radius, z, psi( radius, z ) );
+					if ( value == 0.0 )
+						continue;
+					cell.inSupport = true;
+					if ( !std::isfinite( value ) )
+					{
+						cell.finite = false;
+						continue;
+					}
+					// | F |/R dR dz = | F | rho^2/R du dtheta.
+					cell.sum += weight[ a ]*weight[ b ]*delta*delta
+					            *std::abs( value )*rho*rho/radius;
+				}
+			}
+			return cell;
+		};
+
+		std::size_t const width = static_cast<std::size_t>( angularCells );
+		std::vector<char> visited( static_cast<std::size_t>( rings )*width, 0 );
+		auto index = [ & ]( int ring, int angle )
+		{
+			return static_cast<std::size_t>( ring )*width
+			       + static_cast<std::size_t>( angle );
+		};
+
+		ExteriorSupportIntegral result;
+		std::deque<std::pair<int, int>> queue;
+		auto visit = [ & ]( int ring, int angle )
+		{
+			if ( angle < 0 || angle >= angularCells || ring < 0 )
+				return;
+			if ( ring >= rings )
+			{
+				result.bounded = false;
+				return;
+			}
+			char &mark = visited[ index( ring, angle ) ];
+			if ( mark )
+				return;
+			mark = 1;
+			Cell const cell = evaluate( ring, angle );
+			if ( !cell.inSupport )
+				return;
+			++result.cells;
+			if ( ring == 0 )
+				++result.touching;
+			result.integral += cell.sum;
+			if ( !cell.finite )
+				result.finite = false;
+			result.reach = std::max( result.reach,
+			                         rhoGamma*std::exp( ( ring + 1 )*delta ) );
+			queue.emplace_back( ring, angle );
+		};
+
+		for ( int angle = 0; angle < angularCells; ++angle )
+			visit( 0, angle );
+		while ( !queue.empty() )
+		{
+			auto const [ ring, angle ] = queue.front();
+			queue.pop_front();
+			visit( ring + 1, angle );
+			visit( ring - 1, angle );
+			visit( ring, angle + 1 );
+			visit( ring, angle - 1 );
+		}
+
+		if ( !result.finite )
+			result.integral = std::numeric_limits<double>::infinity();
+		return result;
 	}
 
 }

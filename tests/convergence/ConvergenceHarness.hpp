@@ -669,8 +669,8 @@ namespace tests
 		// and is reported as a failure that is not one. MillerConvergence.cpp
 		// carries the measurement: 1.9e-14 absolute against a first residual of
 		// 1.55e-3.
-		solver.setNewtonControl( meq::newtonTolerance( relativeTolerance ),
-		                         meq::newtonTolerance( 1.0e-14 ),
+		solver.setNewtonControl( relativeTolerance,
+		                         1.0e-14,
 		                         maxNewtonIterations );
 		if ( guess )
 			solver.setInitialGuess( *guess );
@@ -750,8 +750,8 @@ namespace tests
 		solver.setSource( source, psiAxisGuess );
 		solver.setBoundaryData( boundaryCoeff );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( relativeTolerance ),
-		                         meq::newtonTolerance( 1.0e-14 ),
+		solver.setNewtonControl( relativeTolerance,
+		                         1.0e-14,
 		                         maxNewtonIterations );
 
 		NormalisedMeasurement point;

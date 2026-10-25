@@ -267,8 +267,8 @@ namespace
 		// failed. That is a stopping rule that does not fit the problem, not a
 		// convergence failure, and the residual histories printed below show it
 		// plainly. 1e-10 asks for 1.55e-13, comfortably above the floor.
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-13 ), 30 );
+		solver.setNewtonControl( 1.0e-10,
+		                  1.0e-13, 30 );
 
 		SelfMeasurement point;
 		point.converged = true;

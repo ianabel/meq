@@ -226,11 +226,14 @@ mistake: a monotone test with no sufficient-decrease constant accepts any small
 enough step and creeps instead of failing honestly. `KIN_LINESEARCH` applies
 Armijo.
 
-**AND THE MAP MUST BE TOTAL, BECAUSE KINSOL IS C.** An exception raised inside
-the residual unwinds through its frames and denies the line search a finite
-value at the trial point. With the map throwing, the first full step lands on
-`g² < 0` across the whole profile and the run dies **without backtracking
-once**. An inadmissible state returns a residual pointing back to the last
+**AND THE MAP MUST BE TOTAL, BECAUSE A THROW ENDS THE LOOP.** KINSOL is C, so
+no exception may unwind through its frames: each of `OuterKINSolver`'s callbacks
+catches, hands KINSOL its unrecoverable flag, and `solveForToroidalField`
+reports the loop as not converged with the map's message
+(`a_map_that_throws_ends_the_loop_and_is_reported`). That denies the line
+search a finite value at the trial point. With the map throwing, the first full
+step lands on `g² < 0` across the whole profile and the run ends **without
+backtracking once**. An inadmissible state returns a residual pointing back to the last
 admissible one instead; it can introduce no spurious root, `g² < 0` not being an
 equilibrium.
 
@@ -330,12 +333,23 @@ it was repaired:
   on −0.21 to −0.27. It is now `max( 1e-4, 100 × floor )` — the least step at
   which noise costs a column 1%. **The truncation–noise balance,
   `floor^(1/3)`, was tried and is worse**: it raised double's step to 4.4e-4,
-  where `SafetyFactorSolver`'s map is not smooth — its residual steps by
-  2.6e-05 between `c₁ + 2.4e-4` and `c₁ + 2.4e-3` with both inner solves at
-  1e-14 — and the loop contracted linearly at 0.19 a step, 8 iterations and 57
-  solves against 4 and 29. **That step in the map is open**: it is in the
-  extraction, not the solve, and it coincides with the inner Newton taking 4
-  iterations rather than 3 from the same warm start.
+  and the loop contracted linearly at 0.19 a step, 8 iterations and 57 solves
+  against 4 and 29.
+* **The map is piecewise smooth, and that is the DG level set, not a choice
+  the extraction makes** (→ **[M-308b](MEASUREMENTS.md#m-308b)**). `ψ*` and
+  `q*` jump across every element face, so `{ψ* = c}` is a union of
+  per-element arcs, and where a ray node crosses a face it moves to the other
+  arc and takes the other element's flux into its weight. On
+  `SafetyFactorSolver`'s fixture one node of the innermost surface does that
+  5.3e-4 below the root's `c₁`: `ψ*` jumps 5.2e-08 and `|R q*|` 8.2e-05
+  relative at the face, the node moves 1.8e-07 and the coefficients step by
+  2.6e-05, with the solve, the axis and the inner Newton's count smooth
+  through it. Every column differenced across it is off by that over `2s`.
+  No floor sees it, because each residual is right to the floor; only a
+  continuous field to extract from would remove it, and that is a different
+  extraction. The step at 1e-4 straddles none on that fixture and finishes
+  quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom` bounds the
+  iterations at 5 so that a straddle elsewhere is seen as the crawl it is.
 * **KINSOL differenced `J p` itself.** MFEM declares its custom linear solver
   iterative, so KINSOL forms `J p` for the line search's slope after every
   solve, by one more map evaluation at `u + √eps p` — an equilibrium per

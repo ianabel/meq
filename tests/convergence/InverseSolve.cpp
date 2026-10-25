@@ -107,8 +107,8 @@ namespace
 		auto solver = std::make_unique<meq::GradShafranovSolver>(
 			*m.sub, m.config->getDiscretisation().polynomialDegree );
 		solver->setNewtonControl(
-			meq::newtonTolerance( m.config->getSolver().newtonRelativeTolerance ),
-			meq::newtonTolerance( m.config->getSolver().newtonAbsoluteTolerance ),
+			m.config->getSolver().newtonRelativeTolerance,
+			m.config->getSolver().newtonAbsoluteTolerance,
 			m.config->getSolver().newtonMaxIterations );
 		solver->setExtension( *m.path, m.gammaHMarker );
 		solver->setSource( *m.source, psiAxisStart );
@@ -827,8 +827,8 @@ BOOST_AUTO_TEST_CASE( theXPointTargetMovesTheTrackedSaddle )
 		solver.setFreeCurrents( m.coils, { { "F6A", { far }, { 1.0 } } } );
 		solver.addXPointTarget( targetR, targetZ );
 		solver.setNewtonControl(
-			meq::newtonTolerance( m.config->getSolver().newtonRelativeTolerance ),
-			meq::newtonTolerance( m.config->getSolver().newtonAbsoluteTolerance ),
+			m.config->getSolver().newtonRelativeTolerance,
+			m.config->getSolver().newtonAbsoluteTolerance,
 			30 );
 		try
 		{

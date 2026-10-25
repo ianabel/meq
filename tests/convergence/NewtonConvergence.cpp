@@ -808,8 +808,8 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 		solver.setPicardDamping( run.damping );
 		// Generous: the Picard paths need hundreds where Newton needs four, and
 		// the point here is where they land, not how fast.
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 500 );
+		solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 500 );
 
 		// NOT BOOST_REQUIRE_NO_THROW: it reports "unexpected exception thrown"
 		// and discards what(), which is where the iteration count, the final
@@ -1427,8 +1427,8 @@ BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
 	meq::GradShafranovSolver solver( mesh, 2 );
 	solver.setSource( source );
 	solver.setBoundaryData( psiCoeff );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 60 );
+	solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 60 );
 	solver.solve();
 
 	char const *which =

@@ -2351,6 +2351,22 @@ cold solve is bit-identical because there the reference *is* `‖r₀‖`, and o
 warm one changes: from failing to converging in one step. It costs one extra
 residual evaluation, and only when a guess was set.
 
+**A request below the format's reach stops at the round-off floor, and a
+fixed floor in its place is a quadratic step short.** The two Newton paths
+take `setNewtonControl()`'s tolerances as a request and, below the request
+floored at ten `eps` (`meq::newtonTolerance()`, now only a GATE), stop where
+the residual is within four times what one ulp of every unknown moves it by,
+or where a step fails to halve it (`newtonStoppedAtRoundOff()`). In double
+every request in the tree is above ten `eps`, the gate is the request, and
+nothing moves. In single the ten-`eps` stop sat 17 times over the median
+floor, and on `XPointBorder`'s machine every warm sweep of the bordered Picard
+route stopped on its one Picard step, 1.1e-04 short of the bordered Newton's
+answer (→ **[M-306](MEASUREMENTS.md#m-306)**). The one-ulp measure alone is
+not a stop: an ulp moves a quadrature point across a source's jump at the
+plasma edge and reads orders over the floor, and it misses the rotating
+mirror's source rounding by up to twelve. A best fit's stationarity stop has
+no failing step to read and stays at the gate.
+
 **`NewtonSolver` needs `iterative_mode = true`, and the failure is silent.** The
 Dirichlet values ride in the iterate, so with `iterative_mode` left false
 `NewtonSolver` zeroes `x` on entry and throws the boundary data away — silently,

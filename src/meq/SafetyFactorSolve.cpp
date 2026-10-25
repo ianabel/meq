@@ -134,6 +134,20 @@ namespace meq
 					return ofMap + ofIterate;
 				}
 
+				/// `|| G( x ) - x ||_inf` if @a x was evaluated, and NaN if it
+				/// never was: what a failed loop reports, without asking the
+				/// map that just failed again.
+				double rememberedNormAt( mfem::Vector const &x ) const
+				{
+					Evaluation const *known = find( x );
+					if ( known == nullptr )
+						return std::numeric_limits<double>::quiet_NaN();
+					double norm = 0.0;
+					for ( double value : known->residual )
+						norm = std::max( norm, std::abs( value ) );
+					return norm;
+				}
+
 				/// `|| G( x ) - x ||_inf`, evaluating only if @a x never was.
 				double normAt( mfem::Vector const &x ) const
 				{
@@ -300,18 +314,29 @@ namespace meq
 				 * smallest step -- which is why this is the LEAST step that
 				 * meets the noise and not the textbook balance of the two.
 				 *
-				 * **THE BALANCE WAS TRIED AND IS WORSE, BECAUSE IT SPENDS A
-				 * MARGIN THE MAP DOES NOT HAVE.** `( floor/|G| )^( 1/3 )`,
-				 * Dennis and Schnabel section 5.4, is right for noise and a
-				 * smooth remainder. It put double's step at `4.4e-4`, four
-				 * times the option, on a floor that is an upper bound there by
-				 * three orders -- and SafetyFactorSolver's map is NOT smooth
-				 * at that scale: the residual steps by `2.6e-05` between
-				 * `c_1 + 2.4e-4` and `c_1 + 2.4e-3`, with both inner solves
-				 * converged to `1e-14`. A Jacobian straddling the step is 0.5%
-				 * wrong in its `( 1, 1 )` entry and the loop contracted
-				 * linearly at 0.19 a step: 8 iterations and 57 equilibria to
-				 * `7e-09`, against 4 and 29 at the option's `1e-4`.
+				 * **THE BALANCE WAS TRIED AND IS WORSE, BECAUSE THE MAP IS NOT
+				 * NOISE PLUS A SMOOTH REMAINDER.** `( floor/|G| )^( 1/3 )`,
+				 * Dennis and Schnabel section 5.4, assumes both. The q-driven
+				 * map is PIECEWISE smooth: a surface node whose ray crosses an
+				 * element face moves to the other element's arc of the DG
+				 * level set, and its weight takes the other element's flux, so
+				 * the map steps by the face jump -- `2.6e-05` in the
+				 * coefficients on SafetyFactorSolver's fixture, from one node
+				 * of the innermost surface, with the solve smooth through it.
+				 * No floor sees that: the residual at each point is right to
+				 * the floor, and it is the difference across the step that is
+				 * wrong. A column that straddles one is off by the step's
+				 * height over `2s`; at the balance's `4.4e-4` one sits
+				 * `5.3e-4` below the root's `c_1`, every Jacobian near the root
+				 * straddles it, and the loop contracts linearly at 0.19: 8
+				 * iterations and 57 equilibria to `7e-09`, against 4 and 29 at
+				 * the option's `1e-4`, which straddles none there and finishes
+				 * quadratically. Every step from `1e-3` to `3e-2` is linear
+				 * too, at 0.07 down to 0.01 a step. The option is not proof
+				 * against a step either -- a column at `1e-4` that straddles
+				 * one is off by four times as much -- and
+				 * theLoopRecoversTheFieldItsTargetWasBuiltFrom bounds the
+				 * iterations so that one is seen. MEASUREMENTS.md M-308b.
 				 *
 				 * **IN SINGLE THE OPTION'S STEP WAS THE STALL.** `1e-4` of `c`
 				 * is `5e-4` on `c_0` and `1e-4` on `c_2`, against a map whose
@@ -447,9 +472,15 @@ namespace meq
 					// KINSOL hands this whatever GetGradient() returned, which
 					// here is always the dense difference. A dynamic_cast
 					// rather than a static one because a wrong answer would be
-					// silent, and MFEM_VERIFY is not available on a path
-					// reached from C frames -- it throws.
+					// silent. It is reached from KINSOL's C frames, so the
+					// throw is caught by OuterKINSolver's guard there and the
+					// loop is reported as failed with this message.
 					jacobian = dynamic_cast<mfem::DenseMatrix const *>( &op );
+					if ( jacobian == nullptr )
+						throw std::logic_error(
+							"meq::solveForToroidalField: the outer Jacobian "
+							"is not the dense difference the Newton system's "
+							"solve is written for" );
 					height = width = op.Height();
 				}
 
@@ -573,6 +604,44 @@ namespace meq
 					             "KINSetJacTimesVecFn() failed" );
 				}
 
+				/**
+				 * EVERY CALLBACK KINSOL MAKES INTO THIS FILE, BEHIND A CATCH.
+				 *
+				 * KINSOL is C. The residual, the Jacobian's setup, the Newton
+				 * system's solve and the Jacobian-vector product all run C++
+				 * that can throw -- the map itself, a map that changes the
+				 * length of its argument, an MFEM_VERIFY -- and an exception
+				 * unwinding through KINSOL's frames is undefined behaviour,
+				 * which works only where the C was compiled with unwind
+				 * tables. So each callback catches, records the first
+				 * message, and hands KINSOL `-1`, its unrecoverable failure:
+				 * KINSOL returns at once with `KIN_SYSFUNC_FAIL`,
+				 * `KIN_LSETUP_FAIL` or `KIN_LSOLVE_FAIL`, and
+				 * solveForToroidalField() reports the loop as not converged
+				 * with @ref failure() in its status.
+				 *
+				 * MFEM's own callbacks are the ones replaced -- the residual
+				 * through `KINSetSysFunc`, the setup through `KINSetJacFn`,
+				 * the solve in the linear solver's table -- and each guard
+				 * calls the one it replaces, so nothing else changes.
+				 * After takeProductsFromTheJacobian().
+				 */
+				void guardTheCallbacks()
+				{
+					flag = KINSetSysFunc( sundials_mem, OuterKINSolver::residualOf );
+					MFEM_VERIFY( flag == KIN_SUCCESS, "KINSetSysFunc() failed" );
+					flag = KINSetJacFn( sundials_mem, OuterKINSolver::setUp );
+					MFEM_VERIFY( flag == KIN_SUCCESS, "KINSetJacFn() failed" );
+					LSA->ops->solve = OuterKINSolver::solveTheSystem;
+				}
+
+				/// Whether any callback threw -- true even where the message
+				/// could not be recorded.
+				bool callbackFailed() const { return failed; }
+
+				/// What the first callback that threw said, and where.
+				std::string const &failure() const { return failureMessage; }
+
 				/// KINSOL's own function-norm tolerance, changed mid-solve
 				/// as the map's floor is learned. It is read at each
 				/// iteration's stopping test, so a change takes effect there.
@@ -584,14 +653,103 @@ namespace meq
 				}
 
 			private:
-				static int jacobianTimes( N_Vector v, N_Vector jv, N_Vector u,
-				                          sunbooleantype *newU, void *userData )
+				/// The object behind a KINSOL `user_data` or a SUNDIALS
+				/// `content` pointer: both are the mfem::KINSolver that
+				/// KINSolver::SetOperator() and SetSolver() registered, which
+				/// is this object.
+				static OuterKINSolver *self( void *registered )
 				{
-					// userData is the mfem::KINSolver that KINSolver::SetOperator
-					// registered, which is this object.
-					auto *self = static_cast<OuterKINSolver *>(
-						static_cast<mfem::KINSolver *>( userData ) );
+					return static_cast<OuterKINSolver *>(
+						static_cast<mfem::KINSolver *>( registered ) );
+				}
 
+				/// One callback, behind the catch guardTheCallbacks()
+				/// describes. Never throws.
+				template <typename Body>
+				int guarded( char const *where, Body const &body ) noexcept
+				{
+					try
+					{
+						return body();
+					}
+					catch ( std::exception const &error )
+					{
+						record( where, error.what() );
+					}
+					catch ( ... )
+					{
+						record( where, "an exception that is not a "
+						               "std::exception" );
+					}
+					return -1;
+				}
+
+				void record( char const *where, char const *what ) noexcept
+				{
+					if ( !failureMessage.empty() )
+						return;
+					try
+					{
+						failureMessage = std::string( "evaluating " ) + where
+						                 + " threw: " + what;
+					}
+					catch ( ... )
+					{
+						// An allocation failure while describing a failure;
+						// KINSOL still gets its flag, and the status says
+						// that much from the fallback in solveForToroidalField.
+					}
+					failed = true;
+				}
+
+				static int residualOf( N_Vector u, N_Vector fu,
+				                       void *userData ) noexcept
+				{
+					OuterKINSolver *solver = self( userData );
+					return solver->guarded( "the residual G( c ) - c", [ & ]
+					{
+						return mfem::KINSolver::Mult( u, fu, userData );
+					} );
+				}
+
+				static int setUp( N_Vector u, N_Vector fu, SUNMatrix matrix,
+				                  void *userData, N_Vector work1,
+				                  N_Vector work2 ) noexcept
+				{
+					OuterKINSolver *solver = self( matrix->content );
+					return solver->guarded( "the differenced outer Jacobian", [ & ]
+					{
+						return mfem::KINSolver::LinSysSetup( u, fu, matrix, userData,
+						                                     work1, work2 );
+					} );
+				}
+
+				static int solveTheSystem( SUNLinearSolver linear, SUNMatrix matrix,
+				                           N_Vector step, N_Vector rhs,
+				                           sunrealtype tolerance ) noexcept
+				{
+					OuterKINSolver *solver = self( linear->content );
+					return solver->guarded( "the Newton system's solve", [ & ]
+					{
+						return mfem::KINSolver::LinSysSolve( linear, matrix, step, rhs,
+						                                     tolerance );
+					} );
+				}
+
+				static int jacobianTimes( N_Vector v, N_Vector jv, N_Vector u,
+				                          sunbooleantype *newU,
+				                          void *userData ) noexcept
+				{
+					OuterKINSolver *solver = self( userData );
+					return solver->guarded( "the Jacobian-vector product", [ & ]
+					{
+						return solver->multiplyByTheJacobian( v, jv, u, newU );
+					} );
+				}
+
+				int multiplyByTheJacobian( N_Vector v, N_Vector jv, N_Vector u,
+				                           sunbooleantype *newU )
+				{
 					// THE SAME DEVICE SEAMS AS FixedPointResidual::Mult: all
 					// three are KINSOL's vectors, read and written on the host
 					// and pushed back up. MEASUREMENTS.md M-206.
@@ -602,13 +760,15 @@ namespace meq
 					{
 						// Cached on the point, and LinSysSetup has just formed
 						// it at this same iterate: no map evaluation.
-						self->jacobian = &self->residual.GetGradient( point );
+						jacobian = &residual.GetGradient( point );
 						*newU = SUNFALSE;
 					}
 					auto const *dense =
-						dynamic_cast<mfem::DenseMatrix const *>( self->jacobian );
+						dynamic_cast<mfem::DenseMatrix const *>( jacobian );
 					if ( dense == nullptr )
-						return -1;
+						throw std::logic_error(
+							"meq::solveForToroidalField: the outer Jacobian is "
+							"not the dense difference its product is taken from" );
 
 					countedHostRead( direction, __LINE__ );
 					product.HostWrite();
@@ -624,6 +784,8 @@ namespace meq
 				}
 
 				FixedPointResidual const &residual;
+				std::string failureMessage;
+				bool failed = false;
 		};
 #endif
 
@@ -681,7 +843,45 @@ namespace meq
 		 * KINSOL's own first act is the same evaluation, which the residual
 		 * answers from what it remembers, so this costs nothing.
 		 */
-		double const normAtStart = residual.normAt( solution );
+		/*
+		 * A MAP THAT CANNOT BE EVALUATED IS A LOOP THAT DID NOT CONVERGE, AND
+		 * IT IS REPORTED, NOT THROWN -- here, ahead of KINSOL, for the same
+		 * reason as inside it, where it must be (OuterKINSolver's guard). One
+		 * contract wherever the map fails: `converged` false, the coefficients
+		 * the last point the loop had accepted, and the map's own message in
+		 * `status`.
+		 */
+		auto mapFailed = [ & ]( int iterations, std::string const &why )
+		{
+			out.converged = false;
+			out.iterations = iterations;
+			out.jacobianConditioning = residual.conditioning();
+			out.floor = residual.floorAt( solution );
+			out.finalResidual = residual.rememberedNormAt( solution );
+			for ( int i = 0; i < n; ++i )
+				out.coefficients[ static_cast<std::size_t>( i ) ] = solution( i );
+			std::ostringstream failed;
+			failed << "did not converge in " << iterations
+			       << " KINSOL iterations and " << out.mapEvaluations
+			       << " map evaluations: " << why
+			       << "; the coefficients returned are the last the loop "
+			          "accepted, at a residual of " << out.finalResidual;
+			out.status = failed.str();
+			return out;
+		};
+
+		double normAtStart = 0.0;
+		try
+		{
+			normAtStart = residual.normAt( solution );
+			residual.GetGradient( solution );
+		}
+		catch ( std::exception const &error )
+		{
+			return mapFailed( 0, std::string( "evaluating the map at the "
+			                                  "starting coefficients threw: " )
+			                     + error.what() );
+		}
 
 		/*
 		 * THE RANK CHECK HAPPENS HERE AND NOT INSIDE KINSOL, AND IT IS NOT AN
@@ -721,9 +921,9 @@ namespace meq
 		 *
 		 * The Jacobian is cached on its point and KINSOL's first act is to form
 		 * it at this same point, so on a healthy problem this check costs no
-		 * map evaluations at all.
+		 * map evaluations at all. It was formed above, beside the starting
+		 * residual, so that a map failing at the start is reported there.
 		 */
-		residual.GetGradient( solution );
 		if ( residual.conditioning() <= rankFloor( n ) )
 		{
 			out.jacobianConditioning = residual.conditioning();
@@ -773,6 +973,7 @@ namespace meq
 		newton.SetOperator( residual );
 		newton.SetSolver( linear );
 		newton.takeProductsFromTheJacobian();
+		newton.guardTheCallbacks();
 		newton.SetPrintLevel( 0 );
 		newton.SetMaxIter( options.maxIterations );
 
@@ -830,6 +1031,17 @@ namespace meq
 		// The answer comes back wherever KINSOL last wrote it.
 		countedHostRead( solution, __LINE__ );
 
+		if ( newton.callbackFailed() )
+		{
+			OuterNewtonResult failed = mapFailed(
+				newton.GetNumIterations(),
+				newton.failure().empty()
+					? std::string( "a KINSOL callback threw" )
+					: newton.failure() );
+			failed.jacobianConditioning = conditioning;
+			return failed;
+		}
+
 		for ( int i = 0; i < n; ++i )
 			out.coefficients[ static_cast<std::size_t>( i ) ] = solution( i );
 		out.iterations = newton.GetNumIterations();
@@ -861,7 +1073,19 @@ namespace meq
 		 * a point the coefficients do not determine, which no residual can
 		 * vouch for.
 		 */
-		out.finalResidual = residual.normAt( solution );
+		// KINSOL returns a point it evaluated, so this is remembered and not
+		// solved again; the catch is for a point it did not.
+		try
+		{
+			out.finalResidual = residual.normAt( solution );
+		}
+		catch ( std::exception const &error )
+		{
+			return mapFailed( out.iterations,
+			                  std::string( "evaluating the map at the point "
+			                               "KINSOL returned threw: " )
+			                  + error.what() );
+		}
 		out.floor = residual.floorAt( solution );
 		double const judged = threshold( out.floor );
 		bool const deficient = out.jacobianConditioning <= rankFloor( n );

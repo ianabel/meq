@@ -332,6 +332,16 @@ A magnetic mirror's run (``[source] SupportShape = "box"``) also carries:
        largest value on :math:`|z| =` ``AxialEdge``, their ratio, and how many
        samples along the cutoff lay in the mesh. A report of how much current
        the prescribed cutoff cuts through, not a verdict
+   * - ``source_inside_gamma``, ``source_outside_gamma``,
+       ``source_outside_gamma_fraction``, ``source_outside_gamma_bounded``
+     - free boundary only (``[boundary.exterior]``): :math:`\int |F|/R\,dR\,dz`
+       over the mesh and over the part of the support **beyond**
+       :math:`\Gamma` that is connected to it, the source evaluated on the
+       exterior expansion's flux; the fraction outside; and 0 if that part
+       reached the search's outer limit, :math:`10^3\,\rho_\Gamma`. The
+       exterior coupling is exact only where the fraction is zero, and the run
+       warns above :math:`10^{-4}`. The cure is a ``[boundary.exterior]
+       Radius`` beyond the plasma
 
 .. _output-midplane:
 

@@ -29,6 +29,7 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <utility>
 #include <vector>
 #include <string>
 
@@ -165,10 +166,10 @@ namespace tests
 	 *
 	 * **A CONVERGENCE PRECONDITION IS A STATEMENT ABOUT THE TOLERANCE THE
 	 * SOLVER WAS GIVEN, AND SEVEN SITES IN THIS DIRECTORY NAME A LITERAL
-	 * INSTEAD.** Each asks `newtonResiduals().back() < 1.0e-08` while handing
-	 * `solve()` a tolerance built by `meq::newtonTolerance()`, which floors at
-	 * ten `eps` -- `1.19e-06` in single. So the solve reaches exactly what it
-	 * was asked for and the test rejects it at a hundred times tighter. M-217's
+	 * INSTEAD.** Each asks `newtonResiduals().back() < 1.0e-08` of a solve
+	 * whose request single cannot reach, so it stops at its round-off floor --
+	 * under the ten-`eps` gate, `1.19e-06` in single, and above `1e-8` on the
+	 * machine cases (M-306) -- and the test rejects a converged solve. M-217's
 	 * lesson one level out: *a default is only a default on the paths that do
 	 * not override it*, and here the override is in the caller.
 	 *
@@ -433,6 +434,42 @@ namespace tests
 #else
 		return historical;
 #endif
+	}
+
+	/**
+	 * A Newton history WITHOUT the residuals that sit at its round-off floor.
+	 *
+	 * **A SOLVE THAT STOPPED AT ITS ROUND-OFF FLOOR ENDED ON IT** --
+	 * GradShafranovSolver::newtonStoppedAtRoundOff(), M-306 -- so its last
+	 * residual is the floor, every residual within four of it is the floor too,
+	 * and a triple ending on one measures the format and not the Jacobian: a
+	 * Jacobian ten per cent wrong reads order 0.61 on the triple that lands on
+	 * the floor and 0.51 on the one before, and a quadratic tail reads 0.36 on
+	 * its floor-landing triple where the one before reads 1.98. So those are
+	 * dropped and the order is read on what is left. A solve that met its
+	 * request -- every double solve in the suite -- comes back whole.
+	 *
+	 * @param stoppedAtRoundOff  the solver's own flag. Where only the history
+	 *        was kept, the one-argument form reads the sign the solver leaves
+	 *        on it when it stops by a step that did not halve the residual;
+	 *        it cannot see a stop within four ulps' worth of residual.
+	 */
+	inline std::vector<double> aboveTheFloor( std::vector<double> history,
+	                                          bool stoppedAtRoundOff )
+	{
+		if ( !stoppedAtRoundOff || history.empty() )
+			return history;
+		double const level = 4.0*history.back();
+		while ( !history.empty() && history.back() <= level )
+			history.pop_back();
+		return history;
+	}
+
+	inline std::vector<double> aboveTheFloor( std::vector<double> history )
+	{
+		std::size_t const n = history.size();
+		bool const stalled = n >= 2 && history[ n - 1 ] > 0.5*history[ n - 2 ];
+		return aboveTheFloor( std::move( history ), stalled );
 	}
 
 	inline bool oneExactStepReachedTheFloor( std::vector<double> const &residuals )

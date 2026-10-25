@@ -1765,8 +1765,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	meq::GradShafranovSolver solver( mesh, 2, 1.0 );
 	solver.setSource( source );
 	solver.setBoundaryData( zero );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 20 );
+	solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 20 );
 	solver.solve();
 
 	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size(),
@@ -1811,8 +1811,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	meq::GradShafranovSolver rest( mesh, 2, 1.0 );
 	rest.setSource( still );
 	rest.setBoundaryData( zero );
-	rest.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 20 );
+	rest.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 20 );
 	rest.solve();
 
 	double const shift = relativeDifference( solver.potential(), rest.potential() );
@@ -1896,8 +1896,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	meq::GradShafranovSolver solver( mesh, 2, 1.0 );
 	solver.setSource( source, psiAxisGuess );
 	solver.setBoundaryData( zero );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 20 );
+	solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 20 );
 	solver.solve();
 
 	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size() );
@@ -2995,8 +2995,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 		solver.setExtension( path, gammaHMarker );
 		if ( coupled )
 			solver.setExteriorCoupling( dtn );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-8 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+		solver.setNewtonControl( 1.0e-8,
+		                  1.0e-12, 150 );
 		solver.solve();
 
 		Answer out;
@@ -4522,8 +4522,9 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 	 * **THE LOOP IS CONVERGED AT ITS MAP'S FLOOR, SO THE COEFFICIENTS ARE
 	 * WORTH THAT FLOOR WORKED ON BY THE OUTER JACOBIAN.** The driver judges
 	 * the outer residual against max( 1e-09, meq::toroidalMapFloor() ), the
-	 * inner solve's relative accuracy -- `newtonTolerance( 1e-12 )`, ten eps
-	 * in single -- carried through the inversion and the fit; the floor is
+	 * inner solve's relative accuracy at worst -- `newtonTolerance( 1e-12 )`,
+	 * ten eps in single, the gate under which the solve stops at its
+	 * round-off floor (M-306) -- carried through the inversion and the fit; the floor is
 	 * recomputed here, at the answer, exactly as the driver computes it. And
 	 * the worst coefficient's relative error is measured at up to 13 times
 	 * the residual the loop rests at, over both MKLs and one, two and four MKL

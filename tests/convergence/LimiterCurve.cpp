@@ -341,8 +341,8 @@ BOOST_AUTO_TEST_CASE( theContactIsFoundWhereTheFieldIsLargestOnThePolygon )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		solver.solve();
 
 		BOOST_TEST_REQUIRE( solver.limiterContactWasLocated(),
@@ -428,8 +428,8 @@ namespace
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		solver.solve();
 
 		Solved out;
@@ -624,15 +624,15 @@ BOOST_AUTO_TEST_CASE( theBorderRowKeepsNewtonsQuadraticOrder )
 
 		// The tail: the last triple whose middle and last are above the floor.
 		//
-		// **AND THE FLOOR IS THE TOLERANCE THE SOLVE WAS GIVEN, NOT ONLY A
-		// FRACTION OF || r_0 ||.** A residual at or below the target is not a
-		// Newton step, it is the stop -- and meq::newtonTolerance() floors that
-		// target at ten eps, so in single the history ends 7.99e-04, 1.52e-06,
-		// 1.05e-06 with the last entry BELOW 1.19e-06 and the triple ending
-		// there reading order 0.059. The triple ending one earlier reads
-		// 1.882, which is the quadratic tail this case is about. In double the
-		// target is 2.2e-15 and 1e-13 || r_0 || is larger, so the historical
-		// expression is what selects and nothing moves. M-220.
+		// **AND THE FLOOR IS THE STOP'S GATE, NOT ONLY A FRACTION OF
+		// || r_0 ||.** Under the ten eps meq::newtonTolerance() returns, a
+		// single solve is looking for its round-off floor (M-306), and a
+		// triple ending there reads the floor and not the step: 0.059 on the
+		// history 7.99e-04, 1.52e-06, 1.05e-06, where the triple ending one
+		// earlier reads 1.882, which is the quadratic tail this case is
+		// about. In double the gate is 2.2e-15 and 1e-13 || r_0 || is larger,
+		// so the historical expression is what selects and nothing moves.
+		// M-220.
 		double const floorLevel = std::max( 1.0e-13*found.residuals.front(),
 		                                    meq::newtonTolerance( 0.0 ) );
 		double tail = 0.0;
@@ -800,8 +800,8 @@ BOOST_AUTO_TEST_CASE( theDriversOwnEstimateIsTheSameFunctionalAsTheBorder )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		solver.solve();
 
 		BOOST_TEST_REQUIRE( solver.limiterContactWasLocated(),

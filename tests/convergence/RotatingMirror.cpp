@@ -747,8 +747,11 @@ namespace
 	 * aWrongJacobianIsVisibleInTheHistory keeps the control standing: dF/dpsi
 	 * scaled by 0.9, the residual exact, must fail this.
 	 */
-	bool quadraticTail( std::vector<double> const &history, std::string &why )
+	bool quadraticTail( std::vector<double> const &whole, std::string &why )
 	{
+		// Read above the round-off floor: a history that reached it carries
+		// floor residuals a linear tail and a quadratic one share. M-306.
+		std::vector<double> const history = meq::tests::aboveTheFloor( whole );
 		if ( history.size() < 4 )
 		{
 			why = "fewer than four residuals, so there is no triple past the "
@@ -782,8 +785,9 @@ namespace
 	/// not the Jacobian, and it is said loudly instead.
 	/// aWrongJacobianIsVisibleInTheHistory runs in both builds, because a
 	/// wrong Jacobian's history is long. M-272.
-	bool tailIsReadable( std::vector<double> const &history )
+	bool tailIsReadable( std::vector<double> const &whole )
 	{
+		std::vector<double> const history = meq::tests::aboveTheFloor( whole );
 		if ( history.size() < 4 && meq::tests::newtonOrderIsUnmeasurable( 0.0 ) )
 		{
 			std::printf( "%s\n", meq::tests::newtonOrderNotice().c_str() );
@@ -1160,9 +1164,7 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 			// from. That is the format and not the Jacobian, and it is skipped
 			// loudly; aWrongJacobianIsVisibleInTheHistory still runs, because a
 			// wrong Jacobian's history is long. M-272.
-			if ( history.size() < 4 && meq::tests::newtonOrderIsUnmeasurable( 0.0 ) )
-				std::printf( "%s\n", meq::tests::newtonOrderNotice().c_str() );
-			else
+			if ( tailIsReadable( history ) )
 			{
 				std::string why;
 				BOOST_TEST( quadraticTail( history, why ),
@@ -1235,12 +1237,13 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 BOOST_AUTO_TEST_CASE( theStoppingTargetIsNotLooseAgainstThePlasmasOwnFlux )
 {
 #ifdef MFEM_USE_SINGLE
-	// The default target is meq::newtonTolerance(), which in single IS the
-	// format's floor, so there is no tighter target to compare it with: a
-	// solve asked for 1e-15 cannot converge. A double-build acceptance. M-272.
-	std::printf( "\n  *** SKIPPED: in single the default stopping target is the "
-	             "format's own floor, so no tighter target exists to compare it "
-	             "against. M-272\n" );
+	// In single the default target is under the format, so the solve stops
+	// at its round-off floor (newtonStoppedAtRoundOff()), and so does a solve
+	// asked for 1e-15: the two targets are one stop, and comparing them would
+	// be comparing a run with itself. A double-build acceptance. M-272, M-306.
+	std::printf( "\n  *** SKIPPED: in single the default stopping target and a "
+	             "tighter one both stop at the format's own floor, so there is no "
+	             "second stop to compare against. M-272, M-306\n" );
 	return;
 #endif
 	Options base;
@@ -1323,6 +1326,214 @@ BOOST_AUTO_TEST_CASE( aWrongJacobianIsVisibleInTheHistory )
 	BOOST_TEST( !passed,
 		"a ten per cent Jacobian error passes quadraticTail(), so that test "
 		"cannot see one" );
+}
+
+
+/*
+ * MR-0's DIAGNOSTIC ON THE ANSWER: THE FRACTION OF int |F|/R BEYOND Gamma,
+ * GradShafranovSolver::checkExteriorSource(), AGAINST AN INDEPENDENT
+ * QUADRATURE OF THE SAME SOLVED STATE.
+ *
+ * The reference is a Cartesian midpoint sum on a grid whose rows fall on
+ * |z| = z_edge: inside Gamma the total flux is read off the mesh by
+ * meq::PointLocator at points strictly inside an element, plus psi_c exactly
+ * there, and outside Gamma it is the
+ * expansion, ExteriorDtN::exterior() of the converged coefficients. It shares
+ * the source and the state and nothing of the diagnostic's quadrature, fill or
+ * flux assembly.
+ *
+ * TWO SUPPORTS ON ONE ANSWER.
+ *
+ *   z_edge = 1.5, the shipped box. Gamma = 3.0 clears the machine, so the
+ *   source outside it is EXACTLY zero, as M-169 measured on geq's current
+ *   for every Gamma beyond the plasma -- MR-0's acceptance, "below 1e-3 on a
+ *   shipped mirror", met with nothing to spare or to round.
+ *
+ *   z_edge = 3.3, the CONSTRUCTED case: the same field with the box opened past
+ *   Gamma's top, so the plasma's flux tubes run on through the expander and
+ *   out across Gamma near the axis. No re-solve -- the field is the 1.5
+ *   answer, and the support asked about is the wider one -- so the outside
+ *   fraction is whatever the independent quadrature says it is, and it is
+ *   well above the warning.
+ *
+ * AND WHY THE FILL IS CONNECTED. The labels recur on the midplane far outside
+ * the coils, the far side of the expander along the same field lines; that
+ * range is located and printed, and it must lie wholly beyond Gamma, where a
+ * support with no connectivity would count it.
+ */
+BOOST_AUTO_TEST_CASE( theSourceOutsideGammaIsReportedOnTheAnswer )
+{
+	Options o;
+	std::unique_ptr<MirrorRun> const run = runMirror( o );
+	BOOST_TEST_REQUIRE( run->converged, run->failure );
+	meq::GradShafranovSolver &solver = *run->solver;
+	meq::NormalisedRotatingSource &source = *run->source;
+	double const psiAxis = solver.psiAxis();
+	double const psiBoundary = solver.psiBoundary();
+	source.setNormalisation( psiAxis, psiBoundary );
+	std::vector<double> const &coefficients = solver.exteriorCoefficients();
+
+	struct Sums
+	{
+		double inside = 0.0;
+		double outside = 0.0;
+	};
+
+	// The reference: cells of side h, rows on multiples of h so |z| = z_edge
+	// is a row edge; a cell counts as inside where its centre lies in the mesh
+	// and as outside where it lies beyond Gamma, and the band is neither.
+	auto reference = [ & ]( double h, double zEdge )
+	{
+		Sums sums;
+		double const reach = std::max( zEdge, rhoGamma ) + h;
+		int const columns = static_cast<int>( std::lround( rhoGamma/h ) );
+		int const rows = static_cast<int>( std::lround( reach/h ) );
+		std::vector<double> radius, z;
+		for ( int j = -rows; j < rows; ++j )
+			for ( int i = 0; i < columns; ++i )
+			{
+				double const r = ( i + 0.5 )*h;
+				double const zz = ( j + 0.5 )*h;
+				if ( std::hypot( r, zz ) < rhoGamma )
+				{
+					radius.push_back( r );
+					z.push_back( zz );
+				}
+				else
+				{
+					double const psi = run->dtn->exterior( r, zz, coefficients );
+					sums.outside += h*h*std::abs( source.scaledF( r, zz, psi ) )/r;
+				}
+			}
+		// STRICTLY inside an element, code 0: a point the locator snaps in
+		// from the band between Gamma_h and Gamma (code 1) would read the
+		// polynomial extrapolated, which is not the mesh's source.
+		int const count = static_cast<int>( radius.size() );
+		mfem::Vector positions( 2*count );
+		for ( int k = 0; k < count; ++k )
+		{
+			positions( k ) = radius[ static_cast<std::size_t>( k ) ];
+			positions( count + k ) = z[ static_cast<std::size_t>( k ) ];
+		}
+		meq::PointLocator locator( *run->domain->sub );
+		locator.locate( positions );
+		mfem::Vector values;
+		locator.interpolate( solver.potential(), values );
+		for ( int k = 0; k < count; ++k )
+		{
+			if ( locator.codes()[ k ] != 0 )
+				continue;
+			double const r = radius[ static_cast<std::size_t>( k ) ];
+			double const zz = z[ static_cast<std::size_t>( k ) ];
+			double const psi = values( k ) + run->filaments.psi( r, zz );
+			sums.inside += h*h*std::abs( source.scaledF( r, zz, psi ) )/r;
+		}
+		return sums;
+	};
+
+	std::printf( "\n  MR-0: int |F|/R INSIDE AND OUTSIDE Gamma = %.1f, k = %d, level %d, "
+	             "N = %d\n", rhoGamma, o.order, o.level, o.modes );
+	std::printf( "    %7s %6s %14s %14s %14s %14s %11s %11s %6s\n", "z_edge", "cells",
+	             "inside", "reference", "outside", "reference", "fraction", "reference",
+	             "touch" );
+
+	/*
+	 * THE INSIDE HALF IS THE DISCRETE SOURCE'S, AND THAT IS WHY ITS BAND IS
+	 * 5e-3. The diagnostic integrates on the source's own rule, so `inside` is
+	 * the integral the solve assembles; it reads 1.3e-03 and 3.3e-03 above the
+	 * reference here, which has converged to 2e-06 by h = 0.00125. Ten rule
+	 * orders more close the gap to 4.8e-04 and 4.4e-04, so it is that rule's
+	 * quadrature error on this mesh and not the diagnostic's (M-310).
+	 */
+	double const insideTolerance = 5.0e-3;
+
+	// ---- the shipped box -------------------------------------------------
+	{
+		double const zEdge = problem().axialEdge;
+		meq::GradShafranovSolver::ExteriorSourceCheck const check = solver.checkExteriorSource();
+		Sums const want = reference( 0.005, zEdge );
+		std::printf( "    %7.2f %6d %14.6e %14.6e %14.6e %14.6e %11.3e %11.3e %6d\n", zEdge,
+		             512, check.inside, want.inside, check.outside, want.outside,
+		             check.fraction, 0.0, check.touchingCells );
+		BOOST_TEST_REQUIRE( check.applies );
+		BOOST_TEST( check.finite );
+		BOOST_TEST( check.bounded );
+		BOOST_TEST( want.outside == 0.0,
+			"the reference finds source beyond Gamma on the shipped box" );
+		BOOST_TEST( check.outside == 0.0,
+			"Gamma = " << rhoGamma << " clears the machine, yet the diagnostic reads "
+			<< check.outside << " of int |F|/R beyond it" );
+		BOOST_TEST( check.fraction == 0.0 );
+		BOOST_TEST( check.touchingCells == 0 );
+		BOOST_TEST( std::abs( check.inside - want.inside ) < insideTolerance*want.inside,
+			"int |F|/R over D_h reads " << check.inside << " against the "
+			"reference's " << want.inside );
+	}
+
+	// ---- the constructed box, opened past Gamma ---------------------------
+	{
+		double const zEdge = 3.3;
+		source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, zEdge );
+		Sums const want = reference( 0.0025, zEdge );
+		double const wantFraction = want.outside/( want.inside + want.outside );
+		BOOST_TEST_REQUIRE( want.outside > 0.0,
+			"the constructed case puts no source beyond Gamma, so it tests nothing" );
+		for ( int cells : { 512, 2048 } )
+		{
+			meq::GradShafranovSolver::ExteriorSourceCheck const check =
+				solver.checkExteriorSource( cells );
+			std::printf( "    %7.2f %6d %14.6e %14.6e %14.6e %14.6e %11.3e %11.3e %6d\n",
+			             zEdge, cells, check.inside, want.inside, check.outside,
+			             want.outside, check.fraction, wantFraction, check.touchingCells );
+			BOOST_TEST( check.finite );
+			BOOST_TEST( check.bounded );
+			BOOST_TEST( check.touchingCells > 0 );
+			BOOST_TEST( std::abs( check.inside - want.inside ) < insideTolerance*want.inside );
+			double const tolerance = cells == 512 ? 3.0e-2 : 1.0e-2;
+			BOOST_TEST( std::abs( check.outside - want.outside ) < tolerance*want.outside,
+				"at " << cells << " cells int |F|/R beyond Gamma reads " << check.outside
+				<< " against the reference's " << want.outside );
+			BOOST_TEST( std::abs( check.fraction - wantFraction ) < tolerance*wantFraction );
+			BOOST_TEST( check.fraction > check.warningFraction );
+		}
+		source.setPlasmaSupportShape( meq::PlasmaSupportShape::Box, problem().axialEdge );
+	}
+
+	// ---- where the labels recur, and that the fill does not count it ------
+	{
+		double first = 0.0, last = 0.0, largest = 0.0;
+		bool nonFinite = false;
+		for ( int i = 0; i <= 4000; ++i )
+		{
+			double const r = rhoGamma*std::pow( 1.0e3, i/4000.0 );
+			double const psi = run->dtn->exterior( r, 0.0, coefficients );
+			double const normalised = ( psi - psiBoundary )/( psiAxis - psiBoundary );
+			if ( !( normalised > 0.0 && normalised <= 1.0 ) )
+				continue;
+			if ( first == 0.0 )
+				first = r;
+			last = r;
+			double density = std::numeric_limits<double>::quiet_NaN();
+			try
+			{
+				density = std::abs( source.scaledF( r, 0.0, psi ) )/r;
+			}
+			catch ( std::exception const & )
+			{
+			}
+			if ( !std::isfinite( density ) )
+				nonFinite = true;
+			else
+				largest = std::max( largest, density );
+		}
+		std::printf( "    the labels recur on the midplane from R = %.4g to %.4g m; "
+		             "|F|/R there reaches %.3e%s\n", first, last, largest,
+		             nonFinite ? ", and is not finite at some of it" : "" );
+		std::fflush( stdout );
+		BOOST_TEST( first > rhoGamma,
+			"the labels' far branch reaches Gamma, so the connected fill would "
+			"count it" );
+	}
 }
 
 
@@ -1969,6 +2180,28 @@ namespace
 		return std::strtod( text.c_str() + at + marker.size(), nullptr );
 	}
 
+	/// The driver's printed Newton history: the ||r|| column of the table
+	/// under the "it  ||r||" header, to its first blank line.
+	std::vector<double> historyIn( std::string const &text )
+	{
+		std::vector<double> history;
+		std::size_t at = text.find( "||r||/||r_0||" );
+		if ( at == std::string::npos )
+			return history;
+		std::istringstream lines( text.substr( text.find( '\n', at ) + 1 ) );
+		std::string line;
+		while ( std::getline( lines, line ) )
+		{
+			std::istringstream fields( line );
+			int iteration = 0;
+			double residual = 0.0;
+			if ( !( fields >> iteration >> residual ) )
+				break;
+			history.push_back( residual );
+		}
+		return history;
+	}
+
 	bool says( std::string const &text, std::string const &phrase )
 	{
 		return text.find( phrase ) != std::string::npos;
@@ -2212,13 +2445,13 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	// and the axis check that does not apply -- is not printed beside it.
 	for ( char const *phrase : { "converged in ", "constraint psi_inner - psi_h(",
 	                             "psi_inner starts at", "psi_bnd starts at", "axial cutoff",
-	                             "the plasma support is the BOX" } )
+	                             "the plasma support is the BOX", "source outside Gamma" } )
 		BOOST_TEST( says( run.log, phrase ), "the driver did not say '" << phrase << "'" );
 	for ( char const *phrase : { "no interior extremum", "wall-hugging",
 	                             "NOT a magnetic axis", "NO interior extremum",
 	                             "did not converge", "Retrying",
 	                             "support is EMPTY", "at the prescribed point",
-	                             "     psi_ax = " } )
+	                             "lies OUTSIDE Gamma", "     psi_ax = " } )
 		BOOST_TEST( !says( run.log, phrase ),
 			"the driver said '" << phrase << "' of a mirror:\n" << run.log );
 	int const driverSteps = static_cast<int>( numberAfter( run.log, "converged in " ) );
@@ -2320,8 +2553,20 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 		                                ":axis_point_r = 0.1 ;",
 		                                ":plasma_support = \"box",
 		                                ":plasma_support_axial_edge = 1.5 ;",
-		                                ":axial_cutoff_relative = " } )
+		                                ":axial_cutoff_relative = ",
+		                                ":source_inside_gamma = ",
+		                                ":source_outside_gamma_bounded = 1 ;" } )
 			BOOST_TEST( says( nc, attribute ), "the .nc lacks " << attribute );
+		// MR-0's ACCEPTANCE, ON THE SHIPPED FILE: below 1e-3, and Gamma = 3.0
+		// clears the machine, so M-169's measured value -- exactly zero -- is
+		// the one it must read, in the log and in the file.
+		BOOST_TEST( says( nc, ":source_outside_gamma = 0. ;" ),
+			"the shipped mirror's .nc does not read zero source beyond Gamma" );
+		BOOST_TEST( says( nc, ":source_outside_gamma_fraction = 0. ;" ) );
+		BOOST_TEST( numberAfter( run.log, "source outside Gamma: fraction " ) == 0.0 );
+		BOOST_TEST( numberAfter( run.log, "of int abs( F )/R, " ) == 0.0 );
+		BOOST_TEST( numberAfter( run.log, "outside and " ) > 0.0,
+			"the log's int |F|/R inside Gamma is not positive" );
 		BOOST_TEST( !says( nc, ":axis_normalised_flux" ),
 			"the .nc reports a magnetic axis a mirror does not have" );
 	}
@@ -2393,9 +2638,9 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorInTheMidplaneGaugeIsQuadraticAndWarnsOnIts
  * cap one below the steps the shipped file converges in, and exit 2 is the
  * assertion that matters: putting the rung back turns it into an exit 0.
  *
- * THE CAP IS READ FROM THE SHIPPED RUN, NOT WRITTEN DOWN. That count is three
- * in double and two in single, whose Newton stops at a looser residual, so a
- * fixed cap of 2 converged in single and the case failed for the wrong reason.
+ * THE CAP IS READ FROM THE SHIPPED RUN, NOT WRITTEN DOWN: one below the first
+ * step that reached the stop, which is not the same step in the two formats,
+ * so a fixed cap would fail for the wrong reason in one of them.
  *
  * Of the rung's two triggers this is the failure. The annulus cannot fire on
  * a box run, since [boundary.xpoint] is refused beside it, and
@@ -2410,7 +2655,18 @@ BOOST_AUTO_TEST_CASE( aMirrorWhoseFirstAttemptFailsIsNotRetried )
 	BOOST_TEST_REQUIRE( shippedSteps >= 2,
 		"the shipped mirror converges in " << shippedSteps << " Newton steps, so "
 		"no smaller cap can make its first attempt fail:\n" << shipped.log );
-	int const cap = shippedSteps - 1;
+	/*
+	 * ONE BELOW THE FIRST STEP THAT REACHED THE STOP. In double that is the
+	 * last; in single the solve goes on past it until a step fails to halve
+	 * the residual (newtonStoppedAtRoundOff(), M-306), and a cap one below
+	 * THAT count leaves a run already at its floor, which converges -- so the
+	 * steps at the floor are read off the shipped history and not counted.
+	 */
+	std::vector<double> const shippedHistory = historyIn( shipped.log );
+	std::vector<double> const above = meq::tests::aboveTheFloor( shippedHistory );
+	int const reached = above.size() < shippedHistory.size()
+	                    ? static_cast<int>( above.size() ) : shippedSteps;
+	int const cap = std::max( 1, reached - 1 );
 	std::printf( "\n  A MIRROR WHOSE FIRST ATTEMPT FAILS: the shipped file converges in "
 	             "%d, capped at %d\n", shippedSteps, cap );
 
@@ -2612,6 +2868,11 @@ BOOST_AUTO_TEST_CASE( theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain )
 	BOOST_TEST( std::abs( shipped.radius.back() - 0.1 ) < 1.0e-4 );
 	BOOST_TEST( shipped.newtonIterations <= 4,
 		"the midplane gauge took " << shipped.newtonIterations << " steps, so its Newton is not quadratic" );
+	// MR-0's acceptance on the second shipped mirror: Gamma = 3.0 clears the
+	// machine, so nothing of the source lies beyond it (M-169).
+	BOOST_TEST( numberAfter( shipped.run.log, "source outside Gamma: fraction " ) == 0.0,
+		"the three-species example reports source beyond Gamma:\n" << shipped.run.log );
+	BOOST_TEST( !says( shipped.run.log, "lies OUTSIDE Gamma" ) );
 
 	// THE GAP THE KNOTS LEAVE: the solved crossing, a Hermite table on the
 	// .nc's own knots and slopes, against the interpolant through its values
@@ -3906,7 +4167,11 @@ BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadra
 		printDifference( "vacuum curve - fixed radius, psi*", gauges );
 		BOOST_TEST( worstCurve < 1.0e-12, "the solver installed a curve " << worstCurve
 			<< " m from the filaments' own crossing, so it is not the vacuum's" );
-		BOOST_TEST( v.newtonSteps == radius.newtonSteps );
+		// THE STEPS THAT CONVERGED, not the ones that showed the floor: how
+		// many of those a solve takes at its round-off floor is the floor's
+		// noise and not either gauge's (M-306). The whole count in double.
+		BOOST_TEST( meq::tests::aboveTheFloor( v.history ).size()
+		            == meq::tests::aboveTheFloor( radius.history ).size() );
 		std::string why;
 		if ( tailIsReadable( v.history ) )
 			BOOST_TEST( quadraticTail( v.history, why ), "level " << level << ": " << why
@@ -3923,7 +4188,10 @@ BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadra
 			printHistoryLine( "vacuum curve, differenced", dv );
 			Difference const columns = difference( dv.psiStar, v.psiStar );
 			printDifference( "differenced - analytic columns, psi*", columns );
-			BOOST_TEST_REQUIRE( dv.history.size() == v.history.size() );
+			// Compared above the round-off floor: a merit AT the floor is the
+			// floor's noise, and how many such steps each takes is too (M-306).
+			std::vector<double> const above = meq::tests::aboveTheFloor( v.history );
+			BOOST_TEST_REQUIRE( meq::tests::aboveTheFloor( dv.history ).size() == above.size() );
 			// A DIFFERENCED COLUMN IS GOOD TO ITS FORMAT'S DIFFERENCING FLOOR,
 			// 4 sqrt( eps ) in single, and a step taken with it moves the next
 			// merit by that fraction of the residual the step solved. Measured
@@ -3932,7 +4200,7 @@ BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadra
 			// 1.4e-03. Zero in double, where the history agrees to 1e-6 as it
 			// stands. M-219.
 			double const differencedFloor = meq::tests::differencedAgreementFloor( 0.0 );
-			for ( std::size_t i = 0; i < v.history.size(); ++i )
+			for ( std::size_t i = 0; i < above.size(); ++i )
 				BOOST_TEST( std::abs( dv.history[ i ] - v.history[ i ] )
 				            <= 1.0e-6*v.history[ i ] + 1.0e-15*v.history.front()
 				               + ( i > 0 ? differencedFloor*v.history[ i - 1 ] : 0.0 ),
@@ -4625,12 +4893,13 @@ BOOST_AUTO_TEST_CASE( theBorderedGaugeIsQuadraticWhereTheFrozenRefreshIsLinear )
 		                            std::make_pair( "from the vacuum's table held", static_cast<Start const *>( &fromHeld ) ) } )
 		{
 			// The vacuum start's target: a restart takes its cold reference at
-			// its own labels, which moves the target enough to add a step.
-			// meq::newtonTolerance() is the solver's own floor on it, ten eps.
+			// its own labels, which moves the target enough to add a step. In
+			// single both stop at their round-off floor instead, which no
+			// reference moves (newtonStoppedAtRoundOff(), M-306).
 			Options rb = b;
 			rb.start = start.second;
 			rb.relativeTolerance = 1.0e-30;
-			rb.absoluteTolerance = meq::newtonTolerance( 1.0e-12 )*bordered->solver->newtonResiduals().front();
+			rb.absoluteTolerance = 1.0e-12*bordered->solver->newtonResiduals().front();
 			std::unique_ptr<MirrorRun> const restarted = runMirror( rb );
 			BOOST_TEST_REQUIRE( restarted->converged, restarted->failure );
 			printMerits( ( std::string( "bordered, " ) + start.first ).c_str(), *restarted );
@@ -4678,7 +4947,7 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixAreQuadraticUnderTheBorderedGauge )
 	Options c = b;
 	c.start = &fromHeld;
 	c.relativeTolerance = 1.0e-30;
-	c.absoluteTolerance = meq::newtonTolerance( 1.0e-12 )*bordered->solver->newtonResiduals().front();
+	c.absoluteTolerance = 1.0e-12*bordered->solver->newtonResiduals().front();
 	std::unique_ptr<MirrorRun> const continued = runMirror( c );
 	BOOST_TEST_REQUIRE( continued->converged, continued->failure );
 
@@ -4958,8 +5227,10 @@ BOOST_AUTO_TEST_CASE( theHeldStartSavesAtMostOneBorderedStep )
 			// ONE STOPPING TARGET FOR EVERY BORDERED SOLVE: (a)'s, which its
 			// cold reference sets. A restart takes its reference at its own
 			// labels, which moves the target by a factor near one -- enough to
-			// add a step on a quadratic tail.
-			double const target = meq::newtonTolerance( 1.0e-12 )*cold->solver->newtonResiduals().front();
+			// add a step on a quadratic tail. In single the target is under the
+			// format and every one of them stops at its round-off floor
+			// instead, which no reference moves (M-306).
+			double const target = 1.0e-12*cold->solver->newtonResiduals().front();
 
 			held = runMirror( h );
 			BOOST_TEST_REQUIRE( held->converged, held->failure );

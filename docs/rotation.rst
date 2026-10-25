@@ -549,6 +549,13 @@ AlignPlasma`` puts the cutoff on element faces, since a jump across a line that
 cuts elements costs the order. :ref:`configuration-mirror-support` has the keys
 and what is refused beside them.
 
+**And** :math:`\Gamma` **must clear the plasma.** The exterior beyond
+``[boundary.exterior] Radius`` is current-free by construction, so the run
+reports the fraction of :math:`\int |F|/R` its answer would put beyond it
+(``source outside Gamma`` on the console, ``source_outside_gamma_fraction`` in
+the ``.nc``) and warns when that is above :math:`10^{-4}`. On the example,
+:math:`\Gamma` is outside the machine and the fraction is exactly zero.
+
 **The stabilisation is the mirror's own.** Beside the box the HDG stabilisation
 defaults to :math:`\tau = 3/\max(R, 0.1\,\mathrm{m})` rather than the constant
 :math:`\tau = 1` of every other run, with no key in the file

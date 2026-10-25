@@ -3029,8 +3029,8 @@ BOOST_AUTO_TEST_CASE( theBorderedSystemClosesOnANonlinearSource )
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setBorderColumn( choice );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+		solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -3424,8 +3424,8 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 		// being snapped to a dof: the cold reference the target is scaled from
 		// includes psi_bnd's constraint, so changing that definition moved the
 		// target rather than the method.
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-13 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 150 );
+		solver.setNewtonControl( 1.0e-13,
+		                  1.0e-14, 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -3543,8 +3543,8 @@ BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell )
 
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-13 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 150 );
+		solver.setNewtonControl( 1.0e-13,
+		                  1.0e-14, 150 );
 		solver.setSource( source, 0.1 );
 		if ( muZeroCurrent > 0.0 )
 			solver.setPlasmaCurrent( muZeroCurrent );
@@ -3583,8 +3583,8 @@ BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell )
 			double const residual =
 				run( limiterR, confine, muZeroCurrent, psiAx, psiBnd, scale,
 				     its );
-			// The converged/not verdict follows the tolerance the solve was
-			// given, which meq::newtonTolerance() floors at ten eps. M-220.
+			// The converged/not verdict follows what the solve can reach, its
+			// round-off floor in single. M-220, M-306.
 			bool const ok =
 				residual < meq::tests::convergedResidualFloor( 1.0e-8, {} );
 			if ( ok )
@@ -3711,8 +3711,8 @@ BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
 			meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 			meq::GradShafranovSolver solver( *d.sub, order );
 			solver.setInitialGuess( guess );
-			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+			solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 			solver.setSource( source, 0.1 );
 			solver.setBoundaryData( zero );
 			solver.setExtension( *d.path, d.gammaHMarker );
@@ -4091,8 +4091,8 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+		solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 		solver.setSource( source, 0.1 );
 
 		// AND THE SECOND HALF OF THE REPAIR, WITHOUT WHICH THE FIRST DOES NOT
@@ -4117,10 +4117,10 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		try
 		{
 			solver.solve();
-			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
-			// meq::newtonTolerance() floors this solver's targets at ten eps, so
-			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
-			// rejects it. M-220.
+			// TO THE TOLERANCE THE SOLVE CAN REACH, WHICH FOLLOWS real_t: in
+			// single the solver stops at its round-off floor
+			// (newtonStoppedAtRoundOff()), and a literal 1e-8 rejects that.
+			// M-220, M-306.
 			row.converged = !solver.newtonResiduals().empty()
 			                && solver.newtonResiduals().back()
 			                   < meq::tests::convergedResidualFloor(
@@ -4230,9 +4230,9 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		 * **AND I_p IS ONE ROW OF A BORDERED SYSTEM, SO IT IS DELIVERED TO THE
 		 * RESIDUAL THE WHOLE SYSTEM STOPPED AT, WORKED ON BY THAT SYSTEM'S
 		 * CONDITIONING.** M-220's first law says a solver cannot beat the
-		 * tolerance it was given, and this case asks for
-		 * meq::newtonTolerance( 1.0e-9 ), which floors at ten eps in single --
-		 * three orders of target. What the row then carries is that residual
+		 * tolerance it was given, and this case asks for 1.0e-9, which in
+		 * single stops at the residual's round-off floor instead
+		 * (newtonStoppedAtRoundOff(), M-306). What the row carries is that residual
 		 * times the border's own conditioning, measured here at 12 to 488
 		 * across the seven rows of the table above, and
 		 * borderedConstraintFloor() is where those numbers are written down.
@@ -4419,8 +4419,8 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+		solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -4510,8 +4510,8 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+		solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );

@@ -112,8 +112,8 @@ namespace
 		solver->setBoundaryData( datum );
 		solver->setInitialGuess( guess );
 		solver->setUpDownSymmetry( symmetric );
-		solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver->setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		solver->solve();
 		return solver;
 	}

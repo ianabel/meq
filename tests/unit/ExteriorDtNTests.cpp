@@ -1488,3 +1488,194 @@ BOOST_AUTO_TEST_CASE( a_known_high_mode_trace_is_recovered_without_aliasing )
 	            "so this is the rule aliasing the trace's content past mode "
 	            << last << " into the retained ones" );
 }
+
+/*
+ * MR-0's DIAGNOSTIC: THE SOURCE BEYOND Gamma, AGAINST A CLOSED FORM.
+ *
+ * meq::exteriorSupportIntegral() integrates | F |/R over the part of the
+ * exterior's support connected to Gamma. The case is a uniform field,
+ * psi = R^2, carrying F = R^2 on the shell a < R < b, |z| <= h -- a mirror's
+ * box with its flux edges as cylinders -- so | F |/R = R and, with Gamma of
+ * radius 1 about ( 0, c ),
+ *
+ *     integral = int_a^b R L( R ) dR,
+ *     L( R )   = | { |z| <= h : R^2 + ( z - c )^2 > 1 } |,
+ *
+ * L in closed form for each R, so the only quadrature in the reference is a
+ * one-dimensional one over a piecewise-smooth integrand, good to 2.3e-10 (the
+ * kinks, and sqrt( 1 - R^2 ) at R = 1, cost it the rule's order). At
+ * c = 0, a = 0.5, b = 1.2, h = 0.5 it is
+ * h ( b^2 - 3/4 ) - ( 2/3 )( 1/4 )^( 3/2 ) = 0.2616666...
+ *
+ * The flux is NOT an exterior field and need not be: the function is about
+ * the support and the quadrature, and takes any flux it is handed.
+ */
+namespace
+{
+	struct Shell
+	{
+		double inner = 0.5;     ///< a
+		double outer = 1.2;     ///< b
+		double halfHeight = 0.5;  ///< h
+		/// A second shell, DETACHED from Gamma when it starts beyond it;
+		/// none when its inner radius is not below its outer.
+		double farInner = 0.0;
+		double farOuter = 0.0;
+		/// The support runs to infinity in R.
+		bool unbounded = false;
+		double value = 1.0;   ///< the source's factor; infinity for the refusal
+
+		double psi( double radius, double ) const
+		{
+			return radius*radius;
+		}
+
+		double source( double radius, double z, double psi ) const
+		{
+			if ( std::fabs( z ) > halfHeight )
+				return 0.0;
+			double const r = std::sqrt( psi );
+			bool const near = r > inner && ( unbounded || r < outer );
+			bool const far = farInner < farOuter && r > farInner && r < farOuter;
+			return near || far ? value*radius*radius : 0.0;
+		}
+	};
+
+	/// int_a^b R L( R ) dR for the near shell, Gamma of radius 1 about
+	/// ( 0, c ): composite three-point Gauss-Legendre on 200000 panels.
+	double shellReference( Shell const &s, double c )
+	{
+		auto length = [ & ]( double radius )
+		{
+			if ( radius >= 1.0 )
+				return 2.0*s.halfHeight;
+			double const half = std::sqrt( 1.0 - radius*radius );
+			double const excluded = std::max( 0.0,
+				std::min( s.halfHeight, c + half ) - std::max( -s.halfHeight, c - half ) );
+			return 2.0*s.halfHeight - excluded;
+		};
+		int const panels = 200000;
+		double const width = ( s.outer - s.inner )/panels;
+		double const offset = 0.5*std::sqrt( 0.6 );
+		double const node[ 3 ] = { 0.5 - offset, 0.5, 0.5 + offset };
+		double const weight[ 3 ] = { 5.0/18.0, 8.0/18.0, 5.0/18.0 };
+		double sum = 0.0;
+		for ( int p = 0; p < panels; ++p )
+			for ( int k = 0; k < 3; ++k )
+			{
+				double const radius = s.inner + ( p + node[ k ] )*width;
+				sum += weight[ k ]*width*radius*length( radius );
+			}
+		return sum;
+	}
+
+	meq::ExteriorSupportIntegral integrateShell( Shell const &s, double c,
+	                                             int cells, double ratio = 1.0e3 )
+	{
+		ExteriorDtN const dtn( c, 1.0, 4 );
+		return meq::exteriorSupportIntegral( dtn,
+			[ & ]( double radius, double z ) { return s.psi( radius, z ); },
+			[ & ]( double radius, double z, double psi ) { return s.source( radius, z, psi ); },
+			cells, ratio );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theSourceBeyondGammaIsTheClosedFormsToFirstOrder )
+{
+	Shell const shell;
+	double const closed = 0.5*( 1.44 - 0.75 ) - ( 2.0/3.0 )*std::pow( 0.25, 1.5 );
+	BOOST_TEST_REQUIRE( std::fabs( shellReference( shell, 0.0 ) - closed ) < 1.0e-9,
+	                    "the reference quadrature does not reproduce the closed "
+	                    "form, so nothing below is measured against anything" );
+
+	std::printf( "\n  int |F|/R BEYOND Gamma: psi = R^2, F = R^2 on 0.5 < R < 1.2, "
+	             "|z| <= 0.5, Gamma radius 1\n" );
+	std::printf( "    %6s %6s %14s %14s %10s %7s %7s\n", "centre", "cells",
+	             "integral", "reference", "relative", "members", "touch" );
+
+	for ( double c : { 0.0, 0.2 } )
+	{
+		double const reference = shellReference( shell, c );
+		for ( int cells : { 128, 256, 512, 1024 } )
+		{
+			meq::ExteriorSupportIntegral const r = integrateShell( shell, c, cells );
+			double const relative = std::fabs( r.integral - reference )/reference;
+			std::printf( "    %6.2f %6d %14.8e %14.8e %10.3e %7d %7d\n", c, cells,
+			             r.integral, reference, relative, r.cells, r.touching );
+
+			BOOST_TEST( r.bounded );
+			BOOST_TEST( r.finite );
+			BOOST_TEST( r.touching > 0 );
+			// The shell reaches rho = sqrt( 1.2^2 + ( 0.5 + |c| )^2 ) at most,
+			// and the fill must stop within a cell of it.
+			BOOST_TEST( r.reach < std::hypot( 1.2, 0.5 + std::fabs( c ) )
+			                      *std::exp( 2.0*std::acos( -1.0 )/cells ) );
+			// FIRST ORDER, AS A BOUND AND NOT A RATE: the box's edges cut cells,
+			// so the error is a sum of edge terms of either sign and not
+			// monotone in the cell count (measured 4.0e-06 at 256 and 4.2e-04
+			// at 512 for c = 0.2), but it is below 0.25/cells at every count.
+			BOOST_TEST( relative < 0.25/cells,
+			            "at " << cells << " cells the exterior integral is "
+			            << relative << " from the closed form at centre " << c
+			            << ", above the first-order bound " << 0.25/cells );
+		}
+	}
+	std::fflush( stdout );
+}
+
+BOOST_AUTO_TEST_CASE( onlyTheSupportConnectedToGammaIsCounted )
+{
+	Shell const near;
+	meq::ExteriorSupportIntegral const alone = integrateShell( near, 0.0, 512 );
+
+	// A second shell at 2 < R < 2.5: the same labels' far branch, never
+	// touching Gamma. It must change NOTHING.
+	Shell detached = near;
+	detached.farInner = 2.0;
+	detached.farOuter = 2.5;
+	meq::ExteriorSupportIntegral const far = integrateShell( detached, 0.0, 512 );
+	BOOST_TEST( far.integral == alone.integral,
+	            "a shell detached from Gamma was counted: " << far.integral
+	            << " against " << alone.integral );
+	BOOST_TEST( far.cells == alone.cells );
+
+	// THE CONTROL: the same far shell joined to the near one -- 0.5 < R < 2.5
+	// -- is counted, so the zero above is the fill's and not a support the
+	// quadrature cannot see.
+	Shell joined = near;
+	joined.outer = 2.5;
+	meq::ExteriorSupportIntegral const whole = integrateShell( joined, 0.0, 512 );
+	double const wholeReference = shellReference( joined, 0.0 );
+	BOOST_TEST( std::fabs( whole.integral - wholeReference ) < 3.0e-3*wholeReference,
+	            "the joined shell reads " << whole.integral << " against "
+	            << wholeReference );
+
+	// Wholly inside Gamma: exactly nothing, with no member cell.
+	Shell inside;
+	inside.inner = 0.1;
+	inside.outer = 0.6;
+	inside.halfHeight = 0.5;
+	meq::ExteriorSupportIntegral const none = integrateShell( inside, 0.0, 512 );
+	BOOST_TEST( none.integral == 0.0 );
+	BOOST_TEST( none.cells == 0 );
+	BOOST_TEST( none.touching == 0 );
+	BOOST_TEST( none.bounded );
+
+	// A support running to the fill's limit is reported, not silently cut.
+	Shell open = near;
+	open.unbounded = true;
+	meq::ExteriorSupportIntegral const cut = integrateShell( open, 0.0, 128, 10.0 );
+	BOOST_TEST( !cut.bounded );
+	BOOST_TEST( cut.finite );
+
+	// A source with no finite value in the component makes the integral
+	// infinite rather than dropping the point.
+	Shell infinite = near;
+	infinite.value = std::numeric_limits<double>::infinity();
+	meq::ExteriorSupportIntegral const blown = integrateShell( infinite, 0.0, 128 );
+	BOOST_TEST( !blown.finite );
+	BOOST_TEST( std::isinf( blown.integral ) );
+
+	BOOST_CHECK_THROW( integrateShell( near, 0.0, 3 ), std::invalid_argument );
+	BOOST_CHECK_THROW( integrateShell( near, 0.0, 128, 1.0 ), std::invalid_argument );
+}

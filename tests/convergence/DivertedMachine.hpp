@@ -259,10 +259,8 @@ namespace meqtest
 		m.solver = std::make_unique<meq::GradShafranovSolver>(
 			*m.sub, m.config->getDiscretisation().polynomialDegree );
 		m.solver->setNewtonControl(
-			meq::newtonTolerance(
-				m.config->getSolver().newtonRelativeTolerance ),
-			meq::newtonTolerance(
-				m.config->getSolver().newtonAbsoluteTolerance ),
+			m.config->getSolver().newtonRelativeTolerance,
+			m.config->getSolver().newtonAbsoluteTolerance,
 			m.config->getSolver().newtonMaxIterations );
 		m.solver->setSource( *m.source, sourceConfig.psiAxisGuess() );
 		m.solver->setPlasmaCurrent( m.mu0
@@ -316,10 +314,10 @@ namespace meqtest
 		try
 		{
 			m.solver->solve();
-			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
-			// meq::newtonTolerance() floors this solver's targets at ten eps, so
-			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
-			// rejects it. M-220.
+			// TO THE TOLERANCE THE SOLVE CAN REACH, WHICH FOLLOWS real_t: in
+			// single the solver stops at its round-off floor
+			// (newtonStoppedAtRoundOff()), and a literal 1e-8 rejects that.
+			// M-220, M-306.
 			m.converged = !m.solver->newtonResiduals().empty()
 			              && m.solver->newtonResiduals().back()
 			                 < meq::tests::convergedResidualFloor(

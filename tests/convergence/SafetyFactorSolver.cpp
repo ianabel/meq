@@ -8,6 +8,8 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "mfem.hpp"
@@ -139,8 +141,8 @@ namespace
 			out.solver->setInitialGuess( *previous );
 		else
 			out.solver->setInitialGuess( guess );
-		out.solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 60 );
+		out.solver->setNewtonControl( 1.0e-12,
+		                  1.0e-14, 60 );
 
 		// THE REACTIVE LADDER IS NOT AVAILABLE HERE, which is a real constraint
 		// on this loop rather than an omission: psi_ax is a BORDER UNKNOWN, and
@@ -182,11 +184,12 @@ namespace
  * where the error passes through zero. It does not stall at the fixed point, it
  * crosses it.
  *
- * THE MAP MUST BE TOTAL, because KINSOL is C. An exception raised inside the
- * residual unwinds through its frames and denies the line search the one thing
- * it needs: a finite value at the trial point. With the map throwing, the
- * Newton's first full step lands on g^2 < 0 across the whole profile and the
- * run dies without ever backtracking.
+ * THE MAP MUST BE TOTAL. An exception raised inside the residual ends the loop
+ * -- KINSOL is C, so the callback catches it and the loop reports failure --
+ * and denies the line search the one thing it needs: a finite value at the
+ * trial point. With the map throwing, the Newton's first full step lands on
+ * g^2 < 0 across the whole profile and the run ends without ever
+ * backtracking.
  *
  * AND THE KNOTS MUST SPAN THE WHOLE OF Psi, WHICH IS THE ONE THAT LOOKED LIKE
  * PHYSICS AND WAS ARITHMETIC. Laying them only over the family's own range and
@@ -291,12 +294,13 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 	 * WHAT THE MAP RETURNS WHERE IT CANNOT BE EVALUATED, AND WHY IT MUST NOT
 	 * THROW.
 	 *
-	 * KINSOL is C. An exception raised inside mfem::Operator::Mult unwinds
-	 * through its frames, which is undefined behaviour and in any case denies
-	 * the line search the one thing it needs -- a finite residual at the trial
-	 * point, so that Armijo can reject the step and halve it. Measured: with a
-	 * throw here the Newton's first full step lands on g^2 < 0 across the whole
-	 * profile and the run dies, never having backtracked once.
+	 * KINSOL is C, so an exception raised inside mfem::Operator::Mult is
+	 * caught in the callback and ends the loop as a reported failure
+	 * (a_map_that_throws_ends_the_loop_and_is_reported). That denies the line
+	 * search the one thing it needs -- a finite residual at the trial point,
+	 * so that Armijo can reject the step and halve it. Measured: with a throw
+	 * here the Newton's first full step lands on g^2 < 0 across the whole
+	 * profile and the run ends, never having backtracked once.
 	 *
 	 * So an inadmissible c returns a residual that points back to the last
 	 * state that WAS admissible. It is large there and vanishes nowhere, which
@@ -346,7 +350,9 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 		std::vector<double> const out =
 			meq::fitToroidalFieldSquared( inverted, degree );
 		// THE MAP'S OWN FLOOR, from the accuracy every solve here is converged
-		// to -- solveWith()'s relative tolerance, floored as it is there.
+		// to at worst: solveWith()'s relative tolerance floored at ten eps,
+		// the gate under which a single solve stops at its round-off floor
+		// (M-306).
 		mapFloor = meq::toroidalMapFloor( inverted, degree,
 		                                  meq::newtonTolerance( 1.0e-12 ) );
 		return out;
@@ -390,6 +396,23 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 
 	BOOST_TEST_REQUIRE( result.converged,
 		"the outer Newton did not converge: " << result.status );
+
+	/*
+	 * **A NEWTON AND NOT A CRAWL.** 4 KINSOL iterations and 29 solves in
+	 * double, 2 or 3 in single, the last step quadratic. The map is piecewise
+	 * smooth -- a surface node crossing an element face steps it by the DG
+	 * jump there, 2.6e-05 in the coefficients on this fixture -- and a
+	 * Jacobian column whose difference straddles one is off by that over the
+	 * step: at a step of 4.4e-4 one sits 5.3e-4 below the root's c_1, every
+	 * Jacobian near the root straddles it, and the loop contracts linearly at
+	 * 0.19 for 8 iterations and 57 solves. MEASUREMENTS.md M-308b. Red here
+	 * means a column straddles a face crossing; it is the step, not the map.
+	 */
+	BOOST_TEST( result.iterations <= 5,
+		"the outer Newton took " << result.iterations << " iterations, where "
+		"a Newton takes 4: a differenced Jacobian column straddles a step in "
+		"the map, a surface node crossing an element face (M-308b). "
+		<< result.status );
 
 	// The recovered g against the closed form its target was built from.
 	meq::ToroidalField const recovered =
@@ -770,13 +793,18 @@ BOOST_AUTO_TEST_CASE( an_undetermined_outer_jacobian_is_refused )
 	};
 	BOOST_CHECK_NO_THROW( meq::solveForToroidalField( start, determined ) );
 
-	// And a map that changes the length of its argument is a different space.
+	// And a map that changes the length of its argument is a different space:
+	// the loop ends there, reported as a map failure (see
+	// a_map_that_throws_ends_the_loop_and_is_reported).
 	auto ragged = []( std::vector<double> const &c )
 	{
 		return std::vector<double>( c.size() + 1, 0.0 );
 	};
-	BOOST_CHECK_THROW( meq::solveForToroidalField( start, ragged ),
-	                   std::invalid_argument );
+	meq::OuterNewtonResult const wrongSpace =
+		meq::solveForToroidalField( start, ragged );
+	BOOST_TEST( !wrongSpace.converged );
+	BOOST_TEST( wrongSpace.status.find( "different number of coefficients" )
+	            != std::string::npos, wrongSpace.status );
 }
 
 namespace
@@ -823,6 +851,116 @@ namespace
 			}
 			return out;
 		};
+	}
+}
+
+/*
+ * A MAP THAT THROWS ENDS THE LOOP, AND THE LOOP SAYS SO -- WHEREVER IN THE
+ * ITERATION IT THROWS.
+ *
+ * Most map evaluations happen inside KINSOL, which is C, so an exception there
+ * must not unwind through its frames: each of OuterKINSolver's callbacks
+ * catches, hands KINSOL its unrecoverable flag, and the result is a loop that
+ * did not converge, with the map's message in its status. This is the path the
+ * driver turns into ToroidalLoopFailed and exit 2, and no valid run reaches
+ * it, so it is posed here with a map that throws on a chosen evaluation.
+ *
+ * On the noisy map's smooth form with three coefficients the evaluations go:
+ * 1 the start, 2 to 7 the Jacobian there (both ahead of KINSOL), 8 the line
+ * search's first trial -- KINSOL's RESIDUAL callback -- and from 9 the
+ * Jacobian at the first accepted iterate, KINSOL's SETUP callback. Each of
+ * the three places is asserted, and that the map is not called again after
+ * it threw: KINSOL returns at once on the flag.
+ */
+BOOST_AUTO_TEST_CASE( a_map_that_throws_ends_the_loop_and_is_reported )
+{
+	std::vector<double> const start = { 6.0, 3.4, 0.5 };
+	auto smooth = noisyMap( 0.0 );
+	std::vector<double> const startImage = smooth( start );
+	double startResidual = 0.0;
+	for ( std::size_t i = 0; i < start.size(); ++i )
+		startResidual = std::max( startResidual,
+		                          std::abs( startImage[ i ] - start[ i ] ) );
+
+	struct Where
+	{
+		int throwAt;
+		char const *callback;
+		bool ragged;
+	};
+	for ( Where const where : { Where{ 1, "starting coefficients", false },
+	                            Where{ 8, "the residual", false },
+	                            Where{ 10, "the differenced outer Jacobian",
+	                                   false },
+	                            Where{ 8, "the residual", true } } )
+	{
+		int calls = 0;
+		std::string const message =
+			"the inner solve failed at evaluation "
+			+ std::to_string( where.throwAt );
+		auto failing = [ & ]( std::vector<double> const &c )
+		{
+			if ( ++calls == where.throwAt )
+			{
+				if ( where.ragged )
+					return std::vector<double>( c.size() + 1, 0.0 );
+				throw std::runtime_error( message );
+			}
+			return smooth( c );
+		};
+
+		meq::OuterNewtonResult result;
+		BOOST_REQUIRE_NO_THROW( result =
+			meq::solveForToroidalField( start, failing ) );
+		std::printf( "\n  A MAP FAILING AT EVALUATION %d%s: %s\n",
+		             where.throwAt, where.ragged ? " (wrong length)" : "",
+		             result.status.c_str() );
+
+		BOOST_TEST( !result.converged,
+			"a loop whose map threw reads as converged: " << result.status );
+		BOOST_TEST( result.status.find( where.ragged
+			? std::string( "different number of coefficients" ) : message )
+			!= std::string::npos,
+			"the status does not carry the map's own message: "
+			<< result.status );
+		BOOST_TEST( result.status.find( where.callback ) != std::string::npos,
+			"the status does not say where the map failed (" << where.callback
+			<< "): " << result.status );
+		BOOST_TEST( calls == where.throwAt,
+			"the map was called " << calls << " times, past the evaluation "
+			<< where.throwAt << " that failed: KINSOL went on after the "
+			"failure flag" );
+		BOOST_TEST( result.mapEvaluations == where.throwAt );
+
+		// UP TO THE FIRST ACCEPTED STEP THE LOOP IS STILL AT ITS START, and
+		// reports the start's residual -- or NaN, where even that was never
+		// evaluated. After it, the accepted iterate and its smaller residual.
+		// The start is held in real_t, so the residual is compared to 1e-5.
+		// The count is KINSOL's, which includes the iteration it failed in.
+		int const failedIn = where.throwAt == 1 ? 0 : where.throwAt <= 8 ? 1 : 2;
+		BOOST_TEST( result.iterations == failedIn );
+		if ( where.throwAt <= 8 )
+		{
+			for ( std::size_t i = 0; i < start.size(); ++i )
+				BOOST_TEST( result.coefficients[ i ]
+				            == static_cast<double>(
+				                   static_cast<mfem::real_t>( start[ i ] ) ) );
+		}
+		if ( where.throwAt == 1 )
+			BOOST_TEST( std::isnan( result.finalResidual ) );
+		else if ( where.throwAt == 8 )
+			BOOST_TEST( std::abs( result.finalResidual - startResidual )
+			            <= 1.0e-5*startResidual,
+				"a loop that failed before its first step reports a residual "
+				"of " << result.finalResidual << " against the start's "
+				<< startResidual );
+		else
+		{
+			BOOST_TEST( result.finalResidual < startResidual,
+				"a loop that failed after one accepted step reports a residual "
+				"of " << result.finalResidual << ", not below the start's "
+				<< startResidual );
+		}
 	}
 }
 

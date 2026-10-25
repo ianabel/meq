@@ -290,8 +290,9 @@ BOOST_AUTO_TEST_CASE( the_vacuum_extension_adds_a_zero_at_the_plasma_edge )
  * MORE THAN WHERE IT CAN.
  *
  * meq::solveForToroidalField drives this through KINSOL, which is C: an
- * exception raised inside it unwinds through its frames and denies the line
- * search the finite value it needs to reject a step with. So the contract is
+ * exception raised inside it is caught in the callback and ends the loop,
+ * which denies the line search the finite value it needs to reject a step
+ * with. So the contract is
  * that no reachable input throws, and the residual at an inadmissible point is
  * finite, large, and not a root.
  */

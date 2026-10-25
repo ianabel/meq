@@ -315,8 +315,8 @@ namespace
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 30 );
+		solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 30 );
 
 		double const t0 = now();
 		solver.prepare();

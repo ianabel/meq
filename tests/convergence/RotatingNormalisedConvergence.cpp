@@ -113,6 +113,8 @@ namespace
 		/// The solver's OWN constraint residual, which is what says the border
 		/// closed whichever definition is in force.
 		double constraint;
+		/// GradShafranovSolver::newtonStoppedAtRoundOff().
+		bool atFloor = false;
 		/// Whether psi_ax was constrained at a located O-point or fell back to
 		/// the nodal maximum. A silent fallback would make the gap below read
 		/// zero for a reason that has nothing to do with the field.
@@ -132,8 +134,8 @@ namespace
 		meq::GradShafranovSolver solver( mesh, order );
 		solver.setSource( *source, psiAxisGuess );
 		solver.setBoundaryData( zero );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-11 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-11,
+		                  1.0e-14, 40 );
 
 		Solved out{};
 		out.converged = true;
@@ -150,6 +152,7 @@ namespace
 		out.constraint = solver.normalisationResidual();
 		out.newtonIterations = solver.newtonIterations();
 		out.residuals = solver.newtonResiduals();
+		out.atFloor = solver.newtonStoppedAtRoundOff();
 		out.traceDofs = solver.numTraceDofs();
 		out.psiMax = out.converged ? solver.potential().Max() : 0.0;
 		out.axisLocated = solver.axisWasLocated();
@@ -307,15 +310,20 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonKeepsQuadraticOrderInItsTail )
 	}
 	std::fflush( stdout );
 
+	// AND ABOVE WHERE THE SOLVE STOPPED AT ITS ROUND-OFF FLOOR, in single:
+	// the residuals at it are the floor's noise, and a triple ending on one
+	// reads 0.36 on a quadratic Newton. M-306.
+	std::vector<double> const above = meq::tests::aboveTheFloor( s.residuals, s.atFloor );
+
 	bool found = false;
 	double tailOrder = 0.0;
 	std::size_t tailAt = 0;
-	for ( std::size_t i = 2; i < s.residuals.size(); ++i )
+	for ( std::size_t i = 2; i < above.size(); ++i )
 	{
-		if ( s.residuals[ i ] < floor || s.residuals[ i - 1 ] < floor || s.residuals[ i - 2 ] < floor )
+		if ( above[ i ] < floor || above[ i - 1 ] < floor || above[ i - 2 ] < floor )
 			continue;
 
-		tailOrder = meq::tests::newtonOrder( s.residuals[ i - 2 ], s.residuals[ i - 1 ], s.residuals[ i ] );
+		tailOrder = meq::tests::newtonOrder( above[ i - 2 ], above[ i - 1 ], above[ i ] );
 		tailAt = i;
 		found = true;
 	}

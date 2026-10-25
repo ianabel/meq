@@ -90,6 +90,22 @@ namespace
 	double const bootstrapR = referenceXPointR + 0.05;
 	double const bootstrapZ = referenceXPointZ + 0.05;
 
+	/// HOW FAR TWO ROUTES MAY DISAGREE BEYOND A FIXED BOUND: four times the
+	/// larger of their own sweep-to-sweep jitter on one support, in single,
+	/// where each solve stops at its round-off floor (M-306). Zero in double,
+	/// whose sweeps stop at the request and whose jitter is that request's,
+	/// so the historical bounds run there unchanged.
+	double jitterBound( double a, double b )
+	{
+#ifdef MFEM_USE_SINGLE
+		return 4.0*std::max( a, b );
+#else
+		(void)a;
+		(void)b;
+		return 0.0;
+#endif
+	}
+
 	/// One solve of the machine with the X-point in the border, with the plasma
 	/// support frozen at @a state and re-decided here rather than inside Newton.
 	///
@@ -109,10 +125,10 @@ namespace
 		try
 		{
 			m.solver->solve();
-			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
-			// meq::newtonTolerance() floors this solver's targets at ten eps, so
-			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
-			// rejects it. M-220.
+			// TO THE TOLERANCE THE SOLVE CAN REACH, WHICH FOLLOWS real_t: in
+			// single the solver stops at its round-off floor
+			// (newtonStoppedAtRoundOff()), and a literal 1e-8 rejects that.
+			// M-220, M-306.
 			m.converged = !m.solver->newtonResiduals().empty()
 			              && m.solver->newtonResiduals().back()
 			                 < meq::tests::convergedResidualFloor(
@@ -188,6 +204,11 @@ namespace
 		/// different iterations rather than the same one twice.
 		int picardIterations = 0;
 		bool picardConverged = false;
+		/// The largest move of psi_ax and of psi_bnd between two consecutive
+		/// sweeps on the SAME support: the same discrete system solved twice
+		/// from neighbouring starts, so what one route agrees with ITSELF to.
+		double axisJitter = 0.0;
+		double boundaryJitter = 0.0;
 	};
 
 	/// XP-3, end to end: bootstrap, then the SUPPORT alone as an outer state.
@@ -231,8 +252,16 @@ namespace
 				std::printf( "    %-6d %5s %19s\n", sweep, "-", "NO SOLVE" );
 				return answer;
 			}
-			answer.supportMoved +=
-				( m.solver->plasmaComponentElements() != supportBefore );
+			bool const sameSupport =
+				m.solver->plasmaComponentElements() == supportBefore;
+			answer.supportMoved += !sameSupport;
+			if ( sweep > 0 && sameSupport )
+			{
+				answer.axisJitter = std::max( answer.axisJitter,
+				                              std::abs( m.solver->psiAxis() - axis ) );
+				answer.boundaryJitter = std::max(
+					answer.boundaryJitter, std::abs( m.solver->psiBoundary() - boundary ) );
+			}
 
 			answer.xR = m.solver->xPointR();
 			answer.xZ = m.solver->xPointZ();
@@ -631,9 +660,9 @@ BOOST_AUTO_TEST_CASE( theBorderAndTheOuterLoopReachTheSameEquilibrium )
 		"the printed histories say which." );
 	// TWO ROUTES TO ONE DISCRETE EQUILIBRIUM, and psi_ax is a VALUE at a
 	// stationary point rather than its position, so it costs no digits of its
-	// own -- M-220's third law from the good side. What it does carry is the
-	// tolerance both solves were given: measured in single, 1.99e-06 of the
-	// span, which is 17 eps. scalarAgreementFloor() is 64 and keeps the 1e-6 in
+	// own -- M-220's third law from the good side. What it does carry is
+	// where both solves stopped: measured in single, 4.2e-06 of the span,
+	// which is 36 eps. scalarAgreementFloor() is 64 and keeps the 1e-6 in
 	// double. The X-POINT's agreement above is a POSITION and is bounded
 	// separately at 1e-5, which the two routes still meet in single.
 	//
@@ -642,20 +671,34 @@ BOOST_AUTO_TEST_CASE( theBorderAndTheOuterLoopReachTheSameEquilibrium )
 	// so it is a VALUE at a stationary point exactly as psi_ax is -- a saddle
 	// rather than an extremum, which changes the sign of the Hessian and not
 	// the second-order insensitivity that costs a value no digits. It reads
-	// 45 eps against psi_ax's 17 on the same pair of solves, and both are
-	// that shared tolerance rather than anything geometric: the two routes
+	// 64 eps against psi_ax's 36 on the same pair of solves, and both are
+	// where the solves stopped rather than anything geometric: the two routes
 	// put the X-point 1e-5 m apart at worst, which a stationary VALUE feels
 	// at second order. A real disagreement -- a wrong corner block, a route
 	// short of its own fixed point -- is O( span ), four orders above this
 	// bound, so the claim is intact. M-222.
-	BOOST_TEST( std::abs( border.psiAxis - loop.psiAxis )
-	            < meq::tests::scalarAgreementFloor( 1.0e-6, 1.0 )
-	              *std::abs( span ),
+	//
+	// AND NO TIGHTER THAN THE BORDER AGREES WITH ITSELF. Each solve stops at
+	// its round-off floor in single (M-306), and the border's own sweeps on
+	// one support then move psi_ax and psi_bnd by up to 3.8e-07 and 3.4e-07,
+	// 7.5e-06 and 6.7e-06 of the span: four times that is the bound wherever
+	// it is above the 64 eps, as in
+	// theBorderedPicardReachesTheSameEquilibriumAsTheBorderedNewton. Measured
+	// in single, psi_ax 4.2e-06 and psi_bnd 7.7e-06 of the span apart, the
+	// second a hair over 64 eps and inside the border's own jitter. In double
+	// jitterBound() is zero and the 1e-6 is what runs.
+	double const axisBound = std::max(
+		meq::tests::scalarAgreementFloor( 1.0e-6, 1.0 )*std::abs( span ),
+		jitterBound( border.axisJitter, 0.0 ) );
+	double const boundaryBound = std::max(
+		meq::tests::scalarAgreementFloor( 1.0e-6, 1.0 )*std::abs( span ),
+		jitterBound( border.boundaryJitter, 0.0 ) );
+	std::printf( "    the border's own jitter on one support: psi_ax %.3e, psi_bnd "
+	             "%.3e\n", border.axisJitter, border.boundaryJitter );
+	BOOST_TEST( std::abs( border.psiAxis - loop.psiAxis ) < axisBound,
 		"psi_ax disagrees between the two routes by "
 		<< std::abs( border.psiAxis - loop.psiAxis )/span << " of the span" );
-	BOOST_TEST( std::abs( border.psiBoundary - loop.psiBoundary )
-	            < meq::tests::scalarAgreementFloor( 1.0e-6, 1.0 )
-	              *std::abs( span ),
+	BOOST_TEST( std::abs( border.psiBoundary - loop.psiBoundary ) < boundaryBound,
 		"psi_bnd disagrees between the two routes by "
 		<< std::abs( border.psiBoundary - loop.psiBoundary )/span
 		<< " of the span" );
@@ -858,10 +901,11 @@ BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
 		// point's POSITION at half the digits, and that is right for a finder
 		// rooting q_h; these two coordinates are columns of the bordered
 		// Newton, so they carry the solve's own tolerance exactly as psi_ax
-		// does. Measured in single: psi_ax agrees to 2.6e-06 relative -- 21
-		// eps -- and the X-point's R to 3.0e-07 on 1.09, which is 2.3 eps. The
-		// 64 eps of scalarAgreementFloor() clears both by a factor of three and
-		// of twenty-eight, and is exactly the historical bound in double.
+		// does. Measured in single, each solve stopped at its round-off floor
+		// (M-306): the weights' psi_ax agree to 5.9e-07 relative -- five eps
+		// -- and their X-points to the printed 1e-06 m. The 64 eps of
+		// scalarAgreementFloor() clears that by ten, and is exactly the
+		// historical bound in double.
 		BOOST_TEST( std::abs( got.psiAxis - one.psiAxis )
 		            <= meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 )
 		               *std::abs( one.psiAxis ),
@@ -970,45 +1014,54 @@ BOOST_AUTO_TEST_CASE( theBorderedPicardReachesTheSameEquilibriumAsTheBorderedNew
 	            "linearised as Newton throughout and every agreement assertion "
 	            "below is comparing a run with itself" );
 
-	// THE EQUILIBRIUM, at the same tolerance the merit-weight case uses and for
-	// the same reason: this is one discrete problem reached by two sequences of
-	// trial steps, so the answers agree to round-off rather than merely closely.
-	//
+	// THE EQUILIBRIUM: one discrete problem reached by two sequences of trial
+	// steps, so the answers agree to round-off rather than merely closely.
 	/*
-	 * **IN SINGLE THE PAIR IS HELD TO 4096 eps, AND THAT BOUND IS A
-	 * MEASUREMENT WITHOUT AN EXPLANATION.** Measured: psi_ax 1.1e-04 relative
-	 * and psi_bnd 1.6e-04, the X-point's R 4.6e-05 on 1.09, against a bound of
-	 * four times 4096 eps.
+	 * **TO ROUND-OFF MEANS AS WELL AS EACH ROUTE AGREES WITH ITSELF.** Every
+	 * sweep after the support settles solves the same discrete system again,
+	 * from the last sweep's answer, so the largest move between two such
+	 * sweeps of either route -- the jitter -- is what a converged answer is
+	 * worth on this machine. The two routes must agree to four times it, and
+	 * never to worse than the merit-weight case's 64 eps. Measured in single
+	 * over five thread draws: psi_ax 5.5e-07 to 4.4e-06 relative apart and
+	 * psi_bnd 3.4e-06 to 7.1e-06, each solve stopping at a field residual of
+	 * 3.3e-08 to 4.0e-08, against jitters of up to 3.8e-07 and 3.4e-07
+	 * absolute, 4.5e-06 and 1.0e-05 relative; the X-point to 2.3e-06 on 1.09,
+	 * under 64 eps.
 	 *
-	 * It was argued from M-220's second law -- Picard approaches its floor from
-	 * above, so a fixed-point route is worth the tolerance it stopped at -- and
-	 * read off meq::picardTolerance(). That argument does not reach this rung:
-	 * the bordered Picard phase hands off to a bordered NEWTON phase, which
-	 * stops on Newton's own target, and never consults picardTolerance(), which
-	 * is the unbordered KINSOL fixed point's target and is Newton's 10 eps
-	 * floor (solveByPicard() measures why the unbordered route's own 1e-4 gap
-	 * was the map's evaluation and not Picard's). So the 4096 eps stays,
-	 * exactly as measured and no looser, and a 1e-4 gap between two routes
-	 * that both END in Newton is an open finding rather than a law.
+	 * **STOPPED AT A FIXED 1.19e-06 -- meq::newtonTolerance()'s ten eps -- THE
+	 * TWO ROUTES READ psi_ax 1.1e-04 APART, AND THE STOP WAS THE CAUSE.** Not
+	 * Picard: the bordered Picard phase hands off to a bordered NEWTON phase,
+	 * and picardTolerance() is never consulted. Every warm sweep of the Picard
+	 * route was ONE Picard step, 8.3e-03 to 3.3e-07, which is under the
+	 * 1.19e-06 and ten times over the floor, so the Newton phase accepted it
+	 * without a step and psi_ax stayed where the bootstrap support had put it,
+	 * 1.1e-04 short; the bordered Newton's own bootstrap stopped the same way
+	 * at 5.7e-07 in a damped tail. Each route's jitter there was 6e-06, so
+	 * this bound is red on it by a factor of four or more. M-306.
 	 *
-	 * The merit-weight case above is TWO NEWTONS and keeps the 64 eps it always
-	 * had, which is the control on this. exactAgreementFloor( 1.0 ) is exactly
-	 * 0.0 in double, so `achieved` is the 1e-9 and 1e-7 that have always been
-	 * asserted there.
+	 * scalarAgreementFloor() is exactly the historical 1e-9 and 1e-7 in
+	 * double, and jitterBound() is zero there, so the bound is unchanged.
 	 */
-	double const achieved = meq::tests::achievedToleranceFloor(
-		1.0e-9, meq::tests::exactAgreementFloor( 1.0 ) );
-	double const achievedPoint = meq::tests::achievedToleranceFloor(
-		1.0e-7, meq::tests::exactAgreementFloor( 1.0 )*std::abs( newton.xR ) );
+	double const axisBound = std::max(
+		meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 )*std::abs( newton.psiAxis ),
+		jitterBound( newton.axisJitter, picard.axisJitter ) );
+	double const boundaryBound = std::max(
+		meq::tests::scalarAgreementFloor( 1.0e-9, 1.0 )*std::abs( newton.psiBoundary ),
+		jitterBound( newton.boundaryJitter, picard.boundaryJitter ) );
+	double const achievedPoint =
+		meq::tests::scalarAgreementFloor( 1.0e-7, std::abs( newton.xR ) );
 
-	BOOST_TEST( std::abs( picard.psiAxis - newton.psiAxis )
-	            <= achieved*std::abs( newton.psiAxis ),
+	BOOST_TEST( std::abs( picard.psiAxis - newton.psiAxis ) <= axisBound,
 	            "psi_ax moved with the globalisation: " << picard.psiAxis
-	            << " against " << newton.psiAxis );
-	BOOST_TEST( std::abs( picard.psiBoundary - newton.psiBoundary )
-	            <= achieved*std::abs( newton.psiBoundary ),
+	            << " against " << newton.psiAxis << ", where each route moves it by "
+	            "at most " << std::max( newton.axisJitter, picard.axisJitter )
+	            << " between two sweeps on one support" );
+	BOOST_TEST( std::abs( picard.psiBoundary - newton.psiBoundary ) <= boundaryBound,
 	            "psi_bnd moved with the globalisation: " << picard.psiBoundary
-	            << " against " << newton.psiBoundary );
+	            << " against " << newton.psiBoundary << ", where each route moves it "
+	            "by at most " << std::max( newton.boundaryJitter, picard.boundaryJitter )
+	            << " between two sweeps on one support" );
 	BOOST_TEST( std::abs( picard.xR - newton.xR ) <= achievedPoint,
 	            "the X-point's R moved with the globalisation: " << picard.xR
 	            << " against " << newton.xR );
@@ -1034,6 +1087,15 @@ BOOST_AUTO_TEST_CASE( theBorderedPicardReachesTheSameEquilibriumAsTheBorderedNew
 	             "bordered-picard-then-newton", picard.bootstrapIterations,
 	             picard.picardIterations, picard.psiAxis, picard.psiBoundary,
 	             picard.picardConverged ? "reached" : "did not reach" );
+	std::printf( "    apart: psi_ax %.3e (bound %.3e), psi_bnd %.3e (bound %.3e); "
+	             "X-point R %.3e, Z %.3e (bound %.3e)\n",
+	             std::abs( picard.psiAxis - newton.psiAxis ), axisBound,
+	             std::abs( picard.psiBoundary - newton.psiBoundary ), boundaryBound,
+	             std::abs( picard.xR - newton.xR ), std::abs( picard.xZ - newton.xZ ),
+	             achievedPoint );
+	std::printf( "    jitter between sweeps on one support: psi_ax %.3e and %.3e, "
+	             "psi_bnd %.3e and %.3e\n", newton.axisJitter, picard.axisJitter,
+	             newton.boundaryJitter, picard.boundaryJitter );
 	std::fflush( stdout );
 }
 

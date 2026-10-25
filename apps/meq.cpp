@@ -3438,15 +3438,14 @@ int main( int argc, char **argv )
 		}
 
 		fresh->setBoundaryData( zero );
-		// FLOORED AT WHAT THIS BUILD'S real_t CAN REACH. A file written for a
-		// double build asks for 1e-12 and a single build cannot get within
-		// seven orders of it, so an unfloored key turns every shipped example
-		// into a refusal rather than a coarser answer. M-217.
+		// THE KEYS ARE A REQUEST. A file written for a double build asks for
+		// 1e-12, which a single build cannot get within seven orders of; the
+		// solver stops at the residual's round-off floor instead
+		// (GradShafranovSolver::newtonStoppedAtRoundOff()), so the request is
+		// passed as written rather than floored here. M-217, M-306.
 		fresh->setNewtonControl(
-			meq::newtonTolerance(
-				config->getSolver().newtonRelativeTolerance ),
-			meq::newtonTolerance(
-				config->getSolver().newtonAbsoluteTolerance ),
+			config->getSolver().newtonRelativeTolerance,
+			config->getSolver().newtonAbsoluteTolerance,
 		                         config->getSolver().newtonMaxIterations );
 
 		// The two performance keys. Availability was checked once at startup,
@@ -3887,9 +3886,10 @@ int main( int argc, char **argv )
 
 			// THE MAP MUST NOT THROW. Everything below is a REFUSAL, reported
 			// to the line search as a residual pointing back at the last
-			// admissible point; see meq::ToroidalFieldMap. A run that cannot
-			// converge anywhere still ends by saying so rather than by
-			// unwinding through KINSOL's C frames.
+			// admissible point; see meq::ToroidalFieldMap. A throw would end
+			// the outer loop at once (meq::solveForToroidalField catches it in
+			// KINSOL's callbacks and reports the loop failed), where a refusal
+			// lets the line search shorten the step and go on.
 			auto step = [ & ]( std::vector<meq::Knot> const &knots )
 				-> meq::FluxSurfaceFamily const *
 			{
@@ -3925,8 +3925,10 @@ int main( int argc, char **argv )
 
 			// THE MAP'S FLOOR IS ITS INNER SOLVE'S ACCURACY CARRIED THROUGH THE
 			// INVERSION AND THE FIT -- meq::toroidalMapFloor() -- and the
-			// solver below is converged to exactly the relative tolerance set
-			// on it in makeSolver(), floored there as here.
+			// solver below is converged to the relative tolerance set on it in
+			// makeSolver() or, where the format cannot reach that, to its
+			// round-off floor under the ten-eps gate: this floor is the gate,
+			// the inner solve's accuracy at worst (M-306).
 			mapOptions.solveAccuracy =
 				meq::newtonTolerance( config->getSolver().newtonRelativeTolerance );
 
@@ -3949,7 +3951,9 @@ int main( int argc, char **argv )
 			 * KINSOL setup -- the run went on to "converged in 4 Newton
 			 * iterations (via bordered-picard-then-newton)" and wrote
 			 * q-driven.nc and exited 0, the loop never having run. The map cannot
-			 * throw (meq::ToroidalFieldMap), so whatever does is the loop's.
+			 * throw (meq::ToroidalFieldMap), and a throw from inside KINSOL is
+			 * already a reported failure, so whatever reaches here is the
+			 * loop's own.
 			 */
 			meq::OuterNewtonResult const outcome = [ & ]
 			{
@@ -4433,9 +4437,8 @@ int main( int argc, char **argv )
 				 * more than a topological question needs.
 				 */
 				step->setNewtonControl(
-					meq::newtonTolerance( 1.0e-4 ),
-					meq::newtonTolerance(
-						config->getSolver().newtonAbsoluteTolerance ),
+					1.0e-4,
+					config->getSolver().newtonAbsoluteTolerance,
 					std::min( 60, config->getSolver().newtonMaxIterations ) );
 				if ( confinedSource )
 				{
@@ -5423,6 +5426,8 @@ int main( int argc, char **argv )
 	/// reason: reported below and written into the `.nc`.
 	meq::GradShafranovSolver::AxialCutoffCheck axialCutoff;
 	meq::GradShafranovSolver::PlasmaSupportNodes supportNodes;
+	/// And MR-0's: the fraction of the source the answer puts beyond Gamma.
+	meq::GradShafranovSolver::ExteriorSourceCheck exteriorSource;
 	/// What each element is made of, and the table its rows index: classified
 	/// ONCE, on the converged solve, then reported below and written into the
 	/// `.nc` -- one record, so the log and the file cannot disagree.
@@ -6296,6 +6301,7 @@ int main( int argc, char **argv )
 			double const cutoffStartCpu = cpuNow();
 			axialCutoff = solver->checkAxialCutoff();
 			supportNodes = solver->plasmaSupportNodes();
+			exteriorSource = solver->checkExteriorSource();
 			checkSeconds += elapsedSince( started ) - cutoffStart;
 			checkCpuSeconds += cpuNow() - cutoffStartCpu;
 
@@ -6310,6 +6316,38 @@ int main( int argc, char **argv )
 				             axialCutoff.cutoffSamples );
 			std::printf( "     the plasma support holds %d of %d potential nodes\n",
 			             supportNodes.inside, supportNodes.total );
+			/*
+			 * MR-0's DIAGNOSTIC: the source the answer puts beyond Gamma, where
+			 * the DtN assumes none. A warning and not a refusal: the answer is
+			 * the posed problem's, and it is Gamma's placement that is wrong.
+			 * The threshold is ExteriorSourceCheck::warningFraction's, derived
+			 * there from M-169.
+			 */
+			if ( exteriorSource.applies )
+			{
+				std::printf( "     source outside Gamma: fraction %.3e of int abs( F )/R, "
+				             "%.6e outside and %.6e inside (%d exterior cells, %d on "
+				             "Gamma)\n",
+				             exteriorSource.fraction, exteriorSource.outside,
+				             exteriorSource.inside, exteriorSource.exteriorCells,
+				             exteriorSource.touchingCells );
+				if ( exteriorSource.fraction > exteriorSource.warningFraction
+				     || !exteriorSource.bounded )
+				{
+					std::fflush( stdout );
+					std::fprintf( stderr,
+						"MEQ: warning: %.3e of the plasma source lies OUTSIDE Gamma\n"
+						"     (above %.0e%s%s), where the exterior coupling assumes\n"
+						"     no current, so the answer is the posed problem's but the\n"
+						"     truncation is not exact. Move [boundary.exterior] Radius\n"
+						"     out past the plasma (the current reaches rho = %.4g about\n"
+						"     the centre), or tighten the support.\n",
+						exteriorSource.fraction, exteriorSource.warningFraction,
+						exteriorSource.finite ? "" : "; the source is not finite there",
+						exteriorSource.bounded ? "" : "; it reaches the fill's limit",
+						exteriorSource.reach );
+				}
+			}
 			if ( supportNodes.inside == 0 )
 			{
 				std::fflush( stdout );
@@ -7112,6 +7150,17 @@ int main( int argc, char **argv )
 				writer.attribute( "axial_cutoff_value", axialCutoff.atCutoff );
 				writer.attribute( "axial_cutoff_relative", axialCutoff.relative );
 				writer.attribute( "axial_cutoff_samples", axialCutoff.cutoffSamples );
+			}
+			// MR-0's: int |F|/R beyond Gamma and on D_h, in the same units, and
+			// the fraction outside -- the DtN is exact only where it is zero.
+			if ( exteriorSource.applies )
+			{
+				writer.attribute( "source_outside_gamma", exteriorSource.outside );
+				writer.attribute( "source_inside_gamma", exteriorSource.inside );
+				writer.attribute( "source_outside_gamma_fraction",
+				                  exteriorSource.fraction );
+				writer.attribute( "source_outside_gamma_bounded",
+				                  exteriorSource.bounded ? 1 : 0 );
 			}
 		}
 		else if ( config->getSource().confinesToPlasma() )

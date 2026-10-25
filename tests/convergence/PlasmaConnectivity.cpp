@@ -1040,8 +1040,8 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 	GradShafranovSolver solver( *d.sub, order );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+	solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 	solver.setSource( source, 0.1 );
 	solver.setBoundaryData( zero );
 	solver.setExtension( *d.path, d.gammaHMarker );
@@ -1323,8 +1323,8 @@ BOOST_AUTO_TEST_CASE( theConnectivityChangeIsNotAJumpAtTheSizeThatMatters )
 	meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, 1.0 );
 	GradShafranovSolver solver( *d.sub, order );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+	solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 	solver.setSource( source, 0.1 );
 	solver.setBoundaryData( zero );
 	solver.setExtension( *d.path, d.gammaHMarker );
@@ -1604,8 +1604,8 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			GradShafranovSolver solver( *d.sub, order );
 			solver.setPlasmaConnectivity( choice );
 			solver.setInitialGuess( guess );
-			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 150 );
+			solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 150 );
 			solver.setSource( source, 0.1 );
 			solver.setBoundaryData( zero );
 			solver.setExtension( *d.path, d.gammaHMarker );
@@ -1702,8 +1702,8 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 			GradShafranovSolver solver( mesh, order );
 			solver.setPlasmaConnectivity( choice );
 			solver.setInitialGuess( guess );
-			solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), 60 );
+			solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, 60 );
 			solver.setSource( source, start );
 			solver.setBoundaryData( zero );
 
@@ -1874,8 +1874,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
 		GradShafranovSolver solver( mesh, order );
 		solver.setPlasmaConnectivity( choice );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                         meq::newtonTolerance( 1.0e-12 ), 60 );
+		solver.setNewtonControl( 1.0e-9,
+		                         1.0e-12, 60 );
 		solver.setSource( source, start );
 		solver.setBoundaryData( zero );
 		solver.solve();
@@ -2078,7 +2078,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		if ( envelope )
 			solver.setAxisRow( GradShafranovSolver::AxisRow::WithEnvelope );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
+		solver.setNewtonControl( 1.0e-9,
 		                         absoluteTarget, 60 );
 		solver.setSource( source, start );
 		solver.setBoundaryData( zero );
@@ -2388,8 +2388,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 
 		GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-9 ),
-		                  meq::newtonTolerance( 1.0e-12 ), cap );
+		solver.setNewtonControl( 1.0e-9,
+		                  1.0e-12, cap );
 		solver.setSource( source, 0.1 );
 		solver.setPlasmaCurrent( machineCurrent );
 		solver.setBoundaryData( zero );
@@ -2406,10 +2406,10 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		try
 		{
 			solver.solve();
-			// TO THE TOLERANCE THE SOLVE WAS GIVEN, WHICH FOLLOWS real_t.
-			// meq::newtonTolerance() floors this solver's targets at ten eps, so
-			// in single a converged solve stops at 1.19e-06 and a literal 1e-8
-			// rejects it. M-220.
+			// TO THE TOLERANCE THE SOLVE CAN REACH, WHICH FOLLOWS real_t: in
+			// single the solver stops at its round-off floor
+			// (newtonStoppedAtRoundOff()), and a literal 1e-8 rejects that.
+			// M-220, M-306.
 			row.converged = !solver.newtonResiduals().empty()
 			                && solver.newtonResiduals().back()
 			                   < meq::tests::convergedResidualFloor(

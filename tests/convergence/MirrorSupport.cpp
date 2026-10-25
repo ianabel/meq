@@ -398,8 +398,8 @@ BOOST_AUTO_TEST_CASE( aMirrorsAxisIsOutsideItsBoxAndTheDiagnosticAgrees )
 	solver.setSource( source, innerLabel );
 	solver.setBoundaryData( vacuum );
 	solver.setInitialGuess( vacuum );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-	                         meq::newtonTolerance( 1.0e-14 ), 40 );
+	solver.setNewtonControl( 1.0e-12,
+	                         1.0e-14, 40 );
 	solver.solve();
 
 	double const span = solver.psiAxis() - solver.psiBoundary();
@@ -496,8 +496,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxSeedIsConsumedByOneSolve )
 	solver.setSource( source, innerLabel );
 	solver.setBoundaryData( vacuum );
 	solver.setInitialGuess( vacuum );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-	                         meq::newtonTolerance( 1.0e-14 ), 40 );
+	solver.setNewtonControl( 1.0e-12,
+	                         1.0e-14, 40 );
 	solver.solve();
 	double const firstBoundary = solver.psiBoundary();
 	double const firstLast = solver.newtonResiduals().back();

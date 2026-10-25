@@ -44,6 +44,7 @@
 #include <sys/wait.h>
 
 #include "SourceTree.hpp"
+#include "convergence/RoundOffFloor.hpp"
 
 namespace
 {
@@ -387,9 +388,12 @@ BOOST_AUTO_TEST_CASE( theNetCDFRestartsAtTheAnswer )
 // and takes no step; the second re-decides the support at the answer's labels,
 // where the cold run's last sweep froze it at the sweep before's, so it is a
 // different frozen problem and takes a step or two. It may move psi_ax by no
-// more than the cold run's last sweep did: measured in single, 4.4e-06 against
-// 8.3e-06 (2026.2) and 3.0e-06 against 5.2e-06 (2026.1); in double the last
-// sweep moved no printed digit, and nor does the restart.
+// more than the cold run's last sweep did, or than the 64 eps of |psi_ax| a
+// solve stopped at its round-off floor is worth on this machine, whichever is
+// larger: each sweep is one draw of that floor's noise (M-306), so the last
+// sweep's move alone is a coin toss -- measured in single, the restart moved
+// 3.8e-07 against a last sweep of 8.0e-08 and a 64 eps of 6.3e-07. In double
+// the last sweep moved no printed digit, and nor does the restart.
 BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 {
 	struct Case { char const *example; int most; };
@@ -462,11 +466,13 @@ BOOST_AUTO_TEST_CASE( theRestartCarriesTheWholeState )
 			BOOST_TEST_REQUIRE( !psiAxisValue( warm ).empty() );
 			double const moved = std::abs( std::stod( psiAxisValue( warm ) )
 			                               - std::stod( psiAxisValue( cold ) ) );
-			BOOST_TEST( moved <= sweepMove,
+			double const noise = meq::tests::scalarAgreementFloor(
+				0.0, std::stod( psiAxisValue( cold ) ) );
+			BOOST_TEST( moved <= std::max( sweepMove, noise ),
 			            stem << ": the restart moved psi_ax by " << moved << " ( "
 			            << psiAxisValue( cold ) << " -> " << psiAxisValue( warm )
 			            << " ), more than the cold run's last support sweep did, "
-			            << sweepMove );
+			            << sweepMove << ", and more than 64 eps of it, " << noise );
 		}
 
 		/*

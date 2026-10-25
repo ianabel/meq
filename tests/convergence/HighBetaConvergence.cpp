@@ -605,8 +605,8 @@ BOOST_AUTO_TEST_CASE( theNonLocalTermsAreWhatMakeItConverge )
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), budget );
+		solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, budget );
 		if ( decoupled )
 			solver.setNormalisationCoupling(
 				meq::GradShafranovSolver::Normalisation::Decoupled );
@@ -708,8 +708,8 @@ BOOST_AUTO_TEST_CASE( aBorderedNewtonThatHasStoppedMovingSaysSo )
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), budget );
+		solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, budget );
 		solver.setStallLimit( stallLimit );
 		BOOST_TEST( solver.stallLimit() == stallLimit );
 		if ( decoupled )
@@ -793,8 +793,8 @@ BOOST_AUTO_TEST_CASE( theAxisSensitivityIsLocalToItsElement )
 	solver.setSource( source, estimate );
 	solver.setBoundaryData( zero );
 	solver.setInitialGuess( guess );
-	solver.setNewtonControl( meq::newtonTolerance( 1.0e-10 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+	solver.setNewtonControl( 1.0e-10,
+		                  1.0e-14, 40 );
 	solver.solve();
 
 	mfem::Vector trace( solver.trace() );
@@ -932,8 +932,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		solver.solve();
 
 		double const axis = solver.psiAxis();
@@ -1055,8 +1055,8 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		solver.solve();
 
 		Result out;
@@ -1065,6 +1065,7 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		out.iterations = solver.newtonIterations();
 		out.residual = solver.newtonResiduals().empty()
 		               ? 0.0 : solver.newtonResiduals().back();
+		// The ten-eps gate: under it a single solve is at its round-off floor.
 		out.stop = std::max( meq::newtonTolerance( 1.0e-12 )
 		                     *( solver.newtonResiduals().empty()
 		                        ? 0.0 : solver.newtonResiduals().front() ),
@@ -1127,12 +1128,12 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		 * what stops the iteration converging at all.
 		 *
 		 * **AND IT CAN ONLY BE SEEN ABOVE THE STOPPING THRESHOLD.** In single
-		 * that threshold is ten eps, 1.19e-06, and both columns stop the step
-		 * they cross it, so both finish somewhere below it: 9.4e-07 against
-		 * 2.7e-07 on one MKL and 2.6e-07 against 3.0e-07 on another, the same
-		 * binary. Below the threshold neither number is the column's floor.
-		 * In double the differenced column stops above its threshold, so the
-		 * bound is unchanged there.
+		 * that threshold is the ten-eps gate, 1.19e-06, under which each
+		 * column stops at its round-off floor (M-306): 2.9e-07 against
+		 * 2.9e-07 at n = 8 and 8.6e-07 against 2.7e-07 at n = 16 on one draw.
+		 * Under the gate a stop is the floor's noise and neither number is the
+		 * column's own. In double the differenced column stops above its
+		 * threshold, so the bound is unchanged there.
 		 */
 		BOOST_TEST( analytic.residual
 		                <= std::max( 1.5*differenced.residual, differenced.stop ),
@@ -1238,8 +1239,8 @@ BOOST_AUTO_TEST_CASE( theAnalyticCurrentCornerAgreesWithTheDifferencedOne )
 		solver.setPlasmaCurrent( 0.08 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 60 );
+		solver.setNewtonControl( 1.0e-12,
+		                  1.0e-14, 60 );
 		solver.solve();
 
 		Result out;

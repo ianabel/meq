@@ -310,6 +310,77 @@ namespace meq
 			std::vector<double> ruleWeights;
 	};
 
+	/**
+	 * **THE SOURCE A CONFIGURATION WOULD PUT OUTSIDE `Gamma`**: the integral of
+	 * `| F |/R` over the part of the exterior's support that is connected to
+	 * `Gamma`. MIRROR-PLAN.md MR-0's diagnostic, and the numerator of
+	 * GradShafranovSolver::checkExteriorSource().
+	 *
+	 * WHY IT IS NEEDED. Every mode of ExteriorDtN is current-free, so the DtN
+	 * is exact only where the exterior carries no current. A source is a
+	 * function of the flux, and the flux outside `Gamma` is the expansion's,
+	 * so whether the posed problem wants current out there is a property of
+	 * the ANSWER, and this asks it. `F/R` is `mu_0 j_phi`, so the integral is
+	 * `mu_0` times the toroidal current magnitude, `int | j_phi | dR dz`.
+	 *
+	 * WHY ONLY THE PART CONNECTED TO `Gamma`. A mirror's support is a box in
+	 * `( Psi, z )` with no radial bound, and its labels recur far outside the
+	 * coils: the field lines through the plasma leave by the throats, flare,
+	 * and come back through the midplane tens of metres out (38 to 452 m on
+	 * `examples/mirror-rotating.toml`, MEASUREMENTS.md M-310), where a
+	 * centrifugal density `exp( m Omega^2 R^2/2T )` is not finite. That branch is the far side of the
+	 * expander along the same field lines, which is exactly what the box's
+	 * `|z| <= z_edge` exists to exclude, and it is disconnected from the
+	 * plasma through `|z| <= z_edge`. Inside the mesh MR-1 needs no connected
+	 * component because the box is bounded there; outside it the box is not,
+	 * and the component touching `Gamma` is the plasma continuing past it --
+	 * the current MR-0 measured (MEASUREMENTS.md M-169), and the one the
+	 * truncation misses.
+	 *
+	 * THE QUADRATURE. Cells uniform in `( ln rho, theta )` about the
+	 * semicircle's centre, `theta` in `( 0, pi )` from the `+z` axis, square
+	 * in that metric, 3 x 3 Gauss points each; `dR dz = rho^2 dln( rho )
+	 * dtheta`. A cell belongs to the support when `F` is non-zero at any of
+	 * its points, and the component is a breadth-first fill over the four
+	 * neighbours of each cell, seeded by every member of the ring on `Gamma`.
+	 * The box edges cut cells, so the error is first order in the cell size:
+	 * a diagnostic's accuracy, which is all a threshold needs.
+	 *
+	 * It is MFEM-free like the class above: a flux and a source as functions.
+	 *
+	 * @param psi     the flux at an exterior point `( R, z )`.
+	 * @param source  `F( R, z, psi )`. Zero is "outside the support"; a
+	 *                non-finite value counts as inside and makes the integral
+	 *                infinite.
+	 * @param angularCells  cells across `theta`; also sets the ring width.
+	 * @param radiusRatio   how far out the fill may go, as `rho/rhoGamma`. A
+	 *                component reaching it is reported unbounded.
+	 * @throws std::invalid_argument if @a angularCells is below 4 or
+	 *         @a radiusRatio is not above 1.
+	 */
+	struct ExteriorSupportIntegral
+	{
+		/// `int | F |/R dR dz` over the component, or +infinity when the
+		/// source was not finite somewhere in it.
+		double integral = 0.0;
+		/// Cells in the component, and how many of them touch `Gamma`.
+		int cells = 0;
+		int touching = 0;
+		/// The largest `rho` a member cell reaches.
+		double reach = 0.0;
+		/// False when the component reached `radiusRatio` -- the integral is
+		/// then a lower bound.
+		bool bounded = true;
+		/// False when `F` was not finite at a point of the component.
+		bool finite = true;
+	};
+
+	ExteriorSupportIntegral exteriorSupportIntegral(
+		ExteriorDtN const &exterior,
+		std::function<double( double, double )> const &psi,
+		std::function<double( double, double, double )> const &source,
+		int angularCells = 512, double radiusRatio = 1.0e3 );
+
 }
 
 #endif // MEQ_EXTERIORDTN_HPP

@@ -196,8 +196,10 @@ machine whose flux tube leaves the domain, is run and passed →
 [M-169](MEASUREMENTS.md#m-169). With `Γ` put outside the machine no current lies
 beyond it at any Mach number, and the mode count is measured: the copper, not
 the plasma, sets it, 24 to 32 at `ρ_Γ = 3.0` → [M-260](MEASUREMENTS.md#m-260).
-MR-0's MEQ-side diagnostic, the fraction of the current outside `Γ` reported on
-the answer, is not built.
+MR-0's MEQ-side diagnostic, the fraction of `∫|F|/R` outside `Γ`, is
+`GradShafranovSolver::checkExteriorSource()`, reported on every free-boundary
+mirror answer and exactly zero on both shipped examples →
+[M-310](MEASUREMENTS.md#m-310).
 [M-168](MEASUREMENTS.md#m-168)'s contrary reading measured the current beyond a
 radius inside the machine and is superseded; *an admissibility test is a
 statement about where `Γ` was put, not about the machine*.

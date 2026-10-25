@@ -185,8 +185,8 @@ namespace
 		solver.setSource( source, estimate );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                         meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                         1.0e-14, 40 );
 
 		Solved out;
 		out.converged = true;
@@ -226,8 +226,8 @@ namespace
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                         meq::newtonTolerance( 1.0e-14 ), 40 );
+		solver.setNewtonControl( 1.0e-12,
+		                         1.0e-14, 40 );
 
 		Solved out;
 		out.converged = true;
@@ -414,10 +414,10 @@ namespace
 		                    ? std::numeric_limits<double>::infinity()
 		                    : pinned.residuals.back();
 		//
-		// In single the threshold, meq::newtonTolerance( 1e-14 ) = 1.2e-06, sits
-		// one decade above round-off, so a linear tail and a quadratic one stop
-		// in the same decade -- measured 4.5e-07 and 7.9e-08 on the exact row.
-		// A double-build acceptance; the order above still runs. M-272.
+		// In single the request is out of reach and both rows stop at the
+		// round-off floor (newtonStoppedAtRoundOff(), M-306), where a linear
+		// tail and a quadratic one end alike. A double-build acceptance; the
+		// order above still runs. M-272.
 		if ( meq::tests::newtonOrderCeilingIsMeasurable() )
 			BOOST_TEST( last < 1.0e-14,
 			            name << ", n = " << n << ": the prescribed-point Newton "

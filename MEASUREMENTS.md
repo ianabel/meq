@@ -20090,3 +20090,334 @@ pre-stage's estimate, and the adaptive loop's cycle-to-cycle hand-off. No
 shipped example combines `PlasmaCurrent` with either. `boundaryFluxInitialGiven`
 is never cleared, so every support sweep of a restarted run restarts psi_bnd
 at the file's value.
+
+### M-306
+
+**SINGLE NEWTON'S TEN-EPS STOP WAS A QUADRATIC STEP SHORT OF THE FLOOR ON MOST
+SOLVES, AND THAT WAS XPointBorder's 1.1e-04 GAP: THE BORDERED PICARD ROUTE'S
+WARM SWEEPS WERE EACH ONE PICARD STEP THE NEWTON PHASE NEVER STEPPED FROM. THE
+TWO NEWTON PATHS NOW STOP AT THE RESIDUAL'S ROUND-OFF FLOOR UNDER A TEN-EPS
+GATE. DOUBLE IS UNCHANGED SOLVE FOR SOLVE, SINGLE TAKES 3.8% MORE NEWTON STEPS,
+AND BOTH SUITES ARE 83 OF 84, THE DELIBERATE `PlasmaEdgeConvergence`.**
+
+**Setup.** `a338357` and this change, `builds/sp-floor-{single,double}`,
+`meq-integration` at `f3f4fe1ea7`, MKL 2026.2, ctest's `MKL = 1`, `OMP = 2`.
+A temporary per-solve log, not in the tree: route, iterations, target and the
+residual history of every `solve()`, and a probe that takes three Newton steps
+past convergence to read each solve's floor as the least residual reached
+(`runs/sp-floor`).
+
+**1. The floors are not one number, and ten eps was over most of them.** Over
+the 1185 converged Newton solves of the single suite, inverse best fits left
+out, in eps of absolute residual:
+
+| | 5th pct | median | 95th pct | largest |
+|---|---|---|---|---|
+| floor reached | 0.066 | 0.60 | 4.2 | 17, `VacuumMirror`'s meshed packs, which ask 64 eps themselves (M-294) |
+| the 10 eps stop over that floor, 1106 solves | 1.15 at least | 17 | | quartiles 5.9 and 79 |
+
+`PedestalConvergence` at `k = 1, n = 32`: the stop at 2.26e-07, one more
+step to 8.3e-08, the floor 7.8e-08.
+
+**2. The XPointBorder gap is that stop.** The bordered Newton and bordered
+Picard routes, six support sweeps each, read `psi_ax` 8.266104e-02 and
+8.265200e-02, 1.1e-04 apart:
+
+| | Newton route | Picard route |
+|---|---|---|
+| bootstrap | 11 steps, damped tail to 5.7e-07 under the 1.19e-06 stop; floor 3.3e-08 | 13, of which 8 Picard |
+| each warm sweep | 1 Newton step, 8.3e-03 to 3.8e-08 – 3.4e-07 | **1 Picard step**, 8.3e-03 to 1.1e-07 – 3.3e-07, accepted by the Newton phase with no step |
+| `psi_ax` over sweeps 1–5 | 8.266079 – 8.266148e-02 | 8.265312 – 8.265200e-02, still at the bootstrap support's |
+
+The case's comment blamed `picardTolerance()`: **falsified**, that tolerance
+is the unbordered KINSOL fixed point's and the bordered Picard phase never
+reads it. Three Newton steps past each stop bring the routes to 8.6e-07. With
+the floor stop, over five thread draws: `psi_ax` 5.5e-07 to 4.4e-06 relative
+apart, `psi_bnd` 3.4e-06 to 7.1e-06, X-point to 2.3e-06 m on 1.09; each
+route's own sweep-to-sweep jitter on one support is up to 3.8e-07 absolute on
+`psi_ax` and 3.4e-07 on `psi_bnd`. The case now asserts four times the larger
+jitter in single and the historical 1e-9 in double.
+
+**3. Four stops, measured and refused.**
+
+| stop | what it did |
+|---|---|
+| `c eps max( ||u||_inf, ||r_cold|| )` | the floor spreads 0.016 to 13 of it: at c = 8, 15 solves within 2 of their floor and 418 of 1185 looser than ten eps |
+| `4 ||F( u (1 + eps xi) ) - F( u )||` alone, field and labels | the floor is 0.38 to 2.4 of it on smooth tokamak sources and 4.3 on `PlasmaConnectivity`; 3 to 12 on the rotating mirror with the labels perturbed, 1e4 without; orders UNDER it where an ulp moves a quadrature point across the plasma edge: in double a free-boundary solve stopped at 2.3e-06 after 3 steps where it reaches 2.6e-14 in 5. 22 single cases red besides `PlasmaEdgeConvergence`, 4 double |
+| a step that fails to halve the residual, alone, under the gate | right everywhere and an affine solve takes 3 steps where 1 reaches the floor: `NewtonConvergence`, `ExtensionConvergence`, `MillerConvergence` and two `FreeBoundaryCoupling` cases red on their counts |
+| the same, with a Newton phase handed an iterate by a Picard phase treated as a fresh start | the 1.1e-04 back: every warm sweep accepted its Picard step |
+
+**What runs**: under `max( 10 eps, 10 eps x reference )`, the request floored
+by `meq::newtonTolerance()`, converged at the first of: within `4 f` of the
+one-ulp measure, a step that fails to halve the residual, the budget spent; a
+solve that starts under the gate takes no step. The ulp measure is taken only
+under the gate after a step, one or two residual evaluations a solve. Of the
+single suite's 1169 floor stops, 919 are within `4 f`, 226 a failing step
+(192 of them the rotating mirror's) and 24 start under the gate.
+
+**4. Inventories.**
+
+| | single | double |
+|---|---|---|
+| before, `builds/single` and `builds/double` at `a338357` | 83/84, `PlasmaEdgeConvergence` | 83/84, `PlasmaEdgeConvergence` |
+| after, clean build | 83/84, `PlasmaEdgeConvergence` | 83/84, `PlasmaEdgeConvergence` |
+
+**Double is unchanged solve for solve**: every iteration count and final
+residual of the logged double suite matches the unmodified tree's to ten
+digits, but for the cuDSS arms, which differ between two runs of the same
+binary as M-228 records.
+
+**5. Newton steps in single**, every logged solve, before against after:
+
+| test | solves | before | after | |
+|---|---|---|---|---|
+| `RotatingMirror` border / midplane / resolution / route / solve | 178 | 318 | 478 | +50% |
+| `RotatingMirror` vacuum_gauge | 58 | 173 | 227 | +31% |
+| `RotatingNormalisedConvergence` | 6 | 24 | 30 | +25% |
+| `ConductorSubtraction` | 34 | 40 | 44 | +10% |
+| `SolovievGeometryConvergence` | 39 | 71 | 78 | +10% |
+| `PlasmaConnectivity` | 19 | 98 | 106 | +8% |
+| `HighBetaConvergence`, `XPointBorder`, `XPointOuter`, the driver's runs | 268 | 1206 | 1268 | +5.1% |
+| the other 25 tests | 650 | 6618 | 6643 | +0.4% |
+| **the suite** | 1252 | **8548** | **8874** | **+3.8%** |
+
+No solve that converged before fails now and none newly throws; the longest
+crawl rises only on `vacuum_gauge`'s deliberately non-converging plateau at
+1.6e-05, which fails at the cap as before.
+
+**6. What the tests assert instead.** `aboveTheFloor()` drops a history's
+floor residuals before an order is read on it (a ten per cent wrong Jacobian
+reads 0.61 on the floor-landing triple and 0.51 above it; a quadratic tail
+0.36 and 1.98). The driver's capped mirror is capped one below the first step
+that reached the stop. Route agreements on XPointBorder's machine are bounded
+by four times each route's own sweep jitter in single. The diverted restart in
+`OutputConversion` may move `psi_ax` by the larger of the cold run's last
+sweep and 64 eps of `psi_ax`: measured 3.8e-07 against a last sweep of
+8.0e-08 and 6.3e-07. Mutation: the ten-eps stop restored, or the Picard
+hand-off exempted, takes XPointBorder's route case red at 1.1e-04; the
+floor-trimming removed takes `RotatingNormalisedConvergence`, the mirror's
+wrong-Jacobian control and its vacuum gauge red; the cap left at the stop
+step takes the capped mirror red.
+
+**Open.** The inverse best fit's stationarity stop has no failing step to
+read and stays at the gate. Where the source jumps at the plasma edge the ulp
+measure is inflated and the direct stop falls back to the gate; how often in
+single is not recorded. The mirror's source rounds 3 to 12 times over the ulp
+measure and stops one step late. A floor above the gate, the meshed-pack
+mirror's, is not seen. KINSOL and the Picard fixed point keep ten eps.
+
+**Reproduce.** `runs/sp-floor/tools/{steps,floors,est2,choose}.py` over the
+logs in `runs/sp-floor`. The instrument is a temporary patch to `solve()`
+that appends one line a solve to `$MEQ_NEWTON_LOG`, and is not in the tree;
+it is kept as `runs/sp-floor/tools/newtonprobe-full.patch`.
+
+### M-308a
+
+**AN EXCEPTION FROM THE q-DRIVEN MAP NO LONGER CROSSES KINSOL'S C FRAMES. EACH
+CALLBACK CATCHES IT AND HANDS KINSOL ITS UNRECOVERABLE FLAG, AND THE LOOP COMES
+BACK NOT CONVERGED WITH THE MAP'S OWN MESSAGE.**
+
+`meq-integration` at `f3f4fe1ea7`, SUNDIALS 7.5.0. `solveForToroidalField()`
+drives KINSOL through four callbacks: the residual, the Jacobian's setup, the
+Newton system's solve and the Jacobian-vector product. Each can throw: the map
+itself, a map that returns a different number of coefficients (an
+`std::invalid_argument` from the residual), or an `MFEM_VERIFY`. An exception
+unwinding through KINSOL's frames is undefined behaviour; it worked only
+because GCC emits unwind tables for C. `OuterKINSolver::guardTheCallbacks()`
+now replaces MFEM's three callbacks with guards that call them, and the
+product carries the same guard. A guard records the first message and returns
+−1, so KINSOL stops at once with `KIN_SYSFUNC_FAIL`, `KIN_LSETUP_FAIL` or
+`KIN_LSOLVE_FAIL`. The map's evaluations ahead of KINSOL, at the start and the
+starting Jacobian, are reported the same way. So wherever the map fails, the
+result has `converged` false, `coefficients` at the last accepted point,
+`finalResidual` that point's residual (NaN if it was never evaluated), and the
+message in `status`. The driver's `ToroidalLoopFailed` (exit 2) carries that
+status.
+
+`a_map_that_throws_ends_the_loop_and_is_reported` (`SafetyFactorSolver`) uses
+the three-coefficient smooth map and fails it on a chosen evaluation:
+
+| fails at evaluation | where | KINSOL iterations | reported residual |
+|---|---|---|---|
+| 1 | the starting coefficients, ahead of KINSOL | 0 | NaN |
+| 8 | KINSOL's residual, the first line-search trial | 1 | 1.33168, the start's |
+| 10 | KINSOL's Jacobian setup at the first accepted iterate | 2 | 0.237716 |
+| 8, wrong length | KINSOL's residual | 1 | 1.33168 |
+
+In every row the map is called exactly as many times as the evaluation that
+failed, so KINSOL went no further. **Mutations, each red:** without
+`guardTheCallbacks()` the exception leaves `solveForToroidalField`. With the
+failure branch skipped, the status lacks the message and the place it failed.
+With the catch rethrowing, the run aborts in `std::terminate`. The `ragged`
+case of `an_undetermined_outer_jacobian_is_refused` now asserts the report
+rather than a throw.
+
+### M-308b
+
+**`SafetyFactorSolver`'s MAP STEPS WHERE ONE NODE OF ITS INNERMOST SURFACE
+CROSSES AN ELEMENT FACE. THE STEP IS THE DG JUMP OF `ψ*` AND `q*` THERE, NOT A
+CHOICE THE EXTRACTION MAKES, AND NOT THE SOLVE. A DIFFERENCE STEP OF
+`floor^(1/3)` STRADDLES IT, AND SO DOES EVERY STEP FROM 1e-3 TO 3e-2.**
+
+Double, `meq-integration` at `f3f4fe1ea7`, `OMP = 2`, `MKL = 1`. The map is
+`theLoopRecoversTheFieldItsTargetWasBuiltFrom`'s: n = 24, k = 2, 12 surfaces
+and 96 angles, each solve warm-started from the start's equilibrium. It was
+evaluated directly by a scratch harness built against the tree, swept along
+`c₁`, and run inside `solveForToroidalField` at six difference steps.
+
+**Where the step is.** At the loop's fourth iterate at a step of 4.4e-4, every
+backward `c₁` column disagrees with its forward one: −0.938 against −0.962 in
+row 1, and 0.147 against 0.176 in row 2. A sweep down from that iterate finds a
+step between offsets −5.50e-4 and −5.45e-4, which is `c₁ ≈ 2.41912`, 5.3e-4
+below the root's 2.42. An 11-point sweep over that 5e-5 puts the whole step in
+one 5e-6 interval, with no flat:
+
+| quantity across the step | step | smooth change over the interval |
+|---|---|---|
+| residual, `r₀ r₁ r₂` | −3.3e-6, +2.57e-5, −3.15e-5 | +7.5e-6, −4.8e-6, +8.8e-7 |
+| innermost surface `V′` | +1.9e-5 (1.1e-6 relative) | −1.0e-5 |
+| surfaces 1 to 11 `V′` | none | |
+| node 62 of the innermost surface | moves 1.8e-07 outward along its ray | 4.5e-9 radially |
+| every other node | none: within 2.2e-8 of the median move over a 5e-5 interval | |
+
+Node 62 is at (0.96999, −0.09501), on the diagonal of a mesh cell, and its ray
+runs 4° off that face. At the face, `ψ*` jumps by 5.2e-08 between
+elements 502 and 503, and `|R q*|` by 8.2e-05 relative. 5.2e-08 over
+`|∇ψ| = 0.326` is the node's 1.8e-07 along the ray. The node's weight
+`2πR|dx/dθ|/(R|q*|)` takes the other element's flux. That changes it by about
+1e-4 relative, against 2e-6 from the node's move, so the step in `V′` is the
+flux's jump and not the root's. `ψ*` rises across that face going outward, so
+the two elements' arcs overlap and the ray has two roots in a band. The node
+stays on the inner arc until it leaves, and then lands on the outer one, which
+is the jump. Where the arcs leave a gap instead, the root waits at the face,
+`stalledRays` counts it, and the map has a kink of the same height.
+
+**Falsified:**
+- **The solve.** Across the step `ψ_ax` and the located axis's `R` move by
+  their smooth 2.28e-7 and 2.2e-8 an interval. The inner Newton takes 5 iterations
+  on both sides and ends at 7.2e-14 on both.
+- **The extraction's axis.** `findAxis()` keeps element 554 and moves
+  smoothly.
+- **A stalled ray or a point-location fallback.** Both are 0 on the innermost
+  surface on both sides of the step.
+- **The inner Newton's count.** The 4-against-3 pairs in the 4.4e-4 loop are
+  the first iterate's `c₁` and `c₂` columns. Those are symmetric to 1e-5
+  (−0.92870 against −0.92871). The straddled columns, at iterates 4 to 8,
+  have 5 inner iterations on each side.
+- **The map near the start and near the root upward.** 16 points over
+  `c₁ + [0, 3e-3]` at the start and 28 over `c₁ + [0, 2.7e-3]` at the root
+  have second differences at the print's 1e-7 and at 2e-10.
+
+**The outer loop at six steps**, relative to each coefficient, asked for 1e-8:
+
+| difference step | iterations | equilibria | final ‖F‖∞ | contraction, last steps |
+|---|---|---|---|---|
+| **1e-4 (shipped)** | **4** | **29** | 1.6e-09 | 0.06, then 5e-5 |
+| 4.4e-4 (`floor^(1/3)`) | 8 | 57 | 6.9e-09 | 0.186 ×5 |
+| 1e-3 | 7 | 50 | 1.0e-09 | 0.13, 0.074 ×3 |
+| 3e-3 | 5 | 36 | 5.4e-10 | 0.002, 0.009, 0.038 |
+| 1e-2 | 5 | 36 | 7.7e-09 | 0.056, 0.023, 0.012 |
+| 3e-2 | 4 | 29 | 3.7e-10 | 0.011, 0.018 |
+
+**So `floor^(1/3)` cannot be restored, and no step fixes this.** A central
+difference that straddles a step of height `H` is off by `H/(2s)`. At 4.4e-4
+that is 1.2% in the `(1, 1)` entry. The step lies within 1.06e-3 of the root,
+so every Jacobian near the root straddles it, and the loop is linear at 0.19.
+The shipped 1e-4 reaches ±2.4e-4 on `c₁` and misses it, so the finish is
+quadratic. That is where the face happens to be, not a property of the step:
+a straddle at 1e-4 would cost four times as much. Steps of 3e-3 to 3e-2 average
+over many crossings and are linear at 0.01 to 0.04. The map's floor does not
+see any of this, and should not: each residual is right to 3.2e-10, and only
+the difference across a step is wrong. The cure would be an extraction from a
+field that is continuous across faces; TODO keeps it as "the q-driven map is piecewise smooth".
+`theLoopRecoversTheFieldItsTargetWasBuiltFrom` now bounds the iterations at 5.
+Mutation: at a step of 4.4e-4 it reads 8 and is red.
+
+### M-310
+
+**MR-0'S DIAGNOSTIC: THE FRACTION OF `∫|F|/R` A MIRROR'S ANSWER PUTS BEYOND
+`Γ`. BOTH SHIPPED MIRRORS READ EXACTLY ZERO; A BOX OPENED PAST `Γ` READS AN
+INDEPENDENT QUADRATURE'S FRACTION TO 1e-04 OF IT; THE WARNING SITS AT 1e-4.**
+`GradShafranovSolver::checkExteriorSource()`, `meq::exteriorSupportIntegral()`;
+`tests/unit/ExteriorDtNTests.cpp` and `RotatingMirror`'s
+`theSourceOutsideGammaIsReportedOnTheAnswer`.
+
+**The definition.** `fraction = outside/( inside + outside )`, each
+`∫|F_plasma|/R dR dz` (`μ₀ ∫|j_φ|`). `inside` is over `D_h` on the source's own
+quadrature rule and the total flux, as the plasma-current integral takes it.
+`outside` evaluates `scaledF()` on the exterior flux, `Σ a_n (ρ/ρ_Γ)^(1−n) C_n`
+plus FB-7's exterior coils, over the part of the exterior support **connected
+to `Γ`**: a breadth-first fill over cells uniform in `(ln ρ, θ)`, 3 × 3 Gauss
+points each, seeded by the ring on `Γ`, out to `10³ ρ_Γ`. The band between
+`Γ_h` and `Γ` is in neither.
+
+**Why connected.** On `examples/mirror-rotating.toml`'s converged answer
+(k = 2, level 0, N = 32) the labels recur on the midplane from **R = 38.4 to
+452 m** — the field lines through the plasma returning outside the coils, the far
+side of the expander — and the rotating source is **not finite** there. The box
+`|z| ≤ z_edge` has no radial bound off the mesh; this branch is disconnected from
+`Γ` through `|z| ≤ z_edge`, and the fill does not reach it.
+
+**The closed form**, `ψ = R²`, `F = R²` on `0.5 < R < 1.2`, `|z| ≤ 0.5`, `Γ` of
+radius 1 about `(0, c)`; reference good to 2.3e-10:
+
+| `c` | cells 128 | 256 | 512 | 1024 |
+|---|---|---|---|---|
+| 0.0 | 4.49e-04 | 3.80e-04 | 2.27e-04 | 1.16e-04 |
+| 0.2 | 1.48e-04 | 3.99e-06 | 4.20e-04 | 7.52e-05 |
+
+First order and not monotone — the box's edges cut cells, a sum of edge terms of
+either sign — and below `0.25/cells` at every count, which is what is asserted.
+A detached shell at `2 < R < 2.5` changes the integral by exactly nothing; joined
+to the near one it is counted, within 3e-3 of its closed form.
+
+**On the solved mirror**, against a Cartesian midpoint sum of the same state
+(code-0 points of `meq::PointLocator` plus `ψ_c` inside, the expansion outside):
+
+| `z_edge` | cells | inside | reference | outside | reference | fraction | reference |
+|---|---|---|---|---|---|---|---|
+| 1.5 (shipped) | 512 | 5.039845e-02 | 5.033746e-02 | **0** | 0 | **0** | 0 |
+| 3.3 (opened past `Γ`) | 512 | 1.279433e-01 | 1.275181e-01 | 4.279023e+00 | 4.273700e+00 | 9.710e-01 | 9.710e-01 |
+| 3.3 | 2048 | 1.279433e-01 | 1.275181e-01 | 4.273638e+00 | 4.273700e+00 | 9.709e-01 | 9.710e-01 |
+
+The reference converges: its `inside` moves 1.1e-05, 3.3e-06, 1.2e-06 over
+`h = 0.01 … 0.00125` on the shipped box. **The 1.3e-03 and 3.3e-03 left in
+`inside` are the source rule's own quadrature error on this mesh**: ten rule
+orders more (`ψ_c` then exact at the new points) take them to 4.8e-04 and
+4.4e-04. So `inside` is the integral the solve assembles, not the continuum's,
+and the case bounds it at 5e-3. `outside` is 1.2e-03 off at 512 cells and
+1.5e-05 at 2048; the fraction, 0.970969 and 0.970932 against 0.971027, is
+6.0e-05 and 9.8e-05 off, `inside`'s rule error carried through.
+
+**In single** the same rows read `inside` 5.039846e-02 and 1.279435e-01,
+`outside` 4.279075e+00 and 4.273691e+00 against references 4.273753e+00, the
+fractions printing identically, and the shipped box exactly zero; the unit
+table is bit-identical, being double throughout.
+
+**`examples/mirror-three-species.toml`** reads fraction 0 through the driver too,
+asserted in `theNcCarriesTheTrueMidplaneAndItPosesThePlasmaAgain`.
+
+**The threshold, 1e-4, from [M-169](#m-169).** Irreducible relative L2 on `Γ`
+over the outside fraction, at `ρ_Γ = 1.2`:
+
+| `M` | outside fraction | irreducible | ratio |
+|---|---|---|---|
+| 2.0 | 7.09e-02 | 2.09e-02 | 0.295 |
+| 4.0 | 1.41e-02 | 2.77e-03 | 0.196 |
+| 6.0 | 7.53e-04 | 1.70e-04 | 0.226 |
+
+MR-0's `N = 32` leaves 2.65e-05 at `ρ_Γ = 1.7`, `M = 2`, the worst Mach number
+tabulated; `0.3 × 1e-4 = 3e-05` is that. Above it the current beyond `Γ` costs at
+least what the mode count was chosen to leave. Three Mach numbers at one cutting
+radius on one machine: the ratio is measured there and nowhere else.
+
+**Mutations**, each red: the `ρ²` of the area element dropped (9 failures in the
+unit suite); the centre dropped from `z` (4); the fill flooding past the support
+(11 in the unit suite, 11 on the mirror); the unbounded flag never set (1); the
+exterior coefficients zeroed (8); `ψ_c` dropped from `inside` (4); the fraction
+taken over `inside` alone (2); the driver warning on every run (1); the `.nc`'s
+`source_outside_gamma` written from `inside` (1). `z = z_c − ρ cos θ` in place of
+`+` is an equivalent mutant: `θ` spans `(0, π)`, so it samples the same set.
+
+**Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./ExteriorDtNTests`
+and `./RotatingMirror --run_test=solve/theSourceOutsideGammaIsReportedOnTheAnswer`.

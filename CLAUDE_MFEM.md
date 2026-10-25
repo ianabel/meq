@@ -230,9 +230,15 @@ the solver gets slower.
 whole point. It is what found `memory-manager-registration-refcount`, and it
 finds `transformback-single-tolerance` and `densematrixsvd-ldvt` (merges 15 and
 16), which are merged under their local names and which an `hdgdev/`-anchored
-pattern misses. It also shows one merge of `origin/master` itself, which is the
-trunk and no branch of the table. Match every form, over the merges this branch
-made rather than MFEM's whole history:
+pattern misses. It also shows one merge of `origin/master` itself
+(`463593cbb3`, master at `45799ebea8`), which is the trunk and no branch of the
+table, and **the recipe needs no step for it**: it brought two files MEQ never
+builds, `.github/workflows/builds-and-tests.yml` and
+`miniapps/nurbs/makefile`, and that master commit is an ancestor of merges 11,
+13, 14, 15 and 16, so re-creating the branch from the recipe contains it.
+`git merge-base --is-ancestor 45799ebea8 meq-integration` is the check if the
+recipe changes. Match every form, over the merges this branch made rather
+than MFEM's whole history:
 
 ```sh
 git -C ../../mfem/mfem-src log --first-parent --merges --format=%s \
@@ -432,6 +438,7 @@ is not.
 
 | | |
 |---|---|
+| **A per-element correction to the local gradient before it is factored, on the batched `NPCGradient()` route** | Asked 2026-10-22, `../../mfem-hdg-dev/doc/HDG-NPC-GRADIENT-ELEMENT-CORRECTION-FROM-MEQ.md`. MEQ's border fold (`GradShafranovSolver::setBorderFolding()`, [M-303](MEASUREMENTS.md#m-303)) adds `kappa b_p^T` into one row of one element's potential-potential block; on the element loop it rides on `SourceIntegrator::AssembleElementGrad()`, but `NonlinearGradientBatched( g )` assembles and factors in one call, so the fold is skipped under a Device and single on a card keeps the stall. Asked for: a correction list (or a per-element callback, or the blocks exposed before factoring), in force for one call and bit-identical when empty. **Landed means a symbol in `../../mfem/install/include`**; the acceptance is `PlasmaConnectivity`'s confined control under `--device cuda` in single reaching about 8e-08 in three steps |
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | ~~**`DarcyNPCSolver::ArrayMult()`'s per-column staging**~~ | **CLOSED.** MEQ measured it as the NPC leg less upstream's two halves, 32 ms a call at every thread count ([M-301](MEASUREMENTS.md#m-301)). Upstream timed it (`DarcyNPCSolver::GetStagingTime()`, which `--profile` prints) and replaced the copies with views of the caller's columns, at `f3f4fe1ea7`. It is now about 7 ms a call, the three timers close the leg, and the leg at eight threads on TCV is 44% shorter. The views give the same answer on a real card ([M-304](MEASUREMENTS.md#m-304)). The refinement cap is MEQ's `--trace-refinement-cap`, 0 by default, and the colour-free reduce was not wanted |
 | **`SetIntegratorsThreadSafe()`'s SCOPE, which is the durable half and is now upstream's doxygen** | **CLOSED.** MEQ reported that `mfem::NormalTraceJumpIntegrator` carries `Vector face_shape, normal, shape1_n, shape2_n` and two `DenseMatrix` unguarded (`fem/bilininteg.hpp:4872`), that MEQ installs exactly one as the object handed to `EnableHybridization()`, and that `DarcyForm::ReconstructFluxAndPot()` takes it per face inside its element loop. **Guarded upstream, on the trunk**, so all five branches take it. The class layout moves in a `MFEM_THREAD_SAFE` build, so it needs a clean MFEM rebuild, and the `f3f4fe1ea7` installs are that rebuild, verified (*Both installs are current*); the installed `bilininteg.hpp` carries the guard. **MEQ's report overstated one thing and the correction is the tense**: it said the class is reached by "the loop you are threading", and there is no such loop — `darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly and both reconstruction entry points are serial. MEQ inferred that from being told the work was in progress and wrote the inference as an observation. What upstream took as the real defect was **theirs and not the class**: `SetIntegratorsThreadSafe()` made a promise whose scope was written down nowhere, so threading one more loop silently widens what a caller who set it months earlier has undertaken. Its doxygen now says the promise is about **every integrator installed on the hybridization** rather than about whichever loops happen to be threaded |

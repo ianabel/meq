@@ -493,19 +493,25 @@ decides how MR-4 writes them, and how geq's profiles are transferred.
 
 Each ends at a measured acceptance, not at "it runs".
 
-### MR-0 — pick `ρ_Γ` and `N`, and keep the diagnostic — DONE BUT FOR THE DIAGNOSTIC
+### MR-0 — pick `ρ_Γ` and `N`, and keep the diagnostic — DONE
 
-**THE CHOICE IS DONE AND THE DIAGNOSTIC IS NOT BUILT.** `ρ_Γ = 3.0` with
-`N = 32` is measured and on the plateau, the copper setting `N`
-([M-169](MEASUREMENTS.md#m-169), [M-260](MEASUREMENTS.md#m-260)). No code
-reports the fraction of `∫|F|/R` outside `Γ`: nothing in `src/meq` or
-`apps/meq.cpp` computes it, and no measurement reads it on a MEQ answer. The
-nearest instrument is MR-1's `GradShafranovSolver::checkAxialCutoff()`, which
-reports the current density reached at `|z| = z_edge`, a different quantity;
-under the box support `F` is zero beyond the cutoff by construction. So of the
-acceptance below, the mode-count sweep is M-260's on MEQ's own vacuum solve,
-where the copper rather than the plasma sets the trend, and the diagnostic's
-half is not met.
+**DONE**, → [M-310](MEASUREMENTS.md#m-310). `ρ_Γ = 3.0` with `N = 32` is
+measured and on the plateau, the copper setting `N`
+([M-169](MEASUREMENTS.md#m-169), [M-260](MEASUREMENTS.md#m-260)).
+`GradShafranovSolver::checkExteriorSource()` is the diagnostic: on a box support
+with an exterior coupling it evaluates the plasma source on the exterior
+expansion's flux and reports `∫|F|/R` over `D_h`, over the exterior support
+**connected to `Γ`** (`meq::exteriorSupportIntegral()`, a fill over cells in
+`(ln ρ, θ)`), and the fraction outside. Connected, because the box has no
+radial bound off the mesh and the labels recur on the midplane 38 to 452 m out,
+the far side of the expander, where the centrifugal source is not finite. The
+driver prints it, writes `source_outside_gamma_fraction` into the `.nc`, and
+warns above `1e-4`, derived from M-169 (`ExteriorSourceCheck::warningFraction`).
+Both shipped mirrors read **exactly zero**, against the acceptance's `1e-3`; a
+box opened past `Γ` reads an independent quadrature's fraction to 1e-04 of it,
+and the exterior integral matches a closed form to `0.25/cells`. The mode-count
+half of the acceptance is M-260's sweep on MEQ's own vacuum solve, where the
+copper rather than the plasma sets the trend.
 
 **THIS STAGE WAS THE CAMPAIGN'S FALSIFYING EXPERIMENT AND
 [M-169](MEASUREMENTS.md#m-169) HAS RUN IT.** The exterior is admissible at every

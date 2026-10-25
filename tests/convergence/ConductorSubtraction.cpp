@@ -391,8 +391,8 @@ BOOST_AUTO_TEST_CASE( thePicardPathsFreezeTheSourceAtTheTotalFlux )
 		solver.setConductorField( conductors );
 		solver.setGlobalisation( globalisation );
 		solver.setPicardDamping( damping );
-		solver.setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                         meq::newtonTolerance( 1.0e-15 ), 500 );
+		solver.setNewtonControl( 1.0e-12,
+		                         1.0e-15, 500 );
 		solver.solve();
 		return std::make_unique<mfem::GridFunction>( solver.potential() );
 	};

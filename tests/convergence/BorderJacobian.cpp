@@ -137,8 +137,8 @@ namespace
 		m->solver->setSource( *m->source, 0.30 );
 		m->solver->setBoundaryData( *m->zero );
 		m->solver->setInitialGuess( *m->guess );
-		m->solver->setNewtonControl( meq::newtonTolerance( 1.0e-12 ),
-		                  meq::newtonTolerance( 1.0e-14 ), 40 );
+		m->solver->setNewtonControl( 1.0e-12,
+		                  1.0e-14, 40 );
 		try
 		{
 			m->solver->solve();

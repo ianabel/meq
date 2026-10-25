@@ -341,7 +341,12 @@ makes the failure reachable on purpose; `aQDrivenRunWhoseOuterLoopFailsExitsTwo`
 rethrown as `ToroidalLoopFailed`: reaching the ladder as anything else gave it
 the rung — measured with an `MFEM_VERIFY` inside the outer Newton's KINSOL setup,
 the run went on to *"converged in 4 Newton iterations (via
-bordered-picard-then-newton)"* and wrote `q-driven.nc`, exit 0, the loop never having run. **And
+bordered-picard-then-newton)"* and wrote `q-driven.nc`, exit 0, the loop never having run.
+**A throw from the map itself never leaves `solveForToroidalField`**: KINSOL is
+C, so each callback catches, hands KINSOL its unrecoverable flag, and the loop
+comes back not converged with the map's message in its status, which the
+`ToroidalLoopFailed` message then carries
+(→ **[M-308a](MEASUREMENTS.md#m-308a)**). **And
 "converged" is the residual at the answer against `max( tolerance, floor )`**, the
 floor being the map's own (`meq::toroidalMapFloor()`, from the inner
 `NewtonRelativeTolerance`); a stop above it exits 2 whatever KINSOL's flag says.
