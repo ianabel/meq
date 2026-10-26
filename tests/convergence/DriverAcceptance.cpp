@@ -5639,32 +5639,11 @@ BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
 		"it; a sum that has moved is a share applied to the wrong count." );
 }
 
-/*
- * THE RETRY RUNG CLOSES WHAT IT WAS BUILT FOR, AND THE ANSWER IS THE
- * REFERENCE'S. BS-5, MEASUREMENTS.md M-247 and M-248.
- *
- * Two shipped machine files from cold, through the wrapper, each failing its
- * first attempt in one of the two ways the rung is reached:
- *
- *   E, diamagnetic   the bordered Newton FAILS -- its X-point leaves its
- *                    seed in one step and flips sign -- and the retry, with
- *                    the X-point held within 0.05 of Gamma's radius of the
- *                    seed, converges to 9.1e-04 of the reference
- *   A, classic       the bordered Newton CONVERGES, to an annulus with no
- *                    interior extremum and its X-point 1.1 m from its seed;
- *                    the driver reads that as a failure, and the retry finds
- *                    an axis 2.9 cm from the reference's
- *
- * ASSERTED ON THE ANSWER, against freegs4e's reference out of each file's
- * header, and on the rung having run: a case that only asked "did it exit 0"
- * passed on machine A before any of this existed, reporting an equilibrium
- * with no axis. The tolerances are about four times the measured errors, and
- * A's is the looser because its reference was made by an inverse solve that
- * MEQ's forward one is not (M-112's mode mismatch).
- */
-BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
+namespace
 {
-	struct Case
+	/// One shipped machine file from cold through the wrapper, and its answer
+	/// against freegs4e's reference out of the file's header.
+	struct ColdCase
 	{
 		char const *stem;
 		double psiAxis;
@@ -5673,10 +5652,10 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 		double relative;
 		double distance;
 	};
-	for ( Case const &c : { Case{ "machine-e-diamagnetic", 8.376562158930125e-02,
-	                              1.335940, 0.0, 2.0e-03, 5.0e-03 },
-	                        Case{ "machine-a-testtokamak", 8.271751444840184e-02,
-	                              1.351273, 0.062226, 1.0e-01, 1.2e-01 } } )
+
+	/// Runs it, asserts the answer and the settled support, and returns the
+	/// wrapper's stdout for the caller's assertion on the route.
+	std::string runColdCase( ColdCase const &c )
 	{
 		std::string const config = sourcePath( std::string( "examples/" ) + c.stem + ".toml" );
 		int status = -1;
@@ -5686,10 +5665,6 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 		                    "the wrapper exited " << status << " on " << config
 		                    << ". captureStdout() discards stderr, so re-run it by "
 		                    "hand for the diagnosis. Its stdout was:\n" << log );
-		BOOST_TEST( log.find( "the retry holds the X-point" ) != std::string::npos,
-		            config << " converged without the retry rung, so this case is "
-		            "no longer testing it -- the first attempt has started to succeed, "
-		            "which is news worth a measurement before this case is changed" );
 
 		std::string const header = ncdumpHeader( std::string( c.stem ) + ".nc" );
 		BOOST_TEST_REQUIRE( !header.empty(), c.stem << ".nc is unreadable" );
@@ -5706,8 +5681,8 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 		BOOST_TEST( distance < c.distance );
 
 		/*
-		 * AND THE RETRY'S SUPPORT IS SWEPT LIKE THE FIRST ATTEMPT'S. Both
-		 * files ask for PlasmaSupportSweeps, and a rung that solves once
+		 * AND THE SUPPORT IS SWEPT TO A SETTLED ANSWER, on either route. Both
+		 * files ask for PlasmaSupportSweeps, and a retry rung that solves once
 		 * reports the support frozen from the COLD guess -- every row met, and
 		 * on F shaped 8e-03 from the settled answer in the free currents at
 		 * every rung of the inverse race. It wrote no sweep count at all,
@@ -5716,14 +5691,83 @@ BOOST_AUTO_TEST_CASE( theRetryRungClosesAnExcursionAndAnAnnulus )
 		double const sweeps = headerAttribute( header, "plasma_support_sweeps" );
 		double const settled = headerAttribute( header, "plasma_support_settled" );
 		BOOST_TEST( std::isfinite( sweeps ),
-			c.stem << " ran the retry rung and reported no support loop: the "
-			"rung solved once on the support frozen from the cold guess and "
-			"never re-decided it, so the answer is not the configured problem's. "
-			"runSolveWithSupportLoop( true ) in apps/meq.cpp is the route" );
+			c.stem << " reported no support loop: the solve ran once on the "
+			"support frozen from the cold guess and never re-decided it, so the "
+			"answer is not the configured problem's. runSolveWithSupportLoop() in "
+			"apps/meq.cpp is the route" );
 		BOOST_TEST( settled == 1.0,
-			c.stem << "'s support did not settle after the retry rung, in "
-			<< sweeps << " sweeps" );
+			c.stem << "'s support did not settle, in " << sweeps << " sweeps" );
+		return log;
 	}
+}
+
+/*
+ * A AND E FIND THE REFERENCE'S AXIS FROM COLD ON THE FIRST ATTEMPT.
+ *
+ * Both used to need the retry rung (M-247, M-248), and both for the same
+ * reason, which was not the one recorded there: the first support sweep's
+ * fill was seeded at a coil's O-point. No axis has been located before the
+ * first solve, so refreshPlasmaComponent() picked the largest Psi off the
+ * conductors, and a coil carrying current of the plasma's sign wins that. E's
+ * first attempt then carried its X-point off its seed in one step; A's
+ * converged to an annulus with no interior extremum. Seeded at the local
+ * maximum nearest Psi = 1 -- the extremum the normalisation is anchored to --
+ * both converge without the rung, to the answer the rung used to give, to
+ * every printed digit, in a fifth of the time (MEASUREMENTS.md M-313).
+ *
+ * ASSERTED ON THE ANSWER, against freegs4e's reference out of each file's
+ * header, and on the rung NOT having run. The tolerances are about four times
+ * the measured errors, and A's is the looser because its reference was made by
+ * an inverse solve that MEQ's forward one is not (M-112's mode mismatch).
+ */
+BOOST_AUTO_TEST_CASE( theColdStartFindsTheAxisWithoutTheRetryRung )
+{
+	for ( ColdCase const &c : { ColdCase{ "machine-e-diamagnetic", 8.376562158930125e-02,
+	                                      1.335940, 0.0, 2.0e-03, 5.0e-03 },
+	                            ColdCase{ "machine-a-testtokamak", 8.271751444840184e-02,
+	                                      1.351273, 0.062226, 1.0e-01, 1.2e-01 } } )
+	{
+		std::string const log = runColdCase( c );
+		BOOST_TEST( log.find( "the retry holds the X-point" ) == std::string::npos,
+		            c.stem << " needed the retry rung from cold. Its first sweep's "
+		            "fill is seeded before any axis is located, and a seed at a "
+		            "coil's O-point rather than the plasma's is what sent both of "
+		            "these to the rung: see refreshPlasmaComponentMask()'s "
+		            "local-maximum tier" );
+	}
+}
+
+/*
+ * THE RETRY RUNG CLOSES A FIRST ATTEMPT THAT STALLED, AND THE ANSWER IS THE
+ * REFERENCE'S. BS-5, MEASUREMENTS.md M-247, M-248 and M-313.
+ *
+ * TCV shaped from cold: the bordered Newton stops moving -- eight steps in a
+ * row under 1/64 of the Newton step -- and the rung, with the X-point held
+ * within 0.05 of Gamma's radius of its seed, converges to 1.3e-04 of the
+ * reference's psi_ax with the axis 7.3e-05 m from its. Tolerances about four
+ * times those.
+ *
+ * THE RUNG'S OTHER TRIGGER HAS NO SHIPPED CASE. A first attempt that
+ * converges to an annulus with no interior extremum was machine A's, and A no
+ * longer does (theColdStartFindsTheAxisWithoutTheRetryRung). The branch in
+ * apps/meq.cpp stands and nothing in this suite reaches it.
+ */
+BOOST_AUTO_TEST_CASE( theRetryRungClosesAStalledFirstAttempt )
+{
+	ColdCase const c{ "machine-d-tcv-shaped", 2.250790117808095e-02,
+	                  0.915041, -0.002277, 6.0e-04, 3.0e-04 };
+	std::string const log = runColdCase( c );
+	BOOST_TEST( log.find( "the retry holds the X-point" ) != std::string::npos,
+	            c.stem << " converged without the retry rung. If the answer "
+	            "assertions above held, the first attempt has started to succeed, "
+	            "which is news worth a measurement before this case is changed. If "
+	            "they failed, the first attempt converged to ANOTHER EQUILIBRIUM "
+	            "and the driver accepted it: measured in single at "
+	            "MKL_NUM_THREADS = 1, with the old seed rule and the new alike, "
+	            "sweep 0 carries the X-point 0.3 m from its seed and the run ends "
+	            "at psi_ax 7.39e-02 with the axis at ( 2.245, 0.575 ), the support "
+	            "unsettled after four sweeps and plasma current in 206 conductor "
+	            "elements -- TODO, the single-precision round's open items" );
 }
 
 /*

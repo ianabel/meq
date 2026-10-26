@@ -1,37 +1,23 @@
 # Performance runs owed
 
-**MEQ on C shaped (`machine-c-mast-shaped`) converges on two of its six
-rungs**, k2 h1.00 and k4 h0.50, cold and warm. With no accepted finest rung, it
-has no self-error on C. Every cold run on C, and on F, fails the first bordered
-Newton and is solved by the Picard-then-Newton retry; the two defects below are
-where that retry fails too. Measured at `0e7177a`, the race's `ir3-c-meq`
-stage; the doc is the Claude Docs artifact *Inverse race: F, C and D shaped*
-(`claude.ai/artifact/WAq3D1udMQakGMYyvHdL1g`).
+**C shaped's two cold defects are one, and it is fixed: every rung converges on
+the first attempt.** The first support sweep of a cold start was seeded at a
+coil's O-point -- P2U's, 1.1 cm outside its rectangle on the coarse cold guess --
+so the first sweep solved round a coil, and the middle rungs then stalled
+against the retry rung's X-point cap while the datum crawled to P2 reversed.
+Seeded at the local maximum nearest Psi = 1, all six rungs reach `freegs4e`'s
+equilibrium without the rung, the datum at psi_ax 9.006200e-02
+([M-313](MEASUREMENTS.md#m-313)). What is owed is the race's own timed re-run
+of C's MEQ arm on the commit that carries the fix, below.
 
-Each failed run's inputs are in
-`runs/freegs4e-benchmark/race-runs/ir3-c-meq/machine-c-mast-shaped/cold/meq/r0N/rep0/`
-(`meq.toml`, `meq.msh`, `guess.gf`, `meq.log`); `rN` is the rung, 0 to 5 in the
-ladder's order.
+**F shaped still fails its first bordered Newton on every cold rung** and is
+solved by the Picard-then-Newton retry, with or without the fix, to the same
+currents. That is a different cause, unmeasured; each run's inputs are in
+`runs/freegs4e-benchmark/race-runs/ir3-f-meq/machine-f-diiid-shaped/cold/meq/r0N/rep0/`.
 
-## 1. The middle rungs stall, and the retry trips the X-point relocation cap
-
-k2 h0.50 (`r01`), k3 h1.00 (`r02`) and k3 h0.50 (`r03`), all three repeats and
-the seeded start: the bordered Newton exits "has stopped moving: 8 steps in a
-row took less than 1/64 of the Newton step". The Picard-then-Newton retry then
-finds no damping with a finite residual, because every trial moves the X-point
-past the 0.1225 m relocation cap: 0.123573 m (`r01`), 0.122586 m (`r02`),
-0.124438 m (`r03`). The rungs either side, `r00` and `r04`, also hit the cap
-(3 and 5 line-search trials rejected) but converge.
-
-## 2. The datum crawls to the wrong equilibrium
-
-k4 h0.35 (`r05`): the retry converges after the bordered Newton CRAWLED 40
-steps in a row below 1/64 of the Newton step, with 559 line-search trials
-rejected by the cap. The answer is a different equilibrium: psi_ax 0.2769 Wb/rad
-against freegs4e's finest 0.0901, P2 and P3 of opposite sign to freegs4e's,
-and the plasma containing the symmetry axis. The driver refuses it (exit 1,
-"THE PLASMA CONTAINS THE SYMMETRY AXIS"), which is right; reaching it is the
-defect. Its seeded start exits 2.
+**C's k2 h1.00 rung exits 4**, a best fit at a target residual of 4.7e-09, with
+the fix and without it: the inverse best fit's stationarity stop (`TODO`, the
+single-precision round's item 3), not a branch question.
 
 ## Before any timing that follows a fix
 

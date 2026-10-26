@@ -318,13 +318,15 @@ cheap discriminator*.
 CONTROL LIVES** → **[M-247](MEASUREMENTS.md#m-247)**, **[M-248](MEASUREMENTS.md#m-248)**.
 `BorderedPicardThenNewton`, rebuilt, with the X-point held within
 `0.05 × [boundary.exterior] Radius` of its seed — `setXPointRelocationCap()`,
-BS-5. **It is reached two ways and both are observed**: the bordered Newton
-failing, or converging to a flux with no interior extremum, an annulus. In the
-second the first answer stands if the retry finds no axis either, the shared
-source's state put back exactly. **The cap is a branch control and is legal
-ONLY here**: from the first solve it loses MAST's and MAST-U's cold solves; on
-the retry rung it closes A, A shaped, E and E shaped and moves nothing, taking
-MEQ's cold table from five of fourteen with a located axis to nine. **And the
+BS-5. **It is reached two ways**: the bordered Newton failing, or converging to
+a flux with no interior extremum, an annulus. In the second the first answer
+stands if the retry finds no axis either, the shared source's state put back
+exactly. **The annulus trigger has no shipped case**: machine A was it, and A
+reached the annulus only from a first sweep seeded at a coil's O-point
+(→ **[M-313](MEASUREMENTS.md#m-313)**). **The cap is a branch control and is
+legal ONLY here**: from the first solve it loses MAST's and MAST-U's cold
+solves; on the retry rung it closes TCV shaped's stall and every cold rung of
+F shaped in the inverse race, and moves nothing. **And the
 rung starts from the edge the first attempt started from** —
 `freezePlasmaEdge()` on the shared source otherwise carried the failed attempt's
 freeze into the retry, so one configuration closed or not depending on how the

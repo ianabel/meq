@@ -2720,3 +2720,98 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		}
 	}
 }
+
+/*
+ * WITH NO LOCATED AXIS, THE FILL SEEDS AT THE EXTREMUM THE NORMALISATION IS
+ * ANCHORED TO, NOT AT THE TALLEST ONE.
+ *
+ * A cold start's first fill comes before any solve, so no axis has been
+ * located and refreshPlasmaComponent() picks its own seed. The plasma's
+ * extremum is where Psi = 1 -- the normalisation's psi_ax is the guess's own
+ * peak -- and a coil carrying current of the plasma's sign puts a TALLER local
+ * maximum in the field, which a guess built on a coarser mesh can leave
+ * outside the coil's rectangle, where excluding conductors does not reach it.
+ * MEASURED ON machine-c-mast-shaped's inverse cold start: the plasma's peak at
+ * Psi = 1.0007 and one beside each of P2U and P2L at Psi = 1.3409. The argmax
+ * seeded at P2U's, so the first sweep solved around a coil, half the mesh
+ * away from the plasma, and the run left for psi_ax 0.28 against 0.090.
+ *
+ * The fixture is that guess in miniature: the plasma's bump at ( 0.75, 0 ),
+ * Psi = 1 at its peak, and two taller bumps at ( 0.5, +-1.0 ), Psi = 1.34 --
+ * no coils at all, since what is under test is the choice among local maxima
+ * and not the conductor exclusion. Red until the seed is the local maximum
+ * nearest Psi = 1.
+ */
+BOOST_AUTO_TEST_CASE( theFirstFillSeedsAtTheNormalisationsExtremumNotATallerOne )
+{
+	int const order = 2;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	double const plasmaR = 0.75;
+	double const coilR = 0.5;
+	double const coilZ = 1.0;
+	auto bump = [ ]( double dr, double dz, double radius, double height )
+	{
+		double const t = 1.0 - ( dr*dr + dz*dz )/( radius*radius );
+		return t > 0.0 ? height*t : 0.0;
+	};
+	mfem::FunctionCoefficient guess( [ & ]( mfem::Vector const &x )
+	{
+		return bump( x( 0 ) - plasmaR, x( 1 ), 0.40, 0.1 )
+		       + bump( x( 0 ) - coilR, x( 1 ) - coilZ, 0.20, 0.134 )
+		       + bump( x( 0 ) - coilR, x( 1 ) + coilZ, 0.20, 0.134 );
+	} );
+
+	HalfDisc d = makeHalfDisc( 24 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+
+	meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, 1.0 );
+	source.setPlasmaSupport( true );
+	GradShafranovSolver solver( *d.sub, order );
+	solver.setInitialGuess( guess );
+	solver.setSource( source, 0.1 );
+	solver.setBoundaryData( zero );
+	solver.setExtension( *d.path, d.gammaHMarker );
+	solver.setExteriorCoupling( dtn );
+	solver.prepare();
+
+	// As the driver's first sweep poses it: the edge frozen at the guess's
+	// normalisation, and the fill taken before anything has been solved.
+	source.setNormalisation( 0.1, 0.0 );
+	source.freezePlasmaEdge( 0.1, 0.0 );
+	solver.refreshPlasmaComponent( solver.potential() );
+
+	mfem::Mesh const &mesh = *d.sub;
+	int plasma = 0, upper = 0, lower = 0;
+	for ( int e = 0; e < mesh.GetNE(); ++e )
+	{
+		if ( !solver.elementInPlasma( e ) )
+			continue;
+		mfem::Vector centre;
+		const_cast<mfem::Mesh &>( mesh ).GetElementCenter( e, centre );
+		if ( std::hypot( centre( 0 ) - plasmaR, centre( 1 ) ) < 0.40 )
+			++plasma;
+		else if ( std::hypot( centre( 0 ) - coilR, centre( 1 ) - coilZ ) < 0.20 )
+			++upper;
+		else if ( std::hypot( centre( 0 ) - coilR, centre( 1 ) + coilZ ) < 0.20 )
+			++lower;
+	}
+	std::printf( "\n  THE FIRST FILL WITH NO LOCATED AXIS: elements held around "
+	             "the plasma's peak %d, around the taller peaks %d above and %d "
+	             "below, of %d candidates in %d components\n",
+	             plasma, upper, lower, solver.plasmaCandidateElements(),
+	             solver.plasmaComponentCount() );
+
+	BOOST_TEST( solver.plasmaComponentCount() == 3 );
+	BOOST_TEST( plasma > 0,
+		"the fill holds nothing round the plasma's own extremum, Psi = 1: it "
+		"seeded at a taller local maximum, which on a cold start is a coil's "
+		"O-point. Seed at the local maximum nearest Psi = 1" );
+	BOOST_TEST( upper + lower == 0,
+		"the fill holds " << upper << " and " << lower << " elements round the "
+		"taller peaks, Psi = 1.34: the plasma is the component the "
+		"normalisation is anchored to" );
+}

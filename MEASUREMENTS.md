@@ -14995,6 +14995,8 @@ because the committed `examples/*-meta.json` still carry the old one.
 
 ### M-247
 
+*Note: E's excursion and A's annulus here were each what a first support sweep seeded at a coil's O-point does next. [M-313](#m-313) seeds that sweep at the local maximum nearest Psi = 1, and A, A shaped, E and E shaped then converge on the first attempt to the answers this rung gave, to the printed digit.*
+
 *Note: the retry rung's answers in this entry — A, A shaped, E and E shaped — were taken with the support frozen at the cold guess and never re-decided, since the rung solved once instead of sweeping. [M-257](#m-257) finds it and re-takes those four: A and A shaped are unchanged, E and E shaped move to 9.1e-04 and 8.4e-04.*
 
 **BS-5 — A CAP ON HOW FAR A LINE-SEARCH TRIAL MAY MOVE THE X-POINT FROM ITS
@@ -15060,6 +15062,8 @@ X-point is at ( 0.057, 0.446 ), 1.67 m from its seed — an excursion onto the
 symmetry axis.
 
 ### M-248
+
+*Note: [M-313](#m-313) finds A, A shaped, E and E shaped reaching this rung only because the first sweep's fill was seeded at a coil's O-point; seeded at the local maximum nearest Psi = 1 they converge on the first attempt to the same answers. The rung's annulus trigger then has no shipped case.*
 
 *Note: the retry rung's answers in this entry — A, A shaped, E and E shaped — were taken with the support frozen at the cold guess and never re-decided, since the rung solved once instead of sweeping. [M-257](#m-257) finds it and re-takes those four: A and A shaped are unchanged, E and E shaped move to 9.1e-04 and 8.4e-04.*
 
@@ -20719,3 +20723,104 @@ the start, so the gauge has nothing stable to compare.
 
 **Reproduce.** `runs/sp-scale/measure.sh {base,new} {double,single}`, then
 `summarise.sh`; the cases are `DriverAcceptance --run_test='theProfileScaleCrosses*'`.
+
+### M-313
+
+**THE FIRST SUPPORT SWEEP OF A COLD START WAS SEEDED AT A COIL'S O-POINT. ON
+C SHAPED'S INVERSE COLD START THAT DECIDED THE BRANCH: SEEDED AT THE LOCAL
+MAXIMUM NEAREST Psi = 1, ALL SIX RUNGS CONVERGE ON THE FIRST ATTEMPT TO
+`freegs4e`'S EQUILIBRIUM, WHERE TWO DID BEFORE AND BOTH ON THE RETRY RUNG. NO
+CONVERGED ANSWER ELSEWHERE MOVES, AND A, A SHAPED, E AND E SHAPED NO LONGER
+NEED THE RUNG.**
+
+**Setup.** `4cf1ecf` installed (`install/double`, the argmax seed) against
+this change (`builds/double`), double, under `runs/c-cold` and
+`runs/seed-table`. C shaped's six rungs are the inverse race's own inputs,
+`ir3-c-meq`'s `r0N/rep0/` `meq.toml`, `meq.msh` and `guess.gf`, at
+`OMP = MKL = 4`; the forward cold table and F's and D's rungs at
+`OMP = MKL = 8`. Walls are on a shared machine and are not timings.
+
+**What the first fill saw.** No solver has located an axis before the first
+sweep, so `refreshPlasmaComponentMask()` seeded at the largest normalised
+flux off the axis and outside the conductors. C shaped's cold guess -- the
+design blob plus every coil at the vacuum stage's currents, built on a
+1024-element mesh -- has three local maxima of Psi over the vertex-neighbour
+graph:
+
+| where | Psi |
+|---|---|
+| ( 0.9222, −0.0167 ), the plasma | 1.0007 |
+| ( 0.4998, +1.8208 ), 1.1 cm above P2U's rectangle | 1.3409 |
+| ( 0.4998, −1.8208 ), 1.1 cm below P2L's | 1.3409 |
+
+The two coil peaks tie and element order took P2U's. The first sweep's
+support was **737 elements above the midplane and none below**, against
+candidates of 1327 and 1327, on a mirror-symmetric mesh and a state
+symmetric to 1e-14; the residual's potential block was 1.5% asymmetric, every
+border column 30–70%, and the first step's field direction 25% at the two
+design nulls. The fitted targets could not meet both halves, the residue
+landed on a shallow saddle, and XP-3 moved the X-point 0.90 m. Seeded at the
+local maximum nearest Psi = 1 the support is **590 and 590**.
+
+Ruled out on the way, each on `r01` (k2 h0.50): `[[inverse.xpoint]]
+Track = true` on the lower null (converges to a best fit with the axis at
+R = 2.35 and the X-point on R = 0); `psi_bnd` pinned at the design null by
+`[boundary.limiter]` (exit 1, psi_ax 0.284, the plasma containing R = 0);
+`[solver] UpDownSymmetry` (every printed digit unchanged: it projects the
+iterate, which was already symmetric); `TraceSolver = "umfpack"` and
+`--trace-refinement-cap 4` (unchanged: the asymmetry is the support's, not
+round-off).
+
+**C shaped, the inverse race's six cold rungs:**
+
+| rung | `4cf1ecf` | this change |
+|---|---|---|
+| k2 h1.00 | exit 4 via the rung, best fit | exit 4, first attempt, the same currents to every printed digit |
+| k2 h0.50 | exit 2: stalls, rung capped at 0.123573 m | exit 0, first attempt, 8 + 3 + 2 steps over three sweeps |
+| k3 h1.00 | exit 2, the same | exit 0, first attempt |
+| k3 h0.50 | exit 2, the same | exit 0, first attempt |
+| k4 h0.50 | exit 0 via the rung | exit 0, first attempt, the same answer to every printed digit |
+| k4 h0.35 | exit 1 after 1098 s: crawls to psi_ax 0.2769, plasma on R = 0 | exit 0, first attempt, psi_ax 9.006200e-02 |
+
+From k3 h0.50 up the free currents agree to four figures -- P2
+2.3653e+05 A, P3 −1.0214e+04 A, P5 −1.5247e+05 A -- and the reference's own
+psi_axis, 9.008944e-02, is 3.0e-04 from the datum's, at the cross-code floor
+M-255 records.
+No rung crawls. k2 h1.00's exit 4 is a best fit at a target residual of
+4.7e-09, unchanged by this and not a branch question (`TODO`, the inverse
+best fit's stationarity stop).
+
+**Every shipped `machine-*.toml` from cold through `meq-run`:** every
+converged `psi_ax` and axis identical to the printed digit; B, B shaped, C,
+C shaped, TCV and G shaped exit 2 both ways. Four move route:
+
+| config | `4cf1ecf` | this change |
+|---|---|---|
+| A | via the rung, 17.6 s | first attempt, 2.5 s |
+| A shaped | via the rung, 18.4 s | first attempt, 2.5 s |
+| E | via the rung, crawl 6, 12.7 s | first attempt, 2.3 s |
+| E shaped | via the rung, 14.1 s | first attempt, 2.3 s |
+
+So M-247's reading of E -- an X-point excursion the cap closes -- and M-248's
+of A -- an annulus -- were each what a support around a coil does next; the
+rung's cap closed them by holding the X-point while the support re-decided.
+
+**F and D shaped, the inverse race's cold rungs:** identical currents and
+`psi_ax` on all twelve, and the same routes -- F takes the rung on all six
+either way, so F's first-attempt failure is something else.
+
+**In single** `PlasmaConnectivity` passes, and A and E take the first
+attempt to double's `psi_ax` within 2.5e-06. C's rungs were not run in
+single. TCV shaped at `MKL_NUM_THREADS = 1` converges to another equilibrium
+with the argmax seed and with this one alike (`TODO`, the single-precision
+round, item 7).
+
+**Mutation.** `theFirstFillSeedsAtTheNormalisationsExtremumNotATallerOne`
+(`PlasmaConnectivity`) poses the guess in miniature on the half-disc: green,
+199 elements held round the plasma's bump; with the argmax restored, red, 0
+round it and 51 round the lower of the two taller bumps.
+`DriverAcceptance`'s `theColdStartFindsTheAxisWithoutTheRetryRung` is the
+second column of the A and E rows, red under the argmax.
+
+**Reproduce.** `runs/c-cold/rNN/` (`old.log` and `fixed.log`),
+`runs/seed-table/run.sh` and `rungs.sh`.

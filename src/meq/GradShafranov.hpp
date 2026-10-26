@@ -2058,13 +2058,14 @@ namespace meq
 			 *
 			 * The fill is seeded at the element holding the axis the constraint
 			 * last located (`plasmaSeedElement`), and a solver that has not
-			 * solved has none, so its first refreshPlasmaComponent() competes
-			 * an argmax of Psi instead -- which a coil's O-point can win. From a
-			 * cold start that costs nothing the first sweep was not going to
-			 * redo; from a restart AT an answer it poses the first sweep around
-			 * a coil: examples/diverted-tokamak-xpoint.toml restarted from its
-			 * own .nc started at a field residual of 1.1e-02 and left the
-			 * branch for psi_ax = -8.8e-02. MEASUREMENTS.md M-299.
+			 * solved has none, so its first refreshPlasmaComponent() chooses
+			 * among the local maxima of Psi, the one nearest Psi = 1 -- where
+			 * the normalisation puts the axis -- before the argmax a coil's
+			 * O-point can win. That is a guess's own extremum, and a restart's
+			 * file knows the answer's: examples/diverted-tokamak-xpoint.toml
+			 * restarted from its own .nc with the argmax alone started at a
+			 * field residual of 1.1e-02 and left the branch for
+			 * psi_ax = -8.8e-02. MEASUREMENTS.md M-299.
 			 *
 			 * The seed is consumed as plasmaSeedElement is: the next evaluation
 			 * of the axis constraint overwrites it, so it decides only the fill

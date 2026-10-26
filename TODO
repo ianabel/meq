@@ -1212,11 +1212,18 @@ The giving-up is built; what is left is the crawls it exposed.
   direction or its merit looked at, and probably a red test naming it rather
   than a green one that hides it.
 
+  AND TWO SHIPPED COLD STARTS NOW STOP AT THE LIMIT.  Measured at 4cf1ecf
+  (M-313's cold table, OMP = MKL = 8): machine-c-mast and
+  machine-g-mastu-shaped from cold each hit the stall limit on the first
+  attempt and then fail the retry rung, exit 2.  M-248 had C converging and G
+  shaped refused by the axis-source guard, and the stall limit postdates it;
+  whether each used to crawl to its answer is not measured.
+
 
 ================================================================================
 Left open by the single-precision round (MEASUREMENTS.md M-301 to M-312)
-Raised 2026-10-22. Each item is measured; only the adaptive crawl in item 3
-takes a suite case red, in single.
+Raised 2026-10-22. Each item is measured; the adaptive crawl in item 3 and
+TCV shaped's branch in item 7 each take a suite case red, in single.
 ================================================================================
 
   1. THE q-DRIVEN MAP IS PIECEWISE SMOOTH, SO THE OUTER DIFFERENCE STEP IS A
@@ -1317,6 +1324,21 @@ takes a suite case red, in single.
      M-301 and M-304, but upstream's views removed copies around NPCRecover(),
      not work inside it, and MEQ's solver changed in between.  Asked of
      upstream in the reply of 2026-10-21; read their answer when it comes.
+
+  7. TCV SHAPED FROM COLD, IN SINGLE AT MKL_NUM_THREADS = 1, CONVERGES TO
+     ANOTHER EQUILIBRIUM AND EXITS 0.  At MKL = 4 or 8 its first attempt
+     stalls and the retry rung lands 1.3e-04 from the reference, as double
+     does at MKL = 1 and 8.  At MKL = 1 sweep 0 instead converges in 43 steps
+     with the X-point carried 0.3 m from its seed to ( 0.499, -0.722 ), and
+     the run ends at psi_ax 7.39e-02 against 2.25e-02, the axis at
+     ( 2.245, 0.575 ) beside Gamma, plasma current in 206 conductor elements
+     and the support unsettled after four sweeps -- with warnings, and exit 0.
+     The old seed rule and the new alike (M-313), so it is not the first
+     fill.  Two things to look at: why an MKL-thread perturbation picks the
+     branch in single and not in double, and whether an answer whose support
+     did not settle and whose plasma sits in the conductors should exit 0.
+     DriverAcceptance's theRetryRungClosesAStalledFirstAttempt is red on it
+     in single.
 
 
 ================================================================================

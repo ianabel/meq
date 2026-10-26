@@ -2494,7 +2494,7 @@ guard.
 **A coil's O-point is a genuine critical point of `ψ`, so a general
 critical-point finder is right to return it.** `meq::CriticalPointFinder` has no
 conductor exclusion and cannot have one — it is handed a field, not a machine.
-`apps/meq.cpp` carries a three-tier exclusion on the plasma fill's seed for
+`GradShafranovSolver::refreshPlasmaComponentMask()` carries a tiered exclusion on the plasma fill's seed for
 exactly this reason, which is §10.7's defect 2, and **nothing carries one on
 `findAxis()`**.
 
@@ -2511,6 +2511,23 @@ mesh is about a conductor until something says otherwise**, and a displacement
 quoted in metres from such a call needs checking against the coil list before it
 is believed. → **[M-132](MEASUREMENTS.md#m-132)**. The refusal is the feature;
 the forcing argument is what removes it.
+
+### A cold start's first fill is seeded at the extremum nearest Psi = 1, not the largest
+
+**Before the first solve no axis has been located, so the fill picks its own
+seed, and excluding the conductors does not keep a coil's O-point out.** On a
+cold guess built on a coarser mesh a coil's peak can sit outside its
+rectangle: C shaped's has local maxima at Psi = 1.34 just outside P2U and P2L
+and the plasma's at 1.0007. The largest-Psi rule took P2U's, so the first sweep
+solved round a coil with no plasma below the midplane, on a symmetric mesh and
+state — and that, not the X-point or the merit, is what the race's C failures,
+E's excursion and A's annulus were. `refreshPlasmaComponentMask()` now seeds
+at the local maximum (over vertex neighbours, conductors included in the
+comparison) nearest Psi = 1, where the normalisation puts the axis, and falls
+back to the argmax only where none qualifies.
+
+**The tell is a one-sided support on a symmetric problem**, or a seed whose
+Psi is far from 1. → **[M-313](MEASUREMENTS.md#m-313)**.
 
 ### The cold failures are three different things, and the merit's balance is machine-dependent
 

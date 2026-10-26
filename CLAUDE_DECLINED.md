@@ -140,7 +140,7 @@ scale from each border's own column and corner. What came of each stage:
 | BS-2 | choose the X-point's scale: `R·h` (X1) against the implied displacement `gamma_ax·‖(∇q)⁻¹q‖/L` (X3) | **declined.** It is a reweighting of the same merit, so it is a branch control with BS-1's hazard; a better-founded X-point scale is not thereby a neutral one |
 | BS-3 | the four converging M-103 cases reach the same equilibrium | **closed**: a regression with nothing left to regress. It is what said BS-1 moves answers |
 | BS-4 | re-take M-103 under the new ruler | **subsumed**: [M-244](MEASUREMENTS.md#m-244) is the re-take and M-245 the BS-1 arm against it |
-| BS-5 | cap how far a line-search trial may move the X-point from its seed | **landed on the retry rung only**, [M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248): `setXPointRelocationCap()` at `0.05 × [boundary.exterior] Radius` closes A, A shaped, E and E shaped and moves nothing. From the first solve it loses MAST and MAST-U, so it is legal only as a reactive rung |
+| BS-5 | cap how far a line-search trial may move the X-point from its seed | **landed on the retry rung only**, [M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248): `setXPointRelocationCap()` at `0.05 × [boundary.exterior] Radius` closed A, A shaped, E and E shaped and moved nothing, each of which [M-313](MEASUREMENTS.md#m-313) finds was a first sweep seeded at a coil's O-point and now converges without it. From the first solve it loses MAST and MAST-U, so it is legal only as a reactive rung |
 | BS-6 | (a) does `checkAxisSource()` ask the plasma component? | **answered**, M-247: it does, and G shaped's refusal is right |
 
 **Reading `gamma_ax` off iteration 0's assembled column**, which would save two

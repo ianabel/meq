@@ -7806,6 +7806,13 @@ namespace
 		int seedOffAxis = -1;
 		int seedAnywhere = -1;
 
+		// Each element's largest Psi, and whether it may seed the fill: what
+		// the local-maximum tier below reads. An excluded element keeps -inf,
+		// so it never outranks a neighbour.
+		std::vector< double > elementPeak( static_cast< std::size_t >( elements ),
+		                                   -std::numeric_limits< double >::infinity() );
+		std::vector< char > mayBeSeed( static_cast< std::size_t >( elements ), 0 );
+
 		mfem::Array< int > dofs;
 		for ( int e = 0; e < elements; ++e )
 		{
@@ -7819,6 +7826,7 @@ namespace
 			potentialFes->GetElementDofs( e, dofs );
 			bool const onAxis = touchesAxis( e );
 			bool const inCoil = insideConductor( e );
+			mayBeSeed[ static_cast< std::size_t >( e ) ] = !onAxis && !inCoil;
 
 			for ( int i = 0; i < dofs.Size(); ++i )
 			{
@@ -7846,6 +7854,8 @@ namespace
 					carriesPlasma[ static_cast< std::size_t >( e ) ] = 1;
 				else
 					interior[ static_cast< std::size_t >( e ) ] = 0;
+				elementPeak[ static_cast< std::size_t >( e ) ] =
+					std::max( elementPeak[ static_cast< std::size_t >( e ) ], psiN );
 
 				if ( psiN > bestAnywhere )
 				{
@@ -7896,6 +7906,76 @@ namespace
 		{
 			seed = plasmaSeedElement;
 			fromAxis = true;
+		}
+
+		/*
+		 * **WITH NO AXIS, THE LOCAL MAXIMUM THE NORMALISATION IS ANCHORED TO --
+		 * NOT THE LARGEST PSI, WHICH A COIL'S O-POINT WINS.**
+		 *
+		 * The argmax below excludes the conductors and still loses to them: a
+		 * coil's peak is carried by the element next to it, or -- from a
+		 * guess made on a coarser mesh -- lies outside the coil's rectangle
+		 * altogether, a genuine local maximum of the field the fill reads. So
+		 * excluding conductors cannot separate a coil's extremum from the
+		 * plasma's; the VALUE can. Psi is 1 at the axis by construction --
+		 * the normalisation is anchored there -- so the seed is the local
+		 * maximum nearest Psi = 1: an element that may seed and that no
+		 * element sharing a vertex with it exceeds, conductors and the axis
+		 * included in that comparison though not as candidates. Vertex and
+		 * not face neighbours, because a flank element may touch a coil at a
+		 * corner alone. "A Psi of 86 at the seed is the tell", above, is the
+		 * same observation read the other way.
+		 *
+		 * MEASURED ON machine-c-mast-shaped's inverse cold start, where it
+		 * decides the branch. No solver has located an axis before the first
+		 * sweep. The guess has three local maxima -- the plasma's at
+		 * ( 0.9222, -0.0167 ) with Psi = 1.0007 and one beside each of P2U and
+		 * P2L at ( 0.4998, +-1.8208 ), Psi = 1.3409, 1.1 cm outside the coils'
+		 * rectangles -- and the argmax took P2U's, the tie broken by element
+		 * index. The first sweep's support was then 737 elements around that
+		 * coil and none below the midplane, on a mirror-symmetric mesh and
+		 * state, and the iteration went to P2 reversed and psi_ax 0.28 against
+		 * the reference's 0.090. MEASUREMENTS.md M-313.
+		 *
+		 * Nothing changes where an axis is located; where no element
+		 * qualifies the argmax stands, as before.
+		 */
+		if ( !fromAxis )
+		{
+			std::unique_ptr< mfem::Table > const vertexElements(
+				mesh.GetVertexToElementTable() );
+			double bestDistance = std::numeric_limits< double >::infinity();
+			int peakSeed = -1;
+			mfem::Array< int > vertices;
+			for ( int e = 0; e < elements; ++e )
+			{
+				double const peak = elementPeak[ static_cast< std::size_t >( e ) ];
+				if ( !mayBeSeed[ static_cast< std::size_t >( e ) ] || !( peak > 0.0 )
+				     || !( std::abs( peak - 1.0 ) < bestDistance ) )
+					continue;
+				mesh.GetElementVertices( e, vertices );
+				bool exceeded = false;
+				for ( int v = 0; v < vertices.Size() && !exceeded; ++v )
+				{
+					int const *around = vertexElements->GetRow( vertices[ v ] );
+					for ( int i = 0; i < vertexElements->RowSize( vertices[ v ] ); ++i )
+						if ( elementPeak[ static_cast< std::size_t >( around[ i ] ) ] > peak )
+						{
+							exceeded = true;
+							break;
+						}
+				}
+				if ( !exceeded )
+				{
+					bestDistance = std::abs( peak - 1.0 );
+					peakSeed = e;
+				}
+			}
+			if ( peakSeed >= 0 )
+			{
+				seed = peakSeed;
+				bestPsiN = elementPeak[ static_cast< std::size_t >( peakSeed ) ];
+			}
 		}
 
 		// A plasma whose only positive-Psi elements are inside conductors gets

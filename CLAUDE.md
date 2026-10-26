@@ -177,7 +177,9 @@ plain `ctest` exercises threaded assembly as it ships. The one red is
 `PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands; a
 single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
-(→ **[M-312](MEASUREMENTS.md#m-312)**). The
+(→ **[M-312](MEASUREMENTS.md#m-312)**) and
+`theRetryRungClosesAStalledFirstAttempt` TCV shaped reaching another
+equilibrium at `MKL_NUM_THREADS=1` (`TODO`, the single-precision round). The
 wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
 whole on purpose) and then `naming` (one single-threaded clang-tidy run).
 **A suite time is a measurement only on an idle machine**; identical code has

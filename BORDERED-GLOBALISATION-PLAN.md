@@ -692,11 +692,13 @@ measurement. Listed here so it is not confused with a globalisation.
 
 **It is built, as BS-5, and it is reactive**: `setXPointRelocationCap()` at
 `0.05 × [boundary.exterior] Radius` from the `[boundary.xpoint]` seed, on the
-retry rung only, where it closes A, A shaped, E and E shaped and moves nothing;
+retry rung only, where it closes TCV shaped's stall and F shaped's cold rungs
+and moves nothing;
 from the first solve it loses MAST and MAST-U → **[M-247](MEASUREMENTS.md#m-247)**,
 **[M-248](MEASUREMENTS.md#m-248)**, `CLAUDE_DECLINED.md`, *Border scaling*.
-**On the inverse race's C shaped it is what stops three rungs**: the retry's
-every trial lands 0.09 to 1.9 mm past C's 0.1225 m cap (`PERFORMANCE_TODO.md`).
+**C shaped's inverse cold rungs never reach it**: what sent them to the rung,
+and stopped three of them at the cap, was a first sweep seeded at a coil's
+O-point → **[M-313](MEASUREMENTS.md#m-313)**.
 
 ### 6.3 The topology guard's refusal
 

@@ -337,12 +337,18 @@ Stages 0 to 7 are done, and the one red in the suite is the deliberate
    200 Newton steps ([M-151](MEASUREMENTS.md#m-151)), and of the fourteen
    `freegs4e` configurations — seven machines, two conductor models — six exit
    2 cold and three exit 0 with no magnetic axis
-   ([M-103](MEASUREMENTS.md#m-103), [M-117](MEASUREMENTS.md#m-117)). **The
-   inverse race puts it on the clock**: every cold start on F and C shaped
-   fails the first bordered Newton and is solved by the Picard-then-Newton
-   retry, and on C that retry stalls against the X-point relocation cap or
-   crawls to the wrong topology (`PERFORMANCE_TODO.md`). `TODO`'s bordered
-   solves that crawl and then converge are the same species.
+   ([M-103](MEASUREMENTS.md#m-103), [M-117](MEASUREMENTS.md#m-117)). **One
+   cause is found and fixed**: a cold start's first support sweep was seeded
+   at a coil's O-point, and seeded at the local maximum nearest Psi = 1 C
+   shaped's inverse cold rungs converge on the first attempt where two of six
+   converged at all, and A, A shaped, E and E shaped no longer need the retry
+   rung, every converged answer unchanged
+   ([M-313](MEASUREMENTS.md#m-313)). **What is left on the clock is F
+   shaped**, whose every cold rung still fails the first bordered Newton and
+   is solved by the retry (`PERFORMANCE_TODO.md`), and the six forward cold
+   failures, B, B shaped, C, C shaped, TCV and G shaped, which the fix does
+   not move. `TODO`'s bordered solves that crawl and then converge are the
+   same species.
 
    **`PLASMA-EDGE-PLAN.md` is NOT on this list**, deliberately. It is the route
    out of FB-4's `k ≤ j` cap. **Its preamble's precondition is now met** —
