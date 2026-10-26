@@ -174,7 +174,10 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
 **`OMP_NUM_THREADS` is deliberately not pinned in `tests/CMakeLists.txt`**, so a
 plain `ctest` exercises threaded assembly as it ships. The one red is
-`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands. The
+`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands; a
+single build adds `DriverAcceptance`, whose
+`aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
+(→ **[M-312](MEASUREMENTS.md#m-312)**). The
 wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
 whole on purpose) and then `naming` (one single-threaded clang-tidy run).
 **A suite time is a measurement only on an idle machine**; identical code has

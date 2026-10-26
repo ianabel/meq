@@ -1214,23 +1214,12 @@ The giving-up is built; what is left is the crawls it exposed.
 
 
 ================================================================================
-Left open by the single-precision round (MEASUREMENTS.md M-301 to M-310)
-Raised 2026-10-22. Each item is measured; none takes a suite case red today.
+Left open by the single-precision round (MEASUREMENTS.md M-301 to M-312)
+Raised 2026-10-22. Each item is measured; only the adaptive crawl in item 3
+takes a suite case red, in single.
 ================================================================================
 
-  1. THE I_p PROFILE SCALE IS STILL RESET ON TWO ROUTES.  M-305 carries the
-     file's profile_scale into an exact restart through
-     setPlasmaCurrentScaleInitial(), consumed by one solve.  Two other routes
-     still start a fresh bordered solver at scale 1 and write it back over the
-     shared NormalisedSource: the Picard pre-stage's estimate
-     (normalised->setCurrentScale( scale )), and the adaptive loop's
-     cycle-to-cycle hand-off (apps/meq.cpp around 4367-4410 and 4562).  None of
-     the 23 shipped examples with PlasmaCurrent sets PicardSweeps or
-     [adaptivity], so nothing measures it.  No shipped example combines
-     PlasmaCurrent with PicardSweeps or with adaptivity, so carrying it changes
-     trajectories nothing measures yet.  Wants a case first, then the hand-off.
-
-  2. THE q-DRIVEN MAP IS PIECEWISE SMOOTH, SO THE OUTER DIFFERENCE STEP IS A
+  1. THE q-DRIVEN MAP IS PIECEWISE SMOOTH, SO THE OUTER DIFFERENCE STEP IS A
      GAMBLE (M-308b).  psi* and q* jump across element faces, so where a
      surface's ray node crosses a face it moves to the other element's arc of
      the level set and takes the other element's flux into its weight.  On
@@ -1251,7 +1240,7 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
          step's height over s across one, and by O(s) on a smooth map.  A
          third evaluation per flagged column would say which side to keep.
 
-  3. THE PEDESTAL'S COARSE MESHES CRAWL.  At k = 1 PedestalConvergence's
+  2. THE PEDESTAL'S COARSE MESHES CRAWL.  At k = 1 PedestalConvergence's
      coarse meshes have several discrete roots (2 at n = 16, 5 at n = 24,
      differing in where the pedestal layer sits), and Newton wanders between
      them: 226 and 26 steps in double, and 500 without converging in single at
@@ -1264,7 +1253,7 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
      left is a continuation start, or a resolution precondition that refuses or
      warns on a mesh with several roots, not a step control.
 
-  4. WHAT THE ROUND-OFF STOP DOES NOT REACH (M-306).  The two Newton paths
+  3. WHAT THE ROUND-OFF STOP DOES NOT REACH (M-306).  The two Newton paths
      stop at the residual's round-off floor under the ten-eps gate; four
      things are still stopped by a fixed ten eps or miss the floor:
      - THE INVERSE BEST FIT.  Its stationarity stop has no failing step to
@@ -1287,8 +1276,19 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
        floor too.  A gate that follows the problem's own scale would reach
        these, and the scale measured over the suite spreads 0.02 to 13 eps,
        which is why the gate is a fixed ten eps today.
+     - AND IT COSTS AN ADAPTIVE FREE-BOUNDARY RUN ITS ANSWER IN SINGLE (M-312).
+       limited-tokamak with [adaptivity]: cycle 0 converges in 9 steps, and
+       cycle 1's bordered Newton, warm from cycle 0 on 1737 elements, stalls
+       at about 1.8e-06, fifteen eps, so the stall limit hands it to the
+       retry rung, which crawls 238 steps (314 with the I_p scale carried)
+       to psi_ax 9.4707e-02 (9.4809e-02) against double's 9.4831e-02, with
+       psi_ax - max psi_h at 2.4e-07.  Double takes 8 steps.  So
+       theProfileScaleCrossesEachAdaptiveCycle is not posed in single, and
+       DriverAcceptance's aWarmAdaptiveCycleConvergesOnTheNewtonRung is red
+       there until a warm cycle converges on the Newton rung in no more steps
+       than the cold one, to within 2.5e-04 of double's psi_ax.
 
-  5. BORDER FOLDING IS SKIPPED UNDER A DEVICE, so single on a card keeps the
+  4. BORDER FOLDING IS SKIPPED UNDER A DEVICE, so single on a card keeps the
      shelf M-303 removed on the host.  MFEM's batched NPCGradient() assembles
      and factors each element's local block in one call, and the fold is a
      rank-one row on one block, which no pointwise integrand expresses.  It
@@ -1300,21 +1300,19 @@ Raised 2026-10-22. Each item is measured; none takes a suite case red today.
      fold on the host integrand under a Device today, but no shipped
      normalised source takes that route.
 
-  6. THE FOLD'S kappa WINDOW IS MEASURED, NOT DERIVED.  x1 and x10 of the
-     reaction term over the row work, x0.1 and x100 do not.  The header comment
-     explains both edges -- the low edge leaves 1/( 1 + kappa phi ) of the
-     shelf, the high edge lets the folded row dominate the matrix norm -- but
-     not the constants at them.
+  5. THE FOLD'S kappa IS A FIXED MULTIPLE, AND ITS WINDOW MOVES WITH THE
+     MESH.  setBorderFolding() derives the window (M-311a): low edge
+     30 S0/M = 1.5e7 eps in units of the reaction term at n = 16, high edge
+     c/eps with c from 0.004 to 0.07, centre independent of eps; kappa is
+     1000 x the reaction term.  But M falls like 1/N and the reaction term
+     like h against the rest of its row, so single's low edge is s = 1.9, 35 and 2100 at n = 16, 32
+     and 64 on the confined control, and 1000 is under it at n = 64.  The fix
+     the derivation points at: choose kappa each step from the measured
+     M = |R| rho/( 1 - rho ) of the previous one (M is a constant of the
+     approach, 1.82e-04 against 1.85e-04 over three decades of |R|), aiming at
+     the window's centre.  Wants a confined case at n >= 64 in single first.
 
-  7. THE DEFAULT LOCATED-AXIS ROW CARRIES NO ENVELOPE TERM, so the axis piece
-     of a bordered solve converges only linearly, in both formats.  Found while
-     building the fold, which needed the envelope as a second border unknown.
-     The envelope row exists as AxisRow::WithEnvelope, and M-121 measured it
-     harmful, which is why the default is PositionDropped.  The fold carries
-     the envelope as a second border unknown; whether that changes M-121's
-     finding is untested.  If it does not, close this.
-
-  8. THE RECOVER SCALES BETTER AT f3f4fe1ea7 AND NOBODY KNOWS WHY.  At eight
+  6. THE RECOVER SCALES BETTER AT f3f4fe1ea7 AND NOBODY KNOWS WHY.  At eight
      threads on TCV it is 0.324 s against 0.520 (4.64x against 3.20x) between
      M-301 and M-304, but upstream's views removed copies around NPCRecover(),
      not work inside it, and MEQ's solver changed in between.  Asked of

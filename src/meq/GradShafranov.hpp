@@ -1221,57 +1221,95 @@ namespace meq
 			 * same Newton step, not an approximation to it.** `J'` is
 			 * non-singular wherever the axis row sees the amplitude, which is
 			 * what makes the bordered system non-singular in the first place,
-			 * so every solve's answer is step-sized: `|y'|` falls to 0.03 to
-			 * 0.05 where `|y|` was 22.5, and `|z'|` stays at 1.3e+05 where
-			 * `|z|` ran to 2e+09.
+			 * so every solve's answer is step-sized: `|y'|` falls with the
+			 * step, to 5.5e-03 and 4.3e-07 at the last two steps from
+			 * `psi_ax = 0.2` in double where `|y|` stays at 22.5, and `|z'|`
+			 * stays at 1.06e+04 where `|z|` runs to 7.4e+11.
 			 *
 			 * `rho = b . J'^-1( kappa e_j )` says what the fold is doing: 0 where
 			 * `J` is regular and the fold is inert, 1 where `J` is singular and
-			 * the fold is the whole repair (0.995 to 1.004 measured at the
-			 * last step), and
+			 * the fold is the whole repair (1 - rho under 1e-06 at the last
+			 * steps), and
 			 * large where `J'` itself is near singular. By Sherman-Morrison
 			 * `J'` is singular exactly when `1 + kappa b . J^-1 e_j = 0`, and
 			 * that product is `rho/( 1 - rho )`, so KAPPA'S SIGN IS CHOSEN FROM
 			 * THE PREVIOUS STEP'S rho TO KEEP IT POSITIVE. Measured unsigned:
 			 * one step at `rho = -7.2`, `J'` amplifying eight times, and a step
 			 * that landed at 8.7e-05 where it should have reached 1e-05.
-			 * kappa's MAGNITUDE is the source's own reaction term at dof `j`
-			 * over `|b_j|`: the scale of the field block where `F` acts, so
-			 * there is no constant to choose -- and the measurements give no
-			 * reason to invent one. On PlasmaConnectivity's confined control,
-			 * from its ill-conditioned start, as the worst terminal landing
-			 * over the bound theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem
-			 * asserts (1 passes), single, six draws:
+			 * kappa's MAGNITUDE is `s` times the source's own reaction term at
+			 * dof `j` over `|b_j|`, with `s = 1000`. The reaction term carries
+			 * the field block's scale where `F` acts; `s` is the centre of a
+			 * window whose two edges are derived here and checked step by step
+			 * on PlasmaConnectivity's confined control, k = 2, n = 16,
+			 * `|x| = 22.5`, in both formats (MEASUREMENTS.md M-311a).
 			 *
-			 *     kappa x 0.1   2.5 to 9.5     the fold engages too late
-			 *     kappa x 1     1.5 to 2.0     pointwise in 9 or 10 steps
-			 *     kappa x 10    0.10 to 0.82   pointwise in 8 or 10 steps
-			 *     kappa x 100   0.24 to 30     J' dominated by its folded row;
-			 *                                  the shelf back on three draws
+			 * THE LOW EDGE: THE FOLD HAS TO BEAT THE SHELF. Unfolded, a step's
+			 * residual is the solves' backward error on the iterate,
+			 * `S0 = 4.2 eps |x|` (4.1 to 4.2 at n = 16, 32 and 64 in double; the
+			 * 1.13e-05 shelf in single). Folded, `y'` keeps `( 1 - rho ) x` of
+			 * the iterate, `1 - rho = 1/( 1 + kappa phi )`, and near the root
+			 * `phi = b . J^-1 e_j` grows like `1/sigma` with
+			 * `sigma = |R_true|/|x|` -- so `M = kappa phi |R|` is a CONSTANT of
+			 * the approach (1.82e-04 and 1.85e-04 at |R| = 2.1e-04 and 3.2e-07,
+			 * s = 1). A step from |R| lands at
 			 *
-			 * and from that case's own well-conditioned start every scale reads
-			 * 0.38 to 0.68. The unfolded elimination reads 10 to 130 from the
-			 * first start and 8.2 to 10.1 from the second.
+			 *     S0/( 1 + M/|R| )   ->   ( S0/M ) |R|   once |R| << M,
 			 *
-			 * WHY THERE IS A WINDOW, AS FAR AS IT CAN BE SAID WITHOUT A NUMBER
-			 * PRETENDING TO BE A DERIVATION. Both edges follow from what the
-			 * fold does to the size of the solves' answers. Below: the folded
-			 * `y'` keeps a fraction `1 - rho = 1/( 1 + kappa phi )` of the
-			 * iterate, with `phi = b . J^-1 e_j` growing like `1/sigma` as `J`
-			 * goes singular, so the shelf does not vanish at once -- it becomes
-			 * a floor `4.3 eps |x|/( 1 + kappa phi )` that falls in proportion
-			 * to the residual, i.e. a LINEAR rate of about `( shelf/|R| )/kappa`
-			 * in the transition. Too small a kappa makes that rate slower than
-			 * the thirtyfold the terminal bound asks for, which is the x 0.1
-			 * row. Above: `J'` carries `kappa b_p` in one row, and once that row
-			 * is larger than the rest of the matrix the solves' backward error
-			 * scales with it -- `eps |J'| |y'|` with `|J'| ~ kappa |b|` -- so the
-			 * shelf comes back in proportion to kappa, which is the x 100 row.
-			 * The reaction term at dof `j` is the scale at which the folded row
-			 * is the same size as the row it is added to, which is why x 1 sits
-			 * inside. **The edges' constants are not derived**: `sigma`'s
-			 * constant, `u_j` and `b . v` are not measured here, so where exactly
-			 * the window opens and closes is the table above and nothing more.
+			 * a linear contraction `c_A = S0/M = 4.2 eps/( kappa beta )`, with
+			 * `beta = M/( kappa |x| )` the null vectors' overlap with `b` and
+			 * `e_j`. Predicted against landed: single, s = 1, from 2.19e-05,
+			 * 1.2e-06 and 1.20e-06; double, s = 1e-10 and 1e-11, 1.44e-14 and
+			 * 2.0e-14 against 1.62e-14 and 2.0e-14. The terminal bound asks
+			 * `c_A <= 1/30`, so `s >= 30 S0/M( s = 1 ) = 1.5e7 eps`: 1.9 in
+			 * single and 3.4e-09 in double. In single at n = 16 over five
+			 * starts and three draws, s = 1 lands above the bound on 9 of 15
+			 * runs, s = 3 on 3 and s = 10 to 1e4 on none.
+			 *
+			 * THE HIGH EDGE: THE FOLDED ROW'S OWN BACKWARD ERROR. Row `j` of
+			 * `J'` carries `kappa b_p`, and the local factorisation's error in
+			 * that row is `eps kappa |b_p|` times the solved vectors there,
+			 * whose regular part does not shrink as kappa grows. That is a
+			 * second contraction `c_B` growing with kappa, 0.1 to 0.8 eps s
+			 * measured in double at s = 1e10 to 1e12. Once the step's direction
+			 * is a few per cent wrong the line search crawls in the
+			 * ill-conditioned early steps: in single first at s = 3e4,
+			 * `eps s = 0.004`, intermittently above that and on every draw
+			 * from 3e6, with no convergence at 1e7; in double first at
+			 * s = 3e14, `eps s = 0.07`, and no convergence at 1e15. So the
+			 * high edge is `s = c/eps` with `c` between 0.004 and 0.07.
+			 *
+			 * SO THE WINDOW IS `[ 1.5e7 eps, c/eps ]`: its width goes as
+			 * `1/eps^2` -- s from 2 to 3e4 in single, from 3e-09 to 1e13 or
+			 * more in double -- and its geometric centre, 250 to 1000 as `c`
+			 * is read, does not depend on eps at all, which is why one
+			 * constant serves both formats.
+			 *
+			 * THE LOW EDGE RISES WITH RESOLUTION, WHICH IS WHY `s` IS AT THE
+			 * TOP OF THAT RANGE. `beta` falls like `1/N`, and the reaction term
+			 * against the rest of row `j` like `h`: M at s = 1 reads 1.85e-04,
+			 * 1.9e-05 and 6.4e-07 at n = 16, 32 and 64, so single's low edge
+			 * is s = 1.9, 35 and 2100. A thousand clears n = 32's thirtyfold and stays
+			 * thirtyfold under n = 16's first crawl; at n = 64 in single it is
+			 * under the low edge, and no fixed multiple of the reaction term
+			 * covers every mesh, since the window narrows about tenfold per
+			 * refinement. Choosing kappa from the measured `M` each step would.
+			 *
+			 * FALSIFIED: that the reaction term is where the folded row is the
+			 * size of the row it is added to, and that the high edge is where
+			 * it dominates. Row `j`'s divergence and face parts are 3.1e-02 and
+			 * 2.7e-02 against a reaction term of 9.1e-03, so the two are equal
+			 * near s = 5 -- and nothing happens there or for four decades
+			 * above. On the current stop rule s = 100 from the ill-conditioned
+			 * start reads 0.64 to 0.66 of the bound, not the 0.24 to 30 once
+			 * read at that row.
+			 *
+			 * AND A THIRD TERM NO kappa REMOVES: the bordered column's regular
+			 * part. `dx = -( y' + dS z' )` and `z'` tends to a regular vector,
+			 * `|z'| = 1.05e+04` at n = 16 and 5.6e+04 at n = 32, so a step
+			 * carries `4.2 eps |dS| |z'|` of backward error, a contraction
+			 * `c_Z = 4.2 eps |dS/R| |z'|`: 0.075 predicted and measured in single
+			 * at n = 32, the same at s = 300, 1000 and 1e4. It goes with the
+			 * iterate's `dS` and not with kappa, and at n = 16 it is 6e-03.
 			 *
 			 * ONLY WHERE IT APPLIES: one border unknown (`psi_ax`), coupled,
 			 * Newton in the field, no inverse targets, no Device, and a row
@@ -2816,6 +2854,15 @@ namespace meq
 			 * derivative of a jumping function is not obviously an improvement,
 			 * and here it is measurably not one.
 			 *
+			 * THE BORDER FOLD DOES NOT MOVE THIS (MEASUREMENTS.md M-311b). It
+			 * carries the row's flux half as its second unknown `eta`, but it
+			 * folds only where `psi_ax` is the one border -- never on the
+			 * free-boundary cases that lose -- and there it is exact algebra:
+			 * the envelope row folded and unfolded take the same steps. Where
+			 * that one border is all there is, the row wins (HighBetaConvergence's
+			 * `nu = 4` rows 10, 9, 8 steps to 6, 7, 7 in double); with a
+			 * `psi_bnd` beside it, it still loses a limiter radius.
+			 *
 			 * This is therefore a knob of exactly `BorderColumn`'s kind: it
 			 * changes the Jacobian and cannot change the fixed point, so it
 			 * changes the WORK and not the answer. It is not a TOML key, for the
@@ -4276,9 +4323,12 @@ namespace meq
 			 * a re-solve -- and solve() then TELLS THE SOURCE, so a scale a
 			 * caller put on the shared meq::NormalisedSource before solve() is
 			 * overwritten before the first residual reads it. This is how a
-			 * fresh solver starts somewhere else: the driver's exact restart
-			 * from a `.nc`, whose whole iterate is the answer's only together
-			 * with the scale that answer was solved at.
+			 * fresh solver starts somewhere else, and the driver does it on
+			 * every fresh bordered solver that is handed a field solved at
+			 * some scale: a restart from a `.nc`, whose whole iterate is the
+			 * answer's only together with the scale that answer was solved at,
+			 * each adaptive cycle after the first, and the solve after the
+			 * Picard pre-stage (MEASUREMENTS.md M-312).
 			 *
 			 * **MEASURED, AND IT IS THE WHOLE OF A SINGLE-PRECISION RESTART'S
 			 * DRIFT.** `examples/limited-tokamak.toml` restarted from its own

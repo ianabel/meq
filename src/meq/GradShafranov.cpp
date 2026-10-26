@@ -64,6 +64,17 @@ namespace meq
 namespace
 {
 	/*
+	 * THE BORDER FOLD'S kappa, IN UNITS OF THE SOURCE'S REACTION TERM AT THE
+	 * FOLDED DOF OVER |b_j|. GradShafranovSolver::setBorderFolding() derives
+	 * the window it must sit in -- a low edge that rises with eps and a high
+	 * edge that falls with it, so the centre is the same in both formats --
+	 * and this is that centre on PlasmaConnectivity's confined control at
+	 * n = 16 to 32, with thirtyfold margins to n = 16's high edge and n = 32's
+	 * low edge in single. MEASUREMENTS.md M-311a.
+	 */
+	constexpr double borderFoldScale = 1.0e3;
+
+	/*
 	 * THE STEP EVERY CENTRAL DIFFERENCE IN THE NORMALISATION USES.
 	 *
 	 * SHARED RATHER THAN DUPLICATED, because two differences of the same
@@ -14359,10 +14370,12 @@ namespace
 				if ( j < 0 )
 					return;
 
-				// kappa's magnitude: this element's own reaction term at j, from
-				// the integrator that will carry the fold. Zero -- an element the
-				// fill dropped, or a source with no psi dependence there -- means
-				// there is no scale to fold at, and the step is the plain one.
+				// kappa's magnitude: a thousand times this element's own reaction
+				// term at j, from the integrator that will carry the fold -- the
+				// centre of the window setBorderFolding() derives. Zero -- an
+				// element the fill dropped, or a source with no psi dependence
+				// there -- means there is no scale to fold at, and the step is
+				// the plain one.
 				mfem::IsoparametricTransformation transformation;
 				mesh.GetElementTransformation( element, &transformation );
 				mfem::Vector elfun( dofs.Size() );
@@ -14376,7 +14389,7 @@ namespace
 				if ( !( scale > 0.0 ) || !std::isfinite( scale ) )
 					return;
 
-				double const kappa = foldSign*scale/std::abs( row( j ) );
+				double const kappa = foldSign*borderFoldScale*scale/std::abs( row( j ) );
 				borderFoldSpec.element = element;
 				borderFoldSpec.row = j;
 				borderFoldSpec.coefficients = row;

@@ -1567,6 +1567,30 @@ int main( int argc, char **argv )
 	double xPointSeedZ = 0.0;
 
 	/*
+	 * THE I_p PROFILE SCALE, CARRIED FORWARD FOR THE SAME REASON, AND IT HAS TO
+	 * GO TO THE SOLVER.
+	 *
+	 * With [source] PlasmaCurrent the scale is a border unknown, and a fresh
+	 * solver starts it at one and TELLS THE SHARED SOURCE SO before its first
+	 * residual -- so a scale left on the source by the cycle before, by the
+	 * Picard pre-stage or by a restart's file is overwritten unread. One is the
+	 * profile tables' own amplitude, which the current then corrects, and
+	 * starting there throws away what was established: the field handed on is
+	 * the previous answer only together with the scale it was solved at.
+	 * makeSolver() puts this on every bordered solver it builds, through
+	 * setPlasmaCurrentScaleInitial(), consumed by that solver's first solve.
+	 *
+	 * SET BY a restart's file, by the Picard pre-stage's estimate, and by each
+	 * converged cycle; a retry within a cycle starts from the cycle's, as it
+	 * does from the cycle's currents. Empty is one. MEASUREMENTS.md M-312:
+	 * reset to one, tables twice the size cost limited-tokamak two Newton
+	 * steps in every adaptive cycle after the first, and DIII-D after one
+	 * Picard sweep crawls, fails the retry rung too and exits 2; carried,
+	 * both take the shipped tables' steps to the same psi_ax.
+	 */
+	std::optional<double> profileScaleSeed;
+
+	/*
 	 * ROADMAP.md ITEM 10: THE q-DRIVEN ROUTE, AND WHAT IT CARRIES ACROSS
 	 * ADAPTIVE CYCLES.
 	 *
@@ -2951,11 +2975,9 @@ int main( int argc, char **argv )
 					 * restart takes from the file. Without them the whole
 					 * iterate starts at the answer and the border does not,
 					 * which costs the steps it was meant to save. Each only
-					 * where this run has that unknown. The scale set on the
-					 * shared source here is what the Picard pre-stage starts
-					 * from; the bordered solve starts its own from
-					 * setPlasmaCurrentScaleInitial(), on the exact restart
-					 * below, since a fresh solver overwrites the source's.
+					 * where this run has that unknown. The scale is a seed and
+					 * not the shared source's, since a fresh solver overwrites
+					 * the source's; see profileScaleSeed.
 					 */
 					if ( stored.hasXPoint() && config->getBoundary().xpoint.given )
 					{
@@ -2967,7 +2989,7 @@ int main( int argc, char **argv )
 					if ( stored.hasProfileScale() && normalised
 					     && config->getSource().plasmaCurrent() != 0.0 )
 					{
-						normalised->setCurrentScale( stored.profileScale() );
+						profileScaleSeed = stored.profileScale();
 						std::printf( "     the I_p profile scale starts at the file's %.12e\n",
 						             stored.profileScale() );
 					}
@@ -3288,8 +3310,13 @@ int main( int argc, char **argv )
 		 * happens here, once, against the only mu0 in the file.
 		 */
 		if ( bordered && config->getSource().plasmaCurrent() != 0.0 )
+		{
 			fresh->setPlasmaCurrent( config->getSource().permeability()
 			                         *config->getSource().plasmaCurrent() );
+			// AND WHERE ITS SCALE STARTS: see profileScaleSeed.
+			if ( profileScaleSeed )
+				fresh->setPlasmaCurrentScaleInitial( *profileScaleSeed );
+		}
 
 		/*
 		 * `[source] ExcludeAttributes` -- THE REGION THAT CANNOT BE PLASMA.
@@ -3567,19 +3594,13 @@ int main( int argc, char **argv )
 							if ( storedGuess->hasPsiBoundary() )
 								fresh->setBoundaryFluxInitial( storedGuess->psiBoundary() );
 
-							// AND THE PROFILE SCALE AT THE FILE'S, ON THE SOLVER.
-							// Set on the shared source above, it reaches the
-							// Picard pre-stage and nothing else: a fresh solver
-							// starts the scale at one and tells the source so
-							// before its first residual. The answer's iterate at
-							// another scale is not the answer: on limited-tokamak,
-							// 9.1e-04 off, it is a first field residual 185x the
-							// run's last, two Newton steps and psi_ax moved by up
-							// to 5.6e-05 relative in single. M-298.
-							if ( storedGuess->hasProfileScale() && normalised
-							     && config->getSource().plasmaCurrent() != 0.0 )
-								fresh->setPlasmaCurrentScaleInitial(
-									storedGuess->profileScale() );
+							// THE PROFILE SCALE IS THE FILE'S TOO, through
+							// profileScaleSeed, set where the file was read. The
+							// answer's iterate at another scale is not the
+							// answer: on limited-tokamak, 9.1e-04 off, it is a
+							// first field residual 185x the run's last, two
+							// Newton steps and psi_ax moved by up to 5.6e-05
+							// relative in single. M-305.
 
 							// AND THE FIRST PLASMA FILL SEEDED AT THE FILE'S AXIS,
 							// which this fresh solver has not located: its own
@@ -4366,7 +4387,7 @@ int main( int argc, char **argv )
 
 			double axis = psiAxisGuess;
 			double boundary = edgeFluxOf( *picardState );
-			double scale = normalised->currentScale();
+			double scale = profileScaleSeed.value_or( 1.0 );
 			double const target = config->getSource().permeability()
 			                      *config->getSource().plasmaCurrent();
 
@@ -4558,9 +4579,13 @@ int main( int argc, char **argv )
 
 			// THE ESTIMATE THE BORDERED SOLVE STARTS FROM. psi_ax is an initial
 			// value there, so this is the one number the pre-stage exists to
-			// produce; the state it reached is the other.
+			// produce; the state it reached is the other. AND THE SCALE, AS A
+			// SEED: the field it hands on was solved at this scale, and a fresh
+			// bordered solver started at one is a solve of the tables' own
+			// amplitude from that field. See profileScaleSeed.
 			psiAxisGuess = axis;
-			normalised->setCurrentScale( scale );
+			if ( target != 0.0 )
+				profileScaleSeed = scale;
 		};
 
 		/*
@@ -5104,6 +5129,10 @@ int main( int argc, char **argv )
 		// a second attempt.
 		if ( solver->inverseIsPosed() )
 			inverseCurrents = solver->freeCircuitCurrents();
+		// AND THE PROFILE SCALE, which the next cycle's fresh solver would
+		// otherwise start at one. See profileScaleSeed.
+		if ( normalised && config->getSource().plasmaCurrent() != 0.0 )
+			profileScaleSeed = solver->plasmaCurrentScale();
 
 		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
 		              -1.0, solver->newtonIterations(), globalised, rung };

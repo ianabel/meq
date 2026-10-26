@@ -93,7 +93,15 @@ solver starts the scale at one and tells the source so before its first
 residual, and the answer's iterate at another scale is not the answer —
 `limited-tokamak` in single, restarted at scale one, takes two steps and
 moves `psi_ax` by up to 5.6e-05 relative, where carried it takes none and
-prints the cold run's digits. **The current row is read on the starting
+prints the cold run's digits. **It is one seed, `profileScaleSeed`, on every
+fresh bordered solver**: set from the file on any restart route, by the Picard
+pre-stage's estimate, and by each converged adaptive cycle, so a retry within
+a cycle starts where the cycle did. The tables' amplitude is then a gauge
+`PlasmaCurrent` removes everywhere but a cold start: tables twice the size
+take the shipped tables' steps after each hand-off, where reset to one they
+cost two steps per adaptive cycle and turn DIII-D after one Picard sweep into
+exit 2 (`theProfileScaleCrossesEachAdaptiveCycle`,
+`theProfileScaleCrossesThePicardPreStage`, → **[M-312](MEASUREMENTS.md#m-312)**). **The current row is read on the starting
 iterate**, as every other border row is, so a restart at another
 `PlasmaCurrent` is not taken for the answer: the field rows do not read the
 target, and with that row unread a restart at 3.3e5 A from a 3.0e5 A file
@@ -498,7 +506,9 @@ places:
   a converged answer at every refinement. The Dirichlet datum is the fallback
   at nodes the coarse mesh does not cover — and on the curved path there really
   are such nodes, since the computational domain grows as it refines: measured,
-  48 and 360 of them on `miller-adaptive`.
+  48 and 360 of them on `miller-adaptive`. The border's scalars come with it:
+  `psi_ax`, the X-point, the free currents and the I_p profile scale, each
+  through a seed `makeSolver()` reads; `psi_bnd` starts afresh.
 
 **WHAT IT BUYS, AND THE MEASUREMENT NEEDED A NONLINEAR SOURCE TO EXIST AT ALL.**
 MEQ's adaptive examples run a Solov'ev source, whose `∂F/∂ψ` is zero, so Newton

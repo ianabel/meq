@@ -2012,18 +2012,22 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
  * and the route is one route in both formats, so what is measured is the
  * terminal phase and nothing upstream of it. From the control's own 0.1 the
  * first step is ill conditioned and the single and double routes part there;
- * theFillDoesNotMoveASingleLobeAnswer records what that does.
+ * theFillDoesNotMoveASingleLobeAnswer records what that does. The shipped
+ * solve is run from there too, once, because that is where single shows
+ * whether kappa is above the fold's low edge (M-311a).
  *
- * Measured, single, both MKLs at MKL_NUM_THREADS 1, 2 and 4, as the worst of
+ * Measured, single, MKL 2026.2 at MKL_NUM_THREADS 1, 2 and 4, as the worst of
  * ( landing / bound ) over the terminal steps:
  *
- *     folded (the default)          0.38 to 0.40     5 steps
- *     unfolded                      8.2 to 10.1      6 steps
+ *     folded (the default)          0.648 to 0.654   5 steps
+ *     unfolded                      9.4 to 10.1      6 steps
+ *     folded, from psi_ax = 0.1     0.642 to 0.644   9 to 12 steps
  *
- * and in double 0.002 folded and 0.032 unfolded, 6 steps each, because the
- * shelf there is under every target. It is THERE, and the same mechanism: the
- * unfolded double solve ends at a field residual of 2.09e-14 and the folded
- * one at 1.46e-16. So in double the case checks the fold is exact algebra
+ * the folded landings being the format's floor, 7.7e-08, against a tenth of
+ * the target; and in double 0.002 folded and 0.030 to 0.032 unfolded, 6
+ * steps each, because the shelf there is under every target. It is THERE,
+ * and the same mechanism: the unfolded double solve ends at a field residual
+ * of 2.09e-14 and the folded one at 1.45e-16. So in double the case checks the fold is exact algebra
  * rather than that it is needed -- the same answer, psi_ax equal to the bit
  * and psi_h to 3.0e-14, no more steps, and a fold that actually engaged.
  */
@@ -2044,14 +2048,6 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		mesh.GetVertex( v )[ 1 ] -= 0.8;
 	}
 
-	mfem::FunctionCoefficient guess( [ start ]( mfem::Vector const &x )
-	{
-		double const dr = x( 0 ) - 1.0;
-		double const dz = x( 1 );
-		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
-		return t > 0.0 ? start*t : 0.0;
-	} );
-
 	double const absoluteTarget = meq::newtonTolerance( 1.0e-12 );
 
 	struct Run
@@ -2059,6 +2055,8 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		bool folding = false;
 		int iterations = 0;
 		double axis = 0.0;
+		/// |x|, the whole iterate ( q, psi, psihat ) at the answer.
+		double stateNorm = 0.0;
 		std::vector<double> potential;
 		std::vector<GradShafranovSolver::BorderStep> steps;
 	};
@@ -2067,9 +2065,16 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	// The envelope row puts a half of the axis row on the flux dofs, which is
 	// what the fold carries as its second border unknown; the default row has
 	// none, so without this the 2 x 2's second row would never be exercised.
-	auto run = [ & ]( int folding, bool envelope )
+	auto run = [ & ]( int folding, bool envelope, double from )
 	{
-		meq::NormalisedMHDSource source( pPrime, ggPrime, start, 1.0 );
+		mfem::FunctionCoefficient guess( [ from ]( mfem::Vector const &x )
+		{
+			double const dr = x( 0 ) - 1.0;
+			double const dz = x( 1 );
+			double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+			return t > 0.0 ? from*t : 0.0;
+		} );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, from, 1.0 );
 		source.setPlasmaSupport( true );
 
 		GradShafranovSolver solver( mesh, order );
@@ -2080,7 +2085,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		solver.setInitialGuess( guess );
 		solver.setNewtonControl( 1.0e-9,
 		                         absoluteTarget, 60 );
-		solver.setSource( source, start );
+		solver.setSource( source, from );
 		solver.setBoundaryData( zero );
 		solver.solve();
 
@@ -2088,6 +2093,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		out.folding = solver.borderFolding();
 		out.iterations = solver.newtonIterations();
 		out.axis = solver.psiAxis();
+		out.stateNorm = solver.state().Norml2();
 		mfem::GridFunction const &potential = solver.potential();
 		out.potential.assign( potential.GetData(),
 		                      potential.GetData() + potential.Size() );
@@ -2142,8 +2148,8 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	std::printf( "\n  THE CONFINED EIGENPROBLEM'S TERMINAL PHASE, psi_ax started at %.2f\n",
 	             start );
 
-	Run const shipped = run( -1, false );
-	Run const other = run( shipped.folding ? 0 : 1, false );
+	Run const shipped = run( -1, false, start );
+	Run const other = run( shipped.folding ? 0 : 1, false, start );
 	Run const &folded = shipped.folding ? shipped : other;
 	Run const &unfolded = shipped.folding ? other : shipped;
 	Tail const shippedTail = terminal( shipped );
@@ -2204,6 +2210,58 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	            << " Newton steps against the unfolded one's "
 	            << unfolded.iterations );
 
+	/*
+	 * kappa CLEARS SINGLE PRECISION'S LOW EDGE, ASKED IN EITHER FORMAT.
+	 * setBorderFolding() derives it: a folded step keeps 1 - rho of the
+	 * unfolded shelf S0 = 4.2 eps |x| (M-311a measures the 4.2 at n = 16, 32
+	 * and 64), and the terminal bound wants what is kept under a thirtieth of
+	 * where the step started. Evaluated with SINGLE's eps whatever this build's
+	 * format, on the rho each terminal step actually measured, so a kappa that
+	 * would leave the single shelf on is red in double too -- where the
+	 * landings themselves cannot show it. Measured, as a fraction of the
+	 * bound: the shipped kappa 3.2e-03 in double and 1.7e-03 in single; the
+	 * reaction term alone, a thousand times smaller, 3.2 in double -- red --
+	 * and 0.27 in single, whose terminal step here starts at 2e-04 and is
+	 * not where its low edge shows. The start below is.
+	 */
+	double const singleShelf = 4.2*static_cast<double>( std::numeric_limits<float>::epsilon() )
+	                           *shipped.stateNorm;
+	double worstKept = 0.0;
+	for ( std::size_t k = 0; k + 1 < shipped.steps.size(); ++k )
+	{
+		if ( !( shipped.steps[ k ].fieldNorm < 1.0e-3*shipped.steps.front().fieldNorm ) )
+			continue;
+		worstKept = std::max( worstKept,
+		                      std::abs( 1.0 - shipped.steps[ k ].foldRho )*singleShelf
+		                      /( shipped.steps[ k ].fieldNorm/30.0 ) );
+	}
+	std::printf( "    single's shelf 4.2 eps_f |x| = %.3e; the fold keeps at worst %.3e "
+	             "of a thirtieth of the terminal residual\n", singleShelf, worstKept );
+	std::fflush( stdout );
+	BOOST_TEST( worstKept <= 1.0,
+	            "the fold keeps " << worstKept << " times a thirtieth of a terminal "
+	            "residual of single precision's shelf: kappa is under the low edge "
+	            "GradShafranovSolver::setBorderFolding() derives, so in single the "
+	            "terminal phase is linear at S0/M rather than Newton's" );
+
+	/*
+	 * AND FROM THE CONTROL'S OWN ILL-CONDITIONED START, psi_ax = 0.1, which is
+	 * where the low edge is seen in single: the early steps are damped and
+	 * the terminal phase starts from residuals near the shelf. The reaction
+	 * term alone lands 1.48 to 1.65 times over the bound there in single,
+	 * every draw -- red; the shipped kappa 0.63 to 0.66, the format's floor
+	 * against a tenth of the target (M-311a).
+	 */
+	Run const illConditioned = run( -1, false, 0.1 );
+	Tail const illTail = terminal( illConditioned );
+	print( "from 0.1", illConditioned, illTail );
+	BOOST_TEST( illTail.counted >= 1 );
+	BOOST_TEST( illTail.worst <= 1.0,
+	            "from psi_ax = 0.1 a terminal step of the shipped bordered Newton "
+	            "landed " << illTail.worst << " times above its bound: kappa is "
+	            "under the low edge setBorderFolding() derives" );
+	BOOST_TEST( illTail.damped == 0 );
+
 	// AND IT ENGAGED: every step folded, and rho at the last one near 1,
 	// which is the fold carrying a field block that has gone singular. A fold
 	// that silently stopped applying would leave double's histories as they
@@ -2246,16 +2304,17 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	 * rate the tail could not tell from Newton's -- and would leave the first
 	 * steps a few parts in ten thousand away from the unfolded ones.
 	 *
-	 * Measured: the first three merits agree to 2.3e-12 relative in double,
-	 * and 1.5e-12 under the envelope row. In single they agree only to
-	 * 4.0e-04 and 2.4e-03 -- the field block's conditioning at the start times
+	 * Measured: the first three merits agree to 2.7e-13 relative in double,
+	 * and 2.5e-13 under the envelope row, where a fold that drops eta parts
+	 * them by 5.4e-05 (M-311a). In single they agree only to 7.9e-05 and
+	 * 3.6e-03 -- the field block's conditioning at the start times
 	 * eps, and the same between any two orderings of the solve -- which is
 	 * above what a dropped eta would move. So the bound is 1e-9 and floored at
 	 * 65536 eps (7.8e-03) for the narrow format, and THE TEETH ARE DOUBLE'S:
 	 * in single this half only says the two routes are one route.
 	 */
-	Run const envelopeFolded = run( 1, true );
-	Run const envelopeUnfolded = run( 0, true );
+	Run const envelopeFolded = run( 1, true, start );
+	Run const envelopeUnfolded = run( 0, true, start );
 	print( "envelope folded", envelopeFolded, terminal( envelopeFolded ) );
 	print( "envelope unfolded", envelopeUnfolded, terminal( envelopeUnfolded ) );
 

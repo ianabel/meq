@@ -21,6 +21,7 @@
 #include "meq/Sampler.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -34,6 +35,7 @@
 #include <memory>
 #include <numeric>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <sys/stat.h>
@@ -3629,6 +3631,361 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	            "and raise the shipped example rather than relaxing this" );
 
 	std::remove( "driver-acceptance-limited-k2.toml" );
+}
+
+/*
+ * THE I_p PROFILE SCALE CROSSES EVERY HAND-OFF, AND THE TABLES' AMPLITUDE IS A
+ * GAUGE THE PRESCRIBED CURRENT REMOVES. MEASUREMENTS.md M-312.
+ *
+ * With [source] PlasmaCurrent the profile tables give the current's shape and
+ * the scale, a border unknown, gives its size, so tables twice as large are the
+ * same problem at half the scale. Only a cold start may see the difference:
+ * it starts the scale at one, which is the tables' own amplitude. Every later
+ * start is handed a field solved at some scale -- the previous adaptive cycle's
+ * answer, or the Picard pre-stage's state -- and must start the scale there,
+ * or it is solving the tables' amplitude from a field that is not at it. A
+ * fresh solver starts the scale at one and tells the shared source so, so the
+ * hand-off goes to the solver: apps/meq.cpp's profileScaleSeed, through
+ * GradShafranovSolver::setPlasmaCurrentScaleInitial().
+ *
+ * So each case runs a configuration twice, on the shipped tables and on the
+ * same tables doubled, and asks the stage after the hand-off to take the same
+ * Newton steps to the same psi_ax. Reset to one, the doubled limited tokamak
+ * takes 10 steps in each adaptive cycle after the first against 8 (double),
+ * and the doubled DIII-D's bordered solve after one Picard sweep crawls, fails
+ * the retry rung too and exits 2 (both precisions).
+ */
+namespace
+{
+	/// The shipped profile table @a relative with its value and derivative
+	/// columns multiplied by @a factor, written to @a out in the working
+	/// directory. Comment and blank lines are kept as they are.
+	void writeScaledTable( std::string const &relative, double factor,
+	                       std::string const &out )
+	{
+		std::ifstream in( sourcePath( relative ) );
+		BOOST_TEST_REQUIRE( in.good(), "cannot read " << relative );
+		std::ofstream file( out );
+		file << std::setprecision( 17 );
+		std::string line;
+		int rows = 0;
+		while ( std::getline( in, line ) )
+		{
+			std::istringstream fields( line );
+			double psi = 0.0, value = 0.0, derivative = 0.0;
+			if ( line.empty() || line[ 0 ] == '#' || !( fields >> psi >> value >> derivative ) )
+			{
+				file << line << "\n";
+				continue;
+			}
+			file << psi << " " << factor*value << " " << factor*derivative << "\n";
+			++rows;
+		}
+		BOOST_TEST_REQUIRE( rows > 0, relative << " has no data rows" );
+	}
+
+	/// A driver command's whole log, standard error included: the ladder
+	/// reports a retry there.
+	std::string driverLog( std::string const &command, int &status )
+	{
+		std::string const scratch = "driver-acceptance-log.txt";
+		int const raw = std::system( ( command + " > " + scratch + " 2>&1" ).c_str() );
+		status = WIFEXITED( raw ) ? WEXITSTATUS( raw ) : -1;
+		std::string const text = slurp( scratch );
+		std::remove( scratch.c_str() );
+		return text;
+	}
+
+	/// Column @a column of a table whose header line contains @a header and
+	/// whose rows start with an index: the Newton steps are the adaptive
+	/// loop's seventh and the support loop's second.
+	std::vector<int> tableColumn( std::string const &log, std::string const &header,
+	                              std::size_t column )
+	{
+		std::vector<int> counts;
+		std::size_t const at = log.find( header );
+		if ( at == std::string::npos )
+			return counts;
+		std::istringstream in( log.substr( log.find( '\n', at ) + 1 ) );
+		std::string line;
+		while ( std::getline( in, line ) )
+		{
+			std::istringstream fields( line );
+			std::vector<std::string> words;
+			for ( std::string word; fields >> word; )
+				words.push_back( word );
+			if ( words.size() <= column || words[ 0 ].find_first_not_of( "0123456789" )
+			                               != std::string::npos )
+				break;
+			std::string const &its = words[ column ];
+			if ( its.find_first_not_of( "0123456789" ) != std::string::npos )
+				break;
+			counts.push_back( std::stoi( its ) );
+		}
+		return counts;
+	}
+
+	/// The converged psi_ax as the summary prints it, or empty.
+	std::string summaryPsiAxis( std::string const &log )
+	{
+		std::string const key = "     psi_ax = ";
+		std::size_t const at = log.find( key );
+		if ( at == std::string::npos )
+			return std::string();
+		std::size_t const from = at + key.size();
+		return log.substr( from, log.find( ' ', from ) - from );
+	}
+
+	/// The Picard pre-stage's table rows, verbatim, or empty.
+	std::string picardRows( std::string const &log )
+	{
+		std::size_t const at = log.find( "Picard sweep" );
+		if ( at == std::string::npos )
+			return std::string();
+		std::size_t const end = log.find( "MEQ: the plasma support", at );
+		std::istringstream in( log.substr( at, end == std::string::npos ? std::string::npos
+		                                                                  : end - at ) );
+		std::string rows, line;
+		while ( std::getline( in, line ) )
+			if ( line.size() > 6 && line.compare( 0, 5, "     " ) == 0
+			     && std::isdigit( static_cast<unsigned char>( line[ 5 ] ) ) )
+				rows += line + "\n";
+		return rows;
+	}
+}
+
+namespace
+{
+	/// limited-tokamak with three Doerfler cycles, the configuration both
+	/// adaptive cases below run.
+	std::string adaptiveLimitedTokamak()
+	{
+		return shippedConfig( "examples/limited-tokamak.toml" )
+			+ "\n[adaptivity]\nEnabled = true\nMaxIterations = 3\nStrategy = \"doerfler\"\n"
+			  "Theta = 0.6\nTargetError = 1.0e-12\n";
+	}
+
+	/// The adaptive cycle table's header: the Newton steps are its seventh
+	/// column, and a fallback is marked after the count.
+	std::string const adaptiveHeader = "cycle     elem    trace";
+
+	/// That configuration's log on the shipped tables, run once for both cases.
+	std::string const &shippedAdaptiveLog()
+	{
+		static std::string const log = []
+		{
+			std::string const name = "adaptive-limited-tokamak";
+			std::ofstream( name + ".toml" )
+				<< replaceAll( adaptiveLimitedTokamak(), "Prefix = \"limited-tokamak\"",
+				               "Prefix = \"" + name + "\"" );
+			int status = -1;
+			std::string const text =
+				driverLog( std::string( driver() ) + " " + name + ".toml", status );
+			BOOST_TEST_REQUIRE( status == 0, name << " exited " << status << ":\n" << text );
+			return text;
+		}();
+		return log;
+	}
+
+	/// The cycle table's rows, verbatim, one per cycle.
+	std::vector<std::string> adaptiveRows( std::string const &log )
+	{
+		std::vector<std::string> rows;
+		std::size_t const at = log.find( adaptiveHeader );
+		if ( at == std::string::npos )
+			return rows;
+		std::istringstream in( log.substr( log.find( '\n', at ) + 1 ) );
+		for ( std::string line; std::getline( in, line ) && !line.empty(); )
+			rows.push_back( line );
+		return rows;
+	}
+}
+
+/*
+ * A WARM ADAPTIVE CYCLE CONVERGES ON THE NEWTON RUNG, IN NO MORE STEPS THAN THE
+ * COLD ONE, TO THE ANSWER. RED IN SINGLE: MEASUREMENTS.md M-312, TODO's "what
+ * the round-off stop does not reach".
+ *
+ * Each cycle after the first starts from the previous cycle's answer
+ * interpolated onto a mesh refined in a few places, which is a better start
+ * than the cold one, so it may not need more steps than cycle 0 and may not
+ * need the retry rung at all. Double takes 12, 8 and 8. In single, cycle 1's
+ * bordered Newton stalls at about 1.8e-06 -- fifteen eps, over the ten-eps gate
+ * under which the round-off stop works -- the stall limit hands it to the retry
+ * rung, and that crawls 314 steps to a psi_ax 1.4e-03 from double's. Single's
+ * own gap to double on this machine, non-adaptive, is 1.3e-04 (M-221's table),
+ * so 2.5e-04 separates the crawl's answer from single's accuracy by five.
+ * What fixes it is a stop that sees a floor above the gate, or a cycle 1 that
+ * does not stall there.
+ */
+BOOST_AUTO_TEST_CASE( aWarmAdaptiveCycleConvergesOnTheNewtonRung )
+{
+	std::string const &log = shippedAdaptiveLog();
+	std::vector<std::string> const rows = adaptiveRows( log );
+	std::vector<int> const steps = tableColumn( log, adaptiveHeader, 6 );
+	BOOST_TEST_REQUIRE( rows.size() == 3u, log );
+	BOOST_TEST_REQUIRE( steps.size() == 3u, log );
+	for ( std::size_t c = 1; c < rows.size(); ++c )
+	{
+		BOOST_TEST( rows[ c ].find( "P->N" ) == std::string::npos,
+		            "adaptive cycle " << c << " needed the retry rung: " << rows[ c ]
+		            << ". Its bordered Newton stalled from the previous cycle's answer "
+		            "(MEASUREMENTS.md M-312)" );
+		BOOST_TEST( steps[ c ] <= steps[ 0 ],
+		            "adaptive cycle " << c << " took " << steps[ c ] << " Newton steps "
+		            "from a warm start against " << steps[ 0 ] << " from the cold one: a "
+		            "crawl (MEASUREMENTS.md M-312)" );
+	}
+	// Double's answer, printed by this configuration at 867c640.
+	double const reference = 9.483095e-02;
+	std::string const printed = summaryPsiAxis( log );
+	BOOST_TEST_REQUIRE( !printed.empty(), log );
+	double const psiAxis = std::stod( printed );
+	BOOST_TEST( std::abs( psiAxis - reference ) <= 2.5e-4*reference,
+	            "psi_ax " << printed << " is " << std::abs( psiAxis - reference )/reference
+	            << " from double's " << reference << ", against single's own 1.3e-04 on "
+	            "this machine: the crawl's answer and not the format's (MEASUREMENTS.md "
+	            "M-312)" );
+}
+
+BOOST_AUTO_TEST_CASE( theProfileScaleCrossesEachAdaptiveCycle )
+{
+	std::string const adaptive = adaptiveLimitedTokamak();
+
+	writeScaledTable( "examples/limited-tokamak-pprime.dat", 2.0, "scale-gauge-pprime.dat" );
+	writeScaledTable( "examples/limited-tokamak-ggprime.dat", 2.0, "scale-gauge-ggprime.dat" );
+
+	auto solve = [ & ]( std::string const &name, bool doubled )
+	{
+		std::string text = replaceAll( adaptive, "Prefix = \"limited-tokamak\"",
+		                               "Prefix = \"" + name + "\"" );
+		if ( doubled )
+		{
+			std::string const before = text;
+			text = replaceAll( text, sourcePath( "examples/limited-tokamak-pprime.dat" ),
+			                   "scale-gauge-pprime.dat" );
+			text = replaceAll( text, sourcePath( "examples/limited-tokamak-ggprime.dat" ),
+			                   "scale-gauge-ggprime.dat" );
+			BOOST_TEST_REQUIRE( text != before, "the table substitution matched nothing" );
+		}
+		std::ofstream( name + ".toml" ) << text;
+		int status = -1;
+		std::string const log = driverLog( std::string( driver() ) + " " + name + ".toml",
+		                                   status );
+		BOOST_TEST_REQUIRE( status == 0, name << " exited " << status << ":\n" << log );
+		return log;
+	};
+	std::string const &header = adaptiveHeader;
+	std::string const &one = shippedAdaptiveLog();
+	std::vector<int> const oneSteps = tableColumn( one, header, 6 );
+	BOOST_TEST_REQUIRE( oneSteps.size() == 3u, one );
+
+	/*
+	 * THE PRECONDITION: on the shipped tables every cycle after the first
+	 * converges on the Newton rung, so a step count is the hand-off's and not
+	 * a fallback's. The table marks a fallback after the count. In SINGLE it
+	 * does not hold, and that is a defect of its own and not this hand-off's:
+	 * cycle 1's bordered Newton stalls at about 1.8e-06, fifteen eps and above
+	 * the round-off stop's ten-eps gate, with the scale reset or carried, and
+	 * the retry rung crawls 238 to 379 steps to a psi_ax 1e-03 from double's
+	 * (MEASUREMENTS.md M-312, TODO), which aWarmAdaptiveCycleConvergesOnTheNewtonRung
+	 * asserts. So single says so and poses nothing here.
+	 */
+	bool const firstRung = [ & ]
+	{
+		std::size_t const at = one.find( header );
+		std::istringstream in( one.substr( one.find( '\n', at ) + 1 ) );
+		std::string line;
+		for ( int c = 0; c < 3 && std::getline( in, line ); ++c )
+			if ( c > 0 && line.find( "P->N" ) != std::string::npos )
+				return false;
+		return true;
+	}();
+	if ( std::is_same_v<mfem::real_t, float> && !firstRung )
+	{
+		std::printf( "    NOT POSED IN SINGLE: limited-tokamak's adaptive cycles after "
+		             "the first need the retry rung on the shipped tables, so a step "
+		             "count is not the hand-off's. MEASUREMENTS.md M-312.\n" );
+		std::fflush( stdout );
+		return;
+	}
+	BOOST_TEST_REQUIRE( firstRung,
+	                    "on the shipped tables an adaptive cycle after the first needed "
+	                    "the retry rung, so this case cannot read the hand-off:\n" << one );
+
+	std::string const two = solve( "scale-gauge-adaptive-doubled", true );
+	std::vector<int> const twoSteps = tableColumn( two, header, 6 );
+	BOOST_TEST_REQUIRE( twoSteps.size() == 3u, two );
+	for ( std::size_t c = 1; c < oneSteps.size(); ++c )
+		BOOST_TEST( twoSteps[ c ] == oneSteps[ c ],
+		            "adaptive cycle " << c << " took " << twoSteps[ c ] << " Newton steps on "
+		            "tables twice the size against " << oneSteps[ c ] << " on the shipped "
+		            "ones. The amplitude is a gauge PlasmaCurrent removes, so only cycle 0 "
+		            "may see it: the hand-off started the profile scale at one rather than "
+		            "at the previous cycle's answer (apps/meq.cpp, profileScaleSeed)" );
+	BOOST_TEST( !summaryPsiAxis( one ).empty() );
+	BOOST_TEST( summaryPsiAxis( two ) == summaryPsiAxis( one ) );
+	BOOST_TEST( two.find( "P->N" ) == std::string::npos,
+	            "on tables twice the size an adaptive cycle needed the retry rung:\n" << two );
+}
+
+BOOST_AUTO_TEST_CASE( theProfileScaleCrossesThePicardPreStage )
+{
+	std::string const shipped = shippedConfig( "examples/machine-f-diiid.toml" );
+	std::string const picard = replaceAll( shipped, "\nPlasmaSupportSweeps = 4\n",
+	                                       "\nPlasmaSupportSweeps = 4\nPicardSweeps = 1\n" );
+	BOOST_TEST_REQUIRE( picard != shipped, "the PicardSweeps substitution matched nothing" );
+
+	writeScaledTable( "examples/machine-f-diiid-pprime.dat", 2.0, "scale-gauge-diiid-pprime.dat" );
+	writeScaledTable( "examples/machine-f-diiid-ggprime.dat", 2.0,
+	                  "scale-gauge-diiid-ggprime.dat" );
+
+	auto solve = [ & ]( std::string const &name, bool doubled )
+	{
+		std::string text = replaceAll( picard, "Prefix = \"machine-f-diiid\"",
+		                               "Prefix = \"" + name + "\"" );
+		if ( doubled )
+		{
+			std::string const before = text;
+			text = replaceAll( text, sourcePath( "examples/machine-f-diiid-pprime.dat" ),
+			                   "scale-gauge-diiid-pprime.dat" );
+			text = replaceAll( text, sourcePath( "examples/machine-f-diiid-ggprime.dat" ),
+			                   "scale-gauge-diiid-ggprime.dat" );
+			BOOST_TEST_REQUIRE( text != before, "the table substitution matched nothing" );
+		}
+		std::ofstream( name + ".toml" ) << text;
+		// The wrapper: the file carries [mesh.generate], and both runs share
+		// the mesh it makes.
+		int status = -1;
+		std::string const log = driverLog( std::string( wrapper() ) + " " + name + ".toml",
+		                                   status );
+		BOOST_TEST_REQUIRE( status == 0, name << " exited " << status << ":\n" << log );
+		return log;
+	};
+	std::string const one = solve( "scale-gauge-picard", false );
+	std::string const two = solve( "scale-gauge-picard-doubled", true );
+
+	// THE PRECONDITION: the pre-stage itself sees no gauge. Its first estimate
+	// rescales the tables to the target on the guess, so its sweep is the
+	// shipped run's to the printed digit.
+	BOOST_TEST_REQUIRE( !picardRows( one ).empty(), one );
+	BOOST_TEST_REQUIRE( picardRows( two ) == picardRows( one ),
+	                    "the pre-stage is not gauge invariant, so this case cannot "
+	                    "separate the hand-off from it:\n" << picardRows( one ) << "against\n"
+	                    << picardRows( two ) );
+
+	std::string const message =
+		"the bordered solve after the Picard pre-stage did not start at the "
+		"pre-stage's profile scale (apps/meq.cpp, profileScaleSeed): on tables "
+		"twice the size it started at one, twice the scale the field it was handed "
+		"was solved at";
+	BOOST_TEST( two.find( "Retrying" ) == std::string::npos, message << ":\n" << two );
+	std::string const header = "sweep     its         psi_ax        psi_bnd        X-point";
+	std::vector<int> const oneSweeps = tableColumn( one, header, 1 );
+	BOOST_TEST_REQUIRE( !oneSweeps.empty(), one );
+	BOOST_TEST( tableColumn( two, header, 1 ) == oneSweeps, message );
+	BOOST_TEST( !summaryPsiAxis( one ).empty() );
+	BOOST_TEST( summaryPsiAxis( two ) == summaryPsiAxis( one ) );
 }
 
 /*

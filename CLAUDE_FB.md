@@ -2641,6 +2641,16 @@ a face. **Make the constraint continuous first**, and then the term is either
 unnecessary (define `x*` as a critical point of `psi*` and the envelope theorem
 is exact by construction) or safe.
 
+**The border fold does not change this, and cannot.** The fold applies only
+with `psi_ax` the one border, so it never engages on M-121's free-boundary
+cases; where it does engage it is exact algebra, and the envelope row folded
+and unfolded give the same counts and histories to round-off. Re-measured on
+the round-off stop in both formats: the term still costs `FreeBoundaryCoupling`
+its `R = 1.18` limiter radius and reddens `XPointBorder`, and still wins on the
+single-border fixed-boundary located axis — `HighBetaConvergence`'s `nu = 4`
+rows from 10, 9, 8 Newton steps to 6, 7, 7 in double, `PrescribedAxisPoint`'s
+located `n = 8` from 12 to 6 → **[M-311b](MEASUREMENTS.md#m-311b)**.
+
 ## The geometry: meshing a half-disc that reaches the axis
 
 Free boundary is the one campaign here whose geometry

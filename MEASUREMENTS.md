@@ -20085,11 +20085,11 @@ the answer's own labels. The case now bounds the move by that sweep. The
 other two cases must print identical psi_ax and I_p in both precisions, and
 `sameAxis`'s single band is 1e-05.
 
-**Open.** The scale is still overwritten on two other routes: the Picard
-pre-stage's estimate, and the adaptive loop's cycle-to-cycle hand-off. No
-shipped example combines `PlasmaCurrent` with either. `boundaryFluxInitialGiven`
-is never cleared, so every support sweep of a restarted run restarts psi_bnd
-at the file's value.
+The scale on the two other routes, the Picard pre-stage's estimate and the
+adaptive loop's cycle-to-cycle hand-off, is [M-312](#m-312)'s. The psi_bnd
+seed, `setBoundaryFluxInitial()`, is consumed by one solve as the scale's is,
+so a restarted run's later support sweeps continue from the sweep before
+(MirrorSupport's `theBoundaryFluxSeedIsConsumedByOneSolve`).
 
 ### M-306
 
@@ -20421,3 +20421,301 @@ taken over `inside` alone (2); the driver warning on every run (1); the `.nc`'s
 
 **Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./ExteriorDtNTests`
 and `./RotatingMirror --run_test=solve/theSourceOutsideGammaIsReportedOnTheAnswer`.
+
+### M-311a
+
+**THE BORDER FOLD'S kappa WINDOW, DERIVED: THE LOW EDGE IS `30 S0/M` AND RISES
+WITH eps, THE HIGH EDGE IS THE FOLDED ROW'S OWN BACKWARD ERROR AND FALLS WITH
+IT, SO THE WIDTH GOES AS `1/eps²` AND THE CENTRE DOES NOT MOVE BETWEEN
+FORMATS. THE REACTION TERM ALONE SAT UNDER SINGLE'S LOW EDGE; kappa IS NOW A
+THOUSAND TIMES IT.**
+
+**Setup.** `867c640`, `meq-integration` at `f3f4fe1ea7`, MKL 2026.2,
+`builds/sp-fold-{double,single}`. `PlasmaConnectivity`'s confined control
+(`p' = 0.6 Ψ`, `gg' = 0`, `ψ = 0` on the fitted rectangle, `k = 2`), driven
+from a scratch copy of the fixture with three temporary hooks, none in the
+tree: a multiplier `s` on kappa, a per-step trace of the fold's vectors, and
+the row's other entries on the axis element. `s = 1` is the reaction term at
+the folded dof over `|b_j|`. `|x|` is the whole iterate, 22.5 at `n = 16`.
+Draws are `MKL_NUM_THREADS` 1, 2, 4. Runs in `runs/sp-fold`; the probe, not in
+the tree, is `runs/sp-fold/tools/probe-full.patch` with its fixture driver
+`foldprobe.cpp`.
+
+**1. The unfolded shelf is `S0 = 4.2 eps |x|`.** Unfolded, in double, the step
+that lands on the shelf reads 2.09e-14, 4.15e-14 and 8.19e-14 at `n = 16, 32,
+64` (`|x|` = 22.5, 45.1, 90.2): 4.2, 4.2, 4.1 `eps |x|`. In single 1.13e-05,
+the same 4.2.
+
+**2. `M = kappa phi |R|` is a constant of the approach.** `phi = b·J⁻¹e_j`
+goes like `1/sigma` and `sigma` like `|R_true|/|x|`, and `kappa phi` is read
+off each step's `rho` as `rho/(1 − rho)`. At `s = 1`, `n = 16`, double: `M` is
+1.82e-04 at `|R|` = 2.08e-04 and 1.85e-04 at 3.15e-07. A step from `|R|` keeps
+`1 − rho = 1/(1 + M/|R|)` of the shelf, which is a linear contraction
+`c_A = S0/M` once `|R| << M`:
+
+| | from | predicted `S0/(1 + M/|R|)` | landed |
+|---|---|---|---|
+| single, `s = 1` | 2.19e-05 | 1.2e-06 | 1.20e-06 |
+| double, `s = 1e-10` | 3.95e-14 | 1.44e-14 | 1.62e-14 |
+| double, `s = 1e-11` | 3.97e-14 | 2.0e-14 | 2.0e-14 |
+
+`c_A ≤ 1/30` is the terminal bound, so the LOW EDGE is `s = 30 S0/M(1) =
+1.5e7 eps`: 1.9 in single, 3.4e-09 in double. Double's contraction at the edge
+step: 0.41 at `s = 1e-10`, 0.12 at `1e-9`, 0.017 at `1e-8`.
+
+**3. The high edge is the folded row's backward error.** Row `j` of `J'`
+carries `kappa b_p`; its factorisation error is `eps kappa |b_p|` times the
+solved vectors on that element, whose regular part does not shrink with kappa
+(`|z'|` saturates at 1.05e+04 from `s = 1e4` to `1e8`). Its contraction `c_B`,
+read in double as the landing above the `s = 1` landing: 0.68 `eps s` at
+`s = 1e10`, 0.20 at `1e11`, 0.1 to 0.8 at `1e12`. The line search crawls once
+the direction is a few per cent wrong, from the ill-conditioned start `ψ_ax =
+0.1`:
+
+| | `s` | `eps s` | Newton | |
+|---|---|---|---|---|
+| single | 1e4 | 1.2e-03 | 8, 8, 9 | clean |
+| | 3e4 | 3.6e-03 | 16, 16, 15 | **crawl**, 7 or 8 damped terminal steps |
+| | 1e5, 1e6 | 1.2e-02, 0.12 | 9 to 10 | clean |
+| | 3e5 | 3.6e-02 | 29 on two draws, 12 on one | crawl on two |
+| | 3e6 | 0.36 | 56, 51 | crawl |
+| | 1e7, 1e8 | | 60 | **no convergence** |
+| double | 1e13 | 2.2e-03 | 12 | clean |
+| | 3e13, 1e14 | 6.7e-03, 2.2e-02 | 11 to 13 | worst landing/bound up to 1.3 |
+| | 3e14 | 6.7e-02 | 23 on one draw | crawl, 11 damped |
+| | 1e15 | 0.22 | 60 | **no convergence** |
+
+So the HIGH EDGE is `s = c/eps` with `c` between 0.004 (single's first crawl)
+and 0.07 (double's), draw-dependent between 3e4 and 3e6 in single.
+
+**4. The window.** `[1.5e7 eps, c/eps]`: width `∝ 1/eps²`, `s` from 2 to 3e4
+in single and from 3e-09 to 1e13 or more in double, geometric centre 250 to
+1000 as `c` is read, the same in both formats. In single at
+`n = 16`, five starts (`ψ_ax` = 0.1 to 0.25) and three draws each, terminal
+landings above the bound:
+
+| `s` | 1 | 3 | 10 | 30 to 1e4 |
+|---|---|---|---|---|
+| runs over the bound, of 15 | 9 | 3 | 0 | 0 |
+| unfolded, for scale | 15 | | | |
+
+A sixth start, `ψ_ax = 0.08`, is left out: at `n = 24` its terminal step is
+damped at every `s` and in double too — the located axis's merit jumps there
+(M-120), not the fold — and at `n = 32` it fails to converge on random draws
+at `s` = 1, 30, 300 and 3000 alike.
+
+**5. The low edge rises with the mesh.** `M(s = 1)` = 1.85e-04, 1.9e-05 and
+6.4e-07 at `n = 16, 32, 64`; the reaction term falls against the rest of its
+row (divergence and face parts 3.1e-02 and 2.7e-02 against 9.1e-03 at `n =
+16`, 1.6e-02 and 1.4e-02 against 2.3e-03 at 32, 3.7e-03 and 5.4e-03 against
+1.1e-04 at 64). Single's low edge is `s` = 1.9, 35 and 2100. **`s = 1000`
+clears `n = 32`'s thirtyfold and sits thirtyfold under `n = 16`'s first crawl;
+at `n = 64` in single it is under the low edge.**
+
+**6. A third contraction no kappa reaches.** `dx = −(y' + dS z')` and `z'`
+tends to a regular vector, so a step carries `4.2 eps |dS| |z'|` of backward
+error: `c_Z = 4.2 eps |dS/R| |z'|`, 6e-03 at `n = 16` by the formula and 0.075
+at `n = 32` in single, predicted and measured, the same at `s` = 300, 1000 and 1e4 (`ψ_ax =
+0.25`, from 1.69e-05, 1.66e-05 and 1.64e-05 to 1.19e-06, 1.24e-06 and
+1.34e-06). In double the same step is quadratic, 1.42e-05 to 1.42e-09.
+
+**Falsified.**
+- *The reaction term is where the folded row is the size of the row it joins,
+  and the high edge is where it dominates.* The two are equal near `s = 5` (item
+  5), and nothing happens there or for four decades above.
+- *`s = 100` is past the high edge.* On the round-off stop it reads 0.64 to
+  0.66 of the bound from the ill-conditioned start, three draws.
+- *Normalising kappa by the row's divergence part instead fixes the high
+  edge* (probe only). It crawled at the equivalent of `s ≈ 3e4` on both draws
+  at `n = 16`, where the reaction-normalised kappa first crawls, and its low
+  edge still rises as `M` falls. Not taken.
+
+**The change.** kappa is `1000 ×` the reaction term over `|b_j|`
+(`borderFoldScale` in `GradShafranov.cpp`). `PlasmaConnectivity`'s
+`theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem`, single, three draws:
+folded 0.648 to 0.654 of the bound in 5 steps from `ψ_ax = 0.2`, 0.642 to
+0.644 in 9 to 12 steps from 0.1 (the floor, 7.7e-08, against a tenth of the
+target); unfolded 9.4 to 10.1 in 6. Double: 0.002 folded, 0.030 to 0.032
+unfolded, 6 steps each, `ψ_ax` to the bit and `ψ_h` to 3.0e-14.
+
+**What the case asserts now, and its mutations.** It runs the shipped solve
+from `ψ_ax = 0.1` as well, and evaluates the low edge with SINGLE's eps in
+either build: `|1 − rho_k| 4.2 eps_f |x| ≤ |R_k|/30` on every terminal step.
+That reads 3.2e-03 of the bound in double and 1.7e-03 in single. Mutations:
+- kappa back to the reaction term alone: double red at 3.2 on the low-edge
+  check; single red at 1.65 on the run from 0.1 (its low-edge check reads 0.27,
+  since its terminal step starts at 2e-04).
+- `eta` dropped from the 2 × 2: double red on the envelope row's early merits,
+  parted by 5.4e-05 against the 1e-9 bound, and on its `ψ_ax` and step count.
+
+**Suites**, `OMP = 2`, `ctest -j3`, before (`867c640` with the inert hooks)
+and after (this change, `builds/sp-fold-new-*`):
+
+| | before | after |
+|---|---|---|
+| double | 83/84, `PlasmaEdgeConvergence` | 83/84, `PlasmaEdgeConvergence` |
+| single | 82/84, `PlasmaEdgeConvergence` and `DeviceParity` | 83/84, `PlasmaEdgeConvergence` |
+
+The single `DeviceParity` red before is its CUDA arm, where the fold is
+skipped: `diverted-tokamak` took 38 steps against the host's 23, and on a
+rerun of the same binary 23. In double no Newton count moves and no answer
+beyond its last printed digits (a final residual's last digit,
+`RotatingNormalisedConvergence`'s constraint at 1e-16, `SafetyFactorSolver`'s
+round-off-level rows). In single the only counts that move are four of
+`HighBetaConvergence`'s six self-consistent rows, by one step each way (ν = 2
+at amplitudes 10 and 100, 4 to 3; ν = 4 at 10 and 100, 8 to 9), in tails that
+end within a few times the format's floor. They are not a trend in kappa:
+over `s` = 1, 10, 100, 1000 the six rows total 34, 34, 30 and 34 steps (ν = 4,
+amplitude 100 alone: 8, 11, 7, 9), identical on all three draws.
+
+### M-311b
+
+**THE BORDER FOLD DOES NOT CHANGE M-121: IT NEVER FOLDS ON THE CASES THE
+ENVELOPE ROW LOSES, AND WHERE IT FOLDS THE ROW FOLDED AND UNFOLDED TAKE THE
+SAME STEPS. RE-MEASURED ON THE ROUND-OFF STOP, `AxisRow::WithEnvelope` STILL
+LOSES A LIMITER RADIUS AND STILL WINS ON THE ONE-BORDER FIXED-BOUNDARY AXIS.
+THE DEFAULT STAYS `PositionDropped`.**
+
+**Setup.** As [M-311a](#m-311a); every binary of M-121's cases run whole,
+default against envelope row (a temporary switch, not in the tree), and the
+one-border ones also with the fold off. A fold engages only with `ψ_ax` the one
+border; counted from the trace, it engaged on `HighBetaConvergence` and
+`PrescribedAxisPoint` and on none of `XPointBorder`'s or `FreeBoundaryCoupling`'s
+solves.
+
+**Where it folds, it does not matter.** `HighBetaConvergence`'s `ν = 4` rows,
+Newton steps:
+
+| | dropped, folded | dropped, unfolded | envelope, folded | envelope, unfolded |
+|---|---|---|---|---|
+| double, amplitude 1, 10, 100 | 10, 9, 8 | 10, 9, 8 | **6, 7, 7** | 6, 7, 7 |
+| final residual | 1.4e-11 to 1.5e-10 | the same | 2.3e-14 to 7.7e-16 | 2.3e-14 to 5.6e-16 |
+| single | 7, 8, 8 | 7, 7, 7 | **5, 6, 6** | 5, 6, 6 |
+
+`PrescribedAxisPoint`'s located high-beta row, the case M-259 measured linear
+at ×0.073: `n = 8` 12 steps to **6**, `n = 16` 8 to **6** in double (final
+7.8e-14 to 2.3e-14, 7.1e-15 to 1.8e-16); 7 to 5 and 5 to 4 in single. Its
+two-border rows do not move. The envelope row's histories folded and unfolded
+agree to the printed digits in double.
+
+**Where it loses, nothing folds.**
+
+| | dropped | envelope |
+|---|---|---|
+| `FreeBoundaryCoupling`, double | passes | **4 of 5 limiter radii — R = 1.18 does not converge** |
+| `FreeBoundaryCoupling`, single | passes | the same, and the coil-free control runs 1 row of 3 |
+| `XPointBorder` bootstrap, double | 14 steps, to 1.67e-12, order 1.644 | 15 steps, to 1.08e-16, order unreadable (19.5) — **red** |
+| `XPointBorder` bootstrap, single | 13 steps, to 3.87e-08, order 1.94 | 13 steps, stopped at 1.82e-07 on a failing step, order 0.09 — **red twice** |
+| `XPointBorder` sweeps, double | 3, 2, 2 | 3, 2, 2, ending 6.3e-12 against 1.2e-13 |
+
+M-121's shape on both counts: the endgame deeper, the approach worse, and the
+physical fixture's limiter radius lost — on 09-15's library that was R = 1.18
+too. `HighBetaConvergence` in single also goes red under the envelope row on
+its `ν = 4, amplitude 100` order (1.04), read on a triple whose last point is
+the floor (6.4e-05 to 1.36e-06); in double the same row reads 2.01.
+
+**The suite under the envelope row**, against the same binaries' default:
+
+| | default | envelope row |
+|---|---|---|
+| double | 83/84 | **81/84**: `XPointBorder`, `FreeBoundaryCoupling` |
+| single | 82/84 (the CUDA flake above) | **79/84**: `XPointBorder`, `FreeBoundaryCoupling`, `HighBetaConvergence`, `DeviceParity` (`diverted-tokamak` 22 steps on both device routes against 23 on the host) |
+
+Elsewhere in double it saves steps: `MachineFixedBoundary` 7, 6 to 6, 5;
+`XPointOuter`'s sweep 2, 3 to 2; `InverseSolve`'s released solve 4 to 3 and its
+F6A control 12 to 9. **So it does not win: it trades a free-boundary limiter
+radius and an X-point bootstrap for steps on fixed-boundary cases**, which is
+M-121's verdict. Making it the default only where `ψ_ax` is the one border
+would keep the wins and none of the losses measured here; that is a different
+default and is not measured as a suite.
+
+### M-312
+
+**THE I_p PROFILE SCALE WAS RESET TO ONE AFTER THE PICARD PRE-STAGE AND AT
+EVERY ADAPTIVE HAND-OFF. THE TABLES' AMPLITUDE, WHICH `PlasmaCurrent` SHOULD
+REMOVE, THEN DECIDES THE WORK AND EVEN WHETHER THE RUN CONVERGES: DIII-D AFTER
+ONE PICARD SWEEP ON TABLES TWICE THE SIZE EXITS 2 IN BOTH PRECISIONS. CARRIED,
+IT TAKES THE SHIPPED TABLES' STEPS TO THE SAME psi_ax.**
+
+**Setup.** `867c640` (`builds/{double,single}`) against this change
+(`builds/sp-scale-{double,single}`), MKL 2026.2, `MKL = 1`, `OMP = 2`, under
+`runs/sp-scale`. The gauge: `p′` and `gg′` tables both multiplied by two are
+the same problem at half the profile scale, so only a cold start may tell
+them apart. Two configurations, neither shipped: `limited-tokamak` with
+`[adaptivity]` (Doerfler 0.6, three cycles), and `machine-f-diiid` with
+`PicardSweeps = 1`. Newton steps are per adaptive cycle, or per support sweep
+of the bordered solve after the pre-stage.
+
+| case | tables | double, `867c640` | double, carried | single, `867c640` | single, carried |
+|---|---|---|---|---|---|
+| LT adaptive | shipped | 12 / 8 / 8 | 12 / 8 / 8 | 9 / **238 bP→N** / 7 | 9 / **314 bP→N** / 8 |
+| LT adaptive | doubled | 12 / **10 / 10** | 12 / 8 / 8 | 11 / **379 bP→N** / 10 | **exit 2** |
+| DIII-D, 1 Picard sweep | shipped | 8 / 3 / 2 | 7 / 3 / 2 | 7 / 2 / 1 | 5 / 2 / 1 |
+| DIII-D, 1 Picard sweep | doubled | **exit 2**, 216 s | 7 / 3 / 2 | **exit 2**, 196 s | 5 / 2 / 1 |
+| DIII-D, cold | doubled | 9 / 3 / 2 | 9 / 3 / 2 | 7 / 1 / 1 | 7 / 1 / 1 |
+
+**The pre-stage is gauge invariant and the hand-off was not.** Its first
+estimate rescales the tables to the target on the guess, so its one sweep
+prints the shipped run's row on doubled tables (`psi_ax` 3.088430e-01, I_p
+9.700864e+05). The bordered solve after it then started at scale one, twice
+the scale its field was solved at. In double it stalls at sweep 0 (8 steps
+under 1/64 of the Newton step) and the bordered Picard-then-Newton rung runs
+to its 200-step cap; in single sweep 0 converges in 42 steps with the X-point
+carried to ( −0.003, −2.923 ), on the symmetry axis, sweep 1 stalls and the
+rung fails too. Both exit 2. A cold start on the same tables
+converges: the pre-stage's field at the wrong scale is a worse start than no
+pre-stage. Carried, the doubled run is the shipped run, step for step, to
+`psi_ax` 3.759850e-01 (double) and 3.759854e-01 (single); on the shipped
+tables the carry saves one step (double) and two (single) on sweep 0.
+
+**The adaptive hand-off, in double**: reset to one, the doubled tables cost
+two steps in each cycle after the first, the last cycle's first residual
+1.19 against 0.41; carried, both tables take 8 and 8 and print the same
+`psi_ax`, 9.483095e-02. The shipped tables' 9e-04 offset costs no step.
+
+**Single cannot pose the adaptive case, and that is not this hand-off.** On
+the shipped tables cycle 1's bordered Newton stalls at about 1.8e-06, fifteen
+eps, above the round-off stop's ten-eps gate, with the scale reset or carried,
+and the retry rung crawls 238 or 314 steps to `psi_ax` 9.4707e-02 or
+9.4809e-02 against double's 9.4831e-02, `psi_ax − max psi_h` at 2.4e-07. On
+the doubled tables, carried, the rung fails. Which of those happens is decided
+inside a crawl, so the case is not posed in single (TODO, the round-off stop's
+item).
+
+**And the crawl's answer is not single's accuracy.** The three-cycle run in
+single, carried, ends at `psi_ax` 9.496151e-02 against double's 9.483095e-02,
+1.4e-03 apart; the same machine without adaptivity reads 9.483142e-02 in
+single against 9.484404e-02 in double, 1.3e-04, as [M-221](#m-221)'s table
+has it (`runs/adaptive-crawl`, the installed 867c640). DriverAcceptance's
+`aWarmAdaptiveCycleConvergesOnTheNewtonRung` asserts, in both formats, that
+every cycle after the first converges without the retry rung in no more
+Newton steps than cycle 0, and lands within 2.5e-04 of 9.483095e-02. Double
+passes; single is red on all three counts.
+
+**A third route, a restart from a `.nc` on another mesh**, took the file's
+`psi_ax`, X-point and currents and printed "the I_p profile scale starts at
+the file's", then started at one. It now starts there. `lt-adapt.nc` (1977
+elements) onto the shipped 1601: 8 steps either way in double, 6 in single;
+the first residual is dominated by `psi_bnd`, which starts afresh.
+
+**Mutation.** Three mutants of `apps/meq.cpp`, each run against
+`theProfileScaleCrossesEachAdaptiveCycle`,
+`theProfileScaleCrossesThePicardPreStage` and, for the third,
+`OutputConversion`'s `theRestartCarriesTheWholeState`:
+
+| mutant | adaptive | Picard | restart |
+|---|---|---|---|
+| no seed at the cycle hand-off | red: 10 against 8, cycles 1 and 2 | green | — |
+| no seed from the pre-stage | green | red: exit 2 | — |
+| seed never put on the solver | red | red | red: limited-tokamak 1 step and diverted-tokamak-xpoint 3 (double); limited-tokamak 2 steps, `psi_ax` and I_p moved (single) |
+
+In single the adaptive column is the case's precondition; the Picard column
+reads the same in both precisions.
+
+**Not posed on `limited-tokamak` with `PicardSweeps`**: its first sweep
+stalls, finds no O-point and stops, and the bordered solve after it lands on
+different roots of the current-limit fold from round-off-level differences in
+the start, so the gauge has nothing stable to compare.
+
+**Reproduce.** `runs/sp-scale/measure.sh {base,new} {double,single}`, then
+`summarise.sh`; the cases are `DriverAcceptance --run_test='theProfileScaleCrosses*'`.

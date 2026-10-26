@@ -426,12 +426,12 @@ happens:
   mesh and says what field it holds, or a stored grid function and the mesh it
   lives on, ``File`` and ``MeshFile``. The two read the same coefficients and
   restart from the same potential, but a ``.nc`` carries the rest of the
-  solver's state too. On the mesh it was solved on it restarts from the whole
-  iterate — the flux and the trace as well as :math:`\psi_h` — and from the
-  border's unknowns as the run left them: :math:`\psiax`, :math:`\psi_{\rm
-  bnd}`, the X-point, the plasma-current scale, the free circuit currents and a
-  :math:`q`-driven run's :math:`g^2`. So a converged run restarted from its own
-  ``.nc`` starts at its answer, and says what it took; a ``.gf`` starts from
+  solver's state too. On any mesh it starts the border's unknowns as the run
+  left them: :math:`\psiax`, the X-point, the plasma-current scale, the free
+  circuit currents and a :math:`q`-driven run's :math:`g^2`. On the mesh it was
+  solved on it also restarts from the whole iterate — the flux and the trace as
+  well as :math:`\psi_h` — and from :math:`\psi_{\rm bnd}`. So a converged
+  run restarted from its own ``.nc`` starts at its answer, and says what it took; a ``.gf`` starts from
   :math:`\psi_h` and the TOML's seeds. If the stored mesh matches the one being solved on, the
   restart is *exact* — every polynomial coefficient, not an interpolation. If
   it does not, the guess is interpolated onto the new mesh, which is the
@@ -440,7 +440,10 @@ happens:
   first begins from the previous cycle's converged answer, interpolated onto the
   refined mesh, with the Dirichlet datum as the fallback at any node the coarse
   mesh does not cover. On a curved boundary there really are such nodes, because
-  the computational domain *grows* as it refines.
+  the computational domain *grows* as it refines. The border's unknowns start
+  where the previous cycle left them — :math:`\psiax`, the X-point, the free
+  circuit currents and the plasma-current scale — and :math:`\psi_{\rm bnd}`
+  starts afresh.
 
 What a warm start buys depends entirely on the source. For a source whose
 :math:`\partial F/\partial\psi` is zero the problem is affine, Newton takes one
