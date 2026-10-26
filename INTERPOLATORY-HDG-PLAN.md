@@ -70,10 +70,20 @@ own profiler. **If `T(16) − T(6)` is inside the 1.4%–14% run-to-run scatter
 M-80 records, the performance case is dead and the port must stand on §0.3
 alone.**
 
-It needs one flag added to `tests/performance/NewtonStepProfile.cpp` (a
-`--source-extra N` passed through to `setSourceQuadratureOrder()`), a `-j6`
-rebuild and three runs. **No number for it is printed anywhere in this
-document, because it has not been run.**
+The flag is `NewtonStepProfile --source-extra N`. **RUN, AND THE CASE IS NOT
+DEAD — BUT THE KNOB ALONE TAKES MOST OF IT** → **[M-314](MEASUREMENTS.md#m-314)**.
+`T(16) − T(6)` is 12–17% of a threaded step and 27–37% of a serial one,
+outside the scatter, all of it in the residual and gradient legs, and the
+threaded bound is about §3.4's ceiling. But at `extraOrder = 0` no smooth
+fixture's rate moves by more than 0.004, so the competitor is the knob at 0
+and not the shipped 4: what an interpolatory port could add beyond it is the
+remaining six points, **7–10% threaded**, before its own nodal evaluations and
+GEMMs. **§0.3 now carries more of the argument than this section does.**
+
+**AND THE KNOB DOES NOT REACH THE LINEAR PATH**: `setSource( mfem::Coefficient & )`
+integrates on a fixed `2k + 4`, and moving the knob alone breaks the two
+`NewtonConvergence` cases that want the two `setSource()` overloads on one
+rule. A stage that compares the routes moves both.
 
 **A second reading comes free from the same runs**: the rates in
 `SolovievConvergence` and `NewtonConvergence` at `extraOrder = 0` say how much
@@ -809,7 +819,10 @@ by its being closed, and they are recorded here rather than lost:
 House format: each ends at a **measured convergence rate or a measured timing**,
 not at "it runs". Every stage runs against the quadrature control of §4.1.
 
-### IH-0 — the falsifier (§0.1), before anything is written
+### IH-0 — the falsifier (§0.1), before anything is written — RUN, NOT A STOP
+
+**Three repeats of five**, the gate shut for the last two by another
+session's load; the verdict is not close at three. → **[M-314](MEASUREMENTS.md#m-314)**.
 
 **Do**: add `--source-extra N` to `tests/performance/NewtonStepProfile.cpp`,
 rebuild `-j6`, run `extraOrder ∈ { 4, 2, 0 }` × three cases, medians of five,

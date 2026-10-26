@@ -1010,7 +1010,11 @@ request with a consumer attached. **And the headline below is deflated by that
 plan's own arithmetic**: at `extraOrder = 0` interpolation evaluates `F` *more*
 often than quadrature does, the honest figure is 1.6–2.0× fewer evaluations,
 `ComputeH()` is untouched, and the Amdahl ceiling off M-80 is **23–28%**. Read
-its §0 before its stages; IH-0 is a falsifier whose result may be *stop*.
+its §0 before its stages. **IH-0 is run and is not a stop**, but lowering
+the source rule to `extraOrder = 0` takes most of the prize with no new code,
+leaving the port 7–10% threaded beyond it
+([M-314](MEASUREMENTS.md#m-314)), so its §0.3's device argument is now the
+stronger half.
 
 What is kept here is the argument for the method, which is unchanged and is why
 the plan exists.

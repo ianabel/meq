@@ -20824,3 +20824,70 @@ second column of the A and E rows, red under the argmax.
 
 **Reproduce.** `runs/c-cold/rNN/` (`old.log` and `fixed.log`),
 `runs/seed-table/run.sh` and `rungs.sh`.
+
+### M-314
+
+**IH-0, THE INTERPOLATORY-HDG PERFORMANCE FALSIFIER: DROPPING THE SOURCE RULE
+FROM 16 TO 6 POINTS TAKES 12–37% OFF A STEP, SO THE PERFORMANCE CASE IS NOT
+DEAD — BUT THE KNOB ALONE TAKES MOST OF IT.**
+`tests/performance/NewtonStepProfile --source-extra N`, `N ∈ {4, 2, 0}` at
+`k = 2` — 16, 12 and 6 points per straight triangle from `mfem::IntRules`
+(order 8, 6, 4; `OrderW() = 0`), as `INTERPOLATORY-HDG-PLAN.md` §0.1 said.
+`OMP_NUM_THREADS=8`, `MKL_NUM_THREADS=1`, PARDISO; each arm one process at the
+binary's median of five, the three arms interleaved 4, 2, 0 within a repeat,
+each repeat gated at 1-min load < 1.0. **Three repeats, not five**: the gate
+opened for one twenty-minute window. Commit `4cf1ecf` plus the flag.
+
+| case | assembly | T(16) s | T(16) − T(6), paired median | of T(16) | bound (16/10)·d | of T(16) |
+|---|---|---|---|---|---|---|
+| example5 k=2 n=24 | serial | 0.2190 | 0.0629 | **28.7%** | 0.1006 | 46.0% |
+| example5 k=2 n=24 | threaded | 0.0898 | 0.0150 | **16.7%** | 0.0240 | 26.7% |
+| pedestal k=2 n=32 | serial | 0.4747 | 0.1264 | **26.6%** | 0.2022 | 42.6% |
+| pedestal k=2 n=32 | threaded | 0.1937 | 0.0292 | **15.1%** | 0.0467 | 24.1% |
+| highbeta k=2 n=16 | serial | 0.1640 | 0.0598 | **36.5%** | 0.0957 | 58.3% |
+| highbeta k=2 n=16 | threaded | 0.0549 | 0.0067 | **12.2%** | 0.0107 | 19.5% |
+
+**OUTSIDE THE SCATTER, AND THE LEGS SAY WHY.** Every paired difference is
+positive, and the whole of it lands in the residual and gradient legs:
+`ComputeH`, factor, backsolve and `other` are flat across the three arms, as
+are the Newton and factorisation counts. The residual leg's min–max at 16
+points and at 6 does not overlap on any row (highbeta threaded: 0.0182–0.0201
+against 0.0118–0.0123), which is what carries the one median, 12.2%, that
+sits inside M-80's 1.4–14% band. The in-process spread here reproduces that
+band, 2–26%.
+
+**THE THREADED BOUND IS THE §3.4 AMDAHL CEILING, NEAR ENOUGH** — 26.7 / 24.1 /
+19.5% against ≤ 25.4 / 23.4 / 28.1% — so source quadrature is most of what the
+element-local legs could give up. Read the bound to one figure: per-point cost
+is not linear in `N_q` at three repeats (16→12 and 12→6 differ by up to 7×
+on example5 threaded), and it assumes the interpolatory route does not also
+remove the integrator's per-element fixed cost, which a change in `N_q`
+cannot see.
+
+**THE COMPETITOR IS `extraOrder = 0`, NOT THE SHIPPED 4.** At extraOrder 0 no
+rate in `SolovievConvergence` or `NewtonConvergence` moves by more than 0.004
+at the finest mesh, Newton stays quadratic, and the coarse-mesh errors are
+marginally smaller. So the over-integration buys nothing on a smooth source.
+What an interpolatory port could add beyond lowering the knob is the
+remaining six points, `0.6·d`: **10.0 / 9.0 / 7.3%** threaded, 17.2 / 16.0 /
+21.9% serial, before its own ten nodal evaluations and GEMMs are paid.
+The four extra orders are there for a support that stops inside an element
+(`PlasmaEdgeConvergence`), which none of these fixtures has.
+
+**THE KNOB DOES NOT REACH THE LINEAR PATH.** `setSource( mfem::Coefficient & )`
+integrates on `DomainLFIntegrator( …, 2, 4 )`, a fixed `2k + 4`, so
+`SolovievConvergence` is byte-identical at any `setSourceQuadratureOrder()`.
+And moving the knob alone breaks `theNewtonPathReproducesTheLinearPathOnSoloviev`
+(4.3e-7 relative) and `theReconstructionDefectDoesNotReachTheSolve` (18
+checks), which want the two `setSource()` overloads on one rule; both are
+green again when the linear rule moves with it. The rates above were taken
+through an uncommitted environment-variable patch that moved both.
+
+**What is left of IH-0**: repeats four and five, which another session's
+solver kept the gate shut for. The tables above are three repeats.
+
+**Reproduce.** `tests/performance/newton-step-profile.sh <build> 5 N`, or the
+gated, interleaved driver as run: `runs/ih0/ih0-timing.sh` (`REPEATS=5
+START_AT=4` resumes it), parsed by `runs/ih0/ih0-parse.py`; the raw records,
+the rates outputs and the local patch they were taken through are in
+`runs/ih0/`.

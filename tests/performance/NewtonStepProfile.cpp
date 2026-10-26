@@ -63,7 +63,17 @@
  *   wall time the best-of is. Both are printed, so the spread is visible.
  *
  * Usage:  NewtonStepProfile [--repeats N] [--serial] [--threaded]
- *                           [--case pedestal|example5|all]
+ *                           [--case pedestal|example5|highbeta|all]
+ *                           [--source-extra N]
+ *
+ * --source-extra N IS INTERPOLATORY-HDG-PLAN.md's IH-0 FALSIFIER. It hands N to
+ * setSourceQuadratureOrder(), so meq::SourceIntegrator integrates F on the rule
+ * of order 2k + OrderW() + N rather than the solver's default. Every leg is
+ * timed exactly as without it; what moves is the number of F and dF/dpsi
+ * evaluations per element, so the difference in total between two values of N
+ * prices the quadrature points the interpolatory route would delete. Absent,
+ * the setter is NOT called and the run is the solver's own default, bit for
+ * bit -- not a call with 4 that happens to agree today.
  */
 
 #include <algorithm>
@@ -227,12 +237,16 @@ namespace
 
 	template<typename Fixture>
 	Run runOnce( Box const &b, int order, int n, Fixture const &fixture,
-	             mfem::Coefficient &datum, bool guessFromDatum, AM mode )
+	             mfem::Coefficient &datum, bool guessFromDatum, AM mode,
+	             int sourceExtra )
 	{
 		Run out;
 		mfem::Mesh mesh = makeMesh( b, n );
 		Solver solver( mesh, order );
 		solver.setAssemblyMode( mode );
+		// Negative is "not asked", which leaves the solver's default untouched.
+		if ( sourceExtra >= 0 )
+			solver.setSourceQuadratureOrder( sourceExtra );
 
 		EquilibriumSource<Fixture> const source( fixture );
 		solver.setSource( source );
@@ -281,7 +295,7 @@ namespace
 	 * which is precisely what the call counts below are for.
 	 */
 	Run runBordered( Box const &b, int order, int n, int nu, double amplitude,
-	                 AM mode )
+	                 AM mode, int sourceExtra )
 	{
 		Run out;
 		out.bordered = true;
@@ -294,6 +308,8 @@ namespace
 		mfem::Mesh mesh = makeMesh( b, n );
 		Solver solver( mesh, order );
 		solver.setAssemblyMode( mode );
+		if ( sourceExtra >= 0 )
+			solver.setSourceQuadratureOrder( sourceExtra );
 
 		NormalisedEquilibriumSource<meq::analytic::HighBetaPoloidal> source(
 			meq::analytic::HighBetaPoloidal::peaked( nu, amplitude, estimate ) );
@@ -364,6 +380,7 @@ int main( int argc, char **argv )
 	bool wantSerial = true;
 	bool wantThreaded = true;
 	std::string wantCase = "all";
+	int sourceExtra = -1;
 
 	for ( int i = 1; i < argc; ++i )
 	{
@@ -376,6 +393,8 @@ int main( int argc, char **argv )
 			wantSerial = false;
 		else if ( arg == "--case" && i + 1 < argc )
 			wantCase = argv[ ++i ];
+		else if ( arg == "--source-extra" && i + 1 < argc )
+			sourceExtra = std::atoi( argv[ ++i ] );
 	}
 
 	int const ompThreads =
@@ -418,6 +437,11 @@ int main( int argc, char **argv )
 			: "UMFPack";
 		std::printf( "  trace solver: %s (the library default), symbolic reuse ON\n",
 		             which );
+		// What the source integrator was run at, read back from the solver so
+		// that the default is reported as itself rather than as an assumption.
+		std::printf( "  source quadrature: 2k + OrderW() + %d%s\n",
+		             ( sourceExtra >= 0 ) ? sourceExtra : probeSolver.sourceQuadratureOrder(),
+		             ( sourceExtra >= 0 ) ? " (--source-extra)" : " (the library default)" );
 	}
 
 	meq::analytic::ManufacturedNonlinear const example5
@@ -500,16 +524,18 @@ int main( int argc, char **argv )
 				switch ( c.kind )
 				{
 					case Kind::Pedestal:
-						run = runOnce( box(), c.order, c.n, pedestal, datum, true, mode );
+						run = runOnce( box(), c.order, c.n, pedestal, datum, true, mode,
+						               sourceExtra );
 						break;
 					case Kind::Example5:
-						run = runOnce( box(), c.order, c.n, example5, datum, false, mode );
+						run = runOnce( box(), c.order, c.n, example5, datum, false, mode,
+						               sourceExtra );
 						break;
 					case Kind::HighBeta:
 						// nu = 2, amplitude 1: HighBetaConvergence's own converging
 						// point, so a non-convergence here would be the harness
 						// rather than the physics.
-						run = runBordered( box(), c.order, c.n, 2, 1.0, mode );
+						run = runBordered( box(), c.order, c.n, 2, 1.0, mode, sourceExtra );
 						break;
 				}
 				run.name = c.name;

@@ -25,7 +25,11 @@
 # SHARE is more robust to contention than a wall time is -- every leg is slowed
 # together -- but the serial/threaded comparison is not.
 #
-# Usage:  tests/performance/newton-step-profile.sh [build-dir] [repeats]
+# Usage:  tests/performance/newton-step-profile.sh [build-dir] [repeats] [source-extra]
+#
+# source-extra, when given, is handed to the binary as --source-extra: the
+# order added to 2k for meq::SourceIntegrator's rule, INTERPOLATORY-HDG-PLAN.md's
+# IH-0 knob. Absent, the binary leaves the solver's default alone.
 #
 # Runs from any working directory. build-dir defaults to the project's
 # builds/double, found from this script's own location (source/tests/performance
@@ -36,6 +40,8 @@ HERE=$(cd "$(dirname "$0")" && pwd -P)
 PROJECT=$(cd "$HERE/../../.." && pwd -P)
 BUILD="${1:-$PROJECT/builds/double}"
 REPEATS="${2:-5}"
+SOURCE_EXTRA=""
+[ -n "$3" ] && SOURCE_EXTRA="--source-extra $3"
 BIN="$BUILD/tests/NewtonStepProfile"
 
 [ -x "$BIN" ] || BIN="$BUILD/NewtonStepProfile"
@@ -57,7 +63,7 @@ echo "# OMP_NUM_THREADS=8, MKL_NUM_THREADS=1 -- MEQ's own configuration"
 echo "############################################################"
 OMP_NUM_THREADS=8 MKL_NUM_THREADS=1 \
 OMP_PROC_BIND=close OMP_PLACES=cores \
-"$BIN" --repeats "$REPEATS"
+"$BIN" --repeats "$REPEATS" $SOURCE_EXTRA
 
 # THE SECOND ARM ANSWERS A DIFFERENT QUESTION AND IS THREADED-ONLY ON PURPOSE.
 # Pinning MKL to 1 is right for the serial rows -- it stops the gradient leg
@@ -76,7 +82,7 @@ echo "# OMP_NUM_THREADS=8, MKL_NUM_THREADS UNPINNED -- threaded rows only"
 echo "############################################################"
 env -u MKL_NUM_THREADS \
 OMP_NUM_THREADS=8 OMP_PROC_BIND=close OMP_PLACES=cores \
-"$BIN" --repeats "$REPEATS" --threaded
+"$BIN" --repeats "$REPEATS" --threaded $SOURCE_EXTRA
 
 echo
 echo "loadavg at end: $(cat /proc/loadavg)"
