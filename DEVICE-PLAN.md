@@ -22,7 +22,9 @@ pair reproduces the host on all four paths under CUDA. What stays open:
   the plan's own "configure the device problem";
 * **the hardware's**: whether FP32 pays on a resident solve (§7.6 item 3), and
   upstream's crossover on MEQ's triangles (§6), both of which need a card
-  with an admissible FP64 rate.
+  with an admissible FP64 rate. `tools/device-timing/` packs M-242's matrix
+  for one (an A100 node on NERSC Perlmutter first), and its `check.sh` holds
+  the GPU to the host's printed answers before anything is timed.
 
 **EVERY DEVICE ROUTE IS BUILT, AND SINCE [M-238](MEASUREMENTS.md#m-238) THE
 GATES OPEN ON EVERY BORDERED SOLVE UNDER A DEVICE -- THE STATE TO PICK UP FROM

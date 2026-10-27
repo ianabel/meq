@@ -492,6 +492,9 @@ tools/       meqpaths.py (the layout, for every tool), plot_equilibrium.py (both
              chease-benchmark/ (CHEASE, same equation and free functions;
              converge.py refines each code separately, as a MATRIX, because
              only a difference that falls rules out a conversion error, M-158).
+             device-timing/: the M-242 timing matrix packed for a GPU machine
+             with no Claude Code (bundle.sh here; preflight, build, check,
+             run and summarize there). Its README says what to bring back.
 examples/    TOML run configurations.
 docs/        the Sphinx manual for Read the Docs; docs/manual/ is the older
              LaTeX one.

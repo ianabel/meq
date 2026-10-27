@@ -63,6 +63,12 @@ if(GIT_FOUND AND EXISTS "${MEQ_SOURCE_DIR}/.git")
 	if(NOT _meq_git_dirty STREQUAL "")
 		set(MEQ_GIT_COMMIT "${MEQ_GIT_COMMIT}-dirty")
 	endif()
+elseif(EXISTS "${MEQ_SOURCE_DIR}/GIT_COMMIT")
+	# AN EXPORTED TREE HAS NO .git, so whoever exported it says which commit it
+	# is: tools/device-timing/bundle.sh writes this file, in the same spelling
+	# as above, so a binary built off this machine still names its source.
+	file(READ "${MEQ_SOURCE_DIR}/GIT_COMMIT" MEQ_GIT_COMMIT)
+	string(STRIP "${MEQ_GIT_COMMIT}" MEQ_GIT_COMMIT)
 endif()
 
 configure_file(
