@@ -79,6 +79,7 @@ or that code cites by section number, stay where they are and are indexed under
   * *Corner-only refinement for the ψ_ax layer*
   * *Narrowing ψ_ax's nodal maximum instead of locating the axis*
   * *Initialising ψ_bnd from its own border row*
+  * *Starting ψ_bnd at the frozen support edge*
   * *Auxiliary globally-coupled unknowns*
 * **Free boundary: geometry, conductors, meshing and the benchmarks**
   * *The Lackner / von Hagenow Green's-function route*
@@ -1347,6 +1348,25 @@ machine goes from 11 Newton steps to the 200 cap under it, and that item's own
 conclusion (§10.8) is that this is a lever rather than a missing default.
 
 *From `FREE-BOUNDARY-PLAN.md` §12's introduction.*
+
+### Starting ψ_bnd at the frozen support edge
+
+**Falsified as a default, and a branch control.** A cold start's support sweep
+freezes the edge at the guess's own boundary flux while the `ψ_bnd` unknown
+starts at zero; on F shaped the gap makes `F` jump at the frozen edge and the
+first attempt stalls on a Jacobian that cannot see the jump. Starting `ψ_bnd`
+at the edge cures F to the printed digit and loses E, E shaped and MAST-U, and
+reports TCV converged on another equilibrium →
+[M-315](MEASUREMENTS.md#m-315). FB-R's selection again, from the driver.
+
+**And a continuous source, as a default, three ways** (same entry): the
+pointwise test at the live labels with the region frozen; the fill live as
+well; and the profiles' argument zeroed at the frozen edge with a standard
+sweep to finish. Each removes F's jump and each reports another equilibrium
+somewhere -- the shipped `diverted-tokamak-xpoint` 11% out in `psi_ax` under
+the first, machine A under the second -- or fails F outright (the third). The
+frozen edge's jump is load-bearing for branch selection. **Not ruled out**: any
+of them as a rung reached only after an observed failure.
 
 ### Auxiliary globally-coupled unknowns
 

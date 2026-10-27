@@ -11,13 +11,38 @@ equilibrium without the rung, the datum at psi_ax 9.006200e-02
 of C's MEQ arm on the commit that carries the fix, below.
 
 **F shaped still fails its first bordered Newton on every cold rung** and is
-solved by the Picard-then-Newton retry, with or without the fix, to the same
-currents. That is a different cause, unmeasured; each run's inputs are in
-`runs/freegs4e-benchmark/race-runs/ir3-f-meq/machine-f-diiid-shaped/cold/meq/r0N/rep0/`.
+solved by the Picard-then-Newton retry, to the same currents. The cause is
+measured ([M-315](MEASUREMENTS.md#m-315)): the support is frozen at the guess's
+X-point flux, 0.0914, while the `psi_bnd` unknown starts at zero and the first
+step carries it to −0.188, so `F` jumps at the frozen edge and the Jacobian
+cannot see it. Starting `psi_bnd` at the edge cures F and is a branch control;
+so are three ways of making the source continuous. None is landed, and the
+candidate left is a continuous source as a rung reached only on failure.
 
 **C's k2 h1.00 rung exits 4**, a best fit at a target residual of 4.7e-09, with
 the fix and without it: the inverse best fit's stationarity stop (`TODO`, the
 single-precision round's item 3), not a branch question.
+
+## The timing runs owed, in order
+
+None has been run. Each wants the machine to itself: check `ps` first, since a
+Claude session in `../gffp` runs its own solver at about one core, which on
+its own keeps `queue.sh`'s gate (under 6% busy CPU for five minutes) shut.
+
+1. **The inverse race's MEQ arms, F, C and D shaped, cold and warm, three
+   repeats, every rung**, on HEAD: the fix is `b193243`, and `queue.sh` refuses
+   an install that is not HEAD, so configure, build and install from HEAD
+   first. C is the one the fix
+   changes ([M-313](MEASUREMENTS.md#m-313)): every cold rung now converges on
+   the first attempt. F and D are re-run beside it so all three stages name
+   one commit. `runs/inverse-race/queue.sh` runs exactly this, but writes
+   `ir3-*` and would overwrite the stages the doc quotes: change its stage
+   names to `ir4-*` first. Then check every record's `newton_longest_crawl`,
+   and MEQ against `freegs4e`'s finest.
+2. **IH-0's repeats four and five** ([M-314](MEASUREMENTS.md#m-314)):
+   `REPEATS=5 START_AT=4 runs/ih0/ih0-timing.sh`, then
+   `python3 runs/ih0/ih0-parse.py`, and re-take M-314's tables from five
+   repeats. Gated at 1-minute load under 1.0, interleaved.
 
 ## Before any timing that follows a fix
 
@@ -30,10 +55,6 @@ single-precision round's item 3), not a branch question.
 * **The race arms at the default `OMP_WAIT_POLICY`**, with
   `OMP_NUM_THREADS=8 MKL_NUM_THREADS=8`, the physical core count
   (`tools/freegs4e-benchmark/cores.py`).
-* **Re-run C's MEQ arm whole**, cold and warm, three repeats, every rung, and
-  merge it with `ir2-c`'s other codes' records as `queue.sh` does. Check every
-  record's `newton_longest_crawl`, and MEQ against freegs4e's finest: k4 h0.50
-  is 3.7e-6 from it at `0e7177a`.
 
 ## Not in this round, deliberately
 

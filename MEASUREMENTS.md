@@ -20891,3 +20891,103 @@ gated, interleaved driver as run: `runs/ih0/ih0-timing.sh` (`REPEATS=5
 START_AT=4` resumes it), parsed by `runs/ih0/ih0-parse.py`; the raw records,
 the rates outputs and the local patch they were taken through are in
 `runs/ih0/`.
+
+### M-315
+
+**F SHAPED'S COLD FIRST ATTEMPT FAILS BECAUSE ITS SOURCE JUMPS AT THE FROZEN
+SUPPORT EDGE: THE EDGE IS FROZEN AT THE GUESS'S X-POINT FLUX, 0.0914, AND THE
+`psi_bnd` UNKNOWN STARTS AT ZERO. STARTING IT AT THE EDGE CURES F TO THE
+PRINTED DIGIT AND IS A BRANCH CONTROL: IT LOSES E, E SHAPED AND MAST-U AND
+REPORTS TCV CONVERGED ON ANOTHER EQUILIBRIUM. NOT LANDED.**
+
+**Setup.** `e57c672` installed, double, the inverse race's F shaped cold
+rungs from `ir3-f-meq`'s `r0N/rep0/` inputs, `OMP = MKL = 8`, under
+`runs/f-cold`; the experiment through a temporary environment switch in the
+driver and two debug prints, both reverted.
+
+**What the first attempt does** (k2 h1.00, `--profile`). The X-point never
+leaves its seed ( 1.2, −1.0 ), and the targets and the `psi_bnd` row fall to
+1e-16 after one step. The field, axis and I_p rows stall at 2.65e-02 from step
+2: every step after it halves 7 to 12 times, the full step's merit 3.3× the
+iterate's, until eight crawls in a row hand it to the retry rung, which
+converges from the same support in 10 + 3 + 2 steps.
+
+**The ladder says the Jacobian is not the residual's.** Against the
+exact-Newton prediction ( 1 − a )‖R₀‖, the field residual's deviation falls
+40–55× over the first halving and then about 2× per halving, where a correct
+Jacobian on a smooth residual gives 4: a first-order term the Jacobian does
+not carry.
+
+**And the term is a jump at the frozen edge.** The support sweep freezes the
+edge in absolute flux at the guess's X-point flux, 9.135e-02, and the
+pointwise support test then compares live `psi` with it; `F` is evaluated at
+the live normalisation. The `psi_bnd` unknown starts at 0, and the first full
+step -- the one taken with the axis row decoupled -- carries it to −0.188.
+From there it sits near −0.14 while every full step asks for nearly zero, so where
+`psi` crosses the frozen 0.0914 the live `Ψ` is about 0.5 and `F` steps from
+its value there to zero. Nothing in the Jacobian differentiates that. The
+retry's Picard field block needs no consistent Jacobian and walks through it.
+
+**Starting `psi_bnd` at the frozen edge** on the first attempt removes the
+jump at step 0:
+
+| | `e57c672` | `psi_bnd` started at the edge |
+|---|---|---|
+| F shaped race, k2 h1.00 to k3 h0.50 | via the rung | **first attempt**, the same currents and `psi_ax` to every printed digit |
+| C shaped race, k2 h1.00 to k3 h1.00 | first attempt | unchanged |
+| A, A shaped, F, F shaped, F inverse, B, B shaped, C shaped | | unchanged |
+| E, E shaped | first attempt, 9.1e-04 from the reference | **exit 2** |
+| G (MAST-U) | first attempt | **exit 2** |
+| TCV | exit 2 | **exit 0 on another equilibrium**: axis ( 2.2428, 0.5854 ), `psi_ax` 7.24e-02 |
+| F filament | first attempt | via the rung, the same answer |
+| C, G shaped | exit 2 | exit 0, `psi_ax` 5.896e-02 and 9.381e-02, unchecked |
+| TCV shaped | via the rung | via the rung, the same answer |
+
+That is `FREE-BOUNDARY-PLAN.md` FB-R's finding again from the driver: where
+`psi_bnd` starts selects which equilibrium a diverted machine reports. The
+breadth run was stopped there, before C's last three rungs, D's and F's last
+two, and the suite.
+
+**A CONTINUOUS SOURCE, THREE WAYS, AND NONE LANDS ON THE SAME EQUILIBRIUM
+EVERYWHERE.** Each through a temporary switch, reverted; F's profiles vanish
+at `Ψ = 0` with zero slope (`( 1 − ψ_n^1.5 )²`), so a source cut at the LIVE
+`psi_bnd` has no jump to differentiate.
+
+* **A: the pointwise test at the live labels, the element region and the fill
+  at the frozen.** On F the ladder's deviation then falls 3.5–4.7× a halving,
+  the Jacobian consistent again. Across the 16 cold files and the 18 race rungs
+  every answer both routes reach agrees to the printed digit; F converges on
+  the first attempt on four rungs of six; B, B shaped, C, C shaped and G
+  shaped converge cold to `freegs4e`'s equilibrium (3e-06, 1.2e-04, 1.7e-02,
+  1.2e-03, 1.9e-03 in `psi_ax`, C's the filament model's gap). But E, E shaped
+  and TCV shaped exit 2, and the suite has the shipped
+  `diverted-tokamak-xpoint` converging to ANOTHER EQUILIBRIUM and exiting 0 --
+  `psi_ax` 11% and `psi_bnd` 29% from `freegs4e`'s, the X-point 7.8 cm off --
+  with XPointBorder's fixture the same. Where `psi_bnd` starts below the
+  frozen edge the live plasma fills the frozen region and `F` is cut at the
+  region's boundary instead: the jump moves, and the first sweep's problem
+  changes.
+* **B: the fill at the live labels too, refreshed every residual** (M-82's
+  "fill live, edge not frozen" row). A converges to another equilibrium,
+  `psi_ax` 8.485e-02 against 8.068e-02; B and TCV shaped fail.
+* **C: the profiles' argument zero at the frozen edge** -- `Ψ = ( psi −
+  psi_frozen )/span`, so `F` vanishes on the support's own edge at every
+  iterate -- **and C′, one sweep on the standard formulation once the support
+  settles**, since under C a sweep's answer lags the live `psi_bnd` and the
+  mask can settle with `psi_ax` still moving. C′ reproduces A, E and TCV shaped
+  to every printed digit and converges B cold, 1.0e-05 from `freegs4e`. F's
+  k2 h1.00 rung exits 2, its second sweep stalling: sweep 0 answers
+  `psi_bnd` 0.0449 to a frozen 0.0914 about a fixed point near 0.0708, a
+  slope near −1.3 if the edge map is linear, which an iteration on the edge
+  cannot follow. One point, so the slope is an estimate.
+
+**So the jump at the frozen edge selects branches, and removing it changes
+which equilibrium is reported somewhere every way it was tried.** What none of
+this rules out is A, or C′, as a rung reached only on observed failure, which
+by construction moves nothing that converges today; under A, B, B shaped, C, C
+shaped and G shaped converged through A's own retry rung.
+
+**Reproduce.** `runs/f-cold/r00/prof.log`, `axis.log`, `rNN/edge.log`,
+`rNN/live.log` and `r00/shiftp.log`; `runs/seed-table/{edge,live,live2,shiftp}/`
+against `runs/seed-table/new/`, `rungs/{c,d,f}/rNN/live/`, and
+`runs/seed-table/ctest-live.log`.

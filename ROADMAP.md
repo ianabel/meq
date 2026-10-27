@@ -345,7 +345,9 @@ Stages 0 to 7 are done, and the one red in the suite is the deliberate
    rung, every converged answer unchanged
    ([M-313](MEASUREMENTS.md#m-313)). **What is left on the clock is F
    shaped**, whose every cold rung still fails the first bordered Newton and
-   is solved by the retry (`PERFORMANCE_TODO.md`), and the six forward cold
+   is solved by the retry: its source jumps at the frozen support edge, and
+   the obvious cure is a branch control
+   ([M-315](MEASUREMENTS.md#m-315)) -- and the six forward cold
    failures, B, B shaped, C, C shaped, TCV and G shaped, which the fix does
    not move. `TODO`'s bordered solves that crawl and then converge are the
    same species.
