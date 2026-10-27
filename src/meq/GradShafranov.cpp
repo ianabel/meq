@@ -665,11 +665,6 @@ namespace
 		fieldLinearisation = choice;
 	}
 
-	void SourceIntegrator::setBorderFold( BorderFold const *fold )
-	{
-		borderFold = fold;
-	}
-
 	void SourceIntegrator::setPlasmaComponent( PlasmaComponent const *component )
 	{
 		plasmaComponent = component;
@@ -1013,15 +1008,6 @@ namespace
 			mfem::AddMult_a_VVt( -weight*source->dFdPsi( radius, z, totalPsi )/radius,
 			                     shape, elmat );
 		}
-
-		// THE BORDER FOLD, on the one element it names. Not a term of F: it is
-		// a row operation on the Newton system, and the solver adds the
-		// matching multiple of the border row to the right-hand sides. See
-		// GradShafranovSolver::setBorderFolding().
-		if ( borderFold != nullptr && borderFold->element == tr.ElementNo
-		     && borderFold->row >= 0 && borderFold->row < dof )
-			for ( int j = 0; j < dof && j < borderFold->coefficients.Size(); ++j )
-				elmat( borderFold->row, j ) += borderFold->coefficients( j );
 	}
 
 	namespace
@@ -10199,7 +10185,10 @@ namespace
 		 * then is the one most likely to keep it positive now.
 		 */
 		mfem::Vector foldY( n ), foldZ( n ), foldE( n ), foldSolved( n );
-		SourceIntegrator::BorderFold borderFoldSpec;
+		// `kappa e_j b_p^T` over the folded element's potential dofs, in its
+		// own dof order: what AddNextGradientCorrection() is handed.
+		mfem::DenseMatrix foldCorrection;
+		int foldElement = -1;
 		double foldSign = 1.0;
 		mfem::Vector columnL( n ), zL( n ), currentRow( n );
 
@@ -14395,12 +14384,8 @@ namespace
 			int foldIndex = -1;
 			auto prepareFold = [ & ]()
 			{
-				// Not under a Device: the device integrand's local blocks are
-				// assembled and factored inside one upstream call, with no seam
-				// to fold at. setBorderFolding() says what it would take.
 				if ( !borderFoldingWanted || nBorders + nModes + nGauge != 1
 				     || !coupled || inverseSolve || sourceIntegrator == nullptr
-				     || deviceIntegrandInUse || mfem::Device::IsEnabled()
 				     || fieldLinearisationChoice != FieldLinearisation::Newton
 				     || borderDofs.Size() == 0 )
 					return;
@@ -14451,18 +14436,18 @@ namespace
 					return;
 
 				// kappa's magnitude: a thousand times this element's own reaction
-				// term at j, from the integrator that will carry the fold -- the
+				// term at j, from the integrator whose block the fold is added to -- the
 				// centre of the window setBorderFolding() derives. Zero -- an
 				// element the fill dropped, or a source with no psi dependence
 				// there -- means there is no scale to fold at, and the step is
 				// the plain one.
 				mfem::IsoparametricTransformation transformation;
 				mesh.GetElementTransformation( element, &transformation );
+				countedHostRead( unknown, __LINE__ );
 				mfem::Vector elfun( dofs.Size() );
 				for ( int i = 0; i < dofs.Size(); ++i )
 					elfun( i ) = unknown( blockOffsets[ 1 ] + dofs[ i ] );
 				mfem::DenseMatrix reaction;
-				sourceIntegrator->setBorderFold( nullptr );
 				sourceIntegrator->AssembleElementGrad( *potentialFes->GetFE( element ),
 				                                       transformation, elfun, reaction );
 				double const scale = std::abs( reaction( j, j ) );
@@ -14470,17 +14455,23 @@ namespace
 					return;
 
 				double const kappa = foldSign*borderFoldScale*scale/std::abs( row( j ) );
-				borderFoldSpec.element = element;
-				borderFoldSpec.row = j;
-				borderFoldSpec.coefficients = row;
-				borderFoldSpec.coefficients *= kappa;
+				foldElement = element;
+				foldCorrection.SetSize( dofs.Size() );
+				foldCorrection = 0.0;
+				for ( int i = 0; i < dofs.Size(); ++i )
+					foldCorrection( j, i ) = kappa*row( i );
 
+				// Built on the host, where the 2 x 2's dots read them too;
+				// under a Device the copies may land device-valid first.
 				foldIndex = blockOffsets[ 1 ] + dofs[ j ];
 				foldY = residual;
+				countedHostReadWrite( foldY, __LINE__ );
 				foldY( foldIndex ) += kappa*constraint;
 				foldZ = column;
+				countedHostReadWrite( foldZ, __LINE__ );
 				foldZ( foldIndex ) += kappa*corner;
 				foldE = 0.0;
+				countedHostReadWrite( foldE, __LINE__ );
 				foldE( foldIndex ) = kappa;
 				foldActive = true;
 			};
@@ -14506,18 +14497,19 @@ namespace
 						plasmaComponentMask.ringNodes();
 				}
 				prepareFold();
+				// The queue is consumed by the next NPCGradient() alone. It is
+				// emptied first so that one left behind by a gradient that
+				// threw never reaches this one.
+				mfem::DarcyHybridization &hybridization = *darcy->GetHybridization();
+				hybridization.ClearNextGradientCorrections();
 				if ( foldActive )
-					sourceIntegrator->setBorderFold( &borderFoldSpec );
+					hybridization.AddNextGradientCorrection( foldElement, foldCorrection );
 				double const tg = profileNow();
 				double const cg = profileCpuNow();
 				mfem::Operator &jacobian = npc->GetGradient( unknown );
 				profile.gradientSeconds += profileNow() - tg;
 				profile.gradientCpuSeconds += profileCpuNow() - cg;
 				++profile.gradientCalls;
-				// Cleared at once: the fold belongs to THIS assembly and to no
-				// other caller of the integrator.
-				if ( foldActive )
-					sourceIntegrator->setBorderFold( nullptr );
 				npcLinear.SetOperator( jacobian );
 				if ( foldActive )
 				{

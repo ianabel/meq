@@ -321,6 +321,27 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 	endif()
 endforeach()
 
+# THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's
+# confined control again, under an mfem::Device that MEQ_TEST_DEVICE configures
+# before any case runs. The fold reaches the batched local block only through
+# DarcyHybridization::AddNextGradientCorrection(), so this is the case that
+# shows it does; the case itself asserts that the device integrand was taken.
+# `debug` needs no GPU, and `cuda` is registered only where MFEM has it.
+if(TARGET PlasmaConnectivity)
+	set(_fold_devices debug)
+	if(MFEM_USE_CUDA)
+		list(APPEND _fold_devices cuda)
+	endif()
+	foreach(_device IN LISTS _fold_devices)
+		add_test(NAME PlasmaConnectivityFoldOn_${_device}
+			COMMAND PlasmaConnectivity
+			        --run_test=theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem)
+		set_tests_properties(PlasmaConnectivityFoldOn_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device}")
+	endforeach()
+	unset(_fold_devices)
+endif()
+
 # ---------------------------------------------------------------------------
 # The performance harness. BUILT BUT NOT REGISTERED AS A TEST, deliberately.
 #

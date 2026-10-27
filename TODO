@@ -1223,7 +1223,7 @@ The giving-up is built; what is left is the crawls it exposed.
 ================================================================================
 Left open by the single-precision round (MEASUREMENTS.md M-301 to M-312)
 Raised 2026-10-22. Each item is measured; the adaptive crawl in item 3 and
-TCV shaped's branch in item 7 each take a suite case red, in single.
+TCV shaped's branch in item 5 each take a suite case red, in single.
 ================================================================================
 
   1. THE q-DRIVEN MAP IS PIECEWISE SMOOTH, SO THE OUTER DIFFERENCE STEP IS A
@@ -1295,19 +1295,7 @@ TCV shaped's branch in item 7 each take a suite case red, in single.
        there until a warm cycle converges on the Newton rung in no more steps
        than the cold one, to within 2.5e-04 of double's psi_ax.
 
-  4. BORDER FOLDING IS SKIPPED UNDER A DEVICE, so single on a card keeps the
-     shelf M-303 removed on the host.  MFEM's batched NPCGradient() assembles
-     and factors each element's local block in one call, and the fold is a
-     rank-one row on one block, which no pointwise integrand expresses.  It
-     wants one upstream hook: a per-element correction to the local gradient
-     before it is factored, or the local blocks exposed before factoring.
-     Asked of ../../mfem-hdg-dev on 2026-10-22
-     (doc/HDG-NPC-GRADIENT-ELEMENT-CORRECTION-FROM-MEQ.md); the test it names
-     is PlasmaConnectivity's confined control under --device cuda in single.  A source with no fast device form could
-     fold on the host integrand under a Device today, but no shipped
-     normalised source takes that route.
-
-  5. THE FOLD'S kappa IS A FIXED MULTIPLE, AND ITS WINDOW MOVES WITH THE
+  4. THE FOLD'S kappa IS A FIXED MULTIPLE, AND ITS WINDOW MOVES WITH THE
      MESH.  setBorderFolding() derives the window (M-311a): low edge
      30 S0/M = 1.5e7 eps in units of the reaction term at n = 16, high edge
      c/eps with c from 0.004 to 0.07, centre independent of eps; kappa is
@@ -1319,13 +1307,7 @@ TCV shaped's branch in item 7 each take a suite case red, in single.
      approach, 1.82e-04 against 1.85e-04 over three decades of |R|), aiming at
      the window's centre.  Wants a confined case at n >= 64 in single first.
 
-  6. THE RECOVER SCALES BETTER AT f3f4fe1ea7 AND NOBODY KNOWS WHY.  At eight
-     threads on TCV it is 0.324 s against 0.520 (4.64x against 3.20x) between
-     M-301 and M-304, but upstream's views removed copies around NPCRecover(),
-     not work inside it, and MEQ's solver changed in between.  Asked of
-     upstream in the reply of 2026-10-21; read their answer when it comes.
-
-  7. TCV SHAPED FROM COLD, IN SINGLE AT MKL_NUM_THREADS = 1, CONVERGES TO
+  5. TCV SHAPED FROM COLD, IN SINGLE AT MKL_NUM_THREADS = 1, CONVERGES TO
      ANOTHER EQUILIBRIUM AND EXITS 0.  At MKL = 4 or 8 its first attempt
      stalls and the retry rung lands 1.3e-04 from the reference, as double
      does at MKL = 1 and 8.  At MKL = 1 sweep 0 instead converges in 43 steps

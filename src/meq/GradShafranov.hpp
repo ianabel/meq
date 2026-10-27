@@ -828,30 +828,6 @@ namespace meq
 			 */
 			void setFieldLinearisation( FieldLinearisation const *choice );
 
-			/**
-			 * ONE ROW OF ONE ELEMENT'S POTENTIAL BLOCK, ADDED TO THE GRADIENT
-			 * AND NOT TO THE RESIDUAL: `kappa e_j b_p^T`, the border row the
-			 * bordered Newton folds into the field block.
-			 * GradShafranovSolver::setBorderFolding() has the argument.
-			 *
-			 * HERE BECAUSE THIS IS THE ONE INTEGRATOR WHOSE GRADIENT IS
-			 * ASSEMBLED PER STEP: the rest of the element's local block is the
-			 * linear Darcy forms, built once. `coefficients` is in the
-			 * element's own dof order and `row` indexes it.
-			 */
-			struct BorderFold
-			{
-				int element = -1;
-				int row = -1;
-				mfem::Vector coefficients;
-			};
-
-			/// Borrowed and may be null, which is no fold and leaves this
-			/// class bit-unchanged. Only AssembleElementGrad reads it, after
-			/// the quadrature, and the solver sets it for exactly one assembly
-			/// and never under FieldLinearisation::Picard.
-			void setBorderFold( BorderFold const *fold );
-
 			/// MFEM's spelling, from NonlinearFormIntegrator.
 			void AssembleElementVector( mfem::FiniteElement const &el, // NOLINT(readability-identifier-naming)
 			                            mfem::ElementTransformation &tr,
@@ -899,9 +875,6 @@ namespace meq
 			/// setFieldLinearisation(). Borrowed; null is
 			/// FieldLinearisation::Newton.
 			FieldLinearisation const *fieldLinearisation = nullptr;
-
-			/// setBorderFold(). Borrowed; null is no fold.
-			BorderFold const *borderFold = nullptr;
 
 			int extraOrder;
 
@@ -1211,9 +1184,12 @@ namespace meq
 			 * THE FOLD. Add `kappa` times the border row `b . dx + d dS = -G`
 			 * to one potential row `j` of the element the row's potential half
 			 * lives on. The field block becomes `J' = J + kappa e_j b_p^T`,
-			 * which is ELEMENT-LOCAL -- meq::SourceIntegrator adds it to that
-			 * element's gradient, so the NPC elimination and the trace solve
-			 * are untouched -- and the right-hand sides `R + kappa G e_j` and
+			 * which is ELEMENT-LOCAL -- it is queued on
+			 * `DarcyHybridization::AddNextGradientCorrection()`, which adds it
+			 * to that element's potential block after assembly and before the
+			 * local factorisation, on the element loop and the batched route
+			 * alike, so the NPC elimination and the trace solve are untouched
+			 * -- and the right-hand sides `R + kappa G e_j` and
 			 * `c + kappa d e_j`. The row's FLUX half `b_q` (the envelope term,
 			 * on the same element's flux dofs) has no integrator to carry it,
 			 * so `eta = b_q . dx_q` becomes a second border unknown with column
@@ -1312,41 +1288,22 @@ namespace meq
 			 * iterate's `dS` and not with kappa, and at n = 16 it is 6e-03.
 			 *
 			 * ONLY WHERE IT APPLIES: one border unknown (`psi_ax`), coupled,
-			 * Newton in the field, no inverse targets, no Device, and a row
-			 * whose potential half lies on one element -- the located axis,
-			 * the nodal maximum and a prescribed point all do. Anywhere else
-			 * the elimination is the plain one. A `psi_bnd` or exterior border
+			 * Newton in the field, no inverse targets, and a row whose
+			 * potential half lies on one element -- the located axis, the
+			 * nodal maximum and a prescribed point all do. Anywhere else the
+			 * elimination is the plain one. A `psi_bnd` or exterior border
 			 * breaks the homogeneity, so the field block there is not singular
 			 * at the root and has no shelf to remove.
 			 *
-			 * **UNDER A DEVICE THE STEP IS THE PLAIN ONE, AND THAT IS A GAP
-			 * RATHER THAN A CHOICE.** What folding there would take:
-			 *
-			 *   * THE DEVICE INTEGRAND, which a NormalisedMHDSource solve under
-			 *     a Device takes wherever upstream batches (meq::DeviceNPC). It
-			 *     hands upstream's
-			 *     batched `DarcyHybridization::NPCGradient()` a POINTWISE
-			 *     integrand, and the element's local block is assembled and
-			 *     factored in place inside that one call. The fold is a
-			 *     rank-one row on one element's block -- not a product of
-			 *     shape functions at quadrature points, so no integrand can
-			 *     express it -- and there is no seam between the assembly and
-			 *     the factorisation to add it at. It needs one upstream: a
-			 *     per-element correction to the local gradient before it is
-			 *     factored, or the local blocks exposed before factoring.
-			 *   * THE HOST INTEGRAND UNDER A DEVICE, for a source with no POD
-			 *     form, could fold today: SourceIntegrator is what carries the
-			 *     fold, and the cost is making the folded right-hand sides
-			 *     device-coherent and reading the 2 x 2's dots on the host. It
-			 *     is skipped with the rest because no shipped normalised
-			 *     source reaches it, and a route nothing runs is a route
-			 *     nothing tests.
-			 *
-			 * The skip leaves DeviceParity's comparison of a folded host against
-			 * an unfolded card, and it is green: every shipped example's
-			 * `psi_ax`, `psi_bnd`, X-point and Newton count agree to the printed
-			 * digit. The examples are not homogeneous, so the elimination there
-			 * is the plain one in all but its last bits.
+			 * **UNDER A DEVICE IT FOLDS TOO**, on the device integrand's
+			 * batched route as on the host's element loop: the queued
+			 * correction is added where the local block already lives. It
+			 * agrees with a fold added inside the integrator to round-off and
+			 * not to the bit, since it is summed `( grad + D_lin ) + fold`.
+			 * The folded right-hand sides are made on the host and the 2 x 2's
+			 * dots are read there. In single on the card the confined control's
+			 * folded solve meets its target in four steps where the unfolded
+			 * one lands 7.5 times over its bound (MEASUREMENTS.md M-316).
 			 *
 			 * **ON IN DOUBLE TOO, SO THAT THERE IS ONE ALGORITHM.** The shelf
 			 * is there in double and is the same thing -- an unfolded double

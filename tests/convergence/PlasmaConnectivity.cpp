@@ -83,6 +83,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -106,6 +107,31 @@ using meq::analytic::SolovievEquilibrium;
 
 namespace
 {
+	/*
+	 * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE
+	 * RUNS. Unset, there is none, which is how the ctest PlasmaConnectivity
+	 * runs every case. Set, it is how theBorderedNewtonHasNoShelfOnTheConfined-
+	 * Eigenproblem is run on the device integrand's batched route, where the
+	 * fold reaches the local block through
+	 * DarcyHybridization::AddNextGradientCorrection(). A function-local static,
+	 * as in DeviceRowsTests.cpp, because a namespace-scope mfem::Device may be
+	 * constructed before MFEM's own singleton.
+	 */
+	char const *requestedDevice()
+	{
+		char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+		return requested != nullptr && *requested != '\0' ? requested : nullptr;
+	}
+
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			if ( char const *const requested = requestedDevice() )
+				static mfem::Device device( requested );
+		}
+	};
+
 	/// p'( Psi ) = amplitude * Psi^power, exact at all three derivative levels.
 	///
 	/// Copied from FreeBoundaryCoupling.cpp rather than shared, so that a change
@@ -413,6 +439,7 @@ namespace
 	}
 }
 
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 
 /*
  * THE PLUMBING, AND IT RESTS ENTIRELY ON ONE INTEGER.
@@ -1999,7 +2026,7 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
  * the repair.
  *
  * WHAT THIS ASSERTS IS THE BEHAVIOUR, NOT THE MECHANISM: that the terminal
- * phase is a Newton one. Once the field residual is under 1e-3 of the first
+ * phase is a Newton one. Once the field residual is under 1e-2 of the first
  * iterate's, every step is a full step and lands at or below the larger of a
  * thirtieth of where it started and a tenth of the absolute target. A shelf
  * fails it -- the step that reaches 1.1e-05 in single starts from 1.15e-05
@@ -2030,14 +2057,39 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheSameRootAcrossASplitSupport )
  * of 2.09e-14 and the folded one at 1.45e-16. So in double the case checks the fold is exact algebra
  * rather than that it is needed -- the same answer, psi_ax equal to the bit
  * and psi_h to 3.0e-14, no more steps, and a fold that actually engaged.
+ *
+ * THE WINDOW IS 1e-2 AND NOT 1e-3 BECAUSE A SOLVE MAY STOP AT ITS TARGET
+ * BEFORE A STEP STARTS UNDER 1e-3. Under MEQ_TEST_DEVICE in single the folded
+ * step from 2.07e-04 lands at 1.1e-06 with the axis constraint at 4e-07, so
+ * the merit meets the 1.19e-06 target in 4 steps and no step had started
+ * under 3.8e-05; on the host the same step leaves the constraint at 2e-05 and
+ * takes a fifth. The step from 2e-04 discriminates as well: unfolded it lands
+ * 1.7 times over its bound in single, folded 0.16. And for the same reason
+ * the two answers are held to four times the target rather than to
+ * round-off: each may stop anywhere under it, and on the device in single
+ * they end 1.6e-06 apart in psi_h.
  */
 BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 {
 	int const order = 2;
 	double const start = 0.2;
 
-	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
-	auto ggPrime = std::make_shared<PowerProfile const>( 0.0, 1 );
+	// Under MEQ_TEST_DEVICE the same profiles in the kinds the device
+	// integrand has a POD form for: a Hermite spline is exact on a linear
+	// p', and its knots span every Psi an iterate reaches. PowerProfile has
+	// no POD form, so it would leave the solve on the element loop.
+	std::shared_ptr<meq::Profile const> pPrime =
+		std::make_shared<PowerProfile const>( 0.6, 1 );
+	std::shared_ptr<meq::Profile const> ggPrime =
+		std::make_shared<PowerProfile const>( 0.0, 1 );
+	if ( requestedDevice() != nullptr )
+	{
+		std::vector<meq::Knot> knots;
+		for ( double psi : { -1.0, 0.0, 1.0, 2.0 } )
+			knots.push_back( meq::Knot{ psi, 0.6*psi, 0.6 } );
+		pPrime = std::make_shared<meq::SplineProfile const>( knots );
+		ggPrime = std::make_shared<meq::ConstantProfile const>( 0.0 );
+	}
 	mfem::ConstantCoefficient zero( 0.0 );
 
 	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
@@ -2059,6 +2111,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		double stateNorm = 0.0;
 		std::vector<double> potential;
 		std::vector<GradShafranovSolver::BorderStep> steps;
+		bool deviceIntegrand = false;
 	};
 
 	// -1 is the solver's own default, which is the configuration that ships.
@@ -2095,9 +2148,10 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		out.axis = solver.psiAxis();
 		out.stateNorm = solver.state().Norml2();
 		mfem::GridFunction const &potential = solver.potential();
-		out.potential.assign( potential.GetData(),
-		                      potential.GetData() + potential.Size() );
+		auto const *const values = potential.HostRead();
+		out.potential.assign( values, values + potential.Size() );
 		out.steps = solver.borderSteps();
+		out.deviceIntegrand = solver.deviceIntegrandTaken();
 		return out;
 	};
 
@@ -2110,6 +2164,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		int counted = 0;
 		int damped = 0;
 	};
+	double const terminalWindow = 1.0e-2;
 	auto terminal = [ & ]( Run const &r )
 	{
 		Tail t;
@@ -2118,7 +2173,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 		double const first = r.steps.front().fieldNorm;
 		for ( std::size_t k = 0; k + 1 < r.steps.size(); ++k )
 		{
-			if ( !( r.steps[ k ].fieldNorm < 1.0e-3*first ) )
+			if ( !( r.steps[ k ].fieldNorm < terminalWindow*first ) )
 				continue;
 			double const bound = std::max( r.steps[ k ].fieldNorm/30.0,
 			                               absoluteTarget/10.0 );
@@ -2159,6 +2214,19 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	print( "folded", folded, foldedTail );
 	print( "unfolded", unfolded, unfoldedTail );
 
+	// UNDER A DEVICE, ON THE ROUTE IT IS RUN FOR. Without the device
+	// integrand the solve is the host's element loop on device memory, and a
+	// green here would say nothing about the batched route.
+	if ( char const *const device = requestedDevice() )
+	{
+		std::printf( "    device %s: device integrand %s\n", device,
+		             shipped.deviceIntegrand ? "yes" : "NO" );
+		BOOST_TEST( ( shipped.deviceIntegrand && folded.deviceIntegrand ),
+		            "MEQ_TEST_DEVICE=" << device << " is set and the solve did "
+		            "not take the device integrand, so the batched NPCGradient() "
+		            "route this run exists for was not exercised" );
+	}
+
 	double worst = 0.0;
 	BOOST_TEST_REQUIRE( folded.potential.size() == unfolded.potential.size() );
 	for ( std::size_t i = 0; i < folded.potential.size(); ++i )
@@ -2196,14 +2264,16 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	BOOST_TEST( foldedTail.damped == 0 );
 
 	// THE FOLD IS A ROW OPERATION ON THE NEWTON SYSTEM, NOT A NEW PROBLEM:
-	// the same answer to round-off and never more steps.
-	BOOST_TEST( std::abs( folded.axis - unfolded.axis )
-	                <= meq::tests::scalarAgreementFloor( 1.0e-12, unfolded.axis ),
+	// the same answer to the solves' targets and never more steps.
+	double const answerBound =
+		std::max( meq::tests::scalarAgreementFloor( 1.0e-12, unfolded.axis ),
+		          4.0*absoluteTarget );
+	BOOST_TEST( std::abs( folded.axis - unfolded.axis ) <= answerBound,
 	            "psi_ax came out " << folded.axis << " folded and "
 	            << unfolded.axis << " unfolded. The fold adds a multiple of the "
 	            "border row to one field row and the same multiple to the "
 	            "right-hand side, so it cannot move the root" );
-	BOOST_TEST( worst <= meq::tests::scalarAgreementFloor( 1.0e-12, unfolded.axis ),
+	BOOST_TEST( worst <= answerBound,
 	            "folding moved psi_h by " << worst );
 	BOOST_TEST( folded.iterations <= unfolded.iterations,
 	            "the folded solve took " << folded.iterations
@@ -2229,7 +2299,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	double worstKept = 0.0;
 	for ( std::size_t k = 0; k + 1 < shipped.steps.size(); ++k )
 	{
-		if ( !( shipped.steps[ k ].fieldNorm < 1.0e-3*shipped.steps.front().fieldNorm ) )
+		if ( !( shipped.steps[ k ].fieldNorm < terminalWindow*shipped.steps.front().fieldNorm ) )
 			continue;
 		worstKept = std::max( worstKept,
 		                      std::abs( 1.0 - shipped.steps[ k ].foldRho )*singleShelf

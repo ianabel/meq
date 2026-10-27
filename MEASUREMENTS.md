@@ -20024,12 +20024,27 @@ eight threads cold. "Rest" is MEQ's leg less the three timers, at most 5 ms,
 so **the leg is accounted for**. At eight threads cold the leg is 0.759 s
 against M-301's 1.363 s, and it scales 4.18 times against 2.75.
 
-**The recover scales better too, and that is not explained.** At eight it is
-0.324 s against M-301's 0.520, 4.64 times against 3.20; at one thread it is
-1.50 against 1.66. Views remove the copies around it, not work inside it, and
-the solver changed between the two measurements (M-303's border folding is on
-by default). So no cause is claimed. Whole-run walls are not compared: M-301's
-thread scan ran PARDISO's refinement at its old cap of 2.
+**The recover scales better too, and the cause is first-touch page faults.**
+At eight it is 0.324 s against M-301's 0.520, 4.64 times against 3.20; at one
+thread it is 1.50 against 1.66. The old `ArrayMult()` recovered into a fresh
+`BlockVector` per column, allocated without being filled and above glibc's mmap
+threshold, so the recover was the first write to every page and took the faults
+inside its timer. The kernel serves faults serially, so they cost more at eight
+threads. The views write into MEQ's columns, which a Newton has already touched.
+Upstream measured this (their reply 4) in hdgperf, which had the same defect,
+by touching the outputs before the timer, on 5184 quads with 20 columns. The
+recover is 7–12% faster at one thread and 30–35% at eight, and at order 3 it
+scales 3.7x instead of 2.9x. The reduce, which the touch leaves alone, does not
+move. So the solver's change between the two measurements (M-303's border
+folding is on by default) need not be part of the cause. Whole-run walls are not
+compared: M-301's thread scan ran PARDISO's refinement at its old cap of 2.
+
+**So neither half of the leg now clearly holds it back**: 4.64x against the
+reduce's 5.03x, where M-301 read 3.20x against 4.60x. The colour-free reduce was
+dropped partly because the recover read as the flatter half. If the leg matters
+again, both halves should be measured before either is worked on. Any MEQ buffer
+allocated per step and first written inside a threaded loop has the same
+signature: a timer that stays flat as the thread count rises.
 
 **On CUDA, the views are right.** `examples/machine-f-diiid.toml` under
 `--device cuda` reads `psi_ax = 3.759850e-01` and a constraint of
@@ -20991,3 +21006,66 @@ shaped and G shaped converged through A's own retry rung.
 `rNN/live.log` and `r00/shiftp.log`; `runs/seed-table/{edge,live,live2,shiftp}/`
 against `runs/seed-table/new/`, `rungs/{c,d,f}/rNN/live/`, and
 `runs/seed-table/ctest-live.log`.
+
+### M-316
+
+**THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE, THROUGH UPSTREAM'S
+`DarcyHybridization::AddNextGradientCorrection()`: SINGLE ON THE CARD LOSES THE
+SHELF, AND THE FOLDED SOLVE MEETS ITS TARGET IN FOUR STEPS WHERE THE UNFOLDED
+ONE LANDS 7.5 TIMES OVER ITS BOUND.**
+
+**Setup.** `meq-integration` at `1a15a28363`, which carries upstream's
+`9d57561f69`. Both installs were rebuilt, and MEQ was rebuilt `--clean-first` in
+both formats. The fold's `kappa e_j b_p^T` is queued on the hybridization just
+before `npc->GetGradient()` and no longer rides on
+`SourceIntegrator::AssembleElementGrad()`. So the gate that skipped the fold
+under a Device is gone. MKL 2026.2, `MKL_NUM_THREADS=1`.
+`PlasmaConnectivity`'s confined control,
+`theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem`, k = 2, n = 16, started
+at `psi_ax = 0.2`. Under `MEQ_TEST_DEVICE` its profiles are posed as a
+`SplineProfile` (knots at -1, 0, 1, 2, exact on p' = 0.6 Psi) and a
+`ConstantProfile` (gg' = 0), since `PowerProfile` has no POD form and leaves
+the solve on the element loop. Each device run printed `device integrand yes`.
+Worst landing over bound on the terminal steps, from 1e-2 of the first
+residual:
+
+| format | route | folded: steps, worst | unfolded: steps, worst | folded vs unfolded psi_h |
+|---|---|---|---|---|
+| single | host | 5, 0.627 | 6, 9.35 | 1.8e-07 |
+| single | `debug` | 4, 0.161 | 6, 5.26 | 1.65e-06 |
+| single | `cuda` | 4, 0.153 | 6, 7.50 | 1.59e-06 |
+| double | host | 6, 0.045 | 6, 0.045 | 3.0e-14 |
+| double | `debug` | 6, 0.045 | 6, 0.198 | 3.0e-14 |
+| double | `cuda` | 6, 0.045 | 6, 0.214 | 3.2e-14 |
+
+**On the device in single, the folded solve stops at the target one step
+early, and that is the axis constraint and not the fold.** The step from
+2.07e-04 lands at a field residual of 1.1e-06 on both routes. On the host it
+leaves the axis constraint at -1.97e-05, so the merit is 7.1e-06 and a fifth
+step reaches 7.5e-08. On `debug` the constraint is 4.3e-07 and the merit is
+1.12e-06, under the 1.19e-06 target, so the solve stops there at its
+requested target, not at the round-off stop. So no step had started under
+1e-3 of the first residual, which is where the case measured the terminal
+phase. Two answers that each stop anywhere under the target are 1.6e-06 apart
+in psi_h, not at round-off. The case now measures from 1e-2 and holds the
+two answers to four times the target. That window leaves the host's
+single-precision figures as they were and still separates the two routes: the
+unfolded step from 2e-04 lands 1.7 times over its bound.
+
+**The fold engages on every route.** rho reaches 0.999 to 1.000 at the last
+steps on the card as on the host, and no step is damped. The host integrand
+under a Device also folds, since the queue does not care which integrand
+assembled the block. In double the device runs give the host's answer, with
+psi_ax equal to 3e-17 or better.
+
+**The suites.** Double passes 85 of 86, with the deliberate
+`PlasmaEdgeConvergence` red. Single passes 84 of 86, adding
+`DriverAcceptance`'s two named cases (`aWarmAdaptiveCycleConvergesOnTheNewtonRung`,
+`theRetryRungClosesAStalledFirstAttempt`). `DeviceParity` passes in both. The
+two new ctests `PlasmaConnectivityFoldOn_debug` and `_cuda` run the case
+above under each Device and pass in both formats.
+
+**Reproduce.** From `builds/<format>/tests/output/PlasmaConnectivity`:
+`MKL_NUM_THREADS=1 MEQ_TEST_DEVICE=<cuda|debug> ../../PlasmaConnectivity
+--run_test=theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem`, or `ctest -R
+PlasmaConnectivity`.
