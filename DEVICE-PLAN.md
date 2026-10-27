@@ -12,8 +12,11 @@ up and 38.0 MB down, from 83.4 and 48.0, with every printed answer unchanged.
 §4's last unrun acceptances are run: stage 1b is clean, and stage 1's Picard
 pair reproduces the host on all four paths under CUDA. What stays open:
 
-* **upstream's**: `ComputeH()`'s read-only syncs, 24 MB of the 38 down
-  (reported); phase B's mesh and dof maps, which MFEM uploads lazily; item 7,
+* **upstream's**: `ComputeH()`'s read-only sync, 24 MB of the 38 down, which is
+  `D`'s factors at every gradient from the batched branch's
+  `SyncLocalBlocksToHost(LB_NONE)` (asked in
+  `HDG-DEVICE-COMPUTEH-SYNC-FROM-MEQ.md` whether any host reader needs it);
+  phase B's mesh and dof maps, which MFEM uploads lazily; item 7,
   `mem_manager.cpp`'s unguarded maps, which keep the output stage and the
   post-solve axis check serial under a Device; and, under `--device debug`
   only, KINSOL stopping after one iteration on MFEM's serial N_Vectors,
