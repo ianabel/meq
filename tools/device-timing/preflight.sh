@@ -70,16 +70,28 @@ else
 fi
 
 SUNDIALS_DIR=${SUNDIALS_DIR:-${SUNDIALS_ROOT:-}}
-if [ -n "${SUNDIALS_DIR:-}" ] && [ -f "$SUNDIALS_DIR/include/sundials/sundials_config.h" ]; then
-	cfg="$SUNDIALS_DIR/include/sundials/sundials_config.h"
+# The install PREFIX, holding include/ and lib/ or lib64/. The patterns are
+# anchored: a SUNDIALS without CUDA still carries the name, as
+# "/* #undef SUNDIALS_CUDA_ENABLED */", and every one carries all three
+# precisions in a comment.
+cfg="${SUNDIALS_DIR:-}/include/sundials/sundials_config.h"
+if [ -n "${SUNDIALS_DIR:-}" ] && [ -f "$cfg" ]; then
 	v=$(sed -n 's/#define SUNDIALS_VERSION "\(.*\)"/\1/p' "$cfg")
-	if grep -q SUNDIALS_CUDA_ENABLED "$cfg" && grep -q 'SUNDIALS_DOUBLE_PRECISION 1' "$cfg"; then
-		row SUNDIALS ok "$v, CUDA, double, at $SUNDIALS_DIR"
+	libdir=$(ls -d "$SUNDIALS_DIR"/lib64 "$SUNDIALS_DIR"/lib 2>/dev/null | while read -r d; do
+		ls "$d"/libsundials_kinsol.* >/dev/null 2>&1 && echo "$d" && break; done)
+	if ! grep -q '^#define SUNDIALS_CUDA_ENABLED' "$cfg"; then
+		row SUNDIALS BAD "$v at $SUNDIALS_DIR was built without ENABLE_CUDA=ON"
+	elif ! grep -q '^#define SUNDIALS_DOUBLE_PRECISION 1' "$cfg"; then
+		row SUNDIALS BAD "$v at $SUNDIALS_DIR is not double precision"
+	elif [ -z "$libdir" ]; then
+		row SUNDIALS BAD "$v at $SUNDIALS_DIR has no libsundials_kinsol in lib/ or lib64/"
 	else
-		row SUNDIALS BAD "$v at $SUNDIALS_DIR lacks CUDA or double precision"
+		row SUNDIALS ok "$v, CUDA, double, at $SUNDIALS_DIR (libraries in ${libdir##*/}/)"
 	fi
+elif [ -n "${SUNDIALS_DIR:-}" ]; then
+	row SUNDIALS BAD "SUNDIALS_DIR=$SUNDIALS_DIR has no include/sundials/sundials_config.h: it is the install prefix"
 else
-	row SUNDIALS build "7.5.0 with CUDA, from the bundle (or set SUNDIALS_DIR)"
+	row SUNDIALS build "7.5.0 with CUDA, from the bundle (or export SUNDIALS_DIR, the install prefix)"
 fi
 if [ -n "${BOOST_ROOT:-}" ]; then row Boost ok "BOOST_ROOT=$BOOST_ROOT"; else row Boost build "1.86 Boost.Math headers, from the bundle"; fi
 if [ -n "${EIGEN3_DIR:-}" ]; then row Eigen ok "EIGEN3_DIR=$EIGEN3_DIR"; else row Eigen build "3.4.0, from the bundle"; fi

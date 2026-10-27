@@ -25,9 +25,10 @@ The scripts below are for the GPU machine.
 
 ```sh
 tar xf meq-device-timing-*.tar.gz && cd meq-device-timing
-./preflight.sh            # on a LOGIN node: what is there, what will be built
 module load PrgEnv-gnu cudatoolkit/13.2 cray-hdf5 cray-netcdf cmake python
-export SUNDIALS_ROOT=...   # your CUDA SUNDIALS, as gx's Makefile.perlmutter uses it
+export SUNDIALS_DIR=...    # your CUDA SUNDIALS's install prefix (include/, lib64/);
+                          # SUNDIALS_ROOT, as gx's Makefile.perlmutter names it, also works
+./preflight.sh            # on a LOGIN node: what is there, what will be built
 ./build.sh                # on a login node, about 30-60 min
 ./check.sh                # host against GPU, every printed answer: PASS or stop
 sbatch job.slurm          # the timing matrix, on one exclusive GPU node
@@ -49,7 +50,7 @@ The build fails loudly on a missing piece rather than guessing.
 | oneMKL (PARDISO, LAPACK) | `MKLROOT` (an `intel`/`mkl` module) | `python3 -m pip install mkl-devel` into the prefix |
 | netCDF-C | `cray-netcdf` (`NETCDF_DIR`): the SERIAL one; gx's `cray-netcdf-hdf5parallel` would pull MPI into a serial code | — |
 | netcdf-cxx4 | — | built from the bundle against netCDF-C |
-| SUNDIALS with CUDA | `SUNDIALS_DIR`: `ENABLE_CUDA=ON` at the same CUDA arch, `SUNDIALS_PRECISION=DOUBLE`, `SUNDIALS_INDEX_SIZE=64`, KINSOL; `build.sh` checks the first two | 7.5.0, built from the bundle |
+| SUNDIALS with CUDA | `SUNDIALS_DIR`, the install prefix (holding `include/` and `lib/` or `lib64/`), exported: `ENABLE_CUDA=ON` at the same CUDA arch, `SUNDIALS_PRECISION=DOUBLE`, `SUNDIALS_INDEX_SIZE=64`, KINSOL; `build.sh` checks the first two | 7.5.0, built from the bundle |
 | Boost.Math, Eigen | `BOOST_ROOT`, `EIGEN3_DIR` | installed from the bundle |
 
 **MKL is what the host arm is measured with.** PARDISO on MKL's GNU OpenMP

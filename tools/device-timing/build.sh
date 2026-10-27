@@ -157,9 +157,13 @@ fi
 # gx's Makefile.perlmutter names the same thing SUNDIALS_ROOT.
 SUNDIALS_DIR=${SUNDIALS_DIR:-${SUNDIALS_ROOT:-}}
 if [ -n "${SUNDIALS_DIR:-}" ]; then
-	grep -q 'SUNDIALS_CUDA_ENABLED' "$SUNDIALS_DIR/include/sundials/sundials_config.h" 2>/dev/null \
+	# Anchored, as in preflight.sh: unanchored, both match a SUNDIALS without
+	# CUDA in single precision.
+	[ -f "$SUNDIALS_DIR/include/sundials/sundials_config.h" ] \
+		|| die "SUNDIALS_DIR=$SUNDIALS_DIR has no include/sundials/sundials_config.h: it is the install prefix"
+	grep -q '^#define SUNDIALS_CUDA_ENABLED' "$SUNDIALS_DIR/include/sundials/sundials_config.h" \
 		|| die "SUNDIALS_DIR=$SUNDIALS_DIR is not a SUNDIALS built with ENABLE_CUDA=ON"
-	grep -q 'SUNDIALS_DOUBLE_PRECISION 1' "$SUNDIALS_DIR/include/sundials/sundials_config.h" \
+	grep -q '^#define SUNDIALS_DOUBLE_PRECISION 1' "$SUNDIALS_DIR/include/sundials/sundials_config.h" \
 		|| die "SUNDIALS_DIR=$SUNDIALS_DIR is not double precision"
 	say "SUNDIALS: $(sed -n 's/#define SUNDIALS_VERSION "\(.*\)"/\1/p' "$SUNDIALS_DIR/include/sundials/sundials_config.h") at $SUNDIALS_DIR"
 else
@@ -179,6 +183,9 @@ fi
 # --------------------------------------------------------------------------
 # MFEM: meq-integration, as CLAUDE_MFEM.md configures it, at sm_$CUDA_ARCH.
 # --------------------------------------------------------------------------
+# MFEM's FindSUNDIALS looks under SUNDIALS_DIR/lib only, so a SUNDIALS that
+# installs to lib64/ (SUSE's default, Perlmutter's) is found through
+# CMAKE_LIBRARY_PATH instead.
 if [ ! -f "$PREFIX/mfem/include/mfem/mfem.hpp" ] && [ ! -f "$PREFIX/mfem/include/mfem.hpp" ]; then
 	step mfem sh -c "cmake -S '$SRC/mfem' -B '$BUILD/mfem' \
 		-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='$PREFIX/mfem' \
@@ -186,6 +193,7 @@ if [ ! -f "$PREFIX/mfem/include/mfem/mfem.hpp" ] && [ ! -f "$PREFIX/mfem/include
 		-DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH -DCMAKE_CUDA_HOST_COMPILER=$CXX \
 		-DMFEM_USE_CUDSS=YES -DCUDSS_DIR='$CUDSS_DIR' \
 		-DMFEM_USE_SUNDIALS=YES -DSUNDIALS_DIR='$SUNDIALS_DIR' \
+		-DCMAKE_LIBRARY_PATH='$SUNDIALS_DIR/lib64;$SUNDIALS_DIR/lib' \
 		-DMFEM_USE_MKL_PARDISO=YES -DMKL_PARDISO_DIR='$MKLROOT' -DMKL_LIBRARY_DIR=$MKL_LIBDIR \
 		-DMKL_PARDISO_MKL_SEQUENTIAL_LIBRARY='$MKL_LIB/libmkl_gnu_thread.so' \
 		-DMFEM_USE_LAPACK=YES -DBLAS_LIBRARIES='$BLAS' -DLAPACK_LIBRARIES='$BLAS' \
