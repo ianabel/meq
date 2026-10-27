@@ -22,7 +22,10 @@ against is `CLAUDE_DECLINED.md`.
   the device — local factorisation, the NPC traversal, the trace assembly — and
   MEQ's integrand does too. The solve leg is at parity with the host; what a
   device run loses, 1.07–1.13× on the wall, is host threading it has to give up
-  (→ **[M-223](MEASUREMENTS.md#m-223)**).
+  (→ **[M-223](MEASUREMENTS.md#m-223)**). Beyond the 29: the four Picard and
+  Newton paths of `NewtonConvergence`, a limited frozen-support case under
+  `debug`, and both midplane gauges of the three-species mirror reproduce the
+  host (→ **[M-318](MEASUREMENTS.md#m-318)**).
 * **The driver's device defaults**, each applied only where the file said
   nothing: `LocalFactorMode` and `TraceAssemblyMode` batched, `AssemblyMode`
   **`Serial`** (bit-reproducibility, below), and cuDSS as the trace solver under
@@ -31,7 +34,10 @@ against is `CLAUDE_DECLINED.md`.
 * **Residency is built and gated on the data.** The iterate's readers, the axis
   search and the bordered columns have device routes that open by themselves
   once their input is device-valid. Over a `machine-f-diiid` run the bus carries
-  508 MB up and 78.6 MB down (M-240).
+  56.2 MB up and 38.0 MB down (→ **[M-317](MEASUREMENTS.md#m-317)**), from 508
+  and 78.6 at M-240. The largest single item left is upstream's: `ComputeH()`'s
+  read-only syncs, 24 MB down. What is left of MEQ's own is phase B by the
+  plan's own table, chiefly the starting iterate uploaded at each sweep.
 * **Single precision builds and runs at parity with double** (83 of 84 in each
   build, the same deliberate red, single on MKL 2026.2 included, M-303), and its accuracy is qualified **per problem**.
 * **This machine's GPU is an RTX 2070 SUPER** — evidence about correctness,
@@ -250,7 +256,26 @@ is the one that was written, and useless when the write went through an alias.
   11 MB and moved the count not at all. `ResidualRowsBatched()` reads the base's
   block **views**, and `darcyRhs.Update()` re-makes them host-only at every
   `prepare()` (16 calls of 28). *A fix that does not move its number tests the
-  attribution only if it reached the object the reader holds.*
+  attribution only if it reached the object the reader holds.* The repair wrote
+  through the views instead: a line-search trial forms the load in
+  `darcyRhs.GetBlock( 0 )` from the device-resident exterior columns and calls
+  no `prepare()`, re-based by one host assembly per accepted step →
+  [M-317](MEASUREMENTS.md#m-317). Its first version formed every trial from
+  the solve's first load, and the card then rounded loads the host assembled:
+  the mirror's card-against-host gap doubled, and a far base cost single 0.4 %
+  of `psi*`. Re-based, both are the parent's again.
+* **A `LinearForm` is device-capable, so a host assembly into one downloads its
+  own target.** `Assemble()` opens with `*this = 0.0`, which runs on the card,
+  and the first `AddElementVector()` brings the block back down to overwrite it.
+  It happened to `prepare()`'s flux load (4 × 465 KB on `machine-f-diiid`) as
+  it had to `assembleExteriorColumns()` (M-198). The repair is `UseDevice( false )`
+  on the form and `SyncAliasMemory()` to the base after → [M-317](MEASUREMENTS.md#m-317).
+* **`mfem::KINSolver::Mult( b, x )` solves through an alias of `x` and leaves
+  `x`'s own flags as they were.** On the way out it makes the alias's host copy
+  current, so the host is the one copy it vouches for. A device-capable `x`
+  claims a device copy KINSOL wrote past: probed `H0 D1` after the solve.
+  `solveByPicard()` hands KINSOL a host-only iterate and reads the result from
+  the host → [M-318](MEASUREMENTS.md#m-318).
 
 ### A buffer refreshed in place is device-valid from its own previous use → [M-211](MEASUREMENTS.md#m-211), [M-226](MEASUREMENTS.md#m-226), [M-187](MEASUREMENTS.md#m-187), [M-207](MEASUREMENTS.md#m-207), [M-210](MEASUREMENTS.md#m-210)
 

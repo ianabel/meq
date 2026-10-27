@@ -864,6 +864,19 @@ BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
 		 * point by the same route, and comparing its answer is comparing two
 		 * basins. M-186, M-222.
 		 *
+		 * **AND THE LINE IS 3x, NOT 8x, BECAUSE A CROSSING NEED NOT BE SLOW.**
+		 * The descending weights take 13 and 14 against the reference's 14 --
+		 * one times its work -- and every crossing measured takes 53 to 195,
+		 * so the 8x line compared crossings that happened to land right. One
+		 * that did not: a build forming the line search's load from a far base,
+		 * which reassociates it as MKL_NUM_THREADS does, took 85 at MKL = 1 and
+		 * landed in a basin with psi_ax of the OPPOSITE SIGN, under the 8x line.
+		 * M-317.
+		 *
+		 *     MKL              1           2           4
+		 *     shipped      53, right   119, past 8x  70, right
+		 *     far base     85, OTHER    87, right    67, right
+		 *
 		 * **WHAT IS RELAXED IS STILL A PRECONDITION AND NOT A TOLERANCE**, and
 		 * the count below still requires three of the four. Two dropouts is a
 		 * finding; so is a weight that lands in another basin inside the
@@ -871,7 +884,7 @@ BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
 		 */
 		bool const onThePlateau =
 			got.sweeps == 0
-			|| got.bootstrapIterations > 8*one.bootstrapIterations;
+			|| got.bootstrapIterations > 3*one.bootstrapIterations;
 
 		if ( onThePlateau )
 		{

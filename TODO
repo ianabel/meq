@@ -1351,3 +1351,31 @@ Raised 2026-10-22. After a real GPU-only pathway exists, not before.
   columns), and its deterministic mode takes one right-hand side only, so
   every run of such a build gives up the bit-exactness instrument; M-228 banked
   the exact baseline for that.
+
+
+================================================================================
+Single precision, CUDA: "invalid alias" in Picard->Newton's Newton stage
+Raised 2026-10-27, by NewtonConvergencePaths_cuda's first single run (M-318).
+================================================================================
+
+  WHAT IS ESTABLISHED.  NewtonConvergence's
+  everyNonlinearPathReachesTheSameExactSolution under MEQ_TEST_DEVICE=cuda, in
+  the SINGLE build only, throws on the Picard->Newton path in 4 to 6 runs of 10:
+  MFEM_VERIFY( offset + bytes <= mem.bytes ), "invalid alias", in
+  MemoryManager::InsertAlias(), under BlockVector::SetBlocks() inside
+  upstream's DarcyNPCOperator::Mult(), on the first residual of the Newton
+  stage after the Picard stage.  The parent of M-317 (c3d4632, with the test's
+  device hook grafted on) throws 6 of 10, so it is not M-317's; double throws
+  0 of 10.  The other three paths pass every time, at the host's iteration
+  counts and to single's floor.
+
+  WHAT IS NOT.  Whose it is.  Intermittent, single-only and at an alias of a
+  BlockVector re-made by Update() points at a stale registration -- an address
+  reused after a free that the memory manager still records with a smaller
+  size -- but neither the stale entry nor what freed it has been found.
+  solveByPicardThenNewton() rebuilds the forms between its stages, and that is
+  where to look first: run it under gdb with `catch throw`, read the base
+  pointer InsertAlias() was handed, and find who registered it last.
+
+  It is red in the single suite as NewtonConvergencePaths_cuda, by design: a
+  defect gets a failing test.

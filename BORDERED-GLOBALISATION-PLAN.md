@@ -262,10 +262,10 @@ fallback. It damps **every** unknown together — the fields, the trace, `ψ_ax`
 two coordinates — which is the half of a line search a trace-only operator
 cannot express.
 
-**AND IT IS THE CALLER OF THE BUDGET'S LARGEST MEQ-OWNED SERIAL LEG.** Each of
-those twelve trials re-assembles a right-hand side that is exactly linear in the
-exterior coefficients it is varying, at 5.6% of a DIII-D run. That is §12, and
-anything that changes the trial loop has to know the cost is there.
+**AND IT WAS THE CALLER OF THE BUDGET'S LARGEST MEQ-OWNED SERIAL LEG.** Each
+of those twelve trials re-assembled a right-hand side that is exactly linear in
+the exterior coefficients it is varying, at 5.6% of a DIII-D run. §12 forms it
+instead ([M-317](MEASUREMENTS.md#m-317)).
 
 So the question is not "should the bordered path have a globalisation"; it has
 one. The question is what to do when a *step-length* rule is not enough, which
@@ -1012,7 +1012,35 @@ below appears anywhere in this tree and none is invented here.**
 
 ---
 
-## 12. The line search pays a full re-assembly to change ten numbers
+## 12. The line search pays a full re-assembly to change ten numbers — **DONE, M-317**
+
+**BUILT, AND NEITHER OBSTACLE BELOW WAS ONE.** A trial on the Analytic route
+forms `b( a0 ) − Σ_m ( a_m − a0_m ) c_m` from the exterior columns and calls no
+`prepare()`; the Differenced control keeps the re-assembly. The elimination
+does not compose because there is nothing to compose: on the NPC route
+`FormLinearSystem()`'s `ReduceRHS()` only copies the load into the
+hybridization, and `essentialFluxTdofs` is empty, so no row of the flux load is
+rewritten. And the operator rebuild is unnecessary because
+`mfem::DarcyNPCOperator` holds the load **by reference** and reads it at every
+residual, so updating the flux block of `darcyRhs` in place is what it sees.
+**Measured** → [M-317](MEASUREMENTS.md#m-317): on the cold F-shaped rung the
+leg's calls fall from 20 to 3 and the leg from 0.40 s to 0.34, the wall inside
+round-to-round noise, so the 1.05× ceiling below was generous; on the device
+the same change removes the load's re-uploads.
+
+**AND THE BASE IS RE-ASSEMBLED ONCE PER ACCEPTED STEP, WHICH THIS SECTION DID
+NOT FORESEE.** Formed from the solve's first load, a trial's rounding is
+`eps · Σ |a_m − a0_m| |c_m|` rather than an assembly's `eps · |b|`, and on a
+cold start `a` travels far: three routes to one mirror equilibrium spread from
+1e-15 to 7e-15 in double and from 2e-07 to 4e-06 in single, 0.4 % of `psi*`,
+and the same build carried `XPointBorder`'s merit weight 4 into a wrong basin
+at one MKL thread count. Re-based at each accepted `a` by one host assembly of
+the datum load (`assembleExteriorDatumLoad()`), a trial forms only its own
+step, and every one of those numbers is the parent's again. **The exactness
+this section promised is of a trial against its step's base, not against the
+solve's first load.**
+
+What follows is the item as it was sized.
 
 **THIS IS A COST ITEM ON A PATH THAT ALREADY WORKS, AND IT IS HERE BECAUSE §2.1's
 ARMIJO BACKTRACK IS THE CALLER.** It closes none of the six failures and must not

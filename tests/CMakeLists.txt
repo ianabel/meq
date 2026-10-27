@@ -342,6 +342,21 @@ if(TARGET PlasmaConnectivity)
 	unset(_fold_devices)
 endif()
 
+# THE PICARD PATHS UNDER A DEVICE: NewtonConvergence's four-path case, which
+# moves the iterate between KINSOL's vectors and the solver's aliases --
+# DEVICE-PLAN.md section 1.2's sites 1 and 2, on the fallback the driver's
+# reactive ladder takes after an observed Newton failure. CUDA only: under
+# `debug` MFEM hands KINSOL serial vectors and the Anderson path stops after
+# one iteration at the wrong answer, unattributed and outside anything a run
+# configures (M-318).
+if(TARGET NewtonConvergence AND MFEM_USE_CUDA)
+	add_test(NAME NewtonConvergencePaths_cuda
+		COMMAND NewtonConvergence
+		        --run_test=everyNonlinearPathReachesTheSameExactSolution)
+	set_tests_properties(NewtonConvergencePaths_cuda PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
+endif()
+
 # ---------------------------------------------------------------------------
 # The performance harness. BUILT BUT NOT REGISTERED AS A TEST, deliberately.
 #

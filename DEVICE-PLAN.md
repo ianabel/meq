@@ -2,6 +2,28 @@
 
 ## What is next
 
+**NOTHING ON THIS PAGE IS MEQ'S TO DO, AND THE REST IS UPSTREAM'S OR THE
+HARDWARE'S** → [M-317](MEASUREMENTS.md#m-317), [M-318](MEASUREMENTS.md#m-318).
+MEQ's last bus items are done: the exterior columns are the solver's for the
+life of the mesh, a line-search trial forms the load from them in place
+(`BORDERED-GLOBALISATION-PLAN.md` §12), and two per-sweep leftovers that
+backtraced copies named are gone. `machine-f-diiid` under CUDA moves 56.2 MB
+up and 38.0 MB down, from 83.4 and 48.0, with every printed answer unchanged.
+§4's last unrun acceptances are run: stage 1b is clean, and stage 1's Picard
+pair reproduces the host on all four paths under CUDA. What stays open:
+
+* **upstream's**: `ComputeH()`'s read-only syncs, 24 MB of the 38 down
+  (reported); phase B's mesh and dof maps, which MFEM uploads lazily; item 7,
+  `mem_manager.cpp`'s unguarded maps, which keep the output stage and the
+  post-solve axis check serial under a Device; and, under `--device debug`
+  only, KINSOL stopping after one iteration on MFEM's serial N_Vectors,
+  unattributed (M-318);
+* **phase B by design**: the starting iterate, uploaded at each sweep, which is
+  the plan's own "configure the device problem";
+* **the hardware's**: whether FP32 pays on a resident solve (§7.6 item 3), and
+  upstream's crossover on MEQ's triangles (§6), both of which need a card
+  with an admissible FP64 rate.
+
 **EVERY DEVICE ROUTE IS BUILT, AND SINCE [M-238](MEASUREMENTS.md#m-238) THE
 GATES OPEN ON EVERY BORDERED SOLVE UNDER A DEVICE -- THE STATE TO PICK UP FROM
 IS BELOW. WHAT FOLLOWS IN THIS PARAGRAPH IS HOW IT STOOD BEFORE.** Items 1 to 6 and 9 of §3.3 are done and the legs are not what is
@@ -58,15 +80,29 @@ items 3 and 4 below, and both are resolved.
      `81ecf3281e`**, where the twelve are 4-byte copies and the run moves
      47.88 MB down -> [M-271](MEASUREMENTS.md#m-271).
 
-   MEQ's largest remaining item is its own: the exterior columns, uploaded
-   once per SOLVE (26.2 MB over three sweeps) when they are constant for the
-   life of the mesh. `install-single` is refreshed too, and M-235's
+   ~~MEQ's largest remaining item is its own: the exterior columns, uploaded
+   once per SOLVE (26.2 MB over three sweeps)~~ **DONE** ->
+   [M-317](MEASUREMENTS.md#m-317): they are the solver's for the life of the
+   mesh, assembled and uploaded once. `install-single` is refreshed too, and M-235's
    comparison retaken on both -> [M-242](MEASUREMENTS.md#m-242): CUDA now wins
    the solve on all four cases in both formats, 0.38x to 0.90x of the host per
    step, and single is 0.81x to 0.90x of double. What a device run loses on now
    is outside the solve: `setup` at 1.00 cores, 60 to 67 per cent of `ff3`, and
    the output stage and the post-solve axis check serial under a Device.
-2. **MEQ's `load` is re-uploaded at every re-assembly** ->
+2. ~~**MEQ's `load` is re-uploaded at every re-assembly**~~ **DONE** ->
+   [M-317](MEASUREMENTS.md#m-317). A line-search trial no longer re-assembles:
+   the load is affine in `a`, and `moveExteriorLoad()` forms
+   `b( a0 ) - sum_m ( a_m - a0_m ) c_m` from the exterior columns where they
+   live, through the views the residual reads. With that, the columns cached,
+   and the two per-sweep leftovers the same run's backtraces named removed --
+   `prepare()` downloading the flux load it was about to overwrite, and the
+   axis routes' affine maps rebuilt every sweep -- `machine-f-diiid` moves
+   **56.2 MB up and 38.0 MB down, from 83.4 and 48.0**, every printed answer
+   unchanged. The load is RE-BASED once per accepted step, by one host
+   assembly at the accepted `a`: formed from the solve's first load, a cold
+   start's far-travelled `a` spread three routes to one mirror equilibrium
+   from 2e-07 to 4e-06 in single, 0.4 % of `psi*`, and re-based they agree
+   to the parent's digits. What follows is the item as it was found.
    [M-243](MEASUREMENTS.md#m-243). It is `darcyRhs` after all. M-240's control
    uploaded the BASE once per build, and the base is never what is read: its
    block views are, and `darcyRhs.Update()` re-makes them at the end of every
@@ -107,7 +143,13 @@ items 3 and 4 below, and both are resolved.
 counter reads 0.888 MB on a run `nsys` puts at 692 MB host-to-device and 259 MB
 back: it counts MEQ's funnels, which is what attribution inside MEQ needs and
 not what a residency verdict needs. A breakpoint on `mfem::CuMemcpyDtoH` with a
-backtrace per hit is what named `ArrayMult()`.
+backtrace per hit is what named `ArrayMult()`. **`nsys profile --trace=cuda
+--cudabacktrace=memory:1 --sample=process-tree` does it for every copy in one
+run**: the SQLite export joins `CUPTI_ACTIVITY_KIND_MEMCPY` to
+`CUPTI_ACTIVITY_KIND_RUNTIME` on `correlationId`, and the runtime row's
+`callchainId` to `CUDA_CALLCHAINS`, so each byte has a caller. It is what named
+M-317's four MEQ sites. The join returns a second, chainless row per copy, so
+count only rows with a chain.
 
 **AFTER THAT, PHASE B's MESH AND DOF MAPS**, which MFEM uploads lazily and MEQ
 does not control; `meq::DeviceConstants` covers the rest of phase B already
@@ -624,8 +666,10 @@ another, which no amount of earlier `HostRead()` fixes.
    `:10113` aborts. Evidence: `h_mt = 3`, `mc = 0`, `bytes = 192`, and a
    `Write_` breakpoint hit count of exactly **2**. **Upstream's, `debug`-only,
    and filed** as `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-TOTAL-FLUX-FROM-MEQ.md`
-   with the seven same-pattern sites beside it. Sites 1 and 2 above are still
-   unwalked.
+   with the seven same-pattern sites beside it. Sites 1 and 2 above are
+   walked → [M-318](MEASUREMENTS.md#m-318), and the code they name has
+   since changed: the Picard map runs Newton's own NPC operator and moves the
+   iterate through KINSOL's vectors rather than `RecoverFEMSolution()`.
 
 **Sites 1 and 2 are on the Picard fallback, which is the path a hard problem
 lands on.** `usesNonlinearForms()` (`:3876`) returns **false** for
@@ -633,7 +677,9 @@ lands on.** `usesNonlinearForms()` (`:3876`) returns **false** for
 `solveByPicardThenNewton()` (`:4384`) sets `AndersonPicard` at `:4411` — so the
 driver's reactive ladder, on an *observed* Newton failure, moves the solve onto
 exactly the two sites that carry no sync. **The device hardening covers the
-Newton path and not the fallback from it.**
+Newton path and not the fallback from it** -- which was true when written, and
+under CUDA is now measured false: the fallback reproduces the host on all four
+paths ([M-318](MEASUREMENTS.md#m-318)).
 
 **AND THE TEST SUITE'S OWN HABIT IS NOT UNIFORM**, which matters for stage 0 of
 §4: `NpcThreadScaling.cpp:241–253`'s `copyOf()` calls `HostRead()` and carries
@@ -1594,8 +1640,8 @@ tolerance:**
 | stage | acceptance |
 |---|---|
 | **0. Today's state, as a regression** | **BUILT AND GREEN** → [M-223](MEASUREMENTS.md#m-223). `DeviceParity` is the ctest M-130 argued for — one fixed-boundary case and one bordered free-boundary case, each run under `--device cpu` and `--device debug`, asserting the host's `psi_ax`, `psi_bnd`, X-point and **Newton count** to every printed digit — and it passes at 444.9 s. `debug` needs no GPU, so it runs in any build. **AND THE CUDA GAP IS NOW CLOSED, WHICH THIS ROW SAID WAS NOT WORTH DOING** → [M-228](MEASUREMENTS.md#m-228): the gap was named and left open on the grounds that a second arm would be *"a second slow case"*, and that is the wrong way round — **`debug` is the slow arm** at some hundreds of seconds a case and a card run is seconds. The third arm costs **35 s** on a 427 s test. It is not a repeat of `debug` either: `debug` faults on a raw read of a device-valid buffer and is **blind to honest flags over a stale copy**, which is what cost `q-driven` a factor of two ([M-206](MEASUREMENTS.md#m-206)) past a `debug` run that completed without faulting and a Newton count that never moved. It is skipped loudly where no device is configured, read off MFEM's own output, so an absent GPU is an absence rather than a disagreement. **Added BEFORE item 6 deliberately**: §3.5 ends the digit-for-digit instrument when cuDSS becomes the device default, so this was the last point at which a CUDA arm could be pinned exactly rather than to a tolerance |
-| **1. §1.2's three candidates** | **the `postProcess()` one is DONE** → M-130: it faults, each fix moved the fault forward, and the root cause is `Memory<T>::Wrap`'s non-owning `Delete()` inside MFEM rather than either hypothesis this plan offered. The `PicardThenNewton` pair is still unrun; `--device debug` on such a fixture either faults — and each fix moves the fault forward — or does not, in which case the sites are safe and the reading was wrong. **Both outcomes are results** |
-| **1b. §1.2's thirteen ordering-protected reads** | a **limited** free-boundary case with the plasma support frozen — no `refreshXPoint`, no `refreshPlasmaComponent` — under `--device debug`, which is the configuration where the ordering that currently protects them is absent. A clean run says the ordering holds more widely than the reading suggests; a fault names the first site |
+| **1. §1.2's three candidates** | **the `postProcess()` one is DONE** → M-130: it faults, each fix moved the fault forward, and the root cause is `Memory<T>::Wrap`'s non-owning `Delete()` inside MFEM rather than either hypothesis this plan offered. **The `PicardThenNewton` pair is RUN** → [M-318](MEASUREMENTS.md#m-318), on `NewtonConvergence`'s four-path case. **Under `--device cuda` all four paths reach the host's iteration counts and L2 error to every printed digit**, and `NewtonConvergencePaths_cuda` holds it. Under `--device debug` it faulted, and two fixes moved the fault forward: KINSOL's iterate is now a host vector going in and is read from the host coming out, because `mfem::KINSolver::Mult()` solves through an alias and leaves the vector's own flags claiming a device copy it has written past. What is left under `debug` is KINSOL stopping after one iteration at the wrong answer on MFEM's serial N_Vectors, which a third candidate fix did not move, so it is **not attributed** and the `debug` arm is not registered |
+| **1b. §1.2's thirteen ordering-protected reads** | a **limited** free-boundary case with the plasma support frozen — no `refreshXPoint`, no `refreshPlasmaComponent` — under `--device debug`, which is the configuration where the ordering that currently protects them is absent. A clean run says the ordering holds more widely than the reading suggests; a fault names the first site. **RUN AND CLEAN** → [M-318](MEASUREMENTS.md#m-318): `examples/limiter-halfdisc.toml` (contact found on a meshed limiter, no `ConfineToPlasma`, no X-point) runs to the end under `debug` with the host's 7 Newton steps, `psi_ax` and contact, the constraint differing at 3e-16 because a Device takes the batched local factorisation. **The ordering holds there too** |
 | **2. Threaded assembly under a Device** | **ANSWERED, AND THE ANSWER IS THAT IT CANNOT BE MADE TO WORK TODAY** → [M-188](MEASUREMENTS.md#m-188). The acceptance stood as *the same digits at `OMP = 1` and `OMP = 8` under `debug`*, and that is now **MET for serial assembly**: `machine-f-diiid` reads 7 / 3 / 2 and `2.992753e-12` at both thread counts once MEQ's own element loops are gated on `meq::hostLoopsAreSafe()`. It is **unmeetable for threaded assembly**, because `mem_manager.cpp`'s maps are unguarded and upstream has not started on them; the driver refuses that pair above one thread instead. **A refusal is the resolution of this row, not a deferral of it** |
 | **3. A device `SourceIntegrator`** | the analytic fixture ladder, unchanged: `k+1` in `ψ` and `q`, `k+2` in `ψ*`, on `ManufacturedNonlinear` and `SimilarityExponential` at `k = 1…3`, with the host and device rows agreeing to round-off. A device path that changes a rate is a wrong integrand, not a faster one |
 | **4. The whole chain** | `psi_ax`, `psi_bnd`, the X-point and the Newton count identical to the host on `machine-f-diiid.toml`, under `debug` AND under `cuda`, at more than one thread count. M-79's own closing row is the template: cpu, cuda and debug agreeing to every printed digit. **MET at `OMP = MKL = 1`** → M-130 — `psi_ax = 3.759851e-01`, X-point `( 1.200929, −0.999491 )`, constraint `−6.466e-12`, 2 steps. The thread-count half is stage 2 and is still open, and **`mhd-rectangle` took 9 Newton steps under a device against 5 on the host** — **walked** → [M-203](MEASUREMENTS.md#m-203). It is a configured `mfem::Device` and nothing else: not GPU arithmetic (`debug` reproduces `cuda`), not `LocalFactorMode`, not `AssemblyMode`, and not the border, since this case has none. Every route predicate is character for character identical between an arm that takes 5 and an arm that takes 9, the answer agrees to **1.05e-14**, and the device run is the host run with a **no-op step interleaved after every contraction** that raises `‖r‖` by a constant **0.47%**. **WALKED, EXPLAINED AND NOW GREEN** → [M-207](MEASUREMENTS.md#m-207), [M-214](MEASUREMENTS.md#m-214). `meq::StageChecksum` is the instrument M-187 prescribed, kept this time, and `meq::ProbedSolver` sits where `mfem::NewtonSolver` keeps the increment to itself: on the same right-hand side the device returns an increment **36× too small**, which is a wrong JACOBIAN. MEQ's own operator had exactly that — `xLoc` written blockwise and never carried up — and with it fixed **M-187's 31 / 16 / 4 is now 7 / 3 / 2, the host's to every digit**. `mhd-rectangle` takes `mfem::DarcyNPCOperator` instead of MEQ's own subclass; **that half is upstream's and is CLOSED at `ce744b84de`**, and it reads **5 steps under `--device debug` against 5 on the host**, every printed line agreeing but the final residual at 5.3e-19 → [M-223](MEASUREMENTS.md#m-223). MEQ's report named `x_loc`, by analogy with its own defect, and the fault was **`b_tr`** — right about the symptom, the idiom and the file, wrong about the member, and what separated them was upstream running the same Newton two ways in one process. *A reproduction is not a diagnosis.* **AND THE ACCEPTANCE IS STATED ON ONE FILE AND IS NOT ENOUGH** → [M-205](MEASUREMENTS.md#m-205), [M-206](MEASUREMENTS.md#m-206): `examples/q-driven.toml` was wrong under any configured Device by a **factor of two** in `psi_ax` — **five** raw seams in MEQ's own outer Newton, each hiding behind the one in front of it, the fourth of which cost convergence RATE rather than correctness — while its inner bordered solve converged in the same 4 steps and satisfied its own constraint to 1e-16 throughout. *A bordered row certifies consistency, not correctness.* **`--device cuda` now reproduces `--device cpu` to every printed digit on it.** This row should name every nonlinear example, not one machine |
@@ -1630,7 +1676,12 @@ the run → **[M-135](MEASUREMENTS.md#m-135)**.
 **Worth filing, once, and not before it is checked**: the
 `ConformingFaceRestriction` null dereference of §2.4. Upstream's own notes call
 it *"a crash where a refusal belongs — report upstream"*, so it is theirs to
-file and it may already be filed; MEQ should check rather than duplicate. **A
+file and it may already be filed; MEQ should check rather than duplicate.
+**CHECKED, AND NOT FILED**: the cast is still unguarded in the installed
+`fem/restriction.cpp`, and upstream's own `bilininteg_hdg.cpp` records the
+crash and says it *"becomes the thing to fix first"* if face geometry ever
+becomes a kernel. It is recorded where it would be fixed, and it blocks
+nothing here. **A
 "filed as" claim in MEQ's own files needs a check and not a citation** —
 `CLAUDE.md` records one that was never written.
 
@@ -1692,25 +1743,28 @@ Stated plainly, because an admitted gap is worth more than a confident guess.
   `--device cuda`, and the bullets below say which of these gaps it closed.
 * ~~**§1.2's three candidate alias sites are a reading, not a reproduction.**~~
   **The third is reproduced and closed** → M-130, and it is upstream's rather
-  than either hypothesis offered. The two on the Picard fallback are still a
-  reading. **And the reading missed two live sites that a single `--device
+  than either hypothesis offered. The two on the Picard fallback are walked →
+  [M-318](MEASUREMENTS.md#m-318): CUDA reproduces the host on all four paths,
+  and under `debug` one MFEM-side alias was found and repaired before an
+  unattributed stop. **And the reading missed two live sites that a single `--device
   debug` run found in an afternoon**, both of them in §1.2's own subject matter
   — which is the argument for running the instrument before extending the
   sweep.
 * **§1.2's thirteen ordering-protected reads are not claimed to be defects.**
   M-91 measures the DIII-D case solving clean under `--device debug` with the
   X-point, the located axis and ten exterior modes live, so on that
-  configuration the ordering holds. Whether it holds on a limited, frozen-support
-  free-boundary case is a one-command experiment that has not been run.
+  configuration the ordering holds. **On a limited, frozen-support case it holds
+  as well** → [M-318](MEASUREMENTS.md#m-318).
 * ~~**M-91's remaining `postProcess()` abort is attributed to a stack-backed
   `Vector` inside MFEM.**~~ **SETTLED, and neither attribution was right** →
   M-130. It is `Memory<T>::Wrap`'s non-owning, unregistered path meeting
   `Memory<T>::Delete()`'s `std_delete` test under `HOST_DEBUG`, at
   `darcyhybridization.cpp:10164`. Filed upstream with the seven same-pattern
   sites.
-* **The threaded-plus-device question is open**, §4 stage 2. M-79's `OMP=8`
-  abort has no recorded resolution and the post-fix tables do not state a
-  thread count for the runs that pass.
+* ~~**The threaded-plus-device question is open**, §4 stage 2.~~ **ANSWERED**
+  → [M-188](MEASUREMENTS.md#m-188): MEQ's own loops are gated on
+  `meq::hostLoopsAreSafe()`, MFEM's threaded assembly under a Device is fixed
+  upstream, and the driver refuses the pair above one thread.
 * ~~**`apps/meq.cpp:954-956` asserts that a device raises the Newton step count
   "because the device path's element-local evaluation is inexact where dF/dpsi
   is non-zero", at a 1.7x to 2.0x whole-solve loss on the fixtures.** That

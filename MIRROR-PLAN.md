@@ -881,9 +881,12 @@ the branch.
   not fixed; on a mirror only a far `[initialguess]` now poses such a start.
 * **The device on the mirror is measured in double only**: device against host
   in single, and `DeviceParity`'s `MEQ_AXIS_DEVICE=force` arm, are not run on
-  it. Neither `--device` nor the adaptive loop has been run under
-  `Gauge = "midplane"` or `"vacuum-midplane"`, and the knots' rows have no
-  device twin, so under a Device their dot products take the host route.
+  it. Under `--device cuda` both gauges reproduce the host on the
+  three-species example, in double: the same Newton count and `psi_inner`, and
+  every field in the `.nc` within 6.3e-12 of its largest value
+  (→ [M-318](MEASUREMENTS.md#m-318)). The adaptive loop has not been run under
+  either gauge, and the knots' rows have no device twin, so under a Device
+  their dot products take the host route.
 * **The three-species pressure ceiling** (risk 5) was constant `τ = 1`'s
   element-local fold of the discretisation in every stall measured but one,
   and **a box support now defaults to `τ = 3/max(R, 0.1 m)`**, under which

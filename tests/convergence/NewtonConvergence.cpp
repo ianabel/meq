@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include "mfem.hpp"
@@ -190,7 +191,30 @@ namespace
 
 	/// k+1, less the slack allowed for a two-mesh rate estimate.
 	double const rateSlack = meq::tests::rateSlack;
+
+	/*
+	 * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE
+	 * RUNS. Unset, there is none, which is how the ctest NewtonConvergence runs
+	 * every case. Set, it is how everyNonlinearPathReachesTheSameExactSolution
+	 * runs the Picard paths under a Device: they move the iterate between
+	 * KINSOL's vectors and the solver's aliases of one memory, which
+	 * DEVICE-PLAN.md section 1.2 names as its sites 1 and 2 and which the
+	 * Newton path never reaches. A function-local static, as in
+	 * PlasmaConnectivity.cpp, because a namespace-scope mfem::Device may be
+	 * constructed before MFEM's own singleton.
+	 */
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+			if ( requested != nullptr && *requested != '\0' )
+				static mfem::Device device( requested );
+		}
+	};
 }
+
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 
 /// The benchmark before the solver, part one: -Delta*( psi ) must equal
 /// F( R, z, psi ) evaluated at the manufactured psi, or everything measured

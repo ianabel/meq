@@ -575,8 +575,14 @@ the last bit of a published number is a refactor that has to be argued about.
   perfectly satisfied constraint is not evidence the coupling is right.
 
 **WHAT IT COSTS**, and it is more than §4.4 predicted: `N + 2` backsolves against
-one factorisation, **plus one full re-assembly per accepted step**, because the
-datum reaches the system through the right-hand side.
+one factorisation. The datum reaches the system through the right-hand side,
+and that load is **affine in `a`**, so on the Analytic route a step or
+line-search trial forms it from the exterior columns in place --
+`moveExteriorLoad()` -- where it used to re-run `prepare()` and rebuild the
+operator. The base is re-assembled once per accepted step, since a combination
+formed from the solve's first load costs single precision 0.4 % of `psi*` on a
+cold start. The Differenced control still re-assembles every trial
+(`BORDERED-GLOBALISATION-PLAN.md` §12, → **[M-317](MEASUREMENTS.md#m-317)**).
 
 **THE `N + 2` ARE ONE CALL AND NOT `N + 2` CALLS.** They share a Jacobian by
 construction, which is exactly `mfem::DarcyNPCSolver::ArrayMult()`'s case: one

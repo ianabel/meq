@@ -21069,3 +21069,256 @@ above under each Device and pass in both formats.
 `MKL_NUM_THREADS=1 MEQ_TEST_DEVICE=<cuda|debug> ../../PlasmaConnectivity
 --run_test=theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem`, or `ctest -R
 PlasmaConnectivity`.
+
+### M-317
+
+**MEQ'S LAST BUS ITEMS. THE EXTERIOR COLUMNS ARE THE SOLVER'S FOR THE LIFE OF
+THE MESH. A LINE-SEARCH TRIAL FORMS THE LOAD FROM A BASE RE-ASSEMBLED ONCE PER
+ACCEPTED STEP, INSTEAD OF RE-ASSEMBLING IT PER TRIAL. TWO PER-SWEEP LEFTOVERS
+ARE GONE. `machine-f-diiid` MOVES 56.2 MB UP AND 38.0 DOWN, FROM 83.4 AND
+48.0, WITH EVERY PRINTED ANSWER UNCHANGED. A FIRST VERSION THAT NEVER RE-BASED
+LOST 0.4 % OF `psi*` IN SINGLE.**
+
+**Setup.** `meq-integration` at `1a15a28363`, the install M-316 used.
+`machine-f-diiid`, `--device cuda`, `MKL = OMP = 1`, cuDSS, `nsys profile
+--trace=cuda` over the run, copies summed from the SQLite export. `c3d4632` is
+the parent of this change. It reproduces [M-271](#m-271)'s copy count up, and
+down to within 3 copies.
+
+| | `c3d4632` | columns cached, every trial formed from the first load | + `prepare()`'s load, axis maps | + re-based per accepted step (shipped) |
+|---|---|---|---|---|
+| host to device | 83.35 MB, 343 | 51.54 MB, 269 | 50.61 MB, 259 | **56.20 MB, 271** |
+| device to host | 48.00 MB, 417 | 39.84 MB, 392 | 37.98 MB, 388 | **37.98 MB, 388** |
+
+Copies matched by size, parent against shipped:
+
+| bytes | what | direction | `c3d4632` | shipped |
+|---|---|---|---|---|
+| 873,624 | a whole column, `n = 109,203` | up | 31 | 11 |
+| 465,408 | the flux block | up / down | 22 / 18 | 18 / 1 |
+| 232,704 | the potential block | up / down | 24 / 5 | 10 / 5 |
+| 175,512 | the trace block | up / down | 33 / 14 | 7 / 2 |
+
+**The 31 column uploads were the ten exterior columns once per support sweep,
+plus the starting iterate.** `assembleExteriorColumns()`'s output was a local
+of the solve. It is now `exteriorColumnCache`, keyed on the coupling, the mesh
+sequence and the face rule, so the second and third sweeps reuse the columns
+and their device copies. That makes 10 uploads instead of 30.
+
+**The load's re-uploads were the line search's re-assemblies.** Each Armijo
+trial and fallback step re-ran `prepare()` and rebuilt the operator, because
+`a` moved. The load is affine in `a`, and the Analytic columns are minus its
+derivative. So `moveExteriorLoad()` writes `b( a0 ) - sum_m ( a_m - a0_m ) c_m`
+into `darcyRhs.GetBlock( 0 )` from the device-resident columns.
+
+Neither of `BORDERED-GLOBALISATION-PLAN.md` §12's two obstacles exists on this
+route:
+* on NPC, `FormLinearSystem()`'s `ReduceRHS()` only copies the load, and
+  `essentialFluxTdofs` is empty;
+* `mfem::DarcyNPCOperator` holds the load by reference and reads it through
+  those block views at every residual.
+
+The Differenced control keeps `reprepare()`.
+
+**The base must be re-assembled once per accepted step, and the first version
+did not do so.** Formed from the solve's first load, a trial's rounding is
+`eps * sum |a_m - a0_m| |c_m|`, not an assembly's `eps * |b|`. On a cold start
+`a` travels far. `RotatingMirror`'s `theHeldStartSavesAtMostOneBorderedStep`
+solves one mirror equilibrium by three routes, and their spread was:
+
+| | double | single |
+|---|---|---|
+| `c3d4632` | 1.30e-15, 1.59e-15, 2.22e-15 | 9.7e-08, 1.7e-07, 2.4e-07 |
+| formed from the first load | 5.8e-15, 8.1e-15, 6.7e-15 | 3.7e-06, 4.8e-06, 3.8e-06 |
+| re-based per accepted step | 1.30e-15, 1.59e-15, 2.22e-15 | 2.1e-07, 2.0e-07, 1.2e-07 |
+
+In single, 4e-06 is 0.4 % of a plasma `psi*` of 8.7e-04.
+
+The unrebased build also showed a "lower floor": the held start's bordered
+Newton reached 4e-09 where it used to stop at 1.7e-08. That was a solve
+converging tightly to a slightly wrong load, not a gain. Re-based, the
+floors and step counts are the parent's.
+
+`assembleExteriorDatumLoad()` assembles the datum load on the host at the
+accepted `a`, with the integrator `prepare()` uses
+(`addExteriorDatumIntegrator()`, shared). The residual is then re-evaluated
+against it, so the next step's merit and its trials read one load. That costs
+one host assembly, one 465 KB upload and one residual per accepted step,
+against a preparation per trial before: the 12 extra flux-block uploads in
+the last column.
+
+**The last two leftovers were named by backtraced copies, not by any plan
+item.** `nsys --cudabacktrace=memory:1 --sample=process-tree` attributes every
+copy to a caller (`DEVICE-PLAN.md`, *What is next*).
+* `prepare()`'s flux load downloaded its own target, four times at 465 KB.
+  `LinearForm` is device-capable, so `Assemble()`'s opening zero ran on the
+  card, and the first `AddElementVector()` brought the block back. This is
+  [M-198](#m-198)'s mechanism, and the repair is the same:
+  `UseDevice( false )` on the form and `SyncAliasMemory()` to the base.
+* The axis routes' affine maps, 465 KB, were rebuilt and uploaded every sweep,
+  together with the two bases and the bin grid. They were locals of the solve,
+  although their comment called them built once per mesh. They are now
+  `axisDeviceBasis`, a member, and a mesh changed under the solver is refused
+  rather than refilled in place.
+
+What the backtraces attribute to MEQ now:
+* the starting iterate, seeded each sweep, which is phase B by the plan's table;
+* `downloadSolution()`, which is phase D;
+* `assemblePlasmaCurrent()`'s per-element currents, 1.2 MB down, which keep
+  the documented bit-identical host sum.
+
+The largest single item is upstream's: `SyncLocalBlocksToHost()` under
+`GetGradient()`, 24.0 MB down in 26 copies. These are the `ComputeH()`
+read-only syncs already reported.
+
+**Every printed answer is unchanged** in all four columns: sweeps 7 / 3 / 2,
+`psi_ax = 3.759850e-01`, constraint `-6.466e-12`, X-point
+`( 1.200929, -0.999490 )`. On `RotatingMirror`'s
+`theShippedMirrorOnTheCardIsTheHosts`, the shipped build's card-against-host
+gap in `psi_h` is 2.6e-16 to 6.7e-16 over six runs. The parent read 3.2e-16
+to 6.4e-16. The unrebased build read 7.7e-16 to 1.43e-15, because the card
+rounded loads the host assembled.
+
+**On the host, measured on the cold F-shaped race rung** (`runs/f-cold/r00`,
+`OMP = MKL = 4`, three interleaved rounds of the unrebased build against
+`c3d4632` built with the same link line):
+* the answer agrees to every printed digit;
+* the constraint reads `2.496e-12` against `2.495e-12`;
+* the `re-assembly` leg falls from 20 calls to 3 and from 0.39 s to 0.34;
+* the wall reads 11.17 to 11.20 s before and 10.12 to 11.38 s after. That is
+  noise, on a machine held at load 2 by another session.
+
+[M-159](#m-159)'s 51.4 % for this leg was the defective run's.
+
+**`XPointBorder`'s merit weight 4 sits on a plateau**, in every build:
+
+| MKL | `c3d4632` | formed from the first load | shipped |
+|---|---|---|---|
+| 1 | 53, right basin | **85, psi_ax = -7.53e-02** | 53 |
+| 2 | past the 8x line | 87, right basin | 119, past the 8x line |
+| 4 | 70, right basin | 67, right basin | 70 |
+
+The case skipped a weight above 8 times the reference's 14 iterations. The
+descending weights take 13 and 14, and every crossing measured takes 53 to
+195. So the 8x line compared crossings that happened to land right, and the
+unrebased build showed one that did not. The precondition is now 3 times.
+That relaxes a precondition, not a tolerance, and the case still requires
+three of four weights to compare.
+
+**The suites, on the shipped build.**
+* Double passes 86 of 87, with only the deliberate `PlasmaEdgeConvergence`
+  red. `DeviceParity` and `RotatingMirrorDevice` pass, the latter at its
+  original bound.
+* Single passes 84 of 87. `PlasmaEdgeConvergence` and `DriverAcceptance`'s two
+  named cases are red as at [M-316](#m-316). The third red is
+  `NewtonConvergencePaths_cuda`, new here: it names
+  [M-318](#m-318)'s pre-existing "invalid alias".
+* The unrebased build had also reddened `FreeBoundaryCoupling`'s
+  `theExteriorColumnsAreExact` and `RotatingMirror`'s route and driver cases
+  in single. Re-based, all three pass.
+
+**Reproduce.** From `runs/device-bus/`, with the mesh made by
+`meq-run --mesh-only`: `MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 nsys profile
+--trace=cuda [--cudabacktrace=memory:1 --sample=process-tree] -o <tag>
+../../install/double/bin/meq --device cuda --mesh-ready
+../../source/examples/machine-f-diiid.toml`, then `nsys export --type sqlite`
+and sum `CUPTI_ACTIVITY_KIND_MEMCPY` by `copyKind`. The spread:
+`RotatingMirror --run_test=route/theHeldStartSavesAtMostOneBorderedStep`,
+"the three answers within".
+
+### M-318
+
+**THE DEVICE PLAN'S LAST UNRUN ACCEPTANCES.**
+* **A limited, frozen-support case is clean under `debug`.**
+* **The Picard fallback reproduces the host on all four paths under CUDA.**
+  Under `debug` the walk found and repaired one alias defect on MFEM's side of
+  the call before an unattributed stop. In single, Picard->Newton under CUDA
+  meets an intermittent, pre-existing "invalid alias" in MFEM's memory
+  manager.
+* **Both mirror gauges reproduce the host under CUDA.**
+
+Double build unless stated, `meq-integration` at `1a15a28363`, `MKL = 1`.
+
+**§4 stage 1b: `examples/limiter-halfdisc.toml`**, run on the first and the shipped build alike. It finds its contact on a
+meshed limiter, with no `ConfineToPlasma` and no X-point, so it is limited and
+frozen-support. It runs to the end under `--device debug` with no fault, and
+matches `--device cpu` on every printed line but two. The shared lines include
+7 Newton steps and `psi_ax = 7.459870e-01`. The constraint reads -1.1e-16
+against 2.2e-16, and the last residual 1.42e-15 against 1.65e-15: round-off
+from the batched local factorisation a Device takes. **The ordering that
+protects §1.2's thirteen reads holds here too.**
+
+**§4 stage 1, the Picard pair.** `NewtonConvergence`'s
+`everyNonlinearPathReachesTheSameExactSolution` under `MEQ_TEST_DEVICE`, with
+iterations and L2 error against Example 5:
+
+| path | host | `cuda` |
+|---|---|---|
+| Newton | 4, 2.983495e-05 | 4, 2.983495e-05 |
+| Anderson-Picard | 19, 2.983495e-05 | 19, 2.983495e-05 |
+| Picard, w = 0.5 | 97, 2.983495e-05 | 97, 2.983495e-05 |
+| Picard->Newton | 1, 2.983495e-05 | 1, 2.983495e-05 |
+
+**Under CUDA the fallback is the host's to every printed digit**, which is
+what §1.2's reading feared it would not be. The code that reading described
+has since changed: the map runs Newton's own NPC operator and moves the
+iterate through KINSOL's vectors. `NewtonConvergencePaths_cuda` asserts it.
+
+**Under `debug` the case faults, and the walk moved the fault twice.**
+1. The first fault was `potentialGf = in` in the settle step after KINSOL,
+   reading a protected page. Probing `iterate`'s flags gave `H1 D0` before
+   `KINSolver::Mult()` and `H0 D1` after, because `iterate = potentialGf` had
+   made it device-only. `KINSolver::Mult()` solves through an alias `Y` of
+   `x`, ends with `Y->HostRead()` ("Make sure host is up to date"), and never
+   touches `x`'s flags. So the host is the one copy it vouches for, and `x`
+   claimed a device copy KINSOL had written past.
+2. The repair is MEQ's: the iterate is filled through `HostWrite()` going in,
+   and read through `HostRead()` coming out. The fault moved first to a
+   `HostRead()` of the device copy, then out of `solveByPicard()`'s tail
+   entirely.
+3. What is left: Anderson-Picard stops after **one** iteration at L2 0.378,
+   and a later path dies on an unmapped address. A third candidate wrote
+   KINSOL's `out` on the host when no GPU is available, since MFEM makes
+   KINSOL's vectors serial then. It changed nothing, so by the instrument's own
+   rule it was not a fix, and it was reverted.
+
+This stop is not attributed. Only a Device with no GPU reaches it, and no run
+configures one, so the `debug` arm is not registered.
+
+**In single, Picard->Newton under CUDA throws intermittently.**
+`MFEM_VERIFY( offset + bytes <= mem.bytes )`, "invalid alias", in
+`MemoryManager::InsertAlias()`, under `BlockVector::SetBlocks()`, in
+upstream's `DarcyNPCOperator::Mult()`, during the Newton stage after the
+Picard stage. Measured on the case alone, ten runs per binary:
+
+| binary | throws |
+|---|---|
+| single, `c3d4632` (with the test's device hook) | 6 of 10 |
+| single, shipped | 4 of 10 |
+| double, shipped | 0 of 10 |
+
+**Pre-existing, single-only, and not walked.** `NewtonConvergencePaths_cuda`
+names it in the single suite.
+
+**The three-species mirror in both midplane gauges**
+(`examples/mirror-three-species.toml`, and the same file with
+`Gauge = "vacuum-midplane"`). `--device cuda` against `--device cpu`, each in
+its own directory, shipped build:
+
+| gauge | Newton | `psi_inner` | worst field, of its largest value |
+|---|---|---|---|
+| midplane | 3 / 3 | 5.591601e-03, both | 1.3e-12 (`psistar_coefficients`) |
+| vacuum-midplane | 3 / 3 | 5.589740e-03, both | 1.6e-12 (`psistar_coefficients`) |
+
+The residual histories agree to every printed digit down to the round-off
+step. The unrebased build read 6.3e-12 and 3.7e-12. Adaptivity under either gauge is still unrun.
+
+**Reproduce.**
+* `runs/device-1b/`: `meq --device <cpu|debug>
+  ../../source/examples/limiter-halfdisc.toml`.
+* `ctest -R NewtonConvergencePaths`, or from that test's output directory,
+  `MEQ_TEST_DEVICE=<debug|cuda> ../../NewtonConvergence
+  --run_test=everyNonlinearPathReachesTheSameExactSolution`.
+* `runs/device-mirror/`: `meq-run
+  ../../source/examples/mirror-three-species.toml --device <cpu|cuda>`, one
+  directory per arm.

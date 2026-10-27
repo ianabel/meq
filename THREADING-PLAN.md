@@ -668,7 +668,8 @@ of the Armijo backtrack that calls it. That backtrack is described in
 as **§12** of that file, with the mechanism — the `Γ_h` load being exactly
 linear in the exterior coefficients, so a trial right-hand side is
 `b₀ + Σ a_m L_m` over vectors `assembleExteriorColumns()` already computes — and
-the two things that stop it being a one-line change.
+the two things that seemed to stop it being a one-line change. **It is built**,
+and neither did → [M-317](MEASUREMENTS.md#m-317).
 
 **It is worth more now than when it was sized, and the leg did not move.**
 **[M-138](MEASUREMENTS.md#m-138)** reads it at **0.191 s, 5.6%, 1.08 cores**

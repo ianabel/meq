@@ -14,10 +14,12 @@
 // Phase B's payload is a member, so its definition has to be visible here.
 // It is MFEM types and PODs only -- no device language -- so a host build
 // includes it exactly as a device build does.
+#include "DeviceBasis.hpp"
 #include "DeviceNPC.hpp"
 #include "ExteriorDtN.hpp"
 #include "Materials.hpp"
 #include "PlasmaComponent.hpp"
+#include "PointLocator.hpp"
 #include "ResidentIterate.hpp"
 #include "Source.hpp"
 
@@ -6902,6 +6904,16 @@ namespace meq
 			/// False when there is no exterior coupling or no transfer path.
 			/// See the implementation for why a closed form exists.
 			bool assembleExteriorColumns( std::vector<mfem::Vector> &columns );
+			/// The transferred exterior datum's load term, as prepare() puts it
+			/// on the flux equation: one rule, one marker, one coefficient,
+			/// shared by prepare() and assembleExteriorDatumLoad().
+			void addExteriorDatumIntegrator( mfem::LinearForm &form );
+			/// The flux load at the current exterior coefficients, assembled on
+			/// the host into @a out -- what prepare() writes into the flux block
+			/// of the right-hand side, without the rest of a preparation. The
+			/// bordered Newton re-bases its affine load on it once per accepted
+			/// step (M-317).
+			void assembleExteriorDatumLoad( mfem::Vector &out );
 
 			LocalFactorMode localFactorChoice = LocalFactorMode::Serial;
 			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Batched;
@@ -6929,6 +6941,45 @@ namespace meq
 			 * remember to clear is the thing this avoids.
 			 */
 			DeviceConstants npcConstants;
+
+			/*
+			 * assembleExteriorColumns()'s OUTPUT, KEPT FOR THE LIFE OF THE MESH.
+			 *
+			 * The columns depend on the coupling's basis, Gamma_h's faces and the
+			 * face rule, and on nothing a solve changes, so a local per solve
+			 * re-assembled them and re-uploaded them on every support sweep:
+			 * 31 uploads and 27.1 MB of the 83.4 MB `machine-f-diiid` moved up
+			 * under `--device cuda`. The key is what they are a function of;
+			 * ExteriorDtN is immutable, and the extension cannot change once the
+			 * forms are built. Only the Analytic route fills it -- the
+			 * Differenced control is measured afresh, as a control should be.
+			 */
+			std::vector<mfem::Vector> exteriorColumnCache;
+			ExteriorDtN const *exteriorColumnCacheCoupling = nullptr;
+			long exteriorColumnCacheSequence = -1;
+			int exteriorColumnCacheFaceOrder = 0;
+
+			/*
+			 * THE AXIS AND X-POINT DEVICE ROUTES' CONSTANTS OF THE MESH: the
+			 * two spaces' bases, the affine maps and the bin grid. Built at the
+			 * first device evaluation and kept, because they depend on the mesh
+			 * and nothing else -- as locals of solveWithNormalisation() they
+			 * were rebuilt on every support sweep and the maps re-uploaded,
+			 * 465 KB a sweep on `machine-f-diiid`. Never refilled in place
+			 * (M-226): a mesh changed under the solver is refused, and the host
+			 * route takes it.
+			 */
+			struct AxisDeviceBasis
+			{
+				DeviceTriangleBasis flux;
+				DeviceTriangleBasis potential;
+				mfem::Array<AffineTriangle> maps;
+				std::unique_ptr<PointLocator> bins;
+				/// 0 not built, 1 built, -1 refused; for `sequence` alone.
+				int state = 0;
+				long sequence = -1;
+			};
+			AxisDeviceBasis axisDeviceBasis;
 
 			/// DEVICE-PLAN.md section 3.3 item 4; see borderDotsRanOnDevice().
 			/// Mutable because the bordered step that sets it is const-correct

@@ -2187,8 +2187,28 @@ namespace
 			out = potentialGf;
 		};
 
+		/*
+		 * KINSOL'S ITERATE IS A HOST VECTOR GOING IN AND IS READ FROM THE HOST
+		 * COMING OUT -- DEVICE-PLAN.md section 1.2's site 1, walked.
+		 *
+		 * mfem::KINSolver::Mult() solves through an ALIAS of this vector and,
+		 * on the way out, makes the ALIAS's host copy current -- "Make sure
+		 * host is up to date" -- without touching this vector's own flags. So
+		 * the host copy is the one copy it vouches for, on every backend, and
+		 * the flags are whatever they were before the solve. `iterate =
+		 * potentialGf` made them device-only, since an assignment runs on the
+		 * device when either side is device-capable, and the settle step then
+		 * read a device copy KINSOL had written past: under `--device debug` a
+		 * protected page and a named fault, probed at H0 D1 after the solve.
+		 * Filled by HostWrite() it is honestly host-valid before and after, and
+		 * the HostRead() below moves nothing. With no Device both are the
+		 * copies they replace.
+		 */
 		mfem::Vector iterate( potentialGf.Size() );
-		iterate = potentialGf;
+		{
+			mfem::real_t const *const from = potentialGf.HostRead();
+			std::copy( from, from + potentialGf.Size(), iterate.HostWrite() );
+		}
 
 		PicardMap map( iterate.Size(), picardStep );
 
@@ -2240,8 +2260,15 @@ namespace
 		// the potential all come from the SAME state. Without it the flux would
 		// be one iteration stale, which no rate would notice and every field plot
 		// would.
+		// From the host, for the reason given where `iterate` is made: its
+		// flags may claim a device copy the solve wrote past.
+		mfem::Vector converged( iterate.Size() );
+		{
+			mfem::real_t const *const from = iterate.HostRead();
+			std::copy( from, from + iterate.Size(), converged.HostWrite() );
+		}
 		mfem::Vector settled( iterate.Size() );
-		picardStep( iterate, settled );
+		picardStep( converged, settled );
 
 		// As solve() ends a Newton solve: the aliases' validity flags made
 		// honest, the answer downloaded once, and the flux's sign undone.
@@ -6208,21 +6235,16 @@ namespace
 			// Whole, every time. See the declaration.
 			fluxRhs = std::make_unique<mfem::LinearForm>();
 			fluxRhs->Update( fluxFes.get(), rhs.GetBlock( 0 ), 0 );
-			// g( a( x ) ) is no more polynomial in x than L_e is, so the data
-			// half takes the same rule as the solution half -- which is a
-			// REQUIREMENT and not a nicety: the two halves' quadrature errors
-			// cancel only under one rule, and mismatched ones cost upstream's
-			// corner fixture 845x the no-transfer flux error at order 2. Both
-			// defaults are 2k, so leaving both alone shares too.
-			fluxRhs->AddBdrFaceIntegrator(
-				new mfem::VectorBoundaryFluxLFIntegrator(
-					*exteriorDatumCoefficient, 1.0,
-					( extensionFaceOrder >= 0 )
-						? &mfem::IntRules.Get( mfem::Geometry::SEGMENT,
-						                       extensionFaceOrder )
-						: nullptr ),
-				gammaHMarker );
+			// HOST ARITHMETIC, AND KEPT OFF THE DEVICE FOR assembleExteriorColumns()'s
+			// REASON: a LinearForm is device-capable, so Assemble()'s opening
+			// zero ran on the card and its first AddElementVector() downloaded
+			// the block it was about to overwrite -- four of the six
+			// preparations on `machine-f-diiid`, 465 KB each. The alias is
+			// written on the host, and SyncAliasMemory() below tells the base.
+			fluxRhs->UseDevice( false );
+			addExteriorDatumIntegrator( *fluxRhs );
 			fluxRhs->Assemble();
+			fluxRhs->SyncAliasMemory( rhs );
 		}
 
 		// Only setSource( Coefficient & ) has a right hand side source. A
@@ -9429,6 +9451,44 @@ namespace
 		return h != nullptr && h->CanBatchTraceAssembly();
 	}
 
+	void GradShafranovSolver::addExteriorDatumIntegrator( mfem::LinearForm &form )
+	{
+		// g( a( x ) ) is no more polynomial in x than L_e is, so the data half
+		// takes the same rule as the solution half -- which is a REQUIREMENT and
+		// not a nicety: the two halves' quadrature errors cancel only under one
+		// rule, and mismatched ones cost upstream's corner fixture 845x the
+		// no-transfer flux error at order 2. Both defaults are 2k, so leaving
+		// both alone shares too.
+		form.AddBdrFaceIntegrator(
+			new mfem::VectorBoundaryFluxLFIntegrator(
+				*exteriorDatumCoefficient, 1.0,
+				( extensionFaceOrder >= 0 )
+					? &mfem::IntRules.Get( mfem::Geometry::SEGMENT,
+					                       extensionFaceOrder )
+					: nullptr ),
+			gammaHMarker );
+	}
+
+	void GradShafranovSolver::assembleExteriorDatumLoad( mfem::Vector &out )
+	{
+		if ( !exteriorDatumCoefficient )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleExteriorDatumLoad: "
+			                        "no exterior datum has been prepared" );
+		// A HOST VECTOR THAT NEVER SEES THE DEVICE, so the form's zeroing and
+		// its element scatter are one host buffer -- the trap prepare() and
+		// assembleExteriorColumns() each meet with an alias of a device-capable
+		// one. The caller copies it to wherever it is read.
+		out.SetSize( fluxFes->GetVSize() );
+		out.UseDevice( false );
+		zeroOnHost( out );
+		mfem::LinearForm form;
+		form.Update( fluxFes.get(), out, 0 );
+		form.UseDevice( false );
+		addExteriorDatumIntegrator( form );
+		form.Assemble();
+		form.SyncAliasMemory( out );
+	}
+
 	bool GradShafranovSolver::assembleExteriorColumns(
 		std::vector<mfem::Vector> &columns )
 	{
@@ -10161,6 +10221,10 @@ namespace
 		 * process dies inside this function with nothing in the trace to say so.
 		 *
 		 * prepare() also zeroes the iterate, so every caller puts it back.
+		 *
+		 * The Differenced control is its only caller inside the Newton loop:
+		 * on the Analytic route the load is affine in `a` and
+		 * moveExteriorLoad() forms it without a preparation.
 		 */
 		auto reprepare = [ & ]()
 		{
@@ -10684,11 +10748,12 @@ namespace
 		 * reallocates nothing and leaves the fill writing into a page the
 		 * device copy is still believed to own. None of these is ever filled
 		 * twice: the only event that invalidates them is a new mesh, and that
-		 * is a new solver.
+		 * is a new solver. The four that depend on the mesh alone are the
+		 * solver's, so a support sweep reuses them; see axisDeviceBasis.
 		 */
-		DeviceTriangleBasis axisFluxBasis;
-		DeviceTriangleBasis axisPotentialBasis;
-		mfem::Array<AffineTriangle> axisAffineMaps;
+		DeviceTriangleBasis &axisFluxBasis = axisDeviceBasis.flux;
+		DeviceTriangleBasis &axisPotentialBasis = axisDeviceBasis.potential;
+		mfem::Array<AffineTriangle> &axisAffineMaps = axisDeviceBasis.maps;
 		mfem::Vector axisNewtonTarget;
 		mfem::Array<AxisCandidate> axisRawCandidates;
 		std::vector<CriticalPoint> deviceCandidates;
@@ -10702,7 +10767,7 @@ namespace
 		 * rebuilt: a second grid would be two uploads of one table and a
 		 * second thing to keep in step with the mesh.
 		 */
-		std::unique_ptr<PointLocator> axisBins;
+		std::unique_ptr<PointLocator> &axisBins = axisDeviceBasis.bins;
 		mfem::Array<int> axisSelection;
 		std::vector<int> axisSelectionHost;
 
@@ -10806,18 +10871,33 @@ namespace
 			 * scope is what makes it counted instead of averaged.
 			 */
 			PhaseScope const residency( Phase::Upload );
-			if ( !axisFluxBasis.build( *fluxFes )
-			     || !axisPotentialBasis.build( *potentialFes ) )
+			// A previous solve on this mesh built them, or refused to. Built
+			// for another sequence is a mesh changed under the solver, which
+			// is refused rather than refilled in place (M-226): the host route
+			// takes it.
+			if ( axisDeviceBasis.state != 0
+			     && axisDeviceBasis.sequence != mesh.GetSequence() )
 				return false;
-			if ( !affineTrianglesOf( mesh, axisAffineMaps ) )
-				return false;
+			if ( axisDeviceBasis.state == 0 )
+			{
+				axisDeviceBasis.state = -1;
+				axisDeviceBasis.sequence = mesh.GetSequence();
+				if ( !axisFluxBasis.build( *fluxFes )
+				     || !axisPotentialBasis.build( *potentialFes ) )
+					return false;
+				if ( !affineTrianglesOf( mesh, axisAffineMaps ) )
+					return false;
 
-			// The bin grid, borrowed from meq::PointLocator so there is one
-			// of them. Its own refusal -- any element that is not a straight
-			// triangle -- is the same one affineTrianglesOf() just made, so
-			// reaching here means it holds.
-			axisBins = std::make_unique<PointLocator>( mesh );
-			if ( !axisBins->grid().affine )
+				// The bin grid, borrowed from meq::PointLocator so there is
+				// one of them. Its own refusal -- any element that is not a
+				// straight triangle -- is the same one affineTrianglesOf() just
+				// made, so reaching here means it holds.
+				axisBins = std::make_unique<PointLocator>( mesh );
+				if ( !axisBins->grid().affine )
+					return false;
+				axisDeviceBasis.state = 1;
+			}
+			if ( axisDeviceBasis.state < 0 )
 				return false;
 
 			axisDeviceState = 1;
@@ -12747,7 +12827,80 @@ namespace
 		 * bit-identical either way by DeviceRows' own contract.
 		 */
 		DeviceRows transmissionRowsDevice;
-		std::vector<mfem::Vector> exteriorColumns, exteriorZ;
+		// The Analytic route's columns are the solver's and outlive the solve;
+		// the Differenced control's are this solve's own. See
+		// exteriorColumnCache.
+		std::vector<mfem::Vector> differencedExteriorColumns, exteriorZ;
+		std::vector<mfem::Vector> &exteriorColumns =
+			borderColumnChoice == BorderColumn::Analytic
+			? exteriorColumnCache : differencedExteriorColumns;
+		/*
+		 * BORDERED-GLOBALISATION-PLAN.md section 12: THE LOAD IS AFFINE IN `a`,
+		 * SO A TRIAL FORMS IT RATHER THAN ASSEMBLING IT.
+		 *
+		 * `a` reaches the residual through the flux block of the load and
+		 * nowhere else, and the Analytic columns are minus that block's
+		 * derivative, so the load at any `a` is
+		 *
+		 *     b( a ) = b( a0 ) - sum_m ( a_m - a0_m ) c_m
+		 *
+		 * with b( a0 ) the load the last preparation assembled. Each line-search
+		 * trial and fallback step re-ran prepare() and rebuilt the operator to
+		 * move ten numbers -- and under a Device the re-made views of the load
+		 * were host-only, so each re-assembly uploaded it whole: 46 uploads and
+		 * 15.8 MB on `machine-f-diiid` (M-243). The combination runs where the
+		 * columns live, and the residual reads the load by reference through
+		 * the same views. It also makes a trial's residual an exact function
+		 * of `a`, which two re-assemblies at one `a` are not.
+		 *
+		 * The Differenced control keeps reprepare(): it is the reference the
+		 * exact columns are measured against.
+		 */
+		bool loadIsAffine = false;
+		mfem::Vector loadAtBase;
+		std::vector<double> loadBaseCoefficients;
+		std::vector<mfem::Vector> columnLoads;
+		// `a` has just moved: carry it to the load, by the combination where
+		// it is exact and by a preparation where it is not.
+		auto moveExteriorLoad = [ & ]()
+		{
+			if ( !loadIsAffine )
+			{
+				reprepare();
+				return;
+			}
+			mfem::Vector &load = darcyRhs.GetBlock( 0 );
+			load = loadAtBase;
+			for ( std::size_t mode = 0; mode < columnLoads.size(); ++mode )
+				load.Add( -( exteriorCoefficientValues[ mode ]
+				             - loadBaseCoefficients[ mode ] ),
+				          columnLoads[ mode ] );
+		};
+		/*
+		 * AND RE-BASED ONCE PER ACCEPTED STEP, BECAUSE A FAR BASE COSTS DIGITS.
+		 *
+		 * The combination's rounding is eps * sum_m |a_m - a0_m| |c_m|, and an
+		 * assembly's is eps * |b( a )|. On a cold start `a` travels far from
+		 * the solve's first load, so forming every later load from that one
+		 * spread the answers of three routes to one mirror equilibrium from
+		 * 1e-15 to 7e-15 in double and from 2e-07 to 4e-06 in single, 0.4 % of
+		 * psi* (M-317). Assembled afresh at each accepted `a`, a trial forms
+		 * only its own step, which vanishes as Newton converges. One host
+		 * assembly and one upload a step, against one a TRIAL before. The
+		 * caller re-evaluates the residual against the new base, so the next
+		 * step's merit and its trials read one load.
+		 */
+		auto rebaseExteriorLoad = [ & ]() -> bool
+		{
+			if ( !loadIsAffine )
+				return false;
+			mfem::Vector fresh;
+			assembleExteriorDatumLoad( fresh );
+			loadAtBase = fresh;
+			loadBaseCoefficients = exteriorCoefficientValues;
+			moveExteriorLoad();
+			return true;
+		};
 		if ( nModes > 0 )
 		{
 			std::vector<int> transmissionSupport;
@@ -12812,8 +12965,22 @@ namespace
 			 * with the potential and trace blocks exactly zero.
 			 */
 			bool assembled = false;
+			bool cached = false;
 			if ( borderColumnChoice == BorderColumn::Analytic )
-				assembled = assembleExteriorColumns( exteriorColumns );
+			{
+				long const sequence = fluxFes->GetMesh()->GetSequence();
+				cached = exteriorColumnCacheCoupling == exteriorCoupling
+				         && exteriorColumnCacheSequence == sequence
+				         && exteriorColumnCacheFaceOrder == extensionFaceOrder
+				         && exteriorColumns.size() == static_cast<std::size_t>( nModes )
+				         && exteriorColumns.front().Size() == n;
+				assembled = cached || assembleExteriorColumns( exteriorColumns );
+				// A failed assembly leaves the probe's columns in the cache
+				// below, so the key is cleared rather than left to match them.
+				exteriorColumnCacheCoupling = assembled ? exteriorCoupling : nullptr;
+				exteriorColumnCacheSequence = sequence;
+				exteriorColumnCacheFaceOrder = extensionFaceOrder;
+			}
 
 			if ( !assembled )
 			{
@@ -12862,8 +13029,11 @@ namespace
 			 * Uploaded once and left valid on both sides, the copy runs on the
 			 * device from the device copy. Attributed to phase B: a constant of
 			 * the solve is configuration, not the iterate crossing. M-238.
+			 *
+			 * A cached set went up when it was assembled and nothing has
+			 * written it since.
 			 */
-			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			if ( !cached && mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
 			{
 				PhaseScope const residency( Phase::Upload );
 				for ( mfem::Vector &c : exteriorColumns )
@@ -12871,6 +13041,23 @@ namespace
 					c.UseDevice( true );
 					countedDeviceRead( c, __LINE__ );
 				}
+			}
+
+			// The base of the affine load: what the last preparation
+			// assembled, at the coefficients it read. The columns' flux
+			// blocks are views, so the combination reads them where they are.
+			if ( assembled )
+			{
+				int const fluxSize = blockOffsets[ 1 ];
+				mfem::Vector const &load = darcyRhs.GetBlock( 0 );
+				loadAtBase.UseDevice( true );
+				loadAtBase = load;
+				loadBaseCoefficients = exteriorCoefficientValues;
+				columnLoads.resize( static_cast<std::size_t>( nModes ) );
+				for ( int mode = 0; mode < nModes; ++mode )
+					columnLoads[ static_cast<std::size_t>( mode ) ].MakeRef(
+						exteriorColumns[ static_cast<std::size_t>( mode ) ], 0, fluxSize );
+				loadIsAffine = true;
 			}
 
 			fieldResidual( unknown, s, residual );
@@ -15923,7 +16110,7 @@ namespace
 							savedCoefficients[ static_cast<std::size_t>( mode ) ]
 							+ damping*step[ static_cast<std::size_t>( nBorders + mode ) ];
 					if ( nModes > 0 )
-						reprepare();
+						moveExteriorLoad();
 
 					unknown = savedState;
 					unknown.Add( -damping, y );
@@ -16192,7 +16379,7 @@ namespace
 						savedCoefficients[ static_cast<std::size_t>( mode ) ]
 						+ bestDamping*step[ static_cast<std::size_t>( nBorders + mode ) ];
 				if ( nModes > 0 )
-					reprepare();
+					moveExteriorLoad();
 
 				unknown = savedState;
 				unknown.Add( -bestDamping, y );
@@ -16259,6 +16446,12 @@ namespace
 				if ( gaugeBordered )
 					gaugeAll( unknown, gaugeConstraint );
 			}
+
+			// The step is taken, by Armijo or by the fallback: re-base the load
+			// at its `a`, and read the residual the next step starts from
+			// against it.
+			if ( nModes > 0 && rebaseExteriorLoad() )
+				fieldResidual( unknown, s, residual );
 
 			/*
 			 * THE STALL TEST, setStallLimit()'s. A crawl is a step the line
