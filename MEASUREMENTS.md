@@ -21531,3 +21531,118 @@ the bus and the core counts are the findings.
 * `runs/noserial/route-ff1/`;
 * `runs/noserial/mirror/`;
 * `runs/noserial/suite-*.log`.
+
+### M-322
+
+**UPSTREAM'S WEIGHTS ARE ON THE DEVICE AND NOTHING GIVES THE SOLVER'S MESH
+NODES. THE MIRROR'S BATCHED ROUTE IS BACK TO ROUND-OFF, AND ON `ff3` THE THREE
+BATCHED ROUTINES FALL FROM 41% OF THE HOST'S SAMPLES TO 3.9%.**
+
+**Setup.** MEQ's `device-weights` branch, against `meq-integration` at
+`6ef93b0e28`:
+
+* both stabilisations describe themselves to `HDGStabilization::GetRule()`,
+  and each `Eval()` is `rule.Eval()`;
+* `R` on the flux mass is a `GridFunctionCoefficient` of
+  `meq::CoordinateField`, the degree-1 coordinate field built from the
+  mesh's vertices;
+* MEQ's device routes take `GeometricFactors` of that field rather than
+  `Mesh::GetGeometricFactors()`.
+
+The cause of M-321's mirror regression was upstream's: `GetGeometricFactors()`
+calls `Mesh::EnsureNodes()` on a nodeless mesh, so the first batched assembly
+gave the mesh nodes partway through the run. Elements and faces are
+bit-identical with and without them. `Mesh::FindPoints()` moves by 1.8e-15,
+and the mirror's free-boundary solve amplifies that to 9.06e-10 of `psi_h`.
+That amplifier is MEQ's, and it is open (`TODO`). Upstream's
+`HDGElementGeometry` now serves their routes and `CoordinateField` serves
+MEQ's.
+
+Under gdb, a breakpoint on `Mesh::EnsureNodes` across a whole
+`machine-f-diiid --device cuda` run is hit once: in `meq::FieldTransfer`, on
+the guess's mesh, never on the solver's.
+
+**The mirror**, `psi_h` as a fraction of its largest value:
+
+| comparison | `psi_h` |
+|---|---|
+| host, batched against serial | 6.83e-13 |
+| host, constant `tau = 3`, batched against serial | 3.93e-13 |
+| card batched against host serial | 7.34e-13 |
+| card batched against host batched | 9.34e-13 |
+| host serial against `4a87f9280f`'s | 0 |
+
+**`fixed-f-diiid` at `RefinementLevels = 3`**, `--device cuda`, `--profile`,
+`perf record -F 499`. The RTX 2070 SUPER, with another session holding about
+1.6 cores, so **indicative, not timings**:
+
+| | `4a87f9280f` (M-321) | `6ef93b0e28` |
+|---|---|---|
+| wall | 11.94 s | 7.13 s |
+| solve | 6.99 s | 5.19 s |
+| `postProcess` | 4.27 s | 1.20 s |
+| `HDGFaceScatterBatched`, host samples | 531 of 5108 | 49 of 2640 |
+| `HDGFaceSideBatched` | 1183 of 5108 | 38 of 2640 |
+| `HDGElementMassBatched` | 385 of 5108 | 15 of 2640 |
+| face weights, flux mass weights on device | — | yes, yes |
+| `psi_ax` | 2.897815e-01 at ( 1.7684, -0.0003 ) | the same |
+
+Under the three routines, `EvalWeight`, `EvalJacobian`, the face
+transformations and `R`'s `FunctionCoefficient::Eval` are gone. What is left
+on the host, by inclusive samples of 2640:
+
+* **cuDSS's `SetOperator`, 520.** MEQ's.
+* **`CuMemFree`, 481.** Of that, 298 is `GPUBlasBatchedLinAlg::LUSolve`'s
+  per-call pointer arrays, and 63 is `ReconstructTotalFluxBatched`.
+  Upstream's.
+* **`DarcyHybridization::EnsureElementQuadratureTables`, 155.** A host loop
+  of `EvalWeight` and `Transform` per element point, built once. Upstream's.
+* **The seed projection in `prepare()`, about 15.** MEQ's.
+
+The two that are upstream's are in `HDG-DEVICE-WEIGHTS-MEASURED-FROM-MEQ.md`.
+
+**Single precision.** A degree-1 `H1_FECollection` triangle is
+`H1_TriangleElement`. It computes `1 - x - y` in double and then applies an
+inverted Vandermonde matrix, so in `float` the field `R` differs from the
+mesh transformation's `R` at the ulp. In double the two agree to the bit.
+That ulp tipped four single-precision cases that sat on their round-off
+floor, and each is fixed at its cause:
+
+* **`SolovievConvergence`, `k = 1`.** The finest `q` error is 6.3e-05 or
+  6.7e-05, depending on the ulp, against a floor of 7.8e-05. That pair read
+  1.933 or 1.846 against 1.85. A pair whose finer error is under
+  `roundOffFloor()` is now skipped, with a majority quorum. That is what the
+  loop's comment already said it did.
+* **`XPointBorder`, the bootstrap's tail order.** In single its history
+  stalls near 1e-04 of its first residual and ends at a few 1e-07. Three
+  single runs of one equilibrium read 6.15 (M-222), 1.942 and 0.162, and
+  XP-2's control on the last of them read 1.17. It is skipped in single,
+  loudly, and asserted in double.
+* **`FreeBoundaryCoupling`, `theConductorModelIsWorthMeasuring`.** Double
+  reads an interior difference of 2.335e-04 and a coupled-to-datum ratio of
+  0.9998. Single reads 2.578e-04 and 0.953 at `4a87f9280f`, or 2.763e-04 and
+  0.813 here, against a `roundOffFloor` of 1.4e-04. Both allowances now
+  carry that floor, which is 2.6e-13 in double.
+* **`PedestalConvergence`, 4.2 at `k = 1`.** This is not a floor. At
+  `h = 0.0333` the pedestal has two discrete roots, 3e-02 apart in max norm,
+  and the ulp decides between them. Double crawls there, taking 36
+  iterations. The first self-difference reads 7.9e-03 or 3.7e-03, so the
+  `k = 1` rate reads 3.1 or 2.0. From `h = 0.025` both builds read `psi`
+  2.160 and `q` 2.402, against the design 2. The sequence now starts there,
+  with floors 0.2 under those values. The 3.097 and 4.738 asserted before
+  were the root's, not the method's.
+
+`ResidentIterateTests`' "to the bit" cases had been comparing against host
+loops on a mesh that `prepare()` gave nodes. The fixture now calls
+`EnsureNodes()` on purpose, so both sides read one geometry.
+
+**The suites.** Double is 86 / 87, with only `PlasmaEdgeConvergence` red.
+Single is 85 / 87, adding `DriverAcceptance`'s two named cases.
+`RotatingMirrorDevice` is green in both.
+
+**Reproduce.**
+
+* `runs/weights/mirror/` (`r-*.toml`, `rc-*.toml`);
+* `runs/weights/mf/gdb.log`;
+* `runs/noserial/ff3/` (`run-wt.log`, `perf-wt.data`);
+* `builds/wt.suite.log`, `builds/wt-single.suite.log`, `builds/*.five.log`.

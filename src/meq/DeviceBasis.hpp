@@ -3,6 +3,9 @@
 
 #include "mfem.hpp"
 
+#include <memory>
+#include <vector>
+
 /**
  * @file
  *
@@ -543,9 +546,72 @@ namespace meq
 	};
 
 	/**
+	 * THE MESH'S COORDINATES AS A FIELD, AND ITS GEOMETRIC FACTORS, WITHOUT
+	 * GIVING THE MESH NODES.
+	 *
+	 * `mfem::Mesh::GetGeometricFactors()` calls `EnsureNodes()`, so on a mesh
+	 * read without nodes it installs a degree-1 nodal field partway through a
+	 * run. The element and face geometry come out bit-identical either way,
+	 * but `Mesh::FindPoints()` does not -- its reference coordinates move by
+	 * up to 1.8e-15 -- and the rotating mirror's free-boundary solve amplifies
+	 * a change of that size to 9e-10 of `psi_h` (upstream's bisection of
+	 * MEQ's batched-route report; `TODO`). A device run that gave the mesh
+	 * nodes and a host run that did not then solve different discrete
+	 * problems. So nothing on MEQ's device routes asks the mesh: every
+	 * geometric factor comes from this field instead, through MFEM's
+	 * `GeometricFactors( nodes, rule, flags )`, which is the same computation
+	 * `GetGeometricFactors()` runs on the nodes it would have installed.
+	 *
+	 * The field is the mesh's own nodes when it has them, read at each use so
+	 * that a `SetCurvature()` after construction is followed; otherwise a
+	 * degree-1 H1 field of the vertices, built once, which is exactly the
+	 * field `EnsureNodes()` would have installed. It is also `R`: a
+	 * `GridFunctionCoefficient` of component 1 is the radius exactly on an
+	 * affine mesh, and is the form upstream's batched element mass evaluates
+	 * on the device (`mfem::HDGElementMassOnDevice()`).
+	 *
+	 * Under a Device the factors are computed there, and the field is handed
+	 * back to the host afterwards: a host reader after that is free under
+	 * CUDA and is what lifts the debug backend's protection.
+	 */
+	class CoordinateField
+	{
+		public:
+			explicit CoordinateField( mfem::Mesh &meshIn );
+
+			CoordinateField( CoordinateField const & ) = delete;
+			CoordinateField &operator=( CoordinateField const & ) = delete;
+
+			/// The mesh's nodes if it has them now, else the degree-1 field.
+			/// Non-const because `mfem::GridFunctionCoefficient` takes it so;
+			/// nothing writes it.
+			mfem::GridFunction &field();
+
+			/// The geometric factors at @a rule, cached by the rule's ADDRESS as
+			/// `Mesh::GetGeometricFactors()` caches them, so @a rule must
+			/// outlive this object.
+			mfem::GeometricFactors const &factors( mfem::IntegrationRule const &rule,
+			                                       int flags );
+
+		private:
+			mfem::Mesh *mesh;
+			std::unique_ptr<mfem::H1_FECollection> collection;
+			std::unique_ptr<mfem::FiniteElementSpace> space;
+			std::unique_ptr<mfem::GridFunction> vertices;
+			struct Cached
+			{
+				mfem::GridFunction const *field;
+				std::unique_ptr<mfem::GeometricFactors> factors;
+			};
+			std::vector<Cached> cache;
+	};
+
+	/**
 	 * The affine map of every element of @a mesh, for a device kernel.
 	 *
 	 * @param out resized to `mesh.GetNE()` and left **device-valid**.
+	 * @param coordinates the geometry the device route reads; null builds one
+	 *        for this call. The mesh is never given nodes (CoordinateField).
 	 * @return false when the mesh has any element that is not a straight-sided
 	 *         triangle, having filled @a out anyway with `affine` false on
 	 *         those -- so a caller that can skip them may, and a caller that
@@ -557,7 +623,8 @@ namespace meq
 	 * Geometry only: nothing here depends on the solution, so this is a phase B
 	 * upload and is rebuilt only when the mesh is.
 	 */
-	bool affineTrianglesOf( mfem::Mesh &mesh, mfem::Array<AffineTriangle> &out );
+	bool affineTrianglesOf( mfem::Mesh &mesh, mfem::Array<AffineTriangle> &out,
+	                        CoordinateField *coordinates = nullptr );
 
 	/**
 	 * affineTrianglesOf()'s device half, out of MFEM's geometric factors at

@@ -400,9 +400,15 @@ BOOST_AUTO_TEST_CASE( theAffineMapRoundTripsAgainstMfem )
 	mfem::Mesh mesh = triangleMesh();
 
 	mfem::Array<meq::AffineTriangle> maps;
+	bool const hadNodes = mesh.GetNodes() != nullptr;
 	BOOST_TEST_REQUIRE( meq::affineTrianglesOf( mesh, maps ) );
 	meq::countedHostRead( maps, __LINE__ );
 	BOOST_TEST_REQUIRE( maps.Size() == mesh.GetNE() );
+	// AND THE MESH IS AS IT WAS. Mesh::GetGeometricFactors() would have
+	// given a mesh without nodes a nodal field, which moves FindPoints() by
+	// round-off and a free-boundary solve by far more (meq::CoordinateField).
+	BOOST_TEST( ( mesh.GetNodes() != nullptr ) == hadNodes,
+	            "affineTrianglesOf() gave the mesh nodes" );
 
 	mfem::IsoparametricTransformation transformation;
 	mfem::Vector physical( 2 );

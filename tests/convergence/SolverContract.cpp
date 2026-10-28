@@ -235,9 +235,27 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverTheFlooredRadiusAtEver
 	BOOST_TEST( stab.IsConstant(), "a position-dependent tau reported itself state dependent" );
 	BOOST_TEST( stab.tau0() == tau0 );
 	BOOST_TEST( stab.floorRadius() == floorRadius );
+	// In the format's arithmetic, which is the rule's: c0/max( x_k, x_f ) in
+	// real_t. In double these are the plain quotients.
+	mfem::real_t const floored = static_cast<mfem::real_t>( tau0 )
+	                             /static_cast<mfem::real_t>( floorRadius );
 	BOOST_TEST( stab.at( 0.5 ) == tau0/0.5 );
-	BOOST_TEST( stab.at( 0.1 ) == tau0/floorRadius );
-	BOOST_TEST( stab.at( 0.0 ) == tau0/floorRadius );
+	BOOST_TEST( stab.at( 0.1 ) == static_cast<double>( floored ) );
+	BOOST_TEST( stab.at( 0.0 ) == static_cast<double>( floored ) );
+
+	// AND IT DESCRIBES ITSELF, which is what lets upstream's batched face
+	// routes weigh their points on the device: tau0/max( x_0, R_f ), the
+	// radius being coordinate 0.
+	mfem::HDGStabilizationRule described;
+	BOOST_TEST_REQUIRE( stab.GetRule( described ), "the diffusion-scaled tau declined to describe itself" );
+	BOOST_TEST( described.coord == 0 );
+	BOOST_TEST( described.c0 == static_cast<mfem::real_t>( tau0 ) );
+	BOOST_TEST( described.floor == static_cast<mfem::real_t>( floorRadius ) );
+	meq::ConstantStabilization const constant( tau0 );
+	mfem::HDGStabilizationRule constantRule;
+	BOOST_TEST_REQUIRE( constant.GetRule( constantRule ), "the constant tau declined to describe itself" );
+	BOOST_TEST( constantRule.coord < 0 );
+	BOOST_TEST( constantRule.c0 == static_cast<mfem::real_t>( tau0 ) );
 	BOOST_TEST( meq::DiffusionScaledStabilization( tau0 ).floorRadius()
 	            == meq::DiffusionScaledStabilization::defaultFloorRadius );
 
@@ -246,6 +264,8 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverTheFlooredRadiusAtEver
 	integrator.SetStabilization( stab );
 	mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::SEGMENT, 2*order + 2 );
 	integrator.SetIntRule( &rule );
+	BOOST_TEST( mfem::HDGFaceWeightsOnDevice( integrator, potentialSpace ),
+	            "upstream's batched face routes would weigh this tau per point on the host" );
 
 	// Eval(), sampled: every face point, from each side's own transformation.
 	int flooredPoints = 0, scaledPoints = 0;
@@ -260,9 +280,10 @@ BOOST_AUTO_TEST_CASE( theDiffusionScaledFaceTermIsTau0OverTheFlooredRadiusAtEver
 				mfem::ElementTransformation &tr = side == 0 ? *ft->Elem1 : *ft->Elem2;
 				mfem::Vector x;
 				tr.Transform( tr.GetIntPoint(), x );
-				double const wanted = tau0/std::max( static_cast<double>( x( 0 ) ), floorRadius );
-				double const got = stab.Eval( 0.0, 0.0, 0.0, 0.0, tr );
-				BOOST_TEST( got == static_cast<mfem::real_t>( wanted ),
+				mfem::real_t const wanted = static_cast<mfem::real_t>( tau0 )
+					/std::max( x( 0 ), static_cast<mfem::real_t>( floorRadius ) );
+				mfem::real_t const got = stab.Eval( 0.0, 0.0, 0.0, 0.0, tr );
+				BOOST_TEST( got == wanted,
 				            "face " << f << ", point " << q << " at R = " << x( 0 ) << ": tau is "
 				            << got << ", not tau0/max( R, R_f ) = " << wanted );
 				if ( x( 0 ) < floorRadius )

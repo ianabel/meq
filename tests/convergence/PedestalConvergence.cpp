@@ -1002,6 +1002,13 @@ namespace
 	/// internalLayerSelfConverges. The 4.2 and 4.3 rows reproduce to within a
 	/// few iterations (4.2 at h = 0.0333 reads 26 against the 23 below).
 	///
+	/// AND CONVERGING IS NOT ENOUGH: 4.2's k = 1 sequence starts at h = 0.025
+	/// and not at h = 0.0333, where Newton converges but the mesh has two
+	/// discrete roots 3e-02 apart in max norm. An ulp in R decided between them
+	/// in single, and the first self-difference read 7.9e-03 or 3.7e-03 -- a
+	/// k = 1 rate of 3.1 or 2.0 on the same code. Double crawls there, 36
+	/// iterations. M-322.
+	///
 	/// THE POINT WORTH KEEPING: a "coarsest usable mesh" is a property of the
 	/// SOLVER as much as of the benchmark, and this table was calibrated against
 	/// a solver that no longer exists. Re-measure it rather than trusting it
@@ -1159,15 +1166,18 @@ BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 
 BOOST_AUTO_TEST_CASE( pedestalSelfConverges )
 {
-	// MEASURED: psi 3.097, 3.047, 4.384 and q 4.738, 3.122, 4.416 at k = 1, 2, 3.
-	// Design order or better throughout, and the only one of the three that is:
-	// see aCornerSingularSolutionCapsTheRateOnThisRectangle for what the other
-	// two are up against. Floors 0.2 under each measurement.
-	double const psiFloor[] = { 0.0, 2.90, 2.85, 4.15 };
-	double const fluxFloor[] = { 0.0, 4.50, 2.90, 4.20 };
+	// MEASURED: psi 2.160, 3.047, 4.384 and q 2.402, 3.122, 4.416 at k = 1, 2, 3,
+	// k = 1 from h = 0.025 and the same to three digits in single. Design order
+	// or better throughout, and the only one of the three that is: see
+	// aCornerSingularSolutionCapsTheRateOnThisRectangle for what the other two
+	// are up against. Floors 0.2 under each measurement. The k = 1 sequence
+	// from h = 0.0333 read 3.097 and 4.738 -- or 1.997 and 3.297 -- by which of
+	// that mesh's two roots it reached (meshesFor(), M-322).
+	double const psiFloor[] = { 0.0, 1.95, 2.85, 4.15 };
+	double const fluxFloor[] = { 0.0, 2.20, 2.90, 4.20 };
 	for ( int order = 1; order <= 3; ++order )
 		study( meq::analytic::PressurePedestal::pedestal(),
-		       "4.2 pressure pedestal", order, 24, pedestalDatum,
+		       "4.2 pressure pedestal", order, 32, pedestalDatum,
 		       psiFloor[ order ], fluxFloor[ order ] );
 }
 

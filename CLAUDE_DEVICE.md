@@ -50,9 +50,17 @@ against is `CLAUDE_DECLINED.md`.
   back for the raw host readers after it, and MEQ's own node readers
   (`GridSampler`, `PointLocator`) ask for the nodes on the host first, since
   upstream's batched routes read them on the device too. Upstream's batched
-  `Reconstruct()` and `ConstructC()` are taken. What is left on the host is
-  inside upstream's batched routines: `R` and the face and element weights,
-  evaluated per point (`HDG-DEVICE-NO-SERIAL-HOST-MEASURED-FROM-MEQ.md`).
+  `Reconstruct()` and `ConstructC()` are taken, and their face and element
+  weights and `R` are evaluated in kernels (→ **[M-322](MEASUREMENTS.md#m-322)**).
+  **Nothing may give the solver's mesh nodes**: `Mesh::GetGeometricFactors()`
+  calls `EnsureNodes()` on a nodeless mesh, and nodes appearing partway
+  through a run move `Mesh::FindPoints()` by 1e-15, which the mirror's
+  free-boundary solve amplifies to 9e-10 of `psi_h` (`TODO`). So MEQ's device
+  routes take their factors from `meq::CoordinateField`
+  (`DeviceBasis.hpp`), the degree-1 coordinate field of the mesh's vertices,
+  and upstream's from `HDGElementGeometry`. What is left on the host is
+  `LUSolve`'s per-call allocations and `EnsureElementQuadratureTables`
+  (upstream's), and cuDSS's `SetOperator` and the seed projection (MEQ's).
 * **Single precision builds and runs at parity with double** (83 of 84 in each
   build, the same deliberate red, single on MKL 2026.2 included, M-303), and its accuracy is qualified **per problem**.
 * **This machine's GPU is an RTX 2070 SUPER** — evidence about correctness,
@@ -769,11 +777,17 @@ else's translation unit.*
   and, through `SetDefaultAssemblyMode(Batched)` around
   `EnableHybridization()`, the batched constraint block `C`. Both report in
   `--profile` as `constraint block batched`, `reconstruction batched`.
-* **What it does not yet buy**: the batched routines still evaluate `R`, a
-  `FunctionCoefficient`, and the face and element weights per point on the
-  host before their kernels. That is most of what is left of the first
-  assembly and of the reconstruction under a Device, and it is upstream's
-  next step (`HDG-DEVICE-NO-SERIAL-HOST-MEASURED-FROM-MEQ.md`).
+* **What it asks of MEQ**: that the routines can evaluate MEQ's coefficients
+  in kernels. Both stabilisations describe themselves to
+  `HDGStabilization::GetRule()` and their `Eval()` is that rule, and `R` on
+  the flux mass is a `GridFunctionCoefficient` of `meq::CoordinateField`.
+  `--profile` prints `face weights on device` and `flux mass weights on
+  device`; a stabilisation or a coefficient that cannot be described sends
+  the weights back to a host loop per point, which is what those two lines
+  are for (→ **[M-322](MEASUREMENTS.md#m-322)**). **In single, the field `R`
+  differs from the function `R` at the ulp**: a degree-1 H1 triangle is
+  `H1_TriangleElement`, whose shapes go through an inverted Vandermonde
+  matrix. In double they agree to the bit.
 * **Not `Threaded`**: the host default is `Threaded`, which the driver refuses
   under a Device above one thread (M-188). *An inherited default has to be
   honourable in the configuration that inherits it.*

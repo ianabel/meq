@@ -226,22 +226,54 @@ namespace
 			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
 		}
 		else
-		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
-			// A pair whose errors are at this build's round-off floor measures
-			// the format and not the method; skip it, say so, and keep a quorum
-			// so that a sequence entirely at the floor FAILS rather than passing
-			// having asserted nothing. Inert in double. M-218.
-			double ratio = points[ i - 1 ].h/points[ i ].h;
-			double ratePsi = rate( points[ i - 1 ].errorPsi, points[ i ].errorPsi, ratio );
-			double rateFlux = rate( points[ i - 1 ].errorFlux, points[ i ].errorFlux, ratio );
+			// A pair whose finer error is under this build's round-off floor
+			// measures the format and not the method; skip it, say so, and keep
+			// a quorum so that a sequence entirely at the floor FAILS rather
+			// than passing having asserted nothing. The floor cannot reach the
+			// double build (roundOffFloor()), so this is inert there. Measured
+			// in single at k = 1, the finest q error is 6.3e-05 or 6.7e-05
+			// against a floor of 7.8e-05 depending on an ulp in R, and the pair
+			// reads 1.933 or 1.846. M-322.
+			int assertedPsi = 0;
+			int assertedFlux = 0;
+			for ( std::size_t i = 1; i < points.size(); ++i )
+			{
+				double ratio = points[ i - 1 ].h/points[ i ].h;
+				double ratePsi = rate( points[ i - 1 ].errorPsi, points[ i ].errorPsi, ratio );
+				double rateFlux = rate( points[ i - 1 ].errorFlux, points[ i ].errorFlux, ratio );
 
-			BOOST_TEST( ratePsi >= expected,
-			            "k = " << order << ", h = " << points[ i ].h
-			            << ": psi converged at " << ratePsi << ", wanted " << expected );
-			BOOST_TEST( rateFlux >= expected,
-			            "k = " << order << ", h = " << points[ i ].h
-			            << ": q converged at " << rateFlux << ", wanted " << expected );
+				if ( points[ i ].errorPsi < meq::tests::roundOffFloor( points[ i ].normPsi ) )
+					BOOST_TEST_MESSAGE( "  *** k = " << order << ", h = " << points[ i ].h
+					                    << ": SKIPPED the psi rate, the error is under the "
+					                       "round-off floor. M-322" );
+				else
+				{
+					++assertedPsi;
+					BOOST_TEST( ratePsi >= expected,
+					            "k = " << order << ", h = " << points[ i ].h
+					            << ": psi converged at " << ratePsi << ", wanted " << expected );
+				}
+				if ( points[ i ].errorFlux < meq::tests::roundOffFloor( points[ i ].normFlux ) )
+					BOOST_TEST_MESSAGE( "  *** k = " << order << ", h = " << points[ i ].h
+					                    << ": SKIPPED the q rate, the error is under the "
+					                       "round-off floor. M-322" );
+				else
+				{
+					++assertedFlux;
+					BOOST_TEST( rateFlux >= expected,
+					            "k = " << order << ", h = " << points[ i ].h
+					            << ": q converged at " << rateFlux << ", wanted " << expected );
+				}
+			}
+			// A majority of the size() - 1 pairs.
+			std::size_t const quorum = points.size()/2;
+			BOOST_TEST( static_cast<std::size_t>( assertedPsi ) >= quorum,
+			            "k = " << order << ": only " << assertedPsi
+			            << " psi rates were above the round-off floor" );
+			BOOST_TEST( static_cast<std::size_t>( assertedFlux ) >= quorum,
+			            "k = " << order << ": only " << assertedFlux
+			            << " q rates were above the round-off floor" );
 		}
 
 		// The rate is blind to a solution that is wrong by a constant factor or a

@@ -491,6 +491,12 @@ namespace meq
 			                   mfem::real_t uhat,
 			                   mfem::ElementTransformation &tr ) const override;
 
+			/// MFEM's spelling, from HDGStabilization: the constant tau as data,
+			/// so upstream's batched face routes weigh their points on the
+			/// device. Eval() returns the rule's value, so the claim is true by
+			/// construction.
+			bool GetRule( mfem::HDGStabilizationRule &rule ) const override; // NOLINT(readability-identifier-naming)
+
 			double tau() const;
 
 		private:
@@ -600,6 +606,12 @@ namespace meq
 			mfem::real_t Eval( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
 			                   mfem::real_t uhat,
 			                   mfem::ElementTransformation &tr ) const override;
+
+			/// MFEM's spelling, from HDGStabilization: tau0/max( x_0, R_f ) as
+			/// data, which upstream's batched face routes evaluate on the
+			/// device at the point the element's map gives. Eval() and at()
+			/// both evaluate this rule, so the claim is true by construction.
+			bool GetRule( mfem::HDGStabilizationRule &rule ) const override; // NOLINT(readability-identifier-naming)
 
 			/// tau0, in m^-1.
 			double tau0() const;
@@ -1686,6 +1698,21 @@ namespace meq
 			/// batched routes. False before postProcess(), since the call
 			/// builds the enriched spaces the predicate is asked of.
 			bool batchedReconstructionTaken() const;
+			/// Whether upstream's batched face routes weigh the HDG face term
+			/// on the DEVICE -- the stabilization's rule and the face
+			/// geometry in a kernel -- rather than per point on the host:
+			/// mfem::HDGFaceWeightsOnDevice(), asked of the interior face
+			/// integrator. False before the forms are built.
+			bool faceWeightsOnDevice() const;
+			/// The mesh's coordinates as a field: the geometry every device
+			/// route of MEQ's reads, and R. Non-const for the same reason
+			/// meq::CoordinateField::field() is; it caches, it never writes
+			/// the mesh.
+			CoordinateField &coordinateField() const;
+			/// Whether upstream's batched element mass weighs the flux mass on
+			/// the device, R included: mfem::HDGElementMassOnDevice(). False
+			/// before the forms are built.
+			bool fluxMassWeightsOnDevice() const;
 			bool batchedLocalFactorTaken() const;
 			bool batchedLocalSolveTaken() const;
 
@@ -6178,10 +6205,27 @@ namespace meq
 			DiffusionScaledStabilization scaledStabilization;
 			TauScaling tauScalingChoice;
 
-			/// R, the weight of the flux mass form. The diffusion coefficient of
-			/// the operator is 1/R, and DarcyForm's flux mass form wants its
-			/// inverse -- verified by experiment, see the .cpp.
+			/// R as a function of the point, for the integrators that evaluate
+			/// it on face transformations: the extension and, as dead weight,
+			/// the HDG face integrators (see buildForms()).
 			mfem::FunctionCoefficient radiusCoefficient;
+
+			/// The mesh's coordinates as a field, for the device routes'
+			/// geometry and for R. Never gives the mesh nodes; see the class.
+			std::unique_ptr<CoordinateField> coordinates;
+
+			/// R, the weight of the flux mass form, as component 1 of
+			/// `coordinates`: exactly R on an affine mesh, and the form
+			/// upstream's batched element mass evaluates on the device. The
+			/// diffusion coefficient of the operator is 1/R, and DarcyForm's
+			/// flux mass form wants its inverse -- verified by experiment, see
+			/// the .cpp. Rebuilt with the forms.
+			std::unique_ptr<mfem::GridFunctionCoefficient> fluxMassRadius;
+
+			/// The integrators the two predicates above are asked of; owned by
+			/// `darcy`'s forms, null before they are built.
+			mfem::BilinearFormIntegrator const *fluxMassIntegrator = nullptr;
+			mfem::HDGDiffusionIntegrator const *interiorFaceIntegrator = nullptr;
 
 			/// -1/R, the factor the linear source is multiplied by to form the
 			/// potential right hand side. Both halves of that are load bearing;

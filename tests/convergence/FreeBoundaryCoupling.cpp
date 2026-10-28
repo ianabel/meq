@@ -5038,7 +5038,14 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 	// solve invented. Delta* is linear and both solves are the same operator on
 	// the same mesh, so the interior difference is the harmonic extension of the
 	// boundary difference and cannot exceed it by the maximum principle.
-	BOOST_TEST( worst <= 1.05*worstOnGamma,
+	//
+	// IN SINGLE THE TWO SOLVES' OWN ROUND-OFF IS PART OF THE DIFFERENCE, so the
+	// bound carries the format's floor on the field's scale. The double build
+	// reads 2.335e-04 here; single reads 2.578e-04 or 2.763e-04 depending on an
+	// ulp in R, i.e. a few 1e-05 of noise against a floor of 1.4e-04. In double
+	// the floor is 2.6e-13 and the bound is the 5% it always was. M-322.
+	double const formatFloor = meq::tests::roundOffFloor( scale );
+	BOOST_TEST( worst <= 1.05*worstOnGamma + formatFloor,
 		"the interior difference " << worst << " exceeds the difference on Gamma "
 		<< worstOnGamma << " that produced it. Both solves are the same linear "
 		"operator on the same mesh, so the interior difference is the extension "
@@ -5132,7 +5139,9 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 	// a Neumann half inconsistent with its own Dirichlet twin is exactly what
 	// would separate them, and it would do so while every border still
 	// converged, which is the disguise section 7.19 warns about.
-	BOOST_TEST( std::abs( coupledWorst/worst - 1.0 ) < 0.10,
+	// The same floor as the maximum principle above, for the same reason:
+	// double reads a ratio of 0.9998, single 0.953 or 0.813.
+	BOOST_TEST( std::abs( coupledWorst - worst ) < 0.10*worst + formatFloor,
 		"the coupled route puts the finite-size effect at " << coupledWorst
 		<< " and the datum-given route at " << worst << ", a ratio of "
 		<< coupledWorst/worst << ". These are the same physical quantity "

@@ -1,6 +1,7 @@
 #ifndef MEQ_DEVICEQUADRATURE_HPP
 #define MEQ_DEVICEQUADRATURE_HPP
 
+#include "DeviceBasis.hpp"
 #include "SourceView.hpp"
 
 #include "mfem.hpp"

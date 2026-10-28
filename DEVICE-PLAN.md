@@ -29,9 +29,13 @@ wants the exact host loops names `"serial"`.
   * the fold's whole-vector reads, which moved 337 MB down on `ff3`, now
     gathers of a few entries;
   * the Device configured after setup.
-* **MEQ's, OPEN**: the seed projection of the starting guess, about 0.1 s on
-  `ff3`. The guess is a host `std::function`, so it needs a device form for
-  each guess type.
+* **MEQ's, OPEN**:
+  * the seed projection of the starting guess, about 0.1 s on `ff3`. The
+    guess is a host `std::function`, so it needs a device form for each guess
+    type;
+  * cuDSS's `SetOperator`, 520 of 2640 host samples on `ff3`
+    ([M-322](MEASUREMENTS.md#m-322)): whether its analysis is redone on each
+    Newton step is not yet read.
 * **Upstream's, BUILT AND TAKEN** at `4a87f9280f` → [M-321](MEASUREMENTS.md#m-321):
   * a batched `Reconstruct()`, both halves;
   * a batched `ConstructC()`;
@@ -40,10 +44,19 @@ wants the exact host loops names `"serial"`.
 
   On `ff3` locally, `postProcess` falls from 14.8 s to 4.27 s and setup runs
   at 4.18 cores.
-* **Upstream's, NEXT**: `R` and the face and element weights, still evaluated
-  per point on the host inside the batched routines. MEQ has offered `R` as a
-  `GridFunctionCoefficient` of the degree-1 coordinate field
-  (`HDG-DEVICE-NO-SERIAL-HOST-ANSWERS-FROM-MEQ.md`).
+* **Upstream's, BUILT AND TAKEN** at `6ef93b0e28` → [M-322](MEASUREMENTS.md#m-322):
+  the face and element weights and `R` in kernels. MEQ's stabilisations
+  describe themselves through `GetRule()`, and `R` on the flux mass is a
+  `GridFunctionCoefficient` of `meq::CoordinateField`. The three batched
+  routines fall from 41% of the host's samples to 3.9%, and `postProcess`
+  from 4.27 s to 1.20 s. **Nothing gives the solver's mesh nodes**: upstream's
+  routes read `HDGElementGeometry` and MEQ's read `CoordinateField`, since
+  `Mesh::GetGeometricFactors()` calls `EnsureNodes()`.
+* **Upstream's, NEXT** (`HDG-DEVICE-WEIGHTS-MEASURED-FROM-MEQ.md`):
+  `GPUBlasBatchedLinAlg::LUSolve`'s per-call pointer arrays, a
+  `cudaMalloc`/`cudaFree` pair per call and 11% of the host's samples; and
+  `EnsureElementQuadratureTables`, a host loop of `EvalWeight` per element
+  point.
 * **`ComputeH()`'s read-only syncs are gone upstream** →
   [M-320](MEASUREMENTS.md#m-320): `machine-f-diiid` moves 54.3 MB up and 14.0
   MB down.

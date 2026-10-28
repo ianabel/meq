@@ -471,7 +471,63 @@ namespace meq
 		return worstOutside;
 	}
 
-	bool affineTrianglesOf( mfem::Mesh &mesh, mfem::Array<AffineTriangle> &out )
+	CoordinateField::CoordinateField( mfem::Mesh &meshIn )
+		: mesh( &meshIn )
+	{
+		if ( mesh->GetNodes() != nullptr )
+			return;
+
+		/*
+		 * A VERTEX FIELD BY THE SPACE'S OWN VERTEX DOFS, NOT A PROJECTION.
+		 * Mesh::GetNodes( GridFunction & ) would project the identity
+		 * element by element; on a degree-1 H1 space that reads each vertex
+		 * once per element it touches and lands the same numbers. Asking
+		 * the space which vdofs a vertex owns is O( vertices ) and assumes
+		 * nothing about how it numbers them.
+		 */
+		int const dim = mesh->Dimension();
+		int const spaceDimension = mesh->SpaceDimension();
+		collection = std::make_unique<mfem::H1_FECollection>( 1, dim );
+		space = std::make_unique<mfem::FiniteElementSpace>(
+			mesh, collection.get(), spaceDimension, mfem::Ordering::byNODES );
+		vertices = std::make_unique<mfem::GridFunction>( space.get() );
+		vertices->UseDevice( true );
+		mfem::real_t *const host = vertices->HostWrite();
+		mfem::Array<int> vdofs;
+		for ( int v = 0; v < mesh->GetNV(); ++v )
+		{
+			space->GetVertexVDofs( v, vdofs );
+			mfem::real_t const *point = mesh->GetVertex( v );
+			for ( int c = 0; c < spaceDimension; ++c )
+				host[ vdofs[ c ] ] = point[ c ];
+		}
+	}
+
+	mfem::GridFunction &CoordinateField::field()
+	{
+		if ( mfem::GridFunction *nodes = mesh->GetNodes() )
+			return *nodes;
+		return *vertices;
+	}
+
+	mfem::GeometricFactors const &CoordinateField::factors( mfem::IntegrationRule const &rule,
+	                                                         int flags )
+	{
+		mfem::GridFunction const &coordinates = field();
+		for ( Cached const &entry : cache )
+			if ( entry.field == &coordinates && entry.factors->IntRule == &rule
+			     && ( entry.factors->computed_factors & flags ) == flags )
+				return *entry.factors;
+
+		cache.push_back( Cached{ &coordinates,
+			std::make_unique<mfem::GeometricFactors>( coordinates, rule, flags ) } );
+		// Back on the host for the host readers after this; see the class.
+		coordinates.HostRead();
+		return *cache.back().factors;
+	}
+
+	bool affineTrianglesOf( mfem::Mesh &mesh, mfem::Array<AffineTriangle> &out,
+	                        CoordinateField *coordinates )
 	{
 		int const elements = mesh.GetNE();
 		out.SetSize( elements );
@@ -488,10 +544,9 @@ namespace meq
 		 * MFEM's own kernel. A degenerate element still comes back with
 		 * `affine` false, as the host loop leaves it.
 		 *
-		 * GetGeometricFactors() calls EnsureNodes(), so a mesh with no nodes
-		 * acquires a degree-1 nodal space here, as it already does at the
-		 * device integrand's first assembly; and it caches by the RULE'S
-		 * ADDRESS, which is why the rule is a static that outlives the mesh.
+		 * The factors come from a CoordinateField, never from the mesh, so a
+		 * mesh with no nodes keeps none (see the class); and they are cached by
+		 * the RULE'S ADDRESS, which is why the rule is a static.
 		 */
 		mfem::FiniteElementSpace const *nodal = mesh.GetNodalFESpace();
 		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) && elements > 0
@@ -506,21 +561,17 @@ namespace meq
 				rule.IntPoint( 0 ).Set2w( 0.0, 0.0, 0.0 );
 				return rule;
 			}();
-			mfem::GeometricFactors const *factors = mesh.GetGeometricFactors(
+			std::unique_ptr<CoordinateField> local;
+			if ( coordinates == nullptr )
+			{
+				local = std::make_unique<CoordinateField>( mesh );
+				coordinates = local.get();
+			}
+			mfem::GeometricFactors const &factors = coordinates->factors(
 				corner, mfem::GeometricFactors::COORDINATES
 				        | mfem::GeometricFactors::JACOBIANS );
-			if ( factors != nullptr
-			     && affineTrianglesKernel( factors->X, factors->J, elements, out ) )
-			{
-				// THE NODES BACK ON THE HOST. MFEM read them on the device to
-				// compute the factors, and every element transformation after
-				// this -- PointLocator's bins first -- reads them raw on the
-				// host: free under CUDA, where both copies stay valid, and what
-				// lifts the debug backend's protection of the host page.
-				if ( mfem::GridFunction const *meshNodes = mesh.GetNodes() )
-					meshNodes->HostRead();
+			if ( affineTrianglesKernel( factors.X, factors.J, elements, out ) )
 				return true;
-			}
 		}
 		AffineTriangle *const host = out.HostWrite();
 

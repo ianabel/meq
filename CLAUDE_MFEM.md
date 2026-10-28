@@ -276,19 +276,22 @@ it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
 **BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../../mfem/install` and
-on `../../mfem/install-single` against `meq-integration` at `4a87f9280f`:
+on `../../mfem/install-single` against `meq-integration` at `6ef93b0e28`:
 
 * the batched `Reconstruct()`, `ConstructC()` and assembly predicates;
 * setup's threaded loops;
-* and, from `9e5ec65b50`, `ComputeH()` leaving the batched factors on the
-  device ([M-320](MEASUREMENTS.md#m-320), [M-321](MEASUREMENTS.md#m-321)).
+* from `9e5ec65b50`, `ComputeH()` leaving the batched factors on the
+  device ([M-320](MEASUREMENTS.md#m-320), [M-321](MEASUREMENTS.md#m-321));
+* and, from `6ef93b0e28`, `HDGElementGeometry`, `HDGStabilizationRule` and
+  the two weight predicates ([M-322](MEASUREMENTS.md#m-322)).
+  `HDGStabilization` gained a virtual, so that refresh was a layout change.
 
 The DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of
-`-6.466e-12` under `--device cuda` and `debug`, and `DeviceParity` passes.
+`-6.466e-12` under `--device cuda`, and `DeviceParity` passes on all three
+arms.
 
-* **Double passes 85 of 87.** The reds are the deliberate
-  `PlasmaEdgeConvergence` and `RotatingMirrorDevice`, the batched route's
-  regression on the mirror (`TODO`; upstream's).
+* **Double passes 86 of 87.** The red is the deliberate
+  `PlasmaEdgeConvergence`.
 * **Single passes 85 of 87**, adding `DriverAcceptance`'s two named cases
   (MKL 2026.2, [M-303](MEASUREMENTS.md#m-303)).
   `NewtonConvergencePaths_cuda`'s "invalid alias" is intermittent and passed
@@ -449,7 +452,8 @@ is not.
 
 | | |
 |---|---|
-| **`R` and the face and element weights, evaluated per point on the host inside the batched routines** | **OPEN, and upstream's next step.** Under a Device, `HDGFaceScatterBatched`, `HDGFaceSideBatched` and `HDGElementMassBatched` still call `EvalWeight`, `EvalJacobian` and MEQ's `R` (a `FunctionCoefficient`) at every face and element point before their kernels, and `VerifyBatchedLUInfo` checks the batched LU on the host. That is most of what is left of the first assembly and of the reconstruction (→ **[M-321](MEASUREMENTS.md#m-321)**). MEQ has offered `R` as a `GridFunctionCoefficient` of the degree-1 coordinate field, exact on its affine meshes, and said its stabilisation is constant except under `TauScaling = "diffusion"` and a mirror's box default (`HDG-DEVICE-NO-SERIAL-HOST-ANSWERS-FROM-MEQ.md`, `-MEASURED-FROM-MEQ.md`) |
+| **`GPUBlasBatchedLinAlg::LUSolve`'s per-call allocations, and `EnsureElementQuadratureTables`** | **OPEN, and asked** (`HDG-DEVICE-WEIGHTS-MEASURED-FROM-MEQ.md`). `LUSolve` builds its device pointer arrays on every call, a `cudaMalloc`/`cudaFree` pair each, and `cudaFree` synchronises: 298 of 2640 host samples on `ff3`, plus 63 in `ReconstructTotalFluxBatched`. `EnsureElementQuadratureTables` is a host loop of `EvalWeight` and `Transform` per element point, built once per cache, 155 samples (→ **[M-322](MEASUREMENTS.md#m-322)**) |
+| ~~**`R` and the face and element weights, evaluated per point on the host inside the batched routines**~~ | **CLOSED** at `6ef93b0e28` (→ **[M-322](MEASUREMENTS.md#m-322)**): weights and `R` in kernels, with `HDGStabilizationRule` describing MEQ's two stabilisations and `R` read from a `GridFunctionCoefficient` of `meq::CoordinateField`; `HDGFaceWeightsOnDevice()` and `HDGElementMassOnDevice()` say yes on `ff3` and the mirror. `HDGElementGeometry` serves the batched routes without giving the mesh nodes, which closed the mirror's batched regression |
 | ~~**Nothing on one host core under a Device: `Reconstruct()`, `ConstructC()`, the batched packing, setup's loops**~~ | **CLOSED** at `4a87f9280f` (→ **[M-321](MEASUREMENTS.md#m-321)**): a batched `Reconstruct()` (both halves, the enriched trace written by each face's highest-numbered element, the serial replay kept as the exact mode); a batched `ConstructC()`, which MEQ takes by `SetDefaultAssemblyMode(Batched)` around `EnableHybridization()` because C is built inside it; the batched assembly's predicates answered once per mesh; and `MarkLevelSetSubdomain()` and `VertexConePath` threaded on a caller's `phi_thread_safe`, effective only with no Device configured. MEQ asks `CanBatchConstraintAssembly()`, `CanBatchReconstructTotalFlux()` and `DarcyForm::CanBatchReconstruction()` and prints the answers under `--profile` |
 | ~~**A per-element correction to the local gradient before it is factored, on the batched `NPCGradient()` route**~~ | **CLOSED.** Upstream built `DarcyHybridization::AddNextGradientCorrection( int el, DenseMatrix const &dD )`, with `ClearNextGradientCorrections()` and `NumNextGradientCorrections()`, at `9d57561f69`, in `meq-integration` at `1a15a28363`. `dD` is added to element `el`'s potential-potential block after assembly and before the local factorisation, by the next `NPCGradient()` only, on the element loop and the batched route, on host and device. It aborts under `LocalOpType::FluxNL`, on a non-NPC `GetGradient()` with corrections queued, and on a size mismatch. MEQ's border fold (`GradShafranovSolver::setBorderFolding()`, [M-303](MEASUREMENTS.md#m-303)) is queued there and no longer rides on `SourceIntegrator::AssembleElementGrad()`, so it folds under a Device too. In single on the card the confined control loses the shelf: the folded solve meets its target in four steps where the unfolded one lands 7.5 times over its bound ([M-316](MEASUREMENTS.md#m-316)). `PlasmaConnectivityFoldOn_debug` and `_cuda` are the ctests |
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
@@ -848,6 +852,19 @@ the mesh gslib was set up on. That is an accident of how the adaptive loop
 happens to be written, not a rule anybody stated, and it is the second entry in
 this section where one component's requirement silently disabled another's
 optimisation. → **[M-93](MEASUREMENTS.md#m-93)**
+
+**AND `Mesh::GetGeometricFactors()` IS ONE OF THE THINGS THAT GIVES A MESH
+NODES.** On a nodeless mesh it calls `EnsureNodes()`, so the first call
+partway through a run changes the mesh under everything set up before it.
+Every element and face quantity is bit-identical with and without the nodes;
+`Mesh::FindPoints()` is not, by 1.8e-15, and the rotating mirror's
+free-boundary solve turned that into 9.06e-10 of `psi_h` (`TODO`). Upstream's
+batched routes did it, and so did three of MEQ's device routes. **Take the
+factors from a field instead**: `GeometricFactors( const GridFunction &, ...)`
+reads any coordinate field and touches nothing, and `meq::CoordinateField`
+is that field for MEQ (→ **[M-322](MEASUREMENTS.md#m-322)**). A breakpoint on
+`Mesh::EnsureNodes` across a `--device cuda` run is the check; it should hit
+only `FieldTransfer`, on the guess's mesh.
 
 **AND THE THIRD IS A DECORATOR, WHICH IS PASS-THROUGH ONLY FOR THE METHODS IT
 NAMES.** `mfem::Operator::ArrayMult()` has a base implementation that loops
