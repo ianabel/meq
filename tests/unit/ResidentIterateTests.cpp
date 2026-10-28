@@ -109,6 +109,13 @@ namespace
 		{
 			deviceOnce();
 			mesh.Transform( shiftOffAxis );
+			// NODES ON PURPOSE, so the kernels and the host loops read ONE
+			// geometry and "to the bit" is a statement about the kernels'
+			// arithmetic. Without them the host loops take the vertex
+			// Jacobian and the kernels meq::CoordinateField's, which agree to
+			// round-off and not to the bit -- the bit-identity used to come
+			// from prepare() giving the mesh nodes, which it no longer does.
+			mesh.EnsureNodes();
 			collection = std::make_unique<mfem::L2_FECollection>(
 				order, mesh.Dimension() );
 			space = std::make_unique<mfem::FiniteElementSpace>(

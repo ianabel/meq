@@ -1257,6 +1257,10 @@ namespace meq
 			mfem::GridFunction const &fluxField;
 			mfem::GridFunction const &potentialField;
 			mfem::Mesh &meshRef;
+			/// The solver's coordinate field when built from one, so the
+			/// device sweep takes its maps from it rather than building its
+			/// own; null otherwise (meq::affineTrianglesOf() then builds one).
+			CoordinateField *coordinates = nullptr;
 			ConductorField const *conductors = nullptr;
 
 			/*

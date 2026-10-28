@@ -174,6 +174,26 @@ namespace
 		return tail;
 	}
 
+	/// Whether the bootstrap's tail order is a reading at all in this build.
+	///
+	/// **IN SINGLE IT IS NOT, AND THAT IS MEASURED ON THIS FIXTURE.** The
+	/// bootstrap's history stalls near 1e-04 of its first residual -- 1.66e-05
+	/// then 1.57e-05 on one run, 5.1e-05 then 2.4e-05 on another -- and ends at
+	/// a few 1e-07, so every triple in its tail straddles the format's floor.
+	/// Three single runs of the same equilibrium, differing by an ulp in R and
+	/// in MKL's rounding, read 6.15 (M-222), 1.942 and 0.162, and XP-2's
+	/// control on the last of them 1.17. The floor and the comparison are
+	/// skipped loudly, as newtonOrderCeilingIsMeasurable() skips the ceiling;
+	/// double asks all three. M-322.
+	bool bootstrapOrderIsMeasurable()
+	{
+#ifdef MFEM_USE_SINGLE
+		return false;
+#else
+		return true;
+#endif
+	}
+
 	/// Everything one run of the machine leaves behind that the assertions read.
 	struct Answer
 	{
@@ -560,6 +580,11 @@ BOOST_AUTO_TEST_CASE( theXPointBorderClosesOnTheSaddle )
 	std::printf( "    tail order: bootstrap %.3f over %zu iterations, last "
 	             "sweep %.3f over %zu\n", border.bootstrapOrder,
 	             border.bootstrapIterations, border.order, border.iterations );
+	if ( !bootstrapOrderIsMeasurable() )
+		BOOST_TEST_MESSAGE( "  *** SKIPPED the bootstrap's tail order "
+		                    << border.bootstrapOrder << ": in this build's real_t "
+		                    "its tail is at the format's floor. M-322" );
+	else
 	BOOST_TEST( border.bootstrapOrder > 1.2,
 		"the bordered Newton's tail order on the bootstrap is "
 		<< border.bootstrapOrder << ". A rate near 1 is a Jacobian statement, "
@@ -714,6 +739,12 @@ BOOST_AUTO_TEST_CASE( theBorderAndTheOuterLoopReachTheSameEquilibrium )
 	 * that was wrong -- not missing, which makes the dense system singular,
 	 * but wrong -- would show up here and nowhere else in this file.
 	 */
+	if ( !bootstrapOrderIsMeasurable() )
+		BOOST_TEST_MESSAGE( "  *** SKIPPED the order comparison, "
+		                    << border.bootstrapOrder << " against XP-2's "
+		                    << loop.bootstrapOrder << ": both tails are at the "
+		                    "format's floor in this build's real_t. M-322" );
+	else
 	BOOST_TEST( border.bootstrapOrder > loop.bootstrapOrder - 0.2,
 		"the border's bootstrap runs at observed order "
 		<< border.bootstrapOrder << " against XP-2's " << loop.bootstrapOrder

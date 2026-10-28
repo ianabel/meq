@@ -8290,6 +8290,12 @@ int main( int argc, char **argv )
 		std::printf( "MEQ:   constraint block batched %s, reconstruction batched %s\n",
 		             solver->batchedConstraintAssemblyTaken() ? "yes" : "NO",
 		             solver->batchedReconstructionTaken() ? "yes" : "NO" );
+		// Whether the batched routes weigh their points on the device: the
+		// face term through the stabilization's rule, the flux mass through
+		// R as a field. NO means a per-point host loop inside a batched route.
+		std::printf( "MEQ:   face weights on device %s, flux mass weights on device %s\n",
+		             solver->faceWeightsOnDevice() ? "yes" : "NO",
+		             solver->fluxMassWeightsOnDevice() ? "yes" : "NO" );
 		// WHAT PARDISO DID, from its own outputs. Silent under any other trace
 		// solver, where there is nothing to read. See StepProfile.
 		if ( p.traceSolvePhases > 0 )

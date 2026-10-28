@@ -79,13 +79,13 @@ namespace meq
 		if ( restriction == nullptr )
 			return false;
 
-		mfem::GeometricFactors const *geometryFactors =
-			mesh->GetGeometricFactors(
-				rule,
-				mfem::GeometricFactors::COORDINATES
-				| mfem::GeometricFactors::DETERMINANTS );
-		if ( geometryFactors == nullptr )
-			return false;
+		// Not Mesh::GetGeometricFactors(), which would give a mesh without
+		// nodes a nodal field; see meq::CoordinateField.
+		CoordinateField coordinates( *mesh );
+		mfem::GeometricFactors const *geometryFactors = &coordinates.factors(
+			rule,
+			mfem::GeometricFactors::COORDINATES
+			| mfem::GeometricFactors::DETERMINANTS );
 
 		mfem::DofToQuad const &maps =
 			first->GetDofToQuad( rule, mfem::DofToQuad::FULL );

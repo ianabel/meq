@@ -600,7 +600,18 @@ namespace
 	                                          mfem::real_t,
 	                                          mfem::ElementTransformation & ) const
 	{
-		return tauValue;
+		mfem::HDGStabilizationRule rule;
+		GetRule( rule );
+		// A constant rule reads no coordinate.
+		return rule.Eval( nullptr );
+	}
+
+	bool ConstantStabilization::GetRule( mfem::HDGStabilizationRule &rule ) const
+	{
+		rule.c0 = static_cast<mfem::real_t>( tauValue );
+		rule.coord = -1;
+		rule.floor = 0.0;
+		return true;
 	}
 
 	double ConstantStabilization::tau() const
@@ -627,7 +638,18 @@ namespace
 
 	double DiffusionScaledStabilization::at( double radius ) const
 	{
-		return tau0Value/std::max( radius, floorRadiusValue );
+		mfem::HDGStabilizationRule rule;
+		GetRule( rule );
+		mfem::real_t const point = static_cast<mfem::real_t>( radius );
+		return static_cast<double>( rule.Eval( &point ) );
+	}
+
+	bool DiffusionScaledStabilization::GetRule( mfem::HDGStabilizationRule &rule ) const
+	{
+		rule.c0 = static_cast<mfem::real_t>( tau0Value );
+		rule.coord = 0;
+		rule.floor = static_cast<mfem::real_t>( floorRadiusValue );
+		return true;
 	}
 
 	mfem::real_t DiffusionScaledStabilization::Eval( mfem::real_t, mfem::real_t, mfem::real_t,
@@ -640,7 +662,9 @@ namespace
 		mfem::real_t xData[ 3 ];
 		mfem::Vector x( xData, tr.GetSpaceDim() );
 		tr.Transform( tr.GetIntPoint(), x );
-		return static_cast<mfem::real_t>( at( x( 0 ) ) );
+		mfem::HDGStabilizationRule rule;
+		GetRule( rule );
+		return rule.Eval( xData );
 	}
 
 	double DiffusionScaledStabilization::tau0() const
@@ -1359,6 +1383,7 @@ namespace
 		fluxFes = std::make_unique<mfem::FiniteElementSpace>( &mesh, fluxColl.get(), dim );
 		potentialFes = std::make_unique<mfem::FiniteElementSpace>( &mesh, potentialColl.get() );
 		traceFes = std::make_unique<mfem::FiniteElementSpace>( &mesh, traceColl.get() );
+		coordinates = std::make_unique<CoordinateField>( mesh );
 
 		dirichletMarker.SetSize( mesh.bdr_attributes.Size() ? mesh.bdr_attributes.Max() : 0 );
 		dirichletMarker = 1;
@@ -4635,7 +4660,7 @@ namespace
 			mfem::Array<AffineTriangle> maps;
 			mfem::Array<int> onAxis;
 			mfem::real_t scale = 0.0;
-			if ( affineTrianglesOf( mesh, maps )
+			if ( affineTrianglesOf( mesh, maps, coordinates.get() )
 			     && axisSourceScanOnDevice( *nonlinearSource, *potentialFes,
 			                                potentialGf, maps, scale, onAxis ) )
 			{
@@ -5584,6 +5609,8 @@ namespace
 			throw std::logic_error( "meq::GradShafranovSolver: no source has been set" );
 
 		darcy = std::make_unique<mfem::DarcyForm>( fluxFes.get(), potentialFes.get() );
+		fluxMassRadius = std::make_unique<mfem::GridFunctionCoefficient>(
+			&coordinates->field(), 1 );
 
 		// ( R q, v ). DarcyForm's flux mass form holds the INVERSE of the diffusion
 		// coefficient -- convdiff puts 1/k there -- and the coefficient here is
@@ -5591,7 +5618,14 @@ namespace
 		// still converges, to a different function, with the L2 error against the
 		// exact Solov'ev solution flat at 1.9e-2 through four refinements.
 		mfem::BilinearForm *fluxMass = darcy->GetFluxMassForm();
-		fluxMass->AddDomainIntegrator( new mfem::VectorMassIntegrator( radiusCoefficient ) );
+		//
+		// R AS A FIELD AND NOT AS A FUNCTION OF THE POINT, on every arm, so a
+		// host run and a device run assemble the same thing: upstream's
+		// batched element mass evaluates a GridFunctionCoefficient on the
+		// device and a FunctionCoefficient per point on the host.
+		auto *fluxMassTerm = new mfem::VectorMassIntegrator( *fluxMassRadius );
+		fluxMass->AddDomainIntegrator( fluxMassTerm );
+		fluxMassIntegrator = fluxMassTerm;
 
 		if ( transferPath )
 		{
@@ -5633,7 +5667,9 @@ namespace
 		// s_diff it is folded into. (R is the INVERSE of the diffusion
 		// coefficient, so it is not even the coefficient the integrator
 		// documents.) tau is constant or tau0/max( R, R_f ) as setTauScaling()
-		// chose; both are state independent.
+		// chose; both are state independent, and both describe themselves
+		// through GetRule(), so upstream's batched face routes evaluate tau in
+		// a kernel and never read the coefficient at all.
 		mfem::HDGStabilization const &stab =
 			tauScalingChoice == TauScaling::Diffusion
 				? static_cast<mfem::HDGStabilization const &>( scaledStabilization )
@@ -5642,6 +5678,7 @@ namespace
 		auto *boundary = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
 		interior->SetStabilization( stab );
 		boundary->SetStabilization( stab );
+		interiorFaceIntegrator = interior;
 
 		if ( usesNonlinearForms() )
 		{
@@ -8647,7 +8684,7 @@ namespace
 		 * source integrator's table, which the kernel does not add.
 		 */
 		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) && !conductorFieldSet
-		     && plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra ) )
+		     && plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra, coordinates.get() ) )
 		{
 			mfem::Vector psiAt;
 			mfem::Vector const *radiusAt = nullptr;
@@ -9423,6 +9460,23 @@ namespace
 		return h != nullptr && h->CanBatchConstraintAssembly();
 	}
 
+	CoordinateField &GradShafranovSolver::coordinateField() const
+	{
+		return *coordinates;
+	}
+
+	bool GradShafranovSolver::faceWeightsOnDevice() const
+	{
+		return darcy && interiorFaceIntegrator != nullptr
+			&& mfem::HDGFaceWeightsOnDevice( *interiorFaceIntegrator, *potentialFes );
+	}
+
+	bool GradShafranovSolver::fluxMassWeightsOnDevice() const
+	{
+		return darcy && fluxMassIntegrator != nullptr
+			&& mfem::HDGElementMassOnDevice( *fluxMassIntegrator, *fluxFes );
+	}
+
 	bool GradShafranovSolver::batchedReconstructionTaken() const
 	{
 		mfem::DarcyHybridization const *h =
@@ -9558,7 +9612,7 @@ namespace
 		if ( hostShift != deviceShift )
 			return false;
 
-		return plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra );
+		return plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra, coordinates.get() );
 	}
 
 	bool GradShafranovSolver::sourceRuleIsExplicit() const
@@ -11079,7 +11133,7 @@ namespace
 				if ( !axisFluxBasis.build( *fluxFes )
 				     || !axisPotentialBasis.build( *potentialFes ) )
 					return false;
-				if ( !affineTrianglesOf( mesh, axisAffineMaps ) )
+				if ( !affineTrianglesOf( mesh, axisAffineMaps, coordinates.get() ) )
 					return false;
 
 				// The bin grid, borrowed from meq::PointLocator so there is

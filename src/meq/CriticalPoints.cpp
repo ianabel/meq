@@ -121,6 +121,7 @@ namespace meq
 		// one never has to be told separately -- which is what stops a caller
 		// searching the remainder for a physical axis by forgetting a line.
 		setConductorField( solverIn.conductorField() );
+		coordinates = &solverIn.coordinateField();
 	}
 
 	CriticalPointFinder::CriticalPointFinder( mfem::GridFunction const &fluxIn,
@@ -1693,7 +1694,7 @@ namespace meq
 		DeviceTriangleBasis potentialBasis;
 		mfem::Array<AffineTriangle> maps;
 		if ( !fluxBasis.build( *fluxSpace ) || !potentialBasis.build( *potentialSpace )
-		     || !affineTrianglesOf( meshRef, maps ) )
+		     || !affineTrianglesOf( meshRef, maps, coordinates ) )
 			return false;
 
 		// ONE STATE, laid out as the solver's: the flux block, then the

@@ -49,16 +49,16 @@
  *
  * WHAT THE PLASMA LOOPS REPRODUCE, AND HOW.
  *
- *   **THE HOST'S OWN RADII AND WEIGHTS, NOT A RECOMPUTATION.** The host loops
- *   take `scratch.Transform( ip )` for the radius and `ip.weight*Weight()`
- *   for the weight at every quadrature point. Both are constants of the mesh,
- *   so they are evaluated ONCE, on the host, by those same calls, and uploaded
- *   -- phase B. `mfem::Mesh::GetGeometricFactors()` would have computed them
- *   on the device, by a different expression, AND it calls `EnsureNodes()` on
- *   the solver's own mesh, which `CLAUDE.md` records costing `GridSampler` two
- *   orders of magnitude through a mesh acquiring nodes without becoming
- *   curved. Neither is acceptable for a route whose acceptance is the host's
- *   digits.
+ *   **THE RADII AND WEIGHTS ARE CONSTANTS OF THE MESH**, built once -- phase
+ *   B. On an affine mesh of one geometry they are built on the device from a
+ *   meq::CoordinateField's geometric factors, which interpolate the vertices
+ *   where the host loops' `scratch.Transform( ip )` applies the affine map,
+ *   so a radius or a weight can differ in the last bit; parity is on printed
+ *   digits. Not from `mfem::Mesh::GetGeometricFactors()`, which calls
+ *   `EnsureNodes()` on the solver's own mesh: a device run that gives the
+ *   mesh nodes solves a different discrete problem from a host run that does
+ *   not (meq::CoordinateField says how). Any other mesh keeps the host loop,
+ *   taking those same calls.
  *
  *   **EVERY EXPRESSION IN THE HOST'S ORDER**, and the device file is compiled
  *   without FMA contraction for meq::DeviceRows' recorded reason: the host
@@ -141,7 +141,11 @@ namespace meq
 		public:
 			/// Build or confirm phase B for @a potential at @a extraOrder.
 			/// @return whether the routes are available.
-			bool prepare( mfem::FiniteElementSpace &potential, int extraOrder );
+			/// @param coordinates the geometry the device tables are built
+			///        from; null builds one for this call. The mesh is never
+			///        given nodes (meq::CoordinateField).
+			bool prepare( mfem::FiniteElementSpace &potential, int extraOrder,
+			              CoordinateField *coordinates = nullptr );
 
 			/**
 			 * One or two per-element partial sums, left DEVICE-VALID.

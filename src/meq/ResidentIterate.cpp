@@ -6,7 +6,8 @@ namespace meq
 {
 
 	bool DevicePlasmaLoops::prepare( mfem::FiniteElementSpace &potential,
-	                                 int extraOrder )
+	                                 int extraOrder,
+	                                 CoordinateField *coordinates )
 	{
 		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
 			return false;
@@ -123,8 +124,16 @@ namespace meq
 					numbered = local[ j ] == e*dofs + j;
 			}
 
+			// The geometry from a CoordinateField, never from the mesh, which
+			// would give a mesh without nodes a nodal field (see the class).
+			std::unique_ptr<CoordinateField> ownCoordinates;
+			if ( numbered && coordinates == nullptr )
+			{
+				ownCoordinates = std::make_unique<CoordinateField>( *meshIn );
+				coordinates = ownCoordinates.get();
+			}
 			mfem::GeometricFactors const *factors = numbered
-				? meshIn->GetGeometricFactors(
+				? &coordinates->factors(
 					rule, mfem::GeometricFactors::COORDINATES
 					      | mfem::GeometricFactors::DETERMINANTS )
 				: nullptr;
@@ -142,10 +151,6 @@ namespace meq
 				                               dofs, radius, z, weight,
 				                               elementDofs ) )
 				{
-					// The mesh's nodes back on the host, for every element
-					// transformation after this; see affineTrianglesOf().
-					if ( mfem::GridFunction const *meshNodes = meshIn->GetNodes() )
-						meshNodes->HostRead();
 					countedDeviceRead( shape, __LINE__ );
 					status = 1;
 					return true;
