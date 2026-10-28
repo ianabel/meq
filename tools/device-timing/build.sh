@@ -4,10 +4,15 @@
 # kit. Each step logs to build-logs/<step>.log and is skipped when its install
 # already exists, so a failed build resumes where it stopped.
 #
-#   PREFIX     install root                      (default: <kit>/install)
-#   CUDA_ARCH  compute capability, no dot        (default: 80, the A100)
-#   JOBS       parallel compile jobs             (default: 16)
-#   CXX, CC    host compilers                    (default: g++, gcc)
+#   MEQ_PREFIX     install root                  (default: <kit>/install)
+#   MEQ_BUILD      build trees                   (default: <kit>/build)
+#   MEQ_CUDA_ARCH  compute capability, no dot    (default: 80, the A100)
+#   MEQ_JOBS       parallel compile jobs         (default: 16, at most the cores)
+#   CXX, CC        host compilers                (default: g++, gcc)
+#
+# The four are MEQ_-prefixed so that a JOBS, PREFIX, BUILD or CUDA_ARCH some
+# module or login script exports is never read as one of them: Perlmutter
+# exports JOBS as a directory, which `cmake --build -j` refuses.
 #   CUDSS_DIR, MKLROOT, NETCDF_DIR, BOOST_ROOT, EIGEN3_DIR, SUNDIALS_DIR (or SUNDIALS_ROOT)
 #              use the machine's instead of fetching or building one.
 #              A SUNDIALS_DIR must be built with ENABLE_CUDA=ON (for this
@@ -19,16 +24,20 @@
 set -euo pipefail
 KIT=$(cd "$(dirname "$0")" && pwd)
 SRC="$KIT/src"
-PREFIX=${PREFIX:-$KIT/install}
-BUILD=${BUILD:-$KIT/build}
+PREFIX=${MEQ_PREFIX:-$KIT/install}
+BUILD=${MEQ_BUILD:-$KIT/build}
 LOGS="$KIT/build-logs"
-CUDA_ARCH=${CUDA_ARCH:-80}
-JOBS=${JOBS:-16}
+CUDA_ARCH=${MEQ_CUDA_ARCH:-80}
+JOBS=${MEQ_JOBS:-16}
 export CXX=${CXX:-g++} CC=${CC:-gcc}
 mkdir -p "$PREFIX" "$BUILD" "$LOGS"
 
 say() { echo "[build] $*"; }
 die() { echo "[build] FAILED: $*" >&2; exit 1; }
+[[ $JOBS =~ ^[1-9][0-9]*$ ]] || die "MEQ_JOBS=$JOBS is not a positive whole number"
+[[ $CUDA_ARCH =~ ^[1-9][0-9]+$ ]] || die "MEQ_CUDA_ARCH=$CUDA_ARCH is not a compute capability such as 80"
+cores=$(nproc 2>/dev/null || echo "$JOBS")
+[ "$JOBS" -le "$cores" ] || JOBS=$cores
 step() # name, then the command; the log is the record
 {
 	local name=$1; shift

@@ -29,7 +29,7 @@ module load PrgEnv-gnu cudatoolkit/13.2 cray-hdf5 cray-netcdf cmake python
 export SUNDIALS_DIR=...    # your CUDA SUNDIALS's install prefix (include/, lib64/);
                           # SUNDIALS_ROOT, as gx's Makefile.perlmutter names it, also works
 ./preflight.sh            # on a LOGIN node: what is there, what will be built
-./build.sh                # on a login node, about 30-60 min
+./build.sh                # on a login node, about 30-60 min; MEQ_JOBS=N to change its 16
 ./check.sh                # host against GPU, every printed answer: PASS or stop
 sbatch job.slurm          # the timing matrix, on one exclusive GPU node
 ```
