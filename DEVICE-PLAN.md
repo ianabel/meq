@@ -2,32 +2,53 @@
 
 ## What is next
 
-**NOTHING ON THIS PAGE IS MEQ'S TO DO, AND THE REST IS UPSTREAM'S OR THE
-HARDWARE'S** → [M-317](MEASUREMENTS.md#m-317), [M-318](MEASUREMENTS.md#m-318).
-MEQ's last bus items are done: the exterior columns are the solver's for the
-life of the mesh, a line-search trial forms the load from them in place
-(`BORDERED-GLOBALISATION-PLAN.md` §12), and two per-sweep leftovers that
-backtraced copies named are gone. `machine-f-diiid` under CUDA moves 56.2 MB
-up and 38.0 MB down, from 83.4 and 48.0, with every printed answer unchanged.
-§4's last unrun acceptances are run: stage 1b is clean, and stage 1's Picard
-pair reproduces the host on all four paths under CUDA. What stays open:
+**UNDER A DEVICE, NOTHING RUNS ON ONE HOST CORE: THAT IS THE ACCEPTANCE NOW**
+→ [M-319](MEASUREMENTS.md#m-319), [M-321](MEASUREMENTS.md#m-321). The first run
+on a card with admissible FP64 -- an A100 on NERSC Perlmutter, packed by
+`tools/device-timing/` -- prints the host's answers on every arm, and its
+device legs beat 64 EPYC cores 2.36x on `ff3`. The run still lost 2.4x,
+because three host steps ran on one core under the Device: `Reconstruct()`
+(14.4 s against 0.91 on 64 cores), the first assembly (2.42 against 1.61) and
+the post-solve axis check (1.55 against 0.34). Item 7's "optional, under 2% of
+a device run" is falsified by that table. **The answer is not item 7**: a host
+loop under a Device is a loop that should be a kernel, so the work goes to the
+card and `mem_manager.cpp`'s thread safety is not requested. The one
+exception is meshing, which is host work on every arm: the driver configures
+the Device after setup, so setup can thread everywhere.
 
-* **upstream's**: `ComputeH()`'s read-only sync, 24 MB of the 38 down, which is
-  `D`'s factors at every gradient from the batched branch's
-  `SyncLocalBlocksToHost(LB_NONE)` (asked in
-  `HDG-DEVICE-COMPUTEH-SYNC-FROM-MEQ.md` whether any host reader needs it);
-  phase B's mesh and dof maps, which MFEM uploads lazily; item 7,
-  `mem_manager.cpp`'s unguarded maps, which keep the output stage and the
-  post-solve axis check serial under a Device; and, under `--device debug`
-  only, KINSOL stopping after one iteration on MFEM's serial N_Vectors,
-  unattributed (M-318);
-* **phase B by design**: the starting iterate, uploaded at each sweep, which is
-  the plan's own "configure the device problem";
-* **the hardware's**: whether FP32 pays on a resident solve (§7.6 item 3), and
-  upstream's crossover on MEQ's triangles (§6), both of which need a card
-  with an admissible FP64 rate. `tools/device-timing/` packs M-242's matrix
-  for one (an A100 node on NERSC Perlmutter first), and its `check.sh` holds
-  the GPU to the host's printed answers before anything is timed.
+**Bit-identity with the host is a test instrument, not a device
+requirement.** Parity is checked on printed digits, which a reordered sum does
+not reach. So `AssemblyMode` is `Batched` under a Device, and a test that
+wants the exact host loops names `"serial"`.
+
+* **MEQ's, DONE** → [M-321](MEASUREMENTS.md#m-321):
+  * the post-solve axis sweep on the device, and the affine maps built there;
+  * the plasma loops' point tables out of MFEM's geometric factors;
+  * the material classification's points and potential, and the axis-source
+    scan;
+  * the fold's whole-vector reads, which moved 337 MB down on `ff3`, now
+    gathers of a few entries;
+  * the Device configured after setup.
+* **MEQ's, OPEN**: the seed projection of the starting guess, about 0.1 s on
+  `ff3`. The guess is a host `std::function`, so it needs a device form for
+  each guess type.
+* **Upstream's, BUILT AND TAKEN** at `4a87f9280f` → [M-321](MEASUREMENTS.md#m-321):
+  * a batched `Reconstruct()`, both halves;
+  * a batched `ConstructC()`;
+  * the batched assembly's predicates, answered once per mesh;
+  * setup's two loops, threaded on MEQ's `phi_thread_safe` promise.
+
+  On `ff3` locally, `postProcess` falls from 14.8 s to 4.27 s and setup runs
+  at 4.18 cores.
+* **Upstream's, NEXT**: `R` and the face and element weights, still evaluated
+  per point on the host inside the batched routines. MEQ has offered `R` as a
+  `GridFunctionCoefficient` of the degree-1 coordinate field
+  (`HDG-DEVICE-NO-SERIAL-HOST-ANSWERS-FROM-MEQ.md`).
+* **`ComputeH()`'s read-only syncs are gone upstream** →
+  [M-320](MEASUREMENTS.md#m-320): `machine-f-diiid` moves 54.3 MB up and 14.0
+  MB down.
+* **The hardware's**: whether FP32 pays on a resident solve (§7.6 item 3), and
+  upstream's crossover on MEQ's triangles (§6). The kit has no single arm yet.
 
 **EVERY DEVICE ROUTE IS BUILT, AND SINCE [M-238](MEASUREMENTS.md#m-238) THE
 GATES OPEN ON EVERY BORDERED SOLVE UNDER A DEVICE -- THE STATE TO PICK UP FROM
@@ -980,7 +1001,7 @@ file worth keeping*. What a reader needs first is the state:
 | 4 · the bordered border | **DONE AND WIRED** → [M-208](MEASUREMENTS.md#m-208), and wiring it measured the route as an **11× LOSS in transfers** on today's layout. Gated on `Memory::DeviceIsValid()` of the columns, so it turns itself on under residency and is reported by `borderDotsRanOnDevice()`. **ITS GATE IS BLOCKED BY ITEM 6, NOT BY THE DENSE ELIMINATION** → [M-227](MEASUREMENTS.md#m-227): probed at the flush, all 168 columns of a 12-step run read **`H+ D-`** — never on the device rather than brought down — because `NPCReduce` and `NPCRecover` are kernels either side of a **host** trace solve. *A leg's residency is a property of what produces its data, not of what consumes it.* The dense Schur complement is `(N+4)²` scalars and `Add()`/`Norml2()` are device-aware already, so porting it would move nothing |
 | 5 · the host branches | **needed no kernel** → [M-195](MEASUREMENTS.md#m-195) |
 | 6 · cuDSS as the device default | **DONE** → [M-229](MEASUREMENTS.md#m-229). The driver defaults to cuDSS when `Backend::CUDA_MASK` is allowed and the file named no trace solver — `CUDA_MASK` and not `DEVICE_MASK`, because `--device debug` is a Device with no GPU execution for a CUDA library to run on. **Two things came out the opposite way from this plan's prediction.** The instrument SURVIVES: cuDSS varies the bordered constraint run to run at ~1e-15, and over eight repeats every field `DeviceParity` compares is identical, because the driver prints seven significant figures of a quantity perturbed at the fifteenth. And it bought **no residency at all** — the columns stayed `H+ D-`, because `mfem::Vector v( n )` has `UseDevice()` FALSE and no trace solver can change that |
-| 7 · `mem_manager` thread safety | **OPTIONAL for MEQ, and RE-SIZED UPWARDS ON THIS CASE** → [M-216](MEASUREMENTS.md#m-216), [M-223](MEASUREMENTS.md#m-223). M-216 put it under 2% of a device run and expected it to shrink as the routes wire up; the opposite happened, because the routes wiring up is what removed everything else. With the solve leg at parity, the serial `Reconstruct()` this gate forces is **the whole of the 1.07–1.13× a device run loses**, about 10% of the wall. *A transition cost is a property of which legs have kernels yet, so it grows as a share every time another leg stops being the problem.* MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188) |
+| 7 · `mem_manager` thread safety | **NOT REQUESTED: THE WORK GOES TO THE DEVICE** → [M-319](MEASUREMENTS.md#m-319) measured the host steps it would thread at 82% of an A100 run's `ff3` wall, which falsifies the sizing below; the steps are ported or requested as kernels instead (§ What is next). Sized before that → [M-216](MEASUREMENTS.md#m-216), [M-223](MEASUREMENTS.md#m-223). M-216 put it under 2% of a device run and expected it to shrink as the routes wire up; the opposite happened, because the routes wiring up is what removed everything else. With the solve leg at parity, the serial `Reconstruct()` this gate forces is **the whole of the 1.07–1.13× a device run loses**, about 10% of the wall. *A transition cost is a property of which legs have kernels yet, so it grows as a share every time another leg stops being the problem.* MEQ's own half is done → [M-188](MEASUREMENTS.md#m-188) |
 | 8 · single precision | last — and **the whole of it has now been run, not only the early experiment** → [M-204](MEASUREMENTS.md#m-204), [M-222](MEASUREMENTS.md#m-222). The bordered Newton survives FP32 on both bordered machines; the single suite is at parity with the double control, **83 of 84** in each on MKL 2026.2 ([M-303](MEASUREMENTS.md#m-303); 62 of 63 each when parity was first reached, M-222), the one red in each being the deliberate `PlasmaEdgeConvergence`; and the cost was one solver constant, four laws about where a floor comes from, and a per-case accuracy that ranges over 560× |
 
 **AND THE STATE OF THE PARTIAL PATH ITSELF HAS CHANGED, WHICH THIS TABLE'S ITEMS
@@ -1216,7 +1237,7 @@ later disagreement with two candidate causes and no way to separate them.
 | **5** | ~~**The host branches**~~ | **C** | MEQ | **NEEDED NO KERNEL** → [M-195](MEASUREMENTS.md#m-195). `Norml2()` is already an `mfem::reduce`, so the convergence test and the line search are library primitives; the support decision is FROZEN within a solve by XP-2 and reads **0 calls**. What remained was §4 stage 4b's crossing instrument, now built → [M-196](MEASUREMENTS.md#m-196), [M-198](MEASUREMENTS.md#m-198) |
 | **6** | ~~**`TraceSolver = "cudss"` as the DEFAULT under a device**~~ | **C** | MEQ | **DONE** → [M-229](MEASUREMENTS.md#m-229). Taken deliberately, with every exact arm pinned first ([M-228](MEASUREMENTS.md#m-228)). **It did not destroy the instrument and it did not buy residency**, and both halves were predictions of this plan. The printed comparison survives because seven figures sit above a 1e-15 perturbation; residency did not arrive because the bordered columns are `mfem::Vector v( n )`, whose `UseDevice()` is **false** — so no trace solver could ever have made them device-valid. Making them device-capable works and costs **17× the bus traffic**, because the crossing MOVES to the axis constraint's host mesh search. *Residency is a property of a cycle, not of a leg* |
 | **9** | ~~**The axis constraint's mesh SEARCH, and the basis it needs**~~ | **C** | MEQ | **DONE** → [M-230](MEASUREMENTS.md#m-230), [M-231](MEASUREMENTS.md#m-231), [M-232](MEASUREMENTS.md#m-232). §3.4 called this the hardest part of the page and it was right about which, and wrong about why: the obstacle was not the Newton but the EVALUATION — `FiniteElement::CalcShape` is a host virtual, so no kernel could read `q_h` at an arbitrary reference point. `meq::DeviceBasis` is that missing piece, a change of basis to barycentric monomials built once per space in phase B, and it unblocks `meq::PointLocatorDevice`'s stated gap in the same stroke. `meq::axisCandidatesOnDevice()` then ports `rootInElement()` line for line and agrees with `sweep()`'s candidate list to **2.2e-16** in both directions. **The X-point's evaluation goes with it**, being the same mechanism at one located point. Both are **gated on `DeviceIsValid() && !HostIsValid()`** and inert today, for item 4's reason and M-232's: forced open they RENAME a transfer rather than removing one |
-| **7** | **`general/mem_manager.cpp` made thread-safe** | B, C | **upstream** | **OPTIONAL for MEQ** → [M-216](MEASUREMENTS.md#m-216). *A host loop worth threading under a device is a loop that should be a KERNEL*, so this is a TRANSITION cost rather than a requirement — worth under 2% of a device run and falling. MEQ's own gate and the threaded-assembly refusal stay either way, because they are what make a device run CORRECT rather than fast. The 1.74× of [M-185](MEASUREMENTS.md#m-185) is a different measurement and is upstream's own |
+| **7** | **`general/mem_manager.cpp` made thread-safe** | B, C | **upstream** | **NOT REQUESTED** → [M-319](MEASUREMENTS.md#m-319): the host steps it would thread are 82% of an A100 run's `ff3` wall, so the "under 2%" below is falsified, and they go to the device instead. Sized before that → [M-216](MEASUREMENTS.md#m-216). *A host loop worth threading under a device is a loop that should be a KERNEL*, so this is a TRANSITION cost rather than a requirement — worth under 2% of a device run and falling. MEQ's own gate and the threaded-assembly refusal stay either way, because they are what make a device run CORRECT rather than fast. The 1.74× of [M-185](MEASUREMENTS.md#m-185) is a different measurement and is upstream's own |
 | **8** | **`MFEM_PRECISION = single`, MEQ swept `double` → `real_t`** | all | **MEQ** | **items 1–7, deliberately** — §7. The **second** instrument-destroying step, and it pairs with item 6 |
 | — | **The simplex face-restriction crash** | — | upstream | blocks nothing here; it gates tensor-only device *geometry*, which residency does not route through (§2.4) |
 | **B** | **Configure the device problem, once** | **B** | MEQ | **STARTED** → [M-226](MEASUREMENTS.md#m-226). `meq::DeviceConstants` is the payload and the solver owns it, so the per-mesh constants survive the operator rebuilds that were re-uploading them 16 times: **80 uploads → 6**, 1.22 MB → 0.113 MB, answer unmoved. What is NOT done is the mesh and the dof maps, which MFEM uploads lazily and MEQ does not control |

@@ -21322,3 +21322,212 @@ step. The unrebased build read 6.3e-12 and 3.7e-12. Adaptivity under either gaug
 * `runs/device-mirror/`: `meq-run
   ../../source/examples/mirror-three-species.toml --device <cpu|cuda>`, one
   directory per arm.
+
+### M-319
+
+**THE FIRST RUN ON A GPU WITH ADMISSIBLE FP64: AN A100 ON NERSC PERLMUTTER.
+EVERY ARM PRINTS THE SAME ANSWERS. THE DEVICE LEGS ARE 2.4x FASTER THAN 64
+EPYC CORES ON THE LARGEST CASE, AND THE RUN IS STILL 2.4x SLOWER, BECAUSE THE
+HOST WORK LEFT UNDER A DEVICE RUNS ON ONE CORE.**
+
+**Setup.** `tools/device-timing` bundled at MEQ `25bf155`, with
+`meq-integration` at `1a15a28363`. One exclusive GPU node: one AMD EPYC 7763
+(64 cores) and an A100-SXM4-40GB, driver 580.178.04, `cudatoolkit/13.2`, GCC,
+oneMKL from `fast-mkl-amd`. Double precision; cuDSS for the trace solve under
+CUDA. Three arms: `cpu8`, `cpu64` (host, `OMP = 8` and `64`) and `cuda`.
+Best of 3 rounds, 2 at `ff3`. `mf` is `examples/machine-f-diiid.toml`; `ffL`
+is `examples/fixed-f-diiid.toml` at `RefinementLevels = L`. The `ff` cases
+are the post-`d7981f6` file (Newton level set, core guess): 4 Newton steps and
+about 1 s of setup, so this table is not comparable with
+[M-242](#m-242)'s. 33 of 33 runs exit 0; every arm prints the same `psi_ax`
+on every case.
+
+| case | elements | arm | wall | setup | solve | output | solve vs cpu8 | solve vs cpu64 |
+|---|---|---|---|---|---|---|---|---|
+| mf | 4,848 | cpu8 | 2.15 | 0.05 | 1.77 | 0.32 | | |
+| | | cpu64 | 1.89 | 0.05 | 1.60 | 0.23 | | |
+| | | cuda | 2.88 | 0.05 | 1.96 | 0.87 | 1.11x | 1.22x |
+| ff1 | 6,245 | cpu8 | 1.00 | 0.15 | 0.55 | 0.29 | | |
+| | | cpu64 | 0.85 | 0.16 | 0.47 | 0.21 | | |
+| | | cuda | 1.78 | 0.15 | 0.56 | 1.07 | 1.00x | 1.17x |
+| ff2 | 25,487 | cpu8 | 3.38 | 0.36 | 2.23 | 0.79 | | |
+| | | cpu64 | 2.60 | 0.36 | 1.82 | 0.42 | | |
+| | | cuda | 6.11 | 0.36 | 1.87 | 3.88 | 0.84x | 1.03x |
+| ff3 | 102,840 | cpu8 | 12.64 | 1.00 | 9.12 | 2.52 | | |
+| | | cpu64 | 9.22 | 1.00 | 6.92 | 1.30 | | |
+| | | cuda | 22.53 | 1.08 | 6.65 | 14.80 | 0.73x | 0.96x |
+
+**The device legs** are the residual, gradient, trace factorisation and
+backsolve, NPC traversal, constraint and border. Summed:
+
+| case | cuda | cpu64 | cpu8 | cuda against cpu64 |
+|---|---|---|---|---|
+| mf | 0.496 | 0.827 | 1.086 | 1.67x faster |
+| ff1 | 0.217 | 0.275 | 0.371 | 1.27x faster |
+| ff2 | 0.606 | 1.156 | 1.563 | 1.91x faster |
+| ff3 | 1.887 | 4.462 | 6.569 | **2.36x faster** |
+
+**What the CUDA arm loses on is three host steps at 1.00 cores.** On `ff3`:
+
+| step | cuda, 1 core | cpu64 | cores on cpu64 |
+|---|---|---|---|
+| `postProcess`, `DarcyForm::Reconstruct()` | **14.43 s** | 0.91 s | 46.7 |
+| re-assembly, the first `prepare()` | 2.42 s | 1.61 s | 3.9 |
+| the post-solve axis checks | 1.55 s | 0.34 s | 46.6 |
+
+On cpu8, `postProcess` is 2.15 s at 7.23 cores, which is 15.5 core-seconds.
+So the CUDA arm does the same work on one core. Had those three run as on
+cpu64, the CUDA wall would be 6.98 s on `ff3` (0.76x of cpu64), 2.25 on `ff2`
+(0.86x), 0.82 on `ff1` (0.96x) and 2.17 on `mf` (1.15x). `mf`'s
+`makeSolver` takes 0.79 s under CUDA against 0.25 s, mostly CUDA and cuDSS
+start-up.
+
+**And a MEQ bus regression on the folded fixed-boundary cases.** Phase C on
+`ff3` moves 337 MB down, from MEQ's own code: the fold (M-316) downloads the
+whole iterate to read one element (`GradShafranov.cpp:14633` at `25bf155`),
+and its 2 x 2 solve downloads `y`, `z` and the fold's own solve whole to dot
+them over the border (`:15628`, `:15629`). `mf` does not fold, and its phase C
+is 2.26 MB.
+
+**Reproduce.** `runs/device-timing/perlmutter/results-nid001997-20261027-1554.tar.gz`,
+and `python3 tools/device-timing/summarize.py results/`.
+
+### M-320
+
+**`ComputeH()`'s 24 MB DOWN IS GONE, AS UPSTREAM PREDICTED, AND THE FACE MAP
+GOES UP ONCE. THE ANSWERS DID NOT MOVE.**
+
+**Setup.** `meq-integration` at `9e5ec65b50` (`ComputeH()` leaves the batched
+factors on the device and keeps its face map). Both installs were rebuilt
+clean and their headers touched; MEQ was rebuilt `--clean-first` against
+each. `machine-f-diiid`, `--device cuda`, `MKL = OMP = 1`, `nsys profile
+--trace=cuda --cudabacktrace=memory:1`, with copies joined to their call
+chains.
+
+| | `1a15a28363` ([M-317](#m-317)) | `9e5ec65b50` |
+|---|---|---|
+| host to device | 56.20 MB, 271 | **54.28 MB, 260** |
+| device to host | 37.98 MB, 388 | **14.01 MB, 362** |
+
+* **No copy comes down under `ComputeH()`.** There were 26 (23.97 MB): `Df_data` and
+  `Df_ipiv` at each of 12 gradients, and `Af_data` and `Af_ipiv` once, from
+  the batched branch's `SyncLocalBlocksToHost(LB_NONE)`.
+* **The face map's 12 uploads of 174,528 B are 1.** That is the 1.92 MB drop up.
+* **The answers are unchanged:** sweeps 7 / 3 / 2, `psi_ax = 3.759850e-01`,
+  constraint `-6.466e-12`.
+* **Under `--device debug`,** `machine-f-diiid` and `limiter-halfdisc` both exit 0
+  with the same answers. The syncs upstream removed were covering no host
+  reader.
+* **The suites:** double is 86 / 87, and single is 84 / 87. These are the
+  inventories they had before.
+
+**Reproduce.** `runs/device-bus/computeh.*`, `runs/device-bus/debug-9e5e/`,
+`runs/device-bus/refresh-9e5e/`.
+
+### M-321
+
+**UNDER A DEVICE, MEQ'S WHOLE-MESH HOST LOOPS TAKE DEVICE ROUTES, UPSTREAM'S
+FOUR REQUESTS ARE BUILT AND TAKEN, AND SETUP THREADS. ON `ff3` THE FOLD'S 337
+MB DOWN IS 1.57 MB, AND EVERY ANSWER IS THE HOST'S.**
+
+**Setup.** MEQ's `device-no-serial` branch:
+
+* the batched `AssemblyMode` default under a Device;
+* the Device configured after setup;
+* `CriticalPointFinder::sweepOnDevice()`;
+* the affine maps, the plasma loops' point tables, the material
+  classification's points, and the axis-source scan, all on the device;
+* the fold's reads gathered.
+
+It is built against `meq-integration` at `4a87f9280f`:
+
+* a batched `Reconstruct()`, both halves;
+* a batched `ConstructC()`, taken through `SetDefaultAssemblyMode(Batched)`
+  around `EnableHybridization()`;
+* the batched assembly's predicates answered once per mesh;
+* setup's loops threaded on `phi_thread_safe`.
+
+Measured on this machine's RTX 2070 SUPER under another session's load (load
+average 6 to 8). **The wall times are indicative, not timings.** The routes,
+the bus and the core counts are the findings.
+
+**`fixed-f-diiid` at `RefinementLevels = 3`** (102,840 triangles, k = 2),
+`--device cuda`, `--profile`:
+
+| | `56488e1` on `1a15a28363` | branch on `4a87f9280f` |
+|---|---|---|
+| wall | 26.3 s | 11.9 s |
+| setup | 1.53 s at 1.00 cores | 0.47 s at 4.18 cores |
+| `postProcess` | 14.8 s | 4.27 s |
+| first assembly | 3.01 s | 2.54 s |
+| post-solve axis checks | 1.56 s | 0.021 s |
+| border assembly | 0.369 s | 0.008 s |
+| phase C, device to host | 337 MB | 1.57 MB |
+| constraint block, reconstruction | per face, per element | `batched yes`, `batched yes` |
+| `psi_ax`, the located axis | 2.897815e-01 at ( 1.7684, -0.0003 ) | the same |
+
+**Where the old host time went, and what replaced it** (`perf`, folded):
+
+* **The post-solve sweep.** It was 1.5 s on one core. It is
+  `axisCandidatesOnDevice()`, the solve's own kernel. Then 90% of what
+  remained was `affineTrianglesOf()`'s host loop, which is now MFEM's
+  geometric factors at the reference corner. The device sweep's candidates
+  find the same axis; the kernel negates the flux on read, so the finder hands
+  it `-q`.
+* **The border column.** 97% of it was `DevicePlasmaLoops::prepare()`'s host
+  loop. The radius, z and weight tables are now one kernel over the
+  geometric factors.
+* **`elementMaterials()`.** It was 3.9% of the run: `EvalWeight`, `CalcShape`
+  and `Transform` per point. The points and their potential now come from the
+  plasma loops' tables and one kernel. The host only classifies, and the
+  material fields of `machine-f-diiid`'s `.nc` are identical to the host's.
+* **`checkAxisSource()`.** The largest `|F|` over every node is a device
+  reduction. The host visits only elements touching `R = 0`. On
+  `PlasmaConnectivity`'s limiter case, which reaches the axis, under the debug
+  backend, the device scan and a forced host scan print the same scale, the
+  same on-axis values and the same flags to every digit.
+* **The fold.** The kappa element's dofs and the 2 x 2's dots read gathered
+  entries; `foldY`, `foldZ` and `foldE` change their one entry on the device.
+  ff1's phase C falls from 20.5 MB to 0.096 MB.
+* **Left on the host, and upstream's** (`HDG-DEVICE-NO-SERIAL-HOST-MEASURED-FROM-MEQ.md`):
+  per-face-point and per-element-point `EvalWeight`, `EvalJacobian` and
+  `R`'s evaluation inside `HDGFaceScatterBatched`, `HDGFaceSideBatched` and
+  `HDGElementMassBatched`, and `VerifyBatchedLUInfo`.
+
+**Correctness.**
+
+* **`--device debug`.** `machine-f-diiid`, ff1 and `limiter-halfdisc` exit 0
+  with the host's answers.
+* **ff1's `.nc` against a host run of the previous install.** Every field
+  agrees to round-off: `psistar_coefficients` 9.8e-15 of its largest value,
+  the flux coefficients 1.2e-13.
+* **The debug backend found four raw host readers of data a device route had
+  read.** Each hands it back with `HostRead()`, which is free under CUDA:
+  * the index array a gather reads;
+  * the fields `sweepOnDevice()` reads;
+  * the mesh's nodes after `GetGeometricFactors()`, in MEQ's routes;
+  * `GridSampler` and `PointLocator`, ahead of their own node reads.
+
+**The suites on `4a87f9280f`.**
+
+* **Single is 85 / 87**: `PlasmaEdgeConvergence` and `DriverAcceptance`'s two
+  named cases.
+* **Double is 85 / 87**: `PlasmaEdgeConvergence` and **`RotatingMirrorDevice`,
+  which is a regression in the batched route.** It passed on `9e5ec65b50`
+  with the batched default already on. On the host, the mirror's `psi_h`
+  differs between `AssemblyMode = "batched"` and `"serial"` by 9.06e-10 of
+  its largest value (5.42e-10 at constant `tau`). Within one route the card
+  and the host agree to 3.5e-13 and 5.1e-13, and `fixed-f-diiid` level 1
+  agrees across routes to 1.7e-15. It is deterministic and independent of
+  `C`.
+
+  This is upstream's, reported in
+  `HDG-BATCHED-ASSEMBLY-MIRROR-REGRESSION-FROM-MEQ.md`, and it is in `TODO`.
+
+**Reproduce.**
+
+* `runs/noserial/ff3/` (`run*.log`, `perf-*.data`);
+* `runs/noserial/debug*/`;
+* `runs/noserial/route-ff1/`;
+* `runs/noserial/mirror/`;
+* `runs/noserial/suite-*.log`.
