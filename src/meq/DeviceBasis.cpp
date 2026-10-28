@@ -476,6 +476,52 @@ namespace meq
 		int const elements = mesh.GetNE();
 		out.SetSize( elements );
 		out.UseDevice( true );
+
+		/*
+		 * UNDER A DEVICE, ON A MESH OF STRAIGHT TRIANGLES, THE MAPS ARE BUILT
+		 * THERE. The host loop below asks MFEM's transformation of every
+		 * element twice, on one core under a Device: 90% of the driver's
+		 * post-solve axis check on fixed-f-diiid at 102,840 triangles. MFEM's
+		 * geometric factors at the reference corner are the same map -- the
+		 * position there is the origin, and the Jacobian of a degree-1 map is
+		 * the constant one the host checks for at the centre -- computed by
+		 * MFEM's own kernel. A degenerate element still comes back with
+		 * `affine` false, as the host loop leaves it.
+		 *
+		 * GetGeometricFactors() calls EnsureNodes(), so a mesh with no nodes
+		 * acquires a degree-1 nodal space here, as it already does at the
+		 * device integrand's first assembly; and it caches by the RULE'S
+		 * ADDRESS, which is why the rule is a static that outlives the mesh.
+		 */
+		mfem::FiniteElementSpace const *nodal = mesh.GetNodalFESpace();
+		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) && elements > 0
+		     && mesh.Dimension() == 2 && mesh.SpaceDimension() == 2
+		     && mesh.GetNumGeometries( 2 ) == 1
+		     && mesh.GetElementBaseGeometry( 0 ) == mfem::Geometry::TRIANGLE
+		     && ( nodal == nullptr || nodal->GetMaxElementOrder() == 1 ) )
+		{
+			static mfem::IntegrationRule const corner = []()
+			{
+				mfem::IntegrationRule rule( 1 );
+				rule.IntPoint( 0 ).Set2w( 0.0, 0.0, 0.0 );
+				return rule;
+			}();
+			mfem::GeometricFactors const *factors = mesh.GetGeometricFactors(
+				corner, mfem::GeometricFactors::COORDINATES
+				        | mfem::GeometricFactors::JACOBIANS );
+			if ( factors != nullptr
+			     && affineTrianglesKernel( factors->X, factors->J, elements, out ) )
+			{
+				// THE NODES BACK ON THE HOST. MFEM read them on the device to
+				// compute the factors, and every element transformation after
+				// this -- PointLocator's bins first -- reads them raw on the
+				// host: free under CUDA, where both copies stay valid, and what
+				// lifts the debug backend's protection of the host page.
+				if ( mfem::GridFunction const *meshNodes = mesh.GetNodes() )
+					meshNodes->HostRead();
+				return true;
+			}
+		}
 		AffineTriangle *const host = out.HostWrite();
 
 		bool everyOne = true;

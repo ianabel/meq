@@ -943,8 +943,13 @@ since that is an ellipse.
        ``[boundary.xpoint]``, and refused if non-positive.
    * - ``AssemblyMode``
      - ``"threaded"``
-     - ``"serial"`` or ``"threaded"``. Who computes the element-local work.
-       See :ref:`linear-threading`.
+     - ``"serial"``, ``"threaded"`` or ``"batched"``. Who computes the
+       element-local work. See :ref:`linear-threading`. Under ``--device`` a
+       mode the file does not state is ``"batched"``, MFEM's element and face
+       kernels, because a host loop under a device runs on one core. Those
+       kernels sum in an order that can move the last bit against the host
+       loops; a run that has to match another to the bit names ``"serial"``,
+       and ``"threaded"`` is refused under ``--device`` above one thread.
    * - ``TraceSolver``
      - ``"pardiso"``
      - ``"umfpack"`` or ``"pardiso"``. Which direct solver factorises the

@@ -569,8 +569,12 @@ namespace
 		// decides on is exactly the set round-off cannot decide, and a vertex of
 		// Gamma_h landing ON Gamma gives mfem::VertexConePath a zero-length
 		// path. Exactly 0.0 in double, so D_h is unchanged there. See Sampler.hpp.
+		// THREADED, on the promise that the level set is reentrant:
+		// meq::BoundaryShape::levelSet() is const and holds no mutable or
+		// static state. MFEM threads it only with no Device configured, which
+		// the driver guarantees for setup by configuring the Device after it.
 		int const inside = mfem::MarkLevelSetSubdomain(
-			background, levelSet, meq::markingOffset( 1.0, 1.5 ), marker, 1 );
+			background, levelSet, meq::markingOffset( 1.0, 1.5 ), marker, 1, true );
 		if ( inside == 0 )
 			throw std::runtime_error(
 				"[boundary.shape] encloses no background element. The mesh is too "
@@ -661,8 +665,11 @@ namespace
 		// four of slack. VertexConePath is the family Cockburn and Solano analyse,
 		// and it widens rather than failing when a ray finds no root -- which is
 		// why the count is reported rather than ignored.
+		// Threaded on the same promise as the marking above; the arguments
+		// between are VertexConePath's defaults.
 		subdomain.path = std::make_unique<mfem::VertexConePath>(
-			*subdomain.mesh, subdomain.gammaH, levelSet, 6.0*h );
+			*subdomain.mesh, subdomain.gammaH, levelSet, 6.0*h,
+			16, 3, 32, 1e-13, 100, false, true );
 		subdomain.widened = subdomain.path->NumWidened();
 
 		subdomain.gammaHMarker.SetSize( subdomain.gammaH );
@@ -1305,8 +1312,53 @@ int main( int argc, char **argv )
 	 * device-valid buffer is a named fault with a backtrace rather than a wrong
 	 * number. Reach for it before a debugger on anything device-shaped.
 	 */
+	/*
+	 * THE DEVICE IS CONSTRUCTED WHERE SETUP ENDS, NOT HERE.
+	 *
+	 * Setup is meshing -- the background mesh, the level-set marking, the
+	 * transfer paths, the submesh -- and it is host work on every arm, so it
+	 * is threaded for every arm. Under a configured mfem::Device it could
+	 * not be: MFEM switches its host threading off whenever a Device is
+	 * configured, because its memory manager is not thread safe, and so does
+	 * meq::hostLoopsAreSafe(). Setup allocates nothing a kernel reads before
+	 * the solver exists, so the Device is configured after it, and what setup
+	 * needs to know about the Device it reads off the name below.
+	 */
 	std::unique_ptr<mfem::Device> device;
-	if ( deviceGiven && deviceName != "cpu" )
+	bool const deviceWanted = deviceGiven && deviceName != "cpu";
+	auto deviceNamed = [ & ]( std::initializer_list<char const *> backends )
+	{
+		std::size_t from = 0;
+		while ( from <= deviceName.size() )
+		{
+			std::size_t const comma = deviceName.find( ',', from );
+			std::string const token = deviceName.substr(
+				from, comma == std::string::npos ? std::string::npos : comma - from );
+			for ( char const *backend : backends )
+				if ( token == backend )
+					return true;
+			if ( comma == std::string::npos )
+				break;
+			from = comma + 1;
+		}
+		return false;
+	};
+	// mfem::Backend::CUDA_MASK and DEVICE_MASK, asked of the name: every
+	// backend string MFEM's Device::Configure() maps onto them.
+	bool const namedCuda = deviceWanted
+		&& deviceNamed( { "cuda", "ceed-cuda", "occa-cuda", "raja-cuda"
+#ifdef MFEM_USE_CUDA
+		                  , "gpu", "ceed-gpu", "occa-gpu", "raja-gpu"
+#endif
+		                } );
+	bool const namedDevice = deviceWanted
+		&& ( namedCuda
+		     || deviceNamed( { "hip", "ceed-hip", "debug"
+#ifdef MFEM_USE_HIP
+		                       , "gpu", "ceed-gpu", "occa-gpu", "raja-gpu"
+#endif
+		                     } ) );
+	if ( deviceWanted )
 	{
 #ifndef MFEM_USE_CUDA
 		if ( deviceName.find( "cuda" ) != std::string::npos )
@@ -1323,8 +1375,6 @@ int main( int argc, char **argv )
 			return ConfigurationError;
 		}
 #endif
-		device = std::make_unique<mfem::Device>( deviceName.c_str() );
-		device->Print();
 	}
 
 
@@ -1342,7 +1392,7 @@ int main( int argc, char **argv )
 	 * steady_clock and not system_clock: this measures an interval, and a
 	 * wall-clock adjustment mid-run should not appear as negative time.
 	 */
-	auto const started = std::chrono::steady_clock::now();
+	auto started = std::chrono::steady_clock::now();
 	auto elapsedSince = []( std::chrono::steady_clock::time_point from )
 	{
 		return std::chrono::duration<double>(
@@ -1363,7 +1413,7 @@ int main( int argc, char **argv )
 		return static_cast<double>( now.tv_sec )
 		       + 1.0e-9*static_cast<double>( now.tv_nsec );
 	};
-	double const startedCpu = cpuNow();
+	double startedCpu = cpuNow();
 	double setupSeconds = 0.0;
 	double solveSeconds = 0.0;
 	double setupCpuSeconds = 0.0;
@@ -1673,7 +1723,7 @@ int main( int argc, char **argv )
 		 */
 		if ( config->getInverse().given )
 		{
-			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			if ( namedDevice )
 			{
 				std::fprintf( stderr,
 					"MEQ: [inverse] is not solved under --device: the device\n"
@@ -1992,44 +2042,32 @@ int main( int argc, char **argv )
 		? AM::Threaded : AM::Serial;
 
 	/*
-	 * ON A DEVICE, AN UNSTATED ASSEMBLY MODE IS **SERIAL**, AND THAT IS A
-	 * DECISION ABOUT AN INSTRUMENT RATHER THAN ABOUT SPEED.
+	 * ON A DEVICE, AN UNSTATED ASSEMBLY MODE IS **BATCHED**: UNDER A DEVICE
+	 * NOTHING RUNS ON ONE HOST CORE THAT A KERNEL CAN DO.
 	 *
-	 * AssemblyMode::Batched puts the interior-face potential term through one
-	 * kernel instead of a host call per face, and it is the only one of the
-	 * three batched axes that LOSES bit-reproducibility: its `D` accumulation
-	 * goes through AtomicAdd from three or four faces per element, so the
-	 * arrival order shows in the last bit. Upstream swept the keys one at a
-	 * time, bitwise over four runs -- none, LocalFactorMode, + TraceAssembly
-	 * all reproduce; + AssemblyMode does not, at 3.5e-16 to 4.7e-16.
-	 * MEASUREMENTS.md M-209.
+	 * AssemblyMode::Batched puts the element matrices and the interior-face
+	 * potential term through upstream's kernels (HDGElementMassBatched,
+	 * HDGElementDivBatched, HDGFaceScatterBatched) instead of a host call per
+	 * element and per face. Serial there is one core under a Device, because
+	 * MFEM switches its host threading off whenever a Device is configured;
+	 * on fixed-f-diiid at 102,840 triangles the two serial loops are 71% of
+	 * the first assembly, 2.42 s of an A100 run's 22.5 (MEASUREMENTS.md
+	 * M-319).
 	 *
-	 * **SO THIS DEFAULT WAS DESTROYING THE ONE CHECK THE DEVICE PATH IS BUILT
-	 * AROUND.** *"--device cuda reproduces --device cpu to every printed
-	 * digit"* is what root-caused M-79, M-130, M-187 and M-207, it is why
-	 * DEVICE-PLAN.md section 3.5 orders cuDSS and single precision last, and
-	 * it is the reason residency is built in double at all -- and the driver
-	 * was giving it away by default, for the one axis whose host measurement
-	 * is a 15 to 27 per cent LOSS anyway (M-99).
+	 * **IT IS NOT BIT-REPRODUCIBLE, AND THAT IS NOT A REQUIREMENT OF A DEVICE
+	 * RUN.** The face kernel's `D` accumulation goes through AtomicAdd from
+	 * three or four faces per element, so the arrival order shows in the last
+	 * bit, 3.5e-16 to 4.7e-16 (M-209). No run is converged in the physics to
+	 * that, and *"--device cuda reproduces --device cpu"* is checked on
+	 * printed digits, which a reordered sum does not reach. Bit-exactness is
+	 * a TEST instrument: a test, or a caller bisecting a device fault to the
+	 * bit, names `AssemblyMode = "serial"` and gets the per-element and
+	 * per-face host loops, in element order.
 	 *
-	 * **WHAT IS GIVEN UP IS THE FACE KERNELS AND NOTHING ELSE.** Serial here
-	 * still leaves LocalFactorMode and TraceAssemblyMode batched below, which
-	 * is upstream's group 1, the NPC traversal and the trace assembly -- three
-	 * of the four groups, all bit-reproducible. A caller who wants the face
-	 * kernels names `AssemblyMode = "batched"` and gets them, with the
-	 * reproducibility caveat that naming it implies.
-	 *
-	 * **AND SERIAL RATHER THAN THE HOST DEFAULT, WHICH IS Threaded.** A
-	 * Device and a host OpenMP region that touches MFEM memory are mutually
-	 * exclusive -- MEQ's own M-188 -- so `Threaded` under `--device` is
-	 * REFUSED above one thread a few lines down. Inheriting the host default
-	 * here would turn an unstated mode into a refusal on every multi-threaded
-	 * device run, which is the opposite of what an inherited default is for.
-	 *
-	 * ONLY WHERE THE FILE SAID NOTHING. A configuration that names a mode has a
-	 * reason and gets what it named -- the same line `[solver] AssemblyMode`
-	 * already draws between an asked-for mode, which is refused when it cannot
-	 * be honoured, and an inherited one, which is downgraded.
+	 * **AND NOT Threaded, THE HOST DEFAULT.** A Device and a host OpenMP
+	 * region that touches MFEM memory are mutually exclusive -- MEQ's own
+	 * M-188 -- so `Threaded` under `--device` is REFUSED above one thread a
+	 * few lines down.
 	 *
 	 * ONLY WHERE THE FILE SAID NOTHING. A configuration that names a mode has a
 	 * reason and gets what it named -- the same line `[solver] AssemblyMode`
@@ -2067,9 +2105,9 @@ int main( int argc, char **argv )
 	 * mode here that is not bit exact, so a caller comparing two runs to the
 	 * bit names `TraceAssemblyMode = "serial"` and gets it.
 	 */
-	bool const onDevice = mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
+	bool const onDevice = namedDevice;
 	if ( onDevice && !config->getSolver().assemblyModeWasGiven )
-		assemblyMode = AM::Serial;
+		assemblyMode = AM::Batched;
 
 	using LFM = meq::GradShafranovSolver::LocalFactorMode;
 	LFM localFactorMode =
@@ -2130,7 +2168,7 @@ int main( int argc, char **argv )
 	 * all.* And `traceSolverAvailable()` because a build without
 	 * MFEM_USE_CUDSS must keep PARDISO rather than reach a package it lacks.
 	 */
-	bool const onCuda = mfem::Device::Allows( mfem::Backend::CUDA_MASK );
+	bool const onCuda = namedCuda;
 	if ( onCuda && !config->getSolver().traceSolverWasGiven
 	     && meq::GradShafranovSolver::traceSolverAvailable( TS::cuDSS ) )
 		traceSolver = TS::cuDSS;
@@ -2321,7 +2359,7 @@ int main( int argc, char **argv )
 	 * So the config file alone still cannot reach cuDSS -- which is what
 	 * theDriverRefusesASolverItCannotHonour pins, and it runs without the flag.
 	 */
-	if ( traceSolver == TS::cuDSS && !device )
+	if ( traceSolver == TS::cuDSS && !deviceWanted )
 	{
 		std::fprintf( stderr,
 			"MEQ: [solver] TraceSolver = \"cudss\" needs a device, and this run\n"
@@ -2726,7 +2764,10 @@ int main( int argc, char **argv )
 			{
 				try
 				{
-					domain = std::make_unique<meq::AdaptiveDomain>( background, levelSet );
+					// Both of the driver's level sets are pure functions of the
+					// point; see the marking in buildSubdomain().
+					domain = std::make_unique<meq::AdaptiveDomain>( background, levelSet,
+					                                                1, true );
 				}
 				catch ( std::exception const &error )
 				{
@@ -3745,6 +3786,20 @@ int main( int argc, char **argv )
 	setupSeconds = elapsedSince( started );
 	setupCpuSeconds = cpuNow() - startedCpu;
 
+	// AND NOW THE DEVICE, with setup done -- see where `device` is declared.
+	// Its construction is a driver's start-up (a CUDA context) and was never
+	// in any phase, so the clocks are moved past it rather than charging it
+	// to the solve.
+	if ( deviceWanted )
+	{
+		auto const deviceStarted = std::chrono::steady_clock::now();
+		double const deviceStartedCpu = cpuNow();
+		device = std::make_unique<mfem::Device>( deviceName.c_str() );
+		device->Print();
+		started += std::chrono::steady_clock::now() - deviceStarted;
+		startedCpu += cpuNow() - deviceStartedCpu;
+	}
+
 	// ---- solve, and refine if that is what was asked for ----------------
 	std::vector<Cycle> history;
 
@@ -3842,7 +3897,7 @@ int main( int argc, char **argv )
 			// h on a uniform mesh, where the two are the same number.
 			path = std::make_unique<mfem::VertexConePath>(
 				domain->computational(), domain->gammaHAttribute(), levelSet,
-				12.0*domain->largestElement() );
+				12.0*domain->largestElement(), 16, 3, 32, 1e-13, 100, false, true );
 			widened = path->NumWidened();
 			gammaHMarker = &domain->gammaHMarker();
 		}
@@ -8230,6 +8285,11 @@ int main( int argc, char **argv )
 		             "cache %s\n",
 		             solver->fluxMassIsPrefactored() ? "yes" : "NO",
 		             solver->condensationCacheTaken() ? "yes" : "NO" );
+		// Asked after the output stage, because the reconstruction's
+		// predicate is asked of the enriched spaces postProcess() builds.
+		std::printf( "MEQ:   constraint block batched %s, reconstruction batched %s\n",
+		             solver->batchedConstraintAssemblyTaken() ? "yes" : "NO",
+		             solver->batchedReconstructionTaken() ? "yes" : "NO" );
 		// WHAT PARDISO DID, from its own outputs. Silent under any other trace
 		// solver, where there is nothing to read. See StepProfile.
 		if ( p.traceSolvePhases > 0 )

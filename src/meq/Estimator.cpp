@@ -647,10 +647,12 @@ namespace meq
 
 	AdaptiveDomain::AdaptiveDomain( mfem::Mesh const &backgroundIn,
 	                                mfem::PositionFunction levelSetIn,
-	                                int extraRefineIn )
+	                                int extraRefineIn,
+	                                bool levelSetThreadSafeIn )
 		: backgroundMesh( backgroundIn, true ),
 		  levelSet( std::move( levelSetIn ) ),
 		  extraRefine( extraRefineIn ),
+		  levelSetThreadSafe( levelSetThreadSafeIn ),
 		  gammaH( 0 ),
 		  refinementCount( 0 ),
 		  proximityAdditions( 0 )
@@ -670,7 +672,8 @@ namespace meq
 		// nothing here depends on it surviving.
 		int const inside = mfem::MarkLevelSetSubdomain(
 			backgroundMesh, levelSet, meq::markingOffset( 1.0, 1.5 ),
-		                                                insideMarker, extraRefine );
+		                                                insideMarker, extraRefine,
+		                                                levelSetThreadSafe );
 		if ( inside <= 0 )
 			throw std::runtime_error( "meq::AdaptiveDomain: no background element lies inside Omega" );
 

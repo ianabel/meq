@@ -1,4 +1,5 @@
 #include "CriticalPoints.hpp"
+#include "AxisSearch.hpp"
 #include "Crossings.hpp"
 
 #include <cstdlib>
@@ -1674,8 +1675,124 @@ namespace meq
 		throw std::runtime_error( message.str() );
 	}
 
+	bool CriticalPointFinder::sweepOnDevice( std::vector<CriticalPoint> &out ) const
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		if ( conductors != nullptr || nodal.built )
+			return false;
+
+		mfem::FiniteElementSpace const *fluxSpace = fluxField.FESpace();
+		mfem::FiniteElementSpace const *potentialSpace = potentialField.FESpace();
+		if ( fluxSpace == nullptr || potentialSpace == nullptr
+		     || fluxSpace->GetVDim() != 2
+		     || fluxSpace->GetOrdering() != mfem::Ordering::byNODES )
+			return false;
+
+		DeviceTriangleBasis fluxBasis;
+		DeviceTriangleBasis potentialBasis;
+		mfem::Array<AffineTriangle> maps;
+		if ( !fluxBasis.build( *fluxSpace ) || !potentialBasis.build( *potentialSpace )
+		     || !affineTrianglesOf( meshRef, maps ) )
+			return false;
+
+		// ONE STATE, laid out as the solver's: the flux block, then the
+		// potential at potentialOffset. The kernel NEGATES the flux on read,
+		// because it is written for mfem::DarcyForm's `-q`, and this finder
+		// holds `q` -- so `-q` goes in, or every Maximum comes back a Minimum.
+		// All three copies are kernels, so a field already on the device never
+		// visits the host.
+		int const fluxSize = fluxField.Size();
+		mfem::Vector negated( fluxSize );
+		negated.UseDevice( true );
+		negated.Set( -1.0, fluxField );
+		mfem::Vector state( fluxSize + potentialField.Size() );
+		state.UseDevice( true );
+		state.SetVector( negated, 0 );
+		state.SetVector( potentialField, fluxSize );
+		// AND HANDED BACK: the copies read both fields on the device, and every
+		// other reader of them -- nodalExtreme() here, and the solver's own
+		// post-solve checks -- indexes them raw on the host. Free where the
+		// host copy is valid, as it is under CUDA; under the debug backend it
+		// is what lifts the protection a device read leaves on the host page.
+		fluxField.HostRead();
+		potentialField.HostRead();
+
+		mfem::Vector target;
+		if ( !axisFluxScaleOnDevice( state, fluxSpace->GetNDofs(),
+		                             static_cast<mfem::real_t>( tolerance ), target ) )
+			return false;
+
+		int const elementTotal = meshRef.GetNE();
+		mfem::Array<int> selected( elementTotal );
+		selected.UseDevice( true );
+		{
+			int *const host = selected.HostWrite();
+			for ( int e = 0; e < elementTotal; ++e )
+				host[ e ] = e;
+		}
+
+		mfem::IntegrationPoint const centre =
+			mfem::Geometries.GetCenter( mfem::Geometry::TRIANGLE );
+
+		AxisSearchInputs inputs{};
+		inputs.flux = fluxBasis.view();
+		inputs.potential = potentialBasis.view();
+		inputs.maps = maps.Read();
+		inputs.state = state.Read();
+		inputs.target = target.Read();
+		inputs.centreXi = static_cast<mfem::real_t>( centre.x );
+		inputs.centreEta = static_cast<mfem::real_t>( centre.y );
+		inputs.selected = selected.Read();
+		inputs.selectedCount = elementTotal;
+		inputs.elements = elementTotal;
+		inputs.fluxScalarDofs = fluxSpace->GetNDofs();
+		inputs.potentialOffset = fluxSize;
+		inputs.jacobianStep = static_cast<mfem::real_t>( jacobianStep );
+		inputs.containment = static_cast<mfem::real_t>( containment );
+		inputs.maxIterations = maxIterations;
+
+		mfem::Array<AxisCandidate> raw;
+		int count = 0;
+		if ( !axisCandidatesOnDevice( inputs, raw, count ) )
+			return false;
+
+		// In ELEMENT order, which is what the host loop hands the merge, and
+		// the merge keeps the first of two equals.
+		std::vector<CriticalPoint> ordered;
+		ordered.reserve( static_cast<std::size_t>( count ) );
+		for ( int i = 0; i < count; ++i )
+		{
+			AxisCandidate const &from = raw[ i ];
+			CriticalPoint point;
+			point.radius = from.radius;
+			point.z = from.z;
+			point.psi = from.psi;
+			point.type = static_cast<CriticalPointType>( from.type );
+			point.index = criticalPointIndex( point.type );
+			point.element = from.element;
+			point.fluxResidual = from.fluxResidual;
+			point.determinant = from.determinant;
+			point.trace = from.trace;
+			point.overshoot = from.overshoot;
+			point.referenceX = from.referenceX;
+			point.referenceY = from.referenceY;
+			ordered.push_back( point );
+		}
+
+		elementCount += elementTotal;
+		out = mergeCandidates( ordered );
+		return true;
+	}
+
 	std::vector<CriticalPoint> CriticalPointFinder::sweep() const
 	{
+		{
+			std::vector<CriticalPoint> rooted;
+			if ( sweepOnDevice( rooted ) )
+				return rooted;
+		}
+
 		// The deduplication's length scale is the mesh bounding box, and it is
 		// mergeCandidates()'s to compute -- this routine walked every vertex to
 		// build a second copy and then handed the merge nothing, which is what

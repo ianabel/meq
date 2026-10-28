@@ -84,6 +84,75 @@ namespace meq
 		z.UseDevice( true );
 		weight.UseDevice( true );
 		elementDofs.UseDevice( true );
+
+		/*
+		 * ON AN AFFINE MESH OF ONE GEOMETRY THE TABLES ARE BUILT ON THE
+		 * DEVICE, out of MFEM's geometric factors -- the coordinates and
+		 * determinants meq::DeviceQuadrature already takes for the source
+		 * integrand. The host loop below took 97% of the border leg on
+		 * fixed-f-diiid at 102,840 triangles, on one core, since a Device
+		 * switches MEQ's host threading off.
+		 *
+		 * Every element then has the same rule, because OrderW() is a constant
+		 * of an affine map, and the same finite element, because an
+		 * L2_FECollection hands out one per geometry and order. An L2 space
+		 * numbers its dofs element by element, which the kernel's table
+		 * `e*dofs + j` assumes and three elements are checked against.
+		 *
+		 * NOT BIT-IDENTICAL to the host loop: MFEM's factors interpolate the
+		 * vertices where Transform() applies the affine map, so a radius or a
+		 * weight can differ in the last bit.
+		 */
+		mfem::FiniteElementSpace const *nodal = meshIn->GetNodalFESpace();
+		bool const affine = nodal == nullptr || nodal->GetMaxElementOrder() == 1;
+		bool const uniform =
+			meshIn->GetNumGeometries( meshIn->Dimension() ) == 1
+			&& !potential.IsVariableOrder()
+			&& meshIn->SpaceDimension() == 2;
+		if ( affine && uniform )
+		{
+			bool numbered = true;
+			mfem::Array<int> local;
+			int const probes[ 3 ] = { 0, elements/2, elements - 1 };
+			for ( int const e : probes )
+			{
+				potential.GetElementDofs( e, local );
+				if ( local.Size() != dofs )
+					numbered = false;
+				for ( int j = 0; numbered && j < dofs; ++j )
+					numbered = local[ j ] == e*dofs + j;
+			}
+
+			mfem::GeometricFactors const *factors = numbered
+				? meshIn->GetGeometricFactors(
+					rule, mfem::GeometricFactors::COORDINATES
+					      | mfem::GeometricFactors::DETERMINANTS )
+				: nullptr;
+			if ( factors != nullptr )
+			{
+				mfem::Vector quadWeights( quadPoints );
+				{
+					mfem::real_t *const host = quadWeights.HostWrite();
+					for ( int q = 0; q < quadPoints; ++q )
+						host[ q ] = rule.IntPoint( q ).weight;
+				}
+				quadWeights.UseDevice( true );
+				if ( plasmaLoopGeometryKernel( factors->X, factors->detJ,
+				                               quadWeights, elements, quadPoints,
+				                               dofs, radius, z, weight,
+				                               elementDofs ) )
+				{
+					// The mesh's nodes back on the host, for every element
+					// transformation after this; see affineTrianglesOf().
+					if ( mfem::GridFunction const *meshNodes = meshIn->GetNodes() )
+						meshNodes->HostRead();
+					countedDeviceRead( shape, __LINE__ );
+					status = 1;
+					return true;
+				}
+			}
+		}
+
 		{
 			mfem::real_t *const hostRadius = radius.HostWrite();
 			mfem::real_t *const hostZ = z.HostWrite();
@@ -234,6 +303,115 @@ namespace meq
 		return plasmaScatterKernel(
 			view( quantity, source, constants, state, potentialStart, scale ),
 			out.ReadWrite() );
+	}
+
+	bool DevicePlasmaLoops::pointValues( mfem::Vector const &potential,
+	                                     int potentialStart, mfem::Vector &psi,
+	                                     mfem::Vector const *&radiusOut,
+	                                     mfem::Vector const *&zOut,
+	                                     mfem::Vector const *&weightOut,
+	                                     int &pointsPerElement ) const
+	{
+		if ( status <= 0 )
+			return false;
+		psi.SetSize( elements*quadPoints );
+		psi.UseDevice( true );
+		if ( !pointPotentialKernel( shape, elementDofs, potential, potentialStart,
+		                            elements, quadPoints, dofs, psi ) )
+			return false;
+		radiusOut = &radius;
+		zOut = &z;
+		weightOut = &weight;
+		pointsPerElement = quadPoints;
+		return true;
+	}
+
+	bool axisSourceScanOnDevice( Source const &source,
+	                             mfem::FiniteElementSpace &space,
+	                             mfem::Vector const &potential,
+	                             mfem::Array<AffineTriangle> const &maps,
+	                             mfem::real_t &scale, mfem::Array<int> &onAxis )
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+
+		SourceView view{};
+		std::vector<KnotView> knotList;
+		if ( !makePlasmaSourceView( source, view, knotList ) )
+			return false;
+		std::vector<CoilView> coilList;
+		mfem::real_t permeability = 0.0;
+		if ( !makeCoilViews( source, coilList, permeability ) )
+			return false;
+
+		int const elements = space.GetNE();
+		if ( elements == 0 || space.GetVDim() != 1 || space.IsVariableOrder()
+		     || maps.Size() != elements
+		     || dynamic_cast<mfem::L2_FECollection const *>( space.FEColl() ) == nullptr )
+			return false;
+		mfem::FiniteElement const *const first = space.GetFE( 0 );
+		mfem::Mesh *const mesh = space.GetMesh();
+		if ( first == nullptr || mesh == nullptr
+		     || mesh->GetNumGeometries( mesh->Dimension() ) != 1 )
+			return false;
+		mfem::IntegrationRule const &nodeRule = first->GetNodes();
+		int const nodes = first->GetDof();
+		if ( nodeRule.GetNPoints() != nodes )
+			return false;
+
+		// Element by element, which the kernel's `e*nodes + i` assumes; three
+		// elements are checked against it, as DevicePlasmaLoops::prepare() does.
+		mfem::Array<int> local;
+		int const probes[ 3 ] = { 0, elements/2, elements - 1 };
+		for ( int const e : probes )
+		{
+			space.GetElementDofs( e, local );
+			if ( local.Size() != nodes )
+				return false;
+			for ( int i = 0; i < nodes; ++i )
+				if ( local[ i ] != e*nodes + i )
+					return false;
+		}
+
+		mfem::Vector nodeXi( nodes ), nodeEta( nodes );
+		for ( int i = 0; i < nodes; ++i )
+		{
+			nodeXi( i ) = nodeRule.IntPoint( i ).x;
+			nodeEta( i ) = nodeRule.IntPoint( i ).y;
+		}
+		nodeXi.UseDevice( true );
+		nodeEta.UseDevice( true );
+
+		// Never zero-sized: Read() on an empty Array hands a kernel nothing to
+		// capture, and the counts say how much of each is real.
+		mfem::Array<KnotView> knots( std::max<int>( 1, static_cast<int>( knotList.size() ) ) );
+		for ( std::size_t k = 0; k < knotList.size(); ++k )
+			knots[ static_cast<int>( k ) ] = knotList[ k ];
+		knots.UseDevice( true );
+		mfem::Array<CoilView> coils( std::max<int>( 1, static_cast<int>( coilList.size() ) ) );
+		for ( std::size_t k = 0; k < coilList.size(); ++k )
+			coils[ static_cast<int>( k ) ] = coilList[ k ];
+		coils.UseDevice( true );
+
+		onAxis.SetSize( elements );
+		onAxis.UseDevice( true );
+		if ( !axisSourceScanKernel( view, knots, coils, static_cast<int>( coilList.size() ),
+		                            permeability, maps, nodeXi, nodeEta, potential,
+		                            elements, nodes, scale, onAxis ) )
+			return false;
+		onAxis.HostRead();
+		return true;
+	}
+
+	bool setEntryOnDevice( mfem::Vector &v, int index, mfem::real_t value,
+	                       bool add )
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		if ( index < 0 || index >= v.Size() )
+			return false;
+		v.UseDevice( true );
+		return setEntryKernel( v, index, value, add );
 	}
 
 	bool gatherOnDevice( mfem::Vector const &source,

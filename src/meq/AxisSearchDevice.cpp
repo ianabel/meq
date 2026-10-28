@@ -470,6 +470,40 @@ namespace meq
 		return true;
 	}
 
+	bool affineTrianglesKernel( mfem::Vector const &coordinates,
+	                            mfem::Vector const &jacobians, int elements,
+	                            mfem::Array<AffineTriangle> &out )
+	{
+		auto const *d_x = coordinates.Read();
+		auto const *d_j = jacobians.Read();
+		auto *d_out = out.Write();
+		mfem::forall( elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		{
+			// NQ = 1: X[ i + 2 e ], J[ i + 2 ( j + 2 e ) ] = d x_i / d xi_j.
+			AffineTriangle map{};
+			map.origin[ 0 ] = d_x[ 0 + 2*e ];
+			map.origin[ 1 ] = d_x[ 1 + 2*e ];
+			map.jacobian[ 0 ] = d_j[ 0 + 2*( 0 + 2*e ) ];
+			map.jacobian[ 1 ] = d_j[ 0 + 2*( 1 + 2*e ) ];
+			map.jacobian[ 2 ] = d_j[ 1 + 2*( 0 + 2*e ) ];
+			map.jacobian[ 3 ] = d_j[ 1 + 2*( 1 + 2*e ) ];
+			mfem::real_t const determinant =
+				map.jacobian[ 0 ]*map.jacobian[ 3 ] - map.jacobian[ 1 ]*map.jacobian[ 2 ];
+			map.affine = determinant != mfem::real_t( 0 );
+			if ( map.affine )
+			{
+				mfem::real_t const inverse = mfem::real_t( 1 )/determinant;
+				map.determinant = determinant;
+				map.inverseJacobian[ 0 ] =  map.jacobian[ 3 ]*inverse;
+				map.inverseJacobian[ 1 ] = -map.jacobian[ 1 ]*inverse;
+				map.inverseJacobian[ 2 ] = -map.jacobian[ 2 ]*inverse;
+				map.inverseJacobian[ 3 ] =  map.jacobian[ 0 ]*inverse;
+			}
+			d_out[ e ] = map;
+		} );
+		return true;
+	}
+
 #else
 
 	bool axisFluxScaleKernel( mfem::Vector const &, int, mfem::real_t,
@@ -497,6 +531,12 @@ namespace meq
 
 	bool xPointFieldKernel( XPointFieldInputs const &,
 	                        mfem::Array<XPointFieldValues> & )
+	{
+		return false;
+	}
+
+	bool affineTrianglesKernel( mfem::Vector const &, mfem::Vector const &,
+	                            int, mfem::Array<AffineTriangle> & )
 	{
 		return false;
 	}
