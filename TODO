@@ -1382,27 +1382,29 @@ Raised 2026-10-27, by NewtonConvergencePaths_cuda's first single run (M-318).
 
 
 ================================================================================
-AssemblyMode "batched" changes the mirror's discrete system at 4a87f9280f
+The mirror's free-boundary solve turns 1.8e-15 of point location into 9e-10
 Raised 2026-10-28.
 ================================================================================
 
-RotatingMirrorDevice is red against meq-integration at 4a87f9280f. It passed
-at 9e5ec65b50 with the batched device default already on.
+  WHAT IS ESTABLISHED. Giving the rotating mirror's mesh degree-1 nodes partway
+  through a run (Mesh::EnsureNodes(), which Mesh::GetGeometricFactors() calls on
+  a nodeless mesh) moves psi_h by 9.06e-10 of its largest value. Every element
+  Jacobian, weight and mapped point, and every face normal and weight, is
+  bit-identical with and without the nodes; Mesh::FindPoints()'s reference
+  coordinates move by up to 1.8e-15. fixed-f-diiid, which has no extension,
+  moves by 1.7e-15. Upstream's bisection, in their reply to
+  HDG-BATCHED-ASSEMBLY-MIRROR-REGRESSION-FROM-MEQ.md.
 
-The mirror solved on the HOST, batched against serial, differs by 9.06e-10 of
-max |psi_h|; with constant tau = 3, by 5.42e-10. Within one route the card and
-the host agree to 3.5e-13 and 5.1e-13. Two batched runs agree exactly, and
-assembling C per face changes nothing. fixed-f-diiid level 1 agrees to 1.7e-15
-between the routes. So the batched route assembles a different system on the
-mirror alone. The mirror's mesh reaches R = 0, it has an exterior coupling, its
-conductors are filaments out of the mesh, and its support is a box; none of
-these is separated yet.
+  Nothing in MEQ or MFEM now gives the solver's mesh nodes: upstream's batched
+  routes read HDGElementGeometry, and MEQ's device routes read
+  meq::CoordinateField (M-322). So the amplifier no longer shows, and
+  RotatingMirrorDevice is green. It is still there: a 1e-15 perturbation of a
+  located point should not cost six decades.
 
-Upstream's: HDG-BATCHED-ASSEMBLY-MIRROR-REGRESSION-FROM-MEQ.md in
-../mfem-hdg-dev/doc, with the inputs under runs/noserial/mirror/ (m-serial.toml,
-m-batched.toml, mc-*.toml for constant tau). The likeliest commit is
-4a11f09ac4, request 3's packing, but that is an inference.
-
-The test stays red until a batched mirror agrees with a serial one to round-off.
-"AssemblyMode cannot change the answer where both converge" (CLAUDE.md) does
-not hold on this case until then.
+  WHAT IS NOT. Which step amplifies. Upstream's candidate fits the size and is
+  untested: the extension's finite-difference step, cbrt(eps) ~ 6e-6, acting
+  on point-inversion round-off, so 1e-15/6e-6 ~ 2e-10 per differenced entry.
+  To test it: on runs/weights/mirror's serial input, call EnsureNodes() on the
+  solver's mesh before the solve, then difference against an unchanged run with
+  the extension's step doubled and halved. A difference that scales with
+  1/step is the extension.

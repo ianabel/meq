@@ -180,10 +180,8 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 **`-j4` with `OMP_NUM_THREADS=4`** holds the product at the core count, since
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
 **`OMP_NUM_THREADS` is deliberately not pinned in `tests/CMakeLists.txt`**, so a
-plain `ctest` exercises threaded assembly as it ships. The reds are
-`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands, and
-`RotatingMirrorDevice`, which names upstream's batched assembly giving the mirror
-a different discrete system at `4a87f9280f` (`TODO`); a
+plain `ctest` exercises threaded assembly as it ships. The red is
+`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands; a
 single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
 (→ **[M-312](MEASUREMENTS.md#m-312)**) and
