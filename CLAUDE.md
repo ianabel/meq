@@ -101,10 +101,17 @@ that silently changes which equilibrium is reported is not a performance key.
 
 **The device path reproduces the host.** Under `--device cuda` the production
 cases match `--device cpu` to every printed digit, three of upstream's four
-element-local groups run on the device, and the remaining cost of a device run is
-host threading it must give up (M-188, → **[M-223](MEASUREMENTS.md#m-223)**).
-The driver's device defaults are deliberate — cuDSS as the trace solver,
-`AssemblyMode = "serial"` to keep bit-reproducibility, threaded assembly refused
+element-local groups run on the device, and **under a Device nothing should run
+on one host core** — a host loop under a Device is a loop that should be a
+kernel. On an A100 the device legs beat 64 EPYC cores 2.4× while the run lost
+2.4× to host work held to one core, chiefly upstream's `Reconstruct()`
+(→ **[M-319](MEASUREMENTS.md#m-319)**). Meshing is the one exception: it is host
+work on every arm, so the Device is configured after setup, and setup threads
+its two hot loops, upstream's `MarkLevelSetSubdomain()` and `VertexConePath`, on
+MEQ's promise that the level set is reentrant (→ **[M-321](MEASUREMENTS.md#m-321)**). **Bit-identity with the host is a test instrument, not a device
+requirement**: parity is checked on printed digits. The driver's device defaults
+are deliberate — cuDSS as the trace solver, `AssemblyMode = "batched"` (a test
+that wants the bit-exact host loops names `"serial"`), threaded assembly refused
 above one thread, `TraceSolver = "cudss"` refused without a Device.
 **Single precision** builds and runs at parity with double, qualified per
 problem. `CLAUDE_DEVICE.md` is the record. **This machine's GPU is for
@@ -173,8 +180,10 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 **`-j4` with `OMP_NUM_THREADS=4`** holds the product at the core count, since
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
 **`OMP_NUM_THREADS` is deliberately not pinned in `tests/CMakeLists.txt`**, so a
-plain `ctest` exercises threaded assembly as it ships. The one red is
-`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands; a
+plain `ctest` exercises threaded assembly as it ships. The reds are
+`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands, and
+`RotatingMirrorDevice`, which names upstream's batched assembly giving the mirror
+a different discrete system at `4a87f9280f` (`TODO`); a
 single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
 (→ **[M-312](MEASUREMENTS.md#m-312)**) and

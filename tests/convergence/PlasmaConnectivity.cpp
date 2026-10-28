@@ -1263,6 +1263,15 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	std::printf( "    checkAxisSource() reads Psi on R = 0 as %.4e, so the "
 	             "CONTINUOUS test is clean\n",
 	             axisSource.normalisedFluxOnAxis );
+	// The rest of the check, so a run under MEQ_TEST_DEVICE -- whose scan of
+	// the source runs on the device -- can be read against the host's.
+	std::printf( "    %-38s %.6e, on R = 0 %.6e, in the support %.6e "
+	             "(reaches %d, support %d, inside %d)\n",
+	             "checkAxisSource() source scale",
+	             axisSource.sourceScale, axisSource.worstOnAxis,
+	             axisSource.worstOnAxisInSupport, axisSource.reachesAxis ? 1 : 0,
+	             axisSource.supportReachesAxis ? 1 : 0,
+	             axisSource.axisInsidePlasma ? 1 : 0 );
 	std::fflush( stdout );
 
 	BOOST_TEST( axisReading.candidates > 0,

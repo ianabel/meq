@@ -276,14 +276,23 @@ it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
 **BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../../mfem/install` and
-on `../../mfem/install-single` against `meq-integration` at `1a15a28363`, which
-adds `AddNextGradientCorrection()` ([M-316](MEASUREMENTS.md#m-316)). The
-DIII-D machine read `psi_ax = 3.759850e-01` and a constraint of `-6.466e-12`
-under `--device cuda` on the double install at `f3f4fe1ea7`
-([M-304](MEASUREMENTS.md#m-304)), and `DeviceParity` passes at `1a15a28363`.
-**Double passes 85 of 86**, with the deliberate `PlasmaEdgeConvergence` red, and
-**single 84 of 86**, adding `DriverAcceptance`'s two named cases (MKL 2026.2,
-[M-303](MEASUREMENTS.md#m-303)). Every binary takes
+on `../../mfem/install-single` against `meq-integration` at `4a87f9280f`:
+
+* the batched `Reconstruct()`, `ConstructC()` and assembly predicates;
+* setup's threaded loops;
+* and, from `9e5ec65b50`, `ComputeH()` leaving the batched factors on the
+  device ([M-320](MEASUREMENTS.md#m-320), [M-321](MEASUREMENTS.md#m-321)).
+
+The DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of
+`-6.466e-12` under `--device cuda` and `debug`, and `DeviceParity` passes.
+
+* **Double passes 85 of 87.** The reds are the deliberate
+  `PlasmaEdgeConvergence` and `RotatingMirrorDevice`, the batched route's
+  regression on the mirror (`TODO`; upstream's).
+* **Single passes 85 of 87**, adding `DriverAcceptance`'s two named cases
+  (MKL 2026.2, [M-303](MEASUREMENTS.md#m-303)).
+  `NewtonConvergencePaths_cuda`'s "invalid alias" is intermittent and passed
+  this take (`TODO`). Every binary takes
 MKL through the RUNPATH `mkl/latest/lib`, which moved from 2026.1 to 2026.2 on
 2026-10-20 and moved single's knife edges ([M-302](MEASUREMENTS.md#m-302)).
 `LD_LIBRARY_PATH=/opt/intel/oneapi/mkl/2026.1/lib` overrides it, which is how
@@ -440,6 +449,8 @@ is not.
 
 | | |
 |---|---|
+| **`R` and the face and element weights, evaluated per point on the host inside the batched routines** | **OPEN, and upstream's next step.** Under a Device, `HDGFaceScatterBatched`, `HDGFaceSideBatched` and `HDGElementMassBatched` still call `EvalWeight`, `EvalJacobian` and MEQ's `R` (a `FunctionCoefficient`) at every face and element point before their kernels, and `VerifyBatchedLUInfo` checks the batched LU on the host. That is most of what is left of the first assembly and of the reconstruction (→ **[M-321](MEASUREMENTS.md#m-321)**). MEQ has offered `R` as a `GridFunctionCoefficient` of the degree-1 coordinate field, exact on its affine meshes, and said its stabilisation is constant except under `TauScaling = "diffusion"` and a mirror's box default (`HDG-DEVICE-NO-SERIAL-HOST-ANSWERS-FROM-MEQ.md`, `-MEASURED-FROM-MEQ.md`) |
+| ~~**Nothing on one host core under a Device: `Reconstruct()`, `ConstructC()`, the batched packing, setup's loops**~~ | **CLOSED** at `4a87f9280f` (→ **[M-321](MEASUREMENTS.md#m-321)**): a batched `Reconstruct()` (both halves, the enriched trace written by each face's highest-numbered element, the serial replay kept as the exact mode); a batched `ConstructC()`, which MEQ takes by `SetDefaultAssemblyMode(Batched)` around `EnableHybridization()` because C is built inside it; the batched assembly's predicates answered once per mesh; and `MarkLevelSetSubdomain()` and `VertexConePath` threaded on a caller's `phi_thread_safe`, effective only with no Device configured. MEQ asks `CanBatchConstraintAssembly()`, `CanBatchReconstructTotalFlux()` and `DarcyForm::CanBatchReconstruction()` and prints the answers under `--profile` |
 | ~~**A per-element correction to the local gradient before it is factored, on the batched `NPCGradient()` route**~~ | **CLOSED.** Upstream built `DarcyHybridization::AddNextGradientCorrection( int el, DenseMatrix const &dD )`, with `ClearNextGradientCorrections()` and `NumNextGradientCorrections()`, at `9d57561f69`, in `meq-integration` at `1a15a28363`. `dD` is added to element `el`'s potential-potential block after assembly and before the local factorisation, by the next `NPCGradient()` only, on the element loop and the batched route, on host and device. It aborts under `LocalOpType::FluxNL`, on a non-NPC `GetGradient()` with corrections queued, and on a size mismatch. MEQ's border fold (`GradShafranovSolver::setBorderFolding()`, [M-303](MEASUREMENTS.md#m-303)) is queued there and no longer rides on `SourceIntegrator::AssembleElementGrad()`, so it folds under a Device too. In single on the card the confined control loses the shelf: the folded solve meets its target in four steps where the unfolded one lands 7.5 times over its bound ([M-316](MEASUREMENTS.md#m-316)). `PlasmaConnectivityFoldOn_debug` and `_cuda` are the ctests |
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | ~~**`DarcyNPCSolver::ArrayMult()`'s per-column staging**~~ | **CLOSED.** MEQ measured it as the NPC leg less upstream's two halves, 32 ms a call at every thread count ([M-301](MEASUREMENTS.md#m-301)). Upstream timed it (`DarcyNPCSolver::GetStagingTime()`, which `--profile` prints) and replaced the copies with views of the caller's columns, at `f3f4fe1ea7`. It is now about 7 ms a call, the three timers close the leg, and the leg at eight threads on TCV is 44% shorter. The views give the same answer on a real card ([M-304](MEASUREMENTS.md#m-304)). The refinement cap is MEQ's `--trace-refinement-cap`, 0 by default, and the colour-free reduce was not wanted. M-304's faster recover comes from first-touch page faults in the old fresh output columns, which upstream measured. So the two halves now scale about alike, and if the leg matters again, both should be measured before choosing one. For the reduce, what remains to try is fewer colours and fewer barriers |

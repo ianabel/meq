@@ -1679,6 +1679,13 @@ namespace meq
 			/// @}
 
 			bool batchedPotFaceAssemblyTaken() const;
+			/// Whether the constraint block C came from upstream's batched
+			/// kernel: its own predicate, asked of the hybridization.
+			bool batchedConstraintAssemblyTaken() const;
+			/// Whether both halves of the reconstruction take upstream's
+			/// batched routes. False before postProcess(), since the call
+			/// builds the enriched spaces the predicate is asked of.
+			bool batchedReconstructionTaken() const;
 			bool batchedLocalFactorTaken() const;
 			bool batchedLocalSolveTaken() const;
 

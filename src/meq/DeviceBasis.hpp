@@ -549,12 +549,24 @@ namespace meq
 	 * @return false when the mesh has any element that is not a straight-sided
 	 *         triangle, having filled @a out anyway with `affine` false on
 	 *         those -- so a caller that can skip them may, and a caller that
-	 *         cannot has one test to make.
+	 *         cannot has one test to make. Under a Device, on a mesh of
+	 *         straight triangles, the maps are built on the device and this is
+	 *         true; an element with a zero determinant is still marked
+	 *         `affine` false, and the kernels skip it as they skip a curved one.
 	 *
 	 * Geometry only: nothing here depends on the solution, so this is a phase B
 	 * upload and is rebuilt only when the mesh is.
 	 */
 	bool affineTrianglesOf( mfem::Mesh &mesh, mfem::Array<AffineTriangle> &out );
+
+	/**
+	 * affineTrianglesOf()'s device half, out of MFEM's geometric factors at
+	 * the reference corner: `X` is `( 1 x 2 x NE )` and `J` `( 1 x 2 x 2 x
+	 * NE )`. In AxisSearchDevice.cpp; false without a device language.
+	 */
+	bool affineTrianglesKernel( mfem::Vector const &coordinates,
+	                            mfem::Vector const &jacobians, int elements,
+	                            mfem::Array<AffineTriangle> &out );
 
 }
 

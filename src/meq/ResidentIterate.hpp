@@ -1,6 +1,7 @@
 #ifndef MEQ_RESIDENTITERATE_HPP
 #define MEQ_RESIDENTITERATE_HPP
 
+#include "DeviceBasis.hpp"
 #include "DeviceNPC.hpp"
 #include "SourceView.hpp"
 
@@ -167,6 +168,20 @@ namespace meq
 			              mfem::Vector const &state, int potentialStart,
 			              mfem::real_t scale, mfem::Vector &out ) const;
 
+			/**
+			 * The potential at every point of the rule prepare() built, beside
+			 * the point tables themselves: entry `e*pointsPerElement + q`, the
+			 * host loops' order. @a psi is left device-valid, and the tables
+			 * are prepare()'s own; a host caller reads all four with
+			 * HostRead(). Summed over the element's dofs in the host's order.
+			 * @return false, having touched nothing, unless prepare() succeeded.
+			 */
+			bool pointValues( mfem::Vector const &potential, int potentialStart,
+			                  mfem::Vector &psi, mfem::Vector const *&radiusOut,
+			                  mfem::Vector const *&zOut,
+			                  mfem::Vector const *&weightOut,
+			                  int &pointsPerElement ) const;
+
 		private:
 			PlasmaLoopView view( PlasmaQuantity quantity, SourceView const &source,
 			                     DeviceConstants const &constants,
@@ -189,6 +204,39 @@ namespace meq
 			mfem::Vector weight;
 			mfem::Array<int> elementDofs;
 	};
+
+	/**
+	 * The source at every node of an L2 potential space, scanned on the
+	 * device: the largest `| F( R, z, psi ) |` over all of them, and which
+	 * elements have a node exactly on `R = 0`.
+	 *
+	 * `F` is the WHOLE source, as `Source::f()` gives it: the plasma term
+	 * through makePlasmaSourceView() plus, for a coil-augmented source, the
+	 * conductors through makeCoilViews() -- the sum that class's `f()` is.
+	 * The maximum is exact in any order, being a selection.
+	 *
+	 * @param maps one per element, from meq::affineTrianglesOf().
+	 * @param onAxis resized to the element count and left host-valid: 1 where
+	 *        a node of the element lies on the axis.
+	 * @return false, having changed nothing the caller reads, with no Device;
+	 *         on a source neither view describes; on a space that is not
+	 *         scalar L2 of one finite element numbered element by element; or
+	 *         on a mesh with an element `affineTrianglesOf()` could not map.
+	 */
+	bool axisSourceScanOnDevice( Source const &source,
+	                             mfem::FiniteElementSpace &space,
+	                             mfem::Vector const &potential,
+	                             mfem::Array<AffineTriangle> const &maps,
+	                             mfem::real_t &scale, mfem::Array<int> &onAxis );
+
+	/**
+	 * `v[ index ] = value`, or `v[ index ] += value` when @a add, on the
+	 * device; @a v is left device-valid. One entry of a vector that lives
+	 * there, changed without the vector coming over to have it changed.
+	 * @return false, having touched nothing, with no `mfem::Device`.
+	 */
+	bool setEntryOnDevice( mfem::Vector &v, int index, mfem::real_t value,
+	                       bool add );
 
 	/**
 	 * `out[ k ] = source[ indices[ k ] ]`, on the device; @a out is left
@@ -251,6 +299,39 @@ namespace meq
 	bool copyEntriesKernel( mfem::Vector const &source,
 	                        mfem::Array<int> const &indices,
 	                        mfem::Vector &destination );
+	/**
+	 * DevicePlasmaLoops' phase B tables out of MFEM's geometric factors:
+	 * `radius`, `z` and `weight` at every point, and an L2 space's
+	 * element-contiguous dof table, `e*dofs + j`.
+	 * @copydoc plasmaElementKernel
+	 */
+	/// @copydoc plasmaElementKernel
+	bool pointPotentialKernel( mfem::Vector const &shape,
+	                           mfem::Array<int> const &elementDofs,
+	                           mfem::Vector const &potential, int potentialStart,
+	                           int elements, int quadPoints, int dofs,
+	                           mfem::Vector &psi );
+	/// @copydoc plasmaElementKernel
+	bool axisSourceScanKernel( SourceView const &view,
+	                           mfem::Array<KnotView> const &knots,
+	                           mfem::Array<CoilView> const &coils, int coilCount,
+	                           mfem::real_t permeability,
+	                           mfem::Array<AffineTriangle> const &maps,
+	                           mfem::Vector const &nodeXi,
+	                           mfem::Vector const &nodeEta,
+	                           mfem::Vector const &potential,
+	                           int elements, int nodes,
+	                           mfem::real_t &scale, mfem::Array<int> &onAxis );
+	/// @copydoc plasmaElementKernel
+	bool setEntryKernel( mfem::Vector &v, int index, mfem::real_t value,
+	                     bool add );
+	bool plasmaLoopGeometryKernel( mfem::Vector const &coordinates,
+	                               mfem::Vector const &determinants,
+	                               mfem::Vector const &quadWeights,
+	                               int elements, int quadPoints, int dofs,
+	                               mfem::Vector &radius, mfem::Vector &z,
+	                               mfem::Vector &weight,
+	                               mfem::Array<int> &elementDofs );
 
 }
 

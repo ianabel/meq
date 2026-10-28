@@ -27,17 +27,32 @@ against is `CLAUDE_DECLINED.md`.
   `debug`, and both midplane gauges of the three-species mirror reproduce the
   host (→ **[M-318](MEASUREMENTS.md#m-318)**).
 * **The driver's device defaults**, each applied only where the file said
-  nothing: `LocalFactorMode` and `TraceAssemblyMode` batched, `AssemblyMode`
-  **`Serial`** (bit-reproducibility, below), and cuDSS as the trace solver under
-  CUDA. Threaded assembly is refused above one thread, and
+  nothing: `LocalFactorMode`, `TraceAssemblyMode` and `AssemblyMode` batched
+  (below), and cuDSS as the trace solver under CUDA. Threaded assembly is refused above one thread, and
   `TraceSolver = "cudss"` is refused without a Device.
 * **Residency is built and gated on the data.** The iterate's readers, the axis
   search and the bordered columns have device routes that open by themselves
   once their input is device-valid. Over a `machine-f-diiid` run the bus carries
-  56.2 MB up and 38.0 MB down (→ **[M-317](MEASUREMENTS.md#m-317)**), from 508
-  and 78.6 at M-240. The largest single item left is upstream's: `ComputeH()`'s
-  read-only syncs, 24 MB down. What is left of MEQ's own is phase B by the
-  plan's own table, chiefly the starting iterate uploaded at each sweep.
+  54.3 MB up and 14.0 MB down (→ **[M-320](MEASUREMENTS.md#m-320)**), from 508
+  and 78.6 at M-240; `ComputeH()` brings nothing down. The fold's own reads
+  are a few entries, not the iterate (→ **[M-321](MEASUREMENTS.md#m-321)**).
+  What is left of MEQ's own is phase B by the plan's own table, chiefly the
+  starting iterate uploaded at each sweep.
+* **Under a Device nothing should run on one host core** → **[M-319](MEASUREMENTS.md#m-319)**,
+  **[M-321](MEASUREMENTS.md#m-321)**. MEQ's own whole-mesh host loops in a
+  device run take device routes: the post-solve axis sweep
+  (`CriticalPointFinder::sweepOnDevice()`), the affine maps, the plasma loops'
+  point tables, the material classification's points and potential, and the
+  axis-source scan. What stays on the host is per-point classification and the
+  few elements touching `R = 0`. **A device read leaves the host page
+  protected under `--device debug` until something calls `HostRead()`**, so
+  every route that reads a field or a mesh's nodes on the device hands them
+  back for the raw host readers after it, and MEQ's own node readers
+  (`GridSampler`, `PointLocator`) ask for the nodes on the host first, since
+  upstream's batched routes read them on the device too. Upstream's batched
+  `Reconstruct()` and `ConstructC()` are taken. What is left on the host is
+  inside upstream's batched routines: `R` and the face and element weights,
+  evaluated per point (`HDG-DEVICE-NO-SERIAL-HOST-MEASURED-FROM-MEQ.md`).
 * **Single precision builds and runs at parity with double** (83 of 84 in each
   build, the same deliberate red, single on MKL 2026.2 included, M-303), and its accuracy is qualified **per problem**.
 * **This machine's GPU is an RTX 2070 SUPER** — evidence about correctness,
@@ -50,9 +65,10 @@ invisible to the others. Reach for them in this order.
 
 1. **`--device cuda` reproducing `--device cpu` to every printed digit.** This
    is how M-79 and M-130 were root-caused, and every ordering decision in the
-   device plan exists to protect it: residency is built in **double**,
-   `AssemblyMode` is `Serial` under a Device, and `DeviceParity` pins an exact
-   CUDA arm.
+   device plan exists to protect it: residency is built in **double**, and
+   `DeviceParity` pins an exact CUDA arm. **It compares printed digits, not
+   bits**, so a reordered sum does not reach it; a caller bisecting a device
+   fault to the bit names `AssemblyMode = "serial"`.
 2. **`mfem::Device( "debug" )`** has device memory semantics with host
    arithmetic and `mprotect`s the host page. So **a raw host read of a
    device-valid buffer becomes a named fault with a backtrace** rather than a
@@ -737,19 +753,31 @@ else's translation unit.*
   on it, so with it off the element-local dense algebra stays on the host.
   Worth 1.54× on `ComputeH` under CUDA (M-185).
 
-**`AssemblyMode` is `Serial` under a Device** → **[M-215](MEASUREMENTS.md#m-215)**,
-**[M-209](MEASUREMENTS.md#m-209)**.
-* **Why not `Batched`**: swept bitwise, `LocalFactorMode` and
-  `TraceAssemblyMode` batched reproduce the host exactly, while
-  `AssemblyMode::Batched` differs at 3.5e-16 to 4.7e-16. Its face kernels
-  accumulate `D` through `AtomicAdd` from three or four faces per element, which
-  would destroy the parity instrument.
-* **What `Serial` gives up** is the face kernels alone, which lose on the host
-  anyway. Two consecutive CUDA runs of `machine-f-diiid` now agree exactly.
-* **Why `Serial` and not simply inheriting the default**: the host default is
-  `Threaded`, which the driver refuses under a Device above one thread (M-188).
-  *An inherited default has to be honourable in the configuration that inherits
-  it.* → **[M-136](MEASUREMENTS.md#m-136)**.
+**`AssemblyMode` is `Batched` under a Device** → **[M-319](MEASUREMENTS.md#m-319)**,
+**[M-321](MEASUREMENTS.md#m-321)**.
+* **Why**: `Serial` is one core under a Device, since MFEM switches its host
+  threading off there, and the element and interior-face loops are 71% of the
+  first assembly on `fixed-f-diiid` at 102,840 triangles.
+* **What it costs is the last bit.** Swept bitwise, `AssemblyMode::Batched`
+  differs from the host at 3.5e-16 to 4.7e-16 (M-209): its face kernels
+  accumulate `D` through `AtomicAdd` from three or four faces per element.
+  **Bit-identity is a test instrument and not a device requirement**: no run is
+  converged in the physics to 1e-15, and `DeviceParity` compares printed digits.
+  A test or a bisection that wants the exact host loops names
+  `AssemblyMode = "serial"`.
+* **What it takes with it**: upstream's batched `Reconstruct()` (both halves)
+  and, through `SetDefaultAssemblyMode(Batched)` around
+  `EnableHybridization()`, the batched constraint block `C`. Both report in
+  `--profile` as `constraint block batched`, `reconstruction batched`.
+* **What it does not yet buy**: the batched routines still evaluate `R`, a
+  `FunctionCoefficient`, and the face and element weights per point on the
+  host before their kernels. That is most of what is left of the first
+  assembly and of the reconstruction under a Device, and it is upstream's
+  next step (`HDG-DEVICE-NO-SERIAL-HOST-MEASURED-FROM-MEQ.md`).
+* **Not `Threaded`**: the host default is `Threaded`, which the driver refuses
+  under a Device above one thread (M-188). *An inherited default has to be
+  honourable in the configuration that inherits it.*
+  → **[M-136](MEASUREMENTS.md#m-136)**.
 
 **The ordered list, weighted by the leg profile** → **[M-80](MEASUREMENTS.md#m-80)**.
 

@@ -4522,7 +4522,7 @@ namespace
 		 */
 		bool axisNodeAdmitted = false;
 		mfem::Array< int > dofs;
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		auto visit = [ & ]( int e )
 		{
 			potentialFes->GetElementDofs( e, dofs );
 			mfem::FiniteElement const *element = potentialFes->GetFE( e );
@@ -4618,7 +4618,40 @@ namespace
 						result.worstOnAxisInSupport = onAxis;
 				}
 			}
+		};
+
+		/*
+		 * UNDER A DEVICE THE SCAN RUNS THERE, and the host visits only the
+		 * elements it found on the axis. The scale is the largest `| F |` over
+		 * every node, which the device takes exactly, a maximum being a
+		 * selection; what follows it -- the support test, the on-axis value,
+		 * the element's connectivity -- is about the few elements touching
+		 * R = 0, so the host keeps it. Every node of the mesh visited on the
+		 * host is one core under a Device.
+		 */
+		bool scanned = false;
+		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		{
+			mfem::Array<AffineTriangle> maps;
+			mfem::Array<int> onAxis;
+			mfem::real_t scale = 0.0;
+			if ( affineTrianglesOf( mesh, maps )
+			     && axisSourceScanOnDevice( *nonlinearSource, *potentialFes,
+			                                potentialGf, maps, scale, onAxis ) )
+			{
+				// Back on the host for visit()'s raw reads: a device read
+				// leaves the host page protected under the debug backend.
+				potentialGf.HostRead();
+				result.sourceScale = scale;
+				for ( int e = 0; e < mesh.GetNE(); ++e )
+					if ( onAxis[ e ] != 0 )
+						visit( e );
+				scanned = true;
+			}
 		}
+		if ( !scanned )
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+				visit( e );
 
 		if ( !result.reachesAxis )
 			return result;
@@ -5774,8 +5807,33 @@ namespace
 		// < qhat_h.n, mu > = 0. This must come after every AddIntegrator above:
 		// EnableHybridization() reaches into the potential mass and flux divergence
 		// forms as it runs and takes what is there at that moment.
-		darcy->EnableHybridization( traceFes.get(), new mfem::NormalTraceJumpIntegrator(),
-		                            essentialFluxTdofs );
+		/*
+		 * AND UNDER THE SOLVER'S OWN MODE WHEN THAT IS BATCHED. The constraint
+		 * block C is assembled inside EnableHybridization(), before the object
+		 * exists for SetAssemblyMode() below to reach, under the
+		 * hybridization's process-wide DEFAULT mode -- face by face on the host
+		 * unless that default is Batched, which takes upstream's
+		 * HDGNormalTraceJumpBatched(). So a batched solver sets the default for
+		 * this one call and puts the old one back: it is process-wide, and the
+		 * next solver in the process may not be batched.
+		 */
+		{
+			using HybridMode = mfem::DarcyHybridization::AssemblyMode;
+			HybridMode const previous = mfem::DarcyHybridization::GetDefaultAssemblyMode();
+			if ( assemblyModeChoice == AssemblyMode::Batched )
+				mfem::DarcyHybridization::SetDefaultAssemblyMode( HybridMode::Batched );
+			try
+			{
+				darcy->EnableHybridization( traceFes.get(), new mfem::NormalTraceJumpIntegrator(),
+				                            essentialFluxTdofs );
+			}
+			catch ( ... )
+			{
+				mfem::DarcyHybridization::SetDefaultAssemblyMode( previous );
+				throw;
+			}
+			mfem::DarcyHybridization::SetDefaultAssemblyMode( previous );
+		}
 		darcy->GetHybridization()->SetEssentialBC( dirichletMarker );
 
 		/*
@@ -8577,6 +8635,83 @@ namespace
 
 		int const elementTotal = mesh.GetNE();
 
+		/*
+		 * UNDER A DEVICE THE POINTS COME FROM THE DEVICE. The cost of the host
+		 * loop below is the geometry and the potential at every point --
+		 * Transform, Weight and CalcShape, 87% of it on fixed-f-diiid, on one
+		 * core, since a Device switches the loop's threading off -- and
+		 * DevicePlasmaLoops already holds the radius, z and weight of every
+		 * point of exactly this rule, sourceRule() at sourceQuadratureExtra,
+		 * in this order. So one kernel adds psi, and the host classifies.
+		 * The conductor split keeps the host loop: psi_c at a point is the
+		 * source integrator's table, which the kernel does not add.
+		 */
+		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) && !conductorFieldSet
+		     && plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra ) )
+		{
+			mfem::Vector psiAt;
+			mfem::Vector const *radiusAt = nullptr;
+			mfem::Vector const *zAt = nullptr;
+			mfem::Vector const *weightAt = nullptr;
+			int perElement = 0;
+			if ( plasmaLoops.pointValues( solved, 0, psiAt, radiusAt, zAt, weightAt,
+			                              perElement ) )
+			{
+				// Back on the host for the raw readers after this one: a device
+				// read leaves the host page protected under the debug backend.
+				solved.HostRead();
+				countedHostRead( psiAt, __LINE__ );
+				mfem::real_t const *const psiHost = psiAt.HostRead();
+				mfem::real_t const *const radiusHost = radiusAt->HostRead();
+				mfem::real_t const *const zHost = zAt->HostRead();
+				mfem::real_t const *const weightHost = weightAt->HostRead();
+
+				if ( points != nullptr )
+					points->assign( static_cast< std::size_t >( elementTotal )
+					                * static_cast< std::size_t >( perElement ),
+					                ClassifiedPoint() );
+
+				ElementMaterials record;
+				record.materialArea.assign( static_cast< std::size_t >( table.size() ), 0.0 );
+				for ( int e = 0; e < elementTotal; ++e )
+				{
+					std::vector< ElementMaterials::Weight > own;
+					own.reserve( static_cast< std::size_t >( perElement ) );
+					bool faulted = false;
+					for ( int i = 0; i < perElement; ++i )
+					{
+						std::size_t const at = static_cast< std::size_t >( e )
+						                       * static_cast< std::size_t >( perElement )
+						                       + static_cast< std::size_t >( i );
+						double const radius = radiusHost[ at ];
+						double const z = zHost[ at ];
+						double const weight = weightHost[ at ];
+						double const psi = psiHost[ at ];
+
+						bool fault = false;
+						int const material = materialAt( table, e, radius, z, psi, &fault );
+						faulted = faulted || fault;
+						own.push_back( ElementMaterials::Weight{ material, weight } );
+
+						if ( points != nullptr )
+						{
+							ClassifiedPoint &out = ( *points )[ at ];
+							out.element = e;
+							out.radius = radius;
+							out.z = z;
+							out.weight = weight;
+							out.psi = psi;
+							out.material = material;
+						}
+					}
+					record.addElement( table, std::move( own ), faulted,
+					                   plasmaComponentMask.isExcluded( e ),
+					                   mesh.GetAttribute( e ) );
+				}
+				return record;
+			}
+		}
+
 		// Sizes first, serially, as buildConductorCache() does: the point
 		// offsets are a prefix sum and the rule lookup is a table read.
 		std::vector< int > pointOffset( static_cast< std::size_t >( elementTotal ) + 1, 0 );
@@ -9281,6 +9416,24 @@ namespace
 		return h != nullptr && h->CanBatchPotFaceAssembly();
 	}
 
+	bool GradShafranovSolver::batchedConstraintAssemblyTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchConstraintAssembly();
+	}
+
+	bool GradShafranovSolver::batchedReconstructionTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		if ( h == nullptr || !isPostProcessed() || totalFluxGf.FESpace() == nullptr )
+			return false;
+		return h->CanBatchReconstructTotalFlux( *totalFluxGf.FESpace() )
+		       && darcy->CanBatchReconstruction( totalFluxGf, enrichedFluxGf,
+		                                         postProcessedGf, enrichedTraceGf );
+	}
+
 	bool GradShafranovSolver::fluxMassIsPrefactored() const
 	{
 		mfem::DarcyHybridization const *h =
@@ -9818,13 +9971,13 @@ namespace
 		}
 
 		out.SetSize( state.Size() );
-		zeroOnHost( out );
 
 		// The device route, for the source the probe above just accepted --
 		// and a POD form exists only for meq::NormalisedMHDSource, whose
 		// derivatives never refuse, so the host's per-point refusal has no
 		// device counterpart to miss. Left device-valid; see
-		// assembleCurrentColumn().
+		// assembleCurrentColumn(). DevicePlasmaLoops::scatter() zeroes its
+		// own output on the device, so the host zeroes only on the host route.
 		if ( iterateIsResident( state ) )
 		{
 			SourceView view{};
@@ -9840,6 +9993,7 @@ namespace
 			}
 			++iterateDeviceDeclined;
 		}
+		zeroOnHost( out );
 
 		// The loop below indexes the iterate raw, and psi_ax is an unknown of
 		// every bordered solve, so this runs per step on the default path.
@@ -10249,6 +10403,46 @@ namespace
 		 * then is the one most likely to keep it positive now.
 		 */
 		mfem::Vector foldY( n ), foldZ( n ), foldE( n ), foldSolved( n );
+		// On the device when there is one: the fold changes ONE entry of each,
+		// and a whole vector brought to the host to change it is 17.7 MB a step
+		// on fixed-f-diiid at 102,840 triangles.
+		foldY.UseDevice( true );
+		foldZ.UseDevice( true );
+		foldE.UseDevice( true );
+		foldSolved.UseDevice( true );
+
+		/*
+		 * A FEW ENTRIES OF A VECTOR, WHEREVER IT LIVES. Gathered on the device
+		 * when only the device copy is valid, so the entries come over and the
+		 * vector does not; read in place otherwise, where a host read is free.
+		 * A gather is a copy, so either way the entries are bit for bit the
+		 * same and so is any sum the caller forms from them.
+		 */
+		auto entriesAt = [ & ]( mfem::Vector const &v, mfem::Array<int> const &at,
+		                        mfem::Vector &out, int line )
+		{
+			out.SetSize( at.Size() );
+			mfem::Memory<mfem::real_t> const &memory = v.GetMemory();
+			if ( memory.DeviceIsValid() && !memory.HostIsValid() )
+			{
+				mfem::Vector gathered;
+				if ( gatherOnDevice( v, at, gathered ) )
+				{
+					// The kernel read the INDICES on the device, and the callers
+					// go on indexing them raw on the host: an Array read there
+					// is left protected on the host under the debug backend
+					// until something asks for it back.
+					at.HostRead();
+					countedHostRead( gathered, line );
+					for ( int i = 0; i < at.Size(); ++i )
+						out( i ) = gathered( i );
+					return;
+				}
+			}
+			countedHostRead( v, line );
+			for ( int i = 0; i < at.Size(); ++i )
+				out( i ) = v( at[ i ] );
+		};
 		// `kappa e_j b_p^T` over the folded element's potential dofs, in its
 		// own dof order: what AddNextGradientCorrection() is handed.
 		mfem::DenseMatrix foldCorrection;
@@ -14630,10 +14824,11 @@ namespace
 				// the plain one.
 				mfem::IsoparametricTransformation transformation;
 				mesh.GetElementTransformation( element, &transformation );
-				countedHostRead( unknown, __LINE__ );
-				mfem::Vector elfun( dofs.Size() );
+				mfem::Array<int> elementAt( dofs.Size() );
 				for ( int i = 0; i < dofs.Size(); ++i )
-					elfun( i ) = unknown( blockOffsets[ 1 ] + dofs[ i ] );
+					elementAt[ i ] = blockOffsets[ 1 ] + dofs[ i ];
+				mfem::Vector elfun;
+				entriesAt( unknown, elementAt, elfun, __LINE__ );
 				mfem::DenseMatrix reaction;
 				sourceIntegrator->AssembleElementGrad( *potentialFes->GetFE( element ),
 				                                       transformation, elfun, reaction );
@@ -14651,15 +14846,26 @@ namespace
 				// Built on the host, where the 2 x 2's dots read them too;
 				// under a Device the copies may land device-valid first.
 				foldIndex = blockOffsets[ 1 ] + dofs[ j ];
+				// The copies run where their sources are, and the one entry is
+				// changed there too; the host route is for a run with no Device.
 				foldY = residual;
-				countedHostReadWrite( foldY, __LINE__ );
-				foldY( foldIndex ) += kappa*constraint;
+				if ( !setEntryOnDevice( foldY, foldIndex, kappa*constraint, true ) )
+				{
+					countedHostReadWrite( foldY, __LINE__ );
+					foldY( foldIndex ) += kappa*constraint;
+				}
 				foldZ = column;
-				countedHostReadWrite( foldZ, __LINE__ );
-				foldZ( foldIndex ) += kappa*corner;
+				if ( !setEntryOnDevice( foldZ, foldIndex, kappa*corner, true ) )
+				{
+					countedHostReadWrite( foldZ, __LINE__ );
+					foldZ( foldIndex ) += kappa*corner;
+				}
 				foldE = 0.0;
-				countedHostReadWrite( foldE, __LINE__ );
-				foldE( foldIndex ) = kappa;
+				if ( !setEntryOnDevice( foldE, foldIndex, kappa, false ) )
+				{
+					countedHostReadWrite( foldE, __LINE__ );
+					foldE( foldIndex ) = kappa;
+				}
 				foldActive = true;
 			};
 
@@ -15624,23 +15830,26 @@ namespace
 				 * below reads `y` and `z`, so eta e' is folded into y and the
 				 * trial is the Newton step it always was.
 				 */
-				countedHostRead( y, __LINE__ );
-				countedHostRead( z, __LINE__ );
-				countedHostRead( foldSolved, __LINE__ );
+				// The three vectors at the border's dofs only, in the order the
+				// loop below sums them.
+				mfem::Vector yAt, zAt, eAt;
+				entriesAt( y, borderDofs, yAt, __LINE__ );
+				entriesAt( z, borderDofs, zAt, __LINE__ );
+				entriesAt( foldSolved, borderDofs, eAt, __LINE__ );
 				double by = 0.0, bz = 0.0, be = 0.0;
 				double qy = 0.0, qz = 0.0, qe = 0.0;
 				for ( int i = 0; i < borderDofs.Size(); ++i )
 				{
 					int const at = borderDofs[ i ];
 					double const w = border( i );
-					by += w*y( at );
-					bz += w*z( at );
-					be += w*foldSolved( at );
+					by += w*yAt( i );
+					bz += w*zAt( i );
+					be += w*eAt( i );
 					if ( at < blockOffsets[ 1 ] || at >= blockOffsets[ 2 ] )
 					{
-						qy += w*y( at );
-						qz += w*z( at );
-						qe += w*foldSolved( at );
+						qy += w*yAt( i );
+						qz += w*zAt( i );
+						qe += w*eAt( i );
 					}
 				}
 				double const a11 = corner - bz;

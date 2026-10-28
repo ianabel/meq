@@ -733,6 +733,12 @@ namespace meq
 			 * winding number, and a disagreement is then positive evidence that
 			 * something was missed -- which is a use of the degree as a
 			 * certification, the only use it has.
+			 *
+			 * **UNDER A DEVICE IT ROOTS ON THE DEVICE**, through
+			 * meq::axisCandidatesOnDevice(), the kernel the solver's axis
+			 * constraint already uses, and merges on the host with
+			 * mergeCandidates() as the host loop does. See sweepOnDevice()
+			 * for what it refuses.
 			 */
 			std::vector<CriticalPoint> sweep() const;
 
@@ -1225,6 +1231,28 @@ namespace meq
 			/// Fills nodal on the first call and returns it. A no-op returning
 			/// an empty table when no conductor field is set.
 			NodalConductors const &nodalConductors() const;
+
+			/**
+			 * sweep()'s rooting on the device, into the merged list.
+			 *
+			 * **A HOST LOOP UNDER A DEVICE RUNS ON ONE CORE**, because
+			 * meq::hostLoopsAreSafe() switches MEQ's OpenMP off whenever an
+			 * `mfem::Device` is configured. The driver's post-solve check
+			 * swept 102,840 elements that way in 1.55 s of an A100 run, while
+			 * the same kernel the solve uses roots them in milliseconds.
+			 *
+			 * @return false, having changed nothing, with no Device; with a
+			 *         conductor field or an adopted `q_c` table, whose shift
+			 *         the kernel does not add; with a flux field not ordered
+			 *         by nodes; or wherever meq::DeviceTriangleBasis or
+			 *         meq::affineTrianglesOf() refuses the space or the mesh.
+			 *         The host loop is then sweep()'s answer, unchanged.
+			 *
+			 * The candidates agree with the host loop's to 2.2e-16, not to the
+			 * bit: the device basis is not bit-identical to `CalcShape`
+			 * (`tests/unit/AxisSearchTests.cpp`).
+			 */
+			bool sweepOnDevice( std::vector<CriticalPoint> &out ) const;
 
 			mfem::GridFunction const &fluxField;
 			mfem::GridFunction const &potentialField;

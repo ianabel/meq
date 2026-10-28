@@ -259,6 +259,132 @@ namespace meq
 		return true;
 	}
 
+	bool plasmaLoopGeometryKernel( mfem::Vector const &coordinates,
+	                               mfem::Vector const &determinants,
+	                               mfem::Vector const &quadWeights,
+	                               int elements, int quadPoints, int dofs,
+	                               mfem::Vector &radius, mfem::Vector &z,
+	                               mfem::Vector &weight,
+	                               mfem::Array<int> &elementDofs )
+	{
+		// X is ( nq x sdim x ne ) and detJ ( nq x ne ), as
+		// DeviceQuadratureDevice.cpp reads them from MFEM's headers.
+		auto const *d_x = coordinates.Read();
+		auto const *d_detJ = determinants.Read();
+		auto const *d_w = quadWeights.Read();
+		auto *d_radius = radius.Write();
+		auto *d_z = z.Write();
+		auto *d_weight = weight.Write();
+		auto *d_dofs = elementDofs.Write();
+		int const nq = quadPoints;
+		mfem::forall( elements*nq, [ = ] MFEM_HOST_DEVICE ( int k )
+		{
+			int const e = k/nq;
+			int const q = k - e*nq;
+			d_radius[ k ] = d_x[ q + nq*( 0 + 2*e ) ];
+			d_z[ k ] = d_x[ q + nq*( 1 + 2*e ) ];
+			d_weight[ k ] = d_w[ q ]*d_detJ[ q + nq*e ];
+		} );
+		mfem::forall( elements*dofs, [ = ] MFEM_HOST_DEVICE ( int k )
+		{
+			d_dofs[ k ] = k;
+		} );
+		return true;
+	}
+
+	bool setEntryKernel( mfem::Vector &v, int index, mfem::real_t value,
+	                     bool add )
+	{
+		auto *d_v = v.ReadWrite();
+		mfem::forall( 1, [ = ] MFEM_HOST_DEVICE ( int )
+		{
+			d_v[ index ] = add ? d_v[ index ] + value : value;
+		} );
+		return true;
+	}
+
+	bool pointPotentialKernel( mfem::Vector const &shape,
+	                           mfem::Array<int> const &elementDofs,
+	                           mfem::Vector const &potential, int potentialStart,
+	                           int elements, int quadPoints, int dofs,
+	                           mfem::Vector &psi )
+	{
+		auto const *d_shape = shape.Read();
+		auto const *d_dofs = elementDofs.Read();
+		auto const *d_potential = potential.Read();
+		auto *d_psi = psi.Write();
+		int const nq = quadPoints;
+		int const nd = dofs;
+		int const start = potentialStart;
+		mfem::forall( elements*nq, [ = ] MFEM_HOST_DEVICE ( int k )
+		{
+			int const e = k/nq;
+			int const q = k - e*nq;
+			mfem::real_t sum = mfem::real_t( 0 );
+			for ( int j = 0; j < nd; ++j )
+				sum += d_shape[ q*nd + j ]*d_potential[ start + d_dofs[ e*nd + j ] ];
+			d_psi[ k ] = sum;
+		} );
+		return true;
+	}
+
+	bool axisSourceScanKernel( SourceView const &view,
+	                           mfem::Array<KnotView> const &knots,
+	                           mfem::Array<CoilView> const &coils, int coilCount,
+	                           mfem::real_t permeability,
+	                           mfem::Array<AffineTriangle> const &maps,
+	                           mfem::Vector const &nodeXi,
+	                           mfem::Vector const &nodeEta,
+	                           mfem::Vector const &potential,
+	                           int elements, int nodes,
+	                           mfem::real_t &scale, mfem::Array<int> &onAxis )
+	{
+		auto const *d_knots = knots.Read();
+		auto const *d_coils = coils.Read();
+		auto const *d_maps = maps.Read();
+		auto const *d_xi = nodeXi.Read();
+		auto const *d_eta = nodeEta.Read();
+		auto const *d_psi = potential.Read();
+		auto *d_axis = onAxis.Write();
+		SourceView const source = view;
+		int const count = coilCount;
+		mfem::real_t const mu = permeability;
+		int const nn = nodes;
+
+		mfem::forall( elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		{
+			AffineTriangle const map = d_maps[ e ];
+			int any = 0;
+			for ( int i = 0; i < nn; ++i )
+			{
+				mfem::real_t radius, z;
+				affineTransform( map, d_xi[ i ], d_eta[ i ], radius, z );
+				if ( radius == mfem::real_t( 0 ) )
+					any = 1;
+			}
+			d_axis[ e ] = any;
+		} );
+
+		mfem::real_t peak = mfem::real_t( 0 );
+		mfem::Array<mfem::real_t> work;
+		mfem::reduce( elements*nn, peak,
+		              [ = ] MFEM_HOST_DEVICE ( int k, mfem::real_t &r )
+		              {
+		                      int const e = k/nn;
+		                      int const i = k - e*nn;
+		                      mfem::real_t radius, z;
+		                      affineTransform( d_maps[ e ], d_xi[ i ], d_eta[ i ],
+		                                       radius, z );
+		                      mfem::real_t const value =
+		                              sourceF( source, d_knots, radius, z, d_psi[ k ] )
+		                              + coilF( d_coils, count, mu, radius, z );
+		                      r = fmax( r, fabs( value ) );
+		              },
+		              mfem::MaxReducer<mfem::real_t>{}, true, work );
+		scale = peak;
+		return true;
+	}
+
 #else
 
 	bool plasmaElementKernel( PlasmaLoopView const &, mfem::real_t *,
@@ -292,6 +418,36 @@ namespace meq
 
 	bool copyEntriesKernel( mfem::Vector const &, mfem::Array<int> const &,
 	                        mfem::Vector & )
+	{
+		return false;
+	}
+
+	bool plasmaLoopGeometryKernel( mfem::Vector const &, mfem::Vector const &,
+	                               mfem::Vector const &, int, int, int,
+	                               mfem::Vector &, mfem::Vector &,
+	                               mfem::Vector &, mfem::Array<int> & )
+	{
+		return false;
+	}
+
+	bool setEntryKernel( mfem::Vector &, int, mfem::real_t, bool )
+	{
+		return false;
+	}
+
+	bool pointPotentialKernel( mfem::Vector const &, mfem::Array<int> const &,
+	                           mfem::Vector const &, int, int, int, int,
+	                           mfem::Vector & )
+	{
+		return false;
+	}
+
+	bool axisSourceScanKernel( SourceView const &, mfem::Array<KnotView> const &,
+	                           mfem::Array<CoilView> const &, int, mfem::real_t,
+	                           mfem::Array<AffineTriangle> const &,
+	                           mfem::Vector const &, mfem::Vector const &,
+	                           mfem::Vector const &, int, int, mfem::real_t &,
+	                           mfem::Array<int> & )
 	{
 		return false;
 	}

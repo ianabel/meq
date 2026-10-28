@@ -54,6 +54,13 @@ namespace meq
 			mfem::GridFunction const *nodes = mesh.GetNodes();
 			if ( nodes == nullptr )
 				return true;
+			// ON THE HOST, before this and every element transformation after
+			// it reads them raw. MFEM's geometric factors read the nodes on the
+			// device -- the batched reconstruction and assembly do, as MEQ's own
+			// device routes do -- and under the debug backend that leaves the
+			// host page protected until something asks for it back. Free where
+			// both copies are valid, as under CUDA.
+			nodes->HostRead();
 
 			mfem::FiniteElementSpace const *space = nodes->FESpace();
 			if ( space == nullptr || space->IsVariableOrder()

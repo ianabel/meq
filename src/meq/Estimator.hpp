@@ -467,9 +467,16 @@ namespace meq
 			///                      0 tests the vertices, which is exact only for
 			///                      a convex Omega. The default of 1 is the cheap
 			///                      insurance ExtensionConvergence.cpp also takes.
+			/// @param levelSetThreadSafeIn the caller's promise that
+			///                      @a levelSetIn is reentrant, which lets
+			///                      mfem::MarkLevelSetSubdomain thread its
+			///                      lattice loop. MFEM does so only with no
+			///                      Device configured. Off by default: only
+			///                      the caller can know.
 			AdaptiveDomain( mfem::Mesh const &backgroundIn,
 			                mfem::PositionFunction levelSetIn,
-			                int extraRefineIn = 1 );
+			                int extraRefineIn = 1,
+			                bool levelSetThreadSafeIn = false );
 
 			AdaptiveDomain( AdaptiveDomain const & ) = delete;
 			AdaptiveDomain &operator=( AdaptiveDomain const & ) = delete;
@@ -526,6 +533,7 @@ namespace meq
 			mfem::Mesh backgroundMesh;
 			mfem::PositionFunction levelSet;
 			int extraRefine;
+			bool levelSetThreadSafe;
 
 			/// Over the background elements: 1 for T_h, 1 for T_c^h.
 			mfem::Array<int> insideMarker;

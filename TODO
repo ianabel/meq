@@ -1379,3 +1379,30 @@ Raised 2026-10-27, by NewtonConvergencePaths_cuda's first single run (M-318).
 
   It is red in the single suite as NewtonConvergencePaths_cuda, by design: a
   defect gets a failing test.
+
+
+================================================================================
+AssemblyMode "batched" changes the mirror's discrete system at 4a87f9280f
+Raised 2026-10-28.
+================================================================================
+
+RotatingMirrorDevice is red against meq-integration at 4a87f9280f. It passed
+at 9e5ec65b50 with the batched device default already on.
+
+The mirror solved on the HOST, batched against serial, differs by 9.06e-10 of
+max |psi_h|; with constant tau = 3, by 5.42e-10. Within one route the card and
+the host agree to 3.5e-13 and 5.1e-13. Two batched runs agree exactly, and
+assembling C per face changes nothing. fixed-f-diiid level 1 agrees to 1.7e-15
+between the routes. So the batched route assembles a different system on the
+mirror alone. The mirror's mesh reaches R = 0, it has an exterior coupling, its
+conductors are filaments out of the mesh, and its support is a box; none of
+these is separated yet.
+
+Upstream's: HDG-BATCHED-ASSEMBLY-MIRROR-REGRESSION-FROM-MEQ.md in
+../mfem-hdg-dev/doc, with the inputs under runs/noserial/mirror/ (m-serial.toml,
+m-batched.toml, mc-*.toml for constant tau). The likeliest commit is
+4a11f09ac4, request 3's packing, but that is an inference.
+
+The test stays red until a batched mirror agrees with a serial one to round-off.
+"AssemblyMode cannot change the answer where both converge" (CLAUDE.md) does
+not hold on this case until then.
