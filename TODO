@@ -1382,29 +1382,36 @@ Raised 2026-10-27, by NewtonConvergencePaths_cuda's first single run (M-318).
 
 
 ================================================================================
-The mirror's free-boundary solve turns 1.8e-15 of point location into 9e-10
+The extension differences a bisection staircase: the mirror's step dependence
 Raised 2026-10-28.
 ================================================================================
 
-  WHAT IS ESTABLISHED. Giving the rotating mirror's mesh degree-1 nodes partway
-  through a run (Mesh::EnsureNodes(), which Mesh::GetGeometricFactors() calls on
-  a nodeless mesh) moves psi_h by 9.06e-10 of its largest value. Every element
-  Jacobian, weight and mapped point, and every face normal and weight, is
-  bit-identical with and without the nodes; Mesh::FindPoints()'s reference
-  coordinates move by up to 1.8e-15. fixed-f-diiid, which has no extension,
-  moves by 1.7e-15. Upstream's bisection, in their reply to
-  HDG-BATCHED-ASSEMBLY-MIRROR-REGRESSION-FROM-MEQ.md.
+  WHAT IS ESTABLISHED. On the rotating mirror, host, serial, with probe hooks
+  for the solver mesh's nodes, MEQ's extensionFdStep() and VertexConePath's
+  tol (runs/probe-amplifier, branch probe-amplifier, not for merge).
+  psi_h as a fraction of its largest value:
 
-  Nothing in MEQ or MFEM now gives the solver's mesh nodes: upstream's batched
-  routes read HDGElementGeometry, and MEQ's device routes read
-  meq::CoordinateField (M-322). So the amplifier no longer shows, and
-  RotatingMirrorDevice is green. It is still there: a 1e-15 perturbation of a
-  located point should not cost six decades.
+  * At the shipped tol = 1e-13, MEQ's step x1/4 .. x4 moves psi_h by 1e-6 to
+    1e-5. FirstCrossing bisects to a bracket of tol * length, about 2.4e-13,
+    so the endpoint is a staircase, and a central difference at a physical
+    step near 1e-7 reads it as 1e-6 in da/dxi. With tol = 0 (bisect until the
+    midpoint stops moving) the same sweep reads 1e-8 to 6e-8, and tol 1e-13
+    against 0 moves psi_h by 1.3e-6. The wall time does not move measurably.
+  * Upstream's candidate for the 9e-10 node effect holds. With tol = 0, nodes
+    on against off reads 5.4e-9, 9.5e-10, 5.6e-10 and 3.4e-10 at steps
+    x1/4, 1, 2 and 4 -- 1/step -- so it is round-off in the located point
+    over the step, the floor of any finite difference. It no longer shows in
+    a run, since nothing gives the solver's mesh nodes (M-322).
 
-  WHAT IS NOT. Which step amplifies. Upstream's candidate fits the size and is
-  untested: the extension's finite-difference step, cbrt(eps) ~ 6e-6, acting
-  on point-inversion round-off, so 1e-15/6e-6 ~ 2e-10 per differenced entry.
-  To test it: on runs/weights/mirror's serial input, call EnsureNodes() on the
-  solver's mesh before the solve, then difference against an unchanged run with
-  the extension's step doubled and halved. A difference that scales with
-  1/step is the extension.
+  WHAT IS NOT. Whether tol = 0 is safe on every shape: CrossingResolution()
+  then accepts an origin outside Gamma only within eps (|x| + length), about
+  1e-15, where tol = 1e-13 gave 2.4e-13. Asked upstream, with the two fixes
+  that are theirs -- bisect to round-off whatever tol is, and differentiate
+  the endpoint exactly (s' = -grad phi . ( x' + s t' )/( grad phi . t )),
+  which removes fd_step altogether: HDG-EXTENSION-ENDPOINT-DERIVATIVE-FROM-MEQ.md.
+
+  MEQ'S HALF, once upstream answers: pass the bisection tolerance they name at
+  both VertexConePath constructions in apps/meq.cpp, and take
+  mfem::ExtensionFDStep() in meq::extensionFdStep() -- its comment says 1e-6
+  is "MFEM's own default, kept exactly", and MFEM's default is now cbrt(eps).
+  Both move answers at 1e-6, so the suite's measured bounds are re-read.
