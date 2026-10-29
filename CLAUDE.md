@@ -105,10 +105,13 @@ element-local groups run on the device, and **under a Device nothing should run
 on one host core** — a host loop under a Device is a loop that should be a
 kernel. On an A100 the device legs beat 64 EPYC cores 2.4× while the run lost
 2.4× to host work held to one core, chiefly upstream's `Reconstruct()`
-(→ **[M-319](MEASUREMENTS.md#m-319)**). Meshing is the one exception: it is host
-work on every arm, so the Device is configured after setup, and setup threads
+(→ **[M-319](MEASUREMENTS.md#m-319)**). The exceptions are host work on every
+arm. Meshing is one: the Device is configured after setup, and setup threads
 its two hot loops, upstream's `MarkLevelSetSubdomain()` and `VertexConePath`, on
-MEQ's promise that the level set is reentrant (→ **[M-321](MEASUREMENTS.md#m-321)**). **Bit-identity with the host is a test instrument, not a device
+MEQ's promise that the level set is reentrant (→ **[M-321](MEASUREMENTS.md#m-321)**).
+The warm start is the other: it threads under a Device where its loops cannot
+reach MFEM's memory manager (`meq::setupLoopMayThread()`,
+→ **[M-323](MEASUREMENTS.md#m-323)**). **Bit-identity with the host is a test instrument, not a device
 requirement**: parity is checked on printed digits. The driver's device defaults
 are deliberate — cuDSS as the trace solver, `AssemblyMode = "batched"` (a test
 that wants the bit-exact host loops names `"serial"`), threaded assembly refused

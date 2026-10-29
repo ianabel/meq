@@ -21646,3 +21646,56 @@ Single is 85 / 87, adding `DriverAcceptance`'s two named cases.
 * `runs/weights/mf/gdb.log`;
 * `runs/noserial/ff3/` (`run-wt.log`, `perf-wt.data`);
 * `builds/wt.suite.log`, `builds/wt-single.suite.log`, `builds/*.five.log`.
+
+### M-323
+
+**CUDSS'S `SetOperator` REUSES ITS ANALYSIS, SO THERE IS NOTHING TO FIX. THE
+ONE-CORE STEP IN `mf`'S `makeSolver` WAS THE WARM START, AND IT NOW THREADS
+UNDER A DEVICE: 0.82 TO 0.97 S ON ONE CORE BECOMES 0.25 S ON 7.6.**
+
+**cuDSS.** MEQ's trace solver sets `SetReorderingReuse( true )`, so after the
+first call `SetOperator()` only uploads the values and factorises. On `ff3`,
+`--device cuda`, `perf record`:
+
+| `SetOperator` call | wall | host samples |
+|---|---|---|
+| first | 0.80 s | 134 in cuDSS, 180 in the driver: the analysis |
+| each of the next three | about 0.135 s | `cudaStreamSynchronize`, waiting on the card |
+
+On the A100 (M-319) the trace factorisation is 0.50 s against 1.42 s on 64
+EPYC cores, 2.2% of the run.
+
+**The warm start.** M-319 read `makeSolver` on `mf` as 0.80 s of a 2.95 s
+A100 run, at 1.00 cores. Locally it is 1.594 s of 4.399 s, and 1398 of its
+1412 samples are `meq::FieldTransfer::transfer()` →
+`meq::PointLocator::locate()`, locating 58,176 points in the 1,024-element
+quadrilateral guess mesh. A quadrilateral mesh takes the host search, whose
+loop, like the transfer's two element loops, was serial under any Device.
+
+`meq::setupLoopMayThread()` (`Threading.hpp`) now lets the three loops thread
+under a Device when they cannot reach MFEM's memory manager: the host memory
+type is plain HOST, and none of the objects they read through an MFEM accessor
+is registered. The transfer writes its target through a raw pointer taken
+before the loop.
+
+`mf`, `--device cuda`, `OMP_NUM_THREADS=8`, two runs each. The machine's load
+was about 7 from another session, so **indicative, not timings**:
+
+| | `cb96cf3` | threaded |
+|---|---|---|
+| `makeSolver` | 0.971 s, 0.823 s at 1.00 cores | 0.246 s, 0.258 s at 7.6 cores |
+| wall | 2.714 s, 2.154 s | 1.533 s, 1.646 s |
+| `psi_ax` | 3.759850e-01 | the same |
+
+`psi_h` differs from `cb96cf3`'s by 2.1e-15 of its largest value. Two runs of
+`cb96cf3` differ by 2.4e-15, since a device run's batched scatter is not
+ordered.
+
+`WarmStartTests` asserts the predicate and asserts a 4-thread transfer equal to
+a 1-thread one to the bit. Under `debug`, whose HOST_DEBUG memory registers
+every allocation, the predicate refuses and both run on one thread. Under
+`cuda` (`WarmStartTests_cuda`) it threads.
+
+**Reproduce.** `runs/weights/mf/` (`prof.toml --mesh-ready --device cuda
+--profile`, `run-old.log`, `run-new.log`); `runs/noserial/ff3/`
+(`perf-wt.data`).

@@ -60,7 +60,15 @@ against is `CLAUDE_DECLINED.md`.
   (`DeviceBasis.hpp`), the degree-1 coordinate field of the mesh's vertices,
   and upstream's from `HDGElementGeometry`. What is left on the host is
   `LUSolve`'s per-call allocations and `EnsureElementQuadratureTables`
-  (upstream's), and cuDSS's `SetOperator` and the seed projection (MEQ's).
+  (upstream's), and the seed projection (MEQ's). cuDSS's `SetOperator`
+  reuses its analysis, so after the first call it waits on the card
+  (→ **[M-323](MEASUREMENTS.md#m-323)**).
+* **The warm start threads under a Device** where its loops cannot reach
+  MFEM's memory manager, which is not reentrant: plain HOST memory and no
+  registered object read through an MFEM accessor
+  (`meq::setupLoopMayThread()`). `debug`'s HOST_DEBUG registers every
+  allocation, so under `debug` it stays on one thread; `WarmStartTests_cuda`
+  is the arm that threads (→ **[M-323](MEASUREMENTS.md#m-323)**).
 * **Single precision builds and runs at parity with double** (83 of 84 in each
   build, the same deliberate red, single on MKL 2026.2 included, M-303), and its accuracy is qualified **per problem**.
 * **This machine's GPU is an RTX 2070 SUPER** — evidence about correctness,

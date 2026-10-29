@@ -3,6 +3,8 @@
 
 #include "mfem.hpp"
 
+#include <initializer_list>
+
 /**
  * @file
  *
@@ -100,6 +102,51 @@ namespace meq
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
 		return !mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
 #else
+		return false;
+#endif
+	}
+
+	/**
+	 * @brief May a SETUP loop take more than one thread, under a Device too?
+	 *
+	 * hostLoopsAreSafe() says no to every loop under a Device, and for a loop
+	 * that belongs on the card that is the right answer: it should be a kernel.
+	 * A setup loop is a different case. The warm start's search of a curved
+	 * guess mesh is host work on every arm, as meshing is, and holding it to
+	 * one core cost an A100 run 27% of its wall (M-319).
+	 *
+	 * **IT THREADS UNDER A Device ONLY WHERE THE LOOP CANNOT REACH MFEM'S
+	 * MEMORY BOOKKEEPING AT ALL.** That is narrower than the race upstream
+	 * documents above mfem::MemoryManager, where `cuda` merely touches the maps
+	 * less often. Here they are not touched:
+	 *
+	 *   * the host memory type is plain HOST, so every Vector, Array and
+	 *     DenseMatrix a thread allocates is new[] and delete[] and never enters
+	 *     the maps. `debug`'s HOST_DEBUG registers every one, and is refused;
+	 *   * none of @a shared -- the host pointers of every object the loop
+	 *     reads or writes through an MFEM accessor -- is registered, so
+	 *     Memory::Read() returns the host pointer before it reaches the maps or
+	 *     writes its own flags. A registered one keeps the loop serial.
+	 *
+	 * Beyond those two it relies on nothing inside the loop asking for DEVICE
+	 * memory, which would register; the loops it gates are element
+	 * transformations, shape functions and dense algebra. A null pointer in
+	 * @a shared is an object that does not exist, and is skipped.
+	 */
+	inline bool setupLoopMayThread( std::initializer_list<void const *> shared )
+	{
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return true;
+		if ( mfem::MemoryManager::GetHostMemoryType() != mfem::MemoryType::HOST )
+			return false;
+		for ( void const *pointer : shared )
+			if ( pointer != nullptr
+			     && ( mfem::mm.IsKnown( pointer ) || mfem::mm.IsAlias( pointer ) ) )
+				return false;
+		return true;
+#else
+		static_cast<void>( shared );
 		return false;
 #endif
 	}

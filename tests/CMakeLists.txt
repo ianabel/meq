@@ -50,6 +50,7 @@ set(MEQ_UNIT_TESTS
 	SourceTests
 	SourceFactoryTests
 	SourceViewTests
+	WarmStartTests
 	ZernikeTests)
 
 foreach(_test IN LISTS MEQ_UNIT_TESTS)
@@ -340,6 +341,16 @@ if(TARGET PlasmaConnectivity)
 			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device}")
 	endforeach()
 	unset(_fold_devices)
+endif()
+
+# THE WARM START THREADED UNDER A DEVICE: WarmStartTests' default arm is
+# `debug`, whose registering host memory keeps the warm start on one thread;
+# only `cuda`'s plain host memory lets meq::setupLoopMayThread() thread it, so
+# the cuda arm is the one that runs the threaded loops under a Device.
+if(TARGET WarmStartTests AND MFEM_USE_CUDA)
+	add_test(NAME WarmStartTests_cuda COMMAND WarmStartTests)
+	set_tests_properties(WarmStartTests_cuda PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
 endif()
 
 # THE PICARD PATHS UNDER A DEVICE: NewtonConvergence's four-path case, which

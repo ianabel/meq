@@ -1,6 +1,7 @@
 #include "PointLocator.hpp"
 #include "Crossings.hpp"
 #include "Sampler.hpp"
+#include "Threading.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -616,11 +617,15 @@ namespace meq
 					code[ p ] = 2u;
 			};
 
-			// Serial under an mfem::Device, which reaches this loop only for a
-			// curved or degenerate mesh: the element transformations read mesh
-			// nodes through MFEM's memory manager, which nothing documents as
-			// reentrant, and a device run is a correctness instrument anyway.
-			bool const hostThreads = !mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
+			// Threaded under an mfem::Device too, which reaches this loop only
+			// for a curved or degenerate mesh, whenever the mesh's nodes are
+			// unregistered: the element transformations read them through
+			// MFEM's memory manager, which is not reentrant
+			// (meq::setupLoopMayThread()). A warm start is setup, and on the
+			// card it was a quarter of a run at one core (M-319).
+			mfem::GridFunction const *nodes = meshRef.GetNodes();
+			bool const hostThreads = meq::setupLoopMayThread(
+				{ nodes != nullptr ? nodes->GetData() : nullptr } );
 			int notFound = 0;
 			std::exception_ptr failure;
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )

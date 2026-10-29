@@ -12,9 +12,11 @@ because three host steps ran on one core under the Device: `Reconstruct()`
 the post-solve axis check (1.55 against 0.34). Item 7's "optional, under 2% of
 a device run" is falsified by that table. **The answer is not item 7**: a host
 loop under a Device is a loop that should be a kernel, so the work goes to the
-card and `mem_manager.cpp`'s thread safety is not requested. The one
-exception is meshing, which is host work on every arm: the driver configures
-the Device after setup, so setup can thread everywhere.
+card and `mem_manager.cpp`'s thread safety is not requested. The exceptions
+are host work on every arm. Meshing is one: the driver configures the Device
+after setup, so setup can thread everywhere. The warm start is the other: its
+loops thread under a Device where they cannot reach the memory manager
+(`meq::setupLoopMayThread()`, [M-323](MEASUREMENTS.md#m-323)).
 
 **Bit-identity with the host is a test instrument, not a device
 requirement.** Parity is checked on printed digits, which a reordered sum does
@@ -29,13 +31,15 @@ wants the exact host loops names `"serial"`.
   * the fold's whole-vector reads, which moved 337 MB down on `ff3`, now
     gathers of a few entries;
   * the Device configured after setup.
+* **MEQ's, DONE** → [M-323](MEASUREMENTS.md#m-323):
+  * the warm start threaded under a Device, `makeSolver` on `mf` from 0.82 s
+    on one core to 0.25 s on 7.6;
+  * cuDSS's `SetOperator` read: it reuses its analysis, so only the first
+    call analyses and the rest wait on the card. Nothing to change.
 * **MEQ's, OPEN**:
   * the seed projection of the starting guess, about 0.1 s on `ff3`. The
     guess is a host `std::function`, so it needs a device form for each guess
-    type;
-  * cuDSS's `SetOperator`, 520 of 2640 host samples on `ff3`
-    ([M-322](MEASUREMENTS.md#m-322)): whether its analysis is redone on each
-    Newton step is not yet read.
+    type.
 * **Upstream's, BUILT AND TAKEN** at `4a87f9280f` → [M-321](MEASUREMENTS.md#m-321):
   * a batched `Reconstruct()`, both halves;
   * a batched `ConstructC()`;

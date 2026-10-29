@@ -1,5 +1,6 @@
 #include "WarmStart.hpp"
 #include "Crossings.hpp"
+#include "Threading.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -137,12 +138,18 @@ namespace meq
 		 * every quadrature point of the new mesh, inside makeSolver() -- which
 		 * --profile reads at one core and 0.9 to 1.5 s on TCV shaped.
 		 *
-		 * AND SERIAL UNDER AN mfem::Device. Vector writes and mesh-node reads
-		 * there pass through MFEM's memory manager, which nothing documents as
-		 * reentrant, and a device run is a correctness instrument rather than
-		 * a timing (CLAUDE.md), so it is not worth finding out.
+		 * AND UNDER AN mfem::Device TOO, WHERE THAT IS PROVABLY SAFE. A warm
+		 * start is setup, host work on every arm, so it threads like meshing
+		 * does. MFEM's memory manager is not reentrant, so
+		 * meq::setupLoopMayThread() lets the loops thread only where they
+		 * cannot reach it: plain HOST memory and no registered object read
+		 * through an MFEM accessor. The only such object here is the target
+		 * mesh's nodes, when it has any; `target` itself is written through a
+		 * raw pointer taken before the loop.
 		 */
-		bool const hostThreads = !mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
+		mfem::GridFunction const *targetNodes = targetMesh.GetNodes();
+		bool const hostThreads = meq::setupLoopMayThread(
+			{ targetNodes != nullptr ? targetNodes->GetData() : nullptr } );
 
 		std::vector<mfem::IntegrationRule const *> rules(
 			static_cast<std::size_t>( elements ) );
@@ -259,6 +266,11 @@ namespace meq
 		double farthest = 0.0;
 		std::exception_ptr failure;
 
+		// Once, before the loop. Vector::SetSubVector() would call ReadWrite()
+		// on `target` per element, which on a registered vector goes through
+		// MFEM's memory manager from every thread.
+		mfem::real_t *const targetData = target.HostReadWrite();
+
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
 		#pragma omp parallel if ( disjoint && hostThreads ) reduction( + : notFound ) reduction( max : farthest )
 #endif
@@ -332,7 +344,16 @@ namespace meq
 					inverse.Mult( rhs, coefficients );
 
 					targetSpace->GetElementDofs( e, elementDofs, dofTransformation );
-					target.SetSubVector( elementDofs, coefficients );
+					// Vector::SetSubVector()'s own arithmetic, including its
+					// sign convention for an orientation-flipped dof.
+					for ( int i = 0; i < elementDofs.Size(); ++i )
+					{
+						int const dof = elementDofs[ i ];
+						if ( dof >= 0 )
+							targetData[ dof ] = coefficients( i );
+						else
+							targetData[ -1 - dof ] = -coefficients( i );
+					}
 				}
 				catch ( ... )
 				{
