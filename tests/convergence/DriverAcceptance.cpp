@@ -19,6 +19,7 @@
 #include "meq/SafetyFactor.hpp"
 #include "meq/Source.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -1190,10 +1191,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 
 	meq::BoundaryShape const shape =
 		meq::BoundaryShape::miller( 1.5, 0.0, 0.5, 1.6, 0.35, 0.0 );
-	mfem::PositionFunction const levelSet = [ &shape ]( mfem::Vector const &x )
-	{
-		return shape.levelSet( x( 0 ), x( 1 ) );
-	};
+	meq::LevelSet const gamma = meq::shapeLevelSet( shape );
+	mfem::PositionFunction const &levelSet = gamma.value;
 
 	mfem::Array<int> marker;
 	int const insideCount =
@@ -1217,6 +1216,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
 	int const gammaH = sub.bdr_attributes.Max();
 	double const h = std::max( ( 2.3 - 0.7 )/( 8*4.0 ), ( 1.9 + 1.9 )/( 10*4.0 ) );
 	mfem::VertexConePath path( sub, gammaH, levelSet, 6.0*h );
+	path.SetLevelSetGradient( gamma.gradient );
 
 	mfem::Array<int> gammaHMarker( gammaH );
 	gammaHMarker = 0;
@@ -1488,10 +1488,8 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 
 	meq::BoundaryShape const shape =
 		meq::BoundaryShape::miller( 1.5, 0.0, 0.5, 1.6, 0.35, 0.0 );
-	mfem::PositionFunction const levelSet = [ &shape ]( mfem::Vector const &x )
-	{
-		return shape.levelSet( x( 0 ), x( 1 ) );
-	};
+	meq::LevelSet const gamma = meq::shapeLevelSet( shape );
+	mfem::PositionFunction const &levelSet = gamma.value;
 
 	meq::SolovievSource const source( -0.52 );
 	mfem::ConstantCoefficient zero( 0.0 );
@@ -1520,6 +1518,7 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 		path = std::make_unique<mfem::VertexConePath>(
 			domain.computational(), domain.gammaHAttribute(), levelSet,
 			12.0*domain.largestElement() );
+		path->SetLevelSetGradient( gamma.gradient );
 
 		solver = std::make_unique<meq::GradShafranovSolver>(
 			domain.computational(), order, 1.0 );
@@ -2927,10 +2926,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	// THE SEMICIRCLE, WHICH IS NOT A meq::BoundaryShape AND CANNOT BE ONE: that
 	// class refuses a surface reaching R <= 0, and this one's flat side IS the
 	// axis. The exterior expansion is valid there and nowhere else.
-	mfem::PositionFunction const levelSet = []( mfem::Vector const &x )
-	{
-		return std::hypot( x( 0 ), x( 1 ) ) - 1.5;
-	};
+	meq::LevelSet const gamma = meq::circleLevelSet( 0.0, 0.0, 1.5 );
+	mfem::PositionFunction const &levelSet = gamma.value;
 
 	mfem::Array<int> marker;
 	BOOST_TEST_REQUIRE( mfem::MarkLevelSetSubdomain(
@@ -2959,6 +2956,7 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 
 	int const gammaH = sub.bdr_attributes.Max();
 	mfem::VertexConePath path( sub, gammaH, levelSet, 6.0*h );
+	path.SetLevelSetGradient( gamma.gradient );
 	mfem::Array<int> gammaHMarker( gammaH );
 	gammaHMarker = 0;
 	gammaHMarker[ gammaH - 1 ] = 1;

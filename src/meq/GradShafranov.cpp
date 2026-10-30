@@ -97,19 +97,17 @@ namespace
 	 */
 	/**
 	 * The central-difference step mfem::ExtensionBoundaryQuadrature() takes for
-	 * `da/dxi`, scaled to real_t rather than left at MFEM's default.
+	 * `da/dxi` when its path has no level-set gradient, scaled to real_t.
 	 *
-	 * **WITHOUT THIS THE EXTENSION QUADRATURE YIELDS NO POINTS AT ALL IN SINGLE
-	 * PRECISION, AND SAYS NOTHING.** That routine rejects a quadrature point
-	 * whose measure falls below
+	 * **A DOUBLE-TUNED STEP MAKES THE EXTENSION QUADRATURE YIELD NO POINTS AT
+	 * ALL IN SINGLE PRECISION, AND SAY NOTHING.** That routine rejects a
+	 * quadrature point whose measure falls below
 	 *
 	 *     floor = 100 * ( eps / fd_step ) * ||xbar||
 	 *
-	 * which correctly follows `eps` -- but `fd_step` defaults to a bare `1e-6`,
-	 * a constant right for double and nine orders wrong for single. `eps/fd_step`
-	 * is 2.2e-10 in double and **0.119 in single**, so the floor becomes
-	 * `11.9 ||xbar||`, larger than any measure a real face can have, and EVERY
-	 * point is skipped.
+	 * which follows `eps` -- so a bare `1e-6` step, right for double, gives
+	 * `eps/fd_step` = **0.119 in single**, a floor of `11.9 ||xbar||`, larger
+	 * than any measure a real face can have, and EVERY point is skipped.
 	 *
 	 * **MEASURED: 21 points per face in double and 0 in single.** The callback
 	 * then never fires, meq::GradShafranovSolver::exteriorTransmissionRows()
@@ -120,22 +118,19 @@ namespace
 	 * a failure: `reached` stays true, because nothing was ever reached.
 	 * → M-182.
 	 *
-	 * A central difference is optimal at `eps^(1/3)`: 6.1e-6 in double, where
-	 * MFEM's 1e-6 is the right order and is therefore returned EXACTLY so the
-	 * double path is bit-unchanged, and 4.9e-3 in single.
+	 * So meq::extensionFdStep() is MFEM's `ExtensionFDStep()`, `cbrt( eps )`:
+	 * 6.1e-6 in double and 4.9e-3 in single. A path given its level set's
+	 * gradient, which is every path the driver builds (meq::LevelSet), ignores
+	 * it and differences nothing.
 	 *
-	 * **This is MFEM's default to fix and MEQ passes its own meanwhile**, so
-	 * that MEQ is correct against a stock library rather than a patched one.
-	 *
-	 * **IT LIVES IN THE HEADER AND NOT HERE, AND THAT IS NOT TIDINESS.** It was
-	 * file-local, so a caller outside this translation unit could not share it
-	 * -- and `theTransmissionRowIsTheBoundaryIntegralItClaims` is exactly such
-	 * a caller: it builds a reference for the row this file assembles. It took
-	 * MFEM's default while the row took this one, the two diverged the moment
-	 * MFEM's default changed, and the case reported 1.27e-06 on a row that had
-	 * not moved at all. M-189. One expression that two readers share is the
-	 * repair, and meq::limiterPolygonMaximum() is the precedent: M-165 is the
-	 * same failure, a second reading of one quantity under the same words.
+	 * **IT LIVES IN THE HEADER AND NOT HERE, AND THAT IS NOT TIDINESS.** A
+	 * caller outside this translation unit must be able to share it --
+	 * `theTransmissionRowIsTheBoundaryIntegralItClaims` builds a reference for
+	 * the row this file assembles, and with a step of its own the two diverge
+	 * by the difference's own error: 1.27e-06 on a row that had not moved.
+	 * M-189. One expression that two readers share is the repair, and
+	 * meq::limiterPolygonMaximum() is the precedent: M-165 is the same failure,
+	 * a second reading of one quantity under the same words.
 	 */
 
 	double normalisationDifferenceStep( double value )

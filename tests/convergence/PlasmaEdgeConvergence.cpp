@@ -60,6 +60,7 @@
 #include "meq/Estimator.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "analytic/PlasmaEdge.hpp"
 
@@ -1262,6 +1263,8 @@ namespace
 		d.gammaPMarker = domain.gammaHMarker();
 		d.path = std::make_unique<mfem::VertexConePath>(
 			*d.sub, d.gammaP, edgeLevelSet, 6.0*domain.largestElement() );
+		d.path->SetLevelSetGradient(
+			meq::circleLevelSet( edgeCentreR, edgeCentreZ, edgeRadius ).gradient );
 		return d;
 	}
 
@@ -1323,6 +1326,8 @@ namespace
 		// here are about 1.3 h long.
 		d.path = std::make_unique<mfem::VertexConePath>( *d.sub, d.gammaP,
 		                                                edgeLevelSet, 6.0*d.h );
+		d.path->SetLevelSetGradient(
+			meq::circleLevelSet( edgeCentreR, edgeCentreZ, edgeRadius ).gradient );
 		return d;
 	}
 

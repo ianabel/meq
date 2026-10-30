@@ -50,6 +50,7 @@
 #include "meq/SourceFactory.hpp"
 #include "meq/WarmStart.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 namespace meqtest
 {
@@ -71,12 +72,9 @@ namespace meqtest
 	/// Negative inside. The semicircle about the axis, which is what makes the
 	/// exterior expansion legal at all; the flat side IS R = 0 and stays
 	/// ordinary fitted boundary.
-	inline mfem::PositionFunction semicircle( double radius, double centreZ )
+	inline meq::LevelSet semicircle( double radius, double centreZ )
 	{
-		return [ radius, centreZ ]( mfem::Vector const &x )
-		{
-			return std::hypot( x( 0 ), x( 1 ) - centreZ ) - radius;
-		};
+		return meq::circleLevelSet( 0.0, centreZ, radius );
 	}
 
 	/// Everything one solve needs, kept alive together. The solver aliases the
@@ -148,8 +146,9 @@ namespace meqtest
 			m.config->getBoundary().exterior;
 		BOOST_TEST_REQUIRE( exteriorConfig.given,
 		                    "the machine file names no [boundary.exterior]" );
-		mfem::PositionFunction const levelSet =
+		meq::LevelSet const gamma =
 			semicircle( exteriorConfig.radius, exteriorConfig.centreZ );
+		mfem::PositionFunction const &levelSet = gamma.value;
 
 		// The gmsh mesh carries MATERIAL attributes -- the four conductors and
 		// the limiter region -- and MarkLevelSetSubdomain overwrites them to
@@ -196,6 +195,7 @@ namespace meqtest
 			"names a fitted edge" );
 		m.path = std::make_unique<mfem::VertexConePath>( *m.sub, m.gammaH,
 		                                                levelSet, 6.0*h );
+		m.path->SetLevelSetGradient( gamma.gradient );
 		m.gammaHMarker.SetSize( m.gammaH );
 		m.gammaHMarker = 0;
 		m.gammaHMarker[ m.gammaH - 1 ] = 1;

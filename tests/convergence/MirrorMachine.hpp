@@ -92,6 +92,7 @@
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "convergence/GeqReference.hpp"
 
@@ -391,6 +392,7 @@ namespace mirror
 		d->gammaHMarker[ d->gammaH - 1 ] = 1;
 		d->path = std::make_unique<mfem::VertexConePath>(
 			*d->sub, d->gammaH, semicircle, 6.0*d->h );
+		d->path->SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, rhoGamma ).gradient );
 		return d;
 	}
 

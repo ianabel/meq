@@ -134,6 +134,19 @@ namespace meq
 			/// evaluations, rather than by fifty halvings of [ 0, 2 pi ].
 			double levelSet( double radius, double z ) const;
 
+			/// The gradient of levelSet(), in closed form.
+			///
+			/// With x measured from the centre, r = |x| and alpha its polar
+			/// angle, the level set is r - rho( alpha ), so its gradient is
+			/// e_r - rho'( alpha )/r e_alpha. rho'( alpha ) comes from the curve's
+			/// own tangent at the parameter whose polar angle is alpha. It is
+			/// what mfem's path families differentiate their endpoints with
+			/// (meq::LevelSet), so it must be the gradient of exactly this
+			/// function. BoundaryShapeTests checks it against a central
+			/// difference. Undefined at the centre, where it returns zero.
+			void levelSetGradient( double radius, double z,
+			                       double &dRadius, double &dZ ) const;
+
 			/// The polar angle about the centre of the curve point at @a theta,
 			/// in [ 0, 2 pi ). Strictly increasing in theta for a star shaped
 			/// curve, which is what the constructor verifies.

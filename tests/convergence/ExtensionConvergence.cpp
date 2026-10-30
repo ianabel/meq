@@ -16,6 +16,7 @@
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "analytic/Soloviev.hpp"
 
@@ -178,6 +179,16 @@ namespace
 	double levelSet( mfem::Vector const &x )
 	{
 		return psiExact( x( 0 ), x( 1 ) );
+	}
+
+	/// levelSet()'s gradient, for the paths' closed-form endpoint derivative.
+	void levelSetGradient( mfem::Vector const &x, mfem::Vector &gradient )
+	{
+		double dRadius = 0.0, dZ = 0.0;
+		equilibrium().gradPsi( x( 0 ), x( 1 ), dRadius, dZ );
+		gradient.SetSize( 2 );
+		gradient( 0 ) = dRadius;
+		gradient( 1 ) = dZ;
 	}
 
 	// The background box. It contains Omega with room to spare, keeps R well
@@ -390,6 +401,7 @@ namespace
 		// Six h of search length. The paths are about 1.3 h long, so this is a
 		// factor of four of slack; LevelSetPath would need twelve, see the header.
 		mfem::VertexConePath path( *sub, gammaH, levelSet, 6.0*h );
+		path.SetLevelSetGradient( levelSetGradient );
 
 		mfem::Array<int> gammaHMarker( gammaH );
 		gammaHMarker = 0;
@@ -866,6 +878,8 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnTheCurvedBoundary )
 
 	mfem::VertexConePath linearPath( *linearMesh, gammaH, levelSet, 6.0*h );
 	mfem::VertexConePath newtonPath( *newtonMesh, gammaH, levelSet, 6.0*h );
+	linearPath.SetLevelSetGradient( levelSetGradient );
+	newtonPath.SetLevelSetGradient( levelSetGradient );
 
 	meq::GradShafranovSolver linearSolver( *linearMesh, order );
 	linearSolver.setSource( sourceCoeff );
@@ -958,6 +972,7 @@ BOOST_AUTO_TEST_CASE( theTransferredDatumReproducesTheImposedCondition )
 			{ return eq.f( x( 0 ), x( 1 ), 0.0 ); } );
 		mfem::ConstantCoefficient zero( 0.0 );
 		mfem::VertexConePath path( *sub, gammaH, levelSet, 6.0*h );
+		path.SetLevelSetGradient( levelSetGradient );
 
 		mfem::Array<int> gammaHMarker( gammaH );
 		gammaHMarker = 0;
@@ -1065,6 +1080,7 @@ BOOST_AUTO_TEST_CASE( theTransferredDatumRestoresEtaFive )
 			{ return eq.f( x( 0 ), x( 1 ), 0.0 ); } );
 		mfem::ConstantCoefficient zero( 0.0 );
 		mfem::VertexConePath path( *sub, gammaH, levelSet, 6.0*h );
+		path.SetLevelSetGradient( levelSetGradient );
 
 		mfem::Array<int> gammaHMarker( gammaH );
 		gammaHMarker = 0;

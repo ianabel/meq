@@ -56,11 +56,14 @@ wants the exact host loops names `"serial"`.
   from 4.27 s to 1.20 s. **Nothing gives the solver's mesh nodes**: upstream's
   routes read `HDGElementGeometry` and MEQ's read `CoordinateField`, since
   `Mesh::GetGeometricFactors()` calls `EnsureNodes()`.
-* **Upstream's, NEXT** (`HDG-DEVICE-WEIGHTS-MEASURED-FROM-MEQ.md`):
-  `GPUBlasBatchedLinAlg::LUSolve`'s per-call pointer arrays, a
-  `cudaMalloc`/`cudaFree` pair per call and 11% of the host's samples; and
-  `EnsureElementQuadratureTables`, a host loop of `EvalWeight` per element
-  point.
+* **Upstream's, BUILT AND TAKEN** at `9d57974336`:
+  `GPUBlasBatchedLinAlg`'s pointer arrays kept between calls, so
+  `LUSolve()` no longer allocates and frees per call, and
+  `EnsureElementQuadratureTables()`'s points and weights in a kernel. Not yet
+  profiled on `ff3`.
+* **Upstream's, OPEN** (`HDG-FACE-SCATTER-ILLEGAL-ADDRESS-FROM-MEQ.md`): an
+  illegal address in `HDGFaceScatterBatched()` on a form rebuilt in the same
+  process, `NewtonConvergencePaths_cuda` 7 runs in 10 (`TODO`).
 * **`ComputeH()`'s read-only syncs are gone upstream** →
   [M-320](MEASUREMENTS.md#m-320): `machine-f-diiid` moves 54.3 MB up and 14.0
   MB down.

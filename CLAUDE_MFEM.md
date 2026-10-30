@@ -276,26 +276,31 @@ it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
 two MEQ binaries on one library and survives.
 
 **BOTH INSTALLS ARE CURRENT.** Both checks below pass on `../../mfem/install` and
-on `../../mfem/install-single` against `meq-integration` at `6ef93b0e28`:
+on `../../mfem/install-single` against `meq-integration` at `9d57974336`:
 
 * the batched `Reconstruct()`, `ConstructC()` and assembly predicates;
 * setup's threaded loops;
 * from `9e5ec65b50`, `ComputeH()` leaving the batched factors on the
   device ([M-320](MEASUREMENTS.md#m-320), [M-321](MEASUREMENTS.md#m-321));
-* and, from `6ef93b0e28`, `HDGElementGeometry`, `HDGStabilizationRule` and
-  the two weight predicates ([M-322](MEASUREMENTS.md#m-322)).
-  `HDGStabilization` gained a virtual, so that refresh was a layout change.
+* from `6ef93b0e28`, `HDGElementGeometry`, `HDGStabilizationRule` and
+  the two weight predicates ([M-322](MEASUREMENTS.md#m-322));
+* and, from `9d57974336`, `GPUBlasBatchedLinAlg`'s persistent pointer arrays,
+  `HDGElementPointsAndWeights()` under `EnsureElementQuadratureTables()`, and
+  the extension's bisection to round-off with `SetLevelSetGradient()`
+  ([M-324](MEASUREMENTS.md#m-324)). Three path classes gained a member, so
+  that refresh was a layout change.
 
 The DIII-D machine reads `psi_ax = 3.759850e-01` and a constraint of
-`-6.466e-12` under `--device cuda`, and `DeviceParity` passes on all three
-arms.
+`-6.466e-12` under `--device cuda`, and `DeviceParity` passes in both builds.
 
-* **Double passes 86 of 87.** The red is the deliberate
-  `PlasmaEdgeConvergence`.
-* **Single passes 85 of 87**, adding `DriverAcceptance`'s two named cases
-  (MKL 2026.2, [M-303](MEASUREMENTS.md#m-303)).
-  `NewtonConvergencePaths_cuda`'s "invalid alias" is intermittent and passed
-  this take (`TODO`). Every binary takes
+* **Double passes 87 of 89.** The reds are the deliberate
+  `PlasmaEdgeConvergence` and `NewtonConvergencePaths_cuda`, an illegal
+  address in `HDGFaceScatterBatched` on a rebuilt form, 7 runs in 10, sent
+  upstream (`TODO`).
+* **Single passes 87 of 89**, adding `DriverAcceptance`'s adaptive cases
+  (MKL 2026.2, [M-303](MEASUREMENTS.md#m-303)), which fail on `cb96cf3` too.
+  `NewtonConvergencePaths_cuda` is intermittent and passed this take. Every
+  binary takes
 MKL through the RUNPATH `mkl/latest/lib`, which moved from 2026.1 to 2026.2 on
 2026-10-20 and moved single's knife edges ([M-302](MEASUREMENTS.md#m-302)).
 `LD_LIBRARY_PATH=/opt/intel/oneapi/mkl/2026.1/lib` overrides it, which is how
@@ -452,7 +457,7 @@ is not.
 
 | | |
 |---|---|
-| **`GPUBlasBatchedLinAlg::LUSolve`'s per-call allocations, and `EnsureElementQuadratureTables`** | **OPEN, and asked** (`HDG-DEVICE-WEIGHTS-MEASURED-FROM-MEQ.md`). `LUSolve` builds its device pointer arrays on every call, a `cudaMalloc`/`cudaFree` pair each, and `cudaFree` synchronises: 298 of 2640 host samples on `ff3`, plus 63 in `ReconstructTotalFluxBatched`. `EnsureElementQuadratureTables` is a host loop of `EvalWeight` and `Transform` per element point, built once per cache, 155 samples (→ **[M-322](MEASUREMENTS.md#m-322)**) |
+| **`HDGFaceScatterBatched`'s third kernel faults on a rebuilt form** | **OPEN, and asked** (`HDG-FACE-SCATTER-ILLEGAL-ADDRESS-FROM-MEQ.md`). `NewtonConvergencePaths_cuda`'s fourth solver in one process faults with an illegal address in lambda #3 of `HDGFaceScatterBatched()` as it builds its forms, 7 runs in 10 in double at `9d57974336`, under the NATIVE batched backend as often as under GPU BLAS. Single's "invalid alias" may be the same corruption (`TODO`) |
 | ~~**`R` and the face and element weights, evaluated per point on the host inside the batched routines**~~ | **CLOSED** at `6ef93b0e28` (→ **[M-322](MEASUREMENTS.md#m-322)**): weights and `R` in kernels, with `HDGStabilizationRule` describing MEQ's two stabilisations and `R` read from a `GridFunctionCoefficient` of `meq::CoordinateField`; `HDGFaceWeightsOnDevice()` and `HDGElementMassOnDevice()` say yes on `ff3` and the mirror. `HDGElementGeometry` serves the batched routes without giving the mesh nodes, which closed the mirror's batched regression |
 | ~~**Nothing on one host core under a Device: `Reconstruct()`, `ConstructC()`, the batched packing, setup's loops**~~ | **CLOSED** at `4a87f9280f` (→ **[M-321](MEASUREMENTS.md#m-321)**): a batched `Reconstruct()` (both halves, the enriched trace written by each face's highest-numbered element, the serial replay kept as the exact mode); a batched `ConstructC()`, which MEQ takes by `SetDefaultAssemblyMode(Batched)` around `EnableHybridization()` because C is built inside it; the batched assembly's predicates answered once per mesh; and `MarkLevelSetSubdomain()` and `VertexConePath` threaded on a caller's `phi_thread_safe`, effective only with no Device configured. MEQ asks `CanBatchConstraintAssembly()`, `CanBatchReconstructTotalFlux()` and `DarcyForm::CanBatchReconstruction()` and prints the answers under `--profile` |
 | ~~**A per-element correction to the local gradient before it is factored, on the batched `NPCGradient()` route**~~ | **CLOSED.** Upstream built `DarcyHybridization::AddNextGradientCorrection( int el, DenseMatrix const &dD )`, with `ClearNextGradientCorrections()` and `NumNextGradientCorrections()`, at `9d57561f69`, in `meq-integration` at `1a15a28363`. `dD` is added to element `el`'s potential-potential block after assembly and before the local factorisation, by the next `NPCGradient()` only, on the element loop and the batched route, on host and device. It aborts under `LocalOpType::FluxNL`, on a non-NPC `GetGradient()` with corrections queued, and on a size mismatch. MEQ's border fold (`GradShafranovSolver::setBorderFolding()`, [M-303](MEASUREMENTS.md#m-303)) is queued there and no longer rides on `SourceIntegrator::AssembleElementGrad()`, so it folds under a Device too. In single on the card the confined control loses the shelf: the folded solve meets its target in four steps where the unfolded one lands 7.5 times over its bound ([M-316](MEASUREMENTS.md#m-316)). `PlasmaConnectivityFoldOn_debug` and `_cuda` are the ctests |

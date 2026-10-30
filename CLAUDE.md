@@ -184,12 +184,17 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
 **`OMP_NUM_THREADS` is deliberately not pinned in `tests/CMakeLists.txt`**, so a
 plain `ctest` exercises threaded assembly as it ships. The red is
-`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands; a
+`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands, and
+`NewtonConvergencePaths_cuda` intermittently in either build, an illegal
+address in upstream's `HDGFaceScatterBatched()` (`TODO`); a
 single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
-(→ **[M-312](MEASUREMENTS.md#m-312)**) and
-`theRetryRungClosesAStalledFirstAttempt` TCV shaped reaching another
-equilibrium at `MKL_NUM_THREADS=1` (`TODO`, the single-precision round). The
+(→ **[M-312](MEASUREMENTS.md#m-312)**). Which of its other single cases fail
+moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
+reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
+`theDriverRefinesOverAnExteriorCoupling` and
+`theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
+(`TODO`, the single-precision round). The
 wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
 whole on purpose) and then `naming` (one single-threaded clang-tidy run).
 **A suite time is a measurement only on an idle machine**; identical code has

@@ -279,4 +279,41 @@ namespace meq
 		point( theta, br, bz );
 		return centreDistance - std::hypot( br - radius0, bz - z0 );
 	}
+
+	void BoundaryShape::levelSetGradient( double radius, double z,
+	                                      double &dRadius, double &dZ ) const
+	{
+		double const dr = radius - radius0;
+		double const dz = z - z0;
+		double const centreDistance = std::hypot( dr, dz );
+		if ( centreDistance < 1.0e-14 )
+		{
+			dRadius = 0.0;
+			dZ = 0.0;
+			return;
+		}
+
+		// The curve point q at the parameter whose polar angle is x's, and its
+		// tangent dq/dtheta, both from the centre.
+		double const theta = parameterAtPolarAngle( wrappedAngle( dr, dz ) );
+		double slope = 0.0;
+		double const shifted = shiftedAngle( theta, slope );
+		double const qR = minor*std::cos( shifted );
+		double const qZ = elongationValue*minor*std::sin( theta );
+		double const tangentR = -minor*std::sin( shifted )*slope;
+		double const tangentZ = elongationValue*minor*std::cos( theta );
+
+		// d rho/d alpha = ( d rho/d theta )/( d alpha/d theta )
+		//               = rho ( q . q' )/( q x q' ),
+		// where q x q' > 0 is the star-shaped condition the constructor checks.
+		double const rho = std::hypot( qR, qZ );
+		double const cross = qR*tangentZ - qZ*tangentR;
+		double const dRhoDAlpha = rho*( qR*tangentR + qZ*tangentZ )/cross;
+
+		double const eR = dr/centreDistance;
+		double const eZ = dz/centreDistance;
+		double const angular = dRhoDAlpha/centreDistance;
+		dRadius = eR + angular*eZ;    // e_alpha = ( -eZ, eR )
+		dZ = eZ - angular*eR;
+	}
 }

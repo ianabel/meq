@@ -525,27 +525,23 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	// discretisation's. A rising last row would be the coupling degrading with
 	// N; a still-falling one would mean (a) is reading the truncation.
 	//
-	// ONLY WHERE THE PLATEAU IS THE DISCRETISATION'S. The transfer differences
-	// its path endpoints at extensionFdStep(), so it carries eps/fd_step of the
-	// field: 2.4e-05 relative in single, 6.6e-05 on this || psi ||, where the
-	// single plateau sits at 6.8e-05 and moves by up to 20% from one N to the
-	// next. That is round-off with nothing left to resolve, and the 2% band
-	// cannot be asked of it, nor where the plateau starts, which is read off
-	// the same 5% band: under the mirror's stabilisation the single rows from
-	// N = 16 move by up to 1.5x, and the plateau's start lands anywhere from
-	// N = 16 to 48 as MKL_NUM_THREADS moves ( M-294 ). In double
-	// the floor is eleven orders down and this always runs. M-275.
-	bool const plateauIsResolved = global[ last ]
-		> 4.0*globalNorm[ last ]
-		  *static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
-		  /meq::extensionFdStep();
+	// ONLY WHERE THE PLATEAU IS THE DISCRETISATION'S. In single it sits at
+	// 3.97e-05 on a || psi || of 2.43, 1.6e-05 relative or about 140 eps, and
+	// moves by up to 20% from one N to the next. That is round-off with nothing
+	// left to resolve, and the 2% band cannot be asked of it, nor where the
+	// plateau starts, which is read off the same 5% band: under the mirror's
+	// stabilisation the single rows from N = 16 move by up to 1.5x, and the
+	// plateau's start lands anywhere from N = 16 to 48 as MKL_NUM_THREADS
+	// moves ( M-294 ). It is the solve's floor and not the extension's: it did
+	// not move when the extension stopped differencing its endpoints (M-324).
+	// In double the floor is eleven orders down and this always runs. M-275.
+	double const plateauFloor = meq::tests::roundOffFloor( globalNorm[ last ] );
+	bool const plateauIsResolved = global[ last ] > plateauFloor;
 	if ( !plateauIsResolved )
 	{
-		std::printf( "    *** SKIPPED \"it stops\": the plateau, %.3e, is under 4 eps/fd_step "
-		             "x || psi || = %.3e, the extension's own floor in this format. M-275\n",
-		             global[ last ], 4.0*globalNorm[ last ]
-		             *static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
-		             /meq::extensionFdStep() );
+		std::printf( "    *** SKIPPED \"it stops\": the plateau, %.3e, is under the "
+		             "format's round-off floor on || psi ||, %.3e. M-275\n",
+		             global[ last ], plateauFloor );
 	}
 	else
 	{
@@ -563,16 +559,13 @@ BOOST_AUTO_TEST_CASE( theModeCountIsSetByTheCopperAndNotByThePlasma )
 	//
 	// ONLY WHERE THAT PLATEAU IS RESOLVED, by the same floor on the region's
 	// own norm. In single under the mirror's stabilisation the machine rows
-	// from N = 8 read 1.0e-06 to 2.3e-06, moving by up to 1.5x from one N to
-	// the next, against double's 5.4e-07: round-off, under 4 eps/fd_step x
-	// || psi || = 3.1e-05 there ( M-294 ). Double always runs it.
-	double const regionFloor = 4.0*regionNorm[ last ]
-		*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
-		/meq::extensionFdStep();
+	// from N = 8 read about 1e-06, moving by up to 1.5x from one N to the next,
+	// against double's 5.4e-07: round-off ( M-294 ). Double always runs it.
+	double const regionFloor = meq::tests::roundOffFloor( regionNorm[ last ] );
 	if ( !( region[ last ] > regionFloor ) )
 		std::printf( "    *** SKIPPED \"the machine region plateaus first\": its plateau, %.3e, "
-		             "is under 4 eps/fd_step x || psi || = %.3e, the extension's own floor "
-		             "in this format. M-275\n", region[ last ], regionFloor );
+		             "is under the format's round-off floor on its norm, %.3e. M-275\n",
+		             region[ last ], regionFloor );
 	else
 		BOOST_TEST( region[ 1 ] < 1.2*region[ last ],
 			"the machine region is still " << region[ 1 ]/region[ last ]

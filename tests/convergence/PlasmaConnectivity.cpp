@@ -98,6 +98,7 @@
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "analytic/Soloviev.hpp"
 
@@ -256,6 +257,7 @@ namespace
 
 		auto path = std::make_unique<mfem::VertexConePath>(
 			*sub, gammaH, halfDiscLevelSet, 6.0*out.h );
+		path->SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, halfDiscGamma ).gradient );
 
 		out.sub = sub.get();
 		out.path = path.get();

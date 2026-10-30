@@ -52,6 +52,7 @@
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
 #include "meq/WarmStart.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "RoundOffFloor.hpp"
 
@@ -60,15 +61,6 @@
 namespace
 {
 	std::string const machineFile = meq::test::sourcePath( "examples/machine-f-diiid.toml" );
-
-	/// Negative inside: the semicircle about the axis that is Gamma.
-	mfem::PositionFunction semicircle( double radius, double centreZ )
-	{
-		return [ radius, centreZ ]( mfem::Vector const &x )
-		{
-			return std::hypot( x( 0 ), x( 1 ) - centreZ ) - radius;
-		};
-	}
 
 	/// The machine, kept alive together; the solver aliases everything above
 	/// it. The coil set is held WRITABLE, which is what an inverse solve needs
@@ -149,8 +141,9 @@ namespace
 
 		meq::ExteriorConfig const &exteriorConfig = m.config->getBoundary().exterior;
 		BOOST_TEST_REQUIRE( exteriorConfig.given );
-		mfem::PositionFunction const levelSet =
-			semicircle( exteriorConfig.radius, exteriorConfig.centreZ );
+		meq::LevelSet const gamma =
+			meq::circleLevelSet( 0.0, exteriorConfig.centreZ, exteriorConfig.radius );
+		mfem::PositionFunction const &levelSet = gamma.value;
 
 		std::vector<int> original( static_cast<std::size_t>( m.background->GetNE() ) );
 		for ( int e = 0; e < m.background->GetNE(); ++e )
@@ -182,6 +175,7 @@ namespace
 		BOOST_TEST_REQUIRE( gammaH > parentBoundaryMax );
 		m.path = std::make_unique<mfem::VertexConePath>( *m.sub, gammaH, levelSet,
 		                                                6.0*h );
+		m.path->SetLevelSetGradient( gamma.gradient );
 		m.gammaHMarker.SetSize( gammaH );
 		m.gammaHMarker = 0;
 		m.gammaHMarker[ gammaH - 1 ] = 1;

@@ -14,6 +14,7 @@
 #include "meq/Estimator.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "analytic/Soloviev.hpp"
 
@@ -133,6 +134,16 @@ namespace
 	double levelSet( mfem::Vector const &x )
 	{
 		return psiExact( x( 0 ), x( 1 ) );
+	}
+
+	/// levelSet()'s gradient, for the paths' closed-form endpoint derivative.
+	void levelSetGradient( mfem::Vector const &x, mfem::Vector &gradient )
+	{
+		double dRadius = 0.0, dZ = 0.0;
+		equilibrium().gradPsi( x( 0 ), x( 1 ), dRadius, dZ );
+		gradient.SetSize( 2 );
+		gradient( 0 ) = dRadius;
+		gradient( 1 ) = dZ;
 	}
 
 	double const boxRMin = 0.25;
@@ -821,6 +832,7 @@ BOOST_AUTO_TEST_CASE( theAdaptiveLoopRunsOnTheCurvedBoundary )
 			// uniform mesh, where the two are the same number.
 			mfem::VertexConePath path( sub, gammaH, levelSet,
 			                           12.0*domain.largestElement() );
+			path.SetLevelSetGradient( levelSetGradient );
 
 			meq::GradShafranovSolver solver( sub, order );
 			solver.setSource( sourceCoeff );

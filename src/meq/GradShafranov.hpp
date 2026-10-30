@@ -206,34 +206,28 @@ namespace meq
 	 */
 	/**
 	 * The central-difference step for `mfem::ExtensionBoundaryQuadrature()` and
-	 * `mfem::ExtensionRegionQuadrature()`.
+	 * `mfem::ExtensionRegionQuadrature()`: MFEM's own `ExtensionFDStep()`,
+	 * `cbrt( eps )`, the optimum for a central difference in either format.
 	 *
-	 * `eps^(1/3)` is the optimum for a central difference; MFEM's historical
-	 * literal `1e-6` is the right order in double and is returned EXACTLY here
-	 * so that the double path is bit-unchanged, and single gets a step that
-	 * follows its own epsilon. M-182 is why the single arm exists: a
-	 * double-tuned step there puts the sweep's degeneracy floor above every
-	 * measure a real face can have, so EVERY quadrature point is skipped, the
-	 * callback never fires, and the exterior DtN coupling drops out of the
-	 * bordered Jacobian while staying in the residual.
+	 * **A PATH GIVEN ITS LEVEL SET'S GRADIENT IGNORES IT.** The driver gives
+	 * every path one (meq::LevelSet), so its sweeps difference nothing and
+	 * carry no step. The step still matters for a path built without a
+	 * gradient, which differences its endpoints and so reads round-off divided
+	 * by the step. M-182 is why single needs a step that follows its own
+	 * epsilon: a double-tuned one puts the sweep's degeneracy floor above
+	 * every measure a real face can have, so every quadrature point is
+	 * skipped and the exterior coupling drops out of the bordered Jacobian.
 	 *
 	 * **IT IS PUBLIC SO THAT A CALLER COMPUTING THE SAME QUANTITY TWO WAYS CAN
 	 * GIVE BOTH HALVES THE SAME STEP.** A central difference's error is a
 	 * deterministic function of its step, so it is common to two sweeps that
 	 * share one and cancels exactly -- and appears in full the moment they do
-	 * not. That is what M-189 is: MFEM's default moved, MEQ's four production
-	 * sweeps passed this and did not, the reference inside
-	 * `theTransmissionRowIsTheBoundaryIntegralItClaims` took the default, and
-	 * the case reported 1.27e-06 against a row that had not moved by a bit.
-	 * **A test that contracts against a sweep must pass this too.**
+	 * not (M-189). **A test that contracts against a differenced sweep must pass
+	 * this too.**
 	 */
 	inline double extensionFdStep()
 	{
-#ifdef MFEM_USE_SINGLE
-		return 5.0e-3;
-#else
-		return 1.0e-6;   // MFEM's own default, kept exactly
-#endif
+		return static_cast<double>( mfem::ExtensionFDStep() );
 	}
 
 

@@ -1361,7 +1361,7 @@ stops a coarse pin hiding an inadequate shipped default.
 
 **AND THAT DEFAULT REACHED MEQ AND TURNED TWO CASES RED.**
 `VertexConePath`'s four-argument constructor now builds **no cone at all**, so
-`theConeIsWhatCostsTheTiling` compared a cone-off column against a cone-off
+`theConeCostsRuleOrderAndNotCoverage` compared a cone-off column against a cone-off
 column — its own message said so, *"the two columns are the same experiment"* —
 and `theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap` found the signed
 sweep no better than the unsigned one, because signing matters only where the
@@ -1377,6 +1377,17 @@ order it was meant to fix turns out to be **pre-asymptotic** and recovers on its
 own. And they connected it to MEQ's earlier signed-weight finding: **the cone is
 what makes the foot map backtrack**, so MEQ's `O(h)` unsigned overcount and this
 `O(h²)` residual are two readings of one thing.
+
+**WITH THE ENDPOINT DIFFERENTIATED EXACTLY, BOTH SWEEPS TILE TO ROUND-OFF.**
+Every path MEQ builds carries its level set's gradient (`meq::LevelSet`), so
+the weights take `da/dξ` in closed form and nothing is differenced. The boundary
+sum reads 5.3e-16 to 2.8e-15 in double and the region sum 5.3e-16 to 1.9e-13,
+both a couple of `eps` in single, and both are asserted at the round-off floor.
+The cone still costs rule order — at `n = 12`, q8 2.4e-10, q12 3.0e-13, q20
+8.8e-16 — and nothing else, so
+`theConeCostsRuleOrderAndNotCoverage` asserts coverage at the finest rule with
+the cone and without it. Which of two round-off columns is smaller is not
+asserted (→ **[M-324](MEASUREMENTS.md#m-324)**).
 
 **One assertion beside it was wrong and is corrected rather than relaxed.**
 `gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement` asserted

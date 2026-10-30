@@ -48,6 +48,7 @@
 #include "meq/GradShafranov.hpp"
 #include "meq/SurfaceAverage.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 namespace
 {
@@ -1139,6 +1140,7 @@ namespace
 
 		d.path = std::make_unique<mfem::VertexConePath>(
 			*d.sub, gammaH, gammaLevelSet, 6.0*d.h );
+		d.path->SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, gammaRadius ).gradient );
 		return d;
 	}
 

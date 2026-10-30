@@ -40,6 +40,7 @@
 #include "meq/FluxFamily.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Inverse.hpp"
+#include "meq/LevelSet.hpp"
 #include "meq/Output.hpp"
 #include "meq/RotatingSource.hpp"
 #include "meq/SafetyFactor.hpp"
@@ -525,41 +526,8 @@ namespace
 		return std::max( hR, hZ );
 	}
 
-	/// Negative inside Omega, which is the sign convention every piece of the
-	/// extension machinery uses. Built once and shared: buildSubdomain() below
-	/// and meq::AdaptiveDomain on the adaptive path must be given the SAME
-	/// function, or D_h differs between a one-shot run and cycle 0 of an adaptive
-	/// one for no reason a user could see.
-	mfem::PositionFunction levelSetOf( meq::BoundaryShape const &shape )
-	{
-		meq::BoundaryShape const *shapePointer = &shape;
-		return [ shapePointer ]( mfem::Vector const &x )
-		{
-			return shapePointer->levelSet( x( 0 ), x( 1 ) );
-		};
-	}
-
-	/// The level set of the SEMICIRCLE `[boundary.exterior]` describes: negative
-	/// inside, zero on `Gamma`, positive outside.
-	///
-	/// **THIS IS NOT A meq::BoundaryShape AND CANNOT BE ONE.** That class refuses
-	/// a surface reaching `R <= 0`, rightly, since a closed plasma surface
-	/// through the axis carries a non-integrable `1/R`. `Gamma` here is an
-	/// ARTIFICIAL boundary whose flat side IS the axis, and the axis half of it
-	/// is ordinary fitted boundary that SubMesh leaves with its inherited
-	/// attribute -- so `Gamma_h` is the arc alone and nothing is ever
-	/// transferred across `R = 0`. meq::AdaptiveDomain was relaxed for exactly
-	/// this geometry.
-	mfem::PositionFunction semicircleLevelSet( double radius, double centreZ )
-	{
-		return [ radius, centreZ ]( mfem::Vector const &x )
-		{
-			return std::hypot( x( 0 ), x( 1 ) - centreZ ) - radius;
-		};
-	}
-
 	Subdomain buildSubdomain( mfem::Mesh &background,
-	                          mfem::PositionFunction const &levelSet,
+	                          meq::LevelSet const &levelSet,
 	                          double h )
 	{
 		// extra_refine = 1: the vertex test alone is exact only where Omega is
@@ -574,7 +542,7 @@ namespace
 		// static state. MFEM threads it only with no Device configured, which
 		// the driver guarantees for setup by configuring the Device after it.
 		int const inside = mfem::MarkLevelSetSubdomain(
-			background, levelSet, meq::markingOffset( 1.0, 1.5 ), marker, 1, true );
+			background, levelSet.value, meq::markingOffset( 1.0, 1.5 ), marker, 1, true );
 		if ( inside == 0 )
 			throw std::runtime_error(
 				"[boundary.shape] encloses no background element. The mesh is too "
@@ -668,8 +636,11 @@ namespace
 		// Threaded on the same promise as the marking above; the arguments
 		// between are VertexConePath's defaults.
 		subdomain.path = std::make_unique<mfem::VertexConePath>(
-			*subdomain.mesh, subdomain.gammaH, levelSet, 6.0*h,
+			*subdomain.mesh, subdomain.gammaH, levelSet.value, 6.0*h,
 			16, 3, 32, 1e-13, 100, false, true );
+		// The endpoints' derivative in closed form, so the extension's sweeps
+		// difference nothing (meq::LevelSet).
+		subdomain.path->SetLevelSetGradient( levelSet.gradient );
 		subdomain.widened = subdomain.path->NumWidened();
 
 		subdomain.gammaHMarker.SetSize( subdomain.gammaH );
@@ -2463,7 +2434,12 @@ int main( int argc, char **argv )
 	/// climbs toward it, which is what makes the exterior coefficients
 	/// comparable across a refinement.
 	std::unique_ptr<meq::ExteriorDtN> exterior;
-	mfem::PositionFunction levelSet;
+	/// Negative inside Omega, the sign convention every piece of the extension
+	/// machinery uses, with its gradient. Built once and shared: buildSubdomain()
+	/// and meq::AdaptiveDomain on the adaptive path must be given the SAME
+	/// function, or D_h differs between a one-shot run and cycle 0 of an
+	/// adaptive one for no reason a user could see.
+	meq::LevelSet levelSet;
 	/// Curved: D_h is a strict subset of the background mesh, cut by levelSet.
 	/// True for [boundary.shape] AND for [boundary.exterior], which are two ways
 	/// of describing a Gamma that is not the mesh boundary.
@@ -2710,8 +2686,16 @@ int main( int argc, char **argv )
 			exterior = std::make_unique<meq::ExteriorDtN>(
 				exteriorConfig.centreZ, exteriorConfig.radius,
 				exteriorConfig.modes );
-			levelSet = semicircleLevelSet( exteriorConfig.radius,
-			                               exteriorConfig.centreZ );
+			// THE SEMICIRCLE IS NOT A meq::BoundaryShape AND CANNOT BE ONE.
+			// That class refuses a surface reaching R <= 0, rightly, since a
+			// closed plasma surface through the axis carries a non-integrable
+			// 1/R. Gamma here is an ARTIFICIAL boundary whose flat side IS the
+			// axis, and the axis half of it is ordinary fitted boundary that
+			// SubMesh leaves with its inherited attribute -- so Gamma_h is the
+			// arc alone and nothing is ever transferred across R = 0.
+			// meq::AdaptiveDomain was relaxed for exactly this geometry.
+			levelSet = meq::circleLevelSet( 0.0, exteriorConfig.centreZ,
+			                                exteriorConfig.radius );
 		}
 
 		if ( shapeConfig.type != meq::ShapeType::None )
@@ -2730,7 +2714,7 @@ int main( int argc, char **argv )
 					                      shapeConfig.elongation,
 					                      shapeConfig.cosCoefficients,
 					                      shapeConfig.sinCoefficients ) );
-			levelSet = levelSetOf( *shape );
+			levelSet = meq::shapeLevelSet( *shape );
 		}
 
 		if ( curved )
@@ -2766,7 +2750,7 @@ int main( int argc, char **argv )
 				{
 					// Both of the driver's level sets are pure functions of the
 					// point; see the marking in buildSubdomain().
-					domain = std::make_unique<meq::AdaptiveDomain>( background, levelSet,
+					domain = std::make_unique<meq::AdaptiveDomain>( background, levelSet.value,
 					                                                1, true );
 				}
 				catch ( std::exception const &error )
@@ -3896,8 +3880,9 @@ int main( int argc, char **argv )
 			// is not harmed by being given one; ExtensionConvergence.cpp uses six
 			// h on a uniform mesh, where the two are the same number.
 			path = std::make_unique<mfem::VertexConePath>(
-				domain->computational(), domain->gammaHAttribute(), levelSet,
+				domain->computational(), domain->gammaHAttribute(), levelSet.value,
 				12.0*domain->largestElement(), 16, 3, 32, 1e-13, 100, false, true );
+			path->SetLevelSetGradient( levelSet.gradient );
 			widened = path->NumWidened();
 			gammaHMarker = &domain->gammaHMarker();
 		}

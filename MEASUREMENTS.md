@@ -21699,3 +21699,78 @@ every allocation, the predicate refuses and both run on one thread. Under
 **Reproduce.** `runs/weights/mf/` (`prof.toml --mesh-ready --device cuda
 --profile`, `run-old.log`, `run-new.log`); `runs/noserial/ff3/`
 (`perf-wt.data`).
+
+### M-324
+
+**THE EXTENSION'S ENDPOINTS ARE DIFFERENTIATED EXACTLY, SO NOTHING IS
+DIFFERENCED AND THE MIRROR'S STEP DEPENDENCE IS GONE. MEQ'S ANSWER ON THE MIRROR
+MOVES BY 1.34e-06, WHICH IS THE BISECTION STAIRCASE LEAVING.**
+
+**Setup.** `meq-integration` at `9d57974336`: upstream's `2bed225310`
+bisects every path endpoint to round-off whatever `tol` is, and a level-set path
+given `SetLevelSetGradient()` differentiates its endpoint in closed form,
+`s' = -grad phi . ( x' + s t' )/( grad phi . t )`, so
+`ExtensionBoundaryQuadrature()` and `ExtensionRegionQuadrature()` ignore
+`fd_step`. MEQ gives every path it builds the gradient (`meq::LevelSet`): in
+closed form for `meq::BoundaryShape`'s radial gap, where
+`BoundaryShapeTests` reads 1.3e-09 relative against a central difference of the
+level set at 1e-6, and for circles. The tests take the Solov'ev fixture's
+`gradPsi`. `meq::extensionFdStep()` is MFEM's `ExtensionFDStep()`, `cbrt( eps )`,
+for a path without one.
+
+**The rotating mirror**, host, `AssemblyMode = "serial"`, `OMP = MKL = 1`, a
+probe build with hooks for the solver mesh's nodes, the step's scale, `tol` and
+the gradient. `psi_h` as a fraction of its largest value, 1.0168e-03:
+
+| | with the gradient | differenced |
+|---|---|---|
+| nodes on against off, step x1/4 | 2.88e-13 | 2.71e-13 |
+| nodes on against off, step x1 | 2.88e-13 | 4.59e-10 |
+| nodes on against off, step x4 | 2.88e-13 | 1.24e-10 |
+| step x1/4 against x1 | 0 | 4.75e-09 |
+| step x4 against x1 | 0 | 2.01e-09 |
+| `tol = 0` against `1e-13` | 0 | 0 |
+
+Against `cb96cf3`'s answer (`tol = 1e-13` with the old bracket stop, step 1e-6),
+the gradient run differs by **1.340e-06**. Against `cb96cf3` at `tol = 0` it
+differs by 1.446e-08. Newton takes 3 steps on every arm, to 1.5e-16 to 2.5e-16
+of the first residual.
+
+So the 1/step node effect of M-322 is gone, and with it the amplifier: a node
+perturbation of 1.8e-15 in a located point now moves `psi_h` by round-off.
+
+**The tiling** (`FreeBoundaryCoupling`), relative:
+
+| | double | single |
+|---|---|---|
+| boundary weights against `|Gamma|`, n = 12, 24, 48 | 5.3e-16, 0, 2.8e-15 | 2.6e-07 to 2.7e-07 |
+| region weights against the gap | 5.3e-16, 9.9e-15, 1.9e-13 | 2.3e-07 to 8.4e-08 |
+| cone on, n = 12: q8, q12, q20 | 2.4e-10, 3.0e-13, 8.8e-16 | at round-off |
+
+Both sums are asserted at `roundOffFloor()`, where the boundary sum stood at the
+step's floor. The cone costs rule order and not coverage, and
+`theConeCostsRuleOrderAndNotCoverage` asserts coverage at the finest rule.
+
+**The single-precision floors that named the step** are restated on
+`roundOffFloor()`. In single, MR-5's driver-against-library gap is
+1.055e-07, which is 14 eps of `|psi_bnd|`; it read 1.578e-06 while the
+endpoints were differenced (M-272). The vacuum mirror's single plateau did not
+move (3.97e-05 on a `|| psi ||` of 2.43), so it is the solve's floor and was
+never the step's.
+
+**The suites**, at `9d57974336`:
+
+* **Double passes 87 of 89.** The reds are `PlasmaEdgeConvergence`, which is
+  deliberate, and `NewtonConvergencePaths_cuda`. The second now fails in
+  double too, 7 runs in 10: an illegal address in upstream's
+  `HDGFaceScatterBatched`, sent upstream (`TODO`).
+* **Single passes 87 of 89.** The reds are `PlasmaEdgeConvergence` and
+  `DriverAcceptance`, whose failing cases fail on `cb96cf3` too. The first
+  take also failed `FreeBoundaryCoupling`'s cone case, which asserted that one
+  of two round-off columns was smaller than the other. Restated as above, it
+  passes in both builds, as do `RotatingMirror`, `RotatingMirrorDevice` and
+  `VacuumMirror` on their restated floors.
+
+**Reproduce.** `runs/probe-gradient/` (`run.sh`; branch `probe-amplifier`,
+not for merge); `runs/probe-amplifier/` for `cb96cf3`'s arms;
+`builds/double.grad.suite.log`, `builds/single.grad.suite.log`.

@@ -212,6 +212,64 @@ BOOST_AUTO_TEST_CASE( theLevelSetIsNegativeInsideAndPositiveOutside )
 }
 
 /*
+ * THE GRADIENT IS THE LEVEL SET'S OWN, which nothing downstream can check.
+ *
+ * mfem's path families differentiate their endpoints with the gradient MEQ
+ * gives them, and a gradient of some other function gives a wrong derivative
+ * without an error (upstream's HDG-EXTENSION-ENDPOINT-DERIVATIVE reply). So it
+ * is checked here against a central difference of levelSet() itself: inside,
+ * outside and on the curve, on a Miller shape and on the twenty-harmonic one
+ * above, where rho'( alpha ) is far from zero.
+ */
+BOOST_AUTO_TEST_CASE( theGradientIsTheLevelSetsOwn )
+{
+	std::vector<double> cosines{ 0.02 }, sines{ 0.3, -0.05 };
+	for ( int n = 1; n <= 20; ++n )
+	{
+		double const size = 2.0e-3/static_cast<double>( n );
+		if ( n > 1 )
+			cosines.push_back( ( n % 2 ? 1.0 : -1.0 )*size );
+		if ( n > 2 )
+			sines.push_back( ( n % 3 ? -1.0 : 1.0 )*size );
+	}
+	meq::BoundaryShape const harmonic( 1.7, 0.05, 0.6, 1.5, cosines, sines );
+	meq::BoundaryShape const miller = iterLike();
+
+	double worst = 0.0;
+	for ( meq::BoundaryShape const *shape : { &miller, &harmonic } )
+	{
+		double minRadius = 0.0, maxRadius = 0.0, zMin = 0.0, zMax = 0.0;
+		shape->boundingBox( minRadius, maxRadius, zMin, zMax );
+		double const centreR = 0.5*( minRadius + maxRadius );
+		double const centreZ = 0.5*( zMin + zMax );
+		double const step = 1.0e-6;
+		for ( int i = 0; i < 400; ++i )
+		{
+			double const theta = 2.0*pi*i/400.0 + 1.0e-3;
+			double onR = 0.0, onZ = 0.0;
+			shape->point( theta, onR, onZ );
+			// On the curve, and a fifth of the way in and out along the ray
+			// from the box's centre.
+			for ( double scale : { 1.0, 0.8, 1.2 } )
+			{
+				double const radius = centreR + scale*( onR - centreR );
+				double const z = centreZ + scale*( onZ - centreZ );
+				double dRadius = 0.0, dZ = 0.0;
+				shape->levelSetGradient( radius, z, dRadius, dZ );
+				double const differenceR = ( shape->levelSet( radius + step, z )
+				                             - shape->levelSet( radius - step, z ) )/( 2.0*step );
+				double const differenceZ = ( shape->levelSet( radius, z + step )
+				                             - shape->levelSet( radius, z - step ) )/( 2.0*step );
+				worst = std::max( worst, std::hypot( dRadius - differenceR, dZ - differenceZ )
+				                         /std::hypot( dRadius, dZ ) );
+			}
+		}
+	}
+	BOOST_TEST_MESSAGE( "worst relative gap to a central difference: " << worst );
+	BOOST_TEST( worst < 1.0e-8 );
+}
+
+/*
  * AND THE VALIDATION THAT MATTERS, because it is the one a user will hit.
  *
  * levelSet() inverts the polar angle by bisection, which is single valued only

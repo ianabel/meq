@@ -73,6 +73,7 @@
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Sampler.hpp"
+#include "meq/LevelSet.hpp"
 
 #include "analytic/ExteriorMatched.hpp"
 #include "analytic/Soloviev.hpp"
@@ -119,6 +120,16 @@ namespace
 	double levelSet( mfem::Vector const &x )
 	{
 		return equilibrium().psi( x( 0 ), x( 1 ) ) + psiOffset;
+	}
+
+	/// levelSet()'s gradient, for the paths' closed-form endpoint derivative.
+	void levelSetGradient( mfem::Vector const &x, mfem::Vector &gradient )
+	{
+		double dRadius = 0.0, dZ = 0.0;
+		equilibrium().gradPsi( x( 0 ), x( 1 ), dRadius, dZ );
+		gradient.SetSize( 2 );
+		gradient( 0 ) = dRadius;
+		gradient( 1 ) = dZ;
 	}
 
 	/// The subdomain D_h and its Gamma_h attribute. The same construction
@@ -200,6 +211,7 @@ namespace
 		c.sub = makeSubdomain( n, c.gammaH, c.h );
 		c.path = std::make_unique<mfem::VertexConePath>( *c.sub, c.gammaH,
 		                                                levelSet, 6.0*c.h );
+		c.path->SetLevelSetGradient( levelSetGradient );
 		c.gammaHMarker.SetSize( c.gammaH );
 		c.gammaHMarker = 0;
 		c.gammaHMarker[ c.gammaH - 1 ] = 1;
@@ -517,6 +529,7 @@ BOOST_AUTO_TEST_CASE( theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap )
 		// and the signed and unsigned sweeps agree trivially.
 		mfem::VertexConePath path( sub, gammaH, circle, 6.0*h,
 		                           16, 3, 32, 1.0e-13, 100, /*use_cone=*/true );
+		path.SetLevelSetGradient( meq::circleLevelSet( centreR, centreZ, radius ).gradient );
 
 		// The area of D_h, so the region sweep has something to be compared
 		// against: it must give |Omega| - |D_h|.
@@ -609,112 +622,59 @@ BOOST_AUTO_TEST_CASE( theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap )
 
 	/*
 	 * THE BOUNDARY SUM IS EXACT AT EVERY MESH, AND THAT -- NOT ITS CONVERGENCE
-	 * -- IS THE PROPERTY.
+	 * -- IS THE PROPERTY. A gate that merely required improvement would pass
+	 * on a routine that was O( h ) wrong, which is what this one was before the
+	 * weight was signed.
 	 *
-	 * An earlier version of this test asserted that the error SHRANK with
-	 * refinement, which was a guess and was the wrong shape. Measured, it does
-	 * not shrink because there is nothing to shrink: 4.85e-10, 4.64e-10,
-	 * 6.38e-11 at h = 0.1, 0.05, 0.025. That is mesh-INDEPENDENT and it sits at
-	 * the central difference's own floor -- fd_step = 1e-6 gives O( fd^2 ) =
-	 * 1e-12 truncation and O( eps/fd ) = 1e-10 round-off, and 1e-10 is what is
-	 * measured. The quadrature is EXACT and the residue is the instrument.
-	 *
-	 * A gate that merely required improvement would pass on a routine that was
-	 * O( h ) wrong, which is what this one was before the weight was signed.
+	 * "IT CONVERGES, SO IT IS GEOMETRY" WAS MEQ'S DIAGNOSIS ONCE, AND WRONG.
+	 * Differenced and at a 12th-order face rule, this case read 1.01e-04,
+	 * 2.24e-05, 4.59e-06 at n = 12, 24, 48, and MEQ filed that upstream as lost
+	 * coverage. Two things converge: lost coverage, and a curve the RULE
+	 * under-resolves, which straightens as h falls. Refining the rule at fixed
+	 * h separates them, because no quadrature recovers coverage that is not
+	 * there, and theConeCostsRuleOrderAndNotCoverage below runs that sweep: the cone
+	 * makes the foot map xi -> a( x( xi ) ) rougher along a face, and a
+	 * fixed-order rule under-resolves it. Coverage is exact with the cone and
+	 * without it. So the rule here is 80, and the gate was never too tight.
+	 * The discriminator is to refine the INSTRUMENT at fixed geometry, the same
+	 * move CLAUDE.md records for Richardson extrapolation.
 	 */
 	/*
-	 * THIS WAS RED, AND MEQ'S DIAGNOSIS OF IT WAS WRONG. 2026-09-05.
-	 *
-	 * At a 12th-order face rule this case read 1.01e-04, 2.24e-05, 4.59e-06 at
-	 * n = 12, 24, 48 -- converging at about O( h^2 ) where the expectation is a
-	 * mesh-independent floor near 1e-10. MEQ filed that upstream as lost
-	 * coverage, on the argument that "a quadrature residual that CONVERGES is
-	 * measuring a geometry rather than an instrument".
-	 *
-	 * THAT ARGUMENT HAS A HOLE AND UPSTREAM FOUND IT: two things converge. The
-	 * other is a curve the RULE under-resolves, which straightens as h falls.
-	 * Refining the rule at fixed h separates them, because no quadrature
-	 * recovers coverage that is not there -- and theConeIsWhatCostsTheTiling
-	 * below now runs that sweep. At n = 12 the cone-on sum goes
-	 *
-	 *     q8 2.61e-04   q12 1.01e-04   q20 1.34e-05   q40 6.68e-08   q80 5.40e-10
-	 *
-	 * and 5.40e-10 IS the cone-off floor. Coverage is exact with the cone and
-	 * without it. What the cone costs is the SMOOTHNESS of xi -> a( x( xi ) )
-	 * along a face: it drives the two interpolated vertex directions apart, the
-	 * foot map roughens, and a fixed-order Gauss rule under-resolves it.
-	 *
-	 * SO THE RULE IS RAISED TO 80 AND THE GATE STANDS AT ITS ORIGINAL VALUE.
-	 * Relaxing the gate would have been the wrong repair for the right symptom;
-	 * the gate was never too tight, the rule was too coarse for the family.
-	 *
-	 * The transferable part is the shape of the mistake. "It converges, so it is
-	 * geometry" ignores that an under-resolved quadrature of an h-dependent
-	 * integrand converges too. The discriminator is to refine the INSTRUMENT at
-	 * fixed geometry, which is the same move CLAUDE.md records for Richardson
-	 * extrapolation -- a column that keeps moving under mesh refinement while
-	 * the extrapolated one does not is measuring the instrument.
+	 * **EXACT TO ROUND-OFF, BECAUSE NOTHING IS DIFFERENCED.** The path is given
+	 * its level set's gradient, so each weight's da/dxi is the endpoint's
+	 * derivative in closed form rather than a central difference of the
+	 * position map. Measured: 5.3e-16, 0 and 2.8e-15 in double, 2.6e-07 to
+	 * 2.7e-07 in single -- two eps, FLAT in `h`, which is the property the case
+	 * exists for. A weight loss, which is what this guards, is `O( h )` and
+	 * would show as a column that falls; the region sweep below reads 1.8e-03
+	 * to 7e-03 for exactly that.
 	 */
-	/*
-	 * **AND "EXACT AT THE fd_step FLOOR" IS A STATEMENT ABOUT A STEP THAT
-	 * FOLLOWS THE FORMAT.** The weights come from a central difference of the
-	 * position map, so their truncation is `O( step^2 )` and
-	 * `meq::extensionFdStep()` is `1e-06` in double and **`5e-03` in single`,
-	 * which is `cbrt( eps )` either way. That moves the floor from `1e-12` to
-	 * `2.5e-05`. Measured: 2.60e-06 and 3.01e-06 across the sequence in
-	 * single, an order under it -- and FLAT in `h`, which is the property the
-	 * case exists for and which survives the format intact. A weight loss,
-	 * which is what this guards, is `O( h )` and would show as a column that
-	 * falls.
-	 */
-	double const stepFloor = meq::extensionFdStep()*meq::extensionFdStep();
 	for ( std::size_t i = 0; i < boundaryError.size(); ++i )
-		BOOST_TEST( boundaryError[ i ] < std::max( 1.0e-8, stepFloor ),
+		BOOST_TEST( boundaryError[ i ] < meq::tests::roundOffFloor( 1.0 ),
 		            "the boundary weights do not sum to |Gamma| at mesh " << i
 		            << ": relative " << boundaryError[ i ] << ". This should be "
-		            "EXACT at every mesh, at the fd_step floor of about 1e-10 -- "
-		            "an O( h ) error here is the WEIGHT LOSING ITS SIGN, which "
-		            "makes the sweep measure the length the foot map traverses "
-		            "rather than the piece of Gamma it covers. Those differ "
-		            "wherever the map backtracks, which on a staircase Gamma_h "
-		            "it does" );
+		            "EXACT at every mesh, to round-off -- an O( h ) error here is "
+		            "the WEIGHT LOSING ITS SIGN, which makes the sweep measure the "
+		            "length the foot map traverses rather than the piece of Gamma "
+		            "it covers. Those differ wherever the map backtracks, which on "
+		            "a staircase Gamma_h it does" );
 
 	/*
-	 * AND THE REGION SWEEP IS THE CONTROL, WHICH STILL CARRIES THE DEFECT.
+	 * AND THE REGION SWEEP TILES THE GAP, TO ROUND-OFF AS WELL.
 	 *
-	 * mfem::ExtensionRegionQuadrature uses std::abs( J.Det() ) and so counts a
-	 * fold twice, exactly as the boundary sweep did before its weight was
-	 * signed. Measured here: 6.96e-03, 3.29e-03, 1.84e-03 -- O( h ), against the
-	 * boundary sweep's 1e-10 on the same geometry and the same path family.
-	 *
-	 * IT IS DELIBERATELY NOT FIXED HERE. That routine is what
-	 * HDGExtensionIntegrator's lifting is built on, which is stage 5's machinery
-	 * and which MEQ has measured at k+2; changing its quadrature would move
-	 * results the suite pins, and is a claim that needs its own measurement
-	 * rather than a drive-by. The gate below is therefore set ABOVE the measured
-	 * value, to say "this is known and is not what is under test here".
+	 * Measured: 5.3e-16, 9.9e-15 and 1.9e-13 in double, 2.3e-07 to 8.4e-08 in
+	 * single, relative to the gap's area, which shrinks with h. An unsigned
+	 * weight, std::abs( J.Det() ), counted a fold twice and read 6.96e-03,
+	 * 3.29e-03 and 1.84e-03 -- O( h ) -- until upstream signed it as the
+	 * boundary sweep's is (367b5876e4). The bound sits between the two: three
+	 * orders above double's round-off and an order under the O( h ) a lost or
+	 * doubled weight gives.
 	 */
-	BOOST_TEST( regionError.back() < 1.0e-2,
+	BOOST_TEST( regionError.back() < 1.0e-10 + meq::tests::roundOffFloor( 1.0 ),
 	            "the region weights do not sum to |Omega| - |D_h|: relative "
-	            << regionError.back() << ", worse than the O( h ) already known. "
-	            "That is the EXISTING sweep and its unsigned weight; if this has "
-	            "grown, the path family's coverage has changed and the boundary "
-	            "result above needs rechecking too" );
-
-	// **AND A RANKING IS EMPTY WHERE BOTH COLUMNS HAVE REACHED THE SAME
-	// FLOOR.** The separation is seven orders in double -- 1.1e-10 against
-	// 4.0e-04 -- and in single the central difference the weights are built
-	// from has a step of 5.0e-03 rather than 1.0e-06, so its own truncation is
-	// 2.5e-05 and BOTH columns sit under it: 5.19e-06 signed against 3.37e-06
-	// unsigned. Which of two floors is smaller is not a measurement. The sums
-	// themselves are still asserted above, and they are what says the tiling
-	// covers Gamma. clearOfContaminant() is true in double, where the unsigned
-	// sweep is eight orders clear of its own step.
-	if ( meq::tests::clearOfContaminant( regionError.back(), stepFloor ) )
-	BOOST_TEST( boundaryError.back() < regionError.back(),
-	            "the signed boundary sweep is no better than the unsigned region "
-	            "sweep on the same geometry and the same paths. The whole point "
-	            "of signing the weight is that it is" );
+	            << regionError.back() << ". With the level set's gradient given "
+	            "this tiles to round-off; an O( h ) error is a lost or doubled "
+	            "weight, and the boundary result above needs rechecking too" );
 }
 
 /*
@@ -785,6 +745,7 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
 
 		int const gammaH = sub.bdr_attributes.Max();
 		mfem::VertexConePath path( sub, gammaH, circle, 6.0*h );
+		path.SetLevelSetGradient( meq::circleLevelSet( centreR, centreZ, radius ).gradient );
 		mfem::Array<int> gammaHMarker( gammaH );
 		gammaHMarker = 0;
 		gammaHMarker[ gammaH - 1 ] = 1;
@@ -877,6 +838,7 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
 
 		int const gammaH = sub.bdr_attributes.Max();
 		mfem::VertexConePath path( sub, gammaH, circle, 6.0*0.05 );
+		path.SetLevelSetGradient( meq::circleLevelSet( centreR, centreZ, radius ).gradient );
 		mfem::Array<int> gammaHMarker( gammaH );
 		gammaHMarker = 0;
 		gammaHMarker[ gammaH - 1 ] = 1;
@@ -1054,6 +1016,10 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 			 * a single bit. M-189, and DO NOT "fix" a recurrence by widening
 			 * the tolerance below: a disagreement here means the two sweeps
 			 * differ in something, and the step is the first thing to check.
+			 *
+			 * The path now carries its level set's gradient, so neither half
+			 * differences anything and the step is ignored by both. It is
+			 * still passed, so that a path built without one stays matched.
 			 */
 			mfem::ExtensionBoundaryQuadrature( *ftr, *c.path, faceRule,
 				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
@@ -1146,32 +1112,31 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 
 /*
  * ===========================================================================
- * IS THE CONE WHAT COSTS THE TILING? THE CONTROL THAT ANSWERS IT
+ * WHAT THE CONE COSTS THE TILING: RULE ORDER, AND NOT COVERAGE
  * ===========================================================================
  *
- * theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap is red: the weights
- * sum to |Gamma| only to O( h^2 ) where the recorded expectation is the central
- * difference's floor, mesh-independent at about 1e-10. Two stories fit that
- * equally well and they call for opposite actions:
- *
- *   (a) mfem::VertexConePath's cone C( x ), which is new, changed the path
- *       family and the images stopped tiling. Then something regressed and it
- *       belongs upstream.
- *   (b) MEQ's circle never tiled to 1e-10 and the recorded numbers came from a
- *       different geometry. Then nothing regressed, the expectation was never
- *       MEQ's to hold, and the gate is wrong rather than the library.
+ * mfem::VertexConePath's cone C( x ) restricts each vertex's direction, which
+ * could in principle lose coverage -- images that stop tiling Gamma -- or only
+ * roughen the foot map along a face, which a fixed-order rule under-resolves.
+ * The two call for opposite actions: the first is a defect upstream's, the
+ * second a rule order MEQ chooses.
  *
  * THE COIN-FLIP IS FREE, BECAUSE THE CONE TURNS ITSELF OFF. HasCone() is
- * documented as "whether the mesh handed to the constructor was a SubMesh with
- * a parent to read edges from", so a path built on a PLAIN Mesh copy of the
- * same D_h has the identical geometry, the identical Gamma_h and no cone. Same
- * faces, same level set, same sweep -- one variable.
+ * "whether the mesh handed to the constructor was a SubMesh with a parent to
+ * read edges from", so a path built on a PLAIN Mesh copy of the same D_h has
+ * the identical geometry, the identical Gamma_h and no cone. Same faces, same
+ * level set, same sweep -- one variable. mfem::Mesh plain( sub ) copies the
+ * elements and boundary attributes and drops the parent pointer.
  *
- * Slicing the copy is the whole trick: mfem::Mesh plain( sub ) copies the
- * elements and boundary attributes and drops the parent pointer, which is
- * exactly the difference being isolated.
+ * And the rule order is swept at fixed h, which is what separates the two.
+ * Measured in double, cone on, n = 12: q8 2.4e-10, q12 3.0e-13, q20 8.8e-16;
+ * cone off at q12, 8.8e-16. From q20 both columns are at round-off at every
+ * mesh. So the cone costs rule order and nothing else, and coverage is what
+ * is asserted: at the finest rule, both columns tile Gamma to round-off. In
+ * single both sit at a couple of eps at every rule, where which is smaller is
+ * not a measurement.
  */
-BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
+BOOST_AUTO_TEST_CASE( theConeCostsRuleOrderAndNotCoverage )
 {
 	double const centreR = 1.10;
 	double const centreZ = 0.0;
@@ -1185,14 +1150,13 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 		return std::sqrt( dr*dr + dz*dz ) - radius;
 	};
 
-	std::printf( "\n  DOES THE CONE COST THE TILING?  ( |Gamma| = %.10f )\n\n",
+	std::printf( "\n  WHAT DOES THE CONE COST THE TILING?  ( |Gamma| = %.10f )\n\n",
 	             exactPerimeter );
 	std::printf( "    %5s %8s %16s %11s %16s %11s\n",
 	             "n", "h", "cone on", "rel", "cone off", "rel" );
 
-	std::vector<double> withCone;
-	std::vector<double> withoutCone;
 	std::vector<double> coneOnFinestRule;
+	std::vector<double> coneOffFinestRule;
 
 	for ( int n : { 12, 24, 48 } )
 	{
@@ -1247,6 +1211,7 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 			// checks both halves rather than assuming either.
 			mfem::VertexConePath path( meshRef, gammaH, circle, 6.0*h,
 			                           16, 3, 32, 1.0e-13, 100, /*use_cone=*/true );
+			path.SetLevelSetGradient( meq::circleLevelSet( centreR, centreZ, radius ).gradient );
 			cone[ which ] = path.HasCone();
 
 			for ( int oi = 0; oi < nOrders; ++oi )
@@ -1292,26 +1257,31 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 		// fixed h bring the sum back to the coverage floor?
 		coneOnFinestRule.push_back(
 			std::abs( sums[ 0 ][ nOrders - 1 ] - exactPerimeter )/exactPerimeter );
+		coneOffFinestRule.push_back(
+			std::abs( sums[ 1 ][ nOrders - 1 ] - exactPerimeter )/exactPerimeter );
 
 		BOOST_TEST_REQUIRE( cone[ 0 ], "the SubMesh path has no cone at n = " << n
 		                    << ", so the two columns are the same experiment" );
 		BOOST_TEST_REQUIRE( !cone[ 1 ], "the plain-Mesh path still has a cone at n = "
 		                    << n << ", so slicing did not drop the parent" );
 
-		withCone.push_back( relOn );
-		withoutCone.push_back( relOff );
 	}
 
 	std::printf( "\n" );
 	std::fflush( stdout );
 
-	BOOST_TEST( withoutCone.back() < withCone.back(),
-	            "turning the cone off does not improve the tiling at the finest "
-	            "mesh: " << withoutCone.back() << " against " << withCone.back()
-	            << ". Then the cone is NOT what costs it, and the O( h^2 ) is a "
-	            "property of MEQ's circle or of the routine -- either way the red "
-	            "gate beside this is measuring the wrong thing and the recorded "
-	            "1e-10 expectation never applied here" );
+	for ( std::size_t i = 0; i < coneOnFinestRule.size(); ++i )
+	{
+		BOOST_TEST( coneOnFinestRule[ i ] < meq::tests::roundOffFloor( 1.0 ),
+		            "with the cone, the finest rule's sum misses |Gamma| by "
+		            << coneOnFinestRule[ i ] << " relative at mesh " << i
+		            << ". No rule recovers coverage that is not there, so the "
+		            "cone's images no longer tile Gamma: upstream's" );
+		BOOST_TEST( coneOffFinestRule[ i ] < meq::tests::roundOffFloor( 1.0 ),
+		            "without the cone, the finest rule's sum misses |Gamma| by "
+		            << coneOffFinestRule[ i ] << " relative at mesh " << i
+		            << ", so the path family itself has lost coverage" );
+	}
 }
 
 /*
@@ -1428,6 +1398,7 @@ namespace
 
 		d.path = std::make_unique<mfem::VertexConePath>(
 			*d.sub, d.gammaH, halfDiscLevelSet, 6.0*d.h );
+		d.path->SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, halfDiscGamma ).gradient );
 		return d;
 	}
 
@@ -1504,6 +1475,7 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheExteriorDatumOnTheHalfDisc )
 			gammaHMarker[ gammaH - 1 ] = 1;
 
 			mfem::VertexConePath path( *sub, gammaH, halfDiscLevelSet, 6.0*h );
+			path.SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, halfDiscGamma ).gradient );
 
 			mfem::FunctionCoefficient source( []( mfem::Vector const &x )
 			{
@@ -2289,6 +2261,7 @@ BOOST_AUTO_TEST_CASE( amperesLawIsExactOnAContourThatAvoidsTheAxis )
 			gammaHMarker = 0;
 			gammaHMarker[ gammaH - 1 ] = 1;
 			mfem::VertexConePath path( *sub, gammaH, circle, 6.0*h );
+			path.SetLevelSetGradient( meq::circleLevelSet( centreR, centreZ, radius ).gradient );
 
 			mfem::FunctionCoefficient source(
 				[ & ]( mfem::Vector const &x )
@@ -2720,6 +2693,7 @@ BOOST_AUTO_TEST_CASE( theCoupledSolveSurvivesTheAdaptiveLoop )
 			// long search and the fine part is not harmed by having one.
 			mfem::VertexConePath path( sub, gammaH, halfDiscLevelSet,
 			                           12.0*domain.largestElement() );
+			path.SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, halfDiscGamma ).gradient );
 
 			meq::GradShafranovSolver solver( sub, order );
 			solver.setSource( source );
@@ -3172,6 +3146,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients )
 				int const gammaH = domain.gammaHAttribute();
 				mfem::VertexConePath path( sub, gammaH, halfDiscLevelSet,
 				                           12.0*domain.largestElement() );
+				path.SetLevelSetGradient( meq::circleLevelSet( 0.0, 0.0, halfDiscGamma ).gradient );
 
 				meq::GradShafranovSolver solver( sub, order );
 				solver.setSource( source );

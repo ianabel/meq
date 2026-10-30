@@ -2501,19 +2501,16 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorSolvesThroughTheDriver )
 	std::printf( "    psi_inner printed %.6e, library %.12e\n", driverAxis, m.psiAxis );
 	std::fflush( stdout );
 
-	// IN SINGLE THE TWO ROUTES MEET AT THE EXTENSION'S OWN FLOOR. The transfer
-	// differences its path endpoints at extensionFdStep(), so it carries
-	// eps/fd_step of the field it moves -- 2.4e-05 relative in single -- and
-	// the driver and the library reach their endpoints through two
-	// expressions of one level set. Measured 1.578e-06, peaking at Gamma, against
-	// eps/fd_step x |psi_bnd| = 1.556e-06: a ratio of 1.01. Applied in single
-	// only, since in double that floor would loosen the bit-identity this
-	// asserts there. M-272.
+	// IN SINGLE THE TWO ROUTES MEET AT THE FORMAT'S ROUND-OFF ON THE FIELD THE
+	// TRANSFER MOVES, |psi_bnd|. Both reach their path endpoints through one
+	// level set and differentiate them exactly (meq::LevelSet). Measured
+	// 1.055e-07, 14 eps of |psi_bnd|; it read 1.578e-06 while the endpoints
+	// were differenced (M-272, M-324). Applied in single only, since in double
+	// that floor would loosen the bit-identity this asserts there.
 	double driverBound = meq::tests::scalarAgreementFloor( 1.0e-12, largest );
 #ifdef MFEM_USE_SINGLE
-	driverBound = std::max( driverBound, 4.0*std::abs( m.psiBoundary )
-	                        *static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )
-	                        /meq::extensionFdStep() );
+	driverBound = std::max( driverBound,
+	                        meq::tests::roundOffFloor( std::abs( m.psiBoundary ) ) );
 #endif
 	BOOST_TEST( worst < driverBound,
 		"the driver's psi_h differs from the library's on geq's problem by " << worst
@@ -3346,12 +3343,11 @@ BOOST_AUTO_TEST_CASE( theShippedMirrorOnTheCardIsTheHosts )
 	double bound = meq::tests::scalarAgreementFloor( 1.0e-12*largest, largest );
 	double fluxBound = meq::tests::scalarAgreementFloor( 1.0e-12*fluxLargest, fluxLargest );
 #ifdef MFEM_USE_SINGLE
-	// The driver comparison's own floor in single, the extension's
-	// eps/fd_step of the field it moves (theShippedMirrorSolvesThroughTheDriver).
-	double const extension = 4.0*static_cast<double>(
-		std::numeric_limits<mfem::real_t>::epsilon() )/meq::extensionFdStep();
-	bound = std::max( bound, extension*largest );
-	fluxBound = std::max( fluxBound, extension*fluxLargest );
+	// Two factorisations' round-off in single, against each field's own size.
+	// Measured: q_h 3.05e-07 of a largest 5.0e-02, about 50 eps, where 64 eps is
+	// scalarAgreementFloor()'s; psi_h is bounded below by the physical flux.
+	bound = std::max( bound, meq::tests::roundOffFloor( largest ) );
+	fluxBound = std::max( fluxBound, meq::tests::roundOffFloor( fluxLargest ) );
 	// AND psi_h IS A REMAINDER, SO ITS ROUND-OFF IS THE PHYSICAL FLUX'S. The
 	// conductors are out of the mesh, psi_h = psi - psi_c is about 1e-3 at its
 	// largest, and the terms it is made from are the size of psi, 1.73. On a
