@@ -6264,6 +6264,9 @@ namespace meq
 			mfem::Coefficient const *guessSeedFrom = nullptr;
 			mfem::Vector guessSeedPotential;
 			mfem::Vector guessSeedTrace;
+			/// The flux block's seed, cached beside the other two: on a field
+			/// guess it is the costliest of the three (M-325).
+			mfem::Vector guessSeedFlux;
 			/// Forget the cached seed. Called by both setInitialGuess()
 			/// overloads, which is what keeps the cache honest.
 			void dropGuessSeed();
@@ -6308,8 +6311,17 @@ namespace meq
 			void projectPathTraceOntoGammaH( mfem::Coefficient &coeff,
 			                                 mfem::Vector &target ) const;
 
+			/// @a mayThread only for a coefficient safe to evaluate from
+			/// several threads at once; see prepare().
 			void projectOntoTrace( mfem::Coefficient &coeff,
-			                       mfem::GridFunction &target ) const;
+			                       mfem::GridFunction &target,
+			                       bool mayThread = false ) const;
+
+			/// GridFunction::ProjectCoefficient's default arm onto the
+			/// potential space, with @a mayThread as projectOntoTrace() has it.
+			void projectOntoPotential( mfem::Coefficient &coeff,
+			                           mfem::GridFunction &target,
+			                           bool mayThread ) const;
 
 			/// The transferring paths, or null on the fitted path. Borrowed.
 			mfem::TransferPath *transferPath;

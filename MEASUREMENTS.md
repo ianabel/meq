@@ -21775,3 +21775,215 @@ never the step's.
 with `runs/probe-gradient/tools/probe-hooks.patch` applied: the `MEQ_PROBE_*`
 hooks, not for merge); `runs/probe-amplifier/` for `cb96cf3`'s arms;
 `builds/double.grad.suite.log`, `builds/single.grad.suite.log`.
+
+### M-325
+
+**THE SECOND A100 RUN: THE GPU NOW WINS ON WALL TIME IN EVERY CASE, 2.9x
+AGAINST 64 EPYC CORES ON `ff3`, WHERE [M-319](#m-319) LOST 2.4x. THE THREE
+ONE-CORE HOST STEPS ARE GONE. THE CARD WAS NOT THE SAME MODEL.**
+
+**Setup.** The Oct 27 kit brought up to date with `tools/device-timing/update.sh`:
+MEQ `7c1d3ef`, `meq-integration` `6e1cc66618` (the mirror's `b9c1b8a`). One
+exclusive GPU node, `nid200260`: one AMD EPYC 7763 (64 cores) and an
+**A100-SXM4-80GB at 500 W**, where M-319 had an A100-SXM4-40GB at 400 W;
+same driver (580.178.04), `cudatoolkit/13.2`. FP64 is the same on both
+cards; memory bandwidth is about 1.3x higher on the 80GB part (2.0 against
+1.6 TB/s), so a bandwidth-bound device leg may have gained up to that from
+the card alone. Arms, rounds and cases as M-319. 33 of 33 runs exit 0, and
+every arm prints M-319's `psi_ax` on every case.
+
+| case | elements | arm | wall | setup | solve | output | wall vs cpu64 | M-319's cuda wall |
+|---|---|---|---|---|---|---|---|---|
+| mf | 4,848 | cpu8 | 2.04 | 0.05 | 1.72 | 0.27 | | |
+| | | cpu64 | 1.77 | 0.04 | 1.50 | 0.22 | | |
+| | | cuda | **1.23** | 0.04 | 0.99 | 0.21 | **1.44x faster** | 2.88 |
+| ff1 | 6,245 | cpu8 | 0.90 | 0.05 | 0.58 | 0.27 | | |
+| | | cpu64 | 0.71 | 0.05 | 0.47 | 0.19 | | |
+| | | cuda | **0.48** | 0.05 | 0.27 | 0.16 | **1.48x faster** | 1.78 |
+| ff2 | 25,487 | cpu8 | 3.11 | 0.11 | 2.27 | 0.74 | | |
+| | | cpu64 | 2.26 | 0.08 | 1.77 | 0.41 | | |
+| | | cuda | **1.04** | 0.11 | 0.58 | 0.36 | **2.17x faster** | 6.11 |
+| ff3 | 102,840 | cpu8 | 11.93 | 0.33 | 9.04 | 2.56 | | |
+| | | cpu64 | 8.03 | 0.22 | 6.61 | 1.21 | | |
+| | | cuda | **2.75** | 0.34 | 1.83 | 0.59 | **2.92x faster** | 22.53 |
+
+**M-319's three one-core steps, on `ff3`:**
+
+| step | M-319 cuda | now cuda | now cpu64 |
+|---|---|---|---|
+| `postProcess`, `DarcyForm::Reconstruct()` | 14.43 s | **0.29 s** | 0.86 s |
+| re-assembly, the first `prepare()` | 2.42 s | **0.53 s** | 1.65 s |
+| the post-solve axis checks | 1.55 s | **0.02 s** | 0.33 s |
+
+Each now beats 64 cores ([M-321](#m-321), [M-322](#m-322)). The fold's
+phase C download ([M-321](#m-321)) is 1.57 MB on `ff3`, from 337 MB.
+
+**The device legs**, summed as M-319 sums them:
+
+| case | cuda | cpu64 | cuda against cpu64 | M-319 |
+|---|---|---|---|---|
+| mf | 0.453 | 0.822 | 1.81x | 1.68x |
+| ff1 | 0.160 | 0.273 | 1.71x | 1.29x |
+| ff2 | 0.360 | 1.100 | 3.06x | 1.93x |
+| ff3 | 1.106 | 4.081 | **3.69x** | 2.39x |
+
+The host arms' device legs did not move, and their walls fell only by setup
+(`ff3`'s 1.00 s to 0.22 on cpu64, setup threaded since). How much of the
+device legs' 1.69x on `ff3` (1.866 s to 1.106 s) is the software and how much
+is the card's bandwidth, this run cannot say. A run pinned to the 40GB nodes
+would.
+
+**What the CUDA arm spends its time on now**, `ff3`, best round, 2.75 s:
+* **The trace factorisation, 0.48 s**, cuDSS, at about 3.3 host cores. It
+  barely moved from M-319's 0.51.
+* **Re-assembly, 0.53 s**, one call at 1.0 cores.
+* **The gradient, 0.28 s**, nearly all `ComputeH`.
+* **Output, 0.59 s**: `postProcess` 0.29, and the writer 0.3. The writer
+  costs 0.3 to 0.5 s in every arm, so it is host work common to all.
+* **Setup, 0.34 s**, threaded at about 4.4 cores on the arm's 8 host
+  threads, as on cpu8.
+
+**On `mf`, re-assembly is one-core host work in EVERY arm**: 3 calls, 0.19 to
+0.20 s on cpu8, cpu64 and cuda alike, at 1.0 to 1.25 cores. It is 15% of the
+CUDA wall, and nothing has moved it to the card or threaded it.
+
+**Reproduce.** `runs/device-timing/perlmutter-20261030/results-nid200260-20261030-1018.tar.gz`,
+and `python3 tools/device-timing/summarize.py results/`.
+
+### M-326
+
+**`mf`'S RE-ASSEMBLY WAS MEQ SEEDING ITS ITERATE FROM THE GUESS, ON ONE CORE.
+THREADED, IT IS 5x FASTER ON EVERY ARM, AND THE SEED IS UNCHANGED TO THE BIT.
+`ff3`'S IS UPSTREAM'S FORM BUILD, AND IS ASKED.**
+
+**Setup.** MEQ `7c1d3ef` plus this change, `meq-integration` `6e1cc66618`,
+the RTX 2070 SUPER under WSL2, `OMP = MKL = 8`, the machine shared with
+another session's suite (load 7 to 11), so the times are indicative.
+`perf record --call-graph dwarf` at 1 to 2 kHz, the samples under
+`GradShafranovSolver::prepare()` on the main thread.
+
+**Where `mf`'s 0.18 s went** (3 preparations; [M-325](#m-325) read 0.19 to
+0.20 s at one core on every A100 arm):
+
+| | share of `prepare()` |
+|---|---|
+| `seedFluxFromGuess()`, a weighted projection per element | 55% |
+| `projectOntoTrace()` and the potential's `ProjectCoefficient()` | 21% |
+| `buildForms()`, upstream's | 22% |
+
+The seed ran on all 4 seeded preparations and the two projections on 3. The
+trace and potential seeds were cached between preparations, but the flux
+seed was not. Each later call re-sets the guess, which drops the cache.
+
+**The fix.** The three loops thread on every arm, and under a Device by
+`meq::setupLoopMayThread()`, as the warm start does ([M-323](#m-323)). A
+field guess is read by MEQ's own evaluators, `GuessFieldValue` and
+`GuessFieldGradient`: the element arms of `GridFunction::GetValue()` and
+`GetGradient()`, but with a local `DofTransformation` and an explicit sum.
+MFEM's own take the two-argument `GetElementDofs()`, which writes the space's
+mutable `DoFTrans`, and under a Device a dot product that reduces through a
+static workspace. The field is read, and the blocks written, through host
+pointers taken before any thread. The flux seed is cached beside the other
+two. A bare `Coefficient` guess (ramp, bump, conductors) is the caller's
+object, so it stays on one thread.
+
+| `mf`, re-assembly | before | after |
+|---|---|---|
+| `cpu`, 8 threads | 0.181 s at 1.86 cores | **0.036 to 0.039 s** at 7.3 to 8.2 |
+| `cuda`, 8 host threads | 0.186 s at 1.00 | **0.036 to 0.037 s** at 6.2 to 6.3 |
+
+`psi_ax = 3.759850e-01` and the constraint `-6.466e-12` are unchanged on
+both. **Bit for bit, asserted.** `WarmStartTests`'s
+`aThreadedGuessSeedIsTheSerialOneAndMfemsBitForBit` prepares a solver from a
+field guess and compares the whole iterate:
+* one thread against four, under `debug` (one thread by the predicate) and
+  `cuda` (threaded);
+* the trace and potential against a bare `GridFunctionCoefficient` of the
+  same field, which is MFEM's readers;
+* the flux against the pre-change loop on MFEM's
+  `GradientGridFunctionCoefficient`;
+* and a second `prepare()` from the cache.
+
+All are equal in double and single. MFEM's host dot product sums in index
+order from zero (`general/reducers.hpp`'s host arm), so the explicit sum is
+the same arithmetic.
+
+**`ff3`'s re-assembly is a different leg**, at 1.2 s here and 0.53 s on the
+A100 under CUDA at one core. MEQ's seed is 10% of it. The rest is upstream's
+`buildForms()`:
+
+| | share of `prepare()`, `ff3`, cuda |
+|---|---|
+| `DarcyHybridization::Init()`: host zero-fills of the local blocks (~22%), `ConstructC()`'s host read of `Ct` (6%) | 37.7% |
+| the extension's boundary flux mass, a serial per-face loop bisecting each path's endpoint | 14.1% |
+| `Finalize()`'s host `memmove` and `InvertA()` | 10.7% |
+| `HDGFaceScatterBatched()`'s per-call `cudaFree` and upload (upstream: the scatter kernel's own time surfacing at the free, [M-327](#m-327)) | 9.9% |
+
+Sent upstream as `HDG-PREPARE-HOST-COSTS-FROM-MEQ.md`. These are WSL2's
+proportions, where first-touch page faults may inflate the zero-fills.
+
+**Suites:** double 88/89, single 87/89, the standing reds only (`PlasmaEdgeConvergence` in both, `DriverAcceptance` in single); `WarmStartTests` and its `_cuda` twin green in both.
+
+**Reproduce.** `meq --device {cpu,cuda} --profile --mesh-ready
+machine-f-diiid.toml` with `runs/device-timing/mesh/`'s mesh, and
+`WarmStartTests` under `MEQ_TEST_DEVICE=debug` and `cuda`.
+
+### M-327
+
+**UPSTREAM'S FORM BUILD UNDER A DEVICE: THE LOCAL BLOCKS STAY ON THE CARD AND
+THE EXTENSION'S BOUNDARY FACES THREAD. `ff3`'S RE-ASSEMBLY UNDER CUDA IS 1.7x
+FASTER HERE, WITH THE SAME ANSWERS. MEQ CHANGED ONLY AN AUDIT COMMENT.**
+
+**Setup.** MEQ at [M-326](#m-326), `meq-integration` `06d6680729` (lf
+`c7cc6983d5`, interp `cb4d330f04`, subdomains `760ac96fe5`), the RTX 2070
+SUPER under WSL2, `OMP = MKL = 8`, `fixed-f-diiid` at `RefinementLevels = 3`,
+`--profile`. Load 4 to 6 from another session, so indicative.
+
+**What upstream found** (`nsys` and `perf` on our `ff3`). The kernels ran 101
+ms of a 1.05 s build. The rest was the local blocks crossing the bus: zeroed on
+the host (about 300 MB of fresh pages), uploaded as zeros by each batched
+kernel, downloaded and owned at the end of each group, `A` copied on the host
+for the linear backup and uploaded again by `InvertA()`. 492 MB went up and 396
+MB came down. Our row for `HDGFaceScatterBatched()`'s `cudaFree` was misread:
+it is the scatter kernel's own run time, surfacing at the next synchronising
+call, not a host cost.
+
+**What changed upstream.**
+* Under batched assembly on a device the blocks are zeroed on the device. Each
+  host loop takes exactly what it writes, and the end-of-group syncs make
+  readable only what a host reader needs, leaving `A` and `D` on the card.
+  `Finalize()`'s backup is a device-to-device copy.
+* The extension's crossing search is Brent's method to the same round-off:
+  `ff3`'s level-set calls through `FirstCrossing()` 1.01 M to 200,542.
+* `AssembleFluxMassBdrMatricesBatched()`'s face loop threads on
+  `SetIntegratorsThreadSafe()`, under a Device too when the host memory is plain
+  HOST. **That reaches MEQ's level set and its gradient from several threads.**
+  Both are reentrant (`LevelSet.hpp`, `BoundaryShape::levelSet()` and
+  `levelSetGradient()`: const, no mutable or static state), and the audit
+  comment at `SetIntegratorsThreadSafe()` in `GradShafranov.cpp`, which said
+  the extension integrator was not reached by a threaded loop, now says it is
+  and what that rests on.
+
+| `ff3`, re-assembly | before ([M-326](#m-326)) | after |
+|---|---|---|
+| `cuda`, 8 host threads | 1.20 s | **0.68 to 0.71 s** (1.08 s cold, first run) |
+| `cpu`, 8 threads | | 2.13 s at 1.86 cores |
+
+Upstream's own interleaved pairs on this card read 2.15 s to 1.34 s for the
+same leg (their machine loaded by our suites). Ours is a before from
+M-326's profile and an after from four runs, not interleaved: read it as the
+same ratio, not as a new number.
+
+`psi_ax = 2.897815e-01` on `cuda` and `cpu`, as on the A100 ([M-325](#m-325));
+the constraint at 1e-14 on both.
+
+**What is left.** 278 MB still comes down during the build (`Ct`, `B`, `E`,
+`G`, `H`, for NPC's batched reduce and the host face loops), into cold pages,
+422 ms under WSL2 by upstream's count; whether it matters on the A100 is the
+next run's to say. The host arm's build is still 1.9 cores of 8. A device path
+for the extension's path integrals was not attempted.
+
+**Suites:** double 88/89, single 87/89, the standing reds only (`PlasmaEdgeConvergence` in both, `DriverAcceptance` in single); `DeviceParity`, `ExtensionConvergence` and `NewtonConvergencePaths_cuda` green in both.
+
+**Reproduce.** `meq --device {cuda,cpu} --profile` on `fixed-f-diiid.toml`
+with `RefinementLevels = 3`, from a directory holding its `.dat` files.

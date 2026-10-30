@@ -1,6 +1,7 @@
 // Unit tests for the warm start's threading under an mfem::Device:
-// meq::setupLoopMayThread() and the two loops it gates, meq::FieldTransfer's
-// projection and meq::PointLocator's host search.
+// meq::setupLoopMayThread() and the loops it gates, meq::FieldTransfer's
+// projection, meq::PointLocator's host search, and the seeding of a solver's
+// iterate from a field guess in GradShafranovSolver::prepare().
 //
 // A warm start is setup, host work on every arm, so under a Device it threads
 // where it provably cannot reach MFEM's memory manager, which is not
@@ -21,6 +22,9 @@
 #define BOOST_TEST_MODULE WarmStart
 #include <boost/test/unit_test.hpp>
 
+#include "meq/GradShafranov.hpp"
+#include "meq/Profiles.hpp"
+#include "meq/Source.hpp"
 #include "meq/Threading.hpp"
 #include "meq/WarmStart.hpp"
 
@@ -29,6 +33,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #ifdef MFEM_USE_OPENMP
 	#include <omp.h>
@@ -176,4 +181,145 @@ BOOST_AUTO_TEST_CASE( aThreadedWarmStartIsTheSerialOneBitForBit )
 	double const error = threaded.ComputeL2Error( guessCoefficient );
 	BOOST_TEST_MESSAGE( "L2 error of the transferred guess: " << error );
 	BOOST_TEST( error < 5.0e-3 );
+}
+
+// THE SEED OF A FIELD GUESS, THREADED, IS THE ONE-THREAD SEED AND MFEM'S, TO
+// THE BIT.
+//
+// prepare() seeds the iterate from a field guess with three loops of its own:
+// the trace and the potential through MEQ's reading of the field, and the flux
+// by a weighted projection of its gradient. Each element and face writes its
+// own dofs with the same arithmetic in the same order on any thread, so three
+// equalities are the claim:
+//
+//   * one thread against four, the whole iterate;
+//   * the field route against a bare Coefficient of the same field, which
+//     takes MFEM's GridFunctionCoefficient on one thread: the potential and
+//     trace blocks;
+//   * the flux block against the projection written with MFEM's
+//     GradientGridFunctionCoefficient and SetSubVector(), which is what the
+//     loop was before it threaded;
+//
+// and a second prepare() takes all three from the cache unchanged.
+BOOST_AUTO_TEST_CASE( aThreadedGuessSeedIsTheSerialOneAndMfemsBitForBit )
+{
+	deviceOnce();
+
+	// R in [ 0.6, 1.6 ], clear of the axis; z in [ -0.6, 0.6 ].
+	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+		10, 12, mfem::Element::TRIANGLE, false, 1.0, 1.2 );
+	for ( int v = 0; v < mesh.GetNV(); ++v )
+	{
+		mfem::real_t *const point = mesh.GetVertex( v );
+		point[ 0 ] += static_cast<mfem::real_t>( 0.6 );
+		point[ 1 ] -= static_cast<mfem::real_t>( 0.6 );
+	}
+
+	auto pPrime = std::make_shared<meq::ConstantProfile const>( 0.45 );
+	auto ggPrime = std::make_shared<meq::ConstantProfile const>( 0.30 );
+	meq::NormalisedMHDSource source( pPrime, ggPrime, 1.0, 1.0 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guessCoefficient( guessValue );
+
+	struct Seed
+	{
+		mfem::Vector state, cached, flux;
+		int potentialSize = 0, traceSize = 0;
+	};
+	auto seedOf = [ & ]( bool asField, int threads )
+	{
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setSource( source, 0.3 );
+		solver.setBoundaryData( zero );
+		mfem::GridFunction guess(
+			const_cast<mfem::FiniteElementSpace *>( solver.potential().FESpace() ) );
+		guess.ProjectCoefficient( guessCoefficient );
+		mfem::GridFunctionCoefficient bare( &guess );
+		if ( asField )
+			solver.setInitialGuess( guess );
+		else
+			solver.setInitialGuess( bare );
+
+#ifdef MFEM_USE_OPENMP
+		int const threadsBefore = omp_get_max_threads();
+		omp_set_num_threads( threads );
+#else
+		static_cast<void>( threads );
+#endif
+		Seed out;
+		solver.prepare();
+		out.state = solver.state();
+		solver.prepare();
+		out.cached = solver.state();
+#ifdef MFEM_USE_OPENMP
+		omp_set_num_threads( threadsBefore );
+#endif
+		out.potentialSize = solver.potential().Size();
+		out.traceSize = solver.trace().Size();
+
+		// The flux seed as it was written before it threaded.
+		mfem::FiniteElementSpace &fluxSpace =
+			*const_cast<mfem::FiniteElementSpace *>( solver.flux().FESpace() );
+		mfem::GradientGridFunctionCoefficient gradient( &guess );
+		mfem::FunctionCoefficient radius(
+			[]( mfem::Vector const &x ) { return x( 0 ); } );
+		mfem::VectorMassIntegrator mass( radius );
+		mfem::VectorDomainLFIntegrator load( gradient );
+		mfem::GridFunction flux( &fluxSpace );
+		flux = 0.0;
+		mfem::Array<int> vdofs;
+		mfem::DenseMatrix elementMass;
+		mfem::Vector elementLoad, elementFlux;
+		mfem::IsoparametricTransformation transformation;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &element = *fluxSpace.GetFE( e );
+			mesh.GetElementTransformation( e, &transformation );
+			mass.AssembleElementMatrix( element, transformation, elementMass );
+			load.AssembleRHSElementVect( element, transformation, elementLoad );
+			mfem::DenseMatrixInverse inverse( elementMass );
+			elementFlux.SetSize( elementLoad.Size() );
+			inverse.Mult( elementLoad, elementFlux );
+			elementFlux.Neg();
+			fluxSpace.GetElementVDofs( e, vdofs );
+			flux.SetSubVector( vdofs, elementFlux );
+		}
+		flux.HostRead();
+		out.flux = flux;
+		return out;
+	};
+
+	auto same = []( mfem::real_t const *a, mfem::real_t const *b, int n )
+	{
+		return std::memcmp( a, b, sizeof( mfem::real_t )*static_cast<std::size_t>( n ) ) == 0;
+	};
+
+	Seed serial = seedOf( true, 1 );
+	Seed threaded = seedOf( true, 4 );
+	Seed mfems = seedOf( false, 1 );
+	// The copies may be device-valid, and under `debug` their host pages are
+	// protected until something asks for them back.
+	for ( Seed *seed : { &serial, &threaded, &mfems } )
+	{
+		seed->state.HostRead();
+		seed->cached.HostRead();
+		seed->flux.HostRead();
+	}
+
+	int const total = serial.state.Size();
+	int const fluxSize = total - serial.potentialSize - serial.traceSize;
+	BOOST_REQUIRE( fluxSize > 0 );
+	BOOST_REQUIRE( threaded.state.Size() == total && mfems.state.Size() == total );
+
+	BOOST_TEST( same( serial.state.GetData(), threaded.state.GetData(), total ) );
+	BOOST_TEST( same( serial.state.GetData(), serial.cached.GetData(), total ) );
+	BOOST_TEST( same( threaded.state.GetData(), threaded.cached.GetData(), total ) );
+
+	// The potential and trace blocks, after the flux block.
+	BOOST_TEST( same( serial.state.GetData() + fluxSize,
+	                  mfems.state.GetData() + fluxSize, total - fluxSize ) );
+	BOOST_TEST( same( serial.state.GetData(), serial.flux.GetData(), fluxSize ) );
+
+	// And it is a seed: the guess is not zero, so neither is its flux.
+	BOOST_TEST( serial.flux.Normlinf() > 0.1 );
 }

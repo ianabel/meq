@@ -1940,6 +1940,7 @@ namespace
 		guessSeedFrom = nullptr;
 		guessSeedPotential.SetSize( 0 );
 		guessSeedTrace.SetSize( 0 );
+		guessSeedFlux.SetSize( 0 );
 	}
 
 	void GradShafranovSolver::setInitialGuess( mfem::Coefficient &psiGuess )
@@ -1961,6 +1962,130 @@ namespace
 		initialGuess = ownedInitialGuess.get();
 		initialGuessField = &psiGuess;
 		prepared = false;
+	}
+
+	namespace
+	{
+		/*
+		 * A GUESS FIELD, READ AS GridFunction READS ITSELF, FROM SEVERAL THREADS.
+		 *
+		 * GridFunctionCoefficient and GradientGridFunctionCoefficient cannot be
+		 * shared by threads, for two reasons in MFEM rather than in the field.
+		 * GridFunction::GetValue( ElementTransformation &, ... ) takes the
+		 * two-argument GetElementDofs(), which writes the SPACE's mutable
+		 * DoFTrans (Threading.hpp's second hazard); and its dot product is
+		 * Vector::operator*, which under a Device reduces through a static
+		 * workspace. These are the ELEMENT arms of GetValue() and GetGradient()
+		 * line for line, with a local DofTransformation, an explicit sum, and
+		 * the values read through a host pointer the caller took once, before
+		 * any thread, so that nothing here reaches MFEM's memory manager.
+		 *
+		 * Only for a field on the solver's own mesh: MFEM's coefficients map a
+		 * point through RefinedToCoarse() when the element counts differ, and
+		 * these do not.
+		 */
+		class GuessFieldValue : public mfem::Coefficient
+		{
+			public:
+				GuessFieldValue( mfem::FiniteElementSpace const &spaceIn,
+				                 mfem::real_t const *valuesIn )
+					: space( spaceIn ), values( valuesIn )
+				{
+				}
+
+				mfem::real_t Eval( mfem::ElementTransformation &transformation,
+				                   mfem::IntegrationPoint const &point ) override
+				{
+					MFEM_VERIFY( transformation.ElementType
+					             == mfem::ElementTransformation::ELEMENT,
+					             "GuessFieldValue reads volume elements only" );
+					int const element = transformation.ElementNo;
+					mfem::Array<int> dofs;
+					mfem::DofTransformation unused;
+					space.GetElementDofs( element, dofs, unused );
+					mfem::FiniteElement const &fe = *space.GetFE( element );
+					mfem::Vector shape( dofs.Size() );
+					if ( fe.GetMapType() == mfem::FiniteElement::VALUE )
+						fe.CalcShape( point, shape );
+					else
+					{
+						transformation.SetIntPoint( &point );
+						fe.CalcPhysShape( transformation, shape );
+					}
+					mfem::real_t sum = 0.0;
+					for ( int i = 0; i < dofs.Size(); ++i )
+						sum += shape( i )*valueAt( dofs[ i ] );
+					return sum;
+				}
+
+			private:
+				// GetSubVector()'s reading of a signed dof index.
+				mfem::real_t valueAt( int dof ) const
+				{
+					return dof >= 0 ? values[ dof ] : -values[ -1 - dof ];
+				}
+
+				mfem::FiniteElementSpace const &space;
+				mfem::real_t const *values;
+		};
+
+		class GuessFieldGradient : public mfem::VectorCoefficient
+		{
+			public:
+				GuessFieldGradient( mfem::FiniteElementSpace const &spaceIn,
+				                    mfem::real_t const *valuesIn )
+					: mfem::VectorCoefficient( spaceIn.GetMesh()->SpaceDimension() ),
+					  space( spaceIn ), values( valuesIn )
+				{
+				}
+
+				void Eval( mfem::Vector &gradient,
+				           mfem::ElementTransformation &transformation,
+				           mfem::IntegrationPoint const & ) override
+				{
+					MFEM_VERIFY( transformation.ElementType
+					             == mfem::ElementTransformation::ELEMENT,
+					             "GuessFieldGradient reads volume elements only" );
+					int const element = transformation.ElementNo;
+					mfem::FiniteElement const &fe = *space.GetFE( element );
+					int const dim = fe.GetDim(), dof = fe.GetDof();
+					mfem::DenseMatrix dshape( dof, dim );
+					mfem::Vector local, reference( dim );
+					gradient.SetSize( space.GetMesh()->SpaceDimension() );
+
+					// GetElementDofValues().
+					mfem::Array<int> vdofs;
+					mfem::DofTransformation doftrans;
+					space.GetElementVDofs( element, vdofs, doftrans );
+					local.SetSize( vdofs.Size() );
+					for ( int i = 0; i < vdofs.Size(); ++i )
+						local( i ) = vdofs[ i ] >= 0 ? values[ vdofs[ i ] ]
+						                             : -values[ -1 - vdofs[ i ] ];
+					doftrans.InvTransformPrimal( local );
+
+					fe.CalcDShape( transformation.GetIntPoint(), dshape );
+					dshape.MultTranspose( local, reference );
+					transformation.InverseJacobian().MultTranspose( reference, gradient );
+				}
+
+			private:
+				mfem::FiniteElementSpace const &space;
+				mfem::real_t const *values;
+		};
+
+		// Vector::SetSubVector()'s writing of a signed dof index, through a
+		// raw pointer, which reaches no memory manager.
+		void writeAt( mfem::real_t *target, mfem::Array<int> const &dofs,
+		              mfem::Vector const &local )
+		{
+			for ( int i = 0; i < dofs.Size(); ++i )
+			{
+				if ( dofs[ i ] >= 0 )
+					target[ dofs[ i ] ] = local( i );
+				else
+					target[ -1 - dofs[ i ] ] = -local( i );
+			}
+		}
 	}
 
 	/*
@@ -2006,39 +2131,74 @@ namespace
 	void GradShafranovSolver::seedFluxFromGuess( mfem::GridFunction const &psiGuess )
 	{
 		mfem::Mesh &mesh = *fluxFes->GetMesh();
+		int const elements = mesh.GetNE();
+		mfem::FiniteElementSpace const &guessSpace = *psiGuess.FESpace();
 
-		mfem::GradientGridFunctionCoefficient gradient(
-			const_cast<mfem::GridFunction *>( &psiGuess ) );
-		mfem::FunctionCoefficient radius(
-			[]( mfem::Vector const &x ) { return x( 0 ); } );
+		/*
+		 * THREADED, ON EVERY ARM, AND UNDER A Device WHERE THAT IS SAFE.
+		 *
+		 * One small solve per element with nothing shared but read-only state,
+		 * so the answer is the serial loop's whatever the thread count. It was
+		 * one core everywhere, and on the DIII-D machine it was most of the
+		 * re-assembly leg on every arm, the A100's included (M-325). Like the
+		 * warm start it is host work on every arm, and threads under a Device
+		 * by meq::setupLoopMayThread(): the guess is read and the flux written
+		 * through host pointers taken here, before any thread, so the loop
+		 * reaches no registered object except the mesh's nodes, if it has them.
+		 * A guess on another mesh takes MFEM's coefficient, on one thread.
+		 */
+		bool const sameMesh = guessSpace.GetMesh()->GetNE() == elements;
+		mfem::GridFunction const *nodes = mesh.GetNodes();
+		bool const hostThreads = sameMesh && meq::setupLoopMayThread(
+			{ nodes != nullptr ? nodes->GetData() : nullptr } );
+		mfem::real_t const *guess = psiGuess.HostRead();
+		mfem::real_t *flux = darcyFlux.HostReadWrite();
 
-		mfem::VectorMassIntegrator mass( radius );
-		mfem::VectorDomainLFIntegrator load( gradient );
-
-		mfem::Array<int> vdofs;
-		mfem::DenseMatrix elementMass;
-		mfem::Vector elementLoad, elementFlux;
-
-		// A LOCAL transformation, not mesh.GetElementTransformation( int ). That
-		// one hands out shared scratch and resets what the previous call
-		// returned; this file records the trap in six other places.
-		mfem::IsoparametricTransformation transformation;
-
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		#pragma omp parallel if ( hostThreads )
+#endif
 		{
-			mfem::FiniteElement const &element = *fluxFes->GetFE( e );
-			mesh.GetElementTransformation( e, &transformation );
+			GuessFieldGradient fieldGradient( guessSpace, guess );
+			mfem::GradientGridFunctionCoefficient mfemGradient(
+				const_cast<mfem::GridFunction *>( &psiGuess ) );
+			mfem::FunctionCoefficient radius(
+				[]( mfem::Vector const &x ) { return x( 0 ); } );
 
-			mass.AssembleElementMatrix( element, transformation, elementMass );
-			load.AssembleRHSElementVect( element, transformation, elementLoad );
+			mfem::VectorMassIntegrator mass( radius );
+			mfem::VectorDomainLFIntegrator load(
+				sameMesh ? static_cast<mfem::VectorCoefficient &>( fieldGradient )
+				         : static_cast<mfem::VectorCoefficient &>( mfemGradient ) );
 
-			mfem::DenseMatrixInverse inverse( elementMass );
-			elementFlux.SetSize( elementLoad.Size() );
-			inverse.Mult( elementLoad, elementFlux );
-			elementFlux.Neg();
+			mfem::Array<int> vdofs;
+			mfem::DofTransformation doftrans;
+			mfem::DenseMatrix elementMass;
+			mfem::Vector elementLoad, elementFlux;
 
-			fluxFes->GetElementVDofs( e, vdofs );
-			darcyFlux.SetSubVector( vdofs, elementFlux );
+			// A LOCAL transformation, not mesh.GetElementTransformation( int ).
+			// That one hands out shared scratch and resets what the previous
+			// call returned; this file records the trap in six other places.
+			mfem::IsoparametricTransformation transformation;
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+			#pragma omp for schedule( static )
+#endif
+			for ( int e = 0; e < elements; ++e )
+			{
+				mfem::FiniteElement const &element = *fluxFes->GetFE( e );
+				mesh.GetElementTransformation( e, &transformation );
+
+				mass.AssembleElementMatrix( element, transformation, elementMass );
+				load.AssembleRHSElementVect( element, transformation, elementLoad );
+
+				mfem::DenseMatrixInverse inverse( elementMass );
+				elementFlux.SetSize( elementLoad.Size() );
+				inverse.Mult( elementLoad, elementFlux );
+				elementFlux.Neg();
+
+				// SetSubVector() never applied the transformation either.
+				fluxFes->GetElementVDofs( e, vdofs, doftrans );
+				writeAt( flux, vdofs, elementFlux );
+			}
 		}
 	}
 
@@ -5928,6 +6088,31 @@ namespace
 		 * THREADING-PLAN.md's addendum is the audit, and psi* is
 		 * byte-identical at OMP_NUM_THREADS 1 and 8.
 		 *
+		 * AND THE PROMISE NOW COVERS THE EXTENSION'S BOUNDARY FACES, WHICH ARE
+		 * THREADED, UNDER A DEVICE TOO. Upstream's c7cc6983d5 threads
+		 * AssembleFluxMassBdrMatricesBatched()'s face loop on this flag (with
+		 * plain HOST memory, per-thread transformations), and its doxygen now
+		 * says the flag covers the flux mass form's boundary face integrators
+		 * and, for an extension integrator, its path and the level set the
+		 * path calls. So the extension integrator IS reached by a threaded loop
+		 * now, and three things have to be reentrant:
+		 *
+		 *   HDGExtensionIntegrator       the only boundary face integrator on
+		 *                                the flux mass form (see where it is
+		 *                                added above); guarded, as said
+		 *   mfem::VertexConePath         built with phi_thread_safe = true in
+		 *                                apps/meq.cpp, its per-call state
+		 *                                upstream's to keep per thread
+		 *   meq::LevelSet value and      circleLevelSet() and shapeLevelSet()
+		 *   gradient                     (LevelSet.hpp): lambdas over captured
+		 *                                values or a const BoundaryShape, whose
+		 *                                levelSet() and levelSetGradient() are
+		 *                                const and touch no mutable or static
+		 *                                state. The gradient writes only the
+		 *                                Vector the path hands it
+		 *
+		 * A new level set, or a BoundaryShape that caches, has to keep that.
+		 *
 		 * WHAT THIS COMMENT USED TO SAY, AND WHY THE SHAPE OF THE ERROR IS
 		 * WORTH MORE THAN THE FACT. It described that class as carrying plain
 		 * unguarded members and argued the promise held anyway because nothing
@@ -6061,35 +6246,79 @@ namespace
 	 * VALUE map type, so the nodes are where the dofs live.
 	 */
 	void GradShafranovSolver::projectOntoTrace( mfem::Coefficient &coeff,
-	                                            mfem::GridFunction &target ) const
+	                                            mfem::GridFunction &target,
+	                                            bool mayThread ) const
 	{
 		mfem::Mesh &mesh = *traceFes->GetMesh();
-		mfem::Array<int> vdofs;
-		mfem::Vector values;
+		int const faces = mesh.GetNumFaces();
+		mfem::real_t *out = target.HostReadWrite();
 
-		for ( int f = 0; f < mesh.GetNumFaces(); ++f )
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		#pragma omp parallel if ( mayThread )
+#endif
 		{
-			mfem::FaceElementTransformations *ftr =
-				mesh.GetFaceElementTransformations( f );
-			if ( !ftr )
-				continue;
+			// The caller-allocated overload: the other hands out the mesh's
+			// own scratch, as GetElementTransformation( int ) does.
+			mfem::FaceElementTransformations ftr;
+			mfem::IsoparametricTransformation first, second;
+			mfem::Array<int> vdofs;
+			mfem::Vector values;
 
-			mfem::FiniteElement const *faceFe = traceFes->GetFaceElement( f );
-			if ( !faceFe )
-				continue;
-
-			traceFes->GetFaceVDofs( f, vdofs );
-			int const dof = faceFe->GetDof();
-			values.SetSize( dof );
-
-			mfem::IntegrationRule const &nodes = faceFe->GetNodes();
-			for ( int i = 0; i < dof; ++i )
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+			#pragma omp for schedule( static )
+#endif
+			for ( int f = 0; f < faces; ++f )
 			{
-				ftr->SetAllIntPoints( &nodes.IntPoint( i ) );
-				values( i ) = coeff.Eval( *ftr->Elem1, ftr->GetElement1IntPoint() );
-			}
+				mfem::FiniteElement const *faceFe = traceFes->GetFaceElement( f );
+				if ( !faceFe )
+					continue;
+				mesh.GetFaceElementTransformations( f, ftr, first, second );
 
-			target.SetSubVector( vdofs, values );
+				traceFes->GetFaceVDofs( f, vdofs );
+				int const dof = faceFe->GetDof();
+				values.SetSize( dof );
+
+				mfem::IntegrationRule const &nodes = faceFe->GetNodes();
+				for ( int i = 0; i < dof; ++i )
+				{
+					ftr.SetAllIntPoints( &nodes.IntPoint( i ) );
+					values( i ) = coeff.Eval( *ftr.Elem1, ftr.GetElement1IntPoint() );
+				}
+
+				writeAt( out, vdofs, values );
+			}
+		}
+	}
+
+	void GradShafranovSolver::projectOntoPotential( mfem::Coefficient &coeff,
+	                                                mfem::GridFunction &target,
+	                                                bool mayThread ) const
+	{
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		int const elements = mesh.GetNE();
+		mfem::real_t *out = target.HostReadWrite();
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		#pragma omp parallel if ( mayThread )
+#endif
+		{
+			mfem::IsoparametricTransformation transformation;
+			mfem::Array<int> vdofs;
+			mfem::DofTransformation doftrans;
+			mfem::Vector values;
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+			#pragma omp for schedule( static )
+#endif
+			for ( int e = 0; e < elements; ++e )
+			{
+				potentialFes->GetElementVDofs( e, vdofs, doftrans );
+				values.SetSize( vdofs.Size() );
+				mesh.GetElementTransformation( e, &transformation );
+				potentialFes->GetFE( e )->Project( coeff, transformation, values );
+				doftrans.TransformPrimal( values );
+				writeAt( out, vdofs, values );
+			}
 		}
 	}
 
@@ -6136,8 +6365,9 @@ namespace
 		// The trace is the half that matters, being Newton's actual unknown. The
 		// potential block is seeded as well, for MFEM's element-local non-linear
 		// solves, which start from whatever the block vector holds -- see the
-		// header. The flux block is left at zero: nothing iterates from it, and a
-		// guess for psi says nothing about q without differentiating it.
+		// header. The flux block is seeded only from a FIELD guess, by
+		// differentiating it (seedFluxFromGuess()); a bare Coefficient leaves
+		// it at zero, having nothing to differentiate.
 		/*
 		 * AND NOT WHEN THE CALLER IS ABOUT TO OVERWRITE THE ITERATE.
 		 *
@@ -6184,26 +6414,58 @@ namespace
 			 */
 			bool const cached = guessSeedFrom == initialGuess
 			                    && guessSeedPotential.Size() == potentialGf.Size()
-			                    && guessSeedTrace.Size() == traceGf.Size();
+			                    && guessSeedTrace.Size() == traceGf.Size()
+			                    && ( !initialGuessField
+			                         || guessSeedFlux.Size() == darcyFlux.Size() );
 			if ( cached )
 			{
 				traceGf = guessSeedTrace;
 				potentialGf = guessSeedPotential;
+				if ( initialGuessField )
+					darcyFlux = guessSeedFlux;
 			}
 			else
 			{
-				projectOntoTrace( *initialGuess, traceGf );
-				potentialGf.ProjectCoefficient( *initialGuess );
+				/*
+				 * A FIELD GUESS IS PROJECTED ON EVERY THREAD, AS ITS FLUX IS
+				 * SEEDED (see seedFluxFromGuess() for when, under a Device).
+				 * GuessFieldValue is MEQ's reading of the field and safe to
+				 * share; a bare Coefficient is the caller's, and MEQ cannot vouch
+				 * for evaluating it from several threads at once, so that one
+				 * stays on one.
+				 */
+				mfem::Mesh &mesh = *potentialFes->GetMesh();
+				bool const fieldOnThisMesh = initialGuessField
+					&& initialGuessField->FESpace()->GetMesh()->GetNE() == mesh.GetNE();
+				if ( fieldOnThisMesh )
+				{
+					mfem::GridFunction const *nodes = mesh.GetNodes();
+					bool const hostThreads = meq::setupLoopMayThread(
+						{ nodes != nullptr ? nodes->GetData() : nullptr } );
+					GuessFieldValue field( *initialGuessField->FESpace(),
+					                       initialGuessField->HostRead() );
+					projectOntoTrace( field, traceGf, hostThreads );
+					projectOntoPotential( field, potentialGf, hostThreads );
+				}
+				else
+				{
+					projectOntoTrace( *initialGuess, traceGf );
+					projectOntoPotential( *initialGuess, potentialGf, false );
+				}
+
+				// AND THE FLUX, when the guess arrived as a field rather than as
+				// a bare Coefficient -- see seedFluxFromGuess() for why the flux
+				// row makes this a consistency question rather than a
+				// convenience.
+				if ( initialGuessField )
+				{
+					seedFluxFromGuess( *initialGuessField );
+					guessSeedFlux = darcyFlux;
+				}
 				guessSeedTrace = traceGf;
 				guessSeedPotential = potentialGf;
 				guessSeedFrom = initialGuess;
 			}
-
-			// AND THE FLUX, when the guess arrived as a field rather than as a
-			// bare Coefficient -- see seedFluxFromGuess() for why the flux row
-			// makes this a consistency question rather than a convenience.
-			if ( initialGuessField )
-				seedFluxFromGuess( *initialGuessField );
 		}
 
 		/*

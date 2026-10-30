@@ -45,7 +45,15 @@ TIMER=()
 	echo
 	(module list 2>&1 || true)
 	echo
-	cat "$KIT/PROVENANCE.txt" 2>/dev/null
+	# After update.sh the sources are clones and the bundle's PROVENANCE.txt
+	# no longer describes them, so a clone names its own commit.
+	if [ -d "$KIT/src/meq/.git" ] || [ -d "$KIT/src/mfem/.git" ]; then
+		for s in meq mfem; do
+			[ -d "$KIT/src/$s/.git" ] && echo "$s $(git -C "$KIT/src/$s" log -1 --format='%H %s')"
+		done
+	else
+		cat "$KIT/PROVENANCE.txt" 2>/dev/null
+	fi
 } > "$RESULTS/env.txt"
 
 run_one() # case, arm, round

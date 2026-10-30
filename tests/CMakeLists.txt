@@ -343,10 +343,10 @@ if(TARGET PlasmaConnectivity)
 	unset(_fold_devices)
 endif()
 
-# THE WARM START THREADED UNDER A DEVICE: WarmStartTests' default arm is
-# `debug`, whose registering host memory keeps the warm start on one thread;
-# only `cuda`'s plain host memory lets meq::setupLoopMayThread() thread it, so
-# the cuda arm is the one that runs the threaded loops under a Device.
+# THE WARM START AND THE GUESS SEED THREADED UNDER A DEVICE: WarmStartTests'
+# default arm is `debug`, whose registering host memory keeps both on one
+# thread; only `cuda`'s plain host memory lets meq::setupLoopMayThread() thread
+# them, so the cuda arm is the one that runs the threaded loops under a Device.
 if(TARGET WarmStartTests AND MFEM_USE_CUDA)
 	add_test(NAME WarmStartTests_cuda COMMAND WarmStartTests)
 	set_tests_properties(WarmStartTests_cuda PROPERTIES

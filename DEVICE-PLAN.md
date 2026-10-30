@@ -18,6 +18,28 @@ after setup, so setup can thread everywhere. The warm start is the other: its
 loops thread under a Device where they cannot reach the memory manager
 (`meq::setupLoopMayThread()`, [M-323](MEASUREMENTS.md#m-323)).
 
+**MET ON THE FIXED-BOUNDARY CASES BY THE SECOND RUN** →
+[M-325](MEASUREMENTS.md#m-325). At MEQ `7c1d3ef` and `meq-integration`
+`6e1cc66618` the CUDA arm wins on wall time everywhere: 2.92x against 64 cores
+on `ff3` (2.75 s against 8.03; M-319's 22.53), 2.17x on `ff2`, 1.48x on
+`ff1`, 1.44x on `mf`. The three steps are 0.29, 0.53 and 0.02 s, each under
+cpu64's. Its card was an A100-80GB, where M-319's was a 40GB, so the device
+legs' own 1.69x on `ff3` is part software and part bandwidth. What is left:
+* **`mf`'s re-assembly was MEQ seeding its iterate from the guess, on one
+  core in every arm. THREADED** → [M-326](MEASUREMENTS.md#m-326): 0.18 s to
+  0.037 s on `cpu` and `cuda` alike, the seed unchanged to the bit.
+* **`ff3`'s re-assembly (0.53 s) was upstream's form build on one host core.
+  Upstream's, DONE at `06d6680729`** → [M-327](MEASUREMENTS.md#m-327): the
+  local blocks are zeroed and kept on the card (492 MB up and 396 down
+  became 96 and 278), the extension's crossing search is Brent's, and its
+  boundary faces thread. 1.20 s to 0.7 s under CUDA here; the A100 is the
+  next run's. 278 MB still comes down for host readers, and the host arm's
+  build is 1.9 cores of 8.
+* **The trace factorisation (cuDSS, 0.48 s on `ff3`)** is the other largest
+  solve leg; it did not move between the runs.
+* **A run pinned to the 40GB nodes** (`--constraint=gpu&hbm40g`) would
+  separate the software's gain from the card's.
+
 **Bit-identity with the host is a test instrument, not a device
 requirement.** Parity is checked on printed digits, which a reordered sum does
 not reach. So `AssemblyMode` is `Batched` under a Device, and a test that
@@ -36,10 +58,14 @@ wants the exact host loops names `"serial"`.
     on one core to 0.25 s on 7.6;
   * cuDSS's `SetOperator` read: it reuses its analysis, so only the first
     call analyses and the rest wait on the card. Nothing to change.
+* **MEQ's, DONE** → [M-326](MEASUREMENTS.md#m-326): the seed of a FIELD
+  guess (trace, potential and flux) threaded on every arm, `mf`'s
+  re-assembly 0.18 s to 0.037 s.
 * **MEQ's, OPEN**:
-  * the seed projection of the starting guess, about 0.1 s on `ff3`. The
-    guess is a host `std::function`, so it needs a device form for each guess
-    type.
+  * the seed projection of a COEFFICIENT guess (ramp, bump, conductors),
+    about 0.1 s on `ff3`, still one core: the guess is a host
+    `std::function` MEQ cannot vouch for under threads, so it needs a
+    device form, or a thread-safe one, for each guess type.
 * **Upstream's, BUILT AND TAKEN** at `4a87f9280f` → [M-321](MEASUREMENTS.md#m-321):
   * a batched `Reconstruct()`, both halves;
   * a batched `ConstructC()`;
@@ -59,8 +85,8 @@ wants the exact host loops names `"serial"`.
 * **Upstream's, BUILT AND TAKEN** at `9d57974336`:
   `GPUBlasBatchedLinAlg`'s pointer arrays kept between calls, so
   `LUSolve()` no longer allocates and frees per call, and
-  `EnsureElementQuadratureTables()`'s points and weights in a kernel. Not yet
-  profiled on `ff3`.
+  `EnsureElementQuadratureTables()`'s points and weights in a kernel, and on
+  the A100 since ([M-325](MEASUREMENTS.md#m-325)).
 * **`ComputeH()`'s read-only syncs are gone upstream** →
   [M-320](MEASUREMENTS.md#m-320): `machine-f-diiid` moves 54.3 MB up and 14.0
   MB down.

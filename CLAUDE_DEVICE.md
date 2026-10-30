@@ -39,7 +39,18 @@ against is `CLAUDE_DECLINED.md`.
   What is left of MEQ's own is phase B by the plan's own table, chiefly the
   starting iterate uploaded at each sweep.
 * **Under a Device nothing should run on one host core** → **[M-319](MEASUREMENTS.md#m-319)**,
-  **[M-321](MEASUREMENTS.md#m-321)**. MEQ's own whole-mesh host loops in a
+  **[M-321](MEASUREMENTS.md#m-321)**, and on the A100 it holds on the
+  fixed-boundary cases: 2.92x against 64 cores on `ff3`'s wall
+  (**[M-325](MEASUREMENTS.md#m-325)**). `prepare()`'s seed of the iterate
+  from a field guess threads as the warm start does
+  (**[M-326](MEASUREMENTS.md#m-326)**): through MEQ's own `GuessFieldValue`
+  and `GuessFieldGradient`, because MFEM's `GridFunction` readers write the
+  space's `DoFTrans` and, under a Device, reduce through a static workspace.
+  Upstream's form build keeps its local blocks on the card and threads the
+  extension's boundary faces, which reaches MEQ's level set from several
+  threads: **a level set must stay reentrant**
+  (**[M-327](MEASUREMENTS.md#m-327)**). MEQ's own
+  whole-mesh host loops in a
   device run take device routes: the post-solve axis sweep
   (`CriticalPointFinder::sweepOnDevice()`), the affine maps, the plasma loops'
   point tables, the material classification's points and potential, and the
@@ -59,7 +70,8 @@ against is `CLAUDE_DECLINED.md`.
   routes take their factors from `meq::CoordinateField`
   (`DeviceBasis.hpp`), the degree-1 coordinate field of the mesh's vertices,
   and upstream's from `HDGElementGeometry`. What is left on the host is
-  the seed projection (MEQ's); upstream's `LUSolve` allocations and
+  the seed projection of a coefficient guess (MEQ's; a field guess threads,
+  M-326); upstream's `LUSolve` allocations and
   `EnsureElementQuadratureTables` loop are gone at `9d57974336`. cuDSS's `SetOperator`
   reuses its analysis, so after the first call it waits on the card
   (→ **[M-323](MEASUREMENTS.md#m-323)**).
