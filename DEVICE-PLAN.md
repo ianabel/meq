@@ -40,6 +40,38 @@ legs' own 1.69x on `ff3` is part software and part bandwidth. What is left:
 * **A run pinned to the 40GB nodes** (`--constraint=gpu&hbm40g`) would
   separate the software's gain from the card's.
 
+**WHAT THE THIRD A100 RUN SHOULD BRING BACK.** Kit brought up with
+`update.sh`, then `check.sh` and `job.slurm` as before. Against
+[M-325](MEASUREMENTS.md#m-325):
+
+* **Provenance.** `env.txt` names `meq 6c68287…` and `mfem 02266d9…` (the
+  mirror's snapshot of `meq-integration` `06d6680729`), not a bundle's
+  `PROVENANCE.txt`. `nvidia-smi`'s line says which card: **if it is a 40GB
+  part, every cuda number below is confounded with M-325's 80GB card**, and
+  the comparison is with M-319's hardware instead.
+* **Answers.** `check.sh` PASS on all four cases; every arm prints M-325's
+  `psi_ax` (`ff3` 2.897815e-01); 33 of 33 runs exit 0. Anything else (an
+  illegal address, an invalid alias, a `psi_ax` past the 7th digit) is the
+  headline and outranks every timing.
+* **`mf`'s re-assembly, every arm: 0.19 s → about 0.04 s** ([M-326](MEASUREMENTS.md#m-326)),
+  at several cores rather than 1.0. So `mf`'s cuda wall about 1.23 → 1.08 s,
+  and the host arms lose about 0.15 s too. Still 0.19 means the seed did not
+  thread there (look at the cores column).
+* **`ff3`'s re-assembly under cuda: 0.53 s → 0.25 to 0.35 s**
+  ([M-327](MEASUREMENTS.md#m-327)'s 1.7x here; native Linux and the A100's
+  bus may do better than WSL2's cold pages). Its cores column above 1.0
+  (the boundary-face loop now threads). If it is **above 0.35**, the 278 MB
+  still downloaded during the build is the likely reason, and an `NSYS=1`
+  run (off by default) is what measures it. `ff3`'s cuda wall about 2.75 →
+  2.5 s; the host arms' re-assembly should fall somewhat (Brent's search
+  and the threaded loop serve them too) but their build is still mostly one
+  core.
+* **Unchanged, and expected to be:** the trace factorisation (cuDSS, 0.48 s
+  on `ff3`), the gradient (0.28 s), `postProcess` (0.29 s), the writer (0.3
+  to 0.5 s in every arm), and every host arm's solve leg. The factorisation
+  then becomes the largest single cuda leg on `ff3`, and is the next thing
+  to look at.
+
 **Bit-identity with the host is a test instrument, not a device
 requirement.** Parity is checked on printed digits, which a reordered sum does
 not reach. So `AssemblyMode` is `Batched` under a Device, and a test that
