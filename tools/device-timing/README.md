@@ -12,7 +12,7 @@ in `job.slurm` and the defaults below.
 development machine) packs everything into one tarball:
 * MEQ's source as it stands;
 * the MFEM MEQ links (`meq-integration`, flattened; also at
-  `github.com/ianabel/mfem-meq-integration`, private);
+  `github.com/ianabel/mfem-meq-integration`, public);
 * SUNDIALS 7.5.0;
 * netcdf-cxx4 4.3.1, Eigen 3.4.0 and Boost 1.86 (only the parts used);
 * the case inputs, including the gmsh mesh `machine-f-diiid` needs, so no

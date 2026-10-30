@@ -60,9 +60,7 @@ against is `CLAUDE_DECLINED.md`.
   (`DeviceBasis.hpp`), the degree-1 coordinate field of the mesh's vertices,
   and upstream's from `HDGElementGeometry`. What is left on the host is
   the seed projection (MEQ's); upstream's `LUSolve` allocations and
-  `EnsureElementQuadratureTables` loop are gone at `9d57974336`. An illegal
-  address in upstream's `HDGFaceScatterBatched()` on a rebuilt form is open
-  (`TODO`). cuDSS's `SetOperator`
+  `EnsureElementQuadratureTables` loop are gone at `9d57974336`. cuDSS's `SetOperator`
   reuses its analysis, so after the first call it waits on the card
   (→ **[M-323](MEASUREMENTS.md#m-323)**).
 * **The warm start threads under a Device** where its loops cannot reach

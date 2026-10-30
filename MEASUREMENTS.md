@@ -21771,6 +21771,7 @@ never the step's.
   passes in both builds, as do `RotatingMirror`, `RotatingMirrorDevice` and
   `VacuumMirror` on their restated floors.
 
-**Reproduce.** `runs/probe-gradient/` (`run.sh`; branch `probe-amplifier`,
-not for merge); `runs/probe-amplifier/` for `cb96cf3`'s arms;
+**Reproduce.** `runs/probe-gradient/` (`run.sh`, against a build of `62ac54d`
+with `runs/probe-gradient/tools/probe-hooks.patch` applied: the `MEQ_PROBE_*`
+hooks, not for merge); `runs/probe-amplifier/` for `cb96cf3`'s arms;
 `builds/double.grad.suite.log`, `builds/single.grad.suite.log`.
