@@ -45,14 +45,17 @@ KIT="$STAGE/meq-device-timing"
 mkdir -p "$KIT/src/meq" "$KIT/cases"
 
 # The scripts, at the kit's top level.
-cp "$HERE"/{README.md,preflight.sh,build.sh,check.sh,cases.sh,run.sh,job.slurm,summarize.py} "$KIT/"
+cp "$HERE"/{README.md,preflight.sh,build.sh,check.sh,cases.sh,run.sh,job.slurm,summarize.py,update.sh} "$KIT/"
 
-# MEQ as it stands: tracked files from the working tree, toml11 with them.
+# MEQ as it stands: tracked files from the working tree, toml11 with them, and
+# new files not yet added (not ignored ones), which the diff cannot carry.
 ( cd "$SOURCE" && git ls-files -z --recurse-submodules | tar --null -T - -cf - ) | tar -xf - -C "$KIT/src/meq"
+untracked=$(git -C "$SOURCE" ls-files --others --exclude-standard)
+[ -z "$untracked" ] || ( cd "$SOURCE" && git ls-files -z --others --exclude-standard | tar --null -T - -cf - ) | tar -xf - -C "$KIT/src/meq"
 git -C "$SOURCE" diff HEAD > "$KIT/src/meq.diff"
 # What meq --version and every .nc will say, in cmake/GitCommit.cmake's spelling.
 commit=$(git -C "$SOURCE" rev-parse --short HEAD)
-[ -n "$(git -C "$SOURCE" status --porcelain --untracked-files=no)" ] && commit="$commit-dirty"
+[ -n "$(git -C "$SOURCE" status --porcelain --untracked-files=normal)" ] && commit="$commit-dirty"
 echo "$commit" > "$KIT/src/meq/GIT_COMMIT"
 
 # MFEM and SUNDIALS from their repositories, at the named refs.
@@ -72,6 +75,7 @@ cp "$MESH" "$MESH.meq-mesh" "$KIT/cases/"
 {
 	echo "MEQ device timing kit, bundled $(date -Iseconds) on $(hostname)"
 	echo "meq       $(git -C "$SOURCE" rev-parse HEAD) $( [ -s "$KIT/src/meq.diff" ] && echo "+ src/meq.diff ($(wc -l < "$KIT/src/meq.diff") lines, uncommitted)")"
+	[ -z "$untracked" ] || echo "          + new, not in the diff: $(echo $untracked)"
 	echo "mfem      $MFEM_REF at $(git -C "$MFEM_SRC" rev-parse "$MFEM_REF") (github.com/ianabel/mfem-meq-integration)"
 	echo "sundials  $SUNDIALS_REF at $(git -C "$SUNDIALS_SRC" rev-parse "$SUNDIALS_REF^{commit}")"
 	echo "eigen 3.4.0, netcdf-cxx4 4.3.1, boost 1.86.0 (cmake), sha256:"

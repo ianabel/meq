@@ -34,6 +34,20 @@ export SUNDIALS_DIR=...    # your CUDA SUNDIALS's install prefix (include/, lib6
 sbatch job.slurm          # the timing matrix, on one exclusive GPU node
 ```
 
+### The next time: `./update.sh`, not a new bundle
+
+Once a kit is built, `./update.sh` (on a login node, in place of `build.sh`)
+pulls MEQ from `github.com/ianabel/meq` and MFEM from
+`github.com/ianabel/mfem-meq-integration`, both `main` by default
+(`MEQ_GIT_REF=`/`MFEM_GIT_REF=` for any branch, tag or commit), and rebuilds.
+MFEM is rebuilt only when its commit moved, and the other libraries not at
+all. It refreshes the scripts here and `cases/` from MEQ's tree, except a
+script you edited (`job.slurm`), which it keeps and names. It stops if the
+configuration's mesh no longer matches the gmsh mesh in `cases/`, which only a
+new bundle (or gmsh) can make. Then `./check.sh` and `sbatch job.slurm` as
+before. On the development machine, `mirror.sh` pushes a new MFEM snapshot
+to the mirror; MEQ's changes reach the run only once they are pushed.
+
 Then bring back `results-*.tar.gz` (and `preflight.txt`, `check.txt`).
 `summarize.py results/` turns it into the tables M-242 prints.
 
@@ -69,9 +83,10 @@ code.
   `cuda` (one A100);
 * **rounds**: 3, interleaved, so drift hits every arm alike; `ff3` takes 2;
 * every run writes `--profile`, so the solve leg can be read apart from
-  setup and output. **Setup and output are single-threaded host work under a
-  Device** (`DEVICE-PLAN.md`, *What is next*), so the wall alone understates
-  the GPU;
+  setup and output. The host steps the first Perlmutter run found on one core
+  under the Device (`Reconstruct()`, the first assembly, the axis check:
+  M-319) are now on the card or threaded (`DEVICE-PLAN.md`, *What is next*);
+  the `cuda` arm's profile is where to confirm that held on `ff3`;
 * optionally `NSYS=1`: one extra `cuda` run per case under `nsys`, for the
   bus count.
 
