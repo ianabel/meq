@@ -177,8 +177,8 @@ items 3 and 4 below, and both are resolved.
    block views are, and `darcyRhs.Update()` re-makes them at the end of every
    `prepare()`, host-only. That is 16 of 28 residuals and 11.2 MB; the potential
    block is zero throughout and goes up 16 times anyway.
-   `BORDERED-GLOBALISATION-PLAN.md` §12 is the repair, since the load is linear
-   in the exterior coefficients. What WAS MEQ's next to it is done: `rLoc` and
+   Forming the load in place is the repair, since it is linear in the
+   exterior coefficients ([M-317](MEASUREMENTS.md#m-317)). What WAS MEQ's next to it is done: `rLoc` and
    `rTr` arrived host-valid, so the residual's blocks and its trace row went
    down and back up every call.
 3. ~~**`diverted-tokamak` under a device reaches a different equilibrium**~~

@@ -592,8 +592,8 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
  * rests on -- an exterior operator needing forty modes would be no cheaper than
  * the kernel it replaces. FREE-BOUNDARY-PLAN.md section 3.3 measures
  * |a_n| falling from 2.0e-1 at n = 2 to 5.8e-8 at n = 20 for rho_Gamma = 2.5,
- * and faster at 4.0, and section 8 lists the rho_Gamma-against-mesh trade as
- * unresolved for a real tokamak geometry.
+ * and faster at 4.0, and section 8 records the rho_Gamma-against-mesh trade
+ * as answered on the machine case.
  *
  * Asserted as a RATIO between two radii rather than as an absolute decay rate,
  * because the rate is a property of the geometry rather than of the class: what
@@ -830,11 +830,11 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
  * FB-0's LAST OPEN ITEM: CEDRES++'S OWN BOUNDARY FORM, IN THIS BASIS
  * ============================================================================
  *
- * FREE-BOUNDARY-PLAN.md section 3.4 states the falsifying test of the whole
- * of section 3, and states it as a challenge rather than a hope: *"assemble
- * CEDRES++ eq (3.5) against the Gegenbauer basis and check it comes out
- * diagonal with the symbol above. If it does not, this section is wrong and
- * the rest of the plan needs the kernel."*
+ * FREE-BOUNDARY-PLAN.md section 3.4 names the falsifying test of the whole of
+ * section 3, as a challenge rather than a hope: assemble CEDRES++ eq (3.5)
+ * against the Gegenbauer basis and check it comes out diagonal with the
+ * symbol. If it does not, section 3 is wrong and the exterior needs the
+ * kernel.
  *
  * This is that test, and it is the most independent check in this file --
  * more so than the current loop, which at least shares the idea of an

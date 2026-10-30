@@ -3610,7 +3610,7 @@ int main( int argc, char **argv )
 
 							// AND psi_bnd AT THE FILE'S, ON THIS ROUTE ONLY. A
 							// fresh solver starts it at zero on purpose:
-							// FREE-BOUNDARY-PLAN.md section 10.5 measured a start
+							// FREE-BOUNDARY-PLAN.md section 10.8 measured a start
 							// NEAR the answer drifting or changing branch. This is
 							// a start AT it, the whole iterate with it, so the
 							// border row is satisfied rather than seeded nearby,
@@ -3704,7 +3704,7 @@ int main( int argc, char **argv )
 		 * A MIRROR'S STARTING LABELS ARE READ OFF THE STATE IT STARTS FROM.
 		 *
 		 * psi_bnd starts every bordered solve at zero on a fresh solver. On a
-		 * tokamak that is the right place: section 10.5 of
+		 * tokamak that is the right place: section 10.8 of
 		 * FREE-BOUNDARY-PLAN.md measures a limited machine started NEAR its
 		 * answer drifting to the iteration cap, and a diverted one reaching a
 		 * different equilibrium -- which is why setBoundaryFluxInitial() is not
@@ -8230,9 +8230,8 @@ int main( int argc, char **argv )
 		// sweeping Gamma for the exterior modes, which is inside `border
 		// assembly` and is NOT inside `constraint location`, where this line
 		// used to sit -- a sub-slice printed under the wrong parent is a share
-		// of the wrong denominator, and this one read 0.000 on every case for
-		// long enough that THREADING-PLAN.md section 0 told a reader to size an
-		// item against it.
+		// of the wrong denominator, and this one read 0.000 on every case
+		// while the sweep it names cost about 1% of the run.
 		leg( "  of which transmission", p.transmissionSeconds,
 		     p.transmissionCpuSeconds, p.transmissionCalls );
 		leg( "border dense solve", p.borderSolveSeconds,

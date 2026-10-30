@@ -582,7 +582,13 @@ line-search trial forms it from the exterior columns in place --
 operator. The base is re-assembled once per accepted step, since a combination
 formed from the solve's first load costs single precision 0.4 % of `psi*` on a
 cold start. The Differenced control still re-assembles every trial
-(`BORDERED-GLOBALISATION-PLAN.md` §12, → **[M-317](MEASUREMENTS.md#m-317)**).
+(→ **[M-317](MEASUREMENTS.md#m-317)**). **Forming it in place needs neither a
+`prepare()` nor a new operator**: on NPC, `FormLinearSystem()`'s `ReduceRHS()`
+only copies the load into the hybridization and no flux tdof is essential, and
+`mfem::DarcyNPCOperator` holds the load by reference and reads it at every
+residual, so updating the flux block of `darcyRhs` is what it sees. The
+exactness is of a trial against its step's base, not against the solve's first
+load.
 
 **THE `N + 2` ARE ONE CALL AND NOT `N + 2` CALLS.** They share a Jacobian by
 construction, which is exactly `mfem::DarcyNPCSolver::ArrayMult()`'s case: one
@@ -1481,7 +1487,8 @@ coupling transmits, keeps full order. `1/h²` would have stopped it.
 
 **`k = 3` escaping is a property of the fixture, not of the method** — its `q`
 is a quadratic, so `P_3` has room to spare. A higher-degree flux should show the
-deficit there too, and measuring that is the obvious next step.
+deficit there too (`TODO`, *Free boundary: what
+FREE-BOUNDARY-PLAN.md left open*, item 2).
 
 **Two traps met while writing it, both already recorded in `CLAUDE_HDGGS.md`.**
 The conditioning
@@ -2555,6 +2562,29 @@ between machines, nor step-length management repairs them, and E's defect is
 root selection.
 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Globalisation, and a transferable merit weight, as the repair for the cold failures*; *PicardSweeps and BorderedPicardThenNewton*
 
+**WHAT AN `exit 2` CAN BE, AND THREE CAUSES WANT THREE REPAIRS.** The bordered
+Newton exits 2 when twelve halvings of the Armijo backtrack leave every trial
+non-finite. The saved state's own merit was finite, so as `α → 0` a trial tends
+to a finite state, and only three things make one non-finite at `α = 2⁻¹¹`:
+
+| cause | what it is | does a globalisation help? |
+|---|---|---|
+| **a non-finite direction** | the trace solve's `y` or `z` carries `NaN`/`Inf`; most likely the elimination `M_ij = D_ij − b_i·z_j` going singular as the X-point rows and the `ψ_bnd` row collapse onto each other | **No.** The Jacobian or its elimination is the defect |
+| **a throwing constraint** | `refreshXPoint()` carrying the point out of the mesh, the axis search failing, or `setNormalisation()` refusing a `ψ_ax` through zero, each caught as `trialNorm = ∞` | **Only if** the step caused the throw |
+| **a genuine excursion** | a finite direction, constraints that evaluate, and a residual that overflows | **Yes.** This is the case a globalisation is for |
+
+M-117 puts none of the six in the first row; `BorderedPicardThenNewton` reaches
+it by measurement on one case, below.
+
+**AND A RUN THAT LOCATES NO AXIS CONVERGES ON A DEGENERATE SYSTEM, WHICH NO
+GLOBALISATION TOUCHES.** When `locateAxisPoint()` fails, `peakAt()` falls back
+to the nodal maximum and the axis row is built empty, so the step is
+`ψ_ax ← max ψ_h`, a Picard update — the same row *XP-3* records on iteration 0.
+On a run with no interior extremum of `ψ_h` it holds at every iteration, and a
+wall-hugging annulus and an `R = 0` boundary layer both satisfy it. Three of
+M-103's fourteen rows are that: converged, with no O-point. The repair is a
+refusal or a different constraint, not a path.
+
 ### The bordered path has a globalisation, and it is Picard in the field alone
 
 `Globalisation::BorderedPicardThenNewton` is the second rung of the driver's
@@ -2580,16 +2610,15 @@ defect correction. The increment form is what lets the bordered machinery be
 reused verbatim, and under hybridization applying `A_lin^-1` is a `ComputeH`
 plus a trace solve either way, so it costs nothing extra.
 
-**THE RESIDUAL IS NEVER FROZEN, WHICH IS A DEPARTURE FROM
-`BORDERED-GLOBALISATION-PLAN.md` §3.2 AND IS THE WHOLE OF THE DESIGN.** At the
+**THE RESIDUAL IS NEVER FROZEN, AND THAT IS THE WHOLE OF THE DESIGN.** At the
 iterate `F( R, z, psi_h )` and `F( R, z, psi^k )` are the same numbers, so
 freezing the residual changes no step. It changes only what is evaluated AWAY
 from the iterate, and both places it reaches are places it does harm: the Armijo
 trials, where a frozen `F` makes the field part of the merit affine in the field
 so the line search stops seeing the excursion it exists to catch; and the
 differenced border columns, which would then be derivatives of a source the
-residual is not using. §3.3's "one-line consistency requirement" does not arise
-because the inconsistency does not arise. `AssembleElementVector` is untouched
+residual is not using. Handing the analytic `ψ_ax` column the frozen state
+would cure that, and is not needed because the inconsistency does not arise. `AssembleElementVector` is untouched
 and the change is an early `return` in `AssembleElementGrad`.
 
 **IT CANNOT CHANGE WHICH EQUILIBRIUM IS REPORTED, AND THAT IS ASSERTED RATHER
@@ -2635,25 +2664,36 @@ in 35, and then throws *"the bordered Jacobian is singular in
 reaches. With the field block replaced by something that cannot be singular,
 what is left singular is **the border's Schur complement**. So the rung's real
 use is as a way of ASKING whether a failure is the field's, and on five of six
-the answer is no. That is `BORDERED-GLOBALISATION-PLAN.md` §0.1's first row
-reached by measurement, and it points at §6.1's degenerate axis row and at
-M-115 rather than at anything else in that plan.
+the answer is no. That is the first row of the table above — the elimination,
+not the field — reached by measurement, and it points at the degenerate axis
+row and at M-115 rather than at any globalisation.
 
 **The handoff tolerance is also measured useless here.** It is 1e-3 relative and
 no case gets below 2.5e-01, so on all six the phase change is the budget or the
 line-search rescue and never the tolerance. A tolerance is the right control for
 a case that is merely slow; none of these is.
 
-Two smaller departures from the plan, both recorded so the plan is not read as
-the built thing. BG-3 proposes re-purposing `Globalisation::PicardOnly`; a new
-value is used instead, because `PicardOnly` makes `usesNonlinearForms()` false
-and so moves the potential block onto the linear form — the exact route §3.2
-spends four reasons ruling out. And BG-4 proposes two calls to `solve()`; both
-phases are iterations of **one** loop inside `solveWithNormalisation()`, because
+Two choices that look arbitrary and are not. The rung is its own enum value
+rather than `Globalisation::PicardOnly`, because `PicardOnly` makes
+`usesNonlinearForms()` false and so moves the potential block onto the linear
+form, a route ruled out four ways (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**,
+*The bordered globalisation campaign, BG-0 to BG-7*). And both phases are
+iterations of **one** loop inside `solveWithNormalisation()` rather than two
+calls to `solve()`, because
 a second call re-enters `prepare()`, which under NPC seeds the potential and the
 trace and leaves the **flux** block at zero. One loop also keeps `gamma` frozen
 at the first iterate across both phases, so the printed history is one merit end
 to end.
+
+**A GLOBALISATION IS NEVER SWITCHED INSIDE `solveWithNormalisation()`.**
+`setGlobalisation()` resets `built`, and `buildForms()` replaces the `DarcyForm`
+outright — the form the live `mfem::DarcyNPCOperator`, the trace vectors and
+the bound trace solver all refer to. On the unbordered path the switch falls
+between two `solve()` calls; inside the bordered loop it leaves every one of
+those dangling, and `reprepare()`'s comment records that a stale hybridization
+handle alone kills the process with nothing in the trace. The Picard-to-Newton
+handoff changes only what the field block's derivative carries, and rebuilds
+nothing.
 
 ### The axis row's envelope term is written, correct, and off by default
 

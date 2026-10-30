@@ -3466,7 +3466,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	 * in double at MKL_NUM_THREADS 1 and 4, and 9 in single. psi_bnd seeded at
 	 * the limiter's starting flux -- the mirror's rule, widened past the box --
 	 * takes this file to 129 steps at the same psi_ax to every printed digit,
-	 * which is FREE-BOUNDARY-PLAN.md section 10.5's drift; a locator that warm
+	 * which is FREE-BOUNDARY-PLAN.md section 10.8's drift; a locator that warm
 	 * starts from the wrong element took it to 32, MEASUREMENTS.md M-176. Both
 	 * left every assertion above green.
 	 */

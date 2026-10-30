@@ -727,7 +727,8 @@ namespace
 		 * THREADED, AND IT IS THE EASY KIND. Each element writes its own
 		 * disjoint slice and reads nothing another writes, so there is no
 		 * reduction and no contention -- the same shape as the five plasma
-		 * loops of THREADING-PLAN.md item B. The one hazard is MFEM's:
+		 * loops that build the border (CLAUDE_HDGGS.md, *MEQ's own threaded
+		 * loops*). The one hazard is MFEM's:
 		 * Mesh::GetElementTransformation( int ) hands out SHARED SCRATCH, so
 		 * this uses the caller-supplied overload into a per-thread object,
 		 * which is the rule CLAUDE.md records and which cost this project six
@@ -3270,8 +3271,8 @@ namespace
 	 * PROJECTING A PATH COEFFICIENT ONTO Gamma_h'S TRACE DOFS, AND WHY
 	 * GridFunction::ProjectBdrCoefficient CANNOT DO IT.
 	 *
-	 * FREE-BOUNDARY-PLAN.md section 4.3 says each column of P is "one call to
-	 * ProjectBdrCoefficient against mfem::PathTraceCoefficient". IT IS NOT, and
+	 * The obvious route to each column of P is one call to
+	 * ProjectBdrCoefficient against mfem::PathTraceCoefficient. IT IS NOT, and
 	 * the attempt aborts rather than misbehaving quietly:
 	 *
 	 *     PathTraceCoefficient must be evaluated on a face: the path family may
@@ -5522,8 +5523,9 @@ namespace
 		 *
 		 * `border assembly` is every column of the bordered Jacobian; this is
 		 * the part of it that sweeps Gamma for the exterior modes, which is
-		 * what THREADING-PLAN.md item A's second half has to be sized against.
-		 * Without it that item can only be sized against its parent, which is
+		 * what threading the sweep has to be sized against: about 1% of a
+		 * DIII-D run at 1.00 cores, which is why it is not threaded.
+		 * Without it the sweep can only be sized against its parent, which is
 		 * an upper bound and not the thing.
 		 *
 		 * meq::Estimator ALSO reaches the transmission condition, through
@@ -6085,7 +6087,7 @@ namespace
 		 * integrator is not reached, the reconstruction taking only the flux
 		 * mass's DOMAIN integrators. That last is a property of one line of
 		 * darcyform.cpp, so re-read it when that loop changes.
-		 * THREADING-PLAN.md's addendum is the audit, and psi* is
+		 * CLAUDE_MFEM.md records the promise's scope, and psi* is
 		 * byte-identical at OMP_NUM_THREADS 1 and 8.
 		 *
 		 * AND THE PROMISE NOW COVERS THE EXTENSION'S BOUNDARY FACES, WHICH ARE
@@ -8683,9 +8685,8 @@ namespace
 		 * same bits at every thread count, which is the property that matters,
 		 * and costs one double per element ( 39 KB on the shipped machine case ).
 		 *
-		 * **AND IT IS A RE-ASSOCIATION OF THE SUM, WHICH THE PLAN THAT ASKED
-		 * FOR IT SAID IT WAS NOT.** THREADING-PLAN.md item B claims per-element
-		 * partials are "bit-identical to the serial loop". They are not: the
+		 * **AND IT IS A RE-ASSOCIATION OF THE SUM.** Per-element partials are
+		 * not bit-identical to the serial loop: the
 		 * loop this replaces carried ONE running total across every quadrature
 		 * point of every element, so its association crosses element
 		 * boundaries, and `( a + b ) + ( c + d )` is not `( ( a + b ) + c ) + d`
@@ -11812,7 +11813,7 @@ namespace
 		 *
 		 * A FINITE BUT DEGENERATE matrix is the thing setBorderRegularisation()
 		 * exists for, and the row norms say which constraint collapsed --
-		 * BORDERED-GLOBALISATION-PLAN.md section 0.1 predicts the X-point rows
+		 * CLAUDE_FB.md's classification of an exit 2 predicts the X-point rows
 		 * and the psi_bnd row falling onto each other, and this is what would
 		 * show it.
 		 *
@@ -13340,7 +13341,7 @@ namespace
 			borderColumnChoice == BorderColumn::Analytic
 			? exteriorColumnCache : differencedExteriorColumns;
 		/*
-		 * BORDERED-GLOBALISATION-PLAN.md section 12: THE LOAD IS AFFINE IN `a`,
+		 * M-317: THE LOAD IS AFFINE IN `a`,
 		 * SO A TRIAL FORMS IT RATHER THAN ASSEMBLING IT.
 		 *
 		 * `a` reaches the residual through the flux block of the load and
@@ -16326,7 +16327,7 @@ namespace
 
 					// THE COLLINEARITY PENALTY, per row, over the Schur
 					// complement's own rows -- which is where the degeneracy
-					// BORDERED-GLOBALISATION-PLAN.md section 0.1 predicts would
+					// CLAUDE_FB.md's classification of an exit 2 predicts would
 					// show: the X-point rows and the psi_bnd row collapsing
 					// onto each other. max over the other rows, as freegsnke's
 					// is, so one parallel pair is enough to penalise a row.

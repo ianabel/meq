@@ -2931,8 +2931,8 @@ namespace meq
 			 * singular in ( psi_ax, psi_bnd, a )"* under
 			 * Globalisation::BorderedPicardThenNewton -- with the field block
 			 * replaced by something that cannot be singular, what was left
-			 * singular was the BORDER. `BORDERED-GLOBALISATION-PLAN.md` section
-			 * 0.1 names the mechanism: `M_ij = D_ij - b_i.z_j` degenerating as
+			 * singular was the BORDER. CLAUDE_FB.md, *The cold failures are three
+			 * different things*, names the mechanism: `M_ij = D_ij - b_i.z_j` degenerating as
 			 * the X-point and `psi_bnd` rows collapse onto each other.
 			 *
 			 * **THE FORM IS freegsnke'S, ADAPTED FOR UNITS.** freegsnke solves
@@ -4654,7 +4654,7 @@ namespace meq
 			 * later sweeps on the same solver start from the sweep before.
 			 *
 			 * **IT IS NOT A TOLERANCE AND IT IS NOT A DEFAULT WAITING TO BE
-			 * FILLED IN.** `FREE-BOUNDARY-PLAN.md` section 10.5 measures both
+			 * FILLED IN.** `FREE-BOUNDARY-PLAN.md` section 10.8 measures both
 			 * halves. On a LIMITED machine, starting `psi_bnd` near its answer
 			 * puts the plasma edge on the limiter from step 0, where the support
 			 * sits exactly on the boundary of flipping: the solve descends to

@@ -2169,6 +2169,55 @@ take it is not its 1.13x** — it is that PARDISO is the only trace solver that
 tolerates `MKL_NUM_THREADS > 1` at all, and UMFPACK collapses there whatever the
 assembly mode.
 
+### MEQ's own threaded loops, and the rule they keep
+
+**`OMP_NUM_THREADS` MUST NOT CHANGE A PRINTED DIGIT**, at `MKL_NUM_THREADS=1`.
+Every threaded loop MEQ owns is asserted at `0.000e+00` across thread counts
+rather than at a tolerance, because the suite pins `psi_ax` to every printed
+digit in several places and a loop that moves the last bit turns those pins into
+coin tosses. **A loop that cannot be made exact comes back for an argument; it
+is not taken with a tolerance.** Three designs meet it:
+
+| | what | why it is exact | asserted by |
+|---|---|---|---|
+| the border rows | `meq::CompressedRows`: each exterior and current row stored on its support only | dropping a term that is exactly zero leaves every partial sum unchanged in ascending index order; the build checks that the support covers every nonzero | `theCompressedBorderRowsContractExactly` |
+| the five plasma element loops | `assemblePlasmaCurrent()`, the current row, column and corner, and the `ψ_ax` column, through `MEQ_OMP()` (`src/meq/Threading.hpp`) | the potential space is L2, so the vector scatter is disjoint; the two scalar loops write one partial per element and sum them in element order | `theBorderAssemblersAreThreadSafe` |
+| `CriticalPointFinder::sweep()` | per-element candidate buffers | the deduplication is order-dependent, so it runs serially over an element-ordered concatenation | `theAxisSweepDoesNotDependOnTheThreadCount` |
+
+**Per-element partials are exact across thread counts and not against a serial
+running total**, whose association crossed element boundaries: against that
+the regrouping is 6.9e-15 relative in `ψ` and moves no physical quantity
+(→ **[M-137](MEASUREMENTS.md#m-137)**).
+
+**The hazards each of these pays, and a new loop pays them too:**
+
+* **Scratch is declared inside the loop.** An `mfem::Array` or `mfem::Vector`
+  declared above a threaded loop is shared, and a concurrent `SetSize` is a
+  reallocation, so the failure is memory corruption rather than a stale read.
+* **The caller-allocated `GetElementTransformation()`**, into a `thread_local`
+  (`CLAUDE.md`, *Traps*).
+* **No exception escapes a region.** A throw out of an OpenMP structured block
+  is undefined behaviour and `meq::RotatingSource` throws from `f()`, so each
+  region catches into a per-thread `std::exception_ptr` and rethrows after it.
+* **`GridFunction::GetValue()` is reentrant here only because MEQ's flux and
+  potential spaces are L2 with a scalar range and a value map**; the other
+  branch reaches the mesh's shared scratch. **`GetElementDofs()` builds its
+  table lazily**, so the sweep makes one serial call before its region. And
+  `L2_TriangleElement::CalcShape` holds mutable scratch unless
+  `MFEM_THREAD_SAFE`, so every region is guarded on
+  `MFEM_USE_OPENMP && MFEM_THREAD_SAFE`.
+* **No nested regions.** These loops are entered from the Newton loop's master
+  thread or from the driver, never from inside MFEM's threaded element loop.
+
+OpenMP is asked for in `CMakeLists.txt` and linked `PUBLIC` onto `meq_core`,
+not inherited from MFEM's flags. **Read a profile under
+`OMP_WAIT_POLICY=passive`**, or a serial leg's `cores` column reads high. The
+three are worth `1.16×` on the whole DIII-D run at eight threads
+(→ **[M-137](MEASUREMENTS.md#m-137)**); size anything new against
+**[M-172](MEASUREMENTS.md#m-172)**, then **[M-138](MEASUREMENTS.md#m-138)**, in
+seconds rather than shares.
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *MEQ's own threading: the routes not taken*
+
 ### What to do, in order of value
 
 **The element-local dense work does not need getting off threaded MKL, which is

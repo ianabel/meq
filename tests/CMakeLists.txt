@@ -223,9 +223,9 @@ set(MEQ_CONVERGENCE_TESTS
 	# on potential dofs, so it asserts that the constraint cannot respond to the
 	# FLUX -- and a flux perturbation moves the axis while leaving psi_h alone.
 	BorderJacobian
-	# THREADING-PLAN.md items A and B, which are one case each and share a
-	# fixture. Item A compresses the eleven border rows that walked the whole
-	# 109,200-entry vector onto the indices they are non-zero on; item B threads
+	# The compressed border rows and the threaded plasma loops, one case each
+	# sharing a fixture. The first compresses the eleven border rows that walked the whole
+	# 109,200-entry vector onto the indices they are non-zero on; the second threads
 	# the five plasma element loops that build them. Both claim EXACTNESS rather
 	# than agreement -- dropping a term that is exactly zero cannot move a sum,
 	# and an L2 scatter is disjoint by construction -- so both assert at

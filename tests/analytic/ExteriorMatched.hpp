@@ -5,7 +5,7 @@
  * A manufactured equilibrium that is EXACTLY ONE EXTERIOR MODE outside a
  * radius rho_0 and a polynomial inside it, for FB-1.
  *
- * FREE-BOUNDARY-PLAN.md section 8 makes FB-1 "the stage to protect" -- it
+ * FREE-BOUNDARY-PLAN.md section 7 makes FB-1 "the stage to protect" -- it
  * exercises ExteriorDtN, the transferred datum with a non-zero g, the
  * transmission condition, the augmented solve and the coil sources all at once
  * -- and gives its acceptance as "psi_h against that closed form at k+1", the

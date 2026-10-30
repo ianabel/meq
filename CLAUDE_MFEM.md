@@ -551,10 +551,10 @@ OpenMP region and the colouring being paid for and unusable. Upstream's own
 table has the same sign at the same size. A serial deployment of MEQ is
 very slightly worse off for this change.
 
-**MEQ'S OWN HALF OF THE THREADING IS ALSO MEASURED NOW, AND `THREADING-PLAN.md`
-IS CLOSED.** Items A, B and C — the sparse border rows and the five plasma
+**MEQ'S OWN HALF OF THE THREADING IS ALSO MEASURED**, and its rules are
+`CLAUDE_HDGGS.md`'s *MEQ's own threaded loops*. The three items — the sparse border rows and the five plasma
 element loops and the critical-point sweep — are worth **`1.16×` on the whole
-DIII-D run at eight threads**, against the `1.14×` that plan predicted, and
+DIII-D run at eight threads**, against the `1.14×` predicted, and
 `1.03×` at one thread where only the sparsity item has anything to give
 → **[M-137](MEASUREMENTS.md#m-137)**. The `before` arm is the pre-threading
 commit carrying **one** cherry-picked line, `SetIntegratorsThreadSafe()`,
@@ -568,9 +568,9 @@ against the ~30% M-126 measured, and the largest single-threaded item was
 and ahead of the NPC traversal it used to sit behind. **Upstream has since
 threaded it**, worth `1.177×` on the whole run
 → **[M-172](MEASUREMENTS.md#m-172)**, so the largest single-threaded item MEQ
-pays for is now `re-assembly` at about 6%, which MEQ owns: the line search
-re-assembling a right-hand side that is linear in the exterior coefficients, and
-it lives in `BORDERED-GLOBALISATION-PLAN.md` §12. **Size anything on this path
+pays for is `re-assembly` at about 6%, which MEQ owns: the line search's
+right-hand side, linear in the exterior coefficients, which a trial now forms in
+place (`CLAUDE_FB.md`, FB-5, → **[M-317](MEASUREMENTS.md#m-317)**). **Size anything on this path
 against M-172, then M-138, and not against M-126.**
 
 Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:

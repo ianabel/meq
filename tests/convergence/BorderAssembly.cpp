@@ -26,7 +26,8 @@ using namespace meqtest;
  * THE BORDER'S ELEMENT LOOPS: COMPRESSED EXACTLY, AND THREADED EXACTLY
  * ===========================================================================
  *
- * THREADING-PLAN.md items A and B, on the one fixture in this tree that
+ * The compressed border rows and the threaded plasma loops (CLAUDE_HDGGS.md,
+ * *MEQ's own threaded loops*), on the one fixture in this tree that
  * carries every border row at once -- psi_ax, psi_bnd, XP-3's two, the current
  * scale and the exterior modes. examples/diverted-tokamak.toml is freegs4e's
  * A_testtokamak_classic, and DivertedMachine.hpp assembles it exactly as
@@ -47,9 +48,8 @@ using namespace meqtest;
  * assemblePlasmaCurrent() and assembleCurrentNormalisationCorner() carried one
  * running total across every quadrature point of every element, and a flat
  * left fold is not reproducible from per-element partials by any grouping --
- * `( a + b ) + ( c + d )` is not `( ( a + b ) + c ) + d`. THREADING-PLAN.md
- * item B says per-element partials are "bit-identical to the serial loop" and
- * that is false; what IS true, and what is asserted below, is that they give
+ * `( a + b ) + ( c + d )` is not `( ( a + b ) + c ) + d`. So per-element
+ * partials are NOT bit-identical to the serial loop; what IS true, and what is asserted below, is that they give
  * the same bits at every thread count. The re-association against the
  * PREVIOUS serial code is a one-off of order 1e-16 and is recorded rather than
  * hidden.

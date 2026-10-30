@@ -2577,8 +2577,8 @@ BOOST_AUTO_TEST_CASE( theExteriorCouplingClosesInOneBorderedNewton )
  * theExteriorCouplingClosesInOneBorderedNewton above puts the exterior
  * coefficients in the same Newton as the state, on a FIXED mesh. This is the
  * same coupling driven through solve -> post-process -> estimate -> mark ->
- * refine, which is what FREE-BOUNDARY-PLAN.md section 7's FB-5 row still has
- * open.
+ * refine, which is the second half of FREE-BOUNDARY-PLAN.md section 7's FB-5
+ * row.
  *
  * WHAT IS NEW HERE AND IS NOT A REPEAT OF STAGE 6. The adaptive loop on the
  * curved boundary is already measured -- AdaptiveRefinement.cpp's
@@ -2847,8 +2847,9 @@ BOOST_AUTO_TEST_CASE( theCoupledSolveSurvivesTheAdaptiveLoop )
 	 * interior error is 9.3e-04 and the frozen coefficient error is 1.3e-03; a
 	 * few more cycles and the second is the floor of the first. What that wants
 	 * is a boundary indicator of its own -- the transmission residual per face
-	 * of Gamma_h -- added to the marking. It is not built, and
-	 * FREE-BOUNDARY-PLAN.md section 7's FB-5 row is where that is recorded.
+	 * of Gamma_h -- added to the marking. That is eta_6, opt-in, and
+	 * theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients below measures it
+	 * (FREE-BOUNDARY-PLAN.md section 7.12a).
 	 *
 	 * WHAT IS ASSERTED INSTEAD IS STABILITY, WHICH IS A REAL PROPERTY AND NOT A
 	 * CONSOLATION. The border is re-assembled every cycle on a new mesh, a new

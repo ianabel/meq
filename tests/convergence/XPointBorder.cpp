@@ -1000,8 +1000,8 @@ BOOST_AUTO_TEST_CASE( theXPointMeritWeightRefusesANonPositiveValue )
 /*
  * THE BORDERED PICARD REACHES THE SAME EQUILIBRIUM AS THE BORDERED NEWTON.
  *
- * BORDERED-GLOBALISATION-PLAN.md BG-4's second acceptance, and it is the one
- * with teeth. Globalisation::BorderedPicardThenNewton runs the SAME bordered
+ * The rung's acceptance with teeth (CLAUDE_FB.md, *The bordered path has a
+ * globalisation*). Globalisation::BorderedPicardThenNewton runs the SAME bordered
  * system through a different iteration -- Picard in the field block, Newton in
  * the borders, the Armijo loop and the augmented norm untouched -- so the fixed
  * point is unchanged by construction:

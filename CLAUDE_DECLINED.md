@@ -48,6 +48,7 @@ or that code cites by section number, stay where they are and are indexed under
   * *`Normalisation::Decoupled`: a Picard on the border round a Newton on the field*
   * *KINSOL and Anderson acceleration on the bordered fixed point*
   * *The bordered ladder's rejected-outright list*
+  * *The bordered globalisation campaign, BG-0 to BG-7*
 * **Linear solves, threading and the build**
   * *UMFPACK's threaded BLAS as the `MKL_NUM_THREADS` culprit*
   * *MKL_THREADING_LAYER=GNU*
@@ -56,6 +57,7 @@ or that code cites by section number, stay where they are and are indexed under
   * *MFEM as a submodule*
   * *PARDISO's old failure: the sequential timings and three dead hypotheses*
   * *Threading the output writers (E) and the Newton loop's remainder (F)*
+  * *MEQ's own threading: the routes not taken*
 * **Device and single precision**
   * *cuDSS determinism: SetDeterministic and per-column Mult*
   * *A per-pair rate criterion, or a wider `rateSlack`, in single precision*
@@ -321,7 +323,7 @@ sweep's rather than the solve's. BG-0's instrumentation ([M-117](MEASUREMENTS.md
 would be re-taken. Do not propose a fourth detector without
 saying how it would be falsified on all fourteen of M-103's rows.
 
-*From `BORDERED-GLOBALISATION-PLAN.md` §1.4.*
+*From `BORDERED-GLOBALISATION-PLAN.md`, deleted; §1.4.*
 
 ### `PicardThenNewton` as the default, and `CondenseThenLinearise` as a cheaper rung
 
@@ -489,9 +491,12 @@ That removes, structurally:
 * **Newton–Krylov / JFNK**, which needs `J·v`;
 * and anything that wants to *compare* `J` between iterates.
 
-*From `BORDERED-GLOBALISATION-PLAN.md` §2.2, whose closing paragraph — what IS
-available, and why the families there change the operator or the problem rather
-than the step rule — stays in that file.*
+**What IS available** is the step direction, the residual and the constraints at
+trial points, the dense border system, and the freedom to change which operator
+is assembled — so a globalisation on this path changes the operator or the
+problem rather than the step rule, and that is forced rather than chosen.
+
+*From `BORDERED-GLOBALISATION-PLAN.md`, deleted; §2.2.*
 
 **CEDRES++'s architecture is therefore not available to MEQ, and this is not a
 preference.** Its SQP iteration (3.33) is a 3×3 block KKT system containing
@@ -512,13 +517,13 @@ side and to each border column, blocked through `DarcyNPCSolver::ArrayMult`.*
 reaches `4.447e-15` in 4 iterations, decoupled sits at `8.239e-02` after 15 and
 does not converge.
 
-That is the *opposite* split from the bordered Picard of
-`BORDERED-GLOBALISATION-PLAN.md` §3: Newton on the field, Picard on the border.
+That is the *opposite* split from `BorderedPicardThenNewton` (`CLAUDE_FB.md`,
+*The bordered path has a globalisation*): Newton on the field, Picard on the border.
 It is worth stating because it is the obvious first idea and it is already dead,
 and because it is the control that says the coupling is doing real work. **Do
 not re-derive it.**
 
-*From `BORDERED-GLOBALISATION-PLAN.md` §2.4.*
+*From `BORDERED-GLOBALISATION-PLAN.md`, deleted; §2.4.*
 
 ### KINSOL and Anderson acceleration on the bordered fixed point
 
@@ -547,7 +552,7 @@ reactive rung, which is affordable. **BG-3 is built that way and is falsified
 on other grounds** — 0 of 6 close, [M-119](MEASUREMENTS.md#m-119) — so the
 iteration count is not what kills it and Anderson has nothing to add.
 
-*From `BORDERED-GLOBALISATION-PLAN.md` §3.6.*
+*From `BORDERED-GLOBALISATION-PLAN.md`, deleted; §3.6.*
 
 ### The bordered ladder's rejected-outright list
 
@@ -559,7 +564,56 @@ cannot take the border); a dogleg, trust region or JFNK (*Methods that need Jᵀ
 (*Predictive solver selection: the killed detectors* — two signals measured
 useless, one of them anti-correlated, and a third that looks the same way).
 
-*From `BORDERED-GLOBALISATION-PLAN.md` §7, item 5.*
+*From `BORDERED-GLOBALISATION-PLAN.md`, deleted; §7, item 5.*
+
+### The bordered globalisation campaign, BG-0 to BG-7
+
+**Falsified.** The campaign made a globalisation reachable with `ψ_ax` an
+unknown of the bordered Newton, so that the six cold failures would have a
+second rung. **Every stage but BG-2 ran, and it closes none of the six.**
+
+| stage | verdict |
+|---|---|
+| **BG-0** classify the `exit 2` | no non-finite direction on any step of the six: two single fatal steps that are X-point excursions, one chronic, three excursions → [M-117](MEASUREMENTS.md#m-117), [M-253](MEASUREMENTS.md#m-253) (`CLAUDE_FB.md`, *The cold failures are three different things*) |
+| **BG-1** `PicardSweeps` as the control | fixes none and makes three silent wrong answers → [M-116](MEASUREMENTS.md#m-116) (*PicardSweeps and BorderedPicardThenNewton*) |
+| **BG-2** a frozen source, `SourceIntegrator::setFrozenPotential()` | not built; `meq::FieldLinearisation` changes the Jacobian's field block and leaves the residual alone |
+| **BG-3** the bordered Picard | built as `BorderedPicardThenNewton`; 0 of 6, and four of six reach a worse minimum than Newton → [M-119](MEASUREMENTS.md#m-119) |
+| **BG-7** continuation in `μ₀ I_p` | dead: the ramp fails at every `λ` down to 0.05 (*Border scaling: a per-border ruler for the bordered merit*) |
+
+BG-4 to BG-6 are the rung's handoff, its place in the driver and the re-take,
+all built. **The kill criterion that the re-take must close two of six fired**,
+and the plan's answer to it was to delete the rung; it stays because it is the
+retry rung BS-5's X-point cap sits on ([M-247](MEASUREMENTS.md#m-247)), not
+because the campaign paid.
+
+**Family (a), a frozen source through `buildForms()`, is the obvious route and
+is wrong four ways.** With `usesNonlinearForms()` false the potential block goes
+on the linear form, `EnableHybridization()` takes the `M_p` branch, and
+`DarcyNPCOperator::Mult` is not established to be defined there; the exterior
+coupling is refused when `usesNonlinearForms()` is false, and every machine case
+has one; `FrozenSource::Eval` calls `source.f()` directly and so skips the
+element mask and `fOutsidePlasma()`, leaving XP-1's fill inert; and
+`buildForms()` replaces the `DarcyForm` outright, which is fatal mid-solve
+(`CLAUDE_FB.md`, *The bordered path has a globalisation*).
+
+**Family (b), freeze the borders and solve unbordered (`PicardSweeps`), solves a
+different problem each sweep**: an ordinary semi-linear Grad–Shafranov problem
+at fixed `(ψ_ax, ψ_bnd, λ)`, which `theFixedNormalisationIsADifferentProblem`
+controls. Its outer map is a Gauss–Seidel split of a system the bordered Newton
+solves simultaneously, and on case A it does not contract: `ψ_bnd` read at a
+fixed seed runs `I_p` from 3.2e+05 to 4.4e+06 in one sweep, tracking the saddle
+inverts the span at the first sweep, and the inner solve stalls in a limit cycle
+near 1e-03. It also discards the prescribed-current border and re-poses the
+amplitude-fixed problem once per sweep. BG-1 is its measurement on the six.
+
+**What moved the cold failures instead was not a globalisation**:
+`setBorderRegularisation()` removes the singular-Jacobian throw
+([M-123](MEASUREMENTS.md#m-123)), and an initial guess spreading `I_p` over an
+ellipse converges MAST-U from its own file ([M-124](MEASUREMENTS.md#m-124)) —
+necessary together and neither sufficient.
+
+*From `BORDERED-GLOBALISATION-PLAN.md`, deleted; its status, §3.2, §4, §5, §8
+and §10.*
 
 ## Linear solves, threading and the build
 
@@ -681,7 +735,7 @@ MEQ's matrix — a plain 5-point Laplacian failed identically.
 
 **Declined, and the decline is a decision rather than a deferral.** Re-checked
 against [M-138](MEASUREMENTS.md#m-138) and unchanged. If either grows, that is a
-new plan and not a reopening of `THREADING-PLAN.md`.
+new plan.
 
 **E. The output writers, 3.8% — do not do.** `output` less `postProcess` is
 0.269 s. [M-92](MEASUREMENTS.md#m-92) splits it on this same case: the `.vtu`
@@ -726,8 +780,8 @@ is MFEM `Vector` arithmetic and allocator churn inside the Newton loop:
   wall and +55.4 M allocations** against an otherwise identical
   `../../mfem/install-nocuda`, with byte-identical output, and attributes 24% of the
   allocation traffic to `mfem::forall`'s host-lambda wrapper. **7% of the whole
-  run for one CMake variable is larger than every item `THREADING-PLAN.md` built
-  except A**, and it costs nothing to take for a production CPU build.
+  run for one CMake variable is larger than every threading item MEQ built
+  except the sparse border rows**, and it costs nothing to take for a production CPU build.
 
 **Do not thread this leg. Take the no-CUDA install instead, and say in the
 release notes that a CPU production build is a separate install.** Re-checked
@@ -740,7 +794,7 @@ and are already below the noise.
 
 **When E or F would be worth revisiting, and it is a new plan when it
 happens.** A reader meeting a bigger number later needs to tell whether it means
-anything, and `THREADING-PLAN.md` produced the counter-example itself:
+anything, and MEQ's own threading produced the counter-example:
 `re-assembly` went from 4.2% to 5.6% of the run **without the leg moving at
 all**, purely because the run got shorter around it.
 
@@ -763,15 +817,44 @@ another; comparing a share across budgets is not.
   other reason**, because `Vector::Add` and `Norml2` already dispatch through
   `mfem::forall`. Until then the lever is M-77's build variable and not a loop.
   If a Device does arrive, `Norml2` would reassociate and the augmented norm
-  feeds the Armijo test, so `THREADING-PLAN.md`'s cross-cutting exactness rule
-  applies to it.
+  feeds the Armijo test, so the exactness rule of `CLAUDE_HDGGS.md`, *MEQ's own
+  threaded loops*, applies to it.
 
-**And either way it is a new plan.** `THREADING-PLAN.md` is closed, its budget
+**And either way it is a new plan.** The budget E and F were judged against
 is superseded, and an item reopened against a stale denominator is how a closed
 plan quietly becomes a wrong one.
 
-*From `THREADING-PLAN.md` §E, §F, *When E or F would be worth revisiting*, and
-*What to do first* (*Not to be done*).*
+*From `THREADING-PLAN.md`, deleted; §E, §F, *When E or F would be worth
+revisiting*, and *What to do first* (*Not to be done*).*
+
+### MEQ's own threading: the routes not taken
+
+**Declined.** What `CLAUDE_HDGGS.md`, *MEQ's own threaded loops*, built was
+chosen against these, each ruled out for a stated reason.
+
+* **Threading the border's dense solve, or handing it to a BLAS-3 GEMM.** It was
+  a sparsity problem: eleven of fifteen border rows walked a vector of about
+  109,000 entries, of which an exterior row has at most 984 nonzeros. Dropping
+  the zeros took the leg 41× ([M-137](MEASUREMENTS.md#m-137)) and is exact,
+  where a blocked GEMM reassociates and widens the `MKL_NUM_THREADS` exposure.
+* **Threading `I_p` and the transmission sweep.** `of which I_p` reads 0.016 s,
+  0.5% of the run, already at 5.14 cores; `of which transmission` reads 0.037 s,
+  about 1%, at 1.00 cores over three calls. Neither is worth a region.
+* **A `reduction(+:)` for the scalar plasma loops.** It reassociates with the
+  thread count; per-element partials summed in element order do not.
+* **Gating the plasma loops on the source type** to keep a throw out of an
+  OpenMP region. A gate has to be kept correct as sources are added; a
+  per-thread `std::exception_ptr` rethrown after the region does not.
+* **Threading `CriticalPointFinder::sweep()`'s deduplication.** Which candidate
+  survives depends on order, so the reported axis would move at the 1e-3 level
+  with `OMP_NUM_THREADS`.
+* **Taking the payoff against `../mfem/install-before-npcthread`.** It needs no
+  patch, and it measures a library MEQ no longer ships; the `before` arm is the
+  pre-threading commit with `SetIntegratorsThreadSafe()` cherry-picked instead
+  ([M-137](MEASUREMENTS.md#m-137)).
+
+*From `THREADING-PLAN.md`, deleted; its status, §0, *`border dense solve` is a
+sparsity problem*, items A to C and *Cross-cutting*.*
 
 ## Device and single precision
 
@@ -1224,8 +1307,9 @@ wrong answer and no warning** — C shaped out by a factor of 3.9, both E rows b
 ### Globalisation, and a transferable merit weight, as the repair for the cold failures
 
 **Falsified.** **NOT ONE OF THE SIX COLD `exit 2` CASES HAS A NON-FINITE
-DIRECTION**, which is the condition `BORDERED-GLOBALISATION-PLAN.md` §0.1 names
-as the one that would make the whole globalisation campaign moot. They are three
+DIRECTION**, which is the condition that would have made the whole
+globalisation campaign moot (`CLAUDE_FB.md`, *The cold failures are three
+different things*). They are three
 distinct failures: two machines lose a SINGLE step of twenty-seven; one is
 chronic, exhausting the halving ladder on 55 of 288; and three are not
 step-length failures at all but **X-point EXCURSIONS** — TCV's null travels 1.6 m
@@ -1342,7 +1426,7 @@ three options, as originally written*; section numbers are that file's.*
 
 ### Initialising ψ_bnd from its own border row
 
-**Declined.** `FREE-BOUNDARY-PLAN.md` §10.5's *initialise `ψ_bnd` from its own
+**Declined.** `FREE-BOUNDARY-PLAN.md` §10.8's *initialise `ψ_bnd` from its own
 border row* is **declined on its own measurement**, not pending: the limited
 machine goes from 11 Newton steps to the 200 cap under it, and that item's own
 conclusion (§10.8) is that this is a lever rather than a missing default.
@@ -2186,12 +2270,6 @@ any of it is worth building.
 These lists are woven into live material or are cited by section number, so
 they stay where they are; this index makes the catalogue complete.
 
-- `BORDERED-GLOBALISATION-PLAN.md` *STATUS* table and §8's stages: BG-1 `PicardSweeps` falsified, three silent wrong answers (M-116); BG-2 `setFrozenPotential()` not built as written, replaced by `meq::FieldLinearisation`; BG-3 `BorderedPicardThenNewton` falsified, 0 of 6 (M-119); BG-7 continuation in `μ₀ I_p` dead, see *Border scaling: a per-border ruler for the bordered merit*. Interleaved with the DONE stages BG-0, BG-4, BG-5, BG-6.
-- `BORDERED-GLOBALISATION-PLAN.md` §3.2: the obvious `buildForms()` route for a frozen source, rejected for four reasons in favour of `SourceIntegrator`, itself not built as written.
-- `BORDERED-GLOBALISATION-PLAN.md` §4: family (b), freeze the borders and hand off; §4.3's basin question answered no by BG-1 (M-116).
-- `BORDERED-GLOBALISATION-PLAN.md` §5: family (c), continuation in `μ₀ I_p`, dead — every `λ` down to 0.05 fails on machine B, and machine E reaches a degenerate branch (*Border scaling: a per-border ruler for the bordered merit*).
-- `BORDERED-GLOBALISATION-PLAN.md` §10: the campaign's kill criteria, several of which fired (M-116, M-119).
-- `BORDERED-GLOBALISATION-PLAN.md` §12: removing the line search's full re-assembly, deferred at a 1.05× ceiling (M-138), and since built for the device bus and for exactness rather than for the ceiling (M-317).
 - `CLAUDE_DEVICE.md` *Single precision*, single precision's setup loss: `extensionFdStep()` as the suspect (falsified); `meq::pathTolerance()` built, swept and reverted whole, upstream's bisection termination taken instead (M-242).
 - `CLAUDE_DEVICE.md` *Which integrators need device offload, and the batched routes*: `AssemblyMode::Batched` a 15 to 27% host loss (closed, M-99); `LocalFactorMode::Batched` not the host default (declined); `AssemblyMode::Batched` under a Device (declined, M-215, M-209); the ordered list's items 2 and 3 (closed), "`HDGExtensionIntegrator` disqualifies the condensation cache" (falsified), nothing for the linear-form integrators (declined) (M-185).
 - `CLAUDE_MFEM.md` *`../../mfem-hdg-dev` is receive-only*, the `Reconstruct()` row: MEQ's two candidate fixes (falsified, measured); upstream's `own_internal` flag (withdrawn); three explanations of why `cuda` never met it (falsified).
@@ -2202,7 +2280,7 @@ they stay where they are; this index makes the catalogue complete.
 - `CLAUDE_FB.md` *FB-5* (the support fill): the face-neighbour leak estimate half falsified (2,275 leak), blocking the saddle element declined, fixed rings reverted, ring depth declined. `FREE-BOUNDARY-PLAN.md` §10.3 carries the same list plus "latent not broken" falsified, interior-only declined and freezing the fill not needed.
 - `CLAUDE_FB.md` *PE-0*: PE-0's acceptance as written falsified (M-74, M-75), the X-point corner as the cause falsified (M-76), quadrature as the `j = 2, k = 3` anomaly falsified (M-84).
 - `CLAUDE_FB.md` *§7.12b's fixture was the defect*: "machine C's guard refusal is a true property" withdrawn, a guard on `axisInsidePlasma` reverted (M-109); a point-in-polygon vessel declined (M-110).
-- `CLAUDE_FB.md` *The bordered path has a globalisation*: *PicardSweeps and BorderedPicardThenNewton* — freezing the residual per `BORDERED-GLOBALISATION-PLAN.md` §3.2 declined, `BorderedPicardThenNewton`'s predicted value falsified (M-119, M-253), the handoff tolerance useless, BG-3's re-purposed `PicardOnly` and BG-4's two `solve()` calls declined.
+- `CLAUDE_FB.md` *The bordered path has a globalisation*: *PicardSweeps and BorderedPicardThenNewton* — freezing the residual declined, `BorderedPicardThenNewton`'s predicted value falsified (M-119, M-253), the handoff tolerance useless, a re-purposed `PicardOnly` and two `solve()` calls declined.
 - `CLAUDE_FB.md` *Meshing the half-disc*: linking gmsh's C++ API into `meq_core` declined, re-meshing during a solve not on the plan.
 - `CLAUDE_FB.md` *MEQ against freegs4e*: the causes eliminated on machine A — `h`/`p` refinement, freegs4e's grid, the conductor model, mode truncation, the exterior radius, the `ff′` amplitude, the profile conversion, the support, the source arithmetic, `I_p` — and the forward/inverse mode mismatch as the explanation falsified (M-105, M-107).
 - `CLAUDE_FB.md` *MEQ against freegs4e*: contour against fitter falsified (M-62), caching only `Jtor` columns not pursued, two 4.5e-08 gap hypotheses falsified, `--seed-from` 10× falsified (1.21×), the `n³` sparse-LU explanation falsified and multigrid/VCYCLE closed, `±eps` averaging falsified and a BEM declined, von Hagenow for FB-6 declined, pyMFEM not used.
@@ -2266,7 +2344,7 @@ they stay where they are; this index makes the catalogue complete.
 - `PLASMA-EDGE-PLAN.md` §7: the X-point diagnosis half wrong, and the evidence against the premise disposed of.
 - `PLASMA-EDGE-PLAN.md` §9.2 and §9.4: `φ = ψ − ψ_X` as the defining function, falsified; and three causes ruled out — cone widening, a P.1 violation, the mesher / datum / path family.
 - `PLASMA-EDGE-PLAN.md` §9.5 and §9.7: an interface at `ψ_X − ε` as a fallback rather than a design, and an `O(h)` disc exclusion, superseded by the closed-form local solution.
-- `ROADMAP.md` plan-file table: the `THREADING-PLAN.md` row (E and F declined, M-137, M-138), the `BORDERED-GLOBALISATION-PLAN.md` row (the ladder closes none of six; do not start its §8; M-116, M-117, M-119), the `COIL-SUBTRACTION-PLAN.md` row (caching `psi_c` alone superseded, M-170; subdividing filaments moves MEQ away from `freegs4e`, M-166), the `FREE-BOUNDARY-PLAN.md` row (FB-T does not cure confinement, M-134) and the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-134, M-137, M-138, M-166, M-170)
+- `ROADMAP.md` plan-file table: the `COIL-SUBTRACTION-PLAN.md` row (caching `psi_c` alone superseded, M-170; subdividing filaments moves MEQ away from `freegs4e`, M-166), the `FREE-BOUNDARY-PLAN.md` row (FB-T does not cure confinement, M-134) and the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-134, M-137, M-138, M-166, M-170)
 - `ROADMAP.md` *So what is next* item 1 (l.80-117): `η₆` in the marking does nothing; coils the wrong instinct, a vertical field makes no core, vacuum start meaningless, continuation not needed; the §7.12 / §7.13 attempts (falsified / declined) (M-05)
 - `ROADMAP.md` *So what is next* item 1, *The conductor model is what is left*: no `Γ` excludes the conductors on any of seven machines, and the mixed case cascades (falsified) (M-95, M-96)
 - `ROADMAP.md` *Division of labour*: auxiliary globally-coupled unknowns no longer worth asking for (M-98); BEM coupling not wanted, ExteriorDtN instead; the local-solve seed never filed (moot under NPC)
@@ -2276,8 +2354,6 @@ they stay where they are; this index makes the catalogue complete.
 - `ROADMAP.md` item 8: FB-4 has no cut rule (declined); rectangular integrators not needed (closed); cut quadrature closed — MomentFitting −30/−63, Algoim rejected (declined)
 - `ROADMAP.md` item 10: a non-local Jacobian not needed, an outer loop instead (declined); damped Picard (falsified); global-structure work deferred
 - `ROADMAP.md` item 12.1: interpolating `F(ψ_h)`, the CSZ 2019 route, loses `k+2` (declined)
-- `THREADING-PLAN.md` *STATUS* and §0: two of six candidates were not threading problems (the border dense solve is sparsity; the remainder is the build, M-77); the `I_p` half (0.5%) and the transmission sweep (~1%) not worth doing; payoff against install-before-npcthread (declined) (M-77, M-138)
-- `THREADING-PLAN.md` *`border dense solve` is a sparsity problem* and *Cross-cutting*: BLAS-3 GEMM for the border solve (declined; reassociates); design rejections inside A–C — `reduction(+:)`, gating on source type, threading the dedup (declined)
 - `TODO` *Read p'(psi) and FF'(psi) from NetCDF*: splitting the path at the last slash, and GDAL's `NETCDF:"f":var` / OPeNDAP's `?` separator, not adopted (declined); options (b) differentiate the spline again and (c) a values-only fit (declined)
 - `TODO` *Report q( Psi )*: the prescribed-field `q` refusal stands (declined); the vacuum-field key (deferred)
 - `TODO` *More nonlinear test cases*: the "stiff" premise wrong for three of four (falsified); the Weierstrass dependency undecided (deferred)

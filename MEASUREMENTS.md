@@ -3846,8 +3846,8 @@ are how six hypotheses were killed in a day rather than argued about.
 ### M-116
 
 **`[solver] PicardSweeps` ON THE SIX COLD FAILURES: IT FIXES NONE OF THEM AND
-TURNS THREE INTO SILENT WRONG ANSWERS.** `BORDERED-GLOBALISATION-PLAN.md` §0.2
-records that **nothing in the tree has ever set this key** — no example, no test,
+TURNS THREE INTO SILENT WRONG ANSWERS.** **Nothing in the tree had ever set
+this key** — no example, no test,
 no benchmark — so every row of M-103 was taken at zero, and it was the cheapest
 untried thing available: fourteen `meq-run` invocations and no code. It has now
 been run. The pre-stage freezes `psi_ax`, `psi_bnd` and the plasma edge and
@@ -3883,8 +3883,8 @@ the repair there.
 ### M-117
 
 **WHAT THE SIX COLD FAILURES ACTUALLY ARE, AND NOT ONE IS A NON-FINITE
-DIRECTION.** `BORDERED-GLOBALISATION-PLAN.md` §0.1 asks for this classification
-and names the condition that would make the whole globalisation campaign moot:
+DIRECTION.** `CLAUDE_FB.md`, *The cold failures are three different things*,
+carries this classification and names the condition that would make the whole globalisation campaign moot:
 if the bordered step's DIRECTION is non-finite, a line search can only choose
 how far along it to go and no globalisation is the repair. **It does not hold.**
 The border trace prints on failure under `--profile` and records
@@ -4053,10 +4053,11 @@ the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )
 — a guard that has been in the tree since FB-3 (`64cca6e`) and that the Newton
 arm never reaches. **With the field block replaced by `A_lin`, which is
 unconditionally invertible, what is left singular is the BORDER'S Schur
-complement.** That is `BORDERED-GLOBALISATION-PLAN.md` §0.1's first row — *a
-non-finite direction; the Jacobian or its elimination is the defect* — reached
+complement.** That is the first row of `CLAUDE_FB.md`'s classification of an
+`exit 2` — *a non-finite direction; the Jacobian or its elimination is the
+defect* — reached
 by measurement rather than by argument, and it says the obstruction on this case
-is the border and not the field. §6.1's degenerate axis row and M-115 are where
+is the border and not the field. The degenerate axis row and M-115 are where
 it points.
 
 **AND THE HANDOFF NEVER HAPPENS THE WAY IT WAS DESIGNED TO.** The tolerance is
@@ -5106,7 +5107,7 @@ those of a different equilibrium.
 ### M-132
 
 **THE INITIAL `psi_bnd` SELECTS AMONG DISCRETE EQUILIBRIA ON THE DIVERTED
-MACHINE, AND REFINEMENT DOES NOT MERGE THEM.** `FREE-BOUNDARY-PLAN.md` §10.5
+MACHINE, AND REFINEMENT DOES NOT MERGE THEM.** `FREE-BOUNDARY-PLAN.md` §10.8
 measured two answers from two starting values and nominated *"whether the gap
 closes under refinement"* as the next thing to measure — FB-R. It is now
 measured, on the **library** fixture rather than through the driver, so that the
@@ -5157,7 +5158,7 @@ library's `findAxis()` has none, because it is a general critical-point finder
 and a coil O-point is a real critical point of `psi`. So **any axis position
 taken from `findAxis()` on a machine with meshed conductors is about a
 conductor unless something excludes them**, and a displacement quoted in metres
-from such a call — §10.5's own `6.9e-02 m` among them — needs checking against
+from such a call — §10.8's own `6.9e-02 m` among them — needs checking against
 the coil list before it is believed.
 
 **WHAT FB-R NOW NEEDS**, stated so the next attempt does not repeat this one: a
@@ -5417,9 +5418,9 @@ that MEQ does not take.
 ### M-137
 
 **THE A+B+C PAYOFF: `1.16×` ON THE WHOLE DIII-D RUN AT EIGHT THREADS, AGAINST A
-PREDICTION OF `1.14×`.** `THREADING-PLAN.md`'s items A, B and C were built,
-merged and asserted bit-exact, and the one thing the plan never had was the
-clock. This is it.
+PREDICTION OF `1.14×`.** The sparse border rows, the threaded plasma loops and
+the threaded critical-point sweep were built, merged and asserted bit-exact;
+this is the clock.
 
 **BOTH ARMS ARE BUILT AGAINST THE SHIPPING `libmfem.a`, WHICH IS THE DESIGN
 DECISION THAT MAKES THIS A MEASUREMENT ABOUT MEQ.** `before` is `60d8505` — the
@@ -5523,7 +5524,7 @@ whole printed run did not move.
 ### M-138
 
 **THE WHOLE-RUN BUDGET ON THE SHIPPING LIBRARY, AND IT IS NOT THE ONE
-`THREADING-PLAN.md` WAS WRITTEN AGAINST.** Same run as
+MEQ'S OWN THREADING WAS SIZED AGAINST.** Same run as
 [M-137](MEASUREMENTS.md#m-137)'s `after` arm — `machine-f-diiid.toml`,
 `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive`, quiet machine. This supersedes
 [M-126](MEASUREMENTS.md#m-126)'s budget as the sizing table for anything on this
@@ -5574,16 +5575,14 @@ rather than `ψ_h`. It did not move under any of this and it is now larger than
 the NPC traversal it used to sit behind.
 
 **THE LARGEST SINGLE-THREADED ITEM MEQ OWNS IS `re-assembly`, AT 5.6%.** That is
-`prepare()` under the line search, and it is the subject of
-`BORDERED-GLOBALISATION-PLAN.md` §12. Everything else MEQ owns and does not
+`prepare()` under the line search, which [M-317](#m-317) forms in place. Everything else MEQ owns and does not
 thread is under 3.5%: `other (remainder)` 3.4%, the non-`postProcess` part of
 `output` 5.8%, `makeSolver` 1.6%.
 
 **WHAT AN AMDAHL SUM SAYS IS LEFT.** Threading `Reconstruct()` perfectly would
 be `1/(1 − 0.185 × (1 − 1/6.5)) = 1.19×`; removing `re-assembly` outright is
 `1.06×`. Those are the two largest single levers on this path, and **both are
-larger than anything remaining in `THREADING-PLAN.md`**, which is the honest
-reason that plan closes rather than continues.
+larger than anything left to thread in MEQ's own code**.
 
 ### M-139
 
@@ -7073,7 +7072,7 @@ table puts `re-assembly` at 5.6% and names `DarcyForm::Reconstruct()` as the
 largest single-threaded leg at 18.5%. Cold and bordered, `postProcess` is
 **0.6%** and `re-assembly` is **51.4%** — a share moves with the problem, which
 is the same lesson [M-135](#m-135) records about the NPC traversal, met again
-from the other end. `BORDERED-GLOBALISATION-PLAN.md` §12 already owns this leg.
+from the other end. [M-317](#m-317) takes this leg's per-trial calls away.
 
 **WHY 114 STEPS: THE FULL NEWTON STEP IS ASCENT FOR THE MERIT, EVERY ITERATION,
 FOR A HUNDRED OF THEM.** From the solver's own printed trial ladder in sweep 0,
@@ -14751,8 +14750,8 @@ residuals:
 *A view's flags are the view's.* Making a vector device-valid helps no reader
 that sees it through views made afterwards.
 
-What removes the load uploads is `BORDERED-GLOBALISATION-PLAN.md` §12: the
-load is linear in the exterior coefficients, and MEQ holds the per-mode loads.
+What removes the load uploads is forming the load in place ([M-317](#m-317)):
+the load is linear in the exterior coefficients, and MEQ holds the per-mode loads.
 `DEVICE-PLAN.md` §1 had already predicted these 16 uploads, by that count.
 
 Every printed answer is unchanged across the three columns. The double suite is
@@ -19505,7 +19504,7 @@ the file's `mesh`, and the stored field the one this run solves for —
 `xpoint_located`, the I_p profile scale from `profile_scale`, the free
 currents from `inverse_currents`, a q-driven run's `g_squared_coefficients`
 (the last two now written to 17 digits), and `psi_bnd` from `psi_boundary` on
-the exact route only (§10.5 of `FREE-BOUNDARY-PLAN.md` measured a start NEAR
+the exact route only (§10.8 of `FREE-BOUNDARY-PLAN.md` measured a start NEAR
 the answer drifting; this is a start AT it).
 
 **A LIBRARY DEFECT, FOUND BY THE FIRST UNBORDERED CASE.** On the plain
@@ -21111,8 +21110,7 @@ trial and fallback step re-ran `prepare()` and rebuilt the operator, because
 derivative. So `moveExteriorLoad()` writes `b( a0 ) - sum_m ( a_m - a0_m ) c_m`
 into `darcyRhs.GetBlock( 0 )` from the device-resident columns.
 
-Neither of `BORDERED-GLOBALISATION-PLAN.md` §12's two obstacles exists on this
-route:
+Neither expected obstacle exists on this route:
 * on NPC, `FormLinearSystem()`'s `ReduceRHS()` only copies the load, and
   `essentialFluxTdofs` is empty;
 * `mfem::DarcyNPCOperator` holds the load by reference and reads it through

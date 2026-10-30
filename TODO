@@ -765,7 +765,7 @@ accuracy and not for patience.
      the stablest number in either table.
 
      And `meq --profile` does the same for a WHOLE RUN rather than a step,
-     which is what M-126 and M-128 are, and which is what THREADING-PLAN.md was
+     which is what M-126 and M-128 are, and which is what MEQ's own threading was
      sized against. Neither perf nor MFEM_USE_CALIPER was needed.
 
   3. DONE UPSTREAM, AND IN THE LIBRARY MEQ LINKS.
@@ -1351,3 +1351,76 @@ Raised 2026-10-22. After a real GPU-only pathway exists, not before.
   columns), and its deterministic mode takes one right-hand side only, so
   every run of such a build gives up the bit-exactness instrument; M-228 banked
   the exact baseline for that.
+
+
+================================================================================
+Free boundary: what FREE-BOUNDARY-PLAN.md left open
+Raised 2026-10-30, when that plan became a closed design record.
+================================================================================
+
+  The plan's stages are done or answered; these ten are the questions it named
+  and did not close. Each says where in the plan the evidence is. MEQ's cold
+  start is not here: CLAUDE_FB.md owns it.
+
+  1. REFUSE A FREE-BOUNDARY PROFILE THAT DOES NOT VANISH AT THE EDGE.  At
+     j = 0 the moving support does not converge at all, from the exact
+     solution or under PicardThenNewton, because dF/dpsi carries F.delta(Psi)
+     and meq::Source cannot (plan 7.10).  Such a configuration should be
+     refused at parse, the way [boundary] Type = "exact" is, rather than run to
+     a non-convergence the user has to diagnose.  Not built: nothing in
+     Config or apps/meq.cpp checks the edge value.  FreeGS's
+     (1 - Psi_n^alpha)^beta gives j = beta, and beta = 1 is its default.
+
+  2. THE q DEFICIT AT k = 3 ON A HIGHER-DEGREE FIXTURE.  On a mesh reaching
+     the axis q is short by about half an order at k = 2 and a fifth at k = 1;
+     k = 3 escapes because the fixture's q is a quadratic (plan 7.2,
+     CLAUDE_FB.md FB-A).  A fixture with a higher-degree flux should show the
+     deficit at k = 3 too.  Unmeasured.
+
+  3. THE ITER PROFILE FAMILY.  The published ITER profile has gamma = 1.395 < 2,
+     so dF/dpsi is unbounded at the edge: a k = 1 case with a singular Jacobian
+     there (plan 7.11).  Open it at gamma = 2 or 3, then bring 1.395 in as the
+     published case, expecting k >= 2 not to hold k+2 on it, which is the
+     profile's property.  freegs4e has no ITER machine; any of its seven serves.
+     ROADMAP.md item 1 names it as the next harder case.
+
+  4. B AT A CONDUCTOR AGAINST THE MODE COUNT.  The exterior truncation N is
+     calibrated against psi_ax (N = 10 converged to 2.9e-04 on 7.16's case),
+     and B at a conductor is a different functional of the same coefficients
+     (plan 7.19).  A multipole expansion is worst just outside Gamma.  Measure
+     B's convergence in N before quoting a force.
+
+  5. VERTICAL INSTABILITY.  No vertically unstable case has been run (plan 8).
+     CEDRES++ names it as where fixed-point iteration fails outright; MEQ's
+     Newton is not a fixed-point scheme, but a Newton on an indefinite problem
+     is not automatically safe, and a line search on the full NPC residual is
+     measured making every case worse (CLAUDE_HDGGS.md, Why it fails).
+
+  6. NEAR-DOUBLE-NULL CONDITIONING.  Two saddles at nearly equal psi make the
+     choice of bounding point arbitrarily sensitive (plan 10.5).  Expect the
+     border to be ill-conditioned and the choice to flip between iterates;
+     measure the conditioning, with AxisConvergence as the template.
+
+  7. WHAT IS LEFT OF FB-R.  The initial psi_bnd selects among discrete
+     equilibria and refinement does not merge them (M-132, plan 12).  Owed: a
+     topology diagnostic saying which equilibrium each row is, and a fourth
+     refinement level.  The conductor-excluded axis location is built.  Plan
+     10.8's own 6.9e-02 m must be re-checked against the coil list before it is
+     quoted again, since the instrument that produced it found a coil's O-point.
+
+  8. WHAT THE CONFINEMENT IS DOING (FB-T).  A prescribed current moves
+     confinement off zero (0/4 to 2/4) without curing it (M-134, plan 12), so
+     theTwoBordersConvergeTogether's retraction stands.  What the confinement
+     is doing instead is not answered.
+
+  9. THE |a_n| SPECTRUM TABLE CANNOT BE RE-DERIVED.  Plan 3.3's table records
+     the decay rate, which is sound and is what the cost argument uses, but not
+     the loop radius and current normalisation behind its magnitudes; against
+     a unit loop they differ by an n-dependent factor up to about 9 (plan 3.6).
+     Record the source parameters beside the table.
+
+  10. OPTIONAL: AN O(h^2) GAP BETWEEN Gamma AND THE STAIRCASE.  D_h stops at the
+      last mesh line whose outer corner fits inside Gamma, so the gap is O(h);
+      an offset of about h^2/(2 rho_Gamma) chosen per mesh would make it O(h^2)
+      (plan 7.9).  Only worth it if FB-1's transmission row is ever limited by
+      it.

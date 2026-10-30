@@ -3,8 +3,9 @@
 Written 2026-09-16. `CLAUDE.md` is the maintainer's index, `CLAUDE_FB.md` owns
 the borders and the `freegs4e` benchmark, `CLAUDE_HDGGS.md` owns Newton, and
 `MEASUREMENTS.md` holds the published tables; this file defers to all four and
-restates none of them. `BORDERED-GLOBALISATION-PLAN.md` and the
-per-border merit scaling (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**,
+restates none of them. The bordered globalisation campaign
+(→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *The bordered globalisation
+campaign, BG-0 to BG-7*) and the per-border merit scaling (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**,
 *Border scaling: a per-border ruler for the bordered merit*) attack the same
 cold-start failure from the solver side, and §8 says how this relates to them.
 
@@ -137,8 +138,9 @@ is a real motivation and a much smaller one.
 
 **Is MEQ's cold-start failure actually a topology failure?** M-103's six exit-2
 rows report *"no damping of the bordered Newton step gave a finite residual —
-`psi_ax`"*, and `BORDERED-GLOBALISATION-PLAN.md` §0.1 establishes that **nothing
-in the code distinguishes a genuine excursion from a non-finite direction**.
+`psi_ax`"*, and **nothing in the code distinguished a genuine excursion from a
+non-finite direction** (`CLAUDE_FB.md`, *The cold failures are three different
+things*).
 
 **Had BG-0 come back "a non-finite direction" on most of the six, an inverse
 capability would not have helped them either** — the defect would be in the
@@ -536,8 +538,8 @@ dF/dI_c  =  mu0 * R / area_c   on coil c's rectangle,   0 elsewhere.
   (`Coils.cpp:1224-1227`) forwards to the plasma source alone — the coils
   contribute nothing to it. So the coil column is **independent of the
   iterate**, exactly as the exterior Gegenbauer columns are
-  (`GradShafranov.cpp:4917`, and `BORDERED-GLOBALISATION-PLAN.md` §2.3 lists it
-  among the four border pieces that need no `∂F/∂ψ`). **Assembled once per mesh,
+  (`GradShafranov.cpp:4917`; of the bordered system's pieces only the field
+  block needs `∂F/∂ψ`). **Assembled once per mesh,
   not once per Newton step.**
 * **It does not depend on the plasma support.** The coil term is added
   unconditionally, outside every `elementInPlasma()` gate; `assembleCurrentRow()`
@@ -562,7 +564,8 @@ are assembled by different code. §6.3.
 
 ### 3.4 AND MEQ HAS NO `Jᵀ`, WHICH DECIDES THE ARCHITECTURE BEFORE ANY TRADE-OFF
 
-`BORDERED-GLOBALISATION-PLAN.md` §2.2, verified against the installed header:
+→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Methods that need Jᵀ*, verified
+against the installed header:
 `mfem::DarcyNPCOperator::Jacobian::Mult` **aborts** and there is no `Jᵀ`, so
 CEDRES++'s full-space SQP — a KKT system containing `D_y Bᵀ(yⁱ)` explicitly — is
 **structurally unbuildable** on the NPC path.
@@ -1053,7 +1056,7 @@ and it converts one of the forward table's five reds, TCV
 
 | | | |
 |---|---|---|
-| **`BORDERED-GLOBALISATION-PLAN.md`** | **complementary, and its BG-0 gated this document's motivation — run, discharged, [M-117](MEASUREMENTS.md#m-117)** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its §2.2 is load bearing here — no `Jᵀ` — and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |
+| **The bordered globalisation campaign** → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *The bordered globalisation campaign, BG-0 to BG-7* | **complementary, and its BG-0 gated this document's motivation — run, discharged, [M-117](MEASUREMENTS.md#m-117)** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its finding that there is no `Jᵀ` is load bearing here (*Methods that need Jᵀ*), and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |
 | **Border scaling**, BS-0 to BS-5 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Border scaling: a per-border ruler for the bordered merit* | **complementary** | **BS-1, a per-border merit scale, is reverted** ([M-245](MEASUREMENTS.md#m-245) — a per-border ruler moves which equilibrium is reported), so an inverse border's scale, `1/M_c` (§4.4), is a candidate to measure rather than a datum to slot in. **BS-5, the X-point relocation cap, is landed on the retry rung** ([M-247](MEASUREMENTS.md#m-247), [M-248](MEASUREMENTS.md#m-248)). Its BS-0 gate is BG-0 restated |
 
 **Is an inverse capability a superset of either? No, and the claim should not be
@@ -1069,9 +1072,9 @@ made.** Three reasons:
 
 **What it does offer that neither plan does** is a route that changes the
 *problem* rather than the *step*, which is the family
-`BORDERED-GLOBALISATION-PLAN.md` §2.2 says is forced on MEQ anyway: *"Three of
-the four families below therefore change the operator or the problem rather than
-the step rule, and that is forced rather than chosen."* **An inverse solve is a
+*Methods that need Jᵀ* says is forced on MEQ anyway: a globalisation on this
+path changes the operator or the problem rather than the step rule, and that is
+forced rather than chosen. **An inverse solve is a
 fifth member of that family and arguably the most physical one** — it adds
 information about the machine rather than damping the arithmetic.
 
@@ -1087,7 +1090,7 @@ fails until it is there.**
 
 **Run `solve_from_cold()` on all seven machines** and tabulate inverse-stage
 iterations, released-forward iterations, and final agreement with the reference.
-§0.1. Run `BORDERED-GLOBALISATION-PLAN.md`'s BG-0 beside it.
+§0.1. Run the `exit 2` classification of M-117 beside it.
 
 **Acceptance**: a table in `MEASUREMENTS.md` under a **new** anchor — the highest
 today is **M-103** and anchors are never renumbered. **If fewer than five of
