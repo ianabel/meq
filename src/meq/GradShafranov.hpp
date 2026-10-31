@@ -2535,13 +2535,26 @@ namespace meq
 			 *    is. Beside the extension a flux law takes a flux mass form
 			 *    holding the extension's face integrator alone, which
 			 *    DarcyForm::Reconstruct() treats as no form at all;
-			 *  - beside setConductorField(): the vacuum flux adds to q, and under
-			 *    Delta it carries a load (ANISOTROPY-PLAN.md AN-3b);
 			 *  - under an mfem::Device, since the weight is a host coefficient
 			 *    and the device path assembles R as a field;
 			 *  - beside setPlasmaCurrent(), refused by solve(): the constraint
 			 *    integrates F/R, which is the toroidal current only when Delta = 0
 			 *    -- under it Delta* psi = ( grad psi . grad Delta - F )/( 1 - Delta ).
+			 *
+			 * BESIDE setConductorField() EVERY Delta, a position one included,
+			 * goes on the flux law, and the law is AFFINE. The solved flux is
+			 * the remainder's, u_p = -q_p in DarcyForm's sign, and the
+			 * conductors' q_c is not divided by 1 - Delta, so the remainder's
+			 * flux row carries a load:
+			 *
+			 *     R/( 1 - Delta ) u_p - ( Delta/( 1 - Delta ) ) grad_bar psi_c,
+			 *
+			 * with Delta read at the TOTAL psi_p + psi_c. A linear flux mass
+			 * cannot carry the load into DarcyForm::Reconstruct(), which takes
+			 * a law's value at zero flux and nothing on the linear mass's
+			 * right-hand side. psi_c and its gradient are tabulated once per
+			 * mesh at the law's own quadrature points; anywhere else they are
+			 * evaluated.
 			 *
 			 * UNDER Argument::NormalisedFlux the bordered Newton's label columns
 			 * are differenced and never the source's analytic ones, which know
@@ -5367,7 +5380,10 @@ namespace meq
 			///
 			/// **UNDER setAnisotropy() THIS IS ( 1 - Delta )/R grad_bar( psi )**,
 			/// the flux the anisotropic operator conserves, and not the poloidal
-			/// field. Its zeros are grad psi's, since 1 - Delta > 0.
+			/// field. Its zeros are grad psi's, since 1 - Delta > 0. Beside the
+			/// split too, the remainder's q_p and q_c = ( 1/R ) grad_bar( psi_c )
+			/// add to that, the load in setAnisotropy()'s law being what makes
+			/// them.
 			///
 			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
 			/// THE REMAINDER `psi_p` AND NOT OF THE PHYSICAL FLUX.** `q_c` is
@@ -6365,10 +6381,37 @@ namespace meq
 			bool stabilisationFollowsAnisotropy = false;
 			std::unique_ptr<mfem::HDGStabilization> anisotropicStabilization;
 
-			/// R/( 1 - Delta( psi ) ) and its psi-derivative, the flux law of a
-			/// Delta that reads psi. Owned here because the integrator holds it by
+			/// The flux law of a Delta that reads psi, or of any Delta beside
+			/// setConductorField(): R/( 1 - Delta ), its psi-derivative, and the
+			/// conductors' load. Owned here because the integrator holds it by
 			/// reference. Null otherwise.
-			std::unique_ptr<mfem::FunctionDiffusionFlux> anisotropicFlux;
+			class AnisotropicFluxLaw;
+			std::unique_ptr<mfem::MixedFluxFunction> anisotropicFlux;
+
+			/// Whether the flux mass is the law rather than a bilinear form.
+			bool anisotropyIsAFluxLaw() const;
+
+			/// psi_c and grad_bar( psi_c ) at every point of the law's own
+			/// element rule, three values a point, built once per mesh by
+			/// buildForms() beside setConductorField(); and each element's rule,
+			/// so conductorAtLawPoint() can tell a tabulated point from any
+			/// other. Empty otherwise.
+			std::vector<double> anisotropicConductorValues;
+			std::vector<int> anisotropicConductorOffsets;
+			std::vector<mfem::IntegrationRule const *> anisotropicConductorRules;
+			void buildAnisotropicConductorTable();
+
+			/// psi_c and grad_bar( psi_c ) at the point @a transformation is set
+			/// to: from the table where it is one of the law's own points,
+			/// evaluated otherwise. Reentrant.
+			void conductorAtLawPoint( mfem::ElementTransformation &transformation,
+			                          double radius, double z, double &psi,
+			                          double &gradR, double &gradZ ) const;
+
+			/// solve()'s checks of the solved psi -- the TOTAL under a split --
+			/// against the firehose limit, and against Gamma_h beside the
+			/// extension or the DtN.
+			void checkSolvedAnisotropy( bool againstTheBoundary ) const;
 
 			/// solve() is this, then the check of the solved psi against the
 			/// firehose limit under a Delta that reads psi.

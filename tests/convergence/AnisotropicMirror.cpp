@@ -13,6 +13,7 @@
 
 #include "meq/Anisotropy.hpp"
 #include "meq/Coils.hpp"
+#include "meq/ConductorField.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/PointLocator.hpp"
 #include "meq/RotatingSource.hpp"
@@ -45,6 +46,14 @@
  *
  * zero outside 0 < Psi < 1, between the two labels. Whether it vanishes on
  * Gamma_h depends on the solved psi, so the solver checks it there.
+ *
+ * AND THE SAME PACKS SUBTRACTED, ANISOTROPY-PLAN.md AN-3b: psi_c of the two
+ * rectangles handed to setConductorField(), the plasma source alone on the
+ * mesh, and the anisotropic flux row carrying the conductors' load. Both
+ * routes solve one continuous problem on one mesh, so their difference falls
+ * with refinement, as COIL-SUBTRACTION-PLAN.md's instrument has it. A load
+ * missing or of the wrong sign leaves a difference of order delta0 that does
+ * not.
  *
  * Each case says what it asserts.
  */
@@ -181,9 +190,21 @@ namespace
 		return out;
 	}
 
+	/// The two packs as psi_c: the subtracted route's conductors, the meshed
+	/// route's machineCoils() at the same quadrature order.
+	meq::ConductorField packsField()
+	{
+		meq::ConductorField field( machine().mu0 );
+		field.add( pack( -1.0 ) );
+		field.add( pack( +1.0 ) );
+		field.setQuadratureOrder( referenceOrder );
+		return field;
+	}
+
 	/// Everything one solve aliases, kept alive with it.
 	struct Run
 	{
+		std::unique_ptr<meq::ConductorField> conductors;
 		std::unique_ptr<Domain> domain;
 		std::unique_ptr<VacuumSolve> vacuum;
 		std::shared_ptr<meq::NormalisedRotatingSource> plasma;
@@ -206,7 +227,7 @@ namespace
 	};
 
 	std::unique_ptr<Run> run( int order, int level, Delta kind, double amplitude,
-	                          bool tauFollows = false )
+	                          bool tauFollows = false, bool subtracted = false )
 	{
 		meqtest::geq::GeqCase const &p = problem();
 		auto r = std::make_unique<Run>();
@@ -216,10 +237,24 @@ namespace
 		mesh.alignConductors = true;
 		r->domain = buildDomain( level, "anisotropic-mirror", mesh );
 
-		r->vacuum = solveMeshed( *r->domain, order, defaultModes, machineCoils() );
-		std::vector<double> const labels = valuesAt(
-			r->vacuum->solver->potential(), { p.axisPointR, p.boundaryPointR },
-			{ p.axisPointZ, p.boundaryPointZ } );
+		std::vector<double> labels;
+		if ( subtracted )
+		{
+			// The labels are the TOTAL flux at their points: the vacuum's
+			// remainder there plus psi_c, exactly.
+			r->conductors = std::make_unique<meq::ConductorField>( packsField() );
+			r->vacuum = solveSubtracted( *r->domain, order, defaultModes, *r->conductors );
+			labels = valuesAt( r->vacuum->solver->potential(), { p.axisPointR, p.boundaryPointR },
+			                   { p.axisPointZ, p.boundaryPointZ } );
+			labels[ 0 ] += r->conductors->psi( p.axisPointR, p.axisPointZ );
+			labels[ 1 ] += r->conductors->psi( p.boundaryPointR, p.boundaryPointZ );
+		}
+		else
+		{
+			r->vacuum = solveMeshed( *r->domain, order, defaultModes, machineCoils() );
+			labels = valuesAt( r->vacuum->solver->potential(), { p.axisPointR, p.boundaryPointR },
+			                   { p.axisPointZ, p.boundaryPointZ } );
+		}
 
 		r->plasma = std::make_shared<meq::NormalisedRotatingSource>(
 			meqtest::geq::speciesFrom( p, false ), meqtest::geq::omegaFrom( p ),
@@ -247,7 +282,13 @@ namespace
 		solver.setAxisFluxPoint( p.axisPointR, p.axisPointZ );
 		solver.setBoundaryFluxPoint( p.boundaryPointR, p.boundaryPointZ );
 		solver.setBoundaryFluxInitial( labels[ 1 ] );
-		solver.setSource( *r->source, labels[ 0 ] );
+		if ( subtracted )
+		{
+			solver.setConductorField( *r->conductors );
+			solver.setSource( *r->plasma, labels[ 0 ] );
+		}
+		else
+			solver.setSource( *r->source, labels[ 0 ] );
 		solver.setBoundaryData( r->zero );
 		solver.setExtension( *r->domain->path, r->domain->gammaHMarker );
 		solver.setExteriorCoupling( *r->dtn );
@@ -283,6 +324,19 @@ namespace
 					c.z.push_back( z );
 				}
 		return c;
+	}
+
+	/// psi* at the cloud, the TOTAL on the subtracted route: the remainder's
+	/// reconstruction plus psi_c, exactly.
+	std::vector<double> totalPsiStarAt( Run &r, Cloud const &cloud )
+	{
+		r.solver->postProcess();
+		std::vector<double> values = valuesAt( r.solver->postProcessedPotential(), cloud.radius,
+		                                       cloud.z );
+		if ( r.conductors )
+			for ( std::size_t i = 0; i < values.size(); ++i )
+				values[ i ] += r.conductors->psi( cloud.radius[ i ], cloud.z[ i ] );
+		return values;
 	}
 
 	double rms( std::vector<double> const &a, std::vector<double> const &b )
@@ -422,4 +476,104 @@ BOOST_AUTO_TEST_CASE( aDeltaInPsiOnGammaIsRefusedOnTheSolvedPsi )
 	BOOST_TEST( !r->converged );
 	BOOST_TEST( r->failure.find( "Gamma_h" ) != std::string::npos, r->failure );
 	BOOST_TEST( r->failure.find( "solved psi" ) != std::string::npos, r->failure );
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * AN-3b: the subtracted mirror
+ * ---------------------------------------------------------------------------
+ */
+
+/// A zero bump on the subtracted route goes through the flux law -- every Delta
+/// beside setConductorField() does -- and must be the isotropic subtracted
+/// mirror, to the solver's tolerance rather than to the bit: the two assemble
+/// the flux mass through different integrators.
+BOOST_AUTO_TEST_CASE( aZeroBumpThroughTheLawIsTheSubtractedMirror )
+{
+	auto const plain = run( 2, 0, Delta::None, 0.0, false, true );
+	auto const zero = run( 2, 0, Delta::Bump, 0.0, false, true );
+	BOOST_TEST_REQUIRE( plain->converged, plain->failure );
+	BOOST_TEST_REQUIRE( zero->converged, zero->failure );
+
+	mfem::GridFunction const &a = plain->solver->potential();
+	mfem::GridFunction const &b = zero->solver->potential();
+	double worst = 0.0;
+	for ( int i = 0; i < a.Size(); ++i )
+		worst = std::max( worst, static_cast<double>( std::abs( a( i ) - b( i ) ) ) );
+	double const scale = a.Normlinf();
+	std::printf( "  subtracted, zero bump through the law: psi_p differs by %.3e on %.3e;"
+	             " Newton %d and %d\n", worst, scale, plain->solver->newtonIterations(),
+	             zero->solver->newtonIterations() );
+	std::fflush( stdout );
+	BOOST_TEST( worst < 1.0e-10*scale, "psi_p differs by " << worst << " on " << scale );
+}
+
+/// From the subtracted vacuum, either Delta converges as the meshed route does.
+BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorConvergesFromTheVacuum )
+{
+	for ( Delta const kind : { Delta::Bump, Delta::Profile } )
+	{
+		char const *const label = kind == Delta::Bump ? "bump" : "Delta( Psi )";
+		auto const r = run( 2, 0, kind, -0.3, false, true );
+		BOOST_TEST_REQUIRE( r->converged, label << ": " << r->failure );
+		std::printf( "  subtracted, %s, delta0 = -0.3: %d Newton steps, psi_ax %.6e,"
+		             " psi_bnd %.6e; residuals", label, r->solver->newtonIterations(),
+		             r->solver->psiAxis(), r->solver->psiBoundary() );
+		for ( double v : r->solver->newtonResiduals() )
+			std::printf( " %.2e", v );
+		std::printf( "\n" );
+		std::fflush( stdout );
+		BOOST_TEST( r->solver->newtonIterations() <= 8, label << ": "
+		            << r->solver->newtonIterations() << " Newton steps" );
+	}
+}
+
+/// THE SUBTRACTED MIRROR IS THE MESHED ONE: on each level the RMS of the two
+/// routes' total psi* over the machine region, for the isotropic mirror and
+/// for both Deltas at delta0 = -0.3. The isotropic difference is what the two
+/// discretisations leave; an anisotropic one must fall as it does and stay
+/// within a factor of it. A conductors' load dropped, or of the wrong sign,
+/// leaves an O( delta0 ) difference that does not fall.
+BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorIsTheMeshedOne )
+{
+	Cloud const cloud = machineCloud();
+	struct Variant
+	{
+		char const *label;
+		Delta kind;
+	};
+	std::vector<std::vector<double>> differences;
+	for ( Variant const &variant : { Variant{ "isotropic", Delta::None },
+	                                 Variant{ "bump, delta0 = -0.3", Delta::Bump },
+	                                 Variant{ "Delta( Psi ), delta0 = -0.3", Delta::Profile } } )
+	{
+		std::vector<double> d;
+		for ( int level : { 0, 1, 2 } )
+		{
+			auto meshed = run( 2, level, variant.kind, -0.3, false, false );
+			auto subtracted = run( 2, level, variant.kind, -0.3, false, true );
+			BOOST_TEST_REQUIRE( meshed->converged, "meshed, level " << level << ": "
+			                    << meshed->failure );
+			BOOST_TEST_REQUIRE( subtracted->converged, "subtracted, level " << level << ": "
+			                    << subtracted->failure );
+			d.push_back( rms( totalPsiStarAt( *meshed, cloud ),
+			                  totalPsiStarAt( *subtracted, cloud ) ) );
+		}
+		std::printf( "  %s, k = 2: subtracted - meshed psi*, level 0 %.3e, 1 %.3e, 2 %.3e;"
+		             " rates %.3f, %.3f\n", variant.label, d[ 0 ], d[ 1 ], d[ 2 ],
+		             std::log2( d[ 0 ]/d[ 1 ] ), std::log2( d[ 1 ]/d[ 2 ] ) );
+		std::fflush( stdout );
+		differences.push_back( d );
+	}
+
+	std::vector<double> const &isotropic = differences[ 0 ];
+	for ( std::size_t v = 1; v < differences.size(); ++v )
+		for ( std::size_t i = 0; i < isotropic.size(); ++i )
+		{
+			double const ratio = differences[ v ][ i ]/isotropic[ i ];
+			BOOST_TEST( ( ratio > 0.5 && ratio < 2.0 ), "variant " << v << ", level " << i
+			            << ": subtracted - meshed is " << ratio << " of the isotropic one" );
+			if ( i > 0 )
+				BOOST_TEST( differences[ v ][ i ] < differences[ v ][ i - 1 ] );
+		}
 }

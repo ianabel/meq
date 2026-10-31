@@ -110,9 +110,10 @@ The load is supported where `Δ` is, which is inside the plasma and away from
 every filament. It is non-linear in `ψ` through `Δ`. **`Δ` and `B` read the
 total flux**: `B = |q_r + q_c|/(1 − Δ)`.
 
-This is derived here and not yet checked. **AN-0 checks it by substitution**,
-and `DarcyForm`'s `−q` sign convention (`CLAUDE_HDGGS.md`) decides the sign in
-the assembly.
+AN-0 checks it by substitution (`tools/anisotropic_equation.py`). In
+`DarcyForm`'s `u = −q` (`CLAUDE_HDGGS.md`) the remainder's dual flux is
+`R/(1 − Δ) u_p − (Δ/(1 − Δ))∇̄ψ_c`, and AN-3b measures it
+(→ **[M-334](MEASUREMENTS.md#m-334)**).
 
 ### 3. The source
 
@@ -398,17 +399,43 @@ immaterial here; a `Δ` nearer the firehose limit is where it would matter.
 and something then limits it, most likely the packs' rectangle corners. That
 is not measured, and it is the meshed route's, not the anisotropy's.
 
-#### AN-3b — the subtracted mirror
+#### AN-3b — the subtracted mirror — DONE
 
-**Next.** Beside `setConductorField()` every `Δ`, a position one included,
-goes on a law of MEQ's own, `R/(1 − Δ) u_p + g` with
-`g = −(Δ/(1 − Δ))∇̄ψ_c` in `DarcyForm`'s `u = −q`, and `Δ` read at
-`ψ_p + ψ_c`. A position `Δ` cannot stay on the linear mass, whose flux
-right-hand side `Reconstruct()` does not carry. The sign is AN-0's load in
-that convention, and the test decides it.
+**DONE** → **[M-334](MEASUREMENTS.md#m-334)**.
 
-**Acceptance**: the subtracted machine against AN-3a's meshed one, as
-COIL-SUBTRACTION-PLAN's instrument does.
+**What is built.** Beside `setConductorField()` every `Δ`, a position one
+included, goes on MEQ's own law, `GradShafranovSolver::AnisotropicFluxLaw`:
+
+```
+R/(1 − Δ) u_p − (Δ/(1 − Δ)) ∇̄ψ_c,    Δ at ψ_p + ψ_c
+```
+
+in `DarcyForm`'s `u = −q`. Its `ψ`-Jacobian is
+`Δ′/(1 − Δ)² (R u_p − ∇̄ψ_c)`. A position `Δ` cannot stay on the linear mass:
+`Reconstruct()` carries a law's value at zero flux, but nothing on a linear
+mass's right-hand side. Without a conductor field the law is
+`FunctionDiffusionFlux`'s arithmetic to the bit, so AN-2's measurements stand
+on it unchanged. `ψ_c` and `∇̄ψ_c` are tabulated once per mesh at the law's
+own element rule, since each rectangle's `ψ_c` is a cross-section
+quadrature; a point of any other rule is evaluated directly. The checks of
+the solved `ψ`, the firehose limit and `Γ_h`, read the total.
+
+**The test.** `AnisotropicMirror` subtracts the same two packs it meshes, on
+the same mesh:
+
+* a zero bump through the law is the isotropic subtracted mirror, to 6e-16
+  on a scale of 1e-3;
+* the bump and `Δ(Ψ)` at `δ₀ = −0.3` converge from the subtracted vacuum in
+  3 steps;
+* **the subtracted mirror is the meshed one.** On levels 0 to 2 at `k = 2`,
+  the RMS of the two routes' total `ψ*` over the machine region is 0.99 to
+  1.00 of the isotropic control's, for either `Δ`. Dropping the load, which
+  still converges quadratically, leaves it flat at 2e-3 to 3e-3, 16 to 3,000
+  times the control.
+
+**What the instrument cannot say.** The isotropic control itself falls at
+6.3 and then 0.74, the meshed route's own limit (M-332). So it shows the
+anisotropic load is right to the level the two routes agree, not an order.
 
 ### AN-4 — geq's reference
 

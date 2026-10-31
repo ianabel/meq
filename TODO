@@ -430,8 +430,8 @@ Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
 
-  ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3a
-  are done (M-328 to M-333); AN-3b, the subtracted mirror, is next.
+  ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3
+  are done (M-328 to M-334); AN-4 and AN-5, against geq, are next.
 
   NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
   only. On builds/single (MFEM 59ef46309f):

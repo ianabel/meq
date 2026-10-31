@@ -22293,3 +22293,64 @@ the solved `ψ`.
 
 **Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror`,
 and `./AnisotropicConvergence --run_test='theFluxLaws*,aFluxLawUnder*'`.
+
+### M-334
+
+**AN-3b: THE SUBTRACTED ANISOTROPIC MIRROR IS THE MESHED ONE. WITH THE PACKS
+AS `ψ_c` AND THE CONDUCTORS' LOAD ON THE FLUX LAW, EITHER `Δ` CONVERGES FROM
+THE VACUUM IN 3 STEPS, AND THE TWO ROUTES' TOTAL `ψ*` DIFFER BY 0.99 TO 1.00 OF
+WHAT THEY DIFFER BY ISOTROPICALLY. WITH THE LOAD DROPPED THE SOLVE STILL
+CONVERGES QUADRATICALLY, TO A DIFFERENT EQUILIBRIUM, 16 TO 3,000 TIMES
+FURTHER OFF.** `ANISOTROPY-PLAN.md`, AN-3b.
+
+**Setup.** M-332's machine, plasma and mesh, aligned to the packs. The
+subtracted route hands `setConductorField()` the two packs as rectangles, at
+`machineCoils()`'s quadrature order 16, and puts
+`NormalisedRotatingSource` alone on the mesh. Its labels start from the
+subtracted vacuum's remainder at the points plus `ψ_c` there, exactly. The
+two `Δ`s are M-333's, at `δ₀ = −0.3`. `AnisotropicMirror`, double build.
+
+**The zero bump through the law.** Every `Δ` beside `setConductorField()` is
+on the flux law. A zero bump is the isotropic subtracted mirror to 6.2e-16 in
+`ψ_p` on a scale of 1.06e-03, in 3 Newton steps either way.
+
+**From the subtracted vacuum**, level 0, `k = 2`:
+
+| `Δ` | steps | `ψ_ax` | `ψ_bnd` | residuals |
+|---|---|---|---|---|
+| bump | 3 | 5.604985e-03 | 6.167852e-02 | 6.47e-01 2.17e-04 1.28e-08 3.40e-16 |
+| `Δ(Ψ)` | 3 | 5.640378e-03 | 5.909566e-02 | 6.47e-01 2.51e-04 6.36e-08 4.78e-15 |
+
+The meshed route reads `ψ_bnd` 6.172730e-02 and 5.914209e-02 on the same
+level (M-333).
+
+**Subtracted against meshed**, `k = 2`, RMS of the total `ψ*` over M-332's
+432 machine-region points:
+
+| | level 0 | level 1 | level 2 | rates |
+|---|---|---|---|---|
+| isotropic | 1.188e-04 | 1.491e-06 | 8.962e-07 | 6.315, 0.735 |
+| bump | 1.181e-04 | 1.489e-06 | 8.894e-07 | 6.309, 0.743 |
+| `Δ(Ψ)` | 1.176e-04 | 1.497e-06 | 8.844e-07 | 6.296, 0.760 |
+
+Asserted: each anisotropic difference within a factor of 2 of the isotropic
+one, and falling. **The isotropic difference is the meshed route's limit**,
+the same one M-332's ladder shows, so this says the load is right to the
+level the two routes agree, and not at an order.
+
+**Mutation: the load dropped** (`ComputeDualFlux()`'s `g`, and its slope, set
+to zero). The vacuum starts converge in 3 steps, quadratically, to `ψ_bnd`
+6.544056e-02 (bump) and 6.545489e-02 (`Δ(Ψ)`):
+
+| | level 0 | level 1 | level 2 |
+|---|---|---|---|
+| bump | 1.863e-03 | 1.938e-03 | 1.937e-03 |
+| `Δ(Ψ)` | 2.604e-03 | 2.666e-03 | 2.666e-03 |
+
+That is 16 to 2,975 times the isotropic difference, and it does not fall. A
+wrong load converges at the right rate to the wrong function, and only the
+second route sees it.
+
+**Suites:** double 90/91, the standing red only (`PlasmaEdgeConvergence`); `naming` green; `AnisotropicMirror` 730 s. The law's points all hit the `ψ_c` table: 291,360 hits and no misses over the two vacuum starts, counted once and not kept.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror --run_test='*Subtracted*'`.
