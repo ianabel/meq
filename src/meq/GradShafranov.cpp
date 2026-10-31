@@ -1409,6 +1409,58 @@ namespace
 		fluxGf = 0.0;
 	}
 
+	void GradShafranovSolver::setAnisotropy( Anisotropy const &anisotropyIn )
+	{
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setAnisotropy: the forms are already built; the anisotropy has to be set before the first solve" );
+		if ( anisotropyValue != nullptr )
+			throw std::logic_error( "meq::GradShafranovSolver::setAnisotropy: an anisotropy is already set; one solver holds one" );
+		anisotropyValue = &anisotropyIn;
+	}
+
+	Anisotropy const *GradShafranovSolver::anisotropy() const
+	{
+		return anisotropyValue;
+	}
+
+	void GradShafranovSolver::checkAnisotropyIsElliptic() const
+	{
+		// SERIAL, AND BEFORE ANY ASSEMBLY, because it throws: an exception
+		// cannot leave the threaded element loops the weight is evaluated in.
+		// The rule is order 2k + 2, above the flux mass's own 2k on an affine
+		// triangle, and the vertices are added so that a Delta peaking on an
+		// element's corner is seen.
+		mfem::Mesh &mesh = *fluxFes->GetMesh();
+		mfem::IsoparametricTransformation transformation;
+		mfem::Vector x;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mesh.GetElementTransformation( e, &transformation );
+			mfem::Geometry::Type const geometry = mesh.GetElementBaseGeometry( e );
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+				geometry, 2*fluxFes->GetOrder( e ) + 2 );
+			mfem::IntegrationRule const &vertices = *mfem::Geometries.GetVertices( geometry );
+			for ( mfem::IntegrationRule const *points : { &rule, &vertices } )
+			{
+				for ( int i = 0; i < points->GetNPoints(); ++i )
+				{
+					transformation.Transform( points->IntPoint( i ), x );
+					double const delta = anisotropyValue->delta( x( 0 ), x( 1 ) );
+					if ( !( 1.0 - delta > 0.0 ) )
+					{
+						std::ostringstream message;
+						message << "meq::GradShafranovSolver: 1 - Delta = " << 1.0 - delta
+						        << " at ( " << x( 0 ) << ", " << x( 1 ) << " ), in element " << e
+						        << ". Delta >= 1 is the firehose limit, where the operator"
+						        << " -div( ( 1 - Delta )/R grad psi ) stops being elliptic;"
+						        << " MEQ refuses it rather than clipping Delta.";
+						throw std::invalid_argument( message.str() );
+					}
+				}
+			}
+		}
+	}
+
 	void GradShafranovSolver::setSource( mfem::Coefficient &fIn )
 	{
 		// A NEW SOURCE IS A NEW PROBLEM, so the carried axis goes. See the
@@ -2162,8 +2214,15 @@ namespace
 			GuessFieldGradient fieldGradient( guessSpace, guess );
 			mfem::GradientGridFunctionCoefficient mfemGradient(
 				const_cast<mfem::GridFunction *>( &psiGuess ) );
+			// The flux mass's own weight, so the seed is the q the solve carries:
+			// R, or R/( 1 - Delta ) under an anisotropy.
+			Anisotropy const *const delta = anisotropyValue;
 			mfem::FunctionCoefficient radius(
-				[]( mfem::Vector const &x ) { return x( 0 ); } );
+				[ delta ]( mfem::Vector const &x )
+				{
+					return delta == nullptr ? x( 0 )
+					                        : x( 0 )/( 1.0 - delta->delta( x( 0 ), x( 1 ) ) );
+				} );
 
 			mfem::VectorMassIntegrator mass( radius );
 			mfem::VectorDomainLFIntegrator load(
@@ -5780,7 +5839,37 @@ namespace
 		// host run and a device run assemble the same thing: upstream's
 		// batched element mass evaluates a GridFunctionCoefficient on the
 		// device and a FunctionCoefficient per point on the host.
-		auto *fluxMassTerm = new mfem::VectorMassIntegrator( *fluxMassRadius );
+		//
+		// UNDER AN ANISOTROPY THE WEIGHT IS R/( 1 - Delta ), the inverse of the
+		// anisotropic diffusion coefficient ( 1 - Delta )/R, and q becomes
+		// ( 1 - Delta )/R grad psi. setAnisotropy() lists what it is refused
+		// beside, and why.
+		mfem::Coefficient *fluxMassWeight = fluxMassRadius.get();
+		if ( anisotropyValue != nullptr )
+		{
+			char const *const refusal = "meq::GradShafranovSolver: an anisotropy (setAnisotropy) ";
+			if ( transferPath != nullptr )
+				throw std::logic_error( std::string( refusal ) + "beside setExtension() is not built: the extension reads q as grad psi/R on Gamma_h (ANISOTROPY-PLAN.md AN-3)" );
+			if ( exteriorCoupling != nullptr )
+				throw std::logic_error( std::string( refusal ) + "beside setExteriorCoupling() is not built (ANISOTROPY-PLAN.md AN-3)" );
+			if ( conductorFieldSet != nullptr )
+				throw std::logic_error( std::string( refusal ) + "beside setConductorField() is not built: the vacuum flux adds to q, and under Delta it carries a load (ANISOTROPY-PLAN.md section 2, AN-3)" );
+			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+				throw std::logic_error( std::string( refusal ) + "under an mfem::Device is not built: its weight is a host coefficient, and the device assembles R as a field" );
+
+			checkAnisotropyIsElliptic();
+
+			Anisotropy const *const delta = anisotropyValue;
+			anisotropicWeight = std::make_unique<mfem::FunctionCoefficient>(
+				[ delta ]( mfem::Vector const &x )
+				{
+					return 1.0/( 1.0 - delta->delta( x( 0 ), x( 1 ) ) );
+				} );
+			anisotropicFluxMass = std::make_unique<mfem::ProductCoefficient>(
+				*fluxMassRadius, *anisotropicWeight );
+			fluxMassWeight = anisotropicFluxMass.get();
+		}
+		auto *fluxMassTerm = new mfem::VectorMassIntegrator( *fluxMassWeight );
 		fluxMass->AddDomainIntegrator( fluxMassTerm );
 		fluxMassIntegrator = fluxMassTerm;
 

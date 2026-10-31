@@ -199,6 +199,13 @@ namespace meq
 		if ( potentialChoice == Potential::PostProcessed && !solver->isPostProcessed() )
 			throw std::logic_error( "meq::ResidualEstimator: the estimator uses the post-processed potential, but GradShafranovSolver::postProcess() has not been called" );
 
+		// Every term is the ISOTROPIC operator's residual: under an anisotropy
+		// q is ( 1 - Delta )/R grad psi and eta_1's divergence is of the
+		// anisotropic flux, which none of eq (20)'s terms were judged on.
+		// ANISOTROPY-PLAN.md leaves the estimator unbuilt, so it refuses.
+		if ( solver->anisotropy() != nullptr )
+			throw std::logic_error( "meq::ResidualEstimator: the solver carries an anisotropy (setAnisotropy), and the estimator is the isotropic operator's; it is not built for ANISOTROPY-PLAN.md's operator" );
+
 		mfem::GridFunction const &fluxGf = solver->flux();
 		mfem::GridFunction const &traceGf = solver->trace();
 		mfem::GridFunction const &psiGf =

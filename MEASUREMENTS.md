@@ -21985,3 +21985,53 @@ for the extension's path integrals was not attempted.
 
 **Reproduce.** `meq --device {cuda,cpu} --profile` on `fixed-f-diiid.toml`
 with `RefinementLevels = 3`, from a directory holding its `.dat` files.
+
+### M-328
+
+**AN-1: THE ANISOTROPIC OPERATOR, `Δ` A FUNCTION OF POSITION, CONVERGES AT ITS
+DESIGN RATES — `k+1` IN `ψ` AND IN THE ANISOTROPIC `q`, `k+2` IN `ψ*`, FOR
+`k = 1…4`. `Δ = 0` IS THE ISOTROPIC SOLVE BIT FOR BIT, AND A CONSTANT `Δ` IS
+THE ISOTROPIC PROBLEM WITH `F/(1 − Δ)` AND `τ/(1 − Δ)` TO ROUND-OFF.**
+`ANISOTROPY-PLAN.md`, AN-1.
+
+**Setup.** `GradShafranovSolver::setAnisotropy()` weights the flux mass by
+`R/(1 − Δ)`, refs/AlphaGK.pdf eq (6.18). The fixture is
+`tests/analytic/ManufacturedAnisotropic.hpp`'s position model,
+`Δ = −0.3 cos( 2.5( R − 1 ) ) cos( 2z )`, on Example 5's flux and box
+`[0.6, 1.4] × [−0.6, 0.6]`. Triangles, `n = 4, 8, 16, 32` a side, the linear
+path, constant `τ = 1`, and the exact `ψ` as Dirichlet data. `q` is measured
+against `( (1 − Δ)/R )∇̄ψ`. `AnisotropicConvergence`, double build.
+
+| `k` | `ψ` at `h = 0.025` | rates | `q` at `h = 0.025` | rates | `ψ*` at `h = 0.025` | rates |
+|---|---|---|---|---|---|---|
+| 1 | 5.55e-04 | 1.970, 1.991, 1.997 | 1.02e-03 | 1.959, 1.984, 1.994 | 4.36e-06 | 2.932, 2.973, 2.989 |
+| 2 | 5.62e-06 | 2.978, 2.993, 2.998 | 1.09e-05 | 2.985, 2.995, 2.998 | 2.57e-08 | 3.988, 3.997, 3.999 |
+| 3 | 4.44e-08 | 3.974, 3.993, 3.998 | 9.45e-08 | 3.973, 3.992, 3.997 | 1.74e-10 | 4.979, 4.991, 4.996 |
+| 4 | 3.79e-10 | 4.974, 4.993, 4.998 | 8.77e-10 | 4.980, 4.995, 4.999 | 1.12e-12 | 5.986, 5.995, 5.981 |
+
+**The two exact statements.**
+
+* **`Δ = 0`, set through the interface, is the isotropic solve to the bit**,
+  in `ψ` and `q`, at `k = 1` and `3`. The weight is `R` times
+  `1/(1 − 0) = 1` exactly, on the same rule.
+* **A constant `Δ` is the isotropic problem rescaled, to below 1e-12 of the
+  solution**, at `Δ = −0.4` and `+0.3` and `k = 1` and `3`: the anisotropic
+  solve at `τ = 1 − Δ` against the isotropic one at `τ = 1` with source
+  `F/(1 − Δ)`, and `q_Δ = (1 − Δ) q₀`. `ψ_Δ = ψ₀/(1 − Δ)`, which the plan's
+  draft asserted, is false: it ignores the boundary data, and the HDG
+  stabilisation does not scale with the operator. Substituting
+  `q = (1 − Δ) q′` divides the conservation and constraint rows by `1 − Δ`, so
+  `τ` scales with `F`.
+
+**Mutation.** With the weight `R(1 − Δ)` in place of `R/(1 − Δ)`, the
+rescaling case and all four convergence cases fail. The refusals are asserted:
+
+* `1 − Δ ≤ 0` reached only in one corner of the box;
+* a second anisotropy;
+* an anisotropy set after the forms are built;
+* `ResidualEstimator` on an anisotropic solve.
+
+**Suites:** double 89/90, the standing red only (`PlasmaEdgeConvergence`);
+`naming` green over `src/meq/Anisotropy.hpp`.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicConvergence`.

@@ -9,6 +9,7 @@
 
 #include "mfem.hpp"
 
+#include "Anisotropy.hpp"
 #include "Coils.hpp"
 #include "ConductorStore.hpp"
 // Phase B's payload is a member, so its definition has to be visible here.
@@ -2458,6 +2459,34 @@ namespace meq
 
 			/// The seed's component number. For the same reason.
 			int plasmaComponentSeedLabel() const;
+
+			/**
+			 * THE PRESSURE ANISOTROPY, ANISOTROPY-PLAN.md's AN-1: the operator
+			 * becomes -div_bar( ( 1 - Delta )/R grad_bar psi ) = F/R, refs/AlphaGK.pdf
+			 * eq (6.18). Delta is carried in the flux mass, ( R/( 1 - Delta ) q, v )
+			 * in place of ( R q, v ), so **q BECOMES ( 1 - Delta )/R grad_bar psi**
+			 * and flux() returns that; see its note.
+			 *
+			 * Delta is a function of position only, so the flux mass stays a
+			 * bilinear form and both the linear and the Newton paths take it.
+			 *
+			 * REFUSED, by buildForms(), at the first solve:
+			 *  - 1 - Delta <= 0 at any vertex or flux-mass quadrature point, the
+			 *    firehose limit. Refused rather than clipped;
+			 *  - beside setExtension(), setExteriorCoupling() and
+			 *    setConductorField(), each of which reads q as grad_bar( psi )/R
+			 *    or adds a vacuum flux to it. AN-3 lifts them;
+			 *  - under an mfem::Device, since the weight is a host coefficient
+			 *    and the device path assembles R as a field.
+			 *
+			 * @param anisotropyIn borrowed, and must outlive the solver.
+			 * @throws std::logic_error after the forms are built, or if one is
+			 *         already set.
+			 */
+			void setAnisotropy( Anisotropy const &anisotropyIn );
+
+			/// The anisotropy setAnisotropy() gave, or null.
+			Anisotropy const *anisotropy() const;
 
 			/// The Dirichlet datum g_D for psi on Gamma. Non-homogeneous data is
 			/// the normal case: the level set psi = 0 is the plasma boundary, but a
@@ -5256,6 +5285,10 @@ namespace meq
 			/// q_h = ( 1/R ) grad_bar( psi ) in V_h, in MEQ's sign convention.
 			/// Valid after solve(); see the sign note at the top of this file.
 			///
+			/// **UNDER setAnisotropy() THIS IS ( 1 - Delta )/R grad_bar( psi )**,
+			/// the flux the anisotropic operator conserves, and not the poloidal
+			/// field. Its zeros are grad psi's, since 1 - Delta > 0.
+			///
 			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
 			/// THE REMAINDER `psi_p` AND NOT OF THE PHYSICAL FLUX.** `q_c` is
 			/// meq::ConductorField::flux() and adds to this one, `Δ*` being
@@ -6215,6 +6248,18 @@ namespace meq
 			/// flux mass form wants its inverse -- verified by experiment, see
 			/// the .cpp. Rebuilt with the forms.
 			std::unique_ptr<mfem::GridFunctionCoefficient> fluxMassRadius;
+
+			/// setAnisotropy()'s Delta, borrowed, or null.
+			Anisotropy const *anisotropyValue = nullptr;
+
+			/// 1/( 1 - Delta ), and R times it, the anisotropic flux mass weight.
+			/// Null without an anisotropy. Rebuilt with the forms.
+			std::unique_ptr<mfem::FunctionCoefficient> anisotropicWeight;
+			std::unique_ptr<mfem::ProductCoefficient> anisotropicFluxMass;
+
+			/// buildForms()'s refusal of 1 - Delta <= 0, at every vertex and every
+			/// point of the flux mass's quadrature rule.
+			void checkAnisotropyIsElliptic() const;
 
 			/// The integrators the two predicates above are asked of; owned by
 			/// `darcy`'s forms, null before they are built.
