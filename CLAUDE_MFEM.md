@@ -116,7 +116,7 @@ the dev tree deliberately when testing a fix; otherwise leave it alone.
 
 ## `meq-integration`: the branch MEQ builds from, and why it is local only
 
-MEQ needs work from **seventeen branches**, all fetched from `hdgdev`. Several
+MEQ needs work from **eighteen branches**, all fetched from `hdgdev`. Several
 are fixes branched off MFEM master rather than the HDG line, and two are merged
 under their local names rather than as `hdgdev/<name>`. See the warning under the
 containment loop for how branches missing from this table were found and why no
@@ -141,6 +141,7 @@ check built from the table could find them:
 | **`pardiso-refinement-control`** | `PardisoSolver::SetMaxRefinementSteps()`, `GetNumRefinementSteps()` and `GetNumPerturbedPivots()` — `iparm[7]` settable, `iparm[6]` and `iparm[13]` readable. MEQ asked for it ([M-300](MEASUREMENTS.md#m-300)): `setTraceRefinementCap()` and `StepProfile`'s refinement counts call it, so **its absence is a compile error**. The same refresh carries `DarcyHybridization::GetNPCReduceTime()`, `GetNPCRecoverTime()` and `GetNumElementColours()`, on `gf-hdg-linearise-first` and `gf-interp-hdg-dev` | merge 14 |
 | **`transformback-single-tolerance`** | `d10e8c48e7`: `TransformBack()`'s default `tol_0` is `1e-6` in single, the value `meq::inverseTransformTolerance()` passes at MEQ's own sites, so the default and MEQ's call are the same arithmetic ([M-271](MEASUREMENTS.md#m-271); `CLAUDE_DEVICE.md`, *What was not a tolerance*). MEQ passes its own tolerance, so its absence moves nothing MEQ calls. Merged as `transformback-single-tolerance`, not `hdgdev/…`, so the `hdgdev/`-anchored half of the pattern below cannot see it | merge 15 |
 | **`densematrixsvd-ldvt`** | `cee6a378af`: `DenseMatrixSVD` with `jobvt = 'S'` hands LAPACK an `LDVT` equal to `Vt`'s height, where it wrote past its own buffer for a wide matrix. MEQ reported it ([M-249](MEASUREMENTS.md#m-249)) and calls nothing from it, the inverse corner being Eigen's `JacobiSVD`. Merged under its local name, like merge 15 | merge 16 |
+| **`batched-linalg-persistent-pointers`** | **Off MFEM master**, as merges 9 and 15 are. Three changes to `linalg/batched/`. The GPU BLAS and MAGMA `AddMult` passed `op(A)`'s shape as `lda`, which is wrong on a rectangular block under `Op::T`. `NativeBatchedLinAlg::LUSolve` took `x.Write()`, so on a device it solved against whatever device memory held. And the GPU BLAS LU now keeps its pointer and info arrays between calls. **MEQ reaches it under a Device**: the batched local factorisation is `BatchedLinAlg::LUFactor()` (`GradShafranov.hpp`, `Config.hpp`'s `LocalFactorisation`). Its absence compiles and runs. The listing below found it; the loop could not | merge 17 |
 
 **THE TOPOLOGY HAS NOW CHANGED THREE TIMES AND THIS ROW HAS BEEN WRONG TWICE.**
 It has read "pairwise independent", then "an ANCESTOR of both, so it needs no
@@ -196,6 +197,7 @@ git merge hdgdev/sundials-real-t                  # 13; single precision needs i
 git merge hdgdev/pardiso-refinement-control       # 14; MEQ's setTraceRefinementCap()
 git merge hdgdev/transformback-single-tolerance   # 15
 git merge hdgdev/densematrixsvd-ldvt              # 16
+git merge hdgdev/batched-linalg-persistent-pointers   # 17; off master
 # ALWAYS finish with this, and believe it over the table above:
 for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
          gf-hdg-linearise-first gf-hdg-dev pardiso-multi-rhs \
@@ -205,13 +207,13 @@ for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
          cmake-find-package-component-cache cudss-solver-configuration \
          intrules-triangle-high-order sundials-real-t \
          pardiso-refinement-control transformback-single-tolerance \
-         densematrixsvd-ldvt; do
+         densematrixsvd-ldvt batched-linalg-persistent-pointers; do
   git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained" \
                                               || echo "$b NOT CONTAINED"
 done
 ```
 
-**Run that last loop.** It is seventeen cheap commands and it is the only thing that
+**Run that last loop.** It is eighteen cheap commands and it is the only thing that
 catches a branch having moved out from under the recipe — which is precisely
 what happened to the three-branch version of this section.
 
