@@ -316,6 +316,19 @@ def provenance(ladder):
                                 "--untracked-files=no"],
                                capture_output=True, text=True).stdout.strip()
         return (out.stdout.strip() or "?") + ("-dirty" if dirty else "")
+    def imported(module, up):
+        # THE CHECKOUT THE geq ARM IMPORTS, under run_geq()'s own PYTHONPATH,
+        # which a caller may extend -- a worktree at freegs4e's tip, say -- so
+        # the sibling checkout's commit is not necessarily what ran.
+        env = {**os.environ,
+               "PYTHONPATH": GEQ_SRC + os.pathsep + os.environ.get("PYTHONPATH", "")}
+        done = subprocess.run([VENV, "-c", f"import {module} as m; print(m.__file__)"],
+                              capture_output=True, text=True, env=env)
+        path = done.stdout.strip()
+        for _ in range(up):
+            path = os.path.dirname(path)
+        return path or "?"
+
     def version(build):
         return subprocess.run([install_binary(build, "meq"), "--version"],
                               capture_output=True, text=True).stdout.strip()
@@ -324,8 +337,8 @@ def provenance(ladder):
             "meq_version": version(REFERENCE_BUILD),
             "meq_ladder": install_binary(ladder, "meq"),
             "meq_ladder_version": version(ladder),
-            "geq": sha(meqpaths.sibling("geq")),
-            "freegs4e": sha(meqpaths.sibling("freegs4e")),
+            "geq": sha(imported("geq.solver", 3)),
+            "freegs4e": sha(imported("freegs4e.species", 2)),
             "libmfem_mtime": time.strftime("%Y-%m-%d %H:%M",
                                            time.localtime(os.path.getmtime(lib)))
             if os.path.exists(lib) else "?",

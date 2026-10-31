@@ -364,7 +364,10 @@ def make_machine():
                COIL_SEPARATION * 1.5, COIL_SEPARATION * 1.5])
 
 
-def build(n, boundary, omega_peak):
+def build(n, boundary, omega_peak, anisotropy=None):
+    """The state before a solve. `anisotropy`, an `export_anisotropic.Anisotropy`
+    or None, hands freegs4e's ProfilesCentrifugalMirror a PrescribedAnisotropy
+    in one of its two rearrangements; None is MR-4's problem, untouched."""
     machine, info = make_machine()
     eq = Equilibrium(tokamak=machine, Rmin=R_MIN, Rmax=R_MAX, Zmin=-Z_EXTENT,
                      Zmax=Z_EXTENT, nx=n, ny=n,
@@ -380,7 +383,12 @@ def build(n, boundary, omega_peak):
     bndry = dict(r_inner=R_INNER, z_inner=0.0, r_outer=R_OUTER, z_outer=0.0,
                  mach=None, voltage=None, omega_profile=omega)
     all_species.set_omega(psi_n=None, R=None, omega_profile=omega)
-    profiles = ProfilesCentrifugalMirror(all_species=all_species)
+    if anisotropy is None:
+        profiles = ProfilesCentrifugalMirror(all_species=all_species)
+    else:
+        profiles = ProfilesCentrifugalMirror(
+            all_species=all_species, anisotropy=anisotropy.prescribed(),
+            aniso_divergence_form=anisotropy.divergence)
     return eq, machine_psi, profiles, psi_axis, psi_bndry, bndry, info
 
 
@@ -393,10 +401,14 @@ def check_hold(profiles):
             raise RuntimeError(f"geq replaced a prescribed profile of {s.name}")
 
 
-def solve(n, boundary, omega_peak, rtol, maxits, cache=None, tight=True):
+def solve(n, boundary, omega_peak, rtol, maxits, cache=None, tight=True,
+          anisotropy=None):
     """One converged state. Returns the Equilibrium, the profiles and a record."""
     tag = f"{SHAPE['name']}_{boundary}_{n}_{'tight' if tight else 'loose'}_w{omega_peak:.6e}_r{rtol:.1e}"
-    eq, machine_psi, profiles, pa, pb, bndry, info = build(n, boundary, omega_peak)
+    if anisotropy is not None:
+        tag += "_" + anisotropy.tag()
+    eq, machine_psi, profiles, pa, pb, bndry, info = build(n, boundary, omega_peak,
+                                                          anisotropy)
     path = os.path.join(cache, tag + ".npz") if cache else None
     if path and os.path.exists(path):
         data = np.load(path, allow_pickle=True)

@@ -153,11 +153,11 @@ and not to assume it**, and AN-3 does.
 
 ## The reference: what geq solves
 
-**The pins already carry it.** freegs4e `9a1ee0c` is the anisotropic-`Jtor`
-commit itself, and geq `73b9a72` has `PrescribedAnisotropy`. So the benchmark
-stays on the pins every reference so far was regenerated at
-(`tools/geq-benchmark/README.md`). geq's HEAD is 89 commits on, and nothing
-here needs it.
+**MEQ is compared against the latest geq**, and against the freegs4e it runs
+on, the tip of `feature/rotation_equilibrium`: fetched, run at the tip, and the
+commits recorded in the reference's `meta.txt` (`tools/geq-benchmark/README.md`,
+*Regenerating the reference*). Both carry the hook: `PrescribedAnisotropy` in
+geq, the anisotropic `Jtor` in freegs4e.
 
 **Six facts about geq set the reference.**
 
@@ -181,7 +181,7 @@ here needs it.
    That is the label precondition MR-4 established, extended to the box end.
 5. **geq's input file cannot pose it.** At HEAD, `[physics.anisotropy]` offers
    only a constant or a Gaussian `Δ( ψ_n )`; a Gaussian does not vanish at the
-   labels, and the section is not at the pin anyway. **The cases are per-case
+   labels. **The cases are per-case
    scripts with a callable `Δ`**, in the shape of
    `cases/geq_<shape>.py`, calling only geq's and freegs4e's interfaces.
 6. **`fast_fraction` scales the named species' pressure bracket by `1 − f`
@@ -437,26 +437,38 @@ the same mesh:
 6.3 and then 0.74, the meshed route's own limit (M-332). So it shows the
 anisotropic load is right to the level the two routes agree, not an order.
 
-### AN-4 — geq's reference
+### AN-4 — geq's reference — DONE
 
-`tools/geq-benchmark/export_anisotropic.py`, beside `export_rotating.py`. It
-follows MR-4a's protocol:
+**DONE** → **[M-335](MEASUREMENTS.md#m-335)**, at the latest geq.
 
-* direct `freeBoundary`;
-* `φ₀` tightened;
-* `N_D` held;
-* `rtol = 2e-9`;
-* the labels exported by `psiRZ` at the points.
+`tools/geq-benchmark/export_anisotropic.py`, beside `export_rotating.py`, whose
+problem and protocol it takes whole: direct `freeBoundary`, `φ₀` tightened every
+Picard step, `N_D` held, `rtol = 2e-9`, the labels by `psiRZ` at their points.
+`export_rotating.build()` and `solve()` take an optional anisotropy, absent by
+default, so MR-4's reference is unchanged. To that it adds
 
-To that it adds `Δ = δ₀ g( ψ_n ) h( z )` at `δ₀ = −0.1` and `−0.3`, with
-`dp_par_dpsin = fast_fraction = 0`, in **both** rearrangements. The profile and
-`Δ` tables are tracked; geq's answer is regenerated, not committed.
+```
+Δ = δ₀ (4ψ_n(1 − ψ_n))³ (1 − (z/1.2)²)³,   δ₀ = −0.1, −0.3
+```
 
-**Acceptance**:
+through geq's `PrescribedAnisotropy`, with `dp_par_dpsin = fast_fraction = 0`,
+in **both** rearrangements. The shape is symmetric in `ψ_n`, so it is
+`AnisotropicMirror`'s `MirrorProfile` in MEQ's `Ψ`. The problem is
+`reference/rotating/`'s tables with `reference/anisotropic/meta.txt`; geq's
+answer is regenerated, not committed.
 
-* geq's own self-convergence at 129², 257² and 513², re-taken.
-* The two rearrangements' difference, falling as geq refines.
-* `δ₀ = 0` reproduces M-261's tables.
+**Accepted:**
+
+* `δ₀ = 0` through the hook is the hook absent, bit for bit, in either form,
+  and the latest geq reproduces M-261's answer to 9e-13;
+* geq's self-convergence at 129², 257² and 513², order 2.1 to 2.3;
+* the two rearrangements' difference falls at exactly 4 a doubling, to 3e-8
+  and 7e-8 at 513², 13 to 18 times under geq's own 257-against-513
+  difference.
+
+**Seen, and geq's:** Picard's step count at `δ₀ = −0.3` is 13 at 129² and
+257² and 40 at 513², against the isotropic solve's 9, 9 and 12. A lagged `∇Δ`
+whose gain grows with resolution would do that. Not measured further.
 
 ### AN-5 — MEQ against geq
 

@@ -431,7 +431,8 @@ Raised 2026-08-25.
 ================================================================================
 
   ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3
-  are done (M-328 to M-334); AN-4 and AN-5, against geq, are next.
+  are done (M-328 to M-334), and AN-4, geq's reference (M-335); AN-5, MEQ
+  against it, is next.
 
   NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
   only. On builds/single (MFEM 59ef46309f):
