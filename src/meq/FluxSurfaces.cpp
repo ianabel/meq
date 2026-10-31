@@ -228,6 +228,11 @@ namespace meq
 		mfem::GridFunction const &fluxFor( GradShafranovSolver const &solver,
 		                                   Potential which )
 		{
+			// Under an anisotropy q is ( 1 - Delta )/R grad psi, not the
+			// poloidal field, and every average the tracer takes reads |q| as
+			// B_p. Refused until ANISOTROPY-PLAN.md's output stage divides it out.
+			if ( solver.anisotropy() != nullptr )
+				throw std::logic_error( "meq::ContourTracer: the solver carries an anisotropy (setAnisotropy), so its flux is not the poloidal field; flux surfaces are not built for ANISOTROPY-PLAN.md's operator" );
 			return which == Potential::Raw ? solver.flux()
 			                               : solver.postProcessedFlux();
 		}

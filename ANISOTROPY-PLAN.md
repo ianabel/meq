@@ -228,23 +228,45 @@ symbolic check.
 
 **Acceptance**: all four exact. No solver code changes in this stage.
 
-### AN-1 — the operator, with `Δ` a function of position
+### AN-1 — the operator, with `Δ` a function of position — DONE
 
-`Δ( R, z )` only. **The flux mass stays linear**, with the coefficient
-`R/(1 − Δ)` as a field, the way `R` is now. So this stage needs no non-linear
-flux law.
+**DONE** → **[M-328](MEASUREMENTS.md#m-328)**.
 
-* The audit of `q`'s consumers first.
-* Then the refusal at `1 − Δ ≤ 0`.
+**The interface.** `meq::Anisotropy`, MFEM-free, gives `Δ( R, z )`.
+`GradShafranovSolver::setAnisotropy()` weights the flux mass by
+`R/(1 − Δ)`, as `fluxMassRadius` times a `1/(1 − Δ)` coefficient. **So `q` is
+`( (1 − Δ)/R )∇̄ψ`**, and `flux()` says so. The flux mass stays a bilinear form,
+so the linear path and the Newton path both take it.
 
-**Acceptance**:
+**Refusals.** `buildForms()` refuses `1 − Δ ≤ 0` at every vertex and every
+point of an order-`2k + 2` rule, serially, before any assembly; an exception
+cannot leave the threaded loops. It also refuses an anisotropy beside any of:
 
-* `Δ = 0` reproduces the isotropic solve bit for bit.
-* **A constant `Δ` is an exact rescaling**: on a fixed boundary with fixed `F`,
-  `ψ_Δ = ψ₀/(1 − Δ)`, to round-off. That is geq's own
-  `test_uniform_delta_is_a_pure_rescaling`, made exact.
-* The manufactured fixture converges at `k+1` in `ψ` and `q`, and at `k+2` in
-  `ψ*`, over `k = 1…4`.
+* `setExtension()`;
+* `setExteriorCoupling()`;
+* `setConductorField()`;
+* a Device.
+
+**The audit of `q`'s consumers**, as built:
+
+| consumer | under an anisotropy |
+|---|---|
+| the warm start's `q` seed | weighted like the flux mass, so the seed is the `q` the solve carries |
+| `Reconstruct()`, `ψ*` | consistent with no change, since it reads the forms: `ψ*` converges at `k+2` |
+| `CriticalPointFinder` | unchanged: the zeros of `q` are `∇ψ`'s, and at a zero the Hessian is scaled by `1/(1 − Δ) > 0`, so the classification stands |
+| `ResidualEstimator` | **refused**: its terms are the isotropic operator's |
+| `ContourTracer` and the flux surfaces | **refused**: they read `|q|` as `B_p` |
+| the extension on `Γ_h`, the DtN, `ConductorField` | refused with their setters, until AN-3 |
+| `Field.hpp`'s B and the driver's output | **unreachable**: the driver cannot pose an anisotropy. AN-6 divides `1 − Δ` out |
+
+**The constant-`Δ` statement, corrected.** The draft of this stage claimed
+`ψ_Δ = ψ₀/(1 − Δ)`. **That is wrong twice.** It ignores the boundary data, and
+in HDG the stabilisation does not scale with the operator. Substituting
+`q = (1 − Δ) q′` divides the conservation and constraint rows by `1 − Δ`. So a
+constant `Δ` **is** the isotropic problem with `F/(1 − Δ)` and `τ/(1 − Δ)`,
+with `q_Δ = (1 − Δ) q₀`, exactly, and that is what is asserted. **It is also
+the first evidence for *What changes* §4**: to keep the stabilisation in
+proportion to the diffusion, `τ` scales with `1 − Δ`.
 
 ### AN-2 — `Δ` a function of `Ψ`
 
