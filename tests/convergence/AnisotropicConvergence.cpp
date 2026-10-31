@@ -4,11 +4,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "mfem.hpp"
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+	// For omp_get_max_threads() alone, so that the threaded flux-law case can
+	// say whether the run it reports could have exhibited a race.
+	#include <omp.h>
+#endif
 
 #include "RoundOffFloor.hpp"
 
@@ -764,17 +771,155 @@ namespace
 	}
 }
 
-/*
- * NO FINITE-DIFFERENCE CHECK OF THE FLUX LAW'S JACOBIAN, AND THERE CANNOT BE ONE
- * HERE. NewtonConvergence.cpp differences the CONDENSED operator, the backup
- * ordering's; under a flux law the hybridization's local operator is FullNL,
- * and the condensed gradient aborts in DenseMatrixLUSolver::SetOperator() ("Not
- * a DenseMatrix operator!"), measured. NPC's Jacobian is solve-only by
- * construction. So the instrument is the one NewtonConvergence.cpp names for
- * NPC: the OBSERVED NEWTON ORDER, asserted in checkFluxOrder(). Zeroing the
- * flux-potential block (the flux law's df) was run as a mutation, and
- * MEASUREMENTS.md M-329 records what the order read.
- */
+/// THE FLUX LAW'S JACOBIAN AGAINST A CENTRAL DIFFERENCE OF THE RESIDUAL, as
+/// NewtonConvergence.cpp's jacobianMatchesAFiniteDifferenceOfTheResidual does
+/// it and for its reasons: on the CONDENSED operator, at a state away from the
+/// solution, the linearisation held at that state, the essential trace dofs
+/// left out of every direction. Under a flux law the hybridization's local
+/// operator is FullNL, so this reaches the law's df through the element-local
+/// elimination. Beside it, checkFluxOrder()'s observed Newton order is the
+/// instrument on the NPC path the solve drives.
+BOOST_AUTO_TEST_CASE( theFluxLawsJacobianMatchesAFiniteDifferenceOfTheResidual )
+{
+	Fixture const eq = Fixture::flux();
+	FluxModelAnisotropy const anisotropy( eq );
+	FixtureSource const source( eq );
+	mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), 3 );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setAnisotropy( anisotropy );
+	solver.setSource( source );
+	solver.setBoundaryData( psiCoeff );
+	solver.prepare();
+
+	mfem::Operator &residual = solver.reducedOperator();
+	int const size = solver.reducedSolution().Size();
+	std::vector<bool> isEssential( static_cast<std::size_t>( size ), false );
+	mfem::Array<int> const &essential = solver.essentialTraceDofs();
+	for ( int i = 0; i < essential.Size(); ++i )
+		isEssential[ static_cast<std::size_t>( essential[ i ] ) ] = true;
+	BOOST_TEST_REQUIRE( essential.Size() > 0 );
+
+	mfem::Vector state( solver.reducedSolution() );
+	for ( int i = 0; i < size; ++i )
+		if ( !isEssential[ static_cast<std::size_t>( i ) ] )
+			state( i ) += 0.3*std::sin( 1.7*i + 0.4 );
+
+	residual.GetGradient( state );
+
+	double const step = meq::tests::jacobianDifferenceStep( 1.0e-5 );
+	int const numDirections = 4;
+	std::vector<mfem::Vector> directions( numDirections );
+	std::vector<mfem::Vector> differences( numDirections );
+	for ( int trial = 0; trial < numDirections; ++trial )
+	{
+		mfem::Vector &direction = directions[ static_cast<std::size_t>( trial ) ];
+		direction.SetSize( size );
+		for ( int i = 0; i < size; ++i )
+			direction( i ) = isEssential[ static_cast<std::size_t>( i ) ]
+			                 ? 0.0
+			                 : std::cos( 2.3*i + 1.1*trial ) + 0.5*std::sin( 0.7*i - 0.3*trial );
+		direction /= direction.Norml2();
+
+		mfem::Vector forward( size );
+		mfem::Vector backward( size );
+		mfem::Vector shifted( state );
+		shifted.Add( step, direction );
+		residual.Mult( shifted, forward );
+		shifted = state;
+		shifted.Add( -step, direction );
+		residual.Mult( shifted, backward );
+
+		mfem::Vector &difference = differences[ static_cast<std::size_t>( trial ) ];
+		difference.SetSize( size );
+		difference = forward;
+		difference -= backward;
+		difference /= 2.0*step;
+	}
+
+	mfem::Operator &jacobian = residual.GetGradient( state );
+	double worst = 0.0;
+	for ( int trial = 0; trial < numDirections; ++trial )
+	{
+		mfem::Vector applied( size );
+		jacobian.Mult( directions[ static_cast<std::size_t>( trial ) ], applied );
+		mfem::Vector error( differences[ static_cast<std::size_t>( trial ) ] );
+		error -= applied;
+		double const relative = error.Norml2()/applied.Norml2();
+		std::printf( "  flux law: Jacobian vs central difference, direction %d: "
+		             "||J d|| = %.6e, relative error %.3e\n",
+		             trial, applied.Norml2(), relative );
+		worst = std::max( worst, relative );
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( worst < meq::tests::jacobianDifferenceTolerance( 1.0e-8 ),
+	            "the flux law's condensed Jacobian differs from a central difference "
+	            "of the residual by " << worst << " relative" );
+}
+
+/// THREADED ASSEMBLY BESIDE A FLUX LAW REPRODUCES SERIAL, bit for bit, as
+/// SolverContract.cpp's threadedAssemblyReproducesSerialAssemblyOnANonlinearSource
+/// requires of the source integrator and for its reasons: psi, q, psi* -- the
+/// threaded reconstruction lifts the law through one frozen coefficient every
+/// thread evaluates -- and the Newton count, which is what a racing gradient
+/// moves and nothing else does. omp_get_max_threads() is printed: one thread
+/// cannot exhibit a race.
+BOOST_AUTO_TEST_CASE( aFluxLawUnderThreadedAssemblyIsTheSerialSolve )
+{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+	std::printf( "\n  flux law, threaded assembly: skipped, this MFEM has no OpenMP "
+	             "or no thread safety\n" );
+#else
+	using AM = meq::GradShafranovSolver::AssemblyMode;
+	std::printf( "\n  flux law, threaded against serial: omp_get_max_threads() = %d%s\n",
+	             omp_get_max_threads(), omp_get_max_threads() > 1 ? ""
+	             : "  <- ONE THREAD: this run cannot exhibit a race" );
+
+	Fixture const eq = Fixture::flux();
+	FluxModelAnisotropy const anisotropy( eq );
+	FixtureSource const source( eq );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	for ( int order : { 1, 3 } )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), 16 );
+		auto solveIn = [ & ]( AM mode )
+		{
+			auto solver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			solver->setAssemblyMode( mode );
+			solver->setAnisotropy( anisotropy );
+			solver->setSource( source );
+			solver->setBoundaryData( psiCoeff );
+			solver->solve();
+			solver->postProcess();
+			return solver;
+		};
+		auto const serial = solveIn( AM::Serial );
+		auto const threaded = solveIn( AM::Threaded );
+
+		double const psi = maxDifference( threaded->potential(), serial->potential() );
+		double const flux = maxDifference( threaded->flux(), serial->flux() );
+		double const star = maxDifference( threaded->postProcessedPotential(),
+		                                   serial->postProcessedPotential() );
+		std::printf( "    k = %d, n = 16: psi %.3e, q %.3e, psi* %.3e; Newton %d and %d\n",
+		             order, psi, flux, star, serial->newtonIterations(),
+		             threaded->newtonIterations() );
+		std::fflush( stdout );
+		BOOST_TEST( psi == 0.0, "k = " << order << ": psi differs by " << psi );
+		BOOST_TEST( flux == 0.0, "k = " << order << ": q differs by " << flux );
+		BOOST_TEST( star == 0.0, "k = " << order << ": psi* differs by " << star );
+		BOOST_TEST( serial->newtonIterations() == threaded->newtonIterations() );
+	}
+#endif
+}
 
 BOOST_AUTO_TEST_CASE( theFluxModelConvergesAtK1 )
 {
@@ -860,9 +1005,8 @@ BOOST_AUTO_TEST_CASE( aZeroFluxModelIsTheIsotropicNewtonSolve )
 }
 
 /// What a Delta that reads psi is refused beside, at the first solve: a
-/// psi-independent source, which takes the linear path; and Threaded
-/// assembly, which upstream aborts beside a flux law. And an ANSWER past the
-/// firehose limit, which cannot be checked before the solve.
+/// psi-independent source, which takes the linear path. And an ANSWER past
+/// the firehose limit, which cannot be checked before the solve.
 BOOST_AUTO_TEST_CASE( aFluxModelsRefusals )
 {
 	Fixture const eq = Fixture::flux();
@@ -882,15 +1026,6 @@ BOOST_AUTO_TEST_CASE( aFluxModelsRefusals )
 		meq::GradShafranovSolver solver( mesh, 1 );
 		solver.setAnisotropy( anisotropy );
 		solver.setSource( sourceCoeff );
-		solver.setBoundaryData( psiCoeff );
-		BOOST_CHECK_THROW( solver.solve(), std::logic_error );
-	}
-	{
-		mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), 4 );
-		meq::GradShafranovSolver solver( mesh, 1 );
-		solver.setAssemblyMode( meq::GradShafranovSolver::AssemblyMode::Threaded );
-		solver.setAnisotropy( anisotropy );
-		solver.setSource( source );
 		solver.setBoundaryData( psiCoeff );
 		BOOST_CHECK_THROW( solver.solve(), std::logic_error );
 	}

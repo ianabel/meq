@@ -2512,8 +2512,8 @@ namespace meq
 			 * mfem::MixedConductionNLFIntegrator with weight R/( 1 - Delta( psi ) ),
 			 * whose Jacobian carries R Delta'/( 1 - Delta )^2 in the flux-potential
 			 * block -- the whole of it, and not the linear R plus a correction,
-			 * because DarcyForm::Reconstruct() lifts the linear flux mass alone
-			 * and would drop a law beside it. Under FieldLinearisation::Picard
+			 * because DarcyForm::Reconstruct() refuses a law beside a flux mass
+			 * with domain integrators. Under FieldLinearisation::Picard
 			 * that block is zero, as the source's reaction term is.
 			 *
 			 * REFUSED, by buildForms(), at the first solve:
@@ -2525,29 +2525,36 @@ namespace meq
 			 *    (setSource( mfem::Coefficient & )), which takes the linear path;
 			 *    pose it as a meq::Source with dFdPsi = 0. Argument::Flux beside
 			 *    setSource( NormalisedSource &, double ), which is not measured;
-			 *    Argument::NormalisedFlux WITHOUT it, having no labels to read; and
-			 *    under an AssemblyMode::Threaded that
-			 *    setAssemblyMode() chose. The threaded reconstruction lifts the
-			 *    law through one shared mfem::FrozenDualFluxCoefficient, whose
-			 *    Eval() writes its own members, so the thread-safety promise
-			 *    buildForms() makes would be false. A DEFAULT Threaded is taken as
-			 *    Serial instead, which changes no answer;
+			 *    Argument::NormalisedFlux WITHOUT it, having no labels to read;
 			 *  - beside setExtension() or setExteriorCoupling(), unless Delta
 			 *    VANISHES on the boundary of the mesh -- at every vertex and
-			 *    face quadrature point, checked before assembly for a position
-			 *    Delta. Both read q on Gamma_h as grad_bar( psi )/R, which it is
-			 *    only where Delta = 0. A Delta that reads psi is refused beside
-			 *    setExtension() outright: the extension is a face integrator on
-			 *    the linear flux mass, and beside it DarcyForm::Reconstruct()
-			 *    drops the flux law (../../mfem-hdg-dev/doc/
-			 *    FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md);
-			 *  - beside setConductorField(): the vacuum flux adds to q, and under
-			 *    Delta it carries a load (ANISOTROPY-PLAN.md AN-3b);
+			 *    face quadrature point. Both read q on Gamma_h as
+			 *    grad_bar( psi )/R, which it is only where Delta = 0. A position
+			 *    Delta is checked before assembly; a Delta that reads psi is
+			 *    checked on the SOLVED psi, by solve(), as the firehose limit
+			 *    is. Beside the extension a flux law takes a flux mass form
+			 *    holding the extension's face integrator alone, which
+			 *    DarcyForm::Reconstruct() treats as no form at all;
 			 *  - under an mfem::Device, since the weight is a host coefficient
 			 *    and the device path assembles R as a field;
 			 *  - beside setPlasmaCurrent(), refused by solve(): the constraint
 			 *    integrates F/R, which is the toroidal current only when Delta = 0
 			 *    -- under it Delta* psi = ( grad psi . grad Delta - F )/( 1 - Delta ).
+			 *
+			 * BESIDE setConductorField() EVERY Delta, a position one included,
+			 * goes on the flux law, and the law is AFFINE. The solved flux is
+			 * the remainder's, u_p = -q_p in DarcyForm's sign, and the
+			 * conductors' q_c is not divided by 1 - Delta, so the remainder's
+			 * flux row carries a load:
+			 *
+			 *     R/( 1 - Delta ) u_p - ( Delta/( 1 - Delta ) ) grad_bar psi_c,
+			 *
+			 * with Delta read at the TOTAL psi_p + psi_c. A linear flux mass
+			 * cannot carry the load into DarcyForm::Reconstruct(), which takes
+			 * a law's value at zero flux and nothing on the linear mass's
+			 * right-hand side. psi_c and its gradient are tabulated once per
+			 * mesh at the law's own quadrature points; anywhere else they are
+			 * evaluated.
 			 *
 			 * UNDER Argument::NormalisedFlux the bordered Newton's label columns
 			 * are differenced and never the source's analytic ones, which know
@@ -5373,7 +5380,10 @@ namespace meq
 			///
 			/// **UNDER setAnisotropy() THIS IS ( 1 - Delta )/R grad_bar( psi )**,
 			/// the flux the anisotropic operator conserves, and not the poloidal
-			/// field. Its zeros are grad psi's, since 1 - Delta > 0.
+			/// field. Its zeros are grad psi's, since 1 - Delta > 0. Beside the
+			/// split too, the remainder's q_p and q_c = ( 1/R ) grad_bar( psi_c )
+			/// add to that, the load in setAnisotropy()'s law being what makes
+			/// them.
 			///
 			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
 			/// THE REMAINDER `psi_p` AND NOT OF THE PHYSICAL FLUX.** `q_c` is
@@ -6358,20 +6368,50 @@ namespace meq
 			/// does not read it; solve() makes the other, on the solved psi.
 			void checkAnisotropyIsElliptic( mfem::GridFunction const *psi ) const;
 
-			/// buildForms()'s condition for an anisotropy beside setExtension() or
+			/// The condition for an anisotropy beside setExtension() or
 			/// setExteriorCoupling(): Delta exactly zero at every vertex and every
 			/// point of an order-2k + 2 rule on every boundary element of the
-			/// mesh, for a position Delta. Throws naming the point.
-			void checkAnisotropyVanishesOnTheBoundary() const;
+			/// mesh. Delta is read at @a psi, or at psi = 0 when it is null:
+			/// buildForms()'s call for a position Delta, which throws
+			/// std::invalid_argument; solve() makes the other, on the solved psi,
+			/// and throws std::runtime_error. Either names the point.
+			void checkAnisotropyVanishesOnTheBoundary( mfem::GridFunction const *psi ) const;
 
 			/// setStabilisationFollowsAnisotropy(), and the wrapper it installs.
 			bool stabilisationFollowsAnisotropy = false;
 			std::unique_ptr<mfem::HDGStabilization> anisotropicStabilization;
 
-			/// R/( 1 - Delta( psi ) ) and its psi-derivative, the flux law of a
-			/// Delta that reads psi. Owned here because the integrator holds it by
+			/// The flux law of a Delta that reads psi, or of any Delta beside
+			/// setConductorField(): R/( 1 - Delta ), its psi-derivative, and the
+			/// conductors' load. Owned here because the integrator holds it by
 			/// reference. Null otherwise.
-			std::unique_ptr<mfem::FunctionDiffusionFlux> anisotropicFlux;
+			class AnisotropicFluxLaw;
+			std::unique_ptr<mfem::MixedFluxFunction> anisotropicFlux;
+
+			/// Whether the flux mass is the law rather than a bilinear form.
+			bool anisotropyIsAFluxLaw() const;
+
+			/// psi_c and grad_bar( psi_c ) at every point of the law's own
+			/// element rule, three values a point, built once per mesh by
+			/// buildForms() beside setConductorField(); and each element's rule,
+			/// so conductorAtLawPoint() can tell a tabulated point from any
+			/// other. Empty otherwise.
+			std::vector<double> anisotropicConductorValues;
+			std::vector<int> anisotropicConductorOffsets;
+			std::vector<mfem::IntegrationRule const *> anisotropicConductorRules;
+			void buildAnisotropicConductorTable();
+
+			/// psi_c and grad_bar( psi_c ) at the point @a transformation is set
+			/// to: from the table where it is one of the law's own points,
+			/// evaluated otherwise. Reentrant.
+			void conductorAtLawPoint( mfem::ElementTransformation &transformation,
+			                          double radius, double z, double &psi,
+			                          double &gradR, double &gradZ ) const;
+
+			/// solve()'s checks of the solved psi -- the TOTAL under a split --
+			/// against the firehose limit, and against Gamma_h beside the
+			/// extension or the DtN.
+			void checkSolvedAnisotropy( bool againstTheBoundary ) const;
 
 			/// solve() is this, then the check of the solved psi against the
 			/// firehose limit under a Delta that reads psi.
@@ -6870,10 +6910,6 @@ namespace meq
 			mutable int solveDepth = 0;
 
 			AssemblyMode assemblyModeChoice;
-			/// Whether setAssemblyMode() chose it, rather than the default. A flux
-			/// law (setAnisotropy) refuses an explicit Threaded and takes Serial in
-			/// place of a default one; see buildForms().
-			bool assemblyModeExplicit = false;
 			TraceSolver traceSolverChoice;
 			int andersonDepth;
 			double picardDamping;
