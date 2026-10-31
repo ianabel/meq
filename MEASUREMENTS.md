@@ -22035,3 +22035,203 @@ rescaling case and all four convergence cases fail. The refusals are asserted:
 `naming` green over `src/meq/Anisotropy.hpp`.
 
 **Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicConvergence`.
+
+### M-329
+
+**AN-2a: `Δ` A FUNCTION OF `ψ`, THE WHOLE FLUX MASS ON A NON-LINEAR FLUX LAW,
+CONVERGES AT ITS DESIGN RATES AND NEWTON IS QUADRATIC.** The rates are `k+1` in
+`ψ` and `q` and `k+2` in `ψ*`, for `k = 1…4`. Newton takes 4 steps on every
+mesh. A zero-amplitude law is the isotropic solve to 5e-13, and costs 1.7× to
+2.5× per Newton step. `ANISOTROPY-PLAN.md`, AN-2a.
+
+**Setup.** `ManufacturedAnisotropic.hpp`'s flux model, `Δ = −0.5 ψ²`, on Example
+5's flux and box, with `Argument::Flux`. `F` is a function of position, posed
+as a `meq::Source` with `dFdPsi = 0`. The flux mass is
+`mfem::MixedConductionNLFIntegrator( FunctionDiffusionFlux )`, weight
+`R/(1 − Δ)` and derivative `R Δ′/(1 − Δ)²`, with no linear `M_u`. Triangles,
+`n = 4…32`, Newton from the Dirichlet data, Serial assembly.
+`AnisotropicConvergence`.
+
+| `k` | `ψ` at `h = 0.025` | rates | `q` | rates | `ψ*` | rates |
+|---|---|---|---|---|---|---|
+| 1 | 6.60e-04 | 1.953, 1.987, 1.997 | 1.26e-03 | 1.977, 1.981, 1.994 | 4.85e-06 | 3.096, 2.991, 2.999 |
+| 2 | 1.06e-05 | 2.903, 2.981, 2.996 | 2.02e-05 | 2.898, 2.990, 2.998 | 4.75e-08 | 3.869, 4.025, 4.011 |
+| 3 | 1.75e-07 | 3.972, 3.988, 3.997 | 3.43e-07 | 3.992, 3.984, 3.995 | 6.19e-10 | 5.097, 4.990, 4.997 |
+| 4 | 2.44e-09 | 4.881, 4.977, 4.995 | 4.76e-09 | 4.885, 4.985, 4.996 | 6.72e-12 | **5.782**, 5.984, 5.996 |
+
+`ψ*` is asserted from the second pair. At `k = 4` the coarsest pair, on 280
+trace dofs, is pre-asymptotic.
+
+**Newton.** The residuals at `k = 2`, `n = 16`, are 4.03e-01, 1.06e-02,
+4.90e-05, 2.70e-09 and 7.74e-16. The best order is 1.82 to 1.84, and it takes 4
+steps at every `k` and `n`.
+
+**Mutation.** With the flux-potential block zeroed (the law's `df = 0`), Newton
+takes 10 steps and its order is 1.22. That case fails. **There is no
+finite-difference Jacobian check, and there cannot be one.** The condensed
+gradient aborts under `FullNL` in `DenseMatrixLUSolver::SetOperator()` ("Not a
+DenseMatrix operator!"), and NPC's is solve-only. So the observed order is the
+instrument.
+
+**The flux-law path against the isotropic one.** A zero-amplitude flux model
+takes the law, `FullNL`, and no `M_u`. On `n = 16` it agrees with the isotropic
+Newton solve to 1.1e-13 in `ψ` and 3.7e-14 in `q` at `k = 1`, and to 5.1e-13
+and 2.4e-13 at `k = 3`. **What the path costs per Newton step** is 1.68× to
+1.82× at `k = 1` and 2.49× to 2.51× at `k = 3`. These are one-shot timings,
+with the machine shared.
+
+**Threaded assembly is not taken beside the law.** `Reconstruct()`'s threaded
+loop shares one `mfem::FrozenDualFluxCoefficient`, whose `Eval()` writes its own
+members. That was read, not observed. An explicit `Threaded` is refused, and a
+default one is taken as Serial. It is filed upstream as
+`FROZEN-FLUX-LAW-THREADING-FROM-MEQ.md`.
+
+**Suites:** double 89/90, the standing red only (`PlasmaEdgeConvergence`); `naming` green.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicConvergence --run_test='theFluxModel*,aZeroFlux*'`.
+
+### M-330
+
+**AN-2b: `Δ` A FUNCTION OF `Ψ`, THROUGH THE LABELS, ON THE BORDERED NEWTON. `ψ`
+AND `q` CONVERGE AT `k+1`, AND NEWTON IS QUADRATIC ONLY BECAUSE THE LABEL COLUMN
+IS DIFFERENCED. ON THE SOURCE'S ANALYTIC COLUMN IT IS LINEAR, ORDER 1.000. `ψ*`
+IS BOUND BY THE LABEL'S POINTWISE ERROR AND IS NOT AT `k+2`.**
+`ANISOTROPY-PLAN.md`, AN-2b.
+
+**Setup.** As [M-329](#m-329), with `Δ = −0.5 Ψ²`,
+`Argument::NormalisedFlux`. `F` is a `NormalisedSource` that claims
+analytic label derivatives of zero, which is true of `F` and false of the
+flux law. `setSource( source, 0.9 )` against an exact axis value of 1,
+`ψ_bnd = 0`. **The axis label is at a prescribed point**, Example 5's exact
+maximum `( 0.5 + 1/2.3, 0 )`.
+
+| `k` | `ψ` at `h = 0.025` | rates | `q` rates | `ψ*` rates | `|ψ_ax − 1|`, `n = 4…32` |
+|---|---|---|---|---|---|
+| 1 | 6.60e-04 | 1.961, 1.987, 1.995 | 1.976, 1.972, 2.001 | 2.918, **0.629**, 2.910 | 9.2e-03, 1.4e-03, 2.4e-03, 3.2e-04 |
+| 2 | 1.07e-05 | 2.885, 2.980, 2.997 | 2.875, 2.980, 3.003 | 2.133, 2.779, 3.093 | 4.5e-03, 9.9e-04, 1.5e-04, 1.7e-05 |
+| 3 | 1.75e-07 | 3.972, 3.987, 4.000 | 3.993, 3.982, 4.001 | 4.219, 3.698, 5.882 | 4.4e-04, 2.5e-05, 2.0e-06, 3.3e-08 |
+
+**Newton.** At `k = 1`, `n = 16`, the residuals are 9.89e-01, 8.51e-03,
+2.19e-04, 1.01e-07 and 7.07e-15. The order over the asymptotic triples is
+2.12 to 2.13, in 4 steps at every `k` and `n`.
+`meq::tests::bestNewtonOrder()` reads 47 to 62 on the located-axis histories
+below, because their first two residuals are 0.99 and 0.88. So the case takes
+its order only from triples whose middle residual is below a tenth of the
+first.
+
+**Mutation.** On the source's analytic zero column in place of the difference,
+Newton contracts by about 0.2 a step, order 1.000, and takes 16 steps at every
+`k`.
+
+**`ψ*`, and why it is not `k+2`.** `Δ` reads `ψ_ax`, which is `ψ_h` at a point,
+so the operator itself carries `ψ_h`'s pointwise error. That is `k+1`, at about
+1.6, 2.7 and 4.6 a halving across the sequence for `k = 1, 2, 3`, and its
+constant moves with where the point falls in its element. `ψ*` cannot beat its
+own operator. **Under the located axis it is worse**:
+
+* `|ψ_ax − 1|` at `k = 1` reads 1.05e-02, 1.65e-03, 2.49e-03, 3.28e-04;
+* `ψ*` reads 2.88, 0.63, 2.94;
+* Newton's order decays to about 1.15 as `ψ_ax` moves under it.
+
+This holds for any operator coefficient read through the labels. Reading them
+from `ψ*` is the route, and is not built.
+
+**Suites:** double 89/90, the standing red only (`PlasmaEdgeConvergence`); `naming` green.
+
+**Reproduce.** `... ./AnisotropicConvergence --run_test='theNormalisedFluxModel*'`.
+
+### M-331
+
+**THE LABELS READ FROM `ψ*` GIVE `ψ*` ITS ORDER BACK. Under
+`LabelReading::PostProcessed` the axis label of [M-330](#m-330)'s problem is
+`ψ*` at its point, by defect correction, and `ψ*` converges at `k+2` for
+`k = 1…3` where read from `ψ_h` it read 0.63. The passes settle in 2 to 6.**
+`ANISOTROPY-PLAN.md`, AN-2b.
+
+**Setup.** As [M-330](#m-330), with `setLabelReading( LabelReading::PostProcessed )`.
+Each pass's axis row is `ψ_ax − ψ_h(x) − c = 0`, with `c = (ψ* − ψ_h)(x)`
+from the previous pass, starting at 0. The pass's whole iterate and labels
+start the next. The passes stop when `c` moves by less than 1e-12 of the span.
+
+| `k` | `ψ*` at `h = 0.025` | `ψ*` rates | `|ψ_ax − 1|`, `n = 4…32` | passes |
+|---|---|---|---|---|
+| 1 | 4.86e-06 | 3.115, 2.994, 3.005 | 2.6e-03, 2.5e-04, 3.5e-05, 3.1e-06 | 6, 4, 4, 3 |
+| 2 | 4.76e-08 | 3.943, 4.008, 4.014 | 2.9e-04, 1.2e-05, 3.8e-07, 6.2e-08 | 4, 3, 3, 3 |
+| 3 | 6.21e-10 | 5.097, 4.996, 4.995 | 1.2e-05, 5.6e-07, 8.8e-09, 5.0e-10 | 3, 3, 2, 2 |
+
+`ψ` and `q` are [M-330](#m-330)'s to three figures. **The label no longer
+costs `ψ*` anything.** At `k = 1` it is 4.86e-06 against [M-329](#m-329)'s
+4.85e-06, on the same flux model with no labels at all. Against
+[M-330](#m-330)'s `ψ_h`-read labels, `|ψ_ax − 1|` on the finest mesh is 103×,
+279× and 67× smaller at `k = 1, 2, 3`.
+
+**Suites:** double 89/90, the standing red only (`PlasmaEdgeConvergence`); `naming` green.
+
+**Reproduce.** `... ./AnisotropicConvergence --run_test='labelsReadFromPsiStar*'`.
+
+### M-332
+
+**AN-3a: A POSITION `Δ` ON THE ROTATING MIRROR, BESIDE THE EXTENSION, THE DtN
+AND MESHED PACKS. NEWTON CONVERGES FROM THE VACUUM IN 3 STEPS, AND
+`ψ*` CONVERGES AS THE ISOTROPIC MIRROR'S DOES, TO 6% ON EVERY RUNG. `τ(1 − Δ)`
+IS IMMATERIAL AT `δ₀ = −0.3`. A `Δ` IN `Ψ` CANNOT BE POSED HERE YET.**
+`ANISOTROPY-PLAN.md`, AN-3a.
+
+**Setup.**
+
+* **The problem.** MR-4's machine and plasma: geq's rotating mirror, with
+  both labels at their points and the box support. `Γ = 3.0`, `N = 32`, the
+  mirror's stabilisation.
+* **The packs are meshed and aligned**: `CoilAugmentedNormalisedSource` over
+  `machineCoils()`, on `meshFile()` with `alignConductors`. There is no
+  subtraction, so `Δ` carries no coil load.
+* **`Δ = δ₀ b(R) h(z)`**, with `b = (1 − ((R − 0.225)/0.075)²)³` and
+  `h = (1 − (z/1.2)²)³`, and zero outside them. It sits inside the machine
+  region, clear of the box end and of `Γ`.
+* The start is the meshed vacuum's state and labels. `AnisotropicMirror`,
+  double build.
+
+**Convergence from the vacuum**, level 0, `k = 2`:
+
+| `δ₀` | Newton residuals | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|
+| −0.1 | 7.26e-01, 4.83e-05, 5.80e-10, 3.77e-15 | 5.576115e-03 | 6.403862e-02 |
+| −0.3 | 7.30e-01, 2.17e-04, 1.28e-08, 4.42e-15 | 5.608420e-03 | 6.172730e-02 |
+
+Three steps is the isotropic mirror's 3 or 4. The history is too short for an
+order: the first step falls 1e-4 from the vacuum start and the third is at
+round-off. The one middle step reads `r₂ ≈ 0.25 r₁²` at `δ₀ = −0.1`.
+
+**`Δ = 0` set through the interface is the meshed mirror to the bit**, in `ψ`
+and in the Newton count.
+
+**Against itself and against the isotropic control**: `k = 3`, levels 0 to 3,
+`ψ*` RMS differences between levels at 432 points of geq's machine region.
+
+| | 0–1 | 1–2 | 2–3 | rates |
+|---|---|---|---|---|
+| isotropic | 5.099e-05 | 3.283e-07 | 6.457e-08 | 7.279, 2.346 |
+| `δ₀ = −0.3` | 5.069e-05 | 3.098e-07 | 6.429e-08 | 7.354, 2.269 |
+| `δ₀ = −0.3`, `τ(1 − Δ)` | 5.069e-05 | 3.097e-07 | 6.428e-08 | 7.355, 2.269 |
+
+The anisotropic differences are 0.99, 0.94 and 1.00 of the isotropic ones,
+and that is what is asserted, within 25%. **The ladder's own rates are not
+`ψ*`'s design 4, isotropic as well.** At `k = 2` over levels 0 to 2 they read
+7.03 isotropic and 6.78 anisotropic. Level 0 is pre-asymptotic, and the rung
+after it is limited, most likely by the meshed packs' rectangle corners,
+which RotatingMirror's subtracted filaments do not have. Not measured.
+
+**`τ(1 − Δ)`** moves the differences by under 1e-3 of themselves. It stays
+off.
+
+**Refused.**
+
+* `Δ = −0.1` everywhere, nonzero on `Γ_h`, is refused before assembly beside
+  the extension.
+* A `Δ` in `Ψ` is refused beside the extension. `Reconstruct()` would drop its
+  flux law, since `M_u` exists to carry the extension.
+  `../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md`.
+
+**Suites:** double 90/91, the standing red only (`PlasmaEdgeConvergence`); `AnisotropicMirror` 374 s.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror`.

@@ -40,6 +40,7 @@
 #include <iomanip>
 #include <sstream>
 #include <exception>
+#include <functional>
 #include <stdexcept>
 
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
@@ -1423,7 +1424,114 @@ namespace
 		return anisotropyValue;
 	}
 
-	void GradShafranovSolver::checkAnisotropyIsElliptic() const
+	void GradShafranovSolver::setStabilisationFollowsAnisotropy( bool follows )
+	{
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setStabilisationFollowsAnisotropy: the forms are already built" );
+		stabilisationFollowsAnisotropy = follows;
+	}
+
+	void GradShafranovSolver::checkAnisotropyVanishesOnTheBoundary() const
+	{
+		mfem::Mesh &mesh = *fluxFes->GetMesh();
+		mfem::IsoparametricTransformation transformation;
+		mfem::Vector x;
+		int const order = 2*fluxFes->GetMaxElementOrder() + 2;
+		for ( int b = 0; b < mesh.GetNBE(); ++b )
+		{
+			mesh.GetBdrElementTransformation( b, &transformation );
+			mfem::Geometry::Type const geometry = mesh.GetBdrElementGeometry( b );
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get( geometry, order );
+			mfem::IntegrationRule const &vertices = *mfem::Geometries.GetVertices( geometry );
+			for ( mfem::IntegrationRule const *points : { &rule, &vertices } )
+			{
+				for ( int i = 0; i < points->GetNPoints(); ++i )
+				{
+					transformation.Transform( points->IntPoint( i ), x );
+					double const delta = anisotropyValue->delta( x( 0 ), x( 1 ), 0.0 );
+					if ( delta != 0.0 )
+					{
+						std::ostringstream message;
+						message << "meq::GradShafranovSolver: Delta = " << delta << " at ( "
+						        << x( 0 ) << ", " << x( 1 ) << " ), on boundary element " << b
+						        << ". Beside setExtension() or setExteriorCoupling() Delta must"
+						        << " vanish on the boundary of the mesh, Gamma_h: both read q"
+						        << " there as grad psi/R, which it is only where Delta = 0.";
+						throw std::invalid_argument( message.str() );
+					}
+				}
+			}
+		}
+	}
+
+	namespace
+	{
+		/// tau( x )( 1 - Delta( x ) ): setStabilisationFollowsAnisotropy().
+		/// State independent, and with no rule to hand a batched route, so the
+		/// faces take the host loop -- which a Device's refusal already
+		/// guarantees.
+		class AnisotropicStabilization : public mfem::HDGStabilization
+		{
+			public:
+				AnisotropicStabilization( mfem::HDGStabilization const &baseIn,
+				                          meq::Anisotropy const &deltaIn )
+					: base( baseIn ), delta( deltaIn )
+				{
+				}
+
+				bool IsConstant() const override // NOLINT(readability-identifier-naming)
+				{
+					return true;
+				}
+
+				mfem::real_t Eval( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
+				                   mfem::real_t uhat,
+				                   mfem::ElementTransformation &tr ) const override
+				{
+					mfem::real_t coordinates[ 3 ];
+					mfem::Vector x( coordinates, tr.GetSpaceDim() );
+					tr.Transform( tr.GetIntPoint(), x );
+					return base.Eval( sDiff, un, u, uhat, tr )
+					       *( 1.0 - delta.delta( x( 0 ), x( 1 ), 0.0 ) );
+				}
+
+			private:
+				mfem::HDGStabilization const &base;
+				meq::Anisotropy const &delta;
+		};
+	}
+
+	double GradShafranovSolver::anisotropyAt( double radius, double z, double psi,
+	                                          double *dDeltaDPsi ) const
+	{
+		double argument = 0.0;
+		double scale = 0.0;
+		switch ( anisotropyValue->argument() )
+		{
+			case Anisotropy::Argument::Position:
+				break;
+			case Anisotropy::Argument::Flux:
+				argument = psi;
+				scale = 1.0;
+				break;
+			case Anisotropy::Argument::NormalisedFlux:
+			{
+				// The labels as the bordered Newton last set them, which is
+				// also what makes a differenced label column see the flux law.
+				double const axis = normalisedSource->normalisation();
+				double const boundary = normalisedSource->boundaryNormalisation();
+				scale = 1.0/( axis - boundary );
+				argument = ( psi - boundary )*scale;
+				break;
+			}
+		}
+		if ( dDeltaDPsi != nullptr )
+			*dDeltaDPsi = scale == 0.0 ? 0.0
+			                           : scale*anisotropyValue->dDeltaDPsi( radius, z, argument );
+		return anisotropyValue->delta( radius, z, argument );
+	}
+
+	void GradShafranovSolver::checkAnisotropyIsElliptic( mfem::GridFunction const *psi ) const
 	{
 		// SERIAL, AND BEFORE ANY ASSEMBLY, because it throws: an exception
 		// cannot leave the threaded element loops the weight is evaluated in.
@@ -1444,16 +1552,21 @@ namespace
 			{
 				for ( int i = 0; i < points->GetNPoints(); ++i )
 				{
-					transformation.Transform( points->IntPoint( i ), x );
-					double const delta = anisotropyValue->delta( x( 0 ), x( 1 ) );
+					mfem::IntegrationPoint const &ip = points->IntPoint( i );
+					transformation.Transform( ip, x );
+					double const psiValue = psi != nullptr ? psi->GetValue( e, ip ) : 0.0;
+					double const delta = anisotropyAt( x( 0 ), x( 1 ), psiValue, nullptr );
 					if ( !( 1.0 - delta > 0.0 ) )
 					{
 						std::ostringstream message;
 						message << "meq::GradShafranovSolver: 1 - Delta = " << 1.0 - delta
 						        << " at ( " << x( 0 ) << ", " << x( 1 ) << " ), in element " << e
+						        << ( psi != nullptr ? ", on the solve's last psi" : "" )
 						        << ". Delta >= 1 is the firehose limit, where the operator"
 						        << " -div( ( 1 - Delta )/R grad psi ) stops being elliptic;"
 						        << " MEQ refuses it rather than clipping Delta.";
+						if ( psi != nullptr )
+							throw std::runtime_error( message.str() );
 						throw std::invalid_argument( message.str() );
 					}
 				}
@@ -2126,6 +2239,42 @@ namespace
 				mfem::real_t const *values;
 		};
 
+		/*
+		 * THE FLUX MASS'S WEIGHT, FOR THE SEED: R, or R/( 1 - Delta ) under an
+		 * anisotropy, so the seeded q is the q the solve carries. A Delta that
+		 * reads psi is read at the guess's psi, through @a psiIn -- a
+		 * GuessFieldValue where the loop threads, for the reason above. With
+		 * no anisotropy this is FunctionCoefficient( x(0) ) exactly.
+		 */
+		class AnisotropicSeedWeight : public mfem::Coefficient
+		{
+			public:
+				/// @param deltaIn Delta( R, z, psi ), the solver's anisotropyAt(),
+				///        or empty for none.
+				AnisotropicSeedWeight( std::function<double( double, double, double )> deltaIn,
+				                       bool readsFluxIn, mfem::Coefficient &psiIn )
+					: delta( std::move( deltaIn ) ), readsFlux( readsFluxIn ), psi( psiIn )
+				{
+				}
+
+				mfem::real_t Eval( mfem::ElementTransformation &transformation,
+				                   mfem::IntegrationPoint const &point ) override
+				{
+					mfem::real_t coordinates[ 3 ];
+					mfem::Vector x( coordinates, 3 );
+					transformation.Transform( point, x );
+					if ( !delta )
+						return x( 0 );
+					double const psiValue = readsFlux ? psi.Eval( transformation, point ) : 0.0;
+					return x( 0 )/( 1.0 - delta( x( 0 ), x( 1 ), psiValue ) );
+				}
+
+			private:
+				std::function<double( double, double, double )> delta;
+				bool readsFlux;
+				mfem::Coefficient &psi;
+		};
+
 		// Vector::SetSubVector()'s writing of a signed dof index, through a
 		// raw pointer, which reaches no memory manager.
 		void writeAt( mfem::real_t *target, mfem::Array<int> const &dofs,
@@ -2216,13 +2365,20 @@ namespace
 				const_cast<mfem::GridFunction *>( &psiGuess ) );
 			// The flux mass's own weight, so the seed is the q the solve carries:
 			// R, or R/( 1 - Delta ) under an anisotropy.
-			Anisotropy const *const delta = anisotropyValue;
-			mfem::FunctionCoefficient radius(
-				[ delta ]( mfem::Vector const &x )
+			GuessFieldValue fieldValue( guessSpace, guess );
+			mfem::GridFunctionCoefficient mfemValue( &psiGuess );
+			std::function<double( double, double, double )> delta;
+			if ( anisotropyValue != nullptr )
+				delta = [ this ]( double radius, double z, double psi )
 				{
-					return delta == nullptr ? x( 0 )
-					                        : x( 0 )/( 1.0 - delta->delta( x( 0 ), x( 1 ) ) );
-				} );
+					return anisotropyAt( radius, z, psi, nullptr );
+				};
+			AnisotropicSeedWeight radius(
+				std::move( delta ),
+				anisotropyValue != nullptr
+					&& anisotropyValue->argument() != Anisotropy::Argument::Position,
+				sameMesh ? static_cast<mfem::Coefficient &>( fieldValue )
+				         : static_cast<mfem::Coefficient &>( mfemValue ) );
 
 			mfem::VectorMassIntegrator mass( radius );
 			mfem::VectorDomainLFIntegrator load(
@@ -2564,6 +2720,7 @@ namespace
 		}
 
 		assemblyModeChoice = choice;
+		assemblyModeExplicit = true;
 		built = false;
 		prepared = false;
 	}
@@ -5174,6 +5331,18 @@ namespace
 	                                                mfem::Vector &shape,
 	                                                mfem::Array<int> &dofs ) const
 	{
+		mfem::IntegrationPoint reference;
+		locateReferencePoint( radius, z, element, reference );
+		mfem::FiniteElement const *fe = potentialFes->GetFE( element );
+		shape.SetSize( fe->GetDof() );
+		fe->CalcShape( reference, shape );
+		potentialFes->GetElementDofs( element, dofs );
+	}
+
+	void GradShafranovSolver::locateReferencePoint( double radius, double z,
+	                                                int &element,
+	                                                mfem::IntegrationPoint &reference ) const
+	{
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		mfem::Vector point( 2 );
 		point( 0 ) = radius;
@@ -5254,17 +5423,11 @@ namespace
 			}
 		}
 
-		if ( best >= 0 && bestViolation <= tolerance )
+		if ( best >= 0 && bestViolation <= tolerance && potentialFes->GetFE( best ) )
 		{
-			mfem::FiniteElement const *fe = potentialFes->GetFE( best );
-			if ( fe )
-			{
-				shape.SetSize( fe->GetDof() );
-				fe->CalcShape( bestReference, shape );
-				potentialFes->GetElementDofs( best, dofs );
-				element = best;
-				return;
-			}
+			reference = bestReference;
+			element = best;
+			return;
 		}
 
 		std::ostringstream message;
@@ -5833,7 +5996,14 @@ namespace
 		// 1/R, so this is R. Measured rather than assumed: putting 1/R here instead
 		// still converges, to a different function, with the L2 error against the
 		// exact Solov'ev solution flat at 1.9e-2 through four refinements.
-		mfem::BilinearForm *fluxMass = darcy->GetFluxMassForm();
+		//
+		// A Delta THAT READS psi takes no flux mass form at all -- not an empty
+		// one, since DarcyForm::Reconstruct() lifts M_u's integrators whenever
+		// M_u exists and would silently drop the flux law beside it. So the form
+		// is asked for only off that branch.
+		bool const fluxLaw = anisotropyValue != nullptr
+		                     && anisotropyValue->argument() != Anisotropy::Argument::Position;
+		mfem::BilinearForm *fluxMass = fluxLaw ? nullptr : darcy->GetFluxMassForm();
 		//
 		// R AS A FIELD AND NOT AS A FUNCTION OF THE POINT, on every arm, so a
 		// host run and a device run assemble the same thing: upstream's
@@ -5848,30 +6018,92 @@ namespace
 		if ( anisotropyValue != nullptr )
 		{
 			char const *const refusal = "meq::GradShafranovSolver: an anisotropy (setAnisotropy) ";
-			if ( transferPath != nullptr )
-				throw std::logic_error( std::string( refusal ) + "beside setExtension() is not built: the extension reads q as grad psi/R on Gamma_h (ANISOTROPY-PLAN.md AN-3)" );
-			if ( exteriorCoupling != nullptr )
-				throw std::logic_error( std::string( refusal ) + "beside setExteriorCoupling() is not built (ANISOTROPY-PLAN.md AN-3)" );
+			if ( transferPath != nullptr && fluxLaw )
+				throw std::logic_error( std::string( refusal ) + "that reads psi beside setExtension() is not built: the extension is a face integrator on the linear flux mass, and beside it DarcyForm::Reconstruct() drops the flux law. ../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md" );
+			if ( exteriorCoupling != nullptr && fluxLaw )
+				throw std::logic_error( std::string( refusal ) + "that reads psi beside setExteriorCoupling() is not built: it is not measured (ANISOTROPY-PLAN.md AN-3)" );
+			// A POSITION Delta beside either, where it vanishes on the boundary:
+			// both read q on Gamma_h as grad psi/R, which it is there.
+			if ( ( transferPath != nullptr || exteriorCoupling != nullptr ) && !fluxLaw )
+				checkAnisotropyVanishesOnTheBoundary();
 			if ( conductorFieldSet != nullptr )
 				throw std::logic_error( std::string( refusal ) + "beside setConductorField() is not built: the vacuum flux adds to q, and under Delta it carries a load (ANISOTROPY-PLAN.md section 2, AN-3)" );
 			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
 				throw std::logic_error( std::string( refusal ) + "under an mfem::Device is not built: its weight is a host coefficient, and the device assembles R as a field" );
 
-			checkAnisotropyIsElliptic();
 
 			Anisotropy const *const delta = anisotropyValue;
-			anisotropicWeight = std::make_unique<mfem::FunctionCoefficient>(
-				[ delta ]( mfem::Vector const &x )
+			if ( !fluxLaw )
+			{
+				checkAnisotropyIsElliptic( nullptr );
+
+				anisotropicWeight = std::make_unique<mfem::FunctionCoefficient>(
+					[ delta ]( mfem::Vector const &x )
+					{
+						return 1.0/( 1.0 - delta->delta( x( 0 ), x( 1 ), 0.0 ) );
+					} );
+				anisotropicFluxMass = std::make_unique<mfem::ProductCoefficient>(
+					*fluxMassRadius, *anisotropicWeight );
+				fluxMassWeight = anisotropicFluxMass.get();
+			}
+			else
+			{
+				// AN-2a. Each refusal is a path this law has not been measured on,
+				// or one that cannot carry it; setAnisotropy() says which.
+				if ( linearSource != nullptr )
+					throw std::logic_error( std::string( refusal ) + "that reads psi beside setSource( mfem::Coefficient & ) is not built: that source takes the linear path, and the flux law is non-linear. Pose the source as a meq::Source with dFdPsi = 0" );
+				bool const normalised
+					= anisotropyValue->argument() == Anisotropy::Argument::NormalisedFlux;
+				if ( !normalised && normalisedSource != nullptr )
+					throw std::logic_error( std::string( refusal ) + "that reads the physical psi beside setSource( NormalisedSource &, double ) is not built: it is not measured. A Delta in the labels is Argument::NormalisedFlux (ANISOTROPY-PLAN.md AN-2b)" );
+				if ( normalised && normalisedSource == nullptr )
+					throw std::logic_error( std::string( refusal ) + "that reads Psi needs setSource( NormalisedSource &, double ): without it there are no labels to normalise by" );
+				// THREADED IS NOT SAFE BESIDE A FLUX LAW, and not because of the
+				// law: DarcyForm::Reconstruct() lifts it through ONE
+				// mfem::FrozenDualFluxCoefficient shared by its threaded loop,
+				// and that coefficient's Eval() writes its own members and reads
+				// GridFunction::GetValue( T, ip ), which writes the space's
+				// DoFTrans. Under Serial upstream threads none of these loops, so
+				// the promise below is vacuous there. An explicit Threaded is
+				// refused; a default one becomes Serial, which is a performance
+				// key and changes no answer.
+				if ( assemblyModeChoice == AssemblyMode::Threaded )
 				{
-					return 1.0/( 1.0 - delta->delta( x( 0 ), x( 1 ) ) );
-				} );
-			anisotropicFluxMass = std::make_unique<mfem::ProductCoefficient>(
-				*fluxMassRadius, *anisotropicWeight );
-			fluxMassWeight = anisotropicFluxMass.get();
+					if ( assemblyModeExplicit )
+						throw std::logic_error( std::string( refusal ) + "that reads psi under AssemblyMode::Threaded, chosen by setAssemblyMode(), is not built: the threaded reconstruction shares one mfem::FrozenDualFluxCoefficient, which is not reentrant" );
+					assemblyModeChoice = AssemblyMode::Serial;
+				}
+
+				// f( x, psi ) = R/( 1 - Delta ), and its psi-derivative
+				// R Delta'/( 1 - Delta )^2 -- zero under Picard, which drops the
+				// operator's dependence on psi from the Jacobian exactly as it
+				// drops the source's reaction term. R is the point's own here,
+				// not the coordinate field: the law is host-only and a Device is
+				// refused above, so there is no second arm to agree with.
+				anisotropicFlux = std::make_unique<mfem::FunctionDiffusionFlux>(
+					2,
+					[ this ]( mfem::Vector const &x, mfem::real_t psi ) -> mfem::real_t
+					{
+						return x( 0 )/( 1.0 - anisotropyAt( x( 0 ), x( 1 ), psi, nullptr ) );
+					},
+					[ this ]( mfem::Vector const &x, mfem::real_t psi ) -> mfem::real_t
+					{
+						if ( fieldLinearisationChoice == FieldLinearisation::Picard )
+							return 0.0;
+						double slope = 0.0;
+						double const tension = 1.0 - anisotropyAt( x( 0 ), x( 1 ), psi, &slope );
+						return x( 0 )*slope/( tension*tension );
+					} );
+				darcy->GetBlockNonlinearForm()->AddDomainIntegrator(
+					new mfem::MixedConductionNLFIntegrator( *anisotropicFlux ) );
+			}
 		}
-		auto *fluxMassTerm = new mfem::VectorMassIntegrator( *fluxMassWeight );
-		fluxMass->AddDomainIntegrator( fluxMassTerm );
-		fluxMassIntegrator = fluxMassTerm;
+		if ( !fluxLaw )
+		{
+			auto *fluxMassTerm = new mfem::VectorMassIntegrator( *fluxMassWeight );
+			fluxMass->AddDomainIntegrator( fluxMassTerm );
+			fluxMassIntegrator = fluxMassTerm;
+		}
 
 		if ( transferPath )
 		{
@@ -5922,8 +6154,17 @@ namespace
 				: static_cast<mfem::HDGStabilization const &>( stabilization );
 		auto *interior = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
 		auto *boundary = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
-		interior->SetStabilization( stab );
-		boundary->SetStabilization( stab );
+		mfem::HDGStabilization const *chosen = &stab;
+		if ( stabilisationFollowsAnisotropy )
+		{
+			if ( anisotropyValue == nullptr
+			     || anisotropyValue->argument() != Anisotropy::Argument::Position )
+				throw std::logic_error( "meq::GradShafranovSolver: setStabilisationFollowsAnisotropy() needs a position anisotropy (setAnisotropy with a meq::PositionAnisotropy)" );
+			anisotropicStabilization = std::make_unique<AnisotropicStabilization>( stab, *anisotropyValue );
+			chosen = anisotropicStabilization.get();
+		}
+		interior->SetStabilization( *chosen );
+		boundary->SetStabilization( *chosen );
 		interiorFaceIntegrator = interior;
 
 		if ( usesNonlinearForms() )
@@ -10360,6 +10601,14 @@ namespace
 		if ( !normalisedSource )
 			return false;
 
+		// A FLUX LAW IN THE LABELS IS PART OF THE COLUMN, and the source's
+		// analytic derivatives know nothing of it: they are dF/ds, and the
+		// flux row moves with s too. The difference perturbs the labels the
+		// law reads (anisotropyAt()), so it carries that term with no more code.
+		if ( anisotropyValue != nullptr
+		     && anisotropyValue->argument() == Anisotropy::Argument::NormalisedFlux )
+			return false;
+
 		// Ask the source once whether it can answer at all. A source that has
 		// not implemented the derivatives is differenced as before.
 		{
@@ -11228,7 +11477,8 @@ namespace
 					total += conductorPsi( xR, xZ );
 			}
 			else if ( limiterConstraintChoice == LimiterConstraint::ExactPoint )
-				total += conductorPsi( boundaryFluxR, boundaryFluxZ );
+				total += conductorPsi( boundaryFluxR, boundaryFluxZ )
+				         + boundaryLabelCorrectionValue;
 			else if ( limiterContactLocatedValue )
 				total += conductorPsi( limiterContactRValue,
 				                       limiterContactZValue );
@@ -13067,6 +13317,10 @@ namespace
 					value += axisPointShape( i )
 					         *state( blockOffsets[ 1 ] + axisPointDofs[ i ] );
 				value += conductorPsi( axisFluxR, axisFluxZ );
+				// setLabelReading()'s defect correction, psi* - psi_h at the
+				// point from the previous pass: a constant, so on the value and
+				// never on the row. Exactly zero under LabelReading::Potential.
+				value += axisLabelCorrectionValue;
 
 				plasmaSeedElement = axisPointElement;
 				if ( element )
@@ -17222,6 +17476,145 @@ namespace
 	}
 
 	void GradShafranovSolver::solve()
+	{
+		if ( labelReadingChoice == LabelReading::PostProcessed )
+			solveReadingPostProcessedLabels();
+		else
+		{
+			labelReadingPassCount = 0;
+			solveChecked();
+		}
+	}
+
+	void GradShafranovSolver::setLabelReading( LabelReading choice )
+	{
+		labelReadingChoice = choice;
+		axisLabelCorrectionValue = 0.0;
+		boundaryLabelCorrectionValue = 0.0;
+	}
+
+	GradShafranovSolver::LabelReading GradShafranovSolver::labelReading() const
+	{
+		return labelReadingChoice;
+	}
+
+	int GradShafranovSolver::labelReadingPasses() const
+	{
+		return labelReadingPassCount;
+	}
+
+	double GradShafranovSolver::axisLabelCorrection() const
+	{
+		return axisLabelCorrectionValue;
+	}
+
+	double GradShafranovSolver::boundaryLabelCorrection() const
+	{
+		return boundaryLabelCorrectionValue;
+	}
+
+	double GradShafranovSolver::postProcessedMinusPotentialAt( double radius, double z ) const
+	{
+		int element = -1;
+		mfem::IntegrationPoint reference;
+		locateReferencePoint( radius, z, element, reference );
+		return postProcessedPotential().GetValue( element, reference )
+		       - potential().GetValue( element, reference );
+	}
+
+	void GradShafranovSolver::solveReadingPostProcessedLabels()
+	{
+		/*
+		 * THE LABELS FROM psi*, BY DEFECT CORRECTION. Each prescribed label's
+		 * row is psi_label - psi_h( x ) - c = 0 with c a constant, so the
+		 * bordered Newton inside each pass is exactly the one it always was;
+		 * between passes c becomes ( psi* - psi_h )( x ) on the pass's answer.
+		 * At the fixed point the label IS psi*( x ), k+2 where psi_h( x ) is
+		 * k+1 with a constant that moves with where the point falls in its
+		 * element -- and an operator coefficient read through the labels
+		 * (setAnisotropy()'s Argument::NormalisedFlux) carries that error into
+		 * psi*, which then cannot beat it. ANISOTROPY-PLAN.md, AN-2b.
+		 *
+		 * Each pass after the first starts from the last one's whole iterate
+		 * and labels, so it costs a few Newton steps and not a cold solve.
+		 */
+		bool const axisPointed = normalisedSource != nullptr
+		                         && axisConstraintChoice == AxisConstraint::PrescribedPoint
+		                         && axisFluxPointIsSet;
+		bool const boundaryPointed = normalisedSource != nullptr && boundaryFluxIsUnknown
+		                             && !xPointIsUnknown
+		                             && limiterConstraintChoice == LimiterConstraint::ExactPoint;
+		if ( !axisPointed && !boundaryPointed )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: LabelReading::PostProcessed reads a label from psi* at its prescribed point, and neither label is at one: setAxisFluxPoint() with AxisConstraint::PrescribedPoint, or setBoundaryFluxPoint(), on a normalised source" );
+
+		axisLabelCorrectionValue = 0.0;
+		boundaryLabelCorrectionValue = 0.0;
+		labelReadingPassCount = 0;
+
+		int const maximumPasses = 12;
+		for ( int pass = 0; pass < maximumPasses; ++pass )
+		{
+			solveChecked();
+			++labelReadingPassCount;
+			postProcess();
+
+			double const axisCorrection
+				= axisPointed ? postProcessedMinusPotentialAt( axisFluxR, axisFluxZ ) : 0.0;
+			double const boundaryCorrection
+				= boundaryPointed ? postProcessedMinusPotentialAt( boundaryFluxR, boundaryFluxZ ) : 0.0;
+			double const change = std::max( std::abs( axisCorrection - axisLabelCorrectionValue ),
+			                                 std::abs( boundaryCorrection - boundaryLabelCorrectionValue ) );
+			double const span = std::abs( psiAxis() - psiBoundary() );
+
+			// Settled when the correction no longer moves at the scale the
+			// labels themselves are resolved to: the pass's answer was solved
+			// with corrections this close to its own.
+			if ( change <= labelReadingTolerance*span )
+				return;
+
+			axisLabelCorrectionValue = axisCorrection;
+			boundaryLabelCorrectionValue = boundaryCorrection;
+
+			setInitialState( state(), exteriorCoefficients() );
+			setAxisFluxInitial( psiAxis() );
+			if ( boundaryFluxIsUnknown )
+				setBoundaryFluxInitial( psiBoundary() );
+		}
+
+		std::ostringstream message;
+		message << "meq::GradShafranovSolver::solve: LabelReading::PostProcessed did not settle in "
+		        << maximumPasses << " passes; the labels' correction is still moving by more than "
+		        << labelReadingTolerance << " of the span";
+		throw std::runtime_error( message.str() );
+	}
+
+	void GradShafranovSolver::solveChecked()
+	{
+		// A Delta that reads psi cannot be checked before the solve, so the
+		// solved psi is. A transient excursion past the limit inside Newton is
+		// not refused; an ANSWER past it is. And a solve that FAILS with its
+		// last iterate past the limit says so, since past it the operator is
+		// indefinite and that, not the iteration, is the likely cause.
+		bool const fluxLaw = anisotropyValue != nullptr
+		                     && anisotropyValue->argument() != Anisotropy::Argument::Position;
+		if ( anisotropyValue != nullptr && currentIsUnknown )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: a prescribed plasma current (setPlasmaCurrent) beside an anisotropy (setAnisotropy) is not built: the constraint integrates F/R, which is the toroidal current only at Delta = 0" );
+		try
+		{
+			solveBody();
+		}
+		catch ( std::runtime_error const & )
+		{
+			if ( fluxLaw )
+				checkAnisotropyIsElliptic( &potential() );
+			throw;
+		}
+
+		if ( fluxLaw )
+			checkAnisotropyIsElliptic( &potential() );
+	}
+
+	void GradShafranovSolver::solveBody()
 	{
 		longestCrawlValue = 0;
 		newtonTargetValue = 0.0;
