@@ -199,11 +199,12 @@ def meq_config(case, directory, mesh, level, order, prefix, plasma_size=0.1):
     return path
 
 
-def trace_unknowns(mesh_path, order):
-    """faces x ( k + 1 ) from the written .mesh: Euler for a triangulation,
-    ( 3 NE + boundary edges ) / 2, counted rather than estimated."""
-    with open(mesh_path) as handle:
-        lines = handle.read().split("\n")
+def trace_unknowns(mesh_text, order):
+    """faces x ( k + 1 ) from the run's mesh, MFEM's own text as the .nc carries
+    it in `mesh` -- the .nc is MEQ's only default output: Euler for a
+    triangulation, ( 3 NE + boundary edges ) / 2, counted rather than
+    estimated."""
+    lines = mesh_text.split("\n")
     elements = int(lines[lines.index("elements") + 1])
     boundary = int(lines[lines.index("boundary") + 1])
     return elements, ((3*elements + boundary)//2)*(order + 1)
@@ -235,7 +236,8 @@ def run_meq(case, directory, mesh, level, order, threads, tag, plasma_size=0.1,
         R = np.asarray(nc.variables["R"][:], dtype=float)
         Z = np.asarray(nc.variables["Z"][:], dtype=float)
         inside = np.asarray(nc.variables["inside"][:]).T
-    elements, unknowns = trace_unknowns(os.path.join(directory, tag + ".mesh"), order)
+        mesh_text = nc.variables["mesh"][...]
+    elements, unknowns = trace_unknowns(str(mesh_text), order)
     return dict(ok=True, seconds=seconds,
                 solve=float(m.group(3)) if m else float("nan"),
                 setup=float(m.group(2)) if m else float("nan"),
