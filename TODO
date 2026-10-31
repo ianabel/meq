@@ -433,6 +433,27 @@ Raised 2026-08-25.
   ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3a
   are done (M-328 to M-333); AN-3b, the subtracted mirror, is next.
 
+  NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
+  only. On builds/single (MFEM 59ef46309f):
+
+  * AnisotropicConvergence, 25 cases: the constant-Delta rescaling and the
+    zero flux model against the isotropic Newton solve assert 1e-10 and
+    read 2e-5 to 1e-4; the flux model's best Newton order reads 1.49 to
+    1.52 against 1.8; the normalised model's Newton order reads 0.92 and
+    its q rate collapses at k = 3 (-0.91 on the last pair);
+    labelsReadFromPsiStar has q below k+1 at k = 2; and the firehose case
+    in aFluxModelsRefusals ends in an MFEM verification, IsFinite( norm ),
+    rather than MEQ's named refusal. The Jacobian difference passes, at
+    4.7e-05, and so does threaded parity.
+  * AnisotropicMirror: the four vacuum starts converge, in 3 to 5 steps,
+    each stalling at 1.6e-06 to 1.9e-06 -- the meshed packs' single floor
+    the Status records, which solveMeshed() meets with a 64 eps target and
+    the plasma solves here do not. So the k = 3 ladder's isotropic level 0
+    does not converge.
+
+  Each needs a single-precision bound measured as M-294's were, not assumed;
+  the firehose verification may be a defect.
+
   The reference is pinned: refs/AlphaGK.pdf eq (6.18), and refs/Refs.md,
   "Anisotropic pressure", carries what it says and its two typos. It answers
   both questions this entry asked. The operator changes (the diffusion

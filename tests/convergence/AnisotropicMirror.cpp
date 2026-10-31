@@ -308,7 +308,7 @@ BOOST_AUTO_TEST_CASE( aZeroBumpIsTheMeshedMirrorBitForBit )
 	mfem::GridFunction const &a = plain->solver->potential();
 	mfem::GridFunction const &b = zero->solver->potential();
 	for ( int i = 0; i < a.Size(); ++i )
-		worst = std::max( worst, std::abs( a( i ) - b( i ) ) );
+		worst = std::max( worst, static_cast<double>( std::abs( a( i ) - b( i ) ) ) );
 	BOOST_TEST( worst == 0.0, "psi differs by " << worst );
 	BOOST_TEST( plain->solver->newtonIterations() == zero->solver->newtonIterations() );
 }
