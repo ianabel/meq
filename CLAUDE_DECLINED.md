@@ -122,7 +122,7 @@ or that code cites by section number, stay where they are and are indexed under
   * *Iron and the evolution problem*
   * *What the X-point pathway does not reach: the plasma edge, inversion through a separatrix, a fixed boundary on one*
   * *The inversion's out-of-scope list: topology, 3D, straight-field-line angles, `p` contours and the inverse-equilibrium formulation*
-  * *Anisotropic pressure, NetCDF profiles and MaNTA coupling*
+  * *NetCDF profiles and MaNTA coupling*
 * **Recorded in place**
 
 ## Newton, globalisation and solver selection
@@ -2255,13 +2255,12 @@ reachable for:
 
 *From `INVERSION-PLAN.md` §9.*
 
-### Anisotropic pressure, NetCDF profiles and MaNTA coupling
+### NetCDF profiles and MaNTA coupling
 
 **Deferred.** The rest of the physics is deliberately not yet on the roadmap:
-anisotropic pressure, several profiles read out of one NetCDF file, and coupling
-to MaNTA. `TODO` carries each with what has been established; anisotropic
-pressure has **no reference pinned**, which is the first thing it needs before
-any of it is worth building.
+several profiles read out of one NetCDF file, and coupling to MaNTA. `TODO`
+carries each with what has been established. Anisotropic pressure is planned,
+not deferred: `ANISOTROPY-PLAN.md`.
 
 *From `ROADMAP.md`, Deliberately not yet.*
 

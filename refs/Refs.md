@@ -251,15 +251,18 @@ coefficients are checked.
 
 ## Anisotropic pressure
 
-`p_∥ ≠ p_⊥`, so the scalar `p(ψ)` in the source is replaced by a pair. **This is
-the other generalisation, and it is independent of the rotation one above.**
-`TODO` names the question that decides how large a job it is, and none of these
-rows answers it yet: whether the anisotropy enters as a **modified source under
-an unchanged `Δ*`**, in which case only `src/meq/Source.{hpp,cpp}` changes and
-the discretisation is untouched — or whether it **changes the operator**, in
-which case the HDG assembly changes too and this is a much larger piece of work.
+`p_∥ ≠ p_⊥`, so the scalar `p(ψ)` in the source is replaced by a pair. **It
+composes with the rotation above rather than standing beside it**: the equation
+MEQ implements carries both at once, and reduces to (136) when the anisotropy
+vanishes. **It changes the operator, not only the source**: the left-hand side
+is `R ∇̄·( (1−Δ)/R ∇̄ψ )`, so the diffusion coefficient `1/R` becomes
+`(1−Δ)/R` and the HDG assembly changes. `ANISOTROPY-PLAN.md` is the plan.
 
-**Every row here is an unread seed, and the provenance is the reason to be
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| ✔ (§6 only) Unpublished draft, "under consideration for publication in J. Plasma Phys.", typeset 2024-03-08 | **none, and none to look for**: unpublished, supplied by its first author, who is this project's. Not on Crossref or arXiv (checked 2026-10-30), which is consistent with that and not a reason to search again | Abel, Wilkie & Schekochihin, *Multiscale gyrokinetics for rotating tokamak plasmas III: Energetic particles*. **The equation MEQ implements for anisotropic pressure**: eq (6.18), printed page 13. A later version moves it to Appendix B as (B18), which is the number geq and freegs4e cite (`freegs4e/jtor.py`, `_apply_anisotropy`); the numbers here are this draft's. Read beside it: (6.3) and (6.6), `Δ = Σ 4π( p_∥ − p_⊥ )/B²`; (6.7), `I = Ī( ψ )/( 1 − Δ )`, so the toroidal field is not a flux function; (6.14), `dĪ/dψ`; and (6.19), the Maxwellian bracket, which is RoPP (136)'s. **The left-hand side is `( 1 − Δ )Δ*ψ − ∇ψ·∇Δ`, which is exactly `R ∇̄·( (1−Δ)/R ∇̄ψ )`**, the answer to the question this section used to ask. **The sum over species is not restricted to energetic ones for an equilibrium**: the draft sums over its energetic species `α` because of its ordering, but any species may carry its own `Δ_s` and its own `∫d³w m_s w_∥² ∂F_s/∂ψ`, and a Maxwellian is simply the case `Δ_s = 0` with (6.19) as its integral. **The source is `∂F_s/∂ψ` at fixed `( ε_s, μ_s )`, not `∂p_∥/∂ψ` at fixed `B`**, because `ε` carries the centrifugal energy (page 14). freegs4e's docstring names it `dp_par/dpsi\|_{B,Psi}`, which is that mistake, and geq's `kinetic_closure.py` says the name is historical. **Two typos, confirmed by the first author, and both caught by setting `Δ = 0` and reducing to (136) as `docs/rotation.rst` writes it**: the rotation term prints `−4π( Σ m_s n_s R² ) ω dω/dψ`, but (6.17) through (6.15) gives `−4πR²( Σ m_s n_s R² ) ω ω′`, RoPP's `R⁴`, which freegs4e's docstring also restores; and (6.19)'s bracket prints `½ ω² R²` for `½ m_s ω² R²`, which is not an energy without the mass. Gaussian units: `4π → μ₀` and `c` drops. Only §6, pages 11–14, has been read against MEQ | AlphaGK.pdf |
+
+**Every row below is an unread seed, and the provenance is the reason to be
 careful.** They are transcribed from CEDRES++'s bibliography — the set a
 production free-boundary code thought worth citing as future work, not a
 literature search — which is exactly the provenance this file's opening rule
@@ -285,11 +288,10 @@ harder problem — so the pattern was half seen; the check is what shows it cove
 Goedbloed & Lifschitz as well. Maschke & Perrin and Guazzotto stay in *Toroidal
 rotation* above, where they belong, and are not duplicated here.
 
-**So Fitzgerald et al is the one to read first**, on two independent counts: it
-is the only *implementation* in the list, and it is the only entry that treats
-anisotropy and toroidal rotation together — which, if it holds up, makes this
-section and `FLOW-PLAN.md` one piece of work rather than two, exactly as `TODO`
-suspected from the title. Note what the bibliographic check does and does not
+**Of these, Fitzgerald et al is the one to read beside the draft above**: it
+is the only *implementation* in the list, and the only entry that treats
+anisotropy and toroidal rotation together, so it is a second statement of the
+composition the draft makes. Note what the bibliographic check does and does not
 establish: that the paper exists and says so, not that the physics composes.
 
 | Reference | URL (doi or arxiv) | Short Description | File Name |

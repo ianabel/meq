@@ -430,60 +430,13 @@ Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
 
-  The other generalisation, and independent of the rotation one above: p_par is
-  not equal to p_perp, so the scalar pressure p(psi) in the source is replaced
-  by a pair, and the Grad-Shafranov equation changes shape rather than just
-  gaining terms.
+  Planned: ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md.
 
-  NO REFERENCE IS PINNED FOR THIS YET, and one is needed before anything is
-  written -- unlike the rotation case above, where refs/RotatingGK.pdf eq (136)
-  is the equation and docs/rotation.rst is the derivation. The seeds below come from the
-  CEDRES++ paper's own
-  list of what it plans to add (refs/CEDRES.pdf, section 1 and its
-  bibliography), so they are the set a production free-boundary code considered
-  worth citing, not a literature search:
-
-    Grad 1967                Toroidal containment of a plasma, Phys. Fluids 10, 137
-    Maschke & Perrin 1984    An analytic solution of the stationary MHD equations
-                             for a rotating toroidal plasma, Phys. Lett. A 102, 106
-                             -- WRONG CITATION, and the paper in refs/ is the
-                             right one: Plasma Physics 22 (1980) 579, as
-                             MaschkePerrin.pdf. Its section 4 IS a benchmark for
-                             the rotation work, verified by substitution to
-                             8e-26, and is tests/analytic/MaschkePerrin.hpp;
-                             its section 3, the actual polytrope, is not a
-                             benchmark for it at all. See CLAUDE_FLOW.md, Toroidal flow
-    Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
-    Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
-                             discharges with anisotropic pressure, PPCF 43, 1441
-    Guazzotto, Betti, Manickam & Kaye 2004    Numerical study of tokamak
-                             equilibria with arbitrary flow, Phys. Plasmas 11, 604
-                             -- fetched, and in refs/Refs.md as
-                             GuazzottoFLOW.pdf. Poloidal AND toroidal flow, so a
-                             different and harder problem than (136)
-    Cooper et al 2009        Three-dimensional anisotropic pressure free boundary
-                             equilibria, Comput. Phys. Commun. 180, 1524
-    Pustovitov 2010          Anisotropic pressure effects on plasma equilibrium in
-                             toroidal systems, PPCF 52, 065001
-    Fitzgerald, Appel & Hole 2013   EFIT tokamak equilibria with toroidal flow and
-                             anisotropic pressure using the two-temperature
-                             guiding-centre plasma, Nucl. Fusion 53, 113408
-
-  Verify each doi against Crossref before adding any of these to refs/Refs.md --
-  they are transcribed from another paper's bibliography, which is exactly the
-  provenance that file's opening rule exists for. Only the Guazzotto entry has
-  been checked and fetched; the rest have NOT.
-
-  Two things to establish when a reference is chosen:
-
-  - Whether the anisotropy enters as a modified source with the same Delta*
-    operator on the left, in which case MEQ's discretisation is untouched and
-    only Source changes; or whether it changes the operator, in which case the
-    HDG assembly changes too and this is a much larger job. Fitzgerald et al
-    is the likely place to look, being an implementation.
-  - Whether it composes with rotation. Fitzgerald's title suggests the two are
-    treated together, which would make it the reference for both entries; if so
-    the two should be planned as one piece of work rather than two.
+  The reference is pinned: refs/AlphaGK.pdf eq (6.18), and refs/Refs.md,
+  "Anisotropic pressure", carries what it says and its two typos. It answers
+  both questions this entry asked. The operator changes (the diffusion
+  coefficient 1/R becomes (1 - Delta)/R), and anisotropy composes with rotation
+  in one equation that reduces to (136) at Delta = 0.
 
 
 ================================================================================
