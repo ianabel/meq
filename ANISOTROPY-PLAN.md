@@ -361,24 +361,45 @@ right-hand side. So `g` would reach the solve and not `ψ*`, which would be a
 different function and not merely a lower order. Filed as
 `../../mfem-hdg-dev/doc/AFFINE-FLUX-LAW-RECONSTRUCTION-FROM-MEQ.md`.
 
-#### AN-3a — the anisotropic mirror with meshed packs
+#### AN-3a — the operator beside the mirror's machinery — DONE, with a position `Δ`
 
-On `RotatingMirror`'s machine, through `MirrorMachine.hpp`, with the packs
-meshed, so that there is no load:
+**DONE** → **[M-332](MEASUREMENTS.md#m-332)**. It is done for a position `Δ`,
+and **not for a `Δ` in `Ψ`**, which is blocked upstream.
 
-* **Lift the extension and DtN refusals** where `Δ` vanishes on `Γ_h`, checked
-  on the solve's last `ψ`, since both read `q` there as `∇ψ/R`.
-* **Measure `τ`**: the box default against `τ(1 − Δ)`, which AN-1's
-  constant-`Δ` identity says keeps the stabilisation in proportion.
-* **Answer the jump question** of *Refusals*, at the box's `z` edges, which
-  are faces.
-* The labels from `ψ*` (AN-2b) on both labels.
+**A `Δ` in `Ψ` cannot be posed on the mirror yet.** The mirror's curved `Γ`
+needs the extension, a boundary-face integrator **on the linear flux mass**.
+A `Δ` in `Ψ` has no linear flux mass, and `Reconstruct()` decides whether to
+lift a flux law by whether `M_u` exists, not by whether it holds domain
+integrators. So beside the extension it drops the law, and `ψ*` is wrong. The
+one-line request is
+`../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md`. Until it
+lands the solver refuses a flux law beside `setExtension()`.
 
-**Acceptance**:
+**What is built, for a position `Δ`.**
 
-* **`Δ = 0` reproduces the meshed-pack mirror to round-off.**
-* At `δ₀ = −0.1` and `−0.3`, Newton converges from the vacuum guess, and MEQ
-  converges against itself at its design rate (MR-4c's form).
+* **The extension and exterior refusals are lifted where `Δ` vanishes on the
+  boundary of the mesh**, checked at every vertex and boundary quadrature
+  point before assembly.
+* **`setStabilisationFollowsAnisotropy()`** puts `τ(1 − Δ)` on every face.
+
+**The test.** `AnisotropicMirror` puts a smooth bump
+`Δ = δ₀ b(R) h(z)` on MR-4's machine and plasma, with the packs meshed:
+
+* a zero bump is the meshed mirror bit for bit;
+* `δ₀ = −0.1` and `−0.3` converge from the vacuum in 3 steps, as the
+  isotropic mirror does in 3 or 4;
+* on a `k = 3` ladder over levels 0 to 3 the anisotropic `ψ*` differences
+  match the isotropic control's to 6%;
+* a `Δ` that does not vanish on `Γ_h` is refused.
+
+**`τ` measured.** `τ(1 − Δ)` moves the differences by under 1e-3 of
+themselves at `δ₀ = −0.3`. It stays off by default, as measured and
+immaterial here; a `Δ` nearer the firehose limit is where it would matter.
+
+**What the ladder cannot say.** The meshed-pack ladder itself reads 7.3 then
+2.3 against `ψ*`'s design 4, isotropic as well. Level 0 is pre-asymptotic,
+and something then limits it, most likely the packs' rectangle corners. That
+is not measured, and it is the meshed route's, not the anisotropy's.
 
 #### AN-3b — the subtracted mirror
 

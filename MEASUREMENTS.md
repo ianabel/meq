@@ -22168,3 +22168,70 @@ costs `ψ*` anything.** At `k = 1` it is 4.86e-06 against [M-329](#m-329)'s
 **Suites:** double 89/90, the standing red only (`PlasmaEdgeConvergence`); `naming` green.
 
 **Reproduce.** `... ./AnisotropicConvergence --run_test='labelsReadFromPsiStar*'`.
+
+### M-332
+
+**AN-3a: A POSITION `Δ` ON THE ROTATING MIRROR, BESIDE THE EXTENSION, THE DtN
+AND MESHED PACKS. NEWTON CONVERGES FROM THE VACUUM IN 3 STEPS, AND
+`ψ*` CONVERGES AS THE ISOTROPIC MIRROR'S DOES, TO 6% ON EVERY RUNG. `τ(1 − Δ)`
+IS IMMATERIAL AT `δ₀ = −0.3`. A `Δ` IN `Ψ` CANNOT BE POSED HERE YET.**
+`ANISOTROPY-PLAN.md`, AN-3a.
+
+**Setup.**
+
+* **The problem.** MR-4's machine and plasma: geq's rotating mirror, with
+  both labels at their points and the box support. `Γ = 3.0`, `N = 32`, the
+  mirror's stabilisation.
+* **The packs are meshed and aligned**: `CoilAugmentedNormalisedSource` over
+  `machineCoils()`, on `meshFile()` with `alignConductors`. There is no
+  subtraction, so `Δ` carries no coil load.
+* **`Δ = δ₀ b(R) h(z)`**, with `b = (1 − ((R − 0.225)/0.075)²)³` and
+  `h = (1 − (z/1.2)²)³`, and zero outside them. It sits inside the machine
+  region, clear of the box end and of `Γ`.
+* The start is the meshed vacuum's state and labels. `AnisotropicMirror`,
+  double build.
+
+**Convergence from the vacuum**, level 0, `k = 2`:
+
+| `δ₀` | Newton residuals | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|
+| −0.1 | 7.26e-01, 4.83e-05, 5.80e-10, 3.77e-15 | 5.576115e-03 | 6.403862e-02 |
+| −0.3 | 7.30e-01, 2.17e-04, 1.28e-08, 4.42e-15 | 5.608420e-03 | 6.172730e-02 |
+
+Three steps is the isotropic mirror's 3 or 4. The history is too short for an
+order: the first step falls 1e-4 from the vacuum start and the third is at
+round-off. The one middle step reads `r₂ ≈ 0.25 r₁²` at `δ₀ = −0.1`.
+
+**`Δ = 0` set through the interface is the meshed mirror to the bit**, in `ψ`
+and in the Newton count.
+
+**Against itself and against the isotropic control**: `k = 3`, levels 0 to 3,
+`ψ*` RMS differences between levels at 432 points of geq's machine region.
+
+| | 0–1 | 1–2 | 2–3 | rates |
+|---|---|---|---|---|
+| isotropic | 5.099e-05 | 3.283e-07 | 6.457e-08 | 7.279, 2.346 |
+| `δ₀ = −0.3` | 5.069e-05 | 3.098e-07 | 6.429e-08 | 7.354, 2.269 |
+| `δ₀ = −0.3`, `τ(1 − Δ)` | 5.069e-05 | 3.097e-07 | 6.428e-08 | 7.355, 2.269 |
+
+The anisotropic differences are 0.99, 0.94 and 1.00 of the isotropic ones,
+and that is what is asserted, within 25%. **The ladder's own rates are not
+`ψ*`'s design 4, isotropic as well.** At `k = 2` over levels 0 to 2 they read
+7.03 isotropic and 6.78 anisotropic. Level 0 is pre-asymptotic, and the rung
+after it is limited, most likely by the meshed packs' rectangle corners,
+which RotatingMirror's subtracted filaments do not have. Not measured.
+
+**`τ(1 − Δ)`** moves the differences by under 1e-3 of themselves. It stays
+off.
+
+**Refused.**
+
+* `Δ = −0.1` everywhere, nonzero on `Γ_h`, is refused before assembly beside
+  the extension.
+* A `Δ` in `Ψ` is refused beside the extension. `Reconstruct()` would drop its
+  flux law, since `M_u` exists to carry the extension.
+  `../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md`.
+
+**Suites:** double 90/91, the standing red only (`PlasmaEdgeConvergence`); `AnisotropicMirror` 374 s.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror`.

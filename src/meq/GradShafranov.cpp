@@ -1424,6 +1424,83 @@ namespace
 		return anisotropyValue;
 	}
 
+	void GradShafranovSolver::setStabilisationFollowsAnisotropy( bool follows )
+	{
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setStabilisationFollowsAnisotropy: the forms are already built" );
+		stabilisationFollowsAnisotropy = follows;
+	}
+
+	void GradShafranovSolver::checkAnisotropyVanishesOnTheBoundary() const
+	{
+		mfem::Mesh &mesh = *fluxFes->GetMesh();
+		mfem::IsoparametricTransformation transformation;
+		mfem::Vector x;
+		int const order = 2*fluxFes->GetMaxElementOrder() + 2;
+		for ( int b = 0; b < mesh.GetNBE(); ++b )
+		{
+			mesh.GetBdrElementTransformation( b, &transformation );
+			mfem::Geometry::Type const geometry = mesh.GetBdrElementGeometry( b );
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get( geometry, order );
+			mfem::IntegrationRule const &vertices = *mfem::Geometries.GetVertices( geometry );
+			for ( mfem::IntegrationRule const *points : { &rule, &vertices } )
+			{
+				for ( int i = 0; i < points->GetNPoints(); ++i )
+				{
+					transformation.Transform( points->IntPoint( i ), x );
+					double const delta = anisotropyValue->delta( x( 0 ), x( 1 ), 0.0 );
+					if ( delta != 0.0 )
+					{
+						std::ostringstream message;
+						message << "meq::GradShafranovSolver: Delta = " << delta << " at ( "
+						        << x( 0 ) << ", " << x( 1 ) << " ), on boundary element " << b
+						        << ". Beside setExtension() or setExteriorCoupling() Delta must"
+						        << " vanish on the boundary of the mesh, Gamma_h: both read q"
+						        << " there as grad psi/R, which it is only where Delta = 0.";
+						throw std::invalid_argument( message.str() );
+					}
+				}
+			}
+		}
+	}
+
+	namespace
+	{
+		/// tau( x )( 1 - Delta( x ) ): setStabilisationFollowsAnisotropy().
+		/// State independent, and with no rule to hand a batched route, so the
+		/// faces take the host loop -- which a Device's refusal already
+		/// guarantees.
+		class AnisotropicStabilization : public mfem::HDGStabilization
+		{
+			public:
+				AnisotropicStabilization( mfem::HDGStabilization const &baseIn,
+				                          meq::Anisotropy const &deltaIn )
+					: base( baseIn ), delta( deltaIn )
+				{
+				}
+
+				bool IsConstant() const override // NOLINT(readability-identifier-naming)
+				{
+					return true;
+				}
+
+				mfem::real_t Eval( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
+				                   mfem::real_t uhat,
+				                   mfem::ElementTransformation &tr ) const override
+				{
+					mfem::real_t coordinates[ 3 ];
+					mfem::Vector x( coordinates, tr.GetSpaceDim() );
+					tr.Transform( tr.GetIntPoint(), x );
+					return base.Eval( sDiff, un, u, uhat, tr )
+					       *( 1.0 - delta.delta( x( 0 ), x( 1 ), 0.0 ) );
+				}
+
+			private:
+				mfem::HDGStabilization const &base;
+				meq::Anisotropy const &delta;
+		};
+	}
+
 	double GradShafranovSolver::anisotropyAt( double radius, double z, double psi,
 	                                          double *dDeltaDPsi ) const
 	{
@@ -5941,10 +6018,14 @@ namespace
 		if ( anisotropyValue != nullptr )
 		{
 			char const *const refusal = "meq::GradShafranovSolver: an anisotropy (setAnisotropy) ";
-			if ( transferPath != nullptr )
-				throw std::logic_error( std::string( refusal ) + "beside setExtension() is not built: the extension reads q as grad psi/R on Gamma_h (ANISOTROPY-PLAN.md AN-3)" );
-			if ( exteriorCoupling != nullptr )
-				throw std::logic_error( std::string( refusal ) + "beside setExteriorCoupling() is not built (ANISOTROPY-PLAN.md AN-3)" );
+			if ( transferPath != nullptr && fluxLaw )
+				throw std::logic_error( std::string( refusal ) + "that reads psi beside setExtension() is not built: the extension is a face integrator on the linear flux mass, and beside it DarcyForm::Reconstruct() drops the flux law. ../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md" );
+			if ( exteriorCoupling != nullptr && fluxLaw )
+				throw std::logic_error( std::string( refusal ) + "that reads psi beside setExteriorCoupling() is not built: it is not measured (ANISOTROPY-PLAN.md AN-3)" );
+			// A POSITION Delta beside either, where it vanishes on the boundary:
+			// both read q on Gamma_h as grad psi/R, which it is there.
+			if ( ( transferPath != nullptr || exteriorCoupling != nullptr ) && !fluxLaw )
+				checkAnisotropyVanishesOnTheBoundary();
 			if ( conductorFieldSet != nullptr )
 				throw std::logic_error( std::string( refusal ) + "beside setConductorField() is not built: the vacuum flux adds to q, and under Delta it carries a load (ANISOTROPY-PLAN.md section 2, AN-3)" );
 			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
@@ -6073,8 +6154,17 @@ namespace
 				: static_cast<mfem::HDGStabilization const &>( stabilization );
 		auto *interior = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
 		auto *boundary = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
-		interior->SetStabilization( stab );
-		boundary->SetStabilization( stab );
+		mfem::HDGStabilization const *chosen = &stab;
+		if ( stabilisationFollowsAnisotropy )
+		{
+			if ( anisotropyValue == nullptr
+			     || anisotropyValue->argument() != Anisotropy::Argument::Position )
+				throw std::logic_error( "meq::GradShafranovSolver: setStabilisationFollowsAnisotropy() needs a position anisotropy (setAnisotropy with a meq::PositionAnisotropy)" );
+			anisotropicStabilization = std::make_unique<AnisotropicStabilization>( stab, *anisotropyValue );
+			chosen = anisotropicStabilization.get();
+		}
+		interior->SetStabilization( *chosen );
+		boundary->SetStabilization( *chosen );
 		interiorFaceIntegrator = interior;
 
 		if ( usesNonlinearForms() )

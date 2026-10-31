@@ -703,6 +703,24 @@ endif()
 # acceptance (MR-4b) and RotatingMirrorResolution the study (MR-4c, and MR-4d
 # against geq's untracked answer, which export_rotating.py writes). The study
 # is most of the cost, and the split lets ctest -j run the two side by side;
+# ANISOTROPY-PLAN.md AN-3a: a position Delta on the rotating mirror with the
+# packs meshed. RotatingMirror's machine, MirrorMachine.hpp's meshes, its own
+# stem; halfdisc.py as RotatingMirror runs it.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/AnisotropicMirror.cpp")
+	add_executable(AnisotropicMirror "convergence/AnisotropicMirror.cpp")
+	target_include_directories(AnisotropicMirror PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(AnisotropicMirror PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(AnisotropicMirror PRIVATE
+		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
+		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+	add_test(NAME AnisotropicMirror COMMAND AnisotropicMirror)
+	set_tests_properties(AnisotropicMirror PROPERTIES ENVIRONMENT "MKL_NUM_THREADS=1")
+endif()
+
 # each makes its own mesh files, so they do not race.
 if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/RotatingMirror.cpp")

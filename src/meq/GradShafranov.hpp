@@ -2532,9 +2532,17 @@ namespace meq
 			 *    Eval() writes its own members, so the thread-safety promise
 			 *    buildForms() makes would be false. A DEFAULT Threaded is taken as
 			 *    Serial instead, which changes no answer;
-			 *  - beside setExtension(), setExteriorCoupling() and
-			 *    setConductorField(), each of which reads q as grad_bar( psi )/R
-			 *    or adds a vacuum flux to it. AN-3 lifts them;
+			 *  - beside setExtension() or setExteriorCoupling(), unless Delta
+			 *    VANISHES on the boundary of the mesh -- at every vertex and
+			 *    face quadrature point, checked before assembly for a position
+			 *    Delta. Both read q on Gamma_h as grad_bar( psi )/R, which it is
+			 *    only where Delta = 0. A Delta that reads psi is refused beside
+			 *    setExtension() outright: the extension is a face integrator on
+			 *    the linear flux mass, and beside it DarcyForm::Reconstruct()
+			 *    drops the flux law (../../mfem-hdg-dev/doc/
+			 *    FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md);
+			 *  - beside setConductorField(): the vacuum flux adds to q, and under
+			 *    Delta it carries a load (ANISOTROPY-PLAN.md AN-3b);
 			 *  - under an mfem::Device, since the weight is a host coefficient
 			 *    and the device path assembles R as a field;
 			 *  - beside setPlasmaCurrent(), refused by solve(): the constraint
@@ -2550,6 +2558,18 @@ namespace meq
 			 *         already set.
 			 */
 			void setAnisotropy( Anisotropy const &anisotropyIn );
+
+			/**
+			 * THE HDG STABILISATION SCALED BY 1 - Delta, beside a position
+			 * anisotropy: tau( x )( 1 - Delta( x ) ) on every face point, with tau
+			 * whatever setTauScaling() chose. A constant Delta is EXACTLY the
+			 * isotropic problem with tau/( 1 - Delta ) (MEASUREMENTS.md M-328), so
+			 * this is what keeps the stabilisation in proportion to the diffusion
+			 * it stabilises. Off by default: ANISOTROPY-PLAN.md AN-3a measures it.
+			 * Host-only, as the anisotropy is. Refused at the first solve without
+			 * a position anisotropy.
+			 */
+			void setStabilisationFollowsAnisotropy( bool follows );
 
 			/// The anisotropy setAnisotropy() gave, or null.
 			Anisotropy const *anisotropy() const;
@@ -6337,6 +6357,16 @@ namespace meq
 			/// when @a psi is null, which is buildForms()'s call for a Delta that
 			/// does not read it; solve() makes the other, on the solved psi.
 			void checkAnisotropyIsElliptic( mfem::GridFunction const *psi ) const;
+
+			/// buildForms()'s condition for an anisotropy beside setExtension() or
+			/// setExteriorCoupling(): Delta exactly zero at every vertex and every
+			/// point of an order-2k + 2 rule on every boundary element of the
+			/// mesh, for a position Delta. Throws naming the point.
+			void checkAnisotropyVanishesOnTheBoundary() const;
+
+			/// setStabilisationFollowsAnisotropy(), and the wrapper it installs.
+			bool stabilisationFollowsAnisotropy = false;
+			std::unique_ptr<mfem::HDGStabilization> anisotropicStabilization;
 
 			/// R/( 1 - Delta( psi ) ) and its psi-derivative, the flux law of a
 			/// Delta that reads psi. Owned here because the integrator holds it by
