@@ -22354,3 +22354,69 @@ second route sees it.
 **Suites:** double 90/91, the standing red only (`PlasmaEdgeConvergence`); `naming` green; `AnisotropicMirror` 730 s. The law's points all hit the `ψ_c` table: 291,360 hits and no misses over the two vacuum starts, counted once and not kept.
 
 **Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror --run_test='*Subtracted*'`.
+
+### M-335
+
+**AN-4: geq'S ANISOTROPIC ROTATING MIRROR, AT THE LATEST geq. `δ₀ = 0`
+THROUGH THE HOOK IS THE ISOTROPIC SOLVE BIT FOR BIT, AND THE LATEST geq IS
+M-261'S ANSWER TO 9e-13. AT `δ₀ = −0.1` AND `−0.3` geq SELF-CONVERGES AT
+ORDER 2.1 TO 2.3, AND ITS TWO REARRANGEMENTS CONVERGE ON EACH OTHER AT EXACTLY
+4 A DOUBLING, TO 3e-8 AND 7e-8 AT 513².** `ANISOTROPY-PLAN.md`, AN-4.
+
+**Setup.** `tools/geq-benchmark/export_anisotropic.py`: M-261's problem and
+protocol, with geq's `PrescribedAnisotropy` handing freegs4e
+`Δ = δ₀ (4ψ_n(1 − ψ_n))³ (1 − (z/1.2)²)³`, `dp_par_dpsin = fast_fraction = 0`.
+geq `c86ced9` (`main`, the latest) and freegs4e `4555a49` (the tip of
+`feature/rotation_equilibrium`, eight commits past M-261's `9a1ee0c`, from a
+detached worktree), both clean. Picard `atol = 0`, `rtol = 2e-9`. Differences
+are max `|Δψ|` over the 65 × 65 common nodes, corners included.
+
+**`δ₀ = 0` through the hook**, against the hook absent: exactly 0 in `ψ` and
+both labels, in either form, at 129² and 257². **Against M-261's own
+`psi_direct_<n>.dat`**, taken at geq `73b9a72`: 6.0e-14, 2.1e-13 and 8.8e-13
+at 129², 257² and 513². freegs4e's eight commits since move nothing here.
+
+**geq's self-convergence**, against 513²:
+
+| `δ₀` | form | 129 | 257 | order |
+|---|---|---|---|---|
+| −0.1 | historical | 3.058e-06 | 5.294e-07 | 2.26 |
+| −0.1 | divergence | 2.704e-06 | 4.490e-07 | 2.33 |
+| −0.3 | historical | 6.557e-06 | 1.215e-06 | 2.15 |
+| −0.3 | divergence | 6.425e-06 | 1.237e-06 | 2.10 |
+
+The order is from successive differences, 129–257 against 257–513.
+
+**Historical minus divergence:**
+
+| `δ₀` | 129² | 257² | 513² |
+|---|---|---|---|
+| −0.1 | 5.380e-07 | 1.348e-07 | 3.371e-08 |
+| −0.3 | 1.062e-06 | 2.684e-07 | 6.727e-08 |
+
+Ratios 3.96 to 4.00, so second order, and at 513² 13 to 18 times under geq's
+own 257-against-513 difference: the lagged `∇Δ`'s discretisation is not what
+limits geq.
+
+**What `Δ` moves**, at 513² against the isotropic solve: max 2.266e-03 and
+6.324e-03, nearly all of it `ψ_bnd` (−2.236e-03 and −6.250e-03); `ψ_ax` moves
++3.15e-05 and +8.62e-05. The plasma's own flux is 8.72e-04. The two forms agree
+on all of it to the digits shown.
+
+**Picard steps and wall:**
+
+| | 129² | 257² | 513² |
+|---|---|---|---|
+| isotropic | 9, 5.7 s | 9, 42.5 s | 12, 473 s |
+| −0.1 historical | 10, 6.4 s | 10, 45.6 s | 20, 696 s |
+| −0.1 divergence | 8, 4.6 s | 8, 30.5 s | 22, 716 s |
+| −0.3 historical | 13, 8.2 s | 13, 51.2 s | 40, 1594 s |
+| −0.3 divergence | 15, 7.9 s | 15, 66.6 s | 33, 1355 s |
+
+**The step count triples at 513² under `Δ`**, where the isotropic one goes from
+9 to 12. It is geq's, and a lagged `∇Δ` whose gain grows with resolution would
+do it. Not measured further.
+
+**Reproduce.** `PYTHONPATH=<freegs4e at its tip>:/home/ian/projects/geq/src
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_anisotropic.py`,
+about 1.5 hours.

@@ -40,9 +40,9 @@ MEQ's residual needs `phi_0` but never its derivative.
 **Not compared**: `g g'`, which is identically zero on every geq path, so this
 checks the pressure term alone; anything about the discretisation, the
 boundary, or the iteration; and geq's **anisotropic and kinetic closures**
-(`kinetic_closure.py`, `fast_species.py`), which MEQ has no counterpart for.
-This is pinned to the isotropic `ProfilesCentrifugalMirror` path and must stay
-there.
+(`kinetic_closure.py`, `fast_species.py`). This is pinned to the isotropic
+`ProfilesCentrifugalMirror` path and must stay there. A prescribed anisotropy
+is compared as a solve, not as a source: `export_anisotropic.py`, below.
 
 ## The gauge is the conversion, and it is not a detail
 
@@ -94,6 +94,7 @@ passing comparison.
 | `reference/three/` | + carbon at `Z = 6`, at **M = 0.76**. MEQ takes `Closure::RootFind`, and the charge weighting stops being a plain sum |
 | `export_vacuum.py`, `reference/vacuum/` | the **vacuum** machine, no plasma, for MR-3's solve. See *The vacuum mirror* below |
 | `export_rotating.py`, `reference/rotating/` | the **solved** free-boundary rotating mirror, for MR-4, and its midplane-gauge tables. See *The rotating mirror* below |
+| `export_anisotropic.py`, `reference/anisotropic/` | the same mirror with a **prescribed pressure anisotropy**, for `ANISOTROPY-PLAN.md`'s AN-4. See *The anisotropic mirror* below |
 
 **THE TWO MACH NUMBERS ARE FORCED, NOT CHOSEN**, with
 `M² = m_i ω² R( z=0 )²/T_e` on the `ψ_n = 0.5` surface and `meta.txt` recording
@@ -141,10 +142,16 @@ state identically is solved harder.
 Needs `geq` and `freegs4e` beside the project directory and the benchmark venv.
 **The point sets are geq's answer and are not tracked**, so
 `GeqSourceComparison` needs this run before it can read them; the tables it is
-given are tracked. Every reference in
-this directory was generated at geq `73b9a72` and freegs4e `9a1ee0c`, both
-clean; `export_rotating.py` records that in its `meta.txt`, and a regeneration
-at any other commit is a different reference.
+given are tracked.
+
+**MEQ IS COMPARED AGAINST THE LATEST geq**, and against the freegs4e it runs on,
+the tip of `feature/rotation_equilibrium`. `git fetch --dry-run` in each says
+whether the remote has moved. Do not move the sibling freegs4e checkout to get
+there, since FB-6's benchmark imports it too: put a detached worktree at the
+tip first on `PYTHONPATH`, and remove it afterwards. Every export records the
+geq and freegs4e it imported in its `meta.txt`, and the race in its provenance,
+so a reference says which geq it answers. `reference/two/` to
+`reference/rotating/` were generated at geq `73b9a72` and freegs4e `9a1ee0c`.
 
 ```sh
 cd /home/ian/projects/meq/source
@@ -351,6 +358,53 @@ About eleven minutes, nine and a half of them the 513² direct solve (5 s at
 Picard runs with `atol = 0` and `rtol = 2e-09`, because geq's default
 `atol = 1e-06` is what actually stops it. `--cache DIR` keeps each solve and
 reuses it.
+
+## The anisotropic mirror: `export_anisotropic.py` and `reference/anisotropic/`
+
+`ANISOTROPY-PLAN.md`'s AN-4: `export_rotating.py`'s problem, every hold and
+patch of it, with a prescribed anisotropy handed to freegs4e's
+`ProfilesCentrifugalMirror` through geq's `PrescribedAnisotropy`:
+
+```
+Δ( ψ_n, z ) = δ₀ ( 4ψ_n( 1 − ψ_n ) )³ ( 1 − ( z/1.2 )² )³,   δ₀ = −0.1, −0.3
+```
+
+zero outside `0 < ψ_n < 1` and `|z| < 1.2`. `dp_par_dpsin` and
+`fast_fraction` are both zero, so the operator is all that changes. The shape is
+symmetric in `ψ_n`, so it is MEQ's `Δ( Ψ )` too, and it vanishes at both labels
+and before the box end, which MEQ's support needs. `AnisotropicMirror.cpp`'s
+`MirrorProfile` is the same function.
+
+**BOTH OF freegs4e'S REARRANGEMENTS ARE SOLVED**, each lagged one Picard step:
+the historical `( Jtor − ∇ψ·∇Δ/μ₀R )/( 1 − Δ )` and the divergence form
+`Jtor − ∇·( (Δ/R)∇ψ )/μ₀`, both with `np.gradient`. They agree only at
+convergence and as the grid resolves `∇Δ`, so their difference is a control on
+geq's own discretisation of it.
+
+**AGAINST THE LATEST geq**, as every comparison here is (*Regenerating the
+reference*). `meta.txt` records the commits imported. `geq.fast_species`
+imports `geq.utils`, which needs `xarray` and `pint`, which this venv does not
+have. The script stands a module in for `geq.utils` whose `units` refuses any
+use, since `PrescribedAnisotropy` uses none.
+
+**THE PROBLEM IS `reference/rotating/`'S**, so only `meta.txt` is tracked here:
+`Δ`, `δ₀`, the forms and the settings. geq's answer, in `runs/`, is
+`psi_<form>_<δ₀>_<n>.dat` on the 65 × 65 common nodes, in `export_rotating.py`'s
+layout, and `solution.txt`. Three checks are printed and recorded:
+
+* **`δ₀ = 0` through the hook is M-261's solve**, bit for bit against the hook
+  absent in either form, and against M-261's own `psi_direct_<n>.dat`;
+* geq's self-convergence at each `δ₀` and form;
+* the two forms' difference at each resolution.
+
+```sh
+cd /home/ian/projects/meq/source
+PYTHONPATH=<freegs4e at its tip>:/home/ian/projects/geq/src \
+tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_anisotropic.py
+```
+
+About an hour, most of it the four 513² solves, and `--cache DIR` reuses
+solves. → **[M-335](../../MEASUREMENTS.md#m-335)**.
 
 ## The shape cases: `shapes.py` and `cases/`
 

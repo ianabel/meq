@@ -1,0 +1,18 @@
+case anisotropic
+geq_commit c86ced9f9aa7902bc44048c4b5d3d79a665abad7 clean
+freegs4e_commit 4555a49a1df75fa89118777862ed1b3acbf5a2b3 clean
+# The problem is reference/rotating/'s -- meta.txt, the tables and
+# filaments.dat -- with the anisotropy below. Delta is in geq's
+# psi_n = 1 - Psi; g is symmetric, so it reads the same in MEQ's Psi.
+profiles reference/rotating
+delta delta0*(4*psi_n*(1-psi_n))^3*(1-(z/z_cut)^2)^3, zero outside 0<psi_n<1 and |z|<z_cut
+z_cut 1.19999999999999996e+00
+delta0 -1.00000000000000006e-01 -2.99999999999999989e-01
+forms historical divergence
+dp_par_dpsin 0.0
+fast_fraction 0.0
+picard atol 0 rtol 2.000e-09 maxits 400
+boundary freeBoundary ( direct )
+phi0 tightened_every_picard_step
+N_s held_as_prescribed_flux_functions
+resolutions 129 257 513
