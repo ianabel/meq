@@ -1431,15 +1431,21 @@ namespace
 		stabilisationFollowsAnisotropy = follows;
 	}
 
-	void GradShafranovSolver::checkAnisotropyVanishesOnTheBoundary() const
+	void GradShafranovSolver::checkAnisotropyVanishesOnTheBoundary( mfem::GridFunction const *psi ) const
 	{
+		// SERIAL, as checkAnisotropyIsElliptic() is and for its reason, through
+		// caller-allocated transformations: Mesh's own are shared scratch. psi is
+		// read from the boundary element's one neighbour, at the face point's
+		// image in it.
 		mfem::Mesh &mesh = *fluxFes->GetMesh();
-		mfem::IsoparametricTransformation transformation;
+		mfem::FaceElementTransformations face;
+		mfem::IsoparametricTransformation first;
+		mfem::IsoparametricTransformation second;
 		mfem::Vector x;
 		int const order = 2*fluxFes->GetMaxElementOrder() + 2;
 		for ( int b = 0; b < mesh.GetNBE(); ++b )
 		{
-			mesh.GetBdrElementTransformation( b, &transformation );
+			mesh.GetBdrFaceTransformations( b, face, first, second );
 			mfem::Geometry::Type const geometry = mesh.GetBdrElementGeometry( b );
 			mfem::IntegrationRule const &rule = mfem::IntRules.Get( geometry, order );
 			mfem::IntegrationRule const &vertices = *mfem::Geometries.GetVertices( geometry );
@@ -1447,16 +1453,24 @@ namespace
 			{
 				for ( int i = 0; i < points->GetNPoints(); ++i )
 				{
-					transformation.Transform( points->IntPoint( i ), x );
-					double const delta = anisotropyValue->delta( x( 0 ), x( 1 ), 0.0 );
+					mfem::IntegrationPoint const &ip = points->IntPoint( i );
+					face.SetAllIntPoints( &ip );
+					face.Transform( ip, x );
+					double const psiValue = psi != nullptr
+					                        ? psi->GetValue( face.Elem1No, face.GetElement1IntPoint() )
+					                        : 0.0;
+					double const delta = anisotropyAt( x( 0 ), x( 1 ), psiValue, nullptr );
 					if ( delta != 0.0 )
 					{
 						std::ostringstream message;
 						message << "meq::GradShafranovSolver: Delta = " << delta << " at ( "
 						        << x( 0 ) << ", " << x( 1 ) << " ), on boundary element " << b
+						        << ( psi != nullptr ? ", on the solved psi" : "" )
 						        << ". Beside setExtension() or setExteriorCoupling() Delta must"
 						        << " vanish on the boundary of the mesh, Gamma_h: both read q"
 						        << " there as grad psi/R, which it is only where Delta = 0.";
+						if ( psi != nullptr )
+							throw std::runtime_error( message.str() );
 						throw std::invalid_argument( message.str() );
 					}
 				}
@@ -2720,7 +2734,6 @@ namespace
 		}
 
 		assemblyModeChoice = choice;
-		assemblyModeExplicit = true;
 		built = false;
 		prepared = false;
 	}
@@ -5997,13 +6010,15 @@ namespace
 		// still converges, to a different function, with the L2 error against the
 		// exact Solov'ev solution flat at 1.9e-2 through four refinements.
 		//
-		// A Delta THAT READS psi takes no flux mass form at all -- not an empty
-		// one, since DarcyForm::Reconstruct() lifts M_u's integrators whenever
-		// M_u exists and would silently drop the flux law beside it. So the form
-		// is asked for only off that branch.
+		// A Delta THAT READS psi puts no DOMAIN integrator on the flux mass
+		// form: DarcyForm::Reconstruct() refuses a flux law beside one. The form
+		// is asked for only where something goes on it -- the linear mass off
+		// that branch, the extension's face integrator on either -- so a flux
+		// law away from the extension builds exactly what it always did.
 		bool const fluxLaw = anisotropyValue != nullptr
 		                     && anisotropyValue->argument() != Anisotropy::Argument::Position;
-		mfem::BilinearForm *fluxMass = fluxLaw ? nullptr : darcy->GetFluxMassForm();
+		mfem::BilinearForm *fluxMass = fluxLaw && transferPath == nullptr
+		                               ? nullptr : darcy->GetFluxMassForm();
 		//
 		// R AS A FIELD AND NOT AS A FUNCTION OF THE POINT, on every arm, so a
 		// host run and a device run assemble the same thing: upstream's
@@ -6018,14 +6033,11 @@ namespace
 		if ( anisotropyValue != nullptr )
 		{
 			char const *const refusal = "meq::GradShafranovSolver: an anisotropy (setAnisotropy) ";
-			if ( transferPath != nullptr && fluxLaw )
-				throw std::logic_error( std::string( refusal ) + "that reads psi beside setExtension() is not built: the extension is a face integrator on the linear flux mass, and beside it DarcyForm::Reconstruct() drops the flux law. ../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md" );
-			if ( exteriorCoupling != nullptr && fluxLaw )
-				throw std::logic_error( std::string( refusal ) + "that reads psi beside setExteriorCoupling() is not built: it is not measured (ANISOTROPY-PLAN.md AN-3)" );
-			// A POSITION Delta beside either, where it vanishes on the boundary:
-			// both read q on Gamma_h as grad psi/R, which it is there.
+			// Beside either, Delta must vanish on the boundary: both read q on
+			// Gamma_h as grad psi/R, which it is only there. A position Delta is
+			// checked here; one that reads psi on the solved psi, by solve().
 			if ( ( transferPath != nullptr || exteriorCoupling != nullptr ) && !fluxLaw )
-				checkAnisotropyVanishesOnTheBoundary();
+				checkAnisotropyVanishesOnTheBoundary( nullptr );
 			if ( conductorFieldSet != nullptr )
 				throw std::logic_error( std::string( refusal ) + "beside setConductorField() is not built: the vacuum flux adds to q, and under Delta it carries a load (ANISOTROPY-PLAN.md section 2, AN-3)" );
 			if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
@@ -6058,22 +6070,6 @@ namespace
 					throw std::logic_error( std::string( refusal ) + "that reads the physical psi beside setSource( NormalisedSource &, double ) is not built: it is not measured. A Delta in the labels is Argument::NormalisedFlux (ANISOTROPY-PLAN.md AN-2b)" );
 				if ( normalised && normalisedSource == nullptr )
 					throw std::logic_error( std::string( refusal ) + "that reads Psi needs setSource( NormalisedSource &, double ): without it there are no labels to normalise by" );
-				// THREADED IS NOT SAFE BESIDE A FLUX LAW, and not because of the
-				// law: DarcyForm::Reconstruct() lifts it through ONE
-				// mfem::FrozenDualFluxCoefficient shared by its threaded loop,
-				// and that coefficient's Eval() writes its own members and reads
-				// GridFunction::GetValue( T, ip ), which writes the space's
-				// DoFTrans. Under Serial upstream threads none of these loops, so
-				// the promise below is vacuous there. An explicit Threaded is
-				// refused; a default one becomes Serial, which is a performance
-				// key and changes no answer.
-				if ( assemblyModeChoice == AssemblyMode::Threaded )
-				{
-					if ( assemblyModeExplicit )
-						throw std::logic_error( std::string( refusal ) + "that reads psi under AssemblyMode::Threaded, chosen by setAssemblyMode(), is not built: the threaded reconstruction shares one mfem::FrozenDualFluxCoefficient, which is not reentrant" );
-					assemblyModeChoice = AssemblyMode::Serial;
-				}
-
 				// f( x, psi ) = R/( 1 - Delta ), and its psi-derivative
 				// R Delta'/( 1 - Delta )^2 -- zero under Picard, which drops the
 				// operator's dependence on psi from the Jacobian exactly as it
@@ -6444,6 +6440,25 @@ namespace
 		 *                                Vector the path hands it
 		 *
 		 * A new level set, or a BoundaryShape that caches, has to keep that.
+		 *
+		 * AND BESIDE AN ANISOTROPY THAT READS psi, THE FLUX LAW. The element
+		 * loops and the reconstruction reach:
+		 *
+		 *   MixedConductionNLFIntegrator the law's integrator, on the block
+		 *                                non-linear form; its scratch is under
+		 *                                `#ifndef MFEM_THREAD_SAFE`
+		 *   the frozen law, its offset   FrozenDualFluxCoefficient and
+		 *                                FrozenDualFluxOffsetCoefficient, built
+		 *                                by Reconstruct(); reentrant upstream,
+		 *                                and theirs to keep so
+		 *   anisotropicFlux's two        MEQ's, and the one part of this the
+		 *   callbacks                    promise is about: anisotropyAt() reads
+		 *                                the labels and calls meq::Anisotropy,
+		 *                                whose methods must be reentrant (its
+		 *                                doxygen), and writes nothing
+		 *
+		 * Threaded reproduces Serial bit for bit beside the law, psi* included
+		 * (MEASUREMENTS.md M-333).
 		 *
 		 * WHAT THIS COMMENT USED TO SAY, AND WHY THE SHAPE OF THE ERROR IS
 		 * WORTH MORE THAN THE FACT. It described that class as carrying plain
@@ -17611,7 +17626,11 @@ namespace
 		}
 
 		if ( fluxLaw )
+		{
 			checkAnisotropyIsElliptic( &potential() );
+			if ( transferPath != nullptr || exteriorCoupling != nullptr )
+				checkAnisotropyVanishesOnTheBoundary( &potential() );
+		}
 	}
 
 	void GradShafranovSolver::solveBody()

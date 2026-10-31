@@ -293,19 +293,20 @@ derivative is zero, as the source's reaction term is.
 * A `ψ`-independent coefficient source is refused; pose it as a `meq::Source`
   with `dFdPsi = 0`.
 * A normalised source is refused until AN-2b.
-* **An explicit `AssemblyMode::Threaded` is refused, and a default one becomes
-  Serial.** `Reconstruct()`'s threaded loop shares one
-  `mfem::FrozenDualFluxCoefficient`, whose `Eval()` writes its own members, so
-  MEQ's `SetIntegratorsThreadSafe()` promise would be false. Filed upstream as
-  `../../mfem-hdg-dev/doc/FROZEN-FLUX-LAW-THREADING-FROM-MEQ.md`.
 * **The firehose limit is checked on the solve's last `ψ`.** A solve that ends
   past it is refused. A solve that fails with its last iterate past it names
   the limit rather than the iteration.
 
-**No finite-difference Jacobian check.** The condensed gradient aborts under
-`FullNL`, and NPC's is solve-only, so the instrument is the observed Newton
-order. Zeroing the derivative is caught: 10 steps in place of 4, best order
-1.22.
+**Two Jacobian instruments.** The observed Newton order on the NPC path the
+solve drives: zeroing the law's derivative costs 10 steps in place of 4, best
+order 1.22. And the condensed operator's Jacobian against a central
+difference of its residual, as `NewtonConvergence` checks Example 5's
+(→ **[M-333](MEASUREMENTS.md#m-333)**).
+
+**Threaded assembly is the serial solve, bit for bit**, in `ψ`, `q` and `ψ*`
+and the Newton count. `Reconstruct()`'s frozen law is reentrant upstream, so
+MEQ's `SetIntegratorsThreadSafe()` promise covers only its own callbacks
+(→ **[M-333](MEASUREMENTS.md#m-333)**).
 
 #### AN-2b — `Δ( Ψ )`, through the labels — DONE
 
@@ -352,45 +353,41 @@ Newton is linear, order 1.000, 16 steps in place of 4.
 
 ### AN-3 — the mirror, through MEQ
 
-**Split in two, because coil subtraction under `Δ` needs upstream.** The
-remainder's flux row carries `−(Δ/(1 − Δ))∇ψ_c` (*What changes* §2, verified
-at AN-0). That is an **affine** flux law, `f u + g`, and `g` depends on `ψ`.
-MFEM's flux law carries it in the solve. `DarcyForm::Reconstruct()` freezes
-the law at zero flux, though, and its local problem has a zero flux
-right-hand side. So `g` would reach the solve and not `ψ*`, which would be a
-different function and not merely a lower order. Filed as
-`../../mfem-hdg-dev/doc/AFFINE-FLUX-LAW-RECONSTRUCTION-FROM-MEQ.md`.
+**Split in two: the meshed machine, then the subtracted one.** Under
+subtraction the remainder's flux row carries `−(Δ/(1 − Δ))∇ψ_c` (*What
+changes* §2, verified at AN-0). That is an **affine** flux law, `f u + g`,
+with `g` depending on `ψ`. `DarcyForm::Reconstruct()` carries a law's value
+at zero flux, `g` frozen at `ψ_h`, as the local flux right-hand side, so `ψ*`
+sees it.
 
-#### AN-3a — the operator beside the mirror's machinery — DONE, with a position `Δ`
+#### AN-3a — the operator beside the mirror's machinery — DONE
 
-**DONE** → **[M-332](MEASUREMENTS.md#m-332)**. It is done for a position `Δ`,
-and **not for a `Δ` in `Ψ`**, which is blocked upstream.
+**DONE** → **[M-332](MEASUREMENTS.md#m-332)** for a position `Δ`,
+**[M-333](MEASUREMENTS.md#m-333)** for a `Δ` in `Ψ`.
 
-**A `Δ` in `Ψ` cannot be posed on the mirror yet.** The mirror's curved `Γ`
-needs the extension, a boundary-face integrator **on the linear flux mass**.
-A `Δ` in `Ψ` has no linear flux mass, and `Reconstruct()` decides whether to
-lift a flux law by whether `M_u` exists, not by whether it holds domain
-integrators. So beside the extension it drops the law, and `ψ*` is wrong. The
-one-line request is
-`../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md`. Until it
-lands the solver refuses a flux law beside `setExtension()`.
-
-**What is built, for a position `Δ`.**
+**What is built.**
 
 * **The extension and exterior refusals are lifted where `Δ` vanishes on the
   boundary of the mesh**, checked at every vertex and boundary quadrature
-  point before assembly.
+  point: before assembly for a position `Δ`, on the solved `ψ` for one that
+  reads it.
+* **Beside the extension a flux law takes a flux mass form holding the
+  extension's face integrator alone.** `Reconstruct()` decides on `M_u`'s
+  domain integrators, so it lifts the law, and refuses a law beside a domain
+  `M_u`, which MEQ never builds.
 * **`setStabilisationFollowsAnisotropy()`** puts `τ(1 − Δ)` on every face.
 
-**The test.** `AnisotropicMirror` puts a smooth bump
-`Δ = δ₀ b(R) h(z)` on MR-4's machine and plasma, with the packs meshed:
+**The test.** `AnisotropicMirror` puts two `Δ`s on MR-4's machine and
+plasma, with the packs meshed: a smooth bump `Δ = δ₀ b(R) h(z)`, and AN-4's
+shape in `Ψ`, `Δ = δ₀ (4Ψ(1 − Ψ))³ h(z)`.
 
 * a zero bump is the meshed mirror bit for bit;
-* `δ₀ = −0.1` and `−0.3` converge from the vacuum in 3 steps, as the
-  isotropic mirror does in 3 or 4;
+* `δ₀ = −0.1` and `−0.3` converge from the vacuum in 3 steps, either `Δ`, as
+  the isotropic mirror does in 3 or 4;
 * on a `k = 3` ladder over levels 0 to 3 the anisotropic `ψ*` differences
-  match the isotropic control's to 6%;
-* a `Δ` that does not vanish on `Γ_h` is refused.
+  match the isotropic control's, within 6% for the bump and 10% for `Δ(Ψ)`;
+* a `Δ` that does not vanish on `Γ_h` is refused: before assembly for the
+  bump, on the solved `ψ` for one in `Ψ`.
 
 **`τ` measured.** `τ(1 − Δ)` moves the differences by under 1e-3 of
 themselves at `δ₀ = −0.3`. It stays off by default, as measured and
@@ -403,8 +400,12 @@ is not measured, and it is the meshed route's, not the anisotropy's.
 
 #### AN-3b — the subtracted mirror
 
-**Waits on the request above.** It needs an affine flux law, `g` included in
-the reconstruction, and the refusal beside `setConductorField()` lifted.
+**Next.** Beside `setConductorField()` every `Δ`, a position one included,
+goes on a law of MEQ's own, `R/(1 − Δ) u_p + g` with
+`g = −(Δ/(1 − Δ))∇̄ψ_c` in `DarcyForm`'s `u = −q`, and `Δ` read at
+`ψ_p + ψ_c`. A position `Δ` cannot stay on the linear mass, whose flux
+right-hand side `Reconstruct()` does not carry. The sign is AN-0's load in
+that convention, and the test decides it.
 
 **Acceptance**: the subtracted machine against AN-3a's meshed one, as
 COIL-SUBTRACTION-PLAN's instrument does.

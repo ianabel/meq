@@ -2512,8 +2512,8 @@ namespace meq
 			 * mfem::MixedConductionNLFIntegrator with weight R/( 1 - Delta( psi ) ),
 			 * whose Jacobian carries R Delta'/( 1 - Delta )^2 in the flux-potential
 			 * block -- the whole of it, and not the linear R plus a correction,
-			 * because DarcyForm::Reconstruct() lifts the linear flux mass alone
-			 * and would drop a law beside it. Under FieldLinearisation::Picard
+			 * because DarcyForm::Reconstruct() refuses a law beside a flux mass
+			 * with domain integrators. Under FieldLinearisation::Picard
 			 * that block is zero, as the source's reaction term is.
 			 *
 			 * REFUSED, by buildForms(), at the first solve:
@@ -2525,22 +2525,16 @@ namespace meq
 			 *    (setSource( mfem::Coefficient & )), which takes the linear path;
 			 *    pose it as a meq::Source with dFdPsi = 0. Argument::Flux beside
 			 *    setSource( NormalisedSource &, double ), which is not measured;
-			 *    Argument::NormalisedFlux WITHOUT it, having no labels to read; and
-			 *    under an AssemblyMode::Threaded that
-			 *    setAssemblyMode() chose. The threaded reconstruction lifts the
-			 *    law through one shared mfem::FrozenDualFluxCoefficient, whose
-			 *    Eval() writes its own members, so the thread-safety promise
-			 *    buildForms() makes would be false. A DEFAULT Threaded is taken as
-			 *    Serial instead, which changes no answer;
+			 *    Argument::NormalisedFlux WITHOUT it, having no labels to read;
 			 *  - beside setExtension() or setExteriorCoupling(), unless Delta
 			 *    VANISHES on the boundary of the mesh -- at every vertex and
-			 *    face quadrature point, checked before assembly for a position
-			 *    Delta. Both read q on Gamma_h as grad_bar( psi )/R, which it is
-			 *    only where Delta = 0. A Delta that reads psi is refused beside
-			 *    setExtension() outright: the extension is a face integrator on
-			 *    the linear flux mass, and beside it DarcyForm::Reconstruct()
-			 *    drops the flux law (../../mfem-hdg-dev/doc/
-			 *    FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md);
+			 *    face quadrature point. Both read q on Gamma_h as
+			 *    grad_bar( psi )/R, which it is only where Delta = 0. A position
+			 *    Delta is checked before assembly; a Delta that reads psi is
+			 *    checked on the SOLVED psi, by solve(), as the firehose limit
+			 *    is. Beside the extension a flux law takes a flux mass form
+			 *    holding the extension's face integrator alone, which
+			 *    DarcyForm::Reconstruct() treats as no form at all;
 			 *  - beside setConductorField(): the vacuum flux adds to q, and under
 			 *    Delta it carries a load (ANISOTROPY-PLAN.md AN-3b);
 			 *  - under an mfem::Device, since the weight is a host coefficient
@@ -6358,11 +6352,14 @@ namespace meq
 			/// does not read it; solve() makes the other, on the solved psi.
 			void checkAnisotropyIsElliptic( mfem::GridFunction const *psi ) const;
 
-			/// buildForms()'s condition for an anisotropy beside setExtension() or
+			/// The condition for an anisotropy beside setExtension() or
 			/// setExteriorCoupling(): Delta exactly zero at every vertex and every
 			/// point of an order-2k + 2 rule on every boundary element of the
-			/// mesh, for a position Delta. Throws naming the point.
-			void checkAnisotropyVanishesOnTheBoundary() const;
+			/// mesh. Delta is read at @a psi, or at psi = 0 when it is null:
+			/// buildForms()'s call for a position Delta, which throws
+			/// std::invalid_argument; solve() makes the other, on the solved psi,
+			/// and throws std::runtime_error. Either names the point.
+			void checkAnisotropyVanishesOnTheBoundary( mfem::GridFunction const *psi ) const;
 
 			/// setStabilisationFollowsAnisotropy(), and the wrapper it installs.
 			bool stabilisationFollowsAnisotropy = false;
@@ -6870,10 +6867,6 @@ namespace meq
 			mutable int solveDepth = 0;
 
 			AssemblyMode assemblyModeChoice;
-			/// Whether setAssemblyMode() chose it, rather than the default. A flux
-			/// law (setAnisotropy) refuses an explicit Threaded and takes Serial in
-			/// place of a default one; see buildForms().
-			bool assemblyModeExplicit = false;
 			TraceSolver traceSolverChoice;
 			int andersonDepth;
 			double picardDamping;

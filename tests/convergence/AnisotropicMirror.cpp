@@ -26,23 +26,25 @@
  * MR-4's machine and plasma -- geq's rotating mirror, its two labels at their
  * points, the box support -- with the packs MESHED rather than subtracted, so
  * the anisotropic operator carries no coil load (ANISOTROPY-PLAN.md, What
- * changes section 2), and a POSITION Delta,
+ * changes section 2), and two Deltas, each zero well inside Gamma at rho = 3
+ * and smooth to second order where it stops, so it costs no order there.
+ *
+ * A POSITION Delta, on the linear flux mass beside the extension's face
+ * integrator:
  *
  *     Delta( R, z ) = delta0 b( R ) h( z ),
  *     b = ( 1 - ( ( R - 0.225 )/0.075 )^2 )^3,  h = ( 1 - ( z/1.2 )^2 )^3,
  *
- * zero outside |R - 0.225| < 0.075, |z| < 1.2: inside the machine region, clear
- * of the box end at 1.5 and far from Gamma at rho = 3. Smooth to second order
- * at its edges, so it costs no order where it stops.
+ * zero outside |R - 0.225| < 0.075, |z| < 1.2: inside the machine region and
+ * clear of the box end at 1.5.
  *
- * WHY A POSITION Delta AND NOT ONE IN Psi. A Delta in Psi is a non-linear flux
- * law with no linear flux mass, and the mirror's curved Gamma needs the
- * extension, a boundary-face integrator ON that flux mass. Beside it
- * DarcyForm::Reconstruct() lifts the empty flux mass and drops the law, so
- * psi* would be wrong. Filed upstream as FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md,
- * and refused by the solver until it lands. A position Delta stays on the
- * linear flux mass and the extension sits beside it, which is what this
- * measures: the extension, the DtN and the meshed packs beside an anisotropy.
+ * A Delta IN Psi, the shape AN-4 hands geq, a flux law with the extension's
+ * face integrator ALONE on the flux mass form:
+ *
+ *     Delta( Psi, z ) = delta0 g( Psi ) h( z ),  g = ( 4 Psi ( 1 - Psi ) )^3,
+ *
+ * zero outside 0 < Psi < 1, between the two labels. Whether it vanishes on
+ * Gamma_h depends on the solved psi, so the solver checks it there.
  *
  * Each case says what it asserts.
  */
@@ -80,6 +82,70 @@ namespace
 
 		private:
 			double amplitude;
+	};
+
+	/// The Delta in Psi above. Reentrant, as the bump is.
+	class MirrorProfile : public meq::Anisotropy
+	{
+		public:
+			explicit MirrorProfile( double amplitudeIn )
+				: amplitude( amplitudeIn )
+			{
+			}
+
+			double delta( double, double z, double psi ) const override
+			{
+				if ( psi <= 0.0 || psi >= 1.0 )
+					return 0.0;
+				double const g = 4.0*psi*( 1.0 - psi );
+				return amplitude*g*g*g*cut( z );
+			}
+
+			double dDeltaDPsi( double, double z, double psi ) const override
+			{
+				if ( psi <= 0.0 || psi >= 1.0 )
+					return 0.0;
+				double const g = 4.0*psi*( 1.0 - psi );
+				return amplitude*3.0*g*g*4.0*( 1.0 - 2.0*psi )*cut( z );
+			}
+
+			Argument argument() const override
+			{
+				return Argument::NormalisedFlux;
+			}
+
+		private:
+			static double cut( double z )
+			{
+				double const v = z/1.2;
+				if ( std::abs( v ) >= 1.0 )
+					return 0.0;
+				double const h = 1.0 - v*v;
+				return h*h*h;
+			}
+
+			double amplitude;
+	};
+
+	/// A Delta in Psi that is nonzero everywhere, on Gamma_h included: only
+	/// the solved psi can show it, and the solver must refuse that answer.
+	class EverywhereInPsi : public meq::Anisotropy
+	{
+		public:
+			double delta( double, double, double ) const override
+			{
+				return -0.1;
+			}
+
+			double dDeltaDPsi( double, double, double ) const override
+			{
+				return 0.0;
+			}
+
+			Argument argument() const override
+			{
+				return Argument::NormalisedFlux;
+			}
 	};
 
 	/// Nonzero on Gamma_h, which the solver must refuse beside the extension.
@@ -123,7 +189,7 @@ namespace
 		std::shared_ptr<meq::NormalisedRotatingSource> plasma;
 		std::unique_ptr<meq::CoilAugmentedNormalisedSource> source;
 		std::unique_ptr<meq::ExteriorDtN> dtn;
-		std::unique_ptr<meq::PositionAnisotropy> anisotropy;
+		std::unique_ptr<meq::Anisotropy> anisotropy;
 		mfem::ConstantCoefficient zero{ 0.0 };
 		std::unique_ptr<meq::GradShafranovSolver> solver;
 		bool converged = false;
@@ -134,7 +200,9 @@ namespace
 	{
 		None,
 		Bump,
-		Everywhere
+		Everywhere,
+		Profile,
+		EverywhereInPsi
 	};
 
 	std::unique_ptr<Run> run( int order, int level, Delta kind, double amplitude,
@@ -168,6 +236,10 @@ namespace
 			r->anisotropy = std::make_unique<MirrorBump>( amplitude );
 		else if ( kind == Delta::Everywhere )
 			r->anisotropy = std::make_unique<EverywhereAnisotropy>();
+		else if ( kind == Delta::Profile )
+			r->anisotropy = std::make_unique<MirrorProfile>( amplitude );
+		else if ( kind == Delta::EverywhereInPsi )
+			r->anisotropy = std::make_unique<EverywhereInPsi>();
 		if ( r->anisotropy )
 			solver.setAnisotropy( *r->anisotropy );
 		if ( tauFollows )
@@ -243,23 +315,26 @@ BOOST_AUTO_TEST_CASE( aZeroBumpIsTheMeshedMirrorBitForBit )
 
 /// From the meshed vacuum, at two amplitudes a pickup plasma might have, the
 /// bordered Newton converges in as few steps as the isotropic mirror's 3 or
-/// 4. Three residuals are too few to read an order from, so none is asserted.
+/// 4, for either Delta. Three residuals are too few to read an order from, so
+/// none is asserted.
 BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesFromTheVacuum )
 {
+	for ( Delta const kind : { Delta::Bump, Delta::Profile } )
 	for ( double amplitude : { -0.1, -0.3 } )
 	{
-		auto const r = run( 2, 0, Delta::Bump, amplitude );
-		BOOST_TEST_REQUIRE( r->converged, "delta0 = " << amplitude << ": " << r->failure );
+		char const *const label = kind == Delta::Bump ? "bump" : "Delta( Psi )";
+		auto const r = run( 2, 0, kind, amplitude );
+		BOOST_TEST_REQUIRE( r->converged, label << ", delta0 = " << amplitude << ": " << r->failure );
 		std::vector<double> const &history = r->solver->newtonResiduals();
-		std::printf( "  delta0 = %+.1f: %d Newton steps, psi_ax %.6e, psi_bnd %.6e; residuals",
-		             amplitude, r->solver->newtonIterations(), r->solver->psiAxis(),
+		std::printf( "  %s, delta0 = %+.1f: %d Newton steps, psi_ax %.6e, psi_bnd %.6e; residuals",
+		             label, amplitude, r->solver->newtonIterations(), r->solver->psiAxis(),
 		             r->solver->psiBoundary() );
 		for ( double v : history )
 			std::printf( " %.2e", v );
 		std::printf( "\n" );
 		std::fflush( stdout );
 		BOOST_TEST( r->solver->newtonIterations() <= 8,
-		            "delta0 = " << amplitude << ": " << r->solver->newtonIterations()
+		            label << ", delta0 = " << amplitude << ": " << r->solver->newtonIterations()
 		            << " Newton steps against the isotropic mirror's 3 or 4" );
 	}
 }
@@ -278,6 +353,10 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesFromTheVacuum )
 /// And tau( 1 - Delta ), setStabilisationFollowsAnisotropy(), beside it: the
 /// measurement AN-3a owes on tau. At delta0 = -0.3 it moves the differences
 /// by under 1e-3 of themselves, printed and not asserted.
+///
+/// AND THE Delta IN Psi, on the same ladder, which is the case with teeth for
+/// the reconstruction: psi* is read, and beside the extension's face
+/// integrator a dropped flux law moves it by order one.
 BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 {
 	Cloud const cloud = machineCloud();
@@ -290,7 +369,8 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 	std::vector<std::vector<double>> differences;
 	for ( Variant const &variant : { Variant{ "isotropic", Delta::None, false },
 	                                 Variant{ "delta0 = -0.3", Delta::Bump, false },
-	                                 Variant{ "delta0 = -0.3, tau( 1 - Delta )", Delta::Bump, true } } )
+	                                 Variant{ "delta0 = -0.3, tau( 1 - Delta )", Delta::Bump, true },
+	                                 Variant{ "Delta( Psi ), delta0 = -0.3", Delta::Profile, false } } )
 	{
 		std::vector<std::vector<double>> sampled;
 		for ( int level : { 0, 1, 2, 3 } )
@@ -332,4 +412,14 @@ BOOST_AUTO_TEST_CASE( aDeltaOnGammaIsRefusedBesideTheExtension )
 	auto const r = run( 1, 0, Delta::Everywhere, 0.0 );
 	BOOST_TEST( !r->converged );
 	BOOST_TEST( r->failure.find( "Gamma_h" ) != std::string::npos, r->failure );
+}
+
+/// A Delta in Psi that does not vanish on Gamma_h is refused too, on the
+/// solved psi -- it cannot be checked before the solve -- and by name.
+BOOST_AUTO_TEST_CASE( aDeltaInPsiOnGammaIsRefusedOnTheSolvedPsi )
+{
+	auto const r = run( 1, 0, Delta::EverywhereInPsi, 0.0 );
+	BOOST_TEST( !r->converged );
+	BOOST_TEST( r->failure.find( "Gamma_h" ) != std::string::npos, r->failure );
+	BOOST_TEST( r->failure.find( "solved psi" ) != std::string::npos, r->failure );
 }

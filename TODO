@@ -430,7 +430,8 @@ Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
 
-  Planned: ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md.
+  ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3a
+  are done (M-328 to M-333); AN-3b, the subtracted mirror, is next.
 
   The reference is pinned: refs/AlphaGK.pdf eq (6.18), and refs/Refs.md,
   "Anisotropic pressure", carries what it says and its two typos. It answers

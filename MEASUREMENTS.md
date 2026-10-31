@@ -22067,11 +22067,9 @@ trace dofs, is pre-asymptotic.
 steps at every `k` and `n`.
 
 **Mutation.** With the flux-potential block zeroed (the law's `df = 0`), Newton
-takes 10 steps and its order is 1.22. That case fails. **There is no
-finite-difference Jacobian check, and there cannot be one.** The condensed
-gradient aborts under `FullNL` in `DenseMatrixLUSolver::SetOperator()` ("Not a
-DenseMatrix operator!"), and NPC's is solve-only. So the observed order is the
-instrument.
+takes 10 steps and its order is 1.22. That case fails. The condensed
+Jacobian against a central difference is
+**[M-333](MEASUREMENTS.md#m-333)**'s.
 
 **The flux-law path against the isotropic one.** A zero-amplitude flux model
 takes the law, `FullNL`, and no `M_u`. On `n = 16` it agrees with the isotropic
@@ -22080,11 +22078,7 @@ and 2.4e-13 at `k = 3`. **What the path costs per Newton step** is 1.68× to
 1.82× at `k = 1` and 2.49× to 2.51× at `k = 3`. These are one-shot timings,
 with the machine shared.
 
-**Threaded assembly is not taken beside the law.** `Reconstruct()`'s threaded
-loop shares one `mfem::FrozenDualFluxCoefficient`, whose `Eval()` writes its own
-members. That was read, not observed. An explicit `Threaded` is refused, and a
-default one is taken as Serial. It is filed upstream as
-`FROZEN-FLUX-LAW-THREADING-FROM-MEQ.md`.
+Threaded assembly beside the law is **[M-333](MEASUREMENTS.md#m-333)**'s.
 
 **Suites:** double 89/90, the standing red only (`PlasmaEdgeConvergence`); `naming` green.
 
@@ -22174,7 +22168,7 @@ costs `ψ*` anything.** At `k = 1` it is 4.86e-06 against [M-329](#m-329)'s
 **AN-3a: A POSITION `Δ` ON THE ROTATING MIRROR, BESIDE THE EXTENSION, THE DtN
 AND MESHED PACKS. NEWTON CONVERGES FROM THE VACUUM IN 3 STEPS, AND
 `ψ*` CONVERGES AS THE ISOTROPIC MIRROR'S DOES, TO 6% ON EVERY RUNG. `τ(1 − Δ)`
-IS IMMATERIAL AT `δ₀ = −0.3`. A `Δ` IN `Ψ` CANNOT BE POSED HERE YET.**
+IS IMMATERIAL AT `δ₀ = −0.3`. A `Δ` IN `Ψ` IS M-333'S.**
 `ANISOTROPY-PLAN.md`, AN-3a.
 
 **Setup.**
@@ -22228,10 +22222,74 @@ off.
 
 * `Δ = −0.1` everywhere, nonzero on `Γ_h`, is refused before assembly beside
   the extension.
-* A `Δ` in `Ψ` is refused beside the extension. `Reconstruct()` would drop its
-  flux law, since `M_u` exists to carry the extension.
-  `../../mfem-hdg-dev/doc/FLUX-LAW-BESIDE-AN-EXTENSION-FROM-MEQ.md`.
 
 **Suites:** double 90/91, the standing red only (`PlasmaEdgeConvergence`); `AnisotropicMirror` 374 s.
 
 **Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror`.
+
+### M-333
+
+**THE FLUX LAW ON THE MIRROR AND UNDER THREADS. A `Δ` IN `Ψ` CONVERGES FROM
+THE MESHED VACUUM IN 3 STEPS BESIDE THE EXTENSION AND THE DtN, AND ITS `ψ*`
+CONVERGES AS THE ISOTROPIC MIRROR'S DOES, TO 10% ON EVERY RUNG. THE LAW'S
+CONDENSED JACOBIAN MATCHES A CENTRAL DIFFERENCE TO 4e-11. THREADED ASSEMBLY IS
+THE SERIAL SOLVE, BIT FOR BIT.** `ANISOTROPY-PLAN.md`, AN-2a and AN-3a.
+
+The MFEM is `meq-integration` `59ef46309f`, which carries
+`FrozenDualFluxOffsetCoefficient`: `Reconstruct()` lifts a frozen law whole
+and reentrantly, and decides on `M_u`'s domain integrators, so a flux mass
+form holding only the extension reconstructs as no form does.
+
+**The Jacobian**, `theFluxLawsJacobianMatchesAFiniteDifferenceOfTheResidual`.
+The flux model, `Δ = −0.5ψ²`, `k = 2` on a 3 × 3 box, four directions, the
+linearisation held at a state away from the solution:
+
+| | relative error, worst of four |
+|---|---|
+| the law as built | 4.416e-11 |
+| its derivative zeroed (mutation) | 2.491e-02 |
+
+Example 5's isotropic check reads 4e-11 on the same instrument
+(`NewtonConvergence`).
+
+**Threads**, `aFluxLawUnderThreadedAssemblyIsTheSerialSolve`. The flux model
+at `n = 16`, `omp_get_max_threads() = 4`, `MKL_NUM_THREADS=1`: at `k = 1` and
+`k = 3`, `ψ`, `q` and `ψ*` differ by exactly 0, and Newton takes 4 steps
+either way. The serial fallback beside a flux law is gone, so a default
+`Threaded` stays threaded.
+
+**The mirror**, `AnisotropicMirror`, M-332's setup with
+`Δ = δ₀ (4Ψ(1 − Ψ))³ h(z)`, zero outside `0 < Ψ < 1`, an
+`Argument::NormalisedFlux` law.
+
+From the vacuum, level 0, `k = 2`:
+
+| `Δ` | `δ₀` | steps | `ψ_bnd` | residuals |
+|---|---|---|---|---|
+| bump | −0.1 | 3 | 6.403862e-02 | 7.26e-01 4.83e-05 5.80e-10 3.77e-15 |
+| bump | −0.3 | 3 | 6.172730e-02 | 7.30e-01 2.17e-04 1.28e-08 4.42e-15 |
+| `Δ(Ψ)` | −0.1 | 3 | 6.317102e-02 | 7.26e-01 4.84e-05 1.63e-09 4.06e-15 |
+| `Δ(Ψ)` | −0.3 | 3 | 5.914209e-02 | 7.31e-01 2.51e-04 6.37e-08 7.33e-15 |
+
+The `k = 3` ladder, `ψ*` sampled at 432 points of the machine region, RMS
+difference between levels:
+
+| | 0–1 | 1–2 | 2–3 | rates |
+|---|---|---|---|---|
+| isotropic | 5.099e-05 | 3.283e-07 | 6.457e-08 | 7.279, 2.346 |
+| bump, `δ₀ = −0.3` | 5.069e-05 | 3.098e-07 | 6.429e-08 | 7.354, 2.269 |
+| bump, `τ(1 − Δ)` | 5.069e-05 | 3.097e-07 | 6.428e-08 | 7.355, 2.269 |
+| `Δ(Ψ)`, `δ₀ = −0.3` | 5.003e-05 | 3.411e-07 | 5.828e-08 | 7.196, 2.549 |
+
+`Δ(Ψ)`'s differences are 0.98, 1.04 and 0.90 of the isotropic ones, and fall.
+That is asserted within 25%. The ladder's own rates are M-332's, the meshed
+route's.
+
+**Refused, on the solved `ψ`:** `Δ = −0.1` everywhere as an
+`Argument::NormalisedFlux` law, nonzero on `Γ_h`. The message names `Γ_h` and
+the solved `ψ`.
+
+**Suites:** double 90/91, the standing red only (`PlasmaEdgeConvergence`); `naming` green; `AnisotropicMirror` 555 s, `AnisotropicConvergence` 23 s.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror`,
+and `./AnisotropicConvergence --run_test='theFluxLaws*,aFluxLawUnder*'`.
