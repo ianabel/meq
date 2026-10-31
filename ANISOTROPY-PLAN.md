@@ -268,36 +268,125 @@ with `q_Δ = (1 − Δ) q₀`, exactly, and that is what is asserted. **It is al
 the first evidence for *What changes* §4**: to keep the stabilisation in
 proportion to the diffusion, `τ` scales with `1 − Δ`.
 
-### AN-2 — `Δ` a function of `Ψ`
+### AN-2 — `Δ` a function of the flux
 
-The non-linear block flux law, through `SetBlockNonlinearIntegrator()`. The
-bordered Newton gains `Δ`'s dependence on both labels in its border columns.
+**Split in two**, so the non-linear flux law is measured before the labels
+are added on top of it.
 
-**Acceptance**:
+#### AN-2a — `Δ( R, z, ψ )`, physical `ψ`, plain Newton — DONE
 
-* The assembled Jacobian matches a central difference of the assembled
-  residual, at the unit rung.
-* Newton is quadratic.
-* A manufactured `Δ( Ψ )` fixture converges at the AN-1 rates.
-* **`FullNL`'s cost against `PotNL`'s**, per Newton step, on the isotropic
-  problem posed through the block slot.
+**DONE** → **[M-329](MEASUREMENTS.md#m-329)**.
+
+**The interface.** `meq::Anisotropy` is now general: `delta( R, z, ψ )`,
+`dDeltaDPsi()` and `dependsOnPsi()`. `meq::PositionAnisotropy` is AN-1's case,
+and keeps the linear flux mass bit for bit.
+
+**The flux law.** A `Δ` that reads `ψ` puts **the whole** flux mass on
+`mfem::MixedConductionNLFIntegrator( FunctionDiffusionFlux )`, with weight
+`R/(1 − Δ)` and derivative `R Δ′/(1 − Δ)²`; there is no linear `M_u`.
+`DarcyForm::Reconstruct()` lifts `M_u` whenever it exists and would drop a law
+beside it, so `M_u` is never asked for on this branch. Under Picard the
+derivative is zero, as the source's reaction term is.
+
+**Refusals.**
+
+* A `ψ`-independent coefficient source is refused; pose it as a `meq::Source`
+  with `dFdPsi = 0`.
+* A normalised source is refused until AN-2b.
+* **An explicit `AssemblyMode::Threaded` is refused, and a default one becomes
+  Serial.** `Reconstruct()`'s threaded loop shares one
+  `mfem::FrozenDualFluxCoefficient`, whose `Eval()` writes its own members, so
+  MEQ's `SetIntegratorsThreadSafe()` promise would be false. Filed upstream as
+  `../../mfem-hdg-dev/doc/FROZEN-FLUX-LAW-THREADING-FROM-MEQ.md`.
+* **The firehose limit is checked on the solve's last `ψ`.** A solve that ends
+  past it is refused. A solve that fails with its last iterate past it names
+  the limit rather than the iteration.
+
+**No finite-difference Jacobian check.** The condensed gradient aborts under
+`FullNL`, and NPC's is solve-only, so the instrument is the observed Newton
+order. Zeroing the derivative is caught: 10 steps in place of 4, best order
+1.22.
+
+#### AN-2b — `Δ( Ψ )`, through the labels — DONE
+
+**DONE** → **[M-330](MEASUREMENTS.md#m-330)**.
+
+**The interface.** `Anisotropy::argument()` names what `delta()` reads:
+`Position`, `Flux` or `NormalisedFlux`. Under `NormalisedFlux` the solver
+hands it `Ψ = (ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, from the normalised source's labels
+as the bordered Newton last set them. It applies `1/(ψ_ax − ψ_bnd)` to
+`dΔ/dΨ` itself, in `anisotropyAt()`, the one place that mapping is made.
+
+**The label columns are differenced beside a `Δ` in `Ψ`.** The source's
+analytic `normalisationDerivatives()` are `dF/ds`, but the flux row moves with
+the labels too. The difference perturbs the labels `anisotropyAt()` reads, so
+it carries that term. Measured as a mutation: on the source's analytic column,
+Newton is linear, order 1.000, 16 steps in place of 4.
+
+**The axis label at a point, and what it costs `ψ*`.**
+
+* Under the located axis, `ψ_ax`'s irregular error, MEQ's open defect, goes
+  straight into the operator.
+* With the label at a prescribed point, as a mirror reads its labels, Newton
+  is quadratic.
+* **Read from `ψ_h`, `ψ*` is not at `k+2`.** The label is `ψ_h` at a point,
+  so `Δ` carries `ψ_h`'s pointwise error, `k+1` with a constant that moves
+  with where the point sits in its element. That bounds `ψ*`, and it holds for
+  any operator coefficient read through the labels.
+* **Read from `ψ*`, it is**, → **[M-331](MEASUREMENTS.md#m-331)**.
+  `setLabelReading( LabelReading::PostProcessed )` reads each prescribed
+  label from `ψ*` by defect correction. Each pass's label row is
+  `ψ_label − ψ_h(x) − c = 0`, with `c` the last pass's `(ψ* − ψ_h)(x)`, so the
+  bordered Newton within a pass is exactly the one it always was. At the
+  fixed point the label is `ψ*(x)`. `ψ*` is back at `k+2` for `k = 1…3`, in 2
+  to 6 passes. The corrections are exactly zero by default, so every other
+  path is unchanged.
+
+**Refused.**
+
+* `Flux` beside a normalised source, which is not measured.
+* `NormalisedFlux` without one, since there are no labels to read.
+* **`setPlasmaCurrent()` beside any anisotropy.** The constraint integrates
+  `F/R`, and under `Δ`, `Δ*ψ = (∇ψ·∇Δ − F)/(1 − Δ)`, so `F/R` is not the
+  toroidal current.
 
 ### AN-3 — the mirror, through MEQ
 
-On `RotatingMirror`'s machine, through `MirrorMachine.hpp`:
+**Split in two, because coil subtraction under `Δ` needs upstream.** The
+remainder's flux row carries `−(Δ/(1 − Δ))∇ψ_c` (*What changes* §2, verified
+at AN-0). That is an **affine** flux law, `f u + g`, and `g` depends on `ψ`.
+MFEM's flux law carries it in the solve. `DarcyForm::Reconstruct()` freezes
+the law at zero flux, though, and its local problem has a zero flux
+right-hand side. So `g` would reach the solve and not `ψ*`, which would be a
+different function and not merely a lower order. Filed as
+`../../mfem-hdg-dev/doc/AFFINE-FLUX-LAW-RECONSTRUCTION-FROM-MEQ.md`.
 
-* the subtraction load;
-* the per-species `Δ_s` and source;
-* `τ`, measured;
-* the jump question of *Refusals*.
+#### AN-3a — the anisotropic mirror with meshed packs
+
+On `RotatingMirror`'s machine, through `MirrorMachine.hpp`, with the packs
+meshed, so that there is no load:
+
+* **Lift the extension and DtN refusals** where `Δ` vanishes on `Γ_h`, checked
+  on the solve's last `ψ`, since both read `q` there as `∇ψ/R`.
+* **Measure `τ`**: the box default against `τ(1 − Δ)`, which AN-1's
+  constant-`Δ` identity says keeps the stabilisation in proportion.
+* **Answer the jump question** of *Refusals*, at the box's `z` edges, which
+  are faces.
+* The labels from `ψ*` (AN-2b) on both labels.
 
 **Acceptance**:
 
-* **`Δ = 0` reproduces `RotatingMirror` to round-off.**
+* **`Δ = 0` reproduces the meshed-pack mirror to round-off.**
 * At `δ₀ = −0.1` and `−0.3`, Newton converges from the vacuum guess, and MEQ
   converges against itself at its design rate (MR-4c's form).
-* **A meshed control**: the same machine with a pack meshed rather than
-  subtracted agrees, as COIL-SUBTRACTION-PLAN's instrument does.
+
+#### AN-3b — the subtracted mirror
+
+**Waits on the request above.** It needs an affine flux law, `g` included in
+the reconstruction, and the refusal beside `setConductorField()` lifted.
+
+**Acceptance**: the subtracted machine against AN-3a's meshed one, as
+COIL-SUBTRACTION-PLAN's instrument does.
 
 ### AN-4 — geq's reference
 
