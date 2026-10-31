@@ -195,7 +195,25 @@ mirrored, and `dp_par_dpsin`'s sign is negated, exactly as MR-4's profiles were.
 
 ## Stages
 
-### AN-0 — the equation, pinned and checked
+### AN-0 — the equation, pinned and checked — DONE
+
+**DONE.** `tools/anisotropic_equation.py` runs all four checks and exits
+non-zero on any failure. It **derives** (6.19) from a Maxwellian at fixed
+`( ε, μ )` rather than transcribing it, and each typo check runs in both
+directions: the corrected form holds and the printed one does not.
+`tests/analytic/ManufacturedAnisotropic.hpp` carries two `Δ` models on Example
+5's flux and box. The position model is AN-1's. The flux model,
+`Δ = d ψ²`, is AN-2's, built now because the same script checks it at no cost.
+`AnisotropicConvergence` checks the fixture four ways:
+
+* against a central difference of its own operator;
+* against the script's symbolic `F`, to 1e-13;
+* against Example 5 at `Δ = 0`;
+* that `1 − Δ > 0.5` on the box.
+
+Flipping the sign of the `∇Δ·∇ψ` term fails both the operator check and the
+symbolic check.
+
 
 * **The reduction**: `Δ = 0`, every species Maxwellian, reduces the equation
   above to `docs/rotation.rst`'s `F` term for term, by sympy. This is the check

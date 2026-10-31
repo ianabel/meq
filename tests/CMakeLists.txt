@@ -280,7 +280,12 @@ set(MEQ_CONVERGENCE_TESTS
 	# test because what it asserts is that a Chebyshev series in normalised arc
 	# length converges on an open curve while a periodic basis cannot.
 	OpenSurfaces
-	SafetyFactorSolver)
+	SafetyFactorSolver
+	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
+	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
+	# against tools/anisotropic_equation.py's symbolic closed form; the solves
+	# arrive with AN-1 and AN-2.
+	AnisotropicConvergence)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the
