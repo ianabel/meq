@@ -22420,3 +22420,62 @@ do it. Not measured further.
 **Reproduce.** `PYTHONPATH=<freegs4e at its tip>:/home/ian/projects/geq/src
 tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_anisotropic.py`,
 about 1.5 hours.
+
+### M-336
+
+**THE FOUR SHAPE RACES OF [M-295](MEASUREMENTS.md#m-295) AT THE LATEST geq,
+`c86ced9` ON freegs4e `4555a49`, AGAINST MEQ `60f3999`. geq'S ANSWER IS
+UNCHANGED: EVERY ERROR ON EVERY GRID OF EVERY SHAPE IS M-295'S TO THREE FIGURES,
+AND ITS 65² STILL DOES NOT CONVERGE ON THE FLAT-TOP. MEQ REACHES 1e-07 FIRST ON
+EVERY SHAPE: 3.2× ON THE SKEW, 9.0× ON THE QUARTIC AND THE DOUBLE PEAK AND 49×
+ON THE FLAT-TOP AT 8 THREADS, AND 1.5 TO 16× AT ONE. AT ONE THREAD geq'S 65²
+STILL TAKES THE SKEW'S 1e-06.**
+
+**Setup.** M-295's race protocol unchanged: `race_geq.py --case <shape>` at its
+defaults, the four in sequence from 2026-10-31 17:13, one thread and 8, three
+takes a configuration and one over 120 s, the median timed, the process's wall
+clock. geq is its `main` at `c86ced9`, clean; freegs4e is
+`feature/rotation_equilibrium` at `4555a49`, a detached worktree on
+`PYTHONPATH`; MEQ is `install/double` at `60f3999`, clean. `race.md`'s
+provenance records all three as imported. The busy cores before each run read
+median 0.04 and at most 0.34 over 412 rows.
+
+**Agreement.** Max `| ψ − ψ_ref |` over geq's 65 × 65 nodes less its corners,
+`ψ_ref` MEQ at level 2, `k = 4`:
+
+| case | geq 65² | geq 129² | geq 257² | geq 513² | resolves |
+|---|---|---|---|---|---|
+| flattop | fails | 1.42e-05 | 3.24e-07 | 2.39e-08 | 2.42e-08 |
+| quartic | 5.22e-04 | 8.08e-07 | 5.56e-08 | 7.33e-09 | 8.93e-09 |
+| skew | 3.07e-07 | 5.72e-08 | 1.62e-08 | 4.46e-09 | 6.18e-10 |
+| double | 4.49e-06 | 1.03e-07 | 2.55e-08 | 7.18e-09 | 3.57e-09 |
+
+The flat-top's 65² raises `Mirror solve failed to converge (too many
+iterations)` on all 24 takes, at both tolerances and both thread counts.
+
+**Time to accuracy.** The cheapest run of each code reaching each max error,
+wall seconds, geq/MEQ, with M-295's ratio in brackets. The 1e-05 and 1e-06
+columns are at 8 threads:
+
+| case | 1e-05 | 1e-06 | 1e-07 at 8 threads | 1e-07 at 1 thread |
+|---|---|---|---|---|
+| flattop | 28.87 / 0.88 = 33 (29) | 28.87 / 2.12 = 13.6 (10.4) | geq 513² 225.11 / L1 `k = 4` 4.57 = **49** (37) | 201.17 / 12.41 = 16.2 (16.1) |
+| quartic | 5.03 / 0.70 = 7.2 (6.4) | 5.03 / 1.20 = 4.2 (3.5) | geq 257² 28.97 / L1 `k = 3` 3.22 = **9.0** (6.5) | 29.59 / 8.29 = 3.6 (3.0) |
+| skew | 1.92 / 0.87 = 2.2 (1.8) | 1.92 / 1.16 = 1.6 (1.3) | geq 129² 4.99 / L0 `k = 4` 1.54 = **3.2** (2.6) | 5.13 / 3.35 = 1.5 (1.3) |
+| double | 1.94 / 0.70 = 2.8 (2.4) | 5.04 / 1.16 = 4.4 (3.5) | geq 257² 29.00 / L1 `k = 3` 3.22 = **9.0** (6.6) | 29.13 / 8.29 = 3.5 (3.1) |
+
+At one thread the skew's 1e-06 goes to geq, 1.89 s at 65² against MEQ's 2.34
+at L0 `k = 3`, 0.8.
+
+**The ratios move with MEQ's threads, not its serial cost.** MEQ's one-thread
+time is 2.3 to 2.8× its eight-thread time from L1 up and 1.6 to 2.2× on L0,
+against M-295's 1.9 to 2.3 and 1.5 to 2.0, and its one-thread 1e-07 cells
+barely move. geq's 257² takes 29 s where M-295 had 25 to 26, and its 513²
+takes 201 to 228 s; its one-thread time is 0.89 to 1.06 of its eight-thread
+time, so geq still does not use the threads. Its `rtol = 2e-9` still gives the
+`1e-6` error to three figures, at 1.9 to 3.2× the time at 513².
+
+**Reproduce.** With freegs4e's tip at `<tip>`, from `source/`:
+`PYTHONPATH=<tip> tools/freegs4e-benchmark/venv/bin/python
+tools/geq-benchmark/race_geq.py --case <shape>`, about 50 minutes a shape.
+Each writes `race.md` and `race.json` under `runs/geq-benchmark/race/`.

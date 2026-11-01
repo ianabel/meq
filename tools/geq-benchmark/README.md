@@ -518,5 +518,6 @@ It takes about an hour, most of it geq's 513² solves. The results go to
 project directory. M-274 (host) and M-276 (device) raced
 `reference/rotating/`'s problem with a geq arm that called
 `export_rotating.solve()` inside the harness, not a geq script, so their tables
-are not this protocol's and are not comparable with it. The four shape races, and
-the agreement pass before them, are M-295.
+are not this protocol's and are not comparable with it. The four shape races at
+the latest geq are M-336; M-295 is the agreement pass and the same races at
+geq `73b9a72`.
