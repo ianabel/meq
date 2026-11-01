@@ -509,7 +509,118 @@ rate across the three grids is a precondition. That is what is relaxed; the
 * **The driver's keys and the `.nc`**: `p_∥`, `p_⊥`, `Δ`, and the firehose and
   mirror-mode margins (geq's `anisotropy_stability`).
 * **A race through each code's own front end**: geq's case script and MEQ's
-  `meq.toml`, by `race_geq.py`'s protocol.
+  `meq.toml`, by `race_geq.py`'s protocol. AN-7 is that race on the
+  distribution mirrorfp emits.
+
+### AN-7 — a race on a mirrorfp closure
+
+**The target**: geq and MEQ race on an anisotropic mirror whose pressure is
+**the form mirrorfp hands geq**, through each code's own front end, by
+`race_geq.py`'s protocol. Nothing of it is built.
+
+#### What mirrorfp emits, and how geq reads it
+
+* **mirrorfp writes a closure `.npz` per flux surface**, through
+  `mirrorfp/closure.py`'s `save_closure()`. Each holds 49 nodes along a half
+  field line from the anchor to the throat, with these columns:
+  * `s`, the normalised arc length, and `z`;
+  * `b = B/B_mid`;
+  * `n`, `p_∥`, `p_⊥` and `χ`, in code units.
+  * **The bridge to SI is `p[Pa] = p_code · 2 n_D T_i[J]`.** The factor 2 is a
+    known trap.
+  * Its tables are **deuterium only, the whole population**, bulk and pickup
+    ring. The electrons stay geq's Boltzmann Maxwellian.
+* **geq reads it through `geq.kinetic_closure.KineticClosure`**, numpy and
+  scipy only, **from scripts and never from its input file**: `[physics.anisotropy]`
+  has no closure key. In production it is in z-mode:
+  * the table is read at `ẑ = |Z|/Z_thr( ψ_n )`;
+  * one surface's shape is carried to every `ψ_n` by its midplane `n_D T_i`,
+    or several surfaces' shapes are interpolated in `ψ_n`;
+  * `Δ = μ₀( p_∥ − p_⊥ )/B²`, with **`B` the iterate's `|B|`**;
+  * `dp_par_dpsin` is AlphaGK's source integral at fixed `( ε, μ )`, in closed
+    form from the tables, `dlnN`, `dlnT`, `χ` and `dlnB_mid/dψ_N`;
+  * `fast_fraction = 1`: the tables replace deuterium's whole Maxwellian
+    bracket, and its rotation term keeps the Boltzmann density.
+* **So the form is `Δ( Ψ, z, B ) = μ₀ Δp( Ψ, ẑ )/B²` with a source
+  `S_D( Ψ, z )`.** `Δp` and `S_D` are functions of position and label once
+  `Z_thr( ψ_n )` and `B_mid( ψ_n )` are held. The dependence on `B` is the
+  operator's.
+* **geq converges it only with help, by its own record.**
+  * `B_mid` read every Picard step is a limit cycle, so it is frozen
+    (`freeze_field`) and refreshed in an outer loop.
+  * The lagged `∇Δ` has a gain near 1 at the grid scale, which shows as a
+    6-cell ripple in `B_z`. The divergence form removes the `∇δψ` channel. The
+    `dΔ` channel, through `B = |∇ψ|/R` and the tables' steep slope, needs
+    `smooth_delta`, a binomial filter on the grid.
+  * The Newton polish often fails and is latched off.
+
+#### The problem, held fixed
+
+A race needs one well-posed equation that both codes solve. geq's outer loops
+are not that equation, so the race poses the fixed point they converge to:
+
+* **`Z_thr( ψ_n )`, `B_mid( ψ_n )` and the `ψ_n` map are held**: taken once off
+  reference/rotating's isotropic answer, written as tables, and read by both
+  codes. Neither refreshes them.
+* **No `smooth_delta`.** It is a filter on geq's grid, not part of the
+  equation, and it would put a grid-dependent term into the reference.
+* **The divergence form is the reference**, as geq's `resolve()` forces. The
+  historical form is a control where it converges.
+* **The machine and plasma are reference/rotating's**, scaled where `Δ` needs
+  it: the 20 filaments, the labels, the box and the tables. Deuterium's bracket
+  becomes `S_D`.
+
+#### Stages
+
+* **AN-7a — the closure on our machine, and the size of `Δ`.**
+  `KineticClosure` on reference/rotating's isotropic equilibrium, with the
+  GF1 table (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in
+  `closure_mode = "multi"` even for one file, which mirrorfp's troubleshooting
+  asks for. Hold `Z_thr`, `B_mid` and the map, then measure:
+  * `Δ`'s range, against M-335's −0.1 and −0.3;
+  * whether `Δ` vanishes at both labels, at the box end and on `Γ_h`, which
+    MEQ's support needs.
+
+  `Δp` scales with this plasma's `n T`. **Estimated, not measured**: the GF1
+  table's midplane `p_∥ − p_⊥` is −1.12 in code units. reference/rotating's
+  peak `N = 5e18`, `T_D = 1.53 keV` and `B ≈ 1 T` at the midplane put
+  `Δ_mid` near −3e-3, about a hundredth of M-335's `δ₀`. So the plasma is
+  scaled, `N` or `T` by about 100, and the scaling is recorded.
+* **AN-7b — geq's reference, or the finding that there is none.** A per-case
+  script, `KineticClosure` held as above, at 129², 257² and 513², with no
+  smoothing. **The feasibility question comes first**: does Picard converge
+  with the `B` in `Δ` live and no filter? If it does not, the race falls back
+  to a rung with `B` held in `Δ`: `Δ( Ψ, z )` from the held answer, and the
+  same `S_D`. That is AN-5's operator with mirrorfp's shape and source, a
+  smaller claim, and called that.
+* **AN-7c — MEQ.**
+  * **`Δ` reading `B`** (AN-6's first item). Under the flux law,
+    `u = ( 1 − Δ )∇̄ψ/R`, so `B = |u|/( 1 − Δ )` and
+    `Δ = a( 1 − Δ )²` with `a = μ₀Δp/|u|²`. That is a quadratic per point,
+    closed form, with `∂Δ/∂u` in the law's Jacobian. The alternative reads
+    `∇̄ψ_h` from the potential. Which one is decided by measurement.
+  * **A species' source integral in place of its bracket**, section 3's
+    interface, with `S_D( Ψ, z )` and its `Ψ`-derivative.
+  * **Readers for the held tables**: `Δp( Ψ, ẑ )` dense in two dimensions,
+    `Z_thr( Ψ )` and `B_mid( Ψ )`. MEQ reads a dense export of geq's
+    interpolant, not a reimplementation of it. The export's own error is
+    measured by doubling it, and must sit far under geq's 257-against-513
+    difference.
+  * Then AN-5's matrix against AN-7b.
+* **AN-7d — the race.** A `race_geq.py` case: geq's script with
+  `KineticClosure`, MEQ's `meq.toml` with the driver keys AN-6 adds, both
+  reading the same held tables. Timed by M-295's protocol.
+
+#### Decided at AN-7a, with the author
+
+* **Which table.** GF1's is a real kinetic solve on another machine, and is
+  carried here by self-similar scaling. mirrorfp's `prescribed_closure.py`
+  would write one for this machine instead, a bi-Maxwellian through the same
+  Liouville map, from a geq `.nc`. That needs a JAX environment, and an
+  equilibrium file that export_rotating does not write today.
+* **One surface or several.** A single table carried by `n T` under-states
+  `p_⊥` on the flanks by 45 to 55%, by geq's own measurement. That does not
+  matter for a benchmark, and it would matter for physics.
 
 ## Open, before any of it is built
 
