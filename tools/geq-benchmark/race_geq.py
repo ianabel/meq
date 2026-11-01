@@ -4,7 +4,8 @@
 The input is one of shapes.py's cases, tools/geq-benchmark/cases/<case>/: geq's
 machine, electrons and deuterons with the electron density given at z = 0, the
 labels at the electrode ( 0.10, 0 ) and the limiter ( 0.35, 0 ), and one
-profile shape. `--case` names it; skew is the default. Each code is run the way
+profile shape -- or gf1.py's, GF1's working point with carbon, on the same
+machine and labels. `--case` names it; skew is the default. Each code is run the way
 its user runs it, and the harness changes only what that user would change to
 refine a run:
 
@@ -20,7 +21,8 @@ refine a run:
         the variant is written under runs/. The mesh is generated once by
         `meq-run --mesh-only` and is not timed.
 
-Before anything runs, shapes.py --check must find the tracked case current, so
+Before anything runs, shapes.py --check ( gf1.py --check ) must find the
+tracked case current, so
 the two inputs state one problem.
 
 TWO RACES, as race_desc.py has them, and only the second decides anything.
@@ -86,6 +88,11 @@ sys.path.insert(0, meqpaths.source("tools", "freegs4e-benchmark"))
 from cores import physical_cores                                # noqa: E402
 sys.path.insert(0, HERE)
 import shapes                                                   # noqa: E402
+import gf1                                                      # noqa: E402
+
+#: The input tables each case's meq.toml names: shapes.py's two species, and
+#: gf1.py's three with carbon's density.
+INPUT_TABLES = {gf1.NAME: 6}
 
 #: The reference's install: double precision, on the host, whatever the ladder.
 REFERENCE_BUILD = "double"
@@ -175,8 +182,9 @@ def meq_config(case, directory, mesh, level, order, prefix, plasma_size=0.1):
     text, tables = INPUT_TABLE.subn(
         lambda m: m.group(1) + os.path.normpath(os.path.join(here, m.group(2))) + '"',
         text)
-    if tables != 4:
-        raise SystemExit(f"{source}: {tables} input tables, expected 4")
+    if tables != INPUT_TABLES.get(case, 4):
+        raise SystemExit(f"{source}: {tables} input tables, expected "
+                         f"{INPUT_TABLES.get(case, 4)}")
     subs = [
         (f'File = "mirror-{case}.msh"',
          f'File = "{mesh}"\nRefinementLevels = {level}'),
@@ -349,7 +357,8 @@ def provenance(ladder):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--case", choices=tuple(shapes.SHAPES), default="skew",
+    ap.add_argument("--case", choices=tuple(shapes.SHAPES) + (gf1.NAME,),
+                    default="skew",
                     help="the profile shape: tools/geq-benchmark/cases/<case>/")
     ap.add_argument("--out", default=None)
     ap.add_argument("--geq", default="65,129,257,513",
@@ -386,10 +395,11 @@ def main(argv=None):
                          "before each run")
     args = ap.parse_args(argv)
 
-    stale = shapes.check([args.case])
+    writer = "gf1.py" if args.case == gf1.NAME else "shapes.py"
+    stale = gf1.check() if args.case == gf1.NAME else shapes.check([args.case])
     if stale:
-        raise SystemExit("the tracked case is not what shapes.py writes: "
-                         + " ".join(stale) + "; run tools/geq-benchmark/shapes.py")
+        raise SystemExit(f"the tracked case is not what {writer} writes: "
+                         + " ".join(stale) + f"; run tools/geq-benchmark/{writer}")
     case = args.case
 
     print(f"waiting for the load average to stay under {args.quiet} for 60 s ...",
