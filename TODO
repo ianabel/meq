@@ -432,7 +432,8 @@ Raised 2026-08-25.
 
   ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3
   are done (M-328 to M-334), AN-4, geq's reference (M-335), and AN-5, MEQ
-  against it (M-337). AN-6 is next.
+  against it (M-337). AN-6 is next: Delta( B ) (AN-6a), the firehose
+  side (AN-6b), and a race on a mirrorfp closure (AN-6c to AN-6g).
 
   NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
   only. On builds/single (MFEM 59ef46309f):

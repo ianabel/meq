@@ -127,7 +127,7 @@ The rotation term keeps every species' density. That matches the draft's
 (6.17), which carries `m_α n_α R² ω ω′` for the energetic species too. It also
 matches freegs4e, which leaves the rotation term unscaled on purpose.
 
-Prescribed means a function of `( Ψ, R, z )`, and of `B` from AN-6. A kinetic
+Prescribed means a function of `( Ψ, R, z )`, and of `B` from AN-6a. A kinetic
 closure, geq's `KineticClosure` tables from mirrorfp, is a later consumer of
 the same interface and not on this plan.
 
@@ -189,7 +189,7 @@ geq, the anisotropic `Jtor` in freegs4e.
    `dp_par_dpsin` is then the fast population's full source term. The two are
    given together or not at all. **The first comparison sets both to zero**,
    which isolates the operator and needs no translation. The translation into
-   MEQ's species is AN-6's.
+   MEQ's species is AN-6e's.
 
 **The flux variable flips.** geq's `ψ_n` is MEQ's `1 − Ψ`. `Δ`'s shape is
 mirrored, and `dp_par_dpsin`'s sign is negated, exactly as MR-4's profiles were.
@@ -258,7 +258,7 @@ cannot leave the threaded loops. It also refuses an anisotropy beside any of:
 | `ResidualEstimator` | **refused**: its terms are the isotropic operator's |
 | `ContourTracer` and the flux surfaces | **refused**: they read `|q|` as `B_p` |
 | the extension on `Γ_h`, the DtN, `ConductorField` | refused with their setters, until AN-3 |
-| `Field.hpp`'s B and the driver's output | **unreachable**: the driver cannot pose an anisotropy. AN-6 divides `1 − Δ` out |
+| `Field.hpp`'s B and the driver's output | **unreachable**: the driver cannot pose an anisotropy. AN-6f divides `1 − Δ` out |
 
 **The constant-`Δ` statement, corrected.** The draft of this stage claimed
 `ψ_Δ = ψ₀/(1 − Δ)`. **That is wrong twice.** It ignores the boundary data, and
@@ -499,24 +499,13 @@ three grids' differences, over-states the last step by 0.30 and 0.32 rms. One
 rate across the three grids is a precondition. That is what is relaxed; the
 0.30 is not.
 
-### AN-6 — beyond geq, and through the front end
-
-* **`Δ( B )` through `|q|`**, the mirror's case.
-* **`Δ > 0` towards the firehose limit.** MEQ against itself only, since geq
-  has no converged reference there.
-* **geq's paired `dp_par_dpsin` and `fast_fraction`**, translated into a
-  species split and compared.
-* **The driver's keys and the `.nc`**: `p_∥`, `p_⊥`, `Δ`, and the firehose and
-  mirror-mode margins (geq's `anisotropy_stability`).
-* **A race through each code's own front end**: geq's case script and MEQ's
-  `meq.toml`, by `race_geq.py`'s protocol. AN-7 is that race on the
-  distribution mirrorfp emits.
-
-### AN-7 — a race on a mirrorfp closure
+### AN-6 — beyond geq: `Δ( B )`, the firehose side, and a mirrorfp closure
 
 **The target**: geq and MEQ race on an anisotropic mirror whose pressure is
 **the form mirrorfp hands geq**, through each code's own front end, by
-`race_geq.py`'s protocol. Nothing of it is built.
+`race_geq.py`'s protocol. Each stage before the race builds one thing it
+needs, and the firehose side, which geq has no reference for, is measured on
+the way.
 
 #### What mirrorfp emits, and how geq reads it
 
@@ -554,7 +543,7 @@ rate across the three grids is a precondition. That is what is relaxed; the
     `smooth_delta`, a binomial filter on the grid.
   * The Newton polish often fails and is latched off.
 
-#### The problem, held fixed
+#### The problem the race holds fixed
 
 A race needs one well-posed equation that both codes solve. geq's outer loops
 are not that equation, so the race poses the fixed point they converge to:
@@ -572,12 +561,42 @@ are not that equation, so the race poses the fixed point they converge to:
 
 #### Stages
 
-* **AN-7a — the closure on our machine, and the size of `Δ`.**
+* **AN-6a — `Δ` reading `B`, in MEQ.** `meq::FieldAnisotropy` hands the
+  solver `μ₀Δp`, of position or a label, and the solver forms
+  `Δ = μ₀Δp/B²` at the iterate's `B`. With `g = 0`, `B = |q|/( 1 − Δ )`,
+  where `q` is the total flux the law carries, so each law point solves
+  `Δ |q|² = μ₀Δp ( 1 − Δ )²`. That is a quadratic, taken on the root that
+  vanishes with `Δp`, in closed form, with `∂Δ/∂q` in the law's
+  flux-flux Jacobian and `∂Δ/∂ψ` in its flux-potential one.
+  * **The root's limits.** For `Δp > 0` it lies in `( 0, 1 )` at every
+    `|q|`, so the firehose limit is unreachable at fixed flux. For `Δp < 0`
+    it exists only while `|q|² ≥ −4μ₀Δp`, where `Δ` reaches −1 and
+    `∂Δ/∂q` diverges: a fold in `B`, at `B² = −μ₀Δp`. A solved answer past
+    it is refused, as the firehose limit is; a Newton iterate past it is
+    held at the fold.
+  * **The reconstruction freezes `Δ` at the solved flux.** MFEM lifts a flux
+    law into `ψ*`'s local problem by its Jacobian at zero flux, and at zero
+    flux there is no `B`. Under `postProcess()` the law reads `|q|` from the
+    solved flux instead, so the local problem carries the solved
+    `R/( 1 − Δ_h )`.
+  * **Accepted**: the manufactured position model posed as `Δ( B )`, with
+    `μ₀Δp = Δ |∇ψ|²/R²` at the exact solution, converges at `k + 1` in
+    `ψ` and `q` and `k + 2` in `ψ*`, with Newton quadratic; the law's
+    Jacobian against a central difference; on the mirror, `Δ( B )` beside
+    the subtracted filaments is the meshed route, as AN-3b has it, which a
+    `B` read from the remainder's flux alone would fail by order `Δ`.
+* **AN-6b — `Δ > 0` towards the firehose limit.** MEQ against itself only,
+  since geq has no converged reference there. AN-3a's two shapes at positive
+  `δ₀`, stepped towards 1: Newton's count and history, and the ladder's
+  rates against the isotropic one's. Where it stops, and why, is the
+  finding.
+* **AN-6c — the closure on our machine, and the size of `Δ`.**
   `KineticClosure` on reference/rotating's isotropic equilibrium, with the
   GF1 table (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in
   `closure_mode = "multi"` even for one file, which mirrorfp's troubleshooting
   asks for. Hold `Z_thr`, `B_mid` and the map, then measure:
-  * `Δ`'s range, against M-335's −0.1 and −0.3;
+  * `Δ`'s range, against M-335's −0.1 and −0.3, and its distance from
+    AN-6a's fold;
   * whether `Δ` vanishes at both labels, at the box end and on `Γ_h`, which
     MEQ's support needs.
 
@@ -586,32 +605,31 @@ are not that equation, so the race poses the fixed point they converge to:
   peak `N = 5e18`, `T_D = 1.53 keV` and `B ≈ 1 T` at the midplane put
   `Δ_mid` near −3e-3, about a hundredth of M-335's `δ₀`. So the plasma is
   scaled, `N` or `T` by about 100, and the scaling is recorded.
-* **AN-7b — geq's reference, or the finding that there is none.** A per-case
+* **AN-6d — geq's reference, or the finding that there is none.** A per-case
   script, `KineticClosure` held as above, at 129², 257² and 513², with no
   smoothing. **The feasibility question comes first**: does Picard converge
   with the `B` in `Δ` live and no filter? If it does not, the race falls back
   to a rung with `B` held in `Δ`: `Δ( Ψ, z )` from the held answer, and the
   same `S_D`. That is AN-5's operator with mirrorfp's shape and source, a
   smaller claim, and called that.
-* **AN-7c — MEQ.**
-  * **`Δ` reading `B`** (AN-6's first item). Under the flux law,
-    `u = ( 1 − Δ )∇̄ψ/R`, so `B = |u|/( 1 − Δ )` and
-    `Δ = a( 1 − Δ )²` with `a = μ₀Δp/|u|²`. That is a quadratic per point,
-    closed form, with `∂Δ/∂u` in the law's Jacobian. The alternative reads
-    `∇̄ψ_h` from the potential. Which one is decided by measurement.
+* **AN-6e — MEQ on the closure.**
   * **A species' source integral in place of its bracket**, section 3's
-    interface, with `S_D( Ψ, z )` and its `Ψ`-derivative.
+    interface, with `S_D( Ψ, z )` and its `Ψ`-derivative, and geq's paired
+    `dp_par_dpsin` and `fast_fraction` translated into it.
   * **Readers for the held tables**: `Δp( Ψ, ẑ )` dense in two dimensions,
     `Z_thr( Ψ )` and `B_mid( Ψ )`. MEQ reads a dense export of geq's
     interpolant, not a reimplementation of it. The export's own error is
     measured by doubling it, and must sit far under geq's 257-against-513
     difference.
-  * Then AN-5's matrix against AN-7b.
-* **AN-7d — the race.** A `race_geq.py` case: geq's script with
-  `KineticClosure`, MEQ's `meq.toml` with the driver keys AN-6 adds, both
-  reading the same held tables. Timed by M-295's protocol.
+  * Then AN-5's matrix against AN-6d.
+* **AN-6f — the driver's keys and the `.nc`**: `p_∥`, `p_⊥`, `Δ`, and the
+  firehose and mirror-mode margins (geq's `anisotropy_stability`). `q` is
+  `( 1 − Δ )/R ∇̄ψ`, so `B` in the `.nc` divides it out.
+* **AN-6g — the race.** A `race_geq.py` case: geq's script with
+  `KineticClosure`, MEQ's `meq.toml` with AN-6f's keys, both reading the same
+  held tables. Timed by M-295's protocol.
 
-#### Decided at AN-7a, with the author
+#### Decided at AN-6c, with the author
 
 * **Which table.** GF1's is a real kinetic solve on another machine, and is
   carried here by self-similar scaling. mirrorfp's `prescribed_closure.py`
@@ -627,10 +645,10 @@ are not that equation, so the race poses the fixed point they converge to:
 * **What `q`'s consumers assume.** AN-1 begins with the audit.
 * **`FullNL`'s cost, and whether `FullNL` runs under a Device.** Neither is
   measured.
-* **Whether geq's divergence form converges at `Δ > 0`.** If it does, AN-6's
+* **Whether geq's divergence form converges at `Δ > 0`.** If it does, AN-6b's
   firehose leg gets a reference after all.
 * **What a prescribed `Δ( ψ, z )` is physically.** Parallel force balance ties
   `∂p_∥/∂s` to `( p_∥ − p_⊥ ) ∂ ln B/∂s`. A `Δ` prescribed independently of
   `B`, with an `h( z )` cut, is a statement of a coefficient and not of a
   distribution. That is enough for a code benchmark, and it is called that.
-  A self-consistent `Δ` is AN-6's `Δ( B )` and, beyond it, a kinetic closure.
+  A self-consistent `Δ` is AN-6a's `Δ( B )` and, beyond it, a kinetic closure.
