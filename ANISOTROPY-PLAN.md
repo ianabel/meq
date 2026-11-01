@@ -628,6 +628,16 @@ are not that equation, so the race poses the fixed point they converge to:
     `Δ`'s range against AN-6a's fold, and whether `Δ` vanishes at both
     labels, at the box end and on `Γ_h`, which MEQ's support needs.
 
+  * **MEASURED**: geq at its tip reproduces the table's point to 0.3%
+    (**[M-341](MEASUREMENTS.md#m-341)**), seeded near its temperatures; from
+    the runner's own start its power balance walks the wrong way and fails.
+  * **GF1's profiles do not vanish at the labels** (M-341): densities and
+    temperatures at 4 to 5% of peak, `ω` at 60% and 17%, and geq zeroes the
+    density outside them. MEQ's box refuses that, and AN-6a's support needs
+    `Δ` to vanish there. **For the author**: taper GF1's profiles to vanish at
+    both labels, to an order, and give the same tables to both codes; or keep
+    geq's jump, which MEQ does not pose.
+
   **Estimated, not measured**: the table's midplane `p_∥ − p_⊥` is −1.12
   `n_D T_i`, so `μ₀Δp ≈ −0.158 T²` and `Δ_mid ≈ −0.18` at `B_mid = 0.93 T`.
   AN-6a's fold is at `B = √(−μ₀Δp) ≈ 0.40 T`.

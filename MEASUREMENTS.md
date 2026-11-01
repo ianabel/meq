@@ -22695,3 +22695,50 @@ times the source's `n T`. Read as the deuterium's, with `T_∥` the source's
 
 **Reproduce.** A temporary `AnisotropicMirror` case, not kept: M-338's `run()`
 with a warm start, the halving loop above, and a grid export.
+
+### M-341
+
+**GF1'S 0.4 MV, 4 T WORKING POINT AT `n_e = 1e20`, SOLVED BY geq AT ITS TIP,
+IS THE CLOSURE TABLE'S EQUILIBRIUM: `n_D`, `T_D` AND `B_mid` AT `ψ_n = 0.5`
+WITHIN 0.3% OF `p2_closure_gf1.npz`'s `meta_*`, AND THE MIRROR RATIO ITS `b`
+TABLE'S TOP. ITS PROFILES DO NOT VANISH AT THE LABELS, SO MEQ's BOX REFUSES
+THEM AS THEY STAND.** `ANISOTROPY-PLAN.md`, AN-6c.
+
+**Setup.** geq `c86ced9`, freegs4e `4555a49` (the tip of
+`origin/feature/rotation_equilibrium`, exported; the sibling checkout is behind
+it). geq's `tools/gf1_scan_points.py` machine and settings, `BASE` and `ZEFF`,
+through `power_balance.scan_density_power_balance` at `n_e = 1e20`, 257²,
+midplane labels `( 0.10, 0 )`/`( 0.35, 0 )`. The reference scan the runner
+warm-starts from is not on this machine, so the temperatures start at the
+runner's own `TEMPERATURE_INIT` in one run and near the table's in the other.
+
+| at `ψ_n = 0.5` | geq, seeded at 6.4 / 7.9 keV | `p2_closure_gf1.npz` |
+|---|---|---|
+| `n_D` (m⁻³) | 8.896e19 | 8.899e19 |
+| `T_D` (eV) | 7817 | 7840 |
+| `B_mid` (T) | 0.9277 | 0.9275 |
+| mirror ratio | 4.309 | 4.3096 (`b` at the throat) |
+| `T_e` (eV) | 4911 | 6376, mirrorfp's own electron balance |
+
+The seeded run balances in 8 iterations, at peak `T_e = 4911`, `T_D = 7817`,
+`T_C = 8020` eV, `M = 6.59` at `ψ_n = 0.5`, `β = 0.0088`.
+
+**From the runner's own start, geq does not reach it.** From 1.4 / 1.6 keV the
+damped Broyden learns a Jacobian of the wrong sign in its first four steps and
+then lowers every temperature by about 280 eV a step while every species reports
+a surplus, to 74 eV at step 11. Carbon's classical-transport term is then NaN
+and `solve_quasineutrality_global` raises. That is geq's defect; the runner is
+written to start from the reference scan.
+
+**At the labels**, geq's profiles are its Gaussian ones, and they do not
+vanish: at `ψ_n = 0` and 1 the densities are 4.4% of their peak and the
+temperatures 4.6%, and `ω` is 60% of its peak at the inner label and 17% at the
+outer. geq sets the density to zero outside `ψ_n ∈ [ 0, 1 ]`, so its source
+jumps there. MEQ's box refuses an `F` above `labelTolerance` at either label
+(`RotatingSource.cpp`, [M-281](#m-281)), and AN-6a's support needs `Δ` to
+vanish there too.
+
+**Reproduce.** A per-case script calling `scan_density_power_balance` with
+`gf1_scan_points.BASE`, `ZEFF`, `ne_axis_base = 1e20`, and
+`temperature_dict_init` of 6400, 7900 and 7900 eV, with `xarray` and `pint` in
+the benchmark venv. About three minutes.
