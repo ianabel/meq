@@ -618,9 +618,12 @@ are not that equation, so the race poses the fixed point they converge to:
     tips. The scan the table names, `scan_V0.4MV_B4.0T/eq_ne_1p00e20.nc`, is
     not on this machine, so the point is solved cold and its `n_D`, `T_i` and
     `B_mid` at `ψ_n = 0.5` are checked against the table's `meta_*`.
-  * **The same point in MEQ**, through `examples/mirror-three-species.toml`'s
-    route, from tables exported off geq's answer: the isotropic race before
-    any anisotropy.
+  * **The same point in MEQ — MEASURED** →
+    **[M-342](MEASUREMENTS.md#m-342)**. `tools/geq-benchmark/gf1.py` writes
+    the case, `cases/gf1/`, tapered and held, and `race_geq.py --case gf1`
+    runs it. The two codes agree to either's resolution; from the vacuum, MEQ
+    converges on four of its twelve rungs (`TODO`), and the timed race waits
+    for an idle machine.
   * **`KineticClosure` on it**, with the GF1 table
     (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in
     `closure_mode = "multi"` even for one file, which mirrorfp's
@@ -634,9 +637,9 @@ are not that equation, so the race poses the fixed point they converge to:
   * **GF1's profiles do not vanish at the labels** (M-341): densities and
     temperatures at 4 to 5% of peak, `ω` at 60% and 17%, and geq zeroes the
     density outside them. MEQ's box refuses that, and AN-6a's support needs
-    `Δ` to vanish there. **For the author**: taper GF1's profiles to vanish at
-    both labels, to an order, and give the same tables to both codes; or keep
-    geq's jump, which MEQ does not pose.
+    `Δ` to vanish there. **Decided with the author: the densities are
+    tapered**, to geq's 1e14 floor with edge order 3 (`gf1.py`), and the
+    plasma is held and not power balanced.
 
   **Estimated, not measured**: the table's midplane `p_∥ − p_⊥` is −1.12
   `n_D T_i`, so `μ₀Δp ≈ −0.158 T²` and `Δ_mid ≈ −0.18` at `B_mid = 0.93 T`.

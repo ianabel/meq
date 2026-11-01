@@ -22742,3 +22742,46 @@ vanish there too.
 `gf1_scan_points.BASE`, `ZEFF`, `ne_axis_base = 1e20`, and
 `temperature_dict_init` of 6400, 7900 and 7900 eV, with `xarray` and `pint` in
 the benchmark venv. About three minutes.
+
+### M-342
+
+**MEQ AND geq ON GF1, TAPERED AND HELD (`cases/gf1/`), AGREE TO EITHER CODE'S
+OWN RESOLUTION: geq AT 513² IS 7.7e-7 FROM MEQ'S L2 `k = 4` AT geq'S 65² NODES,
+UNDER geq'S OWN 257-TO-513 DIFFERENCE OF 2.2e-6 AND BESIDE MEQ'S L2 `k = 3`,
+4.2e-7. BUT FROM THE VACUUM, MEQ'S BORDERED NEWTON CONVERGES ON ONLY FOUR OF
+TWELVE RUNGS, AND geq FAILS AT 65².** `ANISOTROPY-PLAN.md`, AN-6c; the case is
+`tools/geq-benchmark/gf1.py`'s.
+
+**Setup.** `race_geq.py`'s runners and error, untimed: the machine carried
+three `gffp` processes on 14 of 16 cores, so no time here is a measurement.
+MEQ `51d5b72` (install/double) at 4 threads, cold, on the shipped
+`PlasmaSize = 0.1` mesh; geq `c86ced9`, freegs4e `4555a49`, Picard
+`rtol = 2e-9`. Max and rms of `ψ` (Wb/rad) over the 65 × 65 common nodes less
+the four corners, where `max|ψ| = 0.882`.
+
+| run | from the vacuum | max | rms |
+|---|---|---|---|
+| MEQ L2 `k = 4` | 7 Newton | reference | |
+| MEQ L2 `k = 3` | 7 Newton | 4.19e-7 | 4.44e-8 |
+| MEQ L1 `k = 4` | 7 Newton | 2.03e-6 | 2.90e-7 |
+| MEQ L2 `k = 2` | 7 Newton | 7.52e-6 | 8.03e-7 |
+| MEQ L0 all `k`, L1 `k ≤ 3`, L2 `k = 1` | no convergence in 30 | | |
+| geq 65² | too many Picard iterations | | |
+| geq 129² | 31 Picard | 2.40e-5 | 4.50e-6 |
+| geq 257² | 31 Picard | 2.99e-6 | 4.67e-7 |
+| geq 513² | 31 Picard | 7.68e-7 | 1.06e-7 |
+
+geq's own differences are 2.10e-5 (129 to 257) and 2.23e-6 (257 to 513), a
+ratio of 9.4.
+
+**The coarse rungs are the discretisation's and not the equilibrium's.**
+Continued in density from 5% of GF1's, each step started from the last `.nc`,
+L0 `k = 2` converges in 3 steps to 0.46 and fails at 0.48, and L1 `k = 3`
+converges in 3 or 4 steps at every step to 1.0, the rung that stalls cold at
+1.5e-3. M-291's mirror ceiling is the same class, there at a tenth of this
+pressure.
+
+**Reproduce.** `python3 tools/geq-benchmark/gf1.py --check`, then the case
+through `race_geq.py`'s `run_meq` and `run_geq` at the settings above, with
+freegs4e's tip on `PYTHONPATH`. The timed race, `race_geq.py --case gf1`, waits
+for an idle machine.
