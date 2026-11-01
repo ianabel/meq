@@ -549,15 +549,22 @@ A race needs one well-posed equation that both codes solve. geq's outer loops
 are not that equation, so the race poses the fixed point they converge to:
 
 * **`Z_thr( ψ_n )`, `B_mid( ψ_n )` and the `ψ_n` map are held**: taken once off
-  reference/rotating's isotropic answer, written as tables, and read by both
-  codes. Neither refreshes them.
+  GF1's isotropic answer, written as tables, and read by both codes. Neither
+  refreshes them.
 * **No `smooth_delta`.** It is a filter on geq's grid, not part of the
   equation, and it would put a grid-dependent term into the reference.
 * **The divergence form is the reference**, as geq's `resolve()` forces. The
   historical form is a control where it converges.
-* **The machine and plasma are reference/rotating's**, scaled where `Δ` needs
-  it: the 20 filaments, the labels, the box and the tables. Deuterium's bracket
-  becomes `S_D`.
+* **The machine and plasma are GF1's, geq's design.** The coils are already
+  MEQ's mirror fixture: geq's two-pack at 4 T, `r_i = 0.7855`, `L = 1`,
+  `dz = 3`, its 20 filaments, and the scan family's midplane label pair
+  `( 0.10, 0 )`/`( 0.35, 0 )` (`MirrorMachine.hpp`, reference/rotating). The
+  plasma is not: reference/rotating's `N = 5e18`, `T_D = 1.53 keV` is a test
+  plasma on GF1's coils. The closure table was solved on GF1's 0.4 MV working
+  point at `n_e = 1e20` (`n_D = 8.9e19`, `T_i = 7.84 keV`, `B_mid = 0.93 T`
+  at `ψ_n = 0.5`), so that point is the race's plasma, with e, D and C⁶⁺ at
+  `Z_eff = 1.55`, and the table needs no scaling. Deuterium's bracket becomes
+  `S_D`.
 
 #### Stages
 
@@ -605,21 +612,25 @@ are not that equation, so the race poses the fixed point they converge to:
     `0.9`, 23 at `0.95`, and no convergence at `0.99`. That is a defect, open
     in `TODO`, and not the operator's: the bump shares its `1 − Δ` and
     converges.
-* **AN-6c — the closure on our machine, and the size of `Δ`.**
-  `KineticClosure` on reference/rotating's isotropic equilibrium, with the
-  GF1 table (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in
-  `closure_mode = "multi"` even for one file, which mirrorfp's troubleshooting
-  asks for. Hold `Z_thr`, `B_mid` and the map, then measure:
-  * `Δ`'s range, against M-335's −0.1 and −0.3, and its distance from
-    AN-6a's fold;
-  * whether `Δ` vanishes at both labels, at the box end and on `Γ_h`, which
-    MEQ's support needs.
+* **AN-6c — GF1's working point, the closure on it, and the size of `Δ`.**
+  * **GF1's isotropic equilibrium from geq's front end**:
+    `tools/gf1_scan_points.py 1.0`, power balanced, at geq's and freegs4e's
+    tips. The scan the table names, `scan_V0.4MV_B4.0T/eq_ne_1p00e20.nc`, is
+    not on this machine, so the point is solved cold and its `n_D`, `T_i` and
+    `B_mid` at `ψ_n = 0.5` are checked against the table's `meta_*`.
+  * **The same point in MEQ**, through `examples/mirror-three-species.toml`'s
+    route, from tables exported off geq's answer: the isotropic race before
+    any anisotropy.
+  * **`KineticClosure` on it**, with the GF1 table
+    (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in
+    `closure_mode = "multi"` even for one file, which mirrorfp's
+    troubleshooting asks for. Hold `Z_thr`, `B_mid` and the map, then measure
+    `Δ`'s range against AN-6a's fold, and whether `Δ` vanishes at both
+    labels, at the box end and on `Γ_h`, which MEQ's support needs.
 
-  `Δp` scales with this plasma's `n T`. **Estimated, not measured**: the GF1
-  table's midplane `p_∥ − p_⊥` is −1.12 in code units. reference/rotating's
-  peak `N = 5e18`, `T_D = 1.53 keV` and `B ≈ 1 T` at the midplane put
-  `Δ_mid` near −3e-3, about a hundredth of M-335's `δ₀`. So the plasma is
-  scaled, `N` or `T` by about 100, and the scaling is recorded.
+  **Estimated, not measured**: the table's midplane `p_∥ − p_⊥` is −1.12
+  `n_D T_i`, so `μ₀Δp ≈ −0.158 T²` and `Δ_mid ≈ −0.18` at `B_mid = 0.93 T`.
+  AN-6a's fold is at `B = √(−μ₀Δp) ≈ 0.40 T`.
 * **AN-6d — geq's reference, or the finding that there is none.** A per-case
   script, `KineticClosure` held as above, at 129², 257² and 513², with no
   smoothing. **The feasibility question comes first**: does Picard converge
@@ -644,14 +655,11 @@ are not that equation, so the race poses the fixed point they converge to:
   `KineticClosure`, MEQ's `meq.toml` with AN-6f's keys, both reading the same
   held tables. Timed by M-295's protocol.
 
-#### Decided at AN-6c, with the author
+#### For the author at AN-6c
 
-* **Which table.** GF1's is a real kinetic solve on another machine, and is
-  carried here by self-similar scaling. mirrorfp's `prescribed_closure.py`
-  would write one for this machine instead, a bi-Maxwellian through the same
-  Liouville map, from a geq `.nc`. That needs a JAX environment, and an
-  equilibrium file that export_rotating does not write today.
-* **One surface or several.** A single table carried by `n T` under-states
+* **Which table — GF1's.** It is a kinetic solve at GF1's working point, and
+  the race is posed there, so it is used as solved.
+* **One surface or several — open.** A single table carried by `n T` under-states
   `p_⊥` on the flanks by 45 to 55%, by geq's own measurement. That does not
   matter for a benchmark, and it would matter for physics.
 
