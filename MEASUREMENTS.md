@@ -22603,8 +22603,8 @@ steps at `−0.1` and `−0.2`, and at `−0.22` and `−0.24`.
   and 6.223e-08, which is 1.005, 1.033 and 0.964 of the isotropic one; at
   `+0.9`, 0.972, 1.023 and 0.903; at `+3.0`, 0.906, 1.404 and 0.893.
 
-**Suites:** `AnisotropicConvergence` green; `AnisotropicMirror` green, in 14.5
-minutes.
+**Suites:** double 91/92, the standing red only (`PlasmaEdgeConvergence`);
+`AnisotropicMirror` alone in 14.5 minutes.
 
 **Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1
 ./AnisotropicConvergence --run_test='*ield*'` and `./AnisotropicMirror`.
