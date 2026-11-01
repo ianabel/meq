@@ -22479,3 +22479,56 @@ time, so geq still does not use the threads. Its `rtol = 2e-9` still gives the
 `PYTHONPATH=<tip> tools/freegs4e-benchmark/venv/bin/python
 tools/geq-benchmark/race_geq.py --case <shape>`, about 50 minutes a shape.
 Each writes `race.md` and `race.json` under `runs/geq-benchmark/race/`.
+
+### M-337
+
+**AN-5: MEQ AGAINST geq WITH A PRESSURE ANISOTROPY. AT `δ₀ = −0.1` AND `−0.3`,
+AGAINST BOTH OF geq'S REARRANGEMENTS, MEQ'S ANSWER LIES 0.19 TO 0.30 OF geq'S
+OWN 257-AGAINST-513 DIFFERENCE FROM geq'S 513², AND THE DIFFERENCE FALLS AT
+geq'S RATE. THAT IS WHERE A geq CONVERGING AT ORDER 2.1 TO 2.6 AGAINST THE
+EXACT ANSWER PUTS IT. THE LABELS AGREE TO 3.4e-08. `Δ` MOVES geq'S ANSWER BY
+2.3e-03 AND 6.3e-03, 10⁴ TIMES THE DISAGREEMENT.** `ANISOTROPY-PLAN.md`,
+AN-5.
+
+**Setup.** `RotatingMirror --run_test=anisotropic`, the ctest
+`RotatingMirrorAnisotropic`. MEQ solves M-261's problem with AN-4's
+`Δ = δ₀ (4Ψ(1 − Ψ))³ (1 − (z/1.2)²)³`, through the flux law beside the 20
+subtracted filaments, with the DtN and the bordered Newton. It reads it at
+level 2, `k = 4` (19,276 elements), by `ψ*`. Its own error is bounded from
+level 1 as MR-4c's is, `|ψ*₁ − ψ*₂|/(2⁴ − 1)`. geq is M-335's answer, at geq
+`c86ced9` and freegs4e `4555a49`. MEQ is the `an-5` branch off `61839d2`,
+double, on the host. The differences are over geq's 65 × 65 common nodes less
+its four corners (MR-4d's reason), 4,221 nodes, all in `D_h`. MEQ takes 3
+Newton steps at both levels and both `δ₀`, and 26 s at level 2.
+
+| `δ₀` | form | MEQ − geq 129 | 257 | 513 | rates | geq 257 − 513 | at 513, of it |
+|---|---|---|---|---|---|---|---|
+| −0.1 | historical | 3.21e-06 | 6.87e-07 | 1.58e-07 | 2.23, 2.12 | 5.29e-07 | 0.30 |
+| −0.1 | divergence | 2.83e-06 | 5.79e-07 | 1.30e-07 | 2.29, 2.15 | 4.49e-07 | 0.29 |
+| −0.3 | historical | 6.89e-06 | 1.53e-06 | 3.31e-07 | 2.17, 2.21 | 1.22e-06 | 0.27 |
+| −0.3 | divergence | 6.73e-06 | 1.56e-06 | 3.24e-07 | 2.11, 2.26 | 1.24e-06 | 0.26 |
+
+The table is max. In rms, at 513² MEQ is 0.24, 0.24, 0.23 and 0.19 of geq's
+257-against-513 difference. **MEQ's own error**, bounded, is 1.6e-08 max and
+6.4e-10 rms at `δ₀ = −0.1`, and 8.4e-08 and 3.0e-09 at `−0.3`. That is 4 to 45
+times under the 513² difference, so the residual is geq's. **The labels**:
+`ψ*` at the inner point is geq's `psi_axis` to 2.4e-09 to 8.7e-09, and at the
+outer point its `psi_bndry` to 2.7e-09 to 3.4e-08. geq's own 257-against-513
+difference is 4.5e-07 to 1.2e-06.
+
+**geq's error decelerates, and why.** geq's two forms differ at 513² by
+3.4e-08 and 6.7e-08 max. Their difference falls at 2.000 and 1.996 from 257²
+to 513², max, and 1.998 and 1.996 rms. So geq's lagged `∇Δ` contributes a part
+of exactly second order. The rest of geq's error falls faster. Read against
+MEQ, which is the exact answer to within its own bound, geq's rms error at
+`δ₀ = −0.1` falls at 2.59 then 2.34 (historical) and 2.65 then 2.38
+(divergence). geq's own three-grid rate is 2.64 and 2.70. MR-4d's criterion,
+each step within 0.30 of that one rate, fails those two second steps by 0.003
+and 0.02. The second-order part is a larger share at `δ₀ = −0.3`, where the
+rates are already about 2.3 and steady. The rate asserted is therefore the
+slower of geq's three-grid rate and the forms' rate, about 2.0. Every step of
+every case is above 2.0 itself, the lowest at 2.11.
+
+**Reproduce.** `MKL_NUM_THREADS=1 ./RotatingMirror --run_test=anisotropic` in
+`builds/double/tests`, with M-335's answer in
+`runs/geq-benchmark/reference/anisotropic/`, about 70 seconds.

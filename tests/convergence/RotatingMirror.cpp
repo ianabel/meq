@@ -1,6 +1,6 @@
 /*
  * MR-4: THE FREE-BOUNDARY ROTATING MIRROR, THROUGH MEQ, AGAINST geq.
- * MIRROR-PLAN.md MR-4b, MR-4c and MR-4d.
+ * MIRROR-PLAN.md MR-4b, MR-4c and MR-4d; ANISOTROPY-PLAN.md AN-5.
  *
  * Everything at once: meq::NormalisedRotatingSource at two species, both labels
  * pinned at prescribed points on the midplane, the box support, geq's twenty
@@ -116,6 +116,8 @@ namespace
 	char const *const ladderStem = "RotatingMirrorLadder";
 	/// The midplane suite's ladder, its own ctest and so its own files.
 	char const *const midplaneStem = "RotatingMirrorMidplane";
+	/// The anisotropic suite's, likewise.
+	char const *const anisotropicStem = "RotatingMirrorAnisotropic";
 	/// The stem sampled() meshes under: the resolution suite's, unless the
 	/// midplane suite -- which runs in its own process -- has claimed it.
 	char const *ladderStemInUse = ladderStem;
@@ -332,6 +334,9 @@ namespace
 		double tau = meq::MirrorStabilisation::tau0;
 		bool diffusionScaledTau = true;
 		double tauFloorRadius = meq::MirrorStabilisation::floorRadius;
+		/// setAnisotropy()'s Delta, borrowed, which must outlive the run;
+		/// null is the isotropic mirror.
+		meq::Anisotropy const *anisotropy = nullptr;
 	};
 
 	/// Everything one plasma solve aliases, kept alive with it.
@@ -470,6 +475,8 @@ namespace
 		if ( o.diffusionScaledTau )
 			solver.setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
 			                      o.tauFloorRadius );
+		if ( o.anisotropy )
+			solver.setAnisotropy( *o.anisotropy );
 		solver.setAxisFluxPoint( p.axisPointR, p.axisPointZ );
 		solver.setBoundaryFluxPoint( p.boundaryPointR, p.boundaryPointZ );
 		if ( o.seedBoundary )
@@ -976,11 +983,13 @@ namespace
 			[]( double x ) { return std::isfinite( x ); } ) );
 	}
 
-	/// One of geq's untracked psi files, R z psi on geqNodes() in order.
-	std::vector<double> readGeqPsi( std::string const &name )
+	/// One of geq's untracked psi files, R z psi on geqNodes() in order, from
+	/// @a directory: the rotating case's answer unless another case's is named.
+	std::vector<double> readGeqPsi( std::string const &name,
+	                                std::string const &directory = rotatingAnswerDirectory() )
 	{
-		std::string const path = rotatingAnswerDirectory() + "/" + name;
-		std::ifstream in = meqtest::geq::openOutput( rotatingAnswerDirectory(), name );
+		std::string const path = directory + "/" + name;
+		std::ifstream in = meqtest::geq::openOutput( directory, name );
 		Nodes const &nodes = geqNodes();
 		std::vector<double> psi;
 		std::string line;
@@ -1016,10 +1025,11 @@ namespace
 		double boundary = std::numeric_limits<double>::quiet_NaN();
 	};
 
-	Labels readGeqLabels( std::string const &key )
+	Labels readGeqLabels( std::string const &key,
+	                      std::string const &directory = rotatingAnswerDirectory() )
 	{
-		std::string const path = rotatingAnswerDirectory() + "/solution.txt";
-		std::ifstream in = meqtest::geq::openOutput( rotatingAnswerDirectory(), "solution.txt" );
+		std::string const path = directory + "/solution.txt";
+		std::ifstream in = meqtest::geq::openOutput( directory, "solution.txt" );
 		std::string line;
 		while ( std::getline( in, line ) )
 		{
@@ -1034,7 +1044,7 @@ namespace
 			return out;
 		}
 		BOOST_TEST_REQUIRE( false, path << " has no " << key << "; regenerate it "
-			"with " << meqtest::geq::regenerationCommand( rotatingAnswerDirectory() ) );
+			"with " << meqtest::geq::regenerationCommand( directory ) );
 		return Labels();
 	}
 }
@@ -1046,7 +1056,8 @@ namespace
  * MR-5 -- the shipped example through the shipped binary, against the library.
  * `adaptive` judges the estimator on that example and `device` runs it on the
  * card; both need the binary, as `driver` does. `midplane` and `vacuum_gauge`
- * are the two crossing gauges, MIRROR-PLAN.md section 5.
+ * are the two crossing gauges, MIRROR-PLAN.md section 5. `anisotropic` is
+ * ANISOTROPY-PLAN.md AN-5: MR-4d's matrix with AN-4's Delta in both codes.
  */
 BOOST_AUTO_TEST_SUITE( solve )
 
@@ -5398,6 +5409,238 @@ BOOST_AUTO_TEST_CASE( theOuterLoopOnTheCurveIsLinear )
 			             "loop stopped at this build's target rather than its fixed point. M-272\n" );
 		else
 			BOOST_TEST( gap.max < 1.0e-4*largest( answer.plasma ), c.name );
+	}
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * ---------------------------------------------------------------------------
+ * AN-5: MEQ AGAINST geq WITH A PRESSURE ANISOTROPY
+ * ---------------------------------------------------------------------------
+ */
+
+namespace
+{
+	/// The anisotropic case's problem: reference/anisotropic/meta.txt, in the
+	/// source tree, or MEQ_GEQ_ANISOTROPIC_REFERENCE for a regenerated export,
+	/// a directory holding the whole of it, as rotatingDirectory() takes.
+	std::string anisotropicDirectory()
+	{
+		char const *override = std::getenv( "MEQ_GEQ_ANISOTROPIC_REFERENCE" );
+		return override ? std::string( override )
+		                : meqtest::geq::inputDirectory( "anisotropic" );
+	}
+
+	/// geq's anisotropic answer, untracked, or the same override.
+	std::string anisotropicAnswerDirectory()
+	{
+		char const *override = std::getenv( "MEQ_GEQ_ANISOTROPIC_REFERENCE" );
+		return override ? std::string( override )
+		                : meqtest::geq::answerDirectory( "anisotropic" );
+	}
+
+	/// geq's name for one of its solves, `<form>_<delta0>_<n>`, as
+	/// export_anisotropic.py writes it: delta0 by Python's str().
+	std::string anisotropicKey( std::string const &form, double amplitude, int n )
+	{
+		std::ostringstream out;
+		out << form << "_" << amplitude << "_" << n;
+		return out.str();
+	}
+}
+
+BOOST_AUTO_TEST_SUITE( anisotropic )
+
+/*
+ * AN-5: MR-4d'S MATRIX, WITH AN-4'S Delta IN BOTH CODES.
+ *
+ * geq's problem is reference/rotating's, with
+ *
+ *     Delta = delta0 ( 4 Psi ( 1 - Psi ) )^3 ( 1 - ( z/z_cut )^2 )^3
+ *
+ * through PrescribedAnisotropy, at each delta0 and in each of geq's two
+ * rearrangements of the lagged Delta, at 129, 257 and 513. MEQ solves the same
+ * Delta, GeqReference.hpp's ReferenceAnisotropy, through the flux law beside
+ * the subtracted filaments (AN-3b), at level 2, k = 4, read by psi* -- MR-4d's
+ * best run -- with level 1 bounding its error as MR-4c's reference is bounded.
+ *
+ * For each delta0 and each form, as MR-4d asserts it:
+ *
+ *   MEQ - geq falls at every step, in both norms;
+ *   at about geq's own rate, each step within 0.30 of the SLOWER of that
+ *   form's observed log2( |g129 - g257| / |g257 - g513| ) and the rate of the
+ *   two forms' difference, log2( |h257 - d257| / |h513 - d513| );
+ *   at 513 it is within geq's own 257-against-513 difference;
+ *   MEQ's own error is under that difference, so the residual is geq's;
+ *   psi* at the label points is geq's psi_axis and psi_bndry to within it.
+ *
+ * WHY THE SLOWER OF TWO RATES, WHERE MR-4d TAKES geq'S ONE. geq's error here
+ * carries a part of exactly second order, its lagged grad Delta by
+ * np.gradient: the two forms differ by that part alone, and their difference
+ * falls at 4 a doubling (M-335). The rest of geq's error falls faster, so the
+ * whole DECELERATES towards 2 as the second-order part takes over, and a rate
+ * read off three grids' differences over-states the last step. MEASURED at
+ * delta0 = -0.1, where the second-order part is the smaller share: MEQ - geq
+ * falls at 2.59 then 2.34 rms against geq's three-grid 2.64, with MEQ's own
+ * error 45 times under the 513 difference. The precondition MR-4d's rate rests
+ * on -- one rate across the three grids -- does not hold, so it is relaxed to
+ * the slowest rate geq's error is measured to contain; the 0.30 is not.
+ *
+ * THE CONTROL IS THE ANISOTROPY ITSELF: geq's anisotropic 513 against its
+ * isotropic 513, rotating's psi_direct_513.dat. MEQ - geq must be a thousandth
+ * of that or less, or the agreement says nothing about Delta.
+ *
+ * geq's four grid corners are left out, for MR-4d's reason.
+ */
+BOOST_AUTO_TEST_CASE( meqAgreesWithGeqWithAnAnisotropy )
+{
+	meqtest::geq::AnisotropicCase const aniso
+		= meqtest::geq::readAnisotropicCase( anisotropicDirectory() );
+	BOOST_TEST_REQUIRE( aniso.profiles == "reference/rotating",
+		"the anisotropic case takes " << aniso.profiles << "'s problem, where this "
+		"suite solves reference/rotating's" );
+	BOOST_TEST_REQUIRE( ( aniso.resolutions == std::vector<int>{ 129, 257, 513 } ) );
+	std::string const answer = anisotropicAnswerDirectory();
+
+	// geq's answers first, so that a clone without them fails in a second and
+	// names the command, rather than after the solves.
+	std::map<std::string, std::vector<double>> geq;
+	for ( double amplitude : aniso.amplitudes )
+		for ( std::string const &form : aniso.forms )
+			for ( int n : aniso.resolutions )
+			{
+				std::string const key = anisotropicKey( form, amplitude, n );
+				geq[ key ] = withoutCorners( readGeqPsi( "psi_" + key + ".dat", answer ) );
+				readGeqLabels( "labels_" + key, answer );
+			}
+	std::vector<double> const isotropic = withoutCorners( readGeqPsi( "psi_direct_513.dat" ) );
+
+	std::printf( "\n  AN-5: MEQ against geq with AN-4's Delta\n" );
+	for ( double amplitude : aniso.amplitudes )
+	{
+		meqtest::geq::ReferenceAnisotropy const delta( amplitude, aniso.zCut );
+		Options o;
+		o.order = bestOrder;
+		o.stem = anisotropicStem;
+		o.anisotropy = &delta;
+		o.level = bestLevel - 1;
+		Sampled const coarse = sample( o );
+		o.level = bestLevel;
+		Sampled const best = sample( o );
+		BOOST_TEST_REQUIRE( finiteCount( best.psiStar )
+		                    == static_cast<int>( best.psiStar.size() ) );
+
+		Difference own = difference( coarse.psiStar, best.psiStar );
+		double const factor = std::pow( 2.0, postProcessedRate( bestOrder ) ) - 1.0;
+		own.max /= factor;
+		own.rms /= factor;
+		std::vector<double> const meq = withoutCorners( best.psiStar );
+
+		std::printf( "\n  delta0 = %g, z_cut = %g: MEQ at level %d, k = %d, psi* "
+		             "( %d elements ), %d and %d Newton steps at levels %d and %d, "
+		             "%.1f s at level %d\n", amplitude, aniso.zCut, best.level, best.order,
+		             best.elements, coarse.newtonSteps, best.newtonSteps, coarse.level,
+		             best.level, best.seconds, best.level );
+		printDifference( "MEQ's own error, bounded", own );
+		Difference const signal = difference(
+			geq[ anisotropicKey( aniso.forms.front(), amplitude, 513 ) ], isotropic );
+		printDifference( "CONTROL: geq 513, Delta - isotropic", signal );
+		if ( aniso.forms.size() == 2 )
+			printDifference( "geq 513, one form - the other",
+				difference( geq[ anisotropicKey( aniso.forms[ 0 ], amplitude, 513 ) ],
+				            geq[ anisotropicKey( aniso.forms[ 1 ], amplitude, 513 ) ] ) );
+
+		// The rate of geq's second-order part, from the two forms' difference
+		// on 257 and 513: max then rms. With one form there is none to read,
+		// and geq's own rate stands alone.
+		double formsRate[ 2 ] = { std::numeric_limits<double>::infinity(),
+		                          std::numeric_limits<double>::infinity() };
+		if ( aniso.forms.size() == 2 )
+		{
+			Difference const f257 = difference(
+				geq[ anisotropicKey( aniso.forms[ 0 ], amplitude, 257 ) ],
+				geq[ anisotropicKey( aniso.forms[ 1 ], amplitude, 257 ) ] );
+			Difference const f513 = difference(
+				geq[ anisotropicKey( aniso.forms[ 0 ], amplitude, 513 ) ],
+				geq[ anisotropicKey( aniso.forms[ 1 ], amplitude, 513 ) ] );
+			formsRate[ 0 ] = std::log2( f257.max/f513.max );
+			formsRate[ 1 ] = std::log2( f257.rms/f513.rms );
+			std::printf( "    the forms' difference falls at %.3f ( max ) and %.3f ( rms ) "
+			             "from 257 to 513\n", formsRate[ 0 ], formsRate[ 1 ] );
+		}
+
+		for ( std::string const &form : aniso.forms )
+		{
+			std::vector<double> const &g129 = geq[ anisotropicKey( form, amplitude, 129 ) ];
+			std::vector<double> const &g257 = geq[ anisotropicKey( form, amplitude, 257 ) ];
+			std::vector<double> const &g513 = geq[ anisotropicKey( form, amplitude, 513 ) ];
+			Difference const d129 = difference( meq, g129 );
+			Difference const d257 = difference( meq, g257 );
+			Difference const d513 = difference( meq, g513 );
+			Difference const geqCoarse = difference( g129, g257 );
+			Difference const geqFine = difference( g257, g513 );
+
+			std::printf( "\n    %s form\n", form.c_str() );
+			printDifference( "MEQ - geq 129", d129 );
+			printDifference( "MEQ - geq 257", d257 );
+			printDifference( "MEQ - geq 513", d513 );
+			printDifference( "geq 129 - geq 257", geqCoarse );
+			printDifference( "geq 257 - geq 513", geqFine );
+			double const geqMax = std::log2( geqCoarse.max/geqFine.max );
+			double const geqRms = std::log2( geqCoarse.rms/geqFine.rms );
+			double const slowMax = std::min( geqMax, formsRate[ 0 ] );
+			double const slowRms = std::min( geqRms, formsRate[ 1 ] );
+			std::printf( "    rates, max: MEQ - geq %.3f then %.3f; geq's own %.3f, asserted "
+			             "against %.3f\n", std::log2( d129.max/d257.max ),
+			             std::log2( d257.max/d513.max ), geqMax, slowMax );
+			std::printf( "    rates, rms: MEQ - geq %.3f then %.3f; geq's own %.3f, asserted "
+			             "against %.3f\n", std::log2( d129.rms/d257.rms ),
+			             std::log2( d257.rms/d513.rms ), geqRms, slowRms );
+			std::printf( "    at 513: %.3f ( max ) and %.3f ( rms ) of geq's own 257 - 513\n",
+			             d513.max/geqFine.max, d513.rms/geqFine.rms );
+			Labels const l513 = readGeqLabels( "labels_" + anisotropicKey( form, amplitude, 513 ),
+			                                   answer );
+			std::printf( "    labels: psi*( ax ) - geq %.3e, psi*( bnd ) - geq %.3e; "
+			             "psi_ax - geq %.3e, psi_bnd - geq %.3e\n", best.starAxis - l513.axis,
+			             best.starBoundary - l513.boundary, best.psiAxis - l513.axis,
+			             best.psiBoundary - l513.boundary );
+			std::fflush( stdout );
+
+			std::string const where = "delta0 = " + std::to_string( amplitude ) + ", " + form;
+			for ( auto const &norm : { std::make_tuple( "max", d129.max, d257.max, d513.max,
+			                                            geqFine.max, slowMax, own.max ),
+			                           std::make_tuple( "rms", d129.rms, d257.rms, d513.rms,
+			                                            geqFine.rms, slowRms, own.rms ) } )
+			{
+				char const *name = std::get<0>( norm );
+				double const a = std::get<1>( norm ), b = std::get<2>( norm ),
+				             c = std::get<3>( norm );
+				double const floor = std::get<4>( norm ), geqRate = std::get<5>( norm );
+				BOOST_TEST( ( a > b && b > c ), where << ", " << name << ": MEQ - geq reads "
+					<< a << ", " << b << ", " << c << " at 129, 257, 513 and does not fall" );
+				for ( auto const &step : { std::make_pair( a, b ), std::make_pair( b, c ) } )
+				{
+					double const rate = std::log2( step.first/step.second );
+					BOOST_TEST( rate > geqRate - 0.30, where << ", " << name << ": MEQ - geq "
+						"falls at " << rate << " where geq's slower rate is " << geqRate );
+				}
+				BOOST_TEST( c < floor, where << ", " << name << ": at 513 MEQ - geq is " << c
+					<< ", above geq's own 257 - 513 difference " << floor );
+				BOOST_TEST( std::get<6>( norm ) < floor, where << ", " << name << ": MEQ's "
+					"own error, bounded at " << std::get<6>( norm ) << ", is not below geq's "
+					"257 - 513 difference " << floor );
+			}
+			BOOST_TEST( std::abs( best.starAxis - l513.axis ) < geqFine.max,
+				where << ": psi* at the inner point differs from geq's psi_axis by "
+				<< best.starAxis - l513.axis );
+			BOOST_TEST( std::abs( best.starBoundary - l513.boundary ) < geqFine.max,
+				where << ": psi* at the outer point differs from geq's psi_bndry by "
+				<< best.starBoundary - l513.boundary );
+			BOOST_TEST( d513.max < 1.0e-3*signal.max,
+				where << ": MEQ - geq 513 is " << d513.max << " where Delta moves geq's "
+				"answer by " << signal.max );
+		}
 	}
 }
 

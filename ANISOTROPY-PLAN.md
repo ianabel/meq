@@ -470,17 +470,34 @@ answer is regenerated, not committed.
 257² and 40 at 513², against the isotropic solve's 9, 9 and 12. A lagged `∇Δ`
 whose gain grows with resolution would do that. Not measured further.
 
-### AN-5 — MEQ against geq
+### AN-5 — MEQ against geq — DONE
 
-MR-4d's matrix:
+**DONE** → **[M-337](MEASUREMENTS.md#m-337)**.
 
-* `ψ` at geq's grid nodes, nodes outside `D_h` dropped, geq's four corners
-  excluded;
-* both labels;
-* against 129², 257² and 513².
+`RotatingMirror --run_test=anisotropic`, the ctest
+`RotatingMirrorAnisotropic`: MR-4d's matrix with AN-4's `Δ` in both codes.
+MEQ solves `GeqReference.hpp`'s `ReferenceAnisotropy`, read at
+`reference/anisotropic/meta.txt`'s `z_cut` and `δ₀`, through the flux law
+beside the subtracted filaments, at level 2, `k = 4`, read by `ψ*`. Level 1
+bounds its error. Against each `δ₀` and each of geq's forms at 129², 257² and
+513², on the 65 × 65 nodes less geq's corners, in both norms:
 
-**Acceptance**: the difference falls at geq's own observed rate. At 513² it
-sits within a small multiple of geq's own 257-against-513 difference.
+* the difference falls at every step;
+* each step falls within 0.30 of the slower of geq's own three-grid rate and
+  the rate of geq's two forms' difference;
+* at 513² it is under geq's own 257-against-513 difference, and so is MEQ's own
+  error;
+* `ψ*` at both label points is geq's `psi_axis` and `psi_bndry` to within that
+  difference;
+* it is under a thousandth of what `Δ` moves geq's answer by.
+
+**The slower of two rates, not geq's one.** geq's error carries a part of
+exactly second order, its lagged `∇Δ`: the forms differ by that alone, and
+their difference falls at 2.00 from 257² to 513². The rest falls faster, so
+the whole decelerates towards 2. At `δ₀ = −0.1`, MR-4d's single rate, read off
+three grids' differences, over-states the last step by 0.30 and 0.32 rms. One
+rate across the three grids is a precondition. That is what is relaxed; the
+0.30 is not.
 
 ### AN-6 — beyond geq, and through the front end
 
