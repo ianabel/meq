@@ -456,6 +456,38 @@ python3 tools/geq-benchmark/shapes.py            # rewrite cases/
 python3 tools/geq-benchmark/shapes.py --check    # assert they are current
 ```
 
+### GF1: `gf1.py` and `cases/gf1/`
+
+**GF1's working point on the same machine and labels**: geq's 0.4 MV, 4 T point
+at `n_e = 1e20`, with electrons, deuterons and fully stripped carbon at
+`Z_eff = 1.55`, **held and not power balanced**
+(**[M-341](../../MEASUREMENTS.md#m-341)**). `gf1.py` writes it, in
+`shapes.py`'s layout, and `race_geq.py --case gf1` runs it.
+
+* **The temperatures** are geq's GF1 Gaussians,
+  `generate_temperature_profile( ψ_n, peak, 10 eV, 1 )`, with M-341's balanced
+  peaks held as inputs: 4911, 7817 and 8020 eV.
+* **The densities are tapered.** geq's GF1 profiles sit at 4.4% of their peak
+  at the labels and geq zeroes them outside, which the box refuses. `n_e( z = 0 )`
+  is geq's `generate_density_z0_profile( ψ_n, 1e20, 1e14, 1 )` brought to geq's
+  own 1e14 floor by `t( ψ_n ) = S( ψ_n/0.1 ) S( ( 1 − ψ_n )/0.1 )`,
+  `S( u ) = u³( 10 − 15u + 6u² )` below 1: unchanged on `0.1 ≤ ψ_n ≤ 0.9`, and
+  edge order 3 at both labels. Carbon is `0.55/30` of it, as freegs4e derives it
+  from `Z_eff`.
+* **`ω` is M-341's solved profile, held**, as a degree-8 polynomial in `ψ_n`
+  within 1.0e-3 of its peak. geq's voltage drive moves `ω` with the equilibrium
+  every Picard step, which MEQ does not pose. It is not tapered.
+
+**MEQ's coarse rungs do not reach it cold.** At `PlasmaSize = 0.1`, a density
+continuation stops at 0.48 of GF1's density at L0, `k = 2`, and reaches it at
+L1, `k = 3`; cold, L1 `k = 3` stalls and L2 `k = 3`, L1 `k = 4` and L2 `k = 4`
+converge.
+
+```sh
+python3 tools/geq-benchmark/gf1.py               # rewrite cases/gf1/
+python3 tools/geq-benchmark/gf1.py --check       # assert it is current
+```
+
 ## The race: `race_geq.py`
 
 MEQ and geq solving **the same rotating mirror**, one of `cases/`, each run
