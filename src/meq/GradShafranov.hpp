@@ -2560,6 +2560,21 @@ namespace meq
 			 * are differenced and never the source's analytic ones, which know
 			 * nothing of the flux law's dependence on the labels.
 			 *
+			 * A meq::FieldAnisotropy (AN-6a) IS ALWAYS A FLUX LAW. It hands
+			 * mu0 Delta_p, and the law forms Delta = mu0 Delta_p/B^2 at the
+			 * iterate's B = |q_total|/( 1 - Delta ), q_total = -( u_p - q_c )
+			 * the TOTAL flux, by meq::fieldDelta(): so d Delta/d u is in the
+			 * flux-flux block too, a rank-one addition to R/( 1 - Delta ),
+			 * and the flux-potential block carries d Delta/d psi through
+			 * mu0 Delta_p's dependence on its argument. Its checks are made on
+			 * the solved answer alone: a point past fieldDelta()'s fold (no B
+			 * carries the flux) is refused there, by solve(), as the firehose
+			 * limit is; Gamma_h's condition is on mu0 Delta_p. postProcess()
+			 * freezes Delta at the solved flux for the reconstruction, which
+			 * otherwise linearises the law at zero flux, where there is no B.
+			 * Beside setStabilisationFollowsAnisotropy() it is refused.
+			 * The seed weights q by Delta at the guess's own B.
+			 *
 			 * @param anisotropyIn borrowed, and must outlive the solver.
 			 * @throws std::logic_error after the forms are built, or if one is
 			 *         already set.
@@ -2574,7 +2589,8 @@ namespace meq
 			 * this is what keeps the stabilisation in proportion to the diffusion
 			 * it stabilises. Off by default: ANISOTROPY-PLAN.md AN-3a measures it.
 			 * Host-only, as the anisotropy is. Refused at the first solve without
-			 * a position anisotropy.
+			 * a position anisotropy, and beside a meq::FieldAnisotropy, which
+			 * reads B whatever its argument.
 			 */
 			void setStabilisationFollowsAnisotropy( bool follows );
 
@@ -6345,8 +6361,10 @@ namespace meq
 			/// the .cpp. Rebuilt with the forms.
 			std::unique_ptr<mfem::GridFunctionCoefficient> fluxMassRadius;
 
-			/// setAnisotropy()'s Delta, borrowed, or null.
+			/// setAnisotropy()'s Delta, borrowed, or null; and the same object
+			/// as a meq::FieldAnisotropy when it is one, or null.
 			Anisotropy const *anisotropyValue = nullptr;
+			FieldAnisotropy const *fieldAnisotropyValue = nullptr;
 
 			/// 1/( 1 - Delta ), and R times it, the anisotropic flux mass weight.
 			/// Null without an anisotropy. Rebuilt with the forms.
@@ -6359,14 +6377,37 @@ namespace meq
 			/// not null, d Delta/d psi by the chain rule, 1/( psi_ax - psi_bnd )
 			/// applied here. The ONE place that mapping is made, so the flux law,
 			/// its Jacobian, the seed and the refusal cannot disagree on it.
+			///
+			/// **UNDER A meq::FieldAnisotropy THIS IS Delta's NUMERATOR**,
+			/// FieldAnisotropy::pressure() and its derivative, which the caller
+			/// turns into Delta through meq::fieldDelta() and the flux.
 			double anisotropyAt( double radius, double z, double psi,
 			                     double *dDeltaDPsi ) const;
+
+			/// Whether Delta reads anything of the solution -- psi, or B -- so
+			/// that it is checked on the solved answer rather than before it.
+			bool anisotropyReadsTheSolution() const;
+
+			/// The remainder flux u_p, DarcyForm's -q, at @a point of @a element,
+			/// from @a flux, the flux block's host values, and the flux space's
+			/// own shape: reentrant, and reaching no memory manager.
+			void solvedFluxAt( mfem::real_t const *flux, int element,
+			                   mfem::IntegrationPoint const &point,
+			                   double &fluxR, double &fluxZ ) const;
 
 			/// The refusal of 1 - Delta <= 0, at every vertex and every point of an
 			/// order-2k + 2 rule. Delta is read at @a psi there, or at psi = 0
 			/// when @a psi is null, which is buildForms()'s call for a Delta that
 			/// does not read it; solve() makes the other, on the solved psi.
+			/// UNDER A meq::FieldAnisotropy it is the refusal of a point with no
+			/// root, past meq::fieldDelta()'s fold, at the rule's points alone,
+			/// the flux read from the solved one; never before the solve.
 			void checkAnisotropyIsElliptic( mfem::GridFunction const *psi ) const;
+
+			/// checkAnisotropyIsElliptic()'s branch for a meq::FieldAnisotropy:
+			/// a root of meq::fieldDelta() at every point of the order-2k + 2
+			/// rule, mu0 Delta_p read at @a psi and |q| from the solved flux.
+			void checkFieldAnisotropyHasARoot( mfem::GridFunction const *psi ) const;
 
 			/// The condition for an anisotropy beside setExtension() or
 			/// setExteriorCoupling(): Delta exactly zero at every vertex and every
@@ -6387,6 +6428,14 @@ namespace meq
 			/// reference. Null otherwise.
 			class AnisotropicFluxLaw;
 			std::unique_ptr<mfem::MixedFluxFunction> anisotropicFlux;
+
+			/// Set by postProcess() around the reconstruction alone: a
+			/// meq::FieldAnisotropy's law then reads |q| from the SOLVED flux,
+			/// solvedFluxHost, the flux block's host values taken before any
+			/// thread, and not from the flux it is handed, which MFEM's lift
+			/// sets to zero. Read-only inside the threaded loops.
+			bool fluxLawReadsTheSolvedFlux = false;
+			mfem::real_t const *solvedFluxHost = nullptr;
 
 			/// Whether the flux mass is the law rather than a bilinear form.
 			bool anisotropyIsAFluxLaw() const;

@@ -561,35 +561,50 @@ are not that equation, so the race poses the fixed point they converge to:
 
 #### Stages
 
-* **AN-6a — `Δ` reading `B`, in MEQ.** `meq::FieldAnisotropy` hands the
+* **AN-6a — `Δ` reading `B`, in MEQ — DONE** →
+  **[M-338](MEASUREMENTS.md#m-338)**. `meq::FieldAnisotropy` hands the
   solver `μ₀Δp`, of position or a label, and the solver forms
   `Δ = μ₀Δp/B²` at the iterate's `B`. With `g = 0`, `B = |q|/( 1 − Δ )`,
   where `q` is the total flux the law carries, so each law point solves
-  `Δ |q|² = μ₀Δp ( 1 − Δ )²`. That is a quadratic, taken on the root that
-  vanishes with `Δp`, in closed form, with `∂Δ/∂q` in the law's
-  flux-flux Jacobian and `∂Δ/∂ψ` in its flux-potential one.
-  * **The root's limits.** For `Δp > 0` it lies in `( 0, 1 )` at every
-    `|q|`, so the firehose limit is unreachable at fixed flux. For `Δp < 0`
-    it exists only while `|q|² ≥ −4μ₀Δp`, where `Δ` reaches −1 and
-    `∂Δ/∂q` diverges: a fold in `B`, at `B² = −μ₀Δp`. A solved answer past
-    it is refused, as the firehose limit is; a Newton iterate past it is
-    held at the fold.
+  `Δ |q|² = μ₀Δp ( 1 − Δ )²` (`meq::fieldDelta()`). That is a quadratic,
+  taken on the root that vanishes with `Δp`, in closed form, with `∂Δ/∂q` in
+  the law's flux-flux Jacobian and `∂Δ/∂ψ` in its flux-potential one.
+  * **The operator is elliptic only for `−1 < Δ < 1`.** Linearised, its
+    coefficient across `∇ψ` is `1 − Δ` and along it `1 + Δ`, since
+    `|q| = B − μ₀Δp/B`. For `Δp > 0` the root lies in `( 0, 1 )` at every
+    `|q|`, so at fixed flux the firehose limit is unreachable. For `Δp < 0`
+    it exists only while `|q|² ≥ −4μ₀Δp`: there `Δ = −1`, `B² = −μ₀Δp`, and
+    no `B` carries less flux. A solved answer past that fold is refused,
+    as the firehose limit is; a Newton iterate past it is held at the fold.
+    **So `δ₀` of a `Δ( B )` is a pressure and not a `Δ`**: on the mirror,
+    `δ₀ = −0.2` solves with `Δ` down to `−0.34`, `−0.24` still converges, and
+    `−0.3` has no equilibrium at this flux.
   * **The reconstruction freezes `Δ` at the solved flux.** MFEM lifts a flux
     law into `ψ*`'s local problem by its Jacobian at zero flux, and at zero
     flux there is no `B`. Under `postProcess()` the law reads `|q|` from the
-    solved flux instead, so the local problem carries the solved
-    `R/( 1 − Δ_h )`.
-  * **Accepted**: the manufactured position model posed as `Δ( B )`, with
-    `μ₀Δp = Δ |∇ψ|²/R²` at the exact solution, converges at `k + 1` in
-    `ψ` and `q` and `k + 2` in `ψ*`, with Newton quadratic; the law's
-    Jacobian against a central difference; on the mirror, `Δ( B )` beside
-    the subtracted filaments is the meshed route, as AN-3b has it, which a
-    `B` read from the remainder's flux alone would fail by order `Δ`.
-* **AN-6b — `Δ > 0` towards the firehose limit.** MEQ against itself only,
-  since geq has no converged reference there. AN-3a's two shapes at positive
-  `δ₀`, stepped towards 1: Newton's count and history, and the ladder's
-  rates against the isotropic one's. Where it stops, and why, is the
-  finding.
+    solved flux instead. Without it `ψ*` converges at order 1.
+  * **The condensed residual's element solves start from the stored flux**,
+    and zero flux is past the fold wherever `Δp < 0`. MEQ's Newton is NPC's
+    and makes none; a solver started cold on the condensation would.
+  * **Accepted**: the manufactured position model posed as `Δ( B )`, on a
+    box without `ψ`'s O-point, converges at `k + 1` in `ψ` and `q` and
+    `k + 2` in `ψ*`; its Jacobian matches a central difference at either
+    sign; restarted near the answer, Newton is quadratic at either sign;
+    threaded is serial to the bit. On the mirror, `Δ( B )` beside the
+    subtracted filaments is the meshed route, as AN-3b has it, and its
+    ladder is the isotropic one's.
+* **AN-6b — `Δ > 0` towards the firehose limit — MEASURED** →
+  **[M-339](MEASUREMENTS.md#m-339)**. MEQ against itself only, since geq has
+  no converged reference there.
+  * **A `Δ` of position converges to `δ₀ = 0.99`** in 3 or 4 Newton steps,
+    and its ladder converges, with differences 3 to 21 times the isotropic
+    ones at `0.9`: the operator is nearly degenerate at the bump's peak.
+  * **`Δ( B )` converges at every pressure tried, to `3.0`**, in 3 or 4 steps,
+    its ladder the isotropic one's: at fixed flux the limit is not reachable.
+  * **`Δ( Ψ )` converges to `0.7`, and then crawls**: 12 Newton steps at
+    `0.9`, 23 at `0.95`, and no convergence at `0.99`. That is a defect, open
+    in `TODO`, and not the operator's: the bump shares its `1 − Δ` and
+    converges.
 * **AN-6c — the closure on our machine, and the size of `Δ`.**
   `KineticClosure` on reference/rotating's isotropic equilibrium, with the
   GF1 table (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in

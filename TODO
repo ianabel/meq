@@ -432,11 +432,24 @@ Raised 2026-08-25.
 
   ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3
   are done (M-328 to M-334), AN-4, geq's reference (M-335), and AN-5, MEQ
-  against it (M-337). AN-6 is next: Delta( B ) (AN-6a), the firehose
-  side (AN-6b), and a race on a mirrorfp closure (AN-6c to AN-6g).
+  against it (M-337). Of AN-6, Delta( B ) is done (AN-6a, M-338) and the
+  firehose side measured (AN-6b, M-339); the race on a mirrorfp closure,
+  AN-6c to AN-6g, is next.
+
+  DELTA( Psi ) CRAWLS TOWARDS THE FIREHOSE LIMIT (M-339). On the meshed
+  mirror, level 0, k = 2, from the vacuum: 3 or 4 Newton steps to
+  delta0 = 0.7, then 12 at 0.9, the residual falling from 2.6e-3 to 3.0e-4
+  over seven of them, 23 at 0.95, from 1.6e-2 to 2.4e-4 over eighteen, and
+  no convergence at 0.99. The bump, a Delta of position with the same 1 - Delta at its peak,
+  converges in 3 or 4 steps to 0.99, and Delta( B ) at any pressure tried;
+  so it is not the operator's degeneracy alone. Suspects, none measured:
+  the bordered Newton's label columns, differenced under a Delta in Psi,
+  near a Delta whose slope in Psi grows as 1 - Delta shrinks; the flux
+  law's psi-slope against the label normalisation. A crawl that converges
+  is a defect, not a slow case.
 
   NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
-  only. On builds/single (MFEM 59ef46309f):
+  only, AN-6a's Delta( B ) included. On builds/single (MFEM 59ef46309f):
 
   * AnisotropicConvergence, 25 cases: the constant-Delta rescaling and the
     zero flux model against the isotropic Newton solve assert 1e-10 and

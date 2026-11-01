@@ -22532,3 +22532,123 @@ every case is above 2.0 itself, the lowest at 2.11.
 **Reproduce.** `MKL_NUM_THREADS=1 ./RotatingMirror --run_test=anisotropic` in
 `builds/double/tests`, with M-335's answer in
 `runs/geq-benchmark/reference/anisotropic/`, about 70 seconds.
+
+### M-338
+
+**AN-6a: `Δ` THAT READS `B`. THE MANUFACTURED POSITION MODEL POSED AS
+`Δ = μ₀Δp/B²` CONVERGES AT `k + 1` IN `ψ` AND `q` AND `k + 2` IN `ψ*`, `k = 1`
+TO 4, WITH NEWTON QUADRATIC AT EITHER SIGN. ON THE MIRROR IT CONVERGES IN 3
+NEWTON STEPS, BESIDE THE SUBTRACTED FILAMENTS IT IS THE MESHED ROUTE, AND ITS
+LADDER IS THE ISOTROPIC ONE'S. AT FIXED FLUX A PRESSURE PAST
+`μ₀Δp = −|q|²/4` HAS NO EQUILIBRIUM, WHERE `Δ = −1` AND THE OPERATOR STOPS
+BEING ELLIPTIC.** `ANISOTROPY-PLAN.md`, AN-6a.
+
+**Setup.** `meq::FieldAnisotropy` and `meq::fieldDelta()`, on the `an-6a`
+branch off `7e52698`, double, on the host. `AnisotropicConvergence`'s AN-6a
+cases and `AnisotropicMirror`'s `Δ( B )` cases.
+
+**Manufactured.** The position model `Δ = −0.3 cos( 2.5( R − 1 ) ) cos( 2z )`
+posed as its numerator, `μ₀Δp = Δ |∇ψ|²/R²` at the exact `ψ`, so the exact
+solution and source are the position model's. On `R ∈ [ 1.0, 1.75 ]`,
+`z ∈ [ −0.6, 0.6 ]`: the standard box holds `ψ`'s O-point at `( 0.935, 0 )`,
+where `B = 0`. Errors at `h = 0.0234` (`n = 32`), rates from `n = 16`:
+
+| `k` | `L2( ψ )` | rate | `L2( q )` | rate | `L2( ψ* )` | rate |
+|---|---|---|---|---|---|---|
+| 1 | 4.39e-04 | 1.999 | 7.63e-04 | 1.992 | 4.74e-06 | 2.989 |
+| 2 | 3.32e-06 | 2.998 | 6.30e-06 | 2.997 | 2.57e-08 | 3.997 |
+| 3 | 3.02e-08 | 3.999 | 6.28e-08 | 3.997 | 1.79e-10 | 4.995 |
+| 4 | 2.36e-10 | 4.999 | 5.34e-10 | 4.998 | 1.12e-12 | 5.998 |
+
+Newton takes 5 steps on every mesh, best observed order 2.11. At `+0.3`, `k = 2`:
+1.91e-06, 3.14e-06 and 1.58e-08, at 2.996, 2.996 and 3.996, in 5 steps.
+
+* **The Jacobian**, condensed, against a central difference: 7e-11 to 1.4e-10
+  at `−0.3` and 2.1e-10 to 2.9e-10 at `+0.3`, at the solved trace perturbed by
+  0.01. At 0.03 one element's flux row has no solution, past the fold, and
+  its local Newton stalls at 5e-02. MEQ's NPC Newton makes no such solve.
+* **Newton's order.** The cold start at `+0.3` reads 1.71 at best, its
+  quadratic constant growing from 6 to 62, with PARDISO and with UMFPack.
+  Restarted from the solved state with `q` and `ψ` perturbed by `δ`, the first
+  step gives `r₁/r₀²` = 2.4319e-04, 2.4268e-04 and 2.4264e-04 at `−0.3`, and
+  2.2113e-04, 2.2096e-04 and 2.2094e-04 at `+0.3`, for `δ` = 1e-2, 1e-3 and
+  1e-4. Newton is quadratic, and the cold reading is the trajectory's.
+* **Threaded is serial**, `ψ`, `q` and `ψ*` to the bit, `k = 1` and 3, 16
+  threads.
+* **The reconstruction's freeze is load-bearing.** Without it, `ψ*` at `k = 2`
+  reads 4.42e-02, 2.26e-02, 1.12e-02 and 5.65e-03, order 1.
+
+**The mirror.** `μ₀Δp = 1.12 δ₀ (4Ψ(1 − Ψ))³ (1 − (z/1.2)²)³` T², 1.12 T²
+being the isotropic meshed mirror's `B²` at the midplane (`B_z` 1.05 to 1.06 T
+at `R = 0.22` to 0.26). From the meshed vacuum, level 0, `k = 2`:
+
+| `δ₀` | Newton | solved `Δ` over the machine region | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|---|
+| −0.1 | 3 | [ −0.124, 0 ] | 5.615010e-03 | 6.314076e-02 |
+| −0.2 | 3 | [ −0.338, 0 ] | 5.695803e-03 | 6.023806e-02 |
+| −0.22 | 3 | | 5.716846e-03 | 5.952082e-02 |
+| −0.24 | 3 | | 5.740750e-03 | 5.872457e-02 |
+| −0.3 | refused | | | |
+
+At `−0.3` the solved answer has `μ₀Δp = −0.328` T² against `|q|² = 1.288` T²
+at `( 0.254, −0.109 )`, under the `1.31` the root needs. The subtracted route converges in 3
+steps at `−0.1` and `−0.2`, and at `−0.22` and `−0.24`.
+
+* **Subtracted against meshed**, `k = 2`, rms of the total `ψ*`, at
+  `δ₀ = −0.2`: 1.196e-04, 1.498e-06 and 9.042e-07, which is 1.007, 1.005 and
+  1.009 of the isotropic 1.188e-04, 1.491e-06 and 8.962e-07, M-334's meshed
+  limit. With `B` read from the remainder's flux alone, the subtracted solve
+  does not converge at level 0.
+* **The `k = 3` ladder**, levels 0 to 3: at `δ₀ = −0.2`, 5.122e-05, 3.390e-07
+  and 6.223e-08, which is 1.005, 1.033 and 0.964 of the isotropic one; at
+  `+0.9`, 0.972, 1.023 and 0.903; at `+3.0`, 0.906, 1.404 and 0.893.
+
+**Suites:** `AnisotropicConvergence` green; `AnisotropicMirror` green, in 14.5
+minutes.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1
+./AnisotropicConvergence --run_test='*ield*'` and `./AnisotropicMirror`.
+
+### M-339
+
+**AN-6b: `Δ > 0` ON THE MIRROR, MEQ AGAINST ITSELF. A `Δ` OF POSITION
+CONVERGES TO `δ₀ = 0.99` AND `Δ( B )` AT EVERY PRESSURE TRIED, IN 3 OR 4
+NEWTON STEPS. `Δ( Ψ )` CONVERGES TO 0.7 AND THEN CRAWLS, AND AT 0.99 IT DOES
+NOT CONVERGE: A DEFECT, OPEN IN `TODO`.** `ANISOTROPY-PLAN.md`, AN-6b.
+
+**Setup.** As M-338, meshed, from the vacuum, level 0, `k = 2`; AN-3a's bump
+and `Δ( Ψ )` and M-338's `Δ( B )`.
+
+| `δ₀` | bump | `Δ( Ψ )` | `Δ( B )` |
+|---|---|---|---|
+| 0.1 | 3 | 3 | 3 |
+| 0.3 | 3 | 3 | 3 |
+| 0.5 | 3 | 4 | 3 |
+| 0.7 | 3 | 4 | 3 |
+| 0.9 | 3 | **12** | 3, `Δ` to 0.381 |
+| 0.95 | 3 | **23** | 3 |
+| 0.99 | 4 | **fails** | 3 |
+| 1.5 | | | 4 |
+| 3.0 | | | 4, `Δ` to 0.593 |
+
+**`Δ( Ψ )`'s crawl.** At 0.9 the residual falls from 2.6e-03 to 3.0e-04 over
+seven steps, and at 0.95 from 1.6e-02 to 2.4e-04 over eighteen, each step
+removing between 0.2% and 72% of it, before it converges in four more. The bump has the same `1 − Δ` at its peak and
+does not crawl, so the operator's near-degeneracy is not the cause on its own.
+Not diagnosed.
+
+**The `k = 3` ladder**, levels 0 to 3, against the isotropic one:
+
+| | 0–1 | 1–2 | 2–3 | rates | of the isotropic |
+|---|---|---|---|---|---|
+| bump, 0.9 | 1.318e-04 | 6.801e-06 | 8.811e-07 | 4.28, 2.95 | 2.6, 20.7, 13.6 |
+| `Δ( Ψ )`, 0.7 | 5.367e-05 | 5.668e-06 | 2.323e-07 | 3.24, 4.61 | 1.1, 17.3, 3.6 |
+| `Δ( B )`, 0.9 | 4.957e-05 | 3.359e-07 | 5.834e-08 | 7.21, 2.53 | 0.97, 1.02, 0.90 |
+
+Both of the former converge, with larger differences: `1 − Δ` is 0.1 and 0.3
+at their peaks. `Δ( B )` at 0.9 reaches only 0.381, and is the isotropic
+ladder's.
+
+**Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror
+--run_test=theAnisotropicMirrorConvergesTowardsTheFirehoseLimit`. The crawl
+and the positive ladders were measured with temporary cases, not kept.
