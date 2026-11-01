@@ -22652,3 +22652,46 @@ ladder's.
 **Reproduce.** `cd builds/double/tests && MKL_NUM_THREADS=1 ./AnisotropicMirror
 --run_test=theAnisotropicMirrorConvergesTowardsTheFirehoseLimit`. The crawl
 and the positive ladders were measured with temporary cases, not kept.
+
+### M-340
+
+**THE `Δ( B )` MIRROR AT ITS MARGIN. CONTINUED IN THE PRESSURE AMPLITUDE, THE
+EQUILIBRIUM FAMILY TURNS OVER WHERE THE MOST NEGATIVE `Δ` REACHES −1, AS A
+SQUARE ROOT: `1 + Δ_min ≈ 2.5 √( δ₀ − δ₀* )`, `δ₀* = −0.2788`. THERE IS NO
+FIELD NULL: `B` FALLS TO THE FOLD VALUE `√(−μ₀Δp)`, 0.56 T AGAINST 1.06 T
+ISOTROPIC. SO THE EQUILIBRIUM IS NOT LOST BEFORE `|Δ| = 1`; M-338's "no
+equilibrium at `−0.3`" STANDS, AND ITS LINE IS `−0.279`.** `ANISOTROPY-PLAN.md`,
+AN-6a.
+
+**Setup.** M-338's meshed mirror and `Δ( B )`, each solve started from the
+last converged state (`setInitialState()`), `δ₀` stepped by −0.01 and the step
+halved on each failure down to 1e-5. `Δ_min` and `B_min` are read from `q_h`
+and `ψ_h` on a 1 cm × 2 cm grid over the machine region, and so sit slightly
+above the extreme at the solver's own points.
+
+| `δ₀` | level 1, `k = 3`: Newton | `Δ_min` | `B_min` (T) | level 0, `k = 2`: `Δ_min` |
+|---|---|---|---|---|
+| −0.20 | 3 | −0.347 | 0.802 | −0.344 |
+| −0.24 | 3 | −0.515 | 0.722 | −0.508 |
+| −0.26 | 3 | −0.654 | 0.667 | −0.640 |
+| −0.27 | 3 | −0.763 | 0.629 | −0.739 |
+| −0.275 | 4 | −0.846 | 0.603 | |
+| −0.2775 | 8 | −0.909 | 0.584 | |
+| −0.27875 | 7 | −0.966 | 0.568 | |
+| −0.278828 | 3 | −0.973 | 0.566 | |
+
+The last converged `δ₀` is −0.278828 at level 1, `k = 3`, and −0.280742 at
+level 0, `k = 2`. `(1 + Δ_min)/√(δ₀ − δ₀*)` reads 2.53, 2.50 and 2.49 at
+−0.27, −0.275 and −0.2775. Every failure past the margin is the solver's
+refusal of a point with `|q|² < 4|μ₀Δp|`, at level 0 to five figures of
+equality at −0.28076. Sampled on a 5 mm × 1 cm grid, the marginal answer has
+`Δ = −0.977` at `( 0.253, 0 )`, where `B = 0.565` T against the fold's
+`√(−μ₀Δp) = 0.558` T and the isotropic 1.06 T; there
+`2μ₀( p_⊥ − p_∥ )/B² = 2.04`, `p_∥` and `p_⊥` constructed as below.
+
+**Not this plasma's own `Δp`.** At the margin `|Δp| ≈ 2.5e5` Pa, about twenty
+times the source's `n T`. Read as the deuterium's, with `T_∥` the source's
+`T_D`, it needs `T_⊥ = T_∥ − Δp/n_D` up to 102 keV.
+
+**Reproduce.** A temporary `AnisotropicMirror` case, not kept: M-338's `run()`
+with a warm start, the halving loop above, and a grid export.
