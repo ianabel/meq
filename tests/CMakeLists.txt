@@ -752,8 +752,12 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	# The bordered gauge's route from the vacuum through the held table,
 	# against the starts it replaces, and the outer loop on the curve.
 	add_test(NAME RotatingMirrorRoute COMMAND RotatingMirror --run_test=route)
+	# ANISOTROPY-PLAN.md AN-5: MR-4d's matrix with AN-4's Delta in both codes,
+	# against geq's untracked answer, which export_anisotropic.py writes.
+	add_test(NAME RotatingMirrorAnisotropic COMMAND RotatingMirror --run_test=anisotropic)
 	set_tests_properties(RotatingMirror RotatingMirrorResolution RotatingMirrorMidplane
-		RotatingMirrorVacuumGauge RotatingMirrorBorder RotatingMirrorRoute PROPERTIES
+		RotatingMirrorVacuumGauge RotatingMirrorBorder RotatingMirrorRoute
+		RotatingMirrorAnisotropic PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 	# MR-5's acceptance: examples/mirror-rotating.toml through the shipped
 	# binary, against the library on geq's problem. It needs the driver and its

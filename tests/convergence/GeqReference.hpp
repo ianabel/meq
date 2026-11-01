@@ -16,6 +16,7 @@
  * test framework to its caller.
  */
 
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -24,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "meq/Anisotropy.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/RotatingSource.hpp"
 
@@ -77,6 +79,8 @@ namespace geq
 			return run + "export_vacuum.py" + lands;
 		if ( name == "rotating" )
 			return run + "export_rotating.py" + lands + " ( about eleven minutes )";
+		if ( name == "anisotropic" )
+			return run + "export_anisotropic.py" + lands + " ( about an hour and a half )";
 		return "the export script tools/geq-benchmark/README.md names for " + directory;
 	}
 
@@ -231,6 +235,118 @@ namespace geq
 		return std::make_shared<meq::SplineProfile const>(
 			meq::SplineProfile::fromFile( reference.directory + "omega.dat" ) );
 	}
+
+	/**
+	 * WHAT reference/anisotropic/meta.txt SAYS: the rotating case's problem
+	 * with a Delta, ANISOTROPY-PLAN.md AN-4. The shape is fixed by the export,
+	 * and the numbers in it -- the cut and the amplitudes -- are read here, so
+	 * that a reference regenerated at another delta0 is compared at its own.
+	 */
+	struct AnisotropicCase
+	{
+		std::string directory;  ///< with its trailing '/'
+		std::string profiles;   ///< the case whose problem it takes, "reference/rotating"
+		double zCut = 0.0;
+		std::vector<double> amplitudes;  ///< delta0, each solved
+		std::vector<std::string> forms;  ///< geq's rearrangements, each solved
+		std::vector<int> resolutions;
+	};
+
+	/// @param directory the case's INPUT directory, with or without a
+	///        trailing '/'.
+	/// @throws std::runtime_error naming meta.txt when it cannot be opened or
+	///         lacks a key.
+	inline AnisotropicCase readAnisotropicCase( std::string directory )
+	{
+		if ( directory.empty() || directory.back() != '/' )
+			directory += '/';
+		AnisotropicCase out;
+		out.directory = directory;
+
+		std::string const metaPath = directory + "meta.txt";
+		std::ifstream meta( metaPath );
+		if ( !meta )
+			throw std::runtime_error( "cannot open " + metaPath + " -- the anisotropic "
+				"reference's problem, committed under tools/geq-benchmark/reference" );
+
+		std::string line;
+		while ( std::getline( meta, line ) )
+		{
+			std::istringstream in( line );
+			std::string key;
+			in >> key;
+			if ( key == "profiles" )
+				in >> out.profiles;
+			else if ( key == "z_cut" )
+				in >> out.zCut;
+			else if ( key == "delta0" )
+				for ( double v; in >> v; )
+					out.amplitudes.push_back( v );
+			else if ( key == "forms" )
+				for ( std::string v; in >> v; )
+					out.forms.push_back( v );
+			else if ( key == "resolutions" )
+				for ( int v; in >> v; )
+					out.resolutions.push_back( v );
+		}
+		if ( !( out.zCut > 0.0 ) || out.amplitudes.empty() || out.forms.empty()
+		     || out.resolutions.empty() || out.profiles.empty() )
+			throw std::runtime_error( metaPath + " lacks one of profiles, z_cut, delta0, "
+				"forms or resolutions" );
+		return out;
+	}
+
+	/**
+	 * AN-4'S Delta, THE ONE geq'S REFERENCE IS SOLVED WITH:
+	 *
+	 *     Delta = delta0 ( 4 Psi ( 1 - Psi ) )^3 ( 1 - ( z/z_cut )^2 )^3,
+	 *
+	 * zero outside 0 < Psi < 1 and |z| < z_cut. export_anisotropic.py writes it
+	 * in geq's psi_n = 1 - Psi; the shape is symmetric, so it reads the same in
+	 * MEQ's Psi. Reentrant: it reads only its own constants.
+	 */
+	class ReferenceAnisotropy : public meq::Anisotropy
+	{
+		public:
+			ReferenceAnisotropy( double amplitudeIn, double zCutIn )
+				: amplitude( amplitudeIn ), zCut( zCutIn )
+			{
+			}
+
+			double delta( double, double z, double psi ) const override
+			{
+				if ( psi <= 0.0 || psi >= 1.0 )
+					return 0.0;
+				double const g = 4.0*psi*( 1.0 - psi );
+				return amplitude*g*g*g*cut( z );
+			}
+
+			double dDeltaDPsi( double, double z, double psi ) const override
+			{
+				if ( psi <= 0.0 || psi >= 1.0 )
+					return 0.0;
+				double const g = 4.0*psi*( 1.0 - psi );
+				return amplitude*3.0*g*g*4.0*( 1.0 - 2.0*psi )*cut( z );
+			}
+
+			Argument argument() const override
+			{
+				return Argument::NormalisedFlux;
+			}
+
+		private:
+			double cut( double z ) const
+			{
+				double const v = z/zCut;
+				if ( std::abs( v ) >= 1.0 )
+					return 0.0;
+				double const h = 1.0 - v*v;
+				return h*h*h;
+			}
+
+			double amplitude;
+			double zCut;
+	};
 }
 }
 

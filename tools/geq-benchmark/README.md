@@ -372,8 +372,9 @@ patch of it, with a prescribed anisotropy handed to freegs4e's
 zero outside `0 < ψ_n < 1` and `|z| < 1.2`. `dp_par_dpsin` and
 `fast_fraction` are both zero, so the operator is all that changes. The shape is
 symmetric in `ψ_n`, so it is MEQ's `Δ( Ψ )` too, and it vanishes at both labels
-and before the box end, which MEQ's support needs. `AnisotropicMirror.cpp`'s
-`MirrorProfile` is the same function.
+and before the box end, which MEQ's support needs. `GeqReference.hpp`'s
+`ReferenceAnisotropy` is the same function, read at `meta.txt`'s `z_cut` and
+`δ₀`; `RotatingMirrorAnisotropic` (AN-5) solves it against this answer.
 
 **BOTH OF freegs4e'S REARRANGEMENTS ARE SOLVED**, each lagged one Picard step:
 the historical `( Jtor − ∇ψ·∇Δ/μ₀R )/( 1 − Δ )` and the divergence form
@@ -403,8 +404,9 @@ PYTHONPATH=<freegs4e at its tip>:/home/ian/projects/geq/src \
 tools/freegs4e-benchmark/venv/bin/python tools/geq-benchmark/export_anisotropic.py
 ```
 
-About an hour, most of it the four 513² solves, and `--cache DIR` reuses
-solves. → **[M-335](../../MEASUREMENTS.md#m-335)**.
+About an hour and a half, most of it the 513² solves, and `--cache DIR` reuses
+solves. → **[M-335](../../MEASUREMENTS.md#m-335)**; MEQ against it,
+**[M-337](../../MEASUREMENTS.md#m-337)**.
 
 ## The shape cases: `shapes.py` and `cases/`
 

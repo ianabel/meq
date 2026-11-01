@@ -93,47 +93,15 @@ namespace
 			double amplitude;
 	};
 
-	/// The Delta in Psi above. Reentrant, as the bump is.
-	class MirrorProfile : public meq::Anisotropy
+	/// The Delta in Psi above: AN-4's, GeqReference.hpp's one definition of
+	/// it, at the export's cut.
+	class MirrorProfile : public meqtest::geq::ReferenceAnisotropy
 	{
 		public:
 			explicit MirrorProfile( double amplitudeIn )
-				: amplitude( amplitudeIn )
+				: meqtest::geq::ReferenceAnisotropy( amplitudeIn, 1.2 )
 			{
 			}
-
-			double delta( double, double z, double psi ) const override
-			{
-				if ( psi <= 0.0 || psi >= 1.0 )
-					return 0.0;
-				double const g = 4.0*psi*( 1.0 - psi );
-				return amplitude*g*g*g*cut( z );
-			}
-
-			double dDeltaDPsi( double, double z, double psi ) const override
-			{
-				if ( psi <= 0.0 || psi >= 1.0 )
-					return 0.0;
-				double const g = 4.0*psi*( 1.0 - psi );
-				return amplitude*3.0*g*g*4.0*( 1.0 - 2.0*psi )*cut( z );
-			}
-
-			Argument argument() const override
-			{
-				return Argument::NormalisedFlux;
-			}
-
-		private:
-			static double cut( double z )
-			{
-				double const v = z/1.2;
-				if ( std::abs( v ) >= 1.0 )
-					return 0.0;
-				double const h = 1.0 - v*v;
-				return h*h*h;
-			}
-
-			double amplitude;
 	};
 
 	/// A Delta in Psi that is nonzero everywhere, on Gamma_h included: only
