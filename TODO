@@ -448,15 +448,8 @@ Raised 2026-08-25.
   law's psi-slope against the label normalisation. A crawl that converges
   is a defect, not a slow case.
 
-  GF1 DOES NOT SOLVE FROM THE VACUUM ON MEQ'S COARSE RUNGS (M-342). The
-  tapered GF1 case, tools/geq-benchmark/cases/gf1/, isotropic: from the
-  vacuum, L0 at every k, L1 at k <= 3 and L2 at k = 1 fail in 30 Newton steps;
-  L2 k = 2 and 3 and L1 k = 4 converge in 7. A density continuation reaches
-  GF1 at L1 k = 3 in 3 or 4 steps a step, and stops at 0.48 of it at L0 k = 2.
-  So the race's ladder has four cold entries where shapes.py's cases have
-  twelve. Raised 2026-11-01. Suspects, none measured: M-291's element-local
-  fold under the mirror tau at about ten times its pressure; the cold start's
-  labels at the vacuum's flux, a 15% diamagnetic dip away from the answer.
+  The race on GF1 (AN-6c) meets an ISOTROPIC defect, its own entry: "A mirror
+  at GF1's pressure does not solve from the vacuum on MEQ's coarse rungs".
 
   NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
   only, AN-6a's Delta( B ) included. On builds/single (MFEM 59ef46309f):
@@ -1424,3 +1417,33 @@ Raised 2026-10-30, when that plan became a closed design record.
       an offset of about h^2/(2 rho_Gamma) chosen per mesh would make it O(h^2)
       (plan 7.9).  Only worth it if FB-1's transmission row is ever limited by
       it.
+
+
+================================================================================
+A mirror at GF1's pressure does not solve from the vacuum on MEQ's coarse rungs
+Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342).
+================================================================================
+
+  WHAT FAILS. tools/geq-benchmark/cases/gf1/, isotropic -- GF1's 0.4 MV
+  point at n_e = 1e20, densities tapered, nothing anisotropic -- through the
+  driver on the shipped PlasmaSize = 0.1 mesh, from the vacuum: L0 at every
+  k, L1 at k <= 3 and L2 at k = 1 do not converge in 30 bordered Newton
+  steps. L1 k = 3 stalls at 1.5e-3 of the first residual. L2 k = 2 and 3 and
+  L1 k = 4 converge in 7, quadratic at the end. So race_geq.py --case gf1 has
+  four cold MEQ entries where shapes.py's cases have twelve.
+
+  IT IS THE DISCRETISATION, NOT THE EQUILIBRIUM. Continued in density from
+  5% of GF1's, each step started from the last .nc: L1 k = 3 reaches GF1 in
+  3 or 4 Newton steps a step; L0 k = 2 converges to 0.46 and fails at 0.48.
+
+  SUSPECTS, NONE MEASURED:
+  * M-291's element-local fold under the mirror tau (M-293), at about ten
+    times the pressure where M-294 placed it: local beta near 0.3, a 15%
+    diamagnetic dip at the midplane.
+  * The cold start's labels, psi_inner and psi_bnd at the vacuum's flux at
+    the electrode and the limiter, far from the answer at this beta.
+
+  WHAT CLOSES IT. Every rung either solving from the vacuum, or failing with
+  a named refusal that says the mesh cannot carry this pressure; not a
+  30-step stall. A failing case naming it, as the testing stance asks, is
+  still to be written.
