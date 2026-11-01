@@ -441,9 +441,10 @@ namespace
 	double const rateSlack = 0.15;
 
 	void printTable( char const *model, int order,
-	                 std::vector<AnisotropicMeasurement> const &points )
+	                 std::vector<AnisotropicMeasurement> const &points,
+	                 char const *box = "standard box" )
 	{
-		std::printf( "\n  manufactured anisotropic, %s, k = %d, standard box\n", model, order );
+		std::printf( "\n  manufactured anisotropic, %s, k = %d, %s\n", model, order, box );
 		std::printf( "  %8s %9s %13s %6s %13s %6s %13s %6s\n",
 		             "h", "trace", "L2(psi)", "rate", "L2(q)", "rate", "L2(psi*)", "rate" );
 		for ( std::size_t i = 0; i < points.size(); ++i )
@@ -1391,3 +1392,544 @@ BOOST_AUTO_TEST_CASE( labelsReadFromPsiStarGivePsiStarItsOrder )
 			               " means the correction is not contracting" );
 	}
 }
+
+/*
+ * ---------------------------------------------------------------------------
+ * AN-6a: Delta that reads B
+ * ---------------------------------------------------------------------------
+ *
+ * THE POSITION MODEL POSED AS Delta( B ). A meq::FieldAnisotropy whose
+ * numerator is mu0 Delta_p = Delta( R, z ) |grad psi|^2/R^2 at the EXACT
+ * solution has Delta = mu0 Delta_p/B^2 = Delta( R, z ) there, so its exact
+ * solution and source are the position model's -- and its solve forms Delta
+ * from the discrete flux, through meq::fieldDelta(), with d Delta/d u in the
+ * law's flux-flux Jacobian. psi* reads the reconstruction's Delta frozen at
+ * the solved flux.
+ *
+ * ON A BOX WITHOUT ITS O-POINT. The standard box holds psi's O-point at
+ * ( 0.935, 0 ), where B = 0 and the numerator vanishes as B^2 with it, so
+ * Delta there is a ratio of two discretely small numbers. A mirror has no
+ * such point inside its plasma. The shifted box R in [ 1.0, 1.75 ] keeps
+ * |grad psi| above 0.4.
+ */
+namespace
+{
+	meq::tests::Rectangle shiftedBox()
+	{
+		return meq::tests::Rectangle{ 1.0, 1.75, -0.6, 0.6 };
+	}
+
+	/// The position model's Delta, through its numerator at the exact B.
+	class FieldModelAnisotropy : public meq::FieldAnisotropy
+	{
+		public:
+			explicit FieldModelAnisotropy( Fixture const &eqIn )
+				: eq( eqIn )
+			{
+			}
+
+			double pressure( double radius, double z, double ) const override
+			{
+				double dPsiDr = 0.0;
+				double dPsiDz = 0.0;
+				eq.gradPsi( radius, z, dPsiDr, dPsiDz );
+				return eq.delta( radius, z )*( dPsiDr*dPsiDr + dPsiDz*dPsiDz )/( radius*radius );
+			}
+
+			double dPressureDPsi( double, double, double ) const override
+			{
+				return 0.0;
+			}
+
+			Argument argument() const override
+			{
+				return Argument::Position;
+			}
+
+		private:
+			Fixture eq;
+	};
+
+	FluxMeasurement measureField( Fixture const &eq, int order, int n )
+	{
+		meq::tests::Rectangle const box = shiftedBox();
+		mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+
+		mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+		{
+			return eq.psi( x( 0 ), x( 1 ) );
+		} );
+		mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
+		                                                       mfem::Vector &value )
+		{
+			double fluxR = 0.0, fluxZ = 0.0;
+			eq.flux( x( 0 ), x( 1 ), fluxR, fluxZ );
+			value( 0 ) = fluxR;
+			value( 1 ) = fluxZ;
+		} );
+
+		FieldModelAnisotropy const anisotropy( eq );
+		FixtureSource const source( eq );
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setAnisotropy( anisotropy );
+		solver.setSource( source );
+		solver.setBoundaryData( psiCoeff );
+		solver.solve();
+		solver.postProcess();
+
+		FluxMeasurement result;
+		AnisotropicMeasurement &point = result.point;
+		point.h = box.width()/static_cast<double>( n );
+		point.traceDofs = solver.numTraceDofs();
+		point.errorPsi = solver.potentialError( psiCoeff );
+		point.errorFlux = solver.fluxError( fluxCoeff );
+		point.errorPsiStar = solver.postProcessedPotentialError( psiCoeff );
+		point.normPsi = solver.exactPotentialNorm( psiCoeff );
+		point.normFlux = solver.exactFluxNorm( fluxCoeff );
+		result.newtonIterations = solver.newtonIterations();
+		result.history = solver.newtonResiduals();
+		return result;
+	}
+
+	/// @param coldOrder whether the best Newton order read off the cold
+	///        start's residuals is asserted; the instrument for Newton's
+	///        order itself is theFieldLawsNewtonIsQuadraticAtBothSigns.
+	void checkFieldOrder( Fixture const &eq, char const *label, int order, double psiCeiling,
+	                      double fluxCeiling, bool coldOrder = true )
+	{
+		std::vector<AnisotropicMeasurement> points;
+		std::vector<int> iterations;
+		double best = 0.0;
+		for ( int n : meshSizes )
+		{
+			FluxMeasurement const m = measureField( eq, order, n );
+			if ( n == 16 )
+			{
+				std::printf( "\n  [%s] k = %d, n = 16, Newton residuals:", label, order );
+				for ( double r : m.history )
+					std::printf( " %.3e", r );
+				std::printf( "\n" );
+			}
+			points.push_back( m.point );
+			iterations.push_back( m.newtonIterations );
+			best = std::max( best, meq::tests::bestNewtonOrder( m.history ) );
+		}
+		std::printf( "\n  [%s] Newton iterations:", label );
+		for ( int it : iterations )
+			std::printf( " %d", it );
+		std::printf( "; best observed order %.3f\n", best );
+		printTable( label, order, points, "R in [ 1.0, 1.75 ]" );
+
+		if ( !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+		else
+		{
+			double const expected = order + 1.0 - rateSlack;
+			double const expectedStar = order + 2.0 - rateSlack;
+			for ( std::size_t i = 1; i < points.size(); ++i )
+			{
+				AnisotropicMeasurement const &c = points[ i - 1 ];
+				AnisotropicMeasurement const &p = points[ i ];
+				double const ratio = c.h/p.h;
+				double const ratePsi = meq::tests::rate( c.errorPsi, p.errorPsi, ratio );
+				double const rateFlux = meq::tests::rate( c.errorFlux, p.errorFlux, ratio );
+				double const rateStar = meq::tests::rate( c.errorPsiStar, p.errorPsiStar, ratio );
+				BOOST_TEST( ratePsi >= expected, label << ", k = " << order << ", h = " << p.h
+				            << ": psi converged at " << ratePsi << ", wanted " << expected );
+				BOOST_TEST( rateFlux >= expected, label << ", k = " << order << ", h = " << p.h
+				            << ": q converged at " << rateFlux << ", wanted " << expected );
+				if ( p.errorPsiStar < meq::tests::roundOffFloor( p.normPsi ) )
+					BOOST_TEST_MESSAGE( "  k = " << order << ", h = " << p.h
+					                    << ": psi* under the round-off floor, rate not asserted" );
+				else
+					BOOST_TEST( rateStar >= expectedStar, label << ", k = " << order << ", h = "
+					            << p.h << ": psi* converged at " << rateStar << ", wanted "
+					            << expectedStar );
+			}
+		}
+
+		for ( int it : iterations )
+			BOOST_TEST( it >= 2, label << ", k = " << order << ": Newton converged in " << it
+			            << " step, so the law's dependence on B never reached the operator" );
+		if ( coldOrder )
+			BOOST_TEST( best >= 1.8, label << ", k = " << order << ": the best observed Newton"
+			            " order is " << best << "; the law's Jacobian disagrees with its residual" );
+
+		meq::tests::checkCeilings( order, points.back().errorPsi, points.back().normPsi,
+		                           psiCeiling, points.back().errorFlux, points.back().normFlux,
+		                           fluxCeiling );
+	}
+}
+
+/// meq::fieldDelta() is the root of Delta w^2 = a( 1 - Delta )^2 that
+/// vanishes with a, with its two slopes, on either side of a = 0, at the fold
+/// and past it. The slopes against central differences; J = w sqrt( w^2 + 4a ).
+BOOST_AUTO_TEST_CASE( fieldDeltaIsTheRootThatVanishesWithThePressure )
+{
+	for ( double pressure : { -0.24, -0.1, -1.0e-9, 0.0, 1.0e-9, 0.3, 5.0, 1.0e4 } )
+	{
+		double const fluxSquared = 1.0;
+		meq::FieldDelta const d = meq::fieldDelta( pressure, fluxSquared );
+		BOOST_TEST_REQUIRE( d.exists, "a = " << pressure );
+		double const tension = 1.0 - d.delta;
+		BOOST_TEST( std::abs( d.delta*fluxSquared - pressure*tension*tension )
+		            < 1.0e-14*( 1.0 + std::abs( pressure ) ), "a = " << pressure
+		            << ": Delta = " << d.delta << " is not a root" );
+		BOOST_TEST( tension > 0.0, "a = " << pressure );
+		if ( pressure > 0.0 )
+			BOOST_TEST( ( d.delta > 0.0 && d.delta < 1.0 ), "a = " << pressure );
+		if ( pressure < 0.0 )
+			BOOST_TEST( ( d.delta < 0.0 && d.delta > -1.0 ), "a = " << pressure );
+		// The small-a root is a/w^2 to first order, with nothing cancelled.
+		if ( std::abs( pressure ) < 1.0e-6 )
+			BOOST_TEST( std::abs( d.delta - pressure ) <= 3.0e-9*std::abs( pressure ) );
+
+		double const h = 1.0e-6*std::max( 1.0, std::abs( pressure ) );
+		double const dPressure = ( meq::fieldDelta( pressure + h, fluxSquared ).delta
+		                           - meq::fieldDelta( pressure - h, fluxSquared ).delta )/( 2.0*h );
+		double const g = 1.0e-6;
+		double const dFlux = ( meq::fieldDelta( pressure, fluxSquared + g ).delta
+		                       - meq::fieldDelta( pressure, fluxSquared - g ).delta )/( 2.0*g );
+		BOOST_TEST( std::abs( dPressure - d.dDeltaDPressure ) < 1.0e-6*( 1.0 + std::abs( dPressure ) ),
+		            "a = " << pressure << ": dDelta/da " << d.dDeltaDPressure << " against "
+		            << dPressure );
+		BOOST_TEST( std::abs( dFlux - d.dDeltaDFluxSquared ) < 1.0e-6*( 1.0 + std::abs( dFlux ) ),
+		            "a = " << pressure << ": dDelta/dw^2 " << d.dDeltaDFluxSquared << " against "
+		            << dFlux );
+		double const jacobian = fluxSquared + 2.0*pressure*tension;
+		BOOST_TEST( std::abs( jacobian - std::sqrt( fluxSquared*( fluxSquared + 4.0*pressure ) ) )
+		            < 1.0e-12*( 1.0 + std::abs( pressure ) ), "a = " << pressure );
+	}
+
+	// At the fold Delta = -1, and past it there is no root: held at -1.
+	meq::FieldDelta const fold = meq::fieldDelta( -0.25 + 1.0e-12, 1.0 );
+	BOOST_TEST( std::abs( fold.delta + 1.0 ) < 1.0e-5 );
+	meq::FieldDelta const past = meq::fieldDelta( -0.3, 1.0 );
+	BOOST_TEST( !past.exists );
+	BOOST_TEST( past.delta == -1.0 );
+	BOOST_TEST( past.dDeltaDPressure == 0.0 );
+	BOOST_TEST( past.dDeltaDFluxSquared == 0.0 );
+	// No flux and a positive numerator: the firehose limit, held at 0.
+	meq::FieldDelta const null = meq::fieldDelta( 0.1, 0.0 );
+	BOOST_TEST( !null.exists );
+	BOOST_TEST( null.delta == 0.0 );
+}
+
+/// The law's Jacobian against a central difference of the residual, as
+/// theFluxLawsJacobianMatchesAFiniteDifferenceOfTheResidual has it, for the
+/// field model: what it adds is d Delta/d u in the flux-flux block, which the
+/// element-local elimination reaches.
+BOOST_AUTO_TEST_CASE( theFieldLawsJacobianMatchesAFiniteDifferenceOfTheResidual )
+{
+	for ( double amplitude : { -0.3, 0.3 } )
+	{
+	Fixture const eq = Fixture::position( amplitude );
+	FieldModelAnisotropy const anisotropy( eq );
+	FixtureSource const source( eq );
+	mfem::Mesh mesh = meq::tests::makeMesh( shiftedBox(), 3 );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	// AT THE SOLVED ANSWER, PERTURBED BY 0.01, and not at prepare()'s zero
+	// trace and zero flux, perturbed by the psi law's 0.3. The condensed
+	// residual solves each element's flux row by a local Newton started from
+	// the stored flux, and under Delta( B ) that row has no solution where the
+	// trace asks for B^2 < -mu0 Delta_p: the root that vanishes with Delta_p
+	// ends at the fold, Delta = -1, and the flux cannot carry less. Zero flux
+	// is past it, and so is a perturbation of 0.03 on one element of this
+	// mesh: there the local solve stalls at 5e-2 and the difference reads
+	// 9e-2. At 0, 1e-3 and 1e-2 it reads 1e-10 (measured). So the solver
+	// starts from a solved twin's psi, through setInitialGuess(), which seeds
+	// the flux, and the state is the twin's trace. The global Newton is
+	// NPC's and makes no local solve.
+	meq::GradShafranovSolver solved( mesh, 2 );
+	solved.setAnisotropy( anisotropy );
+	solved.setSource( source );
+	solved.setBoundaryData( psiCoeff );
+	solved.solve();
+
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setAnisotropy( anisotropy );
+	solver.setSource( source );
+	solver.setBoundaryData( psiCoeff );
+	solver.setInitialGuess( solved.potential() );
+	solver.prepare();
+
+	mfem::Operator &residual = solver.reducedOperator();
+	int const size = solver.reducedSolution().Size();
+	std::vector<bool> isEssential( static_cast<std::size_t>( size ), false );
+	mfem::Array<int> const &essential = solver.essentialTraceDofs();
+	for ( int i = 0; i < essential.Size(); ++i )
+		isEssential[ static_cast<std::size_t>( essential[ i ] ) ] = true;
+	BOOST_TEST_REQUIRE( essential.Size() > 0 );
+
+	BOOST_TEST_REQUIRE( solved.reducedSolution().Size() == size );
+	mfem::Vector state( solved.reducedSolution() );
+	for ( int i = 0; i < size; ++i )
+		if ( !isEssential[ static_cast<std::size_t>( i ) ] )
+			state( i ) += 0.01*std::sin( 1.7*i + 0.4 );
+
+	residual.GetGradient( state );
+
+	double const step = meq::tests::jacobianDifferenceStep( 1.0e-5 );
+	int const numDirections = 4;
+	double worst = 0.0;
+	mfem::Operator &jacobian = residual.GetGradient( state );
+	for ( int trial = 0; trial < numDirections; ++trial )
+	{
+		mfem::Vector direction( size );
+		for ( int i = 0; i < size; ++i )
+			direction( i ) = isEssential[ static_cast<std::size_t>( i ) ]
+			                 ? 0.0
+			                 : std::cos( 2.3*i + 1.1*trial ) + 0.5*std::sin( 0.7*i - 0.3*trial );
+		direction /= direction.Norml2();
+
+		mfem::Vector forward( size );
+		mfem::Vector backward( size );
+		mfem::Vector shifted( state );
+		shifted.Add( step, direction );
+		residual.Mult( shifted, forward );
+		shifted = state;
+		shifted.Add( -step, direction );
+		residual.Mult( shifted, backward );
+		mfem::Vector difference( forward );
+		difference -= backward;
+		difference /= 2.0*step;
+
+		residual.GetGradient( state );
+		mfem::Vector applied( size );
+		jacobian.Mult( direction, applied );
+		mfem::Vector error( difference );
+		error -= applied;
+		double const relative = error.Norml2()/applied.Norml2();
+		std::printf( "  field law, Delta %+.1f: Jacobian vs central difference, direction %d: "
+		             "||J d|| = %.6e, relative error %.3e\n",
+		             amplitude, trial, applied.Norml2(), relative );
+		worst = std::max( worst, relative );
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( worst < meq::tests::jacobianDifferenceTolerance( 1.0e-8 ),
+	            "Delta " << amplitude << ": the field law's condensed Jacobian differs from a"
+	            " central difference of the residual by " << worst << " relative" );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theFieldModelConvergesAtK1 )
+{
+	// Measured at h = 0.0234: psi 4.39e-04, q 7.63e-04.
+	checkFieldOrder( Fixture::position(), "field, Delta = -0.3 cos cos", 1, 1.3e-03, 2.3e-03 );
+}
+
+BOOST_AUTO_TEST_CASE( theFieldModelConvergesAtK2 )
+{
+	// Measured at h = 0.0234: psi 3.32e-06, q 6.30e-06.
+	checkFieldOrder( Fixture::position(), "field, Delta = -0.3 cos cos", 2, 1.0e-05, 1.9e-05 );
+}
+
+BOOST_AUTO_TEST_CASE( theFieldModelConvergesAtK3 )
+{
+	// Measured at h = 0.0234: psi 3.02e-08, q 6.28e-08.
+	checkFieldOrder( Fixture::position(), "field, Delta = -0.3 cos cos", 3, 9.1e-08, 1.9e-07 );
+}
+
+BOOST_AUTO_TEST_CASE( theFieldModelConvergesAtK4 )
+{
+	// Measured at h = 0.0234: psi 2.36e-10, q 5.34e-10.
+	checkFieldOrder( Fixture::position(), "field, Delta = -0.3 cos cos", 4, 7.1e-10, 1.6e-09 );
+}
+
+/// The firehose side: Delta up to +0.3 through its numerator, where the
+/// root's slope in |q|^2 has the other sign. The rates, and not the order read
+/// off the cold start: its residuals read 1.71 at best, the quadratic
+/// constant growing from 6 to 62 over the last two steps, on PARDISO and
+/// UMFPack alike, while the restarts below find Newton quadratic to 0.1% over
+/// three decades. So the cold reading is the trajectory's and not the
+/// Jacobian's, and the restarts are what assert the order.
+BOOST_AUTO_TEST_CASE( thePositiveFieldModelConvergesAtK2 )
+{
+	// Measured at h = 0.0234: psi 1.91e-06, q 3.14e-06.
+	checkFieldOrder( Fixture::position( 0.3 ), "field, Delta = +0.3 cos cos", 2, 5.7e-06, 9.4e-06,
+	                 false );
+}
+
+/// NEWTON IS QUADRATIC, AT BOTH SIGNS OF Delta: restarted from the solved
+/// state with q and psi perturbed by delta = 1e-2, 1e-3, 1e-4, the first
+/// step's residual is C r_0^2 with one C to within 1% across the three -- an
+/// exact Jacobian's signature, on the NPC path the solve drives, which the
+/// condensed difference above does not reach.
+BOOST_AUTO_TEST_CASE( theFieldLawsNewtonIsQuadraticAtBothSigns )
+{
+	for ( double amplitude : { -0.3, 0.3 } )
+	{
+		Fixture const eq = Fixture::position( amplitude );
+		FieldModelAnisotropy const anisotropy( eq );
+		FixtureSource const source( eq );
+		mfem::Mesh mesh = meq::tests::makeMesh( shiftedBox(), 16 );
+		mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+		{
+			return eq.psi( x( 0 ), x( 1 ) );
+		} );
+		meq::GradShafranovSolver solved( mesh, 2 );
+		solved.setAnisotropy( anisotropy );
+		solved.setSource( source );
+		solved.setBoundaryData( psiCoeff );
+		solved.solve();
+		int const fieldSize = solved.fluxSpace().GetVSize() + solved.potentialSpace().GetVSize();
+
+		std::vector<double> constants;
+		for ( double delta : { 1.0e-2, 1.0e-3, 1.0e-4 } )
+		{
+			mfem::Vector state( solved.state() );
+			for ( int i = 0; i < fieldSize; ++i )
+				state( i ) += delta*std::sin( 1.7*i + 0.4 );
+			meq::GradShafranovSolver solver( mesh, 2 );
+			solver.setAnisotropy( anisotropy );
+			solver.setSource( source );
+			solver.setBoundaryData( psiCoeff );
+			solver.setInitialState( state, {} );
+			solver.solve();
+			std::vector<double> const &history = solver.newtonResiduals();
+			BOOST_TEST_REQUIRE( history.size() >= 2 );
+			constants.push_back( history[ 1 ]/( history[ 0 ]*history[ 0 ] ) );
+			std::printf( "  field law, Delta %+.1f, restart at delta = %.0e: residuals", amplitude,
+			             delta );
+			for ( double r : history )
+				std::printf( " %.3e", r );
+			std::printf( "; r_1/r_0^2 = %.4e\n", constants.back() );
+			std::fflush( stdout );
+		}
+		for ( double c : constants )
+			BOOST_TEST( std::abs( c/constants.back() - 1.0 ) < 1.0e-2, "Delta " << amplitude
+			            << ": r_1/r_0^2 = " << c << " against " << constants.back()
+			            << " at the smallest restart; Newton is not quadratic" );
+	}
+}
+
+/// Threaded assembly and reconstruction beside the field law are the serial
+/// solve, bit for bit: the reconstruction reads the solved flux through a host
+/// pointer from every thread.
+BOOST_AUTO_TEST_CASE( aFieldLawUnderThreadedAssemblyIsTheSerialSolve )
+{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+	std::printf( "\n  field law, threaded assembly: skipped, this MFEM has no OpenMP "
+	             "or no thread safety\n" );
+#else
+	using AM = meq::GradShafranovSolver::AssemblyMode;
+	std::printf( "\n  field law, threaded against serial: omp_get_max_threads() = %d%s\n",
+	             omp_get_max_threads(), omp_get_max_threads() > 1 ? ""
+	             : "  <- ONE THREAD: this run cannot exhibit a race" );
+
+	Fixture const eq = Fixture::position();
+	FieldModelAnisotropy const anisotropy( eq );
+	FixtureSource const source( eq );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	for ( int order : { 1, 3 } )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( shiftedBox(), 16 );
+		auto solveIn = [ & ]( AM mode )
+		{
+			auto solver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			solver->setAssemblyMode( mode );
+			solver->setAnisotropy( anisotropy );
+			solver->setSource( source );
+			solver->setBoundaryData( psiCoeff );
+			solver->solve();
+			solver->postProcess();
+			return solver;
+		};
+		auto const serial = solveIn( AM::Serial );
+		auto const threaded = solveIn( AM::Threaded );
+
+		double const psi = maxDifference( threaded->potential(), serial->potential() );
+		double const flux = maxDifference( threaded->flux(), serial->flux() );
+		double const star = maxDifference( threaded->postProcessedPotential(),
+		                                   serial->postProcessedPotential() );
+		std::printf( "    k = %d, n = 16: psi %.3e, q %.3e, psi* %.3e; Newton %d and %d\n",
+		             order, psi, flux, star, serial->newtonIterations(),
+		             threaded->newtonIterations() );
+		std::fflush( stdout );
+		BOOST_TEST( psi == 0.0, "k = " << order << ": psi differs by " << psi );
+		BOOST_TEST( flux == 0.0, "k = " << order << ": q differs by " << flux );
+		BOOST_TEST( star == 0.0, "k = " << order << ": psi* differs by " << star );
+		BOOST_TEST( serial->newtonIterations() == threaded->newtonIterations() );
+	}
+#endif
+}
+
+/// What a Delta that reads B is refused: an answer past fieldDelta()'s fold,
+/// on the solved flux and by name; beside a psi-independent source; and beside
+/// setStabilisationFollowsAnisotropy(), whatever its argument.
+BOOST_AUTO_TEST_CASE( aFieldModelsRefusals )
+{
+	/// A numerator far past the fold everywhere: |q|^2 < -4 mu0 Delta_p.
+	class PastTheFold : public meq::FieldAnisotropy
+	{
+		public:
+			double pressure( double, double, double ) const override
+			{
+				return -1.0e3;
+			}
+
+			double dPressureDPsi( double, double, double ) const override
+			{
+				return 0.0;
+			}
+
+			Argument argument() const override
+			{
+				return Argument::Position;
+			}
+	};
+	PastTheFold const past;
+	Fixture const eq = Fixture::position();
+	FixtureSource const source( eq );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( shiftedBox(), 4 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		solver.setAnisotropy( past );
+		solver.setSource( source );
+		solver.setBoundaryData( psiCoeff );
+		std::string what;
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::runtime_error const &e )
+		{
+			what = e.what();
+		}
+		BOOST_TEST( what.find( "fold" ) != std::string::npos, what );
+	}
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( shiftedBox(), 4 );
+		mfem::ConstantCoefficient zero( 0.0 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		solver.setAnisotropy( past );
+		solver.setSource( zero );
+		solver.setBoundaryData( zero );
+		BOOST_CHECK_THROW( solver.solve(), std::logic_error );
+	}
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( shiftedBox(), 4 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		solver.setAnisotropy( past );
+		solver.setStabilisationFollowsAnisotropy( true );
+		solver.setSource( source );
+		solver.setBoundaryData( psiCoeff );
+		BOOST_CHECK_THROW( solver.solve(), std::logic_error );
+	}
+	BOOST_CHECK_THROW( past.delta( 1.0, 0.0, 0.0 ), std::logic_error );
+}
+

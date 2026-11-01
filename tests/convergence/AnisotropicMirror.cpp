@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "mfem.hpp"
@@ -46,6 +47,13 @@
  *
  * zero outside 0 < Psi < 1, between the two labels. Whether it vanishes on
  * Gamma_h depends on the solved psi, so the solver checks it there.
+ *
+ * A Delta THAT READS B, ANISOTROPY-PLAN.md AN-6a: the same shape as a
+ * numerator, mu0 Delta_p = B_0^2 delta0 g( Psi ) h( z ), and Delta formed at
+ * the iterate's B. Its delta0 is a pressure and not a Delta: the solved Delta
+ * is deeper where B falls, and at fixed flux mu0 Delta_p < -|q|^2/4 has no
+ * root at all -- the fold where Delta = -1 and the operator, whose
+ * coefficient along grad psi is 1 + Delta, stops being elliptic.
  *
  * AND THE SAME PACKS SUBTRACTED, ANISOTROPY-PLAN.md AN-3b: psi_c of the two
  * rectangles handed to setConductorField(), the plasma source alone on the
@@ -102,6 +110,42 @@ namespace
 				: meqtest::geq::ReferenceAnisotropy( amplitudeIn, 1.2 )
 			{
 			}
+	};
+
+	/// The same shape as a numerator, ANISOTROPY-PLAN.md AN-6a's Delta( B ):
+	/// mu0 Delta_p = B_0^2 delta0 g( Psi ) h( z ), with B_0^2 = 1.12 T^2 the
+	/// isotropic meshed mirror's |B|^2 at the midplane, where B = B_z is
+	/// 1.05 to 1.06 T at R = 0.22 to 0.26 (measured, level 0, k = 2). So Delta
+	/// is about delta0 there and falls as 1/B^2 towards the throats, where B_z
+	/// alone reaches 3.6 T at z = 1.2 -- a pressure held on a flux surface, as
+	/// a kinetic closure hands it, rather than a Delta held.
+	class MirrorFieldProfile : public meq::FieldAnisotropy
+	{
+		public:
+			explicit MirrorFieldProfile( double amplitudeIn )
+				: shape( amplitudeIn, 1.2 )
+			{
+			}
+
+			double pressure( double radius, double z, double psi ) const override
+			{
+				return midplaneFieldSquared*shape.delta( radius, z, psi );
+			}
+
+			double dPressureDPsi( double radius, double z, double psi ) const override
+			{
+				return midplaneFieldSquared*shape.dDeltaDPsi( radius, z, psi );
+			}
+
+			Argument argument() const override
+			{
+				return shape.argument();
+			}
+
+			static constexpr double midplaneFieldSquared = 1.12;
+
+		private:
+			meqtest::geq::ReferenceAnisotropy shape;
 	};
 
 	/// A Delta in Psi that is nonzero everywhere, on Gamma_h included: only
@@ -191,8 +235,23 @@ namespace
 		Bump,
 		Everywhere,
 		Profile,
-		EverywhereInPsi
+		EverywhereInPsi,
+		Field
 	};
+
+	char const *kindName( Delta kind )
+	{
+		switch ( kind )
+		{
+			case Delta::None: return "isotropic";
+			case Delta::Bump: return "bump";
+			case Delta::Everywhere: return "everywhere";
+			case Delta::Profile: return "Delta( Psi )";
+			case Delta::EverywhereInPsi: return "everywhere in Psi";
+			case Delta::Field: return "Delta( B )";
+		}
+		return "";
+	}
 
 	std::unique_ptr<Run> run( int order, int level, Delta kind, double amplitude,
 	                          bool tauFollows = false, bool subtracted = false )
@@ -243,6 +302,8 @@ namespace
 			r->anisotropy = std::make_unique<MirrorProfile>( amplitude );
 		else if ( kind == Delta::EverywhereInPsi )
 			r->anisotropy = std::make_unique<EverywhereInPsi>();
+		else if ( kind == Delta::Field )
+			r->anisotropy = std::make_unique<MirrorFieldProfile>( amplitude );
 		if ( r->anisotropy )
 			solver.setAnisotropy( *r->anisotropy );
 		if ( tauFollows )
@@ -307,6 +368,55 @@ namespace
 		return values;
 	}
 
+	/// The solved Delta( B )'s range over the machine cloud, meshed route: q
+	/// is the total flux there, and Delta is meq::fieldDelta() of the
+	/// numerator at the solved Psi and |q|^2.
+	std::pair<double, double> solvedFieldDelta( Run &r )
+	{
+		Cloud const cloud = machineCloud();
+		mfem::GridFunction const &q = r.solver->flux();
+		int const count = static_cast<int>( cloud.radius.size() );
+		mfem::Vector positions( 2*count );
+		for ( int i = 0; i < count; ++i )
+		{
+			positions( i ) = cloud.radius[ static_cast<std::size_t>( i ) ];
+			positions( count + i ) = cloud.z[ static_cast<std::size_t>( i ) ];
+		}
+		// meq::PointLocator interpolates a scalar field, so each component
+		// of the vector L2 flux is read through a scalar view of its block.
+		mfem::FiniteElementSpace const &space = *q.FESpace();
+		BOOST_TEST_REQUIRE( space.GetOrdering() == mfem::Ordering::byNODES );
+		mfem::FiniteElementSpace scalar( space.GetMesh(), space.FEColl(), 1 );
+		meq::PointLocator locator( *space.GetMesh() );
+		locator.locate( positions );
+		mfem::Vector component[ 2 ];
+		for ( int c = 0; c < 2; ++c )
+		{
+			mfem::GridFunction view;
+			view.MakeRef( &scalar, const_cast<mfem::real_t *>( q.GetData() ) + c*scalar.GetVSize() );
+			locator.interpolate( view, component[ c ] );
+		}
+		for ( int i = 0; i < count; ++i )
+			BOOST_TEST_REQUIRE( locator.codes()[ i ] != 2, "point " << i << " is off the mesh" );
+		std::vector<double> const psi = valuesAt( r.solver->potential(), cloud.radius, cloud.z );
+		auto const &field = dynamic_cast<meq::FieldAnisotropy const &>( *r.anisotropy );
+		double const axis = r.solver->psiAxis();
+		double const boundary = r.solver->psiBoundary();
+		std::pair<double, double> range{ 0.0, 0.0 };
+		for ( int i = 0; i < count; ++i )
+		{
+			std::size_t const k = static_cast<std::size_t>( i );
+			double const pressure = field.pressure( cloud.radius[ k ], cloud.z[ k ],
+			                                        ( psi[ k ] - boundary )/( axis - boundary ) );
+			double const fluxSquared = component[ 0 ]( i )*component[ 0 ]( i )
+			                           + component[ 1 ]( i )*component[ 1 ]( i );
+			double const delta = meq::fieldDelta( pressure, fluxSquared ).delta;
+			range.first = std::min( range.first, delta );
+			range.second = std::max( range.second, delta );
+		}
+		return range;
+	}
+
 	double rms( std::vector<double> const &a, std::vector<double> const &b )
 	{
 		double sum = 0.0;
@@ -339,12 +449,24 @@ BOOST_AUTO_TEST_CASE( aZeroBumpIsTheMeshedMirrorBitForBit )
 /// bordered Newton converges in as few steps as the isotropic mirror's 3 or
 /// 4, for either Delta. Three residuals are too few to read an order from, so
 /// none is asserted.
+///
+/// And Delta( B ) at delta0 = -0.1 and -0.2: a pressure, whose Delta is
+/// printed over the machine region. It reaches -0.124 and -0.338, the second
+/// near the -0.37 mirrorfp's GF1 table has at its midplane.
 BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesFromTheVacuum )
 {
-	for ( Delta const kind : { Delta::Bump, Delta::Profile } )
-	for ( double amplitude : { -0.1, -0.3 } )
+	struct Case
 	{
-		char const *const label = kind == Delta::Bump ? "bump" : "Delta( Psi )";
+		Delta kind;
+		double amplitude;
+	};
+	for ( Case const c : { Case{ Delta::Bump, -0.1 }, Case{ Delta::Bump, -0.3 },
+	                       Case{ Delta::Profile, -0.1 }, Case{ Delta::Profile, -0.3 },
+	                       Case{ Delta::Field, -0.1 }, Case{ Delta::Field, -0.2 } } )
+	{
+		Delta const kind = c.kind;
+		double const amplitude = c.amplitude;
+		char const *const label = kindName( kind );
 		auto const r = run( 2, 0, kind, amplitude );
 		BOOST_TEST_REQUIRE( r->converged, label << ", delta0 = " << amplitude << ": " << r->failure );
 		std::vector<double> const &history = r->solver->newtonResiduals();
@@ -354,11 +476,29 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesFromTheVacuum )
 		for ( double v : history )
 			std::printf( " %.2e", v );
 		std::printf( "\n" );
+		if ( kind == Delta::Field )
+		{
+			std::pair<double, double> const range = solvedFieldDelta( *r );
+			std::printf( "    solved Delta in [ %.3f, %.3f ] over the machine region\n",
+			             range.first, range.second );
+		}
 		std::fflush( stdout );
 		BOOST_TEST( r->solver->newtonIterations() <= 8,
 		            label << ", delta0 = " << amplitude << ": " << r->solver->newtonIterations()
 		            << " Newton steps against the isotropic mirror's 3 or 4" );
 	}
+}
+
+/// A pressure past the fold has no equilibrium at this flux, and the solver
+/// says so on the solved answer rather than returning one: at delta0 = -0.3,
+/// mu0 Delta_p reaches -0.336 T^2 where |q|^2 is near 1.29 T^2, under the
+/// 4|mu0 Delta_p| the root needs. -0.24 converges in 3 Newton steps; the line
+/// is near -0.25, where |q|^2/4 meets the pressure.
+BOOST_AUTO_TEST_CASE( aPressurePastTheFoldIsRefused )
+{
+	auto const r = run( 2, 0, Delta::Field, -0.3 );
+	BOOST_TEST( !r->converged );
+	BOOST_TEST( r->failure.find( "fold" ) != std::string::npos, r->failure );
 }
 
 /// MEQ AGAINST ITSELF, AND AGAINST THE ISOTROPIC MESHED MIRROR ON THE SAME LADDER:
@@ -379,6 +519,10 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesFromTheVacuum )
 /// AND THE Delta IN Psi, on the same ladder, which is the case with teeth for
 /// the reconstruction: psi* is read, and beside the extension's face
 /// integrator a dropped flux law moves it by order one.
+///
+/// AND Delta( B ), AN-6a, at a pressure either side: -0.2, whose solved Delta
+/// is mirrorfp's depth, and +0.9. Its psi* is the reconstruction with Delta
+/// frozen at the solved flux.
 BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 {
 	Cloud const cloud = machineCloud();
@@ -387,17 +531,20 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 		char const *label;
 		Delta kind;
 		bool tauFollows;
+		double amplitude;
 	};
 	std::vector<std::vector<double>> differences;
-	for ( Variant const &variant : { Variant{ "isotropic", Delta::None, false },
-	                                 Variant{ "delta0 = -0.3", Delta::Bump, false },
-	                                 Variant{ "delta0 = -0.3, tau( 1 - Delta )", Delta::Bump, true },
-	                                 Variant{ "Delta( Psi ), delta0 = -0.3", Delta::Profile, false } } )
+	for ( Variant const &variant : { Variant{ "isotropic", Delta::None, false, 0.0 },
+	                                 Variant{ "delta0 = -0.3", Delta::Bump, false, -0.3 },
+	                                 Variant{ "delta0 = -0.3, tau( 1 - Delta )", Delta::Bump, true, -0.3 },
+	                                 Variant{ "Delta( Psi ), delta0 = -0.3", Delta::Profile, false, -0.3 },
+	                                 Variant{ "Delta( B ), delta0 = -0.2", Delta::Field, false, -0.2 },
+	                                 Variant{ "Delta( B ), delta0 = +0.9", Delta::Field, false, 0.9 } } )
 	{
 		std::vector<std::vector<double>> sampled;
 		for ( int level : { 0, 1, 2, 3 } )
 		{
-			auto r = run( 3, level, variant.kind, -0.3, variant.tauFollows );
+			auto r = run( 3, level, variant.kind, variant.amplitude, variant.tauFollows );
 			BOOST_TEST_REQUIRE( r->converged, "level " << level << ": " << r->failure );
 			r->solver->postProcess();
 			sampled.push_back( valuesAt( r->solver->postProcessedPotential(), cloud.radius,
@@ -425,6 +572,53 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 			if ( i > 0 )
 				BOOST_TEST( differences[ v ][ i ] < differences[ v ][ i - 1 ] );
 		}
+}
+
+/// ANISOTROPY-PLAN.md AN-6b, Delta > 0 TOWARDS THE FIREHOSE LIMIT, from the
+/// meshed vacuum at level 0, k = 2. MEQ against itself only: geq has no
+/// converged reference there.
+///
+///  - the bump, a Delta of position, to delta0 = 0.99, where 1 - Delta is a
+///    hundredth at its peak;
+///  - Delta( B ) to a pressure of 3.0, three times B_0^2: its root never
+///    reaches 1 at a positive flux, so the limit is not reachable at all;
+///  - Delta( Psi ) to 0.7. Past it the Newton crawls, 12 steps at 0.9 and 23
+///    at 0.95, and at 0.99 it does not converge. That is a defect, recorded
+///    in TODO and not asserted here.
+///
+/// Each within the isotropic mirror's 3 or 4 steps and some slack, as the
+/// negative side is.
+BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesTowardsTheFirehoseLimit )
+{
+	struct Case
+	{
+		Delta kind;
+		double amplitude;
+	};
+	for ( Case const c : { Case{ Delta::Bump, 0.5 }, Case{ Delta::Bump, 0.9 },
+	                       Case{ Delta::Bump, 0.99 }, Case{ Delta::Field, 0.9 },
+	                       Case{ Delta::Field, 3.0 }, Case{ Delta::Profile, 0.5 },
+	                       Case{ Delta::Profile, 0.7 } } )
+	{
+		auto const r = run( 2, 0, c.kind, c.amplitude );
+		BOOST_TEST_REQUIRE( r->converged, kindName( c.kind ) << ", delta0 = " << c.amplitude
+		                    << ": " << r->failure );
+		std::printf( "  %s, delta0 = %+.2f: %d Newton steps, psi_ax %.6e, psi_bnd %.6e;"
+		             " residuals", kindName( c.kind ), c.amplitude, r->solver->newtonIterations(),
+		             r->solver->psiAxis(), r->solver->psiBoundary() );
+		for ( double v : r->solver->newtonResiduals() )
+			std::printf( " %.2e", v );
+		std::printf( "\n" );
+		if ( c.kind == Delta::Field )
+		{
+			std::pair<double, double> const range = solvedFieldDelta( *r );
+			std::printf( "    solved Delta in [ %.3f, %.3f ] over the machine region\n",
+			             range.first, range.second );
+		}
+		std::fflush( stdout );
+		BOOST_TEST( r->solver->newtonIterations() <= 8, kindName( c.kind ) << ", delta0 = "
+		            << c.amplitude << ": " << r->solver->newtonIterations() << " Newton steps" );
+	}
 }
 
 /// A Delta that does not vanish on Gamma_h is refused beside the extension:
@@ -479,13 +673,15 @@ BOOST_AUTO_TEST_CASE( aZeroBumpThroughTheLawIsTheSubtractedMirror )
 /// From the subtracted vacuum, either Delta converges as the meshed route does.
 BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorConvergesFromTheVacuum )
 {
-	for ( Delta const kind : { Delta::Bump, Delta::Profile } )
+	for ( Delta const kind : { Delta::Bump, Delta::Profile, Delta::Field } )
 	{
-		char const *const label = kind == Delta::Bump ? "bump" : "Delta( Psi )";
-		auto const r = run( 2, 0, kind, -0.3, false, true );
+		char const *const label = kindName( kind );
+		// Delta( B )'s delta0 is a pressure, and -0.3 is past its fold.
+		double const amplitude = kind == Delta::Field ? -0.2 : -0.3;
+		auto const r = run( 2, 0, kind, amplitude, false, true );
 		BOOST_TEST_REQUIRE( r->converged, label << ": " << r->failure );
-		std::printf( "  subtracted, %s, delta0 = -0.3: %d Newton steps, psi_ax %.6e,"
-		             " psi_bnd %.6e; residuals", label, r->solver->newtonIterations(),
+		std::printf( "  subtracted, %s, delta0 = %+.1f: %d Newton steps, psi_ax %.6e,"
+		             " psi_bnd %.6e; residuals", label, amplitude, r->solver->newtonIterations(),
 		             r->solver->psiAxis(), r->solver->psiBoundary() );
 		for ( double v : r->solver->newtonResiduals() )
 			std::printf( " %.2e", v );
@@ -502,6 +698,11 @@ BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorConvergesFromTheVacuum )
 /// discretisations leave; an anisotropic one must fall as it does and stay
 /// within a factor of it. A conductors' load dropped, or of the wrong sign,
 /// leaves an O( delta0 ) difference that does not fall.
+///
+/// And Delta( B ) at delta0 = -0.2, which reads B from the TOTAL flux, the
+/// remainder's u_p less q_c: one read from u_p alone sees the remainder's
+/// field, not the machine's, and the two routes then solve different
+/// equations.
 BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorIsTheMeshedOne )
 {
 	Cloud const cloud = machineCloud();
@@ -509,17 +710,19 @@ BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorIsTheMeshedOne )
 	{
 		char const *label;
 		Delta kind;
+		double amplitude;
 	};
 	std::vector<std::vector<double>> differences;
-	for ( Variant const &variant : { Variant{ "isotropic", Delta::None },
-	                                 Variant{ "bump, delta0 = -0.3", Delta::Bump },
-	                                 Variant{ "Delta( Psi ), delta0 = -0.3", Delta::Profile } } )
+	for ( Variant const &variant : { Variant{ "isotropic", Delta::None, 0.0 },
+	                                 Variant{ "bump, delta0 = -0.3", Delta::Bump, -0.3 },
+	                                 Variant{ "Delta( Psi ), delta0 = -0.3", Delta::Profile, -0.3 },
+	                                 Variant{ "Delta( B ), delta0 = -0.2", Delta::Field, -0.2 } } )
 	{
 		std::vector<double> d;
 		for ( int level : { 0, 1, 2 } )
 		{
-			auto meshed = run( 2, level, variant.kind, -0.3, false, false );
-			auto subtracted = run( 2, level, variant.kind, -0.3, false, true );
+			auto meshed = run( 2, level, variant.kind, variant.amplitude, false, false );
+			auto subtracted = run( 2, level, variant.kind, variant.amplitude, false, true );
 			BOOST_TEST_REQUIRE( meshed->converged, "meshed, level " << level << ": "
 			                    << meshed->failure );
 			BOOST_TEST_REQUIRE( subtracted->converged, "subtracted, level " << level << ": "
@@ -545,3 +748,5 @@ BOOST_AUTO_TEST_CASE( theSubtractedAnisotropicMirrorIsTheMeshedOne )
 				BOOST_TEST( differences[ v ][ i ] < differences[ v ][ i - 1 ] );
 		}
 }
+
+
