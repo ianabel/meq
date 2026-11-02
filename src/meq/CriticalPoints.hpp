@@ -16,8 +16,8 @@
 
 /*
  * Critical points of psi_h as objects: the magnetic axis, any X-point, and a
- * global audit of how many of each there can be. INVERSION-PLAN.md section 5
- * and stage IN-A.
+ * global audit of how many of each there can be. Stage IN-A;
+ * docs/flux_surfaces.rst, Critical points, is the reader's account.
  *
  * The magnetic axis and an X-point are where grad_bar(psi) vanishes. Every
  * contour method wants them located FIRST, because they are exactly where a
@@ -109,8 +109,8 @@
  *
  * It is a CERTIFICATION, never an EXCLUSION. Degree zero does not imply no
  * root: a maximum and a saddle inside sum to zero and the boundary cannot tell
- * the difference from an empty domain. INVERSION-PLAN.md section 5 says this in
- * capitals because it was got wrong once during the survey that produced it,
+ * the difference from an empty domain. This is said in capitals because it was
+ * got wrong once, during the survey that designed this unit,
  * and tests/convergence/CriticalPointConvergence.cpp keeps a domain containing
  * exactly one maximum and one saddle as a live demonstration: it reads a
  * winding number of zero with two critical points inside. Anything that uses
@@ -161,7 +161,7 @@
  *
  * findAxis() and sweep() are seeded Newton. Newton certifies the root it
  * converges to and says nothing whatever about the roots it does not.
- * INVERSION-PLAN.md section 5 specifies the exhaustive construction --
+ * The exhaustive construction is
  * subdivision in the barycentric Bernstein basis with the convex-hull test of
  * Reuter et al., 10.1007/s00371-007-0184-x, where a sub-triangle all of whose
  * Bernstein coefficients share a sign provably contains no zero and can be
@@ -182,8 +182,9 @@
  * negative -- which is what the Solov'ev benchmarks have, F = -((1-A) R^2 + A)
  * -- psi is a subsolution, its maximum is on the boundary and the magnetic axis
  * is an interior MINIMUM. With F positive it is an interior maximum, which is
- * the case the high-beta source and INVERSION-PLAN.md section 6's maximum
- * principle argument are written for. So "seed from the largest nodal value" is
+ * the case the high-beta source is written for; docs/flux_surfaces.rst, How
+ * many critical points there can be, has the maximum principle argument for
+ * both signs. So "seed from the largest nodal value" is
  * right for one sign of F and finds a corner of the mesh for the other.
  * findAxis() therefore seeds from BOTH nodal extremes and returns whichever
  * yields a genuine interior extremum, and refuses rather than guesses if both
@@ -228,8 +229,9 @@ namespace meq
 	/// The Poincare-Hopf index: +1 for either extremum, -1 for a saddle, 0 for
 	/// a degenerate point. Note the first of those: a maximum and a minimum are
 	/// NOT distinguished by their index in two dimensions, which is why
-	/// INVERSION-PLAN.md section 6 needs the maximum principle and not just the
-	/// topology to conclude that there is exactly one axis and no saddle.
+	/// docs/flux_surfaces.rst, How many critical points there can be, needs
+	/// the maximum principle and not just the topology to conclude that one
+	/// axis brings no saddle.
 	int criticalPointIndex( CriticalPointType type );
 
 	/// One located zero of q_h.
@@ -565,7 +567,7 @@ namespace meq
 			 * @throws std::runtime_error if no interior extremum is found, or if
 			 *         @a sense is Either and both a maximum and a minimum are.
 			 *         The second is a genuine ambiguity rather than a failure --
-			 *         INVERSION-PLAN.md section 6 argues it cannot happen for the
+			 *         the maximum principle rules it out for the
 			 *         fixed-boundary problem with single-signed F -- and guessing
 			 *         would be worse than refusing.
 			 * @throws std::invalid_argument for AxisSense::Saddle, which this

@@ -1,5 +1,5 @@
 // The ( Psi, theta ) flux-surface output and the per-psi geometry cache:
-// INVERSION-PLAN.md stage IN-6.
+// stage IN-6.
 //
 // tests/unit/FluxFamilyTests.cpp is the MFEM-free half -- the cache's
 // invalidation contract, the interpolation, and the refusals -- driven by a
@@ -15,8 +15,8 @@
 //     Green's theorem gives V = closed-integral pi R^2 dz -- a contour integral
 //     with no gradient in it at all -- and the coarea formula says
 //     V' = | dV/dpsi |. Two completely different integrals over the same nodes,
-//     which must agree. SurfaceAverage.hpp records that the third leg of
-//     section 3.3's cross-check is missing; this is that leg on one quantity.
+//     which must agree. The third leg of IN-2's cross-check, implicit
+//     quadrature, is declined; this is a third leg on one quantity.
 //   * THE SEPARATRIX CUT, swept rather than inherited from LIUQE.
 //   * THE BAND MASK PER NODE, on the curved path where there really is a band,
 //     through the file rather than only in memory.
@@ -571,8 +571,8 @@ BOOST_AUTO_TEST_CASE( theEnclosedVolumeAndVPrimeAgreeThroughTheCoareaFormula )
 
 /// Where the outer end of the cut has to go, measured rather than inherited.
 ///
-/// INVERSION-PLAN.md section 8's second risk says to decide meq's cut
-/// deliberately and record it, and names what production codes do: LIUQE cuts at
+/// meq's cut is decided deliberately and recorded, against what production
+/// codes do: LIUQE cuts at
 /// Psi_N = 0.95, FreeGS extrapolates outside [ 0.01, 0.99 ]. Repeating LIUQE's
 /// number with LIUQE's reason would be inheriting a decision rather than making
 /// one, so this is the sweep the default is set from.

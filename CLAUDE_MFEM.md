@@ -909,7 +909,13 @@ needs those unreachable or serialised.
 per-surface full-mesh scan sat under a test asserting that count is zero,
 reading 0 before and 0 after while the real count moved. The numbers above are
 from a breakpoint on `mfem::Mesh::FindPoints`, which is the only instrument that
-can see them. `INVERSION-PLAN.md` §11.3 has the detail.
+can see them.
+
+**BUILD EVERY CACHED TABLE BEFORE THE PARALLEL REGION.**
+`Mesh::ElementToElementTable()` builds and caches on first call, so building it
+inside a parallel region is a data race on the cache. The same goes for
+anything that mutates a shared object on first use: `setBandExtension()`
+mutates the tracer and so can never run inside a region over a const one.
 
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.

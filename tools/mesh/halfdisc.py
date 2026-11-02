@@ -622,7 +622,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
     `[conductors] Model = "subtracted"` or `"filament"`, under which no --coil
     is emitted at all -- so that the cells the copper occupies are whole cells
     of it, which is what `[mesh.generate] AlignConductors` asks for and what
-    ELEMENT-REGIONS-PLAN.md's material record reads.  The solve itself does not
+    the .nc's material record reads.  The solve itself does not
     need it: the copper is vacuum to the remainder equation.
 
     `symmetric` meshes the half z >= 0 and reflects it, so that the result is

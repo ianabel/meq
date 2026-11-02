@@ -25,7 +25,7 @@
 #include "ConvergenceHarness.hpp"
 
 /*
- * The acceptance test for INVERSION-PLAN.md stage IN-A: the magnetic axis as a
+ * The acceptance test for stage IN-A: the magnetic axis as a
  * genuine critical point of psi_h, and the Poincare-Hopf audit over the whole
  * domain.
  *
@@ -57,16 +57,17 @@
  * the control, and it is the reason the under-resolved cases below are run at
  * all.
  *
- * THE SIGN OF THE SOLOV'EV AXIS, WHICH IS NOT WHAT THE PLAN ASSUMES.
+ * THE SIGN OF THE SOLOV'EV AXIS, WHICH IS NOT THE ONE USUALLY ASSUMED.
  *
- * INVERSION-PLAN.md section 6 argues from the maximum principle that with
- * single-signed F >= 0 the interior critical point is a MAXIMUM. Every
+ * The maximum principle says that with single-signed F >= 0 the interior
+ * critical point is a MAXIMUM (docs/flux_surfaces.rst, How many critical
+ * points there can be). Every
  * Solov'ev fixture in tests/analytic has F = -( ( 1 - A ) R^2 + A ), which on
  * these domains is single-signed NEGATIVE -- so psi is a subsolution, its
  * maximum is on the boundary, and the axis is an interior MINIMUM. Measured
  * here, and it is a minimum on all four configurations.
  *
- * The plan's conclusion is untouched: a maximum and a minimum both have index
+ * The conclusion is untouched: a maximum and a minimum both have index
  * +1 in two dimensions, so #extrema - #saddles = 1 either way and one axis
  * still means no interior saddle. What it does invalidate is the seeding rule
  * "start from the largest nodal value of psi": that finds a corner of the
@@ -933,8 +934,8 @@ BOOST_AUTO_TEST_CASE( theAuditSurvivesADeliberatelyUnderResolvedMesh )
  * A DEGREE IS A SUM OF INDICES AND NEVER A COUNT, demonstrated rather than
  * asserted.
  *
- * INVERSION-PLAN.md section 5 says this in capitals because it was got wrong
- * once during the survey that produced the plan, and a warning in a header is
+ * It is said in capitals because it was got wrong once, during the survey
+ * that designed CriticalPoints.hpp, and a warning in a header is
  * worth less than a live case. iterExample2 has its axis at ( 1.051, 0.024 )
  * and an X-point at ( 0.88384, -0.704 ); a box containing both contains an
  * extremum of index +1 -- a minimum here, since this fixture's F is negative --
@@ -1053,8 +1054,8 @@ BOOST_AUTO_TEST_CASE( theWindingNumberIsASumOfIndicesAndNotACount )
  * The solver's psi_ax is the extreme NODAL value of psi_h, chosen because the
  * bordered Newton of the normalised-profile path needs a constraint it can
  * differentiate -- one nodal value is one entry of the discrete unknown, so the
- * border row is sparse. IN-A's axis is the critical point. INVERSION-PLAN.md
- * lists conflating them as risk 7 and CriticalPoints.hpp says at length not to,
+ * border row is sparse. IN-A's axis is the critical point. CLAUDE_INVERSION.md
+ * and CriticalPoints.hpp say at length not to conflate them,
  * so here is the number that makes it concrete.
  *
  * WHAT IS MEASURED, and the second column is the sharp one:

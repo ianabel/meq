@@ -9,7 +9,7 @@
 # EVERY MAP EVALUATION IS A WHOLE EQUILIBRIUM -- one solve per residual, and
 # 2 ( d + 1 ) more per Jacobian. It is affordable only because the profile is
 # FITTED, so the unknown is a handful of coefficients rather than nFieldDOF;
-# INVERSION-PLAN.md section 11.1 measures the alternative, differencing against
+# CLAUDE_INVERSION.md's IN-P measures the alternative, differencing against
 # every field degree of freedom, at about 5.7 hours for one Jacobian.
 #
 # AND ONE SOLVER DOES ALL OF THEM. Only gg' changes between steps, so the mesh,

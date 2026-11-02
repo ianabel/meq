@@ -2710,7 +2710,7 @@ namespace meq
 				output.getBooleanOr( "GridFunctions", outputOptions.gridFunctions );
 			outputOptions.vtk = output.getBooleanOr( "VTK", outputOptions.vtk );
 
-			// The ( Psi, theta ) file: INVERSION-PLAN.md stage IN-6. See
+			// The ( Psi, theta ) file: stage IN-6. See
 			// OutputConfig for why it is off by default and why both ends of
 			// the cut are cut.
 			outputOptions.fluxSurfaces =

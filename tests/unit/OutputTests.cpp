@@ -1,7 +1,7 @@
 // Unit tests for the material record in src/meq/Output: NetCDFWriter::materials(),
 // NetCDFWriter::nodeMaterial(), and the VTK cell data of meq::ElementCellData.
 //
-// ELEMENT-REGIONS-PLAN.md §2.3 and ER-1. The reserved kinds -- passive and
+// ER-1 and ER-2. The reserved kinds -- passive and
 // ferromagnetic -- must be READABLE BEFORE THEY ARE PRODUCED, so this writes a
 // table holding one passive row and two ferromagnetic rows, one linear and one
 // with a permeability curve, and reads it back. The read is through ncdump and
@@ -216,7 +216,7 @@ BOOST_AUTO_TEST_CASE( theReservedKindsAreReadableBeforeTheyAreProduced )
 	std::string const text = dump( file.path );
 	BOOST_TEST_REQUIRE( !text.empty(), "ncdump could not read the file the writer made" );
 
-	// THE TABLE, every column of §2.1, with each kind's fills.
+	// THE TABLE, every column, with each kind's fills.
 	std::vector<std::string> const names = tokens( text, "material_name" );
 	std::vector<std::string> const wanted = { "vacuum", "plasma", "upper", "lower",
 	                                          "solenoid", "wall", "core", "yoke" };

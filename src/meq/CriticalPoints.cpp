@@ -18,7 +18,7 @@
 #include <vector>
 
 /*
- * The implementation of INVERSION-PLAN.md stage IN-A. CriticalPoints.hpp
+ * The implementation of stage IN-A. CriticalPoints.hpp
  * carries the argument; this file carries the arithmetic, and comments here are
  * confined to the places where the arithmetic is not the obvious transcription
  * of it.

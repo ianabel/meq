@@ -1054,7 +1054,7 @@ namespace meq
 		column( file, "element_attribute", netCDF::ncInt, elementDim, record.attribute,
 		        "the element's attribute in the mesh variable" );
 
-		// ---- the material table, every column of section 2.1 ----
+		// ---- the material table, every column of it ----
 		std::vector<Material> const &rows = table.materials();
 		std::vector<std::string> names;
 		std::vector<int> kinds, circuits, curveIndex;

@@ -127,7 +127,7 @@ keep the vacuum attribute, and no size field grades it. It is for a conductor
 the solve **subtracts** — `[conductors] Model = "subtracted"` or `"filament"`,
 under which `meq --mesh-command` emits no `--coil` — so that the cells its
 copper occupies are whole cells of it, which is what
-`ELEMENT-REGIONS-PLAN.md`'s element record reads. `[mesh.generate]
+the `.nc`'s element record reads (`docs/output.rst`). `[mesh.generate]
 AlignConductors = true` emits one per `[[coils]]` block. The solve does not
 need it: subtracted copper is vacuum to the remainder equation.
 

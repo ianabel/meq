@@ -9852,7 +9852,7 @@ namespace
 
 		if ( fault != nullptr )
 			*fault = plasma && conductor >= 0;
-		// §2.1b: copper wins over vacuum, and plasma in copper is a fault that
+		// Copper wins over vacuum, and plasma in copper is a fault that
 		// is counted and still goes to the copper.
 		if ( conductor >= 0 )
 			return conductor;

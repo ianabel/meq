@@ -2745,7 +2745,7 @@ BOOST_AUTO_TEST_CASE( the_prescribed_plasma_current_is_amperes_and_needs_a_norma
 }
 
 /// [output] FluxSurfaces and the four sizes beside it: the ( Psi, theta ) file
-/// of INVERSION-PLAN.md stage IN-6.
+/// of stage IN-6.
 BOOST_AUTO_TEST_CASE( the_flux_surface_output_is_off_by_default_and_its_cut_is_validated )
 {
 	auto const refuses = []( std::string const & text, std::string const & key )
@@ -3491,7 +3491,7 @@ BOOST_AUTO_TEST_CASE( coil_size_is_refused_beside_a_subtracting_conductor_model 
 // [mesh.generate] AlignConductors -- THE RECTANGLES AS GEOMETRY ONLY, UNDER A
 // SUBTRACTING MODEL AND ONLY THERE.
 //
-// ELEMENT-REGIONS-PLAN.md §2.1b. Off by default, so every existing file means
+// Off by default, so every existing file means
 // what it meant; accepted under "subtracted" and "filament"; refused under
 // "meshed", whose --coil already fragments every rectangle in, so the key
 // would be accepted and do nothing.

@@ -5,9 +5,12 @@
 and `CLAUDE_FB.md` has free boundary, which IN-5 waited on. `CLAUDE_FLOW.md` is
 the third campaign.
 
-**The plan is `INVERSION-PLAN.md`** and the stage names (IN-A, IN-0 … IN-P) and
-section numbers cited below are its. `MANTA-COUPLING.md` is the consumer this
-exists for, written from MaNTA's side. `ROADMAP.md` item 10 is where it sits.
+**The stage names (IN-A, IN-0 … IN-P) are the table below.**
+`docs/flux_surfaces.rst`, `docs/surface_geometry.rst` and
+`docs/normalised_flux.rst` are the user-facing account, derivations included;
+this file is what a maintainer needs beside them. `MANTA-COUPLING.md` is the
+consumer this exists for, written from MaNTA's side. `ROADMAP.md` item 10 is
+where it sits.
 
 **Measurement tables live in `MEASUREMENTS.md`** under stable `M-nn` anchors.
 **Do not renumber the anchors.**
@@ -16,11 +19,27 @@ exists for, written from MaNTA's side. `ROADMAP.md` item 10 is where it sits.
 toroidal flow — `CLAUDE_FLOW.md` — was a change to `F` alone: a new consumer of
 `ψ_h` and `q_h`.
 
+## The stages
+
+Every one is done. Each ended at a measured number, and the sections below are
+what each found.
+
+| stage | what it built or answered | where it lives |
+|---|---|---|
+| **IN-A** | the magnetic axis and any X-point as roots of `q_h`, by Newton inside one element, audited by the winding number of `q` on the boundary | `meq::CriticalPointFinder`, `src/meq/CriticalPoints.{hpp,cpp}`; `CriticalPointConvergence` |
+| **IN-0** | the predictor–corrector tracer: curvature-controlled step, cubic Hermite from `q`, `Potential::PostProcessed` by default, and the band crossed by `BandExtension::TransferLift` | `meq::ContourTracer`, `src/meq/FluxSurfaces.{hpp,cpp}`; `FluxSurfaceConvergence` |
+| **IN-1** | a closed contour by poloidal angle, with the metric pointwise from `q` and the differenced metric kept as the live control | `ContourTracer::fitByAngle()`, `meq::AngleParametrisation`; `FluxSurfaceConvergence` |
+| **IN-2** | flux-surface averages as one primitive over a callable integrand — `V′`, `⟨R⁻²⟩`, the safety factor — against a converged reference on the exact field | `meq::surfaceAverages()`, `src/meq/SurfaceAverage.{hpp,cpp}`; `SurfaceAverageConvergence`, `tests/analytic/FluxSurfaceReference.hpp` |
+| **IN-3** | `R` and `z` as Zernike expansions on `ρ = √Ψ_N`, fitted to traced points, with the axis-shape relabelling | `meq::SurfaceFit`, `meq::relabelByAxisShape()`, `src/meq/{SurfaceFit,Zernike}.{hpp,cpp}`; `SurfaceFitConvergence`, `ZernikeTests` |
+| **IN-4** | the `ψ`-element question, answered: no element; the angle is solved for | `meq::gaugeFreeFit()`, `meq::SurfaceGauge`; `SurfaceFitConvergence` |
+| **IN-5** | open surfaces: traced both ways from a seed and fitted as Chebyshev series in normalised arc length | `ContourTracer::traceOpen()`, `meq::fitOpenSurface()`; `OpenSurfaces` |
+| **IN-6** | the `(Ψ, θ)` file `<stem>_surfaces.nc` and the per-`ψ` cache | `meq::FluxSurfaceFamily`, `meq::GeometryCache`, `meq::extractFluxSurfaces()`, `meq::FluxGridWriter`, `[output] FluxSurfaces`; `FluxFamilyTests`, `FluxGridConvergence`, `DriverAcceptance::theDriverWritesTheFluxSurfaceGrid` |
+| **IN-P** | the chain timed, and its cost model tested; not a ctest | `tests/performance/InversionScaling.cpp`, `inversion-scan.sh` |
+
 ## Solution inversion: every stage is done
 
-**`INVERSION-PLAN.md` is the design and the staged plan** — `ψ(R, z)` to
-`R(Ψ, l)`, `z(Ψ, l)`, which is what `MANTA-COUPLING.md` needs, what the driver's
-`(Ψ, θ)` grid is, and what `ROADMAP.md` item 10 is. **Every stage is done**,
+**The inversion takes `ψ(R, z)` to `R(Ψ, l)`, `z(Ψ, l)`**, which is what
+`MANTA-COUPLING.md` needs, what the driver's `(Ψ, θ)` grid is, and what `ROADMAP.md` item 10 is. **Every stage is done**,
 IN-5 included — it was deferred with free boundary, and free boundary now
 solves. This section is only what a reader of the code needs.
 
@@ -35,6 +54,18 @@ Compare CEDRES++, which records as an open problem that in P1 continuous
 Galerkin the axis and the X-point are confined to mesh vertices, and TokaMaker,
 which notes for Lagrange order ≥ 2 that saddles "can exist anywhere within the
 mesh". MEQ resolves both sub-element by root finding.
+
+**Two holes in the literature that this fills, both reached independently by
+two surveys.** No paper treats iso-contouring a field whose gradient is an
+independently solved unknown at the same order — the nearest is the
+gradient-augmented level set (Nave, Rosales & Seibold,
+`10.1016/j.jcp.2010.01.029`), where the gradient is advected rather than
+co-solved, so the Hermite-from-`q` is well founded by analogy and is not
+something MEQ can cite as done. And nobody extracts flux surfaces from a `P_k`
+finite-element `ψ` and demonstrates that `q(ψ)` and the averages converge at
+`k+1`: CHEASE bisects its element cubic and keeps the element order in the
+quadrature, ECOM is fully spectral and cannot take an X-point, and this is
+between them.
 
 The two pieces that exist are `src/meq/CriticalPoints.{hpp,cpp}` (stage IN-A)
 and `src/meq/Zernike.{hpp,cpp}` (the basis IN-3 will fit in). Both headers carry
@@ -151,7 +182,7 @@ and **1.0000** at 12,288 — the `O(h²)`-in-value gap of the paragraph above,
 measured. It costs 0.041 s and 0.214 s against solves of 1.0 s and 36 s.
 
 **`findAxis()` seeds from BOTH nodal extremes, and the reason is a sign error
-this file's plan carried.** MEQ's `ψ` is not sign-normalised across sources:
+the design carried.** MEQ's `ψ` is not sign-normalised across sources:
 the Solov'ev fixtures have `F` single-signed **negative**, so `ψ` is a
 *subsolution*, its maximum is on `Γ`, and **the magnetic axis is an interior
 MINIMUM** (Hessian determinant +0.693, trace +2.121 on `nstx`). With `F` positive
@@ -173,8 +204,8 @@ depend on the seed**.
 for.** The raw block holds `−q`; in even dimension `index(−v) = index(v)`, so
 every winding number is unchanged and **every Maximum silently becomes a
 Minimum**. The audit still passes. `sweep()` is seeded Newton and is **not
-exhaustive** — the certified subdivision of `INVERSION-PLAN.md` §5 is
-deliberately not built, because IN-A's acceptance needs the axis and the audit
+exhaustive** — the certified subdivision, a barycentric Bernstein basis with
+Reuter et al.'s convex-hull test, is deliberately not built, because IN-A's acceptance needs the axis and the audit
 and neither needs exhaustiveness.
 
 ### Driving by `q( ψ )`: the inversion, and the outer Newton that closes it
@@ -211,8 +242,8 @@ passes through zero**. It does not stall at the fixed point, it crosses it.
 
 **AND THE NEWTON IS AFFORDABLE BECAUSE THE PROFILE IS FITTED.** `g²` is carried
 as a handful of least-squares coefficients rather than a table, so a differenced
-Jacobian costs a few map evaluations a step against `INVERSION-PLAN.md` §11.1's
-**5.7 hours** for `dGeometry_dpsi`. The fit was put there for conditioning — the
+Jacobian costs a few map evaluations a step against the **5.7 hours** IN-P
+measures for `dGeometry_dpsi` (*Two algorithmic levers*, below). The fit was put there for conditioning — the
 innermost surface's inverted `g` moves **13% for a 1.3%** change in the profile,
 where the extraction is least reliable — and it pays for the Newton as well.
 
@@ -519,8 +550,8 @@ thirty modes would be reading noise. `find_package(Boost CONFIG REQUIRED)` and
 the `.cpp`, so a consumer of the basis takes on nothing.
 
 **A DERIVATIVE CHECKED AGAINST A CENTRAL DIFFERENCE IS FLOORED BY THE
-INSTRUMENT, NOT BY THE DERIVATIVE.** An earlier draft of the plan implied the
-tolerance would tighten once the derivative was exact. It does not: a central
+INSTRUMENT, NOT BY THE DERIVATIVE.** It is tempting to expect the tolerance
+to tighten once the derivative is exact. It does not: a central
 difference carries its own `O(h²)` truncation, so the comparison sits at
 **1.3e-07** however exact the derivative is. Richardson extrapolation,
 `(4D(h/2) − D(h))/3`, reaches **1.4e-11**. **That applies wherever this suite
@@ -603,7 +634,7 @@ for a location once per iteration.
 
 ### IN-1: a spectral rule fed a second-order Jacobian is a second-order scheme
 
-The trap `INVERSION-PLAN.md` §3.2 warns about, made into a measurement. Arc
+The metric trap, made into a measurement. Arc
 length of one contour, three ways, rates in the number of angles:
 
 → **[M-47](MEASUREMENTS.md#m-47)** — **from `q`, pointwise**
@@ -674,7 +705,7 @@ path of length `O(h)`**, which is `k+2`. `BandExtension::FluxTaylor` is kept as
 the **control**, not as a fallback, and the tests say so in their failure
 messages.
 
-**AND THE PRIMITIVE THE PLAN NAMED CANNOT DO IT.** `mfem::PathLiftCoefficient`
+**AND THE PRIMITIVE ITS NAME SUGGESTS CANNOT DO IT.** `mfem::PathLiftCoefficient`
 `dynamic_cast`s its `ElementTransformation` to `FaceElementTransformations` and
 lifts from *that face's own* integration point — it answers "what is `φ_h` on
 `Γ_h`", which is `η₅`'s question and not this one. The usable primitive is one
@@ -709,6 +740,22 @@ was the other half of a real defect in the `.nc`. `ContourPoint::extended` and
 `bandDepth`, `Contour::extendedPoints` / `deepestBandPoint` / `bandExtension`,
 and `AngleParametrisation::extended` per node, so a consumer can report
 band-crossing surfaces separately.
+
+**The third candidate is an anchor, not a field.** `ψ = 0` exactly on `Γ`, and
+`Γ` is known from `BoundaryShape`, so the outermost contour is known for free —
+and the lift starts its line integral there. **Blending an extrapolated value
+toward that datum does not rescue a bad extension, and it has been tried**:
+`(1−t)·v` scales a value and never changes its sign (`docs/output.rst`, *The
+band between Γ_h and Γ*). Fix the evaluation; use the boundary as an anchor and never as a
+correction.
+
+**And the lift withdraws one argument for elements in `ψ`.** A global fit's
+accuracy is set by its worst region, so surfaces known only to an extension's
+order would degrade the representation everywhere — an argument for elements,
+which localise that damage. With the lift the band is not the worst region: it
+converges at `k+2` where the interior population of the same contour reads
+`k+1` to `k+2`. That argument was written assuming the extension costs an order,
+and it does not.
 
 ### IN-2: the averages, and `ψ*` does NOT buy an order here
 
@@ -863,6 +910,24 @@ settling, which is the statement that the growth belongs to the coordinate and
 not to the fit. `MANTA-COUPLING.md`'s consumer can keep its nodes off `Ψ = 0`,
 so this is a conditioning number for a coupling to read rather than a defect.
 
+**`∂R/∂Ψ` IS UNBOUNDED AT THE AXIS IN EVERY EQUILIBRIUM, AND THAT IS A FACT
+ABOUT THE PROBLEM.** For a surface `R = R₀ + a cos θ` the `m = 1` coefficient of
+`R` *is* the minor radius `a`, which grows like `√Ψ`, so `∂R/∂Ψ ∝ 1/(2√Ψ_N)`.
+It is not the Shafranov shift — a rigid shift is the `m = 0` coefficient and is
+well behaved — and averages are unaffected, `V′` tending to a constant; what
+diverges is the derivative of a surface's *position*. **The MaNTA author's
+answer** has two halves, and the first is the real one: MaNTA enforces that its
+fluxes vanish on axis, which is a physical boundary condition (there is no area
+for a flux to cross there), so a metric derivative going like `Ψ^{-1/2}` times
+a flux that vanishes is finite — the singularity is removable in the *coupled*
+system, which is where it has to be. And MaNTA can guarantee no node sits at
+`Ψ = 0` exactly. What is left is conditioning: the geometry block of MaNTA's
+Jacobian scales like `Ψ₁^{-1/2}`, which depends on where MaNTA puts its first
+node. **Measure it once the coupling exists; do not design around it now.**
+`fluxDerivativeFromRadial()` carries the `1/(2ρ)` and `radialDerivative()` stays
+finite; prefer the second wherever a caller can work in `ρ`. This is written
+here and not into `MANTA-COUPLING.md`, which is a received document.
+
 **`fitByAngle()` now accepts its best iterate** where the tolerance is
 unattainable, with `AngleParametrisation::stalledRays` beside `worstResidual`,
 and keeps the throw for a ray that never brackets. The acceptance asserts against
@@ -874,8 +939,10 @@ reporting `extended`.
 
 ### IN-4: the answer is that the question was the wrong one
 
-**The `ψ`-element decision is closed and no element was built.** `§4.4`'s three
-candidates were three ways to buy a `ρ`-dependent poloidal angle; **solving for
+**The `ψ`-element decision is closed and no element was built.** The three
+candidates — one global expansion accepting the tail, elements in `ψ` each with
+its own relabelling, and MXH's per-surface shape expanded in `ρ` — were three
+ways to buy a `ρ`-dependent poloidal angle; **solving for
 the angle directly is cheaper than all of them**, and it is what DESC was
 measured doing.
 
@@ -902,6 +969,29 @@ and never converges.
 **No inner limit tried costs it more than a factor of 1.5.** That is the number
 `MANTA-COUPLING.md` needed, and it removes the constraint that motivated
 elements in the first place.
+
+**Of the four constraints that made elements look necessary, one is still
+live.** Axis regularity is given free by one global Zernike expansion in `ρ`;
+`C¹` in `Ψ`, for `dGeometry_dpsi`, is given free by a global expansion being
+`C^∞`; localising the band's damage is removed by the transfer lift (*The band*,
+above). What is left is **an element boundary at the separatrix**: a global
+expansion assumes smoothness all the way out, the surface develops a corner at
+the X-point, and no polynomial basis in `Ψ` converges against the logarithm
+that follows. IN-5 does not solve that and does not claim to — it delivers the
+geometry of a surface *outside* the separatrix — and a level *at* the
+separatrix stalls at the saddle, which is the honest answer for a set that is
+not a 1-manifold.
+
+**The DESC papers say the three candidates were one basis.** The regularity
+condition IN-3 derived, `a_m(ρ) = ρ^m (a_{m,0} + a_{m,2}ρ² + …)`, is Lewis &
+Bellan, *J. Math. Phys.* **31**, 2592 (1990), which Dudt §III.B cites for the
+purpose; MXH's per-surface shape does not escape it, it relocates it onto the
+shape coefficients. With regularity imposed the candidates are the same basis
+and the only real variable is the angle. Dudt records DESC's own version of
+IN-3's finding — more modes needed in the core, more error near the axis — and
+Panici shows the fix: a general computational angle that the solve is free to
+move. That is the difference between fitting and solving, and it pointed at
+IN-4's answer.
 
 **Panici's Figure 5 reproduced on a fit, with no penalty at all**: spectral width
 `M(2,2)` falls 1.607 → 1.366 under minimum-norm damping alone, and 1.481 → 1.265
@@ -962,9 +1052,9 @@ it exits non-zero only for the correctness properties that make its timings mean
 anything. Note that **`naming` does not cover `tests/performance`** — it runs
 over `MEQ_CORE_SOURCES_PRESENT`, which is `src/meq` alone.
 
-**85% OF THE CHAIN IS `gaugeFreeFit`, AND `INVERSION-PLAN.md` §11 DOES NOT
-MENTION IT** — that section was written before IN-4 existed and puts the weight
-on the tracer's per-point corrector instead. Measured at `k = 2`, `n = 48`, 12
+**85% OF THE CHAIN IS `gaugeFreeFit`, AND THE COST MODEL THE HARNESS WAS BUILT
+TO TEST DOES NOT MENTION IT** — it predates IN-4 and puts the weight on the
+tracer's per-point corrector instead. Measured at `k = 2`, `n = 48`, 12
 surfaces × 48 angles, `L = 10`, serial: `trace` 11.2%, `fitByAngle` 1.8%,
 `surfaceAverages` 1.8%, the linear `SurfaceFit` 0.6%, `findAxis` 0.01%, and
 `gaugeFreeFit` **84.6%**. For scale the solve itself is 0.37 s and
@@ -972,8 +1062,8 @@ surfaces × 48 angles, `L = 10`, serial: `trace` 11.2%, `fitByAngle` 1.8%,
 
 **And inside `gaugeFreeFit`, 82.5% is field evaluation** — 21,888 `sampleAt`
 calls — so **about 70% of the whole chain is `ContourTracer::sampleAt`** and the
-linear algebra is nowhere near the cost. §11 predicted the quadrature would not
-be where the time is, and that much is right: it is 1.8%.
+linear algebra is nowhere near the cost. The model predicted the quadrature
+would not be where the time is, and that much is right: it is 1.8%.
 
 **The corrector is not the problem either.** 97.3% of accepted points take
 **exactly two** iterations, mean 1.994, worst 3, with `stalledCorrections` and
@@ -1010,8 +1100,8 @@ shared-tracer construction below.
 
 ### Threading: available, and blocked by one non-reentrant function
 
-Given a mesh, a solve and a tracer per thread, the parallelism §11.2 predicted is
-there and is exact:
+Given a mesh, a solve and a tracer per thread, the parallelism the cost model
+predicted is there and is exact:
 
 → **[M-50](MEASUREMENTS.md#m-50)** — threads · over surfaces · over rays
 
@@ -1019,18 +1109,40 @@ there and is exact:
 quadrature weights and `V′` — which is available exactly because independent
 surfaces and independent rays reassociate nothing. Surfaces cap at about 3.3×
 because there are only twelve of them and the outer ones are longer; rays scale
-properly, which is §11.2's asymmetry confirmed: **the tracer's steps are
-sequential and the rays are not.**
+properly, which is the predicted asymmetry confirmed: **the tracer's steps are
+sequential and the rays are not.** The tracer is the robust route for
+*establishing* a surface, assuming no star-shapedness; the rays are the
+parallel route for *populating* it once `min|u × t|` is healthy.
 
 **What is not available is sharing one tracer**, for the `FindPoints` reason
 in `CLAUDE_MFEM.md`, *Traps in MFEM's API*. That is the single blocker, and the walk-depth item above is most
 of its cure.
 
-### Two levers from §11.4, one of which does not exist
+**OpenMP OVER INDEPENDENT WORK, NEVER THREADED BLAS.** 70% of the chain is
+`ContourTracer::sampleAt`, which calls no BLAS at all, and the chain has no
+active OpenMP region to nest MKL's element-local work in the way
+`AssemblyMode::Threaded` does. So extraction wants `MKL_NUM_THREADS=1` and gains
+nothing from relaxing it, and a harness that appears to gain from raising MKL
+threads is measuring something else.
+
+**AND NOT AUTOMATIC.** A parallel region per surface is right for a `(Ψ, θ)` grid
+built once and wrong for one surface asked for repeatedly, which is MaNTA's
+pointwise call pattern; the cure for that is `meq::GeometryCache`, which serves a
+repeated point from one extraction rather than parallelising it. Threading here
+is an informed opt-in, like `setAssemblyMode()`.
+
+**THE BIT-EXACTNESS ASSERTION IS AT `0.000e+00`, NOT A TOLERANCE.** Independent
+surfaces and independent rays reassociate nothing, so exactness is available,
+and a tolerance would be an admission that something is shared — which is the
+defect being guarded against.
+
+### Two algorithmic levers, one of which does not exist
 
 **Continuation in the flux label is worth 1.004× — nothing — and corrector
-iterations went UP.** §11.4 framed this as a genuine trade against parallelism
-over surfaces and warned against reasoning from structure. **There is no trade to
+iterations went UP.** It looked like a genuine trade against parallelism over
+surfaces: Allgower & Georg's ch. 15 makes the whole family one 2-manifold with
+no critical points, so the surface at `Ψ_j` looks like an excellent predictor
+for the one at `Ψ_{j+1}`. **There is no trade to
 resolve**: the predictor for every point after the first already comes from the
 previous point of the *same* surface, so continuation can only save
 `traceFromAxis`'s bracket and one corrector per surface. Take the parallelism.
@@ -1042,8 +1154,19 @@ served from one family per `ψ`, a factor of **5.1**.
 **AND HERE IS THE NUMBER THAT DECIDES THE COUPLING'S DESIGN.**
 `dGeometry_dpsi` by differencing costs one extraction per `ψ` degree of
 freedom: **0.447 s × 46,080 dofs ≈ 5.7 hours for a single Jacobian, serial.**
-That is what §11.4's shape derivative has to beat, and it is the only part of the
+That is what the shape derivative has to beat, and it is the only part of the
 chain where a core count is worth a factor rather than a few percent.
+
+**THE SHAPE DERIVATIVE IS THE LEVER THAT IS STILL OWED** (`TODO`, the MaNTA
+coupling entry). A flux-surface average is an integral over a surface whose
+location is itself set by `ψ`, so its derivative has two parts — the integrand
+moving and the surface moving — and both have closed forms: one extraction plus
+a quadrature per degree of freedom, against `nFieldDOF` re-extractions. **The
+differenced derivative is then the TEST and must not be deleted**:
+`MANTA-COUPLING.md` §6 records that MaNTA never assembles its Jacobian, so a
+missing surface-motion term costs Newton iterations and not the answer, and the
+remedy is the one MEQ uses on `dFdPsi` — check the closed form against a
+difference, as a unit test.
 
 ### Eigen, and what the swap did and did not move
 
@@ -1112,10 +1235,10 @@ written and is unaffected.
 square-root branch point at the axis and not the algebra. `Ψ_N` is carried
 beside it; the interpolation is in `ρ`.
 
-### §8's separatrix cut: nothing gives out, and that is the finding
+### The separatrix cut: nothing gives out, and that is the finding
 
-`INVERSION-PLAN.md` §8's second risk said to decide the cut deliberately
-*"rather than discovering it as a convergence failure"*. **The premise is wrong
+The design said to decide the cut deliberately *"rather than discovering it as
+a convergence failure"*. **The premise is wrong
 — there is no failure to discover.** Swept on a curved Miller boundary at seven
 levels on two meshes, every trace closed, every fit converged, **zero** rays
 stalled, transversality moved 0.730 → 0.684, and `|ψ_h − c|` sat at 2e-13 at
@@ -1131,10 +1254,10 @@ at 0.995), so the per-node mask is the only signal there is and the cut is a
 decision about **data provenance** rather than about convergence.
 
 MEQ ships `Ψ_N ∈ [0.05, 0.95]`, configurable, and **refuses rather than
-extrapolating** outside it — the opposite of FreeGS, and it is §8's *fail by
-throwing* applied to a boundary condition. **The band is `O(h)`, so the right
-cut moves with the mesh**: the operational rule is to read `extrapolated`, not
-to trust the default.
+extrapolating** outside it — the opposite of FreeGS, and it is
+`MANTA-COUPLING.md` §8's *fail by throwing* applied to a boundary condition.
+**The band is `O(h)`, so the right cut moves with the mesh**: the operational
+rule is to read `extrapolated`, not to trust the default.
 
 **And the two ends are cut for different reasons, which is why they are two
 numbers.** The outer end is the band. The inner end is that `traceFromAxis()`
@@ -1144,8 +1267,8 @@ an element wide — `dρ/dψ`'s `1/(2√Ψ_N)` divergence belongs to the **coord
 
 ### The coarea formula is a third cross-check and it was free
 
-§3.3's implicit quadrature, the third extraction IN-2's cross-check names, is
-declined (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature
+Implicit quadrature on the level set, the third extraction IN-2's cross-check
+names, is declined (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature
 on the level set as IN-2's third cross-check*). There is a cheaper check for
 `V'` alone. Green's theorem
 gives the enclosed volume as `V = ∮ πR² dz`, a contour integral with **no
@@ -1168,10 +1291,10 @@ ON.** It says both *"`V' = ∮2πR dl/|∇ψ|`"*, positive by construction, and
 axis is a maximum they differ by a sign. Nothing is wrong and nothing moved —
 recorded so the next reader does not re-derive it.
 
-### The cache is keyed bitwise, and a hash was rejected on §8's own wording
+### The cache is keyed bitwise, and a hash was rejected on MaNTA's own wording
 
 `MANTA-COUPLING.md` §5: `Geometry` is **pointwise** — once per physics node, per
-residual evaluation, handed the whole `ψ` vector each time. §8 then asks that a
+residual evaluation, handed the whole `ψ` vector each time. Its §8 then asks that a
 stale cache be **impossible** rather than unlikely, and that a served answer
 equal a cold one **bit for bit**, zero tolerance, because the last defect of
 that kind left a second run completing, plausible, and wrong in the eleventh
@@ -1202,12 +1325,12 @@ previous key serves a different state's geometry the moment the caller retries
 at the old `ψ`; leaving it under the new key serves it immediately. Both are the
 fudge §8 forbids, so the cache is invalidated *before* the extractor is entered
 and the key is committed only on success. And a `ψ` carrying a non-finite entry
-is refused **before** the extractor, since §1 guarantees MEQ is called far from
-equilibrium routinely and a NaN reaching the tracer is an unbounded search
-rather than a message.
+is refused **before** the extractor, since `MANTA-COUPLING.md` §1 guarantees
+MEQ is called far from equilibrium routinely and a NaN reaching the tracer is
+an unbounded search rather than a message.
 
-**§11.1's `nodes/surfaces` IS CONFIRMED, AND THE BASELINE HAS TO BE NAMED OR THE
-NUMBER MEANS NOTHING.** Against a naive that locates the **one** surface through
+**THE PREDICTED `nodes/surfaces` IS CONFIRMED, AND THE BASELINE HAS TO BE NAMED
+OR THE NUMBER MEANS NOTHING.** Against a naive that locates the **one** surface through
 each node — which is what a consumer without a cache would write, and what IN-P
 measured — the saving is `nodes/surfaces`: **3.3× at 40 nodes over 12 surfaces**,
 against a predicted 3.33. Against a naive that rebuilds the whole family per
@@ -1218,7 +1341,7 @@ node it is **42×**. Quote the first.
 level and its `Ψ_N`. A missing surface would be bridged **silently** by the
 interpolation, which is a plausible number for a place MEQ could not look at —
 the same failure mode as `v0-legacy:FluxSurfaces.cpp` returning a partial curve
-labelled as a closed contour, which §8's risk 3 was closed against.
+labelled as a closed contour, which `ContourStatus` exists to refuse.
 
 ### What the geometry reads, and what the file does not carry
 
@@ -1267,6 +1390,28 @@ changes the map from reference to physical space — and the tracer reads geomet
 at every corrector step. Extracting afterwards would trace contours of a field
 on a mesh that is no longer the mesh it was solved on. The same reason the
 driver already gives for the sampler, one consumer further along.
+
+### Standing warnings about using the machinery
+
+None of these is work to do; each will bite somebody who changes a parameter or
+points the tracer at a new geometry, and they stand as long as the code does.
+
+* **`Δs` chosen once and left.** The error split rests on the step being tuned
+  to `h` and `k`; a fixed `Δs` reintroduces the floor the method exists to
+  avoid, and it looks like the method failing rather than the parameter being
+  wrong. `SurfaceAverageConvergence` ties the step to `h` for this reason.
+* **The axis.** `1/|∇ψ|` diverges there, surfaces shrink to a point, and the
+  corrector's `∇ψ(c−ψ)/|∇ψ|²` is `0/0`. Locating the axis first (IN-A) is the
+  mitigation; the innermost surfaces may still want the elliptical Hessian
+  approximation LIUQE uses, and `axisShapeFromHessian()` is that ellipse.
+* **A rotating equilibrium's `p`.** It is not a flux function, so its contours
+  are a different family with critical points of their own, and none of the
+  scoping in `docs/flux_surfaces.rst`, *How many critical points there can be*,
+  applies (→ **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, the inversion's
+  out-of-scope list).
+* **IN-A's axis against the solver's `ψ_ax` under `NodalMaximum`.** Two
+  different quantities, both correct, `O(h^{k+1})` apart; see *`CriticalPointFinder`'s
+  axis and `GradShafranovSolver::psiAxis()` are THE SAME POINT*.
 
 ### What is next
 
@@ -1361,7 +1506,7 @@ count buys a factor rather than a few percent.
   it is deliberately *not* the surface's level — on a stalled ray the node sits
   as close to the level as the field's jump allows and no closer, and this
   records where it actually is.
-* **§3.3's implicit quadrature is declined**, not outstanding: two extractions
+* **Implicit quadrature on the level set is declined**, not outstanding: two extractions
   agree to 3.6e-10 and the leg it would replace is 1.8% of the chain. →
   **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Implicit quadrature on the
   level set as IN-2's third cross-check*.

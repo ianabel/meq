@@ -230,7 +230,7 @@ namespace
 	}
 
 	/*
-	 * ---- ELEMENT-REGIONS-PLAN.md ER-1: THE ELEMENT TABLES, READ BACK ----
+	 * ---- ER-1: THE ELEMENT TABLES, READ BACK ----
 	 *
 	 * Through ncdump at 17 digits and through the `.mesh` as text, so nothing
 	 * here shares code with the writer or with MFEM's reader.
@@ -2040,7 +2040,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
  * the plasma, so there is no closed form to hold it to.
  *
  * AND THE FILE SAYS SO. Plasma current inside copper is a fault in the
- * element record (ELEMENT-REGIONS-PLAN.md §2.1b), and this example poses it on
+ * element record, and this example poses it on
  * purpose: its source is not normalised, so it has no support to keep out of
  * the coils. `region_faults` is pinned at the 32 elements M-267 measured, at
  * zero current as well, since a fault is geometry and not current, and at 0
@@ -4494,7 +4494,7 @@ BOOST_AUTO_TEST_CASE( theDriverMeshesTheMachineItSolves )
 }
 
 /// The ( Psi, theta ) flux-surface file, through the driver, on the CURVED
-/// path: INVERSION-PLAN.md stage IN-6.
+/// path: stage IN-6.
 ///
 /// A DRIVER TEST AND NOT A LIBRARY ONE, for the reason this file exists at all:
 /// every defect found building the free-boundary case was driver-side, in keys
@@ -5820,7 +5820,7 @@ BOOST_AUTO_TEST_CASE( theSymmetricMeshOfMastKeepsItsVacuum )
 
 /*
  * ER-1: THE `.nc` SAYS WHAT EACH ELEMENT IS MADE OF, ON A WIRED MACHINE AND ON
- * A MIRROR. ELEMENT-REGIONS-PLAN.md §2.3; the limited tokamak's read-back is in
+ * A MIRROR. The limited tokamak's read-back is in
  * theDriverSolvesALimitedTokamak, beside the run it reads.
  *
  * THE DIVERTED TOKAMAK IS WIRED HERE, NOT IN examples/: P2L and P2U go on one
@@ -5946,7 +5946,6 @@ BOOST_AUTO_TEST_CASE( theFileSaysWhatEachElementIsMadeOf )
 /*
  * ER-2 UNDER ADAPTIVITY: EVERY CYCLE'S FRAME SAYS WHAT EACH ELEMENT IS MADE
  * OF, so the plasma boundary can be watched under refinement.
- * ELEMENT-REGIONS-PLAN.md §2.3.
  *
  * The rotating mirror with [adaptivity] added by text substitution, because
  * it is the shipped run with a confined support and conductors both -- so a

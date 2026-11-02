@@ -1,5 +1,5 @@
 /*
- * WHAT EACH ELEMENT IS MADE OF -- ELEMENT-REGIONS-PLAN.md ER-0.
+ * WHAT EACH ELEMENT IS MADE OF -- ER-0.
  *
  * meq::GradShafranovSolver::elementMaterials() asks the solver's own support
  * decision at the solver's own quadrature points, and assigns each point to

@@ -13,7 +13,7 @@
 #include "meq/SurfaceFit.hpp"
 
 /*
- * OPEN SURFACES -- INVERSION-PLAN.md stage IN-5.
+ * OPEN SURFACES -- stage IN-5.
  *
  * Every surface IN-0 to IN-6 handles is a loop: the tracer closes it, the disc
  * chart parametrises it by an angle about the axis, and the averages integrate
@@ -232,8 +232,7 @@ BOOST_AUTO_TEST_CASE( anOpenLevelIsTracedFromWallToWall )
 }
 
 /*
- * THE CHEBYSHEV FIT CONVERGES AND A PERIODIC ONE CANNOT -- section 4.2's claim,
- * measured.
+ * THE CHEBYSHEV FIT CONVERGES AND A PERIODIC ONE CANNOT, measured.
  *
  * The curve is analytic, so a Chebyshev series in normalised arc length should
  * converge GEOMETRICALLY: each added pair of modes multiplies the error by a
@@ -388,7 +387,7 @@ BOOST_AUTO_TEST_CASE( theChebyshevFitConvergesWhereAPeriodicOneFloors )
 	BOOST_TEST( controlGain < 2.0,
 		"the periodic control improved by " << controlGain << ", so it is "
 		"converging -- and if a periodic basis can represent this curve then "
-		"section 4.2's argument for Chebyshev is not what these numbers say" );
+		"the argument for Chebyshev is not what these numbers say" );
 	BOOST_TEST( periodic.back() > 1.0e5*chebyshev.back(),
 		"the two bases came out comparable, so this control is not "
 		"discriminating and the choice between them is not being tested" );

@@ -107,8 +107,7 @@ namespace meq
 	                         mfem::GridFunction const &postProcessed );
 
 	/**
-	 * WHAT EACH ELEMENT IS MADE OF, AS VTK CELL DATA: `ELEMENT-REGIONS-PLAN.md`
-	 * §2.3's VTK half, from a meq::ElementMaterials and nothing re-derived.
+	 * WHAT EACH ELEMENT IS MADE OF, AS VTK CELL DATA: ER-2, from a meq::ElementMaterials and nothing re-derived.
 	 *
 	 *     region              ElementRegion's value, the `.nc`'s element_region
 	 *     plasma_fraction     element_plasma_fraction
@@ -471,7 +470,7 @@ namespace meq
 
 			/**
 			 * WHAT EVERY ELEMENT IS MADE OF, AND THE TABLES THAT SAY WHAT THE
-			 * MATERIALS ARE: `ELEMENT-REGIONS-PLAN.md` §2.1 and §2.3, from
+			 * MATERIALS ARE: ER-1, from
 			 * meq::GradShafranovSolver::elementMaterials() and nothing
 			 * re-derived here. `docs/output.rst` is the reader's account.
 			 *
@@ -522,7 +521,7 @@ namespace meq
 			/**
 			 * THE MATERIAL AT EACH GRID NODE: `node_material( Z, R )`, an int,
 			 * the material table's row there and -1 (the `_FillValue`) where
-			 * `inside` is 0. `ELEMENT-REGIONS-PLAN.md` §2.3's pointwise half,
+			 * `inside` is 0. ER-3,
 			 * and the mask a rotating run's `n_<species>` and `e_phi_0` are
 			 * read through.
 			 *
@@ -547,7 +546,7 @@ namespace meq
 	};
 
 	/*
-	 * The ( Psi, theta ) flux-surface file: INVERSION-PLAN.md stage IN-6, and
+	 * The ( Psi, theta ) flux-surface file: stage IN-6, and
 	 * the fourth of meq's output formats.
 	 *
 	 * WHAT IT IS FOR, AND WHY THE OTHER THREE DO NOT COVER IT. The .mesh/.gf

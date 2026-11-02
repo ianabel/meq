@@ -40,7 +40,7 @@
  * and the fixed point is an equilibrium whose own `q` is the one asked for.
  * That is a Picard iteration on the geometry, and it is deliberately the
  * halfway house rather than a Newton: making it quadratic needs
- * `d( V', < R^-2 > )/d psi`, which `INVERSION-PLAN.md` section 11.1 measures at
+ * `d( V', < R^-2 > )/d psi`, which `CLAUDE_INVERSION.md`'s IN-P measures at
  * about **5.7 hours per Jacobian** by differencing, since it is `nFieldDOF`
  * complete re-extractions of the whole surface family. The shape derivative is
  * what would make that affordable and it is not built. See section 5.

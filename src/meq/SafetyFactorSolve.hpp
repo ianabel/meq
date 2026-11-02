@@ -34,7 +34,7 @@
  *
  * `c` is a handful of coefficients rather than `nFieldDOF`, so a differenced
  * Jacobian costs a few map evaluations per step -- each one a solve and an
- * extraction -- against `INVERSION-PLAN.md` section 11.1's **5.7 hours** for
+ * extraction -- against the **5.7 hours** `CLAUDE_INVERSION.md`'s IN-P measures for
  * `dGeometry_dpsi`, which differences against every field degree of freedom.
  * The fit was put there for conditioning and it pays for the Newton as well.
  *

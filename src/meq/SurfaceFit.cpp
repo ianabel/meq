@@ -109,7 +109,7 @@ namespace
 	 *   * JacobiSVD is a column-pivoted QR followed by one-sided Jacobi, which
 	 *     is exactly what this file used to do by hand and has the same high
 	 *     RELATIVE accuracy in the small singular values. That matters here and
-	 *     not everywhere: INVERSION-PLAN.md IN-4 measured the gauge to be "a
+	 *     not everywhere: IN-4 measured the gauge to be "a
 	 *     soft tail with no gap" running to 8e-08 of the largest singular value,
 	 *     with the floor a threshold that has to be CHOSEN rather than read off
 	 *     a gap -- so which directions fall either side of it is a real
@@ -840,7 +840,7 @@ namespace meq
 
 
 	// =======================================================================
-	// THE GAUGE-FREE FIT. INVERSION-PLAN.md section 4.4, stage IN-4.
+	// THE GAUGE-FREE FIT. Stage IN-4.
 	//
 	// The header carries the argument. What is here is the arithmetic, and two
 	// things about it are worth reading before the code:
@@ -883,7 +883,7 @@ namespace meq
 			// would divide by zero -- and the underlying reason is not
 			// arithmetic: the constraint "land on the surface Psi_N = 0" carries
 			// no information about which way to move, because to first order
-			// every direction stays on it. That is INVERSION-PLAN.md section 2's
+			// every direction stays on it. That is FluxSurfaces.hpp's
 			// error ( a ) and its 1/| grad psi | again. Refuse rather than clamp.
 			if ( !( sample.normalisedFlux > 0.0 ) )
 				throw std::invalid_argument(

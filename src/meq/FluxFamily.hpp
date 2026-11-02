@@ -8,7 +8,7 @@
 
 /*
  * The flux-surface family, the flux label it is expressed against, and the
- * per-psi cache: INVERSION-PLAN.md stage IN-6.
+ * per-psi cache: stage IN-6.
  *
  * MFEM-FREE, DELIBERATELY, AND THE REASON IS THE CONTRACT RATHER THAN THE
  * ARITHMETIC. What is in this file is a container of doubles, an interpolation
@@ -47,12 +47,11 @@
  *
  * 2. THE SEPARATRIX CUT IS A DECISION AND IT IS RECORDED HERE.
  *
- * INVERSION-PLAN.md section 8's second risk asks for exactly this: everything
- * degrades approaching the separatrix -- 1/| grad psi | in every weight, the
+ * Everything degrades approaching the separatrix -- 1/| grad psi | in every weight, the
  * corner in the surface, the logarithm no polynomial basis catches -- and
  * production codes simply stop. LIUQE cuts at Psi_N = 0.95; FreeGS extrapolates
- * outside [ 0.01, 0.99 ]. The instruction is to decide meq's cut deliberately
- * rather than discover it as a convergence failure.
+ * outside [ 0.01, 0.99 ]. meq's cut is decided deliberately rather than left to
+ * be discovered as a convergence failure.
  *
  * meq's default is Psi_N in [ 0.05, 0.95 ], and the two ends are cut for
  * DIFFERENT reasons, which is why they are two numbers and not one:
@@ -106,9 +105,8 @@
  *
  * MANTA-COUPLING.md section 5: Geometry is POINTWISE -- called once per physics
  * node, per residual evaluation, handed the whole psi vector each time. Done
- * naively that locates and integrates a surface per node per residual, which
- * INVERSION-PLAN.md section 11.1 calls a requirement on this stage rather than
- * an optimisation. IN-P measured what the cache is worth: nodes / surfaces,
+ * naively that locates and integrates a surface per node per residual, so the
+ * cache is a requirement of that call pattern rather than an optimisation. IN-P measured what the cache is worth: nodes / surfaces,
  * 5.1x on a sixty-node case, 6.55 s against 1.29 s.
  *
  * The key is the psi vector itself, compared entry by entry with std::memcmp.
@@ -182,8 +180,7 @@ namespace meq
 		/// 1 where the node's field came from the band extension outside the
 		/// mesh rather than from an element, 0 otherwise.
 		///
-		/// PER NODE AND NOT A COUNT. INVERSION-PLAN.md section 4.3 is explicit
-		/// that a consumer must be able to tell WHICH data came from an
+		/// PER NODE AND NOT A COUNT. A consumer must be able to tell WHICH data came from an
 		/// extension, and CLAUDE.md records that the count-not-mask version of
 		/// exactly this was half of a real defect in the ( R, Z ) grid file --
 		/// nothing downstream could tell which of 1667 nodes were continued.
@@ -215,8 +212,7 @@ namespace meq
 		///
 		/// dz/dtheta is taken POINTWISE from rho' -- which comes from the solved
 		/// flux -- and never by differencing neighbouring z_j. That is
-		/// INVERSION-PLAN.md section 3.2's metric trap, and it is the same trap
-		/// on a new integrand.
+		/// IN-1's metric trap, on a new integrand.
 		double volume = 0.0;
 		double crossSectionArea = 0.0;
 
@@ -249,8 +245,8 @@ namespace meq
 		bool crossesBand = false;
 		double deepestBandNode = 0.0;
 
-		/// The worst | psi_h( x_j ) - level | over the nodes: INVERSION-PLAN.md
-		/// section 2's error ( b ) for this surface, and the thing to read
+		/// The worst | psi_h( x_j ) - level | over the nodes: FluxSurfaces.hpp's
+		/// error ( b ) for this surface, and the thing to read
 		/// before believing any of the rest.
 		double worstResidual = 0.0;
 
