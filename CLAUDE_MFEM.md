@@ -23,6 +23,7 @@
 | **`MFEM_USE_CUDA = YES`**, `CUDA_ARCH = sm_75` | CUDA 13.3. **`sm_75` because the card is compute capability 7.5**; MFEM's cache defaulted to `sm_60`, which is wrong here and nothing warns you |
 | **`MFEM_USE_CUDSS = YES`** | cuDSS 0.8.0 from Debian (`/usr/include/cudss.h`), found with `-DCUDSS_DIR=/usr`. `mfem::CuDSSSolver` agrees with UMFPACK to 3.5e-14; its **timings on this machine are not reproducible** and MEQ's solver does not use it. See `CLAUDE_HDGGS.md`, *Threading, measured* |
 | `RAJA`, `OCCA`, `CEED`, `SIMD`, `AMGX` all `NO` | |
+| **`CMAKE_POSITION_INDEPENDENT_CODE = ON`** | **Load bearing for the Python module**, and not in `config.mk`, so only the build's `CMakeCache.txt` shows it. `libmfem.a` is linked into `_meq`, a shared object, and the compiler's default `-fPIE` reaches libstdc++'s data PC-relatively, which a shared object cannot: the link fails with *relocation R_X86_64_PC32 against symbol ... can not be used when making a shared object*. A refresh that reconfigures from scratch must pass it again. `meq_core` is made position independent by `python/CMakeLists.txt` itself |
 
 **Turning CUDA on is not one flag, and two of the three obstacles are silent.**
 

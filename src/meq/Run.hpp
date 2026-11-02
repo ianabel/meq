@@ -45,8 +45,21 @@ namespace meq
 	 */
 	struct RunOptions
 	{
-		/// The TOML file.
+		/// The TOML file -- or, with `configText`, only the name messages and
+		/// the output's `config_file` give the configuration.
 		std::string configPath;
+
+		/// The configuration AS TEXT, in place of reading `configPath`: a
+		/// front end that holds the document and has no file, such as the
+		/// Python module's from_dict(). The text is what the .nc records as
+		/// `input_toml`, as it records a file's.
+		std::string configText;
+
+		/// With `configText`, the directory its relative input paths resolve
+		/// against, as a file's own directory does. Empty leaves them as
+		/// given, relative to the working directory.
+		std::string baseDirectory;
+
 
 		/// MEQ_VERSION of the front end's build, which the files written carry.
 		/// The front end's because the commit is stamped into the binary at
@@ -87,12 +100,43 @@ namespace meq
 			Run &operator=( Run const & ) = delete;
 
 			/// Configure, set up, solve and write, in that order, and the exit
-			/// code: meq::ExitCode's. Once per object.
+			/// code: meq::ExitCode's. Once per object, in place of the three
+			/// below.
 			int execute();
+
+			/**
+			 * THE SAME RUN A PHASE AT A TIME, for a front end that wants to
+			 * act between them. Each returns meq::ExitCode's code: Solved
+			 * when the phase succeeded, the run's own failure code when it did
+			 * not, and write() TargetsNotMet for an inverse best fit, exactly
+			 * as execute() would have.
+			 *
+			 * IN ORDER AND EACH ONCE, AND OUT OF ORDER IS REFUSED: a phase
+			 * called before the one it follows has succeeded, again, or after
+			 * any phase has failed throws std::logic_error. Calling them in
+			 * order is execute(), to the bit.
+			 */
+			int prepare();          ///< read the configuration and set the run up
+			int solve();            ///< solve, and refine if the file asks
+			int write();            ///< write what [output] and the options ask for
 
 		private:
 			struct Impl;
 			std::unique_ptr<Impl> impl;
+
+			/// Which phase is next, and whether one has failed.
+			enum class Stage
+			{
+				Fresh,
+				Prepared,
+				Solved,
+				Written,
+				Failed
+			};
+			Stage stage = Stage::Fresh;
+
+			/// Refuse a phase whose predecessor is not `from`.
+			void advance( Stage from, char const *what );
 	};
 }
 

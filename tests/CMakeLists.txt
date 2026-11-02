@@ -874,6 +874,23 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# PythonDriverParity -- the Python module is the run meq runs (PY-1)
+# ---------------------------------------------------------------------------
+#
+# pytest under the interpreter the module was built for, with this build's
+# package first on the path, the binary and the wrapper passed rather than
+# guessed, and bytecode and pytest's cache kept out of the source tree.
+if(TARGET _meq)
+	add_test(NAME PythonDriverParity
+		COMMAND "${MEQ_PYTHON_EXECUTABLE}" -m pytest -q -p no:cacheprovider
+			"${CMAKE_SOURCE_DIR}/tests/python/test_driver_parity.py")
+	set_tests_properties(PythonDriverParity PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1;PYTHONPATH=${MEQ_PYTHON_ROOT};PYTHONPYCACHEPREFIX=${CMAKE_BINARY_DIR}/pycache;MEQ_SOURCE_DIR=${CMAKE_SOURCE_DIR};MEQ_DRIVER_PATH=$<TARGET_FILE:meq>;MEQ_RUN_PATH=${CMAKE_BINARY_DIR}/meq-run")
+else()
+	message(STATUS "meq: PythonDriverParity not registered (no Python module in this build)")
+endif()
+
+# ---------------------------------------------------------------------------
 # Each test's working directory: output/<test>/ in this build tree
 # ---------------------------------------------------------------------------
 #

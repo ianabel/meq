@@ -81,6 +81,12 @@ option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 # executable, which is what CI does.
 option(MEQ_BUILD_APP "Build the meq executable" ON)
 
+# The Python module, `import meq`: a third front end on meq::Run beside meq and
+# meq-convert (PYTHON-PLAN.md). Built when the executable is -- it needs the
+# same MFEM -- and when extern/pybind11 is populated; python/CMakeLists.txt has
+# the rest.
+option(MEQ_PYTHON "Build the meq Python module" ON)
+
 # gcov instrumentation, off by default. When on it is attached to meq_core
 # PUBLIC, so the flags reach the test executables as well -- gcov needs both
 # the compile and the link side on every object it reports, and a test binary
@@ -862,6 +868,16 @@ if(MEQ_BUILD_APP)
 		DESTINATION "${CMAKE_INSTALL_BINDIR}")
 	install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/mesh/halfdisc.py"
 		DESTINATION "${CMAKE_INSTALL_DATADIR}/meq/tools/mesh")
+
+	if(MEQ_PYTHON)
+		if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/pybind11/CMakeLists.txt")
+			add_subdirectory(python)
+		else()
+			message(STATUS
+				"meq: extern/pybind11 is empty, so the Python module is not built; "
+				"git submodule update --init populates it")
+		endif()
+	endif()
 endif()
 
 if(MEQ_BUILD_TESTS)

@@ -51,6 +51,7 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
 #include <optional>
 #include <limits>
 #include <memory>
@@ -734,6 +735,8 @@ struct meq::Run::Impl
 {
 	explicit Impl( RunOptions const &options )
 		: argument( options.configPath ),
+		  configText( options.configText ),
+		  baseDirectory( options.baseDirectory ),
 		  version( options.version ),
 		  deviceName( options.deviceName ),
 		  deviceGiven( options.deviceGiven ),
@@ -754,6 +757,8 @@ struct meq::Run::Impl
 
 	// The process's choices, RunOptions'.
 	std::string const argument;
+	std::string const configText;
+	std::string const baseDirectory;
 	std::string const version;
 	std::string deviceName;
 	bool deviceGiven = false;
@@ -882,20 +887,73 @@ meq::Run::~Run() = default;
 
 int meq::Run::execute()
 {
-	try
+	int const prepared = prepare();
+	if ( prepared != Solved )
+		return prepared;
+	int const solved = solve();
+	if ( solved != Solved )
+		return solved;
+	return write();
+}
+
+namespace
+{
+	/// One phase of a Run, as the public calls take it: a failure code, or
+	/// nextPhase mapped to Solved; and an exit from inside a lambda the phase
+	/// called, which is not a std::exception, caught here as it was by
+	/// execute().
+	template < typename Phase >
+	int runPhase( Phase &&phase )
 	{
-		for ( auto phase : { &Impl::configure, &Impl::setUp, &Impl::solve } )
+		try
 		{
-			int const code = ( impl.get()->*phase )();
-			if ( code != nextPhase )
-				return code;
+			int const code = phase();
+			return code == nextPhase ? meq::Solved : code;
 		}
-		return impl->write();
+		catch ( RunExit const &early )
+		{
+			return early.code;
+		}
 	}
-	catch ( RunExit const &early )
+}
+
+void meq::Run::advance( Stage from, char const *what )
+{
+	if ( stage == Stage::Failed )
+		throw std::logic_error( std::string( "meq::Run::" ) + what
+		                        + "(): an earlier phase of this run failed" );
+	if ( stage != from )
+		throw std::logic_error( std::string( "meq::Run::" ) + what
+		                        + "(): out of order -- prepare(), solve() and "
+		                          "write() run once each, in that order" );
+}
+
+int meq::Run::prepare()
+{
+	advance( Stage::Fresh, "prepare" );
+	int const code = runPhase( [ this ]()
 	{
-		return early.code;
-	}
+		int const configured = impl->configure();
+		return configured != nextPhase ? configured : impl->setUp();
+	} );
+	stage = code == Solved ? Stage::Prepared : Stage::Failed;
+	return code;
+}
+
+int meq::Run::solve()
+{
+	advance( Stage::Prepared, "solve" );
+	int const code = runPhase( [ this ]() { return impl->solve(); } );
+	stage = code == Solved ? Stage::Solved : Stage::Failed;
+	return code;
+}
+
+int meq::Run::write()
+{
+	advance( Stage::Solved, "write" );
+	int const code = runPhase( [ this ]() { return impl->write(); } );
+	stage = ( code == Solved || code == TargetsNotMet ) ? Stage::Written : Stage::Failed;
+	return code;
 }
 
 int meq::Run::Impl::configure()
@@ -1294,7 +1352,10 @@ int meq::Run::Impl::configure()
 
 	try
 	{
-		config = std::make_unique<meq::Configuration>( argument );
+		config = configText.empty()
+			? std::make_unique<meq::Configuration>( argument )
+			: std::make_unique<meq::Configuration>(
+				meq::Configuration::fromString( configText, argument, baseDirectory ) );
 
 		// THE FORMATS BESIDE THE .nc: the file's keys or the command line's,
 		// either one asking being enough. OutputConfig says why both are off.
@@ -7349,15 +7410,20 @@ int meq::Run::Impl::write()
 			 * to a file, and with the `.mesh` and the profile tables named
 			 * above it is the run.
 			 */
-			std::ifstream configStream( argument );
-			if ( configStream )
+			// The text handed in, or the file's; a run given text has no
+			// file to read, and the text is the input as given.
+			std::ifstream configStream;
+			if ( configText.empty() )
+				configStream.open( argument );
+			if ( !configText.empty() || configStream )
 			{
-				std::string const text(
-					( std::istreambuf_iterator<char>( configStream ) ),
-					std::istreambuf_iterator<char>() );
+				std::string const text = !configText.empty() ? configText
+					: std::string( ( std::istreambuf_iterator<char>( configStream ) ),
+					               std::istreambuf_iterator<char>() );
 				writer.attribute( "input_toml", text );
 				writer.attribute( "input_file", argument );
 			}
+
 		}
 
 		/*

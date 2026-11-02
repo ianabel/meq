@@ -1136,6 +1136,14 @@ namespace meq
 		return Configuration( parseString( text, source ), source );
 	}
 
+	Configuration Configuration::fromString( std::string const & text, std::string const & source,
+	                                         std::string const & directory )
+	{
+		Configuration parsed( parseString( text, source ), source );
+		parsed.resolveInputPaths( directory );
+		return parsed;
+	}
+
 	void Configuration::parse( toml::value const & document )
 	{
 		if ( !document.is_table() )
