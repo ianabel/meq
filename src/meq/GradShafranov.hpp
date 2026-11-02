@@ -2380,8 +2380,7 @@ namespace meq
 
 			/**
 			 * **WHAT EACH ELEMENT IS MADE OF, BY THIS SOLVER'S OWN SUPPORT
-			 * DECISION AT THIS SOLVER'S OWN POINTS.** `ELEMENT-REGIONS-PLAN.md`
-			 * §2.2: per element, the non-zero `( material, fraction )` pairs,
+			 * DECISION AT THIS SOLVER'S OWN POINTS.** ER-0: per element, the non-zero `( material, fraction )` pairs,
 			 * the region they derive, and the fault count.
 			 *
 			 * **ONE IMPLEMENTATION, HERE, AND NOT RE-DERIVED BY A WRITER.** Two
@@ -2430,7 +2429,7 @@ namespace meq
 			 * It is how a writer asks the classifier about a point that is not
 			 * a quadrature point -- the `.nc`'s `node_material`, judged on the
 			 * flux the grid carries (`psi* + psi_c`) -- without a second copy of
-			 * the rule. `ELEMENT-REGIONS-PLAN.md` §2.3.
+			 * the rule. ER-3.
 			 *
 			 * @param element  the element holding the point, whose fill and
 			 *                 exclusions gate the plasma (elementInPlasma());
@@ -2438,7 +2437,7 @@ namespace meq
 			 *                 band, the element of its foot.
 			 * @param totalPsi the PHYSICAL flux there: `psi + psi_c`.
 			 * @param fault    if given, set when the point is plasma AND inside
-			 *                 a conductor -- §2.1b's fault, which goes to the
+			 *                 a conductor -- a fault, which goes to the
 			 *                 conductor.
 			 */
 			int materialAt( MaterialTable const &table, int element,

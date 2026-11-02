@@ -344,8 +344,9 @@ namespace
 		// [mesh.generate] AlignConductors: under a split, the same rectangles
 		// as GEOMETRY ONLY -- fragmented in so their edges are element faces,
 		// with no attribute and no grading, which is what --align-coil means to
-		// the generator. ELEMENT-REGIONS-PLAN.md §2.1b; the parse refuses the
-		// key under "meshed", where the --coil above already does this.
+		// the generator. docs/output.rst, What each element is made of; the
+		// parse refuses the key under "meshed", where the --coil above
+		// already does this.
 		else if ( g.alignConductors )
 		{
 			for ( meq::CoilParameters const &coil : config.getCoils().coils )
@@ -736,9 +737,8 @@ namespace
 	}
 
 	/**
-	 * WHAT EACH ELEMENT IS MADE OF, AS A COUNT: `ELEMENT-REGIONS-PLAN.md`
-	 * §2.1b's driver half, from GradShafranovSolver::elementMaterials() and
-	 * nothing re-derived here. The same record is what the `.nc` carries.
+	 * WHAT EACH ELEMENT IS MADE OF, AS A COUNT: ER-0's driver half, from
+	 * GradShafranovSolver::elementMaterials() and nothing re-derived here. The same record is what the `.nc` carries.
 	 *
 	 * Two things are worth a warning and neither is a refusal. A FAULT is
 	 * plasma current inside a conductor at some quadrature point -- the
@@ -5384,7 +5384,7 @@ int main( int argc, char **argv )
 		//
 		// AND WHAT EACH ELEMENT IS MADE OF, classified on THIS cycle's solve,
 		// so the plasma boundary can be watched moving under refinement
-		// (ELEMENT-REGIONS-PLAN.md §2.3). The table needs only the geometry
+		// (ER-2). The table needs only the geometry
 		// here -- the frame carries rows, not currents -- so the file's
 		// currents stand in for the solved ones the `.nc` gets.
 		if ( series )
@@ -6792,8 +6792,8 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * WHAT EACH NODE IS MADE OF: `node_material`, ELEMENT-REGIONS-PLAN.md
-		 * §2.3's pointwise half, and MR-5's support mask.
+		 * WHAT EACH NODE IS MADE OF: `node_material`, ER-3, and MR-5's
+		 * support mask.
 		 *
 		 * ASKED OF THE CLASSIFIER, NOT RE-DERIVED HERE: materialAt() is the
 		 * decision elementMaterials() makes at each quadrature point, handed
@@ -7719,7 +7719,7 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * ---- WHAT EACH ELEMENT IS MADE OF: ELEMENT-REGIONS-PLAN.md §2.3 ----
+		 * ---- WHAT EACH ELEMENT IS MADE OF: ER-1 ----
 		 *
 		 * Indexed as the elements of the embedded `mesh`, which is the mesh the solver
 		 * classified: the record is the one reported above, not recomputed,
@@ -7781,7 +7781,7 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * ---- the ( Psi, theta ) flux-surface file, INVERSION-PLAN.md IN-6 ----
+		 * ---- the ( Psi, theta ) flux-surface file, IN-6 ----
 		 *
 		 * The fourth output format, and the one a 1-D transport code reads. The
 		 * other three are a field on a mesh, a picture, and a field on a

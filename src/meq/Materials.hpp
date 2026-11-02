@@ -9,12 +9,13 @@
 #include "Coils.hpp"
 
 /*
- * WHAT EACH ELEMENT OF THE MESH IS MADE OF: `ELEMENT-REGIONS-PLAN.md` §2.1.
+ * WHAT EACH ELEMENT OF THE MESH IS MADE OF: ER-0. `docs/output.rst`, What each
+ * element is made of, is the reader's account.
  *
  * Every element stores the fraction of it occupied by each MATERIAL -- vacuum,
  * plasma, each coil, and, reserved for later, passive and ferromagnetic
  * structures -- and a REGION is derived from those fractions for plotting. The
- * fractions are the record and the region is a convenience; §2.1's table says
+ * fractions are the record and the region is a convenience; deriveRegion() says
  * which fractions name which region.
  *
  * **THIS HALF IS MFEM-FREE, DELIBERATELY.** The table, the region rule and the
@@ -45,7 +46,7 @@ namespace meq
 	};
 
 	/// Whether a kind is a conductor -- a coil, a passive structure or iron --
-	/// for §2.1b's rules: a conductor wins a point over vacuum, and a point
+	/// for the pairing rules: a conductor wins a point over vacuum, and a point
 	/// that is plasma and conductor at once is a fault.
 	bool isConductor( MaterialKind kind );
 
@@ -57,7 +58,7 @@ namespace meq
 	 * numbers are the `.nc`'s `element_region` flag values and do not move.
 	 *
 	 * The first five are an element holding one material whole. The other
-	 * three are §2.1b's: a plasma boundary is unavoidable, a conductor boundary
+	 * three are the pairings: a plasma boundary is unavoidable, a conductor boundary
 	 * happens only when the mesh is not aligned to the copper, and Mixed is
 	 * either a fault or a cell `[mesh.generate] AlignConductors` would split.
 	 */
@@ -84,7 +85,7 @@ namespace meq
 	char const *elementRegionName( ElementRegion region );
 
 	/**
-	 * ONE ROW OF THE MATERIAL TABLE, with every column of §2.1. A column that
+	 * ONE ROW OF THE MATERIAL TABLE, with every column the `.nc` carries. A column that
 	 * does not apply to a kind holds its fill value, so a new kind adds rows
 	 * and no new columns.
 	 */
@@ -162,7 +163,7 @@ namespace meq
 	 * follow in the order they were added -- for coils, `[[coils]]` order.
 	 *
 	 * **A COIL ROW CARRIES ITS RECTANGLE**, because conductor membership is
-	 * geometric (§2.2): meq::Coil::contains() at the solver's points, whatever
+	 * geometric: meq::Coil::contains() at the solver's points, whatever
 	 * the conductor model. The cross-section is the copper whether its current
 	 * is meshed, subtracted or carried as filaments -- so this takes the
 	 * `[[coils]]` block's rectangle and never the filaments it was split into.
@@ -261,13 +262,13 @@ namespace meq
 		double fraction = 0.0;
 	};
 
-	/// The region an element's fractions derive, by §2.1's table.
+	/// The region an element's fractions derive, by the region rule.
 	/// @param entries the element's non-zero fractions.
 	ElementRegion deriveRegion( std::vector< MaterialFraction > const &entries,
 	                            MaterialTable const &table );
 
 	/**
-	 * EVERY ELEMENT'S MATERIALS: the ragged record of §2.3 and what is derived
+	 * EVERY ELEMENT'S MATERIALS: the `.nc`'s ragged record and what is derived
 	 * from it. Elements are in mesh order and the offsets are a prefix sum, so
 	 * element `e`'s entries are `entries[ offsets[ e ] .. offsets[ e + 1 ] )`,
 	 * sorted by material.
@@ -330,7 +331,7 @@ namespace meq
 		 *
 		 * The VTK's `conductor_material` and `conductor_fraction`: one
 		 * conductor per cell is what a cell array can carry, and the full
-		 * ragged record stays in the `.nc` (`ELEMENT-REGIONS-PLAN.md` §2.3).
+		 * ragged record stays in the `.nc`.
 		 */
 		MaterialFraction dominantConductor( int element, MaterialTable const &table ) const;
 

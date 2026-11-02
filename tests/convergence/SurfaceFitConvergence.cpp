@@ -19,7 +19,7 @@
 #include "ConvergenceHarness.hpp"
 
 /*
- * The acceptance test for INVERSION-PLAN.md stage IN-3: the representation.
+ * The acceptance test for stage IN-3: the representation.
  * R( discRadius, theta ) and z( discRadius, theta ) as truncated Zernike
  * expansions on the disc, fitted to traced surface POINTS.
  *
@@ -67,9 +67,8 @@
  * coefficients keep whatever harmonics the surface shaping puts there, so the
  * fit stays limited near the axis; measured, the envelope decays geometrically
  * with the innermost surface at Psi_N = 0.10 and leaves an algebraic tail when
- * it is pulled in to Psi_N = 0.02. That is INVERSION-PLAN.md section 4.4's
- * tension -- axis regularity against everything else -- as a table, and it is
- * IN-4's to resolve rather than this stage's.
+ * it is pulled in to Psi_N = 0.02. That is the tension between axis regularity
+ * and everything else, as a table, and it is IN-4's to resolve rather than this stage's.
  *
  * ---------------------------------------------------------------------------
  * WHAT IS ASSERTED, AND WHY EACH CONTROL IS LIVE RATHER THAN QUOTED.
@@ -98,8 +97,7 @@
  *    traced INDEPENDENTLY -- not against a difference of the fit's own output,
  *    which would check nothing.
  *
- *    IT IS STATED IN discRadius AND NOT IN Psi_N. INVERSION-PLAN.md section 4.4
- *    records that d/dPsi_N diverges like 1/( 2 sqrt( Psi_N ) ) at the axis in
+ *    IT IS STATED IN discRadius AND NOT IN Psi_N. d/dPsi_N diverges like 1/( 2 sqrt( Psi_N ) ) at the axis in
  *    EVERY equilibrium -- the m = 1 coefficient of R is the minor radius, which
  *    grows like sqrt( Psi ) -- so an acceptance written over the whole domain
  *    against dGeometry/dPsi would be comparing infinities and would fail for a
@@ -159,7 +157,7 @@
  * that a relabelling which does not depend on the radius straightens exactly one
  * order, leaving an algebraic tail near the axis that no degree removes.
  *
- * INVERSION-PLAN.md section 4.4 put three candidates against that: a global
+ * Three candidates were put against that: a global
  * expansion that accepts the tail, elements in psi, or MXH's per-surface shape.
  * The DESC papers say the tail is not what any of them is about. Panici et al.,
  * Figure 5: "DESC, while not explicitly enforcing any poloidal angle
@@ -1280,8 +1278,7 @@ BOOST_AUTO_TEST_CASE( theFluxDerivativeConversionGrowsLikeTheInverseRootFlux )
 
 	// FIRST: the conversion is a CHAIN RULE and not a modelling choice, so on a
 	// range bounded away from the axis it must agree with a difference in Psi_N
-	// to the same accuracy the discRadius derivative does. Psi_N in [ 0.1, 0.9 ]
-	// per INVERSION-PLAN.md IN-3.
+	// to the same accuracy the discRadius derivative does. Psi_N in [ 0.1, 0.9 ].
 	std::printf( "\n=== IN-3 case 5: d/dPsi_N, and what it costs near the axis"
 	             " ===\n\n" );
 	std::printf( "  the chain rule, on Psi_N in [ 0.1, 0.9 ]:\n" );
@@ -1346,7 +1343,7 @@ BOOST_AUTO_TEST_CASE( theFluxDerivativeConversionGrowsLikeTheInverseRootFlux )
 	BOOST_TEST( worstChain < 1.0e-6 );
 
 	// SECOND: how the conversion grows as the innermost node is lowered, which
-	// is the number a future coupling reads. INVERSION-PLAN.md section 4.4:
+	// is the number a future coupling reads. CLAUDE_INVERSION.md's IN-3:
 	// MaNTA enforces vanishing fluxes on axis and can keep its nodes off
 	// Psi = 0, so what is left is a conditioning question and this is it.
 	//
@@ -1934,7 +1931,7 @@ BOOST_AUTO_TEST_CASE( theRayFitAcceptsWhereTheCorrectorWouldRatherThanThrowing )
  * 10. THE GAUGE-FREE FIT, ON THE FAMILY WHERE THE ANSWER IS KNOWN EXACTLY.
  * ===========================================================================
  *
- * THE DECISIVE TEST OF INVERSION-PLAN.md SECTION 4.4, AND IT NEEDS NO
+ * THE DECISIVE TEST OF THE psi-ELEMENT QUESTION, AND IT NEEDS NO
  * EQUILIBRIUM AT ALL. Case 1 above showed that the same ellipse points fit to
  * 3e-15 under the ellipse's own parameter and are wrong by 1e-2 at degree
  * twenty under the geometric angle -- because a prescribed angle puts content
@@ -2103,7 +2100,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitRecoversWhatTheAngleLabelDestroyed )
  * IN-3's second finding, in its own words: "with the innermost surface at
  * Psi_N = 0.10 the coefficient envelope decays geometrically, and pulling it in
  * to Psi_N = 0.02 leaves an algebraic tail that no degree removes." That is
- * INVERSION-PLAN.md section 4.4's tension, and it is the reason a psi-varying
+ * the tension, and it is the reason a psi-varying
  * element was on the table.
  *
  * IT IS NOT AN ELEMENT PROBLEM. It is an ANGLE problem: a relabelling that does
@@ -2518,7 +2515,7 @@ BOOST_AUTO_TEST_CASE( theGaugeIsLoadBearingAndFailsDifferentlyOnEachField )
  * 14. THE TWO GAUGES AGAINST EACH OTHER.
  * ===========================================================================
  *
- * INVERSION-PLAN.md section 4.4 names two ways to fix the tangential freedom:
+ * There are two ways to fix the tangential freedom:
  * a minimum-norm step, and Hirshman & Breslau's spectral condensation as an
  * explicit penalty -- the constraint VMEC uses where DESC lets the solve find
  * the angle. Both are implemented and this is the measurement rather than the
@@ -2728,7 +2725,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 			return false;
 
 		// grad_bar psi = R q -- the SOLVED flux, at the potential's own order
-		// rather than one below it, which is INVERSION-PLAN.md section 3.2's
+		// rather than one below it, which is the flux-is-the-asset
 		// argument arriving in the Jacobian of a geometric Newton.
 		normalisedFlux = 1.0 - psi/exact.psi;
 		gradientR = -radius*fluxR/exact.psi;

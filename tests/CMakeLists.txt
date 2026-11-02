@@ -275,7 +275,7 @@ set(MEQ_CONVERGENCE_TESTS
 	# g( psi ). A convergence test because the loop is solve -> extract ->
 	# invert -> re-solve, and what it asserts is that the fixed point is the
 	# equilibrium whose target q was built from a KNOWN g.
-	# INVERSION-PLAN.md stage IN-5: surfaces that do not close. A convergence
+	# Stage IN-5: surfaces that do not close. A convergence
 	# test because what it asserts is that a Chebyshev series in normalised arc
 	# length converges on an open curve while a periodic basis cannot.
 	OpenSurfaces
@@ -781,7 +781,7 @@ else()
 	message(STATUS "meq: RotatingMirror not registered")
 endif()
 
-# ElementRegions is ELEMENT-REGIONS-PLAN.md's ER-0: what each element is made
+# ElementRegions is ER-0: what each element is made
 # of, by the solver's own support test at its own points. It meshes geq's
 # mirror four ways through convergence/MirrorMachine.hpp, so it has that
 # header's needs -- python3 with gmsh at test time, the meshes into the build

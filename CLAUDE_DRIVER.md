@@ -1,6 +1,6 @@
 # The driver: `meq`, `meq-run`, the output files and the warm start
 
-**`CLAUDE.md`'s driver half** — what `apps/meq.cpp` and `meq-run` do, the four output formats and the band between `Γ_h` and `Γ`, the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the interpolating warm start, and the configuration parser's traps. `docs/running.rst` is the user-facing account; the device refusals are `CLAUDE_DEVICE.md`.
+**`CLAUDE.md`'s driver half** — what `apps/meq.cpp` and `meq-run` do, the four output formats and the band between `Γ_h` and `Γ`, the element regions (ER-0 to ER-3), the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the interpolating warm start, and the configuration parser's traps. `docs/running.rst` is the user-facing account; the device refusals are `CLAUDE_DEVICE.md`.
 
 **The standing rules are `CLAUDE.md`'s.** Measurement tables live in `MEASUREMENTS.md` under stable `M-nn` anchors, which are not renumbered. A hypothesis that was measured and falsified stays; the history of the file does not — present tense, no "used to", no dated "now fixed". What was decided against is `CLAUDE_DECLINED.md`.
 
@@ -265,9 +265,8 @@ currents. It asks `GradShafranovSolver::elementMaterials()` once, and that
 record is both the `regions:` line and `NetCDFWriter::materials()`'s
 variables, so the two cannot disagree. It is taken before
 `curveBoundaryOnto()` and is indexed as `<stem>.mesh`'s elements. The
-classification rule, the fault and `AlignConductors` are
-`ELEMENT-REGIONS-PLAN.md`'s. The layout is `docs/output.rst`'s, *What each
-element is made of*. `[[circuits]] Name = "default"` is refused, because the
+classification rule, the fault and `AlignConductors` are *Element regions*,
+below. The layout is `docs/output.rst`'s, *What each element is made of*. `[[circuits]] Name = "default"` is refused, because the
 output groups the unwired coils under that name
 (→ **[M-268](MEASUREMENTS.md#m-268)**). The same record is the VTK's cell data,
 `meq::ElementCellData`, built after the bending. Each adaptive frame gets its
@@ -420,6 +419,54 @@ points, `ψ_inner` at the electrode and `ψ_bnd` at the limiter:
 
 `RotatingMirrorDriver` runs the shipped example and compares it dof for dof
 with the library.
+
+## Element regions: ER-0 to ER-3
+
+What each element and each grid node is made of. `docs/output.rst`, *What each
+element is made of* and *And at each grid node*, has the layout; this is why it
+is shaped so.
+
+| stage | what it built | where it lives |
+|---|---|---|
+| **ER-0** | the classification in the library: per element, the non-zero `( material, fraction )` pairs at the source rule's own points, the derived region, and the fault count; the driver's `regions:` line; `[mesh.generate] AlignConductors` (→ **[M-266](MEASUREMENTS.md#m-266)**, **[M-267](MEASUREMENTS.md#m-267)**) | `GradShafranovSolver::elementMaterials()`, `meq::MaterialTable` and `meq::ElementMaterials` in `src/meq/Materials.{hpp,cpp}` (MFEM-free); `ElementRegions`, `MaterialsTests` |
+| **ER-1** | the `.nc` record: the ragged fractions, the material, circuit and permeability curve tables, and the totals as attributes, with `default` reserved in `[[circuits]]` (→ **[M-268](MEASUREMENTS.md#m-268)**) | `NetCDFWriter::materials()`, `meq::buildMaterialTable()`; `OutputTests`, `DriverAcceptance` |
+| **ER-2** | the VTK cell data on the answer and on every adaptive frame, one constant per cell (→ **[M-269](MEASUREMENTS.md#m-269)**) | `meq::ElementCellData`; `tests/convergence/VtuReader.hpp`, `OutputTests`, `DriverAcceptance` |
+| **ER-3** | the pointwise `node_material( Z, R )` grid mask, which is MR-5's support mask (→ **[M-270](MEASUREMENTS.md#m-270)**) | `GradShafranovSolver::materialAt()`, `NetCDFWriter::nodeMaterial()`; `DriverAcceptance` |
+
+**ONE CLASSIFIER, IN THE SOLVER, ASKED AT THE SOLVER'S OWN POINTS.** Two readers
+of "is this plasma" is how a written mask comes to disagree with the current
+that was integrated, so the predicate is exactly `SourceIntegrator`'s —
+`elementCarriesPlasma( e )` for the fill and the exclusions, and the source's
+`insidePlasma( R, z, ψ_h + ψ_c )` for the support — at the source rule's
+points, weighted by `ip.weight × |J|`. CS-4 and `totalFluxAt()` are the
+precedents. `ElementRegions` checks it against the integral: summing `F/R` over
+the points called plasma reproduces the assembled plasma load, under a split
+whose remainder is zero, so a classifier that judged `ψ_h` without `ψ_c` would
+find no plasma at all. Conductor membership is geometric —
+`meq::Coil::contains()`, whatever the conductor model, since the cross-section
+is the copper whether its current is meshed, subtracted or filaments. It runs
+on the host after the solve, reading the potential through `HostRead()`.
+
+**EACH PAIRING IN A CELL HAS ITS OWN CAUSE, AND THE CLASSIFIER TREATS THEM
+DIFFERENTLY.** Plasma beside vacuum is unavoidable: the plasma boundary is a
+level set of the answer, and those cells cap the order (M-09, M-10). Copper
+beside vacuum happens only under a subtracting model, which meshes no `--coil`
+on purpose, so the fraction there is a statement about the drawing and not the
+current. Plasma and copper at one point is a **fault** — plasma current in
+copper — counted, warned and kept, the point going to the conductor. All three
+in a cell without sharing a point is a cell to split, which is
+`AlignConductors`' job and not a fourth state of the classifier; its cost in
+elements is → **[M-267](MEASUREMENTS.md#m-267)**.
+
+**THE `material` DIMENSION IS NOT CS-6's `conductor`.** That one holds the
+`ConductorField`'s members, expanded to filaments under `Model = "filament"`;
+a coil row here is a `[[coils]]` block.
+
+**THE RESERVED KINDS ARE READABLE BEFORE THEY ARE PRODUCED.** Passive and
+ferromagnetic rows, and iron's permeability curves, are columns and tables
+nothing writes yet; `OutputTests` writes them by hand and reads them back, so a
+reader can be written against them now. Producing them is a new campaign with
+its own input. The vessel's attribute 30 is `excluded`, not a material.
 
 ## The two performance keys, and what the TOML may choose
 

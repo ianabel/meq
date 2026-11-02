@@ -36,7 +36,7 @@
  *
  * THIS IS A PICARD ITERATION ON THE GEOMETRY AND IT IS DELIBERATELY THE HALFWAY
  * HOUSE. Making it quadratic needs `d( V', < R^-2 > )/dpsi`, which
- * INVERSION-PLAN.md section 11.1 measures at about **5.7 hours per Jacobian**
+ * CLAUDE_INVERSION.md's IN-P measures at about **5.7 hours per Jacobian**
  * by differencing -- `nFieldDOF` complete re-extractions of the whole family --
  * so the Newton wants the shape derivative first and that is not built. The
  * same staging XP-2 takes against XP-3, and for the same reason: an outer fixed

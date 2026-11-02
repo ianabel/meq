@@ -7,7 +7,7 @@
 #include "mfem.hpp"
 
 /*
- * INVERSION-PLAN.md stage IN-2. The header carries the conventions, the design
+ * Stage IN-2. The header carries the conventions, the design
  * argument and every trap; this file is the arithmetic, and the comments in it
  * are only for the places where the code makes a choice the header does not
  * already explain -- where the band flag is read from, why the differenced

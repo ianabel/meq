@@ -1,6 +1,6 @@
 // Unit tests for the material table and the region rule in src/meq/Materials.
 //
-// ELEMENT-REGIONS-PLAN.md §2.1 and §2.1b. Which material a quadrature point
+// ER-0. Which material a quadrature point
 // belongs to is asked by meq::GradShafranovSolver::elementMaterials() and is
 // tested on meshes in tests/convergence/ElementRegions.cpp; what is tested here
 // is everything after that question -- the table's rows, the fractions an
@@ -106,7 +106,7 @@ BOOST_AUTO_TEST_CASE( conductorMembershipIsTheRectangleAndOnlyTheRectangle )
 	BOOST_TEST( bare.conductorContaining( 0.0, 0.0 ) == -1 );
 }
 
-/// §2.1's table, every row of it, and §2.1b's three pairings.
+/// The region table, every row of it, and the three pairings.
 BOOST_AUTO_TEST_CASE( theRegionIsDerivedByTheTable )
 {
 	MaterialTable const table = machine();
@@ -231,7 +231,7 @@ namespace
 	}
 }
 
-/// §2.1: every coil outside a [[circuits]] block is in ONE group named
+/// Every coil outside a [[circuits]] block is in ONE group named
 /// `default`, a grouping and not a supply, present only when it has a member.
 BOOST_AUTO_TEST_CASE( everyCoilIsInItsCircuitOrInTheDefaultGroup )
 {
@@ -283,7 +283,7 @@ BOOST_AUTO_TEST_CASE( everyCoilIsInItsCircuitOrInTheDefaultGroup )
 	                   std::invalid_argument );
 }
 
-/// §2.1: a ferromagnetic row holds a constant OR a curve, the curve names its
+/// A ferromagnetic row holds a constant OR a curve, the curve names its
 /// material, and neither reserved kind is on a supply.
 BOOST_AUTO_TEST_CASE( aReservedRowHoldsOnePermeabilityAndNoCircuit )
 {

@@ -19,13 +19,14 @@
 #include "meq/Sampler.hpp"
 
 /*
- * The acceptance test for INVERSION-PLAN.md stages IN-0 and IN-1: the
+ * The acceptance test for stages IN-0 and IN-1: the
  * predictor-corrector contour tracer, and the poloidal-angle parametrisation
  * and metric built on it. ON THE FITTED PATH, where there is no band between
  * Gamma_h and Gamma and every rate is therefore attributable to the tracer
  * alone.
  *
- * SECTION 2's THREE-WAY ERROR SPLIT, MADE INTO SEPARATE NUMBERS. That split is
+ * THE THREE-WAY ERROR SPLIT OF src/meq/FluxSurfaces.hpp, MADE INTO SEPARATE
+ * NUMBERS. That split is
  * the point of the stage and conflating its three parts is how this problem
  * gets done badly, so each is measured on its own and none of them is inferred
  * from another:
@@ -46,7 +47,7 @@
  *         Delta_s independent of h -- which is what says ( b ) and ( c ) have
  *         been separated.
  *
- * IN-1 IS THE TRAP OF SECTION 3.2 MADE INTO A MEASUREMENT, and its acceptance
+ * IN-1 IS THE METRIC TRAP MADE INTO A MEASUREMENT, and its acceptance
  * is three columns of one table: the periodic trapezoid rule with rho' taken
  * pointwise from q, the same rule with rho' obtained by differencing
  * neighbouring node radii, and a chord sum. The middle column is the
@@ -238,7 +239,7 @@ namespace
 	/// The first-order distance from @a point to the EXACT level set { psi = c }.
 	/// This is error ( a ), and note its 1/|grad psi| weighting: the geometric
 	/// error of a contour is worst exactly where the gradient is small, which is
-	/// section 2's point about the axis.
+	/// the point about the axis.
 	double distanceToExactContour( Equilibrium const &eq, double level, double radius,
 	                               double z )
 	{
@@ -376,7 +377,7 @@ namespace
 	/// -- which is what anybody actually wants -- q's tangent is the better of
 	/// the two, being an approximation of one order higher.
 	///
-	/// The representation error of INVERSION-PLAN.md section 2 ( c ) is a
+	/// The representation error ( c ) is a
 	/// property of the interpolation and is asked of the curve the interpolant
 	/// is measured against, so it is this consistent pairing that carries the
 	/// Delta_s^4 rate. The q pairing is reported beside it, along with the
@@ -676,7 +677,7 @@ namespace
 		                       : std::numeric_limits<double>::infinity();
 	}
 
-	/// The two populations of INVERSION-PLAN.md section 4.3, kept apart.
+	/// The two populations of a band-crossing contour, kept apart.
 	struct BandMeasurement
 	{
 		double bandWorst = 0.0;
@@ -1206,8 +1207,8 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
  * ( c ) HAVE BEEN SEPARATED.
  *
  * The representation error is a property of the point spacing and the
- * interpolation order and of nothing else -- INVERSION-PLAN.md section 2 calls
- * that the single most important realisation in its survey, because it is what
+ * interpolation order and of nothing else -- the single most important
+ * realisation in the survey that designed the tracer, because it is what
  * defeats the obvious objection that exact points joined by chords still give a
  * second-order line integral. Hold Delta_s and refine the mesh: if the number
  * moved with h, the interpolant would be inheriting the mesh through the point
@@ -1290,7 +1291,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationErrorDoesNotKnowAboutTheMesh )
 	            << " to " << worstHermite << " over a fourfold refinement at "
 	            << "fixed Delta_s. It should not know about h at all: if it "
 	            << "does, ( b ) and ( c ) are not separate and the whole error "
-	            << "split of INVERSION-PLAN.md section 2 is not what this code "
+	            << "split of src/meq/FluxSurfaces.hpp is not what this code "
 	            << "implements" );
 
 	BOOST_TEST( worstChord < 2.0*bestChord,
@@ -2143,8 +2144,8 @@ BOOST_AUTO_TEST_CASE( theSpectralRuleIsOnlyAsGoodAsItsJacobian )
 
 	BOOST_TEST( differencedRate < 3.0,
 	            "the differenced Jacobian converges at " << differencedRate
-	            << ". THAT COLUMN IS THE CONTROL: it is the trap of "
-	            << "INVERSION-PLAN.md section 3.2, a spectrally accurate rule "
+	            << ". THAT COLUMN IS THE CONTROL: it is the metric "
+	            << "trap, a spectrally accurate rule "
 	            << "fed a second-order metric, and if it ever converges as fast "
 	            << "as the pointwise one the comparison is empty and this test "
 	            << "is worthless" );
@@ -2297,8 +2298,7 @@ BOOST_AUTO_TEST_CASE( theMetricAndTheHermiteArcLengthAgree )
  * STAR-SHAPEDNESS IS A HYPOTHESIS, AND THE FIT REFUSES RATHER THAN RETURNING A
  * NUMBER WHEN IT FAILS.
  *
- * INVERSION-PLAN.md section 3.4 keeps ray bisection as a cross-check and not as
- * the primary route precisely because it assumes star-shapedness, which fails
+ * Ray bisection is a cross-check and not the primary route precisely because it assumes star-shapedness, which fails
  * on indented cross-sections and near the axis where the bracket degenerates.
  * The denominator of the metric identity, u x t, vanishes exactly when the ray
  * is TANGENT to the curve -- so the hypothesis is not a qualitative worry, it is
@@ -2574,8 +2574,7 @@ BOOST_AUTO_TEST_CASE( theBandIsCrossedOnlyWhenAnExtensionSaysHow )
  * IN-0's SECOND ACCEPTANCE, PART TWO, AND THE DELIVERABLE OF THIS HALF OF THE
  * STAGE: THE TWO BAND EXTENSIONS MEASURED SIDE BY SIDE ON THE SAME CONTOURS.
  *
- * INVERSION-PLAN.md section 4.3 lists three candidates and says the choice is
- * to be MEASURED, not argued. Two of them are fields and are measured here; the
+ * There are three candidates and the choice is MEASURED, not argued. Two of them are fields and are measured here; the
  * third -- psi = 0 exactly on Gamma, which is known analytically -- is not a
  * field at all but an ANCHOR, and it is what the lift's line integral starts
  * from. It is deliberately not used as a correction: CLAUDE.md records that
@@ -2599,7 +2598,7 @@ BOOST_AUTO_TEST_CASE( theBandIsCrossedOnlyWhenAnExtensionSaysHow )
  *                 BETTER than psi_h's own, and the band should not limit the
  *                 contour at all.
  *
- * THE TWO POPULATIONS ARE KEPT APART, per section 4.3. The interior column is
+ * THE TWO POPULATIONS ARE KEPT APART. The interior column is
  * the same contour's points inside Omega_h and converges at psi_h's k+1
  * whichever extension is configured -- it is the control on the control, since
  * an extension that damaged the interior would show up there and nowhere else.
@@ -2826,8 +2825,7 @@ BOOST_AUTO_TEST_CASE( theTwoBandExtensionsAreMeasuredSideBySide )
  * Gamma is the level set the subdomain was cut from. Nothing shrinks and there
  * is nothing to disentangle.
  *
- * AND IT IS THE THIRD CANDIDATE OF INVERSION-PLAN.md SECTION 4.3 MADE INTO A
- * NUMBER. That candidate is "psi = 0 exactly on Gamma, and Gamma is known
+ * AND IT IS THE THIRD CANDIDATE MADE INTO A NUMBER. That candidate is "psi = 0 exactly on Gamma, and Gamma is known
  * analytically, so the outermost contour is known for free with no tracing at
  * all". It is an ANCHOR and not a field: TransferLift starts its line integral
  * from g( a( x0 ) ) and so carries it, FluxTaylor knows nothing about Gamma and
@@ -3025,8 +3023,8 @@ BOOST_AUTO_TEST_CASE( theOutermostSurfaceIsTracedEntirelyInTheBand )
  * IN-0's SECOND ACCEPTANCE, PART FOUR: THE FLAG SURVIVES THE REPARAMETRISATION,
  * BECAUSE IN-2 IS WHAT NEEDS IT.
  *
- * INVERSION-PLAN.md section 4.3 asks that "every flux-surface quantity computed
- * on a surface that crosses the band be flagged as such", so that IN-2 reports
+ * Every flux-surface quantity computed on a surface that crosses the band
+ * must be flagged as such, so that IN-2 reports
  * the two populations separately rather than averaging them in. A flux-surface
  * average is not taken over the traced points: it is taken over a
  * REPARAMETRISATION of them, at equispaced poloidal angles found by their own
@@ -3038,7 +3036,7 @@ BOOST_AUTO_TEST_CASE( theOutermostSurfaceIsTracedEntirelyInTheBand )
  * mask and a count -- and the mask is checked here against
  * mfem::Mesh::FindPoints, which knows nothing of the band machinery. A count
  * alone would say a quantity is affected and not WHERE, which is the .nc's own
- * defect and the reason section 4.3 says so explicitly.
+ * defect and the reason it is said explicitly.
  */
 BOOST_AUTO_TEST_CASE( theBandFlagReachesTheAngleParametrisation )
 {

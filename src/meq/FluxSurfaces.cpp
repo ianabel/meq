@@ -10,7 +10,7 @@
 #include "Sampler.hpp"
 
 /*
- * The implementation of INVERSION-PLAN.md stages IN-0 and IN-1.
+ * The implementation of stages IN-0 and IN-1.
  * FluxSurfaces.hpp carries the argument; this file carries the arithmetic, and
  * comments here are confined to the places where the arithmetic is not the
  * obvious transcription of it.
@@ -455,8 +455,8 @@ namespace meq
 			// mfem::FaceElementTransformations above is still shared. That is
 			// safe because setBandExtension() MUTATES the tracer and so can
 			// never be in a parallel region over a const one; build the band
-			// before the region, as INVERSION-PLAN.md section 11.3 says of
-			// every cached table.
+			// before the region, as CLAUDE_MFEM.md's Traps in MFEM's API says
+			// of every cached table.
 			mfem::IsoparametricTransformation elementScratch;
 			meshRef.GetElementTransformation( face.element, &elementScratch );
 			mfem::ElementTransformation *trans = &elementScratch;
@@ -893,8 +893,8 @@ namespace meq
 		// whole curved path rests on, and it is stated for arbitrary endpoints:
 		// mfem::PathIntegral takes x and xbar and nothing else.
 		//
-		// mfem::PathLiftCoefficient -- which INVERSION-PLAN.md section 4.3 names
-		// as the primitive -- is NOT usable here: it evaluates on a
+		// mfem::PathLiftCoefficient -- which its name suggests is the
+		// primitive -- is NOT usable here: it evaluates on a
 		// FaceElementTransformations at that face's own integration point and
 		// answers "what is phi_h on Gamma_h", which is eta_5's question. The
 		// usable primitive is one level down and public.
@@ -2016,7 +2016,7 @@ namespace meq
 			message << "ContourTracer::fitByAngle: the traced contour is not "
 			        << "star-shaped about ( " << axis.radius << ", " << axis.z
 			        << " ) -- the polar angle turns back by " << fit.worstBacktrack
-			        << " rad. INVERSION-PLAN.md section 3.4 records that ray "
+			        << " rad. Ray "
 			        << "methods fail on indented cross-sections; this is that "
 			        << "hypothesis failing rather than a defect";
 			throw std::runtime_error( message.str() );

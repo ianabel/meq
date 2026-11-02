@@ -10,8 +10,9 @@
 #include "GradShafranov.hpp"
 
 /*
- * Flux surfaces as curves: the predictor-corrector tracer of INVERSION-PLAN.md
- * stage IN-0, and the poloidal-angle parametrisation and metric of stage IN-1.
+ * Flux surfaces as curves: the predictor-corrector tracer of stage IN-0, and
+ * the poloidal-angle parametrisation and metric of stage IN-1.
+ * docs/flux_surfaces.rst is the reader's account.
  *
  * THE BAND BETWEEN Gamma_h AND Gamma IS THE SECOND HALF OF IN-0, AND IT IS THE
  * INTERESTING PART RATHER THAN A CORNER CASE.
@@ -107,8 +108,8 @@
  * WHAT A TRACED CONTOUR'S ERROR IS MADE OF, WHICH IS THE FRAME FOR EVERY
  * MEASUREMENT IN tests/convergence/FluxSurfaceConvergence.cpp.
  *
- * INVERSION-PLAN.md section 2 splits it three ways and the split is the whole
- * reason this is worth doing carefully:
+ * It splits three ways and the split is the whole reason this is worth doing
+ * carefully:
  *
  *   (a) FIELD.          the level set of the field being rooted, against
  *                       { psi = c }. O( h^(k+1) / |grad psi| ) for psi_h and
@@ -208,8 +209,8 @@
  * product kappa * Delta_s is then constant -- which by the Hermite error below
  * makes the deviation per segment proportional to Delta_s and the deviation
  * relative to the segment's own length constant. Equidistributing the deviation
- * itself would want Delta_s ~ kappa^(-3/4); the plan asks for 1/kappa, which is
- * the robust geometric variant and is what is implemented.
+ * itself would want Delta_s ~ kappa^(-3/4); 1/kappa is the robust geometric
+ * variant and is what is implemented.
  *
  * kappa IS A DIFFERENCE -- the turning of the unit tangent between the last two
  * accepted points, divided by the step between them -- AND THAT IS FINE, for
@@ -224,8 +225,7 @@
  *
  * CUBIC HERMITE BETWEEN ACCEPTED POINTS, WITH THE TANGENTS FROM q.
  *
- * INVERSION-PLAN.md section 3.2( i ), and the highest-value single use of q in
- * the whole item. q gives the unit tangent at every accepted point at the
+ * The highest-value single use of q in the whole item. q gives the unit tangent at every accepted point at the
  * potential's own order and costs nothing, the tracer having evaluated it
  * already for the predictor. Two points and two unit tangents, with the tangent
  * magnitudes taken as the CHORD LENGTH, give
@@ -262,8 +262,8 @@
  *
  * CLOSURE: "AT MACHINE PRECISION" NEEDS A REFINEMENT, AND HERE IT IS.
  *
- * INVERSION-PLAN.md asks for "closure error over a full circuit at machine
- * precision". Taken literally that is not available and it is not a defect that
+ * "Closure error over a full circuit at machine precision" is the obvious
+ * requirement. Taken literally that is not available and it is not a defect that
  * it is not. psi_h is discontinuous across faces, so { psi_h = c } is a union of
  * per-element arcs with O( h^(k+1) ) jumps between them; the curve is closed as
  * a set, but it is not one analytic curve. What IS true, and what is measured:
@@ -328,8 +328,8 @@
  * jump of psi_h that is being measured there and a band point has no second
  * side to disagree with.
  *
- * MFEM's PathLiftCoefficient IS NOT THE PRIMITIVE THE LIFT IS BUILT ON, AND
- * INVERSION-PLAN.md section 4.3 NAMES IT AS THOUGH IT WERE. It evaluates on a
+ * MFEM's PathLiftCoefficient IS NOT THE PRIMITIVE THE LIFT IS BUILT ON,
+ * WHATEVER ITS NAME SUGGESTS. It evaluates on a
  * FaceElementTransformations of a face of Gamma_h, at that face's own
  * integration point, and returns the lifting to the foot -- it answers "what is
  * phi_h on Gamma_h", which is the question the estimator's eta_5 asks and is
@@ -338,7 +338,7 @@
  * integrates from a band point rather than from a face point, and
  * mfem::ElementExtension supplies the flux along the way. So the answer to
  * "is the transfer-path lift usable at an arbitrary band point" is yes, but
- * not through the class the plan names.
+ * not through PathLiftCoefficient.
  *
  * WHICH POTENTIAL TO ROOT: MEASURED, AND THE MEASUREMENT MOVED THE DEFAULT AND
  * CHANGED WHAT THE TANGENT FROM q IS WORTH.
@@ -376,8 +376,8 @@
  *    Hermite is fourth order in Delta_s until the O( h^k ) tangent tilt takes
  *    over and second order afterwards; paired with psi* the tilt is a full
  *    order smaller and the fourth order survives the whole sweep. So the
- *    default is not merely more accurate, it is what makes the section 3.2( i )
- *    claim about q hold at all on this discretisation.
+ *    default is not merely more accurate, it is what makes the Hermite-from-q
+ *    claim hold at all on this discretisation.
  *
  * Potential::PostProcessed is therefore the default and the constructor refuses
  * a solver that has not been post-processed, because postProcessedPotential()
@@ -398,13 +398,12 @@
  *
  * It is not an X-point-aware tracer. The level set through a saddle is not a
  * 1-manifold and the tangent is not defined there; a trace at that level will
- * stall or turn a corner arbitrarily. INVERSION-PLAN.md section 5 is why
+ * stall or turn a corner arbitrarily. That is why
  * CriticalPointFinder exists, and a caller is expected to have used it.
  *
  * ARC LENGTH AND THE METRIC -- IN-1, AND THE TRAP MADE INTO A MEASUREMENT.
  *
- * INVERSION-PLAN.md section 3.2 warns that it is easy to build a spectrally
- * accurate quadrature rule and then feed it a SECOND-ORDER Jacobian obtained by
+ * It is easy to build a spectrally accurate quadrature rule and then feed it a SECOND-ORDER Jacobian obtained by
  * differencing neighbouring node positions, at which point the whole scheme is
  * second order and nothing in the output says so. AngleParametrisation -- the
  * struct below -- exists to measure exactly that, with the differenced version
@@ -441,8 +440,8 @@
  * AngleParametrisation::transversality is min | u x t | over the fit and
  * transverse is whether it cleared the floor, mirroring
  * IndexAudit::transversality and IndexAudit::transverse and for the same
- * reason. INVERSION-PLAN.md section 3.4 records that ray methods fail on
- * indented cross-sections; this is that hypothesis made measurable. The
+ * reason. Ray methods fail on indented cross-sections; this is that
+ * hypothesis made measurable. The
  * parametrisation REFUSES rather than returning a number when it degenerates,
  * and the traced curve's own polar angle is checked for monotonicity as a
  * second, independent statement of the same hypothesis -- one that does not
@@ -532,7 +531,7 @@ namespace meq
 		TooLong,
 
 		/// BOTH ENDS REACHED THE EDGE OF THE FIELD, which is what an OPEN
-		/// surface is -- INVERSION-PLAN.md stage IN-5. Only traceOpen()
+		/// surface is -- stage IN-5. Only traceOpen()
 		/// produces it, and it is a SUCCESS: a scrape-off-layer field line
 		/// runs from wall to wall and has genuine endpoints, where LeftMesh
 		/// on a closed surface means the curve was cut short.
@@ -696,9 +695,8 @@ namespace meq
 			return status == ContourStatus::Closed;
 		}
 
-		/// Whether any of the curve lies outside the mesh. INVERSION-PLAN.md
-		/// section 4.3 requires that every flux-surface quantity computed on
-		/// such a surface be flaggable as such, so that IN-2 reports the two
+		/// Whether any of the curve lies outside the mesh. Every flux-surface
+		/// quantity computed on such a surface must be flaggable as such, so that IN-2 reports the two
 		/// populations separately rather than quoting one rate over both --
 		/// which would hide exactly the thing that stage exists to measure.
 		bool crossesBand() const
@@ -799,8 +797,8 @@ namespace meq
 
 			/// Trace outward from a known axis: walk out along a ray until the
 			/// potential brackets @a level, bisect, and trace from there. This
-			/// is the ordinary entry point, IN-A's findAxis() being the
-			/// prerequisite INVERSION-PLAN.md section 5 says it is.
+			/// is the ordinary entry point, IN-A's findAxis() being its
+			/// prerequisite.
 			///
 			/// EIGHT RAYS RATHER THAN ONE, AND THAT IS A MEASUREMENT. +R alone
 			/// is the obvious choice and fails on an ordinary benchmark; the
@@ -823,7 +821,7 @@ namespace meq
 			
 			/**
 			 * AN OPEN SURFACE, TRACED FROM THE SEED IN BOTH DIRECTIONS AND
-			 * JOINED -- INVERSION-PLAN.md stage IN-5.
+			 * JOINED -- stage IN-5.
 			 *
 			 * **A LEVEL OUTSIDE THE PLASMA IS NOT A LOOP.** Beyond `psi_bnd` a
 			 * flux surface is not closed: it runs to the edge of the field and
@@ -878,8 +876,8 @@ namespace meq
 			/// extension outside the mesh rather than from an element.
 			///
 			/// A SEPARATE OVERLOAD RATHER THAN AN EXTRA DEFAULTED ARGUMENT,
-			/// because the flag is the thing INVERSION-PLAN.md section 4.3
-			/// insists a consumer must be able to read PER POINT, and a defaulted
+			/// because the flag is the thing a consumer must be able to read
+			/// PER POINT, and a defaulted
 			/// out-parameter is easy to not notice. Without it a caller placing
 			/// its own quadrature points -- which is what
 			/// meq::surfaceAverages( tracer, contour ) does -- cannot tell
@@ -891,7 +889,7 @@ namespace meq
 			/**
 			 * Re-parametrise a closed @a contour by poloidal angle about
 			 * @a axis, at @a count equispaced angles, and build the metric.
-			 * INVERSION-PLAN.md stage IN-1; see AngleParametrisation.
+			 * Stage IN-1; see AngleParametrisation.
 			 *
 			 * A member rather than a free function because every ray Newton
 			 * reads psi and q through the same seam the tracer does, and threads
@@ -904,9 +902,8 @@ namespace meq
 			 * @throws std::runtime_error if the transversality falls below
 			 *         @a floor, if the traced angle is not monotone about the
 			 *         axis, or if a ray fails to find the level within its
-			 *         bracket. Refusing is the point: INVERSION-PLAN.md section
-			 *         3.4 records that ray methods fail on indented
-			 *         cross-sections, and a number returned from a degenerate
+			 *         bracket. Refusing is the point: ray methods fail on
+			 *         indented cross-sections, and a number returned from a degenerate
 			 *         fit is worse than no number.
 			 */
 			AngleParametrisation fitByAngle( Contour const &contour,
@@ -1000,7 +997,8 @@ namespace meq
 			/**
 			 * Answer calls in the band between Gamma_h and Gamma with an
 			 * extension, so that a contour crossing it COMPLETES rather than
-			 * stopping at the edge of the mesh. INVERSION-PLAN.md section 4.3.
+			 * stopping at the edge of the mesh. docs/flux_surfaces.rst, The
+			 * band, on a curved boundary.
 			 *
 			 * @param which          which extension. BandExtension::None
 			 *                       restores the fitted behaviour and ignores
@@ -1313,7 +1311,7 @@ namespace meq
 
 	/**
 	 * A closed contour re-parametrised by poloidal angle about the axis, and
-	 * the metric that comes with it. INVERSION-PLAN.md stage IN-1.
+	 * the metric that comes with it. Stage IN-1.
 	 *
 	 * The points are at equispaced theta and each is found by a 1-D Newton along
 	 * its ray, using q for the derivative -- no differencing anywhere in the
@@ -1330,7 +1328,7 @@ namespace meq
 	 *   chordLength()        sum of chords                             the naive
 	 *                                                                  control
 	 *
-	 * The first is the rule the plan wants and the second is the same rule fed a
+	 * The first is the rule to use and the second is the same rule fed a
 	 * second-order Jacobian -- a spectrally accurate quadrature reduced to
 	 * second order by its metric, with nothing in its own output saying so. If
 	 * either control ever converges as fast as the first the comparison is empty

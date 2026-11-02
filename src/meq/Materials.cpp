@@ -280,7 +280,7 @@ namespace meq
 			conductor = conductor || isConductor( kind );
 		}
 
-		// §2.1b: plasma beside vacuum is the boundary nobody can mesh to;
+		// The pairings: plasma beside vacuum is the boundary nobody can mesh to;
 		// copper beside vacuum is a mesh not aligned to it. Plasma beside
 		// copper, with or without vacuum, is a fault or a cell to split.
 		if ( vacuum && plasma && !conductor )

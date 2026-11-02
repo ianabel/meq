@@ -9,7 +9,7 @@
 #include "FluxSurfaces.hpp"
 
 /*
- * Flux-surface averages: INVERSION-PLAN.md stage IN-2, on the fitted path.
+ * Flux-surface averages: stage IN-2, on the fitted path.
  *
  * THE CONVENTION IS PART OF THE DEFINITION, so it is first and it is stated
  * once:
@@ -96,8 +96,7 @@
  *
  * THE METRIC TRAP, AND WHAT IT DOES TO AN AVERAGE AS OPPOSED TO A LENGTH.
  *
- * INVERSION-PLAN.md section 3.2 warns that it is easy to build a spectrally
- * accurate rule and then feed it a SECOND-ORDER Jacobian obtained by
+ * It is easy to build a spectrally accurate rule and then feed it a SECOND-ORDER Jacobian obtained by
  * differencing neighbouring node positions, at which point the whole scheme is
  * second order and nothing in its output says so. IN-1 measured that on an arc
  * length -- 7.03 against 1.97 -- and tests/analytic/FluxSurfaceReference.hpp
@@ -122,7 +121,7 @@
  * differencedAvailable() says so and averageDifferenced() REFUSES rather than
  * returning a number when it is not.
  *
- * TWO EXTRACTIONS, WHICH IS TWO OF THE THREE LEGS SECTION 3.3 ASKS FOR.
+ * TWO EXTRACTIONS, WHICH IS TWO OF THREE POSSIBLE LEGS.
  *
  * There are two builders and they share the field and the level and nothing
  * else:
@@ -143,7 +142,7 @@
  *
  * One is a ray parametrisation and the other is a predictor-corrector trace
  * with an interpolant; they agree or one of them is wrong, and agreement is
- * worth more than either being plausible. A THIRD leg, section 3.3's implicit
+ * worth more than either being plausible. A THIRD leg, implicit
  * quadrature -- a rule constructed on the level set with no curve extracted at
  * all -- is DECLINED rather than deferred: Saye's construction is for
  * hyperrectangles and MEQ is on triangles, the leg it would replace is 1.8% of
@@ -167,8 +166,7 @@
  * On the curved path Omega_h is inscribed in Gamma, so there is a band O( h )
  * wide that is inside the plasma and outside the mesh, and the outermost
  * surfaces -- exactly the ones a q( psi ) profile most wants -- cross it.
- * INVERSION-PLAN.md section 4.3 is explicit that a COUNT is not enough and that
- * a consumer must be able to tell WHICH data came from an extension, the way
+ * A COUNT is not enough: a consumer must be able to tell WHICH data came from an extension, the way
  * the .nc carries a byte extrapolated( Z, R ) beside inside; CLAUDE.md records
  * that the count-not-mask version of that was half of a real defect.
  *
@@ -254,9 +252,8 @@
  *
  * It is not an X-point-aware facility. Approaching the separatrix 1/| grad psi |
  * diverges, the surface develops a corner and every quantity here diverges
- * logarithmically with it. That is the physics, it is INVERSION-PLAN.md section
- * 8's second risk, and where MEQ cuts is a decision to be recorded rather than
- * discovered.
+ * logarithmically with it. That is the physics, and where MEQ cuts is a decision
+ * recorded in FluxFamily.hpp rather than discovered.
  *
  * And safetyFactor() carries no evidence of its own. It is
  * V' g < R^-2 > / 4 pi^2, an algebraic combination of two quantities that ARE
@@ -288,7 +285,7 @@ namespace meq
 
 		/// psi_h at the node, from the same evaluation the weight was built
 		/// from, and | psi_h - level | with it. The second is
-		/// INVERSION-PLAN.md section 2's error ( b ) for this node.
+		/// FluxSurfaces.hpp's error ( b ) for this node.
 		double psi = 0.0;
 		double residual = 0.0;
 

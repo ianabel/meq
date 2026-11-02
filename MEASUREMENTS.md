@@ -603,7 +603,7 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 | batched field evaluation by element | **0.90–1.14×** | **do not** |
 
 
-## §8's separatrix cut: nothing gives out, and that is the finding
+## The separatrix cut: nothing gives out, and that is the finding
 
 ### M-52
 
@@ -5045,8 +5045,8 @@ until something explains it.**
 it in `Output.cpp`, and wrote it on no run at all: the column is gated on
 `FluxSurfaceFamily::safetyFactorAvailable`, which is
 `static_cast<bool>( FluxFamilyOptions::toroidalField )`, and `apps/meq.cpp` set
-that at neither extraction site. **Found by closing `INVERSION-PLAN.md` rather
-than by using the code.**
+that at neither extraction site. **Found by reading the code against its design
+rather than by using it.**
 
 **THE REFUSAL WAS RIGHT FOR ONE CASE AND WAS NEVER REVISITED FOR THE OTHER.** A
 `meq::Source` carries `g g'` and not `g`, so a PRESCRIBED-field run cannot

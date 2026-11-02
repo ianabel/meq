@@ -37,9 +37,8 @@
  * no branch. tests/unit/ZernikeTests.cpp measures that as a contrast against a
  * deliberately parity-violating mode rather than asserting it as folklore.
  *
- * FOR MEQ THE CENTRE OF THE DISC IS THE MAGNETIC AXIS. INVERSION-PLAN.md
- * section 4.1 wants the flux surfaces as R( Psi, l ), z( Psi, l ) -- a map from
- * a disc, whose centre is the axis and whose boundary is the outermost surface.
+ * FOR MEQ THE CENTRE OF THE DISC IS THE MAGNETIC AXIS. The flux surfaces are
+ * wanted as R( Psi, l ), z( Psi, l ) -- a map from a disc, whose centre is the axis and whose boundary is the outermost surface.
  * The axis is precisely where the surfaces shrink to a point, where 1/|grad psi|
  * diverges, and where the in-surface coordinate l is undefined; it is the one
  * place a representation is most tempted to special-case and least able to
@@ -86,7 +85,7 @@
  *
  * WHAT IS DELIBERATELY ABSENT: there is no fitting routine and no quadrature.
  * A projection integral would need a rule on the disc and a callable f, and it
- * is not what INVERSION-PLAN.md IN-3 actually does -- IN-3 fits traced surface
+ * is not what IN-3 actually does -- IN-3 fits traced surface
  * POINTS, which is a least-squares problem against a point cloud, not an
  * integral against a function. Supplying a quadrature projection here would put
  * the wrong tool in the library and invite it to be used. The unit tests build
@@ -239,7 +238,7 @@ namespace meq
 	 *                           =>   df/dPsi_N = ( df/drho ) / ( 2 rho ).
 	 *
 	 * This exists as a named function rather than as three characters at each
-	 * call site because INVERSION-PLAN.md IN-3 exists to deliver dGeometry/dPsi
+	 * call site because IN-3 exists to deliver dGeometry/dPsi
 	 * for MANTA-COUPLING.md, that derivative is the deliverable, and a factor
 	 * dropped in it would show up as a coupled run that converges to the wrong
 	 * equilibrium rather than as anything failing.
@@ -247,9 +246,10 @@ namespace meq
 	 * IT IS UNBOUNDED AT rho = 0 AND THAT IS THE COORDINATE, NOT A DEFECT. Even
 	 * for a representation that is perfectly smooth in Cartesian coordinates,
 	 * d/dPsi_N at fixed theta diverges at the axis whenever the m = 1 content is
-	 * non-zero -- the m = 1 modes are the rigid shift of a surface, R ~ rho cos
-	 * theta, and moving the axis sideways at a rate 1/( 2 rho ) is exactly what
-	 * a Shafranov shift does as the surfaces shrink onto a point. A caller
+	 * non-zero -- for a surface R = R_0 + a cos theta the m = 1 coefficient of R
+	 * IS the minor radius a, which grows like rho, so dR/dPsi_N goes like
+	 * 1/( 2 rho ) in every equilibrium. It is not the Shafranov shift: a rigid
+	 * shift is the m = 0 coefficient and is well behaved. A caller
 	 * wanting a quantity that stays finite there wants d/drho, which this file
 	 * also supplies. No exception is thrown: rho = 0 returns an infinity or a
 	 * NaN by the ordinary floating point rules, because this is called per

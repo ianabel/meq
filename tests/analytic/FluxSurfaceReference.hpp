@@ -9,7 +9,7 @@
 /*
  * Flux-surface averages on an EXACT equilibrium, to converged precision.
  *
- * This is the reference INVERSION-PLAN.md IN-2 measures against, and it is a
+ * This is the reference IN-2 measures against, and it is a
  * reference VALUE rather than a closed form. There is no closed form: psi is
  * elementary but V'( psi ), < R^-2 > and the safety factor are integrals over a
  * CONTOUR of it, and the contours of the Cerfon-Freidberg twelve-coefficient
@@ -20,8 +20,8 @@
  *
  * IT NEVER TOUCHES psi_h, AND THAT IS THE ENTIRE REASON IT EXISTS. Every
  * quantity here is computed from the analytic psi and grad psi of a fixture in
- * this directory. So a comparison against it measures INVERSION-PLAN.md
- * section 2's error (a) -- the discretisation -- with (b) and (c) removed by
+ * this directory. So a comparison against it measures src/meq/FluxSurfaces.hpp's
+ * error (a) -- the discretisation -- with (b) and (c) removed by
  * construction, rather than measuring all three together and attributing the
  * total to whichever one is being worked on.
  *
@@ -43,8 +43,7 @@
  * ray being grad psi . u exactly. So the point sits on the level set to solver
  * tolerance and carries no marching error.
  *
- * The METRIC is the part that is easy to get wrong and is the whole subject of
- * INVERSION-PLAN.md section 3.2's block quote: it is easy to build a
+ * The METRIC is the part that is easy to get wrong: it is easy to build a
  * spectrally accurate rule and then feed it a SECOND-ORDER Jacobian obtained by
  * differencing neighbouring node positions, at which point the whole scheme is
  * second order and nothing in its output says so. Differentiating the defining
@@ -66,12 +65,11 @@
  * min | grad psi . u | / | grad psi | over the walk and is the direct analogue
  * of IndexAudit::transversality in src/meq/CriticalPoints.hpp, kept for the
  * same reason: a hypothesis that is measured is a hypothesis that cannot be
- * silently violated. INVERSION-PLAN.md section 3.4 records that ray methods
- * fail on indented cross-sections, at and beyond the separatrix, and near the
+ * silently violated. Ray methods fail on indented cross-sections, at and beyond the separatrix, and near the
  * axis where the bracket degenerates; this is that failure made visible.
  *
- * WHY A RAY IS ACCEPTABLE HERE AND NOT AS MEQ'S PRIMARY ROUTE. Section 3.4
- * rejects ray bisection as the tracer because it assumes star-shapedness. It is
+ * WHY A RAY IS ACCEPTABLE HERE AND NOT AS MEQ'S PRIMARY ROUTE. Ray bisection
+ * is not the tracer because it assumes star-shapedness. It is
  * the right choice for a REFERENCE on an analytic equilibrium, where the
  * surfaces are known to be star-shaped and the hypothesis is checked every
  * call, and its independence from the predictor-corrector route is exactly what
@@ -108,7 +106,7 @@
  * three orders of magnitude worse. At 256 angles the pointwise answer is exact
  * and the differenced one is wrong in the fourth decimal.
  *
- * THAT MIDDLE ROW IS THE WHOLE OF SECTION 3.2's WARNING IN ONE LINE: the RULE
+ * THAT MIDDLE ROW IS THE WHOLE OF THE METRIC TRAP IN ONE LINE: the RULE
  * is spectral in both of the first two rows -- it is the same trapezoid over the
  * same points -- and the second is second order because its JACOBIAN is. A
  * spectrally accurate quadrature fed a differenced metric is a second-order
@@ -119,7 +117,7 @@
  * rho = 0.8 vertically while reaching it by rho = 0.4 outboard. A reach of 0.8
  * throws -- correctly, and with a message that says which of the two things
  * went wrong -- where 2.0 succeeds. The throw is the designed behaviour and is
- * better than the prior art's silent partial curve; see section 4.3.
+ * better than the prior art's silent partial curve.
  */
 
 namespace meq
@@ -235,8 +233,7 @@ namespace meq
 		 * @throws std::runtime_error if a ray fails to bracket the level, which
 		 *         is what a non-star-shaped surface or a level outside the
 		 *         plasma looks like from here. It throws rather than returning a
-		 *         partial curve, per section 4.3's complaint against the prior
-		 *         art.
+		 *         partial curve, as the prior art did.
 		 */
 		template<class Equilibrium>
 		SurfaceQuadrature surfaceQuadrature( Equilibrium const &eq,
@@ -402,7 +399,7 @@ namespace meq
 		 * piece is elementary, plain reads 8.1e-07 where ( 4 D( h/2 ) - D( h ) )
 		 * / 3 reads 2.7e-13. This is the third place in the tree where that
 		 * applies; see src/meq/Zernike.hpp's derivative test and
-		 * INVERSION-PLAN.md IN-3.
+		 * IN-3.
 		 *
 		 * @returns left-hand side minus right-hand side, in the units of F / R^2.
 		 */

@@ -1,7 +1,7 @@
 // Unit tests for the flux-surface family, its interpolation, and the per-psi
 // geometry cache: src/meq/FluxFamily.
 //
-// INVERSION-PLAN.md stage IN-6. MFEM-FREE, like the unit under test, and that
+// Stage IN-6. MFEM-FREE, like the unit under test, and that
 // is the whole reason the split exists: the cache's invalidation rule IS
 // MANTA-COUPLING.md section 8 -- a served answer must equal a cold one BIT FOR
 // BIT and a stale cache must be impossible rather than unlikely -- and that is

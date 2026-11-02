@@ -283,7 +283,7 @@ namespace meq
 		 * **WHAT IT BUYS IS A PURE CELL, NOT A BETTER SOLVE.** Under
 		 * subtraction `psi_c` is evaluated analytically and the copper is
 		 * vacuum to the remainder equation, so a cell the rectangle cuts costs
-		 * nothing numerically; it costs `ELEMENT-REGIONS-PLAN.md`'s record a
+		 * nothing numerically; it costs the `.nc`'s element record a
 		 * `conductor_boundary` cell, and a plasma boundary passing through such
 		 * a cell a `mixed` one. Off by default, to keep the subtraction's
 		 * point -- a mesh that need not resolve the conductors -- and its price
@@ -1932,7 +1932,7 @@ namespace meq
 
 		// ------------------------------------------------------------------
 		// [output] FluxSurfaces and its four sizes: the ( Psi, theta ) file,
-		// INVERSION-PLAN.md stage IN-6.
+		// stage IN-6.
 		//
 		// OFF BY DEFAULT, AND NOT BECAUSE IT IS EXPERIMENTAL. It costs a
 		// contour trace and an angle fit per surface -- comparable with the

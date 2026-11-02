@@ -377,11 +377,16 @@ a square root and a chain rule at each call site: the chain factor is
    That factor is **unbounded at the axis, and that is the coordinate rather
    than a defect.** Even for a representation perfectly smooth in Cartesian
    coordinates, :math:`\mathrm{d}/\mathrm{d}\Psi_{\mathrm N}` at fixed angle
-   diverges at the axis whenever the :math:`m = 1` content is non-zero — those
-   modes are the rigid shift of a surface, and shifting the axis sideways at a
-   rate :math:`1/(2\varrho)` is exactly what a Shafranov shift does as the
-   surfaces shrink onto a point. A caller wanting a quantity that stays finite
-   there wants ``radialDerivative()``, which is in the disc radius. Its growth as
+   diverges at the axis whenever the :math:`m = 1` content is non-zero. For a
+   surface :math:`R = R_0 + a\cos\theta` the :math:`m = 1` coefficient of
+   :math:`R` *is* the minor radius :math:`a`, which grows like
+   :math:`\varrho`, so :math:`\partial R/\partial\Psi_{\mathrm N}` goes
+   like :math:`1/(2\varrho)` in every equilibrium. It is not the Shafranov
+   shift: a rigid shift is the :math:`m = 0` coefficient and is well behaved.
+   Flux-surface *averages* are unaffected, since :math:`V'` tends to a constant
+   at the axis; what diverges is the derivative of a surface's *position*. A
+   caller wanting a quantity that stays finite there wants
+   ``radialDerivative()``, which is in the disc radius. Its growth as
    the innermost surface approaches the axis is a **conditioning number for a
    coupling to read**, not a defect to fix.
 

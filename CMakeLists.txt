@@ -376,7 +376,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # worked around, it is what keeps the physics unit-testable and puts the mesh
 # walking where meshes already live.
 
-# src/meq/Materials.cpp is ABSENT from it too: ELEMENT-REGIONS-PLAN.md's
+# src/meq/Materials.cpp is ABSENT from it too: the element record's
 # material table, the region rule and the bookkeeping that turns per-element
 # weights into fractions are plain doubles in and out. Which material a
 # quadrature point belongs to is asked by the solver, which is where MFEM enters.

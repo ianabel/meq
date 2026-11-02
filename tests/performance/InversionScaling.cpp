@@ -1,6 +1,6 @@
 /*
  * InversionScaling -- the cost of the solution-inversion chain, which had never
- * been measured. INVERSION-PLAN.md stage IN-P.
+ * been measured. Stage IN-P.
  *
  * This is a BENCHMARK, not a test: it is built but NOT registered with ctest,
  * because everything it reports is a timing and CLAUDE.md's standing rule is
@@ -17,10 +17,10 @@
  *     replace. A faster wrong answer is not a result, and this file prices four
  *     replacements without adopting any of them.
  *
- * Everything in INVERSION-PLAN.md section 7 is an ACCURACY measurement. The one
+ * Every stage before IN-P made an ACCURACY measurement. The one
  * cost datum that existed before this file is that FluxSurfaceConvergence runs
  * in 16.6 s, which is a test and not a workload. So the questions here are the
- * ones section 11 poses and could not answer:
+ * ones a cost model can pose and not answer:
  *
  *   1. where the time actually goes, per stage and as a share;
  *   2. which hand-written loops a library kernel beats, AND BY HOW MUCH --
@@ -385,7 +385,7 @@ namespace
 	// than the fit's own residual.
 	//
 	// IT IS PRICED HERE AND NOT ADOPTED. Zernike.cpp's route is exact, is what
-	// every accuracy number in INVERSION-PLAN.md section 7 was measured with,
+	// every accuracy number in IN-A to IN-4 was measured with,
 	// and its header records that the naive factorial sum -- a DIFFERENT
 	// alternative -- loses eight digits at l = 30. A recurrence is not that
 	// sum, but the burden is on the replacement.
@@ -1254,7 +1254,7 @@ namespace
 
 		// The recurrence is a CANDIDATE and the burden is on it. 1e-11 is far
 		// above the round-off of an O(1) quantity and far below anything a fit
-		// residual could notice -- the discrete fits in section 7 sit at 1e-7
+		// residual could notice -- the discrete fits of IN-4 sit at 1e-7
 		// and better -- so this separates "a stable recurrence" from "a
 		// recurrence that has started to cancel", which is the failure
 		// Zernike.hpp records the explicit factorial sum suffering.
@@ -1783,8 +1783,7 @@ namespace
 	/// fitByAngle() runs the whole ray loop inside one call, so its rays cannot
 	/// be threaded from outside without a library change. This is the same
 	/// iteration on the same primitive, and it is here to answer the question
-	/// INVERSION-PLAN.md section 11.2 item 3 asks -- what the rays are worth if
-	/// they were threaded -- rather than to replace anything.
+	/// of what the rays are worth if they were threaded -- rather than to replace anything.
 	double solveRay( meq::ContourTracer const &tracer, double axisR, double axisZ,
 	                 double theta, double level, double seed, int &iterations )
 	{
@@ -1822,8 +1821,8 @@ namespace
 	 * THREADING, AND THE FIRST THING TO SAY IS THAT THE CHAIN CANNOT BE THREADED
 	 * AS IT STANDS. That is a measurement and not a caution: the first version
 	 * of this section put one shared const ContourTracer in an
-	 * omp parallel for over surfaces, which is exactly what INVERSION-PLAN.md
-	 * section 11.2 item 1 proposes, and it ABORTED --
+	 * omp parallel for over surfaces, which is the obvious
+	 * parallelism, and it ABORTED --
 	 *
 	 *     terminate called after throwing an instance of 'std::runtime_error'
 	 *       what():  ContourTracer::traceFromAxis: the axis is not in the mesh
@@ -1831,8 +1830,9 @@ namespace
 	 * -- because every entry point reaches mfem::Mesh::FindPoints, and
 	 * FindPoints is not reentrant. It loops over every element calling the
 	 * SHARED GetElementTransformation( int ) overload, and it builds a
-	 * vertex-to-element table on the way. Section 11.3 anticipated the second
-	 * half of this and got the premise wrong: it says the fallback "must stay
+	 * vertex-to-element table on the way. The cost model this file was built to
+	 * test anticipated the second half of this and got the premise wrong: it
+	 * says the fallback "must stay
 	 * outside, or be serialised. It is already O( elements x points ) and the
 	 * tracer reports zero fallbacks, so this costs nothing to honour." The
 	 * tracer reports zero fallbacks ON A TRACE, and Contour::fallbackLocations
@@ -1854,8 +1854,8 @@ namespace
 	 * So what is measured here is the parallelism that is AVAILABLE, by giving
 	 * each thread its own mesh, its own solve and its own tracer -- which shares
 	 * nothing at all, at the cost of one solve per thread outside the timed
-	 * region. It answers section 11.2's question ("what are surfaces and rays
-	 * worth threaded") without pretending the sharing is not there, and the
+	 * region. It answers the question "what are surfaces and rays
+	 * worth threaded" without pretending the sharing is not there, and the
 	 * bit-exactness assertion still does its job: with genuinely independent
 	 * state the answers must be identical to the last bit, and anything left
 	 * over -- a thread_local that is not, a lazily built global table -- shows up
@@ -2259,7 +2259,7 @@ namespace
 		             oneFamily*fieldDofs/3600.0 );
 		std::printf( "    it is embarrassingly parallel over psi DOFs, so a"
 		             " core count divides it -- and nothing else here does.\n"
-		             "    INVERSION-PLAN.md section 11.4's shape derivative is"
+		             "    The closed-form shape derivative is"
 		             " the lever that changes the exponent rather than the\n"
 		             "    constant, and this is the number it has to beat.\n" );
 	}

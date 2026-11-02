@@ -11,7 +11,7 @@
 
 /*
  * Turning a solved psi_h and q_h into a meq::FluxSurfaceFamily: the MFEM half of
- * INVERSION-PLAN.md stage IN-6.
+ * stage IN-6.
  *
  * The container, the flux label, the interpolation and the per-psi cache are in
  * FluxFamily.hpp and are MFEM-free so that continuous integration can gate the
@@ -53,7 +53,7 @@
  *     dz/dtheta = rho'( theta ) sin( theta ) + rho( theta ) cos( theta )
  *
  * and rho' comes from the solved flux by IN-1's identity. Differencing
- * neighbouring z_j instead is INVERSION-PLAN.md section 3.2's metric trap, which
+ * neighbouring z_j instead is the metric trap, which
  * IN-1 measured at 7.03 against 1.97 on an arc length and IN-2 measured again on
  * an average. This is the same trap on a third integrand, and the differenced
  * column is kept live as a control in the test rather than argued away.
@@ -181,8 +181,8 @@ namespace meq
 	 * CENTRAL DIFFERENCING the neighbouring rho_j instead of pointwise from the
 	 * solved flux.
 	 *
-	 * THE CONTROL, AND IT IS NOT TEST SCAFFOLDING. INVERSION-PLAN.md section
-	 * 3.2's metric trap is that a spectrally accurate rule fed a second-order
+	 * THE CONTROL, AND IT IS NOT TEST SCAFFOLDING. The metric trap is
+	 * that a spectrally accurate rule fed a second-order
 	 * Jacobian is a second-order scheme with nothing in its output to say so.
 	 * IN-1 measured it on an arc length -- 7.03 against 1.97 -- and IN-2 on an
 	 * average; this is the same trap on a third integrand, and it lives beside

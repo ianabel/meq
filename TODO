@@ -351,7 +351,8 @@ derivation.
   Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
 Report q( Psi ) in the flux-surface output -- (a) DONE, (b) open
-Raised 2026-09-19, by closing INVERSION-PLAN.md rather than by using the code.
+Raised 2026-09-19, by reading the inversion against its design rather than by
+using the code.
 Part (a) closed the same day.
 ================================================================================
 
@@ -517,15 +518,15 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   pointwise Geometry hook fast enough, since MaNTA calls it once per physics
   node per residual evaluation and hands over the whole psi vector each time.
 
-  BOTH NOW HAVE MACHINERY BEHIND THEM, WHICH IS WHAT INVERSION-PLAN.md WAS FOR.
+  BOTH NOW HAVE MACHINERY BEHIND THEM, WHICH IS WHAT IN-A TO IN-P WERE FOR.
   IN-2 builds the flux-surface averages as ONE primitive over a callable
   integrand, so dGeometry_dpsi is differentiated once rather than per slot, and
   IN-3's fit supplies the surface derivative, and IN-6's per-psi cache is built
-  as meq::GeometryCache (FluxFamily.hpp) -- INVERSION-PLAN.md section 11.1 argues
-  it is a REQUIREMENT of the pointwise call pattern rather than an optimisation,
-  and its invalidation contract is MANTA-COUPLING.md section 8. INVERSION-PLAN.md
-  is closed, IN-P included. What is still owed on MEQ's side is the closed-form
-  shape derivative its section 11.4 names as the largest lever. Do not design the coupling against the
+  as meq::GeometryCache (FluxFamily.hpp) -- a REQUIREMENT of the pointwise
+  call pattern rather than an optimisation -- and its invalidation contract is
+  MANTA-COUPLING.md section 8. The inversion is closed, IN-P included. What is
+  still owed on MEQ's side is the closed-form shape derivative, the largest
+  lever CLAUDE_INVERSION.md's IN-P names (see its section on the two levers). Do not design the coupling against the
   illustrative geometry slot list: MANTA-COUPLING.md says itself that the list
   "is negotiated with the transport physics case, not fixed by MaNTA", and its
   tokamak set is known to be under revision.

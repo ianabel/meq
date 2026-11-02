@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# The solution-inversion scan, INVERSION-PLAN.md stage IN-P.
+# The solution-inversion scan, stage IN-P.
 #
 # ONE PROCESS PER THREAD COUNT, which is not fastidiousness and is the same
 # reason scan.sh gives beside it: MKL fixes its threading at first use and the

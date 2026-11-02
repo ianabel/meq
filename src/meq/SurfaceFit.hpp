@@ -9,14 +9,14 @@
 
 /*
  * The representation: R and z as truncated Zernike expansions on the disc,
- * fitted to traced surface POINTS. INVERSION-PLAN.md stage IN-3.
+ * fitted to traced surface POINTS. Stage IN-3.
  *
  * ---------------------------------------------------------------------------
  * A NAME COLLISION THAT IS SETTLED BEFORE ANYTHING ELSE, BECAUSE BOTH
  * QUANTITIES MEET IN THIS FILE AND ONE IS A FUNCTION OF THE OTHER.
  * ---------------------------------------------------------------------------
  *
- * In src/meq/Zernike.hpp and in INVERSION-PLAN.md section 4.1, `rho` is the
+ * In src/meq/Zernike.hpp and in docs/surface_geometry.rst, `rho` is the
  * DISC RADIAL COORDINATE, rho = sqrt( Psi_N ): a FLUX label, dimensionless,
  * zero at the magnetic axis and one at the edge of the disc.
  *
@@ -132,9 +132,8 @@
  * free and a post-hoc fit does not. Measured, the consequence is exactly where
  * it should be: with the innermost surface at Psi_N = 0.10 the coefficient
  * envelope decays geometrically, and pulling it in to Psi_N = 0.02 leaves an
- * algebraic tail that no degree removes. That is INVERSION-PLAN.md section
- * 4.4's tension -- axis regularity against everything else -- as a table rather
- * than an argument.
+ * algebraic tail that no degree removes. That is the tension between axis
+ * regularity and everything else, as a table rather than an argument.
  *
  * AND IT IS RESOLVED, LOWER DOWN THIS FILE, BY TAKING THE ANGLE OUT OF THE
  * PROBLEM STATEMENT ALTOGETHER. meq::gaugeFreeFit() asks each disc node only to
@@ -156,14 +155,14 @@
  * THE RADIAL EXTENT: WHAT ROD THE DISC IS CUT TO, AND WHY THERE IS AN OPTION.
  * ---------------------------------------------------------------------------
  *
- * The disc is discRadius in [ 0, 1 ]. Section 4.1 defines discRadius =
+ * The disc is discRadius in [ 0, 1 ]. Zernike.hpp defines discRadius =
  * sqrt( Psi_N ), so discRadius = 1 is the SEPARATRIX -- and a fit almost never
  * has data there, because the separatrix carries an X-point where the surface
  * develops a corner and every flux-surface quantity diverges logarithmically.
  * So the sample set covers an ANNULUS and there are two ways to place it:
  *
  *   discEdge = 1        FIT ON A PARTIAL DISC. discRadius = sqrt( Psi_N )
- *                       literally, so a coefficient means what section 4.1 says
+ *                       literally, so a coefficient means what Zernike.hpp says
  *                       it means and two fits with different outermost surfaces
  *                       are directly comparable. THE DEFAULT, on that ground and
  *                       on no other.
@@ -305,19 +304,18 @@
  *
  * It is not a fit of OPEN surfaces. Every mode here is periodic in theta and
  * regular at the disc centre; an open surface terminating on the domain
- * boundary has endpoints and wants Chebyshev, which is INVERSION-PLAN.md IN-5
- * and is deferred with free boundary.
+ * boundary has endpoints and wants Chebyshev, which is meq::fitOpenSurface()
+ * below, stage IN-5.
  *
- * It is not the psi-varying element of section 4.4. This is the GLOBAL Zernike
- * candidate of that section -- the simplest of the three -- and IN-4 is where it
- * is measured against the other two. What this file supplies to that decision is
- * the global column and the machinery to build the others'.
+ * It is not a psi-varying element. This is ONE GLOBAL Zernike expansion, and
+ * IN-4 found that no element is needed: the gauge-free fit below gives the
+ * angle its freedom instead, which is cheaper than every way of buying a
+ * psi-varying parametrisation.
  *
  * It does not know where its samples came from, so it cannot flag a surface as
  * band-limited. A caller mixing surfaces that crossed the band between Gamma_h
  * and Gamma with surfaces that did not is fitting two different accuracies into
- * one expansion, and INVERSION-PLAN.md section 4.3 says that is a decision to be
- * taken deliberately. Contour::crossesBand() and
+ * one expansion, and that is a decision to be taken deliberately. Contour::crossesBand() and
  * AngleParametrisation::crossesBand() are where the caller finds out.
  */
 
@@ -363,8 +361,7 @@ namespace meq
 	 * A plain aggregate, in the style of meq::ZernikeMode and meq::SurfaceNode.
 	 * The angle is the geometric poloidal angle about the magnetic axis; the
 	 * flux label is Psi_N, zero on the axis and one on the separatrix, which is
-	 * the normalisation tests/analytic/FluxSurfaceReference.hpp uses and the one
-	 * INVERSION-PLAN.md is written in.
+	 * the normalisation tests/analytic/FluxSurfaceReference.hpp uses.
 	 *
 	 * THE ANGLE IS NOT REQUIRED TO BE EQUISPACED and the samples are not
 	 * required to lie on a tensor grid: the fit is a least-squares problem
@@ -450,7 +447,7 @@ namespace meq
 		std::vector<SurfaceSample> const &samples, AxisShape const &shape );
 
 	// -----------------------------------------------------------------------
-	// THE GAUGE-FREE FIT. INVERSION-PLAN.md section 4.4, stage IN-4.
+	// THE GAUGE-FREE FIT. Stage IN-4.
 	// -----------------------------------------------------------------------
 	//
 	// EVERYTHING ABOVE PINS THE ANGLE AS AN INPUT, AND THAT IS THE WHOLE OF
@@ -476,8 +473,8 @@ namespace meq
 	// choose it. It needs no force balance and no second physics solver, because
 	// MEQ already has psi; and the Jacobian needs grad Psi_N, which is the
 	// SOLVED FLUX -- grad_bar psi = R q, so grad Psi_N = R q / ( psi_bnd -
-	// psi_ax ). That is INVERSION-PLAN.md section 3.2's "the gradient is a
-	// solved unknown" paying off a third time.
+	// psi_ax ). That is "the gradient is a solved unknown" paying
+	// off a third time.
 	//
 	// IT IS A GEOMETRIC GAUSS-NEWTON WARM-STARTED FROM THE LINEAR FIT ABOVE, and
 	// the two are not alternatives: the linear fit is what puts the iterate in
@@ -522,7 +519,7 @@ namespace meq
 	// null space is not a field that can do without a gauge.
 	//
 	// THAT MATTERS BECAUSE IT MOVES WHAT THE GAUGE IS. Three treatments, and the
-	// first two are the ones INVERSION-PLAN.md section 4.4 names:
+	// first two are the obvious candidates:
 	//
 	//   MinimumNorm     the pseudo-inverse step: directions below a relative
 	//                   singular-value floor are NOT MOVED. Among the ways to
@@ -560,8 +557,8 @@ namespace meq
 	//                   spectrum, already sits below every penalised value.
 	//                   Hirshman & Breslau MINIMISE M itself, which is not a
 	//                   quadratic problem, and a quadratic surrogate for it is
-	//                   not the same thing. Kept because it is the alternative
-	//                   INVERSION-PLAN.md section 4.4 names and because a
+	//                   not the same thing. Kept because it is the obvious
+	//                   alternative and because a
 	//                   comparison with no losing column is not a comparison.
 	//
 	//   None            THE CONTROL. Every direction inverted however small its
@@ -610,8 +607,8 @@ namespace meq
 	// Psi_N( x ) = 0, which is true at the magnetic axis and would pin it for
 	// free -- except that grad Psi_N VANISHES there, so the row scaling divides
 	// by zero and the linearisation carries no information about where to move.
-	// That is INVERSION-PLAN.md section 2's error ( a ) and its 1/| grad psi |
-	// met a third time. discNodesFrom() therefore refuses a node at Psi_N = 0,
+	// That is FluxSurfaces.hpp's error ( a ) and its 1/| grad psi | met a
+	// third time. discNodesFrom() therefore refuses a node at Psi_N = 0,
 	// and the axis stays what section "THE AXIS COMES OUT RIGHT FOR FREE" above
 	// says it is: an extrapolation into the hole, whose accuracy is measured
 	// rather than imposed.
@@ -859,7 +856,7 @@ namespace meq
 		FitRadialCoordinate coordinate = FitRadialCoordinate::DiscRadius;
 
 		/// The normalised flux that maps to discRadius = 1. One means
-		/// discRadius = sqrt( Psi_N ) literally, which is section 4.1's
+		/// discRadius = sqrt( Psi_N ) literally, which is Zernike.hpp's
 		/// definition; see the header for what the alternative buys and costs.
 		double discEdge = 1.0;
 
@@ -944,7 +941,7 @@ namespace meq
 			               double &radius, double &z ) const;
 
 			/// d( R, z )/d( discRadius ) at fixed theta. FINITE EVERYWHERE,
-			/// including on the axis, which is why INVERSION-PLAN.md IN-3 states
+			/// including on the axis, which is why IN-3 states
 			/// its acceptance in this derivative and not in the next one.
 			///
 			/// It is d/d( discRadius ) for BOTH coordinates: under
@@ -958,8 +955,7 @@ namespace meq
 			/// d( R, z )/d( Psi_N ) at fixed theta.
 			///
 			/// IT DIVERGES LIKE 1/( 2 sqrt( Psi_N ) ) AT THE AXIS AND THAT IS THE
-			/// COORDINATE RATHER THAN A DEFECT. INVERSION-PLAN.md section 4.4:
-			/// the m = 1 coefficient of R is the minor radius, which grows like
+			/// COORDINATE RATHER THAN A DEFECT. The m = 1 coefficient of R is the minor radius, which grows like
 			/// sqrt( Psi ) in EVERY equilibrium, so the derivative of a surface's
 			/// POSITION with respect to flux is unbounded there universally.
 			/// MaNTA's own answer is that its fluxes vanish on axis and its nodes
@@ -1134,7 +1130,7 @@ namespace meq
 
 	/**
 	 * Refit @a start so that every node LANDS ON ITS SURFACE, with the poloidal
-	 * angle free. INVERSION-PLAN.md section 4.4; see the gauge-free section of
+	 * angle free. Stage IN-4; see the gauge-free section of
 	 * this header for the whole argument.
 	 *
 	 * @a start supplies the degree, the options, the mode list and the initial
@@ -1173,7 +1169,7 @@ namespace meq
 
 	/**
 	 * AN OPEN SURFACE: R AND z AS TRUNCATED CHEBYSHEV SERIES IN NORMALISED ARC
-	 * LENGTH. INVERSION-PLAN.md stage IN-5, section 4.2.
+	 * LENGTH. Stage IN-5.
 	 *
 	 *
 	 * 1. WHY NOT THE DISC BASIS, AND WHY NOT A PERIODIC ONE

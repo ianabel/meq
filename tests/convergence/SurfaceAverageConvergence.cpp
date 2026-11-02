@@ -19,7 +19,7 @@
 #include "ConvergenceHarness.hpp"
 
 /*
- * The acceptance test for INVERSION-PLAN.md stage IN-2: flux-surface averages,
+ * The acceptance test for stage IN-2: flux-surface averages,
  * ON THE FITTED PATH, where Gamma_h is Gamma and there is no band -- so every
  * rate here is attributable to the discretisation and the quadrature and to
  * nothing else.
@@ -30,7 +30,7 @@
  *    tests/analytic/FluxSurfaceReference.hpp computes the same averages from the
  *    analytic psi and grad psi by rays plus the periodic trapezoid, and reaches
  *    round-off. IT NEVER TOUCHES psi_h, so a comparison against it is
- *    INVERSION-PLAN.md section 2's error ( a ) -- the discretisation -- with
+ *    src/meq/FluxSurfaces.hpp's error ( a ) -- the discretisation -- with
  *    ( b ) and ( c ) removed by construction. It is a reference VALUE and not a
  *    closed form, and that distinction is stated wherever the number is printed:
  *    there IS no closed form, because psi is elementary and an integral over a
@@ -52,9 +52,8 @@
  *    its cubic Hermite, and the ray-based angle parametrisation, are genuinely
  *    different routes to the same surface -- different nodes, different metric,
  *    different rule. Agreement is worth more than either being plausible. The
- *    THIRD leg, section 3.3's implicit quadrature, is explicitly deferred and
- *    the header of src/meq/SurfaceAverage.hpp says so; read this as two of
- *    three.
+ *    THIRD leg, implicit quadrature on the level set, is declined
+ *    (CLAUDE_DECLINED.md); read this as two of three.
  *
  * 4. THE BAND FLAG IS CARRIED. Zero here, and asserted to be zero rather than
  *    assumed: the fitted path has no band, so a false is the correct answer
@@ -435,7 +434,7 @@ BOOST_AUTO_TEST_CASE( theConvergedReferenceReproducesItsRecordedValues )
  * exact everything else is -- the floor is the INSTRUMENT, not the identity, and
  * an identity checked at 1e-5 would pass with a real defect underneath it. This
  * is the third place in the tree where that applies; src/meq/Zernike.hpp's
- * derivative test is the first and INVERSION-PLAN.md IN-3 the second.
+ * derivative test is the first and IN-3 the second.
  */
 BOOST_AUTO_TEST_CASE( theExactIdentityNeedsRichardsonAndNotACentralDifference )
 {
@@ -532,8 +531,7 @@ BOOST_AUTO_TEST_CASE( theExactIdentityNeedsRichardsonAndNotACentralDifference )
  * SPECTRAL IN THE ANGLE COUNT, AND THE DIFFERENCED METRIC KEPT AS A LIVE
  * CONTROL.
  *
- * INVERSION-PLAN.md section 3.2 warns that it is easy to build a spectrally
- * accurate rule and then feed it a SECOND-ORDER Jacobian obtained by
+ * It is easy to build a spectrally accurate rule and then feed it a SECOND-ORDER Jacobian obtained by
  * differencing neighbouring node positions, at which point the whole scheme is
  * second order and nothing in its output says so. IN-1 measured that on an ARC
  * LENGTH. AN AVERAGE IS A DIFFERENT INTEGRAND AND IS ENTITLED TO ITS OWN
@@ -671,7 +669,7 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
 		BOOST_TEST( differencedRate < 3.0,
 		            column.name << ": the differenced Jacobian converges at "
 		            << differencedRate << ". THAT COLUMN IS THE CONTROL -- it is "
-		            << "the trap of INVERSION-PLAN.md section 3.2, a spectrally "
+		            << "the metric trap, a spectrally "
 		            << "accurate rule fed a second-order metric -- and if it "
 		            << "ever converges as fast as the pointwise one the "
 		            << "comparison is empty and this test is worthless" );
@@ -979,7 +977,7 @@ BOOST_AUTO_TEST_CASE( theAveragesConvergeInTheMeshAgainstTheExactField )
  * -- flat to three figures across a sixteen-fold refinement at k = 3 -- while
  * the extrapolated column keeps falling. An identity checked with that
  * instrument would pass at 1e-5 with a real defect underneath it, which is the
- * whole reason INVERSION-PLAN.md puts the requirement in capitals.
+ * whole reason the requirement is in capitals.
  *
  * THE STEP IS A REAL CHOICE AND IT IS NOT MONOTONE. Too large and the
  * extrapolation's own truncation dominates; too small and the difference of two
@@ -1161,11 +1159,10 @@ BOOST_AUTO_TEST_CASE( theAveragedIdentityHoldsOnTheDiscreteFieldAndConverges )
  *
  * Agreement is worth more than either being plausible, and disagreement would
  * not say which was wrong -- which is precisely why both are kept rather than
- * one being chosen. THE THIRD LEG IS NOT BUILT: INVERSION-PLAN.md section 3.3's
- * implicit quadrature, a rule constructed on the level set with no curve
- * extracted at all, is deferred deliberately (Saye is for hyperrectangles and
- * meq is on triangles, so it would be Fries-Omerovic or moment fitting). Read
- * what follows as two of three and not as a closed case.
+ * one being chosen. THE THIRD LEG IS NOT BUILT: implicit quadrature, a rule
+ * constructed on the level set with no curve extracted at all, is declined in
+ * CLAUDE_DECLINED.md (Saye is for hyperrectangles and meq is on triangles, so it
+ * would be Fries-Omerovic or moment fitting). Read what follows as two of three.
  *
  * HOW WELL THEY CAN AGREE IS SET BY THE DG JUMP, AND THAT IS THE FINDING OF
  * THIS TEST RATHER THAN A CAVEAT ON IT. { psi_h = c } is NOT one curve: it is a
@@ -1224,7 +1221,7 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 
 	std::printf( "\n  Two extractions of { psi* = c }: the ray fit and the "
 	             "traced Hermite. The third leg\n  -- implicit quadrature on "
-	             "the level set, section 3.3 -- is NOT built, so this is two\n"
+	             "the level set -- is NOT built, so this is two\n"
 	             "  of three. Delta_s = h/16, and RMS over Psi_N =" );
 	for ( double fraction : fractions )
 		std::printf( " %.2f", fraction );
@@ -1255,8 +1252,8 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 				meq::ContourTracer tracer( solved.theSolver() );
 
 				// THE TRACE STEP IS TIED TO h, WHICH IS NOT A DETAIL.
-				// INVERSION-PLAN.md section 8's fourth risk is "Delta_s chosen
-				// once and left": the whole section 2 argument rests on the
+				// The standing risk is "Delta_s chosen once and left": the
+				// whole error-split argument rests on the
 				// representation error being tuned to the mesh, and a fixed step
 				// reintroduces exactly the floor the method exists to avoid --
 				// which then looks like the method failing rather than the
@@ -1456,8 +1453,8 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
  * THE BAND FLAG READS FALSE HERE AND THAT IS ASSERTED RATHER THAN ASSUMED. The
  * fitted path has no band -- Gamma_h IS Gamma -- so false is the CORRECT answer
  * and not an absent one, and an edit that starts reporting a band on this path
- * should fail loudly. INVERSION-PLAN.md section 4.3 requires that a surface
- * crossing the band be flagged rather than counted, so that IN-2 reports the two
+ * should fail loudly. A surface crossing the band must be flagged rather than
+ * counted, so that IN-2 reports the two
  * populations separately instead of quoting one rate over both; CLAUDE.md
  * records the count-not-mask version of the same mistake in the .nc as half of a
  * real defect.
@@ -1528,7 +1525,7 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	// does not.
 	BOOST_TEST( angle.differencedAvailable(),
 	            "the equispaced-angle route must carry the differenced metric "
-	            "control: it is the trap of INVERSION-PLAN.md section 3.2 and "
+	            "control: it is the metric trap and "
 	            "there is nothing to compare a spectral claim against without "
 	            "it" );
 	BOOST_TEST( !hermite.differencedAvailable(),

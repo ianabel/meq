@@ -1,6 +1,6 @@
 // Unit tests for the Zernike disc basis in src/meq/Zernike.
 //
-// INVERSION-PLAN.md section 4.1 builds the flux-surface representation
+// The flux-surface representation is built as
 // R( rho, theta ), z( rho, theta ) on this basis, with rho = sqrt( Psi_N ). Two
 // properties are the reason it was chosen over a naive "polynomial in rho times
 // Fourier in theta", and they are what this file exists to MEASURE rather than

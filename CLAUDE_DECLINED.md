@@ -2187,8 +2187,8 @@ restart are what make the warning avoidable.
 there should not be: `V′` and `⟨R^{-2}⟩` are integrals round a closed loop, and
 the volume an open curve encloses is not defined. What IN-5 delivers is the
 GEOMETRY — the curve, its arc length and a basis that represents it — which is
-what a scrape-off-layer consumer asks for, and it is the scope
-`INVERSION-PLAN.md` §6 describes. Nor is the tracer X-point aware: a level AT a
+what a scrape-off-layer consumer asks for, and the topology it would need is
+out of scope (*The inversion's out-of-scope list*, below). Nor is the tracer X-point aware: a level AT a
 separatrix stalls at the saddle, where the level set is not a 1-manifold, and
 `Stalled` is the honest answer rather than a defect.
 
@@ -2202,15 +2202,16 @@ corner arbitrarily. `pointAtArcLength()` parametrises segments linearly in
 *polyline* length rather than true arc length, and says so.
 
 *From `CLAUDE_INVERSION.md` IN-5 (WHAT IS DELIBERATELY ABSENT) and What is next
-(What is deliberately absent from the tracer), and `INVERSION-PLAN.md` IN-5
-(WHAT IS NOT BUILT); three copies of one list, merged.*
+(What is deliberately absent from the tracer), and IN-5's design (WHAT IS NOT
+BUILT); three copies of one list, merged.*
 
 ### Implicit quadrature on the level set as IN-2's third cross-check
 
 **Declined.** Two of the three cross-checks were built and the third was not.
-Ray bisection from the axis (`INVERSION-PLAN.md` §3.4) is kept as the second
-extraction; `INVERSION-PLAN.md` §3.3's implicit quadrature — a rule on the level
-set with no curve extracted at all — is the third leg, and it is declined rather
+Ray bisection from the axis (*Other ways to extract a contour*, below) is kept
+as the second extraction; implicit quadrature — a rule on the level set with no
+curve extracted at all, after Saye, and on simplices Fries & Omerović or moment
+fitting — is the third leg, and it is declined rather
 than outstanding, so nobody reads it as work waiting. Two measurements close it.
 IN-P puts the quadrature at **1.8%** of the extraction chain against
 `gaugeFreeFit`'s 84.6%, so an implicit rule saves essentially nothing on the leg
@@ -2221,7 +2222,7 @@ implementation to maintain in exchange for a check the second one already
 passes. If a reason to build it ever appears it will be a geometry the tracer
 cannot close, not a cost.
 
-*From `INVERSION-PLAN.md` IN-2.*
+*From IN-2.*
 
 ### Other ways to extract a contour: marching, subdivision, rational contours, unprojected ODEs, rays, Morse–Smale
 
@@ -2233,14 +2234,11 @@ primary route.
 | **Marching squares / marching triangles** | Caps at `O(h_cell²)` regardless of `k` — Etiene et al. measured vertex position 1.94, normals 0.93, curvature *divergent* (`10.1109/tvcg.2009.194`). On a simplicial mesh it is at least unambiguous, the affine interpolant's level set being convex hence connected; but the order is the point and it throws away `k−1` of them. |
 | **Subdivide, then march** — what ParaView, VisIt, VTK and MFEM's own exporters do | **Second order in the SUB-CELL size with no `k`-dependence at all**; Remacle et al.'s error falls as `2^{2r}` and the degree never enters. Fine for a picture, which is what it is for. Not fine for `q(ψ)`. |
 | **Exact rational contours** | Wiley et al. give the contour of a bivariate quadratic over a triangle as an exact conic. **It caps at `k = 2` in principle**: a level set of a degree-`d` polynomial is an algebraic curve of degree `d`, and rational parametrisation needs genus 0 — a generic smooth plane cubic has genus 1. MEQ runs to `k = 4`. (Their *quartic* comes from curved element geometry; MEQ's solve mesh is straight-sided, so it would be a conic here.) |
-| **Plain ODE tracing without projection** | Error accumulates monotonically; the curve drifts onto a neighbouring contour and does not close. With projection it *is* `INVERSION-PLAN.md` §3.1, the predictor–corrector continuation MEQ uses. |
+| **Plain ODE tracing without projection** | Error accumulates monotonically; the curve drifts onto a neighbouring contour and does not close. With projection it *is* the predictor–corrector continuation MEQ uses (`docs/flux_surfaces.rst`, *Tracing a surface*). |
 | **Ray bisection from the axis** | Point accuracy is as good as a corrector's and it parallelises trivially — worth keeping as an **independent cross-check** and as the initialiser for a periodic parametrisation, since it produces points already indexed by angle. **Not the primary route**: it assumes star-shapedness, which fails on indented cross-sections, at and beyond the separatrix, and near the axis where the bracket degenerates. |
 | **The Morse–Smale complex** | **It gives the wrong curves.** Its "separatrices" are integral curves of `∇ψ`, *orthogonal* to the level sets; the plasma separatrix is the level **set** through the X-point. Recorded because it is the natural thing to reach for by name. |
 
-*From `INVERSION-PLAN.md` §3.4, What is rejected, and why (the heading stays
-there as a stub, because `src/meq/FluxSurfaces.{hpp,cpp}`,
-`tests/analytic/FluxSurfaceReference.hpp` and
-`tests/convergence/FluxSurfaceConvergence.cpp` cite it for ray bisection).*
+*From IN-0's design, What is rejected, and why.*
 
 ### A kernel survey: the Kintner recurrence, Vandermonde + GEMM, and batched field evaluation
 
@@ -2514,7 +2512,7 @@ reachable for:
 * **`PLASMA-EDGE-PLAN.md`**, which needs transfer paths across the plasma edge
   and whose §7 already records that both path families give out at a corner.
   That plan is limiter-only and this item does not change it.
-* **the flux-surface inversion.** `INVERSION-PLAN.md` is complete, IN-5
+* **the flux-surface inversion.** It is complete, IN-5
   included — but IN-5 delivers open surfaces as Chebyshev in arc length, and a
   **disc chart still has no meaning through a separatrix**. The tracer is not
   X-point aware: a level AT one stalls at the saddle, where the level set is not
@@ -2533,13 +2531,13 @@ table, XP-0 to XP-4.*
 
 | | |
 |---|---|
-| **Topological classification** — contour trees, open/closed, saddle crossing | `INVERSION-PLAN.md` §6, where it is deferred. It belongs with free boundary, where `χ(annulus) = 0` forces X-points to exist. |
+| **Topological classification** — contour trees, open/closed, saddle crossing | Deferred. On a fixed boundary with a single-signed source there is no interior saddle to classify (`docs/flux_surfaces.rst`, *How many critical points there can be*). It belongs with free boundary, where every extremum beyond the axis forces a saddle. When it comes, the shape is settled: the **join tree only** — a superlevel-set question, so neither the split tree nor the merge — output-sensitive (Chiang et al., `10.1016/j.comgeo.2004.05.002`, sorting only the critical vertices), glued by a rule derived from the HDG trace `ψ̂` rather than a lossy filter, with IN-A's critical points. Carr, Snoeyink & Axen (`10.1016/s0925-7721(02)00093-7`) is the construction; Nucha et al. (`10.1111/cgf.13165`) is the one paper on contour trees of piecewise *polynomial* 2D functions. |
 | **3D / stellarator geometry** | MEQ is axisymmetric. DESC's basis is borrowed; its toroidal Fourier factor is not. |
 | **Straight-field-line, PEST, Boozer or Hamada angles** | Stability and gyrokinetic codes want these; flux-surface *averages* do not. Build them on top of IN-3 if a consumer appears. Note the practical warning that a straight-field-line angle resolves the low-field-side midplane poorly, which is where ballooning modes live. |
-| **Contouring `p` in a rotating equilibrium** | A different curve family (`INVERSION-PLAN.md` §6). Not hard, but not this. |
+| **Contouring `p` in a rotating equilibrium** | A different curve family, with critical points of its own (`docs/flux_surfaces.rst`, *How many critical points there can be*). Not hard, but not this. |
 | **The inverse-equilibrium formulation** | VMEC, DESC and CHEASE make the surfaces unknowns of the *solve*. That is a different code, not a post-processing step, and it hard-codes star-shapedness into the discretisation. (This is the flux-coordinate formulation, not MEQ's inverse solve for coil currents, IV-0 to IV-6, which is built.) |
 
-*From `INVERSION-PLAN.md` §9.*
+*From the inversion's design, Out of scope.*
 
 ### NetCDF profiles and MaNTA coupling
 
@@ -2575,10 +2573,14 @@ they stay where they are; this index makes the catalogue complete.
 - `CLAUDE_HDGGS.md` *The assembled flux is −q, and the papers' τ carries the wrong sign*: `bsymmetrize = false` (falsified); reinstating `τ = 5.0`, MFEM's built-in LDG `τ`, and deriving `τ` from the local coefficient (declined).
 - `CLAUDE_INVERSION.md` *`CriticalPointFinder`'s axis and `GradShafranovSolver::psiAxis()` are THE SAME POINT*: "Three design decisions in it are worth not undoing" — `tryFindAxis()` declined for `sweep()`, a two-sided test declined for the one-sided one, and any rule but "largest `Ψ` wins" declined (M-46)
 - `CLAUDE_INVERSION.md` *Driving by `q( ψ )`*, "Neither obvious repair reaches it": bounding the GMRES iterations (Falsified: back-substitution goes infinite) and a rank-revealing dense solve (does not rescue the line search; kept for another reason)
+- `CLAUDE_INVERSION.md` *The disc basis, and why `ρ = √Ψ_N` rather than `Ψ_N`*: the factorial-sum Zernike (Declined)
+- `CLAUDE_INVERSION.md` *The band, and the extension that was chosen by measuring both*: the flux Taylor step as a control and not a fallback, `PathLiftCoefficient` (cannot), blending toward `ψ = 0` (Falsified) and the band argument for `ψ`-elements (Withdrawn) (M-48)
+- `CLAUDE_INVERSION.md` *IN-2: the averages, and `ψ*` does NOT buy an order here*: `ψ*` buying `k+2` in an average and an average escaping the metric trap (both Falsified)
 - `CLAUDE_INVERSION.md` *IN-3: the fit, and the angle is not free*: the geometric poloidal angle (Falsified, `L^-1.2`; *The geometric poloidal angle*), a parity control (useless, cond 9e16) and "the sample layout is the conditioning lever" (Falsified)
-- `CLAUDE_INVERSION.md` *IN-4: the answer is that the question was the wrong one*: the `ψ`-varying element (Closed, none built), an explicit spectral-width penalty (Falsified, loses 44×; kept as the losing column) and an undamped pseudo-inverse (fails at `L = 16, 20`)
+- `CLAUDE_INVERSION.md` *IN-4: the answer is that the question was the wrong one*: the `ψ`-varying element (Closed, none built) and three of its four constraints struck, an explicit spectral-width penalty (Falsified, loses 44×; kept as the losing column), the gauge as a null subspace (wrong), an undamped pseudo-inverse (fails at `L = 16, 20`) and the prescribed-angle acceptances (not re-asserted)
+- `CLAUDE_INVERSION.md` *IN-P* and *Threading*: the cost model (Falsified, M-49), threaded BLAS for extraction (Declined) and automatic per-surface parallelism (Declined)
 - `CLAUDE_INVERSION.md` *Eigen, and what the swap did and did not move*: Eigen as optional, `CompleteOrthogonalDecomposition` and `EIGEN_USE_BLAS`/`LAPACKE` (all Declined)
-- `CLAUDE_INVERSION.md` *The cache is keyed bitwise, and a hash was rejected on §8's own wording*, and `INVERSION-PLAN.md` IN-6's cache box: *A hash as the cache key* — a hash (Declined: "unlikely" is not "impossible") and `==` (Declined: `memcmp`, for signed zero and NaN)
+- `CLAUDE_INVERSION.md` *The cache is keyed bitwise, and a hash was rejected on MaNTA's own wording*: *A hash as the cache key* — a hash (Declined: "unlikely" is not "impossible") and `==` (Declined: `memcmp`, for signed zero and NaN)
 - `CLAUDE_INVERSION.md` *What is next*: *Vandermonde + GEMM extraction* (34.7×, not taken: the `(Ψ, θ)` file is written from traced nodes, not a `SurfaceFit`), a guard on the seed hint (Declined), the tolerance ladder in `SurfaceAverageConvergence` (Reverted) and segment-endpoint band marking (Reverted, per-node instead) (M-51, M-71)
 - `DEVICE-PLAN.md` *What is next* and §0: "porting the last reader opens every gate" (falsified, M-237); phase-C scalars measured and left (closed, M-240); Boost.Math to the device not needed, "interpolatory HDG dodges the device problem" (falsified)
 - `DEVICE-PLAN.md` §1.2: `transmissionConstraint()` as a defect (withdrawn); two attributions of the `postProcess` abort, MEQ's aliases and a stack `Vector` (falsified, M-130)
@@ -2603,14 +2605,6 @@ they stay where they are; this index makes the catalogue complete.
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` §8: "the inverse solve is a superset of either globalisation plan", declined for three reasons.
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` IV-6: a zero-current cold start (0 of 14), the basin-finder claim carried over from `freegs4e` (one conversion), and a support re-decided inside Newton plus topology-holding continuation, named and not built (M-253).
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` §13.4: modifying the Grad–Shafranov operator for an iron core (falsified) and porting Appel & Lupelli's factor of 2 (declined).
-- `INVERSION-PLAN.md` §4.1: the geometric angle (Falsified) and the factorial-sum Zernike (Declined)
-- `INVERSION-PLAN.md` §4.3: the flux Taylor step as a control and not a fallback, `PathLiftCoefficient` (cannot), blending toward `ψ = 0` (Falsified) and the "third argument for `ψ`-elements" (Withdrawn) (M-48)
-- `INVERSION-PLAN.md` §4.4: the `ψ`-varying element (Closed, answered by IN-4) and two of its constraints struck
-- `INVERSION-PLAN.md` §6: the global-structure work (Deferred) and a split tree / merge (not needed)
-- `INVERSION-PLAN.md` IN-2: "two expectations died" — `ψ*` buying `k+2` in an average and an average escaping the metric trap (both Falsified)
-- `INVERSION-PLAN.md` IN-3: a parity basis (Falsified, useless) and "the layout is the lever" (Falsified)
-- `INVERSION-PLAN.md` IN-4: the width penalty (loses), the gauge as a null subspace (wrong), an undamped pseudo-inverse (fails) and the prescribed-angle acceptances (not re-asserted)
-- `INVERSION-PLAN.md` §11: the cost model (Falsified, M-49), threaded BLAS for extraction (Declined) and automatic per-surface parallelism (Declined)
 - `PLASMA-EDGE-PLAN.md` header: the whole plan deferred on cost-benefit, `j ≥ 1` already giving `k+2` at `k ≤ j`; "the transfer costs an order" withdrawn (M-83); `k+1.5` as PE-0's acceptance falsified (M-81).
 - `PLASMA-EDGE-PLAN.md` §6, notes under the staging table: quadrature and the fixture ruled out as the `j = 2, k = 3` anomaly's cause, the "270° staircase" withdrawn (M-84), and the corner as the cause of fragility falsified.
 - `PLASMA-EDGE-PLAN.md` §7: the X-point diagnosis half wrong, and the evidence against the premise disposed of.

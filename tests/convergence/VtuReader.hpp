@@ -4,7 +4,7 @@
 /*
  * READING A `.vtu` BACK, WITHOUT VTK AND WITHOUT MFEM.
  *
- * `ELEMENT-REGIONS-PLAN.md` ER-2 asserts what the VTK carries by reading the
+ * ER-2 asserts what the VTK carries by reading the
  * file, so the reader must share no code with the writer: this decodes the
  * XML, the base64 and the zlib by hand. It reads what
  * `mfem::ParaViewDataCollection` writes -- inline `format="binary"`

@@ -154,6 +154,53 @@ Which extremum is the axis
    out the same and **every maximum silently becomes a minimum**. The audit
    still passes. See :ref:`sign-conventions`.
 
+.. _flux-surfaces-count:
+
+How many critical points there can be
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On a fixed boundary with a single-signed source, a single magnetic axis comes
+with no saddle. The load-bearing step is analytic, not topological.
+
+The Poincaré–Hopf theorem on a disc gives
+
+.. math::
+
+   \#\mathrm{max} + \#\mathrm{min} - \#\mathrm{saddle} = \chi = 1,
+
+which is an *identity* and not an absence: two maxima and one saddle also sum to
+one. What excludes a second extremum is the **maximum principle**. Since
+:math:`R > 0` the operator :math:`\Delta^*` is uniformly elliptic in divergence
+form, and the sign of :math:`F` decides which extremum it forbids inside:
+
+* :math:`F \ge 0` makes :math:`\psi` a supersolution, its minimum lies on
+  :math:`\Gamma`, and there is no interior minimum;
+* :math:`F \le 0` makes it a subsolution, its maximum lies on :math:`\Gamma`,
+  and there is no interior maximum.
+
+Either way only one kind of extremum can occur inside, so the identity becomes
+:math:`\#\mathrm{saddle} = \#\mathrm{extrema} - 1`: one axis brings no saddle,
+and every further extremum of the same kind brings one.
+
+The conclusion does not depend on MEQ's sign conventions. Negating
+:math:`\psi` swaps maxima and minima, and both have index :math:`+1` in two
+dimensions. :math:`q = \gradbar\psi/R` has the same zeros and indices as
+:math:`\gradbar\psi`, because :math:`R > 0`. And the library's :math:`-q` has
+the same indices again, because in an even dimension negating a vector field
+does not change its index.
+
+The argument fails in three places, and each is a place MEQ goes:
+
+* **Free boundary.** Once coils carry current inside the domain, :math:`F` is
+  not single-signed over it and the maximum principle no longer excludes a
+  second extremum. By the identity, every extremum beyond the first forces a
+  saddle. X-points are not incidental there.
+* **A reversed core current.** :math:`F` changes sign inside the plasma, the
+  supersolution property is lost, and an interior saddle becomes possible.
+* **A rotating equilibrium's pressure.** :math:`p` is not a flux function
+  there, so it has its own critical points in its own places, and nothing above
+  applies to its contours.
+
 .. _flux-surfaces-audit:
 
 The index audit, and what a degree is
@@ -349,8 +396,13 @@ otherwise be joined by; ``Contour::pointOnSegment`` is the interpolant and
    :math:`O(\theta^2)` on an arc of turning angle :math:`\theta`, which leaves
    the fourth order intact.
 
-The step is **curvature controlled**: a constant turning angle per step, so that
-the interpolation error per segment is equidistributed. That is a deliberate
+The step is **curvature controlled**: a constant turning angle per step. An arc
+of turning angle :math:`\theta = \kappa\,\Delta s` departs from its cubic
+Hermite by about :math:`\theta^4/128` per unit radius, so a constant turn makes
+each segment's deviation proportional to its length, and the deviation
+*relative to the segment* constant. Equidistributing the deviation itself would
+want :math:`\Delta s \propto \kappa^{-3/4}`; a constant turn is the robust
+geometric variant, and the two are different rules. Either is a deliberate
 departure from the standard continuation strategies, which key the step on
 *corrector effort* :cite:p:`AllgowerGeorg2003` — right for software whose object
 is to traverse a path cheaply, and wrong for one whose object is a well-shaped
