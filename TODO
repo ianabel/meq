@@ -430,7 +430,7 @@ Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
 
-  ANISOTROPY-PLAN.md, a draft not yet ordered in ROADMAP.md. AN-0 to AN-3
+  ANISOTROPY-PLAN.md, item 13 of ROADMAP.md and first in its order. AN-0 to AN-3
   are done (M-328 to M-334), AN-4, geq's reference (M-335), and AN-5, MEQ
   against it (M-337). Of AN-6, Delta( B ) is done (AN-6a, M-338) and the
   firehose side measured (AN-6b, M-339); the race on a mirrorfp closure,
