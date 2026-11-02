@@ -1996,6 +1996,14 @@ namespace meq
 			// and resolve against the working directory.
 			static Configuration fromString( std::string const & text, std::string const & source = "<string>" );
 
+			// The same, with relative INPUT paths resolved against
+			// `directory`, exactly as the file constructor resolves them
+			// against the file's own: a front end that has the document but
+			// no file, such as the Python module's from_dict(). Empty
+			// `directory` is fromString() above.
+			static Configuration fromString( std::string const & text, std::string const & source,
+			                                 std::string const & directory );
+
 			MeshConfig const & getMesh() const noexcept { return meshOptions; };
 
 			/// The `[[coils]]` blocks, in file order. Empty unless the file has

@@ -493,7 +493,14 @@ apps/        meq.cpp (the command line: argv, --help, --version,
              .nc), and meq-run.in -- configured twice: into the build
              directory as `meq-run`, and for install/<name>/bin, paths
              relative to itself. Not runnable from apps/.
-tests/       SourceTree.hpp (how a test names a source file), unit/ (Boost.Test), convergence/ (rate assertions), analytic/
+python/      the `meq` Python package (python/meq/) and its extension
+             _meq.cpp over meq::Run: PYTHON-PLAN.md. Built for the system
+             python3 into builds/<name>/python, which is a PYTHONPATH entry.
+             IMPORT meq BEFORE numpy: Debian's numpy brings the system MKL,
+             and meq refuses a process that already holds it. It needs MFEM
+             built position independent (CLAUDE_MFEM.md).
+tests/       SourceTree.hpp (how a test names a source file), unit/ (Boost.Test), convergence/ (rate assertions), python/
+             (pytest: PythonDriverParity, the module against meq), analytic/
              (closed forms), performance/ (timings, none a ctest:
              TraceSolverScaling, NpcThreadScaling, NewtonStepProfile,
              InversionScaling).

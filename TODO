@@ -1454,6 +1454,31 @@ Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342).
 
 
 ================================================================================
+NewtonMaxIterations = 1 crashes the Picard fallback inside KINSOL
+Raised 2026-11-02, by PY-1's non-converging fixture.
+================================================================================
+
+  WHAT FAILS. examples/mhd-rectangle.toml with NewtonMaxIterations = 1:
+  the first Newton attempt fails, as it should, the ladder retries with
+  Anderson-Picard, and meq takes SIGSEGV (exit 139) instead of exiting 2.
+  On main at 3e96da4, at OMP_NUM_THREADS 1 and 4, PIC MFEM or not.
+
+  THE CAUSE IS SUNDIALS 7.9.0's, AND MEQ PASSES WHAT MEETS IT.
+  GradShafranovSolver::solveByPicard() enables Anderson acceleration at
+  andersonDepth and then SetMaxIter( newtonMaxIterations ). KINInitAA
+  (kinsol_aa.c) clamps the depth to mxiter - 1, which is 0 at a cap of 1;
+  KINInitOrth (kinsol_orth.c) then allocates its QR workspace only for a
+  depth above what it holds, 0 > 0 is false, and line 88 writes through
+  the null kin_qr_data. Backtrace: KINInitOrth <- KINSol <-
+  mfem::KINSolver::Mult <- solveByPicard <- solveByPicardThenNewton.
+
+  WHAT CLOSES IT. A failing test that runs a cap of 1 through the ladder
+  and requires exit 2 and no output; then MEQ not enabling Anderson where
+  the cap leaves it no depth (a plain Picard at a cap of 1 is what KINSOL
+  would have run had it not crashed), and the report upstream to SUNDIALS.
+  A cap of 2 is clear of it: the depth clamps to 1 and is allocated.
+
+================================================================================
 A shipped MAST-U filament case
 Raised 2026-11-01, when the coil-subtraction plan was retired.
 ================================================================================

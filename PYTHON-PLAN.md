@@ -139,8 +139,8 @@ Each stage ends at a measured, asserted result, as every stage here does.
 
 | stage | what | acceptance |
 |---|---|---|
-| PY-0 | `meq::Run`, the run out of `main()` | `meq` unchanged, to the byte |
-| PY-1 | the `_meq` extension and the `meq` package; `Equilibrium( file )`, `from_dict`, `solve`, `write` | Python's `.nc` equals `meq`'s, every coefficient |
+| PY-0 | `meq::Run`, the run out of `main()` | `meq` unchanged, to the byte — **done** |
+| PY-1 | the `_meq` extension and the `meq` package; `Equilibrium( file )`, `from_dict`, `solve`, `write` | Python's `.nc` equals `meq`'s, every coefficient — **done** |
 | PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit |
 | PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer |
 | PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted |
@@ -170,31 +170,86 @@ something else. The whole suite must pass as before. And the `.nc`, exit code
 and masked report of every shipped example must equal the ones the installed
 binary made before the move.
 
-**PY-1: the extension.** Laid out as MaNTA's:
+**PY-1: the extension.** Laid out as MaNTA's, and built:
 
-* `extern/pybind11` as a submodule **pinned to MaNTA's commit, `b0fa039`**
-  (v3.0.4-128), for the reason toml11 is pinned to MaNTA's: two modules loaded
-  into one interpreter should share a pybind11 internals ABI.
-* `python/meq/` holds the package, whose `__init__.py` re-exports `_meq`.
-  `_meq` is built by `pybind11_add_module( _meq NO_EXTRAS ... )`,
-  **NO_EXTRAS for MaNTA's reasons**: no second LTO, and no strip, because a
-  backtrace from inside MKL needs symbols.
-* The package is staged into the build tree by symlink, installed to
-  `install/<name>/lib/python3.14/site-packages/meq`, and its stub is generated
-  by `pybind11-stubgen` and held by a `stubs-check` target.
-* **The interpreter is the system `python3`**, found once, with the headers,
-  the ABI suffix and every tool derived from it (MaNTA's
-  `cmake/MantaPython.cmake`, which exists because a mismatch cost three
-  misleading failures there). No venv is preferred over it.
-* `MEQ_PYTHON` defaults to ON when MFEM is found and pybind11 is populated, and
-  is OFF in CI, which cannot build the solver anyway.
-* A single build gives a single module of the same name, in its own install.
-  `meq.build_info()` reports commit, precision and backends, as the `.nc` does,
-  and the SUNDIALS and MKL it was linked against (PY-6).
+* `extern/pybind11` is a submodule **pinned to MaNTA's commit, `b0fa039`**
+  (v3.0.4, `stable`), for the reason toml11 is pinned to MaNTA's: two modules
+  loaded into one interpreter should share a pybind11 internals ABI.
+* `python/meq/` holds the package, whose `__init__.py` re-exports `_meq`;
+  `python/_meq.cpp` is the extension, built by
+  `pybind11_add_module( _meq NO_EXTRAS ... )` -- **NO_EXTRAS for MaNTA's
+  reasons**: no second LTO, and no strip, because a backtrace from inside MKL
+  needs symbols. It is staged into `builds/<name>/python/meq/` by symlink and
+  installed to `install/<name>/lib/python3.14/site-packages/meq`.
+* **The interpreter is the system `python3`**, found once in
+  `python/CMakeLists.txt`, with the headers, the ABI suffix and the test's
+  interpreter derived from it. No venv is preferred over it.
+* `MEQ_PYTHON` defaults to ON beside `MEQ_BUILD_APP` and needs
+  `extern/pybind11` populated; CI, which builds no MFEM, never reaches it.
+* **`meq.Equilibrium( path )` is `meq path` a phase at a time** --
+  construction is `meq::Run::prepare()`, then `solve()` and `write()`, which
+  return `True` or `False` where an inverse solve exits 0 or 4 -- and
+  `Equilibrium.from_dict( tables, base_dir=, name= )` takes the TOML's tables:
+  `tomlFromPy()`, MaNTA's, makes them TOML text, which `meq::RunOptions`
+  carries as `configText` beside `baseDirectory`, and which the `.nc` records
+  as `input_toml`. `mesh_ready`, `grid_functions`, `vtk` and `profile` are
+  the command line's flags. **The device is not an argument**: `mfem::Device`
+  is process-wide and configured once, which one equilibrium among several in
+  a process cannot own.
+* Failures raise `meq.ConfigError`, `meq.SolveError` and `meq.OutputError`,
+  all `meq.Error`, where `meq` exits 1, 2 and 3; a phase out of order, again,
+  or after a failed one raises `RuntimeError` (`meq::Run`'s `logic_error`).
+* **The report goes to the process's file descriptors 1 and 2**, as `meq`'s
+  does, with Python's buffered stdout flushed before each phase so the two
+  interleave in order. A notebook does not capture it; capturing it is still
+  owed, and it is a sink in `meq::Run` beside its 220 `printf`s.
+* **No stub yet**: `pybind11-stubgen` is not in the system Python, so the
+  `stubs-check` target MaNTA has is not built. Owed with the interface's first
+  change after this one.
+* `meq.build_info()` reports version, precision and backends, as `meq
+  --version` and the `.nc` do; `meq/_libraries.py`, written after every link
+  by `python/record_libraries.py` from `ldd`, records the files the module
+  resolves to.
 
-The acceptance is a ctest, `PythonDriverParity`, that runs shipped examples
-both ways and compares every coefficient: a tokamak (`fixed-*`, a
-free-boundary machine) and both mirrors.
+**THE MODULE NEEDS POSITION-INDEPENDENT MFEM AND meq_core, AND HAS BOTH.**
+`libmfem.a` and `meq_core` are static and the module is a shared object. The
+compiler's default `-fPIE` is position independent for an executable only:
+MFEM's objects reach libstdc++'s data PC-relatively, and `meq_core`'s
+`thread_local`s use a TLS model a `dlopen`ed object cannot. So
+`../../mfem/build` is configured `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`
+(`CLAUDE_MFEM.md`'s table), `python/CMakeLists.txt` gives `meq_core` the same
+with `-fno-semantic-interposition`, and the module links with
+`--exclude-libs,ALL`, which makes MFEM's and `meq_core`'s symbols local to it
+and out of the process's global scope.
+
+**AND IT IS THE RUN `meq` RUNS, TO THE BIT, IN A PROCESS THAT LOADS NOTHING
+ELSE OF ITS LIBRARIES.** `PythonDriverParity` runs `soloviev-nstx`,
+`mhd-rectangle`, `limited-tokamak` (free boundary, coils, a `.gf` guess) and
+`mirror-rotating` (a generated mesh, the box, species) through the build's
+`meq` and through the module in a child process that imports `meq` alone,
+and requires every variable and attribute of the two `.nc` files equal but
+`meq_version`; then `from_dict()` against the file it was read from, a
+relative table without its `base_dir` refused, each exception against its
+exit code, and the phase order.
+
+**DEBIAN'S numpy BRINGS A SECOND MKL, AND THAT IS PY-6's HAZARD MET IN
+PY-1.** The system numpy reaches `/usr/lib/x86_64-linux-gnu/libmkl_rt.so`,
+the 2020-era system MKL, through the BLAS alternative, and `libmkl_rt` loads
+MKL's layers into the global scope. Measured, with `LD_DEBUG=bindings`:
+
+* **numpy imported first**, `_meq`, UMFPACK and CHOLMOD bind `dgemm_`,
+  `dgetrf_`, `dpotrf_` and PARDISO to the system MKL, which MEQ was not built
+  against. `import meq` refuses it, naming the two files.
+* **`meq` imported first**, its own calls stay bound to oneAPI 2026.2, but
+  MKL's lazily loaded kernels mix with the second MKL: `soloviev-nstx`'s
+  `psi` moves 7.5e-14 of its 0.44 peak and `limited-tokamak`'s 3.0e-14, with
+  the same Newton counts. Neither a warm-up of oneAPI's kernels before numpy
+  arrives nor MKL's `MKL_CBWR=COMPATIBLE` brings the bits back (both tried),
+  and at one thread it is still there, so it is not OpenMP's reduction order.
+  meq warns, once, at the next phase.
+
+One MKL in the process is the fix, and it is PY-6's: the bits are not wrong
+by more than round-off, but they are not `meq`'s.
 
 **PY-2: species profiles from arrays, on the fixed maps.** One C++ change:
 `makeSource()` and `makeNormalisedSource()` take an optional
@@ -273,7 +328,10 @@ for `V′`.
 * **Two MKLs.** `_manta` links the system `libmkl_rt.so`; MEQ links oneAPI's
   `latest` `lp64`/`gnu_thread`/`core`. Two MKL versions in one process are not
   supported by Intel, and `mkl-2026-2-moves-single-precision` says this
-  machine's answers can move with the MKL version.
+  machine's answers can move with the MKL version. **Measured in PY-1, and
+  numpy alone is enough**: Debian's numpy is on the same system `libmkl_rt`,
+  and with it in the process MEQ's answers move about 1e-13 relative (PY-1,
+  above). So the one MKL has to serve numpy too.
 
 **The fix is in the build systems, not in the module: one SUNDIALS and one MKL
 serve both codes.** The candidate is MEQ's pair, `cuda-install` and oneAPI,
@@ -282,11 +340,12 @@ MEQ builds, so that a mismatch can never be silent:
 
 * **At configure**, `-DMEQ_MANTA_PREFIX=` reads that MaNTA's `manta.pc` and
   fails if its SUNDIALS or MKL is not the one MEQ resolved, naming both.
-* **At import**, `meq` reads `/proc/self/maps`. If a `libsundials_core` or an
-  MKL is already mapped from a different path than the one recorded in
-  `build_info()`, the import raises, naming the module that loaded it. A
-  refusal at import costs nothing, where the wrong library costs a wrong
-  answer.
+* **At import**, `meq` reads `/proc/self/maps`, and a library already mapped
+  under the name of one the module links, from another file, refuses the
+  import, naming both files; one that arrives after the import is warned
+  about at the next phase. **Built in PY-1** (`meq/__init__.py`, against
+  `meq/_libraries.py`). A refusal at import costs nothing, where the wrong
+  library costs a wrong answer.
 
 The acceptance is that each code's answer in the joint process, imported in
 either order, equals its answer alone, to the bit.
