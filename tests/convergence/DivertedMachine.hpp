@@ -20,7 +20,7 @@
  * between the two borders and the two fixtures -- which is the one thing that
  * comparison exists to rule out.
  *
- * The sequence follows apps/meq.cpp, which is the only place this assembly
+ * The sequence follows src/meq/Run.cpp, which is the only place this assembly
  * exists; a fixture that assembled it differently would be measuring its own
  * wiring.
  *
@@ -110,7 +110,7 @@ namespace meqtest
 	/// meshed to, the two profile tables, the coil currents, the limiter
 	/// contact, the exterior expansion and the reference initial guess.
 	///
-	/// The sequence follows apps/meq.cpp, which is the only place this assembly
+	/// The sequence follows src/meq/Run.cpp, which is the only place this assembly
 	/// exists; a test that assembled it differently would be measuring its own
 	/// wiring.
 	/// @param refinements uniform refinements of the gmsh mesh before anything
@@ -219,7 +219,7 @@ namespace meqtest
 			m.plasma, m.coils );
 
 		/*
-		 * ON THE WRAPPER AND AFTER IT EXISTS, WHICH IS WHAT apps/meq.cpp DOES
+		 * ON THE WRAPPER AND AFTER IT EXISTS, WHICH IS WHAT src/meq/Run.cpp DOES
 		 * AND WHAT THIS FIXTURE DID NOT.
 		 *
 		 * setPlasmaSupport() is virtual so that a call on the WRAPPER reaches

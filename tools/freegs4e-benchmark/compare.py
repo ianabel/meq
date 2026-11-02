@@ -45,7 +45,7 @@ def axis_status(ds):
     #
     #   * no `psi_axis` either: the run was not normalised, psi_ax is not an
     #     answer, and there is nothing to judge;
-    #   * `psi_axis` present and the axis absent: apps/meq.cpp is explicit that
+    #   * `psi_axis` present and the axis absent: src/meq/Run.cpp is explicit that
     #     "their ABSENCE is informative too" -- no interior extremum was found
     #     anywhere, which is the wall-hugging annulus branch;
     #   * or the file simply predates the attribute.
@@ -276,7 +276,7 @@ if __name__ == "__main__":
             # stdout carries the table and stderr the warnings, so without the
             # flush the two arrive interleaved wherever the pair is piped to one
             # file -- and this warning is about the row printed next to it.
-            # apps/meq.cpp does the same thing at its own axis warning and says
+            # src/meq/Run.cpp does the same thing at its own axis warning and says
             # so in the same words.
             sys.stdout.flush()
             print(f"    {stem:22s} -- warning: no axis check in the .nc "

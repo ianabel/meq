@@ -590,7 +590,7 @@ int main( int argc, char **argv )
 	 * sets the mode itself, so it can still reach the abort. Run the device
 	 * columns at OMP_NUM_THREADS=1, or with serial assembly.
 	 *
-	 * AND THE REFUSAL apps/meq.cpp CARRIES IS NARROW: the gate is `cuDSS WITHOUT
+	 * AND THE REFUSAL src/meq/Run.cpp CARRIES IS NARROW: the gate is `cuDSS WITHOUT
 	 * a device`, and --device cuda honours the key. The trade argument is what
 	 * survives, and it is about the NO-DEVICE case only -- configuring a Device
 	 * to reach cuDSS and nothing else buys a fifth of a step (M-126) and pays a

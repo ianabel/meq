@@ -1,12 +1,15 @@
 # The driver: `meq`, `meq-run`, the output files and the warm start
 
-**`CLAUDE.md`'s driver half** — what `apps/meq.cpp` and `meq-run` do, the four output formats and the band between `Γ_h` and `Γ`, the element regions (ER-0 to ER-3), the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the interpolating warm start, and the configuration parser's traps. `docs/running.rst` is the user-facing account; the device refusals are `CLAUDE_DEVICE.md`.
+**`CLAUDE.md`'s driver half** — what `meq` (`src/meq/Run.cpp`, the run, under `apps/meq.cpp`, its command line) and `meq-run` do, the four output formats and the band between `Γ_h` and `Γ`, the element regions (ER-0 to ER-3), the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the interpolating warm start, and the configuration parser's traps. `docs/running.rst` is the user-facing account; the device refusals are `CLAUDE_DEVICE.md`.
 
 **The standing rules are `CLAUDE.md`'s.** Measurement tables live in `MEASUREMENTS.md` under stable `M-nn` anchors, which are not renumbered. A hypothesis that was measured and falsified stays; the history of the file does not — present tense, no "used to", no dated "now fixed". What was decided against is `CLAUDE_DECLINED.md`.
 
 ## MEQ is runnable
 
-**MEQ is runnable.** `apps/meq.cpp` is the driver, `MEQ_BUILD_APP` defaults
+**MEQ is runnable.** `meq::Run` (`src/meq/Run.cpp`) is the driver and
+`apps/meq.cpp` its command line, which keeps argv, `--help`, `--version`,
+`--mesh-command` and the exit code and nothing else, so that every front end
+runs the same run (`PYTHON-PLAN.md`, PY-0). `MEQ_BUILD_APP` defaults
 `ON`, and `meq config.toml` parses, builds the mesh and source, solves — with
 the adaptive loop if asked — and writes the equilibrium to **one file by
 default, the `.nc`**, with exit codes 0/1/2/3/4 as `docs/running.rst`
@@ -135,7 +138,7 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   **`B` GETS THE BAND TOO** Only `samplePotentialWithFlux()` applied
   the Taylor step; `sample()`, `sampleComponent()` and `sampleCoefficient()`
   never read `offsetR`/`offsetZ` at all, so for a band node they return the
-  value **at the foot on `Γ_h`** — and `apps/meq.cpp` sent `ψ` through the first
+  value **at the foot on `Γ_h`** — and `src/meq/Run.cpp` sent `ψ` through the first
   and `B` through `sampleComponent`. Measured on `miller-curved.nc`:
   `extrapolated_nodes = 1667` of 129×129 = 16,641, so about **one node in ten
   carried a piecewise-constant `B`**, `O(h)`, in a field `q` itself resolves at
@@ -635,7 +638,7 @@ unconfined — with XP-1's element-level fill running anyway, since that reads
 `plasmaSupport()`. `CLAUDE_FLOW.md`, *`ConfineToPlasma` reaches the rotating
 source*.
 
-**And `ConfigError::what()` carried a `MEQ: ` banner while `apps/meq.cpp`
+**And `ConfigError::what()` carried a `MEQ: ` banner while `src/meq/Run.cpp`
 prefixes every line with the same thing**, so every configuration error read
 `MEQ: MEQ: configuration error in …`. It is not new — it was `meq: meq:` for
 months and nobody read it at that size; the rename to `MEQ` is what made it
@@ -646,7 +649,7 @@ out rather than the model.
 
 **A `switch` OVER AN ENUM WITH NO `default`, AFTER A VARIABLE IS ALREADY
 INITIALISED, SILENTLY KEEPS THE INITIALISER — AND `-Wswitch` DID NOT CATCH IT.**
-`apps/meq.cpp:1634` is `TS traceSolver = TS::UMFPack;` followed by a `switch`
+`src/meq/Run.cpp`'s `configure()` sets `traceSolver = TS::UMFPack;` and then switches
 over `config->getSolver().traceSolver` with one case per choice and no
 `default`. Add a `TraceSolverType` and forget the case, and every run naming it
 **runs UMFPack instead**, converging normally to the right answer with no

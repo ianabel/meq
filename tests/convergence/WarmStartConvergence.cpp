@@ -674,7 +674,7 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 ///
 /// aWarmStartCutsTheWorkAndNotTheAnswer above measures ONE transfer between two
 /// solves. A refinement loop is a chain of them, and until 2026-09-02
-/// apps/meq.cpp threw every link away: each cycle destroyed its solver, refined,
+/// src/meq/Run.cpp threw every link away: each cycle destroyed its solver, refined,
 /// and started the next solve from the Dirichlet datum, on the stated grounds
 /// that the interpolating restart "needs GSLIB". GSLIB has been on, and
 /// meq::FieldTransfer written and tested, for far longer than that comment

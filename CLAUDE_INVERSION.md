@@ -1363,7 +1363,7 @@ by not having the variable.
 
 **`[source] SafetyFactorFile` IS THE EXCEPTION AND IT IS THE RUN THAT NEEDS IT
 MOST**, because the outer Newton solves for the coefficients of `g²` itself.
-`apps/meq.cpp` sets `FluxFamilyOptions::toroidalField` from them, and the
+`src/meq/Run.cpp` sets `FluxFamilyOptions::toroidalField` from them, and the
 surfaces file carries `safety_factor` beside `toroidal_field_driven`,
 `g_squared_coefficients` and `safety_factor_target` — so the round trip is
 readable off the output rather than taken on faith. **The reported `q` is the
@@ -1385,7 +1385,7 @@ that is a NaN in a file whose only per-node mask is about the band. A failure
 leaves the variable absent and says so.
 
 **AND THE EXTRACTION HAPPENS BEFORE THE VTK STEP, WHICH IS LOAD BEARING.**
-`apps/meq.cpp` bends the mesh boundary out onto `Γ` for the `.vtu`, which
+`src/meq/Run.cpp` bends the mesh boundary out onto `Γ` for the `.vtu`, which
 changes the map from reference to physical space — and the tracer reads geometry
 at every corrector step. Extracting afterwards would trace contours of a field
 on a mesh that is no longer the mesh it was solved on. The same reason the

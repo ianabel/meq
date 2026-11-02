@@ -865,7 +865,7 @@ BOOST_AUTO_TEST_CASE( theNormalisationCanBeMovedAndIsRefusedAtZero )
  * IT IS REACHABLE FROM A FILE, which is what made the omission a defect rather
  * than an unimplemented corner. Config.cpp's Rotating branch lists
  * "ConfineToPlasma" among its accepted keys and calls readPlasmaSupport(), and
- * apps/meq.cpp calls setPlasmaSupport( true ) on whatever normalised source it
+ * src/meq/Run.cpp calls setPlasmaSupport( true ) on whatever normalised source it
  * built -- so `[source] Type = "rotating"` with `Normalised = true` and
  * `ConfineToPlasma = true` parses, reports nothing, and would solve the
  * unconfined problem.
@@ -953,7 +953,7 @@ BOOST_AUTO_TEST_SUITE_END()
  *
  * AND IT IS REACHABLE: Config.cpp's Rotating branch lists "PlasmaCurrent"
  * among its accepted keys, readPlasmaCurrent() refuses it only when
- * Normalised is false, and apps/meq.cpp calls setPlasmaCurrent() with no
+ * Normalised is false, and src/meq/Run.cpp calls setPlasmaCurrent() with no
  * source-type guard. THE SAME SHAPE CLAUDE.md RECORDS UNDER "A RESERVED KEY IS
  * ONLY RESERVED ON THE PATHS THAT CALL THE REFUSAL", and the second time this
  * exact pair of source types has produced it.

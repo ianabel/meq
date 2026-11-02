@@ -816,7 +816,7 @@ presents as an MFEM regression and is MEQ's own bug**, which is the reason to
 write it down: the backtrace names three MFEM frames and no MEQ frame at all.
 
 The production code was never exposed — `Estimator` holds its background as a
-member and `apps/meq.cpp` takes it by reference — so this is a fixture defect,
+member and `src/meq/Run.cpp` takes it by reference — so this is a fixture defect,
 and the fix is a `static` pool that lives as long as the process. **Anything
 that returns a `SubMesh` must return, or otherwise outlive, its parent.**
 
@@ -857,7 +857,7 @@ vertex array rather than assumed equal to it, since MFEM lets a caller deform a
 mesh through its nodes while leaving the vertices behind.
 
 **It was latent rather than live, and nothing was keeping it that way.** Both
-`FieldTransfer`s in `apps/meq.cpp` are built on the stored guess's mesh or on
+`FieldTransfer`s in `src/meq/Run.cpp` are built on the stored guess's mesh or on
 `previousMesh`, which is a **copy** — so the mesh the driver samples was never
 the mesh gslib was set up on. That is an accident of how the adaptive loop
 happens to be written, not a rule anybody stated, and it is the second entry in

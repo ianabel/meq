@@ -2003,7 +2003,7 @@ default rather than merely faster on average.
 is only guarded by `setAssemblyMode()`, and the constructor bypasses the setter.
 A build without `MFEM_USE_OPENMP` or `MFEM_THREAD_SAFE` therefore defaults to
 `Serial`. `Config`'s default is a plain `Threaded` because that header is
-MFEM-free; `apps/meq.cpp` downgrades it when the build cannot honour it, and
+MFEM-free; `src/meq/Run.cpp` downgrades it when the build cannot honour it, and
 **refuses** only when the file said `"threaded"` explicitly.
 
 **THE BIT-EXACTNESS HOLDS AT `MKL_NUM_THREADS=1` AND NOT ABOVE IT**, which is
@@ -2106,7 +2106,7 @@ MEASURING.**
   catastrophic**, and it is a configuration a user can reach by accident. A team
   of one thread does not get the nested-region suppression. Measured on the
   isolated element-local kernels: **12.4 s against 0.069 s serial** at `k = 3`.
-  `apps/meq.cpp` warns about exactly this combination at startup, and only when
+  `src/meq/Run.cpp` warns about exactly this combination at startup, and only when
   it is actually present.
 
 **AND THE `ComputeH()` STORY THIS FILE TOLD WAS WRONG IN ONE DETAIL WORTH

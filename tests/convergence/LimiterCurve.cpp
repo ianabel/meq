@@ -746,7 +746,7 @@ BOOST_AUTO_TEST_CASE( anEmptyPolygonAndADoublyPinnedContactAreBothRefused )
  * THE DRIVER'S OWN ESTIMATE IS THE SAME FUNCTIONAL AS THE BORDER, AND THE
  * REGION IS NOT IT.
  *
- * `apps/meq.cpp` needs `psi_bnd` of the iterate the FIRST plasma-support sweep
+ * `src/meq/Run.cpp` needs `psi_bnd` of the iterate the FIRST plasma-support sweep
  * will start from, and the solver cannot supply it: `psiBoundary()` is the
  * CONVERGED value and there is no converged value before the first solve. So
  * the driver evaluates the constraint itself, on a field of its own -- and for

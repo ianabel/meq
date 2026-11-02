@@ -47,7 +47,7 @@ namespace meq
 		}
 		// Unreachable for any value of the enum, and a default: would stop
 		// -Wswitch warning when a phase is added -- which CLAUDE.md records
-		// costing a silent wrong trace solver at apps/meq.cpp's own switch.
+		// costing a silent wrong trace solver at src/meq/Run.cpp's own switch.
 		return "unknown";
 	}
 

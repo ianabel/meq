@@ -153,7 +153,7 @@ once it arrives. `NewtonRelativeTolerance` from 1e-10 to 1e-4 takes sweep 0 from
 is being paid for.
 
 **AND THE SUSPECT IS NAMED: THE FIRST SUPPORT FREEZE IS POSED WITH `psi_bnd`
-WRONG BY 2.26×.** `apps/meq.cpp`'s `edgeFluxOf()` reads `psi` at the bounding
+WRONG BY 2.26×.** `src/meq/Run.cpp`'s `edgeFluxOf()` reads `psi` at the bounding
 point straight off the grid function, which under a subtracting conductor model
 is `psi_p`; every consumer pairs it with a **total** `psi_ax`. On DIII-D `psi_c`
 at the X-point seed is −8.945e-02, so the first sweep freezes the support at a
@@ -816,7 +816,7 @@ source's pointwise test is live. Nothing fails loudly and nothing is logged; the
 only tell is `plasmaComponentElements()` reading `0 of 0 over 0 components`,
 which is what *no fill is live* prints and not what *an empty plasma* prints.
 
-`apps/meq.cpp` has always called it on the wrapper and is correct;
+`src/meq/Run.cpp` has always called it on the wrapper and is correct;
 `XPointOuter`'s fixture did not, so **the one diverted case in the tree ran
 without XP-1** — 333 elements of private flux region, 44% of the candidates,
 carrying a current channel nobody asked for. → **[M-82](MEASUREMENTS.md#m-82)**.
@@ -1184,7 +1184,7 @@ minimum and found the coil's. **It reports `normalised flux 1.0000`**, because
 tautology recorded under *IN-A* meeting a case it cannot see. Refinement cures
 it; the tells are the axis POSITION and the negative scale.
 
-**AND THE DRIVER WARNS ON IT NOW.** `apps/meq.cpp` tests the located axis
+**AND THE DRIVER WARNS ON IT NOW.** `src/meq/Run.cpp` tests the located axis
 against every `[[coils]]` conductor's own rectangle and says so, because that is
 the one thing here that is **not circular**: every test phrased in terms of the
 plasma is satisfied at the coil, `Ψ` being 1 there by construction. A warning
@@ -3384,7 +3384,7 @@ RESULT** — the cone tiling, the MXH distance, the transmission row's shared
 quadrature rule, and the FB-1b single-mesh check. The tell is always the same: a
 number that does not move when something that should move it changes.
 
-**AND IT IS `ψ*` THAT IS COMPARED, NOT `ψ_h`.** `apps/meq.cpp` samples
+**AND IT IS `ψ*` THAT IS COMPARED, NOT `ψ_h`.** `src/meq/Run.cpp` samples
 `postProcessedPotential()` into the `.nc` — its own comment says *"THE POTENTIAL
 SAMPLED HERE IS psi*, NOT psi_h"* — and `compare.py` reads the `.nc`, so every
 benchmark number is the post-processed field. That is the right thing to compare,
@@ -3882,7 +3882,7 @@ every digit · §4 REPAIRED, and its retraction points at M-165
 
 ## The driver's first support freeze read a different functional under the same words
 
-**AND IT IS WHY THE CURVE POSTURE LOOKED IMPOSSIBLE.** `apps/meq.cpp`'s
+**AND IT IS WHY THE CURVE POSTURE LOOKED IMPOSSIBLE.** `src/meq/Run.cpp`'s
 `edgeFluxOf()` supplies `psi_bnd` of the iterate the first sweep starts from —
 the one number the freeze needs and the one `psiBoundary()` cannot give before
 a solve. Under `[boundary.limiter] SurfaceAttribute` it read *"the maximum over
@@ -3959,7 +3959,7 @@ matched posing hands both codes the branch rather than letting either search.
 
 **A BOUND ON HOW WRONG AN ESTIMATE MAY BE IS A BOUND ON AN ESTIMATE OF THAT
 QUANTITY, AND SAYS NOTHING ABOUT AN ESTIMATE OF A DIFFERENT ONE.** The driver's
-plasma-support loop is a fixed point over the support, so `apps/meq.cpp`'s own
+plasma-support loop is a fixed point over the support, so `src/meq/Run.cpp`'s own
 comment is right that *"a bad estimate costs sweeps rather than correctness"* —
 the next sweep re-decides from the answer just reached. That licence is what
 made a second, informal reading of a constraint look safe to write, and the
@@ -4104,7 +4104,7 @@ What the split saves is the conductor elements and their grading inside `Γ`.
 
 **THE REAL COST OF THE SPLIT: THE SOLVED FIELD STOPS BEING THE PHYSICAL FIELD,
 AND EVERY CONSUMER THAT FORGETS IS A SILENT WRONG ANSWER.** Counted when CS-4
-was scoped: `apps/meq.cpp` 19 reads, `GradShafranov.cpp` 40, `FluxSurfaces.cpp`
+was scoped: `src/meq/Run.cpp` 19 reads, `GradShafranov.cpp` 40, `FluxSurfaces.cpp`
 4, `Estimator.cpp` 4, `CriticalPoints.cpp` 1 — about 68 sites. A change made
 correctly 68 times will not be, so one setter per consumer was the wrong shape
 (→ `CLAUDE_DECLINED.md`, *A total `GridFunction` `psi_p + psi_c` for consumers to
@@ -4133,7 +4133,7 @@ screen or a value, and the two need different arguments.
 constructor.** `ContourTracer::sampleField()` is the only place `psi` and `q` are
 read at a physical point, so the shift is one addition there and the four
 public entry points inherit it. `ContourTracer( solver )` reads
-`solver.conductorField()` itself, so `apps/meq.cpp` needed no edit; the
+`solver.conductorField()` itself, so `src/meq/Run.cpp` needed no edit; the
 bare-field constructor cannot know, which is the only reason the tracer's
 `setConductorField()` is public. Three details:
 
@@ -4293,7 +4293,7 @@ carries the exact physical field and the exact format a remainder, which
 
 **Refusing a `.gf` warm start under a split was proposed and decided against**
 → `CLAUDE_DECLINED.md`, *Refusing a `.gf` warm start under a subtracting model*.
-`apps/meq.cpp` warns instead, and `[initialguess] Content = "total"` lets a
+`src/meq/Run.cpp` warns instead, and `[initialguess] Content = "total"` lets a
 warm start cross the split — without it a guess written by a meshed run arrives
 one whole conductor field from where the solver believes it is.
 

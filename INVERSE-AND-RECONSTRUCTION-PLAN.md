@@ -1260,7 +1260,7 @@ alone, which settles in four sweeps to a best fit 4.6e-03 off with the
 equilibrium itself at round-off.
 
 
-`apps/meq.cpp`, `ConfineToPlasma`, `PlasmaSupportSweeps`, the exterior coupling.
+`src/meq/Run.cpp`, `ConfineToPlasma`, `PlasmaSupportSweeps`, the exterior coupling.
 §6.
 
 **Acceptance**: `tests/convergence/DriverAcceptance.cpp` —

@@ -706,7 +706,7 @@ iterative trace solve is closed rather than pending**, and Ginkgo — which is
 otherwise well fitted, being the one MFEM solver package that is not MPI-gated
 and that takes an `mfem::Device` directly — would have to close that gap with a
 preconditioner rather than with hardware. **And the driver silently ran UMFPack
-for the first measurement**, because `apps/meq.cpp:1634` initialises
+for the first measurement**, because `src/meq/Run.cpp` initialises
 `TS traceSolver = TS::UMFPack` before a `switch` with no `default`; see `CLAUDE_DRIVER.md`,
 *Configuration traps*.
 
@@ -2173,7 +2173,7 @@ own points and is bound to one mesh, degree and quadrature rule instead
 `psi − psi_c`, so `[initialguess] File` naming one beside `[conductors] Model`
 was proposed for refusal. Abel: *"assume the user knows what they're doing and
 so the warm start .gf file changes meaning (from psi to psi_p); warn loudly on
-stdout that you're doing it though."* `apps/meq.cpp` prints the change of
+stdout that you're doing it though."* `src/meq/Run.cpp` prints the change of
 meaning whenever both are set; `[initialguess] Content = "total"` and the `.nc`
 restart are what make the warning avoidable.
 
@@ -2598,7 +2598,7 @@ they stay where they are; this index makes the catalogue complete.
 - `CLAUDE_FB.md` *`ψ_ax` was the weak point of the whole free-boundary path*: `F(0, z) = 0` as a freebie of a free boundary, falsified — it is a precondition, which `ConfineToPlasma` meets.
 - `CLAUDE_FB.md` *The two-border fixture was the defect*: a fixed `a = 0.30` for the whole sweep, the textbook on-axis loop formula, and a looser assertion past `R ≈ 1.20`, all declined (M-45).
 - `MEASUREMENTS.md` M-132 and M-134 (FB-R, FB-T): the gap between the two discrete equilibria does not close; a prescribed current does not cure confinement; `setBoundaryFluxInitial` is never a TOML key.
-- `src/meq/ExteriorDtN.hpp`, `truncationRatio()`: reading the truncation off the last amplitude alone, declined for parity; `apps/meq.cpp`'s advice threshold: 1e-2, declined as firing on the converged production case, calibrated to 1e-1.
+- `src/meq/ExteriorDtN.hpp`, `truncationRatio()`: reading the truncation off the last amplitude alone, declined for parity; `src/meq/Run.cpp`'s advice threshold: 1e-2, declined as firing on the converged production case, calibrated to 1e-1.
 - `CLAUDE_FB.md` *`ψ_ax` was the weak point of the whole free-boundary path*: the first `checkAxisSource()`, asking the iterate's `ψ_h` on the axis, reverted — a healthy run reads 6.2e-05 of scale there and any tolerance that catches the pole refuses it; at `ψ = 0` the sound case is round-off and the failing one 1.0e-02.
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` IV-0 and §4.6: a flat coil list, and freeing every conductor, falsified (M-244).
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` §4.5: targets as hard equations and a square corner, declined — it fails on machine A.

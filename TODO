@@ -356,7 +356,7 @@ using the code.
 Part (a) closed the same day.
 ================================================================================
 
-  (a) IS DONE. apps/meq.cpp sets FluxFamilyOptions::toroidalField from
+  (a) IS DONE. src/meq/Run.cpp sets FluxFamilyOptions::toroidalField from
   toroidalCoefficients on the driven path, examples/q-driven.toml carries
   [ output ] FluxSurfaces = true, and the surfaces file now has a
   safety_factor column plus toroidal_field_driven, g_squared_coefficients and
@@ -384,7 +384,7 @@ Part (a) closed the same day.
   safetyFactor is computed, SurfaceAverages::safetyFactor() is RoPP (142), and
   Output.cpp carries a `safety_factor` column -- gated on
   FluxSurfaceFamily::safetyFactorAvailable, which is
-  static_cast<bool>( options.toroidalField ). apps/meq.cpp sets
+  static_cast<bool>( options.toroidalField ). src/meq/Run.cpp sets
   options.toroidalField at NEITHER extraction site, so no run ever writes it.
 
   THE REFUSAL IS RIGHT FOR A PRESCRIBED-FIELD RUN AND MISSING FOR A DRIVEN ONE.
@@ -395,7 +395,7 @@ Part (a) closed the same day.
   exactly this and is right.
 
   BUT [source] SafetyFactorFile SOLVES FOR THE COEFFICIENTS OF g^2 AND
-  apps/meq.cpp HOLDS THEM. `toroidalCoefficients` is declared in main() and is
+  src/meq/Run.cpp HOLDS THEM. `toroidalCoefficients` is declared in main() and is
   in scope at the surfaces writer -- it is already printed to the .nc as
   coefficients. So the one run type whose entire purpose is to reach a target q
   is the one that cannot show the q it reached, and a user has to take the round
@@ -743,7 +743,7 @@ accuracy and not for patience.
      rows sat at 266% CPU making no progress. And threaded assembly at
      OMP_NUM_THREADS=1 with MKL threads on is catastrophic (12.4 s against
      0.069 s serial at k = 3), because a team of one thread gets no suppression;
-     apps/meq.cpp warns about exactly that combination at startup.
+     src/meq/Run.cpp warns about exactly that combination at startup.
 
   2. DONE. PROFILE THE INSIDE OF A NEWTON SOLVE. It asked for the breakdown
      WITHIN a solve -- residual against gradient against recovery -- and the
@@ -940,7 +940,7 @@ transferred faces.
   asymmetry survived. It asserts the pairing rather than the refusal, since a
   single-path test would have passed throughout.
 
-  ConfigError::what() carried its own "MEQ: " banner while apps/meq.cpp prefixes
+  ConfigError::what() carried its own "MEQ: " banner while src/meq/Run.cpp prefixes
   every line it prints with the same thing and catches std::exception, so every
   configuration error read "MEQ: MEQ: configuration error in ...". It predates
   the rename -- it was "meq: meq:" and went unread for months at that size.
@@ -1125,7 +1125,7 @@ need something these cases structurally cannot give.
   ENTRY GOT WRONG IN THE OTHER DIRECTION.  M-142's 1.96x lives on a FREE-
   boundary half-disc, where the conductors are inside the computational domain
   by construction -- and what stood between MEQ and it was not a fixture but
-  ONE LOOP: apps/meq.cpp emitted `--coil` for every [[coils]] block whatever
+  ONE LOOP: src/meq/Run.cpp emitted `--coil` for every [[coils]] block whatever
   [conductors] Model said, so the key reached the solver and never reached the
   mesh.  That is fixed, and examples/mastu-nke now meshes at 4716 triangles
   against 9361 by editing one key -- MEASUREMENTS.md M-148.  A fixed-boundary
@@ -1326,7 +1326,7 @@ Raised 2026-10-22. After a real GPU-only pathway exists, not before.
   WHY IT IS NOT POSSIBLE TODAY.  CMakeLists.txt refuses an MFEM with neither
   SuiteSparse nor oneMKL PARDISO, because CuDSSSolver without an mfem::Device
   reads host pointers through the device-aware accessors and aborts inside CUDA
-  (apps/meq.cpp, the cuDSS refusal), so a host run would have no trace solver.
+  (src/meq/Run.cpp, the cuDSS refusal), so a host run would have no trace solver.
   defaultTraceSolver() never returns cuDSS, and the driver switches to it only
   under an active CUDA device.
 
@@ -1364,7 +1364,7 @@ Raised 2026-10-30, when the free-boundary campaign closed.
      arise; docs/free_boundary.rst, The plasma support).  Such a configuration
      should be refused at parse, the way [boundary] Type = "exact" is, rather
      than run to a non-convergence the user has to diagnose.  Not built:
-     nothing in Config or apps/meq.cpp checks the edge value.  FreeGS's
+     nothing in Config or src/meq/Run.cpp checks the edge value.  FreeGS's
      (1 - Psi_n^alpha)^beta gives j = beta, and beta = 1 is its default.
 
   2. THE q DEFICIT AT k = 3 ON A HIGHER-DEGREE FIXTURE.  On a mesh reaching

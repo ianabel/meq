@@ -21,18 +21,18 @@ extensions are built for **the system Python**, 3.14.4 here (headers in
 ## The design rule: a front end, not a second driver
 
 **`meq`, `meq-convert` and the Python module are three front ends on ONE run.**
-`apps/meq.cpp` is 8,493 lines and its `main()` is about 7,500 of them, in four
-phases that share locals: configuration (`:1457`), setup (`:2429`), solve and
-refine (`:3788`), write (`:6493`). Every refusal, the reactive ladder, the
-retry rung, the label checks, the warm start, the exterior-source diagnostic
-and the outputs live there and nowhere else.
+The run is `meq::Run` (`src/meq/Run.cpp`, about 8,100 lines), in four phases
+that share state: configuration, setup, solve and refine, and write. Every
+refusal, the reactive ladder, the retry rung, the label checks, the warm
+start, the exterior-source diagnostic and the outputs live there and nowhere
+else. `apps/meq.cpp` is the command line over it.
 
 **A binding over the library pieces (`Configuration`, `makeSource`,
 `GradShafranovSolver`) would be a second driver**, and two drivers can each
 converge, to different equilibria, which is exactly what M-264 asserts the
 driver and the library do not do. It would also lose every refusal the driver
-makes on the user's behalf. So the first stage moves the run out of `main()`,
-and the module binds that.
+makes on the user's behalf. So the first stage, PY-0, moved the run out of
+`main()`, and the module binds that.
 
 **Python must reproduce `meq` to the bit** on the same configuration. That is
 PY-1's acceptance, and it is why the rule exists: a race or a coupling run
@@ -148,19 +148,27 @@ Each stage ends at a measured, asserted result, as every stage here does.
 | PY-5 | a mirror's transport geometry | closed-form and finite-difference checks, below |
 | PY-6 | MEQ and MaNTA in one process, then the first outer loop | each code's answer in the joint process equals its answer alone |
 
-**PY-0: `meq::Run`.** The four phases become methods of a library class in
-`src/meq/Run.{hpp,cpp}`, and the locals they share become members. `main()`
-keeps `argv` and the exit codes. `Run` never calls `exit()`: it throws a
-`meq::RunError` carrying the code, and `main()` maps it. It writes its report
-to an `std::ostream &` it is handed, so that Python can capture it
-(`py::scoped_ostream_redirect`) and a test can read it. **This is the largest
-stage and it is behaviour-free by construction**: the whole driver suite
-(`DriverAcceptance`, `RotatingMirrorDriver`'s bit comparison, `OutputConversion`,
-`ConfigTests`) must pass unchanged. The `.nc` of every shipped example must
-equal the one made before the move, apart from the build-time attributes.
-**A mechanical move of 7,500 lines is not verified by a build** (`CLAUDE.md`,
-*Code hygiene*): build `-Wshadow -Winit-self` and read every warning, since a
-local that becomes a member is exactly the shadowing a rename makes.
+**PY-0: `meq::Run`.** The four phases are methods of a private
+`meq::Run::Impl` in `src/meq/Run.cpp` — `configure()`, `setUp()`, `solve()`
+and `write()` — and the locals they share are its members, declared in
+`main()`'s order so that they are destroyed in it. `main()` keeps `argv`,
+`--help`, `--version`, `--mesh-command` and the exit code, and hands the rest
+to `meq::RunOptions`. The bodies moved as text. Every edit to them is one of:
+a declaration hoisted to a member; the two clocks and three type aliases
+moved to namespace scope; the two lambdas the solve calls (`makeSolver`,
+`totalFluxAt`) made members; one by-name capture made an init-capture of the
+same value; the one `std::exit` made a throw that `execute()` turns into the
+same code; and `MEQ_VERSION` handed in by the front end, whose link stamps the
+commit. **The report still goes to stdout and stderr**, as `meq`'s always has;
+capturing it for Python is PY-1's.
+
+**This was the largest stage and it is behaviour-free by construction**, held
+to that by four checks. The hoisted names: `-Wshadow -Winit-self` gives the
+same five warnings, on the same names, as the original, and no member name is
+used before the line `main()` declared it on, so none now resolves to
+something else. The whole suite must pass as before. And the `.nc`, exit code
+and masked report of every shipped example must equal the ones the installed
+binary made before the move.
 
 **PY-1: the extension.** Laid out as MaNTA's:
 

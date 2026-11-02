@@ -1429,7 +1429,7 @@ namespace meq
 		// deliberately, and it is the one place the two defaults differ. This
 		// header is MFEM-free -- it is one of the four translation units CI
 		// compiles without the library -- so it cannot ask whether this build
-		// has OpenMP. apps/meq.cpp asks assemblyModeAvailable() and falls back
+		// has OpenMP. src/meq/Run.cpp asks assemblyModeAvailable() and falls back
 		// to Serial when the answer is no, which is what keeps a file that says
 		// nothing working on every build.
 		AssemblyModeType assemblyMode = AssemblyModeType::Threaded;
@@ -1475,7 +1475,7 @@ namespace meq
 		// AND THE SAME QUESTION FOR LocalFactorMode, WHICH IS ASKED FOR A
 		// DIFFERENT REASON. That key is available on every build -- it needs
 		// no package -- so it is never refused. What it needs a flag for is
-		// the DEVICE default: apps/meq.cpp turns it on under --device, where
+		// the DEVICE default: src/meq/Run.cpp turns it on under --device, where
 		// the batched local factorisation is the route to GPUBlasBatchedLinAlg,
 		// and a file that named a mode must keep the one it named.
 		bool localFactorModeWasGiven = false;
@@ -1767,7 +1767,7 @@ namespace meq
 		// meq::FieldTransfer in WarmStart.hpp IS meq::PointLocator -- MEQ's
 		// own, and not mfem::FindPointsGSLIB, which is why MFEM_USE_GSLIB is
 		// optional and why a single-precision build can have a warm start at
-		// all -- and WarmStartConvergence is a registered ctest. apps/meq.cpp
+		// all -- and WarmStartConvergence is a registered ctest. src/meq/Run.cpp
 		// reaches it: a mesh-count mismatch INTERPOLATES rather than being
 		// refused, so restarting from a run at another resolution -- the
 		// ordinary way to use a stored answer -- works. The exact restart is
@@ -1908,7 +1908,7 @@ namespace meq
 		// in P_(k+1) and converges at k+2, so it is the better field to look at
 		// and the better field to sample -- and it does not fit the degree-k
 		// potential space an exact restart reads back into. _psi.gf therefore
-		// keeps psi_h and this carries psi*; see apps/meq.cpp's write block.
+		// keeps psi_h and this carries psi*; see src/meq/Run.cpp's write block.
 		std::string getPsiStarFile() const;
 
 		// ------------------------------------------------------------------

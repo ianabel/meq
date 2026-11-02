@@ -94,7 +94,7 @@ a member nothing read.
 
 **IT WAS REACHABLE FROM A FILE, WHICH IS WHAT MADE IT A DEFECT RATHER THAN AN
 UNIMPLEMENTED CORNER.** `Config.cpp`'s Rotating branch lists `ConfineToPlasma`
-among its accepted keys and calls `readPlasmaSupport()`, and `apps/meq.cpp`
+among its accepted keys and calls `readPlasmaSupport()`, and `src/meq/Run.cpp`
 calls `setPlasmaSupport( true )` on whatever normalised source it built — so
 `[source] Type = "rotating"` with `Normalised = true` and
 `ConfineToPlasma = true` parsed, reported nothing and solved the unconfined
