@@ -1,5 +1,5 @@
 /*
- * MR-3: THE VACUUM MIRROR, THROUGH MEQ. MIRROR-PLAN.md, stage MR-3.
+ * MR-3: THE VACUUM MIRROR, THROUGH MEQ.
  *
  * No plasma. geq's two-pack mirror machine, a half-disc made by
  * tools/mesh/halfdisc.py, and the exterior coupling live -- the rung between

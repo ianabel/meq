@@ -3,7 +3,7 @@
 
 /*
  * geq'S MIRROR MACHINE, ASSEMBLED ONCE FOR EVERY CASE THAT NEEDS ONE.
- * MIRROR-PLAN.md MR-3 and MR-4.
+ * MR-3 and MR-4.
  *
  * The pack geometry and current, the half-disc mesh made by
  * tools/mesh/halfdisc.py, D_h cut from it at Gamma, the coil field as a

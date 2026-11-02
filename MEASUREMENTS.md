@@ -8332,8 +8332,8 @@ export picks. There is no better single radius.
 
 **The shape of the fix is a gauge that is per-surface** — geq references each
 surface's own midplane radius, which is exactly why its `N_s` stays `O( n )` —
-or storing `log n_s0`. Neither is a benchmark change. `MIRROR-PLAN.md` item 6
-carries it, because a mirror is a high-Mach multi-species device by definition
+or storing `log n_s0`. Neither is a benchmark change. `docs/rotation.rst`,
+*The midplane gauge*, carries it, because a mirror is a high-Mach multi-species device by definition
 and this is on the path to MR-4.
 
 #### 6. What this does not reach
@@ -8354,7 +8354,8 @@ EXTERIOR.**
 MEQ's free boundary truncates at a **semicircle** `Γ` centred on the axis and
 represents everything outside it by a Gegenbauer expansion whose modes decay as
 `ρ^(1−n)`. That is exact only where the exterior is current-free, and
-`MIRROR-PLAN.md`'s standing assumption is the working form of it: `Γ` large
+the mirror's standing assumption (`docs/rotation.rst`, *The standing
+assumption*) is the working form of it: `Γ` large
 enough, and the confinement good enough, that the plasma's `j_φ` is negligible
 **on and beyond** `Γ`. Not that there is no plasma out there — only that what is
 out there does not move `B`.
@@ -8480,7 +8481,7 @@ THIS SENTENCE WAS WRONG.** For a tokamak it is the lever — the plasma is a com
 and `( ρ_plasma/ρ_Γ )^n` improves with every metre. For a mirror the flux tube
 leaves the machine, so the expansion's premise has to be bought from the
 **physics** — trapping and rotation suppressing the density at the throat — and
-then **checked on the answer**, which is `MIRROR-PLAN.md` MR-0.
+then **checked on the answer**, which is MR-0.
 
 **The measurement is a property of geq's mask, not of centrifugal mirrors.** A
 configuration with a stronger mirror ratio, or a plasma region that is cut off
@@ -16867,7 +16868,7 @@ case catches.
 
 **THE MIDPLANE GAUGE ON THE ROTATING MIRROR: ONE EQUILIBRIUM IN BOTH GAUGES,
 geq's IN THE MIDPLANE GAUGE TO M-263's RESOLUTION, AND THREE SPECIES AT `M = 6`.**
-`MIRROR-PLAN.md` §5; `RotatingMirrorMidplane` is the acceptance and
+`docs/rotation.rst`, *The midplane gauge*; `RotatingMirrorMidplane` is the acceptance and
 `RotatingSourceTests`' `midplane_gauge` suite the pointwise half. MEQ at this
 branch, `meq-integration` as installed, double, host; geq `73b9a72` and freegs4e
 `9a1ee0c`, both clean, the reference regenerated bit-identical to the one M-263
@@ -17156,8 +17157,8 @@ answer moves in its last bits from run to run.
 
 **THE VACUUM-MIDPLANE GAUGE: A FIXED CURVE, AN EXACT JACOBIAN, QUADRATIC NEWTON.
 M-278 §2's SIX FROZEN-TABLE STEPS ARE NOT REPRODUCED, AND THE THREE-SPECIES
-PRESSURE CAP IS THE MESH'S, NOT THE FREEZE'S.** `MIRROR-PLAN.md` §5, *A fixed curve
-is a gauge*. `RotatingMirrorVacuumGauge` is the acceptance and `RotatingSourceTests`'
+PRESSURE CAP IS THE MESH'S, NOT THE FREEZE'S.** `docs/rotation.rst`, *The
+vacuum-midplane gauge*. `RotatingMirrorVacuumGauge` is the acceptance and `RotatingSourceTests`'
 `fixed_curve_gauge` suite the pointwise half. MEQ on `fb0756e` plus this change,
 `meq-integration` as installed, double, host, `OMP_NUM_THREADS=2`,
 `MKL_NUM_THREADS=1`. geq's committed reference, `tools/geq-benchmark/reference/rotating`.
@@ -17337,7 +17338,7 @@ IT.** The frozen refresh it is measured against is retired, and these knots
 are how `Gauge = "midplane"` solves → [M-284](#m-284).
 
 **Setup.**
-* `MIRROR-PLAN.md` §5. `GradShafranovSolver::setMidplaneGaugeKnots( K )` makes
+* `docs/rotation.rst`, *The midplane gauge*. `GradShafranovSolver::setMidplaneGaugeKnots( K )` makes
   `R₀` at `K` uniform knots in `Ψ` unknowns of the bordered Newton, after the
   exterior modes. The source's table at every residual, line-search trials
   included, is `meq::crossingThroughKnots()`: the not-a-knot `C²` spline of
@@ -17542,8 +17543,8 @@ answer through `setInitialState()`:
 
 **Ruled out, measured:**
 * **The freeze's left-out term.** The bordered gauge has it and stalls
-  identically. M-278 §5 and the MIRROR-PLAN paragraph attributed the stall to
-  it, and that attribution is FALSIFIED.
+  identically. M-278 §5 attributed the stall to it, and that attribution is
+  FALSIFIED.
 * **The box's label precondition.** The density floor at the labels lowered
   from 1e-6 to 1e-8, 1e-10 and 1e-12 moves `|F|` just inside each label by the
   same factor. It moves neither stall: 1.57e-05 to 1.60e-05 at 2e19.
@@ -17589,7 +17590,7 @@ KNOTS DO NOT, SO IT IS RETIRED, AND `meq` SOLVES THE MIDPLANE GAUGE WITH 32
 KNOTS.**
 
 **Setup.**
-* `MIRROR-PLAN.md` §5. `RotatingMirrorRoute`'s
+* `docs/rotation.rst`, *The midplane gauge*. `RotatingMirrorRoute`'s
   `theHeldStartSavesAtMostOneBorderedStep` is the acceptance; `RotatingMirrorBorder`,
   `RotatingMirrorMidplane`, `RotatingMirrorVacuumGauge` and
   `RotatingMirrorDriver`'s two midplane cases carry the gauge as shipped.
@@ -19098,8 +19099,8 @@ exit 2; `2/max(R, 0.2)` converges in 17 steps to the shipped answer
 (M-293 §4); constant `τ = 1` exits 2 from 0.2 and from 0.15. **The
 premise is the default's**, so the test stands as written, at 0.2; 0.15 is a
 second discrete root a plain bordered Newton reaches under the mirror's
-stabilisation, which the driver reports with exit 0, recorded in MIRROR-PLAN's
-MR-5 *Open*.
+stabilisation, which the driver reports with exit 0, recorded in `TODO`,
+*The free-boundary mirror: what is still open*.
 
 *What the old default held back to level 1.*
 `threeSpeciesAtMachSixOnTheVacuumCurve` printed level 0 at 2e19 as not converging; under the default every level

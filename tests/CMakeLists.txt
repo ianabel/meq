@@ -203,7 +203,7 @@ set(MEQ_CONVERGENCE_TESTS
 	# solved field; the fill itself is MFEM-free and is unit tested as
 	# PlasmaComponentTests.
 	PlasmaConnectivity
-	# MIRROR-PLAN.md MR-1, the solver's half of a mirror's support: XP-1's fill
+	# MR-1, the solver's half of a mirror's support: XP-1's fill
 	# is OFF under PlasmaSupportShape::Box, asserted against a one-sided control
 	# on the same field, and checkAxialCutoff() reads the current the prescribed
 	# |z| bound cuts through. No solve runs; the field is a closed form.
@@ -259,7 +259,7 @@ set(MEQ_CONVERGENCE_TESTS
 	# of q_h and must find 1 there -- and it is a convergence test rather than a
 	# unit one because half of it drives the bordered Newton.
 	AxisAgreement
-	# MIRROR-PLAN.md MR-2: psi_ax pinned at a PRESCRIBED point, which a mirror
+	# MR-2: psi_ax pinned at a PRESCRIBED point, which a mirror
 	# needs because it has no magnetic axis. It needs no mirror to test: on a
 	# tokamak, pinned at the axis LocatedAxis converged to, the two constraints
 	# are one equation, so the answers must agree to the root finder's accuracy
@@ -666,7 +666,7 @@ else()
 	message(STATUS "meq: GeqSourceComparison not registered")
 endif()
 
-# VacuumMirror is MIRROR-PLAN.md's MR-3: geq's mirror coils, no plasma, the
+# VacuumMirror is MR-3: geq's mirror coils, no plasma, the
 # half-disc from tools/mesh/halfdisc.py and the exterior coupling live, against
 # meq::coilPsi() at a rate and against geq's own vacuum field.
 #
@@ -693,7 +693,7 @@ else()
 	message(STATUS "meq: VacuumMirror not registered")
 endif()
 
-# RotatingMirror is MIRROR-PLAN.md's MR-4: VacuumMirror's machine with the
+# RotatingMirror is MR-4: VacuumMirror's machine with the
 # rotating plasma in it, both labels pinned at points and the box support, on
 # geq's problem from tools/geq-benchmark/reference/rotating. It shares
 # VacuumMirror's machine through convergence/MirrorMachine.hpp, and so its
@@ -735,7 +735,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		MEQ_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 	add_test(NAME RotatingMirror COMMAND RotatingMirror --run_test=solve)
 	add_test(NAME RotatingMirrorResolution COMMAND RotatingMirror --run_test=resolution)
-	# MIRROR-PLAN.md section 5: the midplane gauge on the same machine -- the
+	# The midplane gauge on the same machine -- the
 	# one equilibrium in both gauges, geq's in the midplane gauge, and the
 	# three-species case at M = 6 the fixed radius cannot pose. Its own suite
 	# and its own mesh stem, so it runs beside the resolution study.

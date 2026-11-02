@@ -6,8 +6,10 @@ not yet placed this plan in its order.
 **The target**: MEQ solves the anisotropic generalisation of RoPP (136) on the
 free-boundary rotating mirror. The answer is checked against geq's
 `PrescribedAnisotropy`, which freegs4e's `ProfilesCentrifugalMirror` folds into
-its `Jtor`. `MIRROR-PLAN.md` is the machine, the gauge and the comparison
-protocol, and this plan reuses all three. `CLAUDE_FLOW.md` is the rotating
+its `Jtor`. The machine and the gauge are the free-boundary rotating mirror's,
+`docs/rotation.rst`, *A magnetic mirror* and *The gauge*, and the comparison
+protocol is MR-4's (`CLAUDE_FLOW.md`, `tools/geq-benchmark/README.md`); this
+plan reuses all three. `CLAUDE_FLOW.md` is the rotating
 source. `MEASUREMENTS.md` will hold the tables.
 
 **The reference is pinned**: `refs/AlphaGK.pdf`, eq (6.18). It is an

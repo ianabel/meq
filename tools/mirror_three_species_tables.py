@@ -2,7 +2,7 @@
 """THE PROFILE TABLES OF examples/mirror-three-species.toml, written once.
 
 Electrons, deuterium and fully stripped carbon on geq's mirror at M = 6, in
-MEQ's MIDPLANE gauge (MIRROR-PLAN.md section 5): each density is the density
+MEQ's MIDPLANE gauge (docs/rotation.rst): each density is the density
 where its flux surface crosses z = 0. tests/convergence/RotatingMirror.cpp's
 `threeSpecies()` poses the same plasma in closed form; this writes it as the
 three-column tables a configuration reads.

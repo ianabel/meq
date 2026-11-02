@@ -520,7 +520,7 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_reaches_the_source_that_evaluates_the_p
 }
 
 /*
- * AND A MIRROR'S BOX FORWARDS THE SAME WAY. MIRROR-PLAN.md MR-1.
+ * AND A MIRROR'S BOX FORWARDS THE SAME WAY. MR-1.
  *
  * meq::PlasmaSupportShape::Box adds `Psi <= 1` and `|z| <= z_edge` to the
  * support, and it is consulted by the object that evaluates the profiles --

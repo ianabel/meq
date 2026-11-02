@@ -1,7 +1,8 @@
 # Toroidal flow: the generalised Grad-Shafranov equation of RoPP (136)
 
 **MEQ's rotating-source half**, split out of `CLAUDE_HDGGS.md` because it is a
-campaign rather than part of the core method — FL-0 to FL-8, **done**.
+campaign rather than part of the core method — FL-0 to FL-8, **done** — and
+the free-boundary rotating mirror built on it, MR-0 to MR-5, **done**.
 `CLAUDE.md` is the index; `CLAUDE_HDGGS.md` has the equation, the
 discretisation, Newton and the bordered Newton that this source is driven
 through, and `CLAUDE_FB.md` and `CLAUDE_INVERSION.md` are the other two
@@ -189,34 +190,79 @@ author and a reading of the paper with MEQ. geq's state drifts `C` by **7.58×**
 against that fixture's 2.50×, and nothing in it came from MEQ — so this is the
 first **outside** confirmation rather than the only check.
 
-**AND THE RUNG AFTER THE SOURCE COMPARISON IS A MIRROR SOLVE, AND IT IS BUILT.**
-`MIRROR-PLAN.md` is the plan — MR-0 to MR-5 — and its first stage, the
-falsifying experiment on whether MEQ's semicircular exterior is admissible for a
-machine whose flux tube leaves the domain, is run and passed →
-[M-169](MEASUREMENTS.md#m-169). With `Γ` put outside the machine no current lies
-beyond it at any Mach number, and the mode count is measured: the copper, not
-the plasma, sets it, 24 to 32 at `ρ_Γ = 3.0` → [M-260](MEASUREMENTS.md#m-260).
-MR-0's MEQ-side diagnostic, the fraction of `∫|F|/R` outside `Γ`, is
-`GradShafranovSolver::checkExteriorSource()`, reported on every free-boundary
-mirror answer and exactly zero on both shipped examples →
-[M-310](MEASUREMENTS.md#m-310).
-[M-168](MEASUREMENTS.md#m-168)'s contrary reading measured the current beyond a
-radius inside the machine and is superseded; *an admissibility test is a
-statement about where `Γ` was put, not about the machine*.
+**Both run here**, in MEQ's own benchmark venv at
+`tools/freegs4e-benchmark/venv` with `geq/src` on `PYTHONPATH`; geq's own
+`tests/test_jtor_abel.py` passes. `pint` and `xarray` are absent, so `geq.utils`
+does not import and nothing in the (136) path needs it. **geq's `CLAUDE.md`
+names a conda env and `/Users/...` paths and is another machine's recipe** —
+which is what made this look unrunnable for as long as it did.
 
-**MR-1 TO MR-5 ARE DONE: MEQ SOLVES A ROTATING MIRROR AND AGREES WITH geq TO
-geq'S OWN RESOLUTION** ([M-263](MEASUREMENTS.md#m-263)), and MR-5 runs it from a
-file: `examples/mirror-rotating.toml` through the driver matches the library to the bit
-([M-264](MEASUREMENTS.md#m-264)). The support is a box
-in `( Ψ, z )` with the fill off ([M-258](MEASUREMENTS.md#m-258)); `ψ_ax` can be
-pinned at a point ([M-259](MEASUREMENTS.md#m-259)); and the vacuum mirror solves
-through MEQ, agreeing with geq to geq's own coil model
-([M-260](MEASUREMENTS.md#m-260)). **What the vacuum stage changed**: the coils
-are meshed inside `Γ = 3.0` rather than outside it, so `ρ_Γ` is set by the
-copper and not the plasma (`CLAUDE_FB.md`, FB-7). **What the support stage
-found**: `Ψ = 1` is a moving edge of the box, so a mirror's `F` must vanish at
-the inner label as well as the outer one (`MIRROR-PLAN.md`, *What does NOT
-bite*).
+## The free-boundary mirror: MR-0 to MR-5
+
+**MEQ SOLVES A ROTATING MIRROR FREE BOUNDARY AND AGREES WITH geq TO geq'S OWN
+RESOLUTION** ([M-263](MEASUREMENTS.md#m-263)), and runs it from a file
+([M-264](MEASUREMENTS.md#m-264)). `docs/rotation.rst`, *A magnetic mirror* and
+*The gauge*, is how a mirror is posed — the standing assumption on the exterior,
+the two labels at points, the box support in `( Ψ, z )`, the two midplane gauges
+and the mirror's stabilisation — and `docs/configuration.rst`, *A mirror's
+support*, has the keys and what is refused beside the box.
+`tools/geq-benchmark/README.md` is the comparison protocol and what the
+reference changes in geq; `CLAUDE_DRIVER.md` has the driver's branches beside
+the box. What is open is `TODO`'s *The free-boundary mirror: what is still
+open*.
+
+| stage | what it built or answered | where |
+|---|---|---|
+| MR-0 | `ρ_Γ` and `N`: with `Γ` outside the machine the exterior is admissible at every Mach number ([M-169](MEASUREMENTS.md#m-169)), and the copper, not the plasma, sets `N` — `ρ_Γ = 3.0`, 32 modes ([M-260](MEASUREMENTS.md#m-260)). The diagnostic: the fraction of `∫\|F\|/R` the answer puts beyond `Γ`, warned above 1e-4, exactly zero on both shipped mirrors ([M-310](MEASUREMENTS.md#m-310)) | `GradShafranovSolver::checkExteriorSource()`, `meq::exteriorSupportIntegral()`, `ExteriorSourceCheck::warningFraction`; `source_outside_gamma_fraction` in the `.nc` |
+| MR-1 | the support as a box in `( Ψ, z )`, `0 < Ψ ≤ 1` and `\|z\| ≤ z_edge`, the source vanishing on all three sides; XP-1's fill off under it as a stated branch; the current density the cutoff cuts through reported ([M-258](MEASUREMENTS.md#m-258)) | `meq::PlasmaSupportShape::Box`, `NormalisedSource::setPlasmaSupportShape()`, `plasmaComponentWanted()`, `checkAxialCutoff()`; `MirrorSupport`, `RotatingSourceTests`, `SourceViewTests`, `CoilsTests` |
+| MR-2 | `ψ_ax` pinned at a prescribed point by `setBoundaryFluxPoint()`'s row; at a tokamak's located axis it is `LocatedAxis`'s equilibrium, quadratic where that is linear ([M-259](MEASUREMENTS.md#m-259)) | `AxisConstraint::PrescribedPoint`, `setAxisFluxPoint()`; `PrescribedAxisPoint`, `SolverContract` |
+| MR-3 | the vacuum mirror through MEQ: geq's packs meshed inside `Γ = 3.0`, `ψ` at `k + 1` against `meq::coilPsi()`, and against geq to geq's own coil model ([M-260](MEASUREMENTS.md#m-260)) | `VacuumMirror`, `MirrorMachine.hpp`, `tools/geq-benchmark/export_vacuum.py` |
+| MR-4 | the free-boundary rotating mirror against geq, in the mode geq solves in. **MR-4a** the reference: direct free boundary, profiles vanishing at the labels at orders 2 and 3, `φ₀` tightened, `N_D` held ([M-261](MEASUREMENTS.md#m-261)); **MR-4b** MEQ converges on it from the vacuum, quadratically, with a negative span; **MR-4c** MEQ against itself in `h` and `k` ([M-262](MEASUREMENTS.md#m-262)); **MR-4d** MEQ against geq at 129², 257² and 513² as a matrix, the difference falling at geq's rate, with shipped geq's bias as the control ([M-263](MEASUREMENTS.md#m-263)) | `RotatingMirror` (`solve`, `resolution`), `tools/geq-benchmark/export_rotating.py` and `reference/rotating/` |
+| MR-5 | the mirror from a file: `[boundary.electrode]` (`ψ_inner`), `SupportShape = "box"`, `AxialEdge`, `AlignPlasma`; the driver reproduces the library to the bit ([M-264](MEASUREMENTS.md#m-264)), adaptively under a judged estimator ([M-279](MEASUREMENTS.md#m-279)), on the card ([M-280](MEASUREMENTS.md#m-280)), and with no retry rung beside the box ([M-277](MEASUREMENTS.md#m-277)) | `examples/mirror-rotating.toml`, `ConfigTests`' `mirror_keys`, `RotatingMirror` (`driver`, `adaptive`, `device`); `CLAUDE_DRIVER.md` |
+
+The two midplane gauges and the mirror's stabilisation carry no stage label:
+`Gauge = "midplane"` ([M-278](MEASUREMENTS.md#m-278),
+[M-283](MEASUREMENTS.md#m-283)), `Gauge = "vacuum-midplane"`
+([M-281](MEASUREMENTS.md#m-281), [M-282](MEASUREMENTS.md#m-282)) and
+`meq::MirrorStabilisation` ([M-291](MEASUREMENTS.md#m-291),
+[M-293](MEASUREMENTS.md#m-293), [M-294](MEASUREMENTS.md#m-294)), below;
+`RotatingMirror`'s `midplane`, `vacuum_gauge`, `border` and `route` suites.
+
+**MR-0 WAS THE CAMPAIGN'S FALSIFYING EXPERIMENT, AND IT PASSED.** Whether MEQ's
+semicircular exterior is admissible for a machine whose flux tube leaves the
+domain → [M-169](MEASUREMENTS.md#m-169): with `Γ` put outside the machine no
+current lies beyond it at any Mach number, and lower Mach costs only modes.
+[M-168](MEASUREMENTS.md#m-168)'s contrary reading measured the current beyond a
+radius inside the machine and is superseded. **A threshold of `M ≳ 6` was
+FALSIFIED** the same way: it rested on that radius, carried out of an
+exploratory run onto a machine half a metre larger. *A threshold measured at
+one arbitrary value of a free parameter is a statement about that value*, and
+an admissibility test is a statement about where `Γ` was put, not about the
+machine. The diagnostic counts only the exterior support connected to `Γ`,
+because the box has no radial bound off the mesh and the labels recur on the
+midplane far out beyond the expander, where the centrifugal source is not
+finite.
+
+**IF `Γ` EVER HAS TO SIT CLOSE** — a mesh budget, or a machine whose plasma
+genuinely leaves the domain — the extension that fits is FB-7's split
+generalised. `ψ = ψ_ext + ψ̃` holds for any known exterior current, not only a
+coil's: the iterate's own exterior plasma current, evaluated from the exterior
+model, would have its field on `Γ` added to both halves of the datum together,
+which FB-7 warns must happen together or not at all. It needs a quadrature over
+an unmeshed region, so it is built only if a measurement says `ρ_Γ` cannot
+move; [M-169](MEASUREMENTS.md#m-169) has the irreducible error at a close `Γ`
+that it would buy back.
+
+**WHAT THE VACUUM STAGE CHANGED**: the coils are meshed inside `Γ = 3.0` rather
+than outside it, so `ρ_Γ` is set by the copper and not the plasma
+(`CLAUDE_FB.md`, FB-7). **What the support stage found**: `Ψ = 1` is a moving
+edge of the box, so a mirror's `F` must vanish at the inner label as well as
+the outer one (`docs/rotation.rst`, *A magnetic mirror*) — which decided how
+MR-4 writes its profiles and transfers geq's. **What MR-4's run answered**
+([M-262](MEASUREMENTS.md#m-262)): the bordered Newton converges with a negative
+span from a vacuum guess, undamped; geq's `N_D` hold works inside geq; the
+stopping target, relative to the cold residual, is not loose against the
+plasma's own flux; and zero initial exterior coefficients cost nothing.
 
 **RECONCILE THE `φ₀` GAUGE FIRST — IT IS NOT A DETAIL.** MEQ pins
 `φ₀(ReferenceRadius, ψ) = 0`, one condition per flux surface. geq pins **one
@@ -228,12 +274,15 @@ derives `ω` from a Mach number or a voltage and re-derives it every Picard step
 so its `omega_profile` callable is the only way to hand both codes the same
 `ω(ψ)`; and geq sets `gg′ ≡ 0` unconditionally, which on MEQ's side means
 `GGPrime = 0` and the trivial-branch warning in
-`examples/rotating-rectangle.toml`.
+`examples/rotating-rectangle.toml`. **And geq's Mach number is not
+M-167's**: geq's `M = ωR/√( 2T_i/m_i )` is M-167's `M`, on `T_e`, divided by
+about 1.55, so geq-Mach 2 and 4 are M-167's 3.1 and 6.2.
 
 **A MIRROR CAN TAKE THE OTHER LOCAL GAUGE**, `[source] Gauge = "midplane"`:
 `φ₀ = 0` where each surface crosses `z = 0`, so the densities are midplane
 densities and stay within a double at high Mach with impurities, which the
-fixed radius does not (`MIRROR-PLAN.md` §5, → [M-278](MEASUREMENTS.md#m-278)).
+fixed radius does not (`docs/rotation.rst`, *The midplane gauge*,
+→ [M-278](MEASUREMENTS.md#m-278)).
 Three traps from building it. **Read the midplane flux off `q`, not `ψ_h`**:
 `ψ_h` jumps between elements by more than the plasma's own flux on a coarse
 mirror mesh, and a crossing table built on it stalls Newton. **The crossings
@@ -250,6 +299,28 @@ is the stabilisation, below.
 vacuum's crossing held save one bordered step of three at most and cost more
 than they save (→ [M-284](MEASUREMENTS.md#m-284)). **A density flat at a
 label is not flat at fixed `R`** under this gauge where `ω` is non-zero there.
+
+**THE FIXED-RADIUS EXPONENT IS AN UPPER BOUND, ABOUT TWICE THE REAL ONE**, which
+is why the fixed radius still carries MR-4's two species.
+`m_s ω²( R_ref² − R_mid² )/2T_s` is the `φ₀ = 0` limit; with the electrons in,
+quasineutrality makes the deuteron's exponent the shared
+`m_D ω²ΔR²/( 2( T_e + T_i ) )`, the form [M-167](MEASUREMENTS.md#m-167)
+measured, and carbon's is exactly six times deuterium's, the two having the same
+`Z/m`. Before a double overflows, what stops a three-species mirror at high Mach
+is the Hermite table, whose relative error is `( E′h )⁴/384` on an exponent of
+slope `E′`: thousands of knots for carbon at `M = 6`. So the midplane gauge is
+the route for three species at high Mach, not a precondition for every mirror.
+`R_ref` is already at its range-minimising value, so no tuning of it helps.
+
+**AND IT DOES NOT MAKE geq'S BENCHMARK EASIER — EXPECTED, AND FALSIFIED.** It
+was expected to make MEQ's `n_s0` and geq's `N_s` one quantity up to geq's one
+global offset. Under MR-4a's hold geq's `N_s` are its zero-potential densities,
+not midplane ones, so geq's plasma in the midplane gauge is geq's
+quasineutrality solved at each surface's crossing on geq's 513² state: an
+output, `nmid_*.dat`, beside geq's answer, and farther from `N_s` than the
+fixed-radius transfer. `theGaugeTransferIsLoadBearing` is pointed at the
+fixed-radius gauge by name and asserts the refusal under the midplane gauge too
+(`tools/geq-benchmark/README.md`).
 
 **AND A FIXED CURVE IS A GAUGE TOO**, `[source] Gauge = "vacuum-midplane"`,
 `RotatingSource::Gauge::FixedCurve`: `φ₀ = 0` on the vacuum's crossing
@@ -288,12 +359,7 @@ branch.
 Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
 solved crossing (→ [M-282](MEASUREMENTS.md#m-282)).
 
-**Both run here**, in MEQ's own benchmark venv at
-`tools/freegs4e-benchmark/venv` with `geq/src` on `PYTHONPATH`; geq's own
-`tests/test_jtor_abel.py` passes. `pint` and `xarray` are absent, so `geq.utils`
-does not import and nothing in the (136) path needs it. **geq's `CLAUDE.md`
-names a conda env and `/Users/...` paths and is another machine's recipe** —
-which is what made this look unrunnable for as long as it did.
+## The `C′(ψ)` gap, and the mutation tests
 
 **THE `C′(ψ)` GAP IS CLOSED, BY A MANUFACTURED FIXTURE, AND NO PUBLISHED
 BENCHMARK COULD HAVE CLOSED IT** — though an independent *implementation* has

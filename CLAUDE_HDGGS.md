@@ -1020,7 +1020,7 @@ default and constrains `ψ_ax` at a zero of `q_h`.
 corner 1, no envelope term, no root find. Unlike `LocatedAxis` its row is live
 at iteration 0, because it is built from the point located once per solve and
 not from `constraintLocated`, which the cold reference clears. It exists for the
-mirror, which has no interior extremum (`MIRROR-PLAN.md` MR-2). On a tokamak
+mirror, which has no interior extremum (MR-2, `CLAUDE_FLOW.md`). On a tokamak
 pinned at the located axis it is the same equation with the position term held
 exactly, so it is also the control that isolates the located row's dropped
 envelope term: same root, quadratic where `LocatedAxis` is linear

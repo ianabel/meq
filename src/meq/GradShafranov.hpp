@@ -1415,7 +1415,7 @@ namespace meq
 				/**
 				 * `psi_ax = psi_h( R, z )` at a point the CALLER names, by
 				 * setAxisFluxPoint(), evaluated inside the element containing
-				 * it. MIRROR-PLAN.md section 1 and stage MR-2.
+				 * it. MR-2.
 				 *
 				 * **IT EXISTS FOR A CONFIGURATION WITH NO MAGNETIC AXIS.** A
 				 * mirror's `psi` rises monotonically outward from `R = 0`, so
@@ -1746,7 +1746,7 @@ namespace meq
 
 			/**
 			 * PIN `psi_ax` AT A PRESCRIBED POINT -- AxisConstraint::
-			 * PrescribedPoint, which this also SELECTS. MIRROR-PLAN.md MR-2.
+			 * PrescribedPoint, which this also SELECTS. MR-2.
 			 *
 			 * setBoundaryFluxPoint()'s twin for the other label: the constraint
 			 * is `psi_ax = psi_h( R, z )` inside the element containing the
@@ -2022,7 +2022,7 @@ namespace meq
 			 * meq::PlasmaSupportShape::Box** -- a mirror's support, bounded in
 			 * `Psi` on both sides and in `|z|`, which is pointwise by
 			 * construction and has no magnetic axis to seed a fill from.
-			 * MIRROR-PLAN.md §3, and plasmaComponentWanted() is the branch.
+			 * plasmaComponentWanted() is the branch.
 			 */
 			enum class PlasmaConnectivity
 			{
@@ -2146,7 +2146,7 @@ namespace meq
 			 * the knots start on the starting iterate's own crossings -- see
 			 * setMidplaneGaugeKnots() -- and zero when they start on
 			 * setMidplaneCrossingInitial()'s table or the source reads no
-			 * midplane. MIRROR-PLAN.md section 5.
+			 * midplane.
 			 *
 			 * **THE PRECONDITION IS CHECKED THERE, AND AGAIN ON THE ANSWER.**
 			 * `psi` must be monotone along `z = 0` across the support, so that
@@ -2205,7 +2205,8 @@ namespace meq
 			 * gives, so that it tabulates `R_g( Psi )` and checks the box's
 			 * precondition on it. A no-op for any other source, and for one
 			 * that already has its curve -- so it is never refreshed, not per
-			 * iteration and not per adaptive cycle. MIRROR-PLAN.md section 5,
+			 * iteration and not per adaptive cycle.
+			 * docs/rotation.rst, The vacuum-midplane gauge;
 			 * [M-281](MEASUREMENTS.md#m-281).
 			 *
 			 * solve() calls it before its first residual; it is public so that
@@ -2224,7 +2225,8 @@ namespace meq
 
 			/**
 			 * THE MIDPLANE GAUGE'S CROSSINGS ARE BORDER UNKNOWNS, so that F is
-			 * pointwise and Newton quadratic. MIRROR-PLAN.md section 5;
+			 * pointwise and Newton quadratic.
+			 * docs/rotation.rst, The midplane gauge;
 			 * [M-283](MEASUREMENTS.md#m-283).
 			 *
 			 * R_0 at @a knots uniform knots Psi_k over
@@ -5040,7 +5042,7 @@ namespace meq
 			 * **THE CURRENT DENSITY A MIRROR'S AXIAL CUTOFF CUTS THROUGH**, so
 			 * that the approximation meq::PlasmaSupportShape::Box makes is
 			 * visible on every answer rather than assumed small.
-			 * MIRROR-PLAN.md MR-1 and risk 3b.
+			 * MR-1.
 			 *
 			 * The box's `|z| <= z_edge` is PRESCRIBED, at or near the throat,
 			 * because beyond it the flux tube flares into the expander and the
@@ -5114,7 +5116,7 @@ namespace meq
 
 			/**
 			 * **THE FRACTION OF THE SOURCE THE ANSWER WOULD PUT OUTSIDE `Gamma`**
-			 * -- MIRROR-PLAN.md MR-0's diagnostic, the mirror's analogue of
+			 * -- MR-0's diagnostic, the mirror's analogue of
 			 * checkAxisSource(): one-sided, a positive detection is the finding.
 			 *
 			 * The exterior DtN is exact only where the exterior is current-free.

@@ -55,8 +55,9 @@
  *     phi_0( R_0( psi ), psi ) = 0
  *
  * with R_0( psi ) each surface's own crossing of z = 0, so n_s0 is the density
- * where the surface crosses the midplane. MIRROR-PLAN.md section 5 measured why:
- * the fixed-radius transfer carries exp( m_s omega^2 ( R_ref^2 - R_0^2 )/2T_s ),
+ * where the surface crosses the midplane. Why (docs/rotation.rst, The midplane
+ * gauge): the fixed-radius transfer carries
+ * exp( m_s omega^2 ( R_ref^2 - R_0^2 )/2T_s ),
  * an exponent LINEAR IN THE SPECIES MASS, and at M = 6 carbon's n_s0 spans 1e216
  * against a double's exp( 709.8 ); under the midplane gauge that exponent is
  * zero on every surface by construction. It is a mirror's gauge only, because
@@ -90,7 +91,8 @@
  * surface crossed z = 0, and the transfer to the true midplane is
  * exp( m_s omega^2 ( R_0vac^2 - R_0^2 )/2T_s ) -- only the plasma's own
  * displacement of its surfaces, not the machine's span of radii.
- * MIRROR-PLAN.md section 5, [M-281](MEASUREMENTS.md#m-281).
+ * docs/rotation.rst, The vacuum-midplane gauge;
+ * [M-281](MEASUREMENTS.md#m-281).
  *
  * THE PRICE OF THE GAUGE IS THAT TWO SETS OF n_s0 DIFFERING BY IT DESCRIBE THE
  * SAME PLASMA. Anyone comparing profiles against RoPP's own notation, against a
@@ -163,7 +165,7 @@ namespace meq
 	 * as a Hermite table on uniform knots: each knot's R_0 by a ROOT FIND on
 	 * x( R, 0 ) = x_i, and its slope by the inverse function theorem,
 	 * dR_0/dx = 1/( dx/dR ) at R_0, with dx/dR read off the field rather than
-	 * differenced. MIRROR-PLAN.md section 5.
+	 * differenced.
 	 *
 	 * @param field  x( R, 0 ) and dx/dR in the flux variable the caller's
 	 *               profiles take -- PHYSICAL psi for meq::RotatingSource, Psi
@@ -454,7 +456,7 @@ namespace meq
 			 * dF/dW AND dF/dW' AT FIXED ( R, psi ), W( psi ) = R_0( psi )^2/2
 			 * the HALF SQUARED CROSSING -- the derivatives of f() with respect
 			 * to the table's value and slope at this point's psi, the other
-			 * profiles and R held. MIRROR-PLAN.md section 5, and the columns of
+			 * profiles and R held -- the columns of
 			 * the bordered midplane gauge, GradShafranovSolver::
 			 * setMidplaneGaugeKnots(): with R_0 at a set of knots as border
 			 * unknowns, F depends on each knot through W and W' alone, and the

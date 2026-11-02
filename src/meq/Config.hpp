@@ -649,7 +649,7 @@ namespace meq
 		// midplane gauges, which have no constant radius.
 		double referenceRadius = 1.0;
 		// Gauge: "fixed-radius" (the default), "midplane" or "vacuum-midplane",
-		// MIRROR-PLAN.md section 5. The midplane gauge makes each Density the
+		// docs/rotation.rst, The gauge. The midplane gauge makes each Density the
 		// physical density where its flux surface crosses z = 0, which keeps a
 		// high-Mach, multi-species mirror's densities within a double; it needs psi
 		// monotone along z = 0, so it is accepted only on a mirror --

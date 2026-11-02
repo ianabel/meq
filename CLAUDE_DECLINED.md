@@ -111,6 +111,10 @@ or that code cites by section number, stay where they are and are indexed under
 * **Toroidal flow and the mirror**
   * *XP-1's element flood fill on the mirror path*
   * *A plasma-current border for the mirror*
+  * *A user-supplied gauge curve, as a table file*
+  * *The midplane gauge's knots started from a vacuum-gauge solve*
+  * *The frozen midplane table, and the outer loop on the curve*
+  * *Tuning `R_ref`, and RoPP's flux-surface-average gauge, for a high-Mach mirror*
 * **Interpolatory HDG**
   * *The interpolatory source: seven hypotheses rejected*
 * **Output and sampling**
@@ -1988,20 +1992,20 @@ re-doing.*
 
 ### XP-1's element flood fill on the mirror path
 
-**Declined**, dissolved by the axial cutoff (`MIRROR-PLAN.md` item 2). The
-element-level half of the support takes the connected component containing the
-magnetic axis. A mirror has no axis, and a flux-labelled annulus is connected
+**Declined**, dissolved by the axial cutoff (`docs/rotation.rst`, *A magnetic
+mirror*). The element-level half of the support takes the connected component
+containing the magnetic axis. A mirror has no axis, and a flux-labelled annulus is connected
 *through the tube* to the ends of the machine — so the fill neither starts nor
 terminates where it should.
 
 **THE AXIAL CUTOFF REMOVES THE QUESTION.** With `|z| ≤ z_edge` the support is a
 bounded annular box, defined pointwise and needing no seed and no connected
 component. So the fill is simply not wanted on this path — which is a decision
-the plan can take rather than a `2 × 2` it has to run. What stays live in
-`MIRROR-PLAN.md` is that turning it off must be a **stated** branch a test
-asserts, not a flag that happens to be false.
-
-*From `MIRROR-PLAN.md` §3.*
+the design can take rather than a `2 × 2` it has to run. What stays live is
+that turning it off is a **stated** branch a test asserts, not a flag that
+happens to be false: `plasmaComponentWanted()` is the branch, and
+`MirrorSupport` asserts it against a one-sided control on the same field
+(MR-1, → [M-258](MEASUREMENTS.md#m-258)).
 
 ### A plasma-current border for the mirror
 
@@ -2012,8 +2016,6 @@ support being free. On the mirror **both** labels are pinned at prescribed
 points, so the support is not free and the eigenvalue does not arise — geq
 prescribes physical densities and temperatures and never a current. Expect to
 need no current border, and treat needing one as a finding.
-
-*From `MIRROR-PLAN.md`, What does NOT bite, which is worth saying.*
 
 ### A user-supplied gauge curve, as a table file
 
@@ -2034,8 +2036,6 @@ with a quadratic Newton is the bordered route — `R_0` at the knots as border
 unknowns, which is how `Gauge = "midplane"` solves — not a frozen copy of
 someone's answer.
 
-*From `MIRROR-PLAN.md` §5.*
-
 ### The midplane gauge's knots started from a vacuum-gauge solve
 
 **Measured and declined.** The guess: solve the same densities first on the
@@ -2051,8 +2051,6 @@ hand-over. Its start's distance from the answer grows with the pressure, 2% to
 first (→ [M-284](MEASUREMENTS.md#m-284)). So the knots start on the
 starting iterate's own crossings.
 
-*From `MIRROR-PLAN.md` §5.*
-
 ### The frozen midplane table, and the outer loop on the curve
 
 **Retired, measured.** A crossing table tabulated once per Newton iteration and
@@ -2065,7 +2063,18 @@ knots' cost. It stays a test-side harness. Neither lifts the pressure ceiling:
 a fixed residual with an exact Jacobian stalls where they did
 (→ [M-285](MEASUREMENTS.md#m-285)).
 
-*From `MIRROR-PLAN.md` §5.*
+### Tuning `R_ref`, and RoPP's flux-surface-average gauge, for a high-Mach mirror
+
+**Falsified, and rejected.** The fixed-radius gauge carries every surface's
+densities to one radius through an exponent linear in the species mass, which
+at `M = 6` puts a three-species mirror's carbon table out of a double's reach.
+**Tuning `ReferenceRadius` does not help**: it already sits at the
+range-minimising value (→ [M-167](MEASUREMENTS.md#m-167) §7). **RoPP's own
+gauge, `⟨φ₀⟩_ψ = 0`, is rejected**: it is a flux-surface average of the unknown
+on every surface, where the midplane gauge needs one crossing per surface along
+one line, a 1D root find on a monotone function — and its crossings are border
+unknowns of the bordered Newton, so its Jacobian is whole
+(→ [M-278](MEASUREMENTS.md#m-278), [M-283](MEASUREMENTS.md#m-283)).
 
 ## Interpolatory HDG
 
@@ -2336,8 +2345,6 @@ they stay where they are; this index makes the catalogue complete.
 - `INVERSION-PLAN.md` IN-3: a parity basis (Falsified, useless) and "the layout is the lever" (Falsified)
 - `INVERSION-PLAN.md` IN-4: the width penalty (loses), the gauge as a null subspace (wrong), an undamped pseudo-inverse (fails) and the prescribed-angle acceptances (not re-asserted)
 - `INVERSION-PLAN.md` §11: the cost model (Falsified, M-49), threaded BLAS for extraction (Declined) and automatic per-surface parallelism (Declined)
-- `MIRROR-PLAN.md` item 6 and its fix: tuning `R_ref` (Falsified, M-167), a midplane gauge (Declined) and RoPP's average gauge (Rejected)
-- `MIRROR-PLAN.md` *Risks*: risks 1 to 3 retired or dissolved (M-169)
 - `PLASMA-EDGE-PLAN.md` header: the whole plan deferred on cost-benefit, `j ≥ 1` already giving `k+2` at `k ≤ j`; "the transfer costs an order" withdrawn (M-83); `k+1.5` as PE-0's acceptance falsified (M-81).
 - `PLASMA-EDGE-PLAN.md` §6, notes under the staging table: quadrature and the fixture ruled out as the `j = 2, k = 3` anomaly's cause, the "270° staircase" withdrawn (M-84), and the corner as the cause of fragility falsified.
 - `PLASMA-EDGE-PLAN.md` §7: the X-point diagnosis half wrong, and the evidence against the premise disposed of.

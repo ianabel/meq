@@ -1449,7 +1449,7 @@ BOOST_AUTO_TEST_CASE( anUnavailableTraceSolverIsRefused )
 
 /*
  * AxisConstraint::PrescribedPoint's REFUSALS, which are what keep a prescribed
- * point from being DEFAULTED. MIRROR-PLAN.md MR-2; the acceptance, which needs
+ * point from being DEFAULTED. MR-2; the acceptance, which needs
  * a solve, is PrescribedAxisPoint.cpp.
  *
  * Every candidate default chooses an equilibrium -- the symmetry axis carries

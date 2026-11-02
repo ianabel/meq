@@ -1133,7 +1133,7 @@ BOOST_AUTO_TEST_CASE( theRotatingNormalisationDerivativesAreAnalytic )
 
 /*
  * A MIRROR'S SUPPORT IS A BOX IN ( Psi, z ), AND THE SOURCE MUST VANISH ON ALL
- * THREE OF ITS SIDES. MIRROR-PLAN.md MR-1.
+ * THREE OF ITS SIDES. MR-1.
  *
  * A mirror has no magnetic axis. Its plasma is an ANNULUS labelled by two
  * prescribed flux surfaces -- psi_ax the INNER one and psi_bnd the OUTER -- so
@@ -1351,7 +1351,7 @@ BOOST_AUTO_TEST_CASE( aBoxWithoutAFinitePositiveEdgeIsRefused )
 }
 
 // ---------------------------------------------------------------------------
-// THE MIDPLANE GAUGE. MIRROR-PLAN.md section 5: phi_0 pinned where each flux
+// THE MIDPLANE GAUGE: phi_0 pinned where each flux
 // surface crosses z = 0, R_0( psi ), rather than at a constant R_ref.
 // ---------------------------------------------------------------------------
 
@@ -2025,7 +2025,7 @@ BOOST_AUTO_TEST_SUITE_END()
 /*
  * THE FIXED-CURVE GAUGE, meq::RotatingSource::Gauge::FixedCurve: phi_0 pinned on
  * a curve R_g( Psi ) given once and never replaced -- the vacuum's crossing, in
- * the solver. MIRROR-PLAN.md section 5, [M-281](MEASUREMENTS.md#m-281).
+ * the solver. [M-281](MEASUREMENTS.md#m-281).
  */
 namespace
 {

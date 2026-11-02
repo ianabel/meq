@@ -519,6 +519,60 @@ point filaments, electrons and deuterons in rigid rotation — which the test
 suite also poses through the library and compares with the binary's answer
 degree of freedom for degree of freedom.
 
+Nothing in the rotating source changes for a mirror. What changes is how the
+free-boundary problem is posed, since every free-boundary default — a magnetic
+axis to locate, a support bounded by one flux surface, a gauge at one radius —
+was written for a tokamak.
+
+.. _rotation-mirror-exterior:
+
+The standing assumption
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A mirror is posed on the same exterior as a tokamak: :math:`\Gamma` is a
+semicircle centred on the axis, ``[boundary.exterior]``, and everything beyond
+it is the sum of current-free Gegenbauer modes decaying as :math:`\rho^{1-n}`.
+That map is exact only where the exterior carries no toroidal current, so MEQ
+assumes
+
+.. important::
+
+   :math:`\Gamma` **is large enough, and the plasma confined well enough, that
+   the plasma's toroidal current is negligible on and beyond** :math:`\Gamma`.
+
+It is **not** the assumption that there is no plasma outside :math:`\Gamma` —
+only that whatever is there does not move the field. It is a modelling choice,
+and the right one for a well-confined centrifugal mirror: the plasma ends inside
+the machine, so a :math:`\Gamma` placed outside the machine has no plasma current
+beyond it **at any Mach number**. That was measured on the example's machine at
+low and high Mach alike. Lower Mach costs exterior modes, and not many; it never
+costs admissibility. The flux tube's flaring into the expander does not reach
+:math:`\Gamma` either, because the support's axial cutoff (below) ends the
+current at the throat.
+
+**What decides** :math:`\rho_\Gamma` **is the copper, not the plasma.** A
+mirror's coil packs sit at radii the plasma's own throat reaches, so no
+semicircle passes between them and the plasma: the packs are inside
+:math:`\Gamma`, meshed or subtracted (``[conductors]``), and the mode count is
+set by their field's tail on :math:`\Gamma`, which falls as
+:math:`(r_{\mathrm{coil}}/\rho_\Gamma)^n`. The example puts :math:`\Gamma` at
+3 m, clear of copper reaching 2.18 m, with 32 modes, on the plateau of a sweep
+of both. Area outside the machine is vacuum where the field is smooth, and the
+adaptive loop coarsens it unprompted.
+
+**And the run checks the assumption rather than taking it.** The Mach number is
+a property of the configuration while the current on :math:`\Gamma` is a
+property of the answer, so every free-boundary mirror run evaluates its source
+on the exterior expansion's flux and reports the fraction of
+:math:`\int |F|/R` its answer would put beyond :math:`\Gamma` (``source outside
+Gamma`` on the console, ``source_outside_gamma_fraction`` in the ``.nc``),
+counting only the part of the exterior support connected to :math:`\Gamma`, and
+warns when that is above :math:`10^{-4}`. On the example the fraction is
+exactly zero. The cure for a warning is a larger ``Radius``.
+
+The two labels
+~~~~~~~~~~~~~~
+
 **A mirror has no magnetic axis.** Its plasma is an annulus between two
 prescribed flux surfaces, so both labels are read at points:
 :math:`\psi_{\mathrm{inner}}` at the limiting electrode,
@@ -530,6 +584,11 @@ vacuum's here — so ``[source] PsiAxis`` is refused beside the box. The inner
 label is the *smaller* flux, so the span
 :math:`\psi_{\mathrm{inner}} - \psi_{\mathrm{bnd}}` is **negative**, and
 nothing needs saying about that: :math:`\Psi` is written in the span.
+The inner label is not located: it is
+``AxisConstraint::PrescribedPoint`` (:doc:`normalised_flux`), the same exact
+border row the outer label's point gives :math:`\psi_{\mathrm{bnd}}`, so
+nothing is searched for and nothing is differenced, and the magnetic-axis
+check is not asked of it.
 
 **The profiles are in** :math:`\Psi`, **which is** :math:`1 - \psi_N` in
 ``geq``'s convention: :math:`\Psi = 1` at the inner label and 0 at the outer.
@@ -539,22 +598,53 @@ its abscissa reversed and its slopes negated. Their slopes, and so the source
 of the support as well as :math:`\Psi = 0`; the example's slopes fall as
 :math:`(1 - \Psi)^2` and :math:`\Psi^3` at the two.
 
-**The support is a box**, ``[source] SupportShape = "box"``:
-:math:`0 < \Psi \le 1` and :math:`|z| \le` ``AxialEdge``. The axial end is a
-prescribed modelling cutoff at the throat — beyond it the same :math:`\Psi`
-recurs in the expander, where the centrifugal potential no longer confines —
-so the run reports the current density it cuts through (``axial cutoff`` on the
-console, ``axial_cutoff_relative`` in the ``.nc``). ``[mesh.generate]
-AlignPlasma`` puts the cutoff on element faces, since a jump across a line that
-cuts elements costs the order. :ref:`configuration-mirror-support` has the keys
-and what is refused beside them.
+``GGPrime = 0``: a mirror has no toroidal field, and that is also what lets the
+plasma's flux reach :math:`R = 0` without an infinite current density there
+(:ref:`running-refusals`).
 
-**And** :math:`\Gamma` **must clear the plasma.** The exterior beyond
-``[boundary.exterior] Radius`` is current-free by construction, so the run
-reports the fraction of :math:`\int |F|/R` its answer would put beyond it
-(``source outside Gamma`` on the console, ``source_outside_gamma_fraction`` in
-the ``.nc``) and warns when that is above :math:`10^{-4}`. On the example,
-:math:`\Gamma` is outside the machine and the fraction is exactly zero.
+The support: a box in :math:`(\Psi, z)`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``[source] SupportShape = "box"`` makes the support
+
+.. math::
+
+   0 < \Psi \le 1 \qquad\text{and}\qquad |z| \le z_{\mathrm{edge}},
+
+with :math:`z_{\mathrm{edge}}` the key ``AxialEdge``. A tokamak's support is
+:math:`\Psi > 0` alone, because there :math:`\psiax` is the extremum of
+:math:`\psi` and :math:`\Psi \le 1` holds by itself; a mirror needs the two
+further bounds.
+
+**Radially**, the inner label is not an extremum, so :math:`\Psi > 0` alone
+would admit everything inside the inner surface, down to :math:`R = 0`. The
+profiles hold their end values outside their tables, so the source there would
+not vanish: it would sit at its inner-edge value all the way to the axis.
+
+**Axially**, beyond the throat the flux tube flares into the expander, the
+centrifugal potential stops confining, and the density is best taken as zero in
+this model. Flux is not a function of :math:`z` along a tube, so the same
+:math:`\Psi` recurs in the expander, and no flux-based mask can exclude it. The
+cutoff :math:`|z| \le z_{\mathrm{edge}}` is **prescribed**, at or near the
+throat, and it is a modelling approximation: where current still flows there it
+is a jump in :math:`F`. So the run reports the current density it cuts through
+beside the peak (``axial cutoff`` on the console, ``axial_cutoff_relative`` in
+the ``.nc``), and ``[mesh.generate] AlignPlasma`` puts the cutoff on element
+faces, since a jump across a line that cuts elements costs the order.
+
+The box is defined pointwise, so it needs no seed and no connected component:
+the element-level fill that keeps a tokamak's support to the component around
+its magnetic axis is switched off under it, as a stated branch.
+:ref:`configuration-mirror-support` has the keys and what is refused beside
+them.
+
+Under ``Gauge = "midplane"`` or ``"vacuum-midplane"`` (:ref:`rotation-gauge`)
+the densities are stated at a midplane crossing — the solved surface's or the
+vacuum's — rather than at one radius, which is what keeps a high-Mach,
+multi-species mirror's densities within a double.
+
+The stabilisation
+~~~~~~~~~~~~~~~~~
 
 **The stabilisation is the mirror's own.** Beside the box the HDG stabilisation
 defaults to :math:`\tau = 3/\max(R, 0.1\,\mathrm{m})` rather than the constant
@@ -568,10 +658,6 @@ that fold moves far above it, and in the midplane gauge the same mesh solves
 ten times the example's density.
 In the vacuum-midplane gauge the posed problem has a fold of its own, near
 eight times the shipped density, which no stabilisation or mesh moves.
-
-``GGPrime = 0``: a mirror has no toroidal field, and that is also what lets the
-plasma's flux reach :math:`R = 0` without an infinite current density there
-(:ref:`running-refusals`).
 
 Output
 ------

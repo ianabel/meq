@@ -387,7 +387,7 @@ exit 1 and write nothing; `docs/running.rst`'s gloss on code 1 is amended, since
 it said *"nothing was attempted"*.
 
 **A MIRROR GOES THROUGH THE SAME DRIVER, AND FIVE TOKAMAK ASSUMPTIONS ARE
-BRANCHED OR REFUSED BESIDE IT** (`MIRROR-PLAN.md` MR-5,
+BRANCHED OR REFUSED BESIDE IT** (MR-5, `CLAUDE_FLOW.md`,
 → **[M-264](MEASUREMENTS.md#m-264)**). `[source] SupportShape = "box"` with
 `[boundary.electrode]` and `[boundary.limiter]` poses two labels at prescribed
 points, `ψ_inner` at the electrode and `ψ_bnd` at the limiter:
