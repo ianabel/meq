@@ -162,15 +162,25 @@ namespace meq
 							"configuration scales that profile. A table is the profile "
 							"itself, so the two cannot both be meant: take the scale out "
 							"of the file, or into the table" );
-					if ( !normalised && found->second.abscissa != ProfileAbscissa::Psi )
+					ProfileAbscissa const abscissa = found->second.abscissa;
+					if ( !normalised && abscissa != ProfileAbscissa::PoloidalFlux )
 						throw ConfigError( configFileName, "source.Normalised",
 							std::string( "the table for \"" ) + slot + "\" is in "
-							+ profileAbscissaName( found->second.abscissa )
+							+ profileAbscissaName( abscissa )
 							+ ", a normalised flux, and this source is not normalised: "
-							"its profiles are functions of psi itself, so only \"Psi\" "
-							"names their abscissa" );
+							"its profiles are functions of psi itself, so a table is in "
+							"\"psi\"" );
 					try
 					{
+						if ( normalised && abscissa == ProfileAbscissa::PoloidalFlux )
+						{
+							inFlux.push_back( slot );
+							// GGPrime is a flux derivative, every other slot a
+							// value (meq::FluxTableProfile's k).
+							return std::make_shared<FluxTableProfile const>(
+								profileFromTable( found->second ), fluxLabels(),
+								slot == "GGPrime" ? 1 : 0 );
+						}
 						return profileFromTable( found->second );
 					}
 					catch ( std::invalid_argument const &error )
@@ -178,6 +188,64 @@ namespace meq
 						throw ConfigError( configFileName, "source." + key,
 						                   "the table for \"" + slot + "\": " + error.what() );
 					}
+				}
+
+				/// A slot the configuration's own file supplied.
+				void noteFile( std::string const &slot )
+				{
+					fromFiles.push_back( slot );
+				}
+
+				/// The labels every table in psi of this source reads, made on
+				/// the first one.
+				std::shared_ptr<FluxLabels> fluxLabels()
+				{
+					if ( !labels )
+						labels = std::make_shared<FluxLabels>();
+					return labels;
+				}
+
+				/// Whether any table is in psi, for a normalised source: then
+				/// no profile may be in Psi, so that F is label-free at fixed
+				/// psi (meq::FluxTableProfile), and the gauge must not tabulate
+				/// in Psi either.
+				bool anyInFlux() const
+				{
+					return !inFlux.empty();
+				}
+
+				void requireNothingInPsi( RotatingParameters const &parameters ) const
+				{
+					if ( parameters.gauge != RotatingGaugeType::FixedRadius )
+						throw ConfigError( configFileName, "source.Gauge",
+							"a table in psi beside a midplane gauge: the gauge "
+							"tabulates its crossings in Psi, which would bring the "
+							"labels back into F. Tables in psi take the fixed-radius "
+							"gauge" );
+					std::vector<std::string> inPsi = fromFiles;
+					for ( std::string const &slot : taken )
+						if ( std::find( inFlux.begin(), inFlux.end(), slot ) == inFlux.end() )
+							inPsi.push_back( slot );
+					if ( !inPsi.empty() )
+						throw ConfigError( configFileName, "source",
+							"\"" + inFlux.front() + "\" is a table in psi and \""
+							+ inPsi.front() + "\" is a profile of Psi. A normalised "
+							"source with a table in psi takes every profile in psi, or "
+							"as a constant: one in each would make F depend on the labels "
+							"neither as the Psi form nor not at all. Give \""
+							+ inPsi.front() + "\" in psi too" );
+					// A CONSTANT GGPrime is d( g^2/2 )/dPsi, which the source
+					// divides by the span, so it moves with the labels unless
+					// it is zero. Every other constant is a value, and does not.
+					bool const ggTable = std::find( inFlux.begin(), inFlux.end(), "GGPrime" )
+					                     != inFlux.end();
+					if ( !ggTable && parameters.ggPrimeFile.empty()
+					     && parameters.ggPrime*parameters.ggPrimeScale != 0.0 )
+						throw ConfigError( configFileName, "source.GGPrime",
+							"a constant GGPrime beside tables in psi: a normalised "
+							"source's GGPrime is d( g^2/2 )/dPsi, and a constant one "
+							"is a d( g^2/2 )/dpsi that moves with the span. Give it as "
+							"a table in psi, or zero" );
 				}
 
 				/// Refuse every table nothing took, naming the slots there are.
@@ -203,6 +271,9 @@ namespace meq
 				bool normalised;
 				std::string const &configFileName;
 				std::vector<std::string> taken;
+				std::vector<std::string> inFlux;
+				std::vector<std::string> fromFiles;
+				std::shared_ptr<FluxLabels> labels;
 		};
 
 		/// A table if one names the slot, else the configuration's own.
@@ -214,6 +285,8 @@ namespace meq
 		{
 			if ( auto table = lookup.take( slot, key, given, scale ) )
 				return table;
+			if ( given && !fileName.empty() )
+				lookup.noteFile( slot );
 			return loadEitherProfile( value, fileName, scale, given, key, configFileName );
 		}
 
@@ -484,13 +557,18 @@ namespace meq
 			{
 				RotatingParameters const &parameters = config.getRotating();
 				RotatingPieces pieces = loadRotating( parameters, configFileName, lookup );
+				if ( lookup.anyInFlux() )
+					lookup.requireNothingInPsi( parameters );
 
 				return guarded( [ & ]() -> std::shared_ptr<NormalisedSource>
 				{
-					return std::make_shared<NormalisedRotatingSource>( std::move( pieces.species ),
+					auto built = std::make_shared<NormalisedRotatingSource>( std::move( pieces.species ),
 						std::move( pieces.omega ), std::move( pieces.ggPrime ),
 						parameters.referenceRadius, psiAxis, parameters.mu0,
 						RotatingSource::Closure::Automatic, rotatingGauge( parameters ) );
+					if ( lookup.anyInFlux() )
+						built->setProfilesInFlux( lookup.fluxLabels() );
+					return built;
 				}, configFileName, "source.species" );
 			}
 

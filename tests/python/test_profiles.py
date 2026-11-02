@@ -9,6 +9,10 @@ imports meq alone, for the reason harness.run_module() gives.
 
 import json
 import math
+import re
+import shutil
+import subprocess
+import sys
 import tomllib
 
 # meq FIRST (meq/__init__.py).
@@ -18,7 +22,7 @@ import netCDF4
 import numpy
 import pytest
 
-from harness import EXAMPLES, compare, fresh, run_module
+from harness import EXAMPLES, compare, fresh, run_binary, run_module
 
 CASE = "rotating-normalised"
 SLOT = "species.D.Density"
@@ -78,11 +82,15 @@ def solve(name, config, profiles=None):
     return where
 
 
-def psi(where):
-    with netCDF4.Dataset(where / f"{CASE}.nc") as nc:
+def psi_of(where, stem):
+    with netCDF4.Dataset(where / f"{stem}.nc") as nc:
         nc.set_auto_mask(False)
         inside = nc["inside"][...] == 1
         return numpy.asarray(nc["psi"][...])[inside]
+
+
+def psi(where):
+    return psi_of(where, CASE)
 
 
 def test_a_table_of_a_files_own_knots_is_the_file(unscaled):
@@ -193,3 +201,77 @@ def test_a_source_without_species_takes_no_table():
     flat = meq.Table([0.0, 1.0], [1.0, 1.0], [0.0, 0.0], abscissa="Psi")
     with pytest.raises(meq.ConfigError):
         meq.Equilibrium.from_dict(tables, base_dir=str(EXAMPLES), profiles={"PPrime": flat})
+
+
+# ---- tables in psi itself (PY-2b) ----------------------------------------------
+
+def newton_steps(report):
+    found = re.search(r"converged in (\d+) Newton iterations", report.read_text())
+    assert found, f"no convergence line in {report}"
+    return int(found.group(1))
+
+
+def test_a_mirror_in_psi_is_the_mirror():
+    """mirror-rotating from its files, through meq-run, and then with every
+    profile -- both temperatures, the electron density and omega -- as a table
+    in psi, mapped from the file's at the labels that run converged to: the
+    same equilibrium, in a solve whose labels float, with Newton taking as many
+    steps. At fixed psi the tables do not move with the labels, and the
+    source reports their derivatives as zero (SourceFactoryTests)."""
+    toml = EXAMPLES / "mirror-rotating.toml"
+    tables = tomllib.loads(toml.read_text())
+    from_file = fresh("mirror/file")
+    assert run_binary(toml, from_file, wrapper=True) == 0
+    with netCDF4.Dataset(from_file / "mirror-rotating.nc") as nc:
+        axis, boundary = nc.getncattr("psi_axis"), nc.getncattr("psi_boundary")
+    span = axis - boundary
+
+    def in_psi(name):
+        x, f, d = read_table(EXAMPLES / name)
+        knots = sorted(zip((boundary + span*a for a in x), f, (c/span for c in d)))
+        return [k[0] for k in knots], [k[1] for k in knots], [k[2] for k in knots]
+
+    source = tables["source"]
+    species = {one["Name"]: one for one in source["species"]}
+    slots = {"Omega": source["OmegaFile"],
+             "species.electron.Temperature": species["electron"]["TemperatureFile"],
+             "species.electron.Density": species["electron"]["DensityFile"],
+             "species.deuterium.Temperature": species["deuterium"]["TemperatureFile"]}
+    profiles = {slot: (*in_psi(name), "psi") for slot, name in slots.items()}
+
+    in_flux = fresh("mirror/psi")
+    for made in from_file.iterdir():
+        if made.suffix in (".msh", ".meq-mesh"):
+            shutil.copy2(made, in_flux / made.name)
+    (in_flux / "tables.json").write_text(json.dumps(profiles))
+    preamble = ("import json\n"
+                "profiles = {slot: meq.Table(x, f, d, abscissa=a) for slot, (x, f, d, a)"
+                " in json.load(open('tables.json')).items()}\n")
+    run_module(in_flux, f"meq.Equilibrium({str(toml)!r}, mesh_ready=True, profiles=profiles)",
+               preamble)
+
+    with netCDF4.Dataset(in_flux / "mirror-rotating.nc") as nc:
+        assert abs(nc.getncattr("psi_axis") - axis) < 1e-12*abs(axis)
+        assert abs(nc.getncattr("psi_boundary") - boundary) < 1e-12*abs(boundary)
+    a, b = psi_of(from_file, "mirror-rotating"), psi_of(in_flux, "mirror-rotating")
+    gap = numpy.max(numpy.abs(a - b)) / numpy.max(numpy.abs(a))
+    steps = newton_steps(from_file / "report.txt"), newton_steps(in_flux / "report.txt")
+    print(f"\n  the mirror in psi against its files: {gap:.2e} of max |psi|, "
+          f"Newton {steps[1]} steps against {steps[0]}")
+    assert gap < 1e-11
+    assert abs(steps[1] - steps[0]) <= 1, "Newton takes more steps on tables in psi"
+
+
+def test_a_table_in_psi_refuses_a_midplane_gauge():
+    """mirror-three-species is in the midplane gauge, which tabulates its
+    crossings in Psi; a table in psi there is refused, by name."""
+    flat = "meq.Table([0.0, 1.0], [1.0, 1.0], [0.0, 0.0], abscissa='psi')"
+    where = fresh("midplane")
+    done = subprocess.run(
+        [sys.executable, "-c",
+         "import meq\n"
+         f"meq.Equilibrium({str(EXAMPLES / 'mirror-three-species.toml')!r}, mesh_ready=True,"
+         f" profiles={{'Omega': {flat}}})\n"],
+        cwd=where, capture_output=True, text=True)
+    assert done.returncode != 0
+    assert "ConfigError" in done.stderr and "midplane gauge" in done.stderr, done.stderr[-800:]

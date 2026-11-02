@@ -746,10 +746,25 @@ namespace meq
 			/// setMidplaneField().
 			RotatingSource & unnormalised();
 
+			/**
+			 * EVERY PROFILE IS A TABLE IN psi OR A CONSTANT, and `labels` is
+			 * what the tables read their map through (meq::FluxTableProfile).
+			 * setNormalisation() keeps them current from here on, and
+			 * normalisationDerivatives() answers zero inside the plasma: at
+			 * fixed psi such a source does not depend on the labels at all, the
+			 * moving support aside, whose surface term this interface leaves
+			 * out for every source on the precondition setPlasmaSupport()
+			 * states. meq::makeNormalisedSource() calls it, having checked the
+			 * premise and refused the midplane gauges, whose crossings are
+			 * tabulated in Psi.
+			 */
+			void setProfilesInFlux( std::shared_ptr<FluxLabels> labels );
+
 		private:
 			RotatingSource inner;
 			double psiAxisValue;
 			double psiBoundaryValue = 0.0;
+			std::shared_ptr<FluxLabels> fluxLabels;
 	};
 
 }

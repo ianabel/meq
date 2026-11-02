@@ -1173,6 +1173,20 @@ namespace meq
 
 		psiAxisValue = psiAxis;
 		psiBoundaryValue = psiBoundary;
+		if ( fluxLabels )
+		{
+			fluxLabels->axis = psiAxis;
+			fluxLabels->boundary = psiBoundary;
+		}
+	}
+
+	void NormalisedRotatingSource::setProfilesInFlux( std::shared_ptr<FluxLabels> labels )
+	{
+		if ( !labels )
+			throw std::invalid_argument( "meq::NormalisedRotatingSource::setProfilesInFlux: no labels" );
+		fluxLabels = std::move( labels );
+		fluxLabels->axis = psiAxisValue;
+		fluxLabels->boundary = psiBoundaryValue;
 	}
 
 	double NormalisedRotatingSource::boundaryNormalisation() const
@@ -1251,6 +1265,20 @@ namespace meq
 		// EDGE, and then straddles it. Word for word
 		// meq::NormalisedMHDSource's position.
 		if ( !insidePlasma( radius, z, psi ) )
+		{
+			dFdAxis = 0.0;
+			dFdBoundary = 0.0;
+			return true;
+		}
+
+		/*
+		 * PROFILES IN psi ITSELF, AND THE LABELS ARE NOT IN F. Every profile
+		 * is g( Psi ) = f( psi_bnd + span Psi ) or a constant, so inner.f() at
+		 * the Psi of this psi is f's own pressure derivative times span, and
+		 * the 1/span below cancels it: F is mu0 R^2 dp/dpsi from tables of
+		 * psi, which no label enters.
+		 */
+		if ( fluxLabels )
 		{
 			dFdAxis = 0.0;
 			dFdBoundary = 0.0;

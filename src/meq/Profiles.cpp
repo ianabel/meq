@@ -668,11 +668,44 @@ namespace meq
 		return valueData;
 	}
 
+	FluxTableProfile::FluxTableProfile( std::shared_ptr<Profile const> tableIn,
+	                                    std::shared_ptr<FluxLabels const> labelsIn,
+	                                    int spanPower )
+		: inPsi( std::move( tableIn ) ), labels( std::move( labelsIn ) ), power( spanPower )
+	{
+		if ( !inPsi || !labels )
+			throw std::invalid_argument( "meq::FluxTableProfile: no table, or no labels" );
+		if ( power != 0 && power != 1 )
+			throw std::invalid_argument( "meq::FluxTableProfile: the span power is 0 or 1" );
+	}
+
+	double FluxTableProfile::operator()( double psi ) const
+	{
+		double const span = labels->axis - labels->boundary;
+		double const scale = power == 1 ? span : 1.0;
+		return scale*( *inPsi )( labels->boundary + span*psi );
+	}
+
+	double FluxTableProfile::prime( double psi ) const
+	{
+		double const span = labels->axis - labels->boundary;
+		double const scale = power == 1 ? span : 1.0;
+		return scale*span*inPsi->prime( labels->boundary + span*psi );
+	}
+
+	double FluxTableProfile::doublePrime( double psi ) const
+	{
+		double const span = labels->axis - labels->boundary;
+		double const scale = power == 1 ? span : 1.0;
+		return scale*span*span*inPsi->doublePrime( labels->boundary + span*psi );
+	}
+
 	std::shared_ptr<Profile const> profileFromTable( ProfileTable const & table )
 	{
 		switch ( table.abscissa )
 		{
 			case ProfileAbscissa::Psi:
+			case ProfileAbscissa::PoloidalFlux:
 				return std::make_shared<SplineProfile const>( table.knots );
 
 			case ProfileAbscissa::PsiN:
@@ -779,10 +812,12 @@ namespace meq
 			return ProfileAbscissa::PsiN;
 		if ( name == "sqrt_psi_n" )
 			return ProfileAbscissa::SqrtPsiN;
+		if ( name == "psi" )
+			return ProfileAbscissa::PoloidalFlux;
 		throw std::invalid_argument(
 			"meq: no abscissa \"" + name + "\": a table is in \"Psi\" (MEQ's "
-			"normalised flux, 1 at the axis), \"psi_n\" (1 - Psi, 0 at the axis) or "
-			"\"sqrt_psi_n\"" );
+			"normalised flux, 1 at the axis), \"psi_n\" (1 - Psi, 0 at the axis), "
+			"\"sqrt_psi_n\", or \"psi\" (the poloidal flux itself, Wb/rad)" );
 	}
 
 	char const * profileAbscissaName( ProfileAbscissa abscissa )
@@ -795,6 +830,8 @@ namespace meq
 				return "psi_n";
 			case ProfileAbscissa::SqrtPsiN:
 				return "sqrt_psi_n";
+			case ProfileAbscissa::PoloidalFlux:
+				return "psi";
 		}
 		return "?";
 	}

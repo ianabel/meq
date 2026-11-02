@@ -2,6 +2,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -917,14 +918,17 @@ BOOST_AUTO_TEST_CASE( what_a_table_cannot_do_is_refused_by_name )
 			"Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\nDensity = 1.0\n"
 			"\n[[source.species]]\nName = \"electron\"\n"
 			"Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\nNeutralising = true\n" );
-		BOOST_TEST( refusedKey( [ & ]()
-		{
-			meq::makeSource( config.getSource(), config.getFileName(),
-				oneTable( "species.ion.Density", meq::ProfileAbscissa::PsiN, flat ) );
-		} ) == "source.Normalised" );
-		// "Psi" names a profile of psi there, and is taken.
+		for ( meq::ProfileAbscissa const normalisedName : { meq::ProfileAbscissa::Psi,
+		                                                    meq::ProfileAbscissa::PsiN,
+		                                                    meq::ProfileAbscissa::SqrtPsiN } )
+			BOOST_TEST( refusedKey( [ & ]()
+			{
+				meq::makeSource( config.getSource(), config.getFileName(),
+					oneTable( "species.ion.Density", normalisedName, flat ) );
+			} ) == "source.Normalised" );
+		// "psi" names a profile of psi there, and is taken.
 		BOOST_CHECK_NO_THROW( meq::makeSource( config.getSource(), config.getFileName(),
-			oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi, flat ) ) );
+			oneTable( "species.ion.Density", meq::ProfileAbscissa::PoloidalFlux, flat ) ) );
 	}
 
 	// Any table for a source whose profiles are not species.
@@ -988,6 +992,148 @@ BOOST_AUTO_TEST_CASE( species_without_rotation_are_the_static_source )
 			            == fromFiles->dFdPsi( radius, 0.2, psi ),
 			            boost::test_tools::tolerance( 1.0e-12 ) );
 		}
+}
+
+/*
+ * TABLES IN psi ITSELF FOR A NORMALISED SOURCE (PYTHON-PLAN.md, PY-2b): AT ITS
+ * LABELS THE SOURCE IS THE SAME SOURCE IN Psi, AND THE LABELS ARE NOT IN IT.
+ *
+ * The same density, omega and g g' twice: as tables in Psi, and as the tables
+ * in psi they map to at psi_ax = 0.25, psi_bnd = 0.02 -- psi = psi_bnd +
+ * span Psi, a value's slope divided by the span, and GGPrime, a derivative in
+ * the flux, divided by it once more. F and dF/dpsi agree to round-off at those
+ * labels. Then the labels move: the Psi source's F moves with them and the
+ * psi source's does not, so its label derivatives are zero -- checked against
+ * a central difference of F itself, not only read off normalisationDerivatives().
+ */
+namespace
+{
+	/// Knots of a table in Psi mapped to psi at the labels; `derivativePower`
+	/// 1 for a value, 2 for a derivative in the flux.
+	std::vector<meq::Knot> mappedToPsi( std::vector<meq::Knot> const &inPsi, double axis,
+	                                    double boundary, int derivativePower )
+	{
+		double const span = axis - boundary;
+		std::vector<meq::Knot> out;
+		for ( meq::Knot const &k : inPsi )
+		{
+			double const valueScale = derivativePower == 2 ? 1.0/span : 1.0;
+			out.push_back( meq::Knot{ boundary + span*k.psi, valueScale*k.value,
+			                          valueScale*k.derivative/span } );
+		}
+		if ( span < 0.0 )
+			std::reverse( out.begin(), out.end() );
+		return out;
+	}
+
+	std::string const fluxFixture =
+		"[source]\nType = \"rotating\"\n"
+		"Omega = 1.0\nGGPrime = 1.0\nReferenceRadius = 1.0\nMu0 = 1.0\n"
+		"Normalised = true\nPsiAxis = 0.25\n"
+		"\n[[source.species]]\nName = \"ion\"\n"
+		"Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\nDensity = 1.0\n"
+		"\n[[source.species]]\nName = \"electron\"\n"
+		"Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\nNeutralising = true\n";
+}
+
+BOOST_AUTO_TEST_CASE( tables_in_psi_are_the_source_in_Psi_at_its_labels )
+{
+	double const axis = 0.25;
+	double const boundary = 0.02;
+	std::vector<meq::Knot> const omega = { { 0.0, 0.5, 1.0 }, { 0.5, 1.2, 1.4 }, { 1.0, 2.0, 0.6 } };
+	std::vector<meq::Knot> const ggPrime = { { 0.0, 0.3, -0.2 }, { 1.0, 0.1, -0.2 } };
+
+	meq::ProfileTables inPsiTables;
+	inPsiTables[ "species.ion.Density" ] = { meq::ProfileAbscissa::Psi, cubicDensityKnots };
+	inPsiTables[ "Omega" ] = { meq::ProfileAbscissa::Psi, omega };
+	inPsiTables[ "GGPrime" ] = { meq::ProfileAbscissa::Psi, ggPrime };
+	meq::ProfileTables inFluxTables;
+	inFluxTables[ "species.ion.Density" ] = { meq::ProfileAbscissa::PoloidalFlux,
+	                                          mappedToPsi( cubicDensityKnots, axis, boundary, 1 ) };
+	inFluxTables[ "Omega" ] = { meq::ProfileAbscissa::PoloidalFlux,
+	                            mappedToPsi( omega, axis, boundary, 1 ) };
+	inFluxTables[ "GGPrime" ] = { meq::ProfileAbscissa::PoloidalFlux,
+	                              mappedToPsi( ggPrime, axis, boundary, 2 ) };
+
+	meq::Configuration const config = configure( fluxFixture );
+	auto const inPsi = meq::makeNormalisedSource( config.getSource(), config.getFileName(), inPsiTables );
+	auto const inFlux = meq::makeNormalisedSource( config.getSource(), config.getFileName(), inFluxTables );
+	inPsi->setNormalisation( axis, boundary );
+	inFlux->setNormalisation( axis, boundary );
+
+	for ( double const psi : { 0.03, 0.08, 0.135, 0.2, 0.245 } )
+		for ( double const radius : { 0.7, 1.0, 1.3 } )
+		{
+			BOOST_TEST( inFlux->f( radius, 0.1, psi ) == inPsi->f( radius, 0.1, psi ),
+			            boost::test_tools::tolerance( 1.0e-12 ) );
+			BOOST_TEST( inFlux->dFdPsi( radius, 0.1, psi ) == inPsi->dFdPsi( radius, 0.1, psi ),
+			            boost::test_tools::tolerance( 1.0e-11 ) );
+
+			double dAxis = 1.0, dBoundary = 1.0;
+			BOOST_TEST_REQUIRE( inFlux->normalisationDerivatives( radius, 0.1, psi, dAxis, dBoundary ) );
+			BOOST_TEST( dAxis == 0.0 );
+			BOOST_TEST( dBoundary == 0.0 );
+		}
+
+	// AND F ITSELF DOES NOT MOVE WITH THE LABELS, where the Psi source's does.
+	double const h = 1.0e-6;
+	double const radius = 1.1, psi = 0.12;
+	auto const at = [ & ]( std::shared_ptr<meq::NormalisedSource> const &source,
+	                       double a, double b )
+	{
+		source->setNormalisation( a, b );
+		return source->f( radius, 0.1, psi );
+	};
+	double const fluxAxis = ( at( inFlux, axis + h, boundary ) - at( inFlux, axis - h, boundary ) )/( 2.0*h );
+	double const fluxBoundary = ( at( inFlux, axis, boundary + h ) - at( inFlux, axis, boundary - h ) )/( 2.0*h );
+	double const psiAxis = ( at( inPsi, axis + h, boundary ) - at( inPsi, axis - h, boundary ) )/( 2.0*h );
+	double const scale = std::fabs( at( inFlux, axis, boundary ) );
+	BOOST_TEST( std::fabs( fluxAxis ) < 1.0e-6*scale );
+	BOOST_TEST( std::fabs( fluxBoundary ) < 1.0e-6*scale );
+	BOOST_TEST( std::fabs( psiAxis ) > 1.0e-2*scale,
+	            "the Psi source does not move with its labels either, so the case cannot tell" );
+}
+
+BOOST_AUTO_TEST_CASE( tables_in_psi_take_nothing_in_Psi )
+{
+	std::vector<meq::Knot> const flatFlux = { { 0.0, 1.0, 0.0 }, { 0.3, 1.0, 0.0 } };
+	auto const flux = [ & ]( std::string const &fixture, meq::ProfileTables const &tables )
+	{
+		meq::Configuration const config = configure( fixture );
+		return [ config, tables ]()
+		{
+			meq::makeNormalisedSource( config.getSource(), config.getFileName(), tables );
+		};
+	};
+	meq::ProfileTables const densityInFlux
+		= oneTable( "species.ion.Density", meq::ProfileAbscissa::PoloidalFlux, flatFlux );
+
+	// A density in psi, and GGPrime = 1 as a constant: a d( g^2/2 )/dPsi that
+	// moves with the span.
+	BOOST_TEST( refusedKey( flux( fluxFixture, densityInFlux ) ) == "source.GGPrime" );
+
+	// GGPrime = 0 is label-free, and with Omega a table in psi too, accepted.
+	std::string zeroGG = fluxFixture;
+	zeroGG.replace( zeroGG.find( "GGPrime = 1.0" ), 13, "GGPrime = 0.0" );
+	meq::ProfileTables both = densityInFlux;
+	both[ "Omega" ] = { meq::ProfileAbscissa::PoloidalFlux, flatFlux };
+	BOOST_CHECK_NO_THROW( flux( zeroGG, both )() );
+
+	// A table in Psi beside one in psi.
+	meq::ProfileTables mixed = both;
+	mixed[ "Omega" ] = { meq::ProfileAbscissa::Psi, flatFlux };
+	BOOST_TEST( refusedKey( flux( zeroGG, mixed ) ) == "source" );
+
+	// A file in Psi beside a table in psi.
+	ScratchFile const density( "meq_test_flux_omega.dat", "0.0 1.0 0.0\n1.0 1.0 0.0\n\n" );
+	std::string withFile = zeroGG;
+	withFile.replace( withFile.find( "Omega = 1.0" ), 11,
+	                  "OmegaFile = \"" + density.fileName() + "\"" );
+	BOOST_TEST( refusedKey( flux( withFile, densityInFlux ) ) == "source" );
+
+	// A midplane gauge is refused too, before anything else; it needs a
+	// mirror's box to parse at all, so PythonProfiles asks it of the shipped
+	// three-species mirror.
 }
 
 BOOST_AUTO_TEST_SUITE_END()
