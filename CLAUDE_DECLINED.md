@@ -2542,9 +2542,11 @@ table, XP-0 to XP-4.*
 ### NetCDF profiles and MaNTA coupling
 
 **Deferred.** The rest of the physics is deliberately not yet on the roadmap:
-several profiles read out of one NetCDF file, and coupling to MaNTA. `TODO`
-carries each with what has been established. Anisotropic pressure is planned,
-not deferred: `ANISOTROPY-PLAN.md`.
+several profiles read out of one NetCDF file, and the TIGHT coupling to MaNTA,
+MEQ as a `FieldModel` (`MANTA-COUPLING.md`). `TODO` carries each with what has
+been established. Anisotropic pressure is planned, not deferred:
+`ANISOTROPY-PLAN.md`. So is the LOOSE coupling, MEQ called from Python with no
+derivatives: `PYTHON-PLAN.md`, `ROADMAP.md` item 14.
 
 *From `ROADMAP.md`, Deliberately not yet.*
 
