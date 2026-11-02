@@ -382,8 +382,12 @@ a square root and a chain rule at each call site: the chain factor is
    :math:`R` *is* the minor radius :math:`a`, which grows like
    :math:`\varrho`, so :math:`\partial R/\partial\Psi_{\mathrm N}` goes
    like :math:`1/(2\varrho)` in every equilibrium. It is not the Shafranov
-   shift: a rigid shift is the :math:`m = 0` coefficient and is well behaved.
-   Flux-surface *averages* are unaffected, since :math:`V'` tends to a constant
+   shift: in :math:`R(\varrho, \theta)` the shift of a surface's centre is the
+   :math:`m = 0` coefficient, even in :math:`\varrho` and so smooth in
+   :math:`\Psi_{\mathrm N}`. (Expanding the *flux* about circles instead, as
+   :math:`\psi(r, \theta) = \psi_0(r) + \psi_1(r)\cos\theta`, the same shift
+   is the :math:`m = 1` harmonic of :math:`\psi`; that is the other common
+   sense of "the shift is :math:`m = 1`".) Flux-surface *averages* are unaffected, since :math:`V'` tends to a constant
    at the axis; what diverges is the derivative of a surface's *position*. A
    caller wanting a quantity that stays finite there wants
    ``radialDerivative()``, which is in the disc radius. Its growth as

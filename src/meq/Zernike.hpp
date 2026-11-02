@@ -248,8 +248,11 @@ namespace meq
 	 * d/dPsi_N at fixed theta diverges at the axis whenever the m = 1 content is
 	 * non-zero -- for a surface R = R_0 + a cos theta the m = 1 coefficient of R
 	 * IS the minor radius a, which grows like rho, so dR/dPsi_N goes like
-	 * 1/( 2 rho ) in every equilibrium. It is not the Shafranov shift: a rigid
-	 * shift is the m = 0 coefficient and is well behaved. A caller
+	 * 1/( 2 rho ) in every equilibrium. It is not the Shafranov shift: in
+	 * R( rho, theta ) the shift of a surface's centre is the m = 0
+	 * coefficient, even in rho and so smooth in Psi_N. (In an expansion of
+	 * psi about circles the same shift is the m = 1 harmonic of psi, which is
+	 * the other common sense of "the shift is m = 1".) A caller
 	 * wanting a quantity that stays finite there wants d/drho, which this file
 	 * also supplies. No exception is thrown: rho = 0 returns an infinity or a
 	 * NaN by the ordinary floating point rules, because this is called per
