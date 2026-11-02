@@ -1361,10 +1361,11 @@ namespace meq
 				 * assembled and nothing differenced.
 				 *
 				 * **AND NOTHING IN IT SAYS THE LARGEST NODAL VALUE IS A MAGNETIC
-				 * AXIS**, which is the whole of FREE-BOUNDARY-PLAN.md section 11:
-				 * `G = psi_ax - max psi_h = 0` is satisfied at machine zero by a
-				 * spurious nodal spike exactly as it is by an axis, and three
-				 * separate configurations were found reporting one.
+				 * AXIS** (CLAUDE_FB.md, *`ψ_ax` was the weak point of the whole
+				 * free-boundary path*): `G = psi_ax - max psi_h = 0` is
+				 * satisfied at machine zero by a spurious nodal spike exactly
+				 * as it is by an axis, and three separate configurations were
+				 * found reporting one.
 				 */
 				NodalMaximum,
 
@@ -1880,7 +1881,7 @@ namespace meq
 				 * plasma edge is the flux surface that touches it, so `psi_bnd`
 				 * is a maximum over a CURVE and the contact is an output of the
 				 * solve. Prescribing the point instead means being told the
-				 * answer, and FREE-BOUNDARY-PLAN.md section 7.20 measures what
+				 * answer, and CLAUDE_FB.md, *FB-6 is beaten*, measures what
 				 * that costs when the teller is another code's grid: the 513^2
 				 * `freegs4e` reference puts its contact 0.6 m round the same
 				 * limiter circle from where its own 129^2 run puts it, because
@@ -1992,12 +1993,12 @@ namespace meq
 
 			/**
 			 * WHETHER THE CONFINED SOURCE IS THE LEVEL SET OR THE CONNECTED
-			 * PLASMA: stage XP-1 of FREE-BOUNDARY-PLAN.md section 10.6.
+			 * PLASMA: stage XP-1; docs/free_boundary.rst, *The plasma support*.
 			 *
 			 * meq::NormalisedSource::setPlasmaSupport() switches F off wherever
 			 * `Psi <= 0`, and that test is POINTWISE -- it has no connectivity
-			 * in it, so what it selects is a level set and not a plasma. Section
-			 * 10.3 records the direction it is wrong in for a DIVERTED plasma,
+			 * in it, so what it selects is a level set and not a plasma. It is
+			 * wrong in a known direction for a DIVERTED plasma,
 			 * where the private flux region carries `Psi > 0` and gets a second
 			 * current channel nobody asked for; MEASURED, it is wrong on
 			 * ordinary LIMITER cases too, because a level of a field that is not
@@ -2105,9 +2106,9 @@ namespace meq
 
 			/**
 			 * **STOP solve() REFRESHING THE SUPPORT, SO IT IS FIXED WITHIN A
-			 * NEWTON AND RE-DECIDED BETWEEN SOLVES.** XP-2 of
-			 * `FREE-BOUNDARY-PLAN.md` §10.6, and §10.5's own prescription
-			 * applied to the support rather than to the bounding point.
+			 * NEWTON AND RE-DECIDED BETWEEN SOLVES.** XP-2: the topology fixed
+			 * within a solve and re-decided between solves, applied to the
+			 * support rather than to the bounding point.
 			 *
 			 * With this off -- the default, and every existing solve is
 			 * bit-unchanged -- `refreshPlasmaComponent()` runs before every
@@ -2126,8 +2127,8 @@ namespace meq
 			 * caller drives the outer loop: refresh at the answer just reached,
 			 * freeze, solve again. It is the same shape as
 			 * `setBoundaryFluxPoint()` being re-decided between sweeps, and it
-			 * has the same failure mode -- §10.5's two states alternating --
-			 * which is a thing to measure rather than to assume away.
+			 * has the same failure mode -- two states alternating -- which is a
+			 * thing to measure rather than to assume away.
 			 *
 			 * **AND IT IS ONLY HALF THE SUPPORT ON ITS OWN.** The mask is
 			 * element granular; inside an element the fill reached, the
@@ -3741,7 +3742,7 @@ namespace meq
 
 			/// The columns of `P`: the trace projection of each exterior mode onto
 			/// `Gamma_h`, for the free-boundary coupling of
-			/// FREE-BOUNDARY-PLAN.md section 4.3.
+			/// docs/free_boundary.rst, *The coupled system*.
 			///
 			/// **WHAT THIS IS FOR.** Free boundary replaces the fixed-boundary datum
 			/// on `Gamma_h` with `psihat|_Gamma_h = P a`, where `a` is the vector of
@@ -3751,8 +3752,8 @@ namespace meq
 			/// FOOT of the transfer path, which is where `Gamma` actually is. Each
 			/// returned vector is full trace length and is zero off `Gamma_h`.
 			///
-			/// **AND THE COLUMN IS CONSTANT IN THE ITERATE**, which is the claim
-			/// section 4.3 makes and calls "an argument and not a measurement".
+			/// **AND THE COLUMN IS CONSTANT IN THE ITERATE**, which is an
+			/// argument and not a measurement.
 			/// `psihat` enters the flux row as `<psihat, v.n>`, the potential row as
 			/// `<tau psihat, w>` and the trace row as `<tau psihat, mu>` -- linearly
 			/// in all three -- while every non-linearity is `F( R, z, psi )`, which
@@ -3772,19 +3773,18 @@ namespace meq
 			exteriorTraceColumns( ExteriorDtN const &exterior ) const;
 
 			/// Impose a NON-ZERO datum on `Gamma_h`'s trace dofs, which is what
-			/// `psihat|_Gamma_h = P a` of FREE-BOUNDARY-PLAN.md section 4.3
-			/// means concretely.
+			/// `psihat|_Gamma_h = P a` means concretely.
 			///
-			/// **WITHOUT THIS THERE IS NO WAY TO PUT A DATUM ON `Gamma`, AND THE
-			/// PLAN ASSUMED THERE WAS.** `setBoundaryData()` is projected against
-			/// `fittedMarker` alone -- see `prepare()` -- because until free
-			/// boundary nothing referenced `Gamma_h`'s trace values, so they were
-			/// pinned to zero. `HDGExtensionIntegrator` supplies only the
-			/// SOLUTION-dependent half of the transferred datum, the path integral
-			/// of the flux, which is the whole of it exactly when `g` is
-			/// homogeneous. So a fixed-boundary solve on a curved `Gamma` could
-			/// only ever impose `psi = 0` there, and every extension study in this
-			/// tree happens to want that.
+			/// **WITHOUT THIS THERE IS NO WAY TO PUT A DATUM ON `Gamma`, AND IT
+			/// IS EASY TO ASSUME THERE IS.** `setBoundaryData()` is projected
+			/// against `fittedMarker` alone -- see `prepare()` -- because until
+			/// free boundary nothing referenced `Gamma_h`'s trace values, so
+			/// they were pinned to zero. `HDGExtensionIntegrator` supplies only
+			/// the SOLUTION-dependent half of the transferred datum, the path
+			/// integral of the flux, which is the whole of it exactly when `g`
+			/// is homogeneous. So a fixed-boundary solve on a curved `Gamma`
+			/// could only ever impose `psi = 0` there, and every extension
+			/// study in this tree happens to want that.
 			///
 			/// Hand it `sum_m a_m P_m`, built from exteriorTraceColumns(). The
 			/// vector is trace length and is ADDED into the trace, which is safe
@@ -3801,7 +3801,7 @@ namespace meq
 
 			/**
 			 * CONDUCTORS OUTSIDE `Γ`, entering through the coupling rather than
-			 * through the mesh. FB-7; `FREE-BOUNDARY-PLAN.md` §7.19.
+			 * through the mesh. FB-7; `docs/free_boundary.rst`, *Conductors*.
 			 *
 			 * A coil the mesh does not reach contributes **nothing** to
 			 * `meq::SourceIntegrator`, which assembles `F` by quadrature over
@@ -4060,9 +4060,9 @@ namespace meq
 			                              std::vector<double> &inside ) const;
 
 			/// The rows of `T`: the transmission condition of
-			/// FREE-BOUNDARY-PLAN.md section 4.2, tested against each exterior
-			/// mode. The Neumann half of the coupling, and the other half of
-			/// exteriorTraceColumns().
+			/// docs/free_boundary.rst, *The coupled system*, tested against each
+			/// exterior mode. The Neumann half of the coupling, and the other
+			/// half of exteriorTraceColumns().
 			///
 			/// **WHAT THIS IS FOR.** `P` says what the exterior expansion imposes
 			/// on `Gamma_h`; on its own that leaves `a` undetermined, since
@@ -4080,14 +4080,14 @@ namespace meq
 			///
 			/// **THE INTEGRAL CARRIES NO 1/R AND THAT IS NOT AN OMISSION.** The
 			/// exterior block is diagonal in the weight `dGamma/R`, which is what
-			/// makes section 3.2 work at all, so the interior term has to be
-			/// tested in that same weight or the two do not meet. It is: the
-			/// transmission condition equates `(1/R) dpsi/dnu` across `Gamma`, and
-			/// MEQ's `q` IS `(1/R) grad_bar( psi )` -- so testing `q.nu` against
-			/// `C_m` in the PLAIN measure `dGamma` already carries the `1/R` the
-			/// exterior side carries in its weight. Writing `dGamma/R` here would
-			/// divide by the radius twice. The flux is the asset again, for the
-			/// fourth time in this tree.
+			/// makes the semicircle's DtN diagonal at all, so the interior term
+			/// has to be tested in that same weight or the two do not meet. It
+			/// is: the transmission condition equates `(1/R) dpsi/dnu` across
+			/// `Gamma`, and MEQ's `q` IS `(1/R) grad_bar( psi )` -- so testing
+			/// `q.nu` against `C_m` in the PLAIN measure `dGamma` already
+			/// carries the `1/R` the exterior side carries in its weight.
+			/// Writing `dGamma/R` here would divide by the radius twice. The
+			/// flux is the asset again, for the fourth time in this tree.
 			///
 			/// **AND THE RADIUS THAT WOULD BE WRONG IS THE FOOT'S, NOT THE NODE'S**
 			/// -- see meq::GridSampler, where reading a band quantity at the foot
@@ -4129,7 +4129,7 @@ namespace meq
 			                          std::vector<int> *support = nullptr ) const;
 
 			/// Make `psi_bnd` an unknown too, pinned by `psi` at a prescribed
-			/// point — FREE-BOUNDARY-PLAN.md's FB-3.
+			/// point — FB-3.
 			///
 			/// **THE PLASMA EDGE IS WHERE THE PROFILES STOP, AND IN A FREE
 			/// BOUNDARY IT IS NOT KNOWN IN ADVANCE.** The profiles are functions
@@ -4148,8 +4148,8 @@ namespace meq
 			/// **NPC ONLY**, and refused otherwise. Under the condensation `psi`
 			/// is a function of the trace through every element's source, so both
 			/// the row and the corner would have to be differenced — which is
-			/// possible and is not built, because §4.5 records that two of the
-			/// three borders are exact under NPC and this is one of them.
+			/// possible and is not built, because under NPC this border is
+			/// exact.
 			///
 			/// Call with no point set — the default — and `psi_bnd` stays zero
 			/// and the solve is the 1x1 it always was, arithmetically unchanged.
@@ -4212,7 +4212,8 @@ namespace meq
 
 			/**
 			 * XP-3: `psi_bnd` AT AN X-POINT THAT IS ITSELF TWO UNKNOWNS OF THE
-			 * SAME NEWTON. FREE-BOUNDARY-PLAN.md section 10.4 and 10.6.
+			 * SAME NEWTON. docs/free_boundary.rst, *The plasma boundary flux, and
+			 * the other borders*.
 			 *
 			 * @param R,z  where the X-point is BELIEVED to be. It is an initial
 			 *             value for an unknown, not a prescription, and a
@@ -4241,10 +4242,10 @@ namespace meq
 			 * from `( N + 2 )` to `( N + 4 )` in the DENSE corner alone. An
 			 * X-point costs two rows of a 4x4 and nothing else.
 			 *
-			 * **AND THE CORNER BLOCK IS EXACT, WHERE THE PLAN EXPECTED IT NOT TO
-			 * BE.** Section 10.4 reads the block `d( q_r, q_z )/d( R_X, z_X )` as
-			 * `grad q` -- the potential's Hessian -- and notes there is no solved
-			 * variable for it, differentiating an L2 field of degree `k` leaving
+			 * **AND THE CORNER BLOCK IS EXACT, WHERE IT WAS EXPECTED NOT TO
+			 * BE.** The expectation read the block `d( q_r, q_z )/d( R_X, z_X )`
+			 * as `grad q` -- the potential's Hessian -- with no solved variable
+			 * for it, differentiating an L2 field of degree `k` leaving
 			 * `k - 1`. That is true of `grad q` as an approximation of the
 			 * CONTINUOUS Hessian and it is not what Newton needs: the derivative
 			 * wanted is that of the DISCRETE residual, and `q_h` is a polynomial
@@ -4267,7 +4268,7 @@ namespace meq
 			 * unknown of the system.
 			 *
 			 * **IT DOES NOT DECIDE WHICH critical point BOUNDS THE PLASMA.** That
-			 * is section 10.5's discrete choice, it is not differentiable, and it
+			 * is a discrete choice, it is not differentiable, and it
 			 * stays where XP-2 put it: outside the Newton. This follows ONE
 			 * saddle, from the value given here, exactly as the axis constraint
 			 * follows one O-point.
@@ -4792,15 +4793,16 @@ namespace meq
 			 * later sweeps on the same solver start from the sweep before.
 			 *
 			 * **IT IS NOT A TOLERANCE AND IT IS NOT A DEFAULT WAITING TO BE
-			 * FILLED IN.** `FREE-BOUNDARY-PLAN.md` section 10.8 measures both
-			 * halves. On a LIMITED machine, starting `psi_bnd` near its answer
-			 * puts the plasma edge on the limiter from step 0, where the support
-			 * sits exactly on the boundary of flipping: the solve descends to
-			 * 2.16e-02 of the initial residual by step 17 and then drifts upward
-			 * monotonically for 183 more, hitting the cap, where from zero the
-			 * same case converges in 11. On a DIVERTED one the two starts reach
-			 * **two different equilibria**, each satisfying its own border row
-			 * to 5e-12 and with their magnetic axes 6.9e-02 m apart.
+			 * FILLED IN.** Both halves are measured (CLAUDE_FB.md, *The diverted
+			 * machine's support*). On a LIMITED machine, starting `psi_bnd`
+			 * near its answer puts the plasma edge on the limiter from step 0,
+			 * where the support sits exactly on the boundary of flipping: the
+			 * solve descends to 2.16e-02 of the initial residual by step 17 and
+			 * then drifts upward monotonically for 183 more, hitting the cap,
+			 * where from zero the same case converges in 11. On a DIVERTED one
+			 * the two starts reach **two different equilibria**, each
+			 * satisfying its own border row to 5e-12 and with their magnetic
+			 * axes 6.9e-02 m apart.
 			 *
 			 * **SO IT IS DELIBERATELY NOT REACHABLE FROM A TOML FILE**, for the
 			 * reason `CLAUDE.md` refuses `Globalisation` and `NonlinearOrdering`

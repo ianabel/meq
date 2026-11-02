@@ -18,20 +18,19 @@
 /*
  * THE LIMITER AS A CURVE, RESTRICTED TO THE POLYGON THE MESH IS FITTED TO.
  *
- * FB-6's remaining capability gap, and FREE-BOUNDARY-PLAN.md section 7.20 is
- * why it is one. `psi_bnd` is the flux at the limiter CONTACT, and until now
+ * FB-6's remaining capability gap (CLAUDE_FB.md, FB-6 is beaten). `psi_bnd` is the flux at the limiter CONTACT, and until now
  * MEQ had to be TOLD where that contact is: setBoundaryFluxPoint() takes a
  * point. The physical problem is `psi_bnd = max psi` over the limiter CURVE,
  * with the contact an output of the solve rather than an input to it -- which
  * is what every production free-boundary code does, and what takes another
- * code's grid artefact out of MEQ's comparison against it. Section 7.20
- * measures the artefact: `freegs4e`'s 513^2 run puts its contact 0.6 m round
+ * code's grid artefact out of MEQ's comparison against it. The artefact is
+ * measured: `freegs4e`'s 513^2 run puts its contact 0.6 m round
  * the same limiter circle from where its own 129^2 run puts it, because a
  * contact read off a grid is a maximum over CELLS.
  *
  * THE RESTRICTION IS THE POLYGON AND IT COSTS ALMOST NOTHING, WHICH IS THE
  * POINT. A limiter is PRESCRIBED INPUT -- it does not move with the solution --
- * so the mesh can be fitted to it, exactly as section 7.9's conductors are.
+ * so the mesh can be fitted to it, exactly as a conductor is.
  * Fitted, the limiter IS a union of mesh faces, and then:
  *
  *   - there is no cut element and no cut quadrature anywhere in it;
@@ -460,9 +459,8 @@ namespace
  * finding a property of the FIELD rather than of the mesh.
  *
  * THE CONTROL IS A PRESCRIBED POINT THAT IS WRONG, and it is wrong the way a
- * real one is: FREE-BOUNDARY-PLAN.md section 7.20 records `freegs4e`'s own
- * contact moving 0.6 m round its limiter circle between two grids, because a
- * contact read off a grid is a maximum over CELLS. A contact prescribed
+ * real one is: `freegs4e`'s own contact moves 0.6 m round its limiter circle
+ * between two grids, because a contact read off a grid is a maximum over CELLS. A contact prescribed
  * somewhere else on the SAME polygon is that failure in miniature, and it is
  * the column that says the located constraint is doing work: without it every
  * assertion below is satisfied by a solver that quietly ignores the polygon.
@@ -693,7 +691,7 @@ BOOST_AUTO_TEST_CASE( theBorderRowKeepsNewtonsQuadraticOrder )
  *
  * AND A PRESCRIBED CONTACT BESIDE A FOUND ONE IS REFUSED RATHER THAN RANKED.
  * Both constraints converge, to equilibria differing by the O( h ) the point
- * version costs -- section 7.20 measures that -- so a precedence rule would
+ * version costs, measured -- so a precedence rule would
  * decide which equilibrium is reported on the strength of call order.
  *
  * THE CONTROL IS THE LAST BLOCK: a setter that refused everything would satisfy

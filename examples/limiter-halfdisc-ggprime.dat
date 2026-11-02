@@ -5,7 +5,7 @@
 # domain reaches r = 0, F/r is mu0 j_phi, and F = mu0 r^2 p' + g g' leaves
 # only g g' on the axis -- p' is protected by its own r^2.  A non-zero g g'
 # here is an infinite current density on the symmetry axis, which the driver
-# refuses.  CLAUDE.md, section 11.3.
+# refuses.  docs/free_boundary.rst, The domain reaches the axis.
 -0.6000  0.0  0.0
 -0.5500  0.0  0.0
 -0.5000  0.0  0.0

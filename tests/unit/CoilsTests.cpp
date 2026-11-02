@@ -1,19 +1,18 @@
 // Unit tests for the coil model in src/meq/Coils.
 //
-// FREE-BOUNDARY-PLAN.md stage FB-2 puts a prescribed current inside the domain
-// and checks the exterior. meq::CoilSet is the current, and its acceptance --
-// "ComputeOutwardFlux against the total current, which is the sharpest
-// whole-assembly test available" -- rests on two things being right that no
+// Stage FB-2 puts a prescribed current inside the domain and checks the
+// exterior. meq::CoilSet is the current, and its acceptance -- the outward flux
+// against the total current, the sharpest whole-assembly test available --
+// rests on two things being right that no
 // convergence rate could see:
 //
 //   * THE SOURCE FACTOR. F = mu0 R j_phi, derived in Coils.cpp from
 //     Delta* psi = -mu0 R j_phi rather than transcribed. An extra or missing R
 //     converges at the full rate to the wrong function, and CLAUDE.md records
 //     that failure happening in this codebase already.
-//   * THE SIGN of the outward flux. FREE-BOUNDARY-PLAN.md section 7 predicts
-//     plainly that the coupling sign will be got wrong at least once. This file
-//     pins it here, where the answer is mu0 I exactly and there is nothing else
-//     in the way.
+//   * THE SIGN of the outward flux. A coupling sign is the thing most likely to
+//     be got wrong. This file pins it here, where the answer is mu0 I exactly
+//     and there is nothing else in the way.
 //
 // MFEM-FREE, like the unit under test, so CI can run it -- which for a stage
 // whose acceptance is these two numbers means CI can gate FB-2's foundation
@@ -179,13 +178,12 @@ BOOST_AUTO_TEST_CASE( the_source_is_a_top_hat )
  *
  *     oint ( 1/R ) dpsi/dn dl  =  -mu0 * totalCurrent()
  *
- * with no discretisation anywhere in it. FREE-BOUNDARY-PLAN.md calls the same
- * identity "the sharpest whole-assembly test available" for FB-2; here it is
- * checked on the exact field, so that when FB-2 checks it on a SOLVE any
+ * with no discretisation anywhere in it. It is the sharpest whole-assembly
+ * test available for FB-2; here it is checked on the exact field, so that when FB-2 checks it on a SOLVE any
  * discrepancy is the solve rather than the identity.
  *
- * THE SIGN IS NEGATIVE AND IS ASSERTED AS SUCH. Section 7 says the coupling
- * sign will be got wrong at least once; this is the cheapest place to pin it.
+ * THE SIGN IS NEGATIVE AND IS ASSERTED AS SUCH. A coupling sign is the thing
+ * most likely to be got wrong; this is the cheapest place to pin it.
  * The same identity written as a counterclockwise circulation of B in ( R, z )
  * comes out POSITIVE, because phi-hat = z-hat x R-hat -- so both signs are
  * defensible statements about different quantities, which is exactly how a sign
@@ -268,8 +266,9 @@ BOOST_AUTO_TEST_CASE( the_outward_flux_is_minus_mu0_times_the_total_current )
  *
  * This is what says the finite cross-section is a smoothing of the filament
  * rather than a different object -- which matters because FB-1's reference
- * field, tests/analytic/CurrentLoop.hpp, IS the filament, and because the plan
- * originally proposed filament loop fields as FB-1's exact answer.
+ * field, tests/analytic/CurrentLoop.hpp, IS the filament, and filament loop
+ * fields are the obvious candidate for FB-1's exact answer
+ * (tests/analytic/ExteriorMatched.hpp says why they cannot be it).
  */
 BOOST_AUTO_TEST_CASE( a_thin_coil_approaches_the_filament_at_second_order )
 {
@@ -1054,8 +1053,8 @@ BOOST_AUTO_TEST_CASE( amperes_law_holds_on_the_filament )
 	            << expected << ". THE SIGN IS THE THING TO CHECK FIRST: "
 	            "Coils.hpp records that the same identity as a circulation of B "
 	            "counterclockwise comes out POSITIVE, because phi-hat = "
-	            "z-hat x R-hat, and FREE-BOUNDARY-PLAN.md section 7 predicts it "
-	            "being got wrong at least once" );
+	            "z-hat x R-hat, and a sign is the thing most likely to be got "
+	            "wrong" );
 }
 
 /*

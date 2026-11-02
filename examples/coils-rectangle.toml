@@ -4,7 +4,7 @@
 #
 #     meq ../../source/examples/coils-rectangle.toml
 #
-# Stage FB-2 of FREE-BOUNDARY-PLAN.md. The equation is unchanged --
+# Stage FB-2. The equation is unchanged --
 #
 #     -grad.( (1/R) grad psi ) = F( R, z, psi )/R    in Omega,   psi = 0 on Gamma
 #
@@ -113,8 +113,8 @@
 # WHAT THIS FILE IS NOT
 # ---------------------
 #
-# IT IS NOT A FREE-BOUNDARY RUN, and the difference is the whole of what remains
-# of FREE-BOUNDARY-PLAN.md. Here Gamma is the mesh's own rectangle and psi = 0
+# IT IS NOT A FREE-BOUNDARY RUN, and the difference is the whole of the
+# free-boundary problem (docs/free_boundary.rst). Here Gamma is the mesh's own rectangle and psi = 0
 # is imposed on it, so Omega is the plasma, the coils sit INSIDE the plasma, and
 # the plasma boundary is where the file says it is rather than where the coil
 # currents put it. A real machine has the coils in a vacuum region outside the

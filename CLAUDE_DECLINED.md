@@ -75,6 +75,7 @@ or that code cites by section number, stay where they are and are indexed under
   * *Confinement, clamping and a prescribed current: the M-134 two-by-two*
   * *Conditioning, units and combinatorics as the cause of the bordered stall*
   * *Starting from vacuum, and amplitude continuation*
+  * *The toy fixture's recorded verdicts, re-measured*
   * *PicardSweeps and BorderedPicardThenNewton*
   * *Globalisation, and a transferable merit weight, as the repair for the cold failures*
   * *Changing the fill, or blocking axis-touching elements, to keep the axis out of the support*
@@ -88,6 +89,9 @@ or that code cites by section number, stay where they are and are indexed under
   * *A directly coupled BEM, and an outer fixed point between interior and exterior*
   * *Lost coverage as the cause of the red tiling, and relaxing the gate*
   * *A closed-form conductor field as more accurate than one assembled on the mesh*
+  * *A coil field, or a value-and-slope match, as FB-1's exact answer*
+  * *`a = 0` exactly for a conductor outside `Γ`, and comparing two meshes by projection*
+  * *FB-6's smaller falsifications: an additive softening, a monotone `ψ_bnd`, regenerating the tables*
   * *Triangle, CGAL Mesh_2 and MMG as the mesh generator*
   * *Cold-start guesses: the vacuum field alone, a filament column, a rectangular column*
   * *η₆ in the marking*
@@ -1139,35 +1143,37 @@ swept over 250x in the target, reaches **2 of 4 at best** — 0 of 4 below
 `μ₀I_p = 0.20`, 2 of 4 at 0.50 and again at 2.00, and back to 0 of 4 at 5.00, so
 the maximum is interior and the sweep is not truncated. The clamped arm is cured
 outright by that same lever. So a prescribed current moves confinement off zero
-and does not repair it, and `theTwoBordersConvergeTogether` keeps
-`FREE-BOUNDARY-PLAN.md` §11.2's retraction of its `ψ_ax` and `ψ_bnd` as physics.
+and does not repair it, and `theTwoBordersConvergeTogether` keeps the retraction
+of its `ψ_ax` and `ψ_bnd` as physics, below.
 **The lesson survives its own example**: it took the full 2 x 2 to say this, and
 each of the four one-key runs on its own supported a different wrong reading.
 
 *From `CLAUDE.md`, “Commands”.*
 
-**Declined.** §7.12b's two-border fixture: four limiter radii, `ψ_ax` in every
-row, and the column is an artefact of the `R = 0` layer. The convergence claims
-in that section stand — the residuals, the iteration counts and `ψ_ax`'s own
+**Declined.** The two-border fixture, `theTwoBordersConvergeTogether`: four
+limiter radii, `ψ_ax` in every row, and the column is an artefact of the `R = 0`
+layer ([M-33](MEASUREMENTS.md#m-33)). The convergence claims stand — the residuals, the iteration counts and `ψ_ax`'s own
 constraint at 1e-17 are statements about the solve closing, and it closes. **The
 `ψ_ax` and `ψ_bnd` values are not physics.**
 
-**RETRACT, AND IT CANNOT BE RE-PUBLISHED.** §11.1 supplied the located-axis
-numbers — 6.513594e-02, 6.420050e-02, 4.420624e-02 and 6.111920e-02 at the four
-radii — but **replacing the column with those would be wrong too**: the O-point
-flux is the axis flux of *the field that was computed*, and §11.3 shows that
-field carries a `1/R` pole on the axis, so it is not the equilibrium `[source]`
+**RETRACT, AND IT CANNOT BE RE-PUBLISHED.** The axis check supplied the
+located-axis numbers — 6.513594e-02, 6.420050e-02, 4.420624e-02 and 6.111920e-02
+at the four radii — but **replacing the column with those would be wrong too**:
+the O-point flux is the axis flux of *the field that was computed*, and that
+field carries a `1/R` pole on the axis (`CLAUDE_FB.md`, *`ψ_ax` was the weak
+point of the whole free-boundary path*), so it is not the equilibrium `[source]`
 describes either.
 
 **AND THE FIXTURE CANNOT BE REPAIRED IN PLACE — WHICH IS A FIXTURE DEFECT AND NOT
-A CAPABILITY GAP, AND THE DISTINCTION MATTERS.** §7.16's machine case has every
+A CAPABILITY GAP, AND THE DISTINCTION MATTERS.** The limited tokamak has every
 ingredient this one has — a domain reaching `R = 0`, a limiter, an exterior
 coupling and `ConfineToPlasma` — and converges in 11 Newton steps. What it has
 that this does not is **coils and a prescribed current**. Made physical while
-keeping neither, this fixture becomes the amplitude-fixed moving-support problem
-§7.14 records as a non-linear **eigenvalue** problem, which is ill posed rather
-than merely hard — and measured, **clamped profiles WITH a prescribed current
-converge in 22 steps** where clamping alone fails 4/4. The cure is §7.14's own.
+keeping neither, this fixture becomes the amplitude-fixed moving-support problem,
+a non-linear **eigenvalue** problem (`CLAUDE_FB.md`, *The plasma current is a
+border unknown*), which is ill posed rather than merely hard — and measured,
+**clamped profiles WITH a prescribed current converge in 22 steps** where
+clamping alone fails 4/4. The cure is the current border.
 Both physically-correct repairs were tried at all four limiter radii, 300 Newton
 iterations, everything else held: `ConfineToPlasma` — **4 of 4 do not
 converge** — and profiles clamped to vanish at `Ψ ≤ 0`, the same statement made
@@ -1178,19 +1184,20 @@ configuration does not close at all. FB-T is the fourth cell, confinement WITH a
 prescribed current, and it reaches 2 of 4 at best →
 [M-134](MEASUREMENTS.md#m-134).
 
-**So the `ψ_ax` and `ψ_bnd` columns of §7.12b are retracted as physics and kept
-as a record of the solve closing.** The convergence claim stands and is what that
-section is about.
+**So the fixture's `ψ_ax` and `ψ_bnd` columns are retracted as physics and kept
+as a record of the solve closing.** The convergence claim stands.
+`CLAUDE_FB.md`, *The two-border fixture was the defect*, is the physical machine
+built in its place.
 
-*From `FREE-BOUNDARY-PLAN.md` §11.2; section numbers are that file's. §11.2
-keeps its heading and the verdict.*
+*From the free-boundary campaign; `CLAUDE_FB.md`, *`ψ_ax` was the weak point of
+the whole free-boundary path*, owns the subject.*
 
 ### Conditioning, units and combinatorics as the cause of the bordered stall
 
 **Falsified.** The stall that `setNormalisation( s )` — one argument where two
 were meant, zeroing `ψ_bnd` inside the Jacobian window — produced was first read
-three other ways. `FREE-BOUNDARY-PLAN.md` §7.16 named unscaled border rows in SI
-as the prime suspect. It is wrong, and so are the two obvious alternatives:
+three other ways. The limited tokamak's first write-up named unscaled border rows
+in SI as the prime suspect. It is wrong, and so are the two obvious alternatives:
 
 * **Not conditioning.** The dense border matrix has `cond( M ) ≈ 1.0e3` — three
   digits of sixteen — and the corner solves its own system to **8.4e-16**.
@@ -1209,13 +1216,13 @@ as the prime suspect. It is wrong, and so are the two obvious alternatives:
 The cause was the one-argument call, measured against the Newton direction's own
 linearised system → [M-03](MEASUREMENTS.md#m-03).
 
-*From `FREE-BOUNDARY-PLAN.md` §7.17 and `CLAUDE_FB.md`, *One argument where two
-were meant*; the two copies are merged.*
+*From `CLAUDE_FB.md`, *One argument where two were meant*.*
 
 ### Starting from vacuum, and amplitude continuation
 
-**Declined.** Asked after `FREE-BOUNDARY-PLAN.md` §7.14's coil sweep failed, and
-worth answering because the obvious homotopy is the wrong one.
+**Declined.** Asked after the toy fixture's coil sweep failed (*The toy
+fixture's recorded verdicts, re-measured*), and worth answering because the
+obvious homotopy is the wrong one.
 
 **A VACUUM START DEGENERATES EVERY BORDER UNKNOWN AT ONCE, WHICH IS WHY IT IS
 NOT THE HOMOTOPY TO PICK.** At `F_plasma = 0` there is no plasma, and therefore:
@@ -1226,7 +1233,7 @@ NOT THE HOMOTOPY TO PICK.** At `F_plasma = 0` there is no plasma, and therefore:
 * the support `{Ψ > 0}` is empty or arbitrary, and `span = ψ_ax − ψ_bnd` has no
   reason to be non-zero.
 
-**The first two are CONFIRMED** (§7.18): the only critical points are the two
+**The first two are CONFIRMED** on re-measurement: the only critical points are the two
 coil centres, minima at `( 1.1966, −0.6965 )` and `( 1.1912, +0.6954 )`, and the
 grid maximum of `ψ_h` is `−6.06e-06`. **What is FALSE is that
 `setNormalisation()` refuses it**: measured, the vacuum solve **converges in 2
@@ -1246,19 +1253,20 @@ Ramping **`I_p`** does not — the plasma is present at every step, all three
 unknowns keep their meaning, and the parameter is **prescribed input** rather
 than something recovered from a black-box `F`, so it carries none of the
 objection recorded against continuation in the driver; `setPlasmaCurrent()`
-makes it a one-line loop. **But the `I_p` ramp is NOT BORNE OUT** (§7.18): at
+makes it a one-line loop. **But the `I_p` ramp is NOT BORNE OUT**: at
 coil `−0.05`, limiter 0.90 — the one place a cold solve fails — a ladder
 converges at `μ₀I_p` = 0.01 … 0.04 and **fails at 0.05** of the 0.35 wanted, on
 a coarse and a refined ladder alike, with every converged rung degenerate
 (`ψ < 0` across the midplane, scale ≤ 5.7e-04).
 
-**THE REAL LESSON IS THAT §7.14's FAILURE WAS NOT A CONTINUATION PROBLEM.**
+**THE REAL LESSON IS THAT THE COIL SWEEP'S FAILURE WAS NOT A CONTINUATION
+PROBLEM.**
 `../../freegs4e` never meets it, and checking why is decisive: its `constrain`
 object is a **control system that solves for the coil currents inside every
 Picard iteration** — `control.py` assembles a least-squares system over the coil
 currents against shape constraints (`Br = 0` and `Bz = 0` at a prescribed
 X-point, isoflux pairs) and applies it each step. **The coils adapt to the
-plasma.** MEQ's §7.14 attempt did the opposite: it *prescribed* currents chosen
+plasma.** MEQ's toy-fixture attempt did the opposite: it *prescribed* currents chosen
 by eye and asked a cold Newton to find a core plasma consistent with them.
 
 So there are two honest routes, and neither is a vacuum start:
@@ -1269,9 +1277,9 @@ So there are two honest routes, and neither is a vacuum start:
    `B_v = μ₀I_p/(4πR)·[ ln(8R/a) + β_p + l_i/2 − 3/2 ]` — so the conductors and
    the initial guess can be made to agree **before** the solve rather than
    discovered to disagree during it. This is not continuation at all; it is
-   picking inputs that describe one machine. §7.18 found that the cold failures
-   this rested on do not occur once §7.17's defect is repaired, and §7.16
-   supplies much better evidence for the same conclusion: with a genuine
+   picking inputs that describe one machine. The cold failures this rested on
+   do not occur once the one-argument defect is repaired, and the limited
+   tokamak supplies much better evidence for the same conclusion: with a genuine
    equilibrium's own coils and profiles the amplitude-fixed problem closes in
    five Newton steps.
 2. **Solve for the currents**, as freegs4e does. That is the inverse solve, and
@@ -1282,16 +1290,73 @@ So there are two honest routes, and neither is a vacuum start:
 **THE DIAGNOSTIC THAT TELLS WHICH BRANCH AN ITERATE IS ON** was proposed
 alongside: on the annular branch `ψ_ax`'s argmax sits near `Γ`, on a core it is
 interior — one integer per iteration, distinguishing "not converging" from
-"converging to the wrong equilibrium", which a residual cannot. §7.18 found it
+"converging to the wrong equilibrium", which a residual cannot. Re-measured it is
 **CONFIRMED for the annulus and MISLEADING otherwise**: where the solve does not
 find the wall-hugging O-point, `ψ_ax` is attained at a single node in the corner
 element where `Γ` meets the axis. Read it against the field's own maximum or it
 reports the corner element rather than the branch.
 
-*From `FREE-BOUNDARY-PLAN.md` §7.15 and `CLAUDE_FB.md`, *The plasma current is a
-border unknown*; section numbers are `FREE-BOUNDARY-PLAN.md`'s. The stale items
-are corrected from §7.18's re-measurement: the vacuum start is not refused, the
+*From `CLAUDE_FB.md`, *The plasma current is a border unknown*; the stale items
+are corrected from the re-measurement: the vacuum start is not refused, the
 `I_p` ramp is not borne out, and the inverse problem is no longer out of scope.*
+
+### The toy fixture's recorded verdicts, re-measured
+
+**Falsified, half of them.** The first coupled fixture with a prescribed current
+— `FreeBoundaryCoupling.cpp`'s `makeHalfDisc`, `n = 24`, `k = 2`, `μ₀ = 1`,
+`ExteriorDtN( 0, 1.5, 4 )`, `p′ = 0.6 Ψ`, `gg′ = 0.05 Ψ`, `ConfineToPlasma`,
+`setPlasmaCurrent( 0.35 )`, a coil pair at `( 1.2, ±0.7 )` carrying `μ₀I` **per
+coil**, limiter at `R = 0.80` — recorded its verdicts under the one-argument
+defect (`CLAUDE_FB.md`, *One argument where two were meant*). Re-measured on a
+reconstruction after the repair, the base case pinned to the published scale
+numbers:
+
+| claim | verdict |
+|---|---|
+| the current-constrained solve closes | **CONFIRMED** — 80 steps against 63, `∫F/R` 3.500000036e-01, scale 1.04e-01 against 8.40e-02 |
+| the equilibrium is an **annulus** | **CONFIRMED** — `CriticalPointFinder::sweep()` finds one O-point, a maximum at `( 1.3768, +0.0012 )`, hard against `Γ_h` |
+| the vertical field's scale, −1.5e-02 at `R = 0.4` and −1.1e-01 at 1.4 | **CONFIRMED**, per coil |
+| coil sweep `0 / −0.05 / −0.10 / −0.20` → converged / FAILED / FAILED / FAILED | **FALSE.** All four converge at limiter 0.80 (80, 17, 34, 122 steps, to 1e-11 or better); FAILED / FAILED / CONVERGED / CONVERGED at 0.90; the same at `n = 32` |
+| a vertical field is what would make it a core | **NOT BORNE OUT.** The O-point moves `R = 1.377 → 1.298` over `0 → −0.20`, and at `−0.35` the equilibrium flips to `ψ < 0` across the midplane. No coil current tried makes a core |
+| branch selection: Newton crosses between a core bump and an annulus | **FALSE as stated** — with the conductors present the answer is still the annulus |
+| the corner block's two missing current entries cost the rate | **COULD NOT REPRODUCE** — measured under the defect, and the incomplete corner is no longer selectable |
+| continuation in the coil current | **works and is not needed** at 0.80; at 0.90 every step converges while the scale runs `5.03e-02 → 3.77e+02`, a degenerate branch |
+| `ψ_ax`'s argmax as the branch diagnostic | **CONFIRMED for the annulus, MISLEADING otherwise** — off it the argmax is one node in the axis–`Γ` corner element, 8.12e-02 against a field maximum of 2.50e-02 |
+| a vacuum start is refused | **FALSE** — it converges in 2 steps to 7.03e-17 with unknowns that mean nothing |
+| ramping `I_p` is the homotopy | **NOT BORNE OUT** — fails at 0.05 of the 0.35 wanted, every converged rung degenerate |
+
+**AND THE AMPLITUDE-FIXED CONTROL IS THE ROW THAT SAYS THE CURRENT BORDER DOES
+REAL WORK**: with no current border the same five coil currents reach the 200-cap
+at limiter 0.80 and 0.90 alike.
+
+**Beside it, five more readings of the same period that did not survive:**
+* *the two borders, `ψ_bnd` and the exterior coefficients, do not converge
+  together* — stale; re-run after the repair they converge at four limiter radii
+  ([M-33](MEASUREMENTS.md#m-33));
+* *`ψ_ax` on that fixture is a corner artefact* — false; it is a layer along the
+  whole `R = 0` boundary (*Corner-only refinement for the ψ_ax layer*);
+* *on the limited tokamak `h`-refinement does not cure the spike branch and
+  `p`-refinement does* — false; every run behind it used tables a factor of the
+  span too small, and with the tables corrected the degree is not the variable
+  (`CLAUDE_FB.md`, *Free boundary: MEQ SOLVES A MACHINE CASE*);
+* *the amplitude-fixed formulation cannot close a confined equilibrium* — false
+  on consistent inputs: with `freegs4e`'s own amplitude the limited tokamak closes
+  in 5 Newton steps, because that amplitude came from an equilibrium;
+* *shrinking MEQ's conductors to half-width 0.01 tests the conductor model* — it
+  established nothing: `ψ_ax` moved 1.6% the wrong way, but the run re-meshed
+  (2875 elements against 1601), so two things changed at once. FB-7's
+  `theConductorModelIsWorthMeasuring` separates it on one mesh.
+
+**Two things the re-measurement found that neither record had.** The base case
+is **limiter-sensitive**: of five positions 0.80 and 1.00 converge and 0.90, 1.05
+and 1.20 do not, and 1.00 converges to a *different* branch — so any result on
+this fixture names its limiter. And `theTwoBordersConvergeTogether`'s own
+no-confine control already has a **disconnected support**, `{ψ > ψ_bnd}` on the
+midplane `[0.40, 0.85] ∪ [1.20, 1.45]`, which is what made XP-1's connectivity
+defect reachable on a limiter case (`CLAUDE_FB.md`, *XP-1*).
+
+*From the free-boundary campaign; `CLAUDE_FB.md`, *The plasma current is a border
+unknown*, owns the subject.*
 
 ### PicardSweeps and BorderedPicardThenNewton
 
@@ -1348,18 +1413,18 @@ transiently, **THE FILL IS NOT THE DEFECT AND CHANGING IT WOULD BE WRONG
 TWICE.** At those iterates its answer is *correct* — `{Ψ > 0}` really is
 connected and really does contain `R = 0` when `ψ_bnd < 0` — so a rule refusing
 to say so would be a fill lying about the state it was handed. And blocking
-axis-touching elements outright switches `p′` off in the one device class
-`FREE-BOUNDARY-PLAN.md` §11.6 protects: a levitated dipole and a magnetic mirror
+axis-touching elements outright switches `p′` off in the one device class the
+axis guard exists to admit: a levitated dipole and a magnetic mirror
 both carry plasma to `R = 0`, both have `gg′ ≡ 0` there, and the pole never
 existed.
 
-*From `CLAUDE_FB.md`, *§7.12b's fixture was the defect*.*
+*From `CLAUDE_FB.md`, *The two-border fixture was the defect*.*
 
 ### Corner-only refinement for the ψ_ax layer
 
 **Falsified.** The question was *"are the corner spike and the corner
 FRAGILITY the same defect?"*, and its premise was that the spike sits in the
-axis–`Γ` corner. **§11.1 measured that it does not**: the largest nodal values
+axis–`Γ` corner. **The axis check's run measured that it does not**: the largest nodal values
 are a flat layer along the **whole** `R = 0` boundary, agreeing to 3.5e-05 over
 168 axis dofs, and which end of it wins the argmax changes with the polynomial
 degree. So the corner is where the argmax lands, not where the phenomenon is,
@@ -1382,10 +1447,11 @@ away. FB-A's own study is the control that says this is not the axis *per se*:
 there `ψ` reads 2.000 / 3.000 / 4.000 on a vacuum harmonic vanishing on the
 axis, with no exterior coupling and no borders. The experiment it proposed —
 drop the exterior coupling, then the limiter border, and see which the layer
-follows — is answered by §11.3: a `1/R` pole in the load, which the limiter
-border opens.
+follows — is answered: a `1/R` pole in the load, which the limiter border opens
+(`CLAUDE_FB.md`, *`ψ_ax` was the weak point of the whole free-boundary path*).
 
-*From `FREE-BOUNDARY-PLAN.md` §11.3a; section numbers are that file's.*
+*From the free-boundary campaign; `CLAUDE_FB.md`, *`ψ_ax` was the weak point of
+the whole free-boundary path*, owns the subject.*
 
 ### Narrowing ψ_ax's nodal maximum instead of locating the axis
 
@@ -1394,8 +1460,8 @@ border opens.
 default. The other two, and the argument that nearly kept the nodal maximum:
 
 1. **Keep the nodal max, exclude elements touching a fitted boundary.**
-   Cheapest, would have prevented §7.12b, and is arbitrary — it names the
-   symptom. **§11.1 sizes it**: on the half-disc that is the entire `R = 0`
+   Cheapest, would have prevented the two-border fixture's reading, and is
+   arbitrary — it names the symptom. **The axis check's run sizes it**: on the half-disc that is the entire `R = 0`
    column, 168 dofs, not two corner elements — so the exclusion is a whole
    boundary layer and the arbitrariness is larger than the option made it sound.
 2. **Restrict the argmax to the plasma component.** `meq::PlasmaComponent` and
@@ -1408,30 +1474,58 @@ default. The other two, and the argument that nearly kept the nodal maximum:
    *stationary* value, so `∇ψ = 0` at an interior extremum and the chain-rule
    term vanishes identically) transfers to a located axis, so option 3 is nearly
    free. It does **not** extend to an X-point, where the constraint is `q = 0`
-   and the corner block is `∇q`; see §10.4.
+   and the corner block is `∇q` — exact too, for a different reason
+   (`CLAUDE_FB.md`, *XP-3*).
 
 **AND KEEPING THE NODAL MAXIMUM AND LETTING THE GUARD DO THE WORK WAS REVERSED.**
 The resolution stood for part of a day as exactly that, on the argument that a
-redefinition would prevent §7.16's defect and **hide** §7.12b's — the axis layer
+redefinition would prevent the limited tokamak's spike and **hide** the two-border
+fixture's layer — the axis layer
 would still be there and `ψ_ax` would simply stop reporting it. **That half is
 true**, and it is why `checkAxisSource()` exists and why it refuses
 independently. What the argument got wrong was treating the two as
 alternatives: the redefinition is what makes `ψ_ax` mean what it says, and the
 source guard is what catches a wrong field. Doing only the second leaves `ψ_ax`
-defined as something that is not a magnetic axis, which is the defect §11.0
-opens with.
+defined as something that is not a magnetic axis, which was the defect.
 
-*From `FREE-BOUNDARY-PLAN.md` §11.5, *Why this nearly was not done* and *The
-three options, as originally written*; section numbers are that file's.*
+*From the free-boundary campaign; `CLAUDE_FB.md`, *`ψ_ax` was the weak point of
+the whole free-boundary path*, owns the subject.*
 
 ### Initialising ψ_bnd from its own border row
 
-**Declined.** `FREE-BOUNDARY-PLAN.md` §10.8's *initialise `ψ_bnd` from its own
-border row* is **declined on its own measurement**, not pending: the limited
-machine goes from 11 Newton steps to the 200 cap under it, and that item's own
-conclusion (§10.8) is that this is a lever rather than a missing default.
+**Declined, on its own measurement and not pending.** `ψ_ax` gets a starting
+value from the caller and `ψ_bnd` gets none, so it starts every solve at 0. On
+the **diverted** machine that is far off — the reference `ψ_bnd` is 39% of the
+way from the axis to the boundary — and from 0 the first fill calls 2274 of 2642
+elements plasma, against 800 from `ψ_h` at the limiter. But on the **limited**
+machine, started at `ψ_h` on its own reference guess, the solve descends to
+`2.16e-02` of `‖r₀‖` by step 17 and then drifts upward monotonically for the
+remaining 183, observed order 1.000, to the 200 cap; from 0 it converges in 11.
+Started near its answer the edge sits on the limiter from step 0, on the
+boundary of flipping; started far, a large plasma shrinks monotonically and
+lands. **It is a lever with no setting right for both machines**, not a missing
+default.
 
-*From `FREE-BOUNDARY-PLAN.md` §12's introduction.*
+**Its first gate was wrong in a way worth keeping.** Gated on
+`hasInitialGuess()` it took four green cases red (`HighBetaConvergence`,
+`PlasmaConnectivity`, `FreeBoundaryCoupling`, `DriverAcceptance`).
+`hasInitialGuess()` conflates a **warm start** — `setInitialGuess(
+GridFunction const & )`, a converged field where `ψ_h` at the limiter genuinely is
+`ψ_bnd` — with the **trivial-branch escape**, `setInitialGuess( Coefficient & )`,
+a synthetic bump where it is a number about the bump. `initialGuessField` is the
+right test, null for the second; with it three of the four come back and only the
+limited machine, the one fixture with a stored field, stays red — which is the
+finding above. **The fill's axis seed, changed in the same experiment, is
+innocent of all four**: the message that read as the seed was the `ψ_bnd` start.
+
+**And on the diverted machine the start selects the equilibrium**: from 0 and
+from the guess's own value the solve reaches two discrete equilibria, each
+satisfying its border row to 5e-12, that refinement does not merge — FB-R,
+[M-132](MEASUREMENTS.md#m-132). So `setBoundaryFluxInitial()` stays a library
+setter and never a key.
+
+*From the free-boundary campaign; `CLAUDE_FB.md`, *The diverted machine's support:
+the seed, and `ψ_bnd`'s starting value*, owns the subject.*
 
 ### Starting ψ_bnd at the frozen support edge
 
@@ -1454,12 +1548,27 @@ of them as a rung reached only after an observed failure.
 
 ### Auxiliary globally-coupled unknowns
 
-**Closed.** `FREE-BOUNDARY-PLAN.md` §6.4's FB-5 row — auxiliary unknowns carried
-through the elimination — is closed because `NPCReduce()`/`NPCRecover()` are
-public already and `DarcyNPCSolver::ArrayMult` blocks them →
-[M-98](MEASUREMENTS.md#m-98).
+**Closed.** The request filed upstream for the coupling asked for auxiliary
+globally-coupled unknowns carried through `DarcyHybridization`'s static
+condensation, so that `GetGradient()` returns the bordered matrix. That is a
+requirement of a condensation and not of NPC: the residual is unreduced, the
+border column is raw, and the elimination is `N + 2` backsolves against one
+factorisation inside a block solve the caller drives. It is closed because the
+entry points are public already — `NPCReduce()`/`NPCRecover()` — and
+`DarcyNPCSolver::ArrayMult` blocks them over several right-hand sides, worth
+1.34× on the DIII-D solve leg at 14 columns → [M-98](MEASUREMENTS.md#m-98). **The
+species of error is the point**: the request named a *capability* when what it
+needed was a *batched entry point*, and that already existed.
 
-*From `FREE-BOUNDARY-PLAN.md` §12's introduction.*
+**The same request's rectangular integrators were not needed either.** It asked
+for `⟨φ_n ∘ a, v·n⟩`, the datum's data half as a form against a basis; the datum
+is not a form but a load built from projections of `PathTraceCoefficient` at the
+foot of each path (`docs/free_boundary.rst`, *The coupled system*). Its one piece
+with nothing behind it — the boundary quadrature over `Γ` for the transmission
+row — was written in MEQ, used, filed with its tiling check, and merged upstream
+as `mfem::ExtensionBoundaryQuadrature`.
+
+*From the free-boundary campaign; `CLAUDE_FB.md`, *FB-5*, owns the subject.*
 
 ## Free boundary: geometry, conductors, meshing and the benchmarks
 
@@ -1479,7 +1588,8 @@ restoring — which is why `attic/` is gone rather than kept visible; it is at
 `git checkout 635aa3d -- attic/` if the judgement is ever revisited, and
 `refs/Refs.md` keeps the analysis of what it did and got wrong.
 
-*From `FREE-BOUNDARY-PLAN.md` §2, *Why not the alternatives*, and §9.*
+*From the free-boundary campaign; `docs/free_boundary.rst`, *Coupling at a
+distance*, says why the method instead.*
 
 ### A directly coupled BEM, and an outer fixed point between interior and exterior
 
@@ -1488,8 +1598,10 @@ restoring — which is why `attic/` is gone rather than kept visible; it is at
 
 * **A directly coupled BEM with a kernel** — CEDRES++'s `c(·,·)`, eq (3.5), a
   double surface integral over `Γ` with a complete-elliptic-integral kernel. It
-  is the right operator; `FREE-BOUNDARY-PLAN.md` §3 says why MEQ should not
-  assemble it that way: the semicircle collapses it to a diagonal operator.
+  is the right operator; MEQ does not assemble it that way because the semicircle
+  collapses it to a diagonal operator (`docs/free_boundary.rst`, *The exterior on
+  a semicircle*), and assembled in MEQ's basis it comes out diagonal
+  (`tests/unit/ExteriorDtNTests.cpp`).
 * **An outer fixed point** between interior and exterior — the paper's own §4.3,
   a Richardson iteration. Rejected for the reason MEQ rejects every outer fixed
   point: it is outside the residual, so the Jacobian cannot see it. The
@@ -1498,7 +1610,8 @@ restoring — which is why `attic/` is gone rather than kept visible; it is at
   8.3e-02 → 8.2e-02 in fifteen. **It does not converge slowly; it does not
   move.**
 
-*From `FREE-BOUNDARY-PLAN.md` §2, *Why not the alternatives*.*
+*From the free-boundary campaign; `docs/free_boundary.rst`, *Coupling at a
+distance*.*
 
 ### Lost coverage as the cause of the red tiling, and relaxing the gate
 
@@ -1549,8 +1662,7 @@ signed-weight finding: **the cone is what makes the foot map backtrack**, so the
 `O(h)` unsigned overcount and this `O(h²)` residual are two readings of one
 thing.
 
-*From `FREE-BOUNDARY-PLAN.md` §7.7, which keeps its heading and the verdict.
-`CLAUDE_FB.md`, *At `j = 0` the question does not arise*, carries the same
+*`CLAUDE_FB.md`, *At `j = 0` the question does not arise*, carries the same
 account interleaved with what it moved in MEQ's code, and keeps it.*
 
 ### A closed-form conductor field as more accurate than one assembled on the mesh
@@ -1575,9 +1687,84 @@ current density are already modelled**, and the exterior route inherits that
 fidelity rather than trading it away. The filament is the limiting case, not the
 method.
 
-*From `FREE-BOUNDARY-PLAN.md` §7.19, *IT IS NOT MORE ACCURATE, AND THE FIRST
-DRAFT OF THIS SECTION SAID IT WAS*. `CLAUDE_FB.md`, *FB-7*, states the same
-verdict in one paragraph and keeps it.*
+*`CLAUDE_FB.md`, *FB-7*, states the same verdict in one paragraph and keeps it.*
+
+### A coil field, or a value-and-slope match, as FB-1's exact answer
+
+**Declined, and the obvious match falsified as a fixture.** FB-1 needs an answer
+known exactly. **The sum of the coils' loop fields cannot be one for an order
+study**: an exact loop field comes from a filament, a point source in the
+`(R, z)` half-plane, so `ψ` is log-singular there, `ψ ∉ H¹`, and `k+1` is
+unreachable; a finite cross-section restores the regularity, but its field is a
+2-D integral of loop fields, semi-analytic and weakly singular inside the coil.
+
+**And the obvious manufactured solution has the same defect from the other
+side.** Matching an exterior mode's value and slope at `ρ_0` with
+`A ρ^n + B ρ^{n+2}` leaves the source discontinuous there, so
+`ψ ∈ H^{5/2−ε}` and the rate caps near **2.5 whatever `k` is** — a `k = 3` study
+would measure the matching radius rather than the coupling.
+`tests/analytic/ExteriorMatched.hpp` carries a **contact order** `p`, the order
+to which the source vanishes at `ρ_0` — default 4, `ψ ∈ C^5`, enough for
+`k = 1…4` — and ships `p = 0` as the control that measures the defect: in the
+band round `ρ_0` its `Δ*` residual sits at 4.81 at every `h`.
+
+*From the free-boundary campaign; `CLAUDE_FB.md`'s stage table, FB-1.*
+
+### `a = 0` exactly for a conductor outside `Γ`, and comparing two meshes by projection
+
+**Falsified, and declined.** FB-7's coupled acceptance first predicted `a = 0` to
+round-off in one Newton step, the exterior field being entirely the conductor's
+so `ψ̃ ≡ 0`. **The reasoning was right and the prediction was not**: the
+transmission condition reads `a` off the *discrete* interior flux extended to
+`Γ`, and `q_h` is `q_coil` only to `O( h^{k+1} )`, so the discrete `a` is the
+interior error projected onto the modes. It converges with the mesh — `|a|` at
+4.076 and `ψ` at 4.486, one Newton step at every mesh — rather than being zero on
+it, and asserting zero would assert an exact interior solve. It is still the sign
+test, on the RATE: a wrong-signed moment asks `a` to cancel twice the conductor's
+own flux, which is `O( 1 )` and does not fall with `h`.
+
+**The prediction for the two routes' agreement, `min( k+1, 3 )`, was half
+right.** A top hat's corners carry an `r² log R` term, so run B's whole-box L2
+reads 2.741 / 3.052 at `k = 2, 3`; the corner term is local, and the overlap half
+a metre away converges at `k+1`, 3.879 at `k = 3`. Both are right.
+
+**Comparing `ψ_h` across meshes by projection is declined**: MEQ's volume spaces
+are Gauss–Lobatto, so a dof is a point value on an element boundary where an
+`L²` field is two-valued, and reading one mesh's field at another's dof points is
+ambiguous by the face jump — the quantity being measured. The case samples at
+fixed points instead.
+
+*From the free-boundary campaign; `CLAUDE_FB.md`, *FB-7*, owns the subject.*
+
+### FB-6's smaller falsifications: an additive softening, a monotone `ψ_bnd`, regenerating the tables
+
+**Falsified, three times, and one closed.**
+
+* **An additive `soft²` in `mkexactguess.py`.** On a finer reference the
+  guess's Green's-function sum aliased: at 513² the guess step is exactly 26
+  source cells in `R` and 52 in `Z`, so nodes inside the core landed on source
+  filaments and came back infinite, and the neighbour fill flattened the peak to
+  2.6e-02 against a reference axis of 9.3e-02. The fix floors the separation at
+  the source cell's own geometric mean distance, `0.44705 d` — inert at 129²
+  (2.38e-04 either way) and 2.0e-05 at 513². An additive `soft²` was tried first
+  and damps the whole near field: it took the 129² control from 4.6e-04 to
+  2.5e-03, five times worse.
+* **`ψ_bnd` monotone in the limiter position.** An early form of
+  `theLimiterConstraintIsEvaluatedWhereItIsAsked` asserted it. Moving the limiter
+  moves the equilibrium, so `ψ_bnd` is not `ψ` sampled on a fixed field: on the
+  toy fixture it has a genuine minimum near `R = 1.20`, and second differences are
+  large near an extremum by construction. The test gates on the control
+  **repeating a value exactly** instead.
+* **Refinement curing the found contact's branch sensitivity.** The same cold run
+  at 5225 elements does not converge at all, where the prescribed point takes 7
+  (`CLAUDE_FB.md`, *FB-6 is beaten*).
+* **Regenerating the profile tables from the 513² arrays** is closed as
+  cosmetic: the shipped tables carry the 129² run's `Ip_logic` factor and the
+  current border absorbs it, at a scale of 0.9400254 predicted to 3.8e-04 from
+  the reference's own metadata.
+
+*From the free-boundary campaign; `CLAUDE_FB.md`, *FB-6 is beaten*, owns the
+subject.*
 
 ### Triangle, CGAL Mesh_2 and MMG as the mesh generator
 
@@ -2214,11 +2401,11 @@ at 513², with every answer unchanged. The fast path tests the geometry's
 * **The evolution problem.** Quasi-static resistive evolution, CEDRES++'s
   Problems 5 and 6.
 
-*From `FREE-BOUNDARY-PLAN.md` §9, which keeps its heading. That list also named
-the inverse problem — coil currents to achieve a shape — which is dropped here
-because it is built: IV-0 to IV-6, [M-250](MEASUREMENTS.md#m-250) to
-[M-253](MEASUREMENTS.md#m-253). Its fourth item, the original free-boundary
-code, is under *The Lackner / von Hagenow Green's-function route*.*
+*From the free-boundary campaign's out-of-scope list. The inverse problem —
+coil currents to achieve a shape — is not on it because it is built: IV-0 to
+IV-6, [M-250](MEASUREMENTS.md#m-250) to [M-253](MEASUREMENTS.md#m-253). The
+original free-boundary code is under *The Lackner / von Hagenow Green's-function
+route*.*
 
 ### What the X-point pathway does not reach: the plasma edge, inversion through a separatrix, a fixed boundary on one
 
@@ -2239,7 +2426,8 @@ reachable for:
   `ψ = −0.03` rather than `ψ = 0`. Nothing here rescues that, and nothing needs
   to: free boundary is what removes the need to mesh the separatrix at all.
 
-*From `FREE-BOUNDARY-PLAN.md` §10.6, *what it does NOT cover*.*
+*From the free-boundary campaign's X-point pathway; `CLAUDE_FB.md`'s stage
+table, XP-0 to XP-4.*
 
 ### The inversion's out-of-scope list: topology, 3D, straight-field-line angles, `p` contours and the inverse-equilibrium formulation
 
@@ -2273,12 +2461,12 @@ they stay where they are; this index makes the catalogue complete.
 - `CLAUDE_DEVICE.md` *Which integrators need device offload, and the batched routes*: `AssemblyMode::Batched` a 15 to 27% host loss (closed, M-99); `LocalFactorMode::Batched` not the host default (declined); `AssemblyMode::Batched` under a Device (declined, M-215, M-209); the ordered list's items 2 and 3 (closed), "`HDGExtensionIntegrator` disqualifies the condensation cache" (falsified), nothing for the linear-form integrators (declined) (M-185).
 - `CLAUDE_MFEM.md` *`../../mfem-hdg-dev` is receive-only*, the `Reconstruct()` row: MEQ's two candidate fixes (falsified, measured); upstream's `own_internal` flag (withdrawn); three explanations of why `cuda` never met it (falsified).
 - `CLAUDE_FB.md` *FB-6 is beaten* (the limiter pinned to a dof): `LimiterConstraint::NearestDof` replaced and kept as a control, and the analogy that excused it falsified (M-08).
-- `CLAUDE_FB.md` *FB-6 is beaten*, and `FREE-BOUNDARY-PLAN.md` §7.20 *What is left*: *Painting the limiter by centroid, and a precedence rule* — painting falsified (an `O(h)` staircase), cutting elements for a smooth limiter declined, a `SurfaceAttribute`/`R`-`Z` precedence rule declined (both refused).
+- `CLAUDE_FB.md` *FB-6 is beaten*: *Painting the limiter by centroid, and a precedence rule* — painting falsified (an `O(h)` staircase), cutting elements for a smooth limiter declined, a `SurfaceAttribute`/`R`-`Z` precedence rule declined (both refused).
 - `CLAUDE_FB.md` *At `j = 0` the question does not arise* (the tiling paragraphs): *Lost coverage as the cause of the red tiling, and relaxing the gate* — withdrawn and declined (M-12).
 - `CLAUDE_FB.md` *At `j = 0` the question does not arise*: `PicardThenNewton` or an exact start for `j = 0` falsified (M-11); a cut rule to make `j = 0` solvable closed; the PLASMA-EDGE route at `j = 0` deferred; the `F·δ(Ψ)` surface term declined.
-- `CLAUDE_FB.md` *FB-5* (the support fill): the face-neighbour leak estimate half falsified (2,275 leak), blocking the saddle element declined, fixed rings reverted, ring depth declined. `FREE-BOUNDARY-PLAN.md` §10.3 carries the same list plus "latent not broken" falsified, interior-only declined and freezing the fill not needed.
+- `CLAUDE_FB.md` *XP-1: the plasma support is a connected component*: the face-neighbour leak estimate half falsified (2,275 leak), blocking the saddle element declined, fixed rings reverted, ring depth declined, "latent not broken" falsified, interior-only declined (179 / 360 / 720 dropped) and freezing the fill not needed.
 - `CLAUDE_FB.md` *PE-0*: PE-0's acceptance as written falsified (M-74, M-75), the X-point corner as the cause falsified (M-76), quadrature as the `j = 2, k = 3` anomaly falsified (M-84).
-- `CLAUDE_FB.md` *§7.12b's fixture was the defect*: "machine C's guard refusal is a true property" withdrawn, a guard on `axisInsidePlasma` reverted (M-109); a point-in-polygon vessel declined (M-110).
+- `CLAUDE_FB.md` *The two-border fixture was the defect*: "machine C's guard refusal is a true property" withdrawn, a guard on `axisInsidePlasma` reverted (M-109); a point-in-polygon vessel declined (M-110).
 - `CLAUDE_FB.md` *The bordered path has a globalisation*: *PicardSweeps and BorderedPicardThenNewton* — freezing the residual declined, `BorderedPicardThenNewton`'s predicted value falsified (M-119, M-253), the handoff tolerance useless, a re-purposed `PicardOnly` and two `solve()` calls declined.
 - `CLAUDE_FB.md` *Meshing the half-disc*: linking gmsh's C++ API into `meq_core` declined, re-meshing during a solve not on the plan.
 - `CLAUDE_FB.md` *MEQ against freegs4e*: the causes eliminated on machine A — `h`/`p` refinement, freegs4e's grid, the conductor model, mode truncation, the exterior radius, the `ff′` amplitude, the profile conversion, the support, the source arithmetic, `I_p` — and the forward/inverse mode mismatch as the explanation falsified (M-105, M-107).
@@ -2306,21 +2494,13 @@ they stay where they are; this index makes the catalogue complete.
 - `DEVICE-PLAN.md` §3.7 and §4: "the first 1.74× is not MEQ's" (M-185, M-188); stage 2 threaded-under-device refused (M-188); stage 4 `x_loc` against `b_tr` (falsified, M-207, M-223); stage 5 no speed on this machine (declined)
 - `DEVICE-PLAN.md` §6: the stack-`Vector` attribution and "an inexact integrand raises the Newton count" (falsified; M-130, M-203, M-207, M-223)
 - `DEVICE-PLAN.md` §7: "do not convert first" (declined); the §7.2 prediction inverted (M-217); per-pair rate criteria (M-218); porting gslib to single (declined; M-175, M-176)
-- `FREE-BOUNDARY-PLAN.md` §4.1: `NonlinearOrdering::LineariseThenCondense`, deleted upstream, and `NORMALISED-LINEARISE-FIRST.md` with it.
-- `FREE-BOUNDARY-PLAN.md` §5.3 (the blockquote), §7.10 and §8: *Cut quadrature, Algoim and moment fitting* — ignoring or differencing the cut-rule derivative, cut quadrature not built, MFEM's cut backends quad-only, the PLASMA-EDGE route deferred, a cut rule for `j = 0` not worth it.
-- `FREE-BOUNDARY-PLAN.md` §6: §6.1's rectangular integrator not needed; §6.3/§6.4's *Auxiliary globally-coupled unknowns*, closed (M-98).
-- `FREE-BOUNDARY-PLAN.md` §7.4a: a filament (log singular), a finite cross-section and a naive C¹ match as FB-1's exact answer — rate capped at 2.5; the match ships as the `p = 0` control.
-- `FREE-BOUNDARY-PLAN.md` §7.11: CEDRES++'s ITER case, Serino's ITER case (a proprietary seed), building an ITER coil set, and `γ = 1.395` as the opener, all declined.
-- `FREE-BOUNDARY-PLAN.md` §7.12 and §7.12a: *η₆ in the marking* — "boundary elements lose Dörfler" falsified, `η₆` summed into `η` reverted, one weighted sum declined, the growing-domain hypothesis ruled out (M-05).
-- `FREE-BOUNDARY-PLAN.md` §7.12b and §7.16: §7.13's verdict stale, the "corner artefact" falsified; "`h` does not cure, `p` does" falsified, the amplitude-fixed formulation failing falsified, the conductor-shrink test establishing nothing.
-- `FREE-BOUNDARY-PLAN.md` §7.18 (verdict table): the coil sweep FALSE, the vertical field NOT BORNE OUT, branch crossing FALSE, the corner entries COULD NOT REPRODUCE, coil continuation not needed, the argmax MISLEADING, "vacuum refused" FALSE, the `I_p` ramp NOT BORNE OUT, "prescribe consistent currents" evidence gone.
-- `FREE-BOUNDARY-PLAN.md` §8 (Risks): the `F(0, z) = 0` freebie falsified, a cut rule for `j = 0` not worth it, *A backtracking line search on the full residual* making every case worse (M-22).
-- `FREE-BOUNDARY-PLAN.md` §7.19: "a = 0 EXACTLY" wrong, the predicted rate half wrong, a cross-mesh projection declined.
-- `FREE-BOUNDARY-PLAN.md` §7.20: the NearestDof analogy falsified, regenerating from 513² cosmetic, an additive `soft²` falsified (5× worse), a monotone `ψ_bnd` assertion falsified, "refinement cures branch sensitivity" falsified.
-- `FREE-BOUNDARY-PLAN.md` §10.8: initialising `ψ_bnd` from its own border row declined (11 → 200 steps), the `hasInitialGuess()` gate falsified, the axis seed innocent, "make the argmax cleverer" declined.
-- `FREE-BOUNDARY-PLAN.md` §11.6: the first `checkAxisSource` reverted, "the fill must not be changed", last-amplitude truncation declined, a 1e-2 threshold declined.
-- `FREE-BOUNDARY-PLAN.md` §11.7: a fixed `a = 0.30`, the textbook on-axis loop formula, and a looser assertion past `R ≈ 1.20`, all declined (M-45).
-- `FREE-BOUNDARY-PLAN.md` §12, FB-R and FB-T: the gap between the two discrete equilibria does not close (M-132); a prescribed current does not cure confinement (M-134); `setBoundaryFluxInitial` is never a TOML key.
+- `CLAUDE_FB.md` *`ψ_bnd`: settable, an unknown*, its last paragraph: `NonlinearOrdering::LineariseThenCondense`, deleted upstream, and `NORMALISED-LINEARISE-FIRST.md` with it.
+- `CLAUDE_FB.md` *FB-6's test problem*: CEDRES++'s ITER case, Serino's ITER case (a proprietary seed), building an ITER coil set, and `γ = 1.395` as the opener, all declined.
+- `CLAUDE_FB.md` *`ψ_ax` was the weak point of the whole free-boundary path*: `F(0, z) = 0` as a freebie of a free boundary, falsified — it is a precondition, which `ConfineToPlasma` meets.
+- `CLAUDE_FB.md` *The two-border fixture was the defect*: a fixed `a = 0.30` for the whole sweep, the textbook on-axis loop formula, and a looser assertion past `R ≈ 1.20`, all declined (M-45).
+- `MEASUREMENTS.md` M-132 and M-134 (FB-R, FB-T): the gap between the two discrete equilibria does not close; a prescribed current does not cure confinement; `setBoundaryFluxInitial` is never a TOML key.
+- `src/meq/ExteriorDtN.hpp`, `truncationRatio()`: reading the truncation off the last amplitude alone, declined for parity; `apps/meq.cpp`'s advice threshold: 1e-2, declined as firing on the converged production case, calibrated to 1e-1.
+- `CLAUDE_FB.md` *`ψ_ax` was the weak point of the whole free-boundary path*: the first `checkAxisSource()`, asking the iterate's `ψ_h` on the axis, reverted — a healthy run reads 6.2e-05 of scale there and any tolerance that catches the pole refuses it; at `ψ = 0` the sound case is round-off and the failing one 1.0e-02.
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` IV-0 and §4.6: a flat coil list, and freeing every conductor, falsified (M-244).
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` §4.5: targets as hard equations and a square corner, declined — it fails on machine A.
 - `INVERSE-AND-RECONSTRUCTION-PLAN.md` §4.5, §5 and §16 items 7–8: inequality constraints on coil currents and forces, and gap constraints, out of scope for Part One.
@@ -2343,8 +2523,8 @@ they stay where they are; this index makes the catalogue complete.
 - `PLASMA-EDGE-PLAN.md` §7: the X-point diagnosis half wrong, and the evidence against the premise disposed of.
 - `PLASMA-EDGE-PLAN.md` §9.2 and §9.4: `φ = ψ − ψ_X` as the defining function, falsified; and three causes ruled out — cone widening, a P.1 violation, the mesher / datum / path family.
 - `PLASMA-EDGE-PLAN.md` §9.5 and §9.7: an interface at `ψ_X − ε` as a fallback rather than a design, and an `O(h)` disc exclusion, superseded by the closed-form local solution.
-- `ROADMAP.md` plan-file table: the `COIL-SUBTRACTION-PLAN.md` row (caching `psi_c` alone superseded, M-170; subdividing filaments moves MEQ away from `freegs4e`, M-166), the `FREE-BOUNDARY-PLAN.md` row (FB-T does not cure confinement, M-134) and the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-134, M-137, M-138, M-166, M-170)
-- `ROADMAP.md` *So what is next* item 1 (l.80-117): `η₆` in the marking does nothing; coils the wrong instinct, a vertical field makes no core, vacuum start meaningless, continuation not needed; the §7.12 / §7.13 attempts (falsified / declined) (M-05)
+- `ROADMAP.md` plan-file table: the `COIL-SUBTRACTION-PLAN.md` row (caching `psi_c` alone superseded, M-170; subdividing filaments moves MEQ away from `freegs4e`, M-166), the free-boundary row (FB-T does not cure confinement, M-134) and the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-134, M-137, M-138, M-166, M-170)
+- `ROADMAP.md` *So what is next* item 1 (l.80-117): `η₆` in the marking does nothing; coils the wrong instinct, a vertical field makes no core, vacuum start meaningless, continuation not needed; the first adaptive-coupling and two-border attempts (falsified / declined) (M-05)
 - `ROADMAP.md` *So what is next* item 1, *The conductor model is what is left*: no `Γ` excludes the conductors on any of seven machines, and the mixed case cascades (falsified) (M-95, M-96)
 - `ROADMAP.md` *Division of labour*: auxiliary globally-coupled unknowns no longer worth asking for (M-98); BEM coupling not wanted, ExteriorDtN instead; the local-solve seed never filed (moot under NPC)
 - `ROADMAP.md` item 1: predictive solver selection killed, and continuation must not go in (falsified / declined) (M-24)

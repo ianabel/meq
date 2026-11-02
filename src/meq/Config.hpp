@@ -856,8 +856,8 @@ namespace meq
 	/**
 	 * ONE RECTANGULAR-CROSS-SECTION COIL CARRYING A UNIFORM CURRENT DENSITY.
 	 *
-	 * FB-6, and section 5.4 of FREE-BOUNDARY-PLAN.md calls the coils "ordinary"
-	 * -- coil currents are data, and the source adds
+	 * FB-6, and the coils are "ordinary" -- coil currents are data, and the
+	 * source adds
 	 * `F_coil = mu0 R I_k / |Omega_ck|` on each coil subdomain. This is the
 	 * configuration half of that; `meq::Coil` is the library half and has been
 	 * measured since FB-2.
@@ -1500,11 +1500,11 @@ namespace meq
 		 * stalls at the 200-iteration cap with the support moving and converges
 		 * in 21 steps with the confinement off.** MEASUREMENTS.md M-82.
 		 *
-		 * The answer is FREE-BOUNDARY-PLAN.md section 10.5's, applied to the
-		 * support rather than to the bounding point: fix the topology within a
-		 * solve and re-decide it between solves. This is how many times the
-		 * driver may re-decide it -- freeze at the answer just reached, solve
-		 * again, and stop when the support stops moving.
+		 * The answer is to fix the topology within a solve and re-decide it
+		 * between solves, applied to the support rather than to the bounding
+		 * point (docs/free_boundary.rst, *The plasma support*). This is how
+		 * many times the driver may re-decide it -- freeze at the answer just
+		 * reached, solve again, and stop when the support stops moving.
 		 *
 		 * **ZERO IS THE DEFAULT AND MEANS TODAY'S BEHAVIOUR**, the support
 		 * moving inside Newton, so every existing file is bit-unchanged. It is

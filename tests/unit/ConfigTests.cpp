@@ -2197,8 +2197,7 @@ BOOST_AUTO_TEST_CASE( initialGuessAndAdaptivityParse )
  * [[coils]] -- FB-6's configuration half
  * ============================================================================
  *
- * FREE-BOUNDARY-PLAN.md section 5.4 calls the coils "ordinary": coil currents
- * are data, and the source adds F_coil = mu0 R I_k / |Omega_ck| on each coil
+ * The coils are ordinary: coil currents are data, and the source adds F_coil = mu0 R I_k / |Omega_ck| on each coil
  * subdomain. meq::Coil has been the library half since FB-2 and is measured;
  * this is the file half.
  *
@@ -2591,7 +2590,7 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
  * THE SUPPORT'S OUTER LOOP, AND THE ONE THING IT IS INERT WITHOUT.
  *
  * [solver] PlasmaSupportSweeps freezes the plasma support within each solve and
- * re-decides it between them -- FREE-BOUNDARY-PLAN.md section 10.5, and the one
+ * re-decides it between them -- docs/free_boundary.rst, The plasma support -- the one
  * discrete state XP-3's border structurally cannot carry. What makes it worth a
  * refusal rather than a default is that
  * meq::NormalisedSource::freezePlasmaEdge is documented INERT unless

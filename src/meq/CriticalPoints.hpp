@@ -293,8 +293,8 @@ namespace meq
 		/// returns a point on the element boundary instead of failing, and a
 		/// field that is constant over the element cannot tell the difference.
 		/// The one consumer that would notice is exactly the one this exists
-		/// for, FREE-BOUNDARY-PLAN.md section 11.5's option 3, where the shape
-		/// functions at this point ARE a row of the bordered Jacobian.
+		/// for, AxisConstraint::LocatedAxis, where the shape functions at this
+		/// point ARE a row of the bordered Jacobian.
 		///
 		/// TWO DOUBLES RATHER THAN AN mfem::IntegrationPoint, because that class
 		/// has no default member initialiser -- a defaulted CriticalPoint would
@@ -599,7 +599,7 @@ namespace meq
 			 * THIS IS THE WARM-START ENTRY POINT AND ITS WHOLE PURPOSE IS COST.
 			 * findAxis() and tryFindAxis() are written for a caller with no prior:
 			 * they seed from the extreme NODAL values -- the quantity
-			 * FREE-BOUNDARY-PLAN.md section 11 is about -- and they fall back to a
+			 * AxisConstraint::NodalMaximum takes -- and they fall back to a
 			 * full sweep() whenever the seeded path is not unambiguous, which is
 			 * the right trade when the answer is wanted once after a solve. It is
 			 * the wrong trade INSIDE a Newton loop, where the point is wanted once
@@ -782,8 +782,8 @@ namespace meq
 			 * THE PLASMA'S ON EVERY SCORE THIS CLASS KNOWS.** Any coil carrying
 			 * current of the plasma's own sign has one, and on a machine whose
 			 * coils are meshed inside the domain it is a perfectly good zero of
-			 * q_h. Measured on the diverted machine of FREE-BOUNDARY-PLAN.md
-			 * section 10: checkAxis() returned the O-point at
+			 * q_h. Measured on the diverted machine of
+			 * examples/diverted-tokamak.toml: checkAxis() returned the O-point at
 			 * ( 1.0099, -1.1018 ) -- inside the P1L conductor -- carrying
 			 * normalised flux 1.5564, and reported the solve's own axis as
 			 * disagreeing with it.

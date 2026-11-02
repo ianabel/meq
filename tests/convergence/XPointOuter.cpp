@@ -1,6 +1,5 @@
 /*
- * XP-2: psi_bnd FROM THE LOCATED X-POINT, AS AN OUTER FIXED POINT.
- * FREE-BOUNDARY-PLAN.md section 10.6.
+ * XP-2: psi_bnd FROM THE LOCATED X-POINT, AS AN OUTER FIXED POINT. M-82.
  *
  * FB-3's setBoundaryFluxPoint() pins psi_bnd = psi_h at a PRESCRIBED point,
  * which is right for a limiter -- the contact is a piece of hardware -- and
@@ -15,8 +14,7 @@
  * an outer fixed point over ( R_X, z_X ), warm started from the previous sweep.
  *
  * THE DISCRETE CHOICE IS FROZEN WITHIN A SOLVE AND RE-DECIDED BETWEEN THEM,
- * which is section 10.5's answer to the one thing this stage cannot
- * differentiate: psi_bnd is a min over candidates and a min is not smooth, so
+ * which is the answer to the one thing this stage cannot differentiate: psi_bnd is a min over candidates and a min is not smooth, so
  * Newton is never asked to differentiate through it. Each solve is a smooth
  * problem with the bounding point FIXED.
  *
@@ -34,7 +32,7 @@
  * psi_bnd therefore puts it at POSITIVE Psi, inside the plasma support, where
  * ConfineToPlasma does not switch gg' off; and F/R is mu_0 j_phi, so that is an
  * infinite toroidal current density on the axis. What the field then grows is
- * section 11.3's axis layer, and what CriticalPointFinder reports is the layer.
+ * the R = 0 axis layer, and what CriticalPointFinder reports is the layer.
  * Measured on one such run: THIRTY critical points, every one at R < 0.1, a
  * ladder of maxima marching up the symmetry axis from z = -0.11 to z = +1.44,
  * and the "magnetic axis" at R = 0.022.
@@ -56,7 +54,7 @@
  * examples/diverted-tokamak.toml IS THE MACHINE THIS RUNS ON INSTEAD, AND IT IS
  * BORROWED RATHER THAN DESIGNED. It is freegs4e's own A_testtokamak_classic:
  * an up-down asymmetric double null whose coil currents were SOLVED FOR by its
- * control system, which section 7.15 argues is what makes a free-boundary
+ * control system -- consistent inputs, which is what makes a free-boundary
  * Newton converge at all. Its psi_bndry IS the lower X-point's flux to every
  * digit and its psi_bnd/psi_ax is 0.39.
  *
@@ -108,7 +106,7 @@
  * What that ruled out: the profile conversion, the guess, the polynomial
  * degree, and the axis competition -- a conductor's O-point is excluded on both
  * paths now ( meq::Source::conductors ) and the runaway axis is in no coil.
- * What was left is the pair section 10.5 names: a plasma support that MOVES
+ * What was left is a pair of non-smooth states: a plasma support that MOVES
  * within the Newton, and a psi_bnd pinned exactly at a saddle, where the
  * enclosed area's derivative is not bounded.
  *
@@ -124,11 +122,12 @@
  * fixed: the pointwise test carries 752 elements over THREE components and the
  * fill keeps the 419 holding the axis. The other 333 -- 44% of the candidates
  * -- are the private flux region, and they were getting a current channel
- * nobody asked for on the only diverted case in this tree. Section 10.3
- * predicted exactly that and XP-1 was built for it.
+ * nobody asked for on the only diverted case in this tree, which is exactly
+ * what XP-1 was built for.
  *
- * The second is section 10.5's own prescription applied to the support as well
- * as to the bounding point: hold the edge insidePlasma() tests against fixed
+ * The second is the prescription for a non-smooth outer state -- fix it within
+ * a solve, re-decide it between solves -- applied to the support as well as to
+ * the bounding point: hold the edge insidePlasma() tests against fixed
  * for the whole of one solve and move it between solves --
  * meq::NormalisedSource::freezePlasmaEdge, with
  * GradShafranovSolver::setPlasmaSupportFrozen holding the fill's own mask the
@@ -281,8 +280,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	};
 	std::vector<Sweep> sweeps;
 	int seededSweeps = 0;
-	// Section 10.5's own warning is that a discrete outer state can alternate
-	// rather than settle, so how often the support changes size is counted and
+	// A discrete outer state can alternate rather than settle, so how often the support changes size is counted and
 	// printed rather than assumed away.
 	int supportMoved = 0;
 
@@ -396,9 +394,9 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	 * AND THE SUPPORT IS THE OTHER DISCRETE STATE ON THIS FIXED POINT, so it
 	 * gets the same treatment as the X-point: reported, and asserted to settle.
 	 *
-	 * Section 10.5 warns that a combinatorial outer iteration can alternate
-	 * rather than converge -- two element sets swapping on alternate sweeps --
-	 * and says there is no globalisation for one. There is no cure to assert
+	 * A combinatorial outer iteration can alternate rather than converge -- two
+	 * element sets swapping on alternate sweeps -- and there is no
+	 * globalisation for one. There is no cure to assert
 	 * here, only the symptom: a support still changing size on the LAST sweep
 	 * has not settled, whatever the X-point did, and a psi_bnd read off it is a
 	 * statement about which of two states the loop stopped on.
@@ -410,7 +408,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	BOOST_TEST( supportMoved < static_cast<int>( sweeps.size() ),
 		"the frozen support changed size on every one of " << sweeps.size()
 		<< " sweeps, so the outer iteration has not settled on a topology -- "
-		"section 10.5's alternating discrete state, which has no globalisation. "
+		"a discrete outer state alternating between two supports, which has no "
+		"globalisation. "
 		"The X-point's own convergence below says nothing about this: they are "
 		"two states on one fixed point and either can chatter while the other "
 		"contracts." );
@@ -461,7 +460,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		"the outer step went from " << sweeps.front().step << " to "
 		<< last.step << " over " << sweeps.size() << " sweeps. XP-2 is a "
 		"fixed-point iteration and a slow one is a different algorithm from a "
-		"fast one -- section 10.4's three-row border is the answer if this is "
+		"fast one -- XP-3's three-row border is the answer if this is "
 		"what the map looks like." );
 
 	// THREE: psi_bnd IS THE FLUX AT THE SADDLE.
@@ -615,7 +614,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		"R = 0." );
 	BOOST_TEST( axis.nodeR > 0.30,
 		"psi_ax is attained at R = " << axis.nodeR << ", which is on or beside "
-		"the symmetry axis -- section 11.3's axis layer." );
+		"the symmetry axis -- the R = 0 axis layer." );
 	BOOST_TEST( axis.agrees,
 		"the O-point of q_h carries Psi = " << axis.normalisedFlux
 		<< " against the 1 it must carry by definition." );

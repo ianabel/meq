@@ -77,7 +77,7 @@ namespace meq
 			 * encloses a plasma and excludes the coils near it -- a search for
 			 * the axis over the whole field can therefore return a COIL's
 			 * O-point, correctly and uselessly. Measured on the diverted machine
-			 * of FREE-BOUNDARY-PLAN.md section 10 -- freegs4e's TestTokamak,
+			 * of examples/diverted-tokamak.toml -- freegs4e's TestTokamak,
 			 * whose P1L carries +1.37e+05 A against an `I_p` of 2.0e+05 A: the
 			 * located axis came back at ( 1.0103, -1.1018 ), inside that
 			 * conductor, at `psi` = 1.21e-01 where the reference equilibrium's
@@ -307,8 +307,8 @@ namespace meq
 			/// and MEQ's fixed-boundary problem has psi = 0 on Gamma, so
 			/// psi_bnd vanished and this class was written as Psi = psi/psi_ax.
 			/// Free boundary makes it an unknown as well -- the flux at the
-			/// limiter contact or the X-point -- and FREE-BOUNDARY-PLAN.md's
-			/// FB-3 is a SECOND border row of the same shape as psi_ax's.
+			/// limiter contact or the X-point -- and FB-3 is a SECOND border
+			/// row of the same shape as psi_ax's.
 			///
 			/// The one-argument form below keeps psi_bnd = 0 and is what every
 			/// fixed-boundary caller wants.
@@ -351,15 +351,14 @@ namespace meq
 			 *
 			 * **AND IT IS THE POINTWISE TEST, NOT A CONNECTIVITY ONE.**
 			 * `{ Psi > 0 }` can pick up private-flux regions beyond an X-point
-			 * and pockets near the coils, which are not the plasma;
-			 * FREE-BOUNDARY-PLAN.md section 5.3 records that CEDRES++ needs a
-			 * connectivity test for exactly this and that
-			 * meq::CriticalPointFinder is what would make one cheap. Until that
-			 * exists this is a limiter plasma's support, and a diverted one's
-			 * only while the search region excludes the private flux.
+			 * and pockets near the coils, which are not the plasma; CEDRES++
+			 * needs a connectivity test for exactly this, and
+			 * meq::PlasmaComponent is MEQ's, applied by the solver on top of
+			 * this one. On its own this is a limiter plasma's support, and a
+			 * diverted one's only while the search region excludes the private
+			 * flux.
 			 *
-			 * FREE-BOUNDARY-PLAN.md section 10.3 is that note promoted to a
-			 * plan, and it says which DIRECTION this is wrong in: the private
+			 * The DIRECTION this is wrong in is specific: the private
 			 * flux region is the sector OPPOSITE the plasma across the saddle,
 			 * so it carries Psi > 0 by value and this test switches the source
 			 * ON there. A diverted run would converge and would describe a
@@ -507,12 +506,12 @@ namespace meq
 			/**
 			 * **HOLD THE EDGE THE SUPPORT TEST USES, SO THE SUPPORT STOPS
 			 * MOVING WITHIN A NEWTON WHILE `psi_ax` AND `psi_bnd` STAY UNKNOWNS
-			 * OF IT.** XP-2 of `FREE-BOUNDARY-PLAN.md` §10.6.
+			 * OF IT.** XP-2; CLAUDE_FB.md's stage table.
 			 *
 			 * With the support live, `F`'s on/off region is a functional of the
 			 * iterate through this class's own pointwise test -- so it moves
 			 * every residual, and its derivative is a surface term the Jacobian
-			 * does not carry. §10.5's answer is the one this tree already
+			 * does not carry. The answer is the one this tree already
 			 * applies to the bounding POINT: fix the topology within a solve and
 			 * re-decide between solves.
 			 *
@@ -685,8 +684,8 @@ namespace meq
 			 *
 			 * Prescribing `I_p` and solving for this scale turns that balance
 			 * into an ordinary unknown of the same bordered Newton. It is what
-			 * CEDRES++ and FreeGS both do -- FREE-BOUNDARY-PLAN.md section 7.11
-			 * names `ConstrainBetapIp` as FB-6's reference model -- and it is
+			 * CEDRES++ and FreeGS both do -- `ConstrainBetapIp` is FB-6's
+			 * reference model (CLAUDE_FB.md, *FB-6's test problem*) -- and it is
 			 * why every production free-boundary code asks for a current rather
 			 * than for an amplitude.
 			 *

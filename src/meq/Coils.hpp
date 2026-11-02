@@ -9,8 +9,8 @@
 #include "Source.hpp"
 
 /*
- * Poloidal field coils of rectangular cross-section: stage FB-2 of
- * FREE-BOUNDARY-PLAN.md, and the thing FB-1 needs before it can run at all.
+ * Poloidal field coils of rectangular cross-section: stage FB-2 of the
+ * free-boundary campaign, and the thing FB-1 needs before it can run at all.
  *
  * WHAT THIS IS. A coil is a region of the ( R, z ) plane carrying a prescribed
  * toroidal current. Its current is DATA -- it does not depend on psi, it is not
@@ -30,11 +30,11 @@
  * THE SOURCE TERM, DERIVED RATHER THAN QUOTED
  * -------------------------------------------
  *
- * FREE-BOUNDARY-PLAN.md section 5.4 prints F_coil = mu0 R I_k / |Omega_ck| and
- * this file does not take that on trust, because CLAUDE.md records two separate
- * occasions in this tree where a transcribed formula converged beautifully to
- * the wrong function. Here is the derivation; it agrees with the plan, and the
- * agreement is reported rather than assumed.
+ * F_coil = mu0 R I_k / |Omega_ck| is not taken on trust, because CLAUDE.md
+ * records two separate occasions in this tree where a transcribed formula
+ * converged beautifully to the wrong function. Here is the derivation, and the
+ * agreement with docs/free_boundary.rst, *Conductors*, is reported rather than
+ * assumed.
  *
  * MEQ solves -div_bar( ( 1/R ) grad_bar psi ) = F( R, z, psi )/R, and
  *
@@ -220,8 +220,8 @@
  *
  * SO THE CONTRACT IS: MACHINE PRECISION OUTSIDE, AND ABOUT 3e-12 INSIDE AT THE
  * DEFAULT ORDER, degrading to 1e-9 at n = 16 and reaching round-off at n = 48.
- * That is good enough to use the interior field as a reference, which is more
- * than the plan asked for -- and it is good enough that the Delta* check above
+ * That is good enough to use the interior field as a reference -- and it is
+ * good enough that the Delta* check above
  * can be run INSIDE the coil, which is the only place it pins the constant.
  * A point sitting almost exactly on a corner of the coil, ( 2.1499, 0.4999 )
  * against a corner at ( 2.15, 0.50 ), behaves no differently: 2.42e-06,
@@ -429,8 +429,8 @@ namespace meq
 	 *
 	 * Public because it is the exact kernel the cross-section integral is built
 	 * from, because the thin-coil limit is checked against it, and because a
-	 * caller modelling a coil as a filament -- which section 5.4 offers as the
-	 * alternative to a subdomain -- wants exactly this and nothing more.
+	 * caller modelling a coil as a filament -- the alternative to a
+	 * subdomain -- wants exactly this and nothing more.
 	 *
 	 * EXACT AND FREE OF CANCELLATION AT THE CONDUCTOR: see the file comment for
 	 * why it is Carlson's form. Two consequences worth knowing.
@@ -524,8 +524,8 @@ namespace meq
 	 * The HDG flux q = ( 1/R ) grad_bar( psi ) of a single filament.
 	 *
 	 * THIS is the primitive a free-boundary coupling wants: the transmission
-	 * condition of FREE-BOUNDARY-PLAN.md section 4.2 is written in q, and its
-	 * Neumann half needs q . nu on Gamma.
+	 * condition (docs/free_boundary.rst, *The coupled system*) is written in
+	 * q, and its Neumann half needs q . nu on Gamma.
 	 *
 	 * **NaN ON THE AXIS IN BOTH COMPONENTS, AND THAT IS NOT THE SAME STATEMENT
 	 * AS grad_bar psi's.** grad_bar psi is 0.0 there; dividing 0 by 0 is not.
@@ -747,17 +747,17 @@ namespace meq
 	 * WHY IT EXISTS, AND IT IS NOT THAT A FILAMENT IS BETTER. meq::Coil models
 	 * a real conductor: finite extent, uniform current density, a field that is
 	 * finite everywhere including inside itself. A filament is an
-	 * IDEALISATION, and FREE-BOUNDARY-PLAN.md section 7.19 records why MEQ
-	 * wants one anyway -- **`../freegs4e`'s default `Coil` IS an exact
+	 * IDEALISATION, and MEQ wants one anyway (CLAUDE_FB.md, *FB-7*) --
+	 * **`../freegs4e`'s default `Coil` IS an exact
 	 * filament**, `controlPsi` returning `Greens( R, Z, . )*turns` with its
 	 * `area` used only for a current-density limit and never entering the
 	 * field. So does FreeGS, and so do most codes of that family. MEQ could
-	 * not model what the reference code models, and section 7.16's published
-	 * 1.3e-04 agreement on `psi_ax` was reached ACROSS that mismatch rather
-	 * than with it removed. This is what lets the two be matched, and the
-	 * difference between two MEQ runs -- one filament, one rectangle, nothing
-	 * else changed -- is then the finite-size effect measured on one code with
-	 * one mesh and one solver.
+	 * not model what the reference code models, and the limited-tokamak
+	 * comparison's published 1.3e-04 agreement on `psi_ax` was reached ACROSS
+	 * that mismatch rather than with it removed. This is what lets the two be
+	 * matched, and the difference between two MEQ runs -- one filament, one
+	 * rectangle, nothing else changed -- is then the finite-size effect
+	 * measured on one code with one mesh and one solver.
 	 *
 	 * **IT STRUCTURALLY CANNOT DO WHAT Coil DOES, WHICH IS THE POINT OF HAVING
 	 * BOTH.** psi diverges logarithmically at the filament and grad psi like
@@ -954,9 +954,9 @@ namespace meq
 			/// over an enclosing rectangle, by central differences of psi() and
 			/// a midpoint rule refined from 200 to 400 points and Richardson
 			/// extrapolated: -1.2566370749e+00 against -mu0 I =
-			/// -1.2566370614e+00, 1.07e-08 relative. FREE-BOUNDARY-PLAN.md
-			/// section 7 predicts this sign will be got wrong at least once;
-			/// this is the version of it that is measured rather than argued.
+			/// -1.2566370614e+00, 1.07e-08 relative. This sign will be got
+			/// wrong at least once; this is the version of it that is
+			/// measured rather than argued.
 			double totalCurrent() const;
 
 			/// The index of a coil containing ( R, z ), or -1 if none does.
@@ -1027,7 +1027,7 @@ namespace meq
 
 	/**
 	 * CONDUCTORS OUTSIDE `Gamma`: the set FB-7 couples through the boundary
-	 * rather than through the mesh. `FREE-BOUNDARY-PLAN.md` section 7.19.
+	 * rather than through the mesh. `docs/free_boundary.rst`, *Conductors*.
 	 *
 	 * It holds meq::Coil and meq::CurrentFilament alike, sums their fields, and
 	 * **HAS NO f()**. That absence is the whole reason it is a type of its own
@@ -1042,7 +1042,7 @@ namespace meq
 	 *   * **AND A FILAMENT HAS NONE AT ALL**, anywhere: infinite current density
 	 *     on a set of measure zero is not a function, so `CoilSet::f()` could not
 	 *     be honest about one however the set were arranged. That is the design
-	 *     question section 7.19 left open, and this is the answer to it -- the
+	 *     question, and this is the answer to it -- the
 	 *     two kinds of member can live in one set precisely because the one
 	 *     method neither of them can answer is not on the interface.
 	 *
@@ -1061,7 +1061,8 @@ namespace meq
 	 *
 	 * **WHY IT CARRIES FILAMENTS AT ALL, AND IT IS NOT THAT THEY ARE BETTER.**
 	 * See meq::CurrentFilament: `../freegs4e`'s default `Coil` IS an exact
-	 * filament, so is FreeGS's, and section 7.16's published 1.3e-04 agreement
+	 * filament, so is FreeGS's, and the limited-tokamak comparison's published
+	 * 1.3e-04 agreement
 	 * in `psi_ax` was reached ACROSS that modelling difference rather than with
 	 * it removed. A real coil has finite extent and finite current density, and
 	 * near the plasma that matters; the filament is here so the mismatch can be

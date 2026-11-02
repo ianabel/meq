@@ -3424,7 +3424,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	            "which is what took this term from 2.8e-03: snapping is O( h ) "
 	            "at every degree, not O( h^{k+1} ), and it made the whole solve "
 	            "bit-identical over a 0.025 m plateau in the requested point. "
-	            "FREE-BOUNDARY-PLAN.md section 7.20" );
+	            "CLAUDE_FB.md, FB-6 is beaten" );
 
 	// The amplitude is the number a conversion error moves by ORDERS, so it
 	// gets a tolerance of its own reasoning: measured 1.24e-03 from 1, and a
@@ -3466,7 +3466,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	 * in double at MKL_NUM_THREADS 1 and 4, and 9 in single. psi_bnd seeded at
 	 * the limiter's starting flux -- the mirror's rule, widened past the box --
 	 * takes this file to 129 steps at the same psi_ax to every printed digit,
-	 * which is FREE-BOUNDARY-PLAN.md section 10.8's drift; a locator that warm
+	 * which is the drift a psi_bnd started near its answer gives (CLAUDE_FB.md,
+	 * The diverted machine's support); a locator that warm
 	 * starts from the wrong element took it to 32, MEASUREMENTS.md M-176. Both
 	 * left every assertion above green.
 	 */
@@ -3488,8 +3489,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	 * seven figures, and report a psi_ax that is a single spiking dof on the
 	 * plasma edge -- with the span inflated to match, Psi collapsed to a few per
 	 * cent over the real plasma, and the profile amplitude raised by the same
-	 * factor to hold int F/R. FREE-BOUNDARY-PLAN.md section 7.16 records exactly
-	 * that on an earlier state of this code, at psi_ax = 2.73e+00 against a field
+	 * factor to hold int F/R. That was measured on an earlier state of this
+	 * code, at psi_ax = 2.73e+00 against a field
 	 * whose psi* peaked at 8.64e-02: THE THREE UNKNOWNS CONSPIRE, and nothing in
 	 * the residual, the constraint residuals or the convergence history tells
 	 * that run apart from this one.
@@ -3558,8 +3559,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	 *
 	 * TWO THINGS ARE ASSERTED AND THEY GUARD OPPOSITE FAILURES. That degree 2
 	 * still lands on the SAME BRANCH is the guard against the spike above coming
-	 * back -- FREE-BOUNDARY-PLAN.md section 7.16 records degree 2 on this mesh
-	 * converging in 17 steps to psi_ax = 2.73e+00, twenty-eight times the
+	 * back -- degree 2 on this mesh was measured converging in 17 steps to psi_ax = 2.73e+00, twenty-eight times the
 	 * reference, which fails the first bound by two orders. That degree 3 is
 	 * MATERIALLY better is the guard against the control going empty.
 	 *
@@ -3611,7 +3611,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	            "degree 2 reports psi_ax = " << twoAxis << ", " << twoError
 	            << " from freegs4e's " << referencePsiAxis << ", so it is not on "
 	            "the same branch as degree 3 at all. Measured 1.6e-02. "
-	            "FREE-BOUNDARY-PLAN.md section 7.16 records this configuration "
+	            "This configuration was measured "
 	            "converging to 2.73e+00 with every border at machine zero and "
 	            "the equilibrium nonsense, which is what this bound exists to "
 	            "catch coming back" );
@@ -3987,8 +3987,7 @@ BOOST_AUTO_TEST_CASE( theProfileScaleCrossesThePicardPreStage )
 }
 
 /*
- * XP-4: A DIVERTED MACHINE AGAINST freegs4e, DRIVEN FROM A FILE.
- * FREE-BOUNDARY-PLAN.md section 10.6.
+ * XP-4: A DIVERTED MACHINE AGAINST freegs4e, DRIVEN FROM A FILE. M-87.
  *
  * WHAT IS NEW HERE AND NOT IN XPointBorder.cpp. That case establishes XP-3's
  * BORDER -- that the three rows close, that they close on the saddle of the
@@ -4223,8 +4222,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesADivertedTokamak )
 	            "MEASURED 3 on this fixture. Either raise [solver] "
 	            "PlasmaSupportSweeps, or look at whether it is ALTERNATING "
 	            "between two supports rather than converging -- "
-	            "FREE-BOUNDARY-PLAN.md section 10.5 names that as a real "
-	            "possibility and the cap is what bounds it" );
+	            "a real possibility for a discrete outer state, and the cap is "
+	            "what bounds it" );
 	BOOST_TEST( sweeps > 1.0,
 	            "the support loop ran " << sweeps << " sweep, so nothing was "
 	            "re-decided and the key is doing the work of a plain solve. "

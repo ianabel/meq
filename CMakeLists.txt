@@ -385,9 +385,8 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # is the newest member of the MFEM-free half: it is the exterior
 # Dirichlet-to-Neumann map of a semicircle, which is special functions and
 # geometry -- Legendre polynomials and a Gauss-Legendre rule from Boost, plain
-# doubles in and out. FREE-BOUNDARY-PLAN.md section 5.1 asks for exactly that,
-# so that FB-0's acceptance is a UNIT test CI can run rather than a convergence
-# study it cannot build.
+# doubles in and out. That is deliberate, so that FB-0's acceptance is a UNIT
+# test CI can run rather than a convergence study it cannot build.
 
 # src/meq/RegularisedLeastSquares.cpp is ABSENT from it too: the inverse solve's
 # dense corner, INVERSE-AND-RECONSTRUCTION-PLAN.md IV-2, is a least squares of

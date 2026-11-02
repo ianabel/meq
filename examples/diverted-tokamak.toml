@@ -4,8 +4,9 @@
 # WHERE THE INPUTS CAME FROM.  freegs4e's own A_testtokamak_classic, the FreeGS
 # worked example's geometry: an up-down asymmetric double null whose coil
 # currents were SOLVED FOR by its control system rather than chosen by eye.
-# FREE-BOUNDARY-PLAN.md section 7.15 argues that is what makes a free-boundary
-# Newton converge at all, and section 10's own history is the evidence: a long
+# Consistent inputs are what make a free-boundary Newton converge at all
+# (docs/free_boundary.rst, The plasma boundary flux, and the other borders),
+# and the diverted campaign's own history is the evidence: a long
 # run of hand-designed diverted machines on the LIMITED case's geometry all
 # failed the same way, and every one of them was a machine nobody would build.
 #
@@ -28,7 +29,7 @@
 # psi_bndry IS the lower X-point's flux to every digit -- that is what makes
 # this a single-ACTIVE-null equilibrium, and the upper null sits 3.5e-03 further
 # out.  So the boundary flux of a diverted plasma is a functional of the
-# solution, which is the whole of FREE-BOUNDARY-PLAN.md section 10.4.
+# solution, which is why [boundary.xpoint] makes the X-point an unknown.
 #
 # WHAT THIS FILE PINS, AND WHY IT IS NOT YET THE WHOLE STORY.  MEQ's
 # [boundary.limiter] takes a POINT and evaluates psi_h there -- FB-3, and right

@@ -42,9 +42,9 @@ driver converts.
 
 ## Why R = 0 is the requirement, not a preference
 
-`FREE-BOUNDARY-PLAN.md` §3 expands the exterior field in Gegenbauer functions
-of order −1/2 on a **semicircle centred on the axis**. The expansion is a
-statement about that geometry and about no other, and `meq::ExteriorDtN`'s
+`docs/free_boundary.rst`, *The exterior on a semicircle*, expands the exterior
+field in Gegenbauer functions of order −1/2 on a **semicircle centred on the
+axis**. The expansion is a statement about that geometry and about no other, and `meq::ExteriorDtN`'s
 diagonal symbol is the DtN map of that shape.
 
 So a domain stopping at `R = 0.05` is not a slightly worse version of it — the
@@ -283,5 +283,5 @@ meshing would then become untestable there too.
 The one thing that would change the answer is a run that re-meshes *during* the
 solve — moving conductors, or a shape optimiser. MEQ's adaptive loop *refines*
 an existing mesh through `meq::AdaptiveDomain` rather than re-meshing, so that
-is not on the plan; and if it arrives, this script transliterates, because it
+is not planned; and if it arrives, this script transliterates, because it
 is the same API.

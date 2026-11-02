@@ -741,8 +741,8 @@ discontinuous so the solve is element-local — one small dense factorisation ea
 DISAPPOINTMENT.** The whole residual is **affine in `q`** — the flux row, the
 potential row and the trace row are all linear in it, and `F` depends on `ψ`
 alone — so an undamped Newton step lands on the *same* point whatever `q` it
-started from. Measured on the free-boundary limited tokamak of
-`FREE-BOUNDARY-PLAN.md` §7.16, seeded and unseeded: **bit-identical residual
+started from. Measured on the free-boundary limited tokamak
+(`examples/limited-tokamak.toml`), seeded and unseeded: **bit-identical residual
 histories from iteration 1 through 17**, seven digits, with only `‖r₀‖` moving.
 The warm-start iteration counts are unmoved too — 2 against 4 cold, and
 4 / 2 / 2 against 4 / 4 / 4 across adaptive cycles.
@@ -991,8 +991,9 @@ the solution the chain rule gives `dψ/dλ = ∂ψ/∂λ + ∇ψ·∂(R*,z*)/∂
 the largest *nodal* value loses nothing the Jacobian would have used — the
 envelope theorem, and a better reason for that definition than the one recorded
 above. **It does not extend to an X-point**, where the constraint is `q = 0`
-rather than a stationary value and the corner block is `∇q`; see
-`FREE-BOUNDARY-PLAN.md` §10.4.
+rather than a stationary value and the corner block is `∇q` — written in closed
+form and exact, since Newton differentiates the discrete `q_h`; see
+`CLAUDE_FB.md`, *XP-3*.
 
 **AND THE SAME THEOREM IS WHY OPTION 3 COSTS NOTHING IN THE JACOBIAN.** With
 `ψ_ax` constrained at the LOCATED axis, `G = ψ_ax − ψ_h( x* )` and `x*` moves
@@ -1236,8 +1237,9 @@ failure mode is the tool's and it is not the same failure twice.** Two of those
 four are silently fatal. Losing the radical on `k` turns the **modulus** into
 the **parameter** — `E(k)` against `E(k²)`, which is the classic elliptic-integral
 error and converges to a wrong answer rather than failing; and `(r₁r₂)^{3/2}`
-read as `(r₁r₂)²` or `(r₁r₂)^{1/2}` changes the weight the whole of
-`FREE-BOUNDARY-PLAN.md` §3.2 turns on. **Render the page for any equation
+read as `(r₁r₂)²` or `(r₁r₂)^{1/2}` changes the weight `dΓ/R` the whole
+exterior separation turns on (`docs/free_boundary.rst`, *The exterior on a
+semicircle*). **Render the page for any equation
 carrying a radical, a fractional exponent or a weight**, which in this subject
 is most of them.
 

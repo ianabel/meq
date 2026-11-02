@@ -109,7 +109,7 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 |---|---|
 | the datum given, `ψ` against `ψ_coil` | **1.980 / 3.409 / 4.069** at `k = 1,2,3`, against a datum-removed control **148,165×** larger |
 | the coupled path | **one Newton step** at `n = 12/24/48` — the residual is affine in `( x, a )` and an exact Jacobian must finish it in one — with `\|a\|` at **4.076** and `ψ` at **4.486** |
-| a rectangle against a filament, same current and centre | **4.242e-04** on `Γ` and **4.076e-04** in the domain, about **3×** §7.16's published 1.3e-04 agreement in `ψ_ax` |
+| a rectangle against a filament, same current and centre | **4.242e-04** on `Γ` and **4.076e-04** in the domain, about **3×** the limited-tokamak comparison's published 1.3e-04 agreement in `ψ_ax` |
 | the same, through the **coupled** path | **0.9998** of the datum-given answer |
 | **the two conductor routes against each other** | **1.951 / 3.727 / 3.879** at `k = 1,2,3`, against a control **6306×** larger |
 
@@ -512,15 +512,15 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 | yes | 0 | 3.67e-02 | −3.96e-01 | 0.0e+00 | AGREES |
 
 
-## §7.12b's fixture was the defect, and the suite is 41/41
+## The two-border fixture was the defect, and the suite is 41/41
 
 ### M-44
 
 | removed | what happens |
 |---|---|
 | `ConfineToPlasma` | `\|F\|` on `R = 0` at **1.0e-02 of scale**; with it, **exactly 0.0** |
-| the prescribed current | **does not converge at any of the four radii** — §7.14's non-linear eigenvalue problem, `Λ = A/span²` on a region that is itself unknown, so scaling `A` changes nothing |
-| the vertical field | converges at limiter 1.05 to §7.14's **annulus**, axis at `R = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.20 |
+| the prescribed current | **does not converge at any of the four radii** — the amplitude-fixed non-linear eigenvalue problem, `Λ = A/span²` on a region that is itself unknown, so scaling `A` changes nothing |
+| the vertical field | converges at limiter 1.05 to the wall-hugging **annulus**, axis at `R = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.20 |
 
 ### M-45
 
@@ -1438,10 +1438,11 @@ live, so nothing failed loudly. `apps/meq.cpp` has always done it the other way
 round and is correct. With it fixed, the pointwise test carries **752 elements
 over 3 components** and the fill keeps the **419** holding the axis: the other
 **333, 44% of the candidates, are the private flux region** — a current channel
-nobody asked for, on the only diverted case in the tree. §10.3 predicted exactly
-that and XP-1 was built for it.
+nobody asked for, on the only diverted case in the tree. A pointwise support test
+does exactly that across an X-point, and XP-1 was built for it.
 
-**THE FROZEN EDGE IS §10.5'S OWN PRESCRIPTION APPLIED TO THE SUPPORT** rather
+**THE FROZEN EDGE IS THE DIVERTED PATHWAY'S OWN PRESCRIPTION — FIX THE TOPOLOGY
+WITHIN A SOLVE, RE-DECIDE IT BETWEEN SOLVES — APPLIED TO THE SUPPORT** rather
 than only to the bounding point: `meq::NormalisedSource::freezePlasmaEdge` holds
 the values `insidePlasma()` tests against for the whole of one solve, and
 `GradShafranovSolver::setPlasmaSupportFrozen` holds the fill's mask the same
@@ -1750,7 +1751,7 @@ Green's-function guess, the bootstrap pin at `( 1.143144, −0.553965 )`, which 
 7.07e-02 m from the answer and about two thirds of an element.
 
 The border adds `q_r( x ) = q_z( x ) = 0` to `ψ_bnd − ψ_h( x ) = 0` and makes
-`( R_X, z_X )` unknowns. The support is still an outer state — §10.5's
+`( R_X, z_X )` unknowns. The support is still an outer state — the
 combinatorial one, which is not differentiable — so the sweeps below move the
 support and nothing else:
 
@@ -5107,7 +5108,7 @@ those of a different equilibrium.
 ### M-132
 
 **THE INITIAL `psi_bnd` SELECTS AMONG DISCRETE EQUILIBRIA ON THE DIVERTED
-MACHINE, AND REFINEMENT DOES NOT MERGE THEM.** `FREE-BOUNDARY-PLAN.md` §10.8
+MACHINE, AND REFINEMENT DOES NOT MERGE THEM.** `CLAUDE_FB.md`, *The diverted machine's support: the seed, and `ψ_bnd`'s starting value*,
 measured two answers from two starting values and nominated *"whether the gap
 closes under refinement"* as the next thing to measure — FB-R. It is now
 measured, on the **library** fixture rather than through the driver, so that the
@@ -5152,13 +5153,14 @@ and `z ∈ [ -1.15, -1.05 ]`. `findAxis()` with no argument refuses outright her
 reporting *"3 maxima, 2 minima and 2 saddles"*, and forcing a sense does not
 find the plasma — it picks a conductor's O-point.
 
-**This is §10.7's defect 2 arriving from the library side.** `apps/meq.cpp` has
+**This is the fill seed's missing conductor exclusion arriving from the
+library side** (`CLAUDE_FB.md`, *The diverted machine's support: the seed, and `ψ_bnd`'s starting value*). `apps/meq.cpp` has
 a three-tier conductor exclusion on the fill seed for exactly this reason; the
 library's `findAxis()` has none, because it is a general critical-point finder
 and a coil O-point is a real critical point of `psi`. So **any axis position
 taken from `findAxis()` on a machine with meshed conductors is about a
 conductor unless something excludes them**, and a displacement quoted in metres
-from such a call — §10.8's own `6.9e-02 m` among them — needs checking against
+from such a call — the diverted machine's own `6.9e-02 m` among them — needs checking against
 the coil list before it is believed.
 
 **WHAT FB-R NOW NEEDS**, stated so the next attempt does not repeat this one: a
@@ -5172,11 +5174,11 @@ library setter and never become a TOML key, since a file that silently moved
 ### M-133
 
 **AN X-POINT ON THE PLASMA EDGE COSTS THE APPROXIMATION NOTHING, AND THE
-SUPPORT-CORNER COUNTER-ARGUMENT DOES NOT BITE.** `FREE-BOUNDARY-PLAN.md` §10.1
-predicts this and says plainly that it cuts against expectation: at a null `Ψ`
+SUPPORT-CORNER COUNTER-ARGUMENT DOES NOT BITE.** The diverted pathway
+predicted this and said plainly that it cuts against expectation: at a null `Ψ`
 vanishes **quadratically**, so a source `F ~ Ψ^j` vanishes to order `2j` there
-and the crossing is *smoother* than the branches rather than rougher. §10.1
-nominated XP-1 to stop it being a prediction; XP-1 went elsewhere — to the fill
+and the crossing is *smoother* than the branches rather than rougher. The
+prediction nominated XP-1 to stop it being a prediction; XP-1 went elsewhere — to the fill
 leaking through the band of elements straddling the separatrix — so FB-S has
 been an argument and not a number for the whole campaign.
 
@@ -5234,8 +5236,8 @@ rates.
 **WHAT IT DOES NOT SETTLE.** This is best approximation, so it bounds what any
 method on these spaces can do and says nothing about whether MEQ's solve
 attains it on a diverted machine — the fill, the moving support and the X-point
-border are all outside it. It is the half of §10.1 that was resting on an
-argument; the solved half is XP-3's and is already green.
+border are all outside it. It is the half of the prediction that was resting
+on an argument; the solved half is XP-3's and is already green.
 
 The case is `anXPointOnThePlasmaEdgeCostsTheApproximationNothing` in
 `tests/convergence/PlasmaEdgeConvergence.cpp`.
@@ -5243,13 +5245,15 @@ The case is `anXPointOnThePlasmaEdgeCostsTheApproximationNothing` in
 ### M-134
 
 **A PRESCRIBED CURRENT MOVES CONFINEMENT OFF ZERO AND DOES NOT CURE IT, SO THE
-FIXTURE IS NOT REPAIRABLE THE WAY §7.12b's WAS.** `FREE-BOUNDARY-PLAN.md` §11.2
-retracts `theTwoBordersConvergeTogether`'s `ψ_ax` and `ψ_bnd` as physics because
+FIXTURE IS NOT REPAIRABLE THE WAY `theTwoBorderSolveReportsATrueMagneticAxis`'s
+WAS.** `CLAUDE_DECLINED.md`, *Confinement, clamping and a prescribed current: the
+M-134 two-by-two*, retracts `theTwoBordersConvergeTogether`'s `ψ_ax` and `ψ_bnd` as physics because
 the case closes only with a source that carries current in the **vacuum**, and
 records two repairs each tried alone and each failing 4 of 4. FB-T is the
 missing fourth cell — confinement **and** a prescribed current — and the
 attribution turns on it: if pinning the amplitude repairs confinement, the
-failure was §7.14's amplitude-fixed-with-a-moving-support difficulty, whose
+failure was the amplitude-fixed-with-a-moving-support difficulty (`CLAUDE_FB.md`,
+*The plasma current is a border unknown*), whose
 known cure is exactly the current border.
 
 **THE WHOLE 2 × 2 IS RE-RUN RATHER THAN ONE CELL BOLTED ONTO REMEMBERED
@@ -5274,11 +5278,11 @@ there the fill was off in *both* arms of every experiment run on it. `k = 2`,
 
 **THE ANSWER IS PARTIAL SUPPORT AND AN EXPLICIT REFUSAL OF THE REST.** A
 prescribed current does move confinement off zero — 0 of 4 becomes 2 of 4 — so
-§7.14's diagnosis is doing real work and the amplitude is part of the
+the amplitude-fixed diagnosis is doing real work and the amplitude is part of the
 difficulty. It is **not the whole difficulty**, and three things in that table
 say so:
 
-* **The clamped arm is cured outright by the same lever.** §11.2's own row reads
+* **The clamped arm is cured outright by the same lever.** The retraction's own row reads
   *clamped profiles with a prescribed current converge in 22 steps*, 4 of 4.
   Confinement gets 2 of 4 at its best over a **250× range** of target current.
 * **The maximum is interior, so this is not a truncated sweep.** 0.50 and 2.00
@@ -5295,7 +5299,7 @@ say so:
   discrete branch a given radius lands on would.
 
 **SO THE FIXTURE IS NOT REPAIRABLE BY GIVING IT THE INGREDIENT IT LACKS**, and
-that is the opposite of how §7.12b's fixture and M-82's fill came out. §11.2's
+that is the opposite of how the two-border fixture and M-82's fill came out. The
 retraction stands unchanged, and what FB-T adds is that it is not going to be
 lifted by the current border.
 
@@ -17999,7 +18003,8 @@ default. `SolverContract` (the override, above) and `PlasmaEdgeConvergence`
   on the NSTX diverted case (`k = 1`, `h = 0.075`) is 8.2e-03 from the closed
   form's axis. `FreeBoundaryCoupling`'s two-border limiter fixture is healthy
   at 3 of its five radii at `τ = 3` and 100 and 4 at 0.3, 10 and 30 (the axis
-  layer of `FREE-BOUNDARY-PLAN.md` §11.3, and at 3 the limiter-constraint
+  layer at `R = 0` (`CLAUDE_FB.md`, *`ψ_ax` was the weak point of the whole
+  free-boundary path*), and at 3 the limiter-constraint
   solve not converging); `DriverAcceptance`'s retry rung does not settle
   `machine-e-diamagnetic` at `τ = 3`, 30 and 100; `PlasmaConnectivity`'s
   limiter case loses its second lobe from `τ = 10`; `XPointBorder` fails at 10
@@ -19504,8 +19509,8 @@ the file's `mesh`, and the stored field the one this run solves for —
 `xpoint_located`, the I_p profile scale from `profile_scale`, the free
 currents from `inverse_currents`, a q-driven run's `g_squared_coefficients`
 (the last two now written to 17 digits), and `psi_bnd` from `psi_boundary` on
-the exact route only (§10.8 of `FREE-BOUNDARY-PLAN.md` measured a start NEAR
-the answer drifting; this is a start AT it).
+the exact route only (a start NEAR the answer is measured drifting, `CLAUDE_FB.md`, *The diverted machine's support: the seed, and `ψ_bnd`'s starting value*;
+this is a start AT it).
 
 **A LIBRARY DEFECT, FOUND BY THE FIRST UNBORDERED CASE.** On the plain
 non-linear path `solve()` prepares once, consuming the state, then twice more
@@ -20957,7 +20962,7 @@ jump at step 0:
 | C, G shaped | exit 2 | exit 0, `psi_ax` 5.896e-02 and 9.381e-02, unchecked |
 | TCV shaped | via the rung | via the rung, the same answer |
 
-That is `FREE-BOUNDARY-PLAN.md` FB-R's finding again from the driver: where
+That is FB-R's finding ([M-132](#m-132)) again from the driver: where
 `psi_bnd` starts selects which equilibrium a diverted machine reports. The
 breadth run was stopped there, before C's last three rungs, D's and F's last
 two, and the suite.

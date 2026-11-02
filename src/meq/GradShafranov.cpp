@@ -3987,8 +3987,9 @@ namespace
 	 * whole transfer technique's accuracy away at the one place it is needed.
 	 *
 	 * This is the same call the fixed-boundary datum already makes, with g = 0
-	 * replaced by a mode. That is section 4.3's point: the coupling is stage 5
-	 * with the datum unknown instead of zero, so the machinery is already here.
+	 * replaced by a mode. That is the point of coupling at a distance
+	 * (docs/free_boundary.rst): the coupling is stage 5 with the datum unknown
+	 * instead of zero, so the machinery is already here.
 	 *
 	 * ONE PROJECTION PER MODE, AND THE MARKER IS gammaHMarker. Note the contrast
 	 * with prepare(), which projects the fixed-boundary datum against
@@ -5878,8 +5879,8 @@ namespace
 	/*
 	 * THE ROWS OF T: THE TRANSMISSION CONDITION, TESTED AGAINST EACH MODE.
 	 *
-	 * This is the Neumann half of the coupling and the piece FREE-BOUNDARY-PLAN.md
-	 * section 7.5 called "genuinely new code". Its MFEM half is not: the sweep of
+	 * This is the Neumann half of the coupling and the one piece of it that is
+	 * genuinely new code. Its MFEM half is not: the sweep of
 	 * Gamma is mfem::ExtensionBoundaryQuadrature(), which was written for this and
 	 * merged upstream. What is here is the contraction.
 	 *
@@ -5903,14 +5904,14 @@ namespace
 	 * between them.
 	 *
 	 * THE MEASURE IS PLAIN dGamma AND THE 1/R IS ALREADY IN q. The exterior block
-	 * is diagonal in the weight dGamma/R -- that is section 3.2, and it is what
-	 * makes the whole method cheap -- so the interior term must be tested in the
-	 * same weight. It is, without dividing by anything: the condition matches
-	 * ( 1/R ) dpsi/dnu across Gamma, and MEQ's q IS ( 1/R ) grad_bar( psi ), so
-	 * q.nu tested in the plain measure already carries the radius the exterior side
-	 * carries in its weight. Dividing by pt.y( 0 ) here would do it twice. The
-	 * header says this at more length; it is repeated because the wrong version
-	 * converges.
+	 * is diagonal in the weight dGamma/R -- docs/free_boundary.rst, *The
+	 * exterior on a semicircle*, and it is what makes the whole method cheap --
+	 * so the interior term must be tested in the same weight. It is, without
+	 * dividing by anything: the condition matches ( 1/R ) dpsi/dnu across
+	 * Gamma, and MEQ's q IS ( 1/R ) grad_bar( psi ), so q.nu tested in the
+	 * plain measure already carries the radius the exterior side carries in its
+	 * weight. Dividing by pt.y( 0 ) here would do it twice. The header says
+	 * this at more length; it is repeated because the wrong version converges.
 	 *
 	 * AND IT IS LINEAR IN q, WHICH IS WHY A ROW EXISTS AT ALL. E_h is a linear
 	 * operator on the flux dofs and nu, C_m and the measure are geometry, so the
@@ -7976,8 +7977,8 @@ namespace
 			return;
 		plasmaComponentMask.clear();
 
-		// FACE neighbours, which is the whole content of section 10.3's
-		// prediction: two lobes meeting at a VERTEX are not adjacent here, so
+		// FACE neighbours, which is the whole content of the prediction
+		// that holds: two lobes meeting at a VERTEX are not adjacent here, so
 		// the fill cannot leak diagonally across a saddle the way a uniform-grid
 		// fill does and freegs4e's core_mask has to block against.
 		// mfem::Mesh::ElementToElementTable is exactly that graph.
@@ -8743,11 +8744,11 @@ namespace
 		 *   interior       every dof with Psi > 0: unambiguously inside.
 		 *
 		 * The fill TRAVERSES the interior and the mask then takes one ring of
-		 * straddling band around it. Section 10.3 predicted a face-neighbour fill
-		 * would need no X-point blocking; measured on an exact diverted fixture
-		 * the ONE-rule fill leaks the whole private flux region -- 2275 elements
-		 * of 16688 and 10.4% of int |F| -- because the straddling band around a
-		 * saddle is several elements wide and every element of it is a
+		 * straddling band around it. The prediction was that a face-neighbour
+		 * fill would need no X-point blocking; measured on an exact diverted
+		 * fixture the ONE-rule fill leaks the whole private flux region -- 2275
+		 * elements of 16688 and 10.4% of int |F| -- because the straddling band
+		 * around a saddle is several elements wide and every element of it is a
 		 * candidate, so the band is what bridges the two lobes. Over the
 		 * interior alone they are two components with nothing blocked, which is
 		 * what the prediction wanted and by a different mechanism.
@@ -8757,7 +8758,7 @@ namespace
 		 * Filling on the interior alone would switch the source off in an O( h )
 		 * band INSIDE the plasma, and psi* keeps k+2 only while the support is
 		 * right -- an element-aligned edge would put an O( h^(1+j) )
-		 * perturbation under a result that costs a whole plan section to
+		 * perturbation under a result that took a whole stage, FB-4, to
 		 * establish. Measured on the diverted fixture, the interior alone drops
 		 * 179 / 360 / 720 elements over two fourfold refinements, which is the
 		 * 1/h of a one-element band and not something that goes away.
@@ -13389,14 +13390,14 @@ namespace
 				 * -- which is every machine MEQ can pose, no semicircle centred on
 				 * the axis both enclosing a plasma and excluding the coils near it
 				 * -- it is a legitimate zero of q_h sitting in the same field.
-				 * Measured on the diverted machine of FREE-BOUNDARY-PLAN.md
-				 * section 10, whose P1L carries +1.37e+05 A against an I_p of
-				 * 2.0e+05 A: this loop returned ( 1.0103, -1.1018 ), inside that
-				 * conductor, carrying psi = 1.21e-01 where the reference
-				 * equilibrium's axis carries 8.3e-02. It WINS the score,
-				 * and every check downstream then passes -- psi_ax is constrained at
-				 * the located axis, so the normalised flux there reads 1 whatever
-				 * the axis is.
+				 * Measured on the diverted machine of
+				 * examples/diverted-tokamak.toml, whose P1L carries +1.37e+05 A
+				 * against an I_p of 2.0e+05 A: this loop returned ( 1.0103,
+				 * -1.1018 ), inside that conductor, carrying psi = 1.21e-01
+				 * where the reference equilibrium's axis carries 8.3e-02. It
+				 * WINS the score, and every check downstream then passes --
+				 * psi_ax is constrained at the located axis, so the normalised
+				 * flux there reads 1 whatever the axis is.
 				 *
 				 * A plasma has no magnetic axis inside a conductor, so the
 				 * candidates are dropped. meq::Source::conductors() is how the
@@ -16244,8 +16245,8 @@ namespace
 					 *   d q_i( x )/d x_j      = grad q, this element's own
 					 *   d psi_h( x )/d x_j    = grad psi_h, the same
 					 *
-					 * FREE-BOUNDARY-PLAN.md section 10.4 expects the first of
-					 * these to be inexact -- "there is no solved variable for
+					 * The obvious expectation is that the first of these is
+					 * inexact -- "there is no solved variable for
 					 * grad q" -- and that is a statement about approximating
 					 * the CONTINUOUS Hessian. What Newton needs is the
 					 * derivative of the DISCRETE residual, and q_h is a

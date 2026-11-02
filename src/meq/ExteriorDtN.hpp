@@ -7,7 +7,7 @@
 
 /*
  * The exterior of a semicircle, as an operator on its own trace: stage FB-0 of
- * FREE-BOUNDARY-PLAN.md.
+ * the free-boundary campaign.
  *
  * WHAT PROBLEM THIS SOLVES. Free boundary makes the domain unbounded -- the
  * vacuum region runs from the plasma out to infinity, with psi -> 0 there --
@@ -20,8 +20,9 @@
  * FOR THE AXISYMMETRIC OPERATOR ON A SEMICIRCLE THAT MAP IS DIAGONAL, and this
  * class is that statement. No layer potentials, no singular quadrature, no
  * elliptic integrals, no O( N^2 ) kernel evaluations -- one number per mode.
- * The derivation is FREE-BOUNDARY-PLAN.md section 3 and is summarised below
- * because a reader of this header should not have to fetch it.
+ * The derivation is docs/free_boundary.rst, *The exterior on a semicircle*,
+ * and is summarised below because a reader of this header should not have to
+ * fetch it.
  *
  * THE SEPARATION. In spherical coordinates R = rho sin( theta ),
  * z = zCentre + rho cos( theta ), mu = cos( theta ), the Grad-Shafranov
@@ -109,11 +110,11 @@ namespace meq
 	/// function. What n = 0 and n = 1 would name is a four-dimensional
 	/// degenerate sector -- 1, z/rho, rho and z, all Delta*-harmonic -- and NOT
 	/// ONE OF THEM VANISHES ON THE AXIS. That is why they are inadmissible here
-	/// rather than merely inconvenient, and it is a stronger statement than the
-	/// plan's: the two that also decay, 1 and z/rho, have INFINITE norm in the
-	/// weight dGamma/R, so there is nothing for a compatibility condition to be
-	/// imposed on. Nothing admissible is lost by starting at 2 -- { C_n }_{n>=2}
-	/// is complete in L^2( dmu/( 1 - mu^2 ) ).
+	/// rather than merely inconvenient, and it is a stronger statement than
+	/// "no constant mode": the two that also decay, 1 and z/rho, have INFINITE
+	/// norm in the weight dGamma/R, so there is nothing for a compatibility
+	/// condition to be imposed on. Nothing admissible is lost by starting at 2
+	/// -- { C_n }_{n>=2} is complete in L^2( dmu/( 1 - mu^2 ) ).
 	class ExteriorDtN
 	{
 		public:
@@ -148,9 +149,9 @@ namespace meq
 			/// domain. It is negative for every admissible n, which is the
 			/// statement that an exterior mode decays. A weak form that wants
 			/// the derivative along its own outward normal wants this number as
-			/// it stands; one written with an inward normal wants it negated,
-			/// and FREE-BOUNDARY-PLAN.md section 7 is explicit that this sign
-			/// will be got wrong at least once and that FB-1 is what settles it.
+			/// it stands; one written with an inward normal wants it negated.
+			/// This sign will be got wrong at least once, and FB-1 is what
+			/// settles it.
 			double symbol( int n ) const;
 
 			/// h_n = 2/( n( n - 1 )( 2n - 1 ) ): the mass of mode n in the

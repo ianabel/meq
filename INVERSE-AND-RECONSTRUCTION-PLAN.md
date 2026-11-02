@@ -13,7 +13,7 @@ cold-start failure from the solver side, and §8 says how this relates to them.
 
 | | |
 |---|---|
-| **Part One**, §§1–9 | a **design** for an inverse solve — given shape targets, find the coil currents. Staged, with measured acceptance criteria naming their test files, in the manner of `FREE-BOUNDARY-PLAN.md` |
+| **Part One**, §§1–9 | a **design** for an inverse solve — given shape targets, find the coil currents. Staged, with measured acceptance criteria naming their test files, in the manner of the free-boundary stages (`CLAUDE_FB.md`'s stage table) |
 | **Part Two**, §§10–15 | **exploratory research** on equilibrium reconstruction from magnetic measurements. It ends in open questions rather than stages, deliberately, and §15 says which |
 
 **Line numbers in `src/meq/GradShafranov.{hpp,cpp}` are as read on 2026-09-16
@@ -397,7 +397,7 @@ nothing — which is what forward *is*. So `γ` is a homotopy parameter between 
 inverse and forward problems, and that is a second use for it beyond §4.4's.
 
 **AND THERE IS A MEASURED WARNING AGAINST THE OBVIOUS ALTERNATIVE.**
-`ROADMAP.md:86-90` records, from §7.18's re-measurement, that **continuation in
+`CLAUDE_DECLINED.md`, *The toy fixture's recorded verdicts, re-measured*, records that **continuation in
 the coil current "works and is not needed", reaching the failing currents on a
 degenerate branch**. So a plain current-homotopy is not the same thing as an
 inverse solve and has already been tried; what settled that episode was

@@ -1,7 +1,7 @@
 # MEQ against freegs4e
 
 **An independent check by a different algorithm**, which is the thing
-`FREE-BOUNDARY-PLAN.md` FB-6 wants and a fine-mesh self-comparison cannot be.
+FB-6 wants and a fine-mesh self-comparison cannot be.
 `freegs4e`, the checkout beside the project directory, is FreeGS-derived: free
 boundary by von Hagenow Green's functions, 2nd/4th-order finite differences on
 a uniform `(R,Z)` grid, Picard with adaptive blending. MEQ is HDG with Newton. They share the equation and essentially no
@@ -1041,7 +1041,7 @@ CHANGE.** They read 9.455354e-02, 2.774057e-02 and 0.994505 — 2.9e-03, 2.8e-03
 and 5.5e-03 — while `ψ_bnd` was pinned at the potential dof NEAREST the limiter
 point rather than at the point. Snapping is an `O( h )` error at every degree,
 not the `O( h^{k+1} )` nodal choice it was described as; see
-`FREE-BOUNDARY-PLAN.md` §7.20 and `GradShafranovSolver::LimiterConstraint`.
+`CLAUDE_FB.md`, *FB-6 is beaten*, and `GradShafranovSolver::LimiterConstraint`.
 
 **AND MEQ CONVERGES IN ITS OWN MESH ON THIS CASE**, which could not be shown
 before, because the boundary condition was quantised by the mesh. Uniform
@@ -1219,7 +1219,8 @@ finding above — *`k = 2, refine = 1` does not converge on MAST or DIII-D while
 `k = 3` does on the same mesh* — and it is why the regression runs degree 2 as a
 control rather than merely running degree 3.
 
-**`FREE-BOUNDARY-PLAN.md` §7.16 records a WORSE degree-2 failure than this** — 17
+**`CLAUDE_FB.md`, *Free boundary: MEQ SOLVES A MACHINE CASE*, records a WORSE
+degree-2 failure than this** — 17
 Newton steps to `ψ_ax = 2.73e+00`, a single spiking nodal value with the profile
 scale raised by 980 to compensate. **That is not reproducible on the code as it
 stands**: the recorded configuration was rerun verbatim, same TOML and same 128²

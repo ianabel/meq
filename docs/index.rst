@@ -43,6 +43,9 @@ What MEQ does
   paths — the technique of :cite:t:`CockburnSolano2012`, as applied to
   Grad–Shafranov by :cite:t:`SanchezVizuet2020adaptive`. See
   :doc:`curved_boundary`.
+* **Solves the free-boundary problem**, with the plasma edge an unknown and
+  the vacuum out to infinity represented by an exact exterior map on a
+  semicircle, coupled to the interior at a distance. See :doc:`free_boundary`.
 * **Refines the mesh adaptively** against a residual error estimator, in the
   usual solve → estimate → mark → refine loop. See :doc:`adaptivity`.
 * **Takes profiles in normalised flux**, in which case the value of
@@ -112,6 +115,7 @@ solver strategy for a problem that is not converging, go to :doc:`nonlinear`.
    formulation
    postprocessing
    curved_boundary
+   free_boundary
    adaptivity
    flux_surfaces
    surface_geometry

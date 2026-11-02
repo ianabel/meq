@@ -658,11 +658,10 @@ def split_amplitudes(frac_p, R0, P0=1.0):
 # ----------------------------------------------------------------------------
 # A LIMITED CIRCULAR TOKAMAK, for the comparison MEQ can actually make.
 #
-# Every other machine in this file is DIVERTED, and MEQ's moving plasma support
-# is a pointwise test on the normalised flux, which picks up the private flux
-# region beyond an X-point -- FREE-BOUNDARY-PLAN.md section 10.3.  So a
-# like-for-like free-boundary comparison needs a limited plasma, and no machine
-# in freegs4e is one.
+# Every other machine in this file is DIVERTED, and a pointwise plasma support
+# test on the normalised flux picks up the private flux region beyond an
+# X-point; MEQ separates it by a connectivity fill (XP-1).  A limited plasma
+# takes that out of the comparison, and no machine in freegs4e is one.
 #
 # VERTICAL FIELD ONLY.  Two coil pairs, placed to give a field that holds the
 # plasma at R0 without producing a null anywhere in the box: with no divertor
@@ -842,9 +841,8 @@ CASES = [
                "only, so no X-point exists in range and the boundary is the "
                "flux surface through the limiter contact rather than a "
                "separatrix.  It is the case MEQ can actually compare against "
-               "-- FREE-BOUNDARY-PLAN.md section 10 records that MEQ's plasma "
-               "support test is pointwise and so is limiter-only, and that "
-               "every other case in this table is diverted."),
+               "-- it needs no connectivity fill to separate a private flux "
+               "region, and every other case in this table is diverted."),
     ),
     dict(
         name="I_limited_shaped",

@@ -2592,9 +2592,9 @@ int main( int argc, char **argv )
 		 * whether or not it did any work.
 		 *
 		 * A WARNING AND NOT A REFUSAL, because the configuration is not wrong
-		 * in principle: FREE-BOUNDARY-PLAN.md section 5.4 offers exactly this
-		 * -- coils outside Omega, entering through the exterior coupling rather
-		 * than through F. That route is not wired yet, so today the coil is
+		 * in principle: a coil outside Omega can enter through the exterior
+		 * coupling rather than through F (FB-7, docs/free_boundary.rst,
+		 * *Conductors*). The driver does not wire that route, so the coil is
 		 * inert, and saying so is the honest thing. The test is against the
 		 * BACKGROUND box, which is the coarsest true statement on every path:
 		 * on the curved path D_h is smaller still, so a coil this check passes
@@ -3609,13 +3609,13 @@ int main( int argc, char **argv )
 							                        storedGuess->exteriorCoefficients() );
 
 							// AND psi_bnd AT THE FILE'S, ON THIS ROUTE ONLY. A
-							// fresh solver starts it at zero on purpose:
-							// FREE-BOUNDARY-PLAN.md section 10.8 measured a start
-							// NEAR the answer drifting or changing branch. This is
-							// a start AT it, the whole iterate with it, so the
-							// border row is satisfied rather than seeded nearby,
-							// and the branch is the file's own. M-298 measures
-							// that it lands there.
+							// fresh solver starts it at zero on purpose: a start
+							// NEAR the answer drifts or changes branch
+							// (CLAUDE_FB.md, *The diverted machine's support*).
+							// This is a start AT it, the whole iterate with it,
+							// so the border row is satisfied rather than seeded
+							// nearby, and the branch is the file's own. M-298
+							// measures that it lands there.
 							if ( storedGuess->hasPsiBoundary() )
 								fresh->setBoundaryFluxInitial( storedGuess->psiBoundary() );
 
@@ -3704,9 +3704,8 @@ int main( int argc, char **argv )
 		 * A MIRROR'S STARTING LABELS ARE READ OFF THE STATE IT STARTS FROM.
 		 *
 		 * psi_bnd starts every bordered solve at zero on a fresh solver. On a
-		 * tokamak that is the right place: section 10.8 of
-		 * FREE-BOUNDARY-PLAN.md measures a limited machine started NEAR its
-		 * answer drifting to the iteration cap, and a diverted one reaching a
+		 * tokamak that is the right place: a limited machine started NEAR its
+		 * answer drifts to the iteration cap, and a diverted one reaches a
 		 * different equilibrium -- which is why setBoundaryFluxInitial() is not
 		 * a key. On a mirror zero is the wrong side: the first span is then
 		 * psi_ax - 0 > 0 where the answer's is negative, and the box sits
@@ -3852,7 +3851,7 @@ int main( int argc, char **argv )
 		// A PLASMA HAS NO MAGNETIC AXIS INSIDE A CONDUCTOR, and on a
 		// machine whose coils are meshed inside Omega one of them can
 		// carry a higher psi than the plasma does -- measured on the
-		// diverted machine of FREE-BOUNDARY-PLAN.md section 10, whose
+		// diverted machine of examples/diverted-tokamak.toml, whose
 		// P1L runs at +1.37e+05 A against an I_p of 2.0e+05 A and whose
 		// O-point reads a normalised flux of 1.5564. The solver's own axis constraint
 		// already drops those candidates; this is the same exclusion for
@@ -4087,9 +4086,8 @@ int main( int argc, char **argv )
 		};
 
 		/*
-		 * THE SUPPORT'S OWN OUTER LOOP, [solver] PlasmaSupportSweeps.
-		 * FREE-BOUNDARY-PLAN.md section 10.5, and the one discrete state XP-3
-		 * leaves outside the Newton.
+		 * THE SUPPORT'S OWN OUTER LOOP, [solver] PlasmaSupportSweeps: the one
+		 * discrete state XP-3 leaves outside the Newton.
 		 *
 		 * WITH ConfineToPlasma THE SET OF ELEMENTS CARRYING F IS A FUNCTIONAL OF
 		 * THE ITERATE, and its derivative is a surface term on a moving edge that
@@ -4110,7 +4108,7 @@ int main( int argc, char **argv )
 		 * why the loop stops on the support REPEATING rather than on a tolerance:
 		 * the element count is an integer and the honest test is that a sweep
 		 * changed nothing. Alternation between two supports is a real possibility
-		 * -- section 10.5 names it -- and the cap is what bounds it; a run that
+		 * and the cap is what bounds it; a run that
 		 * reaches the cap says so rather than reporting the last sweep as an
 		 * answer.
 		 */
@@ -5522,9 +5520,8 @@ int main( int argc, char **argv )
 		 * THE TOTAL CURRENT IS PRINTED BECAUSE IT IS THE ONE COIL NUMBER A
 		 * READER CAN CHECK. FB-2's acceptance identity is
 		 * `oint ( 1/R ) dpsi/dn dl = -mu0 I`, a property of the trace alone --
-		 * so a sign error in a `[[coils]]` block, which is the mistake
-		 * FREE-BOUNDARY-PLAN.md section 7 predicts will be made at least once,
-		 * shows up here before anything is plotted.
+		 * so a sign error in a `[[coils]]` block, a mistake that will be made
+		 * at least once, shows up here before anything is plotted.
 		 */
 		if ( coils )
 			std::printf( "MEQ: %d coil%s, total current %+.6e A\n",
@@ -5830,9 +5827,8 @@ int main( int argc, char **argv )
 			 *
 			 * so a tail of 1e-1 is about a per cent in `psi_ax` and 1e-2 is
 			 * a few parts in ten thousand. A first cut advised above 1e-2 and
-			 * fired on examples/limited-tokamak.toml at ten modes -- which
-			 * FREE-BOUNDARY-PLAN.md section 11.6 records as CONVERGED, and
-			 * which the sweep confirms at 2.9e-04. Advice that fires on the
+			 * fired on examples/limited-tokamak.toml at ten modes -- which is
+			 * CONVERGED, as the sweep confirms at 2.9e-04. Advice that fires on the
 			 * converged production case is noise.
 			 */
 			double const tail = exterior->truncationRatio( a );
@@ -6102,18 +6098,18 @@ int main( int argc, char **argv )
 			if ( !axisCheck.agrees )
 			{
 				/*
-				 * A REFUSAL AND NOT A WARNING, AND THIS WAS ARGUED RATHER THAN
-				 * INHERITED -- FREE-BOUNDARY-PLAN.md section 11.4.
+				 * A REFUSAL AND NOT A WARNING, AND THIS IS ARGUED RATHER THAN
+				 * INHERITED.
 				 *
-				 * It used to warn, on the coil-outside-the-mesh precedent. That
-				 * precedent is about a configuration which is NOT WRONG IN
-				 * PRINCIPLE -- section 5.4 of that plan offers exactly it -- and
-				 * this is not that. psi_ax is what the profiles are NORMALISED
-				 * by, so a psi_ax that is not the flux at a magnetic axis is not
-				 * a bad number in one field: it is a different equilibrium, with
-				 * the current, the geometry and every profile-derived quantity
-				 * downstream of it. Writing three files describing a machine
-				 * nobody asked for is worse than writing none.
+				 * The coil-outside-the-mesh warning is about a configuration
+				 * which is NOT WRONG IN PRINCIPLE -- the exterior coupling can
+				 * carry such a coil -- and this is not that. psi_ax is what the
+				 * profiles are NORMALISED by, so a psi_ax that is not the flux
+				 * at a magnetic axis is not a bad number in one field: it is a
+				 * different equilibrium, with the current, the geometry and
+				 * every profile-derived quantity downstream of it. Writing
+				 * three files describing a machine nobody asked for is worse
+				 * than writing none.
 				 *
 				 * AND IT IS ONLY THE POSITIVE DETECTION THAT REFUSES, which is
 				 * what the guard's own one-sidedness entitles us to. checkAxis()

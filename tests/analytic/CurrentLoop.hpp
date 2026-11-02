@@ -5,12 +5,11 @@
  * The exact poloidal flux of a single circular current loop coaxial with the
  * axis, for FB-0 and FB-1.
  *
- * FREE-BOUNDARY-PLAN.md section 3.3 names this field as the independent
- * check on the exterior Dirichlet-to-Neumann map -- "a circular current loop,
- * psi from complete elliptic integrals, which is NOT the formula any of the
- * above came from" -- and section 7's table makes it FB-1's acceptance as
- * well: a vacuum
- * solve driven by coils has the sum of its loops' fields as its exact answer.
+ * This field is the independent check on the exterior Dirichlet-to-Neumann
+ * map -- a circular current loop, psi from complete elliptic integrals, which
+ * is NOT the formula the Gegenbauer expansion came from (docs/free_boundary.rst,
+ * The exterior on a semicircle). A vacuum solve driven by coils has the sum of
+ * its loops' fields as its exact answer.
  * That is a closed form rather than a self-convergence study, which is what
  * CLAUDE.md's testing stance asks for and what a sign or scaling error can
  * actually be caught by.

@@ -8,12 +8,12 @@ boundary needs something that grid cannot be: a SEMICIRCLE centred on the axis,
 reaching R = 0 EXACTLY, with the coil rectangles as their own subdomains.
 
     R = 0 IS NOT A CONVENIENCE, IT IS WHAT MAKES THE DECOUPLING LEGAL.
-    FREE-BOUNDARY-PLAN.md section 3 expands the exterior field in Gegenbauer
-    functions of order -1/2 on a semicircle CENTRED ON THE AXIS; the expansion
-    is a statement about that geometry and about no other.  A domain stopping
-    at R = 0.05 is not a slightly worse version of it -- the basis does not
-    span the exterior of that shape, and meq::ExteriorDtN's diagonal symbol is
-    not the DtN map of it.  So `--rho` sets Gamma's radius and the flat side is
+    docs/free_boundary.rst, The exterior on a semicircle, expands the exterior
+    field in Gegenbauer functions of order -1/2 on a semicircle CENTRED ON
+    THE AXIS; the expansion is a statement about that geometry and about no
+    other.  A domain stopping at R = 0.05 is not a slightly worse version of
+    it -- the basis does not span the exterior of that shape, and
+    meq::ExteriorDtN's diagonal symbol is not the DtN map of it.  So `--rho` sets Gamma's radius and the flat side is
     the axis itself, and `--check` asserts on `R == 0.0` EXACTLY rather than on
     a tolerance, because a mesh that merely comes close has a different
     exterior problem and nothing downstream would say so.
@@ -53,7 +53,7 @@ so it can be aligned to.  What that is FOR is the limiter as a CURVE --
 `psi_bnd = max psi` over it, with the contact found rather than prescribed,
 which is what every production free-boundary code does and what would take
 `freegs4e`'s own grid artefact out of MEQ's comparison against it
-(FREE-BOUNDARY-PLAN.md section 7.20).
+(CLAUDE_FB.md, FB-6 is beaten).
 
 THE SOLVER HALF IS BUILT NOW -- `LimiterConstraint::LocatedContact`, reached
 from a file as `[boundary.limiter] SurfaceAttribute`.  What is NOT settled is
