@@ -54,7 +54,7 @@
  *     cache built against a DIFFERENT rule, detected by the offsets not being
  *     `e*nq`. Refused rather than silently dropped, because dropping `psi_c`
  *     would put the coil flux out of `psi` and change the equilibrium, which
- *     is the class of silent error COIL-SUBTRACTION-PLAN.md exists to avoid.
+ *     is the class of silent error the conductor split guards against.
  *
  * **AND THE CONDUCTOR SHIFT IS WHY UPSTREAM'S SEAM PASSES `(element, point)`
  * RATHER THAN A FLAG ARRAY.** MEQ proposed an `int const *elementFlags`
@@ -91,7 +91,7 @@ namespace meq
 	 *                   meq::SourceIntegrator::conductorCacheValues() holds
 	 *                   it. **Empty is not a special case**: the shift is then
 	 *                   exactly zero and every path without the
-	 *                   COIL-SUBTRACTION-PLAN.md split is bit-unchanged, which
+	 *                   conductor split is bit-unchanged, which
 	 *                   is the same contract `conductorShiftAt()` has.
 	 * @param conductorOffsets the matching
 	 *                   meq::SourceIntegrator::conductorCacheOffsets().

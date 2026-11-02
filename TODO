@@ -993,8 +993,8 @@ need something these cases structurally cannot give.
   WHAT THEY ARE FOR, IN THE ORDER THE EVIDENCE ASKS FOR THEM.
 
     * COIL SUBTRACTION HAS NOWHERE TO BE MEASURED. `[conductors] Model` is
-      built and works end to end, and COIL-SUBTRACTION-PLAN.md section 2(a)
-      says what it should buy: on examples/mastu-nke.msh, 1024 of 9361
+      built and works end to end, and what it should buy is known: on
+      examples/mastu-nke.msh, 1024 of 9361
       triangles carry a coil attribute and `CoilSize = 0.03` against
       `Size = 0.30` forces a 10x graded refinement around each -- 1.96x in
       element count, M-142. NONE of that is reachable from a fixed-boundary
@@ -1005,10 +1005,9 @@ need something these cases structurally cannot give.
       without them, is the measurement.
 
     * THE PLASMA EDGE CAPS THE ORDER ON EVERY MACHINE CASE WE HAVE.
-      COIL-SUBTRACTION-PLAN.md section 4: `ConstrainPaxisIp` at
-      `alpha_n = 1.2` makes the edge a fractional power and caps the rate at
-      `k <= 1.2` whatever the conductors do, so MAST-U cannot demonstrate the
-      plan's benefit at all. A fixed-boundary case has no moving edge, so a
+      `ConstrainPaxisIp` at `alpha_n = 1.2` makes the edge a fractional power
+      and caps the rate at `k <= 1.2` whatever the conductors do, so MAST-U
+      cannot demonstrate the split's high-order benefit at all. A fixed-boundary case has no moving edge, so a
       SMOOTH-EDGE machine-shaped problem is where a high-order claim can
       actually be made. That is a different fixture from the ones above rather
       than a setting on them.
@@ -1044,8 +1043,9 @@ need something these cases structurally cannot give.
       UpDownSymmetry`), one strongly shaped, one nearly circular as the
       control.
     * AND EACH ONE SOLVED BOTH WAYS -- conductors meshed and conductors
-      subtracted -- because COIL-SUBTRACTION-PLAN.md section 0a-pre makes the
-      meshed route the SUBTRACTION'S INSTRUMENT rather than its rival. The
+      subtracted -- because the meshed route is the SUBTRACTION'S INSTRUMENT
+      rather than its rival (CLAUDE_FB.md, *The meshed route is the split's
+      instrument, and it stays first class*). The
       agreement between the two is the only check that says the split is a
       change of representation and not of answer.
 
@@ -1075,7 +1075,7 @@ need something these cases structurally cannot give.
       `Model = "filament"` is reachable and is a DIFFERENT machine -- 6.081e-03
       globally and 4.143e-02 inside the conductors against the rectangles, on
       DIII-D's eighteen. A filament arm would make the freegs4e comparison
-      like-for-like on both sides of COIL-SUBTRACTION-PLAN.md section 0a's 2x2,
+      like-for-like on both sides of the filament-and-shaped 2x2,
       and it is the cheapest field to evaluate, so it is a plausible DEFAULT
       for the large end of the size range rather than only a comparison.
 
@@ -1142,7 +1142,7 @@ need something these cases structurally cannot give.
   subdivision -- a target cell LENGTH, converging to the rectangle at order
   2.000, MEASUREMENTS.md M-166 -- and the default stays one per block.  What
   is open is a shipped MAST-U filament case, which wants MAST-U's cold start:
-  COIL-SUBTRACTION-PLAN.md section 13.5.
+  the entry *A shipped MAST-U filament case*, below.
 
   THE OLD TEXT OF THIS BULLET FOLLOWS, BECAUSE THE FIXED-BOUNDARY FIXTURE IS
   STILL WORTH HAVING FOR THE PHYSICS EVEN THOUGH IT IS NO LONGER ON THE
@@ -1447,3 +1447,68 @@ Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342).
   a named refusal that says the mesh cannot carry this pressure; not a
   30-step stall. A failing case naming it, as the testing stance asks, is
   still to be written.
+
+
+================================================================================
+A shipped MAST-U filament case
+Raised 2026-11-01, when COIL-SUBTRACTION-PLAN.md was retired.
+================================================================================
+
+  WHAT IS ESTABLISHED. `[conductors] Model = "filament"` is built, reachable
+  from a file, and has an acceptance: examples/machine-f-diiid.toml under it
+  reproduces freegs4e's F_diiid_conventional (M-154), and
+  `[conductors] FilamentSize` divides a block into a stack that converges to
+  the rectangle at order 2 (M-166). Abel's pathway is "run with coarse mesh
+  and filaments, use that to get so close that we only need one or two big
+  newton iterations using meshed coils", and `[initialguess] Content =
+  "total"` lets the filament answer seed the meshed run. CLAUDE_FB.md,
+  *Conductors out of the mesh: the split*, has the record.
+
+  WHAT IS MISSING. Nothing in examples/ poses MAST-U free boundary with its
+  conductors subtracted and divided, which is that pathway's own first rung.
+  One filament per block is not MAST-U: the solenoid is 0.012 m by 3.18 m
+  beside the plasma, one point at its centre is a factor of 5.3 from the
+  rectangle at the plasma, and that arm reaches 7.0e-04 in 200 Newton steps
+  without converging where the meshed arm converges in 2. So the case wants
+  FilamentSize (0.05 m makes the solenoid 1 x 64) AND MAST-U's cold start --
+  M-124's ellipse guess plus setBorderRegularisation() -- and it is a fixture
+  rather than a capability.
+
+  WHAT CLOSES IT. A shipped examples/ file (the mastu-nke machine, filament
+  model, divided), converging cold through `meq-run`, with a DriverAcceptance
+  case asserting it converges and that the meshed run seeded from its answer
+  with `Content = "total"` converges in one or two Newton steps. A filament
+  arm that does not converge is a failing case naming why, not a skipped one.
+
+================================================================================
+The output regenerates its input: the resolved configuration and the profile tables
+Raised 2026-11-01, when COIL-SUBTRACTION-PLAN.md was retired.
+================================================================================
+
+  WHAT IS ESTABLISHED. The `.nc` carries its mesh (M-297), every coefficient
+  and the conductor table (M-150), and the configuration VERBATIM as
+  `input_toml` and `input_file` -- enough to re-run, given the files the
+  configuration names. A file holding a remainder carries what it is a
+  remainder from because the conductors are input.
+
+  WHAT IS MISSING, TWO THINGS.
+
+    * THE RESOLVED CONFIGURATION. meq::Configuration has no serialiser and
+      does not keep the parsed table -- it reads TOML into typed fields and
+      the toml::value is gone. The verbatim copy is provenance; what MEQ
+      actually USED, defaults included, is a different artefact and catches
+      something the verbatim one cannot: a key accepted and ignored, which
+      this tree has met twice (ProfileFile and its kind on one source type,
+      ConfineToPlasma on the rotating source). The test with teeth comes with
+      it: parse a configuration, serialise it, parse the result, and require
+      the two Configurations to agree -- which fails exactly when a key is
+      read into a field nothing writes back.
+    * THE PROFILE TABLES. `<stem>-pprime.dat` and `-ggprime.dat` are named by
+      the configuration and read by meq::SplineProfile, and the `.nc` does not
+      carry them. An output that regenerates its input regenerates a file that
+      cannot be run without them.
+
+  WHAT CLOSES IT. Both in the `.nc`, and `meq-convert` (or a sibling) able to
+  write back a runnable configuration and its tables from the file alone,
+  with a DriverAcceptance case running the regenerated input and requiring
+  the same answer.

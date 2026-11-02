@@ -5,7 +5,7 @@
 #     meq-run ../../source/examples/machine-f-diiid-filament.toml
 #
 # DIFF IT AGAINST examples/machine-f-diiid.toml: four lines differ and
-# every one of them has to, which is COIL-SUBTRACTION-PLAN.md's own list.
+# every one of them has to.
 # [mesh.generate] CoilSize is gone, because it grades the mesh around
 # conductors the generator is no longer told about and is refused beside
 # a subtracting model; the mesh has its own name, so the two arms do not

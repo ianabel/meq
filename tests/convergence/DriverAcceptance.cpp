@@ -2146,8 +2146,8 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
  * `[conductors] Model = "subtracted"` -- THE SAME MACHINE WITH ITS CONDUCTORS
  * TAKEN OUT OF THE MESH, AND THE CASE EXISTS FOR THE DOUBLE COUNT.
  *
- * COIL-SUBTRACTION-PLAN.md section 0a-pre: the split is an OPTION and the
- * meshed route never stops working, so the two must describe ONE machine. What
+ * The split is an OPTION and the meshed route never stops working, so the two
+ * must describe ONE machine. What
  * that leaves is a failure mode with no symptom of its own -- leaving
  * meq::CoilAugmentedSource in place beside psi_c puts the same amperes into the
  * equation TWICE, and the run converges, closes every border, and reports the
@@ -2156,8 +2156,8 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
  * rather than a tolerance.
  *
  * THE SOLVED FIELD IS A REMAINDER AND THE OUTPUT GRID IS NOT, and both halves
- * are asserted. Section 8.3 is the finding that divides them: a `.gf` is the
- * field's own coefficients, so it keeps psi_p; the `.nc` grid is sampled
+ * are asserted. What divides them: a `.gf` is the field's own coefficients,
+ * so it keeps psi_p; the `.nc` grid is sampled
  * pointwise, so psi_c is EVALUATED there and the file carries the physical
  * flux. A reader of the interchange format must not have to know which route
  * produced it -- which is also why `conductor_model` is an attribute.
@@ -2289,14 +2289,14 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
 /*
  * CS-6: THE RESTART FILE SAYS WHAT IT HOLDS AND WHAT IT IS A REMAINDER FROM.
  *
- * COIL-SUBTRACTION-PLAN.md §8.3's finding, and §9's answer to it. The finding:
- * a `.gf` written under `[conductors] Model` holds `psi_p` and is
- * INDISTINGUISHABLE from one that holds `psi` -- GridFunction::Save writes the
- * space header and the coefficients, and there is nowhere for a third fact to
- * go. The answer: the `.nc` carries a second representation beside its
- * rasterization -- every coefficient, the space, `content`, and the conductor
- * TABLE -- because a flag would tell a reader they hold the wrong field
- * without letting them fix it.
+ * CLAUDE_FB.md, *The `.gf` cannot say it holds a remainder, so the `.nc` is the
+ * restart*, has the finding and its answer. The finding: a `.gf` written under
+ * `[conductors] Model` holds `psi_p` and is INDISTINGUISHABLE from one that
+ * holds `psi` -- GridFunction::Save writes the space header and the
+ * coefficients, and there is nowhere for a third fact to go. The answer: the
+ * `.nc` carries a second representation beside its rasterization -- every
+ * coefficient, the space, `content`, and the conductor TABLE -- because a flag
+ * would tell a reader they hold the wrong field without letting them fix it.
  *
  * **THE ASSERTION IS A RECONSTRUCTION AND NOT A PRESENCE CHECK, AND THAT IS
  * THE ONLY VERSION OF THIS TEST WORTH HAVING.** Asserting that the variables
@@ -2308,9 +2308,9 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
  *
  * The only thing taken from outside the `.nc` here is the mesh, read from the
  * `.mesh` the run wrote beside it under `--gf`. The `.nc` EMBEDS that mesh too,
- * as its `mesh` variable -- §9.2 answered the self-contained way round, with
- * MFEM's own text rather than a serialiser of MEQ's -- and OutputConversion is
- * where the two are asserted to be the same bytes.
+ * as its `mesh` variable, as MFEM's own text rather than a serialiser of
+ * MEQ's -- and OutputConversion is where the two are asserted to be the same
+ * bytes.
  */
 BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 {
@@ -2332,9 +2332,9 @@ BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
 	std::string const header = ncdumpHeader( "cs6.nc" );
 	BOOST_TEST_REQUIRE( !header.empty(), "ncdump could not read cs6.nc" );
 
-	// (1) IT SAYS WHICH FIELD IT HOLDS. The one attribute that makes §8.3
-	// answerable; a reader who does not look at it is exactly where the `.gf`
-	// leaves them.
+	// (1) IT SAYS WHICH FIELD IT HOLDS. The one attribute that makes the
+	// question answerable; a reader who does not look at it is exactly where
+	// the `.gf` leaves them.
 	BOOST_TEST( header.find( "content = \"remainder" ) != std::string::npos,
 	            "the restart file does not say that it holds a remainder" );
 	BOOST_TEST( header.find( "string mesh ;" ) != std::string::npos,
@@ -5464,12 +5464,12 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
  * `[conductors] FilamentSize` -- A RECTANGLE DIVIDED INTO A STACK, AND THE
  * ACCEPTANCE IS THAT IT MOVES TOWARDS THE RECTANGLE.
  *
- * COIL-SUBTRACTION-PLAN.md section 13.5. `Model = "filament"` collapses each
- * `[[coils]]` block to ONE point at its centre carrying the total current,
- * which section 4b defends as a different conductor model rather than an
- * approximation -- and which bounds the coarse-filaments-then-meshed-coils
- * pathway, because MAST-U's solenoid is 0.012 x 3.180 m beside the plasma and
- * one point at its centre is not that machine. MEASUREMENTS.md M-166 sizes it:
+ * `Model = "filament"` collapses each `[[coils]]` block to ONE point at its
+ * centre carrying the total current, which is a different conductor model
+ * rather than an approximation -- and which bounds the
+ * coarse-filaments-then-meshed-coils pathway, because MAST-U's solenoid is
+ * 0.012 x 3.180 m beside the plasma and one point at its centre is not that
+ * machine. MEASUREMENTS.md M-166 sizes it:
  * a factor of 5.3 from the rectangle at MAST-U's own plasma.
  *
  * THE THIRD ARM IS WHAT MAKES THIS AN ACCEPTANCE AND NOT A SMOKE TEST. Three

@@ -255,9 +255,9 @@ namespace
 	 * conductors be written once.
 	 *
 	 * **AND A SUBTRACTED CONDUCTOR IS NOT EMITTED AT ALL, WHICH IS THE ONE
-	 * PLACE `[conductors] Model` REACHES THE MESH.** The whole claim of
-	 * `COIL-SUBTRACTION-PLAN.md` is that the mesh need not carry the
-	 * conductors; a `--coil` here would make it carry them anyway, and the
+	 * PLACE `[conductors] Model` REACHES THE MESH.** The whole claim of the
+	 * conductor split is that the mesh need not carry the conductors; a
+	 * `--coil` here would make it carry them anyway, and the
 	 * generator would fragment and grade a region whose current the solve
 	 * evaluates analytically. Every other consequence of the key is inside the
 	 * solver, so this loop is the whole of its geometry half -- and
@@ -1765,10 +1765,11 @@ int main( int argc, char **argv )
 		 * TWO THINGS CHANGE MEANING UNDER THE SPLIT AND NEITHER IS VISIBLE IN
 		 * ANY FILE. The solved field becomes `psi_p = psi - psi_c`, so a stored
 		 * `.gf` written by this run is a REMAINDER and a `.gf` handed to it is
-		 * read as one -- and the format cannot record which, which is
-		 * `COIL-SUBTRACTION-PLAN.md` section 8.3's finding and the whole reason
-		 * CS-6 exists. Until it does, the only thing standing between a user and
-		 * a silently wrong restart is this paragraph on stdout.
+		 * read as one -- and the format cannot record which, which is the
+		 * whole reason CS-6 makes the `.nc` the restart (CLAUDE_FB.md, *The
+		 * `.gf` cannot say it holds a remainder, so the `.nc` is the restart*).
+		 * For a `.gf` warm start, the only thing standing between a user and a
+		 * silently wrong restart is this paragraph on stdout.
 		 *
 		 * THE USER KNOWS WHAT THEY ARE DOING, WHICH IS THE POSITION TAKEN
 		 * DELIBERATELY: the warm start's meaning is allowed to change rather
@@ -3431,8 +3432,9 @@ int main( int argc, char **argv )
 		 * PER MESH.
 		 *
 		 * setConductorField() refuses a mesh with a node or a vertex ON a
-		 * filament -- COIL-SUBTRACTION-PLAN.md section 7.1, a COINCIDENCE test
-		 * and not a clearance one -- so it has to be re-asked on each adaptive
+		 * filament -- a COINCIDENCE test and not a clearance one,
+		 * docs/conductors.rst, *Filaments, and a filament on a mesh point* --
+		 * so it has to be re-asked on each adaptive
 		 * cycle's mesh rather than once at setup. It is the refinement that
 		 * introduces new nodes, and a filament sitting exactly on one of them
 		 * is not a thing the coarse mesh can rule out.
@@ -6565,8 +6567,8 @@ int main( int argc, char **argv )
 		 * AND UNDER A SPLIT, A FOURTH `.gf` THAT IS THE PHYSICAL FLUX -- FOR
 		 * LOOKING AT, AND NOT FOR RESTARTING FROM.
 		 *
-		 * COIL-SUBTRACTION-PLAN.md §9 settles that the `.gf` becomes a VIEWING
-		 * artefact under the split and the `.nc` becomes the restart. The three
+		 * Under the split the `.gf` is a VIEWING artefact and the `.nc` is the
+		 * restart. The three
 		 * files above are unchanged and still hold `psi_p`, because they are
 		 * MFEM's format and MEQ should not redefine it -- open one in GLVis
 		 * under `[conductors] Model` and the picture is a remainder, with a
@@ -6581,7 +6583,7 @@ int main( int argc, char **argv )
 		 * exactly at any point.
 		 *
 		 * NAMED `_psi_total.gf` so that the name says which it is, which is
-		 * the whole complaint §8.3 makes about the format.
+		 * the one thing the format itself cannot say.
 		 */
 		if ( conductorField && wantGridFunctions )
 		{
@@ -6738,8 +6740,9 @@ int main( int argc, char **argv )
 		 *
 		 * Under `[conductors]` the solver's field is the REMAINDER psi_p, so
 		 * everything sampled above is a remainder and the physical flux is
-		 * psi_p + psi_c. COIL-SUBTRACTION-PLAN.md section 8.3 is the finding
-		 * that divides the four output formats:
+		 * psi_p + psi_c. What divides the four output formats
+		 * (docs/conductors.rst, *What the split is exact for, and what it
+		 * cannot be*):
 		 *
 		 *   .nc grid, _surfaces.nc   psi_c is EVALUATED at each node, so the
 		 *                            file carries the physical field exactly
@@ -7185,8 +7188,7 @@ int main( int argc, char **argv )
 		 * globally on DIII-D's eighteen conductors and 4.143e-02 inside them --
 		 * so a file that does not say which one produced it cannot be
 		 * differenced against another, which is the one thing the interchange
-		 * format exists for. COIL-SUBTRACTION-PLAN.md section 4b: it must say
-		 * which model produced an answer.
+		 * format exists for. It must say which model produced an answer.
 		 *
 		 * The GRID still carries the physical psi under either route: the
 		 * sampler reads the solver's total. What changes is the machine, not
@@ -7439,9 +7441,9 @@ int main( int argc, char **argv )
 		/*
 		 * ---- CS-6: THE RESTART REPRESENTATION, BESIDE THE RASTERIZATION ----
 		 *
-		 * COIL-SUBTRACTION-PLAN.md §9. The requirement in one line: **A FILE
-		 * HOLDING A DIFFERENCE HAS TO CARRY WHAT IT IS A DIFFERENCE FROM.**
-		 * §8.3 establishes that a `.gf` cannot -- GridFunction::Save writes the
+		 * The requirement in one line: **A FILE HOLDING A DIFFERENCE HAS TO
+		 * CARRY WHAT IT IS A DIFFERENCE FROM.** A `.gf` cannot --
+		 * GridFunction::Save writes the
 		 * space header and the raw coefficients, the loader reads the space and
 		 * then the vector, and an extra line is consumed as data -- so a file
 		 * written under `[conductors] Model` is a REMAINDER and is
@@ -7468,8 +7470,8 @@ int main( int argc, char **argv )
 		 * existing reader of `psi( Z, R )` is untouched. One file, two
 		 * representations.
 		 *
-		 * THE MESH IS EMBEDDED, as the `mesh` variable, which answers §9.2's
-		 * first open question the self-contained way round -- and without MEQ
+		 * THE MESH IS EMBEDDED, as the `mesh` variable, which carries the
+		 * geometry the self-contained way round -- and without MEQ
 		 * re-implementing a serialiser, because the text IS MFEM's own,
 		 * meq::meshText(), the bytes `<stem>.mesh` would hold. That is what
 		 * makes this file the restart and the one output a run writes by
@@ -7477,7 +7479,8 @@ int main( int argc, char **argv )
 		 * makes the `.mesh`, the `.gf`s and the VTK from it. The PROFILE TABLES
 		 * are still named rather than embedded: a `.nc` moved away from its
 		 * directory regenerates a configuration that cannot be run, and it
-		 * says which files it wanted.
+		 * says which files it wanted (TODO, *The output regenerates its input:
+		 * the resolved configuration and the profile tables*).
 		 */
 		{
 			mfem::GridFunction const &potentialField = solver->potential();
@@ -7580,7 +7583,7 @@ int main( int argc, char **argv )
 
 			/*
 			 * **WHICH FIELD THE COEFFICIENTS ARE**, and this one attribute is
-			 * the whole of §8.3's finding made answerable. A reader that does
+			 * what a `.gf` has no slot for. A reader that does
 			 * not look at it is in exactly the position a `.gf` leaves them.
 			 */
 			writer.attribute( "content",
@@ -7592,9 +7595,9 @@ int main( int argc, char **argv )
 			 * route. A meshed run's conductors are part of the source rather
 			 * than of a difference, so they are not needed to interpret its
 			 * coefficients -- but they ARE needed to regenerate its input, and
-			 * §9 makes those the same mechanism deliberately: *"the conductors
-			 * ARE input parameters, so an output that regenerates its input
-			 * carries them by construction"*. One table, both routes, and the
+			 * those are the same mechanism deliberately: the conductors ARE
+			 * input parameters, so an output that regenerates its input
+			 * carries them by construction. One table, both routes, and the
 			 * `conductor_model` attribute above says which was taken.
 			 */
 			/*
@@ -7609,9 +7612,9 @@ int main( int argc, char **argv )
 			 * `.nc` then carries `conductor_model = "filament"` and NOT ONE ROW
 			 * of the geometry that model is made of.
 			 *
-			 * That defeats the whole of section 9's *"the conductors ARE input
-			 * parameters, so an output that regenerates its input carries them
-			 * by construction"*, on exactly the model that needs it most: a
+			 * That defeats the whole point of the conductors being input
+			 * parameters that an output regenerating its input carries by
+			 * construction, on exactly the model that needs it most: a
 			 * rectangle divided by [conductors] FilamentSize is a stack this
 			 * file is the only record of.
 			 * theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom did not
@@ -7689,19 +7692,20 @@ int main( int argc, char **argv )
 			}
 
 			/*
-			 * AND THE CONFIGURATION VERBATIM, WHICH IS THE CHEAP HALF OF §9.1
-			 * AND THE ONLY HALF THAT EXISTS.
+			 * AND THE CONFIGURATION VERBATIM, WHICH IS THE CHEAP HALF OF THE
+			 * PROVENANCE AND THE ONLY HALF THAT EXISTS.
 			 *
-			 * §9.1 distinguishes two artefacts: the input AS GIVEN, which is
+			 * There are two artefacts: the input AS GIVEN, which is
 			 * provenance and is trivially correct, and what MEQ ACTUALLY USED,
 			 * serialised from meq::Configuration's fields, which would catch a
 			 * key accepted and ignored. **THE SECOND IS NOT BUILT**:
 			 * meq::Configuration has no serialiser and does not keep the parsed
 			 * table -- it reads TOML into typed fields and the toml::value is
 			 * gone -- so writing it means writing one, and the test with real
-			 * teeth that §9.1 describes ( parse, serialise, re-parse, require
-			 * the two Configurations to agree ) comes with it. That is a stage
-			 * of its own and this attribute does not pretend to be it.
+			 * teeth ( parse, serialise, re-parse, require the two
+			 * Configurations to agree ) comes with it. That is TODO, *The
+			 * output regenerates its input: the resolved configuration and the
+			 * profile tables*, and this attribute does not pretend to be it.
 			 *
 			 * What this IS: enough to re-run. Read `input_toml` out, write it
 			 * to a file, and with the `.mesh` and the profile tables named
@@ -7952,8 +7956,7 @@ int main( int argc, char **argv )
 				 * route -- meq::ContourTracer takes the solver's conductors and
 				 * shifts at its seam -- so, exactly as for the grid, what
 				 * changes between the models is the machine and not the meaning
-				 * of a variable. COIL-SUBTRACTION-PLAN.md section 4b: a file must
-				 * say which model produced it.
+				 * of a variable. A file must say which model produced it.
 				 */
 				if ( conductorField )
 				{
@@ -8098,8 +8101,8 @@ int main( int argc, char **argv )
 			             stem.c_str() );
 		/*
 		 * AND UNDER A SPLIT THE LISTING ABOVE IS WRONG WITHOUT THIS, which is
-		 * the whole of COIL-SUBTRACTION-PLAN.md §8.3 stated where a user will
-		 * meet it: "exact, for GLVis and restart" describes three files holding
+		 * the `.gf`'s limit stated where a user will meet it: "exact, for
+		 * GLVis and restart" describes three files holding
 		 * a REMAINDER, and the inversion is the opposite of what the names
 		 * suggest -- the lossy `.nc` carries the physically exact field,
 		 * because it samples, and the exact `.gf` carries a difference.

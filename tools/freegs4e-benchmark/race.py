@@ -150,14 +150,14 @@ if SHAPED:
 # --filament: THE OTHER WAY TO MATCH THE CONDUCTOR MODEL, AND THE CHEAPER ONE.
 #
 # `--shaped` above moves the REFERENCE to MEQ's rectangles.  This moves MEQ to
-# the reference's FILAMENTS, and it is the direction `COIL-SUBTRACTION-PLAN.md`
+# the reference's FILAMENTS, and it is the direction the conductor split
 # exists for: `[conductors] Model = "filament"` takes the conductors out of the
 # mesh and evaluates them analytically at exactly the points freegs4e's own
 # `Coil` sits at, so the two arms are the same machine rather than two
 # approximations to one.
 #
-# IT IS ALSO A SMALLER MESH, which is the point of the plan rather than a side
-# effect: the conductors are not meshed, not graded to, and not fragmented.
+# IT IS ALSO A SMALLER MESH, which is the point of the split rather than a
+# side effect: the conductors are not meshed, not graded to, and not fragmented.
 # Measured on DIII-D, MEASUREMENTS.md M-154 -- 5054 triangles to 1702, and the
 # field-wide error against the filament reference 4.593e-03 meshed against
 # 2.031e-03 subtracted, which is BELOW M-111's 5.785e-03 floor.

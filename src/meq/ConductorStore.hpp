@@ -9,8 +9,8 @@
 /**
  * `psi_c` ON DISK: A FILE-BACKED VERSION OF THE CONDUCTOR CACHES.
  *
- * `COIL-SUBTRACTION-PLAN.md` §1 splits the flux as `psi = psi_c + psi_p` and
- * licenses a cache of the conductors' own field, because the conductors do not
+ * The conductor split, `psi = psi_c + psi_p`, licenses a cache of the
+ * conductors' own field, because the conductors do not
  * move during a forward solve. MEQ builds it ONCE PER MESH at three sets of
  * points -- `psi_c` at every potential dof and at every quadrature point
  * meq::SourceIntegrator visits, and **`q_c = ( 1/R ) grad_bar psi_c` at every

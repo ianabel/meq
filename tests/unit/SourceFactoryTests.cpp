@@ -666,10 +666,10 @@ BOOST_AUTO_TEST_CASE( the_coil_factory_names_the_block_it_refuses )
 /// THE NULL RETURN IS THE ASSERTION THAT MATTERS, and it is the one a reader
 /// skips. Every shift inside the solver is guarded on a null
 /// meq::ConductorField, so a null here is what keeps the meshed route
-/// bit-identical -- COIL-SUBTRACTION-PLAN.md section 0a-pre's standing
-/// requirement. Returning an EMPTY field instead would be a non-null pointer
-/// the solver takes, a per-quadrature-point cache built and filled, and every
-/// consumer shifted by exactly nought.
+/// bit-identical, which is a standing requirement on the split. Returning an
+/// EMPTY field instead would be a non-null pointer the solver takes, a
+/// per-quadrature-point cache built and filled, and every consumer shifted by
+/// exactly nought.
 BOOST_AUTO_TEST_CASE( the_conductor_factory_builds_only_what_was_asked_for )
 {
 	meq::CoilConfig coils;
@@ -714,7 +714,7 @@ BOOST_AUTO_TEST_CASE( the_conductor_factory_builds_only_what_was_asked_for )
 	BOOST_TEST( points->filament( 0 ).height() == one.centreZ );
 
 	// AND THE TWO DISAGREE, or the filament mode is a relabelling rather than
-	// the per-cent-level different conductor model section 4b measures. Read
+	// the per-cent-level different conductor model CS-0 measures. Read
 	// well away from the conductor, where both are smooth and the difference is
 	// the model rather than a quadrature.
 	BOOST_TEST( rectangles->psi( 1.70, 0.0 ) != points->psi( 1.70, 0.0 ),

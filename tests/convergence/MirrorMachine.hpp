@@ -41,8 +41,8 @@
  *     the transfer, as the driver does.
  *
  * Inside Gamma a rectangle can be MESHED ( a domain source through
- * meq::CoilAugmentedSource, the default and the route COIL-SUBTRACTION-PLAN.md
- * section 0a-pre says must never stop working ) or SUBTRACTED ( CS-3 ).
+ * meq::CoilAugmentedSource, the default and the route that must never stop
+ * working ) or SUBTRACTED ( CS-3 ).
  * solveMeshed() and solveSubtracted() are the two.
  *
  * AND IT MOVES THE MODE COUNT FROM THE PLASMA TO THE COILS. A source inside

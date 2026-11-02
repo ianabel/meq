@@ -717,13 +717,13 @@ namespace
 		 * machine with 23 RECTANGLES that is 23 cross-section quadratures per
 		 * point -- of order 1e4 Carlson evaluations -- against 23 for the same
 		 * machine as filaments. Uncached, the rectangle case alone buys back
-		 * the element-count saving the whole plan exists for, many times over.
+		 * the element-count saving the whole split exists for, many times over.
 		 *
-		 * COIL-SUBTRACTION-PLAN.md §1 says why the cache is legitimate rather
-		 * than a trick: the conductor currents do not move during a forward
-		 * solve, only the profile scale does, so psi_c at a FIXED point is a
-		 * precompute. The rule below is the same `rule()` both loops use, so
-		 * the points are identical by construction rather than by agreement.
+		 * The cache is legitimate rather than a trick: the conductor currents
+		 * do not move during a forward solve, only the profile scale does, so
+		 * psi_c at a FIXED point is a precompute. The rule below is the same
+		 * `rule()` both loops use, so the points are identical by construction
+		 * rather than by agreement.
 		 *
 		 * THREADED, AND IT IS THE EASY KIND. Each element writes its own
 		 * disjoint slice and reads nothing another writes, so there is no
@@ -4073,7 +4073,7 @@ namespace
 		 * vacuous whenever the second had not happened yet.
 		 */
 		/*
-		 * COIL-SUBTRACTION-PLAN.md section 7.1's refusal, walked over the mesh.
+		 * The filament-on-a-mesh-point refusal, walked over the mesh.
 		 *
 		 * VERTICES AND NODES ARE DIFFERENT SETS AND BOTH ARE CHECKED. A curved
 		 * or high-order mesh carries nodes the vertex array does not, and it is
@@ -4202,7 +4202,7 @@ namespace
 
 		/*
 		 * AND THE MIRROR IMAGE, FOR THE CONDUCTORS THAT ARE SUBTRACTED RATHER
-		 * THAN COUPLED. COIL-SUBTRACTION-PLAN.md CS-3.
+		 * THAN COUPLED. CS-3.
 		 *
 		 * The two preconditions are OPPOSITE and each is the other's failure.
 		 * setExteriorConductors() takes a conductor BEYOND Gamma, so that
@@ -4331,8 +4331,7 @@ namespace
 		 * A NormalisedSource IS NOW ALLOWED, AND THE FOUR THINGS THAT HAD TO BE
 		 * TRUE FIRST ARE TRUE. It divides by psi_ax and psi_bnd, which are
 		 * functionals of the PHYSICAL flux, so every consumer of psi had to
-		 * read psi_c + psi_p rather than the solved remainder --
-		 * COIL-SUBTRACTION-PLAN.md CS-4:
+		 * read psi_c + psi_p rather than the solved remainder -- CS-4:
 		 *
 		 *   psi_ax        peakAt() maximises over the total, through the
 		 *                 per-dof cache;
@@ -4364,8 +4363,8 @@ namespace
 		 *                        condition is about q_p + q_c.
 		 *
 		 * THE TWO MUST MOVE TOGETHER OR THE DATUM IS DOUBLE COUNTED, which is
-		 * COIL-SUBTRACTION-PLAN.md section 3's warning and is why they landed in
-		 * one change rather than two.
+		 * why neither may change without the other (docs/conductors.rst, *The
+		 * boundary datum and the exterior coupling*).
 		 *
 		 * WHAT IS REFUSED INSTEAD IS THE GEOMETRY. A subtracted conductor must
 		 * lie strictly INSIDE Gamma -- see requireConductorsInsideGamma above,
@@ -4383,8 +4382,10 @@ namespace
 		 * a point on the loop already, so nothing silently returns an infinity
 		 * -- but that throw arrives from inside a solve and names a field
 		 * point, while this one names the NODE and the FILAMENT, at setup,
-		 * before a mesh has been assembled. COIL-SUBTRACTION-PLAN.md section
-		 * 7.1 records why this is a COINCIDENCE test and not a clearance test.
+		 * before a mesh has been assembled. CLAUDE_DECLINED.md, *A clearance
+		 * rule, a perturbed node or a finite part for a filament on a mesh
+		 * point*, records why this is a COINCIDENCE test and not a clearance
+		 * test.
 		 *
 		 * Vertices AND nodes, because they are different sets: a curved or
 		 * high-order mesh carries nodes the vertex array does not, and the
@@ -5066,9 +5067,8 @@ namespace
 					total += faceShape( i )*values( offset + faceDofs[ i ] );
 
 				/*
-				 * THE CONTACT IS A MAXIMUM OF THE PHYSICAL FLUX. Under
-				 * COIL-SUBTRACTION-PLAN.md's split the state holds psi_p, and
-				 * a limiter is a piece of metal near the conductors -- exactly
+				 * THE CONTACT IS A MAXIMUM OF THE PHYSICAL FLUX. Under the
+				 * conductor split the state holds psi_p, and a limiter is a piece of metal near the conductors -- exactly
 				 * where psi_c is largest and least uniform along a face.
 				 * Searching the remainder would put the contact in the wrong
 				 * place and then report psi_bnd from it, and psi_bnd is a
@@ -6590,7 +6590,7 @@ namespace
 			// Handed unconditionally: an unfilled component is the constant
 			// true, so a solve that never asks for one is bit-unchanged.
 			sourceTerm->setPlasmaComponent( &plasmaComponentMask );
-			// COIL-SUBTRACTION-PLAN.md CS-2: the source and its Jacobian must
+			// CS-2: the source and its Jacobian must
 			// see psi_c + psi_p rather than the solved remainder. Null unless
 			// the split is in use, and null shifts by exactly zero.
 			sourceTerm->setConductorField( conductorFieldSet );
@@ -8316,10 +8316,9 @@ namespace
 		/*
 		 * psi_c AT EVERY POTENTIAL DOF, ONCE PER MESH.
 		 *
-		 * COIL-SUBTRACTION-PLAN.md §1 asks for exactly this -- the conductor
-		 * currents do not move during a forward solve, so psi_c at a fixed
-		 * point is a precompute whose cost amortises over every iteration of
-		 * every support sweep. What forced it now rather than later is that
+		 * The conductor currents do not move during a forward solve, so psi_c
+		 * at a fixed point is a precompute whose cost amortises over every
+		 * iteration of every support sweep. What forced it now rather than later is that
 		 * peakAt() scans the potential block BY RAW INDEX, so a shift computed
 		 * per ( element, local dof ) cannot reach it; a table indexed by dof
 		 * serves that caller and the element fill alike.
@@ -8929,14 +8928,13 @@ namespace
 			for ( int i = 0; i < dofs.Size(); ++i )
 			{
 				/*
-				 * THE TOTAL, NOT THE REMAINDER. Under
-				 * COIL-SUBTRACTION-PLAN.md's split the state holds psi_p and
-				 * the plasma's edge is a level set of the PHYSICAL flux, so a
-				 * fill run on the remainder labels the wrong elements -- and
-				 * the labels decide where F is switched off, which is a change
-				 * of SUPPORT rather than a small error. A conductor near the
-				 * plasma makes psi_c comparable to psi_p, so this is not a
-				 * correction at the margin.
+				 * THE TOTAL, NOT THE REMAINDER. Under the conductor split the
+				 * state holds psi_p and the plasma's edge is a level set of the
+				 * PHYSICAL flux, so a fill run on the remainder labels the
+				 * wrong elements -- and the labels decide where F is switched
+				 * off, which is a change of SUPPORT rather than a small error.
+				 * A conductor near the plasma makes psi_c comparable to psi_p,
+				 * so this is not a correction at the margin.
 				 *
 				 * The shift is exact rather than approximate: meq's potential
 				 * space is BasisType::GaussLobatto, so a coefficient IS the
@@ -9332,9 +9330,8 @@ namespace
 		 * psi_c AT A SOURCE QUADRATURE POINT, AND THE FIVE CALLERS ARE WHY
 		 * THIS IS A FUNCTION AND NOT A LINE.
 		 *
-		 * COIL-SUBTRACTION-PLAN.md CS-4 is "every consumer of psi reads the
-		 * total", and its staging entry lists the critical-point finder, the
-		 * element fill, peakAt, the source and its Jacobian, the limiter and
+		 * CS-4 is "every consumer of psi reads the total", and its staging
+		 * entry lists the critical-point finder, the element fill, peakAt, the source and its Jacobian, the limiter and
 		 * the .nc grid. **FIVE MORE WERE NOT ON THAT LIST**, and they are all
 		 * in this file: the plasma-current integral and its four derivative
 		 * assemblies rebuild `psi` from the state at a quadrature point and
@@ -11827,17 +11824,16 @@ namespace
 		 * AND THE PHYSICAL FLUX AT THE CONTACT, WHICH IS WHAT psi_bnd IS
 		 * CONSTRAINED TO EQUAL. Only ever applied to a STATE.
 		 *
-		 * Under COIL-SUBTRACTION-PLAN.md's split the state holds psi_p, and a
-		 * limiter is a piece of metal near the conductors -- exactly where
-		 * psi_c is largest -- while an X-point of a machine sits in the middle
-		 * of them. FOUR routes reach the contact and each knows where it is
-		 * differently: the nearest-dof one indexes the potential block and
-		 * takes the per-dof cache; XP-3's is the X-point itself, which the
-		 * limiter search never locates -- `limiterContactLocatedValue` is
-		 * refreshLimiterContact()'s and that search returns early anywhere but
-		 * LocatedContact; the PRESCRIBED point has its ( R, z ) as given data,
-		 * unmoving for the whole solve; and the located one has it in hand at
-		 * this iterate.
+		 * Under the conductor split the state holds psi_p, and a limiter is a
+		 * piece of metal near the conductors -- exactly where psi_c is largest
+		 * -- while an X-point of a machine sits in the middle of them. FOUR
+		 * routes reach the contact and each knows where it is differently: the
+		 * nearest-dof one indexes the potential block and takes the per-dof
+		 * cache; XP-3's is the X-point itself, which the limiter search never
+		 * locates -- `limiterContactLocatedValue` is refreshLimiterContact()'s
+		 * and that search returns early anywhere but LocatedContact; the
+		 * PRESCRIBED point has its ( R, z ) as given data, unmoving for the
+		 * whole solve; and the located one has it in hand at this iterate.
 		 *
 		 * **THE PRESCRIBED-POINT ROUTE WAS THE ONE LEFT OUT, AND IT IS THE
 		 * DEFAULT.** This enumerated three and there are four:
@@ -12450,8 +12446,7 @@ namespace
 
 			/*
 			 * AND THE X-POINT IS A NULL OF THE TOTAL FIELD, NOT OF THE
-			 * REMAINDER. COIL-SUBTRACTION-PLAN.md CS-4, and this border was
-			 * MISSING from its list.
+			 * REMAINDER. CS-4, and this border was MISSING from its list.
 			 *
 			 * The three quantities above are psi_p's and q_p's. Under the
 			 * split XP-3's rows then read `q_p( x_X ) = 0` and
@@ -13316,7 +13311,7 @@ namespace
 				// The axis is a zero of the PHYSICAL flux and a value of the
 				// physical potential; under the split this solver holds only the
 				// remainder. Null unless the split is in use, and null shifts by
-				// exactly zero. COIL-SUBTRACTION-PLAN.md CS-4.
+				// exactly zero. CS-4.
 				finder.setConductorField( conductorFieldSet );
 				finder.setInterpolatedFlux( interpolateConductorFlux );
 
@@ -13481,8 +13476,7 @@ namespace
 
 			/*
 			 * AND psi_c AT THE AXIS, BECAUSE psi_ax IS THE PHYSICAL FLUX
-			 * THERE. COIL-SUBTRACTION-PLAN.md CS-4, and this is the psi_bnd
-			 * row's exact mirror.
+			 * THERE. CS-4, and this is the psi_bnd row's exact mirror.
 			 *
 			 * The sum above contracts the shape functions against the STATE,
 			 * which under the split holds psi_p -- so it is the remainder at

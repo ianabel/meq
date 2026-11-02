@@ -19,12 +19,12 @@
  * shared with RotatingMirror; its comment says why the coils are inside Gamma
  * and why Gamma is at 3.0.
  *
- * THIS FILE TAKES THE MESHED ROUTE FOR (a) AND (b), because a subtracted
- * vacuum has psi_p = 0 identically and nothing to converge --
- * COIL-SUBTRACTION-PLAN.md section 10.1 says a rate there would be wrong in
- * both directions -- while a meshed one makes the coil field the solve's own
- * answer, which is the claim. Subtraction appears in (c), where it is the
- * instrument rather than the claim.
+ * THIS FILE TAKES THE MESHED ROUTE FOR (a) AND (b), because a subtracted vacuum
+ * has psi_p = 0 identically and nothing to converge -- a rate there would be
+ * wrong in both directions (CLAUDE_FB.md, *The acceptances are identities, and
+ * a rate would be wrong*) -- while a meshed one makes the coil field the
+ * solve's own answer, which is the claim. Subtraction appears in (c), where it
+ * is the instrument rather than the claim.
  */
 
 #define BOOST_TEST_MODULE VacuumMirror

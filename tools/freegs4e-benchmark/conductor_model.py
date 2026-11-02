@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """HOW MUCH OF THE IRREDUCIBLE BENCHMARK ERROR IS THE CONDUCTOR MODEL?
 
-COIL-SUBTRACTION-PLAN.md's CS-0, and it decides whether that plan is worth
-building.  No solver runs here and no mesh exists: both fields are
+CS-0 of the conductor split (CLAUDE_FB.md, *Conductors out of the mesh: the
+split*).  No solver runs here and no mesh exists: both fields are
 Green's-function sums over the SAME currents, differing only in how the current
 is distributed.
 
@@ -22,7 +22,7 @@ refusing to refine.  This measures it.
     own filament positions, and the floor becomes a modelling CHOICE.
   * much smaller     -> the flat error is something else, most likely
     REGULARITY, and the subtraction still helps but for a different reason.
-  * much larger      -> neither story holds and the plan is premature.
+  * much larger      -> neither story holds and the split is premature.
 
 THE NORM IS compare.py'S, so the number lands on the same scale as M-111's: the
 relative L2 is against `max | psi_ref |` over the compared nodes, and the
@@ -177,7 +177,7 @@ def main():
           f"\n    rel L2 5.785e-03 flat across a 16x range in dofs"
           f"\n    off the coils 6.3e-04 to 7.6e-04, also flat")
     if off is not None and whole is not None:
-        print(f"\n  VERDICT on COIL-SUBTRACTION-PLAN.md CS-0, ON BOTH ROWS --")
+        print(f"\n  VERDICT on CS-0, ON BOTH ROWS --")
         print(f"  reading only the off-conductor one is how the first version of")
         print(f"  this script got the answer backwards.")
         g = whole / 5.785e-03

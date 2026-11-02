@@ -1231,7 +1231,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_sets_clearance_is_to_the_nearest_point )
  * THE CONDUCTOR FIELD IS Delta*-HARMONIC AWAY FROM ITS CONDUCTORS, AND THAT IS
  * THE WHOLE FOUNDATION OF THE SUBTRACTION PATH.
  *
- * COIL-SUBTRACTION-PLAN.md solves for a REMAINDER: `psi = psi_c + psi_p`, with
+ * The conductor split solves for a REMAINDER: `psi = psi_c + psi_p`, with
  * `psi_c` the conductors' analytic field and `psi_p` what MEQ discretises. That
  * is only a reformulation of the same problem if
  *

@@ -104,7 +104,8 @@ namespace meq
 	/// WHAT KEEPS THE MESHED ROUTE FREE.** Every shift inside the solver is
 	/// guarded on a null meq::ConductorField, so a configuration that does not
 	/// ask for the split runs the code it always ran and answers bit for bit.
-	/// `COIL-SUBTRACTION-PLAN.md` section 0a-pre is the standing requirement and
+	/// That is a standing requirement (CLAUDE_FB.md, *The meshed route is the
+	/// split's instrument, and it stays first class*), and
 	/// ConductorSubtraction.cpp's control case is what asserts it.
 	///
 	/// **THE TWO NON-NULL RETURNS ARE DIFFERENT MACHINES AND NOT TWO WAYS OF

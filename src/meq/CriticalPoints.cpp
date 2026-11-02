@@ -598,7 +598,7 @@ namespace meq
 		 * interpolating. So there is no cost to save here and a real thing to
 		 * lose: `psi_ax` IS this number on the located-axis path, and the
 		 * conductors being resolved exactly rather than to the mesh's order is
-		 * the whole claim of COIL-SUBTRACTION-PLAN.md section 2(b).
+		 * the whole claim of the conductor split.
 		 */
 		double radius = 0.0;
 		double z = 0.0;

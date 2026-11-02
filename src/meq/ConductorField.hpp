@@ -11,7 +11,7 @@ namespace meq
 {
 	/**
 	 * `psi_c`: the field of the conductors ALONE, evaluated exactly, for the
-	 * split `psi = psi_c + psi_p` of `COIL-SUBTRACTION-PLAN.md`.
+	 * conductor split `psi = psi_c + psi_p` (docs/conductors.rst).
 	 *
 	 * `Delta*` is linear and a forward solve's conductor currents are
 	 * prescribed inputs, so the coil term can be taken off the right-hand side
@@ -20,7 +20,7 @@ namespace meq
 	 *     Delta* psi_p = -mu0 R J_plasma( psi_c + psi_p )
 	 *
 	 * with `psi_c` supplied here. **The conductors then need not be in the mesh
-	 * at all**, which is the point of the plan.
+	 * at all**, which is the point of the split.
 	 *
 	 * **A FILAMENT IS THE CONDUCTOR THIS EXISTS FOR.** A filament
 	 * is the one conductor MEQ structurally CANNOT carry any other way: a point
@@ -42,15 +42,15 @@ namespace meq
 	 *   * **coincides() is about FILAMENTS ONLY.** A rectangle has no line
 	 *     singularity for a mesh point to land on, so there is nothing to
 	 *     refuse, and refusing a node inside a coil would reject the ordinary
-	 *     configuration this plan exists to make cheap.
+	 *     configuration the split exists to make cheap.
 	 *   * a rectangle CAN be carried as a domain source instead, through
 	 *     `meq::CoilAugmentedSource`, and for a rectangle the split is a
 	 *     performance and accuracy choice rather than the only option. For a
 	 *     filament there is no alternative at all.
 	 *
 	 * The quadrature order is forwarded to the underlying `meq::CoilSet` and is
-	 * raisable, which is what `COIL-SUBTRACTION-PLAN.md` §7.2's replacement for
-	 * CS-5 needs: a reference field built far beyond what a solve would use.
+	 * raisable, which is what CS-5's acceptance needs: a reference field built
+	 * far beyond what a solve would use.
 	 *
 	 * **THIS CLASS IS MFEM-FREE AND THAT DECIDES ITS INTERFACE.** It lives
 	 * beside `meq::Coils` in the half of `src/meq` that CI can build, so it
@@ -105,7 +105,7 @@ namespace meq
 			/// The cross-section quadrature the RECTANGLES are integrated at;
 			/// filaments have no quadrature and are unaffected. Forwarded to
 			/// meq::CoilSet, whose default is what a solve uses -- raise it to
-			/// build the reference field §7.2 of the plan asks CS-5 for.
+			/// build the reference field CS-5's acceptance compares against.
 			void setQuadratureOrder( int order );
 			int quadratureOrder() const;
 
@@ -215,8 +215,9 @@ namespace meq
 			 * text round trip, which is `1e-16` relative at worst -- rather
 			 * than to enforce any distance. **Do not widen it into a clearance
 			 * rule**: nothing measured supports needing one, and a clearance is
-			 * a much stronger claim about the discretisation than this plan
-			 * makes.
+			 * a much stronger claim about the discretisation than the split
+			 * makes (CLAUDE_DECLINED.md, *A clearance rule, a perturbed node or
+			 * a finite part for a filament on a mesh point*).
 			 *
 			 * The distance is `hypot( R - radius, z - height )` in the
 			 * half-plane and the tolerance is relative to the filament's own
@@ -227,7 +228,7 @@ namespace meq
 			 * A coil's field is a quadrature over its cross-section and is
 			 * finite everywhere, inside it included, so a mesh point in a
 			 * rectangle is an ordinary point -- and refusing one would reject
-			 * the configuration this plan exists to make cheap.
+			 * the configuration the split exists to make cheap.
 			 */
 			bool coincides( double radius, double z,
 			                double tolerance = -1.0 ) const;

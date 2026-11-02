@@ -1307,11 +1307,14 @@ the best fit, with every other equation of the equilibrium satisfied, writes
 it, says so, and exits ``4`` rather than ``0`` — see
 :ref:`running-exit-codes`.
 
+.. _config-conductors:
+
 ``[conductors]``
 ----------------
 
 *How* the ``[[coils]]`` blocks enter the equation. One key decides it, and the
 default is what every file written before this table existed already means.
+:doc:`conductors` explains what each model does to the equation.
 
 .. list-table::
    :header-rows: 1

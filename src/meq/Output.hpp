@@ -436,8 +436,8 @@ namespace meq
 			 * CS-6 NEEDS AND field() CANNOT GIVE.
 			 *
 			 * `field()` writes on the ( Z, R ) lattice, which is the whole of
-			 * what this file held: a RASTERIZATION. `COIL-SUBTRACTION-PLAN.md`
-			 * §9 makes it carry a second representation beside it -- every
+			 * what this file held: a RASTERIZATION. CS-6 makes it carry a
+			 * second representation beside it -- every
 			 * `P_k` coefficient of the solved fields, and the conductor set
 			 * that says what a REMAINDER is a remainder from -- and neither is
 			 * grid shaped.

@@ -48,6 +48,9 @@ What MEQ does
 * **Takes profiles in normalised flux**, in which case the value of
   :math:`\psi` on the magnetic axis is itself an unknown of the nonlinear
   system rather than an input. See :doc:`normalised_flux`.
+* **Takes the coils out of the mesh** if asked, solving for the plasma's flux
+  beside the conductors' own field evaluated exactly, or carries them in the
+  mesh as finite conductors, which stays the default. See :doc:`conductors`.
 * **Includes toroidal rotation**, solving the generalised Grad–Shafranov
   equation for a rotating multi-species plasma. See :doc:`rotation`.
 * **Extracts the flux surfaces.** The magnetic axis and any X-point as roots of
@@ -115,6 +118,7 @@ solver strategy for a problem that is not converging, go to :doc:`nonlinear`.
    adaptivity
    flux_surfaces
    surface_geometry
+   conductors
 
 .. toctree::
    :maxdepth: 2

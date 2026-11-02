@@ -1023,7 +1023,7 @@ namespace meq
 			 *                       the level set psi = 0.
 			 *
 			 *                       IT IS THE PHYSICAL DATUM, NOT THE SOLVER'S.
-			 *                       Under COIL-SUBTRACTION-PLAN.md's split
+			 *                       Under the conductor split
 			 *                       GradShafranovSolver::setBoundaryData() is
 			 *                       given psi|_Gamma - psi_c|_Gamma, because the
 			 *                       solved field is the remainder; this one keeps
@@ -1090,7 +1090,7 @@ namespace meq
 			std::size_t bandFaceCount() const;
 
 			/**
-			 * `psi_c` for `COIL-SUBTRACTION-PLAN.md`'s split, or null.
+			 * `psi_c` for the conductor split, or null.
 			 *
 			 * **A FLUX SURFACE IS A LEVEL SET OF THE PHYSICAL FLUX AND THE
 			 * SOLVER ONLY HAS THE REMAINDER.** Under the split `potentialField`
@@ -1303,7 +1303,7 @@ namespace meq
 			double bandReach = 2.0;
 			int bandLineOrder = -1;
 
-			/// COIL-SUBTRACTION-PLAN.md's split; see setConductorField().
+			/// The conductor split; see setConductorField().
 			ConductorField const *conductors = nullptr;
 
 			/// conductorScale()'s cache. Negative means not yet taken, which is

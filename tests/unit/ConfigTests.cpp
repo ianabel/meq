@@ -3206,11 +3206,11 @@ BOOST_AUTO_TEST_CASE( the_batched_assembly_axes_are_separate_keys )
 
 // [conductors] Model -- THE KEY THAT TAKES THE COILS OUT OF THE MESH.
 //
-// COIL-SUBTRACTION-PLAN.md section 0a-pre is a standing constraint on the whole
-// campaign: the meshed finite coil never stops working, and the split is an
-// OPTION. That makes the DEFAULT the load-bearing assertion here -- a file
-// written before this table existed must still mean exactly what it meant --
-// and it is the one a reader would skip past.
+// A standing constraint on the whole conductor split: the meshed finite coil
+// never stops working, and the split is an OPTION. That makes the DEFAULT the
+// load-bearing assertion here -- a file written before this table existed must
+// still mean exactly what it meant -- and it is the one a reader would skip
+// past.
 //
 // THE THREE REFUSALS ARE EACH A KEY THAT WOULD OTHERWISE BE ACCEPTED AND
 // IGNORED, which CLAUDE.md records happening twice already in this parser:
@@ -3314,11 +3314,11 @@ BOOST_AUTO_TEST_CASE( the_conductor_model_decides_how_the_coils_enter )
  * THE FILAMENT STACK'S TWO KEYS -- [conductors] FilamentSize AND [[coils]]
  * FilamentsR / FilamentsZ.
  *
- * COIL-SUBTRACTION-PLAN.md section 13.5 and MEASUREMENTS.md M-166. One point at
- * a rectangle's centre is exact in the FAR field and a factor of 5.3 from the
- * rectangle at MAST-U's own plasma; these divide it. The DEFAULT is one per
- * block and stays so -- a stack converges to the RECTANGLE, which is away from
- * a point-filament reference, so this is a mode rather than an improvement.
+ * MEASUREMENTS.md M-166. One point at a rectangle's centre is exact in the FAR
+ * field and a factor of 5.3 from the rectangle at MAST-U's own plasma; these
+ * divide it. The DEFAULT is one per block and stays so -- a stack converges to
+ * the RECTANGLE, which is away from a point-filament reference, so this is a
+ * mode rather than an improvement.
  *
  * THE REFUSALS ARE THE CONTRACT, and both directions matter. Accepted-and-
  * ignored is the failure CLAUDE.md now records four times, and here it would be
@@ -3441,12 +3441,12 @@ BOOST_AUTO_TEST_CASE( the_filament_stack_keys_are_refused_off_the_filament_model
 
 // [mesh.generate] CoilSize AND A SUBTRACTING MODEL ARE MUTUALLY EXCLUSIVE.
 //
-// COIL-SUBTRACTION-PLAN.md section 13: the driver omits every `--coil` under a
-// subtracting model, which is the whole of how [conductors] reaches the
-// geometry, so a CoilSize beside it names an element size for a region the
-// generator is never told about. That is the accepted-and-ignored failure this
-// schema refuses everywhere -- and here it is the one a user would MOST easily
-// misread, the point of the split being that the mesh gets cheaper.
+// CS-M: the driver omits every `--coil` under a subtracting model, which is the
+// whole of how [conductors] reaches the geometry, so a CoilSize beside it names
+// an element size for a region the generator is never told about. That is the
+// accepted-and-ignored failure this schema refuses everywhere -- and here it is
+// the one a user would MOST easily misread, the point of the split being that
+// the mesh gets cheaper.
 BOOST_AUTO_TEST_CASE( coil_size_is_refused_beside_a_subtracting_conductor_model )
 {
 	std::string const base =
@@ -3541,10 +3541,9 @@ BOOST_AUTO_TEST_CASE( align_conductors_is_a_subtracting_models_key )
 
 // [initialguess] Content -- WHAT A STORED .gf HOLDS, WHICH THE FILE CANNOT SAY.
 //
-// COIL-SUBTRACTION-PLAN.md section 8.3. The default is load bearing for the
-// same reason [conductors] Model's is: every .gf written before this key
-// existed means "remainder" under a split and "psi" without one, and those are
-// the same file.
+// The default is load bearing for the same reason [conductors] Model's is:
+// every .gf written before this key existed means "remainder" under a split and
+// "psi" without one, and those are the same file.
 BOOST_AUTO_TEST_CASE( the_guess_content_says_which_field_a_stored_file_holds )
 {
 	std::string const base =
