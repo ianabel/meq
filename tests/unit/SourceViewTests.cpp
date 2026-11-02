@@ -277,7 +277,7 @@ BOOST_AUTO_TEST_CASE( theViewReproducesTheMirrorBoxOnAllThreeSides )
 	/*
 	 * meq::PlasmaSupportShape::Box -- `0 < Psi <= 1` and `|z| <= z_edge` -- is
 	 * CARRIED by the view rather than refused, so it is a second expression of
-	 * the support and this is what holds it to the first. MIRROR-PLAN.md MR-1.
+	 * the support and this is what holds it to the first. MR-1.
 	 *
 	 * Mirror orientation: psi_ax is the INNER label and the smaller flux, so
 	 * the span is negative. Each of the box's three sides is crossed, its two

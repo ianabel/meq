@@ -7937,7 +7937,7 @@ namespace
 
 		/*
 		 * **AND NOT ON A MIRROR'S BOX, AS A STATED BRANCH RATHER THAN A FLAG
-		 * THAT HAPPENS TO BE FALSE.** MIRROR-PLAN.md §3.
+		 * THAT HAPPENS TO BE FALSE.**
 		 *
 		 * The fill exists because `{ Psi > 0 }` is a level set and not a
 		 * plasma: it seeds at the magnetic axis and keeps the connected
@@ -13703,8 +13703,8 @@ namespace
 			 * would hand over. refreshPlasmaComponent() takes the seed only if
 			 * that element carries plasma and otherwise falls back to its own
 			 * ladder, so a point ON the Psi = 1 surface -- a mirror's inner
-			 * label -- costs the ladder and not a wrong fill. MIRROR-PLAN.md
-			 * MR-1 turns the fill off for mirrors as a stated branch; this is
+			 * label -- costs the ladder and not a wrong fill. MR-1
+			 * turns the fill off for mirrors as a stated branch; this is
 			 * not that.
 			 */
 			if ( axisIsPrescribed )
@@ -13902,7 +13902,7 @@ namespace
 
 		/*
 		 * THE MIDPLANE GAUGE'S KNOTS, BEFORE THE FIRST RESIDUAL READS THEM.
-		 * MIRROR-PLAN.md section 5. The runs along z = 0 are re-taken per
+		 * The runs along z = 0 are re-taken per
 		 * solve, since an adaptive cycle refines the mesh this solver holds by
 		 * reference.
 		 */

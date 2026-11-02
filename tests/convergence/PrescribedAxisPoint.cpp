@@ -18,7 +18,7 @@
 #include "convergence/ConvergenceHarness.hpp"
 
 /*
- * MIRROR-PLAN.md MR-2: AxisConstraint::PrescribedPoint, MEASURED ON A TOKAMAK.
+ * MR-2: AxisConstraint::PrescribedPoint, MEASURED ON A TOKAMAK.
  *
  * A mirror has no magnetic axis -- psi rises monotonically outward from R = 0 --
  * so neither NodalMaximum nor LocatedAxis has anything to constrain psi_ax to.

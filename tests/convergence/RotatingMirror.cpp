@@ -1,6 +1,6 @@
 /*
  * MR-4: THE FREE-BOUNDARY ROTATING MIRROR, THROUGH MEQ, AGAINST geq.
- * MIRROR-PLAN.md MR-4b, MR-4c and MR-4d; ANISOTROPY-PLAN.md AN-5.
+ * MR-4b, MR-4c and MR-4d; ANISOTROPY-PLAN.md AN-5.
  *
  * Everything at once: meq::NormalisedRotatingSource at two species, both labels
  * pinned at prescribed points on the midplane, the box support, geq's twenty
@@ -30,7 +30,7 @@
  * output and are gitignored; MR-4d reads them at run time and fails, naming the
  * command, when they are absent. No number of geq's is written in this file.
  *
- * THE SEQUENCE IS THE ONE THE SETTERS IMPOSE, MIRROR-PLAN.md MR-4b:
+ * THE SEQUENCE IS THE ONE THE SETTERS IMPOSE, MR-4b's:
  *
  *   1. the vacuum on its own solver -- one solver holds one source -- by the
  *      subtracted route, so its state is the remainder the plasma solve's
@@ -588,7 +588,7 @@ namespace
 	 * reproduced by the cubic exactly and reads d^2 at every d.
 	 *
 	 * So the power is fitted from four to sixteen knot spacings in, where F is
-	 * the profile's, and the knot-scale remainder is held to the plan's
+	 * the profile's, and the knot-scale remainder is held to an
 	 * amplitude bound instead: below 1e-06 of the peak within 1e-4 of each
 	 * label, which is MR-4a's own acceptance of geq's state.
 	 */
@@ -1056,7 +1056,7 @@ namespace
  * MR-5 -- the shipped example through the shipped binary, against the library.
  * `adaptive` judges the estimator on that example and `device` runs it on the
  * card; both need the binary, as `driver` does. `midplane` and `vacuum_gauge`
- * are the two crossing gauges, MIRROR-PLAN.md section 5. `anisotropic` is
+ * are the two crossing gauges. `anisotropic` is
  * ANISOTROPY-PLAN.md AN-5: MR-4d's matrix with AN-4's Delta in both codes.
  */
 BOOST_AUTO_TEST_SUITE( solve )
@@ -1108,8 +1108,7 @@ BOOST_AUTO_TEST_CASE( theSubtractedFilamentsAreTheRotatingCasesOwn )
  * MR-4b: THE SOLVE, AT k = 2 AND 3 ON THE FIRST TWO MESHES, AND WHAT IT IS
  * ASKED.
  *
- *   CONVERGED FROM THE VACUUM, with a negative span -- MIRROR-PLAN.md's first
- *   unknown.
+ *   CONVERGED FROM THE VACUUM, with a negative span.
  *
  *   QUADRATICALLY, by quadraticTail(); see it for why not the best triple.
  *
@@ -1117,8 +1116,8 @@ BOOST_AUTO_TEST_CASE( theSubtractedFilamentsAreTheRotatingCasesOwn )
  *   setBoundaryFluxInitial() left out the boundary row starts large and the
  *   first span is positive, putting the box around the axis; the bordered
  *   Newton recovers -- the boundary row is linear in the state, so the first
- *   step pins psi_bnd -- in more steps. So the plan's MANDATORY is a cost here
- *   and not a failure, and this is the assertion that sees it dropped.
+ *   step pins psi_bnd -- in more steps. So leaving the seed out is a cost
+ *   here and not a failure, and this is the assertion that sees it dropped.
  *
  *   F VANISHES AT EACH LABEL AT THE PROFILES' OWN POWER: |F|/R on the midplane
  *   at Psi = 1 - d and Psi = d falls as d^2 at the inner label and d^3 at the
@@ -1165,7 +1164,7 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 			Measured const m = measure( *run );
 			printMeasured( m, *run );
 			std::vector<double> const &history = run->solver->newtonResiduals();
-			std::printf( "    best-triple order %.3f, the plan's measure, which a "
+			std::printf( "    best-triple order %.3f, MR-4b's measure, which a "
 			             "history this short cannot carry\n",
 			             meq::tests::bestNewtonOrder( history ) );
 			std::fflush( stdout );
@@ -1220,7 +1219,7 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 				<< " where the profiles' Psi^3 slope puts it at d^3" );
 			BOOST_TEST( m.nearLabels < 1.0e-6,
 				"|F|/R reaches " << m.nearLabels << " of its peak within 1e-4 of a "
-				"label, where the plan's bound -- MR-4a's on geq's own state -- is "
+				"label, where MR-4a's bound on geq's own state is "
 				"1e-06" );
 
 			BOOST_TEST( m.axis.reachesAxis );
@@ -1238,7 +1237,7 @@ BOOST_AUTO_TEST_CASE( theRotatingMirrorConvergesFromTheVacuum )
 /*
  * THE COLD-REFERENCE TARGET IS NOT LOOSE AGAINST THE PLASMA'S OWN FLUX.
  *
- * MIRROR-PLAN.md's third unknown: the stopping target is scaled from the cold
+ * The stopping target is scaled from the cold
  * residual, which the 5.9 MA packs would dominate, while the plasma moves
  * psi_bnd by about 1e-03 of the label span's 6e-02. Under the split the coils
  * are not in the residual at all, and the quadratic tail lands at round-off
@@ -3392,7 +3391,7 @@ BOOST_AUTO_TEST_SUITE_END()
 #endif
 
 /*
- * THE MIDPLANE GAUGE ON THE MIRROR. MIRROR-PLAN.md section 5.
+ * THE MIDPLANE GAUGE ON THE MIRROR.
  *
  * meq::RotatingSource::Gauge::Midplane pins phi_0 where each flux surface
  * crosses z = 0, R_0( psi ), which the solver re-tabulates once per Newton
@@ -4038,7 +4037,7 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixSolveInTheMidplaneGauge )
 BOOST_AUTO_TEST_SUITE_END()
 
 /*
- * THE VACUUM-MIDPLANE GAUGE ON THE MIRROR. MIRROR-PLAN.md section 5,
+ * THE VACUUM-MIDPLANE GAUGE ON THE MIRROR.
  * [M-281](MEASUREMENTS.md#m-281).
  *
  * meq::RotatingSource::Gauge::FixedCurve pins phi_0 on a curve R_g( Psi ) that
@@ -4573,7 +4572,7 @@ BOOST_AUTO_TEST_SUITE_END()
 
 /*
  * THE MIDPLANE GAUGE WITH ITS CROSSINGS AS BORDER UNKNOWNS.
- * MIRROR-PLAN.md section 5; [M-283](MEASUREMENTS.md#m-283).
+ * [M-283](MEASUREMENTS.md#m-283).
  *
  * GradShafranovSolver::setMidplaneGaugeKnots() makes R_0 at K knots in Psi
  * unknowns of the bordered Newton, the source's table the C^2 spline of
@@ -5082,7 +5081,7 @@ BOOST_AUTO_TEST_CASE( theBorderedGaugeRefusesWhatItCannotCarry )
 BOOST_AUTO_TEST_SUITE_END()
 
 /*
- * THE MIDPLANE GAUGE'S START, AND THE OUTER LOOP. MIRROR-PLAN.md section 5;
+ * THE MIDPLANE GAUGE'S START, AND THE OUTER LOOP.
  * [M-284](MEASUREMENTS.md#m-284) and
  * [M-285](MEASUREMENTS.md#m-285).
  *

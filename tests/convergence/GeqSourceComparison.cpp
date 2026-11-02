@@ -217,8 +217,8 @@ namespace
  *
  * THE TWO CASES SIT AT DIFFERENT MACH NUMBERS AND THAT IS FORCED, NOT CHOSEN.
  * With M^2 = m_i omega^2 R( z=0 )^2/T_e on the psi_n = 0.5 surface -- the number
- * a mirror is specified by -- `two` is at M = 6.0, which is the operating point
- * MIRROR-PLAN.md's exterior assumption needs, and `three` is at M = 0.76.
+ * a mirror is specified by -- `two` is at M = 6.0, a mirror's operating point, and
+ * `three` is at M = 0.76.
  * `meta.txt` records it per case.
  *
  * CARBON IS WHY, AND IT IS A PROPERTY OF MEQ'S GAUGE RATHER THAN OF THE
@@ -228,9 +228,10 @@ namespace
  * exponent linear in the species MASS. At M = 6 that is +31.2 to -51.8 for
  * deuterium and +187.2 to -310.5 for CARBON, a dynamic range of 1e216 in a
  * quantity stored as a double. The transfer's root find loses its bracket and
- * the three-species case cannot be posed at M = 6 at all. MIRROR-PLAN.md item 6
- * carries it, because a mirror is a high-Mach multi-species device and this is
- * MEQ's own interface rather than an artefact of the comparison.
+ * the three-species case cannot be posed at M = 6 at all. A mirror is a
+ * high-Mach multi-species device and this is MEQ's own interface rather than an
+ * artefact of the comparison, which is why a mirror can take the midplane gauge
+ * (docs/rotation.rst, The midplane gauge).
  *
  * WHY THERE ARE TWO REFERENCES PER CASE, WHICH IS THE MEASUREMENT THIS FILE WAS
  * WRITTEN AROUND. Against geq's state exactly as it ships, MEQ agrees to
@@ -363,9 +364,9 @@ BOOST_AUTO_TEST_CASE( meqsRotatingSourceReproducesGeqsCurrentDensity )
  *
  * POINTED AT THE FIXED-RADIUS GAUGE BY NAME, which is where the trap lives:
  * Gauge::FixedRadius is the default and this is the gauge every table here is
- * transferred to. MIRROR-PLAN.md section 5 expected the midplane gauge to make
- * geq's N_s and MEQ's n_s0 nearly one quantity, and so this assertion weak; it
- * does not. geq's N_s are its ZERO-POTENTIAL densities, and the midplane
+ * transferred to. The midplane gauge might be expected to make geq's N_s
+ * and MEQ's n_s0 nearly one quantity, and so this assertion weak; it does
+ * not. geq's N_s are its ZERO-POTENTIAL densities, and the midplane
  * gauge's are the densities where each surface crosses z = 0, which differ by
  * exp( m_s omega^2 R_0^2/2T_s - Z_s e phi_0/T_s ) -- 2.37 in the log on MR-4's
  * state, export_rotating.py's solution.txt. So the same refusal stands under

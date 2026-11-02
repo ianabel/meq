@@ -196,7 +196,7 @@ namespace meq
 	 *
 	 * **A TOKAMAK NEEDS ONE BOUND AND A MIRROR NEEDS THREE**, and that is the
 	 * whole reason this is an enumeration rather than an extra test applied to
-	 * everyone. `MIRROR-PLAN.md` §2.
+	 * everyone.
 	 *
 	 *   - In a tokamak `psi_ax` is the EXTREMUM of `psi`, so `Psi <= 1` holds
 	 *     everywhere by construction and the support is `Psi > 0` alone. It
@@ -235,7 +235,7 @@ namespace meq
 	 * the remainder plus any subtracted conductor field.
 	 *
 	 * What a source in meq::RotatingSource::Gauge::Midplane reads to find each
-	 * flux surface's midplane crossing. MIRROR-PLAN.md section 5.
+	 * flux surface's midplane crossing.
 	 *
 	 * **`dpsi/dR` IS READ OFF THE SOLVED `q`, NOT DIFFERENCED**, as
 	 * `R q_R( R, 0 )` since `grad_bar( psi ) = R q`: `q` is an unknown at the
@@ -752,7 +752,7 @@ namespace meq
 			 * first residual and never again -- not per iteration, not per
 			 * adaptive cycle -- so the curve the profiles are stated on is
 			 * fixed for the run. False here and once the curve is in.
-			 * MIRROR-PLAN.md section 5, [M-281](MEASUREMENTS.md#m-281).
+			 * [M-281](MEASUREMENTS.md#m-281).
 			 */
 			virtual bool readsVacuumMidplane() const
 			{

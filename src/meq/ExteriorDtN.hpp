@@ -314,7 +314,7 @@ namespace meq
 	/**
 	 * **THE SOURCE A CONFIGURATION WOULD PUT OUTSIDE `Gamma`**: the integral of
 	 * `| F |/R` over the part of the exterior's support that is connected to
-	 * `Gamma`. MIRROR-PLAN.md MR-0's diagnostic, and the numerator of
+	 * `Gamma`. MR-0's diagnostic, and the numerator of
 	 * GradShafranovSolver::checkExteriorSource().
 	 *
 	 * WHY IT IS NEEDED. Every mode of ExteriorDtN is current-free, so the DtN

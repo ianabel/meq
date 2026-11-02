@@ -2,7 +2,7 @@
 #
 #     meq-run ../../source/examples/mirror-rotating.toml
 #
-# WHAT IT POSES.  The rotating mirror of MIRROR-PLAN.md MR-4: geq's machine --
+# WHAT IT POSES.  The rotating mirror of docs/rotation.rst: geq's machine --
 # two coil packs at z = -1.5 and +1.5, each carried as ten point filaments --
 # with a two-species plasma (electrons and deuterons) in rigid rotation, solved
 # free boundary inside a semicircle Gamma of radius 3.0 that clears the copper.

@@ -456,8 +456,7 @@ def main(argv=None):
     )
 
     # M^2 = m_i omega^2 R( z=0 )^2/T_e on the psi_n = 0.5 surface -- the number a
-    # mirror is specified by, and the one that decides whether the exterior
-    # assumption of MIRROR-PLAN.md holds. Reported and recorded, because the
+    # mirror is specified by. Reported and recorded, because the
     # gauge transfer's conditioning is a steep function of it.
     Z0mid = np.argmin(abs(eq.Z[0, :]))
     psin_mid = (eq.psi()[:, Z0mid] - psi_ax)/span

@@ -103,9 +103,9 @@ it per case. The gauge transfer carries
 at `M = 6` that is +31.2 to −51.8 for deuterium and **+187.2 to −310.5 for
 carbon**, a dynamic range of 1e216 against a double's `exp( 709.8 )` ceiling. The
 three-species transfer loses its root-find bracket and **cannot be posed at
-`M = 6`**. That is MEQ's own interface rather than anything about the comparison
-— `MIRROR-PLAN.md` item 6 — and `R_ref` is already at its range-minimising value,
-so it is not a tuning failure.
+`M = 6`**. That is MEQ's own interface rather than anything about the comparison,
+and `R_ref` is already at its range-minimising value, so it is not a tuning
+failure; the midplane gauge (`docs/rotation.rst`) is MEQ's answer.
 
 Per case: `meta.txt` (species constants, `R_ref`, `mu0`, the flux range),
 `omega.dat`, `T_<name>.dat`, `n_<name>.dat` in MEQ's own three-column
@@ -192,7 +192,7 @@ is taken without touching what is committed.
 
 ## The vacuum mirror: `export_vacuum.py` and `reference/vacuum/`
 
-`MIRROR-PLAN.md`'s MR-3 compares MEQ's **solve** with geq's field, which is the
+MR-3 compares MEQ's **solve** with geq's field, which is the
 other half of what this directory does: no plasma, geq's two packs, MEQ's
 half-disc with the exterior coupling live. `tests/convergence/VacuumMirror.cpp`
 is the acceptance and is a registered ctest.
@@ -233,13 +233,13 @@ subtraction — at which point the floor is gone. → **[M-260](../../MEASUREMEN
 
 ## The rotating mirror: `export_rotating.py` and `reference/rotating/`
 
-`MIRROR-PLAN.md`'s MR-4 compares MEQ's free-boundary rotating mirror with
+MR-4 compares MEQ's free-boundary rotating mirror with
 geq's, **in the mode geq solves in**: Picard, the twenty filaments FIXED, both
 labels read every step at `( 0.10, 0 )` and `( 0.35, 0 )`, no current
 constraint. Unlike `reference/two/` this is a solve, not a prescribed state.
 MR-4b and MR-4d's ctests read it.
 
-**IT IS NOT SHIPPED geq**, for the three facts `MIRROR-PLAN.md` records, and
+**IT IS NOT SHIPPED geq**, for three reasons, and
 the script changes nothing in geq or freegs4e — every change is a
 monkeypatch from the script:
 
@@ -261,13 +261,13 @@ monkeypatch from the script:
 **THE SHAPE IS SET BY THE EDGE ORDER, AND IT IS ASYMMETRIC ON PURPOSE.** What
 an edge costs MEQ is its order `j`, `p′ ~ d^j` at distance `d` inside a label:
 `CLAUDE_FB.md`, *The plasma edge caps the order*, has `ψ*` keep `k + 2` only for
-`k ≤ j`. The plan's first choice, `16 ψ_n²( 1 − ψ_n )²`, is `j = 1` and would cap
+`k ≤ j`. The obvious choice, `16 ψ_n²( 1 − ψ_n )²`, is `j = 1` and would cap
 MR-4c's rates from `k = 2`. This shape is `j = 2` at the inner label and `j = 3`
 at the outer, and `J_φ` on the converged state falls as `d^2.000` and `d^3.000`
 there. The asymmetry is the second reason for it: every table differs from its
 own reflection by 35–54% of its peak, so a reader that took them in `ψ_n`
-rather than `Ψ` gets different numbers, and the sense of the abscissa —
-`MIRROR-PLAN.md`'s item 4 — is something this reference can catch.
+rather than `Ψ` gets different numbers, and the sense of the abscissa,
+`Ψ = 1 − ψ_n`, is something this reference can catch.
 `--shape quartic` and `--shape sextic` (`64 ψ_n³( 1 − ψ_n )³`, `j = 2` both sides)
 remain as options; both are symmetric and neither is the reference.
 
@@ -330,8 +330,8 @@ first.
 
 **AND THE SAME PLASMA IN MEQ'S MIDPLANE GAUGE**, `nmid_<name>.dat`, written
 beside geq's answer and not tracked: the density where each surface crosses
-`z = 0`, which `[source] Gauge = "midplane"` takes (`MIRROR-PLAN.md` §5). It is
-**not** the near-identity §5 expected. geq's `N_s` here are held as its
+`z = 0`, which `[source] Gauge = "midplane"` takes. It is
+**not** the near-identity one might expect. geq's `N_s` here are held as its
 ZERO-POTENTIAL densities, so the midplane tables are geq's quasineutrality solved
 at each surface's own crossing `R_0( ψ )`, with the slope carried along the
 crossing, and `R_0` is read off geq's solved 513² state — max `|ln( n_mid/N_s )|`

@@ -1,5 +1,5 @@
 /*
- * A MIRROR'S PLASMA SUPPORT, ON THE SOLVER'S SIDE -- MIRROR-PLAN.md MR-1.
+ * A MIRROR'S PLASMA SUPPORT, ON THE SOLVER'S SIDE -- MR-1.
  *
  * meq::PlasmaSupportShape::Box makes the support `0 < Psi <= 1` and
  * `|z| <= z_edge`, and RotatingSourceTests asserts that the source vanishes on
@@ -9,9 +9,9 @@
  *   XP-1's ELEMENT FILL IS OFF ON THIS PATH, AS A STATED BRANCH. The fill seeds
  *   at the magnetic axis and keeps the connected component around it; a mirror
  *   has no axis, and its annulus is connected through the tube to the ends of
- *   the machine. MIRROR-PLAN.md §3 takes the decision that the box makes the
- *   fill unnecessary -- and CLAUDE_FB.md records this fill once being silently
- *   off as a real defect, found only by a 2 x 2 cross, so "off" has to be
+ *   the machine. The box makes the fill unnecessary (CLAUDE_DECLINED.md,
+ *   XP-1's element flood fill on the mirror path) -- and CLAUDE_FB.md
+ *   records this fill once being silently off as a real defect, found only by a 2 x 2 cross, so "off" has to be
  *   asserted against a control in which it is ON on the same field.
  *
  *   THE CUTOFF IS REPORTED. `z_edge` is prescribed, so a configuration whose

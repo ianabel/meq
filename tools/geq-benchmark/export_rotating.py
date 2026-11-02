@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""EXPORT geq'S FREE-BOUNDARY ROTATING MIRROR, FOR MIRROR-PLAN.md MR-4.
+"""EXPORT geq'S FREE-BOUNDARY ROTATING MIRROR, FOR MEQ'S MR-4.
 
 A SOLVED reference, unlike export_mirror.py's prescribed state: geq's Picard
 iteration on its two-pack mirror machine (coils fixed, 2 x 10 filaments, labels
@@ -7,7 +7,7 @@ read at ( 0.10, 0 ) and ( 0.35, 0 ) every step), with electrons and deuterons,
 rigid rotation omega( psi_n ) and the quasineutrality potential phi_0. MEQ's
 MR-4b and MR-4d ctests read what this writes.
 
-IT IS NOT SHIPPED geq, FOR THREE REASONS MIRROR-PLAN.md, MR-4 MEASURES:
+IT IS NOT SHIPPED geq, FOR THREE REASONS MR-4 MEASURED:
 
   1. SHIPPED geq IS BIASED BY ABOUT 1% OF THE PLASMA FLUX, and its own
      self-convergence cannot see it: freegs4e/boundary.py's von Hagenow offset
@@ -54,7 +54,7 @@ About eleven minutes on this machine, most of it the 513^2 direct solve.
 `--cache DIR` keeps each solve as an .npz and reuses it on a re-run.
 
 AND THE MIDPLANE GAUGE'S TABLES, nmid_<name>.dat: the same densities where each
-surface crosses z = 0, MEQ's Gauge::Midplane (MIRROR-PLAN.md section 5). geq's
+surface crosses z = 0, MEQ's Gauge::Midplane (docs/rotation.rst). geq's
 N_s are its zero-potential densities, so the transfer needs the crossings of
 geq's solved state -- the finest direct one -- and these tables are an OUTPUT,
 written beside geq's answer rather than with the tracked problem.
@@ -162,7 +162,7 @@ def omega_peak_for(mach):
 #              label, j = 3 at the outer, peak at x = 3/7. THE REFERENCE.
 #              Deliberately asymmetric, so that tables read in psi_n instead of
 #              Psi give different numbers -- the sense of the abscissa is tested.
-#   "quartic"  16 x^2 ( 1 - x )^2, MIRROR-PLAN.md's first choice: j = 1, which
+#   "quartic"  16 x^2 ( 1 - x )^2, the obvious choice: j = 1, which
 #              would cap MR-4c's rates at k >= 2, and symmetric about 1/2.
 #   "sextic"   64 x^3 ( 1 - x )^3: j = 2 at both, symmetric.
 SKEW_C = 1.0 / ((3.0 / 7.0) ** 3 * (4.0 / 7.0) ** 4)
@@ -574,7 +574,7 @@ def midplane_crossings(eq, pa, pb, psi_n):
     """R_0( psi_n ), where each surface of geq's solved state crosses z = 0, by
     a root find on psiRZ along the midplane, and dR_0/dpsi_n = 1/( dpsi_n/dR )
     there, with dpsi/dR = R B_z read off geq's own field rather than
-    differenced. MIRROR-PLAN.md section 5's crossing, on geq's state."""
+    differenced. MEQ's midplane crossing, on geq's state."""
     span = pb - pa
     lo, hi = R_INNER - 0.02, R_OUTER + 0.02
     r0 = np.empty_like(psi_n)
@@ -590,8 +590,8 @@ def transfer_to_midplane(psi_n, omega_peak, r0, dr0):
     their slope d/dpsi_n along the crossing.
 
     geq's N_s are its ZERO-POTENTIAL densities, held as prescribed flux
-    functions, so this is NOT the near-identity MIRROR-PLAN.md section 5
-    expected: it is geq's quasineutrality solved at each surface's own crossing,
+    functions, so this is NOT the near-identity one might
+    expect: it is geq's quasineutrality solved at each surface's own crossing,
     transfer_to_reference_radius() point by point with R_ref = R_0, plus the
     crossing's own motion,
 
@@ -913,7 +913,7 @@ def main(argv=None):
     end_slopes = {s: (float(v[2][0]), float(v[2][-1])) for s, v in tk.items()}
 
     # --- the midplane gauge's tables, on geq's finest crossings -------------
-    # MIRROR-PLAN.md section 5: n_s0 is the density where each surface crosses
+    # Under the midplane gauge n_s0 is the density where each surface crosses
     # z = 0. On geq's held N_s that needs geq's solved R_0( psi ), so these are
     # made from geq's answer and go beside it, untracked.
     mk, merr = midplane_tables(eqf, pa, pb, omega_peak, knots)

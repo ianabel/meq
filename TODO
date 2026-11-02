@@ -1454,7 +1454,7 @@ Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342).
 
 ================================================================================
 A shipped MAST-U filament case
-Raised 2026-11-01, when COIL-SUBTRACTION-PLAN.md was retired.
+Raised 2026-11-01, when the coil-subtraction plan was retired.
 ================================================================================
 
   WHAT IS ESTABLISHED. `[conductors] Model = "filament"` is built, reachable
@@ -1485,7 +1485,7 @@ Raised 2026-11-01, when COIL-SUBTRACTION-PLAN.md was retired.
 
 ================================================================================
 The output regenerates its input: the resolved configuration and the profile tables
-Raised 2026-11-01, when COIL-SUBTRACTION-PLAN.md was retired.
+Raised 2026-11-01, when the coil-subtraction plan was retired.
 ================================================================================
 
   WHAT IS ESTABLISHED. The `.nc` carries its mesh (M-297), every coefficient
@@ -1515,3 +1515,130 @@ Raised 2026-11-01, when COIL-SUBTRACTION-PLAN.md was retired.
   write back a runnable configuration and its tables from the file alone,
   with a DriverAcceptance case running the regenerated input and requiring
   the same answer.
+
+================================================================================
+The free-boundary mirror: what is still open
+Raised 2026-11-01, when the mirror plan was retired.
+================================================================================
+
+  MR-0 to MR-5 and both midplane gauges are done (CLAUDE_FLOW.md, "The
+  free-boundary mirror: MR-0 to MR-5"; docs/rotation.rst, "A magnetic
+  mirror"). Each item below says what is measured and what would close it.
+
+  1. A SECOND DISCRETE ROOT, FROM A FAR START.  Under the mirror's
+     stabilisation the plain bordered Newton started at psi_inner = 0.15
+     converges in 27 steps to psi_inner 4.575e-03, psi_bnd 4.980e-02, where
+     the shipped answer is 5.547e-03 and 6.530e-02, and the driver would exit
+     0 (M-294).  psi_inner starts at the electrode's flux, 5.64e-03 cold, so
+     a file can pose that start only through a far [initialguess].  Untried:
+     whether it is M-277's root from 0.2 (a spike in one element of the box),
+     and whether it survives refinement.  Closes: the root followed under
+     refinement, and either gone or met by a failing test naming a check
+     that tells it from the physical answer.
+
+  2. THE BORDERED TARGET IS RELATIVE TO THE COLD RESIDUAL, so a bad enough
+     start is accepted loose: from psi_inner = 0.5 a first residual of
+     1.11e+12 accepts 9.11e-05, and the run exits 0 with an answer 5.3e-02 of
+     max |psi_h| from the problem's (M-277).  It bites any first attempt, not
+     only the retry rung's; on a mirror only a far [initialguess] poses such
+     a start.  Closes: a stop a far start cannot loosen, asserted from that
+     start.
+
+  3. BOTH MIDPLANE GAUGES ARE UNTRIED UNDER ADAPTIVITY.  The parse accepts
+     them beside [adaptivity]; RotatingMirrorAdaptive (M-279) judges only the
+     fixed-radius gauge.  Under the midplane gauge the knots start on the
+     warm start's crossings each cycle; the vacuum's curve is installed once
+     and never refreshed.  Closes: an adaptive run in each gauge judged as
+     M-279 judges the fixed radius -- the index inside AdaptiveRefinement's
+     band, eta and the error both falling every cycle.
+
+  4. THE DEVICE ON THE MIRROR IS MEASURED IN DOUBLE ONLY.  Under --device
+     cuda both gauges reproduce the host on the three-species example: the
+     same Newton count and psi_inner, every .nc field within 6.3e-12 of its
+     largest value (M-318), and RotatingMirrorDevice holds the shipped
+     two-species file (M-280).  Not run: device against host in single, and
+     DeviceParity's MEQ_AXIS_DEVICE=force arm on a mirror.  The knots' rows
+     have no device twin, so under a Device their dot products take the host
+     route.  Closes: both runs, and a twin for the rows if a profile shows
+     them on the device path's critical leg.
+
+  5. A MESHED-PACK MIRROR THROUGH THE DRIVER IN SINGLE.  In single the floor
+     rises with tau's size, and a meshed-coil mirror's floor, 1.4e-06 to
+     2.8e-06, sits above the solver's ten-eps absolute target under the
+     mirror's default; VacuumMirror's fixture asks 64 eps by hand (M-294).
+     The shipped files subtract their filaments and converge in two steps,
+     so a meshed-pack mirror through the driver in a single build is
+     unmeasured.  Closes: that run; the gate itself is item 3 of "Left open
+     by the single-precision round", above.
+
+  6. q_h ON THE ROTATING MIRROR IS REFERENCE-LIMITED.  RotatingMirror-
+     Resolution's q_h against the level-2 k = 4 reference reads 3.563 and
+     3.428 at k = 3; level 2 reads the reference, so only the first pair is
+     asserted (M-294 section 2).  Only VacuumMirror checks q_h where the mesh
+     touches the axis (the R_f mutation, M-292).  Closes: a finer reference,
+     so the last pair is asserted, and the same axis check on the rotating
+     mirror.
+
+  7. psi* GAINS NOTHING OVER psi_h ON THE VACUUM MIRROR.  VacuumMirror's psi*
+     rates are psi_h's, k + 1, not the k + 2 a post-processing promises, and
+     are asserted at k + 1 - 0.30 on the finest pair only (M-292, M-294
+     section 2).  Measured and not explained.  Closes: the cause found --
+     the packs' meshed corners, the axis, or the reconstruction -- and the
+     rate it allows asserted.
+
+  8. THE TWO GAUGES' FOLDS.  On the vacuum's curve the posed problem folds,
+     mesh converged, near 4.16e19; under the midplane gauge every fold
+     measured is tau's, linear in tau_0, and there is no posed-problem fold
+     below 6.4e20 (M-291, M-293).  Why the gauges differ -- the vacuum's
+     curve multiplying the density at the solved crossing by
+     exp( m omega^2 ( R_vac^2 - R_0^2 )/2T ), a feedback the midplane gauge
+     does not have -- is a reading, not a measurement (M-291 section 3).
+     Closes: the midplane gauge continued past 6.4e20 at a larger tau_0 to
+     find its own fold, if any, and an experiment that isolates the
+     feedback.
+
+  9. 32 KNOTS FOR EVERY MESH.  At level 2 the knots' error is 170x under the
+     discretisation error, but between knots they move the .nc's
+     true-midplane densities off the input tables by up to 7e-05 (carbon),
+     and re-posing them agrees to 1.2e-06 of psi* (M-283 section 5, M-284
+     section 4).  Meshes finer than level 2 are not checked against them.
+     Closes: the knot count swept on finer meshes, and a count tied to the
+     mesh if the interpolant's error overtakes the discretisation's.
+
+  10. SELF-CONVERGENCE ON THE VACUUM'S CURVE AT 5e18 IS SLOWER than M-278's
+     midplane run: psi* max 7.4e-07 then 5.2e-08, against 5.7e-07 then
+     1.1e-08 (M-281 section 4).  The cause is not looked at.  Closes: the
+     cause found, or the two shown to converge to their own answers at one
+     rate.
+
+  11. THE VACUUM-MIDPLANE GAUGE'S LABEL REFUSAL HAS NO END-TO-END TEST.  The
+     driver's exit 1 on a profile set above meq::labelTolerance (1e-6 of the
+     peak) at a label is asserted only at library level, and the tolerance's
+     cost in order at the label is argued, not measured; Newton is
+     unaffected up to 1e-3 (M-281).  Closes: a driver case exiting 1 on such
+     a set, and the order measured against F at a label from 1e-6 to 1e-3.
+
+  12. THE AXIAL CUTOFF IS REPORTED AND NOTHING WARNS ON IT.
+     checkAxialCutoff() prints the current density on |z| = AxialEdge beside
+     the peak and writes axial_cutoff_relative, but no threshold is measured
+     (M-258), where the exterior check's 1e-4 is derived (M-310).  Closes: the
+     error a cutoff through current costs measured against that ratio, and a
+     warning set from it.
+
+  13. THE ESTIMATOR'S UNIFORM EFFECTIVITY IS NOT ASSERTED.  On the uniform
+     ladder at k = 2 it reads 7.7, 11.7 and 14.3 over levels 0 to 2, still
+     rising, pre-asymptotic (M-279).  Closes: the ladder taken until it
+     settles inside AdaptiveRefinement's band, then asserted.
+
+  14. A CURVED BOUNDARY WITH SUBTRACTED CONDUCTORS AND NO [boundary.exterior]
+     takes eta_5 against transferredDatum() with g = 0.  That matches what
+     the solve imposes; whether the combination poses the intended problem is
+     unexamined (M-279's repair of eta_5).  Closes: a case posing it against
+     a known answer.
+
+  15. A PRESCRIBED PLASMA CURRENT BESIDE THE KNOTS IS REFUSED, since its
+     corner against them is not assembled (M-283).  The driver refuses a
+     current beside the box, so no run loses it, and a mirror needs no
+     current border (CLAUDE_DECLINED.md, "A plasma-current border for the
+     mirror").  Closes: the corner assembled, if a mirror ever wants a
+     current.

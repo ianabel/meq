@@ -3970,7 +3970,7 @@ BOOST_AUTO_TEST_CASE( the_seven_machines_wired_as_circuits_carry_the_same_curren
 
 // ---------------------------------------------------------------------------
 // A mirror from a file: [boundary.electrode], SupportShape, AxialEdge, AlignPlasma.
-// MIRROR-PLAN.md MR-5.
+// MR-5.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -4450,7 +4450,7 @@ BOOST_AUTO_TEST_CASE( the_box_refuses_what_it_has_no_state_for )
 }
 
 /// `[source] Gauge`: THE MIDPLANE GAUGE IS A MIRROR'S, AND EVERYWHERE ELSE IT IS
-/// REFUSED BY NAME. MIRROR-PLAN.md section 5. It parses on the boxed rotating
+/// REFUSED BY NAME. It parses on the boxed rotating
 /// source and carries no radius; it is refused beside a ReferenceRadius it
 /// would not read, without Normalised (no bordered Newton to re-tabulate it),
 /// on a one-sided support (a tokamak's, whose midplane crosses every surface
@@ -4519,8 +4519,8 @@ BOOST_AUTO_TEST_CASE( the_midplane_gauge_is_a_mirrors_and_refused_elsewhere )
 }
 
 /// `[source] Gauge = "vacuum-midplane"`: THE MIDPLANE GAUGE'S REFUSALS, AND ONE
-/// OF ITS OWN -- IT NEEDS THE VACUUM KNOWN BEFORE THE SOLVE. MIRROR-PLAN.md
-/// section 5. It parses on the shipped three-species mirror with the one line
+/// OF ITS OWN -- IT NEEDS THE VACUUM KNOWN BEFORE THE SOLVE.
+/// It parses on the shipped three-species mirror with the one line
 /// changed, and carries no radius. Refused beside a ReferenceRadius, without
 /// Normalised, without the box -- the midplane gauge's three -- and, its own,
 /// without the conductors subtracted (the vacuum is then a solve of its own)

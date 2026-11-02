@@ -1892,7 +1892,7 @@ namespace meq
 					// meshed coils make the vacuum a solve of its own, and a
 					// curve read off anything else -- the starting guess, a
 					// previous answer -- would make what each Density means
-					// depend on it. MIRROR-PLAN.md section 5.
+					// depend on it. docs/rotation.rst, The vacuum-midplane gauge.
 					if ( vacuum && !conductorOptions.subtracts() )
 						source.fail( "Gauge", "\"vacuum-midplane\" states each Density where the VACUUM's flux surface crosses z = 0, and reads the vacuum as the conductors' own field, which is known before the solve only when they are subtracted; set [conductors] Model = \"filament\" or \"subtracted\", or use Gauge = \"midplane\"" );
 

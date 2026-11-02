@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""EXPORT geq'S VACUUM MIRROR FIELD, FOR MIRROR-PLAN.md MR-3.
+"""EXPORT geq'S VACUUM MIRROR FIELD, FOR MEQ'S MR-3.
 
 No plasma. The field of geq's two-pack mirror machine on geq's own grid, exactly
 as geq poses it -- `make_mirror_machine_from_field( field=4.0, L=1.0,
