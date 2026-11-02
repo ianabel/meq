@@ -21,6 +21,8 @@
 #include <optional>
 #include <string>
 
+#include "Profiles.hpp"
+
 namespace meq
 {
 	/// The exit codes docs/running.rst gives the user. apps/meq.cpp's header
@@ -59,6 +61,11 @@ namespace meq
 		/// against, as a file's own directory does. Empty leaves them as
 		/// given, relative to the working directory.
 		std::string baseDirectory;
+
+		/// Profiles as tables in place of the files the configuration names,
+		/// by slot: meq::makeSource()'s `tables`. The .nc lists them as
+		/// `profile_tables`.
+		ProfileTables profiles;
 
 
 		/// MEQ_VERSION of the front end's build, which the files written carry.

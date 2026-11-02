@@ -9,6 +9,13 @@ is `meq examples/soloviev-nstx.toml`, a phase at a time, and writes the same
 files. `meq.Equilibrium.from_dict(tables, base_dir=...)` takes the TOML's
 tables as a dict instead of a file.
 
+Profiles can be handed in as arrays in place of the files a rotating
+source's configuration names: `profiles={"species.deuterium.Temperature":
+meq.Table(x, T, dT_dx, abscissa="psi_n"), ...}`. The abscissa is always
+named -- "Psi" (MEQ's own normalised flux, 1 at the axis), "psi_n" (1 - Psi)
+or "sqrt_psi_n" -- and the derivative is always given. The .nc lists them as
+`profile_tables`.
+
 A configuration with [mesh.generate] needs its mesh made first, by `meq-run`
 or by the command `meq --mesh-command` prints, and then `mesh_ready=True`, as
 `meq --mesh-ready` does.
@@ -96,6 +103,7 @@ from ._meq import (
     Error,
     OutputError,
     SolveError,
+    Table,
     __version__,
     build_info,
 )
@@ -106,6 +114,7 @@ __all__ = [
     "Error",
     "OutputError",
     "SolveError",
+    "Table",
     "__version__",
     "build_info",
 ]

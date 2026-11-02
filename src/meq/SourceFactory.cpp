@@ -2,6 +2,7 @@
 
 #include "RotatingSource.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -114,6 +115,116 @@ namespace meq
 			return std::make_shared<ScaledProfile const>( std::move( table ), scale );
 		}
 
+		/**
+		 * THE TABLES A FRONT END HANDED IN, slot by slot, and which were used.
+		 *
+		 * A slot takes its table only where the configuration gave the key
+		 * the table replaces, so the configuration still says which profiles
+		 * the problem has -- a table cannot add rotation to a file that has
+		 * none -- and a table nothing took is refused rather than ignored,
+		 * since a misspelt slot would otherwise solve with the file's profile
+		 * and say nothing.
+		 */
+		class TableLookup
+		{
+			public:
+				TableLookup( ProfileTables const &tablesIn, bool normalisedIn,
+				             std::string const &configFileNameIn )
+					: tables( tablesIn ), normalised( normalisedIn ),
+					  configFileName( configFileNameIn )
+				{
+				}
+
+				bool empty() const
+				{
+					return tables.empty();
+				}
+
+				/// The profile for `slot`, or null when no table names it.
+				std::shared_ptr<Profile const> take( std::string const &slot,
+				                                     std::string const &key,
+				                                     bool given, double scale )
+				{
+					auto const found = tables.find( slot );
+					if ( found == tables.end() )
+						return nullptr;
+					taken.push_back( slot );
+
+					if ( !given )
+						throw ConfigError( configFileName, "source." + key,
+							"a table was handed in for \"" + slot + "\", and the "
+							"configuration has no " + key + " for it to replace. The "
+							"configuration says which profiles the problem has; give "
+							"the key -- a constant will do -- and the table replaces it" );
+					if ( scale != 1.0 )
+						throw ConfigError( configFileName, "source." + key + "Scale",
+							"a table was handed in for \"" + slot + "\" and the "
+							"configuration scales that profile. A table is the profile "
+							"itself, so the two cannot both be meant: take the scale out "
+							"of the file, or into the table" );
+					if ( !normalised && found->second.abscissa != ProfileAbscissa::Psi )
+						throw ConfigError( configFileName, "source.Normalised",
+							std::string( "the table for \"" ) + slot + "\" is in "
+							+ profileAbscissaName( found->second.abscissa )
+							+ ", a normalised flux, and this source is not normalised: "
+							"its profiles are functions of psi itself, so only \"Psi\" "
+							"names their abscissa" );
+					try
+					{
+						return profileFromTable( found->second );
+					}
+					catch ( std::invalid_argument const &error )
+					{
+						throw ConfigError( configFileName, "source." + key,
+						                   "the table for \"" + slot + "\": " + error.what() );
+					}
+				}
+
+				/// Refuse every table nothing took, naming the slots there are.
+				void requireAllTaken( std::vector<std::string> const &slots ) const
+				{
+					for ( auto const &entry : tables )
+					{
+						if ( std::find( taken.begin(), taken.end(), entry.first ) != taken.end() )
+							continue;
+						std::string known;
+						for ( std::string const &slot : slots )
+							known += ( known.empty() ? "" : ", " ) + slot;
+						throw ConfigError( configFileName, "source",
+							"a table was handed in for \"" + entry.first + "\", which "
+							"is not a profile of this source; its slots are " + known
+							+ ". A Neutralising species' density is quasineutrality's "
+							"and takes no table" );
+					}
+				}
+
+			private:
+				ProfileTables const &tables;
+				bool normalised;
+				std::string const &configFileName;
+				std::vector<std::string> taken;
+		};
+
+		/// A table if one names the slot, else the configuration's own.
+		std::shared_ptr<Profile const> loadSlot( TableLookup &lookup, std::string const &slot,
+		                                         double value, std::string const &fileName,
+		                                         double scale, bool given,
+		                                         std::string const &key,
+		                                         std::string const &configFileName )
+		{
+			if ( auto table = lookup.take( slot, key, given, scale ) )
+				return table;
+			return loadEitherProfile( value, fileName, scale, given, key, configFileName );
+		}
+
+		/// A species' slot prefix: its Name, as the configuration gives it.
+		std::string speciesSlot( SpeciesParameters const &one, std::size_t index )
+		{
+			return "species."
+			       + ( one.name.empty() ? "[" + std::to_string( index ) + "]" : one.name )
+			       + ".";
+		}
+
 		/// The species of a rotating source, with the one marked Neutralising
 		/// given the density charge neutrality implies.
 		///
@@ -122,7 +233,9 @@ namespace meq
 		/// order, and a diagnostic that blames an arbitrary one of several bad
 		/// files sends the reader to fix a file that may be perfectly fine.
 		std::vector<Species> buildSpecies( RotatingParameters const &parameters,
-		                                   std::string const &configFileName )
+		                                   std::string const &configFileName,
+		                                   TableLookup &lookup,
+		                                   std::vector<std::string> &slots )
 		{
 			std::vector<Species> species( parameters.species.size() );
 			std::size_t neutralising = parameters.species.size();
@@ -134,7 +247,10 @@ namespace meq
 
 				species[ i ].mass = one.mass;
 				species[ i ].charge = one.charge;
-				species[ i ].temperature = loadEitherProfile( one.temperature, one.temperatureFile,
+				std::string const slot = speciesSlot( one, i );
+				slots.push_back( slot + "Temperature" );
+				species[ i ].temperature = loadSlot( lookup, slot + "Temperature",
+					one.temperature, one.temperatureFile,
 					one.temperatureScale, true, where + "Temperature", configFileName );
 
 				if ( one.neutralising )
@@ -143,7 +259,9 @@ namespace meq
 					continue;
 				}
 
-				species[ i ].density = loadEitherProfile( one.density, one.densityFile,
+				slots.push_back( slot + "Density" );
+				species[ i ].density = loadSlot( lookup, slot + "Density",
+					one.density, one.densityFile,
 					one.densityScale, true, where + "Density", configFileName );
 			}
 
@@ -167,15 +285,34 @@ namespace meq
 		};
 
 		RotatingPieces loadRotating( RotatingParameters const &parameters,
-		                             std::string const &configFileName )
+		                             std::string const &configFileName,
+		                             TableLookup &lookup )
 		{
+			std::vector<std::string> slots;
 			RotatingPieces pieces;
-			pieces.species = buildSpecies( parameters, configFileName );
-			pieces.omega = loadEitherProfile( parameters.omega, parameters.omegaFile,
+			pieces.species = buildSpecies( parameters, configFileName, lookup, slots );
+			slots.push_back( "Omega" );
+			pieces.omega = loadSlot( lookup, "Omega", parameters.omega, parameters.omegaFile,
 				parameters.omegaScale, parameters.omegaGiven, "Omega", configFileName );
-			pieces.ggPrime = loadEitherProfile( parameters.ggPrime, parameters.ggPrimeFile,
-				parameters.ggPrimeScale, true, "GGPrime", configFileName );
+			slots.push_back( "GGPrime" );
+			pieces.ggPrime = loadSlot( lookup, "GGPrime", parameters.ggPrime,
+				parameters.ggPrimeFile, parameters.ggPrimeScale, true, "GGPrime",
+				configFileName );
+			lookup.requireAllTaken( slots );
 			return pieces;
+		}
+
+		/// Tables go only into a rotating source: species are the one array
+		/// route (PYTHON-PLAN.md, PY-2).
+		void refuseTablesFor( TableLookup const &lookup, SourceConfig const &config,
+		                      std::string const &configFileName )
+		{
+			if ( !lookup.empty() && config.type != SourceType::Rotating )
+				throw ConfigError( configFileName, "source.Type",
+					"profile tables were handed in, and they go only into a "
+					"\"rotating\" source, whose profiles are species -- Density, "
+					"Temperature, Omega and GGPrime. This source reads its profiles "
+					"from its own keys" );
 		}
 
 		/// `[source] Gauge`, mapped in ONE switch with no default -- see
@@ -221,8 +358,12 @@ namespace meq
 	}
 
 	std::shared_ptr<Source const> makeSource( SourceConfig const &config,
-	                                          std::string const &configFileName )
+	                                          std::string const &configFileName,
+	                                          ProfileTables const &tables )
 	{
+		TableLookup lookup( tables, config.isNormalised(), configFileName );
+		refuseTablesFor( lookup, config, configFileName );
+
 		// A NORMALISED SOURCE MUST NOT COME OUT OF HERE, and the reason is that
 		// it would work. meq::NormalisedRotatingSource is-a meq::Source, so
 		// returning one would compile and solve -- with psi_ax frozen at the
@@ -274,7 +415,7 @@ namespace meq
 			case SourceType::Rotating:
 			{
 				RotatingParameters const &parameters = config.getRotating();
-				RotatingPieces pieces = loadRotating( parameters, configFileName );
+				RotatingPieces pieces = loadRotating( parameters, configFileName, lookup );
 
 				return guarded( [ & ]() -> std::shared_ptr<Source const>
 				{
@@ -294,8 +435,12 @@ namespace meq
 	}
 
 	std::shared_ptr<NormalisedSource> makeNormalisedSource( SourceConfig const &config,
-	                                                        std::string const &configFileName )
+	                                                        std::string const &configFileName,
+	                                                        ProfileTables const &tables )
 	{
+		TableLookup lookup( tables, config.isNormalised(), configFileName );
+		refuseTablesFor( lookup, config, configFileName );
+
 		if ( !config.isNormalised() )
 			throw ConfigError( configFileName, "source.Normalised",
 			                   "this source is not specified in normalised flux, so psi_ax is "
@@ -338,7 +483,7 @@ namespace meq
 			case SourceType::Rotating:
 			{
 				RotatingParameters const &parameters = config.getRotating();
-				RotatingPieces pieces = loadRotating( parameters, configFileName );
+				RotatingPieces pieces = loadRotating( parameters, configFileName, lookup );
 
 				return guarded( [ & ]() -> std::shared_ptr<NormalisedSource>
 				{

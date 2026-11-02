@@ -153,10 +153,11 @@ namespace
 	/// configured once, so it is not an argument of one equilibrium among
 	/// several in a process.
 	meq::RunOptions optionsFrom( bool meshReady, bool gridFunctions, bool vtk,
-	                             bool profile )
+	                             bool profile, meq::ProfileTables const &profiles )
 	{
 		meq::RunOptions options;
 		options.version = MEQ_VERSION;
+		options.profiles = profiles;
 		options.meshReady = meshReady;
 		options.wantGridFunctions = gridFunctions;
 		options.wantVtk = vtk;
@@ -217,27 +218,99 @@ PYBIND11_MODULE( _meq, m )
 	}, "The build: version and commit, precision, and device backends, as "
 	   "`meq --version` and the .nc report them." );
 
+	/*
+	 * A PROFILE AS ARRAYS: knots in `abscissa`, the derivative in that variable
+	 * too. THE ABSCISSA IS A REQUIRED KEYWORD AND HAS NO DEFAULT, because
+	 * reading psi_n as Psi converges, at full order, to the wrong equilibrium
+	 * (meq::ProfileAbscissa). Checked where the source is built, slot by slot.
+	 */
+	py::class_<meq::ProfileTable>( m, "Table",
+		"A profile as arrays: x, the value and its derivative in x, in the "
+		"abscissa named -- \"Psi\" (MEQ's normalised flux, 1 at the axis or a "
+		"mirror's inner label, what a profile file is in), \"psi_n\" (1 - Psi) or "
+		"\"sqrt_psi_n\". Units are the configuration key's." )
+		.def( py::init( []( std::vector<double> const &x,
+		                    std::vector<double> const &value,
+		                    std::vector<double> const &derivative,
+		                    std::string const &abscissa )
+		      {
+		          if ( value.size() != x.size() || derivative.size() != x.size() )
+		              throw py::value_error(
+		                  "meq.Table: x, value and derivative have lengths "
+		                  + std::to_string( x.size() ) + ", "
+		                  + std::to_string( value.size() ) + " and "
+		                  + std::to_string( derivative.size() ) );
+		          meq::ProfileTable table;
+		          try
+		          {
+		              table.abscissa = meq::profileAbscissaNamed( abscissa );
+		          }
+		          catch ( std::invalid_argument const &error )
+		          {
+		              throw py::value_error( error.what() );
+		          }
+		          for ( std::size_t i = 0; i < x.size(); ++i )
+		              table.knots.push_back( meq::Knot{ x[ i ], value[ i ], derivative[ i ] } );
+		          return table;
+		      } ),
+		      py::arg( "x" ), py::arg( "value" ), py::arg( "derivative" ),
+		      py::kw_only(), py::arg( "abscissa" ) )
+		.def_property_readonly( "abscissa", []( meq::ProfileTable const &t )
+		      { return std::string( meq::profileAbscissaName( t.abscissa ) ); } )
+		.def_property_readonly( "x", []( meq::ProfileTable const &t )
+		      {
+		          std::vector<double> out;
+		          for ( meq::Knot const &k : t.knots )
+		              out.push_back( k.psi );
+		          return out;
+		      } )
+		.def_property_readonly( "value", []( meq::ProfileTable const &t )
+		      {
+		          std::vector<double> out;
+		          for ( meq::Knot const &k : t.knots )
+		              out.push_back( k.value );
+		          return out;
+		      } )
+		.def_property_readonly( "derivative", []( meq::ProfileTable const &t )
+		      {
+		          std::vector<double> out;
+		          for ( meq::Knot const &k : t.knots )
+		              out.push_back( k.derivative );
+		          return out;
+		      } )
+		.def( "__repr__", []( meq::ProfileTable const &t )
+		      {
+		          return "meq.Table(" + std::to_string( t.knots.size() ) + " knots, abscissa=\""
+		                 + meq::profileAbscissaName( t.abscissa ) + "\")";
+		      } );
+
 	py::class_<Equilibrium>( m, "Equilibrium" )
 		.def( py::init( []( std::string const &path, bool meshReady,
-		                    bool gridFunctions, bool vtk, bool profile )
+		                    bool gridFunctions, bool vtk, bool profile,
+		                    meq::ProfileTables const &profiles )
 		      {
 		          meq::RunOptions options
-		              = optionsFrom( meshReady, gridFunctions, vtk, profile );
+		              = optionsFrom( meshReady, gridFunctions, vtk, profile, profiles );
 		          options.configPath = path;
 		          return std::make_unique<Equilibrium>( options );
 		      } ),
 		      py::arg( "path" ), py::kw_only(),
 		      py::arg( "mesh_ready" ) = false, py::arg( "grid_functions" ) = false,
 		      py::arg( "vtk" ) = false, py::arg( "profile" ) = false,
+		      py::arg( "profiles" ) = meq::ProfileTables(),
 		      "Read a configuration file and set the run up, as `meq path` "
-		      "does before it solves. Raises meq.ConfigError where meq exits 1." )
+		      "does before it solves. `profiles` maps a slot -- \"Omega\", "
+		      "\"GGPrime\", \"species.<Name>.Density\" or "
+		      "\"species.<Name>.Temperature\", a rotating source's -- to a "
+		      "meq.Table that replaces the profile the configuration gives it. "
+		      "Raises meq.ConfigError where meq exits 1." )
 		.def_static( "from_dict",
 		      []( py::dict const &config, std::string const &baseDir,
 		          std::string const &name, bool meshReady, bool gridFunctions,
-		          bool vtk, bool profile )
+		          bool vtk, bool profile, meq::ProfileTables const &profiles )
 		      {
 		          meq::RunOptions options
-		              = optionsFrom( meshReady, gridFunctions, vtk, profile );
+		              = optionsFrom( meshReady, gridFunctions, vtk, profile, profiles );
 		          options.configPath = name;
 		          options.configText = toml::format( tomlFromPy( config ) );
 		          options.baseDirectory = baseDir;
@@ -247,6 +320,7 @@ PYBIND11_MODULE( _meq, m )
 		      py::arg( "name" ) = "<dict>",
 		      py::arg( "mesh_ready" ) = false, py::arg( "grid_functions" ) = false,
 		      py::arg( "vtk" ) = false, py::arg( "profile" ) = false,
+		      py::arg( "profiles" ) = meq::ProfileTables(),
 		      "The same from a dict of the TOML's tables. Relative input paths "
 		      "resolve against base_dir, as a file's do against its own "
 		      "directory; empty leaves them relative to the working directory. "

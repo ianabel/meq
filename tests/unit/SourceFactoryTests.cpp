@@ -7,6 +7,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "meq/Config.hpp"
 #include "meq/RotatingSource.hpp"
@@ -749,6 +750,244 @@ BOOST_AUTO_TEST_CASE( the_conductor_factory_builds_only_what_was_asked_for )
 		{
 			return error.getKey() == "coils[0] (PF-inboard)";
 		} );
+}
+
+/*
+ * PROFILES AS TABLES (PYTHON-PLAN.md, PY-2): A TABLE OF A FILE'S OWN KNOTS IS
+ * THE FILE, TO THE BIT.
+ *
+ * The configuration names the density file and a table of that file's own
+ * knots is handed in for the slot; the two sources must agree exactly, value
+ * and derivative, at every point asked, because the table path builds the same
+ * SplineProfile from the same knots and nothing else. Then the same profile in
+ * psi_n, its knots reversed at 1 - Psi with their slopes negated, agrees to the
+ * rounding of 1 - x -- it is re-knotted exactly, not resampled.
+ */
+namespace
+{
+	/// A normalised two-species rotating source, the density from `densityKeys`.
+	std::string rotatingTablesFixture( std::string const &densityKeys,
+	                                   std::string const &extra = "" )
+	{
+		return "[source]\nType = \"rotating\"\n"
+		       "Omega = 2.0\nGGPrime = 0.5\nReferenceRadius = 1.0\nMu0 = 1.0\n"
+		       "Normalised = true\nPsiAxis = 0.2\n" + extra +
+		       "\n[[source.species]]\n"
+		       "Name = \"ion\"\n"
+		       "Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\n" + densityKeys +
+		       "\n[[source.species]]\n"
+		       "Name = \"electron\"\n"
+		       "Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\n"
+		       "Neutralising = true\n";
+	}
+
+	/// n( Psi ) = 1 + 2 Psi + Psi^2 - Psi^3 on four knots, as a file's text and
+	/// as the knots that text reads back as.
+	std::vector<meq::Knot> const cubicDensityKnots = {
+		{ 0.0, 1.0, 2.0 },
+		{ 0.25, 1.546875, 2.3125 },
+		{ 0.75, 2.640625, 1.8125 },
+		{ 1.0, 3.0, 1.0 } };
+
+	std::string cubicDensityText()
+	{
+		std::string text = "# Psi\tn\tn'\n";
+		for ( meq::Knot const &k : cubicDensityKnots )
+			text += std::to_string( k.psi ) + "\t" + std::to_string( k.value ) + "\t"
+			        + std::to_string( k.derivative ) + "\n";
+		return text + "\n";
+	}
+
+	meq::ProfileTables oneTable( std::string const &slot, meq::ProfileAbscissa abscissa,
+	                             std::vector<meq::Knot> knots )
+	{
+		meq::ProfileTables tables;
+		tables[ slot ] = meq::ProfileTable{ abscissa, std::move( knots ) };
+		return tables;
+	}
+
+	/// The ConfigError `build` throws, by key, or a failure saying none was.
+	template < typename Build >
+	std::string refusedKey( Build build )
+	{
+		try
+		{
+			build();
+		}
+		catch ( meq::ConfigError const &error )
+		{
+			return error.getKey();
+		}
+		return "<not refused>";
+	}
+}
+
+BOOST_AUTO_TEST_CASE( a_table_of_a_files_own_knots_is_the_file )
+{
+	// The knots print exactly at std::to_string's six digits, so the file
+	// reads back as cubicDensityKnots bit for bit.
+	ScratchFile const density( "meq_test_table_density.dat", cubicDensityText() );
+	meq::Configuration const config = configure( rotatingTablesFixture(
+		"DensityFile = \"" + density.fileName() + "\"\n" ) );
+
+	auto const fromFile = meq::makeNormalisedSource( config.getSource(), config.getFileName() );
+	auto const fromTable = meq::makeNormalisedSource( config.getSource(), config.getFileName(),
+		oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi, cubicDensityKnots ) );
+
+	// psi, not Psi: a normalised source divides by its axis flux, 0.2 here,
+	// so these are Psi = 0.003 to 0.97, inside the table rather than past it.
+	for ( double const psi : { 0.0006, 0.022, 0.04, 0.074, 0.1, 0.162, 0.194 } )
+		for ( double const radius : { 0.7, 1.0, 1.3 } )
+		{
+			BOOST_TEST( fromTable->f( radius, 0.1, psi ) == fromFile->f( radius, 0.1, psi ) );
+			BOOST_TEST( fromTable->dFdPsi( radius, 0.1, psi )
+			            == fromFile->dFdPsi( radius, 0.1, psi ) );
+		}
+
+	// AND IN psi_n, THE SAME PROFILE: knots reversed at 1 - Psi, slopes negated.
+	std::vector<meq::Knot> inPsiN;
+	for ( auto k = cubicDensityKnots.rbegin(); k != cubicDensityKnots.rend(); ++k )
+		inPsiN.push_back( meq::Knot{ 1.0 - k->psi, k->value, -k->derivative } );
+	auto const fromPsiN = meq::makeNormalisedSource( config.getSource(), config.getFileName(),
+		oneTable( "species.ion.Density", meq::ProfileAbscissa::PsiN, inPsiN ) );
+	for ( double const psi : { 0.0006, 0.022, 0.074, 0.1, 0.162, 0.194 } )
+	{
+		BOOST_TEST( fromPsiN->f( 1.1, 0.1, psi ) == fromFile->f( 1.1, 0.1, psi ),
+		            boost::test_tools::tolerance( 1.0e-14 ) );
+		BOOST_TEST( fromPsiN->dFdPsi( 1.1, 0.1, psi ) == fromFile->dFdPsi( 1.1, 0.1, psi ),
+		            boost::test_tools::tolerance( 1.0e-13 ) );
+	}
+}
+
+/*
+ * AND WHAT A TABLE CANNOT DO IS REFUSED BY NAME, each against the key a reader
+ * would edit. A table no slot takes, a slot the configuration does not give, a
+ * scaled slot, a normalised abscissa for a source in psi itself, a table the
+ * spline refuses, and any table at all for a source that is not "rotating".
+ */
+BOOST_AUTO_TEST_CASE( what_a_table_cannot_do_is_refused_by_name )
+{
+	std::vector<meq::Knot> const flat = { { 0.0, 1.0, 0.0 }, { 1.0, 1.0, 0.0 } };
+	auto const normalised = [ & ]( std::string const &fixture, meq::ProfileTables const &tables )
+	{
+		meq::Configuration const config = configure( fixture );
+		return [ config, tables ]()
+		{
+			meq::makeNormalisedSource( config.getSource(), config.getFileName(), tables );
+		};
+	};
+	std::string const plain = rotatingTablesFixture( "Density = 1.0\n" );
+
+	// A misspelt slot, and the Neutralising species' density: neither is a
+	// profile of this source.
+	BOOST_TEST( refusedKey( normalised( plain,
+		oneTable( "species.ion.Densty", meq::ProfileAbscissa::Psi, flat ) ) ) == "source" );
+	BOOST_TEST( refusedKey( normalised( plain,
+		oneTable( "species.electron.Density", meq::ProfileAbscissa::Psi, flat ) ) ) == "source" );
+
+	// Omega is a slot only where the file gives it.
+	std::string const still = "[source]\nType = \"rotating\"\n"
+		"GGPrime = 0.5\nReferenceRadius = 1.0\nMu0 = 1.0\n"
+		"Normalised = true\nPsiAxis = 0.2\n"
+		"\n[[source.species]]\nName = \"ion\"\n"
+		"Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\nDensity = 1.0\n"
+		"\n[[source.species]]\nName = \"electron\"\n"
+		"Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\nNeutralising = true\n";
+	BOOST_TEST( refusedKey( normalised( still,
+		oneTable( "Omega", meq::ProfileAbscissa::Psi, flat ) ) ) == "source.Omega" );
+
+	// A scaled slot: the table and the scale cannot both be meant.
+	BOOST_TEST( refusedKey( normalised(
+		rotatingTablesFixture( "Density = 1.0\nDensityScale = 2.0\n" ),
+		oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi, flat ) ) )
+		== "source.species[0].DensityScale" );
+
+	// Knots the spline refuses, named by the key the slot replaces.
+	BOOST_TEST( refusedKey( normalised( plain,
+		oneTable( "species.ion.Temperature", meq::ProfileAbscissa::Psi,
+		          { { 0.5, 1.0, 0.0 }, { 0.5, 2.0, 0.0 } } ) ) )
+		== "source.species[0].Temperature" );
+
+	// A normalised abscissa where the profiles are functions of psi itself.
+	{
+		meq::Configuration const config = configure(
+			"[source]\nType = \"rotating\"\n"
+			"Omega = 2.0\nGGPrime = 0.5\nReferenceRadius = 1.0\nMu0 = 1.0\n"
+			"\n[[source.species]]\nName = \"ion\"\n"
+			"Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\nDensity = 1.0\n"
+			"\n[[source.species]]\nName = \"electron\"\n"
+			"Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\nNeutralising = true\n" );
+		BOOST_TEST( refusedKey( [ & ]()
+		{
+			meq::makeSource( config.getSource(), config.getFileName(),
+				oneTable( "species.ion.Density", meq::ProfileAbscissa::PsiN, flat ) );
+		} ) == "source.Normalised" );
+		// "Psi" names a profile of psi there, and is taken.
+		BOOST_CHECK_NO_THROW( meq::makeSource( config.getSource(), config.getFileName(),
+			oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi, flat ) ) );
+	}
+
+	// Any table for a source whose profiles are not species.
+	{
+		ScratchFile const pPrime( "meq_test_table_pprime.dat", constantProfileTable );
+		meq::Configuration const config = configure(
+			"[source]\nType = \"mhd\"\n"
+			"PPrimeFile = \"" + pPrime.fileName() + "\"\n"
+			"GGPrimeFile = \"" + pPrime.fileName() + "\"\n"
+			"Mu0 = 1.0\nNormalised = true\nPsiAxis = 0.5\n" );
+		BOOST_TEST( refusedKey( [ & ]()
+		{
+			meq::makeNormalisedSource( config.getSource(), config.getFileName(),
+				oneTable( "PPrime", meq::ProfileAbscissa::Psi, flat ) );
+		} ) == "source.Type" );
+	}
+}
+
+/*
+ * THE SPECIES ROUTE WITHOUT ROTATION IS THE STATIC EQUATION, so a tokamak can
+ * take profiles as species too (PYTHON-PLAN.md, PY-2). Two species at T = 4,
+ * Omega absent, and n( Psi ) = 1 + 2 Psi handed in as a table: p = n ( T_i +
+ * T_e ), so p' = 16 everywhere, and an "mhd" source reading p' = 16 and the
+ * same g g' from files must give the same F at every point -- the rotating
+ * source's exponent is exactly zero without omega.
+ */
+BOOST_AUTO_TEST_CASE( species_without_rotation_are_the_static_source )
+{
+	ScratchFile const pPrime( "meq_test_static_pprime.dat",
+	                          "0.0 16.0 0.0\n1.0 16.0 0.0\n\n" );
+	ScratchFile const ggPrime( "meq_test_static_ggprime.dat",
+	                           "0.0 0.5 0.0\n1.0 0.5 0.0\n\n" );
+	meq::Configuration const mhd = configure(
+		"[source]\nType = \"mhd\"\n"
+		"PPrimeFile = \"" + pPrime.fileName() + "\"\n"
+		"GGPrimeFile = \"" + ggPrime.fileName() + "\"\n"
+		"Mu0 = 1.0\nNormalised = true\nPsiAxis = 0.2\n" );
+	meq::Configuration const species = configure(
+		"[source]\nType = \"rotating\"\n"
+		"GGPrime = 0.5\nReferenceRadius = 1.0\nMu0 = 1.0\n"
+		"Normalised = true\nPsiAxis = 0.2\n"
+		"\n[[source.species]]\nName = \"ion\"\n"
+		"Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\nDensity = 1.0\n"
+		"\n[[source.species]]\nName = \"electron\"\n"
+		"Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\nNeutralising = true\n" );
+
+	auto const fromFiles = meq::makeNormalisedSource( mhd.getSource(), mhd.getFileName() );
+	auto const fromSpecies = meq::makeNormalisedSource( species.getSource(), species.getFileName(),
+		oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi,
+		          { { 0.0, 1.0, 2.0 }, { 1.0, 3.0, 2.0 } } ) );
+
+	// psi inside the axis flux, 0.2, so Psi = 0.05 to 0.95: past it the
+	// density table is clamped and its slope, which the pressure term reads,
+	// is zero.
+	for ( double const psi : { 0.01, 0.06, 0.12, 0.19 } )
+		for ( double const radius : { 0.7, 1.0, 1.35 } )
+		{
+			BOOST_TEST( fromSpecies->f( radius, 0.2, psi ) == fromFiles->f( radius, 0.2, psi ),
+			            boost::test_tools::tolerance( 1.0e-13 ) );
+			BOOST_TEST( fromSpecies->dFdPsi( radius, 0.2, psi )
+			            == fromFiles->dFdPsi( radius, 0.2, psi ),
+			            boost::test_tools::tolerance( 1.0e-12 ) );
+		}
 }
 
 BOOST_AUTO_TEST_SUITE_END()
