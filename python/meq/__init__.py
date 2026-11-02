@@ -12,8 +12,10 @@ tables as a dict instead of a file.
 Profiles can be handed in as arrays in place of the files a rotating
 source's configuration names: `profiles={"species.deuterium.Temperature":
 meq.Table(x, T, dT_dx, abscissa="psi_n"), ...}`. The abscissa is always
-named -- "Psi" (MEQ's own normalised flux, 1 at the axis), "psi_n" (1 - Psi)
-or "sqrt_psi_n" -- and the derivative is always given. The .nc lists them as
+named -- "Psi" (MEQ's own normalised flux, 1 at the axis), "psi_n" (1 - Psi),
+"sqrt_psi_n", or "psi", the poloidal flux itself, which a normalised source
+takes with every profile in psi or none -- and the derivative is always
+given. The .nc lists them as
 `profile_tables`.
 
 A configuration with [mesh.generate] needs its mesh made first, by `meq-run`

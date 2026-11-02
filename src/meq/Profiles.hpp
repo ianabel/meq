@@ -475,9 +475,13 @@ namespace meq
 	 *
 	 * `Psi` is MEQ's own, ( psi - psi_bnd )/( psi_ax - psi_bnd ): 0 at the
 	 * boundary, 1 at the axis or a mirror's inner label
-	 * (docs/normalised_flux.rst), and what a profile file is in. `PsiN` is the
-	 * conventional normalised poloidal flux, 1 - Psi, 0 at the axis -- geq's
-	 * psi_n -- and `SqrtPsiN` its square root, the usual rho.
+	 * (docs/normalised_flux.rst), and what a normalised source's profile file
+	 * is in. `PsiN` is the conventional normalised poloidal flux, 1 - Psi, 0
+	 * at the axis -- geq's psi_n -- and `SqrtPsiN` its square root, the usual
+	 * rho. `PoloidalFlux` is psi itself, Wb/rad, the total flux the .nc's
+	 * `psi` is: what an unnormalised source's profiles are functions of, and
+	 * for a normalised one a map that moves with the labels
+	 * (meq::FluxTableProfile).
 	 *
 	 * **A NAME, NOT A DEFAULT, WHEREVER A CALLER CHOOSES ONE**: tables read in
 	 * psi_n where Psi was meant converge, at full order, to an answer 8.56e-04
@@ -487,7 +491,8 @@ namespace meq
 	{
 		Psi,
 		PsiN,
-		SqrtPsiN
+		SqrtPsiN,
+		PoloidalFlux
 	};
 
 	/// One profile handed in as a table in place of a file: knots in
@@ -509,7 +514,9 @@ namespace meq
 	 * (meq::SourceView) and the solver sees a C^1 cubic in Psi whatever the
 	 * table was written in.
 	 *
-	 * `Psi` is the table's own SplineProfile, to the bit. `PsiN` is
+	 * `Psi` is the table's own SplineProfile, to the bit, and so is
+	 * `PoloidalFlux`, a profile of psi for a source whose argument is psi; a
+	 * normalised source wraps it in a FluxTableProfile. `PsiN` is
 	 * RE-KNOTTED EXACTLY: x = 1 - Psi is affine, and a Hermite cubic composed
 	 * with an affine map is the Hermite cubic on the mapped knots, so the knots
 	 * reverse, each abscissa becomes 1 - x and each slope changes sign.
@@ -536,14 +543,68 @@ namespace meq
 	 */
 	std::shared_ptr<Profile const> profileFromTable( ProfileTable const & table );
 
+	/**
+	 * THE TWO LABELS A NORMALISED SOURCE IS AT, shared with the tables that read
+	 * them. The source writes them in setNormalisation(), once per residual
+	 * evaluation and before any thread reads them, and nothing else writes.
+	 */
+	struct FluxLabels
+	{
+		double axis = 1.0;
+		double boundary = 0.0;
+	};
+
+	/**
+	 * A TABLE IN psi, AS A PROFILE OF Psi FOR A NORMALISED SOURCE:
+	 * g( Psi ) = span^k f( psi_bnd + span Psi ), span = psi_ax - psi_bnd, with
+	 * g' = span^( k + 1 ) f' and g'' = span^( k + 2 ) f'', each the exact
+	 * derivative of the one before, at whatever labels the source was last set
+	 * to. k = 0 FOR A VALUE -- a density, a temperature, omega -- and k = 1
+	 * FOR A DERIVATIVE IN THE FLUX: a normalised source's GGPrime is
+	 * d( g^2/2 )/dPsi, which it divides by the span, so a table of
+	 * d( g^2/2 )/dpsi reaches it multiplied by the span once.
+	 *
+	 * WHAT IT IS FOR. A profile in psi itself does not move with the labels at
+	 * fixed psi, and a normalised source whose every profile is one, or a
+	 * constant, has F label-free at fixed psi: its derivatives in the labels are
+	 * zero, exactly, which meq::NormalisedRotatingSource::setProfilesInFlux()
+	 * is how it is told. One such table beside a profile in Psi would make
+	 * those derivatives neither the Psi form nor zero, and makeNormalisedSource()
+	 * refuses the pair.
+	 *
+	 * Not a SplineProfile, so the device path does not read it and a source
+	 * holding one evaluates on the host (meq::SourceView).
+	 */
+	class FluxTableProfile : public Profile
+	{
+		public:
+			/// @param tableIn    the table, a profile of psi.
+			/// @param labelsIn   the source's labels; borrowed by sharing.
+			/// @param spanPower  k above: 0 for a value, 1 for a derivative.
+			/// @throws std::invalid_argument for a null table or labels, or a
+			///         power that is neither.
+			FluxTableProfile( std::shared_ptr<Profile const> tableIn,
+			                  std::shared_ptr<FluxLabels const> labelsIn,
+			                  int spanPower = 0 );
+
+			double operator()( double psi ) const override;
+			double prime( double psi ) const override;
+			double doublePrime( double psi ) const override;
+
+		private:
+			std::shared_ptr<Profile const> inPsi;
+			std::shared_ptr<FluxLabels const> labels;
+			int power;
+	};
+
 	/// How far past the axis a `SqrtPsiN` table that reaches it is continued,
 	/// linearly, by profileFromTable(): rho cannot name Psi > 1, and an
 	/// overshooting iterate needs a profile there that is C^1 through the axis.
 	/// rotating-normalised's own table reaches as far.
 	inline constexpr double sqrtPsiNBeyondAxis = 1.5;
 
-	/// "Psi", "psi_n", "sqrt_psi_n": the names a front end takes.
-	/// @throws std::invalid_argument naming the three for any other.
+	/// "Psi", "psi_n", "sqrt_psi_n", "psi": the names a front end takes.
+	/// @throws std::invalid_argument naming the four for any other.
 	ProfileAbscissa profileAbscissaNamed( std::string const & name );
 	char const * profileAbscissaName( ProfileAbscissa abscissa );
 

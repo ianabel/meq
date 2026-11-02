@@ -948,9 +948,49 @@ BOOST_AUTO_TEST_CASE( theAbscissaeAreNamedAndNothingElseIs )
 {
 	for ( meq::ProfileAbscissa const abscissa : { meq::ProfileAbscissa::Psi,
 	                                              meq::ProfileAbscissa::PsiN,
-	                                              meq::ProfileAbscissa::SqrtPsiN } )
+	                                              meq::ProfileAbscissa::SqrtPsiN,
+	                                              meq::ProfileAbscissa::PoloidalFlux } )
 		BOOST_TEST( ( meq::profileAbscissaNamed( meq::profileAbscissaName( abscissa ) )
 		              == abscissa ) );
+	BOOST_TEST( ( meq::profileAbscissaNamed( "psi" ) == meq::ProfileAbscissa::PoloidalFlux ) );
 	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "rho" ), std::invalid_argument );
-	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "psi" ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "PSI" ), std::invalid_argument );
+}
+
+// A table in psi read through a source's labels: g( Psi ) = span^k f( psi ) at
+// psi = psi_bnd + span Psi, each derivative another factor of the span, and
+// the labels read when evaluated, not when made.
+BOOST_AUTO_TEST_CASE( aTableInPsiReadsItsLabels )
+{
+	auto const f = []( double x ) { return 2.0*x*x*x - x*x + 3.0*x - 1.0; };
+	auto const fp = []( double x ) { return 6.0*x*x - 2.0*x + 3.0; };
+	auto const fpp = []( double x ) { return 12.0*x - 2.0; };
+	std::vector<meq::Knot> knots;
+	for ( double const x : { -0.2, 0.1, 0.4, 0.7 } )
+		knots.push_back( meq::Knot{ x, f( x ), fp( x ) } );
+	auto const table = std::make_shared<meq::SplineProfile const>( knots );
+	auto labels = std::make_shared<meq::FluxLabels>();
+
+	for ( int const k : { 0, 1 } )
+	{
+		meq::FluxTableProfile const g( table, labels, k );
+		for ( auto const &at : { std::pair<double, double>{ 0.6, 0.1 },
+		                         std::pair<double, double>{ -0.1, 0.5 } } )
+		{
+			labels->axis = at.first;
+			labels->boundary = at.second;
+			double const span = at.first - at.second;
+			double const scale = k == 1 ? span : 1.0;
+			for ( double const psiN : { 0.1, 0.5, 0.9 } )
+			{
+				double const x = at.second + span*psiN;
+				BOOST_TEST( g( psiN ) == scale*f( x ), boost::test_tools::tolerance( 1.0e-13 ) );
+				BOOST_TEST( g.prime( psiN ) == scale*span*fp( x ),
+				            boost::test_tools::tolerance( 1.0e-13 ) );
+				BOOST_TEST( g.doublePrime( psiN ) == scale*span*span*fpp( x ),
+				            boost::test_tools::tolerance( 1.0e-12 ) );
+			}
+		}
+	}
+	BOOST_CHECK_THROW( meq::FluxTableProfile( table, labels, 2 ), std::invalid_argument );
 }

@@ -227,8 +227,10 @@ PYBIND11_MODULE( _meq, m )
 	py::class_<meq::ProfileTable>( m, "Table",
 		"A profile as arrays: x, the value and its derivative in x, in the "
 		"abscissa named -- \"Psi\" (MEQ's normalised flux, 1 at the axis or a "
-		"mirror's inner label, what a profile file is in), \"psi_n\" (1 - Psi) or "
-		"\"sqrt_psi_n\". Units are the configuration key's." )
+		"mirror's inner label, what a profile file is in), \"psi_n\" (1 - Psi), "
+		"\"sqrt_psi_n\", or \"psi\" (the poloidal flux itself, Wb/rad, which a "
+		"normalised source takes only with every profile in psi). Units are "
+		"the configuration key's." )
 		.def( py::init( []( std::vector<double> const &x,
 		                    std::vector<double> const &value,
 		                    std::vector<double> const &derivative,

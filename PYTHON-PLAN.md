@@ -87,7 +87,7 @@ Seven decisions in it, each with its reason:
    | `abscissa` | is | moves with the solve |
    |---|---|---|
    | `"Psi"` | MEQ's own normalised flux, 0 at `ψ_bnd`, 1 at the axis or the inner label: what a profile file is in | no |
-   | `"psi"` | poloidal flux, Wb/rad | yes, through the labels |
+   | `"psi"` | poloidal flux, Wb/rad, the total the `.nc`'s `psi` is | yes, through the labels |
    | `"psi_n"` | normalised poloidal flux, 0 at the axis or the inner label, 1 at `ψ_bnd`: geq's `ψ_n`, MEQ's `1 − Ψ` | no |
    | `"sqrt_psi_n"` | `√ψ_n` | no |
    | `"R_midplane"` | the radius, m, where the surface crosses `z = 0` | yes, through the crossing |
@@ -142,7 +142,7 @@ Each stage ends at a measured, asserted result, as every stage here does.
 | PY-0 | `meq::Run`, the run out of `main()` | `meq` unchanged, to the byte — **done** |
 | PY-1 | the `_meq` extension and the `meq` package; `Equilibrium( file )`, `from_dict`, `solve`, `write` | Python's `.nc` equals `meq`'s, every coefficient — **done** |
 | PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit — **done** |
-| PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer |
+| PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer — **`psi` done; `R_midplane` not built** |
 | PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted |
 | PY-4 | results in memory: scalars, `grid()`, `psi`/`B` at points, `surfaces()` | equal to the `.nc` and `_surfaces.nc` the same run writes |
 | PY-5 | a mirror's transport geometry | closed-form and finite-difference checks, below |
@@ -305,19 +305,42 @@ files the run did not read. **Setting a profile after construction, and
 solving again, is PY-3's**: the source is built when the run is prepared.
 
 **PY-2b: the moving maps.** `psi` makes `x` depend on the labels, which are
-already border unknowns, so it adds terms to the label columns the bordered
-Newton carries. `R_midplane` makes `x` depend on the surface's crossing, which
-the midplane gauge already carries as border unknowns, `R₀` at 32 knots in
-`Ψ` (`GradShafranovSolver::setMidplaneGaugeKnots()`, M-283). The abscissa
-reuses those knots rather than building a second crossing table.
-**`R_midplane` is refused beside a located axis**: a tokamak surface crosses
-`z = 0` twice, and which crossing is meant is a choice no default should make.
-The acceptance is that Newton stays quadratic, as M-283's was, and that a
-table in a moving abscissa, re-expressed in `psi_n` through the answer's own
-map, gives the same answer to the tabulation. **If quadratic Newton is not
-reached, the fallback holds the map at the warm start's state and says so**:
-a held map is a fixed point of the outer loop and not of the solve, which is
-the smaller claim.
+border unknowns; `R_midplane` on each surface's crossing.
+
+**`psi` is done, for a source whose every profile is a table in `psi` or a
+value-constant, and that is exact rather than approximate.** For an
+unnormalised source `psi` is the identity, its own argument, and the
+normalised names are refused there (PY-2 had taken `"Psi"` for it, which was
+the wrong name). For a normalised one each table becomes a
+`meq::FluxTableProfile`, `g( Ψ ) = span^k f( ψ_bnd + span Ψ )` read through
+labels the source keeps current, `k = 0` for a value and `k = 1` for GGPrime,
+which a normalised source holds as `d( g²/2 )/dΨ`. At fixed `ψ` such a
+source does not depend on the labels at all, so
+`NormalisedRotatingSource::setProfilesInFlux()` makes its label derivatives
+exactly zero, the moving support's surface term aside as for every source.
+**Measured on `mirror-rotating`**, its two temperatures, its electron density
+and its omega handed in as tables in `psi` at the labels its file run
+converged to: the same equilibrium, 3.75e-16 of `max |ψ|`, the labels
+floating, in 3 Newton steps as from the files. **And the zero is load
+bearing**: with the `Ψ` form's derivatives in its place the same mirror takes
+8 steps to the same answer.
+
+**What `psi` refuses, and why each one**: a table in `psi` beside a profile in
+`Ψ`, from a file or a table, because then the label derivatives are neither
+the `Ψ` form nor zero, and building them would need each profile's separate
+part in `F` from inside the species closure; a constant GGPrime other than
+zero, which is a `d( g²/2 )/dψ` that moves with the span; and a midplane
+gauge, whose crossings are tabulated in `Ψ` and bring the labels back. Mixed
+abscissae are the next thing to build if a caller needs them.
+
+**`R_midplane` is not built.** It makes `x` depend on the surface's crossing,
+which only the midplane gauge carries as border unknowns, `R₀` at 32 knots in
+`Ψ` (`GradShafranovSolver::setMidplaneGaugeKnots()`, M-283), and a table in
+`R` then enters `F` through those knots, so its derivatives join the gauge's
+border columns. It would be refused beside a located axis, since a tokamak
+surface crosses `z = 0` twice. The acceptance stays: Newton quadratic, as
+M-283's is, and a table in `R_midplane`, re-expressed in `psi_n` through the
+answer's own crossings, giving the same answer to the tabulation.
 
 **PY-3: repeated solves.** Three properties, each asserted:
 
@@ -387,6 +410,27 @@ MEQ builds, so that a mismatch can never be silent:
 The acceptance is that each code's answer in the joint process, imported in
 either order, equals its answer alone, to the bit.
 
+**MET, MEASURED 2026-11-02, against MaNTA's `build/mkl-cuda`**, which links
+oneAPI MKL 2026.2 and `../../sundials/cuda-install`: the 45 libraries both
+modules link resolve to the same files. In one process with no numpy, MaNTA's
+`LinearDiffusion` and MEQ's `mhd-rectangle` solved in either order and either
+import order: MEQ's `.nc` is the `meq` binary's, and MaNTA's output is MaNTA's
+alone, both bit for bit. **One thing moves, and it is MaNTA's threading layer,
+not an answer.** MaNTA links MKL's single dynamic library, `libmkl_rt`, which
+picks its threading layer at its first call: alone, `intel_thread` (Intel's
+OpenMP); beside `meq`, in either import order, `gnu_thread`, the layer MEQ
+links, so the process holds one OpenMP runtime. At `MKL_NUM_THREADS=1`, where
+this was measured, the layer changes no bit. Above it, MaNTA's threaded MKL
+calls run on GNU OpenMP in the joint process; `MKL_THREADING_LAYER=GNU` gives
+a MaNTA-alone run the same layer to compare against. Not measured above one
+thread.
+
+**And numpy is still the second MKL.** MaNTA's Python physics cases import
+numpy, and Debian's numpy reaches the system MKL (PY-1). So a workflow with a
+Python case meets `import meq`'s refusal, or its warning, until numpy is on
+the one MKL too -- a numpy built against oneAPI, or the BLAS alternative
+pointed at it. A C++ case driven by `manta.Runner( "Name" )` does not.
+
 **Then the loop.** A small Python fixed-point iteration between a MaNTA case
 and MEQ on a mirror: MaNTA's `n_s`, `T_s` and `ω` go into MEQ's species slots,
 on whichever abscissa MaNTA's case uses, and PY-5's geometry comes back. It
@@ -412,9 +456,10 @@ the validation tool for the tight one.
 
 ## Open
 
-1. **Whether MaNTA builds against oneAPI MKL and `sundials/cuda-install`**
-   (PY-6). Being checked on MaNTA's side. If it cannot, PY-6 needs another
-   common pair.
-2. **Which abscissa MaNTA's mirror case uses.** It no longer changes the
-   design, since all four are served. It sets which of PY-2 and PY-2b the
-   first loop needs.
+1. **numpy on the one MKL.** MaNTA's `build/mkl-cuda` shares MEQ's MKL and
+   SUNDIALS (PY-6, met), but Debian's numpy does not, so a workflow with a
+   Python physics case needs a numpy built against oneAPI or the system BLAS
+   alternative pointed at it. A machine-level choice, not either code's.
+2. **Which abscissa MaNTA's mirror case uses.** `Psi`, `psi_n`, `sqrt_psi_n`
+   and `psi` are served; `R_midplane` is not built (PY-2b). It decides
+   whether the first loop needs it.
