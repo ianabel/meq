@@ -1,7 +1,8 @@
 # Anisotropic pressure, in MEQ, against geq
 
-**DRAFT.** Nothing here is built. No stage is scheduled, and `ROADMAP.md` has
-not yet placed this plan in its order.
+**Item 13 of `ROADMAP.md`, and first in its order.** AN-0 to AN-5 are done,
+AN-6a and AN-6b are done, and AN-6c is under way on GF1's working point;
+*Stages* below says what each is and what is next.
 
 **The target**: MEQ solves the anisotropic generalisation of RoPP (136) on the
 free-boundary rotating mirror. The answer is checked against geq's
