@@ -640,9 +640,9 @@ namespace meq
 		table.fluxQ = cache.criticalFluxQ;
 		table.fluxOffset = cache.criticalFluxOffset;
 		table.scale = cache.criticalFluxScale;
-		table.fluxUsable.assign( cache.criticalFluxUsable.size(), false );
+		table.fluxUsable.assign( cache.criticalFluxUsable.size(), 0 );
 		for ( std::size_t i = 0; i < cache.criticalFluxUsable.size(); ++i )
-			table.fluxUsable[ i ] = cache.criticalFluxUsable[ i ] != 0;
+			table.fluxUsable[ i ] = cache.criticalFluxUsable[ i ] != 0 ? 1 : 0;
 		table.built = true;
 		return table;
 	}
@@ -804,11 +804,14 @@ namespace meq
 
 		nodal.potentialPsi.assign( potentialPoints, 0.0 );
 		nodal.fluxQ.assign( 2*fluxPoints, 0.0 );
-		nodal.fluxUsable.assign( fluxPoints, false );
+		nodal.fluxUsable.assign( fluxPoints, 0 );
 
 		/*
 		 * THREADED, AND IT IS THE EASY KIND -- each element writes its own
-		 * disjoint slice and reads nothing another writes. The one hazard is
+		 * disjoint slice and reads nothing another writes. Disjoint in BYTES,
+		 * which is why `fluxUsable` is not a std::vector< bool >: its bits
+		 * share words across elements, and under schedule( dynamic ) two
+		 * threads setting bits of one word lose a write. The one hazard is
 		 * MFEM's, and CLAUDE.md records it: GetElementTransformation( int )
 		 * hands out shared scratch, so this takes the caller-supplied
 		 * overload into a per-thread object. `pointOf` already does that;
@@ -860,7 +863,7 @@ namespace meq
 				std::size_t const at = qBase + static_cast< std::size_t >( n );
 				nodal.fluxQ[ 2*at ] = qR;
 				nodal.fluxQ[ 2*at + 1 ] = qZ;
-				nodal.fluxUsable[ at ] = true;
+				nodal.fluxUsable[ at ] = 1;
 			}
 		}
 

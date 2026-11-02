@@ -1144,7 +1144,13 @@ namespace meq
 				/// which is meq::ConductorField::flux()'s own contract and is
 				/// screened by `fluxUsable`.
 				std::vector< double > fluxQ;
-				std::vector< bool > fluxUsable;
+				/// Non-zero where `fluxQ` is usable, which is every node off
+				/// the axis. **ONE BYTE A FLAG AND NOT std::vector< bool >,**
+				/// because the table is filled by a threaded element loop and
+				/// a bit vector packs neighbouring elements' flags into one
+				/// word, so two threads setting bits of it lose a write
+				/// (theConductorFluxScreenIsCompleteAtAnyThreadCount).
+				std::vector< unsigned char > fluxUsable;
 				std::vector< int > fluxOffset;
 
 				/// max | q_c | over the flux nodes -- fluxScale()'s whole
