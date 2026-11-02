@@ -24,6 +24,7 @@
 #define BOOST_TEST_MODULE ConductorSubtraction
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -32,6 +33,14 @@
 #include <string>
 
 #include "mfem.hpp"
+
+// omp_get_max_threads() and omp_set_num_threads(), for
+// theConductorFluxScreenIsCompleteAtAnyThreadCount. Guarded on the same pair
+// src/meq/Threading.hpp is: with either absent the table is built serially
+// and the case has nothing to race.
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+#include <omp.h>
+#endif
 
 #include <limits>
 #include <memory>
@@ -2172,6 +2181,117 @@ BOOST_AUTO_TEST_CASE( theConductorCacheSurvivesAFileBitForBit )
 	std::fflush( stdout );
 
 	std::filesystem::remove( cachePath, ignored );
+}
+
+/*
+ * THE q_c SCREEN KEEPS EVERY FLUX NODE OFF THE AXIS, AT ANY THREAD COUNT.
+ *
+ * CriticalPointFinder::nodalConductorTable() fills `fluxUsable` inside a
+ * threaded element loop, schedule( dynamic ), one element at a time, so the
+ * elements beside one another in the table are written by different threads.
+ * Held as a std::vector< bool > the flags of neighbouring elements share a
+ * word, and two threads setting bits of one word lose one of the writes: a
+ * node off the axis is then screened out as if it were on it, and its q_c is
+ * read from poloidalField()'s axis limit instead. Measured on
+ * examples/machine-f-diiid-filament.toml at four threads, the cached
+ * critical_q_c_usable carried 108 to 155 zeros from run to run, where one
+ * thread gives the 105 flux nodes on R = 0.
+ *
+ * THE BOX REACHES R = 0, so the screen has nodes it must refuse as well as
+ * nodes it must keep, and k = 1 puts three flags in each element, so one word
+ * holds the flags of about twenty. Eight finders, each building its table
+ * afresh, at four threads at least.
+ */
+BOOST_AUTO_TEST_CASE( theConductorFluxScreenIsCompleteAtAnyThreadCount )
+{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+	BOOST_TEST_MESSAGE( "MFEM is built without MFEM_USE_OPENMP and "
+	                    "MFEM_THREAD_SAFE together, so the table is built "
+	                    "serially and there is nothing to race" );
+#else
+	// [ 0, 1 ] x [ -0.5, 0.5 ], vertices on multiples of 1/48.
+	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+		48, 48, mfem::Element::TRIANGLE, false, 1.0, 1.0 );
+	for ( int v = 0; v < mesh.GetNV(); ++v )
+		mesh.GetVertex( v )[ 1 ] -= 0.5;
+
+	// GAUSS-LOBATTO, AS MEQ'S FLUX SPACE IS, so nodes sit on the elements'
+	// edges and some on R = 0. The default Gauss-Legendre nodes are all
+	// interior and would leave the screen nothing to refuse.
+	int const degree = 1;
+	mfem::L2_FECollection collection( degree, 2, mfem::BasisType::GaussLobatto );
+	mfem::FiniteElementSpace potentialSpace( &mesh, &collection );
+	mfem::FiniteElementSpace fluxSpace( &mesh, &collection, 2 );
+	mfem::GridFunction potential( &potentialSpace );
+	mfem::GridFunction flux( &fluxSpace );
+	potential = 0.0;
+	flux = 0.0;
+
+	// On no vertex, as setConductorField() needs.
+	meq::ConductorField conductors;
+	conductors.add( meq::CurrentFilament( 0.53, 0.017, 2.5e5 ) );
+
+	// THE SCREEN'S ANSWER, counted serially by the finder's own rule: a flux
+	// node is usable where R > 0.
+	std::size_t total = 0;
+	std::size_t offAxis = 0;
+	mfem::IsoparametricTransformation transformation;
+	for ( int e = 0; e < mesh.GetNE(); ++e )
+	{
+		mesh.GetElementTransformation( e, &transformation );
+		mfem::IntegrationRule const &nodes = fluxSpace.GetFE( e )->GetNodes();
+		for ( int n = 0; n < nodes.GetNPoints(); ++n )
+		{
+			mfem::Vector position( 2 );
+			transformation.SetIntPoint( &nodes.IntPoint( n ) );
+			transformation.Transform( nodes.IntPoint( n ), position );
+			++total;
+			if ( position( 0 ) > 0.0 )
+				++offAxis;
+		}
+	}
+	BOOST_TEST_REQUIRE( offAxis < total,
+	                    "the box does not reach R = 0, so the screen has "
+	                    "nothing to refuse and the case cannot tell a lost "
+	                    "write from a correct one" );
+
+	int const ambient = omp_get_max_threads();
+	int const threads = std::max( ambient, 4 );
+	omp_set_num_threads( threads );
+
+	int incomplete = 0;
+	std::size_t fewest = offAxis;
+	int const takes = 8;
+	for ( int take = 0; take < takes; ++take )
+	{
+		meq::CriticalPointFinder finder( flux, potential );
+		finder.setConductorField( &conductors );
+		meq::CriticalPointFinder::NodalConductors const &table
+			= finder.nodalConductorTable();
+		BOOST_TEST_REQUIRE( table.fluxUsable.size() == total );
+		std::size_t const usable = static_cast< std::size_t >( std::count_if(
+			table.fluxUsable.begin(), table.fluxUsable.end(),
+			[]( auto flag ) { return static_cast< bool >( flag ); } ) );
+		if ( usable != offAxis )
+			++incomplete;
+		fewest = std::min( fewest, usable );
+	}
+	omp_set_num_threads( ambient );
+
+	std::printf( "\n  THE q_c SCREEN AT %d THREADS\n", threads );
+	std::printf( "    %zu flux nodes, %zu off the axis; fewest kept %zu, "
+	             "%d of %d takes short\n",
+	             total, offAxis, fewest, incomplete, takes );
+
+	BOOST_TEST( incomplete == 0,
+	            incomplete << " of " << takes << " tables at " << threads
+	            << " threads kept fewer than the " << offAxis << " flux nodes "
+	               "off the axis, as few as " << fewest << ". Writes to the "
+	               "screen were lost between threads: a std::vector< bool > "
+	               "packs neighbouring elements' flags into one word, and the "
+	               "element loop is schedule( dynamic ). Hold the screen one "
+	               "byte a flag (NodalConductors::fluxUsable)." );
+#endif
 }
 
 /*
