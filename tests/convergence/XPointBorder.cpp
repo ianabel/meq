@@ -1,6 +1,6 @@
 /*
  * XP-3: THE X-POINT IS TWO MORE UNKNOWNS OF THE SAME NEWTON.
- * FREE-BOUNDARY-PLAN.md sections 10.4 and 10.6.
+ * CLAUDE_FB.md, XP-3, is the record; M-86 the measurement.
  *
  * XP-2 pins psi_bnd at the current estimate of the X-point, solves, locates the
  * saddle of the solved q_h, re-pins and re-solves -- an OUTER fixed point over
@@ -17,9 +17,9 @@
  *
  * WHAT THIS CASE ASSERTS, AND WHY IT IS NOT AN ERROR NORM.
  *
- * The plan's own acceptance is "agreement with XP-2 at round-off, and the
- * observed Newton order, which is the only thing that can see the inexact
- * grad q corner block". Both are here, and so is the reason the second matters:
+ * The acceptance is agreement with XP-2 at round-off, and the observed Newton
+ * order, which is the only thing that can see an inexact grad q corner block.
+ * Both are here, and so is the reason the second matters:
  * CLAUDE_HDGGS.md's *A wrong Jacobian is invisible to a convergence table* -- Newton
  * converges to the same discrete solution whatever Jacobian carried it there,
  * so a corner block that is wrong, or absent, moves the ITERATION COUNT and the
@@ -27,14 +27,14 @@
  * alone would pass on a border with the whole corner block zeroed.
  *
  *
- * AND THE PLAN'S PREDICTION ABOUT THAT CORNER BLOCK IS FALSIFIED HERE, WHICH IS
- * THE ONE FINDING OF THE STAGE.
+ * AND THE PREDICTION THAT THAT CORNER BLOCK IS INEXACT IS FALSIFIED HERE, WHICH
+ * IS THE ONE FINDING OF THE STAGE.
  *
- * Section 10.4 expects to lose the quadratic rate: "the corner block
+ * The prediction was a lost quadratic rate: "the corner block
  * d( q_r, q_z )/d( R_X, z_X ) is grad q -- the Hessian of the potential -- and
  * there is no solved variable for it: differentiating an L2 field of degree k
- * leaves k - 1. This is the same wall recorded for the band continuation of B."
- * It then plans a fallback of differencing the two rows.
+ * leaves k - 1. This is the same wall recorded for the band continuation of B,"
+ * with a fallback of differencing the two rows.
  *
  * The band analogy does not carry, and the difference is between approximating
  * a CONTINUOUS object and differentiating a DISCRETE one. The band continuation
@@ -55,7 +55,7 @@
  *
  * THE SUPPORT IS STILL AN OUTER LOOP AND THAT IS THE POINT OF THE STAGE.
  *
- * Section 10.5 names two discrete states on XP-2's fixed point: which critical
+ * XP-2's fixed point carries two discrete states: which critical
  * point bounds the plasma, and which elements carry current. M-82 measured both
  * as necessary -- the outer loop fails at the 200-iteration cap with either one
  * moving inside the Newton. XP-3 removes the FIRST from the outer loop by
@@ -590,9 +590,8 @@ BOOST_AUTO_TEST_CASE( theXPointBorderClosesOnTheSaddle )
 		<< border.bootstrapOrder << ". A rate near 1 is a Jacobian statement, "
 		"and the entries this stage owns are the two flux rows and the corner "
 		"block grad q -- so the first thing to suspect is the corner block, "
-		"which FREE-BOUNDARY-PLAN.md section 10.4 expects to be inexact and "
 		"which this file argues is exact. If it really cannot be made exact, "
-		"the plan's own fallback is to difference the two rows in "
+		"the fallback is to difference the two rows in "
 		"( R_X, z_X ), which is two residual evaluations in a 2-vector. Read "
 		"the printed history before believing this number: a run that damped "
 		"its way through the first half has no asymptotic regime." );
@@ -610,7 +609,7 @@ BOOST_AUTO_TEST_CASE( theXPointBorderClosesOnTheSaddle )
 
 	/*
 	 * SIX: ONE OUTER STATE WHERE XP-2 HAS TWO. The support is still re-decided
-	 * between solves -- section 10.5's combinatorial state, which has no
+	 * between solves -- a combinatorial state, which has no
 	 * globalisation -- and it has to settle for psi_bnd to mean anything. The
 	 * X-point is no longer on that list, which is the stage.
 	 */
@@ -619,13 +618,14 @@ BOOST_AUTO_TEST_CASE( theXPointBorderClosesOnTheSaddle )
 	BOOST_TEST( border.supportMoved < border.sweeps,
 		"the frozen support changed size on every one of " << border.sweeps
 		<< " sweeps, so the one outer state this stage leaves has not settled "
-		"on a topology -- section 10.5's alternating discrete state. The "
+		"on a topology -- a discrete outer state alternating between two "
+		"supports. The "
 		"X-point's own convergence says nothing about this: they are separate "
 		"states and either can chatter while the other closes." );
 }
 
 /*
- * AGREEMENT WITH XP-2, WHICH IS THE PLAN'S OWN ACCEPTANCE.
+ * AGREEMENT WITH XP-2, WHICH IS THE STAGE'S ACCEPTANCE.
  *
  * The two solve the same problem by different means: the outer loop alternates
  * a root find with a solve until they stop moving each other, and the border

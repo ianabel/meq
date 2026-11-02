@@ -54,7 +54,8 @@
  * TABLE BELOW BY UP TO EIGHT PER CENT. It used to be the largest NODAL value of
  * psi_h; it is now the flux at the LOCATED magnetic axis, a zero of q_h --
  * GradShafranovSolver::AxisConstraint, default LocatedAxis, with NodalMaximum
- * kept as the control. FREE-BOUNDARY-PLAN.md section 11.5 is the account.
+ * kept as the control. CLAUDE_FB.md, `psi_ax` was the weak point of the whole
+ * free-boundary path, is the account.
  *
  * THE CONSEQUENCE FOR THESE TESTS IS NOT COSMETIC AND IT IS WHY SEVERAL
  * ASSERTIONS HERE MOVED. `psi_ax == max psi_h` used to be the self-consistency
@@ -878,7 +879,7 @@ BOOST_AUTO_TEST_CASE( theAxisSensitivityIsLocalToItsElement )
  * The profiles are functions of Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ).
  * Everything above takes psi_bnd = 0, which is what MEQ's fixed-boundary
  * problem has. Free boundary makes it an unknown too -- the flux at the limiter
- * contact -- and FREE-BOUNDARY-PLAN.md's FB-3 is that second border.
+ * contact -- and FB-3 is that second border.
  *
  * THE SETUP IS DELIBERATELY THE SIMPLEST THING THAT EXERCISES BOTH BORDERS.
  * Constant p' and gg', so F = ( mu0 R^2 c1 + c2 )/span carries no Psi-dependence

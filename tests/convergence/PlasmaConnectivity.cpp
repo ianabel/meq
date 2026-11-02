@@ -1,13 +1,13 @@
 /*
- * THE PLASMA IS A CONNECTED SET AND `{ Psi > 0 }` IS NOT -- stage XP-1 of
- * FREE-BOUNDARY-PLAN.md section 10.6.
+ * THE PLASMA IS A CONNECTED SET AND `{ Psi > 0 }` IS NOT -- stage XP-1.
+ * CLAUDE_FB.md, XP-1: the plasma support is a connected component, is the record.
  *
  * meq::NormalisedSource::insidePlasma() is a POINTWISE test on the value,
- * ( psi - psi_bnd )*span > 0, with no connectivity in it whatever. Section 10.3
- * records what that costs on a DIVERTED plasma -- across an X-point the level
+ * ( psi - psi_bnd )*span > 0, with no connectivity in it whatever. On a
+ * DIVERTED plasma that costs a current channel -- across an X-point the level
  * psi = psi_X cuts a neighbourhood into four sectors and two opposite ones
  * carry Psi > 0, so the source switches on in the private flux region as well
- * as in the plasma -- and calls it latent, on the grounds that no shipped
+ * as in the plasma -- and it looks latent, on the grounds that no shipped
  * example sets ConfineToPlasma and MEQ has no diverted case.
  *
  * IT IS NOT LATENT, AND THE HALF-DISC CASE BELOW IS WHY. A LIMITER
@@ -25,11 +25,11 @@
  *      mask would apply to arbitrary elements and every measurement below
  *      would be noise. Checked against a mask holding ONE element.
  *
- *   2. theFillSeparatesThePrivateFluxRegionFromThePlasma -- section 10.6's
+ *   2. theFillSeparatesThePrivateFluxRegionFromThePlasma -- XP-1's
  *      sharp question, on Soloviev::iterExample2(), whose X-point is known in
  *      closed form. Does a FACE-neighbour fill need the explicit X-point
  *      blocking freegs4e's grid-based core_mask requires? IT DOES: the answer
- *      is no on section 10.3's reasoning and yes in fact, because two lobes
+ *      is no on the face-neighbour reasoning and yes in fact, because two lobes
  *      meeting at a point are joined by the BAND of elements straddling the
  *      separatrix, which near a saddle is several elements wide. The two-rule
  *      fill is what fixes it and it locates nothing. Measured as an element
@@ -61,7 +61,7 @@
  *   6. theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses -- CAN THE FILL REACH
  *      R = 0? refreshPlasmaComponent() refuses to SEED an axis-touching element
  *      and does not refuse to REACH one, so an iterate lifting psi_h above
- *      psi_bnd there would put section 11.3's 1/R pole back with
+ *      psi_bnd there would put the 1/R pole on the axis back with
  *      `ConfineToPlasma` on. IT DOES REACH IT, on the first Newton steps of the
  *      shipped physical machine, where psi_bnd is transiently negative and
  *      `{ Psi > 0 }` genuinely contains the axis -- and it clears by step 2 to 4.
@@ -269,8 +269,8 @@ namespace
 	}
 
 	/*
-	 * THE PHYSICAL TWO-BORDER MACHINE OF FREE-BOUNDARY-PLAN.md section 11.7,
-	 * transcribed rather than shared for the reason PowerProfile is: a change
+	 * THE PHYSICAL TWO-BORDER MACHINE (CLAUDE_FB.md, The two-border fixture was
+	 * the defect), transcribed rather than shared for the reason PowerProfile is: a change
 	 * to either file's fixture must not silently move the other's numbers.
 	 *
 	 * Three ingredients and all three are necessary -- ConfineToPlasma, a
@@ -567,12 +567,11 @@ BOOST_AUTO_TEST_CASE( theIntegratorHonoursTheElementItIsGiven )
 
 
 /*
- * SECTION 10.6's SHARP QUESTION: DOES A FACE-NEIGHBOUR FILL LEAK THROUGH AN
- * X-POINT?
+ * XP-1's SHARP QUESTION: DOES A FACE-NEIGHBOUR FILL LEAK THROUGH AN X-POINT?
  *
  * `../freegs4e` fills on a uniform ( R, z ) grid and has to block a
  * neighbourhood of each X-point first, because on a grid the two lobes -- which
- * meet at a POINT -- are eight-neighbours. Section 10.3 predicts MEQ needs no
+ * meet at a POINT -- are eight-neighbours. The prediction was that MEQ needs no
  * such blocking, "except in whichever element actually contains the X-point,
  * which is cut by both branches and is a face neighbour of both lobes. So the
  * expected leak is ONE ELEMENT WIDE".
@@ -585,8 +584,8 @@ BOOST_AUTO_TEST_CASE( theIntegratorHonoursTheElementItIsGiven )
  * NormalisedSource::insidePlasma() is written to be sign-agnostic for exactly
  * this reason and this fixture is what exercises it.
  *
- * MEASURED AS AN ELEMENT COUNT AND AS THE INTEGRAL OF |F|, because section 10.6
- * asks for both: a count alone does not say whether the difference matters, and
+ * MEASURED AS AN ELEMENT COUNT AND AS THE INTEGRAL OF |F|, because XP-1 needs
+ * both: a count alone does not say whether the difference matters, and
  * the private flux region is where the source would be switched on by mistake.
  */
 BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
@@ -910,7 +909,7 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		            "the pointwise test switches the source on in NO element "
 		            "below the X-point, so the box needs to reach further down" );
 
-		// AND SECTION 10.3's PREDICTION IS FALSE. It reads: "A fill over FACE
+		// AND THE FACE-NEIGHBOUR PREDICTION IS FALSE. It reads: "A fill over FACE
 		// neighbours cannot cross a shared vertex, so it should be blocked at
 		// the saddle automatically -- except in whichever element actually
 		// contains the X-point ... So the expected leak is ONE ELEMENT WIDE."
@@ -921,7 +920,7 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		            "the one-rule fill reached " << reading.oneRuleBelow << " of the "
 		            "pointwise test's " << reading.pointwiseBelow << " private-flux "
 		            "elements. If it now blocks some of them the straddling band "
-		            "has stopped bridging the lobes, and section 10.3's "
+		            "has stopped bridging the lobes, and the face-neighbour "
 		            "prediction is worth re-reading rather than this assertion "
 		            "being relaxed" );
 
@@ -957,7 +956,7 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		            "region" );
 
 		// AND IT IS NEVER WORSE THAN BLOCKING THE SADDLE'S OWN ELEMENT, which
-		// is section 10.3's own proposed cure and is the control here.
+		// is the obvious proposed cure and is the control here.
 		//
 		// **THAT CURE IS RESOLUTION-DEPENDENT AND THE TWO-RULE FILL IS NOT**,
 		// which is the second finding of this case and was not expected.
@@ -1018,8 +1017,8 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
  * AND IT IS LIVE ON A LIMITER CASE, WHICH IS WHAT MAKES XP-1 URGENT RATHER THAN
  * SCHEDULED.
  *
- * Section 10.3 says the defect "cannot fire today: no shipped example sets
- * ConfineToPlasma and MEQ has no diverted case". The first half is still true.
+ * The defect looks unable to fire: "no shipped example sets ConfineToPlasma and
+ * MEQ has no diverted case". The first half is still true.
  * The second is beside the point: the half-disc below has NO X-POINT ANYWHERE,
  * it converges in six Newton steps, it is exactly the configuration
  * FreeBoundaryCoupling::theTwoBordersConvergeTogether drives at limiter
@@ -1181,7 +1180,7 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	// number and not an implementation detail of the fill.
 	BOOST_TEST( midplaneRuns >= 2,
 	            "a ray across the midplane crosses " << midplaneRuns << " lobe( s )"
-	            " of { psi > psi_bnd }. Section 10.3's claim that the pointwise "
+	            " of { psi > psi_bnd }. The claim that the pointwise "
 	            "support test is a LATENT defect would then be correct after all, "
 	            "and this case measures nothing" );
 	BOOST_TEST( solver.plasmaComponentCount() > 1,
@@ -1212,11 +1211,12 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	 * psi_ax is the flux at the LOCATED magnetic axis, a zero of q_h, so on this
 	 * fixture it reads 1.26e-01 at the plasma while the R = 0 layer sits at
 	 * 3.08e-01. The border no longer follows the layer, which is precisely the
-	 * defect FREE-BOUNDARY-PLAN.md section 11 opens with.
+	 * defect CLAUDE_FB.md, `psi_ax` was the weak point of the whole
+	 * free-boundary path, opens with.
 	 *
 	 * So what is asserted is the SEPARATION, and it is the stronger statement:
-	 * the layer is still there -- this fixture carries the 1/R pole of section
-	 * 11.3 and nothing here repairs the FIELD -- and psi_ax has stopped
+	 * the layer is still there -- this fixture carries the 1/R pole on the axis
+	 * and nothing here repairs the FIELD -- and psi_ax has stopped
 	 * reporting it. Both halves matter, and a test that only checked the second
 	 * would pass on a fixture whose layer had quietly gone away.
 	 */
@@ -1584,7 +1584,7 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 	 * p' is killed by its own R^2. So a non-zero gg' is a toroidal current
 	 * density diverging like 1/R on the symmetry axis, which
 	 * GradShafranovSolver::checkAxisSource() is the guard for and
-	 * FREE-BOUNDARY-PLAN.md section 11.3 is the account of. With gg' = 0 the
+	 * docs/free_boundary.rst, The domain reaches the axis, is the account of. With gg' = 0 the
 	 * axis carries no current, which is what a plasma reaching R = 0 must
 	 * satisfy -- a levitated dipole and a magnetic mirror both do, and both
 	 * have no toroidal field for exactly this reason.
@@ -2442,13 +2442,13 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
  * refreshPlasmaComponent() refuses to SEED an axis-touching element -- the
  * argmax of psi_h on a half-disc is the R = 0 layer and not the magnetic axis,
  * which theLimiterCaseAlreadyHasMoreThanOneLobe measures -- and it does not
- * refuse to REACH one. So the question FREE-BOUNDARY-PLAN.md section 11.6
- * leaves open is whether an iterate can lift psi_h above psi_bnd on the axis
- * and put the 1/R pole of section 11.3 back with `ConfineToPlasma` on.
+ * refuse to REACH one. So the question is whether an iterate can lift psi_h
+ * above psi_bnd on the axis and put the 1/R pole on the axis back with
+ * `ConfineToPlasma` on.
  *
  * IT CAN, AND IT DOES -- ON THE INTERMEDIATE ITERATES OF THE SHIPPED PHYSICAL
- * FIXTURE, at every resolution tried. The first Newton step of section 11.7's
- * own machine carries psi_bnd NEGATIVE, so `{ Psi > 0 }` genuinely contains
+ * FIXTURE, at every resolution tried. The first Newton step of the two-border
+ * fixture's machine carries psi_bnd NEGATIVE, so `{ Psi > 0 }` genuinely contains
  * R = 0, every axis-touching element is in the plasma's component, and the
  * assembly puts a non-zero F on the axis. It clears by step 2 to 4 and the
  * converged answer has no axis element that is even a candidate.
@@ -2457,7 +2457,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
  * fill's answer is CORRECT: the level set really is connected and really does
  * contain the axis, and a rule that refused to say so would be a fill that
  * lies about the state it is given. Blocking axis-touching elements outright
- * would also be wrong for the one device class section 11.6 protects -- a
+ * would also be wrong for the one device class the axis guard protects -- a
  * levitated dipole and a magnetic mirror both have plasma to R = 0, and both
  * have gg' == 0 there, so F( 0, z ) vanishes and the pole never existed.
  *
@@ -2468,7 +2468,7 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
  * CONVERGED answer psi_h( 0, z ) -> 0, so the fill can only reach the axis when
  * that reading is positive too. Measured over both branches of the limiter
  * sweep: at R = 1.15 the fill reaches none of the 84 axis elements and the
- * guard is clean; at R = 1.20, where section 11.7 records psi_bnd going
+ * guard is clean; at R = 1.20, where psi_bnd is measured going
  * negative, it reaches all 84 and the guard refuses on both counts.
  *
  * THE GAP BETWEEN THE TWO READINGS IS THE DISCRETE LAYER, AND IT IS MEASURED
@@ -2580,7 +2580,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 
 	std::printf( "\n  CAN THE FILL REACH R = 0, AND DOES checkAxisSource() SEE "
 	             "IT WHEN IT DOES?\n" );
-	std::printf( "    section 11.7's machine: ConfineToPlasma, mu0 I_p = %.2f, "
+	std::printf( "    the two-border fixture's machine: ConfineToPlasma, "
+	             "mu0 I_p = %.2f, "
 	             "and Shafranov's field for a = R_limiter - %.2f\n",
 	             machineCurrent, machineRadius );
 	std::printf( "    %-9s %-8s %-5s %5s %14s %10s %11s %11s %12s %9s\n",
@@ -2594,8 +2595,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		rows.push_back( run( 2, 1.15, cap ) );
 
 	// 2. THE CONVERGED ANSWER on both branches of the limiter sweep. 1.15 is
-	//    one of section 11.7's five healthy radii; 1.20 is where that section
-	//    records psi_bnd going negative and the O-point landing on Gamma.
+	//    one of the two-border fixture's five healthy radii; 1.20 is where
+	//    psi_bnd goes negative and the O-point landing on Gamma.
 	std::size_t const healthyRow = rows.size();
 	rows.push_back( run( 2, 1.15, 150 ) );
 	std::size_t const spuriousRow = rows.size();
@@ -2693,8 +2694,7 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 	std::fflush( stdout );
 
 	/*
-	 * 1. THE FILL DOES REACH THE AXIS, WHICH IS SECTION 11.6's QUESTION
-	 *    ANSWERED. Without this the case is vacuous: every assertion below
+	 * 1. THE FILL DOES REACH THE AXIS, WHICH IS THE QUESTION ANSWERED. Without this the case is vacuous: every assertion below
 	 *    would be satisfied by a fill that simply never got there.
 	 */
 	BOOST_TEST( rows[ 0 ].axis.reached > 0,
@@ -2742,8 +2742,8 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 	 */
 	BOOST_TEST( rows[ spuriousRow ].axis.reached > 0,
 	            "limiter 1.20 was chosen as the row where the fill DOES reach "
-	            "the axis at convergence -- FREE-BOUNDARY-PLAN.md section 11.7 "
-	            "records psi_bnd going negative there -- and it reached "
+	            "the axis at convergence -- psi_bnd is measured going "
+	            "negative there -- and it reached "
 	            << rows[ spuriousRow ].axis.reached << ". Without it the "
 	            "coupling below is asserted over no positive case at all" );
 	for ( std::size_t i = healthyRow; i < rows.size(); ++i )

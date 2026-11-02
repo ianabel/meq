@@ -94,8 +94,7 @@
  *
  * AND THE SAME TWO MEASUREMENTS AGAIN AT THE X-POINT, WHICH IS XP-0.
  *
- * FREE-BOUNDARY-PLAN.md section 10.6's first stage is this file's axis study
- * with the saddle in place of the axis: the position of the X-point against a
+ * XP-0 is this file's axis study with the saddle in place of the axis: the position of the X-point against a
  * closed form at a measured rate, and audit() reading +1 and -1 over a box
  * holding both critical points. It needs no free boundary and no normalisation,
  * only the same fixed-boundary Solov'ev solve the axis study runs. Three things
@@ -1249,9 +1248,8 @@ BOOST_AUTO_TEST_CASE( theCriticalPointIsNotTheExtremeNodalValue )
  * THAT SAYS SO PUSHES THEM BACK THROUGH THE ELEMENT MAP.
  *
  * CriticalPoint carries ( referenceX, referenceY ) so that a caller can call
- * CalcShape() on the axis element at the axis -- FREE-BOUNDARY-PLAN.md section
- * 11.5's option 3, where those shape functions ARE a row of a bordered
- * Jacobian. The alternative is to hand back ( R, z ) alone and let the caller
+ * CalcShape() on the axis element at the axis -- AxisConstraint::LocatedAxis,
+ * where those shape functions ARE a row of a bordered Jacobian. The alternative is to hand back ( R, z ) alone and let the caller
  * invert the map with TransformBack, and CLAUDE.md records why that is a trap:
  * a CLAMPED inverse returns a point on the element boundary rather than
  * failing, and a field that is constant over the element cannot tell the
@@ -1544,9 +1542,9 @@ BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
 }
 
 /*
- * XP-0, FREE-BOUNDARY-PLAN.md section 10.6: THE X-POINT AGAINST A CLOSED FORM.
+ * XP-0: THE X-POINT AGAINST A CLOSED FORM.
  *
- * Everything above XP-1 in that plan assumes MEQ can locate an X-point at the
+ * Every X-point stage after XP-1 assumes MEQ can locate an X-point at the
  * order its flux converges at, and these three cases are the measurement that
  * says it can. They need no free boundary, no normalisation and no coupling: a
  * Solov'ev source, an exact Dirichlet datum, and a saddle whose position is
@@ -1562,7 +1560,7 @@ BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
  *
  * WHY nstx() AND NOT ONE OF THE OTHER TWO. All three of nstx(), iterExample2()
  * and nstxExample3() pass the closed-form check below, so any of them would
- * serve. nstx() is the one section 10.2 names, it is the fixture the axis study
+ * serve. nstx() is Cerfon-Freidberg's single null, it is the fixture the axis study
  * above already runs, and its X-point is the furthest of the three from its own
  * axis -- 1.83 against nstxExample3's 1.60 and iterExample2's 0.75 -- so a box
  * that holds the saddle and nothing else is roomy rather than contrived.
@@ -1680,8 +1678,7 @@ BOOST_AUTO_TEST_CASE( theClosedFormXPointIsASaddleOfTheClosedForm )
  * XP-0'S ACCEPTANCE RATE: THE LOCATED X-POINT AGAINST THE EXACT ONE.
  *
  * Structurally this is the axis study one rung along, and deliberately so --
- * the acceptance in FREE-BOUNDARY-PLAN.md section 10.6 is "the rate findAxis()
- * reaches for the axis", so the measurement has to be the same measurement. The
+ * XP-0's acceptance is the rate findAxis() reaches for the axis, so the measurement has to be the same measurement. The
  * saddle is a zero of q_h exactly as the axis is, its distance from the true
  * saddle is the POINTWISE error of q_h there divided by dq/dx, and both columns
  * are printed side by side so that claim can be read rather than believed.

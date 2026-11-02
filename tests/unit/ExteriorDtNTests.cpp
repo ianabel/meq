@@ -1,6 +1,6 @@
 // Unit tests for the exterior Dirichlet-to-Neumann map in src/meq/ExteriorDtN.
 //
-// FREE-BOUNDARY-PLAN.md stage FB-0. The class claims that for the axisymmetric
+// Stage FB-0. The class claims that for the axisymmetric
 // Grad-Shafranov operator, the exterior of a SEMICIRCLE centred on the axis is a
 // DIAGONAL operator on its own trace, in a Gegenbauer basis of order -1/2. That
 // claim is the reason free boundary is approachable at all in this tree: it
@@ -132,7 +132,7 @@ BOOST_AUTO_TEST_CASE( modes_are_indexed_by_degree_from_two_and_refuse_otherwise 
  * C_n and is worth pinning.
  *
  * src/meq/ExteriorDtN.cpp uses C_n = ( 1 - mu^2 ) P'_{n-1}( mu )/( n( n-1 ) )
- * rather than the plan's ( P_{n-2} - P_n )/( 2n-1 ). The two are the same
+ * rather than the printed ( P_{n-2} - P_n )/( 2n-1 ). The two are the same
  * function, but the first carries ( 1 - mu^2 ) as an EXPLICIT FACTOR -- so the
  * axis is exactly zero -- while the second is a difference of two quantities
  * that both tend to 1 there, losing about four digits by mu = 0.99999 and more
@@ -165,7 +165,7 @@ BOOST_AUTO_TEST_CASE( every_mode_vanishes_exactly_on_the_axis )
 /*
  * The mass, against the closed form, and the closed form against a quadrature.
  *
- * h_n is DERIVED in ExteriorDtN.cpp rather than transcribed from the plan --
+ * h_n is DERIVED in ExteriorDtN.cpp rather than transcribed --
  * from the standard integral of ( 1 - mu^2 )[ P'_m ]^2 -- so the closed form and
  * the quadrature agreeing is a check rather than a restatement. The quadrature
  * here is the class's own projection, which is the thing a caller will use.
@@ -243,8 +243,7 @@ BOOST_AUTO_TEST_CASE( the_mass_matches_the_closed_form_and_the_basis_is_orthogon
  *
  * The floor is the instrument's. A central difference of a smooth function at
  * h = 1e-4 carries O( h^2 ) truncation and O( eps/h^2 ) round-off, so a few
- * times 1e-7 relative is as good as this gets; the plan's own run of the same
- * check reported 1e-8 to 8e-6. Do not tighten this expecting exactness --
+ * times 1e-7 relative is as good as this gets. Do not tighten this expecting exactness --
  * src/meq/Zernike.hpp records the same point about derivatives checked against
  * differences, and Richardson extrapolation is the way past it if a sharper
  * number is ever wanted.
@@ -304,9 +303,8 @@ BOOST_AUTO_TEST_CASE( each_exterior_mode_is_delta_star_harmonic )
  *
  * WHAT THIS DOES NOT ESTABLISH is the SIGN a weak form wants. symbol() returns
  * the OUTWARD radial derivative, and whether the coupled system wants that or
- * its negative depends on which way its normal points --
- * FREE-BOUNDARY-PLAN.md section 7 says plainly that this will be got wrong at
- * least once and that FB-1, not this file, is what settles it.
+ * its negative depends on which way its normal points, a sign that is easily
+ * got wrong, and FB-1, not this file, is what settles it.
  */
 BOOST_AUTO_TEST_CASE( the_symbol_is_the_outward_radial_derivative )
 {
@@ -455,7 +453,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_field_matches_its_trace_and_decays )
  * of an exact artificial boundary condition, and a loop is the cheapest field
  * that exercises it.
  *
- * MEASURED, AND BOTH COLUMNS BEAT THE PLAN'S OWN RUN OF THE SAME CHECK:
+ * MEASURED:
  *
  *     rho_Gamma  modes    trace         DtN ( relative )
  *           2.5     12    5.60e-07      1.95e-05
@@ -463,15 +461,10 @@ BOOST_AUTO_TEST_CASE( the_exterior_field_matches_its_trace_and_decays )
  *           4.0     12    1.15e-09      7.12e-08
  *           4.0     24    1.44e-15      6.89e-14
  *
- * against section 3.3's 1.7e-11 / 2.3e-09 and 4.4e-14 / 6.8e-09.
- *
- * THE DtN COLUMN IS FIVE ORDERS BETTER AT rho_Gamma = 4 AND THE REASON IS THE
- * REFERENCE, NOT THE METHOD. Section 3.3 says of its own figure that it is
- * "limited by the finite-difference reference, not by the method", and it was
- * right: this test compares against the loop's ANALYTIC gradient instead, which
- * carries no truncation, and the floor moves from 6.8e-09 to 6.9e-14. So the
- * plan's number was measuring its instrument and said so; this one is measuring
- * the expansion. tests/analytic/CurrentLoop.hpp's derivatives are themselves
+ * THE DtN REFERENCE IS THE LOOP'S ANALYTIC GRADIENT, NOT A DIFFERENCE. A
+ * finite-difference normal derivative floors near 1e-8 and would be measuring
+ * its instrument; the analytic gradient carries no truncation, so this column
+ * measures the expansion. tests/analytic/CurrentLoop.hpp's derivatives are themselves
  * checked against a Richardson-extrapolated difference at 4e-11, which is what
  * entitles them to be used as a reference here.
  *
@@ -581,8 +574,8 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
 	            "derivative: worst relative " << worstDtN << ". The trace error "
 	            "above says whether the expansion is the problem; if the trace is "
 	            "fine and this is not, the SYMBOL ( 1 - n )/rhoGamma is wrong -- "
-	            "check its sign first, which FREE-BOUNDARY-PLAN.md section 7 warns "
-	            "will be got wrong at least once" );
+	            "check its sign first, which is the thing most easily got "
+	            "wrong" );
 }
 
 /*
@@ -590,10 +583,8 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
  *
  * THIS IS WHAT MAKES N SMALL, and it is the property the whole method's cost
  * rests on -- an exterior operator needing forty modes would be no cheaper than
- * the kernel it replaces. FREE-BOUNDARY-PLAN.md section 3.3 measures
- * |a_n| falling from 2.0e-1 at n = 2 to 5.8e-8 at n = 20 for rho_Gamma = 2.5,
- * and faster at 4.0, and section 8 records the rho_Gamma-against-mesh trade
- * as answered on the machine case.
+ * the kernel it replaces. The rho_Gamma-against-mesh trade it sets up is
+ * docs/free_boundary.rst, Choosing the radius and the mode count.
  *
  * Asserted as a RATIO between two radii rather than as an absolute decay rate,
  * because the rate is a property of the geometry rather than of the class: what
@@ -646,8 +637,8 @@ BOOST_AUTO_TEST_CASE( the_spectrum_falls_geometrically_and_faster_from_further_o
  * THE BASIS AGAINST VALUES COMPUTED SOMEWHERE ELSE ENTIRELY.
  *
  * Every number below is an EXACT RATIONAL, produced in sympy in exact rational
- * arithmetic from ( P_{n-2} - P_n )/( 2n - 1 ) -- which is the formula the plan
- * prints and NOT the one src/meq/ExteriorDtN.cpp evaluates. So this table is a
+ * arithmetic from ( P_{n-2} - P_n )/( 2n - 1 ) -- which is the printed formula
+ * and NOT the one src/meq/ExteriorDtN.cpp evaluates. So this table is a
  * check on the identity between the two forms as much as on the arithmetic, and
  * it is independent of both in the way that matters: nothing here came from
  * running the code under test.
@@ -708,7 +699,7 @@ BOOST_AUTO_TEST_CASE( the_basis_matches_independently_computed_exact_values )
 	BOOST_TEST( worst < 1.0e-14,
 	            "the basis disagrees with independently computed exact values by "
 	            << worst << ". These came from sympy in exact rational arithmetic "
-	            "using the PLAN's formula ( P_{n-2} - P_n )/( 2n-1 ), while the "
+	            "using the printed formula ( P_{n-2} - P_n )/( 2n-1 ), while the "
 	            "implementation evaluates ( 1 - mu^2 ) P'_{n-1}/( n( n-1 ) ) -- so "
 	            "this is a check on that identity, not only on the arithmetic" );
 
@@ -770,8 +761,8 @@ BOOST_AUTO_TEST_CASE( the_basis_matches_independently_computed_exact_values )
  * against VacuumHarmonic's R^2, R^2 z and -( R^4 - 4 R^2 z^2 )/8 -- the same
  * span, mode for mode, with the scalings shown.
  *
- * THAT IS A REAL TIE AND NOT A CURIOSITY. Two parts of FREE-BOUNDARY-PLAN.md
- * written weeks apart, from different arguments, meeting on the same functions:
+ * THAT IS A REAL TIE AND NOT A CURIOSITY. Two stages, from different
+ * arguments, meeting on the same functions:
  * FB-A's fixture is the INTERIOR branch rho^n of exactly the separation FB-0
  * uses the EXTERIOR branch rho^(1-n) of. It is also a free cross-check --
  * each stage's fixture now validates the other's -- and it explains after the
@@ -830,11 +821,11 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
  * FB-0's LAST OPEN ITEM: CEDRES++'S OWN BOUNDARY FORM, IN THIS BASIS
  * ============================================================================
  *
- * FREE-BOUNDARY-PLAN.md section 3.4 names the falsifying test of the whole of
- * section 3, as a challenge rather than a hope: assemble CEDRES++ eq (3.5)
- * against the Gegenbauer basis and check it comes out diagonal with the
- * symbol. If it does not, section 3 is wrong and the exterior needs the
- * kernel.
+ * This is the falsifying test of the whole separation (docs/free_boundary.rst,
+ * The exterior on a semicircle), as a challenge rather than a hope: assemble
+ * CEDRES++ eq (3.5) against the Gegenbauer basis and check it comes out
+ * diagonal with the symbol. If it does not, the separation is wrong and the
+ * exterior needs the kernel.
  *
  * This is that test, and it is the most independent check in this file --
  * more so than the current loop, which at least shares the idea of an
@@ -845,7 +836,7 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
  * share the equation and nothing else -- no basis, no measure written the same
  * way, no quadrature, not even the same century of technique.
  *
- * THEIR FORM, transcribed in section 3.5 from refs/CEDRES.pdf page 13 rendered
+ * THEIR FORM, transcribed from refs/CEDRES.pdf page 13 rendered
  * at 900 dpi, because pdftotext deletes the radicals on that page and would
  * turn the elliptic MODULUS into the PARAMETER -- which converges to a wrong
  * answer rather than failing:
@@ -878,7 +869,7 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
  *
  * MEASURED: the off-diagonal entries come out at 1e-15 to 1e-10 against
  * diagonals of order 1e-1, and the diagonal agrees with blockEntry( n ) to TEN
- * significant figures. Section 3 stands, and the plan does not need the kernel.
+ * significant figures. The separation stands, and MEQ does not need the kernel.
  */
 namespace
 {
@@ -1047,9 +1038,10 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
 	            "CEDRES++'s boundary form is NOT diagonal in the Gegenbauer "
 	            "basis: the worst off-diagonal is " << worstOffDiagonal
 	            << " against a diagonal scale of " << scale
-	            << ". FREE-BOUNDARY-PLAN.md section 3 rests on that "
-	            "diagonality, and section 3.4 says in as many words that if "
-	            "this fails the section is wrong and the plan needs the kernel" );
+	            << ". The exterior coupling rests on that diagonality "
+	            "(docs/free_boundary.rst, The exterior on a semicircle): if this "
+	            "fails the separation is wrong and the exterior needs the "
+	            "kernel" );
 
 	BOOST_TEST( worstDiagonal < 1.0e-6,
 	            "CEDRES++'s boundary form is diagonal but its diagonal is not "
@@ -1063,9 +1055,9 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
 /*
  * THE DECAY DIAGNOSTIC, AND THE MISREADING IT EXISTS TO PREVENT.
  *
- * FREE-BOUNDARY-PLAN.md section 11.6 asks for a readable spectrum, on the
- * grounds that the raw coefficients are not one: the modes are orthogonal in
- * dGamma/R but NOT normalised in it, so mode n contributes
+ * The spectrum has to be readable (docs/free_boundary.rst, Choosing the radius
+ * and the mode count), and the raw coefficients are not: the modes are
+ * orthogonal in dGamma/R but NOT normalised in it, so mode n contributes
  * | a_n | sqrt( mass( n ) ) to the trace's norm rather than | a_n |, and
  * mass( n ) ~ 1/n^3 makes that conversion factor ~ n^( -3/2 ).
  *
@@ -1130,7 +1122,7 @@ BOOST_AUTO_TEST_CASE( the_energy_spectrum_and_the_raw_one_disagree_about_the_tai
 		            "has the wrong sign of exponent and the diagnostic's advice "
 		            "is inverted" );
 
-	// AND IT IS THE n^( -3/2 ) OF THE PLAN, not merely some decay. mass( n )
+	// AND IT IS THE n^( -3/2 ) OF THE DERIVATION, not merely some decay. mass( n )
 	// is exactly 2/( n( n-1 )( 2n-1 ) ), which is asymptotically 1/n^3, so the
 	// ratio of the amplitude to n^( -3/2 ) must SETTLE rather than drift.
 	double const tailRatioFirst =
@@ -1167,7 +1159,7 @@ BOOST_AUTO_TEST_CASE( the_energy_spectrum_and_the_raw_one_disagree_about_the_tai
 	BOOST_TEST( flatRawTruncation < 0.2,
 	            "a flat RAW spectrum reports a truncation ratio of "
 	            << flatRawTruncation << ", which is not the small number its "
-	            "energy content deserves. This is the misreading section 11.6 "
+	            "energy content deserves. This is the misreading the diagnostic "
 	            "exists to remove: flat raw IS decaying energy" );
 
 	// ---- (2) FLAT ENERGY: the genuinely unconverged case -----------------

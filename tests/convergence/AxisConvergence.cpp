@@ -1,14 +1,13 @@
 /*
  * FB-A: the axis. Does MEQ's discretisation survive a mesh reaching R = 0?
  *
- * FREE-BOUNDARY-PLAN.md section 7 puts this first, and ROADMAP.md calls it the
- * one free-boundary item measurable today. Free boundary needs a domain that
+ * Free boundary needs a domain that
  * includes the machine axis -- the vacuum region runs from the plasma out to
  * the coils and the artificial boundary is a SEMICIRCLE whose flat side IS the
  * axis -- and at R = 0 the flux mass form ( R q, v ) degenerates and the
  * operator's 1/R is not integrable.
  *
- * WHAT THE PLAN SAID AND WHY IT IS SHARPENED HERE. Its acceptance was "element
+ * WHY THIS IS A RATE AND NOT A BOUND. The obvious acceptance is "element
  * local iteration counts and the trace condition number bounded under
  * refinement". Half of that is stale -- under NonlinearOrdering::NPC, which is
  * MEQ's default, there is no element-local non-linear solve and
@@ -32,8 +31,7 @@
  *      than a value, because the value is a property of the mesh and the
  *      degree and the ratio is a property of the axis.
  *   4. That q is BOUNDED at the axis, which is the claim the whole thing rests
- *      on and which FREE-BOUNDARY-PLAN.md section 8 lists as one of three
- *      things believed and not measured.
+ *      on.
  *
  * WHAT THIS IS NOT. It is not free boundary, not a coupling, not an exterior
  * operator and not a semicircular domain -- it is a rectangle whose left edge
@@ -317,12 +315,9 @@ BOOST_AUTO_TEST_CASE( theVacuumFieldsAreHarmonicAndVanishOnTheAxis )
  * same as the control -- and `q` is short by about half an order at k = 2 and
  * by a fifth and worsening at k = 1, while k = 3 is clean.
  *
- * THAT IS THE MEASUREMENT FREE-BOUNDARY-PLAN.md SECTION 8 ASKED FOR, AND IT IS
- * NOT THE ONE IT EXPECTED. The plan lists three reasons the axis should be
- * survivable and says plainly that none is a measurement, then names "the
- * conditioning as h -> 0" as the unknown. The conditioning is not what gives
- * way; the flux's rate is. The mechanism is visible in the weights: the flux
- * mass form is ( R q, v ), so the discrete flux is controlled in a norm whose
+ * THE CONDITIONING IS NOT WHAT GIVES WAY; THE FLUX'S RATE IS. That q is bounded
+ * and that the flux mass is positive definite are both true, and neither is the
+ * thing that fails. The mechanism is visible in the weights: the flux mass form is ( R q, v ), so the discrete flux is controlled in a norm whose
  * weight VANISHES at R = 0, while fluxError() measures it in an unweighted L2.
  * The elements touching the axis are therefore the ones the method controls
  * least and the error norm counts fully, which is the shape of a boundary layer
@@ -551,16 +546,15 @@ BOOST_AUTO_TEST_CASE( theTwoPathsAgreeOnTheVacuumField )
 }
 
 /*
- * WHAT THE AXIS COSTS THE CONDITIONING, WHICH IS THE PLAN'S OWN ACCEPTANCE.
+ * WHAT THE AXIS COSTS THE CONDITIONING, WHICH IS FB-A's OWN ACCEPTANCE.
  *
  * The claim under test is not that the conditioning is good -- it degrades under
  * h-refinement for every elliptic problem and always has -- but that the axis
  * does not make it degrade FASTER. So the quantity asserted is the RATIO of the
  * two columns, and what must be bounded is its growth.
  *
- * MEASURED, AND THE ANSWER IS 1/h. This is the number
- * FREE-BOUNDARY-PLAN.md section 8 asks for -- "what is unknown is the
- * conditioning as h -> 0" -- and it comes out unambiguous:
+ * MEASURED, AND THE ANSWER IS 1/h, unambiguously (docs/free_boundary.rst, The
+ * domain reaches the axis):
  *
  *     k     on axis, over the sweep          the control        ratio grows by
  *     1     5.48e1 -> 4.61e2                 7.28 -> 8.54            7.169
@@ -574,8 +568,7 @@ BOOST_AUTO_TEST_CASE( theTwoPathsAgreeOnTheVacuumField )
  * so the element touching the axis carries a weight of order h and the extreme
  * ratio grows as 1/h.
  *
- * WHAT THAT MEANS FOR FREE BOUNDARY, stated plainly because the plan will need
- * it. 1/h is survivable and is not the outcome that would stop FB-1: MEQ solves
+ * WHAT THAT MEANS FOR FREE BOUNDARY, stated plainly. 1/h is survivable and is not the outcome that would stop FB-1: MEQ solves
  * the trace system with a DIRECT solver, whose cost and accuracy are almost
  * insensitive to conditioning at these sizes, and the suite's own answers are
  * unaffected -- psi still converges at k+1 on the same meshes. It would matter
@@ -656,9 +649,8 @@ BOOST_AUTO_TEST_CASE( theAxisDoesNotDegradeTheConditioningWithRefinement )
 /*
  * AND THE CLAIM THE WHOLE STAGE RESTS ON: q IS BOUNDED AT THE AXIS.
  *
- * FREE-BOUNDARY-PLAN.md section 8 offers three reasons the axis is survivable
- * and says plainly that none of them is a measurement. This is the first of
- * them: "q = ( 1/R ) grad-bar psi is BOUNDED at the axis because psi ~ R^2".
+ * q = ( 1/R ) grad-bar psi is BOUNDED at the axis because psi ~ R^2: the first
+ * of the reasons the axis is survivable.
  *
  * It is a statement about the exact field rather than about the solver, so it
  * is checked on the fixture -- but it is checked HERE rather than in the

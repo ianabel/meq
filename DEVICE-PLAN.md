@@ -835,7 +835,8 @@ at **0.035 s, 0.5%** of the run. It is high because the integrand is not
 polynomial: `VertexConePath`'s cone roughens the foot map `ξ ↦ a( x( ξ ) )`, so
 the rule converges algebraically rather than spectrally — 2.61e-04 at q8,
 1.01e-04 at q12, 1.34e-05 at q20, 6.68e-08 at q40, 5.40e-10 at q80, which is the
-cone-off floor (`FREE-BOUNDARY-PLAN.md` §7.7). **What matters for residency is
+cone-off floor (`CLAUDE_DECLINED.md`, *Lost coverage as the cause of the red
+tiling, and relaxing the gate*). **What matters for residency is
 the 15.8 crossings, not the 21 points inside each one.**
 
 **Once per solve, or once per adaptive cycle — these cost one transfer at the

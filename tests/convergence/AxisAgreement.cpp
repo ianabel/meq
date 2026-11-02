@@ -343,7 +343,7 @@ BOOST_AUTO_TEST_CASE( aSpikedNodalValueIsNotAMagneticAxis )
  * THE FIXTURE IS TWO GAUSSIAN BUMPS WITH AN EXACT FLUX, so nothing here depends
  * on a solve: the plasma's peaks at 0.25 at ( 1.00, 0.00 ) and the conductor's
  * at 0.40 at ( 1.60, 0.30 ). That ordering is the observed one on the diverted
- * machine of FREE-BOUNDARY-PLAN.md section 10, where P1L carries +1.37e+05 A
+ * machine, where P1L carries +1.37e+05 A
  * against an I_p of 2.0e+05 A and its O-point reads psi = 1.21e-01 against the
  * reference equilibrium's axis at 8.3e-02.
  *
@@ -668,8 +668,8 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
  * THE NEW DEFAULT: psi_ax IS THE FLUX AT THE LOCATED AXIS, SO Psi THERE IS 1.
  *
  * AxisConstraint::LocatedAxis constrains psi_ax at a zero of q_h rather than at
- * the largest nodal value of psi_h -- FREE-BOUNDARY-PLAN.md section 11.5,
- * option 3. What that buys is that psi_ax MEANS the flux at a magnetic axis
+ * the largest nodal value of psi_h (docs/normalised_flux.rst, The bordered
+ * Newton). What that buys is that psi_ax MEANS the flux at a magnetic axis
  * rather than merely being the largest number in the potential vector.
  *
  * WHAT THIS CASE CAN AND CANNOT ASSERT, SAID PLAINLY BECAUSE THE DISTINCTION IS

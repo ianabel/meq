@@ -1,5 +1,6 @@
 # THE SAME DIVERTED TOKAMAK, WITH THE X-POINT SOLVED FOR RATHER THAN PRESCRIBED.
-# FREE-BOUNDARY-PLAN.md section 10, stage XP-3.
+# Stage XP-3 (CLAUDE_FB.md's stage table; docs/free_boundary.rst, The plasma
+# boundary flux, and the other borders).
 #
 # examples/diverted-tokamak.toml is this machine with psi_bnd pinned at the
 # REFERENCE's X-point, which makes a well-posed run and a fair comparison and

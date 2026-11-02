@@ -610,7 +610,7 @@ BOOST_AUTO_TEST_SUITE_END()
  * meq::NormalisedSource's profiles are functions of
  * Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ). MEQ's fixed-boundary problem has
  * psi = 0 on Gamma, so psi_bnd vanished and the class was written as
- * Psi = psi/psi_ax. FREE-BOUNDARY-PLAN.md's FB-3 makes it an unknown -- the flux
+ * Psi = psi/psi_ax. FB-3 makes it an unknown -- the flux
  * at the limiter contact or the X-point -- so it has to be settable first.
  *
  * THE PROPERTY IS A TRANSLATION, AND IT IS EXACT RATHER THAN APPROXIMATE.

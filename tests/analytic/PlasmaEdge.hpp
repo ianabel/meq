@@ -3,15 +3,15 @@
 
 /*
  * A MANUFACTURED EQUILIBRIUM WHOSE SOURCE STOPS AT A CIRCLE NO MESH LINE
- * FOLLOWS -- the plasma edge of FREE-BOUNDARY-PLAN.md section 5.3, with
- * everything else about free boundary removed.
+ * FOLLOWS -- the plasma edge of a free boundary (docs/free_boundary.rst, The
+ * plasma support), with everything else about free boundary removed.
  *
  * Free boundary makes the source F = [ mu0 R^2 p'(Psi) + (g g')(Psi) ] carry a
  * factor chi_{Omega_p}, and Omega_p is a level set of the solution. So F stops
  * dead on a curve that cuts through elements, and it moves while Newton runs.
  * The question this fixture exists to answer is what that costs the ORDER --
- * MEQ is a k+1 code in psi_h and a k+2 code in psi*, and section 5.3 names this
- * as the one place a published code (CEDRES++) says it hit a wall.
+ * MEQ is a k+1 code in psi_h and a k+2 code in psi*, and this is the one place
+ * a published code (CEDRES++) says it hit a wall.
  *
  * THE CONSTRUCTION. Take a disc of radius a about ( R_0, z0 ), strictly inside
  * the benchmark box, as the plasma:
@@ -254,8 +254,7 @@ class PlasmaEdge
  * point: nothing tells the solver where the edge is.
  *
  * F IS THEN A FUNCTION OF ( R, z, psi ) AND meq::Source's interface survives
- * untouched, which is FREE-BOUNDARY-PLAN.md section 5.3's first claim made
- * concrete.  Recovering phi from psi means inverting
+ * untouched.  Recovering phi from psi means inverting
  *
  *     g( t ) = t + c t^m ,      g' = 1 + c m t^( m - 1 ) > 0 ,
  *
@@ -276,7 +275,7 @@ class PlasmaEdge
  * as the other half of the pair.
  *
  * AND THE JACOBIAN IS EXACT WITHOUT A CUT-RULE DERIVATIVE, which is worth
- * saying because section 5.3 names that derivative as FB-4's one real gap.
+ * saying because a cut rule's derivative is what CEDRES++ names as its gap.
  * meq::SourceIntegrator evaluates dF/dpsi pointwise on a rule whose points do
  * NOT move, so the assembled Jacobian is the exact derivative of the assembled
  * residual whatever the edge is doing.  What the moving edge costs is

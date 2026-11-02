@@ -14,8 +14,8 @@ reproducing freegs4e to 1.3e-04. What it had that the fixture did not is **coils
 and a prescribed current**. The fixture now has both, plus the confinement, and
 it is **green at five limiter radii in a row**, 1.08 to 1.18, with the coil-free
 control converging to the wrong topology at three of them; see `CLAUDE_FB.md`,
-*§7.12b's fixture was the defect*, and `FREE-BOUNDARY-PLAN.md` §11.3 for the diagnosis and §11.7 for
-the repair.
+*`ψ_ax` was the weak point of the whole free-boundary path* for the diagnosis
+and *The two-border fixture was the defect* for the repair.
 
 Neither ingredient alone repairs the fixture, and confinement with a prescribed
 current does not either; it took the full 2 x 2 to say so

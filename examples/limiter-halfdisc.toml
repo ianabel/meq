@@ -16,7 +16,7 @@
 #
 # THE MESH IS FITTED TO THE LIMITER, WHICH IS WHAT MAKES THE POLYGON EXACT.  A
 # limiter is prescribed input and does not move with the solution, so it can be
-# aligned to, exactly as FREE-BOUNDARY-PLAN.md section 7.9's conductors are:
+# aligned to, exactly as a conductor is (CLAUDE_FB.md, FB-2):
 #
 #   python3 tools/mesh/halfdisc.py --rho 1.5 --size 0.12 \
 #           --limiter 1.00 0.0 0.35 -o examples/limiter-halfdisc.msh --check

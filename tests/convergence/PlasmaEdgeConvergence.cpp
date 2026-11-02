@@ -4,9 +4,9 @@
  *
  * Free boundary multiplies the source by chi_{Omega_p}, so F stops dead on a
  * curve that cuts through elements and moves while Newton runs.
- * FREE-BOUNDARY-PLAN.md section 5.3 calls this "the genuinely hard part" and
- * names cut quadrature -- and the DERIVATIVE of a cut rule -- as what a
- * published code (CEDRES++) says stopped it going above first order. MEQ is a
+ * This looks like the genuinely hard part: a published code (CEDRES++) names
+ * cut quadrature -- and the DERIVATIVE of a cut rule -- as what stopped it
+ * going above first order. MEQ is a
  * k+1 code in psi_h and a k+2 code in psi*, so "what order survives the cut" is
  * the question this file exists to answer.
  *
@@ -547,17 +547,16 @@ BOOST_AUTO_TEST_CASE( theCutCapsTheOrderBeforeAnyMethodIsChosen )
  */
 /*
  * FB-S: DOES AN X-POINT ON THE PLASMA EDGE COST THE APPROXIMATION ANYTHING?
- * FREE-BOUNDARY-PLAN.md section 10.1 and section 12.
+ * M-133.
  *
- * That section records a PREDICTION and says it is one: at a null `Psi` vanishes
- * QUADRATICALLY, so `F ~ Psi^j` vanishes to order `2j` there and the crossing is
- * SMOOTHER than the rest of the edge for every `j >= 1`, not rougher. The
- * `| d |^{j+2}` cap should therefore continue to hold along each branch and the
- * crossing should contribute nothing extra, being a set of measure zero in a
- * two-dimensional integral. It nominates XP-1 as where it stops being a
- * prediction, and XP-1 went elsewhere -- it found the fill leaking through the
- * BAND of elements straddling the separatrix and shipped a watershed. So the
- * order question was never asked.
+ * The PREDICTION: at a null `Psi` vanishes QUADRATICALLY, so `F ~ Psi^j`
+ * vanishes to order `2j` there and the crossing is SMOOTHER than the rest of
+ * the edge for every `j >= 1`, not rougher. The `| d |^{j+2}` cap should
+ * therefore continue to hold along each branch and the crossing should
+ * contribute nothing extra, being a set of measure zero in a two-dimensional
+ * integral. XP-1 was to test it and went elsewhere -- it found the fill leaking
+ * through the BAND of elements straddling the separatrix and shipped a
+ * watershed -- so the order question is asked here.
  *
  * THERE IS A COMPETING ARGUMENT AND IT IS WHY THIS IS WORTH MEASURING RATHER
  * THAN ASSERTING. The SUPPORT of a crossed edge has a CORNER -- two wedges
@@ -705,7 +704,7 @@ BOOST_AUTO_TEST_CASE( anXPointOnThePlasmaEdgeCostsTheApproximationNothing )
 	/*
 	 * WHAT IS ASSERTED IS THE PREDICTION, AND IT IS A COMPARISON RATHER THAN AN
 	 * ABSOLUTE RATE. The cap m + 1/2 is what theCutCapsTheOrderBeforeAnyMethodIsChosen
-	 * already measures for the smooth arm; what section 10.1 claims is that the
+	 * already measures for the smooth arm; what the prediction claims is that the
 	 * crossing costs NOTHING ON TOP, so the crossed arm's rate must not fall
 	 * below the smooth arm's by more than the scatter a moving cut produces.
 	 * 0.25 is ExtensionConvergence's own per-sequence slack for the same
@@ -714,8 +713,8 @@ BOOST_AUTO_TEST_CASE( anXPointOnThePlasmaEdgeCostsTheApproximationNothing )
 	 */
 	BOOST_TEST( worstDrop < 0.25,
 		"a crossed plasma edge converges " << worstDrop << " of an order worse "
-		"than a smooth one at its worst ( k, j ). FREE-BOUNDARY-PLAN.md "
-		"section 10.1 predicts no loss at all, on the argument that Psi "
+		"than a smooth one at its worst ( k, j ). The prediction is "
+		"no loss at all, on the argument that Psi "
 		"vanishes quadratically at a null so the crossing is SMOOTHER than the "
 		"branches; a real loss here is the SUPPORT's corner rather than the "
 		"function's smoothness, and it would mean a diverted plasma is capped "
@@ -981,14 +980,13 @@ BOOST_AUTO_TEST_CASE( locatingTheEdgeExactlyBuysNoOrder )
  *                                any degree or any mesh
  *     j >= 1  F is C^0 in psi    3 to 4 iterations, ordinary
  *
- * which is FREE-BOUNDARY-PLAN.md section 5.3's surface term dF/dpsi ~ F delta(
- * Psi ) made concrete: at j = 0 it is genuinely there, meq::Source cannot carry
- * a delta, and the Jacobian is not merely inconsistent but absent. Section 5.3
- * said to "decide this deliberately and write it down"; this is the
- * measurement it asked for.
+ * which is the surface term dF/dpsi ~ F delta( Psi ) made concrete: at j = 0
+ * it is genuinely there, meq::Source cannot carry a delta, and the Jacobian is
+ * not merely inconsistent but absent. A missing surface term is the kind of
+ * Jacobian error that has to be decided deliberately; this is the measurement.
  *
- * NOTE WHAT IS *NOT* MISSING. Section 5.3 names the derivative of a cut rule as
- * FB-4's one real gap. MEQ has no such gap, because it uses no cut rule: the
+ * NOTE WHAT IS *NOT* MISSING. The derivative of a cut rule looks like FB-4's
+ * one real gap. MEQ has no such gap, because it uses no cut rule: the
  * quadrature points do not move, so the assembled Jacobian is the exact
  * derivative of the assembled residual. Adopting a cut rule is what would
  * create that gap.
@@ -1078,8 +1076,8 @@ BOOST_AUTO_TEST_CASE( theMovingEdgeCostsTheRateNothingAndCostsNewtonEverythingAt
 		            "Newton converged on a moving edge with j = 0, where F jumps "
 		            "in psi and the residual is Lipschitz but not "
 		            "differentiable. If that is now reachable, something has "
-		            "supplied the surface term dF/dpsi ~ F delta( Psi ) that "
-		            "FREE-BOUNDARY-PLAN.md section 5.3 warns about, and this "
+		            "supplied the surface term dF/dpsi ~ F delta( Psi ), "
+		            "and this "
 		            "file's account of j = 0 needs rewriting" );
 		BOOST_TEST( !seeded,
 		            "Newton converged at j = 0 when STARTED FROM THE EXACT "

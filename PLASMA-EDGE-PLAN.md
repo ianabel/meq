@@ -1,9 +1,9 @@
 # The plasma edge as an interior interface, coupled at a distance
 
 **A design, not an implementation, and deliberately not to be built yet.**
-Written 2026-09-05, out of FB-4's measurements. `FREE-BOUNDARY-PLAN.md` §5.3 and
-§7.10 are the measurements; `CLAUDE_FB.md`'s *The plasma edge caps the order* is
-the record. This file is the one route out of that cap that fits the machinery
+Written 2026-09-05, out of FB-4's measurements. `CLAUDE_FB.md`'s *The plasma
+edge caps the order* is the record, and `docs/free_boundary.rst`, *The plasma
+support*, the account. This file is the one route out of that cap that fits the machinery
 MEQ already has, worked out far enough to be costed and argued with.
 
 **THE PRECONDITION WAS EXPLICIT — get `j ≥ 1` right first — AND IT IS NOW MET.**
@@ -200,7 +200,9 @@ rebuilt as the iterate moves.** Three consequences, in increasing order of how
 awkward they are.
 
 **5.1 The geometry's derivative enters the Jacobian.** This is
-`FREE-BOUNDARY-PLAN.md` §6.4's "one real gap", and it is not avoided by this
+the one real gap a cut rule opens — the derivative of the rule with the level
+set (`CLAUDE_FB.md`, *At `j = 0` the question does not arise*) — and it is not
+avoided by this
 route — it is the *price* of every route to high order at a moving interface.
 MEQ avoids it today only because a fixed quadrature rule has no geometry to
 differentiate.
@@ -242,7 +244,7 @@ Each stage ends at a **measured rate**, as every stage in this tree does.
 |---|---|---|
 | **PE-0** | **A fixed interface, one side only.** Solve the plasma problem alone on `Ω_{p,h}` with `λ` GIVEN, against `PlasmaEdge`'s exact solution. No coupling, no vacuum side. | **RUN.** `tests/convergence/PlasmaEdgeConvergence.cpp`, three cases, `j = 0, 1, 2` × `k = 1, 2, 3`; the control is the same solve with `λ` deleted and it is flat at −0.06. **`ψ` at `k+1`: MET.** At `j = 0` it reads **2.00 / 3.04 / 4.01** where the cut mesh is capped at `j + 1.5 = 1.5` whatever `k` is, and the cap is gone at every `j`. **`ψ*` at `k+2`: NOT MET with `λ` transferred** — 2.23 / 3.16 / 4.00 at `j = 0` — and **MET with the same `λ` imposed on `Γ_{p,h}` instead**, 2.88 / 3.94 / 4.93. The two columns differ only in the transfer, so **the premise is true and the TRANSFER is what costs `ψ*` its extra order**, by about a full order, at every `j`. `j` has left the rates: the spread of `ψ*` over `j = 0, 1, 2` is 0.07 / 0.18 / 0.29 against the cut mesh's 1.11 / 2.04 / 2.18. §7's `j = 2, k = 3` worry does NOT reproduce here — see the note under this table |
 | **PE-1** | **The vacuum side, with its inward paths.** Same, on `Ω_{v,h}`, `λ` still given. | the same rates from the other side, plus the mirrored star-shapedness margin `≥ 0` |
-| **PE-2** | **The two-sided sweep and its tiling check.** Both path families over the same `Γ_p`; weights from each must sum to `\|Γ_p\|`. | agreement to the cone-off floor, `~5e-10`, which is the number `ExtensionBoundaryQuadrature`'s own check reached. **Refine the RULE at fixed `h`** to separate coverage from smoothness — the mistake recorded in §7.7 of the free-boundary plan |
+| **PE-2** | **The two-sided sweep and its tiling check.** Both path families over the same `Γ_p`; weights from each must sum to `\|Γ_p\|`. | agreement to the cone-off floor, `~5e-10`, which is the number `ExtensionBoundaryQuadrature`'s own check reached. **Refine the RULE at fixed `h`** to separate coverage from smoothness — the mistake recorded in `CLAUDE_DECLINED.md`, *Lost coverage as the cause of the red tiling, and relaxing the gate* |
 | **PE-3** | **The coupling closed on a FIXED interface**, `λ` solved for by the `N` flux-balance rows in a border. Still no moving support: prescribe `Γ_p`. | `k+1` / `k+2` against the exact solution at `j = 0, 1, 2`, and `λ`'s truncation shown to be spectral in `N` and therefore not the binding term |
 | **PE-4** | **The support read off `ψ_h`**, with the outer fixed point of §5.2. | the same rates as PE-3 on `MovingPlasmaEdge`; the outer loop terminating on "no element changed"; **and `j = 0` converging at all**, which is the finding this plan exists to overturn |
 | **PE-5** | **Into the free-boundary solve**: `ψ_ax`, `ψ_bnd`, the exterior coupling and the plasma edge in one bordered system. | `HighBetaConvergence` and the FB-1 cases unchanged to every digit, which is what says the generalisation reduces |
@@ -313,8 +315,8 @@ to first order or worse — so a corner takes away exactly the two quantities th
 plan exists to recover. **So this design still covers LIMITER plasmas and not
 diverted ones**, which is a large scope limit and is not a detail to discover at
 PE-5; but the reason is now a number rather than a hand-wave, and §9.5 lists
-three geometries that would remove it. `FREE-BOUNDARY-PLAN.md` §10 is the
-diverted-plasma pathway and **it does not rescue this one**: it works by never
+three geometries that would remove it. XP-0 to XP-4 are the diverted-plasma
+pathway (`CLAUDE_FB.md`'s stage table) and **it does not rescue this one**: it works by never
 meshing the separatrix, which is available to a free-boundary solve and is
 exactly what an interior interface cannot do.
 
@@ -383,8 +385,9 @@ is the measurement.
 
 ### 9.1 The separatrix is four analytic arcs and a node, not a singular curve
 
-**`ψ` is analytic at an X-point** — `FREE-BOUNDARY-PLAN.md` §10.1's organising
-fact — because `Δ*ψ = −F` with `F` bounded and the X-point is an ordinary
+**`ψ` is analytic at an X-point** — the organising fact of the diverted
+pathway (`docs/free_boundary.rst`, *The plasma boundary flux, and the other
+borders*) — because `Δ*ψ = −F` with `F` bounded and the X-point is an ordinary
 non-degenerate saddle. The Morse lemma then gives coordinates in which
 
 ```
@@ -451,7 +454,8 @@ core and the private flux region — and that set is not locally Lipschitz, so n
 extension analysis applies to it at all. Take the core alone and both domains
 become Lipschitz: 77.48° convex, 282.52° re-entrant.
 
-So `FREE-BOUNDARY-PLAN.md` §10.3's flood fill is not a later refinement for
+So XP-1's flood fill (`CLAUDE_FB.md`, *XP-1: the plasma support is a connected
+component*) is not a later refinement for
 diverted plasmas. **It is what makes `Ω_p` a domain this plan can be posed on**,
 and the plan's dependency on it should be stated at the top rather than
 discovered at PE-5.

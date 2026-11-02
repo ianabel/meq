@@ -13,15 +13,14 @@
 # WHY THIS CASE AND NOT A DIVERTED ONE.  meq::NormalisedSource::insidePlasma is
 # a POINTWISE test on the value, ( psi - psi_bnd )*span > 0, with no
 # connectivity.  Across an X-point that switches the source on in the private
-# flux region as well as in the plasma, so MEQ is limiter-only until the flood
-# fill of FREE-BOUNDARY-PLAN.md section 10 is built.  This case has
+# flux region as well as in the plasma; the connected-component fill (XP-1) is
+# what separates them on a diverted case.  This case has
 # vertical-field coils only, so no X-point exists in range.
 #
 # WHERE THE INPUTS CAME FROM.  freegs4e's own H_limited_circular, whose coil
 # currents were SOLVED FOR by its control system rather than chosen by eye --
-# which is what makes them consistent inputs, and which
-# FREE-BOUNDARY-PLAN.md section 7.15 argues is the thing that makes a
-# free-boundary Newton converge at all.  tools/freegs4e-benchmark/README.md is
+# which is what makes them consistent inputs, and consistent inputs are what
+# make a free-boundary Newton converge at all.  tools/freegs4e-benchmark/README.md is
 # the recipe and DriverAcceptance's theDriverSolvesALimitedTokamak is the
 # regression.
 #
@@ -145,7 +144,7 @@ Type = "zero"
 # true circle's maximum is on both grids.  So this key reproduces the
 # reference's grid error faithfully and is not the machine; a MEQ run compared
 # against a FINER reference has to take this point, and the coil currents, from
-# that same run.  FREE-BOUNDARY-PLAN.md section 7.20.
+# that same run.  CLAUDE_FB.md, FB-6 is beaten.
 #
 # MEQ EVALUATES psi_h AT THIS POINT, not at the nearest potential dof to it --
 # LimiterConstraint::ExactPoint, the default since 2026-09-07.  Snapping was an

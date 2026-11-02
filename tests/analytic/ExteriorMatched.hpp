@@ -5,22 +5,21 @@
  * A manufactured equilibrium that is EXACTLY ONE EXTERIOR MODE outside a
  * radius rho_0 and a polynomial inside it, for FB-1.
  *
- * FREE-BOUNDARY-PLAN.md section 7 makes FB-1 "the stage to protect" -- it
- * exercises ExteriorDtN, the transferred datum with a non-zero g, the
- * transmission condition, the augmented solve and the coil sources all at once
- * -- and gives its acceptance as "psi_h against that closed form at k+1", the
- * closed form being "the sum of the coils' loop fields".
+ * FB-1 is the stage to protect -- it exercises ExteriorDtN, the transferred
+ * datum with a non-zero g, the transmission condition, the augmented solve and
+ * the coil sources all at once -- and its acceptance is psi_h against a closed
+ * form at k+1. The obvious closed form is the sum of the coils' loop fields.
  *
  *
  * WHY THE LOOP FIELDS CANNOT BE THAT CLOSED FORM
  * ----------------------------------------------
  *
  * They are the right check on ExteriorDtN alone -- tests/unit/ExteriorDtNTests
- * puts a current loop through the symbol and reads 6.9e-14, and section 3.3 is
- * explicit that a field the class knows nothing about is the only kind that can
- * catch a self-consistent misreading. What they cannot be is the exact
+ * puts a current loop through the symbol and reads 6.9e-14, and a field the
+ * class knows nothing about is the only kind that can catch a self-consistent
+ * misreading. What they cannot be is the exact
  * SOLUTION of an order study, and there are two independent reasons, matching
- * the two coil models section 5.4 offers.
+ * the two coil models there are.
  *
  * A FILAMENT IS A DELTA FUNCTION. In the ( R, z ) half-plane a circular loop is
  * a point, so its source is a Dirac mass and its psi has a logarithmic
@@ -37,7 +36,7 @@
  * recovers it" -- and the remedy is the same one: do not pose the study there.
  *
  * A FINITE CROSS-SECTION FIXES THE REGULARITY AND LOSES THE CLOSED FORM.
- * Section 5.4's other model, F_coil = mu0 R I_k / |Omega_ck| on a coil
+ * The other model, F_coil = mu0 R I_k / |Omega_ck| on a coil
  * subdomain, has psi in H^2 -- but its exact field is the two-dimensional
  * integral of loop fields over the cross-section, which is semi-analytic
  * (quadrature, not a formula) and whose integrand is weakly singular for a
@@ -58,8 +57,8 @@
  * ----------------
  *
  * In spherical coordinates about a centre on the axis -- R = rho sin theta,
- * z = zCentre + rho cos theta, mu = cos theta -- FREE-BOUNDARY-PLAN.md
- * section 3 separates the operator as
+ * z = zCentre + rho cos theta, mu = cos theta -- docs/free_boundary.rst,
+ * The exterior on a semicircle -- the operator separates as
  *
  *     Delta*( F( rho ) C_n( mu ) ) = [ F'' - n( n - 1 ) F / rho^2 ] C_n( mu ),
  *

@@ -4,23 +4,23 @@
 #include <vector>
 
 /*
- * THE PLASMA IS A CONNECTED SET AND `{ Psi > 0 }` IS NOT: stage XP-1 of
- * FREE-BOUNDARY-PLAN.md section 10.6.
+ * THE PLASMA IS A CONNECTED SET AND `{ Psi > 0 }` IS NOT: stage XP-1.
+ * docs/free_boundary.rst, *The plasma support*, is the account; CLAUDE_FB.md,
+ * *XP-1: the plasma support is a connected component*, the record.
  *
  * meq::NormalisedSource::insidePlasma() is a POINTWISE test on the value,
  * ( psi - psi_bnd )*span > 0, with no connectivity in it at all. That is
  * correct for a plasma whose level set happens to have one component and wrong
- * whenever it does not, and section 10.3 records the direction it is wrong in:
+ * whenever it does not, and it is wrong in a specific direction:
  * across an X-point the level psi = psi_X cuts a neighbourhood into four
  * sectors and TWO OPPOSITE ONES carry Psi > 0 -- the plasma, and the private
  * flux region under the divertor. A run with `ConfineToPlasma` on then
  * converges and describes a machine with a second current channel nobody asked
  * for.
  *
- * **AND IT IS LIVE RATHER THAN LATENT, WHICH SECTION 10.3 SAID IT WAS NOT.**
- * That paragraph reads "it cannot fire today: no shipped example sets
- * ConfineToPlasma and MEQ has no diverted case". The first half is still true
- * and the second is beside the point. Measured on the LIMITER fixture of
+ * **AND IT IS LIVE RATHER THAN LATENT.** The obvious reading is "it cannot
+ * fire: no shipped example sets ConfineToPlasma and MEQ has no diverted case",
+ * and the second half is beside the point. Measured on the LIMITER fixture of
  * tests/convergence/FreeBoundaryCoupling.cpp -- a half-disc, an exterior
  * coupling, two borders, and NO X-POINT ANYWHERE -- the converged
  * { psi > psi_bnd } is 705 elements in more than one piece, and a ray across
@@ -63,9 +63,10 @@
  * X-point first, because a grid fill leaks diagonally through the saddle: the
  * two lobes meet at a point, and on a grid a point is an eight-neighbour hop.
  *
- * Section 10.3 predicts MEQ needs no such blocking, because two lobes meeting
- * at a shared VERTEX are not face neighbours, and that "the expected leak is
- * ONE ELEMENT WIDE" -- the saddle's own element, which is cut by both branches.
+ * The natural prediction is that MEQ needs no such blocking, because two lobes
+ * meeting at a shared VERTEX are not face neighbours, and that "the expected
+ * leak is ONE ELEMENT WIDE" -- the saddle's own element, which is cut by both
+ * branches.
  * MEASURED on Soloviev::iterExample2(), whose saddle is known in closed form,
  * BOTH HALVES ARE WRONG IN THE SAME DIRECTION.
  *
@@ -77,8 +78,8 @@
  *     carries Psi > 0 at some vertex and is therefore a candidate, and which
  *     near a saddle is several elements wide. The plain fill takes the WHOLE
  *     private flux region: 2275 elements of 16688 and 10.4% of int |F|.
- *   * And blocking the saddle's own element -- section 10.3's cure, which needs
- *     an X-point finder that stage XP-0 has not built -- works on a fine mesh
+ *   * And blocking the saddle's own element -- the obvious cure, which needs
+ *     an X-point finder -- works on a fine mesh
  *     and NOT on a coarse one: 161 of 2304 elements still reached below the
  *     saddle at the coarsest of three resolutions.
  *
@@ -171,7 +172,7 @@ namespace meq
 			 * So the leak is a property of the INCLUSIVE candidate rule and not
 			 * of the graph. Two lobes meeting at a point are joined by the band
 			 * of elements STRADDLING the separatrix, which near the saddle is
-			 * several elements wide -- section 10.3 predicted a leak "one
+			 * several elements wide -- the prediction was a leak "one
 			 * element wide" and the plain fill in fact takes the whole private
 			 * flux region, 2275 elements and 10.4% of int |F|.
 			 *

@@ -1,6 +1,6 @@
 // Unit tests for the plasma connectivity fill in src/meq/PlasmaComponent.
 //
-// FREE-BOUNDARY-PLAN.md stage XP-1. meq::NormalisedSource::insidePlasma() is a
+// Stage XP-1. meq::NormalisedSource::insidePlasma() is a
 // POINTWISE test on the value, so `{ Psi > 0 }` is whatever the level set
 // happens to be and not necessarily the plasma. This is the connectivity the
 // pointwise test is missing, as a graph algorithm on plain data.
@@ -12,8 +12,8 @@
 //   * TWO LOBES TOUCHING AT A VERTEX. `../freegs4e` has to block a
 //     neighbourhood of each X-point before its grid fill, because on a uniform
 //     grid two lobes meeting at a point are eight-neighbours. Over FACE
-//     neighbours they are not adjacent at all, and section 10.3 predicts MEQ
-//     therefore needs no blocking. Half of that is right and this file pins the
+//     neighbours they are not adjacent at all, and the face-neighbour prediction
+//     (CLAUDE_FB.md, XP-1) was that MEQ therefore needs no blocking. Half of that is right and this file pins the
 //     half that is: a vertex-touching pair really is separated.
 //   * TWO LOBES BRIDGED BY ONE ELEMENT, which is the other half and is what the
 //     X-point's own element does -- it is cut by both branches and is a face
@@ -111,7 +111,7 @@ BOOST_AUTO_TEST_CASE( an_unfilled_component_holds_everywhere )
 /*
  * TWO LOBES TOUCHING AT A VERTEX ARE SEPARATE, WHICH IS THE PREDICTION.
  *
- * Section 10.3: "A fill over FACE neighbours cannot cross a shared vertex, so
+ * The face-neighbour prediction (CLAUDE_FB.md, XP-1): "A fill over FACE neighbours cannot cross a shared vertex, so
  * it should be blocked at the saddle automatically". Here is that statement in
  * its purest form -- a 3x3 grid whose two diagonal corners carry plasma and
  * whose centre does not:
@@ -152,7 +152,7 @@ BOOST_AUTO_TEST_CASE( two_lobes_meeting_at_a_vertex_are_not_connected )
  *
  * The element that CONTAINS an X-point is cut by both branches of the
  * separatrix, so it carries Psi > 0 and is a face neighbour of both lobes.
- * Section 10.3 predicts the resulting leak is "one element wide"; it is not.
+ * The prediction was that the resulting leak is "one element wide"; it is not.
  * Once the fill is through the bridge, every further cell of the far lobe is an
  * ordinary face neighbour and the whole region is taken -- which this case
  * measures directly by making the far lobe large.
@@ -284,7 +284,7 @@ BOOST_AUTO_TEST_CASE( a_connected_candidate_set_is_unchanged )
  * The one-rule fill above is bridged by a single element, and on a real mesh
  * that bridge is the band STRADDLING the level set near a saddle -- which is
  * several elements wide, so the leak is the whole far lobe rather than the one
- * element section 10.3 predicted. The two-rule fill walks only elements that
+ * element that was predicted. The two-rule fill walks only elements that
  * are unambiguously inside, where the two lobes are not adjacent at all, and
  * then gives each straddling element to whichever interior component reaches it
  * first, so that the plasma EDGE is not eaten.

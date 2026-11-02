@@ -191,12 +191,11 @@ set(MEQ_CONVERGENCE_TESTS
 	FluxGridConvergence
 	SurfaceAverageConvergence
 	SurfaceFitConvergence
-	# FB-A, the first stage of FREE-BOUNDARY-PLAN.md and the only one that needs
-	# no free boundary: a vacuum solve on a mesh whose inner edge IS the axis,
-	# where the flux mass ( r q, v ) degenerates and the operator's 1/r is not
+	# FB-A, the one free-boundary stage that needs no free boundary: a vacuum
+	# solve on a mesh whose inner edge IS the axis, where the flux mass ( r q, v ) degenerates and the operator's 1/r is not
 	# integrable. It is an ordinary convergence test because it has an ordinary
 	# exact solution -- see tests/analytic/VacuumHarmonic.hpp for why one exists
-	# at all, which the plan did not know.
+	# at all.
 	AxisConvergence
 	# XP-1, the connectivity of the confined plasma support. It is a convergence
 	# test rather than a unit one because the flood fill's INPUT is a mesh and a

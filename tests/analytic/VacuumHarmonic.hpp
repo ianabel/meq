@@ -4,11 +4,10 @@
 /*
  * Delta*-harmonic flux functions that VANISH ON THE AXIS, for FB-A.
  *
- * FREE-BOUNDARY-PLAN.md section 7 puts FB-A first -- "the axis. A vacuum solve
- * on a mesh touching R = 0. No free boundary, no coupling" -- and ROADMAP.md
- * calls it the one thing measurable today. Its acceptance was written as "the
- * trace condition number bounded under refinement", and that is weaker than
- * this project accepts anywhere else. It does not have to be: a vacuum solve
+ * FB-A is the axis: a vacuum solve on a mesh touching R = 0, with no free
+ * boundary and no coupling. "The trace condition number bounded under
+ * refinement" would be a weaker acceptance than this project takes anywhere
+ * else, and it does not have to be: a vacuum solve
  * needs Delta* psi = 0, and there are POLYNOMIAL Delta*-harmonic functions that
  * are exactly zero on the axis, so FB-A gets a rate against a closed form like
  * every other stage.
@@ -26,8 +25,8 @@
  * basis also contains R^2 ln R - z^2, which is Delta*-harmonic and BOUNDED at
  * the axis but NOT zero there -- it tends to -z^2. axisNonZero() is that
  * function. A solve that handles R^2 and fails on this one has found something
- * about the axis rather than about the mesh, which is the discrimination
- * FREE-BOUNDARY-PLAN.md section 8's three non-measurements are missing. Note
+ * about the axis rather than about the mesh, which is a discrimination that
+ * "q is bounded" and "the mass matrix is positive definite" cannot make. Note
  * that its GRADIENT carries a ln R and a 1/R, so q is unbounded at the axis and
  * only the potential is: it is a control, not a benchmark, and a mesh reaching
  * exactly R = 0 cannot integrate it.
@@ -109,10 +108,9 @@ class VacuumHarmonic
 		///
 		/// BOUNDED AT THE AXIS, AND THAT IS THE POINT. Every term of psi carries
 		/// R^2, so every term of d_r psi carries R and the division is exact:
-		/// q_r -> 2a as R -> 0 rather than diverging. This is the "q is bounded
-		/// at the axis because psi ~ R^2" that FREE-BOUNDARY-PLAN.md section 8
-		/// lists as one of its three non-measurements, written down so that it
-		/// can be one.
+		/// q_r -> 2a as R -> 0 rather than diverging. This is "q is bounded at
+		/// the axis because psi ~ R^2", written down so that it can be
+		/// measured.
 		double fluxR( double radius, double z ) const
 		{
 			return 2.0*aValue + 2.0*bValue*z

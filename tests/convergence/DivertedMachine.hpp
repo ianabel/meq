@@ -3,16 +3,16 @@
 
 /*
  * THE DIVERTED MACHINE, ASSEMBLED ONCE FOR EVERY CASE THAT NEEDS ONE.
- * FREE-BOUNDARY-PLAN.md section 10.
  *
  * examples/diverted-tokamak.toml is freegs4e's own A_testtokamak_classic: an
  * up-down asymmetric double null whose coil currents were SOLVED FOR by its
- * control system, which section 7.15 argues is what makes a free-boundary
- * Newton converge at all. It is BORROWED rather than designed, and the header
+ * control system -- consistent inputs, which is what makes a free-boundary
+ * Newton converge at all (docs/free_boundary.rst, The plasma boundary flux, and
+ * the other borders). It is BORROWED rather than designed, and the header
  * of XPointOuter.cpp records the twelve hand-built single nulls that failed
  * before it and why -- the short form being that this tree's own geometry
  * cannot carry a null without driving psi_bnd negative, which puts the
- * symmetry axis inside the plasma support and grows section 11.3's axis layer.
+ * symmetry axis inside the plasma support and grows the R = 0 axis layer.
  *
  * IT LIVES IN A HEADER BECAUSE XP-2 AND XP-3 SOLVE THE SAME MACHINE AND MUST
  * SOLVE THE SAME ONE. XP-3's acceptance is agreement with XP-2, so a second
@@ -209,7 +209,7 @@ namespace meqtest
 		// THE FILE'S OWN [[coils]], THROUGH THE FACTORY THE DRIVER CALLS. The
 		// currents are freegs4e's control system's, so this case borrows a
 		// machine somebody else's code balanced rather than one built here --
-		// which is the whole reason section 10 stopped designing single nulls
+		// which is the whole reason this tree stopped designing single nulls
 		// by hand.
 		m.coils = meq::makeCoilSet( m.config->getCoils(),
 		                            sourceConfig.permeability(), machineFile );
@@ -231,7 +231,7 @@ namespace meqtest
 		 * source's pointwise test is live, so nothing fails loudly.
 		 *
 		 * WHAT THAT COSTS IS THE WHOLE OF XP-1 ON THE ONE DIVERTED CASE IN THIS
-		 * TREE. Section 10.3: a diverted plasma's level set is DISCONNECTED
+		 * TREE. A diverted plasma's level set is DISCONNECTED
 		 * across the X-point, so the pointwise test picks up the private flux
 		 * region and gives it a current channel nobody asked for. That is the
 		 * configuration XP-1 was built for and this fixture was running without
@@ -409,8 +409,9 @@ namespace meqtest
 	}
 
 	/// **FIX THE SUPPORT FOR THE NEXT SOLVE AT @a state, AND RE-DECIDE IT HERE
-	/// RATHER THAN INSIDE NEWTON.** Section 10.5's prescription, applied to the
-	/// support as well as to the bounding point: the threshold insidePlasma()
+	/// RATHER THAN INSIDE NEWTON.** Fix the topology within a solve and
+	/// re-decide it between solves, applied to the support as well as to the
+	/// bounding point: the threshold insidePlasma()
 	/// tests against and the connected component the fill reaches are both held
 	/// for the whole of one solve and both moved between solves.
 	///

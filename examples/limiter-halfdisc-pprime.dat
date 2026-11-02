@@ -4,7 +4,8 @@
 # CONSTANT, so this source has j = 0 at the plasma edge.  That is admissible
 # HERE only because the support does not move: no ConfineToPlasma, so F is a
 # function of Psi everywhere and the residual stays smooth in the unknowns.
-# FREE-BOUNDARY-PLAN.md FB-4 is why j = 0 and a MOVING support do not mix.
+# FB-4 is why j = 0 and a MOVING support do not mix (docs/free_boundary.rst,
+# The plasma support).
 -0.6000  4.5000000000e-01  0.0
 -0.5500  4.5000000000e-01  0.0
 -0.5000  4.5000000000e-01  0.0

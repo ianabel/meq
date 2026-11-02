@@ -11,9 +11,9 @@
 #include <string>
 
 /*
- * HOW C_n IS EVALUATED, AND IT IS NOT THE FORMULA THE PLAN PRINTS.
+ * HOW C_n IS EVALUATED, AND IT IS NOT THE PRINTED FORMULA.
  *
- * FREE-BOUNDARY-PLAN.md section 3 writes the angular functions as
+ * The angular functions are usually written
  *
  *     C_n( mu ) = ( P_{n-2}( mu ) - P_n( mu ) ) / ( 2n - 1 ),
  *
@@ -69,7 +69,7 @@
  *
  * at m = n - 1, divided by ( n( n - 1 ) )^2 -- which gives
  * 2/( n( n - 1 )( 2n - 1 ) ) exactly. So the closed form in the header is
- * DERIVED here rather than copied from the plan, and the two agreeing is a
+ * DERIVED here rather than copied, and the two agreeing is a
  * check rather than a restatement. Confirmed numerically as well, at n = 2..8,
  * to every digit printed.
  */
@@ -430,8 +430,8 @@ namespace meq
 	 * caller reading raw a_n therefore worries about the healthy case and is
 	 * comforted by the sick one.
 	 *
-	 * The measured stake, from FREE-BOUNDARY-PLAN.md section 11.6: on section
-	 * 7.16's machine case N = 6 costs 0.3% in psi_ax and N = 10 is converged.
+	 * The measured stake: on the limited-tokamak machine case N = 6 costs
+	 * 0.3% in psi_ax and N = 10 is converged.
 	 * That is a small enough margin that it has to be read off an honest
 	 * quantity rather than eyeballed.
 	 */
