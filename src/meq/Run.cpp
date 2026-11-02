@@ -737,6 +737,7 @@ struct meq::Run::Impl
 		: argument( options.configPath ),
 		  configText( options.configText ),
 		  baseDirectory( options.baseDirectory ),
+		  profiles( options.profiles ),
 		  version( options.version ),
 		  deviceName( options.deviceName ),
 		  deviceGiven( options.deviceGiven ),
@@ -759,6 +760,7 @@ struct meq::Run::Impl
 	std::string const argument;
 	std::string const configText;
 	std::string const baseDirectory;
+	meq::ProfileTables const profiles;
 	std::string const version;
 	std::string deviceName;
 	bool deviceGiven = false;
@@ -1581,7 +1583,7 @@ int meq::Run::Impl::configure()
 
 		if ( config->getSource().isNormalised() )
 		{
-			auto plasma = meq::makeNormalisedSource( config->getSource(), argument );
+			auto plasma = meq::makeNormalisedSource( config->getSource(), argument, profiles );
 			psiAxisGuess = config->getSource().psiAxisGuess();
 			xPointSeedR = config->getBoundary().xpoint.radius;
 			xPointSeedZ = config->getBoundary().xpoint.z;
@@ -1664,7 +1666,7 @@ int meq::Run::Impl::configure()
 		}
 		else
 		{
-			auto plasma = meq::makeSource( config->getSource(), argument );
+			auto plasma = meq::makeSource( config->getSource(), argument, profiles );
 
 			if ( coils )
 			{
@@ -7422,6 +7424,19 @@ int meq::Run::Impl::write()
 					               std::istreambuf_iterator<char>() );
 				writer.attribute( "input_toml", text );
 				writer.attribute( "input_file", argument );
+			}
+
+			// AND WHICH PROFILES CAME AS TABLES RATHER THAN FROM THE FILES
+			// input_toml names, slot by slot, with the abscissa and the
+			// size: input_toml alone would name files this run never read.
+			if ( !profiles.empty() )
+			{
+				std::string tables;
+				for ( auto const &entry : profiles )
+					tables += ( tables.empty() ? "" : "; " ) + entry.first + " ("
+					          + meq::profileAbscissaName( entry.second.abscissa ) + ", "
+					          + std::to_string( entry.second.knots.size() ) + " knots)";
+				writer.attribute( "profile_tables", tables );
 			}
 
 		}

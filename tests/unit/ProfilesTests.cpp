@@ -820,3 +820,137 @@ BOOST_AUTO_TEST_CASE( theSplineClampsOutsideAndRefusesWhatItCannotBuild )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * A TABLE IN ANOTHER ABSCISSA IS THE SAME FUNCTION OF Psi (PYTHON-PLAN.md, PY-2).
+ *
+ * Both maps are checked against closed forms a Hermite cubic reproduces
+ * exactly, so the comparisons are round-off and not tabulation.
+ */
+
+// psi_n = 1 - Psi is affine, so a cubic in psi_n is a cubic in Psi and the
+// re-knotted table reproduces it, with each derivative carrying the chain
+// rule's sign -- and it is still a SplineProfile, which the device path reads.
+BOOST_AUTO_TEST_CASE( aTableInPsiNIsTheSameCubicInPsi )
+{
+	auto const f = []( double x ) { return 2.0*x*x*x - x*x + 3.0*x - 1.0; };
+	auto const fp = []( double x ) { return 6.0*x*x - 2.0*x + 3.0; };
+	auto const fpp = []( double x ) { return 12.0*x - 2.0; };
+
+	meq::ProfileTable table;
+	table.abscissa = meq::ProfileAbscissa::PsiN;
+	for ( double const x : { 0.0, 0.3, 0.55, 1.0 } )
+		table.knots.push_back( meq::Knot{ x, f( x ), fp( x ) } );
+
+	std::shared_ptr<meq::Profile const> const profile = meq::profileFromTable( table );
+	BOOST_TEST( dynamic_cast<meq::SplineProfile const *>( profile.get() ) != nullptr );
+
+	for ( double const psi : { 0.02, 0.2, 0.45, 0.6, 0.9, 0.99 } )
+	{
+		double const x = 1.0 - psi;
+		BOOST_TEST( ( *profile )( psi ) == f( x ), boost::test_tools::tolerance( 1.0e-13 ) );
+		BOOST_TEST( profile->prime( psi ) == -fp( x ), boost::test_tools::tolerance( 1.0e-13 ) );
+		BOOST_TEST( profile->doublePrime( psi ) == fpp( x ),
+		            boost::test_tools::tolerance( 1.0e-12 ) );
+	}
+}
+
+// sqrt( psi_n ) is not affine, so a table in it is re-knotted at its own knots
+// mapped to Psi = 1 - x^2: exact there, value and slope, and between them to
+// the tabulation. f( x ) = cos x is even, as a profile smooth in the flux is,
+// so g( Psi ) = cos( sqrt( 1 - Psi ) ) is analytic in Psi and the cubic in Psi
+// closes on it at fourth order; its slope is sin( sqrt s )/( 2 sqrt s ), 1/2 at
+// the axis, where the knot's slope is the limit -f''( 0 )/2 read off the table.
+BOOST_AUTO_TEST_CASE( aTableInSqrtPsiNIsReKnottedInPsi )
+{
+	auto const g = []( double psi ) { return std::cos( std::sqrt( 1.0 - psi ) ); };
+	auto const gp = []( double psi )
+	{
+		double const r = std::sqrt( 1.0 - psi );
+		return r > 0.0 ? std::sin( r )/( 2.0*r ) : 0.5;
+	};
+	auto const build = []( int intervals )
+	{
+		meq::ProfileTable table;
+		table.abscissa = meq::ProfileAbscissa::SqrtPsiN;
+		for ( int i = 0; i <= intervals; ++i )
+		{
+			double const x = static_cast<double>( i )/intervals;
+			table.knots.push_back( meq::Knot{ x, std::cos( x ), -std::sin( x ) } );
+		}
+		return meq::profileFromTable( table );
+	};
+
+	std::shared_ptr<meq::Profile const> const coarse = build( 8 );
+	BOOST_TEST( dynamic_cast<meq::SplineProfile const *>( coarse.get() ) != nullptr );
+
+	// AT THE KNOTS, exact: the value carried over, the slope mapped.
+	for ( int i = 1; i <= 8; ++i )
+	{
+		double const x = i/8.0;
+		double const psi = 1.0 - x*x;
+		BOOST_TEST( ( *coarse )( psi ) == std::cos( x ), boost::test_tools::tolerance( 1.0e-14 ) );
+		BOOST_TEST( coarse->prime( psi ) == gp( psi ), boost::test_tools::tolerance( 1.0e-13 ) );
+	}
+	// At the axis, the limit -f''( 0 )/2, read off the first interval as an
+	// even function: exact through x^4, so cos x's x^6 term is all that is
+	// left on an interval of 1/8 -- about 3e-7 of the slope.
+	BOOST_TEST( ( *coarse )( 1.0 ) == 1.0 );
+	BOOST_TEST( coarse->prime( 1.0 ) == 0.5, boost::test_tools::tolerance( 1.0e-6 ) );
+
+	// PAST THE AXIS, which rho cannot name: continued linearly with the axis
+	// value and slope to sqrtPsiNBeyondAxis, and clamped beyond it.
+	double const axisSlope = coarse->prime( 1.0 );
+	BOOST_TEST( ( *coarse )( 1.2 ) == 1.0 + 0.2*axisSlope, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( coarse->prime( 1.2 ) == axisSlope, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( ( *coarse )( 1.7 ) == 1.0 + ( meq::sqrtPsiNBeyondAxis - 1.0 )*axisSlope,
+	            boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( coarse->prime( 1.7 ) == 0.0 );
+
+	// BETWEEN THEM, fourth order: the worst error at 64 points between the
+	// knots falls about 16x from 8 to 16 intervals.
+	auto const worst = [ & ]( std::shared_ptr<meq::Profile const> const &profile )
+	{
+		double error = 0.0;
+		for ( int j = 0; j < 64; ++j )
+		{
+			double const psi = ( j + 0.5 )/64.0;
+			error = std::max( error, std::fabs( ( *profile )( psi ) - g( psi ) ) );
+		}
+		return error;
+	};
+	double const e8 = worst( coarse );
+	double const e16 = worst( build( 16 ) );
+	BOOST_TEST( e8 < 1.0e-5 );
+	BOOST_TEST( e8/e16 > 12.0, "the re-knotted table converges at " << std::log2( e8/e16 )
+	            << " a halving rather than the cubic's 4" );
+}
+
+// A slope at sqrt( psi_n ) = 0 is a derivative in the flux unbounded at the
+// axis, and is refused; one that is round-off against the table's steepest is
+// zero, and is taken. A table that starts away from the axis is not asked.
+BOOST_AUTO_TEST_CASE( aSqrtPsiNTableWithASlopeAtTheAxisIsRefused )
+{
+	auto const tableWith = []( double slopeAtAxis, double first )
+	{
+		meq::ProfileTable table;
+		table.abscissa = meq::ProfileAbscissa::SqrtPsiN;
+		table.knots = { { first, 1.0, slopeAtAxis }, { 1.0, 0.0, -2.0 } };
+		return table;
+	};
+	BOOST_CHECK_THROW( meq::profileFromTable( tableWith( 0.5, 0.0 ) ), std::invalid_argument );
+	BOOST_CHECK_NO_THROW( meq::profileFromTable( tableWith( 1.0e-12, 0.0 ) ) );
+	BOOST_CHECK_NO_THROW( meq::profileFromTable( tableWith( 0.5, 0.1 ) ) );
+	BOOST_CHECK_THROW( meq::profileFromTable( tableWith( 0.0, -0.1 ) ), std::invalid_argument );
+}
+
+BOOST_AUTO_TEST_CASE( theAbscissaeAreNamedAndNothingElseIs )
+{
+	for ( meq::ProfileAbscissa const abscissa : { meq::ProfileAbscissa::Psi,
+	                                              meq::ProfileAbscissa::PsiN,
+	                                              meq::ProfileAbscissa::SqrtPsiN } )
+		BOOST_TEST( ( meq::profileAbscissaNamed( meq::profileAbscissaName( abscissa ) )
+		              == abscissa ) );
+	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "rho" ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "psi" ), std::invalid_argument );
+}

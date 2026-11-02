@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <iosfwd>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -467,6 +468,84 @@ namespace meq
 			std::vector<double> valueData;
 			std::vector<double> curvatureData;
 	};
+
+	/**
+	 * THE VARIABLE A TABLE IS TABULATED IN, against the normalised flux every
+	 * profile here is a function of. PYTHON-PLAN.md, PY-2.
+	 *
+	 * `Psi` is MEQ's own, ( psi - psi_bnd )/( psi_ax - psi_bnd ): 0 at the
+	 * boundary, 1 at the axis or a mirror's inner label
+	 * (docs/normalised_flux.rst), and what a profile file is in. `PsiN` is the
+	 * conventional normalised poloidal flux, 1 - Psi, 0 at the axis -- geq's
+	 * psi_n -- and `SqrtPsiN` its square root, the usual rho.
+	 *
+	 * **A NAME, NOT A DEFAULT, WHEREVER A CALLER CHOOSES ONE**: tables read in
+	 * psi_n where Psi was meant converge, at full order, to an answer 8.56e-04
+	 * away (MEASUREMENTS.md M-263's mutation), so the swap is silent.
+	 */
+	enum class ProfileAbscissa
+	{
+		Psi,
+		PsiN,
+		SqrtPsiN
+	};
+
+	/// One profile handed in as a table in place of a file: knots in
+	/// `abscissa`, with the derivative in that variable too.
+	struct ProfileTable
+	{
+		ProfileAbscissa abscissa = ProfileAbscissa::Psi;
+		std::vector<Knot> knots;
+	};
+
+	/// Tables by the slot they replace, named by the key that names the file
+	/// less `File`: "Omega", "GGPrime", "species.<Name>.Density",
+	/// "species.<Name>.Temperature".
+	using ProfileTables = std::map<std::string, ProfileTable>;
+
+	/**
+	 * A table as a profile of Psi -- ALWAYS A SplineProfile, the one a file of
+	 * the mapped knots would make, so the device path reads every table
+	 * (meq::SourceView) and the solver sees a C^1 cubic in Psi whatever the
+	 * table was written in.
+	 *
+	 * `Psi` is the table's own SplineProfile, to the bit. `PsiN` is
+	 * RE-KNOTTED EXACTLY: x = 1 - Psi is affine, and a Hermite cubic composed
+	 * with an affine map is the Hermite cubic on the mapped knots, so the knots
+	 * reverse, each abscissa becomes 1 - x and each slope changes sign.
+	 *
+	 * `SqrtPsiN` IS RE-KNOTTED AT ITS OWN KNOTS, Psi_i = 1 - x_i^2, with the
+	 * value carried over and the slope f'( x )/( -2x ), and at the axis, x = 0,
+	 * that slope's limit -f''( 0 )/2, f'' read off the first interval as the
+	 * even function the profile is required to be.
+	 * Not exact, as the affine map is: the cubic in Psi agrees with the table
+	 * at every knot, value and slope, and between them to the tabulation's
+	 * own order. **COMPOSITION, g( Psi ) = f( sqrt( 1 - Psi ) ), IS THE
+	 * OTHER ROUTE AND IT IS NOT TAKEN FOR TWO REASONS**: the
+	 * device path cannot read a composed profile, and its second derivative
+	 * grows like ( 1 - Psi )^( -1/2 ) at the axis, which a cubic in x with
+	 * zero slope there still carries through its x^3 term; the re-knotted
+	 * cubic has neither. A table that reaches the axis is continued past it,
+	 * linearly, to sqrtPsiNBeyondAxis; profileFromTable() says why.
+	 *
+	 * @throws std::invalid_argument for a table SplineProfile refuses -- fewer
+	 *         than two knots, a non-finite entry, abscissae not increasing --
+	 *         and for a `SqrtPsiN` table below x = 0, or that reaches x = 0
+	 *         with a slope there: a profile smooth in the flux is even in rho,
+	 *         and one that is not has a slope in Psi unbounded at the axis.
+	 */
+	std::shared_ptr<Profile const> profileFromTable( ProfileTable const & table );
+
+	/// How far past the axis a `SqrtPsiN` table that reaches it is continued,
+	/// linearly, by profileFromTable(): rho cannot name Psi > 1, and an
+	/// overshooting iterate needs a profile there that is C^1 through the axis.
+	/// rotating-normalised's own table reaches as far.
+	inline constexpr double sqrtPsiNBeyondAxis = 1.5;
+
+	/// "Psi", "psi_n", "sqrt_psi_n": the names a front end takes.
+	/// @throws std::invalid_argument naming the three for any other.
+	ProfileAbscissa profileAbscissaNamed( std::string const & name );
+	char const * profileAbscissaName( ProfileAbscissa abscissa );
 
 }
 

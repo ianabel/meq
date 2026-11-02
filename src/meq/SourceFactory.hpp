@@ -17,6 +17,7 @@
 #include "Coils.hpp"
 #include "ConductorField.hpp"
 #include "Config.hpp"
+#include "Profiles.hpp"
 #include "Source.hpp"
 
 namespace meq
@@ -34,8 +35,15 @@ namespace meq
 	///         than like an I/O error from somewhere in the numerics.
 	/// @param configFileName  where the configuration came from, used only to
 	///                        make a thrown ConfigError name its own source.
+	///
+	/// @param tables  profiles handed in as tables in place of files, by slot
+	///                (meq::ProfileTables). Only a rotating source takes them;
+	///                a slot replaces its key only where the configuration
+	///                gave the key and does not scale it, and a table no slot
+	///                takes is refused, each as a ConfigError naming the slot.
 	std::shared_ptr<Source const> makeSource( SourceConfig const &config,
-	                                          std::string const &configFileName = std::string() );
+	                                          std::string const &configFileName = std::string(),
+	                                          ProfileTables const &tables = ProfileTables() );
 
 	/// Construct a source whose profiles are functions of NORMALISED flux, so
 	/// that psi_ax is an unknown of the non-linear system rather than data.
@@ -50,8 +58,11 @@ namespace meq
 	///         profile file cannot be read, or if the source itself refuses its
 	///         arguments -- the last translated so that a failure reads as the
 	///         configuration error it is rather than as a library exception.
+	///
+	/// @param tables  as makeSource()'s.
 	std::shared_ptr<NormalisedSource> makeNormalisedSource( SourceConfig const &config,
-	                                                        std::string const &configFileName = std::string() );
+	                                                        std::string const &configFileName = std::string(),
+	                                                        ProfileTables const &tables = ProfileTables() );
 
 	/// Construct the coil set the `[[coils]]` blocks describe, or a null
 	/// pointer if there are none.

@@ -668,4 +668,135 @@ namespace meq
 		return valueData;
 	}
 
+	std::shared_ptr<Profile const> profileFromTable( ProfileTable const & table )
+	{
+		switch ( table.abscissa )
+		{
+			case ProfileAbscissa::Psi:
+				return std::make_shared<SplineProfile const>( table.knots );
+
+			case ProfileAbscissa::PsiN:
+			{
+				checkTable( table.knots );
+				std::vector<Knot> inPsi;
+				inPsi.reserve( table.knots.size() );
+				for ( auto k = table.knots.rbegin(); k != table.knots.rend(); ++k )
+					inPsi.push_back( Knot{ 1.0 - k->psi, k->value, -k->derivative } );
+				return std::make_shared<SplineProfile const>( std::move( inPsi ) );
+			}
+
+			case ProfileAbscissa::SqrtPsiN:
+			{
+				checkTable( table.knots );
+				Knot const &first = table.knots.front();
+				if ( first.psi < 0.0 )
+					throw std::invalid_argument(
+						"meq::profileFromTable: a sqrt( psi_n ) table starts at "
+						+ std::to_string( first.psi ) + ", below zero, where no flux is" );
+				/*
+				 * THE SLOPE AT THE AXIS. A profile smooth in the flux is a
+				 * smooth function of x^2, so its slope in x vanishes at x = 0;
+				 * one that does not has g' = -f'( x )/( 2x ), unbounded there,
+				 * which is a current-density spike on the axis and not a
+				 * profile. RELATIVE, because a slope computed by a transport
+				 * code at a symmetry boundary is round-off rather than zero.
+				 */
+				if ( first.psi == 0.0 )
+				{
+					double steepest = 0.0;
+					for ( Knot const &k : table.knots )
+						steepest = std::max( steepest, std::fabs( k.derivative ) );
+					if ( std::fabs( first.derivative ) > 1.0e-8*steepest )
+						throw std::invalid_argument(
+							"meq::profileFromTable: a sqrt( psi_n ) table has slope "
+							+ std::to_string( first.derivative ) + " at sqrt( psi_n ) = 0, "
+							"so its derivative in the flux is unbounded at the axis. A "
+							"profile smooth in the flux has zero slope in rho there; "
+							"give 0, or tabulate in psi_n" );
+				}
+				/*
+				 * THE KNOTS IN Psi. The slope at the axis is the limit of
+				 * f'( x )/( -2x ), -f''( 0 )/2, and f''( 0 ) is read off the
+				 * first interval AS AN EVEN FUNCTION, which the slope check
+				 * above already requires the profile to be: f0 + a x^2 + c x^4
+				 * through ( h, f1 ) and ( h, f1' ) gives
+				 * a = 2( f1 - f0 )/h^2 - f1'/( 2h ), exact through x^4, and
+				 * the slope in Psi is -a. NOT THE FIRST HERMITE CUBIC'S f'',
+				 * 6( f1 - f0 )/h^2 - ( 4 f0' + 2 f1' )/h: that cubic does not
+				 * know the profile is even, its f'' is O( h^2 ), and the
+				 * re-knotted slope -- which is what F carries -- converged at
+				 * second order where its values converge at fourth (measured,
+				 * a ratio of 4.0 a halving from 8 to 128 intervals).
+				 */
+				std::vector<Knot> inPsi;
+				inPsi.reserve( table.knots.size() );
+				for ( auto k = table.knots.rbegin(); k != table.knots.rend(); ++k )
+				{
+					double slope = 0.0;
+					if ( k->psi > 0.0 )
+						slope = k->derivative/( -2.0*k->psi );
+					else
+					{
+						Knot const &next = table.knots[ 1 ];
+						double const h = next.psi;
+						double const a = 2.0*( next.value - k->value )/( h*h )
+						                 - next.derivative/( 2.0*h );
+						slope = -a;
+					}
+					inPsi.push_back( Knot{ 1.0 - k->psi*k->psi, k->value, slope } );
+				}
+				/*
+				 * AND PAST THE AXIS, WHICH NO TABLE IN rho CAN REACH: Psi > 1
+				 * has no real rho. An iterate overshoots there, and a profile
+				 * clamped at Psi = 1 puts a kink in F's slope at the axis
+				 * that the bordered Newton stalls on -- measured on
+				 * rotating-normalised, whose own table reaches 1.5 for this
+				 * reason, and whose profile cut at 1 stalls at 6e-3 of the
+				 * first residual. So a table that reaches the axis is
+				 * continued past it linearly, with the axis value and slope,
+				 * to sqrtPsiNBeyondAxis: C^1 through the axis, and nothing an
+				 * equilibrium reads, since its Psi stops at 1.
+				 */
+				if ( first.psi == 0.0 )
+				{
+					Knot const axis = inPsi.back();
+					double const reach = sqrtPsiNBeyondAxis - 1.0;
+					inPsi.push_back( Knot{ sqrtPsiNBeyondAxis,
+					                       axis.value + reach*axis.derivative,
+					                       axis.derivative } );
+				}
+				return std::make_shared<SplineProfile const>( std::move( inPsi ) );
+			}
+		}
+		throw std::logic_error( "meq::profileFromTable: no case for this abscissa" );
+	}
+
+	ProfileAbscissa profileAbscissaNamed( std::string const & name )
+	{
+		if ( name == "Psi" )
+			return ProfileAbscissa::Psi;
+		if ( name == "psi_n" )
+			return ProfileAbscissa::PsiN;
+		if ( name == "sqrt_psi_n" )
+			return ProfileAbscissa::SqrtPsiN;
+		throw std::invalid_argument(
+			"meq: no abscissa \"" + name + "\": a table is in \"Psi\" (MEQ's "
+			"normalised flux, 1 at the axis), \"psi_n\" (1 - Psi, 0 at the axis) or "
+			"\"sqrt_psi_n\"" );
+	}
+
+	char const * profileAbscissaName( ProfileAbscissa abscissa )
+	{
+		switch ( abscissa )
+		{
+			case ProfileAbscissa::Psi:
+				return "Psi";
+			case ProfileAbscissa::PsiN:
+				return "psi_n";
+			case ProfileAbscissa::SqrtPsiN:
+				return "sqrt_psi_n";
+		}
+		return "?";
+	}
+
 }

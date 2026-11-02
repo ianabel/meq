@@ -82,10 +82,11 @@ Seven decisions in it, each with its reason:
    working from files. Once set, the slot holds those knots in place of the
    file, and the file is never read.
 3. **The abscissa is named every time a profile is passed, and MEQ does the
-   mapping.** Four choices:
+   mapping.** Five choices:
 
    | `abscissa` | is | moves with the solve |
    |---|---|---|
+   | `"Psi"` | MEQ's own normalised flux, 0 at `ψ_bnd`, 1 at the axis or the inner label: what a profile file is in | no |
    | `"psi"` | poloidal flux, Wb/rad | yes, through the labels |
    | `"psi_n"` | normalised poloidal flux, 0 at the axis or the inner label, 1 at `ψ_bnd`: geq's `ψ_n`, MEQ's `1 − Ψ` | no |
    | `"sqrt_psi_n"` | `√ψ_n` | no |
@@ -93,11 +94,10 @@ Seven decisions in it, each with its reason:
 
    **A name, not a default**, because the `ψ_n`/`Ψ` swap is a known silent
    trap: tables read in the wrong one converge, at full order, to an answer
-   8.56e-04 away (M-263's mutation). **The table stays a Hermite spline in its
-   own variable and is composed with `x( Ψ )`**, with `df/dΨ = f′( x ) x′( Ψ )`
-   evaluated at the quadrature point. It is never re-knotted in `Ψ`: `√ψ_n`
-   has an infinite slope at the axis, and a cubic in `Ψ` cannot carry it.
-   **The derivative is required, in `x`.** A missing `f′` is refused rather
+   8.56e-04 away (M-263's mutation). **Every table becomes a Hermite spline in
+   `Ψ` on its own knots mapped to `Ψ`**, so the device path reads it as it reads
+   a file (`meq::profileFromTable()`, PY-2 below has what that took). **The
+   derivative is required, in `x`.** A missing `f′` is refused rather
    than differenced, because the Hermite table's accuracy is the derivative's
    (the `TODO` entry's question 1: MaNTA's `q` is that derivative, for free).
 4. **`solve()` after the first warm-starts from the last converged state, on
@@ -141,7 +141,7 @@ Each stage ends at a measured, asserted result, as every stage here does.
 |---|---|---|
 | PY-0 | `meq::Run`, the run out of `main()` | `meq` unchanged, to the byte — **done** |
 | PY-1 | the `_meq` extension and the `meq` package; `Equilibrium( file )`, `from_dict`, `solve`, `write` | Python's `.nc` equals `meq`'s, every coefficient — **done** |
-| PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit |
+| PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit — **done** |
 | PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer |
 | PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted |
 | PY-4 | results in memory: scalars, `grid()`, `psi`/`B` at points, `surfaces()` | equal to the `.nc` and `_surfaces.nc` the same run writes |
@@ -251,21 +251,58 @@ MKL's layers into the global scope. Measured, with `LD_DEBUG=bindings`:
 One MKL in the process is the fix, and it is PY-6's: the bits are not wrong
 by more than round-off, but they are not `meq`'s.
 
-**PY-2: species profiles from arrays, on the fixed maps.** One C++ change:
-`makeSource()` and `makeNormalisedSource()` take an optional
-`meq::ProfileTables`, a map from slot to a table and its abscissa, consulted
-before the file. A file's table is the abscissa `Ψ`, which is the identity
-map, so **the file path and the array path build the same `SplineProfile`
-from the same knots**. That is the first acceptance: a slot set from
-`SplineProfile::fromFile()`'s own knots equals the file run to the bit. The
-second: a table in `psi_n` and the same function in `Ψ` agree to the
-tabulation. The third: on a tokamak, the species route at `ω = 0` reproduces
-the `mhd` source with `p′` from `Σ n_s T_s`, to the tabulation. Refused by
-name, each with a test: an unknown slot, a slot the configuration did not
-give, a source type with no species, a non-increasing or non-finite abscissa,
-a missing derivative, and a length mismatch. Setting a slot rebuilds the
-source and hands it to the solver again on the next `solve()`. Nothing else is
-rebuilt.
+**PY-2: species profiles from arrays, on the fixed maps — done.**
+`meq.Table( x, value, derivative, abscissa= )`, the abscissa a required
+keyword, and `profiles={ slot: table }` on both constructors, carried by
+`meq::RunOptions::profiles` to `makeSource()` and `makeNormalisedSource()`,
+which consult a table before the file. `meq::profileFromTable()` makes every
+table a `SplineProfile` in `Ψ`:
+
+* **`Psi`** is the table's own knots, so **a table of a file's own knots is
+  the file, to the bit** (`PythonProfiles`, through the module, every
+  variable of the `.nc`; and `SourceFactoryTests`, every `F` and `∂F/∂ψ`).
+* **`psi_n`** is re-knotted exactly: `x = 1 − Ψ` is affine, so the knots
+  reverse at `1 − x` with their slopes negated, and only the rounding of
+  `1 − x` separates it from the file.
+* **`sqrt_psi_n`** is re-knotted at `Ψ_i = 1 − x_i²` with slope
+  `f′( x )/( −2x )`, and at the axis `−a` from `f₀ + a x² + c x⁴` fitted to the
+  first interval — the evenness a profile smooth in the flux has, and which a
+  table with a slope at `x = 0` lacks and is refused for. **COMPOSITION,
+  `f( √( 1 − Ψ ) )`, WAS THE PLAN AND IS NOT TAKEN**: the device path cannot
+  read it, and its second derivative grows like `( 1 − Ψ )^( −1/2 )` at the
+  axis. **READING THE AXIS SLOPE OFF THE FIRST HERMITE CUBIC WAS BUILT AND
+  MEASURED WRONG**: that cubic does not know the profile is even, and the
+  re-knotted slope, which `F` carries, converged at second order where its
+  values converge at fourth. With the even fit the answer converges at
+  **third order**, a cubic's order in a slope: 2.45e-6 to 8.4e-11 from 8 to
+  256 intervals, 2.97 a halving on average.
+* **AND PAST THE AXIS, WHICH NO TABLE IN ρ CAN REACH**, a `sqrt_psi_n` table
+  that reaches it is continued linearly with the axis value and slope to
+  `Ψ = 1.5` (`meq::sqrtPsiNBeyondAxis`). An iterate overshoots there, and a
+  profile clamped at `Ψ = 1` stalls the bordered Newton at 6e-3 of its first
+  residual — measured on `rotating-normalised`, whose own table reaches 1.5
+  for this reason, and which converges cut at `Ψ = 0` and fails cut at
+  `Ψ = 1`. The equilibrium reads the continuation only at 1.6e-8. A `Psi`
+  or `psi_n` table ending at the axis is not continued: its author can write
+  it past the axis, as that file's author did.
+
+**WHAT A RUN READS OUTSIDE THE PLASMA IS PART OF THE PROBLEM IT POSES**,
+which a caller handing in tables meets first: `rotating-normalised` does not
+confine its source and dips below `ψ = 0` at the wall, so its profile below
+`Ψ = 0` moves its answer 5.7e-4 when clamped. A table covers the range the
+file it replaces covered.
+
+**Refused by name**, each with a test: an unknown slot, a Neutralising
+species' density, a slot the configuration does not give (a constant will
+do), a slot the file scales, a normalised abscissa where the source is in
+`ψ` itself, knots the spline refuses, a `sqrt_psi_n` table below `x = 0` or
+with a slope at it, an unknown abscissa, lengths that disagree, and any table
+for a source without species. **The species route without rotation is the
+static source**: with `Omega` absent it gives the `mhd` source's `F` and
+`∂F/∂ψ` from `p′ = Σ n_s′ T_s` to 1e-13. The `.nc` lists the tables as
+`profile_tables`, slot, abscissa and knot count, since `input_toml` names
+files the run did not read. **Setting a profile after construction, and
+solving again, is PY-3's**: the source is built when the run is prepared.
 
 **PY-2b: the moving maps.** `psi` makes `x` depend on the labels, which are
 already border unknowns, so it adds terms to the label columns the bordered
