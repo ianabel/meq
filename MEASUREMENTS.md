@@ -5592,10 +5592,12 @@ larger than anything left to thread in MEQ's own code**.
 
 **CS-0b: MATCHING THE CONDUCTOR MODEL TAKES DIII-D's BENCHMARK FLOOR FROM
 5.785e-03 TO 7.7e-04, AND LANDS IT ON THE QUADRATURE — WHICH IS WHERE
-`COIL-SUBTRACTION-PLAN.md` §0a SAID IT WOULD LAND.** M-111 reads MEQ against
+THE CONDUCTOR-MODEL COMPARISON SAID IT WOULD LAND.** M-111 reads MEQ against
 freegs4e's **filament** DIII-D at `5.785e-03` and records that it **does not
 refine**: 5.785e-03, 5.802e-03, 5.763e-03, 5.803e-03 across a 16× range in dofs.
-§0a measured the two conductor models directly and predicted that matching them
+`tools/freegs4e-benchmark/conductor_model.py` measured the two conductor models
+directly — point filaments against `ShapedCoil` and against MEQ's rectangles, on
+the same eighteen currents, with no solve — and predicted that matching them
 would leave `6.580e-04`, the quadrature difference alone. This is that
 experiment run end to end.
 
@@ -5613,17 +5615,17 @@ experiment run end to end.
 | k2r0a3 | 147,726 | 2 | 7.754e-04 | 3.741e-04 | 4.00e-05 | ( 1.2004, −0.9995 ) |
 | k3r0a3 | 172,590 | 2 | 7.830e-04 | 3.909e-04 | 3.01e-05 | ( 1.2004, −0.9996 ) |
 
-**7.5× BETTER GLOBALLY AND 2.0× OFF THE COILS**, against §0a's predicted 9.2×
+**7.5× BETTER GLOBALLY AND 2.0× OFF THE COILS**, against the predicted 9.2×
 and 3.4× on the model difference itself. The prediction was of the *difference
 between two conductor models*; this is what removing it from a *solve* is worth,
-and the two agreeing to within a factor of 1.2 is the part that says §0a
-measured the right thing.
+and the two agreeing to within a factor of 1.2 is the part that says the
+comparison measured the right thing.
 
 **AND IT STILL DOES NOT REFINE, WHICH IS THE RESULT RATHER THAN A
 DISAPPOINTMENT.** 8.484e-04 → 7.692e-04 → 7.680e-04 → 7.750e-04 over a **6.7×
 range in dofs** and from `k = 2` to `k = 3`: nine per cent, and not monotone.
 **The floor moved down by 7.5× and it is still not MEQ's discretisation.**
-§0a named what would be left — MEQ integrates its rectangles at 24² tensor
+The comparison named what would be left — MEQ integrates its rectangles at 24² tensor
 Gauss and `freegs4e.shaped_coil.ShapedCoil` caps at **6 points per triangle**,
 so the two evaluate the same model to different precision — and predicted
 `6.580e-04`. **Measured, 7.7e-04.** That is agreement to 17% on a number
@@ -5662,9 +5664,8 @@ shaped against M-111's filament row wants a quiet machine.
 
 **MEQ's "EXACT RESTART" WAS ONE BIT OUT ON A QUARTER OF ITS COEFFICIENTS, AND A
 TEST NAMED `theMfemFilesRoundTripExactly` PASSED THROUGHOUT.** Found while
-asking whether a `GridFunction` could be written to NetCDF for
-`COIL-SUBTRACTION-PLAN.md` CS-6, which turns on whether the existing format is
-exact.
+asking whether a `GridFunction` could be written to NetCDF for CS-6, which
+turns on whether the existing format is exact.
 
 **16 IS THE NUMBER OF DIGITS A DOUBLE IS ACCURATE TO; 17 IS THE NUMBER NEEDED TO
 RECOVER ONE.** `std::numeric_limits<double>::max_digits10` is **17**.
@@ -5703,7 +5704,7 @@ and not the answer — so a one-ulp perturbation sits far below the Newton
 tolerance and the restart still finishes in one iteration. A legitimate test
 that is structurally blind to this: it checks the consequence, not the property.
 
-**AND IT STRENGTHENS CS-6 RATHER THAN ONLY FIXING A BUG.** §9 proposes NetCDF
+**AND IT STRENGTHENS CS-6 RATHER THAN ONLY FIXING A BUG.** CS-6 puts in NetCDF
 for the exact field because a `.gf` cannot carry metadata; NetCDF stores
 **binary** doubles, so the round-trip question does not arise there at all — and
 the file is smaller than the ASCII it replaces. The precision fix makes the
@@ -5712,8 +5713,8 @@ current format correct; the format change makes the question disappear.
 ### M-141
 
 **THE TWO CONDUCTOR ROUTES AGREE, AND MESHING TO THE COIL IS WORTH 43× AT THE
-COARSEST LEVEL.** `COIL-SUBTRACTION-PLAN.md` §0a-pre is a standing requirement —
-MEQ must always be able to solve finite-sized coils accurately the old way, and
+COARSEST LEVEL.** A standing requirement (`CLAUDE_FB.md`, *Conductors out of the mesh: the split*, *The meshed route is
+the split's instrument*) is that MEQ must always be able to solve finite-sized coils accurately the old way, and
 the split is an option rather than a replacement. This is the measurement that
 gives it teeth, and it is only possible because CS-1b put **rectangles** in
 `meq::ConductorField`: a rectangle is the conductor that can go either way, so
@@ -5722,8 +5723,8 @@ subtracted.
 
 **THE SUBTRACTED ARM IS THE TRUTH, WHICH IS THE RIGHT WAY ROUND.** With the
 coil's own field as the Dirichlet datum and no plasma, the remainder is
-identically zero and the total is `psi_c` **exactly**
-→ **[§7.4](COIL-SUBTRACTION-PLAN.md)**. The meshed arm solves
+identically zero and the total is `psi_c` **exactly** (`docs/conductors.rst`,
+*What the split is exact for, and what it cannot be*). The meshed arm solves
 `Δ* psi = −mu0 R j_phi` with the same datum and a **top-hat** source, so it
 approximates that same field to the mesh's order. The difference between them
 therefore *is* the meshed route's discretisation error.
@@ -5761,8 +5762,8 @@ solving the same problem.
 ### M-142
 
 **NOT MESHING THE COILS IS WORTH `1.96×` IN ELEMENTS ON MAST-U, AND THE DOMAIN
-SHRINK IS WORTH ALMOST NOTHING — WHICH IS THE OPPOSITE OF HOW
-`COIL-SUBTRACTION-PLAN.md` §2(a) RANKS THEM.** The question was when the
+SHRINK IS WORTH ALMOST NOTHING — WHICH IS THE OPPOSITE OF HOW THE SPLIT'S
+DESIGN RANKED THEM.** The question was when the
 coil-subtraction pathway can be tested for usefulness. The largest claimed
 benefit needs **no MEQ code and no solve at all**: it is a property of two gmsh
 meshes, which is the same shape as CS-0 measuring the conductor-model difference
@@ -5782,13 +5783,14 @@ flags already produces the coil-free mesh; nothing had to be written.
 **9361 REPRODUCES `CLAUDE.md`'s OWN RECORDED COUNT**, which is the check that
 this is the mesh the tree means rather than a lookalike.
 
-**§2(a) PUTS "THE DOMAIN SHRINKS" FIRST AND THE COIL REFINEMENT SECOND, AND THE
-MEASUREMENT INVERTS THAT.** The outer annulus is meshed at the **coarse** size —
+**THE DESIGN PUT "THE DOMAIN SHRINKS" FIRST AND THE COIL REFINEMENT SECOND, AND
+THE MEASUREMENT INVERTS THAT.** The outer annulus is meshed at the **coarse** size —
 `Size = 0.30` against `CoilSize = 0.03` — so removing it takes area and almost
 no elements, while the 10× grading around 23 coils is where the elements
-actually are. **An area argument over-weights coarse regions**, and §0c's
-careful correction of 2.6× to 1.85× *in area* was still answering the less
-important question.
+actually are. **An area argument over-weights coarse regions**, and the
+correction of 2.6× to 1.85× *in area* (`CLAUDE_DECLINED.md`, *Shrinking `Γ` once
+the conductors are out of the mesh*) was still answering the less important
+question.
 
 **THE COST SIDE IS WHERE THE RISK IS, AND IT SPLITS BY CONDUCTOR KIND.** `psi_c`
 is needed at every quadrature point of every element on every residual and every
@@ -5801,7 +5803,7 @@ Jacobian. Per point:
 
 So a rectangle machine uncached would buy back the 1.96× many times over, and a
 filament machine would barely notice. **That is an argument for the cache rather
-than against the plan**, and §1 already licensed it: the conductor currents do
+than against the split**, and the split already licenses it: the conductor currents do
 not move during a forward solve, so `psi_c` at a fixed point is a precompute.
 Three caches now exist — per quadrature point for the source and its Jacobian,
 per potential dof for the element fill and `peakAt` — and the quadrature one is
@@ -5815,8 +5817,8 @@ identities at `0.000e+00` both before and after it was introduced.
 ### M-143
 
 **CS-3's TWO HALVES ARE SEPARATELY LOAD BEARING, AND BOTH WERE BROKEN ON PURPOSE
-TO SHOW IT.** `COIL-SUBTRACTION-PLAN.md` §3 predicted the trap in advance —
-*"the two must move together or the datum is double-counted"* — so the question
+TO SHOW IT.** The split's design predicted the trap in advance — *"the two must
+move together or the datum is double-counted"* — so the question
 was not whether the pair works but whether **each** of them does something. The
 instrument is the dual of FB-7's coupled case: a conductor **inside** `Γ`,
 subtracted, with no plasma, where the continuous answer is `psi_p ≡ 0` and `a`
@@ -5903,7 +5905,7 @@ different sentences.**
 ### M-145
 
 **THE FILAMENT MODEL'S ERROR PROFILE, MEASURED ON MEQ'S OWN FIXTURE, AND IT
-AGREES WITH §4b's DIII-D FIGURES.** `[conductors] Model = "filament"` against
+AGREES WITH THE DIII-D FIGURES.** `[conductors] Model = "filament"` against
 `"subtracted"` on `examples/coils-rectangle.toml` — the same two conductors, one
 as a rectangle of uniform current density and one as a point at its centre
 carrying the same total current, nothing else moved. Both converge in **5
@@ -5921,11 +5923,12 @@ Newton iterations**. On the 129 × 129 output grid, relative to
 **THE 1.23 IS THE LOGARITHM AND NOTHING ELSE.** The worst node is at
 `R = 2.0984, Z = −0.6016`, **2.2 mm** from the filament, where `psi` of a line
 current genuinely diverges. That is the model behaving correctly rather than a
-defect, and it is why `COIL-SUBTRACTION-PLAN.md` §4b calls a filament MEQ *"a
-per-cent-level answer near the coils and far better away from them"* and a mode
-to offer rather than an approximation to hide.
+defect, and it is why a filament MEQ is *"a per-cent-level answer near the coils
+and far better away from them"* and a mode to offer rather than an
+approximation to hide (`docs/conductors.rst`, *Filaments, and a filament on a
+mesh point*).
 
-**AND THE PROFILE LANDS ON §4b's INDEPENDENT NUMBERS.** That section measured
+**AND THE PROFILE LANDS ON CS-0's INDEPENDENT NUMBERS.** CS-0 measured
 filament-against-rectangle on DIII-D's eighteen conductors at **6.081e-03**
 globally and **6.731e-05** off them for the matched model, by two
 Green's-function sums with no solver anywhere. This is the same comparison
@@ -5945,7 +5948,7 @@ typical one.**
 ### M-146
 
 **THE FLUX SURFACES UNDER THE SPLIT, AND THE CURVE THAT WAS BEING WRITTEN
-INSTEAD.** `COIL-SUBTRACTION-PLAN.md` CS-4's second tranche: `meq::ContourTracer`
+INSTEAD.** CS-4's second tranche: `meq::ContourTracer`
 roots whatever field it is handed, so under `[conductors]` it rooted `psi_p` and
 `_surfaces.nc` carried level sets of the remainder. From
 `tests/convergence/ConductorSubtraction.cpp`,
@@ -6222,8 +6225,8 @@ at the default 32-point cross-section quadrature is **1.88 ms measured**, so one
 such sweep over 9052 elements is **102 s** — and `fluxScale()` is called once
 per ring of every seeded search. The first subtracted MAST-U run did not finish
 a single Newton iteration in seven minutes. A per-node cache, built once and
-threaded, is the fix, and it is the third of the plan's §1 precomputes after the
-source integrator's and the solver's own.
+threaded, is the fix, and it is the third of the split's per-mesh precomputes
+after the source integrator's and the solver's own.
 
 **THE SAME FIGURE FOR FILAMENTS IS 2.38 µs, A FACTOR OF 694** — the same 23
 conductors, one Carlson evaluation each against a `32²` tensor quadrature each.
@@ -6236,7 +6239,8 @@ filament route the one the split has to win on.
 **CS-5: THE SHIPPED CONDUCTOR QUADRATURE AGAINST MEQ'S OWN EXPENSIVE ONE, WHICH
 IS THE REFERENCE [M-139](#m-139) DENIED IT.**
 
-`COIL-SUBTRACTION-PLAN.md` §7.2 retires CS-5 as staged: the `freegs4e`
+CS-5 as first staged is retired (`CLAUDE_DECLINED.md`, *CS-5's acceptance
+against `freegs4e`*): the `freegs4e`
 comparison's floor is `7.7e-04` and does not refine, because that code's
 `ShapedCoil` caps at six points per triangle, and a change whose whole claim is
 that the conductors are resolved exactly cannot be accepted against a reference
@@ -6286,7 +6290,7 @@ either way, a beautiful and vacuous agreement:
 Against [M-144](#m-144)'s own discretisation error on those meshes —
 `4.7e-02` and `1.6e-04` — the quadrature contributes about **`1e-7` of it**. So
 the split's acceptance is a measurement of the DISCRETISATION, which is the
-property §7.2 needs and the one M-139 says the benchmark cannot supply.
+property CS-5 needs and the one M-139 says the benchmark cannot supply.
 
 **COST, FOR ANYONE TEMPTED TO RAISE THE DEFAULT.** One `coilPsi()` on a single
 rectangle: 0.25 µs at order 2, 3.6 µs at 8, 13.7 µs at 16, **56.3 µs at 32**.
@@ -6301,10 +6305,11 @@ needs, and the rectangle route is not the one the split has to win on.
 
 **CS-6: THE RESTART FILE IS READ WITH NOTHING BUT ITSELF.**
 
-`COIL-SUBTRACTION-PLAN.md` §8.3's finding is that a `.gf` written under
+The finding (`CLAUDE_FB.md`, *Conductors out of the mesh: the split*, *The `.gf` cannot say it holds a remainder*) is
+that a `.gf` written under
 `[conductors] Model` holds `psi_p` and is indistinguishable from one holding
 `psi` — `GridFunction::Save` writes the space header and the coefficients and
-there is nowhere for a third fact to go. §9's answer is that the `.nc` carries a
+there is nowhere for a third fact to go. CS-6's answer is that the `.nc` carries a
 second representation beside its rasterization: every coefficient, the space,
 `content`, and the conductor TABLE — because a flag tells a reader they hold the
 wrong field without letting them fix it.
@@ -6323,7 +6328,7 @@ physical flux:
 The third row is what makes the first two mean something: `psi_c` is 161 per
 cent of the field here, so a test that reconstructed nothing could not pass.
 
-**WHAT IS NAMED RATHER THAN EMBEDDED, WHICH IS §9.2's FIRST QUESTION ANSWERED
+**WHAT IS NAMED RATHER THAN EMBEDDED, WHICH IS THE FIRST OPEN QUESTION ANSWERED
 THE CHEAP WAY ROUND.** The mesh, in `mesh_file`, and the profile tables, in the
 verbatim configuration. Embedding the mesh is MEQ re-implementing a serialiser
 MFEM already has, and the `.mesh` is written beside the `.nc` by the same run.
@@ -6331,12 +6336,13 @@ The consequence is real and is stated rather than hidden: a `.nc` moved away
 from its directory regenerates a configuration that cannot be run, and it says
 which files it wanted.
 
-**AND HALF OF §9.1 IS NOT BUILT.** That section wants two artefacts — the input
+**AND HALF OF THE PROVENANCE IS NOT BUILT** (`TODO`, *The output regenerates its
+input*). CS-6 wants two artefacts — the input
 AS GIVEN, which is provenance, and what MEQ ACTUALLY USED, serialised from
 `meq::Configuration`'s fields, which would catch a key accepted and ignored.
 Only the first exists, as the `input_toml` attribute. `meq::Configuration` has
 no serialiser and does not keep the parsed table, so the second means writing
-one, and with it §9.1's test with real teeth — parse, serialise, re-parse,
+one, and with it the test with real teeth — parse, serialise, re-parse,
 require the two `Configuration` objects to agree.
 
 **THE INVERSION IS WORTH STATING BECAUSE IT IS THE OPPOSITE OF WHAT THE NAMES
@@ -6386,7 +6392,8 @@ quadrature point off the conductors:
 | 32 | 2413 | 9.206e-03 | −0.11 |
 | | | **across the sequence** | **3.78** |
 
-**The two routes converge to each other**, which is §0b's actual claim. The
+**The two routes converge to each other**, which is the split's actual claim:
+a change of representation, not of answer. The
 non-monotone middle is the unfitted-geometry behaviour `CLAUDE.md` records under
 *Unfitted convergence needs a two-tier rate assertion*: the meshed source is a
 top hat whose edge cuts element interiors and *which* elements it cuts is not a
@@ -6414,8 +6421,8 @@ residual of 7.0e-04 in 200 Newton steps and stops — where the meshed arms take
 iteration path, and on problems M-132 shows are path-sensitive that is enough to
 land somewhere else or nowhere. For MAST-U there is a second and sufficient
 reason: its solenoid is 12 mm by 3.18 m and a single filament at its centre is
-not a machine whose equilibrium is near MAST-U's — `COIL-SUBTRACTION-PLAN.md`
-§13.5.
+not a machine whose equilibrium is near MAST-U's (M-166; `TODO`, *A shipped
+MAST-U filament case*).
 
 
 ### M-152
@@ -6457,7 +6464,7 @@ scale was a CONSEQUENCE of `psi_bnd` being the remainder at the X-point
 being wrong anywhere.
 
 So the source is exact to the tabulation, and what is left is the BORDERS and
-the iteration. The cell that still has no acceptance is narrower than §13.1's
+the iteration. The cell that still has no acceptance is narrower than M-148's
 by one term: **split + exterior coupling + a NORMALISED source**, since
 `theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling` carries a linear plasma
 and therefore no `psi_ax` or `psi_bnd` border at all, and
@@ -6515,7 +6522,8 @@ CONDUCTOR MODEL BREAKS BELOW [M-111](#m-111)'s FLOOR.**
 `examples/machine-f-diiid.toml` with `[conductors] Model = "filament"`, on the
 coil-free mesh the driver now generates, against `F_diiid_conventional` — the
 reference whose 18 conductors `freegs4e` carries as point filaments at exactly
-the positions MEQ puts its own. This is §0a's missing diagonal: MEQ has been
+the positions MEQ puts its own. This is the filament-and-shaped 2 × 2's
+missing diagonal: MEQ has been
 comparable to that reference only as RECTANGLES, which is a different machine.
 
 | | MEQ, filaments | `freegs4e` | |
@@ -8073,11 +8081,10 @@ defect restated as a property rather than as an incident.
 5.3 FROM THE RECTANGLE AT MAST-U's OWN PLASMA, AND THE STACK THAT REPLACES IT
 CONVERGES TO THE RECTANGLE AT ORDER 2.**
 
-`COIL-SUBTRACTION-PLAN.md` §13.5. `Model = "filament"` puts one point at each
-rectangle's centre carrying the total current, which §4b defends as *a different
-conductor model rather than an approximation* — right as a contract, and it is
-what bounded the coarse-filaments-then-meshed-coils pathway. §13.5 argued the
-bound from geometry; this measures it.
+`Model = "filament"` puts one point at each rectangle's centre carrying the total
+current, which is *a different conductor model rather than an approximation* —
+right as a contract, and it is what bounded the coarse-filaments-then-meshed-coils
+pathway. The bound was argued from geometry; this measures it.
 
 #### 1. What the collapse costs, on the conductor that motivates the key
 

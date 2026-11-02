@@ -999,9 +999,10 @@ namespace meq
 	 * not two, and the third one cannot be reached any other way.
 	 *
 	 * **THE DEFAULT IS THE ROUTE THAT HAS ALWAYS WORKED, AND THAT IS A
-	 * REQUIREMENT RATHER THAN A CONVENIENCE.** `COIL-SUBTRACTION-PLAN.md`
-	 * section 0a-pre is a standing constraint on the whole campaign: the meshed
-	 * finite coil never stops working, the split is an OPTION, and a file that
+	 * REQUIREMENT RATHER THAN A CONVENIENCE.** It is a standing constraint on
+	 * the split (CLAUDE_FB.md, *The meshed route is the split's instrument,
+	 * and it stays first class*): the meshed finite coil never stops working,
+	 * the split is an OPTION, and a file that
 	 * does not ask for it must be bit-identical to one written before this key
 	 * existed. A key whose default changed the answer would be the thing
 	 * `CLAUDE.md` forbids outright.
@@ -1033,9 +1034,9 @@ namespace meq
 		/// **THIS ONE HAS NO MESHED FORM AND THAT IS STRUCTURAL.** A point
 		/// source has no finite-element representation as a current density and
 		/// `psi` near it is logarithmic, so subtraction is the only way MEQ can
-		/// carry a filament -- `COIL-SUBTRACTION-PLAN.md` section 4b. It is
-		/// also the cheaper field, one Carlson evaluation per point per
-		/// conductor against a tensor quadrature per rectangle.
+		/// carry a filament. It is also the cheaper field, one Carlson
+		/// evaluation per point per conductor against a tensor quadrature per
+		/// rectangle.
 		///
 		/// **AND IT IS A DIFFERENT MACHINE, MEASURED.** Against the rectangle
 		/// on DIII-D's eighteen conductors a filament model is 6.081e-03
@@ -1787,13 +1788,14 @@ namespace meq
 		 * `Content` -- `"total"` or `"remainder"`, and it exists because a
 		 * `.gf` CANNOT SAY WHICH IT HOLDS.
 		 *
-		 * `COIL-SUBTRACTION-PLAN.md` §8.3 is the finding: `GridFunction::Save`
-		 * writes the space header and the raw coefficients, so a file written
-		 * under `[conductors] Model = "subtracted"` is a REMAINDER and looks
-		 * exactly like one written without it. §9.2 left the question open
-		 * deliberately -- Ian: *"assume the user knows what they're doing and
-		 * so the warm start .gf file changes meaning; warn loudly"* -- and
-		 * this key is what lets them say so instead of being warned at.
+		 * `GridFunction::Save` writes the space header and the raw
+		 * coefficients, so a file written under `[conductors] Model =
+		 * "subtracted"` is a REMAINDER and looks exactly like one written
+		 * without it. Refusing such a guess was declined (CLAUDE_DECLINED.md,
+		 * *Refusing a `.gf` warm start under a subtracting model*) -- Ian:
+		 * *"assume the user knows what they're doing and so the warm start
+		 * .gf file changes meaning; warn loudly"* -- and this key is what
+		 * lets them say so instead of being warned at.
 		 *
 		 * **IT IS NOT A SECOND ROUTE TO THE SAME THING; WITHOUT IT ONE
 		 * DIRECTION IS UNREACHABLE.** A subtracted run restarting from its own

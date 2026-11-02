@@ -257,7 +257,7 @@ namespace meq
 				"contour one order closer to the true one; Potential::Raw is the "
 				"other door and needs nothing" );
 
-		// COIL-SUBTRACTION-PLAN.md's split, TAKEN RATHER THAN ASKED FOR. A
+		// THE CONDUCTOR SPLIT, TAKEN RATHER THAN ASKED FOR. A
 		// caller who reached this constructor has a solver, and the solver knows
 		// whether its field is the whole flux or a remainder -- so requiring the
 		// caller to pass it on would be one more thing to forget on a defect
@@ -1024,7 +1024,7 @@ namespace meq
 		// point comes through here, and the band of IN-0's second half is
 		// answered here and nowhere else.
 		//
-		// AND COIL-SUBTRACTION-PLAN.md's SPLIT IS ANSWERED HERE TOO, FOR THE
+		// AND THE CONDUCTOR SPLIT IS ANSWERED HERE TOO, FOR THE
 		// SAME REASON AND AT THE SAME PLACE. Under it the two fields hold the
 		// REMAINDER and the physical flux is psi_p + psi_c, so a contour of what
 		// the caller asked for is a level set of the sum. Adding it once here

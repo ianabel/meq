@@ -2071,20 +2071,109 @@ M-139 is why.** The benchmark's floor after matching the conductor models is
 at 6 points per triangle. **A change whose entire claim is that the conductors
 are resolved exactly cannot be accepted against a reference that resolves them
 to 6 points.** The replacement is MEQ's own quadrature-based reference,
-[M-149](MEASUREMENTS.md#m-149), and it stays in `COIL-SUBTRACTION-PLAN.md` §7.2.
+[M-149](MEASUREMENTS.md#m-149): the same conductors at an order far beyond a
+solve's, which is a self-comparison and the right one, since the claim is about
+representation and not physics.
 
-*From `COIL-SUBTRACTION-PLAN.md` §7.2.*
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
 
 ### A total `GridFunction` `psi_p + psi_c` for consumers to read
 
 **Declined.** **The rejected option is to form a total `GridFunction` once and
-let consumers read that.** It is the smallest diff and it throws away the plan's
-central claim: `psi_c` projected onto the discrete space is `psi_c` to the
-mesh's order, which is exactly the error `COIL-SUBTRACTION-PLAN.md` §2(b) exists
-to remove. It would also reintroduce the singularity into a finite-element
-function, which for a filament is the thing that cannot be represented at all.
+let consumers read that.** It is the smallest diff and it throws away the
+split's central claim: `psi_c` projected onto the discrete space is `psi_c` to
+the mesh's order, which is exactly the error the split exists to remove. It
+would also reintroduce the singularity into a finite-element function, which for
+a filament is the thing that cannot be represented at all. Each consumer
+evaluates `psi_c` at its own point through `meq::PotentialView` instead.
 
-*From `COIL-SUBTRACTION-PLAN.md` §8.2.*
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
+
+### Shrinking `Γ` once the conductors are out of the mesh
+
+**Falsified**, both halves, off `examples/mastu-nke.toml`'s own 23 blocks. The
+claim was that `Γ` sits at 3.4 only because the conductors are meshed, so taking
+them out moves it to about 2.1 — 2.6× less area — and that the existing
+exterior machinery (`ExteriorCoilSet`, `setExteriorConductors()`) does it.
+**`Γ` must contain the plasma**, and MAST-U's limiter reaches `R = 1.80`,
+`|Z| = 1.51`, radius 2.35, so 2.1 was never available under any conductor model.
+**And an exterior conductor must clear `Γ`**, which at the smallest `Γ`
+containing the plasma, 2.4, two of 23 do (six at 2.0, none at 2.8): a tokamak's
+coils hug the vessel and the plasma fills it, so they interleave in radius
+rather than nesting. The honest saving from `Γ` is 3.4 → about 2.5, 1.85× in
+area, and even that needs the interior subtraction, since almost every
+conductor is inside. What the split saves is the conductor elements and their
+grading inside `Γ`.
+
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
+
+### A clearance rule, a perturbed node or a finite part for a filament on a mesh point
+
+**Declined**, all three, in favour of refusing exact coincidence and nothing
+else. **A clearance rule** would be a much stronger claim than anything
+measured supports: `meq::filamentPsi()` stays accurate arbitrarily close to the
+loop (`CLAUDE_FB.md`, *The mesh-point refusal is a per-point predicate*), and a
+large value at one point is not a large error, because `psi_c` is evaluated and
+only the smooth `psi_p` is approximated. **Perturbing the node** changes the
+geometry the solve reports without saying so, and **taking the finite part**
+is a different field from the one `psi = psi_c + psi_p` names; both make a run
+that looks as if it worked. A coincident node is the user's choice —
+`[[coils]]` drives the mesher, so a filament at a meshed coil's centre is
+reachable by writing the obvious file — and a refusal naming it is the answer.
+
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
+
+### Subdivided filaments as the default
+
+**Declined**, [M-154](MEASUREMENTS.md#m-154), [M-166](MEASUREMENTS.md#m-166).
+`[conductors] FilamentSize` converges the stack to the rectangle, and so
+*away* from a point-filament reference: on
+`examples/limited-tokamak-filament.toml` against `freegs4e`'s
+`H_limited_circular`, whose filaments sit at exactly MEQ's centres,
+`FilamentSize = 0.02` makes `psi_ax` **3.50× worse** and `psi_bnd` **10.81×
+worse**. M-154's 2.8e-05 on DIII-D rests on the same coincidence of models.
+Neither setting is safe, so the default stays one per block, a run prints which
+it took, and the `.nc` lists every filament.
+
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
+
+### `InterpolatedFlux` as the default
+
+**Declined**, [M-171](MEASUREMENTS.md#m-171). Rooting the critical points on
+`q_c`'s nodal interpolant takes the constraint-location leg from 9.5 s to 0.4 s,
+but on a cold normalised solve it moves `psi_ax` by up to **7.5e-02** against
+5.6e-17 for the exact field, non-monotone in the mesh, because it perturbs which
+candidate roots are accepted and a normalised solve selects among discrete
+equilibria. **Two repairs were measured and leave it unchanged to every digit**:
+polishing accepted roots with exact Newton steps, and reporting their `psi`
+exactly — a candidate set is not something a later correction restores. It ships
+off by default, safe warm.
+
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
+
+### An mgrid-style interpolated grid for `psi_c`
+
+**Declined.** VMEC's `mgrid` samples the vacuum field on a uniform grid and
+interpolates it back — mesh-free, reusable at any resolution, and approximate.
+The split's identities are asserted at `0.000e+00` and the vacuum remainder at
+`< 1.0e-12*scale`, so a `psi_c` that came back within an interpolation error
+would turn every one of them into a tolerance. The cache holds values at MEQ's
+own points and is bound to one mesh, degree and quadrature rule instead
+([M-170](MEASUREMENTS.md#m-170)).
+
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
+
+### Refusing a `.gf` warm start under a subtracting model
+
+**Declined**, by Abel. A `.gf` cannot say whether it holds `psi` or
+`psi − psi_c`, so `[initialguess] File` naming one beside `[conductors] Model`
+was proposed for refusal. Abel: *"assume the user knows what they're doing and
+so the warm start .gf file changes meaning (from psi to psi_p); warn loudly on
+stdout that you're doing it though."* `apps/meq.cpp` prints the change of
+meaning whenever both are set; `[initialguess] Content = "total"` and the `.nc`
+restart are what make the warning avoidable.
+
+*From `CLAUDE_FB.md`, *Conductors out of the mesh: the split*.*
 
 ## Solution inversion
 
@@ -2482,9 +2571,6 @@ they stay where they are; this index makes the catalogue complete.
 - `CLAUDE_INVERSION.md` *Eigen, and what the swap did and did not move*: Eigen as optional, `CompleteOrthogonalDecomposition` and `EIGEN_USE_BLAS`/`LAPACKE` (all Declined)
 - `CLAUDE_INVERSION.md` *The cache is keyed bitwise, and a hash was rejected on §8's own wording*, and `INVERSION-PLAN.md` IN-6's cache box: *A hash as the cache key* — a hash (Declined: "unlikely" is not "impossible") and `==` (Declined: `memcmp`, for signed zero and NaN)
 - `CLAUDE_INVERSION.md` *What is next*: *Vandermonde + GEMM extraction* (34.7×, not taken: the `(Ψ, θ)` file is written from traced nodes, not a `SurfaceFit`), a guard on the seed hint (Declined), the tolerance ladder in `SurfaceAverageConvergence` (Reverted) and segment-endpoint band marking (Reverted, per-node instead) (M-51, M-71)
-- `COIL-SUBTRACTION-PLAN.md` §0c: the "shrink Gamma" argument, falsified both ways — Gamma ≈ 2.1 with a 2.6× saving, and `setExteriorConductors()` doing it (2 of 23 conductors clear).
-- `COIL-SUBTRACTION-PLAN.md` §7.1: a clearance rule, perturbing a coincident node, and taking the finite part, all declined in favour of refusing coincidence only.
-- `COIL-SUBTRACTION-PLAN.md` §13.5 and §14: subdivided filaments as the default (declined, 3.50× / 10.81× worse against a point-filament reference; M-154, M-166), `InterpolatedFlux` as the default (declined, 7.5e-02; M-171), root polishing and exact `ψ` reporting (did not help), and an mgrid-style interpolated grid (declined).
 - `DEVICE-PLAN.md` *What is next* and §0: "porting the last reader opens every gate" (falsified, M-237); phase-C scalars measured and left (closed, M-240); Boost.Math to the device not needed, "interpolatory HDG dodges the device problem" (falsified)
 - `DEVICE-PLAN.md` §1.2: `transmissionConstraint()` as a defect (withdrawn); two attributions of the `postProcess` abort, MEQ's aliases and a stack `Vector` (falsified, M-130)
 - `DEVICE-PLAN.md` §3.0 table and §3.3 order table: M-199 "half taken" (falsified); the limiter not worth porting (M-201); the dense Schur port moves nothing (M-227); both cuDSS predictions wrong (M-229); the `UseDevice( true )` arm at 17× the bus (reverted, M-229); "the plan was a poor guide" (M-200, M-202); leg share as the yardstick (falsified, M-232)
@@ -2523,9 +2609,9 @@ they stay where they are; this index makes the catalogue complete.
 - `PLASMA-EDGE-PLAN.md` §7: the X-point diagnosis half wrong, and the evidence against the premise disposed of.
 - `PLASMA-EDGE-PLAN.md` §9.2 and §9.4: `φ = ψ − ψ_X` as the defining function, falsified; and three causes ruled out — cone widening, a P.1 violation, the mesher / datum / path family.
 - `PLASMA-EDGE-PLAN.md` §9.5 and §9.7: an interface at `ψ_X − ε` as a fallback rather than a design, and an `O(h)` disc exclusion, superseded by the closed-form local solution.
-- `ROADMAP.md` plan-file table: the `COIL-SUBTRACTION-PLAN.md` row (caching `psi_c` alone superseded, M-170; subdividing filaments moves MEQ away from `freegs4e`, M-166), the free-boundary row (FB-T does not cure confinement, M-134) and the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-134, M-137, M-138, M-166, M-170)
-- `ROADMAP.md` *So what is next* item 1 (l.80-117): `η₆` in the marking does nothing; coils the wrong instinct, a vertical field makes no core, vacuum start meaningless, continuation not needed; the first adaptive-coupling and two-border attempts (falsified / declined) (M-05)
-- `ROADMAP.md` *So what is next* item 1, *The conductor model is what is left*: no `Γ` excludes the conductors on any of seven machines, and the mixed case cascades (falsified) (M-95, M-96)
+- `ROADMAP.md` plan-file table: the `PLASMA-EDGE-PLAN.md` row (not scheduled) (M-137, M-138)
+- `ROADMAP.md` *So what is next* item 2: `η₆` in the marking does nothing; coils the wrong instinct, a vertical field makes no core, vacuum start meaningless, continuation not needed; the first adaptive-coupling and two-border attempts (falsified / declined) (M-05)
+- `ROADMAP.md` *So what is next* item 2, *The conductor model is what is left*: no `Γ` excludes the conductors on any of seven machines, and the mixed case cascades (falsified) (M-95, M-96)
 - `ROADMAP.md` *Division of labour*: auxiliary globally-coupled unknowns no longer worth asking for (M-98); BEM coupling not wanted, ExteriorDtN instead; the local-solve seed never filed (moot under NPC)
 - `ROADMAP.md` item 1: predictive solver selection killed, and continuation must not go in (falsified / declined) (M-24)
 - `ROADMAP.md` item 4: upstream's "under 6%" (withdrawn, M-126); host `LocalFactorMode::Batched` (declined); "`ψ_ax` borders need condense-first" (falsified); the `LineariseThenCondense` investigation deleted (falsified / reverted)

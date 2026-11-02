@@ -59,9 +59,9 @@
  * rectangles handed to setConductorField(), the plasma source alone on the
  * mesh, and the anisotropic flux row carrying the conductors' load. Both
  * routes solve one continuous problem on one mesh, so their difference falls
- * with refinement, as COIL-SUBTRACTION-PLAN.md's instrument has it. A load
- * missing or of the wrong sign leaves a difference of order delta0 that does
- * not.
+ * with refinement, which is the meshed route's cross-check of the split. A
+ * load missing or of the wrong sign leaves a difference of order delta0 that
+ * does not.
  *
  * Each case says what it asserts.
  */

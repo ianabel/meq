@@ -79,7 +79,7 @@ namespace meq
 				/*
 				 * THE SOURCE SEES THE TOTAL FLUX AND THE SOLVER HOLDS THE
 				 * REMAINDER. psi_c is added BEFORE F is evaluated and never
-				 * afterwards -- COIL-SUBTRACTION-PLAN.md CS-2 -- and the
+				 * afterwards -- CS-2 -- and the
 				 * offsets were checked host-side to be e*nq, so this index is
 				 * the cache's own `values[ offsets[ e ] + q ]`.
 				 */

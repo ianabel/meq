@@ -369,7 +369,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 
 # src/meq/ConductorField.cpp is ABSENT for the same reasons and one more that is
 # a DESIGN CONSTRAINT rather than a convenience. It is psi_c, the conductors'
-# own field, for COIL-SUBTRACTION-PLAN.md's psi = psi_c + psi_p -- a sum of
+# own field, for the conductor split psi = psi_c + psi_p -- a sum of
 # elliptic-integral kernels, plain doubles in and out. Its mesh check therefore
 # CANNOT take an mfem::Mesh: it is a per-POINT predicate, coincides(), that the
 # caller loops over the mesh's vertices and nodes. That is not a limitation

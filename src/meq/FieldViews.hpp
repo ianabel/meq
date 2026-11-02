@@ -4,11 +4,12 @@
 /*
  * EVALUATING THE PHYSICAL FIELD WHEN THE SOLVED ONE IS ONLY PART OF IT.
  *
- * Under `COIL-SUBTRACTION-PLAN.md`'s split the solver holds `psi_p` and the
- * physical flux is `psi_c + psi_p`. `COIL-SUBTRACTION-PLAN.md` §8.1 counts
- * about sixty-eight places that read the solved field, and §3 names the hazard
- * plainly: every consumer that forgets is a silent wrong answer rather than a
- * failure. This file exists so that the forgetting is hard.
+ * Under the conductor split the solver holds `psi_p` and the physical flux
+ * is `psi_c + psi_p`. About sixty-eight places read the solved field, and the
+ * hazard is plain: every consumer that forgets is a silent wrong answer rather
+ * than a failure (CLAUDE_FB.md, *Every consumer must read the total, and the
+ * views make forgetting hard*). This file exists so that the forgetting is
+ * hard.
  *
  * WHAT MAKES IT HARD IS THE NAMED CONSTRUCTOR AND NOT THE DOCUMENTATION.
  * There is no default constructor and no implicit conversion from a
@@ -31,10 +32,11 @@
  *
  * THE COST WHEN IT IS IN USE IS REAL AND IS NOT HIDDEN. `psi_c` is a Carlson
  * elliptic integral per filament and a cross-section quadrature per rectangle,
- * evaluated at every point a consumer asks about. `COIL-SUBTRACTION-PLAN.md`
- * §1 says `psi_c` should be computed once per mesh rather than once per
- * evaluation, and **this class is where that cache belongs when it is built**:
- * one type to change rather than sixty-eight call sites.
+ * evaluated at every point a consumer asks about. The per-mesh caches (CS-C)
+ * live where the points are fixed -- the source quadrature points, the
+ * potential dofs and the flux-space nodes -- and a view serves the points that
+ * are not, so the cost here is paid only by consumers reading at arbitrary
+ * points.
  *
  * A TRAP THIS FILE HAS TO AVOID AND EVERY CONSUMER WOULD MEET SEPARATELY.
  * Adding `psi_c` needs the point's `( R, z )`, which needs the element's

@@ -1020,7 +1020,7 @@ namespace meq
 
 		public:
 			/**
-			 * `psi_c` for `COIL-SUBTRACTION-PLAN.md`'s split, or null.
+			 * `psi_c` for the conductor split, or null.
 			 *
 			 * **A CRITICAL POINT IS A PROPERTY OF THE PHYSICAL FLUX AND THE
 			 * SOLVER ONLY HAS THE REMAINDER.** Under the split `fluxField` is
@@ -1107,8 +1107,8 @@ namespace meq
 			 * Newton step. The first run of the subtracted MAST-U case did not
 			 * finish a single iteration in seven minutes.
 			 *
-			 * `COIL-SUBTRACTION-PLAN.md` §1 licenses the cache for the reason
-			 * it licenses the solver's two: the conductor currents do not move
+			 * The split licenses the cache for the reason it licenses the
+			 * solver's two: the conductor currents do not move
 			 * during a forward solve, so `psi_c` at a fixed point is a
 			 * precompute. This one is the third and it is the search's.
 			 *

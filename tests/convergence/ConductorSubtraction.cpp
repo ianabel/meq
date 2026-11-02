@@ -1,4 +1,4 @@
-// COIL-SUBTRACTION-PLAN.md CS-2: the split psi = psi_c + psi_p on a
+// CS-2: the conductor split psi = psi_c + psi_p on a
 // FIXED-boundary case, where nothing else moves.
 //
 // THE ACCEPTANCE IS AN IDENTITY RATHER THAN A RATE, AND THAT IS WHY IT IS
@@ -10,9 +10,9 @@
 //
 // so psi_p is identically zero and the reported total psi_c + psi_p is the
 // filament's field EXACTLY -- at every point, including arbitrarily close to
-// the conductor, which no meshed solve of any degree can do. That is the plan's
-// central claim, §2(b), reduced to something a zero-tolerance assertion can
-// check.
+// the conductor, which no meshed solve of any degree can do. That is the
+// split's central claim -- the conductors resolved exactly rather than to the
+// mesh's order -- reduced to something a zero-tolerance assertion can check.
 //
 // AND IT DISCRIMINATES, WHICH A "SOLVE AND LOOK REASONABLE" TEST WOULD NOT.
 // Drop the subtraction and the same configuration imposes psi_c|_Gamma on the
@@ -187,7 +187,8 @@ BOOST_AUTO_TEST_CASE( withoutTheSubtractionTheRemainderIsLargeAndPlausible )
 	            "about the datum shift" );
 }
 
-// THE REFUSAL, WHICH IS COIL-SUBTRACTION-PLAN.md SECTION 7.1's DECISION.
+// THE REFUSAL: COINCIDENCE IS REFUSED AND PROXIMITY IS NOT. CLAUDE_FB.md, *The
+// mesh-point refusal is a per-point predicate, because the class is MFEM-free*.
 BOOST_AUTO_TEST_CASE( aFilamentOnAMeshVertexIsRefusedAndOneNearItIsNot )
 {
 	VacuumSource const source;
@@ -443,11 +444,12 @@ BOOST_AUTO_TEST_CASE( thePicardPathsFreezeTheSourceAtTheTotalFlux )
 
 // THE EVALUATION ABSTRACTION: FREE WHEN THE SPLIT IS OFF, CORRECT WHEN IT IS ON.
 //
-// COIL-SUBTRACTION-PLAN.md §8.1 counts about sixty-eight places that read the
-// solved field, and §3 names the hazard: every consumer that forgets psi_c is a
-// silent wrong answer. meq::PotentialView is what makes the forgetting hard --
-// it is built by NAME, physical() or remainder(), so the choice is made in a
-// word at the call site rather than by knowing what the class does.
+// About sixty-eight places read the solved field, and every consumer that
+// forgets psi_c is a silent wrong answer (CLAUDE_FB.md, *Every consumer must
+// read the total, and the views make forgetting hard*). meq::PotentialView is
+// what makes the forgetting hard -- it is built by NAME, physical() or
+// remainder(), so the choice is made in a word at the call site rather than by
+// knowing what the class does.
 //
 // BOTH HALVES ARE ASSERTED AT ZERO TOLERANCE, because both are identities.
 // With no conductors the view must be the SAME NUMBER as the bare GridFunction,
@@ -539,21 +541,23 @@ BOOST_AUTO_TEST_CASE( theViewIsFreeWithoutConductorsAndExactWithThem )
 
 // THE TWO ROUTES AGREE, AND THE MESHED ONE CONVERGES TO THE SUBTRACTED ONE.
 //
-// COIL-SUBTRACTION-PLAN.md §0a-pre is a STANDING REQUIREMENT: MEQ must always be
-// able to solve finite-sized coils accurately the old way, and the split is an
-// option rather than a replacement. This case is what gives that teeth, and it
-// is only possible because CS-1b put RECTANGLES in meq::ConductorField -- a
-// rectangle is the conductor that can go either way, so it is the only one that
-// can be the cross-check. A filament can only ever be subtracted.
+// A STANDING REQUIREMENT (CLAUDE_FB.md, *The meshed route is the split's
+// instrument, and it stays first class*): MEQ must always be able to solve
+// finite-sized coils accurately the old way, and the split is an option rather
+// than a replacement. This case is what gives that teeth, and it is only
+// possible because CS-1b put RECTANGLES in meq::ConductorField -- a rectangle
+// is the conductor that can go either way, so it is the only one that can be
+// the cross-check. A filament can only ever be subtracted.
 //
 // THE SUBTRACTED ARM IS THE TRUTH HERE, WHICH IS THE RIGHT WAY ROUND. With the
 // coil's own field as the datum and no plasma, the remainder is identically
-// zero and the total is psi_c EXACTLY -- §7.4's identity. The meshed arm solves
+// zero and the total is psi_c EXACTLY -- CS-2's identity. The meshed arm solves
 // Delta* psi = -mu0 R j_phi with the same datum and a source that is a top hat
 // on the coil, so it approximates that same field to the mesh's order. So the
 // difference between them IS the meshed route's discretisation error, and it
 // must FALL under refinement. A difference that did not fall would say the two
-// routes are solving different problems, which is exactly what §0b forbids.
+// routes are solving different problems: the split is a change of
+// REPRESENTATION and must not be a change of answer.
 BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
 {
 	// A rectangle well inside the box, clear of its boundary, and ALIGNED TO
@@ -571,7 +575,7 @@ BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
 	// assertion" records for the extension path, met here for the same reason,
 	// and it is a fact about cutting a discontinuity rather than about either
 	// conductor route. MEQ meshes TO its coils -- tools/mesh/halfdisc.py exists
-	// to do exactly that -- so the aligned case is the configuration this plan
+	// to do exactly that -- so the aligned case is the configuration the split
 	// is about.
 	meq::Coil const conductor( 1.00, 0.00, 0.10, 0.10, 1.0e5 );
 
@@ -609,7 +613,7 @@ BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
 			return meshed.psi( x( 0 ), x( 1 ) );
 		} );
 
-	std::printf( "\n  §0a-pre: the same rectangle MESHED against SUBTRACTED\n" );
+	std::printf( "\n  the same rectangle MESHED against SUBTRACTED\n" );
 	std::printf( "    %8s %10s %14s %8s\n", "elements", "dofs",
 	             "max |meshed - psi_c|", "rate" );
 
@@ -687,13 +691,13 @@ BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
 	// THE ASSERTION IS THAT IT FALLS, not that it reaches any particular order.
 	// The source is a top hat, so psi is only C^1 across the coil's edge and no
 	// polynomial degree recovers a clean k+1 globally -- which is the ORDER
-	// argument and is not what §0a-pre needs. What it needs is that the two
-	// routes converge to the same field.
+	// argument and is not what the cross-check needs. What it needs is that the
+	// two routes converge to the same field.
 	BOOST_TEST( worstRate > 0.9,
 	            "the meshed coil is not converging to the subtracted one: "
 	            "worst observed rate " << worstRate << ". The two routes are "
-	            "solving different problems, which COIL-SUBTRACTION-PLAN.md "
-	            "§0b forbids" );
+	            "solving different problems, and the split must be a change of "
+	            "representation and not of answer" );
 }
 
 // CS-4: A NORMALISED SOURCE UNDER THE SPLIT, WHICH THE REFUSAL USED TO FORBID.
@@ -1007,7 +1011,7 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 
 	BOOST_TEST( worstTotal < 1.0e-4*spreadRemainder,
 	            "the traced curve is not a level set of psi_p + psi_c, which is "
-	            "what a flux surface is under COIL-SUBTRACTION-PLAN.md's split" );
+	            "what a flux surface is under the conductor split" );
 
 	// AND THE ARM THAT SAYS THE DEFECT WAS REAL. A curve that closed cleanly
 	// on the remainder carries a physical flux that is not constant along it
@@ -1048,8 +1052,8 @@ BOOST_AUTO_TEST_CASE( theConductorPsiIsZeroWithoutASplit )
  *                       Gamma, which is the whole datum rather than an error
  *
  * TWO THINGS HAD TO MOVE TOGETHER FOR THAT TO HOLD, AND EITHER ONE ALONE IS A
- * PLAUSIBLE WRONG ANSWER -- COIL-SUBTRACTION-PLAN.md section 3 says so in
- * advance:
+ * PLAUSIBLE WRONG ANSWER (docs/conductors.rst, *The boundary datum and the
+ * exterior coupling*):
  *
  *     the DIRICHLET half   prepare() transfers g - psi_c inward, because what
  *                          lives on Gamma is the remainder
@@ -1282,7 +1286,7 @@ BOOST_AUTO_TEST_CASE( theSplitReachesTheExteriorCoupling )
 	 * on correct code (there is no rate) and it would pass on code that was
 	 * merely converging towards the right answer from somewhere large. CS-2's
 	 * theRemainderOfAVacuumFilamentIsZero makes the same choice for the same
-	 * reason, and section 7.4 of the plan is the argument.
+	 * reason.
 	 */
 	/*
 	 * THE REMAINDER IS SMALL AGAINST THE FIELD IT IS A REMAINDER FROM, AND
@@ -1298,9 +1302,8 @@ BOOST_AUTO_TEST_CASE( theSplitReachesTheExteriorCoupling )
 	 * -- and in both broken arms the modal sum on Gamma reads 4.12e-02 against
 	 * psi_c, 65% of the datum, so the second assertion goes red too. That is
 	 * what says the two halves are separately load bearing rather than one fix
-	 * written twice, which is exactly the trap COIL-SUBTRACTION-PLAN.md section
-	 * 3 predicts for this pair: "the two must move together or the datum is
-	 * double counted".
+	 * written twice: the two must move together or the conductor is counted
+	 * twice.
 	 *
 	 * AND NEITHER BROKEN ARM DIVERGES OR FAILS TO CONVERGE. Both take one
 	 * Newton step and report a smooth, plausible field -- FB-7 records the same
@@ -1411,7 +1414,7 @@ BOOST_AUTO_TEST_CASE( aSubtractedConductorOutsideGammaIsRefusedEitherWayRound )
 // CS-5: MEQ'S OWN EXPENSIVE QUADRATURE IS THE REFERENCE, BECAUSE THE BENCHMARK
 // CANNOT BE ONE.
 //
-// COIL-SUBTRACTION-PLAN.md §7.2 retires CS-5 as staged and says why:
+// CLAUDE_DECLINED.md, *CS-5's acceptance against `freegs4e`*, says why:
 // MEASUREMENTS.md M-139 puts the freegs4e comparison's floor at 7.7e-04 and it
 // does NOT refine, because freegs4e's ShapedCoil caps at six points per
 // triangle. A change whose entire claim is that the conductors are resolved
@@ -1614,8 +1617,8 @@ BOOST_AUTO_TEST_CASE( theConductorQuadratureIsBoundedByAnExpensiveReference )
 	            "raising the order from 8 to " << shipped << " bought only "
 	            << leastGain << "x at its weakest point clear of the "
 	            "conductor. A reference that does not refine is M-139's "
-	            "freegs4e floor, which is exactly what §7.2 says CS-5 cannot "
-	            "be accepted against" );
+	            "freegs4e floor, which is exactly what CS-5 cannot be "
+	            "accepted against" );
 }
 
 // CS-5, THE SECOND HALF: THE SAME QUESTION ASKED OF A SOLVE RATHER THAN OF THE
@@ -1629,11 +1632,11 @@ BOOST_AUTO_TEST_CASE( theConductorQuadratureIsBoundedByAnExpensiveReference )
 // measures how far apart the two reported equilibria are.
 //
 // THE COMPARISON IS AGAINST THE DISCRETISATION AND NOT AGAINST ZERO, which is
-// the point §7.2 makes about M-139: a reference is only a reference if it
-// resolves the thing being measured better than the thing being measured
-// resolves itself. theMeshedCoilConvergesToTheSubtractedOne reads
-// 1.6e-04 to 1.8e-05 on these meshes; a quadrature contribution of that size
-// would make the split's acceptance a measurement of the quadrature rule.
+// the point M-139 makes about the benchmark: a reference is only a reference if
+// it resolves the thing being measured better than the thing being measured
+// resolves itself. theMeshedCoilConvergesToTheSubtractedOne reads 1.6e-04 to
+// 1.8e-05 on these meshes; a quadrature contribution of that size would make
+// the split's acceptance a measurement of the quadrature rule.
 BOOST_AUTO_TEST_CASE( theSolvedSplitIsInsensitiveToTheConductorQuadrature )
 {
 	meq::Coil const conductor( 1.00, 0.00, 0.10, 0.10, 1.0e5 );
@@ -1731,16 +1734,16 @@ BOOST_AUTO_TEST_CASE( theSolvedSplitIsInsensitiveToTheConductorQuadrature )
 	BOOST_TEST( worstRelative < 1.0e-9,
 	            "the solved split moves by " << worstRelative << " relative "
 	            "when the conductor quadrature is raised from the shipped "
-	            "order to " << reference << ". COIL-SUBTRACTION-PLAN.md §7.2 "
-	            "needs this far below the discretisation, or the split is "
+	            "order to " << reference << ". CS-5 needs this far below the "
+	            "discretisation, or the split is "
 	            "being accepted against its own quadrature rule" );
 }
 
-// §0b's CENTRAL CLAIM, ON THE ONE COMBINATION NO OTHER CASE COVERS:
+// THE SPLIT'S CENTRAL CLAIM, ON THE ONE COMBINATION NO OTHER CASE COVERS:
 // SPLIT + EXTERIOR COUPLING + PLASMA.
 //
-// THIS IS THE CELL NO OTHER ACCEPTANCE COVERS, WHICH IS §13.1's LESSON AND IS
-// THE WHOLE REASON IT IS SEPARATE:
+// THIS IS THE CELL NO OTHER ACCEPTANCE COVERS, WHICH IS CLAUDE.md's RULE ON
+// COMPOSED STAGES AND IS THE WHOLE REASON IT IS SEPARATE:
 //
 //   * theSplitReachesTheExteriorCoupling       -- coupling, NO plasma
 //   * theMeshedCoilConvergesToTheSubtractedOne -- plasma, NO coupling
@@ -1756,9 +1759,9 @@ BOOST_AUTO_TEST_CASE( theSolvedSplitIsInsensitiveToTheConductorQuadrature )
 // its sibling does not is the plasma's doing.
 //
 // THE COMPARISON IS AGAINST THE MESHED ROUTE AND NOT AGAINST A CLOSED FORM,
-// because there is no closed form for this and §0b's claim is a comparison
-// anyway: the same conductors as a DOMAIN SOURCE, on the same mesh, must give
-// the same equilibrium to the discretisation.
+// because there is no closed form for this and the split's claim is a
+// comparison anyway: the same conductors as a DOMAIN SOURCE, on the same mesh,
+// must give the same equilibrium to the discretisation.
 BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 {
 	int const order = 2;
@@ -1810,7 +1813,7 @@ BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 	LinearPlasma const plasma;
 	MeshedPlasma const withCoils( meshed );
 
-	std::printf( "\n  §0b UNDER AN EXTERIOR COUPLING, WITH A PLASMA\n" );
+	std::printf( "\n  MESHED AGAINST SPLIT, EXTERIOR COUPLING, PLASMA\n" );
 	std::printf( "    %5s %10s %16s %8s\n", "n", "elements",
 	             "meshed - split", "rate" );
 
@@ -1956,15 +1959,15 @@ BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 	BOOST_TEST( lastRelative < 1.0e-1,
 	            "the subtracted and meshed routes disagree by " << lastRelative
 	            << " relative under an exterior coupling with a plasma. "
-	            "COIL-SUBTRACTION-PLAN.md §0b requires the split to be a change "
-	            "of REPRESENTATION and not of answer" );
+	            "The split must be a change of REPRESENTATION and not of "
+	            "answer" );
 
 	/*
 	 * AND THE DIFFERENCE FALLS, WHICH IS THE HALF WITH TEETH -- BUT ACROSS THE
 	 * WHOLE SEQUENCE AND NOT PER PAIR, AND THAT IS FORCED.
 	 *
 	 * A tolerance says the two routes are close on one mesh; a rate says they
-	 * are converging to the same field, which is §0b's actual claim.
+	 * are converging to the same field, which is the split's actual claim.
 	 *
 	 * **PER PAIR IS NOT AVAILABLE HERE AND ITS SIBLING SHOWS WHY.**
 	 * theMeshedCoilConvergesToTheSubtractedOne can assert per pair only because

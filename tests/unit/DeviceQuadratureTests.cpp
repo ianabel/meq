@@ -240,7 +240,7 @@ BOOST_AUTO_TEST_CASE( theDeviceLoopRefusesWhatItCannotDo )
  * THE CONDUCTOR SHIFT, WHICH IS THE ONE REFUSAL THAT STOOD BETWEEN THIS LOOP
  * AND THE PRODUCTION CONFIGURATION.
  *
- * COIL-SUBTRACTION-PLAN.md CS-2: the source must see the TOTAL flux while the
+ * CS-2: the source must see the TOTAL flux while the
  * solver holds only the remainder, so `psi_c` is added before F is evaluated
  * and never afterwards. meq::SourceIntegrator caches it per quadrature point
  * as `values[ offsets[ e ] + q ]`, and this case is about that INDEX: a psi_c

@@ -534,7 +534,7 @@ namespace meq
 	 *
 	 * @param psi     the SOLVED potential at the point, already summed against
 	 *                the shape functions.
-	 * @param psiShift `psi_c` under COIL-SUBTRACTION-PLAN.md's split, or zero.
+	 * @param psiShift `psi_c` under the conductor split, or zero.
 	 *                **The source must see the TOTAL flux and the solver only
 	 *                has the remainder**, so this is added before F is
 	 *                evaluated and never afterwards. Zero makes the split

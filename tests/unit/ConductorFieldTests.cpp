@@ -1,6 +1,6 @@
 // Unit tests for the conductor field in src/meq/ConductorField.
 //
-// COIL-SUBTRACTION-PLAN.md CS-1 and CS-1b. The split is psi = psi_c + psi_p,
+// CS-1 and CS-1b. The conductor split is psi = psi_c + psi_p,
 // with psi_c the conductors' own field evaluated exactly and psi_p what MEQ
 // solves for, so that the conductors need not be in the mesh at all. This file
 // is the unit under that: psi_c over FILAMENTS and RECTANGLES both, and the
@@ -9,14 +9,14 @@
 // FOUR THINGS HERE COULD BE SILENTLY WRONG AND NO CONVERGENCE RATE WOULD SEE
 // ANY OF THEM:
 //
-//   * SUPERPOSITION. psi_c is a sum over conductors, and the whole plan rests
+//   * SUPERPOSITION. psi_c is a sum over conductors, and the whole split rests
 //     on Delta* being linear -- so a set of N must give exactly what the N
 //     single-conductor fields give added up. A factor applied per conductor
 //     rather than once converges at full rate to the wrong equilibrium.
 //   * WHICH KIND THE COINCIDENCE TEST IS ABOUT. A filament has a line
 //     singularity and a rectangle does not -- meq::coilPsi() is "Valid
 //     EVERYWHERE, including inside the coil" -- so refusing a node inside a
-//     coil would reject the ordinary configuration this plan exists to make
+//     coil would reject the ordinary configuration the split exists to make
 //     cheap, while NOT refusing one on a filament is an infinity in a solve.
 //   * THE AXIS. psi_c must be EXACTLY zero at R = 0, bit for bit, because that
 //     is the boundary condition the free-boundary problem imposes there and the
@@ -258,7 +258,7 @@ BOOST_AUTO_TEST_CASE( rectanglesSumInBesideTheFilaments )
 // filament kernel over its cross-section and meq::coilPsi() is documented
 // "Valid EVERYWHERE, including inside the coil" -- so there is no line
 // singularity for a node to land on, and refusing one would reject exactly the
-// configuration this plan exists to make cheap.
+// configuration the split exists to make cheap.
 BOOST_AUTO_TEST_CASE( aPointInsideARectangleIsNotACoincidence )
 {
 	meq::ConductorField field;
@@ -280,8 +280,8 @@ BOOST_AUTO_TEST_CASE( aPointInsideARectangleIsNotACoincidence )
 	BOOST_TEST( std::isfinite( field.psi( 1.60 + 0.08, -0.30 ) ) );
 }
 
-// THE QUADRATURE ORDER FORWARDS, which is what COIL-SUBTRACTION-PLAN.md §7.2's
-// replacement for CS-5 needs: a reference field built far beyond what a solve
+// THE QUADRATURE ORDER FORWARDS, which is what CS-5's own-quadrature
+// reference needs: a reference field built far beyond what a solve
 // would use, on the same conductors and the same code.
 BOOST_AUTO_TEST_CASE( theQuadratureOrderForwardsAndChangesOnlyTheRectangles )
 {
@@ -540,10 +540,9 @@ BOOST_AUTO_TEST_CASE( psiIsEvenInRAndTheVectorEntryPointsStillRefuse )
  * THE FILAMENT STACK CONVERGES TO THE RECTANGLE, AT ORDER 2, CLEAR OF THE
  * CONDUCTOR.
  *
- * COIL-SUBTRACTION-PLAN.md section 13.5. A `[[coils]]` block collapsed to ONE
- * filament at its centre is a different conductor model rather than an
- * approximation -- section 4b says so and that is right -- and it is what
- * bounds the coarse-filaments-then-meshed-coils pathway: MAST-U's solenoid is
+ * A `[[coils]]` block collapsed to ONE filament at its centre is a different
+ * conductor model rather than an approximation, and it is what bounds the
+ * coarse-filaments-then-meshed-coils pathway: MAST-U's solenoid is
  * 0.012 x 3.180 m beside the plasma, so one point at its centre is not a
  * machine near MAST-U's.
  *
@@ -729,7 +728,7 @@ BOOST_AUTO_TEST_CASE( theUnitStackIsTheCentreFilamentAndTheStackKeepsTheCurrent 
  * A CELL SIZE IS AN UPPER BOUND ON A CELL, AND ASPECT RATIO IS WHY IT IS A
  * LENGTH RATHER THAN A COUNT.
  *
- * MAST-U's own three shapes, which is the geometry section 13.5 is about: a
+ * MAST-U's own three shapes, which is the geometry the key is about: a
  * solenoid of aspect ratio 265, a PX of 16, and a D of 1. One COUNT is wrong
  * for two of those whichever it is; one SIZE gives each the division its own
  * extent asks for, and that is the whole argument for the key's units.
@@ -805,11 +804,11 @@ BOOST_AUTO_TEST_CASE( theCellSizeDividesEachBlockByItsOwnExtent )
  * WHAT THE COLLAPSE COSTS ON THE CONDUCTOR THAT MOTIVATES THE KEY, AT THE
  * PLASMA.
  *
- * COIL-SUBTRACTION-PLAN.md section 13.5 names MAST-U's solenoid: 0.012 m by
- * 3.18 m, an aspect ratio of 265, sitting beside the plasma rather than out
- * beyond it. The claim the key rests on is that one point at its centre is not
- * a machine near MAST-U's, and this is that claim as a number rather than as an
- * argument -- the geometry and the current are examples/mastu-nke.toml's own.
+ * The motivating conductor is MAST-U's solenoid: 0.012 m by 3.18 m, an aspect
+ * ratio of 265, sitting beside the plasma rather than out beyond it. The claim
+ * the key rests on is that one point at its centre is not a machine near
+ * MAST-U's, and this is that claim as a number rather than as an argument --
+ * the geometry and the current are examples/mastu-nke.toml's own.
  *
  * THE FIELD POINTS ARE IN THE PLASMA, which is where the error has to be
  * measured: the collapse conserves the total current, so it is exact in the FAR
@@ -873,10 +872,9 @@ BOOST_AUTO_TEST_CASE( theCollapseIsPercentLevelAtMastUsPlasmaAndTheStackIsNot )
 	// tenth of a per cent would make this key an optimisation; it is not.
 	BOOST_TEST( collapsed > 0.05,
 		"one filament at the solenoid's centre is " << collapsed << " from the "
-		"rectangle at MAST-U's own plasma. COIL-SUBTRACTION-PLAN.md 13.5 says "
-		"that collapse is what bounds the coarse-filaments pathway; if this "
-		"number is small the plan's premise is wrong and the key is not "
-		"needed." );
+		"rectangle at MAST-U's own plasma. That collapse is what bounds the "
+		"coarse-filaments pathway; if this number is small the key's premise "
+		"is wrong and the key is not needed." );
 
 	BOOST_TEST( sized < 0.01*collapsed,
 		"FilamentSize = 0.05 gives a " << sizedR << " x " << sizedZ

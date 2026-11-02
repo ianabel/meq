@@ -754,7 +754,7 @@ namespace meq
 			void setPlasmaComponent( PlasmaComponent const *component );
 
 			/**
-			 * `psi_c` for `COIL-SUBTRACTION-PLAN.md`'s split, or null.
+			 * `psi_c` for the conductor split, or null.
 			 *
 			 * **THE SOURCE MUST SEE THE TOTAL AND THE SOLVER ONLY HAS THE
 			 * REMAINDER.** Under the split the solved field is `psi_p`, so the
@@ -1974,14 +1974,12 @@ namespace meq
 			/// psi on the magnetic axis: the guess before solve(), the converged
 			/// value after it. Zero unless normalisationIsUnknown().
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS READ OFF THE
-			/// REMAINDER `psi_p` AND IS NOT THE PHYSICAL QUANTITY.** The
-			/// critical-point search, the limiter and the X-point all run on
-			/// the solved field, which is `psi_p`; the physical flux is
-			/// `psi_c + psi_p`. Making every consumer read the total is CS-4,
-			/// and until it is built setConductorField() refuses a normalised
-			/// source, whose whole job is to divide by these. Exactly unchanged
-			/// with no conductor field set.
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS THE PHYSICAL QUANTITY**, a
+			/// value of `psi_c + psi_p` and not of the solved remainder
+			/// `psi_p`: the critical-point search, the limiter and the X-point
+			/// all read the total (CS-4), which is what lets a normalised
+			/// source, whose whole job is to divide by these, run under the
+			/// split. Exactly unchanged with no conductor field set.
 			double psiAxis() const;
 
 			/// The constraint residual psi_ax - max psi_h at the end of the last
@@ -2603,7 +2601,7 @@ namespace meq
 			/// benchmark on a rectangle cut out of an exact equilibrium is not.
 			///
 			/// **THIS IS THE DATUM FOR THE PHYSICAL `psi`, AND IT KEEPS THAT
-			/// MEANING UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT.** A caller
+			/// MEANING UNDER THE CONDUCTOR SPLIT.** A caller
 			/// supplies `psi|_Γ` exactly as before; when setConductorField() is
 			/// in use what is actually projected onto `Γ` is
 			/// `psi|_Γ − psi_c|_Γ`, because the solved field is the remainder.
@@ -2662,8 +2660,10 @@ namespace meq
 			 * holds `psi_p` and is read back as `psi_p`. What is not checkable
 			 * is the mismatch — a guess written without a split and read with
 			 * one, or the reverse — because `mfem::GridFunction::Save()` has no
-			 * slot to record which it was. `COIL-SUBTRACTION-PLAN.md` §8.3 is
-			 * that finding and §9 is the format that fixes it.
+			 * slot to record which it was; the `.nc` restart, which carries the
+			 * conductor table, is the format that fixes it (CLAUDE_FB.md, *The
+			 * `.gf` cannot say it holds a remainder, so the `.nc` is the
+			 * restart*).
 			 *
 			 * **SO THE OBLIGATION IS ON THE CALLER TO SAY SO.**
 			 * guessIsRemainder() reports which meaning is in force, for a
@@ -3858,7 +3858,7 @@ namespace meq
 			/**
 			 * `psi_c` for conductors INSIDE the domain: solve for the remainder
 			 * `psi_p` of `psi = psi_c + psi_p` rather than for `psi` itself.
-			 * `COIL-SUBTRACTION-PLAN.md` CS-2.
+			 * CS-2.
 			 *
 			 * **THIS IS THE OPPOSITE CASE TO setExteriorConductors() AND THE
 			 * ALGEBRA IS WHY.** That one needs its conductors OUTSIDE `Γ`,
@@ -3882,12 +3882,14 @@ namespace meq
 			 * `psi|_Γ − psi_c|_Γ`, computed here. But **the solved field stops
 			 * being the physical field**: `potential()` and everything built on
 			 * it return `psi_p`, and `psi` is `psi_c + psi_p`. Use
-			 * conductorPsi() to add it back. `COIL-SUBTRACTION-PLAN.md` §3 calls
-			 * this the real cost of the plan and this tree has three defects of
-			 * exactly that shape already.
+			 * conductorPsi() to add it back. That is the real cost of the
+			 * split, and this tree has three defects of exactly that shape
+			 * already (CLAUDE_FB.md, *Every consumer must read the total, and
+			 * the views make forgetting hard*).
 			 *
-			 * **A NODE OR VERTEX ON A FILAMENT IS REFUSED HERE**, which is
-			 * §7.1's decision: `psi_c` is genuinely infinite there, and catching
+			 * **A NODE OR VERTEX ON A FILAMENT IS REFUSED HERE**
+			 * (docs/conductors.rst, *Filaments, and a filament on a mesh
+			 * point*): `psi_c` is genuinely infinite there, and catching
 			 * it at setup naming the node is a better failure than
 			 * meq::filamentPsi()'s throw from inside a solve. Proximity is fine
 			 * and is deliberately NOT refused — see meq::ConductorField.
@@ -3895,7 +3897,8 @@ namespace meq
 			 * @param conductors borrowed, and must outlive the solve.
 			 * @throws std::invalid_argument if a mesh vertex or node coincides
 			 *         with a filament, naming both; or if an exterior coupling
-			 *         is set, which is CS-3 and is not built.
+			 *         is set and a conductor does not lie strictly inside
+			 *         `Γ` (CS-3).
 			 */
 			void setConductorField( ConductorField const &conductors );
 
@@ -3911,8 +3914,8 @@ namespace meq
 			/// once and read them back instead of rebuilding `psi_c` at every
 			/// point of every element on every solve. `src/meq/ConductorStore.hpp`
 			/// is the file format and says why this is a cache rather than a
-			/// field; `COIL-SUBTRACTION-PLAN.md` §1 is why the cache is
-			/// legitimate at all.
+			/// field. It is legitimate at all because the conductor currents do
+			/// not move during a forward solve.
 			///
 			/// Empty, with a zero signature, when the split is not in use --
 			/// there is then nothing to store and nothing that would read it.
@@ -3987,9 +3990,8 @@ namespace meq
 			/// setInterpolatedConductorFlux().
 			bool interpolateConductorFlux = false;
 
-			/// `psi_c` at every potential dof, built once per mesh —
-			/// `COIL-SUBTRACTION-PLAN.md` §1's precompute. Empty unless the
-			/// split is in use.
+			/// `psi_c` at every potential dof, built once per mesh. Empty unless
+			/// the split is in use.
 			void buildConductorNodalCache();
 
 			/// The rectangles an extremum search must not adopt an O-point of,
@@ -4846,14 +4848,12 @@ namespace meq
 			/// The converged `psi_bnd`. Zero unless setBoundaryFluxPoint() was
 			/// called. Valid after solve().
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS READ OFF THE
-			/// REMAINDER `psi_p` AND IS NOT THE PHYSICAL QUANTITY.** The
-			/// critical-point search, the limiter and the X-point all run on
-			/// the solved field, which is `psi_p`; the physical flux is
-			/// `psi_c + psi_p`. Making every consumer read the total is CS-4,
-			/// and until it is built setConductorField() refuses a normalised
-			/// source, whose whole job is to divide by these. Exactly unchanged
-			/// with no conductor field set.
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS THE PHYSICAL QUANTITY**, a
+			/// value of `psi_c + psi_p` and not of the solved remainder
+			/// `psi_p`: the critical-point search, the limiter and the X-point
+			/// all read the total (CS-4), which is what lets a normalised
+			/// source, whose whole job is to divide by these, run under the
+			/// split. Exactly unchanged with no conductor field set.
 			double psiBoundary() const;
 
 			/**
@@ -5220,8 +5220,8 @@ namespace meq
 			/// Valid after solve(). Throws std::logic_error on the fitted path,
 			/// where there is no band and `Gamma` is `Gamma_h`.
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS THE REMAINDER'S
-			/// OUTWARD FLUX.** The identity it is usually checked against,
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS THE REMAINDER'S OUTWARD
+			/// FLUX.** The identity it is usually checked against,
 			/// `oint ( 1/R ) dpsi/dn dl = −mu0 I_enclosed`, then holds for the
 			/// PLASMA current alone: the conductors are not in the mesh, so
 			/// their current is not enclosed by anything the solve integrates
@@ -5355,8 +5355,8 @@ namespace meq
 
 			/// psi_h in W_h. Valid after solve().
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS THE REMAINDER
-			/// `psi_p`, NOT THE PHYSICAL FLUX.** When setConductorField() is in
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS THE REMAINDER `psi_p`, NOT
+			/// THE PHYSICAL FLUX.** When setConductorField() is in
 			/// use the physical quantity is `psi_c + psi_p`; add conductorPsi()
 			/// back, or read a total this class already forms. With no
 			/// conductor field set — every existing path — nothing changes and
@@ -5370,12 +5370,13 @@ namespace meq
 			 * point evaluation.
 			 *
 			 * **AND IT IS AN INTERPOLATION WHERE psi() IS EXACT, WHICH IS THE
-			 * WHOLE OF §8.3's FINDING.** `psi_c` has no representation in
+			 * WHOLE OF THE FINDING.** `psi_c` has no representation in
 			 * `V_h` -- for a filament it is logarithmic at the conductor -- so
 			 * anything that writes the total as a FIELD is lossy by
-			 * construction, and that is why `COIL-SUBTRACTION-PLAN.md` §9
-			 * makes the exact restart a NetCDF file carrying the remainder and
-			 * the conductor set, and demotes the `.gf` to a viewing artefact.
+			 * construction, and that is why the exact restart is a NetCDF file
+			 * carrying the remainder and the conductor set, and the `.gf` a
+			 * viewing artefact (docs/conductors.rst, *What the split is exact
+			 * for, and what it cannot be*).
 			 * This is that artefact's maker, named so that nobody mistakes it
 			 * for the restart.
 			 *
@@ -5403,8 +5404,8 @@ namespace meq
 			/// add to that, the load in setAnisotropy()'s law being what makes
 			/// them.
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
-			/// THE REMAINDER `psi_p` AND NOT OF THE PHYSICAL FLUX.** `q_c` is
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS A QUANTITY OF THE REMAINDER
+			/// `psi_p` AND NOT OF THE PHYSICAL FLUX.** `q_c` is
 			/// meq::ConductorField::flux() and adds to this one, `Δ*` being
 			/// linear. With no
 			/// conductor field set — every existing path — nothing changes,
@@ -5414,8 +5415,8 @@ namespace meq
 
 			/// psihat_h in M_h, the hybrid unknown. Valid after solve().
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
-			/// THE REMAINDER `psi_p` AND NOT OF THE PHYSICAL FLUX.** The trace carries
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS A QUANTITY OF THE REMAINDER
+			/// `psi_p` AND NOT OF THE PHYSICAL FLUX.** The trace carries
 			/// `psi_p` on the faces, which is why setBoundaryData()'s datum is
 			/// shifted by `psi_c` before it is projected. With no
 			/// conductor field set — every existing path — nothing changes,
@@ -5502,8 +5503,8 @@ namespace meq
 
 			/// psi*_h in P_(k+1). Valid after postProcess().
 			///
-			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
-			/// THE REMAINDER `psi_p` AND NOT OF THE PHYSICAL FLUX.** `psi*` is a
+			/// **UNDER THE CONDUCTOR SPLIT THIS IS A QUANTITY OF THE REMAINDER
+			/// `psi_p` AND NOT OF THE PHYSICAL FLUX.** `psi*` is a
 			/// post-processing OF `psi_p`, so it is the remainder at `k+2` and
 			/// not the physical flux at `k+2`. With no
 			/// conductor field set — every existing path — nothing changes,
