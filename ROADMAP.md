@@ -53,7 +53,7 @@ becomes a pointer. What neither becomes is an entry that still reads like work.
 | `INVERSE-RACE-PLAN.md` | **Built and run on F, C and D shaped; E and G not run.** A time-to-accuracy race of MEQ, NICE, `freegs4e` and freegsnke on the five shaped machines where all four converge to one answer — [M-254](MEASUREMENTS.md#m-254) poses the problem and [M-255](MEASUREMENTS.md#m-255) shows they agree on it to 3e-04 – 4e-03 once the references are fixed. Two starts: cold from the vacuum stage, and warm as a 1 cm shape step. The results are the Claude Docs artifact *Inverse race: F, C and D shaped*; MEQ converges on C shaped at two rungs of six, and `PERFORMANCE_TODO.md` has the two defects that leave it there. IR-3's MEASUREMENTS.md entries are not written. **Where MEQ's time goes on the race's D and F shaped directories is measured**: on an idle machine the backsolve and the NPC reduce+recover legs run on 2.9 to 4.2 of eight cores, and PARDISO's refinement at a cap of two was 4.5 to 6.0 times the direct solve with no pivot perturbed ([M-300](MEASUREMENTS.md#m-300)); upstream's reduce and recover, timed apart on TCV, reach 4.6 to 4.8× and 3.2 to 3.5× at eight threads, and a cap of zero, now the default, cuts the backsolve 4.0 to 5.2× on the same Newton path ([M-301](MEASUREMENTS.md#m-301)); and upstream's `ArrayMult()` views take the staging from 32 ms a call to 7 and the NPC leg at eight threads 44% shorter, reduce 5.0× and recover 4.6× ([M-304](MEASUREMENTS.md#m-304)) |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, still **not scheduled**. Its own precondition — `j ≥ 1` green, and a machine case at `j ≥ 1` — is now met, so what holds it is the cost-benefit its own numbers make: `j ≥ 1` already gives `k+2` at `k ≤ j` with nothing built |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
-| `PYTHON-PLAN.md` | item 14, **second in the order.** MEQ called in-process from Python through pybind11, for transport workflows: species profiles as arrays on a named abscissa (`psi`, `psi_n`, `sqrt_psi_n` or `R_midplane`), warm re-solves on a frozen mesh, and results under the `.nc`'s names. It is the loose coupling to MaNTA, with no derivatives. PY-0, the run moved out of `apps/meq.cpp`'s `main()` into `meq::Run`, comes first, so that Python is a third front end and not a second driver. Not started |
+| `PYTHON-PLAN.md` | item 14, **second in the order.** MEQ called in-process from Python through pybind11, for transport workflows: species profiles as arrays on a named abscissa (`psi`, `psi_n`, `sqrt_psi_n` or `R_midplane`), warm re-solves on a frozen mesh, and results under the `.nc`'s names. It is the loose coupling to MaNTA, with no derivatives. PY-0, the run moved out of `apps/meq.cpp`'s `main()` into `meq::Run`, comes first, so that Python is a third front end and not a second driver. **PY-0 is done**: `meq` is the command line over `meq::Run`, and every shipped example's `.nc`, exit code and report are the moved code's, as is the suite |
 
 ## So what is next
 
@@ -67,8 +67,8 @@ Stages 0 to 7 are done, and the one red in the suite is the deliberate
    rungs. §13 has the order inside the item.
 
 **Second: MEQ from Python** — item 14, `PYTHON-PLAN.md`. A pybind11 front end
-for transport workflows, MaNTA's loose coupling first. PY-0, moving the run out
-of `main()` into `meq::Run`, comes first and is behaviour-free. §14 has the
+for transport workflows, MaNTA's loose coupling first. PY-0, the run moved out of
+`main()` into `meq::Run`, is done; PY-1, the extension, is next. §14 has the
 order inside the item.
 
 Items 2 to 4 are done and stay for the findings in them; item 4 keeps one
@@ -746,7 +746,7 @@ default now. Two configurations to avoid, both met while measuring: **UMFPACK ca
 never take MKL threads**, its BLAS calls being outside any parallel region and so
 un-nested; and **threaded assembly at `OMP_NUM_THREADS=1` with MKL threads on**
 is catastrophic — 12.4 s against 0.069 s serial at `k = 3` — because a team of
-one thread gets no nesting suppression. `apps/meq.cpp` warns about the second at
+one thread gets no nesting suppression. `src/meq/Run.cpp` warns about the second at
 startup. `CLAUDE_HDGGS.md`'s *What to do, in order of value* no longer carries this as
 its item 0. **`LocalFactorMode::Batched` is explicitly not the answer**: it
 batches `InvertA()`/`InvertD()`, which run once from `Finalize()`, while the
@@ -976,7 +976,7 @@ field and it is not obvious they are consistent.
 **AND `q` WAS NEVER REPORTED, SO THE ROUND TRIP COULD NOT BE READ OFF THE
 OUTPUT. FIXED ON THE DRIVEN ROUTE** → **[M-131](MEASUREMENTS.md#m-131)**.
 `FluxSurface::safetyFactor` was computed and `Output.cpp` had the column, gated
-on `FluxFamilyOptions::toroidalField`, which `apps/meq.cpp` set at neither
+on `FluxFamilyOptions::toroidalField`, which `src/meq/Run.cpp` set at neither
 extraction site. It now sets it from the coefficients the outer Newton solved
 for, `examples/q-driven.toml` carries `[output] FluxSurfaces`, and **the
 reported `q` is the target to 4.5e-07 over 24 surfaces** — an order better than
@@ -1201,9 +1201,9 @@ validated against.
 
 **The order inside it:**
 
-1. **PY-0, `meq::Run`.** The run moves out of `apps/meq.cpp`'s `main()`, so
-   that `meq`, `meq-convert` and Python are front ends on one run.
-   Behaviour-free, and asserted so: `meq` unchanged, to the byte.
+1. ~~**PY-0, `meq::Run`.**~~ **DONE.** The run is out of `main()`, in
+   `src/meq/Run.cpp`, so that `meq`, `meq-convert` and Python are front ends
+   on one run. Behaviour-free, and checked so: `PYTHON-PLAN.md`, PY-0.
 2. **PY-1 to PY-4**: the extension on the system Python, species profiles from
    arrays on a named abscissa (the fixed maps first, then the moving ones),
    warm re-solves on a frozen mesh with transactional failure, and results in

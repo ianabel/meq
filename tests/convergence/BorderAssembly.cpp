@@ -31,7 +31,7 @@ using namespace meqtest;
  * carries every border row at once -- psi_ax, psi_bnd, XP-3's two, the current
  * scale and the exterior modes. examples/diverted-tokamak.toml is freegs4e's
  * A_testtokamak_classic, and DivertedMachine.hpp assembles it exactly as
- * apps/meq.cpp does.
+ * src/meq/Run.cpp does.
  *
  * WHAT THE TWO ITEMS HAVE IN COMMON IS THE ACCEPTANCE AND NOT THE MECHANISM.
  * Neither is allowed to move a digit:

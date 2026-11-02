@@ -47,7 +47,7 @@
  * THE FILAMENTS ARE SUBTRACTED AND NOT WRAPPED. MR-4b's step 2 names
  * meq::CoilAugmentedNormalisedSource, but that wrapper carries MESHED coils, and
  * a filament has no route but subtraction; with every conductor in psi_c the
- * wrapper would hold an empty set and add nothing. apps/meq.cpp takes the same
+ * wrapper would hold an empty set and add nothing. src/meq/Run.cpp takes the same
  * branch: under a subtracted conductor model it releases the meshed set and
  * hands the solver the bare plasma source. And it puts geq's own coil model in,
  * which M-260 measured MEQ reproducing to 3.9e-10 with no plasma -- so the coil
@@ -3051,7 +3051,7 @@ BOOST_AUTO_TEST_SUITE( adaptive )
  *   eta_5's datum was the exterior's modal sum, the PHYSICAL flux on Gamma,
  *   where the load the solve imposes is that less psi_c: eta_5 read 2.68,
  *   3.58, 4.49 over the cycles, eta ROSE, and the marking chased it.
- *   apps/meq.cpp shifts the datum.
+ *   src/meq/Run.cpp shifts the datum.
  *   And eta_1 read F at psi_p rather than at psi_p + psi_c, so its residual
  *   was O( 1 ) and eta fell at FIRST order: 1.48e-02, 7.46e-03, 3.69e-03
  *   under uniform refinement against a flux error falling at 3, an

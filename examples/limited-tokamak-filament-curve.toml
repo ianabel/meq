@@ -29,7 +29,7 @@
 # each posture against the reference its posture was taken from.
 #
 # IT DID NOT CONVERGE UNTIL 2026-09-22, AND THE DEFECT WAS IN THE DRIVER'S
-# FIRST PLASMA-SUPPORT FREEZE RATHER THAN IN THE CONSTRAINT.  apps/meq.cpp
+# FIRST PLASMA-SUPPORT FREEZE RATHER THAN IN THE CONSTRAINT.  src/meq/Run.cpp
 # needs psi_bnd of the iterate the first sweep starts from, before any solve
 # has produced one, and it read the maximum over the region the limiter
 # ENCLOSES where the border reads the maximum over that region's BOUNDARY.

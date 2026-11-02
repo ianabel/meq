@@ -171,7 +171,7 @@ namespace meq
 	 *
 	 * **THIS IS THE ONE IMPLEMENTATION OF THE CONSTRAINT `setLimiterSurface()`
 	 * IMPOSES, AND IT IS FREE RATHER THAN A METHOD SO THAT IT CAN STAY THE
-	 * ONLY ONE.** `apps/meq.cpp` needs the same number before the first solve,
+	 * ONLY ONE.** `src/meq/Run.cpp` needs the same number before the first solve,
 	 * on a field of its own -- `GradShafranovSolver::psiBoundary()` is the
 	 * CONVERGED value and there is none yet -- and one of its three call sites
 	 * runs on the Picard pre-stage's home solver, which is built unbordered and
@@ -2678,7 +2678,7 @@ namespace meq
 			///
 			/// **It exists so that a driver can say so loudly**, which matters
 			/// because a `.gf` cannot record which of the two it holds and the
-			/// two differ by `psi_c`. `apps/meq.cpp` is where the warning
+			/// two differ by `psi_c`. `src/meq/Run.cpp` is where the warning
 			/// belongs — the library prints nothing, by a convention this class
 			/// keeps and which `newtonResiduals()` is the model for.
 			bool guessIsRemainder() const;
@@ -3648,7 +3648,7 @@ namespace meq
 				/// with the host-threaded default. See MEASUREMENTS.md M-223.
 				///
 				/// So what is left for cuDSS is a genuine question rather than
-				/// a foregone one, and `apps/meq.cpp` still refuses this choice
+				/// a foregone one, and `src/meq/Run.cpp` still refuses this choice
 				/// from a config file ALONE: a file naming it would configure a
 				/// device on the strength of a solver name, asking for none of
 				/// the batched routes above, and cuDSS is additionally

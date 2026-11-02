@@ -440,7 +440,7 @@ def main():
 	# steps to psi_ax = -8.9e-02 and an X-point at ( 0.62, +0.42 ): a real
 	# solution of the problem that was posed, and not the machine.
 	#
-	# This is the same trap apps/meq.cpp warns about from the other end -- "the
+	# This is the same trap src/meq/Run.cpp warns about from the other end -- "the
 	# axis is inside a coil, so psi_ax is a coil's own O-point" -- met on the
 	# INPUT side, where nothing was looking for it.  The footprint is a
 	# legitimate input and the plasma is inside it by construction, so the

@@ -883,7 +883,7 @@ BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 		[]( ConfigError const & e ) { return e.getKey() == "output.Prefix"; } );
 
 	// The two performance keys. A wrong SPELLING is a parse fault; an
-	// unavailable CHOICE is not, and is refused by apps/meq.cpp instead -- this
+	// unavailable CHOICE is not, and is refused by src/meq/Run.cpp instead -- this
 	// header is one of the four CI compiles without MFEM, so it cannot know
 	// whether this build has OpenMP or PARDISO. Two faults, two messages.
 	//
@@ -925,7 +925,7 @@ BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
  * asymmetry is the MFEM-free rule rather than an inconsistency. Config cannot
  * ask whether this build has oneMKL -- it is one of the four translation units
  * CI compiles without MFEM at all -- so it names PARDISO always and
- * apps/meq.cpp downgrades an INHERITED one to UMFPack where the build has no
+ * src/meq/Run.cpp downgrades an INHERITED one to UMFPack where the build has no
  * PARDISO, refusing only one the file asked for. traceSolverWasGiven is what
  * carries that distinction, and it is the reason the flag exists.
  *
@@ -1063,7 +1063,7 @@ BOOST_AUTO_TEST_CASE( the_reserved_profile_keys_are_refused_on_every_source )
 	}
 }
 
-/// THE BANNER IS THE CALLER'S, NOT THE MESSAGE'S. apps/meq.cpp prints every
+/// THE BANNER IS THE CALLER'S, NOT THE MESSAGE'S. src/meq/Run.cpp prints every
 /// line it writes as "MEQ: <text>" and catches std::exception, so a banner
 /// inside what() gave "MEQ: MEQ: configuration error in ...". It went unread
 /// while the project spelled itself in lower case and became obvious when it

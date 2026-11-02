@@ -875,7 +875,7 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 	solver.postProcess();
 
 	// THE TRACER TAKES THE CONDUCTORS FROM THE SOLVER AND THE CALLER NEVER
-	// ASKS. That is the point of doing it in the constructor: apps/meq.cpp
+	// ASKS. That is the point of doing it in the constructor: src/meq/Run.cpp
 	// builds its tracer from the solver and needed no edit at all.
 	meq::ContourTracer const tracer( solver );
 	BOOST_TEST_REQUIRE( tracer.conductorField() == &conductors );
@@ -951,7 +951,7 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 	 *
 	 * Ask the conductor-blind tracer for "the surface through ( 0.78, 0 )" --
 	 * which is the trace of psi_p at the value psi_p takes there, and is
-	 * exactly what apps/meq.cpp wrote into _surfaces.nc before this change.
+	 * exactly what src/meq/Run.cpp wrote into _surfaces.nc before this change.
 	 * It closes, it reports a corrector residual at the same tolerance, and
 	 * nothing about it says it is wrong. What says so is the PHYSICAL flux
 	 * along it, measured here and reported beside the real surface's.

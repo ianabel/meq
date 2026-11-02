@@ -24,7 +24,7 @@ companion, **read when working on that subject and not before**:
 | **`CLAUDE_FB.md`** | free boundary — the stage table FB-A to FB-T and XP-0 to XP-4, what each found — the inverse solve, the conductors out of the mesh (CS-0 to CS-C), and the `freegs4e` benchmark |
 | **`CLAUDE_INVERSION.md`** | `ψ(R, z)` to `R(Ψ, l)` — critical points, the tracer, the averages, the disc basis, the `(Ψ, θ)` output, the `q(ψ)`-driven solve |
 | **`CLAUDE_FLOW.md`** | toroidal flow, FL-0 to FL-8 — RoPP (136), the species closure, and Maschke & Perrin |
-| **`CLAUDE_DRIVER.md`** | `apps/meq.cpp` and `meq-run`, the output files and the band between `Γ_h` and `Γ`, the element regions (ER-0 to ER-3), the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the warm start, the configuration parser's traps |
+| **`CLAUDE_DRIVER.md`** | `meq` — `src/meq/Run.cpp`, the run, under `apps/meq.cpp`, its command line — and `meq-run`, the output files and the band between `Γ_h` and `Γ`, the element regions (ER-0 to ER-3), the adaptive loop and the reactive ladder through the driver, what the driver refuses, the two performance keys, the warm start, the configuration parser's traps |
 | **`CLAUDE_DEVICE.md`** | running under an `mfem::Device` — every defect found, the instruments, residency, cuDSS, the threaded-assembly promise, the integrator inventory and the batched routes, and **single precision** |
 | **`CLAUDE_MFEM.md`** | which MFEM MEQ links and how it is configured, `meq-integration` and how to refresh it, `../../mfem-hdg-dev` and what is open upstream, the old-to-new HDG API mapping, and MFEM's API traps |
 | **`CLAUDE_TRAPS.md`** | the long form of the *Traps* checklist below — build, provenance, code hygiene, shell tooling, and reading a red test |
@@ -475,7 +475,8 @@ on.**
 ## Layout
 
 ```
-src/meq/     the library: Config, Profiles, Source, SourceFactory,
+src/meq/     the library: Run (one run of meq, which every front end
+             drives), Config, Profiles, Source, SourceFactory,
              GradShafranov, BoundaryShape, Estimator, Field, Sampler,
              WarmStart, Output, StoredEquilibrium (the .nc read back as
              mesh and fields: the restart and meq-convert's input),
@@ -486,7 +487,9 @@ src/meq/     the library: Config, Profiles, Source, SourceFactory,
              DeviceBasis, AxisSearch, ResidentIterate (device routes);
              Crossings, StageChecksum (device instruments, not part of the
              solve). See CLAUDE_DEVICE.md for the device files.
-apps/        meq.cpp, meq-convert.cpp (the GLVis and ParaView files from a
+apps/        meq.cpp (the command line: argv, --help, --version,
+             --mesh-command and the exit code, over meq::Run),
+             meq-convert.cpp (the GLVis and ParaView files from a
              .nc), and meq-run.in -- configured twice: into the build
              directory as `meq-run`, and for install/<name>/bin, paths
              relative to itself. Not runnable from apps/.

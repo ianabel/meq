@@ -1317,7 +1317,7 @@ namespace meq
 	///
 	/// FREE FUNCTIONS AND NOT MEMBERS because both ends need them and neither
 	/// owns the other: meq::GradShafranovSolver holds the table between solves
-	/// and `apps/meq.cpp` builds a finder of its own after the solve, and a
+	/// and `src/meq/Run.cpp` builds a finder of its own after the solve, and a
 	/// table built once has to reach both. The representations differ because
 	/// the finder screens its flux nodes with a `std::vector< bool >`, which
 	/// has no contiguous storage for netCDF to write.

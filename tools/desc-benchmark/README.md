@@ -668,7 +668,7 @@ whose scalars agree to 4.6e-05. `meta["free_boundary"]` is what selects it now.
 **And a trap that is NOT a defect, recorded because it cost time here.** A MEQ
 `.nc` written under `[conductors] Model` carries
 `content = "remainder (psi - psi_c)"`, and the `psi( Z, R )` **grid variable is
-the TOTAL**: `apps/meq.cpp` says so at the attribute's own site — it describes
+the TOTAL**: `src/meq/Run.cpp` says so at the attribute's own site — it describes
 *which field the coefficients are*. Under a split the lossy interchange format
 carries the physically exact field and the exact format, the `.gf`, carries the
 remainder. Adding `psi_c` back to the grid double-counts it, and on this machine

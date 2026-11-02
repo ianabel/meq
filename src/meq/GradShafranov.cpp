@@ -270,7 +270,7 @@ namespace
 		 *
 		 * IT IS ASKED AT CONSTRUCTION, and that is the honest semantics rather
 		 * than a limitation: mfem::Device is process-wide state that has to be
-		 * configured before the first Vector is allocated -- apps/meq.cpp's
+		 * configured before the first Vector is allocated -- src/meq/Run.cpp's
 		 * `--device` says why -- so a solver built after it sees it, and one
 		 * built before it could not have used it anyway.
 		 */
@@ -6821,7 +6821,7 @@ namespace
 		 *                                the flux mass form (see where it is
 		 *                                added above); guarded, as said
 		 *   mfem::VertexConePath         built with phi_thread_safe = true in
-		 *                                apps/meq.cpp, its per-call state
+		 *                                src/meq/Run.cpp, its per-call state
 		 *                                upstream's to keep per thread
 		 *   meq::LevelSet value and      circleLevelSet() and shapeLevelSet()
 		 *   gradient                     (LevelSet.hpp): lambdas over captured
@@ -9280,7 +9280,7 @@ namespace
 		 * ends with its axis inside P1L and a span six times the physical one.
 		 *
 		 * Both sites read the SOURCE's coil set, which is right on the meshed
-		 * route and silently empty on the subtracted one: apps/meq.cpp releases
+		 * route and silently empty on the subtracted one: src/meq/Run.cpp releases
 		 * its meq::CoilSet when the split is taken, because leaving it wrapped
 		 * around the source beside psi_c would double count. So the conductors
 		 * were no less present -- psi_c carries them, and CS-4 makes every

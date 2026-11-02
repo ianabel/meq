@@ -1206,7 +1206,7 @@ namespace meq
 		// AND currentScale() MULTIPLIES IT, exactly as it multiplies
 		// meq::NormalisedMHDSource::f(). Leaving it off is not a missing
 		// convenience: `[source] Type = "rotating"` accepts `PlasmaCurrent`
-		// (Config.cpp's rotating key list) and apps/meq.cpp calls
+		// (Config.cpp's rotating key list) and src/meq/Run.cpp calls
 		// setPlasmaCurrent() with no source-type guard, so an unscaled f() gives
 		// a current border whose constraint cannot respond to the unknown it is
 		// solving for -- while assembleCurrentColumn() and cornerEntry( I, I )

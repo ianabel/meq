@@ -341,7 +341,7 @@ unreadable.
 
 ## It is psi-star that is compared, not psi_h
 
-**The `.nc` carries the POST-PROCESSED potential.** `apps/meq.cpp` samples
+**The `.nc` carries the POST-PROCESSED potential.** `src/meq/Run.cpp` samples
 `solver->postProcessedPotential()`, and says so in its own comment: *"THE
 POTENTIAL SAMPLED HERE IS psi*, NOT psi_h"*. `_psi.gf` keeps `psi_h`, which is
 what a restart reads back — but `compare.py` reads the `.nc`, so every number on

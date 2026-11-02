@@ -832,12 +832,9 @@ else()
 	# clang-tidy reads the flags for each file out of the compile database
 	# that CMAKE_EXPORT_COMPILE_COMMANDS writes into the build tree, which is
 	# also what limits the check to the ported code: the compile database
-	# contains exactly what some target compiles. apps/meq.cpp is in no target
-	# because it still speaks the old MFEM API, so it is not in the database and
-	# is not checked. That is deliberate and temporary -- it violates the
-	# convention wholesale, and it is renamed when it is ported, at which point
-	# it joins meq_core and is checked like everything else.
-	# src/meq/Estimator.{hpp,cpp} made that journey in stage 6 and is checked.
+	# contains exactly what some target compiles, and the list below is
+	# meq_core's. The run, src/meq/Run.cpp, is in it and is checked;
+	# apps/meq.cpp, the command line over it, is not in the list and is not.
 	# attic/ used to be excluded here permanently; it was removed 2026-09-07.
 	#
 	# HeaderFilterRegex in ../.clang-tidy is what pulls src/meq/*.hpp into the

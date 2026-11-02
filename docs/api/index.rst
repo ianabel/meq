@@ -3,7 +3,7 @@ C++ API reference
 
 MEQ is a library first and a program second. Everything the ``meq`` executable
 does is done through the public interface documented here, and
-``apps/meq.cpp`` is a worked example of using it.
+``src/meq/Run.cpp`` is a worked example of using it.
 
 .. code-block:: cpp
 

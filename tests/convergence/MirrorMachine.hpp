@@ -349,7 +349,7 @@ namespace mirror
 	 * THE CUT IS THE DRIVER'S, STEP FOR STEP: the background read with
 	 * mfem::Mesh( path, 1, 1 ) and refined uniformly, h its largest element
 	 * diameter, the level set marked at meq::markingOffset( 1.0, 1.5 ) with one
-	 * extra refinement, and a six-h transfer path -- apps/meq.cpp's
+	 * extra refinement, and a six-h transfer path -- src/meq/Run.cpp's
 	 * buildSubdomain() and backgroundCellSize() for a [mesh] File. The driver
 	 * also puts the background's material attributes back after the cut, which
 	 * nothing here reads.

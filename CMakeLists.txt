@@ -74,7 +74,8 @@ set(MEQ_RUNS_DIR "${MEQ_PROJECT_DIR}/runs" CACHE PATH
 
 option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 
-# ON since stage 7e: apps/meq.cpp is the driver now, not the legacy vacuum-field
+# ON since stage 7e: meq is the driver now -- apps/meq.cpp, its command
+# line, over src/meq/Run.cpp, the run -- not the legacy vacuum-field
 # program built on MFEM 4.5.1's HDGBilinearForm. It needs MFEM, so the guard
 # below still applies -- a build without it gets the MFEM-free half and no
 # executable, which is what CI does.
@@ -289,6 +290,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/ResidentIterate.cpp
 	src/meq/ResidentIterateDevice.cpp
 	src/meq/RotatingSource.cpp
+	src/meq/Run.cpp
 	src/meq/SafetyFactor.cpp
 	src/meq/SafetyFactorSolve.cpp
 	src/meq/Sampler.cpp
@@ -328,6 +330,8 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/PointLocatorDevice.cpp
 	src/meq/ResidentIterate.cpp
 	src/meq/ResidentIterateDevice.cpp
+	# The run: meq's and every front end's, so the solver and the output.
+	src/meq/Run.cpp
 	# The INVERSION is MFEM-free and CI gates it; the outer Newton around it is
 	# KINSOL through mfem::KINSolver and is not. The split is along the
 	# contract: g = 4 pi^2 q/( V' < R^-2 > ) is arithmetic a mesh cannot change,
@@ -409,6 +413,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 set(MEQ_CORE_SOURCES_NEEDING_NETCDF
 	src/meq/ConductorStore.cpp
 	src/meq/Output.cpp
+	src/meq/Run.cpp
 	src/meq/StoredEquilibrium.cpp)
 
 # Boost.Math, header only, for meq_core rather than only for the tests.
@@ -518,8 +523,8 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	target_compile_definitions(meq_core PRIVATE EIGEN_DONT_PARALLELIZE)
 
 	# Both src/ and src/meq/ are on the include path, so a header can be
-	# reached either as "Config.hpp" (which is how the existing sources and
-	# apps/meq.cpp include each other) or as "meq/Config.hpp".
+	# reached either as "Config.hpp" (which is how the existing sources
+	# include each other) or as "meq/Config.hpp".
 	target_include_directories(meq_core PUBLIC
 		"${CMAKE_CURRENT_SOURCE_DIR}/src"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/meq")

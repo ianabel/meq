@@ -56,7 +56,7 @@ namespace meq
 	{
 
 		// THE BANNER BELONGS TO WHOEVER IS PRINTING, NOT TO THE MESSAGE.
-		// apps/meq.cpp prefixes every line it writes with "MEQ: ", and its
+		// src/meq/Run.cpp prefixes every line it writes with "MEQ: ", and its
 		// catch blocks take std::exception, so a banner here as well produced
 		// "MEQ: MEQ: configuration error in ...". That went unread for as long
 		// as the project spelled itself in lower case, and the rename to MEQ
@@ -2589,7 +2589,7 @@ namespace meq
 			// AVAILABILITY IS NOT CHECKED HERE, and that is the MFEM-free rule
 			// rather than an omission: whether this build has OpenMP, or
 			// PARDISO, or cuDSS is a question about the linked library, and this
-			// translation unit is one CI compiles without it. apps/meq.cpp asks
+			// translation unit is one CI compiles without it. src/meq/Run.cpp asks
 			// GradShafranovSolver::assemblyModeAvailable() and
 			// traceSolverAvailable() and refuses there, with a message naming
 			// the build option. So a wrong SPELLING fails at parse and an

@@ -1107,7 +1107,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
  * dF/dpsi == 0 on part of the domain. Filed with line numbers as
  * ../../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md.
  *
- * WHEN IT GOES GREEN, take setPotential( Potential::Raw ) out of apps/meq.cpp
+ * WHEN IT GOES GREEN, take setPotential( Potential::Raw ) out of src/meq/Run.cpp
  * and out of DriverAcceptance.cpp's hand-rolled loop: the driver can use the
  * published estimator again, which is a whole order of convergence in eta.
  */
@@ -1196,7 +1196,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes
 		            "matrix; see the comment above and "
 		            "../../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md. "
 		            "WHEN THIS PASSES, drop setPotential( Potential::Raw ) from "
-		            "apps/meq.cpp and DriverAcceptance.cpp" );
+		            "src/meq/Run.cpp and DriverAcceptance.cpp" );
 	}
 
 	// AND THE DIAGNOSTIC THAT IDENTIFIES THE CAUSE AS A SINGULAR MATRIX AND

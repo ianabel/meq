@@ -379,7 +379,7 @@ BOOST_AUTO_TEST_CASE( an_inconsistent_cache_is_refused_at_the_writer )
 BOOST_AUTO_TEST_CASE( the_nodal_half_may_travel_alone )
 {
 	// A warm start's stored guess needs psi_c at the dofs and nothing else --
-	// apps/meq.cpp subtracts it node by node when [initialguess] Content is
+	// src/meq/Run.cpp subtracts it node by node when [initialguess] Content is
 	// "total" -- so a cache with no quadrature half is legitimate rather than
 	// truncated, and must not be confused with the malformed case above.
 	ScratchFile scratch( "nodalonly" );

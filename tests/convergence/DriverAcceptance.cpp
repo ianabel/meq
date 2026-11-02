@@ -1529,13 +1529,13 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 
 		// The driver's own choice of potential, reproduced rather than assumed:
 		// psi*, the published estimator, which it could not use until MFEM's
-		// reconstruction stopped skipping its mean-value close. See apps/meq.cpp.
+		// reconstruction stopped skipping its mean-value close. See src/meq/Run.cpp.
 		solver->postProcess();
 		meq::ResidualEstimator estimator( *solver, source );
 
 		// And the driver's treatment of Gamma_h, which is no longer to leave
 		// those faces out: eta_5 compares psi* against the datum actually
-		// imposed. Rebuilt per cycle for the reason apps/meq.cpp gives -- the
+		// imposed. Rebuilt per cycle for the reason src/meq/Run.cpp gives -- the
 		// datum lifts the SOLVED flux, so last cycle's is the wrong boundary
 		// condition. If this drifts from the driver the two etas part company
 		// and this test says so, which is what it is for.
@@ -2857,7 +2857,7 @@ BOOST_AUTO_TEST_CASE( theDriverHasAUsableCommandLine )
  *
  * setExteriorCoupling() has been library capability since FB-5 and had NO ROUTE
  * FROM A TOML FILE -- neither it nor setBoundaryFluxPoint() appeared in
- * apps/meq.cpp or Config.cpp -- so a machine case was a library caller. This is
+ * src/meq/Run.cpp or Config.cpp -- so a machine case was a library caller. This is
  * that gap closed, and the acceptance is the same one every other driver case
  * uses: the driver must reproduce the LIBRARY on the same configuration, not
  * merely converge.
@@ -3475,7 +3475,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	            "the bordered Newton took " << iterations << " steps on the "
 	            "limited tokamak, measured 12. If the log says 'psi_bnd starts at', "
 	            "the mirror's psi_bnd seed has reached a tokamak: it is the box "
-	            "path's rule and only the box's, makeSolver() in apps/meq.cpp. "
+	            "path's rule and only the box's, makeSolver() in src/meq/Run.cpp. "
 	            "Otherwise look at the warm start's point location" );
 
 	/*
@@ -3643,7 +3643,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
  * answer, or the Picard pre-stage's state -- and must start the scale there,
  * or it is solving the tables' amplitude from a field that is not at it. A
  * fresh solver starts the scale at one and tells the shared source so, so the
- * hand-off goes to the solver: apps/meq.cpp's profileScaleSeed, through
+ * hand-off goes to the solver: src/meq/Run.cpp's profileScaleSeed, through
  * GradShafranovSolver::setPlasmaCurrentScaleInitial().
  *
  * So each case runs a configuration twice, on the shipped tables and on the
@@ -3920,7 +3920,7 @@ BOOST_AUTO_TEST_CASE( theProfileScaleCrossesEachAdaptiveCycle )
 		            "tables twice the size against " << oneSteps[ c ] << " on the shipped "
 		            "ones. The amplitude is a gauge PlasmaCurrent removes, so only cycle 0 "
 		            "may see it: the hand-off started the profile scale at one rather than "
-		            "at the previous cycle's answer (apps/meq.cpp, profileScaleSeed)" );
+		            "at the previous cycle's answer (src/meq/Run.cpp, profileScaleSeed)" );
 	BOOST_TEST( !summaryPsiAxis( one ).empty() );
 	BOOST_TEST( summaryPsiAxis( two ) == summaryPsiAxis( one ) );
 	BOOST_TEST( two.find( "P->N" ) == std::string::npos,
@@ -3974,7 +3974,7 @@ BOOST_AUTO_TEST_CASE( theProfileScaleCrossesThePicardPreStage )
 
 	std::string const message =
 		"the bordered solve after the Picard pre-stage did not start at the "
-		"pre-stage's profile scale (apps/meq.cpp, profileScaleSeed): on tables "
+		"pre-stage's profile scale (src/meq/Run.cpp, profileScaleSeed): on tables "
 		"twice the size it started at one, twice the scale the field it was handed "
 		"was solved at";
 	BOOST_TEST( two.find( "Retrying" ) == std::string::npos, message << ":\n" << two );
@@ -3993,7 +3993,7 @@ BOOST_AUTO_TEST_CASE( theProfileScaleCrossesThePicardPreStage )
  * BORDER -- that the three rows close, that they close on the saddle of the
  * solved q_h, and that they reach XP-2's equilibrium to 1.9e-14 m -- in one
  * process, by assembling the machine through the API. None of that exercises a
- * single line of configuration or of apps/meq.cpp, and the free-boundary
+ * single line of configuration or of src/meq/Run.cpp, and the free-boundary
  * campaign's own history is that EVERY defect found wiring FB-6 was driver
  * side: keys describing a box the run never built, a plasma support set on the
  * wrong handle, a limiter block that parsed and did not reach the solver. A
@@ -5147,7 +5147,7 @@ BOOST_AUTO_TEST_CASE( aQDrivenRunWhoseOuterLoopFailsExitsTwo )
 		"converge. An exit 0 is the bordered retry rung run for an outer "
 		"failure: it re-solves one equilibrium at the g g' the loop last tried "
 		"and reports it, a g nobody asked for and a q that is not the target. "
-		"See ToroidalLoopFailed in apps/meq.cpp. Its log:\n" << log );
+		"See ToroidalLoopFailed in src/meq/Run.cpp. Its log:\n" << log );
 	BOOST_TEST( says( "MEQ: the q-driven outer loop did not converge" ),
 		"the driver did not say the outer loop is why the run failed:\n" << log );
 	BOOST_TEST( says( "retry is not run" ),
@@ -5284,7 +5284,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedMachine )
 		"of the psi = psi_p + psi_c split reading the REMAINDER. MEASUREMENTS "
 		"M-148, M-154a and M-160 are the three that have been found, and the "
 		"one that costs accuracy rather than correctness is the first support "
-		"freeze -- edgeFluxOf() in apps/meq.cpp, whose value is paired with a "
+		"freeze -- edgeFluxOf() in src/meq/Run.cpp, whose value is paired with a "
 		"psi_ax that is a total" );
 
 	BOOST_TEST( axisApart < 2.0e-03,
@@ -5404,7 +5404,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
 	BOOST_TEST( log.find( "psi_bnd starts at" ) == std::string::npos,
 		"the driver seeded psi_bnd from the starting state on a limited tokamak. "
 		"That is a mirror's rule, gated on [source] SupportShape = \"box\" in "
-		"makeSolver() in apps/meq.cpp; on examples/limited-tokamak.toml it "
+		"makeSolver() in src/meq/Run.cpp; on examples/limited-tokamak.toml it "
 		"takes the bordered Newton from 12 steps to 129" );
 
 	/*
@@ -5691,7 +5691,7 @@ namespace
 			c.stem << " reported no support loop: the solve ran once on the "
 			"support frozen from the cold guess and never re-decided it, so the "
 			"answer is not the configured problem's. runSolveWithSupportLoop() in "
-			"apps/meq.cpp is the route" );
+			"src/meq/Run.cpp is the route" );
 		BOOST_TEST( settled == 1.0,
 			c.stem << "'s support did not settle, in " << sweeps << " sweeps" );
 		return log;
@@ -5747,7 +5747,7 @@ BOOST_AUTO_TEST_CASE( theColdStartFindsTheAxisWithoutTheRetryRung )
  * THE RUNG'S OTHER TRIGGER HAS NO SHIPPED CASE. A first attempt that
  * converges to an annulus with no interior extremum was machine A's, and A no
  * longer does (theColdStartFindsTheAxisWithoutTheRetryRung). The branch in
- * apps/meq.cpp stands and nothing in this suite reaches it.
+ * src/meq/Run.cpp stands and nothing in this suite reaches it.
  */
 BOOST_AUTO_TEST_CASE( theRetryRungClosesAStalledFirstAttempt )
 {

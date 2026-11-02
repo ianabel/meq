@@ -1196,7 +1196,7 @@ namespace meq
 	 * asserts, and it is the cheapest available statement that the coil term
 	 * really is data.
 	 *
-	 * **SHARED OWNERSHIP OF BOTH, BECAUSE THE DRIVER NEEDS IT.** `apps/meq.cpp`
+	 * **SHARED OWNERSHIP OF BOTH, BECAUSE THE DRIVER NEEDS IT.** `src/meq/Run.cpp`
 	 * builds a fresh solver every adaptive cycle and hands it the same source;
 	 * the source must outlive every one of them, and the coil set is separately
 	 * useful to whatever computes the exterior field. Neither may be null.

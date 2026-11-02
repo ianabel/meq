@@ -7,7 +7,7 @@
  * cold on every route (MEASUREMENTS.md M-103), so a failure here is the
  * inverse border's and not the machine's. The case:
  *
- *   1. solve the file forward, with its support sweeps, as apps/meq.cpp does;
+ *   1. solve the file forward, with its support sweeps, as src/meq/Run.cpp does;
  *   2. read isoflux targets OFF ITS OWN CONVERGED SEPARATRIX -- points where
  *      psi_h = psi_bnd, found by bisection along rays from the located axis;
  *   3. perturb some coil currents, make them unknowns, and solve again;
@@ -123,7 +123,7 @@ namespace
 		                    "meq-run --mesh-only failed on " << file );
 	}
 
-	/// The assembly apps/meq.cpp performs for this file, in its order: cut D_h
+	/// The assembly src/meq/Run.cpp performs for this file, in its order: cut D_h
 	/// from the half disc at Gamma, wrap the plasma source around the coils and
 	/// confine it ON THE WRAPPER, then the X-point border, the prescribed
 	/// current and the exterior coupling, and the stored guess interpolated in.

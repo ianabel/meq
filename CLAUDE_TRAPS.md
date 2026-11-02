@@ -35,7 +35,7 @@ was neither: the fixture called `setPlasmaSupport()` on the plasma source
 **before** constructing the coil wrapper, so the wrapper's own flag stayed false,
 `plasmaComponentWanted()` read false, and **XP-1's flood fill never ran on the
 only diverted case in the tree** — 333 elements of private flux region, 44% of
-the candidates, carrying a current channel nobody asked for. `apps/meq.cpp` has
+the candidates, carrying a current channel nobody asked for. `src/meq/Run.cpp` has
 always done it the other way round and is correct. See `CLAUDE_FB.md`,
 *`setPlasmaSupport()` only reaches the fill if it is called on the wrapper*, and
 → **[M-82](MEASUREMENTS.md#m-82)**.

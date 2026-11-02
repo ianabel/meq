@@ -398,7 +398,7 @@ off, one build, one session:
 Six of that plan's nine items are done; two remain (parallel shared faces,
 non-NPC problems). **The gate MEQ's refusal of `TraceSolver = "cudss"` rests on
 is still written there, unchanged**, and this plan does not propose lifting it —
-see §3.3. But the sentence beside it in `apps/meq.cpp` and in `ROADMAP.md`, that
+see §3.3. But the sentence beside it in `src/meq/Run.cpp` and in `ROADMAP.md`, that
 "group 2 needs a partial-assembly rewrite and is not built", is no longer the
 whole truth: what is not built is a partial-assembly rewrite, and what *is*
 built is a different thing — batched element and face kernels reached through
@@ -418,7 +418,7 @@ the core finding of this audit:
 1. **`hdgdevice` is `Mesh::MakeCartesian2D(n, n, Element::QUADRILATERAL)`**
    (`miniapps/hdg/hdgdevice.cpp:123`). **MEQ is triangles everywhere** — the
    driver's `MakeCartesian2D` passes `mfem::Element::TRIANGLE`
-   (`apps/meq.cpp:311-312`), `tools/mesh/halfdisc.py` runs
+   (`src/meq/Run.cpp`, `buildMesh()`), `tools/mesh/halfdisc.py` runs
    `gmsh.model.mesh.generate(2)` with no recombination, and
    `machine-f-diiid.mesh` carries geometry code 2 on all 4848 elements.
 2. **MEQ's problems sit at or below that crossover.** Element counts of the
@@ -1660,7 +1660,7 @@ exercises batched **arithmetic**. Validate in either; compare the default
 against them to a tolerance.
 
 **AND THE DRIVER'S OWN DEVICE DEFAULT WAS WHAT LEFT THE REPRODUCIBLE SET —
-CHANGED** → **[M-215](MEASUREMENTS.md#m-215)**. `apps/meq.cpp` turned on
+CHANGED** → **[M-215](MEASUREMENTS.md#m-215)**. `src/meq/Run.cpp` turns on
 `AssemblyMode::Batched` under a Device where the file said nothing, which is
 the one key of the three that loses bit-reproducibility; it is `Serial` there
 now. Two consecutive `--device cuda` runs agree exactly where they read
@@ -1683,7 +1683,7 @@ with none of them does not go in.
 → **[CLAUDE_DECLINED.md](CLAUDE_DECLINED.md)**, *Items 6 and 8 strictly last, as uniquely destructive*
 
 **The gate is already the right shape and needs no change today.** It is
-*refuse without a device*, not *refuse always* (`apps/meq.cpp:1480`), so a
+*refuse without a device*, not *refuse always* (`src/meq/Run.cpp`, `configure()`), so a
 caller who has configured `--device cuda` already gets cuDSS and
 `theDriverRefusesASolverItCannotHonour` keeps the config-file-alone route
 closed. What changes at item 6 is the **default**, not the refusal.
@@ -1733,7 +1733,7 @@ device-valid buffer is a **named fault with a backtrace** rather than a wrong
 number. M-79's chain of four and M-91's pair of two were both walked that way,
 one fix per rebuild, **each fix moving the fault forward to the next site** —
 which is the only thing that distinguishes a fix from a coincidence. It costs
-nothing: the driver takes `--device debug` (`apps/meq.cpp:97`, `:983`) and so
+nothing: the driver takes `--device debug` (`apps/meq.cpp`) and so
 does `NpcThreadScaling` (`:604`).
 
 **The acceptance at each stage, and each is a property rather than a
