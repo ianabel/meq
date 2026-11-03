@@ -5293,6 +5293,10 @@ namespace meq
 			/// about KINSOL's implementation is not established, and until it is,
 			/// do not raise this expecting the papers' behaviour.
 			///
+			/// The depth used is at most one under setNewtonControl()'s cap, as
+			/// KINSOL would clamp it, and **depth zero -- set, or clamped from a
+			/// cap of one -- is PicardOnly at the same damping, to the bit.**
+			///
 			/// Ignored by every other Globalisation.
 			void setAndersonDepth( int depth );
 

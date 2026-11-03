@@ -3033,8 +3033,19 @@ namespace
 		// KINSetDamping the underlying fixed point; setting both compounds them
 		// and is worse than either -- measured, Anderson with both fails at 500
 		// iterations where plain damped Picard converges in 194.
-		if ( globalisationChoice == Globalisation::AndersonPicard )
-			fixedPoint.EnableAndersonAcc( andersonDepth, KIN_ORTH_MGS, 0, picardDamping );
+		//
+		// THE DEPTH KINSOL WILL USE, decided here rather than left to it.
+		// KINInitAA clamps the depth to one under the iteration cap, so a cap of
+		// one leaves depth zero -- and SUNDIALS 7.9.0's KINInitOrth then skips
+		// allocating its QR workspace (0 > 0 is false) and dereferences it
+		// anyway, a segfault at kinsol_orth.c:88 rather than a non-convergence.
+		// And at depth zero KINSOL takes the plain fixed-point branch, which
+		// damps by KINSetDamping and not KINSetDampingAA, so the damping set
+		// through EnableAndersonAcc would be silently dropped. Both are the
+		// same case, and it is plain damped Picard: PicardOnly to the bit.
+		int const depth = std::min( andersonDepth, newtonMaxIterations - 1 );
+		if ( globalisationChoice == Globalisation::AndersonPicard && depth > 0 )
+			fixedPoint.EnableAndersonAcc( depth, KIN_ORTH_MGS, 0, picardDamping );
 		else
 			fixedPoint.SetDamping( picardDamping );
 		fixedPoint.SetOperator( map );

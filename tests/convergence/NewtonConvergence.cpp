@@ -909,6 +909,105 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 }
 
 /*
+ * A PICARD STAGE CAPPED AT ONE ITERATION IS A NON-CONVERGENCE, NOT A CRASH.
+ *
+ * KINSOL clamps the Anderson depth to one under the iteration cap, so a cap of
+ * one is depth zero, and SUNDIALS 7.9.0 then dereferences an Anderson QR
+ * workspace it never allocated (kinsol_orth.c:88). The driver reaches it from
+ * any configuration with NewtonMaxIterations = 1: Newton fails, the reactive
+ * ladder retries with PicardThenNewton, and the run died with SIGSEGV instead
+ * of exiting 2. Both the stage alone and the handoff must throw the ordinary
+ * runtime_error. See solveByPicard().
+ */
+BOOST_AUTO_TEST_CASE( aPicardStageCappedAtOneIterationDoesNotConverge )
+{
+	using G = meq::GradShafranovSolver::Globalisation;
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	for ( G choice : { G::AndersonPicard, G::PicardThenNewton } )
+	{
+		mfem::Mesh mesh = makeMesh( 8 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		solver.setSource( source );
+		solver.setBoundaryData( exact );
+		solver.setGlobalisation( choice );
+		solver.setNewtonControl( 1.0e-10, 1.0e-14, 1 );
+		BOOST_CHECK_THROW( solver.solve(), std::runtime_error );
+	}
+}
+
+/*
+ * ANDERSON AT DEPTH ZERO IS PICARD AT THE SAME DAMPING, TO THE BIT.
+ *
+ * At depth zero KINSOL takes its plain fixed-point branch, which damps by
+ * KINSetDamping; the damping EnableAndersonAcc sets is KINSetDampingAA, which
+ * that branch never reads. So a depth-zero Anderson-Picard handed w = 0.5 ran
+ * undamped -- PicardOnly at w = 1, which stalls -- with nothing said. The two
+ * routes are one iteration on one map, so iteration count and iterate are
+ * compared exactly.
+ */
+BOOST_AUTO_TEST_CASE( andersonAtDepthZeroIsPicardAtTheSameDamping )
+{
+	using G = meq::GradShafranovSolver::Globalisation;
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	auto run = [ & ]( G choice, mfem::Vector &answer )
+	{
+		mfem::Mesh mesh = makeMesh( 8 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		solver.setSource( source );
+		solver.setBoundaryData( exact );
+		solver.setGlobalisation( choice );
+		solver.setAndersonDepth( 0 );
+		solver.setPicardDamping( 0.5 );
+		solver.setNewtonControl( 1.0e-10, 1.0e-14, 500 );
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::exception const &error )
+		{
+			BOOST_FAIL( "choice " << static_cast<int>( choice ) << " threw: "
+			            << error.what() );
+		}
+		answer = solver.potential();
+		return solver.newtonIterations();
+	};
+
+	mfem::Vector anderson, picard;
+	int const andersonIterations = run( G::AndersonPicard, anderson );
+	int const picardIterations = run( G::PicardOnly, picard );
+	std::printf( "\n  depth-zero Anderson %d iterations, damped Picard %d\n",
+	             andersonIterations, picardIterations );
+
+	BOOST_TEST( andersonIterations == picardIterations,
+	            "depth-zero Anderson-Picard took " << andersonIterations
+	            << " iterations where PicardOnly at the same damping took "
+	            << picardIterations << " -- the damping did not reach KINSOL" );
+	BOOST_TEST_REQUIRE( anderson.Size() == picard.Size() );
+	int differing = 0;
+	for ( int i = 0; i < anderson.Size(); ++i )
+		differing += anderson( i ) != picard( i );
+	BOOST_TEST( differing == 0,
+	            differing << " of " << anderson.Size() << " potential dofs differ "
+	            "between depth-zero Anderson-Picard and PicardOnly" );
+}
+
+/*
  * PSI* THROUGH NEWTON. An MFEM defect used to make this impossible, and the
  * measurement is what says it does not any more.
  *
