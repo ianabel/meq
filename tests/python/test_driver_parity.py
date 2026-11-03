@@ -109,15 +109,17 @@ def test_a_refused_configuration_raises_config_error():
     assert issubclass(meq.ConfigError, meq.Error)
 
 
-def test_a_solve_that_does_not_converge_raises_solve_error():
-    """mhd-rectangle capped at two Newton steps and held to a tolerance no
+@pytest.mark.parametrize("cap", [1, 2])
+def test_a_solve_that_does_not_converge_raises_solve_error(cap):
+    """mhd-rectangle capped at `cap` Newton steps and held to a tolerance no
     solve reaches, so the retry ladder cannot rescue it either: meq exits 2,
     and the module raises meq.SolveError, refuses to write, and writes
-    nothing. A cap of two, not one: at one KINSOL's Anderson depth clamps to
-    zero and the Picard fallback dereferences workspace it never allocated
-    (TODO)."""
+    nothing. A cap of one is the case that took SIGSEGV: KINSOL clamps the
+    Picard fallback's Anderson depth to zero there, and SUNDIALS 7.9.0 then
+    dereferences workspace it never allocated, so solveByPicard() runs plain
+    damped Picard instead."""
     text = (EXAMPLES / "mhd-rectangle.toml").read_text()
-    for old, new in (("NewtonMaxIterations = 20\n", "NewtonMaxIterations = 2\n"),
+    for old, new in (("NewtonMaxIterations = 20\n", f"NewtonMaxIterations = {cap}\n"),
                      ("NewtonRelativeTolerance = 1.0e-10\n", "NewtonRelativeTolerance = 1.0e-30\n"),
                      ("NewtonAbsoluteTolerance = 1.0e-14\n", "NewtonAbsoluteTolerance = 1.0e-30\n")):
         assert old in text, f"mhd-rectangle.toml no longer says {old.strip()}"
@@ -125,7 +127,7 @@ def test_a_solve_that_does_not_converge_raises_solve_error():
 
     # The capped file beside copies of its two tables, so both arms read
     # them from their own directory.
-    binary_dir = fresh("unconverged/meq")
+    binary_dir = fresh(f"unconverged-{cap}/meq")
     for table in ("mhd-pprime.dat", "mhd-ggprime.dat"):
         shutil.copy2(EXAMPLES / table, binary_dir / table)
     capped = binary_dir / "capped.toml"
@@ -133,7 +135,7 @@ def test_a_solve_that_does_not_converge_raises_solve_error():
     assert run_binary(capped, binary_dir) == 2
     assert not list(binary_dir.glob("*.nc")), "meq wrote output from a failed solve"
 
-    module_dir = fresh("unconverged/module")
+    module_dir = fresh(f"unconverged-{cap}/module")
     previous = os.getcwd()
     os.chdir(module_dir)
     try:
