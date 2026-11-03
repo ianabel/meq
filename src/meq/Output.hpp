@@ -38,6 +38,7 @@
 #include "mfem.hpp"
 
 #include "BoundaryShape.hpp"
+#include "Dataset.hpp"
 #include "FluxFamily.hpp"
 #include "Sampler.hpp"
 
@@ -540,6 +541,12 @@ namespace meq
 			/// see an error rather than have it thrown from a destructor.
 			void close();
 
+			/// EVERYTHING WRITTEN SO FAR, IN MEMORY: each dimension, variable
+			/// and attribute, as the file holds it, recorded by the same calls
+			/// that wrote it. What a front end holding the run reads in place
+			/// of the file (PYTHON-PLAN.md, PY-4).
+			Dataset const &dataset() const;
+
 		private:
 			struct State;
 			std::unique_ptr<State> state;
@@ -639,6 +646,12 @@ namespace meq
 			/// Flush and close. Called by the destructor; call it explicitly to
 			/// see an error rather than have it thrown from a destructor.
 			void close();
+
+			/// EVERYTHING WRITTEN SO FAR, IN MEMORY: each dimension, variable
+			/// and attribute, as the file holds it, recorded by the same calls
+			/// that wrote it. What a front end holding the run reads in place
+			/// of the file (PYTHON-PLAN.md, PY-4).
+			Dataset const &dataset() const;
 
 		private:
 			struct State;

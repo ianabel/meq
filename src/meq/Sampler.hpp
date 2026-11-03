@@ -211,6 +211,20 @@ namespace meq
 			             double rMinIn, double rMaxIn, int nRIn,
 			             double zMinIn, double zMaxIn, int nZIn );
 
+			/**
+			 * A POINT SET IN PLACE OF THE LATTICE: node i at ( radius[ i ],
+			 * z[ i ] ), nodesR() of them and nodesZ() = 1, every sampling pass
+			 * and extendOutward() as for a lattice. Located by the same loop
+			 * over elements, the first containing element claiming a node, so
+			 * a point at a lattice node's coordinates is that node: the same
+			 * element, the same reference point, the same values, to the bit
+			 * (PYTHON-PLAN.md, PY-4). rAt() and zAt() are a lattice's, and
+			 * refuse here; nodeR() and nodeZ() are either's.
+			 * @throws std::logic_error for no points or two lengths.
+			 */
+			GridSampler( mfem::Mesh &mesh, std::vector<double> const &radius,
+			             std::vector<double> const &z );
+
 			int nodesR() const { return nR; }
 			int nodesZ() const { return nZ; }
 
@@ -219,6 +233,10 @@ namespace meq
 			/// dimension.
 			double rAt( int i ) const;
 			double zAt( int j ) const;
+
+			/// Node ( i, j )'s coordinates, of a lattice or a point set.
+			double nodeR( int i, int j ) const;
+			double nodeZ( int i, int j ) const;
 
 			/// True where the node was located in an element.
 			bool located( int i, int j ) const;
@@ -410,6 +428,16 @@ namespace meq
 		private:
 			int index( int i, int j ) const { return j*nR + i; }
 
+			/// Node @a at's coordinates, by its flat index.
+			double radiusOf( std::size_t at ) const;
+			double heightOf( std::size_t at ) const;
+
+			/// The location loop both constructors share: every element in
+			/// order tries the nodes @a candidates( lower, upper, visit ) names
+			/// for its vertex box, and the first to contain a node claims it.
+			template <typename Candidates>
+			void locate( Candidates const &candidates );
+
 			/**
 			 * The located nodes, grouped by the element that holds them.
 			 *
@@ -443,6 +471,8 @@ namespace meq
 
 			mfem::Mesh &mesh;
 			double minRadius, maxRadius, zMin, zMax;
+			/// A point set's coordinates; empty for a lattice.
+			std::vector<double> pointR, pointZ;
 			int nR, nZ;
 			int found;
 			int extended = 0;

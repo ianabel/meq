@@ -52,13 +52,14 @@ eq.set_profile("species.deuterium.Temperature", x, T, dT_dx, abscissa="R_midplan
 eq.set_profile("species.electron.Density", x, n, dn_dx, abscissa="sqrt_psi_n")
 eq.set_profile("Omega", x, omega, domega_dx, abscissa="psi")
 
-r = eq.solve()            # raises meq.ConfigError (exit 1) or meq.SolveError (exit 2)
-r.psi_inner, r.psi_boundary, r.newton_steps, r.longest_crawl, r.exterior_fraction
-
+eq.solve()                # raises meq.ConfigError (exit 1) or meq.SolveError (exit 2)
+eq.attributes()           # the .nc's global attributes: psi_axis, newton_iterations, ...
 eq.grid()                 # the .nc's (R, Z) fields as numpy, its names and masks
-eq.psi(R, Z), eq.B(R, Z)  # point evaluation at arrays of points
-eq.surfaces(rho)          # the _surfaces.nc quantities at these labels (closed surfaces)
-eq.write("stem")          # what `meq` would have written, [output] as configured
+eq.dataset()              # the whole .nc root group in memory
+eq.at(R, Z)               # psi, B_R, B_Z, inside, extrapolated at arrays of points
+eq.surfaces()             # the _surfaces.nc root group in memory (closed surfaces)
+eq.surfaces(rho)          # its 1-D quantities at these labels
+eq.write()                # what `meq` would have written, [output] as configured
 ```
 
 Seven decisions in it, each with its reason:
@@ -144,7 +145,7 @@ Each stage ends at a measured, asserted result, as every stage here does.
 | PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit — **done** |
 | PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer — **done: `psi` exactly, `R_midplane` as a held map** |
 | PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted — **done**, adaptive configurations solving once |
-| PY-4 | results in memory: scalars, `grid()`, `psi`/`B` at points, `surfaces()` | equal to the `.nc` and `_surfaces.nc` the same run writes |
+| PY-4 | results in memory: scalars, `grid()`, `psi`/`B` at points, `surfaces()` | equal to the `.nc` and `_surfaces.nc` the same run writes — **done** |
 | PY-5 | a mirror's transport geometry | closed-form and finite-difference checks, below |
 | PY-6 | MEQ and MaNTA in one process, then the first outer loop | each code's answer in the joint process equals its answer alone |
 
@@ -413,13 +414,48 @@ Without the restart, mutated in, three of the five fail. A re-solve pays a
 whole setup -- the mesh, the conductors' `ψ_c` unless `[conductors]
 CacheFile` keeps it -- which on the shipped cases is small beside the solve.
 
-**PY-4: results in memory.** The scalars are the `.nc`'s attributes, with the
-gauge among them. `grid()` is assembled by the code that samples the `.nc`, not
-by a second sampler. `psi( R, Z )` and `B( R, Z )` go through
-`meq::PointLocator`, with points outside `D_h` refused or masked, matching the
-`.nc`'s `extrapolated` rule. `surfaces( rho )` is `GeometryCache` behind the
-`_surfaces.nc` names, and refused beside a box support, where the field lines
-are open. The acceptance is equality with the files the same run writes.
+**PY-4: results in memory — done.** Asserted in `PythonResults`.
+
+**The `.nc` is recorded as it is written.** `meq::NetCDFWriter` and
+`meq::FluxGridWriter` write through a file that keeps a copy of itself, a
+`meq::Dataset` of every dimension, variable and attribute, made by the same
+calls (`Output.cpp`), so what Python reads is the file's numbers by
+construction, not a second sampling of the answer. The files are unchanged:
+the new binary's `.nc` equals the old one's in every attribute and variable.
+`Run::dataset()` is the last `.nc` written; before any `write()` an
+`Equilibrium` writes its private state file, the one a re-solve restarts from,
+so asking costs the write phase once and the re-solve then reuses it.
+`eq.dataset()` is the whole root group, `eq.attributes()` its global
+attributes (scalars as Python scalars, the gauge among them) and `eq.grid()`
+its ( Z, R ) lattice. The `psi_c` group a `[conductors]` run adds by
+reopening the file is the restart's, and is not in it.
+
+**Points go through the write phase's own sampling.** `meq::GridSampler`
+takes a point set as well as a lattice, located by the same loop over
+elements, the first containing element claiming a node. `Run::sampleAt()` then
+runs the band continuation, ψ* with its flux, B with its gradient and `psi_c`
+under `[conductors]`, which `Impl::sampleAnswer()` now does for the grid too.
+**At the lattice's own nodes `eq.at( R, Z )` is `grid()` to the bit** on
+`rotating-normalised`, on `miller-curved` with its band, and on
+`limited-tokamak-filament` with `psi_c`; outside the domain the values are
+NaN and `inside` is 0, as in the file. Between nodes, B against ψ's
+differences agrees to 1.1e-05 and 1.8e-04 of |B|, which is ψ* against the
+solved flux, not rounding.
+
+**Surfaces are the write phase's family.** `eq.surfaces()` is the
+`_surfaces.nc` root group, extracted at `[output]`'s count, angles and cuts by
+the code `write()` uses (`Impl::writeFluxSurfaces()`), and equal to the file
+`write()` then writes; `eq.surfaces( rho )` is its 1-D quantities at labels of
+the caller's, by the family's monotone cubic, within 1e-14 at the family's own
+labels, and refused outside the cut rather than extrapolated. Refused beside a
+box support, whose field lines are open. `meq::GeometryCache`, keyed on the
+coefficient vector, stays MaNTA's tight coupling's.
+
+**ψ* is made once, by whichever reading comes first.** The write phase
+post-processes, and the tracer and the sampler read ψ*, so `at()` or
+`surfaces()` before any write would read a ψ* never made. The tracer refuses
+that and the sampler would not: `Impl::ensurePostProcessed()` is now the
+first step of all three.
 
 **PY-5: a mirror's transport geometry.** This is new physics output, not
 binding work, and a mirror transport case will ask for it first. The quantities

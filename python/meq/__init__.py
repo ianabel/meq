@@ -24,6 +24,11 @@ restarted exactly from the last state on the same mesh, and a solve that
 fails leaves it holding the last good state. A configuration with
 [adaptivity] solves once.
 
+The solved state reads back under the .nc's names, without a file:
+`eq.attributes()`, `eq.grid()` (the ( Z, R ) lattice), `eq.dataset()` (the
+whole .nc), `eq.at(R, Z)` (psi and B at points, the grid's own sampling) and
+`eq.surfaces()` or `eq.surfaces(rho)` (the _surfaces.nc, closed surfaces only).
+
 A configuration with [mesh.generate] needs its mesh made first, by `meq-run`
 or by the command `meq --mesh-command` prints, and then `mesh_ready=True`, as
 `meq --mesh-ready` does.

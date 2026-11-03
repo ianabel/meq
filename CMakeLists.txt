@@ -271,6 +271,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Crossings.cpp
+	src/meq/Dataset.cpp
 	src/meq/DeviceNPCDevice.cpp
 	src/meq/AxisSearch.cpp
 	src/meq/AxisSearchDevice.cpp

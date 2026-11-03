@@ -775,8 +775,20 @@ struct meq::Run::Impl
 	}
 
 	std::vector<meq::Knot> answerCrossing();
+	void ensurePostProcessed();
+	meq::FluxSurfaceFamily writeFluxSurfaces( std::string const &file );
+	/// The root group of the last _surfaces.nc written, and its family, or null.
+	std::shared_ptr<meq::Dataset const> writtenSurfaces;
+	std::shared_ptr<meq::FluxSurfaceFamily const> writtenFamily;
+	meq::Run::Samples samplesAt( std::vector<double> const &radius,
+	                             std::vector<double> const &z );
+	int sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction const &field,
+	                  std::vector<double> &psi, std::vector<double> &bR,
+	                  std::vector<double> &bZ );
 	/// writeRestart()'s stem while it writes, and empty otherwise.
 	std::string restartStem;
+	/// The root group of the last .nc the write phase wrote, or null.
+	std::shared_ptr<meq::Dataset const> written;
 	std::string const version;
 	std::string deviceName;
 	bool deviceGiven = false;
@@ -994,6 +1006,104 @@ std::vector<meq::Knot> meq::Run::midplaneCrossing()
 	if ( stage != Stage::Solved && stage != Stage::Written )
 		throw std::logic_error( "meq::Run::midplaneCrossing(): there is no solved state" );
 	return impl->answerCrossing();
+}
+
+meq::Run::Samples meq::Run::sampleAt( std::vector<double> const &radius,
+                                      std::vector<double> const &z )
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::sampleAt(): there is no solved state" );
+	return impl->samplesAt( radius, z );
+}
+
+meq::Run::Samples meq::Run::Impl::samplesAt( std::vector<double> const &radius,
+                                             std::vector<double> const &z )
+{
+	ensurePostProcessed();
+	// B as the write phase forms it: a relabelling of the solved flux.
+	mfem::GridFunction field( solver->flux().FESpace() );
+	meq::poloidalField( solver->flux(), field );
+	meq::GridSampler sampler( *solveMesh, radius, z );
+	meq::Run::Samples out;
+	sampleAnswer( sampler, field, out.psi, out.bR, out.bZ );
+	out.inside.resize( radius.size() );
+	out.extrapolated.resize( radius.size() );
+	for ( int i = 0; i < sampler.nodesR(); ++i )
+	{
+		out.inside[ static_cast<std::size_t>( i ) ] = sampler.located( i, 0 ) ? 1 : 0;
+		out.extrapolated[ static_cast<std::size_t>( i ) ] = sampler.wasExtended( i, 0 ) ? 1 : 0;
+	}
+	return out;
+}
+
+std::shared_ptr<meq::Dataset const> meq::Run::fluxSurfaces( std::string const &file )
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::fluxSurfaces(): there is no solved state" );
+	if ( impl->config->getSource().supportIsBox() )
+		throw std::logic_error( "meq::Run::fluxSurfaces(): a box support's field lines are "
+		                        "open, so there are no closed flux surfaces to average on" );
+	if ( !impl->writtenSurfaces )
+	{
+		impl->ensurePostProcessed();
+		impl->writeFluxSurfaces( file );
+	}
+	return impl->writtenSurfaces;
+}
+
+std::vector<std::pair<std::string, std::vector<double>>>
+meq::Run::fluxSurfacesAt( std::vector<double> const &labels, std::string const &file )
+{
+	fluxSurfaces( file );
+	meq::FluxSurfaceFamily const &family = *impl->writtenFamily;
+	using Of = double ( * )( meq::FluxSurface const & );
+	std::vector<std::pair<char const *, Of>> quantities = {
+		{ "V_prime", []( meq::FluxSurface const &s ) { return s.vPrime; } },
+		{ "volume", []( meq::FluxSurface const &s ) { return s.volume; } },
+		{ "cross_section_area", []( meq::FluxSurface const &s ) { return s.crossSectionArea; } },
+		{ "arc_length", []( meq::FluxSurface const &s ) { return s.arcLength; } },
+		{ "surface_area", []( meq::FluxSurface const &s ) { return s.surfaceArea; } },
+		{ "inverse_R_squared", []( meq::FluxSurface const &s ) { return s.inverseRSquared; } },
+		{ "grad_psi_squared_over_R_squared",
+		  []( meq::FluxSurface const &s ) { return s.gradPsiSquaredOverRSquared; } },
+		{ "abs_grad_psi", []( meq::FluxSurface const &s ) { return s.absGradPsi; } },
+		{ "grad_psi_squared", []( meq::FluxSurface const &s ) { return s.gradPsiSquared; } } };
+	if ( family.safetyFactorAvailable )
+		quantities.push_back( { "safety_factor",
+		                        []( meq::FluxSurface const &s ) { return s.safetyFactor; } } );
+
+	std::vector<std::pair<std::string, std::vector<double>>> out;
+	std::vector<double> normalised, psi;
+	for ( double const label : labels )
+	{
+		if ( !family.covers( label ) )
+			throw std::domain_error( "meq::Run::fluxSurfacesAt(): rho = " + std::to_string( label )
+			                         + " is outside the family's cut, rho in [ "
+			                         + std::to_string( family.innerLabel() ) + ", "
+			                         + std::to_string( family.outerLabel() )
+			                         + " ]: refused, not extrapolated" );
+		normalised.push_back( label*label );
+		psi.push_back( meq::fluxAtNormalised( label*label, family.psiAxis, family.psiBoundary ) );
+	}
+	out.emplace_back( "rho", labels );
+	out.emplace_back( "normalised_flux", normalised );
+	out.emplace_back( "psi", psi );
+	for ( auto const &quantity : quantities )
+	{
+		std::vector<double> values;
+		for ( double const label : labels )
+			values.push_back( family.at( label, quantity.second ) );
+		out.emplace_back( quantity.first, std::move( values ) );
+	}
+	return out;
+}
+
+std::shared_ptr<meq::Dataset const> meq::Run::dataset() const
+{
+	if ( !impl->written )
+		throw std::logic_error( "meq::Run::dataset(): nothing has been written; "
+		                        "write() or writeRestart() first" );
+	return impl->written;
 }
 
 bool meq::Run::supportIsBox() const
@@ -6301,6 +6411,362 @@ int meq::Run::Impl::solve()
 	return nextPhase;
 }
 
+/// psi* for the solved state, once: what every reading of the answer -- the
+/// write phase, Run::sampleAt(), Run::fluxSurfaces() -- samples or traces, and
+/// a GridFunction that reads as zero until it is made (ContourTracer's guard).
+void meq::Run::Impl::ensurePostProcessed()
+{
+	if ( solver->isPostProcessed() )
+		return;
+	double const postStart = elapsedSince( started );
+	double const postStartCpu = cpuNow();
+	solver->postProcess();
+	postSeconds += elapsedSince( started ) - postStart;
+	postCpuSeconds += cpuNow() - postStartCpu;
+}
+
+/*
+ * psi, B_R AND B_Z AT A SAMPLER'S NODES, AS THE .nc HAS THEM: the band between
+ * Gamma_h and Gamma continued, psi* with its flux and B with its gradient, and
+ * psi_c added back under [conductors]. The write phase's lattice and
+ * Run::sampleAt()'s point set both come through here, so a point at a
+ * lattice node's coordinates reads that node's values. @return how many nodes
+ * extendOutward() filled.
+ */
+int meq::Run::Impl::sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction const &field,
+                                  std::vector<double> &psi, std::vector<double> &bR,
+                                  std::vector<double> &bZ )
+{
+	// THE SLIVER BETWEEN Gamma_h AND Gamma, which only the curved path has.
+	// Omega_h is the union of background elements lying INSIDE Gamma, so
+	// Gamma_h is inscribed and there is a band O(h) wide that is inside the
+	// plasma and outside the mesh. Left alone it rasterises as NaN and the
+	// picture gets a ragged polygonal edge where the boundary is smooth.
+	//
+	// Filled by extrapolating the element across each boundary face, and
+	// ONLY where the node is inside Gamma -- the level set is what stops
+	// this painting a band outside the plasma, where the solve claims
+	// nothing. Reach 1.0: one face length, which is the O(h) regime the
+	// transfer technique is analysed in and no further.
+	int extended = 0;
+	if ( shape )
+	{
+		meq::BoundaryShape const *curve = shape.get();
+		extended = sampler.extendOutward( 1.0,
+			[ curve ]( double radius, double z )
+			{
+				return curve->levelSet( radius, z ) <= 0.0;
+			},
+			[ curve ]( double radius, double z )
+			{
+				// levelSet is the RADIAL gap and is negative inside, so its
+				// magnitude is the distance to Gamma along the ray. Not the
+				// perpendicular distance, which is smaller -- but the ratio
+				// below only needs the two gaps measured the same way as
+				// each other, and both are along the ray.
+				return -curve->levelSet( radius, z );
+			} );
+	}
+
+	// NaN outside the domain, which is what the file format documents and
+	// what a plotting library will mask for free. A zero there would be a
+	// physical claim, and a wrong one.
+	double const outside = std::numeric_limits<double>::quiet_NaN();
+
+	// THE FLUX CARRIES THE BAND, which is the payoff for the mixed method
+	// showing up somewhere unexpected. q is computed at the SAME order as
+	// psi, so continuing psi across the Gamma_h-to-Gamma band as
+	// psi( x0 ) + R q( x0 ) . ( p - x0 ) evaluates both fields at a point on
+	// the element's own boundary and never outside it. The alternative --
+	// evaluating psi_h's polynomial outside its element -- is bounded by
+	// nothing, and was measured crossing psi = 0, a value this
+	// configuration knows exactly.
+	//
+	// THE POTENTIAL SAMPLED HERE IS psi*, NOT psi_h: the file reports the
+	// better field. The FLUX ARGUMENT STAYS solver->flux(), which is q at
+	// degree k, and that pairing is consistent rather than a leftover --
+	// psi*'s defining local problem matches its gradient to R q, so R q IS
+	// grad psi* to the order psi* is claimed at. Substituting the enriched
+	// flux would change nothing the band can resolve and would pair the
+	// Taylor step with a field the reconstruction produced rather than with
+	// the one it was built from.
+	sampler.samplePotentialWithFlux( solver->postProcessedPotential(),
+	                                 solver->flux(), psi, outside );
+
+	// AND B GETS THE BAND TOO, WHICH IT DID NOT UNTIL 2026-09-02. It used to
+	// go through sampleComponent(), which reads the FOOT on Gamma_h and so
+	// left about one node in ten piecewise constant -- O( h ), in the field
+	// most readers open this file for, behind a mask saying inside = 1.
+	// sampleComponentWithGradient() takes the same Taylor step psi gets,
+	// using B's own gradient inside the element.
+	//
+	// IT IS NOT AS GOOD AS psi's AND THE DIFFERENCE IS STRUCTURAL: psi is
+	// continued with a SOLVED variable at full order, B with a
+	// DIFFERENTIATED one at k-1, so this is O( h^2 ) at every k rather than
+	// the flux's own order. A full order better than what it replaces, and
+	// not the same thing. Sampler.hpp says what it would take to beat it.
+	sampler.sampleComponentWithGradient( field, 0, bR, outside );
+	sampler.sampleComponentWithGradient( field, 1, bZ, outside );
+
+	/*
+	 * AND psi_c IS ADDED BACK HERE, WHICH IS WHERE THE SPLIT'S EXACTNESS
+	 * SURVIVES INTO AN OUTPUT FILE AND WHERE IT DOES NOT.
+	 *
+	 * Under `[conductors]` the solver's field is the REMAINDER psi_p, so
+	 * everything sampled above is a remainder and the physical flux is
+	 * psi_p + psi_c. What divides the four output formats
+	 * (docs/conductors.rst, *What the split is exact for, and what it
+	 * cannot be*):
+	 *
+	 *   .nc grid, _surfaces.nc   psi_c is EVALUATED at each node, so the
+	 *                            file carries the physical field exactly
+	 *   .gf, .vtu                both are the field's own coefficients, and
+	 *                            psi_c can only be PROJECTED into the
+	 *                            discrete space -- for a filament that is
+	 *                            not merely inaccurate but impossible,
+	 *                            psi_c being logarithmic at the conductor
+	 *
+	 * So this grid gets the total and the .gf keeps the remainder, which is
+	 * the honest division rather than a gap: a .gf is what a restart reads,
+	 * and a restart under the same [conductors] wants the remainder. What
+	 * it cannot do is SAY so, which is what CS-6 is for and why the driver
+	 * warns on stdout in the meantime.
+	 *
+	 * A NODE OUTSIDE THE DOMAIN IS LEFT ALONE, NaN AND ALL. `outside` is
+	 * NaN and NaN + anything is NaN, so the arithmetic would be harmless --
+	 * but psi_c is defined out there and adding it would turn a node the
+	 * mask calls absent into one carrying a real number, which is precisely
+	 * the "the band looked trustworthy" defect this file records for B.
+	 *
+	 * B GETS ITS OWN CALL RATHER THAN A RELABELLING OF flux(), because the
+	 * grid's first column is on the axis for every half-disc machine and
+	 * q = ( 1/R ) grad_bar psi is 0/0 there. meq::ConductorField
+	 * ::poloidalField() is the one entry point that takes the limit.
+	 */
+	if ( conductorField )
+	{
+		for ( int j = 0; j < sampler.nodesZ(); ++j )
+			for ( int i = 0; i < sampler.nodesR(); ++i )
+			{
+				if ( !sampler.located( i, j ) )
+					continue;
+				// j*nR + i, R fastest: meq::GridSampler's own layout and
+				// the NetCDF file's, taken from the accessor rather than
+				// recomputed, so a change of ordering cannot silently
+				// transpose this addition against the samples above.
+				std::size_t const node =
+					static_cast<std::size_t>( j )
+					*static_cast<std::size_t>( sampler.nodesR() )
+					+ static_cast<std::size_t>( i );
+				double const radius = sampler.nodeR( i, j );
+				double const z = sampler.nodeZ( i, j );
+				psi[ node ] += conductorField->psi( radius, z );
+				double dbR = 0.0;
+				double dbZ = 0.0;
+				conductorField->poloidalField( radius, z, dbR, dbZ );
+				bR[ node ] += dbR;
+				bZ[ node ] += dbZ;
+			}
+	}
+	return extended;
+}
+
+/*
+ * THE ( Psi, theta ) FLUX-SURFACE FILE, IN-6, at @a file: the family the write
+ * phase extracts, as it writes it, with the provenance it carries. Held as
+ * writtenSurfaces, and the family returned, for Run::fluxSurfaces().
+ */
+meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &file )
+{
+	meq::OutputConfig const &output = config->getOutput();
+	meq::ContourTracer tracer( *solver );
+
+	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
+	// Gamma, so the outermost surfaces of the family are partly
+	// outside the mesh; BandExtension::TransferLift continues the
+	// field along the same transfer paths the solve imposed its
+	// boundary condition through. Measured at k+2 against the flux
+	// Taylor step's second order -- see FluxSurfaces.hpp -- and it
+	// is what lets the outer cut sit anywhere near Gamma at all.
+	// Every node it answers for is marked, per node, in the file.
+	if ( gammaHMarker && path )
+		tracer.setBandExtension( meq::BandExtension::TransferLift,
+		                         *gammaHMarker, path.get() );
+
+	meq::CriticalPointFinder const finder( *solver );
+	meq::CriticalPoint const axis = finder.findAxis();
+
+	meq::FluxFamilyOptions options;
+	options.surfaces =
+		static_cast<std::size_t>( output.fluxSurfaceCount );
+	options.angles =
+		static_cast<std::size_t>( output.fluxAngleCount );
+	options.innerCut = output.fluxInnerCut;
+	options.outerCut = output.fluxOuterCut;
+
+	/*
+	 * g( psi ) FOR THE SAFETY FACTOR COLUMN, AND ONLY THE DRIVEN
+	 * PATH CAN SUPPLY IT.
+	 *
+	 * A meq::Source carries g g' and not g, so recovering
+	 * g = sqrt( g_edge^2 + 2 int g g' dPsi ) from a PRESCRIBED
+	 * field needs a constant of integration that no [ source ] key
+	 * supplies. There, the column is correctly absent: writing
+	 * zeroes would be indistinguishable from a machine with no
+	 * toroidal field, and the file says which by not having the
+	 * variable at all.
+	 *
+	 * [ source ] SafetyFactorFile is the exception, and it is the
+	 * run that needs the column most: the outer Newton solves for
+	 * the coefficients of g^2 itself, so g IS known here -- and
+	 * without this a run whose whole purpose is to reach a target q
+	 * could not show the q it reached.
+	 *
+	 * TWO CONVENTIONS MEET HERE AND THEY POINT OPPOSITE WAYS.
+	 * meq::extractFluxSurfaces calls this with the RAW psi, and the
+	 * coefficients are in the SOURCE's Psi -- see
+	 * fitToroidalFieldSquared(), which fits against
+	 * `1 - normalisedFlux` for exactly this reason. meq::
+	 * normalisedFlux is zero on the axis and the source's Psi is
+	 * one there, so a lambda that reached for the family's label
+	 * would evaluate the polynomial reversed and report a q that is
+	 * smooth, plausible and wrong.
+	 */
+	double const psiAxisValue = axis.psi;
+	double const psiBoundaryValue = solver->psiBoundary();
+	if ( !toroidalCoefficients.empty() && toroidalDriven
+	     && psiAxisValue != psiBoundaryValue )
+	{
+		std::vector<double> const gSquared = toroidalCoefficients;
+		auto atSourcePsi = [ gSquared ]( double sourcePsi )
+		{
+			double value = 0.0;
+			for ( std::size_t j = gSquared.size(); j-- > 0; )
+				value = value*sourcePsi + gSquared[ j ];
+			return value;
+		};
+
+		/*
+		 * g^2 MUST BE POSITIVE ACROSS THE RANGE THE COLUMN WILL BE
+		 * EVALUATED AT, and nothing guarantees it: g^2 is a fitted
+		 * polynomial, so a poorly determined high degree can dip
+		 * below zero inside the cut while every coefficient looks
+		 * ordinary. sqrt() of that is a NaN in a file whose only
+		 * per-node mask is about the band, so the column would be
+		 * unreadable in a way nothing announces.
+		 *
+		 * Checked over the source's Psi on the family's own cut,
+		 * which is 1 - [ innerCut, outerCut ] reversed. A failure
+		 * leaves the variable ABSENT -- the same signal as a
+		 * prescribed-field run -- and says so on stdout, because
+		 * absent-and-explained is better than present-and-NaN.
+		 */
+		double const fromPsi = 1.0 - options.outerCut;
+		double const toPsi = 1.0 - options.innerCut;
+		bool positive = true;
+		for ( int sample = 0; sample <= 64; ++sample )
+		{
+			double const at = fromPsi
+				+ ( toPsi - fromPsi )*sample/64.0;
+			if ( !( atSourcePsi( at ) > 0.0 ) )
+				positive = false;
+		}
+
+		if ( positive )
+			options.toroidalField =
+				[ atSourcePsi, psiAxisValue, psiBoundaryValue ]
+				( double psi )
+				{
+					return std::sqrt( atSourcePsi(
+						( psi - psiBoundaryValue )
+						/( psiAxisValue - psiBoundaryValue ) ) );
+				};
+		else
+			std::printf(
+				"MEQ: warning: the fitted g^2 is not positive across\n"
+				"     Psi in [ %.3f, %.3f ], so g = sqrt( g^2 ) is\n"
+				"     not real there and the safety factor is left\n"
+				"     OUT of %s rather than written as NaN. The g^2\n"
+				"     coefficients are still in the file; a lower\n"
+				"     [ source ] SafetyFactorDegree is the usual cure.\n",
+				fromPsi, toPsi,
+				file.c_str() );
+	}
+
+	meq::FluxSurfaceFamily const family = meq::extractFluxSurfaces(
+		tracer, axis, solver->psiBoundary(), options );
+
+	meq::FluxGridWriter surfaces( file,
+	                              family );
+	surfaces.attribute( "title", "MEQ flux-surface geometry" );
+	surfaces.attribute( "meq_version", version );
+	surfaces.attribute( "meq_precision", meq::realPrecision() );
+	surfaces.attribute( "meq_device_backends",
+	                    meq::deviceBackends() );
+	surfaces.attribute( "config_file", argument );
+	surfaces.attribute( "source_type",
+	                    sourceTypeName( config->getSource().type ) );
+	surfaces.attribute( "polynomial_degree",
+	                    config->getDiscretisation().polynomialDegree );
+	surfaces.attribute( "potential", "post-processed" );
+
+	/*
+	 * WHICH MACHINE, FOR THE SAME REASON THE GRID SAYS SO, AND ONE
+	 * MORE THAT IS THIS FILE'S OWN.
+	 *
+	 * The surfaces are level sets of the PHYSICAL flux under either
+	 * route -- meq::ContourTracer takes the solver's conductors and
+	 * shifts at its seam -- so, exactly as for the grid, what
+	 * changes between the models is the machine and not the meaning
+	 * of a variable. A file must say which model produced it.
+	 */
+	if ( conductorField )
+	{
+		surfaces.attribute( "coils",
+			static_cast<int>( conductorField->size() ) );
+		surfaces.attribute( "coil_current",
+		                    conductorField->totalCurrent() );
+		surfaces.attribute( "conductor_model",
+			config->getConductors().model
+				== meq::ConductorModel::Filament
+			? "filament" : "subtracted" );
+	}
+	surfaces.attribute( "band_extension",
+	                    gammaHMarker && path ? "transfer lift"
+	                                         : "none (fitted)" );
+
+	/*
+	 * AND THE SAFETY FACTOR COLUMN SAYS WHERE ITS g CAME FROM.
+	 *
+	 * `safety_factor` is `V' g < R^-2 >/4 pi^2`, so it is only as
+	 * good as `g`, and on this route `g` is a FITTED polynomial
+	 * that the run solved for rather than anything given. A reader
+	 * differencing two files has to be able to tell that apart from
+	 * a prescribed field, which is what these three say -- the same
+	 * three the ( R, Z ) grid carries, for the same reason.
+	 */
+	if ( !toroidalCoefficients.empty() && toroidalDriven )
+	{
+		std::ostringstream fitted;
+		fitted.setf( std::ios::scientific );
+		fitted.precision( 10 );
+		for ( std::size_t i = 0;
+		      i < toroidalCoefficients.size(); ++i )
+			fitted << ( i == 0 ? "" : " " )
+			       << toroidalCoefficients[ i ];
+
+		surfaces.attribute( "toroidal_field_driven", 1 );
+		surfaces.attribute( "g_squared_coefficients", fitted.str() );
+		surfaces.attribute( "safety_factor_target",
+		                    config->getSource().getMHD()
+		                        .safetyFactorFile );
+	}
+	surfaces.close();
+	writtenSurfaces = std::make_shared<meq::Dataset const>( surfaces.dataset() );
+	writtenFamily = std::make_shared<meq::FluxSurfaceFamily const>( family );
+	return family;
+}
+
 int meq::Run::Impl::write()
 {
 	// ---- write ---------------------------------------------------------
@@ -6348,14 +6814,7 @@ int meq::Run::Impl::write()
 		 * thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes, is guarding
 		 * the answer MEQ reports rather than the mesh it refines.
 		 */
-		if ( !solver->isPostProcessed() )
-		{
-			double const postStart = elapsedSince( started );
-			double const postStartCpu = cpuNow();
-			solver->postProcess();
-			postSeconds += elapsedSince( started ) - postStart;
-			postCpuSeconds += cpuNow() - postStartCpu;
-		}
+		ensurePostProcessed();
 
 		// psi_h AND NOT psi*, AND THAT ASYMMETRY IS DELIBERATE. These three files
 		// are the .gf restart format: "<stem>_psi.gf" is read back into the
@@ -6472,138 +6931,9 @@ int meq::Run::Impl::write()
 			gridRMin, gridRMax, output.gridNR,
 			gridZMin, gridZMax, output.gridNZ );
 
-		// THE SLIVER BETWEEN Gamma_h AND Gamma, which only the curved path has.
-		// Omega_h is the union of background elements lying INSIDE Gamma, so
-		// Gamma_h is inscribed and there is a band O(h) wide that is inside the
-		// plasma and outside the mesh. Left alone it rasterises as NaN and the
-		// picture gets a ragged polygonal edge where the boundary is smooth.
-		//
-		// Filled by extrapolating the element across each boundary face, and
-		// ONLY where the node is inside Gamma -- the level set is what stops
-		// this painting a band outside the plasma, where the solve claims
-		// nothing. Reach 1.0: one face length, which is the O(h) regime the
-		// transfer technique is analysed in and no further.
-		int extended = 0;
-		if ( shape )
-		{
-			meq::BoundaryShape const *curve = shape.get();
-			extended = sampler.extendOutward( 1.0,
-				[ curve ]( double radius, double z )
-				{
-					return curve->levelSet( radius, z ) <= 0.0;
-				},
-				[ curve ]( double radius, double z )
-				{
-					// levelSet is the RADIAL gap and is negative inside, so its
-					// magnitude is the distance to Gamma along the ray. Not the
-					// perpendicular distance, which is smaller -- but the ratio
-					// below only needs the two gaps measured the same way as
-					// each other, and both are along the ray.
-					return -curve->levelSet( radius, z );
-				} );
-		}
-
-		// NaN outside the domain, which is what the file format documents and
-		// what a plotting library will mask for free. A zero there would be a
-		// physical claim, and a wrong one.
-		double const outside = std::numeric_limits<double>::quiet_NaN();
 		std::vector<double> psi, bR, bZ;
-
-		// THE FLUX CARRIES THE BAND, which is the payoff for the mixed method
-		// showing up somewhere unexpected. q is computed at the SAME order as
-		// psi, so continuing psi across the Gamma_h-to-Gamma band as
-		// psi( x0 ) + R q( x0 ) . ( p - x0 ) evaluates both fields at a point on
-		// the element's own boundary and never outside it. The alternative --
-		// evaluating psi_h's polynomial outside its element -- is bounded by
-		// nothing, and was measured crossing psi = 0, a value this
-		// configuration knows exactly.
-		//
-		// THE POTENTIAL SAMPLED HERE IS psi*, NOT psi_h: the file reports the
-		// better field. The FLUX ARGUMENT STAYS solver->flux(), which is q at
-		// degree k, and that pairing is consistent rather than a leftover --
-		// psi*'s defining local problem matches its gradient to R q, so R q IS
-		// grad psi* to the order psi* is claimed at. Substituting the enriched
-		// flux would change nothing the band can resolve and would pair the
-		// Taylor step with a field the reconstruction produced rather than with
-		// the one it was built from.
-		sampler.samplePotentialWithFlux( solver->postProcessedPotential(),
-		                                 solver->flux(), psi, outside );
-
-		// AND B GETS THE BAND TOO, WHICH IT DID NOT UNTIL 2026-09-02. It used to
-		// go through sampleComponent(), which reads the FOOT on Gamma_h and so
-		// left about one node in ten piecewise constant -- O( h ), in the field
-		// most readers open this file for, behind a mask saying inside = 1.
-		// sampleComponentWithGradient() takes the same Taylor step psi gets,
-		// using B's own gradient inside the element.
-		//
-		// IT IS NOT AS GOOD AS psi's AND THE DIFFERENCE IS STRUCTURAL: psi is
-		// continued with a SOLVED variable at full order, B with a
-		// DIFFERENTIATED one at k-1, so this is O( h^2 ) at every k rather than
-		// the flux's own order. A full order better than what it replaces, and
-		// not the same thing. Sampler.hpp says what it would take to beat it.
-		sampler.sampleComponentWithGradient( field, 0, bR, outside );
-		sampler.sampleComponentWithGradient( field, 1, bZ, outside );
-
-		/*
-		 * AND psi_c IS ADDED BACK HERE, WHICH IS WHERE THE SPLIT'S EXACTNESS
-		 * SURVIVES INTO AN OUTPUT FILE AND WHERE IT DOES NOT.
-		 *
-		 * Under `[conductors]` the solver's field is the REMAINDER psi_p, so
-		 * everything sampled above is a remainder and the physical flux is
-		 * psi_p + psi_c. What divides the four output formats
-		 * (docs/conductors.rst, *What the split is exact for, and what it
-		 * cannot be*):
-		 *
-		 *   .nc grid, _surfaces.nc   psi_c is EVALUATED at each node, so the
-		 *                            file carries the physical field exactly
-		 *   .gf, .vtu                both are the field's own coefficients, and
-		 *                            psi_c can only be PROJECTED into the
-		 *                            discrete space -- for a filament that is
-		 *                            not merely inaccurate but impossible,
-		 *                            psi_c being logarithmic at the conductor
-		 *
-		 * So this grid gets the total and the .gf keeps the remainder, which is
-		 * the honest division rather than a gap: a .gf is what a restart reads,
-		 * and a restart under the same [conductors] wants the remainder. What
-		 * it cannot do is SAY so, which is what CS-6 is for and why the driver
-		 * warns on stdout in the meantime.
-		 *
-		 * A NODE OUTSIDE THE DOMAIN IS LEFT ALONE, NaN AND ALL. `outside` is
-		 * NaN and NaN + anything is NaN, so the arithmetic would be harmless --
-		 * but psi_c is defined out there and adding it would turn a node the
-		 * mask calls absent into one carrying a real number, which is precisely
-		 * the "the band looked trustworthy" defect this file records for B.
-		 *
-		 * B GETS ITS OWN CALL RATHER THAN A RELABELLING OF flux(), because the
-		 * grid's first column is on the axis for every half-disc machine and
-		 * q = ( 1/R ) grad_bar psi is 0/0 there. meq::ConductorField
-		 * ::poloidalField() is the one entry point that takes the limit.
-		 */
-		if ( conductorField )
-		{
-			for ( int j = 0; j < sampler.nodesZ(); ++j )
-				for ( int i = 0; i < sampler.nodesR(); ++i )
-				{
-					if ( !sampler.located( i, j ) )
-						continue;
-					// j*nR + i, R fastest: meq::GridSampler's own layout and
-					// the NetCDF file's, taken from the accessor rather than
-					// recomputed, so a change of ordering cannot silently
-					// transpose this addition against the samples above.
-					std::size_t const node =
-						static_cast<std::size_t>( j )
-						*static_cast<std::size_t>( sampler.nodesR() )
-						+ static_cast<std::size_t>( i );
-					double const radius = sampler.rAt( i );
-					double const z = sampler.zAt( j );
-					psi[ node ] += conductorField->psi( radius, z );
-					double dbR = 0.0;
-					double dbZ = 0.0;
-					conductorField->poloidalField( radius, z, dbR, dbZ );
-					bR[ node ] += dbR;
-					bZ[ node ] += dbZ;
-				}
-		}
+		double const outside = std::numeric_limits<double>::quiet_NaN();
+		int const extended = sampleAnswer( sampler, field, psi, bR, bZ );
 
 		/*
 		 * WHAT EACH NODE IS MADE OF: `node_material`, ER-3, and MR-5's
@@ -7567,6 +7897,10 @@ int meq::Run::Impl::write()
 			writer.materials( materialTable, *elementRecord );
 
 		writer.close();
+		// The .nc as written, held for a front end that reads the answer in
+		// memory (Run::dataset()). The root group: psi_c's group, added below
+		// by reopening the file, is the restart's, and is not in it.
+		written = std::make_shared<meq::Dataset const>( writer.dataset() );
 
 		/*
 		 * ---- psi_c, AS A GROUP OF THE FILE JUST CLOSED AND AS ITS OWN ----
@@ -7651,189 +7985,8 @@ int meq::Run::Impl::write()
 		{
 			try
 			{
-				meq::ContourTracer tracer( *solver );
-
-				// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
-				// Gamma, so the outermost surfaces of the family are partly
-				// outside the mesh; BandExtension::TransferLift continues the
-				// field along the same transfer paths the solve imposed its
-				// boundary condition through. Measured at k+2 against the flux
-				// Taylor step's second order -- see FluxSurfaces.hpp -- and it
-				// is what lets the outer cut sit anywhere near Gamma at all.
-				// Every node it answers for is marked, per node, in the file.
-				if ( gammaHMarker && path )
-					tracer.setBandExtension( meq::BandExtension::TransferLift,
-					                         *gammaHMarker, path.get() );
-
-				meq::CriticalPointFinder const finder( *solver );
-				meq::CriticalPoint const axis = finder.findAxis();
-
-				meq::FluxFamilyOptions options;
-				options.surfaces =
-					static_cast<std::size_t>( output.fluxSurfaceCount );
-				options.angles =
-					static_cast<std::size_t>( output.fluxAngleCount );
-				options.innerCut = output.fluxInnerCut;
-				options.outerCut = output.fluxOuterCut;
-
-				/*
-				 * g( psi ) FOR THE SAFETY FACTOR COLUMN, AND ONLY THE DRIVEN
-				 * PATH CAN SUPPLY IT.
-				 *
-				 * A meq::Source carries g g' and not g, so recovering
-				 * g = sqrt( g_edge^2 + 2 int g g' dPsi ) from a PRESCRIBED
-				 * field needs a constant of integration that no [ source ] key
-				 * supplies. There, the column is correctly absent: writing
-				 * zeroes would be indistinguishable from a machine with no
-				 * toroidal field, and the file says which by not having the
-				 * variable at all.
-				 *
-				 * [ source ] SafetyFactorFile is the exception, and it is the
-				 * run that needs the column most: the outer Newton solves for
-				 * the coefficients of g^2 itself, so g IS known here -- and
-				 * without this a run whose whole purpose is to reach a target q
-				 * could not show the q it reached.
-				 *
-				 * TWO CONVENTIONS MEET HERE AND THEY POINT OPPOSITE WAYS.
-				 * meq::extractFluxSurfaces calls this with the RAW psi, and the
-				 * coefficients are in the SOURCE's Psi -- see
-				 * fitToroidalFieldSquared(), which fits against
-				 * `1 - normalisedFlux` for exactly this reason. meq::
-				 * normalisedFlux is zero on the axis and the source's Psi is
-				 * one there, so a lambda that reached for the family's label
-				 * would evaluate the polynomial reversed and report a q that is
-				 * smooth, plausible and wrong.
-				 */
-				double const psiAxisValue = axis.psi;
-				double const psiBoundaryValue = solver->psiBoundary();
-				if ( !toroidalCoefficients.empty() && toroidalDriven
-				     && psiAxisValue != psiBoundaryValue )
-				{
-					std::vector<double> const gSquared = toroidalCoefficients;
-					auto atSourcePsi = [ gSquared ]( double sourcePsi )
-					{
-						double value = 0.0;
-						for ( std::size_t j = gSquared.size(); j-- > 0; )
-							value = value*sourcePsi + gSquared[ j ];
-						return value;
-					};
-
-					/*
-					 * g^2 MUST BE POSITIVE ACROSS THE RANGE THE COLUMN WILL BE
-					 * EVALUATED AT, and nothing guarantees it: g^2 is a fitted
-					 * polynomial, so a poorly determined high degree can dip
-					 * below zero inside the cut while every coefficient looks
-					 * ordinary. sqrt() of that is a NaN in a file whose only
-					 * per-node mask is about the band, so the column would be
-					 * unreadable in a way nothing announces.
-					 *
-					 * Checked over the source's Psi on the family's own cut,
-					 * which is 1 - [ innerCut, outerCut ] reversed. A failure
-					 * leaves the variable ABSENT -- the same signal as a
-					 * prescribed-field run -- and says so on stdout, because
-					 * absent-and-explained is better than present-and-NaN.
-					 */
-					double const fromPsi = 1.0 - options.outerCut;
-					double const toPsi = 1.0 - options.innerCut;
-					bool positive = true;
-					for ( int sample = 0; sample <= 64; ++sample )
-					{
-						double const at = fromPsi
-							+ ( toPsi - fromPsi )*sample/64.0;
-						if ( !( atSourcePsi( at ) > 0.0 ) )
-							positive = false;
-					}
-
-					if ( positive )
-						options.toroidalField =
-							[ atSourcePsi, psiAxisValue, psiBoundaryValue ]
-							( double psi )
-							{
-								return std::sqrt( atSourcePsi(
-									( psi - psiBoundaryValue )
-									/( psiAxisValue - psiBoundaryValue ) ) );
-							};
-					else
-						std::printf(
-							"MEQ: warning: the fitted g^2 is not positive across\n"
-							"     Psi in [ %.3f, %.3f ], so g = sqrt( g^2 ) is\n"
-							"     not real there and the safety factor is left\n"
-							"     OUT of %s rather than written as NaN. The g^2\n"
-							"     coefficients are still in the file; a lower\n"
-							"     [ source ] SafetyFactorDegree is the usual cure.\n",
-							fromPsi, toPsi,
-							output.getFluxSurfaceFile().c_str() );
-				}
-
-				meq::FluxSurfaceFamily const family = meq::extractFluxSurfaces(
-					tracer, axis, solver->psiBoundary(), options );
-
-				meq::FluxGridWriter surfaces( output.getFluxSurfaceFile(),
-				                              family );
-				surfaces.attribute( "title", "MEQ flux-surface geometry" );
-				surfaces.attribute( "meq_version", version );
-				surfaces.attribute( "meq_precision", meq::realPrecision() );
-				surfaces.attribute( "meq_device_backends",
-				                    meq::deviceBackends() );
-				surfaces.attribute( "config_file", argument );
-				surfaces.attribute( "source_type",
-				                    sourceTypeName( config->getSource().type ) );
-				surfaces.attribute( "polynomial_degree",
-				                    config->getDiscretisation().polynomialDegree );
-				surfaces.attribute( "potential", "post-processed" );
-
-				/*
-				 * WHICH MACHINE, FOR THE SAME REASON THE GRID SAYS SO, AND ONE
-				 * MORE THAT IS THIS FILE'S OWN.
-				 *
-				 * The surfaces are level sets of the PHYSICAL flux under either
-				 * route -- meq::ContourTracer takes the solver's conductors and
-				 * shifts at its seam -- so, exactly as for the grid, what
-				 * changes between the models is the machine and not the meaning
-				 * of a variable. A file must say which model produced it.
-				 */
-				if ( conductorField )
-				{
-					surfaces.attribute( "coils",
-						static_cast<int>( conductorField->size() ) );
-					surfaces.attribute( "coil_current",
-					                    conductorField->totalCurrent() );
-					surfaces.attribute( "conductor_model",
-						config->getConductors().model
-							== meq::ConductorModel::Filament
-						? "filament" : "subtracted" );
-				}
-				surfaces.attribute( "band_extension",
-				                    gammaHMarker && path ? "transfer lift"
-				                                         : "none (fitted)" );
-
-				/*
-				 * AND THE SAFETY FACTOR COLUMN SAYS WHERE ITS g CAME FROM.
-				 *
-				 * `safety_factor` is `V' g < R^-2 >/4 pi^2`, so it is only as
-				 * good as `g`, and on this route `g` is a FITTED polynomial
-				 * that the run solved for rather than anything given. A reader
-				 * differencing two files has to be able to tell that apart from
-				 * a prescribed field, which is what these three say -- the same
-				 * three the ( R, Z ) grid carries, for the same reason.
-				 */
-				if ( !toroidalCoefficients.empty() && toroidalDriven )
-				{
-					std::ostringstream fitted;
-					fitted.setf( std::ios::scientific );
-					fitted.precision( 10 );
-					for ( std::size_t i = 0;
-					      i < toroidalCoefficients.size(); ++i )
-						fitted << ( i == 0 ? "" : " " )
-						       << toroidalCoefficients[ i ];
-
-					surfaces.attribute( "toroidal_field_driven", 1 );
-					surfaces.attribute( "g_squared_coefficients", fitted.str() );
-					surfaces.attribute( "safety_factor_target",
-					                    config->getSource().getMHD()
-					                        .safetyFactorFile );
-				}
-				surfaces.close();
+				meq::FluxSurfaceFamily const family =
+					writeFluxSurfaces( output.getFluxSurfaceFile() );
 
 				wroteFluxSurfaces = true;
 				std::printf( "MEQ: %zu flux surfaces over Psi_N in [ %.3f, "
