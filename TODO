@@ -1202,7 +1202,11 @@ The giving-up is built; what is left is the crawls it exposed.
   (2026-10-19, double), 8 of 539 converging bordered solves crawl 9 to 69 steps
   before converging: seven in FreeBoundaryCoupling (crawls of 9 to 65, converging
   at 25 to 149 iterations) and one in XPointBorder (69, converging AT the cap of
-  150).  The library's default stays OFF so those solves are unchanged, but a
+  150).  And one in the inverse race: D shaped's k4 h0.50 cold start crawls 2
+  steps in every repeat, on 0e7177a and 756fb6d alike, converging in one
+  Newton step after four support sweeps -- under the driver's warning at 8,
+  so only the record shows it (M-343).  The library's default stays OFF so
+  those solves are unchanged, but a
   crawl that converges is the iteration getting out by luck: each wants its
   direction or its merit looked at, and probably a red test naming it rather
   than a green one that hides it.
