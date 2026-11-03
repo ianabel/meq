@@ -22906,3 +22906,98 @@ reason.
 
 **Reproduce.** As [M-343](#m-343); the warm records are the same files'
 `start = "warm"` rows.
+
+### M-345
+
+**GF1'S COLD STALL ON MEQ'S COARSE RUNGS IS THE ELEMENT-LOCAL FOLD UNDER THE
+MIRROR'S `τ₀ = 3`, NOT THE COLD LABELS. ON L1 `k = 3` THE DISCRETE PROBLEM FOLDS
+AT 1.25–1.30 OF GF1'S DENSITY, AS `(k + 1)|∂K|/|K|` SCALED FROM L0'S 0.47
+PREDICTS, AND A COLD START REACHES 0.9 OF IT AND NOT 1.0; AT `τ₀ = 10` THE SAME
+RUNG CONVERGES COLD IN 7 STEPS FROM THE SAME LABELS, AND ITS `ψ` IS 8× NEARER
+THE REFERENCE.** `TODO`, *A mirror at GF1's pressure does not solve from the
+vacuum on MEQ's coarse rungs*; [M-342](#m-342) posed it.
+
+**Setup.** `756fb6d` (`install/double`), double. M-342's GF1 case
+(`tools/geq-benchmark/gf1.py`, tapered and held), its shipped `PlasmaSize =
+0.1` mesh, cold from the vacuum, the box default `τ = 3/max(R, 0.1 m)`
+unless a row says otherwise. The density scale `s` multiplies `n_e` and
+`n_C`, value and slope; temperatures and `ω` are held. Errors are `ψ` against
+L2 `k = 4` at `τ₀ = 3`, over the race's 65 × 65 nodes less the corners, each
+run re-sampled there from its own answer; `max |ψ| = 0.88`.
+
+**The cold start, by `s`:**
+
+| rung | converges cold | Newton steps on the way | fails |
+|---|---|---|---|
+| L0 `k = 2` | `s ≤ 0.4` | 3, 4, 4, 5 | from 0.5 |
+| L1 `k = 3` | `s ≤ 0.9` | 3 … 6, then 10 at 0.9 | at 1.0, stalled at 1.7e-3 of the first residual |
+| L2 `k = 2` | every `s` to 1.0 | 3 … 7 | — |
+
+**Where each rung folds.** Continued from the last answer in steps of 0.05,
+L1 `k = 3` converges in 4 or 5 steps to 1.25 and stalls at 1.30; M-342 has L0
+`k = 2` converging to 0.46 and failing at 0.48. The element-local criterion
+(`CLAUDE_HDGGS.md`, *A constant `τ` folds inside one element*) scales the
+ceiling as `(k + 1)/h`, so L0's 0.47 predicts 0.47 × 2 × 4/3 = 1.25 on L1
+`k = 3`. **So a cold start reaches 0.75–0.85 of its rung's fold, and GF1 at
+1.0 is past that on L0 and L1 `k = 3` and inside it on L2.**
+
+**The fold is the stabilisation's.** At GF1's density, cold, the same labels
+(`ψ_inner` 5.64e-03, `ψ_bnd` 6.61e-02, against the answer's 3.79e-03 and
+5.27e-02):
+
+| rung | `τ₀ = 3` | `τ₀ = 10` | `τ₀ = 30` |
+|---|---|---|---|
+| L1 `k = 3` | stalls at 1.7e-3 | 7 steps, quadratic | 7 steps |
+| L0 `k = 2` | stalls | stalls at 1.8e-3 | 7 steps |
+
+L0's ceiling rises with `τ₀` more slowly than linearly, as the record has the
+fold arriving before the smooth reaction meets `λ_min`.
+
+**And the stiffer `τ₀` is the more accurate one here:**
+
+| run, `s = 1` | max | rms |
+|---|---|---|
+| L2 `k = 2`, `τ₀ = 3`, cold | 7.52e-06 | 8.03e-07 |
+| L1 `k = 3`, `τ₀ = 3`, continued | 2.81e-05 | 4.87e-06 |
+| L1 `k = 3`, `τ₀ = 10`, cold | 3.48e-06 | 4.68e-07 |
+| L1 `k = 3`, `τ₀ = 30`, cold | 2.17e-06 | 3.03e-07 |
+| L0 `k = 2`, `τ₀ = 30`, cold | 6.43e-05 | 5.52e-06 |
+
+The L2 row is M-342's to every digit. The reference is itself at `τ₀ = 3`, at
+L2 `k = 4`. `ψ_h` falling with `τ₀` is [M-293](#m-293)'s finding against geq;
+what `τ₀` costs there is the vacuum's `q_h` at `k = 1` and `ψ*`'s `k = 2` rate,
+not measured on GF1.
+
+**Reproduce.** `runs/gf1-coldscan/scan.sh` (the cold scan), the continuation
+and `τ₀` runs beside it, and `grid65/` for the errors; the base case is
+`runs/geq-benchmark/gf1-cold-l1k3/s1.0000/`.
+
+### M-346
+
+**THE FORWARD COLD TABLE AT `756fb6d`: TEN OF THE SIXTEEN SHIPPED `machine-*.toml`
+CONVERGE FROM THEIR SHIPPED GUESS, AND THE SIX THAT EXIT 2 ARE
+[M-313](#m-313)'s SIX — B, B SHAPED, C, C SHAPED, TCV AND G SHAPED. EACH STOPS AT
+THE STALL LIMIT OR THE ITERATION CAP ON THE FIRST ATTEMPT AND THEN FAILS THE
+RETRY RUNG.**
+`runs/cold-table/run.sh`: every file through `install/double/bin/meq-run`, one
+at a time, `OMP = MKL = 8`, a 30-minute cap, on a machine also running M-345.
+
+| exit 0 | wall s | exit 2 | wall s |
+|---|---|---|---|
+| A, A shaped | 2.1, 2.7 | B, B shaped | 36.6, 46.2 |
+| D shaped | 147.3 | C, C shaped | 31.2, 77.9 |
+| E, E shaped | 8.3, 6.9 | TCV | 202.9 |
+| F, F shaped, F filament, F inverse | 6.9, 6.8, 5.9, 13.7 | G shaped | 198.5 |
+| G | 5.6 | | |
+
+Five of the six `exit 2`s read the same: the first bordered Newton stops at
+`setStallLimit( 8 )` — eight steps in a row under 1/64 of the Newton step —
+and the retry rung, Picard in the field block with the X-point held within
+0.05 of `Γ`'s radius of its seed, does not converge either. **TCV is the
+exception**: its first attempt never trips the stall limit, and runs to the
+iteration cap with the residual creeping at 1.8e-2 of the first; its retry
+ends with no damping of the bordered step giving a finite trial. No converged
+answer is compared here; M-313 has them unchanged to the printed digit.
+
+**Reproduce.** `runs/cold-table/run.sh`, which tags its directory with the
+installed commit.
