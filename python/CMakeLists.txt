@@ -64,6 +64,71 @@ set(_meq_package_dir "${MEQ_PYTHON_ROOT}/meq")
 pybind11_add_module(_meq NO_EXTRAS _meq.cpp)
 target_link_libraries(_meq PRIVATE meq_core toml11::toml11)
 target_link_options(_meq PRIVATE "LINKER:--exclude-libs,ALL")
+# ---- MKL and SuiteSparse of its own -----------------------------------------
+#
+# STATIC AND HIDDEN, SO THAT NOTHING ELSE IN THE PROCESS CAN BIND TO THEM OR
+# THEM TO IT. Debian's numpy loads the system MKL into the process's global
+# scope; a module that links MKL shared then binds its BLAS, LAPACK and PARDISO
+# to that MKL if numpy came first, and MKL's lazily loaded kernels mix with it
+# even if numpy came after -- measured, the answers move about 1e-13
+# (PYTHON-PLAN.md, PY-1). Linked from static archives under --exclude-libs,
+# the module carries its own copy, which loads no kernels and exports nothing.
+# SuiteSparse with it, because UMFPACK and CHOLMOD call BLAS and, left shared,
+# would pull the shared MKL back in.
+#
+# HOW: MFEM's exported link line names these as -L<dir> -l<name>, and GNU ld
+# takes the first -L directory that has the name. A directory of this build's
+# own, searched first, answers every one of those names with a linker script
+# that GROUPs all the static archives -- MKL's three depend on one another
+# and on nothing in order, which a group is what resolves. The meq binary's
+# link is untouched: it keeps the shared libraries, and the two are the same
+# versions, which PythonDriverParity holds to the bit.
+#
+# OpenMP cannot be made private the same way: libgomp.a holds local-exec TLS a
+# shared object cannot, and RTLD_DEEPBIND, the other route, makes libgomp read
+# a stale environment and ignore OMP_NUM_THREADS. So libgomp stays shared and
+# is bound when meq is imported, and meq/__init__.py refuses a process that
+# already holds another OpenMP: import meq before numpy.
+set(MEQ_PYTHON_MKL_STATIC_DIR "/opt/intel/oneapi/mkl/latest/lib" CACHE PATH
+	"Where libmkl_intel_lp64.a, libmkl_gnu_thread.a and libmkl_core.a are, for the module")
+set(MEQ_PYTHON_SUITESPARSE_STATIC_DIR "${MEQ_PROJECT_DIR}/../suitesparse/install-static/lib"
+	CACHE PATH "A static, position-independent SuiteSparse, for the module")
+set(_meq_static_names mkl_intel_lp64 mkl_gnu_thread mkl_core)
+set(_meq_suitesparse_names umfpack klu amd btf cholmod colamd camd ccolamd suitesparseconfig)
+set(_meq_static_archives "")
+foreach(_name IN LISTS _meq_static_names)
+	list(APPEND _meq_static_archives "${MEQ_PYTHON_MKL_STATIC_DIR}/lib${_name}.a")
+endforeach()
+foreach(_name IN LISTS _meq_suitesparse_names)
+	list(APPEND _meq_static_archives "${MEQ_PYTHON_SUITESPARSE_STATIC_DIR}/lib${_name}.a")
+endforeach()
+set(_meq_static_missing "")
+foreach(_archive IN LISTS _meq_static_archives)
+	if(NOT EXISTS "${_archive}")
+		list(APPEND _meq_static_missing "${_archive}")
+	endif()
+endforeach()
+if(_meq_static_missing)
+	message(STATUS "meq: the Python module links MKL and SuiteSparse SHARED, since "
+		"these are missing: ${_meq_static_missing}. It then shares them with "
+		"anything else in the process (python/CMakeLists.txt says what that costs)")
+	set(MEQ_PYTHON_STATIC_LIBRARIES OFF CACHE INTERNAL "")
+else()
+	set(_meq_static_view "${PROJECT_BINARY_DIR}/python-static-libraries")
+	file(MAKE_DIRECTORY "${_meq_static_view}")
+	list(JOIN _meq_static_archives " " _meq_group)
+	foreach(_name IN LISTS _meq_static_names _meq_suitesparse_names)
+		file(WRITE "${_meq_static_view}/lib${_name}.a"
+			"/* python/CMakeLists.txt: every static archive _meq links, as one group */\n"
+			"GROUP ( ${_meq_group} )\n")
+	endforeach()
+	message(STATUS "meq: the Python module links MKL and SuiteSparse static and hidden")
+	set(MEQ_PYTHON_STATIC_LIBRARIES ON CACHE INTERNAL "")
+	# First among the -L directories, so every MKL and SuiteSparse name finds
+	# its GROUP script here before the shared library elsewhere.
+	target_link_options(_meq BEFORE PRIVATE "-L${_meq_static_view}")
+endif()
+
 # meq_version.hpp: the module stamps the commit it was linked at, as meq does.
 target_include_directories(_meq PRIVATE "${PROJECT_BINARY_DIR}")
 add_dependencies(_meq meq_version_header)

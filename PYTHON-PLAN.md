@@ -143,7 +143,7 @@ Each stage ends at a measured, asserted result, as every stage here does.
 | PY-1 | the `_meq` extension and the `meq` package; `Equilibrium( file )`, `from_dict`, `solve`, `write` | Python's `.nc` equals `meq`'s, every coefficient — **done** |
 | PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit — **done** |
 | PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer — **`psi` done; `R_midplane` not built** |
-| PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted |
+| PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted — **done**, adaptive configurations solving once |
 | PY-4 | results in memory: scalars, `grid()`, `psi`/`B` at points, `surfaces()` | equal to the `.nc` and `_surfaces.nc` the same run writes |
 | PY-5 | a mirror's transport geometry | closed-form and finite-difference checks, below |
 | PY-6 | MEQ and MaNTA in one process, then the first outer loop | each code's answer in the joint process equals its answer alone |
@@ -232,24 +232,43 @@ and requires every variable and attribute of the two `.nc` files equal but
 relative table without its `base_dir` refused, each exception against its
 exit code, and the phase order.
 
-**DEBIAN'S numpy BRINGS A SECOND MKL, AND THAT IS PY-6's HAZARD MET IN
-PY-1.** The system numpy reaches `/usr/lib/x86_64-linux-gnu/libmkl_rt.so`,
-the 2020-era system MKL, through the BLAS alternative, and `libmkl_rt` loads
-MKL's layers into the global scope. Measured, with `LD_DEBUG=bindings`:
+**THE MODULE CARRIES ITS OWN MKL AND SuiteSparse, STATIC AND HIDDEN, AND
+THE ONE RULE LEFT IS `import meq` BEFORE numpy.** Debian's numpy reaches the
+2020-era system MKL through the BLAS alternative, and `libmkl_rt` loads MKL's
+layers, and Intel's or LLVM's OpenMP with them, into the global scope.
+Measured with `LD_DEBUG=bindings` against a module that linked MKL shared:
+numpy first bound `_meq`'s, UMFPACK's and CHOLMOD's BLAS and PARDISO to the
+system MKL, and numpy after still mixed the two inside MKL's lazily loaded
+kernels, moving answers about 1e-13 -- with neither a warm-up of oneAPI's
+kernels nor `MKL_CBWR` bringing the bits back.
 
-* **numpy imported first**, `_meq`, UMFPACK and CHOLMOD bind `dgemm_`,
-  `dgetrf_`, `dpotrf_` and PARDISO to the system MKL, which MEQ was not built
-  against. `import meq` refuses it, naming the two files.
-* **`meq` imported first**, its own calls stay bound to oneAPI 2026.2, but
-  MKL's lazily loaded kernels mix with the second MKL: `soloviev-nstx`'s
-  `psi` moves 7.5e-14 of its 0.44 peak and `limited-tokamak`'s 3.0e-14, with
-  the same Newton counts. Neither a warm-up of oneAPI's kernels before numpy
-  arrives nor MKL's `MKL_CBWR=COMPATIBLE` brings the bits back (both tried),
-  and at one thread it is still there, so it is not OpenMP's reduction order.
-  meq warns, once, at the next phase.
+**So `_meq` links oneAPI's static MKL and a static, position-independent
+SuiteSparse (`../../suitesparse/install-static`), under `--exclude-libs`**:
+it exports `PyInit__meq` and nothing else, loads no MKL kernels, and no import
+before or after it can bind to its MKL or it to theirs (`python/CMakeLists.txt`
+says how, with a directory of `GROUP` scripts searched first, and leaves the
+`meq` binary's link alone). **OpenMP is the exception, and it cannot be made
+private**: `libgomp.a` holds local-exec TLS a shared object cannot, and
+`RTLD_DEEPBIND`, the other route, made libgomp read a stale environment and
+run 16 threads under `OMP_NUM_THREADS=3`. libgomp stays shared, its calls
+bound when `meq` is imported, so `import meq` refuses a process already
+holding another OpenMP runtime, as numpy-first does. Imported first, measured:
+with numpy and netCDF4 imported after it, `soloviev-nstx`, `mhd-rectangle` and
+`limited-tokamak` are the `meq` binary's files to the bit, and `GOMP_parallel`
+binds to libgomp. The module is 187 MB, nearly all of it MKL's code paths for
+every CPU.
 
-One MKL in the process is the fix, and it is PY-6's: the bits are not wrong
-by more than round-off, but they are not `meq`'s.
+**JAX does not conflict, and the rule is Debian's numpy's.** Measured in
+`../../jax-venv` (jax 0.10.1 on the CPU, pip's numpy 2.4.6, this interpreter):
+JAX brings `libscipy_openblas64_` (OpenBLAS on pthreads, under prefixed
+names), libgfortran and libstdc++, and no MKL and no OpenMP runtime. Imported
+before `meq` or after, with a jitted computation run before and after the
+solve, `mhd-rectangle` and `limited-tokamak` are the binary's files to the bit
+and JAX's own result is the one it gives alone. pip's numpy is the same
+OpenBLAS, so the import order matters only beside Debian's. **Not measured: a
+CUDA jaxlib**, whose CUDA runtime comes from pip wheels under the same names
+(`libcudart`, `libcublas`, `libcusparse`) as the system CUDA `_meq` links; the
+import guard compares those names, and would refuse one loaded first.
 
 **PY-2: species profiles from arrays, on the fixed maps — done.**
 `meq.Table( x, value, derivative, abscissa= )`, the abscissa a required
@@ -342,18 +361,37 @@ surface crosses `z = 0` twice. The acceptance stays: Newton quadratic, as
 M-283's is, and a table in `R_midplane`, re-expressed in `psi_n` through the
 answer's own crossings, giving the same answer to the tabulation.
 
-**PY-3: repeated solves.** Three properties, each asserted:
+**PY-3: repeated solves — done.** `Equilibrium.set_profile( slot, table )`
+replaces a profile, and `solve()` may be called again. **A re-solve is a new
+`meq::Run`, restarted exactly from the last state**: the current run writes
+its state to a private `.nc` (`Run::writeRestart()`, the write phase with no
+`[output]` stem and no optional formats), and the new one is prepared from
+the same configuration with `[initialguess]` replaced by that file
+(`RunOptions::restartFrom`), so the whole iterate `( q, ψ, ψ̂ )`, the labels
+and the exterior coefficients come back through the restart path `meq` itself
+takes, on the same mesh. **The new run replaces the current one only if it
+solves**, which is what makes a failure leave the object as it was. Asserted
+in `PythonResolve`, on `rotating-normalised` with `Omega` as the slot:
 
-* **Unchanged profiles re-solve in at most one Newton step, to the same
-  answer.**
-* **Perturbed profiles re-solve, warm, to the cold solve on the same mesh**,
-  within the solver's tolerance, and in fewer steps. Both counts are reported.
-  A warm solve that crawls is a defect, not a speed-up that is smaller than
-  hoped (`crawling-is-a-bug`).
-* **A solve that fails leaves the object bit-identical to before it**: the
-  iterate, the labels, the source and the mesh. Asserted by solving a profile
-  set the mesh cannot carry (GF1 from the vacuum on level 0 is one, `TODO`)
-  and then the original again.
+* **an unchanged re-solve is the answer in no Newton step**, every field of
+  its `.nc` the first's, bit for bit, the three attributes that say how it
+  solved -- `newton_iterations`, `final_residual`, `warm_start` -- aside;
+* **Omega 10% up re-solves warm to the cold solve of the same profiles**,
+  1.44e-14 of `max |ψ|` apart, in 4 Newton steps against the cold 6;
+* **Omega at 3e6 does not solve, and the `SolveError` leaves the
+  Equilibrium as it was**: what it writes is the file a single solve of the
+  first profiles writes, every variable and attribute, and it solves again
+  afterwards;
+* **profiles set before the first solve are the constructor's**, to the bit,
+  the prepared run being prepared again, cold;
+* **a configuration with `[adaptivity]` solves once**, and its second solve is
+  a `ConfigError`: its mesh is the adaptive loop's, a re-solve would rebuild it
+  from the file and adapt again, and the restart would not be exact. Freezing
+  the adapted mesh, by writing it and naming it, is what lifts that.
+
+Without the restart, mutated in, three of the five fail. A re-solve pays a
+whole setup -- the mesh, the conductors' `ψ_c` unless `[conductors]
+CacheFile` keeps it -- which on the shipped cases is small beside the solve.
 
 **PY-4: results in memory.** The scalars are the `.nc`'s attributes, with the
 gauge among them. `grid()` is assembled by the code that samples the `.nc`, not
@@ -385,13 +423,9 @@ for `V′`.
   builds differ in `sunrealtype` or index size, the second module runs on a
   library it was not built for, silently. A single build of MEQ makes that
   likely.
-* **Two MKLs.** `_manta` links the system `libmkl_rt.so`; MEQ links oneAPI's
-  `latest` `lp64`/`gnu_thread`/`core`. Two MKL versions in one process are not
-  supported by Intel, and `mkl-2026-2-moves-single-precision` says this
-  machine's answers can move with the MKL version. **Measured in PY-1, and
-  numpy alone is enough**: Debian's numpy is on the same system `libmkl_rt`,
-  and with it in the process MEQ's answers move about 1e-13 relative (PY-1,
-  above). So the one MKL has to serve numpy too.
+* **Two MKLs.** Answered for MKL by the module carrying its own, static and
+  hidden (PY-1): numpy's and MaNTA's MKL cannot reach it. What is left
+  shared is OpenMP, bound at `import meq`.
 
 **The fix is in the build systems, not in the module: one SUNDIALS and one MKL
 serve both codes.** The candidate is MEQ's pair, `cuda-install` and oneAPI,
@@ -415,21 +449,13 @@ oneAPI MKL 2026.2 and `../../sundials/cuda-install`: the 45 libraries both
 modules link resolve to the same files. In one process with no numpy, MaNTA's
 `LinearDiffusion` and MEQ's `mhd-rectangle` solved in either order and either
 import order: MEQ's `.nc` is the `meq` binary's, and MaNTA's output is MaNTA's
-alone, both bit for bit. **One thing moves, and it is MaNTA's threading layer,
-not an answer.** MaNTA links MKL's single dynamic library, `libmkl_rt`, which
-picks its threading layer at its first call: alone, `intel_thread` (Intel's
-OpenMP); beside `meq`, in either import order, `gnu_thread`, the layer MEQ
-links, so the process holds one OpenMP runtime. At `MKL_NUM_THREADS=1`, where
-this was measured, the layer changes no bit. Above it, MaNTA's threaded MKL
-calls run on GNU OpenMP in the joint process; `MKL_THREADING_LAYER=GNU` gives
-a MaNTA-alone run the same layer to compare against. Not measured above one
-thread.
-
-**And numpy is still the second MKL.** MaNTA's Python physics cases import
-numpy, and Debian's numpy reaches the system MKL (PY-1). So a workflow with a
-Python case meets `import meq`'s refusal, or its warning, until numpy is on
-the one MKL too -- a numpy built against oneAPI, or the BLAS alternative
-pointed at it. A C++ case driven by `manta.Runner( "Name" )` does not.
+alone, both bit for bit. **And with the module's MKL static, measured again**: `import meq` first,
+MaNTA's `libmkl_rt` finds libgomp loaded and takes the GNU threading layer, so
+the process holds one OpenMP runtime, and both codes' answers are their own to
+the bit; MaNTA computing before `import meq` brings LLVM's OpenMP with its MKL
+and the import is refused. The rule is the same as for numpy: import `meq`
+first, or at least before anything has run MKL. Above one MKL thread not
+measured.
 
 **Then the loop.** A small Python fixed-point iteration between a MaNTA case
 and MEQ on a mirror: MaNTA's `n_s`, `T_s` and `ω` go into MEQ's species slots,
@@ -456,10 +482,10 @@ the validation tool for the tight one.
 
 ## Open
 
-1. **numpy on the one MKL.** MaNTA's `build/mkl-cuda` shares MEQ's MKL and
-   SUNDIALS (PY-6, met), but Debian's numpy does not, so a workflow with a
-   Python physics case needs a numpy built against oneAPI or the system BLAS
-   alternative pointed at it. A machine-level choice, not either code's.
+1. **A private OpenMP**, so that the import order stops mattering: a
+   position-independent OpenMP runtime built from GCC's or LLVM's sources,
+   linked into the module. Not attempted; `import meq` first is the rule
+   until something needs more.
 2. **Which abscissa MaNTA's mirror case uses.** `Psi`, `psi_n`, `sqrt_psi_n`
    and `psi` are served; `R_midplane` is not built (PY-2b). It decides
    whether the first loop needs it.

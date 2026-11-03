@@ -33,7 +33,12 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <memory>
 #include <stdexcept>
+#include <system_error>
+
+#include <unistd.h>
 #include <string>
 #include <utility>
 
@@ -89,14 +94,11 @@ namespace
 		}
 	}
 
-	/// Before each phase: Python's stdout before the run's, so a caller's
-	/// print() and the report come out in the order they were made; and
-	/// meq/__init__.py's check for a library another module has loaded since
-	/// meq was imported, which warns.
+	/// Python's stdout before the run's, so a caller's print() and the
+	/// report come out in the order they were made.
 	void flushPython()
 	{
 		py::module_::import( "sys" ).attr( "stdout" ).attr( "flush" )();
-		py::module_::import( "meq" ).attr( "_warn_if_foreign_libraries" )();
 	}
 
 	/*
@@ -165,21 +167,78 @@ namespace
 		return options;
 	}
 
-	/// One run, a phase at a time.
+	/**
+	 * ONE EQUILIBRIUM, SOLVED AS OFTEN AS ITS PROFILES CHANGE.
+	 *
+	 * The first solve() is the run construction prepared. EACH LATER ONE IS A
+	 * NEW meq::Run, RESTARTED EXACTLY FROM THE LAST: the current run writes
+	 * its state to a private .nc (Run::writeRestart()), and the new one is
+	 * prepared from the same configuration with that file as its
+	 * [initialguess] and the profiles as they now stand -- the whole iterate
+	 * ( q, psi, psihat ), labels and exterior coefficients, on the same mesh,
+	 * through the restart path `meq` itself takes. The new run replaces the
+	 * current one only if it solves, so a solve that fails leaves this object
+	 * as it was: its state, its profiles' effect, what write() writes.
+	 */
 	class Equilibrium
 	{
 		public:
-			explicit Equilibrium( meq::RunOptions const &options )
-				: run( options )
+			explicit Equilibrium( meq::RunOptions const &optionsIn )
+				: options( optionsIn ), run( std::make_unique<meq::Run>( optionsIn ) )
 			{
 				flushPython();
-				raiseFor( run.prepare(), "Equilibrium" );
+				raiseFor( run->prepare(), "Equilibrium" );
+			}
+
+			~Equilibrium()
+			{
+				if ( !scratch.empty() )
+				{
+					std::error_code ignored;
+					std::filesystem::remove_all( scratch, ignored );
+				}
+			}
+
+			Equilibrium( Equilibrium const & ) = delete;
+			Equilibrium &operator=( Equilibrium const & ) = delete;
+
+			/// Replace one profile from the next solve() on. Checked there,
+			/// where the source is built, as at construction.
+			void setProfile( std::string const &slot, meq::ProfileTable const &table )
+			{
+				options.profiles[ slot ] = table;
+				profilesChanged = true;
 			}
 
 			void solve()
 			{
 				flushPython();
-				raiseFor( run.solve(), "solve" );
+				if ( !solved )
+				{
+					// Profiles set before the first solve: the prepared run
+					// built its source without them, so it is prepared again,
+					// cold, as construction would have been.
+					if ( profilesChanged )
+					{
+						auto fresh = std::make_unique<meq::Run>( options );
+						raiseFor( fresh->prepare(), "solve" );
+						run = std::move( fresh );
+					}
+					raiseFor( run->solve(), "solve" );
+					solved = true;
+					profilesChanged = false;
+					return;
+				}
+
+				std::string const restart = scratchDirectory() + "/state";
+				raiseFor( run->writeRestart( restart ), "solve" );
+				meq::RunOptions again = options;
+				again.restartFrom = restart + ".nc";
+				auto next = std::make_unique<meq::Run>( again );
+				raiseFor( next->prepare(), "solve" );
+				raiseFor( next->solve(), "solve" );
+				run = std::move( next );
+				profilesChanged = false;
 			}
 
 			/// True unless an inverse solve wrote its best fit with the
@@ -187,13 +246,32 @@ namespace
 			bool write()
 			{
 				flushPython();
-				int const code = run.write();
+				int const code = run->write();
 				raiseFor( code, "write" );
 				return code == meq::Solved;
 			}
 
 		private:
-			meq::Run run;
+			meq::RunOptions options;
+			std::unique_ptr<meq::Run> run;
+			bool solved = false;
+			bool profilesChanged = false;
+			std::string scratch;
+
+			/// A directory of this object's own for its restart file, made on
+			/// the first re-solve and removed with the object.
+			std::string const &scratchDirectory()
+			{
+				if ( scratch.empty() )
+				{
+					static int made = 0;
+					std::filesystem::path const path = std::filesystem::temp_directory_path()
+						/ ( "meq-" + std::to_string( ::getpid() ) + "-" + std::to_string( made++ ) );
+					std::filesystem::create_directories( path );
+					scratch = path.string();
+				}
+				return scratch;
+			}
 	};
 }
 
@@ -327,9 +405,15 @@ PYBIND11_MODULE( _meq, m )
 		      "resolve against base_dir, as a file's do against its own "
 		      "directory; empty leaves them relative to the working directory. "
 		      "`name` stands for the file in messages and in the output." )
+		.def( "set_profile", &Equilibrium::setProfile, py::arg( "slot" ), py::arg( "table" ),
+		      "Replace one profile, as the constructors' `profiles` does, from "
+		      "the next solve() on." )
 		.def( "solve", &Equilibrium::solve,
 		      "Solve, and refine if the configuration asks. Raises "
-		      "meq.SolveError where meq exits 2. Once per Equilibrium." )
+		      "meq.SolveError where meq exits 2. AGAIN after set_profile(): a "
+		      "warm re-solve, restarted exactly from the last state on the same "
+		      "mesh; one that fails leaves the Equilibrium as it was. A "
+		      "configuration with [adaptivity] solves once." )
 		.def( "write", &Equilibrium::write,
 		      "Write what [output] and the options ask for. False where an "
 		      "inverse solve met its targets only at a best fit (meq's exit "

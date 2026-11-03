@@ -18,9 +18,9 @@ import subprocess
 import sys
 import tomllib
 
-# meq FIRST, before numpy and netCDF4, as its docstring asks: numpy brings the
-# system MKL into the global scope, and meq imported after it is refused --
-# test_meq_refuses_a_process_holding_another_mkl says so.
+# meq FIRST, before numpy and netCDF4, as its docstring asks: numpy brings
+# another OpenMP runtime, and meq imported after it is refused --
+# test_meq_refuses_a_process_holding_another_openmp says so.
 import meq
 
 import netCDF4
@@ -147,31 +147,58 @@ def test_a_solve_that_does_not_converge_raises_solve_error():
     assert not list(module_dir.glob("*.nc")), "the module wrote output from a failed solve"
 
 
-def test_meq_refuses_a_process_holding_another_mkl():
-    """numpy imported first brings the system MKL into the process's global
-    scope; meq would bind BLAS to it, so the import is refused and says why.
-    In a child process, since this one imported meq first on purpose. Skipped
-    where numpy's BLAS is not an MKL meq does not link, since then there is
-    nothing to refuse."""
+def mapped(word):
+    """Basenames of the shared objects this process has mapped containing `word`."""
+    with open("/proc/self/maps") as maps:
+        return {os.path.basename(line.split()[-1]) for line in maps if word in line}
+
+
+def test_meq_refuses_a_process_holding_another_openmp():
+    """numpy imported first brings another OpenMP runtime, through the system
+    MKL, and meq's threaded loops would bind to it: the import is refused, and
+    says why. In a child process, since this one imported meq first on
+    purpose. Skipped where numpy brings no OpenMP, since then there is nothing
+    to refuse."""
     probe = subprocess.run(
         [sys.executable, "-c",
          "import numpy, os\n"
-         "maps = open('/proc/self/maps').read().split()\n"
-         "print(sorted({os.path.realpath(p) for p in maps if 'libmkl_core' in p}))"],
+         "print(any(os.path.basename(p).split('.so')[0] in ('libiomp5', 'libomp')"
+         " for p in open('/proc/self/maps').read().split()))"],
         capture_output=True, text=True, check=True)
-    numpy_mkl = eval(probe.stdout)
-    from meq._libraries import LINKED
-    ours = {path for path in LINKED.values() if "libmkl_core" in path}
-    if not numpy_mkl or set(numpy_mkl) <= ours:
-        pytest.skip("numpy here brings no other MKL")
+    if probe.stdout.strip() != "True":
+        pytest.skip("numpy here brings no other OpenMP runtime")
 
     done = subprocess.run([sys.executable, "-c", "import numpy; import meq"],
                           capture_output=True, text=True)
-    assert done.returncode != 0, "meq imported after numpy's MKL and did not refuse"
+    assert done.returncode != 0, "meq imported after numpy's OpenMP and did not refuse"
     assert "Import meq before numpy" in done.stderr, done.stderr[-600:]
 
 
-def test_the_phases_run_once_each_in_order():
+@pytest.mark.parametrize("name", ["mhd-rectangle", "limited-tokamak"])
+def test_numpy_after_meq_changes_nothing(name):
+    """meq imported first carries its own MKL and SuiteSparse, static and
+    hidden, and binds its OpenMP calls to libgomp: so in THIS process, which
+    imported numpy and netCDF4 after meq, the module still writes meq's file
+    to the bit. The child-process cases above are the claim in a clean
+    process; this is the claim beside a second MKL and a second OpenMP."""
+    if not (mapped("libmkl") or mapped("libomp") or mapped("libiomp5")):
+        pytest.skip("nothing here brought a second MKL or OpenMP to prove against")
+    toml = EXAMPLES / f"{name}.toml"
+    binary_dir = fresh(f"beside-numpy/{name}/meq")
+    module_dir = fresh(f"beside-numpy/{name}/module")
+    assert run_binary(toml, binary_dir) == 0
+    previous = os.getcwd()
+    os.chdir(module_dir)
+    try:
+        eq = meq.Equilibrium(str(toml))
+        eq.solve()
+        assert eq.write() is True
+    finally:
+        os.chdir(previous)
+    compare(binary_dir, module_dir, name)
+
+
+def test_a_state_is_written_once_and_only_after_a_solve():
     where = fresh("order")
     previous = os.getcwd()
     os.chdir(where)
@@ -180,8 +207,12 @@ def test_the_phases_run_once_each_in_order():
         with pytest.raises(RuntimeError, match="out of order"):
             eq.write()
         eq.solve()
+        assert eq.write() is True
         with pytest.raises(RuntimeError, match="out of order"):
-            eq.solve()
+            eq.write()
+        # A second solve is a re-solve (PY-3, PythonResolve), and its state is
+        # written once in turn.
+        eq.solve()
         assert eq.write() is True
         with pytest.raises(RuntimeError, match="out of order"):
             eq.write()

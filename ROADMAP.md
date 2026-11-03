@@ -69,8 +69,8 @@ Stages 0 to 7 are done, and the one red in the suite is the deliberate
 **Second: MEQ from Python** — item 14, `PYTHON-PLAN.md`. A pybind11 front end
 for transport workflows, MaNTA's loose coupling first. PY-0, the run moved out of
 `main()` into `meq::Run`, PY-1, the extension, and PY-2, profiles as arrays
-on the fixed abscissae, are done, and of PY-2b `psi` is; `R_midplane`, or PY-3's
-repeated solves, is next. §14 has the
+on the fixed abscissae, PY-2b's `psi` and PY-3's repeated solves are done;
+PY-2b's `R_midplane`, as a held map, is next. §14 has the
 order inside the item.
 
 Items 2 to 4 are done and stay for the findings in them; item 4 keeps one
@@ -1211,7 +1211,9 @@ validated against.
    ~~**PY-2**~~ **DONE**: species profiles from arrays on the fixed abscissae,
    `PythonProfiles` its acceptance. **PY-2b**: `psi` done, for a source whose
    profiles are all in `psi`, exactly; `R_midplane` not built.
-   **PY-2b's `R_midplane` to PY-4**: the crossing abscissa,
+   ~~**PY-3**~~ **DONE**: repeated solves, each a new run restarted exactly
+   from the last and adopted only if it solves; `PythonResolve`.
+   **PY-2b's `R_midplane` and PY-4**: the crossing abscissa,
    warm re-solves on a frozen mesh with transactional failure, and results in
    memory under the `.nc`'s names.
 3. **PY-5, a mirror's transport geometry**: new physics output in the `.nc`,

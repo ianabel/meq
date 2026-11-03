@@ -18,6 +18,11 @@ takes with every profile in psi or none -- and the derivative is always
 given. The .nc lists them as
 `profile_tables`.
 
+An Equilibrium solves again after `eq.set_profile(slot, table)`: warm,
+restarted exactly from the last state on the same mesh, and a solve that
+fails leaves it holding the last good state. A configuration with
+[adaptivity] solves once.
+
 A configuration with [mesh.generate] needs its mesh made first, by `meq-run`
 or by the command `meq --mesh-command` prints, and then `mesh_ready=True`, as
 `meq --mesh-ready` does.
@@ -26,31 +31,41 @@ Failures raise meq.ConfigError, meq.SolveError or meq.OutputError, all
 meq.Error, where `meq` would exit 1, 2 or 3; the run's own diagnostics are on
 stderr. The report goes to the process's stdout, as `meq`'s does.
 
-IMPORT meq BEFORE numpy, OR ANYTHING ELSE THAT BRINGS AN MKL. Debian's numpy
-reaches the system MKL through libmkl_rt, which loads MKL's layers into the
-process's global scope, and anything loaded after that binds dgemm_, PARDISO
-and the rest of MKL to it: MEQ, UMFPACK and CHOLMOD would run on an MKL they
-were not built against. That import is refused, naming the library.
-
-Imported first, meq's own calls stay bound to its own MKL; but an MKL that
-arrives later still mixes with it inside MKL, and the answers then move in
-their last digits (about 1e-13 relative, measured), so the run is no longer
-`meq`'s to the bit. meq warns when that has happened. One MKL for every
-module in the process is the fix: PYTHON-PLAN.md, PY-6.
+IMPORT meq BEFORE numpy, OR ANYTHING ELSE THAT BRINGS AN OpenMP RUNTIME.
+meq carries its own MKL and SuiteSparse, static and hidden, so nothing loaded
+before or after it can reach them (python/CMakeLists.txt). OpenMP it cannot
+carry: its threaded loops call libgomp, and the calls are bound when meq is
+imported, to whichever OpenMP the process holds first. Debian's numpy brings
+Intel's, through the system MKL, and imported before meq it would run meq's
+loops on that runtime -- so that import is refused, naming the library.
+Imported first, meq binds to libgomp, and numpy's runtime arriving later
+beside it changes nothing of meq's. pip's numpy and JAX on the CPU bring no
+MKL and no OpenMP -- their BLAS is OpenBLAS on pthreads, under prefixed names
+-- so with those either order is fine; measured, in a venv of this
+interpreter, meq's files are the binary's beside a jitted JAX computation.
 
 PYTHON-PLAN.md in the source tree is the design and what comes next.
 """
 
 import os as _os
-import warnings as _warnings
+
+#: Every OpenMP runtime exports the GOMP_* entry points meq's loops call, so
+#: for the guard they are one library whatever each is named.
+_OPENMP = ("libgomp", "libiomp5", "libomp", "libiomp")
+
+
+def _family(path):
+    name = _os.path.basename(path).split(".so")[0]
+    return "OpenMP" if name in _OPENMP else name
 
 
 def _foreign_libraries():
     """Each mapped library that is another file of one _meq links.
 
-    By name less its version -- libmkl_core.so and libmkl_core.so.3 are one
-    library -- against the files recorded at build time. Linux only, where
-    /proc/self/maps lists what is mapped; elsewhere there is nothing to read.
+    By name less its version -- libsundials_core.so and .so.7 are one library,
+    and every OpenMP runtime is one -- against the files recorded at build
+    time. Linux only, where /proc/self/maps lists what is mapped; elsewhere
+    there is nothing to read.
     """
     from ._libraries import LINKED
     try:
@@ -58,14 +73,13 @@ def _foreign_libraries():
             mapped = {line.split()[-1] for line in maps if ".so" in line}
     except OSError:
         return []
-    family = lambda path: _os.path.basename(path).split(".so")[0]
     ours = {}
     for path in LINKED.values():
-        ours.setdefault(family(path), set()).add(_os.path.realpath(path))
+        ours.setdefault(_family(path), set()).add(_os.path.realpath(path))
     clashes = []
     for path in sorted(mapped):
         real = _os.path.realpath(path)
-        known = ours.get(family(path))
+        known = ours.get(_family(path))
         if known and real not in known:
             clashes.append(f"{real} is loaded, and meq was built against "
                            f"{' or '.join(sorted(known))}")
@@ -77,26 +91,8 @@ if _clashes:
     raise ImportError(
         "meq: this process already holds another copy of a library meq links, "
         "and meq would bind to it rather than to its own: " + "; ".join(_clashes)
-        + ". Import meq before numpy, scipy or anything else that loads an MKL, "
-          "or build them against the same library.")
-
-_warned = False
-
-
-def _warn_if_foreign_libraries():
-    """Called by each phase: warn, once, if another copy has arrived since."""
-    global _warned
-    if _warned:
-        return
-    clashes = _foreign_libraries()
-    if clashes:
-        _warned = True
-        _warnings.warn(
-            "meq: another copy of a library meq links has been loaded since meq "
-            "was imported: " + "; ".join(clashes) + ". meq's own calls stay bound "
-            "to its own, but the two mix inside it, and this run's answers are "
-            "no longer meq's to the last digits. One MKL for every module in the "
-            "process is the fix (PYTHON-PLAN.md, PY-6).", RuntimeWarning, stacklevel=3)
+        + ". Import meq before numpy, scipy or anything else that loads an "
+          "OpenMP runtime or an MKL.")
 
 
 from ._meq import (

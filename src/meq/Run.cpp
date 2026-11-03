@@ -738,6 +738,7 @@ struct meq::Run::Impl
 		  configText( options.configText ),
 		  baseDirectory( options.baseDirectory ),
 		  profiles( options.profiles ),
+		  restartFrom( options.restartFrom ),
 		  version( options.version ),
 		  deviceName( options.deviceName ),
 		  deviceGiven( options.deviceGiven ),
@@ -761,6 +762,9 @@ struct meq::Run::Impl
 	std::string const configText;
 	std::string const baseDirectory;
 	meq::ProfileTables const profiles;
+	std::string const restartFrom;
+	/// writeRestart()'s stem while it writes, and empty otherwise.
+	std::string restartStem;
 	std::string const version;
 	std::string deviceName;
 	bool deviceGiven = false;
@@ -948,6 +952,31 @@ int meq::Run::solve()
 	int const code = runPhase( [ this ]() { return impl->solve(); } );
 	stage = code == Solved ? Stage::Solved : Stage::Failed;
 	return code;
+}
+
+int meq::Run::writeRestart( std::string const &stem )
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::writeRestart(): there is no solved state to write" );
+	// The optional formats off and the stem this call's, put back however the
+	// write ends: this is not write(), and leaves the run as it found it.
+	struct Restore
+	{
+		Impl &impl;
+		bool gridFunctions;
+		bool vtk;
+		~Restore()
+		{
+			impl.wantGridFunctions = gridFunctions;
+			impl.wantVtk = vtk;
+			impl.restartStem.clear();
+		}
+	} const restore{ *impl, impl->wantGridFunctions, impl->wantVtk };
+	impl->wantGridFunctions = false;
+	impl->wantVtk = false;
+	impl->restartStem = stem;
+	int const code = runPhase( [ this ]() { return impl->write(); } );
+	return code == TargetsNotMet ? Solved : code;
 }
 
 int meq::Run::write()
@@ -1354,10 +1383,38 @@ int meq::Run::Impl::configure()
 
 	try
 	{
-		config = configText.empty()
-			? std::make_unique<meq::Configuration>( argument )
-			: std::make_unique<meq::Configuration>(
-				meq::Configuration::fromString( configText, argument, baseDirectory ) );
+		if ( restartFrom.empty() )
+			config = configText.empty()
+				? std::make_unique<meq::Configuration>( argument )
+				: std::make_unique<meq::Configuration>(
+					meq::Configuration::fromString( configText, argument, baseDirectory ) );
+		else
+		{
+			// A RE-SOLVE: the same document, [initialguess] the previous
+			// state's .nc, and input paths resolved as the first solve's were.
+			toml::value document = configText.empty()
+				? meq::Configuration::documentFromFile( argument )
+				: meq::Configuration::documentFromString( configText, argument );
+			toml::table guess;
+			guess.emplace( "Type", toml::value( std::string( "gridfunction" ) ) );
+			guess.emplace( "File", toml::value( restartFrom ) );
+			document.as_table()[ "initialguess" ] = toml::value( std::move( guess ) );
+			std::string const directory = configText.empty()
+				? std::filesystem::path( argument ).parent_path().string()
+				: baseDirectory;
+			config = std::make_unique<meq::Configuration>(
+				meq::Configuration::fromDocument( document, argument, directory ) );
+			if ( config->getAdaptivity().enabled )
+			{
+				std::fprintf( stderr,
+					"MEQ: a re-solve of a configuration with [adaptivity] is refused:\n"
+					"     its mesh would be rebuilt from the file and adapted again,\n"
+					"     not the mesh the previous state was solved on, so the restart\n"
+					"     would not be exact. Solve it once, or take [adaptivity] out\n"
+					"     and name the mesh it reached.\n" );
+				return ConfigurationError;
+			}
+		}
 
 		// THE FORMATS BESIDE THE .nc: the file's keys or the command line's,
 		// either one asking being enough. OutputConfig says why both are off.
@@ -6199,7 +6256,8 @@ int meq::Run::Impl::write()
 	try
 	{
 		meq::OutputConfig const &output = config->getOutput();
-		std::string const stem = output.directory + "/" + output.prefix;
+		std::string const stem = restartStem.empty()
+			? output.directory + "/" + output.prefix : restartStem;
 
 		/*
 		 * psi* IS WHAT MEQ REPORTS, SO IT IS POST-PROCESSED ON EVERY RUN AND NOT
@@ -7426,6 +7484,12 @@ int meq::Run::Impl::write()
 				writer.attribute( "input_file", argument );
 			}
 
+			// AND WHERE A RE-SOLVE STARTED: input_toml's [initialguess] is
+			// not what this run read.
+			if ( !restartFrom.empty() )
+				writer.attribute( "warm_start",
+				                  "the previous solve's state, through meq::RunOptions::restartFrom" );
+
 			// AND WHICH PROFILES CAME AS TABLES RATHER THAN FROM THE FILES
 			// input_toml names, slot by slot, with the abscissa and the
 			// size: input_toml alone would name files this run never read.
@@ -7532,7 +7596,7 @@ int meq::Run::Impl::write()
 		 * on stderr and the exit code stays as the solve left it.
 		 */
 		bool wroteFluxSurfaces = false;
-		if ( output.fluxSurfaces )
+		if ( output.fluxSurfaces && restartStem.empty() )
 		{
 			try
 			{
