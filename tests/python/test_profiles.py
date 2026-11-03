@@ -211,17 +211,45 @@ def newton_steps(report):
     return int(found.group(1))
 
 
-def test_a_mirror_in_psi_is_the_mirror():
+MIRROR = EXAMPLES / "mirror-rotating.toml"
+
+
+@pytest.fixture(scope="module")
+def mirror_from_file():
+    """mirror-rotating from its files, through meq-run: its mesh and its answer."""
+    where = fresh("mirror/file")
+    assert run_binary(MIRROR, where, wrapper=True) == 0
+    return where
+
+
+def mirror_slots():
+    """mirror-rotating's four profile slots, and the file each reads."""
+    source = tomllib.loads(MIRROR.read_text())["source"]
+    species = {one["Name"]: one for one in source["species"]}
+    return {"Omega": source["OmegaFile"],
+            "species.electron.Temperature": species["electron"]["TemperatureFile"],
+            "species.electron.Density": species["electron"]["DensityFile"],
+            "species.deuterium.Temperature": species["deuterium"]["TemperatureFile"]}
+
+
+def with_mesh_of(made, name):
+    """A fresh directory holding the mesh `made` generated."""
+    where = fresh(name)
+    for one in made.iterdir():
+        if one.suffix in (".msh", ".meq-mesh"):
+            shutil.copy2(one, where / one.name)
+    return where
+
+
+def test_a_mirror_in_psi_is_the_mirror(mirror_from_file):
     """mirror-rotating from its files, through meq-run, and then with every
     profile -- both temperatures, the electron density and omega -- as a table
     in psi, mapped from the file's at the labels that run converged to: the
     same equilibrium, in a solve whose labels float, with Newton taking as many
     steps. At fixed psi the tables do not move with the labels, and the
     source reports their derivatives as zero (SourceFactoryTests)."""
-    toml = EXAMPLES / "mirror-rotating.toml"
-    tables = tomllib.loads(toml.read_text())
-    from_file = fresh("mirror/file")
-    assert run_binary(toml, from_file, wrapper=True) == 0
+    toml = MIRROR
+    from_file = mirror_from_file
     with netCDF4.Dataset(from_file / "mirror-rotating.nc") as nc:
         axis, boundary = nc.getncattr("psi_axis"), nc.getncattr("psi_boundary")
     span = axis - boundary
@@ -231,18 +259,9 @@ def test_a_mirror_in_psi_is_the_mirror():
         knots = sorted(zip((boundary + span*a for a in x), f, (c/span for c in d)))
         return [k[0] for k in knots], [k[1] for k in knots], [k[2] for k in knots]
 
-    source = tables["source"]
-    species = {one["Name"]: one for one in source["species"]}
-    slots = {"Omega": source["OmegaFile"],
-             "species.electron.Temperature": species["electron"]["TemperatureFile"],
-             "species.electron.Density": species["electron"]["DensityFile"],
-             "species.deuterium.Temperature": species["deuterium"]["TemperatureFile"]}
-    profiles = {slot: (*in_psi(name), "psi") for slot, name in slots.items()}
+    profiles = {slot: (*in_psi(name), "psi") for slot, name in mirror_slots().items()}
 
-    in_flux = fresh("mirror/psi")
-    for made in from_file.iterdir():
-        if made.suffix in (".msh", ".meq-mesh"):
-            shutil.copy2(made, in_flux / made.name)
+    in_flux = with_mesh_of(from_file, "mirror/psi")
     (in_flux / "tables.json").write_text(json.dumps(profiles))
     preamble = ("import json\n"
                 "profiles = {slot: meq.Table(x, f, d, abscissa=a) for slot, (x, f, d, a)"
@@ -275,3 +294,110 @@ def test_a_table_in_psi_refuses_a_midplane_gauge():
         cwd=where, capture_output=True, text=True)
     assert done.returncode != 0
     assert "ConfigError" in done.stderr and "midplane gauge" in done.stderr, done.stderr[-800:]
+
+
+# ---- tables in R at the midplane (PY-2b) -----------------------------------------
+
+def hermite(x, f, d, at):
+    """The Hermite cubic through knots (x, f, d) at `at`, and its slope: the
+    crossing midplane_crossing() returns, as the solver interpolates it."""
+    i = max(0, min(len(x) - 2, int(numpy.searchsorted(x, at)) - 1))
+    h = x[i + 1] - x[i]
+    t = (at - x[i]) / h
+    value = ((2*t**3 - 3*t**2 + 1)*f[i] + (t**3 - 2*t**2 + t)*h*d[i]
+             + (-2*t**3 + 3*t**2)*f[i + 1] + (t**3 - t**2)*h*d[i + 1])
+    slope = ((6*t**2 - 6*t)*f[i] + (3*t**2 - 4*t + 1)*h*d[i]
+             + (-6*t**2 + 6*t)*f[i + 1] + (3*t**2 - 2*t)*h*d[i + 1]) / h
+    return value, slope
+
+
+def in_r(crossing, name, scale=1.0):
+    """A profile file's knots in Psi re-expressed in R through `crossing`, its
+    own knots mapped and its slopes divided by dR/dPsi there, `scale` times."""
+    x, f, d = read_table(EXAMPLES / name)
+    knots = []
+    for a, b, c in zip(x, f, d):
+        if 0.0 <= a <= 1.0:
+            r, dr = hermite(crossing["Psi"], crossing["R"], crossing["dR_dPsi"], a)
+            knots.append((r, scale*b, scale*c/dr))
+    knots.sort()
+    return meq.Table([k[0] for k in knots], [k[1] for k in knots], [k[2] for k in knots],
+                     abscissa="R_midplane")
+
+
+def test_a_mirror_in_R_midplane_is_held_through_its_crossing(mirror_from_file, monkeypatch,
+                                                             capfd):
+    """A table in R_midplane is mapped into Psi through the crossing of the
+    last answer, held for the solve. Before any solve there is none, and it is
+    refused. After the solve from the files, the four profiles re-expressed in
+    R through its crossing re-solve to that answer in at most one Newton step,
+    and again in none. With Omega 10% up in R, each re-solve moves the crossing
+    and the next solve follows it: the steps between successive answers shrink
+    by more than ten each time, to rounding -- the held map is a fixed-point
+    iteration, and on this mirror it contracts."""
+    where = with_mesh_of(mirror_from_file, "mirror/R_midplane")
+    monkeypatch.chdir(where)
+    slots = mirror_slots()
+
+    early = meq.Equilibrium(str(MIRROR), mesh_ready=True)
+    flat = meq.Table([0.1, 0.4], [1.0, 1.0], [0.0, 0.0], abscissa="R_midplane")
+    early.set_profile("Omega", flat)
+    capfd.readouterr()
+    with pytest.raises(meq.ConfigError):
+        early.solve()
+    assert "no answer before the first solve" in capfd.readouterr().err
+
+    reference = psi_of(mirror_from_file, "mirror-rotating")
+    scale = numpy.max(numpy.abs(reference))
+
+    def solved(eq):
+        eq.solve()
+        eq.write()
+        with netCDF4.Dataset(where / "mirror-rotating.nc") as nc:
+            steps = nc.getncattr("newton_iterations")
+        return psi_of(where, "mirror-rotating"), steps
+
+    eq = meq.Equilibrium(str(MIRROR), mesh_ready=True)
+    first, _ = solved(eq)
+    assert numpy.max(numpy.abs(first - reference)) / scale < 1e-12
+    crossing = eq.midplane_crossing()
+    assert crossing["R"][0] > crossing["R"][-1], "the crossing is not the mirror's, outward at Psi 0"
+
+    for slot, name in slots.items():
+        eq.set_profile(slot, in_r(crossing, name))
+    for allowed in (1, 0):
+        now, steps = solved(eq)
+        gap = numpy.max(numpy.abs(now - reference)) / scale
+        print(f"\n  in R through its own crossing: {gap:.2e} of max |psi|, Newton {steps}")
+        assert gap < 1e-11
+        assert steps <= allowed
+
+    eq.set_profile("Omega", in_r(crossing, slots["Omega"], scale=1.1))
+    last, _ = solved(eq)
+    moves = []
+    for _ in range(8):
+        now, _ = solved(eq)
+        moves.append(numpy.max(numpy.abs(now - last)) / scale)
+        last = now
+        if moves[-1] < 1e-13:
+            break
+    print("  Omega 10% up in R, each re-solve's move: " + ", ".join(f"{m:.1e}" for m in moves))
+    assert moves[-1] < 1e-13, "the held map did not settle in eight re-solves"
+    for before, after in zip(moves, moves[1:]):
+        assert after < before / 10 or after < 1e-13, "the held map contracts by less than ten"
+
+
+def test_a_table_in_R_midplane_takes_a_box(monkeypatch, capfd):
+    """R_midplane names one crossing of each surface, a box mirror's; a
+    tokamak's surfaces cross z = 0 twice, and a re-solve with one is refused
+    by its key. midplane_crossing() refuses too."""
+    monkeypatch.chdir(fresh("R_midplane/tokamak"))
+    eq = meq.Equilibrium(str(EXAMPLES / f"{CASE}.toml"))
+    eq.solve()
+    with pytest.raises(meq.ConfigError, match="not a box"):
+        eq.midplane_crossing()
+    eq.set_profile("Omega", meq.Table([0.5, 1.5], [1.0, 1.0], [0.0, 0.0], abscissa="R_midplane"))
+    capfd.readouterr()
+    with pytest.raises(meq.ConfigError):
+        eq.solve()
+    assert "key 'source.SupportShape'" in capfd.readouterr().err

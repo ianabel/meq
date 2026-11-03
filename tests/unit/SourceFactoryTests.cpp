@@ -1136,4 +1136,71 @@ BOOST_AUTO_TEST_CASE( tables_in_psi_take_nothing_in_Psi )
 	// three-species mirror.
 }
 
+namespace
+{
+	/// fluxFixture's source as a mirror's: confined to a box, its inner label
+	/// the flux at the electrode, so no PsiAxis.
+	std::string const boxFixture =
+		"[source]\nType = \"rotating\"\n"
+		"Omega = 1.0\nGGPrime = 0.0\nReferenceRadius = 1.0\nMu0 = 1.0\n"
+		"Normalised = true\nConfineToPlasma = true\n"
+		"SupportShape = \"box\"\nAxialEdge = 0.5\n"
+		"\n[[source.species]]\nName = \"ion\"\n"
+		"Mass = 3.0\nCharge = 1.0\nTemperature = 4.0\nDensity = 1.0\n"
+		"\n[[source.species]]\nName = \"electron\"\n"
+		"Mass = 1.0\nCharge = -1.0\nTemperature = 4.0\nNeutralising = true\n"
+		"\n[boundary.electrode]\nR = 0.7\nZ = 0.0\n"
+		"\n[boundary.limiter]\nR = 1.3\nZ = 0.0\n";
+}
+
+/*
+ * A TABLE IN R_midplane IS THE TABLE IN Psi IT CAME FROM, through the crossing
+ * held for the solve. The crossing here is affine, R_0 = 1.3 - 0.6 Psi, so the
+ * cubic in R composed with it is the cubic in Psi on the mapped knots and the
+ * two sources agree to rounding; RMidplane's refusals beside it.
+ */
+BOOST_AUTO_TEST_CASE( a_table_in_R_midplane_is_the_table_in_Psi_through_the_crossing )
+{
+	double const outerR = 1.3, slope = -0.6;
+	auto const crossing = std::make_shared<meq::SplineProfile const>( std::vector<meq::Knot>{
+		{ 0.0, outerR, slope }, { 1.0, outerR + slope, slope } } );
+	std::vector<meq::Knot> inR;
+	for ( auto k = cubicDensityKnots.rbegin(); k != cubicDensityKnots.rend(); ++k )
+		inR.push_back( meq::Knot{ outerR + slope*k->psi, k->value, k->derivative/slope } );
+
+	meq::Configuration const config = configure( boxFixture );
+	auto const inPsi = meq::makeNormalisedSource( config.getSource(), config.getFileName(),
+		oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi, cubicDensityKnots ) );
+	auto const throughCrossing = meq::makeNormalisedSource( config.getSource(),
+		config.getFileName(),
+		oneTable( "species.ion.Density", meq::ProfileAbscissa::RMidplane, inR ), crossing );
+	double const axis = 0.25, boundary = 0.02;
+	inPsi->setNormalisation( axis, boundary );
+	throughCrossing->setNormalisation( axis, boundary );
+	for ( double const psi : { 0.03, 0.08, 0.135, 0.2, 0.245 } )
+		for ( double const radius : { 0.7, 1.0, 1.3 } )
+		{
+			BOOST_TEST( throughCrossing->f( radius, 0.1, psi ) == inPsi->f( radius, 0.1, psi ),
+			            boost::test_tools::tolerance( 1.0e-13 ) );
+			BOOST_TEST( throughCrossing->dFdPsi( radius, 0.1, psi )
+			            == inPsi->dFdPsi( radius, 0.1, psi ),
+			            boost::test_tools::tolerance( 1.0e-12 ) );
+		}
+
+	// No crossing to hold: before the first solve there is no answer.
+	BOOST_TEST( refusedKey( [ & ]()
+	{
+		meq::makeNormalisedSource( config.getSource(), config.getFileName(),
+			oneTable( "species.ion.Density", meq::ProfileAbscissa::RMidplane, inR ) );
+	} ) == "source" );
+
+	// Not a box: beside an axis each surface crosses z = 0 twice.
+	meq::Configuration const tokamak = configure( fluxFixture );
+	BOOST_TEST( refusedKey( [ & ]()
+	{
+		meq::makeNormalisedSource( tokamak.getSource(), tokamak.getFileName(),
+			oneTable( "species.ion.Density", meq::ProfileAbscissa::RMidplane, inR ), crossing );
+	} ) == "source.SupportShape" );
+}
+
 BOOST_AUTO_TEST_SUITE_END()

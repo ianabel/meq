@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "Profiles.hpp"
 
@@ -75,6 +76,11 @@ namespace meq
 		/// refused beside it: its mesh would be rebuilt from the file and
 		/// re-adapted, not the one the state was solved on.
 		std::string restartFrom;
+
+		/// R_0( Psi ), the midplane crossing an `RMidplane` table is mapped
+		/// through, HELD for the whole solve: a front end hands in the last
+		/// answer's (Run::midplaneCrossing()). Empty refuses such a table.
+		std::vector<Knot> heldCrossing;
 
 
 		/// MEQ_VERSION of the front end's build, which the files written carry.
@@ -145,6 +151,25 @@ namespace meq
 			 * @throws std::logic_error before a successful solve.
 			 */
 			int writeRestart( std::string const &stem );
+
+			/**
+			 * THE SOLVED STATE'S MIDPLANE CROSSING, R_0( Psi ) on Psi in
+			 * [ 0, 1 ], as knots: where each surface crosses z = 0, read off
+			 * the answer's own field along the midplane and its labels, as the
+			 * .nc's true-midplane densities are (meq::
+			 * tabulateMidplaneCrossing()). What an `RMidplane` table of the
+			 * next solve is held at.
+			 * @throws std::logic_error before a successful solve, or for a
+			 *         support that is not a mirror's box.
+			 * @throws std::runtime_error as tabulateMidplaneCrossing() does,
+			 *         for a midplane flux that is not monotone.
+			 */
+			std::vector<Knot> midplaneCrossing();
+
+			/// Whether the configuration's support is a mirror's box, the one
+			/// support midplaneCrossing() answers for. After prepare().
+			/// @throws std::logic_error before it.
+			bool supportIsBox() const;
 
 		private:
 			struct Impl;

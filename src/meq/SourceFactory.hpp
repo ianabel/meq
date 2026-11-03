@@ -41,9 +41,14 @@ namespace meq
 	///                a slot replaces its key only where the configuration
 	///                gave the key and does not scale it, and a table no slot
 	///                takes is refused, each as a ConfigError naming the slot.
+	///
+	/// @param crossing  R_0( Psi ), the midplane crossing an `RMidplane` table
+	///                  is mapped through, held for the solve; null refuses
+	///                  such a table. A mirror's only, beside a box support.
 	std::shared_ptr<Source const> makeSource( SourceConfig const &config,
 	                                          std::string const &configFileName = std::string(),
-	                                          ProfileTables const &tables = ProfileTables() );
+	                                          ProfileTables const &tables = ProfileTables(),
+	                                          std::shared_ptr<Profile const> crossing = nullptr );
 
 	/// Construct a source whose profiles are functions of NORMALISED flux, so
 	/// that psi_ax is an unknown of the non-linear system rather than data.
@@ -59,10 +64,11 @@ namespace meq
 	///         arguments -- the last translated so that a failure reads as the
 	///         configuration error it is rather than as a library exception.
 	///
-	/// @param tables  as makeSource()'s.
+	/// @param tables, crossing  as makeSource()'s.
 	std::shared_ptr<NormalisedSource> makeNormalisedSource( SourceConfig const &config,
 	                                                        std::string const &configFileName = std::string(),
-	                                                        ProfileTables const &tables = ProfileTables() );
+	                                                        ProfileTables const &tables = ProfileTables(),
+	                                                        std::shared_ptr<Profile const> crossing = nullptr );
 
 	/// Construct the coil set the `[[coils]]` blocks describe, or a null
 	/// pointer if there are none.

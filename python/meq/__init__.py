@@ -13,10 +13,11 @@ Profiles can be handed in as arrays in place of the files a rotating
 source's configuration names: `profiles={"species.deuterium.Temperature":
 meq.Table(x, T, dT_dx, abscissa="psi_n"), ...}`. The abscissa is always
 named -- "Psi" (MEQ's own normalised flux, 1 at the axis), "psi_n" (1 - Psi),
-"sqrt_psi_n", or "psi", the poloidal flux itself, which a normalised source
-takes with every profile in psi or none -- and the derivative is always
-given. The .nc lists them as
-`profile_tables`.
+"sqrt_psi_n", "psi", the poloidal flux itself, which a normalised source
+takes with every profile in psi or none, or "R_midplane", a box mirror's
+radius at z = 0, mapped through the last answer's crossing
+(`eq.midplane_crossing()`) and so only after a first solve -- and the
+derivative is always given. The .nc lists them as `profile_tables`.
 
 An Equilibrium solves again after `eq.set_profile(slot, table)`: warm,
 restarted exactly from the last state on the same mesh, and a solve that
