@@ -1211,12 +1211,14 @@ The giving-up is built; what is left is the crawls it exposed.
   direction or its merit looked at, and probably a red test naming it rather
   than a green one that hides it.
 
-  AND TWO SHIPPED COLD STARTS NOW STOP AT THE LIMIT.  Measured at 4cf1ecf
-  (M-313's cold table, OMP = MKL = 8): machine-c-mast and
-  machine-g-mastu-shaped from cold each hit the stall limit on the first
-  attempt and then fail the retry rung, exit 2.  M-248 had C converging and G
-  shaped refused by the axis-source guard, and the stall limit postdates it;
-  whether each used to crawl to its answer is not measured.
+  AND SIX SHIPPED COLD STARTS STOP (M-346, at 756fb6d).  B, B shaped, C,
+  C shaped and G shaped from cold hit the stall limit on the first attempt
+  and then fail the retry rung, exit 2.  TCV never trips the limit: its
+  first attempt creeps to the iteration cap at 1.8e-2 of its first residual,
+  which is a crawl the limit's 1/64 test does not see, and its retry ends on
+  no finite damping.  M-248 had C converging and G shaped refused by the
+  axis-source guard, and the stall limit postdates it; whether each used to
+  crawl to its answer is not measured.
 
 
 ================================================================================
@@ -1440,16 +1442,29 @@ Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342).
   L1 k = 4 converge in 7, quadratic at the end. So race_geq.py --case gf1 has
   four cold MEQ entries where shapes.py's cases have twelve.
 
-  IT IS THE DISCRETISATION, NOT THE EQUILIBRIUM. Continued in density from
-  5% of GF1's, each step started from the last .nc: L1 k = 3 reaches GF1 in
-  3 or 4 Newton steps a step; L0 k = 2 converges to 0.46 and fails at 0.48.
+  IT IS THE ELEMENT-LOCAL FOLD UNDER THE MIRROR'S tau0 = 3, MEASURED (M-345).
+  L1 k = 3 folds at 1.25-1.30 of GF1's density, as (k + 1)|dK|/|K| scaled
+  from L0's 0.47 predicts, and a cold start reaches 0.75-0.85 of its rung's
+  fold: L1 k = 3 converges cold to 0.9 (10 steps there) and not 1.0, L0
+  k = 2 to 0.4. At tau0 = 10, from the SAME cold labels, L1 k = 3 converges
+  in 7 steps; L0 k = 2 needs tau0 = 30. So the labels are not the cause, and
+  on GF1 the stiffer tau0 is also the more accurate: L1 k = 3's psi is
+  3.5e-6 from the reference at tau0 = 10 against 2.8e-5 at 3.
 
-  SUSPECTS, NONE MEASURED:
-  * M-291's element-local fold under the mirror tau (M-293), at about ten
-    times the pressure where M-294 placed it: local beta near 0.3, a 15%
-    diamagnetic dip at the midplane.
-  * The cold start's labels, psi_inner and psi_bnd at the vacuum's flux at
-    the electrode and the limiter, far from the answer at this beta.
+  THE CHOICE IS THE AUTHOR'S, AND IT IS ONE OF THREE.
+  * The case's own tau0. GF1 is ten times M-294's pressure, and Tau is a
+    user key; posing the race at tau0 = 10 or 30 is a statement about the
+    benchmark, written down beside it.
+  * The box default. M-293 chose tau0 = 3 against the vacuum's q_h at k = 1
+    (2.4x constant tau's at 3, 3.7x at 5) with 5 the runner-up; GF1 is new
+    evidence on the other side of that trade, not a reason to move it alone.
+  * A reactive rung beside the box: continuation in the density scale from
+    the vacuum, which reaches L1 k = 3's answer at tau0 = 3 and stops at a
+    real fold, where it could name it. CLAUDE_DECLINED.md declines
+    continuation in the driver for a black-box F and for a vacuum start's
+    degenerate borders; a mirror's densities are prescribed tables and its
+    labels are fluxes at fixed points, so neither objection holds here, but
+    it is a recorded decision to reopen, not to slip in.
 
   WHAT CLOSES IT. Every rung either solving from the vacuum, or failing with
   a named refusal that says the mesh cannot carry this pressure; not a

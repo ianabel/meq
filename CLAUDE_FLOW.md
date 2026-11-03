@@ -355,7 +355,10 @@ asserts, and fold only where `τ` does, linearly in `τ₀` and near 2.15e20 at
 `TauScaling` is refused, since it could be either `τ` or `τ₀`.
 A ceiling is located by creeping up the primary branch in small steps, since a
 long continuation jump near either fold can land on an up-down asymmetric
-branch.
+branch. **A cold start reaches about 0.75–0.85 of its rung's fold**: GF1, at
+ten times that pressure, folds at 1.25–1.30 of its density on L1 `k = 3` and
+the vacuum start stops between 0.9 and 1.0, while `τ₀ = 10` lifts it clear
+(→ [M-345](MEASUREMENTS.md#m-345)).
 Every rotating mirror's `.nc` carries `midplane_n_<species>` on the
 solved crossing (→ [M-282](MEASUREMENTS.md#m-282)).
 

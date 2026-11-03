@@ -626,7 +626,9 @@ are not that equation, so the race poses the fixed point they converge to:
     the case, `cases/gf1/`, tapered and held, and `race_geq.py --case gf1`
     runs it. The two codes agree to either's resolution; from the vacuum, MEQ
     converges on four of its twelve rungs (`TODO`), and the timed race waits
-    for an idle machine.
+    for an idle machine. The coarse rungs are the element-local fold under
+    `τ₀ = 3`, and `τ₀ = 10` solves L1 `k = 3` cold and closer to the reference
+    (**[M-345](MEASUREMENTS.md#m-345)**); which repair is the author's.
   * **`KineticClosure` on it**, with the GF1 table
     (`geq/tests/data/p2_closure_gf1.npz`, tracked in geq), in
     `closure_mode = "multi"` even for one file, which mirrorfp's
