@@ -53,7 +53,7 @@ becomes a pointer. What neither becomes is an entry that still reads like work.
 | `INVERSE-RACE-PLAN.md` | **Built and run on F, C and D shaped; E and G not run.** A time-to-accuracy race of MEQ, NICE, `freegs4e` and freegsnke on the five shaped machines where all four converge to one answer — [M-254](MEASUREMENTS.md#m-254) poses the problem and [M-255](MEASUREMENTS.md#m-255) shows they agree on it to 3e-04 – 4e-03 once the references are fixed. Two starts: cold from the vacuum stage, and warm as a 1 cm shape step. The results are the Claude Docs artifact *Inverse race: F, C and D shaped*; MEQ converges on C shaped at two rungs of six, and `PERFORMANCE_TODO.md` has the two defects that leave it there. IR-3's MEASUREMENTS.md entries are not written. **Where MEQ's time goes on the race's D and F shaped directories is measured**: on an idle machine the backsolve and the NPC reduce+recover legs run on 2.9 to 4.2 of eight cores, and PARDISO's refinement at a cap of two was 4.5 to 6.0 times the direct solve with no pivot perturbed ([M-300](MEASUREMENTS.md#m-300)); upstream's reduce and recover, timed apart on TCV, reach 4.6 to 4.8× and 3.2 to 3.5× at eight threads, and a cap of zero, now the default, cuts the backsolve 4.0 to 5.2× on the same Newton path ([M-301](MEASUREMENTS.md#m-301)); and upstream's `ArrayMult()` views take the staging from 32 ms a call to 7 and the NPC leg at eight threads 44% shorter, reduce 5.0× and recover 4.6× ([M-304](MEASUREMENTS.md#m-304)) |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, still **not scheduled**. Its own precondition — `j ≥ 1` green, and a machine case at `j ≥ 1` — is now met, so what holds it is the cost-benefit its own numbers make: `j ≥ 1` already gives `k+2` at `k ≤ j` with nothing built |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
-| `PYTHON-PLAN.md` | item 14, **second in the order.** MEQ called in-process from Python through pybind11, for transport workflows: species profiles as arrays on a named abscissa (`psi`, `psi_n`, `sqrt_psi_n` or `R_midplane`), warm re-solves on a frozen mesh, and results under the `.nc`'s names. It is the loose coupling to MaNTA, with no derivatives. PY-0, the run moved out of `apps/meq.cpp`'s `main()` into `meq::Run`, comes first, so that Python is a third front end and not a second driver. **PY-0 is done**: `meq` is the command line over `meq::Run`, and every shipped example's `.nc`, exit code and report are the moved code's, as is the suite. **PY-1 is done**: `import meq` runs `meq`'s run a phase at a time and writes its `.nc` to the bit, in a process that holds no other MKL; Debian's numpy brings one, which is PY-6's hazard met early. **PY-2 is done**: `meq.Table` hands species profiles in as arrays in `Psi`, `psi_n` or `sqrt_psi_n`, a table of a file's knots is the file to the bit, and `sqrt_psi_n` converges at third order. **PY-2b and PY-3 are done**: tables in `psi`, exactly, and in `R_midplane`, held at the last answer's crossing; `solve()` again restarts exactly from the last state and adopts the new one only if it solves |
+| `PYTHON-PLAN.md` | item 14, **second in the order.** MEQ called in-process from Python through pybind11, for transport workflows: species profiles as arrays on a named abscissa (`psi`, `psi_n`, `sqrt_psi_n` or `R_midplane`), warm re-solves on a frozen mesh, and results under the `.nc`'s names. It is the loose coupling to MaNTA, with no derivatives. PY-0, the run moved out of `apps/meq.cpp`'s `main()` into `meq::Run`, comes first, so that Python is a third front end and not a second driver. **PY-0 is done**: `meq` is the command line over `meq::Run`, and every shipped example's `.nc`, exit code and report are the moved code's, as is the suite. **PY-1 is done**: `import meq` runs `meq`'s run a phase at a time and writes its `.nc` to the bit, in a process that holds no other MKL; Debian's numpy brings one, which is PY-6's hazard met early. **PY-2 is done**: `meq.Table` hands species profiles in as arrays in `Psi`, `psi_n` or `sqrt_psi_n`, a table of a file's knots is the file to the bit, and `sqrt_psi_n` converges at third order. **PY-2b and PY-3 are done**: tables in `psi`, exactly, and in `R_midplane`, held at the last answer's crossing; `solve()` again restarts exactly from the last state and adopts the new one only if it solves. **PY-4 is done**: the `.nc` and `_surfaces.nc` in memory, recorded by the writer as it writes, and fields at points through the write phase's sampling |
 
 ## So what is next
 
@@ -70,8 +70,8 @@ Stages 0 to 7 are done, and the one red in the suite is the deliberate
 for transport workflows, MaNTA's loose coupling first. PY-0, the run moved out of
 `main()` into `meq::Run`, PY-1, the extension, and PY-2, profiles as arrays
 on the fixed abscissae, PY-2b's moving ones (`psi` exactly, `R_midplane` as
-a held map) and PY-3's repeated solves are done; PY-4, results in memory, is
-next. §14 has the
+a held map), PY-3's repeated solves and PY-4's results in memory are done;
+PY-5, a mirror's transport geometry, is next. §14 has the
 order inside the item.
 
 Items 2 to 4 are done and stay for the findings in them; item 4 keeps one
@@ -1215,7 +1215,9 @@ validated against.
    held at the last answer's crossing, which repeated solves iterate.
    ~~**PY-3**~~ **DONE**: repeated solves, each a new run restarted exactly
    from the last and adopted only if it solves; `PythonResolve`.
-   **PY-4**: results in memory under the `.nc`'s names.
+   ~~**PY-4**~~ **DONE**: results in memory under the `.nc`'s names, recorded
+   by the writer as it writes; points by the write phase's own sampling, the
+   grid's nodes to the bit; `PythonResults`.
 3. **PY-5, a mirror's transport geometry**: new physics output in the `.nc`,
    served to Python by the same code.
 4. **PY-6, MEQ and MaNTA in one process.** One SUNDIALS and one MKL for both

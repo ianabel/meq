@@ -97,14 +97,95 @@ namespace meq
 		if ( !( maxRadius > minRadius ) || !( zMax > zMin ) )
 			throw std::logic_error( "meq::GridSampler: the grid extent must be positive in both directions" );
 
-		element.assign( static_cast<std::size_t>( nR )*nZ, -1 );
-		point.resize( static_cast<std::size_t>( nR )*nZ );
-		blend.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
-		offsetR.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
-		offsetZ.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
-
 		double const dR = ( maxRadius - minRadius )/( nR - 1 );
 		double const dZ = ( zMax - zMin )/( nZ - 1 );
+
+		locate( [ & ]( mfem::Vector const &lower, mfem::Vector const &upper,
+		               auto const &visit )
+		{
+			// THE INVERSION: box to index range, by arithmetic. One element pad
+			// so that a node sitting exactly on a boundary is not missed to
+			// round-off.
+			int const i0 = std::max( 0, static_cast<int>( std::floor( ( lower( 0 ) - minRadius )/dR ) ) - 1 );
+			int const i1 = std::min( nR - 1, static_cast<int>( std::ceil( ( upper( 0 ) - minRadius )/dR ) ) + 1 );
+			int const j0 = std::max( 0, static_cast<int>( std::floor( ( lower( 1 ) - zMin )/dZ ) ) - 1 );
+			int const j1 = std::min( nZ - 1, static_cast<int>( std::ceil( ( upper( 1 ) - zMin )/dZ ) ) + 1 );
+			for ( int j = j0; j <= j1; ++j )
+				for ( int i = i0; i <= i1; ++i )
+					visit( static_cast<std::size_t>( index( i, j ) ) );
+		} );
+	}
+
+	GridSampler::GridSampler( mfem::Mesh &meshIn, std::vector<double> const &radius,
+	                          std::vector<double> const &z )
+		: mesh( meshIn ), minRadius( 0.0 ), maxRadius( 0.0 ), zMin( 0.0 ), zMax( 0.0 ),
+		  pointR( radius ), pointZ( z ),
+		  nR( static_cast<int>( radius.size() ) ), nZ( 1 ), found( 0 )
+	{
+		if ( radius.empty() )
+			throw std::logic_error( "meq::GridSampler: a point set needs at least one point" );
+		if ( radius.size() != z.size() )
+			throw std::logic_error( "meq::GridSampler: the point set has "
+			                        + std::to_string( radius.size() ) + " radii and "
+			                        + std::to_string( z.size() ) + " heights" );
+
+		/*
+		 * THE POINTS IN BUCKETS, so that an element asks only the points near
+		 * it: about one bucket per point, on the points' own box. Any superset
+		 * of the points in an element's box will do, because the containment
+		 * test decides and not the box; what has to match the lattice is the
+		 * ORDER OF ELEMENTS, which locate() keeps.
+		 */
+		double lowR = radius[ 0 ], highR = radius[ 0 ], lowZ = z[ 0 ], highZ = z[ 0 ];
+		for ( std::size_t k = 0; k < radius.size(); ++k )
+		{
+			lowR = std::min( lowR, radius[ k ] );
+			highR = std::max( highR, radius[ k ] );
+			lowZ = std::min( lowZ, z[ k ] );
+			highZ = std::max( highZ, z[ k ] );
+		}
+		int const side = std::max( 1, static_cast<int>( std::sqrt( static_cast<double>( radius.size() ) ) ) );
+		double const widthR = highR > lowR ? ( highR - lowR )/side : 1.0;
+		double const widthZ = highZ > lowZ ? ( highZ - lowZ )/side : 1.0;
+		auto const column = [ & ]( double r )
+		{
+			return std::min( side - 1, std::max( 0, static_cast<int>( std::floor( ( r - lowR )/widthR ) ) ) );
+		};
+		auto const row = [ & ]( double height )
+		{
+			return std::min( side - 1, std::max( 0, static_cast<int>( std::floor( ( height - lowZ )/widthZ ) ) ) );
+		};
+		std::vector<std::vector<std::size_t>> buckets( static_cast<std::size_t>( side )*side );
+		for ( std::size_t k = 0; k < radius.size(); ++k )
+			buckets[ static_cast<std::size_t>( row( z[ k ] ) )*side + column( radius[ k ] ) ].push_back( k );
+
+		locate( [ & ]( mfem::Vector const &lower, mfem::Vector const &upper,
+		               auto const &visit )
+		{
+			// The vertex box is an inner bound for a curved element, so it is
+			// padded by half its own size, as the lattice pads by a spacing.
+			double const padR = 0.5*( upper( 0 ) - lower( 0 ) ), padZ = 0.5*( upper( 1 ) - lower( 1 ) );
+			if ( upper( 0 ) + padR < lowR || lower( 0 ) - padR > highR
+			     || upper( 1 ) + padZ < lowZ || lower( 1 ) - padZ > highZ )
+				return;
+			int const c0 = column( lower( 0 ) - padR ), c1 = column( upper( 0 ) + padR );
+			int const r0 = row( lower( 1 ) - padZ ), r1 = row( upper( 1 ) + padZ );
+			for ( int r = r0; r <= r1; ++r )
+				for ( int c = c0; c <= c1; ++c )
+					for ( std::size_t const at : buckets[ static_cast<std::size_t>( r )*side + c ] )
+						visit( at );
+		} );
+	}
+
+	template <typename Candidates>
+	void GridSampler::locate( Candidates const &candidates )
+	{
+		std::size_t const nodes = static_cast<std::size_t>( nR )*nZ;
+		element.assign( nodes, -1 );
+		point.resize( nodes );
+		blend.assign( nodes, 0.0 );
+		offsetR.assign( nodes, 0.0 );
+		offsetZ.assign( nodes, 0.0 );
 
 		mfem::Vector physical( 2 );
 		mfem::Vector lower( 2 ), upper( 2 );
@@ -168,16 +249,6 @@ namespace meq
 				}
 			}
 
-			// THE INVERSION: box to index range, by arithmetic. One element pad
-			// so that a node sitting exactly on a boundary is not missed to
-			// round-off.
-			int const i0 = std::max( 0, static_cast<int>( std::floor( ( lower( 0 ) - minRadius )/dR ) ) - 1 );
-			int const i1 = std::min( nR - 1, static_cast<int>( std::ceil( ( upper( 0 ) - minRadius )/dR ) ) + 1 );
-			int const j0 = std::max( 0, static_cast<int>( std::floor( ( lower( 1 ) - zMin )/dZ ) ) - 1 );
-			int const j1 = std::min( nZ - 1, static_cast<int>( std::ceil( ( upper( 1 ) - zMin )/dZ ) ) + 1 );
-			if ( i1 < i0 || j1 < j0 )
-				continue;
-
 			// x = v0 + J ( xi, eta ), inverted once for the whole candidate
 			// box. A degenerate element falls back rather than dividing by
 			// zero -- Newton will report it Outside, which is the right answer.
@@ -209,41 +280,39 @@ namespace meq
 			if ( !affine )
 				mesh.GetElementTransformation( e, &transformation );
 
-			for ( int j = j0; j <= j1; ++j )
-				for ( int i = i0; i <= i1; ++i )
+			candidates( lower, upper, [ & ]( std::size_t at )
+			{
+				if ( element[ at ] >= 0 )
+					return;      // first element to claim it keeps it
+
+				physical( 0 ) = radiusOf( at );
+				physical( 1 ) = heightOf( at );
+
+				if ( affine )
 				{
-					std::size_t const at = static_cast<std::size_t>( index( i, j ) );
-					if ( element[ at ] >= 0 )
-						continue;      // first element to claim it keeps it
-
-					physical( 0 ) = rAt( i );
-					physical( 1 ) = zAt( j );
-
-					if ( affine )
-					{
-						double const dr = physical( 0 ) - originR;
-						double const dz = physical( 1 ) - originZ;
-						double const xi  = inverse[ 0 ]*dr + inverse[ 1 ]*dz;
-						double const eta = inverse[ 2 ]*dr + inverse[ 3 ]*dz;
-						if ( xi < -insideTolerance || eta < -insideTolerance
-						     || xi + eta > 1.0 + insideTolerance )
-							continue;
-						point[ at ].Set2( xi, eta );
-						element[ at ] = e;
-						++found;
-						continue;
-					}
-
-					mfem::IntegrationPoint reference;
-					if ( transformation.TransformBack(
-					         physical, reference, inverseTransformTolerance() )
-					     == mfem::InverseElementTransformation::Inside )
-					{
-						element[ at ] = e;
-						point[ at ] = reference;
-						++found;
-					}
+					double const dr = physical( 0 ) - originR;
+					double const dz = physical( 1 ) - originZ;
+					double const xi  = inverse[ 0 ]*dr + inverse[ 1 ]*dz;
+					double const eta = inverse[ 2 ]*dr + inverse[ 3 ]*dz;
+					if ( xi < -insideTolerance || eta < -insideTolerance
+					     || xi + eta > 1.0 + insideTolerance )
+						return;
+					point[ at ].Set2( xi, eta );
+					element[ at ] = e;
+					++found;
+					return;
 				}
+
+				mfem::IntegrationPoint reference;
+				if ( transformation.TransformBack(
+				         physical, reference, inverseTransformTolerance() )
+				     == mfem::InverseElementTransformation::Inside )
+				{
+					element[ at ] = e;
+					point[ at ] = reference;
+					++found;
+				}
+			} );
 		}
 	}
 
@@ -367,8 +436,7 @@ namespace meq
 
 				// grad psi = R q, with R taken at the foot -- the point the
 				// flux was actually read at.
-				int const i = static_cast<int>( at ) % nR;
-				double const footR = rAt( i ) - offsetR[ at ];
+				double const footR = radiusOf( at ) - offsetR[ at ];
 				values[ at ] += footR*( q( 0 )*offsetR[ at ] + q( 1 )*offsetZ[ at ] );
 			}
 		}
@@ -505,7 +573,7 @@ namespace meq
 				if ( element[ at ] >= 0 )
 					continue;
 
-				double const radius = rAt( i ), z = zAt( j );
+				double const radius = radiusOf( at ), z = heightOf( at );
 				if ( accept && !accept( radius, z ) )
 					continue;
 
@@ -612,12 +680,40 @@ namespace meq
 
 	double GridSampler::rAt( int i ) const
 	{
+		if ( !pointR.empty() )
+			throw std::logic_error( "meq::GridSampler::rAt(): a point set is not a lattice; nodeR()" );
 		return minRadius + ( maxRadius - minRadius )*i/( nR - 1 );
 	}
 
 	double GridSampler::zAt( int j ) const
 	{
+		if ( !pointR.empty() )
+			throw std::logic_error( "meq::GridSampler::zAt(): a point set is not a lattice; nodeZ()" );
 		return zMin + ( zMax - zMin )*j/( nZ - 1 );
+	}
+
+	double GridSampler::radiusOf( std::size_t at ) const
+	{
+		if ( !pointR.empty() )
+			return pointR[ at ];
+		return rAt( static_cast<int>( at % static_cast<std::size_t>( nR ) ) );
+	}
+
+	double GridSampler::heightOf( std::size_t at ) const
+	{
+		if ( !pointZ.empty() )
+			return pointZ[ at ];
+		return zAt( static_cast<int>( at/static_cast<std::size_t>( nR ) ) );
+	}
+
+	double GridSampler::nodeR( int i, int j ) const
+	{
+		return radiusOf( static_cast<std::size_t>( index( i, j ) ) );
+	}
+
+	double GridSampler::nodeZ( int i, int j ) const
+	{
+		return heightOf( static_cast<std::size_t>( index( i, j ) ) );
 	}
 
 	int GridSampler::elementAt( int i, int j ) const

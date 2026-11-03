@@ -1,6 +1,7 @@
 #include "Output.hpp"
 
 #include "Crossings.hpp"
+#include "Dataset.hpp"
 #include "Materials.hpp"
 
 #include <algorithm>
@@ -13,6 +14,8 @@
 #include <set>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
+#include <variant>
 
 #ifdef MEQ_USE_NETCDF
 #include <netcdf>
@@ -651,11 +654,223 @@ namespace meq
 
 #ifdef MEQ_USE_NETCDF
 
+	/*
+	 * A NETCDF FILE THAT KEEPS A COPY OF ITSELF: every dimension, variable and
+	 * attribute written through it goes to the file and to a meq::Dataset, by
+	 * the same call. The signatures are netcdf-cxx4's own, so the writers below
+	 * read as they did; what they write is what the Dataset holds, and
+	 * NetCDFWriter::dataset() hands it on (PYTHON-PLAN.md, PY-4).
+	 */
+	namespace
+	{
+		class RecordingFile;
+
+		/// The Dataset's variant for a NetCDF type.
+		DatasetValues valuesOf( netCDF::NcType const &type )
+		{
+			if ( type == netCDF::ncDouble )
+				return std::vector<double>();
+			if ( type == netCDF::ncInt )
+				return std::vector<int>();
+			if ( type == netCDF::ncByte )
+				return std::vector<signed char>();
+			if ( type == netCDF::ncString )
+				return std::vector<std::string>();
+			throw std::logic_error( "meq::NetCDFWriter: a type the Dataset does not record" );
+		}
+
+		/// A numeric attribute of @a count values, in the type it is written as.
+		template <typename T>
+		DatasetAttribute numericAttribute( std::string const &name, netCDF::NcType const &type,
+		                                   std::size_t count, T const *values )
+		{
+			auto cast = [ & ]( auto zero )
+			{
+				std::vector<decltype( zero )> out( count );
+				for ( std::size_t i = 0; i < count; ++i )
+					out[ i ] = static_cast<decltype( zero )>( values[ i ] );
+				return out;
+			};
+			if ( type == netCDF::ncDouble )
+				return DatasetAttribute{ name, cast( 0.0 ) };
+			if ( type == netCDF::ncInt )
+				return DatasetAttribute{ name, cast( 0 ) };
+			if ( type == netCDF::ncByte )
+				return DatasetAttribute{ name, cast( static_cast<signed char>( 0 ) ) };
+			throw std::logic_error( "meq::NetCDFWriter: an attribute type the Dataset does not record" );
+		}
+
+		struct RecordedDim
+		{
+			netCDF::NcDim nc;
+			std::string name;
+			std::size_t length = 0;
+
+			bool isNull() const { return name.empty(); }
+			std::size_t getSize() const { return length; }
+		};
+
+		class RecordedVar
+		{
+			public:
+				RecordedVar( RecordingFile &fileIn, std::string const &nameIn, netCDF::NcVar ncIn )
+					: file( &fileIn ), name( nameIn ), nc( ncIn )
+				{
+				}
+
+				void putAtt( std::string const &key, std::string const &value );
+				template <typename T>
+				void putAtt( std::string const &key, netCDF::NcType const &type, T value )
+				{
+					nc.putAtt( key, type, value );
+					record( numericAttribute( key, type, 1, &value ) );
+				}
+				template <typename T>
+				void putAtt( std::string const &key, netCDF::NcType const &type,
+				             std::size_t count, T const *values )
+				{
+					nc.putAtt( key, type, count, values );
+					record( numericAttribute( key, type, count, values ) );
+				}
+
+				template <typename T>
+				void putVar( T const *values );
+
+			private:
+				void record( DatasetAttribute attribute );
+				DatasetVariable &variable();
+
+				RecordingFile *file;
+				std::string name;
+				netCDF::NcVar nc;
+		};
+
+		class RecordingFile
+		{
+			public:
+				void open( std::string const &path, netCDF::NcFile::FileMode mode )
+				{
+					nc.open( path, mode );
+				}
+
+				void close() { nc.close(); }
+
+				RecordedDim addDim( std::string const &name, std::size_t length )
+				{
+					netCDF::NcDim dim = nc.addDim( name, length );
+					data.addDimension( name, length );
+					return RecordedDim{ dim, name, length };
+				}
+
+				/// The dimension of that name, or a null one.
+				RecordedDim getDim( std::string const &name )
+				{
+					if ( !data.hasDimension( name ) )
+						return RecordedDim{};
+					return RecordedDim{ nc.getDim( name ), name, data.dimension( name ) };
+				}
+
+				RecordedVar addVar( std::string const &name, netCDF::NcType const &type,
+				                    std::vector<RecordedDim> const &dims )
+				{
+					std::vector<netCDF::NcDim> ncDims;
+					std::vector<std::string> names;
+					for ( RecordedDim const &one : dims )
+					{
+						ncDims.push_back( one.nc );
+						names.push_back( one.name );
+					}
+					netCDF::NcVar var = nc.addVar( name, type, ncDims );
+					data.addVariable( name, names, valuesOf( type ) );
+					return RecordedVar( *this, name, var );
+				}
+
+				RecordedVar addVar( std::string const &name, netCDF::NcType const &type,
+				                    RecordedDim const &dim )
+				{
+					return addVar( name, type, std::vector<RecordedDim>{ dim } );
+				}
+
+				/// A scalar.
+				RecordedVar addVar( std::string const &name, netCDF::NcType const &type )
+				{
+					return addVar( name, type, std::vector<RecordedDim>{} );
+				}
+
+				void putAtt( std::string const &key, std::string const &value )
+				{
+					nc.putAtt( key, value );
+					data.setAttribute( DatasetAttribute{ key, value } );
+				}
+
+				template <typename T>
+				void putAtt( std::string const &key, netCDF::NcType const &type, T value )
+				{
+					nc.putAtt( key, type, value );
+					data.setAttribute( numericAttribute( key, type, 1, &value ) );
+				}
+
+				Dataset data;
+
+			private:
+				netCDF::NcFile nc;
+		};
+
+		DatasetVariable &RecordedVar::variable()
+		{
+			return *file->data.variable( name );
+		}
+
+		void RecordedVar::record( DatasetAttribute attribute )
+		{
+			Dataset::setAttribute( variable().attributes, std::move( attribute ) );
+		}
+
+		void RecordedVar::putAtt( std::string const &key, std::string const &value )
+		{
+			nc.putAtt( key, value );
+			record( DatasetAttribute{ key, value } );
+		}
+
+		template <typename T>
+		void RecordedVar::putVar( T const *values )
+		{
+			if constexpr ( std::is_same_v<T, char const *> )
+				nc.putVar( const_cast<char const **>( values ) );
+			else
+				nc.putVar( values );
+			DatasetVariable &target = variable();
+			std::size_t const count = file->data.size( target.dimensions );
+			std::visit( [ & ]( auto &out )
+			{
+				using Element = typename std::decay_t<decltype( out )>::value_type;
+				out.resize( count );
+				for ( std::size_t i = 0; i < count; ++i )
+				{
+					if constexpr ( std::is_same_v<Element, std::string> )
+					{
+						if constexpr ( std::is_same_v<T, char const *> )
+							out[ i ] = values[ i ];
+						else
+							throw std::logic_error( "meq::NetCDFWriter: numbers into a string variable" );
+					}
+					else
+					{
+						if constexpr ( std::is_same_v<T, char const *> )
+							throw std::logic_error( "meq::NetCDFWriter: text into a numeric variable" );
+						else
+							out[ i ] = static_cast<Element>( values[ i ] );
+					}
+				}
+			}, target.values );
+		}
+	}
+
 	struct NetCDFWriter::State
 	{
-		netCDF::NcFile file;
-		netCDF::NcDim rDim;
-		netCDF::NcDim zDim;
+		RecordingFile file;
+		RecordedDim rDim;
+		RecordedDim zDim;
 		int nR;
 		int nZ;
 		bool closed;
@@ -683,14 +898,14 @@ namespace meq
 
 		coordinate.resize( static_cast<std::size_t>( state->nR ) );
 		for ( int i = 0; i < state->nR; ++i ) coordinate[ i ] = sampler.rAt( i );
-		netCDF::NcVar radiusVar = state->file.addVar( "R", netCDF::ncDouble, state->rDim );
+		RecordedVar radiusVar = state->file.addVar( "R", netCDF::ncDouble, state->rDim );
 		radiusVar.putAtt( "long_name", "Major radius" );
 		radiusVar.putAtt( "units", "m" );
 		radiusVar.putVar( coordinate.data() );
 
 		coordinate.resize( static_cast<std::size_t>( state->nZ ) );
 		for ( int j = 0; j < state->nZ; ++j ) coordinate[ j ] = sampler.zAt( j );
-		netCDF::NcVar zVar = state->file.addVar( "Z", netCDF::ncDouble, state->zDim );
+		RecordedVar zVar = state->file.addVar( "Z", netCDF::ncDouble, state->zDim );
 		zVar.putAtt( "long_name", "Height" );
 		zVar.putAtt( "units", "m" );
 		zVar.putVar( coordinate.data() );
@@ -704,8 +919,8 @@ namespace meq
 				mask[ static_cast<std::size_t>( j )*state->nR + i ] =
 					sampler.located( i, j ) ? 1 : 0;
 
-		std::vector<netCDF::NcDim> const shape{ state->zDim, state->rDim };
-		netCDF::NcVar maskVar = state->file.addVar( "inside", netCDF::ncByte, shape );
+		std::vector<RecordedDim> const shape{ state->zDim, state->rDim };
+		RecordedVar maskVar = state->file.addVar( "inside", netCDF::ncByte, shape );
 		maskVar.putAtt( "long_name",
 		                "1 where the node lies inside the computational domain" );
 		maskVar.putVar( mask.data() );
@@ -724,7 +939,7 @@ namespace meq
 				mask[ static_cast<std::size_t>( j )*state->nR + i ] =
 					sampler.wasExtended( i, j ) ? 1 : 0;
 
-		netCDF::NcVar bandVar =
+		RecordedVar bandVar =
 			state->file.addVar( "extrapolated", netCDF::ncByte, shape );
 		bandVar.putAtt( "long_name",
 		                "1 where the node was continued across the Gamma_h-to-"
@@ -748,6 +963,11 @@ namespace meq
 		}
 	}
 
+	Dataset const &NetCDFWriter::dataset() const
+	{
+		return state->file.data;
+	}
+
 	void NetCDFWriter::attribute( std::string const &name, std::string const &value )
 	{
 		state->file.putAtt( name, value );
@@ -761,7 +981,7 @@ namespace meq
 	void NetCDFWriter::text( std::string const &name, std::string const &value,
 	                         std::string const &longName )
 	{
-		netCDF::NcVar var = state->file.addVar( name, netCDF::ncString );
+		RecordedVar var = state->file.addVar( name, netCDF::ncString );
 		var.putAtt( "long_name", longName );
 		char const *pointer = value.c_str();
 		var.putVar( &pointer );
@@ -784,8 +1004,8 @@ namespace meq
 			                          + " values where the grid has "
 			                          + std::to_string( expected ) );
 
-		std::vector<netCDF::NcDim> const shape{ state->zDim, state->rDim };
-		netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble, shape );
+		std::vector<RecordedDim> const shape{ state->zDim, state->rDim };
+		RecordedVar var = state->file.addVar( name, netCDF::ncDouble, shape );
 		var.putAtt( "long_name", longName );
 		var.putAtt( "units", units );
 		// Both the fill attribute and the `inside` mask describe the same
@@ -804,8 +1024,8 @@ namespace meq
 			                          + " values where the grid has "
 			                          + std::to_string( expected ) );
 
-		std::vector<netCDF::NcDim> const shape{ state->zDim, state->rDim };
-		netCDF::NcVar var = state->file.addVar( "node_material", netCDF::ncInt, shape );
+		std::vector<RecordedDim> const shape{ state->zDim, state->rDim };
+		RecordedVar var = state->file.addVar( "node_material", netCDF::ncInt, shape );
 		var.putAtt( "long_name", "the material table's row at the node: the "
 		                         "classifier's test at a point, plasma judged on "
 		                         "psi as written here" );
@@ -824,13 +1044,13 @@ namespace meq
 		if ( radius.empty() )
 			return;
 
-		netCDF::NcDim dim = state->file.addDim( "boundary", radius.size() );
-		netCDF::NcVar radiusVar = state->file.addVar( "boundary_R", netCDF::ncDouble, dim );
+		RecordedDim dim = state->file.addDim( "boundary", radius.size() );
+		RecordedVar radiusVar = state->file.addVar( "boundary_R", netCDF::ncDouble, dim );
 		radiusVar.putAtt( "long_name", "Major radius of the prescribed boundary" );
 		radiusVar.putAtt( "units", "m" );
 		radiusVar.putVar( radius.data() );
 
-		netCDF::NcVar zVar = state->file.addVar( "boundary_Z", netCDF::ncDouble, dim );
+		RecordedVar zVar = state->file.addVar( "boundary_Z", netCDF::ncDouble, dim );
 		zVar.putAtt( "long_name", "Height of the prescribed boundary" );
 		zVar.putAtt( "units", "m" );
 		zVar.putVar( z.data() );
@@ -841,11 +1061,11 @@ namespace meq
 	{
 		/// The dimension of that name at that length, creating it if it is not
 		/// there and refusing it if it is there at another length.
-		netCDF::NcDim sharedDimension( netCDF::NcFile &file,
+		RecordedDim sharedDimension( RecordingFile &file,
 		                               std::string const &name,
 		                               std::size_t length )
 		{
-			netCDF::NcDim existing = file.getDim( name );
+			RecordedDim existing = file.getDim( name );
 			if ( existing.isNull() )
 				return file.addDim( name, length );
 			if ( existing.getSize() != length )
@@ -872,9 +1092,9 @@ namespace meq
 			                            "what an empty array means. The caller "
 			                            "should not write the variable at all" );
 
-		netCDF::NcDim dim = sharedDimension( state->file, dimension,
+		RecordedDim dim = sharedDimension( state->file, dimension,
 		                                     values.size() );
-		netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble, dim );
+		RecordedVar var = state->file.addVar( name, netCDF::ncDouble, dim );
 		var.putAtt( "long_name", longName );
 		if ( !units.empty() )
 			var.putAtt( "units", units );
@@ -890,9 +1110,9 @@ namespace meq
 			throw std::runtime_error( "meq::NetCDFWriter::vector: " + name
 			                          + " is empty; see the double overload" );
 
-		netCDF::NcDim dim = sharedDimension( state->file, dimension,
+		RecordedDim dim = sharedDimension( state->file, dimension,
 		                                     values.size() );
-		netCDF::NcVar var = state->file.addVar( name, netCDF::ncInt, dim );
+		RecordedVar var = state->file.addVar( name, netCDF::ncInt, dim );
 		var.putAtt( "long_name", longName );
 		var.putVar( values.data() );
 	}
@@ -906,9 +1126,9 @@ namespace meq
 			throw std::runtime_error( "meq::NetCDFWriter::vector: " + name
 			                          + " is empty; see the double overload" );
 
-		netCDF::NcDim dim = sharedDimension( state->file, dimension,
+		RecordedDim dim = sharedDimension( state->file, dimension,
 		                                     values.size() );
-		netCDF::NcVar var = state->file.addVar( name, netCDF::ncString, dim );
+		RecordedVar var = state->file.addVar( name, netCDF::ncString, dim );
 		var.putAtt( "long_name", longName );
 		std::vector<char const *> pointers;
 		pointers.reserve( values.size() );
@@ -922,14 +1142,14 @@ namespace meq
 		/// A one-dimensional variable, written whole. The _FillValue goes on
 		/// BEFORE the data, which NetCDF-4 requires.
 		template <typename T>
-		netCDF::NcVar column( netCDF::NcFile &file, std::string const &name,
-		                      netCDF::NcType const &type, netCDF::NcDim const &dim,
+		RecordedVar column( RecordingFile &file, std::string const &name,
+		                      netCDF::NcType const &type, RecordedDim const &dim,
 		                      std::vector<T> const &values,
 		                      std::string const &longName,
 		                      std::string const &units = std::string(),
 		                      bool fillNaN = false )
 		{
-			netCDF::NcVar var = file.addVar( name, type, dim );
+			RecordedVar var = file.addVar( name, type, dim );
 			var.putAtt( "long_name", longName );
 			if ( !units.empty() )
 				var.putAtt( "units", units );
@@ -954,7 +1174,7 @@ namespace meq
 		/// CF's `flag_values` / `flag_meanings` pair for an enumeration of
 		/// @a count values named by @a nameOf.
 		template <typename T, typename Name>
-		void flags( netCDF::NcVar &var, netCDF::NcType const &type, int count,
+		void flags( RecordedVar &var, netCDF::NcType const &type, int count,
 		            Name const &nameOf )
 		{
 			std::vector<T> values;
@@ -982,18 +1202,18 @@ namespace meq
 			                             + std::to_string( table.size() )
 			                             + "; it was made with another table" );
 
-		netCDF::NcFile &file = state->file;
+		RecordingFile &file = state->file;
 		std::size_t const n = static_cast<std::size_t>( elements );
 
 		// ---- the ragged record, CF's contiguous ragged array ----
-		netCDF::NcDim const elementDim = sharedDimension( file, "element", n );
-		netCDF::NcDim const entryDim =
+		RecordedDim const elementDim = sharedDimension( file, "element", n );
+		RecordedDim const entryDim =
 			sharedDimension( file, "element_entry", record.entries.size() );
 
 		std::vector<int> counts( n );
 		for ( std::size_t e = 0; e < n; ++e )
 			counts[ e ] = record.offsets[ e + 1 ] - record.offsets[ e ];
-		netCDF::NcVar countVar = column( file, "element_material_count", netCDF::ncInt,
+		RecordedVar countVar = column( file, "element_material_count", netCDF::ncInt,
 		                                 elementDim, counts,
 		                                 "number of materials in the element, indexed "
 		                                 "as the elements of the mesh variable" );
@@ -1016,7 +1236,7 @@ namespace meq
 		std::vector<signed char> regions( n );
 		for ( std::size_t e = 0; e < n; ++e )
 			regions[ e ] = static_cast<signed char>( record.region[ e ] );
-		netCDF::NcVar regionVar = column( file, "element_region", netCDF::ncByte,
+		RecordedVar regionVar = column( file, "element_region", netCDF::ncByte,
 		                                  elementDim, regions,
 		                                  "region derived from the element's fractions, "
 		                                  "for plotting" );
@@ -1070,8 +1290,8 @@ namespace meq
 			permeabilities.push_back( row.relativePermeability );
 		}
 		vector( "material", "material_name", names, "material name" );
-		netCDF::NcDim const materialDim = file.getDim( "material" );
-		netCDF::NcVar kindVar = column( file, "material_kind", netCDF::ncInt,
+		RecordedDim const materialDim = file.getDim( "material" );
+		RecordedVar kindVar = column( file, "material_kind", netCDF::ncInt,
 		                                materialDim, kinds, "kind of material" );
 		flags<int>( kindVar, netCDF::ncInt, 5,
 		            []( int i ) { return materialKindName( static_cast<MaterialKind>( i ) ); } );
@@ -1102,7 +1322,7 @@ namespace meq
 			}
 			vector( "circuit", "circuit_name", circuitNames,
 			        "circuit name; \"default\" groups the coils in no [[circuits]] block" );
-			netCDF::NcDim const circuitDim = file.getDim( "circuit" );
+			RecordedDim const circuitDim = file.getDim( "circuit" );
 			column( file, "circuit_current", netCDF::ncDouble, circuitDim,
 			        circuitCurrents,
 			        "the supply's current, each member carrying its multiplier "
@@ -1127,16 +1347,16 @@ namespace meq
 			}
 			vector( "permeability_curve", "permeability_curve_material", owners,
 			        "material_name of the row this curve belongs to" );
-			netCDF::NcDim const curveDim = file.getDim( "permeability_curve" );
-			netCDF::NcVar pointVar = column( file, "permeability_curve_point_count",
+			RecordedDim const curveDim = file.getDim( "permeability_curve" );
+			RecordedVar pointVar = column( file, "permeability_curve_point_count",
 			                                 netCDF::ncInt, curveDim, pointCounts,
 			                                 "number of ( H, B ) points in the curve" );
 			pointVar.putAtt( "sample_dimension", "permeability_curve_point" );
-			netCDF::NcDim const pointDim =
+			RecordedDim const pointDim =
 				sharedDimension( file, "permeability_curve_point", h.size() );
 			column( file, "permeability_curve_h", netCDF::ncDouble, pointDim, h,
 			        "magnetic field strength H, increasing from 0", "A/m" );
-			netCDF::NcVar bVar = column( file, "permeability_curve_b", netCDF::ncDouble,
+			RecordedVar bVar = column( file, "permeability_curve_b", netCDF::ncDouble,
 			                             pointDim, b, "flux density B at H", "T" );
 			bVar.putAtt( "interpolation", permeabilityInterpolation );
 		}
@@ -1164,7 +1384,7 @@ namespace meq
 
 	struct FluxGridWriter::State
 	{
-		netCDF::NcFile file;
+		RecordingFile file;
 		bool closed;
 	};
 
@@ -1236,8 +1456,8 @@ namespace meq
 			                          + ": " + error.what() );
 		}
 
-		netCDF::NcDim const fluxDim = state->file.addDim( "flux", count );
-		netCDF::NcDim const thetaDim = state->file.addDim( "theta", angles );
+		RecordedDim const fluxDim = state->file.addDim( "flux", count );
+		RecordedDim const thetaDim = state->file.addDim( "theta", angles );
 
 		// The coordinates first, so the file is self-describing even if a later
 		// write fails.
@@ -1249,7 +1469,7 @@ namespace meq
 			for ( std::size_t i = 0; i < count; ++i )
 				values[ i ] = of( family.surfaces[ i ] );
 
-			netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble,
+			RecordedVar var = state->file.addVar( name, netCDF::ncDouble,
 			                                       fluxDim );
 			var.putAtt( "long_name", longName );
 			var.putAtt( "units", units );
@@ -1271,7 +1491,7 @@ namespace meq
 			theta[ j ] = twoPi*static_cast<double>( j )
 			             /static_cast<double>( angles );
 
-		netCDF::NcVar thetaVar = state->file.addVar( "theta", netCDF::ncDouble,
+		RecordedVar thetaVar = state->file.addVar( "theta", netCDF::ncDouble,
 		                                            thetaDim );
 		thetaVar.putAtt( "long_name",
 		                 "Geometric poloidal angle about the magnetic axis" );
@@ -1279,7 +1499,7 @@ namespace meq
 		thetaVar.putVar( theta.data() );
 
 		// The geometry: ( flux, theta ), theta fastest.
-		std::vector<netCDF::NcDim> const shape{ fluxDim, thetaDim };
+		std::vector<RecordedDim> const shape{ fluxDim, thetaDim };
 		std::vector<double> plane( count*angles, 0.0 );
 
 		auto surfaceColumn = [ & ]( char const *name, char const *longName,
@@ -1291,7 +1511,7 @@ namespace meq
 				for ( std::size_t j = 0; j < angles; ++j )
 					plane[ i*angles + j ] = ( family.surfaces[ i ].*member )[ j ];
 
-			netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble,
+			RecordedVar var = state->file.addVar( name, netCDF::ncDouble,
 			                                        shape );
 			var.putAtt( "long_name", longName );
 			var.putAtt( "units", units );
@@ -1316,7 +1536,7 @@ namespace meq
 				mask[ i*angles + j ] =
 					family.surfaces[ i ].extended[ j ] != 0 ? 1 : 0;
 
-		netCDF::NcVar bandVar = state->file.addVar( "extrapolated",
+		RecordedVar bandVar = state->file.addVar( "extrapolated",
 		                                            netCDF::ncByte, shape );
 		bandVar.putAtt( "long_name",
 		                "1 where the node's field was continued across the "
@@ -1370,7 +1590,7 @@ namespace meq
 		for ( std::size_t i = 0; i < count; ++i )
 			band[ i ] = family.surfaces[ i ].crossesBand ? 1 : 0;
 
-		netCDF::NcVar surfaceBandVar = state->file.addVar( "band",
+		RecordedVar surfaceBandVar = state->file.addVar( "band",
 		                                                   netCDF::ncByte,
 		                                                   fluxDim );
 		surfaceBandVar.putAtt( "long_name",
@@ -1415,6 +1635,11 @@ namespace meq
 		state->closed = true;
 	}
 
+	Dataset const &FluxGridWriter::dataset() const
+	{
+		return state->file.data;
+	}
+
 	void FluxGridWriter::attribute( std::string const &name,
 	                                std::string const &value )
 	{
@@ -1444,6 +1669,7 @@ namespace meq
 	}
 
 	NetCDFWriter::NetCDFWriter( std::string const &, GridSampler const & ) { unavailable(); }
+	Dataset const &NetCDFWriter::dataset() const { unavailable(); }
 	NetCDFWriter::~NetCDFWriter() = default;
 	void NetCDFWriter::close() { }
 	void NetCDFWriter::vector( std::string const &, std::string const &,
@@ -1482,6 +1708,7 @@ namespace meq
 
 	FluxGridWriter::FluxGridWriter( std::string const &,
 	                                FluxSurfaceFamily const & ) { fluxGridUnavailable(); }
+	Dataset const &FluxGridWriter::dataset() const { fluxGridUnavailable(); }
 	FluxGridWriter::~FluxGridWriter() = default;
 	void FluxGridWriter::close() { }
 	void FluxGridWriter::attribute( std::string const &, std::string const & ) { fluxGridUnavailable(); }

@@ -20,8 +20,10 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "Dataset.hpp"
 #include "Profiles.hpp"
 
 namespace meq
@@ -165,6 +167,58 @@ namespace meq
 			 *         for a midplane flux that is not monotone.
 			 */
 			std::vector<Knot> midplaneCrossing();
+
+			/**
+			 * THE .nc THE LAST write() OR writeRestart() WROTE, IN MEMORY: its
+			 * root group, every dimension, variable and attribute, recorded by
+			 * the calls that wrote the file (meq::NetCDFWriter::dataset()).
+			 * Shared, so it outlives the run that wrote it.
+			 * @throws std::logic_error before anything was written.
+			 */
+			std::shared_ptr<Dataset const> dataset() const;
+
+			/**
+			 * psi, B_R AND B_Z AT POINTS OF ONE'S CHOOSING, AS THE .nc's GRID
+			 * HAS THEM: the same location, band continuation and sampling the
+			 * write phase applies to its lattice (meq::GridSampler's point
+			 * set), so at a lattice node's coordinates the values are that
+			 * node's, to the bit. `inside` and `extrapolated` are the .nc's
+			 * masks; outside, the values are NaN.
+			 * @throws std::logic_error before a successful solve, or for two
+			 *         lengths or none.
+			 */
+			struct Samples
+			{
+				std::vector<double> psi, bR, bZ;
+				std::vector<signed char> inside, extrapolated;
+			};
+			Samples sampleAt( std::vector<double> const &radius,
+			                  std::vector<double> const &z );
+
+			/**
+			 * THE _surfaces.nc OF THE SOLVED STATE, IN MEMORY: the family the
+			 * write phase extracts at [output]'s FluxSurfaceCount,
+			 * FluxAngleCount and cuts, as its file holds it -- write()'s, where
+			 * [output] FluxSurfaces wrote one, or written now to @a file.
+			 * @throws std::logic_error before a successful solve, or beside a
+			 *         box support, whose field lines are open.
+			 * @throws std::runtime_error where the extraction fails, as the
+			 *         write phase's warning does.
+			 */
+			std::shared_ptr<Dataset const> fluxSurfaces( std::string const &file );
+
+			/**
+			 * THE FAMILY'S 1-D QUANTITIES AT LABELS rho = sqrt( Psi_N ) OF
+			 * ONE'S CHOOSING, under the _surfaces.nc names: V_prime, volume,
+			 * cross_section_area, arc_length, surface_area, inverse_R_squared,
+			 * grad_psi_squared_over_R_squared, abs_grad_psi, grad_psi_squared,
+			 * and safety_factor where the file has it, by the family's monotone
+			 * cubic (meq::FluxSurfaceFamily::at()); rho, normalised_flux and psi
+			 * exactly. Of the family fluxSurfaces() holds, which is called
+			 * first. @throws std::domain_error for a label outside the cut.
+			 */
+			std::vector<std::pair<std::string, std::vector<double>>>
+			fluxSurfacesAt( std::vector<double> const &labels, std::string const &file );
 
 			/// Whether the configuration's support is a mirror's box, the one
 			/// support midplaneCrossing() answers for. After prepare().

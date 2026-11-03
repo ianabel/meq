@@ -22,6 +22,7 @@
  */
 
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 #include <toml.hpp>
@@ -31,12 +32,15 @@
 #include "meq/BuildInfo.hpp"
 #include "meq/Run.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <system_error>
+#include <type_traits>
+#include <variant>
 
 #include <unistd.h>
 #include <string>
@@ -231,10 +235,10 @@ namespace
 					return;
 				}
 
-				std::string const restart = scratchDirectory() + "/state";
-				raiseFor( run->writeRestart( restart ), "solve" );
+				if ( !stateWritten )
+					writeState( "solve" );
 				meq::RunOptions again = options;
-				again.restartFrom = restart + ".nc";
+				again.restartFrom = scratchDirectory() + "/state.nc";
 				// AN R_midplane TABLE IS HELD AT THE LAST ANSWER'S CROSSING, so
 				// solving again with the tables unchanged moves the map to the
 				// new answer's: the held map's outer loop. A support that is not
@@ -252,6 +256,8 @@ namespace
 				raiseFor( next->solve(), "solve" );
 				run = std::move( next );
 				profilesChanged = false;
+				stateWritten = false;
+				written = false;
 			}
 
 			/// True unless an inverse solve wrote its best fit with the
@@ -261,7 +267,55 @@ namespace
 				flushPython();
 				int const code = run->write();
 				raiseFor( code, "write" );
+				written = true;
 				return code == meq::Solved;
+			}
+
+			/**
+			 * THE .nc OF THE SOLVED STATE, IN MEMORY (PYTHON-PLAN.md, PY-4):
+			 * what write() wrote, or, before any write(), the private state
+			 * file a re-solve restarts from, written now and kept for it. The
+			 * same write phase either way, so the same numbers.
+			 */
+			std::shared_ptr<meq::Dataset const> dataset()
+			{
+				if ( !solved )
+					throw Failure( "meq: there is no solved state to read: solve() first" );
+				if ( !written && !stateWritten )
+					writeState( "results" );
+				return run->dataset();
+			}
+
+			/// The solved state's _surfaces.nc, written privately if write()
+			/// wrote none.
+			std::shared_ptr<meq::Dataset const> surfaces()
+			{
+				if ( !solved )
+					throw Failure( "meq: there is no solved state to read: solve() first" );
+				return translated( [ & ]() { return run->fluxSurfaces( surfacesFile() ); } );
+			}
+
+			std::vector<std::pair<std::string, std::vector<double>>>
+			surfacesAt( std::vector<double> const &labels )
+			{
+				if ( !solved )
+					throw Failure( "meq: there is no solved state to read: solve() first" );
+				return translated( [ & ]() { return run->fluxSurfacesAt( labels, surfacesFile() ); } );
+			}
+
+			/// The solved state's fields at points, as the .nc's grid has them.
+			meq::Run::Samples at( std::vector<double> const &radius,
+			                      std::vector<double> const &z )
+			{
+				if ( !solved )
+					throw Failure( "meq: there is no solved state to read: solve() first" );
+				if ( radius.size() != z.size() )
+					throw Failure( "meq: at() takes as many R as Z, and has "
+					               + std::to_string( radius.size() ) + " and "
+					               + std::to_string( z.size() ) );
+				if ( radius.empty() )
+					return meq::Run::Samples();
+				return run->sampleAt( radius, z );
 			}
 
 			/// The solved state's midplane crossing, R_0( Psi ).
@@ -288,10 +342,47 @@ namespace
 				}
 			}
 
+			std::string surfacesFile()
+			{
+				return scratchDirectory() + "/state_surfaces.nc";
+			}
+
+			/// A library refusal as the exception it is in Python: a question
+			/// this state cannot answer is meq.ConfigError, a label outside
+			/// the cut or an extraction that fails meq.Error.
+			template <typename Call>
+			static auto translated( Call const &call ) -> decltype( call() )
+			{
+				try
+				{
+					return call();
+				}
+				catch ( std::logic_error const &error )
+				{
+					if ( dynamic_cast<std::domain_error const *>( &error ) )
+						throw Failure( std::string( "meq: " ) + error.what() );
+					throw ConfigFailure( std::string( "meq: " ) + error.what() );
+				}
+				catch ( std::runtime_error const &error )
+				{
+					throw Failure( std::string( "meq: no flux surfaces: " ) + error.what() );
+				}
+			}
+
+			/// The state, to the private file a re-solve restarts from.
+			void writeState( char const *phase )
+			{
+				raiseFor( run->writeRestart( scratchDirectory() + "/state" ), phase );
+				stateWritten = true;
+			}
+
 			meq::RunOptions options;
 			std::unique_ptr<meq::Run> run;
 			bool solved = false;
 			bool profilesChanged = false;
+			/// Whether this run's state file, and whether its write(), are written.
+			bool stateWritten = false;
+			bool written = false;
 			std::string scratch;
 
 			/// A directory of this object's own for its restart file, made on
@@ -309,6 +400,111 @@ namespace
 				return scratch;
 			}
 	};
+}
+
+namespace
+{
+	/// Numbers as a numpy array of @a shape; text as a str, or a list of them.
+	template <typename T>
+	py::object numbers( std::vector<T> const &values, std::vector<py::ssize_t> const &shape )
+	{
+		py::array_t<T> out( shape );
+		std::copy( values.begin(), values.end(), out.mutable_data() );
+		return std::move( out );
+	}
+
+	py::object valuesToPython( meq::DatasetValues const &values,
+	                           std::vector<py::ssize_t> const &shape )
+	{
+		return std::visit( [ & ]( auto const &held ) -> py::object
+		{
+			using Element = typename std::decay_t<decltype( held )>::value_type;
+			if constexpr ( std::is_same_v<Element, std::string> )
+			{
+				if ( shape.empty() )
+					return py::str( held.empty() ? std::string() : held.front() );
+				py::list out;
+				for ( std::string const &one : held )
+					out.append( py::str( one ) );
+				return std::move( out );
+			}
+			else if ( shape.empty() )
+				return py::cast( held.empty() ? Element() : held.front() );
+			else
+				return numbers( held, shape );
+		}, values );
+	}
+
+	/// A scalar attribute as a Python scalar, an array of several as numpy.
+	py::object attributeToPython( meq::DatasetAttribute const &attribute )
+	{
+		return std::visit( [ & ]( auto const &held ) -> py::object
+		{
+			using Held = std::decay_t<decltype( held )>;
+			if constexpr ( std::is_same_v<Held, std::string> )
+				return py::str( held );
+			else if ( held.size() == 1 )
+				return py::cast( held.front() );
+			else
+				return numbers( held, { static_cast<py::ssize_t>( held.size() ) } );
+		}, attribute.value );
+	}
+
+	py::dict attributesToPython( std::vector<meq::DatasetAttribute> const &attributes )
+	{
+		py::dict out;
+		for ( meq::DatasetAttribute const &one : attributes )
+			out[ py::str( one.name ) ] = attributeToPython( one );
+		return out;
+	}
+
+	std::vector<py::ssize_t> shapeOf( meq::Dataset const &data,
+	                                  meq::DatasetVariable const &variable )
+	{
+		std::vector<py::ssize_t> shape;
+		for ( std::string const &one : variable.dimensions )
+			shape.push_back( static_cast<py::ssize_t>( data.dimension( one ) ) );
+		return shape;
+	}
+
+	/// The whole root group: {"dimensions", "variables", "attributes"}, each
+	/// variable {"dimensions", "values", "attributes"}.
+	py::dict datasetToPython( meq::Dataset const &data )
+	{
+		py::dict dimensions;
+		for ( auto const &one : data.dimensions() )
+			dimensions[ py::str( one.first ) ] = one.second;
+		py::dict variables;
+		for ( meq::DatasetVariable const &one : data.variables() )
+		{
+			py::dict variable;
+			variable[ "dimensions" ] = py::tuple( py::cast( one.dimensions ) );
+			variable[ "values" ] = valuesToPython( one.values, shapeOf( data, one ) );
+			variable[ "attributes" ] = attributesToPython( one.attributes );
+			variables[ py::str( one.name ) ] = variable;
+		}
+		py::dict out;
+		out[ "dimensions" ] = dimensions;
+		out[ "variables" ] = variables;
+		out[ "attributes" ] = attributesToPython( data.attributes() );
+		return out;
+	}
+
+	/// The variables on the ( Z, R ) lattice and its two coordinates.
+	py::dict gridToPython( meq::Dataset const &data )
+	{
+		py::dict out;
+		for ( meq::DatasetVariable const &one : data.variables() )
+		{
+			std::vector<std::string> const &on = one.dimensions;
+			bool const lattice = on == std::vector<std::string>{ "Z", "R" }
+			                     || on == std::vector<std::string>{ "R" }
+			                     || on == std::vector<std::string>{ "Z" };
+			if ( lattice )
+				out[ py::str( one.name ) ] = valuesToPython( one.values, shapeOf( data, one ) );
+		}
+		return out;
+	}
 }
 
 PYBIND11_MODULE( _meq, m )
@@ -460,6 +656,62 @@ PYBIND11_MODULE( _meq, m )
 		      "The solved state's midplane crossing: R where each surface crosses "
 		      "z = 0, against Psi, with its slope, as a dict of lists. A mirror's; "
 		      "an R_midplane table of the next solve is held at it." )
+		.def( "attributes", []( Equilibrium &self )
+		      { return attributesToPython( self.dataset()->attributes() ); },
+		      "The .nc's global attributes for the solved state, under its names: "
+		      "psi_axis, psi_boundary, newton_iterations, the gauge and the rest. "
+		      "Raises meq.Error before a solve." )
+		.def( "grid", []( Equilibrium &self ) { return gridToPython( *self.dataset() ); },
+		      "The .nc's ( R, Z ) lattice: R and Z, inside and extrapolated, and "
+		      "every field on it -- psi, B_R, B_Z and the rest -- as numpy arrays "
+		      "shaped ( Z, R ), under the .nc's names and with its NaN outside." )
+		.def( "dataset", []( Equilibrium &self ) { return datasetToPython( *self.dataset() ); },
+		      "The whole .nc root group in memory: {'dimensions', 'variables', "
+		      "'attributes'}, each variable {'dimensions', 'values', "
+		      "'attributes'}. The numbers the file holds, from the calls that "
+		      "write it." )
+		.def( "surfaces", []( Equilibrium &self, py::object rho ) -> py::object
+		      {
+		          if ( rho.is_none() )
+		              return datasetToPython( *self.surfaces() );
+		          py::array_t<double, py::array::c_style | py::array::forcecast> labels( rho );
+		          std::vector<py::ssize_t> const shape( labels.shape(), labels.shape() + labels.ndim() );
+		          std::vector<double> const at( labels.data(), labels.data() + labels.size() );
+		          py::dict out;
+		          for ( auto const &quantity : self.surfacesAt( at ) )
+		              out[ py::str( quantity.first ) ] = numbers( quantity.second, shape );
+		          return std::move( out );
+		      },
+		      py::arg( "rho" ) = py::none(),
+		      "The flux surfaces of the solved state. With no argument, the "
+		      "_surfaces.nc root group in memory, as dataset() is the .nc's: the "
+		      "family at [output]'s FluxSurfaceCount, angles and cuts. With rho, "
+		      "an array of sqrt(Psi_N), the family's 1-D quantities there under "
+		      "the file's names, by its monotone cubic; a label outside the cut "
+		      "is refused, not extrapolated. A box support has no closed "
+		      "surfaces and raises meq.ConfigError." )
+		.def( "at", []( Equilibrium &self, py::array_t<double, py::array::c_style | py::array::forcecast> radius,
+		                py::array_t<double, py::array::c_style | py::array::forcecast> z )
+		      {
+		          if ( radius.ndim() != z.ndim() || !std::equal( radius.shape(), radius.shape() + radius.ndim(), z.shape() ) )
+		              throw Failure( "meq: at() takes R and Z of one shape" );
+		          std::vector<py::ssize_t> const shape( radius.shape(), radius.shape() + radius.ndim() );
+		          std::vector<double> const r( radius.data(), radius.data() + radius.size() );
+		          std::vector<double> const height( z.data(), z.data() + z.size() );
+		          meq::Run::Samples const found = self.at( r, height );
+		          py::dict out;
+		          out[ "psi" ] = numbers( found.psi, shape );
+		          out[ "B_R" ] = numbers( found.bR, shape );
+		          out[ "B_Z" ] = numbers( found.bZ, shape );
+		          out[ "inside" ] = numbers( found.inside, shape );
+		          out[ "extrapolated" ] = numbers( found.extrapolated, shape );
+		          return out;
+		      },
+		      py::arg( "R" ), py::arg( "Z" ),
+		      "psi, B_R and B_Z at points (R, Z), arrays of one shape, with the "
+		      "inside and extrapolated masks, under the .nc's names: the write "
+		      "phase's own sampling, so at a node of grid() the values are its. "
+		      "NaN where inside is 0, outside the domain and its band." )
 		.def( "set_profile", &Equilibrium::setProfile, py::arg( "slot" ), py::arg( "table" ),
 		      "Replace one profile, as the constructors' `profiles` does, from "
 		      "the next solve() on." )

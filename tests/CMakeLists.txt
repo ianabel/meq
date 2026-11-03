@@ -874,7 +874,8 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# PythonDriverParity, PythonProfiles and PythonResolve -- the Python module (PY-1 to PY-3)
+# PythonDriverParity, PythonProfiles, PythonResolve and PythonResults -- the
+# Python module (PY-1 to PY-4)
 # ---------------------------------------------------------------------------
 #
 # pytest under the interpreter the module was built for, with this build's
@@ -892,7 +893,11 @@ if(TARGET _meq)
 	add_test(NAME PythonResolve
 		COMMAND "${MEQ_PYTHON_EXECUTABLE}" -m pytest -q -p no:cacheprovider
 			"${CMAKE_SOURCE_DIR}/tests/python/test_resolve.py")
-	set_tests_properties(PythonDriverParity PythonProfiles PythonResolve PROPERTIES
+	# PythonResults: the solved state in memory, under the .nc's names (PY-4).
+	add_test(NAME PythonResults
+		COMMAND "${MEQ_PYTHON_EXECUTABLE}" -m pytest -q -p no:cacheprovider
+			"${CMAKE_SOURCE_DIR}/tests/python/test_results.py")
+	set_tests_properties(PythonDriverParity PythonProfiles PythonResolve PythonResults PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1;PYTHONPATH=${MEQ_PYTHON_ROOT}:${CMAKE_SOURCE_DIR}/tests/python;PYTHONPYCACHEPREFIX=${CMAKE_BINARY_DIR}/pycache;MEQ_SOURCE_DIR=${CMAKE_SOURCE_DIR};MEQ_DRIVER_PATH=$<TARGET_FILE:meq>;MEQ_RUN_PATH=${CMAKE_BINARY_DIR}/meq-run")
 else()
 	message(STATUS "meq: PythonDriverParity not registered (no Python module in this build)")
