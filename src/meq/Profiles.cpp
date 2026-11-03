@@ -700,12 +700,38 @@ namespace meq
 		return scale*span*span*inPsi->doublePrime( labels->boundary + span*psi );
 	}
 
+	CompositeProfile::CompositeProfile( std::shared_ptr<Profile const> outerIn,
+	                                    std::shared_ptr<Profile const> innerIn )
+		: outer( std::move( outerIn ) ), inner( std::move( innerIn ) )
+	{
+		if ( !outer || !inner )
+			throw std::invalid_argument( "meq::CompositeProfile: a null profile" );
+	}
+
+	double CompositeProfile::operator()( double psi ) const
+	{
+		return ( *outer )( ( *inner )( psi ) );
+	}
+
+	double CompositeProfile::prime( double psi ) const
+	{
+		return outer->prime( ( *inner )( psi ) )*inner->prime( psi );
+	}
+
+	double CompositeProfile::doublePrime( double psi ) const
+	{
+		double const x = ( *inner )( psi );
+		double const slope = inner->prime( psi );
+		return outer->doublePrime( x )*slope*slope + outer->prime( x )*inner->doublePrime( psi );
+	}
+
 	std::shared_ptr<Profile const> profileFromTable( ProfileTable const & table )
 	{
 		switch ( table.abscissa )
 		{
 			case ProfileAbscissa::Psi:
 			case ProfileAbscissa::PoloidalFlux:
+			case ProfileAbscissa::RMidplane:
 				return std::make_shared<SplineProfile const>( table.knots );
 
 			case ProfileAbscissa::PsiN:
@@ -814,10 +840,13 @@ namespace meq
 			return ProfileAbscissa::SqrtPsiN;
 		if ( name == "psi" )
 			return ProfileAbscissa::PoloidalFlux;
+		if ( name == "R_midplane" )
+			return ProfileAbscissa::RMidplane;
 		throw std::invalid_argument(
 			"meq: no abscissa \"" + name + "\": a table is in \"Psi\" (MEQ's "
 			"normalised flux, 1 at the axis), \"psi_n\" (1 - Psi, 0 at the axis), "
-			"\"sqrt_psi_n\", or \"psi\" (the poloidal flux itself, Wb/rad)" );
+			"\"sqrt_psi_n\", \"psi\" (the poloidal flux itself, Wb/rad), or "
+			"\"R_midplane\" (m, where a mirror's surface crosses z = 0)" );
 	}
 
 	char const * profileAbscissaName( ProfileAbscissa abscissa )
@@ -832,6 +861,8 @@ namespace meq
 				return "sqrt_psi_n";
 			case ProfileAbscissa::PoloidalFlux:
 				return "psi";
+			case ProfileAbscissa::RMidplane:
+				return "R_midplane";
 		}
 		return "?";
 	}

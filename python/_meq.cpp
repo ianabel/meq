@@ -41,6 +41,7 @@
 #include <unistd.h>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -234,6 +235,18 @@ namespace
 				raiseFor( run->writeRestart( restart ), "solve" );
 				meq::RunOptions again = options;
 				again.restartFrom = restart + ".nc";
+				// AN R_midplane TABLE IS HELD AT THE LAST ANSWER'S CROSSING, so
+				// solving again with the tables unchanged moves the map to the
+				// new answer's: the held map's outer loop. A support that is not
+				// a box has no crossing to hold, and the source factory refuses
+				// the table by its key, source.SupportShape.
+				for ( auto const &entry : options.profiles )
+					if ( entry.second.abscissa == meq::ProfileAbscissa::RMidplane )
+					{
+						if ( run->supportIsBox() )
+							again.heldCrossing = crossingOrRaise();
+						break;
+					}
 				auto next = std::make_unique<meq::Run>( again );
 				raiseFor( next->prepare(), "solve" );
 				raiseFor( next->solve(), "solve" );
@@ -251,7 +264,30 @@ namespace
 				return code == meq::Solved;
 			}
 
+			/// The solved state's midplane crossing, R_0( Psi ).
+			std::vector<meq::Knot> crossing()
+			{
+				return crossingOrRaise();
+			}
+
 		private:
+			std::vector<meq::Knot> crossingOrRaise()
+			{
+				try
+				{
+					return run->midplaneCrossing();
+				}
+				catch ( std::logic_error const &error )
+				{
+					throw ConfigFailure( std::string( "meq: " ) + error.what() );
+				}
+				catch ( std::runtime_error const &error )
+				{
+					throw SolveFailure( std::string( "meq: the answer has no single midplane "
+					                                 "crossing: " ) + error.what() );
+				}
+			}
+
 			meq::RunOptions options;
 			std::unique_ptr<meq::Run> run;
 			bool solved = false;
@@ -306,9 +342,10 @@ PYBIND11_MODULE( _meq, m )
 		"A profile as arrays: x, the value and its derivative in x, in the "
 		"abscissa named -- \"Psi\" (MEQ's normalised flux, 1 at the axis or a "
 		"mirror's inner label, what a profile file is in), \"psi_n\" (1 - Psi), "
-		"\"sqrt_psi_n\", or \"psi\" (the poloidal flux itself, Wb/rad, which a "
-		"normalised source takes only with every profile in psi). Units are "
-		"the configuration key's." )
+		"\"sqrt_psi_n\", \"psi\" (the poloidal flux itself, Wb/rad, which a "
+		"normalised source takes only with every profile in psi), or "
+		"\"R_midplane\" (m, a mirror's, held at the last answer's crossing). "
+		"Units are the configuration key's." )
 		.def( py::init( []( std::vector<double> const &x,
 		                    std::vector<double> const &value,
 		                    std::vector<double> const &derivative,
@@ -405,6 +442,24 @@ PYBIND11_MODULE( _meq, m )
 		      "resolve against base_dir, as a file's do against its own "
 		      "directory; empty leaves them relative to the working directory. "
 		      "`name` stands for the file in messages and in the output." )
+		.def( "midplane_crossing", []( Equilibrium &self )
+		      {
+		          std::vector<double> psi, radius, slope;
+		          for ( meq::Knot const &k : self.crossing() )
+		          {
+		              psi.push_back( k.psi );
+		              radius.push_back( k.value );
+		              slope.push_back( k.derivative );
+		          }
+		          py::dict out;
+		          out[ "Psi" ] = psi;
+		          out[ "R" ] = radius;
+		          out[ "dR_dPsi" ] = slope;
+		          return out;
+		      },
+		      "The solved state's midplane crossing: R where each surface crosses "
+		      "z = 0, against Psi, with its slope, as a dict of lists. A mirror's; "
+		      "an R_midplane table of the next solve is held at it." )
 		.def( "set_profile", &Equilibrium::setProfile, py::arg( "slot" ), py::arg( "table" ),
 		      "Replace one profile, as the constructors' `profiles` does, from "
 		      "the next solve() on." )

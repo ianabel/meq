@@ -739,6 +739,7 @@ struct meq::Run::Impl
 		  baseDirectory( options.baseDirectory ),
 		  profiles( options.profiles ),
 		  restartFrom( options.restartFrom ),
+		  heldCrossing( options.heldCrossing ),
 		  version( options.version ),
 		  deviceName( options.deviceName ),
 		  deviceGiven( options.deviceGiven ),
@@ -763,6 +764,17 @@ struct meq::Run::Impl
 	std::string const baseDirectory;
 	meq::ProfileTables const profiles;
 	std::string const restartFrom;
+	std::vector<meq::Knot> const heldCrossing;
+
+	/// heldCrossing as the profile the factories compose with, or null.
+	std::shared_ptr<meq::Profile const> heldCrossingProfile() const
+	{
+		if ( heldCrossing.empty() )
+			return nullptr;
+		return std::make_shared<meq::SplineProfile const>( heldCrossing );
+	}
+
+	std::vector<meq::Knot> answerCrossing();
 	/// writeRestart()'s stem while it writes, and empty otherwise.
 	std::string restartStem;
 	std::string const version;
@@ -952,6 +964,43 @@ int meq::Run::solve()
 	int const code = runPhase( [ this ]() { return impl->solve(); } );
 	stage = code == Solved ? Stage::Solved : Stage::Failed;
 	return code;
+}
+
+std::vector<meq::Knot> meq::Run::Impl::answerCrossing()
+{
+	if ( !config->getSource().supportIsBox() )
+		throw std::logic_error( "meq::Run::midplaneCrossing(): a midplane crossing is a "
+		                        "mirror's, and this support is not a box" );
+	// The write phase's reading of the answer, the same three steps: the
+	// field along z = 0, in Psi by the answer's labels, and its crossings.
+	double const axis = solver->psiAxis();
+	double const boundary = solver->psiBoundary();
+	double rMin = 0.0, rMax = 0.0;
+	meq::MidplaneField const physical = solver->midplaneField( rMin, rMax );
+	meq::MidplaneField const inPsi = [ & ]( double radius, double &x, double &dXdR )
+	{
+		double value = 0.0, slope = 0.0;
+		if ( !physical( radius, value, slope ) )
+			return false;
+		x = ( value - boundary )/( axis - boundary );
+		dXdR = slope/( axis - boundary );
+		return true;
+	};
+	return meq::tabulateMidplaneCrossing( inPsi, rMin, rMax, 0.0, 1.0 )->knots();
+}
+
+std::vector<meq::Knot> meq::Run::midplaneCrossing()
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::midplaneCrossing(): there is no solved state" );
+	return impl->answerCrossing();
+}
+
+bool meq::Run::supportIsBox() const
+{
+	if ( !impl->config )
+		throw std::logic_error( "meq::Run::supportIsBox(): the run is not prepared" );
+	return impl->config->getSource().supportIsBox();
 }
 
 int meq::Run::writeRestart( std::string const &stem )
@@ -1640,7 +1689,8 @@ int meq::Run::Impl::configure()
 
 		if ( config->getSource().isNormalised() )
 		{
-			auto plasma = meq::makeNormalisedSource( config->getSource(), argument, profiles );
+			auto plasma = meq::makeNormalisedSource( config->getSource(), argument, profiles,
+			                                         heldCrossingProfile() );
 			psiAxisGuess = config->getSource().psiAxisGuess();
 			xPointSeedR = config->getBoundary().xpoint.radius;
 			xPointSeedZ = config->getBoundary().xpoint.z;
@@ -1723,7 +1773,8 @@ int meq::Run::Impl::configure()
 		}
 		else
 		{
-			auto plasma = meq::makeSource( config->getSource(), argument, profiles );
+			auto plasma = meq::makeSource( config->getSource(), argument, profiles,
+			                               heldCrossingProfile() );
 
 			if ( coils )
 			{

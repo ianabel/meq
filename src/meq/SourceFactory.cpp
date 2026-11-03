@@ -129,9 +129,10 @@ namespace meq
 		{
 			public:
 				TableLookup( ProfileTables const &tablesIn, bool normalisedIn,
+				             bool boxIn, std::shared_ptr<Profile const> crossingIn,
 				             std::string const &configFileNameIn )
-					: tables( tablesIn ), normalised( normalisedIn ),
-					  configFileName( configFileNameIn )
+					: tables( tablesIn ), normalised( normalisedIn ), box( boxIn ),
+					  crossing( std::move( crossingIn ) ), configFileName( configFileNameIn )
 				{
 				}
 
@@ -170,8 +171,28 @@ namespace meq
 							+ ", a normalised flux, and this source is not normalised: "
 							"its profiles are functions of psi itself, so a table is in "
 							"\"psi\"" );
+					if ( abscissa == ProfileAbscissa::RMidplane )
+					{
+						if ( !box )
+							throw ConfigError( configFileName, "source.SupportShape",
+								"the table for \"" + slot + "\" is in R_midplane, a "
+								"mirror's: beside a located axis each surface crosses "
+								"z = 0 twice, and which crossing is meant is not a choice "
+								"to make by default. It takes SupportShape = \"box\"" );
+						if ( !crossing )
+							throw ConfigError( configFileName, "source",
+								"the table for \"" + slot + "\" is in R_midplane, which "
+								"is mapped into Psi through a midplane crossing held for "
+								"the solve, the last answer's -- and there is no answer "
+								"before the first solve. Solve once with the profiles in "
+								"Psi, psi_n, sqrt_psi_n or psi, or from the file, and "
+								"then set it" );
+					}
 					try
 					{
+						if ( abscissa == ProfileAbscissa::RMidplane )
+							return std::make_shared<CompositeProfile const>(
+								profileFromTable( found->second ), crossing );
 						if ( normalised && abscissa == ProfileAbscissa::PoloidalFlux )
 						{
 							inFlux.push_back( slot );
@@ -269,6 +290,8 @@ namespace meq
 			private:
 				ProfileTables const &tables;
 				bool normalised;
+				bool box;
+				std::shared_ptr<Profile const> crossing;
 				std::string const &configFileName;
 				std::vector<std::string> taken;
 				std::vector<std::string> inFlux;
@@ -432,9 +455,11 @@ namespace meq
 
 	std::shared_ptr<Source const> makeSource( SourceConfig const &config,
 	                                          std::string const &configFileName,
-	                                          ProfileTables const &tables )
+	                                          ProfileTables const &tables,
+	                                          std::shared_ptr<Profile const> crossing )
 	{
-		TableLookup lookup( tables, config.isNormalised(), configFileName );
+		TableLookup lookup( tables, config.isNormalised(), config.supportIsBox(),
+		                    std::move( crossing ), configFileName );
 		refuseTablesFor( lookup, config, configFileName );
 
 		// A NORMALISED SOURCE MUST NOT COME OUT OF HERE, and the reason is that
@@ -509,9 +534,11 @@ namespace meq
 
 	std::shared_ptr<NormalisedSource> makeNormalisedSource( SourceConfig const &config,
 	                                                        std::string const &configFileName,
-	                                                        ProfileTables const &tables )
+	                                                        ProfileTables const &tables,
+	                                                        std::shared_ptr<Profile const> crossing )
 	{
-		TableLookup lookup( tables, config.isNormalised(), configFileName );
+		TableLookup lookup( tables, config.isNormalised(), config.supportIsBox(),
+		                    std::move( crossing ), configFileName );
 		refuseTablesFor( lookup, config, configFileName );
 
 		if ( !config.isNormalised() )

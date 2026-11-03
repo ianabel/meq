@@ -90,7 +90,7 @@ Seven decisions in it, each with its reason:
    | `"psi"` | poloidal flux, Wb/rad, the total the `.nc`'s `psi` is | yes, through the labels |
    | `"psi_n"` | normalised poloidal flux, 0 at the axis or the inner label, 1 at `ψ_bnd`: geq's `ψ_n`, MEQ's `1 − Ψ` | no |
    | `"sqrt_psi_n"` | `√ψ_n` | no |
-   | `"R_midplane"` | the radius, m, where the surface crosses `z = 0` | yes, through the crossing |
+   | `"R_midplane"` | the radius, m, where the surface crosses `z = 0`; a box mirror's | held at the last answer's crossing |
 
    **A name, not a default**, because the `ψ_n`/`Ψ` swap is a known silent
    trap: tables read in the wrong one converge, at full order, to an answer
@@ -142,7 +142,7 @@ Each stage ends at a measured, asserted result, as every stage here does.
 | PY-0 | `meq::Run`, the run out of `main()` | `meq` unchanged, to the byte — **done** |
 | PY-1 | the `_meq` extension and the `meq` package; `Equilibrium( file )`, `from_dict`, `solve`, `write` | Python's `.nc` equals `meq`'s, every coefficient — **done** |
 | PY-2 | species profiles from arrays, on the fixed abscissae `psi_n` and `sqrt_psi_n` | a slot set from a file's knots equals the file, to the bit — **done** |
-| PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer — **`psi` done; `R_midplane` not built** |
+| PY-2b | the moving abscissae, `psi` and `R_midplane` | Newton stays quadratic; a moving table equals the fixed table it maps to at the answer — **done: `psi` exactly, `R_midplane` as a held map** |
 | PY-3 | repeated solves: warm, frozen mesh, transactional failure | the three properties below, asserted — **done**, adaptive configurations solving once |
 | PY-4 | results in memory: scalars, `grid()`, `psi`/`B` at points, `surfaces()` | equal to the `.nc` and `_surfaces.nc` the same run writes |
 | PY-5 | a mirror's transport geometry | closed-form and finite-difference checks, below |
@@ -352,14 +352,34 @@ zero, which is a `d( g²/2 )/dψ` that moves with the span; and a midplane
 gauge, whose crossings are tabulated in `Ψ` and bring the labels back. Mixed
 abscissae are the next thing to build if a caller needs them.
 
-**`R_midplane` is not built.** It makes `x` depend on the surface's crossing,
-which only the midplane gauge carries as border unknowns, `R₀` at 32 knots in
-`Ψ` (`GradShafranovSolver::setMidplaneGaugeKnots()`, M-283), and a table in
-`R` then enters `F` through those knots, so its derivatives join the gauge's
-border columns. It would be refused beside a located axis, since a tokamak
-surface crosses `z = 0` twice. The acceptance stays: Newton quadratic, as
-M-283's is, and a table in `R_midplane`, re-expressed in `psi_n` through the
-answer's own crossings, giving the same answer to the tabulation.
+**`R_midplane` is done, as a held map, not as border unknowns.** A table in
+`R` is composed with a crossing `R₀( Ψ )` that is HELD for the solve: the
+last answer's, read off its own field along `z = 0` and its labels as the
+`.nc`'s true-midplane densities are (`Run::midplaneCrossing()`,
+`meq::tabulateMidplaneCrossing()`), and composed as
+`meq::CompositeProfile`, `g = outer( R₀ )` with its derivatives by the chain
+rule. Inside one solve the map is fixed, so Newton is the `Ψ` table's and
+stays quadratic; each `solve()` re-reads the crossing from the answer it
+starts from, so repeated solves are a fixed-point iteration on the map, which
+is where an outer transport loop already iterates. The alternative, the
+crossing as border unknowns (the midplane gauge's 32 knots, M-283), would
+couple every table's derivatives into the gauge's border columns, and is not
+needed unless a caller wants one solve to be the converged map.
+`eq.midplane_crossing()` returns the crossing, `Psi`, `R` and `dR_dPsi` as
+lists, for a caller to build its tables from.
+
+**Measured on `mirror-rotating`** (`PythonProfiles`): its four profiles
+re-expressed in `R` through the crossing of the solve from its files
+re-solve to that answer, 1.3e-12 of `max |ψ|`, in one Newton step, then in
+none. With `Omega` 10% up in `R`, successive re-solves move by 1.4e-04,
+7.0e-06, 2.7e-07, 9.6e-09, 3.4e-10, 1.2e-11, 4.2e-13, 1.5e-14 of `max |ψ|`:
+linear, about 30× a solve, each in one to three Newton steps.
+
+**What `R_midplane` refuses**: a support that is not `SupportShape = "box"`,
+by that key, since beside a located axis each surface crosses `z = 0` twice;
+and a first solve, which has no answer to hold a crossing at (solve once in
+any other abscissa, or from the files). A `CompositeProfile` is not a
+`SplineProfile`, so a source holding one evaluates on the host.
 
 **PY-3: repeated solves — done.** `Equilibrium.set_profile( slot, table )`
 replaces a profile, and `solve()` may be called again. **A re-solve is a new
@@ -486,6 +506,6 @@ the validation tool for the tight one.
    position-independent OpenMP runtime built from GCC's or LLVM's sources,
    linked into the module. Not attempted; `import meq` first is the rule
    until something needs more.
-2. **Which abscissa MaNTA's mirror case uses.** `Psi`, `psi_n`, `sqrt_psi_n`
-   and `psi` are served; `R_midplane` is not built (PY-2b). It decides
-   whether the first loop needs it.
+2. **Which abscissa MaNTA's mirror case uses.** All five are served;
+   `R_midplane` is a held map (PY-2b), so a loop in it iterates the map with
+   its own outer iteration.

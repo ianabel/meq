@@ -481,7 +481,9 @@ namespace meq
 	 * rho. `PoloidalFlux` is psi itself, Wb/rad, the total flux the .nc's
 	 * `psi` is: what an unnormalised source's profiles are functions of, and
 	 * for a normalised one a map that moves with the labels
-	 * (meq::FluxTableProfile).
+	 * (meq::FluxTableProfile). `RMidplane` is the radius, m, where the
+	 * surface crosses z = 0: a mirror's, mapped through a crossing R_0( Psi )
+	 * HELD for the solve (meq::CompositeProfile, makeNormalisedSource()).
 	 *
 	 * **A NAME, NOT A DEFAULT, WHEREVER A CALLER CHOOSES ONE**: tables read in
 	 * psi_n where Psi was meant converge, at full order, to an answer 8.56e-04
@@ -492,7 +494,8 @@ namespace meq
 		Psi,
 		PsiN,
 		SqrtPsiN,
-		PoloidalFlux
+		PoloidalFlux,
+		RMidplane
 	};
 
 	/// One profile handed in as a table in place of a file: knots in
@@ -516,7 +519,9 @@ namespace meq
 	 *
 	 * `Psi` is the table's own SplineProfile, to the bit, and so is
 	 * `PoloidalFlux`, a profile of psi for a source whose argument is psi; a
-	 * normalised source wraps it in a FluxTableProfile. `PsiN` is
+	 * normalised source wraps it in a FluxTableProfile. So is `RMidplane`, a
+	 * profile of R, which a normalised source composes with its held
+	 * crossing (CompositeProfile). `PsiN` is
 	 * RE-KNOTTED EXACTLY: x = 1 - Psi is affine, and a Hermite cubic composed
 	 * with an affine map is the Hermite cubic on the mapped knots, so the knots
 	 * reverse, each abscissa becomes 1 - x and each slope changes sign.
@@ -597,14 +602,41 @@ namespace meq
 			int power;
 	};
 
+	/**
+	 * A PROFILE OF A PROFILE: g( x ) = outer( inner( x ) ), with
+	 * g' = outer'( inner ) inner' and g'' = outer''( inner ) inner'^2
+	 * + outer'( inner ) inner'', each the exact derivative of the one before.
+	 * What an `RMidplane` table is to a normalised source: outer the table in
+	 * R, inner the held crossing R_0( Psi ). Outside inner's range inner
+	 * clamps, so g holds outer's value there with no slope.
+	 *
+	 * Not a SplineProfile, so the device path does not read it (meq::
+	 * SourceView) and a source holding one evaluates on the host.
+	 */
+	class CompositeProfile : public Profile
+	{
+		public:
+			/// @throws std::invalid_argument for either null.
+			CompositeProfile( std::shared_ptr<Profile const> outerIn,
+			                  std::shared_ptr<Profile const> innerIn );
+
+			double operator()( double psi ) const override;
+			double prime( double psi ) const override;
+			double doublePrime( double psi ) const override;
+
+		private:
+			std::shared_ptr<Profile const> outer;
+			std::shared_ptr<Profile const> inner;
+	};
+
 	/// How far past the axis a `SqrtPsiN` table that reaches it is continued,
 	/// linearly, by profileFromTable(): rho cannot name Psi > 1, and an
 	/// overshooting iterate needs a profile there that is C^1 through the axis.
 	/// rotating-normalised's own table reaches as far.
 	inline constexpr double sqrtPsiNBeyondAxis = 1.5;
 
-	/// "Psi", "psi_n", "sqrt_psi_n", "psi": the names a front end takes.
-	/// @throws std::invalid_argument naming the four for any other.
+	/// "Psi", "psi_n", "sqrt_psi_n", "psi", "R_midplane": the names a front
+	/// end takes. @throws std::invalid_argument naming the five for any other.
 	ProfileAbscissa profileAbscissaNamed( std::string const & name );
 	char const * profileAbscissaName( ProfileAbscissa abscissa );
 

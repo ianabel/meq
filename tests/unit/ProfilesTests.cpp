@@ -949,10 +949,12 @@ BOOST_AUTO_TEST_CASE( theAbscissaeAreNamedAndNothingElseIs )
 	for ( meq::ProfileAbscissa const abscissa : { meq::ProfileAbscissa::Psi,
 	                                              meq::ProfileAbscissa::PsiN,
 	                                              meq::ProfileAbscissa::SqrtPsiN,
-	                                              meq::ProfileAbscissa::PoloidalFlux } )
+	                                              meq::ProfileAbscissa::PoloidalFlux,
+	                                              meq::ProfileAbscissa::RMidplane } )
 		BOOST_TEST( ( meq::profileAbscissaNamed( meq::profileAbscissaName( abscissa ) )
 		              == abscissa ) );
 	BOOST_TEST( ( meq::profileAbscissaNamed( "psi" ) == meq::ProfileAbscissa::PoloidalFlux ) );
+	BOOST_TEST( ( meq::profileAbscissaNamed( "R_midplane" ) == meq::ProfileAbscissa::RMidplane ) );
 	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "rho" ), std::invalid_argument );
 	BOOST_CHECK_THROW( meq::profileAbscissaNamed( "PSI" ), std::invalid_argument );
 }
@@ -993,4 +995,42 @@ BOOST_AUTO_TEST_CASE( aTableInPsiReadsItsLabels )
 		}
 	}
 	BOOST_CHECK_THROW( meq::FluxTableProfile( table, labels, 2 ), std::invalid_argument );
+}
+
+// A profile of a profile: outer( inner( x ) ) and its first two derivatives by
+// the chain rule, against the closed form of sin( x^2 + x ). Both splines are
+// fine enough that the comparison is of the composition, not the tables.
+BOOST_AUTO_TEST_CASE( aCompositeProfileIsTheChainRule )
+{
+	auto const table = []( auto f, auto fp, double from, double to, int n )
+	{
+		std::vector<meq::Knot> knots;
+		for ( int i = 0; i <= n; ++i )
+		{
+			double const x = from + ( to - from )*i/n;
+			knots.push_back( meq::Knot{ x, f( x ), fp( x ) } );
+		}
+		return std::make_shared<meq::SplineProfile const>( knots );
+	};
+	auto const outer = table( []( double u ) { return std::sin( u ); },
+	                          []( double u ) { return std::cos( u ); }, -0.5, 2.5, 400 );
+	auto const inner = table( []( double x ) { return x*x + x; },
+	                          []( double x ) { return 2.0*x + 1.0; }, 0.0, 1.0, 4 );
+	meq::CompositeProfile const g( outer, inner );
+
+	for ( double const x : { 0.05, 0.3, 0.55, 0.8, 0.97 } )
+	{
+		double const u = x*x + x, du = 2.0*x + 1.0, ddu = 2.0;
+		BOOST_TEST( g( x ) == std::sin( u ), boost::test_tools::tolerance( 1.0e-10 ) );
+		BOOST_TEST( g.prime( x ) == std::cos( u )*du, boost::test_tools::tolerance( 1.0e-6 ) );
+		BOOST_TEST( g.doublePrime( x ) == -std::sin( u )*du*du + std::cos( u )*ddu,
+		            boost::test_tools::tolerance( 1.0e-4 ) );
+	}
+
+	// Past inner's range inner clamps: outer's value there, and no slope.
+	BOOST_TEST( g( 1.3 ) == ( *outer )( 2.0 ), boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( g.prime( 1.3 ) == 0.0 );
+
+	BOOST_CHECK_THROW( meq::CompositeProfile( nullptr, inner ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CompositeProfile( outer, nullptr ), std::invalid_argument );
 }
