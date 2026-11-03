@@ -162,9 +162,9 @@ one input not drawn from the problem file.
 | | | acceptance | |
 |---|---|---|---|
 | **IR-0** | the four arms on F shaped at one rung each, untimed | every arm's record has rows met and currents within M-255's floor of the others | **done** |
-| **IR-1** | F shaped, every rung, both starts, timed | a Pareto front per code; the finest rungs self-converged | **done**, `race-runs/ir1-f-final`; MEQ re-run as `ir3-f`, under `../runs/freegs4e-benchmark/race-runs/` and untracked |
-| **IR-2** | C, D, E, G shaped, one invocation each | the same, and the DNFs with their reasons | **C and D done**, `race-runs/ir2-c`, `ir2-d-final`, MEQ re-run as `ir3-c`, `ir3-d` beside `ir3-f`; on C MEQ converges at two rungs of six (`PERFORMANCE_TODO.md`) and NICE reaches only a best fit. **E and G not run** |
-| **IR-3** | the publication | a new `M-nn` per start: per case and target the cheapest run of each code, the cross-code floor beside it | **open**: the results are the Claude Docs artifact *Inverse race: F, C and D shaped* (`claude.ai/artifact/WAq3D1udMQakGMYyvHdL1g`) and no `M-nn` is written |
+| **IR-1** | F shaped, every rung, both starts, timed | a Pareto front per code; the finest rungs self-converged | **done**, `race-runs/ir1-f-final`; MEQ re-run as `ir4-f`, under `../runs/freegs4e-benchmark/race-runs/` and untracked |
+| **IR-2** | C, D, E, G shaped, one invocation each | the same, and the DNFs with their reasons | **C and D done**, `race-runs/ir2-c`, `ir2-d-final`, MEQ re-run as `ir4-c`, `ir4-d` beside `ir4-f`, every MEQ run accepted; on C NICE reaches only a best fit. **E and G not run** |
+| **IR-3** | the publication | a new `M-nn` per start: per case and target the cheapest run of each code, the cross-code floor beside it | **done for F, C and D**: cold [M-343](MEASUREMENTS.md#m-343), warm [M-344](MEASUREMENTS.md#m-344). The Claude Docs artifact *Inverse race: F, C and D shaped* (`claude.ai/artifact/WAq3D1udMQakGMYyvHdL1g`) quotes the earlier MEQ stage, `0e7177a` |
 
 ## 9. What the result can and cannot say
 

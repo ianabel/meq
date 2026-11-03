@@ -72,12 +72,12 @@ alone.**
 
 The flag is `NewtonStepProfile --source-extra N`. **RUN, AND THE CASE IS NOT
 DEAD — BUT THE KNOB ALONE TAKES MOST OF IT** → **[M-314](MEASUREMENTS.md#m-314)**.
-`T(16) − T(6)` is 12–17% of a threaded step and 27–37% of a serial one,
+`T(16) − T(6)` is 13–18% of a threaded step and 26–33% of a serial one,
 outside the scatter, all of it in the residual and gradient legs, and the
 threaded bound is about §3.4's ceiling. But at `extraOrder = 0` no smooth
 fixture's rate moves by more than 0.004, so the competitor is the knob at 0
 and not the shipped 4: what an interpolatory port could add beyond it is the
-remaining six points, **7–10% threaded**, before its own nodal evaluations and
+remaining six points, **8–11% threaded**, before its own nodal evaluations and
 GEMMs. **§0.3 now carries more of the argument than this section does.**
 
 **AND THE KNOB DOES NOT REACH THE LINEAR PATH**: `setSource( mfem::Coefficient & )`
@@ -821,8 +821,7 @@ not at "it runs". Every stage runs against the quadrature control of §4.1.
 
 ### IH-0 — the falsifier (§0.1), before anything is written — RUN, NOT A STOP
 
-**Three repeats of five**, the gate shut for the last two by another
-session's load; the verdict is not close at three. → **[M-314](MEASUREMENTS.md#m-314)**.
+**Five repeats**, and the verdict is not close. → **[M-314](MEASUREMENTS.md#m-314)**.
 
 **Do**: add `--source-extra N` to `tests/performance/NewtonStepProfile.cpp`,
 rebuild `-j6`, run `extraOrder ∈ { 4, 2, 0 }` × three cases, medians of five,

@@ -20855,39 +20855,40 @@ second column of the A and E rows, red under the argmax.
 ### M-314
 
 **IH-0, THE INTERPOLATORY-HDG PERFORMANCE FALSIFIER: DROPPING THE SOURCE RULE
-FROM 16 TO 6 POINTS TAKES 12–37% OFF A STEP, SO THE PERFORMANCE CASE IS NOT
+FROM 16 TO 6 POINTS TAKES 13–33% OFF A STEP, SO THE PERFORMANCE CASE IS NOT
 DEAD — BUT THE KNOB ALONE TAKES MOST OF IT.**
 `tests/performance/NewtonStepProfile --source-extra N`, `N ∈ {4, 2, 0}` at
 `k = 2` — 16, 12 and 6 points per straight triangle from `mfem::IntRules`
 (order 8, 6, 4; `OrderW() = 0`), as `INTERPOLATORY-HDG-PLAN.md` §0.1 said.
 `OMP_NUM_THREADS=8`, `MKL_NUM_THREADS=1`, PARDISO; each arm one process at the
 binary's median of five, the three arms interleaved 4, 2, 0 within a repeat,
-each repeat gated at 1-min load < 1.0. **Three repeats, not five**: the gate
-opened for one twenty-minute window. Commit `4cf1ecf` plus the flag.
+each repeat gated at 1-min load < 1.0. Five repeats, every arm started under
+1.0 at 1-min load. Commit `4cf1ecf` plus the flag, one frozen binary for all
+five.
 
 | case | assembly | T(16) s | T(16) − T(6), paired median | of T(16) | bound (16/10)·d | of T(16) |
 |---|---|---|---|---|---|---|
-| example5 k=2 n=24 | serial | 0.2190 | 0.0629 | **28.7%** | 0.1006 | 46.0% |
-| example5 k=2 n=24 | threaded | 0.0898 | 0.0150 | **16.7%** | 0.0240 | 26.7% |
-| pedestal k=2 n=32 | serial | 0.4747 | 0.1264 | **26.6%** | 0.2022 | 42.6% |
-| pedestal k=2 n=32 | threaded | 0.1937 | 0.0292 | **15.1%** | 0.0467 | 24.1% |
-| highbeta k=2 n=16 | serial | 0.1640 | 0.0598 | **36.5%** | 0.0957 | 58.3% |
-| highbeta k=2 n=16 | threaded | 0.0549 | 0.0067 | **12.2%** | 0.0107 | 19.5% |
+| example5 k=2 n=24 | serial | 0.2103 | 0.0543 | **25.8%** | 0.0869 | 41.3% |
+| example5 k=2 n=24 | threaded | 0.0849 | 0.0150 | **17.7%** | 0.0240 | 28.3% |
+| pedestal k=2 n=32 | serial | 0.4153 | 0.1189 | **28.6%** | 0.1902 | 45.8% |
+| pedestal k=2 n=32 | threaded | 0.1793 | 0.0292 | **16.3%** | 0.0467 | 26.1% |
+| highbeta k=2 n=16 | serial | 0.1485 | 0.0488 | **32.9%** | 0.0781 | 52.6% |
+| highbeta k=2 n=16 | threaded | 0.0522 | 0.0068 | **13.0%** | 0.0109 | 20.8% |
 
 **OUTSIDE THE SCATTER, AND THE LEGS SAY WHY.** Every paired difference is
 positive, and the whole of it lands in the residual and gradient legs:
 `ComputeH`, factor, backsolve and `other` are flat across the three arms, as
 are the Newton and factorisation counts. The residual leg's min–max at 16
-points and at 6 does not overlap on any row (highbeta threaded: 0.0182–0.0201
-against 0.0118–0.0123), which is what carries the one median, 12.2%, that
+points and at 6 does not overlap on any row (highbeta threaded: 0.0165–0.0201
+against 0.0100–0.0123), which is what carries the one median, 13.0%, that
 sits inside M-80's 1.4–14% band. The in-process spread here reproduces that
-band, 2–26%.
+band, 2–26%, bar one arm at 49% (repeat 1, highbeta serial at 16 points).
 
-**THE THREADED BOUND IS THE §3.4 AMDAHL CEILING, NEAR ENOUGH** — 26.7 / 24.1 /
-19.5% against ≤ 25.4 / 23.4 / 28.1% — so source quadrature is most of what the
+**THE THREADED BOUND IS THE §3.4 AMDAHL CEILING, NEAR ENOUGH** — 28.3 / 26.1 /
+20.8% against ≤ 25.4 / 23.4 / 28.1% — so source quadrature is most of what the
 element-local legs could give up. Read the bound to one figure: per-point cost
-is not linear in `N_q` at three repeats (16→12 and 12→6 differ by up to 7×
-on example5 threaded), and it assumes the interpolatory route does not also
+is not linear in `N_q` (per point, 16→12 and 12→6 differ by 7.2× on
+example5 threaded and by 2× the other way on three rows), and it assumes the interpolatory route does not also
 remove the integrator's per-element fixed cost, which a change in `N_q`
 cannot see.
 
@@ -20896,8 +20897,8 @@ rate in `SolovievConvergence` or `NewtonConvergence` moves by more than 0.004
 at the finest mesh, Newton stays quadratic, and the coarse-mesh errors are
 marginally smaller. So the over-integration buys nothing on a smooth source.
 What an interpolatory port could add beyond lowering the knob is the
-remaining six points, `0.6·d`: **10.0 / 9.0 / 7.3%** threaded, 17.2 / 16.0 /
-21.9% serial, before its own ten nodal evaluations and GEMMs are paid.
+remaining six points, `0.6·d`: **10.6 / 9.8 / 7.8%** threaded, 15.5 / 17.2 /
+19.7% serial, before its own ten nodal evaluations and GEMMs are paid.
 The four extra orders are there for a support that stops inside an element
 (`PlasmaEdgeConvergence`), which none of these fixtures has.
 
@@ -20910,12 +20911,10 @@ checks), which want the two `setSource()` overloads on one rule; both are
 green again when the linear rule moves with it. The rates above were taken
 through an uncommitted environment-variable patch that moved both.
 
-**What is left of IH-0**: repeats four and five, which another session's
-solver kept the gate shut for. The tables above are three repeats.
-
 **Reproduce.** `tests/performance/newton-step-profile.sh <build> 5 N`, or the
 gated, interleaved driver as run: `runs/ih0/ih0-timing.sh` (`REPEATS=5
-START_AT=4` resumes it), parsed by `runs/ih0/ih0-parse.py`; the raw records,
+START_AT=4` resumes it), parsed by `runs/ih0/ih0-parse.py` into
+`runs/ih0/ih0-tables-r5.md`; the raw records,
 the rates outputs and the local patch they were taken through are in
 `runs/ih0/`.
 
@@ -22798,3 +22797,112 @@ pressure.
 through `race_geq.py`'s `run_meq` and `run_geq` at the settings above, with
 freegs4e's tip on `PYTHONPATH`. The timed race, `race_geq.py --case gf1`, waits
 for an idle machine.
+
+### M-343
+
+**THE INVERSE RACE, COLD START, ON F, C AND D SHAPED (IR-3). MEQ IS THE
+CHEAPEST CODE TO EVERY SELF-CONSISTENT ACCURACY ON C AND D, BAR NICE AT 1e-2
+ON D; ON F, `freegs4e` IS THE CHEAPEST FROM 1e-4 DOWN AND MEQ DOES NOT REACH
+1e-5. EVERY MEQ RUN IS ACCEPTED, C'S ON THE FIRST ATTEMPT.**
+`tools/freegs4e-benchmark/race_inverse.py`, the problem of
+[M-254](#m-254) on the references of [M-255](#m-255).
+
+**Setup.** MEQ `756fb6d` (`install/double`, double, PARDISO), 8 threads,
+three repeats a rung and one at the finest, each machine behind five minutes
+under 6% busy CPU (`runs/inverse-race/queue-ir4.sh`), 2026-11-03. The other
+codes' records are the stages first raced and are not re-run:
+`race-runs/ir1-f-final`, `ir2-c`, `ir2-d-final` — `freegs4e` 0.12.0
+(`9a1ee0c`), freegsnke 3.1.0 (`df5bae8`), NICE 1.0.0 (`7ad1ea8`). No record
+in any stage is flagged noisy. **The accuracy is each code against its own
+finest rung**, `dI` over the free supplies, so the table compares each code
+with itself; the cross-code floor beside it says how far apart the answers
+are.
+
+Median wall seconds of the cheapest run reaching each target (its rung):
+
+| case | target | `freegs4e` | freegsnke | MEQ | NICE |
+|---|---|---|---|---|---|
+| F shaped | 1e-2 | 6.55 (65²) | 13.30 (nx65) | 7.84 (k2 h1.00) | **5.51** (area ×1/4) |
+| | 1e-3 | **6.55** (65²) | 13.30 (nx65) | 7.84 (k2 h1.00) | 25.81 (area ×1/16) |
+| | 1e-4 | **6.55** (65²) | 13.30 (nx65) | 25.38 (k3 h0.50) | — |
+| | 1e-5 | **9.19** (129²) | 66.44 (nx129) | — | — |
+| C shaped | 1e-2 | 7.35 (65²) | 11.79 (nx65) | **4.66** (k2 h1.00) | — |
+| | 1e-3 | 7.35 (65²) | 11.79 (nx65) | **4.66** (k2 h1.00) | — |
+| | 1e-4 | 7.35 (65²) | 11.79 (nx65) | **5.41** (k3 h1.00) | — |
+| | 1e-5 | 11.40 (129²) | 11.79 (nx65) | **11.19** (k3 h0.50) | — |
+| D shaped | 1e-2 | 20.48 (65²) | 13.16 (nx65) | 5.02 (k2 h1.00) | **1.93** (area ×1) |
+| | 1e-3 | 20.48 (65²) | 13.16 (nx65) | **5.02** (k2 h1.00) | — |
+| | 1e-4 | 20.48 (65²) | 13.16 (nx65) | **7.12** (k3 h1.00) | — |
+| | 1e-5 | 21.70 (129²) | 243.97 (nx129) | **18.89** (k3 h0.50) | — |
+
+Cross-code floor, finest accepted runs: `freegs4e`–freegsnke 2.0–2.7e-07 on
+all three; **`freegs4e`–MEQ 1.46e-05 (F), 4.14e-06 (C), 3.53e-06 (D)**;
+NICE 4.2–6.7e-04 from each of the others on F and D, and none on C, where no
+NICE rung is accepted. No target below the MEQ floor distinguishes MEQ's
+answer from `freegs4e`'s.
+
+**F IS THE EXTERIOR.** MEQ's self-error on F is 3.1e-04 and 3.0e-04 at k2
+h1.00 and h0.50, and 2.1e-05 at k4 h0.50: refining `h` at k2 does not move it.
+At the shipped `[boundary.exterior] Radius = 3.4 m` in a 3.7 m disc, `Γ`
+sits close enough to F6A that moving it to 3.6 m with 20 modes cuts the
+error 4–9× at k3–k5 and the floor to 2.6e-06, measured on `0e7177a`
+(`runs/f-exterior/`). That changes the problem F's file poses and is
+`PERFORMANCE_TODO.md`'s, not this entry's. A mesh-dependent error near 4e-5
+at k3 under the moved `Γ` is unexplained.
+
+**EVERY RUN IS ACCEPTED, AND ONE STILL RETRIES.** All 96 MEQ records
+converge. C's six cold rungs converge on the first bordered Newton, where on
+`0e7177a` four of them reached no accepted run in three repeats: that is
+[M-313](#m-313)'s seed fix, timed, and C's finest cold run goes from 448 s to
+28 s. F's six cold rungs still fail the first attempt and are solved by the
+Picard-then-Newton retry ([M-315](#m-315)); D's never do. C's k2 h1.00 ends
+as a best fit (exit 4), cold and warm, as it did before the fix. **D's k4
+h0.50 cold run reports `newton_longest_crawl = 2` in all three repeats**, as
+on `0e7177a`, the only crawl in the stage (`TODO`).
+
+**Against `0e7177a`** (the stage the Claude Docs artifact quotes), F's and
+D's cold rungs are 16–33% cheaper at the same iteration counts. Both were
+taken behind the same gate; the commits differ by every change from M-313 to
+M-342, so this is a ratio and not attributed.
+
+**Reproduce.** Install from the commit, then
+`runs/inverse-race/queue-ir4.sh`, which runs `race_inverse.py run ir4-<k>-meq
+--config machine-<case>-shaped --codes meq --starts cold,warm --repeats 3`
+for each case, merges each with the stage's other codes' records and
+summarises into `runs/freegs4e-benchmark/race-runs/ir4-<k>-final/summary.md`.
+
+### M-344
+
+**THE INVERSE RACE, WARM START (A 1 cm SHAPE STEP), ON F, C AND D SHAPED
+(IR-3). MEQ IS THE CHEAPEST CODE TO EVERY TARGET ON C AND D BAR NICE AT 1e-2
+ON D, AND TO 1e-3 ON F; `freegs4e` IS THE CHEAPEST ON F FROM 1e-4. NO WARM RUN
+RETRIES.** The same stages, protocol and records as [M-343](#m-343).
+
+| case | target | `freegs4e` | freegsnke | MEQ | NICE |
+|---|---|---|---|---|---|
+| F shaped | 1e-2 | 4.51 (65²) | 5.66 (nx65) | **2.63** (k2 h1.00) | 4.13 (area ×1/4) |
+| | 1e-3 | 4.51 (65²) | 5.66 (nx65) | **2.63** (k2 h1.00) | 18.52 (area ×1/16) |
+| | 1e-4 | **4.51** (65²) | 5.66 (nx65) | 8.26 (k3 h0.50) | — |
+| | 1e-5 | **6.63** (129²) | 24.76 (nx129) | — | — |
+| C shaped | 1e-2 | 6.29 (65²) | 7.59 (nx65) | **2.64** (k2 h1.00) | — |
+| | 1e-3 | 6.29 (65²) | 7.59 (nx65) | **3.01** (k3 h1.00) | — |
+| | 1e-4 | 6.29 (65²) | 7.59 (nx65) | **3.01** (k3 h1.00) | — |
+| | 1e-5 | 10.32 (129²) | 21.60 (nx129) | **7.57** (k3 h0.50) | — |
+| D shaped | 1e-2 | 14.34 (65²) | 7.06 (nx65) | 2.65 (k2 h1.00) | **1.82** (area ×1) |
+| | 1e-3 | 14.34 (65²) | 7.06 (nx65) | **4.33** (k3 h1.00) | — |
+| | 1e-4 | 14.34 (65²) | 7.06 (nx65) | **4.33** (k3 h1.00) | — |
+| | 1e-5 | 18.22 (129²) | 76.34 (nx129) | **11.22** (k3 h0.50) | — |
+
+Cross-code floor: `freegs4e`–freegsnke 1.4–2.0e-07 on F and C and 1.36e-06
+on D; **`freegs4e`–MEQ 1.44e-05 (F), 1.44e-06 (C), 3.47e-06 (D)**; NICE
+4.4–7.5e-04 from the others on F and D.
+
+**MEQ's warm runs take one or two Newton steps** where on `0e7177a` they took
+three, at every rung bar C's k2 h1.00 best fit, which still takes three, and
+are 10–40% cheaper. F's warm
+start does not fail its first attempt: the retry of [M-343](#m-343) is a
+cold-start defect. MEQ still does not reach 1e-5 on F warm, for M-343's
+reason.
+
+**Reproduce.** As [M-343](#m-343); the warm records are the same files'
+`start = "warm"` rows.
