@@ -67,6 +67,15 @@ namespace meq
 		/// `profile_tables`.
 		ProfileTables profiles;
 
+		/// A .nc a previous run of this configuration wrote, to start from in
+		/// place of the configuration's [initialguess]: on the same mesh that
+		/// is the exact restart, the whole iterate ( q, psi, psihat ), labels
+		/// and exterior coefficients, which is how a front end re-solves warm
+		/// (PYTHON-PLAN.md, PY-3). A configuration with [adaptivity] is
+		/// refused beside it: its mesh would be rebuilt from the file and
+		/// re-adapted, not the one the state was solved on.
+		std::string restartFrom;
+
 
 		/// MEQ_VERSION of the front end's build, which the files written carry.
 		/// The front end's because the commit is stamped into the binary at
@@ -126,6 +135,16 @@ namespace meq
 			int prepare();          ///< read the configuration and set the run up
 			int solve();            ///< solve, and refine if the file asks
 			int write();            ///< write what [output] and the options ask for
+
+			/**
+			 * THE .nc OF THE SOLVED STATE AT `stem`, AND NOTHING ELSE: no
+			 * [output] directory or prefix, no grid functions, no VTK, no flux
+			 * surfaces. What a re-solve restarts from (RunOptions::
+			 * restartFrom). Any time after a successful solve, and it does not
+			 * count as write(): the phase order is untouched.
+			 * @throws std::logic_error before a successful solve.
+			 */
+			int writeRestart( std::string const &stem );
 
 		private:
 			struct Impl;

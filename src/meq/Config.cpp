@@ -1144,6 +1144,26 @@ namespace meq
 		return parsed;
 	}
 
+	toml::value Configuration::documentFromFile( std::string const & fileName )
+	{
+		return parseFile( fileName );
+	}
+
+	toml::value Configuration::documentFromString( std::string const & text,
+	                                               std::string const & source )
+	{
+		return parseString( text, source );
+	}
+
+	Configuration Configuration::fromDocument( toml::value const & document,
+	                                           std::string const & source,
+	                                           std::string const & directory )
+	{
+		Configuration parsed( document, source );
+		parsed.resolveInputPaths( directory );
+		return parsed;
+	}
+
 	void Configuration::parse( toml::value const & document )
 	{
 		if ( !document.is_table() )

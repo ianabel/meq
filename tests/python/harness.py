@@ -43,11 +43,10 @@ def run_binary(toml, where, wrapper=False):
 
 def run_module(where, construct, preamble=""):
     """meq.Equilibrium in `where` -- prepare, solve, write -- IN A CHILD PROCESS
-    THAT IMPORTS meq AND NOTHING ELSE, which is the process PY-1's claim is
-    about. This one has numpy and netCDF4 loaded to read the files, and
-    Debian's numpy brings a second MKL, with which meq's mixes in the last
-    digits (meq/__init__.py). `construct` is the expression that makes the
-    Equilibrium. True when write() reports the targets met."""
+    THAT IMPORTS meq AND NOTHING ELSE, the plainest process the claim is about;
+    test_numpy_after_meq_changes_nothing makes it again beside numpy.
+    `construct` is the expression that makes the Equilibrium, after
+    `preamble`. True when write() reports the targets met."""
     script = ("import meq\n"
               + preamble +
               f"eq = {construct}\n"

@@ -2004,6 +2004,19 @@ namespace meq
 			static Configuration fromString( std::string const & text, std::string const & source,
 			                                 std::string const & directory );
 
+			// THE DOCUMENT BEFORE IT IS A CONFIGURATION, for a front end that
+			// edits it first -- meq::Run's re-solve points [initialguess] at
+			// the previous solve's state -- and then the configuration of the
+			// edited document, input paths resolved against `directory` as a
+			// file's are against its own. Each throws ConfigError as the
+			// constructors above do.
+			static toml::value documentFromFile( std::string const & fileName );
+			static toml::value documentFromString( std::string const & text,
+			                                       std::string const & source );
+			static Configuration fromDocument( toml::value const & document,
+			                                   std::string const & source,
+			                                   std::string const & directory );
+
 			MeshConfig const & getMesh() const noexcept { return meshOptions; };
 
 			/// The `[[coils]]` blocks, in file order. Empty unless the file has

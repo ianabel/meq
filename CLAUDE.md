@@ -496,9 +496,13 @@ apps/        meq.cpp (the command line: argv, --help, --version,
 python/      the `meq` Python package (python/meq/) and its extension
              _meq.cpp over meq::Run: PYTHON-PLAN.md. Built for the system
              python3 into builds/<name>/python, which is a PYTHONPATH entry.
-             IMPORT meq BEFORE numpy: Debian's numpy brings the system MKL,
-             and meq refuses a process that already holds it. It needs MFEM
-             built position independent (CLAUDE_MFEM.md).
+             It carries its own MKL and SuiteSparse, static and hidden, and
+             binds OpenMP at import: IMPORT meq BEFORE DEBIAN'S numpy, whose
+             MKL brings another OpenMP runtime, which meq refuses. pip's numpy
+             and JAX on the CPU bring none, and either order is fine. It needs MFEM built
+             position independent (CLAUDE_MFEM.md) and a static PIC
+             SuiteSparse in ../../suitesparse/install-static, or it links
+             both shared and says so.
 tests/       SourceTree.hpp (how a test names a source file), unit/ (Boost.Test), convergence/ (rate assertions), python/
              (pytest: PythonDriverParity, the module against meq), analytic/
              (closed forms), performance/ (timings, none a ctest:
