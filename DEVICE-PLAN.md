@@ -2306,3 +2306,95 @@ would tell us whether the rest of the plan is worth writing. It is.
    [M-184](MEASUREMENTS.md#m-184) both measure a **partial** offload, where the
    loss is host serialisation and the format is nearly irrelevant. The rate
    question above is the gate on that, not the other way round.
+
+## 8. A stabilisation that follows the reaction
+
+**NOT ON THE DEVICE, AND IT TAKES THE DEVICE SOLVE OFF IT.** The prototype
+`[discretisation] TauFollowsReaction` (branch `tau-follows-reaction`,
+[M-348](MEASUREMENTS.md#m-348), [M-349](MEASUREMENTS.md#m-349)) makes `τ` a
+function of the state, so `IsConstant()` is false. MFEM's
+`AssembleHDGFaceMatrix()` refuses that, so the face constraint goes on
+`DarcyForm::FaceConstraintMode::Live`'s non-linear slot. Every batched
+predicate the device solve rests on refuses that slot:
+`CanBatchNonlinearResidual`/`Gradient` (the caller-integrand route, which
+needs the constraint on `c_bfi_p`), the condensation cache, the batched
+linear face assembly, the batched NL face routes, and the batched
+`Reconstruct()`. **Under `--device cuda` the prototype runs the residual, the
+gradient and the reconstruction in MFEM's host element loop on one core, and
+downloads D, E, G and H at every gradient.** Read at `meq-integration`
+`59ef46309f`; not yet run under a Device.
+
+**What MFEM has.** `HDGNLFaceResidualBatched()` and
+`HDGNLFaceGradScatterBatched()` are a host weight loop and a `forall`
+contraction. They refuse a state-dependent stabilisation in one place,
+`HDGNLGradKindOf()`, whose comment names the change — gradient weights
+`face_w (s + d1s·jump)` and `face_w (−s + d2s·jump)` — and says nothing
+installs one. Neither takes boundary faces. The constant-`τ` device route
+weighs points by `HDGStabilizationRule` in `HDGFaceWeightsDevice`, gated on
+`IsConstant() && GetRule()`.
+
+**What MEQ has.** `sourceDFdPsi()`, the element flags and `ψ_c` at element
+quadrature points, for `meq::NormalisedMHDSource` only. There is no `∂²F/∂ψ²`
+(the prototype differences `dFdPsi()`), no device `ψ_c` at face points, and
+no device form of `meq::RotatingSource`. **Every case the prototype was made
+for — GF1, the three-species mirror — is a `RotatingSource`, which has no
+device integrand with or without `τ`.**
+
+**The design.**
+
+* **Upstream, one request, filed as data, not a functor** (upstream does not
+  copy integrator internals into device lambdas). A state-dependent face
+  stabilisation on the batched NL face routes, in the Prepare/Finish shape of
+  `NonlinearResidualBatched`:
+  * Prepare exposes per-(point, side) device tables of `x`, `u`, `û`, the
+    element and the face.
+  * The caller fills `s` and either pointwise `∂s/∂u`, `∂s/∂û`, or `∂s/∂T`
+    with a per-element gradient row: the element-sampled form, the rank-one
+    term `EvalGrad()` cannot express.
+  * Finish contracts, on interior, boundary and shared faces, with the
+    weights on the device and no host sync.
+  * The caller-integrand route admits the live constraint; the condensation
+    cache stays refused, correctly.
+  * A batched `Reconstruct()` with the converged `s` frozen as data.
+  * A public face residual with caller weights: `addReactionFaceColumns()`'s
+    sum with `∂τ/∂p` in `τ`'s place, giving the border columns on the device
+    with no further kernel.
+* **MEQ alone:**
+  * an analytic `∂²F/∂ψ²`, host and POD, pinned by `SourceViewTests`;
+  * the `τ` (or `T_e`) kernel in `DeviceNPCDevice.cpp`, keeping the device
+    files at seven;
+  * `|K|/|∂K|` in `DeviceConstants`;
+  * `ψ_c` at face points on the device (the host already caches it);
+  * the mixed second derivatives for the border columns;
+  * for `RotatingSource`, a host-filled table, threaded on plain host memory
+    as `setupLoopMayThread()` allows ([M-323](MEASUREMENTS.md#m-323)), with
+    one upload per evaluation, until a device root find exists.
+* **Rejected:** a lagged `τ`, which is linear convergence by construction;
+  and a `τ` frozen per sweep, since the fold is inside Newton's own path from
+  the vacuum ([M-347](MEASUREMENTS.md#m-347)).
+
+**Stages.**
+
+0. Host: the sampling settled (face points, on M-349), the Jacobian exact
+   (done but for `∂²F/∂ψ²`'s difference), a `ProbedSolver` quadratic-tail
+   test where the follow branch binds, and the assembled Jacobian against a
+   difference of the assembled residual with `τ` following.
+1. The prototype under `--device debug` and `cuda`, reproducing `cpu`, with a
+   `--profile` line per refused predicate. `FrozenTau`'s `GridFunction` read
+   in `postProcess()` is expected to need `ψ_h` host-valid (inferred).
+2. Upstream's host weights with the `forall` contraction:
+   `AssemblyMode = "serial"` against `"batched"` on printed digits.
+3. Device weights and MEQ's kernel: parity, the routes asserted taken, and
+   phase-C downloads back to zero.
+4. The border columns on the device.
+5. `RotatingSource`.
+
+**Parity.** A `DeviceParity` arm on a `NormalisedMHD` case where the follow
+branch provably binds — the run prints on how many face points `τ` follows,
+or the arm cannot fail — with Newton counts as well as digits; the
+three-species mirror at `θ = 10`, `s = 40`, `cpu` against `cuda`; and the
+`--profile` route lines under `cuda`, since parity alone passes on host
+fallbacks.
+
+**Until then the following `τ` cannot be the box default**: a default that
+takes the device solve to one host core breaks this file's acceptance.

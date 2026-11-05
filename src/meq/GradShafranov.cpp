@@ -868,7 +868,18 @@ namespace
 			*dReaction = 0.0;
 		if ( !elementCarriesPlasma( element ) || !( radius > 0.0 ) )
 			return 0.0;
-		double const total = psi + ( conductorFieldShift ? conductorFieldShift->psi( radius, z ) : 0.0 );
+		return reactionAtTotal( element, radius, z,
+		                        psi + ( conductorFieldShift ? conductorFieldShift->psi( radius, z ) : 0.0 ),
+		                        dReaction );
+	}
+
+	double SourceIntegrator::reactionAtTotal( int element, double radius, double z, double total,
+	                                          double *dReaction ) const
+	{
+		if ( dReaction )
+			*dReaction = 0.0;
+		if ( !elementCarriesPlasma( element ) || !( radius > 0.0 ) )
+			return 0.0;
 		double const c = source->dFdPsi( radius, z, total )/radius;
 		if ( dReaction )
 		{
@@ -1857,6 +1868,97 @@ namespace
 					source = sourceIn;
 				}
 
+				/*
+				 * psi_c AT EVERY FACE POINT THE FACE INTEGRATORS VISIT, once per
+				 * mesh, as SourceIntegrator::buildConductorCache() holds it at
+				 * the element points: uncached, the filament sum at face points
+				 * was a quarter of a GF1 run (M-348). Keyed by element and the
+				 * point's reference coordinates, which MFEM's face loop computes
+				 * by the same FaceElementTransformations call this does.
+				 */
+				void buildFaceCache( mfem::FiniteElementSpace const &potential,
+				                     mfem::FiniteElementSpace const &trace,
+				                     mfem::Array<int> const &boundaryMarker,
+				                     ConductorField const *conductors )
+				{
+					faceShift.assign( static_cast<std::size_t>( potential.GetNE() ), {} );
+					shiftField = conductors;
+					if ( !conductors )
+						return;
+					mfem::Mesh &mesh = *potential.GetMesh();
+					mfem::FaceElementTransformations faceTr;
+					mfem::IsoparametricTransformation elem1, elem2;
+					mfem::Vector point;
+					auto side = [ & ]( int face, bool second )
+					{
+						mfem::ElementTransformation &tr = second ? *faceTr.Elem2 : *faceTr.Elem1;
+						int const element = second ? faceTr.Elem2No : faceTr.Elem1No;
+						mfem::IntegrationRule const &ir = mfem::IntRules.Get( faceTr.GetGeometryType(),
+							2*std::max( potential.GetFE( element )->GetOrder(),
+							            trace.GetFaceElement( face )->GetOrder() ) );
+						for ( int p = 0; p < ir.GetNPoints(); ++p )
+						{
+							faceTr.SetAllIntPoints( &ir.IntPoint( p ) );
+							mfem::IntegrationPoint const &eip = second ? faceTr.GetElement2IntPoint()
+							                                           : faceTr.GetElement1IntPoint();
+							tr.Transform( eip, point );
+							faceShift[ static_cast<std::size_t>( element ) ].push_back(
+								{ eip.x, eip.y, conductors->psi( point( 0 ), point( 1 ) ) } );
+						}
+					};
+					for ( int f = 0; f < mesh.GetNumFaces(); ++f )
+					{
+						if ( !mesh.FaceIsInterior( f ) )
+							continue;
+						mesh.GetFaceElementTransformations( f, faceTr, elem1, elem2 );
+						side( f, false );
+						side( f, true );
+					}
+					for ( int be = 0; be < mesh.GetNBE(); ++be )
+					{
+						if ( !boundaryMarker[ mesh.GetBdrAttribute( be ) - 1 ] )
+							continue;
+						mesh.GetBdrFaceTransformations( be, faceTr, elem1, elem2 );
+						side( mesh.GetBdrElementFaceIndex( be ), false );
+					}
+				}
+
+				/*
+				 * EXPERIMENT (M-348): c read as the element's own maximum over
+				 * its interior quadrature points, sampled from the state at
+				 * every residual (GradShafranovSolver::sampleElementReactions())
+				 * rather than at the face point. Non-local in the element, so
+				 * EvalGrad() has no slot for it: the Jacobian and the border
+				 * columns OMIT tau's derivative in this mode, and Newton is not
+				 * quadratic. A measurement of the theta it needs, not a method.
+				 */
+				void setElementReactions( std::vector<double> const *reactions )
+				{
+					elementReactions = reactions;
+				}
+
+				bool elementSampled() const
+				{
+					return elementReactions != nullptr;
+				}
+
+				/// psi_c at @a tr's point: the cache's, or the sum where the
+				/// point is not a cached one (none on the face routes).
+				double shiftAt( mfem::ElementTransformation &tr ) const
+				{
+					if ( !shiftField )
+						return 0.0;
+					mfem::IntegrationPoint const &ip = tr.GetIntPoint();
+					if ( static_cast<std::size_t>( tr.ElementNo ) < faceShift.size() )
+						for ( FacePoint const &at : faceShift[ static_cast<std::size_t>( tr.ElementNo ) ] )
+							if ( std::abs( at.x - ip.x ) < 1.0e-13 && std::abs( at.y - ip.y ) < 1.0e-13 )
+								return at.psi;
+					mfem::real_t coordinates[ 3 ];
+					mfem::Vector x( coordinates, tr.GetSpaceDim() );
+					tr.Transform( ip, x );
+					return shiftField->psi( x( 0 ), x( 1 ) );
+				}
+
 				/// FROZEN AT THE SOLVED psi_h for the reconstruction, which
 				/// refuses a state-dependent stabilisation: tau is then read off
 				/// @a psi on the side's own element at the face point -- the
@@ -1876,8 +1978,7 @@ namespace
 				                   mfem::real_t uhat,
 				                   mfem::ElementTransformation &tr ) const override
 				{
-					double dTau = 0.0;
-					return value( sDiff, un, u, uhat, tr, dTau );
+					return value( sDiff, un, u, uhat, tr, nullptr );
 				}
 
 				void EvalGrad( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
@@ -1885,30 +1986,57 @@ namespace
 				               mfem::real_t &d1s, mfem::real_t &d2s ) const override
 				{
 					double dTau = 0.0;
-					value( sDiff, un, u, uhat, tr, dTau );
+					value( sDiff, un, u, uhat, tr, &dTau );
 					d1s = dTau;
 					d2s = 0.0;
 				}
 
+				/// theta |K|/( ( k + 1 )|dK| ) where the following branch is in
+				/// force at @a tr's point with potential @a u, and 0 where the
+				/// floor is: d tau/d p = followScale() dc/dp for any parameter p
+				/// of the source. The gauge columns' face term.
+				double followScale( mfem::ElementTransformation &tr, double u, double uhat ) const
+				{
+					if ( !source || elementReactions )
+						return 0.0;
+					double const floor = base.Eval( 0.0, 0.0, u, uhat, tr );
+					mfem::real_t coordinates[ 3 ];
+					mfem::Vector x( coordinates, tr.GetSpaceDim() );
+					tr.Transform( tr.GetIntPoint(), x );
+					double const c = source->reactionAtTotal( tr.ElementNo, x( 0 ), x( 1 ), u + shiftAt( tr ), nullptr );
+					double const scale = theta*size[ static_cast<std::size_t>( tr.ElementNo ) ]/( degree + 1 );
+					return scale*c > floor ? scale : 0.0;
+				}
+
 			private:
 				double value( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, mfem::real_t uhat,
-				              mfem::ElementTransformation &tr, double &dTau ) const
+				              mfem::ElementTransformation &tr, double *dTau ) const
 				{
 					double const floor = base.Eval( sDiff, un, u, uhat, tr );
-					dTau = 0.0;
+					if ( dTau )
+						*dTau = 0.0;
 					if ( !source )
 						return floor;
+					if ( elementReactions )
+					{
+						std::size_t const e = static_cast<std::size_t>( tr.ElementNo );
+						return std::max( floor, theta*size[ e ]/( degree + 1 )*( *elementReactions )[ e ] );
+					}
 					mfem::real_t coordinates[ 3 ];
 					mfem::Vector x( coordinates, tr.GetSpaceDim() );
 					tr.Transform( tr.GetIntPoint(), x );
 					double dc = 0.0;
 					double const psi = frozen ? frozen->GetValue( tr, tr.GetIntPoint() ) : u;
-					double const c = source->reaction( tr.ElementNo, x( 0 ), x( 1 ), psi, &dc );
+					// The derivative costs two more dF/dpsi calls: only for EvalGrad().
+					bool const wantSlope = dTau && !frozen;
+					double const c = source->reactionAtTotal( tr.ElementNo, x( 0 ), x( 1 ), psi + shiftAt( tr ),
+					                                          wantSlope ? &dc : nullptr );
 					double const scale = theta*size[ static_cast<std::size_t>( tr.ElementNo ) ]/( degree + 1 );
 					double const follow = scale*c;
 					if ( !( follow > floor ) )
 						return floor;
-					dTau = frozen ? 0.0 : scale*dc;
+					if ( wantSlope )
+						*dTau = scale*dc;
 					return follow;
 				}
 
@@ -1918,6 +2046,13 @@ namespace
 				std::vector<double> size;
 				SourceIntegrator const *source = nullptr;
 				mfem::GridFunction const *frozen = nullptr;
+				struct FacePoint
+				{
+					double x, y, psi;
+				};
+				std::vector<std::vector<FacePoint>> faceShift;
+				std::vector<double> const *elementReactions = nullptr;
+				ConductorField const *shiftField = nullptr;
 		};
 	}
 
@@ -6809,7 +6944,15 @@ namespace
 			// building a second one on the same points.
 			sourceIntegrator = sourceTerm;
 			if ( following )
+			{
 				following->setSource( sourceTerm );
+				following->buildFaceCache( *potentialFes, *traceFes, fittedMarker, conductorFieldSet );
+				if ( std::getenv( "MEQ_TAU_ELEMENT_SAMPLE" ) )
+				{
+					elementReactionSample.assign( static_cast<std::size_t>( potentialFes->GetNE() ), 0.0 );
+					following->setElementReactions( &elementReactionSample );
+				}
+			}
 			// AND THE CACHE HERE RATHER THAN IN prepare(), because this is
 			// where the integrator exists -- it is a local, owned by the form
 			// it is handed to. Empty and free unless the split is in use.
@@ -10039,7 +10182,7 @@ namespace
 		// The device route, left device-valid: this column is a right-hand
 		// side of the trace solve and goes nowhere near the host on its way
 		// there. See assemblePlasmaCurrent().
-		if ( iterateIsResident( state ) )
+		if ( iterateIsResident( state ) && !reactionStabilization )
 		{
 			SourceView view{};
 			if ( plasmaLoopsAvailable( view )
@@ -10141,6 +10284,16 @@ namespace
 
 		if ( failure )
 			std::rethrow_exception( failure );
+
+		// F is linear in the scale, so tau's c is too, on every face.
+		if ( reactionStabilization
+		     && !addReactionFaceColumns( state, 1,
+				[ & ]( double radius, double z, double psi, double *g )
+				{
+					g[ 0 ] = normalisedSource->scaledF( radius, z, psi )/scale;
+					return true;
+				}, { &out } ) )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleCurrentColumn: the face term refused" );
 	}
 
 	void GradShafranovSolver::assembleCurrentNormalisationCorner(
@@ -11160,6 +11313,181 @@ namespace
 		return refused == 0;
 	}
 
+	void GradShafranovSolver::sampleElementReactions( mfem::Vector const &state ) const
+	{
+		if ( !reactionStabilization
+		     || !static_cast<ReactionFollowingStabilization const &>( *reactionStabilization ).elementSampled() )
+			return;
+		countedHostRead( state, __LINE__ );
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		int const potentialStart = blockOffsets[ 1 ];
+		// The largest c over the element's source quadrature points: the
+		// probe's point-max reading (M-347), at the state in hand.
+		MEQ_OMP_ELEMENT_LOOP
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			double worst = 0.0;
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			mfem::Array<int> dofs;
+			potentialFes->GetElementDofs( e, dofs );
+			mfem::Vector shape( el.GetDof() ), point;
+			mfem::IntegrationRule const &ir = sourceRule( el, scratch, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				scratch.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				scratch.Transform( ip, point );
+				double psi = conductorPsiAtQuadrature( e, i );
+				for ( int j = 0; j < dofs.Size(); ++j )
+					psi += shape( j )*state( potentialStart + dofs[ j ] );
+				worst = std::max( worst, sourceIntegrator->reactionAtTotal( e, point( 0 ), point( 1 ), psi ) );
+			}
+			elementReactionSample[ static_cast<std::size_t>( e ) ] = worst;
+		}
+	}
+
+	bool GradShafranovSolver::addReactionFaceGaugeColumns( mfem::Vector const &state,
+	                                                       CardinalSpline const &basis,
+	                                                       std::vector<double> const &crossings,
+	                                                       std::vector<mfem::Vector> &out ) const
+	{
+		// assembleGaugeColumns()'s own integrand: dF/dR_0k =
+		// ( dF/dW phi_k + dF/dW' phi_k' ) R_0k.
+		double const boundary = normalisedSource->boundaryNormalisation();
+		double const span = normalisedSource->normalisation() - boundary;
+		std::size_t const knots = basis.size();
+		std::vector<double> phi( knots ), phiPrime( knots );
+		std::vector<mfem::Vector *> columns;
+		for ( mfem::Vector &column : out )
+			columns.push_back( &column );
+		return addReactionFaceColumns( state, knots,
+			[ & ]( double radius, double z, double psi, double *g )
+			{
+				double dFdW = 0.0, dFdWPrime = 0.0;
+				if ( !normalisedSource->crossingDerivatives( radius, z, psi, dFdW, dFdWPrime ) )
+					return false;
+				basis.basis( ( psi - boundary )/span, phi.data(), phiPrime.data(), nullptr );
+				for ( std::size_t k = 0; k < knots; ++k )
+					g[ k ] = ( dFdW*phi[ k ] + dFdWPrime*phiPrime[ k ] )*crossings[ k ];
+				return true;
+			}, columns );
+	}
+
+	bool GradShafranovSolver::addReactionFaceColumns(
+		mfem::Vector const &state, std::size_t count,
+		std::function<bool( double, double, double, double * )> const &derivative,
+		std::vector<mfem::Vector *> const &out ) const
+	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds,
+		                      profile.borderAssemblyCalls );
+		auto const &following = static_cast<ReactionFollowingStabilization const &>( *reactionStabilization );
+		countedHostRead( state, __LINE__ );
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		int const potentialStart = blockOffsets[ 1 ];
+		int const traceStart = blockOffsets[ 2 ];
+
+		/*
+		 * THE FACE TERM OF dR/dp_j, HDGDiffusionIntegrator::
+		 * AssembleHDGFaceVector()'s own sum with tau replaced by d tau/d p_j:
+		 * per side of a face, w = |J_f| w_ip d tau, and the side's element rows
+		 * take w ( u - uhat ) phi_i, the face's trace rows w ( u - uhat ) mu_i.
+		 * Linear in tau, so this IS the derivative. d tau/d p_j =
+		 * followScale() d c/d p_j, and c = ( 1/R ) dF/dpsi, so by the symmetry
+		 * of the mixed derivative
+		 *
+		 *     d c/d p_j = ( 1/R ) d/dpsi[ dF/dp_j ],
+		 *
+		 * the domain column's own integrand differentiated in psi -- by a
+		 * central difference at the point, which costs two calls of it rather
+		 * than two residuals per column. Checked against the differenced
+		 * columns to 1e-9 relative (MEASUREMENTS.md M-348). Serial: the trace
+		 * rows are shared between a face's two sides.
+		 */
+		std::vector<double> gPlus( count ), gMinus( count );
+		mfem::FaceElementTransformations faceTr;
+		mfem::IsoparametricTransformation elem1, elem2;
+		mfem::Array<int> elementDofs, traceDofs;
+		mfem::Vector elementShape, traceShape, normal( mesh.SpaceDimension() ), point;
+		bool refused = false;
+
+		auto side = [ & ]( int face, bool second )
+		{
+			mfem::ElementTransformation &tr = second ? *faceTr.Elem2 : *faceTr.Elem1;
+			int const element = second ? faceTr.Elem2No : faceTr.Elem1No;
+			mfem::FiniteElement const &el = *potentialFes->GetFE( element );
+			mfem::FiniteElement const &traceEl = *traceFes->GetFaceElement( face );
+			potentialFes->GetElementDofs( element, elementDofs );
+			traceFes->GetFaceDofs( face, traceDofs );
+			elementShape.SetSize( el.GetDof() );
+			traceShape.SetSize( traceEl.GetDof() );
+			// AssembleHDGFaceVector()'s default rule; the integrators carry none.
+			mfem::IntegrationRule const &ir = mfem::IntRules.Get(
+				faceTr.GetGeometryType(), 2*std::max( el.GetOrder(), traceEl.GetOrder() ) );
+			for ( int p = 0; p < ir.GetNPoints(); ++p )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( p );
+				faceTr.SetAllIntPoints( &ip );
+				mfem::IntegrationPoint const &eip = second ? faceTr.GetElement2IntPoint()
+				                                           : faceTr.GetElement1IntPoint();
+				el.CalcShape( eip, elementShape );
+				traceEl.CalcShape( ip, traceShape );
+				double u = 0.0, uhat = 0.0;
+				for ( int j = 0; j < elementDofs.Size(); ++j )
+					u += elementShape( j )*state( potentialStart + elementDofs[ j ] );
+				for ( int j = 0; j < traceDofs.Size(); ++j )
+					uhat += traceShape( j )*state( traceStart + traceDofs[ j ] );
+				double const scale = following.followScale( tr, u, uhat );
+				if ( scale == 0.0 || u == uhat )
+					continue;
+				tr.Transform( eip, point );
+				double const radius = point( 0 ), z = point( 1 );
+				double const total = u + following.shiftAt( tr );
+				double const h = 1.0e-6*( std::abs( total ) + 1.0e-3 );
+				if ( !derivative( radius, z, total + h, gPlus.data() )
+				     || !derivative( radius, z, total - h, gMinus.data() ) )
+				{
+					refused = true;
+					return;
+				}
+				mfem::CalcOrtho( faceTr.Jacobian(), normal );
+				double const weight = ip.weight*normal.Norml2()*scale*( u - uhat )/( radius*2.0*h );
+				for ( std::size_t k = 0; k < count; ++k )
+				{
+					double const factor = weight*( gPlus[ k ] - gMinus[ k ] );
+					if ( factor == 0.0 )
+						continue;
+					mfem::Vector &column = *out[ k ];
+					for ( int j = 0; j < elementDofs.Size(); ++j )
+						column( potentialStart + elementDofs[ j ] ) += factor*elementShape( j );
+					for ( int j = 0; j < traceDofs.Size(); ++j )
+						column( traceStart + traceDofs[ j ] ) += factor*traceShape( j );
+				}
+			}
+		};
+
+		for ( int f = 0; f < mesh.GetNumFaces() && !refused; ++f )
+		{
+			if ( !mesh.FaceIsInterior( f ) )
+				continue;
+			mesh.GetFaceElementTransformations( f, faceTr, elem1, elem2 );
+			side( f, false );
+			side( f, true );
+		}
+		// The boundary integrator's faces: fittedMarker, as buildForms() adds it.
+		for ( int be = 0; be < mesh.GetNBE() && !refused; ++be )
+		{
+			if ( !fittedMarker[ mesh.GetBdrAttribute( be ) - 1 ] )
+				continue;
+			mesh.GetBdrFaceTransformations( be, faceTr, elem1, elem2 );
+			side( mesh.GetBdrElementFaceIndex( be ), false );
+		}
+		return !refused;
+	}
+
 	bool GradShafranovSolver::assembleNormalisationColumn( mfem::Vector const &state,
 	                                                       bool axis,
 	                                                       mfem::Vector &out ) const
@@ -11169,12 +11497,6 @@ namespace
 		// this element assembly is not it. NPC's residual is unreduced, which is
 		// what makes the column assemblable at all.
 		if ( !normalisedSource )
-			return false;
-
-		// A TAU THAT FOLLOWS THE REACTION MOVES WITH THE LABELS TOO, through
-		// dF/dpsi on every face, and the analytic column is the domain term's
-		// alone: differenced, it carries the face term.
-		if ( reactionStabilization )
 			return false;
 
 		// A FLUX LAW IN THE LABELS IS PART OF THE COLUMN, and the source's
@@ -11204,7 +11526,7 @@ namespace
 		// device counterpart to miss. Left device-valid; see
 		// assembleCurrentColumn(). DevicePlasmaLoops::scatter() zeroes its
 		// own output on the device, so the host zeroes only on the host route.
-		if ( iterateIsResident( state ) )
+		if ( iterateIsResident( state ) && !reactionStabilization )
 		{
 			SourceView view{};
 			if ( plasmaLoopsAvailable( view )
@@ -11341,8 +11663,22 @@ namespace
 
 		if ( failure )
 			std::rethrow_exception( failure );
+		if ( refused != 0 )
+			return false;
 
-		return refused == 0;
+		// A TAU THAT FOLLOWS THE REACTION MOVES WITH THE LABELS TOO, through
+		// dF/dpsi on every face: the face term's share, from the same integrand.
+		if ( reactionStabilization )
+			return addReactionFaceColumns( state, 1,
+				[ & ]( double radius, double z, double psi, double *g )
+				{
+					double dFdAxis = 0.0, dFdBoundary = 0.0;
+					if ( !normalisedSource->normalisationDerivatives( radius, z, psi, dFdAxis, dFdBoundary ) )
+						return false;
+					g[ 0 ] = axis ? dFdAxis : dFdBoundary;
+					return true;
+				}, { &out } );
+		return true;
 	}
 
 	void GradShafranovSolver::solveWithNormalisation()
@@ -12896,6 +13232,7 @@ namespace
 					++profile.componentCalls;
 				}
 
+				sampleElementReactions( state );
 				double const tr = profileNow();
 				double const cr = profileCpuNow();
 				npc->Mult( state, out );
@@ -16168,10 +16505,20 @@ namespace
 					throw std::logic_error( "meq::GradShafranovSolver::solve: the source's "
 						"crossingDerivatives() refused inside the plasma" );
 				// UNDER A tau THAT FOLLOWS THE REACTION the face term moves with
-				// the crossings too, through dF/dpsi, and the analytic columns are
-				// the domain term's alone: differenced, after a flush, as the
-				// normalisation column's fallback is and for its reason.
+				// the crossings too, through dF/dpsi: its share is assembled
+				// beside the domain term's.
+				static bool const checkColumns = std::getenv( "MEQ_CHECK_REACTION_COLUMNS" ) != nullptr;
+				std::vector<mfem::Vector> direct;
 				if ( reactionStabilization )
+				{
+					if ( !addReactionFaceGaugeColumns( unknown, *gaugeBasis, gaugeR, gaugeColumns ) )
+						throw std::logic_error( "meq::GradShafranovSolver::solve: the source's "
+							"crossingDerivatives() refused on a face" );
+					if ( checkColumns )
+						direct = gaugeColumns;
+				}
+				// PROTOTYPE CHECK: the differenced columns, against the direct ones.
+				if ( reactionStabilization && checkColumns )
 				{
 					flush();
 					mfem::Vector minus( unknown.Size() );
@@ -16191,6 +16538,27 @@ namespace
 						gaugeColumns[ at ] -= minus;
 						gaugeColumns[ at ] /= 2.0*h;
 					}
+					// Per block, the worst |direct - differenced| over the
+					// worst |differenced|, and the same with the direct trace
+					// block's sign flipped.
+					double worst[ 3 ] = { 0.0, 0.0, 0.0 }, size[ 3 ] = { 0.0, 0.0, 0.0 }, flipped = 0.0;
+					for ( int k = 0; k < nGauge; ++k )
+					{
+						mfem::Vector const &a = direct[ static_cast<std::size_t>( k ) ];
+						mfem::Vector const &b = gaugeColumns[ static_cast<std::size_t>( k ) ];
+						for ( int i = 0; i < a.Size(); ++i )
+						{
+							int const block = i < blockOffsets[ 1 ] ? 0 : ( i < blockOffsets[ 2 ] ? 1 : 2 );
+							worst[ block ] = std::max( worst[ block ], std::abs( a( i ) - b( i ) ) );
+							size[ block ] = std::max( size[ block ], std::abs( b( i ) ) );
+							if ( block == 2 )
+								flipped = std::max( flipped, std::abs( -a( i ) - b( i ) ) );
+						}
+					}
+					std::fprintf( stderr, "MEQ check: gauge columns direct vs differenced: flux %.3e/%.3e"
+					              " potential %.3e/%.3e trace %.3e/%.3e (flipped %.3e)\n",
+					              worst[ 0 ], size[ 0 ], worst[ 1 ], size[ 1 ], worst[ 2 ], size[ 2 ], flipped );
+					gaugeColumns = direct;
 				}
 				MidplaneField const field = midplaneFieldOf( unknown );
 				for ( int k = 0; k < nGauge; ++k )
@@ -16551,6 +16919,28 @@ namespace
 					if ( normalisedSource )
 						normalisedSource->setNormalisation( s, sB );
 					assembled = assembleNormalisationColumn( unknown, false, columnB );
+				}
+				// PROTOTYPE CHECK: the direct column against the differenced one.
+				if ( assembled && reactionStabilization && std::getenv( "MEQ_CHECK_REACTION_COLUMNS" ) )
+				{
+					flush();
+					mfem::Vector plus( n ), minus( n );
+					double const hB = normalisationStep( sB );
+					double const columnBase = sB;
+					sB = columnBase + hB;
+					fieldResidual( unknown, s, plus );
+					sB = columnBase - hB;
+					fieldResidual( unknown, s, minus );
+					sB = columnBase;
+					plus -= minus;
+					plus /= 2.0*hB;
+					double worst = 0.0, size = 0.0;
+					for ( int i = 0; i < n; ++i )
+					{
+						worst = std::max( worst, std::abs( plus( i ) - columnB( i ) ) );
+						size = std::max( size, std::abs( plus( i ) ) );
+					}
+					std::fprintf( stderr, "MEQ check: psi_bnd column direct vs differenced: %.3e/%.3e\n", worst, size );
 				}
 				if ( !assembled )
 				{

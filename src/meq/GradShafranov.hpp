@@ -2,6 +2,7 @@
 #define MEQ_GRADSHAFRANOV_HPP
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -861,6 +862,11 @@ namespace meq
 			 */
 			double reaction( int element, double radius, double z, double psi,
 			                 double *dReaction = nullptr ) const;
+
+			/// reaction() at the TOTAL flux @a total = psi + psi_c, for a
+			/// caller that holds psi_c at the point already.
+			double reactionAtTotal( int element, double radius, double z, double total,
+			                        double *dReaction = nullptr ) const;
 
 		private:
 			mfem::IntegrationRule const &rule( mfem::FiniteElement const &el,
@@ -7106,6 +7112,37 @@ namespace meq
 			                           CardinalSpline const &basis,
 			                           std::vector<double> const &crossings,
 			                           std::vector<mfem::Vector> &out ) const;
+
+			/**
+			 * UNDER setTauFollowsReaction(), THE FACE TERM's share of the
+			 * columns of border unknowns p_j that F reads, added to @a out:
+			 * tau reads dF/dpsi, which moves with every such p_j.
+			 * HDGDiffusionIntegrator's face sum with d tau/d p_j in tau's
+			 * place, on the faces the potential form integrates.
+			 *
+			 * @param derivative  dF/dp_j at fixed ( R, z, psi ), psi the total
+			 *                    flux, into its last argument's @a count
+			 *                    entries -- the integrand the domain column
+			 *                    already reads. Differenced in psi at the point
+			 *                    for d( dF/dpsi )/dp_j. False refuses.
+			 *
+			 * @return false if @a derivative refused.
+			 */
+			bool addReactionFaceColumns( mfem::Vector const &state, std::size_t count,
+			                             std::function<bool( double, double, double, double * )> const &derivative,
+			                             std::vector<mfem::Vector *> const &out ) const;
+
+			/// The EXPERIMENT's per-element c, sampled from @a state; nothing
+			/// unless MEQ_TAU_ELEMENT_SAMPLE is set. Mutable: a cache of the
+			/// state the next residual reads.
+			void sampleElementReactions( mfem::Vector const &state ) const;
+			mutable std::vector<double> elementReactionSample;
+
+			/// addReactionFaceColumns() for the gauge's knots.
+			bool addReactionFaceGaugeColumns( mfem::Vector const &state,
+			                                  CardinalSpline const &basis,
+			                                  std::vector<double> const &crossings,
+			                                  std::vector<mfem::Vector> &out ) const;
 
 			/// `int F_plasma/R` over the domain at @a state, i.e. `mu0 I_p`.
 			double assemblePlasmaCurrent( mfem::Vector const &state ) const;
