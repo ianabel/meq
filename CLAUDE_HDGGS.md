@@ -281,6 +281,16 @@ only bounds it from above. The global linearised operator's lowest plasma mode
 agrees with the one element's to under 1%: the trace coupling does not move it
 (→ **[M-287](MEASUREMENTS.md#m-287)**).
 
+**Read on the answer, the criterion predicts the `τ₀` a cold start needs.**
+On GF1, over eleven rungs of three meshes and four degrees, the `τ₀` making
+the answer's hottest `c_K` equal `λ_K` puts L1 `k = 3`'s fold where
+continuation finds it, and a cold start converges at `τ₀` ≥ 1.6× that need and
+fails at 1.3×: Newton's path from the vacuum passes through iterates needing
+2.3–2.6× what the answer does, so a margin on the answer is a margin on the
+path. The exception is L0 `k = 1`, where the largest-point `c_K` over-reads an
+element that resolves nothing (→ **[M-347](MEASUREMENTS.md#m-347)**). That is
+the ground for a `τ` that follows the reaction, element by element (`TODO`).
+
 **A constant `τ` is weakest relative to the operator where `ν` is largest**, at
 small `R`, which is where a mirror's plasma sits. `τ = τ₀ ν` makes the
 criterion `∂F/∂ψ < (k + 1) τ₀ |∂K|/|K|`, the same at every radius and in

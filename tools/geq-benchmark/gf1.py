@@ -45,6 +45,15 @@ temperatures and omega are not tapered: under the midplane statement the source
 vanishes with the density, and geq's first phi_0 guess needs omega nonzero
 at the labels (shapes.py).
 
+THE STABILISATION IS THE CASE'S OWN: tau = 30/max( R, 0.1 m ), not the box
+default tau0 = 3. GF1 is ten times M-294's pressure, and at tau0 = 3 the coarse
+rungs fold inside one element -- the reaction (1/R) dF/dpsi reaches the local
+block's lowest eigenvalue (k + 1) tau |dK|/|K| (MEASUREMENTS.md M-345) -- so
+they do not solve from the vacuum. Of 3, 10 and 30, 30 is the smallest that
+solves every race rung from the vacuum, and it moves the L2 k = 4 reference by
+2e-7 of a max |psi| of 0.88 (M-347). This is a statement about the benchmark,
+not a default: a general tau that follows the reaction is TODO's.
+
 USAGE, from source/:
 
     python3 tools/geq-benchmark/gf1.py            # write cases/gf1/
@@ -282,6 +291,10 @@ if __name__ == "__main__":
 '''
 
 
+#: GF1's tau0, in m^-1, under TauScaling = "diffusion" (the docstring).
+TAU0 = 30.0
+
+
 def meq_config():
     """shapes.py's configuration for this case: the same machine, labels, mesh
     and output, with carbon added and the profile comments replaced."""
@@ -313,7 +326,14 @@ def meq_config():
              f"Charge = {CARBON_CHARGE!r}\n"
              'TemperatureFile = "T_carbon.dat"\n'
              f"TemperatureScale = {shapes.EV!r}\n"
-             'DensityFile = "n_carbon.dat"\n')):
+             'DensityFile = "n_carbon.dat"\n'),
+            ("[discretisation]\nPolynomialDegree = 2\n",
+             "[discretisation]\nPolynomialDegree = 2\n"
+             "# GF1's own stabilisation, tau = 30/max( R, 0.1 m ): at the box default\n"
+             "# tau0 = 3 the coarse rungs fold inside one element and do not solve from\n"
+             "# the vacuum (gf1.py's docstring; MEASUREMENTS.md M-345, M-347).\n"
+             'TauScaling = "diffusion"\n'
+             f"Tau = {TAU0!r}\n")):
         if text.count(old) != 1:
             raise SystemExit(f"gf1.py: shapes.MEQ_CONFIG no longer holds '{old[:50]}'")
         text = text.replace(old, new)
