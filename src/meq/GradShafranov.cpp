@@ -861,6 +861,24 @@ namespace
 			+ static_cast< std::size_t >( quadraturePoint ) ];
 	}
 
+	double SourceIntegrator::reaction( int element, double radius, double z, double psi,
+	                                   double *dReaction ) const
+	{
+		if ( dReaction )
+			*dReaction = 0.0;
+		if ( !elementCarriesPlasma( element ) || !( radius > 0.0 ) )
+			return 0.0;
+		double const total = psi + ( conductorFieldShift ? conductorFieldShift->psi( radius, z ) : 0.0 );
+		double const c = source->dFdPsi( radius, z, total )/radius;
+		if ( dReaction )
+		{
+			double const step = 1.0e-6*( std::abs( total ) + 1.0e-3 );
+			*dReaction = ( source->dFdPsi( radius, z, total + step )
+			               - source->dFdPsi( radius, z, total - step ) )/( 2.0*step*radius );
+		}
+		return c;
+	}
+
 	double SourceIntegrator::sourceValue( double radius, double z, double psi,
 	                                      int element ) const
 	{
@@ -1821,6 +1839,88 @@ namespace
 				mfem::HDGStabilization const &base;
 				meq::Anisotropy const &delta;
 		};
+
+		/// max( tau_b( x ), theta ( |K|/|dK| )/( k + 1 ) c+( x, psi ) ):
+		/// setTauFollowsReaction(). STATE DEPENDENT through c, so MFEM's
+		/// nonlinear face routes carry it with EvalGrad's d tau/d psi.
+		class ReactionFollowingStabilization : public mfem::HDGStabilization
+		{
+			public:
+				ReactionFollowingStabilization( mfem::HDGStabilization const &baseIn, double thetaIn,
+				                                int degreeIn, std::vector<double> sizeIn )
+					: base( baseIn ), theta( thetaIn ), degree( degreeIn ), size( std::move( sizeIn ) )
+				{
+				}
+
+				void setSource( SourceIntegrator const *sourceIn )
+				{
+					source = sourceIn;
+				}
+
+				bool IsConstant() const override // NOLINT(readability-identifier-naming)
+				{
+					return false;
+				}
+
+				mfem::real_t Eval( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
+				                   mfem::real_t uhat,
+				                   mfem::ElementTransformation &tr ) const override
+				{
+					double dTau = 0.0;
+					return value( sDiff, un, u, uhat, tr, dTau );
+				}
+
+				void EvalGrad( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
+				               mfem::real_t uhat, mfem::ElementTransformation &tr,
+				               mfem::real_t &d1s, mfem::real_t &d2s ) const override
+				{
+					double dTau = 0.0;
+					value( sDiff, un, u, uhat, tr, dTau );
+					d1s = dTau;
+					d2s = 0.0;
+				}
+
+			private:
+				double value( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, mfem::real_t uhat,
+				              mfem::ElementTransformation &tr, double &dTau ) const
+				{
+					double const floor = base.Eval( sDiff, un, u, uhat, tr );
+					dTau = 0.0;
+					if ( !source )
+						return floor;
+					mfem::real_t coordinates[ 3 ];
+					mfem::Vector x( coordinates, tr.GetSpaceDim() );
+					tr.Transform( tr.GetIntPoint(), x );
+					double dc = 0.0;
+					double const c = source->reaction( tr.ElementNo, x( 0 ), x( 1 ), u, &dc );
+					double const scale = theta*size[ static_cast<std::size_t>( tr.ElementNo ) ]/( degree + 1 );
+					double const follow = scale*c;
+					if ( !( follow > floor ) )
+						return floor;
+					dTau = scale*dc;
+					return follow;
+				}
+
+				mfem::HDGStabilization const &base;
+				double theta;
+				int degree;
+				std::vector<double> size;
+				SourceIntegrator const *source = nullptr;
+		};
+	}
+
+	void GradShafranovSolver::setTauFollowsReaction( double theta )
+	{
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setTauFollowsReaction: the forms are already built" );
+		if ( !( theta >= 0.0 ) || !std::isfinite( theta ) )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setTauFollowsReaction: theta must be finite and >= 0" );
+		reactionTheta = theta;
+	}
+
+	double GradShafranovSolver::tauFollowsReaction() const
+	{
+		return reactionTheta;
 	}
 
 	double GradShafranovSolver::anisotropyAt( double radius, double z, double psi,
@@ -6562,6 +6662,35 @@ namespace
 			anisotropicStabilization = std::make_unique<AnisotropicStabilization>( stab, *anisotropyValue );
 			chosen = anisotropicStabilization.get();
 		}
+		ReactionFollowingStabilization *following = nullptr;
+		if ( reactionTheta > 0.0 && usesNonlinearForms() )
+		{
+			if ( stabilisationFollowsAnisotropy )
+				throw std::logic_error( "meq::GradShafranovSolver: setTauFollowsReaction() beside setStabilisationFollowsAnisotropy() is not built" );
+			// |K|/|dK| per element, from its vertices: the shoelace area over
+			// the vertex loop's perimeter.
+			mfem::Mesh &mesh = *potentialFes->GetMesh();
+			std::vector<double> size( static_cast<std::size_t>( mesh.GetNE() ) );
+			mfem::Array<int> vertices;
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+			{
+				mesh.GetElementVertices( e, vertices );
+				double area = 0.0, perimeter = 0.0;
+				for ( int a = 0; a < vertices.Size(); ++a )
+				{
+					double const *p = mesh.GetVertex( vertices[ a ] );
+					double const *q = mesh.GetVertex( vertices[ ( a + 1 )%vertices.Size() ] );
+					area += p[ 0 ]*q[ 1 ] - q[ 0 ]*p[ 1 ];
+					perimeter += std::hypot( q[ 0 ] - p[ 0 ], q[ 1 ] - p[ 1 ] );
+				}
+				size[ static_cast<std::size_t>( e ) ] = 0.5*std::abs( area )/perimeter;
+			}
+			auto made = std::make_unique<ReactionFollowingStabilization>(
+				*chosen, reactionTheta, potentialFes->GetMaxElementOrder(), std::move( size ) );
+			following = made.get();
+			reactionStabilization = std::move( made );
+			chosen = following;
+		}
 		interior->SetStabilization( *chosen );
 		boundary->SetStabilization( *chosen );
 		interiorFaceIntegrator = interior;
@@ -6661,6 +6790,8 @@ namespace
 			// plasma-current assemblies reading the same cache rather than
 			// building a second one on the same points.
 			sourceIntegrator = sourceTerm;
+			if ( following )
+				following->setSource( sourceTerm );
 			// AND THE CACHE HERE RATHER THAN IN prepare(), because this is
 			// where the integrator exists -- it is a local, owned by the form
 			// it is handed to. Empty and free unless the split is in use.
@@ -6745,6 +6876,12 @@ namespace
 			HybridMode const previous = mfem::DarcyHybridization::GetDefaultAssemblyMode();
 			if ( assemblyModeChoice == AssemblyMode::Batched )
 				mfem::DarcyHybridization::SetDefaultAssemblyMode( HybridMode::Batched );
+			// A STATE-DEPENDENT tau MUST STAY ON THE NON-LINEAR SLOT. Frozen,
+			// EnableHybridization() folds every HDGDiffusionIntegrator into the
+			// linear constraint because it is a BilinearFormIntegrator, and
+			// AssembleHDGFaceMatrix() then refuses the state it cannot see.
+			if ( reactionStabilization )
+				darcy->SetFaceConstraintMode( mfem::DarcyForm::FaceConstraintMode::Live );
 			try
 			{
 				darcy->EnableHybridization( traceFes.get(), new mfem::NormalTraceJumpIntegrator(),
@@ -11014,6 +11151,12 @@ namespace
 		// this element assembly is not it. NPC's residual is unreduced, which is
 		// what makes the column assemblable at all.
 		if ( !normalisedSource )
+			return false;
+
+		// A TAU THAT FOLLOWS THE REACTION MOVES WITH THE LABELS TOO, through
+		// dF/dpsi on every face, and the analytic column is the domain term's
+		// alone: differenced, it carries the face term.
+		if ( reactionStabilization )
 			return false;
 
 		// A FLUX LAW IN THE LABELS IS PART OF THE COLUMN, and the source's
@@ -16006,6 +16149,31 @@ namespace
 				if ( !assembleGaugeColumns( unknown, *gaugeBasis, gaugeR, gaugeColumns ) )
 					throw std::logic_error( "meq::GradShafranovSolver::solve: the source's "
 						"crossingDerivatives() refused inside the plasma" );
+				// UNDER A tau THAT FOLLOWS THE REACTION the face term moves with
+				// the crossings too, through dF/dpsi, and the analytic columns are
+				// the domain term's alone: differenced, after a flush, as the
+				// normalisation column's fallback is and for its reason.
+				if ( reactionStabilization )
+				{
+					flush();
+					mfem::Vector minus( unknown.Size() );
+					for ( int k = 0; k < nGauge; ++k )
+					{
+						std::size_t const at = static_cast<std::size_t>( k );
+						double const saved = gaugeR[ at ];
+						double const h = 1.0e-6*std::max( std::abs( saved ), 1.0e-2 );
+						gaugeR[ at ] = saved + h;
+						installGauge();
+						fieldResidual( unknown, s, gaugeColumns[ at ] );
+						gaugeR[ at ] = saved - h;
+						installGauge();
+						fieldResidual( unknown, s, minus );
+						gaugeR[ at ] = saved;
+						installGauge();
+						gaugeColumns[ at ] -= minus;
+						gaugeColumns[ at ] /= 2.0*h;
+					}
+				}
 				MidplaneField const field = midplaneFieldOf( unknown );
 				for ( int k = 0; k < nGauge; ++k )
 				{

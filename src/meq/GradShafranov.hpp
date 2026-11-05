@@ -849,6 +849,19 @@ namespace meq
 			                          mfem::Vector const &elfun,
 			                          mfem::DenseMatrix &elmat ) override;
 
+			/**
+			 * THE REACTION c = (1/R) dF/dpsi AT A POINT OF @a element, with
+			 * @a psi the SOLVED field there -- the remainder under the
+			 * conductor split, to which psi_c is added at the point, as the
+			 * Jacobian adds it from its cache. Zero where the fill did not
+			 * reach, as the Jacobian is. With @a dReaction, also dc/dpsi, by
+			 * a central difference of dFdPsi(): no source carries d2F/dpsi2.
+			 * What setTauFollowsReaction()'s stabilisation reads at face
+			 * points.
+			 */
+			double reaction( int element, double radius, double z, double psi,
+			                 double *dReaction = nullptr ) const;
+
 		private:
 			mfem::IntegrationRule const &rule( mfem::FiniteElement const &el,
 			                                   mfem::ElementTransformation &tr ) const;
@@ -2593,6 +2606,29 @@ namespace meq
 			 * reads B whatever its argument.
 			 */
 			void setStabilisationFollowsAnisotropy( bool follows );
+
+			/**
+			 * PROTOTYPE (TODO, "A stabilisation that follows the reaction"):
+			 * tau( x, psi ) = max( tau_b( x ), theta |K|/( ( k + 1 )|dK| ) c+ )
+			 * at every face point, with tau_b whatever setTauScaling() chose,
+			 * c = (1/R) dF/dpsi at the iterate's own psi there, and |K|/|dK|
+			 * the side's element. The element criterion c < ( k + 1 ) tau
+			 * |dK|/|K| (CLAUDE_HDGGS.md, MEASUREMENTS.md M-287, M-347) then
+			 * holds with margin theta wherever the reaction would otherwise
+			 * fold an element, and tau is tau_b exactly where it would not.
+			 * State dependent, so the face terms go through MFEM's
+			 * AssembleHDGFaceVector/Grad with EvalGrad, the batched face routes
+			 * decline them, and the normalisation column is differenced. Only
+			 * on a non-linear source; refused beside
+			 * setStabilisationFollowsAnisotropy().
+			 *
+			 * @param theta > 0, or 0 for off.
+			 * @throws std::logic_error after the forms are built.
+			 */
+			void setTauFollowsReaction( double theta );
+
+			/// setTauFollowsReaction()'s theta, 0 when off.
+			double tauFollowsReaction() const;
 
 			/// The anisotropy setAnisotropy() gave, or null.
 			Anisotropy const *anisotropy() const;
@@ -6429,6 +6465,10 @@ namespace meq
 			/// setStabilisationFollowsAnisotropy(), and the wrapper it installs.
 			bool stabilisationFollowsAnisotropy = false;
 			std::unique_ptr<mfem::HDGStabilization> anisotropicStabilization;
+
+			/// setTauFollowsReaction(): theta, and the wrapper it installs.
+			double reactionTheta = 0.0;
+			std::unique_ptr<mfem::HDGStabilization> reactionStabilization;
 
 			/// The flux law of a Delta that reads psi, or of any Delta beside
 			/// setConductorField(): R/( 1 - Delta ), its psi-derivative, and the

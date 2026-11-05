@@ -3170,6 +3170,8 @@ int meq::Run::Impl::setUp()
 		if ( config->getDiscretisation().tauScaling == meq::TauScalingType::Diffusion )
 			fresh->setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
 			                      config->getDiscretisation().tauFloorRadius );
+		if ( config->getDiscretisation().tauFollowsReaction > 0.0 )
+			fresh->setTauFollowsReaction( config->getDiscretisation().tauFollowsReaction );
 
 		if ( gammaHMarker )
 			fresh->setExtension( *path, *gammaHMarker );
@@ -5465,6 +5467,9 @@ int meq::Run::Impl::solve()
 			std::printf( "MEQ: the HDG stabilisation is tau = %g/max( R, %g m )\n",
 			             config->getDiscretisation().tau,
 			             config->getDiscretisation().tauFloorRadius );
+		if ( config->getDiscretisation().tauFollowsReaction > 0.0 )
+			std::printf( "MEQ: tau follows the reaction, max( tau_b, %g |K|/( ( k + 1 )|dK| ) (1/R) dF/dpsi )\n",
+			             config->getDiscretisation().tauFollowsReaction );
 
 		if ( config->getSource().supportIsBox() )
 			std::printf( "MEQ: the plasma support is the BOX 0 < Psi <= 1, "

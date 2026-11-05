@@ -1777,7 +1777,8 @@ namespace meq
 		// [source], since a box support changes its default.
 		{
 			Table discretisation( document, "discretisation", sourceName, true );
-			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau", "TauScaling", "TauFloorRadius" } );
+			discretisation.rejectUnknownKeys( { "PolynomialDegree", "Tau", "TauScaling", "TauFloorRadius",
+			                                     "TauFollowsReaction" } );
 
 			discretisationOptions.polynomialDegree = discretisation.getInteger( "PolynomialDegree" );
 			if ( discretisationOptions.polynomialDegree < 0 )
@@ -2089,6 +2090,15 @@ namespace meq
 
 			if ( !( discretisationOptions.tau > 0.0 ) )
 				discretisation.fail( "Tau", "must be positive; the HDG stabilisation is tau = O(1) and defaults to 1.0" );
+
+			if ( discretisation.has( "TauFollowsReaction" ) )
+			{
+				discretisationOptions.tauFollowsReaction = discretisation.getFloat( "TauFollowsReaction" );
+				if ( !( std::isfinite( discretisationOptions.tauFollowsReaction )
+				        && discretisationOptions.tauFollowsReaction > 0.0 ) )
+					discretisation.fail( "TauFollowsReaction", "must be a positive margin theta in "
+					                     "tau = max( tau_b, theta |K|/( ( k + 1 )|dK| ) (1/R) dF/dpsi )" );
+			}
 		}
 
 		// [boundary]
