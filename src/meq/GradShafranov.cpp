@@ -1857,9 +1857,19 @@ namespace
 					source = sourceIn;
 				}
 
+				/// FROZEN AT THE SOLVED psi_h for the reconstruction, which
+				/// refuses a state-dependent stabilisation: tau is then read off
+				/// @a psi on the side's own element at the face point -- the
+				/// value the solve's u was there -- so it is the converged tau
+				/// exactly, as a function of position. Null thaws it.
+				void freeze( mfem::GridFunction const *psi )
+				{
+					frozen = psi;
+				}
+
 				bool IsConstant() const override // NOLINT(readability-identifier-naming)
 				{
-					return false;
+					return frozen != nullptr;
 				}
 
 				mfem::real_t Eval( mfem::real_t sDiff, mfem::real_t un, mfem::real_t u, // NOLINT(readability-identifier-naming)
@@ -1892,12 +1902,13 @@ namespace
 					mfem::Vector x( coordinates, tr.GetSpaceDim() );
 					tr.Transform( tr.GetIntPoint(), x );
 					double dc = 0.0;
-					double const c = source->reaction( tr.ElementNo, x( 0 ), x( 1 ), u, &dc );
+					double const psi = frozen ? frozen->GetValue( tr, tr.GetIntPoint() ) : u;
+					double const c = source->reaction( tr.ElementNo, x( 0 ), x( 1 ), psi, &dc );
 					double const scale = theta*size[ static_cast<std::size_t>( tr.ElementNo ) ]/( degree + 1 );
 					double const follow = scale*c;
 					if ( !( follow > floor ) )
 						return floor;
-					dTau = scale*dc;
+					dTau = frozen ? 0.0 : scale*dc;
 					return follow;
 				}
 
@@ -1906,7 +1917,14 @@ namespace
 				int degree;
 				std::vector<double> size;
 				SourceIntegrator const *source = nullptr;
+				mfem::GridFunction const *frozen = nullptr;
 		};
+	}
+
+	void GradShafranovSolver::freezeReactionStabilisation( mfem::GridFunction const *psi )
+	{
+		if ( reactionStabilization )
+			static_cast<ReactionFollowingStabilization &>( *reactionStabilization ).freeze( psi );
 	}
 
 	void GradShafranovSolver::setTauFollowsReaction( double theta )
@@ -18994,6 +19012,24 @@ namespace
 			FrozenField( FrozenField const & ) = delete;
 			FrozenField &operator=( FrozenField const & ) = delete;
 		} const frozen( *this );
+		// A tau THAT FOLLOWS THE REACTION is frozen at the solved psi_h the
+		// same way, and for the same kind of reason: Reconstruct() refuses a
+		// state-dependent stabilisation. Frozen, it is the converged tau.
+		struct FrozenTau
+		{
+			GradShafranovSolver &solver;
+			FrozenTau( GradShafranovSolver &solverIn, mfem::GridFunction const &psi )
+				: solver( solverIn )
+			{
+				solver.freezeReactionStabilisation( &psi );
+			}
+			~FrozenTau()
+			{
+				solver.freezeReactionStabilisation( nullptr );
+			}
+			FrozenTau( FrozenTau const & ) = delete;
+			FrozenTau &operator=( FrozenTau const & ) = delete;
+		} const frozenTau( *this, potentialGf );
 		darcy->Reconstruct( darcySolution, traceX, totalFluxGf, enrichedFluxGf,
 		                    postProcessedGf, enrichedTraceGf );
 

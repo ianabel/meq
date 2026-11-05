@@ -6470,6 +6470,10 @@ namespace meq
 			double reactionTheta = 0.0;
 			std::unique_ptr<mfem::HDGStabilization> reactionStabilization;
 
+			/// Freeze that wrapper at @a psi, or thaw it with null; a no-op
+			/// without one. postProcess()'s, around Reconstruct().
+			void freezeReactionStabilisation( mfem::GridFunction const *psi );
+
 			/// The flux law of a Delta that reads psi, or of any Delta beside
 			/// setConductorField(): R/( 1 - Delta ), its psi-derivative, and the
 			/// conductors' load. Owned here because the integrator holds it by
