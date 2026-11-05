@@ -31,6 +31,11 @@ AlignPlasma = true
 
 [discretisation]
 PolynomialDegree = 2
+# GF1's own stabilisation, tau = 30/max( R, 0.1 m ): at the box default
+# tau0 = 3 the coarse rungs fold inside one element and do not solve from
+# the vacuum (gf1.py's docstring; MEASUREMENTS.md M-345, M-347).
+TauScaling = "diffusion"
+Tau = 30.0
 
 [solver]
 NewtonRelativeTolerance = 1.0e-12

@@ -449,8 +449,9 @@ Raised 2026-08-25.
   law's psi-slope against the label normalisation. A crawl that converges
   is a defect, not a slow case.
 
-  The race on GF1 (AN-6c) meets an ISOTROPIC defect, its own entry: "A mirror
-  at GF1's pressure does not solve from the vacuum on MEQ's coarse rungs".
+  The race on GF1 (AN-6c) runs at the case's own tau0 = 30, which solves
+  every rung from the vacuum (M-347); the general stabilisation is its own
+  entry, "A stabilisation that follows the reaction".
 
   NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
   only, AN-6a's Delta( B ) included. On builds/single (MFEM 59ef46309f):
@@ -1430,46 +1431,52 @@ Raised 2026-10-30, when the free-boundary campaign closed.
 
 
 ================================================================================
-A mirror at GF1's pressure does not solve from the vacuum on MEQ's coarse rungs
-Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342).
+A stabilisation that follows the reaction
+Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342); posed as a formula 2026-11-04.
 ================================================================================
 
-  WHAT FAILS. tools/geq-benchmark/cases/gf1/, isotropic -- GF1's 0.4 MV
-  point at n_e = 1e20, densities tapered, nothing anisotropic -- through the
-  driver on the shipped PlasmaSize = 0.1 mesh, from the vacuum: L0 at every
-  k, L1 at k <= 3 and L2 at k = 1 do not converge in 30 bordered Newton
-  steps. L1 k = 3 stalls at 1.5e-3 of the first residual. L2 k = 2 and 3 and
-  L1 k = 4 converge in 7, quadratic at the end. So race_geq.py --case gf1 has
-  four cold MEQ entries where shapes.py's cases have twelve.
+  WHAT FAILS. A constant tau0 is a guess at the pressure. At the box default,
+  tau = 3/max( R, 0.1 m ), GF1 (tools/geq-benchmark/cases/gf1/) solves from
+  the vacuum on 3 of the race's 11 rungs: the coarse ones fold inside one
+  element (M-345). The case now carries its own tau0 = 30, which solves all
+  eleven in 7 steps and costs no accuracy there (M-347) -- a statement about
+  that benchmark, chosen by sweeping. The next case at a new pressure needs
+  the same sweep, and a user has no way to know they need it.
 
-  IT IS THE ELEMENT-LOCAL FOLD UNDER THE MIRROR'S tau0 = 3, MEASURED (M-345).
-  L1 k = 3 folds at 1.25-1.30 of GF1's density, as (k + 1)|dK|/|K| scaled
-  from L0's 0.47 predicts, and a cold start reaches 0.75-0.85 of its rung's
-  fold: L1 k = 3 converges cold to 0.9 (10 steps there) and not 1.0, L0
-  k = 2 to 0.4. At tau0 = 10, from the SAME cold labels, L1 k = 3 converges
-  in 7 steps; L0 k = 2 needs tau0 = 30. So the labels are not the cause, and
-  on GF1 the stiffer tau0 is also the more accurate: L1 k = 3's psi is
-  3.5e-6 from the reference at tau0 = 10 against 2.8e-5 at 3.
+  THE CRITERION PREDICTS IT (M-347). Per element, the tau0 the answer needs
+  is the one making c_K, the largest (1/R) dF/dpsi over K, equal to
+  lambda_K = ( k + 1 ) int_dK tau ds / |K|. On GF1 it puts L1 k = 3's fold where M-345 measured
+  it, and on ten of eleven rungs a cold start converges at tau0 >= 1.6x the
+  answer's need and fails at 1.3x, because Newton's path from the vacuum
+  passes through iterates needing 2.3-2.6x what the answer needs. L0 k = 1
+  is the exception: one element's largest-point c is 7x its neighbours', and
+  it converges at a quarter of the predicted need.
 
-  THE CHOICE IS THE AUTHOR'S, AND IT IS ONE OF THREE.
-  * The case's own tau0. GF1 is ten times M-294's pressure, and Tau is a
-    user key; posing the race at tau0 = 10 or 30 is a statement about the
-    benchmark, written down beside it.
-  * The box default. M-293 chose tau0 = 3 against the vacuum's q_h at k = 1
-    (2.4x constant tau's at 3, 3.7x at 5) with 5 the runner-up; GF1 is new
-    evidence on the other side of that trade, not a reason to move it alone.
-  * A reactive rung beside the box: continuation in the density scale from
-    the vacuum, which reaches L1 k = 3's answer at tau0 = 3 and stops at a
-    real fold, where it could name it. CLAUDE_DECLINED.md declines
-    continuation in the driver for a black-box F and for a vacuum start's
-    degenerate borders; a mirror's densities are prescribed tables and its
-    labels are fluxes at fixed points, so neither objection holds here, but
-    it is a recorded decision to reopen, not to slip in.
+  THE FORMULA TO TRY.  tau_K = max( tau_default, theta c_K |K| / ( ( k + 1 )
+  |dK| ) ), so that tau stays the default wherever the reaction is weak --
+  the vacuum, whose q_h at k = 1 is what M-293's choice of 3 protected -- and
+  rises only in the elements that would fold. Open, in order:
+  * c_K FROM WHAT. The iterate's own, making tau a function of the state
+    (Nguyen, Peraire and Cockburn's s( u, uhat ); MFEM's HDGStabilization
+    takes it, with EvalGrad owed), which follows Newton's 2.5x transient and
+    leaves one discrete problem; or a bound from the source's tables and the
+    vacuum's labels, which keeps tau state independent and the batched face
+    routes on the device, at whatever the bound over-reaches. A tau read off
+    the starting guess is not on the list: the answer would depend on it.
+  * c_K AS WHAT. The largest point is crude where an element resolves
+    nothing (L0 k = 1); M-287's lambda_min( S - M_c, M ) is exact and costs a
+    small dense eigenproblem per element.
+  * theta, measured on GF1, the three-species M = 6 case (M-291, M-294) and
+    the vacuum suites, against M-293's costs.
+  * The ceiling no tau lifts: at k >= 3 lambda_min saturates at the bubble's
+    c_K nu/h^2 (CLAUDE_HDGGS.md), and at any k a tau with tau h/nu ~ 1 costs
+    order. Past either, the mesh cannot carry the reaction, and the run should
+    say so by name rather than stall.
 
-  WHAT CLOSES IT. Every rung either solving from the vacuum, or failing with
-  a named refusal that says the mesh cannot carry this pressure; not a
-  30-step stall. A failing case naming it, as the testing stance asks, is
-  still to be written.
+  WHAT CLOSES IT. A run at a pressure no case was swept for -- GF1 at the box
+  default with the formula in place of tau0 = 30 -- solving from the vacuum
+  on every rung that resolves its reaction, a named refusal on any that does
+  not, and the vacuum and mirror suites' orders and bounds unmoved.
 
 
 ================================================================================

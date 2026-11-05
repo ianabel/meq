@@ -478,10 +478,13 @@ at `n_e = 1e20`, with electrons, deuterons and fully stripped carbon at
   within 1.0e-3 of its peak. geq's voltage drive moves `ω` with the equilibrium
   every Picard step, which MEQ does not pose. It is not tapered.
 
-**MEQ's coarse rungs do not reach it cold.** At `PlasmaSize = 0.1`, a density
-continuation stops at 0.48 of GF1's density at L0, `k = 2`, and reaches it at
-L1, `k = 3`; cold, L1 `k = 3` stalls and L2 `k = 3`, L1 `k = 4` and L2 `k = 4`
-converge.
+* **The stabilisation is the case's own, `τ = 30/max(R, 0.1 m)`**, not the
+  box default `τ₀ = 3`. At 3 the coarse rungs fold inside one element and do
+  not solve from the vacuum (**[M-345](../../MEASUREMENTS.md#m-345)**); of 3, 10
+  and 30, 30 is the smallest that solves every rung cold, and it moves the
+  reference by 2e-7 (**[M-347](../../MEASUREMENTS.md#m-347)**). It is a
+  statement about this benchmark: a case at another pressure needs its own
+  sweep until `τ` follows the reaction (`TODO`).
 
 ```sh
 python3 tools/geq-benchmark/gf1.py               # rewrite cases/gf1/

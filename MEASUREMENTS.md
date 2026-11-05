@@ -23001,3 +23001,94 @@ answer is compared here; M-313 has them unchanged to the printed digit.
 
 **Reproduce.** `runs/cold-table/run.sh`, which tags its directory with the
 installed commit.
+
+### M-347
+
+**GF1 FROM THE VACUUM AT `τ₀` = 3, 10 AND 30 ON EVERY RACE RUNG: AT `τ₀ = 30`
+ALL ELEVEN SOLVE COLD, IN 7 NEWTON STEPS (9 ON L0 `k = 1`), AND NO RUNG IS
+LESS ACCURATE THAN AT 3 WHERE BOTH SOLVE; THE L2 `k = 4` REFERENCE MOVES BY
+2.1e-07. AND THE ELEMENT CRITERION, EVALUATED ON EACH RUNG'S OWN ANSWER,
+PREDICTS WHICH `τ₀` SOLVES IT: ON TEN OF THE ELEVEN RUNGS A COLD START
+CONVERGES WHERE `τ₀` IS AT LEAST 1.6× THE `τ₀` THE ANSWER'S HOTTEST ELEMENT
+NEEDS AND FAILS AT 1.3×, BECAUSE NEWTON'S PATH FROM THE VACUUM PASSES THROUGH
+ITERATES NEEDING 2.3–2.6× WHAT THE ANSWER NEEDS.** The case's `τ₀` is
+`gf1.py`'s from this ([M-345](#m-345) posed the choice); `TODO`, *A
+stabilisation that follows the reaction*, is the general question.
+
+**Setup.** `756fb6d` (`install/double`), double. M-342's GF1 case with
+`[discretisation] TauScaling = "diffusion"`, `Tau = τ₀` added and nothing else,
+through `race_geq.py`'s own `meq_config()` and `run_meq()`: the race's mesh,
+cold from the vacuum, 30 Newton steps, written on the race's 65 × 65 grid. The
+three `τ₀` ran at once at three threads each on eight cores, so walls are not
+compared. Errors are `ψ` against L2 `k = 4` AT THE SAME `τ₀`, over the 65 × 65
+nodes less the corners; `max |ψ| = 0.883`.
+
+**1. The cold ladder.** Newton steps, and the max error:
+
+| rung | `τ₀ = 3` | `τ₀ = 10` | `τ₀ = 30` |
+|---|---|---|---|
+| L0 `k = 1` | fails | fails | 9, 5.96e-04 |
+| L0 `k = 2` | fails | fails | 7, 6.44e-05 |
+| L0 `k = 3` | fails | 7, 2.86e-05 | 7, 3.50e-05 |
+| L0 `k = 4` | fails | 7, 1.47e-05 | 7, 1.32e-05 |
+| L1 `k = 1` | fails | 14, 1.36e-03 | 7, 1.25e-04 |
+| L1 `k = 2` | fails | 7, 2.84e-05 | 7, 1.94e-05 |
+| L1 `k = 3` | fails | 7, 3.32e-06 | 7, 2.27e-06 |
+| L1 `k = 4` | 7, 2.03e-06 | 7, 1.50e-06 | 7, 1.36e-06 |
+| L2 `k = 1` | fails | 7, 5.02e-05 | 7, 4.09e-05 |
+| L2 `k = 2` | 7, 7.52e-06 | 7, 2.75e-06 | 7, 1.82e-06 |
+| L2 `k = 3` | 7, 4.19e-07 | 7, 3.47e-07 | 7, 3.93e-07 |
+
+The `τ₀ = 3` column is M-342's cold count. The references: 3 against 10
+differ by 1.60e-07 (rms 2.2e-08), 3 against 30 by 2.05e-07 (2.9e-08), 10
+against 30 by 4.5e-08. L1 `k = 1` at `τ₀ = 10`, the rung nearest its
+threshold below, takes 14 steps with a crawl of 1, and is 11× less accurate
+than at 30: **near the element fold the answer degrades before the solve
+fails**. What `τ₀ = 30` costs elsewhere is [M-293](#m-293)'s, the vacuum's
+`q_h` at `k = 1` and `ψ*` at `k = 2`, not measured on GF1.
+
+**2. The criterion on the answer.** An uncommitted probe in
+`SourceIntegrator::AssembleElementGrad()`, at one thread so that elements
+arrive in order, prints for each Jacobian pass the largest
+`c_K/λ_K` over elements, with `c_K` the largest `c = (1/R) ∂F/∂ψ` at the
+element's own quadrature points, the same evaluation the Jacobian makes, and
+`λ_K = (k + 1) ∫_∂K τ ds/|K|`, `τ = τ₀/max(R, 0.1)`. That is the `τ₀` the
+hottest element needs for `c_K = λ_K`, "need" below. It is read on the
+`τ₀ = 30` runs, as the last pass (the answer) and the largest pass on the way
+there:
+
+| rung | the answer's need | Newton's peak | cold at 3 / 10 / 30 |
+|---|---|---|---|
+| L0 `k = 1` | 127.1 | 200.8 | ✗ / ✗ / ✓ |
+| L0 `k = 2` | 7.60 | 18.1 | ✗ / ✗ / ✓ |
+| L0 `k = 3` | 5.08 | 12.1 | ✗ / ✓ / ✓ |
+| L0 `k = 4` | 3.88 | 9.95 | ✗ / ✓ / ✓ |
+| L1 `k = 1` | 5.53 | 13.7 | ✗ / ✓ / ✓ |
+| L1 `k = 2` | 3.23 | 7.91 | ✗ / ✓ / ✓ |
+| L1 `k = 3` | 2.37 | 5.91 | ✗ / ✓ / ✓ |
+| L1 `k = 4` | 1.90 | 4.75 | ✓ / ✓ / ✓ |
+| L2 `k = 1` | 2.59 | 6.01 | ✗ / ✓ / ✓ |
+| L2 `k = 2` | 1.62 | 3.90 | ✓ / ✓ / ✓ |
+| L2 `k = 3` | 1.23 | 2.92 | ✓ / ✓ / ✓ |
+
+* **The fold.** L1 `k = 3`'s need of 2.37 puts its fold at `τ₀ = 3` at
+  `s = 3/2.37 = 1.27` of GF1's density if `c` is linear in `s`; M-345 has it
+  between 1.25 and 1.30. L0 `k = 2`'s 7.60 puts it at 0.39, where M-345 has
+  0.46–0.48.
+* **The cold start.** Every rung but L0 `k = 1` converges where
+  `τ₀/need ≥ 1.58` (L1 `k = 4` at 3) and fails where it is at most 1.32
+  (L0 `k = 2` at 10); the nearest above, L1 `k = 1` at 1.81, takes 14 steps.
+  Newton's peak is 2.3–2.6× the answer's need on every rung but L0 `k = 1`
+  (1.6). The hottest element sits at `R` 0.25–0.29,
+  `|z| < 0.03`, on every rung.
+* **L0 `k = 1` is the exception, and it is the estimate's.** Its hottest
+  element reads `∂F/∂ψ = 1.7e4`, 7× its neighbours, and it converges at a need
+  four times `τ₀`. A largest-point `c_K` is the crude part: the local block
+  feels `c` weighted by the mode, and on an element that resolves nothing at
+  `k = 1` the two differ. M-287's `λ_min(S − M_c, M)` is the exact margin.
+
+**Reproduce.** `runs/gf1-tau/`: `t3/`, `t10/`, `t30/` (`sweep.json`, each
+rung's directory, the reference's `ψ` as `reference_psi.npy`) and `probe/`
+(each `τ₀ = 30` rung re-run by the probed binary, `probe.log`), with the
+untracked scripts beside them: `gf1_tau_sweep.py OUT τ₀ THREADS`, `probe.sh`,
+and `tauprobe.patch`, the probe as a diff against `756fb6d`.
