@@ -391,6 +391,10 @@ The checklist; the measurement and the story of each is in the file named.
   defaults to `τ = 3/max(R, 0.1 m)`, every other run to constant `τ = 1`**;
   beside a box a `Tau` with no `TauScaling` is refused, since it would be
   `τ₀` in m⁻¹ there and a constant in m⁻² elsewhere (M-294).
+  **`TauFollowsReaction = θ` makes `τ` a function of the state**, raised only
+  where the reaction would fold an element, with an exact Jacobian; off by
+  default, **host only and refused under `--device`**, because the live face
+  constraint takes every batched route away (M-348, M-349, DEVICE-PLAN.md §8).
 * **`TauScaling = "diffusion"` is `τ₀/max(R, R_f)`, and `R_f ≤ 0` is
   refused**: an unbounded `τ₀/R` costs `q` half an order on any mesh touching
   `R = 0`, since the face rule makes `τ h` constant there, and gives `τ ~ 1e18`

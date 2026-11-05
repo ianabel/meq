@@ -2,6 +2,7 @@
 #define MEQ_GRADSHAFRANOV_HPP
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -848,6 +849,24 @@ namespace meq
 			                          mfem::ElementTransformation &tr,
 			                          mfem::Vector const &elfun,
 			                          mfem::DenseMatrix &elmat ) override;
+
+			/**
+			 * THE REACTION c = (1/R) dF/dpsi AT A POINT OF @a element, with
+			 * @a psi the SOLVED field there -- the remainder under the
+			 * conductor split, to which psi_c is added at the point, as the
+			 * Jacobian adds it from its cache. Zero where the fill did not
+			 * reach, as the Jacobian is. With @a dReaction, also dc/dpsi, by
+			 * a central difference of dFdPsi(): no source carries d2F/dpsi2.
+			 * What setTauFollowsReaction()'s stabilisation reads at face
+			 * points.
+			 */
+			double reaction( int element, double radius, double z, double psi,
+			                 double *dReaction = nullptr ) const;
+
+			/// reaction() at the TOTAL flux @a total = psi + psi_c, for a
+			/// caller that holds psi_c at the point already.
+			double reactionAtTotal( int element, double radius, double z, double total,
+			                        double *dReaction = nullptr ) const;
 
 		private:
 			mfem::IntegrationRule const &rule( mfem::FiniteElement const &el,
@@ -1940,6 +1959,9 @@ namespace meq
 				/// MEQ always did, kept so the two can be measured against each
 				/// other -- and the only route under the condensation, whose
 				/// residual is the reduced trace one rather than this assembly.
+				/// It covers the bordered midplane gauge's knots too, so a
+				/// face term setTauFollowsReaction() adds to their columns has
+				/// a control.
 				Differenced
 			};
 
@@ -2593,6 +2615,36 @@ namespace meq
 			 * reads B whatever its argument.
 			 */
 			void setStabilisationFollowsAnisotropy( bool follows );
+
+			/**
+			 * A STABILISATION THAT FOLLOWS THE REACTION (MEASUREMENTS.md M-348,
+			 * M-349; TODO, "A stabilisation that follows the reaction"):
+			 * tau( x, psi ) = max( tau_b( x ), theta |K|/( ( k + 1 )|dK| ) c+ )
+			 * at every face point, with tau_b whatever setTauScaling() chose,
+			 * c = (1/R) dF/dpsi at the iterate's own psi there, and |K|/|dK|
+			 * the side's element. The element criterion c < ( k + 1 ) tau
+			 * |dK|/|K| (CLAUDE_HDGGS.md, M-287, M-347) then holds with margin
+			 * theta wherever the reaction would otherwise fold an element, and
+			 * tau is tau_b exactly where it would not. theta is set by the
+			 * fold: 6 < theta <= 8 on the three-species mirror (M-349).
+			 *
+			 * The Jacobian is exact: EvalGrad() carries dtau/dpsi, and every
+			 * border column F reads -- psi_ax, psi_bnd, the current scale, the
+			 * midplane gauge's knots -- takes the face term directly
+			 * (addReactionFaceColumns()). State dependent, so the face
+			 * constraint goes on MFEM's live non-linear slot, which every
+			 * batched and device face route declines: HOST ONLY, and under a
+			 * Device the residual and gradient run on one core
+			 * (DEVICE-PLAN.md section 8). Only on a non-linear source; refused
+			 * beside setStabilisationFollowsAnisotropy().
+			 *
+			 * @param theta > 0, or 0 for off.
+			 * @throws std::logic_error after the forms are built.
+			 */
+			void setTauFollowsReaction( double theta );
+
+			/// setTauFollowsReaction()'s theta, 0 when off.
+			double tauFollowsReaction() const;
 
 			/// The anisotropy setAnisotropy() gave, or null.
 			Anisotropy const *anisotropy() const;
@@ -6430,6 +6482,14 @@ namespace meq
 			bool stabilisationFollowsAnisotropy = false;
 			std::unique_ptr<mfem::HDGStabilization> anisotropicStabilization;
 
+			/// setTauFollowsReaction(): theta, and the wrapper it installs.
+			double reactionTheta = 0.0;
+			std::unique_ptr<mfem::HDGStabilization> reactionStabilization;
+
+			/// Freeze that wrapper at @a psi, or thaw it with null; a no-op
+			/// without one. postProcess()'s, around Reconstruct().
+			void freezeReactionStabilisation( mfem::GridFunction const *psi );
+
 			/// The flux law of a Delta that reads psi, or of any Delta beside
 			/// setConductorField(): R/( 1 - Delta ), its psi-derivative, and the
 			/// conductors' load. Owned here because the integrator holds it by
@@ -7062,6 +7122,31 @@ namespace meq
 			                           CardinalSpline const &basis,
 			                           std::vector<double> const &crossings,
 			                           std::vector<mfem::Vector> &out ) const;
+
+			/**
+			 * UNDER setTauFollowsReaction(), THE FACE TERM's share of the
+			 * columns of border unknowns p_j that F reads, added to @a out:
+			 * tau reads dF/dpsi, which moves with every such p_j.
+			 * HDGDiffusionIntegrator's face sum with d tau/d p_j in tau's
+			 * place, on the faces the potential form integrates.
+			 *
+			 * @param derivative  dF/dp_j at fixed ( R, z, psi ), psi the total
+			 *                    flux, into its last argument's @a count
+			 *                    entries -- the integrand the domain column
+			 *                    already reads. Differenced in psi at the point
+			 *                    for d( dF/dpsi )/dp_j. False refuses.
+			 *
+			 * @return false if @a derivative refused.
+			 */
+			bool addReactionFaceColumns( mfem::Vector const &state, std::size_t count,
+			                             std::function<bool( double, double, double, double * )> const &derivative,
+			                             std::vector<mfem::Vector *> const &out ) const;
+
+			/// addReactionFaceColumns() for the gauge's knots.
+			bool addReactionFaceGaugeColumns( mfem::Vector const &state,
+			                                  CardinalSpline const &basis,
+			                                  std::vector<double> const &crossings,
+			                                  std::vector<mfem::Vector> &out ) const;
 
 			/// `int F_plasma/R` over the domain at @a state, i.e. `mu0 I_p`.
 			double assemblePlasmaCurrent( mfem::Vector const &state ) const;

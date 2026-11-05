@@ -1473,10 +1473,59 @@ Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342); posed as a formula 2026-11-
     order. Past either, the mesh cannot carry the reaction, and the run should
     say so by name rather than stall.
 
+  THE FOLLOWING TAU (M-348, M-349), [discretisation] TauFollowsReaction =
+  theta, off by default: c at the iterate's own psi at each face point,
+  so tau follows Newton's path, with an exact Jacobian -- EvalGrad's
+  dtau/dpsi, and every border column's face term assembled directly. At
+  theta = 10 over the box default it solves all eleven GF1 rungs from the
+  vacuum and lifts the three-species midplane ceiling past 4e20, leaves a
+  resolved answer within 3e-9 of the default's, does not lift the
+  vacuum-midplane gauge's own fold, and costs 1.55x a plain tau0 = 30 solve.
+  theta is set by the fold: the three-species mirror at x80 needs
+  6 < theta <= 8; GF1 solves every rung at 6, less accurately, since tau buys
+  accuracy there. Open on it:
+  * where it rescues a rung it is up to 3x less accurate than a global
+    tau0 = 30 on GF1, whose psi_h improves with tau everywhere;
+  * the element's interior maximum of c needs theta 2-4 rather than 6-8, but
+    is non-local in the element and buys no fold the face sample misses:
+    measured and dropped (M-349);
+  * M-349's psi_bnd column check differs by 1.4% on one step of eight,
+    unexplained (a kink inside the difference is the hypothesis);
+  * the remaining 1.55x: a live-face residual is 2.2x a plain one, and the
+    columns' face loops are serial;
+  * THE DEVICE, which is why it cannot become the box default yet: a
+    state-dependent tau puts the face constraint on MFEM's live non-linear
+    slot, and every batched route MEQ's device solve rests on refuses that,
+    so under --device the whole residual and gradient would fall back to one
+    host core; the driver refuses the key there. DEVICE-PLAN.md section 8
+    has the design; the upstream request is sent (CLAUDE_MFEM.md).
+
   WHAT CLOSES IT. A run at a pressure no case was swept for -- GF1 at the box
   default with the formula in place of tau0 = 30 -- solving from the vacuum
   on every rung that resolves its reaction, a named refusal on any that does
   not, and the vacuum and mirror suites' orders and bounds unmoved.
+
+
+================================================================================
+RotatingMirrorAnisotropic crashes intermittently under load
+Raised 2026-11-05, by the suite on tau-follows-reaction; reproduced on main.
+================================================================================
+
+  WHAT FAILS. RotatingMirror --run_test=anisotropic, meqAgreesWithGeqWithAn-
+  Anisotropy, after its first solve, in totalFluxAt() -> valuesAt() (last
+  checkpoint RotatingMirror.cpp:385-387): "stack smashing detected" once,
+  SIGSEGV at address 0x0 once, and once a run killed at a 900 s cap where it
+  takes 90-250 s. Alone it passes (3 of 3 on main a143457, 3 of 3 on the
+  branch); three concurrent copies at OMP_NUM_THREADS=4 crashed one of main's
+  three. So it is not the branch's, and it is a memory defect that load
+  exposes -- a race or an out-of-bounds write, not a tolerance.
+
+  WHERE TO LOOK. valuesAt() builds a meq::PointLocator and interpolates the
+  flux remainder's two components; the test is the one that reads a vector
+  field through it. Run it under valgrind or an ASan build at
+  OMP_NUM_THREADS=4 with the machine loaded.
+
+  WHAT CLOSES IT. The cause found and fixed, and ten loaded runs clean.
 
 
 ================================================================================

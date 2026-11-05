@@ -2829,6 +2829,44 @@ BOOST_AUTO_TEST_CASE( theDriverRefusesThreadedAssemblyOnADevice )
 }
 
 /*
+ * [discretisation] TauFollowsReaction UNDER A DEVICE IS REFUSED, AND ON THE
+ * HOST IT RUNS. A state-dependent tau puts the face constraint on MFEM's live
+ * non-linear slot, which every batched and device face route declines, so
+ * under --device the solve would run on one host core (DEVICE-PLAN.md section
+ * 8). Asserted on the PAIRING, as theDriverRefusesThreadedAssemblyOnADevice
+ * is, so a driver refusing the key everywhere fails too; the host cell is also
+ * the key's one run through the driver on the plain, unbordered Newton.
+ */
+BOOST_AUTO_TEST_CASE( theDriverRefusesAFollowingTauOnADevice )
+{
+	std::string const shipped = shippedConfig( "examples/manufactured-driver.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+	std::string text = replaceAll( shipped, "PolynomialDegree = 3\n",
+	                               "PolynomialDegree = 3\nTauFollowsReaction = 10.0\n" );
+	BOOST_TEST_REQUIRE( text != shipped, "the [discretisation] substitution matched nothing" );
+	text = replaceAll( text, "Prefix = \"manufactured-driver\"",
+	                   "Prefix = \"driver-acceptance-following\"" );
+	{
+		std::ofstream file( "driver-acceptance-following.toml" );
+		file << text;
+	}
+	auto runWith = []( char const *extra )
+	{
+		std::string const command = std::string( driver() ) + " driver-acceptance-following.toml "
+		                            + extra + " > /dev/null 2>&1";
+		int const status = std::system( command.c_str() );
+		return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+	};
+	BOOST_TEST( runWith( "--device debug" ) == 1,
+	            "TauFollowsReaction under --device must exit 1: accepted, the solve "
+	            "would run on one host core under the Device" );
+	BOOST_TEST( runWith( "" ) == 0,
+	            "TauFollowsReaction on the host must solve, or the refusal is broader "
+	            "than the reason for it" );
+	std::remove( "driver-acceptance-following.toml" );
+}
+
+/*
  * --help and --version are the two things a user tries first, and a binary that
  * exits non-zero on --help is a binary that looks broken.
  */

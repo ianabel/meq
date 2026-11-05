@@ -23092,3 +23092,239 @@ rung's directory, the reference's `ψ` as `reference_psi.npy`) and `probe/`
 (each `τ₀ = 30` rung re-run by the probed binary, `probe.log`), with the
 untracked scripts beside them: `gf1_tau_sweep.py OUT τ₀ THREADS`, `probe.sh`,
 and `tauprobe.patch`, the probe as a diff against `756fb6d`.
+
+### M-348
+
+**THE PROTOTYPE `τ` THAT FOLLOWS THE REACTION (`[discretisation]
+TauFollowsReaction = θ`, branch `tau-follows-reaction`), ON TOP OF THE BOX
+DEFAULT `τ₀ = 3`. AT `θ = 10` IT SOLVES ALL ELEVEN GF1 RACE RUNGS FROM THE
+VACUUM, IN 7–8 NEWTON STEPS (11 ON L0 `k = 1`), WHERE THE DEFAULT SOLVES THREE.
+IT LEAVES A RESOLVED ANSWER WHERE THE DEFAULT PUTS IT: THE L2 `k = 4` REFERENCE
+MOVES BY 3.2e-09, AGAINST 2.1e-07 FOR A GLOBAL `τ₀ = 30`. ON THE THREE-SPECIES
+MIRROR IT LIFTS THE MIDPLANE GAUGE'S COARSE-MESH CEILING FROM 1e20 TO PAST
+4e20, AND IT DOES NOT LIFT THE VACUUM-MIDPLANE GAUGE'S OWN FOLD. `θ = 2` IS
+TOO SMALL; `θ = 4` MISSES ONE GF1 RUNG. IT COSTS 8–14× A PLAIN `τ` SOLVE,
+NEARLY ALL OF IT THE DIFFERENCED GAUGE COLUMNS.** `TODO`, *A stabilisation that
+follows the reaction*, posed it from [M-347](#m-347).
+
+**The prototype.** `τ(x, ψ) = max(τ_b(x), θ |K|/((k + 1)|∂K|) c⁺)` at every
+face point, `τ_b = 3/max(R, 0.1 m)`, `c = (1/R) ∂F/∂ψ` at the iterate's own
+`ψ` there (`ψ_c` added, zero off the fill), `|K|/|∂K|` the side's element
+from its vertices. `EvalGrad` carries `dτ/dψ` from a central difference of
+`dFdPsi()`. The face constraint takes MFEM's live non-linear route. The
+normalisation column and the bordered midplane gauge's columns are
+differenced, because the analytic ones are the domain term's alone. Without
+the gauge's, GF1 L0 `k = 2` at `θ = 50` contracts linearly, by about 40 a
+step, from 1e-3 to 1e-13 in 11 steps; with them, 7 steps, the tail at order
+1.4–2.3. The ψ* reconstruction refuses a state-dependent `τ`, so `τ` is
+frozen there at the solved `ψ_h`, read on the side's own element: the
+converged `τ` exactly.
+
+**Setup.** `install/tau-proto`, built from the branch on `a143457`, double.
+GF1 as M-347, through `race_geq.py`'s `meq_config()` and `run_meq()`, with
+`TauScaling = "diffusion"`, `Tau = 3.0`, `TauFollowsReaction = θ`, cold, 4
+threads, two sweeps at once on eight cores. Errors are `ψ` against PLAIN
+`τ₀ = 3`'s L2 `k = 4` reference, one reference for every column, on the race's
+65 × 65 nodes less the corners. The three-species mirror is
+`examples/mirror-three-species.toml`, level 0, `k = 2` as shipped, its
+`5e18` peak scaled by `DensityScale = s` on both tabled densities, cold,
+through `meq-run`, 2 threads.
+
+**1. GF1.** Newton steps, and the max error:
+
+| rung | `τ₀ = 3` | `τ₀ = 30` | `θ = 4` | `θ = 10` |
+|---|---|---|---|---|
+| L0 `k = 1` | fails | 9, 5.96e-04 | 10, 1.39e-03 | 11, 1.53e-03 |
+| L0 `k = 2` | fails | 7, 6.43e-05 | fails | 8, 1.93e-04 |
+| L0 `k = 3` | fails | 7, 3.52e-05 | 7, 7.43e-05 | 7, 4.39e-05 |
+| L0 `k = 4` | fails | 7, 1.33e-05 | 7, 2.05e-05 | 7, 1.70e-05 |
+| L1 `k = 1` | fails | 7, 1.25e-04 | 8, 2.79e-04 | 7, 2.36e-04 |
+| L1 `k = 2` | fails | 7, 1.92e-05 | 7, 5.66e-05 | 7, 3.01e-05 |
+| L1 `k = 3` | fails | 7, 2.17e-06 | 7, 7.96e-06 | 7, 5.20e-06 |
+| L1 `k = 4` | 7, 2.03e-06 | 7, 1.53e-06 | 7, 1.84e-06 | 7, 1.70e-06 |
+| L2 `k = 1` | fails | 7, 4.07e-05 | 7, 1.05e-04 | 7, 7.59e-05 |
+| L2 `k = 2` | 7, 7.52e-06 | 7, 1.63e-06 | 7, 7.21e-06 | 7, 6.65e-06 |
+| L2 `k = 3` | 7, 4.19e-07 | 7, 3.76e-07 | 7, 4.15e-07 | 7, 4.12e-07 |
+
+Each prototype reference against plain `τ₀ = 3`'s: 2.41e-10 at `θ = 4`,
+3.15e-09 at `θ = 10`; `τ₀ = 30`'s is 2.05e-07. At `θ = 2`, L0 `k = 2` fails as
+at the default.
+
+* **Where the default already solves, the following `τ` keeps the default's
+  answer** — L1 `k = 4`, L2 `k = 2` and `k = 3` within 16% of `τ₀ = 3`'s error —
+  and on the reference to 3e-9: `τ` rises only in the elements that need it.
+* **Where it rescues a rung, its answer is up to 3× less accurate than a global
+  `τ₀ = 30`'s** (L0 `k = 2` 1.9e-4 against 6.4e-5; L1 `k = 3` 5.2e-6 against
+  2.2e-6). GF1's `ψ_h` improves with `τ` everywhere (M-345), and a `τ` raised
+  only where it must be buys less of that. L2 `k = 2` shows it on a rung both
+  solve: 6.7e-6 against 1.6e-6.
+
+**2. The three-species mirror.** Newton steps, or ✗:
+
+| gauge, `s` | 4 | 8 | 10 | 20 | 40 | 80 |
+|---|---|---|---|---|---|---|
+| midplane, default | 3 | 4 | 4 | 4 | ✗ | ✗ |
+| midplane, `θ = 2` | 3 | 4 | 4 | 4 | ✗ | ✗ |
+| midplane, `θ = 4` | | | | | 6 | ✗ |
+| midplane, `θ = 10` | | | | | 5 | 8 |
+| midplane, `τ₀ = 30` | | | | | 5 | 7 |
+| vacuum-midplane, default | 3 | ✗ | ✗ | ✗ | ✗ | ✗ |
+| vacuum-midplane, `θ = 2` | 3 | ✗ | ✗ | ✗ | ✗ | ✗ |
+| vacuum-midplane, `θ = 10` | | 5 | ✗ | ✗ | | |
+| vacuum-midplane, `τ₀ = 30` | | 5 | ✗ | | | |
+
+`s = 8` is 4.0e19 and `s = 10` 5.0e19, either side of the vacuum-midplane
+gauge's own fold near 4.16e19 ([M-291](#m-291), [M-294](#m-294)). **The
+following `τ` reaches 4.0e19 there from the vacuum, as `τ₀ = 30` does, and
+neither produces an answer past the fold.** In the midplane gauge every
+ceiling met is `τ`'s, and `θ = 10` and `τ₀ = 30` lift it alike.
+
+**3. θ.** `θ = 2` lifts nothing on either case, `θ = 4` all but one rung and
+one density, `θ = 10` everything tried. M-347's 1.6× was a margin on the
+answer's element-largest `c`; the prototype samples `c` at face points, which
+under-read an element's interior where the plasma peaks, and the fold arrives
+before the smooth reaction meets `λ_min` (CLAUDE_HDGGS.md). `θ` between 4 and
+10 was not bracketed further.
+
+**4. What it costs.** Wall against plain `τ₀ = 30` on the same rung: 8× to 14×
+(L0 `k = 1` 21.4 s against 1.5 s, L2 `k = 3` 374 s against 34 s), at different
+thread counts and loads, so a ratio only. `--profile` on GF1 L0 `k = 2`,
+4 threads: 14.9 s against 1.1 s, 92% of it residuals, 565 against 19 — two per
+knot per Newton step for the differenced gauge columns, 2 × 33 × 8 — each
+4.4× a plain residual's for the live face path. Assembled directly, the
+columns' face term takes it to 1.55× → **[M-349](#m-349)**.
+
+**Reproduce.** `runs/gf1-tau/`: `f3-th4/`, `f3-th10/` (`gf1_tau_sweep.py OUT 3 4
+θ <install/tau-proto>`), `compare.py` for table 1, `dbg/` for the profile;
+`runs/tau-proto/three/` (`run.sh` at `THETA=2`, `more.sh`) for table 2.
+
+### M-349
+
+**THE FOLLOWING `τ`'S BORDER COLUMNS TAKE THE FACE TERM DIRECTLY, AND THE
+COST FALLS FROM 18× TO 1.55× A PLAIN `τ₀ = 30` SOLVE ON GF1 L0 `k = 2`, WITH
+EVERY NEWTON STEP AND ERROR OF [M-348](#m-348)'s `θ = 10` SWEEP REPRODUCED TO
+THE PRINTED DIGIT. `θ` IS BRACKETED: FACE-POINT SAMPLING NEEDS `6 < θ ≤ 8`,
+SET BY THE THREE-SPECIES MIRROR AT ×80 (GF1 SOLVES EVERY RUNG AT `θ = 6`).
+SAMPLING `c` AS THE ELEMENT'S INTERIOR MAXIMUM INSTEAD NEEDS `2 < θ ≤ 4` THERE,
+AND `θ = 2` ON TEN OF GF1'S ELEVEN RUNGS — BUT ITS JACOBIAN CANNOT BE MADE
+EXACT THROUGH MFEM'S STABILISATION HOOK, AND IT TAKES UP TO 30 STEPS.**
+
+**The columns.** Every border unknown `p` that `F` reads moves `τ` through `c`,
+so its column gains the face term `HDGDiffusionIntegrator::AssembleHDGFaceVector()`
+sums, with `∂τ/∂p` in `τ`'s place: per side of each face the integrator
+visits, `w = |J_f| w_ip ∂τ/∂p`, into the side's element rows as
+`w (u − û) φ_i` and the face's trace rows as `w (u − û) μ_i`. With
+`c = (1/R) ∂F/∂ψ`, `∂c/∂p = (1/R) ∂/∂ψ [∂F/∂p]` by the symmetry of the mixed
+derivative, so the face term is the domain column's own integrand
+differenced in `ψ` at the point (`addReactionFaceColumns()`). It serves the
+bordered gauge's knots, `ψ_ax`/`ψ_inner`, `ψ_bnd` and the current scale. `ψ_c`
+is cached at the face points as it is at the element points.
+
+**The check.** At `bc22331`, `MEQ_CHECK_REACTION_COLUMNS=1` assembled the
+differenced columns beside the direct ones at every step and printed the worst
+difference over the worst differenced entry. The standing control is
+`BorderColumn::Differenced`, which differences the gauge's knots too, in
+`RotatingMirror`'s `aTauThatFollowsTheReactionLiftsTheElementFoldAndIsQuadratic`:
+the same merits to the printed digit and answers 3.2e-16 apart, the last
+triple at order 1.9; with the gauge columns' face term removed the order reads
+1.007 and the control parts. On GF1 L0 `k = 2` at `θ = 10`, all eight steps:
+
+* the gauge columns: the potential block at 1.8e-10/1.1 to 1.3e-9/2.6, and the
+  trace block zero on the first step and 4.8e-10/1.4 to 1.1e-9/1.7 after. The
+  trace block with its sign
+  flipped reads 2× its size, so the trace rows' sign is MFEM's;
+* the `ψ_bnd` column: 7.4e-8/2.5 to 7.6e-6/2.8 on seven steps; 2.7e-2/2.0 on
+  the second. The second step is NOT explained. A difference straddling a
+  kink — `max(τ_b, ·)` at a face point, or an element entering the fill — is
+  the hypothesis, unmeasured.
+
+**The cost.** `--profile`, GF1 L0 `k = 2`, `θ = 10` over `τ₀ = 3`, 4 threads,
+the machine otherwise idle, against plain `τ₀ = 30` on the same rung (7 steps;
+0.84 s of solve, 19 residuals at 5.7 ms):
+
+| | solve | residuals | residual | border assembly |
+|---|---|---|---|---|
+| M-348, columns differenced | 14.6 s | 565 | 13.7 s | |
+| the gauge's face term direct | 2.38 s | 53 | 1.36 s | |
+| and `ψ_bnd`, `ψ_inner`, the scale | 2.04 s | 21 | 0.50 s | 1.16 s |
+| and `ψ_c` cached at face points | 1.30 s | 21 | 0.27 s | 0.44 s |
+
+`perf` before the face cache had the filament sum (`geometricKernel`,
+Carlson's `R_D`, `filamentPsi`, `requireFinite`) at a fifth of the run.
+What is left is a residual 2.2× a plain one's, on MFEM's host face loop
+under the live face constraint, and the serial face loops of the columns.
+Across the sweep, under load, the 11 rungs run 1.3×–2.0× `τ₀ = 30`'s wall.
+
+**`θ`, face-point sampling** (exact Jacobian). GF1, all 11 rungs, steps and the
+max error against plain `τ₀ = 3`'s L2 `k = 4`, as M-348:
+
+| rung | `τ₀ = 30` | `θ = 6` | `θ = 10` |
+|---|---|---|---|
+| L0 `k = 1` | 9, 5.96e-04 | 9, 1.43e-03 | 11, 1.53e-03 |
+| L0 `k = 2` | 7, 6.43e-05 | 8, 4.54e-04 | 8, 1.93e-04 |
+| L0 `k = 3` | 7, 3.52e-05 | 7, 5.15e-05 | 7, 4.39e-05 |
+| L0 `k = 4` | 7, 1.33e-05 | 7, 1.85e-05 | 7, 1.70e-05 |
+| L1 `k = 1` | 7, 1.25e-04 | 7, 2.39e-04 | 7, 2.36e-04 |
+| L1 `k = 2` | 7, 1.92e-05 | 7, 4.13e-05 | 7, 3.01e-05 |
+| L1 `k = 3` | 7, 2.17e-06 | 7, 6.43e-06 | 7, 5.20e-06 |
+| L1 `k = 4` | 7, 1.53e-06 | 7, 1.74e-06 | 7, 1.70e-06 |
+| L2 `k = 1` | 7, 4.07e-05 | 7, 8.97e-05 | 7, 7.59e-05 |
+| L2 `k = 2` | 7, 1.63e-06 | 7, 6.93e-06 | 7, 6.65e-06 |
+| L2 `k = 3` | 7, 3.76e-07 | 7, 4.14e-07 | 7, 4.12e-07 |
+
+The `θ = 10` column is M-348's to every digit.
+References against `τ₀ = 3`'s:
+8.2e-10 at `θ = 6`, 3.2e-9 at `θ = 10`. The three-species mirror, level 0, cold,
+2 threads:
+
+| gauge, `s` | 40 | 80 | 160 |
+|---|---|---|---|
+| midplane, `θ = 4` (M-348) | 6 | ✗ | |
+| midplane, `θ = 6` | 6 | ✗ | |
+| midplane, `θ = 8` | | 8 | |
+| midplane, `θ = 10` | 5 | 8 | ✗ |
+| midplane, `τ₀ = 30` | 5 | 7 | ✗ |
+
+and in the vacuum-midplane gauge `θ = 6` reaches `s = 8` (4.0e19, 6 steps) and
+fails at `s = 10` (5.0e19), its own fold as before. **On GF1 a smaller `θ`
+costs accuracy**, since `τ` buys accuracy there everywhere (M-345): `θ` is set
+by the fold, and the three-species mirror puts it above 6.
+
+**`θ`, element sampling** (`MEQ_TAU_ELEMENT_SAMPLE=1` at `bc22331`, an
+experiment, since removed from the tree). `c` is
+the element's largest over its source quadrature points at the state of each
+residual — M-347's reading — so `τ` is non-local in the element and
+`EvalGrad()` has no slot for its derivative: the Jacobian and the face columns
+omit it, and Newton is not quadratic. GF1:
+
+| rung | `θ = 2` | `θ = 4` |
+|---|---|---|
+| L0 `k = 1` | fails | fails |
+| L0 `k = 2` | 28, 1.54e-04 | 14, 1.05e-04 |
+| L0 `k = 3` | 26, 6.67e-05 | 11, 3.66e-05 |
+| L0 `k = 4` | 16, 1.77e-05 | 11, 1.40e-05 |
+| L1 `k = 1` | 27, 3.35e-04 | 24, 2.49e-04 |
+| L1 `k = 2` | 16, 7.93e-05 | 12, 4.36e-05 |
+| L1 `k = 3` | 9, 9.84e-06 | 9, 6.04e-06 |
+| L1 `k = 4` | 8, 1.98e-06 | 8, 1.80e-06 |
+| L2 `k = 1` | 30, 1.33e-04 | 15, 9.44e-05 |
+| L2 `k = 2` | 9, 7.54e-06 | 10, 7.16e-06 |
+| L2 `k = 3` | 7, 4.21e-07 | 7, 4.17e-07 |
+
+References against `τ₀ = 3`'s: 5.4e-12 and 2.7e-10. L0 `k = 1` converges at
+`θ = 10` (22 steps) and `θ = 20` (20) — M-347's exception again, its one
+element's interior peak 7× its neighbours'. The three-species mirror:
+midplane `s = 40` at `θ = 2` (19 steps), `s = 80` fails at `θ = 2` and
+converges at `θ = 4` (16), `s = 160` fails at `θ = 4`; vacuum-midplane `s = 8`
+converges at `θ = 2` (17) and `s = 10` fails at `θ = 2` and `θ = 4`. **The
+interior sample needs a `θ` 2–3× smaller, nearer M-347's 1.6, and leaves the
+answer nearer the default's; it does not reach a fold the face sample
+misses, and it would need MFEM to carry a per-element rank-one derivative.
+Dropped on these numbers.**
+
+**Reproduce.** `install/tau-direct` and `install/tau-elem`, the branch at
+`bc22331`. `runs/gf1-tau/`: `d3-th10/`, `d3-th6/` (`gf1_tau_sweep.py OUT 3
+3 θ <install/tau-direct>`), `e3-th2/`, `e3-th4/` (the same with
+`MEQ_TAU_ELEMENT_SAMPLE=1` and `install/tau-elem`), `compare2.py`; `direct/`
+for the profile, the check and L0 `k = 1`'s element runs;
+`runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.

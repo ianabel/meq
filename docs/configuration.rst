@@ -359,6 +359,20 @@ tokamak, and ``examples/mirror-rotating.toml`` for a mirror, whose
        ``TauScaling`` absent from a run whose support is not a box — since a
        constant :math:`\tau` never reads :math:`R`. It matters only where the
        mesh comes within :math:`R_f` of the axis. See :ref:`formulation-tau`.
+   * - ``TauFollowsReaction``
+     - off
+     - A margin :math:`\theta > 0` that raises :math:`\tau` where the
+       source's reaction :math:`c = (1/R)\,\partial F/\partial\psi` would
+       otherwise make one element's local problem singular:
+       :math:`\tau = \max(\tau_b, \theta\,c\,|K|/((k+1)|\partial K|))` at
+       every face point, :math:`\tau_b` the stabilisation the keys above
+       give, :math:`c` read at the iterate's own :math:`\psi`, so
+       :math:`\tau` follows the solve and Newton stays quadratic. Where the
+       reaction is weak :math:`\tau` is :math:`\tau_b` exactly. It changes
+       the discretisation where it binds, so the answer at a fixed mesh.
+       Refused if not positive, beside a Solov'ev source (no reaction), and
+       under ``--device``, where it would take the solve off every device
+       route. See :ref:`formulation-tau`.
 
 ``[source]``
 ------------

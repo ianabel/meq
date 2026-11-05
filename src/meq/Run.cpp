@@ -1654,6 +1654,21 @@ int meq::Run::Impl::configure()
 			}
 		}
 
+		// A tau THAT FOLLOWS THE REACTION is state dependent, which puts the
+		// face constraint on MFEM's live non-linear slot, and every batched and
+		// device face route declines that slot: under a Device the whole
+		// residual and gradient would run on one host core (DEVICE-PLAN.md
+		// section 8). Refused rather than run there.
+		if ( namedDevice && config->getDiscretisation().tauFollowsReaction > 0.0 )
+		{
+			std::fprintf( stderr,
+				"MEQ: [discretisation] TauFollowsReaction is not solved under\n"
+				"     --device: a state-dependent tau takes the face terms off\n"
+				"     every device route, so the solve would run on one host\n"
+				"     core. Run it on the host, or use a constant Tau.\n" );
+			return ConfigurationError;
+		}
+
 		coils = meq::makeCoilSet( config->getCoils(),
 		                          config->getSource().permeability(), argument );
 
@@ -3170,6 +3185,8 @@ int meq::Run::Impl::setUp()
 		if ( config->getDiscretisation().tauScaling == meq::TauScalingType::Diffusion )
 			fresh->setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
 			                      config->getDiscretisation().tauFloorRadius );
+		if ( config->getDiscretisation().tauFollowsReaction > 0.0 )
+			fresh->setTauFollowsReaction( config->getDiscretisation().tauFollowsReaction );
 
 		if ( gammaHMarker )
 			fresh->setExtension( *path, *gammaHMarker );
@@ -5465,6 +5482,9 @@ int meq::Run::Impl::solve()
 			std::printf( "MEQ: the HDG stabilisation is tau = %g/max( R, %g m )\n",
 			             config->getDiscretisation().tau,
 			             config->getDiscretisation().tauFloorRadius );
+		if ( config->getDiscretisation().tauFollowsReaction > 0.0 )
+			std::printf( "MEQ: tau follows the reaction, max( tau_b, %g |K|/( ( k + 1 )|dK| ) (1/R) dF/dpsi )\n",
+			             config->getDiscretisation().tauFollowsReaction );
 
 		if ( config->getSource().supportIsBox() )
 			std::printf( "MEQ: the plasma support is the BOX 0 < Psi <= 1, "

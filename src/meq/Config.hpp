@@ -419,6 +419,10 @@ namespace meq
 		// is the same number, which this MFEM-free header cannot name and
 		// SolverContract holds equal.
 		double tauFloorRadius = MirrorStabilisation::floorRadius;
+
+		// TauFollowsReaction: theta in GradShafranovSolver::
+		// setTauFollowsReaction(), > 0, or absent for off. PROTOTYPE.
+		double tauFollowsReaction = 0.0;
 	};
 
 	// [source] -- which right-hand side F( R, z, psi ), and its parameters.
