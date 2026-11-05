@@ -23151,7 +23151,7 @@ Each prototype reference against plain `τ₀ = 3`'s: 2.41e-10 at `θ = 4`,
 at the default.
 
 * **Where the default already solves, the following `τ` keeps the default's
-  answer** — L1 `k = 4`, L2 `k = 2` and `k = 3` within 15% of `τ₀ = 3`'s error —
+  answer** — L1 `k = 4`, L2 `k = 2` and `k = 3` within 16% of `τ₀ = 3`'s error —
   and on the reference to 3e-9: `τ` rises only in the elements that need it.
 * **Where it rescues a rung, its answer is up to 3× less accurate than a global
   `τ₀ = 30`'s** (L0 `k = 2` 1.9e-4 against 6.4e-5; L1 `k = 3` 5.2e-6 against
