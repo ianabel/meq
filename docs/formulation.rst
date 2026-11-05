@@ -224,6 +224,29 @@ scaled stabilisation's reach on the rotating mirror, the sweep that chose the
 mirror's two numbers and the cost on the analytic benchmarks are in
 ``MEASUREMENTS.md``; measure on your own problem before choosing.
 
+**A stabilisation that follows the reaction.** Any fixed :math:`\tau_0` is a
+guess at the pressure: the fold above arrives wherever the reaction
+:math:`c = (1/R)\,\partial F/\partial\psi` reaches
+:math:`(k+1)\,\tau\,|\partial K|/|K|`, and a case at a new pressure needs a
+new sweep. ``[discretisation] TauFollowsReaction`` = :math:`\theta` keeps that
+criterion with a margin instead,
+
+.. math::
+
+   \tau(x, \psi) = \max\!\Bigl(\tau_b(x),\;
+   \theta\,\frac{|K|}{(k+1)\,|\partial K|}\,c^+(x, \psi)\Bigr),
+
+at every face point, with :math:`\tau_b` the stabilisation above and
+:math:`c` read at the iterate's own :math:`\psi` there. :math:`\tau` then
+depends on the solution, as Nguyen, Peraire and Cockburn's :math:`s(u, \hat u)`
+does, and MEQ carries its derivative into every block and border column of
+the Jacobian, so Newton is quadratic. Where the reaction is weak — the
+vacuum, the edge — it is :math:`\tau_b` exactly. It does not lift a fold the
+posed problem has of its own. The margin is set by the fold: on MEQ's
+three-species mirror it is above 6. It is off by default, and host only.
+Measure the margin and the accuracy on your own problem before relying on
+it; the figures are in ``MEASUREMENTS.md``.
+
 .. warning::
 
    **MFEM will not give you a constant** :math:`\tau` **unless you ask.** The

@@ -23220,9 +23220,14 @@ differenced in `ψ` at the point (`addReactionFaceColumns()`). It serves the
 bordered gauge's knots, `ψ_ax`/`ψ_inner`, `ψ_bnd` and the current scale. `ψ_c`
 is cached at the face points as it is at the element points.
 
-**The check.** `MEQ_CHECK_REACTION_COLUMNS=1` assembles the differenced columns
-beside the direct ones at every step and prints the worst difference over the
-worst differenced entry. On GF1 L0 `k = 2` at `θ = 10`, all eight steps:
+**The check.** At `bc22331`, `MEQ_CHECK_REACTION_COLUMNS=1` assembled the
+differenced columns beside the direct ones at every step and printed the worst
+difference over the worst differenced entry. The standing control is
+`BorderColumn::Differenced`, which differences the gauge's knots too, in
+`RotatingMirror`'s `aTauThatFollowsTheReactionLiftsTheElementFoldAndIsQuadratic`:
+the same merits to the printed digit and answers 3.2e-16 apart, the last
+triple at order 1.9; with the gauge columns' face term removed the order reads
+1.007 and the control parts. On GF1 L0 `k = 2` at `θ = 10`, all eight steps:
 
 * the gauge columns: the potential block at 1.8e-10/1.1 to 1.3e-9/2.6, and the
   trace block zero on the first step and 4.8e-10/1.4 to 1.1e-9/1.7 after. The
@@ -23285,7 +23290,8 @@ fails at `s = 10` (5.0e19), its own fold as before. **On GF1 a smaller `θ`
 costs accuracy**, since `τ` buys accuracy there everywhere (M-345): `θ` is set
 by the fold, and the three-species mirror puts it above 6.
 
-**`θ`, element sampling** (`MEQ_TAU_ELEMENT_SAMPLE=1`, an experiment). `c` is
+**`θ`, element sampling** (`MEQ_TAU_ELEMENT_SAMPLE=1` at `bc22331`, an
+experiment, since removed from the tree). `c` is
 the element's largest over its source quadrature points at the state of each
 residual — M-347's reading — so `τ` is non-local in the element and
 `EvalGrad()` has no slot for its derivative: the Jacobian and the face columns
@@ -23313,11 +23319,11 @@ converges at `θ = 4` (16), `s = 160` fails at `θ = 4`; vacuum-midplane `s = 8`
 converges at `θ = 2` (17) and `s = 10` fails at `θ = 2` and `θ = 4`. **The
 interior sample needs a `θ` 2–3× smaller, nearer M-347's 1.6, and leaves the
 answer nearer the default's; it does not reach a fold the face sample
-misses, and it would need MFEM to carry a per-element rank-one derivative
-(DEVICE-PLAN.md, *A stabilisation that follows the reaction*).**
+misses, and it would need MFEM to carry a per-element rank-one derivative.
+Dropped on these numbers.**
 
-**Reproduce.** `install/tau-direct` and `install/tau-elem`, the branch at this
-entry's commit. `runs/gf1-tau/`: `d3-th10/`, `d3-th6/` (`gf1_tau_sweep.py OUT 3
+**Reproduce.** `install/tau-direct` and `install/tau-elem`, the branch at
+`bc22331`. `runs/gf1-tau/`: `d3-th10/`, `d3-th6/` (`gf1_tau_sweep.py OUT 3
 3 θ <install/tau-direct>`), `e3-th2/`, `e3-th4/` (the same with
 `MEQ_TAU_ELEMENT_SAMPLE=1` and `install/tau-elem`), `compare2.py`; `direct/`
 for the profile, the check and L0 `k = 1`'s element runs;

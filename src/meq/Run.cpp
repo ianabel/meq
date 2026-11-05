@@ -1654,6 +1654,21 @@ int meq::Run::Impl::configure()
 			}
 		}
 
+		// A tau THAT FOLLOWS THE REACTION is state dependent, which puts the
+		// face constraint on MFEM's live non-linear slot, and every batched and
+		// device face route declines that slot: under a Device the whole
+		// residual and gradient would run on one host core (DEVICE-PLAN.md
+		// section 8). Refused rather than run there.
+		if ( namedDevice && config->getDiscretisation().tauFollowsReaction > 0.0 )
+		{
+			std::fprintf( stderr,
+				"MEQ: [discretisation] TauFollowsReaction is not solved under\n"
+				"     --device: a state-dependent tau takes the face terms off\n"
+				"     every device route, so the solve would run on one host\n"
+				"     core. Run it on the host, or use a constant Tau.\n" );
+			return ConfigurationError;
+		}
+
 		coils = meq::makeCoilSet( config->getCoils(),
 		                          config->getSource().permeability(), argument );
 

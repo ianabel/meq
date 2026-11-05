@@ -2098,6 +2098,9 @@ namespace meq
 				        && discretisationOptions.tauFollowsReaction > 0.0 ) )
 					discretisation.fail( "TauFollowsReaction", "must be a positive margin theta in "
 					                     "tau = max( tau_b, theta |K|/( ( k + 1 )|dK| ) (1/R) dF/dpsi )" );
+				if ( sourceOptions.type == SourceType::Soloviev )
+					discretisation.fail( "TauFollowsReaction", "means nothing beside a Solov'ev source, "
+					                     "whose F does not depend on psi: there is no reaction to follow" );
 			}
 		}
 

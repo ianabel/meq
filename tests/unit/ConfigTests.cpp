@@ -845,6 +845,46 @@ BOOST_AUTO_TEST_CASE( tau_floor_radius_defaults_and_is_refused_beside_a_constant
 			[]( ConfigError const & e ) { return e.getKey() == "discretisation.TauFloorRadius"; } );
 }
 
+/// [discretisation] TauFollowsReaction: absent is off, so every file written
+/// before the key means what it meant; a positive margin theta is read as
+/// given; anything else is refused by name, and so is the key beside a
+/// Solov'ev source, whose F has no reaction to follow and which would
+/// otherwise accept it and do nothing.
+BOOST_AUTO_TEST_CASE( tau_follows_reaction_is_off_unless_given_and_refused_where_it_means_nothing )
+{
+	auto withMargin = []( std::string const & line, std::string const & source )
+	{
+		return
+			"[mesh]\n"
+			"RMin = 0.2\n"
+			"RMax = 1.8\n"
+			"ZMin = -1.6\n"
+			"ZMax = 1.6\n"
+			"\n"
+			"[discretisation]\n"
+			"PolynomialDegree = 2\n"
+			+ line + "\n" + source;
+	};
+	std::string const mhd = "[source]\nType = \"mhd\"\nPPrimeFile = \"profiles/pprime.dat\"\n"
+	                        "GGPrimeFile = \"profiles/ggprime.dat\"\n";
+	std::string const soloviev = "[source]\nType = \"soloviev\"\nA = -0.52\n";
+
+	BOOST_TEST( parse( minimal() ).getDiscretisation().tauFollowsReaction == 0.0 );
+	BOOST_TEST( parse( withMargin( "TauFollowsReaction = 10\n", mhd ) )
+	            .getDiscretisation().tauFollowsReaction == 10.0 );
+	std::string spinning = rotating();
+	std::string const degree = "PolynomialDegree = 2\n";
+	spinning.insert( spinning.find( degree ) + degree.size(), "TauFollowsReaction = 7.5\n" );
+	BOOST_TEST( parse( spinning ).getDiscretisation().tauFollowsReaction == 7.5 );
+
+	for ( std::string const bad : { "TauFollowsReaction = 0\n", "TauFollowsReaction = -2.0\n",
+	                                "TauFollowsReaction = \"yes\"\n", "TauFollowsReaction = nan\n" } )
+		BOOST_CHECK_EXCEPTION( parse( withMargin( bad, mhd ) ), ConfigError,
+			[]( ConfigError const & e ) { return e.getKey() == "discretisation.TauFollowsReaction"; } );
+	BOOST_CHECK_EXCEPTION( parse( withMargin( "TauFollowsReaction = 10\n", soloviev ) ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "discretisation.TauFollowsReaction"; } );
+}
+
 BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 {
 	std::string const zeroTau =

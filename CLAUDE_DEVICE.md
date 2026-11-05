@@ -30,6 +30,10 @@ against is `CLAUDE_DECLINED.md`.
   nothing: `LocalFactorMode`, `TraceAssemblyMode` and `AssemblyMode` batched
   (below), and cuDSS as the trace solver under CUDA. Threaded assembly is refused above one thread, and
   `TraceSolver = "cudss"` is refused without a Device.
+* **`[discretisation] TauFollowsReaction` is refused under `--device`.** A
+  state-dependent `τ` puts the face constraint on MFEM's live non-linear slot,
+  which every batched and device face route declines, so the solve would run
+  on one host core. `DEVICE-PLAN.md` §8 has the port and its upstream request.
 * **Residency is built and gated on the data.** The iterate's readers, the axis
   search and the bordered columns have device routes that open by themselves
   once their input is device-valid. Over a `machine-f-diiid` run the bus carries

@@ -334,6 +334,8 @@ namespace
 		double tau = meq::MirrorStabilisation::tau0;
 		bool diffusionScaledTau = true;
 		double tauFloorRadius = meq::MirrorStabilisation::floorRadius;
+		/// setTauFollowsReaction()'s margin theta over that tau; zero is off.
+		double tauFollowsReaction = 0.0;
 		/// setAnisotropy()'s Delta, borrowed, which must outlive the run;
 		/// null is the isotropic mirror.
 		meq::Anisotropy const *anisotropy = nullptr;
@@ -475,6 +477,8 @@ namespace
 		if ( o.diffusionScaledTau )
 			solver.setTauScaling( meq::GradShafranovSolver::TauScaling::Diffusion,
 			                      o.tauFloorRadius );
+		if ( o.tauFollowsReaction > 0.0 )
+			solver.setTauFollowsReaction( o.tauFollowsReaction );
 		if ( o.anisotropy )
 			solver.setAnisotropy( *o.anisotropy );
 		solver.setAxisFluxPoint( p.axisPointR, p.axisPointZ );
@@ -4967,6 +4971,102 @@ BOOST_AUTO_TEST_CASE( threeSpeciesAtMachSixAreQuadraticUnderTheBorderedGauge )
 	BOOST_TEST( stepsOf( *bordered ) <= 3 );
 	BOOST_TEST( stepsOf( *continued ) <= 2 );
 	landsOnTheAnswer( lands, *bordered, "from the held answer" );
+}
+
+/*
+ * 5. A tau THAT FOLLOWS THE REACTION, setTauFollowsReaction() (MEASUREMENTS.md
+ * M-348, M-349): the three-species mirror at 2e20 -- 40x the suite's density
+ * -- on level 0 in the bordered midplane gauge, from the vacuum, where the mirror's own
+ * stabilisation folds inside one element and theta = 10 over it does not.
+ *
+ * QUADRATIC, because the Jacobian is exact: EvalGrad()'s dtau/dpsi and the
+ * face term of every border column. THE CONTROL IS THE DIFFERENCED COLUMNS
+ * (BorderColumn::Differenced, knots included), which carry the face term with
+ * no code of their own: the same answer, and the same merits step by step.
+ * Without the gauge columns' face term M-348 measured a linear tail, about 40
+ * a step, which fails both.
+ */
+BOOST_AUTO_TEST_CASE( aTauThatFollowsTheReactionLiftsTheElementFoldAndIsQuadratic )
+{
+	double const peak = 2.0e20;
+	MirrorProfiles const three = threeSpecies( peak );
+	Options b;
+	b.level = 0;
+	b.order = 2;
+	b.stem = borderStem;
+	b.profiles = &three;
+	b.gaugeKnots = borderKnots;
+	std::printf( "\n  THREE SPECIES AT M = 6, %.1e, level 0, k = 2, midplane gauge, from the vacuum\n", peak );
+
+	// The control first: the mirror's stabilisation alone folds here.
+	std::unique_ptr<MirrorRun> const plain = runMirror( b );
+	std::printf( "    %-40s %s\n", "tau = 3/max( R, 0.1 m )", plain->converged ? "converged" : "fails" );
+	BOOST_TEST( !plain->converged, "the mirror's stabilisation converges at " << peak
+		<< ", so this case does not exercise a following tau" );
+
+	Options f = b;
+	f.tauFollowsReaction = 10.0;
+	std::unique_ptr<MirrorRun> const following = runMirror( f );
+	BOOST_TEST_REQUIRE( following->converged, "theta = 10 over the mirror's stabilisation does not "
+		"lift the element fold at " << peak << ": " << following->failure );
+	printMerits( "theta = 10", *following );
+	std::vector<double> const &history = following->solver->newtonResiduals();
+	std::string why;
+	if ( tailIsReadable( history ) )
+		BOOST_TEST( quadraticTail( history, why ), why << "the following tau's Jacobian is not "
+			"the residual's: a border column without its face term is the measured cause (M-348)" );
+	BOOST_TEST( stepsOf( *following ) <= 8 );
+
+	Options d = f;
+	d.differencedColumns = true;
+	std::unique_ptr<MirrorRun> const differenced = runMirror( d );
+	BOOST_TEST_REQUIRE( differenced->converged, differenced->failure );
+	printMerits( "theta = 10, columns differenced", *differenced );
+	double const lands = maxDifference( *differenced, *following );
+	std::printf( "    the two answers %.3e apart\n", lands );
+	std::fflush( stdout );
+	landsOnTheAnswer( lands, *following, "the differenced columns" );
+	std::vector<double> const above = meq::tests::aboveTheFloor( history );
+	std::vector<double> const &control = differenced->solver->newtonResiduals();
+	BOOST_TEST_REQUIRE( meq::tests::aboveTheFloor( control ).size() == above.size() );
+	double const differencedFloor = meq::tests::differencedAgreementFloor( 0.0 );
+	for ( std::size_t i = 0; i < above.size(); ++i )
+		BOOST_TEST( std::abs( control[ i ] - history[ i ] )
+		            <= 1.0e-6*history[ i ] + 1.0e-15*history.front()
+		               + ( i > 0 ? differencedFloor*history[ i - 1 ] : 0.0 ),
+			"step " << i << ": the differenced columns' merit " << control[ i ]
+			<< " against the assembled " << history[ i ] );
+}
+
+/*
+ * 6. AND IT DOES NOT LIFT A FOLD OF THE PROBLEM'S OWN. The vacuum-midplane
+ * gauge folds near 4.16e19 on its own (M-291, M-294): a following tau reaches
+ * 4e19 from the vacuum and does not produce an answer at 5e19, as tau0 = 30
+ * does not either (M-348). A tau that "solved" past it would be reporting an
+ * equilibrium the problem does not have.
+ */
+BOOST_AUTO_TEST_CASE( aTauThatFollowsTheReactionDoesNotLiftTheVacuumGaugesOwnFold )
+{
+	for ( double const peak : { 4.0e19, 5.0e19 } )
+	{
+		MirrorProfiles const three = threeSpecies( peak, meq::RotatingSource::Gauge::FixedCurve );
+		Options o;
+		o.level = 0;
+		o.order = 2;
+		o.stem = vacuumStem;
+		o.profiles = &three;
+		o.tauFollowsReaction = 10.0;
+		std::unique_ptr<MirrorRun> const run = runMirror( o );
+		std::printf( "\n  THREE SPECIES AT M = 6, %.1e, level 0, k = 2, vacuum-midplane gauge, theta = 10: %s\n",
+		             peak, run->converged ? "converged" : "fails" );
+		if ( run->converged )
+			printMerits( "theta = 10", *run );
+		if ( peak < 4.16e19 )
+			BOOST_TEST( run->converged, "below the gauge's fold at " << peak << ": " << run->failure );
+		else
+			BOOST_TEST( !run->converged, "past the vacuum-midplane gauge's own fold, at " << peak
+				<< ", a following tau produced an answer the problem does not have" );
+	}
 }
 
 /*

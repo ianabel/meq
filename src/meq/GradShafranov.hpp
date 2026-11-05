@@ -1959,6 +1959,9 @@ namespace meq
 				/// MEQ always did, kept so the two can be measured against each
 				/// other -- and the only route under the condensation, whose
 				/// residual is the reduced trace one rather than this assembly.
+				/// It covers the bordered midplane gauge's knots too, so a
+				/// face term setTauFollowsReaction() adds to their columns has
+				/// a control.
 				Differenced
 			};
 
@@ -2614,19 +2617,26 @@ namespace meq
 			void setStabilisationFollowsAnisotropy( bool follows );
 
 			/**
-			 * PROTOTYPE (TODO, "A stabilisation that follows the reaction"):
+			 * A STABILISATION THAT FOLLOWS THE REACTION (MEASUREMENTS.md M-348,
+			 * M-349; TODO, "A stabilisation that follows the reaction"):
 			 * tau( x, psi ) = max( tau_b( x ), theta |K|/( ( k + 1 )|dK| ) c+ )
 			 * at every face point, with tau_b whatever setTauScaling() chose,
 			 * c = (1/R) dF/dpsi at the iterate's own psi there, and |K|/|dK|
 			 * the side's element. The element criterion c < ( k + 1 ) tau
-			 * |dK|/|K| (CLAUDE_HDGGS.md, MEASUREMENTS.md M-287, M-347) then
-			 * holds with margin theta wherever the reaction would otherwise
-			 * fold an element, and tau is tau_b exactly where it would not.
-			 * State dependent, so the face terms go through MFEM's
-			 * AssembleHDGFaceVector/Grad with EvalGrad, the batched face routes
-			 * decline them, and the normalisation column is differenced. Only
-			 * on a non-linear source; refused beside
-			 * setStabilisationFollowsAnisotropy().
+			 * |dK|/|K| (CLAUDE_HDGGS.md, M-287, M-347) then holds with margin
+			 * theta wherever the reaction would otherwise fold an element, and
+			 * tau is tau_b exactly where it would not. theta is set by the
+			 * fold: 6 < theta <= 8 on the three-species mirror (M-349).
+			 *
+			 * The Jacobian is exact: EvalGrad() carries dtau/dpsi, and every
+			 * border column F reads -- psi_ax, psi_bnd, the current scale, the
+			 * midplane gauge's knots -- takes the face term directly
+			 * (addReactionFaceColumns()). State dependent, so the face
+			 * constraint goes on MFEM's live non-linear slot, which every
+			 * batched and device face route declines: HOST ONLY, and under a
+			 * Device the residual and gradient run on one core
+			 * (DEVICE-PLAN.md section 8). Only on a non-linear source; refused
+			 * beside setStabilisationFollowsAnisotropy().
 			 *
 			 * @param theta > 0, or 0 for off.
 			 * @throws std::logic_error after the forms are built.
@@ -7131,12 +7141,6 @@ namespace meq
 			bool addReactionFaceColumns( mfem::Vector const &state, std::size_t count,
 			                             std::function<bool( double, double, double, double * )> const &derivative,
 			                             std::vector<mfem::Vector *> const &out ) const;
-
-			/// The EXPERIMENT's per-element c, sampled from @a state; nothing
-			/// unless MEQ_TAU_ELEMENT_SAMPLE is set. Mutable: a cache of the
-			/// state the next residual reads.
-			void sampleElementReactions( mfem::Vector const &state ) const;
-			mutable std::vector<double> elementReactionSample;
 
 			/// addReactionFaceColumns() for the gauge's knots.
 			bool addReactionFaceGaugeColumns( mfem::Vector const &state,

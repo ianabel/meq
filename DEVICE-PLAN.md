@@ -2342,15 +2342,14 @@ device integrand with or without `τ`.**
 
 **The design.**
 
-* **Upstream, one request, filed as data, not a functor** (upstream does not
-  copy integrator internals into device lambdas). A state-dependent face
-  stabilisation on the batched NL face routes, in the Prepare/Finish shape of
-  `NonlinearResidualBatched`:
+* **Upstream, one request, as data, not a functor** (upstream does not copy
+  integrator internals into device lambdas), sent as
+  `../../mfem-hdg-dev/doc/HDG-STATE-DEPENDENT-STABILIZATION-BATCHED-FROM-MEQ.md`.
+  A state-dependent face stabilisation on the batched NL face routes, in the
+  Prepare/Finish shape of `NonlinearResidualBatched`:
   * Prepare exposes per-(point, side) device tables of `x`, `u`, `û`, the
     element and the face.
-  * The caller fills `s` and either pointwise `∂s/∂u`, `∂s/∂û`, or `∂s/∂T`
-    with a per-element gradient row: the element-sampled form, the rank-one
-    term `EvalGrad()` cannot express.
+  * The caller fills `s`, `∂s/∂u` and `∂s/∂û` pointwise.
   * Finish contracts, on interior, boundary and shared faces, with the
     weights on the device and no host sync.
   * The caller-integrand route admits the live constraint; the condensation
@@ -2361,8 +2360,8 @@ device integrand with or without `τ`.**
     with no further kernel.
 * **MEQ alone:**
   * an analytic `∂²F/∂ψ²`, host and POD, pinned by `SourceViewTests`;
-  * the `τ` (or `T_e`) kernel in `DeviceNPCDevice.cpp`, keeping the device
-    files at seven;
+  * the `τ` kernel in `DeviceNPCDevice.cpp`, keeping the device files at
+    seven;
   * `|K|/|∂K|` in `DeviceConstants`;
   * `ψ_c` at face points on the device (the host already caches it);
   * the mixed second derivatives for the border columns;
@@ -2375,10 +2374,11 @@ device integrand with or without `τ`.**
 
 **Stages.**
 
-0. Host: the sampling settled (face points, on M-349), the Jacobian exact
-   (done but for `∂²F/∂ψ²`'s difference), a `ProbedSolver` quadratic-tail
-   test where the follow branch binds, and the assembled Jacobian against a
-   difference of the assembled residual with `τ` following.
+0. Host: **done**. Face-point sampling; the Jacobian exact but for
+   `∂²F/∂ψ²`'s difference; `RotatingMirror`'s
+   `aTauThatFollowsTheReactionLiftsTheElementFoldAndIsQuadratic` asserts the
+   quadratic tail where the follow branch binds, against the differenced
+   columns as the control.
 1. The prototype under `--device debug` and `cuda`, reproducing `cpu`, with a
    `--profile` line per refused predicate. `FrozenTau`'s `GridFunction` read
    in `postProcess()` is expected to need `ψ_h` host-valid (inferred).

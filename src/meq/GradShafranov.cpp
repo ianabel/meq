@@ -1923,25 +1923,6 @@ namespace
 					}
 				}
 
-				/*
-				 * EXPERIMENT (M-348): c read as the element's own maximum over
-				 * its interior quadrature points, sampled from the state at
-				 * every residual (GradShafranovSolver::sampleElementReactions())
-				 * rather than at the face point. Non-local in the element, so
-				 * EvalGrad() has no slot for it: the Jacobian and the border
-				 * columns OMIT tau's derivative in this mode, and Newton is not
-				 * quadratic. A measurement of the theta it needs, not a method.
-				 */
-				void setElementReactions( std::vector<double> const *reactions )
-				{
-					elementReactions = reactions;
-				}
-
-				bool elementSampled() const
-				{
-					return elementReactions != nullptr;
-				}
-
 				/// psi_c at @a tr's point: the cache's, or the sum where the
 				/// point is not a cached one (none on the face routes).
 				double shiftAt( mfem::ElementTransformation &tr ) const
@@ -1997,7 +1978,7 @@ namespace
 				/// of the source. The gauge columns' face term.
 				double followScale( mfem::ElementTransformation &tr, double u, double uhat ) const
 				{
-					if ( !source || elementReactions )
+					if ( !source )
 						return 0.0;
 					double const floor = base.Eval( 0.0, 0.0, u, uhat, tr );
 					mfem::real_t coordinates[ 3 ];
@@ -2017,11 +1998,6 @@ namespace
 						*dTau = 0.0;
 					if ( !source )
 						return floor;
-					if ( elementReactions )
-					{
-						std::size_t const e = static_cast<std::size_t>( tr.ElementNo );
-						return std::max( floor, theta*size[ e ]/( degree + 1 )*( *elementReactions )[ e ] );
-					}
 					mfem::real_t coordinates[ 3 ];
 					mfem::Vector x( coordinates, tr.GetSpaceDim() );
 					tr.Transform( tr.GetIntPoint(), x );
@@ -2051,7 +2027,6 @@ namespace
 					double x, y, psi;
 				};
 				std::vector<std::vector<FacePoint>> faceShift;
-				std::vector<double> const *elementReactions = nullptr;
 				ConductorField const *shiftField = nullptr;
 		};
 	}
@@ -6816,7 +6791,12 @@ namespace
 			chosen = anisotropicStabilization.get();
 		}
 		ReactionFollowingStabilization *following = nullptr;
-		if ( reactionTheta > 0.0 && usesNonlinearForms() )
+		// A linear source has no reaction, so the margin would do nothing:
+		// refused rather than accepted and ignored.
+		if ( reactionTheta > 0.0 && !usesNonlinearForms() )
+			throw std::logic_error( "meq::GradShafranovSolver: setTauFollowsReaction() needs a "
+				"non-linear source; a linear one has no reaction for tau to follow" );
+		if ( reactionTheta > 0.0 )
 		{
 			if ( stabilisationFollowsAnisotropy )
 				throw std::logic_error( "meq::GradShafranovSolver: setTauFollowsReaction() beside setStabilisationFollowsAnisotropy() is not built" );
@@ -6947,11 +6927,6 @@ namespace
 			{
 				following->setSource( sourceTerm );
 				following->buildFaceCache( *potentialFes, *traceFes, fittedMarker, conductorFieldSet );
-				if ( std::getenv( "MEQ_TAU_ELEMENT_SAMPLE" ) )
-				{
-					elementReactionSample.assign( static_cast<std::size_t>( potentialFes->GetNE() ), 0.0 );
-					following->setElementReactions( &elementReactionSample );
-				}
 			}
 			// AND THE CACHE HERE RATHER THAN IN prepare(), because this is
 			// where the integrator exists -- it is a local, owned by the form
@@ -11313,42 +11288,6 @@ namespace
 		return refused == 0;
 	}
 
-	void GradShafranovSolver::sampleElementReactions( mfem::Vector const &state ) const
-	{
-		if ( !reactionStabilization
-		     || !static_cast<ReactionFollowingStabilization const &>( *reactionStabilization ).elementSampled() )
-			return;
-		countedHostRead( state, __LINE__ );
-		mfem::Mesh &mesh = *potentialFes->GetMesh();
-		int const potentialStart = blockOffsets[ 1 ];
-		// The largest c over the element's source quadrature points: the
-		// probe's point-max reading (M-347), at the state in hand.
-		MEQ_OMP_ELEMENT_LOOP
-		for ( int e = 0; e < mesh.GetNE(); ++e )
-		{
-			double worst = 0.0;
-			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
-			thread_local mfem::IsoparametricTransformation scratch;
-			mesh.GetElementTransformation( e, &scratch );
-			mfem::Array<int> dofs;
-			potentialFes->GetElementDofs( e, dofs );
-			mfem::Vector shape( el.GetDof() ), point;
-			mfem::IntegrationRule const &ir = sourceRule( el, scratch, sourceQuadratureExtra );
-			for ( int i = 0; i < ir.GetNPoints(); ++i )
-			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
-				scratch.SetIntPoint( &ip );
-				el.CalcShape( ip, shape );
-				scratch.Transform( ip, point );
-				double psi = conductorPsiAtQuadrature( e, i );
-				for ( int j = 0; j < dofs.Size(); ++j )
-					psi += shape( j )*state( potentialStart + dofs[ j ] );
-				worst = std::max( worst, sourceIntegrator->reactionAtTotal( e, point( 0 ), point( 1 ), psi ) );
-			}
-			elementReactionSample[ static_cast<std::size_t>( e ) ] = worst;
-		}
-	}
-
 	bool GradShafranovSolver::addReactionFaceGaugeColumns( mfem::Vector const &state,
 	                                                       CardinalSpline const &basis,
 	                                                       std::vector<double> const &crossings,
@@ -13232,7 +13171,6 @@ namespace
 					++profile.componentCalls;
 				}
 
-				sampleElementReactions( state );
 				double const tr = profileNow();
 				double const cr = profileCpuNow();
 				npc->Mult( state, out );
@@ -16507,18 +16445,15 @@ namespace
 				// UNDER A tau THAT FOLLOWS THE REACTION the face term moves with
 				// the crossings too, through dF/dpsi: its share is assembled
 				// beside the domain term's.
-				static bool const checkColumns = std::getenv( "MEQ_CHECK_REACTION_COLUMNS" ) != nullptr;
-				std::vector<mfem::Vector> direct;
-				if ( reactionStabilization )
-				{
-					if ( !addReactionFaceGaugeColumns( unknown, *gaugeBasis, gaugeR, gaugeColumns ) )
-						throw std::logic_error( "meq::GradShafranovSolver::solve: the source's "
-							"crossingDerivatives() refused on a face" );
-					if ( checkColumns )
-						direct = gaugeColumns;
-				}
-				// PROTOTYPE CHECK: the differenced columns, against the direct ones.
-				if ( reactionStabilization && checkColumns )
+				if ( reactionStabilization
+				     && !addReactionFaceGaugeColumns( unknown, *gaugeBasis, gaugeR, gaugeColumns ) )
+					throw std::logic_error( "meq::GradShafranovSolver::solve: the source's "
+						"crossingDerivatives() refused on a face" );
+				// BorderColumn::Differenced, the control: each knot's column
+				// from two residuals, after a flush, as the normalisation
+				// column's is and for its reason. The analytic columns above
+				// still ran, so a source that cannot answer is refused alike.
+				if ( borderColumnChoice == BorderColumn::Differenced )
 				{
 					flush();
 					mfem::Vector minus( unknown.Size() );
@@ -16538,27 +16473,6 @@ namespace
 						gaugeColumns[ at ] -= minus;
 						gaugeColumns[ at ] /= 2.0*h;
 					}
-					// Per block, the worst |direct - differenced| over the
-					// worst |differenced|, and the same with the direct trace
-					// block's sign flipped.
-					double worst[ 3 ] = { 0.0, 0.0, 0.0 }, size[ 3 ] = { 0.0, 0.0, 0.0 }, flipped = 0.0;
-					for ( int k = 0; k < nGauge; ++k )
-					{
-						mfem::Vector const &a = direct[ static_cast<std::size_t>( k ) ];
-						mfem::Vector const &b = gaugeColumns[ static_cast<std::size_t>( k ) ];
-						for ( int i = 0; i < a.Size(); ++i )
-						{
-							int const block = i < blockOffsets[ 1 ] ? 0 : ( i < blockOffsets[ 2 ] ? 1 : 2 );
-							worst[ block ] = std::max( worst[ block ], std::abs( a( i ) - b( i ) ) );
-							size[ block ] = std::max( size[ block ], std::abs( b( i ) ) );
-							if ( block == 2 )
-								flipped = std::max( flipped, std::abs( -a( i ) - b( i ) ) );
-						}
-					}
-					std::fprintf( stderr, "MEQ check: gauge columns direct vs differenced: flux %.3e/%.3e"
-					              " potential %.3e/%.3e trace %.3e/%.3e (flipped %.3e)\n",
-					              worst[ 0 ], size[ 0 ], worst[ 1 ], size[ 1 ], worst[ 2 ], size[ 2 ], flipped );
-					gaugeColumns = direct;
 				}
 				MidplaneField const field = midplaneFieldOf( unknown );
 				for ( int k = 0; k < nGauge; ++k )
@@ -16919,28 +16833,6 @@ namespace
 					if ( normalisedSource )
 						normalisedSource->setNormalisation( s, sB );
 					assembled = assembleNormalisationColumn( unknown, false, columnB );
-				}
-				// PROTOTYPE CHECK: the direct column against the differenced one.
-				if ( assembled && reactionStabilization && std::getenv( "MEQ_CHECK_REACTION_COLUMNS" ) )
-				{
-					flush();
-					mfem::Vector plus( n ), minus( n );
-					double const hB = normalisationStep( sB );
-					double const columnBase = sB;
-					sB = columnBase + hB;
-					fieldResidual( unknown, s, plus );
-					sB = columnBase - hB;
-					fieldResidual( unknown, s, minus );
-					sB = columnBase;
-					plus -= minus;
-					plus /= 2.0*hB;
-					double worst = 0.0, size = 0.0;
-					for ( int i = 0; i < n; ++i )
-					{
-						worst = std::max( worst, std::abs( plus( i ) - columnB( i ) ) );
-						size = std::max( size, std::abs( plus( i ) ) );
-					}
-					std::fprintf( stderr, "MEQ check: psi_bnd column direct vs differenced: %.3e/%.3e\n", worst, size );
 				}
 				if ( !assembled )
 				{
