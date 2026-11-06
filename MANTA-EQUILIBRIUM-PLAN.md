@@ -111,7 +111,7 @@ starts to matter.
 With `p` MaNTA's nodal state, the map `G` is a chain:
 
 ```
-p  --Π-->  T  (tables: knots at the nodes, values from u, slopes from q)       linear
+p  --Π-->  T  (tables: knots at the nodes, from u and q, T_s = (2/3)E_s/n_s)    pointwise
 T  ------>  x  (the converged bordered state: ψ fields and border b)           R(x; T) = 0
 x  --E-->  family  --I-->  g  (extraction, then interpolation at the label points)
 ```
@@ -119,15 +119,15 @@ x  --E-->  family  --I-->  g  (extraction, then interpolation at the label point
 so, with `J = ∂R/∂x` the bordered Newton matrix at the converged state,
 
 ```
-G'  dp  =  I' E'  J^{-1} ( −∂R/∂T · Π dp )
-G'^T dg =  Π^T (∂R/∂T)^T  J^{-T} ( −E'^T I'^T dg )
+G'  dp  =  I' E'  J^{-1} ( −∂R/∂T · Π' dp )
+G'^T dg =  Π'^T (∂R/∂T)^T  J^{-T} ( −E'^T I'^T dg )
 ```
 
 Each factor is one piece of work:
 
 | | what | exists? | branch |
 |---|---|---|---|
-| `Π` | MaNTA rows → table knots | trivial, linear | `manta/adapter` |
+| `Π`, `Π'` | MaNTA rows → table knots, and its derivative | node-local; `Π'` is a 2×2 per species per node (§4.7) | `manta/adapter` |
 | `∂R/∂T` | the residual's derivative in the table entries (values, slopes) | **no**; gauge columns are the precedent | `manta/table-derivative` |
 | `J^{-1}` | the bordered solve, caller RHS, at a **retained** linearisation | pieces only | `manta/linearised-solve` |
 | `E'` | directional derivative of the extraction, decisions frozen | **no** | `manta/shape-derivative` |
@@ -325,6 +325,23 @@ other branches do not.
 `Π` lives here: the slot map from MaNTA rows to MEQ table slots is the model's
 own TOML table (`[MEQEquilibrium]`), as the theta pinch's `PressureAux` is.
 
+**MaNTA evolves conserved variables**, density `n_s` and energy density
+`E_s = (3/2) n_s T_s`, because it has no `n_s ∂_t T_s` form on the left-hand
+side. Its `q` rows are the solved slopes `n_s'`, `E_s'`. So `Π` builds MEQ's
+`Temperature` table as a quotient at each node,
+
+```
+T_s  = (2/3) E_s / n_s,        T_s' = (2/3) ( E_s' − T_s·(3/2) n_s' ) / n_s
+```
+
+and the `Density` table from `(n_s, n_s')` directly. `Π` is no longer linear,
+but it is local: `Π'` is a 2×2 block per species per node on each of
+`(value, slope)`, and `Π'^T` the same blocks transposed, so neither costs
+anything beside a back-solve. A node with `n_s ≤ 0` is a throw (MaNTA's step
+failure), never a clamped temperature. The quotient adds no order loss: `n_s`
+and `E_s` converge at `k+1` and so does `T_s` where `n_s` is bounded away from
+zero, which an edge density at the domain's end must be.
+
 ## 5. Decisions for the user
 
 * **D1. The label and the domain.** Recommend `sqrt_psi_n` (MEQ's ρ): fixed
@@ -334,10 +351,17 @@ own TOML table (`[MEQEquilibrium]`), as the theta pinch's `PressureAux` is.
   Domain `[0, ρ_max]` with `ρ_max ≤ outerCut` — the axis served by its limits,
   the edge kept inside the extraction's range.
 * **D2. Route.** Python adapter first (§4.7), or a C++ plugin.
-* **D3. The input map.** Recommend species `n_s` and `T_s` as MaNTA *evolved*
-  variables, so `q` supplies the slopes a Hermite table needs; knots at the
-  nodes, one table per slot. A pressure carried as an aux has no slope and costs
-  an order (MaNTA learnt this on the theta pinch).
+* **D3. The input map — settled by MaNTA's form.** MaNTA evolves the conserved
+  `n_s` and `E_s = (3/2) n_s T_s` (no `n_s ∂_t T_s` on its left-hand side), and
+  `q` supplies their slopes; MEQ's tables are `n_s` and `T_s = (2/3)E_s/n_s`
+  through §4.7's quotient. A pressure carried as an aux has no slope and costs
+  an order (MaNTA learnt this on the theta pinch). **Open for the tokamak
+  case's author:** whether it evolves `n_s`, `E_s` or the volume-weighted
+  `V' n_s`, `V' E_s` that the theta pinch uses to stay conservative while `V'`
+  moves. `T_s` is the same either way, since `V'` cancels; `n_s = N_s/V'`
+  would make MEQ's input depend on MEQ's own `V'` — a fixed point inside
+  `Solve`, and a `V'` term in the response — so this is to be agreed with
+  MaNTA before `manta/adapter`.
 * **D4. The slot list.** Needs a tokamak transport case on MaNTA's side;
   proposed start: `V'`, `⟨|∇ρ|²⟩`, `⟨|∇ρ|⟩`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩`, `q`.
   SI, as MEQ is; units go to MaNTA's output strings.
