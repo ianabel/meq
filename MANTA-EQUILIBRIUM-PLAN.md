@@ -442,11 +442,15 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   rather than refusing (the family's `outerCut < 1` is a free-boundary guard; a
   fixed-boundary run can lift it). **At the axis it is constant only to the
   extent `ψ_ax` is**: `ψ_ax` is an unknown of MEQ's solve (`PsiAxis` is a
-  starting guess), and with `q` and `Γ` fixed it moves only through the
-  toroidal flux's diamagnetic part, `O(β)`. The first coupled transient
-  records `ψ_ax(t)`; if `ψ̇_ax/ψ_ax` is below MaNTA's tolerance over the run,
-  the frame term is dropped with that number cited, and if not, it is one
-  scalar MEQ's response supplies (D6). Free boundary, where `ψ_bnd` moves too,
+  starting guess). **With `q(ρ)` and `Γ` fixed it is not constant**: the
+  q-driven solve finds all of `g`, its edge value included, and with `p = 0`
+  `(ψ, g) → λ(ψ, g)` leaves GS and `q` invariant; the `p′` term breaks the
+  scaling as `1/λ`, so `λ ∝ √p` — `ψ_ax` and `B₀` follow the square root of the
+  pressure at fixed `β`. One scalar must be held to pin the scale: `ψ_ax`
+  itself (a border row; `q`'s overall scale `α` floats — the normalisation is
+  then exactly constant), `I_p` (`ψ_bnd − ψ_ax ≈ μ₀R₀I_pℓᵢ/2` drifts with `ℓᵢ`
+  and `β_p`), or the vacuum `B₀` (drift `O(β)`). **Which one is open, put to the
+  user 2026-11-06; recommended: hold `ψ_ax`.** Free boundary, where `ψ_bnd` moves too,
   comes after.
 * **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
 * **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
