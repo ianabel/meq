@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <vector>
 
 #include "mfem.hpp"
@@ -951,7 +952,8 @@ BOOST_AUTO_TEST_CASE( aPicardStageCappedAtOneIterationDoesNotConverge )
  * that branch never reads. So a depth-zero Anderson-Picard handed w = 0.5 ran
  * undamped -- PicardOnly at w = 1, which stalls -- with nothing said. The two
  * routes are one iteration on one map, so iteration count and iterate are
- * compared exactly.
+ * compared exactly -- the iterate to the bit on the host, and to round-off
+ * under a Device, whose reductions do not fix their order.
  */
 BOOST_AUTO_TEST_CASE( andersonAtDepthZeroIsPicardAtTheSameDamping )
 {
@@ -999,12 +1001,34 @@ BOOST_AUTO_TEST_CASE( andersonAtDepthZeroIsPicardAtTheSameDamping )
 	            << " iterations where PicardOnly at the same damping took "
 	            << picardIterations << " -- the damping did not reach KINSOL" );
 	BOOST_TEST_REQUIRE( anderson.Size() == picard.Size() );
+	anderson.HostRead();
+	picard.HostRead();
 	int differing = 0;
+	double largest = 0.0;
+	double scale = 0.0;
 	for ( int i = 0; i < anderson.Size(); ++i )
+	{
 		differing += anderson( i ) != picard( i );
-	BOOST_TEST( differing == 0,
-	            differing << " of " << anderson.Size() << " potential dofs differ "
-	            "between depth-zero Anderson-Picard and PicardOnly" );
+		largest = std::max( largest, std::abs( anderson( i ) - picard( i ) ) );
+		scale = std::max( scale, std::abs( picard( i ) ) );
+	}
+	std::printf( "  %d of %d dofs differ, by at most %.3e on a field of %.3e\n",
+	             differing, anderson.Size(), largest, scale );
+
+	// TO THE BIT ON THE HOST; TO ROUND-OFF UNDER A DEVICE, where KINSOL's
+	// vector operations run as device reductions whose order is not fixed:
+	// measured under cuda, 97 iterations on both routes every time, and the
+	// iterates bit-equal on some runs and up to 8.9e-16 apart on a field of
+	// 1.04 on others. The iteration count is the damping's test -- an
+	// undamped depth-zero branch stalls -- so it is exact everywhere.
+	if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		BOOST_TEST( differing == 0,
+		            differing << " of " << anderson.Size() << " potential dofs differ "
+		            "between depth-zero Anderson-Picard and PicardOnly" );
+	else
+		BOOST_TEST( largest <= 64.0*std::numeric_limits<double>::epsilon()*scale,
+		            "under a Device, depth-zero Anderson-Picard and PicardOnly differ by "
+		            << largest << " on a field of " << scale << ", more than round-off" );
 }
 
 /*
