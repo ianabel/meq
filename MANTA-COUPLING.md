@@ -1,5 +1,12 @@
 # What MaNTA needs from MEQ
 
+**This is MaNTA's tier 2, `FieldModel` (`FieldCoupling = "coupled"`).** MaNTA now
+also offers tiers 0 and 1, an `EquilibriumModel` that solves to a converged
+equilibrium and supplies its linearised response; tier 2's field blocks are
+dense in `nField`, which a 2-D Grad–Shafranov solve does not fit. MEQ's side of
+the coupling is `MANTA-EQUILIBRIUM-PLAN.md`, which says where this note is still
+right.
+
 A note on the interface a magnetic-field solver has to present in order to be
 coupled to [MaNTA](https://github.com/ianabel/MaNTA) as a `FieldModel`. Written
 from MaNTA's side, at the point where the coupling machinery is complete and no
