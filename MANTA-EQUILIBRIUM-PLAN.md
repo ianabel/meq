@@ -56,6 +56,50 @@ The contract that matters most for this plan (brief §3.2):
   `FieldCoupling = "auto"` keeps steady solves reduced only for a model that
   declares `EquilibriumResponse::Model`.
 
+### 1.1 What MaNTA evolves: RoPP's transport equations
+
+The coupled transport case evolves **conserved** quantities, because MaNTA has no
+`n_s ∂_t T_s` form on its left-hand side, and in a time-dependent equilibrium
+**`V'` sits inside them**. The equations are Abel et al., *Multiscale
+gyrokinetics for rotating tokamak plasmas*, Rep. Prog. Phys. 76 (2013) 116201
+(RoPP), §8, in the poloidal flux `ψ` with `V' = dV/dψ` and `∂_t` at fixed `ψ`:
+
+| RoPP | conserved variable | flux function MEQ's source needs |
+|---|---|---|
+| (166) particles | `Ñ_s = V' ⟨n_s⟩` | `N_s`, the Boltzmann prefactor: `N_s = ⟨n_s⟩ / ⟨exp(m_s ω² R²/2T_s − Z_s e φ₀/T_s)⟩` (172), with `φ₀` from quasineutrality (97) |
+| (194) energy | `W_s = (3/2) V' ⟨n_s⟩ T_s` | `T_s = (2/3) W_s / Ñ_s` — **`V'` cancels; node-local** |
+| (179) angular momentum | `L = V' J ω`, `J = Σ_s m_s ⟨n_s R²⟩` (180) | `ω = L / (V' J)` |
+| (143) the field | `q(ψ)`, evolving on the resistive time | `I(ψ)` from `q = V' I ⟨R⁻²⟩ / 4π²` (142) |
+
+and `ψ(R, z)` follows **instantaneously** from the generalised Grad–Shafranov
+equation (RoPP (136), MEQ's `RotatingSource`) — RoPP §7.3's closing sentence. So
+the equilibrium is an instantaneous function of the transport state, which is
+exactly tiers 0 and 1; nothing needs MaNTA's tier 2.
+
+**Three consequences shape this plan.**
+
+1. **Only `T_s` is a pointwise map of MaNTA's state.** `N_s`, `ω` and `I` are
+   defined through flux-surface integrals of **MEQ's own solution** — `V'`,
+   `⟨exp(…)⟩` with MEQ's `φ₀`, `⟨n_s R²⟩`, `⟨R⁻²⟩`. MEQ cannot be handed tables;
+   it must find the flux functions that reproduce MaNTA's contents. That is a
+   **content-driven equilibrium** (§4.8), the generalisation of MEQ's q-driven
+   solve (ROADMAP item 10), which already finds `I` from `q` through `V'⟨R⁻²⟩`.
+2. **The conserved contents enter only as right-hand sides.** With the flux
+   functions' knots as border unknowns and "MEQ's content = MaNTA's content" as
+   border rows, MaNTA's state appears in `R(x; p) = 0` linearly, in the rows'
+   right-hand sides — and in `T_s`'s table. `∂R/∂p` is then trivial for the
+   contents; the work moves into the rows' derivative in `ψ`, which is the
+   shape derivative of §4.5 applied to content integrals.
+3. **The energy equation needs the geometry's time derivative.** The
+   compressional heating `P_comp = T_s ⟨n_s ∇·(∂_tψ ∇ψ/|∇ψ|²)⟩` (200), the
+   flux-surface motion in `Γ_s` (167) and the potential-energy exchange (201)
+   read `V_ψ = −∂_tψ ∇ψ/|∇ψ|²`. At tiers 0/1 the geometry is `G(p(t), t)`, so
+   **`ġ = G'(p) ṗ + ∂_t G` — MEQ's own response along MaNTA's `ṗ`.** The response
+   is therefore not only a speed-up: it is how these terms can be computed at
+   all without differencing in time. MaNTA hands a model no `ṗ` and a case no
+   geometry time derivative today (its time-derivative-sources spec has that
+   phase unbuilt): **a request to MaNTA**, §5 D7.
+
 ## 2. What MEQ has, read on 2026-11-06
 
 1. **Re-solves.** `meq.Equilibrium.solve()` (PY-3, `python/_meq.cpp:188-262`)
@@ -108,27 +152,32 @@ starts to matter.
 
 ## 3. The map, and its derivative
 
-With `p` MaNTA's nodal state, the map `G` is a chain:
+With `p` MaNTA's nodal state — `Ñ_s`, `W_s`, `L`, `q` and their slopes — the
+map `G` is a chain:
 
 ```
-p  --Π-->  T  (tables: knots at the nodes, from u and q, T_s = (2/3)E_s/n_s)    pointwise
-T  ------>  x  (the converged bordered state: ψ fields and border b)           R(x; T) = 0
-x  --E-->  family  --I-->  g  (extraction, then interpolation at the label points)
+p  --Π-->  (T, C)   T: the T_s tables, (2/3) W_s/Ñ_s at the nodes        pointwise
+                    C: the contents Ñ_s, L, q as row right-hand sides      linear
+(T, C) -->  x       the converged bordered state: ψ fields, the labels,
+                    and the knots of N_s, ω, I as border unknowns         R(x; T) = B C
+x  --E-->  family  --I-->  g   (extraction, then interpolation at the label points)
 ```
 
-so, with `J = ∂R/∂x` the bordered Newton matrix at the converged state,
+so, with `J = ∂R/∂x` the bordered Newton matrix at the converged state (the
+content rows and knot columns included),
 
 ```
-G'  dp  =  I' E'  J^{-1} ( −∂R/∂T · Π' dp )
-G'^T dg =  Π'^T (∂R/∂T)^T  J^{-T} ( −E'^T I'^T dg )
+G'  dp  =  I' E'  J^{-1} ( B Π_C' dp − ∂R/∂T · Π_T' dp )
+G'^T dg =  Π'^T ( B^T z − (∂R/∂T)^T z ),     J^T z = E'^T I'^T dg
 ```
 
 Each factor is one piece of work:
 
 | | what | exists? | branch |
 |---|---|---|---|
-| `Π`, `Π'` | MaNTA rows → table knots, and its derivative | node-local; `Π'` is a 2×2 per species per node (§4.7) | `manta/adapter` |
-| `∂R/∂T` | the residual's derivative in the table entries (values, slopes) | **no**; gauge columns are the precedent | `manta/table-derivative` |
+| `Π`, `Π'` | MaNTA rows → `T_s` knots and content right-hand sides, and its derivative | node-local; `Π_T'` a 2×2 per species per node (§4.7) | `manta/adapter` |
+| content rows, knot columns | MEQ's `V'⟨n_s⟩`, `V'Jω`, `V'⟨R⁻²⟩I` against MaNTA's, with `N_s`, `ω`, `I` knots as border unknowns | **no**; the q-driven solve does `I` by an outer loop, the midplane gauge has knot columns | `manta/content-solve` (§4.8) |
+| `∂R/∂T` | the residual's derivative in the table entries (values, slopes) — for `T_s`, and as the knot columns of §4.8 | **no**; gauge columns are the precedent | `manta/table-derivative` |
 | `J^{-1}` | the bordered solve, caller RHS, at a **retained** linearisation | pieces only | `manta/linearised-solve` |
 | `E'` | directional derivative of the extraction, decisions frozen | **no** | `manta/shape-derivative` |
 | `I'` | interpolation in the label, linear given the family | trivial | `manta/shape-derivative` |
@@ -325,22 +374,62 @@ other branches do not.
 `Π` lives here: the slot map from MaNTA rows to MEQ table slots is the model's
 own TOML table (`[MEQEquilibrium]`), as the theta pinch's `PressureAux` is.
 
-**MaNTA evolves conserved variables**, density `n_s` and energy density
-`E_s = (3/2) n_s T_s`, because it has no `n_s ∂_t T_s` form on the left-hand
-side. Its `q` rows are the solved slopes `n_s'`, `E_s'`. So `Π` builds MEQ's
-`Temperature` table as a quotient at each node,
+**`Π` is two maps** (§1.1). The temperature tables are node-local quotients,
 
 ```
-T_s  = (2/3) E_s / n_s,        T_s' = (2/3) ( E_s' − T_s·(3/2) n_s' ) / n_s
+T_s  = (2/3) W_s / Ñ_s,        T_s' = (2/3) ( W_s' − (3/2) T_s Ñ_s' ) / Ñ_s
 ```
 
-and the `Density` table from `(n_s, n_s')` directly. `Π` is no longer linear,
-but it is local: `Π'` is a 2×2 block per species per node on each of
-`(value, slope)`, and `Π'^T` the same blocks transposed, so neither costs
-anything beside a back-solve. A node with `n_s ≤ 0` is a throw (MaNTA's step
-failure), never a clamped temperature. The quotient adds no order loss: `n_s`
-and `E_s` converge at `k+1` and so does `T_s` where `n_s` is bounded away from
-zero, which an edge density at the domain's end must be.
+(`V'` cancels between `W_s` and `Ñ_s`), so `Π_T'` is a 2×2 block per species per
+node on `(value, slope)`, and its transpose the same blocks transposed. A node
+with `Ñ_s ≤ 0` is a throw, never a clamped temperature. The contents `Ñ_s`, `L`,
+`q` pass through unchanged as the right-hand sides of §4.8's rows.
+
+### 4.8 `manta/content-solve` — the equilibrium that reproduces MaNTA's contents
+
+**The problem.** Given MaNTA's contents on its label grid — `Ñ_s = V'⟨n_s⟩`,
+`L = V'Jω`, and `q` — find `ψ` and the flux functions `N_s`, `ω`, `I` such that
+the GS equation holds and MEQ's own flux-surface integrals reproduce the
+contents. `T_s` is given (§4.7). This is one equilibrium problem, not a table
+lookup followed by a solve.
+
+**Two routes, and the recommendation.**
+
+* *Outer fixed point*, as `SafetyFactorSolve` does for `q → I`: solve, extract,
+  update the tables, repeat. It exists in shape, but it converges linearly
+  (12 outer iterations and 43 equilibria for the q-driven example), its
+  stopping test makes `G` piecewise at MaNTA's 1e-8 steps, and its response
+  would need the implicit function theorem over the loop anyway. **Kept as the
+  reference the monolithic solve is checked against.**
+* *Monolithic, recommended*: the flux functions' knots are **border unknowns**
+  and the content conditions are **border rows** of the bordered Newton — the
+  midplane gauge's pattern (`R₀` at 32 knots, quadratic, M-283/M-284). Newton
+  stays quadratic, `G` has no outer stopping test, and the response falls out
+  of the same `J`.
+
+**The rows.** State each content as the **amount inside a surface or a shell**,
+not as a density at a node. MaNTA's own conserved unknowns are cell contents —
+`∫_cell Ñ_s dx` is the number of particles of species `s` in the shell between
+two faces — and MEQ computes the same number as a volume integral of `n_s(R, ψ)`
+over the region between two level sets. A volume integral cut by a level set is
+smoother in `ψ` than a surface average (its derivative is one surface integral,
+§4.5's machinery applied once per face), and it is what is conserved. So: one
+row per species per MaNTA cell for particles, one per cell for angular
+momentum, and `q` at the faces for the field; knots of `N_s`, `ω` on MaNTA's
+faces — the knot layout MaNTA found necessary for the theta pinch (brief §7.4) —
+with one slope condition per cell to close a C¹ table. **The knot count and its
+closure are to be measured, not assumed** (first experiment on this branch).
+
+**What it needs.** The knot columns are `∂R/∂(knot)` for `N_s`, `ω` and `I`
+inside `RotatingSource` — `manta/table-derivative`'s work, with `ω` entering the
+exponent and `φ₀` through quasineutrality. The rows' derivative in `ψ` and the
+labels is the shape derivative of a cut volume integral —
+`manta/shape-derivative`'s. So this branch merges both and adds the rows,
+their right-hand sides and the corner.
+
+**Cost to watch.** Each border column is one trace back-solve per Newton step;
+two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
+`ArrayMult`. The gauge's 32 knots are the measured precedent; this is 4× it.
 
 ## 5. Decisions for the user
 
@@ -350,23 +439,30 @@ zero, which an edge density at the domain's end must be.
   tokamak transport but moves with `q(ψ)` and is not one of MEQ's abscissae.
   Domain `[0, ρ_max]` with `ρ_max ≤ outerCut` — the axis served by its limits,
   the edge kept inside the extraction's range.
-* **D2. Route.** Python adapter first (§4.7), or a C++ plugin.
-* **D3. The input map — settled by MaNTA's form.** MaNTA evolves the conserved
-  `n_s` and `E_s = (3/2) n_s T_s` (no `n_s ∂_t T_s` on its left-hand side), and
-  `q` supplies their slopes; MEQ's tables are `n_s` and `T_s = (2/3)E_s/n_s`
-  through §4.7's quotient. A pressure carried as an aux has no slope and costs
-  an order (MaNTA learnt this on the theta pinch). **Open for the tokamak
-  case's author:** whether it evolves `n_s`, `E_s` or the volume-weighted
-  `V' n_s`, `V' E_s` that the theta pinch uses to stay conservative while `V'`
-  moves. `T_s` is the same either way, since `V'` cancels; `n_s = N_s/V'`
-  would make MEQ's input depend on MEQ's own `V'` — a fixed point inside
-  `Solve`, and a `V'` term in the response — so this is to be agreed with
-  MaNTA before `manta/adapter`.
+* **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
+* **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
+  `(3/2)V'⟨n_s⟩T_s` and `V'Jω` (§1.1), so MEQ takes `T_s` pointwise and the rest
+  as contents through §4.8's content-driven solve. Still to agree with the
+  tokamak case's author: whether `q` (143) is evolved, or frozen over a run
+  shorter than the resistive time — in which case MEQ takes `q` once and the
+  `I` rows are the q-driven solve's.
 * **D4. The slot list.** Needs a tokamak transport case on MaNTA's side;
   proposed start: `V'`, `⟨|∇ρ|²⟩`, `⟨|∇ρ|⟩`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩`, `q`.
   SI, as MEQ is; units go to MaNTA's output strings.
 * **D5. Precision and device.** Double and host only: MaNTA is double, and
   bit-determinism is a host promise (device parity is to printed digits).
+* **D6. MaNTA's label and RoPP's `∂_t|_ψ`.** RoPP's equations are at fixed `ψ`;
+  MaNTA's grid is fixed in its `x`. With `x = ρ` (D1), the label moves through
+  `ψ` as `ψ_ax`, `ψ_bnd` change, and the transport case carries frame terms in
+  `ψ̇_ax`, `ψ̇_bnd` — scalars MEQ's response supplies along `ṗ` (D7). Which `x`
+  makes those terms cheapest is the transport case's call; MEQ serves any of its
+  fixed abscissae.
+* **D7. Geometry time derivatives — a request to MaNTA.** `P_comp`, `Γ_s`'s
+  flux-surface motion and `P_pot` need `V_ψ`, i.e. `∂_t` of the geometry at fixed
+  label (§1.1, consequence 3). At tiers 0/1 that is `G'(p) ṗ + ∂_t G`: MaNTA would
+  hand the model `ṗ` (IDA has it) and let a case read time-derivative slots.
+  MEQ's side is the response it builds anyway, plus `∂_t G` (zero unless coil
+  currents are programmed in time).
 
 ## 6. The branches
 
@@ -380,11 +476,14 @@ rebases). `manta/design` holds this plan and is where the pieces meet.
 | `manta/table-derivative` | `∂R/∂T` applied and transposed, differenced-column tests | — |
 | `manta/linearised-solve` | the linearisation solver, `solveLinearised`, the whole-bordered-Jacobian test | `session` (the snapshot) |
 | `manta/shape-derivative` | frozen extraction, `E'`, `E'^T`, `I'`, axis limits | `session` |
+| `manta/content-solve` | the content-driven equilibrium: `N_s`, `ω`, `I` knots as border unknowns, content rows, the fixed-point reference | `table-derivative`, `shape-derivative` |
+| `manta/plugin-abi` | MEQ built C++23 with MaNTA's `-march` and `EIGEN_USE_BLAS`, so a C++ plugin can share MaNTA's process | — |
 | `manta/adapter` | `meq.Session` binding, the Python `EquilibriumModel`, `Π`, the coupled acceptance runs | all |
 
 **Order:** `session` (and its smoothness numbers) first; `table-derivative`
-in parallel, since it needs nothing; then `linearised-solve` and
-`shape-derivative`; `adapter` last, with tier 0 runnable as soon as `session`
+in parallel, since it needs nothing; then `shape-derivative` and
+`linearised-solve`; then `content-solve`, which is where MaNTA's variables first
+reach MEQ correctly; `adapter` last, with tier 0 runnable as soon as `session`
 and the binding exist. The coupled acceptance is MaNTA's: tier 0 against
 tier 1-differenced against tier 1-own on one tokamak case, the same answer to
 the integration error, with the equilibrium-solve counts of brief §4.5.
