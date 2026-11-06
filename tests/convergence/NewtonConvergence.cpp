@@ -1009,8 +1009,9 @@ BOOST_AUTO_TEST_CASE( andersonAtDepthZeroIsPicardAtTheSameDamping )
 	for ( int i = 0; i < anderson.Size(); ++i )
 	{
 		differing += anderson( i ) != picard( i );
-		largest = std::max( largest, std::abs( anderson( i ) - picard( i ) ) );
-		scale = std::max( scale, std::abs( picard( i ) ) );
+		largest = std::max( largest, std::abs( static_cast<double>( anderson( i ) )
+		                                       - static_cast<double>( picard( i ) ) ) );
+		scale = std::max( scale, std::abs( static_cast<double>( picard( i ) ) ) );
 	}
 	std::printf( "  %d of %d dofs differ, by at most %.3e on a field of %.3e\n",
 	             differing, anderson.Size(), largest, scale );
@@ -1026,7 +1027,7 @@ BOOST_AUTO_TEST_CASE( andersonAtDepthZeroIsPicardAtTheSameDamping )
 		            differing << " of " << anderson.Size() << " potential dofs differ "
 		            "between depth-zero Anderson-Picard and PicardOnly" );
 	else
-		BOOST_TEST( largest <= 64.0*std::numeric_limits<double>::epsilon()*scale,
+		BOOST_TEST( largest <= 64.0*std::numeric_limits<mfem::real_t>::epsilon()*scale,
 		            "under a Device, depth-zero Anderson-Picard and PicardOnly differ by "
 		            << largest << " on a field of " << scale << ", more than round-off" );
 }
