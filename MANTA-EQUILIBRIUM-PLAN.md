@@ -90,10 +90,12 @@ exactly tiers 0 and 1; nothing needs MaNTA's tier 2.
    right-hand sides — and in `T_s`'s table. `∂R/∂p` is then trivial for the
    contents; the work moves into the rows' derivative in `ψ`, which is the
    shape derivative of §4.5 applied to content integrals.
-3. **The energy equation needs the geometry's time derivative.** The
-   compressional heating `P_comp = T_s ⟨n_s ∇·(∂_tψ ∇ψ/|∇ψ|²)⟩` (200), the
-   flux-surface motion in `Γ_s` (167) and the potential-energy exchange (201)
-   read `V_ψ = −∂_tψ ∇ψ/|∇ψ|²`. At tiers 0/1 the geometry is `G(p(t), t)`, so
+3. **The energy equation needs the geometry's time derivative — only there.**
+   The fluxes do not: in RoPP's evaluated forms (170), (196) the `n ∂_tψ` of
+   (167) has cancelled against the inductive `E×B` drift. At `ω = 0` the one
+   term is the compressional heating (200), in `ρ`
+   `V'_ρ P_comp = −(2/3) W_s ∂_t ln V'_ρ` with `ψ_ax` held (the write-up's
+   (ρ30)); with rotation, the potential-energy exchange (201)–(203) adds more. At tiers 0/1 the geometry is `G(p(t), t)`, so
    **`ġ = G'(p) ṗ + ∂_t G` — MEQ's own response along MaNTA's `ṗ`.** The response
    is therefore not only a speed-up: it is how these terms can be computed at
    all without differencing in time. MaNTA hands a model no `ṗ` and a case no
@@ -442,20 +444,20 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   rather than refusing (the family's `outerCut < 1` is a free-boundary guard; a
   fixed-boundary run can lift it). **At the axis it is constant only to the
   extent `ψ_ax` is**: `ψ_ax` is an unknown of MEQ's solve (`PsiAxis` is a
-  starting guess). **With `q(ρ)` and `Γ` fixed it is not constant**: the
-  q-driven solve finds all of `g`, its edge value included, and with `p = 0`
-  `(ψ, g) → λ(ψ, g)` leaves GS and `q` invariant; the `p′` term breaks the
-  scaling as `1/λ`, so `λ ∝ √p` — `ψ_ax` and `B₀` follow the square root of the
-  pressure at fixed `β`. One scalar must be held to pin the scale: `ψ_ax`
-  itself (a border row; `q`'s overall scale `α` floats — the normalisation is
-  then exactly constant), `I_p` (`ψ_bnd − ψ_ax ≈ μ₀R₀I_pℓᵢ/2` drifts with `ℓᵢ`
-  and `β_p`), or the vacuum `B₀` (drift `O(β)`). **Decided 2026-11-06: hold `ψ_ax`,
-  and let `q`'s scale float** — `q = α q̂(ρ)` with `q̂` the run's fixed shape and
-  `α` a border unknown reported per solve. The located-axis row then pins `ψ`
-  at the axis to the held value, and `α` takes the freedom `ψ_ax` gave up, so
-  `ρ`'s normalisation is constant at both ends and MaNTA's frame terms vanish
-  by construction (D6). In §4.8's solve that is one more border unknown and no
-  new row. Free boundary, where `ψ_bnd` moves too,
+  starting guess). **With `q(ρ)` and `Γ` fixed, the pressure does not set the
+  scale**: in a cylinder the fixed-boundary q-driven equilibrium at the same
+  `p(ψ_N)` and `q(ψ_N)` exists for a continuum of central fields (force balance
+  is first order in `B_z²` with a free constant — the write-up's §7), so one
+  scalar must be prescribed (Grad–Hogan). **Decided 2026-11-06: hold `ψ_ax`,
+  with `q` fully fixed** (`α = 1`). The located-axis row pins `ψ` at the axis to
+  the held value; `ρ`'s normalisation is then constant at both ends on a fixed
+  boundary, and MaNTA's frame terms vanish by construction (D6). A floating
+  scale `α` beside a held `ψ_ax` would make the bordered Jacobian singular or
+  nearly so, and imply `⟨E·B⟩ ∝ α̇/α`, outside RoPP's ordering — so there is
+  none. **First check on `manta/session`**: the torus is not the cylinder, and
+  MEQ's q-driven solve fits all of `g²` including its edge value and converges
+  today — measure whether its outer Jacobian is near-singular along this
+  continuum and what pins it (`ToroidalFieldGuess`, the polynomial degree). Free boundary, where `ψ_bnd` moves too,
   comes after.
 * **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
 * **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
