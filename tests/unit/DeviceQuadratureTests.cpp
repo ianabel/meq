@@ -30,6 +30,7 @@
 #include "convergence/RoundOffFloor.hpp"
 #include "meq/DeviceQuadrature.hpp"
 #include "meq/Profiles.hpp"
+#include "meq/RulePoint.hpp"
 #include "meq/Source.hpp"
 #include "meq/SourceView.hpp"
 
@@ -37,6 +38,8 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
+#include <new>
 #include <memory>
 #include <vector>
 
@@ -398,4 +401,58 @@ BOOST_AUTO_TEST_CASE( theDeviceLoopRefusesAConductorCacheFromAnotherRule )
 	                4, out ),
 	            "a conductor cache whose offsets do not match this rule must "
 	            "be refused: its values are not these quadrature points" );
+}
+
+
+/*
+ * A POINT IS A TABLE'S BY ADDRESS ONLY WHEN IT IS ONE OF THE RULE'S OWN.
+ *
+ * meq::indexInRule() is how GradShafranovSolver::conductorAtLawPoint() tells
+ * a tabulated point from any other, and its first version -- a pointer
+ * subtraction -- crashed RotatingMirrorAnisotropic intermittently: a point at
+ * a higher address, not a whole IntegrationPoint away from the rule's storage,
+ * came out as a garbage index that passed the bound about half the time. The
+ * copies here are placed at every 8-byte offset in a buffer, so their
+ * distances from the rule take every residue modulo sizeof( IntegrationPoint )
+ * whatever the allocator does: at least four of the five are the case that
+ * crashed, deterministically, and none may be taken for one of the rule's.
+ */
+BOOST_AUTO_TEST_CASE( onlyARulesOwnPointsAreFoundInIt )
+{
+	mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::TRIANGLE, 9 );
+	mfem::IntegrationRule const &other = mfem::IntRules.Get( mfem::Geometry::TRIANGLE, 4 );
+	BOOST_TEST_REQUIRE( rule.GetNPoints() > 1 );
+	BOOST_TEST_REQUIRE( &rule != &other );
+
+	for ( int i = 0; i < rule.GetNPoints(); ++i )
+		BOOST_TEST( meq::indexInRule( rule, rule.IntPoint( i ) ) == i );
+	for ( int i = 0; i < other.GetNPoints(); ++i )
+		BOOST_TEST( meq::indexInRule( rule, other.IntPoint( i ) ) == -1,
+		            "another rule's point " << i << " was taken for this one's" );
+
+	mfem::IntegrationPoint const onTheStack = rule.IntPoint( 0 );
+	BOOST_TEST( meq::indexInRule( rule, onTheStack ) == -1 );
+
+	std::size_t const stride = sizeof( mfem::IntegrationPoint );
+	std::size_t const step = alignof( mfem::IntegrationPoint );
+	BOOST_TEST_REQUIRE( stride % step == 0 );
+	std::vector<unsigned char> buffer( 4*stride );
+	int residues = 0;
+	std::uintptr_t const first = reinterpret_cast<std::uintptr_t>( &rule.IntPoint( 0 ) );
+	for ( std::size_t offset = 0; offset < stride; offset += step )
+	{
+		void *const where = buffer.data() + offset;
+		auto *const copy = new ( where ) mfem::IntegrationPoint( rule.IntPoint( 1 ) );
+		std::uintptr_t const address = reinterpret_cast<std::uintptr_t>( copy );
+		std::uintptr_t const distance = address > first ? address - first : first - address;
+		if ( distance % stride != 0 )
+			++residues;
+		BOOST_TEST( meq::indexInRule( rule, *copy ) == -1,
+		            "a copy " << offset << " bytes into a buffer, "
+		            << distance % stride << " bytes off the rule's stride, was found in it" );
+	}
+	BOOST_TEST( residues >= static_cast<int>( stride/step ) - 1 );
+
+	mfem::IntegrationRule const empty;
+	BOOST_TEST( meq::indexInRule( empty, rule.IntPoint( 0 ) ) == -1 );
 }

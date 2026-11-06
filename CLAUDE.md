@@ -354,6 +354,11 @@ The checklist; the measurement and the story of each is in the file named.
   inventories.
 * **Never commit a file a subagent owns on the strength of its compiling** —
   scaffolding compiles. Read the diff.
+* **Never tell "is this one of the rule's points" by `&ip - &rule.IntPoint( 0 )`.**
+  The subtraction is an exact division by 40 to g++, so a foreign point comes
+  out as a garbage index that passes a bound about half the time, and *which*
+  points are foreign is allocation order under OpenMP. Use
+  `meq::indexInRule()` (`RulePoint.hpp`), which compares bytes.
 
 **MFEM's API** (`CLAUDE_MFEM.md`)
 
