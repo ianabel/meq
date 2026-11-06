@@ -14,6 +14,7 @@
 #include "RegularisedLeastSquares.hpp"
 #include "DeviceRows.hpp"
 #include "StageChecksum.hpp"
+#include "RulePoint.hpp"
 
 // FB-7: conductors outside Gamma. The header forward-declares CoilSet so that it
 // does not pull in a file it needs only by reference; the definition is needed
@@ -1736,8 +1737,10 @@ namespace
 		if ( element >= 0 && static_cast<std::size_t>( element ) < anisotropicConductorRules.size() )
 		{
 			mfem::IntegrationRule const &rule = *anisotropicConductorRules[ static_cast<std::size_t>( element ) ];
-			std::ptrdiff_t const i = &transformation.GetIntPoint() - &rule.IntPoint( 0 );
-			if ( i >= 0 && i < rule.GetNPoints() )
+			// By address in bytes; see meq::indexInRule() for the crash a
+			// pointer subtraction here was.
+			int const i = indexInRule( rule, transformation.GetIntPoint() );
+			if ( i >= 0 )
 			{
 				double const *const values = &anisotropicConductorValues[
 					static_cast<std::size_t>( anisotropicConductorOffsets[ static_cast<std::size_t>( element ) ] )

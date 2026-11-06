@@ -1507,28 +1507,6 @@ Raised 2026-11-01, by AN-6c (MEASUREMENTS.md M-342); posed as a formula 2026-11-
 
 
 ================================================================================
-RotatingMirrorAnisotropic crashes intermittently under load
-Raised 2026-11-05, by the suite on tau-follows-reaction; reproduced on main.
-================================================================================
-
-  WHAT FAILS. RotatingMirror --run_test=anisotropic, meqAgreesWithGeqWithAn-
-  Anisotropy, after its first solve, in totalFluxAt() -> valuesAt() (last
-  checkpoint RotatingMirror.cpp:385-387): "stack smashing detected" once,
-  SIGSEGV at address 0x0 once, and once a run killed at a 900 s cap where it
-  takes 90-250 s. Alone it passes (3 of 3 on main a143457, 3 of 3 on the
-  branch); three concurrent copies at OMP_NUM_THREADS=4 crashed one of main's
-  three. So it is not the branch's, and it is a memory defect that load
-  exposes -- a race or an out-of-bounds write, not a tolerance.
-
-  WHERE TO LOOK. valuesAt() builds a meq::PointLocator and interpolates the
-  flux remainder's two components; the test is the one that reads a vector
-  field through it. Run it under valgrind or an ASan build at
-  OMP_NUM_THREADS=4 with the machine loaded.
-
-  WHAT CLOSES IT. The cause found and fixed, and ten loaded runs clean.
-
-
-================================================================================
 SUNDIALS: KINSOL's Anderson setup at depth zero, to report upstream
 Raised 2026-11-02, by PY-1's non-converging fixture.
 ================================================================================
