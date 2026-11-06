@@ -9,9 +9,10 @@ transpose — is what this plan is mostly about: four derivatives MEQ does not
 have today, each on its own feature branch.
 
 **Where it comes from.** MaNTA's brief of 2026-11-06,
-`MEQ-INTERFACE-BRIEF-FROM-MANTA.md` (inbox in the project root, read at MaNTA
-`9f7aa12`, plus `f38dc17` on `feat/field-python`, which added the Python
-`EquilibriumModel`). What it establishes is restated in §1, so this file stands
+`MEQ-INTERFACE-BRIEF-FROM-MANTA.md` (inbox in the project root; its final
+version, read at MaNTA `9f7aa12` for the C++ interface and `feat/field-python`
+at `f38dc17`, `5b7e193` for the Python one — built and tested there, not yet
+merged to MaNTA's `main`). What it establishes is restated in §1, so this file stands
 without it. The four MEQ-side findings in §2 were read from MEQ at `c5a1ecd`.
 
 **What it supersedes.** `MANTA-COUPLING.md` describes MaNTA's tier 2 — MEQ's
@@ -281,8 +282,9 @@ belongs on `manta/session`, as a convergence test over the session.
 
 ### 4.7 `manta/adapter` — the `EquilibriumModel`
 
-**Python first** (recommended, D2): MaNTA's `manta.EquilibriumModel` exists
-as of `f38dc17` with `Solve`, `Geometry` and the optional `applyResponse`,
+**Python first** (recommended, D2, and the route MaNTA's final brief settles
+on): MaNTA's `manta.EquilibriumModel` (`PyEquilibriumModel.hpp`, on
+`feat/field-python`) has `Solve`, `Geometry` and the optional `applyResponse`,
 `applyResponseTranspose`, `responseStep`, `setTolerances`, `resetForRun`, and
 MEQ's module already shares a process with `_manta` (PY-6). A Python adapter
 over a `meq.Session` binding (`resolve`, `snapshot`, `geometry`, `response`,
@@ -290,6 +292,35 @@ over a `meq.Session` binding (`resolve`, `snapshot`, `geometry`, `response`,
 (C++23 adapter units, Eigen defines in one `.so`, MFEM PIC, `-march`). The
 response arrays cross numpy once per call; against a back-solve that is noise.
 A C++ plugin can follow if the GIL or marshalling ever shows in a profile.
+
+What the Python surface fixes, from MaNTA's side:
+
+* **Shapes.** `Solve(self, states, points, weights, t, warm)` gets the whole
+  `GlobalState` dict, `(nPoints, nVars)` arrays under `"Variable"`,
+  `"Derivative"`, `"Flux"`, `"Aux"`; `Geometry(self, e, points)` returns
+  `(nGeometry, len(points))`. `applyResponse(e, states, dp, inputPoints, weights,
+  t, geometryPoints) -> dg`; `applyResponseTranspose(…, dg, …) -> dict of dp rows`;
+  both only with `response = manta.EquilibriumResponse.Model`.
+* **Slots by name.** A Python transport case reads `state.geom["Vprime"]` by the
+  model's slot names (`geometry = [manta.GeometrySlot(name, description,
+  units), …]`), and a JAX case gets `d*_dGeometry` by `jax.grad`. **The names
+  MEQ publishes are part of the contract** (D4).
+* **Attaching.** `runner.set_equilibrium_model(model)`, or
+  `manta.registerEquilibriumModel("MEQ", factory)` with `factory(config, grid)`,
+  then `EquilibriumModel = "MEQ"` in a dict or in a config file the `manta`
+  command runs (it imports the module first).
+* **Snapshots are kept several at a time**: the last, the Jacobian build's,
+  and perturbed ones while MaNTA differences. §4.1's ~1–2 MB snapshot is
+  affordable; a snapshot holding the factorisation would not be, which is one
+  more reason the linearisation lives in the session (§4.3), keyed to a
+  snapshot, and not in the snapshot.
+* **The template** is MaNTA's `python/Tests/theta_pinch_balance.py`: its native
+  C++ model rewritten in numpy as a `manta.EquilibriumModel`, matching the C++
+  one to 7e-11 at tiers 0 and 1. MEQ's adapter's first test is the same shape:
+  the Python adapter against a fresh `meq` run on the same tables.
+
+**`manta/adapter` waits on `feat/field-python` reaching MaNTA's `main`**; the
+other branches do not.
 
 `Π` lives here: the slot map from MaNTA rows to MEQ table slots is the model's
 own TOML table (`[MEQEquilibrium]`), as the theta pinch's `PressureAux` is.
