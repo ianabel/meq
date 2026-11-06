@@ -69,7 +69,7 @@ gyrokinetics for rotating tokamak plasmas*, Rep. Prog. Phys. 76 (2013) 116201
 | (166) particles | `Ñ_s = V' ⟨n_s⟩` | `N_s`, the Boltzmann prefactor: `N_s = ⟨n_s⟩ / ⟨exp(m_s ω² R²/2T_s − Z_s e φ₀/T_s)⟩` (172), with `φ₀` from quasineutrality (97) |
 | (194) energy | `W_s = (3/2) V' ⟨n_s⟩ T_s` | `T_s = (2/3) W_s / Ñ_s` — **`V'` cancels; node-local** |
 | (179) angular momentum | `L = V' J ω`, `J = Σ_s m_s ⟨n_s R²⟩` (180) | `ω = L / (V' J)` |
-| (143) the field | `q(ψ)`, evolving on the resistive time | `I(ψ)` from `q = V' I ⟨R⁻²⟩ / 4π²` (142) |
+| (143) the field | `q(ψ)`: **fixed first**, given once per run; later evolved by (143) | `I(ψ)` from `q = V' I ⟨R⁻²⟩ / 4π²` (142) |
 
 and `ψ(R, z)` follows **instantaneously** from the generalised Grad–Shafranov
 equation (RoPP (136), MEQ's `RotatingSource`) — RoPP §7.3's closing sentence. So
@@ -415,7 +415,7 @@ over the region between two level sets. A volume integral cut by a level set is
 smoother in `ψ` than a surface average (its derivative is one surface integral,
 §4.5's machinery applied once per face), and it is what is conserved. So: one
 row per species per MaNTA cell for particles, one per cell for angular
-momentum, and `q` at the faces for the field; knots of `N_s`, `ω` on MaNTA's
+momentum, and `q` at the faces for the field (fixed per run at first, D3); knots of `N_s`, `ω` on MaNTA's
 faces — the knot layout MaNTA found necessary for the theta pinch (brief §7.4) —
 with one slope condition per cell to close a C¹ table. **The knot count and its
 closure are to be measured, not assumed** (first experiment on this branch).
@@ -442,10 +442,14 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
 * **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
 * **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
   `(3/2)V'⟨n_s⟩T_s` and `V'Jω` (§1.1), so MEQ takes `T_s` pointwise and the rest
-  as contents through §4.8's content-driven solve. Still to agree with the
-  tokamak case's author: whether `q` (143) is evolved, or frozen over a run
-  shorter than the resistive time — in which case MEQ takes `q` once and the
-  `I` rows are the q-driven solve's.
+  as contents through §4.8's content-driven solve. **`q` is fixed first**
+  (decided 2026-11-06): one `q(ρ)` per run, from the run's configuration, so
+  the `I` rows are the q-driven solve's with a constant right-hand side and `q`
+  is not in `p` — no `dq` column in the response, nothing for MaNTA to hand
+  over. **Later**, MaNTA evolves `q` by RoPP (143); the same rows then take their
+  right-hand side from `p`, and the response gains that column with no change to
+  `J`. Building the rows with `q` as a right-hand side from the start keeps
+  that step small.
 * **D4. The slot list.** Needs a tokamak transport case on MaNTA's side;
   proposed start: `V'`, `⟨|∇ρ|²⟩`, `⟨|∇ρ|⟩`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩`, `q`.
   SI, as MEQ is; units go to MaNTA's output strings.
