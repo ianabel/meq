@@ -449,8 +449,13 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   pressure at fixed `β`. One scalar must be held to pin the scale: `ψ_ax`
   itself (a border row; `q`'s overall scale `α` floats — the normalisation is
   then exactly constant), `I_p` (`ψ_bnd − ψ_ax ≈ μ₀R₀I_pℓᵢ/2` drifts with `ℓᵢ`
-  and `β_p`), or the vacuum `B₀` (drift `O(β)`). **Which one is open, put to the
-  user 2026-11-06; recommended: hold `ψ_ax`.** Free boundary, where `ψ_bnd` moves too,
+  and `β_p`), or the vacuum `B₀` (drift `O(β)`). **Decided 2026-11-06: hold `ψ_ax`,
+  and let `q`'s scale float** — `q = α q̂(ρ)` with `q̂` the run's fixed shape and
+  `α` a border unknown reported per solve. The located-axis row then pins `ψ`
+  at the axis to the held value, and `α` takes the freedom `ψ_ax` gave up, so
+  `ρ`'s normalisation is constant at both ends and MaNTA's frame terms vanish
+  by construction (D6). In §4.8's solve that is one more border unknown and no
+  new row. Free boundary, where `ψ_bnd` moves too,
   comes after.
 * **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
 * **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
@@ -469,9 +474,11 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
 * **D5. Precision and device.** Double and host only: MaNTA is double, and
   bit-determinism is a host promise (device parity is to printed digits).
 * **D6. MaNTA's label and RoPP's `∂_t|_ψ`.** RoPP's equations are at fixed `ψ`;
-  MaNTA's grid is fixed in `ρ`. In a fixed-boundary run `ψ_bnd` is constant,
-  so the only frame term is in `ψ̇_ax` — measured first, carried only if it
-  matters (D1). Free boundary adds `ψ̇_bnd`.
+  MaNTA's grid is fixed in `ρ`. On a fixed boundary with `ψ_ax` held (D1) the
+  map `ψ ↔ ρ` is constant in time and the frame terms vanish; in general they
+  are in `ψ̇_ax` and, on a free boundary, `ψ̇_bnd`. The transformation of RoPP's
+  equations to `ρ` with both varying, and the route from fixed to free boundary,
+  is written up separately (an artifact, 2026-11-06).
 * **D7. Geometry time derivatives — a request to MaNTA.** `P_comp`, `Γ_s`'s
   flux-surface motion and `P_pot` need `V_ψ`, i.e. `∂_t` of the geometry at fixed
   label (§1.1, consequence 3). At tiers 0/1 that is `G'(p) ṗ + ∂_t G`: MaNTA would
