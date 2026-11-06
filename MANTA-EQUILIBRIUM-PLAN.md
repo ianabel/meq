@@ -433,12 +433,21 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
 
 ## 5. Decisions for the user
 
-* **D1. The label and the domain.** Recommend `sqrt_psi_n` (MEQ's ρ): fixed
-  under the solve, bounded `∂g/∂ρ` at the axis where `∂g/∂Ψ_N ~ 1/√Ψ_N`, and the
-  abscissa MEQ's tables already take at third order. `ρ_tor` is usual for
-  tokamak transport but moves with `q(ψ)` and is not one of MEQ's abscissae.
-  Domain `[0, ρ_max]` with `ρ_max ≤ outerCut` — the axis served by its limits,
-  the edge kept inside the extraction's range.
+* **D1. The label and the domain — decided 2026-11-06: `x = ρ = √Ψ_N`, fixed
+  boundary first.** `ρ` is fixed under the solve, `∂g/∂ρ` is bounded at the axis
+  where `∂g/∂Ψ_N ~ 1/√Ψ_N`, and MEQ's tables take it at third order. **Fixed
+  boundary makes the normalisation a constant at the edge**: `ψ_bnd` is the
+  Dirichlet value, so `ρ = 1` is `Γ` itself for all time, and the outer end is
+  the boundary — no separatrix, no band. Extraction at `ρ = 1` traces `Γ`
+  rather than refusing (the family's `outerCut < 1` is a free-boundary guard; a
+  fixed-boundary run can lift it). **At the axis it is constant only to the
+  extent `ψ_ax` is**: `ψ_ax` is an unknown of MEQ's solve (`PsiAxis` is a
+  starting guess), and with `q` and `Γ` fixed it moves only through the
+  toroidal flux's diamagnetic part, `O(β)`. The first coupled transient
+  records `ψ_ax(t)`; if `ψ̇_ax/ψ_ax` is below MaNTA's tolerance over the run,
+  the frame term is dropped with that number cited, and if not, it is one
+  scalar MEQ's response supplies (D6). Free boundary, where `ψ_bnd` moves too,
+  comes after.
 * **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
 * **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
   `(3/2)V'⟨n_s⟩T_s` and `V'Jω` (§1.1), so MEQ takes `T_s` pointwise and the rest
@@ -456,11 +465,9 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
 * **D5. Precision and device.** Double and host only: MaNTA is double, and
   bit-determinism is a host promise (device parity is to printed digits).
 * **D6. MaNTA's label and RoPP's `∂_t|_ψ`.** RoPP's equations are at fixed `ψ`;
-  MaNTA's grid is fixed in its `x`. With `x = ρ` (D1), the label moves through
-  `ψ` as `ψ_ax`, `ψ_bnd` change, and the transport case carries frame terms in
-  `ψ̇_ax`, `ψ̇_bnd` — scalars MEQ's response supplies along `ṗ` (D7). Which `x`
-  makes those terms cheapest is the transport case's call; MEQ serves any of its
-  fixed abscissae.
+  MaNTA's grid is fixed in `ρ`. In a fixed-boundary run `ψ_bnd` is constant,
+  so the only frame term is in `ψ̇_ax` — measured first, carried only if it
+  matters (D1). Free boundary adds `ψ̇_bnd`.
 * **D7. Geometry time derivatives — a request to MaNTA.** `P_comp`, `Γ_s`'s
   flux-surface motion and `P_pot` need `V_ψ`, i.e. `∂_t` of the geometry at fixed
   label (§1.1, consequence 3). At tiers 0/1 that is `G'(p) ṗ + ∂_t G`: MaNTA would
