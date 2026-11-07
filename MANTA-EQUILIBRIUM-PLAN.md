@@ -338,6 +338,22 @@ pending is **which** continuous extraction, and it is the user's choice
 | **D. Accept it as discretisation error** | **jumps**, by a per-crossing amount converging at about `h^{3.4}` (`k = 2`) | unchanged | unchanged | a straddled column's median error at 1e-4 needs about five more uniform levels on TCV at `k = 2` (×700 elements) or two to three at `k = 3` (×20–60), while the straddle rate doubles each level and the worst crossing is 10–60× the median | none | — |
 | **E. A smooth partition of unity across faces**: each point's value a blend of the neighbouring elements' polynomials (extended) with weights smooth in the distance to their faces | **smooth**, no kinks | as A, the band blended the same way; axis as the root of the blended `q` | the blend differs from either side by the jump; its gradient carries jump/width | 2–6 element evaluations near a face or vertex | moderate; only worth it if a kink matters, which a bounded difference error says it does not | the blend's derivative, linear |
 
+**Two measures, and they are different.** MEQ owes `G` to about 1e-6, no
+better. Every jump measured is at or below that on a mesh good to 1e-6 — the
+box's 1.3e-5 is on a 768-element `k = 2` mesh that is not, and TCV's are
+1e-8 and below — so as an *accuracy* the jumps are already paid for. They
+matter only because MaNTA's difference divides them by its 1.5e-8 step. So
+each candidate is read twice:
+
+| | `G`'s accuracy against 1e-6 | what a 1.5e-8 difference amplifies |
+|---|---|---|
+| now | at the field's `k+1`; the jumps sit inside it | jumps: a straddled column off by 0.07–160× its derivative (median, M-SHAPE-1), worst 4–6000× |
+| A | unchanged in order; values move by at most the face jumps (≤ 5e-8 on TCV), inside 1e-6 | kinks only: the straddled column off by the kink in `G'`, estimated at the `q*` jump (1e-4 relative, M-308b) over `N_θ = 128`, ~1e-6 of the derivative — **an estimate, not measured** |
+| B | worse (interpolated between face points) | jumps at vertex passages; not a fix |
+| C | `k+1`, as now | kinks at vertex passages, of the same estimated size as A's |
+| D | unchanged | jumps, falling `h^{3.4}`; on TCV at `k = 3` still a median 0.07 and a worst 3.8 of the derivative |
+| E | the blend moves values by the jump and gradients by jump/width, both inside 1e-6 | nothing: `G` smooth |
+
 A crossing's straddle rate per MaNTA column, at its 1.5e-8 step, all 24
 surfaces read and `Omega` moved, is 4e-4 to 1.3e-3 per column on these meshes:
 at that rate, of 512 read columns (§4.4), a third to a half of all Jacobian
@@ -405,6 +421,14 @@ outermost surfaces, and `ψ_ax`. Three findings, each deciding something:
    band faces and the band masks do not change anywhere in the scans.
    `SessionSmoothness` prints that report, asserts a jump below the noise, and
    is red until an extraction continuous in the state (§4.5, D8) is built.
+   **Its cost, ~10 minutes, is a candidate for trimming once the extraction
+   is chosen**, and what a trimmed form needs is a crossing it is sure to see:
+   a scan that happens to straddle none passes whatever the extraction does.
+   With the per-node elements now recorded, the test can find a crossing on
+   the box (bisect the table between two states whose node elements differ,
+   ~10 resolves at 0.3 s) and assert `G` continuous across a 1e-9 interval
+   there, plus the noise floor from two warm starts — about a minute, the box
+   alone; TCV's band and curved boundary would stay in `ExtractionJumps`.
    Fixed boundary has no support change and no X-point; the boundary-flux
    point is not measured here (tables feed only `RotatingSource`, and no
    free-boundary rotating case ships).
