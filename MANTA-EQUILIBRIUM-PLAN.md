@@ -317,8 +317,8 @@ weights each node by `1/(R|q*|)`; both fields are element-wise polynomials, so
 when a node's root slides across a face it lands on the neighbour's polynomial,
 and its position (by the `ψ*` jump over `|∇ψ|`) and its weight (by the `q*`
 jump) change discontinuously. Every jump above the noise in the scans coincides
-with a node of that surface changing element, bar a residue of one or two a
-case recorded in M-SHAPE-1; in no scan did the axis element, a band face or a
+with a node of that surface changing element at that step, or is the echo of
+one at the next; in no scan did the axis element, a band face or a
 band mask change, and the ray Newton's stopping test, which changes iteration
 counts at dozens of nodes, makes no jump above the noise. Per crossing the
 jump falls with the mesh — about `h^{3.4}` at `k = 2`, the `q*` jump — while
@@ -326,7 +326,7 @@ crossings come faster as `1/h`.
 
 **THE FIX IS SELF-CONSISTENT, NOT FROZEN.** Nothing about one equilibrium's
 extraction is carried to the next: the geometry is a function of the solved
-state, and the state of the tables, whatever warm start reached it. What is
+state, and so of the tables, whatever warm start reached it. What is
 pending is **which** continuous extraction, and it is the user's choice
 (§5, D8). The candidates, costed against M-SHAPE-1:
 
@@ -339,9 +339,9 @@ pending is **which** continuous extraction, and it is the user's choice
 | **E. A smooth partition of unity across faces**: each point's value a blend of the neighbouring elements' polynomials (extended) with weights smooth in the distance to their faces | **smooth**, no kinks | as A, the band blended the same way; axis as the root of the blended `q` | the blend differs from either side by the jump; its gradient carries jump/width | 2–6 element evaluations near a face or vertex | moderate; only worth it if a kink matters, which a bounded difference error says it does not | the blend's derivative, linear |
 
 A crossing's straddle rate per MaNTA column, at its 1.5e-8 step, all 24
-surfaces read, is 4e-4 to 7e-4 per column on these meshes: of 512 read columns
-(§4.4), a third of all Jacobian builds would carry one column wrong by
-O(1)–O(1000). The same mechanism is M-308b's step in the q-driven map; a
+surfaces read and `Omega` moved, is 4e-4 to 1.3e-3 per column on these meshes:
+at that rate, of 512 read columns (§4.4), a third to a half of all Jacobian
+builds would carry one column wrong by O(0.1)–O(1000). The same mechanism is M-308b's step in the q-driven map; a
 continuous extraction removes that too.
 
 **Differentiate the algorithm that ships, not the continuum formula** — that
