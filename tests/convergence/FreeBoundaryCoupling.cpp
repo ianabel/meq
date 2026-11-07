@@ -3480,8 +3480,26 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
  * fail for a reason that has nothing to do with the confinement. The scale lambda is reported beside each row: lambda near 1 is a
  * target the unconstrained problem would have delivered anyway, which is what
  * "consistent" means here.
+ *
+ * **DISABLED IN THE SUITE, AND IT IS A STUDY RATHER THAN A TEST.** Its one
+ * assertion is the unconfined control, and that is
+ * theTwoBordersConvergeTogether's `converged == 4` at IDENTICAL configuration --
+ * the same profiles, guess, Newton control, radii and modes, and the same
+ * Newton counts row for row. The other thirty-six solves are printed and not
+ * asserted, and asserting them would be asserting a known defect; most of them
+ * run to the Newton cap, which made this one case most of the binary's wall and
+ * the suite's critical path. The cells also move by the take -- M-354 has
+ * the cross on two builds against M-134's -- which is what a lever shifting
+ * branches looks like, and is why the table is a measurement to re-run rather
+ * than something to keep reproducing on every ctest. Run it by name:
+ *
+ *     MKL_NUM_THREADS=1 ./FreeBoundaryCoupling \
+ *         --run_test=confinementWithAPrescribedCurrentIsTheFourthCell
+ *
+ * and re-run it whole, as above, before quoting any cell of it.
  */
-BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell )
+BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell,
+                      * boost::unit_test::disabled() )
 {
 	int const order = 2;
 	int const n = 24;

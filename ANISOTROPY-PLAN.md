@@ -481,8 +481,9 @@ whose gain grows with resolution would do that. Not measured further.
 `RotatingMirrorAnisotropic`: MR-4d's matrix with AN-4's `Δ` in both codes.
 MEQ solves `GeqReference.hpp`'s `ReferenceAnisotropy`, read at
 `reference/anisotropic/meta.txt`'s `z_cut` and `δ₀`, through the flux law
-beside the subtracted filaments, at level 2, `k = 4`, read by `ψ*`. Level 1
-bounds its error. Against each `δ₀` and each of geq's forms at 129², 257² and
+beside the subtracted filaments, at level 2, `k = 3`, read by `ψ*`. Level 1
+bounds its error. (M-337's table is the `k = 4` run; at `k = 3` every bound
+holds, the own-error bound by 3.0 times at least → M-354 §2.) Against each `δ₀` and each of geq's forms at 129², 257² and
 513², on the 65 × 65 nodes less geq's corners, in both norms:
 
 * the difference falls at every step;

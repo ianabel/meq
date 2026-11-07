@@ -1365,6 +1365,21 @@ The giving-up is built; what is left is the crawls it exposed.
   axis-source guard, and the stall limit postdates it; whether each used to
   crawl to its answer is not measured.
 
+  AND XPointBorder's MERIT WEIGHT 4.00 CRAWLS, AND THE CASE SKIPS IT RATHER
+  THAN FAILING.  theXPointMeritWeightChangesTheWorkAndNotTheAnswer runs XP-3's
+  bootstrap at [solver] XPointMeritWeight 0.25, 0.5, 2 and 4 against the
+  reference weight 1.  At f3d10b2 weight 4.00 takes 104 bootstrap iterations
+  in double and 75 in single, against 13 or 14 for every other weight and 14
+  for the reference.  In double it lands on the reference's sweep-0 answer to
+  every printed digit, so it is a crawl to the right fixed point and not
+  another basin.  The case's plateau precondition (more than 3x the
+  reference's bootstrap iterations) prints "crossed the plateau rather than
+  descending it -- SKIPPED", and the case passes on three of four weights.
+  That precondition is deliberate (M-186, M-222, M-317: a crossing has also
+  landed in another basin), but it means the crawl itself is never red.  What
+  is owed: why a merit weight of 4 puts the line search on the plateau at
+  all, and a failing case naming it, rather than a skip.
+
 
 ================================================================================
 machine-c-mast's first support sweep: a crawl that the last bit decides
@@ -1597,7 +1612,8 @@ Raised 2026-10-30, when the free-boundary campaign closed.
      again, since the instrument that produced it found a coil's O-point.
 
   8. WHAT THE CONFINEMENT IS DOING (FB-T).  A prescribed current moves
-     confinement off zero (0/4 to 2/4) without curing it (M-134), so
+     confinement off zero (0/4 to at best 2/4 or 3/4, which cells closing
+     moving by the build) without curing it (M-134, M-354), so
      theTwoBordersConvergeTogether's retraction stands.  What the confinement
      is doing instead is not answered.
 

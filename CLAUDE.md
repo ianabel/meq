@@ -197,10 +197,13 @@ reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
 (`TODO`, the single-precision round). The anisotropic suites are qualified
-in single (→ **[M-350](MEASUREMENTS.md#m-350)**). The
-wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
-whole on purpose). `naming` is one clang-tidy test per translation unit,
-`naming.<file>`, labelled `naming` (`ctest -L naming` runs the check entire).
+in single (→ **[M-350](MEASUREMENTS.md#m-350)**). The wall is set by its
+longest tests — `DriverAcceptance` and `DeviceParity` — and FB-T's forty-solve
+cross (M-134) is `disabled()` in `FreeBoundaryCoupling` and run by name: its
+one assertion is `theTwoBordersConvergeTogether`'s at identical configuration,
+and its cells move by the take (→ **[M-354](MEASUREMENTS.md#m-354)**).
+`naming` is one clang-tidy test per translation unit, `naming.<file>`,
+labelled `naming` (`ctest -L naming` runs the check entire).
 **A suite time is a measurement only on an idle machine**; identical code has
 read 1.16× to 1.6× apart here, so read ratios.
 
