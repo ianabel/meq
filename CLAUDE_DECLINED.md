@@ -693,7 +693,9 @@ which can look at what the build actually links.
 
 ### An iterative trace solve: GMRES, and Ginkgo
 
-**Closed.**
+**Closed for GMRES with Gauss-Seidel.** Whether a preconditioner that knows the
+trace system closes the gap is open: `TODO`, *A PRECONDITIONED Krylov solve of
+the trace, against the direct solvers*.
 
 **AND `TraceSolver = "gmres"` IS A FOURTH CHOICE, EXPOSED TO BE MEASURED AND
 MEASURED AS UNVIABLE** → **[M-179](MEASUREMENTS.md#m-179)**. GMRES with a

@@ -406,7 +406,23 @@ namespace meq
 									physical( 0 ) = r;
 									physical( 1 ) = z;
 									meshRef.GetElementTransformation( e, &transformation );
+									/*
+									 * NaN UNTIL MFEM WRITES IT, BECAUSE IT DOES
+									 * NOT ALWAYS. NewtonSolve()'s "stuck on
+									 * boundary" exit (fem/eltrans.cpp:273 at
+									 * 880626eb32) returns Outside without
+									 * `ip = xip`, so `found` was this frame's
+									 * stack garbage and the snap candidate below
+									 * was chosen by it: valgrind's uninitialised
+									 * jumps at the overshoot tests, on every
+									 * diverted-tokamak warm start. A NaN iterate
+									 * makes `!( overshoot < 1 )` true, so an
+									 * unwritten point is no candidate -- which is
+									 * what it is.
+									 */
 									mfem::IntegrationPoint found;
+									found.Init( 0 );
+									found.x = found.y = std::numeric_limits<mfem::real_t>::quiet_NaN();
 									int status =
 										transformation.TransformBack(
 											physical, found,
