@@ -288,6 +288,10 @@ set(MEQ_CONVERGENCE_TESTS
 	# meq::EquilibriumSnapshot -- the session a transport code re-solves in
 	# memory, transactional and deterministic given its warm start.
 	RunSession
+	# MANTA-EQUILIBRIUM-PLAN.md section 4.6: the geometry MaNTA reads, differenced
+	# in one table entry from 1e-2 to 1e-10 through the session, against the
+	# map's own noise -- whether G is smooth where MaNTA differences it.
+	SessionSmoothness
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves

@@ -23469,3 +23469,68 @@ made from its `_surfaces.nc` and `fixed-d-tcv-ggprime.dat`, `tcv-d2-g1.4.toml`),
 and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (asserted, short) — the tables
 above are its earlier, longer sweep, `runs/manta-session/scale.log`,
 `scale3.log`, `scale4.log`.
+
+### M-SESSION-4
+
+**Is the geometry MaNTA reads a smooth function of the tables?**
+`SessionSmoothness` and its longer first sweep, `manta/session`, double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`. Two cases, both `RotatingSource`
+(rotating-normalised's species, `Omega = 4e5`, `GGPrime` constant, the D
+density as a table): `rotating-normalised`'s box (768 elements, `k = 2`) and
+`fixed-d-tcv`'s MXH boundary at `RefinementLevels = 1` (3993 elements,
+curved, its family traced through the band). Two inputs: `Omega` scaled by
+`1 + h`, and the density knot at `Ψ = 0.5` moved by `h`. Every state a
+`resolve()` warm from the same base snapshot. Outputs: `V′_ρ = dV/dρ`,
+`⟨|∇ρ|²⟩`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩` at `ρ` = 0.224, 0.615, 0.975, and `ψ_ax`.
+
+**Noise** — the same tables from the base and from a state 1e-4 away, worst
+relative difference over the outputs:
+
+| | `NewtonRelativeTolerance = 1e-10` (shipped) | `1e-16` (round-off floor, M-306) |
+|---|---|---|
+| box, `Omega` | 2.1e-14 | 2.1e-14 |
+| box, density | 1.1e-14 | 1.1e-14 |
+| TCV, `Omega` | **2.8e-11** | 2.6e-14 |
+| TCV, density | 9.6e-15 | 9.6e-15 |
+
+At 1e-10 the steps below ~1e-9 take no Newton step (box `h = 1e-10`: 0
+steps; TCV `h = 1e-9`: 1 step, `ψ_ax` unchanged; `h = 1e-10`: 0) and the
+difference is exactly zero; at 1e-16 they take two and it is not.
+
+**The central difference** — `max |D(h) − D(10h)|/|D|` over the outputs, and
+which, round-off tolerance:
+
+| h | box `Omega` | box density | TCV `Omega` | TCV density |
+|---|---|---|---|---|
+| 1e-3 | 1.3e-1 `V′_ρ`@0.975 | 2.5e-2 `⟨R⁻²⟩`@0.975 | 7.5e-3 `⟨|∇ψ|²/R²⟩`@0.975 | 3.8e-4 `⟨|∇ρ|²⟩`@0.224 |
+| 1e-4 | 1.6e-1 `V′_ρ`@0.975 | 2.7e-2 `⟨R⁻²⟩`@0.975 | 7.5e-4 `⟨|∇ρ|²⟩`@0.224 | 3.4e-4 `⟨|∇ρ|²⟩`@0.224 |
+| 1e-5 | 3.2e-8 | 1.3e-8 | 8.6e-4 `⟨|∇ρ|²⟩`@0.224 | **3.4e-3** `⟨|∇ρ|²⟩`@0.224 |
+| 1e-6 | 6.8e-8 | 1.5e-7 | 1.5e-7 | **3.7e-3** `⟨|∇ρ|²⟩`@0.224 |
+| 1e-7 | 2.0e-6 | 7.9e-7 | 1.0e-6 | 2.8e-7 |
+| 1e-8 | 7.2e-6 | 2.0e-5 | 5.6e-5 | 6.0e-6 |
+| 1e-9 | 1.5e-4 | 6.1e-5 | 5.5e-4 | 8.7e-5 |
+| 1e-10 | 9.6e-4 | 1.9e-3 | 4.0e-3 | 8.4e-4 |
+
+The TCV density column's 1e-5 row is the base sitting within 1e-5 of a jump:
+`D(1e-5)` is 3.4e-3 off both `D(1e-4)` and `D(1e-6)`, which agree to 4e-4. Below
+`1e-6` every column grows as `ε/h`, `ε ≈ 1e-13`.
+
+**The jumps** — `G` at `h = j·1e-4`, `j = −10 … 10`, each second difference's
+largest departure from their median, relative to the value:
+
+| | box | TCV |
+|---|---|---|
+| `Omega` | 1.31e-5, `⟨|∇ρ|²⟩`@0.975, `h = −1e-4` | 1.52e-8, `⟨|∇ψ|²/R²⟩`@0.224, `h = 0` |
+| density | 1.30e-5, `⟨|∇ρ|²⟩`@0.975, `h = +3e-4` | 1.52e-8, `⟨|∇ψ|²/R²⟩`@0.224, `h = 0` |
+
+Smooth, the departure is `h³ G‴` ~ 1e-12 plus the noise. TCV's two are one
+jump, 1.517e-8 and 1.516e-8: the same decision on the innermost surface,
+crossed within 1e-4 of the base by either input. The box's jumps sit
+on its outermost surface and are a thousand times the TCV mesh's, which is
+five times finer and curved — the size of the discretisation's DG jumps, as
+M-308b's face crossing would give. `SessionSmoothness` asserts the noise below
+1e-12 (met at round-off) and the jumps below 1e-11 (not met: four failures).
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`
+(round-off tolerance only, ~10 min); the shipped-tolerance columns are the
+first sweep's, `runs/manta-session/smooth.log`, `smooth3.log`.

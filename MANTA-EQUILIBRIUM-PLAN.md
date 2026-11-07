@@ -351,6 +351,39 @@ plot the error of the difference against the step. A smooth `G` gives the
 §4.5's freezing tier 0 needs, and it is the test every later branch keeps. It
 belongs on `manta/session`, as a convergence test over the session.
 
+**Measured on `manta/session`** (`SessionSmoothness`, → M-SESSION-4): `Omega`
+scaled, and one density knot moved, by `±h` through `resolve()` warm from one
+snapshot, on `rotating-normalised` (768 elements) and on `fixed-d-tcv`'s MXH
+boundary with the same rotating source (3993 elements, curved, the band);
+`V′_ρ`, `⟨|∇ρ|²⟩`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩` on the innermost, middle and
+outermost surfaces, and `ψ_ax`. Three findings, each deciding something:
+
+1. **A session must converge to round-off, not to a tolerance.** At the
+   shipped `NewtonRelativeTolerance = 1e-10` the same tables from two warm
+   starts differ by up to 2.8e-11 (TCV) — at MaNTA's 1e-8 step, 3e-3 of
+   noise — and a perturbation below ~1e-9 takes no Newton step at all, so `G`
+   is flat there and its difference is exactly zero. Below ten eps the solve
+   stops at its round-off floor (M-306): the noise falls to ≤ 2.6e-14 and the
+   difference at `h = 1e-8` is good to 6e-6 to 5e-5 of the derivative. The
+   adapter's `setTolerances` should ask for that, whatever MaNTA passes.
+2. **Away from a decision, `G` is smooth**: the central difference settles
+   between `h = 1e-5` and `1e-7` to 3e-8 – 3e-7 and then grows as
+   `ε/h` with `ε ≈ 1e-13`.
+3. **`G` jumps, and a step that straddles a jump is wrong by the jump over the
+   step.** On the rectangle the outermost surface's `⟨|∇ρ|²⟩` and `V′_ρ` jump
+   by 1.3e-5 of their value within `±1e-3` of the base in both inputs (the
+   difference at `h = 1e-3, 1e-4` is 12–16% off); on TCV the jumps are
+   1.5e-8 of the value (the innermost surface's `⟨|∇ψ|²/R²⟩`), and the base sits within 1e-5 of one (the
+   difference at `h = 1e-5` is 3.4e-3 off, at `1e-4` and `1e-6` it is not).
+   Their size follows the mesh — consistent with M-308b's mechanism, a ray
+   node crossing an element face onto the other element's `ψ*` and `q*` —
+   and at MaNTA's 1.5e-8 step a 1e-8 jump is an O(1) error in the column it
+   straddles. **Tier 0 needs §4.5's freezing**; `SessionSmoothness` asserts a
+   jump below the noise and is red until `manta/shape-derivative` delivers it.
+   Fixed boundary has no support change and no X-point; those decisions are
+   not measured here (tables feed only `RotatingSource`, and no free-boundary
+   rotating case ships).
+
 ### 4.7 `manta/adapter` — the `EquilibriumModel`
 
 **Python first** (recommended, D2, and the route MaNTA's final brief settles
