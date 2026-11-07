@@ -88,7 +88,7 @@ Requirements:
 
 | | |
 |---|---|
-| C++17 compiler | g++ 15 is what it is developed against |
+| C++23 compiler | g++ 15 is what it is developed against; g++ 13 is the oldest that takes `-std=c++23` |
 | CMake | ≥ 3.20 |
 | [MFEM](https://mfem.org) | **the HDG branch** — see below. The one hard dependency |
 | [toml11](https://github.com/ToruNiina/toml11) | vendored as a submodule at `extern/toml11` |
