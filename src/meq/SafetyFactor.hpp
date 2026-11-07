@@ -379,6 +379,14 @@ namespace meq
 			/// Zero until a step has.
 			double floor() const { return lastFloor; }
 
+			/// The family's labels, `Psi_N`, at the last step that produced
+			/// an equilibrium: the abscissae the fit was taken on. Empty
+			/// until one has.
+			std::vector<double> const &lastLabels() const { return labels; }
+
+			/// The relative accuracy each equilibrium is solved to, as given.
+			double solveAccuracy() const { return options.solveAccuracy; }
+
 		private:
 			std::vector<double> refuse(
 				std::vector<double> const &coefficients ) const;
@@ -386,9 +394,120 @@ namespace meq
 			Solve solve;
 			Options options;
 			std::vector<double> lastGood;
+			std::vector<double> labels;
 			double lastFloor = 0.0;
 			int solveCount = 0;
 			int refusalCount = 0;
+	};
+
+	/**
+	 * THE ONE SCALAR BESIDE `p( Psi_N )` AND `q( Psi_N )` THAT SELECTS THE
+	 * EQUILIBRIUM.
+	 *
+	 * Fixed-boundary equilibria sharing those two profiles form a ONE-PARAMETER
+	 * FAMILY: `q` sets the field-line pitch and not the field's strength, which
+	 * is VMEC's reason for wanting `PHIEDGE` beside `iota( s )`. Left free, the
+	 * family is the outer Jacobian's near-null direction and the member is
+	 * picked by the degree of `g^2` alone (MEASUREMENTS.md M-FIX-2). Each value
+	 * here is one input that picks it.
+	 */
+	enum class ScalePin
+	{
+		/// `g` on the boundary, `R0 B0`: `c_0 = g_edge^2` is HELD and leaves
+		/// the unknowns, since `c_0` enters no solve.
+		EdgeField,
+
+		/// `mu0 I_p` of the solved state, as a row of the outer system. The
+		/// inner solve's profile scale stays one.
+		PlasmaCurrent,
+
+		/// `psi_ax - psi_bnd` of the solved state, as a row of the outer
+		/// system. With `q( Psi_N )` given this is the edge toroidal flux,
+		/// `Phi_edge = 2 pi ( psi_ax - psi_bnd ) int_0^1 q dPsi_N`.
+		FluxSpan
+	};
+
+	/**
+	 * THE q-DRIVEN OUTER SYSTEM WITH ITS SCALE PINNED, KEPT SQUARE.
+	 *
+	 * meq::ToroidalFieldMap's fixed point `G( c ) = c` has `d + 1` conditions
+	 * -- the fit's rows -- for `d + 1` coefficients, and one direction they do
+	 * not determine: the family's scale. A pin removes it, and to keep the
+	 * system square ONE q CONDITION GIVES WAY: in the fit's orthonormal
+	 * coordinates `y = R c` (`R` from the QR of the design matrix on the
+	 * surfaces' labels, scaled by `1/sqrt( N )`), the highest row `y_d` is
+	 * dropped. So the `g^2` misfit left at the answer is a multiple of the
+	 * `d`-th orthogonal polynomial over the surfaces -- the one least able to
+	 * move the equilibrium -- and q is matched in every lower moment.
+	 *
+	 *   EdgeField      unknowns `c_1 .. c_d`; rows `y_0 .. y_{d-1}`
+	 *   PlasmaCurrent  unknowns `c_0 .. c_d`; rows `y_0 .. y_{d-1}` and
+	 *   FluxSpan       `w ( m - m* )/m*`, `m` the measured scalar
+	 *
+	 * **THE SAME ROW GIVES WAY UNDER EVERY PIN, AND THAT IS WHAT MAKES THEM
+	 * COMPOSE.** An equilibrium solved under one pin satisfies every other
+	 * pin's system once that pin is set to the value it reads -- so the three
+	 * pins return the same equilibrium -- only if each system drops the same q
+	 * condition: dropping different ones leaves the fit's misfit in different
+	 * directions, and the answers differ by it (MEASUREMENTS.md M-QSCALE-1).
+	 *
+	 * It is a ToroidalFieldMap -- the callable meq::solveForToroidalField
+	 * roots -- through `x -> x + F( x )`, so the outer Newton, its floor and
+	 * its refusals are the free loop's. Like the map it wraps, it never throws
+	 * for a reason the loop could meet: a refused step, or a pin that cannot be
+	 * read, returns a residual pointing back at the last admissible point.
+	 */
+	class PinnedToroidalFieldMap
+	{
+		public:
+			struct Pin
+			{
+				ScalePin kind = ScalePin::EdgeField;
+
+				/// `g_edge`, `mu0 I_p` or `psi_ax - psi_bnd`, by @ref kind.
+				double value = 0.0;
+
+				/// The solved state's own value of the pinned scalar, read
+				/// after each admissible solve. Unused for EdgeField. A throw
+				/// is a refusal.
+				std::function<double()> measured;
+
+				/// The pin row's scale, in `g^2` per unit of relative misfit,
+				/// so that it sits beside the fit's rows. It moves the Newton
+				/// path and the reported conditioning, never the root.
+				double weight = 1.0;
+			};
+
+			/// @throws std::invalid_argument if @a pin's value is not usable
+			///         -- non-positive for EdgeField, zero or non-finite
+			///         otherwise -- or a row pin has nothing to measure.
+			PinnedToroidalFieldMap( ToroidalFieldMap &map, unsigned int degree,
+			                        Pin pin );
+
+			/// The outer Newton's unknowns from the coefficients of `g^2`:
+			/// all of them, or all but `c_0` under EdgeField.
+			std::vector<double> unknowns( std::vector<double> const &coefficients ) const;
+
+			/// And back, with `c_0 = g_edge^2` under EdgeField.
+			std::vector<double> coefficients( std::vector<double> const &unknowns ) const;
+
+			/// `x + F( x )`. Never throws for a reason the loop could meet.
+			std::vector<double> operator()( std::vector<double> const &unknowns );
+
+			/// The round-off floor of `F` at the last admissible step: the
+			/// map's, carried through `R`, and the pin row's.
+			double floor() const { return lastFloor; }
+
+			/// The pinned scalar as the last admissible step measured it.
+			double lastMeasured() const { return measuredValue; }
+
+		private:
+			ToroidalFieldMap &map;
+			unsigned int degree;
+			Pin pin;
+			std::vector<double> lastGood;
+			double lastFloor = 0.0;
+			double measuredValue = 0.0;
 	};
 
 	/**

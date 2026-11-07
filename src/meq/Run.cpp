@@ -61,6 +61,22 @@
 namespace
 {
 	/*
+	 * `int_0^1 q dPsi` OF A q-DRIVEN RUN'S TARGET, as MEQ evaluates it --
+	 * clamped beyond its table's ends, as the loop's map asks it -- by
+	 * composite Simpson. The factor between the toroidal flux inside the
+	 * boundary and the span of psi: Phi_edge = 2 pi ( psi_ax - psi_bnd ) times
+	 * this.
+	 */
+	double targetIntegral( meq::Profile const &target )
+	{
+		int const intervals = 4096;
+		double sum = target( 0.0 ) + target( 1.0 );
+		for ( int i = 1; i < intervals; ++i )
+			sum += ( i % 2 == 1 ? 4.0 : 2.0 )*target( static_cast<double>( i )/intervals );
+		return sum/( 3.0*intervals );
+	}
+
+	/*
 	 * A q-DRIVEN RUN'S OUTER LOOP DID NOT CONVERGE, AND THAT IS NOT A FAILURE
 	 * THE RETRY RUNG CAN ANSWER.
 	 *
@@ -776,6 +792,21 @@ struct meq::Run::Impl
 
 	std::vector<meq::Knot> answerCrossing();
 	void ensurePostProcessed();
+
+	/*
+	 * THE q-DRIVEN ANSWER'S THREE SCALE PINS, read off the equilibrium the
+	 * solver holds: g on the boundary [T m], the toroidal flux inside it [Wb]
+	 * and I_p [A]. The run was given exactly one; all three are reported, so
+	 * that any one re-poses the same equilibrium (meq::PinnedToroidalFieldMap,
+	 * MEASUREMENTS.md M-QSCALE-3). Read from the SOLVER and not kept by the
+	 * loop, because the retry rung can re-solve the loop's converged g on a
+	 * solver of its own.
+	 */
+	struct ScaleOfAnswer
+	{
+		double edgeField, toroidalFlux, plasmaCurrent;
+	};
+	ScaleOfAnswer scaleOfAnswer() const;
 	meq::FluxSurfaceFamily writeFluxSurfaces( std::string const &file );
 	/// The solved state's family at @a options, traced as the write phase
 	/// traces it: on the curved path through the band, by the transfer
@@ -848,6 +879,11 @@ struct meq::Run::Impl
 	std::shared_ptr<meq::NormalisedMHDSource> toroidalDriven;
 	std::shared_ptr<meq::Profile const> safetyFactorTarget;
 	std::vector<double> toroidalCoefficients;
+
+	// What the q-driven loop cost: KINSOL iterations and equilibria, so a crawl
+	// that converges is visible in the file rather than only on stdout.
+	int toroidalIterations = 0;
+	int toroidalEquilibria = 0;
 	AM assemblyMode = AM::Serial;
 	bool onDevice = false;
 	LFM localFactorMode = LFM::Serial;
@@ -983,6 +1019,15 @@ int meq::Run::solve()
 	int const code = runPhase( [ this ]() { return impl->solve(); } );
 	stage = code == Solved ? Stage::Solved : Stage::Failed;
 	return code;
+}
+
+meq::Run::Impl::ScaleOfAnswer meq::Run::Impl::scaleOfAnswer() const
+{
+	double const mu0 = config->getSource().permeability();
+	return { std::sqrt( toroidalCoefficients.front() ),
+	         2.0*M_PI*( solver->psiAxis() - solver->psiBoundary() )
+	             *targetIntegral( *safetyFactorTarget ),
+	         mu0 != 0.0 ? solver->deliveredPlasmaCurrent()/mu0 : 0.0 };
 }
 
 std::vector<meq::Knot> meq::Run::Impl::answerCrossing()
@@ -1844,9 +1889,11 @@ int meq::Run::Impl::configure()
 				// higher coefficient is zero. That is gg' = 0 -- the vacuum --
 				// which is the honest statement of what is known before the
 				// first equilibrium exists.
+				// Under R0B0 that constant is the boundary's own g, held.
+				double const opening = mhd.edgeToroidalField > 0.0
+				                       ? mhd.edgeToroidalField : mhd.toroidalFieldGuess;
 				toroidalCoefficients.assign( mhd.safetyFactorDegree + 1, 0.0 );
-				toroidalCoefficients[ 0 ] =
-					mhd.toroidalFieldGuess*mhd.toroidalFieldGuess;
+				toroidalCoefficients[ 0 ] = opening*opening;
 			}
 
 			if ( coils )
@@ -2956,7 +3003,7 @@ int meq::Run::Impl::setUp()
 						std::printf( "     the X-point starts at the file's ( %.6f, %.6f )\n",
 						             xPointSeedR, xPointSeedZ );
 					}
-					if ( stored.hasProfileScale() && normalised
+					if ( stored.hasProfileScale() && normalised && !toroidalDriven
 					     && config->getSource().plasmaCurrent() != 0.0 )
 					{
 						profileScaleSeed = stored.profileScale();
@@ -3281,7 +3328,14 @@ int meq::Run::Impl::setUp()
 		 * ::permeability() exists for precisely that sharing. So the conversion
 		 * happens here, once, against the only mu0 in the file.
 		 */
-		if ( bordered && config->getSource().plasmaCurrent() != 0.0 )
+		/*
+		 * NOT ON A q-DRIVEN RUN, where PlasmaCurrent is the outer loop's scale
+		 * pin instead: a border here would rescale p' and g g' together, so
+		 * the loop would fit a g^2 the equilibrium does not have and a
+		 * pressure would be solved that nobody gave (MEASUREMENTS.md
+		 * M-QSCALE-2). See runToroidalLoop.
+		 */
+		if ( bordered && config->getSource().plasmaCurrent() != 0.0 && !toroidalDriven )
 		{
 			fresh->setPlasmaCurrent( config->getSource().permeability()
 			                         *config->getSource().plasmaCurrent() );
@@ -3948,6 +4002,53 @@ int meq::Run::Impl::solve()
 
 			meq::ToroidalFieldMap map( step, mapOptions );
 
+			/*
+			 * THE SCALE PIN, AND WITHOUT IT THE PROBLEM HAS NO ANSWER TO FIND.
+			 *
+			 * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter
+			 * family, so the fixed point G( c ) = c is a continuum up to what
+			 * g^2's degree cannot follow (MEASUREMENTS.md M-FIX-2). Config
+			 * requires exactly one of the three, and each selects the member:
+			 *
+			 *   R0B0           c_0 = R0B0^2 held, out of the unknowns;
+			 *   ToroidalFlux   psi_ax - psi_bnd = Phi/( 2 pi int_0^1 q dPsi ),
+			 *                  a row, read off the family the map just traced;
+			 *   PlasmaCurrent  mu0 I_p, a row, read off the solved state, with
+			 *                  the profile scale left at one (makeSolver()).
+			 *
+			 * One q condition gives way to keep the system square, and it is
+			 * the same one under every pin -- meq::PinnedToroidalFieldMap says
+			 * which and why that makes them compose (M-QSCALE-1, M-QSCALE-3).
+			 * The row weight is the opening c_0, so the pin row is in the
+			 * fit rows' units; it moves the path and not the root.
+			 */
+			meq::MHDParameters const &mhd = config->getSource().getMHD();
+			double const mu0 = config->getSource().permeability();
+			double const qIntegral = targetIntegral( targetProfile );
+
+			meq::PinnedToroidalFieldMap::Pin pin;
+			pin.weight = std::abs( toroidalCoefficients.front() );
+			if ( mhd.edgeToroidalField > 0.0 )
+			{
+				pin.kind = meq::ScalePin::EdgeField;
+				pin.value = mhd.edgeToroidalField;
+			}
+			else if ( mhd.toroidalFlux != 0.0 )
+			{
+				pin.kind = meq::ScalePin::FluxSpan;
+				pin.value = mhd.toroidalFlux/( 2.0*M_PI*qIntegral );
+				// The bordered Newton's own psi_ax and psi_bnd: the span the
+				// source was normalised by.
+				pin.measured = [ & ] { return solver->psiAxis() - solver->psiBoundary(); };
+			}
+			else
+			{
+				pin.kind = meq::ScalePin::PlasmaCurrent;
+				pin.value = mu0*config->getSource().plasmaCurrent();
+				pin.measured = [ & ] { return solver->deliveredPlasmaCurrent(); };
+			}
+			meq::PinnedToroidalFieldMap pinned( map, mapOptions.degree, pin );
+
 			// std::ref AND NOT THE OBJECT. solveForToroidalField takes a
 			// std::function, which COPIES what it is given -- so the copy would
 			// do the solving and keep the counts, and the map here would report
@@ -3955,7 +4056,7 @@ int meq::Run::Impl::solve()
 			meq::OuterNewtonOptions outerOptions;
 			if ( qIterationCap )
 				outerOptions.maxIterations = *qIterationCap;
-			outerOptions.mapFloor = [ &map ]() { return map.floor(); };
+			outerOptions.mapFloor = [ &pinned ]() { return pinned.floor(); };
 			/*
 			 * AN EXCEPTION OUT OF THE OUTER LOOP IS AN OUTER FAILURE TOO, and
 			 * reaching the ladder below as anything else gives it the rung:
@@ -3974,7 +4075,8 @@ int meq::Run::Impl::solve()
 				try
 				{
 					return meq::solveForToroidalField(
-						toroidalCoefficients, std::ref( map ), outerOptions );
+						pinned.unknowns( toroidalCoefficients ), std::ref( pinned ),
+						outerOptions );
 				}
 				catch ( std::exception const &error )
 				{
@@ -3995,7 +4097,9 @@ int meq::Run::Impl::solve()
 					"the outer Newton on the toroidal field did not converge: "
 					+ outcome.status );
 
-			toroidalCoefficients = outcome.coefficients;
+			toroidalCoefficients = pinned.coefficients( outcome.coefficients );
+			toroidalIterations = outcome.iterations;
+			toroidalEquilibria = map.solves();
 
 			// g( Psi ) = sqrt( sum c_j Psi^j ), which is the ANSWER and is what
 			// a reader of this run wants beside psi_ax. Printed at the two ends
@@ -4037,6 +4141,14 @@ int meq::Run::Impl::solve()
 				throw std::runtime_error(
 					"the outer Newton converged but its own answer does not "
 					"re-solve, so there is no equilibrium to write" );
+
+			ScaleOfAnswer const scale = scaleOfAnswer();
+			std::printf( "  its scale: R0B0 = %.9e T m, ToroidalFlux = %.9e Wb, "
+			             "PlasmaCurrent = %.9e A; the run gave %s\n",
+			             scale.edgeField, scale.toroidalFlux, scale.plasmaCurrent,
+			             pin.kind == meq::ScalePin::EdgeField ? "R0B0"
+			             : pin.kind == meq::ScalePin::FluxSpan ? "ToroidalFlux"
+			             : "PlasmaCurrent" );
 		};
 
 		/*
@@ -4380,8 +4492,11 @@ int meq::Run::Impl::solve()
 			double axis = psiAxisGuess;
 			double boundary = edgeFluxOf( *picardState );
 			double scale = profileScaleSeed.value_or( 1.0 );
-			double const target = config->getSource().permeability()
-			                      *config->getSource().plasmaCurrent();
+			// A q-driven run's PlasmaCurrent is its loop's pin and not a
+			// profile scale; see makeSolver().
+			double const target = toroidalDriven ? 0.0
+			                      : config->getSource().permeability()
+			                        *config->getSource().plasmaCurrent();
 
 			/*
 			 * THE AMPLITUDE BEFORE THE FIRST SOLVE, AND WITHOUT IT THE FIRST
@@ -5123,7 +5238,7 @@ int meq::Run::Impl::solve()
 			inverseCurrents = solver->freeCircuitCurrents();
 		// AND THE PROFILE SCALE, which the next cycle's fresh solver would
 		// otherwise start at one. See profileScaleSeed.
-		if ( normalised && config->getSource().plasmaCurrent() != 0.0 )
+		if ( normalised && config->getSource().plasmaCurrent() != 0.0 && !toroidalDriven )
 			profileScaleSeed = solver->plasmaCurrentScale();
 
 		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
@@ -5677,7 +5792,7 @@ int meq::Run::Impl::solve()
 		 * different current from the one prescribed, which is a modelling fact a
 		 * user wants rather than an internal.
 		 */
-		if ( config->getSource().plasmaCurrent() != 0.0 )
+		if ( config->getSource().plasmaCurrent() != 0.0 && !toroidalDriven )
 		{
 			double const mu0 = config->getSource().permeability();
 			std::printf( "     I_p = %.6e A against the %.6e A asked for, "
@@ -7271,6 +7386,20 @@ int meq::Run::Impl::write()
 			writer.attribute( "g_squared_coefficients", coefficients.str() );
 			writer.attribute( "safety_factor_target",
 			                  config->getSource().getMHD().safetyFactorFile );
+
+			// THE SCALE: which pin the run was given, and all three as the
+			// answer reads them, so that any one re-poses this equilibrium.
+			meq::MHDParameters const &mhd = config->getSource().getMHD();
+			writer.attribute( "scale_pin",
+			                  mhd.edgeToroidalField > 0.0 ? std::string( "R0B0" )
+			                  : mhd.toroidalFlux != 0.0 ? std::string( "ToroidalFlux" )
+			                  : std::string( "PlasmaCurrent" ) );
+			ScaleOfAnswer const scale = scaleOfAnswer();
+			writer.attribute( "edge_toroidal_field", scale.edgeField );
+			writer.attribute( "toroidal_flux", scale.toroidalFlux );
+			writer.attribute( "plasma_current", scale.plasmaCurrent );
+			writer.attribute( "toroidal_loop_iterations", toroidalIterations );
+			writer.attribute( "toroidal_loop_equilibria", toroidalEquilibria );
 		}
 		/*
 		 * AND WHETHER psi_axis IS A MAGNETIC AXIS, which normalisation_residual
@@ -7439,7 +7568,7 @@ int meq::Run::Impl::write()
 			for ( std::size_t m = 0; m < a.size(); ++m )
 				writer.attribute( "exterior_a" + std::to_string( m + 2 ), a[ m ] );
 		}
-		if ( config->getSource().plasmaCurrent() != 0.0 )
+		if ( config->getSource().plasmaCurrent() != 0.0 && !toroidalDriven )
 		{
 			double const mu0 = config->getSource().permeability();
 			writer.attribute( "plasma_current_target", config->getSource().plasmaCurrent() );

@@ -29,6 +29,12 @@
  * the same mesh through q = V' g < R^-2 >/4 pi^2, and the q-driven run of
  * that target recovering g^2's three coefficients. The discretisation error
  * is common to both, so what is read is the loop's accuracy.
+ *
+ * UNDER THE R0B0 PIN, g = 2.20 on the boundary (Psi = 0 there): c_0 is held
+ * and the loop solves for c_1 and c_2 with the fit's highest row given way
+ * (meq::PinnedToroidalFieldMap). The target being exactly quadratic, every
+ * row holds at the answer and the recovered coefficients are the closed
+ * form's.
  */
 namespace
 {
@@ -122,7 +128,7 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversItsFieldOnACurvedBoundary )
 	// ---- the q-driven run of that target ------------------------------------
 	auto driven = run( configuration( "curved-driven",
 		"SafetyFactorFile = \"curved-q.dat\"\nSafetyFactorDegree = 2\n"
-		"ToroidalFieldGuess = 2.2\n" ), directory );
+		"R0B0 = 2.2\n" ), directory );
 	BOOST_TEST_REQUIRE( driven->prepare() == meq::Solved );
 	int const code = driven->solve();
 	BOOST_TEST_REQUIRE( code == meq::Solved,

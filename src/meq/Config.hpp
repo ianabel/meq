@@ -483,10 +483,28 @@ namespace meq
 		unsigned int safetyFactorDegree = 2;
 
 		// ToroidalFieldGuess: g = R B_phi to start from, as a constant, so the
-		// loop opens at gg' = 0. Required with SafetyFactorFile and has no
-		// default: q determines g through the geometry, but only once there IS
-		// a geometry, and a machine's vacuum R0 B0 is the number a user has.
+		// loop opens at gg' = 0. Required with SafetyFactorFile beside
+		// PlasmaCurrent or ToroidalFlux, and has no default: q determines g
+		// through the geometry, but only once there IS a geometry, and a
+		// machine's vacuum R0 B0 is the number a user has. REFUSED beside
+		// R0B0, which is then where the loop opens.
 		double toroidalFieldGuess = 0.0;
+
+		// THE SCALE PIN. Equilibria sharing p( Psi_N ) and q( Psi_N ) form a
+		// one-parameter family, so a q-driven run names EXACTLY ONE of R0B0,
+		// ToroidalFlux and PlasmaCurrent to select its member; none, or two,
+		// is refused (meq::PinnedToroidalFieldMap, MEASUREMENTS.md M-QSCALE-1).
+		//
+		// R0B0: g = R B_phi on the boundary [T m], the vacuum field the TF
+		// coils set, positive; c_0 of the g^2 fit is its square. Zero when
+		// absent. Read only beside SafetyFactorFile.
+		double edgeToroidalField = 0.0;
+		// ToroidalFlux: the toroidal flux inside the boundary, Phi_edge [Wb],
+		// signed as psi_ax - psi_bnd times q. With q( Psi_N ) given it is
+		// 2 pi ( psi_ax - psi_bnd ) int_0^1 q dPsi_N, so it holds psi_ax's span
+		// in the unit a user has -- VMEC's PHIEDGE. Zero when absent. Read
+		// only beside SafetyFactorFile.
+		double toroidalFlux = 0.0;
 
 		// GGPrimeFile: path to the tabulated g dg/dpsi
 		//                                     [T^2 m^2 / (Wb per radian)]

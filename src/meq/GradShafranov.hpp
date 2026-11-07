@@ -4540,6 +4540,25 @@ namespace meq
 			double plasmaCurrent() const;
 
 			/**
+			 * `int F_plasma/R` over the domain at the CURRENT STATE, `mu0 I_p`,
+			 * whether or not the current is a border unknown -- the same
+			 * quadrature the current row is assembled from, so on a solve with
+			 * setPlasmaCurrent() it is plasmaCurrent() to round-off.
+			 *
+			 * **IT IS WHAT THE q-DRIVEN LOOP'S CURRENT PIN READS.** There the
+			 * current selects one member of the family of equilibria sharing
+			 * `p( Psi_N )` and `q( Psi_N )`, and it does so as a row of the
+			 * OUTER system with the profile scale left at one: a border here
+			 * would rescale `p` and `g g'` together, and the loop would then
+			 * fit a `g^2` the equilibrium does not have
+			 * (MEASUREMENTS.md M-QSCALE-2).
+			 *
+			 * Over `Omega_h`: on a curved boundary the band's sliver of current
+			 * is not counted, as it is not by the current row.
+			 */
+			double deliveredPlasmaCurrent() const;
+
+			/**
 			 * `d( mu0 I_p )/d lambda` ALONG THE SOLUTION MANIFOLD -- how much
 			 * current the profile scale actually BUYS, with the field, the
 			 * normalisation, the X-point and the exterior all re-solving.

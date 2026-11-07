@@ -7977,6 +7977,11 @@ namespace
 		return plasmaCurrentValue;
 	}
 
+	double GradShafranovSolver::deliveredPlasmaCurrent() const
+	{
+		return assemblePlasmaCurrent( solution );
+	}
+
 	double GradShafranovSolver::plasmaCurrentSensitivity() const
 	{
 		return currentSensitivityValue;

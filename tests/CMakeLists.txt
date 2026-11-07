@@ -287,6 +287,9 @@ set(MEQ_CONVERGENCE_TESTS
 	# The q-driven loop on a curved fixed boundary, whose outer surfaces lie in
 	# the band: a round trip on a Miller boundary.
 	QDrivenCurvedBoundary
+	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
+	# PlasmaCurrent, returning one equilibrium (M-QSCALE-3).
+	QDrivenScalePin
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves
@@ -337,6 +340,21 @@ endforeach()
 # meq_core requires anyway.
 if(TARGET SafetyFactorScale)
 	target_link_libraries(SafetyFactorScale PRIVATE Eigen3::Eigen)
+endif()
+
+# WHICH q CONDITION GIVES WAY TO EACH SCALE PIN: a study, BUILT BUT NOT
+# REGISTERED, because its numbers are MEASUREMENTS.md M-QSCALE-1 and M-QSCALE-2,
+# taken once, and the suite asserts the choice through the driver instead
+# (DriverAcceptance's q-driven pins). About ten minutes:
+#     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
+if(TARGET meq_core
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SafetyFactorPinStudy.cpp")
+	add_executable(SafetyFactorPinStudy "convergence/SafetyFactorPinStudy.cpp")
+	target_include_directories(SafetyFactorPinStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(SafetyFactorPinStudy PRIVATE
+		meq_core
+		Boost::unit_test_framework
+		Eigen3::Eigen)
 endif()
 
 # THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's

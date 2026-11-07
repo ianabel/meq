@@ -142,12 +142,159 @@ namespace meq
 			} );
 
 		lastGood = coefficients;
+		labels = inverted.normalisedFlux;
 		std::vector<double> const fitted =
 			fitToroidalFieldSquared( inverted, options.degree );
 		lastFloor = toroidalMapFloor( inverted, options.degree,
 		                              options.solveAccuracy );
 		stageChecksum( "toroidalMap.out", fitted );
 		return fitted;
+	}
+
+	PinnedToroidalFieldMap::PinnedToroidalFieldMap( ToroidalFieldMap &map,
+	                                                unsigned int degree, Pin pin )
+		: map( map ), degree( degree ), pin( std::move( pin ) )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: a degree-zero g^2 has no q "
+				"condition to give way" );
+		if ( !std::isfinite( this->pin.value ) || this->pin.value == 0.0 )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: the pinned value must be finite "
+				"and non-zero" );
+		if ( this->pin.kind == ScalePin::EdgeField && !( this->pin.value > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: g on the boundary is pinned as a "
+				"magnitude, so it must be positive; its sign is q's (see "
+				"section 3)" );
+		if ( this->pin.kind != ScalePin::EdgeField && !this->pin.measured )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: a current or flux pin is a row of "
+				"the outer system and needs the solved state's own value" );
+		if ( !( this->pin.weight > 0.0 ) || !std::isfinite( this->pin.weight ) )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: the pin row's weight must be "
+				"positive" );
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::unknowns(
+		std::vector<double> const &coefficients ) const
+	{
+		if ( coefficients.size() != degree + 1 )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap::unknowns: the coefficients are not "
+				"of this degree" );
+		if ( pin.kind == ScalePin::EdgeField )
+			return std::vector<double>( coefficients.begin() + 1, coefficients.end() );
+		return coefficients;
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::coefficients(
+		std::vector<double> const &unknowns ) const
+	{
+		if ( pin.kind != ScalePin::EdgeField )
+			return unknowns;
+		std::vector<double> out;
+		out.reserve( unknowns.size() + 1 );
+		out.push_back( pin.value*pin.value );
+		out.insert( out.end(), unknowns.begin(), unknowns.end() );
+		return out;
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::operator()(
+		std::vector<double> const &unknowns )
+	{
+		/*
+		 * A REFUSAL POINTS BACK AT THE LAST ADMISSIBLE POINT, as the free
+		 * map's does and for its reason: finite, large where the iterate has
+		 * wandered, zero nowhere but at a point that really was evaluated.
+		 */
+		auto refuse = [ & ]
+		{
+			std::vector<double> out( unknowns.size() );
+			for ( std::size_t i = 0; i < unknowns.size(); ++i )
+				out[ i ] = lastGood.size() == unknowns.size()
+				           ? lastGood[ i ] : unknowns[ i ] - 1.0;
+			return out;
+		};
+
+		std::vector<double> const c = coefficients( unknowns );
+		int const refusedBefore = map.refusals();
+		std::vector<double> const image = map( c );
+		if ( map.refusals() != refusedBefore )
+			return refuse();
+
+		double measured = 0.0;
+		if ( pin.kind != ScalePin::EdgeField )
+		{
+			try
+			{
+				measured = pin.measured();
+			}
+			catch ( ... )
+			{
+				return refuse();
+			}
+			if ( !std::isfinite( measured ) )
+				return refuse();
+		}
+
+		/*
+		 * THE FIT'S ORTHONORMAL COORDINATES, on the labels this step was fitted
+		 * on -- the same Vandermonde in the SOURCE's Psi that
+		 * fitToroidalFieldSquared() solves, so `y = R c` is the coefficient
+		 * vector's own discrete L2 coordinate over the surfaces.
+		 */
+		std::vector<double> const &label = map.lastLabels();
+		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
+		Eigen::MatrixXd design( static_cast<Eigen::Index>( label.size() ), terms );
+		for ( std::size_t i = 0; i < label.size(); ++i )
+		{
+			double power = 1.0;
+			for ( Eigen::Index j = 0; j < terms; ++j )
+			{
+				design( static_cast<Eigen::Index>( i ), j ) = power;
+				power *= 1.0 - label[ i ];
+			}
+		}
+		Eigen::HouseholderQR<Eigen::MatrixXd> const qr( design );
+		Eigen::MatrixXd const r =
+			Eigen::MatrixXd( qr.matrixQR().topRows( terms ).triangularView<Eigen::Upper>() )
+			/std::sqrt( static_cast<double>( label.size() ) );
+
+		Eigen::VectorXd difference( terms );
+		for ( Eigen::Index j = 0; j < terms; ++j )
+			difference( j ) = image[ static_cast<std::size_t>( j ) ]
+			                  - c[ static_cast<std::size_t>( j ) ];
+		Eigen::VectorXd const y = r*difference;
+
+		// y_d GIVES WAY: rows y_0 .. y_{d-1}, and the pin's row after them.
+		std::vector<double> residual( static_cast<std::size_t>( terms - 1 ) );
+		for ( Eigen::Index j = 0; j + 1 < terms; ++j )
+			residual[ static_cast<std::size_t>( j ) ] = y( j );
+		if ( pin.kind != ScalePin::EdgeField )
+			residual.push_back( pin.weight*( measured - pin.value )/pin.value );
+
+		/*
+		 * THE FLOOR. Each fit row is a combination of the map's coefficients
+		 * with the weights of R's row, so its noise is at most the row sum
+		 * times the map's floor; the pin row carries the solve's relative
+		 * accuracy with toroidalMapFloor()'s four standard deviations of four.
+		 */
+		double rowSum = 0.0;
+		for ( Eigen::Index i = 0; i + 1 < terms; ++i )
+			rowSum = std::max( rowSum, r.row( i ).cwiseAbs().sum() );
+		lastFloor = rowSum*map.floor();
+		if ( pin.kind != ScalePin::EdgeField )
+			lastFloor = std::max( lastFloor, pin.weight*16.0*map.solveAccuracy() );
+
+		lastGood = unknowns;
+		measuredValue = measured;
+		std::vector<double> out( unknowns.size() );
+		for ( std::size_t i = 0; i < unknowns.size(); ++i )
+			out[ i ] = unknowns[ i ] + residual[ i ];
+		return out;
 	}
 
 	std::vector<double> monotoneSlopes( std::vector<double> const &x,
