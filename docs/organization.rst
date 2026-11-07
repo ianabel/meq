@@ -229,7 +229,7 @@ Naming conventions
 That last row is a deliberate mismatch with the C++ rule, inherited from a
 sibling project's convention set. **Do not reconcile the two.**
 
-The style is tab indentation, Allman braces, C++17.
+The style is tab indentation, Allman braces, C++23.
 
 .. note::
 

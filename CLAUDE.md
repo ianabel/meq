@@ -576,7 +576,7 @@ beside the tests that produce them, because a measurement in a manual goes stale
 silently. A live trap a user meets ("freegs4e's docstring says normalised flux
 and is wrong") belongs in both.
 
-**Style** follows MaNTA: **tabs**, Allman braces, C++17.
+**Style** follows MaNTA: **tabs**, Allman braces, C++23 (host and device, as MaNTA builds).
 
 | | |
 |---|---|

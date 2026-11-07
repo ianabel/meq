@@ -1,7 +1,7 @@
 Building MEQ
 ============
 
-MEQ is a C++17 library and a single executable. It is built with CMake and
+MEQ is a C++23 library and a single executable. It is built with CMake and
 depends on a development branch of MFEM; everything else is either vendored, or
 optional, or a package your distribution already has.
 
@@ -17,7 +17,7 @@ What you need
    * - Dependency
      - Required?
      - Notes
-   * - A C++17 compiler
+   * - A C++23 compiler
      - yes
      - Developed against recent GCC. No compiler extensions are used.
    * - CMake ≥ 3.20
