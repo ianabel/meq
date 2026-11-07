@@ -1289,6 +1289,40 @@ The giving-up is built; what is left is the crawls it exposed.
 
 
 ================================================================================
+machine-c-mast's first support sweep: a crawl that the last bit decides
+Raised 2026-11-07.
+================================================================================
+
+  Found by the memcheck campaign (runs/memcheck/7e4253a-par/). Natively,
+  examples/machine-c-mast.toml converges and exits 0: the plasma support's
+  sweep 0 takes 23 Newton iterations from the warm start, then 6, 4, 3. Under
+  valgrind it exits 2: sweep 0 starts from the same ||r_0|| = 2.842906e+02,
+  agrees for a few steps, then stalls near 1.2e2, and the Picard-then-Newton
+  fallback ends on the X-point relocation cap (a trial 0.122993 m from the
+  seed against a cap of 0.122500 m).
+
+  NOT A MEMORY DEFECT. Memcheck reports 0 errors, and valgrind's no-op tool
+  (--tool=none) reproduces the failure to every printed digit. Natively the run
+  is unmoved by OMP_NUM_THREADS = 4, 2, 1 and by MKL_ENABLE_INSTRUCTIONS =
+  AVX2, AVX, SSE4_2. What valgrind changes is its arithmetic: x87 long double
+  runs at 64 bits, and Boost.Math promotes double to long double by default --
+  Coils.cpp turns promotion off, ExteriorDtN.cpp's legendre_p and Zernike.cpp's
+  jacobi do not, and this case runs 10 Gegenbauer modes. That is the
+  hypothesis, unmeasured.
+
+  WHY IT IS AN ENTRY. A first sweep that takes 23 steps is a crawl ("Bordered
+  solves that CRAWL", above), and a perturbation at the last bit of a special
+  function moves it to another outcome. machine-c-mast-shaped exits 2 natively
+  too (112 s), and machine-d-tcv (269 s); neither was run under memcheck
+  (over the 60 s budget). Closes: sweep 0's residual history printed natively
+  (the driver prints only a failed sweep's), and either the crawl explained and
+  removed, or the case shown to sit beside a fold of the support iteration with
+  a check that says so. A one-key confirmation of the hypothesis first:
+  promote_double<false> on ExteriorDtN's legendre_p, and the run under
+  --tool=none again.
+
+
+================================================================================
 Left open by the single-precision round (MEASUREMENTS.md M-301 to M-312)
 Raised 2026-10-22. Each item is measured; the adaptive crawl in item 3 and
 TCV shaped's branch in item 5 each take a suite case red, in single.
