@@ -614,7 +614,12 @@ are not that equation, so the race poses the fixed point they converge to:
   * **`Δ( Ψ )` converges to `0.7`, and then crawls**: 12 Newton steps at
     `0.9`, 23 at `0.95`, and no convergence at `0.99`. That is a defect, open
     in `TODO`, and not the operator's: the bump shares its `1 − Δ` and
-    converges.
+    converges. **Not the Jacobian and not a fold** →
+    **[M-ANISO-2](MEASUREMENTS.md#m-aniso-2)**: the bordered direction is
+    exact along every step of the crawl, label columns included, and
+    continuation in `δ₀` reaches 0.99 in undamped steps. The line search walks
+    exact steps whose curvature, through the boundary label's column, reaches
+    3·10⁴ times the bump's.
 * **AN-6c — GF1's working point, the closure on it, and the size of `Δ`.**
   * **GF1's isotropic equilibrium from geq's front end**:
     `tools/gf1_scan_points.py 1.0`, power balanced, at geq's and freegs4e's

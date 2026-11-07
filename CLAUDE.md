@@ -193,10 +193,10 @@ moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
-(`TODO`, the single-precision round). It also adds three suites never
-qualified in single: `AnisotropicConvergence` and `AnisotropicMirror`
-(`TODO`, *Anisotropic pressure*) and `RotatingMirrorBorder`'s differenced
-control for the following `τ` (`TODO`, the single-precision round, item 6). The
+(`TODO`, the single-precision round). It also adds one suite never
+qualified in single, `RotatingMirrorBorder`'s differenced control for the
+following `τ` (`TODO`, the single-precision round, item 6); the anisotropic
+suites are qualified (→ **[M-ANISO-1](MEASUREMENTS.md#m-aniso-1)**). The
 wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
 whole on purpose) and then `naming` (one single-threaded clang-tidy run).
 **A suite time is a measurement only on an idle machine**; identical code has
