@@ -1221,6 +1221,16 @@ namespace
 				                      mfem::Vector const &x, bool isFinal ) override
 				{
 					stage( "newton.iterate", it, x );
+					// THE LAST ITERATE WHOSE RESIDUAL WAS FINITE. NewtonSolver
+					// refuses a non-finite norm by MFEM_VERIFY at the top of
+					// its loop, BEFORE the monitor sees it, leaving that
+					// iterate in the unknown; the plain Newton path puts this
+					// one back and says what happened (lastFiniteIterate()).
+					if ( !isFinal && std::isfinite( static_cast<double>( norm ) ) )
+					{
+						lastFinite = x;
+						lastFiniteStep = it;
+					}
 					// AFTER MonitorResidual(), which NewtonSolver calls first with
 					// the same iterate, so the history already ends at `norm`.
 					if ( roundOffGate > 0.0 && !isFinal && !converged )
@@ -1274,6 +1284,18 @@ namespace
 
 				bool stoppedAtRoundOff = false;
 
+				/// The last iterate the monitor saw with a finite residual, and
+				/// its step; empty, and -1, before the first.
+				mfem::Vector const &lastFiniteIterate() const
+				{
+					return lastFinite;
+				}
+
+				int lastFiniteIteration() const
+				{
+					return lastFiniteStep;
+				}
+
 			private:
 
 				/// One probe, labelled with its iteration so two transcripts
@@ -1297,6 +1319,8 @@ namespace
 				double gateRelative = 0.0;
 				bool gateOnFirst = false;
 				int maxIterations = 0;
+				mfem::Vector lastFinite;
+				int lastFiniteStep = -1;
 		};
 	}
 
@@ -19114,7 +19138,70 @@ namespace
 			// the KINSOL paths, where ShiftedResidual has already done so. The
 			// unknown is `solution` entire under NPC and the trace alone under
 			// the condensation.
-			nonlinear->Mult( newtonRhs, unknown );
+			/*
+			 * A DIVERGING ITERATION IS MEQ'S FAILURE TO REPORT, NOT MFEM'S.
+			 * NewtonSolver refuses a non-finite residual norm by MFEM_VERIFY,
+			 * an mfem::ErrorException that no caller of solve() expects and
+			 * that leaves the non-finite iterate in the unknown. Single
+			 * precision overflows a diverging Newton within the budget where
+			 * double does not (AnisotropicConvergence's firehose refusal: the
+			 * residual reaches 1.3e+06 at step 17 and then inf), so the same
+			 * divergence reached the anisotropy's named refusal in one format
+			 * and an MFEM verification in the other. Here it is the runtime
+			 * error a budget spent is, with the last iterate whose residual was
+			 * finite put back, so that solveChecked() checks a Delta that reads
+			 * psi on THAT iterate rather than on a NaN. Told apart from any
+			 * other MFEM error by the iterate left behind, or its residual,
+			 * holding a non-finite entry. MEASUREMENTS.md M-ANISO-1.
+			 */
+			try
+			{
+				nonlinear->Mult( newtonRhs, unknown );
+			}
+			catch ( mfem::ErrorException const & )
+			{
+				// Entry by entry, on the host and on this path out only:
+				// Vector::Norml2() is the scaled l2 norm, which skips a NaN
+				// entry (it compares against the running scale) and so reads
+				// a NaN residual as finite, and Dot() overflows to inf where
+				// every entry is finite. NewtonSolver's norm is the latter.
+				auto allFinite = []( mfem::Vector const &v )
+				{
+					mfem::real_t const *const data = v.HostRead();
+					for ( int i = 0; i < v.Size(); ++i )
+						if ( !std::isfinite( static_cast<double>( data[ i ] ) ) )
+							return false;
+					return true;
+				};
+				bool diverged = !allFinite( unknown );
+				if ( !diverged )
+				{
+					try
+					{
+						mfem::Vector left( residualOperator.Height() );
+						residualOperator.Mult( unknown, left );
+						diverged = !allFinite( left )
+						           || !std::isfinite( static_cast<double>( mfem::InnerProduct( left, left ) ) );
+					}
+					catch ( ... )
+					{
+						diverged = false;
+					}
+				}
+				mfem::Vector const &kept = recorder.lastFiniteIterate();
+				if ( !diverged || kept.Size() != unknown.Size() )
+					throw;
+				unknown = kept;
+				std::ostringstream message;
+				message << "meq::GradShafranovSolver::solve: the non-linear iteration reached a"
+				        << " residual that is not finite after step " << recorder.lastFiniteIteration()
+				        << ", where it was " << ( newtonResidualHistory.empty()
+				                                  ? 0.0 : newtonResidualHistory.back() )
+				        << ". The solution holds that step's iterate, the last with a finite"
+				        << " residual";
+				newtonIterationCount = recorder.lastFiniteIteration() + 1;
+				throw std::runtime_error( message.str() );
+			}
 			newtonIterationCount = nonlinear->GetNumIterations();
 			newtonStoppedAtRoundOffValue = recorder.stoppedAtRoundOff;
 			newtonTargetValue = coldReference >= 0.0
