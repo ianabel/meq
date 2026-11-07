@@ -280,6 +280,13 @@ set(MEQ_CONVERGENCE_TESTS
 	# length converges on an open curve while a periodic basis cannot.
 	OpenSurfaces
 	SafetyFactorSolver
+	# What fixes the scale of a q-driven equilibrium: the outer Jacobian along
+	# the continuum of equilibria with the same p( Psi_N ) and q( Psi_N ), and
+	# what holding psi_ax does to it (M-FIX-2).
+	SafetyFactorScale
+	# The q-driven loop on a curved fixed boundary, whose outer surfaces lie in
+	# the band: a round trip on a Miller boundary.
+	QDrivenCurvedBoundary
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves
@@ -325,6 +332,12 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 			ENVIRONMENT "MKL_NUM_THREADS=1")
 	endif()
 endforeach()
+
+# SafetyFactorScale reads its Jacobians' singular values with Eigen, which
+# meq_core requires anyway.
+if(TARGET SafetyFactorScale)
+	target_link_libraries(SafetyFactorScale PRIVATE Eigen3::Eigen)
+endif()
 
 # THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's
 # confined control again, under an mfem::Device that MEQ_TEST_DEVICE configures

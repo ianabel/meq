@@ -427,6 +427,66 @@ Part (a) closed the same day.
   run has no g and its file correctly says so by having no variable.
 
 ================================================================================
+The q-driven solve leaves the equilibrium's scale to the degree of g^2
+Raised 2026-11-07, on fix/q-driven-band (MEASUREMENTS.md M-FIX-2). To be FIXED
+in the pure q-solve -- psi_ax free, q given -- and not by holding psi_ax.
+================================================================================
+
+  WHAT IS ESTABLISHED. Fixed-boundary equilibria with the same p( Psi_N ) and
+  q( Psi_N ) form a one-parameter family in the torus as in the cylinder: it is
+  VMEC's statement that p( s ), iota( s ) and the boundary need PHIEDGE beside
+  them, and with q( Psi_N ) fixed Phi_edge = 2 pi ( psi_ax - psi_bnd )
+  int_0^1 q dPsi_N. [source] SafetyFactorFile leaves psi_ax free and fits all
+  of g^2, its edge value c_0 included, so no input selects a member.
+  SafetyFactorScale measures what does, on SafetyFactorSolver's fixture:
+
+    - the outer Jacobian G' - I at the answer has ONE near-null direction and
+      it is the scale, d ln psi_ax = 0.527 d ln c_0 ( g grows with psi_ax );
+      sigma_min/sigma_max 9.6e-05 at SafetyFactorDegree 2, 4.2e-05 at 3,
+      1.1e-06 at 4, ~1e-06 to 1e-07 at 5;
+    - held 10% along the family, the least-squares fixed point's residual
+      falls with the degree, 3.5e-03, 3.8e-03, 4.3e-04, 1.2e-04 at 2 to 5, and
+      NOT with the mesh, 1.85e-03, 1.83e-03, 1.85e-03 at n = 12, 24, 48 (5%
+      along). So the scale is pinned only by g^2's degree: neither the torus
+      nor the discretisation pins it.
+
+  EXAMPLES/q-DRIVEN.TOML IS ROBUST ONLY BECAUSE ITS TARGET IS EXACTLY
+  QUADRATIC. Its q was built from g = 2.20 + 0.55 Psi, so g^2 is a quadratic
+  and the reference is an EXACT fixed point at every degree >= 2: from
+  ToroidalFieldGuess 1.6, 2.2 and 3.0 at degrees 2, 3 and 4 the loop lands on
+  it every time (psi_ax 3.457383e-01, 3.457387e-01, 3.457438e-01 by degree).
+  A target that is not -- any measured q -- leaves the scale to the degree.
+
+  FIXED-d-TCV WITH A MEASURED q FAILS. Its MXH boundary at RefinementLevels =
+  1, the target the q of the shipped gg' run on the same mesh ( g_edge =
+  1.400002, the meta file's ), degree 2, guess 1.4: not converged -- 10 KINSOL
+  iterations, 145 map evaluations of which 19 refused, the line search stopped
+  at a residual of 0.067, outer conditioning 3.4e-08. From guess 1.2 the loop
+  was still evaluating after ~35 minutes and was stopped.
+
+  WHAT IS NOT DECIDED: THE ONE EXTRA SCALAR A PURE q-SOLVE NEEDS. Candidates,
+  each an input that selects the member, none chosen:
+
+    - the vacuum R B_phi at the boundary, g_edge -- c_0 of the fit. The same
+      key as (b) of "Report q( Psi ) in the flux-surface output" above, a
+      [source] R0 B0, which would then also make q reportable on every
+      prescribed-field run. With c_0 given, the fit has one coefficient fewer
+      than it has conditions, so one q condition (or q's overall scale) has
+      to give way to keep the system square.
+    - Phi_edge, VMEC's PHIEDGE: with q fixed it is psi_ax's span, so this is
+      holding psi_ax under another name, and in the unit a user knows.
+    - I_p. [source] PlasmaCurrent exists and makes the profile SCALE a border
+      unknown of the bordered Newton; beside SafetyFactorFile it is accepted
+      and has never been measured, and with q fixed at the edge I_p and the
+      toroidal field are tied, so whether it selects the member or fights the
+      loop is the first thing to measure.
+
+  WHAT [source] CARRIES TODAY DOES NOT DO IT. ToroidalFieldGuess is the
+  constant g the loop opens at and selects nothing (the three guesses above
+  agree to every printed digit); PsiAxis is the bordered Newton's starting
+  value; SafetyFactorDegree is what pins the scale now, by accident.
+
+================================================================================
 Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================

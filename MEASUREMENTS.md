@@ -23341,3 +23341,149 @@ Dropped on these numbers.**
 `MEQ_TAU_ELEMENT_SAMPLE=1` and `install/tau-elem`), `compare2.py`; `direct/`
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
+
+### M-FIX-1
+
+**The q-driven loop's trace solver is analysed once per solve, not once per
+loop.** `examples/q-driven.toml` at its shipped degree and guess, `meq
+--trace-solver-stats` (PARDISO), `manta/session` at `a8b0097` (main `c4ee278`
+and the session; the loop is main's), double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`:
+
+| | count |
+|---|---|
+| equilibria solved (36 map evaluations and the driver's re-solve at the answer) | 37 |
+| PARDISO reordering phases (`Summary: ( reordering phase )`) | 37 |
+| time per reordering on this 512-element box | 1.4–1.7 ms |
+
+`makeTraceSolver()` is called inside `GradShafranovSolver::solve()` (and the
+Picard path's), so the trace solver and its symbolic analysis are locals of
+one solve: reused across that solve's Newton steps —
+`NewtonConvergence::theSymbolicAnalysisIsReusedAcrossNewtonSteps` asserts one
+analysis per solve — and redone by the next. What one solver object keeps
+across the loop is the mesh, the spaces and the forms.
+
+**Reproduce.** `runs/manta-session/qdriven/`: `q-d2-g2.2.toml` (the example
+with absolute input paths), `meq --trace-solver-stats q-d2-g2.2.toml >
+stats.log`, then `grep -c "reordering phase" stats.log`.
+
+### M-FIX-2
+
+**The q-driven solve with `ψ_ax` free is pinned on the scale continuum only by
+the degree of `g²`.** (a)–(c) measured on `manta/session` at `a8b0097` and
+later (main `c4ee278` and the session; the loop and the harness are main's),
+(c)'s square system and (d) on `fix/q-driven-band` off `f3d10b2`; double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+**(a) The driver, `examples/q-driven.toml`**, `SafetyFactorDegree` ×
+`ToroidalFieldGuess` (conditioning: the run's own report, `σ_min/σ_max` worst
+over the iteration, monomial basis):
+
+| degree | guess 1.6 | guess 2.2 | guess 3.0 | KINSOL its / equilibria | conditioning | `ψ_ax` | `g` edge, axis |
+|---|---|---|---|---|---|---|---|
+| 2 | same | same | same | 5 / 36 | 6.4e-03 | 3.457383e-01 | 2.199999, 2.749999 |
+| 3 | same | same | same | 5 / 46 | 1.3e-02 | 3.457387e-01 | 2.200001, 2.750002 |
+| 4 | same | same | same | 5 / 56 | 5.2e-03 | 3.457438e-01 | 2.200032, 2.750045 |
+
+"same": the three guesses print the same `ψ_ax` and `g` to every digit shown.
+The target was built from `g = 2.20 + 0.55Ψ`, so `g²` is exactly quadratic
+and the reference is an exact fixed point at every degree ≥ 2.
+
+**(b) `fixed-d-tcv`'s MXH boundary, q-driven** (`RefinementLevels = 1`, 3993
+elements): the target is the `q` of the shipped `gg′` run on the same mesh,
+`q = V′g⟨R⁻²⟩/4π²` at 24 surfaces with `g_edge = 1.400002` (the meta file's),
+so `g²` is not polynomial. With the loop's family traced without the band,
+every map evaluation is refused (7 of 7) and the loop stops on an exactly zero
+Jacobian. With it (`Run::Impl::extractFamily()`), degree 2, guess 1.4:
+**not converged** — 10 KINSOL iterations, 145 map evaluations (19 refused),
+the line search stopped at a residual of 0.067, outer conditioning **3.4e-08**.
+From guess 1.2 the loop was still evaluating after ~35 minutes and was
+stopped.
+
+**(c) `SafetyFactorScale`**, `SafetyFactorSolver`'s fixture (box `n = 24`,
+`k = 2`, `p′ = 0.45`, `μ₀ = 1`, 12 surfaces × 96 angles, target `q` read off
+the reference at its own labels). `G′ − I` differenced centrally at the
+answer, singular values in the fit's orthonormal coordinates (`y = Rc`, `R`
+from the QR of the design matrix on the surfaces), `ψ_ax` free:
+
+| degree | step | σ_max | σ_min | ratio | near-null `δc/δc₀` | `δln ψ_ax/δln c₀` along it |
+|---|---|---|---|---|---|---|
+| 2 | 1e-3 | 25.0 | 2.39e-3 | 9.6e-05 | 1, 0.60, 0.153 | 0.527 |
+| 3 | 1e-3 | 57.5 | 2.42e-3 | 4.2e-05 | 1, 0.59, 0.172, −0.010 | 0.526 |
+| 4 | 1e-3 | 110 | 1.21e-4 | 1.1e-06 | 1, 0.62, 0.081, 0.099, −0.043 | 0.527 |
+| 5 | 1e-3 | 192 | 3.66e-4 | 1.9e-06 | | 0.527 |
+| 5 | 1e-2 | 191 | 1.77e-5 | 9.2e-08 | | 0.527 |
+
+`|G(c*) − c*|_y` 5.1e-13 at every degree. One near-null direction, and it is
+the scale: `ψ_ax ∝ g` would give exactly ½, and the family's `g` grows a little
+slower than `ψ_ax` (the `g` columns below).
+
+`ψ_ax` held at `(1 + δ)ψ_ax*`, the least-squares fixed point of
+`[R(G_S(c) − c); 10 (ψ_ax,located − S)/S]` by Gauss–Newton from `(1+δ)²c*`;
+"tall" the singular values of that `(d+2) × (d+1)` Jacobian, "q rows" of its
+square fit block alone, "α" of the square system with a source scale `α` as
+its last column:
+
+| degree | δ | fit residual | axis residual | tall σ_min | tall σ_max | q rows ratio | α ratio | `g` edge | `g` axis |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | −0.10 | 3.47e-3 | 2.2e-6 | 0.533 | 9.03 | 1.1e-3 | 4.0e-4 | 1.991740 | 2.456095 |
+| 2 | −0.05 | 1.83e-3 | 1.4e-6 | 0.531 | 8.80 | 1.1e-3 | 4.9e-4 | 2.095709 | 2.603301 |
+| 2 | 0 | 2.9e-14 | 3.5e-15 | 0.527 | 8.63 | 1.2e-3 | 5.7e-4 | 2.200000 | 2.750000 |
+| 2 | +0.05 | 2.00e-3 | −2.1e-6 | 0.521 | 8.49 | 1.3e-3 | 5.5e-4 | 2.304554 | 2.896255 |
+| 2 | +0.10 | 4.05e-3 | −5.0e-6 | 0.513 | 8.38 | 1.3e-3 | 5.6e-4 | 2.409311 | 3.042110 |
+| 3 | −0.10 | 3.78e-3 | −7.0e-7 | 0.123 | 13.6 | 2.0e-4 | 1.0e-3 | 1.991269 | 2.456053 |
+| 3 | +0.10 | 3.89e-3 | 1.1e-6 | 0.124 | 12.7 | 1.9e-4 | 8.3e-4 | 2.409802 | 3.042170 |
+| 4 | −0.10 | 4.34e-4 | 1.4e-9 | 0.0226 | 18.3 | 2.6e-6 | 6.3e-5 | 1.991839 | 2.456046 |
+| 4 | +0.10 | 4.86e-4 | 1.0e-8 | 0.0227 | 17.1 | 1.0e-5 | 3.8e-5 | 2.409311 | 3.042172 |
+| 5 | −0.10 | 1.20e-4 | −1.6e-9 | 3.7e-3 | 23.0 | 8.3e-6 | 2.3e-5 | 1.991728 | 2.456028 |
+| 5 | +0.10 | 8.01e-5 | 1.8e-9 | | | 8.6e-6 | 2.3e-5 | 2.409415 | 3.042189 |
+
+(the full table, `δ = ±0.05` at every degree, is in the reproduce directory).
+**The residual 10% along the family falls 8× from degree 2 to 4 and 29× to 5**:
+a member exists, and only the representation keeps it from being a fixed
+point. **It does not fall with the mesh**, `δ = −0.05`:
+
+| n | degree 2 | degree 3 |
+|---|---|---|
+| 12 | 1.846e-3 | 1.897e-3 |
+| 24 | 1.828e-3 | 1.884e-3 |
+| 48 | 1.853e-3 | 1.870e-3 |
+
+`g` at the edge goes with `ψ_ax` (1.9917/2.2 = 0.905 at δ = −0.1, 2.4093/2.2
+= 1.095 at +0.1). Holding `ψ_ax` lifts the smallest singular value from 2.4e-3
+to 0.53 at degree 2 (220×) and from 1.2e-4 to 0.023 at degree 4 (190×); the
+fit's `q` rows alone are near-degenerate in one direction (1e-3 to 3e-6), which
+the axis row removes; `α` beside a held `ψ_ax` is near-singular (4e-4 to
+2e-5).
+
+**Square systems with `ψ_ax` held, 10% off** (`fix/q-driven-band`): the
+least-squares system has `d + 2` rows for `d + 1` unknowns, and two ways of
+making it square were measured.
+
+| degree | free σ_min | `q = s q_target`, `s` an unknown: σ_min, ratio, `s − 1` at its root | axis row in place of fit row `y_d`: σ_min, σ_max | in place of `y_1` | in place of `y_0` |
+|---|---|---|---|---|---|
+| 2 | 2.39e-3 | 9.7e-3, 5.8e-4, −0.031 | 0.513, 8.38 | 0.017 | 0 |
+| 4 | 1.21e-4 | 1.8e-4, 6.9e-6, +0.16 (residual still 9.2e-4 after 4 Newton steps) | 0.0226, 17.1 | 3.5e-4 | 0 |
+
+**`q`'s scale beside a held `ψ_ax` is a continuum again**, no better
+conditioned than the free problem and moving `q` by 3% and 16%: any `q`
+profile has a member at every `ψ_ax`, so `s` is free exactly as `α` is. **The
+axis row in place of the highest fit row is as well conditioned as least
+squares** (the same σ_min to three digits) and 200× the free problem; in place
+of `y_0` it is exactly singular, since `c₀` enters no solve and only `y_0`
+sees it.
+
+**(d) `QDrivenCurvedBoundary`** (`fix/q-driven-band`): a Miller boundary
+(`R₀ = 1.5`, `a = 0.5`, `κ = 1.6`, `δ = 0.35`, `RefinementLevels = 1`,
+`k = 2`), `p′ = 0.45`, `μ₀ = 1`, the target the `q` of `g = 2.20 + 0.55Ψ` on
+the same mesh at 24 surfaces. With the family traced through the band: 6
+KINSOL iterations, 43 equilibria, 0 refused, `g² = 4.84000000 + 2.42000000Ψ +
+0.30250000Ψ²`. Without (the loop calling `extractFluxSurfaces( *solver, … )`):
+7 equilibria, 7 refused, conditioning 0, exit 2.
+
+**Reproduce.** `runs/manta-session/qdriven/` (`run.sh`, `q-d<d>-g<g>.toml`),
+`runs/manta-session/tcv/` (`tcv-ref.toml` with `FluxSurfaces`, `tcv-q.dat`
+made from its `_surfaces.nc` and `fixed-d-tcv-ggprime.dat`, `tcv-d2-g1.4.toml`),
+and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (asserted, ~6 minutes) — the
+tables above are its earlier, longer sweep, `runs/manta-session/scale.log`,
+`scale3.log`, `scale4.log`; the square systems `runs/manta-session/fix-scale2.log`.

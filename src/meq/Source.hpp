@@ -908,8 +908,10 @@ namespace meq
 			 * Newton on the coefficients of `g^2` re-solves the equilibrium
 			 * once per map evaluation, each time with a different `gg'`. Every
 			 * other input is unchanged, so rebuilding the source -- and with it
-			 * the solver, its spaces, its forms and its symbolic factorisation
-			 * -- would throw away everything the solve is entitled to keep.
+			 * the solver, its spaces and its forms -- would throw away what the
+			 * solve is entitled to keep. The trace solver is not among them: it
+			 * is built inside each solve(), so its symbolic analysis is reused
+			 * across that solve's Newton steps and redone by the next solve.
 			 *
 			 * The **normalisation is deliberately untouched**: `psi_ax` and
 			 * `psi_bnd` are unknowns of the bordered Newton and belong to the
