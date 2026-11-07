@@ -440,7 +440,7 @@ open fixture:
    spaces and the forms survive, and each solve is warm-started from the last.
    The trace solver's symbolic factorisation does not survive: it is built
    inside each solve and reused only across that solve's Newton steps, one
-   reordering per map evaluation (→ **[M-SESSION-1](MEASUREMENTS.md#m-session-1)**).
+   reordering per map evaluation (→ **[M-352](MEASUREMENTS.md#m-352)**).
 
    **What is left is the fixture**: it is a rectangle with one closed plasma
    rather than a machine, and nothing has driven `q` on the limited tokamak,

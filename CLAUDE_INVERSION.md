@@ -429,7 +429,7 @@ of `solve()` (`makeTraceSolver()` inside it), so its symbolic analysis is reused
 across one solve's Newton steps — what `theSymbolicAnalysisIsReusedAcrossNewtonSteps`
 asserts, one analysis per solve — and redone by the next: 37 PARDISO reorderings
 for the 37 solves of `q-driven.toml`
-(→ **[M-SESSION-1](MEASUREMENTS.md#m-session-1)**). **The normalisation is deliberately not reset
+(→ **[M-352](MEASUREMENTS.md#m-352)**). **The normalisation is deliberately not reset
 by that setter**: `ψ_ax` and `ψ_bnd` are unknowns of the bordered Newton and
 belong to the solve rather than to the profile.
 
@@ -465,11 +465,13 @@ scale (`g ∝ ψ_ax`), with `σ_min/σ_max` 1e-4 at degree 2 falling to ~1e-6 at
 degree 4. What isolates the fixed point is that a polynomial of degree `d`
 cannot follow the family: held 10% along it, the least-squares residual falls
 from 3.5e-3 at degree 2 to 1.2e-4 at degree 5 and does not move with the mesh
-(`SafetyFactorScale`, → **[M-SESSION-2](MEASUREMENTS.md#m-session-2)**). **The
+(`SafetyFactorScale`, → **[M-353](MEASUREMENTS.md#m-353)**). **The
 example converges, from any `ToroidalFieldGuess`, because its target was built
 from an exactly quadratic `g²`**, so the reference is an exact fixed point at
 every degree; a target that is not — any measured `q` — is left to the degree.
-Holding `ψ_ax` is what makes it well posed (`MANTA-EQUILIBRIUM-PLAN.md`, D1).
+The pure q-solve needs one more scalar to select the member — `TODO`, *The
+q-driven solve leaves the equilibrium's scale to the degree of `g²`*, names the
+candidates; `manta/design`'s plan holds `ψ_ax` for MaNTA instead.
 
 **A CURVED BOUNDARY'S FAMILY IS TRACED THROUGH THE BAND, AND THE LOOP'S HAS TO
 BE TOO.** `Ω_h` is inscribed in `Γ`, so the outer surfaces of a curved
@@ -477,8 +479,11 @@ fixed-boundary run lie partly outside the mesh; the write phase continues the
 field there by the transfer lift, and the loop must as well: traced without
 it, every family on `fixed-d-tcv`'s MXH boundary fails at its outer surfaces,
 every map evaluation is refused, and the loop stops on a Jacobian of exactly
-zero. Both go through `Run::Impl::extractFamily()`. Posed there with a
-measured `q`, the loop runs, and fails on the scale (M-SESSION-2).
+zero. Both go through `Run::Impl::extractFamily()`. `QDrivenCurvedBoundary`
+is the round trip on a Miller boundary, the target measured from a closed-form
+`g` on the same mesh: 6 KINSOL iterations, 43 equilibria, `g²` recovered to
+eight digits. Posed on `fixed-d-tcv` with a measured `q`, the loop runs, and
+fails on the scale (M-353).
 
 **WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a
 rectangle with one closed plasma rather than a machine, and nothing has yet

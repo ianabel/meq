@@ -608,7 +608,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# `-forward-unknown-to-host-compiler` and `--generate-code=...` are all
 	# `unknown argument` to it, and `__clang_cuda_runtime_wrapper.h` then fails
 	# to find `texture_fetch_functions.h`. Sixteen errors, and a file that does
-	# not parse has not been checked -- so the `naming` test must skip these five
+	# not parse has not been checked -- so the `naming` tests must skip these five
 	# rather than report a pass it did not earn. EMPTY unless a device language
 	# was actually enabled, so the CI build checks them like anything else.
 	set(MEQ_CORE_SOURCES_DEVICE_LANGUAGE "")

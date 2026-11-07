@@ -149,7 +149,7 @@ exactly tiers 0 and 1; nothing needs MaNTA's tier 2.
 builds its trace solver (`makeTraceSolver()` inside `solve()`) and resets the
 count, and `NewtonConvergence::theSymbolicAnalysisIsReusedAcrossNewtonSteps`
 asserts one analysis per solve; the q-driven loop pays one reordering per map
-evaluation, 37 for `q-driven.toml`'s 37 solves (→ M-SESSION-1). A resolve pays
+evaluation, 37 for `q-driven.toml`'s 37 solves (→ M-352). A resolve pays
 the same, plus the solver's construction (§4.1).
 
 ## 3. The map, and its derivative
@@ -558,7 +558,7 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   nearly so, and imply `⟨E·B⟩ ∝ α̇/α`, outside RoPP's ordering — so there is
   none. Free boundary, where `ψ_bnd` moves too, comes after.
 
-  **The torus check, done on `manta/session` (→ M-SESSION-2).** The continuum
+  **The torus check, done on `manta/session` (→ M-353).** The continuum
   is there in the torus too — it is VMEC's statement that `p(s)`, `ι(s)` and
   the boundary need `PHIEDGE` beside them, and with `q(Ψ_N)` fixed
   `Φ_edge = 2π (ψ_ax − ψ_bnd) ∫q dΨ_N`, so the free scalar is `ψ_ax` — and
