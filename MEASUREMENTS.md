@@ -23353,31 +23353,6 @@ across the loop is the mesh, the spaces and the forms.
 with absolute input paths), `meq --trace-solver-stats q-d2-g2.2.toml >
 stats.log`, then `grep -c "reordering phase" stats.log`.
 
-### M-SESSION-3
-
-**`Run::resolve()` against the cold solve and against PY-3's file restart.**
-`RunSession`, `examples/rotating-normalised.toml` (768 elements, `k = 2`,
-`NewtonRelativeTolerance = 1e-10`), `manta/session` at `a8b0097`, double,
-`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a machine at load ~20 — read the
-ratio, not the seconds:
-
-| case | result |
-|---|---|
-| unchanged tables, warm from the run's own state | 0 Newton steps; state, `ψ_ax` and every surface's `V'` the same bits |
-| `Omega` 10% up, warm, against a cold solve of the same tables | 1.5e-14 of the state's max apart, `ψ_ax` 2.6e-16; 4 Newton steps against 6 |
-| the same resolve against a new run restarted from the `.nc` with the same tables | the same bits, state and `ψ_ax`; the same step count |
-| `Omega` at 3e6, which does not solve | exit 2; `snapshot()` and `dataset()` the same objects; the restart file written after it equal to the one before, every variable byte for byte |
-| tables A, then B, then A warm from the first state | the same bits as the first A |
-| a 0.1% `Omega` step, mean of 4, from the same state | resolve 0.295 s, file restart 0.475 s: **1.61×** |
-
-The file restart pays a whole `prepare()` — configuration, mesh, spaces — and
-a `.nc` each way; the resolve pays one solver construction, the solve, and
-nothing else. Mutation: leaving the solver out of `SolvedState`'s swap makes
-the failed-resolve case fail on `psi`, `B_R`, `B_Z` and the densities.
-
-**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./RunSession`; it
-writes `RunSession-files/` in its working directory.
-
 ### M-SESSION-2
 
 **D1's torus check: the q-driven solve with `ψ_ax` free is pinned on the scale
@@ -23469,6 +23444,31 @@ made from its `_surfaces.nc` and `fixed-d-tcv-ggprime.dat`, `tcv-d2-g1.4.toml`),
 and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (asserted, short) — the tables
 above are its earlier, longer sweep, `runs/manta-session/scale.log`,
 `scale3.log`, `scale4.log`.
+
+### M-SESSION-3
+
+**`Run::resolve()` against the cold solve and against PY-3's file restart.**
+`RunSession`, `examples/rotating-normalised.toml` (768 elements, `k = 2`,
+`NewtonRelativeTolerance = 1e-10`), `manta/session` at `a8b0097`, double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a machine at load ~20 — read the
+ratio, not the seconds:
+
+| case | result |
+|---|---|
+| unchanged tables, warm from the run's own state | 0 Newton steps; state, `ψ_ax` and every surface's `V'` the same bits |
+| `Omega` 10% up, warm, against a cold solve of the same tables | 1.5e-14 of the state's max apart, `ψ_ax` 2.6e-16; 4 Newton steps against 6 |
+| the same resolve against a new run restarted from the `.nc` with the same tables | the same bits, state and `ψ_ax`; the same step count |
+| `Omega` at 3e6, which does not solve | exit 2; `snapshot()` and `dataset()` the same objects; the restart file written after it equal to the one before, every variable byte for byte |
+| tables A, then B, then A warm from the first state | the same bits as the first A |
+| a 0.1% `Omega` step, mean of 4, from the same state | resolve 0.295 s, file restart 0.475 s: **1.61×** |
+
+The file restart pays a whole `prepare()` — configuration, mesh, spaces — and
+a `.nc` each way; the resolve pays one solver construction, the solve, and
+nothing else. Mutation: leaving the solver out of `SolvedState`'s swap makes
+the failed-resolve case fail on `psi`, `B_R`, `B_Z` and the densities.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./RunSession`; it
+writes `RunSession-files/` in its working directory.
 
 ### M-SESSION-4
 
