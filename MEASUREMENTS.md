@@ -23470,6 +23470,17 @@ flux it is the remainder of, 1.566 — RotatingMirror's card-against-host
 argument. Single asserts `scalarAgreementFloor()` of the total, 64 `eps`,
 1.2e-05; a load dropped by the law is `O( ψ_c )`.
 
+**4. Inventories**, `ctest -j3` at `OMP_NUM_THREADS = 2`, `MEQ_PYTHON = OFF`
+(so 92 tests where `builds/double` has 96 with its four Python suites):
+
+| | before, `builds/{single,double}.tip828` | after, `aniso-single` at `2651b69` |
+|---|---|---|
+| single | `PlasmaEdgeConvergence`, `DriverAcceptance`, `AnisotropicConvergence`, `AnisotropicMirror`, `RotatingMirrorBorder` | `PlasmaEdgeConvergence`, `DriverAcceptance` (the same three cases), `RotatingMirrorBorder` (the same case) |
+| double | `PlasmaEdgeConvergence` | `PlasmaEdgeConvergence` |
+
+`AnisotropicConvergence`'s double output, every test case but the timings,
+is the reference binary's to the character.
+
 ### M-ANISO-2
 
 **`Δ( Ψ )`'s CRAWL ON THE MESHED MIRROR (M-339) IS NOT THE JACOBIAN AND NOT A
