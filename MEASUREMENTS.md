@@ -23563,7 +23563,7 @@ its iteration count; the family carries the axis element.
 departure of a second difference in its `±1e-3` scan, and the node whose
 position has the largest second difference there:
 
-| case, input | jump | node | its element across the jump | the node's position step |
+| case, input | jump | node | its element across the jump | the node's position, second difference |
 |---|---|---|---|---|
 | box, `Omega` | 1.31e-5 of `⟨|∇ρ|²⟩`@0.975 | surface 23, node 24 | 763 → 761 | 2.99e-5 m |
 | box, density | 1.30e-5 of `⟨|∇ρ|²⟩`@0.975 | surface 23, node 24 | 761 → 763 | 2.99e-5 m |
@@ -23573,8 +23573,9 @@ position has the largest second difference there:
 On TCV the node barely moves, so the jump is in its weight — the `q*` jump at
 the face, as M-308b found. Over all four scans the axis element never changes
 (423 on the box, 2015 on TCV), no band face and no band mask changes (TCV has
-77 band nodes), and the traced contour's point count changes once at most per
-surface without a jump.
+77 band nodes), and the traced contour's point count, which seeds every ray's
+guess, changes on one surface in two of the scans; (b) finds no jump that is
+not a crossing.
 
 **(b) Every jump, every surface, and how it scales** — `ExtractionJumps`:
 `Omega` scaled by `1 + j·1e-4`, `j = −10 … 10`, all 24 surfaces × 128 angles,
