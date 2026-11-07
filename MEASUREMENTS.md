@@ -1,3 +1,25 @@
+**(d) `QDrivenCurvedBoundary`** (`fix/q-driven-band`): a Miller boundary
+(`R₀ = 1.5`, `a = 0.5`, `κ = 1.6`, `δ = 0.35`, `k = 2`), `p′ = 0.45`,
+`μ₀ = 1`, the target the `q` of `g = 2.20 + 0.55Ψ` on the same mesh at 24
+surfaces. At `RefinementLevels = 1` with the family traced through the band: 6
+KINSOL iterations, 43 equilibria, 0 refused, `g² = 4.84000000 + 2.42000000Ψ +
+0.30250000Ψ²`; at `RefinementLevels = 0`, the suite's, 29 equilibria and the
+same eight digits. Without the band (the loop calling
+`extractFluxSurfaces( *solver, … )`), at either level: 7 equilibria, 7
+refused, conditioning 0, exit 2.
+
+**WHAT THE SUITE REPRODUCES AND WHAT WAS MEASURED ONCE.** `SafetyFactorScale`
+asserts on `n = 12` at degrees 2 and 4, and on the mesh pair `n = 12, 18`; the
+tables above at `n = 24`, degrees 3 and 5, `n = 48`, the driver sweeps (a),
+fixed-d-tcv (b), and the root of the square system with `s` floating are the
+longer study, measured once. The suite's own numbers, `n = 12`:
+
+| degree | free σ_min, ratio, `δln ψ_ax/δln c₀` | held 10%: residual | least squares σ_min, σ_max | axis row for `y_d` | `α` ratio | `s` σ_min, ratio |
+|---|---|---|---|---|---|---|
+| 2 | 2.90e-3, 1.2e-4, 0.527 | 3.84e-3 | 0.513, 8.38 | 0.513 | 5.3e-4 | 9.0e-3, 5.2e-4 |
+| 4 | 3.56e-4, 3.2e-6, 0.527 | 4.11e-4 | 0.0227, 17.1 | 0.0226 | 2.3e-5 | 2.6e-4, 1.2e-5 |
+
+(the `s` columns at the least-squares point, where they cost no solve).
 # MEQ's published tables
 
 **Every number MEQ claims, in one place.** These are MEQ's measurement tables,
@@ -23342,7 +23364,7 @@ Dropped on these numbers.**
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
 
-### M-FIX-1
+### M-352
 
 **The q-driven loop's trace solver is analysed once per solve, not once per
 loop.** `examples/q-driven.toml` at its shipped degree and guess, `meq
@@ -23367,7 +23389,7 @@ across the loop is the mesh, the spaces and the forms.
 with absolute input paths), `meq --trace-solver-stats q-d2-g2.2.toml >
 stats.log`, then `grep -c "reordering phase" stats.log`.
 
-### M-FIX-2
+### M-353
 
 **The q-driven solve with `ψ_ax` free is pinned on the scale continuum only by
 the degree of `g²`.** (a)–(c) measured on `manta/session` at `a8b0097` and
@@ -23484,6 +23506,6 @@ KINSOL iterations, 43 equilibria, 0 refused, `g² = 4.84000000 + 2.42000000Ψ +
 **Reproduce.** `runs/manta-session/qdriven/` (`run.sh`, `q-d<d>-g<g>.toml`),
 `runs/manta-session/tcv/` (`tcv-ref.toml` with `FluxSurfaces`, `tcv-q.dat`
 made from its `_surfaces.nc` and `fixed-d-tcv-ggprime.dat`, `tcv-d2-g1.4.toml`),
-and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (asserted, ~6 minutes) — the
-tables above are its earlier, longer sweep, `runs/manta-session/scale.log`,
-`scale3.log`, `scale4.log`; the square systems `runs/manta-session/fix-scale2.log`.
+and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (the suite's, above) — the
+longer study is `runs/manta-session/scale.log`, `scale3.log`, `scale4.log`, and
+the square systems `runs/manta-session/fix-scale2.log`.

@@ -3888,7 +3888,7 @@ int meq::Run::Impl::solve()
 		 * lets them. The trace solver's symbolic analysis does NOT: the trace
 		 * solver is a local of each solve(), reused across that solve's Newton
 		 * steps only -- one reordering per map evaluation, MEASUREMENTS.md
-		 * M-FIX-1.
+		 * M-352.
 		 * The warm start comes for free with the solver -- each solve begins
 		 * from the last one's field, which is what makes the later steps of the
 		 * loop cheap.
@@ -6623,7 +6623,7 @@ meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions con
 	// AND THE q-DRIVEN LOOP NEEDS IT AS MUCH AS THE FILE DOES: traced
 	// without it, every family of a curved fixed boundary fails at its
 	// outer surfaces, so every map evaluation of the loop is refused and
-	// the outer Jacobian comes back exactly zero (M-FIX-2).
+	// the outer Jacobian comes back exactly zero (M-353).
 	if ( gammaHMarker && path )
 		tracer.setBandExtension( meq::BandExtension::TransferLift,
 		                         *gammaHMarker, path.get() );

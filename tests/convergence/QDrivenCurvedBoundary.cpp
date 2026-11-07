@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE QDrivenCurvedBoundary
 #include <boost/test/unit_test.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -22,7 +23,7 @@
  * through the band by the transfer lift; the q-driven loop's map must too, or
  * every family fails at its outer surfaces, every map evaluation is refused,
  * and the outer Newton stops on an exactly zero Jacobian (MEASUREMENTS.md
- * M-FIX-2) -- so a q-driven run could not be posed on any machine shape.
+ * M-353) -- so a q-driven run could not be posed on any machine shape.
  *
  * The round trip q-driven.toml makes on its box, made on a Miller boundary:
  * an equilibrium from a closed-form g = 2.20 + 0.55 Psi, its q measured on
@@ -39,7 +40,8 @@ namespace
 	{
 		return
 			"[mesh]\nRMin = 0.7\nRMax = 2.3\nZMin = -1.9\nZMax = 1.9\nNR = 8\nNZ = 10\n"
-			"RefinementLevels = 1\n\n"
+			// Unrefined: 29 equilibria, and the band is the same band.
+			"RefinementLevels = 0\n\n"
 			"[discretisation]\nPolynomialDegree = 2\nTau = 1.0\n\n"
 			"[source]\nType = \"mhd\"\nNormalised = true\nPsiAxis = 0.3\nMu0 = 1.0\n"
 			"PPrimeFile = \"curved-pprime.dat\"\n" + toroidal + "\n"
@@ -87,6 +89,8 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversItsFieldOnACurvedBoundary )
 	}
 
 	// ---- the reference and its q, on this mesh ------------------------------
+	using Clock = std::chrono::steady_clock;
+	Clock::time_point const started = Clock::now();
 	auto reference = run( configuration( "curved-reference", "GGPrimeFile = \"curved-ggprime.dat\"\n" ),
 	                      directory );
 	BOOST_TEST_REQUIRE( reference->prepare() == meq::Solved );
@@ -124,7 +128,11 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversItsFieldOnACurvedBoundary )
 		"SafetyFactorFile = \"curved-q.dat\"\nSafetyFactorDegree = 2\n"
 		"ToroidalFieldGuess = 2.2\n" ), directory );
 	BOOST_TEST_REQUIRE( driven->prepare() == meq::Solved );
+	Clock::time_point const loop = Clock::now();
 	int const code = driven->solve();
+	std::printf( "\n  wall: the reference and its target %.1f s, the q-driven solve %.1f s\n",
+	             std::chrono::duration<double>( loop - started ).count(),
+	             std::chrono::duration<double>( Clock::now() - loop ).count() );
 	BOOST_TEST_REQUIRE( code == meq::Solved,
 		"the q-driven run on a curved boundary exits " << code << ": if every map "
 		"evaluation was refused, its families are traced without the band "

@@ -282,7 +282,7 @@ set(MEQ_CONVERGENCE_TESTS
 	SafetyFactorSolver
 	# What fixes the scale of a q-driven equilibrium: the outer Jacobian along
 	# the continuum of equilibria with the same p( Psi_N ) and q( Psi_N ), and
-	# what holding psi_ax does to it (M-FIX-2).
+	# what holding psi_ax does to it (M-353).
 	SafetyFactorScale
 	# The q-driven loop on a curved fixed boundary, whose outer surfaces lie in
 	# the band: a round trip on a Miller boundary.

@@ -23,7 +23,7 @@
 #include "convergence/ConvergenceHarness.hpp"
 
 /*
- * WHAT FIXES THE SCALE OF A q-DRIVEN EQUILIBRIUM -- MEASUREMENTS.md M-FIX-2,
+ * WHAT FIXES THE SCALE OF A q-DRIVEN EQUILIBRIUM -- MEASUREMENTS.md M-353,
  * and MANTA-EQUILIBRIUM-PLAN.md's D1 (on manta/design), which rests on it.
  *
  * In a cylinder, fixed-boundary equilibria with the same p( Psi_N ) and
@@ -37,9 +37,9 @@
  * included. This file measures what that does, on SafetyFactorSolver's
  * fixture (g = 2.20 + 0.55 Psi, so g^2 is exactly quadratic):
  *
- *   1. the outer Jacobian G' - I at the answer, psi_ax free, by degree, in an
+ *   1. the outer Jacobian G' - I at the answer, psi_ax free, in an
  *      orthonormal basis of the fit's own space -- whether it is near-singular
- *      along the continuum, and whether that falls with the degree;
+ *      along the continuum;
  *   2. psi_ax HELD at S = ( 1 + delta ) psi_ax*, the least-squares fixed point
  *      of [ G_S( c ) - c ; w ( psi_ax,located - S )/S ] -- whether a member
  *      of the family exists off the reference, to what residual, and how well
@@ -370,69 +370,63 @@ namespace
 }
 
 /*
- * 1. psi_ax FREE, AS MEQ SOLVES q-DRIVEN TODAY: G' - I at the answer has ONE
- *    near-null direction, and it is the scale -- psi_ax and g moving together,
- *    d psi_ax/psi_ax = ( 1/2 ) d c_0/c_0 -- smaller with every degree.
+ * 1 AND 2 ON ONE FIXTURE, n = 12, AT DEGREES 2 AND 4 -- the suite's version;
+ * MEASUREMENTS.md M-353 has the longer study at n = 24 and degrees 2 to 5.
+ *
+ * psi_ax FREE, as MEQ solves q-driven today: G' - I at the answer has ONE
+ * near-null direction, and it is the scale -- psi_ax and g moving together,
+ * d psi_ax/psi_ax = ( 1/2 ) d c_0/c_0.
+ *
+ * psi_ax HELD 10% off the reference: a member of the family exists, to a
+ * residual that falls with the degree of g^2 -- the representation pins the
+ * scale, not the torus -- and holding psi_ax raises the smallest singular
+ * value by orders, as does the axis row in place of the fit's highest row,
+ * which is square. Printed and not asserted: alpha, a source scale, and q's
+ * own scale s as the square system's last unknown -- each a continuum again.
+ * s's column costs no solve: the fitted g^2 is s^2 times s = 1's, and at
+ * s = 1 the other columns are the least-squares Jacobian's.
  */
-BOOST_AUTO_TEST_CASE( theFreeOuterJacobiansNearNullDirectionIsTheScale )
+BOOST_AUTO_TEST_CASE( theScaleIsFreeAndHoldingPsiAxisSelectsAMember )
 {
-	Fixture fixture;
-	std::printf( "\n  D1 TORUS CHECK 1: G' - I at the answer, psi_ax free (M-FIX-2)\n" );
-	std::printf( "    %6s %11s %11s %11s %13s\n", "degree", "sigma_min", "sigma_max",
-	             "ratio", "dlnpsi/dlnc0" );
-	for ( int degree : { 2, 4 } )
-	{
-		Eigen::VectorXd const c = answer( degree );
-		FreeJacobian const at = freeJacobian( fixture, c, 1.0e-3 );
-		Eigen::JacobiSVD<Eigen::MatrixXd> svd( at.inY, Eigen::ComputeFullV );
-		Eigen::VectorXd const sigma = svd.singularValues();
-		Eigen::MatrixXd const r = fixture.orthonormal( degree );
-		Eigen::VectorXd const nullC = r.inverse()*svd.matrixV().col( degree );
-		double const scale = ( at.located.dot( nullC )/fixture.referenceAxis )
-		                     /( nullC( 0 )/c( 0 ) );
-		std::printf( "    %6d %11.3e %11.3e %11.3e %13.4f\n", degree, sigma( degree ),
-		             sigma( 0 ), sigma( degree )/sigma( 0 ), scale );
-		BOOST_TEST( sigma( degree )/sigma( 0 ) < 1.0e-3,
-			"at degree " << degree << " the free q-driven Jacobian's smallest singular "
-			"value is " << sigma( degree )/sigma( 0 ) << " of its largest: the scale "
-			"continuum of fixed p( Psi_N ), q( Psi_N ) equilibria is gone, and D1's "
-			"reason for holding psi_ax with it" );
-		BOOST_TEST( std::abs( scale - 0.5 ) < 0.1,
-			"the near-null direction moves psi_ax by " << scale << " of c_0 relatively, "
-			"where the scale continuum, g proportional to psi_ax, moves it by 1/2" );
-	}
-	std::printf( "    %d solves\n", fixture.solves );
-}
-
-/*
- * 2. psi_ax HELD 10% off the reference: a member of the family exists, to a
- *    residual that falls with the degree of g^2 (8x from 2 to 4, 29x to 5,
- *    M-FIX-2) -- the representation pins
- *    the scale, not the torus -- and holding psi_ax raises the smallest
- *    singular value by two orders. alpha, a source scale, as the square
- *    system's last unknown is printed: the plan rejects it as near-singular.
- */
-BOOST_AUTO_TEST_CASE( holdingPsiAxisSelectsAMemberOfTheFamily )
-{
-	Fixture fixture;
+	Fixture fixture( 12 );
 	double const weight = 10.0;
 	double const delta = 0.10;
 	double const held = ( 1.0 + delta )*fixture.referenceAxis;
-	std::printf( "\n  D1 TORUS CHECK 2: psi_ax held at 1.10 psi_ax*, least squares "
-	             "(M-FIX-2)\n" );
-	std::printf( "    %6s %11s %11s %11s %11s %11s %11s\n", "degree", "|fit res|",
-	             "axis res", "s_min", "s_max", "alpha ratio", "free s_min" );
+	std::printf( "\n  WHAT FIXES THE SCALE, n = 12 (M-353)\n" );
 	std::vector<double> residuals;
 	for ( int degree : { 2, 4 } )
 	{
+		Eigen::MatrixXd const r = fixture.orthonormal( degree );
+
+		// ---- psi_ax free ----------------------------------------------------
+		Eigen::VectorXd const answerC = answer( degree );
+		FreeJacobian const free = freeJacobian( fixture, answerC, 1.0e-3 );
+		Eigen::JacobiSVD<Eigen::MatrixXd> freeSvd( free.inY, Eigen::ComputeFullV );
+		Eigen::VectorXd const sigma = freeSvd.singularValues();
+		Eigen::VectorXd const nullC = r.inverse()*freeSvd.matrixV().col( degree );
+		double const scale = ( free.located.dot( nullC )/fixture.referenceAxis )
+		                     /( nullC( 0 )/answerC( 0 ) );
+		std::printf( "    degree %d, psi_ax free: sigma_min %.3e, sigma_max %.3e, ratio %.3e, "
+		             "d ln psi_ax/d ln c_0 along it %.4f\n", degree, sigma( degree ), sigma( 0 ),
+		             sigma( degree )/sigma( 0 ), scale );
+		BOOST_TEST( sigma( degree )/sigma( 0 ) < 1.0e-3,
+			"at degree " << degree << " the free q-driven Jacobian's smallest singular "
+			"value is " << sigma( degree )/sigma( 0 ) << " of its largest: the scale "
+			"continuum of fixed p( Psi_N ), q( Psi_N ) equilibria is gone" );
+		BOOST_TEST( std::abs( scale - 0.5 ) < 0.1,
+			"the near-null direction moves psi_ax by " << scale << " of c_0 relatively, "
+			"where the scale continuum, g proportional to psi_ax, moves it by 1/2" );
+
+		// ---- psi_ax held ----------------------------------------------------
 		Held const at = solveHeld( fixture, degree, held, weight,
-		                           answer( degree )*( 1.0 + delta )*( 1.0 + delta ) );
+		                           answerC*( 1.0 + delta )*( 1.0 + delta ) );
 		BOOST_TEST_REQUIRE( at.solved );
 		Eigen::JacobiSVD<Eigen::MatrixXd> tall( at.jacobian );
+		double const residual = at.residual.head( degree + 1 ).norm();
+		residuals.push_back( residual );
 
 		Eigen::MatrixXd withAlpha( degree + 2, degree + 2 );
 		withAlpha.leftCols( degree + 1 ) = at.jacobian;
-		Eigen::MatrixXd const r = fixture.orthonormal( degree );
 		{
 			double const step = 1.0e-4;
 			Step const up = fixture.evaluate( at.c, held, 1.0 + step );
@@ -445,66 +439,16 @@ BOOST_AUTO_TEST_CASE( holdingPsiAxisSelectsAMemberOfTheFamily )
 		}
 		Eigen::JacobiSVD<Eigen::MatrixXd> alpha( withAlpha );
 
-		FreeJacobian const free = freeJacobian( fixture, answer( degree ), 1.0e-3 );
-		Eigen::JacobiSVD<Eigen::MatrixXd> freeSvd( free.inY );
-
-		/*
-		 * q's SCALE AS THE LAST UNKNOWN, q = s q_target with its shape held:
-		 * g = 4 pi^2 q/( V' < R^-2 > ), so the fitted g^2 is s^2 times
-		 * s = 1's, exactly, and its column costs no solve. Square, (c, s)
-		 * against ( the fit, the axis row ); solved by Newton from the
-		 * least-squares point.
-		 */
-		Eigen::VectorXd c = at.c;
-		double scale = 1.0;
-		Eigen::MatrixXd square( degree + 2, degree + 2 );
-		Eigen::VectorXd squareResidual( degree + 2 );
-		for ( int iteration = 0; iteration < 4; ++iteration )
+		Eigen::MatrixXd withScale( degree + 2, degree + 2 );
+		withScale.leftCols( degree + 1 ) = at.jacobian;
 		{
-			Step const here = fixture.evaluate( c, held, 1.0, true );
+			Step const here = fixture.evaluate( at.c, held, 1.0 );
 			BOOST_TEST_REQUIRE( here.ok );
-			squareResidual.head( degree + 1 ) = r*( scale*scale*here.fitted - c );
-			squareResidual( degree + 1 ) = weight*( here.located - held )/held;
-			for ( int j = 0; j <= degree; ++j )
-			{
-				double const step = 1.0e-3;
-				Eigen::VectorXd plus = c, minus = c;
-				plus( j ) += step;
-				minus( j ) -= step;
-				Step const up = fixture.evaluate( plus, held, 1.0 );
-				Step const down = fixture.evaluate( minus, held, 1.0 );
-				BOOST_TEST_REQUIRE( ( up.ok && down.ok ) );
-				Eigen::VectorXd column( degree + 2 );
-				column.head( degree + 1 ) = r*( scale*scale*( up.fitted - down.fitted )/( 2.0*step ) );
-				column( j ) -= r( j, j );
-				for ( int i = 0; i < j; ++i )
-					column( i ) -= r( i, j );
-				column( degree + 1 ) = weight*( up.located - down.located )/( 2.0*step*held );
-				square.col( j ) = column;
-			}
-			square.col( degree + 1 ).head( degree + 1 ) = r*( 2.0*scale*here.fitted );
-			square( degree + 1, degree + 1 ) = 0.0;
-			Eigen::VectorXd const delta = square.fullPivLu().solve( -squareResidual );
-			c += delta.head( degree + 1 );
-			scale += delta( degree + 1 );
-			if ( delta.norm() < 1.0e-11*c.norm() )
-				break;
+			withScale.col( degree + 1 ).head( degree + 1 ) = r*( 2.0*here.fitted );
+			withScale( degree + 1, degree + 1 ) = 0.0;
 		}
-		Eigen::JacobiSVD<Eigen::MatrixXd> squareSvd( square );
-		std::printf( "    %6d   q's scale s floating, square: s - 1 = %.3e, residual %.3e, "
-		             "s_min %.3e, s_max %.3e, ratio %.3e\n", degree, scale - 1.0,
-		             squareResidual.norm(), squareSvd.singularValues()( degree + 1 ),
-		             squareSvd.singularValues()( 0 ),
-		             squareSvd.singularValues()( degree + 1 )/squareSvd.singularValues()( 0 ) );
-		/*
-		 * q's scale cannot close it, measured above: any q profile has a member
-		 * at every psi_ax, so q = s q_target beside a held psi_ax is a
-		 * continuum again, as alpha is. Printed, not asserted.
-		 *
-		 * WHAT CAN: the axis row in place of one q condition. Each fit row
-		 * dropped in turn from the least-squares Jacobian, the square rest's
-		 * smallest singular value; the best is the one to drop.
-		 */
+		Eigen::JacobiSVD<Eigen::MatrixXd> sSvd( withScale );
+
 		double bestDropped = 0.0;
 		int bestRow = -1;
 		for ( int k = 0; k <= degree; ++k )
@@ -515,49 +459,47 @@ BOOST_AUTO_TEST_CASE( holdingPsiAxisSelectsAMemberOfTheFamily )
 				if ( i != k )
 					dropped.row( row++ ) = at.jacobian.row( i );
 			Eigen::JacobiSVD<Eigen::MatrixXd> droppedSvd( dropped );
-			double const smallest = droppedSvd.singularValues()( degree );
-			std::printf( "    %6d   fit row y_%d replaced by the axis row: s_min %.3e, s_max %.3e\n",
-			             degree, k, smallest, droppedSvd.singularValues()( 0 ) );
-			if ( smallest > bestDropped )
+			if ( droppedSvd.singularValues()( degree ) > bestDropped )
 			{
-				bestDropped = smallest;
+				bestDropped = droppedSvd.singularValues()( degree );
 				bestRow = k;
 			}
 		}
-		BOOST_TEST( bestDropped > 30.0*freeSvd.singularValues()( degree ),
+
+		std::printf( "    degree %d, psi_ax held: residual %.3e, axis %.3e; least squares "
+		             "s_min %.3e s_max %.3e; axis row for y_%d s_min %.3e; alpha ratio %.3e; "
+		             "q's scale s_min %.3e ratio %.3e\n", degree, residual,
+		             at.residual( degree + 1 )/weight, tall.singularValues()( degree ),
+		             tall.singularValues()( 0 ), bestRow, bestDropped,
+		             alpha.singularValues()( degree + 1 )/alpha.singularValues()( 0 ),
+		             sSvd.singularValues()( degree + 1 ),
+		             sSvd.singularValues()( degree + 1 )/sSvd.singularValues()( 0 ) );
+		BOOST_TEST( tall.singularValues()( degree ) > 30.0*sigma( degree ),
+			"at degree " << degree << ", holding psi_ax leaves the smallest singular value "
+			<< tall.singularValues()( degree ) << " against " << sigma( degree )
+			<< " free: holding it no longer determines the scale" );
+		BOOST_TEST( bestDropped > 30.0*sigma( degree ),
 			"at degree " << degree << ", the axis row in place of fit row y_" << bestRow
 			<< " leaves the square system's smallest singular value " << bestDropped
-			<< " against " << freeSvd.singularValues()( degree ) << " free" );
-
-		double const residual = at.residual.head( degree + 1 ).norm();
-		residuals.push_back( residual );
-		std::printf( "    %6d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e\n", degree, residual,
-		             at.residual( degree + 1 )/weight, tall.singularValues()( degree ),
-		             tall.singularValues()( 0 ),
-		             alpha.singularValues()( degree + 1 )/alpha.singularValues()( 0 ),
-		             freeSvd.singularValues()( degree ) );
-		BOOST_TEST( tall.singularValues()( degree ) > 30.0*freeSvd.singularValues()( degree ),
-			"at degree " << degree << ", holding psi_ax leaves the smallest singular value "
-			<< tall.singularValues()( degree ) << " against " << freeSvd.singularValues()( degree )
-			<< " free: holding it no longer determines the scale" );
+			<< " against " << sigma( degree ) << " free" );
 	}
 	BOOST_TEST( residuals[ 1 ] < 0.25*residuals[ 0 ],
 		"10% along the continuum the held fixed point's residual is " << residuals[ 0 ]
 		<< " at degree 2 and " << residuals[ 1 ] << " at degree 4: if it does not fall with "
-		"the representation, the torus pins the scale and D1's continuum is not there" );
+		"the representation, the torus pins the scale and the continuum is not there" );
 	std::printf( "    %d solves\n", fixture.solves );
 }
 
 /*
  * 3. AND THE MESH DOES NOT PIN IT: the same residual, 5% along, at n = 12 and
- *    24 (and 48 in M-FIX-2), each against its own mesh's reference.
+ *    18 (and 24 and 48 in M-353), each against its own mesh's reference.
  */
 BOOST_AUTO_TEST_CASE( theMeshDoesNotPinTheScale )
 {
-	std::printf( "\n  D1 TORUS CHECK 3: the residual 5%% along the continuum, by resolution "
-	             "(M-FIX-2)\n" );
+	std::printf( "\n  WHAT FIXES THE SCALE, 3: the residual 5%% along the continuum, by resolution "
+	             "(M-353)\n" );
 	std::vector<double> residuals;
-	for ( int cells : { 12, 24 } )
+	for ( int cells : { 12, 18 } )
 	{
 		Fixture fixture( cells );
 		double const held = 0.95*fixture.referenceAxis;
