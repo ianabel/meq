@@ -113,6 +113,25 @@ converges in no step to the file's current. It reads the embedded mesh with
 coefficients; on the shipped meshes MFEM's default reading reorders nothing
 either, so that is a guarantee rather than a defect seen.
 
+**The session is that restart held in memory** (`Run::resolve()`,
+`meq::EquilibriumSnapshot`, `MANTA-EQUILIBRIUM-PLAN.md` §4.1). A solved run
+re-solves with new profile tables — by slot, through `buildSources()`, the
+factories and refusals `configure()` uses — warm from a snapshot: the same
+fields the `.nc` carries, so a resolve **is** the file restart of the same
+tables, to the bit (`RunSession::aResolveIsTheFileRestartToTheBit`), without
+the file or a second `prepare()`. **Each resolve builds a fresh solver** on the
+run's mesh, seeded in `makeSolverBody` ahead of every other start, with `ψ_c`
+adopted from the last solver: the answer is then a function of the tables and
+the warm snapshot and of nothing else the run holds, which is the determinism
+a memoised transport Newton is pinned to
+(`theAnswerDependsOnTheTablesAndTheWarmStartAlone`). **It is transactional**:
+every member a solve phase assigns is swapped aside by `SolvedState` and
+swapped back unless the solve succeeds, so a failed resolve leaves the restart
+file byte for byte as it was — a member added to `Impl` that `solve()`
+assigns belongs in `SolvedState`, or that test is what fails. Refused with the
+run untouched: `[adaptivity]`, a box support, `[inverse]`, a Device
+(→ **[M-SESSION-3](MEASUREMENTS.md#m-session-3)**).
+
 **The VTK is written high-order deliberately**, and it is the one thing in that
 row that can be silently wrong: VTK's native cells are linear, so the default
 path draws a `k = 3` solution as though it were `k = 1` — a picture that looks

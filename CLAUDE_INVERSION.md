@@ -451,6 +451,30 @@ first: that the map is **total**, and that the target is asked in the SOURCE's
 the run **found**, so there is no `GGPrimeFile` beside the output for a consumer
 to look it up in — the same argument that put `axis_normalised_flux` there.
 
+**AND THE SCALE IS NOT DETERMINED BY q, p AND THE BOUNDARY — ONLY BY THE
+DEGREE OF `g²`.** Fixed-boundary equilibria with the same `p(Ψ_N)` and
+`q(Ψ_N)` form a one-parameter family in the torus as in the cylinder — VMEC's
+`PHIEDGE` is the same fact, and here `Φ_edge = 2π(ψ_ax − ψ_bnd)∫q dΨ_N` — and
+with `ψ_ax` free the loop's outer Jacobian has one near-null direction, the
+scale (`g ∝ ψ_ax`), with `σ_min/σ_max` 1e-4 at degree 2 falling to ~1e-6 at
+degree 4. What isolates the fixed point is that a polynomial of degree `d`
+cannot follow the family: held 10% along it, the least-squares residual falls
+from 3.5e-3 at degree 2 to 1.2e-4 at degree 5 and does not move with the mesh
+(`SafetyFactorScale`, → **[M-SESSION-2](MEASUREMENTS.md#m-session-2)**). **The
+example converges, from any `ToroidalFieldGuess`, because its target was built
+from an exactly quadratic `g²`**, so the reference is an exact fixed point at
+every degree; a target that is not — any measured `q` — is left to the degree.
+Holding `ψ_ax` is what makes it well posed (`MANTA-EQUILIBRIUM-PLAN.md`, D1).
+
+**A CURVED BOUNDARY'S FAMILY IS TRACED THROUGH THE BAND, AND THE LOOP'S HAS TO
+BE TOO.** `Ω_h` is inscribed in `Γ`, so the outer surfaces of a curved
+fixed-boundary run lie partly outside the mesh; the write phase continues the
+field there by the transfer lift, and the loop must as well: traced without
+it, every family on `fixed-d-tcv`'s MXH boundary fails at its outer surfaces,
+every map evaluation is refused, and the loop stops on a Jacobian of exactly
+zero. Both go through `Run::Impl::extractFamily()`. Posed there with a
+measured `q`, the loop runs, and fails on the scale (M-SESSION-2).
+
 **WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a
 rectangle with one closed plasma rather than a machine, and nothing has yet
 driven `q` on the limited tokamak, where the support moves and `ψ_bnd` is an

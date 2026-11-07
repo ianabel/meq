@@ -137,7 +137,7 @@ namespace
 
 	struct Fixture
 	{
-		int const n = 24;
+		int const n;
 		int const order = 2;
 		mfem::Mesh mesh;
 		std::vector<double> label, targetQ;
@@ -145,8 +145,8 @@ namespace
 		std::unique_ptr<Solved> base;
 		int solves = 0;
 
-		Fixture()
-			: mesh( meq::tests::makeMesh( meq::tests::standardBox(), 24 ) )
+		explicit Fixture( int cells = 24 )
+			: n( cells ), mesh( meq::tests::makeMesh( meq::tests::standardBox(), cells ) )
 		{
 			// THE REFERENCE AND ITS q, exactly as SafetyFactorSolver builds them.
 			std::vector<meq::Knot> knots;
@@ -271,151 +271,219 @@ namespace
 	}
 }
 
-BOOST_AUTO_TEST_CASE( theFreeOuterJacobianAlongTheContinuum )
+namespace
 {
-	Fixture fixture;
-	std::printf( "\n  D1 TORUS CHECK 1: G' - I at the answer, psi_ax free\n" );
-	std::printf( "    reference psi_ax %.10e\n", fixture.referenceAxis );
-	for ( int degree : { 2, 3, 4, 5 } )
+	struct Held
 	{
-		Eigen::VectorXd const c = answer( degree );
+		bool solved = false;
+		Eigen::VectorXd c;
+		Eigen::MatrixXd jacobian;
+		Eigen::VectorXd residual;
+	};
+
+	/// The least-squares fixed point with psi_ax held at @a held: Gauss-Newton
+	/// on [ R( G_S( c ) - c ) ; w ( psi_ax,located - S )/S ], R the fit's
+	/// orthonormalising factor.
+	Held solveHeld( Fixture &fixture, int degree, double held, double weight,
+	                Eigen::VectorXd c )
+	{
+		Held out;
 		Eigen::MatrixXd const r = fixture.orthonormal( degree );
-		for ( double step : { 1.0e-3, 1.0e-2 } )
+		auto assemble = [ & ]( Step const &at, Eigen::VectorXd const &point )
 		{
-			Step const at = fixture.evaluate( c, -1.0, 1.0 );
-			BOOST_TEST_REQUIRE( at.ok );
-			Eigen::MatrixXd jac( degree + 1, degree + 1 );
-			Eigen::VectorXd located( degree + 1 );
+			Eigen::VectorXd value( degree + 2 );
+			value.head( degree + 1 ) = r*( at.fitted - point );
+			value( degree + 1 ) = weight*( at.located - held )/held;
+			return value;
+		};
+		out.jacobian.resize( degree + 2, degree + 1 );
+		for ( int iteration = 0; iteration < 8; ++iteration )
+		{
+			Step const at = fixture.evaluate( c, held, 1.0, true );
+			if ( !at.ok )
+				return out;
+			out.residual = assemble( at, c );
 			for ( int j = 0; j <= degree; ++j )
 			{
+				double const step = 1.0e-3;
 				Eigen::VectorXd plus = c, minus = c;
 				plus( j ) += step;
 				minus( j ) -= step;
-				Step const up = fixture.evaluate( plus, -1.0, 1.0 );
-				Step const down = fixture.evaluate( minus, -1.0, 1.0 );
-				BOOST_TEST_REQUIRE( ( up.ok && down.ok ) );
-				jac.col( j ) = ( up.fitted - down.fitted )/( 2.0*step );
-				jac( j, j ) -= 1.0;
-				located( j ) = ( up.located - down.located )/( 2.0*step );
+				Step const up = fixture.evaluate( plus, held, 1.0 );
+				Step const down = fixture.evaluate( minus, held, 1.0 );
+				if ( !up.ok || !down.ok )
+					return out;
+				out.jacobian.col( j ) = ( assemble( up, plus ) - assemble( down, minus ) )
+				                        /( 2.0*step );
 			}
-			Eigen::MatrixXd const inY = r*jac*r.inverse();
-			Eigen::JacobiSVD<Eigen::MatrixXd> svd( inY, Eigen::ComputeFullV );
-			Eigen::VectorXd const sigma = svd.singularValues();
-			std::printf( "    degree %d, step %.0e: |G(c*) - c*|_y %.3e\n", degree,
-			             step, ( r*( at.fitted - c ) ).norm() );
-			printVector( "sigma (y)", sigma );
-			std::printf( "      sigma_min/sigma_max %.4e\n",
-			             sigma( degree )/sigma( 0 ) );
-			Eigen::VectorXd const nullY = svd.matrixV().col( degree );
-			Eigen::VectorXd const nullC = r.inverse()*nullY;
-			printVector( "near-null (c)", nullC/nullC( 0 ) );
-			std::printf( "      d psi_ax along it (per unit c_0) %.4e, psi_ax %.4e\n",
-			             located.dot( nullC )/nullC( 0 ), fixture.referenceAxis );
+			Eigen::VectorXd const dc =
+				out.jacobian.colPivHouseholderQr().solve( -out.residual );
+			c += dc;
+			if ( dc.norm() < 1.0e-9*c.norm() )
+				break;
 		}
+		Step const at = fixture.evaluate( c, held, 1.0, true );
+		if ( !at.ok )
+			return out;
+		out.residual = assemble( at, c );
+		out.c = c;
+		out.solved = true;
+		return out;
+	}
+}
+
+namespace
+{
+	/// G' - I at @a c, psi_ax free, in the fit's orthonormal coordinates; and
+	/// d psi_ax / d c, column by column.
+	struct FreeJacobian
+	{
+		Eigen::MatrixXd inY;
+		Eigen::VectorXd located;
+	};
+
+	FreeJacobian freeJacobian( Fixture &fixture, Eigen::VectorXd const &c, double step )
+	{
+		int const degree = static_cast<int>( c.size() ) - 1;
+		Eigen::MatrixXd const r = fixture.orthonormal( degree );
+		Eigen::MatrixXd jacobian( degree + 1, degree + 1 );
+		FreeJacobian out;
+		out.located.resize( degree + 1 );
+		for ( int j = 0; j <= degree; ++j )
+		{
+			Eigen::VectorXd plus = c, minus = c;
+			plus( j ) += step;
+			minus( j ) -= step;
+			Step const up = fixture.evaluate( plus, -1.0, 1.0 );
+			Step const down = fixture.evaluate( minus, -1.0, 1.0 );
+			BOOST_TEST_REQUIRE( ( up.ok && down.ok ) );
+			jacobian.col( j ) = ( up.fitted - down.fitted )/( 2.0*step );
+			jacobian( j, j ) -= 1.0;
+			out.located( j ) = ( up.located - down.located )/( 2.0*step );
+		}
+		out.inY = r*jacobian*r.inverse();
+		return out;
+	}
+}
+
+/*
+ * 1. psi_ax FREE, AS MEQ SOLVES q-DRIVEN TODAY: G' - I at the answer has ONE
+ *    near-null direction, and it is the scale -- psi_ax and g moving together,
+ *    d psi_ax/psi_ax = ( 1/2 ) d c_0/c_0 -- smaller with every degree.
+ */
+BOOST_AUTO_TEST_CASE( theFreeOuterJacobiansNearNullDirectionIsTheScale )
+{
+	Fixture fixture;
+	std::printf( "\n  D1 TORUS CHECK 1: G' - I at the answer, psi_ax free (M-SESSION-2)\n" );
+	std::printf( "    %6s %11s %11s %11s %13s\n", "degree", "sigma_min", "sigma_max",
+	             "ratio", "dlnpsi/dlnc0" );
+	for ( int degree : { 2, 4 } )
+	{
+		Eigen::VectorXd const c = answer( degree );
+		FreeJacobian const at = freeJacobian( fixture, c, 1.0e-3 );
+		Eigen::JacobiSVD<Eigen::MatrixXd> svd( at.inY, Eigen::ComputeFullV );
+		Eigen::VectorXd const sigma = svd.singularValues();
+		Eigen::MatrixXd const r = fixture.orthonormal( degree );
+		Eigen::VectorXd const nullC = r.inverse()*svd.matrixV().col( degree );
+		double const scale = ( at.located.dot( nullC )/fixture.referenceAxis )
+		                     /( nullC( 0 )/c( 0 ) );
+		std::printf( "    %6d %11.3e %11.3e %11.3e %13.4f\n", degree, sigma( degree ),
+		             sigma( 0 ), sigma( degree )/sigma( 0 ), scale );
+		BOOST_TEST( sigma( degree )/sigma( 0 ) < 1.0e-3,
+			"at degree " << degree << " the free q-driven Jacobian's smallest singular "
+			"value is " << sigma( degree )/sigma( 0 ) << " of its largest: the scale "
+			"continuum of fixed p( Psi_N ), q( Psi_N ) equilibria is gone, and D1's "
+			"reason for holding psi_ax with it" );
+		BOOST_TEST( std::abs( scale - 0.5 ) < 0.1,
+			"the near-null direction moves psi_ax by " << scale << " of c_0 relatively, "
+			"where the scale continuum, g proportional to psi_ax, moves it by 1/2" );
 	}
 	std::printf( "    %d solves\n", fixture.solves );
 }
 
-BOOST_AUTO_TEST_CASE( holdingPsiAxisAlongTheContinuum )
+/*
+ * 2. psi_ax HELD 10% off the reference: a member of the family exists, to a
+ *    residual that falls with the degree of g^2 (8x from 2 to 4, 29x to 5,
+ *    M-SESSION-2) -- the representation pins
+ *    the scale, not the torus -- and holding psi_ax raises the smallest
+ *    singular value by two orders. alpha, a source scale, as the square
+ *    system's last unknown is printed: the plan rejects it as near-singular.
+ */
+BOOST_AUTO_TEST_CASE( holdingPsiAxisSelectsAMemberOfTheFamily )
 {
 	Fixture fixture;
-	double const reference = fixture.referenceAxis;
 	double const weight = 10.0;
-	std::printf( "\n  D1 TORUS CHECK 2: psi_ax HELD at ( 1 + delta ) psi_ax*, least "
-	             "squares\n" );
-	std::printf( "    reference psi_ax %.10e; axis row weighted %.1f\n", reference,
-	             weight );
-	for ( int degree : { 2, 3, 4, 5 } )
+	double const delta = 0.10;
+	double const held = ( 1.0 + delta )*fixture.referenceAxis;
+	std::printf( "\n  D1 TORUS CHECK 2: psi_ax held at 1.10 psi_ax*, least squares "
+	             "(M-SESSION-2)\n" );
+	std::printf( "    %6s %11s %11s %11s %11s %11s %11s\n", "degree", "|fit res|",
+	             "axis res", "s_min", "s_max", "alpha ratio", "free s_min" );
+	std::vector<double> residuals;
+	for ( int degree : { 2, 4 } )
 	{
-		Eigen::MatrixXd const r = fixture.orthonormal( degree );
-		std::printf( "    degree %d\n", degree );
-		std::printf( "      %7s %11s %11s %11s %11s %11s %11s %11s\n", "delta",
-		             "|fit res|", "axis res", "s_min/s_max", "sq s_min/max",
-		             "alpha s_min", "g(1)", "g(0)" );
-		for ( double delta : { -0.10, -0.05, 0.0, 0.05, 0.10 } )
-		{
-			double const held = ( 1.0 + delta )*reference;
-			// From the scale the cylinder suggests, g^2 ~ S^2.
-			Eigen::VectorXd c = answer( degree )*( 1.0 + delta )*( 1.0 + delta );
-			// Warm-start the held solves from the reference.
-			Eigen::MatrixXd jac( degree + 2, degree + 1 );
-			Eigen::VectorXd residual( degree + 2 );
-			auto assemble = [ & ]( Step const &at, Eigen::VectorXd const &point )
-			{
-				Eigen::VectorXd out( degree + 2 );
-				out.head( degree + 1 ) = r*( at.fitted - point );
-				out( degree + 1 ) = weight*( at.located - held )/held;
-				return out;
-			};
-			bool solved = true;
-			for ( int iteration = 0; iteration < 8; ++iteration )
-			{
-				Step const at = fixture.evaluate( c, held, 1.0, true );
-				if ( !at.ok )
-				{
-					solved = false;
-					break;
-				}
-				residual = assemble( at, c );
-				for ( int j = 0; j <= degree; ++j )
-				{
-					double const step = 1.0e-3;
-					Eigen::VectorXd plus = c, minus = c;
-					plus( j ) += step;
-					minus( j ) -= step;
-					Step const up = fixture.evaluate( plus, held, 1.0 );
-					Step const down = fixture.evaluate( minus, held, 1.0 );
-					if ( !up.ok || !down.ok )
-					{
-						solved = false;
-						break;
-					}
-					jac.col( j ) = ( assemble( up, plus ) - assemble( down, minus ) )
-					               /( 2.0*step );
-				}
-				if ( !solved )
-					break;
-				Eigen::VectorXd const dc =
-					jac.colPivHouseholderQr().solve( -residual );
-				c += dc;
-				if ( dc.norm() < 1.0e-9*c.norm() )
-					break;
-			}
-			if ( !solved )
-			{
-				std::printf( "      %7.3f  did not solve\n", delta );
-				continue;
-			}
-			Step const at = fixture.evaluate( c, held, 1.0, true );
-			residual = assemble( at, c );
-			Eigen::JacobiSVD<Eigen::MatrixXd> tall( jac );
-			Eigen::JacobiSVD<Eigen::MatrixXd> square(
-				Eigen::MatrixXd( jac.topRows( degree + 1 ) ) );
+		Held const at = solveHeld( fixture, degree, held, weight,
+		                           answer( degree )*( 1.0 + delta )*( 1.0 + delta ) );
+		BOOST_TEST_REQUIRE( at.solved );
+		Eigen::JacobiSVD<Eigen::MatrixXd> tall( at.jacobian );
 
-			// THE SQUARE SYSTEM WITH A SOURCE SCALE alpha AS ITS LAST UNKNOWN.
-			Eigen::MatrixXd withAlpha( degree + 2, degree + 2 );
-			withAlpha.leftCols( degree + 1 ) = jac;
-			{
-				double const step = 1.0e-4;
-				Step const up = fixture.evaluate( c, held, 1.0 + step );
-				Step const down = fixture.evaluate( c, held, 1.0 - step );
-				BOOST_TEST_REQUIRE( ( up.ok && down.ok ) );
-				withAlpha.col( degree + 1 ) =
-					( assemble( up, c ) - assemble( down, c ) )/( 2.0*step );
-			}
-			Eigen::JacobiSVD<Eigen::MatrixXd> alpha( withAlpha );
-			double gEdge = std::sqrt( c( 0 ) );
-			double gAxis = std::sqrt( c.sum() );
-			std::printf( "      %7.3f %11.3e %11.3e %11.3e %11.3e %11.3e %11.6f %11.6f\n",
-			             delta, residual.head( degree + 1 ).norm(),
-			             residual( degree + 1 )/weight,
-			             tall.singularValues()( degree )/tall.singularValues()( 0 ),
-			             square.singularValues()( degree )
-			                 /square.singularValues()( 0 ),
-			             alpha.singularValues()( degree + 1 )
-			                 /alpha.singularValues()( 0 ),
-			             gEdge, gAxis );
+		Eigen::MatrixXd withAlpha( degree + 2, degree + 2 );
+		withAlpha.leftCols( degree + 1 ) = at.jacobian;
+		Eigen::MatrixXd const r = fixture.orthonormal( degree );
+		{
+			double const step = 1.0e-4;
+			Step const up = fixture.evaluate( at.c, held, 1.0 + step );
+			Step const down = fixture.evaluate( at.c, held, 1.0 - step );
+			BOOST_TEST_REQUIRE( ( up.ok && down.ok ) );
+			withAlpha.col( degree + 1 ).head( degree + 1 ) =
+				r*( up.fitted - down.fitted )/( 2.0*step );
+			withAlpha( degree + 1, degree + 1 ) =
+				weight*( up.located - down.located )/( 2.0*step*held );
 		}
+		Eigen::JacobiSVD<Eigen::MatrixXd> alpha( withAlpha );
+
+		FreeJacobian const free = freeJacobian( fixture, answer( degree ), 1.0e-3 );
+		Eigen::JacobiSVD<Eigen::MatrixXd> freeSvd( free.inY );
+
+		double const residual = at.residual.head( degree + 1 ).norm();
+		residuals.push_back( residual );
+		std::printf( "    %6d %11.3e %11.3e %11.3e %11.3e %11.3e %11.3e\n", degree, residual,
+		             at.residual( degree + 1 )/weight, tall.singularValues()( degree ),
+		             tall.singularValues()( 0 ),
+		             alpha.singularValues()( degree + 1 )/alpha.singularValues()( 0 ),
+		             freeSvd.singularValues()( degree ) );
+		BOOST_TEST( tall.singularValues()( degree ) > 30.0*freeSvd.singularValues()( degree ),
+			"at degree " << degree << ", holding psi_ax leaves the smallest singular value "
+			<< tall.singularValues()( degree ) << " against " << freeSvd.singularValues()( degree )
+			<< " free: holding it no longer determines the scale" );
 	}
+	BOOST_TEST( residuals[ 1 ] < 0.25*residuals[ 0 ],
+		"10% along the continuum the held fixed point's residual is " << residuals[ 0 ]
+		<< " at degree 2 and " << residuals[ 1 ] << " at degree 4: if it does not fall with "
+		"the representation, the torus pins the scale and D1's continuum is not there" );
 	std::printf( "    %d solves\n", fixture.solves );
+}
+
+/*
+ * 3. AND THE MESH DOES NOT PIN IT: the same residual, 5% along, at n = 12 and
+ *    24 (and 48 in M-SESSION-2), each against its own mesh's reference.
+ */
+BOOST_AUTO_TEST_CASE( theMeshDoesNotPinTheScale )
+{
+	std::printf( "\n  D1 TORUS CHECK 3: the residual 5%% along the continuum, by resolution "
+	             "(M-SESSION-2)\n" );
+	std::vector<double> residuals;
+	for ( int cells : { 12, 24 } )
+	{
+		Fixture fixture( cells );
+		double const held = 0.95*fixture.referenceAxis;
+		Held const at = solveHeld( fixture, 2, held, 10.0, answer( 2 )*0.95*0.95 );
+		BOOST_TEST_REQUIRE( at.solved );
+		residuals.push_back( at.residual.head( 3 ).norm() );
+		std::printf( "    n = %2d: |fit res| %.3e, axis res %.3e\n", cells, residuals.back(),
+		             at.residual( 3 )/10.0 );
+	}
+	BOOST_TEST( std::abs( residuals[ 1 ] - residuals[ 0 ] ) < 0.1*residuals[ 1 ],
+		"the held residual moves from " << residuals[ 0 ] << " to " << residuals[ 1 ]
+		<< " with the mesh: what pins the scale is then the discretisation" );
 }

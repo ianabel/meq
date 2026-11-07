@@ -104,13 +104,13 @@ exactly tiers 0 and 1; nothing needs MaNTA's tier 2.
 
 ## 2. What MEQ has, read on 2026-11-06
 
-1. **Re-solves.** `meq.Equilibrium.solve()` (PY-3, `python/_meq.cpp:188-262`)
+1. **Re-solves.** `meq.Equilibrium.solve()` (PY-3, `python/_meq.cpp`)
    writes a private restart `.nc` and builds a **new `meq::Run`** — config, mesh,
    forms, ψ_c unless `CacheFile` — then swaps it in on success. Transactional,
-   but a whole setup per `Solve`. `meq::Run` is one-shot by design (`Run.hpp:136`).
-   The q-driven loop (`Run.cpp:3876-3925`) is the precedent for one live
-   `GradShafranovSolver` swapping a profile (`setGGPrime`) and re-solving warm,
-   but it is not transactional.
+   but a whole setup per `Solve`. **`Run::resolve()` (§4.1, `manta/session`) is
+   the same restart held in memory**, with no file and no second setup. The
+   q-driven loop is the precedent for one live `GradShafranovSolver` swapping a
+   profile (`setGGPrime`) and re-solving warm, but it is not transactional.
 2. **The linear solve.** The bordered Newton (`solveWithNormalisation`,
    `GradShafranov.cpp:11626-18358`) eliminates the border — ψ_ax, ψ_bnd, the
    X-point, the current scale, DtN modes, gauge knots, free coil currents —
@@ -145,12 +145,12 @@ exactly tiers 0 and 1; nothing needs MaNTA's tier 2.
    location across DG faces, band-extension switching on the outer surfaces, and
    the located axis changing element.
 
-**A stale claim found on the way.** `ROADMAP.md:437`, `CLAUDE_INVERSION.md:417`
-and `Run.cpp:3921` say the q-driven loop's symbolic factorisation survives
-between solves. It does not: every solve builds its trace solver (`:15450`) and
-resets the count (`:11789`), and `NewtonConvergence.cpp:1572` asserts one
-symbolic factorisation per solve. Corrected on `manta/session`, where it
-starts to matter.
+**The trace solver's symbolic factorisation lives one solve.** Every solve
+builds its trace solver (`makeTraceSolver()` inside `solve()`) and resets the
+count, and `NewtonConvergence::theSymbolicAnalysisIsReusedAcrossNewtonSteps`
+asserts one analysis per solve; the q-driven loop pays one reordering per map
+evaluation, 37 for `q-driven.toml`'s 37 solves (→ M-SESSION-1). A resolve pays
+the same, plus the solver's construction (§4.1).
 
 ## 3. The map, and its derivative
 
@@ -200,27 +200,47 @@ bordered solve already carries them; the response just keeps them.
 
 ## 4. Design, piece by piece
 
-### 4.1 `manta/session` — one live run, re-solved in memory (tier 0's cost)
+### 4.1 `manta/session` — one live run, re-solved in memory (tier 0's cost) — built
 
-A **fourth phase of `meq::Run`**, not a binding over the solver (the PYTHON-PLAN
-rule: a front end, not a second driver): `resolve(profiles, warm)` on a Solved
-run replaces the source's tables through the same refusals `makeSource` applies,
-warm-starts from a **snapshot** (below), solves, and on failure restores the
-snapshot it started from — transactional in memory, as PY-3 is through a file.
-Mesh, spaces, forms, ψ_c and the solver object survive. Adaptivity, the retry
-rung and the Picard ladder rebuild the solver; a session refuses `[adaptivity]`
-(as PY-3 does) and accepts a rebuilt solver on a fallback rung.
+**As built**: `int Run::resolve( ProfileTables, shared_ptr<EquilibriumSnapshot
+const> warm = nullptr )` and `shared_ptr<EquilibriumSnapshot const>
+Run::snapshot()`, a fourth phase of `meq::Run` and not a binding over the
+solver (the PYTHON-PLAN rule: a front end, not a second driver). The tables
+replace the slots they name through `buildSources()` — the factories and
+refusals `configure()` uses, factored out so the two cannot drift — and the run
+solves again through the whole solve phase (ladder, retry rung, support
+sweeps), warm from `warm` or from its own state: the `.nc` restart's fields,
+seeded in `makeSolverBody` ahead of every other start. Mesh, spaces, `ψ_c`
+(adopted from the last solver) and the configuration survive.
 
-**The snapshot** (`meq::EquilibriumSnapshot`, a value): the ψ/q/ψ̂ BlockVector,
-the border values, the axis (point and element), the boundary-flux point, the
-exterior coefficients, the extracted family, and the frozen extraction
-decisions of §4.5. ~1–2 MB at 46,000 trace DOFs. It is what MaNTA's opaque
-`Equilibrium` holds, and what `warm` hands back.
+**A fresh solver per resolve, not one surviving solver object** — a change
+from the design, and deliberate: the answer is then a function of
+`( tables, warm )` and of nothing the run holds, which is MaNTA's determinism
+contract (a reused model pinned bit-for-bit to a fresh one), and the old
+solver is what a failed resolve is restored to. The cost is the solver's
+construction; a 0.1% `Omega` step on `rotating-normalised` resolves in
+0.30 s against PY-3's 0.48 s (→ M-SESSION-3). **Transactional** by swapping
+every member the solve phase assigns aside (`SolvedState`) and back on failure.
+Refused with the run untouched: `[adaptivity]`, a box support (`R_midplane`
+tables are iterated across solves), `[inverse]` (shared coil set), a Device
+(D5).
 
-Acceptance: a `resolve` of unchanged tables is the answer in zero Newton steps
-and the same bits; a `resolve` matches a fresh run on the same tables to the
-convergence tolerance; a failed `resolve` leaves `dataset()` byte-identical;
-cost per warm small-change `resolve` measured against PY-3's.
+**The snapshot** (`meq::EquilibriumSnapshot`, MFEM-free, a value): session
+id and sequence, the tables it was solved at, `( q, ψ, ψ̂ )`, the exterior
+coefficients, `ψ_ax`, `ψ_bnd` and whether it is an unknown, the located axis,
+the X-point, the `I_p` scale, the free currents, the q-driven `g²`
+coefficients, the Newton count, and the family at `[output]`'s options
+(`snapshot()` extracts it once per state). The axis element and §4.5's frozen
+decisions are not in it yet: `manta/shape-derivative` adds them. §4.3 needs
+from it the state, the border values and the tables, all of which are there.
+
+**Acceptance, met** (`RunSession`, M-SESSION-3): an unchanged resolve is the
+answer in zero Newton steps and the same bits; a changed table resolves warm to
+the cold solve of the same tables, 1.5e-14 of the state apart in 4 steps
+against 6; a resolve is the file restart of the same tables **to the bit**; a
+failed resolve leaves the restart file byte for byte as it was (mutation:
+dropping the solver from `SolvedState` is caught); the same tables from the
+same warm start give the same bits whatever the run held between.
 
 ### 4.2 `manta/table-derivative` — `∂R/∂T`
 
@@ -454,11 +474,50 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   boundary, and MaNTA's frame terms vanish by construction (D6). A floating
   scale `α` beside a held `ψ_ax` would make the bordered Jacobian singular or
   nearly so, and imply `⟨E·B⟩ ∝ α̇/α`, outside RoPP's ordering — so there is
-  none. **First check on `manta/session`**: the torus is not the cylinder, and
-  MEQ's q-driven solve fits all of `g²` including its edge value and converges
-  today — measure whether its outer Jacobian is near-singular along this
-  continuum and what pins it (`ToroidalFieldGuess`, the polynomial degree). Free boundary, where `ψ_bnd` moves too,
-  comes after.
+  none. Free boundary, where `ψ_bnd` moves too, comes after.
+
+  **The torus check, done on `manta/session` (→ M-SESSION-2).** The continuum
+  is there in the torus too — it is VMEC's statement that `p(s)`, `ι(s)` and
+  the boundary need `PHIEDGE` beside them, and with `q(Ψ_N)` fixed
+  `Φ_edge = 2π (ψ_ax − ψ_bnd) ∫q dΨ_N`, so the free scalar is `ψ_ax` — and
+  **MEQ's q-driven solve today, `ψ_ax` free, is pinned on it only by the
+  truncation of `g²` to a polynomial.** Measured on `SafetyFactorSolver`'s
+  fixture (`SafetyFactorScale`):
+  * `ψ_ax` free, `G′ − I` at the answer has exactly one near-null direction,
+    and it is the scale: `δψ_ax/ψ_ax = 0.53 δc₀/c₀` (`c₀ = g²` at the edge), i.e. `g ∝ ψ_ax`;
+    `σ_min/σ_max` (in an orthonormal basis of the fit's space) 9.6e-5, 4.2e-5,
+    1.1e-6, ~1e-6 at degrees 2 to 5.
+  * Holding `ψ_ax` 10% off the reference, a q-driven fixed point exists to a
+    least-squares residual that falls with the degree of `g²` — 3.5e-3, 3.8e-3,
+    4.3e-4, 1.2e-4 at degrees 2 to 5 — and does **not** fall with the mesh
+    (1.85e-3, 1.83e-3, 1.85e-3 at 5% on `n = 12, 24, 48`). So neither the
+    torus nor the discretisation pins the scale; the representation does.
+  * `examples/q-driven.toml` converges, and to the same `ψ_ax` from
+    `ToroidalFieldGuess` 1.6, 2.2 and 3.0 at every degree, only because its
+    target was built from an exactly quadratic `g²`: the reference is then an
+    exact fixed point at every degree ≥ 2 (degrees 2 and 4 agree to 1.6e-5 in
+    `ψ_ax`). Posed on `fixed-d-tcv`'s boundary with a measured `q` (not
+    polynomial in `g²`), the loop **fails**: 145 map evaluations, the line
+    search stopped at 0.067, outer conditioning 3.4e-8.
+
+  **So the decision to hold `ψ_ax` is right, and it does what it is for**: held,
+  the smallest singular value of the (fit + axis row) system is 0.53 against
+  2.4e-3 free at degree 2 — 220× — and a floating `α` beside it is
+  near-singular as the plan says (`σ_min/σ_max` 4e-4 to 1e-6). **What it
+  leaves open is the row count.** With `ψ_ax` held, the `q` rows alone are
+  near-degenerate in exactly one direction (`σ_min/σ_max` 1e-3 to 3e-5 at
+  degrees 2 to 5: the cylinder's free axis datum) and the axis row is what
+  removes it, so in a square discretisation the axis row must *replace* one `q`
+  condition, not join them: with `g` knots on MaNTA's faces and `q` rows on
+  the same faces, one row too many. §4.8 must decide which — `q` imposed on
+  the traced surfaces and not at the axis limit, with `g`'s axis value closed
+  by the axis row, is the natural reading of the cylinder (where `B_z(0)` is
+  exactly the free datum) — and measure it. The fitted loop sidesteps it in
+  least squares, which is well conditioned at low degree (0.53/8.6 at degree 2)
+  and less so at higher (1.6e-4 relative at degree 5). **And the q-driven
+  driver itself should hold `ψ_ax`** (a `[source]` key, the answer then a
+  well-posed function of it) rather than leave the scale to its degree: an
+  open item for the user.
 * **D2. Route.** Python adapter first (§4.7); the C++ plugin kept possible by making MEQ's build ABI-compatible with MaNTA's (C++23, a concrete `-march`, `EIGEN_USE_BLAS`), investigated on `manta/plugin-abi`.
 * **D3. The input map — settled by RoPP.** MaNTA evolves the conserved `V'⟨n_s⟩`,
   `(3/2)V'⟨n_s⟩T_s` and `V'Jω` (§1.1), so MEQ takes `T_s` pointwise and the rest
