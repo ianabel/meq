@@ -637,8 +637,9 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 ///  - Delta( B ) to a pressure of 3.0, three times B_0^2: its root never
 ///    reaches 1 at a positive flux, so the limit is not reachable at all;
 ///  - Delta( Psi ) to 0.7. Past it the Newton crawls, 12 steps at 0.9 and 23
-///    at 0.95, and at 0.99 it does not converge. That is a defect, recorded
-///    in TODO and not asserted here.
+///    at 0.95, and at 0.99 it does not converge. That is a defect, asserted
+///    -- and red -- by theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes
+///    below; MEASUREMENTS.md M-351.
 ///
 /// Each within the isotropic mirror's 3 or 4 steps and some slack, as the
 /// negative side is.
@@ -672,6 +673,43 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesTowardsTheFirehoseLimit )
 		std::fflush( stdout );
 		BOOST_TEST( r->solver->newtonIterations() <= 8, kindName( c.kind ) << ", delta0 = "
 		            << c.amplitude << ": " << r->solver->newtonIterations() << " Newton steps" );
+	}
+}
+
+/// DELTA( Psi ) TOWARDS THE FIREHOSE LIMIT, AS THE BUMP GOES: delta0 = 0.9
+/// and 0.95 from the same meshed vacuum, level 0, k = 2, within the same
+/// budget the neighbouring cases allow, as 0.7 and below converge.
+///
+/// RED, DELIBERATELY, WHILE THE CRAWL STANDS (MEASUREMENTS.md M-351; TODO,
+/// "Anisotropic pressure"). Measured in double 12 and 23 steps, in single 10
+/// and no convergence. The bordered Newton direction is exact along every
+/// step and continuation in delta0 reaches 0.99 undamped, so neither the
+/// Jacobian nor a fold is at fault: the Armijo search walks exact steps whose
+/// curvature, through the boundary label's column, reaches 3e4 times the
+/// bump's. Turns green with a fix of that, not with a looser budget.
+BOOST_AUTO_TEST_CASE( theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes )
+{
+	for ( double amplitude : { 0.9, 0.95 } )
+	{
+		auto const r = run( 2, 0, Delta::Profile, amplitude );
+		std::printf( "  Delta( Psi ), delta0 = %+.2f: %s, %d Newton steps; dampings",
+		             amplitude, r->converged ? "converged" : "FAILED",
+		             r->solver->newtonIterations() );
+		for ( auto const &step : r->solver->borderSteps() )
+			std::printf( " %.3g", step.damping );
+		std::printf( "\n" );
+		std::fflush( stdout );
+		bool const met = r->converged && r->solver->newtonIterations() <= 8;
+		BOOST_TEST( met, "Delta( Psi ), delta0 = " << amplitude << ": "
+		            << ( r->converged ? "converged in " : "did not converge in " )
+		            << r->solver->newtonIterations() << " Newton steps against the bump's 3"
+		            " or 4 and this suite's budget of 8 -- the crawl towards the firehose"
+		            " limit, MEASUREMENTS.md M-351, TODO \"Anisotropic pressure\". The"
+		            " Jacobian is exact; the line search walks steps whose curvature runs"
+		            " through the psi_bnd column. Candidate fixes, unmeasured: carry 1 - Delta"
+		            " on the conservation row rather than as R/( 1 - Delta ) on the flux"
+		            " mass, or bound the psi_bnd step relative to the label span"
+		            << ( r->converged ? "" : std::string( ". " ) + r->failure ) );
 	}
 }
 

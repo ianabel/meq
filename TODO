@@ -443,7 +443,9 @@ Raised 2026-08-25.
   to between 2^-7 and 1/2 on most steps, and no convergence at 0.99. The
   bump, a Delta of position with the same 1 - Delta at its peak,
   converges in 3 or 4 steps to 0.99, and Delta( B ) at any pressure tried.
-  A crawl that converges is a defect, not a slow case.
+  A crawl that converges is a defect, not a slow case, and
+  AnisotropicMirror's theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes
+  asserts the wanted behaviour, red in both formats until it is fixed.
 
   WHAT IT IS NOT, MEASURED (M-351):
   * The Jacobian. Along every step of the crawl at 0.9 and 0.95, label
