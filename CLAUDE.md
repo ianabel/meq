@@ -196,8 +196,12 @@ reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 (`TODO`, the single-precision round). It also adds two suites never
 qualified in single: `AnisotropicConvergence` and `AnisotropicMirror`
 (`TODO`, *Anisotropic pressure*). The
-wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
-whole on purpose) and then `naming` (one single-threaded clang-tidy run).
+wall is set by its longest test — `DriverAcceptance`, `naming` (one
+single-threaded clang-tidy run) and `DeviceParity` are the longest. FB-T's
+forty-solve cross (M-134) is `disabled()` in `FreeBoundaryCoupling` and run by
+name: its one assertion is `theTwoBordersConvergeTogether`'s at identical
+configuration, and its cells move by the take
+(→ **[M-354](MEASUREMENTS.md#m-354)**).
 **A suite time is a measurement only on an idle machine**; identical code has
 read 1.16× to 1.6× apart here, so read ratios.
 

@@ -3805,22 +3805,34 @@ namespace
 	/// column, and a fallback is marked after the count.
 	std::string const adaptiveHeader = "cycle     elem    trace";
 
-	/// That configuration's log on the shipped tables, run once for both cases.
-	std::string const &shippedAdaptiveLog()
+	/// One run of the driver: its exit status and everything it printed.
+	struct DriverRun
 	{
-		static std::string const log = []
+		int status = -1;
+		std::string text;
+	};
+
+	/// That configuration's run on the shipped tables, made once for both cases.
+	///
+	/// **THE CACHE HOLDS THE OUTCOME AND DOES NOT ASSERT IT**, and each caller
+	/// requires the status itself, as qDrivenExampleRan() does. A REQUIRE inside
+	/// the static's initialiser throws out of it, and C++ runs an initialiser
+	/// that threw again on the next call -- so a failing run was made once per
+	/// case, and in single that is a second copy of the whole adaptive crawl.
+	DriverRun const &shippedAdaptiveRun()
+	{
+		static DriverRun const outcome = []
 		{
 			std::string const name = "adaptive-limited-tokamak";
 			std::ofstream( name + ".toml" )
 				<< replaceAll( adaptiveLimitedTokamak(), "Prefix = \"limited-tokamak\"",
 				               "Prefix = \"" + name + "\"" );
-			int status = -1;
-			std::string const text =
-				driverLog( std::string( driver() ) + " " + name + ".toml", status );
-			BOOST_TEST_REQUIRE( status == 0, name << " exited " << status << ":\n" << text );
-			return text;
+			DriverRun made;
+			made.text =
+				driverLog( std::string( driver() ) + " " + name + ".toml", made.status );
+			return made;
 		}();
-		return log;
+		return outcome;
 	}
 
 	/// The cycle table's rows, verbatim, one per cycle.
@@ -3846,17 +3858,24 @@ namespace
  * interpolated onto a mesh refined in a few places, which is a better start
  * than the cold one, so it may not need more steps than cycle 0 and may not
  * need the retry rung at all. Double takes 12, 8 and 8. In single, cycle 1's
- * bordered Newton stalls at about 1.8e-06 -- fifteen eps, over the ten-eps gate
- * under which the round-off stop works -- the stall limit hands it to the retry
- * rung, and that crawls 314 steps to a psi_ax 1.4e-03 from double's. Single's
- * own gap to double on this machine, non-adaptive, is 1.3e-04 (M-221's table),
- * so 2.5e-04 separates the crawl's answer from single's accuracy by five.
- * What fixes it is a stop that sees a floor above the gate, or a cycle 1 that
- * does not stall there.
+ * bordered Newton stalls -- the stall limit hands it to the retry rung after
+ * 8 steps under 1/64 of the Newton step -- and the retry rung's Picard stage
+ * runs its 200 iterations without reaching its hand-off tolerance, so the
+ * driver exits 2 and this case fails at its status REQUIRE before the step
+ * counts and psi_ax below are read. Those stand for a run that does finish:
+ * single's own gap to double on this machine, non-adaptive, is 1.3e-04 (M-221's
+ * table), and 2.5e-04 is the bound on a crawl's answer. What fixes it is a
+ * stop that sees a floor above the round-off gate, or a cycle 1 that does not
+ * stall there.
  */
 BOOST_AUTO_TEST_CASE( aWarmAdaptiveCycleConvergesOnTheNewtonRung )
 {
-	std::string const &log = shippedAdaptiveLog();
+	DriverRun const &adaptive = shippedAdaptiveRun();
+	BOOST_TEST_REQUIRE( adaptive.status == 0,
+	                    "adaptive-limited-tokamak exited " << adaptive.status << ": an "
+	                    "adaptive cycle's retry rung did not converge either "
+	                    "(MEASUREMENTS.md M-312):\n" << adaptive.text );
+	std::string const &log = adaptive.text;
 	std::vector<std::string> const rows = adaptiveRows( log );
 	std::vector<int> const steps = tableColumn( log, adaptiveHeader, 6 );
 	BOOST_TEST_REQUIRE( rows.size() == 3u, log );
@@ -3912,7 +3931,13 @@ BOOST_AUTO_TEST_CASE( theProfileScaleCrossesEachAdaptiveCycle )
 		return log;
 	};
 	std::string const &header = adaptiveHeader;
-	std::string const &one = shippedAdaptiveLog();
+	DriverRun const &shipped = shippedAdaptiveRun();
+	BOOST_TEST_REQUIRE( shipped.status == 0,
+	                    "adaptive-limited-tokamak exited " << shipped.status << " on the "
+	                    "shipped tables, so there is no hand-off to read. "
+	                    "aWarmAdaptiveCycleConvergesOnTheNewtonRung names the defect "
+	                    "(MEASUREMENTS.md M-312):\n" << shipped.text );
+	std::string const &one = shipped.text;
 	std::vector<int> const oneSteps = tableColumn( one, header, 6 );
 	BOOST_TEST_REQUIRE( oneSteps.size() == 3u, one );
 
