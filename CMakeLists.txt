@@ -20,7 +20,10 @@ project(meq
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-set(CMAKE_CXX_STANDARD 17)
+# C++23, host and device, to match MaNTA, which loads MEQ as a plugin into its
+# own process (MANTA-PLUGIN-ABI-PLAN.md on manta/plugin-abi measured the move:
+# nothing in the tree changes behaviour).
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -612,6 +615,22 @@ if(MEQ_CORE_SOURCES_PRESENT)
 
 	if(MFEM_FOUND AND MFEM_USE_CUDA)
 		enable_language(CUDA)
+		# THE DEVICE SOURCES FOLLOW THE HOST'S STANDARD. Left alone, nvcc takes 17
+		# from MFEM's cxx_std_17 feature. nvcc 13.4 accepts -std=c++23, but CMake
+		# 4.2's Compiler/NVIDIA.cmake stops at 20 and refuses CUDA_STANDARD 23
+		# ("does not support this"), so the flag is supplied here, after
+		# enable_language() and so not seen by its ABI probe.
+		if(NOT DEFINED CMAKE_CUDA${CMAKE_CXX_STANDARD}_STANDARD_COMPILE_OPTION)
+			set(CMAKE_CUDA${CMAKE_CXX_STANDARD}_STANDARD_COMPILE_OPTION "-std=c++${CMAKE_CXX_STANDARD}")
+			set(CMAKE_CUDA${CMAKE_CXX_STANDARD}_EXTENSION_COMPILE_OPTION "-std=c++${CMAKE_CXX_STANDARD}")
+			list(APPEND CMAKE_CUDA_COMPILE_FEATURES cuda_std_${CMAKE_CXX_STANDARD})
+			set(CMAKE_CUDA${CMAKE_CXX_STANDARD}_COMPILE_FEATURES cuda_std_${CMAKE_CXX_STANDARD})
+			set(CMAKE_CUDA_STANDARD_LATEST ${CMAKE_CXX_STANDARD})
+		endif()
+		set_target_properties(meq_core PROPERTIES
+			CUDA_STANDARD ${CMAKE_CXX_STANDARD}
+			CUDA_STANDARD_REQUIRED ON
+			CUDA_EXTENSIONS OFF)
 
 		# THE ARCHITECTURE IS READ OUT OF MFEM AND NOT GUESSED. CLAUDE.md
 		# records MFEM's own cache defaulting to sm_60 on a card that is
