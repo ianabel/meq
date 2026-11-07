@@ -2159,9 +2159,10 @@ profile is *fitted*: the unknown is the handful of coefficients of
 field.
 
 One solver serves all of them. Only :math:`g\,\mathrm{d}g/\mathrm{d}\Psi`
-changes between steps, so the mesh, the finite element spaces, the assembled
-forms and the trace solver's symbolic factorisation all survive, and each solve
-is warm-started from the previous one's field.
+changes between steps, so the mesh, the finite element spaces and the assembled
+forms survive, and each solve is warm-started from the previous one's field.
+The trace solver's symbolic factorisation is redone by each solve: it is reused
+across the Newton steps of one solve, not between solves.
 
 A relaxed Picard iteration cannot replace the outer Newton, and that is a
 theorem rather than a preference: :math:`c \leftarrow c + \omega(G(c) - c)` has

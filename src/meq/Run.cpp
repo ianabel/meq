@@ -777,6 +777,13 @@ struct meq::Run::Impl
 	std::vector<meq::Knot> answerCrossing();
 	void ensurePostProcessed();
 	meq::FluxSurfaceFamily writeFluxSurfaces( std::string const &file );
+	/// The solved state's family at @a options, traced as the write phase
+	/// traces it: on the curved path through the band, by the transfer
+	/// lift, since Omega_h is inscribed in Gamma and the outer surfaces lie
+	/// partly outside it. Every caller that extracts goes through here.
+	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options,
+	                                      meq::CriticalPoint const &axis );
+	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options );
 	/// The root group of the last _surfaces.nc written, and its family, or null.
 	std::shared_ptr<meq::Dataset const> writtenSurfaces;
 	std::shared_ptr<meq::FluxSurfaceFamily const> writtenFamily;
@@ -3876,9 +3883,12 @@ int meq::Run::Impl::solve()
 		 * THE q-DRIVEN OUTER LOOP, ROADMAP.md ITEM 10.
 		 *
 		 * One equilibrium per map evaluation, with ONE solver for all of them:
-		 * only gg' changes between steps, so the mesh, the spaces, the forms
-		 * and the trace solver's symbolic factorisation are all entitled to
-		 * survive, and NormalisedMHDSource::setGGPrime() is what lets them.
+		 * only gg' changes between steps, so the mesh, the spaces and the forms
+		 * are entitled to survive, and NormalisedMHDSource::setGGPrime() is what
+		 * lets them. The trace solver's symbolic analysis does NOT: the trace
+		 * solver is a local of each solve(), reused across that solve's Newton
+		 * steps only -- one reordering per map evaluation, MEASUREMENTS.md
+		 * M-352.
 		 * The warm start comes for free with the solver -- each solve begins
 		 * from the last one's field, which is what makes the later steps of the
 		 * loop cheap.
@@ -3910,7 +3920,7 @@ int meq::Run::Impl::solve()
 					// so this is the field the family should be built on and
 					// not merely one that happens to be available.
 					solver->postProcess();
-					extracted = meq::extractFluxSurfaces( *solver, family );
+					extracted = extractFamily( family );
 				}
 				catch ( std::exception const & )
 				{
@@ -6596,9 +6606,9 @@ int meq::Run::Impl::sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction 
  * phase extracts, as it writes it, with the provenance it carries. Held as
  * writtenSurfaces, and the family returned, for Run::fluxSurfaces().
  */
-meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &file )
+meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options,
+                                                      meq::CriticalPoint const &axis )
 {
-	meq::OutputConfig const &output = config->getOutput();
 	meq::ContourTracer tracer( *solver );
 
 	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
@@ -6609,9 +6619,26 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 	// Taylor step's second order -- see FluxSurfaces.hpp -- and it
 	// is what lets the outer cut sit anywhere near Gamma at all.
 	// Every node it answers for is marked, per node, in the file.
+	//
+	// AND THE q-DRIVEN LOOP NEEDS IT AS MUCH AS THE FILE DOES: traced
+	// without it, every family of a curved fixed boundary fails at its
+	// outer surfaces, so every map evaluation of the loop is refused and
+	// the outer Jacobian comes back exactly zero (M-353).
 	if ( gammaHMarker && path )
 		tracer.setBandExtension( meq::BandExtension::TransferLift,
 		                         *gammaHMarker, path.get() );
+	return meq::extractFluxSurfaces( tracer, axis, solver->psiBoundary(), options );
+}
+
+meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options )
+{
+	meq::CriticalPointFinder const finder( *solver );
+	return extractFamily( options, finder.findAxis() );
+}
+
+meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &file )
+{
+	meq::OutputConfig const &output = config->getOutput();
 
 	meq::CriticalPointFinder const finder( *solver );
 	meq::CriticalPoint const axis = finder.findAxis();
@@ -6713,8 +6740,7 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 				file.c_str() );
 	}
 
-	meq::FluxSurfaceFamily const family = meq::extractFluxSurfaces(
-		tracer, axis, solver->psiBoundary(), options );
+	meq::FluxSurfaceFamily const family = extractFamily( options, axis );
 
 	meq::FluxGridWriter surfaces( file,
 	                              family );
