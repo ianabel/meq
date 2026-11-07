@@ -408,7 +408,7 @@ namespace meq
 	 * FAMILY: `q` sets the field-line pitch and not the field's strength, which
 	 * is VMEC's reason for wanting `PHIEDGE` beside `iota( s )`. Left free, the
 	 * family is the outer Jacobian's near-null direction and the member is
-	 * picked by the degree of `g^2` alone (MEASUREMENTS.md M-FIX-2). Each value
+	 * picked by the degree of `g^2` alone (MEASUREMENTS.md M-353). Each value
 	 * here is one input that picks it.
 	 */
 	enum class ScalePin

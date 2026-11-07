@@ -28,7 +28,7 @@
  * AND NOT REGISTERED WITH ctest. MEASUREMENTS.md M-QSCALE-1 and M-QSCALE-2.
  *
  * A q-driven equilibrium needs one scalar beside p( Psi_N ) and q( Psi_N ) to
- * select a member of the family they leave (M-FIX-2). Each pin adds a
+ * select a member of the family they leave (M-353). Each pin adds a
  * condition, or removes an unknown, so to keep the outer system square one q
  * condition gives way: a direction u of the fit's residual space, in the
  * orthonormal coordinates y = R c of the fit (R from the QR of its design

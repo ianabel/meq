@@ -345,7 +345,7 @@ endif()
 # WHICH q CONDITION GIVES WAY TO EACH SCALE PIN: a study, BUILT BUT NOT
 # REGISTERED, because its numbers are MEASUREMENTS.md M-QSCALE-1 and M-QSCALE-2,
 # taken once, and the suite asserts the choice through the driver instead
-# (DriverAcceptance's q-driven pins). About ten minutes:
+# (QDrivenScalePin, the composition). About five minutes:
 #     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
 if(TARGET meq_core
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SafetyFactorPinStudy.cpp")

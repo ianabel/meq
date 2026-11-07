@@ -4007,12 +4007,13 @@ int meq::Run::Impl::solve()
 			 *
 			 * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter
 			 * family, so the fixed point G( c ) = c is a continuum up to what
-			 * g^2's degree cannot follow (MEASUREMENTS.md M-FIX-2). Config
+			 * g^2's degree cannot follow (MEASUREMENTS.md M-353). Config
 			 * requires exactly one of the three, and each selects the member:
 			 *
 			 *   R0B0           c_0 = R0B0^2 held, out of the unknowns;
 			 *   ToroidalFlux   psi_ax - psi_bnd = Phi/( 2 pi int_0^1 q dPsi ),
-			 *                  a row, read off the family the map just traced;
+			 *                  a row, read off the bordered Newton's own psi_ax
+			 *                  and psi_bnd (not a held psi_ax: M-QSCALE-1);
 			 *   PlasmaCurrent  mu0 I_p, a row, read off the solved state, with
 			 *                  the profile scale left at one (makeSolver()).
 			 *

@@ -566,7 +566,6 @@ namespace meq
 					"moves can change the equilibrium; and a degree the surface "
 					"family does not determine leaves the outer Jacobian rank "
 					"deficient, which is reported rather than solved" );
-
 		}
 
 		/**
@@ -577,7 +576,7 @@ namespace meq
 		 * family -- q sets the pitch of the field lines and not the strength
 		 * of the field -- so the q-driven problem is ILL-POSED with none of
 		 * the three, and its answer is then whatever g^2's degree happens to
-		 * select (MEASUREMENTS.md M-FIX-2). Two over-determine it, and which
+		 * select (MEASUREMENTS.md M-353). Two over-determine it, and which
 		 * one would win is a precedence rule deciding the physics. So both are
 		 * refused, naming the keys.
 		 *

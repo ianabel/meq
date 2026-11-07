@@ -437,17 +437,29 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - —
      - Path to a tabulated **target** :math:`q(\Psi)`, which makes
        :math:`g\,\mathrm{d}g/\mathrm{d}\psi` an **output** of the run rather
-       than an input. Requires ``Normalised = true`` and ``ToroidalFieldGuess``.
-       See :ref:`configuration-q-driven`.
+       than an input. Requires ``Normalised = true`` and **exactly one** of
+       ``R0B0``, ``ToroidalFlux`` and ``PlasmaCurrent``. See
+       :ref:`configuration-q-driven`.
    * - ``SafetyFactorDegree``
      - ``2``
      - Degree of the :math:`g^2` polynomial the outer loop solves for. Only with
        ``SafetyFactorFile``.
+   * - ``R0B0``
+     - —
+     - :math:`g = R B_\phi` on the boundary, in T m — the vacuum field the TF
+       coils set. One of the three scale pins of ``SafetyFactorFile``, and
+       refused without it. Positive.
+   * - ``ToroidalFlux``
+     - —
+     - :math:`\Phi_\mathrm{edge}`, the toroidal flux inside the boundary, in
+       Wb — VMEC's ``PHIEDGE``. One of the three scale pins of
+       ``SafetyFactorFile``, and refused without it.
    * - ``ToroidalFieldGuess``
      - —
-     - **Required with** ``SafetyFactorFile``. The constant
-       :math:`g = R B_\phi` the loop opens at — a machine's vacuum
-       :math:`R_0 B_0`.
+     - **Required with** ``SafetyFactorFile`` beside ``ToroidalFlux`` or
+       ``PlasmaCurrent``; refused beside ``R0B0``, where the loop opens at
+       :math:`g = R_0 B_0`. The constant :math:`g = R B_\phi` the loop opens
+       at — a machine's vacuum :math:`R_0 B_0`.
    * - ``PPrimeScale``, ``GGPrimeScale``
      - ``1.0``
      - Constant multiplying the table as read, so unit conversion needs no edit
@@ -806,6 +818,12 @@ Newton and prescribes the current instead: the profiles then give the current's
 **shape** and this gives its **size**. It is how every production free-boundary
 code poses the problem. Absent, the amplitude is fixed and the current is
 whatever it comes out as.
+
+**Beside** ``SafetyFactorFile`` **it is not a border.** There it is the scale pin
+of :ref:`configuration-q-driven-scale`: the profile scale stays one, so the
+pressure is the table's, and the current is a condition of the outer loop. A
+scale border there would multiply :math:`p'` and :math:`g g'` together, and the
+loop would report a :math:`g` the equilibrium does not have.
 
 .. list-table::
    :header-rows: 1
@@ -2151,8 +2169,8 @@ What it costs
 
 **Every map evaluation is a whole equilibrium** — one per residual, and
 :math:`2(d+1)` more per Jacobian, which is formed afresh at every outer
-iteration. The shipped example converges in 5 outer iterations and **36
-equilibria** in double, and in 4 and **30** in single. It is affordable only
+iteration. The shipped example converges in 5 outer iterations and **26
+equilibria** in double. It is affordable only
 because the
 profile is *fitted*: the unknown is the handful of coefficients of
 :math:`g^2 = \sum_j c_j \Psi^j` rather than every degree of freedom of the
@@ -2184,6 +2202,61 @@ machine can have and which nothing downstream will look at twice.
 surface family does not determine leaves the outer Jacobian rank deficient,
 which MEQ reports — ``did not converge … the outer Jacobian is RANK
 DEFICIENT`` — rather than solving. Two or three is the usual.
+
+.. _configuration-q-driven-scale:
+
+The scale: exactly one of ``R0B0``, ``ToroidalFlux`` and ``PlasmaCurrent``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**A target** :math:`q(\Psi)` **and a pressure** :math:`p(\Psi)` **do not
+determine the equilibrium.** Fixed-boundary equilibria sharing the two form a
+one-parameter family: :math:`q` sets the pitch of the field lines and not the
+strength of the field — the reason VMEC wants ``PHIEDGE`` beside
+:math:`\iota(s)`. Along the family :math:`g` and :math:`\psi_\mathrm{ax}` grow
+together. So a q-driven run names **exactly one** more scalar, which selects
+the member:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Key
+     - What it holds
+   * - ``R0B0``
+     - :math:`g` on the boundary, T m: the vacuum toroidal field. The loop
+       opens at this constant :math:`g`, and :math:`g^2`'s constant term is
+       held at its square.
+   * - ``ToroidalFlux``
+     - :math:`\Phi_\mathrm{edge} = 2\pi(\psi_\mathrm{ax} - \psi_\mathrm{bnd})
+       \int_0^1 q\,\mathrm{d}\Psi`, Wb, with :math:`q` the target as MEQ
+       evaluates it (held at its end values beyond the table). With :math:`q`
+       given it holds the span of :math:`\psi`, in the unit a user has.
+   * - ``PlasmaCurrent``
+     - :math:`I_p`, A. The profile scale stays one, so :math:`p` is the
+       table's.
+
+**Naming none is refused**, since the problem then has no answer to find — the
+loop would return whichever member the degree of :math:`g^2` happens to
+favour, and on a measured :math:`q` it does not converge at all. **Naming two
+is refused** too: each alone selects the equilibrium.
+
+Each pin adds one condition to the loop or removes one unknown, so to keep the
+system square **one condition on** :math:`q` **gives way**: the highest moment
+of the fit, the one least able to move the equilibrium, so that :math:`q` is
+matched in every lower moment. It is the same condition under every pin, and
+that is what lets them pose **one** problem: an equilibrium solved under one
+pin is returned by the other two when they are set to the values it reads.
+Where the target's :math:`g^2` is not a polynomial of the degree asked for, the
+choice of condition moves the answer by the fit's misfit — which is one more
+reason the degree is part of the model.
+
+Every q-driven ``<stem>.nc`` reports all three of its answer's own scalars, as
+``edge_toroidal_field``, ``toroidal_flux`` and ``plasma_current``, beside
+``scale_pin``, the key the run was given, and the loop's cost,
+``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``; the run prints
+them as ``its scale:``. The numbers behind these choices are in
+``MEASUREMENTS.md`` (M-QSCALE-1 to M-QSCALE-3) — measure them on your own
+case.
 
 When the loop does not converge
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2237,7 +2310,8 @@ What the run writes
 
 The answer is :math:`g`, so it goes into the interchange file: ``<stem>.nc``
 carries ``toroidal_field_driven``, ``g_squared_coefficients`` — ascending in
-:math:`\Psi` — and ``safety_factor_target``. There is no ``GGPrimeFile`` beside
+:math:`\Psi` — and ``safety_factor_target``, with the scale attributes of
+:ref:`configuration-q-driven-scale`. There is no ``GGPrimeFile`` beside
 the output for a reader to look the field up in, which is why it is recorded
 rather than left to the configuration.
 

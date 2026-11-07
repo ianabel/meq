@@ -2945,7 +2945,7 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
  *
  * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter family, so
  * a q-driven run with none of the three is ill-posed -- its answer is whatever
- * g^2's degree selects (MEASUREMENTS.md M-FIX-2) -- and one with two is
+ * g^2's degree selects (MEASUREMENTS.md M-353) -- and one with two is
  * over-determined. Both are refused, and the refusal names the keys: the
  * message is what tells a user what the run is missing.
  */

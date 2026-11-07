@@ -23509,3 +23509,146 @@ made from its `_surfaces.nc` and `fixed-d-tcv-ggprime.dat`, `tcv-d2-g1.4.toml`),
 and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (the suite's, above) — the
 longer study is `runs/manta-session/scale.log`, `scale3.log`, `scale4.log`, and
 the square systems `runs/manta-session/fix-scale2.log`.
+
+### M-QSCALE-1
+
+**Which q condition gives way to each scale pin, by the smallest singular
+value of the square system.** `SafetyFactorPinStudy` (built, not a ctest),
+`q-solve-scale` off `fix/q-driven-band` at `9893091`, double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`: `SafetyFactorSolver`'s fixture (box
+`n = 24`, `k = 2`, `p′ = 0.45`, `μ₀ = 1`, 12 surfaces × 96 angles, the target
+the `q` of `g = 2.20 + 0.55Ψ`), Jacobians differenced centrally at the answer
+(step 1e-3), rows and columns in the fit's orthonormal coordinates `y = Rc`,
+the pin row `10 (m − m*)/m*`. "Gives way": the direction of the fit's residual
+space left free — `y_k`, the `k`-th orthonormal row, or "axis", the
+coefficient of `Ψ^d` (a misfit zero to order `d` at the edge and largest on
+the axis). `σ_min/σ_max`; `ψ_ax` free means the bordered inner solve with the
+pin a row of the outer system, `ψ_ax` held the plain inner solve at the
+target's normalisation with the located axis as the row.
+
+| degree | gives way | `R0B0` (`c₀` held) | `Φ_edge`, `ψ_ax` free | `Φ_edge`, `ψ_ax` held | `I_p`, `ψ_ax` free |
+|---|---|---|---|---|---|
+| 2 | `y_0` | 1.57e-2 / 15.8 | 0 / 17.8 | 0 / 27.0 | 0 / 21.6 |
+| 2 | `y_1` | 0.116 / 21.9 | 0.0587 / 21.9 | 0.0587 / 41.0 | 0.0110 / 23.8 |
+| 2 | **`y_2`** | **2.69** / 26.9 | **0.578** / 26.5 | **0.594** / 44.2 | **0.329** / 28.5 |
+| 2 | axis | 2.68 / 4.11 | 0.266 / 10.0 | 0.268 / 23.1 | 0.198 / 15.8 |
+| 4 | `y_0` | 7.9e-4 / 86.2 | 0 / 90.0 | 0 / 110 | 0 / 90.6 |
+| 4 | `y_1` | 7.4e-3 / 84.9 | 3.7e-3 / 86.7 | 3.3e-3 / 136 | 8.3e-4 / 87.2 |
+| 4 | `y_2` | 0.210 / 103 | 0.263 / 105 | 0.262 / 151 | 0.0161 / 105 |
+| 4 | `y_3` | 0.390 / 110 | 0.522 / 112 | 0.531 / 156 | 0.0195 / 112 |
+| 4 | **`y_4`** | **2.23** / 112 | **0.577** / 113 | **0.593** / 157 | **0.173** / 113 |
+| 4 | axis | 0.0357 / 18.5 | 1.8e-3 / 30.2 | 1.6e-3 / 63.4 | 6.9e-3 / 38.5 |
+
+Free, no pin: `σ_min` 2.39e-3 at degree 2 and 1.21e-4 at degree 4.
+`d ln ψ_ax/dc` = (0, 0.132, 0.195, 0.237, 0.269) and `d ln I_p/dc` = (0, 0.151,
+0.0576, 0.0031, −0.036): **`c₀` enters no solve**, so with `c₀` an unknown the
+fit's `y_0` is the only row that sees it and dropping it is exactly singular.
+
+**The highest row `y_d` gives way best under every pin at both degrees** —
+at degree 2 the axis limit ties it under `R0B0` (2.68 against 2.69) and loses
+under the other two, and at degree 4 it is 60× to 300× worse. The pinned
+systems are 100× (degree 2) to 10⁴× (degree 4) better conditioned than the free
+one. **Holding `ψ_ax` inside buys nothing over the free inner solve with the
+flux as an outer row** (0.594 against 0.578, 0.593 against 0.577), and the
+held inner solve is the outer closure `CLAUDE_DECLINED.md` records falsified
+(*Fixing `ψ_ax`, or closing it outside the solver*), so the flux pin is a row
+beside the bordered Newton.
+
+**Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy`
+(about 5 minutes); `runs/q-solve-scale/study/study.log`.
+
+### M-QSCALE-2
+
+**`[source] PlasmaCurrent` as a profile-scale border beside the free q loop
+selects a member, and it is not the member asked for.** `SafetyFactorPinStudy`'s
+second case, the M-QSCALE-1 fixture, degree 2, the free outer loop around a
+bordered inner solve carrying `μ₀ I_p` as a border (the scale `α`
+multiplies `p′` and `gg′` together), from `g = 2`:
+
+| `I_p` asked | KINSOL its / equilibria | `α` | `ψ_ax` (reference 0.345741) | `c` | `q` against the target |
+|---|---|---|---|---|---|
+| `I_p*` | 8 / 57 | 1.3467 | 0.330550 | 4.7247, 1.6944, −0.0299 | 4.3e-2 |
+| `1.1 I_p*` | 7 / 50 | 1.7219 | 0.356154 | 5.6715, 1.5973, −0.1230 | 6.9e-2 |
+
+The loop converges, and at `α ≠ 1`: **asked for the reference's own current it
+does not return the reference**. The equilibrium carries `α p`, a pressure
+nobody gave, and `gg′` is `α` times the one the loop fitted, so the `g²` the
+loop reports is not the equilibrium's and its `q` misses the target by 4–7%
+(the last column: `√((c₀ + αV)/(c₀ + V)) − 1`, `V` the fit's varying part, worst
+over the surfaces). **It fights the loop.** As a pin the current is instead a
+row of the outer system with `α = 1` (`GradShafranovSolver::deliveredPlasmaCurrent()`).
+
+**Reproduce.** As M-QSCALE-1.
+
+### M-QSCALE-3
+
+**The three pins compose, and each converges with no crawl.** `q-solve-scale`,
+double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a loaded machine (wall times
+are not measurements).
+
+**(a) `examples/q-driven.toml`** (`R0B0 = 2.2`, the target's own boundary `g`),
+and the same file under the other two pins at the values it reads, from
+`ToroidalFieldGuess = 1.8`:
+
+| pin | KINSOL its / equilibria | conditioning | `g²` |
+|---|---|---|---|
+| `R0B0 = 2.2` | 5 / 26 | 0.167 | 4.840000, 2.419999, 0.3025002 |
+| `ToroidalFlux = 2.475788836` | 5 / 36 | 0.0925 | the same |
+| `PlasmaCurrent = 5.212435078` | 5 / 36 | 0.0751 | the same |
+
+against 5 / 36 at conditioning 6.4e-3 with no pin (M-353). Reported
+conditioning is in the unknowns' own coordinates and is diagnostic only.
+
+**(b) `QDrivenScalePin`, the composition, asserted.** The q-driven box at
+`RefinementLevels = 0`, the target `q-driven-q.dat × (1 + 0.2Ψ³)`, which no
+quadratic `g²` follows. A base run under `PlasmaCurrent = 5.0` from `g = 1.8`
+reads `R0B0 = 1.937000795`, `Φ = 2.213770701` and `I_p = 5.000000000`; re-solved
+under each:
+
+| re-solved under | KINSOL its / equilibria | `ψ_h` from the base | `g²` from the base |
+|---|---|---|---|
+| base, `PlasmaCurrent = 5.0` | 5 / 36 | | |
+| `R0B0` | 5 / 26 | 1.1e-14 | 7.3e-14 |
+| `ToroidalFlux`, from `g = 2.2` | 4 / 29 | 3.3e-11 | 6.2e-11 |
+| `PlasmaCurrent`, from `g = 2.2` | 5 / 36 | 1.7e-15 | 8.3e-16 |
+
+(relative to the peak coefficient). 58 s. **Mutated**: `R0B0` giving way on the
+axis limit instead of `y_2` puts its answer 0.13 of `ψ`'s peak from the others
+(`Φ` 2.506 against 2.214); `PlasmaCurrent` giving way on `y_1` moves the base
+itself and puts the three 0.045 to 0.13 apart, one of them taking 24 KINSOL
+iterations. Both fail the case. **Which q condition gives way moves the answer
+by the fit's misfit — 13% of `ψ` here — so it is part of the problem posed and
+has to be one choice under every pin.**
+
+**(c) `fixed-d-tcv` with a measured `q`** — M-353 (b)'s failing case: the MXH
+boundary at `RefinementLevels = 1` (3993 elements), the target the `q` of the
+shipped `gg′` run on the same mesh, `g_edge = 1.400002`, degree 2:
+
+| pin, opening `g` | KINSOL its / equilibria | refused | conditioning | wall |
+|---|---|---|---|---|
+| `R0B0 = 1.400002` | 3 / 16 | 0 | 0.461 | 1 m 48 s |
+| `ToroidalFlux = 0.5360939985`, 1.4 | 4 / 29 | 0 | 3.3e-3 | 2 m 35 s |
+| `ToroidalFlux`, 1.2 | 4 / 29 | 0 | 2.9e-3 | 2 m 31 s |
+| `PlasmaCurrent = 1.168128770e5`, 1.4 | 4 / 29 | 0 | 6.3e-4 | 2 m 51 s |
+| `PlasmaCurrent`, 1.2 | 4 / 29 | 0 | 8.0e-4 | 2 m 22 s |
+| `R0B0`, degree 3 | 3 / 22 | 0 | 0.043 | 1 m 52 s |
+
+Every degree-2 run returns `g² = 1.960006, −2.780245e-3, 1.396952e-2` and reads
+`R0B0 = 1.400002`, `Φ = 0.536094 Wb`, `I_p = 1.168129e5 A`, where unpinned the
+loop failed in 10 iterations and 145 equilibria from 1.4 and was still running
+after 35 minutes from 1.2. At degree 3 the member moves (`Φ` 0.531787,
+`I_p` 1.116323e5): the degree is part of the model, and no longer what selects
+the member.
+
+**(d) `QDrivenCurvedBoundary` under `R0B0 = 2.2`**, asserted: the Miller
+boundary at `RefinementLevels = 0`, `k = 2`, the target the `q` of
+`g = 2.20 + 0.55Ψ` on the same mesh. 5 KINSOL iterations, 26 equilibria, none
+refused, conditioning 0.210, `g² = 4.84000000 + 2.42000000Ψ + 0.30250000Ψ²`;
+35 s.
+
+**Reproduce.** (a) `runs/q-solve-scale/example/` (`run.log`, `flux.toml`,
+`current.toml`); (b) `MKL_NUM_THREADS=1 ./QDrivenScalePin`,
+`runs/q-solve-scale/study/composition.log` and `mutation-a.log`,
+`mutation-c.log` (the mutated row in `PinnedToroidalFieldMap::operator()`);
+(c) `runs/q-solve-scale/tcv/` (`make.sh`, `run.sh`, `base.toml` from M-353's
+`tcv-d2-g1.4.toml`, `tcv-q.dat`, one `.toml`/`.log` per row).

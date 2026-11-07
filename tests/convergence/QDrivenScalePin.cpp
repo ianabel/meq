@@ -35,8 +35,10 @@
  * is that table times ( 1 + 0.2 Psi^3 ), whose g^2 no quadratic follows: the
  * fit leaves a misfit, it lies along whichever condition gave way, and two
  * pins that dropped different conditions return equilibria that differ by it.
- * Measured on this fixture, R0B0 dropping its axis-limit condition instead of
- * y_2 moves psi by 4e-4 of its peak; this case asks for 1e-6.
+ * Mutation-tested on this fixture (M-QSCALE-3): R0B0 giving way on its
+ * axis-limit condition instead of y_2 puts its answer 0.13 of psi's peak from
+ * the others, and PlasmaCurrent giving way on y_1 puts every answer 0.05 to
+ * 0.13 apart; this case asks for 1e-6.
  *
  * Coarse on purpose (the q-driven box at RefinementLevels = 0, k = 2): the
  * agreement asked for is the LOOP's, between solves on one mesh, and does not
@@ -192,7 +194,7 @@ BOOST_AUTO_TEST_CASE( theThreePinsReturnOneEquilibrium )
 
 	/*
 	 * AND NONE OF THEM CRAWLED. The loop is a differenced Newton started at
-	 * gg' = 0 and finishes in 4 to 6 iterations under every pin here
+	 * gg' = 0 and finishes in 4 or 5 iterations under every pin here
 	 * (M-QSCALE-3); a crawl that converged would still pass the agreement
 	 * above, and is a defect.
 	 */
