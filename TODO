@@ -1424,6 +1424,22 @@ TCV shaped's branch in item 5 each take a suite case red, in single.
      DriverAcceptance's theRetryRungClosesAStalledFirstAttempt is red on it
      in single.
 
+  6. THE FOLLOWING tau'S DIFFERENCED CONTROL TAKES A STEP MORE IN SINGLE.
+     RotatingMirrorBorder's aTauThatFollowsTheReactionLiftsTheElementFold-
+     AndIsQuadratic, three species at 2e20, theta = 10: the direct columns
+     converge in 4 steps (1.33 1.87e-2 2.15e-3 3.42e-5 8.49e-8), the
+     differenced control in 5 (1.33 1.86e-2 2.22e-3 4.57e-5 6.84e-7
+     3.74e-8), the answers 1.3e-7 apart, under the floor and skipped as M-272
+     says. The REQUIRE that both histories have as many steps above the floor
+     is red, 6 != 5, and the step-by-step bound would be too: step 2 differs
+     by 7e-5 against differencedAgreementFloor's 1.4e-3 of the step before,
+     2.6e-5. A single-precision central difference is an inexact Jacobian at
+     about 4e-3 here. The test was first run in single on 2026-11-07 -- main
+     did not build in single while it was written (20c131e). Closes: the
+     control's agreement bound measured in single, as M-294's were, and the
+     size REQUIRE read on the steps both histories share; or the comparison
+     skipped loudly under the floor, as landsOnTheAnswer() is.
+
 
 ================================================================================
 A CUDA-only build: cuDSS as the only trace solver
