@@ -390,6 +390,19 @@ if(TARGET NewtonConvergence AND MFEM_USE_CUDA)
 		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
 endif()
 
+# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-SHAPE-1 -- what
+# makes the flux-surface geometry jump as a table moves, and how the jump scales
+# with the mesh. BUILT BUT NOT REGISTERED: it asserts nothing, and each case is a
+# measurement of minutes, run one at a time with --run_test=<case> and
+# MKL_NUM_THREADS=1. SessionSmoothness is the assertion it serves.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ExtractionJumps.cpp")
+	add_executable(ExtractionJumps "convergence/ExtractionJumps.cpp")
+	target_include_directories(ExtractionJumps PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(ExtractionJumps PRIVATE meq_core Boost::unit_test_framework)
+endif()
+
 # ---------------------------------------------------------------------------
 # The performance harness. BUILT BUT NOT REGISTERED AS A TEST, deliberately.
 #

@@ -1164,6 +1164,11 @@ namespace meq
 				/// the factor of 1.7e5 CLAUDE.md records against sampleCoefficient().
 				double footR = 0.0;
 				double footZ = 0.0;
+
+				/// For an extended sample, the index of the band face it was
+				/// extended from (bandFaces' numbering, which is the order
+				/// setBandExtension() found them in); -1 otherwise.
+				int face = -1;
 			};
 
 			/// Locate ( R, z ) and evaluate both fields there. @a hint is the
@@ -1351,6 +1356,16 @@ namespace meq
 	 * separate the first column from the second by the end of the sweep, and
 	 * every one of them is the Jacobian.
 	 */
+	/// How a ray's search for its node ended: Newton to the tolerance,
+	/// bisection to the tolerance, or the closest iterate either reached
+	/// (AngleParametrisation::stalledRays).
+	enum class RayRoute : char
+	{
+		Newton = 0,
+		Bisection = 1,
+		BestIterate = 2
+	};
+
 	struct AngleParametrisation
 	{
 		/// The axis the rays are drawn from.
@@ -1483,6 +1498,25 @@ namespace meq
 		/// The same measurement Contour::fallbackLocations is, for the same
 		/// reason: it is a performance statement and nothing else would say it.
 		int fallbackLocations = 0;
+
+		/// THE DISCRETE CHOICES EACH NODE WAS PLACED BY, per node, as
+		/// diagnostics: the element whose polynomial was rooted (for a band
+		/// node, the element whose polynomial was extended), the band face it
+		/// was extended from (-1 inside Omega_h), how the ray's search ended,
+		/// and its iterations. Nothing reads them back into an extraction;
+		/// they are how a jump in the geometry is traced to the choice that
+		/// made it (SessionSmoothness, M-SHAPE-1). A node whose element
+		/// changes between two nearby states has crossed a face, and the root
+		/// moves by the DG jump over | grad psi |.
+		std::vector<int> element;
+		std::vector<int> bandFace;
+		std::vector<char> route;
+		std::vector<int> iterations;
+
+		/// The traced contour's point count, which seeds every ray's guess
+		/// and bracket. A diagnostic, not a decision: a ray that converges is
+		/// independent of it except through the element its walk starts in.
+		std::size_t tracedPoints = 0;
 
 		/// The periodic trapezoid rule on sqrt( rho'^2 + rho^2 ), with rho' from
 		/// q. THE ANSWER.

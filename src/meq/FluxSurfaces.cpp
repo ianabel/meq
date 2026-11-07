@@ -839,6 +839,7 @@ namespace meq
 		BoundaryFace const &face = bandFaces[ which ];
 
 		sample.element = face.element;
+		sample.face = which;
 		sample.extended = true;
 		sample.depth = depth;
 		sample.footR = footR;
@@ -1065,6 +1066,7 @@ namespace meq
 			sample.depth = 0.0;
 			sample.footR = 0.0;
 			sample.footZ = 0.0;
+			sample.face = -1;
 		};
 
 		bool const band = bandMethod != BandExtension::None;
@@ -2038,6 +2040,11 @@ namespace meq
 		fit.speed.assign( count, 0.0 );
 		fit.crossing.assign( count, 0.0 );
 		fit.extended.assign( count, 0 );
+		fit.element.assign( count, -1 );
+		fit.bandFace.assign( count, -1 );
+		fit.route.assign( count, static_cast<char>( RayRoute::Newton ) );
+		fit.iterations.assign( count, 0 );
+		fit.tracedPoints = contour.points.size();
 		fit.transversality = std::numeric_limits<double>::infinity();
 
 		double const target = tolerance*potentialScale();
@@ -2087,6 +2094,8 @@ namespace meq
 			// leave the answer in whichever evaluation happened to converge.
 			bool nodeExtended = false;
 			double nodeDepth = 0.0;
+			int nodeElement = -1;
+			int nodeFace = -1;
 
 			// THE BEST ITERATE, AND WHY THIS RAY NEWTON KEEPS ONE.
 			//
@@ -2117,6 +2126,8 @@ namespace meq
 			double bestQZ = 0.0;
 			bool bestExtended = false;
 			double bestDepth = 0.0;
+			int bestElement = -1;
+			int bestFace = -1;
 			bool haveBest = false;
 
 			auto evaluate = [ & ]( double rho, double &psi, double &qR,
@@ -2132,6 +2143,8 @@ namespace meq
 				qZ = sample.qZ;
 				nodeExtended = sample.extended;
 				nodeDepth = sample.depth;
+				nodeElement = sample.element;
+				nodeFace = sample.face;
 
 				double const distance = std::abs( sample.psi - contour.level );
 				if ( distance < bestResidual )
@@ -2143,6 +2156,8 @@ namespace meq
 					bestQZ = sample.qZ;
 					bestExtended = sample.extended;
 					bestDepth = sample.depth;
+					bestElement = sample.element;
+					bestFace = sample.face;
 					haveBest = true;
 				}
 
@@ -2186,6 +2201,7 @@ namespace meq
 				// bracket, which is why the bracket is kept rather than only the
 				// seed.
 				++fit.bisections;
+				fit.route[ j ] = static_cast<char>( RayRoute::Bisection );
 
 				double aLo = bracketLo;
 				double aHi = bracketHi;
@@ -2249,7 +2265,10 @@ namespace meq
 					qZ = bestQZ;
 					nodeExtended = bestExtended;
 					nodeDepth = bestDepth;
+					nodeElement = bestElement;
+					nodeFace = bestFace;
 					++fit.stalledRays;
+					fit.route[ j ] = static_cast<char>( RayRoute::BestIterate );
 				}
 			}
 
@@ -2277,6 +2296,9 @@ namespace meq
 			fit.transversality = std::min( fit.transversality, std::abs( cross ) );
 
 			fit.extended[ j ] = nodeExtended ? 1 : 0;
+			fit.element[ j ] = nodeElement;
+			fit.bandFace[ j ] = nodeFace;
+			fit.iterations[ j ] = iterations;
 			if ( nodeExtended )
 			{
 				++fit.extendedNodes;

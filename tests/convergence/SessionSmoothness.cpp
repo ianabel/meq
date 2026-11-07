@@ -14,6 +14,7 @@
 #include "meq/EquilibriumSnapshot.hpp"
 #include "meq/Run.hpp"
 
+#include "SessionCases.hpp"
 #include "SourceTree.hpp"
 
 /*
@@ -39,70 +40,7 @@
  */
 namespace
 {
-	std::string tcvRotating()
-	{
-		// examples/fixed-d-tcv.toml's machine -- an MXH boundary, curved, so
-		// the outer surfaces cross the band -- with rotating-normalised's
-		// source: RotatingSource is the one MaNTA's tables feed.
-		std::string text = meq::test::shippedConfig( "examples/fixed-d-tcv.toml" );
-		std::string const density = meq::test::sourcePath( "examples/rotating-density-normalised.dat" );
-		std::string const source =
-			"[source]\n"
-			"Type = \"rotating\"\n"
-			"Normalised = true\n"
-			"PsiAxis = 0.043\n"
-			"ReferenceRadius = 0.9\n"
-			"Omega = 4.0e5\n"
-			"GGPrime = 0.02\n\n"
-			"[[source.species]]\n"
-			"Name = \"D\"\n"
-			"Mass = 3.3435837768e-27\n"
-			"Charge = 1.0\n"
-			"Temperature = 1.0\n"
-			"TemperatureScale = 1.602176634e-16\n"
-			"DensityFile = \"" + density + "\"\n"
-			"DensityScale = 1.0e20\n\n"
-			"[[source.species]]\n"
-			"Name = \"e\"\n"
-			"Mass = 9.1093837015e-31\n"
-			"Charge = -1.0\n"
-			"Temperature = 0.8\n"
-			"TemperatureScale = 1.602176634e-16\n"
-			"Neutralising = true\n\n";
-		text = std::regex_replace( text, std::regex( R"(\n\[source\]\n[\s\S]*?\n(?=\[solver\]))" ),
-		                           "\n" + source );
-		text = std::regex_replace( text, std::regex( R"(RefinementLevels = 2)" ),
-		                           "RefinementLevels = 1" );
-		text = std::regex_replace( text, std::regex( R"(\nAmplitude = [0-9.eE+-]+)" ),
-		                           "\nAmplitude = 0.043" );
-		return text;
-	}
-
-	/// The configuration with the D density's scale taken into its table, so
-	/// the table can be handed in, and the Newton's relative tolerance set.
-	std::string adapted( std::string text, double tolerance )
-	{
-		text = std::regex_replace( text, std::regex( R"(\nDensityScale = 1.0e20\n)" ), "\n" );
-		char line[ 64 ];
-		std::snprintf( line, sizeof line, "\nNewtonRelativeTolerance = %.1e\n", tolerance );
-		return std::regex_replace( text, std::regex( R"(\nNewtonRelativeTolerance = [0-9.eE+-]+\n)" ),
-		                           line );
-	}
-
-	meq::ProfileTable density( double h );
-
-	std::unique_ptr<meq::Run> solvedRun( std::string const &path, std::string const &text )
-	{
-		meq::RunOptions options;
-		options.configPath = path;
-		options.configText = text;
-		options.profiles = { { "species.D.Density", density( 0.0 ) } };
-		options.version = "SessionSmoothness";
-		auto run = std::make_unique<meq::Run>( options );
-		BOOST_TEST_REQUIRE( run->prepare() == meq::Solved );
-		BOOST_TEST_REQUIRE( run->solve() == meq::Solved );
-		return run;
-	}
+	using namespace meq::test::session;
 
 	struct Output
 	{
@@ -139,6 +77,98 @@ namespace
 	}
 
 	using Perturbed = std::function<meq::ProfileTables( double )>;
+
+	/*
+	 * WHICH DECISION MAKES THE JUMP -- the instrument behind M-SHAPE-1. Along
+	 * the scan, every node of every surface keeps the decisions that placed it
+	 * (FluxSurface::elements, bandFaces, rayRoutes, rayIterations) and the
+	 * axis its element. A jump in an output is a jump in some node's position
+	 * or flux; the node is found as the one whose position has the largest
+	 * second difference across the spike, and its decisions are printed on
+	 * the three states either side. Along the whole scan, how many nodes ever
+	 * change each decision.
+	 */
+	void reportDecisions( std::vector<std::shared_ptr<meq::EquilibriumSnapshot const>> const &states,
+	                      std::size_t output, int at )
+	{
+		std::size_t const n = states.front()->family->surfaces.size();
+		std::size_t const surfaces[] = { 0, n/2, n - 1 };
+		std::size_t const which = output/4 < 3 ? surfaces[ output/4 ] : 0;
+
+		std::size_t axisChanges = 0;
+		for ( std::size_t j = 1; j < states.size(); ++j )
+			if ( states[ j ]->family->axisElement != states[ j - 1 ]->family->axisElement )
+				++axisChanges;
+		std::printf( "    decisions along the scan: the axis element changes %zu times "
+		             "(element %d at the base)\n", axisChanges,
+		             states[ states.size()/2 ]->family->axisElement );
+
+		for ( std::size_t i = 0; i < n; ++i )
+		{
+			std::size_t elementNodes = 0, faceNodes = 0, routeNodes = 0, iterationNodes = 0;
+			std::size_t traced = 0;
+			meq::FluxSurface const &first = states.front()->family->surfaces[ i ];
+			for ( std::size_t node = 0; node < first.count(); ++node )
+			{
+				bool element = false, face = false, route = false, iterations = false;
+				for ( std::size_t j = 1; j < states.size(); ++j )
+				{
+					meq::FluxSurface const &a = states[ j - 1 ]->family->surfaces[ i ];
+					meq::FluxSurface const &b = states[ j ]->family->surfaces[ i ];
+					element |= a.elements[ node ] != b.elements[ node ];
+					face |= a.bandFaces[ node ] != b.bandFaces[ node ];
+					route |= a.rayRoutes[ node ] != b.rayRoutes[ node ];
+					iterations |= a.rayIterations[ node ] != b.rayIterations[ node ];
+				}
+				elementNodes += element;
+				faceNodes += face;
+				routeNodes += route;
+				iterationNodes += iterations;
+			}
+			for ( std::size_t j = 1; j < states.size(); ++j )
+				traced += states[ j ]->family->surfaces[ i ].tracedPoints
+				          != states[ j - 1 ]->family->surfaces[ i ].tracedPoints;
+			if ( elementNodes + faceNodes + routeNodes + iterationNodes + traced > 0 )
+				std::printf( "      surface %2zu (rho %.3f): nodes changing element %zu, band face %zu, "
+				             "route %zu, ray iterations %zu; traced point count changes %zu times\n",
+				             i, first.radial, elementNodes, faceNodes, routeNodes, iterationNodes,
+				             traced );
+		}
+
+		if ( at < 1 || at + 1 >= static_cast<int>( states.size() ) )
+			return;
+		auto surfaceAt = [ & ]( int j ) -> meq::FluxSurface const &
+		{
+			return states[ static_cast<std::size_t>( j ) ]->family->surfaces[ which ];
+		};
+		meq::FluxSurface const &mid = surfaceAt( at );
+		double worst = 0.0;
+		std::size_t culprit = 0;
+		for ( std::size_t node = 0; node < mid.count(); ++node )
+		{
+			double const dR = surfaceAt( at + 1 ).radius[ node ] - 2.0*mid.radius[ node ]
+			                  + surfaceAt( at - 1 ).radius[ node ];
+			double const dZ = surfaceAt( at + 1 ).z[ node ] - 2.0*mid.z[ node ]
+			                  + surfaceAt( at - 1 ).z[ node ];
+			double const size = std::hypot( dR, dZ );
+			if ( size > worst )
+			{
+				worst = size;
+				culprit = node;
+			}
+		}
+		std::printf( "      at the spike: surface %zu's node %zu moves by a second difference of %.2e m\n",
+		             which, culprit, worst );
+		for ( int j = at - 1; j <= at + 1; ++j )
+		{
+			meq::FluxSurface const &s = surfaceAt( j );
+			std::printf( "        state %+d: element %d, band face %d, route %d, iterations %d, "
+			             "( %.15f, %.15f ), axis element %d\n", j - 10, s.elements[ culprit ],
+			             s.bandFaces[ culprit ], static_cast<int>( s.rayRoutes[ culprit ] ),
+			             s.rayIterations[ culprit ], s.radius[ culprit ], s.z[ culprit ],
+			             states[ static_cast<std::size_t>( j ) ]->family->axisElement );
+		}
+	}
 
 	struct Result
 	{
@@ -226,8 +256,12 @@ namespace
 		 */
 		double const spacing = 1.0e-4;
 		std::vector<Output> scan;
+		std::vector<std::shared_ptr<meq::EquilibriumSnapshot const>> states;
 		for ( int j = -10; j <= 10; ++j )
-			scan.push_back( geometry( *at( j*spacing, base ) ) );
+		{
+			states.push_back( at( j*spacing, base ) );
+			scan.push_back( geometry( *states.back() ) );
+		}
 		double spike = 0.0;
 		std::size_t spikeOutput = 0;
 		int spikeAt = 0;
@@ -251,29 +285,11 @@ namespace
 		std::printf( "    fine scan over +-1e-3: the largest departure of a second difference "
 		             "from their median is %.2e of the value, %s at h = %+.0e\n", spike,
 		             g0.names[ spikeOutput ].c_str(), spikeAt*spacing );
+		reportDecisions( states, spikeOutput, spikeAt + 10 );
 		results.push_back( Result{ name, floor, spike, g0.names[ spikeOutput ], differences } );
 
 		// Back to the base, so the next input starts where this one did.
 		BOOST_TEST_REQUIRE( run.resolve( tables( 0.0 ), base ) == meq::Solved );
-	}
-
-	meq::ProfileTable omega( double value )
-	{
-		meq::ProfileTable table;
-		table.knots = { meq::Knot{ -0.5, value, 0.0 }, meq::Knot{ 1.5, value, 0.0 } };
-		return table;
-	}
-
-	/// rotating-density-normalised.dat, with the knot at Psi = 0.5 moved by
-	/// the relative step h.
-	meq::ProfileTable density( double h )
-	{
-		double const scale = 1.0e20;
-		meq::ProfileTable table;
-		table.knots = { meq::Knot{ -0.2, 0.1*scale, 2.0*scale }, meq::Knot{ 0.0, 0.5*scale, 2.0*scale },
-		                meq::Knot{ 0.5, 1.5*scale*( 1.0 + h ), 2.0*scale },
-		                meq::Knot{ 1.0, 2.5*scale, 2.0*scale }, meq::Knot{ 1.5, 3.5*scale, 2.0*scale } };
-		return table;
 	}
 
 	void measureCase( char const *name, meq::Run &run )
@@ -316,8 +332,11 @@ namespace
 				r.name << ": G jumps by " << r.spike << " of " << r.spikeOutput
 				<< " between two tables 1e-4 apart -- a discrete decision in the solve or "
 				"the extraction changing with the input. A step straddling it is wrong by "
-				"the jump over the step. MANTA-EQUILIBRIUM-PLAN.md section 4.5's frozen "
-				"extraction is what removes it (manta/shape-derivative)." );
+				"the jump over the step. What removes it is an extraction continuous in the "
+				"solved state, chosen self-consistently and not by freezing the choice: "
+				"MANTA-EQUILIBRIUM-PLAN.md section 4.5 and M-SHAPE-1 weigh the candidates "
+				"(manta/shape-derivative). The decision report printed above names the "
+				"choice that changed." );
 		}
 		results.clear();
 	}
