@@ -388,7 +388,7 @@ shape in `Ψ`, `Δ = δ₀ (4Ψ(1 − Ψ))³ h(z)`.
 * a zero bump is the meshed mirror bit for bit;
 * `δ₀ = −0.1` and `−0.3` converge from the vacuum in 3 steps, either `Δ`, as
   the isotropic mirror does in 3 or 4;
-* on a `k = 3` ladder over levels 0 to 3 the anisotropic `ψ*` differences
+* on a `k = 3` ladder over levels 0 to 2 the anisotropic `ψ*` differences
   match the isotropic control's, within 6% for the bump and 10% for `Δ(Ψ)`;
 * a `Δ` that does not vanish on `Γ_h` is refused: before assembly for the
   bump, on the solved `ψ` for one in `Ψ`.
@@ -614,7 +614,12 @@ are not that equation, so the race poses the fixed point they converge to:
   * **`Δ( Ψ )` converges to `0.7`, and then crawls**: 12 Newton steps at
     `0.9`, 23 at `0.95`, and no convergence at `0.99`. That is a defect, open
     in `TODO`, and not the operator's: the bump shares its `1 − Δ` and
-    converges.
+    converges. **Not the Jacobian and not a fold** →
+    **[M-351](MEASUREMENTS.md#m-351)**: the bordered direction is
+    exact along every step of the crawl, label columns included, and
+    continuation in `δ₀` reaches 0.99 in undamped steps. The line search walks
+    exact steps whose curvature, through the boundary label's column, reaches
+    3·10⁴ times the bump's.
 * **AN-6c — GF1's working point, the closure on it, and the size of `Δ`.**
   * **GF1's isotropic equilibrium from geq's front end**:
     `tools/gf1_scan_points.py 1.0`, power balanced, at geq's and freegs4e's

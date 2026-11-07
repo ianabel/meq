@@ -2461,6 +2461,16 @@ guards has no symptom: a column solved against a Jacobian belonging to a
 different plasma support is a plausible number, and Newton converges to
 something.
 
+**A NON-FINITE RESIDUAL IS AN `mfem::ErrorException`, NOT A FAILED SOLVE,
+UNTIL `solve()` SAYS OTHERWISE.** `mfem::NewtonSolver` refuses a non-finite norm
+by `MFEM_VERIFY` at the top of its loop, before the monitor sees it, and leaves
+that iterate in the unknown. Anything catching `std::runtime_error` to report a
+failed solve — `solveChecked()`'s firehose check, the driver's ladder — was
+skipped by it. The plain Newton path catches it, establishes the non-finite
+entry itself (`Vector::Norml2()` skips a NaN), puts back the last iterate with a
+finite residual, and throws its own `std::runtime_error`
+(→ **[M-350](MEASUREMENTS.md#m-350)**).
+
 ## `MKL_NUM_THREADS`, measured
 
 **Every run needs `MKL_NUM_THREADS=1`**, which every registered ctest sets. It

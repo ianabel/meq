@@ -425,10 +425,20 @@ BOOST_AUTO_TEST_CASE( aConstantAnisotropyIsTheIsotropicProblemRescaled )
 			double const fluxDifference
 				= maxDifference( anisotropic.solver.flux(), isotropic.solver.flux(), tension );
 
-			BOOST_TEST( psiDifference < 1.0e-12*psiScale,
+			// TWO SOLVES OF ONE PROBLEM POSED TWO WAYS, so they meet at
+			// round-off and not at zero. 1e-12 relative is 4500 of double's
+			// eps; single reads 160 to 1250 of its own (Delta = 0.3, k = 3,
+			// psi), so exactAgreementFloor()'s 4096 eps is the same statement
+			// in that format, and exactly zero in double. A weight formed as
+			// R( 1 - Delta ) is O( Delta ) out. MEASUREMENTS.md M-350.
+			double const psiBound = std::max( 1.0e-12*psiScale,
+			                                  meq::tests::exactAgreementFloor( psiScale ) );
+			double const fluxBound = std::max( 1.0e-12*fluxScale,
+			                                   meq::tests::exactAgreementFloor( fluxScale ) );
+			BOOST_TEST( psiDifference < psiBound,
 			            "Delta = " << delta << ", k = " << order << ": psi differs by "
 			            << psiDifference << " on a scale of " << psiScale );
-			BOOST_TEST( fluxDifference < 1.0e-12*fluxScale,
+			BOOST_TEST( fluxDifference < fluxBound,
 			            "Delta = " << delta << ", k = " << order << ": q - ( 1 - Delta ) q_0 is "
 			            << fluxDifference << " on a scale of " << fluxScale );
 		}
@@ -763,8 +773,23 @@ namespace
 		for ( int it : iterations )
 			BOOST_TEST( it >= 2, "k = " << order << ": Newton converged in " << it
 			            << " step, so the flux law behaved linearly" );
-		BOOST_TEST( best >= 1.8, "k = " << order << ": the best observed Newton order is "
-		            << best << "; the flux law's Jacobian disagrees with its residual" );
+		//
+		// IN SINGLE THE TRIPLE THAT READS 1.8 IS UNDER THE FLOOR. Double reads
+		// it on ( 1.06e-02, 4.88e-05, 2.67e-09 ), and 2.67e-09 is 170 times
+		// under single's floor at 4.6e-07; what single keeps is the triple
+		// before it, which reads 1.47 to 1.52 in BOTH formats -- the
+		// trajectory's, before the quadratic regime. On that triple, measured
+		// in single, dDelta/dpsi 10% high reads 1.28 to 1.31, 10% low 1.22 to
+		// 1.24, and dropped 1.16, against 1.49 to 1.52 exact: 1.4 sits between
+		// with 0.09 either side, thin and recorded. MEASUREMENTS.md M-350.
+#ifdef MFEM_USE_SINGLE
+		double const orderBound = 1.4;
+#else
+		double const orderBound = 1.8;
+#endif
+		BOOST_TEST( best >= orderBound, "k = " << order << ": the best observed Newton order is "
+		            << best << " against " << orderBound
+		            << "; the flux law's Jacobian disagrees with its residual" );
 
 		meq::tests::checkCeilings( order, points.back().errorPsi, points.back().normPsi,
 		                           psiCeiling, points.back().errorFlux, points.back().normFlux,
@@ -998,9 +1023,17 @@ BOOST_AUTO_TEST_CASE( aZeroFluxModelIsTheIsotropicNewtonSolve )
 		             /( isotropicClock.RealTime()/std::max( 1, isotropic.newtonIterations() ) ) );
 		std::fflush( stdout );
 
-		BOOST_TEST( psiDifference < 1.0e-10*psiScale, "k = " << order << ": psi differs by "
+		// Two converged solves of one problem: in single each stops at its
+		// round-off floor, and they meet to 5 to 174 eps (q, k = 3) where
+		// double meets the solver's tolerance. exactAgreementFloor() is zero
+		// in double. MEASUREMENTS.md M-350.
+		double const psiBound = std::max( 1.0e-10*psiScale,
+		                                  meq::tests::exactAgreementFloor( psiScale ) );
+		double const fluxBound = std::max( 1.0e-10*fluxScale,
+		                                   meq::tests::exactAgreementFloor( fluxScale ) );
+		BOOST_TEST( psiDifference < psiBound, "k = " << order << ": psi differs by "
 		            << psiDifference << " on a scale of " << psiScale );
-		BOOST_TEST( fluxDifference < 1.0e-10*fluxScale, "k = " << order << ": q differs by "
+		BOOST_TEST( fluxDifference < fluxBound, "k = " << order << ": q differs by "
 		            << fluxDifference << " on a scale of " << fluxScale );
 	}
 }
@@ -1173,6 +1206,36 @@ namespace
 		return best;
 	}
 
+	/**
+	 * In single, the order read through the triple that LANDS on the floor
+	 * too, as a lower bound; in double, @a asymptotic unchanged.
+	 *
+	 * **A RESIDUAL HELD UP BY THE FLOOR CAN ONLY UNDER-STATE THE ORDER**: the
+	 * step that landed there would have gone at least as low, so a triple
+	 * ending on it reads less than the method's order, never more. That makes
+	 * it useless for refuting quadratic convergence -- M-306's 0.36 on a
+	 * quadratic tail -- and sound for certifying it. The bordered solve here
+	 * has no other triple in single: the one asymptoticNewtonOrder() admits
+	 * is the first, which mostly moves psi_ax and reads 0.92. Measured, the
+	 * floor-landing triple reads 1.93 to 2.00 at n = 4 and 1.34 to 1.46 at
+	 * n = 32, exact; on the source's analytic label column -- the mutation the
+	 * case names -- every triple reads 1.00 at best. MEASUREMENTS.md M-350.
+	 */
+	double singleOrderLowerBound( double asymptotic, std::vector<double> const &history )
+	{
+#ifdef MFEM_USE_SINGLE
+		double best = asymptotic;
+		for ( std::size_t i = 2; i < history.size(); ++i )
+			if ( history[ i - 1 ] <= 0.1*history.front() )
+				best = std::max( best, meq::tests::newtonOrder( history[ i - 2 ], history[ i - 1 ],
+				                                                history[ i ] ) );
+		return best;
+#else
+		(void)history;
+		return asymptotic;
+#endif
+	}
+
 	NormalisedFluxMeasurement measureNormalisedFlux( Fixture const &eq, int order, int n,
 	                                                 bool postProcessedLabels = false )
 	{
@@ -1253,7 +1316,8 @@ BOOST_AUTO_TEST_CASE( theNormalisedFluxModelConvergesOnTheBorderedNewton )
 			}
 			points.push_back( m.point );
 			axisErrors.push_back( std::abs( m.psiAxis - 1.0 ) );
-			best = std::max( best, asymptoticNewtonOrder( m.history ) );
+			best = std::max( best, singleOrderLowerBound( asymptoticNewtonOrder( m.history ),
+			                                              m.history ) );
 			BOOST_TEST( m.newtonIterations >= 2, "k = " << order << ", n = " << n
 			            << ": Newton converged in " << m.newtonIterations << " step" );
 		}
@@ -1270,23 +1334,31 @@ BOOST_AUTO_TEST_CASE( theNormalisedFluxModelConvergesOnTheBorderedNewton )
 		// in its element (|psi_ax - 1| at k = 1 reads 9.2e-03, 1.4e-03,
 		// 2.4e-03, 3.2e-04) -- and psi* at k+2 cannot beat its own operator.
 		// At k = 1 it reads 2.92, 0.63, 2.91.
+		// The rates by rateIsMeasurable(), as AN-2a's: in single q at k = 3
+		// reads 2.14e-05 and 4.01e-05 on the last two meshes against double's
+		// 5.49e-06 and 3.43e-07, the floor the unbordered flux model meets at
+		// the same 2.06e-05 and 3.96e-05. MEASUREMENTS.md M-350.
 		double const expected = order + 1.0 - rateSlack;
-		for ( std::size_t i = 1; i < points.size(); ++i )
-		{
-			AnisotropicMeasurement const &c = points[ i - 1 ];
-			AnisotropicMeasurement const &p = points[ i ];
-			double const ratio = c.h/p.h;
-			double const ratePsi = meq::tests::rate( c.errorPsi, p.errorPsi, ratio );
-			double const rateFlux = meq::tests::rate( c.errorFlux, p.errorFlux, ratio );
-			BOOST_TEST( ratePsi >= expected, "k = " << order << ", h = " << p.h
-			            << ": psi converged at " << ratePsi << ", wanted " << expected );
-			BOOST_TEST( rateFlux >= expected, "k = " << order << ", h = " << p.h
-			            << ": q converged at " << rateFlux << ", wanted " << expected );
-		}
+		if ( !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+		else
+			for ( std::size_t i = 1; i < points.size(); ++i )
+			{
+				AnisotropicMeasurement const &c = points[ i - 1 ];
+				AnisotropicMeasurement const &p = points[ i ];
+				double const ratio = c.h/p.h;
+				double const ratePsi = meq::tests::rate( c.errorPsi, p.errorPsi, ratio );
+				double const rateFlux = meq::tests::rate( c.errorFlux, p.errorFlux, ratio );
+				BOOST_TEST( ratePsi >= expected, "k = " << order << ", h = " << p.h
+				            << ": psi converged at " << ratePsi << ", wanted " << expected );
+				BOOST_TEST( rateFlux >= expected, "k = " << order << ", h = " << p.h
+				            << ": q converged at " << rateFlux << ", wanted " << expected );
+			}
 		BOOST_TEST( axisErrors.back() < axisErrors.front(),
 		            "k = " << order << ": psi_ax does not tend to the exact 1" );
-		BOOST_TEST( best >= 1.8, "k = " << order << ": the best observed Newton order is "
-		            << best << "; the label column misses the flux law's dependence on psi_ax" );
+		BOOST_TEST( best >= meq::tests::quadraticOrderThreshold( 1.8 ), "k = " << order
+		            << ": the best observed Newton order is " << best
+		            << "; the label column misses the flux law's dependence on psi_ax" );
 	}
 }
 
@@ -1366,26 +1438,33 @@ BOOST_AUTO_TEST_CASE( labelsReadFromPsiStarGivePsiStarItsOrder )
 		std::printf( "\n" );
 		std::fflush( stdout );
 
+		// The rates by rateIsMeasurable(), as above. In single at k >= 2 the
+		// later passes start under the round-off gate and take no step, so
+		// the answer is the first pass's to every printed digit: the label's
+		// correction is under the format's floor. MEASUREMENTS.md M-350.
 		double const expected = order + 1.0 - rateSlack;
 		double const expectedStar = order + 2.0 - rateSlack;
-		for ( std::size_t i = 1; i < points.size(); ++i )
-		{
-			AnisotropicMeasurement const &c = points[ i - 1 ];
-			AnisotropicMeasurement const &p = points[ i ];
-			double const ratio = c.h/p.h;
-			BOOST_TEST( meq::tests::rate( c.errorPsi, p.errorPsi, ratio ) >= expected,
-			            "k = " << order << ", h = " << p.h << ": psi below k+1" );
-			BOOST_TEST( meq::tests::rate( c.errorFlux, p.errorFlux, ratio ) >= expected,
-			            "k = " << order << ", h = " << p.h << ": q below k+1" );
-			double const rateStar = meq::tests::rate( c.errorPsiStar, p.errorPsiStar, ratio );
-			if ( p.errorPsiStar < meq::tests::roundOffFloor( p.normPsi ) )
-				BOOST_TEST_MESSAGE( "  k = " << order << ", h = " << p.h
-				                    << ": psi* under the round-off floor, rate not asserted" );
-			else
-				BOOST_TEST( rateStar >= expectedStar, "k = " << order << ", h = " << p.h
-				            << ": psi* converged at " << rateStar << ", wanted " << expectedStar
-				            << " -- the label is not being read from psi*" );
-		}
+		if ( !meq::tests::rateIsMeasurable( order ) )
+			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
+		else
+			for ( std::size_t i = 1; i < points.size(); ++i )
+			{
+				AnisotropicMeasurement const &c = points[ i - 1 ];
+				AnisotropicMeasurement const &p = points[ i ];
+				double const ratio = c.h/p.h;
+				BOOST_TEST( meq::tests::rate( c.errorPsi, p.errorPsi, ratio ) >= expected,
+				            "k = " << order << ", h = " << p.h << ": psi below k+1" );
+				BOOST_TEST( meq::tests::rate( c.errorFlux, p.errorFlux, ratio ) >= expected,
+				            "k = " << order << ", h = " << p.h << ": q below k+1" );
+				double const rateStar = meq::tests::rate( c.errorPsiStar, p.errorPsiStar, ratio );
+				if ( p.errorPsiStar < meq::tests::roundOffFloor( p.normPsi ) )
+					BOOST_TEST_MESSAGE( "  k = " << order << ", h = " << p.h
+					                    << ": psi* under the round-off floor, rate not asserted" );
+				else
+					BOOST_TEST( rateStar >= expectedStar, "k = " << order << ", h = " << p.h
+					            << ": psi* converged at " << rateStar << ", wanted " << expectedStar
+					            << " -- the label is not being read from psi*" );
+			}
 		for ( int p : passes )
 			BOOST_TEST( ( p >= 2 && p <= 6 ), "k = " << order << ": " << p
 			            << " passes; the first carries no correction, and more than six"
@@ -1551,6 +1630,21 @@ namespace
 		for ( int it : iterations )
 			BOOST_TEST( it >= 2, label << ", k = " << order << ": Newton converged in " << it
 			            << " step, so the law's dependence on B never reached the operator" );
+		// IN SINGLE THE COLD ORDER IS NOT READ. Double reads 2.1 on
+		// ( 1.95e-03, 3.36e-05, 6.70e-09 ), whose last residual is 50 times
+		// under single's floor, and the triples single keeps read 1.62 to 1.72
+		// in either format -- and do not discriminate: d Delta/d |q|^2 10% low
+		// reads 1.52 to 1.61 there and 10% HIGH 1.75 to 1.86, above the exact.
+		// theFieldLawsNewtonIsQuadraticAtBothSigns is the order's instrument,
+		// in single as in double. MEASUREMENTS.md M-350.
+#ifdef MFEM_USE_SINGLE
+		if ( coldOrder )
+			BOOST_TEST_MESSAGE( "  *** " << label << ", k = " << order << ": SKIPPED the cold"
+			                    " Newton order, " << best << ": in single its quadratic triple"
+			                    " is under the floor and the triples left read the trajectory."
+			                    " The restarts assert the order. M-350" );
+		coldOrder = false;
+#endif
 		if ( coldOrder )
 			BOOST_TEST( best >= 1.8, label << ", k = " << order << ": the best observed Newton"
 			            " order is " << best << "; the law's Jacobian disagrees with its residual" );
@@ -1780,6 +1874,7 @@ BOOST_AUTO_TEST_CASE( theFieldLawsNewtonIsQuadraticAtBothSigns )
 		int const fieldSize = solved.fluxSpace().GetVSize() + solved.potentialSpace().GetVSize();
 
 		std::vector<double> constants;
+		std::vector<double> firstSteps;
 		for ( double delta : { 1.0e-2, 1.0e-3, 1.0e-4 } )
 		{
 			mfem::Vector state( solved.state() );
@@ -1794,6 +1889,7 @@ BOOST_AUTO_TEST_CASE( theFieldLawsNewtonIsQuadraticAtBothSigns )
 			std::vector<double> const &history = solver.newtonResiduals();
 			BOOST_TEST_REQUIRE( history.size() >= 2 );
 			constants.push_back( history[ 1 ]/( history[ 0 ]*history[ 0 ] ) );
+			firstSteps.push_back( history[ 1 ] );
 			std::printf( "  field law, Delta %+.1f, restart at delta = %.0e: residuals", amplitude,
 			             delta );
 			for ( double r : history )
@@ -1801,10 +1897,30 @@ BOOST_AUTO_TEST_CASE( theFieldLawsNewtonIsQuadraticAtBothSigns )
 			std::printf( "; r_1/r_0^2 = %.4e\n", constants.back() );
 			std::fflush( stdout );
 		}
+		/*
+		 * IN SINGLE THE CONSTANT IS UNDER THE FLOOR AT EVERY RESTART. Double's
+		 * C r_0^2 is 1.2e-07 at the LARGEST, under single's floor of about
+		 * 3e-07, so all three first steps land on the floor and r_1/r_0^2 is
+		 * the floor over r_0^2. What single can read is whether the first step
+		 * from 1e-2 reaches the same floor as the one from 1e-4, which an
+		 * exact Jacobian does: measured, 1.56 and 1.87 times that floor at the
+		 * two signs, and d Delta/d |q|^2 10% high or low 9.6 to 11.5 times, since
+		 * its linear part, 1.5e-04 of r_0, is above the floor from 1e-2 and
+		 * not from 1e-4. 4 sits between. Double asserts the constant to 1%.
+		 * MEASUREMENTS.md M-350.
+		 */
+#ifdef MFEM_USE_SINGLE
+		for ( double r : firstSteps )
+			BOOST_TEST( r <= 4.0*firstSteps.back(), "Delta " << amplitude << ": a first step"
+			            " left " << r << " against " << firstSteps.back() << " from the smallest"
+			            " restart, so it did not reach the floor; the law's Jacobian disagrees"
+			            " with its residual" );
+#else
 		for ( double c : constants )
 			BOOST_TEST( std::abs( c/constants.back() - 1.0 ) < 1.0e-2, "Delta " << amplitude
 			            << ": r_1/r_0^2 = " << c << " against " << constants.back()
 			            << " at the smallest restart; Newton is not quadratic" );
+#endif
 	}
 }
 

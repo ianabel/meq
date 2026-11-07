@@ -499,40 +499,58 @@ Raised 2026-08-25.
 
   DELTA( Psi ) CRAWLS TOWARDS THE FIREHOSE LIMIT (M-339). On the meshed
   mirror, level 0, k = 2, from the vacuum: 3 or 4 Newton steps to
-  delta0 = 0.7, then 12 at 0.9, the residual falling from 2.6e-3 to 3.0e-4
-  over seven of them, 23 at 0.95, from 1.6e-2 to 2.4e-4 over eighteen, and
-  no convergence at 0.99. The bump, a Delta of position with the same 1 - Delta at its peak,
-  converges in 3 or 4 steps to 0.99, and Delta( B ) at any pressure tried;
-  so it is not the operator's degeneracy alone. Suspects, none measured:
-  the bordered Newton's label columns, differenced under a Delta in Psi,
-  near a Delta whose slope in Psi grows as 1 - Delta shrinks; the flux
-  law's psi-slope against the label normalisation. A crawl that converges
-  is a defect, not a slow case.
+  delta0 = 0.7, then 12 at 0.9 and 23 at 0.95, damped by the line search
+  to between 2^-7 and 1/2 on most steps, and no convergence at 0.99. The
+  bump, a Delta of position with the same 1 - Delta at its peak,
+  converges in 3 or 4 steps to 0.99, and Delta( B ) at any pressure tried.
+  A crawl that converges is a defect, not a slow case, and
+  AnisotropicMirror's theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes
+  asserts the wanted behaviour, red in both formats until it is fixed.
+
+  WHAT IT IS NOT, MEASURED (M-351):
+  * The Jacobian. Along every step of the crawl at 0.9 and 0.95, label
+    columns included, || F( x + a d ) - ( 1 - a ) F( x ) ||/( a || F || )
+    falls linearly in a down to a = 1e-5: the bordered Newton direction is
+    the exact one. Both suspects this entry named -- the label columns
+    differenced under a Delta in Psi, and the flux law's psi-slope against
+    the label normalisation -- are falsified.
+  * A fold, or no equilibrium at 0.99. Continued in delta0 from 0.7 by
+    0.05, then 0.01, then 0.0025, every rung to 0.99 converges in 5 to 8
+    UNDAMPED Newton steps, psi_bnd smooth in delta0; a jump of 0.02 at
+    0.95 already stagnates at 1.6e-04.
+
+  WHAT IT IS: the problem's curvature through the labels. The second-order
+  term along the exact step, c in c a^2 || F ||, reaches 12.5 on the crawl
+  at 0.9 and 1800 at 0.95, against 0.06 at most on the bump, and a step is
+  accepted only where c a is under about one. The step is dominated by
+  the boundary label's column: | dpsi_bnd z_B | = 162 against | y | = 29
+  on the first step at 0.95, where the bump has 1.27 against 27.7. The
+  quadratic constant at the answer is about 1e2, 3e3 and 1e4 at delta0 =
+  0.7, 0.9, 0.95, against 0.01 to 0.07 for the bump. So from the vacuum
+  Newton starts far outside a basin that shrinks with 1 - Delta, and the
+  Armijo search walks into it. In single it is worse: 0.9 in 10 steps,
+  0.95 not at all. Continuation in the driver is declined
+  (CLAUDE_DECLINED.md, "Starting from vacuum, and amplitude continuation";
+  an Anisotropy has no amplitude to ramp). Unmeasured candidates: carrying
+  1 - Delta on the conservation row rather than as R/( 1 - Delta ) on the
+  flux mass, so the psi-curvature loses its 1/( 1 - Delta )^3; a bound on
+  the psi_bnd step relative to the label span.
 
   The race on GF1 (AN-6c) runs at the case's own tau0 = 30, which solves
   every rung from the vacuum (M-347); the general stabilisation is its own
   entry, "A stabilisation that follows the reaction".
 
-  NOT QUALIFIED IN SINGLE PRECISION. Every AN stage was measured in double
-  only, AN-6a's Delta( B ) included. On builds/single (MFEM 59ef46309f):
-
-  * AnisotropicConvergence, 25 cases: the constant-Delta rescaling and the
-    zero flux model against the isotropic Newton solve assert 1e-10 and
-    read 2e-5 to 1e-4; the flux model's best Newton order reads 1.49 to
-    1.52 against 1.8; the normalised model's Newton order reads 0.92 and
-    its q rate collapses at k = 3 (-0.91 on the last pair);
-    labelsReadFromPsiStar has q below k+1 at k = 2; and the firehose case
-    in aFluxModelsRefusals ends in an MFEM verification, IsFinite( norm ),
-    rather than MEQ's named refusal. The Jacobian difference passes, at
-    4.7e-05, and so does threaded parity.
-  * AnisotropicMirror: the four vacuum starts converge, in 3 to 5 steps,
-    each stalling at 1.6e-06 to 1.9e-06 -- the meshed packs' single floor
-    the Status records, which solveMeshed() meets with a 64 eps target and
-    the plasma solves here do not. So the k = 3 ladder's isotropic level 0
-    does not converge.
-
-  Each needs a single-precision bound measured as M-294's were, not assumed;
-  the firehose verification may be a defect.
+  QUALIFIED IN SINGLE PRECISION (M-350). AnisotropicConvergence and
+  AnisotropicMirror pass in single; the double path is unchanged to every
+  printed digit. One was a defect: a plain Newton that diverged overflowed
+  in single and ended in MFEM's IsFinite( norm ) verification, which is not
+  a std::runtime_error, so the firehose refusal reached in double was not
+  reached in single. solve() now reports a non-finite residual as its own
+  runtime error with the last finite iterate kept (SolverContract,
+  aNonFiniteResidualIsTheSolversRuntimeError). Every other red measured the
+  format: each check's single bound or loud skip is in M-350, the
+  thinnest the flux model's cold Newton order, 1.4, between 1.49 exact and
+  1.31 with dDelta/dpsi 10% out.
 
   The reference is pinned: refs/AlphaGK.pdf eq (6.18), and refs/Refs.md,
   "Anisotropic pressure", carries what it says and its two typos. It answers
