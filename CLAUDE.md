@@ -197,7 +197,8 @@ reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 qualified in single: `AnisotropicConvergence` and `AnisotropicMirror`
 (`TODO`, *Anisotropic pressure*). The
 wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
-whole on purpose) and then `naming` (one single-threaded clang-tidy run).
+whole on purpose). `naming` is one clang-tidy test per translation unit,
+`naming.<file>`, labelled `naming` (`ctest -L naming` runs the check entire).
 **A suite time is a measurement only on an idle machine**; identical code has
 read 1.16× to 1.6× apart here, so read ratios.
 
@@ -258,7 +259,7 @@ gated on `MFEM_DEBUG`, which the install sets `NO`, and MEQ has no `assert()`
 
 **CI CANNOT BUILD THE SOLVER, AND THIS IS STRUCTURAL.** `meq-integration` is a
 local merge published nowhere, so `find_package(MFEM)` is not `REQUIRED` and CI
-builds the MFEM-free half: four unit suites, `naming` and a 90% `gcovr` line
+builds the MFEM-free half: four unit suites, the `naming` tests and a 90% `gcovr` line
 gate. **A green CI badge is evidence about the configuration and profile layers
 and nothing else.** The `full` job is `if: false` until the branch is published.
 
@@ -588,7 +589,7 @@ and is wrong") belongs in both.
 **The project is MEQ in prose and `meq` in code** — `meq::`, `src/meq/`,
 `meq_core`, `meq config.toml`. **External names keep their author's
 capitalisation** (`cuDSS`, with a `NOLINT` saying so). Enforced by
-`.clang-tidy`'s `readability-identifier-naming` through the `naming` ctest over
+`.clang-tidy`'s `readability-identifier-naming` through the `naming` ctests over
 every file in `src/meq` — except, on a CUDA build only, the seven device files,
 because clang-tidy cannot read nvcc's flags; on a host build they are checked
 like everything else.

@@ -94,7 +94,7 @@ Requirements:
 | [toml11](https://github.com/ToruNiina/toml11) | vendored as a submodule at `extern/toml11` |
 | netcdf-cxx4 | optional; without it the gridded output format is dropped |
 | Boost | header-only Boost.Math for the library; `unit_test_framework` for the tests |
-| clang-tidy | optional; gates the `naming` test only |
+| clang-tidy | optional; gates the `naming` tests only |
 
 Reached *through* MFEM rather than found separately: oneMKL (PARDISO, the
 default trace solver wherever the build has it), SuiteSparse (UMFPACK, the
