@@ -6814,8 +6814,8 @@ namespace
 				double area = 0.0, perimeter = 0.0;
 				for ( int a = 0; a < vertices.Size(); ++a )
 				{
-					double const *p = mesh.GetVertex( vertices[ a ] );
-					double const *q = mesh.GetVertex( vertices[ ( a + 1 )%vertices.Size() ] );
+					mfem::real_t const *p = mesh.GetVertex( vertices[ a ] );
+					mfem::real_t const *q = mesh.GetVertex( vertices[ ( a + 1 )%vertices.Size() ] );
 					area += p[ 0 ]*q[ 1 ] - q[ 0 ]*p[ 1 ];
 					perimeter += std::hypot( q[ 0 ] - p[ 0 ], q[ 1 ] - p[ 1 ] );
 				}

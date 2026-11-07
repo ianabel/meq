@@ -880,6 +880,72 @@ accuracy and not for patience.
   depending on the access pattern and has never been measured either way here.
 
 ================================================================================
+A PRECONDITIONED Krylov solve of the trace, against the direct solvers
+Raised 2026-11-06.
+================================================================================
+
+  WHAT IS MEASURED, AND WHAT IT DOES NOT CLOSE. M-179 ran GMRES with a
+  Gauss-Seidel smoother: 247 iterations on soloviev-nstx (0.41 s against
+  PARDISO's 0.30 s) and 4,179 on machine-f-diiid's first solve, which did not
+  finish in 1,800 s against 3.0 s. CLAUDE_DECLINED.md, "An iterative trace
+  solve", records that as closing the iterative question. It closes Gauss-
+  Seidel. No preconditioner that knows the trace system's structure was tried,
+  and the iteration count's seventeenfold rise for a threefold rise in elements
+  is what an unpreconditioned elliptic operator does -- the number a good
+  preconditioner exists to flatten.
+
+  WHAT AN ITERATIVE SOLVE HAS TO BEAT, so the comparison is not of iteration
+  counts alone:
+  * one factorisation amortised over the bordered step's back-solves -- 14
+    columns on machine-f-diiid, blocked into one ArrayMult (M-98's 1.34x);
+  * the symbolic analysis kept across Newton steps
+    (direct-solver-symbolic-reuse in meq-integration);
+  * the trace matrix is NOT symmetric where Gamma is curved (CLAUDE_HDGGS.md,
+    "The trace matrix is symmetric on the fitted path and is not on the
+    extension path"), so CG and MINRES are out on the driver's target and
+    GMRES or BiCGStab is the method;
+  * serial MFEM has no AMG (HypreBoomerAMG needs MPI; CLAUDE_DECLINED.md,
+    item 4 of "Symmetric solvers ...").
+
+  CANDIDATES, cheapest to try first:
+  1. THE FACTORISATION AS A PRECONDITIONER ACROSS NEWTON STEPS. Factor at one
+     Newton step, precondition the next steps' GMRES with it, refactor when the
+     count rises. Near convergence J barely moves, so the count should be a
+     handful; this trades factorisations for back-solves without giving up the
+     direct solver. The same idea serves MaNTA's linearised solves
+     (MANTA-EQUILIBRIUM-PLAN.md section 4.3), which apply J^-1 at a retained
+     state many times. Needs: the factor-versus-solve split of the trace leg
+     first (tests/performance/newton-step-profile.sh), since if back-solves
+     already dominate there is nothing to win.
+  2. A LOW-ORDER COARSE CORRECTION. The HDG trace system has a standard
+     two-level preconditioner: transfer to continuous P1 on the same mesh, solve
+     there (directly -- it is a fraction of the size), smooth on the trace
+     (Cockburn, Dubois, Gopalakrishnan & Tan, "Multigrid for an HDG method",
+     IMA J. Numer. Anal. 34 (2014); not yet in refs/). This is what should take
+     the count from thousands to tens, if anything does.
+  3. ILU / ISAI / SCHWARZ through Ginkgo, which is not MPI-gated and takes an
+     mfem::Device directly -- the device route M-179 named. Only worth it after
+     2, since M-179's argument is that a device does not close a gap of this
+     size; a preconditioner has to.
+  4. THE 14 COLUMNS. A block Krylov method, or recycling (GCRO-DR) across the
+     columns and the Newton steps, if 1 to 3 leave the columns as the cost.
+
+  WHERE THE CROSSOVER WOULD BE. A 2D nested-dissection factorisation costs
+  about N^1.5 and fills about N log N; a preconditioned Krylov solve with a
+  mesh-independent count costs about N per iteration. At MEQ's sizes (50k trace
+  dofs factor in 0.4 s) direct is expected to win; the question is the
+  crossover in N, and whether adaptive runs, high k or the MaNTA coupling's
+  repeated solves reach it. Measure on the M-179 pair and one larger case:
+  machine-f-diiid refined once and twice uniformly.
+
+  CLOSES: the four timings -- PARDISO, and each candidate taken -- on those
+  cases against N, including the 14-column bordered step and the Newton
+  sequence rather than one solve, and either a TraceSolver choice measured to
+  win somewhere or the entry folded into CLAUDE_DECLINED.md with its numbers.
+  Either way the answer must agree with PARDISO to the printed digits
+  (theTraceSolversAgree's contract).
+
+================================================================================
 Stale comments and inert keys, found by writing the LaTeX manual -- ALL CLOSED
 Raised 2026-09-03. Estimator.hpp's two stale paragraphs, the last open item,
 now say what the estimator does: it works through Newton, and eta_5 keeps the
@@ -1223,6 +1289,40 @@ The giving-up is built; what is left is the crawls it exposed.
 
 
 ================================================================================
+machine-c-mast's first support sweep: a crawl that the last bit decides
+Raised 2026-11-07.
+================================================================================
+
+  Found by the memcheck campaign (runs/memcheck/7e4253a-par/). Natively,
+  examples/machine-c-mast.toml converges and exits 0: the plasma support's
+  sweep 0 takes 23 Newton iterations from the warm start, then 6, 4, 3. Under
+  valgrind it exits 2: sweep 0 starts from the same ||r_0|| = 2.842906e+02,
+  agrees for a few steps, then stalls near 1.2e2, and the Picard-then-Newton
+  fallback ends on the X-point relocation cap (a trial 0.122993 m from the
+  seed against a cap of 0.122500 m).
+
+  NOT A MEMORY DEFECT. Memcheck reports 0 errors, and valgrind's no-op tool
+  (--tool=none) reproduces the failure to every printed digit. Natively the run
+  is unmoved by OMP_NUM_THREADS = 4, 2, 1 and by MKL_ENABLE_INSTRUCTIONS =
+  AVX2, AVX, SSE4_2. What valgrind changes is its arithmetic: x87 long double
+  runs at 64 bits, and Boost.Math promotes double to long double by default --
+  Coils.cpp turns promotion off, ExteriorDtN.cpp's legendre_p and Zernike.cpp's
+  jacobi do not, and this case runs 10 Gegenbauer modes. That is the
+  hypothesis, unmeasured.
+
+  WHY IT IS AN ENTRY. A first sweep that takes 23 steps is a crawl ("Bordered
+  solves that CRAWL", above), and a perturbation at the last bit of a special
+  function moves it to another outcome. machine-c-mast-shaped exits 2 natively
+  too (112 s), and machine-d-tcv (269 s); neither was run under memcheck
+  (over the 60 s budget). Closes: sweep 0's residual history printed natively
+  (the driver prints only a failed sweep's), and either the crawl explained and
+  removed, or the case shown to sit beside a fold of the support iteration with
+  a check that says so. A one-key confirmation of the hypothesis first:
+  promote_double<false> on ExteriorDtN's legendre_p, and the run under
+  --tool=none again.
+
+
+================================================================================
 Left open by the single-precision round (MEASUREMENTS.md M-301 to M-312)
 Raised 2026-10-22. Each item is measured; the adaptive crawl in item 3 and
 TCV shaped's branch in item 5 each take a suite case red, in single.
@@ -1323,6 +1423,22 @@ TCV shaped's branch in item 5 each take a suite case red, in single.
      did not settle and whose plasma sits in the conductors should exit 0.
      DriverAcceptance's theRetryRungClosesAStalledFirstAttempt is red on it
      in single.
+
+  6. THE FOLLOWING tau'S DIFFERENCED CONTROL TAKES A STEP MORE IN SINGLE.
+     RotatingMirrorBorder's aTauThatFollowsTheReactionLiftsTheElementFold-
+     AndIsQuadratic, three species at 2e20, theta = 10: the direct columns
+     converge in 4 steps (1.33 1.87e-2 2.15e-3 3.42e-5 8.49e-8), the
+     differenced control in 5 (1.33 1.86e-2 2.22e-3 4.57e-5 6.84e-7
+     3.74e-8), the answers 1.3e-7 apart, under the floor and skipped as M-272
+     says. The REQUIRE that both histories have as many steps above the floor
+     is red, 6 != 5, and the step-by-step bound would be too: step 2 differs
+     by 7e-5 against differencedAgreementFloor's 1.4e-3 of the step before,
+     2.6e-5. A single-precision central difference is an inexact Jacobian at
+     about 4e-3 here. The test was first run in single on 2026-11-07 -- main
+     did not build in single while it was written (20c131e). Closes: the
+     control's agreement bound measured in single, as M-294's were, and the
+     size REQUIRE read on the steps both histories share; or the comparison
+     skipped loudly under the floor, as landsOnTheAnswer() is.
 
 
 ================================================================================

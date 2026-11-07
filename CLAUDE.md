@@ -193,7 +193,10 @@ moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
-(`TODO`, the single-precision round). The
+(`TODO`, the single-precision round). It also adds three suites never
+qualified in single: `AnisotropicConvergence` and `AnisotropicMirror`
+(`TODO`, *Anisotropic pressure*) and `RotatingMirrorBorder`'s differenced
+control for the following `τ` (`TODO`, the single-precision round, item 6). The
 wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
 whole on purpose) and then `naming` (one single-threaded clang-tidy run).
 **A suite time is a measurement only on an idle machine**; identical code has
@@ -214,6 +217,24 @@ tests/performance/scan.sh build 3            # LINEAR path, one thread axis at a
 tests/performance/npc-scan.sh build 3        # NONLINEAR path, OMP = MKL = N together
 tests/performance/newton-step-profile.sh build 5   # where a Newton step's time goes, by leg
 ```
+
+**Periodically, and after anything touching threads, caches or pointers: the
+shipped examples under valgrind's memcheck**, through the driver as a user
+runs them — the suite runs harnesses, and the two defects this found first
+(an out-of-bounds read decided by allocation order, `c5a1ecd`; MFEM's
+unwritten inverse-transform point, `845fb36`) passed it for weeks. It wants
+an install with debug information, `install/valgrind`:
+
+```sh
+cmake -S source -B builds/valgrind -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DMEQ_BUILD_TESTS=OFF -DMEQ_PYTHON=OFF -DCMAKE_INSTALL_PREFIX=$PWD/install/valgrind
+cmake --build builds/valgrind -j6 && cmake --install builds/valgrind
+MEQ_BUILD=valgrind source/tools/memcheck/memcheck.py    # -> runs/memcheck/<stamp>/
+```
+
+Each case runs natively first (the control, and the 60 s budget that keeps
+memcheck's 20–50× to about an hour at six at once), then under memcheck; it
+pops on any error or an exit code that differs from the native one.
 
 `npc-scan.sh` sweeps both axes together because under threaded assembly MKL
 suppresses its own threading inside the OpenMP region (`CLAUDE_HDGGS.md`,
