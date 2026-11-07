@@ -416,10 +416,15 @@ produced.
 
 **ONE SOLVER SERVES EVERY MAP EVALUATION**, through
 `NormalisedMHDSource::setGGPrime()`. Only `gg′` changes between steps, so the
-mesh, the spaces, the forms and the trace solver's symbolic factorisation all
-survive, and each solve is warm-started from the previous one's field —
-rebuilding the solver per evaluation, which is what the library test does, would
-throw all of that away 43 times. **The normalisation is deliberately not reset
+mesh, the spaces and the forms survive, and each solve is warm-started from the
+previous one's field — rebuilding the solver per evaluation, which is what the
+library test does, would throw that away 43 times. **The trace solver's
+symbolic factorisation is not among what survives**: the trace solver is a local
+of `solve()` (`makeTraceSolver()` inside it), so its symbolic analysis is reused
+across one solve's Newton steps — what `theSymbolicAnalysisIsReusedAcrossNewtonSteps`
+asserts, one analysis per solve — and redone by the next: 37 PARDISO reorderings
+for the 37 solves of `q-driven.toml`
+(→ **[M-352](MEASUREMENTS.md#m-352)**). **The normalisation is deliberately not reset
 by that setter**: `ψ_ax` and `ψ_bnd` are unknowns of the bordered Newton and
 belong to the solve rather than to the profile.
 
@@ -445,6 +450,35 @@ first: that the map is **total**, and that the target is asked in the SOURCE's
 `g_squared_coefficients` and `safety_factor_target`. On this route `g` is what
 the run **found**, so there is no `GGPrimeFile` beside the output for a consumer
 to look it up in — the same argument that put `axis_normalised_flux` there.
+
+**AND THE SCALE IS NOT DETERMINED BY q, p AND THE BOUNDARY — ONLY BY THE
+DEGREE OF `g²`.** Fixed-boundary equilibria with the same `p(Ψ_N)` and
+`q(Ψ_N)` form a one-parameter family in the torus as in the cylinder — VMEC's
+`PHIEDGE` is the same fact, and here `Φ_edge = 2π(ψ_ax − ψ_bnd)∫q dΨ_N` — and
+with `ψ_ax` free the loop's outer Jacobian has one near-null direction, the
+scale (`g ∝ ψ_ax`), with `σ_min/σ_max` 1e-4 at degree 2 falling to ~1e-6 at
+degree 4. What isolates the fixed point is that a polynomial of degree `d`
+cannot follow the family: held 10% along it, the least-squares residual falls
+from 3.5e-3 at degree 2 to 1.2e-4 at degree 5 and does not move with the mesh
+(`SafetyFactorScale`, → **[M-353](MEASUREMENTS.md#m-353)**). **The
+example converges, from any `ToroidalFieldGuess`, because its target was built
+from an exactly quadratic `g²`**, so the reference is an exact fixed point at
+every degree; a target that is not — any measured `q` — is left to the degree.
+The pure q-solve needs one more scalar to select the member — `TODO`, *The
+q-driven solve leaves the equilibrium's scale to the degree of `g²`*, names the
+candidates; `manta/design`'s plan holds `ψ_ax` for MaNTA instead.
+
+**A CURVED BOUNDARY'S FAMILY IS TRACED THROUGH THE BAND, AND THE LOOP'S HAS TO
+BE TOO.** `Ω_h` is inscribed in `Γ`, so the outer surfaces of a curved
+fixed-boundary run lie partly outside the mesh; the write phase continues the
+field there by the transfer lift, and the loop must as well: traced without
+it, every family on `fixed-d-tcv`'s MXH boundary fails at its outer surfaces,
+every map evaluation is refused, and the loop stops on a Jacobian of exactly
+zero. Both go through `Run::Impl::extractFamily()`. `QDrivenCurvedBoundary`
+is the round trip on a Miller boundary, the target measured from a closed-form
+`g` on the same mesh: 6 KINSOL iterations, 43 equilibria, `g²` recovered to
+eight digits. Posed on `fixed-d-tcv` with a measured `q`, the loop runs, and
+fails on the scale (M-353).
 
 **WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a
 rectangle with one closed plasma rather than a machine, and nothing has yet

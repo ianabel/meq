@@ -13,8 +13,9 @@
 # every field degree of freedom, at about 5.7 hours for one Jacobian.
 #
 # AND ONE SOLVER DOES ALL OF THEM. Only gg' changes between steps, so the mesh,
-# the spaces, the forms and the trace solver's symbolic factorisation all
-# survive, and each solve is warm-started from the last one's field.
+# the spaces and the forms survive, and each solve is warm-started from the last
+# one's field. The trace solver's symbolic factorisation is redone by each solve:
+# it is reused across one solve's Newton steps, not between solves.
 
 [mesh]
 RMin = 0.6

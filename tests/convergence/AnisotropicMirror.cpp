@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -21,6 +22,7 @@
 
 #include "convergence/GeqReference.hpp"
 #include "convergence/MirrorMachine.hpp"
+#include "convergence/RoundOffFloor.hpp"
 
 /*
  * ANISOTROPY-PLAN.md AN-3a: THE ANISOTROPIC OPERATOR ON THE ROTATING MIRROR.
@@ -322,6 +324,24 @@ namespace
 		solver.setExtension( *r->domain->path, r->domain->gammaHMarker );
 		solver.setExteriorCoupling( *r->dtn );
 		solver.setInitialGuess( r->vacuum->solver->potential() );
+#ifdef MFEM_USE_SINGLE
+		// THE MESHED PACKS' SINGLE FLOOR IS THE PLASMA SOLVE'S TOO, and it
+		// sits above the ten-eps gate the round-off stop works under, as
+		// solveMeshed()'s vacuum does (M-294): measured with no target to
+		// meet, every meshed plasma solve here stagnates between 1.35e-06 and
+		// 2.20e-06 -- k = 2 at levels 0 and 1, k = 3 at levels 0 to 2, every
+		// Delta -- drifting down by a few per cent a step, while the
+		// subtracted route reaches 1.6e-08 to 6.9e-08. Whether a solve then
+		// dips under the gate and stops is a coin toss: k = 3's isotropic
+		// level 0 and k = 2's level 1 do not. solveMeshed()'s 64 eps, 7.6e-06, clears the worst stagnant
+		// residual by 3.5 and is four orders under the step before it.
+		// Double asks the solver's own default. MEASUREMENTS.md M-350.
+		if ( !subtracted )
+			solver.setNewtonControl( 1.0e-12,
+			                         64.0*static_cast<double>(
+				                         std::numeric_limits<mfem::real_t>::epsilon() ),
+			                         30 );
+#endif
 		try
 		{
 			solver.solve();
@@ -502,15 +522,17 @@ BOOST_AUTO_TEST_CASE( aPressurePastTheFoldIsRefused )
 }
 
 /// MEQ AGAINST ITSELF, AND AGAINST THE ISOTROPIC MESHED MIRROR ON THE SAME LADDER:
-/// k = 3, levels 0 to 3, psi* sampled over the machine region.
+/// k = 3, levels 0 to 2, psi* sampled over the machine region.
 ///
 /// THE LADDER ITSELF IS NOT AT THE DESIGN RATE, AND THE ISOTROPIC CONTROL SAYS
-/// SO. Its Cauchy rates read 7.28 then 2.35 against psi*'s design 4: level 0
-/// pre-asymptotic, and then limited -- most likely by the meshed packs'
-/// corners, r^2 log r at each rectangle's corner, which RotatingMirror's
-/// subtracted filaments do not have. Not measured. So what is asserted is
-/// what the anisotropy adds: on every rung its difference is within 25% of the
-/// isotropic one, and falls. Measured, the two agree to 6%.
+/// SO. Its Cauchy rate reads 7.28 against psi*'s design 4, level 0
+/// pre-asymptotic; a level 3 reads 2.35 on the next rung, limited -- most
+/// likely by the meshed packs' corners, r^2 log r at each rectangle's corner,
+/// which RotatingMirror's subtracted filaments do not have. Not measured.
+/// Level 3 is not run: it is six k = 3 solves at 64 times level 0's elements,
+/// most of the suite's wall, for a rung that adds no claim. So what is
+/// asserted is what the anisotropy adds: on every rung its difference is
+/// within 25% of the isotropic one, and falls. Measured, the two agree to 6%.
 ///
 /// And tau( 1 - Delta ), setStabilisationFollowsAnisotropy(), beside it: the
 /// measurement AN-3a owes on tau. At delta0 = -0.3 it moves the differences
@@ -534,6 +556,7 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 		double amplitude;
 	};
 	std::vector<std::vector<double>> differences;
+	double scale = 0.0;
 	for ( Variant const &variant : { Variant{ "isotropic", Delta::None, false, 0.0 },
 	                                 Variant{ "delta0 = -0.3", Delta::Bump, false, -0.3 },
 	                                 Variant{ "delta0 = -0.3, tau( 1 - Delta )", Delta::Bump, true, -0.3 },
@@ -542,7 +565,7 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 	                                 Variant{ "Delta( B ), delta0 = +0.9", Delta::Field, false, 0.9 } } )
 	{
 		std::vector<std::vector<double>> sampled;
-		for ( int level : { 0, 1, 2, 3 } )
+		for ( int level : { 0, 1, 2 } )
 		{
 			auto r = run( 3, level, variant.kind, variant.amplitude, variant.tauFollows );
 			BOOST_TEST_REQUIRE( r->converged, "level " << level << ": " << r->failure );
@@ -553,18 +576,49 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 		std::vector<double> d;
 		for ( std::size_t i = 1; i < sampled.size(); ++i )
 			d.push_back( rms( sampled[ i - 1 ], sampled[ i ] ) );
-		std::printf( "  %s, k = 3: psi* level 0-1 %.3e, 1-2 %.3e, 2-3 %.3e; rates %.3f, %.3f;"
-		             " over %zu points\n", variant.label, d[ 0 ], d[ 1 ], d[ 2 ],
-		             std::log2( d[ 0 ]/d[ 1 ] ), std::log2( d[ 1 ]/d[ 2 ] ),
+		if ( differences.empty() )
+			scale = rms( sampled.back(), std::vector<double>( sampled.back().size(), 0.0 ) );
+		std::printf( "  %s, k = 3: psi* level 0-1 %.3e, 1-2 %.3e; rate %.3f; over %zu points\n",
+		             variant.label, d[ 0 ], d[ 1 ], std::log2( d[ 0 ]/d[ 1 ] ),
 		             cloud.radius.size() );
 		std::fflush( stdout );
 		differences.push_back( d );
 	}
 
+	/*
+	 * IN SINGLE THE LADDER REACHES THE FORMAT'S FLOOR AFTER ITS FIRST RUNG.
+	 * The isotropic differences read 5.22e-05, 1.42e-06 against double's
+	 * 5.10e-05, 3.28e-07: rung 0 is the same number to 2.4%, rung 1 the
+	 * meshed plasma solve's own round-off -- its residual stagnates at
+	 * 1.4e-06 to 2.2e-06. In units of psi*'s rms over the cloud, 0.22, the floored
+	 * rungs of every variant read 36 to 63 eps and rung 0 1970. A rung whose
+	 * isotropic difference is under 256 eps of that rms compares two floors,
+	 * so it is skipped loudly; rung 0 is asserted as in double.
+	 * roundOffFloor()'s 2048 eps would skip rung 0 as well and leave the case
+	 * asserting nothing. MEASUREMENTS.md M-350.
+	 */
 	std::vector<double> const &isotropic = differences[ 0 ];
+	std::vector<bool> readable( isotropic.size(), true );
+	double const ladderFloor = 256.0;
+	for ( std::size_t i = 0; i < isotropic.size(); ++i )
+		readable[ i ] = meq::tests::aboveTheFormatsFloor( isotropic[ i ], scale, ladderFloor );
+#ifdef MFEM_USE_SINGLE
+	std::printf( "  psi* rms over the cloud %.3e; this build's floor on a rung %.3e\n", scale,
+	             ladderFloor*scale*static_cast<double>(
+		             std::numeric_limits<mfem::real_t>::epsilon() ) );
+	for ( std::size_t i = 0; i < isotropic.size(); ++i )
+	{
+		if ( !readable[ i ] )
+			std::printf( "    *** SKIPPED rung %zu: the isotropic difference %.3e is under this"
+			             " build's floor, so the rung compares two floors. M-350\n", i,
+			             isotropic[ i ] );
+	}
+#endif
 	for ( std::size_t v = 1; v < differences.size(); ++v )
 		for ( std::size_t i = 0; i < isotropic.size(); ++i )
 		{
+			if ( !readable[ i ] )
+				continue;
 			double const ratio = differences[ v ][ i ]/isotropic[ i ];
 			BOOST_TEST( ( ratio > 0.8 && ratio < 1.25 ), "variant " << v << ", rung " << i
 			            << ": the anisotropic difference is " << ratio
@@ -583,8 +637,9 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 ///  - Delta( B ) to a pressure of 3.0, three times B_0^2: its root never
 ///    reaches 1 at a positive flux, so the limit is not reachable at all;
 ///  - Delta( Psi ) to 0.7. Past it the Newton crawls, 12 steps at 0.9 and 23
-///    at 0.95, and at 0.99 it does not converge. That is a defect, recorded
-///    in TODO and not asserted here.
+///    at 0.95, and at 0.99 it does not converge. That is a defect, asserted
+///    -- and red -- by theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes
+///    below; MEASUREMENTS.md M-351.
 ///
 /// Each within the isotropic mirror's 3 or 4 steps and some slack, as the
 /// negative side is.
@@ -618,6 +673,43 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesTowardsTheFirehoseLimit )
 		std::fflush( stdout );
 		BOOST_TEST( r->solver->newtonIterations() <= 8, kindName( c.kind ) << ", delta0 = "
 		            << c.amplitude << ": " << r->solver->newtonIterations() << " Newton steps" );
+	}
+}
+
+/// DELTA( Psi ) TOWARDS THE FIREHOSE LIMIT, AS THE BUMP GOES: delta0 = 0.9
+/// and 0.95 from the same meshed vacuum, level 0, k = 2, within the same
+/// budget the neighbouring cases allow, as 0.7 and below converge.
+///
+/// RED, DELIBERATELY, WHILE THE CRAWL STANDS (MEASUREMENTS.md M-351; TODO,
+/// "Anisotropic pressure"). Measured in double 12 and 23 steps, in single 10
+/// and no convergence. The bordered Newton direction is exact along every
+/// step and continuation in delta0 reaches 0.99 undamped, so neither the
+/// Jacobian nor a fold is at fault: the Armijo search walks exact steps whose
+/// curvature, through the boundary label's column, reaches 3e4 times the
+/// bump's. Turns green with a fix of that, not with a looser budget.
+BOOST_AUTO_TEST_CASE( theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes )
+{
+	for ( double amplitude : { 0.9, 0.95 } )
+	{
+		auto const r = run( 2, 0, Delta::Profile, amplitude );
+		std::printf( "  Delta( Psi ), delta0 = %+.2f: %s, %d Newton steps; dampings",
+		             amplitude, r->converged ? "converged" : "FAILED",
+		             r->solver->newtonIterations() );
+		for ( auto const &step : r->solver->borderSteps() )
+			std::printf( " %.3g", step.damping );
+		std::printf( "\n" );
+		std::fflush( stdout );
+		bool const met = r->converged && r->solver->newtonIterations() <= 8;
+		BOOST_TEST( met, "Delta( Psi ), delta0 = " << amplitude << ": "
+		            << ( r->converged ? "converged in " : "did not converge in " )
+		            << r->solver->newtonIterations() << " Newton steps against the bump's 3"
+		            " or 4 and this suite's budget of 8 -- the crawl towards the firehose"
+		            " limit, MEASUREMENTS.md M-351, TODO \"Anisotropic pressure\". The"
+		            " Jacobian is exact; the line search walks steps whose curvature runs"
+		            " through the psi_bnd column. Candidate fixes, unmeasured: carry 1 - Delta"
+		            " on the conservation row rather than as R/( 1 - Delta ) on the flux"
+		            " mass, or bound the psi_bnd step relative to the label span"
+		            << ( r->converged ? "" : std::string( ". " ) + r->failure ) );
 	}
 }
 
@@ -667,7 +759,21 @@ BOOST_AUTO_TEST_CASE( aZeroBumpThroughTheLawIsTheSubtractedMirror )
 	             " Newton %d and %d\n", worst, scale, plain->solver->newtonIterations(),
 	             zero->solver->newtonIterations() );
 	std::fflush( stdout );
-	BOOST_TEST( worst < 1.0e-10*scale, "psi_p differs by " << worst << " on " << scale );
+	double bound = 1.0e-10*scale;
+#ifdef MFEM_USE_SINGLE
+	// psi_p IS A REMAINDER, SO ITS ROUND-OFF IS THE TOTAL FLUX'S, as
+	// RotatingMirror's card-against-host pair finds: psi_p is 1e-03 at its
+	// largest and the total it is taken from is 1.57. Measured, 5.4e-08, which
+	// is 0.29 eps of the total and 430 of psi_p's own size; a conductors' load
+	// dropped by the law is O( psi_c ). MEASUREMENTS.md M-350.
+	mfem::GridFunction total;
+	plain->solver->totalPotential( total );
+	bound = std::max( bound, meq::tests::scalarAgreementFloor( 0.0, total.Normlinf() ) );
+	std::printf( "    the total flux reaches %.3e; the bound in single is %.3e\n",
+	             static_cast<double>( total.Normlinf() ), bound );
+	std::fflush( stdout );
+#endif
+	BOOST_TEST( worst < bound, "psi_p differs by " << worst << " on " << scale );
 }
 
 /// From the subtracted vacuum, either Delta converges as the meshed route does.
