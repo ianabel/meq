@@ -132,6 +132,11 @@ def one_case(stem, args, root):
     # Clean only when memcheck read its summary as zero AND the driver exited
     # as it did natively; anything else -- an error, a crash, a timeout, a
     # different branch -- is for reading.
+    if errors is None:
+        # No summary read: valgrind did not run, or died before it wrote one.
+        # Not a verdict on MEQ -- the harness is what to read (meq.log).
+        result["verdict"] = "NO REPORT"
+        return result
     clean = errors == 0 and code == result["native"]
     result["verdict"] = "clean" if clean else "POPPED"
     return result
@@ -167,7 +172,9 @@ def main():
             sys.exit("not an example: " + ", ".join(unknown))
         stems = wanted
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    root = args.out or meqpaths.runs("memcheck", stamp)
+    # Absolute: every path below is handed to a process running in a case's
+    # own directory, valgrind's --log-file among them.
+    root = os.path.abspath(args.out or meqpaths.runs("memcheck", stamp))
     os.makedirs(root, exist_ok=True)
     version = subprocess.run([meqpaths.meq(), "--version"],
                              capture_output=True, text=True).stdout.strip()
@@ -190,7 +197,7 @@ def main():
             r.get("vseconds", 0.0), r.get("summary", "-"), r["verdict"]))
     with open(os.path.join(root, "summary.txt"), "w") as f:
         f.writelines(lines)
-    popped = [r["case"] for r in results if r["verdict"] in ("POPPED", "MESH FAILED")]
+    popped = [r["case"] for r in results if r["verdict"] in ("POPPED", "MESH FAILED", "NO REPORT")]
     print("\n%d cases, %d popped%s" % (len(results), len(popped),
                                        (": " + ", ".join(sorted(popped))) if popped else ""))
     return 1 if popped else 0
