@@ -483,6 +483,9 @@ namespace meq
 			/// of f() over a Mach sweep in RotatingSourceTests.
 			double dFdPsi( double radius, double z, double psi ) const override;
 
+			/// Every species' temperature and density, omega and g g'.
+			void tableReach( double psiLow, double psiHigh, TableReach &out ) const override;
+
 			// ---- the closure, exposed because it is what FL-1 asserts on ----
 
 			/// e phi_0( R, psi ) in JOULES -- the potential of (97) times the
@@ -652,6 +655,9 @@ namespace meq
 			/// @throws std::logic_error under Gauge::FixedRadius.
 			bool crossingDerivatives( double radius, double z, double psi,
 			                          double &dFdW, double &dFdWPrime ) const override;
+
+			/// The source underneath's, over the Psi of [ psiLow, psiHigh ].
+			void tableReach( double psiLow, double psiHigh, TableReach &out ) const override;
 
 			/// Both honour setPlasmaSupport(): `F` and `dF/dpsi` are zero
 			/// wherever `Psi <= 0`, as meq::NormalisedMHDSource's are -- and,

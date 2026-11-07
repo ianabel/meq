@@ -337,25 +337,35 @@ BOOST_AUTO_TEST_CASE( the_second_derivative_jumps_at_an_interior_knot )
 	checkClose( profile.prime( knot + eps ), profile.prime( knot - eps ), 1e-7, "prime across a knot", knot );
 }
 
-BOOST_AUTO_TEST_CASE( clamps_outside_the_table_rather_than_throwing )
+BOOST_AUTO_TEST_CASE( continues_linearly_outside_the_table_rather_than_throwing )
 {
 	// The documented policy, and it matters: a Newton iterate overshoots [ 0, 1 ]
 	// routinely, and an exception out of a quadrature loop would abandon a solve
-	// that was going to converge.
+	// that was going to converge. Past an end the end knot's value and slope
+	// carry on, so value and slope are continuous there (M-TABLEDERIV-6).
 	meq::SplineProfile const profile( wiggle, wigglePrime, 10 );
+	meq::Knot const first = profile.knots().front();
+	meq::Knot const last = profile.knots().back();
 
 	for ( double psi : { -5.0, -1.0, -1e-12 } )
 	{
-		BOOST_CHECK_EQUAL( profile( psi ), profile.knots().front().value );
-		BOOST_CHECK_EQUAL( profile.prime( psi ), 0.0 );
+		BOOST_CHECK_EQUAL( profile( psi ), first.value + first.derivative*( psi - first.psi ) );
+		BOOST_CHECK_EQUAL( profile.prime( psi ), first.derivative );
 		BOOST_CHECK_EQUAL( profile.doublePrime( psi ), 0.0 );
 	}
 
 	for ( double psi : { 1.0 + 1e-12, 2.0, 17.0 } )
 	{
-		BOOST_CHECK_EQUAL( profile( psi ), profile.knots().back().value );
-		BOOST_CHECK_EQUAL( profile.prime( psi ), 0.0 );
+		BOOST_CHECK_EQUAL( profile( psi ), last.value + last.derivative*( psi - last.psi ) );
+		BOOST_CHECK_EQUAL( profile.prime( psi ), last.derivative );
 		BOOST_CHECK_EQUAL( profile.doublePrime( psi ), 0.0 );
+	}
+
+	// Continuous through each end, value and slope.
+	for ( double const end : { first.psi, last.psi } )
+	{
+		checkClose( profile( end - 1e-9 ), profile( end + 1e-9 ), 1e-7, "the value across an end", end );
+		checkClose( profile.prime( end - 1e-9 ), profile.prime( end + 1e-9 ), 1e-7, "the slope across an end", end );
 	}
 
 	// At the end knots themselves the tabulated derivative is still returned.
@@ -899,13 +909,12 @@ BOOST_AUTO_TEST_CASE( aTableInSqrtPsiNIsReKnottedInPsi )
 	BOOST_TEST( coarse->prime( 1.0 ) == 0.5, boost::test_tools::tolerance( 1.0e-6 ) );
 
 	// PAST THE AXIS, which rho cannot name: continued linearly with the axis
-	// value and slope to sqrtPsiNBeyondAxis, and clamped beyond it.
+	// value and slope to sqrtPsiNBeyondAxis, and on past it as every table is.
 	double const axisSlope = coarse->prime( 1.0 );
 	BOOST_TEST( ( *coarse )( 1.2 ) == 1.0 + 0.2*axisSlope, boost::test_tools::tolerance( 1.0e-14 ) );
 	BOOST_TEST( coarse->prime( 1.2 ) == axisSlope, boost::test_tools::tolerance( 1.0e-14 ) );
-	BOOST_TEST( ( *coarse )( 1.7 ) == 1.0 + ( meq::sqrtPsiNBeyondAxis - 1.0 )*axisSlope,
-	            boost::test_tools::tolerance( 1.0e-14 ) );
-	BOOST_TEST( coarse->prime( 1.7 ) == 0.0 );
+	BOOST_TEST( ( *coarse )( 1.7 ) == 1.0 + 0.7*axisSlope, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( coarse->prime( 1.7 ) == axisSlope, boost::test_tools::tolerance( 1.0e-14 ) );
 
 	// BETWEEN THEM, fourth order: the worst error at 64 points between the
 	// knots falls about 16x from 8 to 16 intervals.
@@ -1027,10 +1036,50 @@ BOOST_AUTO_TEST_CASE( aCompositeProfileIsTheChainRule )
 		            boost::test_tools::tolerance( 1.0e-4 ) );
 	}
 
-	// Past inner's range inner clamps: outer's value there, and no slope.
-	BOOST_TEST( g( 1.3 ) == ( *outer )( 2.0 ), boost::test_tools::tolerance( 1.0e-14 ) );
-	BOOST_TEST( g.prime( 1.3 ) == 0.0 );
+	// Past inner's range inner continues linearly, u = 2 + 3( x - 1 ), and g
+	// is outer there, slope and all.
+	BOOST_TEST( g( 1.3 ) == ( *outer )( 2.9 ), boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( g.prime( 1.3 ) == outer->prime( 2.9 )*3.0, boost::test_tools::tolerance( 1.0e-12 ) );
 
 	BOOST_CHECK_THROW( meq::CompositeProfile( nullptr, inner ), std::invalid_argument );
 	BOOST_CHECK_THROW( meq::CompositeProfile( outer, nullptr ), std::invalid_argument );
+}
+
+/*
+ * A READ PAST A TABLE IS ANSWERED BY THE CONTINUATION AND REPORTED BY
+ * tableReach(): how far below the first knot and above the last, in the
+ * table's own argument, and the larger over the span -- through the wrappers
+ * that map the argument on the way.
+ */
+BOOST_AUTO_TEST_CASE( a_read_past_a_table_is_reported_with_how_far )
+{
+	auto const table = std::make_shared<meq::SplineProfile const>( wiggle, wigglePrime, 10 );
+
+	meq::TableReach inside;
+	table->tableReach( 0.1, 0.9, inside );
+	BOOST_TEST( inside.below == 0.0 );
+	BOOST_TEST( inside.above == 0.0 );
+	BOOST_TEST( inside.relative == 0.0 );
+
+	meq::TableReach outside;
+	table->tableReach( -0.2, 1.05, outside );
+	BOOST_TEST( outside.below == 0.2, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( outside.above == 0.05, boost::test_tools::tolerance( 1.0e-14 ) );
+	BOOST_TEST( outside.relative == 0.2, boost::test_tools::tolerance( 1.0e-14 ) );
+
+	meq::ScaledProfile const scaled( table, -3.0 );
+	meq::TableReach throughScale;
+	scaled.tableReach( -0.2, 1.05, throughScale );
+	BOOST_TEST( throughScale.relative == outside.relative );
+
+	// A table in psi read at Psi through labels psi_ax = 2, psi_bnd = 1:
+	// Psi in [ -0.5, 0.2 ] is psi in [ 0.5, 1.2 ], 0.2 above the table.
+	auto labels = std::make_shared<meq::FluxLabels>();
+	labels->axis = 2.0;
+	labels->boundary = 1.0;
+	meq::FluxTableProfile const inFlux( table, labels, 0 );
+	meq::TableReach throughLabels;
+	inFlux.tableReach( -0.5, 0.2, throughLabels );
+	BOOST_TEST( throughLabels.below == 0.0 );
+	BOOST_TEST( throughLabels.above == 0.2, boost::test_tools::tolerance( 1.0e-14 ) );
 }

@@ -111,6 +111,18 @@ namespace meq
 			/// slows) the convergence to it. Must be the exact derivative of f().
 			virtual double dFdPsi( double radius, double z, double psi ) const = 0;
 
+			/**
+			 * Widens @a out by how far reading every profile F reads, for psi
+			 * over [ psiLow, psiHigh ] at the labels as they stand, goes past
+			 * the profiles' tables -- in each table's own argument. What
+			 * GradShafranovSolver::sourceTableReach() asks after a solve.
+			 * The default reads no table.
+			 */
+			virtual void tableReach( double psiLow, double psiHigh, TableReach &out ) const
+			{
+				(void)psiLow; (void)psiHigh; (void)out;
+			}
+
 		protected:
 			Source() = default;
 			Source( Source const & ) = default;
@@ -174,6 +186,7 @@ namespace meq
 			/// mu0 R^2 p''( psi ) + ( g g' )'( psi ), i.e. mu0 R^2 times the
 			/// pressure profile's prime() plus the g g' profile's prime().
 			double dFdPsi( double radius, double z, double psi ) const override;
+			void tableReach( double psiLow, double psiHigh, TableReach &out ) const override;
 
 			/// The dp/dpsi profile.
 			Profile const & pPrime() const;
@@ -887,6 +900,8 @@ namespace meq
 			bool normalisationDerivatives( double radius, double z, double psi,
 			                               double &dFdAxis,
 			                               double &dFdBoundary ) const override;
+			/// The profiles', over the Psi of [ psiLow, psiHigh ].
+			void tableReach( double psiLow, double psiHigh, TableReach &out ) const override;
 
 			void setNormalisation( double psiAxis, double psiBoundary ) override;
 			using NormalisedSource::setNormalisation;

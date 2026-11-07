@@ -329,9 +329,9 @@ namespace meq
 		if ( extension == EdgeExtension::VacuumOutside )
 		{
 			// Psi = 0 is the plasma edge. Outside it the toroidal field is the
-			// vacuum one, g = const, so gg' = 0 -- and a knot there is what
-			// makes SplineProfile's clamp carry that rather than the innermost
-			// value it happens to hold. Only added when the family does not
+			// vacuum one, g = const, so gg' = 0 -- and a knot there, value and
+			// slope zero, is what makes SplineProfile's continuation carry that
+			// rather than the innermost value and slope it happens to hold. Only added when the family does not
 			// already reach the edge, which it does not by construction.
 			if ( knots.front().psi > 0.0 )
 			{

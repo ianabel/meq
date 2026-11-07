@@ -333,11 +333,13 @@ namespace meq
 			return view.scale*view.constantValue;
 
 		KnotView const *k = knots + view.offset;
-		// Constant extension outside, matching SplineProfile::operator().
+		// The linear continuation outside, SplineProfile::operator()'s
+		// expression to the operation, so the two agree to the bit.
 		if ( x <= k[ 0 ].psi )
-			return view.scale*k[ 0 ].value;
+			return view.scale*( k[ 0 ].value + k[ 0 ].derivative*( x - k[ 0 ].psi ) );
 		if ( x >= k[ view.count - 1 ].psi )
-			return view.scale*k[ view.count - 1 ].value;
+			return view.scale*( k[ view.count - 1 ].value
+			                    + k[ view.count - 1 ].derivative*( x - k[ view.count - 1 ].psi ) );
 
 		int const i = profileInterval( view, k, view.count, x );
 		mfem::real_t const lo = k[ i ].psi;
@@ -360,10 +362,12 @@ namespace meq
 			return mfem::real_t( 0 );
 
 		KnotView const *k = knots + view.offset;
-		// Zero outside, consistent with the constant extension above --
-		// HermiteCubicSpline::prime() makes the same choice for the same reason.
-		if ( x < k[ 0 ].psi || x > k[ view.count - 1 ].psi )
-			return mfem::real_t( 0 );
+		// The end knot's slope outside, the linear continuation's, as
+		// SplineProfile::prime().
+		if ( x < k[ 0 ].psi )
+			return view.scale*k[ 0 ].derivative;
+		if ( x > k[ view.count - 1 ].psi )
+			return view.scale*k[ view.count - 1 ].derivative;
 
 		int const i = profileInterval( view, k, view.count, x );
 		mfem::real_t const lo = k[ i ].psi;

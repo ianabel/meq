@@ -32,6 +32,26 @@ namespace meq
 {
 
 	/**
+	 * HOW FAR A READ OF A PROFILE WENT PAST ITS TABLES' ENDS, in each table's
+	 * own argument: the largest distance below a first knot and above a last
+	 * one, and the largest of either over that table's span. Zero when every
+	 * read was inside. Profile::tableReach() fills it; a SplineProfile is
+	 * continued linearly out there, so a read past it is answered, and this
+	 * is how a caller learns that it was.
+	 */
+	struct TableReach
+	{
+		double below = 0.0;
+		double above = 0.0;
+		double relative = 0.0;
+	};
+
+	/// The share of a table's span a solve may read past its ends before the
+	/// driver says so: past round-off and an axis overshoot, short of a
+	/// read that the continuation answers rather than the table.
+	inline constexpr double tableReachWarning = 1.0e-3;
+
+	/**
 	 * A scalar function of the poloidal flux psi, together with its derivative.
 	 *
 	 * The Grad-Shafranov solve is nonlinear in psi and MEQ closes it with Newton,
@@ -50,7 +70,7 @@ namespace meq
 	 * Out-of-range convention: implementations must not throw when handed a psi
 	 * outside their natural range. A Newton iterate routinely overshoots, and an
 	 * exception thrown out of a quadrature loop would kill a solve that would
-	 * otherwise have converged. Implementations clamp instead; see SplineProfile
+	 * otherwise have converged. Implementations extend instead; see SplineProfile
 	 * for the exact policy.
 	 */
 	class Profile
@@ -89,6 +109,14 @@ namespace meq
 			/// converged answer, but a Newton step taken exactly at a knot sees a
 			/// Jacobian that is one-sided. Nothing has measured what that costs.
 			virtual double doublePrime( double psi ) const = 0;
+
+			/// Widens @a out by how far reading this profile over
+			/// [ low, high ] of its argument goes past its tables' ends. The
+			/// default reads no table.
+			virtual void tableReach( double low, double high, TableReach &out ) const
+			{
+				(void)low; (void)high; (void)out;
+			}
 
 		protected:
 			// Copying through a Profile& would slice; derived classes are free to be
@@ -222,6 +250,7 @@ namespace meq
 			double operator()( double psi ) const override;
 			double prime( double psi ) const override;
 			double doublePrime( double psi ) const override;
+			void tableReach( double low, double high, TableReach &out ) const override;
 
 			/// The profile underneath, unscaled.
 			Profile const & unscaled() const;
@@ -241,14 +270,23 @@ namespace meq
 	 * analytic derivative of operator() rather than a difference of it. That is
 	 * what makes the Newton Jacobian consistent with the residual.
 	 *
-	 * Out-of-range policy (applied identically by operator() and prime()): the
-	 * table is extended by a *constant* beyond its end knots. Below the first knot
-	 * the value is f( first ) and the derivative is 0; above the last knot the
-	 * value is f( last ) and the derivative is 0. Nothing throws. The rationale is
-	 * in Profile's documentation: Newton overshoots, and a bounded extension keeps
-	 * the residual finite where a linear extrapolation of a steep edge profile
-	 * would not. The extension is continuous but not C^1 -- there is a kink in the
-	 * derivative at each end knot.
+	 * OUT OF RANGE THE TABLE IS CONTINUED LINEARLY: below the first knot
+	 * f( first ) + f'( first )( psi - psi_first ), slope f'( first ), and the
+	 * same from the last knot above it; doublePrime() is zero there. Nothing
+	 * throws. Value AND SLOPE are continuous at each end, so dF/dpsi of a
+	 * source that reads a value is too, and only the second derivative jumps.
+	 *
+	 * WHY NOT A CONSTANT, WHICH THIS WAS. A clamp holds the end value with
+	 * zero slope, so dF/dpsi JUMPS across the level set psi = psi_end wherever
+	 * a solution reaches past a table -- and a fixed-boundary psi_h does, beside
+	 * the wall, where it undershoots (MEASUREMENTS.md M-TABLEDERIV-2). The
+	 * solution shrugs that off; the derivative of the discrete solution in a
+	 * table does not, and loses its order: ~1.5 against the control's k + 1
+	 * at k = 3 (M-TABLEDERIV-4). Continued, it keeps it (M-TABLEDERIV-6). The
+	 * price is the one the clamp was chosen to avoid: an overshoot past a steep
+	 * edge reads a value that keeps going -- a density or a temperature can go
+	 * through zero there -- so GradShafranovSolver::sourceTableReach() says how
+	 * far a solve read past any table, and the driver warns.
 	 *
 	 * The class is a plain value type: copyable and movable, with no hand-written
 	 * special members to get wrong.
@@ -289,8 +327,8 @@ namespace meq
 			/// that then indexed out of bounds on first use.)
 			static SplineProfile fromFile( std::string const & fileName );
 
-			/// The interpolated value at psi; clamped outside the knot range, see
-			/// the class documentation.
+			/// The interpolated value at psi; continued linearly outside the knot
+			/// range, see the class documentation.
 			double operator()( double psi ) const override;
 
 			/// The derivative of the interpolant at psi; zero outside the knot
@@ -302,6 +340,7 @@ namespace meq
 			/// findInterval() decides which side a knot belongs to and the answer
 			/// there is that interval's, not an average. See Profile::doublePrime.
 			double doublePrime( double psi ) const override;
+			void tableReach( double low, double high, TableReach &out ) const override;
 
 			/// Write the table in the format fromStream() reads, at enough
 			/// precision to round-trip a double exactly, terminated by a blank
@@ -353,7 +392,7 @@ namespace meq
 			std::vector<Knot> const & knots() const;
 
 			/// ( first knot psi, last knot psi ) -- the range over which this
-			/// profile interpolates rather than clamps.
+			/// profile interpolates rather than continues.
 			std::pair<double,double> domain() const;
 
 			/// The number of Hermite cubics, i.e. knots().size() - 1.
@@ -595,6 +634,8 @@ namespace meq
 			double operator()( double psi ) const override;
 			double prime( double psi ) const override;
 			double doublePrime( double psi ) const override;
+			/// The table's, over the psi of [ low, high ].
+			void tableReach( double low, double high, TableReach &out ) const override;
 
 		private:
 			std::shared_ptr<Profile const> inPsi;
@@ -623,6 +664,8 @@ namespace meq
 			double operator()( double psi ) const override;
 			double prime( double psi ) const override;
 			double doublePrime( double psi ) const override;
+			/// outer's, over inner's image of [ low, high ].
+			void tableReach( double low, double high, TableReach &out ) const override;
 
 		private:
 			std::shared_ptr<Profile const> outer;

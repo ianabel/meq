@@ -68,6 +68,12 @@ namespace
 				return sum;
 			}
 
+			void tableReach( double low, double high, meq::TableReach &out ) const override
+			{
+				for ( auto const &part : partData )
+					part->tableReach( low, high, out );
+			}
+
 		private:
 			std::vector<double> weightData;
 			std::vector<std::shared_ptr<meq::Profile const>> partData;
@@ -1110,6 +1116,18 @@ namespace meq
 		return permeability*radius*radius*pDoublePrime + ggPrimeProfile->prime( psi );
 	}
 
+	void RotatingSource::tableReach( double psiLow, double psiHigh, TableReach &out ) const
+	{
+		for ( Species const &species : speciesData )
+		{
+			species.temperature->tableReach( psiLow, psiHigh, out );
+			species.density->tableReach( psiLow, psiHigh, out );
+		}
+		if ( omegaProfile )
+			omegaProfile->tableReach( psiLow, psiHigh, out );
+		ggPrimeProfile->tableReach( psiLow, psiHigh, out );
+	}
+
 	std::vector<Species> const & RotatingSource::species() const
 	{
 		return speciesData;
@@ -1207,10 +1225,10 @@ namespace meq
 		// this is one comparison.
 		//
 		// AND IT MATTERS MORE HERE THAN A MISSING ZERO USUALLY WOULD, because
-		// the profiles CLAMP: meq::SplineProfile holds its endpoint value
-		// outside the knot range, so an ungated source does not tail off out
-		// here -- it sits at its plasma-edge value all the way to the wall,
-		// which is a current density filling the vacuum region.
+		// the profiles CONTINUE: meq::SplineProfile carries its endpoint value
+		// and slope on outside the knot range, so an ungated source does not
+		// tail off out here -- it runs on from its plasma-edge value all the
+		// way to the wall, which is a current density filling the vacuum region.
 		if ( !insidePlasma( radius, z, psi ) )
 			return 0.0;
 
@@ -1442,6 +1460,14 @@ namespace meq
 			knots.push_back( Knot{ k.psi, value, dPsi + dRadius*k.derivative } );
 		}
 		return std::make_shared<SplineProfile const>( std::move( knots ) );
+	}
+
+	void NormalisedRotatingSource::tableReach( double psiLow, double psiHigh, TableReach &out ) const
+	{
+		double const span = psiAxisValue - psiBoundaryValue;
+		double const a = ( psiLow - psiBoundaryValue )/span;
+		double const b = ( psiHigh - psiBoundaryValue )/span;
+		inner.tableReach( std::min( a, b ), std::max( a, b ), out );
 	}
 
 	void NormalisedRotatingSource::setMidplaneCrossing( std::shared_ptr<Profile const> crossing )

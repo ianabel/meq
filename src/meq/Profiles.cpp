@@ -152,6 +152,11 @@ namespace meq
 		return scaleFactor*innerProfile->doublePrime( psi );
 	}
 
+	void ScaledProfile::tableReach( double low, double high, TableReach &out ) const
+	{
+		innerProfile->tableReach( low, high, out );
+	}
+
 	Profile const & ScaledProfile::unscaled() const
 	{
 		return *innerProfile;
@@ -326,18 +331,25 @@ namespace meq
 
 	double SplineProfile::operator()( double psi ) const
 	{
-		if ( psi <= knotData.front().psi )
-			return knotData.front().value;
-		if ( psi >= knotData.back().psi )
-			return knotData.back().value;
+		// THE LINEAR CONTINUATION past either end: the end knot's value and
+		// slope carried on, so value and slope are continuous there -- and
+		// with them dF/dpsi of a source reading the value. See the class.
+		Knot const &first = knotData.front();
+		Knot const &last = knotData.back();
+		if ( psi <= first.psi )
+			return first.value + first.derivative*( psi - first.psi );
+		if ( psi >= last.psi )
+			return last.value + last.derivative*( psi - last.psi );
 
 		return intervalAt( findInterval( psi ) )( psi );
 	}
 
 	double SplineProfile::prime( double psi ) const
 	{
-		if ( psi < knotData.front().psi || psi > knotData.back().psi )
-			return 0.0;
+		if ( psi < knotData.front().psi )
+			return knotData.front().derivative;
+		if ( psi > knotData.back().psi )
+			return knotData.back().derivative;
 
 		return intervalAt( findInterval( psi ) ).prime( psi );
 	}
@@ -348,6 +360,17 @@ namespace meq
 			return 0.0;
 
 		return intervalAt( findInterval( psi ) ).doublePrime( psi );
+	}
+
+	void SplineProfile::tableReach( double low, double high, TableReach &out ) const
+	{
+		double const first = knotData.front().psi;
+		double const last = knotData.back().psi;
+		double const below = std::max( 0.0, first - low );
+		double const above = std::max( 0.0, high - last );
+		out.below = std::max( out.below, below );
+		out.above = std::max( out.above, above );
+		out.relative = std::max( out.relative, std::max( below, above )/( last - first ) );
 	}
 
 	bool SplineProfile::uniformKnots() const
@@ -700,6 +723,14 @@ namespace meq
 		return scale*span*span*inPsi->doublePrime( labels->boundary + span*psi );
 	}
 
+	void FluxTableProfile::tableReach( double low, double high, TableReach &out ) const
+	{
+		double const span = labels->axis - labels->boundary;
+		double const a = labels->boundary + span*low;
+		double const b = labels->boundary + span*high;
+		inPsi->tableReach( std::min( a, b ), std::max( a, b ), out );
+	}
+
 	CompositeProfile::CompositeProfile( std::shared_ptr<Profile const> outerIn,
 	                                    std::shared_ptr<Profile const> innerIn )
 		: outer( std::move( outerIn ) ), inner( std::move( innerIn ) )
@@ -723,6 +754,15 @@ namespace meq
 		double const x = ( *inner )( psi );
 		double const slope = inner->prime( psi );
 		return outer->doublePrime( x )*slope*slope + outer->prime( x )*inner->doublePrime( psi );
+	}
+
+	void CompositeProfile::tableReach( double low, double high, TableReach &out ) const
+	{
+		// The held crossing is monotone across a support, so its image of the
+		// interval is the interval of its ends' images.
+		double const a = ( *inner )( low );
+		double const b = ( *inner )( high );
+		outer->tableReach( std::min( a, b ), std::max( a, b ), out );
 	}
 
 	std::shared_ptr<Profile const> profileFromTable( ProfileTable const & table )
