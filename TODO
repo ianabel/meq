@@ -880,6 +880,72 @@ accuracy and not for patience.
   depending on the access pattern and has never been measured either way here.
 
 ================================================================================
+A PRECONDITIONED Krylov solve of the trace, against the direct solvers
+Raised 2026-11-06.
+================================================================================
+
+  WHAT IS MEASURED, AND WHAT IT DOES NOT CLOSE. M-179 ran GMRES with a
+  Gauss-Seidel smoother: 247 iterations on soloviev-nstx (0.41 s against
+  PARDISO's 0.30 s) and 4,179 on machine-f-diiid's first solve, which did not
+  finish in 1,800 s against 3.0 s. CLAUDE_DECLINED.md, "An iterative trace
+  solve", records that as closing the iterative question. It closes Gauss-
+  Seidel. No preconditioner that knows the trace system's structure was tried,
+  and the iteration count's seventeenfold rise for a threefold rise in elements
+  is what an unpreconditioned elliptic operator does -- the number a good
+  preconditioner exists to flatten.
+
+  WHAT AN ITERATIVE SOLVE HAS TO BEAT, so the comparison is not of iteration
+  counts alone:
+  * one factorisation amortised over the bordered step's back-solves -- 14
+    columns on machine-f-diiid, blocked into one ArrayMult (M-98's 1.34x);
+  * the symbolic analysis kept across Newton steps
+    (direct-solver-symbolic-reuse in meq-integration);
+  * the trace matrix is NOT symmetric where Gamma is curved (CLAUDE_HDGGS.md,
+    "The trace matrix is symmetric on the fitted path and is not on the
+    extension path"), so CG and MINRES are out on the driver's target and
+    GMRES or BiCGStab is the method;
+  * serial MFEM has no AMG (HypreBoomerAMG needs MPI; CLAUDE_DECLINED.md,
+    item 4 of "Symmetric solvers ...").
+
+  CANDIDATES, cheapest to try first:
+  1. THE FACTORISATION AS A PRECONDITIONER ACROSS NEWTON STEPS. Factor at one
+     Newton step, precondition the next steps' GMRES with it, refactor when the
+     count rises. Near convergence J barely moves, so the count should be a
+     handful; this trades factorisations for back-solves without giving up the
+     direct solver. The same idea serves MaNTA's linearised solves
+     (MANTA-EQUILIBRIUM-PLAN.md section 4.3), which apply J^-1 at a retained
+     state many times. Needs: the factor-versus-solve split of the trace leg
+     first (tests/performance/newton-step-profile.sh), since if back-solves
+     already dominate there is nothing to win.
+  2. A LOW-ORDER COARSE CORRECTION. The HDG trace system has a standard
+     two-level preconditioner: transfer to continuous P1 on the same mesh, solve
+     there (directly -- it is a fraction of the size), smooth on the trace
+     (Cockburn, Dubois, Gopalakrishnan & Tan, "Multigrid for an HDG method",
+     IMA J. Numer. Anal. 34 (2014); not yet in refs/). This is what should take
+     the count from thousands to tens, if anything does.
+  3. ILU / ISAI / SCHWARZ through Ginkgo, which is not MPI-gated and takes an
+     mfem::Device directly -- the device route M-179 named. Only worth it after
+     2, since M-179's argument is that a device does not close a gap of this
+     size; a preconditioner has to.
+  4. THE 14 COLUMNS. A block Krylov method, or recycling (GCRO-DR) across the
+     columns and the Newton steps, if 1 to 3 leave the columns as the cost.
+
+  WHERE THE CROSSOVER WOULD BE. A 2D nested-dissection factorisation costs
+  about N^1.5 and fills about N log N; a preconditioned Krylov solve with a
+  mesh-independent count costs about N per iteration. At MEQ's sizes (50k trace
+  dofs factor in 0.4 s) direct is expected to win; the question is the
+  crossover in N, and whether adaptive runs, high k or the MaNTA coupling's
+  repeated solves reach it. Measure on the M-179 pair and one larger case:
+  machine-f-diiid refined once and twice uniformly.
+
+  CLOSES: the four timings -- PARDISO, and each candidate taken -- on those
+  cases against N, including the 14-column bordered step and the Newton
+  sequence rather than one solve, and either a TraceSolver choice measured to
+  win somewhere or the entry folded into CLAUDE_DECLINED.md with its numbers.
+  Either way the answer must agree with PARDISO to the printed digits
+  (theTraceSolversAgree's contract).
+
+================================================================================
 Stale comments and inert keys, found by writing the LaTeX manual -- ALL CLOSED
 Raised 2026-09-03. Estimator.hpp's two stale paragraphs, the last open item,
 now say what the estimator does: it works through Newton, and eta_5 keeps the
