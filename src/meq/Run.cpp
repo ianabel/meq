@@ -39,6 +39,7 @@
 #include "meq/WarmStart.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -758,11 +759,37 @@ struct meq::Run::Impl
 	int solve();
 	int write();
 
+	// ---- the session: Run::resolve() and Run::snapshot() ----------------
+	void buildSources();
+	/// Why this run cannot be re-solved in memory, as a message, or empty.
+	std::string sessionRefusal() const;
+	/// The solved state as a snapshot, without its family.
+	std::shared_ptr<meq::EquilibriumSnapshot> captureState() const;
+	int resolve( meq::ProfileTables const &tables,
+	             std::shared_ptr<meq::EquilibriumSnapshot const> const &warm );
+	/// This run's identity, which its snapshots carry, and how many solves
+	/// it has completed.
+	std::uint64_t const sessionId = nextSessionId();
+	std::uint64_t sequence = 0;
+	/// What Run::snapshot() returns, until the next successful resolve.
+	std::shared_ptr<meq::EquilibriumSnapshot const> currentSnapshot;
+	/// While a resolve solves: the state its first solver starts at, psi_h
+	/// of it for setInitialGuess() (which borrows), and the solver whose
+	/// psi_c cache the new one adopts.
+	std::shared_ptr<meq::EquilibriumSnapshot const> sessionWarm;
+	std::unique_ptr<mfem::GridFunction> sessionGuess;
+	meq::GradShafranovSolver const *cacheDonor = nullptr;
+	static std::uint64_t nextSessionId()
+	{
+		static std::atomic<std::uint64_t> counter{ 0 };
+		return ++counter;
+	}
+
 	// The process's choices, RunOptions'.
 	std::string const argument;
 	std::string const configText;
 	std::string const baseDirectory;
-	meq::ProfileTables const profiles;
+	meq::ProfileTables profiles;
 	std::string const restartFrom;
 	std::vector<meq::Knot> const heldCrossing;
 
@@ -777,6 +804,13 @@ struct meq::Run::Impl
 	std::vector<meq::Knot> answerCrossing();
 	void ensurePostProcessed();
 	meq::FluxSurfaceFamily writeFluxSurfaces( std::string const &file );
+	/// The solved state's family at @a options, traced as the write phase
+	/// traces it: on the curved path through the band, by the transfer
+	/// lift, since Omega_h is inscribed in Gamma and the outer surfaces lie
+	/// partly outside it. Every caller that extracts goes through here.
+	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options,
+	                                      meq::CriticalPoint const &axis );
+	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options );
 	/// The root group of the last _surfaces.nc written, and its family, or null.
 	std::shared_ptr<meq::Dataset const> writtenSurfaces;
 	std::shared_ptr<meq::FluxSurfaceFamily const> writtenFamily;
@@ -908,6 +942,119 @@ struct meq::Run::Impl
 	}
 };
 
+namespace
+{
+	/*
+	 * WHAT A SOLVE PHASE WRITES INTO THE RUN, HELD ASIDE WHILE A RESOLVE
+	 * SOLVES -- and put back if it fails, which is the whole of resolve()'s
+	 * transaction. Every member Impl::solve() assigns, and the sources and
+	 * tables resolve() rebuilds; the old solver goes with them, alive and
+	 * untouched, with the sources it holds references into. Taking a member
+	 * leaves its default behind, which is what a fresh solve phase starts
+	 * from; the seeds are set again from the warm snapshot.
+	 *
+	 * A MEMBER ADDED TO Impl THAT solve() ASSIGNS BELONGS HERE, or a failed
+	 * resolve leaks it: RunSession's aFailedResolveLeavesTheRunAsItWas
+	 * compares the whole restart file before and after.
+	 */
+	template < typename Impl >
+	struct SolvedState
+	{
+		meq::ProfileTables profiles;
+		std::shared_ptr<meq::Source const> source;
+		std::shared_ptr<meq::NormalisedSource> normalised;
+		std::shared_ptr<meq::Source const> plasmaSource;
+		std::shared_ptr<meq::NormalisedMHDSource> toroidalDriven;
+		std::shared_ptr<meq::Profile const> safetyFactorTarget;
+		std::vector<double> toroidalCoefficients;
+		double psiAxisGuess = 0.0;
+		double xPointSeedR = 0.0;
+		double xPointSeedZ = 0.0;
+		std::optional<double> profileScaleSeed;
+		std::unique_ptr<meq::GradShafranovSolver> solver;
+		decltype( Impl::history ) history;
+		int answerCrawl = 0;
+		decltype( Impl::axisCheck ) axisCheck{};
+		bool axisChecked = false;
+		bool axisRefused = false;
+		decltype( Impl::axialCutoff ) axialCutoff{};
+		decltype( Impl::supportNodes ) supportNodes{};
+		decltype( Impl::exteriorSource ) exteriorSource{};
+		decltype( Impl::elementRecord ) elementRecord;
+		decltype( Impl::materialTable ) materialTable{};
+		bool firstFreezeTaken = false;
+		double firstFreezeAxis = 0.0;
+		double firstFreezeBoundary = 0.0;
+		bool supportSettled = false;
+		std::unique_ptr<mfem::GridFunction> sweepState;
+		int sweepsRun = 0;
+		std::unique_ptr<mfem::GridFunction> picardState;
+		std::unique_ptr<meq::GradShafranovSolver> picardHome;
+		std::unique_ptr<mfem::GridFunction> carried;
+		std::shared_ptr<meq::Dataset const> writtenSurfaces;
+		std::shared_ptr<meq::FluxSurfaceFamily const> writtenFamily;
+		std::shared_ptr<meq::EquilibriumSnapshot const> currentSnapshot;
+		std::uint64_t sequence = 0;
+		std::vector<double> clocks;
+
+		static std::vector<double *> clocksOf( Impl &impl )
+		{
+			return { &impl.solveSeconds, &impl.solveCpuSeconds, &impl.supportSeconds,
+			         &impl.supportCpuSeconds, &impl.buildSeconds, &impl.buildCpuSeconds,
+			         &impl.checkSeconds, &impl.checkCpuSeconds, &impl.postSeconds,
+			         &impl.postCpuSeconds, &impl.driverPrepareSeconds,
+			         &impl.driverPrepareCpuSeconds, &impl.sweepOverheadSeconds,
+			         &impl.sweepOverheadCpuSeconds };
+		}
+
+		/// Swap every member with the run's: from a default SolvedState that
+		/// is take(), and a second swap is the restore.
+		void swapWith( Impl &impl )
+		{
+			using std::swap;
+			swap( profiles, impl.profiles );
+			swap( source, impl.source );
+			swap( normalised, impl.normalised );
+			swap( plasmaSource, impl.plasmaSource );
+			swap( toroidalDriven, impl.toroidalDriven );
+			swap( safetyFactorTarget, impl.safetyFactorTarget );
+			swap( toroidalCoefficients, impl.toroidalCoefficients );
+			swap( psiAxisGuess, impl.psiAxisGuess );
+			swap( xPointSeedR, impl.xPointSeedR );
+			swap( xPointSeedZ, impl.xPointSeedZ );
+			swap( profileScaleSeed, impl.profileScaleSeed );
+			swap( solver, impl.solver );
+			swap( history, impl.history );
+			swap( answerCrawl, impl.answerCrawl );
+			swap( axisCheck, impl.axisCheck );
+			swap( axisChecked, impl.axisChecked );
+			swap( axisRefused, impl.axisRefused );
+			swap( axialCutoff, impl.axialCutoff );
+			swap( supportNodes, impl.supportNodes );
+			swap( exteriorSource, impl.exteriorSource );
+			swap( elementRecord, impl.elementRecord );
+			swap( materialTable, impl.materialTable );
+			swap( firstFreezeTaken, impl.firstFreezeTaken );
+			swap( firstFreezeAxis, impl.firstFreezeAxis );
+			swap( firstFreezeBoundary, impl.firstFreezeBoundary );
+			swap( supportSettled, impl.supportSettled );
+			swap( sweepState, impl.sweepState );
+			swap( sweepsRun, impl.sweepsRun );
+			swap( picardState, impl.picardState );
+			swap( picardHome, impl.picardHome );
+			swap( carried, impl.carried );
+			swap( writtenSurfaces, impl.writtenSurfaces );
+			swap( writtenFamily, impl.writtenFamily );
+			swap( currentSnapshot, impl.currentSnapshot );
+			swap( sequence, impl.sequence );
+			std::vector<double *> const live = clocksOf( impl );
+			clocks.resize( live.size(), 0.0 );
+			for ( std::size_t i = 0; i < live.size(); ++i )
+				swap( clocks[ i ], *live[ i ] );
+		}
+	};
+}
+
 meq::Run::Run( RunOptions const &options )
 	: impl( std::make_unique<Impl>( options ) )
 {
@@ -975,7 +1122,175 @@ int meq::Run::solve()
 	advance( Stage::Prepared, "solve" );
 	int const code = runPhase( [ this ]() { return impl->solve(); } );
 	stage = code == Solved ? Stage::Solved : Stage::Failed;
+	if ( code == Solved )
+		impl->sequence = 1;
 	return code;
+}
+
+std::string meq::Run::Impl::sessionRefusal() const
+{
+	if ( adapt.enabled )
+		return "[adaptivity] rebuilds the mesh every cycle, so there is no mesh\n"
+		       "     a re-solve could restart its state on";
+	if ( config->getSource().supportIsBox() )
+		return "a mirror's box support iterates its R_midplane tables and labels\n"
+		       "     across solves, which a session does not carry";
+	if ( !freeCircuits.empty() )
+		return "an [inverse] solve moves the coil set's currents, which every\n"
+		       "     solver of the run shares";
+	if ( deviceWanted )
+		return "a session is solved on the host: it serves MaNTA, which is\n"
+		       "     double and host (MANTA-EQUILIBRIUM-PLAN.md, D5)";
+	return {};
+}
+
+std::shared_ptr<meq::EquilibriumSnapshot> meq::Run::Impl::captureState() const
+{
+	auto out = std::make_shared<meq::EquilibriumSnapshot>();
+	out->session = sessionId;
+	out->sequence = sequence;
+	out->profiles = profiles;
+	mfem::Vector const &state = solver->state();
+	out->state.assign( state.HostRead(), state.HostRead() + state.Size() );
+	out->exteriorCoefficients = solver->exteriorCoefficients();
+	if ( normalised && !config->getSource().supportIsBox() )
+		out->psiAxis = solver->psiAxis();
+	out->psiBoundary = solver->psiBoundary();
+	out->psiBoundaryIsUnknown = config->getBoundary().limiter.given
+	                            || solver->xPointIsAnUnknown();
+	out->axisLocated = axisChecked && axisCheck.located;
+	if ( out->axisLocated )
+	{
+		out->axisR = axisCheck.axis.radius;
+		out->axisZ = axisCheck.axis.z;
+	}
+	out->xPointLocated = solver->xPointIsAnUnknown() && solver->xPointWasLocated();
+	if ( out->xPointLocated )
+	{
+		out->xPointR = solver->xPointR();
+		out->xPointZ = solver->xPointZ();
+	}
+	out->hasProfileScale = normalised && config->getSource().plasmaCurrent() != 0.0;
+	if ( out->hasProfileScale )
+		out->profileScale = solver->plasmaCurrentScale();
+	if ( solver->inverseIsPosed() )
+		out->inverseCurrents = solver->freeCircuitCurrents();
+	if ( toroidalDriven )
+		out->gSquaredCoefficients = toroidalCoefficients;
+	out->newtonIterations = solver->newtonIterations();
+	return out;
+}
+
+int meq::Run::Impl::resolve( meq::ProfileTables const &tables,
+                             std::shared_ptr<meq::EquilibriumSnapshot const> const &warm )
+{
+	// THE STATE TO START FROM, captured before anything is taken aside: the
+	// caller's snapshot, or the one this run holds.
+	std::shared_ptr<meq::EquilibriumSnapshot const> const start
+		= warm ? warm : std::shared_ptr<meq::EquilibriumSnapshot const>( captureState() );
+
+	// THE TRANSACTION. Everything a solve phase writes goes aside, and comes
+	// back unless the solve below succeeds -- however it ends, RunExit
+	// included.
+	struct Transaction
+	{
+		Impl &impl;
+		SolvedState<Impl> saved;
+		bool committed = false;
+		explicit Transaction( Impl &in ) : impl( in ) { saved.swapWith( impl ); }
+		~Transaction()
+		{
+			impl.sessionWarm.reset();
+			impl.sessionGuess.reset();
+			impl.cacheDonor = nullptr;
+			if ( !committed )
+				saved.swapWith( impl );
+		}
+	} transaction( *this );
+	sequence = transaction.saved.sequence;
+
+	profiles = transaction.saved.profiles;
+	for ( auto const &entry : tables )
+		profiles[ entry.first ] = entry.second;
+	try
+	{
+		buildSources();
+	}
+	catch ( std::exception const &error )
+	{
+		std::fprintf( stderr, "MEQ: %s\n", error.what() );
+		return ConfigurationError;
+	}
+
+	// THE BORDER'S SEEDS ARE THE WARM STATE'S, as a restart takes them from
+	// its file and an adaptive cycle from the last.
+	if ( normalised && !config->getSource().supportIsBox() )
+		psiAxisGuess = start->psiAxis;
+	if ( start->xPointLocated )
+	{
+		xPointSeedR = start->xPointR;
+		xPointSeedZ = start->xPointZ;
+	}
+	if ( start->hasProfileScale )
+		profileScaleSeed = start->profileScale;
+	if ( toroidalDriven && start->gSquaredCoefficients.size() == toroidalCoefficients.size() )
+		toroidalCoefficients = start->gSquaredCoefficients;
+
+	sessionWarm = start;
+	cacheDonor = transaction.saved.solver.get();
+	int const code = solve();
+	if ( code != nextPhase )
+		return code;
+
+	++sequence;
+	transaction.committed = true;
+	return nextPhase;
+}
+
+int meq::Run::resolve( ProfileTables const &tables,
+                       std::shared_ptr<EquilibriumSnapshot const> const &warm )
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::resolve(): there is no solved state to re-solve from; "
+		                        "prepare() and solve() first" );
+	if ( warm && warm->session != impl->sessionId )
+		throw std::invalid_argument( "meq::Run::resolve(): that snapshot is another run's; "
+		                             "its state is numbered by that run's mesh" );
+	std::string const refusal = impl->sessionRefusal();
+	if ( !refusal.empty() )
+	{
+		std::fprintf( stderr, "MEQ: this run cannot be re-solved in memory: %s.\n"
+		                      "     Its solved state is unchanged.\n", refusal.c_str() );
+		return ConfigurationError;
+	}
+	int const code = runPhase( [ & ]() { return impl->resolve( tables, warm ); } );
+	if ( code == Solved )
+		stage = Stage::Solved;
+	return code;
+}
+
+std::shared_ptr<meq::EquilibriumSnapshot const> meq::Run::snapshot()
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::snapshot(): there is no solved state" );
+	if ( !impl->currentSnapshot )
+	{
+		std::shared_ptr<meq::EquilibriumSnapshot> const taken = impl->captureState();
+		if ( !impl->config->getSource().supportIsBox() )
+		{
+			impl->ensurePostProcessed();
+			meq::OutputConfig const &output = impl->config->getOutput();
+			meq::FluxFamilyOptions options;
+			options.surfaces = static_cast<std::size_t>( output.fluxSurfaceCount );
+			options.angles = static_cast<std::size_t>( output.fluxAngleCount );
+			options.innerCut = output.fluxInnerCut;
+			options.outerCut = output.fluxOuterCut;
+			taken->family = std::make_shared<meq::FluxSurfaceFamily const>(
+				impl->extractFamily( options ) );
+		}
+		impl->currentSnapshot = taken;
+	}
+	return impl->currentSnapshot;
 }
 
 std::vector<meq::Knot> meq::Run::Impl::answerCrossing()
@@ -1144,6 +1459,118 @@ int meq::Run::write()
 	int const code = runPhase( [ this ]() { return impl->write(); } );
 	stage = ( code == Solved || code == TargetsNotMet ) ? Stage::Written : Stage::Failed;
 	return code;
+}
+
+/*
+ * THE SOURCE, FROM THE CONFIGURATION AND THE TABLES THE RUN HOLDS: what
+ * configure() builds once and resolve() builds again for new tables, so the
+ * two cannot drift apart. Sets source, normalised, plasmaSource and, on the
+ * q-driven route, toroidalDriven, safetyFactorTarget and the loop's opening
+ * coefficients, and the seeds a configuration gives psi_ax and the X-point.
+ * Throws as the factories do; configure() and resolve() report it.
+ */
+void meq::Run::Impl::buildSources()
+{
+	if ( config->getSource().isNormalised() )
+	{
+		auto plasma = meq::makeNormalisedSource( config->getSource(), argument, profiles,
+		                                         heldCrossingProfile() );
+		psiAxisGuess = config->getSource().psiAxisGuess();
+		xPointSeedR = config->getBoundary().xpoint.radius;
+		xPointSeedZ = config->getBoundary().xpoint.z;
+
+		if ( config->getSource().type == meq::SourceType::MHD
+		     && !config->getSource().getMHD().safetyFactorFile.empty() )
+		{
+			meq::MHDParameters const &mhd = config->getSource().getMHD();
+			toroidalDriven =
+				std::dynamic_pointer_cast<meq::NormalisedMHDSource>( plasma );
+			if ( !toroidalDriven )
+				throw meq::ConfigError( argument, "source.SafetyFactorFile",
+					"only the \"mhd\" source can be driven by a target q" );
+
+			safetyFactorTarget = std::make_shared<meq::SplineProfile const>(
+				meq::SplineProfile::fromFile( mhd.safetyFactorFile ) );
+
+			// THE LOOP OPENS AT A CONSTANT g, so g^2 = g0^2 and every
+			// higher coefficient is zero. That is gg' = 0 -- the vacuum --
+			// which is the honest statement of what is known before the
+			// first equilibrium exists.
+			toroidalCoefficients.assign( mhd.safetyFactorDegree + 1, 0.0 );
+			toroidalCoefficients[ 0 ] =
+				mhd.toroidalFieldGuess*mhd.toroidalFieldGuess;
+		}
+
+		if ( coils )
+		{
+			plasmaSource = plasma;
+			normalised = std::make_shared<meq::CoilAugmentedNormalisedSource>(
+				std::move( plasma ), coils );
+		}
+		else
+		{
+			normalised = std::move( plasma );
+		}
+
+		/*
+		 * THE MOVING SUPPORT IS SET ON THE HANDLE THE SOLVER WILL HOLD, AND
+		 * IT HAS TO BE SET AFTER THE WRAPPING RATHER THAN BEFORE.
+		 *
+		 * The coils are OUTSIDE the plasma by construction -- confining them
+		 * to it would switch off every coil in the machine -- so the
+		 * confinement applies to the plasma term alone, and
+		 * meq::CoilAugmentedNormalisedSource::setPlasmaSupport() forwards to
+		 * the wrapped source for exactly that reason. That is why
+		 * meq::NormalisedSource::setPlasmaSupport() is virtual.
+		 *
+		 * **AND A FORWARDING OVERRIDE CAN ONLY FORWARD IF IT IS THE OBJECT
+		 * YOU CALL.** Setting it on `plasma` before the wrapper exists
+		 * confines the plasma term correctly -- f() delegates, so the
+		 * pointwise support works -- and leaves the WRAPPER's own flag
+		 * false. plasmaSupport() is not virtual, so
+		 * GradShafranovSolver::plasmaComponentWanted() reads that false one
+		 * and the flood fill never runs: XP-1's connectivity was silently
+		 * inert on every run carrying a [[coils]] block, which is every
+		 * machine case in this tree. Measured on
+		 * examples/diverted-tokamak.toml before the reorder: the config
+		 * asked for confinement, the inner source reported it, and the
+		 * handle the solver was given reported 0.
+		 *
+		 * theConnectivityReachesACoilMachine in
+		 * tests/convergence/PlasmaConnectivity.cpp is the regression, and it
+		 * asserts on the HANDLE rather than on the wrapped source, because
+		 * asking the plasma source would have passed throughout.
+		 */
+		if ( config->getSource().confinesToPlasma() )
+		{
+			normalised->setPlasmaSupport( true );
+			// AND ITS SHAPE, ON THE SAME HANDLE AND FOR THE SAME REASON:
+			// the wrapper forwards to the plasma term, and the solver reads
+			// the handle's shape to decide whether the connectivity fill
+			// runs. One-sided is the default and resets nothing.
+			normalised->setPlasmaSupportShape(
+				supportShapeOf( config->getSource().supportShape ),
+				config->getSource().axialEdge );
+		}
+
+		source = normalised;
+	}
+	else
+	{
+		auto plasma = meq::makeSource( config->getSource(), argument, profiles,
+		                               heldCrossingProfile() );
+
+		if ( coils )
+		{
+			plasmaSource = plasma;
+			source = std::make_shared<meq::CoilAugmentedSource const>(
+				std::move( plasma ), coils );
+		}
+		else
+		{
+			source = std::move( plasma );
+		}
+	}
 }
 
 int meq::Run::Impl::configure()
@@ -1812,106 +2239,7 @@ int meq::Run::Impl::configure()
 			std::fflush( stdout );
 		}
 
-		if ( config->getSource().isNormalised() )
-		{
-			auto plasma = meq::makeNormalisedSource( config->getSource(), argument, profiles,
-			                                         heldCrossingProfile() );
-			psiAxisGuess = config->getSource().psiAxisGuess();
-			xPointSeedR = config->getBoundary().xpoint.radius;
-			xPointSeedZ = config->getBoundary().xpoint.z;
-
-			if ( config->getSource().type == meq::SourceType::MHD
-			     && !config->getSource().getMHD().safetyFactorFile.empty() )
-			{
-				meq::MHDParameters const &mhd = config->getSource().getMHD();
-				toroidalDriven =
-					std::dynamic_pointer_cast<meq::NormalisedMHDSource>( plasma );
-				if ( !toroidalDriven )
-					throw meq::ConfigError( argument, "source.SafetyFactorFile",
-						"only the \"mhd\" source can be driven by a target q" );
-
-				safetyFactorTarget = std::make_shared<meq::SplineProfile const>(
-					meq::SplineProfile::fromFile( mhd.safetyFactorFile ) );
-
-				// THE LOOP OPENS AT A CONSTANT g, so g^2 = g0^2 and every
-				// higher coefficient is zero. That is gg' = 0 -- the vacuum --
-				// which is the honest statement of what is known before the
-				// first equilibrium exists.
-				toroidalCoefficients.assign( mhd.safetyFactorDegree + 1, 0.0 );
-				toroidalCoefficients[ 0 ] =
-					mhd.toroidalFieldGuess*mhd.toroidalFieldGuess;
-			}
-
-			if ( coils )
-			{
-				plasmaSource = plasma;
-				normalised = std::make_shared<meq::CoilAugmentedNormalisedSource>(
-					std::move( plasma ), coils );
-			}
-			else
-			{
-				normalised = std::move( plasma );
-			}
-
-			/*
-			 * THE MOVING SUPPORT IS SET ON THE HANDLE THE SOLVER WILL HOLD, AND
-			 * IT HAS TO BE SET AFTER THE WRAPPING RATHER THAN BEFORE.
-			 *
-			 * The coils are OUTSIDE the plasma by construction -- confining them
-			 * to it would switch off every coil in the machine -- so the
-			 * confinement applies to the plasma term alone, and
-			 * meq::CoilAugmentedNormalisedSource::setPlasmaSupport() forwards to
-			 * the wrapped source for exactly that reason. That is why
-			 * meq::NormalisedSource::setPlasmaSupport() is virtual.
-			 *
-			 * **AND A FORWARDING OVERRIDE CAN ONLY FORWARD IF IT IS THE OBJECT
-			 * YOU CALL.** Setting it on `plasma` before the wrapper exists
-			 * confines the plasma term correctly -- f() delegates, so the
-			 * pointwise support works -- and leaves the WRAPPER's own flag
-			 * false. plasmaSupport() is not virtual, so
-			 * GradShafranovSolver::plasmaComponentWanted() reads that false one
-			 * and the flood fill never runs: XP-1's connectivity was silently
-			 * inert on every run carrying a [[coils]] block, which is every
-			 * machine case in this tree. Measured on
-			 * examples/diverted-tokamak.toml before the reorder: the config
-			 * asked for confinement, the inner source reported it, and the
-			 * handle the solver was given reported 0.
-			 *
-			 * theConnectivityReachesACoilMachine in
-			 * tests/convergence/PlasmaConnectivity.cpp is the regression, and it
-			 * asserts on the HANDLE rather than on the wrapped source, because
-			 * asking the plasma source would have passed throughout.
-			 */
-			if ( config->getSource().confinesToPlasma() )
-			{
-				normalised->setPlasmaSupport( true );
-				// AND ITS SHAPE, ON THE SAME HANDLE AND FOR THE SAME REASON:
-				// the wrapper forwards to the plasma term, and the solver reads
-				// the handle's shape to decide whether the connectivity fill
-				// runs. One-sided is the default and resets nothing.
-				normalised->setPlasmaSupportShape(
-					supportShapeOf( config->getSource().supportShape ),
-					config->getSource().axialEdge );
-			}
-
-			source = normalised;
-		}
-		else
-		{
-			auto plasma = meq::makeSource( config->getSource(), argument, profiles,
-			                               heldCrossingProfile() );
-
-			if ( coils )
-			{
-				plasmaSource = plasma;
-				source = std::make_shared<meq::CoilAugmentedSource const>(
-					std::move( plasma ), coils );
-			}
-			else
-			{
-				source = std::move( plasma );
-			}
-		}
+		buildSources();
 
 		if ( config->getBoundary().type == meq::BoundaryDataType::Exact )
 		{
@@ -3462,7 +3790,55 @@ int meq::Run::Impl::setUp()
 		if ( traceRefinementCap )
 			fresh->setTraceRefinementCap( *traceRefinementCap );
 
-		if ( !firstCycle && previousPotential )
+		if ( sessionWarm && firstCycle )
+		{
+			/*
+			 * A RESOLVE'S START: THE WHOLE ITERATE OF ITS WARM SNAPSHOT, as the
+			 * exact restart below takes it from a .nc -- psi_h for the guess,
+			 * ( q, psi, psihat ) and the exterior coefficients over it, psi_bnd
+			 * where it is an unknown, and the first plasma fill seeded at the
+			 * snapshot's axis -- so a resolve of unchanged tables starts AT its
+			 * answer. Every solver the resolve builds starts here, the retry
+			 * rung's included: a second attempt starts where the first did.
+			 */
+			mfem::Vector state( static_cast<int>( sessionWarm->state.size() ) );
+			for ( int i = 0; i < state.Size(); ++i )
+				state( i ) = static_cast<mfem::real_t>(
+					sessionWarm->state[ static_cast<std::size_t>( i ) ] );
+			sessionGuess = std::make_unique<mfem::GridFunction>(
+				fresh->potential().FESpace() );
+			int const fluxSize = fresh->flux().Size();
+			if ( state.Size() < fluxSize + sessionGuess->Size() )
+				throw std::invalid_argument( "meq::Run::resolve(): the warm snapshot's state "
+				                             "does not fit this run's spaces" );
+			for ( int i = 0; i < sessionGuess->Size(); ++i )
+				( *sessionGuess )( i ) = state( fluxSize + i );
+			fresh->setInitialGuess( *sessionGuess );
+			fresh->setInitialState( state, sessionWarm->exteriorCoefficients );
+			if ( sessionWarm->psiBoundaryIsUnknown )
+				fresh->setBoundaryFluxInitial( sessionWarm->psiBoundary );
+			if ( sessionWarm->axisLocated )
+			{
+				try
+				{
+					fresh->setPlasmaAxisSeed( sessionWarm->axisR, sessionWarm->axisZ );
+				}
+				catch ( std::runtime_error const & )
+				{
+					// As on the restart route: the fill's own fallback.
+				}
+			}
+
+			// psi_c AS THE LAST SOLVER HELD IT, on the same mesh: a rebuild
+			// would change no number and cost the run's most expensive
+			// setup step every resolve (M-170).
+			if ( conductorField && cacheDonor )
+			{
+				std::string reason;
+				fresh->adoptConductorCache( cacheDonor->conductorCacheSnapshot(), reason );
+			}
+		}
+		else if ( !firstCycle && previousPotential )
 		{
 			/*
 			 * THE INTERPOLATING WARM START, AND THE REASON CYCLES AFTER THE FIRST
@@ -3910,7 +4286,7 @@ int meq::Run::Impl::solve()
 					// so this is the field the family should be built on and
 					// not merely one that happens to be available.
 					solver->postProcess();
-					extracted = meq::extractFluxSurfaces( *solver, family );
+					extracted = extractFamily( family );
 				}
 				catch ( std::exception const & )
 				{
@@ -6596,9 +6972,9 @@ int meq::Run::Impl::sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction 
  * phase extracts, as it writes it, with the provenance it carries. Held as
  * writtenSurfaces, and the family returned, for Run::fluxSurfaces().
  */
-meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &file )
+meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options,
+                                                      meq::CriticalPoint const &axis )
 {
-	meq::OutputConfig const &output = config->getOutput();
 	meq::ContourTracer tracer( *solver );
 
 	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
@@ -6609,9 +6985,26 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 	// Taylor step's second order -- see FluxSurfaces.hpp -- and it
 	// is what lets the outer cut sit anywhere near Gamma at all.
 	// Every node it answers for is marked, per node, in the file.
+	//
+	// AND THE q-DRIVEN LOOP NEEDS IT AS MUCH AS THE FILE DOES: traced
+	// without it, every family of a curved fixed boundary fails at its
+	// outer surfaces, so every map evaluation of the loop is refused and
+	// the outer Jacobian comes back exactly zero (M-SESSION-2).
 	if ( gammaHMarker && path )
 		tracer.setBandExtension( meq::BandExtension::TransferLift,
 		                         *gammaHMarker, path.get() );
+	return meq::extractFluxSurfaces( tracer, axis, solver->psiBoundary(), options );
+}
+
+meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options )
+{
+	meq::CriticalPointFinder const finder( *solver );
+	return extractFamily( options, finder.findAxis() );
+}
+
+meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &file )
+{
+	meq::OutputConfig const &output = config->getOutput();
 
 	meq::CriticalPointFinder const finder( *solver );
 	meq::CriticalPoint const axis = finder.findAxis();
@@ -6713,8 +7106,7 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 				file.c_str() );
 	}
 
-	meq::FluxSurfaceFamily const family = meq::extractFluxSurfaces(
-		tracer, axis, solver->psiBoundary(), options );
+	meq::FluxSurfaceFamily const family = extractFamily( options, axis );
 
 	meq::FluxGridWriter surfaces( file,
 	                              family );

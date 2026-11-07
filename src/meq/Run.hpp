@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "Dataset.hpp"
+#include "EquilibriumSnapshot.hpp"
 #include "Profiles.hpp"
 
 namespace meq
@@ -219,6 +220,56 @@ namespace meq
 			 */
 			std::vector<std::pair<std::string, std::vector<double>>>
 			fluxSurfacesAt( std::vector<double> const &labels, std::string const &file );
+
+			/**
+			 * RE-SOLVE IN MEMORY WITH NEW TABLES: A SESSION
+			 * (MANTA-EQUILIBRIUM-PLAN.md section 4.1).
+			 *
+			 * After a successful solve(), any number of times: @a tables
+			 * replace the profile tables of the slots they name -- the rest
+			 * stand as they were -- through the same factories and refusals
+			 * prepare() applies, and the run solves again on its own mesh,
+			 * spaces, forms and psi_c, warm from @a warm, or from the state
+			 * it holds when @a warm is null. That is the .nc restart of
+			 * PYTHON-PLAN.md's PY-3, field for field, held in memory: no file,
+			 * no second setup.
+			 *
+			 * A FRESH SOLVER EACH TIME, ON PURPOSE. The answer is then a
+			 * function of ( tables, warm ) and nothing else -- not of which
+			 * state this run held when it was called -- which is the
+			 * determinism a transport code's memoised Newton is pinned to.
+			 * Its cost is the solver's construction; MEASUREMENTS.md
+			 * M-SESSION-3 prices it against PY-3's whole setup.
+			 *
+			 * TRANSACTIONAL. On any failure the run is left exactly as it
+			 * was -- its solver, sources, tables, snapshot and what write()
+			 * would write -- and the code says why: SolveFailed, or
+			 * ConfigurationError for tables prepare() would have refused.
+			 * On success the run holds the new state, write() may be called
+			 * again, and dataset() keeps what the last write wrote until then.
+			 *
+			 * REFUSED, as ConfigurationError with the run untouched, where a
+			 * re-solve cannot restart on the state it holds: [adaptivity],
+			 * whose mesh is the loop's; a mirror's box, whose R_midplane
+			 * tables are iterated across solves; [inverse], whose coil set is
+			 * shared state; and an mfem::Device, since a session is MaNTA's and
+			 * MaNTA is double and host (the plan's D5).
+			 *
+			 * @throws std::logic_error before a successful solve.
+			 * @throws std::invalid_argument for a snapshot of another run.
+			 */
+			int resolve( ProfileTables const &tables,
+			             std::shared_ptr<EquilibriumSnapshot const> const &warm = nullptr );
+
+			/**
+			 * THE SOLVED STATE AS A VALUE: meq::EquilibriumSnapshot, with its
+			 * flux-surface family extracted at [output]'s FluxSurfaceCount,
+			 * FluxAngleCount and cuts (none on a box support). The same object
+			 * until the next successful resolve(), and never changed by one.
+			 * @throws std::logic_error before a successful solve.
+			 * @throws std::runtime_error where the extraction fails.
+			 */
+			std::shared_ptr<EquilibriumSnapshot const> snapshot();
 
 			/// Whether the configuration's support is a mirror's box, the one
 			/// support midplaneCrossing() answers for. After prepare().
