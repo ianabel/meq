@@ -809,8 +809,11 @@ struct meq::Run::Impl
 	/// lift, since Omega_h is inscribed in Gamma and the outer surfaces lie
 	/// partly outside it. Every caller that extracts goes through here.
 	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options,
-	                                      meq::CriticalPoint const &axis );
+	                                      meq::CriticalPoint const &axis,
+	                                      meq::ExtractionFields const *fields = nullptr );
 	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options );
+	/// [output]'s family options, as snapshot() extracts at.
+	meq::FluxFamilyOptions outputFamilyOptions() const;
 	/// The root group of the last _surfaces.nc written, and its family, or null.
 	std::shared_ptr<meq::Dataset const> writtenSurfaces;
 	std::shared_ptr<meq::FluxSurfaceFamily const> writtenFamily;
@@ -1269,6 +1272,32 @@ int meq::Run::resolve( ProfileTables const &tables,
 	return code;
 }
 
+meq::FluxFamilyOptions meq::Run::Impl::outputFamilyOptions() const
+{
+	meq::OutputConfig const &output = config->getOutput();
+	meq::FluxFamilyOptions options;
+	options.surfaces = static_cast<std::size_t>( output.fluxSurfaceCount );
+	options.angles = static_cast<std::size_t>( output.fluxAngleCount );
+	options.innerCut = output.fluxInnerCut;
+	options.outerCut = output.fluxOuterCut;
+	return options;
+}
+
+std::shared_ptr<meq::FluxSurfaceFamily const> meq::Run::familyFrom( FieldBuilder const &build )
+{
+	if ( stage != Stage::Solved && stage != Stage::Written )
+		throw std::logic_error( "meq::Run::familyFrom(): there is no solved state" );
+	if ( impl->config->getSource().supportIsBox() )
+		throw std::logic_error( "meq::Run::familyFrom(): a box support has no closed surfaces" );
+	impl->ensurePostProcessed();
+	meq::ExtractionFields const fields = build( *impl->solver );
+	if ( !fields.potential || !fields.flux )
+		throw std::invalid_argument( "meq::Run::familyFrom(): the builder returned no field" );
+	meq::CriticalPointFinder const finder( *impl->solver );
+	return std::make_shared<meq::FluxSurfaceFamily const>(
+		impl->extractFamily( impl->outputFamilyOptions(), finder.findAxis(), &fields ) );
+}
+
 std::shared_ptr<meq::EquilibriumSnapshot const> meq::Run::snapshot()
 {
 	if ( stage != Stage::Solved && stage != Stage::Written )
@@ -1279,14 +1308,8 @@ std::shared_ptr<meq::EquilibriumSnapshot const> meq::Run::snapshot()
 		if ( !impl->config->getSource().supportIsBox() )
 		{
 			impl->ensurePostProcessed();
-			meq::OutputConfig const &output = impl->config->getOutput();
-			meq::FluxFamilyOptions options;
-			options.surfaces = static_cast<std::size_t>( output.fluxSurfaceCount );
-			options.angles = static_cast<std::size_t>( output.fluxAngleCount );
-			options.innerCut = output.fluxInnerCut;
-			options.outerCut = output.fluxOuterCut;
 			taken->family = std::make_shared<meq::FluxSurfaceFamily const>(
-				impl->extractFamily( options ) );
+				impl->extractFamily( impl->outputFamilyOptions() ) );
 		}
 		impl->currentSnapshot = taken;
 	}
@@ -6976,9 +6999,16 @@ int meq::Run::Impl::sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction 
  * writtenSurfaces, and the family returned, for Run::fluxSurfaces().
  */
 meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options,
-                                                      meq::CriticalPoint const &axis )
+                                                      meq::CriticalPoint const &axis,
+                                                      meq::ExtractionFields const *fields )
 {
-	meq::ContourTracer tracer( *solver );
+	// The caller's fields, where Run::familyFrom() hands some in: the
+	// conductor split goes with them, as the solver's own constructor takes it.
+	meq::ContourTracer tracer = fields
+		? meq::ContourTracer( *fields->potential, *fields->flux )
+		: meq::ContourTracer( *solver );
+	if ( fields )
+		tracer.setConductorField( solver->conductorField() );
 
 	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
 	// Gamma, so the outermost surfaces of the family are partly
