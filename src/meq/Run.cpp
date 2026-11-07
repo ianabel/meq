@@ -4252,9 +4252,12 @@ int meq::Run::Impl::solve()
 		 * THE q-DRIVEN OUTER LOOP, ROADMAP.md ITEM 10.
 		 *
 		 * One equilibrium per map evaluation, with ONE solver for all of them:
-		 * only gg' changes between steps, so the mesh, the spaces, the forms
-		 * and the trace solver's symbolic factorisation are all entitled to
-		 * survive, and NormalisedMHDSource::setGGPrime() is what lets them.
+		 * only gg' changes between steps, so the mesh, the spaces and the forms
+		 * are entitled to survive, and NormalisedMHDSource::setGGPrime() is what
+		 * lets them. The trace solver's symbolic analysis does NOT: the trace
+		 * solver is a local of each solve(), reused across that solve's Newton
+		 * steps only -- one reordering per map evaluation, MEASUREMENTS.md
+		 * M-SESSION-1.
 		 * The warm start comes for free with the solver -- each solve begins
 		 * from the last one's field, which is what makes the later steps of the
 		 * loop cheap.

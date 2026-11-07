@@ -416,10 +416,15 @@ produced.
 
 **ONE SOLVER SERVES EVERY MAP EVALUATION**, through
 `NormalisedMHDSource::setGGPrime()`. Only `gg′` changes between steps, so the
-mesh, the spaces, the forms and the trace solver's symbolic factorisation all
-survive, and each solve is warm-started from the previous one's field —
-rebuilding the solver per evaluation, which is what the library test does, would
-throw all of that away 43 times. **The normalisation is deliberately not reset
+mesh, the spaces and the forms survive, and each solve is warm-started from the
+previous one's field — rebuilding the solver per evaluation, which is what the
+library test does, would throw that away 43 times. **The trace solver's
+symbolic factorisation is not among what survives**: the trace solver is a local
+of `solve()` (`makeTraceSolver()` inside it), so its symbolic analysis is reused
+across one solve's Newton steps — what `theSymbolicAnalysisIsReusedAcrossNewtonSteps`
+asserts, one analysis per solve — and redone by the next: 37 PARDISO reorderings
+for the 37 solves of `q-driven.toml`
+(→ **[M-SESSION-1](MEASUREMENTS.md#m-session-1)**). **The normalisation is deliberately not reset
 by that setter**: `ψ_ax` and `ψ_bnd` are unknowns of the bordered Newton and
 belong to the solve rather than to the profile.
 

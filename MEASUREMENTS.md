@@ -23328,3 +23328,27 @@ Dropped on these numbers.**
 `MEQ_TAU_ELEMENT_SAMPLE=1` and `install/tau-elem`), `compare2.py`; `direct/`
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
+
+### M-SESSION-1
+
+**The q-driven loop's trace solver is analysed once per solve, not once per
+loop.** `examples/q-driven.toml` at its shipped degree and guess, `meq
+--trace-solver-stats` (PARDISO), `manta/session` at `a8b0097`, double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`:
+
+| | count |
+|---|---|
+| equilibria solved (36 map evaluations and the driver's re-solve at the answer) | 37 |
+| PARDISO reordering phases (`Summary: ( reordering phase )`) | 37 |
+| time per reordering on this 512-element box | 1.4–1.7 ms |
+
+`makeTraceSolver()` is called inside `GradShafranovSolver::solve()` (and the
+Picard path's), so the trace solver and its symbolic analysis are locals of
+one solve: reused across that solve's Newton steps —
+`NewtonConvergence::theSymbolicAnalysisIsReusedAcrossNewtonSteps` asserts one
+analysis per solve — and redone by the next. What one solver object keeps
+across the loop is the mesh, the spaces and the forms.
+
+**Reproduce.** `runs/manta-session/qdriven/`: `q-d2-g2.2.toml` (the example
+with absolute input paths), `meq --trace-solver-stats q-d2-g2.2.toml >
+stats.log`, then `grep -c "reordering phase" stats.log`.
