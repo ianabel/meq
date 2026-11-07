@@ -1144,13 +1144,16 @@ converges in 22 steps". **A measurement that rules two things out is not a
 measurement that rules everything out.**
 
 **THE FOURTH CELL IS NOW RUN AND IT SAYS THE PAIR IS NOT ENOUGH EITHER** →
-**[M-134](MEASUREMENTS.md#m-134)**. Confinement **with** a prescribed current,
-swept over 250x in the target, reaches **2 of 4 at best** — 0 of 4 below
-`μ₀I_p = 0.20`, 2 of 4 at 0.50 and again at 2.00, and back to 0 of 4 at 5.00, so
-the maximum is interior and the sweep is not truncated. The clamped arm is cured
-outright by that same lever. So a prescribed current moves confinement off zero
-and does not repair it, and `theTwoBordersConvergeTogether` keeps the retraction
-of its `ψ_ax` and `ψ_bnd` as physics, below.
+**[M-134](MEASUREMENTS.md#m-134)**, **[M-354](MEASUREMENTS.md#m-354)**.
+Confinement **with** a prescribed current, swept over 250x in the target, closes
+some radii at some currents and never all four: 0 of 4 below `μ₀I_p = 0.10` in
+every run, and at best 2 or 3 of 4. **Which cells close moves by the build** —
+double and single on one tree disagree, and both disagree with M-134's own
+run, where the best was interior; in double today it is the largest target
+tried. The clamped arm is cured outright by that same lever. So a prescribed
+current moves confinement off zero and does not repair it — a lever shifting
+which discrete branch a radius lands on — and `theTwoBordersConvergeTogether`
+keeps the retraction of its `ψ_ax` and `ψ_bnd` as physics, below.
 **The lesson survives its own example**: it took the full 2 x 2 to say this, and
 each of the four one-key runs on its own supported a different wrong reading.
 
@@ -1187,8 +1190,8 @@ in the profile rather than by a support test — **4 of 4 do not converge**. So
 `theTwoBordersConvergeTogether`'s result *depends on the unphysical
 extrapolation*: with a source carrying no current in the vacuum, that
 configuration does not close at all. FB-T is the fourth cell, confinement WITH a
-prescribed current, and it reaches 2 of 4 at best →
-[M-134](MEASUREMENTS.md#m-134).
+prescribed current, and it never closes all four, at 2 or 3 of 4 at best by the
+build → [M-134](MEASUREMENTS.md#m-134), [M-354](MEASUREMENTS.md#m-354).
 
 **So the fixture's `ψ_ax` and `ψ_bnd` columns are retracted as physics and kept
 as a record of the solve closing.** The convergence claim stands.
