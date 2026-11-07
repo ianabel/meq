@@ -23547,3 +23547,93 @@ M-308b's face crossing would give. `SessionSmoothness` asserts the noise below
 **Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`
 (round-off tolerance only, ~10 min); the shipped-tolerance columns are the
 first sweep's, `runs/manta-session/smooth.log`, `smooth3.log`.
+
+### M-SHAPE-1
+
+**What makes the session's geometry jump: a flux-surface node crossing an
+element face, and nothing else measured.** `manta/shape-derivative`, double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, the cases of M-SESSION-4
+(`rotating-normalised`'s box and `fixed-d-tcv`'s MXH boundary with the same
+`RotatingSource`, Newton to round-off), every state a `resolve()` warm from one
+base. Each family node carries, as a diagnostic, the element its ray rooted in
+(or, in the band, extended from), its band face, how its ray search ended and
+its iteration count; the family carries the axis element.
+
+**(a) `SessionSmoothness`'s four failures, attributed** — the largest
+departure of a second difference in its `±1e-3` scan, and the node whose
+position has the largest second difference there:
+
+| case, input | jump | node | its element across the jump | the node's position step |
+|---|---|---|---|---|
+| box, `Omega` | 1.31e-5 of `⟨|∇ρ|²⟩`@0.975 | surface 23, node 24 | 763 → 761 | 2.99e-5 m |
+| box, density | 1.30e-5 of `⟨|∇ρ|²⟩`@0.975 | surface 23, node 24 | 761 → 763 | 2.99e-5 m |
+| TCV, `Omega` | 1.52e-8 of `⟨|∇ψ|²/R²⟩`@0.224 | surface 0, node 88 | 1548 → 1547 | 1.33e-9 m |
+| TCV, density | 1.52e-8 of `⟨|∇ψ|²/R²⟩`@0.224 | surface 0, node 88 | 1548 → 1547 | 1.70e-9 m |
+
+On TCV the node barely moves, so the jump is in its weight — the `q*` jump at
+the face, as M-308b found. Over all four scans the axis element never changes
+(423 on the box, 2015 on TCV), no band face and no band mask changes (TCV has
+77 band nodes), and the traced contour's point count changes once at most per
+surface without a jump.
+
+**(b) Every jump, every surface, and how it scales** — `ExtractionJumps`:
+`Omega` scaled by `1 + j·1e-4`, `j = −10 … 10`, all 24 surfaces × 128 angles,
+the four quantities MaNTA reads. A jump at a step is its increment less the
+mean of its neighbours', less that quantity's median along the scan, counted
+where it is the local peak and above 1e-11 of the value:
+
+| case | elements | jumps | at a crossing on that step | echo of a crossing on a neighbouring step | unattributed | crossings per unit relative change | per-crossing jump, median | max | ray route / iteration changes |
+|---|---|---|---|---|---|---|---|---|---|
+| box, `k = 2` | 768 | 21 | 19 | 2 | 0 | 1.40e4 | 4.45e-7 | 1.31e-5 | 1 / 75 |
+| box, `k = 2` | 3072 | 35 | 31 | 4 | 0 | 2.40e4 | 4.22e-8 | 1.49e-6 | 0 / 39 |
+| box, `k = 2` | 12288 | 46 | 42 | 4 | 0 | 4.25e4 | 4.13e-9 | 1.45e-6 | 2 / 55 |
+| box, `k = 3` | 768 | 20 | 18 | 2 | 0 | 1.45e4 | 5.95e-9 | 3.33e-6 | 0 / 45 |
+| box, `k = 3` | 3072 | 33 | 31 | 2 | 0 | 2.45e4 | 4.78e-10 | 3.72e-7 | 0 / 19 |
+| TCV, `k = 2` | 3993 | 26 | 23 | 3 | 0 | 1.45e4 | 1.27e-8 | 5.17e-8 | 0 / 44 |
+| TCV, `k = 2` | 16406 | 39 | 32 | 7 | 0 | 2.85e4 | 1.45e-9 | 1.12e-8 | 0 / 83 |
+| TCV, `k = 3` | 3993 | 21 | 19 | 2 | 0 | 1.45e4 | 7.48e-11 | 7.56e-10 | 0 / 41 |
+
+The axis element and the band face change in no case. The ray Newton's
+iteration count changes at dozens of nodes per scan and makes no jump above
+1e-11; its stopping test is at `1e-12 × max|ψ*|`. Every element change
+makes a jump: none falls below 1e-11 at `k = 2` on the box or on TCV's coarser
+mesh, and 1 of 33 (box, `k = 3`), 1 of 43 and 4 of 25 (TCV) do on the finer
+meshes and degree. Two of the echoes were checked
+node by node: box 768's surface 1 node 48 crosses 412 → 419 one step before
+the flagged one, and box 3072's surface 21 node 90 crosses 97 → 98 one step
+after; in each a second crossing on the same surface cancels the crossing's
+own estimate, so its −J/2 echo is the peak.
+
+**The jump converges, and the crossings multiply.** Per uniform refinement the
+median jump falls 10.5× and 10.2× on the box at `k = 2` (about `h^{3.4}`),
+12.4× at `k = 3`, and 8.8× on TCV at `k = 2` — the `q*` face jump's
+`O(h^{k+1})` with a constant; `k = 3` is 75× (box) and 170× (TCV) below
+`k = 2` on the same mesh. The crossing rate rises 1.7–1.8× per level, as
+`1/h`.
+
+**What a differencing caller pays** — a central difference at MaNTA's
+1.5e-8 step straddling a crossing, its error relative to the derivative, and
+the chance a column straddles one with all 24 surfaces read:
+
+| case | elements | error when straddled, median | max | straddles per column |
+|---|---|---|---|---|
+| box, `k = 2` | 768 | 1.6e+2 | 6.1e+3 | 4.2e-4 |
+| box, `k = 2` | 3072 | 7.7 | 9.8e+2 | 7.2e-4 |
+| box, `k = 2` | 12288 | 1.2 | 1.7e+2 | 1.3e-3 |
+| box, `k = 3` | 768 | 1.4 | 3.2e+2 | 4.4e-4 |
+| box, `k = 3` | 3072 | 0.12 | 40 | 7.4e-4 |
+| TCV, `k = 2` | 3993 | 4.7 | 1.8e+2 | 4.4e-4 |
+| TCV, `k = 2` | 16406 | 0.71 | 64 | 8.6e-4 |
+| TCV, `k = 3` | 3993 | 0.066 | 3.8 | 4.4e-4 |
+
+To bring the straddled column's median error to 1e-4 by refinement alone
+takes about five more uniform levels on TCV at `k = 2` (×700 elements) and two
+to three at `k = 3` (×20–60), with the straddle rate doubling each level and
+the worst crossing 10–60× the median.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`
+for (a), its decision report printed under each fine scan;
+`MKL_NUM_THREADS=1 OMP_NUM_THREADS=2 ./ExtractionJumps --run_test=<case>` for
+(b), cases `boxL1k2`, `boxL2k2`, `boxL3k2`, `boxL1k3`, `boxL2k3`, `tcvL1k2`,
+`tcvL2k2`, `tcvL1k3` (one to five minutes each; built, not registered).
+Logs: `runs/manta-shape-derivative/smooth1.log`, `runs/manta-shape-derivative/jumps/`.

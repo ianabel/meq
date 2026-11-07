@@ -376,9 +376,14 @@ it was repaired:
   relative at the face, the node moves 1.8e-07 and the coefficients step by
   2.6e-05, with the solve, the axis and the inner Newton's count smooth
   through it. Every column differenced across it is off by that over `2s`.
-  No floor sees it, because each residual is right to the floor; only a
-  continuous field to extract from would remove it, and that is a different
-  extraction. The step at 1e-4 straddles none on that fixture and finishes
+  No floor sees it, because each residual is right to the floor; only an
+  extraction continuous in the state would remove it, and that is a different
+  extraction. **The session's geometry jumps by the same mechanism and nothing
+  else** (→ **[M-SHAPE-1](MEASUREMENTS.md#m-shape-1)**): over `±1e-3` of a table,
+  every jump above the noise on the box and on TCV is a node changing element,
+  the axis element and the band never change, and the per-crossing jump falls
+  as about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
+  `MANTA-EQUILIBRIUM-PLAN.md` §4.5 costs the continuous extractions (D8). The step at 1e-4 straddles none on that fixture and finishes
   quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom` bounds the
   iterations at 5 so that a straddle elsewhere is seen as the crawl it is.
 * **KINSOL differenced `J p` itself.** MFEM declares its custom linear solver

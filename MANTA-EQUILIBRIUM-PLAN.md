@@ -181,7 +181,7 @@ Each factor is one piece of work:
 | content rows, knot columns | MEQ's `V'⟨n_s⟩`, `V'Jω`, `V'⟨R⁻²⟩I` against MaNTA's, with `N_s`, `ω`, `I` knots as border unknowns | **no**; the q-driven solve does `I` by an outer loop, the midplane gauge has knot columns | `manta/content-solve` (§4.8) |
 | `∂R/∂T` | the residual's derivative in the table entries (values, slopes) — for `T_s`, and as the knot columns of §4.8 | **no**; gauge columns are the precedent | `manta/table-derivative` |
 | `J^{-1}` | the bordered solve, caller RHS, at a **retained** linearisation | pieces only | `manta/linearised-solve` |
-| `E'` | directional derivative of the extraction, decisions frozen | **no** | `manta/shape-derivative` |
+| `E'` | directional derivative of the extraction — of one continuous in the state (§4.5) | **no** | `manta/shape-derivative` |
 | `I'` | interpolation in the label, linear given the family | trivial | `manta/shape-derivative` |
 | `J^{-T}` | the transposed bordered solve | **no**, and not in MFEM | §4.4 |
 
@@ -230,9 +230,10 @@ id and sequence, the tables it was solved at, `( q, ψ, ψ̂ )`, the exterior
 coefficients, `ψ_ax`, `ψ_bnd` and whether it is an unknown, the located axis,
 the X-point, the `I_p` scale, the free currents, the q-driven `g²`
 coefficients, the Newton count, and the family at `[output]`'s options
-(`snapshot()` extracts it once per state). The axis element and §4.5's frozen
-decisions are not in it yet: `manta/shape-derivative` adds them. §4.3 needs
-from it the state, the border values and the tables, all of which are there.
+(`snapshot()` extracts it once per state). It carries no extraction
+decisions, and none is carried from one snapshot to the next: the geometry is a
+function of the tables alone (§4.5). §4.3 needs from it the state, the border
+values and the tables, all of which are there.
 
 **Acceptance, met** (`RunSession`, M-SESSION-3): an unchanged resolve is the
 answer in zero Newton steps and the same bits; a changed table resolves warm to
@@ -307,28 +308,48 @@ swapped in `DarcyHybridization` — an upstream request to MFEM HDG dev — plus
 the transposed border corner. Only gradients through transients need it.
 Requested when tier 1's forward response is measured, not before.
 
-### 4.5 `manta/shape-derivative` — `E'`, with the decisions frozen
+### 4.5 `manta/shape-derivative` — an extraction continuous in the state, then `E'`
 
-**Differentiate the algorithm that ships, not the continuum formula.** The
-node positions come from roots of ψ* while `|∇ψ|` comes from `q*`, so the
-continuum shape derivative is not the derivative of what MEQ computes. The
-discrete one is local:
+**What makes `G` jump is measured** (→ M-SHAPE-1, `ExtractionJumps` and
+`SessionSmoothness`'s decision report): **a flux-surface node crossing an
+element face.** The extraction roots `ψ*` along fixed rays from the axis and
+weights each node by `1/(R|q*|)`; both fields are element-wise polynomials, so
+when a node's root slides across a face it lands on the neighbour's polynomial,
+and its position (by the `ψ*` jump over `|∇ψ|`) and its weight (by the `q*`
+jump) change discontinuously. Every jump above the noise in the scans coincides
+with a node of that surface changing element, bar a residue of one or two a
+case recorded in M-SHAPE-1; in no scan did the axis element, a band face or a
+band mask change, and the ray Newton's stopping test, which changes iteration
+counts at dozens of nodes, makes no jump above the noise. Per crossing the
+jump falls with the mesh — about `h^{3.4}` at `k = 2`, the `q*` jump — while
+crossings come faster as `1/h`.
 
-* ray root: `δρ_j = (δc − δψ*(x_j) − ∇ψ*·δx_ax) / (R q*·u_j)`;
-* weights `w_j = 2π R_j s_j Δθ / (R_j |q*_j|)` through `δx_j`, `δq*(x_j)`,
-  `∇q*(x_j)·δx_j` and the arc element;
-* axis: `δx_ax = −(∇q_h)^{-1} δq_h(x_ax)`; `δc` from the border (§3);
-* `δψ*`, `δq*` from `δx` through the post-processing (`Reconstruct`), which is
-  linear in the HDG state.
+**THE FIX IS SELF-CONSISTENT, NOT FROZEN.** Nothing about one equilibrium's
+extraction is carried to the next: the geometry is a function of the solved
+state, and the state of the tables, whatever warm start reached it. What is
+pending is **which** continuous extraction, and it is the user's choice
+(§5, D8). The candidates, costed against M-SHAPE-1:
 
-**Freezing** is the same work and is also what makes tier 0 smooth: record,
-per node, the element, the band/extension mask and its foot face, and per
-equilibrium the axis element and the boundary-flux point; evaluate the frozen
-element's polynomial (extended past its face where the node sits in a jump).
-A `Solve` warm from a snapshot reuses that snapshot's decisions where they
-still bracket the root and re-decides only where they do not — deterministic
-given input and warm start, which is MaNTA's contract. The ray Newton runs to
-round-off rather than to a tolerance, so its stopping test is not in `G`.
+| | `G` | band, axis, `ψ_bnd` | accuracy | cost to run | cost to build | `E'` |
+|---|---|---|---|---|---|---|
+| **A. A continuous reconstruction**: `ψ*` and `q*` averaged into `H¹` (nodal averaging, MFEM's `ProjectDiscCoefficient`, or a mass-matrix projection), and the existing rays run on it | **continuous**; a kink where a node crosses a face (`∇ψ̃` jumps), so a straddled difference is off by the kink, bounded and ~`1/N_θ` of the gradient jump | the band's nearest-face choice still switches between faces, so the extension must be blended across neighbouring faces; the axis as the root of the continuous `q̃` | the averaging moves a value by at most the face jumps, which are the fields' own orders (`k+2`, `k+1`); every extraction output moves at the discretisation level | one projection per state, linear and `O(dofs)`; extraction unchanged | small: two `H¹` fields after `postProcess()` and `ContourTracer( ψ̃, q̃ )`, which exists; the band blend is the larger part | the old ray-root formula on `ψ̃`, `q̃`, composed with the averaging (linear) and `Reconstruct` |
+| **B. The trace `ψ̂`** | **still jumps**: `ψ̂` is per face and broken at vertices, so a level-set point jumps as it passes one; and there is no single-valued flux on the skeleton but the normal `q̂·n`, so the weight comes from `q_h` again | — | the curve between face points is interpolated, losing order | — | — | — **Not a fix; recorded so it is not re-proposed** |
+| **C. Per-element level-set integrals** (the coarea formula on the broken field): `V′ = Σ_e ∫_{ψ*_e = c, x∈e} 2πR dl/|∇ψ*_e|`, every element's own arc, no choice at all — `V′(c)` is then `d/dc` of the volume `∫_{ψ*>c} 2πR dA`, which is continuous in the state | **continuous**; a kink only where an arc's end passes a mesh vertex | the band integrated per nearest-face region, whose boundaries are fixed geometry, keeps it continuous but needs arcs clipped at those boundaries; the axis potential as `max ψ*`, which is continuous | `k+1` from the weight, as now; Gauss on each smooth arc piece is not floored by the DG jump the periodic trapezoid meets (IN-1's 1.2e-9) | arcs in the ~`perimeter/h` crossed elements, comparable to the rays | the largest: a new extraction (edge roots, arc parametrisation, several arcs or a tangency in one element, band regions) on triangles, where MFEM's cut rules do not go (`CLAUDE_DECLINED.md`, *Cut quadrature*); `R(θ)`, `z(θ)` for the file still from rays | per-element: interior terms plus face-end terms; its transpose a scatter |
+| **D. Accept it as discretisation error** | **jumps**, by a per-crossing amount converging at about `h^{3.4}` (`k = 2`) | unchanged | unchanged | a straddled column's median error at 1e-4 needs about five more uniform levels on TCV at `k = 2` (×700 elements) or two to three at `k = 3` (×20–60), while the straddle rate doubles each level and the worst crossing is 10–60× the median | none | — |
+| **E. A smooth partition of unity across faces**: each point's value a blend of the neighbouring elements' polynomials (extended) with weights smooth in the distance to their faces | **smooth**, no kinks | as A, the band blended the same way; axis as the root of the blended `q` | the blend differs from either side by the jump; its gradient carries jump/width | 2–6 element evaluations near a face or vertex | moderate; only worth it if a kink matters, which a bounded difference error says it does not | the blend's derivative, linear |
+
+A crossing's straddle rate per MaNTA column, at its 1.5e-8 step, all 24
+surfaces read, is 4e-4 to 7e-4 per column on these meshes: of 512 read columns
+(§4.4), a third of all Jacobian builds would carry one column wrong by
+O(1)–O(1000). The same mechanism is M-308b's step in the q-driven map; a
+continuous extraction removes that too.
+
+**Differentiate the algorithm that ships, not the continuum formula** — that
+stands, whichever row is chosen. The node positions come from roots of the
+potential while `|∇ψ|` comes from the flux, so the continuum shape derivative is
+not the derivative of what MEQ computes; `E'` is the discrete one, built after
+the choice, and the ray Newton (or the arc root) runs to round-off so that its
+stopping test is not in `G`.
 
 **The ends.** Axis limits from the axis Hessian (`axisShapeFromHessian`):
 `V' → 4π² R_ax / √det H`, `⟨R⁻²⟩ → R_ax⁻²`, `⟨|∇ψ|⟩ ~ √Ψ_N → 0`,
@@ -337,19 +358,20 @@ round-off rather than to a tolerance, so its stopping test is not in `G`.
 refusal past `outerCut`; a coupled case sets MaNTA's `UpperBoundary` inside it
 (§5, D1).
 
-Acceptance: `E'` against a central difference of a **frozen** extraction to
-the difference's truncation; `E'^T` by the dot-product test; frozen against
-free extraction identical where no decision changes; the smoothness test
-(§4.6) passing on the diverted and limited examples.
+Acceptance: `SessionSmoothness` green — no jump above the noise — on the
+continuous extraction, with no decision carried between states; `E'` against a
+central difference of the same extraction to the difference's truncation, with
+the step kept off a kink; `E'^T` by the dot-product test; each mutation-tested.
 
 ### 4.6 The smoothness measurement — first, before any derivative
 
 Before building `∂R/∂T`, `J^{-1}` and `E'`, measure `G` as it is: perturb a
 table entry at relative steps `10^{-4} … 10^{-10}`, difference the geometry, and
 plot the error of the difference against the step. A smooth `G` gives the
-`h` / `h²` and round-off V; a piecewise one plateaus. That decides how much of
-§4.5's freezing tier 0 needs, and it is the test every later branch keeps. It
-belongs on `manta/session`, as a convergence test over the session.
+`h` / `h²` and round-off V; a piecewise one plateaus. That decides whether
+tier 0 needs a different extraction (§4.5), and it is the test every later
+branch keeps. It belongs on `manta/session`, as a convergence test over the
+session.
 
 **Measured on `manta/session`** (`SessionSmoothness`, → M-SESSION-4): `Omega`
 scaled, and one density knot moved, by `±h` through `resolve()` warm from one
@@ -375,14 +397,17 @@ outermost surfaces, and `ψ_ax`. Three findings, each deciding something:
    difference at `h = 1e-3, 1e-4` is 12–16% off); on TCV the jumps are
    1.5e-8 of the value (the innermost surface's `⟨|∇ψ|²/R²⟩`), and the base sits within 1e-5 of one (the
    difference at `h = 1e-5` is 3.4e-3 off, at `1e-4` and `1e-6` it is not).
-   Their size follows the mesh — consistent with M-308b's mechanism, a ray
-   node crossing an element face onto the other element's `ψ*` and `q*` —
-   and at MaNTA's 1.5e-8 step a 1e-8 jump is an O(1) error in the column it
-   straddles. **Tier 0 needs §4.5's freezing**; `SessionSmoothness` asserts a
-   jump below the noise and is red until `manta/shape-derivative` delivers it.
-   Fixed boundary has no support change and no X-point; those decisions are
-   not measured here (tables feed only `RotatingSource`, and no free-boundary
-   rotating case ships).
+   At MaNTA's 1.5e-8 step a 1e-8 jump is an O(1) error in the column it
+   straddles. **What makes them is measured** (M-SHAPE-1): each is a ray node
+   crossing an element face onto the neighbour's `ψ*` and `q*` — M-308b's
+   mechanism — the box's at surface 23's node 24 (elements 763 and 761), TCV's
+   at surface 0's node 88 (1548 and 1547) in both inputs; the axis element, the
+   band faces and the band masks do not change anywhere in the scans.
+   `SessionSmoothness` prints that report, asserts a jump below the noise, and
+   is red until an extraction continuous in the state (§4.5, D8) is built.
+   Fixed boundary has no support change and no X-point; the boundary-flux
+   point is not measured here (tables feed only `RotatingSource`, and no
+   free-boundary rotating case ships).
 
 ### 4.7 `manta/adapter` — the `EquilibriumModel`
 
@@ -579,6 +604,14 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   hand the model `ṗ` (IDA has it) and let a case read time-derivative slots.
   MEQ's side is the response it builds anyway, plus `∂_t G` (zero unless coil
   currents are programmed in time).
+* **D8. Which continuous extraction — open.** `G` jumps where a surface node
+  crosses an element face (M-SHAPE-1), and the fix is an extraction continuous
+  in the solved state, not a decision carried between states. §4.5's table
+  costs five routes: a continuous `H¹` reconstruction of `ψ*` and `q*` under the
+  existing rays (A, the cheapest to build, `G` continuous with kinks),
+  per-element level-set integrals (C, no choice anywhere, the most to build),
+  a smooth partition of unity (E, no kinks), and two that do not fix it — the
+  trace `ψ̂` (B) and refining the jump away (D). `E'` waits on this.
 
 ## 6. The branches
 
@@ -591,7 +624,7 @@ rebases). `manta/design` holds this plan and is where the pieces meet.
 | `manta/session` | `Run::resolve`, `EquilibriumSnapshot`, transactional in memory; the smoothness measurement (§4.6); the stale factorisation claim corrected | — |
 | `manta/table-derivative` | `∂R/∂T` applied and transposed, differenced-column tests | — |
 | `manta/linearised-solve` | the linearisation solver, `solveLinearised`, the whole-bordered-Jacobian test | `session` (the snapshot) |
-| `manta/shape-derivative` | frozen extraction, `E'`, `E'^T`, `I'`, axis limits | `session` |
+| `manta/shape-derivative` | what makes `G` jump (M-SHAPE-1); an extraction continuous in the state, chosen by the user from §4.5's candidates; then `E'`, `E'^T`, `I'`, axis limits | `session` |
 | `manta/content-solve` | the content-driven equilibrium: `N_s`, `ω`, `I` knots as border unknowns, content rows, the fixed-point reference | `table-derivative`, `shape-derivative` |
 | `manta/plugin-abi` | MEQ built C++23 with MaNTA's `-march` and `EIGEN_USE_BLAS`, so a C++ plugin can share MaNTA's process | — |
 | `manta/adapter` | `meq.Session` binding, the Python `EquilibriumModel`, `Π`, the coupled acceptance runs | all |
