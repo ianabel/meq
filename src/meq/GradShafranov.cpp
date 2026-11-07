@@ -172,6 +172,28 @@ namespace
 		return relative*std::max( std::abs( value ), 1.0e-10 );
 	}
 
+	/// The step BorderColumn::Differenced takes in a gauge knot's radius, for
+	/// normalisationDifferenceStep()'s reason: the residual it differences is
+	/// real_t's, so a step tuned for double is round-off over the step in
+	/// single. 1e-6 is the verified double value and is kept EXACTLY.
+	///
+	/// IN SINGLE IT IS MEASURED, NOT normalisationDifferenceStep()'s 8e-3. On
+	/// RotatingMirrorBorder's three species at 2e20, theta = 10, the assembled
+	/// columns take 4 steps (merits 1.87e-2 2.15e-3 3.42e-5 8.5e-8). The
+	/// differenced control at 1e-6 takes 5 (2.22e-3 at step 2: round-off over
+	/// the step); at 8e-3 it takes 5 too (2.43e-3: truncation, since the knot
+	/// interpolant curves); from 1e-5 to 1e-3 it takes 4 and reads 2.16e-3 to
+	/// 2.17e-3 and 3.37e-5 to 3.46e-5. 1e-4 is the middle of that band.
+	double knotDifferenceStep( double radius )
+	{
+#ifdef MFEM_USE_SINGLE
+		constexpr double relative = 1.0e-4;   // the middle of the measured band
+#else
+		constexpr double relative = 1.0e-6;   // the verified double value
+#endif
+		return relative*std::max( std::abs( radius ), 1.0e-2 );
+	}
+
 	/*
 	 * THE ASSEMBLY MODE A FRESH SOLVER STARTS IN, AND IT CHANGED ON 2026-09-04
 	 * FROM Serial TO Threaded. THE MEASUREMENT THAT SETTLED IT BEFORE WAS TAKEN
@@ -16488,7 +16510,7 @@ namespace
 					{
 						std::size_t const at = static_cast<std::size_t>( k );
 						double const saved = gaugeR[ at ];
-						double const h = 1.0e-6*std::max( std::abs( saved ), 1.0e-2 );
+						double const h = knotDifferenceStep( saved );
 						gaugeR[ at ] = saved + h;
 						installGauge();
 						fieldResidual( unknown, s, gaugeColumns[ at ] );
@@ -19152,7 +19174,7 @@ namespace
 			 * finite put back, so that solveChecked() checks a Delta that reads
 			 * psi on THAT iterate rather than on a NaN. Told apart from any
 			 * other MFEM error by the iterate left behind, or its residual,
-			 * holding a non-finite entry. MEASUREMENTS.md M-ANISO-1.
+			 * holding a non-finite entry. MEASUREMENTS.md M-350.
 			 */
 			try
 			{

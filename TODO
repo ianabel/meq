@@ -445,7 +445,7 @@ Raised 2026-08-25.
   converges in 3 or 4 steps to 0.99, and Delta( B ) at any pressure tried.
   A crawl that converges is a defect, not a slow case.
 
-  WHAT IT IS NOT, MEASURED (M-ANISO-2):
+  WHAT IT IS NOT, MEASURED (M-351):
   * The Jacobian. Along every step of the crawl at 0.9 and 0.95, label
     columns included, || F( x + a d ) - ( 1 - a ) F( x ) ||/( a || F || )
     falls linearly in a down to a = 1e-5: the bordered Newton direction is
@@ -478,7 +478,7 @@ Raised 2026-08-25.
   every rung from the vacuum (M-347); the general stabilisation is its own
   entry, "A stabilisation that follows the reaction".
 
-  QUALIFIED IN SINGLE PRECISION (M-ANISO-1). AnisotropicConvergence and
+  QUALIFIED IN SINGLE PRECISION (M-350). AnisotropicConvergence and
   AnisotropicMirror pass in single; the double path is unchanged to every
   printed digit. One was a defect: a plain Newton that diverged overflowed
   in single and ended in MFEM's IsFinite( norm ) verification, which is not
@@ -486,7 +486,7 @@ Raised 2026-08-25.
   reached in single. solve() now reports a non-finite residual as its own
   runtime error with the last finite iterate kept (SolverContract,
   aNonFiniteResidualIsTheSolversRuntimeError). Every other red measured the
-  format: each check's single bound or loud skip is in M-ANISO-1, the
+  format: each check's single bound or loud skip is in M-350, the
   thinnest the flux model's cold Newton order, 1.4, between 1.49 exact and
   1.31 with dDelta/dpsi 10% out.
 
@@ -1439,22 +1439,6 @@ TCV shaped's branch in item 5 each take a suite case red, in single.
      did not settle and whose plasma sits in the conductors should exit 0.
      DriverAcceptance's theRetryRungClosesAStalledFirstAttempt is red on it
      in single.
-
-  6. THE FOLLOWING tau'S DIFFERENCED CONTROL TAKES A STEP MORE IN SINGLE.
-     RotatingMirrorBorder's aTauThatFollowsTheReactionLiftsTheElementFold-
-     AndIsQuadratic, three species at 2e20, theta = 10: the direct columns
-     converge in 4 steps (1.33 1.87e-2 2.15e-3 3.42e-5 8.49e-8), the
-     differenced control in 5 (1.33 1.86e-2 2.22e-3 4.57e-5 6.84e-7
-     3.74e-8), the answers 1.3e-7 apart, under the floor and skipped as M-272
-     says. The REQUIRE that both histories have as many steps above the floor
-     is red, 6 != 5, and the step-by-step bound would be too: step 2 differs
-     by 7e-5 against differencedAgreementFloor's 1.4e-3 of the step before,
-     2.6e-5. A single-precision central difference is an inexact Jacobian at
-     about 4e-3 here. The test was first run in single on 2026-11-07 -- main
-     did not build in single while it was written (20c131e). Closes: the
-     control's agreement bound measured in single, as M-294's were, and the
-     size REQUIRE read on the steps both histories share; or the comparison
-     skipped loudly under the floor, as landsOnTheAnswer() is.
 
 
 ================================================================================

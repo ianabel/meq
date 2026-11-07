@@ -2469,7 +2469,7 @@ failed solve — `solveChecked()`'s firehose check, the driver's ladder — was
 skipped by it. The plain Newton path catches it, establishes the non-finite
 entry itself (`Vector::Norml2()` skips a NaN), puts back the last iterate with a
 finite residual, and throws its own `std::runtime_error`
-(→ **[M-ANISO-1](MEASUREMENTS.md#m-aniso-1)**).
+(→ **[M-350](MEASUREMENTS.md#m-350)**).
 
 ## `MKL_NUM_THREADS`, measured
 

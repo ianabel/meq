@@ -615,7 +615,7 @@ are not that equation, so the race poses the fixed point they converge to:
     `0.9`, 23 at `0.95`, and no convergence at `0.99`. That is a defect, open
     in `TODO`, and not the operator's: the bump shares its `1 − Δ` and
     converges. **Not the Jacobian and not a fold** →
-    **[M-ANISO-2](MEASUREMENTS.md#m-aniso-2)**: the bordered direction is
+    **[M-351](MEASUREMENTS.md#m-351)**: the bordered direction is
     exact along every step of the crawl, label columns included, and
     continuation in `δ₀` reaches 0.99 in undamped steps. The line search walks
     exact steps whose curvature, through the boundary label's column, reaches

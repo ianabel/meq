@@ -984,14 +984,14 @@ Jacobian while staying in the residual.
   is an `mfem::ErrorException`, not the `std::runtime_error` the anisotropy's
   refusal is wired to, so the refusal double reaches was not reached. The
   plain Newton path reports a non-finite residual as its own runtime error,
-  with the last finite iterate kept (→ **[M-ANISO-1](MEASUREMENTS.md#m-aniso-1)**).
+  with the last finite iterate kept (→ **[M-350](MEASUREMENTS.md#m-350)**).
 * ***A Newton order fitted where the format leaves one triple reads the
   trajectory.*** The anisotropic models' quadratic triples sit 50 to 170 times
   under single's floor, and the triples left read the same in both formats.
   Each claim was re-asserted against a Jacobian mutation measured in single,
   or skipped loudly where none discriminates; a triple that LANDS on the
   floor can only under-state the order, so it certifies a quadratic one and
-  never refutes it (M-ANISO-1).
+  never refutes it (M-350).
 
 ### What was not a tolerance
 

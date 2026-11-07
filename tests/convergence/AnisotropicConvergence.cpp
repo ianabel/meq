@@ -430,7 +430,7 @@ BOOST_AUTO_TEST_CASE( aConstantAnisotropyIsTheIsotropicProblemRescaled )
 			// eps; single reads 160 to 1250 of its own (Delta = 0.3, k = 3,
 			// psi), so exactAgreementFloor()'s 4096 eps is the same statement
 			// in that format, and exactly zero in double. A weight formed as
-			// R( 1 - Delta ) is O( Delta ) out. MEASUREMENTS.md M-ANISO-1.
+			// R( 1 - Delta ) is O( Delta ) out. MEASUREMENTS.md M-350.
 			double const psiBound = std::max( 1.0e-12*psiScale,
 			                                  meq::tests::exactAgreementFloor( psiScale ) );
 			double const fluxBound = std::max( 1.0e-12*fluxScale,
@@ -781,7 +781,7 @@ namespace
 		// trajectory's, before the quadratic regime. On that triple, measured
 		// in single, dDelta/dpsi 10% high reads 1.28 to 1.31, 10% low 1.22 to
 		// 1.24, and dropped 1.16, against 1.49 to 1.52 exact: 1.4 sits between
-		// with 0.09 either side, thin and recorded. MEASUREMENTS.md M-ANISO-1.
+		// with 0.09 either side, thin and recorded. MEASUREMENTS.md M-350.
 #ifdef MFEM_USE_SINGLE
 		double const orderBound = 1.4;
 #else
@@ -1026,7 +1026,7 @@ BOOST_AUTO_TEST_CASE( aZeroFluxModelIsTheIsotropicNewtonSolve )
 		// Two converged solves of one problem: in single each stops at its
 		// round-off floor, and they meet to 5 to 174 eps (q, k = 3) where
 		// double meets the solver's tolerance. exactAgreementFloor() is zero
-		// in double. MEASUREMENTS.md M-ANISO-1.
+		// in double. MEASUREMENTS.md M-350.
 		double const psiBound = std::max( 1.0e-10*psiScale,
 		                                  meq::tests::exactAgreementFloor( psiScale ) );
 		double const fluxBound = std::max( 1.0e-10*fluxScale,
@@ -1219,7 +1219,7 @@ namespace
 	 * is the first, which mostly moves psi_ax and reads 0.92. Measured, the
 	 * floor-landing triple reads 1.93 to 2.00 at n = 4 and 1.34 to 1.46 at
 	 * n = 32, exact; on the source's analytic label column -- the mutation the
-	 * case names -- every triple reads 1.00 at best. MEASUREMENTS.md M-ANISO-1.
+	 * case names -- every triple reads 1.00 at best. MEASUREMENTS.md M-350.
 	 */
 	double singleOrderLowerBound( double asymptotic, std::vector<double> const &history )
 	{
@@ -1337,7 +1337,7 @@ BOOST_AUTO_TEST_CASE( theNormalisedFluxModelConvergesOnTheBorderedNewton )
 		// The rates by rateIsMeasurable(), as AN-2a's: in single q at k = 3
 		// reads 2.14e-05 and 4.01e-05 on the last two meshes against double's
 		// 5.49e-06 and 3.43e-07, the floor the unbordered flux model meets at
-		// the same 2.06e-05 and 3.96e-05. MEASUREMENTS.md M-ANISO-1.
+		// the same 2.06e-05 and 3.96e-05. MEASUREMENTS.md M-350.
 		double const expected = order + 1.0 - rateSlack;
 		if ( !meq::tests::rateIsMeasurable( order ) )
 			BOOST_TEST_MESSAGE( meq::tests::rateNotMeasurableNotice( order ) );
@@ -1441,7 +1441,7 @@ BOOST_AUTO_TEST_CASE( labelsReadFromPsiStarGivePsiStarItsOrder )
 		// The rates by rateIsMeasurable(), as above. In single at k >= 2 the
 		// later passes start under the round-off gate and take no step, so
 		// the answer is the first pass's to every printed digit: the label's
-		// correction is under the format's floor. MEASUREMENTS.md M-ANISO-1.
+		// correction is under the format's floor. MEASUREMENTS.md M-350.
 		double const expected = order + 1.0 - rateSlack;
 		double const expectedStar = order + 2.0 - rateSlack;
 		if ( !meq::tests::rateIsMeasurable( order ) )
@@ -1636,13 +1636,13 @@ namespace
 		// in either format -- and do not discriminate: d Delta/d |q|^2 10% low
 		// reads 1.52 to 1.61 there and 10% HIGH 1.75 to 1.86, above the exact.
 		// theFieldLawsNewtonIsQuadraticAtBothSigns is the order's instrument,
-		// in single as in double. MEASUREMENTS.md M-ANISO-1.
+		// in single as in double. MEASUREMENTS.md M-350.
 #ifdef MFEM_USE_SINGLE
 		if ( coldOrder )
 			BOOST_TEST_MESSAGE( "  *** " << label << ", k = " << order << ": SKIPPED the cold"
 			                    " Newton order, " << best << ": in single its quadratic triple"
 			                    " is under the floor and the triples left read the trajectory."
-			                    " The restarts assert the order. M-ANISO-1" );
+			                    " The restarts assert the order. M-350" );
 		coldOrder = false;
 #endif
 		if ( coldOrder )
@@ -1907,7 +1907,7 @@ BOOST_AUTO_TEST_CASE( theFieldLawsNewtonIsQuadraticAtBothSigns )
 		 * two signs, and d Delta/d |q|^2 10% high or low 9.6 to 11.5 times, since
 		 * its linear part, 1.5e-04 of r_0, is above the floor from 1e-2 and
 		 * not from 1e-4. 4 sits between. Double asserts the constant to 1%.
-		 * MEASUREMENTS.md M-ANISO-1.
+		 * MEASUREMENTS.md M-350.
 		 */
 #ifdef MFEM_USE_SINGLE
 		for ( double r : firstSteps )

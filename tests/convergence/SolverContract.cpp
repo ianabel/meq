@@ -1157,7 +1157,7 @@ BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyOnANonlinearSource
  * reads psi, the driver's ladder) is skipped, and the NaN iterate is what the
  * solver then holds. Single precision reached it on AnisotropicConvergence's
  * firehose refusal by overflowing a diverging Newton, where double ran out of
- * budget first and named the limit. MEASUREMENTS.md M-ANISO-1.
+ * budget first and named the limit. MEASUREMENTS.md M-350.
  *
  * The source here is undefined above psi = 0.5 -- NaN, as a law evaluated
  * past its range returns -- which Example 5's first Newton step reaches, so

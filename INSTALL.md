@@ -170,7 +170,7 @@ The rest of the dependencies:
 
 | dependency | required? | notes |
 |---|---|---|
-| C++17 compiler, CMake ≥ 3.20 | yes | Boost is found in `CONFIG` mode, because CMake 4 removed `FindBoost` |
+| C++23 compiler (g++ 13 or later), CMake ≥ 3.20 | yes | Boost is found in `CONFIG` mode, because CMake 4 removed `FindBoost` |
 | toml11 | yes | Vendored as `extern/toml11`. **A clone without `--recursive` fails at configure time**, and the error says so — `git submodule update --init --recursive` fixes it. |
 | netcdf-cxx4 | optional | Found with `pkg-config`; Debian calls it `libnetcdf-c++4-dev`. Without it the gridded `.nc` output is dropped from the library and the driver cannot write it. |
 | Boost | **yes** | **Boost.Math is header-only and is needed to build the LIBRARY**, not merely the tests: `src/meq/Zernike.cpp` gets its Jacobi polynomials from it, the Zernike radial polynomial being a Jacobi polynomial under a coordinate change. No link dependency is added. |

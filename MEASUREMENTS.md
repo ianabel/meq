@@ -23098,7 +23098,7 @@ and `tauprobe.patch`, the probe as a diff against `756fb6d`.
 **THE PROTOTYPE `τ` THAT FOLLOWS THE REACTION (`[discretisation]
 TauFollowsReaction = θ`, branch `tau-follows-reaction`), ON TOP OF THE BOX
 DEFAULT `τ₀ = 3`. AT `θ = 10` IT SOLVES ALL ELEVEN GF1 RACE RUNGS FROM THE
-VACUUM, IN 7–8 NEWTON STEPS (11 ON L0 `k = 1`), WHERE THE DEFAULT SOLVES THREE.
+VACUUM, IN 7–8 NEWTON STEPS (9 ON L0 `k = 1`), WHERE THE DEFAULT SOLVES THREE.
 IT LEAVES A RESOLVED ANSWER WHERE THE DEFAULT PUTS IT: THE L2 `k = 4` REFERENCE
 MOVES BY 3.2e-09, AGAINST 2.1e-07 FOR A GLOBAL `τ₀ = 30`. ON THE THREE-SPECIES
 MIRROR IT LIFTS THE MIDPLANE GAUGE'S COARSE-MESH CEILING FROM 1e20 TO PAST
@@ -23120,10 +23120,18 @@ step, from 1e-3 to 1e-13 in 11 steps; with them, 7 steps, the tail at order
 frozen there at the solved `ψ_h`, read on the side's own element: the
 converged `τ` exactly.
 
-**Setup.** `install/tau-proto`, built from the branch on `a143457`, double.
-GF1 as M-347, through `race_geq.py`'s `meq_config()` and `run_meq()`, with
-`TauScaling = "diffusion"`, `Tau = 3.0`, `TauFollowsReaction = θ`, cold, 4
-threads, two sweeps at once on eight cores. Errors are `ψ` against PLAIN
+**Setup.** Tables 1 and 2 are the merged code on MFEM `meq-integration`
+`880626e` (`install/double` at `fdc7aed`, double), its border columns assembled
+directly as [M-349](#m-349) built them; the cost in 4 is the prototype's,
+`install/tau-proto` on `a143457`, whose columns are differenced. **On the MFEM
+before `880626e` the plain `τ₀ = 3` and `τ₀ = 30` columns and every mirror cell
+read the same to the printed digit, and only the following `τ`'s moved**: its
+`k = 1` errors 10–17% higher, and L0 `k = 1` at `θ = 10` in 11 steps.
+`880626e` stops MFEM dropping the boundary list under the live face
+constraint, which only the following `τ` takes. GF1 as M-347, through
+`race_geq.py`'s `meq_config()` and `run_meq()`, with `TauScaling =
+"diffusion"`, `Tau = 3.0`, `TauFollowsReaction = θ`, cold, 3 threads, five
+sweeps at once on sixteen. Errors are `ψ` against PLAIN
 `τ₀ = 3`'s L2 `k = 4` reference, one reference for every column, on the race's
 65 × 65 nodes less the corners. The three-species mirror is
 `examples/mirror-three-species.toml`, level 0, `k = 2` as shipped, its
@@ -23134,19 +23142,19 @@ through `meq-run`, 2 threads.
 
 | rung | `τ₀ = 3` | `τ₀ = 30` | `θ = 4` | `θ = 10` |
 |---|---|---|---|---|
-| L0 `k = 1` | fails | 9, 5.96e-04 | 10, 1.39e-03 | 11, 1.53e-03 |
-| L0 `k = 2` | fails | 7, 6.43e-05 | fails | 8, 1.93e-04 |
-| L0 `k = 3` | fails | 7, 3.52e-05 | 7, 7.43e-05 | 7, 4.39e-05 |
-| L0 `k = 4` | fails | 7, 1.33e-05 | 7, 2.05e-05 | 7, 1.70e-05 |
-| L1 `k = 1` | fails | 7, 1.25e-04 | 8, 2.79e-04 | 7, 2.36e-04 |
-| L1 `k = 2` | fails | 7, 1.92e-05 | 7, 5.66e-05 | 7, 3.01e-05 |
-| L1 `k = 3` | fails | 7, 2.17e-06 | 7, 7.96e-06 | 7, 5.20e-06 |
+| L0 `k = 1` | fails | 9, 5.96e-04 | 10, 1.21e-03 | 9, 1.34e-03 |
+| L0 `k = 2` | fails | 7, 6.43e-05 | fails | 8, 1.91e-04 |
+| L0 `k = 3` | fails | 7, 3.52e-05 | 7, 7.49e-05 | 7, 4.35e-05 |
+| L0 `k = 4` | fails | 7, 1.33e-05 | 7, 2.05e-05 | 7, 1.71e-05 |
+| L1 `k = 1` | fails | 7, 1.25e-04 | 8, 2.36e-04 | 7, 2.00e-04 |
+| L1 `k = 2` | fails | 7, 1.92e-05 | 7, 5.64e-05 | 7, 2.99e-05 |
+| L1 `k = 3` | fails | 7, 2.17e-06 | 7, 7.92e-06 | 7, 5.16e-06 |
 | L1 `k = 4` | 7, 2.03e-06 | 7, 1.53e-06 | 7, 1.84e-06 | 7, 1.70e-06 |
-| L2 `k = 1` | fails | 7, 4.07e-05 | 7, 1.05e-04 | 7, 7.59e-05 |
-| L2 `k = 2` | 7, 7.52e-06 | 7, 1.63e-06 | 7, 7.21e-06 | 7, 6.65e-06 |
-| L2 `k = 3` | 7, 4.19e-07 | 7, 3.76e-07 | 7, 4.15e-07 | 7, 4.12e-07 |
+| L2 `k = 1` | fails | 7, 4.07e-05 | 7, 9.48e-05 | 7, 6.52e-05 |
+| L2 `k = 2` | 7, 7.52e-06 | 7, 1.63e-06 | 7, 7.20e-06 | 7, 6.64e-06 |
+| L2 `k = 3` | 7, 4.19e-07 | 7, 3.76e-07 | 7, 4.13e-07 | 7, 4.10e-07 |
 
-Each prototype reference against plain `τ₀ = 3`'s: 2.41e-10 at `θ = 4`,
+Each following-`τ` reference against plain `τ₀ = 3`'s: 2.47e-10 at `θ = 4`,
 3.15e-09 at `θ = 10`; `τ₀ = 30`'s is 2.05e-07. At `θ = 2`, L0 `k = 2` fails as
 at the default.
 
@@ -23157,7 +23165,7 @@ at the default.
   `τ₀ = 30`'s** (L0 `k = 2` 1.9e-4 against 6.4e-5; L1 `k = 3` 5.2e-6 against
   2.2e-6). GF1's `ψ_h` improves with `τ` everywhere (M-345), and a `τ` raised
   only where it must be buys less of that. L2 `k = 2` shows it on a rung both
-  solve: 6.7e-6 against 1.6e-6.
+  solve: 6.6e-6 against 1.6e-6.
 
 **2. The three-species mirror.** Newton steps, or ✗:
 
@@ -23194,9 +23202,10 @@ knot per Newton step for the differenced gauge columns, 2 × 33 × 8 — each
 4.4× a plain residual's for the live face path. Assembled directly, the
 columns' face term takes it to 1.55× → **[M-349](#m-349)**.
 
-**Reproduce.** `runs/gf1-tau/`: `f3-th4/`, `f3-th10/` (`gf1_tau_sweep.py OUT 3 4
-θ <install/tau-proto>`), `compare.py` for table 1, `dbg/` for the profile;
-`runs/tau-proto/three/` (`run.sh` at `THETA=2`, `more.sh`) for table 2.
+**Reproduce.** `runs/tau-refresh/`: `t3/`, `t30/`, `gf1-th4/`, `gf1-th10/`
+(`runs/gf1-tau/gf1_tau_sweep.py OUT τ₀ 3 θ double`), `compare.py` for table 1,
+`mirror.sh` and `mirror2.sh` for table 2. The prototype's: `runs/gf1-tau/`
+(`f3-th4/`, `f3-th10/`, `dbg/` for the profile) and `runs/tau-proto/three/`.
 
 ### M-349
 
@@ -23260,19 +23269,22 @@ max error against plain `τ₀ = 3`'s L2 `k = 4`, as M-348:
 
 | rung | `τ₀ = 30` | `θ = 6` | `θ = 10` |
 |---|---|---|---|
-| L0 `k = 1` | 9, 5.96e-04 | 9, 1.43e-03 | 11, 1.53e-03 |
-| L0 `k = 2` | 7, 6.43e-05 | 8, 4.54e-04 | 8, 1.93e-04 |
-| L0 `k = 3` | 7, 3.52e-05 | 7, 5.15e-05 | 7, 4.39e-05 |
-| L0 `k = 4` | 7, 1.33e-05 | 7, 1.85e-05 | 7, 1.70e-05 |
-| L1 `k = 1` | 7, 1.25e-04 | 7, 2.39e-04 | 7, 2.36e-04 |
-| L1 `k = 2` | 7, 1.92e-05 | 7, 4.13e-05 | 7, 3.01e-05 |
-| L1 `k = 3` | 7, 2.17e-06 | 7, 6.43e-06 | 7, 5.20e-06 |
+| L0 `k = 1` | 9, 5.96e-04 | 10, 1.24e-03 | 9, 1.34e-03 |
+| L0 `k = 2` | 7, 6.43e-05 | 8, 4.50e-04 | 8, 1.91e-04 |
+| L0 `k = 3` | 7, 3.52e-05 | 7, 5.20e-05 | 7, 4.35e-05 |
+| L0 `k = 4` | 7, 1.33e-05 | 7, 1.85e-05 | 7, 1.71e-05 |
+| L1 `k = 1` | 7, 1.25e-04 | 7, 1.98e-04 | 7, 2.00e-04 |
+| L1 `k = 2` | 7, 1.92e-05 | 7, 4.11e-05 | 7, 2.99e-05 |
+| L1 `k = 3` | 7, 2.17e-06 | 7, 6.40e-06 | 7, 5.16e-06 |
 | L1 `k = 4` | 7, 1.53e-06 | 7, 1.74e-06 | 7, 1.70e-06 |
-| L2 `k = 1` | 7, 4.07e-05 | 7, 8.97e-05 | 7, 7.59e-05 |
-| L2 `k = 2` | 7, 1.63e-06 | 7, 6.93e-06 | 7, 6.65e-06 |
-| L2 `k = 3` | 7, 3.76e-07 | 7, 4.14e-07 | 7, 4.12e-07 |
+| L2 `k = 1` | 7, 4.07e-05 | 7, 7.91e-05 | 7, 6.52e-05 |
+| L2 `k = 2` | 7, 1.63e-06 | 7, 6.92e-06 | 7, 6.64e-06 |
+| L2 `k = 3` | 7, 3.76e-07 | 7, 4.12e-07 | 7, 4.10e-07 |
 
-The `θ = 10` column is M-348's to every digit.
+Both face-point tables are on M-348's build (`fdc7aed`, MFEM `880626e`), so
+the `θ = 10` column is M-348's. At `bc22331`, on the earlier MFEM, the direct
+columns reproduced the differenced prototype's every step and error to the
+printed digit.
 References against `τ₀ = 3`'s:
 8.2e-10 at `θ = 6`, 3.2e-9 at `θ = 10`. The three-species mirror, level 0, cold,
 2 threads:
@@ -23322,14 +23334,15 @@ answer nearer the default's; it does not reach a fold the face sample
 misses, and it would need MFEM to carry a per-element rank-one derivative.
 Dropped on these numbers.**
 
-**Reproduce.** `install/tau-direct` and `install/tau-elem`, the branch at
-`bc22331`. `runs/gf1-tau/`: `d3-th10/`, `d3-th6/` (`gf1_tau_sweep.py OUT 3
+**Reproduce.** The face-point tables: `runs/tau-refresh/` (`gf1-th6/`,
+`gf1-th10/`, `t30/`, `mirror/`), as M-348's. The rest: `install/tau-direct` and
+`install/tau-elem`, the branch at `bc22331`. `runs/gf1-tau/`: `d3-th10/`, `d3-th6/` (`gf1_tau_sweep.py OUT 3
 3 θ <install/tau-direct>`), `e3-th2/`, `e3-th4/` (the same with
 `MEQ_TAU_ELEMENT_SAMPLE=1` and `install/tau-elem`), `compare2.py`; `direct/`
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
 
-### M-ANISO-1
+### M-350
 
 **`AnisotropicConvergence` AND `AnisotropicMirror` QUALIFIED IN SINGLE
 PRECISION. ONE RED WAS A DEFECT: A PLAIN NEWTON THAT DIVERGED OVERFLOWED IN
@@ -23481,7 +23494,7 @@ argument. Single asserts `scalarAgreementFloor()` of the total, 64 `eps`,
 `AnisotropicConvergence`'s double output, every test case but the timings,
 is the reference binary's to the character.
 
-### M-ANISO-2
+### M-351
 
 **`Δ( Ψ )`'s CRAWL ON THE MESHED MIRROR (M-339) IS NOT THE JACOBIAN AND NOT A
 FOLD. ALONG EVERY STEP OF IT THE BORDERED NEWTON DIRECTION IS THE EXACT ONE,
@@ -23517,7 +23530,7 @@ a selection of the 22 steps (every step reads the same way):
 Linear in `α` over four decades on every step, at 0.9 likewise: still
 falling at `α = 1e-5`, so whatever first-order residue there is sits under
 2e-04 relative; the analytic label column, M-330's mutation, leaves a
-contraction of 0.19 per step on AN-2b's fixture (M-ANISO-1). **Both suspects M-339 named are
+contraction of 0.19 per step on AN-2b's fixture (M-350). **Both suspects M-339 named are
 falsified**: the label columns, differenced under a `Δ` in `Ψ`, and the flux
 law's `ψ`-slope against the label normalisation, are both inside `d`.
 

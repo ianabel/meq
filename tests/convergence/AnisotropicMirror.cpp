@@ -335,7 +335,7 @@ namespace
 		// dips under the gate and stops is a coin toss: k = 3's isotropic
 		// level 0 and k = 2's level 1 do not. solveMeshed()'s 64 eps, 7.6e-06, clears the worst stagnant
 		// residual by 3.5 and is four orders under the step before it.
-		// Double asks the solver's own default. MEASUREMENTS.md M-ANISO-1.
+		// Double asks the solver's own default. MEASUREMENTS.md M-350.
 		if ( !subtracted )
 			solver.setNewtonControl( 1.0e-12,
 			                         64.0*static_cast<double>(
@@ -595,7 +595,7 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 	 * isotropic difference is under 256 eps of that rms compares two floors,
 	 * so it is skipped loudly; rung 0 is asserted as in double.
 	 * roundOffFloor()'s 2048 eps would skip rung 0 as well and leave the case
-	 * asserting nothing. MEASUREMENTS.md M-ANISO-1.
+	 * asserting nothing. MEASUREMENTS.md M-350.
 	 */
 	std::vector<double> const &isotropic = differences[ 0 ];
 	std::vector<bool> readable( isotropic.size(), true );
@@ -610,7 +610,7 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 	{
 		if ( !readable[ i ] )
 			std::printf( "    *** SKIPPED rung %zu: the isotropic difference %.3e is under this"
-			             " build's floor, so the rung compares two floors. M-ANISO-1\n", i,
+			             " build's floor, so the rung compares two floors. M-350\n", i,
 			             isotropic[ i ] );
 	}
 #endif
@@ -727,7 +727,7 @@ BOOST_AUTO_TEST_CASE( aZeroBumpThroughTheLawIsTheSubtractedMirror )
 	// RotatingMirror's card-against-host pair finds: psi_p is 1e-03 at its
 	// largest and the total it is taken from is 1.57. Measured, 5.4e-08, which
 	// is 0.29 eps of the total and 430 of psi_p's own size; a conductors' load
-	// dropped by the law is O( psi_c ). MEASUREMENTS.md M-ANISO-1.
+	// dropped by the law is O( psi_c ). MEASUREMENTS.md M-350.
 	mfem::GridFunction total;
 	plain->solver->totalPotential( total );
 	bound = std::max( bound, meq::tests::scalarAgreementFloor( 0.0, total.Normlinf() ) );
