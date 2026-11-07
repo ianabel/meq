@@ -388,7 +388,7 @@ shape in `Ψ`, `Δ = δ₀ (4Ψ(1 − Ψ))³ h(z)`.
 * a zero bump is the meshed mirror bit for bit;
 * `δ₀ = −0.1` and `−0.3` converge from the vacuum in 3 steps, either `Δ`, as
   the isotropic mirror does in 3 or 4;
-* on a `k = 3` ladder over levels 0 to 3 the anisotropic `ψ*` differences
+* on a `k = 3` ladder over levels 0 to 2 the anisotropic `ψ*` differences
   match the isotropic control's, within 6% for the bump and 10% for `Δ(Ψ)`;
 * a `Δ` that does not vanish on `Γ_h` is refused: before assembly for the
   bump, on the solved `ψ` for one in `Ψ`.

@@ -329,7 +329,7 @@ namespace
 		// sits above the ten-eps gate the round-off stop works under, as
 		// solveMeshed()'s vacuum does (M-294): measured with no target to
 		// meet, every meshed plasma solve here stagnates between 1.35e-06 and
-		// 2.20e-06 -- k = 2 at levels 0 and 1, k = 3 at levels 0 to 3, every
+		// 2.20e-06 -- k = 2 at levels 0 and 1, k = 3 at levels 0 to 2, every
 		// Delta -- drifting down by a few per cent a step, while the
 		// subtracted route reaches 1.6e-08 to 6.9e-08. Whether a solve then
 		// dips under the gate and stops is a coin toss: k = 3's isotropic
@@ -522,15 +522,17 @@ BOOST_AUTO_TEST_CASE( aPressurePastTheFoldIsRefused )
 }
 
 /// MEQ AGAINST ITSELF, AND AGAINST THE ISOTROPIC MESHED MIRROR ON THE SAME LADDER:
-/// k = 3, levels 0 to 3, psi* sampled over the machine region.
+/// k = 3, levels 0 to 2, psi* sampled over the machine region.
 ///
 /// THE LADDER ITSELF IS NOT AT THE DESIGN RATE, AND THE ISOTROPIC CONTROL SAYS
-/// SO. Its Cauchy rates read 7.28 then 2.35 against psi*'s design 4: level 0
-/// pre-asymptotic, and then limited -- most likely by the meshed packs'
-/// corners, r^2 log r at each rectangle's corner, which RotatingMirror's
-/// subtracted filaments do not have. Not measured. So what is asserted is
-/// what the anisotropy adds: on every rung its difference is within 25% of the
-/// isotropic one, and falls. Measured, the two agree to 6%.
+/// SO. Its Cauchy rate reads 7.28 against psi*'s design 4, level 0
+/// pre-asymptotic; a level 3 reads 2.35 on the next rung, limited -- most
+/// likely by the meshed packs' corners, r^2 log r at each rectangle's corner,
+/// which RotatingMirror's subtracted filaments do not have. Not measured.
+/// Level 3 is not run: it is six k = 3 solves at 64 times level 0's elements,
+/// most of the suite's wall, for a rung that adds no claim. So what is
+/// asserted is what the anisotropy adds: on every rung its difference is
+/// within 25% of the isotropic one, and falls. Measured, the two agree to 6%.
 ///
 /// And tau( 1 - Delta ), setStabilisationFollowsAnisotropy(), beside it: the
 /// measurement AN-3a owes on tau. At delta0 = -0.3 it moves the differences
@@ -563,7 +565,7 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 	                                 Variant{ "Delta( B ), delta0 = +0.9", Delta::Field, false, 0.9 } } )
 	{
 		std::vector<std::vector<double>> sampled;
-		for ( int level : { 0, 1, 2, 3 } )
+		for ( int level : { 0, 1, 2 } )
 		{
 			auto r = run( 3, level, variant.kind, variant.amplitude, variant.tauFollows );
 			BOOST_TEST_REQUIRE( r->converged, "level " << level << ": " << r->failure );
@@ -576,9 +578,8 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 			d.push_back( rms( sampled[ i - 1 ], sampled[ i ] ) );
 		if ( differences.empty() )
 			scale = rms( sampled.back(), std::vector<double>( sampled.back().size(), 0.0 ) );
-		std::printf( "  %s, k = 3: psi* level 0-1 %.3e, 1-2 %.3e, 2-3 %.3e; rates %.3f, %.3f;"
-		             " over %zu points\n", variant.label, d[ 0 ], d[ 1 ], d[ 2 ],
-		             std::log2( d[ 0 ]/d[ 1 ] ), std::log2( d[ 1 ]/d[ 2 ] ),
+		std::printf( "  %s, k = 3: psi* level 0-1 %.3e, 1-2 %.3e; rate %.3f; over %zu points\n",
+		             variant.label, d[ 0 ], d[ 1 ], std::log2( d[ 0 ]/d[ 1 ] ),
 		             cloud.radius.size() );
 		std::fflush( stdout );
 		differences.push_back( d );
@@ -586,11 +587,10 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 
 	/*
 	 * IN SINGLE THE LADDER REACHES THE FORMAT'S FLOOR AFTER ITS FIRST RUNG.
-	 * The isotropic differences read 5.22e-05, 1.42e-06, 1.66e-06 against
-	 * double's 5.10e-05, 3.28e-07, 6.46e-08: rung 0 is the same number to
-	 * 2.4%, rungs 1 and 2 the meshed plasma solve's own round-off -- its
-	 * residual stagnates at 1.4e-06 to 2.2e-06 -- and the 2-3 difference no
-	 * longer falls. In units of psi*'s rms over the cloud, 0.22, the floored
+	 * The isotropic differences read 5.22e-05, 1.42e-06 against double's
+	 * 5.10e-05, 3.28e-07: rung 0 is the same number to 2.4%, rung 1 the
+	 * meshed plasma solve's own round-off -- its residual stagnates at
+	 * 1.4e-06 to 2.2e-06. In units of psi*'s rms over the cloud, 0.22, the floored
 	 * rungs of every variant read 36 to 63 eps and rung 0 1970. A rung whose
 	 * isotropic difference is under 256 eps of that rms compares two floors,
 	 * so it is skipped loudly; rung 0 is asserted as in double.
