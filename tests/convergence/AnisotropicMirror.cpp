@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -21,6 +22,7 @@
 
 #include "convergence/GeqReference.hpp"
 #include "convergence/MirrorMachine.hpp"
+#include "convergence/RoundOffFloor.hpp"
 
 /*
  * ANISOTROPY-PLAN.md AN-3a: THE ANISOTROPIC OPERATOR ON THE ROTATING MIRROR.
@@ -322,6 +324,24 @@ namespace
 		solver.setExtension( *r->domain->path, r->domain->gammaHMarker );
 		solver.setExteriorCoupling( *r->dtn );
 		solver.setInitialGuess( r->vacuum->solver->potential() );
+#ifdef MFEM_USE_SINGLE
+		// THE MESHED PACKS' SINGLE FLOOR IS THE PLASMA SOLVE'S TOO, and it
+		// sits above the ten-eps gate the round-off stop works under, as
+		// solveMeshed()'s vacuum does (M-294): measured with no target to
+		// meet, every meshed plasma solve here stagnates between 1.35e-06 and
+		// 2.20e-06 -- k = 2 at levels 0 and 1, k = 3 at levels 0 to 3, every
+		// Delta -- drifting down by a few per cent a step, while the
+		// subtracted route reaches 1.6e-08 to 6.9e-08. Whether a solve then
+		// dips under the gate and stops is a coin toss: k = 3's isotropic
+		// level 0 and k = 2's level 1 do not. solveMeshed()'s 64 eps, 7.6e-06, clears the worst stagnant
+		// residual by 3.5 and is four orders under the step before it.
+		// Double asks the solver's own default. MEASUREMENTS.md M-ANISO-1.
+		if ( !subtracted )
+			solver.setNewtonControl( 1.0e-12,
+			                         64.0*static_cast<double>(
+				                         std::numeric_limits<mfem::real_t>::epsilon() ),
+			                         30 );
+#endif
 		try
 		{
 			solver.solve();
@@ -534,6 +554,7 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 		double amplitude;
 	};
 	std::vector<std::vector<double>> differences;
+	double scale = 0.0;
 	for ( Variant const &variant : { Variant{ "isotropic", Delta::None, false, 0.0 },
 	                                 Variant{ "delta0 = -0.3", Delta::Bump, false, -0.3 },
 	                                 Variant{ "delta0 = -0.3, tau( 1 - Delta )", Delta::Bump, true, -0.3 },
@@ -553,6 +574,8 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 		std::vector<double> d;
 		for ( std::size_t i = 1; i < sampled.size(); ++i )
 			d.push_back( rms( sampled[ i - 1 ], sampled[ i ] ) );
+		if ( differences.empty() )
+			scale = rms( sampled.back(), std::vector<double>( sampled.back().size(), 0.0 ) );
 		std::printf( "  %s, k = 3: psi* level 0-1 %.3e, 1-2 %.3e, 2-3 %.3e; rates %.3f, %.3f;"
 		             " over %zu points\n", variant.label, d[ 0 ], d[ 1 ], d[ 2 ],
 		             std::log2( d[ 0 ]/d[ 1 ] ), std::log2( d[ 1 ]/d[ 2 ] ),
@@ -561,10 +584,41 @@ BOOST_AUTO_TEST_CASE( theAnisotropicMirrorConvergesAsTheIsotropicOneDoes )
 		differences.push_back( d );
 	}
 
+	/*
+	 * IN SINGLE THE LADDER REACHES THE FORMAT'S FLOOR AFTER ITS FIRST RUNG.
+	 * The isotropic differences read 5.22e-05, 1.42e-06, 1.66e-06 against
+	 * double's 5.10e-05, 3.28e-07, 6.46e-08: rung 0 is the same number to
+	 * 2.4%, rungs 1 and 2 the meshed plasma solve's own round-off -- its
+	 * residual stagnates at 1.4e-06 to 2.2e-06 -- and the 2-3 difference no
+	 * longer falls. In units of psi*'s rms over the cloud, 0.22, the floored
+	 * rungs of every variant read 36 to 63 eps and rung 0 1970. A rung whose
+	 * isotropic difference is under 256 eps of that rms compares two floors,
+	 * so it is skipped loudly; rung 0 is asserted as in double.
+	 * roundOffFloor()'s 2048 eps would skip rung 0 as well and leave the case
+	 * asserting nothing. MEASUREMENTS.md M-ANISO-1.
+	 */
 	std::vector<double> const &isotropic = differences[ 0 ];
+	std::vector<bool> readable( isotropic.size(), true );
+	double const ladderFloor = 256.0;
+	for ( std::size_t i = 0; i < isotropic.size(); ++i )
+		readable[ i ] = meq::tests::aboveTheFormatsFloor( isotropic[ i ], scale, ladderFloor );
+#ifdef MFEM_USE_SINGLE
+	std::printf( "  psi* rms over the cloud %.3e; this build's floor on a rung %.3e\n", scale,
+	             ladderFloor*scale*static_cast<double>(
+		             std::numeric_limits<mfem::real_t>::epsilon() ) );
+	for ( std::size_t i = 0; i < isotropic.size(); ++i )
+	{
+		if ( !readable[ i ] )
+			std::printf( "    *** SKIPPED rung %zu: the isotropic difference %.3e is under this"
+			             " build's floor, so the rung compares two floors. M-ANISO-1\n", i,
+			             isotropic[ i ] );
+	}
+#endif
 	for ( std::size_t v = 1; v < differences.size(); ++v )
 		for ( std::size_t i = 0; i < isotropic.size(); ++i )
 		{
+			if ( !readable[ i ] )
+				continue;
 			double const ratio = differences[ v ][ i ]/isotropic[ i ];
 			BOOST_TEST( ( ratio > 0.8 && ratio < 1.25 ), "variant " << v << ", rung " << i
 			            << ": the anisotropic difference is " << ratio
@@ -667,7 +721,21 @@ BOOST_AUTO_TEST_CASE( aZeroBumpThroughTheLawIsTheSubtractedMirror )
 	             " Newton %d and %d\n", worst, scale, plain->solver->newtonIterations(),
 	             zero->solver->newtonIterations() );
 	std::fflush( stdout );
-	BOOST_TEST( worst < 1.0e-10*scale, "psi_p differs by " << worst << " on " << scale );
+	double bound = 1.0e-10*scale;
+#ifdef MFEM_USE_SINGLE
+	// psi_p IS A REMAINDER, SO ITS ROUND-OFF IS THE TOTAL FLUX'S, as
+	// RotatingMirror's card-against-host pair finds: psi_p is 1e-03 at its
+	// largest and the total it is taken from is 1.57. Measured, 5.4e-08, which
+	// is 0.29 eps of the total and 430 of psi_p's own size; a conductors' load
+	// dropped by the law is O( psi_c ). MEASUREMENTS.md M-ANISO-1.
+	mfem::GridFunction total;
+	plain->solver->totalPotential( total );
+	bound = std::max( bound, meq::tests::scalarAgreementFloor( 0.0, total.Normlinf() ) );
+	std::printf( "    the total flux reaches %.3e; the bound in single is %.3e\n",
+	             static_cast<double>( total.Normlinf() ), bound );
+	std::fflush( stdout );
+#endif
+	BOOST_TEST( worst < bound, "psi_p differs by " << worst << " on " << scale );
 }
 
 /// From the subtracted vacuum, either Delta converges as the meshed route does.
