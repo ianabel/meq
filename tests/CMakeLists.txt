@@ -864,13 +864,26 @@ else()
 	# check is promoted, so a compiler warning from some header does not fail
 	# the run -- though a compile *error* still does, which is what should
 	# happen, since a file that does not parse has not been checked.
-	add_test(NAME naming
-		COMMAND "${CLANG_TIDY_EXE}"
-			-p "${CMAKE_BINARY_DIR}"
-			"--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy"
-			--quiet
-			--warnings-as-errors=readability-identifier-naming
-			${_naming_sources})
+	#
+	# ONE TEST PER TRANSLATION UNIT, naming.<file>, all labelled `naming`, so
+	# ctest schedules them across its slots: one clang-tidy over every file
+	# runs them one after another, about thirty minutes, where the slowest
+	# file alone (Run.cpp) takes about ninety seconds -- the time is MFEM's
+	# headers parsed once per translation unit either way. `ctest -L naming`
+	# runs the check entire. A violation in a header fails every translation
+	# unit that includes it, which names the same defect more than once and
+	# changes no verdict.
+	foreach(_source IN LISTS _naming_sources)
+		get_filename_component(_naming_stem "${_source}" NAME_WE)
+		add_test(NAME naming.${_naming_stem}
+			COMMAND "${CLANG_TIDY_EXE}"
+				-p "${CMAKE_BINARY_DIR}"
+				"--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy"
+				--quiet
+				--warnings-as-errors=readability-identifier-naming
+				"${_source}")
+		set_tests_properties(naming.${_naming_stem} PROPERTIES LABELS naming)
+	endforeach()
 endif()
 
 # ---------------------------------------------------------------------------
