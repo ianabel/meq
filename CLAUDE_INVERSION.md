@@ -27,7 +27,7 @@ what each found.
 | stage | what it built or answered | where it lives |
 |---|---|---|
 | **IN-A** | the magnetic axis and any X-point as roots of `q_h`, by Newton inside one element, audited by the winding number of `q` on the boundary | `meq::CriticalPointFinder`, `src/meq/CriticalPoints.{hpp,cpp}`; `CriticalPointConvergence` |
-| **IN-0** | the predictor–corrector tracer: curvature-controlled step, cubic Hermite from `q`, `Potential::Continuous` by default (`ψ̃`, `q̃` interpolated from `ψ*`, `ψ̂`, `q*`), and the band crossed by `BandExtension::TransferLift` | `meq::ContourTracer`, `src/meq/FluxSurfaces.{hpp,cpp}`; `FluxSurfaceConvergence` |
+| **IN-0** | the predictor–corrector tracer: curvature-controlled step, cubic Hermite from `q`, `Potential::Continuous` by default (`ψ̃`, `q̃` interpolated from `ψ*`, `ψ̂`, `q*`), and the band crossed by `BandExtension::TransferLift` | `meq::ContourTracer`, `src/meq/FluxSurfaces.{hpp,cpp}`, `src/meq/ContinuousField.{hpp,cpp}`; `FluxSurfaceConvergence`, `ContinuousFieldConvergence`, `ExtractionContinuity` |
 | **IN-1** | a closed contour by poloidal angle, with the metric pointwise from `q` and the differenced metric kept as the live control | `ContourTracer::fitByAngle()`, `meq::AngleParametrisation`; `FluxSurfaceConvergence` |
 | **IN-2** | flux-surface averages as one primitive over a callable integrand — `V′`, `⟨R⁻²⟩`, the safety factor — against a converged reference on the exact field | `meq::surfaceAverages()`, `src/meq/SurfaceAverage.{hpp,cpp}`; `SurfaceAverageConvergence`, `tests/analytic/FluxSurfaceReference.hpp` |
 | **IN-3** | `R` and `z` as Zernike expansions on `ρ = √Ψ_N`, fitted to traced points, with the axis-shape relabelling | `meq::SurfaceFit`, `meq::relabelByAxisShape()`, `src/meq/{SurfaceFit,Zernike}.{hpp,cpp}`; `SurfaceFitConvergence`, `ZernikeTests` |
@@ -376,19 +376,20 @@ it was repaired:
   relative at the face, the node moves 1.8e-07 and the coefficients step by
   2.6e-05, with the solve, the axis and the inner Newton's count smooth
   through it. Every column differenced across it is off by that over `2s`, and
-  no floor sees it, because each residual is right to the floor. **The session's
-  geometry jumped by the same mechanism and nothing else**
-  (→ **[M-363](MEASUREMENTS.md#m-363)**): over `±1e-3` of a table, every
+  no floor sees it, because each residual is right to the floor. **The family
+  jumps by the same mechanism and nothing else** as an input moves
+  (→ **[M-364](MEASUREMENTS.md#m-364)**): over `±1e-3` of a profile, every
   jump above the noise on the box and on TCV is a node changing element, the
   axis element and the band never change, and the per-crossing jump falls as
   about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
-  **So the loop's map, the session and `_surfaces.nc` all extract on `ψ̃`
-  and `q̃`** — `Potential::Continuous`, H¹ fields interpolated by moments
-  from `ψ*`, `ψ̂` (on interior edges) and `q*` (`src/meq/ContinuousField.hpp`).
+  **So the loop's map, `_surfaces.nc` and the session (`Run::resolve()`,
+  `manta/*`) extract on `ψ̃` and `q̃`** — `Potential::Continuous`, H¹ fields
+  interpolated by moments from `ψ*`, `ψ̂` (on interior edges) and `q*`
+  (`src/meq/ContinuousField.hpp`).
   A 1.5e-8 difference straddling a crossing is then off by the noise rather
   than by 0.01–700× the derivative, and the family stays inside the
-  discretisation error of the `ψ*` one (→ **[M-364](MEASUREMENTS.md#m-364)**,
-  **[M-366](MEASUREMENTS.md#m-366)**). M-308b's sweep itself was a
+  discretisation error of the `ψ*` one (→ **[M-365](MEASUREMENTS.md#m-365)**,
+  **[M-367](MEASUREMENTS.md#m-367)**). M-308b's sweep itself was a
   scratch harness and is not re-run; the step it found is a face crossing,
   which no longer moves the map. The step at 1e-4 straddles none on that
   fixture and finishes quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom`
@@ -530,6 +531,21 @@ along `R⁻¹` (`OuterNewtonOptions::differenceBasis`) against
 2.2e-5 and the answers 5e-7 to 1.1e-6 apart, now at the map's own noise
 (→ **[M-359](MEASUREMENTS.md#m-359)**). `SafetyFactorScale` differences the
 same way, which its free `σ_min` needs in single.
+
+**AND THE FLOOR MODEL IS CHECKED AGAINST THE MAP'S MEASURED NOISE, BECAUSE IT
+IS NOT AN UPPER BOUND.** On the box the model sits 2.5× over the noise; on
+`QDrivenCurvedBoundary`'s Miller boundary in single the noise is 2.2× over the
+model, 1.4e-5 per orthonormal coordinate against 6.3e-6, and the loop stalled
+at 2.70e-5 against a threshold of 2.58e-5 — a stopping test asking for less
+than the map resolves (→ **[M-363](MEASUREMENTS.md#m-363)**). So where
+the floor is what the loop is judged on, the first residual within ten floors
+triggers a measurement — that point evaluated again from two other warm
+starts — and four standard deviations of it become a floor if larger; a
+stall above the floor is measured the same way before it is called a
+failure. It is the warm-start noise that is measured, not a jitter that is a
+function of the point (M-308b's face crossings are the map, not noise), and a
+stall above the measured noise stays a failure.
+`a_stall_at_the_maps_measured_noise_is_converged` asserts both.
 
 **THE FLUX PIN HOLDS THE DELIVERED FLUX, AS A ROW BESIDE THE BORDERED NEWTON.**
 `ToroidalFlux` is the equilibrium's own `∫_plasma g/R dA`, read off the solved
@@ -689,10 +705,11 @@ ONE, AND THE POST-PROCESSED PAIR WON ON A REASON THAT WAS NOT THE ONE
 EXPECTED.** The continuous pair is `ψ̃` ∈ H¹ of degree `k+2` and `q̃` ∈ [H¹]²,
 interpolated by moments from `ψ*`, `ψ̂` and `q*` (`src/meq/ContinuousField.hpp`):
 `ψ*` and `q*` are broken across every face, so a family node crossing one makes
-the geometry jump by the face jump (→ **[M-363](MEASUREMENTS.md#m-363)**),
+the geometry jump by the face jump (→ **[M-364](MEASUREMENTS.md#m-364)**),
 which a caller differencing the geometry divides by its step; on `ψ̃`, `q̃` it
-does not, and the family stays inside `ψ*`'s own error
-(→ **[M-364](MEASUREMENTS.md#m-364)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
+does not (`ExtractionContinuity`, with `ψ*`, `q*` as its control), and the
+family stays inside `ψ*`'s own error
+(→ **[M-365](MEASUREMENTS.md#m-365)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
 keeps `q*`'s `k+1` (`ContinuousFieldConvergence`). Everything below about the
 post-processed pair is why the continuous one is built from it.
 
@@ -749,7 +766,7 @@ MEQ OWES.** `ψ̃` is continuous across faces but its gradient is not, so
 `Contour`'s cubic Hermite — smooth by construction — misses the bend. At fixed
 `Δs = 0.004`, `k = 2`, the representation error is 3.6e-7, 9.6e-8, 9.7e-9 at
 `n` = 12, 24, 48, where on `ψ*` and `q*` it is flat at 5.4e-9 (face-crossing
-segments excluded) (→ **[M-366](MEASUREMENTS.md#m-366)**). It converges
+segments excluded) (→ **[M-367](MEASUREMENTS.md#m-367)**). It converges
 with `h` and sits inside the 1e-6 MEQ owes, so nothing is done about it; the
 family's averages are taken on the ray nodes, which root `ψ̃` directly, and
 the `Contour` only seeds and brackets them.

@@ -21,7 +21,7 @@
 # then common to the measurement and to the loop that has to invert it, so
 # what the acceptance below reads is the LOOP's accuracy and not the mesh's.
 # Measured on psi* and q* instead, the table is 5.1e-5 away, inside q's own
-# discretisation error on this mesh (MEASUREMENTS.md M-366) -- and the loop
+# discretisation error on this mesh (MEASUREMENTS.md M-367) -- and the loop
 # then lands 1.7e-3 away in g, which is that difference along the scale's
 # near-null direction (M-353). So the
 # loop's answer is known independently of the loop: it must recover that g, and

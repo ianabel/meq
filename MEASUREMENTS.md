@@ -24443,16 +24443,103 @@ first sweep's, `runs/manta-session/smooth.log`, `smooth3.log`.
 
 ### M-363
 
-**What makes the session's geometry jump: a flux-surface node crossing an
-element face, and nothing else measured.** `manta/shape-derivative`, double,
-`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, the cases of M-SESSION-4
-(`rotating-normalised`'s box and `fixed-d-tcv`'s MXH boundary with the same
-`RotatingSource`, Newton to round-off), every state a `resolve()` warm from one
-base. Each family node carries, as a diagnostic, the element its ray rooted in
+**The q loop's floor model is under the map's noise on a curved boundary in
+single, and the loop now measures that noise.** `q-loop-floor` off `cde84f2`,
+`builds/q-loop-floor-single` (MFEM `install-single`) and `builds/q-loop-floor`
+(double), `OMP_NUM_THREADS=2`.
+
+**(a) The failure on `cde84f2`, single.** `QDrivenCurvedBoundary` (Miller
+boundary, `RefinementLevels = 0`, `k = 2`, `R0B0 = 2.2`): 7 KINSOL iterations,
+37 equilibria, 0 refused, the line search stopping at 2.70312e-5 against a
+threshold of 2.57946e-5 — the orthonormal floor model, 2.507e-5, and the
+iterate's. **The same draw at `MKL_NUM_THREADS` = 1, 2 and 4**, to every digit:
+not a coin toss across MKL, a deterministic stall 1.05× over the threshold.
+
+**(b) The map's noise at that answer**, a probe run once: the returned point
+evaluated again after evaluating it moved by ±0.02, ±0.05 and ±0.1 in `c₁`,
+the change in each orthonormal coordinate of the residual:
+
+| warm start moved by | `y_0` | `y_1` | `y_2` |
+|---|---|---|---|
+| +0.02 | −1.32e-5 | +1.44e-5 | −7.0e-6 |
+| −0.02 | −2.72e-5 | +1.66e-5 | +9.0e-6 |
+| +0.05 | −2.7e-6 | −6.4e-6 | +3.8e-6 |
+| −0.05 | +2.43e-5 | −3.97e-5 | +1.66e-5 |
+| +0.10 | −3.69e-5 | +2.58e-5 | −2.33e-5 |
+| −0.10 | +9.5e-6 | +3.8e-6 | −5.8e-6 |
+
+Worst 3.97e-5, root-mean-square 2.0e-5: differences of two draws, so one
+evaluation's noise is about 1.4e-5 per coordinate, **2.2× the model's**
+`2.507e-5/4 = 6.3e-6`. On the box the model is 2.5× over the noise (M-359), so
+it is not an upper bound: the curved boundary's band continuation is noisier
+than the model's ε per average. The residual the loop stalled at, 2.70e-5, is
+inside this noise — **the stopping test asked for less than the map resolves.**
+
+**(c) What exposed it.** The orthonormal floor (M-359) replaced the monomial
+max-norm floor times `R`'s row sum, which sat near 6e-4 in single and far
+above this noise; this case passed under it (M-358, 4 iterations and 21
+equilibria). The delivered-flux row is not involved: the case is pinned by
+`R0B0` and has no pin row.
+
+**(d) The rule.** Where the floor and not the tolerance judges the loop, the
+first residual within ten modelled floors is followed by a measurement: that
+point evaluated again from two other warm starts (the warm start moved a
+tenth of a unit each way in the last unknown first), and
+`4 max|ΔF|/√2` — four standard deviations of one draw, the model's own margin
+— becomes the floor if it is the larger. A stall above the floor before any
+measurement is measured the same way before it is judged. A measurement that
+is refused raises nothing. Cost: four equilibria, once, where the floor
+governs; none in double, where the 1e-9 tolerance is over the floor.
+
+| `QDrivenCurvedBoundary`, single | KINSOL its / equilibria | final norm / threshold | `g²` |
+|---|---|---|---|
+| `cde84f2`, MKL 1, 2, 4 | 7 / 37 | 2.70e-5 / 2.58e-5, not converged | — |
+| measured at the stall only | 7 / 41 | 2.70e-5 / 1.44e-4 | 4.84, 2.42003322, 0.30248865 |
+| measured near the answer (the rule), MKL 1, 2, 4 | 4 / 25 | 4.39e-5 / 1.51e-4 | 4.84, 2.42000365, 0.30250007 |
+
+Measured only at the stall the loop spends three Newton iterations under a
+floor 2.2× too low before its line search gives out; measured on the way it
+stops at the first iterate inside the noise, in M-358's iteration count, and
+nearer the closed form. In single `QDrivenScalePin`'s re-solves sit 6.1e-7,
+7.1e-7 and 4.0e-7 of `ψ`'s peak from the base (bound 2.4e-6), and
+`SafetyFactorScale` passes.
+
+**(e) The library's assertion**, `SafetyFactorSolver::
+a_stall_at_the_maps_measured_noise_is_converged`: a quadratic map whose noise,
+1e-4, is a fresh draw every call as a warm start's is, with its floor declared
+a hundred times under: converged in 6 iterations and 49 evaluations at
+5.8e-5 against a measured floor of 2.6e-4. The control, the same map stopped
+by a step tolerance at 2.5e-2, is not converged. A map whose jitter is a
+function of the point measures no spread, and the understated case of
+`a_stall_above_the_floor_is_not_converged` stays not converged.
+
+**(f) Double is unchanged.** No driver run measures: the 1e-9 tolerance is
+over every floor. `QDrivenScalePin` re-solves 8.4e-11, 2.4e-13 and 2.1e-15
+from the base, `SafetyFactorScale`'s free `σ_min` 2.883e-3 and 4.456e-4,
+`QDrivenCurvedBoundary` recovers `g²` to eight digits, and `QDrivenConsistency`
+reads its plateau, 1.181e-1 then 1.179e-1, all as on `cde84f2`;
+`DriverAcceptance` passes. The library case converges in double in 7
+iterations and 85 evaluations: its declared floor is a hundred times under
+the noise, so the residual never comes within ten floors and the noise is
+measured only at the stall.
+
+**Reproduce.** `runs/q-loop-floor/` (`probe-mkl*.log` for the noise table, `mkl*.log` and `fixed-mkl*.log` for the rule's sweep); the
+probe was a temporary block in `Run.cpp` behind `MEQ_PROBE_NOISE`, not kept.
+
+### M-364
+
+**What makes the flux-surface geometry jump as an input moves: a family node
+crossing an element face, and nothing else measured.** (a) and (b) were taken
+on `manta/shape-derivative`, through its in-memory re-solve `Run::resolve()`
+(MaNTA's session, `MANTA-EQUILIBRIUM-PLAN.md`, not on main), on `ψ*` and `q*`:
+double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, `rotating-normalised`'s box and
+`fixed-d-tcv`'s MXH boundary with the same `RotatingSource`, Newton to
+round-off, every state a `resolve()` warm from one base. (c) is main's own
+instrument, a source parameter on a linear box. Each family node carries, as a diagnostic, the element its ray rooted in
 (or, in the band, extended from), its band face, how its ray search ended and
 its iteration count; the family carries the axis element.
 
-**(a) `SessionSmoothness`'s four failures, attributed** — the largest
+**(a) `manta/shape-derivative`'s `SessionSmoothness` on `ψ*` and `q*`: its four failures, attributed** — the largest
 departure of a second difference in its `±1e-3` scan, and the node whose
 position has the largest second difference there:
 
@@ -24470,7 +24557,7 @@ the face, as M-308b found. Over all four scans the axis element never changes
 guess, changes on one surface in two of the scans; (b) finds no jump that is
 not a crossing.
 
-**(b) Every jump, every surface, and how it scales** — `ExtractionJumps`:
+**(b) Every jump, every surface, and how it scales** — `manta/shape-derivative`'s `ExtractionJumps`:
 `Omega` scaled by `1 + j·1e-4`, `j = −10 … 10`, all 24 surfaces × 128 angles,
 the four quantities MaNTA reads. A jump at a step is its increment less the
 mean of its neighbours', less that quantity's median along the scan, counted
@@ -24525,22 +24612,62 @@ takes about five more uniform levels on TCV at `k = 2` (×700 elements) and two
 to three at `k = 3` (×20–60), with the straddle rate doubling each level and
 the worst crossing 10–60× the median.
 
-**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`
+**(c) The same mechanism without the session** — main's `ExtractionJumps`,
+`--run_test=<pair><n><k>` and `straddle<Pair><n><k>`: the linear Solov'ev-type
+source `F = −((1 − A)R² + A)` on the standard box (`ExtractionCrossing.hpp`),
+`A = 0.30 + j·5e-4`, `j = −10 … 10`, each state its own solve; 12 surfaces ×
+96 angles, `n × n` cells of two triangles. Double, `OMP_NUM_THREADS=1
+MKL_NUM_THREADS=1`. "Straddled" is the bisected 1.5e-8 central difference of
+M-365, relative to the derivative, over up to four crossings:
+
+| pair | `n`, `k` | elements | crossings per unit `A` | per-crossing jump, median | max | straddled error |
+|---|---|---|---|---|---|---|
+| `ψ*`, `q*` | 8, 2 | 128 | 500 | 4.56e-6 | 1.05e-5 | 5.9e2 – 9.6e3 |
+| | 16, 2 | 512 | 2.1e3 | 1.50e-6 | 8.29e-6 | 4.6e2 – 4.5e3 |
+| | 32, 2 | 2048 | 8.1e3 | 1.31e-7 | 4.75e-6 | |
+| | 8, 3 | 128 | 600 | 2.13e-7 | 4.09e-7 | |
+| | 16, 3 | 512 | 2.3e3 | 1.22e-8 | 2.41e-7 | 0.11 – 68 |
+| `ψ̃`, `q̃` | 8, 2 | 128 | 500 | 2.74e-9 | 8.76e-9 | 5.8e-5 – 7.2e-5 |
+| | 16, 2 | 512 | 2.1e3 | 1.73e-9 | 1.26e-8 | 3.7e-6 – 1.7e-4 |
+| | 32, 2 | 2048 | 8.1e3 | 3.94e-10 | 6.42e-9 | |
+| | 8, 3 | 128 | 600 | 2.79e-10 | 1.69e-9 | |
+| | 16, 3 | 512 | 2.3e3 | 3.64e-11 | 9.47e-10 | 1.2e-5 – 1.3e-4 |
+
+On `ψ*`, `q*` every jump above 1e-11 is a crossing or its echo but one: at
+`n = 8`, `k = 2`, a ray of surface 10 whose root reaches the mesh line
+`z = −0.3` ends on its best iterate after 30 iterations (route
+`BestIterate`, one stalled ray) — a root lying in a face jump. On `ψ̃`, `q̃` no
+ray route changes in any scan. **At this spacing `ψ̃`'s per-crossing estimate
+is the kink's reading, not a jump**, as in M-365 at 1e-4: it falls with `h`
+and `k`, and the bisected straddle, which separates the two, is 4–7 orders
+below the broken pair's. The straddled error on `ψ̃` sits above the
+`1e-14 |G|/(2δ|G′|)` noise column (not printed here; 2e-6 to 2.4e-5) by up to
+80×: each state is a cold solve whose rays stop at `1e-12 × max|ψ|`, and a
+1.7e-4 straddled error is a jump of under 1e-12 of the value
+(`ExtractionContinuity` reads 1.9e-13 across a crossing on this fixture).
+
+**Reproduce.** (a) and (b) on `manta/shape-derivative` at `aa5adcb`, where
+the session still extracted on `ψ*` and `q*`:
+`cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`
 for (a), its decision report printed under each fine scan;
 `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2 ./ExtractionJumps --run_test=<case>` for
 (b), cases `boxL1k2`, `boxL2k2`, `boxL3k2`, `boxL1k3`, `boxL2k3`, `tcvL1k2`,
 `tcvL2k2`, `tcvL1k3` (one to five minutes each; built, not registered).
 Logs: `runs/manta-shape-derivative/smooth1.log`, `runs/manta-shape-derivative/jumps/`.
+(c) on main: `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
+./ExtractionJumps --run_test=<case>`, cases `brokenN8k2` … `continuousN16k3`
+and `straddleBrokenN8k2` … `straddleContinuousN16k3` (seconds to two minutes
+each; built, not registered); logs `runs/continuous-extraction/jumps/`.
 
-### M-364
+### M-365
 
 **Candidate A, prototyped: the geometry extracted from continuous fields
 `ψ̃`, `q̃` built from `ψ*`, `ψ̂` and `q*` does not jump where a node crosses a
 face — a 1.5e-8 central difference straddling a crossing is off by the noise —
 and is as accurate as the shipped extraction.** `manta/shape-derivative`,
 double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a machine at load ~20,
-`ExtractionJumps` (`prototype*`, `reference*`, `accuracy`), M-363's eight
-cases. `Run::familyFrom()` extracts with the shipped options, located axis,
+`ExtractionJumps` at `aa5adcb` (`prototype*`, `reference*`, `accuracy`),
+M-364's eight cases. `Run::familyFrom()` extracts with the shipped options, located axis,
 level and band, on the instrument's fields.
 
 **The fields.** `ψ̃` ∈ H¹ of degree `k+2`, the moment interpolant: vertex
@@ -24590,10 +24717,10 @@ curvature, and the shipped extraction reads the same 1e-5 away from its
 jumps. So A's kink is below 1e-5 of `G′` wherever it is resolved, and a
 straddled 1.5e-8 difference cannot see it. The noise across warm starts is
 1.3e-14 to 5.5e-14 by A on every case but TCV's finest, 1.95e-13 there —
-below the 1e-12 SessionSmoothness asks; the shipped extraction's noise on
+below the 1e-12 `manta/shape-derivative`'s `SessionSmoothness` asks; the shipped extraction's noise on
 that mesh was not taken, so whether the solve or the extraction carries it is
 open. Along the 1e-4 scan
-the per-crossing estimate falls from M-363's 4.5e-7 (box, `k = 2`,
+the per-crossing estimate falls from M-364's 4.5e-7 (box, `k = 2`,
 768) to 1.4e-10 and from 1.3e-8 (TCV, `k = 2`) to below 1e-11 at 24 of 25
 crossings — what a kink reads at a 1e-4 step; the bisected straddle is the
 measurement that separates the two.
@@ -24624,22 +24751,22 @@ accuracy. Taking `ψ̃`'s edges from `ψ̂` or from `ψ*`'s mean trace makes no
 difference to `G` at these digits, although `ψ̂`'s `ψ̃` sits 1.2–2× further
 from `ψ*` — `ψ*` is not the truth either.
 
-**Reproduce.** From `runs/manta-shape-derivative/proto/`:
+**Reproduce.** On `manta/shape-derivative` at `aa5adcb`, from `runs/manta-shape-derivative/proto/`:
 `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2 <tree>/tests/ExtractionJumps --run_test=<case>`
 for `prototypeBoxL1k2` … `prototypeTcvL2k2`, `referenceBoxL3k3`,
 `referenceTcvL2k3` (each leaves `<key>-G.txt`; 10 minutes to 2 hours each at
 that load), then `--run_test=accuracy`.
 
-### M-365
+### M-366
 
 **The axis on the continuous fields — `q̃`'s root, `ψ̃` there — against the
 solve's located axis (`q_h`'s root, `ψ_h` there): measured, not adopted.**
 `manta/shape-derivative` at `9a7dc4f`, double, `OMP_NUM_THREADS=2
-MKL_NUM_THREADS=1`, `ExtractionJumps`' `axis*` cases, on M-364's
+MKL_NUM_THREADS=1`, `ExtractionJumps`' `axis*` cases, on M-365's
 prototype fields; Ω scanned over `±1e-3` and each crossing bisected and
-straddled at 1.5e-8 as M-364 does, with the family's axis and level taken
+straddled at 1.5e-8 as M-365 does, with the family's axis and level taken
 on `q̃`, `ψ̃`. "Solve's", the straddled error on the solve's axis at the same
-crossings, is M-364's column.
+crossings, is M-365's column.
 
 | case | `ψ_ax` moves, of the span | axis moves | `G` moves, worst | axis element, solve's / `q̃`'s | straddled error, `q̃`'s axis | solve's | noise |
 |---|---|---|---|---|---|---|---|
@@ -24651,7 +24778,7 @@ crossings, is M-364's column.
 **The labels move by the axis's own discretisation error, and `G` with them
 where it is most sensitive**: the innermost surface's `⟨|∇ρ|²⟩` changes by
 about `Δψ_ax/(Ψ_N span)`, 1.4e-5/0.05 ≈ 3e-4 on the coarse box at `k = 2` —
-the size of that mesh's own error (M-364) — and 4e-6 and 5e-8 on TCV.
+the size of that mesh's own error (M-365) — and 4e-6 and 5e-8 on TCV.
 **Smoothness gains nothing measurable**: no axis element changes along any
 scan on either axis, so neither has a jump to remove there, and the straddled
 error on `q̃`'s axis is at or a few times the noise — up to 8× on TCV at
@@ -24670,18 +24797,29 @@ face jump of `ψ_h`, were the state to carry it across; no scan does.
 `axisBoxL1k2`, `axisBoxL1k3`, `axisTcvL1k2`, `axisTcvL1k3`; logs
 `runs/manta-shape-derivative/axis/`.
 
-### M-366
+### M-367
 
 **The continuous extraction in production: what the field asserts, what it
 fixes, and every regression value it moved.** `manta/shape-derivative` at
-`e9ef960` and after, against the same tests built at `05465dc` (the merge
+`e9ef960` and after, and `continuous-extraction`, which carries it to main
+from `cde84f2` (`ExtractionContinuity` and M-364(c)), against the same tests built at `05465dc` (the merge
 before it, extracting on `ψ*` and `q*`), double unless said, `OMP_NUM_THREADS=2
 MKL_NUM_THREADS=1`.
 
-**The acceptance.** `SessionSmoothness` on the box: the noise across two warm
-starts 5.0e-14 of the value; across the bisected crossing (surface 1's node 15,
-element 426 → 428, within 7.6e-10 of `Omega`) `G` moves by **2.4e-14** beyond
-its smooth change, against **4.65e-7** on `ψ*` at the same crossing; 22 s.
+**The acceptance.** `ExtractionContinuity`, posed on the library alone:
+the source mix `A` of M-364(c) stepped from 0.30 by 1e-3 until a node of
+some surface changes element, the step bisected on that node to 1e-9, and
+`V′`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩` and `⟨|∇ψ|²⟩` on that surface compared across it
+less their smooth change; `n = 12`, `k = 2`, 17 s for both cases. Surface 2's
+node 20, element 208 → 207: on `ψ̃`, `q̃` the family moves **1.94e-13**
+(asserted below 1e-11); on `ψ*`, `q*`, its control, **3.04e-6** at the same
+node's crossing (asserted above 1e-10), so on the old extraction the
+acceptance fails by five orders.
+On `manta/shape-derivative`, `SessionSmoothness` asserts the same through the
+session on the box: the noise across two warm starts 5.0e-14 of the value;
+across the bisected crossing (surface 1's node 15, element 426 → 428, within
+7.6e-10 of `Omega`) `G` moves by **2.4e-14** beyond its smooth change, against
+**4.65e-7** on `ψ*` at the same crossing; 22 s.
 
 **`ContinuousFieldConvergence`** (new; 1–3 s):
 
@@ -24769,12 +24907,32 @@ on the Hermite curve, which only seeds and brackets the rays.
 `ContinuousFieldConvergence`, `FluxSurfaceConvergence`, `ConductorSubtraction`,
 `FluxGridConvergence`, `SurfaceAverageConvergence`, `SurfaceFitConvergence`,
 `SafetyFactorSolver`, `QDrivenCurvedBoundary` and `CriticalPointConvergence`
-pass. `RunSession`, `SessionSmoothness` and `SafetyFactorScale` fail in
-single, and fail the same assertions at `05465dc` in single: the session's
-warm resolve and cold solve are 9.8e-6 apart and two warm starts 6.4e-6 to
+pass, and so does `DriverAcceptance`'s q-driven pair
+(`theDriverSolvesForTheToroidalField`, `theQDrivenRunReportsTheSafetyFactorItReached`).
+**`ExtractionContinuity` fails in single, and the failure is single's floor,
+not a jump**: on `ψ̃`, `q̃` surface 0's node 0 — angle 0, on the midplane,
+which is the mesh line `z = 0` — changes element 136 → 161 at `A` = 0.30197,
+before any crossing double finds, and the family moves 2.6e-4 across it; the
+control reads 4.6e-6 and passes. `ExtractionJumps` in single at `n = 16`,
+`k = 2` shows why: between neighbouring states with no crossing the family
+moves 3e-5 to 7e-4 (`⟨|∇ρ|²⟩`, worst on the inner surfaces), on both pairs
+alike, the axis element changes 10 times along the scan and the node element
+changes 329 times against double's 21 — nodes and the axis riding the
+midplane's mesh line flip sides by round-off. A 1e-11 bound is a double
+contract, as `SessionSmoothness`'s is; 20ε would not reach it either.
+Not qualified in single (`runs/continuous-extraction/single-check.log`,
+`single-jumps.log`).
+`SafetyFactorScale` fails in single, and fails the same assertion at
+`05465dc` in single: its degree-4 held singular value against the free one;
+not qualified in single. On `manta/shape-derivative`, `RunSession` and
+`SessionSmoothness` fail in single at both commits as well: the session's warm
+resolve and cold solve are 9.8e-6 apart and two warm starts 6.4e-6 to
 1.5e-5, against the 1e-8 and 1e-12 of a double contract (MaNTA's is double,
-the plan's D5), and `SafetyFactorScale`'s degree-4 held singular value
-against the free one. Not qualified in single, here or on main.
+the plan's D5). Their repeatability bounds are `max( bound, 20ε )` with
+`ε = numeric_limits<mfem::real_t>::epsilon()` since `2686013`, unchanged in
+double and 2.4e-6 in single, and both still fail there: after the merge of
+`cde84f2` the gap reads 9.75e-6 (82ε; `ψ_ax` passes) and the warm-start
+noise 2.81e-5 (236ε).
 
 **Under valgrind's memcheck**, `examples/fixed-d-tcv.toml` at
 `RefinementLevels = 1` with `FluxSurfaces = true` (the continuous fields
@@ -24782,8 +24940,9 @@ built, threaded at two threads, and the family traced through the band):
 exit 0, as natively; 0 errors, 0 bytes definitely lost
 (`runs/manta-shape-derivative/memcheck/`).
 
-**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`,
-`./ContinuousFieldConvergence`; the base → production table from each test's
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./ExtractionContinuity`,
+`./ContinuousFieldConvergence` (and `./SessionSmoothness` on
+`manta/shape-derivative`); the base → production table from each test's
 output at `05465dc` and at this branch (`runs/manta-shape-derivative/regress/`);
 the target's re-measurement by `runs/manta-shape-derivative/qtarget/`
 (`qtarget.log`: each tree's `meq` on the example with `GGPrimeFile` the closed

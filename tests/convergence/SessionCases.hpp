@@ -3,7 +3,7 @@
 
 /*
  * THE SESSION'S SMOOTHNESS CASES, shared by SessionSmoothness (the assertion)
- * and ExtractionJumps (the instrument behind M-363), so that both pose the
+ * and SessionJumps (the instrument behind M-364), so that both pose the
  * same equilibria: rotating-normalised's box and fixed-d-tcv's MXH boundary
  * with the same RotatingSource, the D density as a table, and the Newton run
  * to the tolerance asked for.

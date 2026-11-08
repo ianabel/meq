@@ -188,6 +188,15 @@ set(MEQ_CONVERGENCE_TESTS
 	VaryingCentrifugalConvergence
 	CriticalPointConvergence
 	FluxSurfaceConvergence
+	# psi~ and q~, the continuous pair the flux-surface extraction roots and
+	# weights by (ContinuousField.hpp): the interpolant's reproduction of its
+	# degree, continuity and psihat's moments, threaded equal to serial, and
+	# psi*'s and q*'s orders kept against Solov'ev's closed form.
+	ContinuousFieldConvergence
+	# The extraction's acceptance: the family does not jump where a node
+	# crosses an element face, one crossing found and bisected on the box,
+	# with psi* and q* as the control that the instrument sees a jump (M-364).
+	ExtractionContinuity
 	FluxGridConvergence
 	SurfaceAverageConvergence
 	SurfaceFitConvergence
@@ -296,11 +305,6 @@ set(MEQ_CONVERGENCE_TESTS
 	# element face -- one crossing found and bisected on the box, about a
 	# minute -- and the session's noise across warm starts.
 	SessionSmoothness
-	# psi~ and q~, the continuous pair the flux-surface extraction roots and
-	# weights by (ContinuousField.hpp): the interpolant's reproduction of its
-	# degree, continuity and psihat's moments, threaded equal to serial, and
-	# psi*'s and q*'s orders kept against Solov'ev's closed form.
-	ContinuousFieldConvergence
 	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
 	# PlasmaCurrent, returning one equilibrium (M-357).
 	QDrivenScalePin
@@ -421,17 +425,19 @@ if(TARGET NewtonConvergence AND MFEM_USE_CUDA)
 		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
 endif()
 
-# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-363 -- what
-# makes the flux-surface geometry jump as a table moves, and how the jump scales
-# with the mesh. BUILT BUT NOT REGISTERED: it asserts nothing, and each case is a
-# measurement of minutes, run one at a time with --run_test=<case> and
-# MKL_NUM_THREADS=1. SessionSmoothness is the assertion it serves.
+# SessionJumps: ExtractionJumps' picture through the session -- what makes
+# the geometry MaNTA reads jump as a table moves, on the box and on TCV, and
+# how the jump scales with the mesh (MEASUREMENTS.md M-364, M-365, M-366,
+# taken under its former name, ExtractionJumps). BUILT BUT NOT REGISTERED: it
+# asserts nothing, and each case is a measurement of minutes, run one at a
+# time with --run_test=<case> and MKL_NUM_THREADS=1. SessionSmoothness is the
+# assertion it serves.
 list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
 if(TARGET meq_core AND NOT _solver_index EQUAL -1
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ExtractionJumps.cpp")
-	add_executable(ExtractionJumps "convergence/ExtractionJumps.cpp")
-	target_include_directories(ExtractionJumps PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(ExtractionJumps PRIVATE meq_core Boost::unit_test_framework)
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SessionJumps.cpp")
+	add_executable(SessionJumps "convergence/SessionJumps.cpp")
+	target_include_directories(SessionJumps PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(SessionJumps PRIVATE meq_core Boost::unit_test_framework)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -475,6 +481,20 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		        --no-assembly-timing --repeats 1)
 	set_tests_properties(cuDSSTraceSolver PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
+endif()
+
+# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-364 -- what
+# makes the flux-surface geometry jump as a source parameter moves, and how the
+# jump scales with the mesh. BUILT BUT NOT REGISTERED: it asserts nothing, and
+# each case is a measurement of minutes, run one at a time with
+# --run_test=<case> and MKL_NUM_THREADS=1. ExtractionContinuity is the
+# assertion it serves.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ExtractionJumps.cpp")
+	add_executable(ExtractionJumps "convergence/ExtractionJumps.cpp")
+	target_include_directories(ExtractionJumps PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(ExtractionJumps PRIVATE meq_core Boost::unit_test_framework)
 endif()
 
 # InversionScaling -- the same rules, for the solution-inversion chain.

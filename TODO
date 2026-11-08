@@ -428,26 +428,31 @@ Part (a) closed the same day.
 
 ================================================================================
 TCV's flux-surface error at k = 2 does not fall from level 1 to level 2
-Raised 2026-11-08, on manta/shape-derivative (MEASUREMENTS.md M-364).
+Raised 2026-11-08, on manta/shape-derivative (MEASUREMENTS.md M-365).
 Cause unknown.
 ================================================================================
 
-  WHAT IS ESTABLISHED. On fixed-d-tcv's MXH boundary with the rotating source
-  of SessionSmoothness, the family's V'_rho, < |grad rho|^2 >, < R^-2 > and
-  < |grad psi|^2/R^2 > on 24 surfaces, against the same quantities on level 2
-  at k = 3 (worst relative difference): 4.4e-6 at level 1, k = 2 (3993
-  elements) and 4.3e-6 at level 2, k = 2 (16406) -- a fourfold refinement
-  buying nothing. It is the same whichever extraction reads it: on psi* and q*
-  and on psi~ and q~ alike, so it is not the extraction's continuity. At
-  k = 3, level 1 is 2.8e-7. The box (rotating-normalised) at k = 2 converges
-  over the same refinement, 7.7e-5 to 2.6e-6.
+  WHAT IS ESTABLISHED. On fixed-d-tcv's MXH boundary with
+  rotating-normalised's RotatingSource (manta/shape-derivative's
+  SessionCases.hpp; main has no case on it), the family's V'_rho,
+  < |grad rho|^2 >, < R^-2 > and < |grad psi|^2/R^2 > on 24 surfaces, against
+  the same quantities on level 2 at k = 3 (worst relative difference): 4.4e-6
+  at level 1, k = 2 (3993 elements) and 4.3e-6 at level 2, k = 2 (16406) -- a
+  fourfold refinement buying nothing. It is the same whichever extraction
+  reads it: on psi* and q* and on psi~ and q~ alike, so it is not the
+  extraction's continuity. At k = 3, level 1 is 2.8e-7. The box
+  (rotating-normalised) at k = 2 converges over the same refinement, 7.7e-5
+  to 2.6e-6.
 
   WHAT IS NOT KNOWN. Which surface and quantity carries the 4e-6, and whether
   it is the band (the outer surfaces cross it on this curved boundary), the
   boundary's representation, the axis, or the reference itself (same mesh,
-  k = 3). The instrument is ExtractionJumps' straddle cases and the
-  <key>-G.txt files the prototype wrote (runs/manta-shape-derivative/proto/);
-  a per-surface breakdown is the first step.
+  k = 3). The instrument is manta/shape-derivative's SessionJumps (its
+  ExtractionJumps until the merge of main's), whose TCV cases re-solve
+  through the session; main's ExtractionJumps scans a source parameter on
+  the box only. The <key>-G.txt files the prototype wrote are in
+  runs/manta-shape-derivative/proto/; a per-surface breakdown is the first
+  step.
 
 ================================================================================
 The q-driven solve is inconsistent: g^2 is a fixed-degree global fit, so the delivered q misses the target by the fit's floor however fine the mesh

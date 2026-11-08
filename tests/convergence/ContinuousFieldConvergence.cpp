@@ -21,8 +21,8 @@
 
 /*
  * psi~ AND q~, THE CONTINUOUS PAIR THE FLUX-SURFACE EXTRACTION ROOTS AND
- * WEIGHTS BY (ContinuousField.hpp; MANTA-EQUILIBRIUM-PLAN.md section 4.5;
- * M-364). What the extraction's smoothness and accuracy rest on, asserted
+ * WEIGHTS BY (ContinuousField.hpp; CLAUDE_INVERSION.md, IN-0;
+ * M-365). What the extraction's smoothness and accuracy rest on, asserted
  * on the field itself:
  *
  *   1. the moment interpolant reproduces polynomials of its degree, on
@@ -125,7 +125,7 @@ namespace
  * polynomial: on triangles ( P_(p-3) cell moments ) and on quadrilaterals
  * ( Q_(p-2) ), at p = 3, 4, 5. Mutated -- a cell monomial in x where it
  * should be in y, or psi~'s interior edges from one side's psi* in place of
- * psihat -- the case and its neighbours fail (M-366).
+ * psihat -- the case and its neighbours fail (M-367).
  */
 BOOST_AUTO_TEST_CASE( theInterpolantReproducesItsDegree )
 {

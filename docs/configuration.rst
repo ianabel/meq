@@ -2298,6 +2298,17 @@ to move the iterate, or a line search that cannot decrease the residual — has
 reported as such. Loosening ``NewtonRelativeTolerance`` raises the floor with
 it: the outer loop cannot be asked for more than the solves it is made of.
 
+**The floor is a model, and MEQ checks it against the map itself.** Where the
+floor rather than the tolerance is what the loop is judged on, the first time
+the residual comes within ten floors MEQ evaluates that point again from two
+other starting fields and takes four standard deviations of the change as a
+floor too, if it is the larger; and a loop that stalls above its floor is
+measured the same way before it is called a failure. The status line then says
+``(four standard deviations of the map's noise, measured)``. A stall above the
+measured noise is still not converged: a real step remained and the line search
+could not take it. In double the tolerance is far above the noise and none of
+this runs.
+
 **The run exits 2 and writes nothing**, whatever the reason the loop stopped —
 a stalled line search, a rank-deficient Jacobian, or the iteration cap:
 
