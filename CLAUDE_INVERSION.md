@@ -533,8 +533,8 @@ zero. Both go through `Run::Impl::extractFamily()`. `QDrivenCurvedBoundary`
 is the round trip on a Miller boundary, the target measured from a closed-form
 `g` on the same mesh, under `R0B0`: 5 KINSOL iterations, 26 equilibria, `g²` recovered to
 eight digits (M-357). Posed on `fixed-d-tcv` with
-a measured `q` it converges under every pin, in 3 or 4 KINSOL iterations and
-16 to 29 equilibria with none refused, to one `g²` (M-357); unpinned it
+a measured `q` it converges under every pin, in 5 KINSOL iterations and
+26 to 36 equilibria with none refused, to one `g²` (M-357); unpinned it
 failed on the scale (M-353).
 
 **WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a

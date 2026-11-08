@@ -23978,14 +23978,22 @@ has to be one choice under every pin.**
 boundary at `RefinementLevels = 1` (3993 elements), the target the `q` of the
 shipped `gg′` run on the same mesh, `g_edge = 1.400002`, degree 2:
 
-| pin, opening `g` | KINSOL its / equilibria | refused | conditioning | wall |
+| pin, opening `g` | KINSOL its / equilibria | refused | conditioning | final norm / threshold |
 |---|---|---|---|---|
-| `R0B0 = 1.400002` | 3 / 16 | 0 | 0.461 | 1 m 48 s |
-| `ToroidalFlux = 0.5360939985`, 1.4 | 4 / 29 | 0 | 3.3e-3 | 2 m 35 s |
-| `ToroidalFlux`, 1.2 | 4 / 29 | 0 | 2.9e-3 | 2 m 31 s |
-| `PlasmaCurrent = 1.168128770e5`, 1.4 | 4 / 29 | 0 | 6.3e-4 | 2 m 51 s |
-| `PlasmaCurrent`, 1.2 | 4 / 29 | 0 | 8.0e-4 | 2 m 22 s |
-| `R0B0`, degree 3 | 3 / 22 | 0 | 0.043 | 1 m 52 s |
+| `R0B0 = 1.400002` | 5 / 26 | 0 | 0.461 | 1.4e-11 / 1e-9 |
+| `ToroidalFlux = 0.5360939985`, 1.4 | 5 / 36 | 0 | 3.3e-3 | 2.5e-11 / 1e-9 |
+| `ToroidalFlux`, 1.2 | 5 / 36 | 0 | 2.9e-3 | |
+| `PlasmaCurrent = 1.168128770e5`, 1.4 | 5 / 36 | 0 | 5.9e-4 | 8.8e-10 / 1e-9 |
+| `PlasmaCurrent`, 1.2 | 5 / 36 | 0 | 7.6e-4 | |
+| `R0B0`, degree 3 | 5 / 36 | 0 | 0.043 | 2.8e-12 / 1e-9 |
+
+Differenced in the fit's orthonormal coordinates (M-359), wall 1 m 6 s to
+1 m 29 s each on a loaded machine. The loop's floor at this
+`NewtonRelativeTolerance = 1e-10` is now under the tolerance, so the threshold
+is the tolerance's 1e-9: under the monomial floor it was 2.1e-8 (1.5e-7 at
+degree 3), and the same runs stopped one iteration earlier — 3 / 16, 4 / 29
+and 3 / 22 — at 3.0e-9, 5.4e-11 to 6.1e-11 and 1.3e-8, with the same `g²` to
+every printed digit.
 
 Every degree-2 run returns `g² = 1.960006, −2.780245e-3, 1.396952e-2` and reads
 `R0B0 = 1.400002`, `Φ = 0.536094 Wb`, `I_p = 1.168129e5 A`, where unpinned the
@@ -24146,5 +24154,16 @@ Single now passes, the ratio at degree 4 53× against 30×.
 3.2e-11 and 1.1e-15 (1.1e-14, 3.3e-11, 1.7e-15 before), the same iteration and
 equilibrium counts; `QDrivenCurvedBoundary` recovers `g²` to every printed digit.
 
-**Reproduce.** `runs/q-solve-scale/single-diag/` (`*.basis-single.log`), and
-`MKL_NUM_THREADS=1 ./QDrivenScalePin` and `./SafetyFactorScale` in both trees.
+**(e) What else moved in double.** `fixed-d-tcv` under every pin takes one
+more KINSOL iteration — 5 / 26 under `R0B0`, 5 / 36 under the others and at
+degree 3, against 3 / 16, 4 / 29 and 3 / 22 — because its floor, measured in
+`y`, now falls under the 1e-9 tolerance, which is then the threshold in place
+of the monomial floor's 2.1e-8; the `g²` and the three scalars are unchanged
+to every printed digit (M-357(c), updated in place). `examples/q-driven.toml`
+under each pin, `QDrivenCurvedBoundary` and the M-357(a) counts are unchanged
+to the printed digit. `DriverAcceptance` passes.
+
+**Reproduce.** `runs/q-solve-scale/single-diag/` (`*.basis-single.log`),
+`runs/q-solve-scale/tcv/` (the refreshed logs; the previous ones in `prev/`),
+`runs/q-solve-scale/example/`, and `MKL_NUM_THREADS=1 ./QDrivenScalePin` and
+`./SafetyFactorScale` in both trees.
