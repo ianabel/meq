@@ -61,19 +61,18 @@
 namespace
 {
 	/*
-	 * `int_0^1 q dPsi` OF A q-DRIVEN RUN'S TARGET, as MEQ evaluates it --
-	 * clamped beyond its table's ends, as the loop's map asks it -- by
-	 * composite Simpson. The factor between the toroidal flux inside the
-	 * boundary and the span of psi: Phi_edge = 2 pi ( psi_ax - psi_bnd ) times
-	 * this.
+	 * THE SIGN OF A q-DRIVEN RUN'S TARGET, which is g's: the source carries
+	 * g^2 and cannot (SafetyFactor.hpp, section 3), so a reported toroidal flux
+	 * takes it from q -- the sign of q's integral over Psi in [ 0, 1 ], by the
+	 * midpoint rule, the target as MEQ evaluates it.
 	 */
-	double targetIntegral( meq::Profile const &target )
+	double targetSign( meq::Profile const &target )
 	{
-		int const intervals = 4096;
-		double sum = target( 0.0 ) + target( 1.0 );
-		for ( int i = 1; i < intervals; ++i )
-			sum += ( i % 2 == 1 ? 4.0 : 2.0 )*target( static_cast<double>( i )/intervals );
-		return sum/( 3.0*intervals );
+		int const intervals = 64;
+		double sum = 0.0;
+		for ( int i = 0; i < intervals; ++i )
+			sum += target( ( i + 0.5 )/intervals );
+		return sum < 0.0 ? -1.0 : 1.0;
 	}
 
 	/*
@@ -807,6 +806,16 @@ struct meq::Run::Impl
 		double edgeField, toroidalFlux, plasmaCurrent;
 	};
 	ScaleOfAnswer scaleOfAnswer() const;
+
+	/*
+	 * THE DELIVERED TOROIDAL FLUX of the state the solver holds, with g^2 the
+	 * coefficients @a c: Phi = int_plasma g( Psi )/R dA, the plasma being
+	 * where Psi > 0, over Omega_h (GradShafranovSolver::integrateOverDomain).
+	 * g takes the target q's sign, which g^2 cannot carry (SafetyFactor.hpp,
+	 * section 3). What [source] ToroidalFlux pins and the .nc reports: the
+	 * equilibrium's own flux, not the target's (MEASUREMENTS.md M-362).
+	 */
+	double deliveredToroidalFlux( std::vector<double> const &c ) const;
 	meq::FluxSurfaceFamily writeFluxSurfaces( std::string const &file );
 	/// The solved state's family at @a options, traced as the write phase
 	/// traces it: on the curved path through the band, by the transfer
@@ -1025,9 +1034,32 @@ meq::Run::Impl::ScaleOfAnswer meq::Run::Impl::scaleOfAnswer() const
 {
 	double const mu0 = config->getSource().permeability();
 	return { std::sqrt( toroidalCoefficients.front() ),
-	         2.0*M_PI*( solver->psiAxis() - solver->psiBoundary() )
-	             *targetIntegral( *safetyFactorTarget ),
+	         deliveredToroidalFlux( toroidalCoefficients ),
 	         mu0 != 0.0 ? solver->deliveredPlasmaCurrent()/mu0 : 0.0 };
+}
+
+double meq::Run::Impl::deliveredToroidalFlux( std::vector<double> const &c ) const
+{
+	double const axis = solver->psiAxis();
+	double const boundary = solver->psiBoundary();
+	double const span = axis - boundary;
+	double const sign = targetSign( *safetyFactorTarget );
+	return sign*solver->integrateOverDomain(
+		[ & ]( double radius, double, double psi )
+		{
+			if ( !( radius > 0.0 ) || span == 0.0 )
+				return 0.0;
+			double const normalised = ( psi - boundary )/span;
+			if ( !( normalised > 0.0 ) )
+				return 0.0;
+			double value = 0.0, power = 1.0;
+			for ( double coefficient : c )
+			{
+				value += coefficient*power;
+				power *= normalised;
+			}
+			return value > 0.0 ? std::sqrt( value )/radius : 0.0;
+		} );
 }
 
 std::vector<meq::Knot> meq::Run::Impl::answerCrossing()
@@ -4011,9 +4043,9 @@ int meq::Run::Impl::solve()
 			 * requires exactly one of the three, and each selects the member:
 			 *
 			 *   R0B0           c_0 = R0B0^2 held, out of the unknowns;
-			 *   ToroidalFlux   psi_ax - psi_bnd = Phi/( 2 pi int_0^1 q dPsi ),
-			 *                  a row, read off the bordered Newton's own psi_ax
-			 *                  and psi_bnd (not a held psi_ax: M-355);
+			 *   ToroidalFlux   the DELIVERED Phi = int_plasma g/R dA, a row,
+			 *                  read off the solved state with the iterate's own
+			 *                  g^2 (deliveredToroidalFlux(), M-362);
 			 *   PlasmaCurrent  mu0 I_p, a row, read off the solved state, with
 			 *                  the profile scale left at one (makeSolver()).
 			 *
@@ -4025,7 +4057,6 @@ int meq::Run::Impl::solve()
 			 */
 			meq::MHDParameters const &mhd = config->getSource().getMHD();
 			double const mu0 = config->getSource().permeability();
-			double const qIntegral = targetIntegral( targetProfile );
 
 			meq::PinnedToroidalFieldMap::Pin pin;
 			pin.weight = std::abs( toroidalCoefficients.front() );
@@ -4036,17 +4067,21 @@ int meq::Run::Impl::solve()
 			}
 			else if ( mhd.toroidalFlux != 0.0 )
 			{
-				pin.kind = meq::ScalePin::FluxSpan;
-				pin.value = mhd.toroidalFlux/( 2.0*M_PI*qIntegral );
-				// The bordered Newton's own psi_ax and psi_bnd: the span the
-				// source was normalised by.
-				pin.measured = [ & ] { return solver->psiAxis() - solver->psiBoundary(); };
+				pin.kind = meq::ScalePin::ToroidalFlux;
+				pin.value = mhd.toroidalFlux;
+				pin.measured = [ this ]( std::vector<double> const &c )
+				{
+					return deliveredToroidalFlux( c );
+				};
 			}
 			else
 			{
 				pin.kind = meq::ScalePin::PlasmaCurrent;
 				pin.value = mu0*config->getSource().plasmaCurrent();
-				pin.measured = [ & ] { return solver->deliveredPlasmaCurrent(); };
+				pin.measured = [ & ]( std::vector<double> const & )
+				{
+					return solver->deliveredPlasmaCurrent();
+				};
 			}
 			meq::PinnedToroidalFieldMap pinned( map, mapOptions.degree, pin );
 
@@ -4150,7 +4185,7 @@ int meq::Run::Impl::solve()
 			             "PlasmaCurrent = %.9e A; the run gave %s\n",
 			             scale.edgeField, scale.toroidalFlux, scale.plasmaCurrent,
 			             pin.kind == meq::ScalePin::EdgeField ? "R0B0"
-			             : pin.kind == meq::ScalePin::FluxSpan ? "ToroidalFlux"
+			             : pin.kind == meq::ScalePin::ToroidalFlux ? "ToroidalFlux"
 			             : "PlasmaCurrent" );
 		};
 

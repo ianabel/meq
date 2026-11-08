@@ -290,6 +290,10 @@ set(MEQ_CONVERGENCE_TESTS
 	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
 	# PlasmaCurrent, returning one equilibrium (M-357).
 	QDrivenScalePin
+	# RED, deliberately: the delivered q against a target no fixed-degree g^2
+	# represents, which does not converge with the mesh (TODO, "The q-driven
+	# solve is inconsistent", M-361).
+	QDrivenConsistency
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves

@@ -427,8 +427,34 @@ Part (a) closed the same day.
   run has no g and its file correctly says so by having no variable.
 
 ================================================================================
+The q-driven solve is inconsistent: g^2 is a fixed-degree global fit, so the delivered q misses the target by the fit's floor however fine the mesh
+Raised 2026-11-08 (MEASUREMENTS.md M-361). QDrivenConsistency is red for it.
+================================================================================
+
+  WHAT IS MEASURED. The loop carries g^2 as a polynomial of degree d fitted
+  over the surfaces. On a target whose g^2 is not such a polynomial -- the q
+  of a forward solve with g^2 = 2.2^2 + ( e^( 2 Psi ) - 1 )/( e^2 - 1 ) -- the
+  delivered q misses the target by 1.18e-1 at degree 2 and 1.2e-2 at degree
+  3, the same on three meshes, against a reference good to 1e-7. The miss
+  moves with d and not with h: the solve does not converge to the problem
+  posed as the discretisation refines. At B = 1.5, kappa = 3 there is no
+  degree-2 fixed point at all.
+
+  THE FIX. Replace the fit with a g^2 that refines with the discretisation,
+  matched to q at every knot of the family, and solve for it by Newton on the
+  linearised solve's EXACT tangent rather than a differenced Jacobian of a
+  handful of coefficients. With q matched pointwise, the scale pin makes the
+  system square on its own, so no q condition gives way at all and the
+  y_d choice (meq::PinnedToroidalFieldMap) goes.
+
+  IT DEPENDS ON TWO PIECES NOT YET ON main: the continuous extraction
+  (manta/shape-derivative), so that q's derivative with respect to the field
+  is smooth and exact rather than piecewise across DG faces (M-308b), and the
+  linearised solve (manta/linearised-solve), which supplies the tangent.
+
+================================================================================
 The q-driven solve's scale pins: what is not measured
-Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-359).
+Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-359, M-362).
 ================================================================================
 
   A q-driven run names exactly one of [source] R0B0, ToroidalFlux and

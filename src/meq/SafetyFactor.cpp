@@ -255,7 +255,7 @@ namespace meq
 		{
 			try
 			{
-				measured = pin.measured();
+				measured = pin.measured( c );
 			}
 			catch ( ... )
 			{

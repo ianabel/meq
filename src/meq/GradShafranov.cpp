@@ -8006,6 +8006,42 @@ namespace
 		return assemblePlasmaCurrent( solution );
 	}
 
+	double GradShafranovSolver::integrateOverDomain(
+		std::function<double( double radius, double z, double psi )> const &integrand ) const
+	{
+		mfem::FiniteElementSpace const &space = *potentialGf.FESpace();
+		mfem::Mesh &mesh = *space.GetMesh();
+		countedHostRead( potentialGf, __LINE__ );
+
+		double total = 0.0;
+		mfem::IsoparametricTransformation map;
+		mfem::DofTransformation doftrans;
+		mfem::Array<int> dofs;
+		mfem::Vector shape, values;
+		mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &element = *space.GetFE( e );
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+				element.GetGeomType(), 2*element.GetOrder() + 4 );
+			mesh.GetElementTransformation( e, &map );
+			space.GetElementDofs( e, dofs, doftrans );
+			potentialGf.GetSubVector( dofs, values );
+			shape.SetSize( element.GetDof() );
+			for ( int q = 0; q < rule.GetNPoints(); ++q )
+			{
+				mfem::IntegrationPoint const &point = rule.IntPoint( q );
+				map.SetIntPoint( &point );
+				element.CalcShape( point, shape );
+				mfem::Vector here( coordinates, mesh.SpaceDimension() );
+				map.Transform( point, here );
+				total += point.weight*map.Weight()
+				         *integrand( here( 0 ), here( 1 ), shape*values );
+			}
+		}
+		return total;
+	}
+
 	double GradShafranovSolver::plasmaCurrentSensitivity() const
 	{
 		return currentSensitivityValue;

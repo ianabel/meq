@@ -145,8 +145,30 @@ namespace
 		Eigen::VectorXd fitted;
 		double located = 0.0;
 		double current = 0.0;
+		double flux = 0.0;
 		double scale = 1.0;
 	};
+
+	/// The delivered toroidal flux, int_plasma g/R dA with g^2 = sum c_j Psi^j,
+	/// as the driver's ToroidalFlux pin reads it (M-362).
+	double deliveredFlux( GradShafranovSolver const &solver, Eigen::VectorXd const &c )
+	{
+		double const boundary = solver.psiBoundary();
+		double const span = solver.psiAxis() - boundary;
+		return solver.integrateOverDomain( [ & ]( double radius, double, double psi )
+		{
+			double const normalised = ( psi - boundary )/span;
+			if ( !( radius > 0.0 ) || !( normalised > 0.0 ) )
+				return 0.0;
+			double value = 0.0, power = 1.0;
+			for ( Eigen::Index j = 0; j < c.size(); ++j )
+			{
+				value += c( j )*power;
+				power *= normalised;
+			}
+			return value > 0.0 ? std::sqrt( value )/radius : 0.0;
+		} );
+	}
 
 	struct Fixture
 	{
@@ -155,6 +177,7 @@ namespace
 		std::vector<double> label, targetQ;
 		double referenceAxis = 0.0;
 		double referenceCurrent = 0.0;
+		double referenceFlux = 0.0;
 		std::unique_ptr<Solved> base;
 		int solves = 0;
 
@@ -170,6 +193,11 @@ namespace
 			BOOST_TEST_REQUIRE( base->converged );
 			referenceAxis = base->psiAxis;
 			referenceCurrent = base->current;
+			{
+				Eigen::VectorXd reference( 3 );
+				reference << g0*g0, 2.0*g0*g1, g1*g1;
+				referenceFlux = deliveredFlux( *base->solver, reference );
+			}
 			meq::FluxFamilyOptions options = familyOptions();
 			double const axis = referenceAxis;
 			options.toroidalField = [ axis ]( double psi ) { return g0 + g1*psi/axis; };
@@ -237,6 +265,7 @@ namespace
 				fitted.data(), static_cast<Eigen::Index>( fitted.size() ) );
 			out.located = family.psiAxis - family.psiBoundary;
 			out.current = attempt->current;
+			out.flux = deliveredFlux( *attempt->solver, c );
 			out.scale = attempt->scale;
 			out.ok = true;
 			if ( keep )
@@ -261,7 +290,7 @@ namespace
 	struct Jacobian
 	{
 		Eigen::MatrixXd fit;
-		Eigen::RowVectorXd located, current;
+		Eigen::RowVectorXd located, current, flux;
 	};
 
 	Jacobian differentiate( Fixture &fixture, Eigen::VectorXd const &c, Inner inner,
@@ -272,6 +301,7 @@ namespace
 		out.fit.resize( n, n );
 		out.located.resize( n );
 		out.current.resize( n );
+		out.flux.resize( n );
 		for ( int j = 0; j < n; ++j )
 		{
 			Eigen::VectorXd plus = c, minus = c;
@@ -284,6 +314,7 @@ namespace
 			out.fit( j, j ) -= 1.0;
 			out.located( j ) = ( up.located - down.located )/( 2.0*step );
 			out.current( j ) = ( up.current - down.current )/( 2.0*step );
+			out.flux( j ) = ( up.flux - down.flux )/( 2.0*step );
 		}
 		return out;
 	}
@@ -317,8 +348,8 @@ BOOST_AUTO_TEST_CASE( whichQConditionGivesWayToEachPin )
 	std::printf( "\n  M-355: smallest singular value of each pinned square system "
 	             "at the reference (box n = 24, k = 2), weight %.0f on the pin row\n",
 	             rowWeight );
-	std::printf( "    psi_ax* %.9e, mu0 I_p* %.9e\n", fixture.referenceAxis,
-	             fixture.referenceCurrent );
+	std::printf( "    psi_ax* %.9e, mu0 I_p* %.9e, Phi* %.9e\n", fixture.referenceAxis,
+	             fixture.referenceCurrent, fixture.referenceFlux );
 	for ( int degree : { 2, 4 } )
 	{
 		Eigen::VectorXd const c = answer( degree );
@@ -330,8 +361,9 @@ BOOST_AUTO_TEST_CASE( whichQConditionGivesWayToEachPin )
 		Sigma const plain = sigmaOf( r*free.fit*rInverse );
 		std::printf( "    degree %d: free (no pin) sigma_min %.3e, sigma_max %.3e\n", degree,
 		             plain.smallest, plain.largest );
-		std::printf( "      %-8s %22s %22s %22s %22s\n", "gives way", "R0B0 (c0 held)",
-		             "Phi_edge, psi_ax free", "Phi_edge, psi_ax held", "I_p, psi_ax free" );
+		std::printf( "      %-8s %22s %22s %22s %22s %22s\n", "gives way", "R0B0 (c0 held)",
+		             "Phi_edge, psi_ax free", "Phi_edge, psi_ax held", "I_p, psi_ax free",
+		             "Phi delivered" );
 
 		Eigen::MatrixXd const columnsFree = r.bottomRightCorner( degree, degree ).inverse();
 		for ( int k = 0; k <= degree + 1; ++k )
@@ -345,29 +377,35 @@ BOOST_AUTO_TEST_CASE( whichQConditionGivesWayToEachPin )
 
 			Eigen::MatrixXd edge = keep*( r*free.fit ).rightCols( degree )*columnsFree;
 			Eigen::MatrixXd flux( degree + 1, degree + 1 ), fluxHeld( degree + 1, degree + 1 ),
-				current( degree + 1, degree + 1 );
+				current( degree + 1, degree + 1 ), delivered( degree + 1, degree + 1 );
 			flux.topRows( degree ) = keep*r*free.fit;
 			flux.row( degree ) = rowWeight*free.located/fixture.referenceAxis;
 			fluxHeld.topRows( degree ) = keep*r*held.fit;
 			fluxHeld.row( degree ) = rowWeight*held.located/fixture.referenceAxis;
 			current.topRows( degree ) = keep*r*free.fit;
 			current.row( degree ) = rowWeight*free.current/fixture.referenceCurrent;
+			delivered.topRows( degree ) = keep*r*free.fit;
+			delivered.row( degree ) = rowWeight*free.flux/fixture.referenceFlux;
 			Sigma const a = sigmaOf( edge );
 			Sigma const b = sigmaOf( flux*rInverse );
 			Sigma const h = sigmaOf( fluxHeld*rInverse );
 			Sigma const i = sigmaOf( current*rInverse );
+			Sigma const f = sigmaOf( delivered*rInverse );
 			char name[ 16 ];
 			if ( k <= degree )
 				std::snprintf( name, sizeof name, "y_%d", k );
 			else
 				std::snprintf( name, sizeof name, "axis" );
-			std::printf( "      %-8s %10.3e/%10.3e %10.3e/%10.3e %10.3e/%10.3e %10.3e/%10.3e\n",
+			std::printf( "      %-8s %10.3e/%10.3e %10.3e/%10.3e %10.3e/%10.3e %10.3e/%10.3e %10.3e/%10.3e\n",
 			             name, a.smallest, a.largest, b.smallest, b.largest, h.smallest,
-			             h.largest, i.smallest, i.largest );
+			             h.largest, i.smallest, i.largest, f.smallest, f.largest );
 		}
 		std::printf( "      d ln psi_ax/dc = " );
 		for ( Eigen::Index j = 0; j <= degree; ++j )
 			std::printf( " %10.3e", free.located( j )/fixture.referenceAxis );
+		std::printf( "\n      d ln Phi/dc    = " );
+		for ( Eigen::Index j = 0; j <= degree; ++j )
+			std::printf( " %10.3e", free.flux( j )/fixture.referenceFlux );
 		std::printf( "\n      d ln I_p/dc    = " );
 		for ( Eigen::Index j = 0; j <= degree; ++j )
 			std::printf( " %10.3e", free.current( j )/fixture.referenceCurrent );

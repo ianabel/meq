@@ -452,7 +452,8 @@ under a Solov'ev source is an unknown key, not an ignored one.
    * - ``ToroidalFlux``
      - —
      - :math:`\Phi_\mathrm{edge}`, the toroidal flux inside the boundary, in
-       Wb — VMEC's ``PHIEDGE``. One of the three scale pins of
+       Wb — VMEC's ``PHIEDGE`` — held as the solved equilibrium's own
+       :math:`\int g/R\,\mathrm{d}A`. One of the three scale pins of
        ``SafetyFactorFile``, and refused without it.
    * - ``ToroidalFieldGuess``
      - —
@@ -2227,10 +2228,12 @@ the member:
        opens at this constant :math:`g`, and :math:`g^2`'s constant term is
        held at its square.
    * - ``ToroidalFlux``
-     - :math:`\Phi_\mathrm{edge} = 2\pi(\psi_\mathrm{ax} - \psi_\mathrm{bnd})
-       \int_0^1 q\,\mathrm{d}\Psi`, Wb, with :math:`q` the target as MEQ
-       evaluates it (held at its end values beyond the table). With :math:`q`
-       given it holds the span of :math:`\psi`, in the unit a user has.
+     - :math:`\Phi_\mathrm{edge}`, Wb: the **delivered** toroidal flux,
+       :math:`\int_\mathrm{plasma} g(\psi)/R\,\mathrm{d}A` over the solved
+       equilibrium with its own :math:`g`, signed as the target :math:`q`. On
+       a curved boundary the integral runs over the mesh, so the thin band
+       between the mesh and the boundary is not counted, as it is not for
+       :math:`I_p`.
    * - ``PlasmaCurrent``
      - :math:`I_p`, A. The profile scale stays one, so :math:`p` is the
        table's.
@@ -2250,13 +2253,26 @@ Where the target's :math:`g^2` is not a polynomial of the degree asked for, the
 choice of condition moves the answer by the fit's misfit — which is one more
 reason the degree is part of the model.
 
+.. warning::
+
+   **This is interim, and the q-driven solve is not yet consistent.**
+   :math:`g^2` is a polynomial of fixed degree fitted over the surfaces, so a
+   target whose :math:`g^2` is not one is met only to the fit's floor, and that
+   floor does not fall as the mesh refines — on a smooth non-polynomial target
+   it is about 12% in :math:`q` at degree 2 and 1.2% at degree 3, the same at
+   every mesh tried. The representation that replaces it refines with the
+   discretisation and matches :math:`q` at every knot, so that the pin alone
+   makes the system square and no condition on :math:`q` gives way. Until
+   then, check the ``safety_factor`` column of the surfaces file against your
+   target, and raise ``SafetyFactorDegree`` while the miss falls with it.
+
 Every q-driven ``<stem>.nc`` reports all three of its answer's own scalars, as
 ``edge_toroidal_field``, ``toroidal_flux`` and ``plasma_current``, beside
 ``scale_pin``, the key the run was given, and the loop's cost,
 ``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``; the run prints
 them as ``its scale:``. The numbers behind these choices are in
-``MEASUREMENTS.md`` (M-355 to M-357) — measure them on your own
-case.
+``MEASUREMENTS.md`` (M-355 to M-357, M-361 and M-362) — measure them on your
+own case.
 
 When the loop does not converge
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

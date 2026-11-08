@@ -500,10 +500,10 @@ namespace meq
 		// absent. Read only beside SafetyFactorFile.
 		double edgeToroidalField = 0.0;
 		// ToroidalFlux: the toroidal flux inside the boundary, Phi_edge [Wb],
-		// signed as psi_ax - psi_bnd times q. With q( Psi_N ) given it is
-		// 2 pi ( psi_ax - psi_bnd ) int_0^1 q dPsi_N, so it holds psi_ax's span
-		// in the unit a user has -- VMEC's PHIEDGE. Zero when absent. Read
-		// only beside SafetyFactorFile.
+		// signed as q is -- VMEC's PHIEDGE. The DELIVERED flux, int g/R dA
+		// over the solved equilibrium's plasma with its own g, is what is
+		// held to it (MEASUREMENTS.md M-362). Zero when absent. Read only
+		// beside SafetyFactorFile.
 		double toroidalFlux = 0.0;
 
 		// GGPrimeFile: path to the tabulated g dg/dpsi

@@ -461,10 +461,23 @@ family: held 10% along it, the least-squares residual falls with the degree
 and not with the mesh (`SafetyFactorScale`, → **[M-353](MEASUREMENTS.md#m-353)**).
 That is ill-posed, and on a measured `q` it does not converge. So `[source]`
 takes **exactly one** of `R0B0` (`g` on the boundary, `c₀ = R0B0²` held and out
-of the unknowns), `ToroidalFlux` (`ψ_ax − ψ_bnd`, a row) and `PlasmaCurrent`
+of the unknowns), `ToroidalFlux` (the delivered `∫g/R dA`, a row) and `PlasmaCurrent`
 (`μ₀ I_p`, a row), and refuses none or two, naming the keys
 (`meq::PinnedToroidalFieldMap`). `ToroidalFieldGuess` and `PsiAxis` stay
 starting values; beside `R0B0` the guess is refused, the loop opening at `R0B0`.
+
+**THE DEGREE-`d` FIT MAKES THE q-DRIVEN SOLVE INCONSISTENT, AND THAT IS OPEN.**
+A target whose `g²` is not a polynomial of the degree is met only to the fit's
+floor, and the floor does not fall with the mesh: 11.8% in `q` at degree 2 and
+1.2% at degree 3, flat over three levels of `h`, against a reference good to
+1e-7 (→ **[M-361](MEASUREMENTS.md#m-361)**). `QDrivenConsistency` is red for
+it. What replaces the fit is a `g²` that refines with the discretisation,
+matched to `q` at every knot and solved by Newton on the linearised solve's
+exact tangent; the pin then makes the system square with no `q` condition
+giving way. It waits on the continuous extraction (`manta/shape-derivative`)
+and the linearised solve (`manta/linearised-solve`) — `TODO`, *The q-driven
+solve is inconsistent*. **Everything below about which condition gives way is
+interim.**
 
 **ONE q CONDITION GIVES WAY TO KEEP THE SYSTEM SQUARE, AND IT IS THE SAME ONE
 UNDER EVERY PIN.** In the fit's orthonormal coordinates `y = Rc` it is the
@@ -505,13 +518,16 @@ along `R⁻¹` (`OuterNewtonOptions::differenceBasis`) against
 (→ **[M-359](MEASUREMENTS.md#m-359)**). `SafetyFactorScale` differences the
 same way, which its free `σ_min` needs in single.
 
-**THE FLUX PIN IS A ROW BESIDE THE BORDERED NEWTON, NOT A HELD `ψ_ax`.**
-Holding `ψ_ax` in a plain inner solve, with the located axis as the outer row,
-is no better conditioned (0.594 against 0.578 at degree 2) and is the outer
-closure `CLAUDE_DECLINED.md` records falsified (*Fixing `ψ_ax`, or closing it
-outside the solver*). The row reads the bordered Newton's own
-`ψ_ax − ψ_bnd`; `ToroidalFlux` divides by `2π∫₀¹q dΨ` of the target as MEQ
-evaluates it, clamped beyond the table.
+**THE FLUX PIN HOLDS THE DELIVERED FLUX, AS A ROW BESIDE THE BORDERED NEWTON.**
+`ToroidalFlux` is the equilibrium's own `∫_plasma g/R dA`, read off the solved
+state with the iterate's `g²` (`GradShafranovSolver::integrateOverDomain()`),
+not `2π(ψ_ax − ψ_bnd)∫₀¹q dΨ` of the target: the two agree only in the
+continuum, and on `fixed-d-tcv` they differ by 3.5% (→ **[M-362](MEASUREMENTS.md#m-362)**).
+Reading `g` puts `c₀` into the row, and it is better conditioned than the
+span row was, `σ_min` 0.755 against 0.578. Holding `ψ_ax` in a plain inner
+solve instead is no better conditioned than the span row (0.594 against
+0.578) and is the outer closure `CLAUDE_DECLINED.md` records falsified
+(*Fixing `ψ_ax`, or closing it outside the solver*).
 
 **THE CURRENT PIN IS A ROW TOO, AND THE PROFILE SCALE STAYS ONE.**
 `PlasmaCurrent`'s border elsewhere multiplies `p′` and `gg′` together: inside

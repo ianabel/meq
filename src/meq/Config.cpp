@@ -597,9 +597,10 @@ namespace meq
 						"would make q reportable, which MEQ does not yet do (TODO, \"Report q( Psi ) "
 						"in the flux-surface output\", part (b)); remove it" );
 				if ( hasFlux )
-					source.fail( "ToroidalFlux", "is read only beside SafetyFactorFile: it is "
-						"2 pi ( psi_ax - psi_bnd ) times the integral of the TARGET q, and a "
-						"prescribed-field run has no target q. Remove it" );
+					source.fail( "ToroidalFlux", "is read only beside SafetyFactorFile, where it "
+						"selects which of the equilibria sharing p and q is solved. A prescribed-"
+						"field run has no g to integrate -- its source carries g g' and not g -- so "
+						"the flux cannot be held there. Remove it" );
 				return;
 			}
 

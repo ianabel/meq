@@ -64,7 +64,8 @@ SafetyFactorDegree = 2
 #
 #   R0B0           g = R B_phi on the boundary [T m], the vacuum field the TF
 #                  coils set. The loop opens at this constant g, gg' = 0.
-#   ToroidalFlux   the toroidal flux inside the boundary [Wb], VMEC's PHIEDGE.
+#   ToroidalFlux   the toroidal flux inside the boundary [Wb], VMEC's PHIEDGE,
+#                  held as the solved equilibrium's own int g/R dA.
 #   PlasmaCurrent  I_p [A]. Here a condition of the outer loop: the profile
 #                  scale stays one, so p is the table's.
 #

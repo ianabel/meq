@@ -23972,25 +23972,31 @@ space left free — `y_k`, the `k`-th orthonormal row, or "axis", the
 coefficient of `Ψ^d` (a misfit zero to order `d` at the edge and largest on
 the axis). `σ_min/σ_max`; `ψ_ax` free means the bordered inner solve with the
 pin a row of the outer system, `ψ_ax` held the plain inner solve at the
-target's normalisation with the located axis as the row.
+target's normalisation with the located axis as the row. "`Φ` delivered" is
+`ToroidalFlux` as it is posed, the equilibrium's own `∫g/R dA` (M-362); the two
+`Φ_edge` columns are the `ψ_ax − ψ_bnd` row it replaces, kept for the
+comparison.
 
-| degree | gives way | `R0B0` (`c₀` held) | `Φ_edge`, `ψ_ax` free | `Φ_edge`, `ψ_ax` held | `I_p`, `ψ_ax` free |
-|---|---|---|---|---|---|
-| 2 | `y_0` | 1.57e-2 / 15.8 | 0 / 17.8 | 0 / 27.0 | 0 / 21.6 |
-| 2 | `y_1` | 0.116 / 21.9 | 0.0587 / 21.9 | 0.0587 / 41.0 | 0.0110 / 23.8 |
-| 2 | **`y_2`** | **2.69** / 26.9 | **0.578** / 26.5 | **0.594** / 44.2 | **0.329** / 28.5 |
-| 2 | axis | 2.68 / 4.11 | 0.266 / 10.0 | 0.268 / 23.1 | 0.198 / 15.8 |
-| 4 | `y_0` | 7.9e-4 / 86.2 | 0 / 90.0 | 0 / 110 | 0 / 90.6 |
-| 4 | `y_1` | 7.4e-3 / 84.9 | 3.7e-3 / 86.7 | 3.3e-3 / 136 | 8.3e-4 / 87.2 |
-| 4 | `y_2` | 0.210 / 103 | 0.263 / 105 | 0.262 / 151 | 0.0161 / 105 |
-| 4 | `y_3` | 0.390 / 110 | 0.522 / 112 | 0.531 / 156 | 0.0195 / 112 |
-| 4 | **`y_4`** | **2.23** / 112 | **0.577** / 113 | **0.593** / 157 | **0.173** / 113 |
-| 4 | axis | 0.0357 / 18.5 | 1.8e-3 / 30.2 | 1.6e-3 / 63.4 | 6.9e-3 / 38.5 |
+| degree | gives way | `R0B0` (`c₀` held) | `Φ_edge`, `ψ_ax` free | `Φ_edge`, `ψ_ax` held | `I_p`, `ψ_ax` free | `Φ` delivered |
+|---|---|---|---|---|---|---|
+| 2 | `y_0` | 1.57e-2 / 15.8 | 0 / 17.8 | 0 / 27.0 | 0 / 21.6 | 1.39e-2 / 15.8 |
+| 2 | `y_1` | 0.116 / 21.9 | 0.0587 / 21.9 | 0.0587 / 41.0 | 0.0110 / 23.8 | 0.163 / 19.9 |
+| 2 | **`y_2`** | **2.69** / 26.9 | **0.578** / 26.5 | **0.594** / 44.2 | **0.329** / 28.5 | **0.755** / 25.0 |
+| 2 | axis | 2.68 / 4.11 | 0.266 / 10.0 | 0.268 / 23.1 | 0.198 / 15.8 | 0.732 / 4.75 |
+| 4 | `y_0` | 7.9e-4 / 86.2 | 0 / 90.0 | 0 / 110 | 0 / 90.6 | 7.0e-4 / 86.3 |
+| 4 | `y_1` | 7.4e-3 / 84.9 | 3.7e-3 / 86.7 | 3.3e-3 / 136 | 8.3e-4 / 87.2 | 1.03e-2 / 82.7 |
+| 4 | `y_2` | 0.210 / 103 | 0.263 / 105 | 0.262 / 151 | 0.0161 / 105 | 0.327 / 102 |
+| 4 | `y_3` | 0.390 / 110 | 0.522 / 112 | 0.531 / 156 | 0.0195 / 112 | 0.639 / 109 |
+| 4 | **`y_4`** | **2.23** / 112 | **0.577** / 113 | **0.593** / 157 | **0.173** / 113 | **0.755** / 110 |
+| 4 | axis | 0.0357 / 18.5 | 1.8e-3 / 30.2 | 1.6e-3 / 63.4 | 6.9e-3 / 38.5 | 1.67e-2 / 20.0 |
 
 Free, no pin: `σ_min` 2.39e-3 at degree 2 and 1.21e-4 at degree 4.
 `d ln ψ_ax/dc` = (0, 0.132, 0.195, 0.237, 0.269) and `d ln I_p/dc` = (0, 0.151,
-0.0576, 0.0031, −0.036): **`c₀` enters no solve**, so with `c₀` an unknown the
-fit's `y_0` is the only row that sees it and dropping it is exactly singular.
+0.0576, 0.0031, −0.036): **`c₀` enters no solve**, so with `c₀` an unknown and
+a pin that does not read it the fit's `y_0` is the only row that sees it and
+dropping it is exactly singular. The delivered flux reads `g` itself, so
+`c₀` is in its row, `d ln Φ/dc` = (0.0837, 0.0373, 0.0182, 0.0065, −0.0019),
+and dropping `y_0` there is merely poor.
 
 **The highest row `y_d` gives way best under every pin at both degrees** —
 at degree 2 the axis limit ties it under `R0B0` (2.68 against 2.69) and loses
@@ -24003,7 +24009,8 @@ held inner solve is the outer closure `CLAUDE_DECLINED.md` records falsified
 beside the bordered Newton.
 
 **Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy`
-(about 5 minutes); `runs/q-solve-scale/study/study.log`.
+(about 5 minutes); `runs/q-solve-scale/study/study.log`, and
+`study-delivered.log` for the delivered-flux column.
 
 ### M-356
 
@@ -24041,7 +24048,7 @@ and the same file under the other two pins at the values it reads, from
 | pin | KINSOL its / equilibria | conditioning | `g²` |
 |---|---|---|---|
 | `R0B0 = 2.2` | 5 / 26 | 0.167 | 4.840000, 2.419999, 0.3025002 |
-| `ToroidalFlux = 2.475788836` | 5 / 36 | 0.0925 | the same |
+| `ToroidalFlux = 2.491162995` (delivered) | 4 / 29 | 0.0982 | the same |
 | `PlasmaCurrent = 5.212435078` | 5 / 36 | 0.0751 | the same |
 
 against 5 / 36 at conditioning 6.4e-3 with no pin (M-353). Reported
@@ -24050,15 +24057,18 @@ conditioning is in the unknowns' own coordinates and is diagnostic only.
 **(b) `QDrivenScalePin`, the composition, asserted.** The q-driven box at
 `RefinementLevels = 0`, the target `q-driven-q.dat × (1 + 0.2Ψ³)`, which no
 quadratic `g²` follows. A base run under `PlasmaCurrent = 5.0` from `g = 1.8`
-reads `R0B0 = 1.937000795`, `Φ = 2.213770701` and `I_p = 5.000000000`; re-solved
-under each:
+reads `R0B0 = 1.937000629`, the delivered `Φ = 2.215489783` and
+`I_p = 5.000000000`; re-solved under each:
 
 | re-solved under | KINSOL its / equilibria | `ψ_h` from the base | `g²` from the base |
 |---|---|---|---|
 | base, `PlasmaCurrent = 5.0` | 5 / 36 | | |
-| `R0B0` | 5 / 26 | 1.1e-14 | 7.3e-14 |
-| `ToroidalFlux`, from `g = 2.2` | 4 / 29 | 3.3e-11 | 6.2e-11 |
-| `PlasmaCurrent`, from `g = 2.2` | 5 / 36 | 1.7e-15 | 8.3e-16 |
+| `R0B0` | 5 / 26 | 8.4e-11 | 7.3e-11 |
+| `ToroidalFlux`, from `g = 2.2` | 5 / 38 | 2.4e-13 | 1.7e-13 |
+| `PlasmaCurrent`, from `g = 2.2` | 5 / 36 | 2.1e-15 | 2.1e-15 |
+
+(The table is the current code's: delivered flux, orthonormal differencing,
+and main's table continuation, M-360, which moves the base's `R0B0` by 9e-8.)
 
 (relative to the peak coefficient). 58 s. **Mutated**: `R0B0` giving way on the
 axis limit instead of `y_2` puts its answer 0.13 of `ψ`'s peak from the others
@@ -24075,8 +24085,8 @@ shipped `gg′` run on the same mesh, `g_edge = 1.400002`, degree 2:
 | pin, opening `g` | KINSOL its / equilibria | refused | conditioning | final norm / threshold |
 |---|---|---|---|---|
 | `R0B0 = 1.400002` | 5 / 26 | 0 | 0.461 | 1.4e-11 / 1e-9 |
-| `ToroidalFlux = 0.5360939985`, 1.4 | 5 / 36 | 0 | 3.3e-3 | 2.5e-11 / 1e-9 |
-| `ToroidalFlux`, 1.2 | 5 / 36 | 0 | 2.9e-3 | |
+| `ToroidalFlux = 0.5174642912` (delivered), 1.4 | 5 / 36 | 0 | 5.3e-3 | 1.4e-11 / 1e-9 |
+| `ToroidalFlux`, 1.2 | 5 / 36 | 0 | 3.9e-3 | 6.7e-12 / 1e-9 |
 | `PlasmaCurrent = 1.168128770e5`, 1.4 | 5 / 36 | 0 | 5.9e-4 | 8.8e-10 / 1e-9 |
 | `PlasmaCurrent`, 1.2 | 5 / 36 | 0 | 7.6e-4 | |
 | `R0B0`, degree 3 | 5 / 36 | 0 | 0.043 | 2.8e-12 / 1e-9 |
@@ -24090,10 +24100,10 @@ and 3 / 22 — at 3.0e-9, 5.4e-11 to 6.1e-11 and 1.3e-8, with the same `g²` to
 every printed digit.
 
 Every degree-2 run returns `g² = 1.960006, −2.780245e-3, 1.396952e-2` and reads
-`R0B0 = 1.400002`, `Φ = 0.536094 Wb`, `I_p = 1.168129e5 A`, where unpinned the
+`R0B0 = 1.400002`, the delivered `Φ = 0.517464 Wb`, `I_p = 1.168129e5 A`, where unpinned the
 loop failed in 10 iterations and 145 equilibria from 1.4 and was still running
-after 35 minutes from 1.2. At degree 3 the member moves (`Φ` 0.531787,
-`I_p` 1.116323e5): the degree is part of the model, and no longer what selects
+after 35 minutes from 1.2. At degree 3 the member moves (delivered `Φ`
+0.517428, `I_p` 1.116323e5): the degree is part of the model, and no longer what selects
 the member.
 
 **(d) `QDrivenCurvedBoundary` under `R0B0 = 2.2`**, asserted: the Miller
@@ -24270,3 +24280,73 @@ to the printed digit. `DriverAcceptance` passes.
 `runs/q-solve-scale/tcv/` (the refreshed logs; the previous ones in `prev/`),
 `runs/q-solve-scale/example/`, and `MKL_NUM_THREADS=1 ./QDrivenScalePin` and
 `./SafetyFactorScale` in both trees.
+
+### M-361
+
+**The q-driven solve's miss sits at the fit's floor: it moves with the
+degree of `g²` and not with the mesh.** `QDrivenConsistency` (asserted, red)
+and its disabled case `theMissMovesWithTheDegreeAndNotTheMesh` (run once by
+name), `q-solve-scale`, double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+The target is the `q` of a forward solve with
+`g² = 2.2² + (e^{2Ψ} − 1)/(e² − 1)` (`Ψ` the source's, zero on the boundary),
+`gg′` a 64-knot Hermite table with exact slopes, on the q-driven box at
+`RefinementLevels = 3`, `k = 3`, taken through `q = V′g⟨R⁻²⟩/4π²` at the 24
+surfaces of `FluxSurfaceCount = 24`. The q-driven run is pinned by
+`R0B0 = 2.2`, the target's own boundary `g`, and the miss is
+`max |q − q_target|/|q_target|` over the same 24 labels, `q` the surfaces file's
+own column.
+
+| degree | level 0 (`h` = 0.1) | level 1 | level 2 |
+|---|---|---|---|
+| 2 | 1.181e-1 | 1.179e-1 | 1.179e-1 |
+| 3 | 1.200e-2 | 1.215e-2 | 1.214e-2 |
+
+all at `k = 2`. **The reference** at level 2 against level 3, `k = 3`: 1.0e-7
+relative over the same labels, six orders under the miss. So the miss is not
+the mesh's, the reference's, or the loop's (every run converged, 4 KINSOL
+iterations and 21 equilibria at degree 2): it is the representation's, ten
+times smaller for one degree more and flat in `h`. At degree 2 it oscillates
+across the profile — +3.9% on the innermost surface, −3.6% at mid-radius,
++11.8% at the outermost — the shape of the misfit the dropped row leaves. The
+case asserts a factor of 4 per halving of `h` and reads 1.00.
+
+The same family at `B = 1.5`, `κ = 3` does not converge at degree 2 (5 KINSOL
+iterations, 72 equilibria, 32 refused, stopped at 0.86) and does at degree 3
+(7 and 50): the representation can also leave no fixed point at all.
+
+**Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./QDrivenConsistency`
+(22 s, red) and `--run_test=theMissMovesWithTheDegreeAndNotTheMesh` (2 m 50 s);
+the files land in `tests/output/QDrivenConsistency/QDrivenConsistency-files/`.
+
+### M-362
+
+**`ToroidalFlux` holds the delivered flux, `∫_plasma g/R dA`, and not
+`2π(ψ_ax − ψ_bnd)∫₀¹q dΨ` of the target.** `q-solve-scale`, double. The row
+reads the solved state through `GradShafranovSolver::integrateOverDomain()`
+with the iterate's own `g²`, over `Ω_h` where `Ψ > 0`, signed as the target
+`q`; the `.nc`'s `toroidal_flux` is the same quantity.
+
+| case | delivered `Φ` | `2π(ψ_ax − ψ_bnd)∫q` | |
+|---|---|---|---|
+| `examples/q-driven.toml` | 2.491163 Wb | 2.475789 | +0.62% |
+| `fixed-d-tcv`, degree 2 | 0.517464 | 0.536094 | −3.5% |
+| `fixed-d-tcv`, degree 3 | 0.517428 | 0.531787 | −2.7% |
+
+The two are the same quantity in the continuum. Here they differ by the
+target's integral running over `Ψ ∈ [0, 1]` from a table on `[0.05, 0.95]`,
+continued past its ends, where the delivered one reads the equilibrium's own
+`g`; and on a curved boundary the band between `Γ_h` and `Γ` is not counted,
+as it is not by the current row.
+
+The pin is better conditioned than the span row it replaces — `σ_min` 0.755
+against 0.578 at degree 2, 0.755 against 0.577 at degree 4, `y_d` giving way
+(M-355) — since `c₀` now enters its row. Under it: the shipped example
+converges in 4 KINSOL iterations and 29 equilibria, conditioning 0.0982
+(M-357(a)); `QDrivenScalePin` re-solves the base, cold from `g = 2.2`, to
+2.4e-13 of `ψ`'s peak (M-357(b)); `fixed-d-tcv` converges in 5 and 36 from 1.4
+and from 1.2 to the `g²` of the other pins (M-357(c)).
+
+**Reproduce.** `runs/q-solve-scale/example/` (`q-driven.log`, `flux.log`),
+`runs/q-solve-scale/tcv/` (`edge.log`, `flux-g1.4.log`, `flux-g1.2.log`,
+`edge-d3.log`), `runs/q-solve-scale/study/study-delivered.log`.

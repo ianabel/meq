@@ -457,10 +457,11 @@ namespace meq
 		/// inner solve's profile scale stays one.
 		PlasmaCurrent,
 
-		/// `psi_ax - psi_bnd` of the solved state, as a row of the outer
-		/// system. With `q( Psi_N )` given this is the edge toroidal flux,
-		/// `Phi_edge = 2 pi ( psi_ax - psi_bnd ) int_0^1 q dPsi_N`.
-		FluxSpan
+		/// The DELIVERED toroidal flux, `Phi = int_plasma g( psi )/R dA` over
+		/// the solved equilibrium with `g^2` the iterate's own, as a row of the
+		/// outer system -- the equilibrium's flux, not the target's
+		/// (MEASUREMENTS.md M-362).
+		ToroidalFlux
 	};
 
 	/**
@@ -478,7 +479,7 @@ namespace meq
 	 *
 	 *   EdgeField      unknowns `c_1 .. c_d`; rows `y_0 .. y_{d-1}`
 	 *   PlasmaCurrent  unknowns `c_0 .. c_d`; rows `y_0 .. y_{d-1}` and
-	 *   FluxSpan       `w ( m - m* )/m*`, `m` the measured scalar
+	 *   ToroidalFlux   `w ( m - m* )/m*`, `m` the measured scalar
 	 *
 	 * **THE SAME ROW GIVES WAY UNDER EVERY PIN, AND THAT IS WHAT MAKES THEM
 	 * COMPOSE.** An equilibrium solved under one pin satisfies every other
@@ -486,6 +487,14 @@ namespace meq
 	 * pins return the same equilibrium -- only if each system drops the same q
 	 * condition: dropping different ones leaves the fit's misfit in different
 	 * directions, and the answers differ by it (MEASUREMENTS.md M-355).
+	 *
+	 * **INTERIM.** A condition gives way only because `g^2` is a polynomial of
+	 * fixed degree, and that fit is what makes the q-driven solve
+	 * inconsistent: its miss does not fall with the mesh (M-361,
+	 * QDrivenConsistency, red). The representation that replaces it refines
+	 * with the discretisation and is matched to `q` at every knot, so the pin
+	 * alone makes the system square (TODO, "The q-driven solve is
+	 * inconsistent").
 	 *
 	 * It is a ToroidalFieldMap -- the callable meq::solveForToroidalField
 	 * roots -- through `x -> x + F( x )`, so the outer Newton, its floor and
@@ -507,9 +516,10 @@ namespace meq
 				double value = 0.0;
 
 				/// The solved state's own value of the pinned scalar, read
-				/// after each admissible solve. Unused for EdgeField. A throw
-				/// is a refusal.
-				std::function<double()> measured;
+				/// after each admissible solve and given the coefficients of
+				/// `g^2` that solve used -- the delivered toroidal flux reads
+				/// `g` itself. Unused for EdgeField. A throw is a refusal.
+				std::function<double( std::vector<double> const &coefficients )> measured;
 
 				/// The pin row's scale, in `g^2` per unit of relative misfit,
 				/// so that it sits beside the fit's rows. It moves the Newton

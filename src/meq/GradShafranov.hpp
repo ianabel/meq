@@ -4570,6 +4570,21 @@ namespace meq
 			double deliveredPlasmaCurrent() const;
 
 			/**
+			 * `int f( R, z, psi_h ) dR dz` over `Omega_h` at the current state:
+			 * the potential `psi_h` at each quadrature point, two orders above
+			 * the field's as the source rule takes. Serial and on the host.
+			 *
+			 * **WHAT THE q-DRIVEN LOOP'S TOROIDAL-FLUX PIN READS**: the
+			 * delivered `Phi = int_plasma g( psi )/R dA` of the equilibrium the
+			 * loop solved, with `f` zero outside the plasma (MEASUREMENTS.md
+			 * M-362). Over `Omega_h`, as
+			 * deliveredPlasmaCurrent() is: a curved boundary's band is not
+			 * counted.
+			 */
+			double integrateOverDomain(
+				std::function<double( double radius, double z, double psi )> const &integrand ) const;
+
+			/**
 			 * `d( mu0 I_p )/d lambda` ALONG THE SOLUTION MANIFOLD -- how much
 			 * current the profile scale actually BUYS, with the field, the
 			 * normalisation, the X-point and the exterior all re-solving.

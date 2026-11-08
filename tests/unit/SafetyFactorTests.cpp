@@ -531,9 +531,9 @@ BOOST_AUTO_TEST_CASE( the_pinned_system_lets_the_highest_fit_row_give_way )
 	std::vector<double> const orthogonal = { -b, -a, 1.0 };
 
 	meq::PinnedToroidalFieldMap::Pin pin;
-	pin.kind = meq::ScalePin::FluxSpan;
+	pin.kind = meq::ScalePin::ToroidalFlux;
 	pin.value = 0.25;
-	pin.measured = []() { return 0.25; };
+	pin.measured = []( std::vector<double> const & ) { return 0.25; };
 	meq::PinnedToroidalFieldMap pinned( map, 2, pin );
 
 	auto residualAt = [ & ]( std::vector<double> const &c )
@@ -556,7 +556,7 @@ BOOST_AUTO_TEST_CASE( the_pinned_system_lets_the_highest_fit_row_give_way )
 		"where the highest fit row should" );
 
 	// THE PIN ROW: the same point, a pinned value it does not have.
-	pin.measured = []() { return 0.30; };
+	pin.measured = []( std::vector<double> const & ) { return 0.30; };
 	meq::PinnedToroidalFieldMap mismatched( map, 2, pin );
 	std::vector<double> const off = mismatched( alongHighest );
 	BOOST_TEST( std::abs( off[ 2 ] - alongHighest[ 2 ] - 0.2 ) < 1.0e-13,
@@ -597,7 +597,7 @@ BOOST_AUTO_TEST_CASE( the_pinned_system_lets_the_highest_fit_row_give_way )
 
 	// AND A PIN THAT CANNOT BE READ IS A REFUSAL, pointing back at the last
 	// admissible point rather than throwing into KINSOL.
-	pin.measured = []() -> double { throw std::runtime_error( "no state" ); };
+	pin.measured = []( std::vector<double> const & ) -> double { throw std::runtime_error( "no state" ); };
 	meq::PinnedToroidalFieldMap unreadable( map, 2, pin );
 	std::vector<double> refused;
 	BOOST_CHECK_NO_THROW( refused = unreadable( alongAxis ) );
