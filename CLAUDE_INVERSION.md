@@ -383,7 +383,13 @@ it was repaired:
   every jump above the noise on the box and on TCV is a node changing element,
   the axis element and the band never change, and the per-crossing jump falls
   as about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
-  `MANTA-EQUILIBRIUM-PLAN.md` §4.5 costs the continuous extractions (D8). The step at 1e-4 straddles none on that fixture and finishes
+  `MANTA-EQUILIBRIUM-PLAN.md` §4.5 costs the continuous extractions (D8).
+  **The one chosen, prototyped, removes it**
+  (→ **[M-SHAPE-2](MEASUREMENTS.md#m-shape-2)**): the same rays on `ψ̃` and
+  `q̃`, H¹ fields interpolated by moments from `ψ*`, `ψ̂` (on interior edges)
+  and `q*`. A 1.5e-8 difference straddling a crossing is then off by the
+  noise rather than by 0.01–700× the derivative, and `G` stays inside the
+  discretisation error of the shipped extraction. The step at 1e-4 straddles none on that fixture and finishes
   quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom` bounds the
   iterations at 5 so that a straddle elsewhere is seen as the crawl it is.
 * **KINSOL differenced `J p` itself.** MFEM declares its custom linear solver

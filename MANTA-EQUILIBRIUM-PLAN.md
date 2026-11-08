@@ -360,6 +360,62 @@ at that rate, of 512 read columns (§4.4), a third to a half of all Jacobian
 builds would carry one column wrong by O(0.1)–O(1000). The same mechanism is M-308b's step in the q-driven map; a
 continuous extraction removes that too.
 
+**Candidate A is prototyped and holds up** (→ M-SHAPE-2, `ExtractionJumps`'
+`prototype*` cases, through `Run::familyFrom()`). The user asked that the
+continuous field use the trace `ψ̂` as well as `ψ*` and `q*`; what was built:
+
+* **`ψ̃` ∈ H¹ of degree `k+2`, the moment interpolant.** Vertex values are the
+  mean of `ψ*` over the elements there. On each interior edge the `P_k` moments
+  equal `ψ̂`'s — exactly the `k+1` edge dofs a degree-`k+2` edge has beside its
+  two vertices, which is why the degree is one above `ψ*`'s: `ψ̃`'s trace then
+  projects onto `ψ̂`, the HDG solve's single-valued face unknown, and on no
+  lower degree can every interior edge carry all of `ψ̂`. On boundary edges
+  `ψ*`'s own trace (one side, so no choice; on `Γ_h` the trace unknown is a
+  pinned zero, not `ψ̂`). In each cell `ψ*`'s `P_{k−1}` moments, which is the
+  interior dofs' count. Unisolvent, reproduces `P_{k+2}`, and continuous by
+  construction; every choice is a mean or a moment, none a side.
+* **`q̃` ∈ [H¹]² of `q*`'s degree `k+1`**, the same interpolant: vertex means,
+  edge `P_{k−1}` moments of the two sides' mean trace, cell `P_{k−2}` moments.
+  The weight needs a continuous flux as much as the root needs a continuous
+  potential; `∇ψ̃` is not one (its normal component jumps).
+
+Measured on M-SHAPE-1's cases: a 1.5e-8 central difference straddling a
+bisected crossing is off by 2e-6 to 2.5e-5 of the derivative, the noise floor
+there, where the shipped extraction is off by 7e-3 to 690; `G` by A and by the
+shipped extraction differ by less than either differs from a finer mesh, and
+A's error against that mesh matches the shipped one's within 1.4×. **So A's
+kink is below what a 1.5e-8 difference can see, and E's smoothness buys
+nothing measurable**: A over E. `ψ̂` against the control that takes the edges
+from `ψ*`'s mean trace: the same `G` to the digits that matter.
+
+**Proposed production form** (not built; the user's go first):
+
+1. `src/meq/ContinuousField.{hpp,cpp}`: the moment interpolant and the two
+   fields, built by `GradShafranovSolver::postProcess()` after `Reconstruct()`
+   and held beside `ψ*` as `continuousPotential()`, `continuousFlux()`. Cells
+   and edges are independent, so the loops thread; the vertex means are a
+   reduction.
+2. `Potential::Continuous`, and `ContourTracer`'s default becomes it: every
+   extraction — `_surfaces.nc`, the q-driven loop (which takes M-308b's step
+   out of its map), the session — goes through it; `PostProcessed` and `Raw`
+   stay as the controls `FluxSurfaceConvergence` pairs.
+3. The extraction's axis and level from `q̃`'s root and `ψ̃` there, so the
+   label normalisation is continuous too (the prototype kept the solver's
+   located axis; no scan crossed an axis element, but it is the same class of
+   choice). Measured before it ships.
+4. The band's nearest-face choice stays (no scan crossed one); blended only if
+   a measurement finds a jump there.
+5. The regression values that move are re-measured, not loosened:
+   `FluxSurfaceConvergence`, `SurfaceAverageConvergence`, `SurfaceFitConvergence`,
+   `FluxGridConvergence`, `SafetyFactorSolver`, `SafetyFactorTests`,
+   `SafetyFactorScale`, `QDrivenCurvedBoundary`, `DriverAcceptance`, `RunSession`,
+   `ConductorSubtraction`, `FluxFamilyTests`, `test_results.py`.
+   `SessionSmoothness` goes green.
+6. `Run::familyFrom()` goes once the field is the run's.
+7. `E'` then: `δψ̃` is the same interpolant of `δψ*` (`Reconstruct`, linear)
+   and `δψ̂` (part of the state), so the ray-root formula applies with `ψ̃`,
+   `q̃` and their exact gradients.
+
 **Differentiate the algorithm that ships, not the continuum formula** — that
 stands, whichever row is chosen. The node positions come from roots of the
 potential while `|∇ψ|` comes from the flux, so the continuum shape derivative is
@@ -628,14 +684,13 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   hand the model `ṗ` (IDA has it) and let a case read time-derivative slots.
   MEQ's side is the response it builds anyway, plus `∂_t G` (zero unless coil
   currents are programmed in time).
-* **D8. Which continuous extraction — open.** `G` jumps where a surface node
-  crosses an element face (M-SHAPE-1), and the fix is an extraction continuous
-  in the solved state, not a decision carried between states. §4.5's table
-  costs five routes: a continuous `H¹` reconstruction of `ψ*` and `q*` under the
-  existing rays (A, the cheapest to build, `G` continuous with kinks),
-  per-element level-set integrals (C, no choice anywhere, the most to build),
-  a smooth partition of unity (E, no kinks), and two that do not fix it — the
-  trace `ψ̂` (B) and refining the jump away (D). `E'` waits on this.
+* **D8. Which continuous extraction — A, prototyped; production pending.**
+  `G` jumps where a surface node crosses an element face (M-SHAPE-1). The user
+  chose to prototype A — a continuous `H¹` reconstruction under the existing
+  rays — with `ψ̂` among its sources, and it becomes the only extraction once
+  built (`_surfaces.nc`, the q-driven loop, the session). The prototype
+  removes the jump to the noise and keeps `G`'s accuracy (M-SHAPE-2), so E is
+  not needed. §4.5 has the production form; `E'` follows it.
 
 ## 6. The branches
 

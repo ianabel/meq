@@ -23690,3 +23690,101 @@ for (a), its decision report printed under each fine scan;
 (b), cases `boxL1k2`, `boxL2k2`, `boxL3k2`, `boxL1k3`, `boxL2k3`, `tcvL1k2`,
 `tcvL2k2`, `tcvL1k3` (one to five minutes each; built, not registered).
 Logs: `runs/manta-shape-derivative/smooth1.log`, `runs/manta-shape-derivative/jumps/`.
+
+### M-SHAPE-2
+
+**Candidate A, prototyped: the geometry extracted from continuous fields
+`ψ̃`, `q̃` built from `ψ*`, `ψ̂` and `q*` does not jump where a node crosses a
+face — a 1.5e-8 central difference straddling a crossing is off by the noise —
+and is as accurate as the shipped extraction.** `manta/shape-derivative`,
+double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a machine at load ~20,
+`ExtractionJumps` (`prototype*`, `reference*`, `accuracy`), M-SHAPE-1's eight
+cases. `Run::familyFrom()` extracts with the shipped options, located axis,
+level and band, on the instrument's fields.
+
+**The fields.** `ψ̃` ∈ H¹ of degree `k+2`, the moment interpolant: vertex
+values the mean of `ψ*` over the elements there; on each interior edge the
+`P_k` moments of `ψ̂`; on boundary edges `ψ*`'s own trace; in each cell `ψ*`'s
+`P_{k−1}` moments. `q̃` ∈ [H¹]² of `q*`'s degree `k+1`: vertex means of `q*`,
+edge `P_{k−1}` moments of the two sides' mean trace, cell `P_{k−2}` moments.
+The control ("avg") takes `ψ̃`'s interior edges from the mean of `ψ*`'s two
+traces instead of `ψ̂`. How far the fields sit from `ψ*` and `q*` (worst over
+every element's quadrature points, relative to the field's largest value) —
+the size of the face jumps:
+
+| case | `ψ̃ − ψ*`, edges from `ψ̂` | from the mean trace | `q̃ − q*` |
+|---|---|---|---|
+| box, `k = 2`, 768 | 2.0e-4 | 9.8e-5 | 1.6e-3 |
+| box, `k = 2`, 3072 | 4.9e-5 | 2.4e-5 | 7.4e-4 |
+| box, `k = 2`, 12288 | 1.2e-5 | 6.0e-6 | 3.6e-4 |
+| box, `k = 3`, 768 | 5.3e-5 | 3.4e-5 | 4.5e-4 |
+| box, `k = 3`, 3072 | 1.3e-5 | 8.5e-6 | 2.2e-4 |
+| TCV, `k = 2`, 3993 | 1.8e-7 | 1.5e-7 | 1.9e-5 |
+| TCV, `k = 2`, 16406 | 1.9e-8 | 1.7e-8 | 3.9e-6 |
+| TCV, `k = 3`, 3993 | 6.7e-9 | 5.8e-9 | 1.3e-6 |
+
+**What a difference straddling a crossing pays.** Along the `±1e-3` scan of
+`Omega`, the first node to change element on each of up to four surfaces,
+for each extraction separately; the crossing bisected to 1e-11; then the
+central difference at 1.5e-8 centred on it against the mean of the one-sided
+derivatives either side (differenced at 1e-6, 2e-6 off it), relative to the
+derivative, worst of the four quantities. The noise is `1e-14 |G|/(2δ|G′|)`,
+what the resolve's round-off puts into a 1.5e-8 difference:
+
+| case | candidate A, straddled error | shipped, straddled error | noise there | A's kink bound, `|G′_R − G′_L|/|G′|` |
+|---|---|---|---|---|
+| box, `k = 2`, 768 | ≤ 1.5e-5 | 25 – 690 | 3e-6 – 1e-5 | ≤ 2.1e-4 |
+| box, `k = 2`, 3072 | ≤ 2.5e-5 | 0.16 – 20 | 3e-6 – 1e-5 | ≤ 5.8e-5 |
+| box, `k = 2`, 12288 | ≤ 1.9e-5 | 0.71 – 7.9 | 3e-6 – 1e-5 | ≤ 1.5e-5 |
+| box, `k = 3`, 768 | ≤ 9.9e-6 | 0.95 – 14 | 3e-6 – 1e-5 | ≤ 1.9e-5 |
+| box, `k = 3`, 3072 | ≤ 1.7e-5 | 7.5e-3 – 0.24 | 3e-6 – 1e-5 | ≤ 1.3e-5 |
+| TCV, `k = 2`, 3993 | ≤ 9.9e-6 | 0.91 – 13 | 3e-6 – 5e-6 | ≤ 1.3e-5 |
+| TCV, `k = 2`, 16406 | ≤ 1.2e-5 | 0.13 – 0.23 | 4e-6 – 5e-6 | ≤ 1.1e-5 |
+| TCV, `k = 3`, 3993 | ≤ 2.1e-5 | 0.016 – 0.089 | 4e-6 – 5e-6 | ≤ 1.1e-5 |
+
+A's straddled error sits at the noise in every case; a jump as small as
+1e-13 of the value would read 3e-6 there. **The kink column is a bound, not a
+reading**: differenced 4e-6 wide, it carries `G″·4e-6/G′` ≈ 1e-5 of
+curvature, and the shipped extraction reads the same 1e-5 away from its
+jumps. So A's kink is below 1e-5 of `G′` wherever it is resolved, and a
+straddled 1.5e-8 difference cannot see it. The noise across warm starts is
+1.3e-14 to 5.5e-14 by A on every case but TCV's finest, 1.95e-13 there —
+below the 1e-12 SessionSmoothness asks; the shipped extraction's noise on
+that mesh was not taken, so whether the solve or the extraction carries it is
+open. Along the 1e-4 scan
+the per-crossing estimate falls from M-SHAPE-1's 4.5e-7 (box, `k = 2`,
+768) to 1.4e-10 and from 1.3e-8 (TCV, `k = 2`) to below 1e-11 at 24 of 25
+crossings — what a kink reads at a 1e-4 step; the bisected straddle is the
+measurement that separates the two.
+
+**`G`'s accuracy** — worst relative difference over 24 surfaces × 4
+quantities, against the shipped extraction on the same state and against a
+finer mesh (box level 3 at `k = 3`, TCV level 2 at `k = 3`, by A; the three
+extractions agree there to 3.2e-8 and 2.3e-9, far below these columns):
+
+| case | A − shipped | avg − shipped | shipped − reference | A − reference | avg − reference |
+|---|---|---|---|---|---|
+| box, `k = 2`, 768 | 8.6e-5 | 9.7e-5 | 2.8e-4 | 2.8e-4 | 2.8e-4 |
+| box, `k = 2`, 3072 | 9.5e-6 | 7.7e-6 | 7.7e-5 | 7.6e-5 | 7.6e-5 |
+| box, `k = 2`, 12288 | 7.3e-7 | 6.0e-7 | 2.6e-6 | 2.5e-6 | 2.5e-6 |
+| box, `k = 3`, 768 | 1.0e-5 | 1.3e-5 | 1.4e-5 | 1.3e-5 | 1.3e-5 |
+| box, `k = 3`, 3072 | 3.3e-7 | 3.8e-7 | 8.3e-7 | 1.1e-6 | 1.2e-6 |
+| TCV, `k = 2`, 3993 | 4.7e-6 | 4.7e-6 | 4.4e-6 | 4.8e-6 | 4.8e-6 |
+| TCV, `k = 2`, 16406 | 1.7e-7 | 1.7e-7 | 4.3e-6 | 4.2e-6 | 4.2e-6 |
+| TCV, `k = 3`, 3993 | 5.1e-7 | 5.1e-7 | 2.8e-7 | 2.8e-7 | 2.8e-7 |
+
+A and the shipped extraction differ by less than either differs from the
+finer mesh, and A's error matches the shipped one's within 1.4× either way.
+(TCV's error at `k = 2` does not fall from level 1 to level 2, 4.4e-6 to
+4.3e-6, by either extraction: something other than the mesh limits it there,
+and it is not this question's.)
+the reconstruction moves `G` inside the discretisation error and costs no
+accuracy. Taking `ψ̃`'s edges from `ψ̂` or from `ψ*`'s mean trace makes no
+difference to `G` at these digits, although `ψ̂`'s `ψ̃` sits 1.2–2× further
+from `ψ*` — `ψ*` is not the truth either.
+
+**Reproduce.** From `runs/manta-shape-derivative/proto/`:
+`MKL_NUM_THREADS=1 OMP_NUM_THREADS=2 <tree>/tests/ExtractionJumps --run_test=<case>`
+for `prototypeBoxL1k2` … `prototypeTcvL2k2`, `referenceBoxL3k3`,
+`referenceTcvL2k3` (each leaves `<key>-G.txt`; 10 minutes to 2 hours each at
+that load), then `--run_test=accuracy`.
