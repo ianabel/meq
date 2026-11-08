@@ -32,20 +32,16 @@ add_subdirectory("${PROJECT_SOURCE_DIR}/extern/pybind11"
 
 # ---- meq_core inside a shared object ----------------------------------------
 #
-# POSITION-INDEPENDENT, BECAUSE THE MODULE IS A SHARED OBJECT AND meq_core IS
-# STATIC. The compiler's default here is -fPIE, which is position independent
-# for an executable but reaches thread_local storage by the local-exec model,
-# and meq_core has thread_locals (CriticalPoints.cpp's pointOf(), among
-# others) that a dlopen'd object cannot reach that way. -fno-semantic-
-# interposition keeps -fPIC from turning every non-inline function into an
-# interposable one that GCC may not inline: nothing interposes meq_core.
+# meq_core is STATIC and its objects are compiled position independent, with
+# -fno-semantic-interposition, by CMakeLists.txt itself, since the tests' shared
+# library is made of the same objects. The compiler's default would be -fPIE,
+# which reaches thread_local storage by the local-exec model, and meq_core has
+# thread_locals (CriticalPoints.cpp's pointOf(), among others) that a dlopen'd
+# object cannot reach that way.
 #
 # MFEM's static archive needs nothing of the kind: it carries no 32-bit
 # absolute relocations, and --exclude-libs below makes its symbols local, so
 # its PC-relative ones resolve inside the module.
-set_target_properties(meq_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_compile_options(meq_core PRIVATE
-	$<$<COMPILE_LANGUAGE:CXX>:-fno-semantic-interposition>)
 
 # ---- the extension ----------------------------------------------------------
 #

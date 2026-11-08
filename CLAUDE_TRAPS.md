@@ -135,6 +135,58 @@ they are answers about MFEM's own preprocessor, and a precision macro tested in
 a translation unit that has not included MFEM is not false but UNDEFINED — which
 is `MachineFixedBoundary.cpp`'s trap, in `CLAUDE_DEVICE.md`, *Single precision*.
 
+## Linking: one MFEM per test process
+
+**EVERY TEST LINKS `meq_core_tests`, A SHARED LIBRARY CARRYING MEQ'S OBJECTS AND
+ALL OF `libmfem.a`, AND NOTHING ELSE OF EITHER.** `meq_core_objects` compiles
+`src/meq` once, position independent; `meq_core` (static, with `libmfem.a`
+behind it) is what `meq`, `meq-convert` and the Python module link and ship,
+and `meq_core_tests` takes the same objects plus `libmfem.a` under
+`WHOLE_ARCHIVE`, linked once. A test linking `meq_core` carries the MFEM it
+touches — about 70 MB per executable on a CUDA build, 27 MB of host code and
+33 MB of fatbins, ninety times over. The library takes `libmfem.a` `PRIVATE`
+and passes on only `MFEM::headers` and `MFEM::dependencies`
+(`cmake/FindMFEM.cmake`), so the archive stops at it.
+
+**THE TRAP IS A SECOND COPY OF MFEM, AND THE LINKER DOES NOT REPORT IT.** A test
+that also links `MFEM::MFEM` or `meq_core` *ahead of* the library takes its own
+copy of every object it calls first, and holds two of `mfem::Device`, the memory
+manager and `mfem::out` (or of meq's globals); which a call reaches depends on
+where it was linked from — a silent ODR violation, not a link error. Linked
+*after* the library the archive contributes nothing, so a test can carry the
+mistake harmlessly until a reorder. `SharedTestCore` is the check: no test
+executable may define, strong (`nm`'s `T`), an `mfem::` or `meq::` function the
+library also defines; what a test instantiates from the headers is weak, and a
+test's own `meq::` helpers (`ConfigTests`' `operator<<`) are not in the library.
+Mutation-tested both ways: `SolverContract` with `MFEM::MFEM` ahead carries
+5175 of MFEM's functions and fails it, `ConfigTests` with `meq_core` ahead
+carries 155 of meq's. A test's copy-relocated *variable* is not a second copy:
+the library reaches MFEM's and meq's globals through the GOT, even under
+`-fno-semantic-interposition`, so the executable's copy is the one copy.
+
+**IT NEEDS EVERY STATIC ARCHIVE ON MFEM'S LINK LINE BUILT POSITION
+INDEPENDENT** — `libmfem.a` (`CLAUDE_MFEM.md`) and what it names, which here is
+gslib's `libgs.a`: `libmfem.a` whole pulls in `FindPointsGSLIB` and so gslib,
+where the Python module, linking only what it calls, never meets it. Configure
+asks the linker, each archive whole into a shared object with undefined symbols
+allowed, a few seconds cached against their timestamps, and against a `-fPIE`
+one names it and links the tests to `meq_core`, each with its own MFEM. Under
+CUDA the device link of meq's relocatable device code happens once, in the
+library (`CUDA_RESOLVE_DEVICE_SYMBOLS`), and `meq_core` carries
+`CUDA_SEPARABLE_COMPILATION` so that `meq` and the module still device-link it;
+MFEM's kernels are whole-program and need none.
+
+**AND IT IS LINKED `-Bsymbolic-functions`, OR MFEM'S CALLS TO ITSELF GO THROUGH
+THE PLT.** MFEM is compiled `-fPIC` with semantic interposition, which a static
+link relaxes to direct calls and a shared object cannot. Without the flag a
+solver test ran about 5% slower than its static twin (`NewtonConvergence`,
+`HighBetaConvergence`, interleaved); with it, within the run-to-run scatter.
+Startup costs 3 to 20 ms more on a host build and about 40 ms on a CUDA one,
+where loading cuBLAS dominates either way. The flag binds functions only, so the
+GOT rule above still holds for variables; what it gives up is the equality of
+an inline function's address taken in a test with the same function's address
+taken in the library, which nothing here compares.
+
 ## Code hygiene no compiler checks
 
 **AND A BRACELESS `for` ADOPTS THE NEXT BRACED BLOCK AS ITS BODY, WITH NOTHING
