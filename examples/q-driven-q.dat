@@ -16,36 +16,41 @@
 # WHERE THIS TABLE CAME FROM, so that the example asserts something. It is the
 # q of an equilibrium built from the CLOSED FORM g( Psi ) = 2.20 + 0.55 Psi on
 # this box AND THIS MESH, measured through q = V' g < R^-2 >/4 pi^2 at 24
-# surfaces. Same mesh on purpose: the discretisation error is then common to the
-# measurement and to the loop that has to invert it, so what the acceptance
-# below reads is the LOOP's accuracy and not the mesh's. So the
+# surfaces, extracted as every run extracts (psi~ and q~, the continuous pair).
+# Same mesh and the same extraction on purpose: the discretisation error is
+# then common to the measurement and to the loop that has to invert it, so
+# what the acceptance below reads is the LOOP's accuracy and not the mesh's.
+# Measured on psi* and q* instead, the table is 5.1e-5 away, inside q's own
+# discretisation error on this mesh (MEASUREMENTS.md M-366) -- and the loop
+# then lands 1.7e-3 away in g, which is that difference along the scale's
+# near-null direction (M-353). So the
 # loop's answer is known independently of the loop: it must recover that g, and
 # DriverAcceptance::theDriverSolvesForTheToroidalField asserts it does. A target
 # invented rather than measured would only have shown that the loop reaches
 # SOME fixed point.
 #
 #        Psi                  q                       dq/dPsi
-   0.050000             1.432488499             -2.062145804
-   0.112591             1.303416731             -1.611985892
-   0.173048             1.234136859             -0.968432335
-   0.231374             1.188383433             -0.686706710
-   0.287566             1.155496580             -0.522421761
-   0.341626             1.130785389             -0.411855651
-   0.393552             1.111845647             -0.330609500
-   0.443347             1.097155460             -0.267646558
-   0.491008             1.085761884             -0.216310409
-   0.536537             1.076997493             -0.173193005
-   0.579933             1.070360696             -0.135882789
-   0.621196             1.065493792             -0.102782431
-   0.660326             1.062097708             -0.073070342
-   0.697324             1.059931093             -0.045666755
-   0.732189             1.058815958             -0.020250706
-   0.764921             1.058562206             +0.003485986
-   0.795520             1.059036729             +0.025718146
-   0.823987             1.060081274             +0.046800734
-   0.850321             1.061601456             +0.066630553
-   0.874522             1.063448449             +0.085381241
-   0.896591             1.065552046             +0.103361219
-   0.916527             1.067790137             +0.119251146
-   0.934330             1.070052465             +0.134926448
-   0.950000             1.072306530             +0.143845884
+   0.050000            1.432561960           -2.064387852
+   0.112591            1.303350706           -1.612535217
+   0.173048            1.234142018           -0.967773164
+   0.231374            1.188395748           -0.686814710
+   0.287566            1.155489733           -0.522507703
+   0.341626            1.130788234           -0.411816391
+   0.393552            1.111842751           -0.330654937
+   0.443347            1.097153674           -0.267571555
+   0.491008            1.085766420           -0.216268815
+   0.536537            1.076999571           -0.173226562
+   0.579933            1.070362322           -0.136001888
+   0.621196            1.065485774           -0.102871879
+   0.660326            1.062092080           -0.072800568
+   0.697324            1.059943603           -0.045592895
+   0.732189            1.058815654           -0.020558711
+   0.764921            1.058553893            0.003408693
+   0.795520            1.059031532            0.026047937
+   0.823987            1.060092445            0.046731551
+   0.850321            1.061592454            0.066148362
+   0.874522            1.063435268            0.085944251
+   0.896591            1.065569073            0.103881989
+   0.916527            1.067798755            0.118428987
+   0.934330            1.070038439            0.134514813
+   0.950000            1.072301409            0.144411603

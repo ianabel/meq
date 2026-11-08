@@ -6784,6 +6784,9 @@ int meq::Run::Impl::sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction 
 meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options,
                                                       meq::CriticalPoint const &axis )
 {
+	// On psi~ and q~, the continuous pair (ContourTracer's default): a family
+	// that does not jump as one of its nodes crosses an element face
+	// (CLAUDE_INVERSION.md, IN-0; MEASUREMENTS.md M-364).
 	meq::ContourTracer tracer( *solver );
 
 	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in

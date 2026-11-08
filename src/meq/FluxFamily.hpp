@@ -261,6 +261,18 @@ namespace meq
 		int stalledRays = 0;
 		int fallbackLocations = 0;
 
+		/// THE DISCRETE CHOICES, per node, carried from the fit as diagnostics
+		/// (AngleParametrisation has the account): the element rooted or
+		/// extended, the band face (-1 inside Omega_h), how the ray's search
+		/// ended (meq::RayRoute's values) and its iterations, and the traced
+		/// contour's point count. Read by nothing in an extraction; they say
+		/// which choice changed when the geometry jumps.
+		std::vector<int> elements;
+		std::vector<int> bandFaces;
+		std::vector<char> rayRoutes;
+		std::vector<int> rayIterations;
+		std::size_t tracedPoints = 0;
+
 		std::size_t count() const
 		{
 			return radius.size();
@@ -303,6 +315,11 @@ namespace meq
 		/// Whether safetyFactor was computed. False when the caller supplied no
 		/// g( psi ), in which case the field is zero and must not be read.
 		bool safetyFactorAvailable = false;
+
+		/// The element the located axis was rooted in; the potential the
+		/// level is normalised by is that element's. A diagnostic beside the
+		/// per-node ones. -1 when the axis was handed in without one.
+		int axisElement = -1;
 
 		std::size_t size() const
 		{

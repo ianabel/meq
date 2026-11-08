@@ -1245,7 +1245,9 @@ BOOST_AUTO_TEST_CASE( theRepresentationErrorDoesNotKnowAboutTheMesh )
 		SolvedEquilibrium solved( eq, box, order, meshes[ i ] );
 		meq::CriticalPoint const axis = solved.axis();
 
-		meq::ContourTracer tracer( solved.theSolver() );
+		// psi* and q* BY NAME: what this case measures is that pair's, and the
+		// default pair, psi~ and q~, is continuous where psi* jumps (M-366).
+		meq::ContourTracer tracer( solved.theSolver(), meq::Potential::PostProcessed );
 		useFixedStep( tracer, deltaS );
 		meq::Contour const contour = tracer.traceFromAxis( set.levels[ 0 ], axis );
 
@@ -1611,7 +1613,9 @@ BOOST_AUTO_TEST_CASE( theFaceJumpIsTheDiscretisationAndConvergesAtItsOrder )
 			SolvedEquilibrium solved( eq, box, orders[ o ], meshes[ m ] );
 			meq::CriticalPoint const axis = solved.axis();
 
-			meq::ContourTracer tracer( solved.theSolver() );
+			// psi* and q* BY NAME: what this case measures is that pair's, and the
+			// default pair, psi~ and q~, is continuous where psi* jumps (M-366).
+			meq::ContourTracer tracer( solved.theSolver(), meq::Potential::PostProcessed );
 			useFixedStep( tracer, 0.004 );
 			meq::Contour const contour = tracer.traceFromAxis( set.levels[ 0 ], axis );
 
