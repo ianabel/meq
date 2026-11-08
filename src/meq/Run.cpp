@@ -1347,6 +1347,7 @@ std::shared_ptr<meq::EquilibriumSnapshot const> meq::Run::snapshot()
 		impl->currentSnapshot = taken;
 	}
 	return impl->currentSnapshot;
+}
 
 meq::Run::Impl::ScaleOfAnswer meq::Run::Impl::scaleOfAnswer() const
 {
