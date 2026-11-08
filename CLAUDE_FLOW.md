@@ -100,10 +100,10 @@ calls `setPlasmaSupport( true )` on whatever normalised source it built — so
 `ConfineToPlasma = true` parsed, reported nothing and solved the unconfined
 problem.
 
-**AND IT WAS WORSE THAN A MISSING ZERO, BECAUSE THE PROFILES CLAMP.**
-`meq::SplineProfile` holds its endpoint value outside the knot range, so an
-ungated source does not tail off outside the plasma: it sits at its
-plasma-edge value out to the wall. Measured on a source with `gg' = 1`,
+**AND IT WAS WORSE THAN A MISSING ZERO, BECAUSE THE PROFILES EXTEND.**
+`meq::SplineProfile` continues past its knot range from its end value and slope
+and flattens within a tenth of the span, so an ungated source does not tail off
+outside the plasma: it sits near its plasma-edge value out to the wall. Measured on a source with `gg' = 1`,
 `ψ_ax = 1`, `ψ_bnd = 0`: `f( R = 1, Ψ = −0.5 )` returned **1.0** where the MHD
 source under the identical flag returns **0**. That is a current density filling
 the vacuum region.

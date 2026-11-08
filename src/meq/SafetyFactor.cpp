@@ -142,12 +142,199 @@ namespace meq
 			} );
 
 		lastGood = coefficients;
+		labels = inverted.normalisedFlux;
 		std::vector<double> const fitted =
 			fitToroidalFieldSquared( inverted, options.degree );
 		lastFloor = toroidalMapFloor( inverted, options.degree,
 		                              options.solveAccuracy );
+		lastOrthonormalFloor = toroidalMapFloorOrthonormal(
+			inverted, options.degree, options.solveAccuracy );
 		stageChecksum( "toroidalMap.out", fitted );
 		return fitted;
+	}
+
+	PinnedToroidalFieldMap::PinnedToroidalFieldMap( ToroidalFieldMap &map,
+	                                                unsigned int degree, Pin pin )
+		: map( map ), degree( degree ), pin( std::move( pin ) )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: a degree-zero g^2 has no q "
+				"condition to give way" );
+		if ( !std::isfinite( this->pin.value ) || this->pin.value == 0.0 )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: the pinned value must be finite "
+				"and non-zero" );
+		if ( this->pin.kind == ScalePin::EdgeField && !( this->pin.value > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: g on the boundary is pinned as a "
+				"magnitude, so it must be positive; its sign is q's (see "
+				"section 3)" );
+		if ( this->pin.kind != ScalePin::EdgeField && !this->pin.measured )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: a current or flux pin is a row of "
+				"the outer system and needs the solved state's own value" );
+		if ( !( this->pin.weight > 0.0 ) || !std::isfinite( this->pin.weight ) )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap: the pin row's weight must be "
+				"positive" );
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::unknowns(
+		std::vector<double> const &coefficients ) const
+	{
+		if ( coefficients.size() != degree + 1 )
+			throw std::invalid_argument(
+				"meq::PinnedToroidalFieldMap::unknowns: the coefficients are not "
+				"of this degree" );
+		if ( pin.kind == ScalePin::EdgeField )
+			return std::vector<double>( coefficients.begin() + 1, coefficients.end() );
+		return coefficients;
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::coefficients(
+		std::vector<double> const &unknowns ) const
+	{
+		if ( pin.kind != ScalePin::EdgeField )
+			return unknowns;
+		std::vector<double> out;
+		out.reserve( unknowns.size() + 1 );
+		out.push_back( pin.value*pin.value );
+		out.insert( out.end(), unknowns.begin(), unknowns.end() );
+		return out;
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::operator()(
+		std::vector<double> const &unknowns )
+	{
+		/*
+		 * A REFUSAL POINTS BACK AT THE LAST ADMISSIBLE POINT, as the free
+		 * map's does: finite, and zero nowhere but at a point that really was
+		 * evaluated.
+		 *
+		 * **AND IT IS NEVER SMALLER THAN ANY RESIDUAL THE MAP HAS RETURNED.**
+		 * `lastGood - x` alone is large only where the iterate has WANDERED:
+		 * when the last admissible point is a differencing column a step away,
+		 * a refused trial point beside it reads a residual smaller than the
+		 * iterate's own, the line search's Armijo test accepts it, and the
+		 * loop then sits on a point the map cannot evaluate. Measured on
+		 * QDrivenScalePin's base run in single: accepted at 0.16 from 0.50,
+		 * stalled there at 0.14 (MEASUREMENTS.md M-358). Scaled to twice the
+		 * largest admissible 2-norm seen, a refusal fails every sufficient-
+		 * decrease test the loop can pose.
+		 */
+		auto refuse = [ & ]
+		{
+			lastWasRefused = true;
+			std::vector<double> out( unknowns.size() );
+			std::vector<double> back( unknowns.size() );
+			double length = 0.0;
+			for ( std::size_t i = 0; i < unknowns.size(); ++i )
+			{
+				back[ i ] = lastGood.size() == unknowns.size()
+				            ? lastGood[ i ] - unknowns[ i ] : -1.0;
+				length += back[ i ]*back[ i ];
+			}
+			length = std::sqrt( length );
+			double const scale = length > 0.0
+				? std::max( 1.0, 2.0*largestResidual/length ) : 1.0;
+			for ( std::size_t i = 0; i < unknowns.size(); ++i )
+				out[ i ] = unknowns[ i ] + scale*back[ i ];
+			return out;
+		};
+		lastWasRefused = false;
+
+		std::vector<double> const c = coefficients( unknowns );
+		int const refusedBefore = map.refusals();
+		std::vector<double> const image = map( c );
+		if ( map.refusals() != refusedBefore )
+			return refuse();
+
+		double measured = 0.0;
+		if ( pin.kind != ScalePin::EdgeField )
+		{
+			try
+			{
+				measured = pin.measured( c );
+			}
+			catch ( ... )
+			{
+				return refuse();
+			}
+			if ( !std::isfinite( measured ) )
+				return refuse();
+		}
+
+		/*
+		 * THE FIT'S ORTHONORMAL COORDINATES, on the labels this step was fitted
+		 * on -- the same Vandermonde in the SOURCE's Psi that
+		 * fitToroidalFieldSquared() solves, so `y = R c` is the coefficient
+		 * vector's own discrete L2 coordinate over the surfaces.
+		 */
+		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
+		Eigen::MatrixXd const r = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic,
+			Eigen::Dynamic, Eigen::RowMajor> const>(
+			fitOrthonormalFactor( map.lastLabels(), degree ).data(), terms, terms );
+
+		Eigen::VectorXd difference( terms );
+		for ( Eigen::Index j = 0; j < terms; ++j )
+			difference( j ) = image[ static_cast<std::size_t>( j ) ]
+			                  - c[ static_cast<std::size_t>( j ) ];
+		Eigen::VectorXd const y = r*difference;
+
+		// y_d GIVES WAY: rows y_0 .. y_{d-1}, and the pin's row after them.
+		std::vector<double> residual( static_cast<std::size_t>( terms - 1 ) );
+		for ( Eigen::Index j = 0; j + 1 < terms; ++j )
+			residual[ static_cast<std::size_t>( j ) ] = y( j );
+		if ( pin.kind != ScalePin::EdgeField )
+			residual.push_back( pin.weight*( measured - pin.value )/pin.value );
+
+		/*
+		 * THE FLOOR, IN THE COORDINATES THE ROWS ARE IN. The fit rows are
+		 * `y`, whose noise is the map's orthonormal floor directly -- not the
+		 * monomial floor times R's row sum, which charged every row the top
+		 * coefficient's noise, 600 times what single precision measures
+		 * (M-359). The pin row is one quantity solved to the inner solve's
+		 * relative accuracy: four standard deviations of it, times the
+		 * weight.
+		 */
+		lastFloor = map.orthonormalFloor();
+		if ( pin.kind != ScalePin::EdgeField )
+			lastFloor = std::max( lastFloor, pin.weight*4.0*map.solveAccuracy() );
+		lastLabels = map.lastLabels();
+
+		double norm = 0.0;
+		for ( double value : residual )
+			norm += value*value;
+		largestResidual = std::max( largestResidual, std::sqrt( norm ) );
+		lastGood = unknowns;
+		measuredValue = measured;
+		std::vector<double> out( unknowns.size() );
+		for ( std::size_t i = 0; i < unknowns.size(); ++i )
+			out[ i ] = unknowns[ i ] + residual[ i ];
+		return out;
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::differenceBasis() const
+	{
+		if ( lastLabels.empty() )
+			return {};
+		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
+		Eigen::MatrixXd const r = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic,
+			Eigen::Dynamic, Eigen::RowMajor> const>(
+			fitOrthonormalFactor( lastLabels, degree ).data(), terms, terms );
+		// Under EdgeField c_0 is held, so the unknowns' coordinates are R's
+		// block on c_1 .. c_d -- y_1 .. y_d at fixed c_0.
+		Eigen::MatrixXd const block = pin.kind == ScalePin::EdgeField
+			? Eigen::MatrixXd( r.bottomRightCorner( terms - 1, terms - 1 ) ) : r;
+		Eigen::MatrixXd const basis =
+			block.triangularView<Eigen::Upper>().solve(
+				Eigen::MatrixXd::Identity( block.rows(), block.cols() ) );
+		std::vector<double> out( static_cast<std::size_t>( basis.size() ) );
+		for ( Eigen::Index i = 0; i < basis.rows(); ++i )
+			for ( Eigen::Index j = 0; j < basis.cols(); ++j )
+				out[ static_cast<std::size_t>( i*basis.cols() + j ) ] = basis( i, j );
+		return out;
 	}
 
 	std::vector<double> monotoneSlopes( std::vector<double> const &x,
@@ -329,9 +516,9 @@ namespace meq
 		if ( extension == EdgeExtension::VacuumOutside )
 		{
 			// Psi = 0 is the plasma edge. Outside it the toroidal field is the
-			// vacuum one, g = const, so gg' = 0 -- and a knot there is what
-			// makes SplineProfile's clamp carry that rather than the innermost
-			// value it happens to hold. Only added when the family does not
+			// vacuum one, g = const, so gg' = 0 -- and a knot there, value and
+			// slope zero, is what makes SplineProfile's continuation carry that
+			// rather than the innermost value and slope it happens to hold. Only added when the family does not
 			// already reach the edge, which it does not by construction.
 			if ( knots.front().psi > 0.0 )
 			{
@@ -396,6 +583,88 @@ namespace meq
 		for ( std::size_t j = 0; j < terms; ++j )
 			out[ j ] = solution( static_cast<Eigen::Index>( j ) );
 		return out;
+	}
+
+	namespace
+	{
+		Eigen::MatrixXd designOn( std::vector<double> const &labels,
+		                          std::size_t terms )
+		{
+			Eigen::MatrixXd design( static_cast<Eigen::Index>( labels.size() ),
+			                        static_cast<Eigen::Index>( terms ) );
+			for ( std::size_t i = 0; i < labels.size(); ++i )
+			{
+				double const psi = 1.0 - labels[ i ];
+				double power = 1.0;
+				for ( std::size_t j = 0; j < terms; ++j )
+				{
+					design( static_cast<Eigen::Index>( i ),
+					        static_cast<Eigen::Index>( j ) ) = power;
+					power *= psi;
+				}
+			}
+			return design;
+		}
+	}
+
+	std::vector<double> fitOrthonormalFactor( std::vector<double> const &labels,
+	                                          unsigned int degree )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::fitOrthonormalFactor: a degree of zero is not a fit" );
+		std::size_t const terms = degree + 1;
+		if ( labels.size() < terms )
+			throw std::invalid_argument(
+				"meq::fitOrthonormalFactor: fewer surfaces than coefficients" );
+		requireAscending( labels, "meq::fitOrthonormalFactor" );
+		Eigen::HouseholderQR<Eigen::MatrixXd> const qr( designOn( labels, terms ) );
+		Eigen::Index const n = static_cast<Eigen::Index>( terms );
+		Eigen::MatrixXd const r =
+			Eigen::MatrixXd( qr.matrixQR().topRows( n ).triangularView<Eigen::Upper>() )
+			/std::sqrt( static_cast<double>( labels.size() ) );
+		std::vector<double> out( terms*terms );
+		for ( Eigen::Index i = 0; i < n; ++i )
+			for ( Eigen::Index j = 0; j < n; ++j )
+				out[ static_cast<std::size_t>( i*n + j ) ] = r( i, j );
+		return out;
+	}
+
+	double toroidalMapFloorOrthonormal( ToroidalField const &field,
+	                                    unsigned int degree,
+	                                    double solveAccuracy )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::toroidalMapFloorOrthonormal: a degree of zero is not a fit" );
+		std::size_t const terms = degree + 1;
+		if ( field.size() < terms || field.gSquared.size() != field.size() )
+			throw std::invalid_argument(
+				"meq::toroidalMapFloorOrthonormal: the family has fewer surfaces "
+				"than the fit has coefficients, or no g^2 on each of them" );
+		requireAscending( field.normalisedFlux, "meq::toroidalMapFloorOrthonormal" );
+
+		// R P = Q^T/sqrt( N ): the thin Q of the design, whose columns are
+		// orthonormal over the surfaces.
+		Eigen::HouseholderQR<Eigen::MatrixXd> const qr(
+			designOn( field.normalisedFlux, terms ) );
+		Eigen::Index const rows = static_cast<Eigen::Index>( field.size() );
+		Eigen::MatrixXd const q = qr.householderQ()
+			*Eigen::MatrixXd::Identity( rows, static_cast<Eigen::Index>( terms ) );
+		double const scale = 1.0/std::sqrt( static_cast<double>( field.size() ) );
+		double worst = 0.0;
+		for ( Eigen::Index k = 0; k < q.cols(); ++k )
+		{
+			double sum = 0.0;
+			for ( Eigen::Index i = 0; i < rows; ++i )
+			{
+				double const term = scale*q( i, k )
+				                    *field.gSquared[ static_cast<std::size_t>( i ) ];
+				sum += term*term;
+			}
+			worst = std::max( worst, std::sqrt( sum ) );
+		}
+		return 4.0*4.0*std::abs( solveAccuracy )*worst;
 	}
 
 	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,

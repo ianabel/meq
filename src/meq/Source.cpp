@@ -29,6 +29,12 @@ namespace meq
 		return permeability*radius*radius*pPrimeProfile->prime( psi ) + ggPrimeProfile->prime( psi );
 	}
 
+	void MHDSource::tableReach( double psiLow, double psiHigh, TableReach &out ) const
+	{
+		pPrimeProfile->tableReach( psiLow, psiHigh, out );
+		ggPrimeProfile->tableReach( psiLow, psiHigh, out );
+	}
+
 	Profile const & MHDSource::pPrime() const
 	{
 		return *pPrimeProfile;
@@ -200,6 +206,15 @@ namespace meq
 		dFdAxis = -currentScale()*( gPrime*psiN + g )/( span*span );
 		dFdBoundary = currentScale()*( gPrime*( psiN - 1.0 ) + g )/( span*span );
 		return true;
+	}
+
+	void NormalisedMHDSource::tableReach( double psiLow, double psiHigh, TableReach &out ) const
+	{
+		double const span = psiAxisValue - psiBoundaryValue;
+		double const a = ( psiLow - psiBoundaryValue )/span;
+		double const b = ( psiHigh - psiBoundaryValue )/span;
+		pPrimeProfile->tableReach( std::min( a, b ), std::max( a, b ), out );
+		ggPrimeProfile->tableReach( std::min( a, b ), std::max( a, b ), out );
 	}
 
 	Profile const & NormalisedMHDSource::pPrime() const

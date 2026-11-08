@@ -1364,6 +1364,9 @@ namespace meq
 			bool crossingDerivatives( double radius, double z, double psi,
 			                          double &dFdW, double &dFdWPrime ) const override;
 
+			/// The wrapped source's: a coil's current reads no table.
+			void tableReach( double psiLow, double psiHigh, TableReach &out ) const override;
+
 			/// FORWARDED, for the third time and for the same reason: the scale
 			/// belongs to the plasma term and a COIL IS NOT SCALED. Its current
 			/// is amperes and is prescribed input, so scaling it would make the

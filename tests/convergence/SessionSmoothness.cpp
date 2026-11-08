@@ -20,7 +20,7 @@
  *
  * MaNTA differences its equilibrium model at relative steps of 1e-8, so G
  * must be continuous there, and the noise of a resolve below 1e-12 of its
- * value. What breaks continuity is measured (M-SHAPE-1): a flux-surface node
+ * value. What breaks continuity is measured (M-363): a flux-surface node
  * whose ray root crosses an element face, onto a broken field's other
  * polynomial. A scan that happens to straddle no crossing passes whatever the
  * extraction does, so this test FINDS one: Omega is stepped from the base
@@ -106,7 +106,7 @@ BOOST_AUTO_TEST_CASE( theGeometryIsContinuousWhereANodeCrossesAFace )
 		"stops at the round-off floor, M-306)." );
 
 	// A CROSSING: Omega stepped by 1e-4 until a node changes element. The box
-	// meets about 1.4 a step (M-SHAPE-1), so twenty steps is a wide margin.
+	// meets about 1.4 a step (M-363), so twenty steps is a wide margin.
 	double const step = 1.0e-4;
 	double lo = 0.0, hi = 0.0;
 	Family left = at( 0.0, base )->family, right;
@@ -168,6 +168,6 @@ BOOST_AUTO_TEST_CASE( theGeometryIsContinuousWhereANodeCrossesAFace )
 		"G jumps by " << jump << " of " << quantityName( worst ) << " on surface " << surface
 		<< " where its node " << node << " crosses from element " << leftElement << " to "
 		<< rightElement << ", within 1e-9 of Omega. A central difference at MaNTA's 1.5e-8 straddling "
-		"it is wrong by the jump over the step (M-SHAPE-1). What removes it is an extraction "
-		"continuous in the solved state -- MANTA-EQUILIBRIUM-PLAN.md section 4.5, M-SHAPE-2." );
+		"it is wrong by the jump over the step (M-363). What removes it is an extraction "
+		"continuous in the solved state -- MANTA-EQUILIBRIUM-PLAN.md section 4.5, M-364." );
 }

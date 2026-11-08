@@ -2201,12 +2201,17 @@ plasma fifteen times too weak — which for a while looked like a failure of the
 amplitude-fixed formulation and was not.
 
 **AND A TABULATED NORMALISED PROFILE MUST COVER THE RANGE THE ITERATE VISITS.**
-`meq::SplineProfile` **clamps** outside its knots — deliberately, since a linear
-extrapolation of a steep edge profile turns an overshoot into a NaN — but a table
-that STOPS at `Ψ = 0` does not describe the same source as one that continues:
-it switches `F` off outside the plasma while leaving `∂F/∂ψ` discontinuous there,
-which is a moving support imposed by the *table* rather than by the solver. Three
-spellings of one configuration, all of which parse:
+`meq::SplineProfile` **continues** past its knots from the end value and slope
+and **flattens within a tenth of the span** — not linearly all the way, since a
+linear extrapolation of a steep edge profile turns an overshoot into a runaway,
+measured to cost a shipped machine case its convergence
+(→ **[M-360](MEASUREMENTS.md#m-360)**). But a table that STOPS
+at `Ψ = 0` does not describe the same source as one that continues: past the
+end it reads MEQ's taper, not the profile, and the driver warns when a solution
+does. Under a clamp past the knots, which M-32 was measured with, the table
+switched `F` off outside the plasma while leaving `∂F/∂ψ` discontinuous there, a
+moving support imposed by the *table* rather than by the solver. Three spellings
+of one configuration, all of which parse:
 
 → **[M-32](MEASUREMENTS.md#m-32)** — table over `[0, 1]`
 

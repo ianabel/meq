@@ -2338,6 +2338,17 @@ namespace meq
 			/// setInitialState() on another solver over the same mesh.
 			mfem::Vector const &state() const;
 
+			/**
+			 * HOW FAR THE SOLVED STATE READ PAST THE SOURCE'S TABLES: psi over
+			 * meq::SourceIntegrator's quadrature points where F is evaluated
+			 * -- the elements the plasma reaches and, under a support, the
+			 * points inside it -- handed to Source::tableReach(). A table is
+			 * continued linearly past its ends (meq::SplineProfile), so this is
+			 * the only place a read out there shows; meq::Run warns above
+			 * meq::tableReachWarning of a table's span. After a solve.
+			 */
+			TableReach sourceTableReach() const;
+
 			/// Elements the fill reached: the plasma. Zero when no fill is live.
 			int plasmaComponentElements() const;
 
@@ -4540,6 +4551,40 @@ namespace meq
 			double plasmaCurrent() const;
 
 			/**
+			 * `int F_plasma/R` over the domain at the CURRENT STATE, `mu0 I_p`,
+			 * whether or not the current is a border unknown -- the same
+			 * quadrature the current row is assembled from, so on a solve with
+			 * setPlasmaCurrent() it is plasmaCurrent() to round-off.
+			 *
+			 * **IT IS WHAT THE q-DRIVEN LOOP'S CURRENT PIN READS.** There the
+			 * current selects one member of the family of equilibria sharing
+			 * `p( Psi_N )` and `q( Psi_N )`, and it does so as a row of the
+			 * OUTER system with the profile scale left at one: a border here
+			 * would rescale `p` and `g g'` together, and the loop would then
+			 * fit a `g^2` the equilibrium does not have
+			 * (MEASUREMENTS.md M-356).
+			 *
+			 * Over `Omega_h`: on a curved boundary the band's sliver of current
+			 * is not counted, as it is not by the current row.
+			 */
+			double deliveredPlasmaCurrent() const;
+
+			/**
+			 * `int f( R, z, psi_h ) dR dz` over `Omega_h` at the current state:
+			 * the potential `psi_h` at each quadrature point, two orders above
+			 * the field's as the source rule takes. Serial and on the host.
+			 *
+			 * **WHAT THE q-DRIVEN LOOP'S TOROIDAL-FLUX PIN READS**: the
+			 * delivered `Phi = int_plasma g( psi )/R dA` of the equilibrium the
+			 * loop solved, with `f` zero outside the plasma (MEASUREMENTS.md
+			 * M-362). Over `Omega_h`, as
+			 * deliveredPlasmaCurrent() is: a curved boundary's band is not
+			 * counted.
+			 */
+			double integrateOverDomain(
+				std::function<double( double radius, double z, double psi )> const &integrand ) const;
+
+			/**
 			 * `d( mu0 I_p )/d lambda` ALONG THE SOLUTION MANIFOLD -- how much
 			 * current the profile scale actually BUYS, with the field, the
 			 * normalisation, the X-point and the exterior all re-solving.
@@ -5102,7 +5147,7 @@ namespace meq
 			 * density is within this model zero. That is a modelling choice and
 			 * the answer can contradict it: where the plasma still carries
 			 * current at `|z| = z_edge` the cutoff is a jump in `F`, and the
-			 * profiles' own clamping does not soften it. This is the number
+			 * profiles' own continuation does not soften it. This is the number
 			 * that says how large the jump is.
 			 *
 			 * `F/R` is `mu_0 j_phi`, so every field below is a current density
@@ -5578,7 +5623,7 @@ namespace meq
 			/// CONTINUOUS pair the flux-surface extraction roots and weights
 			/// by, interpolated by moments from psi*, psihat and q*
 			/// (ContinuousField.hpp, MANTA-EQUILIBRIUM-PLAN.md section 4.5,
-			/// M-SHAPE-2). Built on first use after postProcess() and kept
+			/// M-364). Built on first use after postProcess() and kept
 			/// until the next solve or post-processing; the build threads
 			/// and is the serial one bit for bit.
 			/// @throws std::logic_error before postProcess().

@@ -250,9 +250,9 @@ BOOST_AUTO_TEST_CASE( a_corrupt_family_is_refused_at_the_division )
  * THE EDGE EXTENSION IS A STATEMENT ABOUT THE PHYSICS AND THE CALLER MAKES IT.
  *
  * A family stops short of the plasma edge -- Psi_N = 0.95 as shipped, i.e.
- * Psi = 0.05 -- and SplineProfile CLAMPS outside its knots. Clamping carries
- * the innermost gg' out past the edge, which keeps g^2 growing where the field
- * should be the vacuum one. VacuumOutside puts a knot at Psi = 0 carrying zero
+ * Psi = 0.05 -- and SplineProfile continues linearly outside its knots, which
+ * carries the innermost gg' and its slope out past the edge and keeps g^2
+ * growing where the field should be the vacuum one. VacuumOutside puts a knot at Psi = 0 carrying zero
  * instead. Neither is right for every run: with [source] ConfineToPlasma the
  * source is switched off out there and the question does not arise at all.
  */
@@ -485,4 +485,131 @@ BOOST_AUTO_TEST_CASE( the_map_floor_is_the_fit_propagating_the_solve )
 	                   std::invalid_argument );
 	BOOST_CHECK_THROW( meq::toroidalMapFloor( field, 0, accuracy ),
 	                   std::invalid_argument );
+}
+
+/*
+ * THE PINNED SYSTEM DROPS THE FIT'S HIGHEST ORTHONORMAL ROW, AND ONLY IT.
+ *
+ * meq::PinnedToroidalFieldMap keeps the q-driven system square by letting one
+ * q condition give way: the misfit it leaves is a multiple of the highest
+ * orthogonal polynomial over the surfaces' labels. So a point whose misfit is
+ * EXACTLY that polynomial is a root, and one whose misfit is Psi^2 -- the
+ * axis-limit condition, M-355's runner-up -- is not. Which condition gives
+ * way is part of the problem posed, and the three pins compose only because it
+ * is the same under each (M-357), so it is pinned here, without a mesh.
+ *
+ * The family inverts to a constant g = 2 whatever it is asked, so the map
+ * returns c = ( 4, 0, 0 ) at every admissible point.
+ */
+BOOST_AUTO_TEST_CASE( the_pinned_system_lets_the_highest_fit_row_give_way )
+{
+	std::vector<double> const label = { 0.10, 0.30, 0.50, 0.70, 0.90 };
+	meq::FluxSurfaceFamily const family = familyOf(
+		label, std::vector<double>( label.size(), 3.0 ),
+		std::vector<double>( label.size(), 0.5 ) );
+	auto solve = [ & ]( std::vector<meq::Knot> const & ) { return &family; };
+	meq::ToroidalFieldMap::Options options;
+	options.degree = 2;
+	// q = g V' < R^-2 >/4 pi^2 with g = 2, V' = 3 and < R^-2 > = 0.5.
+	options.target = []( double ) { return 2.0*3.0*0.5/( 4.0*M_PI*M_PI ); };
+	meq::ToroidalFieldMap map( solve, options );
+
+	// The degree-2 orthogonal polynomial over the labels, in the SOURCE's Psi:
+	// Psi^2 - a Psi - b, orthogonal to 1 and Psi over the surfaces.
+	double s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0;
+	for ( double l : label )
+	{
+		double const psi = 1.0 - l;
+		s0 += 1.0;
+		s1 += psi;
+		s2 += psi*psi;
+		s3 += psi*psi*psi;
+	}
+	double const determinant = s1*s1 - s0*s2;
+	double const a = ( s2*s1 - s0*s3 )/determinant;
+	double const b = ( s1*s3 - s2*s2 )/determinant;
+	std::vector<double> const orthogonal = { -b, -a, 1.0 };
+
+	meq::PinnedToroidalFieldMap::Pin pin;
+	pin.kind = meq::ScalePin::ToroidalFlux;
+	pin.value = 0.25;
+	pin.measured = []( std::vector<double> const & ) { return 0.25; };
+	meq::PinnedToroidalFieldMap pinned( map, 2, pin );
+
+	auto residualAt = [ & ]( std::vector<double> const &c )
+	{
+		std::vector<double> const image = pinned( c );
+		double worst = 0.0;
+		for ( std::size_t i = 0; i < c.size(); ++i )
+			worst = std::max( worst, std::abs( image[ i ] - c[ i ] ) );
+		return worst;
+	};
+
+	std::vector<double> alongHighest( 3 ), alongAxis = { 4.0, 0.0, -0.3 };
+	for ( std::size_t i = 0; i < 3; ++i )
+		alongHighest[ i ] = ( i == 0 ? 4.0 : 0.0 ) - 0.3*orthogonal[ i ];
+	BOOST_TEST( residualAt( alongHighest ) < 1.0e-13,
+		"a misfit along the highest orthogonal polynomial is not a root of the "
+		"pinned system, so some other q condition is giving way" );
+	BOOST_TEST( residualAt( alongAxis ) > 1.0e-3,
+		"a misfit along Psi^2 is a root: the axis-limit condition is giving way "
+		"where the highest fit row should" );
+
+	// THE PIN ROW: the same point, a pinned value it does not have.
+	pin.measured = []( std::vector<double> const & ) { return 0.30; };
+	meq::PinnedToroidalFieldMap mismatched( map, 2, pin );
+	std::vector<double> const off = mismatched( alongHighest );
+	BOOST_TEST( std::abs( off[ 2 ] - alongHighest[ 2 ] - 0.2 ) < 1.0e-13,
+		"the pin row is weight ( m - m* )/m* = 0.2 and reads " << off[ 2 ] - alongHighest[ 2 ] );
+	BOOST_TEST( !mismatched.lastRefused() );
+
+	// A REFUSAL BESIDE THE LAST ADMISSIBLE POINT IS STILL LARGE (M-358): its
+	// residual is never under twice the largest the map has returned, here
+	// 0.2, so the line search cannot accept it -- however near the last
+	// admissible point it lies. g^2 = 4 - 5 Psi goes negative on [ 0, 1 ].
+	std::vector<double> const inadmissible = { 4.0, -5.0, 0.0 };
+	std::vector<double> const pointedBack = mismatched( inadmissible );
+	BOOST_TEST( mismatched.lastRefused() );
+	double length = 0.0;
+	for ( std::size_t i = 0; i < 3; ++i )
+		length += ( pointedBack[ i ] - inadmissible[ i ] )*( pointedBack[ i ] - inadmissible[ i ] );
+	BOOST_TEST( std::sqrt( length ) >= 0.4 - 1.0e-14,
+		"a refusal's residual is " << std::sqrt( length ) << ", under twice the largest "
+		"admissible one, 0.2: a line search may accept the refused point" );
+
+	// R0B0: c_0 leaves the unknowns and is held at g_edge^2 -- here the
+	// point's own, so the point is a root of the held system as well.
+	meq::PinnedToroidalFieldMap::Pin edge;
+	edge.kind = meq::ScalePin::EdgeField;
+	edge.value = std::sqrt( alongHighest[ 0 ] );
+	meq::PinnedToroidalFieldMap held( map, 2, edge );
+	std::vector<double> const unknowns = held.unknowns( alongHighest );
+	BOOST_TEST_REQUIRE( unknowns.size() == 2u );
+	std::vector<double> const back = held.coefficients( unknowns );
+	BOOST_TEST_REQUIRE( back.size() == 3u );
+	for ( std::size_t i = 0; i < 3; ++i )
+		BOOST_TEST( std::abs( back[ i ] - alongHighest[ i ] ) < 1.0e-14 );
+	std::vector<double> const step = held( unknowns );
+	BOOST_TEST_REQUIRE( step.size() == 2u );
+	for ( std::size_t i = 0; i < 2; ++i )
+		BOOST_TEST( std::abs( step[ i ] - unknowns[ i ] ) < 1.0e-13,
+			"R0B0 held at the point's own g_edge does not leave it a root" );
+
+	// AND A PIN THAT CANNOT BE READ IS A REFUSAL, pointing back at the last
+	// admissible point rather than throwing into KINSOL.
+	pin.measured = []( std::vector<double> const & ) -> double { throw std::runtime_error( "no state" ); };
+	meq::PinnedToroidalFieldMap unreadable( map, 2, pin );
+	std::vector<double> refused;
+	BOOST_CHECK_NO_THROW( refused = unreadable( alongAxis ) );
+	for ( std::size_t i = 0; i < 3; ++i )
+		BOOST_TEST( refused[ i ] == alongAxis[ i ] - 1.0 );
+
+	// Values that pin nothing are refused at construction.
+	edge.value = -2.0;
+	BOOST_CHECK_THROW( meq::PinnedToroidalFieldMap( map, 2, edge ), std::invalid_argument );
+	pin.value = 0.0;
+	BOOST_CHECK_THROW( meq::PinnedToroidalFieldMap( map, 2, pin ), std::invalid_argument );
+	pin.value = 0.25;
+	pin.measured = nullptr;
+	BOOST_CHECK_THROW( meq::PinnedToroidalFieldMap( map, 2, pin ), std::invalid_argument );
 }

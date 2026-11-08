@@ -193,9 +193,9 @@ namespace
  *
  * AND THE KNOTS MUST SPAN THE WHOLE OF Psi, WHICH IS THE ONE THAT LOOKED LIKE
  * PHYSICS AND WAS ARITHMETIC. Laying them only over the family's own range and
- * letting SplineProfile clamp gives a profile that differs from the closed form
- * exactly where it clamps -- so the outer residual AT THE ANSWER was 1.3e-01
- * rather than zero, and both outer methods converged, correctly, to a fixed
+ * letting SplineProfile extend them gives a profile that differs from the
+ * closed form exactly where it extends -- with a clamp past the knots the
+ * outer residual AT THE ANSWER was 1.3e-01 rather than zero, and both outer methods converged, correctly, to a fixed
  * point that was not it. theOuterResidualsConditioningAtTheAnswer is the
  * measurement that found it and now guards it: 4.9e-13, on a Jacobian whose
  * degeneracy measure is 0.12.

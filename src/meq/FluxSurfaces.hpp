@@ -391,10 +391,10 @@
  * DIFFERENCES THE GEOMETRY. psi* and q* are broken across every face, so a
  * family node whose root slides across one lands on the other polynomial and
  * the family jumps -- by less than its own error, but a difference at a
- * relative step of 1e-8 divides the jump by the step (M-SHAPE-1). psi~ and q~
+ * relative step of 1e-8 divides the jump by the step (M-363). psi~ and q~
  * are interpolated from psi*, psihat and q* into H1 by moments
  * (ContinuousField.hpp): continuous, of psi*'s order, and a family extracted
- * on them moves by less than its discretisation error (M-SHAPE-2).
+ * on them moves by less than its discretisation error (M-364).
  *
  * WHAT THIS IS NOT.
  *
@@ -485,9 +485,9 @@ namespace meq
 		/// CONTINUOUS, interpolated by moments from psi*, psihat and q*
 		/// (ContinuousField.hpp). THE DEFAULT, and the only pair a run
 		/// extracts with: on psi* and q*, broken across every face, a node
-		/// crossing a face makes the geometry jump (M-SHAPE-1); on these it
+		/// crossing a face makes the geometry jump (M-363); on these it
 		/// does not, and the geometry stays inside psi*'s own discretisation
-		/// error (M-SHAPE-2). Requires postProcess(), as PostProcessed does.
+		/// error (M-364). Requires postProcess(), as PostProcessed does.
 		Continuous
 	};
 
@@ -1526,7 +1526,7 @@ namespace meq
 		/// was extended from (-1 inside Omega_h), how the ray's search ended,
 		/// and its iterations. Nothing reads them back into an extraction;
 		/// they are how a jump in the geometry is traced to the choice that
-		/// made it (SessionSmoothness, M-SHAPE-1). A node whose element
+		/// made it (SessionSmoothness, M-363). A node whose element
 		/// changes between two nearby states has crossed a face, and the root
 		/// moves by the DG jump over | grad psi |.
 		std::vector<int> element;

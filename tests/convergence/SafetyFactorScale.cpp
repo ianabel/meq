@@ -136,7 +136,26 @@ namespace
 		bool ok = false;
 		Eigen::VectorXd fitted;
 		double located = 0.0;
+
+		/// meq::toroidalMapFloorOrthonormal() here: the noise on @ref fitted
+		/// in the fit's orthonormal coordinates.
+		double floor = 0.0;
 	};
+
+	/*
+	 * THE DIFFERENCES ARE TAKEN IN THE FIT'S ORTHONORMAL COORDINATES, y = R c,
+	 * and the step is the production loop's: the least asked for, raised to
+	 * 100 map floors measured in those coordinates (meq::solveForToroidalField
+	 * with meq::PinnedToroidalFieldMap::differenceBasis()). There the map's
+	 * noise is uniform; in the monomial coefficients the top one's is 1/R_dd
+	 * times the rest -- 3.5e-3 at degree 4 in single, where a fixed 1e-3 in c
+	 * lifted the free sigma_min this file exists to show is near-null from
+	 * 3.6e-4 to 1.5e-3 (MEASUREMENTS.md M-358, M-359).
+	 */
+	double differenceStep( double least, Step const &at )
+	{
+		return std::max( least, 100.0*at.floor );
+	}
 
 	struct Fixture
 	{
@@ -246,6 +265,8 @@ namespace
 			out.fitted = Eigen::Map<Eigen::VectorXd const>(
 				fitted.data(), static_cast<Eigen::Index>( fitted.size() ) );
 			out.located = family.psiAxis;
+			out.floor = meq::toroidalMapFloorOrthonormal( inverted,
+				static_cast<unsigned int>( c.size() - 1 ), meq::newtonTolerance( 1.0e-12 ) );
 			out.ok = true;
 			if ( keep )
 			{
@@ -306,19 +327,22 @@ namespace
 			if ( !at.ok )
 				return out;
 			out.residual = assemble( at, c );
-			for ( int j = 0; j <= degree; ++j )
+			double const step = differenceStep( 1.0e-3, at );
+			Eigen::MatrixXd const toC = r.inverse();
+			Eigen::MatrixXd alongY( degree + 2, degree + 1 );
+			for ( int k = 0; k <= degree; ++k )
 			{
-				double const step = 1.0e-3;
-				Eigen::VectorXd plus = c, minus = c;
-				plus( j ) += step;
-				minus( j ) -= step;
+				Eigen::VectorXd const plus = c + step*toC.col( k );
+				Eigen::VectorXd const minus = c - step*toC.col( k );
 				Step const up = fixture.evaluate( plus, held, 1.0 );
 				Step const down = fixture.evaluate( minus, held, 1.0 );
 				if ( !up.ok || !down.ok )
 					return out;
-				out.jacobian.col( j ) = ( assemble( up, plus ) - assemble( down, minus ) )
-				                        /( 2.0*step );
+				alongY.col( k ) = ( assemble( up, plus ) - assemble( down, minus ) )
+				                  /( 2.0*step );
 			}
+			// Columns in c, as the tall system's singular values are quoted.
+			out.jacobian = alongY*r;
 			Eigen::VectorXd const dc =
 				out.jacobian.colPivHouseholderQr().solve( -out.residual );
 			c += dc;
@@ -345,26 +369,28 @@ namespace
 		Eigen::VectorXd located;
 	};
 
-	FreeJacobian freeJacobian( Fixture &fixture, Eigen::VectorXd const &c, double step )
+	FreeJacobian freeJacobian( Fixture &fixture, Eigen::VectorXd const &c, double least )
 	{
 		int const degree = static_cast<int>( c.size() ) - 1;
 		Eigen::MatrixXd const r = fixture.orthonormal( degree );
-		Eigen::MatrixXd jacobian( degree + 1, degree + 1 );
+		Eigen::MatrixXd const toC = r.inverse();
+		Step const here = fixture.evaluate( c, -1.0, 1.0 );
+		BOOST_TEST_REQUIRE( here.ok );
+		double const step = differenceStep( least, here );
 		FreeJacobian out;
-		out.located.resize( degree + 1 );
-		for ( int j = 0; j <= degree; ++j )
+		out.inY.resize( degree + 1, degree + 1 );
+		Eigen::VectorXd locatedY( degree + 1 );
+		for ( int k = 0; k <= degree; ++k )
 		{
-			Eigen::VectorXd plus = c, minus = c;
-			plus( j ) += step;
-			minus( j ) -= step;
-			Step const up = fixture.evaluate( plus, -1.0, 1.0 );
-			Step const down = fixture.evaluate( minus, -1.0, 1.0 );
+			Step const up = fixture.evaluate( c + step*toC.col( k ), -1.0, 1.0 );
+			Step const down = fixture.evaluate( c - step*toC.col( k ), -1.0, 1.0 );
 			BOOST_TEST_REQUIRE( ( up.ok && down.ok ) );
-			jacobian.col( j ) = ( up.fitted - down.fitted )/( 2.0*step );
-			jacobian( j, j ) -= 1.0;
-			out.located( j ) = ( up.located - down.located )/( 2.0*step );
+			out.inY.col( k ) = r*( up.fitted - down.fitted )/( 2.0*step );
+			out.inY( k, k ) -= 1.0;
+			locatedY( k ) = ( up.located - down.located )/( 2.0*step );
 		}
-		out.inY = r*jacobian*r.inverse();
+		// d psi_ax/dc = R^T d psi_ax/dy.
+		out.located = r.transpose()*locatedY;
 		return out;
 	}
 }

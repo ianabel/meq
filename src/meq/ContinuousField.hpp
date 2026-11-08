@@ -3,13 +3,13 @@
 
 /*
  * THE CONTINUOUS PAIR THE FLUX-SURFACE EXTRACTION ROOTS AND WEIGHTS BY --
- * MANTA-EQUILIBRIUM-PLAN.md section 4.5, M-SHAPE-1 and M-SHAPE-2.
+ * MANTA-EQUILIBRIUM-PLAN.md section 4.5, M-363 and M-364.
  *
  * psi* and q* are element-wise polynomials, broken across every face, so a
  * flux-surface node whose ray root slides across a face lands on the
  * neighbour's polynomial and the geometry JUMPS -- by the DG jump, which is
  * inside the discretisation's accuracy but which a caller differencing the
- * geometry at a relative step of 1e-8 divides by that step (M-SHAPE-1). The
+ * geometry at a relative step of 1e-8 divides by that step (M-363). The
  * fix is a pair of fields that are continuous, built from the solved state
  * with no side chosen anywhere:
  *
@@ -32,7 +32,7 @@
  * The interpolant is unisolvent, reproduces polynomials of its degree, and is
  * linear in ( psi*, psihat, q* ) -- so in the HDG state, Reconstruct() being
  * linear, which is what the extraction's derivative needs. Measured
- * (M-SHAPE-2): a central difference at 1e-8 straddling a crossing is off by
+ * (M-364): a central difference at 1e-8 straddling a crossing is off by
  * the noise rather than by up to 700 times the derivative, and the geometry
  * moves by less than its own discretisation error.
  *

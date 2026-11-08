@@ -122,7 +122,7 @@ namespace meq
 	 *                    Potential::Continuous is the tracer's own default and
 	 *                    is the right one: it roots psi~, continuous across
 	 *                    faces, so the family does not jump as a node crosses
-	 *                    one (M-SHAPE-1, M-SHAPE-2), and psi~ inherits psi*'s
+	 *                    one (M-363, M-364), and psi~ inherits psi*'s
 	 *                    order -- IN-0 measured psi*'s traced curve 60x, 54x and
 	 *                    83x closer to the truth than psi_h's at k = 1, 2, 3.
 	 * @param axis        IN-A's magnetic axis, a root of q_h. Its psi is the

@@ -301,6 +301,13 @@ set(MEQ_CONVERGENCE_TESTS
 	# degree, continuity and psihat's moments, threaded equal to serial, and
 	# psi*'s and q*'s orders kept against Solov'ev's closed form.
 	ContinuousFieldConvergence
+	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
+	# PlasmaCurrent, returning one equilibrium (M-357).
+	QDrivenScalePin
+	# RED, deliberately: the delivered q against a target no fixed-degree g^2
+	# represents, which does not converge with the mesh (TODO, "The q-driven
+	# solve is inconsistent", M-361).
+	QDrivenConsistency
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves
@@ -353,6 +360,21 @@ if(TARGET SafetyFactorScale)
 	target_link_libraries(SafetyFactorScale PRIVATE Eigen3::Eigen)
 endif()
 
+# WHICH q CONDITION GIVES WAY TO EACH SCALE PIN: a study, BUILT BUT NOT
+# REGISTERED, because its numbers are MEASUREMENTS.md M-355 and M-356,
+# taken once, and the suite asserts the choice through the driver instead
+# (QDrivenScalePin, the composition). About five minutes:
+#     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
+if(TARGET meq_core
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SafetyFactorPinStudy.cpp")
+	add_executable(SafetyFactorPinStudy "convergence/SafetyFactorPinStudy.cpp")
+	target_include_directories(SafetyFactorPinStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(SafetyFactorPinStudy PRIVATE
+		meq_core
+		Boost::unit_test_framework
+		Eigen3::Eigen)
+endif()
+
 # THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's
 # confined control again, under an mfem::Device that MEQ_TEST_DEVICE configures
 # before any case runs. The fold reaches the batched local block only through
@@ -399,7 +421,7 @@ if(TARGET NewtonConvergence AND MFEM_USE_CUDA)
 		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
 endif()
 
-# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-SHAPE-1 -- what
+# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-363 -- what
 # makes the flux-surface geometry jump as a table moves, and how the jump scales
 # with the mesh. BUILT BUT NOT REGISTERED: it asserts nothing, and each case is a
 # measurement of minutes, run one at a time with --run_test=<case> and

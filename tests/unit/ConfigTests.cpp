@@ -1256,7 +1256,7 @@ BOOST_AUTO_TEST_CASE( a_file_resolves_the_paths_it_reads_against_its_own_directo
 			"PPrimeFile = \"pprime.dat\"\n"
 			"Normalised = true\nPsiAxis = 0.3\n"
 			"SafetyFactorFile = \"q.dat\"\n"
-			"ToroidalFieldGuess = 2.2\n" ) ) );
+			"R0B0 = 2.2\n" ) ) );
 		BOOST_TEST( config.getSource().getMHD().safetyFactorFile == here.resolved( "q.dat" ) );
 	}
 
@@ -2880,7 +2880,7 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	std::string const driven =
 		"Normalised = true\nPsiAxis = 0.3\n"
 		"SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n"
-		"ToroidalFieldGuess = 2.2\n";
+		"ToroidalFieldGuess = 2.2\nToroidalFlux = 0.5\n";
 
 	Configuration const good = parse( mhd( driven ) );
 	BOOST_TEST( good.getSource().getMHD().safetyFactorFile
@@ -2917,13 +2917,14 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	// a user has and inventing one here would start the loop somewhere nobody
 	// chose.
 	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n"
-	              "SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n" ),
+	              "SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n"
+	              "ToroidalFlux = 0.5\n" ),
 	         "source.ToroidalFieldGuess" );
 	// A duplicate key would be refused by the TOML parser rather than by MEQ,
 	// so the negative case is built WITHOUT the good guess rather than beside it.
 	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n"
 	              "SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n"
-	              "ToroidalFieldGuess = -1.0\n" ),
+	              "ToroidalFieldGuess = -1.0\nPlasmaCurrent = 1.0e5\n" ),
 	         "source.ToroidalFieldGuess" );
 
 	// DEGREE ZERO IS A CONSTANT g^2, so gg' is identically zero and no
@@ -2936,6 +2937,118 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 
 	Configuration const cubic = parse( mhd( driven + "SafetyFactorDegree = 3\n" ) );
 	BOOST_TEST( cubic.getSource().getMHD().safetyFactorDegree == 3u );
+}
+
+/*
+ * THE SCALE PIN: EXACTLY ONE OF R0B0, ToroidalFlux AND PlasmaCurrent BESIDE
+ * SafetyFactorFile.
+ *
+ * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter family, so
+ * a q-driven run with none of the three is ill-posed -- its answer is whatever
+ * g^2's degree selects (MEASUREMENTS.md M-353) -- and one with two is
+ * over-determined. Both are refused, and the refusal names the keys: the
+ * message is what tells a user what the run is missing.
+ */
+BOOST_AUTO_TEST_CASE( a_q_driven_run_names_exactly_one_scale_pin )
+{
+	auto const message = []( std::string const & text ) -> std::pair<std::string, std::string>
+	{
+		try
+		{
+			parse( text );
+		}
+		catch ( ConfigError const & e )
+		{
+			return { e.getKey(), e.what() };
+		}
+		return { "", "" };
+	};
+
+	auto const mhd = []( std::string const & extra )
+	{
+		return withSource(
+			"[source]\n"
+			"Type = \"mhd\"\n"
+			"PPrimeFile = \"" + exampleData( "fb-pprime.dat" ) + "\"\n"
+			"Normalised = true\nPsiAxis = 0.3\n" + extra );
+	};
+	std::string const target =
+		"SafetyFactorFile = \"" + exampleData( "q-driven-q.dat" ) + "\"\n";
+	std::string const guess = "ToroidalFieldGuess = 2.2\n";
+	std::string const edge = "R0B0 = 2.2\n";
+	std::string const flux = "ToroidalFlux = 0.25\n";
+	std::string const current = "PlasmaCurrent = 3.0e5\n";
+
+	// EACH ALONE IS ACCEPTED, and read.
+	{
+		meq::MHDParameters const p = parse( mhd( target + edge ) ).getSource().getMHD();
+		BOOST_TEST( p.edgeToroidalField == 2.2 );
+		BOOST_TEST( p.toroidalFlux == 0.0 );
+		BOOST_TEST( p.plasmaCurrent == 0.0 );
+	}
+	{
+		meq::MHDParameters const p = parse( mhd( target + guess + flux ) ).getSource().getMHD();
+		BOOST_TEST( p.toroidalFlux == 0.25 );
+		BOOST_TEST( p.edgeToroidalField == 0.0 );
+		BOOST_TEST( p.toroidalFieldGuess == 2.2 );
+	}
+	{
+		meq::MHDParameters const p = parse( mhd( target + guess + current ) ).getSource().getMHD();
+		BOOST_TEST( p.plasmaCurrent == 3.0e5 );
+		BOOST_TEST( p.edgeToroidalField == 0.0 );
+	}
+
+	// NONE IS REFUSED, naming all three.
+	{
+		auto const [ key, what ] = message( mhd( target + guess ) );
+		BOOST_TEST( key == "source.SafetyFactorFile" );
+		for ( char const * name : { "R0B0", "ToroidalFlux", "PlasmaCurrent" } )
+			BOOST_TEST( what.find( name ) != std::string::npos,
+			            "the refusal of an unpinned q-driven run does not name " << name
+			            << ": " << what );
+	}
+
+	// TWO, AND THREE, ARE REFUSED, naming the keys given.
+	for ( std::string const & pair : { edge + flux, edge + current, guess + flux + current } )
+	{
+		auto const [ key, what ] = message( mhd( target + pair ) );
+		BOOST_TEST( !key.empty(), "two pins parsed: " << pair );
+		BOOST_TEST( what.find( "exactly one" ) != std::string::npos, what );
+	}
+	{
+		auto const [ key, what ] = message( mhd( target + edge + flux + current ) );
+		BOOST_TEST( key == "source.ToroidalFlux" );
+		for ( char const * name : { "R0B0", "ToroidalFlux", "PlasmaCurrent" } )
+			BOOST_TEST( what.find( name ) != std::string::npos, what );
+	}
+
+	// R0B0 IS THE VALUE THE LOOP OPENS AT, so a guess beside it is refused.
+	BOOST_TEST( message( mhd( target + edge + guess ) ).first == "source.ToroidalFieldGuess" );
+	// AND THE OTHER TWO STILL NEED ONE.
+	BOOST_TEST( message( mhd( target + flux ) ).first == "source.ToroidalFieldGuess" );
+	BOOST_TEST( message( mhd( target + current ) ).first == "source.ToroidalFieldGuess" );
+
+	// THE VALUES.
+	BOOST_TEST( message( mhd( target + "R0B0 = -2.2\n" ) ).first == "source.R0B0" );
+	BOOST_TEST( message( mhd( target + "R0B0 = 0.0\n" ) ).first == "source.R0B0" );
+	BOOST_TEST( message( mhd( target + guess + "ToroidalFlux = 0.0\n" ) ).first
+	            == "source.ToroidalFlux" );
+	// A signed flux is accepted: its sign is the field's.
+	BOOST_TEST( parse( mhd( target + guess + "ToroidalFlux = -0.25\n" ) )
+	                .getSource().getMHD().toroidalFlux == -0.25 );
+
+	// BESIDE A PRESCRIBED FIELD, R0B0 AND ToroidalFlux MEAN NOTHING YET and are
+	// refused; PlasmaCurrent keeps its own meaning there, the profile scale.
+	std::string const prescribed = "GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
+	BOOST_TEST( message( mhd( prescribed + edge ) ).first == "source.R0B0" );
+	BOOST_TEST( message( mhd( prescribed + flux ) ).first == "source.ToroidalFlux" );
+	BOOST_TEST( parse( mhd( prescribed + current ) ).getSource().plasmaCurrent() == 3.0e5 );
+
+	// AND ON EVERY OTHER SOURCE TYPE THEY ARE NOT KEYS AT ALL.
+	std::string const rotating =
+		"[source]\nType = \"rotating\"\nOmegaFile = \"omega.dat\"\nGGPrimeFile = \"g.dat\"\n";
+	BOOST_TEST( message( withSource( rotating + edge ) ).first == "source.R0B0" );
+	BOOST_TEST( message( withSource( rotating + flux ) ).first == "source.ToroidalFlux" );
 }
 
 /*
@@ -4371,7 +4484,7 @@ BOOST_AUTO_TEST_CASE( the_mirror_keys_are_refused_on_every_source_that_could_car
 	{
 		std::string const text = withSource(
 			"[source]\nType = \"mhd\"\nPPrimeFile = \"p.dat\"\n"
-			"SafetyFactorFile = \"q.dat\"\nToroidalFieldGuess = 1.0\n"
+			"SafetyFactorFile = \"q.dat\"\nR0B0 = 1.0\n"
 			+ boxScalars + electrodeTable + limiterTable );
 		BOOST_TEST( refusedKey( text ) == "source.SafetyFactorFile" );
 	}

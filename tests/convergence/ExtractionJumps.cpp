@@ -19,11 +19,11 @@
 
 /*
  * WHAT MAKES THE GEOMETRY JUMP, AND HOW THE JUMP SCALES WITH THE MESH -- the
- * instrument behind MEASUREMENTS.md's M-SHAPE-1 and M-SHAPE-2, and the
+ * instrument behind MEASUREMENTS.md's M-363 and M-364, and the
  * by-hand study that would catch a jump coming back. BUILT, NOT REGISTERED:
  * it asserts nothing, and each case is a measurement (`--run_test=<case>`).
  * SessionSmoothness is the suite's assertion; this is the picture, on the
- * run's own extraction -- psi~ and q~, the continuous pair. M-SHAPE-1's
+ * run's own extraction -- psi~ and q~, the continuous pair. M-363's
  * numbers were taken on psi* and q*, at aa5adcb.
  *
  * One input, Omega scaled by 1 + h, h = j * 1e-4 for j = -10 ... 10, every
@@ -81,8 +81,8 @@ namespace
 
 	using Family = std::shared_ptr<meq::FluxSurfaceFamily const>;
 
-	/// Every jump of one scan's families, attributed: what M-SHAPE-1's table
-	/// and M-SHAPE-2's continuity column print. @a families are the states
+	/// Every jump of one scan's families, attributed: what M-363's table
+	/// and M-364's continuity column print. @a families are the states
 	/// at h = j * spacing, j = -10 ... 10.
 	void analyse( char const *name, std::vector<Family> const &families, double spacing )
 	{
@@ -329,7 +329,7 @@ namespace
 		                           { "species.D.Density", density( 0.0 ) } };
 	}
 
-	/// M-SHAPE-1: the shipped extraction along the scan.
+	/// M-363: the shipped extraction along the scan.
 	void scan( char const *name, std::string const &path, std::string const &text )
 	{
 		auto run = solvedRun( path, text );
@@ -378,7 +378,7 @@ BOOST_AUTO_TEST_CASE( tcvL2k2 ) { scan( "TCV, level 2, k = 2", tcvPath, tcv( 2, 
 BOOST_AUTO_TEST_CASE( tcvL1k3 ) { scan( "TCV, level 1, k = 3", tcvPath, tcv( 1, 3 ) ); }
 
 /*
- * THE STRADDLES, ON THE RUN'S OWN EXTRACTION -- M-SHAPE-2's measurement, kept
+ * THE STRADDLES, ON THE RUN'S OWN EXTRACTION -- M-364's measurement, kept
  * as the by-hand study (MANTA-EQUILIBRIUM-PLAN.md section 4.5). Along the
  * scan of `analyse`, the first node to change element on each of up to four
  * surfaces; the crossing bisected to 1e-11; the central difference at
@@ -386,8 +386,8 @@ BOOST_AUTO_TEST_CASE( tcvL1k3 ) { scan( "TCV, level 1, k = 3", tcvPath, tcv( 1, 
  * On the continuous pair it is off by the noise; a band face switching, an
  * axis element switching, or anything else that made the geometry jump again
  * would read J/( 2 delta ) here. The prototype that compared psi~, q~ against
- * psi*, q* through a seam on meq::Run is at aa5adcb (M-SHAPE-2), and the axis
- * on q~'s root at 9a7dc4f (M-SHAPE-3).
+ * psi*, q* through a seam on meq::Run is at aa5adcb (M-364), and the axis
+ * on q~'s root at 9a7dc4f (M-365).
  */
 namespace
 {
@@ -562,7 +562,7 @@ namespace sweep
 	using Perturbed = std::function<meq::ProfileTables( double )>;
 
 	/*
-	 * WHICH DECISION MAKES THE JUMP -- the instrument behind M-SHAPE-1. Along
+	 * WHICH DECISION MAKES THE JUMP -- the instrument behind M-363. Along
 	 * the scan, every node of every surface keeps the decisions that placed it
 	 * (FluxSurface::elements, bandFaces, rayRoutes, rayIterations) and the
 	 * axis its element. A jump in an output is a jump in some node's position

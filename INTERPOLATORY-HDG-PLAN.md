@@ -534,8 +534,8 @@ Gauss-Lobatto**, matching MEQ's other volume spaces, and expect the full
 *This subsection is arithmetic in the style of M-09, not a measurement.*
 
 Let `j` be the order to which the profiles vanish at the plasma edge, `p' ~ Ψ^j`
-— a modelling choice, `j = 1` for FreeGS's default. `meq::SplineProfile` clamps
-outside its knots and `NormalisedSource::insidePlasma()` is a hard pointwise
+— a modelling choice, `j = 1` for FreeGS's default. `meq::SplineProfile` continues
+past its knots, but `NormalisedSource::insidePlasma()` is a hard pointwise
 gate, so across the edge `F` behaves like `c d_+^j` with `d` the signed
 distance.
 

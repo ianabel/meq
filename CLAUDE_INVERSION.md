@@ -313,9 +313,9 @@ span the whole of `Ψ`, not the family's own range. `FluxSurfaceFamily` refuses 
 extrapolate and is right to — outside the cut a traced surface is made of
 something else — but **a fit is a model, not a measurement**, and evaluating it
 at `Ψ = 0` or `1` is what a model is for. Laying knots only over `[ 0.05, 0.95 ]`
-and letting `SplineProfile` clamp gives a profile differing from the closed form
-exactly where it clamps, so **the outer residual AT THE ANSWER was 1.3e-01
-rather than zero** — and both outer methods then converged, correctly, to a
+and letting `SplineProfile` extend them gives a profile differing from the
+closed form exactly where it extends; with a clamp past the knots **the outer
+residual AT THE ANSWER was 1.3e-01 rather than zero** — and both outer methods then converged, correctly, to a
 fixed point that was not the answer, from 40% away and from 5% away alike,
 landing on the same wrong one to six digits.
 `theOuterResidualsConditioningAtTheAnswer` found it and now guards it:
@@ -378,7 +378,7 @@ it was repaired:
   through it. Every column differenced across it is off by that over `2s`, and
   no floor sees it, because each residual is right to the floor. **The session's
   geometry jumped by the same mechanism and nothing else**
-  (→ **[M-SHAPE-1](MEASUREMENTS.md#m-shape-1)**): over `±1e-3` of a table, every
+  (→ **[M-363](MEASUREMENTS.md#m-363)**): over `±1e-3` of a table, every
   jump above the noise on the box and on TCV is a node changing element, the
   axis element and the band never change, and the per-crossing jump falls as
   about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
@@ -387,8 +387,8 @@ it was repaired:
   from `ψ*`, `ψ̂` (on interior edges) and `q*` (`src/meq/ContinuousField.hpp`).
   A 1.5e-8 difference straddling a crossing is then off by the noise rather
   than by 0.01–700× the derivative, and the family stays inside the
-  discretisation error of the `ψ*` one (→ **[M-SHAPE-2](MEASUREMENTS.md#m-shape-2)**,
-  **[M-SHAPE-4](MEASUREMENTS.md#m-shape-4)**). M-308b's sweep itself was a
+  discretisation error of the `ψ*` one (→ **[M-364](MEASUREMENTS.md#m-364)**,
+  **[M-366](MEASUREMENTS.md#m-366)**). M-308b's sweep itself was a
   scratch harness and is not re-run; the step it found is a face crossing,
   which no longer moves the map. The step at 1e-4 straddles none on that
   fixture and finishes quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom`
@@ -409,13 +409,12 @@ step-tolerance stop above the floor is now *not converged* and exits 2
 loop is an outer failure too** (`CLAUDE_DRIVER.md`).
 
 **AND IT REACHES THE SOLVE FROM A FILE**, as `[source] SafetyFactorFile`, with
-`SafetyFactorDegree` and `ToroidalFieldGuess` beside it.
-`examples/q-driven.toml` is the worked example and
+`SafetyFactorDegree` and one scale pin beside it (below).
+`examples/q-driven.toml` is the worked example, pinned by `R0B0 = 2.2`, and
 `DriverAcceptance::theDriverSolvesForTheToroidalField` is the acceptance:
-**15 s, 5 outer iterations, 36 equilibria**, recovering a closed-form
-`g = 2.20 + 0.55Ψ` to **1.7e-06** in the worst of the three coefficients of
-`g²` in double, and in single **4 iterations and 30 equilibria** in every MKL
-draw, to 1.3e-05 to 2.4e-04.
+**5 outer iterations, 26 equilibria** in double, recovering a closed-form
+`g = 2.20 + 0.55Ψ` in the coefficients of `g²` (M-357). The pinned loop
+is not measured in single.
 
 **THE TARGET IS MEASURED RATHER THAN INVENTED, WHICH IS THE WHOLE OF WHY THAT
 IS AN ACCEPTANCE.** `examples/q-driven-q.dat` is the `q` of an equilibrium built
@@ -464,22 +463,94 @@ first: that the map is **total**, and that the target is asked in the SOURCE's
 the run **found**, so there is no `GGPrimeFile` beside the output for a consumer
 to look it up in — the same argument that put `axis_normalised_flux` there.
 
-**AND THE SCALE IS NOT DETERMINED BY q, p AND THE BOUNDARY — ONLY BY THE
-DEGREE OF `g²`.** Fixed-boundary equilibria with the same `p(Ψ_N)` and
-`q(Ψ_N)` form a one-parameter family in the torus as in the cylinder — VMEC's
-`PHIEDGE` is the same fact, and here `Φ_edge = 2π(ψ_ax − ψ_bnd)∫q dΨ_N` — and
-with `ψ_ax` free the loop's outer Jacobian has one near-null direction, the
-scale (`g ∝ ψ_ax`), with `σ_min/σ_max` 1e-4 at degree 2 falling to ~1e-6 at
-degree 4. What isolates the fixed point is that a polynomial of degree `d`
-cannot follow the family: held 10% along it, the least-squares residual falls
-from 3.5e-3 at degree 2 to 1.2e-4 at degree 5 and does not move with the mesh
-(`SafetyFactorScale`, → **[M-353](MEASUREMENTS.md#m-353)**). **The
-example converges, from any `ToroidalFieldGuess`, because its target was built
-from an exactly quadratic `g²`**, so the reference is an exact fixed point at
-every degree; a target that is not — any measured `q` — is left to the degree.
-The pure q-solve needs one more scalar to select the member — `TODO`, *The
-q-driven solve leaves the equilibrium's scale to the degree of `g²`*, names the
-candidates; `manta/design`'s plan holds `ψ_ax` for MaNTA instead.
+**AND THE SCALE IS NOT DETERMINED BY q, p AND THE BOUNDARY, SO A RUN NAMES
+EXACTLY ONE SCALAR THAT IS.** Fixed-boundary equilibria with the same `p(Ψ_N)`
+and `q(Ψ_N)` form a one-parameter family in the torus as in the cylinder —
+VMEC's `PHIEDGE` is the same fact, and here `Φ_edge = 2π(ψ_ax − ψ_bnd)∫q dΨ_N`.
+Unpinned, the loop's outer Jacobian has one near-null direction, the scale
+(`g ∝ ψ_ax`), at `σ_min/σ_max` 1e-4 (degree 2) to ~1e-6 (degree 4), and the
+member is selected only because a polynomial of degree `d` cannot follow the
+family: held 10% along it, the least-squares residual falls with the degree
+and not with the mesh (`SafetyFactorScale`, → **[M-353](MEASUREMENTS.md#m-353)**).
+That is ill-posed, and on a measured `q` it does not converge. So `[source]`
+takes **exactly one** of `R0B0` (`g` on the boundary, `c₀ = R0B0²` held and out
+of the unknowns), `ToroidalFlux` (the delivered `∫g/R dA`, a row) and `PlasmaCurrent`
+(`μ₀ I_p`, a row), and refuses none or two, naming the keys
+(`meq::PinnedToroidalFieldMap`). `ToroidalFieldGuess` and `PsiAxis` stay
+starting values; beside `R0B0` the guess is refused, the loop opening at `R0B0`.
+
+**THE DEGREE-`d` FIT MAKES THE q-DRIVEN SOLVE INCONSISTENT, AND THAT IS OPEN.**
+A target whose `g²` is not a polynomial of the degree is met only to the fit's
+floor, and the floor does not fall with the mesh: 11.8% in `q` at degree 2 and
+1.2% at degree 3, flat over three levels of `h`, against a reference good to
+1e-7 (→ **[M-361](MEASUREMENTS.md#m-361)**). `QDrivenConsistency` is red for
+it. What replaces the fit is a `g²` that refines with the discretisation,
+matched to `q` at every knot and solved by Newton on the linearised solve's
+exact tangent; the pin then makes the system square with no `q` condition
+giving way. It waits on the continuous extraction (`manta/shape-derivative`)
+and the linearised solve (`manta/linearised-solve`) — `TODO`, *The q-driven
+solve is inconsistent*. **Everything below about which condition gives way is
+interim.**
+
+**ONE q CONDITION GIVES WAY TO KEEP THE SYSTEM SQUARE, AND IT IS THE SAME ONE
+UNDER EVERY PIN.** In the fit's orthonormal coordinates `y = Rc` it is the
+highest row `y_d`: by `σ_min` it is the best of every candidate under every
+pin at degrees 2 and 4 — the axis limit, a misfit `∝ Ψ^d`, ties it under
+`R0B0` at degree 2 and loses everywhere else, by 60–300× at degree 4 — and the
+pinned systems are 100× (degree 2) to 10⁴× (degree 4) better conditioned than
+the free one (→ **[M-355](MEASUREMENTS.md#m-355)**). `c₀` enters no
+solve, so under a row pin only `y_0` sees it and dropping `y_0` is exactly
+singular. **Sameness is not a nicety**: where the target's `g²` is not a
+polynomial of the degree, the misfit lies along whichever condition gave way,
+so two pins dropping different ones pose different problems — mutated, 13% of
+`ψ` apart on `QDrivenScalePin`'s fixture. With one choice, an equilibrium
+solved under any pin is returned by the other two set to what it reads, to
+1e-10 (→ **[M-357](MEASUREMENTS.md#m-357)**); `QDrivenScalePin`
+asserts that composition, and every q-driven `.nc` reports all three of its
+answer's scalars for it.
+
+**A REFUSED POINT IS NEITHER ACCEPTED NOR DIFFERENCED.** The map's refusal
+residual points back at the last admissible point, and when that point is a
+differencing column a step away it reads smaller than the iterate's own: the
+line search accepted one at 0.16 against 0.50 and the loop sat on it, in
+single, where the 100-floor step reaches fields whose outermost surface cannot
+be traced (double fails at the same `gg′`). So the pinned map scales a refusal
+to twice the largest residual it has returned, and a refused side of a
+Jacobian column makes the column one-sided (`OuterNewtonOptions::mapRefused`,
+→ **[M-358](MEASUREMENTS.md#m-358)**).
+
+**THE OUTER JACOBIAN IS DIFFERENCED IN THE FIT'S ORTHONORMAL COORDINATES,
+AND ITS FLOOR IS MEASURED THERE.** The map's output is `y = Qᵀg²/√N`, so its
+noise is uniform in `y` and `R⁻¹` amplifies it into the monomial coefficients
+— 3.5e-3 against 1.5e-5 at degree 4 in single. A max-norm floor over `c` sized
+every step and every stopping test to the top coefficient's noise: in single
+the pinned loop's floor was 6.2e-4 and the answers 4e-5 apart. Differenced
+along `R⁻¹` (`OuterNewtonOptions::differenceBasis`) against
+`toroidalMapFloorOrthonormal()`, within 2.5× of the noise measured, the floor is
+2.2e-5 and the answers 5e-7 to 1.1e-6 apart, now at the map's own noise
+(→ **[M-359](MEASUREMENTS.md#m-359)**). `SafetyFactorScale` differences the
+same way, which its free `σ_min` needs in single.
+
+**THE FLUX PIN HOLDS THE DELIVERED FLUX, AS A ROW BESIDE THE BORDERED NEWTON.**
+`ToroidalFlux` is the equilibrium's own `∫_plasma g/R dA`, read off the solved
+state with the iterate's `g²` (`GradShafranovSolver::integrateOverDomain()`),
+not `2π(ψ_ax − ψ_bnd)∫₀¹q dΨ` of the target: the two agree only in the
+continuum, and on `fixed-d-tcv` they differ by 3.5% (→ **[M-362](MEASUREMENTS.md#m-362)**).
+Reading `g` puts `c₀` into the row, and it is better conditioned than the
+span row was, `σ_min` 0.755 against 0.578. Holding `ψ_ax` in a plain inner
+solve instead is no better conditioned than the span row (0.594 against
+0.578) and is the outer closure `CLAUDE_DECLINED.md` records falsified
+(*Fixing `ψ_ax`, or closing it outside the solver*).
+
+**THE CURRENT PIN IS A ROW TOO, AND THE PROFILE SCALE STAYS ONE.**
+`PlasmaCurrent`'s border elsewhere multiplies `p′` and `gg′` together: inside
+the q loop it converges, and to the wrong member — asked for the reference's
+own current it returns `α = 1.35`, a pressure nobody gave, and a `g²` the
+equilibrium does not have, its `q` 4% off the target
+(→ **[M-356](MEASUREMENTS.md#m-356)**). So beside `SafetyFactorFile`
+`makeSolver()` sets no current border, the Picard pre-stage takes no current
+target, and the row reads `GradShafranovSolver::deliveredPlasmaCurrent()` —
+the current border's own quadrature, over `Ω_h`.
 
 **A CURVED BOUNDARY'S FAMILY IS TRACED THROUGH THE BAND, AND THE LOOP'S HAS TO
 BE TOO.** `Ω_h` is inscribed in `Γ`, so the outer surfaces of a curved
@@ -489,9 +560,11 @@ it, every family on `fixed-d-tcv`'s MXH boundary fails at its outer surfaces,
 every map evaluation is refused, and the loop stops on a Jacobian of exactly
 zero. Both go through `Run::Impl::extractFamily()`. `QDrivenCurvedBoundary`
 is the round trip on a Miller boundary, the target measured from a closed-form
-`g` on the same mesh: 6 KINSOL iterations, 43 equilibria, `g²` recovered to
-eight digits. Posed on `fixed-d-tcv` with a measured `q`, the loop runs, and
-fails on the scale (M-353).
+`g` on the same mesh, under `R0B0`: 5 KINSOL iterations, 26 equilibria, `g²` recovered to
+eight digits (M-357). Posed on `fixed-d-tcv` with
+a measured `q` it converges under every pin, in 5 KINSOL iterations and
+26 to 36 equilibria with none refused, to one `g²` (M-357); unpinned it
+failed on the scale (M-353).
 
 **WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a
 rectangle with one closed plasma rather than a machine, and nothing has yet
@@ -616,10 +689,10 @@ ONE, AND THE POST-PROCESSED PAIR WON ON A REASON THAT WAS NOT THE ONE
 EXPECTED.** The continuous pair is `ψ̃` ∈ H¹ of degree `k+2` and `q̃` ∈ [H¹]²,
 interpolated by moments from `ψ*`, `ψ̂` and `q*` (`src/meq/ContinuousField.hpp`):
 `ψ*` and `q*` are broken across every face, so a family node crossing one makes
-the geometry jump by the face jump (→ **[M-SHAPE-1](MEASUREMENTS.md#m-shape-1)**),
+the geometry jump by the face jump (→ **[M-363](MEASUREMENTS.md#m-363)**),
 which a caller differencing the geometry divides by its step; on `ψ̃`, `q̃` it
 does not, and the family stays inside `ψ*`'s own error
-(→ **[M-SHAPE-2](MEASUREMENTS.md#m-shape-2)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
+(→ **[M-364](MEASUREMENTS.md#m-364)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
 keeps `q*`'s `k+1` (`ContinuousFieldConvergence`). Everything below about the
 post-processed pair is why the continuous one is built from it.
 
@@ -676,7 +749,7 @@ MEQ OWES.** `ψ̃` is continuous across faces but its gradient is not, so
 `Contour`'s cubic Hermite — smooth by construction — misses the bend. At fixed
 `Δs = 0.004`, `k = 2`, the representation error is 3.6e-7, 9.6e-8, 9.7e-9 at
 `n` = 12, 24, 48, where on `ψ*` and `q*` it is flat at 5.4e-9 (face-crossing
-segments excluded) (→ **[M-SHAPE-4](MEASUREMENTS.md#m-shape-4)**). It converges
+segments excluded) (→ **[M-366](MEASUREMENTS.md#m-366)**). It converges
 with `h` and sits inside the 1e-6 MEQ owes, so nothing is done about it; the
 family's averages are taken on the ray nodes, which root `ψ̃` directly, and
 the `Contour` only seeds and brackets them.

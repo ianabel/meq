@@ -160,6 +160,23 @@ namespace meq
 		/// working precision -- a floor of zero.
 		std::function<double()> mapFloor;
 
+		/// Whether the map's last evaluation was a REFUSAL -- an inadmissible
+		/// point answered with a residual pointing back rather than with the
+		/// map's value. A refused side of a Jacobian column is not
+		/// differenced: the column goes one-sided from the point itself
+		/// (MEASUREMENTS.md M-358). Empty is a map that never refuses.
+		std::function<bool()> mapRefused;
+
+		/// THE COORDINATES TO DIFFERENCE THE JACOBIAN IN, as the columns of
+		/// `T` (row-major, square in the unknowns) with `x = T z`: each column
+		/// is a step along `T e_k` of @ref difference -- raised to `100` floors
+		/// -- times `max( |z_k|, 1 )`, so the floor must be measured in the
+		/// same coordinates. Empty, or the wrong size, is the unknowns' own.
+		/// For the q-driven map, the fit's orthonormal coordinates, where its
+		/// noise is uniform (meq::PinnedToroidalFieldMap::differenceBasis(),
+		/// MEASUREMENTS.md M-359).
+		std::function<std::vector<double>()> differenceBasis;
+
 		/// KIN_LINESEARCH by default. KIN_NONE is kept as the control: it is
 		/// what says the line search is doing the work rather than the Newton
 		/// direction being good enough on its own.
