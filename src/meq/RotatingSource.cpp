@@ -1226,9 +1226,10 @@ namespace meq
 		//
 		// AND IT MATTERS MORE HERE THAN A MISSING ZERO USUALLY WOULD, because
 		// the profiles CONTINUE: meq::SplineProfile carries its endpoint value
-		// and slope on outside the knot range, so an ungated source does not
-		// tail off out here -- it runs on from its plasma-edge value all the
-		// way to the wall, which is a current density filling the vacuum region.
+		// and slope on outside the knot range and then flattens, so an ungated
+		// source does not tail off out here -- it sits near its plasma-edge
+		// value all the way to the wall, which is a current density filling the
+		// vacuum region.
 		if ( !insidePlasma( radius, z, psi ) )
 			return 0.0;
 

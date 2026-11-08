@@ -871,9 +871,9 @@ BOOST_AUTO_TEST_CASE( theNormalisationCanBeMovedAndIsRefusedAtZero )
  * unconfined problem.
  *
  * WORSE THAN A MISSING ZERO, BECAUSE THE PROFILES CONTINUE. A meq::SplineProfile
- * carries its endpoint value and slope on outside the knot range, so at `Psi < 0`
- * the source does not tail off: it runs on from its plasma-edge value out to the
- * wall, which is a current density filling the vacuum region. And the element-level half of the
+ * carries its endpoint value and slope on outside the knot range and then
+ * flattens, so at `Psi < 0` the source does not tail off: it sits near its
+ * plasma-edge value out to the wall, which is a current density filling the vacuum region. And the element-level half of the
  * support DOES run -- GradShafranovSolver::plasmaComponentWanted() reads
  * plasmaSupport(), which is true -- so XP-1's flood fill masks whole elements
  * while the pointwise test inside them does nothing. Half a confinement is a

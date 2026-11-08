@@ -50,8 +50,10 @@ namespace meq
 	 * HOW FAR PAST ITS ENDS A TABLE'S CONTINUATION RUNS BEFORE IT IS FLAT, as
 	 * a fraction of the table's span (meq::SplineProfile). Measured, not
 	 * chosen: a purely linear continuation turned examples/machine-c-mast.toml
-	 * from converging in 3 of 4 perturbed draws to 0 of 4, as did a width of
-	 * 0.5; 0.1 converges in 4 of 4 to the clamp's answer (M-TABLEDERIV-6).
+	 * from converging in 3 of 4 perturbed draws to 0 of 4, as did widths of
+	 * 0.2, 0.3, 0.5 and 1; 0.1 converges in 4 of 4 to the clamp's answer. The
+	 * widest that does, and so the most of the derivative's order a shipped
+	 * case allows (M-TABLEDERIV-6).
 	 */
 	inline constexpr double tableContinuationWidth = 0.1;
 
@@ -291,10 +293,15 @@ namespace meq
 	 * a solution reaches past a table -- and a fixed-boundary psi_h does, beside
 	 * the wall, where it undershoots. The solution shrugs that off; the
 	 * derivative of the discrete solution in a table does not, and loses its
-	 * order. WHY NOT LINEAR ALL THE WAY, which is the natural continuation:
-	 * an overshoot far past a steep edge then reads a value that keeps going,
-	 * the hazard the clamp was chosen to avoid, and it is measured -- it cost
-	 * a shipped machine case its convergence. Both are M-TABLEDERIV-6. A solve
+	 * order. WHY NOT LINEAR ALL THE WAY, which is the natural continuation and
+	 * the one that gives the derivative back its order: an overshoot far past
+	 * a steep edge then reads a value that keeps going, the hazard the clamp
+	 * was chosen to avoid, and it is measured -- it cost a shipped machine case
+	 * its convergence. The taper is between the two in the derivative too:
+	 * dF/dpsi falls from f_e' to zero over w, a feature the mesh must resolve,
+	 * so the derivative's error past an end shrinks as w grows (and a tanh of
+	 * the same reach, with no curvature at the end, does no better). All of it
+	 * is M-TABLEDERIV-6. A solve
 	 * that reads past a table is reported: GradShafranovSolver::
 	 * sourceTableReach() says how far, and the driver warns.
 	 *

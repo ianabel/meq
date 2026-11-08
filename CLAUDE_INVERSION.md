@@ -313,9 +313,9 @@ span the whole of `Ψ`, not the family's own range. `FluxSurfaceFamily` refuses 
 extrapolate and is right to — outside the cut a traced surface is made of
 something else — but **a fit is a model, not a measurement**, and evaluating it
 at `Ψ = 0` or `1` is what a model is for. Laying knots only over `[ 0.05, 0.95 ]`
-and letting `SplineProfile` clamp gives a profile differing from the closed form
-exactly where it clamps, so **the outer residual AT THE ANSWER was 1.3e-01
-rather than zero** — and both outer methods then converged, correctly, to a
+and letting `SplineProfile` extend them gives a profile differing from the
+closed form exactly where it extends; with a clamp past the knots **the outer
+residual AT THE ANSWER was 1.3e-01 rather than zero** — and both outer methods then converged, correctly, to a
 fixed point that was not the answer, from 40% away and from 5% away alike,
 landing on the same wrong one to six digits.
 `theOuterResidualsConditioningAtTheAnswer` found it and now guards it:

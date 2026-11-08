@@ -5867,8 +5867,9 @@ int meq::Run::Impl::solve()
 				std::fprintf( stderr,
 					"MEQ: warning: the solution reads a profile table past its ends, by\n"
 					"     %.3g of the table's span (%.3g below its first knot, %.3g above\n"
-					"     its last, in the table's own argument); the table is continued\n"
-					"     linearly from its end value and slope there\n",
+					"     its last, in the table's own argument); past an end the table\n"
+					"     continues from its end value and slope and flattens within a\n"
+					"     tenth of its span, which is a choice of MEQ's, not the table's\n",
 					reach.relative, reach.below, reach.above );
 			}
 		}

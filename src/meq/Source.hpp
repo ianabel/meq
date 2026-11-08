@@ -220,8 +220,9 @@ namespace meq
 	 *   - A mirror has no axis. Its plasma is an ANNULUS between two prescribed
 	 *     flux surfaces, `psi_ax` the inner label and `psi_bnd` the outer, so
 	 *     `Psi > 0` alone admits everything inside the inner surface down to
-	 *     `R = 0` -- and the profiles CLAMP, so the source there sits at its
-	 *     inner-edge value rather than vanishing. And flux is not a function of
+	 *     `R = 0` -- and the profiles EXTEND (meq::SplineProfile's
+	 *     continuation, flat within a tenth of the span), so the source there
+	 *     sits near its inner-edge value rather than vanishing. And flux is not a function of
 	 *     `z` along a tube: beyond the throat the same `Psi` recurs in the
 	 *     expander, where the centrifugal potential no longer confines and the
 	 *     density is, within this model, zero. M-168 measured geq's flux-only
