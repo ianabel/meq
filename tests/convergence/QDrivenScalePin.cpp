@@ -6,11 +6,14 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <variant>
 #include <vector>
+
+#include "mfem/config/config.hpp"
 
 #include "meq/Dataset.hpp"
 #include "meq/Profiles.hpp"
@@ -38,7 +41,15 @@
  * Mutation-tested on this fixture (M-357): R0B0 giving way on its
  * axis-limit condition instead of y_2 puts its answer 0.13 of psi's peak from
  * the others, and PlasmaCurrent giving way on y_1 puts every answer 0.05 to
- * 0.13 apart; this case asks for 1e-6.
+ * 0.13 apart; this case asks for max( 1e-6, 20 eps ).
+ *
+ * WHY 20 eps AND NOT 1e-6 IN SINGLE. MEQ owes about 1e-6, and in double that
+ * is the bound. In single the answers are 5e-7 to 1.1e-6 apart (M-359), and
+ * that spread is the map's own noise and not amplification: the outer loop
+ * stops below it (1.3e-5 per orthonormal coordinate of g^2), and what reaches
+ * psi is the inner solve's own accuracy, ten eps = 1.2e-6. The bound is twice
+ * that accuracy: 20 eps, 2.4e-6 in single and 4.4e-15 in double, where 1e-6
+ * is the larger.
  *
  * Coarse on purpose (the q-driven box at RefinementLevels = 0, k = 2): the
  * agreement asked for is the LOOP's, between solves on one mesh, and does not
@@ -174,6 +185,8 @@ BOOST_AUTO_TEST_CASE( theThreePinsReturnOneEquilibrium )
 		{ "pin-flux", "ToroidalFieldGuess = 2.2\nToroidalFlux = " + fixed( base.toroidalFlux ) + "\n" },
 		{ "pin-current", "ToroidalFieldGuess = 2.2\nPlasmaCurrent = " + fixed( base.plasmaCurrent ) + "\n" } };
 
+	double const bound = std::max( 1.0e-6,
+		20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() ) );
 	std::vector<Answer> answers = { base };
 	for ( auto const &[ prefix, pin ] : pins )
 	{
@@ -182,13 +195,14 @@ BOOST_AUTO_TEST_CASE( theThreePinsReturnOneEquilibrium )
 		double const gApart = apart( base.gSquared, again.gSquared );
 		std::printf( "      psi %.3e and g^2 %.3e from the base, relative to their peaks\n",
 		             psiApart, gApart );
-		BOOST_TEST( psiApart < 1.0e-6,
+		BOOST_TEST( psiApart < bound,
 			"re-solved under " << pin << " -- the value the base equilibrium reads -- "
 			"psi_h is " << psiApart << " of its peak from the base. The pins pose "
 			"different problems: each must drop the SAME q condition "
 			"(meq::PinnedToroidalFieldMap), or the fit's misfit lands in different "
 			"directions and so do the answers" );
-		BOOST_TEST( gApart < 1.0e-6, "g^2's coefficients are " << gApart << " apart under " << pin );
+		BOOST_TEST( gApart < bound, "g^2's coefficients are " << gApart << " apart under "
+			<< pin << ", against " << bound );
 		answers.push_back( again );
 	}
 

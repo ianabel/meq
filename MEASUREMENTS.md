@@ -24154,6 +24154,15 @@ Single now passes, the ratio at degree 4 53× against 30×.
 3.2e-11 and 1.1e-15 (1.1e-14, 3.3e-11, 1.7e-15 before), the same iteration and
 equilibrium counts; `QDrivenCurvedBoundary` recovers `g²` to every printed digit.
 
+**The bound is `max(1e-6, 20 ε)`**, `ε` the build's machine epsilon: 1e-6 in
+double, 2.4e-6 in single, twice the inner solve's ten-eps accuracy, which is
+what the single spread is (the map's noise, not an amplification of it).
+`QDrivenScalePin` passes in both precisions under it. **Mutated in single** it
+still fails: `R0B0` giving way on the axis limit puts its re-solve 0.132 of
+`ψ`'s peak away, and `PlasmaCurrent` giving way on `y_1` leaves the base run
+unconverged after 21 KINSOL iterations and 256 equilibria, 34 refused, at a
+residual of 0.227 (`runs/q-solve-scale/single/single-mutation-a.log`, `-c.log`).
+
 **(e) What else moved in double.** `fixed-d-tcv` under every pin takes one
 more KINSOL iteration — 5 / 26 under `R0B0`, 5 / 36 under the others and at
 degree 3, against 3 / 16, 4 / 29 and 3 / 22 — because its floor, measured in

@@ -436,15 +436,6 @@ Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-359).
   under every pin (meq::PinnedToroidalFieldMap). Measured in double on the
   q-driven box and on fixed-d-tcv with a measured q. Open:
 
-  * SINGLE PRECISION: QDrivenScalePin's agreement, 1.11e-6 against 1e-6.
-    Differenced in the fit's orthonormal coordinates, every pinned run
-    converges in single in 4 KINSOL iterations to a residual of 1.2e-6 to
-    1.9e-6, and the three re-solves sit 5.0e-7, 1.11e-6 and 5.0e-7 of psi's
-    peak from the base (M-359). The loop already stops below the map's
-    measured noise, 1.3e-5 per orthonormal coordinate in single, so what is
-    left is the map's noise -- the inner solve's ten eps carried through the
-    extraction and inversion -- and not the outer loop. Not taken further.
-
   * A FREE OR LIMITED BOUNDARY. Every pinned run is fixed-boundary, where
     psi_bnd is zero. On a limited or diverted plasma psi_bnd is a border
     unknown, the support moves, and ToroidalFlux's row reads psi_ax - psi_bnd
