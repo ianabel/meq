@@ -428,7 +428,7 @@ Part (a) closed the same day.
 
 ================================================================================
 The q-driven solve's scale pins: what is not measured
-Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-357).
+Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-358).
 ================================================================================
 
   A q-driven run names exactly one of [source] R0B0, ToroidalFlux and
@@ -436,14 +436,24 @@ Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-357).
   under every pin (meq::PinnedToroidalFieldMap). Measured in double on the
   q-driven box and on fixed-d-tcv with a measured q. Open:
 
-  * SINGLE PRECISION FAILS QDrivenScalePin. Its base run, PlasmaCurrent =
-    5.0 from ToroidalFieldGuess 1.8, does not converge in single: 3 KINSOL
-    iterations, 26 equilibria of which 9 refused, the line search stopping at
-    a residual of 0.142 against a floor of 4.9e-04 (MFEM install-single,
-    runs/q-solve-scale/single/QDrivenScalePin.log). The same case converges
-    in double in 5 iterations. Not diagnosed: the pin row's floor is
-    modelled (16 solve accuracies times the row weight) and not measured,
-    and examples/q-driven.toml's single figures are the unpinned loop's.
+  * SINGLE PRECISION: QDrivenScalePin's agreement bound. Every pinned run
+    converges in single, in 3 or 4 KINSOL iterations (M-358), but the
+    re-solves sit 6e-6 to 4e-5 of psi's peak from the base against the
+    case's 1e-6, which is below single's loop floor (6.2e-4 in the residual).
+    A precision-qualified bound -- a multiple of the loop's floor, as
+    theDriverSolvesForTheToroidalField's 32 floors -- is a decision for the
+    user, not taken; the mutations it must still catch move psi by 0.05 to
+    0.13.
+
+  * SINGLE PRECISION: SafetyFactorScale's free Jacobian. Its fixed step of
+    1e-3 is under single's map noise (3.5e-3 in the coefficients at degree
+    4), so the free sigma_min reads 1.5e-3 against double's 3.6e-4 and the
+    30x ratios fail. Steps of 1e-2 to 3e-2 recover double's value; the
+    production loop's 100 floors does not, giving 1.78 at degree 4, because
+    toroidalMapFloor() is a max-norm over the coefficients and the top one is
+    ill-determined. The repair is to size the step -- or difference -- in the
+    fit's orthonormal coordinates, and whether the production loop should do
+    the same is open (M-358).
 
   * A FREE OR LIMITED BOUNDARY. Every pinned run is fixed-boundary, where
     psi_bnd is zero. On a limited or diverted plasma psi_bnd is a border

@@ -24006,3 +24006,81 @@ refused, conditioning 0.210, `g² = 4.84000000 + 2.42000000Ψ + 0.30250000Ψ²`;
 `mutation-c.log` (the mutated row in `PinnedToroidalFieldMap::operator()`);
 (c) `runs/q-solve-scale/tcv/` (`make.sh`, `run.sh`, `base.toml` from M-353's
 `tcv-d2-g1.4.toml`, `tcv-q.dat`, one `.toml`/`.log` per row).
+
+### M-358
+
+**The pinned q loop in single precision: a refused point accepted by the line
+search and differenced into the Jacobian, and `SafetyFactorScale`'s fixed
+difference step.** `q-solve-scale` at `5687e6b` and its parent, `builds/q-solve-scale`
+(double) and `builds/q-solve-scale-single` (MFEM `install-single`),
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+**(a) `QDrivenScalePin`'s base run** (`PlasmaCurrent = 5.0` from
+`ToroidalFieldGuess = 1.8`, the box at `RefinementLevels = 0`, target
+`q-driven-q.dat × (1 + 0.2Ψ³)`) stopped in single on a line search at a
+residual of 0.142 against a floor of 4.9e-4: 3 KINSOL iterations, 26
+equilibria, 9 refused; in double it converges in 5 and 36. Traced:
+
+| suspect | single | double | verdict |
+|---|---|---|---|
+| the outer Jacobian's step | 100 floors: 2.26e-2 relative | 1e-4 | sized to single's noise as designed; at the opening point the two Jacobians agree to 1–5% (column `c₂`: −3.150, −1.245, 0.438 against −3.17, −1.258, 0.435) |
+| the inner solve's accuracy | the fit rows move 7e-7 between evaluations whose solve is the same (`c₀` enters none) | 1e-13 | far below the step's reach; not the cause |
+| `∫F/R` for the `I_p` row | 2.506820672, 2.506820373, 2.506820424 at three such evaluations: 1.2e-7 relative | identical | not the cause |
+| the 9 refusals | every one an extraction failure, `ψ` at `Ψ_N = 0.95` "not attained" | the same `gg′` solved directly fails the same way, in both precisions | **real**: the region exists; single's larger step reaches it and double's 1e-4 does not |
+
+**The defect is how the loop met them, twice over.** At the first iterate the
+`c₁` column's minus side was refused, so the column was differenced against a
+refusal's residual, `lastGood − x`, which is not the map; the step built on it
+landed on another refused point — and that point's refusal residual, pointing
+back at a differencing column a short way off, read **0.16 against the
+iterate's 0.50**, so the Armijo test accepted it. The loop then sat on a point
+the map cannot evaluate, every column through it refused, and stopped at the
+refusal residual, 0.142.
+
+**Repaired** (`meq::PinnedToroidalFieldMap`, `meq::solveForToroidalField`): a
+refusal's residual is scaled to twice the largest admissible residual the map
+has returned, so no line search accepts one; and a refused side of a Jacobian
+column is not differenced — the column goes one-sided from the point, zero if
+both sides refuse (`OuterNewtonOptions::mapRefused`). In double no pinned run
+here meets a refusal, and every number is unchanged. In single:
+
+| pin | KINSOL its / equilibria | refused | final norm / threshold | `R0B0` read |
+|---|---|---|---|---|
+| `PlasmaCurrent = 5.0` | 3 / 22 | 2 | 1.05e-4 / 6.2e-4 | 1.936920 |
+| `R0B0 = 1.937000795` | 4 / 21 | 0 | 2.8e-6 / 6.2e-4 | 1.937001 |
+| `ToroidalFlux = 2.213770701` | 3 / 22 | 0 | 4.3e-5 / 6.2e-4 | 1.936983 |
+
+**`QDrivenScalePin` still fails in single, on its agreement bound and not on
+convergence**: every run converges in 3 or 4 iterations, and the re-solves sit
+5.9e-6, 9.4e-6 and 3.7e-5 of `ψ`'s peak from the base (`g²` 1.2e-5 to 6.8e-5),
+against the case's 1e-6. Each answer is converged only to the loop's floor,
+6.2e-4 in the residual, so agreement below about 1e-5 is not available in
+single. `QDrivenCurvedBoundary` passes in single (`g²` within 3.0e-5).
+
+**(b) `SafetyFactorScale` in single** (`main`'s single suite at `b7c549e`): the
+30× ratios fail because the free `σ_min` at degree 4 reads 1.46e-3 against
+double's 3.56e-4. Same cause in kind — a difference step against single's
+noise — and a different mechanism: the fixture differences at a fixed 1e-3,
+and the map's noise in the coefficients, measured as the change in `G(c)` at
+one `c` from two warm starts, is 1.8e-4 at degree 2 and 3.5e-3 at degree 4 in
+single (2.4e-14 and 5.3e-13 in double). Free `σ_min` by step:
+
+| step | 1e-3 | 3e-3 | 1e-2 | 3e-2 |
+|---|---|---|---|---|
+| degree 2, double | 2.896e-3 | 2.896e-3 | 2.873e-3 | 2.880e-3 |
+| degree 2, single | 3.267e-3 | 1.998e-3 | 2.872e-3 | 2.775e-3 |
+| degree 4, double | 3.557e-4 | 2.912e-4 | 4.385e-4 | 3.603e-4 |
+| degree 4, single | 8.567e-4 | 1.067e-4 | 2.844e-4 | 3.294e-4 |
+
+At 1e-2 and above single reads double's value to within double's own spread
+over the step. **The production rule does not transfer**: `100 ×
+toroidalMapFloor()` is 4.9e-2 at degree 2, where single then reads 2.778e-3,
+but 1.78 at degree 4, where the floor model (1.8e-2, five times the measured
+noise) is dominated by the ill-determined top coefficient and the step leaves
+the admissible region. The noise that matters to `σ_min` is the noise in the
+fit's orthonormal coordinates, not in `c`. Not repaired: TODO.
+
+**Reproduce.** `runs/q-solve-scale/single-diag/` (`current.toml`, `edge.toml`,
+`flux.toml`, `fixedgg.toml` with `gg.dat` for the refused `gg′`, and the
+`*.log`s), `runs/q-solve-scale/single/QDrivenScalePin.log` for the stall; the
+step table from a probe case run once in both trees, not kept.

@@ -483,6 +483,16 @@ solved under any pin is returned by the other two set to what it reads, to
 asserts that composition, and every q-driven `.nc` reports all three of its
 answer's scalars for it.
 
+**A REFUSED POINT IS NEITHER ACCEPTED NOR DIFFERENCED.** The map's refusal
+residual points back at the last admissible point, and when that point is a
+differencing column a step away it reads smaller than the iterate's own: the
+line search accepted one at 0.16 against 0.50 and the loop sat on it, in
+single, where the 100-floor step reaches fields whose outermost surface cannot
+be traced (double fails at the same `gg′`). So the pinned map scales a refusal
+to twice the largest residual it has returned, and a refused side of a
+Jacobian column makes the column one-sided (`OuterNewtonOptions::mapRefused`,
+→ **[M-358](MEASUREMENTS.md#m-358)**).
+
 **THE FLUX PIN IS A ROW BESIDE THE BORDERED NEWTON, NOT A HELD `ψ_ax`.**
 Holding `ψ_ax` in a plain inner solve, with the located axis as the outer row,
 is no better conditioned (0.594 against 0.578 at degree 2) and is the outer
