@@ -324,6 +324,26 @@ namespace meq
 		return interval;
 	}
 
+	/**
+	 * meq::SplineProfile's continuation past an end, to the operation: at
+	 * signed distance @a d and width @a width, the value is f_e + f_e' g and
+	 * the slope f_e' g'.
+	 */
+	MFEM_HOST_DEVICE inline void profileContinuation( mfem::real_t d, mfem::real_t width,
+	                                                  mfem::real_t &g, mfem::real_t &gPrime )
+	{
+		mfem::real_t const sign = d < mfem::real_t( 0 ) ? mfem::real_t( -1 ) : mfem::real_t( 1 );
+		mfem::real_t const u = ( d < mfem::real_t( 0 ) ? -d : d )/width;
+		if ( u >= mfem::real_t( 1 ) )
+		{
+			g = mfem::real_t( 0.5 )*sign*width;
+			gPrime = mfem::real_t( 0 );
+			return;
+		}
+		g = sign*width*( u - mfem::real_t( 0.5 )*u*u );
+		gPrime = mfem::real_t( 1 ) - u;
+	}
+
 	/// @a view evaluated at @a x. @a knots is the flat array @a view indexes.
 	MFEM_HOST_DEVICE inline mfem::real_t evaluateProfile( ProfileView const &view,
 	                                                      KnotView const *knots,
@@ -333,13 +353,21 @@ namespace meq
 			return view.scale*view.constantValue;
 
 		KnotView const *k = knots + view.offset;
-		// The linear continuation outside, SplineProfile::operator()'s
-		// expression to the operation, so the two agree to the bit.
+		// The continuation outside, SplineProfile::operator()'s expression to
+		// the operation, so the two agree to the bit.
+		mfem::real_t const width = mfem::real_t( tableContinuationWidth )
+		                           *( k[ view.count - 1 ].psi - k[ 0 ].psi );
+		mfem::real_t g = 0, gPrime = 0;
 		if ( x <= k[ 0 ].psi )
-			return view.scale*( k[ 0 ].value + k[ 0 ].derivative*( x - k[ 0 ].psi ) );
+		{
+			profileContinuation( x - k[ 0 ].psi, width, g, gPrime );
+			return view.scale*( k[ 0 ].value + k[ 0 ].derivative*g );
+		}
 		if ( x >= k[ view.count - 1 ].psi )
-			return view.scale*( k[ view.count - 1 ].value
-			                    + k[ view.count - 1 ].derivative*( x - k[ view.count - 1 ].psi ) );
+		{
+			profileContinuation( x - k[ view.count - 1 ].psi, width, g, gPrime );
+			return view.scale*( k[ view.count - 1 ].value + k[ view.count - 1 ].derivative*g );
+		}
 
 		int const i = profileInterval( view, k, view.count, x );
 		mfem::real_t const lo = k[ i ].psi;
@@ -362,12 +390,20 @@ namespace meq
 			return mfem::real_t( 0 );
 
 		KnotView const *k = knots + view.offset;
-		// The end knot's slope outside, the linear continuation's, as
-		// SplineProfile::prime().
+		// The continuation's slope outside, as SplineProfile::prime().
+		mfem::real_t const width = mfem::real_t( tableContinuationWidth )
+		                           *( k[ view.count - 1 ].psi - k[ 0 ].psi );
+		mfem::real_t g = 0, gPrime = 0;
 		if ( x < k[ 0 ].psi )
-			return view.scale*k[ 0 ].derivative;
+		{
+			profileContinuation( x - k[ 0 ].psi, width, g, gPrime );
+			return view.scale*( k[ 0 ].derivative*gPrime );
+		}
 		if ( x > k[ view.count - 1 ].psi )
-			return view.scale*k[ view.count - 1 ].derivative;
+		{
+			profileContinuation( x - k[ view.count - 1 ].psi, width, g, gPrime );
+			return view.scale*( k[ view.count - 1 ].derivative*gPrime );
+		}
 
 		int const i = profileInterval( view, k, view.count, x );
 		mfem::real_t const lo = k[ i ].psi;

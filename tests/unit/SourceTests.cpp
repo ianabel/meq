@@ -393,10 +393,10 @@ BOOST_AUTO_TEST_CASE( dfdpsi_agrees_with_a_central_difference_for_spline_profile
 
 BOOST_AUTO_TEST_CASE( an_out_of_range_flux_is_continued_rather_than_thrown )
 {
-	// A Newton iterate overshoots; the profiles continue linearly, so F stays
-	// finite, nothing escapes into the quadrature loop, and dF/dpsi out there
-	// is the end's -- continuous across it, which is what the table derivative's
-	// rate needs (M-TABLEDERIV-6).
+	// A Newton iterate overshoots; the profiles continue and then flatten, so F
+	// stays finite and bounded, nothing escapes into the quadrature loop, and
+	// dF/dpsi is continuous across each end -- which is what the table
+	// derivative's rate needs (M-TABLEDERIV-6).
 	auto const pPrimeSpline = std::make_shared<meq::SplineProfile>( pressureDerivative, pressureSecondDerivative, 8 );
 	auto const ggPrimeSpline = std::make_shared<meq::SplineProfile>( ggPrimeValue, ggPrimeDerivative, 8 );
 	meq::MHDSource const source( pPrimeSpline, ggPrimeSpline, 1.0 );
@@ -405,13 +405,20 @@ BOOST_AUTO_TEST_CASE( an_out_of_range_flux_is_continued_rather_than_thrown )
 	{
 		BOOST_CHECK_NO_THROW( source.f( 1.5, 0.0, psi ) );
 		BOOST_CHECK( std::isfinite( source.f( 1.5, 0.0, psi ) ) );
-		double const end = psi < 0.0 ? 0.0 : 1.0;
-		checkClose( source.dFdPsi( 1.5, 0.0, psi ), source.dFdPsi( 1.5, 0.0, end ), 1e-12,
-		            "dF/dpsi past the table", psi );
+		// Far out the continuation is flat, so the source adds nothing to the
+		// Jacobian there.
+		BOOST_CHECK_EQUAL( source.dFdPsi( 1.5, 0.0, psi ), 0.0 );
 	}
 
-	double const continued = source.f( 1.5, 0.0, 5.0 );
-	checkClose( continued, source.f( 1.5, 0.0, 1.0 ) + 4.0*source.dFdPsi( 1.5, 0.0, 1.0 ), 1e-12,
+	// And continuous across each end.
+	for ( double const end : { 0.0, 1.0 } )
+		checkClose( source.dFdPsi( 1.5, 0.0, end - 1e-10 ), source.dFdPsi( 1.5, 0.0, end + 1e-10 ), 1e-7,
+		            "dF/dpsi across an end", end );
+
+	// Bounded: F at 5 is F at 1 plus the taper's whole reach, w/2 of the slope.
+	double const w = meq::tableContinuationWidth;
+	double const slope = source.dFdPsi( 1.5, 0.0, 1.0 );
+	checkClose( source.f( 1.5, 0.0, 5.0 ), source.f( 1.5, 0.0, 1.0 ) + 0.5*w*slope, 1e-12,
 	            "F continued above the table", 5.0 );
 }
 

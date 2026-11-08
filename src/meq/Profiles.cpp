@@ -82,6 +82,30 @@ namespace
 		return 6.0*t - 2.0;
 	}
 
+	/*
+	 * THE CONTINUATION PAST A TABLE'S END, at signed distance d from it and
+	 * width w: value f_e + f_e' g, slope f_e' g', curvature f_e' g''. A
+	 * quadratic taper, g = d ( 1 - |d|/2w ) out to |d| = w and flat at
+	 * +-w/2 beyond, so value and slope are continuous at the end (g' = 1
+	 * there) and at w (g' = 0 there), and the continuation is bounded.
+	 * meq::SourceView's profileContinuation() is this, to the operation.
+	 */
+	void continuation( double d, double width, double &g, double &gPrime, double &gDouble )
+	{
+		double const sign = d < 0.0 ? -1.0 : 1.0;
+		double const u = std::abs( d )/width;
+		if ( u >= 1.0 )
+		{
+			g = 0.5*sign*width;
+			gPrime = 0.0;
+			gDouble = 0.0;
+			return;
+		}
+		g = sign*width*( u - 0.5*u*u );
+		gPrime = 1.0 - u;
+		gDouble = -sign/width;
+	}
+
 	// Reject the values that would turn into a silently wrong interpolant later.
 	void checkTable( std::vector<meq::Knot> const & data )
 	{
@@ -331,33 +355,63 @@ namespace meq
 
 	double SplineProfile::operator()( double psi ) const
 	{
-		// THE LINEAR CONTINUATION past either end: the end knot's value and
-		// slope carried on, so value and slope are continuous there -- and
-		// with them dF/dpsi of a source reading the value. See the class.
+		// THE CONTINUATION past either end: the end knot's value and slope
+		// carried on and tapered flat, so value and slope are continuous --
+		// and with them dF/dpsi of a source reading the value. See the class.
 		Knot const &first = knotData.front();
 		Knot const &last = knotData.back();
+		double const width = tableContinuationWidth*( last.psi - first.psi );
+		double g = 0.0, gPrime = 0.0, gDouble = 0.0;
 		if ( psi <= first.psi )
-			return first.value + first.derivative*( psi - first.psi );
+		{
+			continuation( psi - first.psi, width, g, gPrime, gDouble );
+			return first.value + first.derivative*g;
+		}
 		if ( psi >= last.psi )
-			return last.value + last.derivative*( psi - last.psi );
+		{
+			continuation( psi - last.psi, width, g, gPrime, gDouble );
+			return last.value + last.derivative*g;
+		}
 
 		return intervalAt( findInterval( psi ) )( psi );
 	}
 
 	double SplineProfile::prime( double psi ) const
 	{
-		if ( psi < knotData.front().psi )
-			return knotData.front().derivative;
-		if ( psi > knotData.back().psi )
-			return knotData.back().derivative;
+		Knot const &first = knotData.front();
+		Knot const &last = knotData.back();
+		double const width = tableContinuationWidth*( last.psi - first.psi );
+		double g = 0.0, gPrime = 0.0, gDouble = 0.0;
+		if ( psi < first.psi )
+		{
+			continuation( psi - first.psi, width, g, gPrime, gDouble );
+			return first.derivative*gPrime;
+		}
+		if ( psi > last.psi )
+		{
+			continuation( psi - last.psi, width, g, gPrime, gDouble );
+			return last.derivative*gPrime;
+		}
 
 		return intervalAt( findInterval( psi ) ).prime( psi );
 	}
 
 	double SplineProfile::doublePrime( double psi ) const
 	{
-		if ( psi < knotData.front().psi || psi > knotData.back().psi )
-			return 0.0;
+		Knot const &first = knotData.front();
+		Knot const &last = knotData.back();
+		double const width = tableContinuationWidth*( last.psi - first.psi );
+		double g = 0.0, gPrime = 0.0, gDouble = 0.0;
+		if ( psi < first.psi )
+		{
+			continuation( psi - first.psi, width, g, gPrime, gDouble );
+			return first.derivative*gDouble;
+		}
+		if ( psi > last.psi )
+		{
+			continuation( psi - last.psi, width, g, gPrime, gDouble );
+			return last.derivative*gDouble;
+		}
 
 		return intervalAt( findInterval( psi ) ).doublePrime( psi );
 	}

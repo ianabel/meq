@@ -46,6 +46,15 @@ namespace meq
 		double relative = 0.0;
 	};
 
+	/**
+	 * HOW FAR PAST ITS ENDS A TABLE'S CONTINUATION RUNS BEFORE IT IS FLAT, as
+	 * a fraction of the table's span (meq::SplineProfile). Measured, not
+	 * chosen: a purely linear continuation turned examples/machine-c-mast.toml
+	 * from converging in 3 of 4 perturbed draws to 0 of 4, as did a width of
+	 * 0.5; 0.1 converges in 4 of 4 to the clamp's answer (M-TABLEDERIV-6).
+	 */
+	inline constexpr double tableContinuationWidth = 0.1;
+
 	/// The share of a table's span a solve may read past its ends before the
 	/// driver says so: past round-off and an axis overshoot, short of a
 	/// read that the continuation answers rather than the table.
@@ -270,23 +279,24 @@ namespace meq
 	 * analytic derivative of operator() rather than a difference of it. That is
 	 * what makes the Newton Jacobian consistent with the residual.
 	 *
-	 * OUT OF RANGE THE TABLE IS CONTINUED LINEARLY: below the first knot
-	 * f( first ) + f'( first )( psi - psi_first ), slope f'( first ), and the
-	 * same from the last knot above it; doublePrime() is zero there. Nothing
-	 * throws. Value AND SLOPE are continuous at each end, so dF/dpsi of a
-	 * source that reads a value is too, and only the second derivative jumps.
+	 * OUT OF RANGE THE TABLE IS CONTINUED, AND THEN FLAT: from an end knot at
+	 * distance d out to w = meq::tableContinuationWidth of the span,
+	 * f_e + f_e' d ( 1 - |d|/2w ), and beyond it the constant f_e +- f_e' w/2
+	 * that reaches. Nothing throws. Value AND SLOPE are continuous at the end
+	 * and at w, so dF/dpsi of a source that reads a value is too; only the
+	 * second derivative jumps, by f_e'/w.
 	 *
 	 * WHY NOT A CONSTANT, WHICH THIS WAS. A clamp holds the end value with
 	 * zero slope, so dF/dpsi JUMPS across the level set psi = psi_end wherever
 	 * a solution reaches past a table -- and a fixed-boundary psi_h does, beside
-	 * the wall, where it undershoots (MEASUREMENTS.md M-TABLEDERIV-2). The
-	 * solution shrugs that off; the derivative of the discrete solution in a
-	 * table does not, and loses its order: ~1.5 against the control's k + 1
-	 * at k = 3 (M-TABLEDERIV-4). Continued, it keeps it (M-TABLEDERIV-6). The
-	 * price is the one the clamp was chosen to avoid: an overshoot past a steep
-	 * edge reads a value that keeps going -- a density or a temperature can go
-	 * through zero there -- so GradShafranovSolver::sourceTableReach() says how
-	 * far a solve read past any table, and the driver warns.
+	 * the wall, where it undershoots. The solution shrugs that off; the
+	 * derivative of the discrete solution in a table does not, and loses its
+	 * order. WHY NOT LINEAR ALL THE WAY, which is the natural continuation:
+	 * an overshoot far past a steep edge then reads a value that keeps going,
+	 * the hazard the clamp was chosen to avoid, and it is measured -- it cost
+	 * a shipped machine case its convergence. Both are M-TABLEDERIV-6. A solve
+	 * that reads past a table is reported: GradShafranovSolver::
+	 * sourceTableReach() says how far, and the driver warns.
 	 *
 	 * The class is a plain value type: copyable and movable, with no hand-written
 	 * special members to get wrong.
