@@ -24934,6 +24934,15 @@ double and 2.4e-6 in single, and both still fail there: after the merge of
 `cde84f2` the gap reads 9.75e-6 (82ε; `ψ_ax` passes) and the warm-start
 noise 2.81e-5 (236ε).
 
+**Beside main's measured q-loop floor (M-363)**, merged from `b347610`: in
+double the q tests read as before — `QDrivenConsistency`'s plateau 1.182e-1
+then 1.179e-1, `SafetyFactorSolver`, `SafetyFactorScale`, `QDrivenScalePin`,
+`QDrivenCurvedBoundary` and `DriverAcceptance` pass — and in single, on the
+`ψ̃` map, `QDrivenCurvedBoundary` converges in 4 KINSOL iterations and 25
+equilibria at 2.64e-5 against a measured floor of 1.01e-4 (M-363(d), on `ψ*`:
+4.39e-5 against 1.51e-4), and the other three pass
+(`runs/continuous-extraction/single-merged.log`).
+
 **Under valgrind's memcheck**, `examples/fixed-d-tcv.toml` at
 `RefinementLevels = 1` with `FluxSurfaces = true` (the continuous fields
 built, threaded at two threads, and the family traced through the band):
