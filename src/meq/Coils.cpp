@@ -1838,6 +1838,11 @@ namespace meq
 		return plasmaSource->crossingDerivatives( radius, z, psi, dFdW, dFdWPrime );
 	}
 
+	void CoilAugmentedNormalisedSource::tableReach( double psiLow, double psiHigh, TableReach &out ) const
+	{
+		plasmaSource->tableReach( psiLow, psiHigh, out );
+	}
+
 	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }
 	CoilSet const & CoilAugmentedNormalisedSource::coils() const { return *coilSet; }
 

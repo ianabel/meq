@@ -9695,6 +9695,53 @@ namespace
 		return sourceIntegrator->conductorShiftAt( element, point );
 	}
 
+	TableReach GradShafranovSolver::sourceTableReach() const
+	{
+		TableReach out;
+		if ( !prepared || !nonlinearSource )
+			return out;
+		countedHostRead( solution, __LINE__ );
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		int const potentialStart = blockOffsets[ 1 ];
+		double low = std::numeric_limits<double>::infinity();
+		double high = -std::numeric_limits<double>::infinity();
+		mfem::IsoparametricTransformation tr;
+		mfem::Array<int> dofs;
+		mfem::Vector shape, point;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			if ( !elementInPlasma( e ) )
+				continue;
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			mesh.GetElementTransformation( e, &tr );
+			potentialFes->GetElementDofs( e, dofs );
+			shape.SetSize( el.GetDof() );
+			mfem::IntegrationRule const &ir = sourceRule( el, tr, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				tr.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				double psi = 0.0;
+				for ( int j = 0; j < el.GetDof(); ++j )
+					psi += shape( j )*solution( potentialStart + dofs[ j ] );
+				psi += conductorPsiAtQuadrature( e, i );
+				if ( normalisedSource )
+				{
+					tr.Transform( ip, point );
+					if ( !normalisedSource->insidePlasma( point( 0 ), point( 1 ), psi ) )
+						continue;
+				}
+				low = std::min( low, psi );
+				high = std::max( high, psi );
+			}
+		}
+		if ( low <= high )
+			nonlinearSource->tableReach( low, high, out );
+		return out;
+	}
+
 	double GradShafranovSolver::assemblePlasmaCurrent( mfem::Vector const &state ) const
 	{
 		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );

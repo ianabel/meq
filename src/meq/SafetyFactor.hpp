@@ -87,14 +87,14 @@
  *
  * A source, though, is evaluated at every quadrature point of the domain,
  * including on the axis and outside the plasma. So a `gg'` built from a family
- * has to say something where the family does not. `meq::SplineProfile` CLAMPS
- * outside its knots -- deliberately, since a linear extrapolation of a steep
- * edge profile turns an overshoot into a NaN -- so the value carried past the
+ * has to say something where the family does not. `meq::SplineProfile`
+ * CONTINUES LINEARLY outside its knots -- the end knot's value and slope
+ * carried on, so `dF/dpsi` is continuous there -- so what is carried past the
  * ends is the end knot's.
  *
  * **THAT IS A CHOICE ABOUT THE PHYSICS AND IT IS WRONG AT THE EDGE.** Outside
  * the plasma the toroidal field is the vacuum one, `g = const`, so `gg' = 0`;
- * clamping at the outermost knot's value instead keeps `g^2` growing. Whether
+ * carrying the outermost knot on instead keeps `g^2` growing. Whether
  * that matters depends on whether the source is confined -- `[source]
  * ConfineToPlasma` sets `F = 0` outside the plasma outright and the question
  * does not arise -- which is why this file offers the choice rather than making
@@ -108,8 +108,8 @@ namespace meq
 	enum class EdgeExtension
 	{
 		/**
-		 * Carry the outermost knot's value, which is what SplineProfile does
-		 * with no help. Right when the source is confined to the plasma, where
+		 * Carry the outermost knot on -- its value and slope, SplineProfile's
+		 * linear continuation -- which is what SplineProfile does with no help. Right when the source is confined to the plasma, where
 		 * nothing outside is ever evaluated.
 		 */
 		Clamp,

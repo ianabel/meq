@@ -250,9 +250,9 @@ BOOST_AUTO_TEST_CASE( a_corrupt_family_is_refused_at_the_division )
  * THE EDGE EXTENSION IS A STATEMENT ABOUT THE PHYSICS AND THE CALLER MAKES IT.
  *
  * A family stops short of the plasma edge -- Psi_N = 0.95 as shipped, i.e.
- * Psi = 0.05 -- and SplineProfile CLAMPS outside its knots. Clamping carries
- * the innermost gg' out past the edge, which keeps g^2 growing where the field
- * should be the vacuum one. VacuumOutside puts a knot at Psi = 0 carrying zero
+ * Psi = 0.05 -- and SplineProfile continues linearly outside its knots, which
+ * carries the innermost gg' and its slope out past the edge and keeps g^2
+ * growing where the field should be the vacuum one. VacuumOutside puts a knot at Psi = 0 carrying zero
  * instead. Neither is right for every run: with [source] ConfineToPlasma the
  * source is switched off out there and the question does not arise at all.
  */
