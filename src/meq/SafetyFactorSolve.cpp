@@ -90,10 +90,10 @@ namespace meq
 					std::function<double()> const &floorOfMap,
 					std::function<bool()> const &refusedByMap,
 					std::function<std::vector<double>()> const &basisOfMap,
-					double difference, int &evaluations )
+					double difference, double tolerance, int &evaluations )
 					: mfem::Operator( n ), map( map ), floorOfMap( floorOfMap ),
 					  refusedByMap( refusedByMap ), basisOfMap( basisOfMap ),
-					  difference( difference ),
+					  difference( difference ), tolerance( tolerance ),
 					  evaluations( evaluations ), gradient( n, n )
 				{
 				}
@@ -122,12 +122,12 @@ namespace meq
 				 * closer, since `4.84` itself is `4.84000015` there. In double
 				 * it is `1e-15` and nothing reaches it.
 				 */
-				double floorAt( mfem::Vector const &x ) const
+				double floorAt( mfem::Vector const &x, bool measured = true ) const
 				{
 					Evaluation const *known = find( x );
-					double const ofMap =
+					double const ofMap = std::max( measured ? measuredNoiseFloor : 0.0,
 						known != nullptr ? known->floor
-						: history.empty() ? 0.0 : history.back().floor;
+						: history.empty() ? 0.0 : history.back().floor );
 					countedHostRead( x, __LINE__ );
 					double const ofIterate =
 						gradientNorm
@@ -219,10 +219,56 @@ namespace meq
 							image[ static_cast<std::size_t>( i ) ] - x( i );
 					record.floor = floorOfMap ? std::abs( floorOfMap() ) : 0.0;
 					record.refused = refusedByMap && refusedByMap();
+					bool const refusedHere = record.refused;
+					double norm = 0.0;
+					for ( double value : record.residual )
+						norm = std::max( norm, std::abs( value ) );
 					history.push_back( std::move( record ) );
+
+					/*
+					 * THE NOISE IS MEASURED WHERE THE RESIDUAL FIRST NEARS THE
+					 * MODELLED FLOOR, so that the iteration stops at the map's
+					 * noise rather than chasing it. Only where the floor, and
+					 * not the tolerance, is what the loop is judged on -- in
+					 * double the tolerance is far above the noise and this never
+					 * runs -- and once. MEASUREMENTS.md M-FLOOR-1: measured only
+					 * after KINSOL's own stall, QDrivenCurvedBoundary in single
+					 * spent three Newton iterations under a model floor 1.6
+					 * times below the noise before its line search gave out.
+					 */
+					if ( !noiseMeasured && !measuring && !refusedHere )
+					{
+						double const modelled = floorAt( x );
+						if ( modelled >= tolerance && norm <= 10.0*modelled )
+							measureNoiseAt( x );
+					}
 					if ( floorChanged )
 						floorChanged( floorAt( x ) );
 				}
+
+				/// measuredSpreadAt() at @a x, taken once: four standard
+				/// deviations of it become a floor under every later one.
+				void measureNoiseAt( mfem::Vector const &x ) const
+				{
+					if ( noiseMeasured || measuring )
+						return;
+					measuring = true;
+					try
+					{
+						measuredNoiseFloor = 4.0*measuredSpreadAt( x )/std::sqrt( 2.0 );
+					}
+					catch ( ... )
+					{
+						measuring = false;
+						throw;
+					}
+					measuring = false;
+					noiseMeasured = true;
+				}
+
+				/// Four standard deviations of the map's measured noise, or
+				/// zero before it has been measured.
+				double measuredFloor() const { return measuredNoiseFloor; }
 
 				/// The conditioning of the last Jacobian formed, as
 				/// `sigma_min/sigma_max`. Meaningless before one has been.
@@ -427,6 +473,55 @@ namespace meq
 				}
 
 			private:
+			public:
+				/**
+				 * THE MAP'S NOISE AT @a x, MEASURED: the largest change in any
+				 * component of the residual when @a x is evaluated again from
+				 * a different warm start -- the map's state moved first by an
+				 * evaluation a tenth of a unit away in the last coordinate,
+				 * once each way. That is the difference of two draws, so its
+				 * standard deviation is sqrt( 2 ) of one. Zero if @a x was
+				 * never evaluated or was refused, and a fresh evaluation that
+				 * is refused counts for nothing: a measurement that cannot be
+				 * made raises no floor.
+				 *
+				 * **WHY IT IS MEASURED AND NOT ONLY MODELLED.** The floor model
+				 * -- 16 eps per surface carried through the fit -- is right to
+				 * within its 4 standard deviations on the box and is under the
+				 * map's noise on a curved boundary: QDrivenCurvedBoundary in
+				 * single reads 4.0e-5 of noise at its answer against a model
+				 * of 2.5e-5, and the loop stalled at 2.70e-5, below what the
+				 * map resolves (MEASUREMENTS.md M-FLOOR-1).
+				 */
+				double measuredSpreadAt( mfem::Vector const &x ) const
+				{
+					Evaluation const *known = find( x );
+					if ( known == nullptr || known->refused )
+						return 0.0;
+					std::vector<double> const reference = known->residual;
+					int const n = x.Size();
+					countedHostRead( x, __LINE__ );
+					double worst = 0.0;
+					for ( double sign : { 1.0, -1.0 } )
+					{
+						mfem::Vector away( n );
+						away = x;
+						away.HostReadWrite();
+						away( n - 1 ) += sign*0.1*std::max( std::abs( x( n - 1 ) ), mfem::real_t( 1.0 ) );
+						mfem::Vector discard( n );
+						Mult( away, discard );
+						std::vector<double> const image = evaluate( x );
+						if ( refusedByMap && refusedByMap() )
+							continue;
+						for ( int i = 0; i < n; ++i )
+							worst = std::max( worst, std::abs(
+								( image[ static_cast<std::size_t>( i ) ] - x( i ) )
+								- reference[ static_cast<std::size_t>( i ) ] ) );
+					}
+					return worst;
+				}
+
+			private:
 				/// Whether the map refused @a x, which it was asked for. A point
 				/// never evaluated reads false.
 				bool refusedAt( mfem::Vector const &x ) const
@@ -511,6 +606,10 @@ namespace meq
 				mutable bool haveGradient = false;
 				mutable double lastConditioning = 1.0;
 				mutable double gradientNorm = 0.0;
+				double tolerance = 0.0;
+				mutable double measuredNoiseFloor = 0.0;
+				mutable bool noiseMeasured = false;
+				mutable bool measuring = false;
 		};
 
 		/**
@@ -900,6 +999,7 @@ namespace meq
 
 		FixedPointResidual residual( n, map, options.mapFloor, options.mapRefused,
 		                             options.differenceBasis, options.difference,
+		                             options.functionTolerance,
 		                             out.mapEvaluations );
 
 		// THE CONVERGENCE THRESHOLD, at a point the map was evaluated at. The
@@ -1172,16 +1272,55 @@ namespace meq
 			                  + error.what() );
 		}
 		out.floor = residual.floorAt( solution );
-		double const judged = threshold( out.floor );
+		double judged = threshold( out.floor );
 		bool const deficient = out.jacobianConditioning <= rankFloor( n );
-		bool const reached = out.finalResidual <= judged;
+		bool reached = out.finalResidual <= judged;
+
+		/*
+		 * A STALL ABOVE THE MODELLED FLOOR IS JUDGED AGAINST THE MAP'S NOISE
+		 * MEASURED THERE.
+		 *
+		 * A Newton stopping test must not demand a residual below what the
+		 * map can resolve, and the floor is a MODEL of that: right on the box,
+		 * 2.5 times under the map's noise on a curved boundary in single. So
+		 * when KINSOL stops on its own -- a line search that cannot decrease
+		 * the residual, or a step below its tolerance, never the iteration
+		 * cap -- the noise at the returned point is measured, by evaluating
+		 * it again from two other warm starts (two equilibria and two more to
+		 * move the warm start), and four standard deviations of it, as the
+		 * model takes, become the floor if they are the larger. A stall above
+		 * THAT is still not converged: a real step remained and the line
+		 * search could not take it (MEASUREMENTS.md M-FLOOR-1).
+		 */
+		if ( !reached && !deficient && out.iterations < options.maxIterations )
+		{
+			try
+			{
+				residual.measureNoiseAt( solution );
+			}
+			catch ( std::exception const & )
+			{
+			}
+			out.floor = residual.floorAt( solution );
+			judged = threshold( out.floor );
+			reached = out.finalResidual <= judged;
+		}
+		double const measuredFloor = residual.measuredFloor();
+		bool const measurementSets =
+			measuredFloor > 0.0
+			&& residual.floorAt( solution ) > residual.floorAt( solution, false );
 		out.converged = reached && !deficient;
 
 		// HOW KINSOL STOPPED, said in words: the flag itself is overwritten
 		// by MFEM before it returns, but the three cases it can be are told
 		// apart by what is left.
+		bool const byMeasurement =
+			reached && measurementSets
+			&& out.finalResidual > threshold( residual.floorAt( solution, false ) );
 		char const *stopped =
-			reached ? "with the residual within the threshold"
+			byMeasurement ? "with the residual within the map's own noise, measured "
+			                "near the answer"
+			: reached ? "with the residual within the threshold"
 			: out.iterations >= options.maxIterations ? "at the iteration cap"
 			: newton.GetConverged()
 				? "on a step below KINSOL's step tolerance, the residual having "
@@ -1195,6 +1334,8 @@ namespace meq
 		       << out.finalResidual << " against a threshold of " << judged
 		       << " -- the larger of the tolerance " << options.functionTolerance
 		       << " and the round-off floor " << out.floor
+		       << ( measurementSets
+		            ? " (four standard deviations of the map's noise, measured)" : "" )
 		       << "; KINSOL stopped " << stopped;
 		if ( deficient )
 			status << "; the outer Jacobian went RANK DEFICIENT during the "

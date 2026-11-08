@@ -1056,6 +1056,82 @@ BOOST_AUTO_TEST_CASE( a_stall_above_the_floor_is_not_converged )
 }
 
 /*
+ * A STALL AT THE MAP'S OWN NOISE IS CONVERGED, MEASURED -- AND A STALL ABOVE IT
+ * IS NOT.
+ *
+ * The q-driven map's noise is a WARM-START noise: the same coefficients solved
+ * from a different starting field answer differently, by the inner solve's
+ * accuracy carried through the extraction. Its floor is a model of that, and
+ * on a curved boundary in single the model is under the noise: the loop
+ * stalled at 2.70e-5 against a floor of 2.58e-5, where the map's measured
+ * noise was 4.0e-5 (MEASUREMENTS.md M-FLOOR-1). A stopping test may not ask
+ * for a residual below what the map resolves, so when KINSOL stops on its own
+ * above the modelled floor the loop re-evaluates the returned point from two
+ * other warm starts and takes four standard deviations of what it measures.
+ *
+ * This map's noise is a fresh draw on EVERY call, as a warm start's is, and
+ * its declared floor is a hundred times under it. Converged, at the measured
+ * floor, and close to the root. And the control: the same map stopped by a
+ * step tolerance far above its noise is not converged -- a real step
+ * remained, and measuring the noise must not excuse it. hashedNoise's map,
+ * a function of the point alone, measures zero spread and is the understated
+ * case above, still not converged.
+ */
+BOOST_AUTO_TEST_CASE( a_stall_at_the_maps_measured_noise_is_converged )
+{
+	std::vector<double> const start = { 6.0, 3.4, 0.5 };
+	std::vector<double> const root = { 4.84, 2.42, 0.3025 };
+	double const noise = 1.0e-4;
+	auto calls = std::make_shared<int>( 0 );
+	auto warmNoisy = [ root, noise, calls ]( std::vector<double> const &c )
+	{
+		++*calls;
+		std::vector<double> out( c.size() );
+		for ( std::size_t i = 0; i < c.size(); ++i )
+		{
+			double const away = c[ i ] - root[ i ];
+			double const draw = std::sin( 12.9898*( *calls ) + 78.233*static_cast<double>( i ) );
+			out[ i ] = root[ i ] + 1.8*away + 0.3*away*away + noise*draw;
+		}
+		return out;
+	};
+
+	meq::OuterNewtonOptions understated;
+	understated.functionTolerance = 1.0e-12;
+	understated.mapFloor = [ noise ]() { return noise/100.0; };
+	meq::OuterNewtonResult const measured =
+		meq::solveForToroidalField( start, warmNoisy, understated );
+	std::printf( "\n  A WARM-START NOISY MAP, FLOOR UNDERSTATED: %s\n", measured.status.c_str() );
+	BOOST_TEST( measured.converged,
+		"a loop stalled at " << measured.finalResidual << " on a map whose noise is "
+		<< noise << " reads as not converged: the stopping test asks for a residual "
+		"below what the map resolves. " << measured.status );
+	BOOST_TEST( measured.floor >= noise,
+		"the floor it was judged against, " << measured.floor << ", is under the "
+		"map's own noise" );
+	double worst = 0.0;
+	for ( std::size_t i = 0; i < root.size(); ++i )
+		worst = std::max( worst, std::abs( measured.coefficients[ i ] - root[ i ] ) );
+	BOOST_TEST( worst < 20.0*noise,
+		"converged at the measured floor, the answer is " << worst << " from the "
+		"root -- more than the noise allows" );
+
+	meq::OuterNewtonOptions stopped = understated;
+	stopped.stepTolerance = 1.0e-1;
+	*calls = 0;
+	meq::OuterNewtonResult const early =
+		meq::solveForToroidalField( start, warmNoisy, stopped );
+	std::printf( "  THE SAME MAP STOPPED EARLY: %s\n", early.status.c_str() );
+	BOOST_TEST( early.finalResidual > 100.0*noise,
+		"the precondition: the step tolerance must stop the loop far above the "
+		"noise, or this is not the control" );
+	BOOST_TEST( !early.converged,
+		"a loop stopped at " << early.finalResidual << ", far above its map's "
+		"noise of " << noise << ", reads as converged: measuring the noise "
+		"excused a step that remained. " << early.status );
+}
+
+/*
  * THE OUTER NEWTON IS A NEWTON: A FRESH JACOBIAN AT EVERY ITERATE.
  *
  * KINSOL's default keeps a Jacobian for ten iterations, which on the q-driven
