@@ -11564,6 +11564,540 @@ namespace
 		return !refused;
 	}
 
+	bool GradShafranovSolver::addSourceColumns(
+		mfem::Vector const &state, std::size_t count,
+		std::function<bool( double, double, double, double * )> const &derivative,
+		std::vector<mfem::Vector *> const &out ) const
+	{
+		countedHostRead( state, __LINE__ );
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		int const potentialStart = blockOffsets[ 1 ];
+		int const elementTotal = mesh.GetNE();
+		std::exception_ptr failure;
+		int refused = 0;
+
+		MEQ_OMP_ELEMENT_LOOP
+		for ( int e = 0; e < elementTotal; ++e )
+		{
+			try
+			{
+				// XP-1: dF/dp_j is zero wherever F is, and the fill switches F
+				// off on a whole element.
+				if ( !elementInPlasma( e ) )
+					continue;
+
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				mfem::ElementTransformation &tr = scratch;
+
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
+				std::vector<double> g( count );
+
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
+
+				// SourceIntegrator's rule, for assembleNormalisationColumn()'s
+				// reason: the column of the ASSEMBLED residual.
+				mfem::IntegrationRule const &ir = sourceRule( el, tr, sourceQuadratureExtra );
+
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					tr.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					tr.Transform( ip, point );
+
+					double const radius = point( 0 );
+					double const z = point( 1 );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
+
+					if ( !derivative( radius, z, psi, g.data() ) )
+					{
+						MEQ_OMP( atomic write )
+						refused = 1;
+						break;
+					}
+
+					double const weight = ip.weight*tr.Weight();
+					for ( std::size_t k = 0; k < count; ++k )
+					{
+						if ( g[ k ] == 0.0 )
+							continue;
+						// SourceIntegrator's -w F/R, differentiated.
+						double const factor = -weight*g[ k ]/radius;
+						mfem::Vector &column = *out[ k ];
+						for ( int j = 0; j < dof; ++j )
+							column( potentialStart + dofs[ j ] ) += factor*shape( j );
+					}
+				}
+			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
+			}
+		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
+		return refused == 0;
+	}
+
+	void GradShafranovSolver::evaluateResidual( mfem::Vector const &state, mfem::Vector &out )
+	{
+		if ( !prepared || !darcy || !nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::evaluateResidual: there is no "
+			                        "non-linear solve to evaluate the residual of" );
+		/*
+		 * Newton's own operator over the full state, as solveByPicard()
+		 * builds it: the hybridization and the right-hand side are members,
+		 * so it outlives nothing it holds. Host: a derivative is a host product.
+		 */
+		++hybridizationGeneration;
+		mfem::DarcyNPCOperator npc( *darcy->GetHybridization(), blockOffsets, darcyRhs );
+		out.SetSize( npc.Height() );
+		npc.Mult( state, out );
+	}
+
+	void GradShafranovSolver::assembleSourceDerivative(
+		mfem::Vector const &state, std::function<double( double, double, double )> const &dFdp,
+		mfem::Vector &out )
+	{
+		if ( !prepared || !darcy || !nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleSourceDerivative: there is no "
+			                        "solve to differentiate at yet" );
+		if ( reactionStabilization || anisotropyValue != nullptr )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleSourceDerivative: refused "
+			                        "beside a reaction-following tau, whose face term reads "
+			                        "dF/dpsi, or an anisotropy, a law held apart from the source" );
+		out.SetSize( state.Size() );
+		zeroOnHost( out );
+		std::vector<mfem::Vector *> columns{ &out };
+		addSourceColumns( state, 1,
+			[ & ]( double radius, double z, double psi, double *g )
+			{
+				g[ 0 ] = dFdp( radius, z, psi );
+				return true;
+			}, columns );
+	}
+
+	void GradShafranovSolver::solveTangent( mfem::Vector const &state, mfem::Vector const &dRdp,
+	                                        mfem::Coefficient *boundaryDerivative, mfem::Vector &out )
+	{
+		if ( !prepared || !darcy || !nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::solveTangent: there is no solve to "
+			                        "linearise at yet" );
+		if ( normalisedSource || exteriorCoupling || reactionStabilization || inverseIsPosed() )
+			throw std::logic_error( "meq::GradShafranovSolver::solveTangent: the unbordered tangent "
+			                        "only -- a normalised source, an exterior coupling, an inverse "
+			                        "solve or a reaction-following tau takes the bordered "
+			                        "linearisation, linearise()" );
+		if ( dRdp.Size() != state.Size() )
+			throw std::invalid_argument( "meq::GradShafranovSolver::solveTangent: dR/dp is not state-sized" );
+
+		/*
+		 * Newton's own operator and elimination, as solveByPicard() builds
+		 * them: the residual first, at the state, so the gradient is taken
+		 * where the residual was -- the order every Newton step keeps.
+		 */
+		++hybridizationGeneration;
+		mfem::DarcyNPCOperator npc( *darcy->GetHybridization(), blockOffsets, darcyRhs );
+		mfem::Vector residual( npc.Height() );
+		npc.Mult( state, residual );
+		std::unique_ptr<mfem::Solver> const traceOwned =
+			makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue,
+			                 traceRefinementCapValue );
+		mfem::DarcyNPCSolver linear( *traceOwned );
+		linear.SetOperator( npc.GetGradient( state ) );
+
+		/*
+		 * THE DATUM IS LIFTED, NOT HANDED TO THE SOLVE. Newton's step is zero
+		 * on the essential trace dofs -- the data ride in the iterate -- so a
+		 * right-hand side there is discarded, measured: the datum's share came
+		 * back as nothing. So delta x = v_b - y, v_b the datum's derivative on
+		 * those dofs and zero elsewhere, and J y = dR/dp + J v_b with y = 0
+		 * there. R is AFFINE in the trace -- psihat enters through the face
+		 * terms tau ( psi - psihat ) and < psihat, q.n >, linear, and F reads
+		 * psi alone -- so J v_b = R( x + v_b ) - R( x ) exactly.
+		 */
+		mfem::Vector rhs( dRdp );
+		mfem::Array<int> const &essential = essentialTraceDofs();
+		int const traceStart = blockOffsets[ 2 ];
+		mfem::Vector lifted( state.Size() );
+		lifted = 0.0;
+		if ( boundaryDerivative )
+		{
+			mfem::GridFunction datum( traceFes.get() );
+			datum = 0.0;
+			datum.ProjectBdrCoefficient( *boundaryDerivative, fittedMarker );
+			for ( int i = 0; i < essential.Size(); ++i )
+				lifted( traceStart + essential[ i ] ) = datum( essential[ i ] );
+			mfem::Vector moved( state ), atMoved( npc.Height() );
+			moved += lifted;
+			npc.Mult( moved, atMoved );
+			atMoved -= residual;
+			rhs += atMoved;
+			// And the gradient back at the state: the residual just taken was
+			// elsewhere (CLAUDE.md, no residual between a gradient and its
+			// solves).
+			npc.Mult( state, residual );
+			linear.SetOperator( npc.GetGradient( state ) );
+		}
+		for ( int i = 0; i < essential.Size(); ++i )
+			rhs( traceStart + essential[ i ] ) = 0.0;
+
+		out.SetSize( state.Size() );
+		out = 0.0;
+		linear.Mult( rhs, out );
+		out.Neg();
+		out += lifted;
+	}
+
+	void GradShafranovSolver::reconstructPotential( mfem::Vector const &state, mfem::GridFunction &into )
+	{
+		if ( !postProcessed )
+			throw std::logic_error( "meq::GradShafranovSolver::reconstructPotential: postProcess() "
+			                        "has not run, so the post-processed space is not built" );
+		if ( reactionStabilization || fieldAnisotropyValue != nullptr )
+			throw std::logic_error( "meq::GradShafranovSolver::reconstructPotential: refused beside a "
+			                        "reaction-following tau or a field anisotropy, whose "
+			                        "reconstruction reads the solution's own field" );
+		mfem::Vector copy( state );
+		mfem::BlockVector sol;
+		sol.Update( copy, darcy->GetOffsets() );
+		mfem::Vector trace( copy, blockOffsets[ 2 ], blockOffsets[ 3 ] - blockOffsets[ 2 ] );
+		mfem::GridFunction totalFlux( totalFluxGf ), enrichedFlux( enrichedFluxGf ),
+			enrichedTrace( enrichedTraceGf );
+		into = postProcessedGf;
+		darcy->Reconstruct( sol, trace, totalFlux, enrichedFlux, into, enrichedTrace );
+	}
+
+	struct GradShafranovSolver::RetainedLinearisation
+	{
+		std::unique_ptr<mfem::DarcyNPCOperator> npc;
+		std::unique_ptr<mfem::Solver> trace;
+		std::unique_ptr<mfem::DarcyNPCSolver> linear;
+		mfem::Vector state;
+		std::uint64_t generation = 0;
+		int borders = 0;
+		/// psi_ax's column dR/ds, its back-solve J^{-1} c, its row and corner.
+		mfem::Vector column;
+		mfem::Vector columnSolved;
+		std::vector<int> rowIndex;
+		std::vector<double> rowWeight;
+		double corner = 1.0;
+		double schur = 1.0;
+	};
+
+	bool GradShafranovSolver::isLinearised() const
+	{
+		return retained && retained->generation == hybridizationGeneration;
+	}
+
+	int GradShafranovSolver::linearisedBorders() const
+	{
+		return isLinearised() ? retained->borders : 0;
+	}
+
+	void GradShafranovSolver::retainedBackSolve( mfem::Vector const &b, mfem::Vector &y ) const
+	{
+		mfem::Vector rhs( b );
+		mfem::Array<int> const &essential = essentialTraceDofs();
+		int const traceStart = blockOffsets[ 2 ];
+		for ( int i = 0; i < essential.Size(); ++i )
+			rhs( traceStart + essential[ i ] ) = 0.0;
+		y.SetSize( b.Size() );
+		y = 0.0;
+		retained->linear->Mult( rhs, y );
+	}
+
+	void GradShafranovSolver::linearise( mfem::Vector const &state )
+	{
+		if ( !prepared || !darcy || !nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::linearise: there is no solve to "
+			                        "linearise at yet" );
+		if ( exteriorCoupling || reactionStabilization || inverseIsPosed() || anisotropyValue != nullptr
+		     || boundaryFluxIsUnknown || currentIsUnknown || xPointIsAnUnknown()
+		     || ( normalisedSource && normalisedSource->readsMidplane() ) )
+			throw std::logic_error( "meq::GradShafranovSolver::linearise: the retained linearisation "
+			                        "carries no border or psi_ax alone; psi_bnd, a prescribed current, "
+			                        "the X-point, the exterior coupling, an inverse solve, the bordered "
+			                        "gauge, a reaction-following tau and an anisotropy are refused" );
+		if ( state.Size() != blockOffsets.Last() )
+			throw std::invalid_argument( "meq::GradShafranovSolver::linearise: the state is not this "
+			                             "solver's" );
+
+		++hybridizationGeneration;
+		auto held = std::make_shared<RetainedLinearisation>();
+		held->state = state;
+
+		/*
+		 * Newton's own operator, the residual first and the gradient where the
+		 * residual was, as every step takes them; then nothing may touch the
+		 * hybridization until the solves below are done -- and nothing after
+		 * them either, which is what the generation enforces.
+		 */
+		held->npc = std::make_unique<mfem::DarcyNPCOperator>( *darcy->GetHybridization(), blockOffsets,
+		                                                       darcyRhs );
+		mfem::Vector residual( held->npc->Height() );
+		held->npc->Mult( state, residual );
+		held->trace = makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue,
+		                               traceRefinementCapValue );
+		held->linear = std::make_unique<mfem::DarcyNPCSolver>( *held->trace );
+		held->linear->SetOperator( held->npc->GetGradient( state ) );
+		held->generation = hybridizationGeneration;
+		retained = held;
+
+		if ( !normalisedSource )
+			return;
+
+		/*
+		 * psi_ax's COLUMN, dR/ds, analytic -- the same element loop the
+		 * bordered Newton assembles it with (assembleNormalisationColumn()),
+		 * which reads no residual and so leaves the factorisation alone.
+		 */
+		held->borders = 1;
+		if ( !assembleNormalisationColumn( state, true, held->column ) )
+			throw std::logic_error( "meq::GradShafranovSolver::linearise: the source cannot give "
+			                        "dF/dpsi_ax analytically (normalisationDerivatives())" );
+		retainedBackSolve( held->column, held->columnSolved );
+
+		/*
+		 * AND ITS ROW, dC/dx of C = psi_ax - psi_h( x_ax ), exactly.
+		 */
+		int const potentialStart = blockOffsets[ 1 ];
+		mfem::GridFunction potentialField( potentialFes.get(), const_cast<mfem::real_t *>( state.GetData() ) + potentialStart );
+		if ( axisConstraintChoice == AxisConstraint::NodalMaximum )
+		{
+			double const span = normalisedSource->normalisation() - normalisedSource->boundaryNormalisation();
+			int best = 0;
+			for ( int j = 1; j < potentialField.Size(); ++j )
+				if ( span >= 0.0 ? potentialField( j ) > potentialField( best )
+				                 : potentialField( j ) < potentialField( best ) )
+					best = j;
+			held->rowIndex.push_back( potentialStart + best );
+			held->rowWeight.push_back( -1.0 );
+		}
+		else
+		{
+			bool const located = axisConstraintChoice == AxisConstraint::LocatedAxis;
+			double radius = located ? axisRValue : axisFluxR;
+			double z = located ? axisZValue : axisFluxZ;
+			int element = -1;
+			mfem::IntegrationPoint reference;
+			if ( !locateFieldPoint( radius, z, -1, element, reference ) )
+				throw std::runtime_error( "meq::GradShafranovSolver::linearise: the axis point is not "
+				                          "in the mesh" );
+			mfem::GridFunction fluxField( fluxFes.get(), const_cast<mfem::real_t *>( state.GetData() ) );
+			mfem::IsoparametricTransformation tr;
+			mfem::DenseMatrix gradient( 2, 2 );
+			mfem::Vector value( 2 ), point( 2 );
+			if ( located )
+			{
+				/*
+				 * x_ax RE-LOCATED AT THIS STATE, a zero of q_h by Newton on the
+				 * element's polynomial -- the solve's last location belongs to
+				 * its last iterate, not to the state handed here.
+				 */
+				for ( int iteration = 0; iteration < 30; ++iteration )
+				{
+					mesh.GetElementTransformation( element, &tr );
+					tr.SetIntPoint( &reference );
+					fluxField.GetVectorValue( tr, reference, value );
+					fluxField.GetVectorGradient( tr, gradient );
+					double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
+					if ( det == 0.0 )
+						break;
+					double const dr = ( gradient( 1, 1 )*value( 0 ) - gradient( 0, 1 )*value( 1 ) )/det;
+					double const dz = ( -gradient( 1, 0 )*value( 0 ) + gradient( 0, 0 )*value( 1 ) )/det;
+					radius -= dr;
+					z -= dz;
+					if ( !locateFieldPoint( radius, z, element, element, reference ) )
+						throw std::runtime_error( "meq::GradShafranovSolver::linearise: the magnetic "
+						                          "axis left the mesh while it was re-located" );
+					if ( std::hypot( dr, dz ) < 1.0e-14*( 1.0 + std::hypot( radius, z ) ) )
+						break;
+				}
+			}
+			mesh.GetElementTransformation( element, &tr );
+			tr.SetIntPoint( &reference );
+
+			mfem::FiniteElement const &el = *potentialFes->GetFE( element );
+			mfem::Vector shape( el.GetDof() );
+			el.CalcShape( reference, shape );
+			mfem::Array<int> dofs;
+			potentialFes->GetElementDofs( element, dofs );
+			for ( int j = 0; j < dofs.Size(); ++j )
+			{
+				held->rowIndex.push_back( potentialStart + dofs[ j ] );
+				held->rowWeight.push_back( -shape( j ) );
+			}
+
+			if ( located )
+			{
+				/*
+				 * THE POSITION TERM: x_ax solves G( x_ax ) = 0, G the flux
+				 * block's field, so d x_ax/du = -( grad G )^{-1} dG/du, and
+				 * -grad psi_h . d x_ax/du is a^T dG/du with
+				 * a = ( grad G )^{-T} grad psi_h. dG_c/du on the flux dof
+				 * ( c, j ) is the scalar shape n_j at x_ax.
+				 */
+				fluxField.GetVectorGradient( tr, gradient );
+				mfem::Vector psiGradient( 2 );
+				potentialField.GetGradient( tr, psiGradient );
+				double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
+				if ( det != 0.0 )
+				{
+					// a = G^{-T} g: solve G^T a = g.
+					double const a0 = ( gradient( 1, 1 )*psiGradient( 0 ) - gradient( 1, 0 )*psiGradient( 1 ) )/det;
+					double const a1 = ( -gradient( 0, 1 )*psiGradient( 0 ) + gradient( 0, 0 )*psiGradient( 1 ) )/det;
+					mfem::FiniteElement const &fluxEl = *fluxFes->GetFE( element );
+					mfem::Vector fluxShape( fluxEl.GetDof() );
+					fluxEl.CalcShape( reference, fluxShape );
+					mfem::Array<int> vdofs;
+					fluxFes->GetElementVDofs( element, vdofs );
+					int const n = fluxEl.GetDof();
+					for ( int j = 0; j < n; ++j )
+					{
+						held->rowIndex.push_back( vdofs[ j ] );
+						held->rowWeight.push_back( a0*fluxShape( j ) );
+						held->rowIndex.push_back( vdofs[ n + j ] );
+						held->rowWeight.push_back( a1*fluxShape( j ) );
+					}
+				}
+			}
+		}
+
+		double rowDotColumn = 0.0;
+		for ( std::size_t k = 0; k < held->rowIndex.size(); ++k )
+			rowDotColumn += held->rowWeight[ k ]*held->columnSolved( held->rowIndex[ k ] );
+		held->corner = 1.0;
+		held->schur = held->corner - rowDotColumn;
+	}
+
+	void GradShafranovSolver::solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
+	                                           mfem::Vector &dx, std::vector<double> &ds )
+	{
+		if ( !isLinearised() )
+			throw std::logic_error( "meq::GradShafranovSolver::solveLinearised: no valid "
+			                        "linearisation is held -- linearise() first, and nothing that "
+			                        "evaluates a residual on this solver in between" );
+		if ( b.Size() != retained->state.Size() )
+			throw std::invalid_argument( "meq::GradShafranovSolver::solveLinearised: b is not state-sized" );
+		retainedBackSolve( b, dx );
+		ds.assign( static_cast<std::size_t>( retained->borders ), 0.0 );
+		if ( retained->borders == 0 )
+			return;
+		double rowDotY = 0.0;
+		for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
+			rowDotY += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
+		double const gValue = g.empty() ? 0.0 : g[ 0 ];
+		ds[ 0 ] = ( gValue - rowDotY )/retained->schur;
+		dx.Add( -ds[ 0 ], retained->columnSolved );
+	}
+
+	void GradShafranovSolver::linearisedTangent( mfem::Vector const &dRdp, std::vector<double> const &dCdp,
+	                                             mfem::Coefficient *boundaryDerivative, mfem::Vector &dx,
+	                                             std::vector<double> &ds )
+	{
+		if ( !isLinearised() )
+			throw std::logic_error( "meq::GradShafranovSolver::linearisedTangent: no valid "
+			                        "linearisation is held" );
+		mfem::Vector b( dRdp );
+		b.Neg();
+		std::vector<double> g( static_cast<std::size_t>( retained->borders ), 0.0 );
+		for ( std::size_t i = 0; i < std::min( g.size(), dCdp.size() ); ++i )
+			g[ i ] = -dCdp[ i ];
+
+		mfem::Vector lifted( b.Size() );
+		lifted = 0.0;
+		if ( boundaryDerivative )
+		{
+			/*
+			 * THE DATUM LIFTED, as solveTangent() lifts it: J v_b =
+			 * R( x + v_b ) - R( x ), R affine in the trace -- a residual
+			 * evaluation, so the linearisation is taken again afterwards.
+			 */
+			mfem::Array<int> const &essential = essentialTraceDofs();
+			int const traceStart = blockOffsets[ 2 ];
+			mfem::GridFunction datum( traceFes.get() );
+			datum = 0.0;
+			datum.ProjectBdrCoefficient( *boundaryDerivative, fittedMarker );
+			for ( int i = 0; i < essential.Size(); ++i )
+				lifted( traceStart + essential[ i ] ) = datum( essential[ i ] );
+			mfem::Vector const state( retained->state );
+			mfem::Vector base( b.Size() ), moved( state ), atMoved( b.Size() );
+			retained->npc->Mult( state, base );
+			moved += lifted;
+			retained->npc->Mult( moved, atMoved );
+			atMoved -= base;
+			b -= atMoved;
+			// The row reads the lifted trace too, but the axis row lives on
+			// element dofs, so g is unchanged.
+			linearise( state );
+		}
+		solveLinearised( b, g, dx, ds );
+		dx += lifted;
+	}
+
+	double GradShafranovSolver::linearisedInverseNorm( int steps, double *change )
+	{
+		if ( !isLinearised() )
+			throw std::logic_error( "meq::GradShafranovSolver::linearisedInverseNorm: no valid "
+			                        "linearisation is held" );
+		int const potentialStart = blockOffsets[ 1 ];
+		int const potentialSize = blockOffsets[ 2 ] - potentialStart;
+		mfem::Vector v( retained->state.Size() ), dx;
+		std::vector<double> g( static_cast<std::size_t>( retained->borders ), 0.0 ), ds;
+		v = 0.0;
+		for ( int i = 0; i < potentialSize; ++i )
+			v( potentialStart + i ) = std::sin( 0.37*i + 0.1 );
+		if ( !g.empty() )
+			g[ 0 ] = 0.5;
+		double estimate = 0.0, previous = 0.0;
+		for ( int step = 0; step < steps; ++step )
+		{
+			double before = 0.0;
+			for ( int i = 0; i < potentialSize; ++i )
+				before += v( potentialStart + i )*v( potentialStart + i );
+			for ( double x : g )
+				before += x*x;
+			before = std::sqrt( before );
+			solveLinearised( v, g, dx, ds );
+			double after = 0.0;
+			v = 0.0;
+			for ( int i = 0; i < potentialSize; ++i )
+			{
+				v( potentialStart + i ) = dx( potentialStart + i );
+				after += dx( potentialStart + i )*dx( potentialStart + i );
+			}
+			for ( std::size_t i = 0; i < ds.size(); ++i )
+			{
+				g[ i ] = ds[ i ];
+				after += ds[ i ]*ds[ i ];
+			}
+			after = std::sqrt( after );
+			previous = estimate;
+			estimate = after/before;
+		}
+		if ( change )
+			*change = previous > 0.0 ? std::abs( estimate - previous )/estimate : 1.0;
+		return estimate;
+	}
+
 	bool GradShafranovSolver::assembleNormalisationColumn( mfem::Vector const &state,
 	                                                       bool axis,
 	                                                       mfem::Vector &out ) const
@@ -18494,6 +19028,7 @@ namespace
 
 	void GradShafranovSolver::solve()
 	{
+		++hybridizationGeneration;
 		if ( labelReadingChoice == LabelReading::PostProcessed )
 			solveReadingPostProcessedLabels();
 		else
@@ -19431,6 +19966,7 @@ namespace
 
 	void GradShafranovSolver::postProcess()
 	{
+		++hybridizationGeneration;
 		// PHASE E OF DEVICE-PLAN.md section 3.3 -- host, and nothing should
 		// cross. A transfer counted here is a block phase D did not bring over,
 		// which is a finding rather than a cost.

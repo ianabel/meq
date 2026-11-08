@@ -2,6 +2,7 @@
 #define MEQ_GRADSHAFRANOV_HPP
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -2337,6 +2338,144 @@ namespace meq
 			/// The whole iterate ( q, psi, psihat ) after solve(), for
 			/// setInitialState() on another solver over the same mesh.
 			mfem::Vector const &state() const;
+
+			/**
+			 * THE ASSEMBLED FIELD RESIDUAL R( @a state ) INTO @a out, AT THE
+			 * SOURCE AS IT STANDS -- its tables, its labels, its scale -- and
+			 * the support and conductor shift the last solve left: the
+			 * residual the bordered Newton evaluates (mfem::DarcyNPCOperator
+			 * on ( q, psi, psihat ), the border rows not included), and what
+			 * a derivative of it is checked against. After a solve().
+			 *
+			 * @throws std::logic_error before a solve, or on the linear path,
+			 *         which has no residual to evaluate.
+			 */
+			void evaluateResidual( mfem::Vector const &state, mfem::Vector &out );
+
+			/**
+			 * dR/dp FOR ANY PARAMETER p THE SOURCE READS AT FIXED psi, given
+			 * dF/dp at a point: -w ( dF/dp )/R against the potential shape
+			 * functions by meq::SourceIntegrator's rule, into a state-sized
+			 * @a out. @a dFdp is called from the element loop's threads, with
+			 * the total flux, and must be reentrant. Refuses a
+			 * reaction-following tau and an anisotropy.
+			 */
+			void assembleSourceDerivative( mfem::Vector const &state,
+			                               std::function<double( double, double, double )> const &dFdp,
+			                               mfem::Vector &out );
+
+			/**
+			 * THE DISCRETE TANGENT, delta x = -J^{-1} ( dR/dp ), AT @a state,
+			 * WITHOUT A BORDER: J the NPC Jacobian of the field residual at
+			 * @a state -- the Newton matrix the solve's next step would use --
+			 * factorised by the solve's own trace solver, and @a dRdp a
+			 * state-sized derivative of the residual in a parameter
+			 * (assembleSourceDerivative()).
+			 *
+			 * The Dirichlet rows: the trace's essential dofs take the
+			 * projection of @a boundaryDerivative -- d( datum )/dp -- the way
+			 * setBoundaryData()'s datum is projected, or zero when it is null.
+			 *
+			 * A fresh operator and factorisation per call, and no border, so
+			 * it refuses a normalised source (psi_ax an unknown), an exterior
+			 * coupling, the free currents and a reaction-following tau.
+			 * linearise() is the retained, bordered one.
+			 */
+			void solveTangent( mfem::Vector const &state, mfem::Vector const &dRdp,
+			                   mfem::Coefficient *boundaryDerivative, mfem::Vector &out );
+
+			/**
+			 * psi* OF @a state -- DarcyForm::Reconstruct() of an arbitrary
+			 * ( q, psi, psihat ), into @a into on the post-processed space,
+			 * as postProcess() makes it of the solution. After a
+			 * postProcess(), which builds that space. Refuses what
+			 * solveTangent() refuses, and a field anisotropy.
+			 */
+			void reconstructPotential( mfem::Vector const &state, mfem::GridFunction &into );
+
+			/**
+			 * J AT A RETAINED LINEARISATION, WITH THE BORDER. Assembles and
+			 * factorises the Newton matrix
+			 * of the bordered system at @a state and the source's labels as
+			 * they stand -- the field Jacobian J (mfem::DarcyNPCOperator's
+			 * gradient, the solve's own trace solver), and, where psi_ax is an
+			 * unknown, its column c = dR/dpsi_ax, its row r = dC/dx of
+			 * C = psi_ax - psi_h( x_ax ) and the corner dC/dpsi_ax = 1 -- and
+			 * KEEPS them: every solveLinearised() after reuses the factorisation
+			 * and J^{-1} c, so a direction costs one back-solve.
+			 *
+			 * THE ROW IS THE EXACT DERIVATIVE OF THE CONSTRAINT THE SOLVE
+			 * CLOSES. Under AxisConstraint::LocatedAxis x_ax is a zero of q_h,
+			 * re-located at @a state to round-off, and moves with the flux, so
+			 * the row carries the position term the Newton's own row may drop
+			 * (AxisRow::PositionDropped): -shape( x_ax ) on the axis element's
+			 * potential dofs and grad psi_h^T ( grad q_h )^{-1} on its flux
+			 * dofs. Under NodalMaximum it is -e_j, under PrescribedPoint the
+			 * shape functions at the point.
+			 *
+			 * INVALIDATED BY ANYTHING THAT EVALUATES THE RESIDUAL OR TAKES A
+			 * GRADIENT ON THIS SOLVER -- solve(), evaluateResidual(),
+			 * solveTangent(), postProcess() -- since those overwrite the
+			 * element-local blocks the factorisation lives in (CLAUDE.md, no
+			 * residual evaluation between NPCGradient() and its solves). A
+			 * caller that keeps solving keeps its linearisation on a solver
+			 * of its own; solveLinearised() refuses a stale one rather than
+			 * answering from it.
+			 *
+			 * Supported: no border (a Source), or psi_ax alone (a
+			 * NormalisedSource on a fixed boundary). Refused, with the reason:
+			 * psi_bnd an unknown, a prescribed current, the X-point, the
+			 * exterior coupling, an inverse solve, the bordered midplane
+			 * gauge, a reaction-following tau and an anisotropy.
+			 */
+			void linearise( mfem::Vector const &state );
+
+			/// Whether a linearisation is held and still valid.
+			bool isLinearised() const;
+
+			/// The border unknowns the held linearisation carries: 0, or 1
+			/// for psi_ax.
+			int linearisedBorders() const;
+
+			/**
+			 * [ J c ; r d ] [ dx ; ds ] = [ b ; g ] at the held linearisation:
+			 * @a b state-sized (its essential trace rows are ignored, and dx
+			 * is zero there), @a g one entry per border. By the Schur
+			 * complement on the retained J^{-1} c: dx = y - ( J^{-1} c ) ds,
+			 * ds = ( g - r y )/( d - r J^{-1} c ), y = J^{-1} b.
+			 * @throws std::logic_error when no valid linearisation is held.
+			 */
+			void solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
+			                      mfem::Vector &dx, std::vector<double> &ds );
+
+			/**
+			 * THE BORDERED TANGENT in a parameter p: [ dx ; ds ] =
+			 * -[ J c ; r d ]^{-1} [ dR/dp ; dC/dp ], with dx carrying the
+			 * Dirichlet datum's derivative @a boundaryDerivative on the
+			 * essential trace dofs (or zero). A table or a source parameter
+			 * reaches C = psi_ax - psi_h( x_ax ) not at all, so @a dCdp is
+			 * empty or zero there. A non-null @a boundaryDerivative costs a
+			 * re-factorisation: its lifting is a residual evaluation.
+			 */
+			void linearisedTangent( mfem::Vector const &dRdp, std::vector<double> const &dCdp,
+			                        mfem::Coefficient *boundaryDerivative, mfem::Vector &dx,
+			                        std::vector<double> &ds );
+
+			/**
+			 * AN ESTIMATE OF 1/sigma_min OF THE HELD BORDERED MATRIX, from the
+			 * factorisation it already has: @a steps of inverse iteration on
+			 * the potential block and the border, the growth of the last step.
+			 * Converges fast exactly where it matters -- near a fold, where one
+			 * mode dominates -- and slowly far from one, so @a change, when
+			 * given, receives the relative change of the estimate over the
+			 * last step to say how far it had got. Strictly it is the inverse
+			 * of the least eigenvalue's modulus, which is 1/sigma_min up to
+			 * that eigenvector's conditioning -- the same thing on a fold. In
+			 * the residual's own scaling, so read it as a ratio against a
+			 * reference, not against an absolute bound. MEASUREMENTS.md
+			 * M-LIN-4.
+			 */
+			double linearisedInverseNorm( int steps = 20, double *change = nullptr );
 
 			/**
 			 * HOW FAR THE SOLVED STATE READ PAST THE SOURCE'S TABLES: psi over
@@ -7167,6 +7306,38 @@ namespace meq
 			                           CardinalSpline const &basis,
 			                           std::vector<double> const &crossings,
 			                           std::vector<mfem::Vector> &out ) const;
+
+			/**
+			 * THE DOMAIN TERM's share of the columns of quantities p_j that F
+			 * reads at fixed psi, added to @a out: -w ( dF/dp_j )/R against
+			 * the potential shape functions, by meq::SourceIntegrator's rule
+			 * and conductor shift, on the elements the plasma reaches. The
+			 * scatter is into each element's own potential dofs, disjoint
+			 * across elements, so threaded it is bit-identical to serial.
+			 *
+			 * @param derivative  dF/dp_j at fixed ( R, z, psi ), psi the total
+			 *                    flux, into its last argument's @a count
+			 *                    entries. CALLED FROM THE THREADS of the
+			 *                    element loop, so it must be reentrant. False
+			 *                    refuses.
+			 *
+			 * @return false if @a derivative refused.
+			 */
+			bool addSourceColumns( mfem::Vector const &state, std::size_t count,
+			                       std::function<bool( double, double, double, double * )> const &derivative,
+			                       std::vector<mfem::Vector *> const &out ) const;
+
+			/// linearise()'s held state; defined in the .cpp. Shared so the
+			/// incomplete type can sit in the header.
+			struct RetainedLinearisation;
+			std::shared_ptr<RetainedLinearisation> retained;
+
+			/// Bumped by everything that overwrites the hybridization's local
+			/// blocks; a linearisation records it and is stale once it moves.
+			std::uint64_t hybridizationGeneration = 0;
+
+			/// J^{-1} b on the held factorisation, essential rows zero.
+			void retainedBackSolve( mfem::Vector const &b, mfem::Vector &y ) const;
 
 			/**
 			 * UNDER setTauFollowsReaction(), THE FACE TERM's share of the

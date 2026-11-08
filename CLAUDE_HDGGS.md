@@ -1253,6 +1253,42 @@ semicircle*). **Render the page for any equation
 carrying a radical, a fractional exponent or a weight**, which in this subject
 is most of them.
 
+### The derivative of the discrete solution, and a retained linearisation
+
+`δx = −J⁻¹ ∂R/∂p` at a converged state is the derivative of the **discrete**
+solution in anything `F` reads. `assembleSourceDerivative()` is `∂R/∂p` from a
+pointwise `∂F/∂p`; `solveTangent()` solves it unbordered with a fresh
+factorisation; `linearise()` keeps one, with `ψ_ax`'s border when the source
+is normalised, and `solveLinearised()`, `linearisedTangent()` and
+`linearisedInverseNorm()` reuse it.
+
+* **Discretise, then differentiate, converges.** The tangent reaches `k + 1`
+  in `ψ` and `q` and `k + 2` in `ψ*`, at `ψ`'s own error, on a closed form
+  that reads its parameter inside the non-linearity
+  (→ **[M-LIN-1](MEASUREMENTS.md#m-lin-1)**). Bordered, `dψ_ax` converges too,
+  and the tangent is a Richardson difference of two round-off solves to
+  4.7e-12 (→ **[M-LIN-3](MEASUREMENTS.md#m-lin-3)**).
+* **The Dirichlet datum is lifted, not handed to the solve.** Newton's step is
+  zero on the essential trace dofs, so a right-hand side there is discarded;
+  `J v_b = R(x + v_b) − R(x)` exactly, since `R` is affine in the trace.
+* **The row is the constraint's exact derivative.** Under `LocatedAxis` it
+  carries the position term `(∇G)^{−T}∇ψ_h` on the flux dofs at the axis,
+  which the Newton's own row may drop. It is second order where `∇ψ_h ≈ 0`,
+  so only the Richardson check sees it.
+* **A retained linearisation shares the hybridization's element-local
+  blocks**, so any residual, gradient or solve on the same solver overwrites
+  it — the local-solve trap above and CLAUDE.md's "no residual evaluation between
+  `NPCGradient()` and its solves". Every one bumps a generation and a stale
+  linearisation is **refused**. A caller that keeps solving keeps its
+  linearisation on a solver of its own.
+* **Near a fold the error grows as `1/σ`** (→ **[M-LIN-2](MEASUREMENTS.md#m-lin-2)**),
+  and `linearisedInverseNorm()` tracks it as `C/δ` from the factorisation the
+  tangent already has (→ **[M-LIN-4](MEASUREMENTS.md#m-lin-4)**). It is the least
+  eigenvalue's modulus in the residual's scaling: read it as a ratio.
+* **Refused**: every border but `ψ_ax`'s — `ψ_bnd`, a prescribed current, the
+  X-point, the exterior coupling, an inverse solve, the bordered gauge — and a
+  reaction-following `τ` or an anisotropy.
+
 ### A wrong Jacobian is invisible to a convergence table
 
 The single most useful thing measured in stage 4, and the justification for

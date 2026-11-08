@@ -24350,3 +24350,229 @@ and from 1.2 to the `g²` of the other pins (M-357(c)).
 **Reproduce.** `runs/q-solve-scale/example/` (`q-driven.log`, `flux.log`),
 `runs/q-solve-scale/tcv/` (`edge.log`, `flux-g1.4.log`, `flux-g1.2.log`,
 `edge-d3.log`), `runs/q-solve-scale/study/study-delivered.log`.
+
+### M-LIN-1
+
+**THE DISCRETE TANGENT `δψ_h = ∂ψ_h/∂λ` CONVERGES TO THE EXACT `∂ψ/∂λ` AT
+`ψ`'S OWN RATES — `k + 1` IN `ψ` AND `q`, `k + 2` IN THE POST-PROCESSED `ψ*`,
+IN L2 AND IN L∞ — OVER `k = 1…4`, WITH ERRORS 0.4–1.6× `ψ`'S.** Kaltsas &
+Throumoulopoulos's exponential similarity solution, `F = f₀e^{nψ}(1 + εR²)`,
+differentiated in the exponent `n`, which `F` reads inside its
+nonlinearity. `tests/convergence/TangentConvergence.cpp`.
+
+`δx = −J⁻¹ (∂R/∂λ)` at the converged state (`solveTangent()`, `J` the NPC
+Newton matrix, the datum's derivative lifted onto the Dirichlet trace dofs),
+`∂R/∂λ` from `assembleSourceDerivative()` with `∂F/∂n = ψF`. The exact tangent
+is `(−ψ + 1/n − 2s tanh s/n)/n`, its gradient
+`−(√c/2) sech²(s)(s/n)∇ζ`. That closed form agrees with central differences of
+the fixture in `n` to 1.3e-11, and it satisfies the linearised equation
+`−Δ*δψ − nFδψ = ψF` to 1.9e-08 by differences of `Δ*`. The tangent agrees
+with a Richardson difference of two solves converged to round-off at `n ± h`
+(`k = 2`, 8 cells a side), over the whole state, to **3.7e-11**.
+
+Errors and observed rates, `ψ_h` above `δψ_h`, standard box, `ψ` its exact
+value on `Γ`; L∞ is the maximum over a `2k + 6` rule's points, componentwise
+for `q`:
+
+| `k` | `h` | `ψ` L2 | `ψ` max | `q` L2 | `q` max | `ψ*` L2 | `ψ*` max |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.025 | 1.10e-04 (2.01) | 5.77e-04 (1.99) | 2.31e-04 (2.00) | 1.35e-03 (1.95) | 9.26e-07 (2.98) | 5.56e-06 (2.97) |
+| 1, δ | 0.025 | 4.87e-05 (2.03) | 2.56e-04 (2.01) | 1.13e-04 (2.01) | 7.68e-04 (1.96) | 4.87e-07 (3.01) | 3.82e-06 (2.97) |
+| 2 | 0.025 | 8.63e-07 (3.01) | 6.57e-06 (3.00) | 2.00e-06 (3.00) | 1.46e-05 (2.99) | 6.37e-09 (4.00) | 4.80e-08 (3.96) |
+| 2, δ | 0.025 | 7.91e-07 (3.01) | 6.27e-06 (3.00) | 1.89e-06 (3.00) | 1.70e-05 (3.00) | 5.49e-09 (4.00) | 4.44e-08 (3.96) |
+| 3 | 0.025 | 1.00e-08 (4.00) | 1.19e-07 (3.97) | 2.45e-08 (4.00) | 2.49e-07 (3.96) | 6.11e-11 (5.00) | 6.16e-10 (4.96) |
+| 3, δ | 0.025 | 1.25e-08 (4.01) | 1.51e-07 (3.99) | 3.10e-08 (4.00) | 3.25e-07 (3.96) | 7.56e-11 (4.99) | 8.12e-10 (4.95) |
+| 4 | 0.025 | 1.20e-10 (5.00) | 1.70e-09 (4.97) | 3.10e-10 (5.00) | 3.89e-09 (4.97) | 6.29e-13 (6.00) | 7.31e-12 (5.95) |
+| 4, δ | 0.025 | 1.92e-10 (5.00) | 2.78e-09 (4.98) | 4.92e-10 (5.00) | 6.34e-09 (4.94) | 1.00e-12 (5.99) | 1.13e-11 (5.94) |
+
+(Rate on the finest pair, 16 → 32 cells; the test prints all four meshes.)
+Every pair from 4 cells on is at `k + 1 ± 0.15` in L2 for both. The coarsest
+pair is pre-asymptotic in the maximum **for `ψ` as much as for `δψ`**: 3.81
+and 3.56 at `k = 3`, 4.66 and 4.62 at `k = 4`. So L∞ is asserted from the
+second pair on, at `k + 1 − 0.2` (`k + 2 − 0.2` for `ψ*`).
+
+**Does it reach 1e-6 in L∞, and where.** These are maximum errors relative to
+`max|∂ψ/∂n|` = 0.154. The 64- and 128-cell rows come from the measurement-only
+case `whereTheTangentReachesOneInAMillion`, run once:
+
+| `k` | 4 cells | 8 | 16 | 32 | 64 | 128 |
+|---|---|---|---|---|---|---|
+| 1 | 1.1e-01 | 2.7e-02 | 6.7e-03 | 1.7e-03 | 4.1e-04 | 1.0e-04 |
+| 2 | 2.0e-02 | 2.6e-03 | 3.3e-04 | 4.1e-05 | 5.1e-06 | **6.3e-07** |
+| 3 | 2.8e-03 | 2.4e-04 | 1.6e-05 | **9.8e-07** | | |
+| 4 | 4.3e-04 | 1.7e-05 | **5.7e-07** | | | |
+
+**1e-6 is reached at `k = 4` on 16 cells, `k = 3` on 32 and `k = 2` on
+about 100.** `k = 1` would need about 1,300 cells a side at its measured rate
+of 2.00. The rate holds at `k + 1` all the way down. The suite's ladder stops
+there: `k = 4` at 16 cells and the others at 32. Under a load of 30 the case
+runs in 43 s; the finer rows are measurement only.
+
+**The sanity rung.** `∂ψ/∂f₀ = −1/(nf₀)` is a constant, and the discrete
+tangent reproduces it to 1.4e-14–2.6e-13, at `k = 1, 3` and 4 and 16 cells.
+The diffusion of a constant vanishes, and `−nF_h c = F_h/f₀` pointwise at
+any `ψ_h`.
+
+**Mutations.** A 5% error in `∂F/∂ψ` reaches only the Jacobian. Newton
+still reaches the same `ψ_h`, linearly. The tangent then misses the
+two-solve difference by 1.5e-02 and plateaus at 5.7e-04 from 8 cells on
+(rate 0.00): 16 failures. A tangent solve that hands the datum's derivative
+to the Dirichlet rows rather than lifting it misses by 1.7 relative. Newton's
+step is zero on those dofs, so a right-hand side there is discarded.
+
+**Reproduce.** `cd builds/<tree>/tests && OMP_NUM_THREADS=2 MKL_NUM_THREADS=1
+./TangentConvergence` (the suite's cases). The two measurement-only cases
+are disabled in the suite and run by name with `--run_test=`:
+`whereTheTangentReachesOneInAMillion` and
+`theTangentsErrorConstantGrowsAsTheOperatorNearsSingularity`
+(M-LIN-2). Where `∂F/∂ψ` jumps, at a table's end inside the domain,
+the tangent loses its order: [M-360](#m-360).
+
+### M-LIN-2
+
+**NEAR SINGULARITY THE TANGENT'S ERROR GROWS AS `1/σ`, `E₀ + C/δ` WITH `δ`
+THE RELATIVE DISTANCE TO THE LINEARISED OPERATOR'S LEAST EIGENVALUE. THE
+AMPLIFICATION OF THE MAXIMUM ERROR IS 25× AT `δ = 1e-4` ON 8 CELLS AND 5.7×
+ON 16, BECAUSE THE RESIDUE `C` FALLS AS ABOUT `h⁵` WHILE `E₀` FALLS AS `h³`.** `TangentConvergence`'s
+`theTangentsErrorConstantGrowsAsTheOperatorNearsSingularity` (measurement
+only, run once by name).
+
+`F = μψ + λg`, `g = −Δ*φ − μφ` for `φ = sin(a(R − R₀)) sin(b(z − z₀))`
+(zero on `Γ`), so `ψ = λφ` exactly and the exact tangent in `λ` is `φ` for
+every `μ`. The discrete one solves `(A_h − μ)δψ_h = g_h`. `μ_1,h`, the least
+eigenvalue on 8 cells at `k = 2`, is the pole of the error's projection on
+`φ`. That projection's sign flips at its zero as well as at its pole, so the
+pole is fitted from three points (on 8 cells the flip is at 23.074862588 and
+the pole at 23.074977827). `σ_min ∝ δ = 1 − μ/μ_1,h`.
+
+On 8 cells and on 16 cells, `k = 2`. The poles are at 23.074977827 and
+23.075295774. The amplification is the maximum error over its value at
+`μ = 0`:
+
+| `δ` | 8 cells: L2 | max | L2 × `δ` | amplification | 16 cells: L2 | max | L2 × `δ` | amplification |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 6.96e-04 | 5.14e-03 | 6.96e-04 | 1.00 | 8.79e-05 | 6.76e-04 | 8.79e-05 | 1.00 |
+| 1e-1 | 8.04e-04 | 6.10e-03 | 8.04e-05 | 1.19 | 9.39e-05 | 7.34e-04 | 9.39e-06 | 1.09 |
+| 1e-2 | 1.03e-03 | 6.21e-03 | 1.03e-05 | 1.21 | 9.63e-05 | 7.40e-04 | 9.63e-07 | 1.09 |
+| 1e-3 | 6.37e-03 | 1.39e-02 | 6.37e-06 | 2.70 | 2.05e-04 | 7.38e-04 | 2.05e-07 | 1.09 |
+| 1e-4 | 6.32e-02 | 1.30e-01 | 6.32e-06 | 25.4 | 1.82e-03 | 3.85e-03 | 1.82e-07 | 5.69 |
+| 1e-5 | 6.32e-01 | 1.30 | 6.32e-06 | 253 | 1.82e-02 | 3.75e-02 | 1.82e-07 | 55.5 |
+| 1e-6 | Newton fails | | | | 1.82e-01 | 3.74e-01 | 1.82e-07 | 554 |
+| 1e-7 | | | | | Newton fails | | | |
+
+The error is `E₀ + C/δ`: the consistency error `E₀` far away, then the
+residue `C` of the least mode amplified by `1/σ`. **`C` falls 35× from 8
+cells to 16 (about `h⁵`) where `E₀` falls 8× (`h³`).** The eigenvalue is
+superconvergent, so the amplified share shrinks faster than the error it is
+added to. The amplification doubles at `δ ≈ 2.5e-3` on 8 cells and
+`δ ≈ 2e-4` on 16. **Against the 1e-6 target** (the maximum relative to
+`max|φ| = 1`): the amplified share in the maximum is `3.7e-7/δ` on 16 cells,
+so it alone exceeds 1e-6 inside `δ ≈ 0.4`, beneath an `E₀` of 6.8e-4 that is
+already far above the target. On a mesh that reaches 1e-6 far from the fold,
+`C/E₀` falling as `h²` would put the doubling near `δ ≈ 1e-5`. That is an
+extrapolation from two meshes, not a measurement. The equilibrium solve,
+which is as singular, fails at `δ = 1e-6` on 8 cells and `1e-7` on 16.
+
+**What follows for a caller of the derivative.** Near a fold the derivative's error is amplified
+past its discretisation error by `1 + (C/E₀)/δ`. The onset moves toward the
+fold as the mesh refines, because the eigenvalue converges faster than the
+solution does.
+
+### M-LIN-3
+
+**THE BORDERED TANGENT AT A RETAINED LINEARISATION — `ψ_ax` AN UNKNOWN, THE
+LOCATED AXIS'S ROW EXACT — IS THE DERIVATIVE OF THE DISCRETE SOLUTION TO
+4.7e-12, AND CONVERGES TO THE CLOSED FORM AT `k + 1` IN `ψ`, `q` AND
+`ψ_ax`. RETAINED, IT ANSWERS TO THE BIT AS A FRESH LINEARISATION DOES.**
+`tests/convergence/LinearisedSolve.cpp`, in the suite (5 s).
+
+**The case.** A manufactured normalised source,
+`F = (λ²/span) g₀ (1 + c(Ψ − φ)) + e (ψ² − λ²φ²) g₀`, `g₀ = −Δ*φ`,
+`φ = sin(a(R − R₀)) sin(b(z − z₀))` on the standard box, `c = 0.3`,
+`e = 0.25`, `λ = 0.2`, `ψ = 0` on `Γ`, `AxisConstraint::LocatedAxis`. Then
+`ψ = λφ`, `ψ_ax = λ` at `φ`'s peak, and the exact tangent in `λ` is `φ` with
+`dψ_ax/dλ = 1`. `F` reads the span, so the border carries weight. **The `e`
+term breaks a symmetry**: without it `F` is homogeneous of degree one in
+`(ψ, ψ_ax, λ)`, the discrete solution is exactly `λφ_h`, and the tangent is
+`ψ_h/λ` to round-off — its rates would be the solution's by construction.
+
+**Against two converged solves** (`k = 2`, 8 cells, Richardson of central
+differences at `λ ± 2e-4` and `± 1e-4`): the state to **4.7e-12** relative,
+`dψ_ax/dλ` 0.9993882517 against 0.9993882517 (**3.8e-13**).
+
+**The closed form** (errors, rate on the pair ending at that row):
+
+| `k` | `h` | `ψ` L2 | `δψ` L2 | `δψ` max | `δq` L2 | `δq` max | `|δψ_ax − 1|` |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.025 | 1.77e-04 (2.01) | 8.89e-04 (2.01) | 3.54e-03 (1.94) | 2.20e-03 (2.08) | 7.54e-03 (2.04) | 2.62e-04 (2.29) |
+| 2 | 0.025 | 2.73e-06 (3.01) | 1.38e-05 (3.01) | 8.64e-05 (2.98) | 4.90e-05 (3.01) | 2.65e-04 (3.01) | 9.25e-06 (3.02) |
+| 3 | 0.05 | 9.04e-07 (4.11) | 4.62e-06 (4.11) | 1.41e-05 (3.97) | 2.25e-05 (4.12) | 6.07e-05 (4.04) | 4.82e-06 (4.13) |
+| 3 | 0.025 | 5.37e-08 (4.07) | 2.74e-07 (4.07) | 8.94e-07 (3.98) | 1.32e-06 (4.09) | 3.67e-06 (4.05) | 2.84e-07 (4.09) |
+
+`k = 1` and `k = 2` run 4 to 32 cells, `k = 3` 8 to 32: from 4 cells its
+**solution** is pre-asymptotic, 2.87 in L2 from 4 to 8, and the tangent
+follows it (2.86). Asserted as `ψ`'s rates are, `k + 1 − 0.2` in L2 on every
+pair and in L∞ from the second. `k = 3`'s finest rung is the 1e-6 target in
+the maximum. The tangent's error is 5× `ψ_h`'s, which is `1/λ`: relative to
+its own size, the same.
+
+**Without a border it is `solveTangent()`**: on the affine case at `μ = 10`
+with a Dirichlet datum's derivative lifted, the two tangents agree to the
+bit (0 relative), so M-LIN-1's closed-form rates through
+`solveTangent()` are this path's too.
+
+**Retained.** One direction, another, the first again, then a fresh
+`linearise()` of the same state and the first once more: every `dx` and
+`ds` bit-identical. A residual evaluated on the solver in between makes
+`isLinearised()` false and `solveLinearised()` throw.
+
+**Mutations**, each in a scratch build by environment variable, none in the
+tree:
+
+| mutation | caught by | by how much |
+|---|---|---|
+| the column's back-solve zeroed (the border ignored) | Richardson, and every rate | state 0.62, `dψ_ax` 2.73 against 0.999 |
+| the row's position term dropped | Richardson | state 2.9e-07, `dψ_ax` 1.7e-07 (the bound is 1e-08) |
+| the generation ignored | the refusal check | answered where it must throw |
+
+**The position term is small here, and that is geometry**: it is
+`(∇G)^{−T}∇ψ_h · δq_h(x_ax)`, and `∇ψ_h` vanishes at the axis to the
+discretisation's accuracy, so it is second order. The rates cannot see it
+and only the Richardson difference can; on an axis where `q_h(x_ax)` is
+resolved worse it is larger.
+
+### M-LIN-4
+
+**`1/σ_min` FROM THE FACTORISATION THE TANGENT ALREADY HAS — TWENTY STEPS OF
+INVERSE ITERATION, `linearisedInverseNorm()` — GROWS AS `C/δ` TOWARDS A
+FOLD, CONSTANT `C` TO 0.6% FROM `δ = 1e-2` TO `1e-5`.** On M-LIN-2's
+affine case, `F = μψ + g`, `μ = μ_1,h (1 − δ)` with M-LIN-2's fitted
+pole 23.074977827 (`k = 2`, 8 cells, no border):
+
+| `δ` | estimate | × `δ` | last relative change |
+|---|---|---|---|
+| 1 | 6.04e+01 | 60.4 | 3.4e-03 |
+| 1e-1 | 3.68e+02 | 36.8 | 4.6e-16 |
+| 1e-2 | 3.48e+03 | 34.8 | 9.1e-16 |
+| 1e-3 | 3.46e+04 | 34.6 | 1.3e-15 |
+| 1e-4 | 3.46e+05 | 34.6 | 1.7e-15 |
+| 1e-5 | 3.46e+06 | 34.6 | 4.0e-16 |
+
+Asserted: `max/min` of estimate × `δ` under 1.5 for `δ ≤ 1e-2` (it is
+1.006). **Far from the fold it has not converged** — at `δ = 1` the last
+step still moves it 3.4e-3, as M-LIN-2 found of an inverse-power
+estimate there: the gap between the two least eigenvalues is small, so twenty
+steps are not enough. Near a fold the gap is the whole of it and one step
+nearly is.
+
+**What it estimates.** Inverse iteration on the potential block and the
+border converges to the least eigenvalue's modulus of `J`, not to its least
+singular value; the two agree up to the conditioning of that eigenvector,
+which on a fold, where one mode goes singular, is the regime that matters. It
+is in the residual's own scaling (mass-weighted), so it is read as a ratio —
+against its value away from the fold, or as `C/δ` — and not against an
+absolute bound. With M-LIN-2's amplification `1 + (C/E₀)/δ`, a growth
+of this estimate by a factor `A ~ 1/δ` over its reference bounds the growth of
+the tangent's error by about `A` wherever the amplified mode's residue is no
+larger than the consistency error, `C ≤ E₀` — on M-LIN-2's 8 cells
+`C/E₀ ≈ 2.4e-3`, so there the bound is loose by that factor.

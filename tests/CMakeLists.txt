@@ -167,6 +167,12 @@ set(MEQ_CONVERGENCE_TESTS
 	RotatingSolovievConvergence
 	RotatingSourceConvergence
 	RotatingNewtonConvergence
+	# The discrete tangent d psi_h/d lambda against the closed-form d psi/d lambda,
+	# at psi's rates, in L2 and L-infinity.
+	TangentConvergence
+	# J^{-1} at a retained linearisation with psi_ax's border -- the bordered
+	# tangent, retained to the bit, and 1/sigma_min from it.
+	LinearisedSolve
 	# Maschke & Perrin's section 4, the second exact rotating equilibrium. It
 	# solves the SAME equation as the rotating Solov'ev case above, so nothing
 	# about the discretisation is new; what is new is that its (4.7) constrains
