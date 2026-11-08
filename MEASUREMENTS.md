@@ -24286,6 +24286,12 @@ warm resolve and cold solve are 9.8e-6 apart and two warm starts 6.4e-6 to
 the plan's D5), and `SafetyFactorScale`'s degree-4 held singular value
 against the free one. Not qualified in single, here or on main.
 
+**Under valgrind's memcheck**, `examples/fixed-d-tcv.toml` at
+`RefinementLevels = 1` with `FluxSurfaces = true` (the continuous fields
+built, threaded at two threads, and the family traced through the band):
+exit 0, as natively; 0 errors, 0 bytes definitely lost
+(`runs/manta-shape-derivative/memcheck/`).
+
 **Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`,
 `./ContinuousFieldConvergence`; the base → production table from each test's
 output at `05465dc` and at this branch (`runs/manta-shape-derivative/regress/`);
