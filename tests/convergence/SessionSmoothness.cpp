@@ -4,9 +4,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "mfem/config/config.hpp"
 
 #include "meq/EquilibriumSnapshot.hpp"
 #include "meq/Run.hpp"
@@ -99,7 +102,13 @@ BOOST_AUTO_TEST_CASE( theGeometryIsContinuousWhereANodeCrossesAFace )
 			floor = std::max( floor, std::abs( b[ q ] - a[ q ] )/std::abs( a[ q ] ) );
 	}
 	std::printf( "\n  the same tables from two warm starts differ by %.2e of the value\n", floor );
-	BOOST_TEST( floor < 1.0e-12,
+	// REPEATABILITY, so max( 1e-12, 20 eps ): two warm starts reach the same
+	// tables to the solve's own accuracy, ten eps, and the bound is twice that,
+	// as QDrivenScalePin's is. In double 20 eps is 4.4e-15 and 1e-12 stands --
+	// MaNTA's contract, which is double (MANTA-EQUILIBRIUM-PLAN.md, D5); in
+	// single it is 2.4e-6. The jump below is not a repeatability bound.
+	double const twentyEps = 20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
+	BOOST_TEST( floor < std::max( 1.0e-12, twentyEps ),
 		"the same tables solved from two warm starts differ by " << floor << " of the value, so "
 		"a difference at MaNTA's 1e-8 step carries " << floor/1.0e-8 << " of noise. A session must "
 		"converge to round-off, not to a relative tolerance (NewtonRelativeTolerance below ten eps "

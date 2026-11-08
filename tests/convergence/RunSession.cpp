@@ -7,11 +7,14 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
+
+#include "mfem/config/config.hpp"
 
 #include "meq/EquilibriumSnapshot.hpp"
 #include "meq/Run.hpp"
@@ -175,8 +178,15 @@ BOOST_AUTO_TEST_CASE( aChangedTableResolvesWarmToTheColdSolve )
 	             "psi_ax %.3e apart; Newton %d against %d\n", gap,
 	             std::abs( warm->psiAxis - reference->psiAxis )/std::abs( reference->psiAxis ),
 	             warm->newtonIterations, reference->newtonIterations );
-	BOOST_TEST( gap < 1.0e-8 );
-	BOOST_TEST( std::abs( warm->psiAxis - reference->psiAxis ) < 1.0e-9*std::abs( reference->psiAxis ) );
+	// REPEATABILITY, so max( the double bound, 20 eps ): the same tables
+	// solved warm and cold agree to the solve's own accuracy, ten eps under a
+	// NewtonRelativeTolerance below ten eps (M-306), and the bound is twice
+	// that, as QDrivenScalePin's is. In double 20 eps is 4.4e-15 and the
+	// double bounds stand; in single it is 2.4e-6.
+	double const twentyEps = 20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
+	BOOST_TEST( gap < std::max( 1.0e-8, twentyEps ) );
+	BOOST_TEST( std::abs( warm->psiAxis - reference->psiAxis )
+	            < std::max( 1.0e-9, twentyEps )*std::abs( reference->psiAxis ) );
 	BOOST_TEST( warm->newtonIterations < reference->newtonIterations,
 		"the warm resolve took no fewer Newton steps than the cold solve" );
 	BOOST_TEST( ( warm->profiles.count( "Omega" ) == 1 ) );
