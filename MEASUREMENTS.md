@@ -24732,7 +24732,21 @@ on the Hermite curve, which only seeds and brackets the rays.
 `ContinuousFieldConvergence`, `FluxSurfaceConvergence`, `ConductorSubtraction`,
 `FluxGridConvergence`, `SurfaceAverageConvergence`, `SurfaceFitConvergence`,
 `SafetyFactorSolver`, `QDrivenCurvedBoundary` and `CriticalPointConvergence`
-pass, and so does `ExtractionContinuity` (@@ECSINGLE@@).
+pass, and so does `DriverAcceptance`'s q-driven pair
+(`theDriverSolvesForTheToroidalField`, `theQDrivenRunReportsTheSafetyFactorItReached`).
+**`ExtractionContinuity` fails in single, and the failure is single's floor,
+not a jump**: on `ψ̃`, `q̃` surface 0's node 0 — angle 0, on the midplane,
+which is the mesh line `z = 0` — changes element 136 → 161 at `A` = 0.30197,
+before any crossing double finds, and the family moves 2.6e-4 across it; the
+control reads 4.6e-6 and passes. `ExtractionJumps` in single at `n = 16`,
+`k = 2` shows why: between neighbouring states with no crossing the family
+moves 3e-5 to 7e-4 (`⟨|∇ρ|²⟩`, worst on the inner surfaces), on both pairs
+alike, the axis element changes 10 times along the scan and the node element
+changes 329 times against double's 21 — nodes and the axis riding the
+midplane's mesh line flip sides by round-off. A 1e-11 bound is a double
+contract, as `SessionSmoothness`'s is; 20ε would not reach it either.
+Not qualified in single (`runs/continuous-extraction/single-check.log`,
+`single-jumps.log`).
 `SafetyFactorScale` fails in single, and fails the same assertion at
 `05465dc` in single: its degree-4 held singular value against the free one;
 not qualified in single. On `manta/shape-derivative`, `RunSession` and

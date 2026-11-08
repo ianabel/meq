@@ -446,9 +446,10 @@ Cause unknown.
   WHAT IS NOT KNOWN. Which surface and quantity carries the 4e-6, and whether
   it is the band (the outer surfaces cross it on this curved boundary), the
   boundary's representation, the axis, or the reference itself (same mesh,
-  k = 3). The instrument is manta/shape-derivative's ExtractionJumps, whose
-  TCV cases re-solve through the session; main's ExtractionJumps scans a
-  source parameter on the box only. The <key>-G.txt files the prototype wrote
+  k = 3). The instrument is manta/shape-derivative's SessionJumps (its
+  ExtractionJumps until the merge of main's), whose TCV cases re-solve
+  through the session; main's ExtractionJumps scans a source parameter on
+  the box only. The <key>-G.txt files the prototype wrote
   are in runs/manta-shape-derivative/proto/; a per-surface breakdown is the
   first step.
 
