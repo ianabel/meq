@@ -43,6 +43,10 @@ namespace meq
 	{
 		std::unique_ptr<mfem::GridFunction> potential;
 		std::unique_ptr<mfem::GridFunction> flux;
+
+		/// Locate the axis, and take the level's psi_ax, on these fields
+		/// rather than on the solver's psi_h and q_h.
+		bool axisFromFields = false;
 	};
 
 	/// The exit codes docs/running.rst gives the user. apps/meq.cpp's header

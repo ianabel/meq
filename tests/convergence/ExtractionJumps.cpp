@@ -735,6 +735,21 @@ namespace
 		return out;
 	}
 
+	/// Up to four crossings along a scan, one per surface: ( surface, node, step ).
+	std::vector<std::array<std::size_t, 3>> crossings( std::vector<Family> const &scan )
+	{
+		std::vector<std::array<std::size_t, 3>> found;
+		for ( std::size_t i = 0; i < scan.front()->surfaces.size() && found.size() < 4; ++i )
+			for ( std::size_t j = 0; j + 1 < scan.size() && ( found.empty() || found.back()[ 0 ] != i ); ++j )
+				for ( std::size_t node = 0; node < scan[ j ]->surfaces[ i ].count(); ++node )
+					if ( scan[ j ]->surfaces[ i ].elements[ node ] != scan[ j + 1 ]->surfaces[ i ].elements[ node ] )
+					{
+						found.push_back( { i, node, j } );
+						break;
+					}
+		return found;
+	}
+
 	void prototype( char const *name, char const *key, std::string const &path, std::string const &text )
 	{
 		auto run = solvedRun( path, text );
@@ -780,19 +795,6 @@ namespace
 		analyse( ( std::string( name ) + ", candidate A" ).c_str(), candidateScan, spacing );
 
 		// The straddles: up to four crossings per extraction, on distinct surfaces.
-		auto crossings = [ & ]( std::vector<Family> const &scan )
-		{
-			std::vector<std::array<std::size_t, 3>> found;   // surface, node, step
-			for ( std::size_t i = 0; i < scan.front()->surfaces.size() && found.size() < 4; ++i )
-				for ( std::size_t j = 0; j + 1 < scan.size() && ( found.empty() || found.back()[ 0 ] != i ); ++j )
-					for ( std::size_t node = 0; node < scan[ j ]->surfaces[ i ].count(); ++node )
-						if ( scan[ j ]->surfaces[ i ].elements[ node ] != scan[ j + 1 ]->surfaces[ i ].elements[ node ] )
-						{
-							found.push_back( { i, node, j } );
-							break;
-						}
-			return found;
-		};
 		auto report = [ & ]( char const *which, Extract const &extract, std::vector<Family> const &scan )
 		{
 			for ( auto const &c : crossings( scan ) )
@@ -815,6 +817,65 @@ namespace
 		auto run = solvedRun( path, text );
 		BOOST_TEST_REQUIRE( run->resolve( tables( 0.0 ), run->snapshot() ) == meq::Solved );
 		writeBase( key, *run );
+	}
+
+	/*
+	 * PLAN SECTION 4.5 ITEM 3, MEASURED AND NOT ADOPTED: the axis, and the
+	 * level's psi_ax, taken on the continuous fields -- q~'s root, psi~ there --
+	 * rather than the solve's located axis (q_h's root, psi_h there). How far
+	 * the labels move, how far G moves with them, and whether G's smoothness
+	 * changes: the scan and the straddles of `prototype`, on that axis.
+	 */
+	Extract continuousAxis()
+	{
+		return []( meq::Run &run )
+		{
+			return run.familyFrom( []( meq::GradShafranovSolver const &solver )
+			{
+				meq::ExtractionFields fields = continuousFields( solver, EdgeSource::Trace );
+				fields.axisFromFields = true;
+				return fields;
+			} );
+		};
+	}
+
+	void axisStudy( char const *name, std::string const &path, std::string const &text )
+	{
+		auto run = solvedRun( path, text );
+		BOOST_TEST_REQUIRE( run->resolve( tables( 0.0 ), run->snapshot() ) == meq::Solved );
+		std::shared_ptr<meq::EquilibriumSnapshot const> const base = run->snapshot();
+		Extract const solveAxis = continuous( EdgeSource::Trace ), fieldAxis = continuousAxis();
+		Family const a = solveAxis( *run ), b = fieldAxis( *run );
+		double const span = std::abs( a->psiBoundary - a->psiAxis );
+		Quantities const qa = quantities( *a ), qb = quantities( *b );
+		double worst = 0.0;
+		for ( std::size_t i = 0; i < qa.values.size(); ++i )
+			for ( std::size_t q = 0; q < 4; ++q )
+				worst = std::max( worst, std::abs( qb.values[ i ][ q ] - qa.values[ i ][ q ] )
+				                         /std::abs( qa.values[ i ][ q ] ) );
+		std::printf( "\n  %s -- THE AXIS ON psi~, q~ AGAINST THE SOLVE'S\n", name );
+		std::printf( "    psi_ax: solve's %.15e (element %d), q~ root's %.15e (element %d); "
+		             "the labels move by %.2e of the span\n", a->psiAxis, a->axisElement, b->psiAxis,
+		             b->axisElement, std::abs( b->psiAxis - a->psiAxis )/span );
+		std::printf( "    the axis moves %.2e m; G moves by %.2e (worst relative, 24 surfaces x 4 "
+		             "quantities)\n", std::hypot( b->axisR - a->axisR, b->axisZ - a->axisZ ), worst );
+
+		double const spacing = 1.0e-4;
+		std::vector<Family> scan;
+		for ( int j = -10; j <= 10; ++j )
+		{
+			BOOST_TEST_REQUIRE( run->resolve( tables( j*spacing ), base ) == meq::Solved );
+			scan.push_back( fieldAxis( *run ) );
+		}
+		analyse( ( std::string( name ) + ", continuous fields and q~'s axis" ).c_str(), scan, spacing );
+		for ( auto const &c : crossings( scan ) )
+		{
+			double const lo = ( static_cast<double>( c[ 2 ] ) - 10.0 )*spacing;
+			Straddle const s = straddle( *run, base, fieldAxis, c[ 0 ], c[ 1 ], lo, lo + spacing );
+			std::printf( "    q~'s axis: surface %zu node %zu: a central difference at 1.5e-8 straddling the "
+			             "crossing is off by %.2e of the derivative (noise there ~%.1e); the kink, "
+			             "| G'_R - G'_L |/| G' |, is %.2e\n", c[ 0 ], c[ 1 ], s.error, s.floor, s.kink );
+		}
 	}
 
 	std::vector<std::array<double, 3>> readBase( std::string const &key )
@@ -840,6 +901,10 @@ BOOST_AUTO_TEST_CASE( prototypeBoxL2k3 ) { prototype( "box, level 2, k = 3", "bo
 BOOST_AUTO_TEST_CASE( prototypeTcvL1k2 ) { prototype( "TCV, level 1, k = 2", "tcvL1k2", tcvPath, tcv( 1, 2 ) ); }
 BOOST_AUTO_TEST_CASE( prototypeTcvL2k2 ) { prototype( "TCV, level 2, k = 2", "tcvL2k2", tcvPath, tcv( 2, 2 ) ); }
 BOOST_AUTO_TEST_CASE( prototypeTcvL1k3 ) { prototype( "TCV, level 1, k = 3", "tcvL1k3", tcvPath, tcv( 1, 3 ) ); }
+BOOST_AUTO_TEST_CASE( axisBoxL1k2 ) { axisStudy( "box, level 1, k = 2", boxPath, box( 1, 2 ) ); }
+BOOST_AUTO_TEST_CASE( axisBoxL1k3 ) { axisStudy( "box, level 1, k = 3", boxPath, box( 1, 3 ) ); }
+BOOST_AUTO_TEST_CASE( axisTcvL1k2 ) { axisStudy( "TCV, level 1, k = 2", tcvPath, tcv( 1, 2 ) ); }
+BOOST_AUTO_TEST_CASE( axisTcvL1k3 ) { axisStudy( "TCV, level 1, k = 3", tcvPath, tcv( 1, 3 ) ); }
 BOOST_AUTO_TEST_CASE( referenceBoxL3k3 ) { reference( "boxL3k3", boxPath, box( 3, 3 ) ); }
 BOOST_AUTO_TEST_CASE( referenceTcvL2k3 ) { reference( "tcvL2k3", tcvPath, tcv( 2, 3 ) ); }
 

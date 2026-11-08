@@ -1293,9 +1293,17 @@ std::shared_ptr<meq::FluxSurfaceFamily const> meq::Run::familyFrom( FieldBuilder
 	meq::ExtractionFields const fields = build( *impl->solver );
 	if ( !fields.potential || !fields.flux )
 		throw std::invalid_argument( "meq::Run::familyFrom(): the builder returned no field" );
-	meq::CriticalPointFinder const finder( *impl->solver );
+	meq::CriticalPoint axis;
+	if ( fields.axisFromFields )
+	{
+		meq::CriticalPointFinder finder( *fields.flux, *fields.potential );
+		finder.setConductorField( impl->solver->conductorField() );
+		axis = finder.findAxis();
+	}
+	else
+		axis = meq::CriticalPointFinder( *impl->solver ).findAxis();
 	return std::make_shared<meq::FluxSurfaceFamily const>(
-		impl->extractFamily( impl->outputFamilyOptions(), finder.findAxis(), &fields ) );
+		impl->extractFamily( impl->outputFamilyOptions(), axis, &fields ) );
 }
 
 std::shared_ptr<meq::EquilibriumSnapshot const> meq::Run::snapshot()
