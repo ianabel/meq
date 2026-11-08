@@ -530,6 +530,21 @@ along `R⁻¹` (`OuterNewtonOptions::differenceBasis`) against
 (→ **[M-359](MEASUREMENTS.md#m-359)**). `SafetyFactorScale` differences the
 same way, which its free `σ_min` needs in single.
 
+**AND THE FLOOR MODEL IS CHECKED AGAINST THE MAP'S MEASURED NOISE, BECAUSE IT
+IS NOT AN UPPER BOUND.** On the box the model sits 2.5× over the noise; on
+`QDrivenCurvedBoundary`'s Miller boundary in single the noise is 2.2× over the
+model, 1.4e-5 per orthonormal coordinate against 6.3e-6, and the loop stalled
+at 2.70e-5 against a threshold of 2.58e-5 — a stopping test asking for less
+than the map resolves (→ **[M-363](MEASUREMENTS.md#m-363)**). So where
+the floor is what the loop is judged on, the first residual within ten floors
+triggers a measurement — that point evaluated again from two other warm
+starts — and four standard deviations of it become a floor if larger; a
+stall above the floor is measured the same way before it is called a
+failure. It is the warm-start noise that is measured, not a jitter that is a
+function of the point (M-308b's face crossings are the map, not noise), and a
+stall above the measured noise stays a failure.
+`a_stall_at_the_maps_measured_noise_is_converged` asserts both.
+
 **THE FLUX PIN HOLDS THE DELIVERED FLUX, AS A ROW BESIDE THE BORDERED NEWTON.**
 `ToroidalFlux` is the equilibrium's own `∫_plasma g/R dA`, read off the solved
 state with the iterate's `g²` (`GradShafranovSolver::integrateOverDomain()`),
