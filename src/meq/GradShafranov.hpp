@@ -5623,7 +5623,7 @@ namespace meq
 			/// CONTINUOUS pair the flux-surface extraction roots and weights
 			/// by, interpolated by moments from psi*, psihat and q*
 			/// (ContinuousField.hpp, CLAUDE_INVERSION.md IN-0,
-			/// M-364). Built on first use after postProcess() and kept
+			/// M-365). Built on first use after postProcess() and kept
 			/// until the next solve or post-processing; the build threads
 			/// and is the serial one bit for bit.
 			/// @throws std::logic_error before postProcess().

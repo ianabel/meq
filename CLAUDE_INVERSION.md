@@ -378,7 +378,7 @@ it was repaired:
   through it. Every column differenced across it is off by that over `2s`, and
   no floor sees it, because each residual is right to the floor. **The family
   jumps by the same mechanism and nothing else** as an input moves
-  (→ **[M-363](MEASUREMENTS.md#m-363)**): over `±1e-3` of a profile, every
+  (→ **[M-364](MEASUREMENTS.md#m-364)**): over `±1e-3` of a profile, every
   jump above the noise on the box and on TCV is a node changing element, the
   axis element and the band never change, and the per-crossing jump falls as
   about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
@@ -386,8 +386,8 @@ it was repaired:
   from `ψ*`, `ψ̂` (on interior edges) and `q*` (`src/meq/ContinuousField.hpp`).
   A 1.5e-8 difference straddling a crossing is then off by the noise rather
   than by 0.01–700× the derivative, and the family stays inside the
-  discretisation error of the `ψ*` one (→ **[M-364](MEASUREMENTS.md#m-364)**,
-  **[M-366](MEASUREMENTS.md#m-366)**). M-308b's sweep itself was a
+  discretisation error of the `ψ*` one (→ **[M-365](MEASUREMENTS.md#m-365)**,
+  **[M-367](MEASUREMENTS.md#m-367)**). M-308b's sweep itself was a
   scratch harness and is not re-run; the step it found is a face crossing,
   which no longer moves the map. The step at 1e-4 straddles none on that
   fixture and finishes quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom`
@@ -688,10 +688,10 @@ ONE, AND THE POST-PROCESSED PAIR WON ON A REASON THAT WAS NOT THE ONE
 EXPECTED.** The continuous pair is `ψ̃` ∈ H¹ of degree `k+2` and `q̃` ∈ [H¹]²,
 interpolated by moments from `ψ*`, `ψ̂` and `q*` (`src/meq/ContinuousField.hpp`):
 `ψ*` and `q*` are broken across every face, so a family node crossing one makes
-the geometry jump by the face jump (→ **[M-363](MEASUREMENTS.md#m-363)**),
+the geometry jump by the face jump (→ **[M-364](MEASUREMENTS.md#m-364)**),
 which a caller differencing the geometry divides by its step; on `ψ̃`, `q̃` it
 does not (`ExtractionContinuity`, with `ψ*`, `q*` as its control), and the family stays inside `ψ*`'s own error
-(→ **[M-364](MEASUREMENTS.md#m-364)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
+(→ **[M-365](MEASUREMENTS.md#m-365)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
 keeps `q*`'s `k+1` (`ContinuousFieldConvergence`). Everything below about the
 post-processed pair is why the continuous one is built from it.
 
@@ -748,7 +748,7 @@ MEQ OWES.** `ψ̃` is continuous across faces but its gradient is not, so
 `Contour`'s cubic Hermite — smooth by construction — misses the bend. At fixed
 `Δs = 0.004`, `k = 2`, the representation error is 3.6e-7, 9.6e-8, 9.7e-9 at
 `n` = 12, 24, 48, where on `ψ*` and `q*` it is flat at 5.4e-9 (face-crossing
-segments excluded) (→ **[M-366](MEASUREMENTS.md#m-366)**). It converges
+segments excluded) (→ **[M-367](MEASUREMENTS.md#m-367)**). It converges
 with `h` and sits inside the 1e-6 MEQ owes, so nothing is done about it; the
 family's averages are taken on the ray nodes, which root `ψ̃` directly, and
 the `Contour` only seeds and brackets them.

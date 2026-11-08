@@ -11,11 +11,11 @@
 
 /*
  * THE FLUX-SURFACE GEOMETRY DOES NOT JUMP WHERE A FAMILY NODE CROSSES AN
- * ELEMENT FACE -- MEASUREMENTS.md M-363 to M-366, CLAUDE_INVERSION.md IN-0.
+ * ELEMENT FACE -- MEASUREMENTS.md M-364 to M-367, CLAUDE_INVERSION.md IN-0.
  *
  * On psi* and q*, broken across every face, a node whose ray root slides
  * across one lands on the neighbour's polynomial and the family's averages
- * jump (M-363): inside the discretisation's accuracy, but divided by the step
+ * jump (M-364): inside the discretisation's accuracy, but divided by the step
  * of anything that differences the geometry. The extraction's default pair,
  * psi~ and q~ (ContinuousField.hpp), is continuous, and the family on it must
  * not jump. A scan that happens to straddle no crossing passes whatever the
@@ -132,11 +132,11 @@ BOOST_AUTO_TEST_CASE( theFamilyIsContinuousWhereANodeCrossesAFace )
 		"the family jumps by " << c.jump << " where surface " << c.surface << "'s node " << c.node
 		<< " crosses from element " << c.from << " to " << c.to << ". On the continuous pair it "
 		"must not: a jump is divided by the step of anything that differences the geometry "
-		"(MEASUREMENTS.md M-363). Suspect the fields' continuity first (ContinuousFieldConvergence)" );
+		"(MEASUREMENTS.md M-364). Suspect the fields' continuity first (ContinuousFieldConvergence)" );
 }
 
 /*
- * THE CONTROL. The same procedure on psi* and q*, where M-363 measured the
+ * THE CONTROL. The same procedure on psi* and q*, where M-364 measured the
  * jump: the instrument must see it, or the case above proves nothing.
  */
 BOOST_AUTO_TEST_CASE( theBrokenPairJumpsThereAndTheTestSeesIt )
@@ -146,6 +146,6 @@ BOOST_AUTO_TEST_CASE( theBrokenPairJumpsThereAndTheTestSeesIt )
 	report( "psi* and q*", c );
 	BOOST_TEST( c.jump > 1.0e-10,
 		"on psi* and q* the family moves only " << c.jump << " across a node's face crossing; "
-		"the broken pair jumps there by the face jump (M-363), so an instrument that cannot see "
+		"the broken pair jumps there by the face jump (M-364), so an instrument that cannot see "
 		"it cannot see one on the continuous pair either" );
 }

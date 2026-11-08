@@ -195,7 +195,7 @@ set(MEQ_CONVERGENCE_TESTS
 	ContinuousFieldConvergence
 	# The extraction's acceptance: the family does not jump where a node
 	# crosses an element face, one crossing found and bisected on the box,
-	# with psi* and q* as the control that the instrument sees a jump (M-363).
+	# with psi* and q* as the control that the instrument sees a jump (M-364).
 	ExtractionContinuity
 	FluxGridConvergence
 	SurfaceAverageConvergence
@@ -459,7 +459,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 endif()
 
-# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-363 -- what
+# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-364 -- what
 # makes the flux-surface geometry jump as a source parameter moves, and how the
 # jump scales with the mesh. BUILT BUT NOT REGISTERED: it asserts nothing, and
 # each case is a measurement of minutes, run one at a time with

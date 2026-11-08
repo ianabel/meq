@@ -6786,7 +6786,7 @@ meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions con
 {
 	// On psi~ and q~, the continuous pair (ContourTracer's default): a family
 	// that does not jump as one of its nodes crosses an element face
-	// (CLAUDE_INVERSION.md, IN-0; MEASUREMENTS.md M-364).
+	// (CLAUDE_INVERSION.md, IN-0; MEASUREMENTS.md M-365).
 	meq::ContourTracer tracer( *solver );
 
 	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in

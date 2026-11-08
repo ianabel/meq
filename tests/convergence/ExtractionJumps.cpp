@@ -13,7 +13,7 @@
 
 /*
  * WHAT MAKES THE GEOMETRY JUMP, AND HOW THE JUMP SCALES WITH THE MESH -- the
- * instrument behind MEASUREMENTS.md's M-363 and M-364, and the by-hand study
+ * instrument behind MEASUREMENTS.md's M-364 and M-365, and the by-hand study
  * that would catch a jump coming back. BUILT, NOT REGISTERED: it asserts
  * nothing, and each case is a measurement (`--run_test=<case>`).
  * ExtractionContinuity is the suite's assertion; this is the picture, on
@@ -74,8 +74,8 @@ namespace
 		return names[ q ];
 	}
 
-	/// Every jump of one scan's families, attributed: what M-363's table
-	/// and M-364's continuity column print. @a families are the states
+	/// Every jump of one scan's families, attributed: what M-364's table
+	/// and M-365's continuity column print. @a families are the states
 	/// at A = A0 + j * spacing, j = -10 ... 10.
 	void analyse( char const *name, std::vector<Family> const &families, double spacing )
 	{
@@ -333,7 +333,7 @@ namespace
 		return which == meq::Potential::Continuous ? "psi~ and q~" : "psi* and q*";
 	}
 
-	/// M-363: the extraction along the scan.
+	/// M-364: the extraction along the scan.
 	void scan( int n, int order, meq::Potential which )
 	{
 		char name[ 128 ];
@@ -354,7 +354,7 @@ BOOST_AUTO_TEST_CASE( brokenN8k3 ) { scan( 8, 3, meq::Potential::PostProcessed )
 BOOST_AUTO_TEST_CASE( brokenN16k3 ) { scan( 16, 3, meq::Potential::PostProcessed ); }
 
 /*
- * THE STRADDLES -- M-364's measurement, kept as the by-hand study. Along the
+ * THE STRADDLES -- M-365's measurement, kept as the by-hand study. Along the
  * scan of `analyse`, the first node to change element on each of up to four
  * surfaces; the crossing bisected to 1e-11 in A; the central difference at
  * 1.5e-8 centred on it, against the one-sided derivatives either side. On the

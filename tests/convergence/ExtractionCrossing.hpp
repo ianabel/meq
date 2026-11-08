@@ -17,7 +17,7 @@
  * edge, under the Solov'ev-type source F = -( ( 1 - A ) R^2 + A ), A the one
  * parameter. Moving A moves every flux surface smoothly, so the nodes of a
  * fixed family slide across element faces as A does, which is what makes a
- * broken extraction jump (MEASUREMENTS.md M-363).
+ * broken extraction jump (MEASUREMENTS.md M-364).
  */
 namespace meq::tests::crossing
 {

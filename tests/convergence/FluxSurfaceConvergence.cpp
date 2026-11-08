@@ -1246,7 +1246,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationErrorDoesNotKnowAboutTheMesh )
 		meq::CriticalPoint const axis = solved.axis();
 
 		// psi* and q* BY NAME: what this case measures is that pair's, and the
-		// default pair, psi~ and q~, is continuous where psi* jumps (M-366).
+		// default pair, psi~ and q~, is continuous where psi* jumps (M-367).
 		meq::ContourTracer tracer( solved.theSolver(), meq::Potential::PostProcessed );
 		useFixedStep( tracer, deltaS );
 		meq::Contour const contour = tracer.traceFromAxis( set.levels[ 0 ], axis );
@@ -1614,7 +1614,7 @@ BOOST_AUTO_TEST_CASE( theFaceJumpIsTheDiscretisationAndConvergesAtItsOrder )
 			meq::CriticalPoint const axis = solved.axis();
 
 			// psi* and q* BY NAME: what this case measures is that pair's, and the
-			// default pair, psi~ and q~, is continuous where psi* jumps (M-366).
+			// default pair, psi~ and q~, is continuous where psi* jumps (M-367).
 			meq::ContourTracer tracer( solved.theSolver(), meq::Potential::PostProcessed );
 			useFixedStep( tracer, 0.004 );
 			meq::Contour const contour = tracer.traceFromAxis( set.levels[ 0 ], axis );

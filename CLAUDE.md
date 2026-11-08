@@ -202,7 +202,7 @@ reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 (`TODO`, the single-precision round). It adds `ExtractionContinuity` too,
 whose 1e-11 is a double contract below single's floor: the family moves 1e-4
 between neighbouring states there with no crossing at all
-(→ **[M-366](MEASUREMENTS.md#m-366)**). The anisotropic suites are qualified
+(→ **[M-367](MEASUREMENTS.md#m-367)**). The anisotropic suites are qualified
 in single (→ **[M-350](MEASUREMENTS.md#m-350)**). The wall is set by its
 longest tests — `DriverAcceptance` and `DeviceParity` — and FB-T's forty-solve
 cross (M-134) is `disabled()` in `FreeBoundaryCoupling` and run by name: its

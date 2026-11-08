@@ -24351,7 +24351,7 @@ and from 1.2 to the `g²` of the other pins (M-357(c)).
 `runs/q-solve-scale/tcv/` (`edge.log`, `flux-g1.4.log`, `flux-g1.2.log`,
 `edge-d3.log`), `runs/q-solve-scale/study/study-delivered.log`.
 
-### M-363
+### M-364
 
 **What makes the flux-surface geometry jump as an input moves: a family node
 crossing an element face, and nothing else measured.** (a) and (b) were taken
@@ -24443,7 +24443,7 @@ source `F = −((1 − A)R² + A)` on the standard box (`ExtractionCrossing.hpp`
 `A = 0.30 + j·5e-4`, `j = −10 … 10`, each state its own solve; 12 surfaces ×
 96 angles, `n × n` cells of two triangles. Double, `OMP_NUM_THREADS=1
 MKL_NUM_THREADS=1`. "Straddled" is the bisected 1.5e-8 central difference of
-M-364, relative to the derivative, over up to four crossings:
+M-365, relative to the derivative, over up to four crossings:
 
 | pair | `n`, `k` | elements | crossings per unit `A` | per-crossing jump, median | max | straddled error |
 |---|---|---|---|---|---|---|
@@ -24463,7 +24463,7 @@ On `ψ*`, `q*` every jump above 1e-11 is a crossing or its echo but one: at
 `z = −0.3` ends on its best iterate after 30 iterations (route
 `BestIterate`, one stalled ray) — a root lying in a face jump. On `ψ̃`, `q̃` no
 ray route changes in any scan. **At this spacing `ψ̃`'s per-crossing estimate
-is the kink's reading, not a jump**, as in M-364 at 1e-4: it falls with `h`
+is the kink's reading, not a jump**, as in M-365 at 1e-4: it falls with `h`
 and `k`, and the bisected straddle, which separates the two, is 4–7 orders
 below the broken pair's. The straddled error on `ψ̃` sits above the
 `1e-14 |G|/(2δ|G′|)` noise column (not printed here; 2e-6 to 2.4e-5) by up to
@@ -24484,7 +24484,7 @@ Logs: `runs/manta-shape-derivative/smooth1.log`, `runs/manta-shape-derivative/ju
 and `straddleBrokenN8k2` … `straddleContinuousN16k3` (seconds to two minutes
 each; built, not registered); logs `runs/continuous-extraction/jumps/`.
 
-### M-364
+### M-365
 
 **Candidate A, prototyped: the geometry extracted from continuous fields
 `ψ̃`, `q̃` built from `ψ*`, `ψ̂` and `q*` does not jump where a node crosses a
@@ -24492,7 +24492,7 @@ face — a 1.5e-8 central difference straddling a crossing is off by the noise �
 and is as accurate as the shipped extraction.** `manta/shape-derivative`,
 double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a machine at load ~20,
 `ExtractionJumps` at `aa5adcb` (`prototype*`, `reference*`, `accuracy`),
-M-363's eight cases. `Run::familyFrom()` extracts with the shipped options, located axis,
+M-364's eight cases. `Run::familyFrom()` extracts with the shipped options, located axis,
 level and band, on the instrument's fields.
 
 **The fields.** `ψ̃` ∈ H¹ of degree `k+2`, the moment interpolant: vertex
@@ -24545,7 +24545,7 @@ straddled 1.5e-8 difference cannot see it. The noise across warm starts is
 below the 1e-12 `manta/shape-derivative`'s `SessionSmoothness` asks; the shipped extraction's noise on
 that mesh was not taken, so whether the solve or the extraction carries it is
 open. Along the 1e-4 scan
-the per-crossing estimate falls from M-363's 4.5e-7 (box, `k = 2`,
+the per-crossing estimate falls from M-364's 4.5e-7 (box, `k = 2`,
 768) to 1.4e-10 and from 1.3e-8 (TCV, `k = 2`) to below 1e-11 at 24 of 25
 crossings — what a kink reads at a 1e-4 step; the bisected straddle is the
 measurement that separates the two.
@@ -24582,16 +24582,16 @@ for `prototypeBoxL1k2` … `prototypeTcvL2k2`, `referenceBoxL3k3`,
 `referenceTcvL2k3` (each leaves `<key>-G.txt`; 10 minutes to 2 hours each at
 that load), then `--run_test=accuracy`.
 
-### M-365
+### M-366
 
 **The axis on the continuous fields — `q̃`'s root, `ψ̃` there — against the
 solve's located axis (`q_h`'s root, `ψ_h` there): measured, not adopted.**
 `manta/shape-derivative` at `9a7dc4f`, double, `OMP_NUM_THREADS=2
-MKL_NUM_THREADS=1`, `ExtractionJumps`' `axis*` cases, on M-364's
+MKL_NUM_THREADS=1`, `ExtractionJumps`' `axis*` cases, on M-365's
 prototype fields; Ω scanned over `±1e-3` and each crossing bisected and
-straddled at 1.5e-8 as M-364 does, with the family's axis and level taken
+straddled at 1.5e-8 as M-365 does, with the family's axis and level taken
 on `q̃`, `ψ̃`. "Solve's", the straddled error on the solve's axis at the same
-crossings, is M-364's column.
+crossings, is M-365's column.
 
 | case | `ψ_ax` moves, of the span | axis moves | `G` moves, worst | axis element, solve's / `q̃`'s | straddled error, `q̃`'s axis | solve's | noise |
 |---|---|---|---|---|---|---|---|
@@ -24603,7 +24603,7 @@ crossings, is M-364's column.
 **The labels move by the axis's own discretisation error, and `G` with them
 where it is most sensitive**: the innermost surface's `⟨|∇ρ|²⟩` changes by
 about `Δψ_ax/(Ψ_N span)`, 1.4e-5/0.05 ≈ 3e-4 on the coarse box at `k = 2` —
-the size of that mesh's own error (M-364) — and 4e-6 and 5e-8 on TCV.
+the size of that mesh's own error (M-365) — and 4e-6 and 5e-8 on TCV.
 **Smoothness gains nothing measurable**: no axis element changes along any
 scan on either axis, so neither has a jump to remove there, and the straddled
 error on `q̃`'s axis is at or a few times the noise — up to 8× on TCV at
@@ -24622,17 +24622,17 @@ face jump of `ψ_h`, were the state to carry it across; no scan does.
 `axisBoxL1k2`, `axisBoxL1k3`, `axisTcvL1k2`, `axisTcvL1k3`; logs
 `runs/manta-shape-derivative/axis/`.
 
-### M-366
+### M-367
 
 **The continuous extraction in production: what the field asserts, what it
 fixes, and every regression value it moved.** `manta/shape-derivative` at
 `e9ef960` and after, and `continuous-extraction`, which carries it to main
-from `cde84f2` (`ExtractionContinuity` and M-363(c)), against the same tests built at `05465dc` (the merge
+from `cde84f2` (`ExtractionContinuity` and M-364(c)), against the same tests built at `05465dc` (the merge
 before it, extracting on `ψ*` and `q*`), double unless said, `OMP_NUM_THREADS=2
 MKL_NUM_THREADS=1`.
 
 **The acceptance.** `ExtractionContinuity`, posed on the library alone:
-the source mix `A` of M-363(c) stepped from 0.30 by 1e-3 until a node of
+the source mix `A` of M-364(c) stepped from 0.30 by 1e-3 until a node of
 some surface changes element, the step bisected on that node to 1e-9, and
 `V′`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩` and `⟨|∇ψ|²⟩` on that surface compared across it
 less their smooth change; `n = 12`, `k = 2`, 17 s for both cases. Surface 2's
