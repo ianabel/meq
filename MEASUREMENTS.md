@@ -24423,7 +24423,15 @@ by a step tolerance at 2.5e-2, is not converged. A map whose jitter is a
 function of the point measures no spread, and the understated case of
 `a_stall_above_the_floor_is_not_converged` stays not converged.
 
-DOUBLEROWS
+**(f) Double is unchanged.** No driver run measures: the 1e-9 tolerance is
+over every floor. `QDrivenScalePin` re-solves 8.4e-11, 2.4e-13 and 2.1e-15
+from the base, `SafetyFactorScale`'s free `σ_min` 2.883e-3 and 4.456e-4,
+`QDrivenCurvedBoundary` recovers `g²` to eight digits, and `QDrivenConsistency`
+reads its plateau, 1.181e-1 then 1.179e-1, all as on `cde84f2`;
+`DriverAcceptance` passes. The library case converges in double in 7
+iterations and 85 evaluations: its declared floor is a hundred times under
+the noise, so the residual never comes within ten floors and the noise is
+measured only at the stall.
 
-**Reproduce.** `runs/q-loop-floor/` (`probe-mkl*.log`, `fixed-mkl*.log`); the
+**Reproduce.** `runs/q-loop-floor/` (`probe-mkl*.log` for the noise table, `mkl*.log` and `fixed-mkl*.log` for the rule's sweep); the
 probe was a temporary block in `Run.cpp` behind `MEQ_PROBE_NOISE`, not kept.
