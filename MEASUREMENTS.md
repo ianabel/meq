@@ -24084,3 +24084,67 @@ fit's orthonormal coordinates, not in `c`. Not repaired: TODO.
 `flux.toml`, `fixedgg.toml` with `gg.dat` for the refused `gg′`, and the
 `*.log`s), `runs/q-solve-scale/single/QDrivenScalePin.log` for the stall; the
 step table from a probe case run once in both trees, not kept.
+
+### M-359
+
+**Differencing in the fit's orthonormal coordinates: the outer loop's floor
+falls 28× in single, and `SafetyFactorScale` passes there.** `q-solve-scale`
+off `f81b09f`, `builds/q-solve-scale` (double) and `builds/q-solve-scale-single`
+(MFEM `install-single`), `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+The outer Jacobian is differenced along `T = R⁻¹` (`R` from
+`meq::fitOrthonormalFactor()`; its `c₁ … c_d` block under `R0B0`), with the
+step `max(1e-4, 100 floors) × max(|z_k|, 1)` in those coordinates
+(`OuterNewtonOptions::differenceBasis`), and the pinned map's floor is
+`meq::toroidalMapFloorOrthonormal()` — the same `16 ε` per surface carried
+through `Qᵀ/√N` — beside a pin row of `4 ε × weight`. In place of the monomial
+max-norm floor times `R`'s row sum, which charged every row the top
+coefficient's noise. `SafetyFactorScale` differences the same way, at
+`max(1e-3, 100 floors)`.
+
+**(a) The map's noise per orthonormal coordinate, against the floor model**
+(`SafetyFactorScale`'s fixture, `n = 12`, `k = 2`, the answer evaluated from
+five warm starts; a probe run once):
+
+| | worst `y` noise | orthonormal floor | floor/noise |
+|---|---|---|---|
+| single, degree 2 | 1.30e-5 | 3.54e-5 | 2.7 |
+| single, degree 4 | 1.47e-5 | 3.54e-5 | 2.4 |
+| double, degree 2 | 5.3e-13 | 2.97e-11 | 56 |
+| double, degree 4 | 6.4e-13 | 2.97e-11 | 47 |
+
+In the monomial coefficients the same single noise is 1.8e-4 and 3.5e-3
+(M-358): the factor is `R⁻¹`, not the map.
+
+**(b) `QDrivenScalePin`'s three pins in single** (the M-358 configurations):
+
+| pin | KINSOL its / equilibria | refused | final norm / threshold | `R0B0` read |
+|---|---|---|---|---|
+| `PlasmaCurrent = 5.0` | 4 / 29 | 2 | 1.79e-6 / 2.20e-5 | 1.936999841 |
+| `R0B0` | 4 / 21 | 0 | 1.90e-6 / 2.09e-5 | 1.937000795 |
+| `ToroidalFlux` | 4 / 29 | 1 | 1.20e-6 / 2.54e-5 | 1.937000579 |
+
+The threshold falls from 6.2e-4 to 2.1–2.5e-5. The composition test's
+re-solves sit **5.0e-7, 1.11e-6 and 5.0e-7** of `ψ`'s peak from the base
+(`g²` 4.4e-7, 1.14e-6, 7.0e-7), against 5.9e-6 to 3.7e-5 before: a 33× fall,
+with one re-solve still 1.11× over the case's 1e-6. Every run stops at a
+residual of 1.2–1.9e-6, **already under the map's measured noise of ~1.3e-5 per
+coordinate**: what is left is the map, not the stopping test.
+
+**(c) `SafetyFactorScale`** (30× unchanged):
+
+| | free `σ_min`, degree 2 / 4 | held `σ_min` 2 / 4 | `d ln ψ_ax/d ln c₀` 2 / 4 | solves |
+|---|---|---|---|---|
+| single, before (M-358) | 3.811e-3 / 1.464e-3 | — / 1.94e-2 | 0.5272 / 0.5385 | 168 |
+| single | 2.888e-3 / 4.255e-4 | 0.5116 / 2.258e-2 | 0.5266 / 0.5266 | 170 |
+| double, before | 2.896e-3 / 3.557e-4 | 0.5128 / 2.270e-2 | 0.5267 / 0.5268 | 125 |
+| double | 2.883e-3 / 4.456e-4 | 0.5123 / 2.267e-2 | 0.5267 / 0.5269 | 116 |
+
+Single now passes, the ratio at degree 4 53× against 30×.
+
+**(d) Double moves within its bounds**: `QDrivenScalePin`'s re-solves 8.4e-11,
+3.2e-11 and 1.1e-15 (1.1e-14, 3.3e-11, 1.7e-15 before), the same iteration and
+equilibrium counts; `QDrivenCurvedBoundary` recovers `g²` to every printed digit.
+
+**Reproduce.** `runs/q-solve-scale/single-diag/` (`*.basis-single.log`), and
+`MKL_NUM_THREADS=1 ./QDrivenScalePin` and `./SafetyFactorScale` in both trees.

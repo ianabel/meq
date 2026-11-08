@@ -147,6 +147,8 @@ namespace meq
 			fitToroidalFieldSquared( inverted, options.degree );
 		lastFloor = toroidalMapFloor( inverted, options.degree,
 		                              options.solveAccuracy );
+		lastOrthonormalFloor = toroidalMapFloorOrthonormal(
+			inverted, options.degree, options.solveAccuracy );
 		stageChecksum( "toroidalMap.out", fitted );
 		return fitted;
 	}
@@ -269,22 +271,10 @@ namespace meq
 		 * fitToroidalFieldSquared() solves, so `y = R c` is the coefficient
 		 * vector's own discrete L2 coordinate over the surfaces.
 		 */
-		std::vector<double> const &label = map.lastLabels();
 		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
-		Eigen::MatrixXd design( static_cast<Eigen::Index>( label.size() ), terms );
-		for ( std::size_t i = 0; i < label.size(); ++i )
-		{
-			double power = 1.0;
-			for ( Eigen::Index j = 0; j < terms; ++j )
-			{
-				design( static_cast<Eigen::Index>( i ), j ) = power;
-				power *= 1.0 - label[ i ];
-			}
-		}
-		Eigen::HouseholderQR<Eigen::MatrixXd> const qr( design );
-		Eigen::MatrixXd const r =
-			Eigen::MatrixXd( qr.matrixQR().topRows( terms ).triangularView<Eigen::Upper>() )
-			/std::sqrt( static_cast<double>( label.size() ) );
+		Eigen::MatrixXd const r = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic,
+			Eigen::Dynamic, Eigen::RowMajor> const>(
+			fitOrthonormalFactor( map.lastLabels(), degree ).data(), terms, terms );
 
 		Eigen::VectorXd difference( terms );
 		for ( Eigen::Index j = 0; j < terms; ++j )
@@ -300,17 +290,18 @@ namespace meq
 			residual.push_back( pin.weight*( measured - pin.value )/pin.value );
 
 		/*
-		 * THE FLOOR. Each fit row is a combination of the map's coefficients
-		 * with the weights of R's row, so its noise is at most the row sum
-		 * times the map's floor; the pin row carries the solve's relative
-		 * accuracy with toroidalMapFloor()'s four standard deviations of four.
+		 * THE FLOOR, IN THE COORDINATES THE ROWS ARE IN. The fit rows are
+		 * `y`, whose noise is the map's orthonormal floor directly -- not the
+		 * monomial floor times R's row sum, which charged every row the top
+		 * coefficient's noise, 600 times what single precision measures
+		 * (M-359). The pin row is one quantity solved to the inner solve's
+		 * relative accuracy: four standard deviations of it, times the
+		 * weight.
 		 */
-		double rowSum = 0.0;
-		for ( Eigen::Index i = 0; i + 1 < terms; ++i )
-			rowSum = std::max( rowSum, r.row( i ).cwiseAbs().sum() );
-		lastFloor = rowSum*map.floor();
+		lastFloor = map.orthonormalFloor();
 		if ( pin.kind != ScalePin::EdgeField )
-			lastFloor = std::max( lastFloor, pin.weight*16.0*map.solveAccuracy() );
+			lastFloor = std::max( lastFloor, pin.weight*4.0*map.solveAccuracy() );
+		lastLabels = map.lastLabels();
 
 		double norm = 0.0;
 		for ( double value : residual )
@@ -321,6 +312,28 @@ namespace meq
 		std::vector<double> out( unknowns.size() );
 		for ( std::size_t i = 0; i < unknowns.size(); ++i )
 			out[ i ] = unknowns[ i ] + residual[ i ];
+		return out;
+	}
+
+	std::vector<double> PinnedToroidalFieldMap::differenceBasis() const
+	{
+		if ( lastLabels.empty() )
+			return {};
+		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
+		Eigen::MatrixXd const r = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic,
+			Eigen::Dynamic, Eigen::RowMajor> const>(
+			fitOrthonormalFactor( lastLabels, degree ).data(), terms, terms );
+		// Under EdgeField c_0 is held, so the unknowns' coordinates are R's
+		// block on c_1 .. c_d -- y_1 .. y_d at fixed c_0.
+		Eigen::MatrixXd const block = pin.kind == ScalePin::EdgeField
+			? Eigen::MatrixXd( r.bottomRightCorner( terms - 1, terms - 1 ) ) : r;
+		Eigen::MatrixXd const basis =
+			block.triangularView<Eigen::Upper>().solve(
+				Eigen::MatrixXd::Identity( block.rows(), block.cols() ) );
+		std::vector<double> out( static_cast<std::size_t>( basis.size() ) );
+		for ( Eigen::Index i = 0; i < basis.rows(); ++i )
+			for ( Eigen::Index j = 0; j < basis.cols(); ++j )
+				out[ static_cast<std::size_t>( i*basis.cols() + j ) ] = basis( i, j );
 		return out;
 	}
 
@@ -570,6 +583,88 @@ namespace meq
 		for ( std::size_t j = 0; j < terms; ++j )
 			out[ j ] = solution( static_cast<Eigen::Index>( j ) );
 		return out;
+	}
+
+	namespace
+	{
+		Eigen::MatrixXd designOn( std::vector<double> const &labels,
+		                          std::size_t terms )
+		{
+			Eigen::MatrixXd design( static_cast<Eigen::Index>( labels.size() ),
+			                        static_cast<Eigen::Index>( terms ) );
+			for ( std::size_t i = 0; i < labels.size(); ++i )
+			{
+				double const psi = 1.0 - labels[ i ];
+				double power = 1.0;
+				for ( std::size_t j = 0; j < terms; ++j )
+				{
+					design( static_cast<Eigen::Index>( i ),
+					        static_cast<Eigen::Index>( j ) ) = power;
+					power *= psi;
+				}
+			}
+			return design;
+		}
+	}
+
+	std::vector<double> fitOrthonormalFactor( std::vector<double> const &labels,
+	                                          unsigned int degree )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::fitOrthonormalFactor: a degree of zero is not a fit" );
+		std::size_t const terms = degree + 1;
+		if ( labels.size() < terms )
+			throw std::invalid_argument(
+				"meq::fitOrthonormalFactor: fewer surfaces than coefficients" );
+		requireAscending( labels, "meq::fitOrthonormalFactor" );
+		Eigen::HouseholderQR<Eigen::MatrixXd> const qr( designOn( labels, terms ) );
+		Eigen::Index const n = static_cast<Eigen::Index>( terms );
+		Eigen::MatrixXd const r =
+			Eigen::MatrixXd( qr.matrixQR().topRows( n ).triangularView<Eigen::Upper>() )
+			/std::sqrt( static_cast<double>( labels.size() ) );
+		std::vector<double> out( terms*terms );
+		for ( Eigen::Index i = 0; i < n; ++i )
+			for ( Eigen::Index j = 0; j < n; ++j )
+				out[ static_cast<std::size_t>( i*n + j ) ] = r( i, j );
+		return out;
+	}
+
+	double toroidalMapFloorOrthonormal( ToroidalField const &field,
+	                                    unsigned int degree,
+	                                    double solveAccuracy )
+	{
+		if ( degree == 0 )
+			throw std::invalid_argument(
+				"meq::toroidalMapFloorOrthonormal: a degree of zero is not a fit" );
+		std::size_t const terms = degree + 1;
+		if ( field.size() < terms || field.gSquared.size() != field.size() )
+			throw std::invalid_argument(
+				"meq::toroidalMapFloorOrthonormal: the family has fewer surfaces "
+				"than the fit has coefficients, or no g^2 on each of them" );
+		requireAscending( field.normalisedFlux, "meq::toroidalMapFloorOrthonormal" );
+
+		// R P = Q^T/sqrt( N ): the thin Q of the design, whose columns are
+		// orthonormal over the surfaces.
+		Eigen::HouseholderQR<Eigen::MatrixXd> const qr(
+			designOn( field.normalisedFlux, terms ) );
+		Eigen::Index const rows = static_cast<Eigen::Index>( field.size() );
+		Eigen::MatrixXd const q = qr.householderQ()
+			*Eigen::MatrixXd::Identity( rows, static_cast<Eigen::Index>( terms ) );
+		double const scale = 1.0/std::sqrt( static_cast<double>( field.size() ) );
+		double worst = 0.0;
+		for ( Eigen::Index k = 0; k < q.cols(); ++k )
+		{
+			double sum = 0.0;
+			for ( Eigen::Index i = 0; i < rows; ++i )
+			{
+				double const term = scale*q( i, k )
+				                    *field.gSquared[ static_cast<std::size_t>( i ) ];
+				sum += term*term;
+			}
+			worst = std::max( worst, std::sqrt( sum ) );
+		}
+		return 4.0*4.0*std::abs( solveAccuracy )*worst;
 	}
 
 	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,

@@ -270,6 +270,36 @@ namespace meq
 	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,
 	                         double solveAccuracy );
 
+	/**
+	 * THE FIT'S ORTHONORMAL COORDINATES: `R` with `y = R c`, from the QR of
+	 * fitToroidalFieldSquared()'s design matrix on @a labels (the family's
+	 * `Psi_N`, the design in the source's `Psi`), scaled by `1/sqrt( N )` so
+	 * that `y` is the coefficient vector's discrete L2 coordinate over the
+	 * surfaces. Upper triangular, `( degree + 1 )^2`, row-major.
+	 *
+	 * **THESE ARE THE COORDINATES THE q-DRIVEN MAP'S NOISE IS UNIFORM IN.**
+	 * The fitted `y` is `Q^T g^2/sqrt( N )`, so each coordinate's noise is at
+	 * most the surfaces' own; in the monomial coefficients `R^-1` multiplies
+	 * it, by 1/R_dd in the highest -- 3.5e-3 against 1.8e-4 between degrees 4
+	 * and 2 in single (MEASUREMENTS.md M-358, M-359).
+	 *
+	 * @throws std::invalid_argument as toroidalMapFloor() does.
+	 */
+	std::vector<double> fitOrthonormalFactor( std::vector<double> const &labels,
+	                                          unsigned int degree );
+
+	/**
+	 * toroidalMapFloor() in the fit's ORTHONORMAL coordinates: the round-off
+	 * floor of each `y_k` of the map's output, worst over `k`, with the same
+	 * model -- `4 x 4 x solveAccuracy` per surface's `g^2`, independent across
+	 * surfaces -- carried through `R P = Q^T/sqrt( N )` in place of `P`. It is
+	 * what a residual measured in `y` is noisy to, and what a difference step
+	 * in `y` is sized against (M-359).
+	 */
+	double toroidalMapFloorOrthonormal( ToroidalField const &field,
+	                                    unsigned int degree,
+	                                    double solveAccuracy );
+
 	/// `gg'` knots from that fit, in the SOURCE's `Psi`, exact on the
 	/// polynomial. Same reflection and the same edge extension as
 	/// ggPrimeKnots(); @a samples knots are laid down uniformly over the
@@ -379,6 +409,11 @@ namespace meq
 			/// Zero until a step has.
 			double floor() const { return lastFloor; }
 
+			/// toroidalMapFloorOrthonormal() at the last step that produced an
+			/// equilibrium: the same noise in the fit's orthonormal
+			/// coordinates, which a residual measured there is noisy to.
+			double orthonormalFloor() const { return lastOrthonormalFloor; }
+
 			/// The family's labels, `Psi_N`, at the last step that produced
 			/// an equilibrium: the abscissae the fit was taken on. Empty
 			/// until one has.
@@ -396,6 +431,7 @@ namespace meq
 			std::vector<double> lastGood;
 			std::vector<double> labels;
 			double lastFloor = 0.0;
+			double lastOrthonormalFloor = 0.0;
 			int solveCount = 0;
 			int refusalCount = 0;
 	};
@@ -498,8 +534,24 @@ namespace meq
 			std::vector<double> operator()( std::vector<double> const &unknowns );
 
 			/// The round-off floor of `F` at the last admissible step: the
-			/// map's, carried through `R`, and the pin row's.
+			/// map's in the fit's orthonormal coordinates, which the q rows
+			/// are measured in, and the pin row's.
 			double floor() const { return lastFloor; }
+
+			/**
+			 * THE COORDINATES TO DIFFERENCE THE OUTER JACOBIAN IN: the fit's
+			 * orthonormal ones, as the columns of `T` with `x = T z` --
+			 * `R^-1`, or under EdgeField the inverse of `R`'s block on
+			 * `c_1 .. c_d`. Row-major, square in the unknowns; empty until a
+			 * step has produced an equilibrium.
+			 *
+			 * There the map's noise is uniform, so one step, sized against
+			 * floor() -- which is in the same coordinates -- costs every
+			 * column the same 1%. In the monomial coefficients the top one's
+			 * noise is `1/R_dd` times the rest and the max-norm floor sized
+			 * every step to it (MEASUREMENTS.md M-359).
+			 */
+			std::vector<double> differenceBasis() const;
 
 			/// The pinned scalar as the last admissible step measured it.
 			double lastMeasured() const { return measuredValue; }
@@ -518,6 +570,7 @@ namespace meq
 			double measuredValue = 0.0;
 			double largestResidual = 0.0;
 			bool lastWasRefused = false;
+			std::vector<double> lastLabels;
 	};
 
 	/**

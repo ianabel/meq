@@ -89,9 +89,11 @@ namespace meq
 						std::vector<double> const & )> const &map,
 					std::function<double()> const &floorOfMap,
 					std::function<bool()> const &refusedByMap,
+					std::function<std::vector<double>()> const &basisOfMap,
 					double difference, int &evaluations )
 					: mfem::Operator( n ), map( map ), floorOfMap( floorOfMap ),
-					  refusedByMap( refusedByMap ), difference( difference ),
+					  refusedByMap( refusedByMap ), basisOfMap( basisOfMap ),
+					  difference( difference ),
 					  evaluations( evaluations ), gradient( n, n )
 				{
 				}
@@ -239,16 +241,42 @@ namespace meq
 
 					int const n = x.Size();
 					double const relative = differenceAt( x );
+
+					/*
+					 * THE COORDINATES THE COLUMNS ARE TAKEN IN: `x = T z`, `T`
+					 * the map's own basis where it gives one -- for the
+					 * q-driven map the fit's orthonormal coordinates, where its
+					 * noise is uniform and its floor is measured -- and the
+					 * unknowns' own otherwise. The columns are of `J T`, and
+					 * `J = ( J T ) T^-1`.
+					 */
+					countedHostRead( x, __LINE__ );
+					Eigen::MatrixXd basis = Eigen::MatrixXd::Identity( n, n );
+					if ( basisOfMap )
+					{
+						std::vector<double> const given = basisOfMap();
+						if ( given.size() == static_cast<std::size_t>( n )*static_cast<std::size_t>( n ) )
+							for ( int i = 0; i < n; ++i )
+								for ( int j = 0; j < n; ++j )
+									basis( i, j ) = given[ static_cast<std::size_t>( i*n + j ) ];
+					}
+					Eigen::FullPivLU<Eigen::MatrixXd> const factored( basis );
+					Eigen::VectorXd point( n );
+					for ( int i = 0; i < n; ++i )
+						point( i ) = x( i );
+					Eigen::VectorXd const coordinates = factored.solve( point );
+					Eigen::MatrixXd alongBasis( n, n );
+
 					mfem::Vector forward( n ), backward( n ), plus( n ), minus( n );
 					for ( int j = 0; j < n; ++j )
 					{
-						// Relative to the coefficient with the option as a
+						// Relative to the coordinate with the option as a
 						// floor: c_0 is O( g^2 ) while the top coefficient can
 						// legitimately be near zero, and one absolute step
 						// would be far too large for the first and far too
 						// small for the last.
 						double const step =
-							relative*std::max( std::abs( x( j ) ), mfem::real_t( 1.0 ) );
+							relative*std::max( std::abs( coordinates( j ) ), 1.0 );
 
 						/*
 						 * THE PERTURBATION HAS TO SURVIVE, AND UNDER A DEVICE
@@ -271,10 +299,13 @@ namespace meq
 						 */
 						plus = x;
 						plus.HostReadWrite();
-						plus( j ) += step;
 						minus = x;
 						minus.HostReadWrite();
-						minus( j ) -= step;
+						for ( int i = 0; i < n; ++i )
+						{
+							plus( i ) += step*basis( i, j );
+							minus( i ) -= step*basis( i, j );
+						}
 						Mult( plus, forward );
 						Mult( minus, backward );
 
@@ -309,16 +340,21 @@ namespace meq
 						for ( int i = 0; i < n; ++i )
 						{
 							if ( !upRefused && !downRefused )
-								gradient( i, j ) =
+								alongBasis( i, j ) =
 									( forward( i ) - backward( i ) )/( 2.0*step );
 							else if ( hereKnown && !upRefused )
-								gradient( i, j ) = ( forward( i ) - here( i ) )/step;
+								alongBasis( i, j ) = ( forward( i ) - here( i ) )/step;
 							else if ( hereKnown && !downRefused )
-								gradient( i, j ) = ( here( i ) - backward( i ) )/step;
+								alongBasis( i, j ) = ( here( i ) - backward( i ) )/step;
 							else
-								gradient( i, j ) = 0.0;
+								alongBasis( i, j ) = 0.0;
 						}
 					}
+
+					Eigen::MatrixXd const inUnknowns = alongBasis*factored.inverse();
+					for ( int i = 0; i < n; ++i )
+						for ( int j = 0; j < n; ++j )
+							gradient( i, j ) = inUnknowns( i, j );
 
 					gradientPoint = x;
 					haveGradient = true;
@@ -465,6 +501,7 @@ namespace meq
 					std::vector<double> const & )> const &map;
 				std::function<double()> const &floorOfMap;
 				std::function<bool()> const &refusedByMap;
+				std::function<std::vector<double>()> const &basisOfMap;
 				std::function<void( double )> floorChanged;
 				double difference;
 				int &evaluations;
@@ -862,7 +899,7 @@ namespace meq
 		out.coefficients = start;
 
 		FixedPointResidual residual( n, map, options.mapFloor, options.mapRefused,
-		                             options.difference,
+		                             options.differenceBasis, options.difference,
 		                             out.mapEvaluations );
 
 		// THE CONVERGENCE THRESHOLD, at a point the map was evaluated at. The

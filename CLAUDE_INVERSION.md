@@ -493,6 +493,18 @@ to twice the largest residual it has returned, and a refused side of a
 Jacobian column makes the column one-sided (`OuterNewtonOptions::mapRefused`,
 → **[M-358](MEASUREMENTS.md#m-358)**).
 
+**THE OUTER JACOBIAN IS DIFFERENCED IN THE FIT'S ORTHONORMAL COORDINATES,
+AND ITS FLOOR IS MEASURED THERE.** The map's output is `y = Qᵀg²/√N`, so its
+noise is uniform in `y` and `R⁻¹` amplifies it into the monomial coefficients
+— 3.5e-3 against 1.5e-5 at degree 4 in single. A max-norm floor over `c` sized
+every step and every stopping test to the top coefficient's noise: in single
+the pinned loop's floor was 6.2e-4 and the answers 4e-5 apart. Differenced
+along `R⁻¹` (`OuterNewtonOptions::differenceBasis`) against
+`toroidalMapFloorOrthonormal()`, within 2.5× of the noise measured, the floor is
+2.2e-5 and the answers 5e-7 to 1.1e-6 apart, now at the map's own noise
+(→ **[M-359](MEASUREMENTS.md#m-359)**). `SafetyFactorScale` differences the
+same way, which its free `σ_min` needs in single.
+
 **THE FLUX PIN IS A ROW BESIDE THE BORDERED NEWTON, NOT A HELD `ψ_ax`.**
 Holding `ψ_ax` in a plain inner solve, with the located axis as the outer row,
 is no better conditioned (0.594 against 0.578 at degree 2) and is the outer
