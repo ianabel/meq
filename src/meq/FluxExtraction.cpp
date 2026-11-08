@@ -145,6 +145,7 @@ namespace meq
 		family.axisR = axis.radius;
 		family.axisZ = axis.z;
 		family.psiAxis = axis.psi;
+		family.axisElement = axis.element;
 		family.psiBoundary = psiBoundary;
 		family.innerCut = options.innerCut;
 		family.outerCut = options.outerCut;
@@ -252,6 +253,11 @@ namespace meq
 			surface.transverse = fit.transverse;
 			surface.stalledRays = fit.stalledRays;
 			surface.fallbackLocations = fit.fallbackLocations;
+			surface.elements = fit.element;
+			surface.bandFaces = fit.bandFace;
+			surface.rayRoutes = fit.route;
+			surface.rayIterations = fit.iterations;
+			surface.tracedPoints = fit.tracedPoints;
 
 			family.surfaces.push_back( std::move( surface ) );
 		}

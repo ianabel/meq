@@ -221,8 +221,21 @@ namespace meq
 		mfem::GridFunction const &potentialFor( GradShafranovSolver const &solver,
 		                                        Potential which )
 		{
-			return which == Potential::Raw ? solver.potential()
-			                               : solver.postProcessedPotential();
+			switch ( which )
+			{
+				case Potential::Raw:
+					return solver.potential();
+				case Potential::PostProcessed:
+					return solver.postProcessedPotential();
+				case Potential::Continuous:
+					break;
+			}
+			if ( !solver.isPostProcessed() )
+				throw std::invalid_argument(
+					"ContourTracer: Potential::Continuous needs "
+					"GradShafranovSolver::postProcess() to have been called since the "
+					"last solve: psi~ and q~ are interpolated from psi* and q*" );
+			return solver.continuousPotential();
 		}
 
 		mfem::GridFunction const &fluxFor( GradShafranovSolver const &solver,
@@ -233,8 +246,16 @@ namespace meq
 			// B_p. Refused until ANISOTROPY-PLAN.md's output stage divides it out.
 			if ( solver.anisotropy() != nullptr )
 				throw std::logic_error( "meq::ContourTracer: the solver carries an anisotropy (setAnisotropy), so its flux is not the poloidal field; flux surfaces are not built for ANISOTROPY-PLAN.md's operator" );
-			return which == Potential::Raw ? solver.flux()
-			                               : solver.postProcessedFlux();
+			switch ( which )
+			{
+				case Potential::Raw:
+					return solver.flux();
+				case Potential::PostProcessed:
+					return solver.postProcessedFlux();
+				case Potential::Continuous:
+					break;
+			}
+			return solver.continuousFlux();
 		}
 
 	}
@@ -253,9 +274,9 @@ namespace meq
 			throw std::invalid_argument(
 				"ContourTracer: Potential::PostProcessed needs "
 				"GradShafranovSolver::postProcess() to have been called since the "
-				"last solve. It is the default because rooting psi* traces a "
-				"contour one order closer to the true one; Potential::Raw is the "
-				"other door and needs nothing" );
+				"last solve: rooting psi* traces a contour one order closer to the "
+				"true one than psi_h does; Potential::Raw is the other door and "
+				"needs nothing" );
 
 		// THE CONDUCTOR SPLIT, TAKEN RATHER THAN ASKED FOR. A
 		// caller who reached this constructor has a solver, and the solver knows
@@ -839,6 +860,7 @@ namespace meq
 		BoundaryFace const &face = bandFaces[ which ];
 
 		sample.element = face.element;
+		sample.face = which;
 		sample.extended = true;
 		sample.depth = depth;
 		sample.footR = footR;
@@ -1065,6 +1087,7 @@ namespace meq
 			sample.depth = 0.0;
 			sample.footR = 0.0;
 			sample.footZ = 0.0;
+			sample.face = -1;
 		};
 
 		bool const band = bandMethod != BandExtension::None;
@@ -2038,6 +2061,11 @@ namespace meq
 		fit.speed.assign( count, 0.0 );
 		fit.crossing.assign( count, 0.0 );
 		fit.extended.assign( count, 0 );
+		fit.element.assign( count, -1 );
+		fit.bandFace.assign( count, -1 );
+		fit.route.assign( count, static_cast<char>( RayRoute::Newton ) );
+		fit.iterations.assign( count, 0 );
+		fit.tracedPoints = contour.points.size();
 		fit.transversality = std::numeric_limits<double>::infinity();
 
 		double const target = tolerance*potentialScale();
@@ -2087,6 +2115,8 @@ namespace meq
 			// leave the answer in whichever evaluation happened to converge.
 			bool nodeExtended = false;
 			double nodeDepth = 0.0;
+			int nodeElement = -1;
+			int nodeFace = -1;
 
 			// THE BEST ITERATE, AND WHY THIS RAY NEWTON KEEPS ONE.
 			//
@@ -2117,6 +2147,8 @@ namespace meq
 			double bestQZ = 0.0;
 			bool bestExtended = false;
 			double bestDepth = 0.0;
+			int bestElement = -1;
+			int bestFace = -1;
 			bool haveBest = false;
 
 			auto evaluate = [ & ]( double rho, double &psi, double &qR,
@@ -2132,6 +2164,8 @@ namespace meq
 				qZ = sample.qZ;
 				nodeExtended = sample.extended;
 				nodeDepth = sample.depth;
+				nodeElement = sample.element;
+				nodeFace = sample.face;
 
 				double const distance = std::abs( sample.psi - contour.level );
 				if ( distance < bestResidual )
@@ -2143,6 +2177,8 @@ namespace meq
 					bestQZ = sample.qZ;
 					bestExtended = sample.extended;
 					bestDepth = sample.depth;
+					bestElement = sample.element;
+					bestFace = sample.face;
 					haveBest = true;
 				}
 
@@ -2186,6 +2222,7 @@ namespace meq
 				// bracket, which is why the bracket is kept rather than only the
 				// seed.
 				++fit.bisections;
+				fit.route[ j ] = static_cast<char>( RayRoute::Bisection );
 
 				double aLo = bracketLo;
 				double aHi = bracketHi;
@@ -2249,7 +2286,10 @@ namespace meq
 					qZ = bestQZ;
 					nodeExtended = bestExtended;
 					nodeDepth = bestDepth;
+					nodeElement = bestElement;
+					nodeFace = bestFace;
 					++fit.stalledRays;
+					fit.route[ j ] = static_cast<char>( RayRoute::BestIterate );
 				}
 			}
 
@@ -2277,6 +2317,9 @@ namespace meq
 			fit.transversality = std::min( fit.transversality, std::abs( cross ) );
 
 			fit.extended[ j ] = nodeExtended ? 1 : 0;
+			fit.element[ j ] = nodeElement;
+			fit.bandFace[ j ] = nodeFace;
+			fit.iterations[ j ] = iterations;
 			if ( nodeExtended )
 			{
 				++fit.extendedNodes;

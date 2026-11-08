@@ -5619,6 +5619,17 @@ namespace meq
 			mfem::GridFunction &postProcessedFlux();
 			mfem::GridFunction const &postProcessedFlux() const;
 
+			/// psi~ in H1 of degree k+2 and q~ in [H1]^2 of degree k+1: the
+			/// CONTINUOUS pair the flux-surface extraction roots and weights
+			/// by, interpolated by moments from psi*, psihat and q*
+			/// (ContinuousField.hpp, CLAUDE_INVERSION.md IN-0,
+			/// M-365). Built on first use after postProcess() and kept
+			/// until the next solve or post-processing; the build threads
+			/// and is the serial one bit for bit.
+			/// @throws std::logic_error before postProcess().
+			mfem::GridFunction const &continuousPotential() const;
+			mfem::GridFunction const &continuousFlux() const;
+
 			/// The normally continuous total flux qhat_h in RT_k, in DarcyForm's
 			/// sign convention because that is the one the constraint equation it
 			/// is projected through is written in. Valid after postProcess().
@@ -7358,6 +7369,14 @@ namespace meq
 			mfem::GridFunction enrichedFluxGf;
 			mfem::GridFunction postProcessedGf;
 			mfem::GridFunction enrichedTraceGf;
+
+			/// psi~ and q~, built from the four above and the trace by
+			/// continuousPotential() on first use; reset wherever
+			/// postProcessed is. Mutable because building them is a cache
+			/// of a function of the const solved state.
+			mutable std::unique_ptr<mfem::GridFunction> continuousPotentialGf;
+			mutable std::unique_ptr<mfem::GridFunction> continuousFluxGf;
+			void buildContinuousFields() const;
 
 			/// The reduced trace system. traceX and traceB alias the trace blocks
 			/// of solution and rhs; that aliasing is what makes FormLinearSystem()
