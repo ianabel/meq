@@ -207,17 +207,40 @@ namespace meq
 	{
 		/*
 		 * A REFUSAL POINTS BACK AT THE LAST ADMISSIBLE POINT, as the free
-		 * map's does and for its reason: finite, large where the iterate has
-		 * wandered, zero nowhere but at a point that really was evaluated.
+		 * map's does: finite, and zero nowhere but at a point that really was
+		 * evaluated.
+		 *
+		 * **AND IT IS NEVER SMALLER THAN ANY RESIDUAL THE MAP HAS RETURNED.**
+		 * `lastGood - x` alone is large only where the iterate has WANDERED:
+		 * when the last admissible point is a differencing column a step away,
+		 * a refused trial point beside it reads a residual smaller than the
+		 * iterate's own, the line search's Armijo test accepts it, and the
+		 * loop then sits on a point the map cannot evaluate. Measured on
+		 * QDrivenScalePin's base run in single: accepted at 0.16 from 0.50,
+		 * stalled there at 0.14 (MEASUREMENTS.md M-358). Scaled to twice the
+		 * largest admissible 2-norm seen, a refusal fails every sufficient-
+		 * decrease test the loop can pose.
 		 */
 		auto refuse = [ & ]
 		{
+			lastWasRefused = true;
 			std::vector<double> out( unknowns.size() );
+			std::vector<double> back( unknowns.size() );
+			double length = 0.0;
 			for ( std::size_t i = 0; i < unknowns.size(); ++i )
-				out[ i ] = lastGood.size() == unknowns.size()
-				           ? lastGood[ i ] : unknowns[ i ] - 1.0;
+			{
+				back[ i ] = lastGood.size() == unknowns.size()
+				            ? lastGood[ i ] - unknowns[ i ] : -1.0;
+				length += back[ i ]*back[ i ];
+			}
+			length = std::sqrt( length );
+			double const scale = length > 0.0
+				? std::max( 1.0, 2.0*largestResidual/length ) : 1.0;
+			for ( std::size_t i = 0; i < unknowns.size(); ++i )
+				out[ i ] = unknowns[ i ] + scale*back[ i ];
 			return out;
 		};
+		lastWasRefused = false;
 
 		std::vector<double> const c = coefficients( unknowns );
 		int const refusedBefore = map.refusals();
@@ -289,6 +312,10 @@ namespace meq
 		if ( pin.kind != ScalePin::EdgeField )
 			lastFloor = std::max( lastFloor, pin.weight*16.0*map.solveAccuracy() );
 
+		double norm = 0.0;
+		for ( double value : residual )
+			norm += value*value;
+		largestResidual = std::max( largestResidual, std::sqrt( norm ) );
 		lastGood = unknowns;
 		measuredValue = measured;
 		std::vector<double> out( unknowns.size() );

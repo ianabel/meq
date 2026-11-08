@@ -455,7 +455,10 @@ namespace meq
 	 * roots -- through `x -> x + F( x )`, so the outer Newton, its floor and
 	 * its refusals are the free loop's. Like the map it wraps, it never throws
 	 * for a reason the loop could meet: a refused step, or a pin that cannot be
-	 * read, returns a residual pointing back at the last admissible point.
+	 * read, returns a residual pointing back at the last admissible point --
+	 * scaled to twice the largest residual it has returned, so that the line
+	 * search can never accept a refused point, and reported by lastRefused(),
+	 * so that no Jacobian column is differenced across one (M-358).
 	 */
 	class PinnedToroidalFieldMap
 	{
@@ -501,6 +504,11 @@ namespace meq
 			/// The pinned scalar as the last admissible step measured it.
 			double lastMeasured() const { return measuredValue; }
 
+			/// Whether the last call was a refusal -- what
+			/// meq::OuterNewtonOptions::mapRefused asks, so that no Jacobian
+			/// column is differenced across one.
+			bool lastRefused() const { return lastWasRefused; }
+
 		private:
 			ToroidalFieldMap &map;
 			unsigned int degree;
@@ -508,6 +516,8 @@ namespace meq
 			std::vector<double> lastGood;
 			double lastFloor = 0.0;
 			double measuredValue = 0.0;
+			double largestResidual = 0.0;
+			bool lastWasRefused = false;
 	};
 
 	/**

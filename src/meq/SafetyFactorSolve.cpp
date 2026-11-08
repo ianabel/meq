@@ -88,10 +88,11 @@ namespace meq
 					std::function<std::vector<double>(
 						std::vector<double> const & )> const &map,
 					std::function<double()> const &floorOfMap,
+					std::function<bool()> const &refusedByMap,
 					double difference, int &evaluations )
 					: mfem::Operator( n ), map( map ), floorOfMap( floorOfMap ),
-					  difference( difference ), evaluations( evaluations ),
-					  gradient( n, n )
+					  refusedByMap( refusedByMap ), difference( difference ),
+					  evaluations( evaluations ), gradient( n, n )
 				{
 				}
 
@@ -215,6 +216,7 @@ namespace meq
 						record.residual[ static_cast<std::size_t>( i ) ] =
 							image[ static_cast<std::size_t>( i ) ] - x( i );
 					record.floor = floorOfMap ? std::abs( floorOfMap() ) : 0.0;
+					record.refused = refusedByMap && refusedByMap();
 					history.push_back( std::move( record ) );
 					if ( floorChanged )
 						floorChanged( floorAt( x ) );
@@ -276,11 +278,46 @@ namespace meq
 						Mult( plus, forward );
 						Mult( minus, backward );
 
+						/*
+						 * A REFUSED SIDE IS NOT THE MAP, SO IT IS NOT
+						 * DIFFERENCED. A refusal's residual is a pointer back
+						 * at the last admissible point, chosen to be large so
+						 * the line search turns back -- as a column it is
+						 * O( 1/step ) of garbage, and the Newton step built on
+						 * it walks straight back into the region that refused.
+						 * Measured: QDrivenScalePin's base run in single, whose
+						 * difference step is 100 floors and reaches a field
+						 * whose outermost surface cannot be traced; the column
+						 * through it sent the loop onto refused points and
+						 * stalled it at 0.14 (MEASUREMENTS.md M-358). So one
+						 * refused side makes the column ONE-SIDED from the
+						 * point itself, and two leave it zero -- a direction
+						 * the map cannot be asked about, which the
+						 * conditioning then reports.
+						 */
+						bool const upRefused = refusedAt( plus );
+						bool const downRefused = refusedAt( minus );
+						mfem::Vector here( n );
+						bool const hereKnown = ( upRefused || downRefused )
+						                       && !refusedAt( x );
+						if ( hereKnown )
+							Mult( x, here );
+
 						countedHostRead( forward, __LINE__ );
 						countedHostRead( backward, __LINE__ );
+						countedHostRead( here, __LINE__ );
 						for ( int i = 0; i < n; ++i )
-							gradient( i, j ) =
-								( forward( i ) - backward( i ) )/( 2.0*step );
+						{
+							if ( !upRefused && !downRefused )
+								gradient( i, j ) =
+									( forward( i ) - backward( i ) )/( 2.0*step );
+							else if ( hereKnown && !upRefused )
+								gradient( i, j ) = ( forward( i ) - here( i ) )/step;
+							else if ( hereKnown && !downRefused )
+								gradient( i, j ) = ( here( i ) - backward( i ) )/step;
+							else
+								gradient( i, j ) = 0.0;
+						}
 					}
 
 					gradientPoint = x;
@@ -354,11 +391,20 @@ namespace meq
 				}
 
 			private:
+				/// Whether the map refused @a x, which it was asked for. A point
+				/// never evaluated reads false.
+				bool refusedAt( mfem::Vector const &x ) const
+				{
+					Evaluation const *known = find( x );
+					return known != nullptr && known->refused;
+				}
+
 				struct Evaluation
 				{
 					mfem::Vector point;
 					std::vector<double> residual;
 					double floor = 0.0;
+					bool refused = false;
 				};
 
 				Evaluation const *find( mfem::Vector const &x ) const
@@ -418,6 +464,7 @@ namespace meq
 				std::function<std::vector<double>(
 					std::vector<double> const & )> const &map;
 				std::function<double()> const &floorOfMap;
+				std::function<bool()> const &refusedByMap;
 				std::function<void( double )> floorChanged;
 				double difference;
 				int &evaluations;
@@ -814,7 +861,8 @@ namespace meq
 		OuterNewtonResult out;
 		out.coefficients = start;
 
-		FixedPointResidual residual( n, map, options.mapFloor, options.difference,
+		FixedPointResidual residual( n, map, options.mapFloor, options.mapRefused,
+		                             options.difference,
 		                             out.mapEvaluations );
 
 		// THE CONVERGENCE THRESHOLD, at a point the map was evaluated at. The

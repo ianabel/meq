@@ -4058,6 +4058,7 @@ int meq::Run::Impl::solve()
 			if ( qIterationCap )
 				outerOptions.maxIterations = *qIterationCap;
 			outerOptions.mapFloor = [ &pinned ]() { return pinned.floor(); };
+			outerOptions.mapRefused = [ &pinned ]() { return pinned.lastRefused(); };
 			/*
 			 * AN EXCEPTION OUT OF THE OUTER LOOP IS AN OUTER FAILURE TOO, and
 			 * reaching the ladder below as anything else gives it the rung:

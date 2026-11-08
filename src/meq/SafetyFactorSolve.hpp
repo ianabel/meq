@@ -160,6 +160,13 @@ namespace meq
 		/// working precision -- a floor of zero.
 		std::function<double()> mapFloor;
 
+		/// Whether the map's last evaluation was a REFUSAL -- an inadmissible
+		/// point answered with a residual pointing back rather than with the
+		/// map's value. A refused side of a Jacobian column is not
+		/// differenced: the column goes one-sided from the point itself
+		/// (MEASUREMENTS.md M-358). Empty is a map that never refuses.
+		std::function<bool()> mapRefused;
+
 		/// KIN_LINESEARCH by default. KIN_NONE is kept as the control: it is
 		/// what says the line search is doing the work rather than the Newton
 		/// direction being good enough on its own.

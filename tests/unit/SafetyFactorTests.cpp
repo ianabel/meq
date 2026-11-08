@@ -561,6 +561,21 @@ BOOST_AUTO_TEST_CASE( the_pinned_system_lets_the_highest_fit_row_give_way )
 	std::vector<double> const off = mismatched( alongHighest );
 	BOOST_TEST( std::abs( off[ 2 ] - alongHighest[ 2 ] - 0.2 ) < 1.0e-13,
 		"the pin row is weight ( m - m* )/m* = 0.2 and reads " << off[ 2 ] - alongHighest[ 2 ] );
+	BOOST_TEST( !mismatched.lastRefused() );
+
+	// A REFUSAL BESIDE THE LAST ADMISSIBLE POINT IS STILL LARGE (M-358): its
+	// residual is never under twice the largest the map has returned, here
+	// 0.2, so the line search cannot accept it -- however near the last
+	// admissible point it lies. g^2 = 4 - 5 Psi goes negative on [ 0, 1 ].
+	std::vector<double> const inadmissible = { 4.0, -5.0, 0.0 };
+	std::vector<double> const pointedBack = mismatched( inadmissible );
+	BOOST_TEST( mismatched.lastRefused() );
+	double length = 0.0;
+	for ( std::size_t i = 0; i < 3; ++i )
+		length += ( pointedBack[ i ] - inadmissible[ i ] )*( pointedBack[ i ] - inadmissible[ i ] );
+	BOOST_TEST( std::sqrt( length ) >= 0.4 - 1.0e-14,
+		"a refusal's residual is " << std::sqrt( length ) << ", under twice the largest "
+		"admissible one, 0.2: a line search may accept the refused point" );
 
 	// R0B0: c_0 leaves the unknowns and is held at g_edge^2 -- here the
 	// point's own, so the point is a root of the held system as well.
