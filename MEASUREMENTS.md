@@ -23407,7 +23407,7 @@ machine cases (`machine-b-ffprime`, `-b-ffprime-shaped`, `-c-mast-shaped`,
 | linear | 0 |
 | taper, `w` = 0.1 of the span | **4**, all to the clamp's answer (6.7e-15) |
 | taper, `w` = 0.2, 0.3, 0.5, 1 | 0 each |
-| `w tanh(d/w)`, `w` = 0.05 (the same reach as the 0.1 taper) | 0 |
+| `w tanh(d/w)`, `w` = 0.05 (the same reach as the 0.1 taper), and 0.1 | 0 each |
 
 The failures are not a crawl: the residual falls to about 2 (from 7e+01 at
 the start), then jumps by an order and stalls there. The converged answer
@@ -23452,7 +23452,11 @@ the widest bounded continuation the shipped cases allow**.
 
 **The suite**: the unit tests that described the clamp now assert the
 continuation (`ProfilesTests`, `SourceTests`) and the reach
-(`a_read_past_a_table_is_reported_with_how_far`).
+(`a_read_past_a_table_is_reported_with_how_far`). With the continuation in,
+merged on `manta/table-derivative` over `main` `d3d93fc`, 139 of 141 pass and
+the two reds are the deliberate ones, `PlasmaEdgeConvergence` and
+`AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`
+(`OMP_NUM_THREADS = 2`, `ctest -j2`, 48 minutes).
 
 ### M-350
 
