@@ -24838,7 +24838,11 @@ not qualified in single. On `manta/shape-derivative`, `RunSession` and
 `SessionSmoothness` fail in single at both commits as well: the session's warm
 resolve and cold solve are 9.8e-6 apart and two warm starts 6.4e-6 to
 1.5e-5, against the 1e-8 and 1e-12 of a double contract (MaNTA's is double,
-the plan's D5).
+the plan's D5). Their repeatability bounds are `max( bound, 20ε )` with
+`ε = numeric_limits<mfem::real_t>::epsilon()` since `2686013`, unchanged in
+double and 2.4e-6 in single, and both still fail there: after the merge of
+`cde84f2` the gap reads 9.75e-6 (82ε; `ψ_ax` passes) and the warm-start
+noise 2.81e-5 (236ε).
 
 **Under valgrind's memcheck**, `examples/fixed-d-tcv.toml` at
 `RefinementLevels = 1` with `FluxSurfaces = true` (the continuous fields

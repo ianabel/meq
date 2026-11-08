@@ -382,7 +382,8 @@ it was repaired:
   jump above the noise on the box and on TCV is a node changing element, the
   axis element and the band never change, and the per-crossing jump falls as
   about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
-  **So the loop's map and `_surfaces.nc` extract on `ψ̃` and `q̃`** — `Potential::Continuous`, H¹ fields interpolated by moments
+  **So the loop's map and `_surfaces.nc` extract on `ψ̃` and `q̃`** —
+  `Potential::Continuous`, H¹ fields interpolated by moments
   from `ψ*`, `ψ̂` (on interior edges) and `q*` (`src/meq/ContinuousField.hpp`).
   A 1.5e-8 difference straddling a crossing is then off by the noise rather
   than by 0.01–700× the derivative, and the family stays inside the
@@ -705,7 +706,8 @@ interpolated by moments from `ψ*`, `ψ̂` and `q*` (`src/meq/ContinuousField.hp
 `ψ*` and `q*` are broken across every face, so a family node crossing one makes
 the geometry jump by the face jump (→ **[M-364](MEASUREMENTS.md#m-364)**),
 which a caller differencing the geometry divides by its step; on `ψ̃`, `q̃` it
-does not (`ExtractionContinuity`, with `ψ*`, `q*` as its control), and the family stays inside `ψ*`'s own error
+does not (`ExtractionContinuity`, with `ψ*`, `q*` as its control), and the
+family stays inside `ψ*`'s own error
 (→ **[M-365](MEASUREMENTS.md#m-365)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
 keeps `q*`'s `k+1` (`ContinuousFieldConvergence`). Everything below about the
 post-processed pair is why the continuous one is built from it.
