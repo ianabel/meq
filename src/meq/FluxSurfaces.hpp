@@ -379,12 +379,22 @@
  *    default is not merely more accurate, it is what makes the Hermite-from-q
  *    claim hold at all on this discretisation.
  *
- * Potential::PostProcessed is therefore the default and the constructor refuses
- * a solver that has not been post-processed, because postProcessedPotential()
- * returns an empty field rather than complaining. Potential::Raw is the other
- * door, needs nothing but a solve, and is what the field-error rate of IN-0 is
- * pinned on -- k+1 being psi_h's order and k+2 being psi*'s, a test that wants
- * to check the implicit function theorem has to say which.
+ * Potential::PostProcessed is therefore the pair the tracer's accuracy is
+ * measured on, and the constructor refuses a solver that has not been
+ * post-processed, because postProcessedPotential() returns an empty field
+ * rather than complaining. Potential::Raw is the other door, needs nothing but
+ * a solve, and is what the field-error rate of IN-0 is pinned on -- k+1 being
+ * psi_h's order and k+2 being psi*'s, a test that wants to check the implicit
+ * function theorem has to say which.
+ *
+ * THE DEFAULT IS Potential::Continuous, AND THE REASON IS A CALLER WHO
+ * DIFFERENCES THE GEOMETRY. psi* and q* are broken across every face, so a
+ * family node whose root slides across one lands on the other polynomial and
+ * the family jumps -- by less than its own error, but a difference at a
+ * relative step of 1e-8 divides the jump by the step (M-SHAPE-1). psi~ and q~
+ * are interpolated from psi*, psihat and q* into H1 by moments
+ * (ContinuousField.hpp): continuous, of psi*'s order, and a family extracted
+ * on them moves by less than its discretisation error (M-SHAPE-2).
  *
  * WHAT THIS IS NOT.
  *
@@ -465,11 +475,20 @@ namespace meq
 		/// psi_h in W_h, paired with q_h. Needs nothing but a solve.
 		Raw,
 
-		/// psi*_h in P_(k+1), paired with the enriched flux q*_h. THE DEFAULT,
-		/// on the measurement recorded in the header. Requires
+		/// psi*_h in P_(k+1), paired with the enriched flux q*_h -- the pair
+		/// the header measured closest to the true contour. Requires
 		/// GradShafranovSolver::postProcess() to have been called, and the
 		/// constructor refuses rather than rooting an empty field if it has not.
-		PostProcessed
+		PostProcessed,
+
+		/// psi~ in H1 of degree k+2, paired with q~ in [H1]^2 -- both
+		/// CONTINUOUS, interpolated by moments from psi*, psihat and q*
+		/// (ContinuousField.hpp). THE DEFAULT, and the only pair a run
+		/// extracts with: on psi* and q*, broken across every face, a node
+		/// crossing a face makes the geometry jump (M-SHAPE-1); on these it
+		/// does not, and the geometry stays inside psi*'s own discretisation
+		/// error (M-SHAPE-2). Requires postProcess(), as PostProcessed does.
+		Continuous
 	};
 
 	/// Which field answers a call at a point OUTSIDE the mesh. See the header:
@@ -760,15 +779,17 @@ namespace meq
 	class ContourTracer
 	{
 		public:
-			/// The ordinary way in. Potential::PostProcessed -- the default --
-			/// takes solver.postProcessedPotential() and
-			/// solver.postProcessedFlux() and requires postProcess() to have
-			/// been called; Potential::Raw takes solver.potential() and
+			/// The ordinary way in. Potential::Continuous -- the default --
+			/// takes solver.continuousPotential() and solver.continuousFlux();
+			/// Potential::PostProcessed takes solver.postProcessedPotential()
+			/// and solver.postProcessedFlux(); both require postProcess() to
+			/// have been called. Potential::Raw takes solver.potential() and
 			/// solver.flux() and needs nothing but a solve.
-			/// @throws std::invalid_argument if @a which is PostProcessed and
-			///         GradShafranovSolver::postProcess() has not been called.
+			/// @throws std::invalid_argument if @a which is Continuous or
+			///         PostProcessed and GradShafranovSolver::postProcess() has
+			///         not been called.
 			explicit ContourTracer( GradShafranovSolver const &solverIn,
-			                        Potential which = Potential::PostProcessed );
+			                        Potential which = Potential::Continuous );
 
 			/// The same over bare fields, so that the tracer can be pointed at
 			/// an interpolated exact psi and q -- which is how a test separates

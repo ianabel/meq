@@ -17,7 +17,6 @@
  * have.
  */
 
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,27 +27,8 @@
 #include "EquilibriumSnapshot.hpp"
 #include "Profiles.hpp"
 
-namespace mfem
-{
-	class GridFunction;
-}
-
 namespace meq
 {
-	class GradShafranovSolver;
-
-	/// What a Run::FieldBuilder hands back: a scalar potential and a vdim-2
-	/// flux on the run's mesh, each owning its space.
-	struct ExtractionFields
-	{
-		std::unique_ptr<mfem::GridFunction> potential;
-		std::unique_ptr<mfem::GridFunction> flux;
-
-		/// Locate the axis, and take the level's psi_ax, on these fields
-		/// rather than on the solver's psi_h and q_h.
-		bool axisFromFields = false;
-	};
-
 	/// The exit codes docs/running.rst gives the user. apps/meq.cpp's header
 	/// says what each means.
 	enum ExitCode
@@ -290,19 +270,6 @@ namespace meq
 			 * @throws std::runtime_error where the extraction fails.
 			 */
 			std::shared_ptr<EquilibriumSnapshot const> snapshot();
-
-			/**
-			 * AN INSTRUMENT'S SEAM, NOT A FRONT END'S: the family snapshot()
-			 * extracts -- the same options, the same located axis and level,
-			 * the same band -- rooted instead on the fields @a build makes
-			 * from the solved (and post-processed) solver. It is how a
-			 * candidate extraction field is measured against the shipped one
-			 * on the same state (ExtractionJumps, M-SHAPE-2) before either
-			 * becomes the run's.
-			 * @throws std::logic_error before a successful solve, or on a box.
-			 */
-			using FieldBuilder = std::function<ExtractionFields( GradShafranovSolver const & )>;
-			std::shared_ptr<FluxSurfaceFamily const> familyFrom( FieldBuilder const &build );
 
 			/// Whether the configuration's support is a mirror's box, the one
 			/// support midplaneCrossing() answers for. After prepare().

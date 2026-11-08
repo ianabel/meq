@@ -11,10 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "mfem.hpp"
-
 #include "meq/EquilibriumSnapshot.hpp"
-#include "meq/GradShafranov.hpp"
 #include "meq/Run.hpp"
 
 #include "SessionCases.hpp"
@@ -22,8 +19,12 @@
 
 /*
  * WHAT MAKES THE GEOMETRY JUMP, AND HOW THE JUMP SCALES WITH THE MESH -- the
- * instrument behind MEASUREMENTS.md's M-SHAPE-1. BUILT, NOT REGISTERED: it
- * asserts nothing, and each case is a measurement (`--run_test=<case>`).
+ * instrument behind MEASUREMENTS.md's M-SHAPE-1 and M-SHAPE-2, and the
+ * by-hand study that would catch a jump coming back. BUILT, NOT REGISTERED:
+ * it asserts nothing, and each case is a measurement (`--run_test=<case>`).
+ * SessionSmoothness is the suite's assertion; this is the picture, on the
+ * run's own extraction -- psi~ and q~, the continuous pair. M-SHAPE-1's
+ * numbers were taken on psi* and q*, at aa5adcb.
  *
  * One input, Omega scaled by 1 + h, h = j * 1e-4 for j = -10 ... 10, every
  * state a resolve() warm from the base, so G is a function of the table
@@ -377,309 +378,22 @@ BOOST_AUTO_TEST_CASE( tcvL2k2 ) { scan( "TCV, level 2, k = 2", tcvPath, tcv( 2, 
 BOOST_AUTO_TEST_CASE( tcvL1k3 ) { scan( "TCV, level 1, k = 3", tcvPath, tcv( 1, 3 ) ); }
 
 /*
- * CANDIDATE A, PROTOTYPED -- MANTA-EQUILIBRIUM-PLAN.md section 4.5 and
- * M-SHAPE-2. The shipped extraction roots psi* and weights by q*, both broken
- * across every face, so a node crossing a face jumps (M-SHAPE-1). Here both
- * are replaced by CONTINUOUS fields built from the solved state, and the
- * shipped rays, axis, level and band run on them unchanged (Run::familyFrom).
- *
- * THE RECONSTRUCTION: the H1 interpolant defined by MOMENTS -- vertex values,
- * then edge moments, then cell moments -- which is unisolvent on triangles,
- * reproduces polynomials of its degree, and needs no choice of side anywhere:
- *
- *   psi~ in H1 of degree p = k+2, one above psi*'s k+1, because that is the
- *   degree whose edge dofs (p-1 = k+1 of them beside the two vertices) match
- *   psihat's P_k moments EXACTLY: on every interior edge the trace of psi~
- *   projects onto psihat, the single-valued face unknown of the HDG solve.
- *   Vertices take psi*'s mean over the elements meeting there; cells take
- *   psi*'s P_(k-1) moments ((k+1)k/2 of them, the interior dofs' count).
- *   Boundary edges take psi*'s own trace -- one side, so no choice; and on
- *   Gamma_h the trace unknown is a pinned zero, not psihat (GradShafranov.hpp,
- *   setExtension()).
- *
- *   q~ in [H1]^2 of q*'s degree k+1: vertices the mean of q*, edges the
- *   P_(k-1) moments of the two sides' mean trace, cells q*'s P_(k-2) moments.
- *
- * The control, EdgeSource::Average, takes psi~'s edges from the mean of
- * psi*'s two traces instead of from psihat: what psihat buys.
+ * THE STRADDLES, ON THE RUN'S OWN EXTRACTION -- M-SHAPE-2's measurement, kept
+ * as the by-hand study (MANTA-EQUILIBRIUM-PLAN.md section 4.5). Along the
+ * scan of `analyse`, the first node to change element on each of up to four
+ * surfaces; the crossing bisected to 1e-11; the central difference at
+ * MaNTA's 1.5e-8 centred on it, against the one-sided derivatives either side.
+ * On the continuous pair it is off by the noise; a band face switching, an
+ * axis element switching, or anything else that made the geometry jump again
+ * would read J/( 2 delta ) here. The prototype that compared psi~, q~ against
+ * psi*, q* through a seam on meq::Run is at aa5adcb (M-SHAPE-2), and the axis
+ * on q~'s root at 9a7dc4f (M-SHAPE-3).
  */
 namespace
 {
-	enum class EdgeSource
-	{
-		Trace,
-		Average
-	};
-
-	double legendre( int m, double x )
-	{
-		double p0 = 1.0, p1 = x;
-		if ( m == 0 )
-			return p0;
-		for ( int n = 1; n < m; ++n )
-		{
-			double const p2 = ( ( 2.0*n + 1.0 )*x*p1 - n*p0 )/( n + 1.0 );
-			p0 = p1;
-			p1 = p2;
-		}
-		return p1;
-	}
-
-	using CellValue = std::function<double( int, mfem::IntegrationPoint const & )>;
-	using FaceValue = std::function<double( int, mfem::FaceElementTransformations &,
-	                                        mfem::IntegrationPoint const & )>;
-
-	/// The moment interpolant into @a out's H1 space: vertex means of @a cell,
-	/// edge moments against P_(p-2) of @a face, cell moments against P_(p-3)
-	/// of @a cell.
-	void momentInterpolant( mfem::GridFunction &out, CellValue const &cell, FaceValue const &face )
-	{
-		mfem::FiniteElementSpace &fes = *out.FESpace();
-		mfem::Mesh &mesh = *fes.GetMesh();
-		int const p = fes.GetElementOrder( 0 );
-		out = 0.0;
-
-		std::vector<double> sum( static_cast<std::size_t>( mesh.GetNV() ), 0.0 );
-		std::vector<int> count( sum.size(), 0 );
-		mfem::Array<int> vertices, dofs, local, interior;
-		for ( int e = 0; e < mesh.GetNE(); ++e )
-		{
-			mesh.GetElementVertices( e, vertices );
-			mfem::IntegrationRule const *corners = mfem::Geometries.GetVertices( mesh.GetElementBaseGeometry( e ) );
-			for ( int i = 0; i < vertices.Size(); ++i )
-			{
-				sum[ static_cast<std::size_t>( vertices[ i ] ) ] += cell( e, corners->IntPoint( i ) );
-				++count[ static_cast<std::size_t>( vertices[ i ] ) ];
-			}
-		}
-		for ( int v = 0; v < mesh.GetNV(); ++v )
-		{
-			fes.GetVertexDofs( v, dofs );
-			if ( dofs.Size() == 1 && count[ static_cast<std::size_t>( v ) ] > 0 )
-				out( dofs[ 0 ] ) = sum[ static_cast<std::size_t>( v ) ]/count[ static_cast<std::size_t>( v ) ];
-		}
-
-		mfem::Vector shape;
-		mfem::FaceElementTransformations faceTransform;
-		mfem::IsoparametricTransformation one, two;
-		for ( int f = 0; f < mesh.GetNumFaces(); ++f )
-		{
-			fes.GetEdgeInteriorDofs( f, interior );
-			int const n = interior.Size();
-			if ( n == 0 )
-				continue;
-			mesh.GetFaceElementTransformations( f, faceTransform, one, two );
-			int const element = faceTransform.Elem1No;
-			mfem::FiniteElement const *fe = fes.GetFE( element );
-			fes.GetElementDofs( element, local );
-			std::vector<int> unknown( static_cast<std::size_t>( local.Size() ), -1 );
-			for ( int i = 0; i < local.Size(); ++i )
-				unknown[ static_cast<std::size_t>( i ) ] = interior.Find( local[ i ] );
-			shape.SetSize( fe->GetDof() );
-			mfem::DenseMatrix a( n, n );
-			mfem::Vector b( n );
-			a = 0.0;
-			b = 0.0;
-			mfem::IntegrationRule const &rule = mfem::IntRules.Get( mfem::Geometry::SEGMENT, 2*p + 2 );
-			for ( int q = 0; q < rule.GetNPoints(); ++q )
-			{
-				mfem::IntegrationPoint const &ip = rule.IntPoint( q );
-				faceTransform.SetAllIntPoints( &ip );
-				fe->CalcShape( faceTransform.GetElement1IntPoint(), shape );
-				double const weight = ip.weight*faceTransform.Weight();
-				double known = 0.0;
-				for ( int i = 0; i < local.Size(); ++i )
-					if ( unknown[ static_cast<std::size_t>( i ) ] < 0 )
-						known += shape( i )*out( local[ i ] );
-				double const target = face( f, faceTransform, ip ) - known;
-				for ( int m = 0; m < n; ++m )
-				{
-					double const basis = legendre( m, 2.0*ip.x - 1.0 )*weight;
-					b( m ) += basis*target;
-					for ( int i = 0; i < local.Size(); ++i )
-						if ( unknown[ static_cast<std::size_t>( i ) ] >= 0 )
-							a( m, unknown[ static_cast<std::size_t>( i ) ] ) += basis*shape( i );
-				}
-			}
-			mfem::DenseMatrixInverse inverse( a );
-			mfem::Vector x( n );
-			inverse.Mult( b, x );
-			for ( int j = 0; j < n; ++j )
-				out( interior[ j ] ) = x( j );
-		}
-
-		mfem::IsoparametricTransformation transform;
-		for ( int e = 0; e < mesh.GetNE(); ++e )
-		{
-			fes.GetElementInteriorDofs( e, interior );
-			int const n = interior.Size();
-			if ( n == 0 )
-				continue;
-			int const degree = p - 3;
-			BOOST_TEST_REQUIRE( n == ( degree + 1 )*( degree + 2 )/2 );
-			mesh.GetElementTransformation( e, &transform );
-			mfem::FiniteElement const *fe = fes.GetFE( e );
-			fes.GetElementDofs( e, local );
-			std::vector<int> unknown( static_cast<std::size_t>( local.Size() ), -1 );
-			for ( int i = 0; i < local.Size(); ++i )
-				unknown[ static_cast<std::size_t>( i ) ] = interior.Find( local[ i ] );
-			shape.SetSize( fe->GetDof() );
-			mfem::DenseMatrix a( n, n );
-			mfem::Vector b( n );
-			a = 0.0;
-			b = 0.0;
-			mfem::IntegrationRule const &rule = mfem::IntRules.Get( fe->GetGeomType(), 2*p + 2 );
-			for ( int q = 0; q < rule.GetNPoints(); ++q )
-			{
-				mfem::IntegrationPoint const &ip = rule.IntPoint( q );
-				transform.SetIntPoint( &ip );
-				fe->CalcShape( ip, shape );
-				double const weight = ip.weight*transform.Weight();
-				double known = 0.0;
-				for ( int i = 0; i < local.Size(); ++i )
-					if ( unknown[ static_cast<std::size_t>( i ) ] < 0 )
-						known += shape( i )*out( local[ i ] );
-				double const target = cell( e, ip ) - known;
-				int m = 0;
-				for ( int total = 0; total <= degree; ++total )
-					for ( int ax = total; ax >= 0; --ax, ++m )
-					{
-						double const basis = std::pow( ip.x, ax )*std::pow( ip.y, total - ax )*weight;
-						b( m ) += basis*target;
-						for ( int i = 0; i < local.Size(); ++i )
-							if ( unknown[ static_cast<std::size_t>( i ) ] >= 0 )
-								a( m, unknown[ static_cast<std::size_t>( i ) ] ) += basis*shape( i );
-					}
-			}
-			mfem::DenseMatrixInverse inverse( a );
-			mfem::Vector x( n );
-			inverse.Mult( b, x );
-			for ( int j = 0; j < n; ++j )
-				out( interior[ j ] ) = x( j );
-		}
-	}
-
-	meq::ExtractionFields continuousFields( meq::GradShafranovSolver const &solver, EdgeSource source )
-	{
-		mfem::GridFunction const &psiStar = solver.postProcessedPotential();
-		mfem::GridFunction const &qStar = solver.postProcessedFlux();
-		mfem::GridFunction const &trace = solver.trace();
-		mfem::FiniteElementSpace const &traceSpace = *trace.FESpace();
-		mfem::Mesh *mesh = psiStar.FESpace()->GetMesh();
-		int const pStar = psiStar.FESpace()->GetElementOrder( 0 );
-
-		meq::ExtractionFields out;
-		auto *psiCollection = new mfem::H1_FECollection( pStar + 1, 2 );
-		out.potential = std::make_unique<mfem::GridFunction>( new mfem::FiniteElementSpace( mesh, psiCollection ) );
-		out.potential->MakeOwner( psiCollection );
-
-		mfem::Array<int> traceDofs;
-		mfem::Vector traceLocal, traceShape;
-		momentInterpolant( *out.potential,
-			[ & ]( int e, mfem::IntegrationPoint const &ip ) { return psiStar.GetValue( e, ip ); },
-			[ & ]( int f, mfem::FaceElementTransformations &ft, mfem::IntegrationPoint const &ip )
-			{
-				if ( ft.Elem2No < 0 )
-					return psiStar.GetValue( ft.Elem1No, ft.GetElement1IntPoint() );
-				if ( source == EdgeSource::Average )
-					return 0.5*( psiStar.GetValue( ft.Elem1No, ft.GetElement1IntPoint() )
-					             + psiStar.GetValue( ft.Elem2No, ft.GetElement2IntPoint() ) );
-				mfem::FiniteElement const *fe = traceSpace.GetFaceElement( f );
-				traceSpace.GetFaceVDofs( f, traceDofs );
-				trace.GetSubVector( traceDofs, traceLocal );
-				traceShape.SetSize( fe->GetDof() );
-				fe->CalcShape( ip, traceShape );
-				return traceShape*traceLocal;
-			} );
-
-		auto *qCollection = new mfem::H1_FECollection( qStar.FESpace()->GetElementOrder( 0 ), 2 );
-		auto *vectorSpace = new mfem::FiniteElementSpace( mesh, qCollection, 2, mfem::Ordering::byNODES );
-		out.flux = std::make_unique<mfem::GridFunction>( vectorSpace );
-		out.flux->MakeOwner( qCollection );
-		mfem::FiniteElementSpace scalarSpace( mesh, qCollection );
-		mfem::Vector value( 2 );
-		for ( int component = 0; component < 2; ++component )
-		{
-			mfem::GridFunction part( &scalarSpace );
-			auto at = [ & ]( int e, mfem::IntegrationPoint const &ip )
-			{
-				qStar.GetVectorValue( e, ip, value );
-				return value( component );
-			};
-			momentInterpolant( part, at,
-				[ & ]( int, mfem::FaceElementTransformations &ft, mfem::IntegrationPoint const & )
-				{
-					if ( ft.Elem2No < 0 )
-						return at( ft.Elem1No, ft.GetElement1IntPoint() );
-					return 0.5*( at( ft.Elem1No, ft.GetElement1IntPoint() )
-					             + at( ft.Elem2No, ft.GetElement2IntPoint() ) );
-				} );
-			int const n = scalarSpace.GetNDofs();
-			for ( int i = 0; i < n; ++i )
-				( *out.flux )( i + component*n ) = part( i );
-		}
-		return out;
-	}
-
-	/// How far the continuous fields sit from psi* and q*, worst over every
-	/// element's quadrature points, relative to each field's own largest
-	/// value -- the size of the face jumps, if the reconstruction keeps
-	/// psi*'s order.
-	void fieldReport( meq::GradShafranovSolver const &solver, meq::ExtractionFields const &fields )
-	{
-		mfem::GridFunction const &psiStar = solver.postProcessedPotential();
-		mfem::GridFunction const &qStar = solver.postProcessedFlux();
-		mfem::Mesh &mesh = *psiStar.FESpace()->GetMesh();
-		double psiDiff = 0.0, psiMax = 0.0, qDiff = 0.0, qMax = 0.0;
-		mfem::Vector a( 2 ), b( 2 );
-		for ( int e = 0; e < mesh.GetNE(); ++e )
-		{
-			mfem::IntegrationRule const &rule = mfem::IntRules.Get( mesh.GetElementBaseGeometry( e ), 8 );
-			for ( int q = 0; q < rule.GetNPoints(); ++q )
-			{
-				mfem::IntegrationPoint const &ip = rule.IntPoint( q );
-				double const star = psiStar.GetValue( e, ip );
-				psiDiff = std::max( psiDiff, std::abs( fields.potential->GetValue( e, ip ) - star ) );
-				psiMax = std::max( psiMax, std::abs( star ) );
-				qStar.GetVectorValue( e, ip, a );
-				fields.flux->GetVectorValue( e, ip, b );
-				qDiff = std::max( qDiff, std::hypot( b( 0 ) - a( 0 ), b( 1 ) - a( 1 ) ) );
-				qMax = std::max( qMax, std::hypot( a( 0 ), a( 1 ) ) );
-			}
-		}
-		std::printf( "    the continuous fields against psi* and q*: max | psi~ - psi* | = %.2e of max | psi* |, "
-		             "max | q~ - q* | = %.2e of max | q* |\n", psiDiff/psiMax, qDiff/qMax );
-	}
-
 	using Extract = std::function<Family( meq::Run & )>;
 
-	Extract const shipped = []( meq::Run &run ) { return run.snapshot()->family; };
-
-	Extract continuous( EdgeSource source )
-	{
-		return [ source ]( meq::Run &run )
-		{
-			return run.familyFrom( [ source ]( meq::GradShafranovSolver const &solver )
-			                       { return continuousFields( solver, source ); } );
-		};
-	}
-
-	/// The base state's quantities by the three extractions, one line per
-	/// ( surface, quantity ), into <key>-G.txt in the working directory: what
-	/// `accuracy` reads.
-	void writeBase( char const *key, meq::Run &run )
-	{
-		Quantities const s = quantities( *shipped( run ) );
-		Quantities const a = quantities( *continuous( EdgeSource::Trace )( run ) );
-		Quantities const v = quantities( *continuous( EdgeSource::Average )( run ) );
-		std::FILE *file = std::fopen( ( std::string( key ) + "-G.txt" ).c_str(), "w" );
-		BOOST_TEST_REQUIRE( file );
-		for ( std::size_t i = 0; i < s.values.size(); ++i )
-			for ( std::size_t q = 0; q < 4; ++q )
-				std::fprintf( file, "%zu %zu %.17e %.17e %.17e\n", i, q, s.values[ i ][ q ],
-				              a.values[ i ][ q ], v.values[ i ][ q ] );
-		std::fclose( file );
-	}
+	Extract const runFamily = []( meq::Run &run ) { return run.snapshot()->family; };
 
 	/// Where along the table a node of a surface changes element, located by
 	/// bisection to @a resolution; then the central difference at MaNTA's
@@ -750,207 +464,53 @@ namespace
 		return found;
 	}
 
-	void prototype( char const *name, char const *key, std::string const &path, std::string const &text )
+	void straddles( char const *name, std::string const &path, std::string const &text )
 	{
 		auto run = solvedRun( path, text );
 		BOOST_TEST_REQUIRE( run->resolve( tables( 0.0 ), run->snapshot() ) == meq::Solved );
 		std::shared_ptr<meq::EquilibriumSnapshot const> const base = run->snapshot();
-		writeBase( key, *run );
-		Extract const candidate = continuous( EdgeSource::Trace );
-		std::printf( "\n  %s\n", name );
-		run->familyFrom( []( meq::GradShafranovSolver const &solver )
-		{
-			meq::ExtractionFields fields = continuousFields( solver, EdgeSource::Trace );
-			std::printf( "  edges from psihat:\n" );
-			fieldReport( solver, fields );
-			meq::ExtractionFields control = continuousFields( solver, EdgeSource::Average );
-			std::printf( "  edges from the mean of psi*'s traces:\n" );
-			fieldReport( solver, control );
-			return fields;
-		} );
 
 		// The noise: the base tables from the base and from a state 1e-4 away.
-		Quantities const fromBase = quantities( *candidate( *run ) );
+		Quantities const fromBase = quantities( *runFamily( *run ) );
 		BOOST_TEST_REQUIRE( run->resolve( tables( 1.0e-4 ), base ) == meq::Solved );
 		std::shared_ptr<meq::EquilibriumSnapshot const> const away = run->snapshot();
 		BOOST_TEST_REQUIRE( run->resolve( tables( 0.0 ), away ) == meq::Solved );
-		Quantities const fromAway = quantities( *candidate( *run ) );
+		Quantities const fromAway = quantities( *runFamily( *run ) );
 		double noise = 0.0;
 		for ( std::size_t i = 0; i < fromBase.values.size(); ++i )
 			for ( std::size_t q = 0; q < 4; ++q )
 				noise = std::max( noise, std::abs( fromAway.values[ i ][ q ] - fromBase.values[ i ][ q ] )
 				                         /std::abs( fromBase.values[ i ][ q ] ) );
 
-		// The scan, both extractions on every state.
-		double const spacing = 1.0e-4;
-		std::vector<Family> shippedScan, candidateScan;
-		for ( int j = -10; j <= 10; ++j )
-		{
-			BOOST_TEST_REQUIRE( run->resolve( tables( j*spacing ), base ) == meq::Solved );
-			shippedScan.push_back( shipped( *run ) );
-			candidateScan.push_back( candidate( *run ) );
-		}
-		std::printf( "\n  %s -- CANDIDATE A, psi~ and q~ continuous; the same tables from two warm "
-		             "starts differ by %.2e (relative, worst)\n", name, noise );
-		analyse( ( std::string( name ) + ", candidate A" ).c_str(), candidateScan, spacing );
-
-		// The straddles: up to four crossings per extraction, on distinct surfaces.
-		auto report = [ & ]( char const *which, Extract const &extract, std::vector<Family> const &scan )
-		{
-			for ( auto const &c : crossings( scan ) )
-			{
-				double const lo = ( static_cast<double>( c[ 2 ] ) - 10.0 )*spacing;
-				Straddle const s = straddle( *run, base, extract, c[ 0 ], c[ 1 ], lo, lo + spacing );
-				std::printf( "    %s: surface %zu node %zu: a central difference at 1.5e-8 straddling the "
-				             "crossing is off by %.2e of the derivative (noise there ~%.1e); the kink, "
-				             "| G'_R - G'_L |/| G' |, is %.2e\n", which, c[ 0 ], c[ 1 ], s.error, s.floor,
-				             s.kink );
-			}
-		};
-		report( "candidate A", candidate, candidateScan );
-		report( "shipped    ", shipped, shippedScan );
-	}
-
-	/// The reference meshes' base quantities, for `accuracy`.
-	void reference( char const *key, std::string const &path, std::string const &text )
-	{
-		auto run = solvedRun( path, text );
-		BOOST_TEST_REQUIRE( run->resolve( tables( 0.0 ), run->snapshot() ) == meq::Solved );
-		writeBase( key, *run );
-	}
-
-	/*
-	 * PLAN SECTION 4.5 ITEM 3, MEASURED AND NOT ADOPTED: the axis, and the
-	 * level's psi_ax, taken on the continuous fields -- q~'s root, psi~ there --
-	 * rather than the solve's located axis (q_h's root, psi_h there). How far
-	 * the labels move, how far G moves with them, and whether G's smoothness
-	 * changes: the scan and the straddles of `prototype`, on that axis.
-	 */
-	Extract continuousAxis()
-	{
-		return []( meq::Run &run )
-		{
-			return run.familyFrom( []( meq::GradShafranovSolver const &solver )
-			{
-				meq::ExtractionFields fields = continuousFields( solver, EdgeSource::Trace );
-				fields.axisFromFields = true;
-				return fields;
-			} );
-		};
-	}
-
-	void axisStudy( char const *name, std::string const &path, std::string const &text )
-	{
-		auto run = solvedRun( path, text );
-		BOOST_TEST_REQUIRE( run->resolve( tables( 0.0 ), run->snapshot() ) == meq::Solved );
-		std::shared_ptr<meq::EquilibriumSnapshot const> const base = run->snapshot();
-		Extract const solveAxis = continuous( EdgeSource::Trace ), fieldAxis = continuousAxis();
-		Family const a = solveAxis( *run ), b = fieldAxis( *run );
-		double const span = std::abs( a->psiBoundary - a->psiAxis );
-		Quantities const qa = quantities( *a ), qb = quantities( *b );
-		double worst = 0.0;
-		for ( std::size_t i = 0; i < qa.values.size(); ++i )
-			for ( std::size_t q = 0; q < 4; ++q )
-				worst = std::max( worst, std::abs( qb.values[ i ][ q ] - qa.values[ i ][ q ] )
-				                         /std::abs( qa.values[ i ][ q ] ) );
-		std::printf( "\n  %s -- THE AXIS ON psi~, q~ AGAINST THE SOLVE'S\n", name );
-		std::printf( "    psi_ax: solve's %.15e (element %d), q~ root's %.15e (element %d); "
-		             "the labels move by %.2e of the span\n", a->psiAxis, a->axisElement, b->psiAxis,
-		             b->axisElement, std::abs( b->psiAxis - a->psiAxis )/span );
-		std::printf( "    the axis moves %.2e m; G moves by %.2e (worst relative, 24 surfaces x 4 "
-		             "quantities)\n", std::hypot( b->axisR - a->axisR, b->axisZ - a->axisZ ), worst );
-
 		double const spacing = 1.0e-4;
 		std::vector<Family> scan;
 		for ( int j = -10; j <= 10; ++j )
 		{
 			BOOST_TEST_REQUIRE( run->resolve( tables( j*spacing ), base ) == meq::Solved );
-			scan.push_back( fieldAxis( *run ) );
+			scan.push_back( runFamily( *run ) );
 		}
-		analyse( ( std::string( name ) + ", continuous fields and q~'s axis" ).c_str(), scan, spacing );
+		std::printf( "\n  %s: the same tables from two warm starts differ by %.2e (relative, worst)\n",
+		             name, noise );
+		analyse( name, scan, spacing );
 		for ( auto const &c : crossings( scan ) )
 		{
 			double const lo = ( static_cast<double>( c[ 2 ] ) - 10.0 )*spacing;
-			Straddle const s = straddle( *run, base, fieldAxis, c[ 0 ], c[ 1 ], lo, lo + spacing );
-			std::printf( "    q~'s axis: surface %zu node %zu: a central difference at 1.5e-8 straddling the "
-			             "crossing is off by %.2e of the derivative (noise there ~%.1e); the kink, "
-			             "| G'_R - G'_L |/| G' |, is %.2e\n", c[ 0 ], c[ 1 ], s.error, s.floor, s.kink );
+			Straddle const st = straddle( *run, base, runFamily, c[ 0 ], c[ 1 ], lo, lo + spacing );
+			std::printf( "    surface %zu node %zu: a central difference at 1.5e-8 straddling the crossing "
+			             "is off by %.2e of the derivative (noise there ~%.1e); the kink, "
+			             "| G'_R - G'_L |/| G' |, is %.2e\n", c[ 0 ], c[ 1 ], st.error, st.floor, st.kink );
 		}
-	}
-
-	std::vector<std::array<double, 3>> readBase( std::string const &key )
-	{
-		std::vector<std::array<double, 3>> out;
-		std::FILE *file = std::fopen( ( key + "-G.txt" ).c_str(), "r" );
-		if ( !file )
-			return out;
-		std::size_t i = 0, q = 0;
-		std::array<double, 3> v{};
-		while ( std::fscanf( file, "%zu %zu %lf %lf %lf", &i, &q, &v[ 0 ], &v[ 1 ], &v[ 2 ] ) == 5 )
-			out.push_back( v );
-		std::fclose( file );
-		return out;
 	}
 }
 
-BOOST_AUTO_TEST_CASE( prototypeBoxL1k2 ) { prototype( "box, level 1, k = 2", "boxL1k2", boxPath, box( 1, 2 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeBoxL2k2 ) { prototype( "box, level 2, k = 2", "boxL2k2", boxPath, box( 2, 2 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeBoxL3k2 ) { prototype( "box, level 3, k = 2", "boxL3k2", boxPath, box( 3, 2 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeBoxL1k3 ) { prototype( "box, level 1, k = 3", "boxL1k3", boxPath, box( 1, 3 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeBoxL2k3 ) { prototype( "box, level 2, k = 3", "boxL2k3", boxPath, box( 2, 3 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeTcvL1k2 ) { prototype( "TCV, level 1, k = 2", "tcvL1k2", tcvPath, tcv( 1, 2 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeTcvL2k2 ) { prototype( "TCV, level 2, k = 2", "tcvL2k2", tcvPath, tcv( 2, 2 ) ); }
-BOOST_AUTO_TEST_CASE( prototypeTcvL1k3 ) { prototype( "TCV, level 1, k = 3", "tcvL1k3", tcvPath, tcv( 1, 3 ) ); }
-BOOST_AUTO_TEST_CASE( axisBoxL1k2 ) { axisStudy( "box, level 1, k = 2", boxPath, box( 1, 2 ) ); }
-BOOST_AUTO_TEST_CASE( axisBoxL1k3 ) { axisStudy( "box, level 1, k = 3", boxPath, box( 1, 3 ) ); }
-BOOST_AUTO_TEST_CASE( axisTcvL1k2 ) { axisStudy( "TCV, level 1, k = 2", tcvPath, tcv( 1, 2 ) ); }
-BOOST_AUTO_TEST_CASE( axisTcvL1k3 ) { axisStudy( "TCV, level 1, k = 3", tcvPath, tcv( 1, 3 ) ); }
-BOOST_AUTO_TEST_CASE( referenceBoxL3k3 ) { reference( "boxL3k3", boxPath, box( 3, 3 ) ); }
-BOOST_AUTO_TEST_CASE( referenceTcvL2k3 ) { reference( "tcvL2k3", tcvPath, tcv( 2, 3 ) ); }
-
-/*
- * G's ACCURACY, from the files the cases above leave in the working
- * directory: each case's base quantities by the shipped extraction, by
- * candidate A and by its edge-average control, against the shipped
- * extraction and against the reference mesh's (box level 3 at k = 3, TCV
- * level 2 at k = 3, by candidate A -- the three extractions agree there to
- * far below 1e-6). Worst relative difference over 24 surfaces x 4 quantities.
- */
-BOOST_AUTO_TEST_CASE( accuracy )
-{
-	struct Case
-	{
-		char const *key;
-		char const *reference;
-	};
-	Case const cases[] = { { "boxL1k2", "boxL3k3" }, { "boxL2k2", "boxL3k3" }, { "boxL3k2", "boxL3k3" },
-	                       { "boxL1k3", "boxL3k3" }, { "boxL2k3", "boxL3k3" }, { "tcvL1k2", "tcvL2k3" },
-	                       { "tcvL2k2", "tcvL2k3" }, { "tcvL1k3", "tcvL2k3" } };
-	std::printf( "\n  %-8s %14s %14s %14s %14s %14s\n", "case", "A - shipped", "avg - shipped",
-	             "shipped - ref", "A - ref", "avg - ref" );
-	for ( Case const &c : cases )
-	{
-		auto const g = readBase( c.key );
-		auto const r = readBase( c.reference );
-		if ( g.empty() || r.size() != g.size() )
-		{
-			std::printf( "  %-8s (no file, or its reference is missing)\n", c.key );
-			continue;
-		}
-		double worst[ 5 ] = { 0.0, 0.0, 0.0, 0.0, 0.0 };
-		for ( std::size_t n = 0; n < g.size(); ++n )
-		{
-			double const scale = std::abs( r[ n ][ 1 ] );
-			worst[ 0 ] = std::max( worst[ 0 ], std::abs( g[ n ][ 1 ] - g[ n ][ 0 ] )/scale );
-			worst[ 1 ] = std::max( worst[ 1 ], std::abs( g[ n ][ 2 ] - g[ n ][ 0 ] )/scale );
-			worst[ 2 ] = std::max( worst[ 2 ], std::abs( g[ n ][ 0 ] - r[ n ][ 1 ] )/scale );
-			worst[ 3 ] = std::max( worst[ 3 ], std::abs( g[ n ][ 1 ] - r[ n ][ 1 ] )/scale );
-			worst[ 4 ] = std::max( worst[ 4 ], std::abs( g[ n ][ 2 ] - r[ n ][ 1 ] )/scale );
-		}
-		std::printf( "  %-8s %14.2e %14.2e %14.2e %14.2e %14.2e\n", c.key, worst[ 0 ], worst[ 1 ],
-		             worst[ 2 ], worst[ 3 ], worst[ 4 ] );
-	}
-}
+BOOST_AUTO_TEST_CASE( straddleBoxL1k2 ) { straddles( "box, level 1, k = 2", boxPath, box( 1, 2 ) ); }
+BOOST_AUTO_TEST_CASE( straddleBoxL2k2 ) { straddles( "box, level 2, k = 2", boxPath, box( 2, 2 ) ); }
+BOOST_AUTO_TEST_CASE( straddleBoxL3k2 ) { straddles( "box, level 3, k = 2", boxPath, box( 3, 2 ) ); }
+BOOST_AUTO_TEST_CASE( straddleBoxL1k3 ) { straddles( "box, level 1, k = 3", boxPath, box( 1, 3 ) ); }
+BOOST_AUTO_TEST_CASE( straddleBoxL2k3 ) { straddles( "box, level 2, k = 3", boxPath, box( 2, 3 ) ); }
+BOOST_AUTO_TEST_CASE( straddleTcvL1k2 ) { straddles( "TCV, level 1, k = 2", tcvPath, tcv( 1, 2 ) ); }
+BOOST_AUTO_TEST_CASE( straddleTcvL2k2 ) { straddles( "TCV, level 2, k = 2", tcvPath, tcv( 2, 2 ) ); }
+BOOST_AUTO_TEST_CASE( straddleTcvL1k3 ) { straddles( "TCV, level 1, k = 3", tcvPath, tcv( 1, 3 ) ); }
 
 /*
  * M-SESSION-4's SWEEP, kept as a measurement: the central difference of the

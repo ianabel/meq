@@ -221,8 +221,21 @@ namespace meq
 		mfem::GridFunction const &potentialFor( GradShafranovSolver const &solver,
 		                                        Potential which )
 		{
-			return which == Potential::Raw ? solver.potential()
-			                               : solver.postProcessedPotential();
+			switch ( which )
+			{
+				case Potential::Raw:
+					return solver.potential();
+				case Potential::PostProcessed:
+					return solver.postProcessedPotential();
+				case Potential::Continuous:
+					break;
+			}
+			if ( !solver.isPostProcessed() )
+				throw std::invalid_argument(
+					"ContourTracer: Potential::Continuous needs "
+					"GradShafranovSolver::postProcess() to have been called since the "
+					"last solve: psi~ and q~ are interpolated from psi* and q*" );
+			return solver.continuousPotential();
 		}
 
 		mfem::GridFunction const &fluxFor( GradShafranovSolver const &solver,
@@ -233,8 +246,16 @@ namespace meq
 			// B_p. Refused until ANISOTROPY-PLAN.md's output stage divides it out.
 			if ( solver.anisotropy() != nullptr )
 				throw std::logic_error( "meq::ContourTracer: the solver carries an anisotropy (setAnisotropy), so its flux is not the poloidal field; flux surfaces are not built for ANISOTROPY-PLAN.md's operator" );
-			return which == Potential::Raw ? solver.flux()
-			                               : solver.postProcessedFlux();
+			switch ( which )
+			{
+				case Potential::Raw:
+					return solver.flux();
+				case Potential::PostProcessed:
+					return solver.postProcessedFlux();
+				case Potential::Continuous:
+					break;
+			}
+			return solver.continuousFlux();
 		}
 
 	}
@@ -253,9 +274,9 @@ namespace meq
 			throw std::invalid_argument(
 				"ContourTracer: Potential::PostProcessed needs "
 				"GradShafranovSolver::postProcess() to have been called since the "
-				"last solve. It is the default because rooting psi* traces a "
-				"contour one order closer to the true one; Potential::Raw is the "
-				"other door and needs nothing" );
+				"last solve: rooting psi* traces a contour one order closer to the "
+				"true one than psi_h does; Potential::Raw is the other door and "
+				"needs nothing" );
 
 		// THE CONDUCTOR SPLIT, TAKEN RATHER THAN ASKED FOR. A
 		// caller who reached this constructor has a solver, and the solver knows

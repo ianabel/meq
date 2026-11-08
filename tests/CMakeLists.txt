@@ -296,6 +296,11 @@ set(MEQ_CONVERGENCE_TESTS
 	# element face -- one crossing found and bisected on the box, about a
 	# minute -- and the session's noise across warm starts.
 	SessionSmoothness
+	# psi~ and q~, the continuous pair the flux-surface extraction roots and
+	# weights by (ContinuousField.hpp): the interpolant's reproduction of its
+	# degree, continuity and psihat's moments, threaded equal to serial, and
+	# psi*'s and q*'s orders kept against Solov'ev's closed form.
+	ContinuousFieldConvergence
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves

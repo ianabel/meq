@@ -271,6 +271,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/ConductorField.cpp
 	src/meq/ConductorStore.cpp
 	src/meq/Config.cpp
+	src/meq/ContinuousField.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Crossings.cpp
@@ -319,6 +320,7 @@ set(MEQ_CORE_SOURCES
 # see the find_package note above for why that case exists at all.
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/BuildInfo.cpp
+	src/meq/ContinuousField.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Crossings.cpp
 	src/meq/DeviceNPCDevice.cpp

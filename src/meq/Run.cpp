@@ -809,8 +809,7 @@ struct meq::Run::Impl
 	/// lift, since Omega_h is inscribed in Gamma and the outer surfaces lie
 	/// partly outside it. Every caller that extracts goes through here.
 	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options,
-	                                      meq::CriticalPoint const &axis,
-	                                      meq::ExtractionFields const *fields = nullptr );
+	                                      meq::CriticalPoint const &axis );
 	meq::FluxSurfaceFamily extractFamily( meq::FluxFamilyOptions const &options );
 	/// [output]'s family options, as snapshot() extracts at.
 	meq::FluxFamilyOptions outputFamilyOptions() const;
@@ -1281,29 +1280,6 @@ meq::FluxFamilyOptions meq::Run::Impl::outputFamilyOptions() const
 	options.innerCut = output.fluxInnerCut;
 	options.outerCut = output.fluxOuterCut;
 	return options;
-}
-
-std::shared_ptr<meq::FluxSurfaceFamily const> meq::Run::familyFrom( FieldBuilder const &build )
-{
-	if ( stage != Stage::Solved && stage != Stage::Written )
-		throw std::logic_error( "meq::Run::familyFrom(): there is no solved state" );
-	if ( impl->config->getSource().supportIsBox() )
-		throw std::logic_error( "meq::Run::familyFrom(): a box support has no closed surfaces" );
-	impl->ensurePostProcessed();
-	meq::ExtractionFields const fields = build( *impl->solver );
-	if ( !fields.potential || !fields.flux )
-		throw std::invalid_argument( "meq::Run::familyFrom(): the builder returned no field" );
-	meq::CriticalPoint axis;
-	if ( fields.axisFromFields )
-	{
-		meq::CriticalPointFinder finder( *fields.flux, *fields.potential );
-		finder.setConductorField( impl->solver->conductorField() );
-		axis = finder.findAxis();
-	}
-	else
-		axis = meq::CriticalPointFinder( *impl->solver ).findAxis();
-	return std::make_shared<meq::FluxSurfaceFamily const>(
-		impl->extractFamily( impl->outputFamilyOptions(), axis, &fields ) );
 }
 
 std::shared_ptr<meq::EquilibriumSnapshot const> meq::Run::snapshot()
@@ -7007,16 +6983,12 @@ int meq::Run::Impl::sampleAnswer( meq::GridSampler &sampler, mfem::GridFunction 
  * writtenSurfaces, and the family returned, for Run::fluxSurfaces().
  */
 meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options,
-                                                      meq::CriticalPoint const &axis,
-                                                      meq::ExtractionFields const *fields )
+                                                      meq::CriticalPoint const &axis )
 {
-	// The caller's fields, where Run::familyFrom() hands some in: the
-	// conductor split goes with them, as the solver's own constructor takes it.
-	meq::ContourTracer tracer = fields
-		? meq::ContourTracer( *fields->potential, *fields->flux )
-		: meq::ContourTracer( *solver );
-	if ( fields )
-		tracer.setConductorField( solver->conductorField() );
+	// On psi~ and q~, the continuous pair (ContourTracer's default): a family
+	// that does not jump as one of its nodes crosses an element face
+	// (MANTA-EQUILIBRIUM-PLAN.md section 4.5, M-SHAPE-2).
+	meq::ContourTracer tracer( *solver );
 
 	// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
 	// Gamma, so the outermost surfaces of the family are partly

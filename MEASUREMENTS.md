@@ -24142,3 +24142,40 @@ from `ψ*` — `ψ*` is not the truth either.
 for `prototypeBoxL1k2` … `prototypeTcvL2k2`, `referenceBoxL3k3`,
 `referenceTcvL2k3` (each leaves `<key>-G.txt`; 10 minutes to 2 hours each at
 that load), then `--run_test=accuracy`.
+
+### M-SHAPE-3
+
+**The axis on the continuous fields — `q̃`'s root, `ψ̃` there — against the
+solve's located axis (`q_h`'s root, `ψ_h` there): measured, not adopted.**
+`manta/shape-derivative` at `9a7dc4f`, double, `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`, `ExtractionJumps`' `axis*` cases, on M-SHAPE-2's
+prototype fields; Ω scanned over `±1e-3` and each crossing bisected and
+straddled at 1.5e-8 as M-SHAPE-2 does, with the family's axis and level taken
+on `q̃`, `ψ̃`. "Solve's", the straddled error on the solve's axis at the same
+crossings, is M-SHAPE-2's column.
+
+| case | `ψ_ax` moves, of the span | axis moves | `G` moves, worst | axis element, solve's / `q̃`'s | straddled error, `q̃`'s axis | solve's | noise |
+|---|---|---|---|---|---|---|---|
+| box, `k = 2`, 768 | 1.4e-5 | 6.9e-7 m | 3.0e-4 | 423 / 354 | 5.0e-6 – 4.2e-5 | ≤ 1.5e-5 | 3e-6 – 9e-6 |
+| box, `k = 3`, 768 | 6.0e-7 | 1.1e-7 m | 1.3e-5 | 354 / 423 | 2.6e-6 – 8.6e-6 | ≤ 9.9e-6 | 3e-6 – 1e-5 |
+| TCV, `k = 2`, 3993 | 2.1e-7 | 5.9e-8 m | 4.3e-6 | 2015 / 2015 | 1.1e-5 – 1.6e-5 | ≤ 9.9e-6 | 4e-6 |
+| TCV, `k = 3`, 3993 | 2.2e-9 | 3.5e-10 m | 4.7e-8 | 2015 / 2015 | 9.4e-6 – 3.2e-5 | ≤ 2.1e-5 | 4e-6 – 5e-6 |
+
+**The labels move by the axis's own discretisation error, and `G` with them
+where it is most sensitive**: the innermost surface's `⟨|∇ρ|²⟩` changes by
+about `Δψ_ax/(Ψ_N span)`, 1.4e-5/0.05 ≈ 3e-4 on the coarse box at `k = 2` —
+the size of that mesh's own error (M-SHAPE-2) — and 4e-6 and 5e-8 on TCV.
+**Smoothness gains nothing measurable**: no axis element changes along any
+scan on either axis, so neither has a jump to remove there, and the straddled
+error on `q̃`'s axis is at or a few times the noise — up to 8× on TCV at
+`k = 3`, where the solve's axis is at most 5× — against the solve's at the
+noise. Why `q̃`'s axis reads noisier there is not measured; the finder's
+stopping test on `q̃` is the candidate. **On the box both axes sit beside the
+face between elements 423 and 354 and pick opposite sides of it** — exactly
+where the solve's located axis would change element, and the level jump by the
+face jump of `ψ_h`, were the state to carry it across; no scan does.
+
+**Reproduce.** `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
+<tree>/tests/ExtractionJumps --run_test=axis<Case>` at `9a7dc4f`, for
+`axisBoxL1k2`, `axisBoxL1k3`, `axisTcvL1k2`, `axisTcvL1k3`; logs
+`runs/manta-shape-derivative/axis/`.
