@@ -24351,6 +24351,91 @@ and from 1.2 to the `g²` of the other pins (M-357(c)).
 `runs/q-solve-scale/tcv/` (`edge.log`, `flux-g1.4.log`, `flux-g1.2.log`,
 `edge-d3.log`), `runs/q-solve-scale/study/study-delivered.log`.
 
+### M-363
+
+**The q loop's floor model is under the map's noise on a curved boundary in
+single, and the loop now measures that noise.** `q-loop-floor` off `cde84f2`,
+`builds/q-loop-floor-single` (MFEM `install-single`) and `builds/q-loop-floor`
+(double), `OMP_NUM_THREADS=2`.
+
+**(a) The failure on `cde84f2`, single.** `QDrivenCurvedBoundary` (Miller
+boundary, `RefinementLevels = 0`, `k = 2`, `R0B0 = 2.2`): 7 KINSOL iterations,
+37 equilibria, 0 refused, the line search stopping at 2.70312e-5 against a
+threshold of 2.57946e-5 — the orthonormal floor model, 2.507e-5, and the
+iterate's. **The same draw at `MKL_NUM_THREADS` = 1, 2 and 4**, to every digit:
+not a coin toss across MKL, a deterministic stall 1.05× over the threshold.
+
+**(b) The map's noise at that answer**, a probe run once: the returned point
+evaluated again after evaluating it moved by ±0.02, ±0.05 and ±0.1 in `c₁`,
+the change in each orthonormal coordinate of the residual:
+
+| warm start moved by | `y_0` | `y_1` | `y_2` |
+|---|---|---|---|
+| +0.02 | −1.32e-5 | +1.44e-5 | −7.0e-6 |
+| −0.02 | −2.72e-5 | +1.66e-5 | +9.0e-6 |
+| +0.05 | −2.7e-6 | −6.4e-6 | +3.8e-6 |
+| −0.05 | +2.43e-5 | −3.97e-5 | +1.66e-5 |
+| +0.10 | −3.69e-5 | +2.58e-5 | −2.33e-5 |
+| −0.10 | +9.5e-6 | +3.8e-6 | −5.8e-6 |
+
+Worst 3.97e-5, root-mean-square 2.0e-5: differences of two draws, so one
+evaluation's noise is about 1.4e-5 per coordinate, **2.2× the model's**
+`2.507e-5/4 = 6.3e-6`. On the box the model is 2.5× over the noise (M-359), so
+it is not an upper bound: the curved boundary's band continuation is noisier
+than the model's ε per average. The residual the loop stalled at, 2.70e-5, is
+inside this noise — **the stopping test asked for less than the map resolves.**
+
+**(c) What exposed it.** The orthonormal floor (M-359) replaced the monomial
+max-norm floor times `R`'s row sum, which sat near 6e-4 in single and far
+above this noise; this case passed under it (M-358, 4 iterations and 21
+equilibria). The delivered-flux row is not involved: the case is pinned by
+`R0B0` and has no pin row.
+
+**(d) The rule.** Where the floor and not the tolerance judges the loop, the
+first residual within ten modelled floors is followed by a measurement: that
+point evaluated again from two other warm starts (the warm start moved a
+tenth of a unit each way in the last unknown first), and
+`4 max|ΔF|/√2` — four standard deviations of one draw, the model's own margin
+— becomes the floor if it is the larger. A stall above the floor before any
+measurement is measured the same way before it is judged. A measurement that
+is refused raises nothing. Cost: four equilibria, once, where the floor
+governs; none in double, where the 1e-9 tolerance is over the floor.
+
+| `QDrivenCurvedBoundary`, single | KINSOL its / equilibria | final norm / threshold | `g²` |
+|---|---|---|---|
+| `cde84f2`, MKL 1, 2, 4 | 7 / 37 | 2.70e-5 / 2.58e-5, not converged | — |
+| measured at the stall only | 7 / 41 | 2.70e-5 / 1.44e-4 | 4.84, 2.42003322, 0.30248865 |
+| measured near the answer (the rule), MKL 1, 2, 4 | 4 / 25 | 4.39e-5 / 1.51e-4 | 4.84, 2.42000365, 0.30250007 |
+
+Measured only at the stall the loop spends three Newton iterations under a
+floor 2.2× too low before its line search gives out; measured on the way it
+stops at the first iterate inside the noise, in M-358's iteration count, and
+nearer the closed form. In single `QDrivenScalePin`'s re-solves sit 6.1e-7,
+7.1e-7 and 4.0e-7 of `ψ`'s peak from the base (bound 2.4e-6), and
+`SafetyFactorScale` passes.
+
+**(e) The library's assertion**, `SafetyFactorSolver::
+a_stall_at_the_maps_measured_noise_is_converged`: a quadratic map whose noise,
+1e-4, is a fresh draw every call as a warm start's is, with its floor declared
+a hundred times under: converged in 6 iterations and 49 evaluations at
+5.8e-5 against a measured floor of 2.6e-4. The control, the same map stopped
+by a step tolerance at 2.5e-2, is not converged. A map whose jitter is a
+function of the point measures no spread, and the understated case of
+`a_stall_above_the_floor_is_not_converged` stays not converged.
+
+**(f) Double is unchanged.** No driver run measures: the 1e-9 tolerance is
+over every floor. `QDrivenScalePin` re-solves 8.4e-11, 2.4e-13 and 2.1e-15
+from the base, `SafetyFactorScale`'s free `σ_min` 2.883e-3 and 4.456e-4,
+`QDrivenCurvedBoundary` recovers `g²` to eight digits, and `QDrivenConsistency`
+reads its plateau, 1.181e-1 then 1.179e-1, all as on `cde84f2`;
+`DriverAcceptance` passes. The library case converges in double in 7
+iterations and 85 evaluations: its declared floor is a hundred times under
+the noise, so the residual never comes within ten floors and the noise is
+measured only at the stall.
+
+**Reproduce.** `runs/q-loop-floor/` (`probe-mkl*.log` for the noise table, `mkl*.log` and `fixed-mkl*.log` for the rule's sweep); the
+probe was a temporary block in `Run.cpp` behind `MEQ_PROBE_NOISE`, not kept.
+
 ### M-LIN-1
 
 **THE DISCRETE TANGENT `δψ_h = ∂ψ_h/∂λ` CONVERGES TO THE EXACT `∂ψ/∂λ` AT
