@@ -207,7 +207,9 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentIsADifferenceOfTwoConvergedSolves )
 		axisOut = s->solver->psiAxis();
 		return mfem::Vector( s->solver->state() );
 	};
-	double const h = 1.0e-3*lambda;
+	// The harness's step for a difference: eps^(1/3) in single, the
+	// historical 1e-3 in double.
+	double const h = meq::tests::jacobianDifferenceStep( 1.0e-3 )*lambda;
 	auto central = [ & ]( double step, double &axisDifference )
 	{
 		double ap = 0.0, am = 0.0;
@@ -230,8 +232,20 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentIsADifferenceOfTwoConvergedSolves )
 	double const axisRelative = std::abs( axisRichardson - dAxis )/std::abs( dAxis );
 	std::printf( "  the bordered tangent against two converged solves: state %.3e relative, "
 	             "d psi_ax %.10f against %.10f (%.3e)\n", relative, dAxis, axisRichardson, axisRelative );
-	BOOST_TEST( relative < 1.0e-8, "the bordered tangent misses the difference by " << relative );
-	BOOST_TEST( axisRelative < 1.0e-8, "d psi_ax misses the difference by " << axisRelative );
+	/*
+	 * IN SINGLE A DIFFERENCE OF TWO SOLVES RESOLVES THE DERIVATIVE TO ABOUT
+	 * 1e-3, NOT 1e-8: each solve is good to a few eps and the step is
+	 * eps^(1/3). Measured 4.6e-04 in the state (M-LIN-5), so the bound there
+	 * is 1e-2 -- which the border's column dropped, 0.62, still exceeds
+	 * sixty-fold. Double keeps 1e-8.
+	 */
+#ifdef MFEM_USE_SINGLE
+	double const bound = 1.0e-2;
+#else
+	double const bound = 1.0e-8;
+#endif
+	BOOST_TEST( relative < bound, "the bordered tangent misses the difference by " << relative );
+	BOOST_TEST( axisRelative < bound, "d psi_ax misses the difference by " << axisRelative );
 }
 
 /*
@@ -360,19 +374,31 @@ namespace
 		std::fflush( stdout );
 
 		double const wanted = order + 1.0 - meq::tests::rateSlack;
+		// The scales of the tangent's round-off floor: max | phi | = 1 and
+		// max | grad phi/R | = a/R_0 at the inner wall.
+		double const psiScale = 1.0, qScale = mode.a()/mode.radiusLow;
 		for ( std::size_t i = 1; i < rows.size(); ++i )
 		{
 			double const ratio = rows[ i - 1 ].h/rows[ i ].h;
-			BOOST_TEST( rate( rows[ i - 1 ].dL2, rows[ i ].dL2, ratio ) >= wanted,
-			            "k = " << order << ": d psi L2 at " << rate( rows[ i - 1 ].dL2, rows[ i ].dL2, ratio ) );
-			BOOST_TEST( rate( rows[ i - 1 ].qL2, rows[ i ].qL2, ratio ) >= wanted,
-			            "k = " << order << ": d q L2 at " << rate( rows[ i - 1 ].qL2, rows[ i ].qL2, ratio ) );
+			auto check = [ & ]( char const *name, double Row::*field, double scale )
+			{
+				// Under the floor the floor is the bound; in double it is
+				// zero and every rate is asserted (M-LIN-5).
+				if ( rows[ i ].*field < meq::tests::tangentRoundOffFloor( scale, rows[ i ].h ) )
+				{
+					BOOST_TEST_MESSAGE( "  k = " << order << ", h = " << rows[ i ].h << ": " << name
+					                    << " is under the tangent's round-off floor, rate not asserted" );
+					return;
+				}
+				double const r = rate( rows[ i - 1 ].*field, rows[ i ].*field, ratio );
+				BOOST_TEST( r >= wanted, "k = " << order << ": " << name << " at " << r );
+			};
+			check( "d psi L2", &Row::dL2, psiScale );
+			check( "d q L2", &Row::qL2, qScale );
 			if ( i >= 2 )
 			{
-				BOOST_TEST( rate( rows[ i - 1 ].dMax, rows[ i ].dMax, ratio ) >= wanted,
-				            "k = " << order << ": d psi max at " << rate( rows[ i - 1 ].dMax, rows[ i ].dMax, ratio ) );
-				BOOST_TEST( rate( rows[ i - 1 ].qMax, rows[ i ].qMax, ratio ) >= wanted,
-				            "k = " << order << ": d q max at " << rate( rows[ i - 1 ].qMax, rows[ i ].qMax, ratio ) );
+				check( "d psi max", &Row::dMax, psiScale );
+				check( "d q max", &Row::qMax, qScale );
 			}
 		}
 	}
@@ -429,14 +455,23 @@ BOOST_AUTO_TEST_CASE( theInverseNormEstimateGrowsAsTheOperatorNearsItsFold )
 		double change = 0.0;
 		double const estimate = solver.linearisedInverseNorm( 20, &change );
 		std::printf( "    %10.1e %14.4e %14.4e %12.2e\n", delta, estimate, estimate*delta, change );
-		if ( delta <= 1.0e-2 )
+		// In single the fold is resolved to about delta = 1e-4: closer, the
+		// factorisation's own round-off is the size of sigma_min, and the
+		// estimate falls short (19 at 1e-5, M-LIN-5). The range is the
+		// format's precondition; double holds it to 1e-5.
+#ifdef MFEM_USE_SINGLE
+		bool const resolved = delta >= 1.0e-4;
+#else
+		bool const resolved = true;
+#endif
+		if ( delta <= 1.0e-2 && resolved )
 			scaled.push_back( estimate*delta );
 	}
 	std::fflush( stdout );
 	double const low = *std::min_element( scaled.begin(), scaled.end() );
 	double const high = *std::max_element( scaled.begin(), scaled.end() );
 	BOOST_TEST( high/low < 1.5, "the estimate times delta varied by " << high/low
-	            << " over delta = 1e-2 to 1e-5; near the fold it should be a constant" );
+	            << " over the resolved deltas from 1e-2; near the fold it should be a constant" );
 }
 
 /*

@@ -12092,6 +12092,14 @@ namespace
 			after = std::sqrt( after );
 			previous = estimate;
 			estimate = after/before;
+			// Normalised every step: the iterate grows by the estimate each
+			// time, and twenty steps of 1e6 overflow single.
+			if ( after > 0.0 )
+			{
+				v *= 1.0/after;
+				for ( double &x : g )
+					x /= after;
+			}
 		}
 		if ( change )
 			*change = previous > 0.0 ? std::abs( estimate - previous )/estimate : 1.0;

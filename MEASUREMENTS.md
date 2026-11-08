@@ -24576,3 +24576,49 @@ of this estimate by a factor `A ~ 1/δ` over its reference bounds the growth of
 the tangent's error by about `A` wherever the amplified mode's residue is no
 larger than the consistency error, `C ≤ E₀` — on M-LIN-2's 8 cells
 `C/E₀ ≈ 2.4e-3`, so there the bound is loose by that factor.
+
+### M-LIN-5
+
+**IN SINGLE PRECISION THE TANGENT IS GOOD TO ABOUT 1e-4 OF ITSELF AND NO
+BETTER: ONE BACK-SOLVE THROUGH `J` CARRIES `eps κ(J_h) ~ eps/h²`, WHICH
+NEWTON'S RESIDUAL CORRECTION KEEPS OUT OF THE SOLUTION. `TangentConvergence`
+AND `LinearisedSolve` ARE QUALIFIED IN SINGLE AGAINST THAT FLOOR; DOUBLE IS
+UNCHANGED.** `builds/linearised-solve-single` (`install-single`),
+`OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`.
+
+**The floor.** Once the format holds it, the tangent's error is
+`c eps scale/h²`, `scale` the quantity's maximum: from the single tables,
+`c` = 1.7 (`δψ` L2, the bordered case, `k = 3`, `h = 0.025`), 1.0 (`δψ` max,
+`k = 2`), 2.2 and 1.3 (`δψ` max, `k = 3`, `h = 0.05` and 0.025), **5.0** (`δψ`
+max, `k = 4`, `h = 0.05`), 0.3 to 0.5 for `δq` and `δψ*`. The solution on the
+same meshes is at `roundOffFloor()`'s `2048 eps ‖ψ‖` — `k = 3`'s bordered
+`ψ_h` reaches 4.0e-08 in L2 where its tangent stops at 1.6e-04. A solution
+is refined by its own residual every Newton step; a tangent is one solve.
+`meq::tests::tangentRoundOffFloor()` is `16 eps scale/h²` in single and zero
+in double, where the same `c` would put it under 1e-11 at the finest mesh any
+tangent study uses.
+
+**What single asserts**, against the double build's:
+
+| | double | single |
+|---|---|---|
+| rate pairs, `TangentConvergence` | 54 of 54 | 9 of 54; 45 under the floor, the floor their bound |
+| rate pairs, `LinearisedSolve` | 26 of 26 | 9 of 26; 17 under the floor |
+| tangent against two solves, `TangentConvergence` | 1e-8 | **1e-2** (measured 4.0e-03; the datum's share alone misses by 0.64) |
+| tangent against two solves, `LinearisedSolve` | 1e-8 | **1e-2** (measured 4.6e-04, `dψ_ax` 2.3e-05; the column dropped misses by 0.62 in double) |
+| `dψ/df₀`, a constant | 1e-11 | `max(1e-11, floor)`: worst 1.25e-04 of 0.667 at `k = 3`, 16 cells |
+| `1/σ` × `δ` constant | `δ` = 1e-2 to 1e-5 | `δ` = 1e-2 to 1e-4 (34.8, 34.4, 32.8); at 1e-5 it reads 19.1 |
+| retained to the bit, and equal to `solveTangent()` | yes | yes |
+
+In single a difference of two solves resolves a derivative to about 1e-3,
+since each solve is good to a few `eps` and the step is `eps^(1/3)`
+(`jacobianDifferenceStep()`, which is the historical 1e-3 in double). At
+`δ = 1e-5` the factorisation's own round-off is the size of `σ_min`, so the
+inverse iteration falls short of the fold; the range is the format's
+precondition, as the meshes are for the rates.
+
+**A defect it found.** `linearisedInverseNorm()` did not normalise its
+iterate, which grows by the estimate every step: twenty steps at
+`δ = 1e-5` reach `(3.4e+06)^20`, past single's range, and every estimate read
+NaN. It normalises each step now; in double the estimates are unchanged
+(M-LIN-4's table). An estimate of 1e+16 would have overflowed double too.
