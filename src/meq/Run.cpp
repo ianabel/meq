@@ -5971,6 +5971,28 @@ int meq::Run::Impl::solve()
 			             answerCrawl, answerCrawl == 1 ? "" : "s" );
 
 		/*
+		 * A READ PAST A PROFILE TABLE IS ANSWERED, NOT REFUSED: a table is
+		 * continued linearly beyond its ends (meq::SplineProfile), so a
+		 * solution that reaches past one -- psi_h undershooting beside a wall,
+		 * an overshoot past the axis, a table cut short of the plasma -- is
+		 * solved with the continuation there. Said, with how far.
+		 */
+		{
+			meq::TableReach const reach = solver->sourceTableReach();
+			if ( reach.relative > meq::tableReachWarning )
+			{
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: warning: the solution reads a profile table past its ends, by\n"
+					"     %.3g of the table's span (%.3g below its first knot, %.3g above\n"
+					"     its last, in the table's own argument); past an end the table\n"
+					"     continues from its end value and slope and flattens within a\n"
+					"     tenth of its span, which is a choice of MEQ's, not the table's\n",
+					reach.relative, reach.below, reach.above );
+			}
+		}
+
+		/*
 		 * AND THAT CONSTRAINT CANNOT TELL AN AXIS FROM A SPIKE, WHICH IS WHY THE
 		 * LINE ABOVE IS NOT ENOUGH.
 		 *

@@ -24,7 +24,8 @@
  * edge from capping the order at k >= 2 -- CLAUDE_FB.md, *The plasma edge caps
  * the order*. The shape is ASYMMETRIC, so a table read in psi_n rather than Psi
  * gives different numbers: the abscissa's sense is something this case catches.
- * SplineProfile holds each table at its end value outside [ 0, 1 ].
+ * SplineProfile continues each table past [ 0, 1 ] from its end value and
+ * slope, and both end slopes vanish here, so it holds the end value.
  *
  * geq's ANSWER IS NOT TRACKED. solution.txt and psi_*.dat are export_rotating.py's
  * output and are gitignored; MR-4d reads them at run time and fails, naming the

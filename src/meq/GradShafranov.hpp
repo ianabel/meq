@@ -2338,6 +2338,17 @@ namespace meq
 			/// setInitialState() on another solver over the same mesh.
 			mfem::Vector const &state() const;
 
+			/**
+			 * HOW FAR THE SOLVED STATE READ PAST THE SOURCE'S TABLES: psi over
+			 * meq::SourceIntegrator's quadrature points where F is evaluated
+			 * -- the elements the plasma reaches and, under a support, the
+			 * points inside it -- handed to Source::tableReach(). A table is
+			 * continued linearly past its ends (meq::SplineProfile), so this is
+			 * the only place a read out there shows; meq::Run warns above
+			 * meq::tableReachWarning of a table's span. After a solve.
+			 */
+			TableReach sourceTableReach() const;
+
 			/// Elements the fill reached: the plasma. Zero when no fill is live.
 			int plasmaComponentElements() const;
 
@@ -5121,7 +5132,7 @@ namespace meq
 			 * density is within this model zero. That is a modelling choice and
 			 * the answer can contradict it: where the plasma still carries
 			 * current at `|z| = z_edge` the cutoff is a jump in `F`, and the
-			 * profiles' own clamping does not soften it. This is the number
+			 * profiles' own continuation does not soften it. This is the number
 			 * that says how large the jump is.
 			 *
 			 * `F/R` is `mu_0 j_phi`, so every field below is a current density

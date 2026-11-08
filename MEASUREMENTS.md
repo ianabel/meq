@@ -23375,6 +23375,100 @@ Dropped on these numbers.**
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
 
+### M-360
+
+**A TABLE NOW CONTINUES PAST ITS ENDS FROM ITS END VALUE AND SLOPE AND TAPERS
+FLAT OVER A TENTH OF ITS SPAN. NO SHIPPED FIXED-BOUNDARY ANSWER MOVES ABOVE
+3.4e-11; ONE FREE-BOUNDARY EXAMPLE THAT READS PAST ITS TABLE MOVES 9.3%, AND
+SAYS SO. LINEAR ALL THE WAY GIVES THE TABLE DERIVATIVE BACK ITS ORDER BUT
+COSTS `machine-c-mast` ITS CONVERGENCE IN EVERY DRAW; THE TAPER IS THE WIDEST
+THAT DOES NOT, AND RECOVERS THE ORDER ONLY IN PART.** `SplineProfile`,
+`tableContinuationWidth`; the warning is `Run.cpp`'s, from
+`GradShafranovSolver::sourceTableReach()`.
+
+**1. Shipped examples**, every `examples/*.toml` through `meq` (`meq-run`'s
+mesh), `OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`: `b7c549e` (the clamp)
+against the linear continuation and against the taper. The difference is the
+largest `ψ_h` coefficient's change over the largest coefficient; `ψ_ax`
+relative.
+
+| case | clamp → linear: `ψ_h` | `ψ_ax` | clamp → taper: `ψ_h` | `ψ_ax` | warning (taper) |
+|---|---|---|---|---|---|
+| `fixed-*` (6), `limited-tokamak*` (3), `q-driven`, `rotating-normalised` | ≤ 6.5e-11 | ≤ 3.4e-11 | ≤ 3.4e-11 | ≤ 2.1e-11 | — |
+| `free-boundary-halfdisc` | 1.27e-01 | 1.65e-02 | **9.28e-02** | **1.29e-02** | 0.086 of the span, 0.172 below the first knot |
+| `limiter-halfdisc` | 0 | 0 | 0 | 0 | 4.1 spans, 8.19 below the first knot |
+| `machine-c-mast` | **exits 2** | | 6.7e-15 | 5.1e-15 | — |
+| `mastu-nke` | 6.4e-15 | 3.7e-15 | 2.9e-15 | 4.4e-16 | — |
+| every other case that writes a `.nc` (23) | 0 | 0 | 0 | 0 | — |
+
+`limiter-halfdisc`'s `p'` is constant, so its end slope is zero and every
+continuation is the clamp. `free-boundary-halfdisc` has no `ConfineToPlasma`
+and its vacuum reads `Ψ` below its table's first knot, where the slope is not
+zero: its answer is the continuation's, and the warning is the tell. Five
+machine cases (`machine-b-ffprime`, `-b-ffprime-shaped`, `-c-mast-shaped`,
+`-d-tcv`, `-g-mastu-shaped`) exit 2 on all three binaries alike, and
+`manufactured` exits 1 (it needs a test fixture's closed form) on all three.
+
+**2. `machine-c-mast` over four draws** (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`
+= 2,1; 1,1; 4,1; 2,2), converged out of four:
+
+| continuation | converged |
+|---|---|
+| clamp (`b7c549e`) | 3 |
+| linear | 0 |
+| taper, `w` = 0.1 of the span | **4**, all to the clamp's answer (6.7e-15) |
+| taper, `w` = 0.2, 0.3, 0.5, 1 | 0 each |
+| `w tanh(d/w)`, `w` = 0.05 (the same reach as the 0.1 taper), and 0.1 | 0 each |
+
+The failures are not a crawl: the residual falls to about 2 (from 7e+01 at
+the start), then jumps by an order and stalls there. The converged answer
+never reads past a table — the run gives no warning under any continuation
+that converges — so it is the iterates on the way that read past the axis
+end, and a continuation that keeps rising there sends the Newton elsewhere.
+**The case is already a knife edge under the clamp**, 3 of 4.
+
+**3. The derivative's order.** `TangentConvergence`'s
+`aClampInsideTheDomainCostsTheTangentItsRate` (on `manta/table-derivative`,
+measurement only): an `MHDSource` whose `p'` table, `0.5 + 2ψ + 30ψ²`, ends
+at `ψ_c`, half the solution's peak, so the solution reads up to one span past
+it; self-convergence against 64 cells on a 4000-point Halton cloud; the
+derivative along the table's own entries. `δψ` L2 on 32 cells, with the rate
+from 16:
+
+| arm | `k = 2` | `k = 3` |
+|---|---|---|
+| the table goes on past the peak (the control) | 3.87e-07 (3.00) | 2.02e-08 (3.30) |
+| linear continuation | 3.82e-07 (2.93) | 3.05e-08 (3.13) |
+| taper, `w` = 1 span | 4.78e-07 (2.71) | 7.38e-08 (2.87) |
+| taper, `w` = 0.3 | 9.33e-07 (2.44) | 2.54e-07 (2.64) |
+| `w tanh(d/w)`, `w` = 0.1 | 1.41e-06 (2.42) | 4.14e-07 (2.80) |
+| **taper, `w` = 0.1 (`SplineProfile`)** | **2.44e-06 (1.99)** | **7.60e-07 (2.57)** |
+| `w tanh(d/w)`, `w` = 0.05 | 2.54e-06 (1.96) | 8.77e-07 (2.41) |
+| clamp | 4.64e-06 (1.56) | 2.24e-06 (1.87) |
+
+`ψ_h` itself is within 1.2× of the control in every arm. **Linear recovers
+the control**; the taper gives back a factor 3 at `k = 3` and 2 at `k = 2` of
+the clamp's loss, and the error falls monotonically as `w` widens.
+
+**Falsified: that the cost is the curvature jump at the end.** The quadratic
+taper's `g″` jumps from 0 to `−1/w` at the end, the linear one's does not, so
+the hypothesis was that the jump set the error. `w tanh(d/w)` has no jump
+there and no kink anywhere, and at the same reach (`w` = 0.05 against the
+taper's 0.1, both flat at `0.05` of the span) it is no better — 8.8e-07
+against 7.6e-07. What sets the error is the width over which `∂F/∂ψ` falls
+from `f′_e` to zero, a feature in `ψ` the mesh has to resolve; any bounded
+continuation has one. So the choice is between the derivative's order past a
+table end (linear) and `machine-c-mast` (bounded), and **the taper at 0.1 is
+the widest bounded continuation the shipped cases allow**.
+
+**The suite**: the unit tests that described the clamp now assert the
+continuation (`ProfilesTests`, `SourceTests`) and the reach
+(`a_read_past_a_table_is_reported_with_how_far`). With the continuation in,
+merged on `manta/table-derivative` over `main` `d3d93fc`, 139 of 141 pass and
+the two reds are the deliberate ones, `PlasmaEdgeConvergence` and
+`AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`
+(`OMP_NUM_THREADS = 2`, `ctest -j2`, 48 minutes).
+
 ### M-350
 
 **`AnisotropicConvergence` AND `AnisotropicMirror` QUALIFIED IN SINGLE

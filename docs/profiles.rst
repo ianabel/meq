@@ -55,20 +55,36 @@ Out of range, nothing throws
    thrown out of a quadrature loop kills a solve that would otherwise have
    converged.
 
-The convention is a **constant extension**: below the first knot the value is
-the first knot's value, above the last it is the last knot's, and the first and
-second derivatives are **zero** outside the table — which is the exact
-derivative of that constant extension.
+The convention is a **tapered continuation**. Past an end knot, at a distance
+:math:`d` from it, a table reads
+
+.. math::
+
+   f_e + f'_e\, d \left( 1 - \frac{|d|}{2w} \right) \quad (|d| < w), \qquad
+   f_e \pm \tfrac{1}{2} f'_e w \quad \text{beyond},
+
+with :math:`f_e` and :math:`f'_e` the end knot's value and slope and :math:`w`
+a tenth of the table's span. Value and slope are continuous at the end and at
+:math:`w`, so :math:`\partial F/\partial\psi` of a source built from the table
+is continuous too, and the continuation is bounded.
+
+Both halves were measured against the alternatives. A **constant** extension
+makes :math:`\partial F/\partial\psi` jump wherever a solution reaches past a
+table; the solution does not mind, but the derivative of the solution in the
+table loses its order there. A **linear** extension all the way keeps that
+order, and turned a shipped machine case from converging to diverging, because
+an early Newton iterate far past a steep end reads a value that keeps going.
+The taper sits between them: it costs no shipped case its convergence, and the
+derivative's error past a table end, while smaller than under a constant
+extension, is not as small as under a linear one.
 
 .. warning::
 
-   **Zero derivative outside the table means the source term switches itself
-   off there, silently.** For a pressure profile that is a plasma with no
-   pressure gradient outside the tabulated range. Both shipped example tables
-   extend well past the flux range their run actually visits, for exactly this
-   reason, and a table given in normalised flux needs to extend past
-   :math:`[0, 1]` because early Newton iterates put :math:`\Psi` anywhere at
-   all.
+   **Past its ends a table is MEQ's continuation, not your profile**, so a
+   table should cover every flux the converged solution visits. When it does
+   not, the run says so on standard error, with how far past which end it read
+   as a fraction of the table's span. If the derivative of the solution in a
+   table matters to you, extend the table and compare.
 
 The implementations
 -------------------

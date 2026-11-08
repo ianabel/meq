@@ -980,9 +980,8 @@ BOOST_AUTO_TEST_CASE( species_without_rotation_are_the_static_source )
 		oneTable( "species.ion.Density", meq::ProfileAbscissa::Psi,
 		          { { 0.0, 1.0, 2.0 }, { 1.0, 3.0, 2.0 } } ) );
 
-	// psi inside the axis flux, 0.2, so Psi = 0.05 to 0.95: past it the
-	// density table is clamped and its slope, which the pressure term reads,
-	// is zero.
+	// psi inside the axis flux, 0.2, so Psi = 0.05 to 0.95, inside both
+	// tables.
 	for ( double const psi : { 0.01, 0.06, 0.12, 0.19 } )
 		for ( double const radius : { 0.7, 1.0, 1.35 } )
 		{
