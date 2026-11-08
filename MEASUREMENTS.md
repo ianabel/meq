@@ -24169,8 +24169,11 @@ the size of that mesh's own error (M-SHAPE-2) — and 4e-6 and 5e-8 on TCV.
 scan on either axis, so neither has a jump to remove there, and the straddled
 error on `q̃`'s axis is at or a few times the noise — up to 8× on TCV at
 `k = 3`, where the solve's axis is at most 5× — against the solve's at the
-noise. Why `q̃`'s axis reads noisier there is not measured; the finder's
-stopping test on `q̃` is the candidate. **On the box both axes sit beside the
+noise. **That is why it is not adopted**: it buys no smoothness the
+scans can see, and the straddled difference on it reads noisier than on the
+solve's axis, which a differencing caller pays for directly. Why it reads
+noisier is not measured and not chased (the finder's stopping test on `q̃` is
+the candidate), since the axis it would explain is not used. **On the box both axes sit beside the
 face between elements 423 and 354 and pick opposite sides of it** — exactly
 where the solve's located axis would change element, and the level jump by the
 face jump of `ψ_h`, were the state to carry it across; no scan does.

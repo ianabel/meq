@@ -670,6 +670,17 @@ predictor step, and reports `stalledCorrections` against `correctorTarget`.
 error by a factor of a hundred on a coarse mesh**, so the (c) measurement
 excludes those segments as well as the face-crossing ones.
 
+**ON THE DEFAULT PAIR THE TRACED CURVE HAS KINKS, AND THEY ARE INSIDE WHAT
+MEQ OWES.** `ψ̃` is continuous across faces but its gradient is not, so
+`{ψ̃ = c}` is one connected curve that bends at every face it crosses, and a
+`Contour`'s cubic Hermite — smooth by construction — misses the bend. At fixed
+`Δs = 0.004`, `k = 2`, the representation error is 3.6e-7, 9.6e-8, 9.7e-9 at
+`n` = 12, 24, 48, where on `ψ*` and `q*` it is flat at 5.4e-9 (face-crossing
+segments excluded) (→ **[M-SHAPE-4](MEASUREMENTS.md#m-shape-4)**). It converges
+with `h` and sits inside the 1e-6 MEQ owes, so nothing is done about it; the
+family's averages are taken on the ray nodes, which root `ψ̃` directly, and
+the `Contour` only seeds and brackets them.
+
 **Closure is not "machine precision", and the correct statement is geometric.**
 Both the returning point and the start sit on the level set to 1e-13, but they
 are separated *along* the curve by the final step's tangential offset `g_t`, and
