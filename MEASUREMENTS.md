@@ -24552,11 +24552,11 @@ pole 23.074977827 (`k = 2`, 8 cells, no border):
 | `δ` | estimate | × `δ` | last relative change |
 |---|---|---|---|
 | 1 | 6.04e+01 | 60.4 | 3.4e-03 |
-| 1e-1 | 3.68e+02 | 36.8 | 4.6e-16 |
-| 1e-2 | 3.48e+03 | 34.8 | 9.1e-16 |
-| 1e-3 | 3.46e+04 | 34.6 | 1.3e-15 |
-| 1e-4 | 3.46e+05 | 34.6 | 1.7e-15 |
-| 1e-5 | 3.46e+06 | 34.6 | 4.0e-16 |
+| 1e-1 | 3.68e+02 | 36.8 | 6.2e-16 |
+| 1e-2 | 3.48e+03 | 34.8 | 2.2e-15 |
+| 1e-3 | 3.46e+04 | 34.6 | 8.4e-16 |
+| 1e-4 | 3.46e+05 | 34.6 | 0 |
+| 1e-5 | 3.46e+06 | 34.6 | 1.5e-15 |
 
 Asserted: `max/min` of estimate × `δ` under 1.5 for `δ ≤ 1e-2` (it is
 1.006). **Far from the fold it has not converged** — at `δ = 1` the last
@@ -24620,5 +24620,12 @@ precondition, as the meshes are for the rates.
 **A defect it found.** `linearisedInverseNorm()` did not normalise its
 iterate, which grows by the estimate every step: twenty steps at
 `δ = 1e-5` reach `(3.4e+06)^20`, past single's range, and every estimate read
-NaN. It normalises each step now; in double the estimates are unchanged
+NaN. It normalises each step now; in double the estimates are unchanged to
+the printed digits and only the last step's change moves, at round-off
 (M-LIN-4's table). An estimate of 1e+16 would have overflowed double too.
+
+**The suite on the branch**, double, `OMP_NUM_THREADS = 2`, `ctest -j2`, 82
+minutes: 140 of 143 pass; the three reds are main's deliberate ones,
+`PlasmaEdgeConvergence`, `QDrivenConsistency`'s
+`theDeliveredQConvergesToTheTarget` (M-361, M-362) and `AnisotropicMirror`'s
+`theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
