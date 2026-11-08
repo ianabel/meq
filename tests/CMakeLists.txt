@@ -288,7 +288,7 @@ set(MEQ_CONVERGENCE_TESTS
 	# the band: a round trip on a Miller boundary.
 	QDrivenCurvedBoundary
 	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
-	# PlasmaCurrent, returning one equilibrium (M-QSCALE-3).
+	# PlasmaCurrent, returning one equilibrium (M-357).
 	QDrivenScalePin
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
@@ -343,7 +343,7 @@ if(TARGET SafetyFactorScale)
 endif()
 
 # WHICH q CONDITION GIVES WAY TO EACH SCALE PIN: a study, BUILT BUT NOT
-# REGISTERED, because its numbers are MEASUREMENTS.md M-QSCALE-1 and M-QSCALE-2,
+# REGISTERED, because its numbers are MEASUREMENTS.md M-355 and M-356,
 # taken once, and the suite asserts the choice through the driver instead
 # (QDrivenScalePin, the composition). About five minutes:
 #     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
@@ -777,7 +777,9 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	add_test(NAME RotatingMirrorVacuumGauge COMMAND RotatingMirror --run_test=vacuum_gauge)
 	# The same gauge with its crossings as border unknowns of the Newton --
 	# GradShafranovSolver::setMidplaneGaugeKnots() -- against the frozen
-	# refresh, and geq. Its own suite and mesh stem, so it runs beside the rest.
+	# refresh; its agreement with geq is RotatingMirrorMidplane's, the same
+	# solve at the default 32 knots. Its own suite and mesh stem, so it runs
+	# beside the rest.
 	add_test(NAME RotatingMirrorBorder COMMAND RotatingMirror --run_test=border)
 	# The bordered gauge's route from the vacuum through the held table,
 	# against the starts it replaces, and the outer loop on the curve.

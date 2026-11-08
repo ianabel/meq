@@ -494,9 +494,9 @@ BOOST_AUTO_TEST_CASE( the_map_floor_is_the_fit_propagating_the_solve )
  * q condition give way: the misfit it leaves is a multiple of the highest
  * orthogonal polynomial over the surfaces' labels. So a point whose misfit is
  * EXACTLY that polynomial is a root, and one whose misfit is Psi^2 -- the
- * axis-limit condition, M-QSCALE-1's runner-up -- is not. Which condition gives
+ * axis-limit condition, M-355's runner-up -- is not. Which condition gives
  * way is part of the problem posed, and the three pins compose only because it
- * is the same under each (M-QSCALE-3), so it is pinned here, without a mesh.
+ * is the same under each (M-357), so it is pinned here, without a mesh.
  *
  * The family inverts to a constant g = 2 whatever it is asked, so the map
  * returns c = ( 4, 0, 0 ) at every admissible point.

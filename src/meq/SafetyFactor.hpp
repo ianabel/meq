@@ -449,7 +449,7 @@ namespace meq
 	 * pin's system once that pin is set to the value it reads -- so the three
 	 * pins return the same equilibrium -- only if each system drops the same q
 	 * condition: dropping different ones leaves the fit's misfit in different
-	 * directions, and the answers differ by it (MEASUREMENTS.md M-QSCALE-1).
+	 * directions, and the answers differ by it (MEASUREMENTS.md M-355).
 	 *
 	 * It is a ToroidalFieldMap -- the callable meq::solveForToroidalField
 	 * roots -- through `x -> x + F( x )`, so the outer Newton, its floor and

@@ -434,7 +434,7 @@ open fixture:
    **And it reaches the solve from a file**: `[source] SafetyFactorFile` with
    `SafetyFactorDegree` and exactly one scale pin — `R0B0`, `ToroidalFlux` or
    `PlasmaCurrent`, since `p` and `q` alone leave a one-parameter family
-   (→ **[M-QSCALE-3](MEASUREMENTS.md#m-qscale-3)**) — `examples/q-driven.toml` as
+   (→ **[M-357](MEASUREMENTS.md#m-357)**) — `examples/q-driven.toml` as
    the worked example, and `theDriverSolvesForTheToroidalField` recovering a
    closed-form `g` to **5.0e-06** in 12 outer iterations and 43 equilibria.
    **One solver serves all of them** — only `gg′` changes, so the mesh, the
@@ -977,7 +977,7 @@ and `ψ_bnd` is an unknown. Nothing refuses the combination, so this is an
 experiment and not a port. Beside `SafetyFactorFile`, `PlasmaCurrent` is the
 outer loop's scale pin and sets no profile-scale border: the border, inside the
 loop, converges to a pressure nobody gave and a `g²` the equilibrium does not
-have (→ **[M-QSCALE-2](MEASUREMENTS.md#m-qscale-2)**).
+have (→ **[M-356](MEASUREMENTS.md#m-356)**).
 
 **AND `q` WAS NEVER REPORTED, SO THE ROUND TRIP COULD NOT BE READ OFF THE
 OUTPUT. FIXED ON THE DRIVEN ROUTE** → **[M-131](MEASUREMENTS.md#m-131)**.

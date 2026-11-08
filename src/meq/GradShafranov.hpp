@@ -4551,7 +4551,7 @@ namespace meq
 			 * OUTER system with the profile scale left at one: a border here
 			 * would rescale `p` and `g g'` together, and the loop would then
 			 * fit a `g^2` the equilibrium does not have
-			 * (MEASUREMENTS.md M-QSCALE-2).
+			 * (MEASUREMENTS.md M-356).
 			 *
 			 * Over `Omega_h`: on a curved boundary the band's sliver of current
 			 * is not counted, as it is not by the current row.

@@ -2255,7 +2255,7 @@ Every q-driven ``<stem>.nc`` reports all three of its answer's own scalars, as
 ``scale_pin``, the key the run was given, and the loop's cost,
 ``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``; the run prints
 them as ``its scale:``. The numbers behind these choices are in
-``MEASUREMENTS.md`` (M-QSCALE-1 to M-QSCALE-3) — measure them on your own
+``MEASUREMENTS.md`` (M-355 to M-357) — measure them on your own
 case.
 
 When the loop does not converge

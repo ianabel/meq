@@ -5334,6 +5334,13 @@ would be asserting a known defect, which the testing stance forbids.
 The case is `confinementWithAPrescribedCurrentIsTheFourthCell` in
 `tests/convergence/FreeBoundaryCoupling.cpp`.
 
+**RE-MEASURED AT [M-354](#m-354), AND THE TABLE ABOVE IS NOT REPRODUCED.** On
+`f3d10b2`'s tree the cells differ in both formats, and each of the three
+bullets' specific claims — the maximum is interior, `R = 1.30` never closes, no
+single current closes more than two — is contradicted by one of the two builds.
+The headline stands: a prescribed current moves confinement off zero and cures
+it at no current.
+
 ### M-135
 
 **THE THREADED NPC TRAVERSAL IS WORTH 1.25× ON THE WHOLE DIII-D RUN, AND IT IS
@@ -22567,6 +22574,10 @@ every case is above 2.0 itself, the lowest at 2.11.
 `builds/double/tests`, with M-335's answer in
 `runs/geq-benchmark/reference/anisotropic/`, about 70 seconds.
 
+**THE CTEST RUNS AT `k = 3`, NOT AT THIS TABLE'S `k = 4`.** At `k = 3` every
+assertion above holds, and the bound on MEQ's own error sits 3.0 to 4.6 times
+under geq's difference in max rather than 14 to 33 → [M-354](#m-354) §2.
+
 ### M-338
 
 **AN-6a: `Δ` THAT READS `B`. THE MANUFACTURED POSITION MODEL POSED AS
@@ -23364,6 +23375,239 @@ Dropped on these numbers.**
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
 
+### M-350
+
+**`AnisotropicConvergence` AND `AnisotropicMirror` QUALIFIED IN SINGLE
+PRECISION. ONE RED WAS A DEFECT: A PLAIN NEWTON THAT DIVERGED OVERFLOWED IN
+SINGLE AND ENDED IN MFEM'S `IsFinite( norm )` VERIFICATION, AN
+`mfem::ErrorException`, SO THE FIREHOSE REFUSAL DOUBLE REACHES WAS NOT REACHED;
+`solve()` NOW REPORTS A NON-FINITE RESIDUAL AS ITS OWN RUNTIME ERROR WITH THE
+LAST FINITE ITERATE KEPT. EVERY OTHER RED MEASURED THE FORMAT, AND EACH NOW
+CARRIES A SINGLE BOUND MEASURED AGAINST A MUTATION OR A LOUD SKIP. THE DOUBLE
+OUTPUT IS UNCHANGED TO EVERY PRINTED DIGIT.**
+
+**Setup.** Branch `aniso-single` off `c4ee278`, `builds/aniso-single`
+(`install-single`) and `builds/aniso-double` (`install`), MKL 2026.2,
+`OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`. Mutations were temporary, by
+environment variable in a scratch build, not in the tree: `dDelta/dpsi` of the
+flux model scaled in the test's anisotropy; `fieldDelta()`'s
+`dDeltaDFluxSquared` scaled in the field law's point evaluation; the source's
+analytic label column taken beside a `Delta` in `Psi` (M-330's mutation).
+Outputs in `runs/aniso-single/`.
+
+**1. The defect.** `aFluxModelsRefusals`' firehose case, `Delta = 3 psi^2`,
+`k = 1`, `n = 4`. Newton diverges in both formats; in single the residual runs
+1.5, 0.99, 7.8, 15, 330, … 2.6e+04, 1.3e+06 and the next is not finite (at
+`Delta = 2 psi^2` 2.9e+06 after ten steps, at 1.5 1.5e+05 after fifteen), so
+`mfem::NewtonSolver` throws from `MFEM_VERIFY` with the NaN iterate in the
+unknown, past `solveChecked()`'s `catch ( std::runtime_error )`; double spends
+its thirty steps finite and names the limit. The plain Newton path now catches
+the verification, establishes the iterate or its residual non-finite entry by
+entry — `Vector::Norml2()` skips a NaN, and `Dot()` overflows on finite
+entries — puts back the last iterate the monitor saw with a finite residual,
+and throws `std::runtime_error`; on that iterate the check reads
+`1 - Delta = -1.13`, `-428` and `-1.1e+05` at the three amplitudes and refuses
+by name. `SolverContract`'s `aNonFiniteResidualIsTheSolversRuntimeError` holds
+it in both formats: a source that is NaN above `psi = 0.5` makes the residual
+after step 0 non-finite, and `solve()` throws `std::runtime_error` with a
+finite potential.
+
+**2. What measured the format.** `eps` is single's, 1.19e-07.
+
+| check | single read | double's own bound, in its `eps` | now in single |
+|---|---|---|---|
+| constant `Delta` against the isotropic problem rescaled | 160 to 1250 `eps` relative, worst `Delta = 0.3`, `k = 3`, `psi` | 1e-12 = 4500 `eps` | `exactAgreementFloor()`, 4096 `eps` |
+| zero flux model against the isotropic Newton solve | `psi` 4.5 to 7 `eps`, `q` 32 to 174 `eps` | 1e-10 | `exactAgreementFloor()` |
+| flux model, best cold Newton order | 1.49 to 1.52 | 1.8 | 1.4, below |
+| field model, best cold Newton order | 1.62 to 1.72 | 1.8 | skipped loudly, below |
+| field law restarts, `r_1/r_0^2` constant to 1% | all three `r_1` on the floor | | first steps against the smallest restart's, below |
+| `Psi` model, best Newton order | 0.92 | 1.8 | through the floor-landing triple as a lower bound, 1.5, below |
+| `Psi` model and labels from `psi*`, rates at `k >= 2` | `q` at `k = 3`: 2.14e-05, 4.01e-05 against 5.49e-06, 3.43e-07 | | `rateIsMeasurable()`, as AN-2a's |
+
+The rates: the unbordered flux model meets the same `q` floor at `k = 3`,
+2.06e-05 and 3.96e-05, and its rates were already skipped by degree. With the
+labels read from `psi*` at `k >= 2` the later passes start under the round-off
+gate and take no step, so the answer is the first pass's to every printed
+digit — the correction is under the format's floor.
+
+**The flux model's order.** Double reads 1.82 on `( 1.06e-02, 4.88e-05,
+2.67e-09 )`, whose last residual is 170 times under single's floor of 4.6e-07;
+the triple single keeps, the one before, reads 1.47 to 1.52 in both formats.
+On that triple, best over `n = 4…32`:
+
+| `dDelta/dpsi` | `k = 1` | 2 | 3 | 4 |
+|---|---|---|---|---|
+| exact | 1.492 | 1.509 | 1.521 | 1.523 |
+| × 1.1 | 1.278 | 1.291 | 1.304 | 1.306 |
+| × 0.9 | 1.219 | 1.226 | 1.237 | 1.237 |
+| × 0 | 1.155 | 1.158 | 1.158 | 1.158 |
+
+the 10% rows identical in double to three digits and the dropped one 1.16 to
+1.22, where the exact reads 1.82 to 1.84 on the next triple. **1.4 sits 0.09 under the exact and 0.09 over a 10% error — thin,
+and recorded as such.**
+
+**The field model's cold order does not discriminate in either format.**
+`dDelta/d|q|^2` × 1.1 reads 1.75 to 1.86 against the exact 1.62 to 1.72 in
+single, and 1.75 to 1.86 against 2.11 in double, passing double's 1.8 at
+`k = 3` and 4. The restarts are the order's instrument (the file says so), and
+single skips the cold reading loudly. **The restarts in single**: double's
+`C r_0^2` is 1.2e-07 at the largest restart, under single's floor of ~3e-07, so
+every `r_1` lands on the floor. What single reads is the first step from
+`delta = 1e-2` against the one from `1e-4`:
+
+| | `Delta = -0.3` | `Delta = +0.3` |
+|---|---|---|
+| exact | 5.19e-07 / 3.32e-07 = 1.56 | 5.40e-07 / 2.89e-07 = 1.87 |
+| × 1.1 | 3.25e-06 / 3.39e-07 = 9.6 | 3.33e-06 / 2.88e-07 = 11.5 |
+| × 0.9 | 3.31e-06 / 3.47e-07 = 9.6 | 3.25e-06 / 2.84e-07 = 11.5 |
+| × 0 | 3.76e-05 / 9.16e-07 = 41 | 2.95e-05 / 5.14e-07 = 57 |
+
+asserted at 4. Double keeps the constant to 1%, which every mutation fails.
+
+**The `Psi` model's order.** Single's history at `n = 16` is `9.89e-01
+8.51e-03 2.19e-04 4.97e-07`, the last on the floor, where double goes on to
+`1.01e-07 7.07e-15` and reads 2.12. The one triple `asymptoticNewtonOrder()`
+admits in single is the first, which mostly moves `psi_ax`. **A residual held
+up by the floor can only under-state the order**, so the floor-landing triple
+is read as a lower bound: exact, 1.93 to 2.00 at `n = 4`, 1.75 to 1.84 at
+`n = 8`, 1.56 to 1.66 at `n = 16`, 1.34 to 1.46 at `n = 32`; on the analytic
+label column every triple reads 1.00 at best and its second step contracts
+by 0.19 against the exact 0.025. Asserted at `quadraticOrderThreshold( 1.8 )`,
+1.5 in single, on the best over meshes.
+
+**3. `AnisotropicMirror`: the meshed packs' floor is the plasma solve's.**
+With no target the meshed plasma solves stagnate between 1.35e-06 and
+2.20e-06 — `k = 2` at levels 0 and 1, `k = 3` at levels 0 to 3, isotropic, the
+bump, `Δ( Ψ )` and `Δ( B )` — drifting down by a few per cent a step; the
+subtracted route reaches 1.6e-08 to 6.9e-08. The round-off stop works under
+the ten-`eps` gate, 1.19e-06 times the cold reference, so whether a solve dips
+under it is a coin toss: `k = 3`'s isotropic level 0 and every `k = 2` level 1
+do not, and the vacuum starts that did took 3 to 5 steps, 1 to 3 of them at
+the floor. `solveMeshed()` met the same floor with 64 `eps` (M-294); the
+plasma solves on the meshed route now ask the same in single, and converge in
+2 steps where they took 3 to 6 (`k = 2`, level 0).
+
+*The `k = 3` ladder*, `ψ*` level to level, rms over the machine cloud:
+
+| | 0–1 | 1–2 | 2–3 |
+|---|---|---|---|
+| isotropic, double | 5.099e-05 | 3.283e-07 | 6.457e-08 |
+| isotropic, single | 5.219e-05 | 1.415e-06 | 1.661e-06 |
+| bump −0.3, single | 5.154e-05 | 1.602e-06 | 1.177e-06 |
+| `Δ( Ψ )` −0.3, single | 5.133e-05 | 1.310e-06 | 9.556e-07 |
+
+Rung 0 is the same number to 2.4%; rungs 1 and 2 are the plasma solve's
+round-off, and the 2–3 difference no longer falls. Against `ψ*`'s rms over
+the cloud, 0.2225, the floored rungs of all six variants read 36 to 63 `eps`
+and rung 0 1970. A rung whose isotropic difference is under 256 `eps` of that
+rms (`aboveTheFormatsFloor()`, true in double) is skipped loudly in single;
+rung 0 is asserted as in double, every variant within 0.963 to 1.003 of the
+isotropic. `roundOffFloor()`'s 2048 `eps`, 5.4e-05, would skip rung 0 too and
+leave the case asserting nothing — measured, it did.
+
+*Subtracted against meshed*, `k = 2`, is not at the floor and is asserted
+unchanged: single reads 1.188e-04, 1.548e-06, 9.283e-07 isotropic against
+AN-3b's double 1.188e-04, 1.491e-06, 8.962e-07, and the three `Δ`s within 1.1
+of it on every level.
+
+*The zero bump through the law against the subtracted mirror*: `ψ_p` differs
+by 5.4e-08 on 1.06e-03, which is 430 `eps` of `ψ_p` and 0.29 of the total
+flux it is the remainder of, 1.566 — RotatingMirror's card-against-host
+argument. Single asserts `scalarAgreementFloor()` of the total, 64 `eps`,
+1.2e-05; a load dropped by the law is `O( ψ_c )`.
+
+**4. Inventories**, `ctest -j3` at `OMP_NUM_THREADS = 2`, `MEQ_PYTHON = OFF`
+(so 92 tests where `builds/double` has 96 with its four Python suites):
+
+| | before, `builds/{single,double}.tip828` | after, `aniso-single` at `2651b69` |
+|---|---|---|
+| single | `PlasmaEdgeConvergence`, `DriverAcceptance`, `AnisotropicConvergence`, `AnisotropicMirror`, `RotatingMirrorBorder` | `PlasmaEdgeConvergence`, `DriverAcceptance` (the same three cases), `RotatingMirrorBorder` (the same case) |
+| double | `PlasmaEdgeConvergence` | `PlasmaEdgeConvergence` |
+
+`AnisotropicConvergence`'s double output, every test case but the timings,
+is the reference binary's to the character.
+
+### M-351
+
+**`Δ( Ψ )`'s CRAWL ON THE MESHED MIRROR (M-339) IS NOT THE JACOBIAN AND NOT A
+FOLD. ALONG EVERY STEP OF IT THE BORDERED NEWTON DIRECTION IS THE EXACT ONE,
+LABEL COLUMNS INCLUDED, AND CONTINUATION IN `δ₀` REACHES 0.99 IN UNDAMPED
+NEWTON STEPS. WHAT CRAWLS IS THE ARMIJO SEARCH, ALONG EXACT STEPS WHOSE
+CURVATURE REACHES 3·10⁴ TIMES THE BUMP'S AND WHICH THE BOUNDARY LABEL'S COLUMN
+DOMINATES.
+NOT FIXED: OPEN IN `TODO`.**
+
+**Setup.** As M-339: `AnisotropicMirror`'s `run()`, meshed, from the vacuum,
+level 0, `k = 2`. Branch `aniso-single` off `c4ee278`, `builds/aniso-double`,
+and `builds/aniso-single` for the confirmation. A temporary probe in the
+bordered loop, not in the tree, after each step's solve and before its line
+search: `F( α ) = F( x + α d )` with `d` the whole bordered step — field,
+`ψ_ax`, `ψ_bnd` and the exterior coefficients together — read as
+`e( α ) = || F( α ) − ( 1 − α ) F( 0 ) ||/( α || F( 0 ) || )`, which falls as
+`c α` for an exact direction and tends to the relative Jacobian error for an
+inexact one. And the step decomposed: `| y |`, the field's own;
+`| δψ_ax z |` and `| δψ_bnd z_B |`, the labels' columns. Temporary cases, not
+kept: `scratchCrawl`, `scratchContinuation`. Outputs in
+`runs/aniso-single/crawl/`.
+
+**1. The Jacobian is exact along the crawl.** `e( α )`, double, `δ₀ = 0.95`,
+a selection of the 22 steps (every step reads the same way):
+
+| step | `|| F ||` | `α = 1e-2` | `1e-3` | `1e-4` | `1e-5` | damping taken |
+|---|---|---|---|---|---|---|
+| 1 | 1.62e-02 | 5.67e-01 | 5.60e-02 | 5.59e-03 | 5.59e-04 | 1/4 |
+| 5 | 5.51e-03 | 2.39e+01 | 1.79e+00 | 1.82e-01 | 1.82e-02 | 2^-7 |
+| 9 | 4.64e-03 | 2.48e-01 | 2.37e-02 | 2.36e-03 | 2.36e-04 | 1/16 |
+| 16 | 8.48e-04 | 9.68e-01 | 9.54e-02 | 9.53e-03 | 9.53e-04 | 2^-5 |
+
+Linear in `α` over four decades on every step, at 0.9 likewise: still
+falling at `α = 1e-5`, so whatever first-order residue there is sits under
+2e-04 relative; the analytic label column, M-330's mutation, leaves a
+contraction of 0.19 per step on AN-2b's fixture (M-350). **Both suspects M-339 named are
+falsified**: the label columns, differenced under a `Δ` in `Ψ`, and the flux
+law's `ψ`-slope against the label normalisation, are both inside `d`.
+
+**2. There is no fold before 0.99.** Continued from 0.7's answer — its
+potential, `ψ_ax` and `ψ_bnd` as the next start — by 0.05 to 0.9, by 0.01 to
+0.95, and by 0.0025 to 0.99: every rung converges in 5 to 8 Newton steps, all
+at damping 1, and `ψ_bnd` runs smooth and monotone from 9.218e-02 at 0.8
+through 1.022632e-01 at 0.95 to 1.105321e-01 at 0.99. A jump of 0.02 from 0.95
+stagnates at 1.6e-04 for thirty steps with damping down to 2^-11, its
+`ψ_bnd` step alternating in sign.
+
+**3. The curvature.** `c` in `e( α ) ≈ c α`, the second-order term in units of
+`|| F ||`, at the first step from the vacuum and the largest over the solve;
+the first step's parts; and `r_{n+1}/r_n²` on the last steps:
+
+| | `c`, first | `c`, largest | `| y |` | `| δψ_ax z |` | `| δψ_bnd z_B |` | `r_{n+1}/r_n²` |
+|---|---|---|---|---|---|---|
+| bump 0.9 | 0.031 | 0.031 | 27.3 | 0.019 | 0.97 | 0.02 to 0.07 |
+| bump 0.95 | 0.056 | 0.056 | 27.7 | 0.027 | 1.27 | 0.01 to 0.07 |
+| `Δ( Ψ )` 0.7 | 4.4e-03 | 0.015 | 26.7 | 0.081 | 4.1 | 7 to 135 |
+| `Δ( Ψ )` 0.9 | 0.023 | 12.5 | 27.8 | 0.15 | 75 | 1e2 to 3e3 |
+| `Δ( Ψ )` 0.95 | 0.18 | 1800 | 29.2 | 0.033 | 162 | 1e2 to 1e4 |
+
+A step of length `α` is accepted when `c α` is under about one, which is the
+damping column of §1. So from the vacuum Newton starts far outside a basin
+that shrinks with `1 − Δ`, and the line search walks into it. The labels'
+sensitivity is where `Δ( Ψ )` differs from the bump: `Ψ` moves with `ψ_bnd`
+everywhere, and the flux mass `R/( 1 − Δ )` moves with it as
+`Δ′/( 1 − Δ )²`.
+
+**4. Single.** The same: 0.9 in 10 steps at dampings down to 1/8, 0.95 does
+not converge in 30, damping down to 2^-11 at 4.6e-04; the bump converges in 2
+or 3. `e( α )` reads linear down to `α = 1e-2` and then rises, the
+difference's round-off.
+
+**Not measured**: carrying `1 − Δ` on the conservation row instead of as
+`R/( 1 − Δ )` on the flux mass, so the `ψ`-curvature loses its
+`1/( 1 − Δ )³`; a bound on the `ψ_bnd` step relative to the label span.
+Continuation in the driver is declined (`CLAUDE_DECLINED.md`, *Starting from
+vacuum, and amplitude continuation*).
+
+**Reproduce.** The probe and cases are not in the tree; the bordered loop's
+`borderSteps()` alone gives the damping column.
+
 ### M-352
 
 **The q-driven loop's trace solver is analysed once per solve, not once per
@@ -23510,7 +23754,117 @@ and `MKL_NUM_THREADS=1 ./SafetyFactorScale` (the suite's, above) — the
 longer study is `runs/manta-session/scale.log`, `scale3.log`, `scale4.log`, and
 the square systems `runs/manta-session/fix-scale2.log`.
 
-### M-QSCALE-1
+### M-354
+
+Two measurements made when the suite was cut to the rungs that carry its
+claims: §1 FB-T's cross re-run whole, which took it out of the default run, and
+§2 `RotatingMirrorAnisotropic` at `k = 3` rather than 4.
+
+**1. FB-T'S CROSS, RE-RUN WHOLE ON TWO BUILDS OF ONE TREE: THE HEADLINE OF
+[M-134](#m-134) STANDS AND ITS CELLS DO NOT.** A prescribed current moves
+confinement off zero in both formats and cures it at no current, as M-134 says.
+But which radii close at which current differs between double and single, and
+between either and M-134's own run, and each of M-134's three specific
+conclusions is contradicted by one of the two builds.
+
+**Setup.** `FreeBoundaryCoupling --run_test=confinementWithAPrescribedCurrentIsTheFourthCell`,
+`k = 2`, `n = 24` on the half-disc (1333 elements), four exterior modes, Newton
+control `1e-13`/`1e-14`/150. Builds `builds/double` and `builds/single` at
+`9c97ffe`, whose tree is `f3d10b2`'s. `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2`.
+Each build's table is identical, cell for cell and step for step, to the same
+build's ctest run of the whole binary earlier the same day, so within a build
+at `MKL_NUM_THREADS=1` the cross is deterministic. `ok n` is a cell converged in
+`n` Newton steps; `--` did not converge or threw.
+
+| arm | M-134 (`bd730e2`) | double | single |
+|---|---|---|---|
+| unconfined, no current | ok5 ok8 ok6 ok5, 4/4 | ok5 ok8 ok6 ok5, 4/4 | ok3 ok7 ok4 ok3, 4/4 |
+| confined, no current | 0/4 | 0/4 | 0/4 |
+| confined, `μ₀I_p` = 0.02 | 0/4 | 0/4 | 0/4 |
+| 0.05 | 0/4 | 0/4 | 0/4 |
+| 0.10 | 0/4 | **ok87** at 1.05, 1/4 | 0/4 |
+| 0.20 | ok20 at 1.05, 1/4 | ok20 at 1.05, 1/4 | ok18 at 1.05, 1/4 |
+| 0.50 | ok25 at 1.05, ok14 at 1.20, 2/4 | ok35 at 1.05, ok12 at 1.20, 2/4 | ok19 at 1.05, ok20 at 1.20, **ok23 at 1.30, 3/4** |
+| 1.00 | ok40 at 1.05, 1/4 | ok41 at 1.05, **ok79 at 1.20**, 2/4 | ok44 at 1.05, **ok38 at 1.30**, 2/4 |
+| 2.00 | ok19 at 1.15, ok32 at 1.20, 2/4 | ok39 at 1.20, 1/4 | ok40 at 1.05, 1/4 |
+| 5.00 | 0/4 | **ok30, ok39, ok18 at 1.05, 1.15, 1.20, 3/4** | ok123 at 1.20, 1/4 |
+| best | 2/4 at 0.50 and 2.00 | 3/4 at 5.00, the largest target | 3/4 at 0.50 |
+
+The limiter radii are 1.05, 1.15, 1.20 and 1.30.
+
+**Against M-134's three bullets:**
+
+* *"The maximum is interior, so this is not a truncated sweep."* In double the
+  best cell is the largest target tried, 3 of 4 at 5.00, and the case's own
+  warning fires.
+* *"`R = 1.30` never does."* Single closes `R = 1.30` at 0.50 and at 1.00.
+* *"No single current closes more than two."* Double closes three at 5.00 and
+  single three at 0.50.
+
+**What all three runs agree on:** the unconfined control is 4 of 4;
+confinement alone is 0 of 4; below `μ₀I_p = 0.10` nothing closes; `R = 1.05`
+closes at 0.20, 0.50 and 1.00; and no current closes all four. That is the
+headline, and it is all that survives. Which other cells close is decided by the
+build — double against single, and the tree since `bd730e2` — so it is a
+property of the round-off a branch decision rests on, not of the problem. That
+strengthens M-134's reading that the current is a lever shifting which discrete
+branch a radius lands on. It also means **no cell of the table may be quoted
+without re-running it on the tree in hand**. Several converged cells crawl
+(79 to 123 steps against the control's 3 to 8); `TODO`, *Bordered solves that
+CRAWL*, has those.
+
+**The case is a study, and is `disabled()` in the suite.** Its one assertion is
+the unconfined control, which `theTwoBordersConvergeTogether` asserts at
+identical configuration, with the same Newton counts row for row in both formats.
+The other thirty-six solves are printed and not asserted, since asserting them
+would assert a known defect. Most of them run to the Newton cap: under a load of
+about 20 on 16 cores the case alone took 42 min 49 s in double and 49 min 28 s in
+single. That made it most of `FreeBoundaryCoupling`'s wall and the suite's
+critical path. `MKL_NUM_THREADS=1 ./FreeBoundaryCoupling --run_test=confinementWithAPrescribedCurrentIsTheFourthCell`
+from the build tree runs it.
+
+**2. AN-5 AT `k = 3`: EVERY BOUND HOLDS, AND THE TIGHTEST MARGIN FALLS FROM 14×
+TO 3.0×.** `RotatingMirror --run_test=anisotropic` ([M-337](#m-337)'s case), on
+`suite-cuts` at `be28877` (main `b7c549e` merged), double,
+`MKL_NUM_THREADS=1 OMP_NUM_THREADS=2`, against the same binary family's `k = 4`
+run on `9c97ffe`. Both read `ψ*` at level 2 (19,276 elements) and bound MEQ's
+own error from level 1 as `|ψ*₁ − ψ*₂|/(2⁴ − 1)`. `ψ*` converges at 4 at both
+degrees, `min(k + 2, j + 2)` with `j = 2`. Three Newton steps at every level,
+degree and `δ₀`. Level 2 took 50.8 and 48.7 s at `k = 3`, against 93.8 and
+85.2 s at `k = 4`, under a load near 20.
+
+The assertion with the least room is the bound on MEQ's own error against geq's
+257-against-513 difference, which must be larger. The table gives that ratio:
+
+| `δ₀` | form | own error, max, `k = 4` → `k = 3` | geq 257 − 513, max | ratio `k = 4` → `k = 3` | rms ratio `k = 4` → `k = 3` |
+|---|---|---|---|---|---|
+| −0.1 | historical | 1.59e-08 → 1.15e-07 | 5.29e-07 | 33 → 4.6 | 183 → 42 |
+| −0.1 | divergence | 1.59e-08 → 1.15e-07 | 4.49e-07 | 28 → 3.9 | 166 → 38 |
+| −0.3 | historical | 8.44e-08 → 4.04e-07 | 1.22e-06 | 14 → **3.0** | 84 → 24 |
+| −0.3 | divergence | 8.44e-08 → 4.04e-07 | 1.24e-06 | 15 → 3.1 | 98 → 28 |
+
+The other assertions barely move, because their numbers are geq's error:
+
+* MEQ − geq at 513², as a fraction of geq's 257-against-513 difference, reads
+  0.296, 0.289, 0.267 and 0.253 max, against 0.298, 0.290, 0.272 and 0.262 at
+  `k = 4`.
+* Each step falls at 2.13 or faster, against an asserted 1.70 at both `δ₀`.
+* `ψ*` at the outer label point is geq's `psi_bndry` to 4.2e-08 at worst,
+  12.7 times under geq's difference (15.6 at `k = 4`).
+* MEQ − geq at 513² is at most 6.9e-05 of what `Δ` moves geq's answer by,
+  against a bound of 1e-03.
+
+**What `k = 3` gives up is a reading and not an assertion.** At `δ₀ = −0.3` the
+bounded own error in max, 4.0e-07, now exceeds MEQ − geq at 513², 3.1e-07 to
+3.2e-07. In max, "the residual is geq's" therefore rests on the bound being
+conservative. In rms it still holds by 5.1 to 5.4 times (1.05e-08 against
+5.4e-08 to 5.7e-08), against 19 at `k = 4`. Every asserted bound holds with at
+least 3.0 times to spare, and the bounds are deterministic at
+`MKL_NUM_THREADS=1`. The suite runs `k = 3`; [M-337](#m-337)'s table is the
+`k = 4` run, and its "4 to 45 times under the 513² difference" is that
+degree's.
+
+### M-355
 
 **Which q condition gives way to each scale pin, by the smallest singular
 value of the square system.** `SafetyFactorPinStudy` (built, not a ctest),
@@ -23557,11 +23911,11 @@ beside the bordered Newton.
 **Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy`
 (about 5 minutes); `runs/q-solve-scale/study/study.log`.
 
-### M-QSCALE-2
+### M-356
 
 **`[source] PlasmaCurrent` as a profile-scale border beside the free q loop
 selects a member, and it is not the member asked for.** `SafetyFactorPinStudy`'s
-second case, the M-QSCALE-1 fixture, degree 2, the free outer loop around a
+second case, the M-355 fixture, degree 2, the free outer loop around a
 bordered inner solve carrying `μ₀ I_p` as a border (the scale `α`
 multiplies `p′` and `gg′` together), from `g = 2`:
 
@@ -23578,9 +23932,9 @@ loop reports is not the equilibrium's and its `q` misses the target by 4–7%
 over the surfaces). **It fights the loop.** As a pin the current is instead a
 row of the outer system with `α = 1` (`GradShafranovSolver::deliveredPlasmaCurrent()`).
 
-**Reproduce.** As M-QSCALE-1.
+**Reproduce.** As M-355.
 
-### M-QSCALE-3
+### M-357
 
 **The three pins compose, and each converges with no crawl.** `q-solve-scale`,
 double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a loaded machine (wall times

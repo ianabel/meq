@@ -798,7 +798,7 @@ struct meq::Run::Impl
 	 * solver holds: g on the boundary [T m], the toroidal flux inside it [Wb]
 	 * and I_p [A]. The run was given exactly one; all three are reported, so
 	 * that any one re-poses the same equilibrium (meq::PinnedToroidalFieldMap,
-	 * MEASUREMENTS.md M-QSCALE-3). Read from the SOLVER and not kept by the
+	 * MEASUREMENTS.md M-357). Read from the SOLVER and not kept by the
 	 * loop, because the retry rung can re-solve the loop's converged g on a
 	 * solver of its own.
 	 */
@@ -3333,7 +3333,7 @@ int meq::Run::Impl::setUp()
 		 * pin instead: a border here would rescale p' and g g' together, so
 		 * the loop would fit a g^2 the equilibrium does not have and a
 		 * pressure would be solved that nobody gave (MEASUREMENTS.md
-		 * M-QSCALE-2). See runToroidalLoop.
+		 * M-356). See runToroidalLoop.
 		 */
 		if ( bordered && config->getSource().plasmaCurrent() != 0.0 && !toroidalDriven )
 		{
@@ -4013,13 +4013,13 @@ int meq::Run::Impl::solve()
 			 *   R0B0           c_0 = R0B0^2 held, out of the unknowns;
 			 *   ToroidalFlux   psi_ax - psi_bnd = Phi/( 2 pi int_0^1 q dPsi ),
 			 *                  a row, read off the bordered Newton's own psi_ax
-			 *                  and psi_bnd (not a held psi_ax: M-QSCALE-1);
+			 *                  and psi_bnd (not a held psi_ax: M-355);
 			 *   PlasmaCurrent  mu0 I_p, a row, read off the solved state, with
 			 *                  the profile scale left at one (makeSolver()).
 			 *
 			 * One q condition gives way to keep the system square, and it is
 			 * the same one under every pin -- meq::PinnedToroidalFieldMap says
-			 * which and why that makes them compose (M-QSCALE-1, M-QSCALE-3).
+			 * which and why that makes them compose (M-355, M-357).
 			 * The row weight is the opening c_0, so the pin row is in the
 			 * fit rows' units; it moves the path and not the root.
 			 */

@@ -400,7 +400,7 @@ loop is an outer failure too** (`CLAUDE_DRIVER.md`).
 `examples/q-driven.toml` is the worked example, pinned by `R0B0 = 2.2`, and
 `DriverAcceptance::theDriverSolvesForTheToroidalField` is the acceptance:
 **5 outer iterations, 26 equilibria** in double, recovering a closed-form
-`g = 2.20 + 0.55Ψ` in the coefficients of `g²` (M-QSCALE-3). The pinned loop
+`g = 2.20 + 0.55Ψ` in the coefficients of `g²` (M-357). The pinned loop
 is not measured in single.
 
 **THE TARGET IS MEASURED RATHER THAN INVENTED, WHICH IS THE WHOLE OF WHY THAT
@@ -472,14 +472,14 @@ highest row `y_d`: by `σ_min` it is the best of every candidate under every
 pin at degrees 2 and 4 — the axis limit, a misfit `∝ Ψ^d`, ties it under
 `R0B0` at degree 2 and loses everywhere else, by 60–300× at degree 4 — and the
 pinned systems are 100× (degree 2) to 10⁴× (degree 4) better conditioned than
-the free one (→ **[M-QSCALE-1](MEASUREMENTS.md#m-qscale-1)**). `c₀` enters no
+the free one (→ **[M-355](MEASUREMENTS.md#m-355)**). `c₀` enters no
 solve, so under a row pin only `y_0` sees it and dropping `y_0` is exactly
 singular. **Sameness is not a nicety**: where the target's `g²` is not a
 polynomial of the degree, the misfit lies along whichever condition gave way,
 so two pins dropping different ones pose different problems — mutated, 13% of
 `ψ` apart on `QDrivenScalePin`'s fixture. With one choice, an equilibrium
 solved under any pin is returned by the other two set to what it reads, to
-1e-10 (→ **[M-QSCALE-3](MEASUREMENTS.md#m-qscale-3)**); `QDrivenScalePin`
+1e-10 (→ **[M-357](MEASUREMENTS.md#m-357)**); `QDrivenScalePin`
 asserts that composition, and every q-driven `.nc` reports all three of its
 answer's scalars for it.
 
@@ -496,7 +496,7 @@ evaluates it, clamped beyond the table.
 the q loop it converges, and to the wrong member — asked for the reference's
 own current it returns `α = 1.35`, a pressure nobody gave, and a `g²` the
 equilibrium does not have, its `q` 4% off the target
-(→ **[M-QSCALE-2](MEASUREMENTS.md#m-qscale-2)**). So beside `SafetyFactorFile`
+(→ **[M-356](MEASUREMENTS.md#m-356)**). So beside `SafetyFactorFile`
 `makeSolver()` sets no current border, the Picard pre-stage takes no current
 target, and the row reads `GradShafranovSolver::deliveredPlasmaCurrent()` —
 the current border's own quadrature, over `Ω_h`.
@@ -510,9 +510,9 @@ every map evaluation is refused, and the loop stops on a Jacobian of exactly
 zero. Both go through `Run::Impl::extractFamily()`. `QDrivenCurvedBoundary`
 is the round trip on a Miller boundary, the target measured from a closed-form
 `g` on the same mesh, under `R0B0`: 5 KINSOL iterations, 26 equilibria, `g²` recovered to
-eight digits (M-QSCALE-3). Posed on `fixed-d-tcv` with
+eight digits (M-357). Posed on `fixed-d-tcv` with
 a measured `q` it converges under every pin, in 3 or 4 KINSOL iterations and
-16 to 29 equilibria with none refused, to one `g²` (M-QSCALE-3); unpinned it
+16 to 29 equilibria with none refused, to one `g²` (M-357); unpinned it
 failed on the scale (M-353).
 
 **WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a

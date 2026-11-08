@@ -493,7 +493,7 @@ namespace meq
 		// THE SCALE PIN. Equilibria sharing p( Psi_N ) and q( Psi_N ) form a
 		// one-parameter family, so a q-driven run names EXACTLY ONE of R0B0,
 		// ToroidalFlux and PlasmaCurrent to select its member; none, or two,
-		// is refused (meq::PinnedToroidalFieldMap, MEASUREMENTS.md M-QSCALE-1).
+		// is refused (meq::PinnedToroidalFieldMap, MEASUREMENTS.md M-355).
 		//
 		// R0B0: g = R B_phi on the boundary [T m], the vacuum field the TF
 		// coils set, positive; c_0 of the g^2 fit is its square. Zero when

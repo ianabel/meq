@@ -19,7 +19,7 @@
 #include "SourceTree.hpp"
 
 /*
- * THE q-DRIVEN SOLVE'S SCALE PINS COMPOSE -- MEASUREMENTS.md M-QSCALE-3.
+ * THE q-DRIVEN SOLVE'S SCALE PINS COMPOSE -- MEASUREMENTS.md M-357.
  *
  * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter family, and
  * a q-driven run names exactly one of R0B0, ToroidalFlux and PlasmaCurrent to
@@ -35,7 +35,7 @@
  * is that table times ( 1 + 0.2 Psi^3 ), whose g^2 no quadratic follows: the
  * fit leaves a misfit, it lies along whichever condition gave way, and two
  * pins that dropped different conditions return equilibria that differ by it.
- * Mutation-tested on this fixture (M-QSCALE-3): R0B0 giving way on its
+ * Mutation-tested on this fixture (M-357): R0B0 giving way on its
  * axis-limit condition instead of y_2 puts its answer 0.13 of psi's peak from
  * the others, and PlasmaCurrent giving way on y_1 puts every answer 0.05 to
  * 0.13 apart; this case asks for 1e-6.
@@ -162,7 +162,7 @@ BOOST_AUTO_TEST_CASE( theThreePinsReturnOneEquilibrium )
 		}
 	}
 
-	std::printf( "\n  THE SCALE PINS COMPOSE (M-QSCALE-3)\n" );
+	std::printf( "\n  THE SCALE PINS COMPOSE (M-357)\n" );
 	// THE BASE UNDER A FOURTH POSING, so that each re-solve below starts
 	// somewhere else: the current pin from g = 1.8, where its re-solve opens
 	// at g = 2.2 and R0B0's at the base's own boundary g.
@@ -195,7 +195,7 @@ BOOST_AUTO_TEST_CASE( theThreePinsReturnOneEquilibrium )
 	/*
 	 * AND NONE OF THEM CRAWLED. The loop is a differenced Newton started at
 	 * gg' = 0 and finishes in 4 or 5 iterations under every pin here
-	 * (M-QSCALE-3); a crawl that converged would still pass the agreement
+	 * (M-357); a crawl that converged would still pass the agreement
 	 * above, and is a defect.
 	 */
 	for ( Answer const &a : answers )

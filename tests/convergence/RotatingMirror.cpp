@@ -3066,8 +3066,9 @@ BOOST_AUTO_TEST_SUITE( adaptive )
  *
  * THE REFERENCE RESOLVES WHAT IS MEASURED AGAINST IT. Its own flux error is
  * bounded from L1 at k = 4 as referenceError() bounds psi*'s, and must sit
- * below a tenth of every error asserted on. The uniform L2 row is printed
- * and not asserted: its error is within a factor three of that bound.
+ * below a tenth of every error asserted on. That is why the uniform rows
+ * stop at L1: a uniform L2 row's error is within a factor three of that bound,
+ * so it could be printed and not asserted, and is not run.
  *
  * THE COST AGAINST UNIFORM REFINEMENT IS PRINTED AND NOT ASSERTED, since
  * nothing in this tree asserts an adaptive loop against uniform refinement:
@@ -3108,14 +3109,12 @@ BOOST_AUTO_TEST_CASE( theEstimatorTracksTheErrorOnTheAdaptiveMirror )
 	}
 	DriverRun const reference = runVariant( "mirror-adaptive-reference", uniform( 2, 4 ) );
 	DriverRun const below = runVariant( "mirror-adaptive-reference-L1", uniform( 1, 4 ) );
-	// One cycle each, which estimates and does not refine: the uniform meshes' eta.
+	// One cycle, which estimates and does not refine: the uniform mesh's eta.
 	std::vector<DriverRun> uniformRuns;
-	for ( int level = 1; level <= 2; ++level )
-		uniformRuns.push_back( runVariant( "mirror-adaptive-uniform-L"
-		                                   + std::to_string( level ), uniform( level, order ),
-		                                   adaptivity( 1 ) ) );
+	uniformRuns.push_back( runVariant( "mirror-adaptive-uniform-L1", uniform( 1, order ),
+	                                   adaptivity( 1 ) ) );
 	for ( DriverRun const *run : std::vector<DriverRun const *>{
-		&reference, &below, &uniformRuns[ 0 ], &uniformRuns[ 1 ] } )
+		&reference, &below, &uniformRuns[ 0 ] } )
 		BOOST_TEST_REQUIRE( run->status == 0, run->stem << " exited " << run->status
 		                    << ":\n" << run->log );
 
@@ -3191,7 +3190,7 @@ BOOST_AUTO_TEST_CASE( theEstimatorTracksTheErrorOnTheAdaptiveMirror )
 	};
 	for ( Row const &r : rows )
 		print( r );
-	std::printf( "    uniform refinement, one cycle each:\n" );
+	std::printf( "    uniform refinement, one cycle:\n" );
 	for ( Row const &r : uniformRows )
 		print( r );
 
@@ -4134,7 +4133,11 @@ BOOST_AUTO_TEST_SUITE( vacuum_gauge )
  * analytic or not -- give the same history, which is the FD check of the
  * columns on the assembled residual.
  *
- * k = 3 over levels 0..2, the midplane suite's rung.
+ * k = 3 over levels 0 and 1. Every claim here is an identity -- round-off
+ * agreement, a step count, a quadratic tail -- which no level makes truer:
+ * level 2 read the two gauges 3.4e-14 apart, which is the same round-off a
+ * coarser mesh reads, and is not a convergence rung. Two levels keep the
+ * claim off one mesh.
  */
 BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadraticNewton )
 {
@@ -4149,7 +4152,7 @@ BOOST_AUTO_TEST_CASE( theMirrorOnTheVacuumCurveIsTheFixedRadiusMirrorWithAQuadra
 	BOOST_TEST( check.relative <= meq::labelTolerance );
 
 	int const order = 3;
-	for ( int level : { 0, 1, 2 } )
+	for ( int level : { 0, 1 } )
 	{
 		Sampled const &radius = sampled( level, order, true );
 		Options o;
@@ -5082,64 +5085,17 @@ BOOST_AUTO_TEST_CASE( aTauThatFollowsTheReactionDoesNotLiftTheVacuumGaugesOwnFol
 }
 
 /*
- * 4. geq's MIRROR UNDER THE BORDERED GAUGE: M-278 section 4's matrix -- MEQ at
- * level 2, k = 4, on geq's midplane tables, against geq's direct solves -- with
- * MR-4d's three asks: falling at every refinement of geq, at geq's own rate, and
- * at 513 under geq's own 257 - 513 difference.
+ * 4. geq's MIRROR UNDER THE BORDERED GAUGE IS THE MIDPLANE SUITE'S CASE, AND IS
+ * ASSERTED THERE. M-278 section 4's matrix -- MEQ at level 2, k = 4, on geq's
+ * midplane tables, against geq's direct solves -- is
+ * midplane/meqAgreesWithGeqInTheMidplaneGauge: the midplane gauge IS the
+ * bordered gauge at GradShafranovSolver::defaultMidplaneGaugeKnots, 32, which
+ * is borderKnots here, on the same tables, so a copy of it in this suite was
+ * the same solve -- the same Newton history to every printed digit, 2.48e-01
+ * 1.86e-06 1.58e-10 8.99e-17, and the same differences against geq -- asserting
+ * a subset of the same claims at the cost of two level 2, k = 4 solves. A knot
+ * count other than the default would be a different claim; none is made.
  */
-BOOST_AUTO_TEST_CASE( meqAgreesWithGeqUnderTheBorderedGauge )
-{
-	std::vector<double> const g129 = readGeqPsi( "psi_direct_129.dat" );
-	std::vector<double> const g257 = readGeqPsi( "psi_direct_257.dat" );
-	std::vector<double> const g513 = readGeqPsi( "psi_direct_513.dat" );
-	MirrorProfiles const geq = geqMidplaneProfiles();
-	ladderStemInUse = borderStem;
-	Options o;
-	o.level = bestLevel;
-	o.order = bestOrder;
-	o.stem = borderStem;
-	o.profiles = &geq;
-	o.gaugeKnots = borderKnots;
-	std::unique_ptr<MirrorRun> const run = runMirror( o );
-	BOOST_TEST_REQUIRE( run->converged, run->failure );
-	std::printf( "\n  MR-4d UNDER THE BORDERED GAUGE, level %d, k = %d, %d knots\n", bestLevel,
-	             bestOrder, borderKnots );
-	printMerits( "bordered, from the vacuum", *run );
-	Sampled const best = reduce( run, o );
-
-	std::vector<double> const meq = withoutCorners( best.psiStar );
-	Difference const d129 = difference( meq, g129 );
-	Difference const d257 = difference( meq, g257 );
-	Difference const d513 = difference( meq, g513 );
-	Difference const geqCoarse = difference( withoutCorners( g129 ), g257 );
-	Difference const geqFine = difference( withoutCorners( g257 ), g513 );
-	Difference const fixedRadius = difference( meq, withoutCorners( reference().psiStar ) );
-	printDifference( "MEQ bordered - geq direct 129", d129 );
-	printDifference( "MEQ bordered - geq direct 257", d257 );
-	printDifference( "MEQ bordered - geq direct 513", d513 );
-	printDifference( "geq 257 - geq 513", geqFine );
-	printDifference( "MEQ bordered - MEQ fixed radius", fixedRadius );
-	std::printf( "    rates, max: MEQ - geq %.3f then %.3f; geq's own %.3f\n",
-	             std::log2( d129.max/d257.max ), std::log2( d257.max/d513.max ),
-	             std::log2( geqCoarse.max/geqFine.max ) );
-	std::printf( "    at 513: %.3f ( max ) and %.3f ( rms ) of geq's own 257 - 513\n",
-	             d513.max/geqFine.max, d513.rms/geqFine.rms );
-	std::fflush( stdout );
-
-	double const fluxScale = std::abs( best.psiBoundary );
-	if ( !meq::tests::aboveTheFormatsFloor( geqFine.max, fluxScale ) )
-	{
-		std::printf( "    *** SKIPPED: geq's own 257 - 513 difference is under this build's "
-		             "floor; the conversion bound alone is asserted. M-272\n" );
-		BOOST_TEST( d513.max < meq::tests::exactAgreementFloor( fluxScale ) );
-		return;
-	}
-	BOOST_TEST( ( d129.max > d257.max && d257.max > d513.max ) );
-	for ( auto const &step : { std::make_pair( d129.max, d257.max ), std::make_pair( d257.max, d513.max ) } )
-		BOOST_TEST( std::log2( step.first/step.second ) > std::log2( geqCoarse.max/geqFine.max ) - 0.30 );
-	BOOST_TEST( d513.max < geqFine.max );
-	BOOST_TEST( d513.rms < geqFine.rms );
-}
 
 /*
  * 5. WHAT THE BORDERED GAUGE REFUSES: a knot count not-a-knot cannot take, a
@@ -5303,8 +5259,11 @@ BOOST_AUTO_TEST_SUITE( route )
 
 /*
  * 1. THE BORDERED GAUGE FROM THE VACUUM, AND THE HELD START IT WAS GUESSED TO
- * NEED. Per case, k = 3, the default knots, each solve three times for a
- * median wall clock (printed, never asserted: the machine is shared):
+ * NEED. Per case, k = 3, the default knots, each solve once, its wall clock
+ * printed and never asserted -- the machine is shared, and every assertion
+ * below is on step counts and landings, which do not move between takes. A
+ * median over repeated takes is a timing study, and belongs in MEASUREMENTS.md
+ * rather than on every ctest:
  *
  *   (a) the bordered Newton from the vacuum, its knots on the vacuum's
  *       crossings -- what solve() does;
@@ -5320,7 +5279,7 @@ BOOST_AUTO_TEST_SUITE( route )
  */
 BOOST_AUTO_TEST_CASE( theHeldStartSavesAtMostOneBorderedStep )
 {
-	int const repeats = 3;
+	int const repeats = 1;
 	std::shared_ptr<meq::SplineProfile const> const vacuum = vacuumCrossing( 1024 );
 	for ( RouteCase const &c : routeCases() )
 	{
@@ -5573,8 +5532,15 @@ BOOST_AUTO_TEST_SUITE( anisotropic )
  * through PrescribedAnisotropy, at each delta0 and in each of geq's two
  * rearrangements of the lagged Delta, at 129, 257 and 513. MEQ solves the same
  * Delta, GeqReference.hpp's ReferenceAnisotropy, through the flux law beside
- * the subtracted filaments (AN-3b), at level 2, k = 4, read by psi* -- MR-4d's
- * best run -- with level 1 bounding its error as MR-4c's reference is bounded.
+ * the subtracted filaments (AN-3b), at level 2, k = 3, read by psi*, with
+ * level 1 bounding its error as MR-4c's reference is bounded.
+ *
+ * k = 3 AND NOT MR-4d's k = 4, BECAUSE EVERY CLAIM HERE IS ABOUT geq's ERROR.
+ * psi* converges at 4 at both degrees (postProcessedRate), so the bound on
+ * MEQ's own error keeps its factor; and that bound only has to sit under
+ * geq's 257 - 513 difference, which it does at k = 3 with the margins
+ * M-354 records -- at k = 4 the same bound sat 14 to 180 times under it,
+ * a resolution no assertion here reads.
  *
  * For each delta0 and each form, as MR-4d asserts it:
  *
@@ -5606,6 +5572,7 @@ BOOST_AUTO_TEST_SUITE( anisotropic )
  */
 BOOST_AUTO_TEST_CASE( meqAgreesWithGeqWithAnAnisotropy )
 {
+	int const anisotropicOrder = 3;
 	meqtest::geq::AnisotropicCase const aniso
 		= meqtest::geq::readAnisotropicCase( anisotropicDirectory() );
 	BOOST_TEST_REQUIRE( aniso.profiles == "reference/rotating",
@@ -5632,7 +5599,7 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqWithAnAnisotropy )
 	{
 		meqtest::geq::ReferenceAnisotropy const delta( amplitude, aniso.zCut );
 		Options o;
-		o.order = bestOrder;
+		o.order = anisotropicOrder;
 		o.stem = anisotropicStem;
 		o.anisotropy = &delta;
 		o.level = bestLevel - 1;
@@ -5643,7 +5610,7 @@ BOOST_AUTO_TEST_CASE( meqAgreesWithGeqWithAnAnisotropy )
 		                    == static_cast<int>( best.psiStar.size() ) );
 
 		Difference own = difference( coarse.psiStar, best.psiStar );
-		double const factor = std::pow( 2.0, postProcessedRate( bestOrder ) ) - 1.0;
+		double const factor = std::pow( 2.0, postProcessedRate( anisotropicOrder ) ) - 1.0;
 		own.max /= factor;
 		own.rms /= factor;
 		std::vector<double> const meq = withoutCorners( best.psiStar );

@@ -25,7 +25,7 @@
 
 /*
  * WHICH q CONDITION GIVES WAY TO EACH SCALE PIN -- A STUDY, RUN ONCE, BUILT
- * AND NOT REGISTERED WITH ctest. MEASUREMENTS.md M-QSCALE-1 and M-QSCALE-2.
+ * AND NOT REGISTERED WITH ctest. MEASUREMENTS.md M-355 and M-356.
  *
  * A q-driven equilibrium needs one scalar beside p( Psi_N ) and q( Psi_N ) to
  * select a member of the family they leave (M-353). Each pin adds a
@@ -314,7 +314,7 @@ namespace
 BOOST_AUTO_TEST_CASE( whichQConditionGivesWayToEachPin )
 {
 	Fixture fixture;
-	std::printf( "\n  M-QSCALE-1: smallest singular value of each pinned square system "
+	std::printf( "\n  M-355: smallest singular value of each pinned square system "
 	             "at the reference (box n = 24, k = 2), weight %.0f on the pin row\n",
 	             rowWeight );
 	std::printf( "    psi_ax* %.9e, mu0 I_p* %.9e\n", fixture.referenceAxis,
@@ -385,7 +385,7 @@ BOOST_AUTO_TEST_CASE( whichQConditionGivesWayToEachPin )
 BOOST_AUTO_TEST_CASE( thePlasmaCurrentBorderBesideTheFreeLoop )
 {
 	Fixture fixture;
-	std::printf( "\n  M-QSCALE-2: [source] PlasmaCurrent's border inside the free q loop\n" );
+	std::printf( "\n  M-356: [source] PlasmaCurrent's border inside the free q loop\n" );
 	for ( double factor : { 1.0, 1.1 } )
 	{
 		double const target = factor*fixture.referenceCurrent;
