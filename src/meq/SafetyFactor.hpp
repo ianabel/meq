@@ -270,6 +270,36 @@ namespace meq
 	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,
 	                         double solveAccuracy );
 
+	/**
+	 * THE FIT'S ORTHONORMAL COORDINATES: `R` with `y = R c`, from the QR of
+	 * fitToroidalFieldSquared()'s design matrix on @a labels (the family's
+	 * `Psi_N`, the design in the source's `Psi`), scaled by `1/sqrt( N )` so
+	 * that `y` is the coefficient vector's discrete L2 coordinate over the
+	 * surfaces. Upper triangular, `( degree + 1 )^2`, row-major.
+	 *
+	 * **THESE ARE THE COORDINATES THE q-DRIVEN MAP'S NOISE IS UNIFORM IN.**
+	 * The fitted `y` is `Q^T g^2/sqrt( N )`, so each coordinate's noise is at
+	 * most the surfaces' own; in the monomial coefficients `R^-1` multiplies
+	 * it, by 1/R_dd in the highest -- 3.5e-3 against 1.8e-4 between degrees 4
+	 * and 2 in single (MEASUREMENTS.md M-358, M-359).
+	 *
+	 * @throws std::invalid_argument as toroidalMapFloor() does.
+	 */
+	std::vector<double> fitOrthonormalFactor( std::vector<double> const &labels,
+	                                          unsigned int degree );
+
+	/**
+	 * toroidalMapFloor() in the fit's ORTHONORMAL coordinates: the round-off
+	 * floor of each `y_k` of the map's output, worst over `k`, with the same
+	 * model -- `4 x 4 x solveAccuracy` per surface's `g^2`, independent across
+	 * surfaces -- carried through `R P = Q^T/sqrt( N )` in place of `P`. It is
+	 * what a residual measured in `y` is noisy to, and what a difference step
+	 * in `y` is sized against (M-359).
+	 */
+	double toroidalMapFloorOrthonormal( ToroidalField const &field,
+	                                    unsigned int degree,
+	                                    double solveAccuracy );
+
 	/// `gg'` knots from that fit, in the SOURCE's `Psi`, exact on the
 	/// polynomial. Same reflection and the same edge extension as
 	/// ggPrimeKnots(); @a samples knots are laid down uniformly over the
@@ -379,6 +409,19 @@ namespace meq
 			/// Zero until a step has.
 			double floor() const { return lastFloor; }
 
+			/// toroidalMapFloorOrthonormal() at the last step that produced an
+			/// equilibrium: the same noise in the fit's orthonormal
+			/// coordinates, which a residual measured there is noisy to.
+			double orthonormalFloor() const { return lastOrthonormalFloor; }
+
+			/// The family's labels, `Psi_N`, at the last step that produced
+			/// an equilibrium: the abscissae the fit was taken on. Empty
+			/// until one has.
+			std::vector<double> const &lastLabels() const { return labels; }
+
+			/// The relative accuracy each equilibrium is solved to, as given.
+			double solveAccuracy() const { return options.solveAccuracy; }
+
 		private:
 			std::vector<double> refuse(
 				std::vector<double> const &coefficients ) const;
@@ -386,9 +429,158 @@ namespace meq
 			Solve solve;
 			Options options;
 			std::vector<double> lastGood;
+			std::vector<double> labels;
 			double lastFloor = 0.0;
+			double lastOrthonormalFloor = 0.0;
 			int solveCount = 0;
 			int refusalCount = 0;
+	};
+
+	/**
+	 * THE ONE SCALAR BESIDE `p( Psi_N )` AND `q( Psi_N )` THAT SELECTS THE
+	 * EQUILIBRIUM.
+	 *
+	 * Fixed-boundary equilibria sharing those two profiles form a ONE-PARAMETER
+	 * FAMILY: `q` sets the field-line pitch and not the field's strength, which
+	 * is VMEC's reason for wanting `PHIEDGE` beside `iota( s )`. Left free, the
+	 * family is the outer Jacobian's near-null direction and the member is
+	 * picked by the degree of `g^2` alone (MEASUREMENTS.md M-353). Each value
+	 * here is one input that picks it.
+	 */
+	enum class ScalePin
+	{
+		/// `g` on the boundary, `R0 B0`: `c_0 = g_edge^2` is HELD and leaves
+		/// the unknowns, since `c_0` enters no solve.
+		EdgeField,
+
+		/// `mu0 I_p` of the solved state, as a row of the outer system. The
+		/// inner solve's profile scale stays one.
+		PlasmaCurrent,
+
+		/// The DELIVERED toroidal flux, `Phi = int_plasma g( psi )/R dA` over
+		/// the solved equilibrium with `g^2` the iterate's own, as a row of the
+		/// outer system -- the equilibrium's flux, not the target's
+		/// (MEASUREMENTS.md M-362).
+		ToroidalFlux
+	};
+
+	/**
+	 * THE q-DRIVEN OUTER SYSTEM WITH ITS SCALE PINNED, KEPT SQUARE.
+	 *
+	 * meq::ToroidalFieldMap's fixed point `G( c ) = c` has `d + 1` conditions
+	 * -- the fit's rows -- for `d + 1` coefficients, and one direction they do
+	 * not determine: the family's scale. A pin removes it, and to keep the
+	 * system square ONE q CONDITION GIVES WAY: in the fit's orthonormal
+	 * coordinates `y = R c` (`R` from the QR of the design matrix on the
+	 * surfaces' labels, scaled by `1/sqrt( N )`), the highest row `y_d` is
+	 * dropped. So the `g^2` misfit left at the answer is a multiple of the
+	 * `d`-th orthogonal polynomial over the surfaces -- the one least able to
+	 * move the equilibrium -- and q is matched in every lower moment.
+	 *
+	 *   EdgeField      unknowns `c_1 .. c_d`; rows `y_0 .. y_{d-1}`
+	 *   PlasmaCurrent  unknowns `c_0 .. c_d`; rows `y_0 .. y_{d-1}` and
+	 *   ToroidalFlux   `w ( m - m* )/m*`, `m` the measured scalar
+	 *
+	 * **THE SAME ROW GIVES WAY UNDER EVERY PIN, AND THAT IS WHAT MAKES THEM
+	 * COMPOSE.** An equilibrium solved under one pin satisfies every other
+	 * pin's system once that pin is set to the value it reads -- so the three
+	 * pins return the same equilibrium -- only if each system drops the same q
+	 * condition: dropping different ones leaves the fit's misfit in different
+	 * directions, and the answers differ by it (MEASUREMENTS.md M-355).
+	 *
+	 * **INTERIM.** A condition gives way only because `g^2` is a polynomial of
+	 * fixed degree, and that fit is what makes the q-driven solve
+	 * inconsistent: its miss does not fall with the mesh (M-361,
+	 * QDrivenConsistency, red). The representation that replaces it refines
+	 * with the discretisation and is matched to `q` at every knot, so the pin
+	 * alone makes the system square (TODO, "The q-driven solve is
+	 * inconsistent").
+	 *
+	 * It is a ToroidalFieldMap -- the callable meq::solveForToroidalField
+	 * roots -- through `x -> x + F( x )`, so the outer Newton, its floor and
+	 * its refusals are the free loop's. Like the map it wraps, it never throws
+	 * for a reason the loop could meet: a refused step, or a pin that cannot be
+	 * read, returns a residual pointing back at the last admissible point --
+	 * scaled to twice the largest residual it has returned, so that the line
+	 * search can never accept a refused point, and reported by lastRefused(),
+	 * so that no Jacobian column is differenced across one (M-358).
+	 */
+	class PinnedToroidalFieldMap
+	{
+		public:
+			struct Pin
+			{
+				ScalePin kind = ScalePin::EdgeField;
+
+				/// `g_edge`, `mu0 I_p` or `psi_ax - psi_bnd`, by @ref kind.
+				double value = 0.0;
+
+				/// The solved state's own value of the pinned scalar, read
+				/// after each admissible solve and given the coefficients of
+				/// `g^2` that solve used -- the delivered toroidal flux reads
+				/// `g` itself. Unused for EdgeField. A throw is a refusal.
+				std::function<double( std::vector<double> const &coefficients )> measured;
+
+				/// The pin row's scale, in `g^2` per unit of relative misfit,
+				/// so that it sits beside the fit's rows. It moves the Newton
+				/// path and the reported conditioning, never the root.
+				double weight = 1.0;
+			};
+
+			/// @throws std::invalid_argument if @a pin's value is not usable
+			///         -- non-positive for EdgeField, zero or non-finite
+			///         otherwise -- or a row pin has nothing to measure.
+			PinnedToroidalFieldMap( ToroidalFieldMap &map, unsigned int degree,
+			                        Pin pin );
+
+			/// The outer Newton's unknowns from the coefficients of `g^2`:
+			/// all of them, or all but `c_0` under EdgeField.
+			std::vector<double> unknowns( std::vector<double> const &coefficients ) const;
+
+			/// And back, with `c_0 = g_edge^2` under EdgeField.
+			std::vector<double> coefficients( std::vector<double> const &unknowns ) const;
+
+			/// `x + F( x )`. Never throws for a reason the loop could meet.
+			std::vector<double> operator()( std::vector<double> const &unknowns );
+
+			/// The round-off floor of `F` at the last admissible step: the
+			/// map's in the fit's orthonormal coordinates, which the q rows
+			/// are measured in, and the pin row's.
+			double floor() const { return lastFloor; }
+
+			/**
+			 * THE COORDINATES TO DIFFERENCE THE OUTER JACOBIAN IN: the fit's
+			 * orthonormal ones, as the columns of `T` with `x = T z` --
+			 * `R^-1`, or under EdgeField the inverse of `R`'s block on
+			 * `c_1 .. c_d`. Row-major, square in the unknowns; empty until a
+			 * step has produced an equilibrium.
+			 *
+			 * There the map's noise is uniform, so one step, sized against
+			 * floor() -- which is in the same coordinates -- costs every
+			 * column the same 1%. In the monomial coefficients the top one's
+			 * noise is `1/R_dd` times the rest and the max-norm floor sized
+			 * every step to it (MEASUREMENTS.md M-359).
+			 */
+			std::vector<double> differenceBasis() const;
+
+			/// The pinned scalar as the last admissible step measured it.
+			double lastMeasured() const { return measuredValue; }
+
+			/// Whether the last call was a refusal -- what
+			/// meq::OuterNewtonOptions::mapRefused asks, so that no Jacobian
+			/// column is differenced across one.
+			bool lastRefused() const { return lastWasRefused; }
+
+		private:
+			ToroidalFieldMap &map;
+			unsigned int degree;
+			Pin pin;
+			std::vector<double> lastGood;
+			double lastFloor = 0.0;
+			double measuredValue = 0.0;
+			double largestResidual = 0.0;
+			bool lastWasRefused = false;
+			std::vector<double> lastLabels;
 	};
 
 	/**

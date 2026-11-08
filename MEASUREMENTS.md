@@ -23375,100 +23375,6 @@ Dropped on these numbers.**
 for the profile, the check and L0 `k = 1`'s element runs;
 `runs/tau-proto/three2/`, `three3/` (`run.sh`) for the mirror.
 
-### M-360
-
-**A TABLE NOW CONTINUES PAST ITS ENDS FROM ITS END VALUE AND SLOPE AND TAPERS
-FLAT OVER A TENTH OF ITS SPAN. NO SHIPPED FIXED-BOUNDARY ANSWER MOVES ABOVE
-3.4e-11; ONE FREE-BOUNDARY EXAMPLE THAT READS PAST ITS TABLE MOVES 9.3%, AND
-SAYS SO. LINEAR ALL THE WAY GIVES THE TABLE DERIVATIVE BACK ITS ORDER BUT
-COSTS `machine-c-mast` ITS CONVERGENCE IN EVERY DRAW; THE TAPER IS THE WIDEST
-THAT DOES NOT, AND RECOVERS THE ORDER ONLY IN PART.** `SplineProfile`,
-`tableContinuationWidth`; the warning is `Run.cpp`'s, from
-`GradShafranovSolver::sourceTableReach()`.
-
-**1. Shipped examples**, every `examples/*.toml` through `meq` (`meq-run`'s
-mesh), `OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`: `b7c549e` (the clamp)
-against the linear continuation and against the taper. The difference is the
-largest `ψ_h` coefficient's change over the largest coefficient; `ψ_ax`
-relative.
-
-| case | clamp → linear: `ψ_h` | `ψ_ax` | clamp → taper: `ψ_h` | `ψ_ax` | warning (taper) |
-|---|---|---|---|---|---|
-| `fixed-*` (6), `limited-tokamak*` (3), `q-driven`, `rotating-normalised` | ≤ 6.5e-11 | ≤ 3.4e-11 | ≤ 3.4e-11 | ≤ 2.1e-11 | — |
-| `free-boundary-halfdisc` | 1.27e-01 | 1.65e-02 | **9.28e-02** | **1.29e-02** | 0.086 of the span, 0.172 below the first knot |
-| `limiter-halfdisc` | 0 | 0 | 0 | 0 | 4.1 spans, 8.19 below the first knot |
-| `machine-c-mast` | **exits 2** | | 6.7e-15 | 5.1e-15 | — |
-| `mastu-nke` | 6.4e-15 | 3.7e-15 | 2.9e-15 | 4.4e-16 | — |
-| every other case that writes a `.nc` (23) | 0 | 0 | 0 | 0 | — |
-
-`limiter-halfdisc`'s `p'` is constant, so its end slope is zero and every
-continuation is the clamp. `free-boundary-halfdisc` has no `ConfineToPlasma`
-and its vacuum reads `Ψ` below its table's first knot, where the slope is not
-zero: its answer is the continuation's, and the warning is the tell. Five
-machine cases (`machine-b-ffprime`, `-b-ffprime-shaped`, `-c-mast-shaped`,
-`-d-tcv`, `-g-mastu-shaped`) exit 2 on all three binaries alike, and
-`manufactured` exits 1 (it needs a test fixture's closed form) on all three.
-
-**2. `machine-c-mast` over four draws** (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`
-= 2,1; 1,1; 4,1; 2,2), converged out of four:
-
-| continuation | converged |
-|---|---|
-| clamp (`b7c549e`) | 3 |
-| linear | 0 |
-| taper, `w` = 0.1 of the span | **4**, all to the clamp's answer (6.7e-15) |
-| taper, `w` = 0.2, 0.3, 0.5, 1 | 0 each |
-| `w tanh(d/w)`, `w` = 0.05 (the same reach as the 0.1 taper), and 0.1 | 0 each |
-
-The failures are not a crawl: the residual falls to about 2 (from 7e+01 at
-the start), then jumps by an order and stalls there. The converged answer
-never reads past a table — the run gives no warning under any continuation
-that converges — so it is the iterates on the way that read past the axis
-end, and a continuation that keeps rising there sends the Newton elsewhere.
-**The case is already a knife edge under the clamp**, 3 of 4.
-
-**3. The derivative's order.** `TangentConvergence`'s
-`aClampInsideTheDomainCostsTheTangentItsRate` (on `manta/table-derivative`,
-measurement only): an `MHDSource` whose `p'` table, `0.5 + 2ψ + 30ψ²`, ends
-at `ψ_c`, half the solution's peak, so the solution reads up to one span past
-it; self-convergence against 64 cells on a 4000-point Halton cloud; the
-derivative along the table's own entries. `δψ` L2 on 32 cells, with the rate
-from 16:
-
-| arm | `k = 2` | `k = 3` |
-|---|---|---|
-| the table goes on past the peak (the control) | 3.87e-07 (3.00) | 2.02e-08 (3.30) |
-| linear continuation | 3.82e-07 (2.93) | 3.05e-08 (3.13) |
-| taper, `w` = 1 span | 4.78e-07 (2.71) | 7.38e-08 (2.87) |
-| taper, `w` = 0.3 | 9.33e-07 (2.44) | 2.54e-07 (2.64) |
-| `w tanh(d/w)`, `w` = 0.1 | 1.41e-06 (2.42) | 4.14e-07 (2.80) |
-| **taper, `w` = 0.1 (`SplineProfile`)** | **2.44e-06 (1.99)** | **7.60e-07 (2.57)** |
-| `w tanh(d/w)`, `w` = 0.05 | 2.54e-06 (1.96) | 8.77e-07 (2.41) |
-| clamp | 4.64e-06 (1.56) | 2.24e-06 (1.87) |
-
-`ψ_h` itself is within 1.2× of the control in every arm. **Linear recovers
-the control**; the taper gives back a factor 3 at `k = 3` and 2 at `k = 2` of
-the clamp's loss, and the error falls monotonically as `w` widens.
-
-**Falsified: that the cost is the curvature jump at the end.** The quadratic
-taper's `g″` jumps from 0 to `−1/w` at the end, the linear one's does not, so
-the hypothesis was that the jump set the error. `w tanh(d/w)` has no jump
-there and no kink anywhere, and at the same reach (`w` = 0.05 against the
-taper's 0.1, both flat at `0.05` of the span) it is no better — 8.8e-07
-against 7.6e-07. What sets the error is the width over which `∂F/∂ψ` falls
-from `f′_e` to zero, a feature in `ψ` the mesh has to resolve; any bounded
-continuation has one. So the choice is between the derivative's order past a
-table end (linear) and `machine-c-mast` (bounded), and **the taper at 0.1 is
-the widest bounded continuation the shipped cases allow**.
-
-**The suite**: the unit tests that described the clamp now assert the
-continuation (`ProfilesTests`, `SourceTests`) and the reach
-(`a_read_past_a_table_is_reported_with_how_far`). With the continuation in,
-merged on `manta/table-derivative` over `main` `d3d93fc`, 139 of 141 pass and
-the two reds are the deliberate ones, `PlasmaEdgeConvergence` and
-`AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`
-(`OMP_NUM_THREADS = 2`, `ctest -j2`, 48 minutes).
-
 ### M-350
 
 **`AnisotropicConvergence` AND `AnisotropicMirror` QUALIFIED IN SINGLE
@@ -23957,3 +23863,490 @@ least 3.0 times to spare, and the bounds are deterministic at
 `MKL_NUM_THREADS=1`. The suite runs `k = 3`; [M-337](#m-337)'s table is the
 `k = 4` run, and its "4 to 45 times under the 513² difference" is that
 degree's.
+
+### M-355
+
+**Which q condition gives way to each scale pin, by the smallest singular
+value of the square system.** `SafetyFactorPinStudy` (built, not a ctest),
+`q-solve-scale` off `fix/q-driven-band` at `9893091`, double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`: `SafetyFactorSolver`'s fixture (box
+`n = 24`, `k = 2`, `p′ = 0.45`, `μ₀ = 1`, 12 surfaces × 96 angles, the target
+the `q` of `g = 2.20 + 0.55Ψ`), Jacobians differenced centrally at the answer
+(step 1e-3), rows and columns in the fit's orthonormal coordinates `y = Rc`,
+the pin row `10 (m − m*)/m*`. "Gives way": the direction of the fit's residual
+space left free — `y_k`, the `k`-th orthonormal row, or "axis", the
+coefficient of `Ψ^d` (a misfit zero to order `d` at the edge and largest on
+the axis). `σ_min/σ_max`; `ψ_ax` free means the bordered inner solve with the
+pin a row of the outer system, `ψ_ax` held the plain inner solve at the
+target's normalisation with the located axis as the row. "`Φ` delivered" is
+`ToroidalFlux` as it is posed, the equilibrium's own `∫g/R dA` (M-362); the two
+`Φ_edge` columns are the `ψ_ax − ψ_bnd` row it replaces, kept for the
+comparison.
+
+| degree | gives way | `R0B0` (`c₀` held) | `Φ_edge`, `ψ_ax` free | `Φ_edge`, `ψ_ax` held | `I_p`, `ψ_ax` free | `Φ` delivered |
+|---|---|---|---|---|---|---|
+| 2 | `y_0` | 1.57e-2 / 15.8 | 0 / 17.8 | 0 / 27.0 | 0 / 21.6 | 1.39e-2 / 15.8 |
+| 2 | `y_1` | 0.116 / 21.9 | 0.0587 / 21.9 | 0.0587 / 41.0 | 0.0110 / 23.8 | 0.163 / 19.9 |
+| 2 | **`y_2`** | **2.69** / 26.9 | **0.578** / 26.5 | **0.594** / 44.2 | **0.329** / 28.5 | **0.755** / 25.0 |
+| 2 | axis | 2.68 / 4.11 | 0.266 / 10.0 | 0.268 / 23.1 | 0.198 / 15.8 | 0.732 / 4.75 |
+| 4 | `y_0` | 7.9e-4 / 86.2 | 0 / 90.0 | 0 / 110 | 0 / 90.6 | 7.0e-4 / 86.3 |
+| 4 | `y_1` | 7.4e-3 / 84.9 | 3.7e-3 / 86.7 | 3.3e-3 / 136 | 8.3e-4 / 87.2 | 1.03e-2 / 82.7 |
+| 4 | `y_2` | 0.210 / 103 | 0.263 / 105 | 0.262 / 151 | 0.0161 / 105 | 0.327 / 102 |
+| 4 | `y_3` | 0.390 / 110 | 0.522 / 112 | 0.531 / 156 | 0.0195 / 112 | 0.639 / 109 |
+| 4 | **`y_4`** | **2.23** / 112 | **0.577** / 113 | **0.593** / 157 | **0.173** / 113 | **0.755** / 110 |
+| 4 | axis | 0.0357 / 18.5 | 1.8e-3 / 30.2 | 1.6e-3 / 63.4 | 6.9e-3 / 38.5 | 1.67e-2 / 20.0 |
+
+Free, no pin: `σ_min` 2.39e-3 at degree 2 and 1.21e-4 at degree 4.
+`d ln ψ_ax/dc` = (0, 0.132, 0.195, 0.237, 0.269) and `d ln I_p/dc` = (0, 0.151,
+0.0576, 0.0031, −0.036): **`c₀` enters no solve**, so with `c₀` an unknown and
+a pin that does not read it the fit's `y_0` is the only row that sees it and
+dropping it is exactly singular. The delivered flux reads `g` itself, so
+`c₀` is in its row, `d ln Φ/dc` = (0.0837, 0.0373, 0.0182, 0.0065, −0.0019),
+and dropping `y_0` there is merely poor.
+
+**The highest row `y_d` gives way best under every pin at both degrees** —
+at degree 2 the axis limit ties it under `R0B0` (2.68 against 2.69) and loses
+under the other two, and at degree 4 it is 60× to 300× worse. The pinned
+systems are 100× (degree 2) to 10⁴× (degree 4) better conditioned than the free
+one. **Holding `ψ_ax` inside buys nothing over the free inner solve with the
+flux as an outer row** (0.594 against 0.578, 0.593 against 0.577), and the
+held inner solve is the outer closure `CLAUDE_DECLINED.md` records falsified
+(*Fixing `ψ_ax`, or closing it outside the solver*), so the flux pin is a row
+beside the bordered Newton.
+
+**Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy`
+(about 5 minutes); `runs/q-solve-scale/study/study.log`, and
+`study-delivered.log` for the delivered-flux column.
+
+### M-356
+
+**`[source] PlasmaCurrent` as a profile-scale border beside the free q loop
+selects a member, and it is not the member asked for.** `SafetyFactorPinStudy`'s
+second case, the M-355 fixture, degree 2, the free outer loop around a
+bordered inner solve carrying `μ₀ I_p` as a border (the scale `α`
+multiplies `p′` and `gg′` together), from `g = 2`:
+
+| `I_p` asked | KINSOL its / equilibria | `α` | `ψ_ax` (reference 0.345741) | `c` | `q` against the target |
+|---|---|---|---|---|---|
+| `I_p*` | 8 / 57 | 1.3467 | 0.330550 | 4.7247, 1.6944, −0.0299 | 4.3e-2 |
+| `1.1 I_p*` | 7 / 50 | 1.7219 | 0.356154 | 5.6715, 1.5973, −0.1230 | 6.9e-2 |
+
+The loop converges, and at `α ≠ 1`: **asked for the reference's own current it
+does not return the reference**. The equilibrium carries `α p`, a pressure
+nobody gave, and `gg′` is `α` times the one the loop fitted, so the `g²` the
+loop reports is not the equilibrium's and its `q` misses the target by 4–7%
+(the last column: `√((c₀ + αV)/(c₀ + V)) − 1`, `V` the fit's varying part, worst
+over the surfaces). **It fights the loop.** As a pin the current is instead a
+row of the outer system with `α = 1` (`GradShafranovSolver::deliveredPlasmaCurrent()`).
+
+**Reproduce.** As M-355.
+
+### M-357
+
+**The three pins compose, and each converges with no crawl.** `q-solve-scale`,
+double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a loaded machine (wall times
+are not measurements).
+
+**(a) `examples/q-driven.toml`** (`R0B0 = 2.2`, the target's own boundary `g`),
+and the same file under the other two pins at the values it reads, from
+`ToroidalFieldGuess = 1.8`:
+
+| pin | KINSOL its / equilibria | conditioning | `g²` |
+|---|---|---|---|
+| `R0B0 = 2.2` | 5 / 26 | 0.167 | 4.840000, 2.419999, 0.3025002 |
+| `ToroidalFlux = 2.491162995` (delivered) | 4 / 29 | 0.0982 | the same |
+| `PlasmaCurrent = 5.212435078` | 5 / 36 | 0.0751 | the same |
+
+against 5 / 36 at conditioning 6.4e-3 with no pin (M-353). Reported
+conditioning is in the unknowns' own coordinates and is diagnostic only.
+
+**(b) `QDrivenScalePin`, the composition, asserted.** The q-driven box at
+`RefinementLevels = 0`, the target `q-driven-q.dat × (1 + 0.2Ψ³)`, which no
+quadratic `g²` follows. A base run under `PlasmaCurrent = 5.0` from `g = 1.8`
+reads `R0B0 = 1.937000629`, the delivered `Φ = 2.215489783` and
+`I_p = 5.000000000`; re-solved under each:
+
+| re-solved under | KINSOL its / equilibria | `ψ_h` from the base | `g²` from the base |
+|---|---|---|---|
+| base, `PlasmaCurrent = 5.0` | 5 / 36 | | |
+| `R0B0` | 5 / 26 | 8.4e-11 | 7.3e-11 |
+| `ToroidalFlux`, from `g = 2.2` | 5 / 38 | 2.4e-13 | 1.7e-13 |
+| `PlasmaCurrent`, from `g = 2.2` | 5 / 36 | 2.1e-15 | 2.1e-15 |
+
+(The table is the current code's: delivered flux, orthonormal differencing,
+and main's table continuation, M-360, which moves the base's `R0B0` by 9e-8.)
+
+(relative to the peak coefficient). 58 s. **Mutated**: `R0B0` giving way on the
+axis limit instead of `y_2` puts its answer 0.13 of `ψ`'s peak from the others
+(`Φ` 2.506 against 2.214); `PlasmaCurrent` giving way on `y_1` moves the base
+itself and puts the three 0.045 to 0.13 apart, one of them taking 24 KINSOL
+iterations. Both fail the case. **Which q condition gives way moves the answer
+by the fit's misfit — 13% of `ψ` here — so it is part of the problem posed and
+has to be one choice under every pin.**
+
+**(c) `fixed-d-tcv` with a measured `q`** — M-353 (b)'s failing case: the MXH
+boundary at `RefinementLevels = 1` (3993 elements), the target the `q` of the
+shipped `gg′` run on the same mesh, `g_edge = 1.400002`, degree 2:
+
+| pin, opening `g` | KINSOL its / equilibria | refused | conditioning | final norm / threshold |
+|---|---|---|---|---|
+| `R0B0 = 1.400002` | 5 / 26 | 0 | 0.461 | 1.4e-11 / 1e-9 |
+| `ToroidalFlux = 0.5174642912` (delivered), 1.4 | 5 / 36 | 0 | 5.3e-3 | 1.4e-11 / 1e-9 |
+| `ToroidalFlux`, 1.2 | 5 / 36 | 0 | 3.9e-3 | 6.7e-12 / 1e-9 |
+| `PlasmaCurrent = 1.168128770e5`, 1.4 | 5 / 36 | 0 | 5.9e-4 | 8.8e-10 / 1e-9 |
+| `PlasmaCurrent`, 1.2 | 5 / 36 | 0 | 7.6e-4 | |
+| `R0B0`, degree 3 | 5 / 36 | 0 | 0.043 | 2.8e-12 / 1e-9 |
+
+Differenced in the fit's orthonormal coordinates (M-359), wall 1 m 6 s to
+1 m 29 s each on a loaded machine. The loop's floor at this
+`NewtonRelativeTolerance = 1e-10` is now under the tolerance, so the threshold
+is the tolerance's 1e-9: under the monomial floor it was 2.1e-8 (1.5e-7 at
+degree 3), and the same runs stopped one iteration earlier — 3 / 16, 4 / 29
+and 3 / 22 — at 3.0e-9, 5.4e-11 to 6.1e-11 and 1.3e-8, with the same `g²` to
+every printed digit.
+
+Every degree-2 run returns `g² = 1.960006, −2.780245e-3, 1.396952e-2` and reads
+`R0B0 = 1.400002`, the delivered `Φ = 0.517464 Wb`, `I_p = 1.168129e5 A`, where unpinned the
+loop failed in 10 iterations and 145 equilibria from 1.4 and was still running
+after 35 minutes from 1.2. At degree 3 the member moves (delivered `Φ`
+0.517428, `I_p` 1.116323e5): the degree is part of the model, and no longer what selects
+the member.
+
+**(d) `QDrivenCurvedBoundary` under `R0B0 = 2.2`**, asserted: the Miller
+boundary at `RefinementLevels = 0`, `k = 2`, the target the `q` of
+`g = 2.20 + 0.55Ψ` on the same mesh. 5 KINSOL iterations, 26 equilibria, none
+refused, conditioning 0.210, `g² = 4.84000000 + 2.42000000Ψ + 0.30250000Ψ²`;
+35 s.
+
+**Reproduce.** (a) `runs/q-solve-scale/example/` (`run.log`, `flux.toml`,
+`current.toml`); (b) `MKL_NUM_THREADS=1 ./QDrivenScalePin`,
+`runs/q-solve-scale/study/composition.log` and `mutation-a.log`,
+`mutation-c.log` (the mutated row in `PinnedToroidalFieldMap::operator()`);
+(c) `runs/q-solve-scale/tcv/` (`make.sh`, `run.sh`, `base.toml` from M-353's
+`tcv-d2-g1.4.toml`, `tcv-q.dat`, one `.toml`/`.log` per row).
+
+### M-358
+
+**The pinned q loop in single precision: a refused point accepted by the line
+search and differenced into the Jacobian, and `SafetyFactorScale`'s fixed
+difference step.** `q-solve-scale` at `5687e6b` and its parent, `builds/q-solve-scale`
+(double) and `builds/q-solve-scale-single` (MFEM `install-single`),
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+**(a) `QDrivenScalePin`'s base run** (`PlasmaCurrent = 5.0` from
+`ToroidalFieldGuess = 1.8`, the box at `RefinementLevels = 0`, target
+`q-driven-q.dat × (1 + 0.2Ψ³)`) stopped in single on a line search at a
+residual of 0.142 against a floor of 4.9e-4: 3 KINSOL iterations, 26
+equilibria, 9 refused; in double it converges in 5 and 36. Traced:
+
+| suspect | single | double | verdict |
+|---|---|---|---|
+| the outer Jacobian's step | 100 floors: 2.26e-2 relative | 1e-4 | sized to single's noise as designed; at the opening point the two Jacobians agree to 1–5% (column `c₂`: −3.150, −1.245, 0.438 against −3.17, −1.258, 0.435) |
+| the inner solve's accuracy | the fit rows move 7e-7 between evaluations whose solve is the same (`c₀` enters none) | 1e-13 | far below the step's reach; not the cause |
+| `∫F/R` for the `I_p` row | 2.506820672, 2.506820373, 2.506820424 at three such evaluations: 1.2e-7 relative | identical | not the cause |
+| the 9 refusals | every one an extraction failure, `ψ` at `Ψ_N = 0.95` "not attained" | the same `gg′` solved directly fails the same way, in both precisions | **real**: the region exists; single's larger step reaches it and double's 1e-4 does not |
+
+**The defect is how the loop met them, twice over.** At the first iterate the
+`c₁` column's minus side was refused, so the column was differenced against a
+refusal's residual, `lastGood − x`, which is not the map; the step built on it
+landed on another refused point — and that point's refusal residual, pointing
+back at a differencing column a short way off, read **0.16 against the
+iterate's 0.50**, so the Armijo test accepted it. The loop then sat on a point
+the map cannot evaluate, every column through it refused, and stopped at the
+refusal residual, 0.142.
+
+**Repaired** (`meq::PinnedToroidalFieldMap`, `meq::solveForToroidalField`): a
+refusal's residual is scaled to twice the largest admissible residual the map
+has returned, so no line search accepts one; and a refused side of a Jacobian
+column is not differenced — the column goes one-sided from the point, zero if
+both sides refuse (`OuterNewtonOptions::mapRefused`). In double no pinned run
+here meets a refusal, and every number is unchanged. In single:
+
+| pin | KINSOL its / equilibria | refused | final norm / threshold | `R0B0` read |
+|---|---|---|---|---|
+| `PlasmaCurrent = 5.0` | 3 / 22 | 2 | 1.05e-4 / 6.2e-4 | 1.936920 |
+| `R0B0 = 1.937000795` | 4 / 21 | 0 | 2.8e-6 / 6.2e-4 | 1.937001 |
+| `ToroidalFlux = 2.213770701` | 3 / 22 | 0 | 4.3e-5 / 6.2e-4 | 1.936983 |
+
+**`QDrivenScalePin` still fails in single, on its agreement bound and not on
+convergence**: every run converges in 3 or 4 iterations, and the re-solves sit
+5.9e-6, 9.4e-6 and 3.7e-5 of `ψ`'s peak from the base (`g²` 1.2e-5 to 6.8e-5),
+against the case's 1e-6. Each answer is converged only to the loop's floor,
+6.2e-4 in the residual, so agreement below about 1e-5 is not available in
+single. `QDrivenCurvedBoundary` passes in single (`g²` within 3.0e-5).
+
+**(b) `SafetyFactorScale` in single** (`main`'s single suite at `b7c549e`): the
+30× ratios fail because the free `σ_min` at degree 4 reads 1.46e-3 against
+double's 3.56e-4. Same cause in kind — a difference step against single's
+noise — and a different mechanism: the fixture differences at a fixed 1e-3,
+and the map's noise in the coefficients, measured as the change in `G(c)` at
+one `c` from two warm starts, is 1.8e-4 at degree 2 and 3.5e-3 at degree 4 in
+single (2.4e-14 and 5.3e-13 in double). Free `σ_min` by step:
+
+| step | 1e-3 | 3e-3 | 1e-2 | 3e-2 |
+|---|---|---|---|---|
+| degree 2, double | 2.896e-3 | 2.896e-3 | 2.873e-3 | 2.880e-3 |
+| degree 2, single | 3.267e-3 | 1.998e-3 | 2.872e-3 | 2.775e-3 |
+| degree 4, double | 3.557e-4 | 2.912e-4 | 4.385e-4 | 3.603e-4 |
+| degree 4, single | 8.567e-4 | 1.067e-4 | 2.844e-4 | 3.294e-4 |
+
+At 1e-2 and above single reads double's value to within double's own spread
+over the step. **The production rule does not transfer**: `100 ×
+toroidalMapFloor()` is 4.9e-2 at degree 2, where single then reads 2.778e-3,
+but 1.78 at degree 4, where the floor model (1.8e-2, five times the measured
+noise) is dominated by the ill-determined top coefficient and the step leaves
+the admissible region. The noise that matters to `σ_min` is the noise in the
+fit's orthonormal coordinates, not in `c`. Not repaired: TODO.
+
+**Reproduce.** `runs/q-solve-scale/single-diag/` (`current.toml`, `edge.toml`,
+`flux.toml`, `fixedgg.toml` with `gg.dat` for the refused `gg′`, and the
+`*.log`s), `runs/q-solve-scale/single/QDrivenScalePin.log` for the stall; the
+step table from a probe case run once in both trees, not kept.
+
+### M-359
+
+**Differencing in the fit's orthonormal coordinates: the outer loop's floor
+falls 28× in single, and `SafetyFactorScale` passes there.** `q-solve-scale`
+off `f81b09f`, `builds/q-solve-scale` (double) and `builds/q-solve-scale-single`
+(MFEM `install-single`), `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+The outer Jacobian is differenced along `T = R⁻¹` (`R` from
+`meq::fitOrthonormalFactor()`; its `c₁ … c_d` block under `R0B0`), with the
+step `max(1e-4, 100 floors) × max(|z_k|, 1)` in those coordinates
+(`OuterNewtonOptions::differenceBasis`), and the pinned map's floor is
+`meq::toroidalMapFloorOrthonormal()` — the same `16 ε` per surface carried
+through `Qᵀ/√N` — beside a pin row of `4 ε × weight`. In place of the monomial
+max-norm floor times `R`'s row sum, which charged every row the top
+coefficient's noise. `SafetyFactorScale` differences the same way, at
+`max(1e-3, 100 floors)`.
+
+**(a) The map's noise per orthonormal coordinate, against the floor model**
+(`SafetyFactorScale`'s fixture, `n = 12`, `k = 2`, the answer evaluated from
+five warm starts; a probe run once):
+
+| | worst `y` noise | orthonormal floor | floor/noise |
+|---|---|---|---|
+| single, degree 2 | 1.30e-5 | 3.54e-5 | 2.7 |
+| single, degree 4 | 1.47e-5 | 3.54e-5 | 2.4 |
+| double, degree 2 | 5.3e-13 | 2.97e-11 | 56 |
+| double, degree 4 | 6.4e-13 | 2.97e-11 | 47 |
+
+In the monomial coefficients the same single noise is 1.8e-4 and 3.5e-3
+(M-358): the factor is `R⁻¹`, not the map.
+
+**(b) `QDrivenScalePin`'s three pins in single** (the M-358 configurations):
+
+| pin | KINSOL its / equilibria | refused | final norm / threshold | `R0B0` read |
+|---|---|---|---|---|
+| `PlasmaCurrent = 5.0` | 4 / 29 | 2 | 1.79e-6 / 2.20e-5 | 1.936999841 |
+| `R0B0` | 4 / 21 | 0 | 1.90e-6 / 2.09e-5 | 1.937000795 |
+| `ToroidalFlux` | 4 / 29 | 1 | 1.20e-6 / 2.54e-5 | 1.937000579 |
+
+The threshold falls from 6.2e-4 to 2.1–2.5e-5. The composition test's
+re-solves sit **5.0e-7, 1.11e-6 and 5.0e-7** of `ψ`'s peak from the base
+(`g²` 4.4e-7, 1.14e-6, 7.0e-7), against 5.9e-6 to 3.7e-5 before: a 33× fall,
+with one re-solve still 1.11× over the case's 1e-6. Every run stops at a
+residual of 1.2–1.9e-6, **already under the map's measured noise of ~1.3e-5 per
+coordinate**: what is left is the map, not the stopping test.
+
+**(c) `SafetyFactorScale`** (30× unchanged):
+
+| | free `σ_min`, degree 2 / 4 | held `σ_min` 2 / 4 | `d ln ψ_ax/d ln c₀` 2 / 4 | solves |
+|---|---|---|---|---|
+| single, before (M-358) | 3.811e-3 / 1.464e-3 | — / 1.94e-2 | 0.5272 / 0.5385 | 168 |
+| single | 2.888e-3 / 4.255e-4 | 0.5116 / 2.258e-2 | 0.5266 / 0.5266 | 170 |
+| double, before | 2.896e-3 / 3.557e-4 | 0.5128 / 2.270e-2 | 0.5267 / 0.5268 | 125 |
+| double | 2.883e-3 / 4.456e-4 | 0.5123 / 2.267e-2 | 0.5267 / 0.5269 | 116 |
+
+Single now passes, the ratio at degree 4 53× against 30×.
+
+**(d) Double moves within its bounds**: `QDrivenScalePin`'s re-solves 8.4e-11,
+3.2e-11 and 1.1e-15 (1.1e-14, 3.3e-11, 1.7e-15 before), the same iteration and
+equilibrium counts; `QDrivenCurvedBoundary` recovers `g²` to every printed digit.
+
+**The bound is `max(1e-6, 20 ε)`**, `ε` the build's machine epsilon: 1e-6 in
+double, 2.4e-6 in single, twice the inner solve's ten-eps accuracy, which is
+what the single spread is (the map's noise, not an amplification of it).
+`QDrivenScalePin` passes in both precisions under it. **Mutated in single** it
+still fails: `R0B0` giving way on the axis limit puts its re-solve 0.132 of
+`ψ`'s peak away, and `PlasmaCurrent` giving way on `y_1` leaves the base run
+unconverged after 21 KINSOL iterations and 256 equilibria, 34 refused, at a
+residual of 0.227 (`runs/q-solve-scale/single/single-mutation-a.log`, `-c.log`).
+
+**(e) What else moved in double.** `fixed-d-tcv` under every pin takes one
+more KINSOL iteration — 5 / 26 under `R0B0`, 5 / 36 under the others and at
+degree 3, against 3 / 16, 4 / 29 and 3 / 22 — because its floor, measured in
+`y`, now falls under the 1e-9 tolerance, which is then the threshold in place
+of the monomial floor's 2.1e-8; the `g²` and the three scalars are unchanged
+to every printed digit (M-357(c), updated in place). `examples/q-driven.toml`
+under each pin, `QDrivenCurvedBoundary` and the M-357(a) counts are unchanged
+to the printed digit. `DriverAcceptance` passes.
+
+**Reproduce.** `runs/q-solve-scale/single-diag/` (`*.basis-single.log`),
+`runs/q-solve-scale/tcv/` (the refreshed logs; the previous ones in `prev/`),
+`runs/q-solve-scale/example/`, and `MKL_NUM_THREADS=1 ./QDrivenScalePin` and
+`./SafetyFactorScale` in both trees.
+
+### M-360
+
+**A TABLE NOW CONTINUES PAST ITS ENDS FROM ITS END VALUE AND SLOPE AND TAPERS
+FLAT OVER A TENTH OF ITS SPAN. NO SHIPPED FIXED-BOUNDARY ANSWER MOVES ABOVE
+3.4e-11; ONE FREE-BOUNDARY EXAMPLE THAT READS PAST ITS TABLE MOVES 9.3%, AND
+SAYS SO. LINEAR ALL THE WAY GIVES THE TABLE DERIVATIVE BACK ITS ORDER BUT
+COSTS `machine-c-mast` ITS CONVERGENCE IN EVERY DRAW; THE TAPER IS THE WIDEST
+THAT DOES NOT, AND RECOVERS THE ORDER ONLY IN PART.** `SplineProfile`,
+`tableContinuationWidth`; the warning is `Run.cpp`'s, from
+`GradShafranovSolver::sourceTableReach()`.
+
+**1. Shipped examples**, every `examples/*.toml` through `meq` (`meq-run`'s
+mesh), `OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`: `b7c549e` (the clamp)
+against the linear continuation and against the taper. The difference is the
+largest `ψ_h` coefficient's change over the largest coefficient; `ψ_ax`
+relative.
+
+| case | clamp → linear: `ψ_h` | `ψ_ax` | clamp → taper: `ψ_h` | `ψ_ax` | warning (taper) |
+|---|---|---|---|---|---|
+| `fixed-*` (6), `limited-tokamak*` (3), `q-driven`, `rotating-normalised` | ≤ 6.5e-11 | ≤ 3.4e-11 | ≤ 3.4e-11 | ≤ 2.1e-11 | — |
+| `free-boundary-halfdisc` | 1.27e-01 | 1.65e-02 | **9.28e-02** | **1.29e-02** | 0.086 of the span, 0.172 below the first knot |
+| `limiter-halfdisc` | 0 | 0 | 0 | 0 | 4.1 spans, 8.19 below the first knot |
+| `machine-c-mast` | **exits 2** | | 6.7e-15 | 5.1e-15 | — |
+| `mastu-nke` | 6.4e-15 | 3.7e-15 | 2.9e-15 | 4.4e-16 | — |
+| every other case that writes a `.nc` (23) | 0 | 0 | 0 | 0 | — |
+
+`limiter-halfdisc`'s `p'` is constant, so its end slope is zero and every
+continuation is the clamp. `free-boundary-halfdisc` has no `ConfineToPlasma`
+and its vacuum reads `Ψ` below its table's first knot, where the slope is not
+zero: its answer is the continuation's, and the warning is the tell. Five
+machine cases (`machine-b-ffprime`, `-b-ffprime-shaped`, `-c-mast-shaped`,
+`-d-tcv`, `-g-mastu-shaped`) exit 2 on all three binaries alike, and
+`manufactured` exits 1 (it needs a test fixture's closed form) on all three.
+
+**2. `machine-c-mast` over four draws** (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`
+= 2,1; 1,1; 4,1; 2,2), converged out of four:
+
+| continuation | converged |
+|---|---|
+| clamp (`b7c549e`) | 3 |
+| linear | 0 |
+| taper, `w` = 0.1 of the span | **4**, all to the clamp's answer (6.7e-15) |
+| taper, `w` = 0.2, 0.3, 0.5, 1 | 0 each |
+| `w tanh(d/w)`, `w` = 0.05 (the same reach as the 0.1 taper), and 0.1 | 0 each |
+
+The failures are not a crawl: the residual falls to about 2 (from 7e+01 at
+the start), then jumps by an order and stalls there. The converged answer
+never reads past a table — the run gives no warning under any continuation
+that converges — so it is the iterates on the way that read past the axis
+end, and a continuation that keeps rising there sends the Newton elsewhere.
+**The case is already a knife edge under the clamp**, 3 of 4.
+
+**3. The derivative's order.** `TangentConvergence`'s
+`aClampInsideTheDomainCostsTheTangentItsRate` (on `manta/table-derivative`,
+measurement only): an `MHDSource` whose `p'` table, `0.5 + 2ψ + 30ψ²`, ends
+at `ψ_c`, half the solution's peak, so the solution reads up to one span past
+it; self-convergence against 64 cells on a 4000-point Halton cloud; the
+derivative along the table's own entries. `δψ` L2 on 32 cells, with the rate
+from 16:
+
+| arm | `k = 2` | `k = 3` |
+|---|---|---|
+| the table goes on past the peak (the control) | 3.87e-07 (3.00) | 2.02e-08 (3.30) |
+| linear continuation | 3.82e-07 (2.93) | 3.05e-08 (3.13) |
+| taper, `w` = 1 span | 4.78e-07 (2.71) | 7.38e-08 (2.87) |
+| taper, `w` = 0.3 | 9.33e-07 (2.44) | 2.54e-07 (2.64) |
+| `w tanh(d/w)`, `w` = 0.1 | 1.41e-06 (2.42) | 4.14e-07 (2.80) |
+| **taper, `w` = 0.1 (`SplineProfile`)** | **2.44e-06 (1.99)** | **7.60e-07 (2.57)** |
+| `w tanh(d/w)`, `w` = 0.05 | 2.54e-06 (1.96) | 8.77e-07 (2.41) |
+| clamp | 4.64e-06 (1.56) | 2.24e-06 (1.87) |
+
+`ψ_h` itself is within 1.2× of the control in every arm. **Linear recovers
+the control**; the taper gives back a factor 3 at `k = 3` and 2 at `k = 2` of
+the clamp's loss, and the error falls monotonically as `w` widens.
+
+**Falsified: that the cost is the curvature jump at the end.** The quadratic
+taper's `g″` jumps from 0 to `−1/w` at the end, the linear one's does not, so
+the hypothesis was that the jump set the error. `w tanh(d/w)` has no jump
+there and no kink anywhere, and at the same reach (`w` = 0.05 against the
+taper's 0.1, both flat at `0.05` of the span) it is no better — 8.8e-07
+against 7.6e-07. What sets the error is the width over which `∂F/∂ψ` falls
+from `f′_e` to zero, a feature in `ψ` the mesh has to resolve; any bounded
+continuation has one. So the choice is between the derivative's order past a
+table end (linear) and `machine-c-mast` (bounded), and **the taper at 0.1 is
+the widest bounded continuation the shipped cases allow**.
+
+**The suite**: the unit tests that described the clamp now assert the
+continuation (`ProfilesTests`, `SourceTests`) and the reach
+(`a_read_past_a_table_is_reported_with_how_far`). With the continuation in,
+merged on `manta/table-derivative` over `main` `d3d93fc`, 139 of 141 pass and
+the two reds are the deliberate ones, `PlasmaEdgeConvergence` and
+`AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`
+(`OMP_NUM_THREADS = 2`, `ctest -j2`, 48 minutes).
+
+### M-361
+
+**The q-driven solve's miss sits at the fit's floor: it moves with the
+degree of `g²` and not with the mesh.** `QDrivenConsistency` (asserted, red)
+and its disabled case `theMissMovesWithTheDegreeAndNotTheMesh` (run once by
+name), `q-solve-scale`, double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`.
+
+The target is the `q` of a forward solve with
+`g² = 2.2² + (e^{2Ψ} − 1)/(e² − 1)` (`Ψ` the source's, zero on the boundary),
+`gg′` a 64-knot Hermite table with exact slopes, on the q-driven box at
+`RefinementLevels = 3`, `k = 3`, taken through `q = V′g⟨R⁻²⟩/4π²` at the 24
+surfaces of `FluxSurfaceCount = 24`. The q-driven run is pinned by
+`R0B0 = 2.2`, the target's own boundary `g`, and the miss is
+`max |q − q_target|/|q_target|` over the same 24 labels, `q` the surfaces file's
+own column.
+
+| degree | level 0 (`h` = 0.1) | level 1 | level 2 |
+|---|---|---|---|
+| 2 | 1.181e-1 | 1.179e-1 | 1.179e-1 |
+| 3 | 1.200e-2 | 1.215e-2 | 1.214e-2 |
+
+all at `k = 2`. **The reference** at level 2 against level 3, `k = 3`: 1.0e-7
+relative over the same labels, six orders under the miss. So the miss is not
+the mesh's, the reference's, or the loop's (every run converged, 4 KINSOL
+iterations and 21 equilibria at degree 2): it is the representation's, ten
+times smaller for one degree more and flat in `h`. At degree 2 it oscillates
+across the profile — +3.9% on the innermost surface, −3.6% at mid-radius,
++11.8% at the outermost — the shape of the misfit the dropped row leaves. The
+case asserts a factor of 4 per halving of `h` and reads 1.00.
+
+The same family at `B = 1.5`, `κ = 3` does not converge at degree 2 (5 KINSOL
+iterations, 72 equilibria, 32 refused, stopped at 0.86) and does at degree 3
+(7 and 50): the representation can also leave no fixed point at all.
+
+**Reproduce.** `cd builds/<name>/tests && MKL_NUM_THREADS=1 ./QDrivenConsistency`
+(22 s, red) and `--run_test=theMissMovesWithTheDegreeAndNotTheMesh` (2 m 50 s);
+the files land in `tests/output/QDrivenConsistency/QDrivenConsistency-files/`.
+
+### M-362
+
+**`ToroidalFlux` holds the delivered flux, `∫_plasma g/R dA`, and not
+`2π(ψ_ax − ψ_bnd)∫₀¹q dΨ` of the target.** `q-solve-scale`, double. The row
+reads the solved state through `GradShafranovSolver::integrateOverDomain()`
+with the iterate's own `g²`, over `Ω_h` where `Ψ > 0`, signed as the target
+`q`; the `.nc`'s `toroidal_flux` is the same quantity.
+
+| case | delivered `Φ` | `2π(ψ_ax − ψ_bnd)∫q` | |
+|---|---|---|---|
+| `examples/q-driven.toml` | 2.491163 Wb | 2.475789 | +0.62% |
+| `fixed-d-tcv`, degree 2 | 0.517464 | 0.536094 | −3.5% |
+| `fixed-d-tcv`, degree 3 | 0.517428 | 0.531787 | −2.7% |
+
+The two are the same quantity in the continuum. Here they differ by the
+target's integral running over `Ψ ∈ [0, 1]` from a table on `[0.05, 0.95]`,
+continued past its ends, where the delivered one reads the equilibrium's own
+`g`; and on a curved boundary the band between `Γ_h` and `Γ` is not counted,
+as it is not by the current row.
+
+The pin is better conditioned than the span row it replaces — `σ_min` 0.755
+against 0.578 at degree 2, 0.755 against 0.577 at degree 4, `y_d` giving way
+(M-355) — since `c₀` now enters its row. Under it: the shipped example
+converges in 4 KINSOL iterations and 29 equilibria, conditioning 0.0982
+(M-357(a)); `QDrivenScalePin` re-solves the base, cold from `g = 2.2`, to
+2.4e-13 of `ψ`'s peak (M-357(b)); `fixed-d-tcv` converges in 5 and 36 from 1.4
+and from 1.2 to the `g²` of the other pins (M-357(c)).
+
+**Reproduce.** `runs/q-solve-scale/example/` (`q-driven.log`, `flux.log`),
+`runs/q-solve-scale/tcv/` (`edge.log`, `flux-g1.4.log`, `flux-g1.2.log`,
+`edge-d3.log`), `runs/q-solve-scale/study/study-delivered.log`.

@@ -566,13 +566,97 @@ namespace meq
 					"moves can change the equilibrium; and a degree the surface "
 					"family does not determine leaves the outer Jacobian rank "
 					"deficient, which is reported rather than solved" );
+		}
+
+		/**
+		 * THE SCALE PIN: EXACTLY ONE OF R0B0, ToroidalFlux AND PlasmaCurrent
+		 * BESIDE SafetyFactorFile, AND NEITHER OF THE FIRST TWO WITHOUT IT.
+		 *
+		 * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter
+		 * family -- q sets the pitch of the field lines and not the strength
+		 * of the field -- so the q-driven problem is ILL-POSED with none of
+		 * the three, and its answer is then whatever g^2's degree happens to
+		 * select (MEASUREMENTS.md M-353). Two over-determine it, and which
+		 * one would win is a precedence rule deciding the physics. So both are
+		 * refused, naming the keys.
+		 *
+		 * Called after readPlasmaCurrent(), whose value it counts.
+		 */
+		void readScalePin( Table const &source, MHDParameters &parameters )
+		{
+			bool const driven = !parameters.safetyFactorFile.empty();
+			bool const hasEdge = source.has( "R0B0" );
+			bool const hasFlux = source.has( "ToroidalFlux" );
+			bool const hasCurrent = source.has( "PlasmaCurrent" );
+
+			if ( !driven )
+			{
+				if ( hasEdge )
+					source.fail( "R0B0", "is read only beside SafetyFactorFile, where it selects which "
+						"of the equilibria sharing p and q is solved. On a prescribed-field run it "
+						"would make q reportable, which MEQ does not yet do (TODO, \"Report q( Psi ) "
+						"in the flux-surface output\", part (b)); remove it" );
+				if ( hasFlux )
+					source.fail( "ToroidalFlux", "is read only beside SafetyFactorFile, where it "
+						"selects which of the equilibria sharing p and q is solved. A prescribed-"
+						"field run has no g to integrate -- its source carries g g' and not g -- so "
+						"the flux cannot be held there. Remove it" );
+				return;
+			}
+
+			std::vector<std::string> named;
+			if ( hasEdge )
+				named.push_back( "R0B0" );
+			if ( hasFlux )
+				named.push_back( "ToroidalFlux" );
+			if ( hasCurrent )
+				named.push_back( "PlasmaCurrent" );
+			if ( named.empty() )
+				source.fail( "SafetyFactorFile", "needs exactly one of R0B0, ToroidalFlux and "
+					"PlasmaCurrent beside it, and none is given. Equilibria with the same p( Psi ) "
+					"and q( Psi ) form a one-parameter family -- q sets the pitch of the field lines, "
+					"not the field's strength -- so one more scalar has to select the member: R0B0, "
+					"g = R B_phi on the boundary [T m]; ToroidalFlux, the toroidal flux inside the "
+					"boundary [Wb]; or PlasmaCurrent, I_p [A]" );
+			if ( named.size() > 1 )
+			{
+				std::string list;
+				for ( std::size_t i = 0; i < named.size(); ++i )
+					list += ( i == 0 ? "" : i + 1 == named.size() ? " and " : ", " ) + named[ i ];
+				source.fail( named[ 1 ], "is given beside " + named[ 0 ] + ": a q-driven run takes "
+					"exactly one of R0B0, ToroidalFlux and PlasmaCurrent, and " + list + " are "
+					"given. Each one alone selects the equilibrium, so two over-determine it; keep "
+					"one" );
+			}
+
+			if ( hasEdge )
+			{
+				parameters.edgeToroidalField = source.getFloat( "R0B0" );
+				if ( !( parameters.edgeToroidalField > 0.0 )
+				     || !std::isfinite( parameters.edgeToroidalField ) )
+					source.fail( "R0B0", "must be positive and finite: it is g = R B_phi on the "
+						"boundary in T m, and the source sees only g^2 -- reverse the field by "
+						"negating the q table, which reverses q and not the equilibrium" );
+				if ( source.has( "ToroidalFieldGuess" ) )
+					source.fail( "ToroidalFieldGuess", "is not read beside R0B0: the loop opens at "
+						"the constant g = R0B0, which is then a value rather than a guess. Remove it" );
+				return;
+			}
+
+			if ( hasFlux )
+			{
+				parameters.toroidalFlux = source.getFloat( "ToroidalFlux" );
+				if ( parameters.toroidalFlux == 0.0 || !std::isfinite( parameters.toroidalFlux ) )
+					source.fail( "ToroidalFlux", "must be finite and non-zero: it is the toroidal "
+						"flux inside the boundary in Wb, and zero is no plasma" );
+			}
 
 			parameters.toroidalFieldGuess =
 				source.getFloatOr( "ToroidalFieldGuess", 0.0 );
 			if ( !( parameters.toroidalFieldGuess > 0.0 )
 			     || !std::isfinite( parameters.toroidalFieldGuess ) )
 				source.fail( "ToroidalFieldGuess",
-					"must be given and positive beside SafetyFactorFile. It is "
+					"must be given and positive beside SafetyFactorFile with " + named[ 0 ] + ". It is "
 					"g = R B_phi to open the loop at, as a constant, and a "
 					"machine's vacuum R0 B0 is the number to use. There is no "
 					"default: q determines g through the geometry, but only "
@@ -1808,7 +1892,7 @@ namespace meq
 					                            "PPrimeVariable", "PPrimeFit",
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "SafetyFactorFile", "SafetyFactorDegree",
-					                            "ToroidalFieldGuess",
+					                            "ToroidalFieldGuess", "R0B0", "ToroidalFlux",
 					                            "Normalised", "PsiAxis", "ConfineToPlasma", "PlasmaCurrent",
 					                            "ExcludeAttributes", "axis", "SupportShape", "AxialEdge",
 					                            "ProfileFile" } );
@@ -1840,6 +1924,7 @@ namespace meq
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
 					readPlasmaExclusion( source, parameters.normalised, sourceOptions.excludeAttributes );
 					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
+					readScalePin( source, parameters );
 					readAxisPoint( source, sourceName, parameters.normalised, sourceOptions.axisPoint );
 					readSupportShape( source, parameters.normalised, parameters.confineToPlasma,
 					                  !parameters.safetyFactorFile.empty(),

@@ -432,7 +432,9 @@ open fixture:
    Jacobian is a handful of coefficients rather than `nFieldDOF`.
 
    **And it reaches the solve from a file**: `[source] SafetyFactorFile` with
-   `SafetyFactorDegree` and `ToroidalFieldGuess`, `examples/q-driven.toml` as
+   `SafetyFactorDegree` and exactly one scale pin — `R0B0`, `ToroidalFlux` or
+   `PlasmaCurrent`, since `p` and `q` alone leave a one-parameter family
+   (→ **[M-357](MEASUREMENTS.md#m-357)**) — `examples/q-driven.toml` as
    the worked example, and `theDriverSolvesForTheToroidalField` recovering a
    closed-form `g` to **5.0e-06** in 12 outer iterations and 43 equilibria.
    **One solver serves all of them** — only `gg′` changes, so the mesh, the
@@ -971,12 +973,11 @@ THE INVERSION RATHER THAN BY USING THE CODE.**
 
 **THE FIXTURE.** It is a rectangle with one closed plasma rather than a machine,
 and nothing has yet driven `q` on the limited tokamak, where the support moves
-and `ψ_bnd` is an unknown. Nothing refuses the combination —
-`readToroidalFieldTarget()` requires only `Normalised = true` — so this is an
-experiment and not a port. Note the interaction it would test: `PlasmaCurrent`
-scales the whole source through the border unknown `λ`, and `q` is a statement
-about `g`, so the outer loop and the current border both act on the toroidal
-field and it is not obvious they are consistent.
+and `ψ_bnd` is an unknown. Nothing refuses the combination, so this is an
+experiment and not a port. Beside `SafetyFactorFile`, `PlasmaCurrent` is the
+outer loop's scale pin and sets no profile-scale border: the border, inside the
+loop, converges to a pressure nobody gave and a `g²` the equilibrium does not
+have (→ **[M-356](MEASUREMENTS.md#m-356)**).
 
 **AND `q` WAS NEVER REPORTED, SO THE ROUND TRIP COULD NOT BE READ OFF THE
 OUTPUT. FIXED ON THE DRIVEN ROUTE** → **[M-131](MEASUREMENTS.md#m-131)**.

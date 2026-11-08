@@ -4990,8 +4990,8 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 	/*
 	 * TWO CONTROLS, BOTH FREE, AND THE SECOND IS THE ONE WITH TEETH.
 	 *
-	 * The loop OPENS at a constant g = ToroidalFieldGuess = 2.2, which is
-	 * c = ( 4.84, 0, 0 ) -- and 4.84 is the correct c0. So a loop that did
+	 * The loop OPENS at a constant g = R0B0 = 2.2, which is c = ( 4.84, 0, 0 )
+	 * -- and 4.84 is the correct c0, held there by the pin. So a loop that did
 	 * nothing at all would already agree with the exact answer in its first
 	 * coefficient, and only the higher ones say it moved.
 	 *
@@ -5004,7 +5004,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 	 */
 	BOOST_TEST( std::abs( recovered[ 1 ] ) > 1.0,
 		"the loop came back with a g^2 that is nearly constant, which is where "
-		"it STARTED -- so it has not moved off ToroidalFieldGuess" );
+		"it STARTED -- so it has not moved off the constant g = R0B0" );
 	BOOST_TEST( recovered[ 1 ] > 0.0 );
 	BOOST_TEST( recovered[ 2 ] > 0.0,
 		"g^2 falls toward the axis, so the recovered shear runs the wrong way. "

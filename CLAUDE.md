@@ -185,11 +185,14 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
 **`OMP_NUM_THREADS` is deliberately not pinned in `tests/CMakeLists.txt`**, so a
 plain `ctest` exercises threaded assembly as it ships. The reds are
-`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands, and
+`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands,
 `AnisotropicMirror`'s
 `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`, deliberate while
 `Δ( Ψ )` crawls towards the firehose limit (→ **[M-351](MEASUREMENTS.md#m-351)**,
-`TODO`, *Anisotropic pressure*); a single build adds `DriverAcceptance`, whose
+`TODO`, *Anisotropic pressure*), and `QDrivenConsistency`, deliberate while
+`g²` is a fixed-degree fit, whose delivered `q` misses its target by the fit's
+floor at every mesh (→ **[M-361](MEASUREMENTS.md#m-361)**, `TODO`, *The q-driven
+solve is inconsistent*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
 (→ **[M-312](MEASUREMENTS.md#m-312)**). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
