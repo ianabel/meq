@@ -326,9 +326,9 @@ crossings come faster as `1/h`.
 
 **THE FIX IS SELF-CONSISTENT, NOT FROZEN.** Nothing about one equilibrium's
 extraction is carried to the next: the geometry is a function of the solved
-state, and so of the tables, whatever warm start reached it. What is
-pending is **which** continuous extraction, and it is the user's choice
-(§5, D8). The candidates, costed against M-SHAPE-1:
+state, and so of the tables, whatever warm start reached it. Which
+continuous extraction was the user's choice (§5, D8: A). The candidates, as
+they were costed against M-SHAPE-1:
 
 | | `G` | band, axis, `ψ_bnd` | accuracy | cost to run | cost to build | `E'` |
 |---|---|---|---|---|---|---|
@@ -360,9 +360,9 @@ at that rate, of 512 read columns (§4.4), a third to a half of all Jacobian
 builds would carry one column wrong by O(0.1)–O(1000). The same mechanism is M-308b's step in the q-driven map; a
 continuous extraction removes that too.
 
-**Candidate A is prototyped and holds up** (→ M-SHAPE-2, `ExtractionJumps`'
-`prototype*` cases, through `Run::familyFrom()`). The user asked that the
-continuous field use the trace `ψ̂` as well as `ψ*` and `q*`; what was built:
+**Candidate A holds up** (→ M-SHAPE-2, measured on a prototype at
+`aa5adcb`). The user asked that the continuous field use the trace `ψ̂` as
+well as `ψ*` and `q*`; what is built:
 
 * **`ψ̃` ∈ H¹ of degree `k+2`, the moment interpolant.** Vertex values are the
   mean of `ψ*` over the elements there. On each interior edge the `P_k` moments
@@ -388,33 +388,32 @@ kink is below what a 1.5e-8 difference can see, and E's smoothness buys
 nothing measurable**: A over E. `ψ̂` against the control that takes the edges
 from `ψ*`'s mean trace: the same `G` to the digits that matter.
 
-**Proposed production form** (not built; the user's go first):
+**The production form, built** (→ M-SHAPE-4):
 
 1. `src/meq/ContinuousField.{hpp,cpp}`: the moment interpolant and the two
-   fields, built by `GradShafranovSolver::postProcess()` after `Reconstruct()`
-   and held beside `ψ*` as `continuousPotential()`, `continuousFlux()`. Cells
-   and edges are independent, so the loops thread; the vertex means are a
-   reduction.
-2. `Potential::Continuous`, and `ContourTracer`'s default becomes it: every
-   extraction — `_surfaces.nc`, the q-driven loop (which takes M-308b's step
-   out of its map), the session — goes through it; `PostProcessed` and `Raw`
-   stay as the controls `FluxSurfaceConvergence` pairs.
-3. The extraction's axis and level from `q̃`'s root and `ψ̃` there, so the
-   label normalisation is continuous too (the prototype kept the solver's
-   located axis; no scan crossed an axis element, but it is the same class of
-   choice). Measured before it ships.
-4. The band's nearest-face choice stays (no scan crossed one); blended only if
-   a measurement finds a jump there.
-5. The regression values that move are re-measured, not loosened:
-   `FluxSurfaceConvergence`, `SurfaceAverageConvergence`, `SurfaceFitConvergence`,
-   `FluxGridConvergence`, `SafetyFactorSolver`, `SafetyFactorTests`,
-   `SafetyFactorScale`, `QDrivenCurvedBoundary`, `DriverAcceptance`, `RunSession`,
-   `ConductorSubtraction`, `FluxFamilyTests`, `test_results.py`.
-   `SessionSmoothness` goes green.
-6. `Run::familyFrom()` goes once the field is the run's.
-7. `E'` then: `δψ̃` is the same interpolant of `δψ*` (`Reconstruct`, linear)
-   and `δψ̂` (part of the state), so the ray-root formula applies with `ψ̃`,
-   `q̃` and their exact gradients.
+   fields. `GradShafranovSolver::continuousPotential()` and
+   `continuousFlux()` build them on first use after `postProcess()` and hold
+   them until the next solve or post-processing. Vertices, then edges, then
+   cells, each dof written by one entity and the vertex means summed in
+   element order, so the threaded build is the serial one bit for bit.
+2. `Potential::Continuous` is `ContourTracer`'s default and the only pair a
+   run extracts with — `_surfaces.nc`, the q-driven loop (M-308b's step is a
+   face crossing, which no longer moves its map) and the session.
+   `PostProcessed` and `Raw` stay as the controls `FluxSurfaceConvergence`
+   pairs.
+3. **The axis and level stay the solve's located axis.** `q̃`'s root, with
+   `ψ̃` there, moves the labels by the axis's own error and buys no
+   smoothness on the measured cases (M-SHAPE-3): no axis element changes
+   along any scan.
+4. The band's nearest-face choice is left unblended; `ExtractionJumps` is the
+   by-hand study that would catch it switching.
+5. The regression values that moved are re-measured in M-SHAPE-4.
+   `SessionSmoothness` is green: across the bisected crossing `G` moves by
+   2.4e-14 where it moved 4.65e-7.
+6. `Run::familyFrom()` is gone.
+7. `E'` follows: `δψ̃` is the same interpolant of `δψ*` (`Reconstruct`,
+   linear) and `δψ̂` (part of the state), so the ray-root formula applies with
+   `ψ̃`, `q̃` and their exact gradients.
 
 **Differentiate the algorithm that ships, not the continuum formula** — that
 stands, whichever row is chosen. The node positions come from roots of the
@@ -475,16 +474,14 @@ outermost surfaces, and `ψ_ax`. Three findings, each deciding something:
    mechanism — the box's at surface 23's node 24 (elements 763 and 761), TCV's
    at surface 0's node 88 (1548 and 1547) in both inputs; the axis element, the
    band faces and the band masks do not change anywhere in the scans.
-   `SessionSmoothness` prints that report, asserts a jump below the noise, and
-   is red until an extraction continuous in the state (§4.5, D8) is built.
-   **Its cost, ~10 minutes, is a candidate for trimming once the extraction
-   is chosen**, and what a trimmed form needs is a crossing it is sure to see:
-   a scan that happens to straddle none passes whatever the extraction does.
-   With the per-node elements now recorded, the test can find a crossing on
-   the box (bisect the table between two states whose node elements differ,
-   ~10 resolves at 0.3 s) and assert `G` continuous across a 1e-9 interval
-   there, plus the noise floor from two warm starts — about a minute, the box
-   alone; TCV's band and curved boundary would stay in `ExtractionJumps`.
+   `SessionSmoothness` asserts a jump below the noise across a crossing it
+   finds, and is green on the continuous extraction (§4.5, D8; M-SHAPE-4).
+   **Trimmed to the box**, because what it needs is a crossing it is sure to
+   see: a scan that happens to straddle none passes whatever the extraction
+   does. It steps `Omega` until a node changes element (the per-node elements
+   the family records), bisects to a 1e-9 interval and asserts `G` continuous
+   across it, beside the noise floor from two warm starts — 15–30 s. TCV's
+   band and curved boundary, and the long sweep, are `ExtractionJumps`'.
    Fixed boundary has no support change and no X-point; the boundary-flux
    point is not measured here (tables feed only `RotatingSource`, and no
    free-boundary rotating case ships).
@@ -684,13 +681,13 @@ two species and `ω` on 32 cells is ~100 knots plus `q`'s ~33, batched through
   hand the model `ṗ` (IDA has it) and let a case read time-derivative slots.
   MEQ's side is the response it builds anyway, plus `∂_t G` (zero unless coil
   currents are programmed in time).
-* **D8. Which continuous extraction — A, prototyped; production pending.**
-  `G` jumps where a surface node crosses an element face (M-SHAPE-1). The user
-  chose to prototype A — a continuous `H¹` reconstruction under the existing
-  rays — with `ψ̂` among its sources, and it becomes the only extraction once
-  built (`_surfaces.nc`, the q-driven loop, the session). The prototype
-  removes the jump to the noise and keeps `G`'s accuracy (M-SHAPE-2), so E is
-  not needed. §4.5 has the production form; `E'` follows it.
+* **D8. Which continuous extraction — decided: A, built.** `G` jumped where a
+  surface node crossed an element face (M-SHAPE-1). The user chose A — a
+  continuous `H¹` reconstruction from `ψ*`, `ψ̂` and `q*` under the existing
+  rays — and it is the only extraction (`_surfaces.nc`, the q-driven loop, the
+  session): it removes the jump to the noise and keeps `G`'s accuracy
+  (M-SHAPE-2, M-SHAPE-4), so E is not needed. The axis stays the solve's
+  (M-SHAPE-3). `E'` follows (§4.5).
 
 ## 6. The branches
 
@@ -703,7 +700,7 @@ rebases). `manta/design` holds this plan and is where the pieces meet.
 | `manta/session` | `Run::resolve`, `EquilibriumSnapshot`, transactional in memory; the smoothness measurement (§4.6); the stale factorisation claim corrected | — |
 | `manta/table-derivative` | `∂R/∂T` applied and transposed, differenced-column tests | — |
 | `manta/linearised-solve` | the linearisation solver, `solveLinearised`, the whole-bordered-Jacobian test | `session` (the snapshot) |
-| `manta/shape-derivative` | what makes `G` jump (M-SHAPE-1); an extraction continuous in the state, chosen by the user from §4.5's candidates; then `E'`, `E'^T`, `I'`, axis limits | `session` |
+| `manta/shape-derivative` | what makes `G` jump (M-SHAPE-1); the continuous extraction, `ψ̃` and `q̃` (§4.5, D8, M-SHAPE-2 to 4); then `E'`, `E'^T`, `I'`, axis limits | `session` |
 | `manta/content-solve` | the content-driven equilibrium: `N_s`, `ω`, `I` knots as border unknowns, content rows, the fixed-point reference | `table-derivative`, `shape-derivative` |
 | `manta/plugin-abi` | MEQ built C++23 with MaNTA's `-march` and `EIGEN_USE_BLAS`, so a C++ plugin can share MaNTA's process | — |
 | `manta/adapter` | `meq.Session` binding, the Python `EquilibriumModel`, `Π`, the coupled acceptance runs | all |

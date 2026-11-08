@@ -24179,3 +24179,116 @@ face jump of `ψ_h`, were the state to carry it across; no scan does.
 <tree>/tests/ExtractionJumps --run_test=axis<Case>` at `9a7dc4f`, for
 `axisBoxL1k2`, `axisBoxL1k3`, `axisTcvL1k2`, `axisTcvL1k3`; logs
 `runs/manta-shape-derivative/axis/`.
+
+### M-SHAPE-4
+
+**The continuous extraction in production: what the field asserts, what it
+fixes, and every regression value it moved.** `manta/shape-derivative` at
+`e9ef960` and after, against the same tests built at `05465dc` (the merge
+before it, extracting on `ψ*` and `q*`), double unless said, `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`.
+
+**The acceptance.** `SessionSmoothness` on the box: the noise across two warm
+starts 5.0e-14 of the value; across the bisected crossing (surface 1's node 15,
+element 426 → 428, within 7.6e-10 of `Omega`) `G` moves by **2.4e-14** beyond
+its smooth change, against **4.65e-7** on `ψ*` at the same crossing; 22 s.
+
+**`ContinuousFieldConvergence`** (new; 1–3 s):
+
+| | double | single |
+|---|---|---|
+| moment interpolant reproducing a polynomial of its degree, worst over triangles and quadrilaterals at `p` = 3, 4, 5, of its size | 8.1e-13 (quadrilaterals, `p = 5`) | 2.9e-4 (the same) |
+| `ψ̃` / `q̃` jump across interior faces, of their scales | 4.2e-15 / 1.2e-15 | 1.1e-6 / 5.8e-7 |
+| `ψ̃`'s trace less `ψ̂`, worst `P_k` moment, of `ψ̃`'s scale | 1.1e-15 | 3.5e-7 |
+| one thread against four, dofs differing | 0 of 3859 | 0 of 3859 |
+
+| `k` | `n` | `ψ*` L2 | `ψ̃` L2 | rate | `q*` L2 | `q̃` L2 | rate |
+|---|---|---|---|---|---|---|---|
+| 1 | 8 | 3.15e-5 | 3.48e-5 | | 1.16e-3 | 8.48e-4 | |
+| 1 | 16 | 4.04e-6 | 4.45e-6 | 2.97 | 2.95e-4 | 2.08e-4 | 2.03 |
+| 2 | 8 | 1.24e-6 | 1.54e-6 | | 7.19e-5 | 7.24e-5 | |
+| 2 | 16 | 7.86e-8 | 9.49e-8 | 4.02 | 9.05e-6 | 9.73e-6 | 2.90 |
+| 3 | 8 | 3.09e-8 | 4.09e-8 | | 2.16e-6 | 2.00e-6 | |
+| 3 | 16 | 9.81e-10 | 1.25e-9 | 5.03 | 1.36e-7 | 1.23e-7 | 4.03 |
+
+`ψ̃` keeps `ψ*`'s `k+2` within 1.3× of its error, and `q̃` keeps `q*`'s `k+1`
+(Solov'ev, `iterExample2`, double). In single `ψ*` itself reaches its floor at
+`k = 2` and grows from `n = 8` to 16 at `k = 3` (1.4e-7 to 5.1e-7), so the
+rates are asserted at `k = 1` there; `ψ̃` stays within 1.1× of `ψ*` at every
+order. **The first build's threaded result differed from the serial one at
+2280 of 3859 dofs**: an edge's solve subtracted the element's other edges'
+dofs as known, whose shapes vanish on the edge only to round-off and which
+other threads were writing; only vertex dofs are subtracted now, and the
+quadrilateral `p = 5` reproduction fell from 3.6e-11 to 8.1e-13 with it.
+**Mutated**: a cell monomial in `x` where it should be in `y` fails all four
+cases (after the test's accumulators were made to propagate NaN: `std::max`
+had swallowed the singular system's NaN and passed it); `ψ̃`'s interior edges
+from one side's `ψ*` in place of `ψ̂` fails the moment check at 1.3e-5.
+
+**What moved, base → production.** Each test passes both ways unless said.
+
+| test | quantity | `ψ*`, `q*` | `ψ̃`, `q̃` |
+|---|---|---|---|
+| `DriverAcceptance` | worst `g²` coefficient, q-driven example, on the shipped target | 1.7e-6 | **1.7e-3: fails** |
+| | the same, target re-measured on `ψ̃` | | 1.4e-6 |
+| `SafetyFactorSolver` | worst `|g − g_exact|/g`; loop's final norm | 3.6e-10; 1.6e-9 | 1.4e-12; 1.0e-13 |
+| `QDrivenCurvedBoundary` | loop's final norm (threshold 1e-9) | 7.4e-13 | 6.2e-10 |
+| `SurfaceAverageConvergence` | settled `V'` at `N = 2048` | 67.14138479360 | 67.14138480619 |
+| | the DG jump on the contour, in `ψ` | 9.8e-11 | 8.6e-16 |
+| | averaged-GS identity residual, Richardson, finest, `k = 2` / `k = 3` | 1.5e-8 / 2.8e-9 | 3.1e-8 / 2.8e-9 |
+| | its rate over the sequence, `k = 2` / `k = 3` | 4.19 / 2.84 | 3.48 / 1.46 |
+| `FluxGridConvergence` | worst `V'`, grid against family | 1.4e-7 | 2.1e-7 |
+| `SurfaceFitConvergence` | worst distance from the exact surfaces | 5.71e-7 | 5.66e-7 |
+| `SafetyFactorScale` | degree-4 `σ_min/σ_max`, `ψ_ax` free | 3.24e-6 | 3.57e-6 |
+| | degree-2 held residual | 3.84e-3 | 4.15e-3 |
+| `FluxSurfaceConvergence` | Hermite arc length, `Ψ_N = 0.4` | 1.677694795238 | 1.677694795445 |
+
+**The q-driven example's target is re-measured, not re-baselined.**
+`examples/q-driven-q.dat` is the `q` of the closed-form `g = 2.20 + 0.55Ψ` on
+the example's mesh, measured — by design — with the extraction the loop
+inverts it with, so that the discretisation error is common to both. Measured
+on `ψ*` it reproduces the shipped table to 4.5e-10; measured on `ψ̃` it is
+**5.1e-5** away. `q`'s own discretisation error on that mesh, against
+`RefinementLevels = 3`, is **5.5e-5** by `ψ*` and **3.5e-5** by `ψ̃`: the move
+is inside the solution's error, and `ψ̃`'s is the closer of the two. The loop
+on the old table lands 1.7e-3 away in `g` — that 5e-5 along M-353's near-null
+scale direction — and on the re-measured one at 1.4e-6, its documented
+accuracy. `theQDrivenRunReportsTheSafetyFactorItReached` (5.5e-5 against the
+old table) passes on the new one.
+
+**The averaged-GS identity's rate falls and its residual does not grow**:
+at `k = 3` the finest residual is the same (2.8e-9) and the coarsest is 17×
+smaller (1.0e-6 → 5.9e-8), which flattens the fitted rate; at `k = 2` the
+finest is 2.1× larger, 3.1e-8. Every residual in the table is below the 1e-6
+MEQ owes.
+
+**Two fixtures named their pair, being about `ψ*`'s own properties**:
+`FluxSurfaceConvergence`'s `theFaceJumpIsTheDiscretisationAndConvergesAtItsOrder`
+(the DG jump of `ψ*`, which on `ψ̃` is 1e-16 and has no rate) and
+`theRepresentationErrorDoesNotKnowAboutTheMesh`; and `ConductorSubtraction`'s
+control tracer, meant as "the same two fields" as the default one. **The
+second is a finding**: at fixed `Δs = 0.004`, `k = 2`, the Hermite
+representation error of a traced contour is flat in `h` on `ψ*` and `q*`
+(5.44e-9, 5.44e-9, 5.33e-9 at `n` = 12, 24, 48, face-crossing segments
+excluded) and falls with `h` on `ψ̃` and `q̃` (3.6e-7, 9.6e-8, 9.7e-9): `ψ̃`'s
+level set is continuous but kinks where `∇ψ̃` jumps, and a smooth Hermite
+through a kink errs. The family's averages are taken on the ray nodes and not
+on the Hermite curve, which only seeds and brackets the rays.
+
+**Single** (`MFEM_DIR=install-single`, `MEQ_PYTHON=OFF`), the touched tests:
+`ContinuousFieldConvergence`, `FluxSurfaceConvergence`, `ConductorSubtraction`,
+`FluxGridConvergence`, `SurfaceAverageConvergence`, `SurfaceFitConvergence`,
+`SafetyFactorSolver`, `QDrivenCurvedBoundary` and `CriticalPointConvergence`
+pass. `RunSession`, `SessionSmoothness` and `SafetyFactorScale` fail in
+single, and fail the same assertions at `05465dc` in single: the session's
+warm resolve and cold solve are 9.8e-6 apart and two warm starts 6.4e-6 to
+1.5e-5, against the 1e-8 and 1e-12 of a double contract (MaNTA's is double,
+the plan's D5), and `SafetyFactorScale`'s degree-4 held singular value
+against the free one. Not qualified in single, here or on main.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`,
+`./ContinuousFieldConvergence`; the base → production table from each test's
+output at `05465dc` and at this branch (`runs/manta-shape-derivative/regress/`);
+the target's re-measurement by `runs/manta-shape-derivative/qtarget/`
+(`qtarget.log`: each tree's `meq` on the example with `GGPrimeFile` the closed
+form, at `RefinementLevels` 1, 2, 3).

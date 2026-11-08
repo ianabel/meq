@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include "mfem.hpp"
@@ -38,6 +39,11 @@ namespace
 {
 	using meq::tests::Rectangle;
 	using Equilibrium = meq::analytic::SolovievEquilibrium;
+
+	/// Machine epsilon at the build's precision: the round-off bounds below
+	/// are multiples of it, so that a single build is asserted at its own
+	/// floor and not at double's.
+	double const eps = std::numeric_limits<mfem::real_t>::epsilon();
 
 	/// The larger, and NaN if either is: std::max( a, NaN ) is a, which
 	/// would let a singular moment system pass as an accurate one.
@@ -168,8 +174,8 @@ BOOST_AUTO_TEST_CASE( theInterpolantReproducesItsDegree )
 			// monomial moments, conditioned like a degree-p Vandermonde.
 			std::printf( "  %-15s p = %d: worst | interpolant - polynomial | = %.2e of its size\n",
 			             type == mfem::Element::TRIANGLE ? "triangles," : "quadrilaterals,", p, worst/scale );
-			BOOST_TEST( worst < 1.0e-11*scale, "the moment interpolant of degree " << p << " does not "
-			            "reproduce a polynomial of that degree: " << worst/scale << " of its size" );
+			BOOST_TEST( worst < 65536.0*eps*scale, "the moment interpolant of degree " << p << " does "
+			            "not reproduce a polynomial of that degree: " << worst/scale << " of its size" );
 		}
 }
 
@@ -191,9 +197,9 @@ BOOST_AUTO_TEST_CASE( theFieldsAreContinuousAndTakePsihatsMoments )
 
 	double psiScale = 0.0, fluxScale = 0.0;
 	for ( int i = 0; i < psi.Size(); ++i )
-		psiScale = std::max( psiScale, std::abs( psi( i ) ) );
+		psiScale = std::max( psiScale, static_cast<double>( std::abs( psi( i ) ) ) );
 	for ( int i = 0; i < flux.Size(); ++i )
-		fluxScale = std::max( fluxScale, std::abs( flux( i ) ) );
+		fluxScale = std::max( fluxScale, static_cast<double>( std::abs( flux( i ) ) ) );
 
 	double psiJump = 0.0, fluxJump = 0.0, moment = 0.0;
 	mfem::FaceElementTransformations faceTransform;
@@ -234,9 +240,9 @@ BOOST_AUTO_TEST_CASE( theFieldsAreContinuousAndTakePsihatsMoments )
 	std::printf( "\n  across interior faces: | psi~ jump | %.2e, | q~ jump | %.2e of their scales; "
 	             "psi~'s trace less psihat, worst P_k moment, %.2e of psi~'s scale\n",
 	             psiJump/psiScale, fluxJump/fluxScale, moment/psiScale );
-	BOOST_TEST( psiJump < 1.0e-13*psiScale, "psi~ is not continuous across a face: " << psiJump );
-	BOOST_TEST( fluxJump < 1.0e-13*fluxScale, "q~ is not continuous across a face: " << fluxJump );
-	BOOST_TEST( moment < 1.0e-13*psiScale, "psi~'s trace does not have psihat's P_k moments: " << moment );
+	BOOST_TEST( psiJump < 512.0*eps*psiScale, "psi~ is not continuous across a face: " << psiJump );
+	BOOST_TEST( fluxJump < 512.0*eps*fluxScale, "q~ is not continuous across a face: " << fluxJump );
+	BOOST_TEST( moment < 512.0*eps*psiScale, "psi~'s trace does not have psihat's P_k moments: " << moment );
 }
 
 /*
@@ -278,6 +284,18 @@ BOOST_AUTO_TEST_CASE( theThreadedBuildIsTheSerialOne )
  */
 BOOST_AUTO_TEST_CASE( theContinuousFieldsKeepTheirSourcesOrder )
 {
+	// THE RATES ARE ASSERTED WHERE psi* ITSELF STILL CONVERGES. In single,
+	// psi* reaches the round-off floor at k = 2 on n = 16 ( 1.7e-7 ) and its
+	// error GROWS from n = 8 to 16 at k = 3, so psi~ cannot be asked for k+2
+	// there; it is still asked to stay within 3x of psi* at every order.
+	auto rated = []( int order )
+	{
+#ifdef MFEM_USE_SINGLE
+		return order == 1;
+#else
+		return order >= 1;
+#endif
+	};
 	Rectangle const box = meq::tests::standardBox();
 	Equilibrium const eq = Equilibrium::iterExample2();
 	mfem::VectorFunctionCoefficient exactFlux( 2, [ &eq ]( mfem::Vector const &x, mfem::Vector &q )
@@ -300,7 +318,7 @@ BOOST_AUTO_TEST_CASE( theContinuousFieldsKeepTheirSourcesOrder )
 			double const tildePsi = solver.continuousPotential().ComputeL2Error( solved.exactPsi() );
 			double const starFlux = solver.postProcessedFlux().ComputeL2Error( exactFlux );
 			double const tildeFlux = solver.continuousFlux().ComputeL2Error( exactFlux );
-			if ( previousPsi > 0.0 )
+			if ( previousPsi > 0.0 && rated( order ) )
 			{
 				double const psiRate = rate( previousPsi, tildePsi );
 				double const fluxRate = rate( previousFlux, tildeFlux );
@@ -313,7 +331,8 @@ BOOST_AUTO_TEST_CASE( theContinuousFieldsKeepTheirSourcesOrder )
 			}
 			else
 				std::printf( "  %3d %4d %12.3e %12.3e %8s %12.3e %12.3e %8s\n", order, n, starPsi,
-				             tildePsi, "-", starFlux, tildeFlux, "-" );
+				             tildePsi, previousPsi > 0.0 ? "(floor)" : "-", starFlux, tildeFlux,
+				             previousPsi > 0.0 ? "(floor)" : "-" );
 			BOOST_TEST( tildePsi < 3.0*starPsi, "psi~'s error " << tildePsi << " is more than 3x psi*'s "
 			            << starPsi << " at k = " << order << ", n = " << n );
 			previousPsi = tildePsi;

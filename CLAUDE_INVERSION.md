@@ -27,7 +27,7 @@ what each found.
 | stage | what it built or answered | where it lives |
 |---|---|---|
 | **IN-A** | the magnetic axis and any X-point as roots of `q_h`, by Newton inside one element, audited by the winding number of `q` on the boundary | `meq::CriticalPointFinder`, `src/meq/CriticalPoints.{hpp,cpp}`; `CriticalPointConvergence` |
-| **IN-0** | the predictor–corrector tracer: curvature-controlled step, cubic Hermite from `q`, `Potential::PostProcessed` by default, and the band crossed by `BandExtension::TransferLift` | `meq::ContourTracer`, `src/meq/FluxSurfaces.{hpp,cpp}`; `FluxSurfaceConvergence` |
+| **IN-0** | the predictor–corrector tracer: curvature-controlled step, cubic Hermite from `q`, `Potential::Continuous` by default (`ψ̃`, `q̃` interpolated from `ψ*`, `ψ̂`, `q*`), and the band crossed by `BandExtension::TransferLift` | `meq::ContourTracer`, `src/meq/FluxSurfaces.{hpp,cpp}`; `FluxSurfaceConvergence` |
 | **IN-1** | a closed contour by poloidal angle, with the metric pointwise from `q` and the differenced metric kept as the live control | `ContourTracer::fitByAngle()`, `meq::AngleParametrisation`; `FluxSurfaceConvergence` |
 | **IN-2** | flux-surface averages as one primitive over a callable integrand — `V′`, `⟨R⁻²⟩`, the safety factor — against a converged reference on the exact field | `meq::surfaceAverages()`, `src/meq/SurfaceAverage.{hpp,cpp}`; `SurfaceAverageConvergence`, `tests/analytic/FluxSurfaceReference.hpp` |
 | **IN-3** | `R` and `z` as Zernike expansions on `ρ = √Ψ_N`, fitted to traced points, with the axis-shape relabelling | `meq::SurfaceFit`, `meq::relabelByAxisShape()`, `src/meq/{SurfaceFit,Zernike}.{hpp,cpp}`; `SurfaceFitConvergence`, `ZernikeTests` |
@@ -366,32 +366,34 @@ it was repaired:
   `floor^(1/3)`, was tried and is worse**: it raised double's step to 4.4e-4,
   and the loop contracted linearly at 0.19 a step, 8 iterations and 57 solves
   against 4 and 29.
-* **The map is piecewise smooth, and that is the DG level set, not a choice
-  the extraction makes** (→ **[M-308b](MEASUREMENTS.md#m-308b)**). `ψ*` and
-  `q*` jump across every element face, so `{ψ* = c}` is a union of
+* **On `ψ*` and `q*` the map is piecewise smooth, and that is the DG level
+  set, not a choice the extraction makes** (→ **[M-308b](MEASUREMENTS.md#m-308b)**).
+  `ψ*` and `q*` jump across every element face, so `{ψ* = c}` is a union of
   per-element arcs, and where a ray node crosses a face it moves to the other
   arc and takes the other element's flux into its weight. On
   `SafetyFactorSolver`'s fixture one node of the innermost surface does that
   5.3e-4 below the root's `c₁`: `ψ*` jumps 5.2e-08 and `|R q*|` 8.2e-05
   relative at the face, the node moves 1.8e-07 and the coefficients step by
   2.6e-05, with the solve, the axis and the inner Newton's count smooth
-  through it. Every column differenced across it is off by that over `2s`.
-  No floor sees it, because each residual is right to the floor; only an
-  extraction continuous in the state would remove it, and that is a different
-  extraction. **The session's geometry jumps by the same mechanism and nothing
-  else** (→ **[M-SHAPE-1](MEASUREMENTS.md#m-shape-1)**): over `±1e-3` of a table,
-  every jump above the noise on the box and on TCV is a node changing element,
-  the axis element and the band never change, and the per-crossing jump falls
-  as about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
-  `MANTA-EQUILIBRIUM-PLAN.md` §4.5 costs the continuous extractions (D8).
-  **The one chosen, prototyped, removes it**
-  (→ **[M-SHAPE-2](MEASUREMENTS.md#m-shape-2)**): the same rays on `ψ̃` and
-  `q̃`, H¹ fields interpolated by moments from `ψ*`, `ψ̂` (on interior edges)
-  and `q*`. A 1.5e-8 difference straddling a crossing is then off by the
-  noise rather than by 0.01–700× the derivative, and `G` stays inside the
-  discretisation error of the shipped extraction. The step at 1e-4 straddles none on that fixture and finishes
-  quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom` bounds the
-  iterations at 5 so that a straddle elsewhere is seen as the crawl it is.
+  through it. Every column differenced across it is off by that over `2s`, and
+  no floor sees it, because each residual is right to the floor. **The session's
+  geometry jumped by the same mechanism and nothing else**
+  (→ **[M-SHAPE-1](MEASUREMENTS.md#m-shape-1)**): over `±1e-3` of a table, every
+  jump above the noise on the box and on TCV is a node changing element, the
+  axis element and the band never change, and the per-crossing jump falls as
+  about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
+  **So the loop's map, the session and `_surfaces.nc` all extract on `ψ̃`
+  and `q̃`** — `Potential::Continuous`, H¹ fields interpolated by moments
+  from `ψ*`, `ψ̂` (on interior edges) and `q*` (`src/meq/ContinuousField.hpp`).
+  A 1.5e-8 difference straddling a crossing is then off by the noise rather
+  than by 0.01–700× the derivative, and the family stays inside the
+  discretisation error of the `ψ*` one (→ **[M-SHAPE-2](MEASUREMENTS.md#m-shape-2)**,
+  **[M-SHAPE-4](MEASUREMENTS.md#m-shape-4)**). M-308b's sweep itself was a
+  scratch harness and is not re-run; the step it found is a face crossing,
+  which no longer moves the map. The step at 1e-4 straddles none on that
+  fixture and finishes quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom`
+  bounds the iterations at 5 so that a straddle elsewhere is seen as the crawl
+  it is.
 * **KINSOL differenced `J p` itself.** MFEM declares its custom linear solver
   iterative, so KINSOL forms `J p` for the line search's slope after every
   solve, by one more map evaluation at `u + √eps p` — an equilibrium per
@@ -609,8 +611,19 @@ poloidal-angle parametrisation; `FluxSurfaceConvergence.cpp` is the acceptance.
 **Fitted path only** — the band between `Γ_h` and `Γ` is deliberately not in it,
 and `sampleField()` is the single seam it will be added at.
 
-**THE DEFAULT IS `Potential::PostProcessed`, AND THE REASON IS NOT THE ONE THAT
-WAS EXPECTED.** MEQ has two candidate pairs: `ψ_h` with `q_h`, both `k+1`; and
+**THE DEFAULT IS `Potential::Continuous`, A PAIR BUILT FROM THE POST-PROCESSED
+ONE, AND THE POST-PROCESSED PAIR WON ON A REASON THAT WAS NOT THE ONE
+EXPECTED.** The continuous pair is `ψ̃` ∈ H¹ of degree `k+2` and `q̃` ∈ [H¹]²,
+interpolated by moments from `ψ*`, `ψ̂` and `q*` (`src/meq/ContinuousField.hpp`):
+`ψ*` and `q*` are broken across every face, so a family node crossing one makes
+the geometry jump by the face jump (→ **[M-SHAPE-1](MEASUREMENTS.md#m-shape-1)**),
+which a caller differencing the geometry divides by its step; on `ψ̃`, `q̃` it
+does not, and the family stays inside `ψ*`'s own error
+(→ **[M-SHAPE-2](MEASUREMENTS.md#m-shape-2)**). `ψ̃` keeps `ψ*`'s `k+2` and `q̃`
+keeps `q*`'s `k+1` (`ContinuousFieldConvergence`). Everything below about the
+post-processed pair is why the continuous one is built from it.
+
+MEQ has two solved candidate pairs: `ψ_h` with `q_h`, both `k+1`; and
 `ψ*` with `q*` from `DarcyForm::Reconstruct()`, where `ψ*` is `k+2`. Rooting
 `ψ*` puts the traced curve `k+2` from the true one instead of `k+1` — measured
 **60×, 54× and 83×** closer at `k = 1, 2, 3` on the same mesh, at *fewer*

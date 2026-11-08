@@ -268,8 +268,8 @@ namespace meq
 		out.potential->MakeOwner( potentialCollection );
 
 		momentInterpolant( *out.potential,
-			[ & ]( int e, mfem::IntegrationPoint const &ip ) { return potential.GetValue( e, ip ); },
-			[ & ]( int f, mfem::FaceElementTransformations &transform, mfem::IntegrationPoint const &ip )
+			[ & ]( int e, mfem::IntegrationPoint const &ip ) -> double { return potential.GetValue( e, ip ); },
+			[ & ]( int f, mfem::FaceElementTransformations &transform, mfem::IntegrationPoint const &ip ) -> double
 			{
 				if ( transform.Elem2No < 0 )
 					return potential.GetValue( transform.Elem1No, transform.GetElement1IntPoint() );
@@ -296,14 +296,14 @@ namespace meq
 		for ( int component = 0; component < 2; ++component )
 		{
 			mfem::GridFunction part( &scalarSpace );
-			auto at = [ & ]( int e, mfem::IntegrationPoint const &ip )
+			auto at = [ & ]( int e, mfem::IntegrationPoint const &ip ) -> double
 			{
 				mfem::Vector value( 2 );
 				flux.GetVectorValue( e, ip, value );
 				return value( component );
 			};
 			momentInterpolant( part, at,
-				[ & ]( int, mfem::FaceElementTransformations &transform, mfem::IntegrationPoint const & )
+				[ & ]( int, mfem::FaceElementTransformations &transform, mfem::IntegrationPoint const & ) -> double
 				{
 					if ( transform.Elem2No < 0 )
 						return at( transform.Elem1No, transform.GetElement1IntPoint() );
