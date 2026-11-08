@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 #include "mfem.hpp"
 
@@ -1143,6 +1144,88 @@ BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyOnANonlinearSource
 		}
 	}
 #endif
+}
+
+
+/*
+ * A NEWTON THAT REACHES A NON-FINITE RESIDUAL IS MEQ'S RUNTIME ERROR, with the
+ * last iterate whose residual was finite left in the solution.
+ *
+ * mfem::NewtonSolver refuses a non-finite residual norm by MFEM_VERIFY -- an
+ * mfem::ErrorException, which is not a std::runtime_error, so anything that
+ * reports a failed solve by catching one (solve()'s own check of a Delta that
+ * reads psi, the driver's ladder) is skipped, and the NaN iterate is what the
+ * solver then holds. Single precision reached it on AnisotropicConvergence's
+ * firehose refusal by overflowing a diverging Newton, where double ran out of
+ * budget first and named the limit. MEASUREMENTS.md M-350.
+ *
+ * The source here is undefined above psi = 0.5 -- NaN, as a law evaluated
+ * past its range returns -- which Example 5's first Newton step reaches, so
+ * the residual after it is not finite in either format.
+ */
+BOOST_AUTO_TEST_CASE( aNonFiniteResidualIsTheSolversRuntimeError )
+{
+	class UndefinedAboveAHalf : public meq::Source
+	{
+		public:
+			explicit UndefinedAboveAHalf( meq::analytic::ManufacturedNonlinear const &eqIn )
+				: inner( eqIn )
+			{
+			}
+
+			double f( double radius, double z, double psi ) const override
+			{
+				return psi > 0.5 ? std::numeric_limits<double>::quiet_NaN()
+				                 : inner.f( radius, z, psi );
+			}
+
+			double dFdPsi( double radius, double z, double psi ) const override
+			{
+				return psi > 0.5 ? std::numeric_limits<double>::quiet_NaN()
+				                 : inner.dFdPsi( radius, z, psi );
+			}
+
+		private:
+			EquilibriumSource<meq::analytic::ManufacturedNonlinear> inner;
+	};
+
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	UndefinedAboveAHalf const source( eq );
+	mfem::FunctionCoefficient psi( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	mfem::Mesh mesh = makeMesh( 8 );
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setSource( source );
+	solver.setBoundaryData( psi );
+	std::string what;
+	bool foreign = false;
+	try
+	{
+		solver.solve();
+	}
+	catch ( std::runtime_error const &error )
+	{
+		what = error.what();
+	}
+	catch ( std::exception const &error )
+	{
+		foreign = true;
+		what = error.what();
+	}
+	std::printf( "\n  a non-finite residual: %s\n", what.c_str() );
+	BOOST_TEST( !foreign, "solve() threw something other than std::runtime_error: " << what );
+	BOOST_TEST( what.find( "not finite" ) != std::string::npos, what );
+
+	mfem::GridFunction const &potential = solver.potential();
+	mfem::real_t const *const data = potential.HostRead();
+	bool finite = true;
+	for ( int i = 0; i < potential.Size(); ++i )
+		finite = finite && std::isfinite( static_cast<double>( data[ i ] ) );
+	BOOST_TEST( finite, "the solver holds a non-finite iterate after the failure" );
 }
 
 /*

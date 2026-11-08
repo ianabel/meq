@@ -184,21 +184,26 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 **`-j4` with `OMP_NUM_THREADS=4`** holds the product at the core count, since
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
 **`OMP_NUM_THREADS` is deliberately not pinned in `tests/CMakeLists.txt`**, so a
-plain `ctest` exercises threaded assembly as it ships. The red is
-`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands; a
-single build adds `DriverAcceptance`, whose
+plain `ctest` exercises threaded assembly as it ships. The reds are
+`PlasmaEdgeConvergence`, deliberate while the staircase `Γ_{p,h}` stands, and
+`AnisotropicMirror`'s
+`theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`, deliberate while
+`Δ( Ψ )` crawls towards the firehose limit (→ **[M-351](MEASUREMENTS.md#m-351)**,
+`TODO`, *Anisotropic pressure*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
 (→ **[M-312](MEASUREMENTS.md#m-312)**). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
-(`TODO`, the single-precision round). It also adds two suites never
-qualified in single: `AnisotropicConvergence` and `AnisotropicMirror`
-(`TODO`, *Anisotropic pressure*). The
-wall is dominated by `FreeBoundaryCoupling` (forty solves reproducing M-134, kept
-whole on purpose). `naming` is one clang-tidy test per translation unit,
-`naming.<file>`, labelled `naming` (`ctest -L naming` runs the check entire).
+(`TODO`, the single-precision round). The anisotropic suites are qualified
+in single (→ **[M-350](MEASUREMENTS.md#m-350)**). The wall is set by its
+longest tests — `DriverAcceptance` and `DeviceParity` — and FB-T's forty-solve
+cross (M-134) is `disabled()` in `FreeBoundaryCoupling` and run by name: its
+one assertion is `theTwoBordersConvergeTogether`'s at identical configuration,
+and its cells move by the take (→ **[M-354](MEASUREMENTS.md#m-354)**).
+`naming` is one clang-tidy test per translation unit, `naming.<file>`,
+labelled `naming` (`ctest -L naming` runs the check entire).
 **A suite time is a measurement only on an idle machine**; identical code has
 read 1.16× to 1.6× apart here, so read ratios.
 

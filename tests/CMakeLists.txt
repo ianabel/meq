@@ -781,7 +781,9 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	add_test(NAME RotatingMirrorVacuumGauge COMMAND RotatingMirror --run_test=vacuum_gauge)
 	# The same gauge with its crossings as border unknowns of the Newton --
 	# GradShafranovSolver::setMidplaneGaugeKnots() -- against the frozen
-	# refresh, and geq. Its own suite and mesh stem, so it runs beside the rest.
+	# refresh; its agreement with geq is RotatingMirrorMidplane's, the same
+	# solve at the default 32 knots. Its own suite and mesh stem, so it runs
+	# beside the rest.
 	add_test(NAME RotatingMirrorBorder COMMAND RotatingMirror --run_test=border)
 	# The bordered gauge's route from the vacuum through the held table,
 	# against the starts it replaces, and the outer loop on the curve.
