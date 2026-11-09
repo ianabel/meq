@@ -119,10 +119,12 @@ namespace meq
 	 * Extract the family.
 	 *
 	 * @param tracer      already pointed at whichever potential the caller wants.
-	 *                    Potential::PostProcessed is the tracer's own default and
-	 *                    is the right one: IN-0 measured the traced curve 60x,
-	 *                    54x and 83x closer to the truth at k = 1, 2, 3 on the
-	 *                    same mesh, at FEWER corrector iterations per point.
+	 *                    Potential::Continuous is the tracer's own default and
+	 *                    is the right one: it roots psi~, continuous across
+	 *                    faces, so the family does not jump as a node crosses
+	 *                    one (M-364, M-365), and psi~ inherits psi*'s
+	 *                    order -- IN-0 measured psi*'s traced curve 60x, 54x and
+	 *                    83x closer to the truth than psi_h's at k = 1, 2, 3.
 	 * @param axis        IN-A's magnetic axis, a root of q_h. Its psi is the
 	 *                    psi_ax the label is normalised by.
 	 * @param psiBoundary psi on the plasma boundary -- zero on every
@@ -149,9 +151,9 @@ namespace meq
 	 * takes psi_bnd from the solver. Nothing more, and it is here so that the
 	 * four lines are written once.
 	 *
-	 * @throws std::invalid_argument if @a which is Potential::PostProcessed and
-	 *         GradShafranovSolver::postProcess() has not been called, which is
-	 *         ContourTracer's own refusal.
+	 * @throws std::invalid_argument if @a which is Potential::PostProcessed or
+	 *         Potential::Continuous and GradShafranovSolver::postProcess() has
+	 *         not been called, which is ContourTracer's own refusal.
 	 * @throws whatever findAxis() throws when there is no unambiguous magnetic
 	 *         axis -- which is a state meq cannot express a flux label against
 	 *         at all, and is exactly the refusal MANTA-COUPLING.md section 8
@@ -160,7 +162,27 @@ namespace meq
 	FluxSurfaceFamily extractFluxSurfaces( GradShafranovSolver const &solver,
 	                                       FluxFamilyOptions const &options,
 	                                       Potential which
-	                                           = Potential::PostProcessed );
+	                                           = Potential::Continuous );
+
+	/**
+	 * The axis a family of @a solver's is labelled by: @a located's point,
+	 * with the psi_ax that Psi_N is normalised by.
+	 *
+	 * WHERE THE SOLVE CARRIES psi_ax AS AN UNKNOWN -- a normalised source,
+	 * GradShafranovSolver::normalisationIsUnknown() -- IT IS THE SOLVE'S, so
+	 * that the family's Psi_N is the source's Psi exactly: a q-driven loop's
+	 * fixed point is then its answer, and a profile read against the source's
+	 * Psi pairs with the family's averages at the same label. OTHERWISE IT IS
+	 * @a tracer's OWN POTENTIAL AT THE POINT -- psi~ by default -- since the
+	 * levels are in that potential, and the finder's psi_h there carries the
+	 * discretisation's error at the axis as an offset in every inner label
+	 * and, in single, the element-local recovery's round-off, 27 times psi~'s
+	 * (MEASUREMENTS.md M-371). grad psi vanishes at the point, so where on it
+	 * the value is read costs second order.
+	 */
+	CriticalPoint labelledAxis( GradShafranovSolver const &solver,
+	                            ContourTracer const &tracer,
+	                            CriticalPoint const &located );
 
 	/**
 	 * The volume enclosed by one fitted surface, by Green's theorem on its own

@@ -79,6 +79,20 @@ against is `CLAUDE_DECLINED.md`.
   `EnsureElementQuadratureTables` loop are gone at `9d57974336`. cuDSS's `SetOperator`
   reuses its analysis, so after the first call it waits on the card
   (→ **[M-323](MEASUREMENTS.md#m-323)**).
+* **A host fallback under a Device asks for host access** — to its inputs,
+  its outputs and its index arrays alike, through `HostRead()`,
+  `HostReadWrite()`, `HostWrite()` or `countedHostRead()`, never raw. Every
+  device route can refuse: on a documented refusal in a CUDA build, and every
+  time where the seven `*Device.cpp` files are host stubs. The loop it falls
+  back to runs under the same Device, so a dof array an MFEM operation read on
+  the device is as protected as a vector (`entriesAt()`). **And a column an
+  upstream route read on the device through an alias is handed back** with
+  `HostRead()` where its host copy is valid, because the alias's protection
+  never reaches the base's flags, and the next host writer copies into the
+  protected page (`flush()`). Neither moves data on any backend. The CPU-only
+  `builds/double` is the tree that exercises this: its `debug` arms take every
+  fallback, which a CUDA build's never do
+  (→ **[M-369](MEASUREMENTS.md#m-369)**).
 * **The warm start threads under a Device** where its loops cannot reach
   MFEM's memory manager, which is not reentrant: plain HOST memory and no
   registered object read through an MFEM accessor
@@ -113,7 +127,10 @@ invisible to the others. Reach for them in this order.
    1170-second run with zero faults.
 3. **A stage-by-stage checksum, diffed between `cpu` and `cuda`.** The first
    stage that disagrees names the defect. `meq::stageChecksum()`
-   (`src/meq/StageChecksum.{hpp,cpp}`) reports each buffer's **validity flags
+   (`src/meq/StageChecksum.{hpp,cpp}`, MFEM-free, with the `mfem::Vector`
+   and `mfem::Array<int>` probes in `StageChecksumMfem.{hpp,cpp}`, so that
+   `SafetyFactor.cpp` in CI's MFEM-free half can probe the seam back into
+   plain doubles) reports each buffer's **validity flags
    before it reads**, so `H- D+` names a stage whose host copy is not live,
    whether or not its value happens to be wrong. It prints only under
    `MEQ_STAGE_CHECKSUM`, an environment variable rather than a key, so a walk

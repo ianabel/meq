@@ -24436,6 +24436,705 @@ measured only at the stall.
 **Reproduce.** `runs/q-loop-floor/` (`probe-mkl*.log` for the noise table, `mkl*.log` and `fixed-mkl*.log` for the rule's sweep); the
 probe was a temporary block in `Run.cpp` behind `MEQ_PROBE_NOISE`, not kept.
 
+### M-364
+
+**What makes the flux-surface geometry jump as an input moves: a family node
+crossing an element face, and nothing else measured.** (a) and (b) were taken
+on `manta/shape-derivative`, through its in-memory re-solve `Run::resolve()`
+(MaNTA's session, `MANTA-EQUILIBRIUM-PLAN.md`, not on main), on `ψ*` and `q*`:
+double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, `rotating-normalised`'s box and
+`fixed-d-tcv`'s MXH boundary with the same `RotatingSource`, Newton to
+round-off, every state a `resolve()` warm from one base. (c) is main's own
+instrument, a source parameter on a linear box. Each family node carries, as a diagnostic, the element its ray rooted in
+(or, in the band, extended from), its band face, how its ray search ended and
+its iteration count; the family carries the axis element.
+
+**(a) `manta/shape-derivative`'s `SessionSmoothness` on `ψ*` and `q*`: its four failures, attributed** — the largest
+departure of a second difference in its `±1e-3` scan, and the node whose
+position has the largest second difference there:
+
+| case, input | jump | node | its element across the jump | the node's position, second difference |
+|---|---|---|---|---|
+| box, `Omega` | 1.31e-5 of `⟨|∇ρ|²⟩`@0.975 | surface 23, node 24 | 763 → 761 | 2.99e-5 m |
+| box, density | 1.30e-5 of `⟨|∇ρ|²⟩`@0.975 | surface 23, node 24 | 761 → 763 | 2.99e-5 m |
+| TCV, `Omega` | 1.52e-8 of `⟨|∇ψ|²/R²⟩`@0.224 | surface 0, node 88 | 1548 → 1547 | 1.33e-9 m |
+| TCV, density | 1.52e-8 of `⟨|∇ψ|²/R²⟩`@0.224 | surface 0, node 88 | 1548 → 1547 | 1.70e-9 m |
+
+On TCV the node barely moves, so the jump is in its weight — the `q*` jump at
+the face, as M-308b found. Over all four scans the axis element never changes
+(423 on the box, 2015 on TCV), no band face and no band mask changes (TCV has
+77 band nodes), and the traced contour's point count, which seeds every ray's
+guess, changes on one surface in two of the scans; (b) finds no jump that is
+not a crossing.
+
+**(b) Every jump, every surface, and how it scales** — `manta/shape-derivative`'s `ExtractionJumps`:
+`Omega` scaled by `1 + j·1e-4`, `j = −10 … 10`, all 24 surfaces × 128 angles,
+the four quantities MaNTA reads. A jump at a step is its increment less the
+mean of its neighbours', less that quantity's median along the scan, counted
+where it is the local peak and above 1e-11 of the value:
+
+| case | elements | jumps | at a crossing on that step | echo of a crossing on a neighbouring step | unattributed | crossings per unit relative change | per-crossing jump, median | max | ray route / iteration changes |
+|---|---|---|---|---|---|---|---|---|---|
+| box, `k = 2` | 768 | 21 | 19 | 2 | 0 | 1.40e4 | 4.45e-7 | 1.31e-5 | 1 / 75 |
+| box, `k = 2` | 3072 | 35 | 31 | 4 | 0 | 2.40e4 | 4.22e-8 | 1.49e-6 | 0 / 39 |
+| box, `k = 2` | 12288 | 46 | 42 | 4 | 0 | 4.25e4 | 4.13e-9 | 1.45e-6 | 2 / 55 |
+| box, `k = 3` | 768 | 20 | 18 | 2 | 0 | 1.45e4 | 5.95e-9 | 3.33e-6 | 0 / 45 |
+| box, `k = 3` | 3072 | 33 | 31 | 2 | 0 | 2.45e4 | 4.78e-10 | 3.72e-7 | 0 / 19 |
+| TCV, `k = 2` | 3993 | 26 | 23 | 3 | 0 | 1.45e4 | 1.27e-8 | 5.17e-8 | 0 / 44 |
+| TCV, `k = 2` | 16406 | 39 | 32 | 7 | 0 | 2.85e4 | 1.45e-9 | 1.12e-8 | 0 / 83 |
+| TCV, `k = 3` | 3993 | 21 | 19 | 2 | 0 | 1.45e4 | 7.48e-11 | 7.56e-10 | 0 / 41 |
+
+The axis element and the band face change in no case. The ray Newton's
+iteration count changes at dozens of nodes per scan and makes no jump above
+1e-11; its stopping test is at `1e-12 × max|ψ*|`. Every element change
+makes a jump: none falls below 1e-11 at `k = 2` on the box or on TCV's coarser
+mesh, and 1 of 33 (box, `k = 3`), 1 of 43 and 4 of 25 (TCV) do on the finer
+meshes and degree. Two of the echoes were checked
+node by node: box 768's surface 1 node 48 crosses 412 → 419 one step before
+the flagged one, and box 3072's surface 21 node 90 crosses 97 → 98 one step
+after; in each a second crossing on the same surface cancels the crossing's
+own estimate, so its −J/2 echo is the peak.
+
+**The jump converges, and the crossings multiply.** Per uniform refinement the
+median jump falls 10.5× and 10.2× on the box at `k = 2` (about `h^{3.4}`),
+12.4× at `k = 3`, and 8.8× on TCV at `k = 2` — the `q*` face jump's
+`O(h^{k+1})` with a constant; `k = 3` is 75× (box) and 170× (TCV) below
+`k = 2` on the same mesh. The crossing rate rises 1.7–1.8× per level, as
+`1/h`.
+
+**What a differencing caller pays** — a central difference at MaNTA's
+1.5e-8 step straddling a crossing, its error relative to the derivative, and
+the chance a column straddles one with all 24 surfaces read:
+
+| case | elements | error when straddled, median | max | straddles per column |
+|---|---|---|---|---|
+| box, `k = 2` | 768 | 1.6e+2 | 6.1e+3 | 4.2e-4 |
+| box, `k = 2` | 3072 | 7.7 | 9.8e+2 | 7.2e-4 |
+| box, `k = 2` | 12288 | 1.2 | 1.7e+2 | 1.3e-3 |
+| box, `k = 3` | 768 | 1.4 | 3.2e+2 | 4.4e-4 |
+| box, `k = 3` | 3072 | 0.12 | 40 | 7.4e-4 |
+| TCV, `k = 2` | 3993 | 4.7 | 1.8e+2 | 4.4e-4 |
+| TCV, `k = 2` | 16406 | 0.71 | 64 | 8.6e-4 |
+| TCV, `k = 3` | 3993 | 0.066 | 3.8 | 4.4e-4 |
+
+To bring the straddled column's median error to 1e-4 by refinement alone
+takes about five more uniform levels on TCV at `k = 2` (×700 elements) and two
+to three at `k = 3` (×20–60), with the straddle rate doubling each level and
+the worst crossing 10–60× the median.
+
+**(c) The same mechanism without the session** — main's `ExtractionJumps`,
+`--run_test=<pair><n><k>` and `straddle<Pair><n><k>`: the linear Solov'ev-type
+source `F = −((1 − A)R² + A)` on the standard box (`ExtractionCrossing.hpp`),
+`A = 0.30 + j·5e-4`, `j = −10 … 10`, each state its own solve; 12 surfaces ×
+96 angles, `n × n` cells of two triangles. Double, `OMP_NUM_THREADS=1
+MKL_NUM_THREADS=1`. "Straddled" is the bisected 1.5e-8 central difference of
+M-365, relative to the derivative, over up to four crossings:
+
+| pair | `n`, `k` | elements | crossings per unit `A` | per-crossing jump, median | max | straddled error |
+|---|---|---|---|---|---|---|
+| `ψ*`, `q*` | 8, 2 | 128 | 500 | 4.56e-6 | 1.05e-5 | 5.9e2 – 9.6e3 |
+| | 16, 2 | 512 | 2.1e3 | 1.50e-6 | 8.29e-6 | 4.6e2 – 4.5e3 |
+| | 32, 2 | 2048 | 8.1e3 | 1.31e-7 | 4.75e-6 | |
+| | 8, 3 | 128 | 600 | 2.13e-7 | 4.09e-7 | |
+| | 16, 3 | 512 | 2.3e3 | 1.22e-8 | 2.41e-7 | 0.11 – 68 |
+| `ψ̃`, `q̃` | 8, 2 | 128 | 500 | 2.74e-9 | 8.76e-9 | 5.8e-5 – 7.2e-5 |
+| | 16, 2 | 512 | 2.1e3 | 1.73e-9 | 1.26e-8 | 3.7e-6 – 1.7e-4 |
+| | 32, 2 | 2048 | 8.1e3 | 3.94e-10 | 6.42e-9 | |
+| | 8, 3 | 128 | 600 | 2.79e-10 | 1.69e-9 | |
+| | 16, 3 | 512 | 2.3e3 | 3.64e-11 | 9.47e-10 | 1.2e-5 – 1.3e-4 |
+
+On `ψ*`, `q*` every jump above 1e-11 is a crossing or its echo but one: at
+`n = 8`, `k = 2`, a ray of surface 10 whose root reaches the mesh line
+`z = −0.3` ends on its best iterate after 30 iterations (route
+`BestIterate`, one stalled ray) — a root lying in a face jump. On `ψ̃`, `q̃` no
+ray route changes in any scan. **At this spacing `ψ̃`'s per-crossing estimate
+is the kink's reading, not a jump**, as in M-365 at 1e-4: it falls with `h`
+and `k`, and the bisected straddle, which separates the two, is 4–7 orders
+below the broken pair's. The straddled error on `ψ̃` sits above the
+`1e-14 |G|/(2δ|G′|)` noise column (not printed here; 2e-6 to 2.4e-5) by up to
+80×: each state is a cold solve whose rays stop at `1e-12 × max|ψ|`, and a
+1.7e-4 straddled error is a jump of under 1e-12 of the value
+(`ExtractionContinuity` reads 1.9e-13 across a crossing on this fixture).
+
+**Reproduce.** (a) and (b) on `manta/shape-derivative` at `aa5adcb`, where
+the session still extracted on `ψ*` and `q*`:
+`cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./SessionSmoothness`
+for (a), its decision report printed under each fine scan;
+`MKL_NUM_THREADS=1 OMP_NUM_THREADS=2 ./ExtractionJumps --run_test=<case>` for
+(b), cases `boxL1k2`, `boxL2k2`, `boxL3k2`, `boxL1k3`, `boxL2k3`, `tcvL1k2`,
+`tcvL2k2`, `tcvL1k3` (one to five minutes each; built, not registered).
+Logs: `runs/manta-shape-derivative/smooth1.log`, `runs/manta-shape-derivative/jumps/`.
+(c) on main: `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
+./ExtractionJumps --run_test=<case>`, cases `brokenN8k2` … `continuousN16k3`
+and `straddleBrokenN8k2` … `straddleContinuousN16k3` (seconds to two minutes
+each; built, not registered); logs `runs/continuous-extraction/jumps/`.
+
+### M-365
+
+**Candidate A, prototyped: the geometry extracted from continuous fields
+`ψ̃`, `q̃` built from `ψ*`, `ψ̂` and `q*` does not jump where a node crosses a
+face — a 1.5e-8 central difference straddling a crossing is off by the noise —
+and is as accurate as the shipped extraction.** `manta/shape-derivative`,
+double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, on a machine at load ~20,
+`ExtractionJumps` at `aa5adcb` (`prototype*`, `reference*`, `accuracy`),
+M-364's eight cases. `Run::familyFrom()` extracts with the shipped options, located axis,
+level and band, on the instrument's fields.
+
+**The fields.** `ψ̃` ∈ H¹ of degree `k+2`, the moment interpolant: vertex
+values the mean of `ψ*` over the elements there; on each interior edge the
+`P_k` moments of `ψ̂`; on boundary edges `ψ*`'s own trace; in each cell `ψ*`'s
+`P_{k−1}` moments. `q̃` ∈ [H¹]² of `q*`'s degree `k+1`: vertex means of `q*`,
+edge `P_{k−1}` moments of the two sides' mean trace, cell `P_{k−2}` moments.
+The control ("avg") takes `ψ̃`'s interior edges from the mean of `ψ*`'s two
+traces instead of `ψ̂`. How far the fields sit from `ψ*` and `q*` (worst over
+every element's quadrature points, relative to the field's largest value) —
+the size of the face jumps:
+
+| case | `ψ̃ − ψ*`, edges from `ψ̂` | from the mean trace | `q̃ − q*` |
+|---|---|---|---|
+| box, `k = 2`, 768 | 2.0e-4 | 9.8e-5 | 1.6e-3 |
+| box, `k = 2`, 3072 | 4.9e-5 | 2.4e-5 | 7.4e-4 |
+| box, `k = 2`, 12288 | 1.2e-5 | 6.0e-6 | 3.6e-4 |
+| box, `k = 3`, 768 | 5.3e-5 | 3.4e-5 | 4.5e-4 |
+| box, `k = 3`, 3072 | 1.3e-5 | 8.5e-6 | 2.2e-4 |
+| TCV, `k = 2`, 3993 | 1.8e-7 | 1.5e-7 | 1.9e-5 |
+| TCV, `k = 2`, 16406 | 1.9e-8 | 1.7e-8 | 3.9e-6 |
+| TCV, `k = 3`, 3993 | 6.7e-9 | 5.8e-9 | 1.3e-6 |
+
+**What a difference straddling a crossing pays.** Along the `±1e-3` scan of
+`Omega`, the first node to change element on each of up to four surfaces,
+for each extraction separately; the crossing bisected to 1e-11; then the
+central difference at 1.5e-8 centred on it against the mean of the one-sided
+derivatives either side (differenced at 1e-6, 2e-6 off it), relative to the
+derivative, worst of the four quantities. The noise is `1e-14 |G|/(2δ|G′|)`,
+what the resolve's round-off puts into a 1.5e-8 difference:
+
+| case | candidate A, straddled error | shipped, straddled error | noise there | A's kink bound, `|G′_R − G′_L|/|G′|` |
+|---|---|---|---|---|
+| box, `k = 2`, 768 | ≤ 1.5e-5 | 25 – 690 | 3e-6 – 1e-5 | ≤ 2.1e-4 |
+| box, `k = 2`, 3072 | ≤ 2.5e-5 | 0.16 – 20 | 3e-6 – 1e-5 | ≤ 5.8e-5 |
+| box, `k = 2`, 12288 | ≤ 1.9e-5 | 0.71 – 7.9 | 3e-6 – 1e-5 | ≤ 1.5e-5 |
+| box, `k = 3`, 768 | ≤ 9.9e-6 | 0.95 – 14 | 3e-6 – 1e-5 | ≤ 1.9e-5 |
+| box, `k = 3`, 3072 | ≤ 1.7e-5 | 7.5e-3 – 0.24 | 3e-6 – 1e-5 | ≤ 1.3e-5 |
+| TCV, `k = 2`, 3993 | ≤ 9.9e-6 | 0.91 – 13 | 3e-6 – 5e-6 | ≤ 1.3e-5 |
+| TCV, `k = 2`, 16406 | ≤ 1.2e-5 | 0.13 – 0.23 | 4e-6 – 5e-6 | ≤ 1.1e-5 |
+| TCV, `k = 3`, 3993 | ≤ 2.1e-5 | 0.016 – 0.089 | 4e-6 – 5e-6 | ≤ 1.1e-5 |
+
+A's straddled error sits at the noise in every case; a jump as small as
+1e-13 of the value would read 3e-6 there. **The kink column is a bound, not a
+reading**: differenced 4e-6 wide, it carries `G″·4e-6/G′` ≈ 1e-5 of
+curvature, and the shipped extraction reads the same 1e-5 away from its
+jumps. So A's kink is below 1e-5 of `G′` wherever it is resolved, and a
+straddled 1.5e-8 difference cannot see it. The noise across warm starts is
+1.3e-14 to 5.5e-14 by A on every case but TCV's finest, 1.95e-13 there —
+below the 1e-12 `manta/shape-derivative`'s `SessionSmoothness` asks; the shipped extraction's noise on
+that mesh was not taken, so whether the solve or the extraction carries it is
+open. Along the 1e-4 scan
+the per-crossing estimate falls from M-364's 4.5e-7 (box, `k = 2`,
+768) to 1.4e-10 and from 1.3e-8 (TCV, `k = 2`) to below 1e-11 at 24 of 25
+crossings — what a kink reads at a 1e-4 step; the bisected straddle is the
+measurement that separates the two.
+
+**`G`'s accuracy** — worst relative difference over 24 surfaces × 4
+quantities, against the shipped extraction on the same state and against a
+finer mesh (box level 3 at `k = 3`, TCV level 2 at `k = 3`, by A; the three
+extractions agree there to 3.2e-8 and 2.3e-9, far below these columns):
+
+| case | A − shipped | avg − shipped | shipped − reference | A − reference | avg − reference |
+|---|---|---|---|---|---|
+| box, `k = 2`, 768 | 8.6e-5 | 9.7e-5 | 2.8e-4 | 2.8e-4 | 2.8e-4 |
+| box, `k = 2`, 3072 | 9.5e-6 | 7.7e-6 | 7.7e-5 | 7.6e-5 | 7.6e-5 |
+| box, `k = 2`, 12288 | 7.3e-7 | 6.0e-7 | 2.6e-6 | 2.5e-6 | 2.5e-6 |
+| box, `k = 3`, 768 | 1.0e-5 | 1.3e-5 | 1.4e-5 | 1.3e-5 | 1.3e-5 |
+| box, `k = 3`, 3072 | 3.3e-7 | 3.8e-7 | 8.3e-7 | 1.1e-6 | 1.2e-6 |
+| TCV, `k = 2`, 3993 | 4.7e-6 | 4.7e-6 | 4.4e-6 | 4.8e-6 | 4.8e-6 |
+| TCV, `k = 2`, 16406 | 1.7e-7 | 1.7e-7 | 4.3e-6 | 4.2e-6 | 4.2e-6 |
+| TCV, `k = 3`, 3993 | 5.1e-7 | 5.1e-7 | 2.8e-7 | 2.8e-7 | 2.8e-7 |
+
+A and the shipped extraction differ by less than either differs from the
+finer mesh, and A's error matches the shipped one's within 1.4× either way.
+(TCV's error at `k = 2` does not fall from level 1 to level 2, 4.4e-6 to
+4.3e-6, by either extraction: something other than the mesh limits it there,
+and it is not this question's.)
+the reconstruction moves `G` inside the discretisation error and costs no
+accuracy. Taking `ψ̃`'s edges from `ψ̂` or from `ψ*`'s mean trace makes no
+difference to `G` at these digits, although `ψ̂`'s `ψ̃` sits 1.2–2× further
+from `ψ*` — `ψ*` is not the truth either.
+
+**Reproduce.** On `manta/shape-derivative` at `aa5adcb`, from `runs/manta-shape-derivative/proto/`:
+`MKL_NUM_THREADS=1 OMP_NUM_THREADS=2 <tree>/tests/ExtractionJumps --run_test=<case>`
+for `prototypeBoxL1k2` … `prototypeTcvL2k2`, `referenceBoxL3k3`,
+`referenceTcvL2k3` (each leaves `<key>-G.txt`; 10 minutes to 2 hours each at
+that load), then `--run_test=accuracy`.
+
+### M-366
+
+**The axis on the continuous fields — `q̃`'s root, `ψ̃` there — against the
+solve's located axis (`q_h`'s root, `ψ_h` there): measured, not adopted.**
+`manta/shape-derivative` at `9a7dc4f`, double, `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`, `ExtractionJumps`' `axis*` cases, on M-365's
+prototype fields; Ω scanned over `±1e-3` and each crossing bisected and
+straddled at 1.5e-8 as M-365 does, with the family's axis and level taken
+on `q̃`, `ψ̃`. "Solve's", the straddled error on the solve's axis at the same
+crossings, is M-365's column.
+
+| case | `ψ_ax` moves, of the span | axis moves | `G` moves, worst | axis element, solve's / `q̃`'s | straddled error, `q̃`'s axis | solve's | noise |
+|---|---|---|---|---|---|---|---|
+| box, `k = 2`, 768 | 1.4e-5 | 6.9e-7 m | 3.0e-4 | 423 / 354 | 5.0e-6 – 4.2e-5 | ≤ 1.5e-5 | 3e-6 – 9e-6 |
+| box, `k = 3`, 768 | 6.0e-7 | 1.1e-7 m | 1.3e-5 | 354 / 423 | 2.6e-6 – 8.6e-6 | ≤ 9.9e-6 | 3e-6 – 1e-5 |
+| TCV, `k = 2`, 3993 | 2.1e-7 | 5.9e-8 m | 4.3e-6 | 2015 / 2015 | 1.1e-5 – 1.6e-5 | ≤ 9.9e-6 | 4e-6 |
+| TCV, `k = 3`, 3993 | 2.2e-9 | 3.5e-10 m | 4.7e-8 | 2015 / 2015 | 9.4e-6 – 3.2e-5 | ≤ 2.1e-5 | 4e-6 – 5e-6 |
+
+**The labels move by the axis's own discretisation error, and `G` with them
+where it is most sensitive**: the innermost surface's `⟨|∇ρ|²⟩` changes by
+about `Δψ_ax/(Ψ_N span)`, 1.4e-5/0.05 ≈ 3e-4 on the coarse box at `k = 2` —
+the size of that mesh's own error (M-365) — and 4e-6 and 5e-8 on TCV.
+**Smoothness gains nothing measurable**: no axis element changes along any
+scan on either axis, so neither has a jump to remove there, and the straddled
+error on `q̃`'s axis is at or a few times the noise — up to 8× on TCV at
+`k = 3`, where the solve's axis is at most 5× — against the solve's at the
+noise. **That is why it is not adopted**: it buys no smoothness the
+scans can see, and the straddled difference on it reads noisier than on the
+solve's axis, which a differencing caller pays for directly. Why it reads
+noisier is not measured and not chased (the finder's stopping test on `q̃` is
+the candidate), since the axis it would explain is not used. **On the box both axes sit beside the
+face between elements 423 and 354 and pick opposite sides of it** — exactly
+where the solve's located axis would change element, and the level jump by the
+face jump of `ψ_h`, were the state to carry it across; no scan does.
+
+**Reproduce.** `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
+<tree>/tests/ExtractionJumps --run_test=axis<Case>` at `9a7dc4f`, for
+`axisBoxL1k2`, `axisBoxL1k3`, `axisTcvL1k2`, `axisTcvL1k3`; logs
+`runs/manta-shape-derivative/axis/`.
+
+### M-367
+
+**The continuous extraction in production: what the field asserts, what it
+fixes, and every regression value it moved.** `manta/shape-derivative` at
+`e9ef960` and after, and `continuous-extraction`, which carries it to main
+from `cde84f2` (`ExtractionContinuity` and M-364(c)), against the same tests built at `05465dc` (the merge
+before it, extracting on `ψ*` and `q*`), double unless said, `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`.
+
+**The acceptance.** `ExtractionContinuity`, posed on the library alone:
+the source mix `A` of M-364(c) stepped from 0.30 by 1e-3 until a node of
+some surface changes element, the step bisected on that node to 1e-9, and
+`V′`, `⟨R⁻²⟩`, `⟨|∇ψ|²/R²⟩` and `⟨|∇ψ|²⟩` on that surface compared across it
+less their smooth change; `n = 12`, `k = 2`, 17 s for both cases. Surface 2's
+node 20, element 208 → 207: on `ψ̃`, `q̃` the family moves **1.94e-13**
+(asserted below 1e-11); on `ψ*`, `q*`, its control, **3.04e-6** at the same
+node's crossing (asserted above 1e-10), so on the old extraction the
+acceptance fails by five orders.
+On `manta/shape-derivative`, `SessionSmoothness` asserts the same through the
+session on the box: the noise across two warm starts 5.0e-14 of the value;
+across the bisected crossing (surface 1's node 15, element 426 → 428, within
+7.6e-10 of `Omega`) `G` moves by **2.4e-14** beyond its smooth change, against
+**4.65e-7** on `ψ*` at the same crossing; 22 s.
+
+**`ContinuousFieldConvergence`** (new; 1–3 s):
+
+| | double | single |
+|---|---|---|
+| moment interpolant reproducing a polynomial of its degree, worst over triangles and quadrilaterals at `p` = 3, 4, 5, of its size | 8.1e-13 (quadrilaterals, `p = 5`) | 2.9e-4 (the same) |
+| `ψ̃` / `q̃` jump across interior faces, of their scales | 4.2e-15 / 1.2e-15 | 1.1e-6 / 5.8e-7 |
+| `ψ̃`'s trace less `ψ̂`, worst `P_k` moment, of `ψ̃`'s scale | 1.1e-15 | 3.5e-7 |
+| one thread against four, dofs differing | 0 of 3859 | 0 of 3859 |
+
+| `k` | `n` | `ψ*` L2 | `ψ̃` L2 | rate | `q*` L2 | `q̃` L2 | rate |
+|---|---|---|---|---|---|---|---|
+| 1 | 8 | 3.15e-5 | 3.48e-5 | | 1.16e-3 | 8.48e-4 | |
+| 1 | 16 | 4.04e-6 | 4.45e-6 | 2.97 | 2.95e-4 | 2.08e-4 | 2.03 |
+| 2 | 8 | 1.24e-6 | 1.54e-6 | | 7.19e-5 | 7.24e-5 | |
+| 2 | 16 | 7.86e-8 | 9.49e-8 | 4.02 | 9.05e-6 | 9.73e-6 | 2.90 |
+| 3 | 8 | 3.09e-8 | 4.09e-8 | | 2.16e-6 | 2.00e-6 | |
+| 3 | 16 | 9.81e-10 | 1.25e-9 | 5.03 | 1.36e-7 | 1.23e-7 | 4.03 |
+
+`ψ̃` keeps `ψ*`'s `k+2` within 1.3× of its error, and `q̃` keeps `q*`'s `k+1`
+(Solov'ev, `iterExample2`, double). In single `ψ*` itself reaches its floor at
+`k = 2` and grows from `n = 8` to 16 at `k = 3` (1.4e-7 to 5.1e-7), so the
+rates are asserted at `k = 1` there; `ψ̃` stays within 1.1× of `ψ*` at every
+order. **The first build's threaded result differed from the serial one at
+2280 of 3859 dofs**: an edge's solve subtracted the element's other edges'
+dofs as known, whose shapes vanish on the edge only to round-off and which
+other threads were writing; only vertex dofs are subtracted now, and the
+quadrilateral `p = 5` reproduction fell from 3.6e-11 to 8.1e-13 with it.
+**Mutated**: a cell monomial in `x` where it should be in `y` fails all four
+cases (after the test's accumulators were made to propagate NaN: `std::max`
+had swallowed the singular system's NaN and passed it); `ψ̃`'s interior edges
+from one side's `ψ*` in place of `ψ̂` fails the moment check at 1.3e-5.
+
+**What moved, base → production.** Each test passes both ways unless said.
+
+| test | quantity | `ψ*`, `q*` | `ψ̃`, `q̃` |
+|---|---|---|---|
+| `DriverAcceptance` | worst `g²` coefficient, q-driven example, on the shipped target | 1.7e-6 | **1.7e-3: fails** |
+| | the same, target re-measured on `ψ̃` | | 1.4e-6 |
+| `SafetyFactorSolver` | worst `|g − g_exact|/g`; loop's final norm | 3.6e-10; 1.6e-9 | 1.4e-12; 1.0e-13 |
+| `QDrivenCurvedBoundary` | loop's final norm (threshold 1e-9) | 7.4e-13 | 6.2e-10 |
+| `SurfaceAverageConvergence` | settled `V'` at `N = 2048` | 67.14138479360 | 67.14138480619 |
+| | the DG jump on the contour, in `ψ` | 9.8e-11 | 8.6e-16 |
+| | averaged-GS identity residual, Richardson, finest, `k = 2` / `k = 3` | 1.5e-8 / 2.8e-9 | 3.1e-8 / 2.8e-9 |
+| | its rate over the sequence, `k = 2` / `k = 3` | 4.19 / 2.84 | 3.48 / 1.46 |
+| `FluxGridConvergence` | worst `V'`, grid against family | 1.4e-7 | 2.1e-7 |
+| `SurfaceFitConvergence` | worst distance from the exact surfaces | 5.71e-7 | 5.66e-7 |
+| `SafetyFactorScale` | degree-4 `σ_min/σ_max`, `ψ_ax` free | 3.24e-6 | 3.57e-6 |
+| | degree-2 held residual | 3.84e-3 | 4.15e-3 |
+| `FluxSurfaceConvergence` | Hermite arc length, `Ψ_N = 0.4` | 1.677694795238 | 1.677694795445 |
+
+**The q-driven example's target is re-measured, not re-baselined.**
+`examples/q-driven-q.dat` is the `q` of the closed-form `g = 2.20 + 0.55Ψ` on
+the example's mesh, measured — by design — with the extraction the loop
+inverts it with, so that the discretisation error is common to both. Measured
+on `ψ*` it reproduces the shipped table to 4.5e-10; measured on `ψ̃` it is
+**5.1e-5** away. `q`'s own discretisation error on that mesh, against
+`RefinementLevels = 3`, is **5.5e-5** by `ψ*` and **3.5e-5** by `ψ̃`: the move
+is inside the solution's error, and `ψ̃`'s is the closer of the two. The loop
+on the old table lands 1.7e-3 away in `g` — that 5e-5 along M-353's near-null
+scale direction — and on the re-measured one at 1.4e-6, its documented
+accuracy. `theQDrivenRunReportsTheSafetyFactorItReached` (5.5e-5 against the
+old table) passes on the new one.
+
+**The averaged-GS identity's rate falls and its residual does not grow**:
+at `k = 3` the finest residual is the same (2.8e-9) and the coarsest is 17×
+smaller (1.0e-6 → 5.9e-8), which flattens the fitted rate; at `k = 2` the
+finest is 2.1× larger, 3.1e-8. Every residual in the table is below the 1e-6
+MEQ owes.
+
+**Two fixtures named their pair, being about `ψ*`'s own properties**:
+`FluxSurfaceConvergence`'s `theFaceJumpIsTheDiscretisationAndConvergesAtItsOrder`
+(the DG jump of `ψ*`, which on `ψ̃` is 1e-16 and has no rate) and
+`theRepresentationErrorDoesNotKnowAboutTheMesh`; and `ConductorSubtraction`'s
+control tracer, meant as "the same two fields" as the default one. **The
+second is a finding**: at fixed `Δs = 0.004`, `k = 2`, the Hermite
+representation error of a traced contour is flat in `h` on `ψ*` and `q*`
+(5.44e-9, 5.44e-9, 5.33e-9 at `n` = 12, 24, 48, face-crossing segments
+excluded) and falls with `h` on `ψ̃` and `q̃` (3.6e-7, 9.6e-8, 9.7e-9): `ψ̃`'s
+level set is continuous but kinks where `∇ψ̃` jumps, and a smooth Hermite
+through a kink errs. The family's averages are taken on the ray nodes and not
+on the Hermite curve, which only seeds and brackets the rays.
+
+**Single** (`MFEM_DIR=install-single`, `MEQ_PYTHON=OFF`), the touched tests:
+`ContinuousFieldConvergence`, `FluxSurfaceConvergence`, `ConductorSubtraction`,
+`FluxGridConvergence`, `SurfaceAverageConvergence`, `SurfaceFitConvergence`,
+`SafetyFactorSolver`, `QDrivenCurvedBoundary` and `CriticalPointConvergence`
+pass, and so does `DriverAcceptance`'s q-driven pair
+(`theDriverSolvesForTheToroidalField`, `theQDrivenRunReportsTheSafetyFactorItReached`).
+**`ExtractionContinuity` fails in single, and the failure is single's floor,
+not a jump**: on `ψ̃`, `q̃` surface 0's node 0 — angle 0, on the midplane,
+which is the mesh line `z = 0` — changes element 136 → 161 at `A` = 0.30197,
+before any crossing double finds, and the family moves 2.6e-4 across it; the
+control reads 4.6e-6 and passes. `ExtractionJumps` in single at `n = 16`,
+`k = 2` shows why: between neighbouring states with no crossing the family
+moves 3e-5 to 7e-4 (`⟨|∇ρ|²⟩`, worst on the inner surfaces), on both pairs
+alike, the axis element changes 10 times along the scan and the node element
+changes 329 times against double's 21 — nodes and the axis riding the
+midplane's mesh line flip sides by round-off. A 1e-11 bound is a double
+contract, as `SessionSmoothness`'s is; 20ε would not reach it either.
+Not qualified in single (`runs/continuous-extraction/single-check.log`,
+`single-jumps.log`).
+`SafetyFactorScale` fails in single, and fails the same assertion at
+`05465dc` in single: its degree-4 held singular value against the free one;
+not qualified in single. On `manta/shape-derivative`, `RunSession` and
+`SessionSmoothness` fail in single at both commits as well: the session's warm
+resolve and cold solve are 9.8e-6 apart and two warm starts 6.4e-6 to
+1.5e-5, against the 1e-8 and 1e-12 of a double contract (MaNTA's is double,
+the plan's D5). Their repeatability bounds are `max( bound, 20ε )` with
+`ε = numeric_limits<mfem::real_t>::epsilon()` since `2686013`, unchanged in
+double and 2.4e-6 in single, and both still fail there: after the merge of
+`cde84f2` the gap reads 9.75e-6 (82ε; `ψ_ax` passes) and the warm-start
+noise 2.81e-5 (236ε).
+
+**Beside main's measured q-loop floor (M-363)**, merged from `b347610`: in
+double the q tests read as before — `QDrivenConsistency`'s plateau 1.182e-1
+then 1.179e-1, `SafetyFactorSolver`, `SafetyFactorScale`, `QDrivenScalePin`,
+`QDrivenCurvedBoundary` and `DriverAcceptance` pass — and in single, on the
+`ψ̃` map, `QDrivenCurvedBoundary` converges in 4 KINSOL iterations and 25
+equilibria at 2.64e-5 against a measured floor of 1.01e-4 (M-363(d), on `ψ*`:
+4.39e-5 against 1.51e-4), and the other three pass
+(`runs/continuous-extraction/single-merged.log`).
+
+**Under valgrind's memcheck**, `examples/fixed-d-tcv.toml` at
+`RefinementLevels = 1` with `FluxSurfaces = true` (the continuous fields
+built, threaded at two threads, and the family traced through the band):
+exit 0, as natively; 0 errors, 0 bytes definitely lost
+(`runs/manta-shape-derivative/memcheck/`).
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./ExtractionContinuity`,
+`./ContinuousFieldConvergence` (and `./SessionSmoothness` on
+`manta/shape-derivative`); the base → production table from each test's
+output at `05465dc` and at this branch (`runs/manta-shape-derivative/regress/`);
+the target's re-measurement by `runs/manta-shape-derivative/qtarget/`
+(`qtarget.log`: each tree's `meq` on the example with `GGPrimeFile` the closed
+form, at `RefinementLevels` 1, 2, 3).
+
+### M-368
+
+**On a CPU-only build the device unit cases that assert a kernel ran skip,
+loudly; nothing they test is compiled there.** `cpu-build` off `b347610`,
+`builds/cpu-build` against `../../mfem/install-nocuda`. MEQ's seven
+`*Device.cpp` files compile their kernels only under
+`MFEM_USE_CUDA_OR_HIP_LANG`, so here each route is its stub and refuses before
+reading anything. `mfem::Device( "debug" )` is still configurable and still
+allows `DEVICE_MASK`, so fourteen cases read the stub's refusal as a red:
+
+| suite | cases that require a kernel |
+|---|---|
+| `AxisSearchTests` | `theDeviceRootsWhatTheHostSweepRoots`, `theDeviceClassifiesThemAsTheHostDoes`, `theStoppingScaleAgreesAndStaysOnTheDevice`, `itReturnsTheWholeCandidateListHoweverLong` |
+| `DeviceQuadratureTests` | `theDeviceElementLoopReproducesTheHostQuadrature`, `theConductorShiftIsAddedAtTheRightQuadraturePoint` |
+| `DeviceRowsTests` | `theDeviceRowsReproduceTheHostDotToTheBit`, `theColumnFillMatchesTheHostAndIsNotTransposed`, `theMirrorSurvivesBeingRefreshed`, `theBatchedFillIsEveryHostArmToTheBit` |
+| `ResidentIterateTests` | `theTwoIntegralsMatchTheirHostLoopsToTheBit`, `theFourScattersMatchTheirHostLoopsToTheBit`, `theSmallKernelsAreTheHostLoops`, `theNodalPeakIsTheWalk` |
+
+Each now carries `*meq::tests::requiresDeviceKernels()`
+(`tests/unit/DeviceKernels.hpp`), a Boost precondition on
+`meq::deviceKernelsBuilt()`, which `SourceViewDevice.cpp` answers from whichever
+branch it was compiled in, and prints `SKIPPED -- this build has no device
+kernels`. The refusal, counter and host-only cases in the same files run on
+every build. `PlasmaConnectivityFoldOn_debug` keeps running and skips only its
+device-integrand claim, the same way.
+
+**None of them should hold on a CPU-only build as MEQ is laid out, and that is
+a choice MEQ makes, not a limit MFEM imposes.** `install-nocuda`'s
+`general/backends.hpp` sets `can_compile_kernels = true` (the `static_assert`
+fires only with `MFEM_USE_CUDA_OR_HIP` and without the device language), so the
+kernels would compile under `g++` there and `debug` would run them on the host.
+Kept as stubs because the CPU-only tree's `debug` arms are then the one place
+the host fallbacks under a Device are exercised, which is what found M-369;
+the kernels' own `debug` and `cuda` arms are the CUDA tree's.
+
+### M-369
+
+**Two host fallbacks under a Device touched protected memory, and only a build
+without kernels takes them.** Under `--device debug` on `builds/cpu-build`,
+before the fixes:
+
+| case | fault | site |
+|---|---|---|
+| `PlasmaConnectivityFoldOn_debug` | `movslq (%r8,%rax,4)`, an `int` load | `entriesAt()` in `solveWithNormalisation()`: the gather refuses and the host branch indexes the dof array `at[ i ]` raw. MFEM's device-aware vector operations take dof arrays by `Read( use_dev )`, so the array is device-valid and protected |
+| `DeviceParity`, `machine-f-diiid`, `debug` (exit 139) | `memcpy` in `Vector::operator=` in `DarcyNPCOperator::Mult()`, `yb.GetBlock( 0 ) = r_loc.GetBlock( 0 )` | the trial residual at `GradShafranov.cpp` `fieldResidual( unknown, s, residual )`: `DarcyNPCSolver::ArrayMult()` read `residual` as a right-hand side through a `BlockVector` alias on the device, which protects the alias's host range and leaves the base's flags host-valid; with no device integrand the residual is formed on the host and copied into the protected page |
+
+Found with gdb on the release binary and on a `-g` relink of
+`GradShafranov.cpp` for the line. **Fixes**: `entriesAt()`'s host branch calls
+`countedHostRead( at, line )` as its gather branch already did; `flush()` hands
+each right-hand side whose host copy is valid back with `HostRead()` after
+`ArrayMult()` — no transfer on any backend, since a valid host copy is never
+copied into.
+
+**Mutation-checked** on scratch relinks of `GradShafranov.cpp`, each with one
+fix reverted:
+
+| reverted | `PlasmaConnectivity` fold, `debug` | `machine-f-diiid`, `--device debug` |
+|---|---|---|
+| neither | passes | converges, 2 Newton steps, exit 0 |
+| `entriesAt()`'s `at` read | `illegal memory access`, signal 11 | — |
+| `flush()`'s hand-back | passes | `illegal memory access`, exit 139, at a page offset `0xfe0` as before |
+
+With both fixes, `DeviceParity` on `builds/cpu-build` (`OMP_NUM_THREADS=4
+ctest -j3`, a loaded machine, so the seconds are not timings):
+
+| case | arm | exit | s | `psi_ax` | Newton |
+|---|---|---|---|---|---|
+| `mhd-rectangle` | cpu | 0 | 0.6 | - | 5 |
+| `mhd-rectangle` | debug | 0 | 34.3 | - | 5 |
+| `machine-f-diiid` | cpu | 0 | 11.9 | 3.759850e-01 | 2 |
+| `machine-f-diiid` | debug | 0 | 750.6 | 3.759850e-01 | 2 |
+| `diverted-tokamak` | cpu | 0 | 17.5 | 8.486305e-02 | 25 |
+
+and the whole suite there is 142 of 145, the three deliberate reds
+(`PlasmaEdgeConvergence`, `QDrivenConsistency`, `AnisotropicMirror`).
+
+**The CUDA tree is unchanged by either fix or by the skips.** A single build
+against `install-single` (`-DMEQ_PYTHON=OFF`), on the RTX 2070 SUPER for
+correctness: `AxisSearchTests`, `DeviceQuadratureTests`, `DeviceRowsTests` and
+`ResidentIterateTests` pass with no case skipped, under `debug` as registered
+and under `MEQ_TEST_DEVICE=cuda`; both `PlasmaConnectivityFoldOn` arms pass
+with `device integrand yes`; `DeviceParity` passes all three arms:
+
+| case | cpu | debug | cuda |
+|---|---|---|---|
+| `mhd-rectangle`, Newton | 4 | 4 | 4 |
+| `machine-f-diiid`, `psi_ax` / Newton | 3.759861e-01 / 1 | 3.759861e-01 / 1 | 3.759862e-01 / 1 |
+| `diverted-tokamak`, `psi_ax` / Newton | 8.486277e-02 / 23 | skipped by design | 8.486279e-02 / 23 |
+
+### M-370
+
+**`PythonDriverParity` failed on the CPU-only MFEM because `meq` and the
+module linked different MKL threading layers.** `install-nocuda` was
+configured fresh, and its `MKL_PARDISO_*` cache results resolved PARDISO to
+oneAPI's `lib/intel64/libmkl_sequential.so`, where the reference CUDA build
+carries the hand-set `libmkl_gnu_thread.so` (`build/CMakeCache.txt`). Every
+other MKL entry of the two caches agrees. So `config.mk`'s `MFEM_EXT_LIBS`
+named both layers: `-lmkl_gnu_thread` from `BLAS_LIBRARIES` and
+`-lmkl_sequential` from PARDISO's. `meq`'s `NEEDED` was `libmkl_intel_lp64`,
+`libmkl_sequential`; the module's static, hidden MKL group carries
+`mkl_gnu_thread` and no shared MKL at all. So the binary ran PARDISO
+sequential and the module threaded, at `MKL_NUM_THREADS=1` in both.
+
+| `soloviev-nstx`, `MKL_NUM_THREADS=1` | `.nc` against the module's |
+|---|---|
+| `meq`, as linked (sequential) | `final_residual`, `B_R`, `B_Z`, `psi`, every coefficient set differ |
+| the same `meq`, `LD_PRELOAD=libmkl_gnu_thread.so.3` | byte-equal |
+| `meq` relinked against a `config.mk` carrying only `mkl_gnu_thread` | byte-equal |
+
+The two answers are 6.9e-14 apart in `psi_coefficients` (`max |psi|` 0.437),
+`final_residual` 9.79e-14 against 9.70e-14: the module was right to refuse
+them as the same, and the layer, not the code, was the difference. Not
+candidates, checked: SuiteSparse (the module's `install-static` and the
+binary's `install` are v7.12.2 from one `../../suitesparse/src`, and the
+preload alone closes the gap), and a different MFEM (one `libmfem.a`).
+
+**The fix belongs to the MFEM install**: `build-nocuda` reconfigured with the
+reference cache's `MKL_LIBRARY_DIR` and `MKL_PARDISO_*` values
+(`CLAUDE_MFEM.md`, *Rebuilding MFEM*), whose regenerated
+`config/config-install.mk` differs from the installed `config.mk` in those
+tokens only. **MEQ's configure now refuses an MFEM whose link line names two
+MKL threading layers**, naming the repair; it fires on `install-nocuda` as
+installed. `builds/cpu-build` was verified against the regenerated file
+through `-DMFEM_CONFIG_MK=`; the install itself is not refreshed by this
+branch.
+
+### M-371
+
+**What amplifies single precision's round-off on its way to the flux-surface
+family, link by link, and the one link MEQ owned.** `single-extraction` off
+`4827b7c`, `ExtractionNoise` (built, not registered), single (`MFEM_DIR =
+install-single`) and double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`. Each
+case is 21 states 1e-5 apart in a source parameter, every state its own solve;
+a smooth quantity's second difference over that step is ~1e-10 of it, so the
+second differences are the noise, and σ is their root mean square over √6.
+The linear case is `ExtractionCrossing.hpp`'s box (`F = −((1 − A)R² + A)`,
+no `ψ_ax` unknown); the normalised case is `SafetyFactorSolver`'s bordered
+source, `gg′`'s slope scaled.
+
+**(a) Each field's own noise, single** (of its largest value, root mean
+square over dofs / worst dof; double is 1e-16 to 1e-13 throughout):
+
+| case | trace `ψ̂` | `ψ_h` | `q_h` | `ψ*` | `ψ̃` |
+|---|---|---|---|---|---|
+| linear, `n = 12`, `k = 2` | 4.9e-8 / 1.4e-7 | 8.7e-6 / 3.7e-5 | 2.4e-6 / 9.7e-6 | 5.6e-7 / 3.3e-6 | 2.9e-7 / 1.3e-6 |
+| linear, `n = 16`, `k = 2` | 5.2e-8 / 1.5e-7 | 1.1e-5 / 4.4e-5 | 3.2e-6 / 1.3e-5 | 5.5e-7 / 3.7e-6 | 2.8e-7 / 1.3e-6 |
+| linear, `n = 32`, `k = 2` | 4.9e-8 / 1.6e-7 | 2.2e-5 / 8.3e-5 | 6.4e-6 / 2.6e-5 | 5.4e-7 / 4.1e-6 | 2.7e-7 / 1.6e-6 |
+| linear, `n = 16`, `k = 3` | 4.7e-8 / 1.6e-7 | 1.8e-5 / 8.0e-5 | 5.9e-6 / 2.9e-5 | 7.4e-7 / 6.4e-6 | 7.1e-7 / 4.5e-6 |
+| normalised, `n = 16`, `k = 2` | 1.6e-7 / 3.6e-7 | 1.8e-7 / 4.2e-7 | 7.0e-7 / 3.0e-6 | 5.6e-7 / 3.9e-6 | 3.1e-7 / 1.5e-6 |
+
+**The trace is solved to about 0.4ε. The element-local recovery of `ψ_h` and
+`q_h` from it — MFEM's `RecoverFEMSolution()`, `real_t` throughout — carries
+about 200× that on the linear path, growing as `1/h` and with `k`**, which
+reads as the local blocks' conditioning or scaling. On the normalised path
+Newton's last steps act as iterative refinement and `ψ_h` comes out 60× quieter.
+**`ψ*` sits at 5.5e-7 on both paths although its `q_h` input differs 4.6×**:
+its floor is `Reconstruct()`'s own, MFEM's too, and `ψ̃` inherits it through
+`ψ*`'s vertex and cell moments. Neither is MEQ code (`../../mfem-hdg-dev` is
+receive-only).
+
+**(b) The axis, single, `n = 16`, `k = 2`** (σ of the span):
+
+| case | the solve's `ψ_ax` | the finder's `ψ_h` at the axis | `ψ̃` at the axis | `ψ̃` at a fixed point |
+|---|---|---|---|---|
+| linear | — | 1.13e-5 | 4.2e-7 | 1.55e-7 |
+| normalised | 2.3e-7 | 4.7e-6 | 8.7e-7 | — |
+
+The axis point moves 1e-5 m (from `q_h`'s noise) and flips between the two
+elements beside the mesh line `z = 0` six times in 21 states, against never
+in double; `ψ_h`'s gradient is `O(h^k)` from zero at `q_h`'s root, so the
+finder's value carries the move as well as `ψ_h`'s own noise.
+
+**(c) The family, single** (σ of each average's value, worst over 12 surfaces
+from `Ψ_N` = 0.05 to 0.9 and six averages; the innermost surface is always the
+worst):
+
+| case | labelled by the finder's `ψ_h` | by `ψ̃` at the axis | by the solve's `ψ_ax` | `ψ̃` at a fixed axis point |
+|---|---|---|---|---|
+| linear, `n = 12`, `k = 2` | 3.1e-4 | 1.4e-5 | — | |
+| linear, `n = 16`, `k = 2` | 2.4e-4 | 9.6e-6 | — | 8.8e-6 |
+| linear, `n = 32`, `k = 2` | 4.2e-4 | 2.8e-5 | — | |
+| linear, `n = 16`, `k = 3` | 4.5e-4 | 2.1e-5 | — | |
+| normalised, `n = 16`, `k = 2` | 9.8e-5 | 1.8e-5 | **1.1e-5** | |
+
+In double every column reads 1e-11 to 5e-11. **The finder's `ψ_h` was the
+amplifier**, 18–27× on the linear path and 9× on the normalised one, and it was
+the only use the extraction made of `ψ_h`. On `ψ*` and `q*` the family reads as
+on `ψ̃` with the same label, so the rooted pair is not the amplifier. With the
+label fixed the axis point no longer matters (the fixed-point column), and what
+is left is `ψ̃`'s own noise near the axis divided by the innermost surface's
+`Ψ_N`: 4.2e-7 / 0.05 ≈ 8e-6 against 9.6e-6 measured.
+
+**(d) The label, and why each half.** `meq::labelledAxis()` labels the family
+by **the solve's `ψ_ax` where the solve has one** — it is the quietest value
+of the three, and only it keeps the family's `Ψ_N` the source's `Ψ`: labelled
+by `ψ̃`, `SafetyFactorSolver`'s `theReferenceIsAFixedPointOfItsOwnTarget`
+fails at 1.5e-7 and `theOuterResidualsConditioningAtTheAnswer` at 1.8e-6 in
+double — and **by `ψ̃` at the located axis otherwise**. That second half
+moves a linear source's family by the discretisation's error in `ψ_h` at the
+axis, and toward the truth. Double, against `n = 48`, `k = 4` (worst average,
+all surfaces):
+
+| case | `ψ̃ − ψ_h` at the axis, of the span | labelled by the finder's `ψ_h` | by `ψ̃` |
+|---|---|---|---|
+| `n = 8`, `k = 2` | | 2.9e-3 | 4.8e-4 |
+| `n = 12`, `k = 2` | 2.2e-5 | | |
+| `n = 16`, `k = 2` | 5.0e-6 | 1.5e-4 | 1.3e-4 |
+| `n = 32`, `k = 2` | 1.4e-6 | 3.3e-5 | 5.9e-6 |
+| `n = 8`, `k = 3` | | 9.0e-5 | 7.5e-5 |
+| `n = 16`, `k = 3` | −3.9e-7 | 1.2e-5 | 1.2e-5 |
+
+The old label's extra error is in the inner surfaces: their `Ψ_N` carried the
+axis offset divided by `Ψ_N`. `ExtractionContinuity`'s
+`theFamilyIsLabelledOnTheFieldItRoots` asserts the rule (`ψ_ax` equal to
+`ψ̃` at the family's axis within 64ε of the span; the finder's value is
+2.2e-5 away on its mesh in double and 6.4e-5 in single).
+
+**(e) Where the bounds stand in single**, at `max( bound, 20ε )`, 20ε = 2.4e-6:
+
+| test | reads | in ε | |
+|---|---|---|---|
+| `ExtractionContinuity`, continuity across the bisected crossing | 1.81e-5 (2.62e-4 before) | 152ε | fails |
+| `ExtractionContinuity`, the label | 0 | | passes |
+| `SessionSmoothness`, two warm starts (`manta/shape-derivative`) | 3.48e-6 (2.81e-5 before) | 29ε | fails, by 1.45× |
+| `SessionSmoothness`, the jump at its crossing (bound 1e-11, not a repeatability bound) | 6.24e-6 | 52ε | fails |
+| `RunSession`, warm against cold | 9.75e-6 (unchanged) | 82ε | fails |
+| `RunSession`, `ψ_ax` | 5.4e-8 relative | 0.5ε | passes |
+
+The family's single floor, about 1e-5 (85ε), is `Reconstruct()`'s round-off
+in `ψ*` carried into `ψ̃` and divided by the innermost `Ψ_N`; bringing it to
+20ε wants `ψ*` about 8× quieter, which is MFEM's local solve, or an innermost
+surface further from the axis. **`RunSession`'s gap is not the family at
+all**: it is the worst entry of the solved state `( q, ψ, ψ̂ )`, and split by
+block (a probe, not kept) it is all `q_h` — 9.75e-6 of the state's largest
+value (rms 1.3e-6), against `ψ_h`'s 1.05e-7 and the trace's 5.8e-8, which is
+3.5e-7 (3ε) of the trace's own largest value. **The warm and cold solves agree
+on the global unknown to 3ε, and MFEM's element-local recovery of `q_h` from it
+is what separates them**, as in (a); a bound on the state at 20ε wants that
+recovery quieter, or an assertion on the trace.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
+./ExtractionNoise --run_test=<case>`: `n12k2`, `n16k2`, `n32k2`, `n16k3`,
+`normalisedN16k2`, `accuracy`; the "finder's `ψ_h`" family is what this
+library extracted before `meq::labelledAxis()`. Logs
+`runs/single-extraction/noise-*.log`, `single-touched.log`.
+
+### M-372
+
+**`QDrivenCurvedBoundary` asserts what the loop promises, and catches what
+"Solved" cannot.** `single-extraction`, double and single. The run's restart
+now carries `toroidal_loop_residual`, `toroidal_loop_threshold` (`max(
+tolerance, floor )`, the loop's judge) and `toroidal_loop_conditioning`
+(`σ_min/σ_max` of the outer Jacobian). "Solved" means the residual reached the
+threshold, which the loop decides itself, so it cannot fail; the coefficients
+are now bounded by `threshold/conditioning`:
+
+| | residual / threshold | conditioning | bound | `c₁`, `c₂` errors |
+|---|---|---|---|---|
+| double | 1.13e-10 / 1e-9 | 0.214 | 4.7e-9 | 1.2e-10, 1.0e-10 |
+| single | 1.38e-5 / 8.0e-5 (measured floor) | 0.215 | 3.7e-4 | 3.3e-5, 1.4e-5 |
+| double, `g²` biased by 2e-8 in `invertSafetyFactor()` | 1.14e-10 / 1e-9 | 0.214 | 4.7e-9 | **5.5e-8, 5.0e-8: fails** |
+
+The mutated loop converges as normally as the true one, and the replaced bound,
+`1e-4·c₀` = 4.8e-4, passes it by four orders. `c₀` is held by the `R0B0` pin.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./QDrivenCurvedBoundary`;
+the mutation is `out.gSquared.push_back( g*g*( 1.0 + 2.0e-8 ) )` in
+`src/meq/SafetyFactor.cpp`, reverted.
+
 ### M-LIN-1
 
 **THE DISCRETE TANGENT `δψ_h = ∂ψ_h/∂λ` CONVERGES TO THE EXACT `∂ψ/∂λ` AT

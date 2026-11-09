@@ -889,10 +889,11 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 	meq::ContourTracer const tracer( solver );
 	BOOST_TEST_REQUIRE( tracer.conductorField() == &conductors );
 
-	// The control tracer: the same two fields through the door that cannot
-	// know about a split, so it answers psi_p and q_p.
-	meq::ContourTracer const bare( solver.postProcessedPotential(),
-	                               solver.postProcessedFlux() );
+	// The control tracer: the same two fields -- the default pair, psi~ and
+	// q~ -- through the door that cannot know about a split, so it answers
+	// psi_p and q_p.
+	meq::ContourTracer const bare( solver.continuousPotential(),
+	                               solver.continuousFlux() );
 	BOOST_TEST_REQUIRE( bare.conductorField() == nullptr );
 
 	// THE SEAM IDENTITY, AT ZERO TOLERANCE, BEFORE ANY TRACING. Whatever the

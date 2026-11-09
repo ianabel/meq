@@ -42,11 +42,13 @@
 #                          caller can react to MFEM_USE_MPI, MFEM_USE_SUNDIALS
 #                          and friends without parsing anything itself
 #
-# Imported target:
+# Imported targets:
 #
-#   MFEM::MFEM     carries the include directories, the link line, any compile
-#                  options MFEM's third-party flags demand, and the C++
-#                  standard MFEM itself was compiled with.
+#   MFEM::MFEM          libmfem, MFEM::headers and MFEM::dependencies together
+#   MFEM::headers       the include directories, any compile options MFEM's
+#                       third-party flags demand, and the C++ standard MFEM
+#                       itself was compiled with
+#   MFEM::dependencies  the third-party link line libmfem needs, without libmfem
 
 include(FindPackageHandleStandardArgs)
 
@@ -246,38 +248,47 @@ find_package_handle_standard_args(MFEM
 	VERSION_VAR MFEM_VERSION)
 
 if(MFEM_FOUND AND NOT TARGET MFEM::MFEM)
+	# THREE TARGETS, SO THAT A CONSUMER CAN TAKE MFEM'S HEADERS WITHOUT ITS
+	# OBJECT CODE. MFEM::MFEM is the whole of it, MFEM::headers and
+	# MFEM::dependencies are its two halves: what compiling against mfem.hpp
+	# needs, and the third-party link line (MKL, SUNDIALS, the CUDA runtime)
+	# that libmfem itself needs. meq's objects take the halves, and meq_core
+	# adds MFEM::MFEM; the shared library the tests link carries libmfem whole
+	# and passes on only the halves, so a test never links a second copy of
+	# MFEM's globals (CMakeLists.txt, meq_core_tests).
+	add_library(MFEM::headers INTERFACE IMPORTED)
+	set_target_properties(MFEM::headers PROPERTIES
+		INTERFACE_INCLUDE_DIRECTORIES "${MFEM_INCLUDE_DIRS}")
+	if(MFEM_COMPILE_DEFINITIONS)
+		set_target_properties(MFEM::headers PROPERTIES
+			INTERFACE_COMPILE_DEFINITIONS "${MFEM_COMPILE_DEFINITIONS}")
+	endif()
+	if(MFEM_COMPILE_OPTIONS)
+		set_target_properties(MFEM::headers PROPERTIES
+			INTERFACE_COMPILE_OPTIONS "${MFEM_COMPILE_OPTIONS}")
+	endif()
+	# Whatever MFEM was compiled with is the floor for anything that includes
+	# its headers, so it travels with the target.
+	if(MFEM_CXX_STANDARD)
+		set_target_properties(MFEM::headers PROPERTIES
+			INTERFACE_COMPILE_FEATURES "cxx_std_${MFEM_CXX_STANDARD}")
+	endif()
+
+	# Everything libmfem in turn depends on.
+	add_library(MFEM::dependencies INTERFACE IMPORTED)
+	list(REMOVE_AT MFEM_LIBRARIES 0)
+	if(MFEM_LIBRARIES)
+		set_target_properties(MFEM::dependencies PROPERTIES
+			INTERFACE_LINK_LIBRARIES "${MFEM_LIBRARIES}")
+	endif()
+	list(INSERT MFEM_LIBRARIES 0 "${MFEM_LIBRARY}")
+
 	# UNKNOWN rather than STATIC: the same tree can be built either way
 	# (config.mk's MFEM_SHARED says which), and UNKNOWN handles both.
 	add_library(MFEM::MFEM UNKNOWN IMPORTED)
 	set_target_properties(MFEM::MFEM PROPERTIES
 		IMPORTED_LOCATION "${MFEM_LIBRARY}"
-		INTERFACE_INCLUDE_DIRECTORIES "${MFEM_INCLUDE_DIRS}")
-
-	# The library itself is IMPORTED_LOCATION; INTERFACE_LINK_LIBRARIES is
-	# everything it in turn depends on.
-	list(REMOVE_AT MFEM_LIBRARIES 0)
-	if(MFEM_LIBRARIES)
-		set_target_properties(MFEM::MFEM PROPERTIES
-			INTERFACE_LINK_LIBRARIES "${MFEM_LIBRARIES}")
-	endif()
-	list(INSERT MFEM_LIBRARIES 0 "${MFEM_LIBRARY}")
-
-	if(MFEM_COMPILE_DEFINITIONS)
-		set_target_properties(MFEM::MFEM PROPERTIES
-			INTERFACE_COMPILE_DEFINITIONS "${MFEM_COMPILE_DEFINITIONS}")
-	endif()
-
-	if(MFEM_COMPILE_OPTIONS)
-		set_target_properties(MFEM::MFEM PROPERTIES
-			INTERFACE_COMPILE_OPTIONS "${MFEM_COMPILE_OPTIONS}")
-	endif()
-
-	# Whatever MFEM was compiled with is the floor for anything that includes
-	# its headers, so it travels with the target.
-	if(MFEM_CXX_STANDARD)
-		set_target_properties(MFEM::MFEM PROPERTIES
-			INTERFACE_COMPILE_FEATURES "cxx_std_${MFEM_CXX_STANDARD}")
-	endif()
+		INTERFACE_LINK_LIBRARIES "MFEM::headers;MFEM::dependencies")
 endif()
 
 mark_as_advanced(MFEM_INCLUDE_DIR MFEM_LIBRARY MFEM_CONFIG_MK)

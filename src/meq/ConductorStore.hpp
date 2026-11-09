@@ -1,6 +1,8 @@
 #ifndef MEQ_CONDUCTORSTORE_HPP
 #define MEQ_CONDUCTORSTORE_HPP
 
+#include "Digest.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -166,14 +168,6 @@ namespace meq
 			/// a different rule from the one the quadrature half follows.
 			bool criticalPointTableIsConsistent() const;
 	};
-
-	/// FNV-1a over the IEEE bytes. Exposed because the mesh and conductor
-	/// digests are built by callers that own those objects -- the solver knows
-	/// its mesh, meq::ConductorField knows its conductors -- and a digest is
-	/// only comparable if both sides mix in the same order.
-	std::uint64_t digestSeed();
-	std::uint64_t digestAppend( std::uint64_t digest, double value );
-	std::uint64_t digestAppend( std::uint64_t digest, std::int64_t value );
 
 	/// The group name MEQ writes when embedding, and looks for when reading a
 	/// file it was not told the group of.

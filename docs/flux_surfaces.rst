@@ -336,14 +336,34 @@ spacing is a free parameter rather than something tied to the mesh.
 Which potential to root
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-MEQ has two candidate pairs: :math:`\psi_h` with :math:`q_h`, both converging at
-:math:`k+1`; and the post-processed :math:`\psi^\star` with the enriched
-:math:`q^\star`, where :math:`\psi^\star` converges at :math:`k+2` (see
-:doc:`postprocessing`). ``Potential::PostProcessed`` is **the default**, and the
-constructor refuses a solver on which ``postProcess()`` has not been called.
+MEQ has two solved candidate pairs: :math:`\psi_h` with :math:`q_h`, both
+converging at :math:`k+1`; and the post-processed :math:`\psi^\star` with the
+enriched :math:`q^\star`, where :math:`\psi^\star` converges at :math:`k+2` (see
+:doc:`postprocessing`). The extraction roots neither directly. **The default,
+and what every run's flux surfaces use, is** ``Potential::Continuous``: a
+potential :math:`\tilde\psi` and a flux :math:`\tilde q` that are continuous
+across element faces, interpolated from :math:`\psi^\star`, the trace
+:math:`\hat\psi` and :math:`q^\star`, and converging at the same orders as
+:math:`\psi^\star` and :math:`q^\star`. Both :math:`\psi^\star` and
+:math:`q^\star` jump across every face, so a surface point that crosses one
+moves discontinuously; the continuous pair removes those jumps, which matters to
+anything that differences the geometry, and moves the averages by less than
+their own discretisation error. The constructor refuses a solver on which
+``postProcess()`` has not been called.
+
+**The label** :math:`\Psi_N` **is normalised by the solve's own**
+:math:`\psiax` **when the solve has one** — a normalised source, whose
+:math:`\Psi` the family's :math:`\Psi_N` then is, so that a profile read against
+the source pairs with the averages at the same label — **and otherwise by**
+:math:`\tilde\psi` **at the located axis**, the field the levels are in, so
+that :math:`\Psi_N` is zero on that field's own axis (``meq::labelledAxis()``).
+The solved :math:`\psi_h` there is not used: it carries the discretisation's
+error at the axis, which an inner surface's label divides by :math:`\Psi_N`,
+and in single precision it carries far more round-off than :math:`\tilde\psi`.
 
 Two things follow from rooting the better field, and the second was not
-expected.
+expected; both are properties of :math:`\psi^\star`, which the continuous pair
+inherits.
 
 **The contour inherits the potential's order.** Every accepted point is on
 :math:`\{\psi^\star = c\}` to tolerance, so by the implicit function theorem the

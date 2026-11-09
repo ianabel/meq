@@ -145,6 +145,7 @@ namespace meq
 		family.axisR = axis.radius;
 		family.axisZ = axis.z;
 		family.psiAxis = axis.psi;
+		family.axisElement = axis.element;
 		family.psiBoundary = psiBoundary;
 		family.innerCut = options.innerCut;
 		family.outerCut = options.outerCut;
@@ -252,6 +253,11 @@ namespace meq
 			surface.transverse = fit.transverse;
 			surface.stalledRays = fit.stalledRays;
 			surface.fallbackLocations = fit.fallbackLocations;
+			surface.elements = fit.element;
+			surface.bandFaces = fit.bandFace;
+			surface.rayRoutes = fit.route;
+			surface.rayIterations = fit.iterations;
+			surface.tracedPoints = fit.tracedPoints;
 
 			family.surfaces.push_back( std::move( surface ) );
 		}
@@ -265,8 +271,25 @@ namespace meq
 	{
 		ContourTracer const tracer( solver, which );
 		CriticalPointFinder const finder( solver );
-		CriticalPoint const axis = finder.findAxis();
+		CriticalPoint const axis = labelledAxis( solver, tracer, finder.findAxis() );
 		return extractFluxSurfaces( tracer, axis, solver.psiBoundary(), options );
+	}
+
+	CriticalPoint labelledAxis( GradShafranovSolver const &solver,
+	                            ContourTracer const &tracer,
+	                            CriticalPoint const &located )
+	{
+		CriticalPoint out = located;
+		if ( solver.normalisationIsUnknown() )
+		{
+			out.psi = solver.psiAxis();
+			return out;
+		}
+		double psi = 0.0, qR = 0.0, qZ = 0.0;
+		int hint = located.element;
+		if ( tracer.sampleAt( located.radius, located.z, psi, qR, qZ, hint ) )
+			out.psi = psi;
+		return out;
 	}
 
 	double enclosedVolume( AngleParametrisation const &fit )

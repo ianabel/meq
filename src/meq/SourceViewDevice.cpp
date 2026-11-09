@@ -76,12 +76,22 @@ namespace meq
 		return true;
 	}
 
+	bool deviceKernelsBuilt()
+	{
+		return true;
+	}
+
 #else
 
 	bool evaluateSourceOnDevice( SourceView const &, KnotView const *, int,
 	                             mfem::real_t const *, mfem::real_t const *,
 	                             mfem::real_t const *, mfem::real_t *,
 	                             mfem::real_t *, int )
+	{
+		return false;
+	}
+
+	bool deviceKernelsBuilt()
 	{
 		return false;
 	}

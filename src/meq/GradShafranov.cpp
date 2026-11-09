@@ -13,7 +13,7 @@
 #include "PointLocator.hpp"
 #include "RegularisedLeastSquares.hpp"
 #include "DeviceRows.hpp"
-#include "StageChecksum.hpp"
+#include "StageChecksumMfem.hpp"
 #include "RulePoint.hpp"
 
 // FB-7: conductors outside Gamma. The header forward-declares CoilSet so that it
@@ -21,6 +21,7 @@
 // here, where the field is actually evaluated.
 #include "Coils.hpp"
 #include "ConductorField.hpp"
+#include "ContinuousField.hpp"
 #include "FieldViews.hpp"
 // samplerInsideTolerance() -- locatePotentialPoint() asks the same question
 // meq::GridSampler does, so it uses the same expression. M-165, M-221.
@@ -3388,6 +3389,8 @@ namespace
 				to[ i ] = -from[ i ];
 		}
 		postProcessed = false;
+		continuousPotentialGf.reset();
+		continuousFluxGf.reset();
 #endif
 	}
 
@@ -12695,7 +12698,15 @@ namespace
 					return;
 				}
 			}
+			// THE HOST ROUTE ASKS FOR THE INDICES TOO. A dof array handed to
+			// one of MFEM's device-aware vector operations comes back
+			// device-valid (see rowDot()'s `borderDofs`), so `at[ i ]` is as
+			// raw as `v( i )` and the debug backend faults on it here. The
+			// branch above asks after its gather; this is the branch taken
+			// when the gather refuses -- every time on a build whose device
+			// files are host stubs.
 			countedHostRead( v, line );
+			countedHostRead( at, line );
 			for ( int i = 0; i < at.Size(); ++i )
 				out( i ) = v( at[ i ] );
 		};
@@ -16999,6 +17010,23 @@ namespace
 				if ( !keepColumnsResident )
 					for ( int i = 0; i < borderOut.Size(); ++i )
 						countedHostRead( *borderOut[ i ], __LINE__ );
+				/*
+				 * AND THE RIGHT-HAND SIDES GO BACK TO WHOEVER WRITES THEM ON
+				 * THE HOST. `ArrayMult()` reads each column through a
+				 * BlockVector over it, on the device, and an alias's device
+				 * read protects its host range under the debug backend without
+				 * telling the base, whose flags still say host-valid. The next
+				 * writer of `residual` is the host element loop inside
+				 * `DarcyNPCOperator::Mult()` whenever the device integrand is
+				 * not in use -- always, on a build whose device files are host
+				 * stubs -- and it copies into the protected page. Asked only of
+				 * a column whose host copy is valid, so this moves no data on
+				 * any backend; it is the hand-back this file makes after every
+				 * device read. M-369.
+				 */
+				for ( int i = 0; i < borderRhs.Size(); ++i )
+					if ( borderRhs[ i ]->GetMemory().HostIsValid() )
+						borderRhs[ i ]->HostRead();
 				borderRhs.SetSize( 0 );
 				borderOut.SetSize( 0 );
 			};
@@ -19999,6 +20027,8 @@ namespace
 		// A new solution invalidates the old post-processing rather than being
 		// silently paired with it.
 		postProcessed = false;
+		continuousPotentialGf.reset();
+		continuousFluxGf.reset();
 	}
 
 	void GradShafranovSolver::downloadSolution()
@@ -20155,6 +20185,32 @@ namespace
 		 * of that defect; this code assumes the library works.
 		 */
 		postProcessed = true;
+		continuousPotentialGf.reset();
+		continuousFluxGf.reset();
+	}
+
+	void GradShafranovSolver::buildContinuousFields() const
+	{
+		if ( continuousPotentialGf )
+			return;
+		if ( !postProcessed )
+			throw std::logic_error( "meq::GradShafranovSolver: the continuous fields psi~ and q~ are "
+			                        "built from psi* and q*, so postProcess() comes first" );
+		ContinuousFields fields = meq::buildContinuousFields( postProcessedGf, enrichedFluxGf, traceGf );
+		continuousPotentialGf = std::move( fields.potential );
+		continuousFluxGf = std::move( fields.flux );
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::continuousPotential() const
+	{
+		buildContinuousFields();
+		return *continuousPotentialGf;
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::continuousFlux() const
+	{
+		buildContinuousFields();
+		return *continuousFluxGf;
 	}
 
 	bool GradShafranovSolver::isPostProcessed() const

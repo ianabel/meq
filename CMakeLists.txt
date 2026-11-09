@@ -79,9 +79,9 @@ option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 
 # ON since stage 7e: meq is the driver now -- apps/meq.cpp, its command
 # line, over src/meq/Run.cpp, the run -- not the legacy vacuum-field
-# program built on MFEM 4.5.1's HDGBilinearForm. It needs MFEM, so the guard
-# below still applies -- a build without it gets the MFEM-free half and no
-# executable, which is what CI does.
+# program built on MFEM 4.5.1's HDGBilinearForm. It needs MFEM, so a build
+# without it turns this off after find_package(MFEM) below, and gets the
+# MFEM-free half and no executable, which is what CI does.
 option(MEQ_BUILD_APP "Build the meq executable" ON)
 
 # The Python module, `import meq`: a third front end on meq::Run beside meq and
@@ -162,6 +162,15 @@ if(NOT MFEM_FOUND)
 	message(STATUS "meq: MFEM not found -- building the MFEM-free subset only.")
 	message(STATUS "meq:   excluded: the solver, the estimator, every convergence test")
 	message(STATUS "meq:   set MFEM_DIR to a built MFEM to get the whole library")
+	# AND NO EXECUTABLE, WHATEVER MEQ_BUILD_APP SAYS. apps/meq.cpp and
+	# apps/meq-convert.cpp include mfem.hpp and drive meq::Run, which is in the
+	# MFEM half, so with the option left at its default the MFEM-free build
+	# would fail on them. Shadowing the option here is what makes "no MFEM"
+	# mean the subset, for the Python module (inside the same block) as well.
+	if(MEQ_BUILD_APP)
+		message(STATUS "meq:   and no meq, meq-convert or Python module, which need it")
+		set(MEQ_BUILD_APP OFF)
+	endif()
 elseif(NOT MFEM_USE_SUITESPARSE AND NOT MFEM_USE_MKL_PARDISO)
 	# A DIRECT TRACE SOLVER ON THE HOST IS A REQUIREMENT, NOT AN OPTION. There
 	# is no iterative fallback: GMRES on MEQ's trace system was measured
@@ -172,6 +181,38 @@ elseif(NOT MFEM_USE_SUITESPARSE AND NOT MFEM_USE_MKL_PARDISO)
 		"with MFEM_USE_SUITESPARSE=YES (install SuiteSparse, e.g. "
 		"libsuitesparse-dev) or MFEM_USE_MKL_PARDISO=YES (install oneMKL), "
 		"then reconfigure. cuDSS alone is not enough: it needs a device.")
+endif()
+
+# ONE MKL THREADING LAYER, OR NONE. MFEM's link line names MKL twice -- once
+# from BLAS_LIBRARIES and once from MKL_PARDISO_LIBRARIES -- and both are cached
+# RESULTS of MFEM's configure, so an MFEM configured fresh rather than from the
+# reference cache resolves PARDISO to its default component, `mkl_sequential`,
+# beside BLAS's `mkl_gnu_thread`. Such a line links and runs: `meq` binds
+# whichever layer the loader meets first, the Python module's static MKL binds
+# the other, and the two front ends write different answers (M-370). The
+# layers are alternatives, so two on one line is a configuration error in the
+# MFEM install, and CLAUDE_MFEM.md, *Rebuilding MFEM*, says how to repair it.
+if(MFEM_FOUND)
+	set(_meq_mkl_layers "")
+	foreach(_item IN LISTS MFEM_LIBRARIES)
+		if(_item MATCHES "mkl_(sequential|gnu_thread|intel_thread|tbb_thread)")
+			list(APPEND _meq_mkl_layers "${CMAKE_MATCH_1}")
+		endif()
+	endforeach()
+	list(REMOVE_DUPLICATES _meq_mkl_layers)
+	list(LENGTH _meq_mkl_layers _meq_mkl_layer_count)
+	if(_meq_mkl_layer_count GREATER 1)
+		message(FATAL_ERROR
+			"meq: the MFEM at ${MFEM_DIR} links ${_meq_mkl_layer_count} MKL "
+			"threading layers (${_meq_mkl_layers}), read out of "
+			"${MFEM_CONFIG_MK}. They are alternatives: the loader binds one, "
+			"and a static link of the other (the Python module's) gives "
+			"different answers. Reconfigure that MFEM with the reference "
+			"build's MKL_PARDISO_* cache entries (mkl_gnu_thread), reinstall it, "
+			"and configure this tree afresh.")
+	endif()
+	unset(_meq_mkl_layers)
+	unset(_meq_mkl_layer_count)
 endif()
 
 # NetCDF, for the driver's output grid. Optional in the same spirit as MFEM: a
@@ -271,6 +312,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/ConductorField.cpp
 	src/meq/ConductorStore.cpp
 	src/meq/Config.cpp
+	src/meq/ContinuousField.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Crossings.cpp
@@ -283,6 +325,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/DeviceQuadratureDevice.cpp
 	src/meq/DeviceRows.cpp
 	src/meq/DeviceRowsDevice.cpp
+	src/meq/Digest.cpp
 	src/meq/ExteriorDtN.cpp
 	src/meq/Field.cpp
 	src/meq/FluxExtraction.cpp
@@ -309,6 +352,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
 	src/meq/StageChecksum.cpp
+	src/meq/StageChecksumMfem.cpp
 	src/meq/StoredEquilibrium.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/SurfaceFit.cpp
@@ -319,6 +363,7 @@ set(MEQ_CORE_SOURCES
 # see the find_package note above for why that case exists at all.
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/BuildInfo.cpp
+	src/meq/ContinuousField.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Crossings.cpp
 	src/meq/DeviceNPCDevice.cpp
@@ -350,7 +395,10 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Sampler.cpp
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
-	src/meq/StageChecksum.cpp
+	# The instrument's probes over mfem::Vector and mfem::Array<int>. The
+	# instrument itself, src/meq/StageChecksum.cpp, is MFEM-free, because
+	# src/meq/SafetyFactor.cpp probes the seam back into plain doubles.
+	src/meq/StageChecksumMfem.cpp
 	src/meq/StoredEquilibrium.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
@@ -502,12 +550,24 @@ if(_meq_core_no_netcdf)
 endif()
 
 if(MEQ_CORE_SOURCES_PRESENT)
-	add_library(meq_core STATIC ${MEQ_CORE_SOURCES_PRESENT})
-	target_link_libraries(meq_core PUBLIC Boost::headers)
+	# meq's translation units are compiled ONCE, into an object library, and
+	# linked into two libraries: meq_core, static, for meq, meq-convert and the
+	# Python module, and meq_core_tests, shared, for the tests (below).
+	# Position independent because the second is a shared object, and so is
+	# the Python module, which links the first. -fno-semantic-interposition
+	# keeps -fPIC from making every non-inline function an interposable one
+	# that GCC may not inline: nothing interposes meq's functions. It leaves
+	# variables reached through the GOT, so a test's copy-relocated reference
+	# to a meq or MFEM global is still the one copy.
+	add_library(meq_core_objects OBJECT ${MEQ_CORE_SOURCES_PRESENT})
+	set_target_properties(meq_core_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	target_compile_options(meq_core_objects PRIVATE
+		$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU,Clang>>:-fno-semantic-interposition>)
+	target_link_libraries(meq_core_objects PUBLIC Boost::headers)
 
 	# PRIVATE: only src/meq/SurfaceFit.cpp includes it and no meq header does,
 	# so a consumer of meq_core takes on nothing.
-	target_link_libraries(meq_core PRIVATE Eigen3::Eigen)
+	target_link_libraries(meq_core_objects PRIVATE Eigen3::Eigen)
 
 	# EIGEN_DONT_PARALLELIZE, and it is a decision rather than caution.
 	#
@@ -530,12 +590,12 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# It is a compile definition on meq_core alone rather than a call to
 	# Eigen::setNbThreads(), which is process-global state a library has no
 	# business setting on its caller's behalf.
-	target_compile_definitions(meq_core PRIVATE EIGEN_DONT_PARALLELIZE)
+	target_compile_definitions(meq_core_objects PRIVATE EIGEN_DONT_PARALLELIZE)
 
 	# Both src/ and src/meq/ are on the include path, so a header can be
 	# reached either as "Config.hpp" (which is how the existing sources
 	# include each other) or as "meq/Config.hpp".
-	target_include_directories(meq_core PUBLIC
+	target_include_directories(meq_core_objects PUBLIC
 		"${CMAKE_CURRENT_SOURCE_DIR}/src"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/meq")
 
@@ -544,7 +604,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		# both the compile and the link side on every object it reports, and a
 		# test binary that links an instrumented library but is not itself
 		# instrumented produces no .gcda for its own translation unit.
-		target_link_libraries(meq_core PUBLIC meq_coverage)
+		target_link_libraries(meq_core_objects PUBLIC meq_coverage)
 	endif()
 
 	# OpenMP, ASKED FOR RATHER THAN INHERITED.
@@ -565,19 +625,23 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# fail at ld time rather than at configure.
 	find_package(OpenMP COMPONENTS CXX)
 	if(OpenMP_CXX_FOUND)
-		target_link_libraries(meq_core PUBLIC OpenMP::OpenMP_CXX)
+		target_link_libraries(meq_core_objects PUBLIC OpenMP::OpenMP_CXX)
 	endif()
 
 	# PUBLIC, not PRIVATE: meq's own headers include mfem.hpp and toml.hpp,
 	# so anything that includes them needs both on its compile line.
-	target_link_libraries(meq_core PUBLIC toml11::toml11)
+	target_link_libraries(meq_core_objects PUBLIC toml11::toml11)
 
 	# Guarded, because an unfound package leaves no target and CMake passes the
 	# name through to the linker verbatim -- the failure is
 	# "cannot find -lMFEM::MFEM" from ld, at link time, long after configure
 	# said everything was fine.
+	#
+	# MFEM's HEADERS AND ITS DEPENDENCIES, NOT libmfem ITSELF: which copy of
+	# libmfem a consumer gets is decided by meq_core and meq_core_tests below,
+	# and a library linked here would reach every test beside the shared one.
 	if(MFEM_FOUND)
-		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
+		target_link_libraries(meq_core_objects PUBLIC MFEM::headers MFEM::dependencies)
 	endif()
 
 	# THE SIX FILES IN src/meq A DEVICE COMPILER OWNS, AND WHY THEY ARE A
@@ -627,7 +691,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			set(CMAKE_CUDA${CMAKE_CXX_STANDARD}_COMPILE_FEATURES cuda_std_${CMAKE_CXX_STANDARD})
 			set(CMAKE_CUDA_STANDARD_LATEST ${CMAKE_CXX_STANDARD})
 		endif()
-		set_target_properties(meq_core PROPERTIES
+		set_target_properties(meq_core_objects PROPERTIES
 			CUDA_STANDARD ${CMAKE_CXX_STANDARD}
 			CUDA_STANDARD_REQUIRED ON
 			CUDA_EXTENSIONS OFF)
@@ -736,9 +800,15 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			src/meq/PointLocatorDevice.cpp
 			src/meq/ResidentIterateDevice.cpp
 			src/meq/SourceViewDevice.cpp)
-		set_target_properties(meq_core PROPERTIES
+		set_target_properties(meq_core_objects PROPERTIES
 			CUDA_SEPARABLE_COMPILATION ON
 			CUDA_ARCHITECTURES "${_meq_cuda_arch}")
+		# MFEM's link line names -lcusparse and -lcublas without their
+		# directory, which a link that CMake hands to the CUDA toolchain gets
+		# implicitly. A test is a host-only link against meq_core_tests and
+		# would not find them.
+		find_package(CUDAToolkit REQUIRED)
+		target_link_directories(meq_core_objects PUBLIC "${CUDAToolkit_LIBRARY_DIR}")
 		list(LENGTH MEQ_CORE_SOURCES_DEVICE_LANGUAGE _meq_device_file_count)
 		message(STATUS
 			"meq: ${_meq_device_file_count} sources compile as CUDA, arch ${_meq_cuda_arch}")
@@ -785,19 +855,178 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# takes plain vectors -- so nothing that includes meq's headers needs it
 	# on its line.
 	if(NETCDFCXX_FOUND)
-		target_link_libraries(meq_core PRIVATE PkgConfig::NETCDFCXX)
-		target_compile_definitions(meq_core PUBLIC MEQ_USE_NETCDF)
+		target_link_libraries(meq_core_objects PRIVATE PkgConfig::NETCDFCXX)
+		target_compile_definitions(meq_core_objects PUBLIC MEQ_USE_NETCDF)
 	endif()
 
 	# Guarded by compiler id rather than assumed: these are the GCC/Clang
 	# spellings, and nothing here is worth breaking a configure over on a
 	# compiler that spells them differently.
-	target_compile_options(meq_core PRIVATE
+	target_compile_options(meq_core_objects PRIVATE
 		$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra>)
 else()
 	message(WARNING
 		"meq: none of the meq_core sources exist yet, so the library target "
 		"was not created. Nothing depending on it will be built.")
+endif()
+
+# ---------------------------------------------------------------------------
+# meq_core and meq_core_tests: one set of objects, two libraries
+# ---------------------------------------------------------------------------
+#
+# meq_core is STATIC, with libmfem behind it, for meq, meq-convert and the
+# Python module, which ship self-contained (python/CMakeLists.txt hides both
+# inside the module). Nothing about what is installed depends on the rest of
+# this section.
+#
+# meq_core_tests is SHARED and is what every test executable links: meq's
+# objects and ALL of libmfem, linked once, whole. A test linking meq_core
+# instead carries the part of MFEM it touches -- about 70 MB per executable,
+# on a CUDA build 27 MB of host code and 33 MB of fatbins -- and there are about
+# ninety of them, which is a 7 GB build tree where sharing it is under 1 GB.
+#
+# THE TRAP IS A SECOND COPY OF MFEM. A test that links libmfem.a as well as
+# this library, directly or through anything that carries MFEM::MFEM, has two
+# of MFEM's globals -- mfem::Device, the memory manager, mfem::out -- in one
+# process, and which one a call reaches depends on where it was linked from:
+# a silent ODR violation, not a link error. So this library exports MFEM and
+# passes on only MFEM::headers and MFEM::dependencies, and the SharedTestCore
+# ctest asserts that no test executable defines an MFEM or meq function the
+# library also defines.
+#
+# A static libmfem goes into a shared object only if it, and every static
+# archive it names, was compiled position independent (CLAUDE_MFEM.md). One
+# that was not is detected here, and the tests then link meq_core as they
+# would without this library.
+option(MEQ_SHARED_TEST_CORE
+	"Link the tests against one shared library carrying meq_core and MFEM" ON)
+set(MEQ_TEST_CORE meq_core)
+set(MEQ_TEST_CORE_CARRIES_MFEM OFF)
+
+if(TARGET meq_core_objects)
+	add_library(meq_core STATIC)
+	target_link_libraries(meq_core PUBLIC meq_core_objects)
+	if(MFEM_FOUND)
+		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
+	endif()
+	if(MFEM_FOUND AND MFEM_USE_CUDA)
+		# Its objects arrive from meq_core_objects, so CMake does not see the
+		# relocatable device code in it unless told: a consumer -- meq, the
+		# Python module -- then skips the device link and fails on
+		# __cudaRegisterLinkedBinary_*.
+		set_target_properties(meq_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+	endif()
+
+	set(_meq_test_core_mfem "")
+	if(NOT MEQ_SHARED_TEST_CORE)
+		set(_meq_test_core_mfem "off")
+	elseif(NOT MFEM_FOUND)
+		set(_meq_test_core_mfem "none")
+	elseif(MFEM_LIBRARY MATCHES "\\.so(\\.[0-9.]+)?$")
+		set(_meq_test_core_mfem "shared")
+	else()
+		# EVERY STATIC ARCHIVE ON MFEM'S LINK LINE, WHOLE, INTO A SHARED OBJECT,
+		# undefined symbols allowed: what fails is exactly a relocation a
+		# shared object cannot carry, which is the linker's own verdict on
+		# -fPIE code. libmfem.a whole pulls in every third-party archive it
+		# names -- gslib's libgs.a, for FindPointsGSLIB -- so each is asked
+		# too. A few seconds, once: the verdict is cached against every
+		# archive's path and timestamp, so a rebuilt one is asked again.
+		set(_meq_archives "")
+		set(_meq_mfem_key "")
+		foreach(_item IN LISTS MFEM_LIBRARIES)
+			if(_item MATCHES "\\.a$" AND EXISTS "${_item}")
+				list(APPEND _meq_archives "${_item}")
+				file(TIMESTAMP "${_item}" _meq_stamp "%s" UTC)
+				string(APPEND _meq_mfem_key "${_item}@${_meq_stamp};")
+			endif()
+		endforeach()
+		list(REMOVE_DUPLICATES _meq_archives)
+		if(NOT MEQ_MFEM_PIC_KEY STREQUAL _meq_mfem_key)
+			set(_meq_probe "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/meq-mfem-pic-probe")
+			file(MAKE_DIRECTORY "${_meq_probe}")
+			set(MEQ_MFEM_NOT_PIC "")
+			foreach(_archive IN LISTS _meq_archives)
+				execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -shared -o probe.so
+						-Wl,--whole-archive "${_archive}" -Wl,--no-whole-archive
+					WORKING_DIRECTORY "${_meq_probe}" RESULT_VARIABLE _meq_rc
+					OUTPUT_QUIET ERROR_QUIET)
+				if(NOT _meq_rc EQUAL 0)
+					list(APPEND MEQ_MFEM_NOT_PIC "${_archive}")
+				endif()
+			endforeach()
+			file(REMOVE_RECURSE "${_meq_probe}")
+			if(MEQ_MFEM_NOT_PIC)
+				set(MEQ_MFEM_PIC OFF)
+			else()
+				set(MEQ_MFEM_PIC ON)
+			endif()
+			set(MEQ_MFEM_PIC ${MEQ_MFEM_PIC} CACHE INTERNAL
+				"MFEM's static archives link into a shared object")
+			set(MEQ_MFEM_NOT_PIC "${MEQ_MFEM_NOT_PIC}" CACHE INTERNAL
+				"MFEM's static archives that do not")
+			set(MEQ_MFEM_PIC_KEY "${_meq_mfem_key}" CACHE INTERNAL
+				"The archives MEQ_MFEM_PIC describes")
+			unset(_meq_probe)
+			unset(_meq_rc)
+		endif()
+		unset(_meq_archives)
+		unset(_meq_stamp)
+		unset(_meq_mfem_key)
+		if(MEQ_MFEM_PIC)
+			set(_meq_test_core_mfem "whole")
+		else()
+			set(_meq_test_core_mfem "not-pic")
+		endif()
+	endif()
+
+	if(_meq_test_core_mfem MATCHES "^(none|shared|whole)$")
+		add_library(meq_core_tests SHARED)
+		target_link_libraries(meq_core_tests PUBLIC meq_core_objects)
+		if(_meq_test_core_mfem STREQUAL "shared")
+			target_link_libraries(meq_core_tests PUBLIC MFEM::MFEM)
+		elseif(_meq_test_core_mfem STREQUAL "whole")
+			# PRIVATE, and that is the point: a shared library's private
+			# dependencies stop at it, so the archive reaches no test.
+			target_link_libraries(meq_core_tests PRIVATE
+				"$<LINK_LIBRARY:WHOLE_ARCHIVE,MFEM::MFEM>")
+			set(MEQ_TEST_CORE_CARRIES_MFEM ON)
+		endif()
+		# Every symbol resolved when the library is linked, rather than in
+		# whichever test happens to call it first.
+		#
+		# -Bsymbolic-functions binds the library's calls to its own functions
+		# at link time, as the static link of each test did, rather than
+		# through the PLT: MFEM is compiled -fPIC with semantic interposition,
+		# so without it every call MFEM makes to itself is an indirect jump.
+		# Functions only: variables still go through the GOT, so a test's
+		# copy-relocated reference to an MFEM or meq global stays the one copy.
+		target_link_options(meq_core_tests PRIVATE
+			"LINKER:--no-undefined" "LINKER:-Bsymbolic-functions")
+		if(MFEM_FOUND AND MFEM_USE_CUDA)
+			# meq's device sources are relocatable device code, so the device
+			# link happens here, once; the tests have no device code of their
+			# own. libmfem's kernels are whole-program and need none.
+			set_target_properties(meq_core_tests PROPERTIES
+				CUDA_SEPARABLE_COMPILATION ON
+				CUDA_RESOLVE_DEVICE_SYMBOLS ON
+				CUDA_ARCHITECTURES "${_meq_cuda_arch}")
+		endif()
+		set(MEQ_TEST_CORE meq_core_tests)
+		if(_meq_test_core_mfem STREQUAL "whole")
+			message(STATUS "meq: the tests link meq_core_tests, a shared library carrying meq_core and all of MFEM")
+		else()
+			message(STATUS "meq: the tests link meq_core_tests, a shared library carrying meq_core")
+		endif()
+	elseif(_meq_test_core_mfem STREQUAL "not-pic")
+		string(REPLACE ";" ", " _meq_not_pic "${MEQ_MFEM_NOT_PIC}")
+		message(STATUS "meq: not position independent: ${_meq_not_pic}. So the "
+			"tests link meq_core and each carries its own MFEM; rebuild these "
+			"with -fPIC (MFEM: CMAKE_POSITION_INDEPENDENT_CODE=ON) for one "
+			"shared copy (CLAUDE_MFEM.md)")
+		unset(_meq_not_pic)
+	endif()
+	unset(_meq_test_core_mfem)
 endif()
 
 # ---------------------------------------------------------------------------
