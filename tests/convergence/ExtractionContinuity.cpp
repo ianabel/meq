@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -128,11 +129,49 @@ BOOST_AUTO_TEST_CASE( theFamilyIsContinuousWhereANodeCrossesAFace )
 	BOOST_TEST_REQUIRE( c.found, "no node of any surface changed element over A in [ 0.30, 0.34 ]; "
 	                             "the test has no crossing to look at, so widen the scan" );
 	report( "psi~ and q~", c );
-	BOOST_TEST( c.jump < 1.0e-11,
+	// max( 1e-11, 20 eps ), the rule QDrivenScalePin's repeatability bounds
+	// follow: in double 20 eps is 4.4e-15 and 1e-11 stands; in single it is
+	// 2.4e-6. Two states 1e-9 apart differ by their round-off as well as by any
+	// jump, and in single the family's own is about 1e-5 (M-371), so this is
+	// red there until that floor comes down.
+	double const twentyEps = 20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
+	BOOST_TEST( c.jump < std::max( 1.0e-11, twentyEps ),
 		"the family jumps by " << c.jump << " where surface " << c.surface << "'s node " << c.node
 		<< " crosses from element " << c.from << " to " << c.to << ". On the continuous pair it "
 		"must not: a jump is divided by the step of anything that differences the geometry "
 		"(MEASUREMENTS.md M-364). Suspect the fields' continuity first (ContinuousFieldConvergence)" );
+}
+
+/*
+ * AND THE FAMILY IS LABELLED ON THE FIELD IT ROOTS -- meq::labelledAxis(),
+ * MEASUREMENTS.md M-371. With no psi_ax unknown in the solve, Psi_N must be
+ * zero at the axis of psi~, the field the levels are in: the finder's psi_h
+ * there differs by the discretisation's error at the axis, which entered every
+ * inner label as an offset divided by Psi_N, and in single by the element-local
+ * recovery's round-off, 27 times psi~'s. The normalised half -- labelled by the
+ * solve's own psi_ax -- is SafetyFactorSolver's
+ * theReferenceIsAFixedPointOfItsOwnTarget, which no other label passes.
+ */
+BOOST_AUTO_TEST_CASE( theFamilyIsLabelledOnTheFieldItRoots )
+{
+	meq::tests::crossing::Solved s( start, 12, 2 );
+	meq::FluxSurfaceFamily const family = s.family( meq::Potential::Continuous );
+	mfem::DenseMatrix point( 2, 1 );
+	point( 0, 0 ) = family.axisR;
+	point( 1, 0 ) = family.axisZ;
+	mfem::Array<int> elements;
+	mfem::Array<mfem::IntegrationPoint> ips;
+	s.theMesh().FindPoints( point, elements, ips, false );
+	BOOST_TEST_REQUIRE( elements[ 0 ] >= 0 );
+	double const tilde = s.theSolver().continuousPotential().GetValue( elements[ 0 ], ips[ 0 ] );
+	double const finder = s.theSolver().potential().GetValue( elements[ 0 ], ips[ 0 ] );
+	double const span = std::abs( family.psiAxis - family.psiBoundary );
+	std::printf( "  the family's psi_ax less psi~ at its axis: %.2e of the span; psi_h there differs from "
+	             "psi~ by %.2e\n", ( family.psiAxis - tilde )/span, ( finder - tilde )/span );
+	BOOST_TEST( std::abs( family.psiAxis - tilde ) < 64.0*std::numeric_limits<mfem::real_t>::epsilon()*span,
+		"the family's psi_ax is " << family.psiAxis << " where psi~ at its axis is " << tilde
+		<< " (psi_h there " << finder << "): Psi_N is not zero on the axis of the field its levels are in. "
+		"meq::labelledAxis() is what reads it there" );
 }
 
 /*

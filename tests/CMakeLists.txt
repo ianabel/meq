@@ -481,6 +481,18 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_link_libraries(ExtractionJumps PRIVATE ${MEQ_TEST_CORE} Boost::unit_test_framework)
 endif()
 
+# ExtractionNoise: the instrument behind MEASUREMENTS.md's M-371 -- which
+# link of the chain from the solution to the family carries the family's
+# noise between neighbouring states, in single and in double. BUILT BUT NOT
+# REGISTERED: it asserts nothing; run with --run_test=<case> and
+# MKL_NUM_THREADS=1.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ExtractionNoise.cpp")
+	add_executable(ExtractionNoise "convergence/ExtractionNoise.cpp")
+	target_include_directories(ExtractionNoise PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(ExtractionNoise PRIVATE ${MEQ_TEST_CORE} Boost::unit_test_framework)
+endif()
+
 # InversionScaling -- the same rules, for the solution-inversion chain.
 #
 # NOT a ctest, and unlike TraceSolverScaling it contributes no ctest either:

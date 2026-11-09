@@ -296,7 +296,11 @@ namespace meq
 		std::vector<FluxSurface> surfaces;
 
 		/// The magnetic axis the rays were drawn from, and the two flux values
-		/// the label is normalised by.
+		/// the label is normalised by. psiAxis is meq::labelledAxis()'s: the
+		/// solve's psi_ax where the solve carries one (a normalised source,
+		/// whose Psi this label then is), and otherwise the potential the
+		/// rays root -- psi~ by default -- at the located axis, not the
+		/// finder's psi_h there (MEASUREMENTS.md M-371).
 		double axisR = 0.0;
 		double axisZ = 0.0;
 		double psiAxis = 0.0;
