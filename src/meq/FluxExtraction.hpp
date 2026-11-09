@@ -106,7 +106,7 @@ namespace meq
 	 * extractFluxSurfaces() traces at -- it is the same code, called from
 	 * there. Exposed because a caller driving the equilibrium BY a
 	 * surface quantity needs the grid before it has a family to read it off:
-	 * meq::ToroidalFieldMap builds `g^2` on these labels every step, and
+	 * meq::SafetyFactorEquilibrium places `g^2`'s knots on these labels, and
 	 * generating them a second time in the caller is how the two would drift
 	 * apart while every column still converged.
 	 *

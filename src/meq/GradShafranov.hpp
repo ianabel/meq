@@ -2395,9 +2395,15 @@ namespace meq
 			 */
 			void reconstructPotential( mfem::Vector const &state, mfem::GridFunction &into );
 
-			/// STUDY SCAFFOLDING (branch q-refining-fit, M-QR): psi* and q* of
-			/// @a state together, q* in MEQ's sign as postProcessedFlux() is.
-			/// Not production API; phase 2 decides its form.
+			/**
+			 * psi* AND q* OF @a state TOGETHER, q* in MEQ's sign as
+			 * postProcessedFlux() is: reconstructPotential() with the flux it
+			 * discards. Linear in the state, so of a tangent it is the
+			 * tangent's psi* and q* -- what the q-driven Jacobian
+			 * differences the extraction along (meq::SafetyFactorEquilibrium).
+			 * @a psiStar and @a qStar must be on the post-processed spaces.
+			 * After a postProcess(); refuses what reconstructPotential() does.
+			 */
 			void reconstructFields( mfem::Vector const &state, mfem::GridFunction &psiStar,
 			                        mfem::GridFunction &qStar );
 
@@ -4743,6 +4749,22 @@ namespace meq
 			 */
 			double integrateOverDomain(
 				std::function<double( double radius, double z, double psi )> const &integrand ) const;
+
+			/**
+			 * THE PIECES OF d( deliveredPlasmaCurrent() ) AT @a state: the
+			 * current row, `( w W ) scaledDFdPsi/R phi_j` over the potential
+			 * dofs, and its corner against `psi_ax`, `sum ( w W/R ) dF/dpsi_ax`
+			 * -- the bordered current solve's own, assembleCurrentRow() and
+			 * assembleCurrentNormalisationCorner(), on their device routes
+			 * where the state is resident. A tangent's change of the delivered
+			 * current is the row against its potential block, the corner times
+			 * its `psi_ax`, and `-sum` of assembleSourceDerivative()'s vector
+			 * of the parameter over the potential block (the shape functions
+			 * sum to one). What the q-driven loop's current pin is linearised
+			 * with (meq::SafetyFactorEquilibrium).
+			 */
+			void plasmaCurrentLinearisation( mfem::Vector const &state, mfem::Vector &row,
+			                                 double &againstAxis ) const;
 
 			/**
 			 * `d( mu0 I_p )/d lambda` ALONG THE SOLUTION MANIFOLD -- how much

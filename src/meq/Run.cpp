@@ -33,6 +33,7 @@
 #include "meq/RotatingSource.hpp"
 #include "meq/SafetyFactor.hpp"
 #include "meq/SafetyFactorSolve.hpp"
+#include "meq/SafetyFactorTangent.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
 #include "meq/StoredEquilibrium.hpp"
@@ -66,6 +67,18 @@ namespace
 	 * takes it from q -- the sign of q's integral over Psi in [ 0, 1 ], by the
 	 * midpoint rule, the target as MEQ evaluates it.
 	 */
+	/// Numbers as one space-separated string at 17 significant digits: the
+	/// q-driven loop's knots and values, metadata beside the grid's fields.
+	std::string spaced( std::vector<double> const &values )
+	{
+		std::ostringstream out;
+		out.setf( std::ios::scientific );
+		out.precision( 16 );
+		for ( std::size_t i = 0; i < values.size(); ++i )
+			out << ( i == 0 ? "" : " " ) << values[ i ];
+		return out.str();
+	}
+
 	double targetSign( meq::Profile const &target )
 	{
 		int const intervals = 64;
@@ -81,8 +94,8 @@ namespace
 	 *
 	 * Its own type so that the ladder can tell it from an inner Newton's
 	 * failure, which is what the rung exists for. The outer loop already
-	 * absorbs every inner failure as a refusal -- meq::ToroidalFieldMap
-	 * returns a residual pointing back at the last admissible point -- so by
+	 * absorbs every inner failure as a refusal -- meq::SafetyFactorSystem
+	 * declines the point and the least squares rejects the step -- so by
 	 * the time this is thrown the inner solves were not what stopped it, and
 	 * the rung, which re-solves ONE equilibrium at whatever g g' the loop
 	 * last tried, would be answering a different question. See the ladder.
@@ -796,7 +809,7 @@ struct meq::Run::Impl
 	 * THE q-DRIVEN ANSWER'S THREE SCALE PINS, read off the equilibrium the
 	 * solver holds: g on the boundary [T m], the toroidal flux inside it [Wb]
 	 * and I_p [A]. The run was given exactly one; all three are reported, so
-	 * that any one re-poses the same equilibrium (meq::PinnedToroidalFieldMap,
+	 * that any one re-poses the same equilibrium (meq::SafetyFactorSystem,
 	 * MEASUREMENTS.md M-357). Read from the SOLVER and not kept by the
 	 * loop, because the retry rung can re-solve the loop's converged g on a
 	 * solver of its own.
@@ -809,13 +822,13 @@ struct meq::Run::Impl
 
 	/*
 	 * THE DELIVERED TOROIDAL FLUX of the state the solver holds, with g^2 the
-	 * coefficients @a c: Phi = int_plasma g( Psi )/R dA, the plasma being
+	 * spline @a field: Phi = int_plasma g( Psi )/R dA, the plasma being
 	 * where Psi > 0, over Omega_h (GradShafranovSolver::integrateOverDomain).
 	 * g takes the target q's sign, which g^2 cannot carry (SafetyFactor.hpp,
 	 * section 3). What [source] ToroidalFlux pins and the .nc reports: the
 	 * equilibrium's own flux, not the target's (MEASUREMENTS.md M-362).
 	 */
-	double deliveredToroidalFlux( std::vector<double> const &c ) const;
+	double deliveredToroidalFlux( meq::ToroidalFieldSpline const &field ) const;
 	meq::FluxSurfaceFamily writeFluxSurfaces( std::string const &file );
 	/// The solved state's family at @a options, traced as the write phase
 	/// traces it: on the curved path through the band, by the transfer
@@ -887,18 +900,23 @@ struct meq::Run::Impl
 	std::optional<double> profileScaleSeed;
 	std::shared_ptr<meq::NormalisedMHDSource> toroidalDriven;
 	std::shared_ptr<meq::Profile const> safetyFactorTarget;
-	std::vector<double> toroidalCoefficients;
+	// g^2 as the q-driven loop holds it: its values at the knots, null until
+	// a loop has run or a restart has handed one over. The loop opens at the
+	// constant g toroidalOpening where there is none.
+	std::shared_ptr<meq::ToroidalFieldSpline const> toroidalField;
+	double toroidalOpening = 0.0;
 
-	// What the q-driven loop cost: KINSOL iterations and equilibria, so a crawl
-	// that converges is visible in the file rather than only on stdout.
+	// What the q-driven loop cost: Gauss-Newton iterations and equilibria, so a
+	// crawl that converges is visible in the file rather than only on stdout.
 	int toroidalIterations = 0;
 	int toroidalEquilibria = 0;
-	// And what its answer is worth: the residual it stopped at, the threshold
-	// that was judged against ( max( tolerance, floor ) ), and the outer
-	// Jacobian's conditioning, the residual over which bounds the coefficients'
-	// error (OuterNewtonResult::finalResidual).
+	// And what its answer is worth: the removable residual it stopped at, the
+	// threshold that was judged against ( max( tolerance, floor ) ), the
+	// misfit least squares leaves at the knots, and the Jacobian's
+	// conditioning (meq::LeastSquaresResult).
 	double toroidalResidual = 0.0;
 	double toroidalThreshold = 0.0;
+	double toroidalMisfit = 0.0;
 	double toroidalConditioning = 0.0;
 	AM assemblyMode = AM::Serial;
 	bool onDevice = false;
@@ -1040,12 +1058,12 @@ int meq::Run::solve()
 meq::Run::Impl::ScaleOfAnswer meq::Run::Impl::scaleOfAnswer() const
 {
 	double const mu0 = config->getSource().permeability();
-	return { std::sqrt( toroidalCoefficients.front() ),
-	         deliveredToroidalFlux( toroidalCoefficients ),
+	return { std::sqrt( std::max( ( *toroidalField )( 0.0 ), 0.0 ) ),
+	         deliveredToroidalFlux( *toroidalField ),
 	         mu0 != 0.0 ? solver->deliveredPlasmaCurrent()/mu0 : 0.0 };
 }
 
-double meq::Run::Impl::deliveredToroidalFlux( std::vector<double> const &c ) const
+double meq::Run::Impl::deliveredToroidalFlux( meq::ToroidalFieldSpline const &field ) const
 {
 	double const axis = solver->psiAxis();
 	double const boundary = solver->psiBoundary();
@@ -1059,12 +1077,7 @@ double meq::Run::Impl::deliveredToroidalFlux( std::vector<double> const &c ) con
 			double const normalised = ( psi - boundary )/span;
 			if ( !( normalised > 0.0 ) )
 				return 0.0;
-			double value = 0.0, power = 1.0;
-			for ( double coefficient : c )
-			{
-				value += coefficient*power;
-				power *= normalised;
-			}
+			double const value = field( normalised );
 			return value > 0.0 ? std::sqrt( value )/radius : 0.0;
 		} );
 }
@@ -1125,6 +1138,17 @@ meq::Run::Samples meq::Run::Impl::samplesAt( std::vector<double> const &radius,
 		out.extrapolated[ static_cast<std::size_t>( i ) ] = sampler.wasExtended( i, 0 ) ? 1 : 0;
 	}
 	return out;
+}
+
+std::vector<double> meq::Run::safetyFactorKnots() const
+{
+	if ( stage == Stage::Fresh || stage == Stage::Failed )
+		throw std::logic_error( "meq::Run::safetyFactorKnots(): prepare() first; the knots follow the mesh" );
+	mfem::Mesh const *mesh = impl->domain ? &impl->domain->computational() : impl->solveMesh;
+	if ( mesh == nullptr )
+		throw std::logic_error( "meq::Run::safetyFactorKnots(): there is no mesh" );
+	return meq::toroidalKnotLabels( meq::toroidalKnotCount(
+		meq::plasmaCells( *mesh ), impl->config->getDiscretisation().polynomialDegree ) );
 }
 
 std::shared_ptr<meq::Dataset const> meq::Run::fluxSurfaces( std::string const &file )
@@ -1924,15 +1948,12 @@ int meq::Run::Impl::configure()
 				safetyFactorTarget = std::make_shared<meq::SplineProfile const>(
 					meq::SplineProfile::fromFile( mhd.safetyFactorFile ) );
 
-				// THE LOOP OPENS AT A CONSTANT g, so g^2 = g0^2 and every
-				// higher coefficient is zero. That is gg' = 0 -- the vacuum --
-				// which is the honest statement of what is known before the
-				// first equilibrium exists.
-				// Under R0B0 that constant is the boundary's own g, held.
-				double const opening = mhd.edgeToroidalField > 0.0
-				                       ? mhd.edgeToroidalField : mhd.toroidalFieldGuess;
-				toroidalCoefficients.assign( mhd.safetyFactorDegree + 1, 0.0 );
-				toroidalCoefficients[ 0 ] = opening*opening;
+				// THE LOOP OPENS AT A CONSTANT g, g^2 = g0^2 at every knot:
+				// gg' = 0 -- the vacuum -- which is the honest statement of
+				// what is known before the first equilibrium exists. Under
+				// R0B0 that constant is the boundary's own g.
+				toroidalOpening = mhd.edgeToroidalField > 0.0
+				                  ? mhd.edgeToroidalField : mhd.toroidalFieldGuess;
 			}
 
 			if ( coils )
@@ -3049,18 +3070,24 @@ int meq::Run::Impl::setUp()
 						std::printf( "     the I_p profile scale starts at the file's %.12e\n",
 						             stored.profileScale() );
 					}
-					if ( !stored.gSquaredCoefficients().empty() && toroidalDriven )
+					if ( !stored.gSquaredKnots().empty() && toroidalDriven )
 					{
-						if ( stored.gSquaredCoefficients().size() == toroidalCoefficients.size() )
+						// The file's g^2 at the file's knots; the loop reads it at
+						// its own, which follow this mesh.
+						try
 						{
-							toroidalCoefficients = stored.gSquaredCoefficients();
-							std::printf( "     the q-driven loop's g^2 starts at the file's\n" );
+							auto field = std::make_shared<meq::ToroidalFieldSpline>(
+								stored.gSquaredKnots() );
+							field->setValues( stored.gSquaredValues() );
+							toroidalField = field;
+							std::printf( "     the q-driven loop's g^2 starts at the file's, "
+							             "at its %zu knots\n", stored.gSquaredKnots().size() );
 						}
-						else
-							std::printf( "     the file's g^2 has %zu coefficients and this "
-							             "run %zu; the loop opens at a constant g\n",
-							             stored.gSquaredCoefficients().size(),
-							             toroidalCoefficients.size() );
+						catch ( std::exception const &error )
+						{
+							std::printf( "     the file's g^2 is not usable (%s); the loop "
+							             "opens at a constant g\n", error.what() );
+						}
 					}
 					if ( !stored.inverseCurrents().empty() )
 					{
@@ -3988,85 +4015,47 @@ int meq::Run::Impl::solve()
 		 */
 		auto runToroidalLoop = [ & ]()
 		{
-			meq::FluxFamilyOptions family;
-			meq::FluxSurfaceFamily extracted;
+			meq::MHDParameters const &mhd = config->getSource().getMHD();
+			double const mu0 = config->getSource().permeability();
+			int const order = config->getDiscretisation().polynomialDegree;
 
-			// THE MAP MUST NOT THROW. Everything below is a REFUSAL, reported
-			// to the line search as a residual pointing back at the last
-			// admissible point; see meq::ToroidalFieldMap. A throw would end
-			// the outer loop at once (meq::solveForToroidalField catches it in
-			// KINSOL's callbacks and reports the loop failed), where a refusal
-			// lets the line search shorten the step and go on.
-			auto step = [ & ]( std::vector<meq::Knot> const &knots )
-				-> meq::FluxSurfaceFamily const *
+			/*
+			 * THE KNOTS FOLLOW THE MESH: about two surfaces per element across
+			 * the minor radius (meq::toroidalKnotCount()), a knot spacing from
+			 * the axis and from the edge (meq::toroidalKnotCut()), so the
+			 * delivered q converges to the request as h and k refine and the
+			 * part of the request no knot sees vanishes with them
+			 * (MEASUREMENTS.md M-QR-3, M-QR-4). [output] FluxSurfaceCount is
+			 * the surfaces file's and nothing of the loop's.
+			 */
+			std::size_t const knots = meq::toroidalKnotCount( meq::plasmaCells( *solveMesh ), order );
+			meq::ToroidalKnotCut const cut = meq::toroidalKnotCut( knots );
+
+			meq::SafetyFactorEquilibrium::Options equilibriumOptions;
+			equilibriumOptions.family.surfaces = cut.surfaces;
+			equilibriumOptions.family.innerCut = cut.innerCut;
+			equilibriumOptions.family.outerCut = cut.outerCut;
+			equilibriumOptions.sign = targetSign( *safetyFactorTarget );
+			// THE BAND, on the curved path: traced without it, every family of a
+			// curved fixed boundary fails at its outer surfaces (M-353).
+			if ( gammaHMarker && path )
 			{
-				try
-				{
-					toroidalDriven->setGGPrime(
-						std::make_shared<meq::SplineProfile const>( knots ) );
-					solver->solve();
-
-					// POST-PROCESS BEFORE EXTRACTING, because the tracer roots
-					// psi* by default and psi* does not exist until this runs.
-					// IN-0 measured the traced curve 60x, 54x and 83x closer to
-					// the truth on the post-processed pairing at k = 1, 2, 3,
-					// so this is the field the family should be built on and
-					// not merely one that happens to be available.
-					solver->postProcess();
-					extracted = extractFamily( family );
-				}
-				catch ( std::exception const & )
-				{
-					return nullptr;
-				}
-				return &extracted;
-			};
-
-			meq::ToroidalFieldMap::Options mapOptions;
-			mapOptions.degree = config->getSource().getMHD().safetyFactorDegree;
-			meq::Profile const &targetProfile = *safetyFactorTarget;
-			mapOptions.target = [ &targetProfile ]( double psi )
-			{
-				return targetProfile( psi );
-			};
-
-			// THE MAP'S FLOOR IS ITS INNER SOLVE'S ACCURACY CARRIED THROUGH THE
-			// INVERSION AND THE FIT -- meq::toroidalMapFloor() -- and the
-			// solver below is converged to the relative tolerance set on it in
-			// makeSolver() or, where the format cannot reach that, to its
-			// round-off floor under the ten-eps gate: this floor is the gate,
-			// the inner solve's accuracy at worst (M-306).
-			mapOptions.solveAccuracy =
-				meq::newtonTolerance( config->getSolver().newtonRelativeTolerance );
-
-			meq::ToroidalFieldMap map( step, mapOptions );
+				equilibriumOptions.gammaHMarker = gammaHMarker;
+				equilibriumOptions.path = path.get();
+			}
 
 			/*
 			 * THE SCALE PIN, AND WITHOUT IT THE PROBLEM HAS NO ANSWER TO FIND.
+			 * Equilibria sharing p( Psi ) and q( Psi ) form a one-parameter
+			 * family (M-353); Config requires exactly one of the three, each a
+			 * row of the system (meq::ScalePin):
 			 *
-			 * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter
-			 * family, so the fixed point G( c ) = c is a continuum up to what
-			 * g^2's degree cannot follow (MEASUREMENTS.md M-353). Config
-			 * requires exactly one of the three, and each selects the member:
-			 *
-			 *   R0B0           c_0 = R0B0^2 held, out of the unknowns;
-			 *   ToroidalFlux   the DELIVERED Phi = int_plasma g/R dA, a row,
-			 *                  read off the solved state with the iterate's own
-			 *                  g^2 (deliveredToroidalFlux(), M-362);
-			 *   PlasmaCurrent  mu0 I_p, a row, read off the solved state, with
-			 *                  the profile scale left at one (makeSolver()).
-			 *
-			 * One q condition gives way to keep the system square, and it is
-			 * the same one under every pin -- meq::PinnedToroidalFieldMap says
-			 * which and why that makes them compose (M-355, M-357).
-			 * The row weight is the opening c_0, so the pin row is in the
-			 * fit rows' units; it moves the path and not the root.
+			 *   R0B0           g^2 continued to the boundary;
+			 *   ToroidalFlux   the DELIVERED Phi = int_plasma g/R dA (M-362);
+			 *   PlasmaCurrent  mu0 I_p, with the profile scale left at one
+			 *                  (makeSolver(), M-356).
 			 */
-			meq::MHDParameters const &mhd = config->getSource().getMHD();
-			double const mu0 = config->getSource().permeability();
-
-			meq::PinnedToroidalFieldMap::Pin pin;
-			pin.weight = std::abs( toroidalCoefficients.front() );
+			meq::SafetyFactorSystem::Pin pin;
 			if ( mhd.edgeToroidalField > 0.0 )
 			{
 				pin.kind = meq::ScalePin::EdgeField;
@@ -4076,119 +4065,137 @@ int meq::Run::Impl::solve()
 			{
 				pin.kind = meq::ScalePin::ToroidalFlux;
 				pin.value = mhd.toroidalFlux;
-				pin.measured = [ this ]( std::vector<double> const &c )
-				{
-					return deliveredToroidalFlux( c );
-				};
 			}
 			else
 			{
 				pin.kind = meq::ScalePin::PlasmaCurrent;
 				pin.value = mu0*config->getSource().plasmaCurrent();
-				pin.measured = [ & ]( std::vector<double> const & )
-				{
-					return solver->deliveredPlasmaCurrent();
-				};
 			}
-			meq::PinnedToroidalFieldMap pinned( map, mapOptions.degree, pin );
+			equilibriumOptions.pin = pin.kind;
 
-			// std::ref AND NOT THE OBJECT. solveForToroidalField takes a
-			// std::function, which COPIES what it is given -- so the copy would
-			// do the solving and keep the counts, and the map here would report
-			// zero of everything afterwards. A reference_wrapper keeps one map.
-			meq::OuterNewtonOptions outerOptions;
+			meq::SafetyFactorEquilibrium equilibrium( *solver, *toroidalDriven, equilibriumOptions );
+			std::vector<double> const labels = equilibrium.labels();
+
+			// THE START: the previous cycle's answer, or the restart's, read at
+			// this mesh's knots; else the constant opening g.
+			std::vector<double> start( labels.size(), toroidalOpening*toroidalOpening );
+			if ( toroidalField )
+			{
+				std::vector<double> carried;
+				for ( double label : labels )
+					carried.push_back( ( *toroidalField )( 1.0 - label ) );
+				if ( std::all_of( carried.begin(), carried.end(),
+				                  []( double v ) { return v > 0.0 && std::isfinite( v ); } ) )
+					start = carried;
+			}
+
+			meq::Profile const &targetProfile = *safetyFactorTarget;
+			meq::SafetyFactorSystem system(
+				labels, [ &targetProfile ]( double psi ) { return targetProfile( psi ); }, pin,
+				[ &equilibrium ]( meq::ToroidalFieldSpline const &spline, meq::SafetyFactorEvaluation &out )
+				{
+					return equilibrium.evaluate( spline, out );
+				},
+				[ &equilibrium ]( meq::ToroidalFieldSpline const &spline, meq::SafetyFactorDerivative &out )
+				{
+					return equilibrium.differentiate( spline, out );
+				},
+				// THE FLOOR IS THE INNER SOLVE'S ACCURACY carried through the
+				// averages (meq::SafetyFactorSystem::floor()); the solver is
+				// converged to the relative tolerance set in makeSolver() or,
+				// where the format cannot reach it, to its round-off floor under
+				// the ten-eps gate (M-306).
+				meq::newtonTolerance( config->getSolver().newtonRelativeTolerance ) );
+
+			meq::LeastSquaresOptions leastSquares;
 			if ( qIterationCap )
-				outerOptions.maxIterations = *qIterationCap;
-			outerOptions.mapFloor = [ &pinned ]() { return pinned.floor(); };
-			outerOptions.mapRefused = [ &pinned ]() { return pinned.lastRefused(); };
-			outerOptions.differenceBasis = [ &pinned ]() { return pinned.differenceBasis(); };
+				leastSquares.maxIterations = *qIterationCap;
+			leastSquares.floor = [ &system ]() { return system.floor(); };
+			// THE PIN IS MET EXACTLY, and the q rows in least squares at each
+			// level of the scale's coordinate: one curve of answers, whichever
+			// pin picks from it (meq::SafetyFactorSystem, M-QR-6).
+			leastSquares.constraints = 1;
+			leastSquares.level = meq::SafetyFactorSystem::scaleGradient;
+			leastSquares.epsilon = static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
+
 			/*
-			 * AN EXCEPTION OUT OF THE OUTER LOOP IS AN OUTER FAILURE TOO, and
-			 * reaching the ladder below as anything else gives it the rung:
-			 * one equilibrium at whichever g g' the loop last installed, an
-			 * exit 0, and a file whose header says g was solved for.
-			 * Measured, by an MFEM_VERIFY inside the outer Newton's own
-			 * KINSOL setup -- the run went on to "converged in 4 Newton
-			 * iterations (via bordered-picard-then-newton)" and wrote
-			 * q-driven.nc and exited 0, the loop never having run. The map cannot
-			 * throw (meq::ToroidalFieldMap), and a throw from inside KINSOL is
-			 * already a reported failure, so whatever reaches here is the
-			 * loop's own.
+			 * AN EXCEPTION OUT OF THE LOOP IS AN OUTER FAILURE TOO, and reaching
+			 * the ladder below as anything else gives it the rung: one
+			 * equilibrium at whichever g g' the loop last installed, an exit 0,
+			 * and a file whose header says g was solved for.
 			 */
-			meq::OuterNewtonResult const outcome = [ & ]
+			std::printf( "  q-driven: g^2 at %zu knots, Psi_N in [ %.4f, %.4f ], pinned by %s\n",
+			             knots, cut.innerCut, cut.outerCut,
+			             pin.kind == meq::ScalePin::EdgeField ? "R0B0"
+			             : pin.kind == meq::ScalePin::ToroidalFlux ? "ToroidalFlux" : "PlasmaCurrent" );
+			meq::LeastSquaresResult const outcome = [ & ]
 			{
 				try
 				{
-					return meq::solveForToroidalField(
-						pinned.unknowns( toroidalCoefficients ), std::ref( pinned ),
-						outerOptions );
+					return meq::solveLeastSquares(
+						start,
+						[ &system ]( std::vector<double> const &u, std::vector<double> &r )
+						{
+							return system.residual( u, r );
+						},
+						[ &system ]( std::vector<double> const &u, std::vector<double> &j )
+						{
+							return system.jacobian( u, j );
+						},
+						leastSquares );
 				}
 				catch ( std::exception const &error )
 				{
 					throw ToroidalLoopFailed(
-						std::string( "the outer Newton on the toroidal field "
-						             "failed: " ) + error.what() );
+						std::string( "the Gauss-Newton on the toroidal field failed: " ) + error.what() );
 				}
 			}();
 
 			std::printf( "  q-driven outer loop: %s\n", outcome.status.c_str() );
-			std::printf( "  %d equilibria solved, %d refused, outer Jacobian "
-			             "conditioning %.3e\n",
-			             map.solves(), map.refusals(),
-			             outcome.jacobianConditioning );
+			std::printf( "  %d Gauss-Newton iterations, %d equilibria solved (%d inner Newton "
+			             "iterations), %d refused; misfit %.3e at the knots, removable %.3e "
+			             "against %.3e, conditioning %.3e\n",
+			             outcome.iterations, system.solves(), equilibrium.innerIterations(),
+			             system.refusals(), outcome.misfit, outcome.removable,
+			             std::max( leastSquares.tolerance, outcome.floor ), outcome.conditioning );
+			std::printf( "  removable residual by iteration:" );
+			for ( double h : outcome.history )
+				std::printf( " %.1e", h );
+			std::printf( "\n" );
+			std::printf( "  its cost: solves %.1f s, tangents %.1f s, %d extractions %.1f s\n",
+			             equilibrium.solveSeconds(), equilibrium.tangentSeconds(),
+			             equilibrium.extractions(), equilibrium.extractionSeconds() );
 
 			if ( !outcome.converged )
 				throw ToroidalLoopFailed(
-					"the outer Newton on the toroidal field did not converge: "
-					+ outcome.status );
+					"the outer Newton on the toroidal field did not converge: " + outcome.status );
 
-			toroidalCoefficients = pinned.coefficients( outcome.coefficients );
+			auto answer = std::make_shared<meq::ToroidalFieldSpline>( labels );
+			answer->setValues( outcome.x );
+			toroidalField = answer;
 			toroidalIterations = outcome.iterations;
-			toroidalEquilibria = map.solves();
-			toroidalResidual = outcome.finalResidual;
-			toroidalThreshold = std::max( outerOptions.functionTolerance, outcome.floor );
-			toroidalConditioning = outcome.jacobianConditioning;
-
-			// g( Psi ) = sqrt( sum c_j Psi^j ), which is the ANSWER and is what
-			// a reader of this run wants beside psi_ax. Printed at the two ends
-			// and in the middle rather than as a table: the file carries the
-			// coefficients, and three numbers say whether the shear came out
-			// the right way round.
-			auto gAt = [ & ]( double psi )
-			{
-				double value = 0.0, power = 1.0;
-				for ( double c : toroidalCoefficients )
-				{
-					value += c*power;
-					power *= psi;
-				}
-				return value > 0.0 ? std::sqrt( value ) : 0.0;
-			};
-			std::printf( "  recovered g( Psi ) = R B_phi:  %.6f on the "
-			             "boundary, %.6f at Psi = 0.5, %.6f on the axis\n",
-			             gAt( 0.0 ), gAt( 0.5 ), gAt( 1.0 ) );
-			std::printf( "  g^2 coefficients, ascending in Psi:" );
-			for ( double c : toroidalCoefficients )
-				std::printf( " %.6e", c );
-			std::printf( "\n" );
+			toroidalResidual = outcome.removable;
+			toroidalThreshold = std::max( leastSquares.tolerance, outcome.floor );
+			toroidalMisfit = outcome.misfit;
+			toroidalConditioning = outcome.conditioning;
 
 			/*
-			 * AND THE SOLVER IS LEFT HOLDING THE ANSWER, WHICH IT IS NOT AFTER
-			 * THE LOOP RETURNS.
-			 *
-			 * KINSOL's last call to the map is whatever it needed last, and on
-			 * a converged run that is usually a DIFFERENCING COLUMN -- an
-			 * equilibrium one step off the answer in one coefficient. Every
-			 * output below reads the solver, so writing without this would
-			 * publish a perturbed equilibrium beside converged coefficients,
-			 * agreeing with them to the differencing step and to nothing else.
+			 * AND THE SOLVER IS LEFT HOLDING THE ANSWER. The loop's last
+			 * evaluation may be a rejected trial or a noise measurement's, and
+			 * every output reads the solver: one more warm solve, at the answer.
 			 */
-			if ( step( meq::ggPrimeKnotsFromCoefficients(
-					toroidalCoefficients, mapOptions.knotSamples,
-					mapOptions.extension ) ) == nullptr )
+			std::vector<double> settled;
+			if ( !system.residual( outcome.x, settled ) )
 				throw std::runtime_error(
-					"the outer Newton converged but its own answer does not "
+					"the q-driven loop converged but its own answer does not "
 					"re-solve, so there is no equilibrium to write" );
+			toroidalEquilibria = system.solves();
+
+			std::printf( "  recovered g( Psi ) = R B_phi:  %.6f on the boundary, "
+			             "%.6f at Psi = 0.5, %.6f on the axis\n",
+			             std::sqrt( std::max( ( *answer )( 0.0 ), 0.0 ) ),
+			             std::sqrt( std::max( ( *answer )( 0.5 ), 0.0 ) ),
+			             std::sqrt( std::max( ( *answer )( 1.0 ), 0.0 ) ) );
 
 			ScaleOfAnswer const scale = scaleOfAnswer();
 			std::printf( "  its scale: R0B0 = %.9e T m, ToroidalFlux = %.9e Wb, "
@@ -5113,7 +5120,7 @@ int meq::Run::Impl::solve()
 			 * the answer's ( 4.84, 2.42, 0.3025 ), with q 21% from the target.
 			 *
 			 * Nor is the rung a cure that has been withheld. The loop absorbs
-			 * every inner failure as a refusal (meq::ToroidalFieldMap), so an
+			 * every inner failure as a refusal (meq::SafetyFactorSystem), so an
 			 * outer failure is the OUTER iteration's -- a stalled line search, a
 			 * rank-deficient Jacobian, the iteration cap -- and a different
 			 * inner globalisation does not move it. A loop that converges and
@@ -5136,8 +5143,8 @@ int meq::Run::Impl::solve()
 					"     retry is not run: it would re-solve one equilibrium at the\n"
 					"     g g' the loop last tried, which is a different problem whose q\n"
 					"     is not the target. The levers are a [source] ToroidalFieldGuess\n"
-					"     nearer the machine's R0 B0, a lower SafetyFactorDegree, and\n"
-					"     RESOLUTION.\n",
+					"     nearer the machine's R0 B0, a restart from a nearby answer,\n"
+					"     and RESOLUTION.\n",
 					firstAttempt.what() );
 				return SolveFailed;
 			}
@@ -6855,41 +6862,35 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 	 * variable at all.
 	 *
 	 * [ source ] SafetyFactorFile is the exception, and it is the
-	 * run that needs the column most: the outer Newton solves for
-	 * the coefficients of g^2 itself, so g IS known here -- and
+	 * run that needs the column most: the loop solves for g^2's
+	 * values at its knots, so g IS known here -- and
 	 * without this a run whose whole purpose is to reach a target q
 	 * could not show the q it reached.
 	 *
 	 * TWO CONVENTIONS MEET HERE AND THEY POINT OPPOSITE WAYS.
 	 * meq::extractFluxSurfaces calls this with the RAW psi, and the
-	 * coefficients are in the SOURCE's Psi -- see
-	 * fitToroidalFieldSquared(), which fits against
-	 * `1 - normalisedFlux` for exactly this reason. meq::
+	 * spline is in the SOURCE's Psi (meq::ToroidalFieldSpline). meq::
 	 * normalisedFlux is zero on the axis and the source's Psi is
 	 * one there, so a lambda that reached for the family's label
-	 * would evaluate the polynomial reversed and report a q that is
-	 * smooth, plausible and wrong.
+	 * would evaluate g^2 reversed and report a q that is smooth,
+	 * plausible and wrong.
 	 */
 	double const psiAxisValue = axis.psi;
 	double const psiBoundaryValue = solver->psiBoundary();
-	if ( !toroidalCoefficients.empty() && toroidalDriven
-	     && psiAxisValue != psiBoundaryValue )
+	if ( toroidalField && toroidalDriven && psiAxisValue != psiBoundaryValue )
 	{
-		std::vector<double> const gSquared = toroidalCoefficients;
+		std::shared_ptr<meq::ToroidalFieldSpline const> const gSquared = toroidalField;
 		auto atSourcePsi = [ gSquared ]( double sourcePsi )
 		{
-			double value = 0.0;
-			for ( std::size_t j = gSquared.size(); j-- > 0; )
-				value = value*sourcePsi + gSquared[ j ];
-			return value;
+			return ( *gSquared )( sourcePsi );
 		};
 
 		/*
 		 * g^2 MUST BE POSITIVE ACROSS THE RANGE THE COLUMN WILL BE
-		 * EVALUATED AT, and nothing guarantees it: g^2 is a fitted
-		 * polynomial, so a poorly determined high degree can dip
-		 * below zero inside the cut while every coefficient looks
-		 * ordinary. sqrt() of that is a NaN in a file whose only
+		 * EVALUATED AT, and nothing guarantees it outside the knots,
+		 * where the spline's end cubics are continued: the loop admits
+		 * only splines positive on [ 0, 1 ], and the check here is
+		 * that promise read back. sqrt() of a negative is a NaN in a file whose only
 		 * per-node mask is about the band, so the column would be
 		 * unreadable in a way nothing announces.
 		 *
@@ -6921,12 +6922,11 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 				};
 		else
 			std::printf(
-				"MEQ: warning: the fitted g^2 is not positive across\n"
+				"MEQ: warning: the solved g^2 is not positive across\n"
 				"     Psi in [ %.3f, %.3f ], so g = sqrt( g^2 ) is\n"
 				"     not real there and the safety factor is left\n"
-				"     OUT of %s rather than written as NaN. The g^2\n"
-				"     coefficients are still in the file; a lower\n"
-				"     [ source ] SafetyFactorDegree is the usual cure.\n",
+				"     OUT of %s rather than written as NaN. g^2 at\n"
+				"     the loop's knots is still in the file.\n",
 				fromPsi, toPsi,
 				file.c_str() );
 	}
@@ -6985,18 +6985,11 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 	 * a prescribed field, which is what these three say -- the same
 	 * three the ( R, Z ) grid carries, for the same reason.
 	 */
-	if ( !toroidalCoefficients.empty() && toroidalDriven )
+	if ( toroidalField && toroidalDriven )
 	{
-		std::ostringstream fitted;
-		fitted.setf( std::ios::scientific );
-		fitted.precision( 10 );
-		for ( std::size_t i = 0;
-		      i < toroidalCoefficients.size(); ++i )
-			fitted << ( i == 0 ? "" : " " )
-			       << toroidalCoefficients[ i ];
-
 		surfaces.attribute( "toroidal_field_driven", 1 );
-		surfaces.attribute( "g_squared_coefficients", fitted.str() );
+		surfaces.attribute( "g_squared_knots", spaced( toroidalField->labels() ) );
+		surfaces.attribute( "g_squared", spaced( toroidalField->values() ) );
 		surfaces.attribute( "safety_factor_target",
 		                    config->getSource().getMHD()
 		                        .safetyFactorFile );
@@ -7444,25 +7437,22 @@ int meq::Run::Impl::write()
 		 * ROADMAP.md item 10 inverts the usual direction: the toroidal field is
 		 * what the run FOUND rather than what it was told, so a consumer
 		 * reading this file has nothing else to judge it by -- there is no
-		 * GGPrimeFile beside it to look up. The coefficients are of
-		 * g^2 = sum_j c_j Psi^j, ascending, against the SOURCE's normalised
-		 * flux; g itself is their square root, and gg' is half the derivative.
+		 * GGPrimeFile beside it to look up. g_squared is g^2 at the loop's
+		 * knots, g_squared_knots their labels in the FAMILY's Psi_N (zero on
+		 * the axis); between them g^2 is the not-a-knot cubic in the source's
+		 * Psi = 1 - Psi_N (meq::ToroidalFieldSpline), g its square root, and
+		 * gg' half its derivative.
 		 *
 		 * Written as a string rather than as a vector because these are
 		 * metadata about the run and not a field on the ( R, Z ) grid every
 		 * other variable in this file lives on.
 		 */
-		if ( !toroidalCoefficients.empty() && toroidalDriven )
+		if ( toroidalField && toroidalDriven )
 		{
-			// 17 significant digits: a restart starts the outer loop from these.
-			std::ostringstream coefficients;
-			coefficients.setf( std::ios::scientific );
-			coefficients.precision( 16 );
-			for ( std::size_t i = 0; i < toroidalCoefficients.size(); ++i )
-				coefficients << ( i == 0 ? "" : " " ) << toroidalCoefficients[ i ];
-
+			// 17 significant digits: a restart starts the loop from these.
 			writer.attribute( "toroidal_field_driven", 1 );
-			writer.attribute( "g_squared_coefficients", coefficients.str() );
+			writer.attribute( "g_squared_knots", spaced( toroidalField->labels() ) );
+			writer.attribute( "g_squared", spaced( toroidalField->values() ) );
 			writer.attribute( "safety_factor_target",
 			                  config->getSource().getMHD().safetyFactorFile );
 
@@ -7481,6 +7471,7 @@ int meq::Run::Impl::write()
 			writer.attribute( "toroidal_loop_equilibria", toroidalEquilibria );
 			writer.attribute( "toroidal_loop_residual", toroidalResidual );
 			writer.attribute( "toroidal_loop_threshold", toroidalThreshold );
+			writer.attribute( "toroidal_loop_misfit", toroidalMisfit );
 			writer.attribute( "toroidal_loop_conditioning", toroidalConditioning );
 		}
 		/*

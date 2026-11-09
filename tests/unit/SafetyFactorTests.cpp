@@ -4,10 +4,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
 #include "meq/SafetyFactor.hpp"
+#include "meq/SafetyFactorSolve.hpp"
 
 /*
  * DRIVING AN EQUILIBRIUM BY q( psi ), the inversion half.
@@ -286,330 +290,403 @@ BOOST_AUTO_TEST_CASE( the_vacuum_extension_adds_a_zero_at_the_plasma_edge )
 }
 
 /*
- * THE MAP IS TOTAL, AND WHAT IT RETURNS WHERE IT CANNOT BE EVALUATED MATTERS
- * MORE THAN WHERE IT CAN.
- *
- * meq::solveForToroidalField drives this through KINSOL, which is C: an
- * exception raised inside it is caught in the callback and ends the loop,
- * which denies the line search the finite value it needs to reject a step
- * with. So the contract is
- * that no reachable input throws, and the residual at an inadmissible point is
- * finite, large, and not a root.
+ * THE KNOTS FOLLOW THE MESH: about two per element across the minor radius,
+ * a knot spacing from the axis and from the edge, and the labels are the
+ * family's own to the bit.
  */
-BOOST_AUTO_TEST_CASE( the_map_is_total_where_g_squared_goes_negative )
+BOOST_AUTO_TEST_CASE( the_knots_follow_the_mesh_and_their_layers_shrink_with_it )
 {
-	std::vector<double> const label = { 0.10, 0.30, 0.50, 0.70, 0.90 };
+	// The q-driven box: 8 x 8 cells at level 0, four times that per level.
+	std::size_t const level0 = meq::toroidalKnotCount( 64.0, 2 );
+	std::size_t const level1 = meq::toroidalKnotCount( 256.0, 2 );
+	std::size_t const level2 = meq::toroidalKnotCount( 1024.0, 2 );
+	BOOST_TEST( level0 == 10u );
+	BOOST_TEST( level1 == 19u );
+	BOOST_TEST( level2 == 37u );
+	// k = 3 is the cubic's own order: the same count.
+	BOOST_TEST( meq::toroidalKnotCount( 256.0, 3 ) == level1 );
+	// Above it the knots grow faster than 1/h.
+	BOOST_TEST( meq::toroidalKnotCount( 256.0, 5 ) > level1 );
+	BOOST_TEST( meq::toroidalKnotCount( 1.0, 2 ) == 6u );
+	BOOST_CHECK_THROW( meq::toroidalKnotCount( 0.0, 2 ), std::invalid_argument );
 
-	// A family that inverts to a CONSTANT g of 2, whatever is asked of it, so
-	// the map's own arithmetic is the only thing under test.
-	std::vector<double> vPrime( label.size(), 3.0 );
-	std::vector<double> inverseRSquared( label.size(), 0.5 );
-	meq::FluxSurfaceFamily const family =
-		familyOf( label, vPrime, inverseRSquared );
-
-	int solves = 0;
-	auto solve = [ & ]( std::vector<meq::Knot> const &knots )
+	for ( std::size_t knots : { level0, level1, level2 } )
 	{
-		++solves;
-		BOOST_TEST( !knots.empty() );
-		return &family;
-	};
-
-	meq::ToroidalFieldMap::Options options;
-	options.degree = 2;
-	options.target = []( double ) { return 4.0*M_PI*M_PI*2.0/( 3.0*0.5 ); };
-
-	meq::ToroidalFieldMap map( solve, options );
-
-	// A g^2 that is positive everywhere on [ 0, 1 ] is admissible and solves.
-	std::vector<double> const good = { 4.0, 0.0, 0.0 };
-	std::vector<double> const first = map( good );
-	BOOST_TEST( map.solves() == 1 );
-	BOOST_TEST( map.refusals() == 0 );
-	BOOST_TEST( first.size() == good.size() );
-
-	// g^2 = 1 - 4 Psi is negative over most of the range. It must NOT reach the
-	// solve, must not throw, and must come back finite.
-	std::vector<double> const bad = { 1.0, -4.0, 0.0 };
-	std::vector<double> hopeless;
-	BOOST_CHECK_NO_THROW( hopeless = map( bad ) );
-	BOOST_TEST( map.solves() == 1,
-		"an inadmissible g^2 reached the solve, which is a wasted equilibrium "
-		"and, with a moving support, one that may not converge at all" );
-	BOOST_TEST( map.refusals() == 1 );
-	for ( double value : hopeless )
-		BOOST_TEST( std::isfinite( value ) );
-
-	// AND THE REFUSAL POINTS BACK AT THE LAST ADMISSIBLE POINT, so the residual
-	// there is `lastGood - c`, which is large and is a root only at a place the
-	// map really was evaluated.
-	BOOST_TEST( map.lastAdmissible() == good, boost::test_tools::per_element() );
-	BOOST_TEST( hopeless == good, boost::test_tools::per_element() );
-
-	std::printf( "\n  the map refused g^2 = 1 - 4 Psi without solving, and "
-	             "returned the last admissible c\n" );
-}
-
-/*
- * THE TARGET IS ASKED IN THE SOURCE'S Psi AND THE FAMILY IS LABELLED IN Psi_N,
- * AND GETTING IT BACKWARDS CONVERGES TO A REVERSED SHEAR.
- *
- * This is the same trap the_two_normalised_fluxes_run_in_opposite_directions
- * pins one level down, met where a CALLER meets it. The map owns the
- * reflection, so the assertion is that the target sees 1 - Psi_N and not
- * Psi_N -- checked by handing it a target that is not symmetric about 0.5, for
- * the reason that a symmetric one cannot tell the two apart.
- */
-BOOST_AUTO_TEST_CASE( the_map_asks_its_target_in_the_sources_normalised_flux )
-{
-	// NOT SYMMETRIC ABOUT 0.5, WHICH IS THE WHOLE POINT. Labels of 0.10 and
-	// 0.90 reflect to 0.90 and 0.10 -- the same SET -- so a check on the set
-	// would pass either way round and test nothing. 0.10 and 0.40 reflect to
-	// 0.90 and 0.60, which share no element with them.
-	std::vector<double> const label = { 0.10, 0.40 };
-	meq::FluxSurfaceFamily const family =
-		familyOf( label, { 3.0, 3.0 }, { 0.5, 0.5 } );
-
-	std::vector<double> asked;
-	meq::ToroidalFieldMap::Options options;
-	options.degree = 1;
-	options.target = [ &asked ]( double psi )
-	{
-		asked.push_back( psi );
-		return 1.0;
-	};
-
-	meq::ToroidalFieldMap map(
-		[ & ]( std::vector<meq::Knot> const & ) { return &family; }, options );
-	map( { 4.0, 0.0 } );
-
-	BOOST_TEST_REQUIRE( asked.size() == label.size() );
-
-	// THE PAIRING, IN ORDER, so a reflection applied to the wrong surface is
-	// caught as well as no reflection at all.
-	for ( std::size_t i = 0; i < label.size(); ++i )
-		BOOST_TEST( asked[ i ] == 1.0 - label[ i ],
-			boost::test_tools::tolerance( 1.0e-14 ) );
-
-	// And the control: the un-reflected labels are NOT what was asked, which is
-	// what says the assertion above has teeth on this fixture.
-	for ( std::size_t i = 0; i < label.size(); ++i )
-		BOOST_TEST( std::abs( asked[ i ] - label[ i ] ) > 0.1,
-			"the target was asked at the FAMILY's label rather than the "
-			"source's, so gg' comes back with its shear reversed" );
-
-	std::printf( "  the target was asked at Psi = %.2f, %.2f for surfaces at "
-	             "Psi_N = %.2f, %.2f\n",
-	             asked[ 0 ], asked[ 1 ], label[ 0 ], label[ 1 ] );
-}
-
-/*
- * A MAP WITH NOTHING TO SOLVE WITH IS REFUSED AT CONSTRUCTION, because the
- * alternative is a null callable met for the first time inside KINSOL.
- */
-BOOST_AUTO_TEST_CASE( a_map_without_a_solve_or_a_target_is_refused )
-{
-	meq::FluxSurfaceFamily const family =
-		familyOf( { 0.5 }, { 3.0 }, { 0.5 } );
-	auto solve = [ & ]( std::vector<meq::Knot> const & ) { return &family; };
-
-	meq::ToroidalFieldMap::Options complete;
-	complete.target = []( double ) { return 1.0; };
-
-	BOOST_CHECK_THROW(
-		meq::ToroidalFieldMap( nullptr, complete ), std::invalid_argument );
-
-	meq::ToroidalFieldMap::Options noTarget;
-	BOOST_CHECK_THROW(
-		meq::ToroidalFieldMap( solve, noTarget ), std::invalid_argument );
-
-	// A degree-zero g^2 is a constant, so gg' is identically zero and no
-	// coefficient the loop moves can change the equilibrium.
-	meq::ToroidalFieldMap::Options flat = complete;
-	flat.degree = 0;
-	BOOST_CHECK_THROW(
-		meq::ToroidalFieldMap( solve, flat ), std::invalid_argument );
-
-	// And a solve that cannot produce an equilibrium is a refusal rather than
-	// a throw, since it is reachable from inside the Newton.
-	meq::ToroidalFieldMap failing(
-		[]( std::vector<meq::Knot> const & )
-		{
-			return static_cast<meq::FluxSurfaceFamily const *>( nullptr );
-		},
-		complete );
-	std::vector<double> out;
-	BOOST_CHECK_NO_THROW( out = failing( { 4.0, 0.0, 0.0 } ) );
-	BOOST_TEST( failing.refusals() == 1 );
-	for ( double value : out )
-		BOOST_TEST( std::isfinite( value ) );
-}
-
-/*
- * THE MAP'S FLOOR IS THE FIT'S OWN PROPAGATION OF THE SOLVE'S ACCURACY, AND
- * IT IS CHECKED HERE WHERE IT CAN BE CHECKED BY HAND.
- *
- * Two surfaces and a degree-one fit: the fit then INTERPOLATES, so its
- * pseudo-inverse is the inverse of the 2 x 2 design matrix and each row norm
- * is arithmetic. `meq::toroidalMapFloor()` is 4 x 4 x accuracy x the largest
- * row norm weighted by each surface's g^2 -- the 4 for g^2's two averages
- * squared, the other 4 standard deviations -- and the outer Newton is judged
- * against it, so a wrong constant or an unweighted row is a loop that
- * reports converged too early or never.
- */
-BOOST_AUTO_TEST_CASE( the_map_floor_is_the_fit_propagating_the_solve )
-{
-	meq::ToroidalField field;
-	field.normalisedFlux = { 0.25, 0.75 };   // Psi = 0.75 and 0.25
-	field.gSquared = { 5.0, 7.0 };
-	field.g = { std::sqrt( 5.0 ), std::sqrt( 7.0 ) };
-	field.safetyFactor = { 0.0, 0.0 };
-
-	// c0 + c1 Psi through ( 0.75, 5 ) and ( 0.25, 7 ). A = [ 1 0.75; 1 0.25 ],
-	// det -0.5, so A^-1 = [ -0.5 1.5; 2 -2 ].
-	double const row0 = std::hypot( -0.5*5.0, 1.5*7.0 );
-	double const row1 = std::hypot( 2.0*5.0, -2.0*7.0 );
-	double const accuracy = 1.0e-6;
-	double const expected = 16.0*accuracy*std::max( row0, row1 );
-
-	double const floor = meq::toroidalMapFloor( field, 1, accuracy );
-	BOOST_TEST( floor == expected, boost::test_tools::tolerance( 1.0e-12 ) );
-
-	// Linear in the accuracy, and zero for an exact solve.
-	BOOST_TEST( meq::toroidalMapFloor( field, 1, 2.0*accuracy )
-	            == 2.0*expected, boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( meq::toroidalMapFloor( field, 1, 0.0 ) == 0.0 );
-
-	// And refused where the fit is.
-	BOOST_CHECK_THROW( meq::toroidalMapFloor( field, 2, accuracy ),
-	                   std::invalid_argument );
-	BOOST_CHECK_THROW( meq::toroidalMapFloor( field, 0, accuracy ),
-	                   std::invalid_argument );
-}
-
-/*
- * THE PINNED SYSTEM DROPS THE FIT'S HIGHEST ORTHONORMAL ROW, AND ONLY IT.
- *
- * meq::PinnedToroidalFieldMap keeps the q-driven system square by letting one
- * q condition give way: the misfit it leaves is a multiple of the highest
- * orthogonal polynomial over the surfaces' labels. So a point whose misfit is
- * EXACTLY that polynomial is a root, and one whose misfit is Psi^2 -- the
- * axis-limit condition, M-355's runner-up -- is not. Which condition gives
- * way is part of the problem posed, and the three pins compose only because it
- * is the same under each (M-357), so it is pinned here, without a mesh.
- *
- * The family inverts to a constant g = 2 whatever it is asked, so the map
- * returns c = ( 4, 0, 0 ) at every admissible point.
- */
-BOOST_AUTO_TEST_CASE( the_pinned_system_lets_the_highest_fit_row_give_way )
-{
-	std::vector<double> const label = { 0.10, 0.30, 0.50, 0.70, 0.90 };
-	meq::FluxSurfaceFamily const family = familyOf(
-		label, std::vector<double>( label.size(), 3.0 ),
-		std::vector<double>( label.size(), 0.5 ) );
-	auto solve = [ & ]( std::vector<meq::Knot> const & ) { return &family; };
-	meq::ToroidalFieldMap::Options options;
-	options.degree = 2;
-	// q = g V' < R^-2 >/4 pi^2 with g = 2, V' = 3 and < R^-2 > = 0.5.
-	options.target = []( double ) { return 2.0*3.0*0.5/( 4.0*M_PI*M_PI ); };
-	meq::ToroidalFieldMap map( solve, options );
-
-	// The degree-2 orthogonal polynomial over the labels, in the SOURCE's Psi:
-	// Psi^2 - a Psi - b, orthogonal to 1 and Psi over the surfaces.
-	double s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0;
-	for ( double l : label )
-	{
-		double const psi = 1.0 - l;
-		s0 += 1.0;
-		s1 += psi;
-		s2 += psi*psi;
-		s3 += psi*psi*psi;
+		meq::ToroidalKnotCut const cut = meq::toroidalKnotCut( knots );
+		std::vector<double> const labels = meq::toroidalKnotLabels( knots );
+		double const spacing = 1.0/static_cast<double>( knots + 1 );
+		BOOST_TEST( labels.size() == knots );
+		BOOST_TEST( std::abs( std::sqrt( cut.innerCut ) - spacing ) < 1e-15 );
+		BOOST_TEST( std::abs( 1.0 - std::sqrt( cut.outerCut ) - spacing ) < 1e-15,
+			"the layer outside the outermost knot is not one knot spacing, so the "
+			"part of the request no knot sees does not shrink with the mesh" );
+		for ( std::size_t j = 0; j < knots; ++j )
+			BOOST_TEST( std::abs( std::sqrt( labels[ j ] ) - ( j + 1.0 )*spacing ) < 1e-14 );
 	}
-	double const determinant = s1*s1 - s0*s2;
-	double const a = ( s2*s1 - s0*s3 )/determinant;
-	double const b = ( s1*s3 - s2*s2 )/determinant;
-	std::vector<double> const orthogonal = { -b, -a, 1.0 };
+}
 
-	meq::PinnedToroidalFieldMap::Pin pin;
-	pin.kind = meq::ScalePin::ToroidalFlux;
-	pin.value = 0.25;
-	pin.measured = []( std::vector<double> const & ) { return 0.25; };
-	meq::PinnedToroidalFieldMap pinned( map, 2, pin );
+/*
+ * THE SPLINE: exact on a cubic in the source's Psi, gg' half its derivative,
+ * linear in its values -- the cardinal functions sum to the spline -- and
+ * reflected once: knots given in Psi_N, evaluated in Psi = 1 - Psi_N.
+ */
+BOOST_AUTO_TEST_CASE( the_spline_is_a_not_a_knot_cubic_in_the_sources_psi )
+{
+	std::vector<double> const labels = meq::toroidalKnotLabels( 9 );
+	meq::ToroidalFieldSpline spline( labels );
+	auto cubic = []( double psi ) { return 4.84 + 2.42*psi + 0.3025*psi*psi - 0.2*psi*psi*psi; };
+	auto slope = []( double psi ) { return 2.42 + 0.605*psi - 0.6*psi*psi; };
+	std::vector<double> values;
+	for ( double label : labels )
+		values.push_back( cubic( 1.0 - label ) );
+	spline.setValues( values );
 
-	auto residualAt = [ & ]( std::vector<double> const &c )
+	double worst = 0.0, worstSlope = 0.0;
+	for ( double psi = 0.0; psi <= 1.0; psi += 0.01 )
 	{
-		std::vector<double> const image = pinned( c );
-		double worst = 0.0;
-		for ( std::size_t i = 0; i < c.size(); ++i )
-			worst = std::max( worst, std::abs( image[ i ] - c[ i ] ) );
-		return worst;
+		worst = std::max( worst, std::abs( spline( psi ) - cubic( psi ) ) );
+		worstSlope = std::max( worstSlope, std::abs( spline( psi, 1 ) - slope( psi ) ) );
+	}
+	BOOST_TEST( worst < 1e-12, "a not-a-knot cubic reproduces a cubic, the end pieces included" );
+	BOOST_TEST( worstSlope < 1e-11 );
+
+	std::shared_ptr<meq::Profile const> const ggPrime = spline.ggPrime();
+	for ( double psi : { 0.0, 0.3, 0.77, 1.0 } )
+	{
+		BOOST_TEST( std::abs( ( *ggPrime )( psi ) - 0.5*slope( psi ) ) < 1e-11,
+			"gg' is half of d( g^2 )/dPsi in the SOURCE's Psi; the wrong sign is a "
+			"reversed shear (section 2)" );
+		double const h = 1e-6;
+		BOOST_TEST( std::abs( ggPrime->prime( psi ) - ( ( *ggPrime )( psi + h ) - ( *ggPrime )( psi - h ) )/( 2*h ) ) < 1e-6 );
+	}
+
+	double sum = 0.0;
+	for ( std::size_t j = 0; j < spline.size(); ++j )
+		sum += values[ j ]*spline.cardinal( j, 0.4 );
+	BOOST_TEST( std::abs( sum - spline( 0.4 ) ) < 1e-12 );
+	BOOST_TEST( std::abs( spline.cardinal( 2, 1.0 - labels[ 2 ] ) - 1.0 ) < 1e-12 );
+	BOOST_TEST( std::abs( spline.cardinal( 2, 1.0 - labels[ 3 ] ) ) < 1e-12 );
+
+	BOOST_TEST( spline.positive() );
+	values[ 0 ] = -1.0;
+	spline.setValues( values );
+	BOOST_TEST( !spline.positive() );
+	BOOST_CHECK_THROW( meq::ToroidalFieldSpline( std::vector<double>{ 0.1, 0.2, 0.3 } ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::ToroidalFieldSpline( std::vector<double>{ 0.1, 0.3, 0.2, 0.4 } ), std::invalid_argument );
+}
+
+namespace
+{
+	/*
+	 * A SYNTHETIC q-DRIVEN SYSTEM: q/g at knot i is a fixed geometry times a
+	 * response to the spline, q/g = a_i ( 1 + b sum_j u_j )^-1, standing in
+	 * for the solve. Enough to check the rows, the pin and the totality.
+	 */
+	struct Synthetic
+	{
+		std::vector<double> labels = meq::toroidalKnotLabels( 6 );
+		std::vector<double> a = { 1.0, 0.9, 0.8, 0.75, 0.7, 0.65 };
+		double b = 0.01;
+		int solves = 0;
+		double askedPsi = -1.0;
+
+		bool solve( meq::ToroidalFieldSpline const &s, meq::SafetyFactorEvaluation &out )
+		{
+			++solves;
+			double sum = 0.0;
+			for ( double v : s.values() )
+				sum += v;
+			out.qOverG.clear();
+			for ( double ai : a )
+				out.qOverG.push_back( ai/( 1.0 + b*sum ) );
+			out.measured = sum;
+			return true;
+		}
+
+		bool differentiate( meq::ToroidalFieldSpline const &s, meq::SafetyFactorDerivative &out )
+		{
+			std::size_t const m = s.size();
+			double sum = 0.0;
+			for ( double v : s.values() )
+				sum += v;
+			out.qOverG.assign( m*m, 0.0 );
+			for ( std::size_t i = 0; i < m; ++i )
+				for ( std::size_t j = 0; j < m; ++j )
+					out.qOverG[ i*m + j ] = -a[ i ]*b/( ( 1.0 + b*sum )*( 1.0 + b*sum ) );
+			out.measured.assign( m, 1.0 );
+			return true;
+		}
+
+		meq::SafetyFactorSystem system( meq::ScalePin kind, double value, std::function<double( double )> target )
+		{
+			meq::SafetyFactorSystem::Pin pin;
+			pin.kind = kind;
+			pin.value = value;
+			return meq::SafetyFactorSystem(
+				labels, target, pin,
+				[ this ]( meq::ToroidalFieldSpline const &s, meq::SafetyFactorEvaluation &o ) { return solve( s, o ); },
+				[ this ]( meq::ToroidalFieldSpline const &s, meq::SafetyFactorDerivative &o ) { return differentiate( s, o ); },
+				1.0e-12 );
+		}
 	};
+}
 
-	std::vector<double> alongHighest( 3 ), alongAxis = { 4.0, 0.0, -0.3 };
+/*
+ * THE SYSTEM IS TOTAL: a spline with g^2 <= 0 anywhere on [ 0, 1 ] is refused
+ * without a solve -- it is not an equilibrium -- and so is a solve that fails
+ * or throws. Refused means residual() returns false and the least squares
+ * rejects the step; nothing throws for a reason the loop can meet.
+ */
+BOOST_AUTO_TEST_CASE( the_system_is_total_where_g_squared_goes_negative )
+{
+	Synthetic synthetic;
+	meq::SafetyFactorSystem system = synthetic.system( meq::ScalePin::EdgeField, 2.2,
+	                                                   []( double ) { return 1.5; } );
+	std::vector<double> r;
+	std::vector<double> u( 6, 4.84 );
+	BOOST_TEST( system.residual( u, r ) );
+	BOOST_TEST( r.size() == 7u );
+
+	std::vector<double> negative( u );
+	negative[ 3 ] = -0.5;
+	int const before = synthetic.solves;
+	BOOST_TEST( !system.residual( negative, r ) );
+	BOOST_TEST( synthetic.solves == before, "g^2 < 0 reached the solve" );
+	BOOST_TEST( system.refusals() == 1 );
+
+	// A spline positive at every knot that dips below zero between them, on
+	// the continued end piece, is refused too: the source reads all of [ 0, 1 ].
+	std::vector<double> dipping = { 5.0, 0.2, 5.0, 0.2, 5.0, 0.05 };
+	BOOST_TEST( !system.residual( dipping, r ) );
+
+	meq::SafetyFactorSystem failing(
+		synthetic.labels, []( double ) { return 1.5; }, { meq::ScalePin::EdgeField, 2.2 },
+		[]( meq::ToroidalFieldSpline const &, meq::SafetyFactorEvaluation & ) -> bool
+		{
+			throw std::runtime_error( "the inner solve did not converge" );
+		},
+		[]( meq::ToroidalFieldSpline const &, meq::SafetyFactorDerivative & ) { return false; },
+		1.0e-12 );
+	BOOST_TEST( !failing.residual( u, r ), "a throwing solve must be a refusal, not an exception" );
+}
+
+/*
+ * THE TARGET IS ASKED IN THE SOURCE'S Psi: the knots are labelled by the
+ * family's Psi_N, zero on the axis, and the target is read at 1 - Psi_N. And
+ * the rows are what the header says: q/q* - 1, and the pin row weighted.
+ */
+BOOST_AUTO_TEST_CASE( the_rows_ask_the_target_in_the_sources_psi )
+{
+	Synthetic synthetic;
+	auto target = []( double psi ) { return 1.0 + psi; };
+	meq::SafetyFactorSystem system = synthetic.system( meq::ScalePin::EdgeField, 2.2, target );
+	for ( std::size_t i = 0; i < synthetic.labels.size(); ++i )
+		BOOST_TEST( std::abs( system.targets()[ i ] - ( 2.0 - synthetic.labels[ i ] ) ) < 1e-15,
+			"the target at Psi_N = " << synthetic.labels[ i ] << " was read at the wrong "
+			"end of the profile; a reflection missed converges to a reversed shear" );
+
+	std::vector<double> u( 6, 4.84 ), r;
+	BOOST_TEST_REQUIRE( system.residual( u, r ) );
+	double const qOverG0 = synthetic.a[ 0 ]/( 1.0 + synthetic.b*6.0*4.84 );
+	BOOST_TEST( std::abs( r[ 0 ] - ( qOverG0*2.2/system.targets()[ 0 ] - 1.0 ) ) < 1e-14 );
+	// R0B0's row: the spline continued to Psi = 0, here the constant 4.84.
+	BOOST_TEST( std::abs( r[ 6 ] ) < 1e-14 );
+	u.assign( 6, 4.84*1.01 );
+	BOOST_TEST_REQUIRE( system.residual( u, r ) );
+	BOOST_TEST( std::abs( r[ 6 ] - 0.01 ) < 1e-9 );
+
+	std::vector<double> j;
+	BOOST_TEST_REQUIRE( system.jacobian( u, j ) );
+	BOOST_TEST( j.size() == 7u*6u );
+	// The R0B0 row is the cardinal functions at the edge; they sum to one.
+	double sum = 0.0;
+	for ( std::size_t k = 0; k < 6; ++k )
+		sum += j[ 6*6 + k ];
+	BOOST_TEST( std::abs( sum - 1.0/( 2.2*2.2 ) ) < 1e-9 );
+	// Asked anywhere but the last admitted point, the Jacobian refuses loudly.
+	std::vector<double> elsewhere( 6, 5.0 );
+	BOOST_CHECK_THROW( system.jacobian( elsewhere, j ), std::logic_error );
+
+	// A pin row that reads the solve: ( m - m* )/m*, weighted.
+	meq::SafetyFactorSystem current = synthetic.system( meq::ScalePin::PlasmaCurrent, 30.0, target );
+	BOOST_TEST_REQUIRE( current.residual( u, r ) );
+	BOOST_TEST( std::abs( r[ 6 ] - ( 6.0*4.84*1.01 - 30.0 )/30.0 ) < 1e-9 );
+	BOOST_TEST( current.floor().size() == 7u );
+	BOOST_CHECK_THROW( synthetic.system( meq::ScalePin::EdgeField, -2.2, target ), std::invalid_argument );
+	BOOST_CHECK_THROW( synthetic.system( meq::ScalePin::EdgeField, 2.2, []( double ) { return 0.0; } ),
+	                   std::invalid_argument );
+}
+
+namespace
+{
+	using Residual = std::function<bool( std::vector<double> const &, std::vector<double> & )>;
+
+	/// An affine least squares with a known minimiser: two exact rows and one
+	/// inconsistent third, r = A x - b.
+	struct Affine
+	{
+		std::vector<double> a = { 2.0, 0.5, -1.0, 3.0, 1.0, 1.0 };   // 3 x 2
+		std::vector<double> b = { 1.0, 2.0, 2.5 };
+		int calls = 0;
+		bool operator()( std::vector<double> const &x, std::vector<double> &r )
+		{
+			++calls;
+			r.resize( 3 );
+			for ( int i = 0; i < 3; ++i )
+				r[ i ] = a[ 2*i ]*x[ 0 ] + a[ 2*i + 1 ]*x[ 1 ] - b[ i ];
+			return true;
+		}
+	};
+}
+
+/*
+ * GAUSS-NEWTON IS EXACT ON AN AFFINE PROBLEM: one step to the least-squares
+ * minimiser, whose misfit is not zero -- and the loop is converged there,
+ * because what a step can remove is zero, not because the residual is.
+ */
+BOOST_AUTO_TEST_CASE( gauss_newton_finishes_an_affine_least_squares_in_one_step )
+{
+	auto affine = std::make_shared<Affine>();
+	Residual residual = [ affine ]( std::vector<double> const &x, std::vector<double> &r ) { return ( *affine )( x, r ); };
+	auto jacobian = [ affine ]( std::vector<double> const &, std::vector<double> &j )
+	{
+		j = affine->a;
+		return true;
+	};
+	meq::LeastSquaresResult const result = meq::solveLeastSquares( { 10.0, -7.0 }, residual, jacobian );
+	BOOST_TEST( result.converged, result.status );
+	BOOST_TEST( result.iterations == 1 );
+	BOOST_TEST( result.misfit > 0.1, "the third row is inconsistent; its misfit stays" );
+	// The normal equations' answer, checked independently.
+	double const ata[ 4 ] = { 4 + 1 + 1, 1 - 3 + 1, 1 - 3 + 1, 0.25 + 9 + 1 };
+	double const atb[ 2 ] = { 2 - 2 + 2.5, 0.5 + 6 + 2.5 };
+	double const det = ata[ 0 ]*ata[ 3 ] - ata[ 1 ]*ata[ 2 ];
+	double const x0 = ( atb[ 0 ]*ata[ 3 ] - ata[ 1 ]*atb[ 1 ] )/det;
+	double const x1 = ( ata[ 0 ]*atb[ 1 ] - ata[ 2 ]*atb[ 0 ] )/det;
+	BOOST_TEST( std::abs( result.x[ 0 ] - x0 ) < 1e-12 );
+	BOOST_TEST( std::abs( result.x[ 1 ] - x1 ) < 1e-12 );
+}
+
+/*
+ * A RANK-DEFICIENT JACOBIAN IS REPORTED, NOT STEPPED THROUGH; A THROW ENDS THE
+ * LOOP AND IS REPORTED, NOT RETHROWN; A REFUSED TRIAL IS A REJECTED STEP.
+ */
+BOOST_AUTO_TEST_CASE( an_undetermined_jacobian_a_throw_and_a_refusal )
+{
+	Residual flat = []( std::vector<double> const &x, std::vector<double> &r )
+	{
+		r = { x[ 0 ] + x[ 1 ] - 1.0, 2.0*( x[ 0 ] + x[ 1 ] ) + 3.0 };
+		return true;
+	};
+	auto singular = []( std::vector<double> const &, std::vector<double> &j )
+	{
+		j = { 1.0, 1.0, 2.0, 2.0 };
+		return true;
+	};
+	meq::LeastSquaresResult const undetermined = meq::solveLeastSquares( { 0.0, 0.0 }, flat, singular );
+	BOOST_TEST( !undetermined.converged );
+	BOOST_TEST( undetermined.status.find( "RANK DEFICIENT" ) != std::string::npos, undetermined.status );
+
+	Residual throwing = []( std::vector<double> const &x, std::vector<double> &r ) -> bool
+	{
+		if ( x[ 0 ] > 0.5 )
+			throw std::runtime_error( "an inner solve exploded" );
+		r = { x[ 0 ] - 1.0 };
+		return true;
+	};
+	auto unit = []( std::vector<double> const &, std::vector<double> &j )
+	{
+		j = { 1.0 };
+		return true;
+	};
+	meq::LeastSquaresResult const thrown = meq::solveLeastSquares( { 0.0 }, throwing, unit );
+	BOOST_TEST( !thrown.converged );
+	BOOST_TEST( thrown.status.find( "an inner solve exploded" ) != std::string::npos, thrown.status );
+
+	// A residual refused beyond x = 0.7: the full step to 1 is rejected and
+	// the search halves into the admissible side, then onward.
+	int refusals = 0;
+	Residual walled = [ &refusals ]( std::vector<double> const &x, std::vector<double> &r )
+	{
+		if ( x[ 0 ] > 0.7 && x[ 0 ] < 0.99 )
+		{
+			++refusals;
+			return false;
+		}
+		r = { std::atan( x[ 0 ] - 1.0 ) };
+		return true;
+	};
+	auto slope = []( std::vector<double> const &x, std::vector<double> &j )
+	{
+		j = { 1.0/( 1.0 + ( x[ 0 ] - 1.0 )*( x[ 0 ] - 1.0 ) ) };
+		return true;
+	};
+	meq::LeastSquaresResult const around = meq::solveLeastSquares( { 0.0 }, walled, slope );
+	BOOST_TEST( around.rejected >= 0 );
+	BOOST_TEST( around.converged, around.status );
+}
+
+namespace
+{
+	/// A quadratic problem whose residual carries a fresh draw of noise
+	/// every evaluation, as a warm-started solve's does.
+	struct Noisy
+	{
+		double noise;
+		int calls = 0;
+		bool operator()( std::vector<double> const &x, std::vector<double> &r )
+		{
+			++calls;
+			r.resize( x.size() );
+			for ( std::size_t i = 0; i < x.size(); ++i )
+			{
+				double const away = x[ i ] - 1.0 - 0.1*static_cast<double>( i );
+				r[ i ] = 1.8*away + 0.3*away*away
+				         + noise*std::sin( 12.9898*calls + 78.233*static_cast<double>( i ) );
+			}
+			return true;
+		}
+	};
+}
+
+/*
+ * CONVERGED MEANS THE REMOVABLE RESIDUAL REACHED max( TOLERANCE, FLOOR ), and
+ * the floor is measured where it governs (M-363): a stall above a floor
+ * understated a hundredfold is measured and then converged at the noise; a
+ * stall above the noise is not converged.
+ */
+BOOST_AUTO_TEST_CASE( a_stall_at_the_measured_noise_is_converged_and_above_it_is_not )
+{
+	double const noise = 1.0e-4;
+	auto noisy = std::make_shared<Noisy>( Noisy{ noise } );
+	Residual residual = [ noisy ]( std::vector<double> const &x, std::vector<double> &r ) { return ( *noisy )( x, r ); };
+	auto jacobian = []( std::vector<double> const &x, std::vector<double> &j )
+	{
+		std::size_t const n = x.size();
+		j.assign( n*n, 0.0 );
+		for ( std::size_t i = 0; i < n; ++i )
+			j[ i*n + i ] = 1.8 + 0.6*( x[ i ] - 1.0 - 0.1*static_cast<double>( i ) );
+		return true;
+	};
+	meq::LeastSquaresOptions understated;
+	understated.tolerance = 1.0e-12;
+	understated.floor = [ noise ]() { return std::vector<double>( 3, noise/100.0 ); };
+	meq::LeastSquaresResult const measured = meq::solveLeastSquares( { 3.0, 2.0, 0.0 }, residual, jacobian, understated );
+	std::printf( "\n  A NOISY RESIDUAL, FLOOR UNDERSTATED: %s, floor %.2e\n", measured.status.c_str(), measured.floor );
+	BOOST_TEST( measured.converged, measured.status );
+	BOOST_TEST( measured.floor >= noise, "the floor judged against is under the residual's own noise" );
 	for ( std::size_t i = 0; i < 3; ++i )
-		alongHighest[ i ] = ( i == 0 ? 4.0 : 0.0 ) - 0.3*orthogonal[ i ];
-	BOOST_TEST( residualAt( alongHighest ) < 1.0e-13,
-		"a misfit along the highest orthogonal polynomial is not a root of the "
-		"pinned system, so some other q condition is giving way" );
-	BOOST_TEST( residualAt( alongAxis ) > 1.0e-3,
-		"a misfit along Psi^2 is a root: the axis-limit condition is giving way "
-		"where the highest fit row should" );
+		BOOST_TEST( std::abs( measured.x[ i ] - 1.0 - 0.1*static_cast<double>( i ) ) < 20.0*noise );
 
-	// THE PIN ROW: the same point, a pinned value it does not have.
-	pin.measured = []( std::vector<double> const & ) { return 0.30; };
-	meq::PinnedToroidalFieldMap mismatched( map, 2, pin );
-	std::vector<double> const off = mismatched( alongHighest );
-	BOOST_TEST( std::abs( off[ 2 ] - alongHighest[ 2 ] - 0.2 ) < 1.0e-13,
-		"the pin row is weight ( m - m* )/m* = 0.2 and reads " << off[ 2 ] - alongHighest[ 2 ] );
-	BOOST_TEST( !mismatched.lastRefused() );
-
-	// A REFUSAL BESIDE THE LAST ADMISSIBLE POINT IS STILL LARGE (M-358): its
-	// residual is never under twice the largest the map has returned, here
-	// 0.2, so the line search cannot accept it -- however near the last
-	// admissible point it lies. g^2 = 4 - 5 Psi goes negative on [ 0, 1 ].
-	std::vector<double> const inadmissible = { 4.0, -5.0, 0.0 };
-	std::vector<double> const pointedBack = mismatched( inadmissible );
-	BOOST_TEST( mismatched.lastRefused() );
-	double length = 0.0;
-	for ( std::size_t i = 0; i < 3; ++i )
-		length += ( pointedBack[ i ] - inadmissible[ i ] )*( pointedBack[ i ] - inadmissible[ i ] );
-	BOOST_TEST( std::sqrt( length ) >= 0.4 - 1.0e-14,
-		"a refusal's residual is " << std::sqrt( length ) << ", under twice the largest "
-		"admissible one, 0.2: a line search may accept the refused point" );
-
-	// R0B0: c_0 leaves the unknowns and is held at g_edge^2 -- here the
-	// point's own, so the point is a root of the held system as well.
-	meq::PinnedToroidalFieldMap::Pin edge;
-	edge.kind = meq::ScalePin::EdgeField;
-	edge.value = std::sqrt( alongHighest[ 0 ] );
-	meq::PinnedToroidalFieldMap held( map, 2, edge );
-	std::vector<double> const unknowns = held.unknowns( alongHighest );
-	BOOST_TEST_REQUIRE( unknowns.size() == 2u );
-	std::vector<double> const back = held.coefficients( unknowns );
-	BOOST_TEST_REQUIRE( back.size() == 3u );
-	for ( std::size_t i = 0; i < 3; ++i )
-		BOOST_TEST( std::abs( back[ i ] - alongHighest[ i ] ) < 1.0e-14 );
-	std::vector<double> const step = held( unknowns );
-	BOOST_TEST_REQUIRE( step.size() == 2u );
-	for ( std::size_t i = 0; i < 2; ++i )
-		BOOST_TEST( std::abs( step[ i ] - unknowns[ i ] ) < 1.0e-13,
-			"R0B0 held at the point's own g_edge does not leave it a root" );
-
-	// AND A PIN THAT CANNOT BE READ IS A REFUSAL, pointing back at the last
-	// admissible point rather than throwing into KINSOL.
-	pin.measured = []( std::vector<double> const & ) -> double { throw std::runtime_error( "no state" ); };
-	meq::PinnedToroidalFieldMap unreadable( map, 2, pin );
-	std::vector<double> refused;
-	BOOST_CHECK_NO_THROW( refused = unreadable( alongAxis ) );
-	for ( std::size_t i = 0; i < 3; ++i )
-		BOOST_TEST( refused[ i ] == alongAxis[ i ] - 1.0 );
-
-	// Values that pin nothing are refused at construction.
-	edge.value = -2.0;
-	BOOST_CHECK_THROW( meq::PinnedToroidalFieldMap( map, 2, edge ), std::invalid_argument );
-	pin.value = 0.0;
-	BOOST_CHECK_THROW( meq::PinnedToroidalFieldMap( map, 2, pin ), std::invalid_argument );
-	pin.value = 0.25;
-	pin.measured = nullptr;
-	BOOST_CHECK_THROW( meq::PinnedToroidalFieldMap( map, 2, pin ), std::invalid_argument );
+	// The control: noise far above any floor and no measurement can excuse a
+	// stall at 1e-2 -- a residual that does not fall below its noise is a
+	// stall, and the tolerance is far under both.
+	auto loud = std::make_shared<Noisy>( Noisy{ 1.0e-2 } );
+	Residual loudResidual = [ loud ]( std::vector<double> const &x, std::vector<double> &r ) { return ( *loud )( x, r ); };
+	meq::LeastSquaresOptions honest;
+	honest.tolerance = 1.0e-12;
+	honest.maxIterations = 4;
+	meq::LeastSquaresResult const stalled = meq::solveLeastSquares( { 3.0, 2.0, 0.0 }, loudResidual, jacobian, honest );
+	BOOST_TEST( !stalled.converged, "a residual still moving at 1e-2 after four steps reads converged: "
+	                                << stalled.status );
 }

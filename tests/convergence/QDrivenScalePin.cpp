@@ -26,30 +26,24 @@
  *
  * Equilibria sharing p( Psi_N ) and q( Psi_N ) form a one-parameter family, and
  * a q-driven run names exactly one of R0B0, ToroidalFlux and PlasmaCurrent to
- * select the member (meq::PinnedToroidalFieldMap). Each pin is a different
- * square system. THE TEST THAT MATTERS is that they pose ONE problem: solve
+ * select the member (meq::SafetyFactorSystem). Each pin is a different row
+ * beside the q rows. THE TEST THAT MATTERS is that they pose ONE problem: solve
  * once, read the answer's own g on the boundary, toroidal flux and current,
  * and re-solve from cold under each pin set to what was read. All three must
  * return the same equilibrium.
  *
- * THE TARGET IS NOT REPRESENTABLE, ON PURPOSE. q-driven-q.dat was measured
- * from an exactly quadratic g^2, so at degree 2 every q condition holds at the
- * answer and any choice of the one that gives way returns it. Here the target
- * is that table times ( 1 + 0.2 Psi^3 ), whose g^2 no quadratic follows: the
- * fit leaves a misfit, it lies along whichever condition gave way, and two
- * pins that dropped different conditions return equilibria that differ by it.
- * Mutation-tested on this fixture (M-357): R0B0 giving way on its
- * axis-limit condition instead of y_2 puts its answer 0.13 of psi's peak from
- * the others, and PlasmaCurrent giving way on y_1 puts every answer 0.05 to
- * 0.13 apart; this case asks for max( 1e-6, 20 eps ).
+ * THE TARGET IS NOT CONSISTENT, ON PURPOSE. q-driven-q.dat is measured at the
+ * example's knots on its own mesh, so the closed form meets it exactly there;
+ * this case runs on another mesh, and on that table times ( 1 + 0.2 Psi^3 ),
+ * so the least squares leaves a misfit at the knots. It reaches the pin row
+ * only through the q rows' near-null direction, r_pin ~ sigma_min x misfit,
+ * so an equilibrium solved under one pin is returned by the others set to
+ * what it reads -- to that, which this case bounds by max( 1e-6, 20 eps ).
  *
  * WHY 20 eps AND NOT 1e-6 IN SINGLE. MEQ owes about 1e-6, and in double that
- * is the bound. In single the answers are 5e-7 to 1.1e-6 apart (M-359), and
- * that spread is the map's own noise and not amplification: the outer loop
- * stops below it (1.3e-5 per orthonormal coordinate of g^2), and what reaches
- * psi is the inner solve's own accuracy, ten eps = 1.2e-6. The bound is twice
- * that accuracy: 20 eps, 2.4e-6 in single and 4.4e-15 in double, where 1e-6
- * is the larger.
+ * is the bound. In single what reaches psi is the inner solve's own accuracy,
+ * ten eps = 1.2e-6, and the bound is twice that: 20 eps, 2.4e-6 in single and
+ * 4.4e-15 in double, where 1e-6 is the larger.
  *
  * Coarse on purpose (the q-driven box at RefinementLevels = 0, k = 2): the
  * agreement asked for is the LOOP's, between solves on one mesh, and does not
@@ -65,7 +59,7 @@ namespace
 			"[discretisation]\nPolynomialDegree = 2\nTau = 1.0\n\n"
 			"[source]\nType = \"mhd\"\nNormalised = true\nPsiAxis = 0.3\nMu0 = 1.0\n"
 			"PPrimeFile = \"" + meq::test::sourcePath( "examples/q-driven-pprime.dat" ) + "\"\n"
-			"SafetyFactorFile = \"pin-q.dat\"\nSafetyFactorDegree = 2\n" + pin + "\n"
+			"SafetyFactorFile = \"pin-q.dat\"\n" + pin + "\n"
 			"[boundary]\nType = \"zero\"\n\n"
 			"[initialguess]\nType = \"bump\"\nAmplitude = 0.3\nCentreR = 1.0\nCentreZ = 0.0\n"
 			"RadiusR = 0.4\nRadiusZ = 0.6\n\n"
@@ -115,7 +109,7 @@ namespace
 		BOOST_TEST_REQUIRE( psi != nullptr );
 		out.psi = std::get<std::vector<double>>( psi->values );
 		std::istringstream in( std::get<std::string>(
-			data.attribute( "g_squared_coefficients" )->value ) );
+			data.attribute( "g_squared" )->value ) );
 		for ( double value = 0.0; in >> value; )
 			out.gSquared.push_back( value );
 		out.edgeField = number( data, "edge_toroidal_field" );
@@ -123,7 +117,7 @@ namespace
 		out.plasmaCurrent = number( data, "plasma_current" );
 		out.iterations = static_cast<int>( number( data, "toroidal_loop_iterations" ) );
 		out.equilibria = static_cast<int>( number( data, "toroidal_loop_equilibria" ) );
-		std::printf( "    %-34s %2d KINSOL iterations, %3d equilibria: R0B0 %.9f, "
+		std::printf( "    %-34s %2d Gauss-Newton iterations, %3d equilibria: R0B0 %.9f, "
 		             "Phi %.9e, I_p %.9e\n", pin.c_str(), out.iterations, out.equilibria,
 		             out.edgeField, out.toroidalFlux, out.plasmaCurrent );
 		return out;
@@ -198,23 +192,21 @@ BOOST_AUTO_TEST_CASE( theThreePinsReturnOneEquilibrium )
 		BOOST_TEST( psiApart < bound,
 			"re-solved under " << pin << " -- the value the base equilibrium reads -- "
 			"psi_h is " << psiApart << " of its peak from the base. The pins pose "
-			"different problems: each must drop the SAME q condition "
-			"(meq::PinnedToroidalFieldMap), or the fit's misfit lands in different "
-			"directions and so do the answers" );
-		BOOST_TEST( gApart < bound, "g^2's coefficients are " << gApart << " apart under "
+			"different problems: the misfit reaches the pin row through more than the "
+			"scale's near-null direction (meq::SafetyFactorSystem)" );
+		BOOST_TEST( gApart < bound, "g^2 at the knots is " << gApart << " apart under "
 			<< pin << ", against " << bound );
 		answers.push_back( again );
 	}
 
 	/*
-	 * AND NONE OF THEM CRAWLED. The loop is a differenced Newton started at
-	 * gg' = 0 and finishes in 4 or 5 iterations under every pin here
-	 * (M-357); a crawl that converged would still pass the agreement
-	 * above, and is a defect.
+	 * AND NONE OF THEM CRAWLED. The loop is a Gauss-Newton on the exact
+	 * tangent started at gg' = 0 (M-QR-3); a crawl that converged would still
+	 * pass the agreement above, and is a defect.
 	 */
 	for ( Answer const &a : answers )
 		BOOST_TEST( a.iterations <= 8,
-			"a pinned q-driven loop took " << a.iterations << " KINSOL iterations "
+			"a pinned q-driven loop took " << a.iterations << " Gauss-Newton iterations "
 			"and " << a.equilibria << " equilibria: a crawl that converges is a defect "
 			"report, not a slow case" );
 }

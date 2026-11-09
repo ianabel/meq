@@ -5,6 +5,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -21,7 +25,13 @@
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
 
+#include "meq/Dataset.hpp"
+#include "meq/Run.hpp"
+#include "meq/SafetyFactor.hpp"
+#include "meq/SafetyFactorTangent.hpp"
+
 #include "SourceTree.hpp"
+#include "convergence/QDrivenTarget.hpp"
 
 /*
  * PHASE-1 STUDY FOR THE q-DRIVEN SOLVE'S REFINING REPRESENTATION (branch
@@ -1074,6 +1084,92 @@ class ScaledGGPrime : public meq::Profile
 		ClosedGGPrime closed;
 };
 
+class ShapedGGPrime : public meq::Profile
+{
+	public:
+		ShapedGGPrime( double a, double c ) : amplitude( a ), centre( c ) {}
+		// closed( psi ) ( 1 + a ( psi - c ) )
+		double operator()( double psi ) const override { return closed( psi )*( 1.0 + amplitude*( psi - centre ) ); }
+		double prime( double psi ) const override
+		{
+			return closed.prime( psi )*( 1.0 + amplitude*( psi - centre ) ) + closed( psi )*amplitude;
+		}
+		double doublePrime( double psi ) const override
+		{
+			return closed.doublePrime( psi )*( 1.0 + amplitude*( psi - centre ) ) + 2.0*closed.prime( psi )*amplitude;
+		}
+	private:
+		double amplitude, centre;
+		ClosedGGPrime closed;
+};
+
+BOOST_AUTO_TEST_CASE( faceProbe, * boost::unit_test::disabled() )
+{
+	auto closed = std::make_shared<ClosedGGPrime const>();
+	int const level = std::getenv( "QR_LEVEL" ) ? std::atoi( std::getenv( "QR_LEVEL" ) ) : 0;
+	for ( double a : { 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0 } )
+	{
+		Machine machine( level, 2, closed );
+		BOOST_TEST_REQUIRE( machine.solve( closed ) );
+		meq::CriticalPoint const before = solvedAxis( machine );
+		bool const ok = machine.solve( std::make_shared<ShapedGGPrime const>( a, 0.5 ) );
+		meq::CriticalPoint const after = ok ? solvedAxis( machine ) : before;
+		std::printf( "  a = %+.1f: %s, %d its; axis ( %.5f, %.2e ) element %d -> ( %.5f, %.2e ) element %d\n", a,
+		             ok ? "ok" : "FAILED", machine.solver->newtonIterations(), before.radius, before.z,
+		             before.element, after.radius, after.z, after.element );
+	}
+}
+
+/*
+ * THE INNER SOLVE AGAINST ONE KNOT MOVED: production knots (toroidalKnotLabels
+ * of the level's rule), the closed form's values, then the innermost knot
+ * alone moved by a factor -- warm, cold, and by continuation in quarter steps.
+ */
+BOOST_AUTO_TEST_CASE( knotProbe, * boost::unit_test::disabled() )
+{
+	int const level = std::getenv( "QR_LEVEL" ) ? std::atoi( std::getenv( "QR_LEVEL" ) ) : 0;
+	std::size_t const which = std::getenv( "QR_KNOT" ) ? std::atoi( std::getenv( "QR_KNOT" ) ) : 0;
+	auto closed = std::make_shared<ClosedGGPrime const>();
+	Machine probe( level, 2, closed );
+	std::size_t const knots = meq::toroidalKnotCount( meq::plasmaCells( *probe.mesh ), 2 );
+	meq::ToroidalFieldSpline spline( meq::toroidalKnotLabels( knots ) );
+	std::vector<double> base;
+	for ( double label : spline.labels() )
+		base.push_back( closedGSquared( 1.0 - label ) );
+	auto with = [ & ]( double f )
+	{
+		std::vector<double> v( base );
+		v[ which ] *= f;
+		meq::ToroidalFieldSpline s( spline );
+		s.setValues( v );
+		return s.ggPrime();
+	};
+	std::printf( "  %zu knots, moving knot %zu at Psi_N %.4f; gg' on the axis %.4f\n", knots, which,
+	             spline.labels()[ which ], ( *with( 1.0 ) )( 1.0 ) );
+	for ( double f : { 1.001, 1.003, 1.01, 0.99 } )
+	{
+		Machine warm( level, 2, with( 1.0 ) );
+		BOOST_TEST_REQUIRE( warm.solve( with( 1.0 ) ) );
+		bool const okWarm = warm.solve( with( f ) );
+		int const itsWarm = warm.solver->newtonIterations();
+		Machine cold( level, 2, with( f ) );
+		bool const okCold = cold.solve( with( f ) );
+		int const itsCold = cold.solver->newtonIterations();
+		Machine path( level, 2, with( 1.0 ) );
+		BOOST_TEST_REQUIRE( path.solve( with( 1.0 ) ) );
+		bool okPath = true;
+		int itsPath = 0;
+		for ( int k = 1; k <= 4 && okPath; ++k )
+		{
+			okPath = path.solve( with( 1.0 + ( f - 1.0 )*k/4.0 ) );
+			itsPath += path.solver->newtonIterations();
+		}
+		std::printf( "  x %.3f (gg' on the axis %.4f): warm %s in %d, cold %s in %d, four quarter steps %s in %d\n",
+		             f, ( *with( f ) )( 1.0 ), okWarm ? "ok" : "FAILED", itsWarm, okCold ? "ok" : "FAILED",
+		             itsCold, okPath ? "ok" : "FAILED", itsPath );
+	}
+}
+
 BOOST_AUTO_TEST_CASE( innerProbe, * boost::unit_test::disabled() )
 {
 	std::size_t const m = 8;
@@ -1259,4 +1355,64 @@ BOOST_AUTO_TEST_CASE( theMissFallsWithTheKnotsAndTheMesh, * boost::unit_test::di
 			std::printf( "\n" );
 			std::fflush( stdout );
 		}
+}
+
+/*
+ * examples/q-driven-q.dat's PROVENANCE: the q of the closed form
+ * g = 2.20 + 0.55 Psi on the example's own box and mesh, at the example's
+ * knots and three labels between each pair (QDrivenTarget.hpp). Written to
+ * example-q.dat here; the shipped table is a copy with its header.
+ */
+BOOST_AUTO_TEST_CASE( writeTheExampleTarget, * boost::unit_test::disabled() )
+{
+	std::string const example = meq::test::sourcePath( "examples/q-driven.toml" );
+	std::string text;
+	{
+		std::ifstream in( example );
+		std::stringstream buffer;
+		buffer << in.rdbuf();
+		text = buffer.str();
+	}
+	std::string const directory = std::filesystem::absolute( "." ).string();
+	for ( char const *file : { "q-driven-pprime.dat", "q-driven-q.dat" } )
+	{
+		std::size_t const at = text.find( std::string( "\"" ) + file + "\"" );
+		BOOST_TEST_REQUIRE( at != std::string::npos );
+		text.replace( at + 1, std::strlen( file ), meq::test::sourcePath( std::string( "examples/" ) + file ) );
+	}
+	std::vector<double> const knots = meq::test::knotsOf( directory, text );
+	std::printf( "  the example's knots: %zu, Psi_N %.6f to %.6f\n", knots.size(), knots.front(), knots.back() );
+
+	double const g0 = 2.20, g1 = 0.55;
+	{
+		std::ofstream gg( directory + "/example-ggprime.dat" );
+		gg.precision( 17 );
+		gg << 0.0 << " " << g1*g0 << " " << g1*g1 << "\n" << 1.0 << " " << g1*( g0 + g1 ) << " " << g1*g1 << "\n";
+	}
+	auto replaceLine = [ &text ]( std::string const &key, std::string const &with )
+	{
+		std::size_t const at = text.find( "\n" + key );
+		BOOST_TEST_REQUIRE( at != std::string::npos, "no line " << key );
+		std::size_t const end = text.find( '\n', at + 1 );
+		text.replace( at + 1, end - at - 1, with );
+	};
+	replaceLine( "SafetyFactorFile", "GGPrimeFile = \"" + directory + "/example-ggprime.dat\"" );
+	replaceLine( "R0B0", "" );
+	replaceLine( "FluxSurfaces = true", meq::test::surfacesAt( knots, 4 ) );
+	replaceLine( "Prefix", "Prefix = \"example-reference\"" );
+
+	meq::RunOptions options;
+	options.configPath = example;
+	options.configText = text;
+	options.baseDirectory = directory;
+	options.version = "QRefiningStudy";
+	meq::Run run( options );
+	BOOST_TEST_REQUIRE( run.prepare() == meq::Solved );
+	BOOST_TEST_REQUIRE( run.solve() == meq::Solved );
+	std::shared_ptr<meq::Dataset const> const surfaces =
+		run.fluxSurfaces( directory + "/example-reference_surfaces.nc" );
+	BOOST_TEST_REQUIRE( surfaces != nullptr );
+	meq::test::writeTarget( *surfaces, [ g0, g1 ]( double psi ) { return g0 + g1*psi; },
+	                        directory + "/example-q.dat" );
+	std::printf( "  wrote example-q.dat\n" );
 }

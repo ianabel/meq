@@ -230,21 +230,21 @@ exhaustive** — the certified subdivision, a barycentric Bernstein basis with
 Reuter et al.'s convex-hull test, is deliberately not built, because IN-A's acceptance needs the axis and the audit
 and neither needs exhaustiveness.
 
-### Driving by `q( ψ )`: the inversion, and the outer Newton that closes it
+### Driving by `q( ψ )`: the knots, the rows and the Gauss-Newton that solves them
 
 **`ROADMAP.md` item 10.** Every source in this tree takes the toroidal field as
 input and reports `q` as an output; a transport code hands an equilibrium code
-the other way round. `src/meq/SafetyFactor.{hpp,cpp}` is the inversion —
-**MFEM-free, so CI gates it** — and `src/meq/SafetyFactorSolve.{hpp,cpp}` is the
-loop, on KINSOL.
+the other way round. `src/meq/SafetyFactor.{hpp,cpp}` holds the representation
+and the rows and `src/meq/SafetyFactorSolve.{hpp,cpp}` the least squares —
+**both MFEM-free, so CI gates them** — and `src/meq/SafetyFactorTangent.{hpp,cpp}`
+the equilibrium solved at a spline and its exact tangent.
 
 **THE ALGEBRA IS A DIVISION AND THE DIFFICULTY IS ALL GEOMETRY.**
 `q = V′ g ⟨R⁻²⟩/4π²`, so `g = 4π² q/( V′ ⟨R⁻²⟩ )` — one division per surface at
 fixed geometry. What makes it a solver is that `V′` and `⟨R⁻²⟩` are functionals
 of the solution. **The round trip closes**: from a `g` 40% too large everywhere,
-**4 KINSOL iterations and 29 inner solves** recover the closed form to
-**3.6e-10** and `ψ_ax` to **3.5e-10** in double; in single, 2 or 3 iterations
-reach the map's floor with `g` 3.1e-05 to 5.8e-04 out.
+5 Gauss-Newton iterations and 6 equilibria recover the closed form at the knots
+to 1.2e-14 in double (`SafetyFactorSolver`).
 
 **THE TWO NORMALISED FLUXES RUN IN OPPOSITE DIRECTIONS**, and this is the trap
 the whole file is arranged around. `FluxSurfaceFamily`'s `Ψ_N` is **zero** on the
@@ -262,351 +262,148 @@ that runs away. Measured, the damped loop walks the error 0.362 → **0.019** an
 straight back up to 0.50, **the step never shrinking — including where the error
 passes through zero**. It does not stall at the fixed point, it crosses it.
 
-**AND THE NEWTON IS AFFORDABLE BECAUSE THE PROFILE IS FITTED.** `g²` is carried
-as a handful of least-squares coefficients rather than a table, so a differenced
-Jacobian costs a few map evaluations a step against the **5.7 hours** IN-P
-measures for `dGeometry_dpsi` (*Two algorithmic levers*, below). The fit was put there for conditioning — the
-innermost surface's inverted `g` moves **13% for a 1.3%** change in the profile,
-where the extraction is least reliable — and it pays for the Newton as well.
+**`g²` IS CARRIED AT KNOTS THAT FOLLOW THE MESH, AND THE DELIVERED `q`
+CONVERGES TO THE REQUESTED ONE.** `meq::ToroidalFieldSpline` holds `g²`'s
+values at the knots — about two flux surfaces per element across the minor
+radius (`meq::toroidalKnotCount()`), uniform in `ρ`, the innermost and
+outermost one knot spacing from the axis and the edge (`meq::toroidalKnotCut()`)
+— as a not-a-knot cubic in the source's `Ψ`. **In `Ψ`, not `ρ`**: a spline in
+`ρ` makes `gg′` carry `1/ρ` on the axis. Outside the knots `g²` is the end
+cubic continued and the request is not imposed, a layer one knot spacing wide
+that shrinks with `h`. Along the diagonal — `h` halved, the knots following —
+the delivered `g²` converges to the closed form its target was measured from at
+`k + 1`; a fixed-degree fit met it only to the fit's floor, flat in `h`
+(→ **[M-QR-3](MEASUREMENTS.md#m-qr-3)**, **[M-361](MEASUREMENTS.md#m-361)**,
+`QDrivenConsistency`). The rule is measured at `k = 2` and 3; above, the cubic's
+`Δ⁴` would cap the rate, so the count grows faster there, unmeasured.
 
-**KINSOL RATHER THAN A HAND-ROLLED ITERATION, FOR THE LINE SEARCH.** An undamped
-outer Newton takes a first step the **inner** bordered Newton cannot solve at,
-and that inner solve has no globalisation of its own —
-`GradShafranovSolver` refuses every `Globalisation` but `None` while `ψ_ax` is a
-border unknown. So the outer step length is the only control there is. Writing
-the search here would repeat `HDG-NPC-GLOBALISATION-FROM-MEQ.md`'s recorded
-mistake: a monotone test with no sufficient-decrease constant accepts any small
-enough step and creeps instead of failing honestly. `KIN_LINESEARCH` applies
-Armijo.
+**THE SYSTEM IS `q` AT EVERY KNOT AND ONE PIN, AND NO CONDITION GIVES WAY**
+(`meq::SafetyFactorSystem`). `r_i = q_i/q*_i − 1`, `q_i = (V′⟨R⁻²⟩/4π²)_i
+√u_i`, plus the pin's row: `m + 1` rows in `m` unknowns. The `q` rows alone are
+nearly singular along the scale family — the near-null vector moves `ψ_ax` by
+0.49 of `g²`, the continuum's ½ — and each pin's row closes it
+(→ **[M-QR-6](MEASUREMENTS.md#m-qr-6)**, `SafetyFactorScale`).
+`meq::solveLeastSquares` meets the pin **exactly** and the `q` rows in least
+squares within each level of the scale's coordinate `Σ ln u_j`, so every pin
+picks from one curve of answers and the pins compose (`QDrivenScalePin`).
+**Weighted into the least squares instead, a pin trades against the misfit,
+differently for each** — answers 1.5e-6 of `ψ` apart on an inconsistent
+target — and **a square system with one more value at the edge, held by the
+pin, is ill-conditioned**: the edge layer, which `q` does not see, takes the
+scale family's place, a 1.3e-3 `q` residual moved `g²` 5.5%, and Newton crawled
+(→ **[M-QR-2](MEASUREMENTS.md#m-qr-2)**). Both are measured and falsified.
 
-**AND THE MAP MUST BE TOTAL, BECAUSE A THROW ENDS THE LOOP.** KINSOL is C, so
-no exception may unwind through its frames: each of `OuterKINSolver`'s callbacks
-catches, hands KINSOL its unrecoverable flag, and `solveForToroidalField`
-reports the loop as not converged with the map's message
-(`a_map_that_throws_ends_the_loop_and_is_reported`). That denies the line
-search a finite value at the trial point. With the map throwing, the first full
-step lands on `g² < 0` across the whole profile and the run ends **without
-backtracking once**. An inadmissible state returns a residual pointing back to the last
-admissible one instead; it can introduce no spurious root, `g² < 0` not being an
-equilibrium.
+**THE JACOBIAN IS THE LINEARISED SOLVE'S EXACT TANGENT, NOT A DIFFERENCE OF
+SOLVES** (`meq::SafetyFactorEquilibrium`, `SafetyFactorTangent.hpp`). Knot
+`j`'s column: `dR/du_j` along the knot's cardinal `gg′`
+(`NormalisedMHDSource::ggPrimeDerivative()`), one back-solve at the retained,
+bordered linearisation, then `ψ*`, `q*` and `ψ̂` of the tangent
+(`reconstructFields()`) and the family extracted on `ψ̃ ± s δψ̃`, labelled
+`ψ_ax ± s δψ_ax`, **with the ray origin moved by the axis root's own derivative
+`−(dq_h/dx)⁻¹ δq_h` in its element**. Held fixed, the origin misses the
+extraction's dependence on where its rays start, 1e-5 to 4e-5 of the Jacobian
+and a contraction of 1e-3 a step; re-located on each perturbed field, it can
+take the other element's root where the axis sits on a face and difference the
+jump, a contraction of 0.1 a step on `examples/q-driven.toml`. Moved, the
+columns are re-solved differences to 1.2e-7 and the loop is quadratic
+(→ **[M-QR-1](MEASUREMENTS.md#m-qr-1)**, `SafetyFactorSolver`). The pin rows
+are linearised as the quadratures they are read with — the current through
+the bordered current solve's own row and corner, the flux through
+`assembleSourceDerivative()` — to 2e-8 and 8e-8 of re-solved differences.
+**The extraction is most of the cost**: `2m + 1` families of `m` surfaces a
+step (`TODO`, *The q-driven Jacobian's cost is the extraction*).
 
-**AND THE LINE SEARCH HAS A SECOND PRECONDITION, WHICH IS THAT THE JACOBIAN IS
-NOT SINGULAR — AND FAILING IT DOES NOT FAIL, IT HANGS.** `KIN_LINESEARCH`
-interpolates its step length on a quotient whose numerator and denominator both
-carry the directional derivative `⟨F, J p⟩`. A singular `J` makes that zero
-**whatever the step is**, so the quotient is `0/0`, the iterate goes to NaN —
-and **KINSOL then never returns**, because every one of its convergence and
-failure tests is a comparison against NaN and every comparison against NaN is
-false. Measured on a two-variable map with no root at all: still calling the map,
-at NaN, after **two million evaluations**, which on the real loop is two million
-equilibrium solves. It was found as a test case that ran for **36 minutes**
-without finishing.
+**GAUSS-NEWTON BY QR WITH AN ARMIJO SEARCH, NOT KINSOL**
+(`SafetyFactorSolve.hpp`). The system is overdetermined, so KINSOL's square
+Newton does not apply. The step is a column-pivoting Householder QR —
+**never the normal equations**, which would square a conditioning that is
+already the problem's weakest number — and a trial is accepted on a sufficient
+decrease of the merit relative to the linear model's prediction: against the
+merit itself the search would ask for what only a zero misfit gives, and
+stalled there. **A refused trial is a rejected step**: a solve that does not
+converge, a family that cannot be traced, or a spline with `g² ≤ 0` anywhere on
+[0, 1] — which is refused without a solve — has no value to compare. Nothing
+in the loop throws for a reason it can meet; a throw from a callback ends the
+loop and is reported.
 
-**NEITHER OBVIOUS REPAIR REACHES IT, AND THAT IS THE PART WORTH KEEPING.**
-Bounding the linear solver's iteration count does not: `mfem::GMRESSolver`'s own
-back-substitution is `y( i ) /= h( i, i )`, unguarded, and on a singular system
-`h( 0, 0 )` is zero, so it comes back **infinite on the first iteration** and a
-cap changes nothing. Replacing it with a rank-revealing dense solve does not
-either — **even though that is correct and returns a step of exactly zero** —
-because it is `⟨F, J p⟩` and not the step that has gone to zero. Both repairs
-were built and measured before that was understood. **The line search cannot be
-rescued from outside it**, so the degeneracy is detected *before* KINSOL is
-entered, and the Jacobian is cached on its point so KINSOL's own first
-evaluation reuses it and the check costs **no map evaluations at all**.
+**CONVERGED MEANS THE REMOVABLE RESIDUAL REACHED max( TOLERANCE, FLOOR ),
+ROW BY ROW.** In least squares the residual does not go to zero; what a step
+can remove, `J dx`, does. Each row's floor is the solve's accuracy carried
+through the averages — `8 ε_solve` on a `q` row, `4 ε_solve` on a flux or
+current pin, nothing on R0B0's — plus `‖J_i‖ ε ‖x‖`; the tolerance is 1e-10.
+**And the floor is measured where it governs** (→
+**[M-363](MEASUREMENTS.md#m-363)**): the first time the removable residual
+comes within ten floors, and at a stall above them, the point is evaluated
+again from two other warm starts and four standard deviations of each row's
+spread become its floor if larger.
 
-**A ZERO JACOBIAN IS ALSO WHAT AN ALREADY-SOLVED PROBLEM HAS, AND THEY ARE
-OPPOSITE ANSWERS.** `G = identity` makes every point a fixed point, so returning
-at once is right there where refusing would be wrong — and the two are
-**indistinguishable by their Jacobians**, both exactly zero. The *residual* is
-the discriminator, and a refusal keyed on rank alone refuses both. Both cases are
-asserted, side by side, for that reason.
+**EVERY SOLVE IS WARM-STARTED EXPLICITLY, AND THE DRIVER'S DID NOT.**
+`GradShafranovSolver::solve()` re-seeds from the stored initial guess, not the
+last answer: on `examples/q-driven.toml` the fit's loop spent 4 inner
+iterations on every one of its 27 solves, differencing columns 1e-4 away
+included, 110 in all; handed the last state by `setInitialState()`, 88
+(→ **[M-QR-5](MEASUREMENTS.md#m-qr-5)**). `meq::SafetyFactorEquilibrium` does
+that on every evaluation.
 
-**THE ASSERTION IS A COUNT AND NOT A TIMING**, on the same principle as the
-symbolic-factorisation reuse: a wall clock is a measurement about the machine
-where the map-evaluation count is a measurement about the code. A map with no
-root must be refused within one Jacobian and its residual — **5 evaluations, and
-the case now takes 393 µs**. The dense truncated-SVD solve is kept regardless,
-being the right solver for a small dense system and the thing that bounds a
-Jacobian going singular partway through, where the pre-flight check cannot see
-it.
+**ON `ψ̃` AND `q̃`, BECAUSE THE MAP MUST BE SMOOTH IN THE FIELD.** `ψ*` and
+`q*` jump across every element face, so a family traced on them jumps as a
+node changes element (→ **[M-308b](MEASUREMENTS.md#m-308b)**,
+**[M-364](MEASUREMENTS.md#m-364)**); the loop and `_surfaces.nc` extract on the
+continuous pair (`src/meq/ContinuousField.hpp`), which is linear in the state,
+so a tangent's fields are the tangent's own
+(→ **[M-365](MEASUREMENTS.md#m-365)**, **[M-367](MEASUREMENTS.md#m-367)**).
 
-**THE ONE THAT LOOKED LIKE PHYSICS AND WAS ARITHMETIC.** The fit's knots must
-span the whole of `Ψ`, not the family's own range. `FluxSurfaceFamily` refuses to
-extrapolate and is right to — outside the cut a traced surface is made of
-something else — but **a fit is a model, not a measurement**, and evaluating it
-at `Ψ = 0` or `1` is what a model is for. Laying knots only over `[ 0.05, 0.95 ]`
-and letting `SplineProfile` extend them gives a profile differing from the
-closed form exactly where it extends; with a clamp past the knots **the outer
-residual AT THE ANSWER was 1.3e-01 rather than zero** — and both outer methods then converged, correctly, to a
-fixed point that was not the answer, from 40% away and from 5% away alike,
-landing on the same wrong one to six digits.
-`theOuterResidualsConditioningAtTheAnswer` found it and now guards it:
-**4.9e-13**, on a Jacobian whose degeneracy measure is 0.12.
+**AND IT REACHES THE SOLVE FROM A FILE**, as `[source] SafetyFactorFile` with
+one scale pin beside it; `SafetyFactorDegree` is refused by name.
+`examples/q-driven.toml` is the worked example, its target
+`examples/q-driven-q.dat` the `q` of the closed form `g = 2.20 + 0.55Ψ` on that
+box and mesh **at the example's own knots** and three labels between each pair
+(`QRefiningStudy`'s `writeTheExampleTarget`), so the closed form meets every
+row and `DriverAcceptance::theDriverSolvesForTheToroidalField` recovers it to
+1e-7. A target measured at other labels is met only to its own interpolation
+error, which a round trip would then read. **The table must be rewritten when
+the example's mesh or degree changes**, since the knots follow them; tests
+measure their targets at the knots `meq::Run::safetyFactorKnots()` reports
+(`tests/convergence/QDrivenTarget.hpp`).
 
-**A CONVERGED OUTER SOLVE IS NOT EVIDENCE THE ROOT IS THE ANSWER**, which is the
-transferable part. Both failing configurations converged — to 3.5e-07 — and
-reported success. What separated them was measuring the residual at a point
-known independently to be right.
-
-**CONVERGED MEANS THE RESIDUAL REACHED max( TOLERANCE, FLOOR ), AND KINSOL'S
-FLAG DOES NOT SAY WHETHER IT DID.** `mfem::KINSolver::GetConverged()` is
-`flag >= 0`, which counts `KIN_STEP_LT_STPTOL` — no more progress possible — as
-success at any residual. So the outer loop is judged on `‖G(c) − c‖∞` at the
-coefficients it returns, against the larger of its tolerance and the map's own
-round-off floor, `meq::toroidalMapFloor()`: the inner solve's relative accuracy
-`ε` (`newtonTolerance()` of its `NewtonRelativeTolerance`, ten eps at the
-least), times 4 for `g²`'s two averages squared, times 4 standard deviations,
-times the fit pseudo-inverse's row norm `‖P_k ∘ g²‖₂` — the surfaces' errors
-being independent. **The per-average factor of one `ε` is the measured piece**:
-evaluated repeatedly at fixed coefficients from moving warm starts, the noise
-on each surface's `g²` is 0.7–4.6 `ε` against the model's 4, the worst single
-excursion 10 against the floor's 16, over `h = 0.1, 0.05, 0.025`, `k = 2, 3` and
-both fixtures, flat in `h` rather than `eps/h²`, insensitive to the inner
-tolerance at 1e-5 and below in single (the solve is at its floor) and three
-orders under its 1e-12 in double, where it is an upper bound. In single it is
-3.8e-04 on `q-driven.toml` against a worst measured excursion of 1.3e-04. The
-coefficients are `real_t`, so `‖J‖ eps ‖c‖` is added: what an exact map has.
-
-**THE LOOP REPORTED SUCCESS AT A TOLERANCE NOBODY ASKED FOR, AND STALLED WHEN
-ONE WAS ASKED.** Four defects, each measured on `q-driven.toml` in single before
-it was repaired:
-
-* **The tolerance was MFEM's.** A relative tolerance is scaled by `‖F(c₀)‖∞`,
-  and MFEM then takes its own absolute default, `eps^(1/3)`, whenever that is
-  larger — **4.9e-03 in single, 6.1e-06 in double**, every time here. So the
-  loop stopped on `KIN_SUCCESS` at 4.2e-03 with `g²` 1–2% out, reporting
-  *"converged … final norm 0.00502"* beside a requested 1e-9. The absolute
-  tolerance is now set, and moved to the floor as the floor is learned.
-* **The Jacobian was kept from the start.** KINSOL refreshes it every ten
-  iterations by default, so every step used the vacuum guess's: the max norm
-  went 0.244, 0.191, 0.149 … 0.0042 over eight iterations, linearly.
-  `SetMaxSetupCalls( 1 )` makes it a Newton.
-* **The difference step was fixed at 1e-4**, so a column's noise was
-  `1.3e-04/1e-4`: the `(2, 2)` entry read −1.06 where 1e-3 and 1e-2 steps agree
-  on −0.21 to −0.27. It is now `max( 1e-4, 100 × floor )` — the least step at
-  which noise costs a column 1%. **The truncation–noise balance,
-  `floor^(1/3)`, was tried and is worse**: it raised double's step to 4.4e-4,
-  and the loop contracted linearly at 0.19 a step, 8 iterations and 57 solves
-  against 4 and 29.
-* **On `ψ*` and `q*` the map is piecewise smooth, and that is the DG level
-  set, not a choice the extraction makes** (→ **[M-308b](MEASUREMENTS.md#m-308b)**).
-  `ψ*` and `q*` jump across every element face, so `{ψ* = c}` is a union of
-  per-element arcs, and where a ray node crosses a face it moves to the other
-  arc and takes the other element's flux into its weight. On
-  `SafetyFactorSolver`'s fixture one node of the innermost surface does that
-  5.3e-4 below the root's `c₁`: `ψ*` jumps 5.2e-08 and `|R q*|` 8.2e-05
-  relative at the face, the node moves 1.8e-07 and the coefficients step by
-  2.6e-05, with the solve, the axis and the inner Newton's count smooth
-  through it. Every column differenced across it is off by that over `2s`, and
-  no floor sees it, because each residual is right to the floor. **The family
-  jumps by the same mechanism and nothing else** as an input moves
-  (→ **[M-364](MEASUREMENTS.md#m-364)**): over `±1e-3` of a profile, every
-  jump above the noise on the box and on TCV is a node changing element, the
-  axis element and the band never change, and the per-crossing jump falls as
-  about `h^{3.4}` at `k = 2` while crossings come as `1/h`.
-  **So the loop's map and `_surfaces.nc` extract on `ψ̃` and `q̃`** —
-  `Potential::Continuous`, H¹ fields interpolated by moments
-  from `ψ*`, `ψ̂` (on interior edges) and `q*` (`src/meq/ContinuousField.hpp`).
-  A 1.5e-8 difference straddling a crossing is then off by the noise rather
-  than by 0.01–700× the derivative, and the family stays inside the
-  discretisation error of the `ψ*` one (→ **[M-365](MEASUREMENTS.md#m-365)**,
-  **[M-367](MEASUREMENTS.md#m-367)**). M-308b's sweep itself was a
-  scratch harness and is not re-run; the step it found is a face crossing,
-  which no longer moves the map. The step at 1e-4 straddles none on that
-  fixture and finishes quadratically; `theLoopRecoversTheFieldItsTargetWasBuiltFrom`
-  bounds the iterations at 5 so that a straddle elsewhere is seen as the crawl
-  it is.
-* **KINSOL differenced `J p` itself.** MFEM declares its custom linear solver
-  iterative, so KINSOL forms `J p` for the line search's slope after every
-  solve, by one more map evaluation at `u + √eps p` — an equilibrium per
-  iteration spent on a slope made of noise. The dense Jacobian's own product is
-  installed instead.
-
-Together, over both MKLs and one, two and four MKL threads: **4 iterations and
-30 equilibria in every draw** to 1.6e-05–1.4e-04 against a floor of 3.8e-04,
-where the same draws stopped in 8–13 iterations and 33–87 equilibria at
-2.2e-03–4.6e-03 (once 2.9e-04), and three of six failed the reported `q`. A
-step-tolerance stop above the floor is now *not converged* and exits 2
-(`a_stall_above_the_floor_is_not_converged`). **An exception out of the outer
-loop is an outer failure too** (`CLAUDE_DRIVER.md`).
-
-**AND IT REACHES THE SOLVE FROM A FILE**, as `[source] SafetyFactorFile`, with
-`SafetyFactorDegree` and one scale pin beside it (below).
-`examples/q-driven.toml` is the worked example, pinned by `R0B0 = 2.2`, and
-`DriverAcceptance::theDriverSolvesForTheToroidalField` is the acceptance:
-**5 outer iterations, 26 equilibria** in double, recovering a closed-form
-`g = 2.20 + 0.55Ψ` in the coefficients of `g²` (M-357). The pinned loop
-is not measured in single.
-
-**THE TARGET IS MEASURED RATHER THAN INVENTED, WHICH IS THE WHOLE OF WHY THAT
-IS AN ACCEPTANCE.** `examples/q-driven-q.dat` is the `q` of an equilibrium built
-from that closed form on that box **and that mesh**, taken through
-`q = V′g⟨R⁻²⟩/4π²` at 24 surfaces — so the answer is known independently of the
-loop, and the discretisation error is common to the measurement and to the
-inversion, which leaves what the case reads the LOOP's accuracy rather than the
-mesh's. A target invented instead would only have shown that the loop reaches
-**some** fixed point, which is exactly the failure the knot-span defect
-produced.
-
-**ONE SOLVER SERVES EVERY MAP EVALUATION**, through
-`NormalisedMHDSource::setGGPrime()`. Only `gg′` changes between steps, so the
-mesh, the spaces and the forms survive, and each solve is warm-started from the
-previous one's field — rebuilding the solver per evaluation, which is what the
-library test does, would throw that away 43 times. **The trace solver's
-symbolic factorisation is not among what survives**: the trace solver is a local
-of `solve()` (`makeTraceSolver()` inside it), so its symbolic analysis is reused
-across one solve's Newton steps — what `theSymbolicAnalysisIsReusedAcrossNewtonSteps`
-asserts, one analysis per solve — and redone by the next: 37 PARDISO reorderings
-for the 37 solves of `q-driven.toml`
-(→ **[M-352](MEASUREMENTS.md#m-352)**). **The normalisation is deliberately not reset
-by that setter**: `ψ_ax` and `ψ_bnd` are unknowns of the bordered Newton and
-belong to the solve rather than to the profile.
-
-**AND THE SOLVER IS NOT HOLDING THE ANSWER WHEN THE LOOP RETURNS**, which is
-the trap in wiring this to a driver. KINSOL's last call to the map is whatever
-it needed last, and on a converged run that is usually a **differencing
-column** — an equilibrium one step off the answer in one coefficient. Every
-output reads the solver, so the driver re-solves at the converged coefficients
-before writing; without that it would publish a perturbed equilibrium beside
-converged coefficients, agreeing with them to the differencing step and to
-nothing else.
-
-**`meq::ToroidalFieldMap` IS THE PICARD STEP AS AN OBJECT, AND IT IS MFEM-FREE.**
-The map is `c → gg′ → [ solve, extract ] → invert → fit → c`, and only the
-bracketed half needs a mesh — so that half is a **callable the caller supplies**
-and the rest is CI-gated arithmetic beside the inversion it wraps. It owns the
-two obligations that are easy to miss and were both hand-rolled in the test
-first: that the map is **total**, and that the target is asked in the SOURCE's
-`Ψ` while the family is labelled in `Ψ_N`. A null return is how the caller says
-"did not converge" without an exception.
+**AND THE SOLVER IS LEFT HOLDING THE ANSWER.** The loop's last evaluation may
+be a rejected trial or a noise measurement's, and every output reads the
+solver, so the driver evaluates the answer once more before writing.
 
 **THE `.nc` CARRIES THE ANSWER**, as `toroidal_field_driven`,
-`g_squared_coefficients` and `safety_factor_target`. On this route `g` is what
-the run **found**, so there is no `GGPrimeFile` beside the output for a consumer
-to look it up in — the same argument that put `axis_normalised_flux` there.
+`g_squared_knots`, `g_squared`, `toroidal_loop_misfit` and
+`safety_factor_target`; a restart opens the loop at that `g²` read at its own
+knots. On this route `g` is what the run **found**, so there is no
+`GGPrimeFile` beside the output for a consumer to look it up in.
 
 **AND THE SCALE IS NOT DETERMINED BY q, p AND THE BOUNDARY, SO A RUN NAMES
 EXACTLY ONE SCALAR THAT IS.** Fixed-boundary equilibria with the same `p(Ψ_N)`
 and `q(Ψ_N)` form a one-parameter family in the torus as in the cylinder —
-VMEC's `PHIEDGE` is the same fact, and here `Φ_edge = 2π(ψ_ax − ψ_bnd)∫q dΨ_N`.
-Unpinned, the loop's outer Jacobian has one near-null direction, the scale
-(`g ∝ ψ_ax`), at `σ_min/σ_max` 1e-4 (degree 2) to ~1e-6 (degree 4), and the
-member is selected only because a polynomial of degree `d` cannot follow the
-family: held 10% along it, the least-squares residual falls with the degree
-and not with the mesh (`SafetyFactorScale`, → **[M-353](MEASUREMENTS.md#m-353)**).
-That is ill-posed, and on a measured `q` it does not converge. So `[source]`
-takes **exactly one** of `R0B0` (`g` on the boundary, `c₀ = R0B0²` held and out
-of the unknowns), `ToroidalFlux` (the delivered `∫g/R dA`, a row) and `PlasmaCurrent`
-(`μ₀ I_p`, a row), and refuses none or two, naming the keys
-(`meq::PinnedToroidalFieldMap`). `ToroidalFieldGuess` and `PsiAxis` stay
-starting values; beside `R0B0` the guess is refused, the loop opening at `R0B0`.
-
-**THE DEGREE-`d` FIT MAKES THE q-DRIVEN SOLVE INCONSISTENT, AND THAT IS OPEN.**
-A target whose `g²` is not a polynomial of the degree is met only to the fit's
-floor, and the floor does not fall with the mesh: 11.8% in `q` at degree 2 and
-1.2% at degree 3, flat over three levels of `h`, against a reference good to
-1e-7 (→ **[M-361](MEASUREMENTS.md#m-361)**). `QDrivenConsistency` is red for
-it. What replaces the fit is a `g²` that refines with the discretisation,
-matched to `q` at every knot and solved by Newton on the linearised solve's
-exact tangent; the pin then makes the system square with no `q` condition
-giving way. It waits on the continuous extraction (`manta/shape-derivative`)
-and the linearised solve (`manta/linearised-solve`) — `TODO`, *The q-driven
-solve is inconsistent*. **Everything below about which condition gives way is
-interim.**
-
-**ONE q CONDITION GIVES WAY TO KEEP THE SYSTEM SQUARE, AND IT IS THE SAME ONE
-UNDER EVERY PIN.** In the fit's orthonormal coordinates `y = Rc` it is the
-highest row `y_d`: by `σ_min` it is the best of every candidate under every
-pin at degrees 2 and 4 — the axis limit, a misfit `∝ Ψ^d`, ties it under
-`R0B0` at degree 2 and loses everywhere else, by 60–300× at degree 4 — and the
-pinned systems are 100× (degree 2) to 10⁴× (degree 4) better conditioned than
-the free one (→ **[M-355](MEASUREMENTS.md#m-355)**). `c₀` enters no
-solve, so under a row pin only `y_0` sees it and dropping `y_0` is exactly
-singular. **Sameness is not a nicety**: where the target's `g²` is not a
-polynomial of the degree, the misfit lies along whichever condition gave way,
-so two pins dropping different ones pose different problems — mutated, 13% of
-`ψ` apart on `QDrivenScalePin`'s fixture. With one choice, an equilibrium
-solved under any pin is returned by the other two set to what it reads, to
-1e-10 (→ **[M-357](MEASUREMENTS.md#m-357)**); `QDrivenScalePin`
-asserts that composition, and every q-driven `.nc` reports all three of its
-answer's scalars for it.
-
-**A REFUSED POINT IS NEITHER ACCEPTED NOR DIFFERENCED.** The map's refusal
-residual points back at the last admissible point, and when that point is a
-differencing column a step away it reads smaller than the iterate's own: the
-line search accepted one at 0.16 against 0.50 and the loop sat on it, in
-single, where the 100-floor step reaches fields whose outermost surface cannot
-be traced (double fails at the same `gg′`). So the pinned map scales a refusal
-to twice the largest residual it has returned, and a refused side of a
-Jacobian column makes the column one-sided (`OuterNewtonOptions::mapRefused`,
-→ **[M-358](MEASUREMENTS.md#m-358)**).
-
-**THE OUTER JACOBIAN IS DIFFERENCED IN THE FIT'S ORTHONORMAL COORDINATES,
-AND ITS FLOOR IS MEASURED THERE.** The map's output is `y = Qᵀg²/√N`, so its
-noise is uniform in `y` and `R⁻¹` amplifies it into the monomial coefficients
-— 3.5e-3 against 1.5e-5 at degree 4 in single. A max-norm floor over `c` sized
-every step and every stopping test to the top coefficient's noise: in single
-the pinned loop's floor was 6.2e-4 and the answers 4e-5 apart. Differenced
-along `R⁻¹` (`OuterNewtonOptions::differenceBasis`) against
-`toroidalMapFloorOrthonormal()`, within 2.5× of the noise measured, the floor is
-2.2e-5 and the answers 5e-7 to 1.1e-6 apart, now at the map's own noise
-(→ **[M-359](MEASUREMENTS.md#m-359)**). `SafetyFactorScale` differences the
-same way, which its free `σ_min` needs in single.
-
-**AND THE FLOOR MODEL IS CHECKED AGAINST THE MAP'S MEASURED NOISE, BECAUSE IT
-IS NOT AN UPPER BOUND.** On the box the model sits 2.5× over the noise; on
-`QDrivenCurvedBoundary`'s Miller boundary in single the noise is 2.2× over the
-model, 1.4e-5 per orthonormal coordinate against 6.3e-6, and the loop stalled
-at 2.70e-5 against a threshold of 2.58e-5 — a stopping test asking for less
-than the map resolves (→ **[M-363](MEASUREMENTS.md#m-363)**). So where
-the floor is what the loop is judged on, the first residual within ten floors
-triggers a measurement — that point evaluated again from two other warm
-starts — and four standard deviations of it become a floor if larger; a
-stall above the floor is measured the same way before it is called a
-failure. It is the warm-start noise that is measured, not a jitter that is a
-function of the point (M-308b's face crossings are the map, not noise), and a
-stall above the measured noise stays a failure.
-`a_stall_at_the_maps_measured_noise_is_converged` asserts both.
-
-**THE FLUX PIN HOLDS THE DELIVERED FLUX, AS A ROW BESIDE THE BORDERED NEWTON.**
-`ToroidalFlux` is the equilibrium's own `∫_plasma g/R dA`, read off the solved
-state with the iterate's `g²` (`GradShafranovSolver::integrateOverDomain()`),
-not `2π(ψ_ax − ψ_bnd)∫₀¹q dΨ` of the target: the two agree only in the
-continuum, and on `fixed-d-tcv` they differ by 3.5% (→ **[M-362](MEASUREMENTS.md#m-362)**).
-Reading `g` puts `c₀` into the row, and it is better conditioned than the
-span row was, `σ_min` 0.755 against 0.578. Holding `ψ_ax` in a plain inner
-solve instead is no better conditioned than the span row (0.594 against
-0.578) and is the outer closure `CLAUDE_DECLINED.md` records falsified
-(*Fixing `ψ_ax`, or closing it outside the solver*).
-
-**THE CURRENT PIN IS A ROW TOO, AND THE PROFILE SCALE STAYS ONE.**
-`PlasmaCurrent`'s border elsewhere multiplies `p′` and `gg′` together: inside
-the q loop it converges, and to the wrong member — asked for the reference's
-own current it returns `α = 1.35`, a pressure nobody gave, and a `g²` the
-equilibrium does not have, its `q` 4% off the target
-(→ **[M-356](MEASUREMENTS.md#m-356)**). So beside `SafetyFactorFile`
-`makeSolver()` sets no current border, the Picard pre-stage takes no current
-target, and the row reads `GradShafranovSolver::deliveredPlasmaCurrent()` —
-the current border's own quadrature, over `Ω_h`.
+VMEC's `PHIEDGE` is the same fact (→ **[M-353](MEASUREMENTS.md#m-353)**). So
+`[source]` takes **exactly one** of `R0B0` (`g²` continued to the boundary),
+`ToroidalFlux` (the delivered `∫g/R dA`) and `PlasmaCurrent` (`μ₀ I_p`), and
+refuses none or two (`meq::ScalePin`). `ToroidalFieldGuess` and `PsiAxis` stay
+starting values. **The flux pin holds the delivered flux**, the equilibrium's
+own `∫_plasma g/R dA` and not `2π(ψ_ax − ψ_bnd)∫q dΨ` of the target, which
+differ by 3.5% on `fixed-d-tcv` (→ **[M-362](MEASUREMENTS.md#m-362)**); **the
+current pin is a row too and the profile scale stays one**: a current border
+rescales `p′` and `gg′` together and returns a pressure nobody gave
+(→ **[M-356](MEASUREMENTS.md#m-356)**). Of the three, the current closes the
+scale weakest and the flux strongest, within a factor of ten either way
+(M-QR-6).
 
 **A CURVED BOUNDARY'S FAMILY IS TRACED THROUGH THE BAND, AND THE LOOP'S HAS TO
-BE TOO.** `Ω_h` is inscribed in `Γ`, so the outer surfaces of a curved
-fixed-boundary run lie partly outside the mesh; the write phase continues the
-field there by the transfer lift, and the loop must as well: traced without
-it, every family on `fixed-d-tcv`'s MXH boundary fails at its outer surfaces,
-every map evaluation is refused, and the loop stops on a Jacobian of exactly
-zero. Both go through `Run::Impl::extractFamily()`. `QDrivenCurvedBoundary`
-is the round trip on a Miller boundary, the target measured from a closed-form
-`g` on the same mesh, under `R0B0`: 5 KINSOL iterations, 26 equilibria, `g²` recovered to
-eight digits (M-357). Posed on `fixed-d-tcv` with
-a measured `q` it converges under every pin, in 5 KINSOL iterations and
-26 to 36 equilibria with none refused, to one `g²` (M-357); unpinned it
-failed on the scale (M-353).
+BE TOO**, perturbed families included: `Ω_h` is inscribed in `Γ`, so the outer
+surfaces lie partly outside the mesh, and traced without the transfer lift
+every evaluation is refused (M-353). `QDrivenCurvedBoundary` is the round trip
+on a Miller boundary.
 
-**WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a
-rectangle with one closed plasma rather than a machine, and nothing has yet
-driven `q` on the limited tokamak, where the support moves and `ψ_bnd` is an
-unknown.
+**WHAT IS OPEN.** The inner bordered Newton stalls on a sharp `gg′` near the
+axis that continuation reaches (`InnerSolveStall`, red, `TODO`); the misfit at
+the knots does not fall monotonically on the box, the innermost knot sitting
+on a surface about one element across at every level (`TODO`); and nothing has
+driven `q` on a limited or diverted plasma, where the support moves and `ψ_bnd`
+is an unknown.
 
 ### IN-5: an open surface is not a loop, and a periodic basis cannot fit one
 

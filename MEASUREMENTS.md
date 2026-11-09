@@ -25751,12 +25751,13 @@ end cubic extrapolated over `Ψ_N ∈ [0, 0.05]` turns a 1% node change into
 about a 60% change of `gg′` on the axis. A Newton step along the near-null
 direction puts a current sheet in the edge layer the same way.
 
-**The axis on a face stalls the inner solve.** On the box at `NZ = 8` the
-axis lies on `z = 0`, a row of faces at every level; the warm bordered
-Newton plateaus (residual 1.8e-3 for 60 iterations) as the located axis
-changes element (73 to 56). At `NZ = 9` (level 0 only: refinement brings the
-row back) or with every vertex moved by `0.03 sin(π(z + 0.6)/1.2)` it does
-not. QDrivenConsistency's box is `NZ = 8`.
+**The axis on a face was suspected and is falsified** (M-QR-8). On the box at
+`NZ = 8` the axis lies on `z = 0`, a row of faces at every level, and a stalled
+inner solve above changed its located axis's element (73 to 56); but smooth
+changes of `gg′` that carry the axis across that row converge in 5 or 6
+iterations, on that mesh as on one moved off it. What stalls the inner solve
+is a sharp `gg′` near the axis -- the square system's steps and single-knot
+moves put one there -- which M-QR-8 measures.
 
 **And the solve does not warm-start itself.** `solve()` re-seeds from the
 stored initial guess: re-solving an unchanged profile took 4 iterations, and
@@ -25766,7 +25767,8 @@ driver's q loop calls `solve()` alone.
 **Reproduce.** `QR_NZ=9 QR_SYMMETRIC=1 QR_VERBOSE=1 QR_MAXLEVEL=0 QR_COUNTS=8
 ./QRefiningStudy --run_test=theMissFallsWithTheKnotsAndTheMesh` (add
 `QR_START_EXACT=1`); without `QR_NZ`/`QR_SYMMETRIC` for the moved mesh;
-`--run_test=innerProbe`; `--run_test=warmProbe` with `QR_COLD=1`.
+`--run_test=innerProbe`; `--run_test=warmProbe` with `QR_COLD=1`;
+`--run_test=faceProbe` for the face row.
 
 ### M-QR-3
 
@@ -25828,3 +25830,141 @@ is about 27 s against 411 s here.
 **Reproduce.** `QR_LS=1 QR_VERBOSE=1 QR_COUNTS=8,16 QR_MAXLEVEL=2
 ./QRefiningStudy --run_test=theMissFallsWithTheKnotsAndTheMesh`; the diagonal
 with `QR_DIAGONAL=1 QR_COUNTS=8`; `QR_ORDER=3` for `k = 3`; `QR_AXISNODE=1`.
+
+### M-QR-4
+
+**THE KNOTS: ABOUT TWO PER ELEMENT ACROSS THE MINOR RADIUS, AND THE LAYERS THE
+REQUEST IS NOT IMPOSED ON ONE KNOT SPACING WIDE.** `meq::toroidalKnotCount()`
+and `meq::toroidalKnotCut()`, measured through `QDrivenConsistency` (M-QR-7)
+and the study (M-QR-3).
+
+`m = ceil( 2 sqrt( cells/π ) )`, `cells` the mesh's area in cells (a triangle
+one half): 10, 19 and 37 knots on the q-driven box at levels 0, 1 and 2 —
+the study's diagonal of 8, 16 and 32 knots, 9.6× and 8.3× a halving
+(M-QR-3), is the same rule within a knot. The knots are `ρ_j = j/( m + 1 )`,
+so the layers inside the innermost and outside the outermost, where `g²` is
+the end cubic continued and `q` is not imposed, are one knot spacing and
+shrink as `h`: `Ψ_N ∈ [0.0083, 0.826]` at level 0, `[0.0025, 0.9025]` at
+level 1. **A fixed cut does not converge to the request**: what lies outside
+it is never imposed, and its extrapolation is over a width the refining knots
+make ever more spacings wide — a cubic carried 0.05 in `Ψ_N` past knots 0.011
+apart, an amplification near `(L/Δ)³`; the innermost knot moved by 1% then
+moved `gg′` on the axis by 60% (M-QR-2).
+
+The g² error over the cut on the q-driven box, k = 2, against the study's
+fixed cut `[0.05, 0.95]` (Gauss-Newton, the cut's own error measure):
+
+| level | fixed cut, m = 8·2^level | the rule |
+|---|---|---|
+| 0 | 4.99e-4 | 1.35e-3 (10 knots) |
+| 1 | 5.20e-5 | 7.37e-5 (19 knots) |
+
+The rule's level-0 error is the larger, over the larger range: its cut reaches
+`Ψ_N = 0.0083` and `0.826` where the fixed one stops at 0.05 and 0.95.
+
+### M-QR-5
+
+**THE DRIVER'S q-DRIVEN LOOP DID NOT WARM-START ITS SOLVES.**
+`GradShafranovSolver::solve()` re-seeds from the stored initial guess, not the
+last answer. `examples/q-driven.toml` through the fit's KINSOL loop (`1e8a3ad`
+plus a probe printing `newtonIterations()` per map evaluation), double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`:
+
+| | inner Newton iterations per solve | total over 27 solves | wall |
+|---|---|---|---|
+| as shipped | 5, then 4 at every one -- differencing columns 1e-4 away included | 110 | 10.9 s |
+| `setInitialState( last state )` before each | 5, then mostly 3 | 88 | 10.4 s |
+
+KINSOL's iterations, map evaluations and the answer were unchanged.
+`meq::SafetyFactorEquilibrium` hands every solve the last admitted state:
+the example now takes 32 inner iterations over 7 equilibria. In the study
+harness an unchanged profile re-solved in 4 iterations, and in 0 so started.
+
+**Reproduce.** `runs/q-refining-fit/warm/` (`before.log`, `after.log`); the
+probe was a temporary block in `Run.cpp` behind `MEQ_PROBE_WARM`, not kept.
+
+### M-QR-6
+
+**THE q ROWS LEAVE THE SCALE FREE AND EACH PIN CLOSES IT; MET EXACTLY, THE
+PINS COMPOSE, AND WEIGHTED INTO THE LEAST SQUARES THEY DO NOT.**
+`SafetyFactorScale`, `QDrivenScalePin`, double.
+
+**(a) The scale** (`SafetyFactorScale`, the closed form `g = 2.20 + 0.55Ψ` on
+the standard box, `k = 2`; the `q` rows in `ln u`, relative; each pin row
+relative, unweighted):
+
+| `n` | knots | `q` rows `σ_min` | next | `σ_min/σ_max` | `d ln ψ_ax/d ln g²` along it | `σ_min` with R0B0 | ToroidalFlux | PlasmaCurrent |
+|---|---|---|---|---|---|---|---|---|
+| 8 | 10 | 1.38e-5 | 0.697 | 4.1e-8 | 0.487 | 3.84e-2 | 1.47e-1 | 1.08e-2 |
+| 12 | 14 | 6.17e-3 | 0.647 | 9.6e-6 | 0.488 | 3.49e-2 | 1.27e-1 | 1.12e-2 |
+| 16 | 19 | 9.46e-3 | 0.627 | 8.1e-6 | 0.484 | 3.42e-2 | 1.11e-1 | 1.21e-2 |
+
+The near-null direction is the scale (the continuum's ½); each pin lifts
+`σ_min` above it, the current weakest — a third of R0B0 — and the flux
+strongest; `|pin · v|/|pin|` is 0.015, 0.07 and 0.004. The near-null value
+itself does not fall monotonically with the mesh, so nothing is asserted of
+its size.
+
+**(b) Composition** (`QDrivenScalePin`, level 0, the example's table times
+`1 + 0.2Ψ³`, a misfit of 3.6e-4 at the knots): the base under PlasmaCurrent,
+then each pin set to what it reads.
+
+| pin | `R0B0` read | `ψ` from the base | `g²` from the base |
+|---|---|---|---|
+| weighted 1e3 into the least squares: R0B0 | 2.114649089 | over 1e-6 (red) | 1.57e-6 |
+| weighted: ToroidalFlux | 2.114648043 | over 1e-6 (red) | — |
+| met exactly, least squares in levels of `Σ ln u` | 2.114643916, all three | under 1e-6 | under 1e-6 |
+
+Weighted, the pin row trades against the misfit, differently for each pin.
+
+**Reproduce.** `MKL_NUM_THREADS=1 ./SafetyFactorScale`, `./QDrivenScalePin`.
+
+### M-QR-7
+
+**`QDrivenConsistency`: THE DELIVERED `g²` CONVERGES 18× A HALVING AT k = 2
+AND 11× AT k = 3; THE MISFIT AT THE KNOTS DOES NOT FALL AT k = 2.** Double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, the reference level 2 at `k = 3` read at
+each rung's knots, `R0B0 = 2.2`, the box at `NZ = 8`.
+
+| level, `k` | knots | `max|g²/g²_exact − 1|` on the cut | misfit at the knots | Gauss-Newton steps / equilibria | wall |
+|---|---|---|---|---|---|
+| 0, 2 | 10 | 1.347e-3 | 5.37e-6 | 6 / 7 | 7.0 s |
+| 1, 2 | 19 | 7.374e-5 | 1.37e-4 | 6 / 7 | 48.6 s |
+| 0, 3 | 10 | 1.127e-3 | 6.97e-6 | 6 / 7 | 9.4 s |
+| 1, 3 | 19 | 1.006e-4 | 2.99e-6 | 6 / 7 | 63.8 s |
+
+Removable residual by step at level 1, `k = 2`: 0.97, 0.41, 0.12, 1.6e-2,
+2.8e-4, 7.7e-8, 5.5e-12 — quadratic from 1e-2. The suite case, 2 m 17 s.
+`examples/q-driven.toml` (19 knots, its table at its knots): 6 steps, 7
+equilibria, 32 inner iterations, the closed form recovered, 60 s of which
+the 273 extractions are 39 s and the 19 tangents 4 s.
+
+### M-QR-8
+
+**THE BORDERED INNER NEWTON STALLS ON A SHARP `gg′` NEAR THE AXIS THAT
+CONTINUATION REACHES; THE AXIS ON A FACE ROW DOES NOT STALL IT.**
+`QRefiningStudy`'s `knotProbe` and `faceProbe`, `InnerSolveStall`, double.
+
+**(a) One knot moved** (production knots, level 0, `k = 2`, 10 knots, the
+closed form at them; the innermost knot at `Ψ_N = 0.0083` times a factor):
+
+| factor | `gg′` on the axis | warm | cold | four quarter steps |
+|---|---|---|---|---|
+| 1.000 | 1.156 | | | |
+| 1.001 | 1.417 | 6 | 6 | 19 |
+| 1.003 | 1.939 | **60, no** | **60, no** | 28 (symmetric mesh); no (moved mesh) |
+| 1.010 | 3.765 | 60, no | 60, no | no |
+| 0.990 | −1.452 | 60, no | 60, no | no |
+
+The failing solves plateau: the residual between 1e-2 and 4e-2 for 60
+iterations. `InnerSolveStall` asserts the 1.003 case converges warm within 15
+iterations, its continuation the precondition.
+
+**(b) The face row** (`gg′` times `1 + a( Ψ − ½ )`, warm from the closed form,
+level 0): on the symmetric `NZ = 8` box, `a` = 0.5 to 4 and −0.5 to −2, 5 to
+10 iterations, the axis moving across `z = 0` from element 56 to 73 at
+`a = −2` in 6; the same on `NZ = 9` and on the moved mesh.
+
+**Reproduce.** `QR_SYMMETRIC=1 ./QRefiningStudy --run_test=knotProbe` (and
+without `QR_SYMMETRIC` for the moved mesh), `--run_test=faceProbe` with
+`QR_NZ=9`; `./InnerSolveStall`.

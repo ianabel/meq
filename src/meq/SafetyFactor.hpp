@@ -2,6 +2,7 @@
 #define MEQ_SAFETY_FACTOR_HPP
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "meq/FluxFamily.hpp"
@@ -33,17 +34,20 @@
  * anything: given a family it is one division per surface.
  *
  * WHAT MAKES IT A SOLVER IS THAT `V'` AND `< R^-2 >` ARE FUNCTIONALS OF THE
- * SOLUTION, and the solution depends on `g`. So the loop is
+ * SOLUTION, and the solution depends on `g`. So `g` is an UNKNOWN: it is
+ * carried as its values `u_j = g^2` at a set of surfaces -- the KNOTS, which
+ * refine with the mesh -- interpolated by a not-a-knot cubic in the source's
+ * `Psi` (ToroidalFieldSpline), and the conditions are `q` at every knot and
+ * one scale pin (SafetyFactorSystem). They are solved together by
+ * Gauss-Newton (SafetyFactorSolve.hpp) on the linearised solve's EXACT
+ * tangent: one bordered back-solve per knot, and the extraction's response
+ * to each tangent field (SafetyFactorTangent.hpp). No equilibrium is
+ * re-solved to form a Jacobian.
  *
- *     solve -> extract the surfaces -> invert -> rebuild gg' -> solve
- *
- * and the fixed point is an equilibrium whose own `q` is the one asked for.
- * That is a Picard iteration on the geometry, and it is deliberately the
- * halfway house rather than a Newton: making it quadratic needs
- * `d( V', < R^-2 > )/d psi`, which `CLAUDE_INVERSION.md`'s IN-P measures at
- * about **5.7 hours per Jacobian** by differencing, since it is `nFieldDOF`
- * complete re-extractions of the whole surface family. The shape derivative is
- * what would make that affordable and it is not built. See section 5.
+ * THE DELIVERED q CONVERGES TO THE REQUESTED q AS h AND k REFINE, which is
+ * the contract (MEASUREMENTS.md M-QR-3): the knots follow the mesh
+ * (toroidalKnotCount()), and so does the part of the request near the axis
+ * and the edge that no knot sees (toroidalKnotFamily()).
  *
  *
  * 2. THE TWO NORMALISED FLUXES ARE OPPOSITE, AND THIS IS THE TRAP
@@ -186,254 +190,126 @@ namespace meq
 	                                EdgeExtension extension
 	                                    = EdgeExtension::Clamp );
 
-	/**
-	 * `g^2` as a polynomial in the SOURCE's `Psi`, by least squares.
-	 *
-	 * Returns the coefficients `c` of `g^2 = sum_j c_j Psi^j`, ascending, so
-	 * `gg' = ( 1/2 ) sum_j j c_j Psi^(j-1)` is exact and analytic rather than a
-	 * slope rule applied to a point cloud.
-	 *
-	 * **THIS IS WHAT MAKES THE OUTER LOOP RUN, AND THE REASON IS THE
-	 * CONDITIONING OF THE INVERSION AND NOT A TASTE FOR SMOOTH PROFILES.**
-	 * `g = 4 pi^2 q/( V' < R^-2 > )` divides by extracted geometry, and near the
-	 * axis a small change in the equilibrium moves `V'` by much more than it
-	 * moves `g` -- measured on the loop of `SafetyFactorSolver`, the innermost
-	 * surface's inverted `g` moved **13%** for a **1.3%** change in the profile
-	 * that produced it. That is exactly where the extraction is least reliable,
-	 * which is why the inner cut exists at all.
-	 *
-	 * Interpolating the cloud and differentiating it turns that into SHAPE: the
-	 * loop's second iterate came back non-monotone in `g`, so `gg'` changed
-	 * sign, and the next solve did not converge. A low-order fit cannot express
-	 * that, which is the point -- it is the same reason a production code
-	 * carries its profiles in a basis rather than as a table it differentiates.
-	 *
-	 * @param degree of the polynomial in `Psi`. Two or three is the usual; the
-	 *        fit is refused if the family has fewer surfaces than coefficients.
-	 * @throws std::invalid_argument if @a degree is zero, if there are fewer
-	 *         surfaces than `degree + 1`, or if the labels are not ascending.
-	 */
-	std::vector<double> fitToroidalFieldSquared( ToroidalField const &field,
-	                                             unsigned int degree );
 
 	/**
-	 * THE ROUND-OFF FLOOR OF ONE PICARD STEP, in the units the outer Newton
-	 * measures its residual in: the max norm of `G( c ) - c` over the
-	 * coefficients of `g^2`.
+	 * THE KNOT COUNT FOR A MESH: ABOUT TWO SURFACES PER ELEMENT ACROSS THE
+	 * MINOR RADIUS.
 	 *
-	 * **THE MAP IS A WHOLE EQUILIBRIUM AND A SURFACE EXTRACTION, SO IT IS
-	 * NOISY, AND NO RESIDUAL BELOW ITS NOISE MEANS ANYTHING.** Evaluated twice
-	 * at the same coefficients from two different warm starts, it comes back
-	 * different -- by up to **1.3e-04** in single on `examples/q-driven.toml`,
-	 * and by **3.7e-14** in double -- because the inner solve stops at a
-	 * relative accuracy @a solveAccuracy and not at the exact discrete
-	 * solution. This is that noise carried through the steps that make the
-	 * map, and each step is linear in it:
+	 * @a cells is the plasma's area in units of a cell -- a quadrilateral
+	 * counts one and a triangle one half, so that a triangulated rectangle
+	 * reads as its rectangle -- and `sqrt( cells/pi )` is then the number of
+	 * elements across the minor radius of a disc of that area. The knots are
+	 * twice that, so their spacing `Delta rho` follows `h`.
 	 *
-	 *     V', < R^-2 >   each in error by about  solveAccuracy,  relatively
-	 *     g^2 = ( 4 pi^2 q/( V' < R^-2 > ) )^2   so  2( 1 + 1 ) = 4 x that
-	 *     c = P g^2      P the least-squares fit's pseudo-inverse, so
-	 *                    coefficient k carries || P_k o g^2 ||_2 of it
+	 * WHY TWO AND WHY THE CUBIC IS ENOUGH TO k = 3. The delivered `g^2`'s
+	 * error is the discretisation's, `O( h^( k + 1 ) )` in the averages, plus
+	 * the spline's, `O( Delta^4 )`: with `Delta` proportional to `h` the
+	 * spline keeps pace to `k = 3`. Above that the spline would cap the
+	 * rate, so the count grows as `( a/h )^( ( k + 1 )/4 )` there -- measured
+	 * at `k = 2` and 3 only (MEASUREMENTS.md M-QR-3).
 	 *
-	 * -- the last a 2-norm because the surfaces' errors are independent, which
-	 * is measured rather than assumed: the three coefficients' noise stands
-	 * in the ratio of these row norms to within a factor of three, on both
-	 * fixtures below. And the floor is FOUR of
-	 * those standard deviations, because it is a CONVERGENCE test: the exact
-	 * root, evaluated once, must read converged.
+	 * At least six, at most 128.
 	 *
-	 *     floor = 4 x 4 x solveAccuracy x max_k || P_k o g^2 ||_2
-	 *
-	 * **THE PER-AVERAGE FACTOR IS THE ONE PIECE THAT IS MEASURED AND NOT
-	 * DERIVED**, and it is said so rather than hidden in the 16: an average's
-	 * relative error is "about" the solve's because both are round-off of the
-	 * same field, and how many units of it survive the tracer is a property of
-	 * the conditioning nothing here can compute. Measured, as the noise's
-	 * standard deviation over each coefficient's propagation and in units of
-	 * the single build's `solveAccuracy = 10 eps`, at the answer:
-	 *
-	 *     q-driven.toml   h = 0.1, 0.05, 0.025   0.7-1.2, 1.5-2.0, 1.3-2.4
-	 *                     k = 3 at h = 0.05      1.4-2.1
-	 *     SafetyFactorSolver, n = 24             1.5-4.6
-	 *
-	 * against the model's 4, with the worst single excursion over 11 to 23
-	 * draws at **10.0** against the floor's 16. In double the inner Newton's
-	 * last step squares its residual, so the map is three orders quieter
-	 * than its 1e-12 tolerance says and this is an upper bound there -- which
-	 * every outer tolerance in the tree already sits above.
-	 *
-	 * @param solveAccuracy the RELATIVE accuracy each equilibrium is solved to,
-	 *        which for MEQ's Newton is `meq::newtonTolerance()` of the
-	 *        relative tolerance it was given: ten eps at the least.
-	 * @throws std::invalid_argument as fitToroidalFieldSquared() does.
+	 * @throws std::invalid_argument for a non-positive cell count or order.
 	 */
-	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,
-	                         double solveAccuracy );
+	std::size_t toroidalKnotCount( double cells, int order );
+
+	/// The knots as a family's cut: how many surfaces, and the cut in `Psi_N`.
+	struct ToroidalKnotCut
+	{
+		std::size_t surfaces = 0;
+		double innerCut = 0.0;
+		double outerCut = 0.0;
+	};
 
 	/**
-	 * THE FIT'S ORTHONORMAL COORDINATES: `R` with `y = R c`, from the QR of
-	 * fitToroidalFieldSquared()'s design matrix on @a labels (the family's
-	 * `Psi_N`, the design in the source's `Psi`), scaled by `1/sqrt( N )` so
-	 * that `y` is the coefficient vector's discrete L2 coordinate over the
-	 * surfaces. Upper triangular, `( degree + 1 )^2`, row-major.
+	 * THE KNOTS AS A FAMILY: @a knots surfaces at `rho_j = j/( knots + 1 )`,
+	 * `j = 1 .. knots`, so the cut is one knot spacing from the axis and one
+	 * from the edge -- `meq::FluxFamilyOptions` with these, spaced in `rho`,
+	 * labels them.
 	 *
-	 * **THESE ARE THE COORDINATES THE q-DRIVEN MAP'S NOISE IS UNIFORM IN.**
-	 * The fitted `y` is `Q^T g^2/sqrt( N )`, so each coordinate's noise is at
-	 * most the surfaces' own; in the monomial coefficients `R^-1` multiplies
-	 * it, by 1/R_dd in the highest -- 3.5e-3 against 1.8e-4 between degrees 4
-	 * and 2 in single (MEASUREMENTS.md M-358, M-359).
+	 * **THE PART OF THE REQUEST NO KNOT SEES SHRINKS WITH THE MESH.** Inside
+	 * the innermost knot and outside the outermost, `g^2` is the end cubic
+	 * continued and the requested `q` is not imposed; that layer is one
+	 * `Delta rho`, which the knot count makes proportional to `h`, so the
+	 * unhonoured part of the request vanishes under refinement. A fixed cut
+	 * does not: there the continuation is extrapolated over a width that the
+	 * refining knots make ever more knot spacings wide (MEASUREMENTS.md
+	 * M-QR-2, M-QR-4).
 	 *
-	 * @throws std::invalid_argument as toroidalMapFloor() does.
+	 * @throws std::invalid_argument for fewer than four knots.
 	 */
-	std::vector<double> fitOrthonormalFactor( std::vector<double> const &labels,
-	                                          unsigned int degree );
+	ToroidalKnotCut toroidalKnotCut( std::size_t knots );
+
+	/// The labels toroidalKnotCut() spaces, `Psi_N = ( j/( knots + 1 ) )^2`.
+	std::vector<double> toroidalKnotLabels( std::size_t knots );
 
 	/**
-	 * toroidalMapFloor() in the fit's ORTHONORMAL coordinates: the round-off
-	 * floor of each `y_k` of the map's output, worst over `k`, with the same
-	 * model -- `4 x 4 x solveAccuracy` per surface's `g^2`, independent across
-	 * surfaces -- carried through `R P = Q^T/sqrt( N )` in place of `P`. It is
-	 * what a residual measured in `y` is noisy to, and what a difference step
-	 * in `y` is sized against (M-359).
+	 * `g^2` AS ITS VALUES AT THE KNOTS: A NOT-A-KNOT CUBIC IN THE SOURCE'S
+	 * `Psi`, ITS END PIECES CONTINUED.
+	 *
+	 * The knots are given as the family's labels, `Psi_N` ascending, and the
+	 * spline lives in `Psi = 1 - Psi_N` -- the reflection of section 2 happens
+	 * here and in ggPrime(), nowhere else. Linear in the values, so the
+	 * derivative with respect to value `j` is the cardinal function
+	 * cardinal( j, . ).
+	 *
+	 * **IN `Psi`, NOT IN `rho`.** A smooth `g^2` is smooth in `Psi_N`; a spline
+	 * in `rho = sqrt( Psi_N )` makes `gg' = d( g^2 )/dPsi` carry `1/rho` on
+	 * the axis unless its slope there vanishes, which nothing imposes.
+	 *
+	 * **C^2, SO `gg'` IS C^1 AND `dF/dpsi` CONTINUOUS.** The source reads
+	 * `gg' = ( g^2 )'/2`, the Newton matrix its derivative, and the bordered
+	 * column one more (Profile::doublePrime()).
 	 */
-	double toroidalMapFloorOrthonormal( ToroidalField const &field,
-	                                    unsigned int degree,
-	                                    double solveAccuracy );
-
-	/// `gg'` knots from that fit, in the SOURCE's `Psi`, exact on the
-	/// polynomial. Same reflection and the same edge extension as
-	/// ggPrimeKnots(); @a samples knots are laid down uniformly over the
-	/// family's own range.
-	std::vector<Knot> ggPrimeKnotsFromFit( ToroidalField const &field,
-	                                       unsigned int degree,
-	                                       std::size_t samples = 17,
-	                                       EdgeExtension extension
-	                                           = EdgeExtension::Clamp );
-
-	/// The same, from coefficients already fitted. `gg' = ( 1/2 ) dG/dPsi` and
-	/// its derivative, both exact on the polynomial, over the whole of
-	/// `Psi` -- see the implementation on why the span is `[ 0, 1 ]` and not
-	/// the family's own range.
-	///
-	/// @throws std::invalid_argument if @a coefficients is empty or fewer than
-	///         two knots are asked for.
-	std::vector<Knot> ggPrimeKnotsFromCoefficients(
-		std::vector<double> const &coefficients, std::size_t samples = 17,
-		EdgeExtension extension = EdgeExtension::Clamp );
-
-	/**
-	 * ONE WHOLE PICARD STEP OF THE `q`-DRIVEN LOOP, AS A CALLABLE.
-	 *
-	 * `c -> gg' -> [ solve, extract ] -> invert -> fit -> c`, which is the map
-	 * `meq::solveForToroidalField` roots. Everything about the machine lives in
-	 * the callable handed to the constructor and nothing about it lives here,
-	 * so this stays **MFEM-free and CI-gated** while the equilibrium solve does
-	 * not.
-	 *
-	 *
-	 * 1. IT EXISTS BECAUSE THE MAP HAS TWO OBLIGATIONS THAT ARE EASY TO MISS
-	 *
-	 * **IT MUST BE TOTAL.** An exception raised inside the residual ends the
-	 * outer loop -- KINSOL is C, so meq::solveForToroidalField catches it in
-	 * the callback and reports the loop as not converged -- and so denies the
-	 * line search the finite value it needs to reject a step with. Measured:
-	 * with the map throwing, the first full Newton step lands on `g^2 < 0`
-	 * across the whole profile and the run ends without backtracking once. So an inadmissible `c`
-	 * returns a residual pointing back at the last admissible one, which is
-	 * large there, vanishes nowhere, and can introduce no spurious root --
-	 * `g^2 < 0` is not an equilibrium.
-	 *
-	 * **AND THE TWO NORMALISED FLUXES RUN IN OPPOSITE DIRECTIONS.** The target
-	 * is asked for against the SOURCE's `Psi`, one on the axis, because that is
-	 * what a profile table in this tree is written in; meq::invertSafetyFactor
-	 * asks against the FAMILY's `Psi_N`, zero on the axis. The reflection
-	 * happens here and nowhere else. Getting it wrong does not fail -- it
-	 * converges, at full order, to an equilibrium with its shear reversed.
-	 *
-	 *
-	 * 2. AND THE SOLVE IS A CALLABLE RATHER THAN A SOLVER
-	 *
-	 * A caller driving this owns a mesh, a boundary, coils, a warm start and a
-	 * globalisation ladder, none of which this needs to know about. What it
-	 * needs is one question answered -- *given these `gg'` knots, what family
-	 * does the equilibrium have?* -- and a way to say "it did not converge"
-	 * that is not an exception. A null return is that way.
-	 */
-	class ToroidalFieldMap
+	class ToroidalFieldSpline
 	{
 		public:
-			/// Solve with these `gg'` knots and hand back the surfaces, or
-			/// nullptr if the equilibrium did not converge or could not be
-			/// extracted. **It must not throw**: see section 1.
-			using Solve = std::function<
-				FluxSurfaceFamily const *( std::vector<Knot> const & )>;
+			/// @throws std::invalid_argument for fewer than four labels, or
+			///         labels that are not strictly ascending inside ( 0, 1 ).
+			explicit ToroidalFieldSpline( std::vector<double> labels );
 
-			struct Options
-			{
-				/// Degree of the `g^2` polynomial. The fit is what makes the
-				/// outer Newton affordable and what stops a noisy inversion
-				/// becoming shape; two or three is the usual.
-				unsigned int degree = 2;
+			std::size_t size() const { return knotLabels.size(); }
 
-				/// The target `q`, against the SOURCE's `Psi` -- one on the
-				/// axis. Reflected to the family's label here.
-				std::function<double( double normalisedFlux )> target;
+			/// The family's labels, `Psi_N`, ascending.
+			std::vector<double> const &labels() const { return knotLabels; }
 
-				std::size_t knotSamples = 17;
-				EdgeExtension extension = EdgeExtension::Clamp;
+			/// `g^2` at each label, in the labels' order.
+			/// @throws std::invalid_argument on a size mismatch or a
+			///         non-finite value.
+			void setValues( std::vector<double> values );
+			std::vector<double> const &values() const { return knotValues; }
 
-				/// The relative accuracy each equilibrium is solved to, from
-				/// which floor() is derived. Zero claims an exact solve and
-				/// so a floor of zero.
-				double solveAccuracy = 0.0;
-			};
+			/// Derivative @a derivative ( 0 to 3 ) of `g^2` with respect to the
+			/// SOURCE's `Psi`, at @a psi; the end pieces continue outside the
+			/// knots.
+			double operator()( double psi, int derivative = 0 ) const;
 
-			ToroidalFieldMap( Solve solve, Options options );
+			/// The same of the cardinal function of knot @a j: `d g^2/d u_j`.
+			double cardinal( std::size_t j, double psi, int derivative = 0 ) const;
 
-			/// One step. Never throws for a reason the loop could meet.
-			std::vector<double> operator()(
-				std::vector<double> const &coefficients );
+			/// `g g' = ( 1/2 ) d( g^2 )/dPsi` as a Profile for the source,
+			/// exact on the spline, with its two derivatives.
+			std::shared_ptr<Profile const> ggPrime() const;
 
-			/// Solves attempted, and steps that came back inadmissible. The
-			/// second is what says whether the line search was doing work.
-			int solves() const { return solveCount; }
-			int refusals() const { return refusalCount; }
+			/// The same of cardinal function @a j: the direction in `gg'`
+			/// that a change of value `j` makes.
+			std::shared_ptr<Profile const> cardinalGGPrime( std::size_t j ) const;
 
-			/// The last coefficients that produced an equilibrium. Empty until
-			/// one does.
-			std::vector<double> const &lastAdmissible() const { return lastGood; }
-
-			/// toroidalMapFloor() at the last step that produced an
-			/// equilibrium -- the noise on what operator() just returned,
-			/// which is what meq::OuterNewtonOptions::mapFloor asks for.
-			/// Zero until a step has.
-			double floor() const { return lastFloor; }
-
-			/// toroidalMapFloorOrthonormal() at the last step that produced an
-			/// equilibrium: the same noise in the fit's orthonormal
-			/// coordinates, which a residual measured there is noisy to.
-			double orthonormalFloor() const { return lastOrthonormalFloor; }
-
-			/// The family's labels, `Psi_N`, at the last step that produced
-			/// an equilibrium: the abscissae the fit was taken on. Empty
-			/// until one has.
-			std::vector<double> const &lastLabels() const { return labels; }
-
-			/// The relative accuracy each equilibrium is solved to, as given.
-			double solveAccuracy() const { return options.solveAccuracy; }
+			/// Whether `g^2 > 0` over all of `Psi` in [ 0, 1 ], sampled at
+			/// @a samples points and at every knot: what the source will be
+			/// evaluated over.
+			bool positive( int samples = 256 ) const;
 
 		private:
-			std::vector<double> refuse(
-				std::vector<double> const &coefficients ) const;
+			std::vector<double> knotLabels, knotValues;
+			std::vector<double> psi;               // source Psi, ascending
+			std::vector<double> valuesToSeconds;   // ( n x n ), row-major
+			std::vector<double> seconds;           // M_i at psi
+			std::vector<double> sourceValues;      // values at psi
 
-			Solve solve;
-			Options options;
-			std::vector<double> lastGood;
-			std::vector<double> labels;
-			double lastFloor = 0.0;
-			double lastOrthonormalFloor = 0.0;
-			int solveCount = 0;
-			int refusalCount = 0;
+			double evaluate( std::vector<double> const &y, std::vector<double> const &m,
+			                 double at, int derivative ) const;
 	};
 
 	/**
@@ -442,145 +318,177 @@ namespace meq
 	 *
 	 * Fixed-boundary equilibria sharing those two profiles form a ONE-PARAMETER
 	 * FAMILY: `q` sets the field-line pitch and not the field's strength, which
-	 * is VMEC's reason for wanting `PHIEDGE` beside `iota( s )`. Left free, the
-	 * family is the outer Jacobian's near-null direction and the member is
-	 * picked by the degree of `g^2` alone (MEASUREMENTS.md M-353). Each value
-	 * here is one input that picks it.
+	 * is VMEC's reason for wanting `PHIEDGE` beside `iota( s )`. The `q` rows
+	 * leave that family the near-null direction of their Jacobian
+	 * (MEASUREMENTS.md M-353), and each value here is a row that picks the
+	 * member.
 	 */
 	enum class ScalePin
 	{
-		/// `g` on the boundary, `R0 B0`: `c_0 = g_edge^2` is HELD and leaves
-		/// the unknowns, since `c_0` enters no solve.
+		/// `g` on the boundary, `R0 B0`, read as the spline continued to
+		/// `Psi = 0`: the row `( g^2( 0 ) - R0B0^2 )/R0B0^2`.
 		EdgeField,
 
-		/// `mu0 I_p` of the solved state, as a row of the outer system. The
-		/// inner solve's profile scale stays one.
+		/// `mu0 I_p` of the solved state, the row `( I - I* )/I*`. The inner
+		/// solve's profile scale stays one.
 		PlasmaCurrent,
 
 		/// The DELIVERED toroidal flux, `Phi = int_plasma g( psi )/R dA` over
-		/// the solved equilibrium with `g^2` the iterate's own, as a row of the
-		/// outer system -- the equilibrium's flux, not the target's
+		/// the solved equilibrium with the iterate's own `g`, the row
+		/// `( Phi - Phi* )/Phi*` -- the equilibrium's flux, not the target's
 		/// (MEASUREMENTS.md M-362).
 		ToroidalFlux
 	};
 
+	/// What one solve and extraction at a spline gives the system: per knot
+	/// `q/g = V' < R^-2 >/4 pi^2`, and the pinned scalar as the solved state
+	/// reads it (unused under ScalePin::EdgeField).
+	struct SafetyFactorEvaluation
+	{
+		std::vector<double> qOverG;
+		double measured = 0.0;
+	};
+
+	/// Their derivatives with respect to the knot values, THROUGH THE SOLVE:
+	/// `d( q/g )_i/d u_j` row-major, knots by knots, at fixed `g` -- the
+	/// geometry's response -- and the pinned scalar's total derivative.
+	struct SafetyFactorDerivative
+	{
+		std::vector<double> qOverG;
+		std::vector<double> measured;
+	};
+
 	/**
-	 * THE q-DRIVEN OUTER SYSTEM WITH ITS SCALE PINNED, KEPT SQUARE.
+	 * THE q-DRIVEN SYSTEM: q AT EVERY KNOT AND ONE SCALE PIN, IN THE KNOT
+	 * VALUES `u_j = g^2( knot j )`. MFEM-free: the solve and its derivative
+	 * are callables (SafetyFactorTangent.hpp supplies them).
 	 *
-	 * meq::ToroidalFieldMap's fixed point `G( c ) = c` has `d + 1` conditions
-	 * -- the fit's rows -- for `d + 1` coefficients, and one direction they do
-	 * not determine: the family's scale. A pin removes it, and to keep the
-	 * system square ONE q CONDITION GIVES WAY: in the fit's orthonormal
-	 * coordinates `y = R c` (`R` from the QR of the design matrix on the
-	 * surfaces' labels, scaled by `1/sqrt( N )`), the highest row `y_d` is
-	 * dropped. So the `g^2` misfit left at the answer is a multiple of the
-	 * `d`-th orthogonal polynomial over the surfaces -- the one least able to
-	 * move the equilibrium -- and q is matched in every lower moment.
+	 *     r_i     = q_i/q*_i - 1,   q_i = ( q/g )_i sqrt( u_i ),  i = 1 .. m
+	 *     r_m+1   = the pin's row, ScalePin
 	 *
-	 *   EdgeField      unknowns `c_1 .. c_d`; rows `y_0 .. y_{d-1}`
-	 *   PlasmaCurrent  unknowns `c_0 .. c_d`; rows `y_0 .. y_{d-1}` and
-	 *   ToroidalFlux   `w ( m - m* )/m*`, `m` the measured scalar
+	 * `m + 1` rows in `m` unknowns, solved by meq::solveLeastSquares with the
+	 * pin row an EXACT constraint and the `q` rows in least squares within
+	 * each level of the scale's coordinate (scaleGradient()). **NO q
+	 * CONDITION GIVES WAY.** The `q` rows alone are nearly singular along the
+	 * scale family, which the pin fixes; what is left is the discrete
+	 * problem's inconsistency, the misfit, spread over the `q` rows and
+	 * falling with `h` (MEASUREMENTS.md M-QR-3).
+	 * A square system -- one more value at the edge, held by the pin -- was
+	 * measured and is ill-conditioned: the edge layer, which `q` does not
+	 * see, takes the scale family's place and the pin barely reaches it
+	 * (M-QR-2).
 	 *
-	 * **THE SAME ROW GIVES WAY UNDER EVERY PIN, AND THAT IS WHAT MAKES THEM
-	 * COMPOSE.** An equilibrium solved under one pin satisfies every other
-	 * pin's system once that pin is set to the value it reads -- so the three
-	 * pins return the same equilibrium -- only if each system drops the same q
-	 * condition: dropping different ones leaves the fit's misfit in different
-	 * directions, and the answers differ by it (MEASUREMENTS.md M-355).
+	 * **THE PINS COMPOSE.** The answers under every pin lie on one curve --
+	 * the q rows' least squares at each level of the scale coordinate -- and
+	 * the pin, met exactly, picks the point; so an equilibrium solved under one
+	 * pin is returned by another set to what it reads (QDrivenScalePin).
+	 * Weighted into the least squares instead, a pin trades against the
+	 * misfit, differently for each, and they returned answers 1.5e-6 of psi
+	 * apart on an inconsistent target (M-QR-6).
 	 *
-	 * **INTERIM.** A condition gives way only because `g^2` is a polynomial of
-	 * fixed degree, and that fit is what makes the q-driven solve
-	 * inconsistent: its miss does not fall with the mesh (M-361,
-	 * QDrivenConsistency, red). The representation that replaces it refines
-	 * with the discretisation and is matched to `q` at every knot, so the pin
-	 * alone makes the system square (TODO, "The q-driven solve is
-	 * inconsistent").
+	 * **IT IS TOTAL.** A spline with `g^2 <= 0` anywhere on [ 0, 1 ], a solve
+	 * that does not converge or an extraction that fails is a REFUSAL --
+	 * residual() returns false -- and the least squares rejects the step.
+	 * Nothing here throws for a reason the loop can meet.
 	 *
-	 * It is a ToroidalFieldMap -- the callable meq::solveForToroidalField
-	 * roots -- through `x -> x + F( x )`, so the outer Newton, its floor and
-	 * its refusals are the free loop's. Like the map it wraps, it never throws
-	 * for a reason the loop could meet: a refused step, or a pin that cannot be
-	 * read, returns a residual pointing back at the last admissible point --
-	 * scaled to twice the largest residual it has returned, so that the line
-	 * search can never accept a refused point, and reported by lastRefused(),
-	 * so that no Jacobian column is differenced across one (M-358).
+	 * **THE TARGET IS ASKED IN THE SOURCE'S `Psi`**, one on the axis, and the
+	 * knots are labelled by the family's `Psi_N`; the reflection is here.
 	 */
-	class PinnedToroidalFieldMap
+	class SafetyFactorSystem
 	{
 		public:
+			/// Solve and extract at this spline; false is a refusal.
+			using Solve = std::function<bool( ToroidalFieldSpline const &, SafetyFactorEvaluation & )>;
+
+			/// The derivative at the spline the last admissible Solve used;
+			/// false if it cannot be formed.
+			using Differentiate = std::function<bool( ToroidalFieldSpline const &, SafetyFactorDerivative & )>;
+
 			struct Pin
 			{
 				ScalePin kind = ScalePin::EdgeField;
 
-				/// `g_edge`, `mu0 I_p` or `psi_ax - psi_bnd`, by @ref kind.
+				/// `g_edge` (positive), `mu0 I_p` or `Phi`, by @ref kind.
 				double value = 0.0;
-
-				/// The solved state's own value of the pinned scalar, read
-				/// after each admissible solve and given the coefficients of
-				/// `g^2` that solve used -- the delivered toroidal flux reads
-				/// `g` itself. Unused for EdgeField. A throw is a refusal.
-				std::function<double( std::vector<double> const &coefficients )> measured;
-
-				/// The pin row's scale, in `g^2` per unit of relative misfit,
-				/// so that it sits beside the fit's rows. It moves the Newton
-				/// path and the reported conditioning, never the root.
-				double weight = 1.0;
 			};
 
-			/// @throws std::invalid_argument if @a pin's value is not usable
-			///         -- non-positive for EdgeField, zero or non-finite
-			///         otherwise -- or a row pin has nothing to measure.
-			PinnedToroidalFieldMap( ToroidalFieldMap &map, unsigned int degree,
-			                        Pin pin );
+			/**
+			 * @param labels the knots, `Psi_N` ascending.
+			 * @param target `q` against the SOURCE's `Psi`.
+			 * @param solveAccuracy the relative accuracy each equilibrium is
+			 *        solved to, from which floor() is derived; zero claims an
+			 *        exact solve.
+			 * @throws std::invalid_argument on an unusable pin, a missing
+			 *         callable, or a target that is zero or not finite at a
+			 *         knot.
+			 */
+			SafetyFactorSystem( std::vector<double> labels,
+			                    std::function<double( double psi )> const &target, Pin pin,
+			                    Solve solve, Differentiate differentiate,
+			                    double solveAccuracy );
 
-			/// The outer Newton's unknowns from the coefficients of `g^2`:
-			/// all of them, or all but `c_0` under EdgeField.
-			std::vector<double> unknowns( std::vector<double> const &coefficients ) const;
-
-			/// And back, with `c_0 = g_edge^2` under EdgeField.
-			std::vector<double> coefficients( std::vector<double> const &unknowns ) const;
-
-			/// `x + F( x )`. Never throws for a reason the loop could meet.
-			std::vector<double> operator()( std::vector<double> const &unknowns );
-
-			/// The round-off floor of `F` at the last admissible step: the
-			/// map's in the fit's orthonormal coordinates, which the q rows
-			/// are measured in, and the pin row's.
-			double floor() const { return lastFloor; }
+			std::size_t unknowns() const { return spline.size(); }
+			std::size_t rows() const { return spline.size() + 1; }
 
 			/**
-			 * THE COORDINATES TO DIFFERENCE THE OUTER JACOBIAN IN: the fit's
-			 * orthonormal ones, as the columns of `T` with `x = T z` --
-			 * `R^-1`, or under EdgeField the inverse of `R`'s block on
-			 * `c_1 .. c_d`. Row-major, square in the unknowns; empty until a
-			 * step has produced an equilibrium.
-			 *
-			 * There the map's noise is uniform, so one step, sized against
-			 * floor() -- which is in the same coordinates -- costs every
-			 * column the same 1%. In the monomial coefficients the top one's
-			 * noise is `1/R_dd` times the rest and the max-norm floor sized
-			 * every step to it (MEASUREMENTS.md M-359).
+			 * THE SCALE'S COORDINATE, `sum_j ln u_j`, as its gradient `1/u_j`:
+			 * the level functional meq::solveLeastSquares meets the q rows
+			 * within, the pin row being its one constraint. The q rows' near-
+			 * null direction is the scale family (M-353, M-QR-6), and this
+			 * moves along it; holding it, the q rows are a well-posed least
+			 * squares, and every pin chooses from the one curve that traces.
 			 */
-			std::vector<double> differenceBasis() const;
+			static std::vector<double> scaleGradient( std::vector<double> const &u );
 
-			/// The pinned scalar as the last admissible step measured it.
+			/// The residual at @a u, `rows()` entries; false is a refusal.
+			bool residual( std::vector<double> const &u, std::vector<double> &r );
+
+			/// The Jacobian, `rows() x unknowns()` row-major, at @a u, which
+			/// must be the last point residual() admitted; false if it cannot
+			/// be formed.
+			bool jacobian( std::vector<double> const &u, std::vector<double> &j );
+
+			/**
+			 * THE ROUND-OFF FLOOR OF EACH ROW: what a residual
+			 * evaluated twice from two warm starts differs by, modelled.
+			 * `q = ( q/g ) sqrt( u )` carries `V'` and `< R^-2 >`, each in
+			 * error by about the solve's relative accuracy, so `2 eps_solve`;
+			 * four standard deviations, so `8 eps_solve`. The pin rows of the
+			 * current and the flux carry one quadrature of the solved state,
+			 * `4 eps_solve`; R0B0's row reads no solve. The per-average factor
+			 * is the measured piece (CLAUDE_INVERSION.md, *Converged means*),
+			 * and where it is under the noise the least squares measures the
+			 * noise (M-363). One entry per row, the pin row's weighted.
+			 */
+			std::vector<double> floor() const;
+
+			/// The spline at the last admissible point.
+			ToroidalFieldSpline const &answer() const { return spline; }
+
+			/// `q*` at the knots, the target as the rows read it.
+			std::vector<double> const &targets() const { return target; }
+
+			/// The pinned scalar at the last admissible point; `g_edge` under
+			/// ScalePin::EdgeField, from the spline.
 			double lastMeasured() const { return measuredValue; }
 
-			/// Whether the last call was a refusal -- what
-			/// meq::OuterNewtonOptions::mapRefused asks, so that no Jacobian
-			/// column is differenced across one.
-			bool lastRefused() const { return lastWasRefused; }
+			/// Solves asked for, and refusals among them (including the
+			/// splines refused before any solve).
+			int solves() const { return solveCount; }
+			int refusals() const { return refusalCount; }
 
 		private:
-			ToroidalFieldMap &map;
-			unsigned int degree;
+			ToroidalFieldSpline spline;
+			std::vector<double> target;
 			Pin pin;
+			Solve solve;
+			Differentiate differentiate;
+			double accuracy = 0.0;
 			std::vector<double> lastGood;
-			double lastFloor = 0.0;
+			std::vector<double> qOverG;
 			double measuredValue = 0.0;
-			double largestResidual = 0.0;
-			bool lastWasRefused = false;
-			std::vector<double> lastLabels;
+			int solveCount = 0;
+			int refusalCount = 0;
 	};
 
 	/**

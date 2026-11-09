@@ -9962,6 +9962,17 @@ namespace
 		return total;
 	}
 
+	void GradShafranovSolver::plasmaCurrentLinearisation( mfem::Vector const &state, mfem::Vector &row,
+	                                                      double &againstAxis ) const
+	{
+		if ( !normalisedSource )
+			throw std::logic_error( "meq::GradShafranovSolver::plasmaCurrentLinearisation: the "
+			                        "delivered current is a normalised source's" );
+		assembleCurrentRow( state, row );
+		double againstBoundary = 0.0;
+		assembleCurrentNormalisationCorner( state, againstAxis, againstBoundary );
+	}
+
 	GradShafranovSolver::ExteriorSourceCheck
 	GradShafranovSolver::checkExteriorSource( int angularCells ) const
 	{

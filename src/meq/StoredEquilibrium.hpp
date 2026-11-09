@@ -100,7 +100,7 @@ namespace meq
 			 *   profileScale  the I_p border's profile scale
 			 *   inverseCurrents  the free circuits' currents, in the run's
 			 *                order of `inverse_circuits`
-			 *   gSquaredCoefficients  a q-driven run's g^2 polynomial
+			 *   gSquaredKnots, gSquaredValues  a q-driven run's g^2 at its knots
 			 */
 			bool hasXPoint() const { return xPointGiven; }
 			double xPointR() const { return xPointRadius; }
@@ -117,8 +117,10 @@ namespace meq
 			bool hasProfileScale() const { return scaleGiven; }
 			double profileScale() const { return scale; }
 			std::vector<double> const &inverseCurrents() const { return currents; }
-			/// A q-driven run's g^2( Psi ) coefficients, its outer unknowns.
-			std::vector<double> const &gSquaredCoefficients() const { return gSquared; }
+			/// A q-driven run's g^2 at its knots, the loop's unknowns, and the
+			/// knots' labels in the family's Psi_N (meq::ToroidalFieldSpline).
+			std::vector<double> const &gSquaredKnots() const { return gSquaredLabels; }
+			std::vector<double> const &gSquaredValues() const { return gSquared; }
 
 			/// The converged axis flux, psi_ax, which a normalised run records
 			/// as its `psi_axis` attribute and a restart starts its bordered
@@ -159,7 +161,7 @@ namespace meq
 			double axisPointRadius = 0.0, axisPointHeight = 0.0;
 			double boundary = 0.0;
 			double xPointRadius = 0.0, xPointHeight = 0.0, scale = 1.0;
-			std::vector<double> currents, gSquared;
+			std::vector<double> currents, gSquared, gSquaredLabels;
 			bool axisGiven = false;
 			double axis = 0.0;
 			std::string contentText;

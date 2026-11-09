@@ -4836,20 +4836,19 @@ BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
  *
  * Every other example in examples/ PRESCRIBES the toroidal field and reports
  * the safety factor. This one inverts the direction: [ source ] SafetyFactorFile
- * gives a target q, gg' becomes an OUTPUT, and an outer Newton on the
- * coefficients of g^2 wraps the whole solve -- one equilibrium per map
- * evaluation.
+ * gives a target q, gg' becomes an OUTPUT, and a Gauss-Newton on g^2's values
+ * at knots that follow the mesh wraps the whole solve -- one equilibrium per
+ * evaluation, the Jacobian from the linearised solve's exact tangent.
  *
  * WHAT MAKES THIS AN ACCEPTANCE AND NOT A SMOKE TEST IS THAT THE ANSWER IS
  * KNOWN INDEPENDENTLY OF THE LOOP. examples/q-driven-q.dat is not an invented
  * profile: it is the q of an equilibrium built from the CLOSED FORM
  * g( Psi ) = 2.20 + 0.55 Psi on that box and that mesh, measured through
- * q = V' g < R^-2 >/4 pi^2. So g^2 is exactly quadratic with coefficients
- * ( g0^2, 2 g0 g1, g1^2 ) = ( 4.84, 2.42, 0.3025 ), and the loop has to come
- * back with them. A target invented rather than measured would only have shown
- * that the loop reaches SOME fixed point, which is the failure
- * SafetyFactorSolver's own conditioning case exists to describe: both outer
- * methods once converged, correctly, to a fixed point that was not the answer.
+ * q = V' g < R^-2 >/4 pi^2 at the run's own knots. So g^2 is exactly quadratic,
+ * which the knots' cubic reproduces, and the loop has to come back with it. A
+ * target invented rather than measured would only have shown that the loop
+ * reaches SOME fixed point: an outer loop here once converged, correctly, to a
+ * fixed point that was not the answer.
  *
  * THE MESH IS THE SAME ONE THE TARGET WAS MEASURED ON, deliberately. The
  * discretisation error is then common to the measurement and to the loop that
@@ -4900,116 +4899,69 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 		"the .nc does not record that this run solved FOR the toroidal field, "
 		"so a reader cannot tell g was an output rather than an input" );
 
-	std::string const needle = ":g_squared_coefficients = \"";
-	std::size_t const at = header.find( needle );
-	BOOST_TEST_REQUIRE( at != std::string::npos,
-		"the .nc carries no g^2 coefficients, which are the answer" );
-
-	std::vector<double> recovered;
+	auto attributeNumbers = [ &header ]( std::string const &name )
 	{
+		std::string const needle = ":" + name + " = \"";
+		std::size_t const at = header.find( needle );
+		std::vector<double> out;
+		if ( at == std::string::npos )
+			return out;
 		char const *cursor = header.c_str() + at + needle.size();
 		char *end = nullptr;
 		for ( double value = std::strtod( cursor, &end ); end != cursor;
 		      value = std::strtod( cursor, &end ) )
 		{
-			recovered.push_back( value );
+			out.push_back( value );
 			cursor = end;
 		}
-	}
-	BOOST_TEST_REQUIRE( recovered.size() == 3u,
-		"g^2 was asked for at degree 2, so there must be three coefficients" );
+		return out;
+	};
+	std::vector<double> const knots = attributeNumbers( "g_squared_knots" );
+	std::vector<double> const recovered = attributeNumbers( "g_squared" );
+	BOOST_TEST_REQUIRE( !recovered.empty(),
+		"the .nc carries no g^2 at the knots, which is the answer" );
+	BOOST_TEST_REQUIRE( recovered.size() == knots.size() );
 
 	double const g0 = 2.20, g1 = 0.55;
-	std::vector<double> const exact = { g0*g0, 2.0*g0*g1, g1*g1 };
-
-	std::printf( "\n  DRIVING BY q( Psi ) THROUGH THE DRIVER\n" );
-	std::printf( "    coefficient       recovered          exact      relative\n" );
+	std::printf( "\n  DRIVING BY q( Psi ) THROUGH THE DRIVER: %zu knots\n", knots.size() );
 	double worst = 0.0;
-	for ( std::size_t i = 0; i < exact.size(); ++i )
+	for ( std::size_t i = 0; i < knots.size(); ++i )
 	{
-		double const relative =
-			std::abs( recovered[ i ] - exact[ i ] )/std::abs( exact[ i ] );
-		worst = std::max( worst, relative );
-		std::printf( "      c%zu          %13.9f  %13.9f     %.3e\n",
-		             i, recovered[ i ], exact[ i ], relative );
+		double const psi = 1.0 - knots[ i ];
+		double const exact = ( g0 + g1*psi )*( g0 + g1*psi );
+		worst = std::max( worst, std::abs( recovered[ i ] - exact )/exact );
 	}
-	std::printf( "    worst %.3e\n", worst );
+	std::printf( "    worst |g^2/g^2_exact - 1| at the knots %.3e\n", worst );
 
 	/*
-	 * **THE LOOP IS CONVERGED AT ITS MAP'S FLOOR, SO THE COEFFICIENTS ARE
-	 * WORTH THAT FLOOR WORKED ON BY THE OUTER JACOBIAN.** The driver judges
-	 * the outer residual against max( 1e-09, meq::toroidalMapFloor() ), the
-	 * inner solve's relative accuracy at worst -- `newtonTolerance( 1e-12 )`,
-	 * ten eps in single, the gate under which the solve stops at its
-	 * round-off floor (M-306) -- carried through the inversion and the fit; the floor is
-	 * recomputed here, at the answer, exactly as the driver computes it. And
-	 * the worst coefficient's relative error is measured at up to 13 times
-	 * the residual the loop rests at, over both MKLs and one, two and four MKL
-	 * threads in single:
-	 *
-	 *     double   residual 3.5e-10                coefficients 1.7e-06 out
-	 *     single   residual 1.6e-05 to 1.4e-04     coefficients 1.3e-05 to 2.4e-04
-	 *              floor 3.8e-04
-	 *
-	 * So the bound is 32 floors: the residual at most one floor, 13 for the
-	 * Jacobian, and a margin of 2.5 -- and 50 over the worst coefficient
-	 * measured. In double the floor is 3e-10 and the 1e-04 is what std::max
-	 * picks, unchanged.
-	 *
-	 * **THIS REPLACES 512 x averagedMetricFloor(), 0.098 at this h, WHICH WAS
-	 * FITTED TO A LOOP THAT HAD NOT CONVERGED.** It read the single build's
-	 * 1.29e-02 as the fit amplifying an `eps/h^2` average 330 times; that run
-	 * had stopped on MFEM's default absolute tolerance, `eps^( 1/3 )` = 4.9e-03,
-	 * with its g^2 1-2% out, and the map's noise is not `eps/h^2` but flat in
-	 * `h` at about the inner solve's own accuracy. A loop that converged to the
-	 * WRONG fixed point is still what this case is for, and it is O( 1 ) out.
+	 * WHAT THE LOOP OWES. examples/q-driven-q.dat is measured at the example's
+	 * own knots on its own mesh from g = 2.20 + 0.55 Psi, whose g^2 the knots'
+	 * cubic reproduces, so the closed form meets every row and only the loop's
+	 * convergence stands between it and the answer: 1e-7 in double, a tenth of
+	 * what MEQ owes, and 20 eps in single, twice the inner solve's own accuracy.
+	 * A loop that converged to the WRONG fixed point is what this case is for,
+	 * and it is O( 1 ) out.
 	 */
-	std::vector<double> const familyLabel =
-		ncdumpVariable( "q-driven_surfaces.nc", "normalised_flux" );
-	BOOST_TEST_REQUIRE( familyLabel.size() >= 3u,
-		"the surfaces file carries no family to recompute the loop's floor on" );
-	meq::ToroidalField answer;
-	answer.normalisedFlux = familyLabel;
-	for ( double label : familyLabel )
-	{
-		double const psi = 1.0 - label;
-		double const g = g0 + g1*psi;
-		answer.g.push_back( g );
-		answer.gSquared.push_back( g*g );
-		answer.safetyFactor.push_back( 0.0 );
-	}
-	double const loopFloor = meq::toroidalMapFloor(
-		answer, 2, meq::newtonTolerance( 1.0e-12 ) );
-	std::printf( "    the loop's floor at the answer %.3e\n", loopFloor );
-	BOOST_TEST( worst < std::max( 1.0e-04, 32.0*loopFloor ),
+	double const bound = std::max( 1.0e-7,
+		20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() ) );
+	BOOST_TEST( worst < bound,
 		"the loop did not recover the closed-form g its target was measured "
-		"from: worst relative error " << worst << ". A loop that converged to "
-		"the WRONG fixed point reports success and looks exactly like this, so "
-		"check the outer residual at the known answer before the solver" );
+		"from: worst relative error " << worst << " against " << bound << ". A loop "
+		"that converged to the WRONG fixed point reports success and looks exactly "
+		"like this" );
 
 	/*
-	 * TWO CONTROLS, BOTH FREE, AND THE SECOND IS THE ONE WITH TEETH.
-	 *
-	 * The loop OPENS at a constant g = R0B0 = 2.2, which is c = ( 4.84, 0, 0 )
-	 * -- and 4.84 is the correct c0, held there by the pin. So a loop that did
-	 * nothing at all would already agree with the exact answer in its first
-	 * coefficient, and only the higher ones say it moved.
-	 *
-	 * And the SHEAR direction is what a reflected target would reverse: g rises
-	 * toward the axis here, so c1 and c2 are positive. Handing MEQ a q table
-	 * written in the family's Psi_N rather than the source's Psi does not fail
-	 * -- it converges, at full order, to an equilibrium with its shear the
-	 * other way round, which is a configuration a real machine can have and
-	 * which nothing downstream would look at twice.
+	 * AND THE SHEAR DIRECTION, which a reflected target would reverse: g rises
+	 * toward the axis here. A q table read in the family's Psi_N rather than
+	 * the source's Psi does not fail -- it converges, at full order, to an
+	 * equilibrium with its shear the other way round. And the loop OPENS at a
+	 * constant g = R0B0, so a g^2 still flat says it never moved.
 	 */
-	BOOST_TEST( std::abs( recovered[ 1 ] ) > 1.0,
-		"the loop came back with a g^2 that is nearly constant, which is where "
-		"it STARTED -- so it has not moved off the constant g = R0B0" );
-	BOOST_TEST( recovered[ 1 ] > 0.0 );
-	BOOST_TEST( recovered[ 2 ] > 0.0,
-		"g^2 falls toward the axis, so the recovered shear runs the wrong way. "
-		"The likeliest cause is the target being read in the family's Psi_N "
-		"rather than the source's Psi; see meq::ToroidalFieldMap" );
+	BOOST_TEST( recovered.front() > recovered.back() + 0.5,
+		"g^2 at the innermost knot is " << recovered.front() << " and at the outermost "
+		<< recovered.back() << ": nearly constant is where the loop STARTED, and falling "
+		"toward the axis is the reversed shear of a target read in the family's Psi_N "
+		"(meq::SafetyFactorSystem)" );
 }
 
 /*
@@ -5018,7 +4970,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
  *
  * The case above asserts the loop recovered the CLOSED FORM its target was
  * measured from, which is the strongest statement available -- and it is a
- * statement about three coefficients in an attribute. A consumer of this run
+ * statement about g^2 at the knots in an attribute. A consumer of this run
  * wants the q itself, on the surfaces, beside the geometry it goes with, and
  * until `options.toroidalField` was wired the file did not carry it: MEQ
  * computed the safety factor, had a column ready for it, and never wrote one.
@@ -5028,7 +4980,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
  * `g = sqrt( g_edge^2 + 2 int g g' dPsi )` without a constant of integration no
  * key supplies, and its file correctly has no safety_factor variable at all --
  * absent rather than zero, since zero is a real machine. The driven run solves
- * for the coefficients of g^2, so here g is known.
+ * for g^2 at its knots, so here g is known.
  *
  * THE ASSERTION IS AGAINST THE TARGET TABLE, EVALUATED THROUGH THE SAME SPLINE
  * THE RUN WAS GIVEN, and the reflection is the whole hazard: the table's
@@ -5055,7 +5007,7 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 	BOOST_TEST( headerAttribute( header, "toroidal_field_driven" ) == 1.0,
 		"the surfaces file does not record that g was an output of this run, "
 		"so a reader cannot tell where its safety factor came from" );
-	BOOST_TEST( header.find( ":g_squared_coefficients = \"" )
+	BOOST_TEST( header.find( ":g_squared_knots = \"" )
 	            != std::string::npos );
 
 	std::vector<double> const reached =
@@ -5097,12 +5049,12 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 
 	/*
 	 * WHAT THE TOLERANCE IS AND WHY IT IS NOT TIGHTER. Three errors are in
-	 * here and none of them is the column's: the outer loop's own convergence
-	 * (M-nn-free, but the case above bounds it at 1e-04 in the coefficients),
-	 * the degree-2 fit of g^2 against a family of 24 surfaces, and the
-	 * extraction of V' and < R^-2 > on THIS mesh. The target was measured on
-	 * the same mesh so the third is largely common, which is why this reads
-	 * five orders better than the coefficient bound rather than worse.
+	 * here and none of them is the column's: the loop's own convergence (the
+	 * case above bounds g^2 at 1e-7 at the knots), the target table's
+	 * interpolation between its rows -- dense, the knots and three labels
+	 * between each pair -- and the extraction of V' and < R^-2 > on THIS mesh,
+	 * at labels the target was not measured at. The target was measured on the
+	 * same mesh, so the third is largely common.
 	 */
 	// AND THE THIRD OF THE THREE ERRORS NAMED ABOVE IS THE ONE THE FORMAT
 	// MOVES. The extraction of V' and < R^-2 > is a flux-surface average, whose

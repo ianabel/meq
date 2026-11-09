@@ -155,8 +155,8 @@ namespace meq
 
 		// ONE COPY OF THE GRID. fluxSurfaceLabels() is the same computation
 		// and is public, so a caller that needs the labels BEFORE it has a
-		// family -- meq::ToroidalFieldMap's loop drives the equilibrium by a
-		// quantity indexed on them -- gets exactly what this traces at, and
+		// family -- the q-driven loop places g^2's knots on them
+		// (meq::SafetyFactorEquilibrium) -- gets exactly what this traces at, and
 		// not a second implementation that could drift.
 		std::vector<double> const labels = fluxSurfaceLabels( options );
 

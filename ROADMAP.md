@@ -422,26 +422,26 @@ open fixture:
    locates one surface per node. The 34.7× Vandermonde-plus-GEMM figure was NOT
    taken up and is still available: the file is written from the traced nodes
    rather than from a `SurfaceFit`, so there is no Vandermonde in that path.
-4. **The fixed-`q(ψ)` solver** — also item 10, and **the round trip closes**:
-   `meq::SafetyFactor` inverts `q = V′ g ⟨R^{-2}⟩/4π²` (MFEM-free, CI-gated) and
-   `meq::SafetyFactorSolve` closes the loop on KINSOL. From a `g` 40% too large
-   everywhere it recovers the closed form to **2.5e-06** in 6 outer iterations
-   and 20 inner solves. **A damped Picard provably cannot do it** — the relaxed
-   derivative is `1 + ω( G′ − 1 )`, above one for every `ω > 0` when `G′ > 1` —
-   and the Newton is affordable only because the profile is *fitted*, so the
-   Jacobian is a handful of coefficients rather than `nFieldDOF`.
+4. **The fixed-`q(ψ)` solver** — also item 10, and **it is consistent**:
+   `g²` is carried at knots that follow the mesh, `q` is matched at every one
+   with one scale pin, and a Gauss-Newton on the linearised solve's exact
+   tangent solves for them (`meq::SafetyFactor`, MFEM-free and CI-gated;
+   `meq::SafetyFactorTangent`). The delivered `g²` converges to the closed form
+   its target was measured from as the mesh and the knots refine together
+   (→ **[M-QR-3](MEASUREMENTS.md#m-qr-3)**), where the fixed-degree fit it
+   replaces met the target only to the fit's floor
+   (→ **[M-361](MEASUREMENTS.md#m-361)**). **A damped Picard provably cannot
+   do it** — the relaxed derivative is `1 + ω( G′ − 1 )`, above one for every
+   `ω > 0` when `G′ > 1`.
 
-   **And it reaches the solve from a file**: `[source] SafetyFactorFile` with
-   `SafetyFactorDegree` and exactly one scale pin — `R0B0`, `ToroidalFlux` or
-   `PlasmaCurrent`, since `p` and `q` alone leave a one-parameter family
-   (→ **[M-357](MEASUREMENTS.md#m-357)**) — `examples/q-driven.toml` as
-   the worked example, and `theDriverSolvesForTheToroidalField` recovering a
-   closed-form `g` to **5.0e-06** in 12 outer iterations and 43 equilibria.
-   **One solver serves all of them** — only `gg′` changes, so the mesh, the
-   spaces and the forms survive, and each solve is warm-started from the last.
-   The trace solver's symbolic factorisation does not survive: it is built
-   inside each solve and reused only across that solve's Newton steps, one
-   reordering per map evaluation (→ **[M-352](MEASUREMENTS.md#m-352)**).
+   **It reaches the solve from a file**: `[source] SafetyFactorFile` and
+   exactly one scale pin — `R0B0`, `ToroidalFlux` or `PlasmaCurrent`, since `p`
+   and `q` alone leave a one-parameter family
+   (→ **[M-357](MEASUREMENTS.md#m-357)**) — with `examples/q-driven.toml` as
+   the worked example and `theDriverSolvesForTheToroidalField` recovering its
+   closed-form `g`. Every solve is warm-started from the last explicitly; the
+   extraction differenced along each tangent is most of the cost (`TODO`,
+   *The q-driven Jacobian's cost is the extraction*).
 
    **What is left is the fixture**: it is a rectangle with one closed plasma
    rather than a machine, and nothing has driven `q` on the limited tokamak,

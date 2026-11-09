@@ -41,6 +41,395 @@ namespace meq
 
 	}
 
+
+	std::size_t toroidalKnotCount( double cells, int order )
+	{
+		if ( !( cells > 0.0 ) || !std::isfinite( cells ) )
+			throw std::invalid_argument(
+				"meq::toroidalKnotCount: the plasma must cover a positive number of cells" );
+		if ( order < 1 )
+			throw std::invalid_argument(
+				"meq::toroidalKnotCount: the polynomial degree must be at least one" );
+		// Elements across the minor radius of a disc of this many cells.
+		double const across = std::sqrt( cells/M_PI );
+		// The cubic's O( Delta^4 ) keeps pace with O( h^( k + 1 ) ) to k = 3;
+		// above, Delta ~ h^( ( k + 1 )/4 ).
+		double const exponent = std::max( 1.0, ( order + 1.0 )/4.0 );
+		double const knots = std::ceil( 2.0*std::pow( across, exponent ) - 1e-9 );
+		return static_cast<std::size_t>( std::clamp( knots, 6.0, 128.0 ) );
+	}
+
+	ToroidalKnotCut toroidalKnotCut( std::size_t knots )
+	{
+		if ( knots < 4 )
+			throw std::invalid_argument(
+				"meq::toroidalKnotCut: a not-a-knot cubic needs four knots at least" );
+		double const spacing = 1.0/static_cast<double>( knots + 1 );
+		ToroidalKnotCut cut;
+		cut.surfaces = knots;
+		cut.innerCut = spacing*spacing;
+		cut.outerCut = ( 1.0 - spacing )*( 1.0 - spacing );
+		return cut;
+	}
+
+	std::vector<double> toroidalKnotLabels( std::size_t knots )
+	{
+		// fluxSurfaceLabels()'s arithmetic, so that the labels are the
+		// family's to the bit: rho uniform between the square roots of the cut.
+		ToroidalKnotCut const cut = toroidalKnotCut( knots );
+		double const inner = std::sqrt( cut.innerCut );
+		double const outer = std::sqrt( cut.outerCut );
+		double const last = static_cast<double>( knots - 1 );
+		std::vector<double> labels;
+		for ( std::size_t i = 0; i < knots; ++i )
+		{
+			double const rho = inner + ( static_cast<double>( i )/last )*( outer - inner );
+			labels.push_back( rho*rho );
+		}
+		return labels;
+	}
+
+	namespace
+	{
+		/// gg' = ( g^2 )'/2 of a ToroidalFieldSpline evaluator.
+		class SplineGGPrime : public Profile
+		{
+			public:
+				explicit SplineGGPrime( std::function<double( double, int )> s )
+					: spline( std::move( s ) ) {}
+				double operator()( double psi ) const override { return 0.5*spline( psi, 1 ); }
+				double prime( double psi ) const override { return 0.5*spline( psi, 2 ); }
+				double doublePrime( double psi ) const override { return 0.5*spline( psi, 3 ); }
+			private:
+				std::function<double( double, int )> spline;
+		};
+	}
+
+	/*
+	 * THE NOT-A-KNOT CUBIC, AS A LINEAR MAP FROM VALUES TO SECOND DERIVATIVES.
+	 *
+	 * The second derivatives M_i at the nodes solve the classical tridiagonal
+	 * system inside and the not-a-knot conditions -- the third derivative
+	 * continuous across the second and the second-to-last node -- at the
+	 * ends. That system depends on the nodes only, so its inverse applied to
+	 * the right-hand side's operator is kept once, n x n: the cardinal
+	 * functions are its columns, and a change of values is a matrix-vector
+	 * product. n is the knot count, at most 128.
+	 */
+	ToroidalFieldSpline::ToroidalFieldSpline( std::vector<double> labels )
+		: knotLabels( std::move( labels ) )
+	{
+		std::size_t const n = knotLabels.size();
+		if ( n < 4 )
+			throw std::invalid_argument(
+				"meq::ToroidalFieldSpline: a not-a-knot cubic needs four knots at least" );
+		requireAscending( knotLabels, "meq::ToroidalFieldSpline" );
+		if ( !( knotLabels.front() > 0.0 ) || !( knotLabels.back() < 1.0 ) )
+			throw std::invalid_argument(
+				"meq::ToroidalFieldSpline: the knots are flux surfaces, inside ( 0, 1 ) in Psi_N" );
+
+		psi.resize( n );
+		for ( std::size_t i = 0; i < n; ++i )
+			psi[ i ] = 1.0 - knotLabels[ n - 1 - i ];
+
+		Eigen::MatrixXd a = Eigen::MatrixXd::Zero( static_cast<Eigen::Index>( n ),
+		                                           static_cast<Eigen::Index>( n ) );
+		Eigen::MatrixXd d = a;
+		auto h = [ this ]( std::size_t i ) { return psi[ i + 1 ] - psi[ i ]; };
+		auto at = []( std::size_t i ) { return static_cast<Eigen::Index>( i ); };
+		a( 0, 0 ) = -1.0/h( 0 );
+		a( 0, 1 ) = 1.0/h( 0 ) + 1.0/h( 1 );
+		a( 0, 2 ) = -1.0/h( 1 );
+		for ( std::size_t i = 1; i + 1 < n; ++i )
+		{
+			a( at( i ), at( i - 1 ) ) = h( i - 1 );
+			a( at( i ), at( i ) ) = 2.0*( h( i - 1 ) + h( i ) );
+			a( at( i ), at( i + 1 ) ) = h( i );
+			d( at( i ), at( i + 1 ) ) += 6.0/h( i );
+			d( at( i ), at( i ) ) += -6.0/h( i ) - 6.0/h( i - 1 );
+			d( at( i ), at( i - 1 ) ) += 6.0/h( i - 1 );
+		}
+		std::size_t const l = n - 1;
+		a( at( l ), at( l - 2 ) ) = -1.0/h( l - 2 );
+		a( at( l ), at( l - 1 ) ) = 1.0/h( l - 2 ) + 1.0/h( l - 1 );
+		a( at( l ), at( l ) ) = -1.0/h( l - 1 );
+		Eigen::MatrixXd const map = a.colPivHouseholderQr().solve( d );
+		valuesToSeconds.resize( n*n );
+		for ( std::size_t i = 0; i < n; ++i )
+			for ( std::size_t j = 0; j < n; ++j )
+				valuesToSeconds[ i*n + j ] = map( at( i ), at( j ) );
+
+		setValues( std::vector<double>( n, 1.0 ) );
+	}
+
+	void ToroidalFieldSpline::setValues( std::vector<double> values )
+	{
+		std::size_t const n = knotLabels.size();
+		if ( values.size() != n )
+			throw std::invalid_argument(
+				"meq::ToroidalFieldSpline::setValues: one value per knot" );
+		for ( double v : values )
+			if ( !std::isfinite( v ) )
+				throw std::invalid_argument(
+					"meq::ToroidalFieldSpline::setValues: a value is not finite" );
+		knotValues = std::move( values );
+		sourceValues.resize( n );
+		for ( std::size_t i = 0; i < n; ++i )
+			sourceValues[ i ] = knotValues[ n - 1 - i ];
+		seconds.assign( n, 0.0 );
+		for ( std::size_t i = 0; i < n; ++i )
+			for ( std::size_t k = 0; k < n; ++k )
+				seconds[ i ] += valuesToSeconds[ i*n + k ]*sourceValues[ k ];
+	}
+
+	double ToroidalFieldSpline::evaluate( std::vector<double> const &y,
+	                                      std::vector<double> const &m,
+	                                      double t, int derivative ) const
+	{
+		std::size_t const n = psi.size();
+		std::size_t i = 0;
+		if ( t >= psi[ n - 2 ] )
+			i = n - 2;
+		else if ( t > psi[ 0 ] )
+			i = static_cast<std::size_t>(
+				    std::upper_bound( psi.begin(), psi.end(), t ) - psi.begin() ) - 1;
+		double const h = psi[ i + 1 ] - psi[ i ];
+		double const a = psi[ i + 1 ] - t, b = t - psi[ i ];
+		double const ca = y[ i ]/h - m[ i ]*h/6.0, cb = y[ i + 1 ]/h - m[ i + 1 ]*h/6.0;
+		switch ( derivative )
+		{
+			case 0:
+				return m[ i ]*a*a*a/( 6.0*h ) + m[ i + 1 ]*b*b*b/( 6.0*h ) + ca*a + cb*b;
+			case 1:
+				return -m[ i ]*a*a/( 2.0*h ) + m[ i + 1 ]*b*b/( 2.0*h ) - ca + cb;
+			case 2:
+				return m[ i ]*a/h + m[ i + 1 ]*b/h;
+			default:
+				return ( m[ i + 1 ] - m[ i ] )/h;
+		}
+	}
+
+	double ToroidalFieldSpline::operator()( double at, int derivative ) const
+	{
+		return evaluate( sourceValues, seconds, at, derivative );
+	}
+
+	double ToroidalFieldSpline::cardinal( std::size_t j, double at, int derivative ) const
+	{
+		std::size_t const n = psi.size();
+		if ( j >= n )
+			throw std::out_of_range( "meq::ToroidalFieldSpline::cardinal: no such knot" );
+		// Knot j in the labels' order is node n - 1 - j in the source's Psi.
+		std::size_t const node = n - 1 - j;
+		std::vector<double> y( n, 0.0 ), m( n, 0.0 );
+		y[ node ] = 1.0;
+		for ( std::size_t i = 0; i < n; ++i )
+			m[ i ] = valuesToSeconds[ i*n + node ];
+		return evaluate( y, m, at, derivative );
+	}
+
+	std::shared_ptr<Profile const> ToroidalFieldSpline::ggPrime() const
+	{
+		auto copy = std::make_shared<ToroidalFieldSpline const>( *this );
+		return std::make_shared<SplineGGPrime const>(
+			[ copy ]( double at, int derivative ) { return ( *copy )( at, derivative ); } );
+	}
+
+	std::shared_ptr<Profile const> ToroidalFieldSpline::cardinalGGPrime( std::size_t j ) const
+	{
+		if ( j >= size() )
+			throw std::out_of_range( "meq::ToroidalFieldSpline::cardinalGGPrime: no such knot" );
+		auto copy = std::make_shared<ToroidalFieldSpline const>( *this );
+		return std::make_shared<SplineGGPrime const>(
+			[ copy, j ]( double at, int derivative ) { return copy->cardinal( j, at, derivative ); } );
+	}
+
+	bool ToroidalFieldSpline::positive( int samples ) const
+	{
+		for ( int k = 0; k <= samples; ++k )
+		{
+			double const value = ( *this )( static_cast<double>( k )/samples );
+			if ( !( value > 0.0 ) || !std::isfinite( value ) )
+				return false;
+		}
+		for ( double v : knotValues )
+			if ( !( v > 0.0 ) )
+				return false;
+		return true;
+	}
+
+	SafetyFactorSystem::SafetyFactorSystem( std::vector<double> labels,
+	                                        std::function<double( double psi )> const &targetIn,
+	                                        Pin pinIn, Solve solveIn, Differentiate differentiateIn,
+	                                        double solveAccuracy )
+		: spline( std::move( labels ) ), pin( pinIn ), solve( std::move( solveIn ) ),
+		  differentiate( std::move( differentiateIn ) ), accuracy( solveAccuracy )
+	{
+		if ( !solve || !differentiate )
+			throw std::invalid_argument(
+				"meq::SafetyFactorSystem: a solve and its derivative are both needed" );
+		if ( !targetIn )
+			throw std::invalid_argument(
+				"meq::SafetyFactorSystem: no target safety factor was given" );
+		if ( !std::isfinite( pin.value ) || pin.value == 0.0 )
+			throw std::invalid_argument(
+				"meq::SafetyFactorSystem: the pinned value must be finite and non-zero" );
+		if ( pin.kind == ScalePin::EdgeField && !( pin.value > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::SafetyFactorSystem: g on the boundary is pinned as a magnitude, so it "
+				"must be positive; its sign is q's (SafetyFactor.hpp, section 3)" );
+		if ( !( accuracy >= 0.0 ) )
+			throw std::invalid_argument(
+				"meq::SafetyFactorSystem: the solve's accuracy must be non-negative" );
+		// THE REFLECTION, ONCE: the target is in the source's Psi.
+		for ( double label : spline.labels() )
+		{
+			double const q = targetIn( 1.0 - label );
+			if ( !std::isfinite( q ) || q == 0.0 )
+			{
+				std::ostringstream message;
+				message << "meq::SafetyFactorSystem: the target safety factor at Psi_N = "
+				        << label << " is " << q << "; a row q/q* - 1 needs it finite and "
+				           "non-zero";
+				throw std::invalid_argument( message.str() );
+			}
+			target.push_back( q );
+		}
+	}
+
+	bool SafetyFactorSystem::residual( std::vector<double> const &u, std::vector<double> &r )
+	{
+		std::size_t const m = spline.size();
+		if ( u.size() != m )
+			throw std::invalid_argument(
+				"meq::SafetyFactorSystem::residual: one unknown per knot" );
+		ToroidalFieldSpline trial( spline );
+		bool finite = true;
+		for ( double v : u )
+			finite = finite && std::isfinite( v );
+		if ( !finite )
+		{
+			++refusalCount;
+			return false;
+		}
+		trial.setValues( u );
+		// TOTAL: g^2 <= 0 is not an equilibrium, so it is refused without a
+		// solve -- the step is rejected, not thrown.
+		if ( !trial.positive() )
+		{
+			++refusalCount;
+			return false;
+		}
+		stageChecksum( "toroidalSystem.in", u );
+		++solveCount;
+		SafetyFactorEvaluation evaluation;
+		bool solved = false;
+		try
+		{
+			solved = solve( trial, evaluation );
+		}
+		catch ( std::exception const & )
+		{
+			solved = false;
+		}
+		if ( !solved || evaluation.qOverG.size() != m )
+		{
+			++refusalCount;
+			return false;
+		}
+		r.assign( m + 1, 0.0 );
+		for ( std::size_t i = 0; i < m; ++i )
+		{
+			if ( !( evaluation.qOverG[ i ] > 0.0 ) || !std::isfinite( evaluation.qOverG[ i ] ) )
+			{
+				++refusalCount;
+				return false;
+			}
+			r[ i ] = evaluation.qOverG[ i ]*std::sqrt( u[ i ] )*( target[ i ] > 0.0 ? 1.0 : -1.0 )
+			         /target[ i ] - 1.0;
+		}
+		double measured = 0.0;
+		if ( pin.kind == ScalePin::EdgeField )
+		{
+			double const edge = trial( 0.0 );
+			measured = std::sqrt( edge );
+			r[ m ] = ( edge - pin.value*pin.value )/( pin.value*pin.value );
+		}
+		else
+		{
+			measured = evaluation.measured;
+			if ( !std::isfinite( measured ) )
+			{
+				++refusalCount;
+				return false;
+			}
+			r[ m ] = ( measured - pin.value )/pin.value;
+		}
+		spline = trial;
+		lastGood = u;
+		qOverG = evaluation.qOverG;
+		measuredValue = measured;
+		stageChecksum( "toroidalSystem.out", r );
+		return true;
+	}
+
+	bool SafetyFactorSystem::jacobian( std::vector<double> const &u, std::vector<double> &j )
+	{
+		std::size_t const m = spline.size();
+		if ( u != lastGood )
+			throw std::logic_error(
+				"meq::SafetyFactorSystem::jacobian: asked at a point that is not the last "
+				"admissible one; the derivative is formed at the state the solver holds" );
+		SafetyFactorDerivative derivative;
+		bool formed = false;
+		try
+		{
+			formed = differentiate( spline, derivative );
+		}
+		catch ( std::exception const & )
+		{
+			formed = false;
+		}
+		if ( !formed || derivative.qOverG.size() != m*m
+		     || ( pin.kind != ScalePin::EdgeField && derivative.measured.size() != m ) )
+			return false;
+		j.assign( ( m + 1 )*m, 0.0 );
+		for ( std::size_t i = 0; i < m; ++i )
+		{
+			double const root = std::sqrt( u[ i ] );
+			double const sign = target[ i ] > 0.0 ? 1.0 : -1.0;
+			for ( std::size_t k = 0; k < m; ++k )
+			{
+				double value = root*derivative.qOverG[ i*m + k ];
+				if ( i == k )
+					value += qOverG[ i ]/( 2.0*root );
+				j[ i*m + k ] = sign*value/target[ i ];
+			}
+		}
+		for ( std::size_t k = 0; k < m; ++k )
+			j[ m*m + k ] = pin.kind == ScalePin::EdgeField
+			               ? spline.cardinal( k, 0.0 )/( pin.value*pin.value )
+			               : derivative.measured[ k ]/pin.value;
+		return true;
+	}
+
+	std::vector<double> SafetyFactorSystem::floor() const
+	{
+		// See the header: 8 eps_solve on a q row, 4 eps_solve on a pin row
+		// that reads the solve; R0B0's reads none.
+		std::vector<double> out( spline.size() + 1, 8.0*accuracy );
+		out.back() = pin.kind == ScalePin::EdgeField ? 0.0 : 4.0*accuracy;
+		return out;
+	}
+
+	std::vector<double> SafetyFactorSystem::scaleGradient( std::vector<double> const &u )
+	{
+		std::vector<double> out( u.size() );
+		for ( std::size_t j = 0; j < u.size(); ++j )
+			out[ j ] = 1.0/u[ j ];
+		return out;
+	}
+
 	/*
 	 * FRITSCH-CARLSON, WITH THE STANDARD THREE-POINT ENDS.
 	 *
@@ -51,292 +440,6 @@ namespace meq
 	 * three-point formula and are then limited against the adjacent secant,
 	 * because an unlimited endpoint is where a monotone rule most often is not.
 	 */
-	ToroidalFieldMap::ToroidalFieldMap( Solve solve, Options options )
-		: solve( std::move( solve ) ), options( std::move( options ) )
-	{
-		if ( !this->solve )
-			throw std::invalid_argument(
-				"meq::ToroidalFieldMap: no solve was given, so there is nothing "
-				"to take a Picard step with" );
-		if ( !this->options.target )
-			throw std::invalid_argument(
-				"meq::ToroidalFieldMap: no target safety factor was given, so "
-				"there is nothing to invert against" );
-		if ( this->options.degree == 0 )
-			throw std::invalid_argument(
-				"meq::ToroidalFieldMap: a degree-zero g^2 is a constant, which "
-				"makes gg' identically zero and the loop unable to move" );
-	}
-
-	std::vector<double> ToroidalFieldMap::refuse(
-		std::vector<double> const &coefficients ) const
-	{
-		/*
-		 * THE RESIDUAL AT AN INADMISSIBLE POINT, AND WHY IT IS THIS ONE.
-		 *
-		 * `G( c ) - c` has to be finite here and it has to point somewhere the
-		 * line search can go. Returning the last admissible coefficients makes
-		 * the residual `lastGood - c`, which is large wherever `c` has wandered
-		 * and is exactly zero only at `lastGood` itself -- and `lastGood` is a
-		 * point the map really was evaluated at, so it is not a root unless it
-		 * is the answer. Before ANY step has succeeded there is no such point,
-		 * and `c - 1` is used instead: a constant nonzero residual, which is
-		 * the honest statement that nothing is known yet.
-		 */
-		std::vector<double> out( coefficients.size() );
-		for ( std::size_t i = 0; i < coefficients.size(); ++i )
-			out[ i ] = lastGood.size() == coefficients.size()
-			           ? lastGood[ i ] : coefficients[ i ] - 1.0;
-		return out;
-	}
-
-	std::vector<double> ToroidalFieldMap::operator()(
-		std::vector<double> const &coefficients )
-	{
-		// ADMISSIBLE MEANS g^2 > 0 EVERYWHERE THE SOURCE WILL BE ASKED, which
-		// is the whole of Psi and not the family's cut -- the knots span
-		// [ 0, 1 ] and the profile is evaluated at every quadrature point of
-		// the domain, including outside the plasma.
-		std::size_t const checks = 64;
-		for ( std::size_t i = 0; i <= checks; ++i )
-		{
-			double const psi = static_cast<double>( i )
-			                   /static_cast<double>( checks );
-			double value = 0.0, power = 1.0;
-			for ( double c : coefficients )
-			{
-				value += c*power;
-				power *= psi;
-			}
-			if ( !( value > 0.0 ) || !std::isfinite( value ) )
-			{
-				++refusalCount;
-				return refuse( coefficients );
-			}
-		}
-
-		++solveCount;
-		// THE OUTERMOST SEAM OF THE q-DRIVEN LOOP, PROBED. `G( c ) - c` is what
-		// the outer Newton roots, so a device run reporting `final norm 0` in
-		// zero iterations is saying `G( c0 ) == c0` -- and these two lines say
-		// whether that is true of the map or of something upstream of it.
-		// MEASUREMENTS.md M-205.
-		stageChecksum( "toroidalMap.in", coefficients );
-		FluxSurfaceFamily const *family = solve( ggPrimeKnotsFromCoefficients(
-			coefficients, options.knotSamples, options.extension ) );
-		if ( family == nullptr || family->empty() )
-		{
-			++refusalCount;
-			stageChecksum( "toroidalMap.refusedEmptyFamily", coefficients );
-			return refuse( coefficients );
-		}
-
-		// THE REFLECTION, ONCE. The family labels by Psi_N and the target is
-		// written in the source's Psi; see the header.
-		auto const &target = options.target;
-		ToroidalField const inverted = invertSafetyFactor(
-			*family,
-			[ &target ]( double normalisedFluxFamily )
-			{
-				return target( 1.0 - normalisedFluxFamily );
-			} );
-
-		lastGood = coefficients;
-		labels = inverted.normalisedFlux;
-		std::vector<double> const fitted =
-			fitToroidalFieldSquared( inverted, options.degree );
-		lastFloor = toroidalMapFloor( inverted, options.degree,
-		                              options.solveAccuracy );
-		lastOrthonormalFloor = toroidalMapFloorOrthonormal(
-			inverted, options.degree, options.solveAccuracy );
-		stageChecksum( "toroidalMap.out", fitted );
-		return fitted;
-	}
-
-	PinnedToroidalFieldMap::PinnedToroidalFieldMap( ToroidalFieldMap &map,
-	                                                unsigned int degree, Pin pin )
-		: map( map ), degree( degree ), pin( std::move( pin ) )
-	{
-		if ( degree == 0 )
-			throw std::invalid_argument(
-				"meq::PinnedToroidalFieldMap: a degree-zero g^2 has no q "
-				"condition to give way" );
-		if ( !std::isfinite( this->pin.value ) || this->pin.value == 0.0 )
-			throw std::invalid_argument(
-				"meq::PinnedToroidalFieldMap: the pinned value must be finite "
-				"and non-zero" );
-		if ( this->pin.kind == ScalePin::EdgeField && !( this->pin.value > 0.0 ) )
-			throw std::invalid_argument(
-				"meq::PinnedToroidalFieldMap: g on the boundary is pinned as a "
-				"magnitude, so it must be positive; its sign is q's (see "
-				"section 3)" );
-		if ( this->pin.kind != ScalePin::EdgeField && !this->pin.measured )
-			throw std::invalid_argument(
-				"meq::PinnedToroidalFieldMap: a current or flux pin is a row of "
-				"the outer system and needs the solved state's own value" );
-		if ( !( this->pin.weight > 0.0 ) || !std::isfinite( this->pin.weight ) )
-			throw std::invalid_argument(
-				"meq::PinnedToroidalFieldMap: the pin row's weight must be "
-				"positive" );
-	}
-
-	std::vector<double> PinnedToroidalFieldMap::unknowns(
-		std::vector<double> const &coefficients ) const
-	{
-		if ( coefficients.size() != degree + 1 )
-			throw std::invalid_argument(
-				"meq::PinnedToroidalFieldMap::unknowns: the coefficients are not "
-				"of this degree" );
-		if ( pin.kind == ScalePin::EdgeField )
-			return std::vector<double>( coefficients.begin() + 1, coefficients.end() );
-		return coefficients;
-	}
-
-	std::vector<double> PinnedToroidalFieldMap::coefficients(
-		std::vector<double> const &unknowns ) const
-	{
-		if ( pin.kind != ScalePin::EdgeField )
-			return unknowns;
-		std::vector<double> out;
-		out.reserve( unknowns.size() + 1 );
-		out.push_back( pin.value*pin.value );
-		out.insert( out.end(), unknowns.begin(), unknowns.end() );
-		return out;
-	}
-
-	std::vector<double> PinnedToroidalFieldMap::operator()(
-		std::vector<double> const &unknowns )
-	{
-		/*
-		 * A REFUSAL POINTS BACK AT THE LAST ADMISSIBLE POINT, as the free
-		 * map's does: finite, and zero nowhere but at a point that really was
-		 * evaluated.
-		 *
-		 * **AND IT IS NEVER SMALLER THAN ANY RESIDUAL THE MAP HAS RETURNED.**
-		 * `lastGood - x` alone is large only where the iterate has WANDERED:
-		 * when the last admissible point is a differencing column a step away,
-		 * a refused trial point beside it reads a residual smaller than the
-		 * iterate's own, the line search's Armijo test accepts it, and the
-		 * loop then sits on a point the map cannot evaluate. Measured on
-		 * QDrivenScalePin's base run in single: accepted at 0.16 from 0.50,
-		 * stalled there at 0.14 (MEASUREMENTS.md M-358). Scaled to twice the
-		 * largest admissible 2-norm seen, a refusal fails every sufficient-
-		 * decrease test the loop can pose.
-		 */
-		auto refuse = [ & ]
-		{
-			lastWasRefused = true;
-			std::vector<double> out( unknowns.size() );
-			std::vector<double> back( unknowns.size() );
-			double length = 0.0;
-			for ( std::size_t i = 0; i < unknowns.size(); ++i )
-			{
-				back[ i ] = lastGood.size() == unknowns.size()
-				            ? lastGood[ i ] - unknowns[ i ] : -1.0;
-				length += back[ i ]*back[ i ];
-			}
-			length = std::sqrt( length );
-			double const scale = length > 0.0
-				? std::max( 1.0, 2.0*largestResidual/length ) : 1.0;
-			for ( std::size_t i = 0; i < unknowns.size(); ++i )
-				out[ i ] = unknowns[ i ] + scale*back[ i ];
-			return out;
-		};
-		lastWasRefused = false;
-
-		std::vector<double> const c = coefficients( unknowns );
-		int const refusedBefore = map.refusals();
-		std::vector<double> const image = map( c );
-		if ( map.refusals() != refusedBefore )
-			return refuse();
-
-		double measured = 0.0;
-		if ( pin.kind != ScalePin::EdgeField )
-		{
-			try
-			{
-				measured = pin.measured( c );
-			}
-			catch ( ... )
-			{
-				return refuse();
-			}
-			if ( !std::isfinite( measured ) )
-				return refuse();
-		}
-
-		/*
-		 * THE FIT'S ORTHONORMAL COORDINATES, on the labels this step was fitted
-		 * on -- the same Vandermonde in the SOURCE's Psi that
-		 * fitToroidalFieldSquared() solves, so `y = R c` is the coefficient
-		 * vector's own discrete L2 coordinate over the surfaces.
-		 */
-		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
-		Eigen::MatrixXd const r = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic,
-			Eigen::Dynamic, Eigen::RowMajor> const>(
-			fitOrthonormalFactor( map.lastLabels(), degree ).data(), terms, terms );
-
-		Eigen::VectorXd difference( terms );
-		for ( Eigen::Index j = 0; j < terms; ++j )
-			difference( j ) = image[ static_cast<std::size_t>( j ) ]
-			                  - c[ static_cast<std::size_t>( j ) ];
-		Eigen::VectorXd const y = r*difference;
-
-		// y_d GIVES WAY: rows y_0 .. y_{d-1}, and the pin's row after them.
-		std::vector<double> residual( static_cast<std::size_t>( terms - 1 ) );
-		for ( Eigen::Index j = 0; j + 1 < terms; ++j )
-			residual[ static_cast<std::size_t>( j ) ] = y( j );
-		if ( pin.kind != ScalePin::EdgeField )
-			residual.push_back( pin.weight*( measured - pin.value )/pin.value );
-
-		/*
-		 * THE FLOOR, IN THE COORDINATES THE ROWS ARE IN. The fit rows are
-		 * `y`, whose noise is the map's orthonormal floor directly -- not the
-		 * monomial floor times R's row sum, which charged every row the top
-		 * coefficient's noise, 600 times what single precision measures
-		 * (M-359). The pin row is one quantity solved to the inner solve's
-		 * relative accuracy: four standard deviations of it, times the
-		 * weight.
-		 */
-		lastFloor = map.orthonormalFloor();
-		if ( pin.kind != ScalePin::EdgeField )
-			lastFloor = std::max( lastFloor, pin.weight*4.0*map.solveAccuracy() );
-		lastLabels = map.lastLabels();
-
-		double norm = 0.0;
-		for ( double value : residual )
-			norm += value*value;
-		largestResidual = std::max( largestResidual, std::sqrt( norm ) );
-		lastGood = unknowns;
-		measuredValue = measured;
-		std::vector<double> out( unknowns.size() );
-		for ( std::size_t i = 0; i < unknowns.size(); ++i )
-			out[ i ] = unknowns[ i ] + residual[ i ];
-		return out;
-	}
-
-	std::vector<double> PinnedToroidalFieldMap::differenceBasis() const
-	{
-		if ( lastLabels.empty() )
-			return {};
-		Eigen::Index const terms = static_cast<Eigen::Index>( degree ) + 1;
-		Eigen::MatrixXd const r = Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic,
-			Eigen::Dynamic, Eigen::RowMajor> const>(
-			fitOrthonormalFactor( lastLabels, degree ).data(), terms, terms );
-		// Under EdgeField c_0 is held, so the unknowns' coordinates are R's
-		// block on c_1 .. c_d -- y_1 .. y_d at fixed c_0.
-		Eigen::MatrixXd const block = pin.kind == ScalePin::EdgeField
-			? Eigen::MatrixXd( r.bottomRightCorner( terms - 1, terms - 1 ) ) : r;
-		Eigen::MatrixXd const basis =
-			block.triangularView<Eigen::Upper>().solve(
-				Eigen::MatrixXd::Identity( block.rows(), block.cols() ) );
-		std::vector<double> out( static_cast<std::size_t>( basis.size() ) );
-		for ( Eigen::Index i = 0; i < basis.rows(); ++i )
-			for ( Eigen::Index j = 0; j < basis.cols(); ++j )
-				out[ static_cast<std::size_t>( i*basis.cols() + j ) ] = basis( i, j );
-		return out;
-	}
-
 	std::vector<double> monotoneSlopes( std::vector<double> const &x,
 	                                    std::vector<double> const &y )
 	{
@@ -529,278 +632,6 @@ namespace meq
 				knots.insert( knots.begin(), vacuum );
 			}
 		}
-
-		return knots;
-	}
-
-
-	/*
-	 * LEAST SQUARES ON THE MONOMIALS, WHICH IS ADEQUATE HERE AND WOULD NOT BE
-	 * AT HIGH DEGREE. Psi is in [ 0, 1 ] and the degree is two or three, so the
-	 * Vandermonde's conditioning is a non-issue; a Jacobi or Chebyshev basis
-	 * would be the answer at ten. Eigen's column-pivoting QR is used rather than
-	 * the normal equations because it costs nothing here and squares nothing.
-	 */
-	std::vector<double> fitToroidalFieldSquared( ToroidalField const &field,
-	                                             unsigned int degree )
-	{
-		if ( degree == 0 )
-			throw std::invalid_argument(
-				"meq::fitToroidalFieldSquared: a degree of zero is a constant "
-				"g^2, i.e. gg' identically zero, which is a vacuum toroidal "
-				"field and not a fit" );
-		std::size_t const terms = degree + 1;
-		if ( field.size() < terms )
-		{
-			std::ostringstream message;
-			message << "meq::fitToroidalFieldSquared: degree " << degree
-			        << " needs " << terms << " coefficients and the family has "
-			        << field.size() << " surfaces";
-			throw std::invalid_argument( message.str() );
-		}
-		requireAscending( field.normalisedFlux, "meq::fitToroidalFieldSquared" );
-
-		Eigen::MatrixXd design( field.size(), terms );
-		Eigen::VectorXd rhs( field.size() );
-		for ( std::size_t i = 0; i < field.size(); ++i )
-		{
-			// THE SOURCE'S Psi, not the family's. See the header, section 2.
-			double const psi = 1.0 - field.normalisedFlux[ i ];
-			double power = 1.0;
-			for ( std::size_t j = 0; j < terms; ++j )
-			{
-				design( static_cast<Eigen::Index>( i ),
-				        static_cast<Eigen::Index>( j ) ) = power;
-				power *= psi;
-			}
-			rhs( static_cast<Eigen::Index>( i ) ) = field.gSquared[ i ];
-		}
-
-		Eigen::VectorXd const solution =
-			design.colPivHouseholderQr().solve( rhs );
-
-		std::vector<double> out( terms );
-		for ( std::size_t j = 0; j < terms; ++j )
-			out[ j ] = solution( static_cast<Eigen::Index>( j ) );
-		return out;
-	}
-
-	namespace
-	{
-		Eigen::MatrixXd designOn( std::vector<double> const &labels,
-		                          std::size_t terms )
-		{
-			Eigen::MatrixXd design( static_cast<Eigen::Index>( labels.size() ),
-			                        static_cast<Eigen::Index>( terms ) );
-			for ( std::size_t i = 0; i < labels.size(); ++i )
-			{
-				double const psi = 1.0 - labels[ i ];
-				double power = 1.0;
-				for ( std::size_t j = 0; j < terms; ++j )
-				{
-					design( static_cast<Eigen::Index>( i ),
-					        static_cast<Eigen::Index>( j ) ) = power;
-					power *= psi;
-				}
-			}
-			return design;
-		}
-	}
-
-	std::vector<double> fitOrthonormalFactor( std::vector<double> const &labels,
-	                                          unsigned int degree )
-	{
-		if ( degree == 0 )
-			throw std::invalid_argument(
-				"meq::fitOrthonormalFactor: a degree of zero is not a fit" );
-		std::size_t const terms = degree + 1;
-		if ( labels.size() < terms )
-			throw std::invalid_argument(
-				"meq::fitOrthonormalFactor: fewer surfaces than coefficients" );
-		requireAscending( labels, "meq::fitOrthonormalFactor" );
-		Eigen::HouseholderQR<Eigen::MatrixXd> const qr( designOn( labels, terms ) );
-		Eigen::Index const n = static_cast<Eigen::Index>( terms );
-		Eigen::MatrixXd const r =
-			Eigen::MatrixXd( qr.matrixQR().topRows( n ).triangularView<Eigen::Upper>() )
-			/std::sqrt( static_cast<double>( labels.size() ) );
-		std::vector<double> out( terms*terms );
-		for ( Eigen::Index i = 0; i < n; ++i )
-			for ( Eigen::Index j = 0; j < n; ++j )
-				out[ static_cast<std::size_t>( i*n + j ) ] = r( i, j );
-		return out;
-	}
-
-	double toroidalMapFloorOrthonormal( ToroidalField const &field,
-	                                    unsigned int degree,
-	                                    double solveAccuracy )
-	{
-		if ( degree == 0 )
-			throw std::invalid_argument(
-				"meq::toroidalMapFloorOrthonormal: a degree of zero is not a fit" );
-		std::size_t const terms = degree + 1;
-		if ( field.size() < terms || field.gSquared.size() != field.size() )
-			throw std::invalid_argument(
-				"meq::toroidalMapFloorOrthonormal: the family has fewer surfaces "
-				"than the fit has coefficients, or no g^2 on each of them" );
-		requireAscending( field.normalisedFlux, "meq::toroidalMapFloorOrthonormal" );
-
-		// R P = Q^T/sqrt( N ): the thin Q of the design, whose columns are
-		// orthonormal over the surfaces.
-		Eigen::HouseholderQR<Eigen::MatrixXd> const qr(
-			designOn( field.normalisedFlux, terms ) );
-		Eigen::Index const rows = static_cast<Eigen::Index>( field.size() );
-		Eigen::MatrixXd const q = qr.householderQ()
-			*Eigen::MatrixXd::Identity( rows, static_cast<Eigen::Index>( terms ) );
-		double const scale = 1.0/std::sqrt( static_cast<double>( field.size() ) );
-		double worst = 0.0;
-		for ( Eigen::Index k = 0; k < q.cols(); ++k )
-		{
-			double sum = 0.0;
-			for ( Eigen::Index i = 0; i < rows; ++i )
-			{
-				double const term = scale*q( i, k )
-				                    *field.gSquared[ static_cast<std::size_t>( i ) ];
-				sum += term*term;
-			}
-			worst = std::max( worst, std::sqrt( sum ) );
-		}
-		return 4.0*4.0*std::abs( solveAccuracy )*worst;
-	}
-
-	double toroidalMapFloor( ToroidalField const &field, unsigned int degree,
-	                         double solveAccuracy )
-	{
-		if ( degree == 0 )
-			throw std::invalid_argument(
-				"meq::toroidalMapFloor: a degree of zero is not a fit" );
-		std::size_t const terms = degree + 1;
-		if ( field.size() < terms || field.gSquared.size() != field.size() )
-			throw std::invalid_argument(
-				"meq::toroidalMapFloor: the family has fewer surfaces than the "
-				"fit has coefficients, or no g^2 on each of them" );
-		requireAscending( field.normalisedFlux, "meq::toroidalMapFloor" );
-
-		// THE SAME DESIGN MATRIX AS fitToroidalFieldSquared(), in the source's
-		// Psi, so P below is that fit's own pseudo-inverse and not a model of
-		// it.
-		Eigen::MatrixXd design( field.size(), terms );
-		for ( std::size_t i = 0; i < field.size(); ++i )
-		{
-			double const psi = 1.0 - field.normalisedFlux[ i ];
-			double power = 1.0;
-			for ( std::size_t j = 0; j < terms; ++j )
-			{
-				design( static_cast<Eigen::Index>( i ),
-				        static_cast<Eigen::Index>( j ) ) = power;
-				power *= psi;
-			}
-		}
-		Eigen::MatrixXd const pseudoInverse =
-			design.completeOrthogonalDecomposition().pseudoInverse();
-
-		// Row k of P, each surface's entry weighted by that surface's g^2 --
-		// the relative error is per surface, so the absolute one is g^2 times
-		// it -- and summed in quadrature, the surfaces' errors being
-		// independent. The worst coefficient is the one the max norm sees.
-		double worst = 0.0;
-		for ( Eigen::Index k = 0; k < pseudoInverse.rows(); ++k )
-		{
-			double sum = 0.0;
-			for ( Eigen::Index i = 0; i < pseudoInverse.cols(); ++i )
-			{
-				double const term = pseudoInverse( k, i )
-				                    *field.gSquared[ static_cast<std::size_t>( i ) ];
-				sum += term*term;
-			}
-			worst = std::max( worst, std::sqrt( sum ) );
-		}
-
-		// 4 for g^2's two averages, each squared; 4 standard deviations.
-		return 4.0*4.0*std::abs( solveAccuracy )*worst;
-	}
-
-	std::vector<Knot> ggPrimeKnotsFromFit( ToroidalField const &field,
-	                                       unsigned int degree,
-	                                       std::size_t samples,
-	                                       EdgeExtension extension )
-	{
-		return ggPrimeKnotsFromCoefficients(
-			fitToroidalFieldSquared( field, degree ), samples, extension );
-	}
-
-	std::vector<Knot> ggPrimeKnotsFromCoefficients(
-		std::vector<double> const &c, std::size_t samples,
-		EdgeExtension extension )
-	{
-		if ( samples < 2 )
-			throw std::invalid_argument(
-				"meq::ggPrimeKnotsFromCoefficients: at least two knots are "
-				"needed" );
-		if ( c.empty() )
-			throw std::invalid_argument(
-				"meq::ggPrimeKnotsFromCoefficients: no coefficients, so there is "
-				"no g^2 to differentiate" );
-
-		// gg' = ( 1/2 ) dG/dPsi and its derivative, both exact on the
-		// polynomial -- which is the whole reason for fitting rather than
-		// interpolating. No slope rule, no reflection: the fit was built in the
-		// source's Psi already.
-		auto ggPrime = [ &c ]( double psi )
-		{
-			double value = 0.0, power = 1.0;
-			for ( std::size_t j = 1; j < c.size(); ++j )
-			{
-				value += 0.5*static_cast<double>( j )*c[ j ]*power;
-				power *= psi;
-			}
-			return value;
-		};
-		auto ggPrimeSlope = [ &c ]( double psi )
-		{
-			double value = 0.0, power = 1.0;
-			for ( std::size_t j = 2; j < c.size(); ++j )
-			{
-				value += 0.5*static_cast<double>( j )
-				         *static_cast<double>( j - 1 )*c[ j ]*power;
-				power *= psi;
-			}
-			return value;
-		};
-
-		/*
-		 * THE KNOTS SPAN THE WHOLE OF Psi, NOT THE FAMILY'S RANGE, AND THE
-		 * DISTINCTION IS THE DIFFERENCE BETWEEN A MODEL AND A MEASUREMENT.
-		 *
-		 * meq::FluxSurfaceFamily refuses to extrapolate, rightly: outside the
-		 * cut a traced surface is made of something else and only the band mask
-		 * can say so. A FIT is not a traced surface. It is a low-order model of
-		 * g^2 and evaluating it at Psi = 0 or 1 is what a model is for.
-		 *
-		 * SAMPLING ONLY [ 0.05, 0.95 ] AND LETTING SplineProfile CLAMP IS A
-		 * DIFFERENT PROFILE, AND IT COSTS THE FIXED POINT. Measured: with the
-		 * knots on the family's range, the outer residual at the CLOSED-FORM
-		 * answer is 1.3e-01 rather than zero -- because the clamped profile
-		 * differs from the closed form exactly where it clamps, near the axis
-		 * and near the edge, so the equilibrium it produces is a different one.
-		 * Both outer methods then converge, correctly, to a fixed point that is
-		 * not the answer, and no solver could have found the answer because it
-		 * was not a root of the map they were given.
-		 */
-		double const lowest = 0.0;
-		double const highest = 1.0;
-
-		std::vector<Knot> knots;
-		knots.reserve( samples + 1 );
-		for ( std::size_t i = 0; i < samples; ++i )
-		{
-			double const t = static_cast<double>( i )
-			                 /static_cast<double>( samples - 1 );
-			double const psi = lowest + t*( highest - lowest );
-			knots.push_back( Knot{ psi, ggPrime( psi ), ggPrimeSlope( psi ) } );
-		}
-
-		if ( extension == EdgeExtension::VacuumOutside && knots.front().psi > 0.0 )
-			knots.insert( knots.begin(), Knot{ 0.0, 0.0, 0.0 } );
 
 		return knots;
 	}

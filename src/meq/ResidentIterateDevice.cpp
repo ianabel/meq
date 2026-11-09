@@ -245,6 +245,28 @@ namespace meq
 		return true;
 	}
 
+	bool doubleDotKernel( mfem::Vector const &a, int aBegin, mfem::Vector const *b, int bBegin,
+	                      int count, double &out )
+	{
+		out = 0.0;
+		if ( count <= 0 )
+			return true;
+		auto const *d_a = a.Read();
+		auto const *d_b = b != nullptr ? b->Read() : d_a;
+		bool const weighted = b != nullptr;
+		double total = 0.0;
+		mfem::Array<double> work;
+		mfem::reduce( count, total,
+		              [ = ] MFEM_HOST_DEVICE ( int k, double &r )
+		              {
+		                      double const x = static_cast<double>( d_a[ aBegin + k ] );
+		                      r += weighted ? x*static_cast<double>( d_b[ bBegin + k ] ) : x;
+		              },
+		              mfem::SumReducer<double>{}, true, work );
+		out = total;
+		return true;
+	}
+
 	bool copyEntriesKernel( mfem::Vector const &source,
 	                        mfem::Array<int> const &indices,
 	                        mfem::Vector &destination )
@@ -412,6 +434,11 @@ namespace meq
 
 	bool nodalPeakKernel( mfem::Vector const &, int, int, mfem::real_t &,
 	                      int & )
+	{
+		return false;
+	}
+
+	bool doubleDotKernel( mfem::Vector const &, int, mfem::Vector const *, int, int, double & )
 	{
 		return false;
 	}

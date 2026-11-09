@@ -198,10 +198,10 @@ plain `ctest` exercises threaded assembly as it ships. The reds are
 `AnisotropicMirror`'s
 `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`, deliberate while
 `Δ( Ψ )` crawls towards the firehose limit (→ **[M-351](MEASUREMENTS.md#m-351)**,
-`TODO`, *Anisotropic pressure*), and `QDrivenConsistency`, deliberate while
-`g²` is a fixed-degree fit, whose delivered `q` misses its target by the fit's
-floor at every mesh (→ **[M-361](MEASUREMENTS.md#m-361)**, `TODO`, *The q-driven
-solve is inconsistent*); a single build adds `DriverAcceptance`, whose
+`TODO`, *Anisotropic pressure*), and `InnerSolveStall`, deliberate while the
+bordered inner Newton stalls on a sharp `gg′` near the axis that continuation
+reaches (→ **[M-QR-8](MEASUREMENTS.md#m-qr-8)**, `TODO`, *The bordered inner
+Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
 (→ **[M-312](MEASUREMENTS.md#m-312)**). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped

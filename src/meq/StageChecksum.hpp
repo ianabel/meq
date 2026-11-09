@@ -84,8 +84,8 @@ namespace meq
 	 *
 	 * It has no memory manager behind it and therefore always reports
 	 * `H+ D-`. It is here so that a walk can follow a quantity across the seam
-	 * where MEQ hands MFEM's world back to its own -- `meq::ToroidalFieldMap`'s
-	 * coefficients are the case this was written for. The overloads over
+	 * where MEQ hands MFEM's world back to its own -- `meq::SafetyFactorSystem`'s
+	 * knot values and residuals are the case it is used for. The overloads over
 	 * `mfem::Vector` and `mfem::Array<int>` are in `meq/StageChecksumMfem.hpp`.
 	 *
 	 * A no-op when `stageChecksumWanted()` is false, including the read -- so

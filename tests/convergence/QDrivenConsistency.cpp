@@ -2,54 +2,55 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <variant>
 #include <vector>
 
 #include "meq/Dataset.hpp"
 #include "meq/Run.hpp"
+#include "meq/SafetyFactor.hpp"
 
 #include "SourceTree.hpp"
+#include "convergence/QDrivenTarget.hpp"
 
 /*
- * THE q-DRIVEN SOLVE IS CONSISTENT: THE q IT DELIVERS CONVERGES TO THE q IT WAS
- * ASKED FOR AS THE MESH REFINES. RED, DELIBERATELY -- TODO, "The q-driven solve
- * is inconsistent: g^2 is a fixed-degree global fit, so the delivered q misses
- * the target by the fit's floor however fine the mesh"; MEASUREMENTS.md M-361.
+ * THE q-DRIVEN SOLVE IS CONSISTENT: WHAT IT DELIVERS CONVERGES TO WHAT IT WAS
+ * ASKED FOR AS THE MESH, THE DEGREE AND THE KNOTS REFINE (MEASUREMENTS.md
+ * M-361, M-QR-3).
  *
- * The loop carries g^2 as a polynomial of fixed degree d, fitted over the
- * surfaces, so a target whose g^2 is not such a polynomial is met only to the
- * fit's floor -- and that floor is a property of d, not of h. Every other q
- * test in the tree builds its target from a g^2 the fit represents exactly,
- * where the floor is zero and the defect cannot show.
- *
- * HERE THE TARGET IS NOT REPRESENTABLE. It is the q of a forward solve with
+ * THE TARGET IS NOT REPRESENTABLE at any finite knot count. It is the q of a
+ * forward solve with
  *
  *     g^2( Psi ) = g0^2 + B ( e^( kappa Psi ) - 1 )/( e^kappa - 1 )
  *
- * (Psi the source's, zero on the boundary, so g = g0 there; B = 1, kappa = 2),
- * taken on a mesh resolved well past the rungs: RefinementLevels = 3 at
- * k = 3, whose q differs from RefinementLevels = 2's by 1.0e-7 relative, six
- * orders under the miss read here (M-361). The q-driven run is then posed on
- * that target, pinned by its own boundary g, on two rungs in h at k = 2, and
- * the delivered q -- the surfaces file's own column -- is compared with the
- * reference's at the same labels.
+ * (Psi the source's, zero on the boundary, so g = g0 there; B = 1, kappa = 2)
+ * on a reference resolved past the rungs, RefinementLevels = 2 at k = 3, read
+ * at each rung's own knots and three labels between each pair
+ * (QDrivenTarget.hpp) -- so the target the loop reads at its knots is the
+ * reference's own, and no table interpolates it there. Each rung is then posed
+ * on its target, pinned by the closed form's own boundary g.
  *
- * WHAT IT ASSERTS: the max-norm miss falls by at least 4 per halving of h, a
- * rate of 2, under the k + 1 = 3 the field and the extraction reach. What it
- * reads now is the fit's floor: 1.18e-1 at degree 2 on levels 0, 1 and 2, and
- * 1.2e-2 at degree 3 on the same three -- it moves with the degree and not
- * with h (M-361). It turns green when g^2 is carried in a representation that
- * refines with the discretisation, matched to q at every knot, and the pin
- * then closes the system with no q condition giving way.
+ * WHAT IT MEASURES, AND WHY NOT q AT THE KNOTS. q is matched at the knots in
+ * least squares, so the miss there is the discrete problem's inconsistency
+ * and says little about the answer. What the run delivers is g^2, which is
+ * known in closed form: the measure is max | g^2/g^2_exact - 1 | on a dense
+ * grid over the knots' cut -- between the knots as well as at them -- the
+ * interior, where q is finite on this box (its corners make q log-singular at
+ * the edge). The part of the request outside the cut is one knot spacing
+ * wide and shrinks with the mesh (meq::toroidalKnotCut()).
  *
- * Coarse on purpose (the q-driven box, levels 0 and 1, k = 2): MEQ owes about
- * 1e-6, and the floor this case is about sits orders above that.
+ * WHAT IT ASSERTS: along the diagonal -- h halved, the knots following it --
+ * the g^2 error falls by at least 6 a step, against the 2^3 = 8 the averages'
+ * k + 1 gives at k = 2 (M-QR-3 measured 9.6 and 8.3 in the study; this case
+ * reads 18 at k = 2 and 11 at k = 3, M-QR-7). M-361's degree-2 and degree-3
+ * fits read 1.18e-1 and 1.2e-2 in q here, flat in h.
  */
 namespace
 {
@@ -68,7 +69,7 @@ namespace
 	}
 
 	std::string configuration( std::string const &prefix, std::string const &toroidal,
-	                           int levels, int order )
+	                           int levels, int order, std::string const &surfaces = "" )
 	{
 		return
 			"[mesh]\nRMin = 0.6\nRMax = 1.4\nZMin = -0.6\nZMax = 0.6\nNR = 8\nNZ = 8\n"
@@ -83,155 +84,131 @@ namespace
 			"[solver]\nNewtonMaxIterations = 60\nNewtonRelativeTolerance = 1.0e-12\n"
 			"NewtonAbsoluteTolerance = 1.0e-14\n\n"
 			"[output]\nDirectory = \".\"\nPrefix = \"" + prefix + "\"\nGridNR = 17\nGridNZ = 17\n"
-			"FluxSurfaces = true\nFluxSurfaceCount = 24\n";
+			+ surfaces;
 	}
 
-	std::vector<double> variable( meq::Dataset const &data, std::string const &name )
+	struct Delivered
 	{
-		meq::DatasetVariable const *v = data.variable( name );
-		BOOST_TEST_REQUIRE( v != nullptr, "no variable " << name );
-		return std::get<std::vector<double>>( v->values );
-	}
-
-	struct Surfaces
-	{
-		std::vector<double> label, q;
+		double gSquaredError = 0.0;
+		double misfit = 0.0;
+		std::size_t knots = 0;
+		double seconds = 0.0;
 	};
-
-	/// Run @a text and return its surfaces file's labels and q -- the q the
-	/// file reports, or one built from the closed-form g for a forward run.
-	Surfaces run( std::string const &directory, std::string const &prefix,
-	              std::string const &text, bool forward )
-	{
-		meq::RunOptions options;
-		options.configPath = directory + "/" + prefix + ".toml";
-		options.configText = text;
-		options.baseDirectory = directory;
-		options.version = "QDrivenConsistency";
-		meq::Run run( options );
-		BOOST_TEST_REQUIRE( run.prepare() == meq::Solved );
-		int const code = run.solve();
-		BOOST_TEST_REQUIRE( code == meq::Solved, prefix << " exits " << code );
-		std::shared_ptr<meq::Dataset const> const data =
-			run.fluxSurfaces( directory + "/" + prefix + "_surfaces.nc" );
-		BOOST_TEST_REQUIRE( data != nullptr );
-		Surfaces out;
-		out.label = variable( *data, "normalised_flux" );
-		if ( forward )
-		{
-			std::vector<double> const vPrime = variable( *data, "V_prime" );
-			std::vector<double> const inverse = variable( *data, "inverse_R_squared" );
-			for ( std::size_t i = 0; i < out.label.size(); ++i )
-				out.q.push_back( vPrime[ i ]*std::sqrt( gSquared( 1.0 - out.label[ i ] ) )
-				                 *inverse[ i ]/( 4.0*M_PI*M_PI ) );
-		}
-		else
-			out.q = variable( *data, "safety_factor" );
-		return out;
-	}
 
 	struct Fixture
 	{
 		std::string directory;
-		Surfaces reference;
 
 		Fixture()
 			: directory( std::filesystem::absolute( "QDrivenConsistency-files" ).string() )
 		{
 			std::filesystem::create_directories( directory );
+			// gg' as a dense Hermite table, exact slopes: its own error is
+			// O( 64^-4 ), far under anything read here.
+			std::ofstream table( directory + "/consistency-ggprime.dat" );
+			table.precision( 17 );
+			int const knots = 64;
+			for ( int i = 0; i <= knots; ++i )
 			{
-				// gg' as a dense Hermite table, exact slopes: its own error is
-				// O( 64^-4 ), far under anything read here.
-				std::ofstream table( directory + "/consistency-ggprime.dat" );
-				table.precision( 17 );
-				int const knots = 64;
-				for ( int i = 0; i <= knots; ++i )
-				{
-					double const psi = static_cast<double>( i )/knots;
-					table << psi << " " << ggPrime( psi ) << " " << kappa*ggPrime( psi ) << "\n";
-				}
-			}
-			reference = run( directory, "consistency-reference",
-				configuration( "consistency-reference", "GGPrimeFile = \"consistency-ggprime.dat\"\n",
-				               3, 3 ), true );
-
-			// The target in the source's Psi, one on the axis, ascending, with
-			// centred slopes: q-driven-q.dat's construction.
-			std::ofstream target( directory + "/consistency-q.dat" );
-			target.precision( 17 );
-			std::size_t const n = reference.label.size();
-			std::vector<double> psi, q;
-			for ( std::size_t i = n; i-- > 0; )
-			{
-				psi.push_back( 1.0 - reference.label[ i ] );
-				q.push_back( reference.q[ i ] );
-			}
-			for ( std::size_t i = 0; i < n; ++i )
-			{
-				std::size_t const a = i == 0 ? 0 : i - 1;
-				std::size_t const b = i + 1 == n ? n - 1 : i + 1;
-				target << psi[ i ] << " " << q[ i ] << " "
-				       << ( q[ b ] - q[ a ] )/( psi[ b ] - psi[ a ] ) << "\n";
+				double const psi = static_cast<double>( i )/knots;
+				table << psi << " " << ggPrime( psi ) << " " << kappa*ggPrime( psi ) << "\n";
 			}
 		}
 
-		/// max | q_delivered - q_target |/| q_target | over the table's labels.
-		double miss( int levels, int order, int degree )
+		Delivered deliver( int levels, int order )
 		{
-			std::string const prefix = "consistency-l" + std::to_string( levels ) + "-k"
-			                           + std::to_string( order ) + "-d" + std::to_string( degree );
-			Surfaces const delivered = run( directory, prefix, configuration( prefix,
-				"SafetyFactorFile = \"consistency-q.dat\"\nSafetyFactorDegree = "
-				+ std::to_string( degree ) + "\nR0B0 = " + std::to_string( g0 ) + "\n",
-				levels, order ), false );
-			BOOST_TEST_REQUIRE( delivered.label.size() == reference.label.size() );
-			double worst = 0.0;
-			for ( std::size_t i = 0; i < delivered.q.size(); ++i )
+			std::string const tag = "l" + std::to_string( levels ) + "-k" + std::to_string( order );
+			std::string const target = "consistency-q-" + tag + ".dat";
+			std::string const driven = "SafetyFactorFile = \"" + target + "\"\nR0B0 = " + std::to_string( g0 ) + "\n";
 			{
-				BOOST_TEST_REQUIRE( std::abs( delivered.label[ i ] - reference.label[ i ] ) < 1.0e-12 );
-				worst = std::max( worst, std::abs( delivered.q[ i ] - reference.q[ i ] )
-				                         /std::abs( reference.q[ i ] ) );
+				std::ofstream provisional( directory + "/" + target );
+				provisional << "0.0 1.0 0.0\n1.0 1.0 0.0\n";
 			}
-			std::printf( "    level %d, k = %d, degree %d: max | q - q_target |/| q_target | %.3e\n",
-			             levels, order, degree, worst );
-			return worst;
+			std::vector<double> const knots = meq::test::knotsOf(
+				directory, configuration( "consistency-" + tag, driven, levels, order ) );
+			std::shared_ptr<meq::Dataset const> const surfaces = meq::test::forward(
+				directory, "consistency-reference-" + tag,
+				configuration( "consistency-reference-" + tag,
+				               "GGPrimeFile = \"consistency-ggprime.dat\"\n", 2, 3,
+				               meq::test::surfacesAt( knots, 4 ) ) );
+			meq::test::writeTarget( *surfaces, []( double psi ) { return std::sqrt( gSquared( psi ) ); },
+			                        directory + "/" + target );
+
+			meq::RunOptions options;
+			options.configPath = directory + "/consistency-" + tag + ".toml";
+			options.configText = configuration( "consistency-" + tag, driven, levels, order );
+			options.baseDirectory = directory;
+			options.version = "QDrivenConsistency";
+			meq::Run run( options );
+			BOOST_TEST_REQUIRE( run.prepare() == meq::Solved );
+			auto const started = std::chrono::steady_clock::now();
+			int const code = run.solve();
+			Delivered out;
+			out.seconds = std::chrono::duration<double>( std::chrono::steady_clock::now() - started ).count();
+			BOOST_TEST_REQUIRE( code == meq::Solved, tag << " exits " << code );
+			BOOST_TEST_REQUIRE( run.writeRestart( directory + "/consistency-" + tag ) == meq::Solved );
+			meq::Dataset const &data = *run.dataset();
+			auto numbers = [ & ]( char const *name )
+			{
+				meq::DatasetAttribute const *a = data.attribute( name );
+				BOOST_TEST_REQUIRE( a != nullptr, "no attribute " << name );
+				std::istringstream in( std::get<std::string>( a->value ) );
+				std::vector<double> values;
+				for ( double value = 0.0; in >> value; )
+					values.push_back( value );
+				return values;
+			};
+			meq::ToroidalFieldSpline spline( numbers( "g_squared_knots" ) );
+			spline.setValues( numbers( "g_squared" ) );
+			BOOST_TEST_REQUIRE( spline.size() == knots.size() );
+			for ( int k = 0; k <= 2000; ++k )
+			{
+				double const psiN = knots.front() + ( knots.back() - knots.front() )*k/2000.0;
+				out.gSquaredError = std::max( out.gSquaredError,
+					std::abs( spline( 1.0 - psiN )/gSquared( 1.0 - psiN ) - 1.0 ) );
+			}
+			meq::DatasetAttribute const *misfit = data.attribute( "toroidal_loop_misfit" );
+			BOOST_TEST_REQUIRE( misfit != nullptr );
+			out.misfit = std::get<std::vector<double>>( misfit->value ).front();
+			out.knots = knots.size();
+			std::printf( "    level %d, k = %d, %2zu knots: max | g^2/g^2_exact - 1 | %.3e, misfit at the "
+			             "knots %.3e, %.1f s\n", levels, order, out.knots, out.gSquaredError, out.misfit,
+			             out.seconds );
+			return out;
 		}
 	};
 }
 
-BOOST_AUTO_TEST_CASE( theDeliveredQConvergesToTheTarget )
+BOOST_AUTO_TEST_CASE( theDeliveredFieldConvergesToTheTarget )
 {
 	Fixture fixture;
-	std::printf( "\n  THE DELIVERED q AGAINST A TARGET NO POLYNOMIAL g^2 REPRESENTS (M-361)\n" );
-	double const coarse = fixture.miss( 0, 2, 2 );
-	double const fine = fixture.miss( 1, 2, 2 );
-	std::printf( "    factor per halving of h: %.2f\n", coarse/fine );
-	BOOST_TEST( fine < coarse/4.0,
-		"the q the q-driven run delivers misses its target by " << coarse << " at h and "
-		<< fine << " at h/2: it does not fall with the mesh. g^2 is carried as a "
-		"polynomial of fixed degree fitted over the surfaces, so a target whose g^2 is "
-		"not one is met only to the fit's floor, whatever the mesh. TODO, \"The q-driven "
-		"solve is inconsistent: g^2 is a fixed-degree global fit\"; MEASUREMENTS.md M-361" );
+	std::printf( "\n  THE DELIVERED g^2 AGAINST A TARGET NO FINITE KNOT SET REPRESENTS (M-QR-3)\n" );
+	Delivered const coarse = fixture.deliver( 0, 2 );
+	Delivered const fine = fixture.deliver( 1, 2 );
+	double const factor = coarse.gSquaredError/fine.gSquaredError;
+	std::printf( "    factor per halving of h, the knots following: %.2f\n", factor );
+	BOOST_TEST( factor > 6.0,
+		"the g^2 the q-driven run delivers misses the closed form its target was measured "
+		"from by " << coarse.gSquaredError << " at h and " << fine.gSquaredError << " at h/2, "
+		"a factor of " << factor << " against the 8 of k + 1 = 3: the solve does not converge "
+		"to the problem posed. If it is flat, the representation does not refine with the mesh "
+		"(meq::toroidalKnotCount())" );
+	// THE MISFIT AT THE KNOTS IS PRINTED AND NOT ASSERTED: it is the least
+	// squares' residual, and on these two rungs it reads 5.4e-6 then 1.4e-4 --
+	// the innermost knot sits a knot spacing from the axis on a surface about
+	// one element across at every level (TODO, *The q-driven misfit at the
+	// innermost knot*). What the run delivers, g^2, is what converges.
 }
 
-/*
- * THE STUDY BEHIND M-361, run by name and not by the suite: the miss by degree
- * and by mesh, and the reference against a coarser one.
- */
-BOOST_AUTO_TEST_CASE( theMissMovesWithTheDegreeAndNotTheMesh, * boost::unit_test::disabled() )
+BOOST_AUTO_TEST_CASE( theDeliveredFieldConvergesAtCubicDegree )
 {
 	Fixture fixture;
-	std::printf( "\n  M-361: the miss by degree and mesh\n" );
-	for ( int degree : { 2, 3 } )
-		for ( int levels : { 0, 1, 2 } )
-			fixture.miss( levels, 2, degree );
-
-	Surfaces const coarser = run( fixture.directory, "consistency-reference-l2",
-		configuration( "consistency-reference-l2", "GGPrimeFile = \"consistency-ggprime.dat\"\n",
-		               2, 3 ), true );
-	double worst = 0.0;
-	for ( std::size_t i = 0; i < coarser.q.size(); ++i )
-		worst = std::max( worst, std::abs( coarser.q[ i ] - fixture.reference.q[ i ] )
-		                         /std::abs( fixture.reference.q[ i ] ) );
-	std::printf( "    reference, level 2 against level 3 at k = 3: %.3e\n", worst );
+	std::printf( "\n  THE SAME AT k = 3 (M-QR-3)\n" );
+	Delivered const coarse = fixture.deliver( 0, 3 );
+	Delivered const fine = fixture.deliver( 1, 3 );
+	double const factor = coarse.gSquaredError/fine.gSquaredError;
+	std::printf( "    factor per halving of h, the knots following: %.2f\n", factor );
+	BOOST_TEST( factor > 6.0,
+		"at k = 3 the delivered g^2 misses by " << coarse.gSquaredError << " then "
+		<< fine.gSquaredError << ", a factor of " << factor );
 }

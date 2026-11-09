@@ -171,6 +171,15 @@ namespace meq
 		       /( span*span );
 	}
 
+	double NormalisedMHDSource::ggPrimeDerivative( double radius, double z, double psi,
+	                                               Profile const &direction ) const
+	{
+		if ( !insidePlasma( radius, z, psi ) )
+			return 0.0;
+		double const span = psiAxisValue - psiBoundaryValue;
+		return currentScale()*direction( ( psi - psiBoundaryValue )/span )/span;
+	}
+
 	bool NormalisedMHDSource::normalisationDerivatives( double radius, double z,
 	                                                    double psi,
 	                                                    double &dFdAxis,

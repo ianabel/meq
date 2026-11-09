@@ -311,10 +311,12 @@ set(MEQ_CONVERGENCE_TESTS
 	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
 	# PlasmaCurrent, returning one equilibrium (M-357).
 	QDrivenScalePin
-	# RED, deliberately: the delivered q against a target no fixed-degree g^2
-	# represents, which does not converge with the mesh (TODO, "The q-driven
-	# solve is inconsistent", M-361).
+	# The delivered g^2 converges to the closed form its target was measured
+	# from as the mesh and the knots refine together (M-QR-3).
 	QDrivenConsistency
+	# RED, deliberately: the bordered inner Newton stalls on a sharp g g' near
+	# the axis that continuation reaches (TODO, M-QR-8).
+	InnerSolveStall
 	# Phase-1 study for the refining g^2 (branch q-refining-fit, M-QR): every
 	# case disabled, run by name.
 	QRefiningStudy
@@ -368,23 +370,6 @@ endforeach()
 # meq_core requires anyway.
 if(TARGET SafetyFactorScale)
 	target_link_libraries(SafetyFactorScale PRIVATE Eigen3::Eigen)
-endif()
-
-# WHICH q CONDITION GIVES WAY TO EACH SCALE PIN: a study, BUILT BUT NOT
-# REGISTERED, because its numbers are MEASUREMENTS.md M-355 and M-356,
-# taken once, and the suite asserts the choice through the driver instead
-# (QDrivenScalePin, the composition). About five minutes:
-#     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
-# It solves, so it needs the solver, as every convergence test does.
-list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
-if(TARGET meq_core AND NOT _solver_index EQUAL -1
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SafetyFactorPinStudy.cpp")
-	add_executable(SafetyFactorPinStudy "convergence/SafetyFactorPinStudy.cpp")
-	target_include_directories(SafetyFactorPinStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(SafetyFactorPinStudy PRIVATE
-		${MEQ_TEST_CORE}
-		Boost::unit_test_framework
-		Eigen3::Eigen)
 endif()
 
 # THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's

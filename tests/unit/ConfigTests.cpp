@@ -2886,7 +2886,6 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	BOOST_TEST( good.getSource().getMHD().safetyFactorFile
 	            == exampleData( "q-driven-q.dat" ) );
 	BOOST_TEST( good.getSource().getMHD().toroidalFieldGuess == 2.2 );
-	BOOST_TEST( good.getSource().getMHD().safetyFactorDegree == 2u );
 	BOOST_TEST( good.getSource().getMHD().ggPrimeFile.empty(),
 		"a q-driven run has no gg' table, and leaving one here would let the "
 		"factory read a profile the loop is about to replace" );
@@ -2927,16 +2926,14 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	              "ToroidalFieldGuess = -1.0\nPlasmaCurrent = 1.0e5\n" ),
 	         "source.ToroidalFieldGuess" );
 
-	// DEGREE ZERO IS A CONSTANT g^2, so gg' is identically zero and no
-	// coefficient the loop moves can change the equilibrium. A degree the
-	// surface family cannot determine is refused at the other end.
-	refuses( mhd( driven + "SafetyFactorDegree = 0\n" ),
+	// SafetyFactorDegree IS REFUSED BY NAME, at every value and on a prescribed
+	// run too: g^2 is carried at knots that follow the mesh, and a degree would
+	// pose the fixed-fit problem that does not converge with it (M-361).
+	for ( char const *value : { "0", "2", "3" } )
+		refuses( mhd( driven + "SafetyFactorDegree = " + value + "\n" ),
+		         "source.SafetyFactorDegree" );
+	refuses( mhd( "GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\nSafetyFactorDegree = 2\n" ),
 	         "source.SafetyFactorDegree" );
-	refuses( mhd( driven + "SafetyFactorDegree = 9\n" ),
-	         "source.SafetyFactorDegree" );
-
-	Configuration const cubic = parse( mhd( driven + "SafetyFactorDegree = 3\n" ) );
-	BOOST_TEST( cubic.getSource().getMHD().safetyFactorDegree == 3u );
 }
 
 /*
