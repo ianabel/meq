@@ -317,9 +317,6 @@ set(MEQ_CONVERGENCE_TESTS
 	# RED, deliberately: the bordered inner Newton stalls on a sharp g g' near
 	# the axis that continuation reaches (TODO, M-QR-8).
 	InnerSolveStall
-	# Phase-1 study for the refining g^2 (branch q-refining-fit, M-QR): every
-	# case disabled, run by name.
-	QRefiningStudy
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves
@@ -370,6 +367,21 @@ endforeach()
 # meq_core requires anyway.
 if(TARGET SafetyFactorScale)
 	target_link_libraries(SafetyFactorScale PRIVATE Eigen3::Eigen)
+endif()
+
+# THE REFINING g^2 STUDY AND ITS PROBES: BUILT BUT NOT REGISTERED. Every case
+# is a measurement taken once (MEASUREMENTS.md M-QR-1 to M-QR-8) and disabled,
+# so as a ctest it would be a module with no case to run; run them by name:
+#     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./QRefiningStudy --run_test=<case>
+# writeTheExampleTarget is examples/q-driven-q.dat's provenance.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/QRefiningStudy.cpp")
+	add_executable(QRefiningStudy "convergence/QRefiningStudy.cpp")
+	target_include_directories(QRefiningStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(QRefiningStudy PRIVATE
+		${MEQ_TEST_CORE}
+		Boost::unit_test_framework)
 endif()
 
 # THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's

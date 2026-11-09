@@ -103,30 +103,6 @@ namespace meq
 		return f;
 	}
 
-	SafetyFactorEquilibrium::Fields SafetyFactorEquilibrium::combine( Fields const &base,
-	                                                                  Fields const &direction, double s )
-	{
-		Fields f;
-		auto sum = []( mfem::GridFunction const &a, mfem::GridFunction const &b, double t )
-		{
-			auto out = std::make_unique<mfem::GridFunction>( a );
-			out->Add( t, b );
-			return out;
-		};
-		f.psiStar = sum( *base.psiStar, *direction.psiStar, s );
-		f.qStar = sum( *base.qStar, *direction.qStar, s );
-		f.trace = sum( *base.trace, *direction.trace, s );
-		f.psi = sum( *base.psi, *direction.psi, s );
-		f.flux = sum( *base.flux, *direction.flux, s );
-		return f;
-	}
-
-	/*
-	 * q/g AT THE KNOTS OF A FIELD: the family on the continuous pair, rooted
-	 * from the axis the raw fields locate -- CriticalPointFinder over q_h and
-	 * psi_h, as the write phase's family is -- and labelled by @a psiAxis,
-	 * the solve's own psi_ax (meq::labelledAxis()).
-	 */
 	CriticalPoint SafetyFactorEquilibrium::locatedAxis( Fields const &fields ) const
 	{
 		CriticalPointFinder const finder( *fields.flux, *fields.psi );
@@ -145,7 +121,16 @@ namespace meq
 		auto const started = std::chrono::steady_clock::now();
 		ContinuousFields const continuous =
 			buildContinuousFields( *fields.psiStar, *fields.qStar, *fields.trace );
-		ContourTracer tracer( *continuous.potential, *continuous.flux );
+		secondsExtracting += secondsSince( started );
+		return qOverG( *continuous.potential, *continuous.flux, axis );
+	}
+
+	std::vector<double> SafetyFactorEquilibrium::qOverG( mfem::GridFunction const &potential,
+	                                                     mfem::GridFunction const &flux,
+	                                                     CriticalPoint const &axis ) const
+	{
+		auto const started = std::chrono::steady_clock::now();
+		ContourTracer tracer( potential, flux );
 		if ( options.gammaHMarker != nullptr )
 			tracer.setBandExtension( BandExtension::TransferLift, *options.gammaHMarker, options.path );
 		FluxSurfaceFamily const family = extractFluxSurfaces( tracer, axis, solver.psiBoundary(),
@@ -275,6 +260,24 @@ namespace meq
 		if ( !( std::abs( det ) > 0.0 ) )
 			return false;
 
+		/*
+		 * psi~ AND q~ ARE LINEAR IN THE STATE (ContinuousField.hpp), so the
+		 * perturbed pair is the base's plus s times the tangent's: one
+		 * interpolant per tangent and one for the base, m + 1 builds, and the
+		 * difference ONE-SIDED from the base family -- m + 1 extractions in
+		 * place of 2m. One-sided at this step it agrees with re-solved
+		 * differences as the central difference did (M-QR-9).
+		 */
+		auto const building = std::chrono::steady_clock::now();
+		ContinuousFields const baseContinuous =
+			buildContinuousFields( *base.psiStar, *base.qStar, *base.trace );
+		secondsExtracting += secondsSince( building );
+		CriticalPoint labelled = axis;
+		labelled.psi = psiAxis;
+		std::vector<double> const atBase = qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled );
+		mfem::GridFunction potential( baseContinuous.potential->FESpace() );
+		mfem::GridFunction flux( baseContinuous.flux->FESpace() );
+
 		out.qOverG.assign( m*m, 0.0 );
 		for ( std::size_t j = 0; j < m; ++j )
 		{
@@ -295,10 +298,28 @@ namespace meq
 				point.psi = psiAxis + t*dAxis[ j ];
 				return point;
 			};
-			std::vector<double> const plus = qOverG( combine( base, direction, s ), moved( s ) );
-			std::vector<double> const minus = qOverG( combine( base, direction, -s ), moved( -s ) );
-			for ( std::size_t i = 0; i < m; ++i )
-				out.qOverG[ i*m + j ] = ( plus[ i ] - minus[ i ] )/( 2.0*s );
+			auto const interpolating = std::chrono::steady_clock::now();
+			ContinuousFields const tangent =
+				buildContinuousFields( *direction.psiStar, *direction.qStar, *direction.trace );
+			secondsExtracting += secondsSince( interpolating );
+			auto at = [ & ]( double t )
+			{
+				potential = *baseContinuous.potential;
+				potential.Add( t, *tangent.potential );
+				flux = *baseContinuous.flux;
+				flux.Add( t, *tangent.flux );
+				return qOverG( potential, flux, moved( t ) );
+			};
+			std::vector<double> const plus = at( s );
+			if ( options.central )
+			{
+				std::vector<double> const minus = at( -s );
+				for ( std::size_t i = 0; i < m; ++i )
+					out.qOverG[ i*m + j ] = ( plus[ i ] - minus[ i ] )/( 2.0*s );
+			}
+			else
+				for ( std::size_t i = 0; i < m; ++i )
+					out.qOverG[ i*m + j ] = ( plus[ i ] - atBase[ i ] )/s;
 		}
 
 		/*

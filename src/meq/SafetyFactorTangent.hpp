@@ -2,6 +2,7 @@
 #define MEQ_SAFETY_FACTOR_TANGENT_HPP
 
 #include <functional>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -36,17 +37,18 @@
  * the extraction's dependence on where its rays start, 1e-5 to 4e-5 of the
  * Jacobian (MEASUREMENTS.md M-QR-1); re-locating it on each perturbed field
  * can pick the other element's root where the axis sits on a face, and
- * difference the O( h^( k + 1 ) ) jump between them. The extraction is differenced, centrally:
- * no equilibrium is re-solved, and the continuous fields make the family
- * smooth in `s` (M-365, M-367). The analytic shape derivative would remove
- * the `2m` extractions per Jacobian that are most of the cost (TODO, *The
- * q-driven Jacobian's cost is the extraction*).
+ * difference the O( h^( k + 1 ) ) jump between them. psi~ and q~ are linear
+ * in the state, so the perturbed pair is the base's plus `s` times the
+ * tangent's -- m + 1 interpolants -- and the extraction is differenced
+ * one-sided from the base family, m + 1 extractions; no equilibrium is
+ * re-solved (M-365, M-367, M-QR-9). The extractions are most of the cost, and
+ * the analytic shape derivative would remove them (TODO, *The q-driven
+ * Jacobian's cost is the extraction*).
  *
  * The pins: R0B0's row reads the spline alone; the flux and the current are
- * linearised as the quadratures they are read with
- * (GradShafranovSolver::integrateOverDomain() with a direction,
- * linearisedPlasmaCurrent()).
- *
+ * linearised as the quadratures they are read with, through the solver's own
+ * assemblers -- assembleSourceDerivative() and the bordered current solve's
+ * row and corner (plasmaCurrentLinearisation()) -- contracted in double.
  *
  * 2. EVERY SOLVE IS WARM-STARTED, EXPLICITLY
  *
@@ -84,9 +86,20 @@ namespace meq
 				mfem::Array<int> const *gammaHMarker = nullptr;
 				mfem::TransferPath const *path = nullptr;
 
-				/// The extraction's difference step, as a fraction of the
-				/// field: `s max|dpsi*| = step max|psi*|`.
-				double step = 1.0e-5;
+				/**
+				 * The extraction's difference step, as a fraction of the
+				 * field: `s max|dpsi~| = step max|psi~|`, one-sided from the
+				 * base family unless @ref central. IN DOUBLE, ONE-SIDED AT
+				 * 1e-9: the base and the perturbed pair share everything but
+				 * `s` times the tangent, so the noise is the tracer's and
+				 * small, and against re-solved differences the columns read
+				 * 2.6e-5, 2.6e-6, 3.1e-8 and 2.7e-6 at 1e-6, 1e-7, 1e-9 and
+				 * 1e-11 -- truncation, then noise (M-QR-9). IN SINGLE a step
+				 * under the format's epsilon adds nothing to the field, so the
+				 * difference is central at 1e-3.
+				 */
+				double step = std::numeric_limits<mfem::real_t>::epsilon() < 1.0e-10 ? 1.0e-9 : 1.0e-3;
+				bool central = std::numeric_limits<mfem::real_t>::epsilon() >= 1.0e-10;
 
 				/// The solve, which may throw; solver.solve() when empty.
 				std::function<void()> solve;
@@ -132,9 +145,10 @@ namespace meq
 
 			Fields solvedFields() const;
 			Fields along( mfem::Vector const &dx ) const;
-			static Fields combine( Fields const &base, Fields const &direction, double s );
 			std::vector<double> qOverG( Fields const &fields, double psiAxis ) const;
 			std::vector<double> qOverG( Fields const &fields, CriticalPoint const &axis ) const;
+			std::vector<double> qOverG( mfem::GridFunction const &potential, mfem::GridFunction const &flux,
+			                            CriticalPoint const &axis ) const;
 			CriticalPoint locatedAxis( Fields const &fields ) const;
 
 			GradShafranovSolver &solver;

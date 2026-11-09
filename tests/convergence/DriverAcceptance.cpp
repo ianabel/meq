@@ -5029,12 +5029,39 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 	std::printf( "\n  THE q THE RUN REACHED, AGAINST THE q IT WAS ASKED FOR\n" );
 	std::printf( "      Psi_N    Psi_source      reached       target"
 	             "     relative\n" );
+	/*
+	 * OVER THE KNOTS' CUT, WHERE THE REQUEST IS IMPOSED. Outside the innermost
+	 * and the outermost knot g^2 is the end cubic continued and the table is
+	 * not imposed -- a layer one knot spacing wide that shrinks with the mesh
+	 * (meq::toroidalKnotCut()); the surfaces file's family reaches past it to
+	 * Psi_N = 0.95, where q is the continuation's, 3.6% off the table here.
+	 */
+	std::string const knotHeader = ncdumpHeader( "q-driven_surfaces.nc" );
+	std::vector<double> knots;
+	{
+		std::string const needle = ":g_squared_knots = \"";
+		std::size_t const at = knotHeader.find( needle );
+		BOOST_TEST_REQUIRE( at != std::string::npos );
+		char const *cursor = knotHeader.c_str() + at + needle.size();
+		char *end = nullptr;
+		for ( double value = std::strtod( cursor, &end ); end != cursor;
+		      value = std::strtod( cursor, &end ) )
+		{
+			knots.push_back( value );
+			cursor = end;
+		}
+	}
+	BOOST_TEST_REQUIRE( knots.size() >= 4u );
 	double worstQ = 0.0;
+	std::size_t inside = 0;
 	for ( std::size_t i = 0; i < reached.size(); ++i )
 	{
+		if ( label[ i ] < knots.front() || label[ i ] > knots.back() )
+			continue;
+		++inside;
 		// THE REFLECTION. meq::normalisedFlux is zero on the axis and the
-		// source's Psi is one there; meq::ToroidalFieldMap owns the same
-		// conversion on the way in, at SafetyFactor.cpp's `target( 1 - ... )`.
+		// source's Psi is one there; meq::SafetyFactorSystem owns the same
+		// conversion on the way in.
 		double const sourcePsi = 1.0 - label[ i ];
 		double const wanted = target( sourcePsi );
 		double const relative = std::abs( reached[ i ] - wanted )
@@ -5045,7 +5072,8 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 			             label[ i ], sourcePsi, reached[ i ], wanted,
 			             relative );
 	}
-	std::printf( "    worst over %zu surfaces %.3e\n", reached.size(), worstQ );
+	std::printf( "    worst over the %zu surfaces inside the knots' cut %.3e\n", inside, worstQ );
+	BOOST_TEST_REQUIRE( inside >= 12u );
 
 	/*
 	 * WHAT THE TOLERANCE IS AND WHY IT IS NOT TIGHTER. Three errors are in
