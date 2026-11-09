@@ -1265,9 +1265,9 @@ is normalised, and `solveLinearised()`, `linearisedTangent()` and
 * **Discretise, then differentiate, converges.** The tangent reaches `k + 1`
   in `ψ` and `q` and `k + 2` in `ψ*`, at `ψ`'s own error, on a closed form
   that reads its parameter inside the non-linearity
-  (→ **[M-LIN-1](MEASUREMENTS.md#m-lin-1)**). Bordered, `dψ_ax` converges too,
+  (→ **[M-373](MEASUREMENTS.md#m-lin-1)**). Bordered, `dψ_ax` converges too,
   and the tangent is a Richardson difference of two round-off solves to
-  4.7e-12 (→ **[M-LIN-3](MEASUREMENTS.md#m-lin-3)**).
+  4.7e-12 (→ **[M-375](MEASUREMENTS.md#m-lin-3)**).
 * **The Dirichlet datum is lifted, not handed to the solve.** Newton's step is
   zero on the essential trace dofs, so a right-hand side there is discarded;
   `J v_b = R(x + v_b) − R(x)` exactly, since `R` is affine in the trace.
@@ -1283,15 +1283,15 @@ is normalised, and `solveLinearised()`, `linearisedTangent()` and
   linearisation on a solver of its own.
 * **The tangent is refined, as Newton's iterate is.** One back-solve through
   `J` carries `eps κ(J_h) ~ eps/h²`, which in single is 1.6e-04 at `k = 3`
-  where `ψ_h` is at 4e-08 (→ **[M-LIN-5](MEASUREMENTS.md#m-lin-5)**).
+  where `ψ_h` is at 4e-08 (→ **[M-377](MEASUREMENTS.md#m-lin-5)**).
   `solveLinearised()` corrects against `r = b − J dx` with `J` **applied** —
   the residual less its source, differenced, plus the source's `dF/dψ` — and
   one pass brings the tangent to the solution's own accuracy; double does not
-  move (→ **[M-LIN-6](MEASUREMENTS.md#m-lin-6)**). A residual evaluated on the
+  move (→ **[M-378](MEASUREMENTS.md#m-lin-6)**). A residual evaluated on the
   retained operator between back-solves leaves its factorisation intact.
-* **Near a fold the error grows as `1/σ`** (→ **[M-LIN-2](MEASUREMENTS.md#m-lin-2)**),
+* **Near a fold the error grows as `1/σ`** (→ **[M-374](MEASUREMENTS.md#m-lin-2)**),
   and `linearisedInverseNorm()` tracks it as `C/δ` from the factorisation the
-  tangent already has (→ **[M-LIN-4](MEASUREMENTS.md#m-lin-4)**). It is the least
+  tangent already has (→ **[M-376](MEASUREMENTS.md#m-lin-4)**). It is the least
   eigenvalue's modulus in the residual's scaling: read it as a ratio.
 * **Refused**: every border but `ψ_ax`'s — `ψ_bnd`, a prescribed current, the
   X-point, the exterior coupling, an inverse solve, the bordered gauge — and a

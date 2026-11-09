@@ -4,7 +4,7 @@
  * matrix of a converged state -- the field Jacobian, psi_ax's column, its row
  * and corner -- and keeps it; solveLinearised() and linearisedTangent() reuse
  * it, one back-solve a direction; linearisedInverseNorm() estimates 1/sigma_min
- * from it. MEASUREMENTS.md M-LIN-3 and M-LIN-4.
+ * from it. MEASUREMENTS.md M-375 and M-376.
  *
  *   * the bordered tangent -- dx and d psi_ax -- against a Richardson
  *     difference of two solves converged to round-off;
@@ -17,7 +17,7 @@
  *     lambda is phi with d psi_ax/d lambda = 1 -- and F reads the
  *     normalisation, so the border is load-bearing;
  *   * sigma_min: the estimate against the distance to the least eigenvalue
- *     of the linearised operator, M-LIN-2's near-fold case.
+ *     of the linearised operator, M-374's near-fold case.
  */
 #define BOOST_TEST_MODULE LinearisedSolve
 #include <boost/test/unit_test.hpp>
@@ -235,7 +235,7 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentIsADifferenceOfTwoConvergedSolves )
 	 * A PRECONDITION OF THE FORMAT, NOT A TOLERANCE. The reference is a
 	 * difference of two solves, and in single each solve stops at its own
 	 * floor, so the reference itself is good to about 2e-3 over this step
-	 * (M-LIN-6) -- it cannot judge a tangent to 1e-8. Single checks the
+	 * (M-378) -- it cannot judge a tangent to 1e-8. Single checks the
 	 * tangent against the closed form instead, at the solution's rates.
 	 */
 #ifdef MFEM_USE_SINGLE
@@ -293,7 +293,7 @@ BOOST_AUTO_TEST_CASE( theRetainedFactorisationAnswersAsAFreshOneDoes )
  * from 8, since its solution is pre-asymptotic on 4 (2.9 in L2 from 4 to 8,
  * the tangent with it), and its finest rung about 1e-6 in L-infinity.
  * Asserted as the solution's rates are: k + 1 - 0.2 in L2 on every pair and
- * in L-infinity from the second on. M-LIN-3.
+ * in L-infinity from the second on. M-375.
  */
 namespace
 {
@@ -395,7 +395,7 @@ namespace
 			 * on which psi_h's own error in that field and norm misses the
 			 * rate is past the format's floor for the solution, and the
 			 * tangent, refined against the same residual, can be no better.
-			 * It holds on every pair in double (M-LIN-6).
+			 * It holds on every pair in double (M-378).
 			 */
 			auto check = [ & ]( char const *name, double Row::*tangentField, double Row::*solutionField )
 			{
@@ -427,9 +427,9 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentConvergesAtDegreeThree ) { borderedRates
 /*
  * sigma_min FROM THE FACTORISATION THE TANGENT ALREADY HAS: the estimate of
  * 1/sigma_min against the relative distance delta to the least eigenvalue of
- * the linearised operator, on M-LIN-2's near-fold case (F = mu psi + g,
- * no border; k = 2 on 8 cells, whose least eigenvalue M-LIN-2 fitted at
- * 23.074977827). Close in it must grow as 1/delta. M-LIN-4.
+ * the linearised operator, on M-374's near-fold case (F = mu psi + g,
+ * no border; k = 2 on 8 cells, whose least eigenvalue M-374 fitted at
+ * 23.074977827). Close in it must grow as 1/delta. M-376.
  */
 namespace
 {
@@ -483,7 +483,7 @@ BOOST_AUTO_TEST_CASE( theInverseNormEstimateGrowsAsTheOperatorNearsItsFold )
 
 /*
  * WITHOUT A BORDER THE RETAINED PATH IS solveTangent()'s, so TangentConvergence's
- * closed-form rates (M-LIN-1), measured through solveTangent(), are this
+ * closed-form rates (M-373), measured through solveTangent(), are this
  * path's too: on the affine case away from its fold, the same tangent from
  * both, with a non-zero Dirichlet datum derivative to exercise the lifting.
  */
@@ -520,7 +520,7 @@ BOOST_AUTO_TEST_CASE( withoutABorderTheRetainedTangentIsSolveTangents )
  * closed form after 0...4 passes of solveLinearised()'s refinement -- each a
  * residual of the bordered system with J applied, and one back-solve -- at
  * k = 2 and 3 on 8 to 32 cells, beside the solution's own error. MEASUREMENT
- * ONLY (disabled; run by name, in each precision). M-LIN-6.
+ * ONLY (disabled; run by name, in each precision). M-378.
  */
 BOOST_AUTO_TEST_CASE( theTangentErrorByRefinementPass, * boost::unit_test::disabled() )
 {

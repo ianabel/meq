@@ -13,8 +13,8 @@
  * with its coefficients read at psi_h rather than psi, and
  * Brezzi-Rappaz-Raviart would have it converge at psi's own rates -- if the
  * linearised operator is invertible, dF/dpsi is Lipschitz and Newton is
- * solved to round-off. This file MEASURES it, MEASUREMENTS.md M-LIN-1 and
- * M-LIN-2:
+ * solved to round-off. This file MEASURES it, MEASUREMENTS.md M-373 and
+ * M-374:
  *
  *   * the tangent against a Richardson difference of two converged solves;
  *   * the closed form: Kaltsas & Throumoulopoulos's exponential similarity
@@ -302,7 +302,7 @@ BOOST_AUTO_TEST_CASE( theTangentIsADifferenceOfTwoConvergedSolves )
 	             datumOnly.Norml2()/exact.Norml2() );
 	// A precondition of the format, not a tolerance: in single the
 	// reference, a difference of two single solves, is itself good to only
-	// about 2e-2 over this step (M-LIN-6), so it cannot judge a tangent to
+	// about 2e-2 over this step (M-378), so it cannot judge a tangent to
 	// 1e-8. Single checks the tangent against the closed form instead.
 #ifdef MFEM_USE_SINGLE
 	BOOST_TEST_MESSAGE( "  single: a difference of two single solves cannot resolve the tangent to "
@@ -336,7 +336,7 @@ BOOST_AUTO_TEST_CASE( theTangentInTheAmplitudeIsTheConstantItShouldBe )
 			std::printf( "  d psi/d f0, k = %d, n = %2d: L2 %.2e, max %.2e against |c| = %.3f\n",
 			             order, cells, e.l2, e.max, std::abs( family.dPsiDf0() ) );
 			// Round-off at every mesh: 1e-11 in double, and max( 1e-11,
-			// 20 eps |c| ) in single, the approved single floor (M-LIN-6).
+			// 20 eps |c| ) in single, the approved single floor (M-378).
 			double const bound = std::max( 1.0e-11, 20.0*static_cast<double>(
 				std::numeric_limits<mfem::real_t>::epsilon() )*std::abs( family.dPsiDf0() ) );
 			BOOST_TEST( e.max < bound, "the constant tangent misses by " << e.max );
@@ -349,7 +349,7 @@ BOOST_AUTO_TEST_CASE( theTangentInTheAmplitudeIsTheConstantItShouldBe )
  * Asserted as the solution's are (ConvergenceHarness.hpp's checkOrder()):
  * every pair's rate at least k + 1 - 0.2 in psi and q, and k + 2 - 0.2 in
  * psi*, for the tangent in L2 -- and in L-infinity, which is what the
- * question was, from the second pair on. M-LIN-1.
+ * question was, from the second pair on. M-373.
  */
 namespace
 {
@@ -477,7 +477,7 @@ namespace
 			 * L-INFINITY FROM THE SECOND PAIR ON. The coarsest pair, 4 to 8
 			 * cells, is pre-asymptotic in the maximum for the SOLUTION as much
 			 * as for its tangent -- psi's own max reads 3.81 at k = 3 and 4.66
-			 * at k = 4 there (M-LIN-1) -- so it is skipped for both, by
+			 * at k = 4 there (M-373) -- so it is skipped for both, by
 			 * name, and every finer pair carries the full bound.
 			 */
 			bool const maxAsserted = i >= 2;
@@ -498,7 +498,7 @@ namespace
 				 * the SOLUTION -- in single, q and psi* stop falling from 16
 				 * cells -- and the tangent, refined against the same residual,
 				 * can be no better. The precondition is the solution's, and it
-				 * holds on every pair in double (M-LIN-6).
+				 * holds on every pair in double (M-378).
 				 */
 				double const solutionRate = rate( rows[ i - 1 ].*check.solution.*check.norm,
 				                                  rows[ i ].*check.solution.*check.norm, ratio );
@@ -525,7 +525,7 @@ BOOST_AUTO_TEST_CASE( theTangentConvergesAtTheSolutionsRatesAtDegreeFour ) { rat
 /*
  * MEASUREMENT ONLY, NOT IN THE SUITE (disabled; run it by name): where the
  * low degrees reach 1e-6 in L-infinity, k = 1 and 2 to 128 cells.
- * M-LIN-1.
+ * M-373.
  */
 BOOST_AUTO_TEST_CASE( whereTheTangentReachesOneInAMillion, * boost::unit_test::disabled() )
 {
@@ -536,7 +536,7 @@ BOOST_AUTO_TEST_CASE( whereTheTangentReachesOneInAMillion, * boost::unit_test::d
 /*
  * ITERATIVE REFINEMENT, BY PASS: the tangent in n's error against the closed
  * form after 0...4 passes, beside the solution's own, k = 2...4. MEASUREMENT
- * ONLY (disabled; run by name, in each precision). M-LIN-6.
+ * ONLY (disabled; run by name, in each precision). M-378.
  */
 BOOST_AUTO_TEST_CASE( theTangentErrorByRefinementPass, * boost::unit_test::disabled() )
 {
@@ -570,7 +570,7 @@ BOOST_AUTO_TEST_CASE( theTangentErrorByRefinementPass, * boost::unit_test::disab
 
 /*
  * NEAR-SINGULARITY: AN AFFINE SOURCE F = mu psi + lambda g, WITH mu WALKING UP
- * TO THE FIRST EIGENVALUE OF -Delta*. M-LIN-2.
+ * TO THE FIRST EIGENVALUE OF -Delta*. M-374.
  *
  * g is manufactured from phi = sin( a ( R - R_0 ) ) sin( b ( z - z_0 ) ), zero
  * on Gamma, as g = -Delta* phi - mu phi, so the exact psi is lambda phi and the

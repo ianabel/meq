@@ -2450,7 +2450,7 @@ namespace meq
 			 * against r = b - J dx - c ds with J APPLIED, not through the
 			 * factors, until the correction stops falling. One back-solve
 			 * carries eps kappa( J ); one pass removes it (MEASUREMENTS.md
-			 * M-LIN-5, M-LIN-6). @a passes = 0 is the bare solve.
+			 * M-377, M-378). @a passes = 0 is the bare solve.
 			 * @throws std::logic_error when no valid linearisation is held.
 			 */
 			void solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
@@ -2459,7 +2459,7 @@ namespace meq
 
 			/// The cap on solveLinearised()'s refinement passes. Each is one
 			/// residual evaluation and one back-solve; they stop earlier, when
-			/// the correction stops falling. MEASUREMENTS.md M-LIN-6.
+			/// the correction stops falling. MEASUREMENTS.md M-378.
 			static constexpr int linearisedRefinementPasses = 4;
 
 			/**
@@ -2488,7 +2488,7 @@ namespace meq
 			 * that eigenvector's conditioning -- the same thing on a fold. In
 			 * the residual's own scaling, so read it as a ratio against a
 			 * reference, not against an absolute bound. MEASUREMENTS.md
-			 * M-LIN-4.
+			 * M-376.
 			 */
 			double linearisedInverseNorm( int steps = 20, double *change = nullptr );
 

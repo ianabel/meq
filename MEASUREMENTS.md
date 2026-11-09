@@ -25135,7 +25135,7 @@ The mutated loop converges as normally as the true one, and the replaced bound,
 the mutation is `out.gSquared.push_back( g*g*( 1.0 + 2.0e-8 ) )` in
 `src/meq/SafetyFactor.cpp`, reverted.
 
-### M-LIN-1
+### M-373
 
 **THE DISCRETE TANGENT `δψ_h = ∂ψ_h/∂λ` CONVERGES TO THE EXACT `∂ψ/∂λ` AT
 `ψ`'S OWN RATES — `k + 1` IN `ψ` AND `q`, `k + 2` IN THE POST-PROCESSED `ψ*`,
@@ -25209,10 +25209,10 @@ step is zero on those dofs, so a right-hand side there is discarded.
 are disabled in the suite and run by name with `--run_test=`:
 `whereTheTangentReachesOneInAMillion` and
 `theTangentsErrorConstantGrowsAsTheOperatorNearsSingularity`
-(M-LIN-2). Where `∂F/∂ψ` jumps, at a table's end inside the domain,
+(M-374). Where `∂F/∂ψ` jumps, at a table's end inside the domain,
 the tangent loses its order: [M-360](#m-360).
 
-### M-LIN-2
+### M-374
 
 **NEAR SINGULARITY THE TANGENT'S ERROR GROWS AS `1/σ`, `E₀ + C/δ` WITH `δ`
 THE RELATIVE DISTANCE TO THE LINEARISED OPERATOR'S LEAST EIGENVALUE. THE
@@ -25262,7 +25262,7 @@ past its discretisation error by `1 + (C/E₀)/δ`. The onset moves toward the
 fold as the mesh refines, because the eigenvalue converges faster than the
 solution does.
 
-### M-LIN-3
+### M-375
 
 **THE BORDERED TANGENT AT A RETAINED LINEARISATION — `ψ_ax` AN UNKNOWN, THE
 LOCATED AXIS'S ROW EXACT — IS THE DERIVATIVE OF THE DISCRETE SOLUTION TO
@@ -25302,7 +25302,7 @@ its own size, the same.
 
 **Without a border it is `solveTangent()`**: on the affine case at `μ = 10`
 with a Dirichlet datum's derivative lifted, the two tangents agree to the
-bit (0 relative), so M-LIN-1's closed-form rates through
+bit (0 relative), so M-373's closed-form rates through
 `solveTangent()` are this path's too.
 
 **Retained.** One direction, another, the first again, then a fresh
@@ -25325,12 +25325,12 @@ discretisation's accuracy, so it is second order. The rates cannot see it
 and only the Richardson difference can; on an axis where `q_h(x_ax)` is
 resolved worse it is larger.
 
-### M-LIN-4
+### M-376
 
 **`1/σ_min` FROM THE FACTORISATION THE TANGENT ALREADY HAS — TWENTY STEPS OF
 INVERSE ITERATION, `linearisedInverseNorm()` — GROWS AS `C/δ` TOWARDS A
-FOLD, CONSTANT `C` TO 0.6% FROM `δ = 1e-2` TO `1e-5`.** On M-LIN-2's
-affine case, `F = μψ + g`, `μ = μ_1,h (1 − δ)` with M-LIN-2's fitted
+FOLD, CONSTANT `C` TO 0.6% FROM `δ = 1e-2` TO `1e-5`.** On M-374's
+affine case, `F = μψ + g`, `μ = μ_1,h (1 − δ)` with M-374's fitted
 pole 23.074977827 (`k = 2`, 8 cells, no border):
 
 | `δ` | estimate | × `δ` | last relative change |
@@ -25344,7 +25344,7 @@ pole 23.074977827 (`k = 2`, 8 cells, no border):
 
 Asserted: `max/min` of estimate × `δ` under 1.5 for `δ ≤ 1e-2` (it is
 1.006). **Far from the fold it has not converged** — at `δ = 1` the last
-step still moves it 3.4e-3, as M-LIN-2 found of an inverse-power
+step still moves it 3.4e-3, as M-374 found of an inverse-power
 estimate there: the gap between the two least eigenvalues is small, so twenty
 steps are not enough. Near a fold the gap is the whole of it and one step
 nearly is.
@@ -25355,13 +25355,13 @@ singular value; the two agree up to the conditioning of that eigenvector,
 which on a fold, where one mode goes singular, is the regime that matters. It
 is in the residual's own scaling (mass-weighted), so it is read as a ratio —
 against its value away from the fold, or as `C/δ` — and not against an
-absolute bound. With M-LIN-2's amplification `1 + (C/E₀)/δ`, a growth
+absolute bound. With M-374's amplification `1 + (C/E₀)/δ`, a growth
 of this estimate by a factor `A ~ 1/δ` over its reference bounds the growth of
 the tangent's error by about `A` wherever the amplified mode's residue is no
-larger than the consistency error, `C ≤ E₀` — on M-LIN-2's 8 cells
+larger than the consistency error, `C ≤ E₀` — on M-374's 8 cells
 `C/E₀ ≈ 2.4e-3`, so there the bound is loose by that factor.
 
-### M-LIN-5
+### M-377
 
 **UNREFINED, THE TANGENT IN SINGLE PRECISION STOPS AT `c eps scale/h²`: ONE
 BACK-SOLVE THROUGH `J` CARRIES `eps κ(J_h)`, WHICH NEWTON'S RESIDUAL
@@ -25376,16 +25376,16 @@ bordered case, `k = 3`, `h = 0.025`), 1.0 (`δψ` max, `k = 2`), 2.2 and 1.3
 `h = 0.05`), 0.3 to 0.5 for `δq` and `δψ*`. `k = 3`'s bordered `ψ_h` reaches
 4.0e-08 in L2 where its tangent stops at 1.6e-04. A solution is corrected
 against its own residual every Newton step; an unrefined tangent is one
-solve. M-LIN-6 is the cure.
+solve. M-378 is the cure.
 
 **A defect it found.** `linearisedInverseNorm()` did not normalise its
 iterate, which grows by the estimate every step: twenty steps at
 `δ = 1e-5` reach `(3.4e+06)^20`, past single's range, and every estimate read
 NaN. It normalises each step; in double the estimates are unchanged to the
-printed digits (M-LIN-4's table). An estimate of 1e+16 would have overflowed
+printed digits (M-376's table). An estimate of 1e+16 would have overflowed
 double too.
 
-### M-LIN-6
+### M-378
 
 **ITERATIVE REFINEMENT AGAINST AN APPLIED JACOBIAN BRINGS THE TANGENT TO THE
 SOLUTION'S OWN ACCURACY IN ONE PASS: IN SINGLE, `k = 3` ON 32 CELLS FROM
