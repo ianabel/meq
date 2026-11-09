@@ -76,34 +76,6 @@ namespace tests
 	}
 
 	/**
-	 * THE FLOOR OF A DERIVATIVE TAKEN BY ONE DIRECT SOLVE, on a quantity of
-	 * maximum @a scale on a mesh of size @a h: `16 eps scale/h^2` in single,
-	 * ZERO in double.
-	 *
-	 * **A TANGENT IS NOT REFINED BY A RESIDUAL, AND A SOLUTION IS.** Newton
-	 * corrects its iterate from the residual every step, so how well each step
-	 * was solved does not reach the answer, and a solution's floor is
-	 * roundOffFloor()'s. A tangent, `-J^{-1} dR/dp`, is one back-solve through
-	 * the same factorisation, so it carries `eps kappa( J_h )` and `kappa`
-	 * grows as `1/h^2`. Measured in single on `TangentConvergence` and
-	 * `LinearisedSolve` (M-LIN-5): the tangent's error once the format holds
-	 * it is `c eps scale/h^2` with `c` from 0.3 to 5 over k = 1...4, so 16
-	 * leaves a factor of three. In double the same `c` puts it under 1e-11 at
-	 * the finest mesh any tangent study uses, far below every error measured,
-	 * and so it is zero there: the double build asserts every rate.
-	 */
-	inline double tangentRoundOffFloor( double scale, double h )
-	{
-#ifdef MFEM_USE_SINGLE
-		return 16.0*scale*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() )/( h*h );
-#else
-		(void)scale;
-		(void)h;
-		return 0.0;
-#endif
-	}
-
-	/**
 	 * Whether one Newton step took an AFFINE residual to this build's round-off
 	 * floor -- which is what "an exact Jacobian finishes it in one" means, and
 	 * is a different statement from "the iteration count is 1".

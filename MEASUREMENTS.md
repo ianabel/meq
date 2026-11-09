@@ -25363,53 +25363,86 @@ larger than the consistency error, `C ≤ E₀` — on M-LIN-2's 8 cells
 
 ### M-LIN-5
 
-**IN SINGLE PRECISION THE TANGENT IS GOOD TO ABOUT 1e-4 OF ITSELF AND NO
-BETTER: ONE BACK-SOLVE THROUGH `J` CARRIES `eps κ(J_h) ~ eps/h²`, WHICH
-NEWTON'S RESIDUAL CORRECTION KEEPS OUT OF THE SOLUTION. `TangentConvergence`
-AND `LinearisedSolve` ARE QUALIFIED IN SINGLE AGAINST THAT FLOOR; DOUBLE IS
-UNCHANGED.** `builds/linearised-solve-single` (`install-single`),
+**UNREFINED, THE TANGENT IN SINGLE PRECISION STOPS AT `c eps scale/h²`: ONE
+BACK-SOLVE THROUGH `J` CARRIES `eps κ(J_h)`, WHICH NEWTON'S RESIDUAL
+CORRECTION KEEPS OUT OF THE SOLUTION. AND `linearisedInverseNorm()`
+OVERFLOWED.** One pass, no refinement, `install-single`,
 `OMP_NUM_THREADS = 2`, `MKL_NUM_THREADS = 1`.
 
-**The floor.** Once the format holds it, the tangent's error is
-`c eps scale/h²`, `scale` the quantity's maximum: from the single tables,
-`c` = 1.7 (`δψ` L2, the bordered case, `k = 3`, `h = 0.025`), 1.0 (`δψ` max,
-`k = 2`), 2.2 and 1.3 (`δψ` max, `k = 3`, `h = 0.05` and 0.025), **5.0** (`δψ`
-max, `k = 4`, `h = 0.05`), 0.3 to 0.5 for `δq` and `δψ*`. The solution on the
-same meshes is at `roundOffFloor()`'s `2048 eps ‖ψ‖` — `k = 3`'s bordered
-`ψ_h` reaches 4.0e-08 in L2 where its tangent stops at 1.6e-04. A solution
-is refined by its own residual every Newton step; a tangent is one solve.
-`meq::tests::tangentRoundOffFloor()` is `16 eps scale/h²` in single and zero
-in double, where the same `c` would put it under 1e-11 at the finest mesh any
-tangent study uses.
-
-**What single asserts**, against the double build's:
-
-| | double | single |
-|---|---|---|
-| rate pairs, `TangentConvergence` | 54 of 54 | 9 of 54; 45 under the floor, the floor their bound |
-| rate pairs, `LinearisedSolve` | 26 of 26 | 9 of 26; 17 under the floor |
-| tangent against two solves, `TangentConvergence` | 1e-8 | **1e-2** (measured 4.0e-03; the datum's share alone misses by 0.64) |
-| tangent against two solves, `LinearisedSolve` | 1e-8 | **1e-2** (measured 4.6e-04, `dψ_ax` 2.3e-05; the column dropped misses by 0.62 in double) |
-| `dψ/df₀`, a constant | 1e-11 | `max(1e-11, floor)`: worst 1.25e-04 of 0.667 at `k = 3`, 16 cells |
-| `1/σ` × `δ` constant | `δ` = 1e-2 to 1e-5 | `δ` = 1e-2 to 1e-4 (34.8, 34.4, 32.8); at 1e-5 it reads 19.1 |
-| retained to the bit, and equal to `solveTangent()` | yes | yes |
-
-In single a difference of two solves resolves a derivative to about 1e-3,
-since each solve is good to a few `eps` and the step is `eps^(1/3)`
-(`jacobianDifferenceStep()`, which is the historical 1e-3 in double). At
-`δ = 1e-5` the factorisation's own round-off is the size of `σ_min`, so the
-inverse iteration falls short of the fold; the range is the format's
-precondition, as the meshes are for the rates.
+**The floor.** Once the format holds it, the unrefined tangent's error is
+`c eps scale/h²`, `scale` the quantity's maximum: `c` = 1.7 (`δψ` L2, the
+bordered case, `k = 3`, `h = 0.025`), 1.0 (`δψ` max, `k = 2`), 2.2 and 1.3
+(`δψ` max, `k = 3`, `h = 0.05` and 0.025), 5.0 (`δψ` max, `k = 4`,
+`h = 0.05`), 0.3 to 0.5 for `δq` and `δψ*`. `k = 3`'s bordered `ψ_h` reaches
+4.0e-08 in L2 where its tangent stops at 1.6e-04. A solution is corrected
+against its own residual every Newton step; an unrefined tangent is one
+solve. M-LIN-6 is the cure.
 
 **A defect it found.** `linearisedInverseNorm()` did not normalise its
 iterate, which grows by the estimate every step: twenty steps at
 `δ = 1e-5` reach `(3.4e+06)^20`, past single's range, and every estimate read
-NaN. It normalises each step now; in double the estimates are unchanged to
-the printed digits and only the last step's change moves, at round-off
-(M-LIN-4's table). An estimate of 1e+16 would have overflowed double too.
+NaN. It normalises each step; in double the estimates are unchanged to the
+printed digits (M-LIN-4's table). An estimate of 1e+16 would have overflowed
+double too.
 
-**The suite on the branch**, double, `OMP_NUM_THREADS = 2`, `ctest -j2`, 82
-minutes: 140 of 143 pass; the three reds are main's deliberate ones,
-`PlasmaEdgeConvergence`, `QDrivenConsistency`'s
-`theDeliveredQConvergesToTheTarget` (M-361, M-362) and `AnisotropicMirror`'s
-`theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
+### M-LIN-6
+
+**ITERATIVE REFINEMENT AGAINST AN APPLIED JACOBIAN BRINGS THE TANGENT TO THE
+SOLUTION'S OWN ACCURACY IN ONE PASS: IN SINGLE, `k = 3` ON 32 CELLS FROM
+1.6e-04 TO 2.6e-07 IN `δψ` L2, WHERE `ψ_h`'S OWN OVER `λ` IS 2.0e-07, AND 3.5e-05 TO
+2.0e-07 IN THE MAXIMUM AGAINST DOUBLE'S 1.5e-07. DOUBLE IS UNCHANGED TO EVERY
+PRINTED DIGIT. THE TANGENT TESTS KEEP THEIR DOUBLE BOUNDS.**
+`solveLinearised()`, and through it `linearisedTangent()` and `solveTangent()`.
+
+**The method.** `r = b − J dx − c ds` and `g − r·dx − ds` for the border, with
+`J dx` **applied** — `[(R − S)(x + s dx) − (R − S)(x)]/s + S′(ψ) dx`, `R` the
+NPC residual, `S` its source term as `SourceIntegrator` assembles it and `S′`
+its `dF/dψ`, exact for any `s` because `R − S` is affine — and the correction
+solved on the retained factorisation, until it stops falling, at most
+`linearisedRefinementPasses = 4`. Each pass is one residual and one
+back-solve. A residual evaluated on the retained operator between back-solves
+leaves the factorisation intact: the retained-to-the-bit case passes with
+refinement on. The datum's lift `J v_b` is applied the same way, so a
+non-null datum no longer re-factorises.
+
+**By pass**, `δψ` L2 against `φ` (`LinearisedSolve`, bordered) and `δψ` max
+against the closed form (`TangentConvergence`), passes 0 to 4:
+
+| case | double | single, pass 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|---|
+| bordered, `k = 2`, 32 cells | 1.379e-05 (all) | 4.272e-05 | 1.390e-05 | 1.388e-05 | 1.388e-05 | 1.388e-05 |
+| bordered, `k = 3`, 16 cells | 4.617e-06 (all) | 4.716e-05 | 1.784e-06 | 1.834e-06 | 1.798e-06 | 1.798e-06 |
+| bordered, `k = 3`, 32 cells | 2.740e-07 (all) | 1.593e-04 | 2.566e-07 | 2.928e-07 | 4.125e-07 | 2.390e-07 |
+| in `n`, `k = 2`, 32 cells | 6.270e-06 (all) | 2.941e-05 | 6.273e-06 | 6.276e-06 | 6.278e-06 | 6.278e-06 |
+| in `n`, `k = 3`, 32 cells | 1.506e-07 (all) | 3.459e-05 | 2.030e-07 | 2.086e-07 | 2.235e-07 | 2.235e-07 |
+| in `n`, `k = 4`, 16 cells | 8.749e-08 (all) | 2.640e-05 | 7.749e-07 | 8.196e-07 | 8.196e-07 | 8.196e-07 |
+
+On the coarse meshes the tangent's error is the discretisation's and no pass
+moves it. **One pass does it**; the next ones wander at the solution's own
+single floor — `ψ_h` max reads 7.2e-07 at `k = 3`, 32 cells and 4.4e-06 at
+`k = 4`, 16 cells, where double reads 1.2e-07 and 5.3e-08 — and the stopping
+rule ends them. `1/σ` from refined solves in single: 34.8, 34.6, 34.5, 32.8
+for `δ = 1e-2` to `1e-5`, a constant to 6% (unrefined, 19.1 at `1e-5`).
+
+**What single asserts now**, at double's bounds:
+
+| | double | single |
+|---|---|---|
+| rate pairs, `TangentConvergence` | 54 of 54 | 23 of 54 |
+| rate pairs, `LinearisedSolve` | 26 of 26 | 21 of 26 |
+| `dψ/df₀`, a constant | 1e-11 | `max(1e-11, 20 eps |c|)` = 1.6e-06; worst 9.5e-07 |
+| `1/σ` × `δ` constant, `δ` = 1e-2 to 1e-5 | yes | yes |
+| tangent against two converged solves | 1e-8 | not asserted |
+| retained to the bit, and equal to `solveTangent()` | yes | yes |
+
+**The rates are held to the solution's**: a pair is asserted for the tangent
+wherever `ψ_h`'s own error in that field and norm keeps `k + 1 − 0.2` on it.
+That is every pair in double. In single the solution's `q` and `ψ*` stop
+falling from 16 cells at `k ≥ 2` and `ψ` from 32 at `k = 3`, and those pairs
+are not asserted for the tangent either — the tangent, corrected against the
+same residual, is at that floor too and cannot be better than the solution.
+**The two-solve reference is a precondition single cannot meet**: each single
+solve stops at its own floor, so a difference of two over the step resolves
+the derivative to only 2.1e-03 (bordered) and 2.0e-02 (in `n`). It is a
+reference that cannot judge a tangent to 1e-8; single checks the tangent
+against the closed form instead.

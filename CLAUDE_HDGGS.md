@@ -1281,6 +1281,14 @@ is normalised, and `solveLinearised()`, `linearisedTangent()` and
   `NPCGradient()` and its solves". Every one bumps a generation and a stale
   linearisation is **refused**. A caller that keeps solving keeps its
   linearisation on a solver of its own.
+* **The tangent is refined, as Newton's iterate is.** One back-solve through
+  `J` carries `eps κ(J_h) ~ eps/h²`, which in single is 1.6e-04 at `k = 3`
+  where `ψ_h` is at 4e-08 (→ **[M-LIN-5](MEASUREMENTS.md#m-lin-5)**).
+  `solveLinearised()` corrects against `r = b − J dx` with `J` **applied** —
+  the residual less its source, differenced, plus the source's `dF/dψ` — and
+  one pass brings the tangent to the solution's own accuracy; double does not
+  move (→ **[M-LIN-6](MEASUREMENTS.md#m-lin-6)**). A residual evaluated on the
+  retained operator between back-solves leaves its factorisation intact.
 * **Near a fold the error grows as `1/σ`** (→ **[M-LIN-2](MEASUREMENTS.md#m-lin-2)**),
   and `linearisedInverseNorm()` tracks it as `C/δ` from the factorisation the
   tangent already has (→ **[M-LIN-4](MEASUREMENTS.md#m-lin-4)**). It is the least

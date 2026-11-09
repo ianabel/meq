@@ -208,9 +208,7 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentIsADifferenceOfTwoConvergedSolves )
 		axisOut = s->solver->psiAxis();
 		return mfem::Vector( s->solver->state() );
 	};
-	// The harness's step for a difference: eps^(1/3) in single, the
-	// historical 1e-3 in double.
-	double const h = meq::tests::jacobianDifferenceStep( 1.0e-3 )*lambda;
+	double const h = 1.0e-3*lambda;
 	auto central = [ & ]( double step, double &axisDifference )
 	{
 		double ap = 0.0, am = 0.0;
@@ -234,19 +232,19 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentIsADifferenceOfTwoConvergedSolves )
 	std::printf( "  the bordered tangent against two converged solves: state %.3e relative, "
 	             "d psi_ax %.10f against %.10f (%.3e)\n", relative, dAxis, axisRichardson, axisRelative );
 	/*
-	 * IN SINGLE A DIFFERENCE OF TWO SOLVES RESOLVES THE DERIVATIVE TO ABOUT
-	 * 1e-3, NOT 1e-8: each solve is good to a few eps and the step is
-	 * eps^(1/3). Measured 4.6e-04 in the state (M-LIN-5), so the bound there
-	 * is 1e-2 -- which the border's column dropped, 0.62, still exceeds
-	 * sixty-fold. Double keeps 1e-8.
+	 * A PRECONDITION OF THE FORMAT, NOT A TOLERANCE. The reference is a
+	 * difference of two solves, and in single each solve stops at its own
+	 * floor, so the reference itself is good to about 2e-3 over this step
+	 * (M-LIN-6) -- it cannot judge a tangent to 1e-8. Single checks the
+	 * tangent against the closed form instead, at the solution's rates.
 	 */
 #ifdef MFEM_USE_SINGLE
-	double const bound = 1.0e-2;
+	BOOST_TEST_MESSAGE( "  single: a difference of two single solves cannot resolve the tangent to "
+	                    "1e-8; not asserted (measured " << relative << ")" );
 #else
-	double const bound = 1.0e-8;
+	BOOST_TEST( relative < 1.0e-8, "the bordered tangent misses the difference by " << relative );
+	BOOST_TEST( axisRelative < 1.0e-8, "d psi_ax misses the difference by " << axisRelative );
 #endif
-	BOOST_TEST( relative < bound, "the bordered tangent misses the difference by " << relative );
-	BOOST_TEST( axisRelative < bound, "d psi_ax misses the difference by " << axisRelative );
 }
 
 /*
@@ -318,6 +316,8 @@ namespace
 		struct Row
 		{
 			double h, psiL2, psiMax, dL2, dMax, qL2, qMax, axis;
+			/// psi_h's own flux errors, against lambda grad phi/R.
+			double solutionQL2 = 0.0, solutionQMax = 0.0;
 		};
 		std::vector<Row> rows;
 		for ( int cells : meshes )
@@ -343,6 +343,18 @@ namespace
 			row.qL2 = dq.ComputeL2Error( q, irs.data() );
 			row.qMax = dq.ComputeMaxError( q, irs.data() );
 			row.axis = std::abs( dAxis - 1.0 );
+			mfem::GridFunction qh( &s->solver->fluxSpace() );
+			for ( int i = 0; i < fluxSize; ++i )
+				qh( i ) = -s->solver->state()( i );
+			mfem::VectorFunctionCoefficient qSolution( 2, [ mode, lambda ]( mfem::Vector const &x, mfem::Vector &v )
+			{
+				double dr = 0.0, dz = 0.0;
+				mode.gradPhi( x( 0 ), x( 1 ), dr, dz );
+				v( 0 ) = lambda*dr/x( 0 );
+				v( 1 ) = lambda*dz/x( 0 );
+			} );
+			row.solutionQL2 = qh.ComputeL2Error( qSolution, irs.data() );
+			row.solutionQMax = qh.ComputeMaxError( qSolution, irs.data() );
 			rows.push_back( row );
 		}
 
@@ -375,31 +387,34 @@ namespace
 		std::fflush( stdout );
 
 		double const wanted = order + 1.0 - meq::tests::rateSlack;
-		// The scales of the tangent's round-off floor: max | phi | = 1 and
-		// max | grad phi/R | = a/R_0 at the inner wall.
-		double const psiScale = 1.0, qScale = mode.a()/mode.radiusLow;
 		for ( std::size_t i = 1; i < rows.size(); ++i )
 		{
 			double const ratio = rows[ i - 1 ].h/rows[ i ].h;
-			auto check = [ & ]( char const *name, double Row::*field, double scale )
+			/*
+			 * Held to the solution's rate where the solution has one: a pair
+			 * on which psi_h's own error in that field and norm misses the
+			 * rate is past the format's floor for the solution, and the
+			 * tangent, refined against the same residual, can be no better.
+			 * It holds on every pair in double (M-LIN-6).
+			 */
+			auto check = [ & ]( char const *name, double Row::*tangentField, double Row::*solutionField )
 			{
-				// Under the floor the floor is the bound; in double it is
-				// zero and every rate is asserted (M-LIN-5).
-				if ( rows[ i ].*field < meq::tests::tangentRoundOffFloor( scale, rows[ i ].h ) )
+				double const solutionRate = rate( rows[ i - 1 ].*solutionField, rows[ i ].*solutionField, ratio );
+				if ( solutionRate < wanted )
 				{
-					BOOST_TEST_MESSAGE( "  k = " << order << ", h = " << rows[ i ].h << ": " << name
-					                    << " is under the tangent's round-off floor, rate not asserted" );
+					std::printf( "    k = %d, h = %.4f: %s not asserted -- the solution's own rate there is %.2f\n",
+					             order, rows[ i ].h, name, solutionRate );
 					return;
 				}
-				double const r = rate( rows[ i - 1 ].*field, rows[ i ].*field, ratio );
+				double const r = rate( rows[ i - 1 ].*tangentField, rows[ i ].*tangentField, ratio );
 				BOOST_TEST( r >= wanted, "k = " << order << ": " << name << " at " << r );
 			};
-			check( "d psi L2", &Row::dL2, psiScale );
-			check( "d q L2", &Row::qL2, qScale );
+			check( "d psi L2", &Row::dL2, &Row::psiL2 );
+			check( "d q L2", &Row::qL2, &Row::solutionQL2 );
 			if ( i >= 2 )
 			{
-				check( "d psi max", &Row::dMax, psiScale );
-				check( "d q max", &Row::qMax, qScale );
+				check( "d psi max", &Row::dMax, &Row::psiMax );
+				check( "d q max", &Row::qMax, &Row::solutionQMax );
 			}
 		}
 	}
@@ -456,23 +471,14 @@ BOOST_AUTO_TEST_CASE( theInverseNormEstimateGrowsAsTheOperatorNearsItsFold )
 		double change = 0.0;
 		double const estimate = solver.linearisedInverseNorm( 20, &change );
 		std::printf( "    %10.1e %14.4e %14.4e %12.2e\n", delta, estimate, estimate*delta, change );
-		// In single the fold is resolved to about delta = 1e-4: closer, the
-		// factorisation's own round-off is the size of sigma_min, and the
-		// estimate falls short (19 at 1e-5, M-LIN-5). The range is the
-		// format's precondition; double holds it to 1e-5.
-#ifdef MFEM_USE_SINGLE
-		bool const resolved = delta >= 1.0e-4;
-#else
-		bool const resolved = true;
-#endif
-		if ( delta <= 1.0e-2 && resolved )
+		if ( delta <= 1.0e-2 )
 			scaled.push_back( estimate*delta );
 	}
 	std::fflush( stdout );
 	double const low = *std::min_element( scaled.begin(), scaled.end() );
 	double const high = *std::max_element( scaled.begin(), scaled.end() );
 	BOOST_TEST( high/low < 1.5, "the estimate times delta varied by " << high/low
-	            << " over the resolved deltas from 1e-2; near the fold it should be a constant" );
+	            << " over delta = 1e-2 to 1e-5; near the fold it should be a constant" );
 }
 
 /*

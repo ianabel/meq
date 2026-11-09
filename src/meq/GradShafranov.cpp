@@ -12155,7 +12155,7 @@ namespace
 			for ( double x : g )
 				before += x*x;
 			before = std::sqrt( before );
-			solveLinearisedOnce( v, g, dx, ds );
+			solveLinearised( v, g, dx, ds );
 			double after = 0.0;
 			v = 0.0;
 			for ( int i = 0; i < potentialSize; ++i )

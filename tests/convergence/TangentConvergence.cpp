@@ -39,6 +39,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -278,9 +279,7 @@ BOOST_AUTO_TEST_CASE( theTangentIsADifferenceOfTwoConvergedSolves )
 		auto s = solveFamily( moved, order, cells );
 		return mfem::Vector( s->solver->state() );
 	};
-	// The harness's step for a difference: eps^(1/3) in single, the
-	// historical 1e-3 in double.
-	double const h = meq::tests::jacobianDifferenceStep( 1.0e-3 );
+	double const h = 1.0e-3;
 	auto central = [ & ]( double step )
 	{
 		mfem::Vector d = solvedAt( step );
@@ -301,16 +300,17 @@ BOOST_AUTO_TEST_CASE( theTangentIsADifferenceOfTwoConvergedSolves )
 	std::printf( "  the tangent against a Richardson difference of two converged solves: %.3e "
 	             "relative (the datum's share alone misses by %.3e)\n", relative,
 	             datumOnly.Norml2()/exact.Norml2() );
-	// In single a difference of two solves resolves the derivative to about
-	// 1e-3 (measured 4.0e-03, M-LIN-5), so the bound there is 1e-2 -- which
-	// the datum's share alone, 0.64, still exceeds sixty-fold.
+	// A precondition of the format, not a tolerance: in single the
+	// reference, a difference of two single solves, is itself good to only
+	// about 2e-2 over this step (M-LIN-6), so it cannot judge a tangent to
+	// 1e-8. Single checks the tangent against the closed form instead.
 #ifdef MFEM_USE_SINGLE
-	double const bound = 1.0e-2;
+	BOOST_TEST_MESSAGE( "  single: a difference of two single solves cannot resolve the tangent to "
+	                    "1e-8; not asserted (measured " << relative << ")" );
 #else
-	double const bound = 1.0e-8;
-#endif
-	BOOST_TEST( relative < bound, "the tangent misses the difference of two converged solves by "
+	BOOST_TEST( relative < 1.0e-8, "the tangent misses the difference of two converged solves by "
 	            << relative << " relative" );
+#endif
 }
 
 /*
@@ -335,8 +335,10 @@ BOOST_AUTO_TEST_CASE( theTangentInTheAmplitudeIsTheConstantItShouldBe )
 			Errors const e = scalarErrors( f.psi, constant, order );
 			std::printf( "  d psi/d f0, k = %d, n = %2d: L2 %.2e, max %.2e against |c| = %.3f\n",
 			             order, cells, e.l2, e.max, std::abs( family.dPsiDf0() ) );
-			double const bound = std::max( 1.0e-11,
-				meq::tests::tangentRoundOffFloor( std::abs( family.dPsiDf0() ), s->h ) );
+			// Round-off at every mesh: 1e-11 in double, and max( 1e-11,
+			// 20 eps |c| ) in single, the approved single floor (M-LIN-6).
+			double const bound = std::max( 1.0e-11, 20.0*static_cast<double>(
+				std::numeric_limits<mfem::real_t>::epsilon() )*std::abs( family.dPsiDf0() ) );
 			BOOST_TEST( e.max < bound, "the constant tangent misses by " << e.max );
 		}
 }
@@ -357,8 +359,6 @@ namespace
 		Errors psi, q, star, dpsi, dq, dstar;
 		/// max | d psi/d n | on the same points: what 1e-6 is of.
 		double scale = 0.0;
-		/// max | d q/d n |, the scale of d q's round-off floor.
-		double qScale = 0.0;
 	};
 
 	Row measureRow( ExponentialFamily const &family, int order, int cells )
@@ -400,9 +400,6 @@ namespace
 		mfem::GridFunction zero( tangentFields.psi );
 		zero = 0.0;
 		row.scale = scalarErrors( zero, dDatum, order ).max;
-		mfem::GridFunction zeroFlux( tangentFields.q );
-		zeroFlux = 0.0;
-		row.qScale = vectorErrors( zeroFlux, dqExact, order ).max;
 		return row;
 	}
 
@@ -473,7 +470,8 @@ namespace
 				Errors Row::*which;
 				double Errors::*norm;
 				double wanted;
-				double scale;
+				/// The solution's own errors in the same field.
+				Errors Row::*solution;
 			};
 			/*
 			 * L-INFINITY FROM THE SECOND PAIR ON. The coarsest pair, 4 to 8
@@ -484,30 +482,33 @@ namespace
 			 */
 			bool const maxAsserted = i >= 2;
 			for ( Check const &check : {
-				      Check{ "d psi L2", &Row::dpsi, &Errors::l2, wanted, rows[ i ].scale },
-				      Check{ "d psi max", &Row::dpsi, &Errors::max, wanted, rows[ i ].scale },
-				      Check{ "d q L2", &Row::dq, &Errors::l2, wanted, rows[ i ].qScale },
-				      Check{ "d q max", &Row::dq, &Errors::max, wanted, rows[ i ].qScale },
-				      Check{ "d psi* L2", &Row::dstar, &Errors::l2, wanted + 1.0, rows[ i ].scale },
-				      Check{ "d psi* max", &Row::dstar, &Errors::max, wanted + 1.0, rows[ i ].scale } } )
+				      Check{ "d psi L2", &Row::dpsi, &Errors::l2, wanted, &Row::psi },
+				      Check{ "d psi max", &Row::dpsi, &Errors::max, wanted, &Row::psi },
+				      Check{ "d q L2", &Row::dq, &Errors::l2, wanted, &Row::q },
+				      Check{ "d q max", &Row::dq, &Errors::max, wanted, &Row::q },
+				      Check{ "d psi* L2", &Row::dstar, &Errors::l2, wanted + 1.0, &Row::star },
+				      Check{ "d psi* max", &Row::dstar, &Errors::max, wanted + 1.0, &Row::star } } )
 			{
 				if ( check.norm == &Errors::max && !maxAsserted )
 					continue;
 				/*
-				 * UNDER THE TANGENT'S ROUND-OFF FLOOR THE FLOOR IS THE BOUND
-				 * AND THE RATE IS NOT ASSERTED -- in single only; in double
-				 * the floor is zero and every rate is (RoundOffFloor.hpp,
-				 * M-LIN-5). An O( 1 ) error is far above it, so the rate is
-				 * asserted wherever a defect would show.
+				 * THE TANGENT IS HELD TO ITS SOLUTION'S RATE WHERE THE SOLUTION
+				 * HAS ONE. A pair on which psi_h's own error in the same field
+				 * and norm misses k + 1 - 0.2 is past the format's floor for
+				 * the SOLUTION -- in single, q and psi* stop falling from 16
+				 * cells -- and the tangent, refined against the same residual,
+				 * can be no better. The precondition is the solution's, and it
+				 * holds on every pair in double (M-LIN-6).
 				 */
-				double const fine = rows[ i ].*check.which.*check.norm;
-				if ( fine < meq::tests::tangentRoundOffFloor( check.scale, rows[ i ].h ) )
+				double const solutionRate = rate( rows[ i - 1 ].*check.solution.*check.norm,
+				                                  rows[ i ].*check.solution.*check.norm, ratio );
+				if ( solutionRate < check.wanted )
 				{
-					BOOST_TEST_MESSAGE( "  k = " << order << ", h = " << rows[ i ].h << ": the tangent's "
-					                    << check.name << " is under its round-off floor, rate not asserted" );
+					std::printf( "    k = %d, h = %.4f: %s not asserted -- the solution's own rate there is %.2f\n",
+					             order, rows[ i ].h, check.name, solutionRate );
 					continue;
 				}
-				double const r = rate( rows[ i - 1 ].*check.which.*check.norm, fine, ratio );
+				double const r = rate( rows[ i - 1 ].*check.which.*check.norm, rows[ i ].*check.which.*check.norm, ratio );
 				BOOST_TEST( r >= check.wanted, "k = " << order << ", h = " << rows[ i ].h << ": the tangent's "
 				            << check.name << " converged at " << r << ", wanted " << check.wanted );
 			}

@@ -2445,6 +2445,12 @@ namespace meq
 			 * is zero there), @a g one entry per border. By the Schur
 			 * complement on the retained J^{-1} c: dx = y - ( J^{-1} c ) ds,
 			 * ds = ( g - r y )/( d - r J^{-1} c ), y = J^{-1} b.
+			 *
+			 * REFINED, as Newton's iterate is: up to @a passes corrections
+			 * against r = b - J dx - c ds with J APPLIED, not through the
+			 * factors, until the correction stops falling. One back-solve
+			 * carries eps kappa( J ); one pass removes it (MEASUREMENTS.md
+			 * M-LIN-5, M-LIN-6). @a passes = 0 is the bare solve.
 			 * @throws std::logic_error when no valid linearisation is held.
 			 */
 			void solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
@@ -2462,8 +2468,9 @@ namespace meq
 			 * Dirichlet datum's derivative @a boundaryDerivative on the
 			 * essential trace dofs (or zero). A table or a source parameter
 			 * reaches C = psi_ax - psi_h( x_ax ) not at all, so @a dCdp is
-			 * empty or zero there. A non-null @a boundaryDerivative costs a
-			 * re-factorisation: its lifting is a residual evaluation.
+			 * empty or zero there. A non-null @a boundaryDerivative is
+			 * lifted by the applied J, on the held factorisation. Refined as
+			 * solveLinearised() is.
 			 */
 			void linearisedTangent( mfem::Vector const &dRdp, std::vector<double> const &dCdp,
 			                        mfem::Coefficient *boundaryDerivative, mfem::Vector &dx,
