@@ -458,12 +458,17 @@ Raised 2026-11-09 (MEASUREMENTS.md M-QR-3, M-QR-7).
 ================================================================================
 
   Each Gauss-Newton step of the q-driven loop differences the flux-surface
-  extraction along every knot's tangent field, centrally: 2m + 1 families of
-  m surfaces, so the cost grows as m^2 and m as 1/h. Measured walls: the
-  example (level 1, 19 knots) 60 s, 49 s of them extraction, against 10 s for
-  the fixed-degree loop it replaced; QDrivenConsistency's level 1 at k = 2,
-  49 s; the study's level 2 at 32 knots, 411 s, 337 s extraction (M-QR-3).
-  The tangents themselves -- one back-solve each -- are under a tenth.
+  extraction along every knot's tangent field, centrally: 2m + 1 families
+  of m surfaces a step with the residual's own, so the cost grows as m^2 and
+  m as 1/h. One-sided would be m + 2, and stalls on a target with a misfit
+  (M-QR-9). Measured walls: the example (level 1, 19 knots) 60 s, 39 s of
+  them 273 extractions, against 10 s for the fixed-degree loop it replaced;
+  one-sided, 44 s and 168; QDrivenConsistency's level 1 at k = 2,
+  49 s (central, M-QR-7); the study's level 2 at 32 knots, 411 s, 337 s
+  extraction (central, M-QR-3). The device audit reads about 190 s a
+  Jacobian at m = 8 on 32,768 triangles in single on the GPU, against a
+  0.94 s solve: 79% the extractions, 19% the tangents' refinement passes.
+  The tangents themselves are under a tenth here.
 
   THE LEVER IS THE ANALYTIC SHAPE DERIVATIVE (MANTA-COUPLING.md section 6):
   a flux-surface average's derivative along a field is the integrand moving

@@ -1398,21 +1398,17 @@ BOOST_AUTO_TEST_CASE( writeTheExampleTarget, * boost::unit_test::disabled() )
 	};
 	replaceLine( "SafetyFactorFile", "GGPrimeFile = \"" + directory + "/example-ggprime.dat\"" );
 	replaceLine( "R0B0", "" );
-	replaceLine( "FluxSurfaces = true", meq::test::surfacesAt( knots, 4 ) );
 	replaceLine( "Prefix", "Prefix = \"example-reference\"" );
-
-	meq::RunOptions options;
-	options.configPath = example;
-	options.configText = text;
-	options.baseDirectory = directory;
-	options.version = "QRefiningStudy";
-	meq::Run run( options );
-	BOOST_TEST_REQUIRE( run.prepare() == meq::Solved );
-	BOOST_TEST_REQUIRE( run.solve() == meq::Solved );
-	std::shared_ptr<meq::Dataset const> const surfaces =
-		run.fluxSurfaces( directory + "/example-reference_surfaces.nc" );
-	BOOST_TEST_REQUIRE( surfaces != nullptr );
-	meq::test::writeTarget( *surfaces, [ g0, g1 ]( double psi ) { return g0 + g1*psi; },
+	// The example's own surfaces file (24 surfaces over [ 0.05, 0.95 ]), so the
+	// table is exact where the run reports its q, and the knots with three
+	// labels between, so it is exact where the loop reads it.
+	std::shared_ptr<meq::Dataset const> const reported =
+		meq::test::forward( directory, "example-reported", text );
+	replaceLine( "FluxSurfaces = true", meq::test::surfacesAt( knots, 4 ) );
+	std::shared_ptr<meq::Dataset const> const atKnots =
+		meq::test::forward( directory, "example-knots", text );
+	meq::test::writeTarget( std::vector<meq::Dataset const *>{ reported.get(), atKnots.get() },
+	                        [ g0, g1 ]( double psi ) { return g0 + g1*psi; },
 	                        directory + "/example-q.dat" );
 	std::printf( "  wrote example-q.dat\n" );
 }

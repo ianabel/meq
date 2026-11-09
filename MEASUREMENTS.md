@@ -25971,9 +25971,10 @@ without `QR_SYMMETRIC` for the moved mesh), `--run_test=faceProbe` with
 
 ### M-QR-9
 
-**THE EXTRACTION DIFFERENCED ONE-SIDED FROM ONE INTERPOLANT PER TANGENT: IN
-DOUBLE AT A STEP OF 1e-9 THE COLUMNS ARE RE-SOLVED DIFFERENCES TO 3.1e-8, AND
-A JACOBIAN COSTS m + 1 EXTRACTIONS IN PLACE OF 2m.** `SafetyFactorSolver`'s
+**ONE INTERPOLANT PER TANGENT, m + 1 IN PLACE OF 2m; THE EXTRACTION
+DIFFERENCED ONE-SIDED AT 1e-9 IS RE-SOLVED DIFFERENCES TO 3.1e-8 AND HALVES THE
+EXTRACTIONS, AND STALLS ON A TARGET WITH A MISFIT, SO THE DIFFERENCE STAYS
+CENTRAL.** `SafetyFactorSolver`'s
 `theTangentJacobianIsTheDifferencedOne` (8 cells, `k = 2`, 10 knots), double.
 
 `ψ̃` and `q̃` are linear in the state, so the perturbed pair is the base's
@@ -25996,3 +25997,12 @@ to the field, so there the difference is central at 1e-3, unmeasured here.
 equilibria, 168 extractions in 30.0 s and a wall of 44 s, against 273 in
 39 s and 60 s central (M-QR-7); load 7 to 9 from other builds, so read the
 ratio.
+
+**And it stalls where the target is not consistent.** `QDrivenScalePin`'s
+base (level 0, 10 knots, a misfit of 3.6e-4, PlasmaCurrent) one-sided: the
+removable residual by step 0.63, 0.46, 4.4e-2, 5.4e-3, 5.4e-5, 7.7e-9, 1.3e-9,
+2.1e-9, 2.7e-9 and no sufficient decrease, above the tolerance 1e-9 (and at
+3e-10 to 9e-10 against 1e-10); central at 1e-5 it converges (M-QR-6). The
+Jacobian's error, projected through a conditioning near 1e-5 and multiplied
+by the misfit, moves `J dx` by about that much. The default is central at
+1e-5 in double, 1e-3 in single, from the one interpolant per tangent.

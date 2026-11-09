@@ -2269,7 +2269,7 @@ remove has reached its floor, and nothing else does.** Every evaluation is an
 equilibrium solved only to ``[solver] NewtonRelativeTolerance`` (floored at
 ten machine epsilon), so the rows are noisy, and no residual below that noise
 means anything. MEQ derives each row's floor from that tolerance and judges
-the loop against the larger of the floor and a tolerance of ``1e-10``; the
+the loop against the larger of the floor and a tolerance of ``1e-9``; the
 status line says which. A loop that stops *above* its threshold — a line search
 that cannot decrease the residual — has **not** converged and is reported as
 such. Loosening ``NewtonRelativeTolerance`` raises the floor with it: the loop

@@ -84,7 +84,7 @@ namespace meq
 	{
 		/// The removable residual the answer must reach, max norm, in the
 		/// rows' units (relative misfits for meq::SafetyFactorSystem).
-		double tolerance = 1.0e-10;
+		double tolerance = 1.0e-9;
 
 		int maxIterations = 30;
 

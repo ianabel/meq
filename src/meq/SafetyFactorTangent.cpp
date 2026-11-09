@@ -263,10 +263,8 @@ namespace meq
 		/*
 		 * psi~ AND q~ ARE LINEAR IN THE STATE (ContinuousField.hpp), so the
 		 * perturbed pair is the base's plus s times the tangent's: one
-		 * interpolant per tangent and one for the base, m + 1 builds, and the
-		 * difference ONE-SIDED from the base family -- m + 1 extractions in
-		 * place of 2m. One-sided at this step it agrees with re-solved
-		 * differences as the central difference did (M-QR-9).
+		 * interpolant per tangent and one for the base, m + 1 builds in place of
+		 * 2m. The difference is central by default (Options::step, M-QR-9).
 		 */
 		auto const building = std::chrono::steady_clock::now();
 		ContinuousFields const baseContinuous =
@@ -274,7 +272,8 @@ namespace meq
 		secondsExtracting += secondsSince( building );
 		CriticalPoint labelled = axis;
 		labelled.psi = psiAxis;
-		std::vector<double> const atBase = qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled );
+		std::vector<double> const atBase = options.central ? std::vector<double>()
+			: qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled );
 		mfem::GridFunction potential( baseContinuous.potential->FESpace() );
 		mfem::GridFunction flux( baseContinuous.flux->FESpace() );
 

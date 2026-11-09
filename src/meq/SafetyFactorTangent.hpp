@@ -40,8 +40,8 @@
  * difference the O( h^( k + 1 ) ) jump between them. psi~ and q~ are linear
  * in the state, so the perturbed pair is the base's plus `s` times the
  * tangent's -- m + 1 interpolants -- and the extraction is differenced
- * one-sided from the base family, m + 1 extractions; no equilibrium is
- * re-solved (M-365, M-367, M-QR-9). The extractions are most of the cost, and
+ * centrally, 2m extractions; no equilibrium is re-solved (M-365, M-367,
+ * M-QR-9). The extractions are most of the cost, and
  * the analytic shape derivative would remove them (TODO, *The q-driven
  * Jacobian's cost is the extraction*).
  *
@@ -88,18 +88,18 @@ namespace meq
 
 				/**
 				 * The extraction's difference step, as a fraction of the
-				 * field: `s max|dpsi~| = step max|psi~|`, one-sided from the
-				 * base family unless @ref central. IN DOUBLE, ONE-SIDED AT
-				 * 1e-9: the base and the perturbed pair share everything but
-				 * `s` times the tangent, so the noise is the tracer's and
-				 * small, and against re-solved differences the columns read
-				 * 2.6e-5, 2.6e-6, 3.1e-8 and 2.7e-6 at 1e-6, 1e-7, 1e-9 and
-				 * 1e-11 -- truncation, then noise (M-QR-9). IN SINGLE a step
-				 * under the format's epsilon adds nothing to the field, so the
-				 * difference is central at 1e-3.
+				 * field: `s max|dpsi~| = step max|psi~|`, central unless
+				 * @ref central is cleared. CENTRAL, AT 1e-5 IN DOUBLE AND 1e-3
+				 * IN SINGLE. One-sided at 1e-9 the columns are closer to
+				 * re-solved differences (3.1e-8 against 1.2e-7) for m + 1
+				 * extractions in place of 2m, but on a target with a misfit
+				 * the error's projection through the near-null scale direction
+				 * left the removable residual stalled at 1e-9 to 3e-9, above
+				 * the tolerance, on QDrivenScalePin's base (M-QR-9). In single
+				 * a step under the format's epsilon adds nothing to the field.
 				 */
-				double step = std::numeric_limits<mfem::real_t>::epsilon() < 1.0e-10 ? 1.0e-9 : 1.0e-3;
-				bool central = std::numeric_limits<mfem::real_t>::epsilon() >= 1.0e-10;
+				double step = std::numeric_limits<mfem::real_t>::epsilon() < 1.0e-10 ? 1.0e-5 : 1.0e-3;
+				bool central = true;
 
 				/// The solve, which may throw; solver.solve() when empty.
 				std::function<void()> solve;

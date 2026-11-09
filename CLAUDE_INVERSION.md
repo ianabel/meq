@@ -298,9 +298,13 @@ SOLVES** (`meq::SafetyFactorEquilibrium`, `SafetyFactorTangent.hpp`). Knot
 `j`'s column: `dR/du_j` along the knot's cardinal `gg′`
 (`NormalisedMHDSource::ggPrimeDerivative()`), one back-solve at the retained,
 bordered linearisation, then `ψ*`, `q*` and `ψ̂` of the tangent
-(`reconstructFields()`) and the family extracted on `ψ̃ ± s δψ̃`, labelled
-`ψ_ax ± s δψ_ax`, **with the ray origin moved by the axis root's own derivative
-`−(dq_h/dx)⁻¹ δq_h` in its element**. Held fixed, the origin misses the
+(`reconstructFields()`) and the family extracted on `ψ̃ + s δψ̃` — `ψ̃` being
+linear in the state, one interpolant per tangent — labelled `ψ_ax + s δψ_ax`,
+**with the ray origin moved by the axis root's own derivative
+`−(dq_h/dx)⁻¹ δq_h` in its element**, differenced centrally at 1e-5 of the
+field in double and 1e-3 in single. One-sided at 1e-9 is closer to re-solved
+differences and costs `m + 1` extractions in place of `2m`, and stalls on a
+target with a misfit (→ **[M-QR-9](MEASUREMENTS.md#m-qr-9)**). Held fixed, the origin misses the
 extraction's dependence on where its rays start, 1e-5 to 4e-5 of the Jacobian
 and a contraction of 1e-3 a step; re-located on each perturbed field, it can
 take the other element's root where the axis sits on a face and difference the
@@ -330,7 +334,11 @@ loop and is reported.
 ROW BY ROW.** In least squares the residual does not go to zero; what a step
 can remove, `J dx`, does. Each row's floor is the solve's accuracy carried
 through the averages — `8 ε_solve` on a `q` row, `4 ε_solve` on a flux or
-current pin, nothing on R0B0's — plus `‖J_i‖ ε ‖x‖`; the tolerance is 1e-10.
+current pin, nothing on R0B0's — plus `‖J_i‖ ε ‖x‖`; the tolerance is 1e-9.
+**Not lower**: on an inconsistent target the removable residual stalls near
+it — 3e-10 to 9e-10 on `QDrivenScalePin`'s, whose misfit is 3.6e-4 — because
+the Jacobian's own error, projected through a conditioning near 1e-5, moves
+`J dx` by that much; the floor model does not carry that term.
 **And the floor is measured where it governs** (→
 **[M-363](MEASUREMENTS.md#m-363)**): the first time the removable residual
 comes within ten floors, and at a stall above them, the point is evaluated
