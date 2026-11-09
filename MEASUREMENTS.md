@@ -25253,12 +25253,20 @@ other 80ε comes from MFEM's element-local recovery of `q_h`
 (M-371 on `main`), and the whole-state bound stays red in single until the
 recovery is quieter.
 
-`SessionSmoothness`, same builds, with bounds unchanged:
+`SessionSmoothness` gets the same split: the base tables solved from two warm
+starts, the base and a state 1e-4 away. It asserts their trace against its
+own largest value at `max( 1e-12, 20ε )`. The geometry assertion at that
+bound and the jump's 1e-11 are unchanged:
 
-| | two warm starts, `max( 1e-12, 20ε )` | the jump at the crossing, 1e-11 |
-|---|---|---|
-| double | 2.01e-13, passes | 1.48e-14, passes |
-| single | 3.48e-6 (29ε), fails | 6.24e-6 (52ε), fails |
+| | trace `ψ̂` | `ψ_h` | `q_h` | the geometry, two warm starts | the jump at the crossing |
+|---|---|---|---|---|---|
+| double | 1.34e-15 | 1.60e-15 | 1.79e-14 | 2.01e-13, passes | 1.48e-14, passes |
+| single | 5.02e-7 (4.2ε), passes | 6.45e-7 (5.4ε) | 7.89e-6 (66ε) | 3.48e-6 (29ε), fails | 6.24e-6 (52ε), fails |
+
+The two warm starts reach the same trace to 4ε in single. The geometry reads
+through `ψ*` and `ψ̃`, so it inherits the floors of the local recovery and
+`Reconstruct()` (M-SX-1(c)), not the trace's. The geometry and the jump
+assertions stay red in single for the same upstream request.
 
 **Not done: a one-step refinement on the linear path.** On the normalised
 path, Newton's last steps already act as iterative refinement of the
@@ -25270,4 +25278,4 @@ it.
 **Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
 ./RunSession --run_test=aChangedTableResolvesWarmToTheColdSolve`, which prints
 `by block, each of its own max: trace …, psi_h …, q_h …`; and
-`./SessionSmoothness`.
+`./SessionSmoothness`, which prints `their states by block, …`.

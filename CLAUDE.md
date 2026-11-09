@@ -213,11 +213,11 @@ continuity case too, at `max( 1e-11, 20ε )`: the family moves about 1e-5
 between neighbouring states in single, `Reconstruct()`'s round-off in `ψ*`
 carried into `ψ̃` and divided by the innermost `Ψ_N`
 (→ **[M-SX-1](MEASUREMENTS.md#m-sx-1)**). It adds `SessionSmoothness`'s jump
-at its crossing, bound 1e-11 and reading 52ε in single, the same family floor
-(its two-warm-starts bound, `max( 1e-12, 20ε )`, reads 29ε there too), and
-`RunSession`'s `aChangedTableResolvesWarmToTheColdSolve` on the whole state at
-`max( 1e-8, 20ε )`, which is `q_h`'s element-local recovery: warm and cold agree
-on the trace to 3ε, which that case asserts and passes
+at its crossing, bound 1e-11 and reading 52ε in single, the same family floor,
+and its two-warm-starts bound on the geometry, `max( 1e-12, 20ε )`, at 29ε;
+and `RunSession`'s `aChangedTableResolvesWarmToTheColdSolve` on the whole state
+at `max( 1e-8, 20ε )`, which is `q_h`'s element-local recovery. In both suites
+the two solves agree on the trace to a few ε, which each asserts and passes
 (→ **[M-SX-3](MEASUREMENTS.md#m-sx-3)**). These are MFEM's local solves in
 `real_t`, filed as
 `../../mfem-hdg-dev/doc/HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md`. The anisotropic suites are qualified

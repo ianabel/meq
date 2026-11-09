@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <limits>
 #include <memory>
@@ -52,6 +53,20 @@ namespace
 		         s.gradPsiSquaredOverRSquared };
 	}
 
+	/// max |a - b| over max |b|, on [ begin, end ) of two solved states.
+	double blockGap( std::vector<double> const &a, std::vector<double> const &b,
+	                 std::size_t begin, std::size_t end )
+	{
+		BOOST_TEST_REQUIRE( ( begin < end && end <= a.size() && a.size() == b.size() ) );
+		double gap = 0.0, scale = 0.0;
+		for ( std::size_t i = begin; i < end; ++i )
+		{
+			gap = std::max( gap, std::abs( a[ i ] - b[ i ] ) );
+			scale = std::max( scale, std::abs( b[ i ] ) );
+		}
+		return gap/scale;
+	}
+
 	char const *quantityName( std::size_t q )
 	{
 		static char const *const names[] = { "V'_rho", "<|grad rho|^2>", "<R^-2>", "<|grad psi|^2/R^2>" };
@@ -92,8 +107,10 @@ BOOST_AUTO_TEST_CASE( theGeometryIsContinuousWhereANodeCrossesAFace )
 	std::shared_ptr<meq::EquilibriumSnapshot const> const base = at( 0.0, run->snapshot() );
 
 	// THE NOISE: the base tables from the base and from a state 1e-4 away.
-	Family const fromBase = at( 0.0, base )->family;
-	Family const fromAway = at( 0.0, at( 1.0e-4, base ) )->family;
+	std::shared_ptr<meq::EquilibriumSnapshot const> const stateFromBase = at( 0.0, base );
+	std::shared_ptr<meq::EquilibriumSnapshot const> const stateFromAway = at( 0.0, at( 1.0e-4, base ) );
+	Family const fromBase = stateFromBase->family;
+	Family const fromAway = stateFromAway->family;
 	double floor = 0.0;
 	for ( std::size_t i = 0; i < fromBase->surfaces.size(); ++i )
 	{
@@ -102,17 +119,39 @@ BOOST_AUTO_TEST_CASE( theGeometryIsContinuousWhereANodeCrossesAFace )
 			floor = std::max( floor, std::abs( b[ q ] - a[ q ] )/std::abs( a[ q ] ) );
 	}
 	std::printf( "\n  the same tables from two warm starts differ by %.2e of the value\n", floor );
+	std::vector<double> const &stateA = stateFromAway->state, &stateB = stateFromBase->state;
+	BOOST_TEST_REQUIRE( ( stateFromAway->fluxEnd == stateFromBase->fluxEnd
+	                      && stateFromAway->potentialEnd == stateFromBase->potentialEnd ) );
+	std::size_t const fluxEnd = stateFromBase->fluxEnd, potentialEnd = stateFromBase->potentialEnd;
+	double const fluxGap = blockGap( stateA, stateB, 0, fluxEnd );
+	double const potentialGap = blockGap( stateA, stateB, fluxEnd, potentialEnd );
+	double const traceGap = blockGap( stateA, stateB, potentialEnd, stateB.size() );
+	std::printf( "  their states by block, each of its own max: trace %.3e, psi_h %.3e, q_h %.3e\n",
+	             traceGap, potentialGap, fluxGap );
 	// REPEATABILITY, so max( 1e-12, 20 eps ): two warm starts reach the same
 	// tables to the solve's own accuracy, ten eps, and the bound is twice that,
 	// as QDrivenScalePin's is. In double 20 eps is 4.4e-15 and 1e-12 stands --
 	// MaNTA's contract, which is double (MANTA-EQUILIBRIUM-PLAN.md, D5); in
 	// single it is 2.4e-6. The jump below is not a repeatability bound.
 	double const twentyEps = 20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
+	// The trace psihat is the solve's global unknown: the two warm starts
+	// must reach the same one at the same bound, of its own largest value.
+	BOOST_TEST( traceGap < std::max( 1.0e-12, twentyEps ),
+		"the same tables solved from two warm starts differ by " << traceGap
+		<< " of the trace's max" );
+	// The geometry at the same bound. RED IN SINGLE, deliberately: the trace
+	// agrees to a few eps, and the family is read through MFEM's element-
+	// local recovery and Reconstruct(), real_t throughout, which carry ~30
+	// eps here (M-SX-1, M-SX-3). Not MEQ code; filed as ../../mfem-hdg-dev/
+	// doc/HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md (M-371).
 	BOOST_TEST( floor < std::max( 1.0e-12, twentyEps ),
 		"the same tables solved from two warm starts differ by " << floor << " of the value, so "
 		"a difference at MaNTA's 1e-8 step carries " << floor/1.0e-8 << " of noise. A session must "
 		"converge to round-off, not to a relative tolerance (NewtonRelativeTolerance below ten eps "
-		"stops at the round-off floor, M-306)." );
+		"stops at the round-off floor, M-306). Their states differ by: trace " << traceGap
+		<< ", psi_h " << potentialGap << ", q_h " << fluxGap << ", each of its own max. In single "
+		"this is MFEM's element-local recovery (HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md, "
+		"M-SX-3)" );
 
 	// A CROSSING: Omega stepped by 1e-4 until a node changes element. The box
 	// meets about 1.4 a step (M-364), so twenty steps is a wide margin.
