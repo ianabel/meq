@@ -13,7 +13,7 @@
 #include "PointLocator.hpp"
 #include "RegularisedLeastSquares.hpp"
 #include "DeviceRows.hpp"
-#include "StageChecksum.hpp"
+#include "StageChecksumMfem.hpp"
 #include "RulePoint.hpp"
 
 // FB-7: conductors outside Gamma. The header forward-declares CoilSet so that it

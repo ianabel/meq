@@ -366,7 +366,9 @@ endif()
 # taken once, and the suite asserts the choice through the driver instead
 # (QDrivenScalePin, the composition). About five minutes:
 #     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
-if(TARGET meq_core
+# It solves, so it needs the solver, as every convergence test does.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SafetyFactorPinStudy.cpp")
 	add_executable(SafetyFactorPinStudy "convergence/SafetyFactorPinStudy.cpp")
 	target_include_directories(SafetyFactorPinStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -950,6 +952,41 @@ else()
 				"${_source}")
 		set_tests_properties(naming.${_naming_stem} PROPERTIES LABELS naming)
 	endforeach()
+endif()
+
+# ---------------------------------------------------------------------------
+# MfemFreeIncludes -- the MFEM-free half stays free of MFEM
+# ---------------------------------------------------------------------------
+#
+# CI builds only the half of meq that does not need MFEM (CMakeLists.txt,
+# MEQ_CORE_SOURCES_NEEDING_MFEM, and .github/workflows/ci.yml). Every tree here
+# has MFEM, so a file of that half that reaches mfem.hpp through some meq header
+# compiles here and breaks there, and nothing local says so.
+# cmake/CheckMfemFree.cmake preprocesses each file of the half -- meq_core's
+# sources that are not on that list, and the unit tests of those units -- with
+# its own compile command and fails on the first MFEM header it opens, naming
+# the chain of includes that led there. Preprocessing only: about ten seconds.
+if(MEQ_CORE_SOURCES_PRESENT AND CMAKE_EXPORT_COMPILE_COMMANDS)
+	set(_mfem_free "")
+	foreach(_source IN LISTS MEQ_CORE_SOURCES_PRESENT)
+		list(FIND MEQ_CORE_SOURCES_NEEDING_MFEM "${_source}" _needs_mfem)
+		if(_needs_mfem EQUAL -1)
+			string(APPEND _mfem_free "${PROJECT_SOURCE_DIR}/${_source}\n")
+			get_filename_component(_unit "${_source}" NAME_WE)
+			if(TARGET ${_unit}Tests)
+				string(APPEND _mfem_free "${CMAKE_CURRENT_SOURCE_DIR}/unit/${_unit}Tests.cpp\n")
+			endif()
+		endif()
+	endforeach()
+	file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/mfem-free-sources.txt" "${_mfem_free}")
+	add_test(NAME MfemFreeIncludes
+		COMMAND "${CMAKE_COMMAND}"
+			"-DCOMPILE_COMMANDS=${PROJECT_BINARY_DIR}/compile_commands.json"
+			"-DLIST=${CMAKE_CURRENT_BINARY_DIR}/mfem-free-sources.txt"
+			-P "${PROJECT_SOURCE_DIR}/cmake/CheckMfemFree.cmake")
+	unset(_mfem_free)
+	unset(_needs_mfem)
+	unset(_unit)
 endif()
 
 # ---------------------------------------------------------------------------

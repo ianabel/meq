@@ -127,7 +127,10 @@ invisible to the others. Reach for them in this order.
    1170-second run with zero faults.
 3. **A stage-by-stage checksum, diffed between `cpu` and `cuda`.** The first
    stage that disagrees names the defect. `meq::stageChecksum()`
-   (`src/meq/StageChecksum.{hpp,cpp}`) reports each buffer's **validity flags
+   (`src/meq/StageChecksum.{hpp,cpp}`, MFEM-free, with the `mfem::Vector`
+   and `mfem::Array<int>` probes in `StageChecksumMfem.{hpp,cpp}`, so that
+   `SafetyFactor.cpp` in CI's MFEM-free half can probe the seam back into
+   plain doubles) reports each buffer's **validity flags
    before it reads**, so `H- D+` names a stage whose host copy is not live,
    whether or not its value happens to be wrong. It prints only under
    `MEQ_STAGE_CHECKSUM`, an environment variable rather than a key, so a walk
