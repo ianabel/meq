@@ -25089,12 +25089,22 @@ axis offset divided by `Ψ_N`. `ExtractionContinuity`'s
 |---|---|---|---|
 | `ExtractionContinuity`, continuity across the bisected crossing | 1.81e-5 (2.62e-4 before) | 152ε | fails |
 | `ExtractionContinuity`, the label | 0 | | passes |
-| `RunSession`, `SessionSmoothness` | `manta/shape-derivative`, after the merge of this branch | | |
+| `SessionSmoothness`, two warm starts (`manta/shape-derivative`) | 3.48e-6 (2.81e-5 before) | 29ε | fails, by 1.45× |
+| `SessionSmoothness`, the jump at its crossing (bound 1e-11, not a repeatability bound) | 6.24e-6 | 52ε | fails |
+| `RunSession`, warm against cold | 9.75e-6 (unchanged) | 82ε | fails |
+| `RunSession`, `ψ_ax` | 5.4e-8 relative | 0.5ε | passes |
 
 The family's single floor, about 1e-5 (85ε), is `Reconstruct()`'s round-off
 in `ψ*` carried into `ψ̃` and divided by the innermost `Ψ_N`; bringing it to
 20ε wants `ψ*` about 8× quieter, which is MFEM's local solve, or an innermost
-surface further from the axis.
+surface further from the axis. **`RunSession`'s gap is not the family at
+all**: it is the worst entry of the solved state `( q, ψ, ψ̂ )`, and split by
+block (a probe, not kept) it is all `q_h` — 9.75e-6 of the state's largest
+value (rms 1.3e-6), against `ψ_h`'s 1.05e-7 and the trace's 5.8e-8, which is
+3.5e-7 (3ε) of the trace's own largest value. **The warm and cold solves agree
+on the global unknown to 3ε, and MFEM's element-local recovery of `q_h` from it
+is what separates them**, as in (a); a bound on the state at 20ε wants that
+recovery quieter, or an assertion on the trace.
 
 **Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
 ./ExtractionNoise --run_test=<case>`: `n12k2`, `n16k2`, `n32k2`, `n16k3`,
