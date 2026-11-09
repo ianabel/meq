@@ -1,5 +1,6 @@
 #include "ContinuousField.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -91,8 +92,14 @@ namespace meq
 		int const p = fes.GetElementOrder( 0 );
 		int const elements = mesh.GetNE();
 
+		// ZEROED THROUGH THE HOST POINTER. `out = 0.0` is device-aware, and a
+		// GridFunction is born UseDevice( true ): under a Device it zeroes the
+		// device copy and invalidates the host one, so every raw write below
+		// lands in a page MFEM believes stale, and the next HostRead() copies
+		// the device's zeros over it (and the debug backend faults on the
+		// first raw read).
 		mfem::real_t *const data = out.HostWrite();
-		out = 0.0;
+		std::fill_n( data, out.Size(), mfem::real_t( 0 ) );
 
 		// VERTICES: each element's value at its corners, threaded, then the
 		// means summed serially in element order.
