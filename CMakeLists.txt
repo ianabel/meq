@@ -79,9 +79,9 @@ option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 
 # ON since stage 7e: meq is the driver now -- apps/meq.cpp, its command
 # line, over src/meq/Run.cpp, the run -- not the legacy vacuum-field
-# program built on MFEM 4.5.1's HDGBilinearForm. It needs MFEM, so the guard
-# below still applies -- a build without it gets the MFEM-free half and no
-# executable, which is what CI does.
+# program built on MFEM 4.5.1's HDGBilinearForm. It needs MFEM, so a build
+# without it turns this off after find_package(MFEM) below, and gets the
+# MFEM-free half and no executable, which is what CI does.
 option(MEQ_BUILD_APP "Build the meq executable" ON)
 
 # The Python module, `import meq`: a third front end on meq::Run beside meq and
@@ -162,6 +162,15 @@ if(NOT MFEM_FOUND)
 	message(STATUS "meq: MFEM not found -- building the MFEM-free subset only.")
 	message(STATUS "meq:   excluded: the solver, the estimator, every convergence test")
 	message(STATUS "meq:   set MFEM_DIR to a built MFEM to get the whole library")
+	# AND NO EXECUTABLE, WHATEVER MEQ_BUILD_APP SAYS. apps/meq.cpp and
+	# apps/meq-convert.cpp include mfem.hpp and drive meq::Run, which is in the
+	# MFEM half, so with the option left at its default the MFEM-free build
+	# would fail on them. Shadowing the option here is what makes "no MFEM"
+	# mean the subset, for the Python module (inside the same block) as well.
+	if(MEQ_BUILD_APP)
+		message(STATUS "meq:   and no meq, meq-convert or Python module, which need it")
+		set(MEQ_BUILD_APP OFF)
+	endif()
 elseif(NOT MFEM_USE_SUITESPARSE AND NOT MFEM_USE_MKL_PARDISO)
 	# A DIRECT TRACE SOLVER ON THE HOST IS A REQUIREMENT, NOT AN OPTION. There
 	# is no iterative fallback: GMRES on MEQ's trace system was measured
@@ -316,6 +325,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/DeviceQuadratureDevice.cpp
 	src/meq/DeviceRows.cpp
 	src/meq/DeviceRowsDevice.cpp
+	src/meq/Digest.cpp
 	src/meq/ExteriorDtN.cpp
 	src/meq/Field.cpp
 	src/meq/FluxExtraction.cpp
@@ -342,6 +352,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
 	src/meq/StageChecksum.cpp
+	src/meq/StageChecksumMfem.cpp
 	src/meq/StoredEquilibrium.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/SurfaceFit.cpp
@@ -384,7 +395,10 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Sampler.cpp
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp
-	src/meq/StageChecksum.cpp
+	# The instrument's probes over mfem::Vector and mfem::Array<int>. The
+	# instrument itself, src/meq/StageChecksum.cpp, is MFEM-free, because
+	# src/meq/SafetyFactor.cpp probes the seam back into plain doubles.
+	src/meq/StageChecksumMfem.cpp
 	src/meq/StoredEquilibrium.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)

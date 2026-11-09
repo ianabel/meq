@@ -1,6 +1,5 @@
 #include "ConductorStore.hpp"
 
-#include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -11,28 +10,10 @@ namespace meq
 {
 	namespace
 	{
-		constexpr std::uint64_t fnvOffsetBasis = 14695981039346656037ULL;
-		constexpr std::uint64_t fnvPrime = 1099511628211ULL;
-
 		constexpr char const *formatName = "meq-conductor-cache";
 		constexpr int formatVersion = 2;
 
-		std::uint64_t mixBytes( std::uint64_t digest, std::uint64_t bits )
-		{
-			for ( int byte = 0; byte < 8; ++byte )
-			{
-				digest ^= ( bits >> ( 8*byte ) ) & 0xffULL;
-				digest *= fnvPrime;
-			}
-			return digest;
-		}
-
-		/// A digest is only ever compared with another digest written by this
-		/// same code, so the IEEE bytes are the right thing to mix -- and
-		/// -0.0 and +0.0 hashing differently is CORRECT here, because a vertex
-		/// at -0.0 and one at +0.0 are the same point and `psi_c` is even in
-		/// `R`, so the values agree and a spurious refusal costs a recompute
-		/// rather than an answer.
+		/// The digest, written as text; meq/Digest.hpp says what is mixed.
 		std::string toHex( std::uint64_t value )
 		{
 			std::ostringstream out;
@@ -246,23 +227,6 @@ namespace meq
 		// offset still looked sane.
 		return criticalFluxQ.size() == 2*fluxNodes
 		       && criticalFluxUsable.size() == fluxNodes;
-	}
-
-	std::uint64_t digestSeed()
-	{
-		return fnvOffsetBasis;
-	}
-
-	std::uint64_t digestAppend( std::uint64_t digest, double value )
-	{
-		std::uint64_t bits = 0;
-		std::memcpy( &bits, &value, sizeof( bits ) );
-		return mixBytes( digest, bits );
-	}
-
-	std::uint64_t digestAppend( std::uint64_t digest, std::int64_t value )
-	{
-		return mixBytes( digest, static_cast< std::uint64_t >( value ) );
 	}
 
 	char const *conductorCacheGroupName()

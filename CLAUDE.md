@@ -281,9 +281,16 @@ gated on `MFEM_DEBUG`, which the install sets `NO`, and MEQ has no `assert()`
 
 **CI CANNOT BUILD THE SOLVER, AND THIS IS STRUCTURAL.** `meq-integration` is a
 local merge published nowhere, so `find_package(MFEM)` is not `REQUIRED` and CI
-builds the MFEM-free half: four unit suites, the `naming` tests and a 90% `gcovr` line
+builds the MFEM-free half: its unit suites, the `naming` tests and a 90% `gcovr` line
 gate. **A green CI badge is evidence about the configuration and profile layers
 and nothing else.** The `full` job is `if: false` until the branch is published.
+**Every local tree has MFEM, so nothing local compiles that half as CI does**:
+`MfemFreeIncludes` preprocesses each of its files with its own compile command
+and fails on the first MFEM header reached, naming the include chain. It cannot
+see a definition the half calls living in a file it does not build — `Digest`
+is split out of `ConductorStore` for that reason, since CI has no netcdf-cxx4
+either — so a change to the split is checked by configuring with
+`-DMFEM_DIR=/nonexistent` and `PKG_CONFIG_LIBDIR=/nonexistent` and building.
 
 **No coverage percentage is quoted, deliberately.** `gcovr` counts comment-heavy
 lines `gcov` does not (92.7% against 64% on one file, one run), so the gate's
