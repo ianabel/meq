@@ -499,6 +499,19 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_link_libraries(ExtractionNoise PRIVATE ${MEQ_TEST_CORE} Boost::unit_test_framework)
 endif()
 
+# RecoveryPrecision: the instrument behind MEASUREMENTS.md's M-RD-1 onwards --
+# why MFEM's element-local HDG recovery (RecoverFEMSolution()) and its
+# reconstruction (Reconstruct()) lose precision in single, separated into
+# solve arithmetic, cancellation and the stored data. BUILT BUT NOT
+# REGISTERED: it asserts nothing; run with --run_test=<case> and
+# MKL_NUM_THREADS=1.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/RecoveryPrecision.cpp")
+	add_executable(RecoveryPrecision "convergence/RecoveryPrecision.cpp")
+	target_include_directories(RecoveryPrecision PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(RecoveryPrecision PRIVATE ${MEQ_TEST_CORE} Boost::unit_test_framework)
+endif()
+
 # InversionScaling -- the same rules, for the solution-inversion chain.
 #
 # NOT a ctest, and unlike TraceSolverScaling it contributes no ctest either:

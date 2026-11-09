@@ -1111,6 +1111,27 @@ a count of calls: *a format-specific defect is pinned by putting the other forma
 in the same position*. With the fix, single is 0.81× to 0.90× of double per
 Newton step, and 0.69× to 0.81× on setup.
 
+### Why the element-local recovery and `Reconstruct()` are noisy → [M-RD-1](MEASUREMENTS.md#m-rd-1), [M-RD-2](MEASUREMENTS.md#m-rd-2), [M-RD-3](MEASUREMENTS.md#m-rd-3)
+
+M-371's 200× on `ψ_h` and `Reconstruct()`'s 5.5e-7 are both MFEM's, and
+`RecoveryPrecision` separates them with the hybridization's own stored blocks,
+checked bit for bit against the fields MFEM recovers.
+* **The recovery is an unstable algorithm, not bad data.** `MultInv()` forms
+  `A⁻¹ b_u` and subtracts `A⁻¹ Bᵀ p`, two intermediates 36–124× the flux they
+  leave (up to 2,190×, as `1/h` and with `k`). The block-Schur route's backward
+  error is 11–33ε at the median element, against 0.12ε for one pivoted LU of
+  the same matrix, and **the same in ε in double**. `B A⁻¹ b_u − b_p` does not
+  cancel, so a rescaling cannot help: a power-of-two block scaling is
+  bit-identical, and Ruiz gains ≤ 1.3×.
+* **The fix is one refinement pass with the residual in double** on the factors
+  already held: `ψ_h` to the trace's own σ, `q_h` to the floor an exact solve of
+  the stored data reaches. Refinement in real_t gets `ψ_h` to 2× the trace.
+* **`q_h`'s floor after that is the trace's noise times `L/h`** (13×, 16×, 34× at
+  `n` = 12, 16, 32): `q` is a derivative of `ψ`. Only a quieter trace moves it.
+* **`Reconstruct()`'s floor is its local load, assembled in real_t.** Its solve
+  is backward stable and a double solve buys 1.2–1.3×. The load formed in double
+  reaches 1.6e-7, and with refined fields as well 0.48e-7, the trace's level.
+
 ## This machine's GPU
 
 An RTX 2070 SUPER with CUDA 13.3, `sm_75`: enough to write and debug a device

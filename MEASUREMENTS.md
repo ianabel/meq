@@ -25452,3 +25452,211 @@ against the closed form instead.
 reds are main's deliberate ones, `PlasmaEdgeConvergence`,
 `QDrivenConsistency`'s `theDeliveredQConvergesToTheTarget` and
 `AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
+
+### M-RD-1
+
+**MFEM's element-local recovery loses precision in its own arithmetic: the
+block-Schur route of `MultInv()` is not backward stable on the HDG local
+system. The stored local matrices, loads and trace are fine.**
+`recovery-diagnostic` off `d3319fc`, `RecoveryPrecision` (built, not
+registered), single (`install-single`, host) and double (`install-nocuda`),
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`. The noise measure is M-371's: 21
+states of `ExtractionCrossing.hpp`'s linear box, 1e-5 apart in `A`, each its
+own solve; σ is the root mean square of the second differences over √6, of the
+field's largest value. **The local matrices do not depend on `A`, so they are
+the same bits in every state, and the rounding of their entries cancels from a
+second difference**; what σ sees is the per-state rounding of the trace, the
+load and the arithmetic.
+
+The study reaches the hybridization's stored blocks read-only, re-assembles
+the unfactored `A` (flux mass) and `D` (the `τ` face terms) with the
+integrators the hybridization holds, and checks before reading a number that
+factoring them as `ComputeElementH()` does reproduces the stored factors of
+`A` and of `S = D − s B A⁻¹ Bᵀ` **bit for bit**, and that `MultInv()` on the
+local right-hand side formed here reproduces `RecoverFEMSolution()`'s `ψ_h` and
+`q_h` **bit for bit**, in every state, element and case, in both builds.
+
+Every method below starts from the same per-state data. `s = +1` (`bsym` is
+false), so the local system is `[A Bᵀ; B D][u; p] = [b_u; b_p]`, with
+`b_u = −Σ Cᵀλ` (the load on `u` is zero here) and `b_p = load − Σ Eλ`.
+
+| method | what changes |
+|---|---|
+| (a) | `RecoverFEMSolution()`, as MEQ runs it |
+| (b) | LU in double of the full local system, from the real_t-stored `A, B, D, Cᵀ, E`, load and trace, the right-hand side formed in double |
+| (b′) | (b) from the right-hand side as MFEM forms it in real_t |
+| (b) split | (b) with the load frozen at the middle state (trace noise only), or the trace frozen (load noise only) |
+| (c) | (a) plus one refinement pass: residual in real_t, correction by `MultInv()` on the stored factors |
+| (d) | (a) plus one pass with the residual in double (right-hand side formed in double), correction on the stored factors, sum in double; (d′) against MFEM's real_t right-hand side; (d2) two passes |
+| (e1) | the Schur route in real_t on blocks scaled per block by powers of two (the `h`-power rescaling) |
+| (e2) | the same with a symmetric Ruiz equilibration of the full local matrix, rounded to powers of two |
+| (f) | one partial-pivoting LU of the full local matrix in real_t, no Schur complement; (f2) on the Ruiz-scaled matrix |
+
+**Single: σ of `p = ψ_h` / `u = −q_h`, root mean square, as a multiple of the
+trace's own σ** (the trace reads 0.41ε, 0.43ε, 0.41ε, 0.40ε; (a)'s absolute
+values are M-371's, to every digit):
+
+| method | `n = 12, k = 2` | `n = 16, k = 2` | `n = 32, k = 2` | `n = 16, k = 3` |
+|---|---|---|---|---|
+| (a) | 176 / 49 | 215 / 61 | 440 / 130 | 377 / 125 |
+| (b) | 1.1 / 13 | 1.1 / 16 | 1.0 / 34 | 1.0 / 24 |
+| (b′) | 1.3 / 16 | 1.2 / 21 | 1.2 / 44 | 1.3 / 32 |
+| (b), trace noise only | 1.1 / 13 | 1.0 / 16 | 1.0 / 34 | 1.0 / 24 |
+| (b), load noise only | 0.28 / 0.05 | 0.20 / 0.04 | 0.11 / 0.02 | 0.16 / 0.05 |
+| (c) | 2.1 / 22 | 2.0 / 28 | 2.0 / 59 | 2.4 / 48 |
+| (d), (d2) | 1.1 / 13 | 1.1 / 16 | 1.0 / 34 | 1.0 / 24 |
+| (d′) | 1.3 / 16 | 1.2 / 21 | 1.2 / 44 | 1.3 / 32 |
+| (e1) | 176 / 49 | 215 / 61 | 440 / 130 | 377 / 125 |
+| (e2) | 132 / 39 | 176 / 51 | 438 / 131 | 373 / 126 |
+| (f) | 2.1 / 42 | 2.0 / 50 | 2.0 / 105 | 2.5 / 97 |
+| (f2) | 2.1 / 33 | 2.3 / 46 | 3.4 / 100 | 3.6 / 85 |
+
+Rounding (d)'s result to real_t for storage moves no figure here.
+
+**Double, the same harness** (here (b) and (d) carry no extra precision, being
+real_t = double): (a) reads `p` 153×, 200×, 359× and `u` 42×, 56×, 100× of the
+trace (`n` = 12, 16, 32, `k = 2`), (f) 2× in `p`, (d) 2× and 1×. **The
+amplification is the same in units of ε in both formats**: the defect is the
+algorithm's, and single only makes it visible.
+
+**Which hypothesis.**
+
+* **H3, the data, is falsified for the noise.** An exact solve of the stored
+  real_t system, (b), puts `ψ_h` at the trace's own level (1.0–1.1×), and
+  splitting it shows the load's rounding contributes 0.1–0.3× and the trace's
+  the rest. Since the matrices are the same bits in every state, rounding
+  their entries cannot reach σ at all; assembling them in double cannot buy
+  any σ. M-RD-2 has the conditioning, which is modest (`cond(M)` 1.5e3–3.9e3).
+* **H2 as posed is falsified**: `B A⁻¹ b_u − b_p` does not cancel. `|b_p|` is
+  0.2–0.7% of `|B A⁻¹ b_u|` at the median element, so the difference is
+  `B A⁻¹ b_u` itself (M-RD-2). Rescaling, which H2 predicts would help, does not: a power-of-two
+  scaling per block, (e1), is bit-identical to (a), as it must be, since an
+  exact scaling commutes with rounding; a per-dof Ruiz scaling, (e2), gains at
+  most 1.3× and nothing at `n = 32`. And refinement in real_t, which H2
+  predicts cannot help, takes `ψ_h` from 176–440× to 2×.
+* **H1, the solve arithmetic, holds, and the mechanism is a cancellation one
+  step later than H2 placed it.** `MultInv()` forms `A⁻¹ b_u`, the flux the
+  trace would drive with `p = 0`, then subtracts `A⁻¹ s Bᵀ p`. The two are
+  36–124× `|u|` at the median element and up to 2,190× at the worst, growing as
+  `1/h` and with `k` (M-RD-2); `|A⁻¹ b_u|` is the potential's level over `h`,
+  and `u` is its gradient. The real_t rounding of those intermediates is
+  rounding relative to them, so the route's normwise backward error is 11–33ε at
+  the median element and up to 385ε, against 0.12ε (≤ 1.4ε) for one pivoted LU
+  of the same matrix. It is the same in double.
+
+**`q_h`'s remaining noise is not the recovery's.** After (b) or (d), `u`
+carries 13×, 16×, 34× the trace's σ at `n` = 12, 16, 32 — proportional to `n`
+— and all of it is the trace's: the trace-only split reproduces it to the digit.
+The exact local map takes a trace perturbation of relative size ε into a flux
+perturbation of relative size about `L/h`·ε, because `q` is the derivative of
+`ψ`. Below it is only a quieter trace, which is the global solve's business.
+That is also why the normalised path's `q_h` stays 4.6× noisier than its `ψ_h`
+in M-371 when Newton's last steps refine the recovery.
+
+**What each fix recovers** (`ψ_h`, `q_h`; the floor is (b)):
+
+| fix | `ψ_h` | `q_h` |
+|---|---|---|
+| one refinement pass, residual in double, local right-hand side formed in double, (d) | to the floor (1.0–1.1× the trace), all cases | to the floor |
+| the same against MFEM's real_t right-hand side, (d′) | 1.2–1.3× | 1.2–1.3× the floor |
+| one refinement pass in real_t, (c) | 2.0–2.4× the trace | 1.7–2.0× the floor |
+| one pivoted LU of the full local system in real_t, (f) | 2.0–2.5× | 3.1–4.0× the floor |
+| per-block `h`-power scaling, (e1) | nothing (bit-identical) | nothing |
+| Ruiz equilibration, (e2) | ≤ 1.3×, nothing at `n = 32` | ≤ 1.3× |
+| assembly in double | nothing reachable: the matrices cancel from σ, and the load's share is 0.1–0.3× | nothing |
+
+A second pass, (d2), changes no figure: one pass with a double residual is
+enough.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
+./RecoveryPrecision --run_test=<case>`, `n12k2`, `n16k2`, `n32k2`, `n16k3`.
+The normalised path (NPC, its own local layout) is not instrumented.
+
+### M-RD-2
+
+**The recovery's local system, per element, at the middle state** (single;
+in double from the stored real_t data; median, worst in brackets). `M` is the
+full local matrix `[A Bᵀ; B D]`, `S = D − B A⁻¹ Bᵀ`, norms ∞; the backward
+error is `‖b − M x‖/(‖M‖‖x‖ + ‖b‖)` in units of ε; the forward error is
+against (b), of the element's own `|p|` or `|u|`.
+
+| | `n = 12, k = 2` | `n = 16, k = 2` | `n = 32, k = 2` | `n = 16, k = 3` |
+|---|---|---|---|---|
+| `cond(A)` | 17 (17) | 17 (17) | 17 (17) | 35 (36) |
+| `cond(S)` | 830 (1,300) | 1,100 (1,750) | 2,180 (3,550) | 1,810 (2,900) |
+| `cond(M)` | 1,470 (2,320) | 1,950 (3,120) | 3,870 (6,310) | 3,920 (6,260) |
+| `cond(M)`, Ruiz | 219 (340) | 283 (463) | 417 (677) | 875 (1,400) |
+| `‖B A⁻¹‖‖B‖/‖D‖` | 1,190 (1,880) | 1,580 (2,520) | 3,130 (5,110) | 4,960 (7,750) |
+| H2's cancellation, `max(‖B A⁻¹ b_u‖, ‖b_p‖)/‖B A⁻¹ b_u − b_p‖` | 0.993 (0.995) | 0.995 (0.997) | 0.998 (0.999) | 0.999 (0.999) |
+| `‖A⁻¹ b_u‖/‖u‖`, the `u` update | 36 (272) | 45 (774) | 100 (2,190) | 124 (2,050) |
+| backward error of (a), ε | 11 (92) | 15 (190) | 33 (385) | 30 (362) |
+| backward error of (f), ε | 0.12 (0.82) | 0.12 (0.91) | 0.12 (1.4) | 0.18 (1.4) |
+| forward error of (a) in `p`, ε | 200 (670) | 267 (920) | 600 (2,330) | 556 (3,010) |
+| forward error of (a) in `u`, ε | 64 (590) | 87 (2,680) | 190 (8,590) | 215 (3,750) |
+
+A cancellation ratio under 1 is no cancellation. Forming
+`b_p = load − Σ Eλ` does not cancel either (the same ratio, 0.70–0.93 at the
+median element, ≤ 1.0). In double the backward errors read the same in ε (11ε, 16ε,
+33ε median; (f) 0.12ε).
+
+### M-RD-3
+
+**`Reconstruct()`'s floor is the real_t assembly of its local problem's
+load, not either local solve.** Same runs. `Reconstruct()` is
+`ReconstructTotalFlux()`, `u_t` in RT_k from `( u, p, ψ̂ )`, then one local
+problem per element (`u*`, `p*` and an enriched trace, closed by `p*`'s
+element mean) solved by `DenseMatrixInverse` in real_t. The study
+re-assembles that local problem bit for bit and re-runs
+`ReconstructTotalFlux()` bit for bit. Its load is linear in `u_t` and the
+potential `p_c`, so it is `G u_t + P p_c` with `G` and `P` fixed per element;
+their columns come from the same real_t code on unit inputs and, fixed, cancel
+from σ as the local matrix does; the products
+are then taken in double ("load in double"; it differs from MFEM's real_t load
+by 3.4e-7 to 6.5e-7 of its largest entry, 3–5ε).
+
+**σ of `ψ*`, root mean square, single, ×1e-7** (the trace is 0.47–0.52):
+
+| `ψ*` from | `n = 12, k = 2` | `n = 16, k = 2` | `n = 32, k = 2` | `n = 16, k = 3` |
+|---|---|---|---|---|
+| `Reconstruct()`, as is | 5.60 | 5.52 | 5.36 | 7.37 |
+| its inputs, solve in double | 4.42 | 4.31 | 4.21 | 6.07 |
+| its inputs, one real_t refinement pass | 5.25 | 5.19 | 4.95 | 7.14 |
+| its inputs, Ruiz-equilibrated real_t solve | 11.2 | 13.3 | 16.5 | 13.2 |
+| `u_t`, `p_c` from M-RD-1's (d), real_t solve | 5.51 | 5.18 | 5.12 | 7.09 |
+| `u_t`, `p_c` from (d), solve in double | 4.29 | 4.04 | 3.94 | 5.59 |
+| its inputs, divergence rows of the load in double, solve in double | 2.78 | 2.64 | 2.64 | 3.15 |
+| its inputs, face rows of the load in double, solve in double | 3.85 | 3.71 | 3.66 | 5.49 |
+| its inputs, load in double, solve in double | 1.61 | 1.57 | 1.55 | 1.93 |
+| `u_t`, `p_c` from (d), load in double, solve in double | **0.48** | **0.50** | **0.46** | **0.45** |
+| the same, load rounded to real_t before the solve | 1.16 | 1.13 | 1.10 | 1.25 |
+
+**The inputs, σ of their own largest value:** `u_t` 1.2e-6, 1.6e-6, 3.2e-6,
+3.0e-6 as `Reconstruct()` makes it, 2.8e-7, 3.6e-7, 7.1e-7, 4.7e-7 from (d)'s
+fields; the load's divergence rows 1.2e-5, 2.1e-5, 8.4e-5, 6.2e-5 (as `n²`:
+`div u_t` is a derivative of a field that already carries the trace's noise
+times `n`), its face rows 1.4e-6 to 3.5e-6, its mean row 6e-8.
+
+**The local problem, per element** (median, worst): `cond(K)` 960 (1,520),
+1,270 (2,040), 2,530 (4,130), 2,310 (3,690); Ruiz makes it worse, 2.5e3 to
+3.3e4, which is why (e2) loses; **`DenseMatrixInverse`'s backward error is
+0.24–0.34ε (≤ 1.4ε)**: this solve is backward stable, unlike M-RD-1's.
+
+* **Neither local solve sets the floor.** Solving `Reconstruct()`'s own local
+  problem in double buys 1.2–1.3×; feeding it refined fields buys nothing while the
+  load is formed in real_t. `ReconstructTotalFlux()` is not it either: with
+  (d)'s fields and the load in double, `ψ*` reaches the trace's level.
+* **The floor is the load's real_t assembly**: forming `G u_t + P p_c` in double
+  takes `ψ*` from 5.4–7.4e-7 to 1.6–1.9e-7, the divergence rows the larger
+  part. That is the "independent of its input" of M-371: the assembly's own
+  rounding sits above the input's noise.
+* **With the recovery refined as well, the floor is gone**: 0.45–0.50e-7,
+  0.38–0.42ε, the trace's own σ — 11–16× under `Reconstruct()`'s. Holding that
+  double load in real_t storage before the solve costs 2.4× of it back.
+* **In double the floor reads the same in units of ε**, `ψ*` 1.04e-15,
+  1.03e-15, 1.02e-15 (4.6–4.7ε, as single's 5.4–5.6e-7 is), unmoved by a double load or a double solve there,
+  which carry no extra precision.
+
+So `Reconstruct()` wants its load accumulated and held in double and its solve
+refined against a double residual (or done in double: the system is ~40 × 40
+and backward stable), and it wants the recovered fields M-RD-1's fix gives.
+Refinement in real_t (3–8%) and equilibration (1.8–3.1× worse) do not help.
