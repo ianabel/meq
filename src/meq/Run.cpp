@@ -1216,6 +1216,8 @@ std::shared_ptr<meq::EquilibriumSnapshot> meq::Run::Impl::captureState() const
 	out->profiles = profiles;
 	mfem::Vector const &state = solver->state();
 	out->state.assign( state.HostRead(), state.HostRead() + state.Size() );
+	out->fluxEnd = static_cast<std::size_t>( solver->fluxSpace().GetVSize() );
+	out->potentialEnd = out->fluxEnd + static_cast<std::size_t>( solver->potentialSpace().GetVSize() );
 	out->exteriorCoefficients = solver->exteriorCoefficients();
 	if ( normalised && !config->getSource().supportIsBox() )
 		out->psiAxis = solver->psiAxis();

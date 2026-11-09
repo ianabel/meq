@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -97,6 +98,16 @@ namespace
 		return gap/scale;
 	}
 
+	/// relativeGap() over one block of two states, [ begin, end ), against
+	/// that block's own largest value.
+	double blockGap( std::vector<double> const &a, std::vector<double> const &b,
+	                 std::size_t begin, std::size_t end )
+	{
+		BOOST_TEST_REQUIRE( ( begin < end && end <= a.size() && a.size() == b.size() ) );
+		return relativeGap( std::vector<double>( a.begin() + begin, a.begin() + end ),
+		                    std::vector<double>( b.begin() + begin, b.begin() + end ) );
+	}
+
 	/// Every variable of two datasets, byte for byte, and every global
 	/// attribute but those saying how long a phase took or which binary ran.
 	void requireSameDataset( meq::Dataset const &a, meq::Dataset const &b )
@@ -174,17 +185,39 @@ BOOST_AUTO_TEST_CASE( aChangedTableResolvesWarmToTheColdSolve )
 	std::shared_ptr<meq::EquilibriumSnapshot const> const reference = cold->snapshot();
 
 	double const gap = relativeGap( warm->state, reference->state );
+	BOOST_TEST_REQUIRE( ( warm->fluxEnd == reference->fluxEnd
+	                      && warm->potentialEnd == reference->potentialEnd ) );
+	std::size_t const fluxEnd = reference->fluxEnd, potentialEnd = reference->potentialEnd;
+	double const fluxGap = blockGap( warm->state, reference->state, 0, fluxEnd );
+	double const potentialGap = blockGap( warm->state, reference->state, fluxEnd, potentialEnd );
+	double const traceGap = blockGap( warm->state, reference->state, potentialEnd,
+	                                  reference->state.size() );
 	std::printf( "\n  Omega 10%% up, warm against cold: %.3e of the state's max, "
 	             "psi_ax %.3e apart; Newton %d against %d\n", gap,
 	             std::abs( warm->psiAxis - reference->psiAxis )/std::abs( reference->psiAxis ),
 	             warm->newtonIterations, reference->newtonIterations );
+	std::printf( "  by block, each of its own max: trace %.3e, psi_h %.3e, q_h %.3e\n",
+	             traceGap, potentialGap, fluxGap );
 	// REPEATABILITY, so max( the double bound, 20 eps ): the same tables
 	// solved warm and cold agree to the solve's own accuracy, ten eps under a
 	// NewtonRelativeTolerance below ten eps (M-306), and the bound is twice
 	// that, as QDrivenScalePin's is. In double 20 eps is 4.4e-15 and the
 	// double bounds stand; in single it is 2.4e-6.
 	double const twentyEps = 20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
-	BOOST_TEST( gap < std::max( 1.0e-8, twentyEps ) );
+	// The trace psihat is the solve's global unknown: warm and cold must
+	// agree on it at the same bound, of its own largest value.
+	BOOST_TEST( traceGap < std::max( 1.0e-8, twentyEps ),
+		"warm and cold differ by " << traceGap << " of the trace's max" );
+	// The whole state ( q, psi, psihat ) at the same bound. RED IN SINGLE,
+	// deliberately: the trace agrees to ~3 eps, and q_h's element-local
+	// recovery from it (MFEM's RecoverFEMSolution(), real_t throughout)
+	// amplifies that to ~80 eps (M-SX-1, M-SX-3). Not MEQ code; filed as
+	// ../../mfem-hdg-dev/doc/HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md
+	// (M-371). Green in single when that recovery is.
+	BOOST_TEST( gap < std::max( 1.0e-8, twentyEps ),
+		"warm and cold differ by " << gap << " of the state's max: trace " << traceGap
+		<< ", psi_h " << potentialGap << ", q_h " << fluxGap << ". In single this is MFEM's "
+		"element-local recovery (HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md, M-371)" );
 	BOOST_TEST( std::abs( warm->psiAxis - reference->psiAxis )
 	            < std::max( 1.0e-9, twentyEps )*std::abs( reference->psiAxis ) );
 	BOOST_TEST( warm->newtonIterations < reference->newtonIterations,

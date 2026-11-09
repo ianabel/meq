@@ -24,6 +24,7 @@
  * MFEM-FREE, like the family, so a front end can hold one without the library.
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -50,6 +51,12 @@ namespace meq
 
 		/// GradShafranovSolver::state(): ( q, psi, psihat ), exactly.
 		std::vector<double> state;
+
+		/// Where state's blocks end: q is [ 0, fluxEnd ), psi
+		/// [ fluxEnd, potentialEnd ) and the trace psihat
+		/// [ potentialEnd, state.size() ).
+		std::size_t fluxEnd = 0;
+		std::size_t potentialEnd = 0;
 
 		/// GradShafranovSolver::exteriorCoefficients(); empty on a fixed
 		/// boundary.

@@ -173,6 +173,10 @@ BOOST_AUTO_TEST_CASE( theGeometryIsContinuousWhereANodeCrossesAFace )
 	std::printf( "  surface %zu's node %zu crosses from element %d to %d between Omega x ( 1 %+.10e ) "
 	             "and ( 1 %+.10e ); across it G moves by %.2e of %s beyond its smooth change\n",
 	             surface, node, leftElement, rightElement, lo, hi, jump, quantityName( worst ) );
+	// RED IN SINGLE, deliberately: the jump reads ~50 eps there (M-SX-1),
+	// the family's floor from MFEM's element-local recovery and Reconstruct()
+	// in real_t, not MEQ code. Filed as ../../mfem-hdg-dev/doc/
+	// HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md (M-371).
 	BOOST_TEST( jump < 1.0e-11,
 		"G jumps by " << jump << " of " << quantityName( worst ) << " on surface " << surface
 		<< " where its node " << node << " crosses from element " << leftElement << " to "

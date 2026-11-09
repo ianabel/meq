@@ -25224,3 +25224,50 @@ The mutated loop converges as normally as the true one, and the replaced bound,
 **Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./QDrivenCurvedBoundary`;
 the mutation is `out.gSquared.push_back( g*g*( 1.0 + 2.0e-8 ) )` in
 `src/meq/SafetyFactor.cpp`, reverted.
+
+### M-SX-3
+
+**`RunSession`'s warm-against-cold gap, split by block, now asserted on the
+trace.** `manta/shape-derivative`, `RunSession` and `SessionSmoothness` built
+alone, double (`install-nocuda`) and single (`install-single`),
+`MKL_NUM_THREADS=1 OMP_NUM_THREADS=2`. `EquilibriumSnapshot` carries
+`fluxEnd` and `potentialEnd`, where `state`'s `q` and `ψ` blocks end, so the
+test splits `( q, ψ, ψ̂ )` itself. Each block's gap is `max |warm − cold|`
+over that block's own largest value; the whole state's is over the state's.
+`aChangedTableResolvesWarmToTheColdSolve`, `Omega` 10% up on
+`rotating-normalised`, every bound `max( 1e-8, 20ε )` (2.4e-6 in single):
+
+| | trace `ψ̂` | `ψ_h` | `q_h` | whole state | `ψ_ax` | Newton, warm / cold |
+|---|---|---|---|---|---|---|
+| double | 1.32e-15 | 1.71e-15 | 1.51e-14 | 1.51e-14 | 6.6e-16 | 4 / 6 |
+| single | 3.53e-7 (3.0ε) | 6.35e-7 (5.3ε) | 9.75e-6 (82ε) | 9.75e-6 (82ε) | 5.4e-8 | 3 / 5 |
+
+In single the trace assertion passes and the whole-state one fails, as the
+case's only failure; in double both pass. The state's largest value is
+`q_h`'s, so the whole-state gap is `q_h`'s. `ψ_h` reads 6.35e-7 of its own
+largest value here and 1.05e-7 in M-SX-1(e), which measured it against the
+state's. **The warm and cold solves agree on the global unknown to 3ε. The
+other 80ε comes from MFEM's element-local recovery of `q_h`
+(`RecoverFEMSolution()`, in `real_t`).** That is filed upstream as
+`../../mfem-hdg-dev/doc/HDG-SINGLE-PRECISION-LOCAL-RECOVERY-FROM-MEQ.md`
+(M-371 on `main`), and the whole-state bound stays red in single until the
+recovery is quieter.
+
+`SessionSmoothness`, same builds, with bounds unchanged:
+
+| | two warm starts, `max( 1e-12, 20ε )` | the jump at the crossing, 1e-11 |
+|---|---|---|
+| double | 2.01e-13, passes | 1.48e-14, passes |
+| single | 3.48e-6 (29ε), fails | 6.24e-6 (52ε), fails |
+
+**Not done: a one-step refinement on the linear path.** On the normalised
+path, Newton's last steps already act as iterative refinement of the
+recovery, and `ψ_h` comes out 60× quieter there (M-SX-1(a)). MEQ does not add
+an equivalent correction step to the linear path. The recovery is MFEM's, and
+the upstream request asks for the refinement there, where every caller gets
+it.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
+./RunSession --run_test=aChangedTableResolvesWarmToTheColdSolve`, which prints
+`by block, each of its own max: trace …, psi_h …, q_h …`; and
+`./SessionSmoothness`.
