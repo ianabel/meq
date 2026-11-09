@@ -208,7 +208,10 @@ moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
-(`TODO`, the single-precision round). The anisotropic suites are qualified
+(`TODO`, the single-precision round). It adds `ExtractionContinuity` too,
+whose 1e-11 is a double contract below single's floor: the family moves 1e-4
+between neighbouring states there with no crossing at all
+(→ **[M-367](MEASUREMENTS.md#m-367)**). The anisotropic suites are qualified
 in single (→ **[M-350](MEASUREMENTS.md#m-350)**). The wall is set by its
 longest tests — `DriverAcceptance` and `DeviceParity` — and FB-T's forty-solve
 cross (M-134) is `disabled()` in `FreeBoundaryCoupling` and run by name: its
@@ -260,7 +263,7 @@ suppresses its own threading inside the OpenMP region (`CLAUDE_HDGGS.md`,
 `MFEM_DIR` defaults to `../../mfem/install` (the double CUDA install) from
 `source/` and reads the environment; `builds/double` and `builds/single` each
 take `-DMFEM_DIR=` their own install, as above. **Configure refuses an MFEM
-whose link line names two MKL threading layers** (M-CPU-3).
+whose link line names two MKL threading layers** (M-370).
 
 ### Coverage and CI
 
@@ -368,6 +371,11 @@ The checklist; the measurement and the story of each is in the file named.
   `MKL_PARDISO_*`, MEQ's own copied link line): copy them from the reference
   cache and diff `MFEM_EXT_LIBS` token by token before comparing two installs.
 * **Never `cmake --build` while `ctest` runs** — the result mixes binaries.
+* **A test links `${MEQ_TEST_CORE}` and nothing else of MEQ's or MFEM's** —
+  `meq_core_tests`, one shared library carrying `src/meq` and all of MFEM. A
+  `meq_core` or `MFEM::MFEM` ahead of it is a second copy of MFEM's or meq's
+  globals in the process, a silent ODR violation; `SharedTestCore` checks with
+  `nm`.
 * **`meq --version` and the `.nc` carry commit, precision and backends**,
   written at build time by `cmake/GitCommit.cmake`; anything read by
   `execute_process()` is read once, at configure.
@@ -582,6 +590,14 @@ refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi.
 `*Device.cpp`, holding every `mfem::forall` in the tree, because `mfem::forall`
 `static_assert`s under `g++`. Without CUDA they are host stubs and the build is
 host-only and correct, which is what CI builds.
+
+**`src/meq` IS COMPILED ONCE, INTO TWO LIBRARIES** (`CMakeLists.txt`,
+`CLAUDE_TRAPS.md`, *Linking*). `meq_core`, static with `libmfem.a` behind it,
+is what `meq`, `meq-convert` and the Python module link and ship;
+`meq_core_tests`, shared, carries the same objects and all of `libmfem.a`, and
+is the one copy every test executable loads — which keeps a build tree with
+tests near 1 GB rather than 7. It needs MFEM built position independent;
+against an MFEM that is not, configure says so and each test carries its own.
 
 **`Profiles` and `Source` are MFEM-free on purpose** — plain `double`
 arguments — so they are unit-testable without the library; the

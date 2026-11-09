@@ -21,6 +21,7 @@
 // here, where the field is actually evaluated.
 #include "Coils.hpp"
 #include "ConductorField.hpp"
+#include "ContinuousField.hpp"
 #include "FieldViews.hpp"
 // samplerInsideTolerance() -- locatePotentialPoint() asks the same question
 // meq::GridSampler does, so it uses the same expression. M-165, M-221.
@@ -3388,6 +3389,8 @@ namespace
 				to[ i ] = -from[ i ];
 		}
 		postProcessed = false;
+		continuousPotentialGf.reset();
+		continuousFluxGf.reset();
 #endif
 	}
 
@@ -16401,7 +16404,7 @@ namespace
 				 * stubs -- and it copies into the protected page. Asked only of
 				 * a column whose host copy is valid, so this moves no data on
 				 * any backend; it is the hand-back this file makes after every
-				 * device read. M-CPU-2.
+				 * device read. M-369.
 				 */
 				for ( int i = 0; i < borderRhs.Size(); ++i )
 					if ( borderRhs[ i ]->GetMemory().HostIsValid() )
@@ -19405,6 +19408,8 @@ namespace
 		// A new solution invalidates the old post-processing rather than being
 		// silently paired with it.
 		postProcessed = false;
+		continuousPotentialGf.reset();
+		continuousFluxGf.reset();
 	}
 
 	void GradShafranovSolver::downloadSolution()
@@ -19560,6 +19565,32 @@ namespace
 		 * of that defect; this code assumes the library works.
 		 */
 		postProcessed = true;
+		continuousPotentialGf.reset();
+		continuousFluxGf.reset();
+	}
+
+	void GradShafranovSolver::buildContinuousFields() const
+	{
+		if ( continuousPotentialGf )
+			return;
+		if ( !postProcessed )
+			throw std::logic_error( "meq::GradShafranovSolver: the continuous fields psi~ and q~ are "
+			                        "built from psi* and q*, so postProcess() comes first" );
+		ContinuousFields fields = meq::buildContinuousFields( postProcessedGf, enrichedFluxGf, traceGf );
+		continuousPotentialGf = std::move( fields.potential );
+		continuousFluxGf = std::move( fields.flux );
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::continuousPotential() const
+	{
+		buildContinuousFields();
+		return *continuousPotentialGf;
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::continuousFlux() const
+	{
+		buildContinuousFields();
+		return *continuousFluxGf;
 	}
 
 	bool GradShafranovSolver::isPostProcessed() const

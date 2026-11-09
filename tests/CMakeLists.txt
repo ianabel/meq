@@ -4,6 +4,12 @@
 # with ctest. Keeping them separate means a test that crashes the process --
 # which, in a library that calls into MFEM, is a realistic failure mode -- takes
 # down only its own suite and is named precisely by ctest.
+#
+# EVERY TEST LINKS ${MEQ_TEST_CORE} AND NOTHING ELSE OF MEQ'S OR MFEM'S: the
+# shared meq_core_tests, which carries meq's objects and all of MFEM once, or
+# meq_core where MFEM cannot go into a shared object (CMakeLists.txt). Never
+# meq_core or MFEM::MFEM beside meq_core_tests -- that is a second copy of
+# MFEM's globals in the process, and SharedTestCore below is the check.
 
 # CONFIG mode: FindBoost was removed in CMake 4, so this relies on the
 # BoostConfig.cmake that Boost itself installs (1.90 here). The imported target
@@ -70,7 +76,7 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 	else()
 		add_executable(${_test} "unit/${_test}.cpp")
 		target_link_libraries(${_test} PRIVATE
-			meq_core
+			${MEQ_TEST_CORE}
 			Boost::unit_test_framework)
 
 		# So that a unit test can reach the closed-form solutions in
@@ -188,6 +194,15 @@ set(MEQ_CONVERGENCE_TESTS
 	VaryingCentrifugalConvergence
 	CriticalPointConvergence
 	FluxSurfaceConvergence
+	# psi~ and q~, the continuous pair the flux-surface extraction roots and
+	# weights by (ContinuousField.hpp): the interpolant's reproduction of its
+	# degree, continuity and psihat's moments, threaded equal to serial, and
+	# psi*'s and q*'s orders kept against Solov'ev's closed form.
+	ContinuousFieldConvergence
+	# The extraction's acceptance: the family does not jump where a node
+	# crosses an element face, one crossing found and bisected on the box,
+	# with psi* and q* as the control that the instrument sees a jump (M-364).
+	ExtractionContinuity
 	FluxGridConvergence
 	SurfaceAverageConvergence
 	SurfaceFitConvergence
@@ -324,7 +339,7 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 		target_include_directories(${_test} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 		target_link_libraries(${_test} PRIVATE
-			meq_core
+			${MEQ_TEST_CORE}
 			Boost::unit_test_framework)
 
 		add_test(NAME ${_test} COMMAND ${_test})
@@ -356,7 +371,7 @@ if(TARGET meq_core
 	add_executable(SafetyFactorPinStudy "convergence/SafetyFactorPinStudy.cpp")
 	target_include_directories(SafetyFactorPinStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(SafetyFactorPinStudy PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework
 		Eigen3::Eigen)
 endif()
@@ -426,7 +441,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/TraceSolverScaling.cpp")
 	add_executable(TraceSolverScaling "performance/TraceSolverScaling.cpp")
 	target_include_directories(TraceSolverScaling PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(TraceSolverScaling PRIVATE meq_core)
+	target_link_libraries(TraceSolverScaling PRIVATE ${MEQ_TEST_CORE})
 
 	# ONE ctest out of the performance harness, and it is not a benchmark gate.
 	#
@@ -448,6 +463,20 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		        --no-assembly-timing --repeats 1)
 	set_tests_properties(cuDSSTraceSolver PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1")
+endif()
+
+# ExtractionJumps: the instrument behind MEASUREMENTS.md's M-364 -- what
+# makes the flux-surface geometry jump as a source parameter moves, and how the
+# jump scales with the mesh. BUILT BUT NOT REGISTERED: it asserts nothing, and
+# each case is a measurement of minutes, run one at a time with
+# --run_test=<case> and MKL_NUM_THREADS=1. ExtractionContinuity is the
+# assertion it serves.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ExtractionJumps.cpp")
+	add_executable(ExtractionJumps "convergence/ExtractionJumps.cpp")
+	target_include_directories(ExtractionJumps PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(ExtractionJumps PRIVATE meq_core Boost::unit_test_framework)
 endif()
 
 # InversionScaling -- the same rules, for the solution-inversion chain.
@@ -472,7 +501,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/InversionScaling.cpp")
 	add_executable(InversionScaling "performance/InversionScaling.cpp")
 	target_include_directories(InversionScaling PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(InversionScaling PRIVATE meq_core)
+	target_link_libraries(InversionScaling PRIVATE ${MEQ_TEST_CORE})
 
 	find_package(Eigen3 3.3 QUIET NO_MODULE)
 	if(TARGET Eigen3::Eigen)
@@ -511,7 +540,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/NpcThreadScaling.cpp")
 	add_executable(NpcThreadScaling "performance/NpcThreadScaling.cpp")
 	target_include_directories(NpcThreadScaling PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(NpcThreadScaling PRIVATE meq_core)
+	target_link_libraries(NpcThreadScaling PRIVATE ${MEQ_TEST_CORE})
 
 	# omp_get_max_threads() only, to report the thread count it is running at --
 	# a threaded timing that does not say how many threads it used is not a
@@ -541,7 +570,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/NewtonStepProfile.cpp")
 	add_executable(NewtonStepProfile "performance/NewtonStepProfile.cpp")
 	target_include_directories(NewtonStepProfile PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(NewtonStepProfile PRIVATE meq_core)
+	target_link_libraries(NewtonStepProfile PRIVATE ${MEQ_TEST_CORE})
 
 	find_package(OpenMP QUIET COMPONENTS CXX)
 	if(TARGET OpenMP::OpenMP_CXX)
@@ -559,7 +588,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptan
 	add_executable(DriverAcceptance "convergence/DriverAcceptance.cpp")
 	target_include_directories(DriverAcceptance PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(DriverAcceptance PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 
 	# Passed rather than guessed. A test that assumed "../meq" would keep
@@ -588,7 +617,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/InverseSolve.c
 	add_executable(InverseSolve "convergence/InverseSolve.cpp")
 	target_include_directories(InverseSolve PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(InverseSolve PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(InverseSolve PRIVATE
 		MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
@@ -625,7 +654,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DeviceParity.c
 	target_include_directories(DeviceParity PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(DeviceParity PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(DeviceParity PRIVATE
 		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
@@ -641,7 +670,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/MachineFixedBo
 	target_include_directories(MachineFixedBoundary PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(MachineFixedBoundary PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(MachineFixedBoundary PRIVATE
 		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
@@ -660,7 +689,7 @@ if(TARGET meq AND TARGET meq-convert
 	target_include_directories(OutputConversion PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(OutputConversion PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(OutputConversion PRIVATE
 		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>"
@@ -690,7 +719,7 @@ if(TARGET meq_core AND NOT _rotating_index EQUAL -1
 	target_include_directories(GeqSourceComparison PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(GeqSourceComparison PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 
 	add_test(NAME GeqSourceComparison COMMAND GeqSourceComparison)
@@ -715,7 +744,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_include_directories(VacuumMirror PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(VacuumMirror PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(VacuumMirror PRIVATE
 		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
@@ -746,7 +775,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_include_directories(AnisotropicMirror PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(AnisotropicMirror PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(AnisotropicMirror PRIVATE
 		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
@@ -762,7 +791,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_include_directories(RotatingMirror PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(RotatingMirror PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(RotatingMirror PRIVATE
 		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
@@ -830,7 +859,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_include_directories(ElementRegions PRIVATE
 		"${CMAKE_CURRENT_SOURCE_DIR}")
 	target_link_libraries(ElementRegions PRIVATE
-		meq_core
+		${MEQ_TEST_CORE}
 		Boost::unit_test_framework)
 	target_compile_definitions(ElementRegions PRIVATE
 		MEQ_HALFDISC_PATH="${CMAKE_SOURCE_DIR}/tools/mesh/halfdisc.py"
@@ -951,6 +980,35 @@ if(TARGET _meq)
 		ENVIRONMENT "MKL_NUM_THREADS=1;PYTHONPATH=${MEQ_PYTHON_ROOT}:${CMAKE_SOURCE_DIR}/tests/python;PYTHONPYCACHEPREFIX=${CMAKE_BINARY_DIR}/pycache;MEQ_SOURCE_DIR=${CMAKE_SOURCE_DIR};MEQ_DRIVER_PATH=$<TARGET_FILE:meq>;MEQ_RUN_PATH=${CMAKE_BINARY_DIR}/meq-run")
 else()
 	message(STATUS "meq: PythonDriverParity not registered (no Python module in this build)")
+endif()
+
+# ---------------------------------------------------------------------------
+# SharedTestCore -- one copy of MFEM in every test process
+# ---------------------------------------------------------------------------
+#
+# Where meq_core_tests carries libmfem whole, no test executable may define an
+# MFEM or meq function the library also defines: cmake/CheckTestLinkage.cmake
+# says how that is read off nm. It checks every executable built in this
+# directory, registered or not.
+if(MEQ_TEST_CORE_CARRIES_MFEM AND CMAKE_NM)
+	get_property(_meq_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+	set(_meq_executables "")
+	foreach(_target IN LISTS _meq_targets)
+		get_target_property(_type ${_target} TYPE)
+		if(_type STREQUAL "EXECUTABLE")
+			string(APPEND _meq_executables "$<TARGET_FILE:${_target}>\n")
+		endif()
+	endforeach()
+	file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test-executables.txt"
+		CONTENT "${_meq_executables}")
+	add_test(NAME SharedTestCore
+		COMMAND "${CMAKE_COMMAND}"
+			"-DNM=${CMAKE_NM}"
+			"-DCORE=$<TARGET_FILE:meq_core_tests>"
+			"-DLIST=${CMAKE_CURRENT_BINARY_DIR}/test-executables.txt"
+			-P "${PROJECT_SOURCE_DIR}/cmake/CheckTestLinkage.cmake")
+	unset(_meq_targets)
+	unset(_meq_executables)
 endif()
 
 # ---------------------------------------------------------------------------

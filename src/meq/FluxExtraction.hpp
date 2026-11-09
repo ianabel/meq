@@ -119,10 +119,12 @@ namespace meq
 	 * Extract the family.
 	 *
 	 * @param tracer      already pointed at whichever potential the caller wants.
-	 *                    Potential::PostProcessed is the tracer's own default and
-	 *                    is the right one: IN-0 measured the traced curve 60x,
-	 *                    54x and 83x closer to the truth at k = 1, 2, 3 on the
-	 *                    same mesh, at FEWER corrector iterations per point.
+	 *                    Potential::Continuous is the tracer's own default and
+	 *                    is the right one: it roots psi~, continuous across
+	 *                    faces, so the family does not jump as a node crosses
+	 *                    one (M-364, M-365), and psi~ inherits psi*'s
+	 *                    order -- IN-0 measured psi*'s traced curve 60x, 54x and
+	 *                    83x closer to the truth than psi_h's at k = 1, 2, 3.
 	 * @param axis        IN-A's magnetic axis, a root of q_h. Its psi is the
 	 *                    psi_ax the label is normalised by.
 	 * @param psiBoundary psi on the plasma boundary -- zero on every
@@ -149,9 +151,9 @@ namespace meq
 	 * takes psi_bnd from the solver. Nothing more, and it is here so that the
 	 * four lines are written once.
 	 *
-	 * @throws std::invalid_argument if @a which is Potential::PostProcessed and
-	 *         GradShafranovSolver::postProcess() has not been called, which is
-	 *         ContourTracer's own refusal.
+	 * @throws std::invalid_argument if @a which is Potential::PostProcessed or
+	 *         Potential::Continuous and GradShafranovSolver::postProcess() has
+	 *         not been called, which is ContourTracer's own refusal.
 	 * @throws whatever findAxis() throws when there is no unambiguous magnetic
 	 *         axis -- which is a state meq cannot express a flux label against
 	 *         at all, and is exactly the refusal MANTA-COUPLING.md section 8
@@ -160,7 +162,7 @@ namespace meq
 	FluxSurfaceFamily extractFluxSurfaces( GradShafranovSolver const &solver,
 	                                       FluxFamilyOptions const &options,
 	                                       Potential which
-	                                           = Potential::PostProcessed );
+	                                           = Potential::Continuous );
 
 	/**
 	 * The volume enclosed by one fitted surface, by Green's theorem on its own

@@ -92,7 +92,7 @@ against is `CLAUDE_DECLINED.md`.
   protected page (`flush()`). Neither moves data on any backend. The CPU-only
   `builds/double` is the tree that exercises this: its `debug` arms take every
   fallback, which a CUDA build's never do
-  (→ **[M-CPU-2](MEASUREMENTS.md#m-cpu-2)**).
+  (→ **[M-369](MEASUREMENTS.md#m-369)**).
 * **The warm start threads under a Device** where its loops cannot reach
   MFEM's memory manager, which is not reentrant: plain HOST memory and no
   registered object read through an MFEM accessor
