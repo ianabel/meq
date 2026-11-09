@@ -57,6 +57,16 @@ namespace meq::tests::crossing
 				return meq::extractFluxSurfaces( solver, options, which );
 			}
 
+			meq::GradShafranovSolver const &theSolver() const
+			{
+				return solver;
+			}
+
+			mfem::Mesh &theMesh()
+			{
+				return mesh;
+			}
+
 		private:
 			double a;
 			mfem::Mesh mesh;

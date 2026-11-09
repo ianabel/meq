@@ -97,6 +97,7 @@
 #include "meq/PlasmaComponent.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
+#include "meq/SourceView.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/LevelSet.hpp"
 
@@ -2228,14 +2229,28 @@ BOOST_AUTO_TEST_CASE( theBorderedNewtonHasNoShelfOnTheConfinedEigenproblem )
 	// UNDER A DEVICE, ON THE ROUTE IT IS RUN FOR. Without the device
 	// integrand the solve is the host's element loop on device memory, and a
 	// green here would say nothing about the batched route.
+	//
+	// ON A BUILD WITH NO DEVICE KERNELS THE INTEGRAND CANNOT BE TAKEN: MEQ's
+	// device files are host stubs there, so the run is the host's element loop
+	// under the Device's memory semantics -- which is still worth running, since
+	// it is the only arm that takes the host fallbacks under a Device -- and
+	// only the route claim is skipped, loudly.
 	if ( char const *const device = requestedDevice() )
 	{
 		std::printf( "    device %s: device integrand %s\n", device,
 		             shipped.deviceIntegrand ? "yes" : "NO" );
-		BOOST_TEST( ( shipped.deviceIntegrand && folded.deviceIntegrand ),
-		            "MEQ_TEST_DEVICE=" << device << " is set and the solve did "
-		            "not take the device integrand, so the batched NPCGradient() "
-		            "route this run exists for was not exercised" );
+		if ( !meq::deviceKernelsBuilt() )
+			std::printf( "    device %s: the device-integrand claim is SKIPPED "
+			             "-- this build has no device kernels (MEQ's *Device.cpp "
+			             "files are host stubs without CUDA)\n", device );
+		else
+		{
+			BOOST_TEST( ( shipped.deviceIntegrand && folded.deviceIntegrand ),
+			            "MEQ_TEST_DEVICE=" << device << " is set and the solve "
+			            "did not take the device integrand, so the batched "
+			            "NPCGradient() route this run exists for was not "
+			            "exercised" );
+		}
 	}
 
 	double worst = 0.0;

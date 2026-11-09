@@ -165,6 +165,26 @@ namespace meq
 	                                           = Potential::Continuous );
 
 	/**
+	 * The axis a family of @a solver's is labelled by: @a located's point,
+	 * with the psi_ax that Psi_N is normalised by.
+	 *
+	 * WHERE THE SOLVE CARRIES psi_ax AS AN UNKNOWN -- a normalised source,
+	 * GradShafranovSolver::normalisationIsUnknown() -- IT IS THE SOLVE'S, so
+	 * that the family's Psi_N is the source's Psi exactly: a q-driven loop's
+	 * fixed point is then its answer, and a profile read against the source's
+	 * Psi pairs with the family's averages at the same label. OTHERWISE IT IS
+	 * @a tracer's OWN POTENTIAL AT THE POINT -- psi~ by default -- since the
+	 * levels are in that potential, and the finder's psi_h there carries the
+	 * discretisation's error at the axis as an offset in every inner label
+	 * and, in single, the element-local recovery's round-off, 27 times psi~'s
+	 * (MEASUREMENTS.md M-SX-1). grad psi vanishes at the point, so where on it
+	 * the value is read costs second order.
+	 */
+	CriticalPoint labelledAxis( GradShafranovSolver const &solver,
+	                            ContourTracer const &tracer,
+	                            CriticalPoint const &located );
+
+	/**
 	 * The volume enclosed by one fitted surface, by Green's theorem on its own
 	 * nodes: V = closed-integral pi R^2 dz, with dz/dtheta pointwise from rho'.
 	 *

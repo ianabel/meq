@@ -33,6 +33,7 @@
 #include "meq/DeviceBasis.hpp"
 
 #include "mfem.hpp"
+#include "unit/DeviceKernels.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -237,7 +238,8 @@ namespace
 // kernel that found a SUBSET would pass "every device point is a host point",
 // and a kernel that accepted spurious roots would pass the converse. A missing
 // candidate is how a coil's O-point wins a competition it should have lost.
-BOOST_AUTO_TEST_CASE( theDeviceRootsWhatTheHostSweepRoots )
+BOOST_AUTO_TEST_CASE( theDeviceRootsWhatTheHostSweepRoots,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -295,7 +297,8 @@ BOOST_AUTO_TEST_CASE( theDeviceRootsWhatTheHostSweepRoots )
 // all on half the iterates and the right one on the other half. The
 // determinant-then-trace ladder is three branches and it is worth pinning that
 // all three agree.
-BOOST_AUTO_TEST_CASE( theDeviceClassifiesThemAsTheHostDoes )
+BOOST_AUTO_TEST_CASE( theDeviceClassifiesThemAsTheHostDoes,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -367,7 +370,8 @@ BOOST_AUTO_TEST_CASE( theDeviceClassifiesThemAsTheHostDoes )
 // that disagreed would give the Newton a different stopping rule and a
 // different set of accepted roots, which is a difference no comparison of
 // positions would separate from a bad Jacobian.
-BOOST_AUTO_TEST_CASE( theStoppingScaleAgreesAndStaysOnTheDevice )
+BOOST_AUTO_TEST_CASE( theStoppingScaleAgreesAndStaysOnTheDevice,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -586,7 +590,8 @@ BOOST_AUTO_TEST_CASE( theMergeIsTheWalkItReplaces )
 // nothing, and the whole list here is the host sweep's. The fixture is that
 // guess: the cosine potential with the flux block ZEROED, as `Type = "ramp"`
 // leaves it, on 5000 elements -- past the 4096 a ceiling once refused.
-BOOST_AUTO_TEST_CASE( itReturnsTheWholeCandidateListHoweverLong )
+BOOST_AUTO_TEST_CASE( itReturnsTheWholeCandidateListHoweverLong,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 

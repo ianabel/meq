@@ -696,6 +696,26 @@ namespace meq
 	                             mfem::real_t *derivative,
 	                             int count );
 
+	/**
+	 * Whether this build carries MEQ's device kernels at all.
+	 *
+	 * **True when the seven `*Device.cpp` files were compiled as device
+	 * translation units, false where each is its host stub**, which refuses
+	 * before reading anything and leaves every caller on its host loop. The
+	 * seven share one guard and `CMakeLists.txt` hands them to the device
+	 * compiler together, so this one answers for all of them; it is defined
+	 * here, beside `evaluateSourceOnDevice()`, so that the answer comes from a
+	 * file that was actually compiled one way or the other rather than from a
+	 * reading of MFEM's configuration.
+	 *
+	 * **A configured `mfem::Device` does not imply it.** On a build against an
+	 * MFEM without CUDA, `mfem::Device( "debug" )` still allows `DEVICE_MASK`
+	 * and every route still refuses, so a test asserting that a kernel ran
+	 * asks this first and skips, naming why, rather than reading the stub's
+	 * refusal as a defect in the kernel.
+	 */
+	bool deviceKernelsBuilt();
+
 }
 
 #endif

@@ -152,11 +152,40 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversItsFieldOnACurvedBoundary )
 		c.push_back( value );
 	BOOST_TEST_REQUIRE( c.size() == 3u );
 
+	auto number = [ & ]( char const *name )
+	{
+		meq::DatasetAttribute const *a = driven->dataset()->attribute( name );
+		BOOST_TEST_REQUIRE( a != nullptr, "no attribute " << name );
+		std::vector<double> const *d = std::get_if<std::vector<double>>( &a->value );
+		BOOST_TEST_REQUIRE( ( d != nullptr && !d->empty() ), "attribute " << name << " is not a number" );
+		return d->front();
+	};
+	double const residual = number( "toroidal_loop_residual" );
+	double const threshold = number( "toroidal_loop_threshold" );
+	double const conditioning = number( "toroidal_loop_conditioning" );
+
 	double const exact[ 3 ] = { g0*g0, 2.0*g0*g1, g1*g1 };
-	std::printf( "\n  q-DRIVEN ON A MILLER BOUNDARY: g^2 = %.8f + %.8f Psi + %.8f Psi^2 "
+	std::printf( "\n  q-DRIVEN ON A MILLER BOUNDARY: g^2 = %.12f + %.12f Psi + %.12f Psi^2 "
 	             "against %.4f + %.4f Psi + %.4f Psi^2\n", c[ 0 ], c[ 1 ], c[ 2 ],
 	             exact[ 0 ], exact[ 1 ], exact[ 2 ] );
+	std::printf( "  errors %.2e, %.2e, %.2e; the loop stopped at %.2e against a threshold of %.2e, "
+	             "conditioning %.3e, so threshold/conditioning %.2e\n",
+	             std::abs( c[ 0 ] - exact[ 0 ] ), std::abs( c[ 1 ] - exact[ 1 ] ), std::abs( c[ 2 ] - exact[ 2 ] ),
+	             residual, threshold, conditioning, threshold/conditioning );
+	// WHAT THE LOOP PROMISES, NOT A FIXED FIGURE. It is judged converged when
+	// its residual in g^2's coefficients is under max( tolerance, floor ), and
+	// the coefficients are then within that over the outer Jacobian's
+	// sigma_min/sigma_max (OuterNewtonResult::finalResidual) -- 4.7e-9 in
+	// double, where they land 1.2e-10 away, and about 4e-4 in single, where
+	// they land 3.7e-6 away. The target is exact at every surface the map
+	// inverts at, so nothing else stands between the two. "Solved" alone is
+	// the loop's own threshold and cannot fail; a fixed 1e-4 of c_0 passed a
+	// map biased by 1e-8 that this catches (MEASUREMENTS.md M-SX-2).
+	BOOST_TEST_REQUIRE( conditioning > 0.0 );
 	for ( int k = 0; k < 3; ++k )
-		BOOST_TEST( std::abs( c[ k ] - exact[ k ] ) < 1.0e-4*exact[ 0 ],
-			"coefficient " << k << " is " << c[ k ] << " against " << exact[ k ] );
+		BOOST_TEST( std::abs( c[ k ] - exact[ k ] ) < threshold/conditioning,
+			"coefficient " << k << " is " << c[ k ] << " against " << exact[ k ] << ", "
+			<< std::abs( c[ k ] - exact[ k ] ) << " away where the loop stopped at " << residual
+			<< " against its threshold " << threshold << " at a conditioning of " << conditioning
+			<< ": the answer is not worth what the loop says it is" );
 }

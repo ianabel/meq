@@ -922,6 +922,13 @@ struct meq::Run::Impl
 	// that converges is visible in the file rather than only on stdout.
 	int toroidalIterations = 0;
 	int toroidalEquilibria = 0;
+	// And what its answer is worth: the residual it stopped at, the threshold
+	// that was judged against ( max( tolerance, floor ) ), and the outer
+	// Jacobian's conditioning, the residual over which bounds the coefficients'
+	// error (OuterNewtonResult::finalResidual).
+	double toroidalResidual = 0.0;
+	double toroidalThreshold = 0.0;
+	double toroidalConditioning = 0.0;
 	AM assemblyMode = AM::Serial;
 	bool onDevice = false;
 	LFM localFactorMode = LFM::Serial;
@@ -1016,6 +1023,9 @@ namespace
 		std::vector<double> toroidalCoefficients;
 		int toroidalIterations = 0;
 		int toroidalEquilibria = 0;
+		double toroidalResidual = 0.0;
+		double toroidalThreshold = 0.0;
+		double toroidalConditioning = 0.0;
 		double psiAxisGuess = 0.0;
 		double xPointSeedR = 0.0;
 		double xPointSeedZ = 0.0;
@@ -1070,6 +1080,9 @@ namespace
 			swap( toroidalCoefficients, impl.toroidalCoefficients );
 			swap( toroidalIterations, impl.toroidalIterations );
 			swap( toroidalEquilibria, impl.toroidalEquilibria );
+			swap( toroidalResidual, impl.toroidalResidual );
+			swap( toroidalThreshold, impl.toroidalThreshold );
+			swap( toroidalConditioning, impl.toroidalConditioning );
 			swap( psiAxisGuess, impl.psiAxisGuess );
 			swap( xPointSeedR, impl.xPointSeedR );
 			swap( xPointSeedZ, impl.xPointSeedZ );
@@ -4518,6 +4531,9 @@ int meq::Run::Impl::solve()
 			toroidalCoefficients = pinned.coefficients( outcome.coefficients );
 			toroidalIterations = outcome.iterations;
 			toroidalEquilibria = map.solves();
+			toroidalResidual = outcome.finalResidual;
+			toroidalThreshold = std::max( outerOptions.functionTolerance, outcome.floor );
+			toroidalConditioning = outcome.jacobianConditioning;
 
 			// g( Psi ) = sqrt( sum c_j Psi^j ), which is the ANSWER and is what
 			// a reader of this run wants beside psi_ax. Printed at the two ends
@@ -7186,7 +7202,10 @@ meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions con
 	if ( gammaHMarker && path )
 		tracer.setBandExtension( meq::BandExtension::TransferLift,
 		                         *gammaHMarker, path.get() );
-	return meq::extractFluxSurfaces( tracer, axis, solver->psiBoundary(), options );
+	// Labelled by the solve's psi_ax where it has one, else by psi~ at the
+	// located axis (meq::labelledAxis(), MEASUREMENTS.md M-SX-1).
+	return meq::extractFluxSurfaces( tracer, meq::labelledAxis( *solver, tracer, axis ),
+	                                 solver->psiBoundary(), options );
 }
 
 meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options )
@@ -7313,7 +7332,10 @@ meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &fil
 	                    sourceTypeName( config->getSource().type ) );
 	surfaces.attribute( "polynomial_degree",
 	                    config->getDiscretisation().polynomialDegree );
-	surfaces.attribute( "potential", "post-processed" );
+	// The pair the rays rooted and weighted by: psi~ and q~, interpolated
+	// continuously from psi*, psihat and q* (ContinuousField.hpp), with psi_ax
+	// read on psi~ at the located axis.
+	surfaces.attribute( "potential", "continuous" );
 
 	/*
 	 * WHICH MACHINE, FOR THE SAME REASON THE GRID SAYS SO, AND ONE
@@ -7844,6 +7866,9 @@ int meq::Run::Impl::write()
 			writer.attribute( "plasma_current", scale.plasmaCurrent );
 			writer.attribute( "toroidal_loop_iterations", toroidalIterations );
 			writer.attribute( "toroidal_loop_equilibria", toroidalEquilibria );
+			writer.attribute( "toroidal_loop_residual", toroidalResidual );
+			writer.attribute( "toroidal_loop_threshold", toroidalThreshold );
+			writer.attribute( "toroidal_loop_conditioning", toroidalConditioning );
 		}
 		/*
 		 * AND WHETHER psi_axis IS A MAGNETIC AXIS, which normalisation_residual
