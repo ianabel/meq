@@ -585,6 +585,15 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	endif()
 endif()
 
+# DeviceAudit -- timings of the c4ee278..1e8a3ad accuracy pieces under a Device.
+# Not a ctest: every number is a timing.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/DeviceAudit.cpp")
+	add_executable(DeviceAudit "performance/DeviceAudit.cpp")
+	target_include_directories(DeviceAudit PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(DeviceAudit PRIVATE ${MEQ_TEST_CORE})
+endif()
+
 # NewtonStepProfile -- WHERE a Newton step's time goes, split into legs that do
 # not overlap. The measurement HDG-NEWTON-STEP-PROFILE-FROM-HDGDEV.md asks for.
 #
