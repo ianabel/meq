@@ -23,7 +23,7 @@
 | **`MFEM_USE_CUDA = YES`**, `CUDA_ARCH = sm_75` | CUDA 13.3. **`sm_75` because the card is compute capability 7.5**; MFEM's cache defaulted to `sm_60`, which is wrong here and nothing warns you |
 | **`MFEM_USE_CUDSS = YES`** | cuDSS 0.8.0 from Debian (`/usr/include/cudss.h`), found with `-DCUDSS_DIR=/usr`. `mfem::CuDSSSolver` agrees with UMFPACK to 3.5e-14; its **timings on this machine are not reproducible** and MEQ's solver does not use it. See `CLAUDE_HDGGS.md`, *Threading, measured* |
 | `RAJA`, `OCCA`, `CEED`, `SIMD`, `AMGX` all `NO` | |
-| **`CMAKE_POSITION_INDEPENDENT_CODE = ON`** | **Load bearing for the Python module**, and not in `config.mk`, so only the build's `CMakeCache.txt` shows it. `libmfem.a` is linked into `_meq`, a shared object, and the compiler's default `-fPIE` reaches libstdc++'s data PC-relatively, which a shared object cannot: the link fails with *relocation R_X86_64_PC32 against symbol ... can not be used when making a shared object*. A refresh that reconfigures from scratch must pass it again. `meq_core` is made position independent by `python/CMakeLists.txt` itself. **`install-single` was never built with it**, so `builds/single` is configured `-DMEQ_PYTHON=OFF`: single precision is the solver's test, not the module's |
+| **`CMAKE_POSITION_INDEPENDENT_CODE = ON`** | **Load bearing for the Python module**, and not in `config.mk`, so only the build's `CMakeCache.txt` shows it. `libmfem.a` is linked into `_meq`, a shared object, and the compiler's default `-fPIE` reaches libstdc++'s data PC-relatively, which a shared object cannot: the link fails with *relocation R_X86_64_PC32 against symbol ... can not be used when making a shared object*. A refresh that reconfigures from scratch must pass it again. **And for the tests**: `meq_core_tests`, the shared library every test links, carries `libmfem.a` whole, and with it gslib's `../../mfem/gslib/build/lib/libgs.a`, which must then be position independent too (`make MPI=0 CFLAGS="-O2 -fPIC"`); against an archive that is not, configure names it and falls back to a copy of MFEM per test executable (`CLAUDE_TRAPS.md`, *Linking*). `meq_core`'s objects are position independent by `CMakeLists.txt` itself. **`install-single` was never built with it**, so `builds/single` is configured `-DMEQ_PYTHON=OFF` and its tests each carry MFEM: single precision is the solver's test, not the module's |
 
 **Turning CUDA on is not one flag, and two of the three obstacles are silent.**
 
@@ -95,7 +95,13 @@ correct, which is what CI builds. → **[M-223](MEASUREMENTS.md#m-223)**.
 AGAINST AN OTHERWISE IDENTICAL INSTALL.** `../../mfem/install-nocuda` differs from
 `../../mfem/install` in `MFEM_USE_CUDA` and the `MFEM_USE_CUDSS` that must follow
 it, and in nothing else; the two produce **byte-identical output** on the machine
-case, so this is cost and not answers.
+case, so this is cost and not answers. **"Nothing else" includes the cached
+`MKL_PARDISO_*` results**: configured fresh, the nocuda build resolves PARDISO to
+`lib/intel64/libmkl_sequential.so` beside BLAS's `mkl_gnu_thread`, `meq` then
+binds the sequential layer and the Python module's static MKL the threaded one,
+and `PythonDriverParity` reads two different `.nc` files. MEQ's configure now
+refuses such an MFEM (→ **[M-370](MEASUREMENTS.md#m-370)**); the repair is
+in *Rebuilding MFEM* below.
 
 → **[M-77](MEASUREMENTS.md#m-77)** — wall · user · allocation count
 
@@ -726,6 +732,25 @@ Debian's MKL on MEQ's `link.txt`. Copy the resolved values out of the reference
 cache, wipe rather than repoint, and **diff `MFEM_EXT_LIBS` token by token
 before believing any comparison between two installs**.
 → **[M-172](MEASUREMENTS.md#m-172)**.
+
+**THE PARDISO HALF FIRES WITH oneAPI ALONE, TOO.** `MKL_PARDISO_MKL_SEQUENTIAL_LIBRARY`
+is a misnomer the reference build overrides by hand to `libmkl_gnu_thread.so`;
+left to MFEM's search it finds oneAPI's own `lib/intel64/libmkl_sequential.so`,
+and the line then carries both layers. Nothing fails: `meq` binds the sequential
+layer, which the loader meets first, the Python module links its static MKL
+group and binds the threaded one, and the two write different answers
+(→ **[M-370](MEASUREMENTS.md#m-370)**). MEQ's configure refuses a line with
+two layers. The repair, on the MFEM build directory, then reinstall and
+configure MEQ's tree afresh:
+
+```sh
+L=/opt/intel/oneapi/mkl/latest/lib
+cmake -S mfem-src -B build-nocuda -DMKL_LIBRARY_DIR=$L \
+  -DMKL_PARDISO_LIBRARIES="$L/libmkl_core.so;$L/libmkl_intel_lp64.so;$L/libmkl_gnu_thread.so" \
+  -DMKL_PARDISO_LIBRARY=$L/libmkl_core.so -DMKL_PARDISO_MKL_LP64_LIBRARY=$L/libmkl_intel_lp64.so \
+  -DMKL_PARDISO_MKL_SEQUENTIAL_LIBRARY=$L/libmkl_gnu_thread.so
+cmake --build build-nocuda -j4 --target install
+```
 
 ## Traps in MFEM's API
 

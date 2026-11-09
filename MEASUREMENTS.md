@@ -24867,6 +24867,131 @@ the target's re-measurement by `runs/manta-shape-derivative/qtarget/`
 (`qtarget.log`: each tree's `meq` on the example with `GGPrimeFile` the closed
 form, at `RefinementLevels` 1, 2, 3).
 
+### M-368
+
+**On a CPU-only build the device unit cases that assert a kernel ran skip,
+loudly; nothing they test is compiled there.** `cpu-build` off `b347610`,
+`builds/cpu-build` against `../../mfem/install-nocuda`. MEQ's seven
+`*Device.cpp` files compile their kernels only under
+`MFEM_USE_CUDA_OR_HIP_LANG`, so here each route is its stub and refuses before
+reading anything. `mfem::Device( "debug" )` is still configurable and still
+allows `DEVICE_MASK`, so fourteen cases read the stub's refusal as a red:
+
+| suite | cases that require a kernel |
+|---|---|
+| `AxisSearchTests` | `theDeviceRootsWhatTheHostSweepRoots`, `theDeviceClassifiesThemAsTheHostDoes`, `theStoppingScaleAgreesAndStaysOnTheDevice`, `itReturnsTheWholeCandidateListHoweverLong` |
+| `DeviceQuadratureTests` | `theDeviceElementLoopReproducesTheHostQuadrature`, `theConductorShiftIsAddedAtTheRightQuadraturePoint` |
+| `DeviceRowsTests` | `theDeviceRowsReproduceTheHostDotToTheBit`, `theColumnFillMatchesTheHostAndIsNotTransposed`, `theMirrorSurvivesBeingRefreshed`, `theBatchedFillIsEveryHostArmToTheBit` |
+| `ResidentIterateTests` | `theTwoIntegralsMatchTheirHostLoopsToTheBit`, `theFourScattersMatchTheirHostLoopsToTheBit`, `theSmallKernelsAreTheHostLoops`, `theNodalPeakIsTheWalk` |
+
+Each now carries `*meq::tests::requiresDeviceKernels()`
+(`tests/unit/DeviceKernels.hpp`), a Boost precondition on
+`meq::deviceKernelsBuilt()`, which `SourceViewDevice.cpp` answers from whichever
+branch it was compiled in, and prints `SKIPPED -- this build has no device
+kernels`. The refusal, counter and host-only cases in the same files run on
+every build. `PlasmaConnectivityFoldOn_debug` keeps running and skips only its
+device-integrand claim, the same way.
+
+**None of them should hold on a CPU-only build as MEQ is laid out, and that is
+a choice MEQ makes, not a limit MFEM imposes.** `install-nocuda`'s
+`general/backends.hpp` sets `can_compile_kernels = true` (the `static_assert`
+fires only with `MFEM_USE_CUDA_OR_HIP` and without the device language), so the
+kernels would compile under `g++` there and `debug` would run them on the host.
+Kept as stubs because the CPU-only tree's `debug` arms are then the one place
+the host fallbacks under a Device are exercised, which is what found M-369;
+the kernels' own `debug` and `cuda` arms are the CUDA tree's.
+
+### M-369
+
+**Two host fallbacks under a Device touched protected memory, and only a build
+without kernels takes them.** Under `--device debug` on `builds/cpu-build`,
+before the fixes:
+
+| case | fault | site |
+|---|---|---|
+| `PlasmaConnectivityFoldOn_debug` | `movslq (%r8,%rax,4)`, an `int` load | `entriesAt()` in `solveWithNormalisation()`: the gather refuses and the host branch indexes the dof array `at[ i ]` raw. MFEM's device-aware vector operations take dof arrays by `Read( use_dev )`, so the array is device-valid and protected |
+| `DeviceParity`, `machine-f-diiid`, `debug` (exit 139) | `memcpy` in `Vector::operator=` in `DarcyNPCOperator::Mult()`, `yb.GetBlock( 0 ) = r_loc.GetBlock( 0 )` | the trial residual at `GradShafranov.cpp` `fieldResidual( unknown, s, residual )`: `DarcyNPCSolver::ArrayMult()` read `residual` as a right-hand side through a `BlockVector` alias on the device, which protects the alias's host range and leaves the base's flags host-valid; with no device integrand the residual is formed on the host and copied into the protected page |
+
+Found with gdb on the release binary and on a `-g` relink of
+`GradShafranov.cpp` for the line. **Fixes**: `entriesAt()`'s host branch calls
+`countedHostRead( at, line )` as its gather branch already did; `flush()` hands
+each right-hand side whose host copy is valid back with `HostRead()` after
+`ArrayMult()` — no transfer on any backend, since a valid host copy is never
+copied into.
+
+**Mutation-checked** on scratch relinks of `GradShafranov.cpp`, each with one
+fix reverted:
+
+| reverted | `PlasmaConnectivity` fold, `debug` | `machine-f-diiid`, `--device debug` |
+|---|---|---|
+| neither | passes | converges, 2 Newton steps, exit 0 |
+| `entriesAt()`'s `at` read | `illegal memory access`, signal 11 | — |
+| `flush()`'s hand-back | passes | `illegal memory access`, exit 139, at a page offset `0xfe0` as before |
+
+With both fixes, `DeviceParity` on `builds/cpu-build` (`OMP_NUM_THREADS=4
+ctest -j3`, a loaded machine, so the seconds are not timings):
+
+| case | arm | exit | s | `psi_ax` | Newton |
+|---|---|---|---|---|---|
+| `mhd-rectangle` | cpu | 0 | 0.6 | - | 5 |
+| `mhd-rectangle` | debug | 0 | 34.3 | - | 5 |
+| `machine-f-diiid` | cpu | 0 | 11.9 | 3.759850e-01 | 2 |
+| `machine-f-diiid` | debug | 0 | 750.6 | 3.759850e-01 | 2 |
+| `diverted-tokamak` | cpu | 0 | 17.5 | 8.486305e-02 | 25 |
+
+and the whole suite there is 142 of 145, the three deliberate reds
+(`PlasmaEdgeConvergence`, `QDrivenConsistency`, `AnisotropicMirror`).
+
+**The CUDA tree is unchanged by either fix or by the skips.** A single build
+against `install-single` (`-DMEQ_PYTHON=OFF`), on the RTX 2070 SUPER for
+correctness: `AxisSearchTests`, `DeviceQuadratureTests`, `DeviceRowsTests` and
+`ResidentIterateTests` pass with no case skipped, under `debug` as registered
+and under `MEQ_TEST_DEVICE=cuda`; both `PlasmaConnectivityFoldOn` arms pass
+with `device integrand yes`; `DeviceParity` passes all three arms:
+
+| case | cpu | debug | cuda |
+|---|---|---|---|
+| `mhd-rectangle`, Newton | 4 | 4 | 4 |
+| `machine-f-diiid`, `psi_ax` / Newton | 3.759861e-01 / 1 | 3.759861e-01 / 1 | 3.759862e-01 / 1 |
+| `diverted-tokamak`, `psi_ax` / Newton | 8.486277e-02 / 23 | skipped by design | 8.486279e-02 / 23 |
+
+### M-370
+
+**`PythonDriverParity` failed on the CPU-only MFEM because `meq` and the
+module linked different MKL threading layers.** `install-nocuda` was
+configured fresh, and its `MKL_PARDISO_*` cache results resolved PARDISO to
+oneAPI's `lib/intel64/libmkl_sequential.so`, where the reference CUDA build
+carries the hand-set `libmkl_gnu_thread.so` (`build/CMakeCache.txt`). Every
+other MKL entry of the two caches agrees. So `config.mk`'s `MFEM_EXT_LIBS`
+named both layers: `-lmkl_gnu_thread` from `BLAS_LIBRARIES` and
+`-lmkl_sequential` from PARDISO's. `meq`'s `NEEDED` was `libmkl_intel_lp64`,
+`libmkl_sequential`; the module's static, hidden MKL group carries
+`mkl_gnu_thread` and no shared MKL at all. So the binary ran PARDISO
+sequential and the module threaded, at `MKL_NUM_THREADS=1` in both.
+
+| `soloviev-nstx`, `MKL_NUM_THREADS=1` | `.nc` against the module's |
+|---|---|
+| `meq`, as linked (sequential) | `final_residual`, `B_R`, `B_Z`, `psi`, every coefficient set differ |
+| the same `meq`, `LD_PRELOAD=libmkl_gnu_thread.so.3` | byte-equal |
+| `meq` relinked against a `config.mk` carrying only `mkl_gnu_thread` | byte-equal |
+
+The two answers are 6.9e-14 apart in `psi_coefficients` (`max |psi|` 0.437),
+`final_residual` 9.79e-14 against 9.70e-14: the module was right to refuse
+them as the same, and the layer, not the code, was the difference. Not
+candidates, checked: SuiteSparse (the module's `install-static` and the
+binary's `install` are v7.12.2 from one `../../suitesparse/src`, and the
+preload alone closes the gap), and a different MFEM (one `libmfem.a`).
+
+**The fix belongs to the MFEM install**: `build-nocuda` reconfigured with the
+reference cache's `MKL_LIBRARY_DIR` and `MKL_PARDISO_*` values
+(`CLAUDE_MFEM.md`, *Rebuilding MFEM*), whose regenerated
+`config/config-install.mk` differs from the installed `config.mk` in those
+tokens only. **MEQ's configure now refuses an MFEM whose link line names two
+MKL threading layers**, naming the repair; it fires on `install-nocuda` as
+installed. `builds/cpu-build` was verified against the regenerated file
+through `-DMFEM_CONFIG_MK=`; the install itself is not refreshed by this
+branch.
+
 ### M-SX-1
 
 **What amplifies single precision's round-off on its way to the flux-surface

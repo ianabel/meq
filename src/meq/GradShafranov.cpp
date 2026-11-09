@@ -12080,7 +12080,15 @@ namespace
 					return;
 				}
 			}
+			// THE HOST ROUTE ASKS FOR THE INDICES TOO. A dof array handed to
+			// one of MFEM's device-aware vector operations comes back
+			// device-valid (see rowDot()'s `borderDofs`), so `at[ i ]` is as
+			// raw as `v( i )` and the debug backend faults on it here. The
+			// branch above asks after its gather; this is the branch taken
+			// when the gather refuses -- every time on a build whose device
+			// files are host stubs.
 			countedHostRead( v, line );
+			countedHostRead( at, line );
 			for ( int i = 0; i < at.Size(); ++i )
 				out( i ) = v( at[ i ] );
 		};
@@ -16384,6 +16392,23 @@ namespace
 				if ( !keepColumnsResident )
 					for ( int i = 0; i < borderOut.Size(); ++i )
 						countedHostRead( *borderOut[ i ], __LINE__ );
+				/*
+				 * AND THE RIGHT-HAND SIDES GO BACK TO WHOEVER WRITES THEM ON
+				 * THE HOST. `ArrayMult()` reads each column through a
+				 * BlockVector over it, on the device, and an alias's device
+				 * read protects its host range under the debug backend without
+				 * telling the base, whose flags still say host-valid. The next
+				 * writer of `residual` is the host element loop inside
+				 * `DarcyNPCOperator::Mult()` whenever the device integrand is
+				 * not in use -- always, on a build whose device files are host
+				 * stubs -- and it copies into the protected page. Asked only of
+				 * a column whose host copy is valid, so this moves no data on
+				 * any backend; it is the hand-back this file makes after every
+				 * device read. M-369.
+				 */
+				for ( int i = 0; i < borderRhs.Size(); ++i )
+					if ( borderRhs[ i ]->GetMemory().HostIsValid() )
+						borderRhs[ i ]->HostRead();
 				borderRhs.SetSize( 0 );
 				borderOut.SetSize( 0 );
 			};

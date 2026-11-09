@@ -34,6 +34,7 @@
 #include "mfem.hpp"
 
 #include "convergence/RoundOffFloor.hpp"
+#include "unit/DeviceKernels.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -241,7 +242,8 @@ namespace
 }
 
 
-BOOST_AUTO_TEST_CASE( theTwoIntegralsMatchTheirHostLoopsToTheBit )
+BOOST_AUTO_TEST_CASE( theTwoIntegralsMatchTheirHostLoopsToTheBit,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	Fixture f;
 	meq::DevicePlasmaLoops loops;
@@ -306,7 +308,8 @@ BOOST_AUTO_TEST_CASE( theTwoIntegralsMatchTheirHostLoopsToTheBit )
 	            "partials differ from the corner's loop, by up to " << largest );
 }
 
-BOOST_AUTO_TEST_CASE( theFourScattersMatchTheirHostLoopsToTheBit )
+BOOST_AUTO_TEST_CASE( theFourScattersMatchTheirHostLoopsToTheBit,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	Fixture f;
 	meq::DevicePlasmaLoops loops;
@@ -383,7 +386,8 @@ BOOST_AUTO_TEST_CASE( theFourScattersMatchTheirHostLoopsToTheBit )
 	}
 }
 
-BOOST_AUTO_TEST_CASE( theSmallKernelsAreTheHostLoops )
+BOOST_AUTO_TEST_CASE( theSmallKernelsAreTheHostLoops,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -450,7 +454,8 @@ BOOST_AUTO_TEST_CASE( theSmallKernelsAreTheHostLoops )
 // MFEM's ArgMaxReducer keeps whichever equal joined last -- so each is a case
 // here, against the walk written out. `+ 0.0` is the walk's own `+
 // conductorPsiAtDof()` with no table, and is what makes a -0 peak +0.
-BOOST_AUTO_TEST_CASE( theNodalPeakIsTheWalk )
+BOOST_AUTO_TEST_CASE( theNodalPeakIsTheWalk,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
