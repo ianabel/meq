@@ -166,7 +166,8 @@ namespace
 	}
 
 	/// The bordered tangent in lambda at a solved state.
-	void tangent( Solved &s, mfem::Vector &dx, double &dAxis )
+	void tangent( Solved &s, mfem::Vector &dx, double &dAxis,
+	              int passes = meq::GradShafranovSolver::linearisedRefinementPasses )
 	{
 		s.solver->linearise( s.solver->state() );
 		mfem::Vector dRdp;
@@ -175,7 +176,7 @@ namespace
 			[ source ]( double radius, double z, double psi ) { return source->dFdLambda( radius, z, psi ); },
 			dRdp );
 		std::vector<double> ds;
-		s.solver->linearisedTangent( dRdp, {}, nullptr, dx, ds );
+		s.solver->linearisedTangent( dRdp, {}, nullptr, dx, ds, passes );
 		dAxis = ds.front();
 	}
 
@@ -506,4 +507,46 @@ BOOST_AUTO_TEST_CASE( withoutABorderTheRetainedTangentIsSolveTangents )
 	double const relative = difference.Normlinf()/fresh.Normlinf();
 	std::printf( "\n  no border: the retained tangent against solveTangent(), %.3e relative\n", relative );
 	BOOST_TEST( relative < 1.0e-13, "the retained path's tangent differs from solveTangent()'s by " << relative );
+}
+
+/*
+ * ITERATIVE REFINEMENT, BY PASS: the bordered tangent's error against the
+ * closed form after 0...4 passes of solveLinearised()'s refinement -- each a
+ * residual of the bordered system with J applied, and one back-solve -- at
+ * k = 2 and 3 on 8 to 32 cells, beside the solution's own error. MEASUREMENT
+ * ONLY (disabled; run by name, in each precision). M-LIN-6.
+ */
+BOOST_AUTO_TEST_CASE( theTangentErrorByRefinementPass, * boost::unit_test::disabled() )
+{
+	double const lambda = 0.2;
+	Mode const mode;
+	mfem::FunctionCoefficient phi( [ mode ]( mfem::Vector const &x ) { return mode.phi( x( 0 ), x( 1 ) ); } );
+	mfem::FunctionCoefficient psiExact( [ mode, lambda ]( mfem::Vector const &x )
+	                                    { return lambda*mode.phi( x( 0 ), x( 1 ) ); } );
+	std::printf( "\n  THE BORDERED TANGENT BY REFINEMENT PASS: d psi L2 against phi, |d psi_ax - 1|\n" );
+	for ( int order : { 2, 3 } )
+		for ( int cells : { 8, 16, 32 } )
+		{
+			auto s = solveManufactured( lambda, order, cells );
+			std::vector<mfem::IntegrationRule const *> irs( mfem::Geometry::NumGeom );
+			for ( int i = 0; i < mfem::Geometry::NumGeom; ++i )
+				irs[ i ] = &mfem::IntRules.Get( i, 2*order + 6 );
+			double const psiError = s->solver->potential().ComputeL2Error( psiExact, irs.data() );
+			std::printf( "    k = %d, %2d cells: psi_h %.3e (relative %.3e) | d psi:", order, cells, psiError,
+			             psiError/lambda );
+			for ( int passes = 0; passes <= 4; ++passes )
+			{
+				mfem::Vector dx;
+				double dAxis = 0.0;
+				tangent( *s, dx, dAxis, passes );
+				int const fluxSize = s->solver->fluxSpace().GetVSize();
+				mfem::GridFunction dpsi( &s->solver->potentialSpace() );
+				for ( int i = 0; i < dpsi.Size(); ++i )
+					dpsi( i ) = dx( fluxSize + i );
+				std::printf( " %d: %.3e (%.1e)", passes, dpsi.ComputeL2Error( phi, irs.data() ),
+				             std::abs( dAxis - 1.0 ) );
+			}
+			std::printf( "\n" );
+			std::fflush( stdout );
+		}
 }

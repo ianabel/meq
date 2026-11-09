@@ -2376,13 +2376,15 @@ namespace meq
 			 * projection of @a boundaryDerivative -- d( datum )/dp -- the way
 			 * setBoundaryData()'s datum is projected, or zero when it is null.
 			 *
-			 * A fresh operator and factorisation per call, and no border, so
-			 * it refuses a normalised source (psi_ax an unknown), an exterior
-			 * coupling, the free currents and a reaction-following tau.
-			 * linearise() is the retained, bordered one.
+			 * linearise() at @a state and linearisedTangent() with no border,
+			 * so it is refined as that is and leaves the linearisation held.
+			 * It refuses a normalised source (psi_ax an unknown), an exterior
+			 * coupling, the free currents and a reaction-following tau, which
+			 * take the bordered linearisedTangent().
 			 */
 			void solveTangent( mfem::Vector const &state, mfem::Vector const &dRdp,
-			                   mfem::Coefficient *boundaryDerivative, mfem::Vector &out );
+			                   mfem::Coefficient *boundaryDerivative, mfem::Vector &out,
+			                   int passes = linearisedRefinementPasses );
 
 			/**
 			 * psi* OF @a state -- DarcyForm::Reconstruct() of an arbitrary
@@ -2446,7 +2448,13 @@ namespace meq
 			 * @throws std::logic_error when no valid linearisation is held.
 			 */
 			void solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
-			                      mfem::Vector &dx, std::vector<double> &ds );
+			                      mfem::Vector &dx, std::vector<double> &ds,
+			                      int passes = linearisedRefinementPasses );
+
+			/// The cap on solveLinearised()'s refinement passes. Each is one
+			/// residual evaluation and one back-solve; they stop earlier, when
+			/// the correction stops falling. MEASUREMENTS.md M-LIN-6.
+			static constexpr int linearisedRefinementPasses = 4;
 
 			/**
 			 * THE BORDERED TANGENT in a parameter p: [ dx ; ds ] =
@@ -2459,7 +2467,7 @@ namespace meq
 			 */
 			void linearisedTangent( mfem::Vector const &dRdp, std::vector<double> const &dCdp,
 			                        mfem::Coefficient *boundaryDerivative, mfem::Vector &dx,
-			                        std::vector<double> &ds );
+			                        std::vector<double> &ds, int passes = linearisedRefinementPasses );
 
 			/**
 			 * AN ESTIMATE OF 1/sigma_min OF THE HELD BORDERED MATRIX, from the
@@ -7320,12 +7328,16 @@ namespace meq
 			 *                    entries. CALLED FROM THE THREADS of the
 			 *                    element loop, so it must be reentrant. False
 			 *                    refuses.
+			 * @param along       when given, each point's dF/dp_j is multiplied
+			 *                    by this state's psi there: a directional
+			 *                    derivative, dF/dpsi along a field.
 			 *
 			 * @return false if @a derivative refused.
 			 */
 			bool addSourceColumns( mfem::Vector const &state, std::size_t count,
 			                       std::function<bool( double, double, double, double * )> const &derivative,
-			                       std::vector<mfem::Vector *> const &out ) const;
+			                       std::vector<mfem::Vector *> const &out,
+			                       mfem::Vector const *along = nullptr ) const;
 
 			/// linearise()'s held state; defined in the .cpp. Shared so the
 			/// incomplete type can sit in the header.
@@ -7338,6 +7350,16 @@ namespace meq
 
 			/// J^{-1} b on the held factorisation, essential rows zero.
 			void retainedBackSolve( mfem::Vector const &b, mfem::Vector &y ) const;
+
+			/// The bordered Schur solve on the held factorisation, once, with
+			/// no refinement: solveLinearised()'s pass.
+			void solveLinearisedOnce( mfem::Vector const &b, std::vector<double> const &g,
+			                          mfem::Vector &dx, std::vector<double> &ds ) const;
+
+			/// J @a t at the held state, APPLIED -- the residual's affine part
+			/// differenced and the source's dF/dpsi along @a t -- and not
+			/// through the factors: what refinement corrects against.
+			void applyRetainedJacobian( mfem::Vector const &t, mfem::Vector &out ) const;
 
 			/**
 			 * UNDER setTauFollowsReaction(), THE FACE TERM's share of the

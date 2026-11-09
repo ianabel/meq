@@ -170,11 +170,12 @@ namespace
 	/// The tangent of a converged solve in a parameter whose dF/dp is
 	/// @a dFdp and whose datum's derivative is @a datum.
 	mfem::Vector tangent( Solved &s, std::function<double( double, double, double )> const &dFdp,
-	                      mfem::Coefficient *datum )
+	                      mfem::Coefficient *datum,
+	                      int passes = meq::GradShafranovSolver::linearisedRefinementPasses )
 	{
 		mfem::Vector dRdp, dx;
 		s.solver->assembleSourceDerivative( s.solver->state(), dFdp, dRdp );
-		s.solver->solveTangent( s.solver->state(), dRdp, datum, dx );
+		s.solver->solveTangent( s.solver->state(), dRdp, datum, dx, passes );
 		return dx;
 	}
 
@@ -529,6 +530,41 @@ BOOST_AUTO_TEST_CASE( whereTheTangentReachesOneInAMillion, * boost::unit_test::d
 {
 	rateTable( 1, { 32, 64, 128 }, false );
 	rateTable( 2, { 32, 64, 128 }, false );
+}
+
+/*
+ * ITERATIVE REFINEMENT, BY PASS: the tangent in n's error against the closed
+ * form after 0...4 passes, beside the solution's own, k = 2...4. MEASUREMENT
+ * ONLY (disabled; run by name, in each precision). M-LIN-6.
+ */
+BOOST_AUTO_TEST_CASE( theTangentErrorByRefinementPass, * boost::unit_test::disabled() )
+{
+	ExponentialFamily const family;
+	meq::analytic::SimilarityExponential const eq = family.fixture();
+	mfem::FunctionCoefficient psiExact( [ &eq ]( mfem::Vector const &x ) { return eq.psi( x( 0 ), x( 1 ) ); } );
+	mfem::FunctionCoefficient dDatum( [ &family ]( mfem::Vector const &x )
+	                                  { return family.dPsiDn( x( 0 ), x( 1 ) ); } );
+	std::printf( "\n  THE TANGENT IN n BY REFINEMENT PASS: d psi max against the closed form\n" );
+	for ( int order : { 2, 3, 4 } )
+		for ( int cells : { 8, 16, 32 } )
+		{
+			if ( order == 4 && cells == 32 )
+				continue;
+			auto s = solveFamily( family, order, cells );
+			Fields const solution = fieldsOf( *s, s->solver->state() );
+			Errors const e = scalarErrors( solution.psi, psiExact, order );
+			std::printf( "    k = %d, %2d cells: psi_h max %.3e | d psi max:", order, cells, e.max );
+			for ( int passes = 0; passes <= 4; ++passes )
+			{
+				mfem::Vector const dx = tangent( *s,
+					[ &eq ]( double radius, double z, double psi ) { return psi*eq.f( radius, z, psi ); },
+					&dDatum, passes );
+				Fields const f = fieldsOf( *s, dx );
+				std::printf( " %d: %.3e", passes, scalarErrors( f.psi, dDatum, order ).max );
+			}
+			std::printf( "\n" );
+			std::fflush( stdout );
+		}
 }
 
 /*

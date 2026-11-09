@@ -11567,7 +11567,7 @@ namespace
 	bool GradShafranovSolver::addSourceColumns(
 		mfem::Vector const &state, std::size_t count,
 		std::function<bool( double, double, double, double * )> const &derivative,
-		std::vector<mfem::Vector *> const &out ) const
+		std::vector<mfem::Vector *> const &out, mfem::Vector const *along ) const
 	{
 		countedHostRead( state, __LINE__ );
 
@@ -11616,10 +11616,16 @@ namespace
 					double const radius = point( 0 );
 					double const z = point( 1 );
 
-					double psi = 0.0;
+					double psi = 0.0, alongPsi = 1.0;
 					for ( int j = 0; j < dof; ++j )
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
 					psi += conductorPsiAtQuadrature( e, i );
+					if ( along )
+					{
+						alongPsi = 0.0;
+						for ( int j = 0; j < dof; ++j )
+							alongPsi += shape( j )*( *along )( potentialStart + dofs[ j ] );
+					}
 
 					if ( !derivative( radius, z, psi, g.data() ) )
 					{
@@ -11634,7 +11640,7 @@ namespace
 						if ( g[ k ] == 0.0 )
 							continue;
 						// SourceIntegrator's -w F/R, differentiated.
-						double const factor = -weight*g[ k ]/radius;
+						double const factor = -weight*g[ k ]*alongPsi/radius;
 						mfem::Vector &column = *out[ k ];
 						for ( int j = 0; j < dof; ++j )
 							column( potentialStart + dofs[ j ] ) += factor*shape( j );
@@ -11695,7 +11701,8 @@ namespace
 	}
 
 	void GradShafranovSolver::solveTangent( mfem::Vector const &state, mfem::Vector const &dRdp,
-	                                        mfem::Coefficient *boundaryDerivative, mfem::Vector &out )
+	                                        mfem::Coefficient *boundaryDerivative, mfem::Vector &out,
+	                                        int passes )
 	{
 		if ( !prepared || !darcy || !nonlinearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::solveTangent: there is no solve to "
@@ -11709,61 +11716,14 @@ namespace
 			throw std::invalid_argument( "meq::GradShafranovSolver::solveTangent: dR/dp is not state-sized" );
 
 		/*
-		 * Newton's own operator and elimination, as solveByPicard() builds
-		 * them: the residual first, at the state, so the gradient is taken
-		 * where the residual was -- the order every Newton step keeps.
+		 * THE RETAINED PATH WITHOUT A BORDER: Newton's own operator at the
+		 * state, factorised, the datum lifted by the applied Jacobian, and the
+		 * tangent refined against it (solveLinearised()). The linearisation
+		 * is left held.
 		 */
-		++hybridizationGeneration;
-		mfem::DarcyNPCOperator npc( *darcy->GetHybridization(), blockOffsets, darcyRhs );
-		mfem::Vector residual( npc.Height() );
-		npc.Mult( state, residual );
-		std::unique_ptr<mfem::Solver> const traceOwned =
-			makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue,
-			                 traceRefinementCapValue );
-		mfem::DarcyNPCSolver linear( *traceOwned );
-		linear.SetOperator( npc.GetGradient( state ) );
-
-		/*
-		 * THE DATUM IS LIFTED, NOT HANDED TO THE SOLVE. Newton's step is zero
-		 * on the essential trace dofs -- the data ride in the iterate -- so a
-		 * right-hand side there is discarded, measured: the datum's share came
-		 * back as nothing. So delta x = v_b - y, v_b the datum's derivative on
-		 * those dofs and zero elsewhere, and J y = dR/dp + J v_b with y = 0
-		 * there. R is AFFINE in the trace -- psihat enters through the face
-		 * terms tau ( psi - psihat ) and < psihat, q.n >, linear, and F reads
-		 * psi alone -- so J v_b = R( x + v_b ) - R( x ) exactly.
-		 */
-		mfem::Vector rhs( dRdp );
-		mfem::Array<int> const &essential = essentialTraceDofs();
-		int const traceStart = blockOffsets[ 2 ];
-		mfem::Vector lifted( state.Size() );
-		lifted = 0.0;
-		if ( boundaryDerivative )
-		{
-			mfem::GridFunction datum( traceFes.get() );
-			datum = 0.0;
-			datum.ProjectBdrCoefficient( *boundaryDerivative, fittedMarker );
-			for ( int i = 0; i < essential.Size(); ++i )
-				lifted( traceStart + essential[ i ] ) = datum( essential[ i ] );
-			mfem::Vector moved( state ), atMoved( npc.Height() );
-			moved += lifted;
-			npc.Mult( moved, atMoved );
-			atMoved -= residual;
-			rhs += atMoved;
-			// And the gradient back at the state: the residual just taken was
-			// elsewhere (CLAUDE.md, no residual between a gradient and its
-			// solves).
-			npc.Mult( state, residual );
-			linear.SetOperator( npc.GetGradient( state ) );
-		}
-		for ( int i = 0; i < essential.Size(); ++i )
-			rhs( traceStart + essential[ i ] ) = 0.0;
-
-		out.SetSize( state.Size() );
-		out = 0.0;
-		linear.Mult( rhs, out );
-		out.Neg();
-		out += lifted;
+		linearise( state );
+		std::vector<double> ds;
+		linearisedTangent( dRdp, {}, boundaryDerivative, out, ds, passes );
 	}
 
 	void GradShafranovSolver::reconstructPotential( mfem::Vector const &state, mfem::GridFunction &into )
@@ -11796,6 +11756,9 @@ namespace
 		/// psi_ax's column dR/ds, its back-solve J^{-1} c, its row and corner.
 		mfem::Vector column;
 		mfem::Vector columnSolved;
+		/// R( x ) - S( x ) at the state: the residual less its source term,
+		/// the affine part J's apply differences against.
+		mfem::Vector linearAtState;
 		std::vector<int> rowIndex;
 		std::vector<double> rowWeight;
 		double corner = 1.0;
@@ -11860,6 +11823,26 @@ namespace
 		held->linear->SetOperator( held->npc->GetGradient( state ) );
 		held->generation = hybridizationGeneration;
 		retained = held;
+
+		/*
+		 * THE AFFINE PART AT THE STATE, R( x ) - S( x ), S the source term as
+		 * SourceIntegrator assembles it on the plasma's elements: what J's
+		 * apply differences against (applyRetainedJacobian()).
+		 */
+		held->linearAtState = residual;
+		{
+			mfem::Vector source( residual.Size() );
+			zeroOnHost( source );
+			std::vector<mfem::Vector *> columns{ &source };
+			Source const &f = *nonlinearSource;
+			addSourceColumns( state, 1,
+				[ &f ]( double radius, double z, double psi, double *g )
+				{
+					g[ 0 ] = f.f( radius, z, psi );
+					return true;
+				}, columns );
+			held->linearAtState -= source;
+		}
 
 		if ( !normalisedSource )
 			return;
@@ -11988,8 +11971,57 @@ namespace
 		held->schur = held->corner - rowDotColumn;
 	}
 
-	void GradShafranovSolver::solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
-	                                           mfem::Vector &dx, std::vector<double> &ds )
+	void GradShafranovSolver::applyRetainedJacobian( mfem::Vector const &t, mfem::Vector &out ) const
+	{
+		/*
+		 * J t, APPLIED AND NOT THROUGH THE FACTORS: the residual is
+		 * R( x ) = A( x ) + S( psi ), A affine -- the HDG blocks, the faces,
+		 * the data -- and S the source term. So
+		 *
+		 *     J t = [ ( R - S )( x + s t ) - ( R - S )( x ) ]/s + S'( psi ) t
+		 *
+		 * EXACTLY, for any s: the bracket is A's linear part and S' is
+		 * SourceIntegrator's own dF/dpsi, which the factorised gradient
+		 * holds. s puts s t at the state's own size, so the difference is no
+		 * worse conditioned than the residual Newton evaluates.
+		 */
+		out.SetSize( t.Size() );
+		zeroOnHost( out );
+		double const size = t.Normlinf();
+		if ( size == 0.0 )
+			return;
+		double const stateSize = retained->state.Normlinf();
+		double const s = ( stateSize > 0.0 ? stateSize : 1.0 )/size;
+		mfem::Vector moved( retained->state );
+		moved.Add( s, t );
+		mfem::Vector difference( t.Size() );
+		retained->npc->Mult( moved, difference );
+		Source const &f = *nonlinearSource;
+		{
+			mfem::Vector source( t.Size() );
+			zeroOnHost( source );
+			std::vector<mfem::Vector *> columns{ &source };
+			addSourceColumns( moved, 1,
+				[ &f ]( double radius, double z, double psi, double *g )
+				{
+					g[ 0 ] = f.f( radius, z, psi );
+					return true;
+				}, columns );
+			difference -= source;
+		}
+		difference -= retained->linearAtState;
+		std::vector<mfem::Vector *> columns{ &out };
+		addSourceColumns( retained->state, 1,
+			[ &f ]( double radius, double z, double psi, double *g )
+			{
+				g[ 0 ] = f.dFdPsi( radius, z, psi );
+				return true;
+			}, columns, &t );
+		out.Add( 1.0/s, difference );
+	}
+
+	void GradShafranovSolver::solveLinearisedOnce( mfem::Vector const &b, std::vector<double> const &g,
+	                                               mfem::Vector &dx, std::vector<double> &ds ) const
 	{
 		if ( !isLinearised() )
 			throw std::logic_error( "meq::GradShafranovSolver::solveLinearised: no valid "
@@ -12009,9 +12041,58 @@ namespace
 		dx.Add( -ds[ 0 ], retained->columnSolved );
 	}
 
+	void GradShafranovSolver::solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
+	                                           mfem::Vector &dx, std::vector<double> &ds, int passes )
+	{
+		solveLinearisedOnce( b, g, dx, ds );
+		/*
+		 * ITERATIVE REFINEMENT IN WORKING PRECISION, against a residual that
+		 * does not go through the factors: r = b - J dx - c ds, J APPLIED as
+		 * the Newton residual is evaluated (applyRetainedJacobian()), and the
+		 * correction solved on the same factorisation. One back-solve carries
+		 * eps kappa( J ); Newton keeps that out of the solution by
+		 * correcting against its residual, and this does the same for the
+		 * tangent. Until the correction stops falling, at most @a passes.
+		 */
+		mfem::Array<int> const &essential = essentialTraceDofs();
+		int const traceStart = blockOffsets[ 2 ];
+		double previous = std::numeric_limits<double>::infinity();
+		mfem::Vector applied, r, correction;
+		std::vector<double> rg, cds;
+		for ( int pass = 0; pass < passes; ++pass )
+		{
+			applyRetainedJacobian( dx, applied );
+			r = b;
+			r -= applied;
+			for ( int i = 0; i < essential.Size(); ++i )
+				r( traceStart + essential[ i ] ) = 0.0;
+			rg.assign( ds.size(), 0.0 );
+			if ( retained->borders > 0 )
+			{
+				r.Add( -ds[ 0 ], retained->column );
+				double rowDotX = 0.0;
+				for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
+					rowDotX += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
+				rg[ 0 ] = ( g.empty() ? 0.0 : g[ 0 ] ) - rowDotX - retained->corner*ds[ 0 ];
+			}
+			solveLinearisedOnce( r, rg, correction, cds );
+			double size = correction.Normlinf();
+			for ( double x : cds )
+				size = std::max( size, std::abs( x ) );
+			if ( !( size < previous ) )
+				break;
+			dx += correction;
+			for ( std::size_t i = 0; i < ds.size(); ++i )
+				ds[ i ] += cds[ i ];
+			previous = size;
+			if ( size == 0.0 )
+				break;
+		}
+	}
+
 	void GradShafranovSolver::linearisedTangent( mfem::Vector const &dRdp, std::vector<double> const &dCdp,
 	                                             mfem::Coefficient *boundaryDerivative, mfem::Vector &dx,
-	                                             std::vector<double> &ds )
+	                                             std::vector<double> &ds, int passes )
 	{
 		if ( !isLinearised() )
 			throw std::logic_error( "meq::GradShafranovSolver::linearisedTangent: no valid "
@@ -12027,9 +12108,11 @@ namespace
 		if ( boundaryDerivative )
 		{
 			/*
-			 * THE DATUM LIFTED, as solveTangent() lifts it: J v_b =
-			 * R( x + v_b ) - R( x ), R affine in the trace -- a residual
-			 * evaluation, so the linearisation is taken again afterwards.
+			 * THE DATUM LIFTED: Newton's step is zero on the essential trace
+			 * dofs, so dx = v_b + y with v_b the datum's derivative there and
+			 * J y = b - J v_b. J v_b is applied (applyRetainedJacobian()), so
+			 * the factorisation is kept. The axis row lives on element dofs,
+			 * so g is unchanged.
 			 */
 			mfem::Array<int> const &essential = essentialTraceDofs();
 			int const traceStart = blockOffsets[ 2 ];
@@ -12038,18 +12121,11 @@ namespace
 			datum.ProjectBdrCoefficient( *boundaryDerivative, fittedMarker );
 			for ( int i = 0; i < essential.Size(); ++i )
 				lifted( traceStart + essential[ i ] ) = datum( essential[ i ] );
-			mfem::Vector const state( retained->state );
-			mfem::Vector base( b.Size() ), moved( state ), atMoved( b.Size() );
-			retained->npc->Mult( state, base );
-			moved += lifted;
-			retained->npc->Mult( moved, atMoved );
-			atMoved -= base;
-			b -= atMoved;
-			// The row reads the lifted trace too, but the axis row lives on
-			// element dofs, so g is unchanged.
-			linearise( state );
+			mfem::Vector applied;
+			applyRetainedJacobian( lifted, applied );
+			b -= applied;
 		}
-		solveLinearised( b, g, dx, ds );
+		solveLinearised( b, g, dx, ds, passes );
 		dx += lifted;
 	}
 
@@ -12076,7 +12152,7 @@ namespace
 			for ( double x : g )
 				before += x*x;
 			before = std::sqrt( before );
-			solveLinearised( v, g, dx, ds );
+			solveLinearisedOnce( v, g, dx, ds );
 			double after = 0.0;
 			v = 0.0;
 			for ( int i = 0; i < potentialSize; ++i )
