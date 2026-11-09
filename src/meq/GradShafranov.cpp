@@ -11573,6 +11573,11 @@ namespace
 		std::vector<mfem::Vector *> const &out, mfem::Vector const *along ) const
 	{
 		countedHostRead( state, __LINE__ );
+		// AUDIT: the direction is indexed raw below, as the state is.
+		if ( along )
+			countedHostRead( *along, __LINE__ );
+		for ( mfem::Vector *column : out )
+			static_cast<void>( column->HostReadWrite() );
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
@@ -11783,11 +11788,16 @@ namespace
 		mfem::Vector rhs( b );
 		mfem::Array<int> const &essential = essentialTraceDofs();
 		int const traceStart = blockOffsets[ 2 ];
+		// AUDIT: a copy is born where its source was valid; the zeroing is raw.
+		static_cast<void>( rhs.HostReadWrite() );
+		static_cast<void>( essential.HostRead() );
 		for ( int i = 0; i < essential.Size(); ++i )
 			rhs( traceStart + essential[ i ] ) = 0.0;
 		y.SetSize( b.Size() );
 		y = 0.0;
 		retained->linear->Mult( rhs, y );
+		// AUDIT: every caller reads the answer raw.
+		static_cast<void>( y.HostRead() );
 	}
 
 	void GradShafranovSolver::linearise( mfem::Vector const &state )
@@ -11968,6 +11978,7 @@ namespace
 		}
 
 		double rowDotColumn = 0.0;
+		static_cast<void>( held->columnSolved.HostRead() );
 		for ( std::size_t k = 0; k < held->rowIndex.size(); ++k )
 			rowDotColumn += held->rowWeight[ k ]*held->columnSolved( held->rowIndex[ k ] );
 		held->corner = 1.0;
@@ -12042,6 +12053,7 @@ namespace
 		double const gValue = g.empty() ? 0.0 : g[ 0 ];
 		ds[ 0 ] = ( gValue - rowDotY )/retained->schur;
 		dx.Add( -ds[ 0 ], retained->columnSolved );
+		static_cast<void>( dx.HostRead() );
 	}
 
 	void GradShafranovSolver::solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
@@ -12067,6 +12079,8 @@ namespace
 			applyRetainedJacobian( dx, applied );
 			r = b;
 			r -= applied;
+			static_cast<void>( r.HostReadWrite() );
+			static_cast<void>( essential.HostRead() );
 			for ( int i = 0; i < essential.Size(); ++i )
 				r( traceStart + essential[ i ] ) = 0.0;
 			rg.assign( ds.size(), 0.0 );
@@ -12074,6 +12088,7 @@ namespace
 			{
 				r.Add( -ds[ 0 ], retained->column );
 				double rowDotX = 0.0;
+				static_cast<void>( dx.HostRead() );
 				for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
 					rowDotX += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
 				rg[ 0 ] = ( g.empty() ? 0.0 : g[ 0 ] ) - rowDotX - retained->corner*ds[ 0 ];
@@ -12085,6 +12100,7 @@ namespace
 			if ( !( size < previous ) )
 				break;
 			dx += correction;
+			static_cast<void>( dx.HostRead() );
 			for ( std::size_t i = 0; i < ds.size(); ++i )
 				ds[ i ] += cds[ i ];
 			previous = size;
@@ -12157,7 +12173,8 @@ namespace
 			before = std::sqrt( before );
 			solveLinearised( v, g, dx, ds );
 			double after = 0.0;
-			v = 0.0;
+			static_cast<void>( dx.HostRead() );
+			zeroOnHost( v );
 			for ( int i = 0; i < potentialSize; ++i )
 			{
 				v( potentialStart + i ) = dx( potentialStart + i );
