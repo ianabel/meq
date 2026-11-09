@@ -18,7 +18,7 @@
 
 /*
  * WHY MFEM'S ELEMENT-LOCAL HDG RECOVERY LOSES PRECISION IN SINGLE -- the
- * instrument behind MEASUREMENTS.md's M-RD-1 onwards. BUILT, NOT REGISTERED:
+ * instrument behind MEASUREMENTS.md's M-379 onwards. BUILT, NOT REGISTERED:
  * it asserts nothing.
  *
  * M-371 measured that in single the trace psihat is solved to ~0.4 eps while

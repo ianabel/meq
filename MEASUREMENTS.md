@@ -25453,7 +25453,7 @@ reds are main's deliberate ones, `PlasmaEdgeConvergence`,
 `QDrivenConsistency`'s `theDeliveredQConvergesToTheTarget` and
 `AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
 
-### M-RD-1
+### M-379
 
 **MFEM's element-local recovery loses precision in its own arithmetic: the
 block-Schur route of `MultInv()` is not backward stable on the HDG local
@@ -25526,10 +25526,10 @@ algorithm's, and single only makes it visible.
   splitting it shows the load's rounding contributes 0.1–0.3× and the trace's
   the rest. Since the matrices are the same bits in every state, rounding
   their entries cannot reach σ at all; assembling them in double cannot buy
-  any σ. M-RD-2 has the conditioning, which is modest (`cond(M)` 1.5e3–3.9e3).
+  any σ. M-380 has the conditioning, which is modest (`cond(M)` 1.5e3–3.9e3).
 * **H2 as posed is falsified**: `B A⁻¹ b_u − b_p` does not cancel. `|b_p|` is
   0.2–0.7% of `|B A⁻¹ b_u|` at the median element, so the difference is
-  `B A⁻¹ b_u` itself (M-RD-2). Rescaling, which H2 predicts would help, does not: a power-of-two
+  `B A⁻¹ b_u` itself (M-380). Rescaling, which H2 predicts would help, does not: a power-of-two
   scaling per block, (e1), is bit-identical to (a), as it must be, since an
   exact scaling commutes with rounding; a per-dof Ruiz scaling, (e2), gains at
   most 1.3× and nothing at `n = 32`. And refinement in real_t, which H2
@@ -25538,7 +25538,7 @@ algorithm's, and single only makes it visible.
   step later than H2 placed it.** `MultInv()` forms `A⁻¹ b_u`, the flux the
   trace would drive with `p = 0`, then subtracts `A⁻¹ s Bᵀ p`. The two are
   36–124× `|u|` at the median element and up to 2,190× at the worst, growing as
-  `1/h` and with `k` (M-RD-2); `|A⁻¹ b_u|` is the potential's level over `h`,
+  `1/h` and with `k` (M-380); `|A⁻¹ b_u|` is the potential's level over `h`,
   and `u` is its gradient. The real_t rounding of those intermediates is
   rounding relative to them, so the route's normwise backward error is 11–33ε at
   the median element and up to 385ε, against 0.12ε (≤ 1.4ε) for one pivoted LU
@@ -25572,7 +25572,7 @@ enough.
 ./RecoveryPrecision --run_test=<case>`, `n12k2`, `n16k2`, `n32k2`, `n16k3`.
 The normalised path (NPC, its own local layout) is not instrumented.
 
-### M-RD-2
+### M-380
 
 **The recovery's local system, per element, at the middle state** (single;
 in double from the stored real_t data; median, worst in brackets). `M` is the
@@ -25599,7 +25599,7 @@ A cancellation ratio under 1 is no cancellation. Forming
 median element, ≤ 1.0). In double the backward errors read the same in ε (11ε, 16ε,
 33ε median; (f) 0.12ε).
 
-### M-RD-3
+### M-381
 
 **`Reconstruct()`'s floor is the real_t assembly of its local problem's
 load, not either local solve.** Same runs. `Reconstruct()` is
@@ -25622,7 +25622,7 @@ by 3.4e-7 to 6.5e-7 of its largest entry, 3–5ε).
 | its inputs, solve in double | 4.42 | 4.31 | 4.21 | 6.07 |
 | its inputs, one real_t refinement pass | 5.25 | 5.19 | 4.95 | 7.14 |
 | its inputs, Ruiz-equilibrated real_t solve | 11.2 | 13.3 | 16.5 | 13.2 |
-| `u_t`, `p_c` from M-RD-1's (d), real_t solve | 5.51 | 5.18 | 5.12 | 7.09 |
+| `u_t`, `p_c` from M-379's (d), real_t solve | 5.51 | 5.18 | 5.12 | 7.09 |
 | `u_t`, `p_c` from (d), solve in double | 4.29 | 4.04 | 3.94 | 5.59 |
 | its inputs, divergence rows of the load in double, solve in double | 2.78 | 2.64 | 2.64 | 3.15 |
 | its inputs, face rows of the load in double, solve in double | 3.85 | 3.71 | 3.66 | 5.49 |
@@ -25639,7 +25639,7 @@ times `n`), its face rows 1.4e-6 to 3.5e-6, its mean row 6e-8.
 **The local problem, per element** (median, worst): `cond(K)` 960 (1,520),
 1,270 (2,040), 2,530 (4,130), 2,310 (3,690); Ruiz makes it worse, 2.5e3 to
 3.3e4, which is why (e2) loses; **`DenseMatrixInverse`'s backward error is
-0.24–0.34ε (≤ 1.4ε)**: this solve is backward stable, unlike M-RD-1's.
+0.24–0.34ε (≤ 1.4ε)**: this solve is backward stable, unlike M-379's.
 
 * **Neither local solve sets the floor.** Solving `Reconstruct()`'s own local
   problem in double buys 1.2–1.3×; feeding it refined fields buys nothing while the
@@ -25658,5 +25658,5 @@ times `n`), its face rows 1.4e-6 to 3.5e-6, its mean row 6e-8.
 
 So `Reconstruct()` wants its load accumulated and held in double and its solve
 refined against a double residual (or done in double: the system is ~40 × 40
-and backward stable), and it wants the recovered fields M-RD-1's fix gives.
+and backward stable), and it wants the recovered fields M-379's fix gives.
 Refinement in real_t (3–8%) and equilibration (1.8–3.1× worse) do not help.

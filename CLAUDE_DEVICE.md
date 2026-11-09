@@ -1111,7 +1111,7 @@ a count of calls: *a format-specific defect is pinned by putting the other forma
 in the same position*. With the fix, single is 0.81× to 0.90× of double per
 Newton step, and 0.69× to 0.81× on setup.
 
-### Why the element-local recovery and `Reconstruct()` are noisy → [M-RD-1](MEASUREMENTS.md#m-rd-1), [M-RD-2](MEASUREMENTS.md#m-rd-2), [M-RD-3](MEASUREMENTS.md#m-rd-3)
+### Why the element-local recovery and `Reconstruct()` are noisy → [M-379](MEASUREMENTS.md#m-rd-1), [M-380](MEASUREMENTS.md#m-rd-2), [M-381](MEASUREMENTS.md#m-rd-3)
 
 M-371's 200× on `ψ_h` and `Reconstruct()`'s 5.5e-7 are both MFEM's, and
 `RecoveryPrecision` separates them with the hybridization's own stored blocks,

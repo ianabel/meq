@@ -499,7 +499,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	target_link_libraries(ExtractionNoise PRIVATE ${MEQ_TEST_CORE} Boost::unit_test_framework)
 endif()
 
-# RecoveryPrecision: the instrument behind MEASUREMENTS.md's M-RD-1 onwards --
+# RecoveryPrecision: the instrument behind MEASUREMENTS.md's M-379 onwards --
 # why MFEM's element-local HDG recovery (RecoverFEMSolution()) and its
 # reconstruction (Reconstruct()) lose precision in single, separated into
 # solve arithmetic, cancellation and the stored data. BUILT BUT NOT
