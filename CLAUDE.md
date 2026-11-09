@@ -360,6 +360,11 @@ The checklist; the measurement and the story of each is in the file named.
   `MKL_PARDISO_*`, MEQ's own copied link line): copy them from the reference
   cache and diff `MFEM_EXT_LIBS` token by token before comparing two installs.
 * **Never `cmake --build` while `ctest` runs** — the result mixes binaries.
+* **A test links `${MEQ_TEST_CORE}` and nothing else of MEQ's or MFEM's** —
+  `meq_core_tests`, one shared library carrying `src/meq` and all of MFEM. A
+  `meq_core` or `MFEM::MFEM` ahead of it is a second copy of MFEM's or meq's
+  globals in the process, a silent ODR violation; `SharedTestCore` checks with
+  `nm`.
 * **`meq --version` and the `.nc` carry commit, precision and backends**,
   written at build time by `cmake/GitCommit.cmake`; anything read by
   `execute_process()` is read once, at configure.
@@ -574,6 +579,14 @@ refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi.
 `*Device.cpp`, holding every `mfem::forall` in the tree, because `mfem::forall`
 `static_assert`s under `g++`. Without CUDA they are host stubs and the build is
 host-only and correct, which is what CI builds.
+
+**`src/meq` IS COMPILED ONCE, INTO TWO LIBRARIES** (`CMakeLists.txt`,
+`CLAUDE_TRAPS.md`, *Linking*). `meq_core`, static with `libmfem.a` behind it,
+is what `meq`, `meq-convert` and the Python module link and ship;
+`meq_core_tests`, shared, carries the same objects and all of `libmfem.a`, and
+is the one copy every test executable loads — which keeps a build tree with
+tests near 1 GB rather than 7. It needs MFEM built position independent;
+against an MFEM that is not, configure says so and each test carries its own.
 
 **`Profiles` and `Source` are MFEM-free on purpose** — plain `double`
 arguments — so they are unit-testable without the library; the
