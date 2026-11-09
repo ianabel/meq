@@ -24511,6 +24511,19 @@ ctest -j3`, a loaded machine, so the seconds are not timings):
 and the whole suite there is 142 of 145, the three deliberate reds
 (`PlasmaEdgeConvergence`, `QDrivenConsistency`, `AnisotropicMirror`).
 
+**The CUDA tree is unchanged by either fix or by the skips.** A single build
+against `install-single` (`-DMEQ_PYTHON=OFF`), on the RTX 2070 SUPER for
+correctness: `AxisSearchTests`, `DeviceQuadratureTests`, `DeviceRowsTests` and
+`ResidentIterateTests` pass with no case skipped, under `debug` as registered
+and under `MEQ_TEST_DEVICE=cuda`; both `PlasmaConnectivityFoldOn` arms pass
+with `device integrand yes`; `DeviceParity` passes all three arms:
+
+| case | cpu | debug | cuda |
+|---|---|---|---|
+| `mhd-rectangle`, Newton | 4 | 4 | 4 |
+| `machine-f-diiid`, `psi_ax` / Newton | 3.759861e-01 / 1 | 3.759861e-01 / 1 | 3.759862e-01 / 1 |
+| `diverted-tokamak`, `psi_ax` / Newton | 8.486277e-02 / 23 | skipped by design | 8.486279e-02 / 23 |
+
 ### M-CPU-3
 
 **`PythonDriverParity` failed on the CPU-only MFEM because `meq` and the
