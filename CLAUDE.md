@@ -175,11 +175,20 @@ From the project directory, `..`:
 
 ```sh
 git -C source submodule update --init --recursive     # extern/toml11
-cmake -S source -B builds/double
+cmake -S source -B builds/double -DMFEM_DIR=$PWD/../mfem/install-nocuda
 cmake --build builds/double -j6
 cmake --install builds/double                         # -> install/double
 cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 ```
+
+**`builds/double` is CPU-only**, against `../../mfem/install-nocuda` (the CUDA
+install's options and commit, less `MFEM_USE_CUDA`/`CUDSS`, PIC, SUNDIALS from
+`../../sundials/install`). Its seven `*Device.cpp` files are host stubs, so its
+`debug` arms run the **host fallbacks under a Device**, and the device unit
+cases that assert a kernel ran skip loudly (`tests/unit/DeviceKernels.hpp`).
+**`builds/single` is the CUDA build**, `-DMFEM_DIR=$PWD/../mfem/install-single
+-DMEQ_PYTHON=OFF`: the one tree whose `debug` and `cuda` arms run MEQ's
+kernels. A change to a device route is checked in both.
 
 **`-j4` with `OMP_NUM_THREADS=4`** holds the product at the core count, since
 every solver test already threads its assembly → **[M-14](MEASUREMENTS.md#m-14)**.
@@ -251,8 +260,10 @@ pops on any error or an exit code that differs from the native one.
 suppresses its own threading inside the OpenMP region (`CLAUDE_HDGGS.md`,
 *Threading, measured*).
 
-`MFEM_DIR` defaults to `../../mfem/install` from `source/` and reads the
-environment; the single build takes `-DMFEM_DIR=` its own install.
+`MFEM_DIR` defaults to `../../mfem/install` (the double CUDA install) from
+`source/` and reads the environment; `builds/double` and `builds/single` each
+take `-DMFEM_DIR=` their own install, as above. **Configure refuses an MFEM
+whose link line names two MKL threading layers** (M-370).
 
 ### Coverage and CI
 

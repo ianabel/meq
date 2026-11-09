@@ -476,7 +476,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/ExtractionJumps.cpp")
 	add_executable(ExtractionJumps "convergence/ExtractionJumps.cpp")
 	target_include_directories(ExtractionJumps PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(ExtractionJumps PRIVATE meq_core Boost::unit_test_framework)
+	target_link_libraries(ExtractionJumps PRIVATE ${MEQ_TEST_CORE} Boost::unit_test_framework)
 endif()
 
 # InversionScaling -- the same rules, for the solution-inversion chain.

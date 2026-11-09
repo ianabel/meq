@@ -95,7 +95,13 @@ correct, which is what CI builds. → **[M-223](MEASUREMENTS.md#m-223)**.
 AGAINST AN OTHERWISE IDENTICAL INSTALL.** `../../mfem/install-nocuda` differs from
 `../../mfem/install` in `MFEM_USE_CUDA` and the `MFEM_USE_CUDSS` that must follow
 it, and in nothing else; the two produce **byte-identical output** on the machine
-case, so this is cost and not answers.
+case, so this is cost and not answers. **"Nothing else" includes the cached
+`MKL_PARDISO_*` results**: configured fresh, the nocuda build resolves PARDISO to
+`lib/intel64/libmkl_sequential.so` beside BLAS's `mkl_gnu_thread`, `meq` then
+binds the sequential layer and the Python module's static MKL the threaded one,
+and `PythonDriverParity` reads two different `.nc` files. MEQ's configure now
+refuses such an MFEM (→ **[M-370](MEASUREMENTS.md#m-370)**); the repair is
+in *Rebuilding MFEM* below.
 
 → **[M-77](MEASUREMENTS.md#m-77)** — wall · user · allocation count
 
@@ -726,6 +732,25 @@ Debian's MKL on MEQ's `link.txt`. Copy the resolved values out of the reference
 cache, wipe rather than repoint, and **diff `MFEM_EXT_LIBS` token by token
 before believing any comparison between two installs**.
 → **[M-172](MEASUREMENTS.md#m-172)**.
+
+**THE PARDISO HALF FIRES WITH oneAPI ALONE, TOO.** `MKL_PARDISO_MKL_SEQUENTIAL_LIBRARY`
+is a misnomer the reference build overrides by hand to `libmkl_gnu_thread.so`;
+left to MFEM's search it finds oneAPI's own `lib/intel64/libmkl_sequential.so`,
+and the line then carries both layers. Nothing fails: `meq` binds the sequential
+layer, which the loader meets first, the Python module links its static MKL
+group and binds the threaded one, and the two write different answers
+(→ **[M-370](MEASUREMENTS.md#m-370)**). MEQ's configure refuses a line with
+two layers. The repair, on the MFEM build directory, then reinstall and
+configure MEQ's tree afresh:
+
+```sh
+L=/opt/intel/oneapi/mkl/latest/lib
+cmake -S mfem-src -B build-nocuda -DMKL_LIBRARY_DIR=$L \
+  -DMKL_PARDISO_LIBRARIES="$L/libmkl_core.so;$L/libmkl_intel_lp64.so;$L/libmkl_gnu_thread.so" \
+  -DMKL_PARDISO_LIBRARY=$L/libmkl_core.so -DMKL_PARDISO_MKL_LP64_LIBRARY=$L/libmkl_intel_lp64.so \
+  -DMKL_PARDISO_MKL_SEQUENTIAL_LIBRARY=$L/libmkl_gnu_thread.so
+cmake --build build-nocuda -j4 --target install
+```
 
 ## Traps in MFEM's API
 

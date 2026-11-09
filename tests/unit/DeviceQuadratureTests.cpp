@@ -35,6 +35,7 @@
 #include "meq/SourceView.hpp"
 
 #include "mfem.hpp"
+#include "unit/DeviceKernels.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -76,7 +77,8 @@ namespace
 }
 
 
-BOOST_AUTO_TEST_CASE( theDeviceElementLoopReproducesTheHostQuadrature )
+BOOST_AUTO_TEST_CASE( theDeviceElementLoopReproducesTheHostQuadrature,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -254,7 +256,8 @@ BOOST_AUTO_TEST_CASE( theDeviceLoopRefusesWhatItCannotDo )
  * case would pass equally against a kernel that ignored the cache, which is
  * precisely the defect it exists to catch.
  */
-BOOST_AUTO_TEST_CASE( theConductorShiftIsAddedAtTheRightQuadraturePoint )
+BOOST_AUTO_TEST_CASE( theConductorShiftIsAddedAtTheRightQuadraturePoint,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 

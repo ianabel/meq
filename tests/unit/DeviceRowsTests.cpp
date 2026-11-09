@@ -29,6 +29,7 @@
 #include "meq/GradShafranov.hpp"
 
 #include "mfem.hpp"
+#include "unit/DeviceKernels.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -136,7 +137,8 @@ namespace
 /*
  * THE CENTRAL CLAIM. Every row, both routes, exact equality.
  */
-BOOST_AUTO_TEST_CASE( theDeviceRowsReproduceTheHostDotToTheBit )
+BOOST_AUTO_TEST_CASE( theDeviceRowsReproduceTheHostDotToTheBit,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 	for ( auto const &shape : { Fixture( 14, 97, 13, 2048 ),
@@ -279,7 +281,8 @@ BOOST_AUTO_TEST_CASE( theMirrorRefusesWhatItCannotDescribe )
  * perfectly well, to the wrong step, so a test that only checked the set of
  * entries would pass against it.
  */
-BOOST_AUTO_TEST_CASE( theColumnFillMatchesTheHostAndIsNotTransposed )
+BOOST_AUTO_TEST_CASE( theColumnFillMatchesTheHostAndIsNotTransposed,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -576,7 +579,8 @@ BOOST_AUTO_TEST_CASE( aCrossingIsAttributedToItsPhase )
 // It is exactly the shape of MEASUREMENTS.md M-187 one level down -- "mode 0
 // survives, every mode after it reads zero" -- and this case is here because
 // the first version of upload() had it and no single-upload test could tell.
-BOOST_AUTO_TEST_CASE( theMirrorSurvivesBeingRefreshed )
+BOOST_AUTO_TEST_CASE( theMirrorSurvivesBeingRefreshed,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
@@ -625,7 +629,8 @@ BOOST_AUTO_TEST_CASE( theMirrorSurvivesBeingRefreshed )
 // its weights exactly; psi_bnd's cannot, because `-( +0 )` is `-0` and a sum of
 // negated terms is `+0` -- so it is meq::RowView's flag, and the zero column
 // below is what tells the two apart.
-BOOST_AUTO_TEST_CASE( theBatchedFillIsEveryHostArmToTheBit )
+BOOST_AUTO_TEST_CASE( theBatchedFillIsEveryHostArmToTheBit,
+                      *meq::tests::requiresDeviceKernels() )
 {
 	deviceOnce();
 
