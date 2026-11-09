@@ -25660,3 +25660,171 @@ So `Reconstruct()` wants its load accumulated and held in double and its solve
 refined against a double residual (or done in double: the system is ~40 × 40
 and backward stable), and it wants the recovered fields M-379's fix gives.
 Refinement in real_t (3–8%) and equilibration (1.8–3.1× worse) do not help.
+
+### M-QR-1
+
+**THE q-DRIVEN JACOBIAN FROM THE EXACT TANGENT — ONE BORDERED BACK-SOLVE PER
+UNKNOWN AND THE EXTRACTION DIFFERENCED ALONG EACH TANGENT FIELD, NO
+EQUILIBRIUM RE-SOLVED — IS THE DERIVATIVE OF THE DISCRETE MAP TO 6e-9 TO
+4e-8 RELATIVE, LESS ONE TERM: THE RAY ORIGIN'S MOTION, 1e-5 TO 4e-5.**
+`tests/convergence/QRefiningStudy.cpp`, `theTangentJacobianIsTheDifferencedOne`
+and `fieldProbe` (disabled, run by name), branch `q-refining-fit` off
+`1e8a3ad`, `builds/q-refining-fit` (double), `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`.
+
+The case is M-361's: the q-driven box (`[0.6, 1.4] × [-0.6, 0.6]`, `8 × 8`
+triangulated), `p′` the example's, `k = 2`; the target the `q` of a forward
+solve with `g² = 2.2² + (e^{2Ψ} − 1)/(e² − 1)` (level 2, `k = 3`) at the
+family's labels. `g²` is carried as its values `u_j` at the `m = 8` surfaces
+(`Ψ_N ∈ [0.05, 0.95]`, uniform in `ρ`) and at the edge, a not-a-knot cubic in
+the source's `Ψ`; `r_i = q_i/q*_i − 1`, `q_i = V′_i⟨R⁻²⟩_i √u_i/4π²`.
+
+The column `j`: `dR/du_j` by `assembleSourceDerivative()` with
+`∂F/∂u_j = ½ φ_j′(Ψ)/span` (`φ_j` the spline's cardinal function),
+`linearisedTangent()` at the retained linearisation (`ψ_ax`'s border, the
+located axis's exact row), then `ψ*`, `q*` of the tangent
+(`reconstructFields()`, study scaffolding beside `reconstructPotential()`) and
+`ψ̂` from its trace block, and the family extracted on `ψ̃ ± s δψ̃` with the
+label `ψ_ax ± s δψ_ax` and the RAY ORIGIN HELD; plus the direct
+`q_i/(2u_i) δ_ij`. Against Richardson of central re-solved differences at
+`h` and `2h` relative:
+
+| | `h` | flat start, level 0 | near the answer, level 0 | flat, level 1 | near, level 1 |
+|---|---|---|---|---|---|
+| reference relocates the axis | 1e-5 | 1.3e-5 | 3.6e-5 | 1.9e-5 | 3.4e-5 |
+| | 1e-7 | 1.3e-5 | 3.6e-5 | 1.9e-5 | 3.4e-5 |
+| reference holds the ray origin | 1e-6 | 3.9e-7 | 8.0e-6 | 9.8e-7 | 1.3e-8 |
+| | 1e-7 | 5.7e-9 | 6.8e-6 | 7.4e-9 | 4.0e-8 |
+
+(max over the matrix of `|J_tangent − J_resolved|`, over `max|J|`: 141 at the
+flat start, 24 near the answer.) The floor that stays with the step is the
+derivative of the extraction's dependence on where its rays start, which the
+tangent Jacobian holds fixed: an `O(h^{k+1})` property of the extraction, not
+of the solve. The one cell at 7e-6 that does not fall (level 0, near the
+answer) is unexplained. The extraction step `s` (1e-4 to 1e-7 of the field)
+moves nothing. Re-solved differences are the hard reference here: at
+`h = 1e-3` they were 5e-3 off, and the state's own difference falls as `h²`
+(4.1e-2, 4.1e-4, 4.1e-6, 4.1e-8 for the innermost node at `h = 1e-2…1e-6`) —
+the map is strongly curved in the inner nodes.
+
+Newton on this Jacobian converges with that floor visible: 4.3e-5, 2.4e-8,
+4.6e-11, 8.0e-14, a contraction of about 1e-3 a step rather than quadratic.
+
+**Cost of one Jacobian** (`m = 8`, central differences, 17 extractions; the
+step's own solve not included): level 0 linearise 0.005 s, 8 tangents 0.09 s,
+8 reconstructions 0.12 s, extractions 3.0 s; level 1 0.02, 0.36, 0.45, 7.4 s.
+**The extraction is 90–95% of it.**
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./QRefiningStudy
+--run_test=theTangentJacobianIsTheDifferencedOne`, with `QR_RH` the reference
+step and `QR_FIXAXIS=1` for the held ray origin; `--run_test=fieldProbe` with
+`QR_H` for the state-level difference.
+
+### M-QR-2
+
+**THE SQUARE SYSTEM THE TODO PROPOSES — q AT EVERY SURFACE, ONE MORE NODE AT
+THE EDGE, R0B0 HOLDING IT — IS ILL-CONDITIONED: ITS ROOT ON A LEVEL-0 MESH
+IS 5.5% FROM THE CLOSED FORM IN `g²` WHERE THE CLOSED FORM'S OWN q MISSES BY
+1.3e-3, AND NEWTON CRAWLS OR STALLS ON INNER FAILURES.** `QRefiningStudy`'s
+`theMissFallsWithTheKnotsAndTheMesh` (square mode) and `innerProbe`, as
+M-QR-1.
+
+With the cut at `Ψ_N ∈ [0.05, 0.95]` the representation has one more degree
+of freedom than conditions only through the edge node, whose cardinal
+function lives in the layer outside the outermost surface. The near-null
+direction of the pinned system is then a near-uniform shift of `g²` inside
+the cut with the layer bending back to `R0B0` — the scale family (M-353)
+leaking through the one region `q` does not see.
+
+| mesh, `m = 8` | start | outcome | `u/g²_exact − 1` |
+|---|---|---|---|
+| `NZ = 9`, level 0 | flat `g = 2.2` | 8 Newton steps, 8e-14 | +5.4e-2 to +5.8e-2, uniform |
+| `NZ = 9`, level 0 | closed form (`r` 1.5e-3) | no root: 1.5e-3 → 1.7e-3 in 12 steps | — |
+| `NZ = 8` off z = 0 (below), level 0 | closed form (`r` 1.3e-3) | crawls to 5.1e-4 in 11 steps; 51 of 57 rejected trials are inner solves that do not converge | — |
+| same, level 1 | flat | stalls at 6.5e-3 (a minimum of `‖r‖`, not a root) | — |
+
+**The inner solve is the casualty.** From a converged state, the warm
+bordered Newton converges at the closed form's `gg′` times 0.9 to 1.1 (5 or
+6 iterations) and at the spline of the closed form times 0.9 to 1.1, and does
+NOT converge (60 iterations) when the innermost node alone moves by 1%: the
+end cubic extrapolated over `Ψ_N ∈ [0, 0.05]` turns a 1% node change into
+about a 60% change of `gg′` on the axis. A Newton step along the near-null
+direction puts a current sheet in the edge layer the same way.
+
+**The axis on a face stalls the inner solve.** On the box at `NZ = 8` the
+axis lies on `z = 0`, a row of faces at every level; the warm bordered
+Newton plateaus (residual 1.8e-3 for 60 iterations) as the located axis
+changes element (73 to 56). At `NZ = 9` (level 0 only: refinement brings the
+row back) or with every vertex moved by `0.03 sin(π(z + 0.6)/1.2)` it does
+not. QDrivenConsistency's box is `NZ = 8`.
+
+**And the solve does not warm-start itself.** `solve()` re-seeds from the
+stored initial guess: re-solving an unchanged profile took 4 iterations, and
+0 after `setInitialState( state() )`. The harness warm-starts that way; the
+driver's q loop calls `solve()` alone.
+
+**Reproduce.** `QR_NZ=9 QR_SYMMETRIC=1 QR_VERBOSE=1 QR_MAXLEVEL=0 QR_COUNTS=8
+./QRefiningStudy --run_test=theMissFallsWithTheKnotsAndTheMesh` (add
+`QR_START_EXACT=1`); without `QR_NZ`/`QR_SYMMETRIC` for the moved mesh;
+`--run_test=innerProbe`; `--run_test=warmProbe` with `QR_COLD=1`.
+
+### M-QR-3
+
+**WITH THE PIN AS A ROW AND NO EDGE NODE — `g²` AT THE SURFACES ONLY, THE
+LAYERS THE END CUBIC CONTINUED, q AT EVERY SURFACE AND `R0B0` ON THE
+CONTINUED EDGE VALUE, SOLVED BY GAUSS–NEWTON ON THE EXACT TANGENT — THE
+DELIVERED `g²` CONVERGES TO THE CLOSED FORM AT `k + 1` AS THE MESH AND THE
+KNOTS REFINE TOGETHER, FROM A START 90% OFF IN q, IN 5 OR 6 STEPS WITH NO
+REFUSED TRIAL.** `QRefiningStudy`'s `theMissFallsWithTheKnotsAndTheMesh` with
+`QR_LS=1`, as M-QR-1, on the box with every vertex moved off `z = 0`
+(M-QR-2), from `g = 2.2` everywhere.
+
+The system is `m + 1` rows (the `m` q rows and `(g²(Ψ=0) − R0B0²)/R0B0²`) in
+`m` unknowns; every q condition is kept and none is dropped; the least-squares
+misfit at the knots is the discrete problem's inconsistency, and it falls with
+the discretisation. `max|g²/g²_exact − 1|` on a 2001-point grid over the cut
+(`Ψ_N ∈ [0.05, 0.95]`; over `[0, 1]` it is within 8% of this in every cell),
+`k = 2`, the reference level 3 at `k = 3`:
+
+| level (`h`) | `m = 8` | `m = 16` | `m = 32` |
+|---|---|---|---|
+| 0 (0.1) | **4.99e-4** | 2.84e-4 | |
+| 1 | 1.84e-4 | **5.20e-5** | 1.94e-5 |
+| 2 | 1.52e-4 | 2.33e-5 | **6.28e-6** |
+
+Bold is the diagonal, `m ∝ 1/h`: 9.6× then 8.3× a halving, rates 3.26 and
+3.05. Along a row or a column alone the error stalls (`m = 8`: 1.8e-4,
+1.5e-4) or falls 3–4×: the mesh and the representation each hold about half
+of it, so neither refines alone. M-361's degree-2 and degree-3 fits read
+1.18e-1 and 1.2e-2 in q on the same case, flat in `h`.
+
+| level, `m` | knot misfit `max|q/q* − 1|` | `q` off the knots | Gauss–Newton steps / solves | wall, of which extraction |
+|---|---|---|---|---|
+| 0, 8 | 1.24e-4 | 2.37e-4 | 5 / 18 | 6.3 s, 4.9 s |
+| 1, 16 | 2.37e-5 | 2.69e-5 | 5 / 18 | 44 s, 35 s |
+| 2, 32 | 1.66e-6 | 8.25e-6 | 6 / 7 | 411 s, 337 s |
+| 2, 16 | 2.69e-6 | 1.06e-5 | 6 / 30 | 176 s, 121 s |
+
+"Off the knots": the delivered state's own family at the `m − 1` midpoint
+labels (in `ρ`), `g` from the spline, against the reference there — so it
+carries the coarse mesh's extraction error as well. The pin row closes to
+1e-11 or better. History on the diagonal: 0.90, 0.37, 0.11, 1.2e-2, 1.7e-4,
+then the misfit.
+
+**`k = 3`**, the diagonal: 1.72e-4 (level 0, `m = 8`), 1.77e-5 (level 1,
+`m = 16`), 9.7×; one pair, so a rate is not claimed.
+
+**A node on the axis**, collocated on `q_ax = g/(R_ax² √det(dq̃/dx))` from the
+continuous fields' axis (`QR_AXISNODE`): the same to two figures (4.93e-4,
+6.85e-5, 2.47e-5 on the diagonal to level 2 at `m = 16`) — the inner layer,
+`Ψ_N < 0.05`, is not where the error is. Its row's tangent derivative agrees
+with re-solved differences as the surfaces' do (M-QR-1's floor).
+
+**Cost.** 2m + 1 extractions of an m-surface family per step, so extraction is
+77–82% of the wall and grows as `m²`. M-361's degree-2 loop took 4 KINSOL
+iterations and 21 equilibria; at about 1.3 s an equilibrium on level 2 that
+is about 27 s against 411 s here.
+
+**Reproduce.** `QR_LS=1 QR_VERBOSE=1 QR_COUNTS=8,16 QR_MAXLEVEL=2
+./QRefiningStudy --run_test=theMissFallsWithTheKnotsAndTheMesh`; the diagonal
+with `QR_DIAGONAL=1 QR_COUNTS=8`; `QR_ORDER=3` for `k = 3`; `QR_AXISNODE=1`.

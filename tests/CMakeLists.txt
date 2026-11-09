@@ -315,6 +315,9 @@ set(MEQ_CONVERGENCE_TESTS
 	# represents, which does not converge with the mesh (TODO, "The q-driven
 	# solve is inconsistent", M-361).
 	QDrivenConsistency
+	# Phase-1 study for the refining g^2 (branch q-refining-fit, M-QR): every
+	# case disabled, run by name.
+	QRefiningStudy
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves

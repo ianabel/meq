@@ -2395,6 +2395,12 @@ namespace meq
 			 */
 			void reconstructPotential( mfem::Vector const &state, mfem::GridFunction &into );
 
+			/// STUDY SCAFFOLDING (branch q-refining-fit, M-QR): psi* and q* of
+			/// @a state together, q* in MEQ's sign as postProcessedFlux() is.
+			/// Not production API; phase 2 decides its form.
+			void reconstructFields( mfem::Vector const &state, mfem::GridFunction &psiStar,
+			                        mfem::GridFunction &qStar );
+
 			/**
 			 * J AT A RETAINED LINEARISATION, WITH THE BORDER. Assembles and
 			 * factorises the Newton matrix

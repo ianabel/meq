@@ -11748,6 +11748,25 @@ namespace
 		darcy->Reconstruct( sol, trace, totalFlux, enrichedFlux, into, enrichedTrace );
 	}
 
+	void GradShafranovSolver::reconstructFields( mfem::Vector const &state, mfem::GridFunction &psiStar,
+	                                             mfem::GridFunction &qStar )
+	{
+		if ( !postProcessed )
+			throw std::logic_error( "meq::GradShafranovSolver::reconstructFields: postProcess() has not run" );
+		if ( reactionStabilization || fieldAnisotropyValue != nullptr )
+			throw std::logic_error( "meq::GradShafranovSolver::reconstructFields: refused beside a "
+			                        "reaction-following tau or a field anisotropy" );
+		mfem::Vector copy( state );
+		mfem::BlockVector sol;
+		sol.Update( copy, darcy->GetOffsets() );
+		mfem::Vector trace( copy, blockOffsets[ 2 ], blockOffsets[ 3 ] - blockOffsets[ 2 ] );
+		mfem::GridFunction totalFlux( totalFluxGf ), enrichedTrace( enrichedTraceGf );
+		psiStar = postProcessedGf;
+		qStar = enrichedFluxGf;
+		darcy->Reconstruct( sol, trace, totalFlux, qStar, psiStar, enrichedTrace );
+		qStar.Neg();
+	}
+
 	struct GradShafranovSolver::RetainedLinearisation
 	{
 		std::unique_ptr<mfem::DarcyNPCOperator> npc;
