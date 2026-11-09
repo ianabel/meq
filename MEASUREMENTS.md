@@ -24866,3 +24866,136 @@ output at `05465dc` and at this branch (`runs/manta-shape-derivative/regress/`);
 the target's re-measurement by `runs/manta-shape-derivative/qtarget/`
 (`qtarget.log`: each tree's `meq` on the example with `GGPrimeFile` the closed
 form, at `RefinementLevels` 1, 2, 3).
+
+### M-SX-1
+
+**What amplifies single precision's round-off on its way to the flux-surface
+family, link by link, and the one link MEQ owned.** `single-extraction` off
+`4827b7c`, `ExtractionNoise` (built, not registered), single (`MFEM_DIR =
+install-single`) and double, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`. Each
+case is 21 states 1e-5 apart in a source parameter, every state its own solve;
+a smooth quantity's second difference over that step is ~1e-10 of it, so the
+second differences are the noise, and σ is their root mean square over √6.
+The linear case is `ExtractionCrossing.hpp`'s box (`F = −((1 − A)R² + A)`,
+no `ψ_ax` unknown); the normalised case is `SafetyFactorSolver`'s bordered
+source, `gg′`'s slope scaled.
+
+**(a) Each field's own noise, single** (of its largest value, root mean
+square over dofs / worst dof; double is 1e-16 to 1e-13 throughout):
+
+| case | trace `ψ̂` | `ψ_h` | `q_h` | `ψ*` | `ψ̃` |
+|---|---|---|---|---|---|
+| linear, `n = 12`, `k = 2` | 4.9e-8 / 1.4e-7 | 8.7e-6 / 3.7e-5 | 2.4e-6 / 9.7e-6 | 5.6e-7 / 3.3e-6 | 2.9e-7 / 1.3e-6 |
+| linear, `n = 16`, `k = 2` | 5.2e-8 / 1.5e-7 | 1.1e-5 / 4.4e-5 | 3.2e-6 / 1.3e-5 | 5.5e-7 / 3.7e-6 | 2.8e-7 / 1.3e-6 |
+| linear, `n = 32`, `k = 2` | 4.9e-8 / 1.6e-7 | 2.2e-5 / 8.3e-5 | 6.4e-6 / 2.6e-5 | 5.4e-7 / 4.1e-6 | 2.7e-7 / 1.6e-6 |
+| linear, `n = 16`, `k = 3` | 4.7e-8 / 1.6e-7 | 1.8e-5 / 8.0e-5 | 5.9e-6 / 2.9e-5 | 7.4e-7 / 6.4e-6 | 7.1e-7 / 4.5e-6 |
+| normalised, `n = 16`, `k = 2` | 1.6e-7 / 3.6e-7 | 1.8e-7 / 4.2e-7 | 7.0e-7 / 3.0e-6 | 5.6e-7 / 3.9e-6 | 3.1e-7 / 1.5e-6 |
+
+**The trace is solved to about 0.4ε. The element-local recovery of `ψ_h` and
+`q_h` from it — MFEM's `RecoverFEMSolution()`, `real_t` throughout — carries
+about 200× that on the linear path, growing as `1/h` and with `k`**, which
+reads as the local blocks' conditioning or scaling. On the normalised path
+Newton's last steps act as iterative refinement and `ψ_h` comes out 60× quieter.
+**`ψ*` sits at 5.5e-7 on both paths although its `q_h` input differs 4.6×**:
+its floor is `Reconstruct()`'s own, MFEM's too, and `ψ̃` inherits it through
+`ψ*`'s vertex and cell moments. Neither is MEQ code (`../../mfem-hdg-dev` is
+receive-only).
+
+**(b) The axis, single, `n = 16`, `k = 2`** (σ of the span):
+
+| case | the solve's `ψ_ax` | the finder's `ψ_h` at the axis | `ψ̃` at the axis | `ψ̃` at a fixed point |
+|---|---|---|---|---|
+| linear | — | 1.13e-5 | 4.2e-7 | 1.55e-7 |
+| normalised | 2.3e-7 | 4.7e-6 | 8.7e-7 | — |
+
+The axis point moves 1e-5 m (from `q_h`'s noise) and flips between the two
+elements beside the mesh line `z = 0` six times in 21 states, against never
+in double; `ψ_h`'s gradient is `O(h^k)` from zero at `q_h`'s root, so the
+finder's value carries the move as well as `ψ_h`'s own noise.
+
+**(c) The family, single** (σ of each average's value, worst over 12 surfaces
+from `Ψ_N` = 0.05 to 0.9 and six averages; the innermost surface is always the
+worst):
+
+| case | labelled by the finder's `ψ_h` | by `ψ̃` at the axis | by the solve's `ψ_ax` | `ψ̃` at a fixed axis point |
+|---|---|---|---|---|
+| linear, `n = 12`, `k = 2` | 3.1e-4 | 1.4e-5 | — | |
+| linear, `n = 16`, `k = 2` | 2.4e-4 | 9.6e-6 | — | 8.8e-6 |
+| linear, `n = 32`, `k = 2` | 4.2e-4 | 2.8e-5 | — | |
+| linear, `n = 16`, `k = 3` | 4.5e-4 | 2.1e-5 | — | |
+| normalised, `n = 16`, `k = 2` | 9.8e-5 | 1.8e-5 | **1.1e-5** | |
+
+In double every column reads 1e-11 to 5e-11. **The finder's `ψ_h` was the
+amplifier**, 18–27× on the linear path and 9× on the normalised one, and it was
+the only use the extraction made of `ψ_h`. On `ψ*` and `q*` the family reads as
+on `ψ̃` with the same label, so the rooted pair is not the amplifier. With the
+label fixed the axis point no longer matters (the fixed-point column), and what
+is left is `ψ̃`'s own noise near the axis divided by the innermost surface's
+`Ψ_N`: 4.2e-7 / 0.05 ≈ 8e-6 against 9.6e-6 measured.
+
+**(d) The label, and why each half.** `meq::labelledAxis()` labels the family
+by **the solve's `ψ_ax` where the solve has one** — it is the quietest value
+of the three, and only it keeps the family's `Ψ_N` the source's `Ψ`: labelled
+by `ψ̃`, `SafetyFactorSolver`'s `theReferenceIsAFixedPointOfItsOwnTarget`
+fails at 1.5e-7 and `theOuterResidualsConditioningAtTheAnswer` at 1.8e-6 in
+double — and **by `ψ̃` at the located axis otherwise**. That second half
+moves a linear source's family by the discretisation's error in `ψ_h` at the
+axis, and toward the truth. Double, against `n = 48`, `k = 4` (worst average,
+all surfaces):
+
+| case | `ψ̃ − ψ_h` at the axis, of the span | labelled by the finder's `ψ_h` | by `ψ̃` |
+|---|---|---|---|
+| `n = 8`, `k = 2` | | 2.9e-3 | 4.8e-4 |
+| `n = 12`, `k = 2` | 2.2e-5 | | |
+| `n = 16`, `k = 2` | 5.0e-6 | 1.5e-4 | 1.3e-4 |
+| `n = 32`, `k = 2` | 1.4e-6 | 3.3e-5 | 5.9e-6 |
+| `n = 8`, `k = 3` | | 9.0e-5 | 7.5e-5 |
+| `n = 16`, `k = 3` | −3.9e-7 | 1.2e-5 | 1.2e-5 |
+
+The old label's extra error is in the inner surfaces: their `Ψ_N` carried the
+axis offset divided by `Ψ_N`. `ExtractionContinuity`'s
+`theFamilyIsLabelledOnTheFieldItRoots` asserts the rule (`ψ_ax` equal to
+`ψ̃` at the family's axis within 64ε of the span; the finder's value is
+2.2e-5 away on its mesh in double and 6.4e-5 in single).
+
+**(e) Where the bounds stand in single**, at `max( bound, 20ε )`, 20ε = 2.4e-6:
+
+| test | reads | in ε | |
+|---|---|---|---|
+| `ExtractionContinuity`, continuity across the bisected crossing | 1.81e-5 (2.62e-4 before) | 152ε | fails |
+| `ExtractionContinuity`, the label | 0 | | passes |
+| `RunSession`, `SessionSmoothness` | `manta/shape-derivative`, after the merge of this branch | | |
+
+The family's single floor, about 1e-5 (85ε), is `Reconstruct()`'s round-off
+in `ψ*` carried into `ψ̃` and divided by the innermost `Ψ_N`; bringing it to
+20ε wants `ψ*` about 8× quieter, which is MFEM's local solve, or an innermost
+surface further from the axis.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 OMP_NUM_THREADS=2
+./ExtractionNoise --run_test=<case>`: `n12k2`, `n16k2`, `n32k2`, `n16k3`,
+`normalisedN16k2`, `accuracy`; the "finder's `ψ_h`" family is what this
+library extracted before `meq::labelledAxis()`. Logs
+`runs/single-extraction/noise-*.log`, `single-touched.log`.
+
+### M-SX-2
+
+**`QDrivenCurvedBoundary` asserts what the loop promises, and catches what
+"Solved" cannot.** `single-extraction`, double and single. The run's restart
+now carries `toroidal_loop_residual`, `toroidal_loop_threshold` (`max(
+tolerance, floor )`, the loop's judge) and `toroidal_loop_conditioning`
+(`σ_min/σ_max` of the outer Jacobian). "Solved" means the residual reached the
+threshold, which the loop decides itself, so it cannot fail; the coefficients
+are now bounded by `threshold/conditioning`:
+
+| | residual / threshold | conditioning | bound | `c₁`, `c₂` errors |
+|---|---|---|---|---|
+| double | 1.13e-10 / 1e-9 | 0.214 | 4.7e-9 | 1.2e-10, 1.0e-10 |
+| single | 1.38e-5 / 8.0e-5 (measured floor) | 0.215 | 3.7e-4 | 3.3e-5, 1.4e-5 |
+| double, `g²` biased by 2e-8 in `invertSafetyFactor()` | 1.14e-10 / 1e-9 | 0.214 | 4.7e-9 | **5.5e-8, 5.0e-8: fails** |
+
+The mutated loop converges as normally as the true one, and the replaced bound,
+`1e-4·c₀` = 4.8e-4, passes it by four orders. `c₀` is held by the `R0B0` pin.
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./QDrivenCurvedBoundary`;
+the mutation is `out.gSquared.push_back( g*g*( 1.0 + 2.0e-8 ) )` in
+`src/meq/SafetyFactor.cpp`, reverted.

@@ -351,6 +351,16 @@ anything that differences the geometry, and moves the averages by less than
 their own discretisation error. The constructor refuses a solver on which
 ``postProcess()`` has not been called.
 
+**The label** :math:`\Psi_N` **is normalised by the solve's own**
+:math:`\psiax` **when the solve has one** — a normalised source, whose
+:math:`\Psi` the family's :math:`\Psi_N` then is, so that a profile read against
+the source pairs with the averages at the same label — **and otherwise by**
+:math:`\tilde\psi` **at the located axis**, the field the levels are in, so
+that :math:`\Psi_N` is zero on that field's own axis (``meq::labelledAxis()``).
+The solved :math:`\psi_h` there is not used: it carries the discretisation's
+error at the axis, which an inner surface's label divides by :math:`\Psi_N`,
+and in single precision it carries far more round-off than :math:`\tilde\psi`.
+
 Two things follow from rooting the better field, and the second was not
 expected; both are properties of :math:`\psi^\star`, which the continuous pair
 inherits.

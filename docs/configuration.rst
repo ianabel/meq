@@ -2268,9 +2268,14 @@ reason the degree is part of the model.
 
 Every q-driven ``<stem>.nc`` reports all three of its answer's own scalars, as
 ``edge_toroidal_field``, ``toroidal_flux`` and ``plasma_current``, beside
-``scale_pin``, the key the run was given, and the loop's cost,
-``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``; the run prints
-them as ``its scale:``. The numbers behind these choices are in
+``scale_pin``, the key the run was given, the loop's cost,
+``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``, and what its
+answer is worth: ``toroidal_loop_residual``, the residual it stopped at in the
+coefficients of :math:`g^2`, ``toroidal_loop_threshold``, the larger of the
+tolerance and the map's floor that it was judged against, and
+``toroidal_loop_conditioning``, the outer Jacobian's conditioning, by which
+the residual is divided to bound the coefficients' error. The run prints the
+scale as ``its scale:``. The numbers behind these choices are in
 ``MEASUREMENTS.md`` (M-355 to M-357, M-361 and M-362) — measure them on your
 own case.
 

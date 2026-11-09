@@ -139,6 +139,28 @@ a zero of `q_h`, which is what this class finds. A solve and a search may still
 land on the two sides of a face and differ by the `O(h^{k+1})` jump in `q_h`
 across it, so expect agreement at the field's own order rather than the last bit.
 
+**The family's `ψ_ax` is the same point; its value is the solve's where the
+solve has one, and the rooted field's otherwise** (`meq::labelledAxis()`).
+Where `ψ_ax` is an unknown of the solve — a normalised source — the family is
+labelled by it, so that `Ψ_N` *is* the source's `Ψ`: the q-driven loop's fixed
+point is its answer only then (`SafetyFactorSolver`'s
+`theReferenceIsAFixedPointOfItsOwnTarget` and
+`theOuterResidualsConditioningAtTheAnswer` fail by 1.5e-7 and 1.8e-6 on any
+other label), and a profile read against the source's `Ψ` pairs with the
+averages at the same label. With no such unknown the label is the tracer's
+own potential at the finder's point — `ψ̃` by default — because the levels
+are in that potential; `∇ψ` vanishes there, so where on the point the value
+is read costs second order. Two measurements decided the second half
+(→ **[M-SX-1](MEASUREMENTS.md#m-sx-1)**). **Accuracy**: the finder's `ψ_h`
+there carries the discretisation's error at the axis (`ψ̃ − ψ_h` is 2.2e-5 to
+1.4e-6 of the span, `k = 2`, `n` = 12 to 32), which enters every inner
+surface's `Ψ_N` divided by `Ψ_N`; against a fine reference the family on
+`ψ̃`'s label is the closer at every mesh and degree tried, 6× at `n = 8` and
+32. **Single precision**: `ψ_h` is the noisiest field MEQ holds — the
+element-local recovery from the trace carries about 200× the trace's own
+round-off, growing as `1/h` — and the finder's value moved the families
+18–27× more between neighbouring states than `ψ̃`'s.
+
 **Under `AxisConstraint::NodalMaximum` — the control — they are different and
 must not be reconciled.** `ψ_ax` is then *the largest nodal value*, which makes
 the border row exactly `−e_j`; IN-A's axis is *the point where `q_h` vanishes*.
