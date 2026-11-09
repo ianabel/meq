@@ -25446,3 +25446,9 @@ solve stops at its own floor, so a difference of two over the step resolves
 the derivative to only 2.1e-03 (bordered) and 2.0e-02 (in `n`). It is a
 reference that cannot judge a tangent to 1e-8; single checks the tangent
 against the closed form instead.
+
+**The suite on the branch** (main `7514d83` merged), double,
+`OMP_NUM_THREADS = 2`, `ctest -j2`, 38 minutes: 147 of 150 pass; the three
+reds are main's deliberate ones, `PlasmaEdgeConvergence`,
+`QDrivenConsistency`'s `theDeliveredQConvergesToTheTarget` and
+`AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
