@@ -174,6 +174,38 @@ elseif(NOT MFEM_USE_SUITESPARSE AND NOT MFEM_USE_MKL_PARDISO)
 		"then reconfigure. cuDSS alone is not enough: it needs a device.")
 endif()
 
+# ONE MKL THREADING LAYER, OR NONE. MFEM's link line names MKL twice -- once
+# from BLAS_LIBRARIES and once from MKL_PARDISO_LIBRARIES -- and both are cached
+# RESULTS of MFEM's configure, so an MFEM configured fresh rather than from the
+# reference cache resolves PARDISO to its default component, `mkl_sequential`,
+# beside BLAS's `mkl_gnu_thread`. Such a line links and runs: `meq` binds
+# whichever layer the loader meets first, the Python module's static MKL binds
+# the other, and the two front ends write different answers (M-CPU-3). The
+# layers are alternatives, so two on one line is a configuration error in the
+# MFEM install, and CLAUDE_MFEM.md, *Rebuilding MFEM*, says how to repair it.
+if(MFEM_FOUND)
+	set(_meq_mkl_layers "")
+	foreach(_item IN LISTS MFEM_LIBRARIES)
+		if(_item MATCHES "mkl_(sequential|gnu_thread|intel_thread|tbb_thread)")
+			list(APPEND _meq_mkl_layers "${CMAKE_MATCH_1}")
+		endif()
+	endforeach()
+	list(REMOVE_DUPLICATES _meq_mkl_layers)
+	list(LENGTH _meq_mkl_layers _meq_mkl_layer_count)
+	if(_meq_mkl_layer_count GREATER 1)
+		message(FATAL_ERROR
+			"meq: the MFEM at ${MFEM_DIR} links ${_meq_mkl_layer_count} MKL "
+			"threading layers (${_meq_mkl_layers}), read out of "
+			"${MFEM_CONFIG_MK}. They are alternatives: the loader binds one, "
+			"and a static link of the other (the Python module's) gives "
+			"different answers. Reconfigure that MFEM with the reference "
+			"build's MKL_PARDISO_* cache entries (mkl_gnu_thread), reinstall it, "
+			"and configure this tree afresh.")
+	endif()
+	unset(_meq_mkl_layers)
+	unset(_meq_mkl_layer_count)
+endif()
+
 # NetCDF, for the driver's output grid. Optional in the same spirit as MFEM: a
 # tree without it still builds and tests everything else, and the writer is the
 # only thing that goes missing. Found through pkg-config because that is how

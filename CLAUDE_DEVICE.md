@@ -79,6 +79,20 @@ against is `CLAUDE_DECLINED.md`.
   `EnsureElementQuadratureTables` loop are gone at `9d57974336`. cuDSS's `SetOperator`
   reuses its analysis, so after the first call it waits on the card
   (→ **[M-323](MEASUREMENTS.md#m-323)**).
+* **A host fallback under a Device asks for host access** — to its inputs,
+  its outputs and its index arrays alike, through `HostRead()`,
+  `HostReadWrite()`, `HostWrite()` or `countedHostRead()`, never raw. Every
+  device route can refuse: on a documented refusal in a CUDA build, and every
+  time where the seven `*Device.cpp` files are host stubs. The loop it falls
+  back to runs under the same Device, so a dof array an MFEM operation read on
+  the device is as protected as a vector (`entriesAt()`). **And a column an
+  upstream route read on the device through an alias is handed back** with
+  `HostRead()` where its host copy is valid, because the alias's protection
+  never reaches the base's flags, and the next host writer copies into the
+  protected page (`flush()`). Neither moves data on any backend. The CPU-only
+  `builds/double` is the tree that exercises this: its `debug` arms take every
+  fallback, which a CUDA build's never do
+  (→ **[M-CPU-2](MEASUREMENTS.md#m-cpu-2)**).
 * **The warm start threads under a Device** where its loops cannot reach
   MFEM's memory manager, which is not reentrant: plain HOST memory and no
   registered object read through an MFEM accessor
