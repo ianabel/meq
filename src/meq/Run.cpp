@@ -4021,8 +4021,10 @@ int meq::Run::Impl::solve()
 			 * at the constant g decides it -- and constant g is the same g^2
 			 * whatever the knots, so that solve is the loop's own start.
 			 */
+			bool opened = false;
 			if ( config->getSource().confinesToPlasma() && solver->plasmaComponentElements() <= 0 )
 			{
+				opened = true;
 				// Or at the carried field, where a previous cycle left one.
 				meq::ToroidalFieldSpline opening( meq::toroidalKnotLabels( 6 ) );
 				opening.setValues( std::vector<double>( 6, toroidalOpening*toroidalOpening ) );
@@ -4077,6 +4079,9 @@ int meq::Run::Impl::solve()
 			equilibriumOptions.pin = pin.kind;
 
 			meq::SafetyFactorEquilibrium equilibrium( *solver, *toroidalDriven, equilibriumOptions );
+			// And the loop's first solve continues from the opening one.
+			if ( opened )
+				equilibrium.warmFromSolver();
 			std::vector<double> const labels = equilibrium.labels();
 
 			// THE START: the previous cycle's answer, or the restart's, read at

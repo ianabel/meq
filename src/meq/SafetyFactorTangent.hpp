@@ -151,6 +151,10 @@ namespace meq
 			/// of each tangent -- what says which direction is the scale.
 			std::vector<double> const &axisDerivative() const { return lastAxisDerivative; }
 
+			/// Warm-start the next evaluate() from the state the solver holds
+			/// now -- a solve made before the loop, at any g.
+			void warmFromSolver();
+
 			/// Why the last refused evaluate() was refused: the exception the
 			/// solve or the extraction threw. Empty before any refusal.
 			std::string const &refusal() const { return lastRefusal; }

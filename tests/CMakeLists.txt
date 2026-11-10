@@ -308,6 +308,10 @@ set(MEQ_CONVERGENCE_TESTS
 	# The q-driven loop on a curved fixed boundary, whose outer surfaces lie in
 	# the band: a round trip on a Miller boundary.
 	QDrivenCurvedBoundary
+	# The q-driven loop on a free plasma edge, limited and diverted: psi_bnd and
+	# the X-point as borders of the tangent, against re-solved differences, and
+	# a round trip on each.
+	QDrivenFreeEdge
 	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
 	# PlasmaCurrent, returning one equilibrium (M-357).
 	QDrivenScalePin
@@ -429,6 +433,72 @@ if(TARGET NewtonConvergence AND MFEM_USE_CUDA)
 	set_tests_properties(NewtonConvergencePaths_cuda PROPERTIES
 		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
 endif()
+
+# THE RETAINED LINEARISATION AND THE FLUX-SURFACE EXTRACTION UNDER A DEVICE.
+# Both read buffers raw that a Device leaves valid only on the card: the
+# extraction's continuous pair was built on the device's zeros (M-382), and
+# the linearised solve's back-solves and refinement residuals were indexed
+# stale (M-383), so under --device cuda the family was missing and the
+# bordered tangent wrong, while --device debug faulted. Each arm runs the cases
+# that assert against a closed form or to the bit, under MEQ_TEST_DEVICE and
+# on MEQ_TEST_SERIAL_ROUTES's bit-exact host routes, so that a run with that
+# variable alone reproduces the debug arm to the bit in double.
+# `debug` needs no GPU and exercises the host fallbacks on a build without
+# device kernels; `cuda` is registered only where MFEM has it. Neither asserts
+# that a kernel ran, so neither needs deviceKernelsBuilt().
+set(_da_devices debug)
+if(MFEM_USE_CUDA)
+	list(APPEND _da_devices cuda)
+endif()
+foreach(_device IN LISTS _da_devices)
+	# theRetainedFactorisationAnswersAsAFreshOneDoes asserts the retained solve
+	# reproduces itself TO THE BIT. Under `cuda` it does not: a direction solved
+	# again after another answers 8e-8 of its largest entry apart in single,
+	# while the first solve after a fresh linearisation answers to the bit --
+	# the solve carries state between calls on the card and not under `debug`
+	# (MEASUREMENTS.md M-383, open). So `debug` runs it and `cuda` does not.
+	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents,theLimiterBorderIsInTheTangent,theXPointBorderIsInTheTangent)
+	if(_device STREQUAL "debug")
+		string(APPEND _linearised_cases ",theRetainedFactorisationAnswersAsAFreshOneDoes")
+	endif()
+	if(TARGET LinearisedSolve)
+		add_test(NAME LinearisedSolveDevice_${_device}
+			COMMAND LinearisedSolve --run_test=${_linearised_cases})
+		set_tests_properties(LinearisedSolveDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET TangentConvergence)
+		add_test(NAME TangentConvergenceDevice_${_device}
+			COMMAND TangentConvergence
+			        --run_test=theTangentInTheAmplitudeIsTheConstantItShouldBe,theTangentConvergesAtTheSolutionsRatesAtDegreeTwo)
+		set_tests_properties(TangentConvergenceDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	# The q-driven tangent and loop: the round trip on the box (every piece
+	# of the Jacobian, quadratically) and on the limited box (psi_bnd's
+	# border and label).
+	if(TARGET SafetyFactorSolver)
+		add_test(NAME SafetyFactorSolverDevice_${_device}
+			COMMAND SafetyFactorSolver --run_test=theLoopRecoversTheFieldItsTargetWasBuiltFrom)
+		set_tests_properties(SafetyFactorSolverDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET QDrivenFreeEdge)
+		add_test(NAME QDrivenFreeEdgeDevice_${_device}
+			COMMAND QDrivenFreeEdge --run_test=theLimitedLoopRecoversItsField)
+		set_tests_properties(QDrivenFreeEdgeDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET ExtractionContinuity)
+		add_test(NAME ExtractionContinuityDevice_${_device}
+			COMMAND ExtractionContinuity
+			        --run_test=theFamilyIsLabelledOnTheFieldItRoots)
+		set_tests_properties(ExtractionContinuityDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+endforeach()
+unset(_da_devices)
+unset(_linearised_cases)
 
 # ---------------------------------------------------------------------------
 # The performance harness. BUILT BUT NOT REGISTERED AS A TEST, deliberately.
@@ -583,6 +653,15 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	if(TARGET OpenMP::OpenMP_CXX)
 		target_link_libraries(NpcThreadScaling PRIVATE OpenMP::OpenMP_CXX)
 	endif()
+endif()
+
+# DeviceAudit -- timings of the c4ee278..1e8a3ad accuracy pieces under a Device.
+# Not a ctest: every number is a timing.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/DeviceAudit.cpp")
+	add_executable(DeviceAudit "performance/DeviceAudit.cpp")
+	target_include_directories(DeviceAudit PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(DeviceAudit PRIVATE ${MEQ_TEST_CORE})
 endif()
 
 # NewtonStepProfile -- WHERE a Newton step's time goes, split into legs that do

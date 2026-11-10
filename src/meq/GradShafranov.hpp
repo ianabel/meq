@@ -4665,6 +4665,11 @@ namespace meq
 			/// Whether setXPointBoundary() made the X-point an unknown.
 			bool xPointIsAnUnknown() const;
 
+			/// Whether psi_bnd is an unknown of the solve -- pinned at a
+			/// limiter point or contact, or at the X-point -- rather than the
+			/// boundary datum's.
+			bool boundaryFluxIsAnUnknown() const { return boundaryFluxIsUnknown; }
+
 			/// Where the last solve left the X-point, and whether it was still
 			/// inside the mesh at the end. Valid after solve(); false, and the
 			/// values setXPointBoundary() was given, otherwise.

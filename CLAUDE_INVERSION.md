@@ -409,9 +409,20 @@ on a Miller boundary.
 **WHAT IS OPEN.** The inner bordered Newton stalls on a sharp `gg′` near the
 axis that continuation reaches (`InnerSolveStall`, red, `TODO`); the misfit at
 the knots does not fall monotonically on the box, the innermost knot sitting
-on a surface about one element across at every level (`TODO`); and nothing has
-driven `q` on a limited or diverted plasma, where the support moves and `ψ_bnd`
-is an unknown.
+on a surface about one element across at every level (`TODO`).
+
+**ON A FREE EDGE `ψ_bnd` IS A BORDER OF THE TANGENT, AND THE LABEL MOVES WITH
+IT.** `linearise()` carries `ψ_bnd` (limiter point, contact or X-point), the
+X-point's `(R_X, z_X)` and the exterior modes as the bordered Newton's own
+blocks, factorised by the Schur complement; the extraction is labelled
+`ψ_bnd + s δψ_bnd` and reads the total field where conductors are subtracted.
+On an unconfined limited and diverted box the borders are re-solved
+differences to 1e-13 and the q columns to 1e-7 where the re-solved reference is
+differentiable — it is not within 2e-5 of an axis-element switch
+(→ **[M-QR-11](MEASUREMENTS.md#m-qr-11)**, `QDrivenFreeEdge`). The flux pin is
+refused there, its integrand `g(0) ≠ 0` jumping at an edge that moves; a
+confined limited machine is not yet driven (`TODO`, *The q-driven loop on a
+confined limited machine*).
 
 ### IN-5: an open surface is not a loop, and a periodic basis cannot fit one
 

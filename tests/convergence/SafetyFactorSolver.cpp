@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -38,6 +39,27 @@
  * to come back. A loop that merely reached A fixed point would satisfy a
  * self-consistency check while sitting on the wrong one.
  */
+/*
+ * UNDER MEQ_TEST_DEVICE, an mfem::Device configured before any case runs: the
+ * q-driven tangent's device work -- the retained solve's funnels, the
+ * tangent fields' vector operations, the pin rows' doubleDotKernel -- on the
+ * device arms registered in tests/CMakeLists.txt.
+ */
+namespace
+{
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+			if ( requested != nullptr && *requested != '\0' )
+				static mfem::Device device( requested );
+		}
+	};
+}
+
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
+
 namespace
 {
 	using meq::GradShafranovSolver;
@@ -78,6 +100,7 @@ namespace
 			solver->setBoundaryData( zero );
 			solver->setInitialGuess( *guess );
 			solver->setNewtonControl( 1.0e-12, 1.0e-14, 60 );
+			meq::tests::namedRoutesFromEnvironment( *solver );
 
 			std::size_t const knots = meq::toroidalKnotCount( meq::plasmaCells( *mesh ), order );
 			meq::ToroidalKnotCut const cut = meq::toroidalKnotCut( knots );

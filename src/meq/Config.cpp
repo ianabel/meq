@@ -2419,6 +2419,19 @@ namespace meq
 				}
 			}
 
+			// THE FLUX PIN NEEDS AN EDGE THAT DOES NOT MOVE. Beside a limiter
+			// or an X-point psi_bnd is an unknown, and the delivered flux
+			// integrates g( 0 ) = R0B0 != 0 up to the edge it moves, so it jumps
+			// as quadrature points cross it (meq::SafetyFactorEquilibrium).
+			if ( auto const *mhd = std::get_if<MHDParameters>( &sourceOptions.parameters );
+			     mhd && mhd->toroidalFlux != 0.0
+			     && ( boundaryOptions.limiter.given || boundaryOptions.limiter.surfaceAttribute > 0
+			          || boundaryOptions.xpoint.given ) )
+				boundary.fail( boundaryOptions.xpoint.given ? "xpoint" : "limiter",
+					"frees psi_bnd, and [source] ToroidalFlux is refused beside a free plasma edge: the "
+					"delivered flux integrates g( 0 ) != 0 up to an edge that moves, so it is not "
+					"differentiable in the state. Pin R0B0 or PlasmaCurrent instead" );
+
 			// [boundary.exterior] -- the exact exterior DtN, FB-5, and what
 			// makes a run FREE boundary.
 			{

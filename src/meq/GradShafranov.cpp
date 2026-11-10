@@ -11586,6 +11586,13 @@ namespace
 		std::vector<mfem::Vector *> const &out, mfem::Vector const *along ) const
 	{
 		countedHostRead( state, __LINE__ );
+		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: the
+		// direction is indexed raw below, as the state is, and the columns are
+		// accumulated into raw. MEASUREMENTS.md M-383.
+		if ( along )
+			countedHostRead( *along, __LINE__ );
+		for ( mfem::Vector *column : out )
+			countedHostReadWrite( *column, __LINE__ );
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		int const potentialStart = blockOffsets[ 1 ];
@@ -11855,6 +11862,12 @@ namespace
 		mfem::Vector rhs( b );
 		mfem::Array<int> const &essential = essentialTraceDofs();
 		int const traceStart = blockOffsets[ 2 ];
+		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: a copy
+		// is born valid where its source was, and the zeroing below is raw, as
+		// is the index array an MFEM operation may have read on the device.
+		// The answer is funnelled where it is read. MEASUREMENTS.md M-383.
+		countedHostReadWrite( rhs, __LINE__ );
+		countedHostRead( essential, __LINE__ );
 		for ( int i = 0; i < essential.Size(); ++i )
 			rhs( traceStart + essential[ i ] ) = 0.0;
 		y.SetSize( b.Size() );
@@ -11970,6 +11983,9 @@ namespace
 		};
 
 		int const potentialStart = blockOffsets[ 1 ];
+		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: both
+		// fields below are views of the state's host pointer. M-383.
+		countedHostRead( state, __LINE__ );
 		mfem::GridFunction potentialField( potentialFes.get(), const_cast<mfem::real_t *>( state.GetData() ) + potentialStart );
 		mfem::GridFunction fluxField( fluxFes.get(), const_cast<mfem::real_t *>( state.GetData() ) );
 
@@ -12274,12 +12290,11 @@ namespace
 				int const i = layout.firstMode + mode;
 				std::size_t const at = static_cast<std::size_t>( i );
 				mfem::Vector const &column = exteriorColumns[ static_cast<std::size_t>( mode ) ];
-				column.HostRead();
-				held->columns[ at ].SetSize( column.Size() );
-				held->columns[ at ].UseDevice( false );
+				// MFEM's device-aware copy: the column is used as the others are.
 				held->columns[ at ] = column;
 				mfem::Vector const &row = rows[ static_cast<std::size_t>( mode ) ];
-				row.HostRead();
+				// HOST FUNNEL: the row is read raw on its support.
+				countedHostRead( row, __LINE__ );
 				for ( int k : support )
 				{
 					held->rowIndex[ at ].push_back( k );
@@ -12297,6 +12312,11 @@ namespace
 		for ( std::size_t j = 0; j < nb; ++j )
 			if ( held->columns[ j ].Size() > 0 )
 				retainedBackSolve( held->columns[ j ], held->columnsSolved[ j ] );
+		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: the
+		// back-solves' answers are read raw. M-383.
+		for ( mfem::Vector const &solved : held->columnsSolved )
+			if ( solved.Size() > 0 )
+				countedHostRead( solved, __LINE__ );
 		held->schur = held->corner;
 		for ( std::size_t i = 0; i < nb; ++i )
 			for ( std::size_t j = 0; j < nb; ++j )
@@ -12390,6 +12410,9 @@ namespace
 		ds.assign( nb, 0.0 );
 		if ( nb == 0 )
 			return;
+		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md
+		// section 9: the back-solve's answer is read raw. M-383.
+		countedHostRead( dx, __LINE__ );
 		// f_i = g_i - b_i . y, M ds = f, dx = y - sum_j ds_j J^{-1} c_j.
 		for ( std::size_t i = 0; i < nb; ++i )
 			ds[ i ] = ( i < g.size() ? g[ i ] : 0.0 ) - retained->rowDot( i, dx );
@@ -12422,6 +12445,10 @@ namespace
 			applyRetainedJacobian( dx, applied );
 			r = b;
 			r -= applied;
+			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md
+			// section 9: the residual is zeroed raw on the essential dofs. M-383.
+			countedHostReadWrite( r, __LINE__ );
+			countedHostRead( essential, __LINE__ );
 			for ( int i = 0; i < essential.Size(); ++i )
 				r( traceStart + essential[ i ] ) = 0.0;
 			rg.assign( ds.size(), 0.0 );
@@ -12431,6 +12458,8 @@ namespace
 					r.Add( -ds[ j ], retained->columns[ j ] );
 			for ( std::size_t i = 0; i < nb; ++i )
 			{
+				// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: M-383.
+				countedHostRead( dx, __LINE__ );
 				rg[ i ] = ( i < g.size() ? g[ i ] : 0.0 ) - retained->rowDot( i, dx );
 				for ( std::size_t j = 0; j < nb; ++j )
 					rg[ i ] -= retained->corner[ i*nb + j ]*ds[ j ];
@@ -12477,8 +12506,15 @@ namespace
 			mfem::Array<int> const &essential = essentialTraceDofs();
 			int const traceStart = blockOffsets[ 2 ];
 			mfem::GridFunction datum( traceFes.get() );
-			datum = 0.0;
+			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: a
+			// GridFunction is born UseDevice( true ), so `datum = 0.0` would zero
+			// the device copy and the projection and the raw reads below would
+			// meet a page MFEM believes stale. Zeroed on the host instead, and
+			// the index array asked for there. M-383.
+			zeroOnHost( datum );
 			datum.ProjectBdrCoefficient( *boundaryDerivative, fittedMarker );
+			countedHostRead( datum, __LINE__ );
+			countedHostRead( essential, __LINE__ );
 			for ( int i = 0; i < essential.Size(); ++i )
 				lifted( traceStart + essential[ i ] ) = datum( essential[ i ] );
 			mfem::Vector applied;
@@ -12514,6 +12550,8 @@ namespace
 			before = std::sqrt( before );
 			solveLinearised( v, g, dx, ds );
 			double after = 0.0;
+			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: M-383.
+			countedHostRead( dx, __LINE__ );
 			v = 0.0;
 			for ( int i = 0; i < potentialSize; ++i )
 			{

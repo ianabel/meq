@@ -443,9 +443,13 @@ open fixture:
    extraction differenced along each tangent is most of the cost (`TODO`,
    *The q-driven Jacobian's cost is the extraction*).
 
-   **What is left is the fixture**: it is a rectangle with one closed plasma
-   rather than a machine, and nothing has driven `q` on the limited tokamak,
-   where the support moves and `ψ_bnd` is an unknown.
+   **What is left is the machine.** On a free edge `ψ_bnd`, the X-point and the
+   exterior modes are borders of the tangent, and an unconfined limited and
+   diverted box close round trips quadratically (→
+   **[M-QR-11](MEASUREMENTS.md#m-qr-11)**, `QDrivenFreeEdge`); the flux pin is
+   refused there. A confined limited machine is not yet driven: on
+   `examples/limited-tokamak.toml` with an invented `q` every trial step's
+   inner solve is refused (`TODO`).
 
 **Item 4 is done and is upstream's**, including the two legs MEQ asked for,
 and it is in the library MEQ links ([M-135](MEASUREMENTS.md#m-135)). Item 6 is
@@ -971,10 +975,9 @@ carries the recovered `g^2` coefficients — on this route there is no
 **WHAT IS LEFT IS TWO THINGS, AND THE SECOND WAS FOUND BY CLOSING
 THE INVERSION RATHER THAN BY USING THE CODE.**
 
-**THE FIXTURE.** It is a rectangle with one closed plasma rather than a machine,
-and nothing has yet driven `q` on the limited tokamak, where the support moves
-and `ψ_bnd` is an unknown. Nothing refuses the combination, so this is an
-experiment and not a port. Beside `SafetyFactorFile`, `PlasmaCurrent` is the
+**THE MACHINE.** The free edge is in the tangent and the unconfined boxes close
+(M-QR-11); a confined limited machine, where the support moves inside the loop,
+is not yet driven (`TODO`, *The q-driven loop on a confined limited machine*). Beside `SafetyFactorFile`, `PlasmaCurrent` is the
 outer loop's scale pin and sets no profile-scale border: the border, inside the
 loop, converges to a pressure nobody gave and a `g²` the equilibrium does not
 have (→ **[M-356](MEASUREMENTS.md#m-356)**).

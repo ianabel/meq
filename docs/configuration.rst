@@ -450,7 +450,8 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - :math:`\Phi_\mathrm{edge}`, the toroidal flux inside the boundary, in
        Wb — VMEC's ``PHIEDGE`` — held as the solved equilibrium's own
        :math:`\int g/R\,\mathrm{d}A`. One of the three scale pins of
-       ``SafetyFactorFile``, and refused without it.
+       ``SafetyFactorFile``, and refused without it, and refused beside
+       ``[boundary.limiter]`` or ``[boundary.xpoint]``.
    * - ``ToroidalFieldGuess``
      - —
      - **Required with** ``SafetyFactorFile`` beside ``ToroidalFlux`` or
@@ -2236,7 +2237,11 @@ the member:
        equilibrium with its own :math:`g`, signed as the target :math:`q`. On
        a curved boundary the integral runs over the mesh, so the thin band
        between the mesh and the boundary is not counted, as it is not for
-       :math:`I_p`.
+       :math:`I_p`. **Refused beside a limiter or an X-point**: there
+       :math:`\psi_\mathrm{bnd}` is free, and the integrand,
+       :math:`g(0) \neq 0` at the edge, jumps as the edge moves across the
+       quadrature points, so the delivered flux is not differentiable in the
+       state. Pin ``R0B0`` or ``PlasmaCurrent`` there.
    * - ``PlasmaCurrent``
      - :math:`I_p`, A. The profile scale stays one, so :math:`p` is the
        table's.

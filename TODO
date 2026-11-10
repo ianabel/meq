@@ -563,11 +563,67 @@ Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-359, M-362).
   (meq::SafetyFactorSystem). Measured in double on the q-driven box and on
   a Miller boundary. Open:
 
-  * A FREE OR LIMITED BOUNDARY. Every pinned run is fixed-boundary, where
-    psi_bnd is zero. On a limited or diverted plasma psi_bnd is a border
-    unknown, the support moves, and linearise() refuses psi_bnd as a border,
-    so the loop's Jacobian cannot be formed there; q-driven runs there are
-    not refused, and fail at their first Jacobian.
+  * A CONFINED FREE EDGE. linearise() carries psi_bnd, the X-point and the
+    exterior modes as borders, and QDrivenFreeEdge holds the tangent to
+    re-solved differences and closes round trips on an unconfined limited
+    and diverted box (M-QR-11). A confined source, as every shipped free-
+    boundary example has, puts the support's edge in the quadrature: see
+    *The q-driven loop on a confined limited machine* and *The flux pin
+    beside a free plasma edge*.
+
+================================================================================
+The flux pin beside a free plasma edge
+Raised 2026-11-09 (MEASUREMENTS.md M-QR-11).
+================================================================================
+
+  [source] ToroidalFlux is refused beside [boundary.limiter] or
+  [boundary.xpoint] (Config, and meq::SafetyFactorEquilibrium). The delivered
+  flux is int_{Psi > 0} g( Psi )/R on the source's quadrature, and
+  g( 0 ) = R0B0 is not zero, so where psi_bnd is free the edge moves and the
+  integral jumps by g/R times a weight as each point crosses it: on the
+  limited box its re-solved difference reads 2.3e2 against the interior
+  linearisation's 1e0, all crossings. The fix is an edge-resolving measure:
+  the flux from the family, Phi = 2 pi int q dpsi, up to an edge where q is
+  finite (limited) or log-singular (diverted), or a cut-cell quadrature of
+  the support's edge. The current pin's integrand is the source, smooth
+  across Psi = 0 when unconfined; confined, it has the same jump wherever
+  F( 0 ) != 0, which the bordered current solve meets too.
+
+================================================================================
+The X-point border from a cold start
+Raised 2026-11-09 (MEASUREMENTS.md M-QR-11).
+================================================================================
+
+  On both manufactured X-point fixtures -- LinearisedSolve's two-lobe mode
+  and QDrivenFreeEdge's divertor filament, each on a fixed box with no
+  exterior coupling -- the bordered Newton's first dense corner is singular
+  from the initial guess ("the bordered Jacobian is singular in ( psi_ax,
+  psi_bnd, a )", every entry finite, rows 0 and 3 nearly parallel), on every
+  lobe shape tried. From XP-2's pinned solve, its saddle re-located to a
+  fixed point, the border converges and its tangent agrees with re-solved
+  differences to 1e-13. Separately, a saddle within about 0.007 of a mesh
+  line makes the X-point's Newton cycle between the two elements' roots
+  (eight cells on both fixtures; nine converge). Neither is diagnosed: the
+  shipped diverted examples start from a stored guess and sweep the support,
+  and are not affected as far as the suite shows.
+
+================================================================================
+The q-driven loop on a confined limited machine
+Raised 2026-11-09.
+================================================================================
+
+  examples/limited-tokamak.toml with SafetyFactorFile (an invented
+  q = 1.15 + 2.4 ( 1 - Psi_N )^2) and R0B0 = 2.0: the support is decided by
+  an opening solve at constant g (meq::Run, so the knots are the plasma's,
+  13 here, not the mesh's 32), the start evaluates (removable 75) and the
+  first Jacobian forms in 0.6 s, and then every trial step's inner solve is
+  refused -- "the bordered Newton has stopped moving" -- 14 of them, 518 s of
+  solves, and the accepted point no longer evaluates either. Not separated:
+  the target's distance from anything reachable at R0B0 = 2.0, the confined
+  support moving under the trials, and the warm start after a refused
+  trial (the support is the last trial's). A target taken from a reachable
+  equilibrium is the first experiment; there is no q-reporting forward run
+  to take it from yet (TODO, "Report q( Psi ) in the flux-surface output").
 
 ================================================================================
 Anisotropic pressure

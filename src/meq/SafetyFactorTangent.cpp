@@ -92,6 +92,19 @@ namespace meq
 	{
 		if ( !( options.step > 0.0 ) )
 			throw std::invalid_argument( "meq::SafetyFactorEquilibrium: the difference step must be positive" );
+		/*
+		 * THE FLUX PIN BESIDE A FREE EDGE IS REFUSED. g( 0 ) = R0B0 is not
+		 * zero, so Phi = int_{Psi > 0} g/R jumps by g/R times a weight each
+		 * time a quadrature point crosses the edge psi_bnd moves, and is not
+		 * differentiable in the state: re-solved differences of it read the
+		 * crossings (QDrivenFreeEdge). A fixed boundary's edge is Gamma_h and
+		 * does not move. TODO, *The flux pin beside a free plasma edge*.
+		 */
+		if ( options.pin == ScalePin::ToroidalFlux && solver.boundaryFluxIsAnUnknown() )
+			throw std::invalid_argument( "meq::SafetyFactorEquilibrium: the ToroidalFlux pin is refused "
+			                             "beside a free plasma edge (a limiter or an X-point): the delivered "
+			                             "flux integrates g( 0 ) != 0 up to an edge that moves, so it jumps "
+			                             "as quadrature points cross it. Pin R0B0 or PlasmaCurrent" );
 		if ( ( options.gammaHMarker == nullptr ) != ( options.path == nullptr ) )
 			throw std::invalid_argument( "meq::SafetyFactorEquilibrium: the band needs both its "
 			                             "Gamma_h marker and its transfer path" );
@@ -203,6 +216,13 @@ namespace meq
 				break;
 		}
 		return deliveredToroidalFlux( solver, spline, options.sign );
+	}
+
+	void SafetyFactorEquilibrium::warmFromSolver()
+	{
+		warm = solver.state();
+		warmExterior = solver.exteriorCoefficients();
+		warmBoundary = solver.psiBoundary();
 	}
 
 	bool SafetyFactorEquilibrium::evaluate( ToroidalFieldSpline const &spline, SafetyFactorEvaluation &out )

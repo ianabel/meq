@@ -3034,6 +3034,20 @@ BOOST_AUTO_TEST_CASE( a_q_driven_run_names_exactly_one_scale_pin )
 	BOOST_TEST( parse( mhd( target + guess + "ToroidalFlux = -0.25\n" ) )
 	                .getSource().getMHD().toroidalFlux == -0.25 );
 
+	// THE FLUX PIN BESIDE A FREE EDGE IS REFUSED -- the delivered flux jumps as
+	// the edge psi_bnd moves crosses the quadrature points -- and the other two
+	// pins are not.
+	{
+		std::string const limiter = "\n[boundary]\nType = \"zero\"\n[boundary.limiter]\nR = 1.0\nZ = 0.0\n";
+		std::string const xpoint = "\n[boundary]\nType = \"zero\"\n[boundary.xpoint]\nR = 1.0\nZ = -1.0\n";
+		BOOST_TEST( message( mhd( target + guess + flux ) + limiter ).first == "boundary.limiter" );
+		BOOST_TEST( message( mhd( target + guess + flux ) + xpoint ).first == "boundary.xpoint" );
+		BOOST_TEST( message( mhd( target + guess + flux ) + limiter ).second.find( "ToroidalFlux" )
+		            != std::string::npos );
+		BOOST_TEST( message( mhd( target + edge ) + limiter ).first == "" );
+		BOOST_TEST( message( mhd( target + guess + current ) + xpoint ).first == "" );
+	}
+
 	// BESIDE A PRESCRIBED FIELD, R0B0 AND ToroidalFlux MEAN NOTHING YET and are
 	// refused; PlasmaCurrent keeps its own meaning there, the profile scale.
 	std::string const prescribed = "GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\n";
