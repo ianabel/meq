@@ -14768,7 +14768,11 @@ namespace
 
 				double const tr = profileNow();
 				double const cr = profileCpuNow();
+				if ( stageChecksumWanted() )
+					stageChecksum( "border.residualIn", state );
 				npc->Mult( state, out );
+				if ( stageChecksumWanted() )
+					stageChecksum( "border.residual", out );
 				profile.residualSeconds += profileNow() - tr;
 				profile.residualCpuSeconds += profileCpuNow() - cr;
 				++profile.residualCalls;
@@ -15880,7 +15884,11 @@ namespace
 				if ( normalisedSource )
 					normalisedSource->setNormalisation( normalisation, sB );
 				if ( assembleNormalisationColumn( state, true, out ) )
+				{
+					if ( stageChecksumWanted() )
+						stageChecksum( "border.axisColumn", out );
 					return;
+				}
 			}
 
 			double const h = normalisationStep( normalisation );
@@ -17806,6 +17814,12 @@ namespace
 						borderOut[ i ]->UseDevice( true );
 						borderOut[ i ]->Write();
 					}
+				if ( stageChecksumWanted() )
+				{
+					stageChecksum( "border.state", unknown );
+					for ( int i = 0; i < borderRhs.Size(); ++i )
+						stageChecksum( "border.rhs", *borderRhs[ i ] );
+				}
 				npcLinear.ArrayMult( borderRhs, borderOut );
 				if ( darcy && darcy->GetHybridization() )
 					profile.elementColours = std::max( profile.elementColours,

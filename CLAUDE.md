@@ -205,9 +205,10 @@ Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAccept
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
 (→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven suites --
 `SafetyFactorSolver` and `QDrivenScalePin`, whose round trips reach `g²` to
-2e-6 to 4e-5 against their 20 eps, and `QDrivenCurvedBoundary` and
-`QDrivenFreeEdge`, whose loops do not close in single (→
-**[M-QR-14](MEASUREMENTS.md#m-qr-14)**, `TODO`, *The q-driven solve in single
+2e-6 to 4e-5 against their bounds, the map's own q being 1.5e-6 from
+double's, and `QDrivenCurvedBoundary` and `QDrivenFreeEdge`, whose loops do
+not close in single, the tracer and the inner solves refusing their trials (→
+**[M-QR-15](MEASUREMENTS.md#m-qr-15)**, `TODO`, *The q-driven solve in single
 precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
@@ -215,8 +216,9 @@ reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
 (`TODO`, the single-precision round). `DeviceParity`'s `q-driven` card arm
 is red in single by the take: about one run in three stalls, on cuDSS and on
-PARDISO alike, from a first solve that is not repeatable on the card
-(→ **[M-QR-14](MEASUREMENTS.md#m-qr-14)**); in double it repeats its outer
+PARDISO alike, its first residual varying run to run through MFEM's batched
+hybridization assembly, which `AssemblyMode = "serial"` makes repeatable
+(→ **[M-QR-15](MEASUREMENTS.md#m-qr-15)**); in double it repeats its outer
 count, cuDSS varying the bits run to run (→ **[M-QR-13](MEASUREMENTS.md#m-qr-13)**). A single
 build reads `FluxSurfaceConvergence`'s
 `thePointErrorDoesNotAccumulateOverManyCircuits` red: its flatness comparison

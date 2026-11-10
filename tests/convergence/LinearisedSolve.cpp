@@ -486,15 +486,23 @@ BOOST_AUTO_TEST_CASE( theInitialStateIsWhereTheSolveStarts )
 	again.setInitialState( base->solver->state(), {} );
 	again.solve();
 	double const first = again.newtonResiduals().front();
+	std::printf( "  its first step: field %.3e, axis constraint %.3e\n",
+	             again.borderSteps().empty() ? -1.0 : again.borderSteps().front().fieldNorm,
+	             again.borderSteps().empty() ? -1.0 : again.borderSteps().front().axis );
 	std::printf( "\n  setInitialState(): the first residual %.3e against the cold start's %.3e, %d iterations "
 	             "against %d\n", first, scale, again.newtonIterations(), base->solver->newtonIterations() );
 	/*
-	 * Not at zero on the host: the first residual is 1.9e-4 of the cold
-	 * start's, in 4 iterations against the cold start's 5, where on the card
-	 * it is 1.5e-16 in none. Which part of the host's first residual that is
-	 * -- the axis the fresh solver locates afresh is the suspect -- is not
-	 * measured (TODO, *The q-driven loop under a Device*). From the guess it
-	 * is the cold start's own.
+	 * NOT AT ZERO ON THE HOST, AND NOTHING IS DROPPED: the field residual of
+	 * the first step is 1.5e-16 on every arm, and psi_ax's label the base's.
+	 * The 1.9e-4 is the axis constraint alone. On eight cells the axis sits
+	 * at a mesh vertex (R = 1, z = 0), the fresh solver's first location is
+	 * a cold sweep, and on the host it roots q_h in another element than the
+	 * converged solve tracked -- psi_h jumps by O( h^( k+1 ) ) across the
+	 * faces there -- so it starts 1.9e-4 off and converges back in 4; the
+	 * card's device route happens to root the same element, 1.5e-16 in none.
+	 * On 7 and 9 cells, the axis off every face, the host starts at 1.8e-15
+	 * and 6.2e-16 in 0 iterations; on 10, a vertex again, 8.0e-5 in 4
+	 * (M-QR-15). From the guess the first residual is the cold start's own.
 	 */
 	BOOST_TEST( first < 1.0e-2*scale, "a converged state handed to setInitialState() starts at "
 	            << first << ", the cold start's " << scale << ": the solve began from the guess" );

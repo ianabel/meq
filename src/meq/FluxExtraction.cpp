@@ -270,9 +270,20 @@ namespace meq
 	                                       Potential which )
 	{
 		ContourTracer const tracer( solver, which );
-		CriticalPointFinder const finder( solver );
-		CriticalPoint const axis = labelledAxis( solver, tracer, finder.findAxis() );
+		CriticalPoint const axis = labelledAxis( solver, tracer, solvedAxis( solver ) );
 		return extractFluxSurfaces( tracer, axis, solver.psiBoundary(), options );
+	}
+
+	CriticalPoint solvedAxis( GradShafranovSolver const &solver )
+	{
+		CriticalPointFinder const finder( solver );
+		AxisSense const sense = solver.psiAxis() > solver.psiBoundary() ? AxisSense::Maximum
+		                                                                : AxisSense::Minimum;
+		CriticalPoint found;
+		if ( solver.axisR() > 0.0
+		     && finder.tryFindCriticalPointFrom( solver.axisR(), solver.axisZ(), sense, found ) )
+			return found;
+		return finder.findAxis( sense );
 	}
 
 	CriticalPoint labelledAxis( GradShafranovSolver const &solver,

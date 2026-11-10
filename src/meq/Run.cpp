@@ -905,6 +905,9 @@ struct meq::Run::Impl
 	// constant g toroidalOpening where there is none.
 	std::shared_ptr<meq::ToroidalFieldSpline const> toroidalField;
 	double toroidalOpening = 0.0;
+	/// The labels the q-driven loop last ran at: what safetyFactorKnots()
+	/// reports once the loop has run.
+	std::vector<double> toroidalLabels;
 
 	// What the q-driven loop cost: Gauss-Newton iterations and equilibria, so a
 	// crawl that converges is visible in the file rather than only on stdout.
@@ -1130,6 +1133,16 @@ std::vector<double> meq::Run::safetyFactorKnots() const
 {
 	if ( stage == Stage::Fresh || stage == Stage::Failed )
 		throw std::logic_error( "meq::Run::safetyFactorKnots(): prepare() first; the knots follow the mesh" );
+	// The loop's own, once it has run.
+	if ( !impl->toroidalLabels.empty() )
+		return impl->toroidalLabels;
+	// ON A FREE EDGE OR A CONFINED SOURCE THE KNOTS FOLLOW THE PLASMA, which
+	// the loop's opening solve decides (runToroidalLoop()).
+	if ( impl->config->getBoundary().limiter.given || impl->config->getBoundary().limiter.surfaceAttribute > 0
+	     || impl->config->getBoundary().xpoint.given || impl->config->getSource().confinesToPlasma() )
+		throw std::logic_error( "meq::Run::safetyFactorKnots(): on a free edge or a confined source the "
+		                        "knots follow the plasma, which the loop's opening solve decides; solve() "
+		                        "first" );
 	mfem::Mesh const *mesh = impl->domain ? &impl->domain->computational() : impl->solveMesh;
 	if ( mesh == nullptr )
 		throw std::logic_error( "meq::Run::safetyFactorKnots(): there is no mesh" );
@@ -4015,14 +4028,17 @@ int meq::Run::Impl::solve()
 			 * the surfaces file's and nothing of the loop's.
 			 */
 			/*
-			 * ON A CONFINED PLASMA THE CELLS ARE THE SUPPORT'S, not the mesh's:
+			 * ON A CONFINED PLASMA THE CELLS ARE THE SUPPORT'S, AND ON A FREE
+			 * EDGE THE Psi > 0 REGION'S, not the mesh's:
 			 * a limited or diverted plasma sits inside a vacuum region the
 			 * knots do not see. With no support decided yet, one opening solve
 			 * at the constant g decides it -- and constant g is the same g^2
 			 * whatever the knots, so that solve is the loop's own start.
 			 */
 			bool opened = false;
-			if ( config->getSource().confinesToPlasma() && solver->plasmaComponentElements() <= 0 )
+			bool const freeEdge = solver->boundaryFluxIsAnUnknown();
+			if ( ( config->getSource().confinesToPlasma() && solver->plasmaComponentElements() <= 0 )
+			     || ( freeEdge && !toroidalField ) )
 			{
 				opened = true;
 				// Or at the carried field, where a previous cycle left one.
@@ -4032,8 +4048,8 @@ int meq::Run::Impl::solve()
 				solver->solve();
 			}
 			std::size_t const knots = meq::toroidalKnotCount(
-				config->getSource().confinesToPlasma() ? meq::plasmaCells( *solver )
-				                                       : meq::plasmaCells( *solveMesh ), order );
+				config->getSource().confinesToPlasma() || freeEdge ? meq::plasmaCells( *solver )
+				                                                   : meq::plasmaCells( *solveMesh ), order );
 			meq::ToroidalKnotCut const cut = meq::toroidalKnotCut( knots );
 
 			meq::SafetyFactorEquilibrium::Options equilibriumOptions;
@@ -4083,6 +4099,7 @@ int meq::Run::Impl::solve()
 			if ( opened )
 				equilibrium.warmFromSolver();
 			std::vector<double> const labels = equilibrium.labels();
+			toroidalLabels = labels;
 
 			// THE START: the previous cycle's answer, or the restart's, read at
 			// this mesh's knots; else the constant opening g.
@@ -6841,16 +6858,14 @@ meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions con
 
 meq::FluxSurfaceFamily meq::Run::Impl::extractFamily( meq::FluxFamilyOptions const &options )
 {
-	meq::CriticalPointFinder const finder( *solver );
-	return extractFamily( options, finder.findAxis() );
+	return extractFamily( options, meq::solvedAxis( *solver ) );
 }
 
 meq::FluxSurfaceFamily meq::Run::Impl::writeFluxSurfaces( std::string const &file )
 {
 	meq::OutputConfig const &output = config->getOutput();
 
-	meq::CriticalPointFinder const finder( *solver );
-	meq::CriticalPoint const axis = finder.findAxis();
+	meq::CriticalPoint const axis = meq::solvedAxis( *solver );
 
 	meq::FluxFamilyOptions options;
 	options.surfaces =

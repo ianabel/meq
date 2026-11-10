@@ -26792,3 +26792,95 @@ output is not repeatable on the card even on PARDISO, and the loop's first
 step is sensitive enough to it to change course; neither the stage nor the
 step's sensitivity is identified.
 
+### M-QR-15
+
+**THE SINGLE JACOBIAN IS NOISE-DOMINATED BUT 6e-5 ACCURATE; THE CARD'S
+NON-REPEATABILITY IS MFEM'S BATCHED HYBRIDIZATION ASSEMBLY; THE REAL LIMITED
+MACHINE CLOSES ON A REACHABLE TARGET; A WARM START'S FIRST STEP DEPENDS ON
+WHICH ELEMENT ROOTS THE AXIS.** Branch `q-refining-fit` on `cbf3fcd`,
+`builds/q-refining-fit` (double, `install-nocuda`) and
+`builds/q-refining-fit-single` (`install-single`, `sm_75`),
+`MKL_NUM_THREADS=1`, a loaded machine.
+
+**1. The differenced Jacobian in single** (`SafetyFactorSolver`'s disabled
+`theJacobianByStep`: the box at the closed form, 8 cells, `k = 2`, 10 knots,
+every matrix held to double's at 1e-5, whose own error is 1.2e-7; max
+`|J_single - J_double|` over max `|J|` = 12.1):
+
+| step | 1e-6 | 1e-5 | 1e-4 | 1e-3 | 3e-3 | 1e-2 |
+|---|---|---|---|---|---|---|
+| double | 1.2e-7 | -- | 5.8e-6 | 1.5e-3 | 1.1e-2 | 1.1e-1 |
+| single | 5.5e-3 | 4.7e-4 | **6.0e-5** | 1.5e-3 | 1.1e-2 | 1.1e-1 |
+| single, Richardson on `s` and `2s` | 7.9e-3 | 5.9e-4 | 6.6e-5 | 2.8e-4 | 1.8e-3 | -- |
+
+The noise goes as `1/s` -- `eps_single` of `q` over the step -- and the
+truncation as `s^2.4`; they cross near 2e-4, where the best a central
+difference can do is about 4e-5. So at the single default, 1e-4, the rows are
+noise-dominated (6e-5 against a truncation of 6e-6) but not "mostly noise",
+and no step does better than twice that; Richardson does not help. Repeats on
+the host are bit-equal. The q the map evaluates at the closed form is itself
+1.5e-6 from double's, which is the floor the round trip's 1.6e-6 sits on.
+
+The host single loop is robust: DeviceParity's q-driven case (level 0,
+ToroidalFlux, PARDISO) from eight starts `ToroidalFieldGuess = 2.2 (1 + k 1e-6)`
+converges in 5 iterations and 6 equilibria every time. Its stalls are the
+card's.
+
+| single test | result | cause, measured |
+|---|---|---|
+| `SafetyFactorSolver` round trip | 1.6e-6, red against 1e-7 | the q floor above |
+| `QDrivenScalePin` | 4.0e-6 and 3.6e-5 apart in `g²` | the same floor through the weakest pins' conditioning |
+| `QDrivenCurvedBoundary` | exits 2 | 20 of its 28 refused trials are `ContourTracer::fitByAngle` failing to bracket a level on 15 elements in single; the rest inner stalls. Not the kept interpolant: `buildContinuousFields()` in its place fails identically |
+| `QDrivenFreeEdge` round trips | fail | trials refused: the limited box's inner Newton stalls, the diverted box's X-point leaves the mesh |
+
+**2. The card's non-repeatability, bisected** with `MEQ_STAGE_CHECKSUM=1` and
+new stages `border.residualIn`, `border.residual`, `border.axisColumn`,
+`border.state`, `border.rhs` (single, `--device cuda`, PARDISO): the input to
+the very first residual is the same in every run and the residual
+(`DarcyNPCOperator::Mult`) is not -- a norm 3e-11 apart. Setting the three
+batched keys serial one at a time: `AssemblyMode = "serial"` alone makes 3
+runs equal in every stage; `TraceAssemblyMode` or `LocalFactorMode` serial
+alone do not. All three serial: 292 stages equal in 3 runs, and 3 of 3
+converge in 5 iterations. So the varying stage is MFEM's
+`DarcyHybridization::AssemblyMode::Batched`, whose interior-face `D`
+accumulation goes through `AtomicAdd` (MEQ's note at
+`defaultAssemblyMode()`), an order that changes run to run on the card. On
+the batched default, 1 run in 3 stalls (2 of 6 on cuDSS, 1 of 3 and 1 of 4 on
+PARDISO); in each the first divergent stage is a residual 3e-11 apart and the
+first Gauss-Newton step reads 0.80 where the others read 0.47.
+
+**3. The real limited machine.** `examples/limited-tokamak.toml` forward
+without `PlasmaCurrent` (profile scale one): the plain bordered Newton stalls
+and the Picard-then-Newton rung converges in 204 iterations, 183 of them
+crawling below 1/64 of the Newton step. Its surfaces file was not written:
+`CriticalPointFinder::findAxis()` unqualified refuses a mesh holding the coils'
+extrema, now `meq::solvedAxis()` (sense from the labels, seeded at the
+solve's own axis) at every family of a solved state. The q-driven run on that
+forward run's own q (64 surfaces, `g² = 4 + 0.1176 Psi³`), R0B0 = 2.0:
+**converged**, 7 Gauss-Newton iterations, 21 equilibria, 13 trial solves
+refused (inner stalls on the moving support, absorbed by the line search),
+removable 1.4e+1, 5.6e-1, 1.2e-1, 6.3e-2, 3.2e-2, 1.1e-3, 2.0e-6, 1.7e-10,
+13 knots, `g²` at the knots within 5.5e-7 of the closed form. The earlier
+"every trial refused" was its target: an invented q no R0B0 = 2.0
+equilibrium reaches. With `PlasmaSupportSweeps = 4` the loop's first solve
+finds no maximum and the run exits 2 (`TODO`).
+
+**The h-and-knots diagonal on a free edge**, `QDrivenConsistency`'s
+`theDeliveredFieldConvergesOnALimitedBox` (the box with `[boundary.limiter]`
+at ( 1.3, 0 ), `k = 2`, target the reference's q on 160 surfaces): level 0,
+6 knots, `g²` 6.0e-2 from the closed form; level 1, 12 knots, 9.4e-3; **6.4
+a halving**. The knots now follow the Psi > 0 region on a free edge
+(`plasmaCells()`), after an opening solve: counted on the box, level 0 put 10
+knots across a plasma half its area, the Jacobian's conditioning fell to
+4e-7 and the loop stalled at a removable 6.9e-7.
+
+**4. The warm start.** `LinearisedSolve`'s
+`theInitialStateIsWhereTheSolveStarts`, the first border step's parts: the
+field residual is 1.5e-16 on the host and under `debug` alike, `psi_ax`'s label
+the base's to 1e-16; the whole 1.9e-4 is the axis constraint. On 8 and 10
+cells the axis is at a mesh vertex ( 1, 0 ) and the host's cold sweep roots
+q_h in another element than the solve converged on (psi_h jumps there by
+`O( h^( k+1 ) )`): 1.9e-4 and 8.0e-5, 4 iterations. On 7 and 9 cells, off
+every face: 1.8e-15 and 6.2e-16, 0 iterations. The card's route roots the
+same element as the converged solve. Nothing is dropped.
+

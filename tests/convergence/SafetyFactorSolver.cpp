@@ -83,7 +83,7 @@ namespace
 		mfem::ConstantCoefficient zero{ 0.0 };
 		std::unique_ptr<meq::SafetyFactorEquilibrium> equilibrium;
 
-		Machine( int cells, int order )
+		Machine( int cells, int order, double step = 0.0 )
 		{
 			meq::tests::Rectangle const box = meq::tests::standardBox();
 			mesh = std::make_unique<mfem::Mesh>( meq::tests::makeMesh( box, cells ) );
@@ -109,6 +109,8 @@ namespace
 			options.family.innerCut = cut.innerCut;
 			options.family.outerCut = cut.outerCut;
 			options.pin = meq::ScalePin::EdgeField;
+			if ( step > 0.0 )
+				options.step = step;
 			equilibrium = std::make_unique<meq::SafetyFactorEquilibrium>( *solver, *source, options );
 		}
 
@@ -211,8 +213,10 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 	std::printf( "    worst |g^2/g^2_exact - 1| at the knots %.3e\n", worst );
 	BOOST_TEST( worst < 1.0e-7,
 		"the loop did not recover the closed form its target was measured from: "
-		<< worst << " at worst (in single this is red at 2.3e-6: TODO, \"The q-driven solve "
-		"in single precision\"; MEASUREMENTS.md M-QR-10). The target is exact at every knot and the spline "
+		<< worst << " at worst (in single this is red at 1.6e-6, a deliberate red: the map's own q at "
+		"the closed form is 1.5e-6 from double's there, so the g^2 recovered from it cannot be nearer; "
+		"TODO, \"The q-driven solve in single precision\"; MEASUREMENTS.md M-QR-15). The target is exact "
+		"at every knot and the spline "
 		"represents the closed form exactly, so a converged loop that lands away "
 		"from it converged to the wrong fixed point" );
 	BOOST_TEST( result.iterations <= 10,
@@ -329,3 +333,37 @@ BOOST_AUTO_TEST_CASE( theTangentJacobianIsTheDifferencedOne )
 			<< " of its size from re-solved differences of the delivered quantity" );
 	}
 }
+
+/*
+ * THE DIFFERENCED JACOBIAN BY STEP, A MEASUREMENT (disabled; run by name in
+ * each precision): the tangent Jacobian at the closed form on 8 cells for
+ * extraction steps 1e-6 to 3e-2 of the field, each written in full to
+ * jacobian-<precision>-<step>.txt beside the run, so that a single build's
+ * matrices can be held to a double build's. Twice at each step, to see
+ * whether a repeat on the same host moves anything.
+ */
+BOOST_AUTO_TEST_CASE( theJacobianByStep, * boost::unit_test::disabled() )
+{
+	bool const single = std::numeric_limits<mfem::real_t>::epsilon() > 1.0e-10;
+	for ( double step : { 1.0e-6, 1.0e-5, 1.0e-4, 1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2 } )
+		for ( int repeat = 0; repeat < 2; ++repeat )
+		{
+			Machine machine( 8, 2, step );
+			meq::ToroidalFieldSpline const exact = machine.splineOf( referenceGSquared );
+			meq::SafetyFactorEvaluation base;
+			BOOST_TEST_REQUIRE( machine.equilibrium->evaluate( exact, base ) );
+			meq::SafetyFactorDerivative tangent;
+			BOOST_TEST_REQUIRE( machine.equilibrium->differentiate( exact, tangent ) );
+			char name[ 128 ];
+			std::snprintf( name, sizeof( name ), "jacobian-%s-%.0e-%d.txt", single ? "single" : "double",
+			               step, repeat );
+			std::FILE *out = std::fopen( name, "w" );
+			for ( double v : tangent.qOverG )
+				std::fprintf( out, "%.17g\n", v );
+			for ( double v : base.qOverG )
+				std::fprintf( out, "# %.17g\n", v );
+			std::fclose( out );
+			std::printf( "  wrote %s\n", name );
+		}
+}
+

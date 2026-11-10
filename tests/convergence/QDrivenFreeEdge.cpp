@@ -474,7 +474,11 @@ namespace
 		std::printf( "\n" );
 		if ( system.refusals() > 0 )
 			std::printf( "    the last refusal: %s\n", machine.equilibrium->refusal().c_str() );
-		BOOST_TEST_REQUIRE( result.converged, nameOf( edge ) << ": " << result.status );
+		BOOST_TEST_REQUIRE( result.converged, nameOf( edge ) << ": " << result.status
+			<< ( std::numeric_limits<mfem::real_t>::epsilon() > 1.0e-10
+			     ? " (red in single, deliberately: most trial solves are refused there -- the limited "
+			       "box's inner Newton stalls, the diverted one's X-point leaves the mesh; TODO, \"The "
+			       "q-driven solve in single precision\", MEASUREMENTS.md M-QR-15)" : "" ) );
 
 		double worst = 0.0;
 		for ( std::size_t i = 0; i < result.x.size(); ++i )

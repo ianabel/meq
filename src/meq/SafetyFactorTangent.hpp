@@ -70,9 +70,11 @@ namespace meq
 	/// is the whole of Omega_h.
 	double plasmaCells( mfem::Mesh const &mesh );
 
-	/// The plasma's area in cells where the solver's source is confined to a
-	/// support it has decided (GradShafranovSolver::elementInPlasma()) -- a
-	/// limited or diverted plasma inside a vacuum region -- else the mesh's.
+	/// The plasma's area in cells: the support's where the solver's source is
+	/// confined to one it has decided (GradShafranovSolver::elementInPlasma()),
+	/// else, on a free edge, the elements whose centres the solved state puts
+	/// at Psi > 0 -- a limited or diverted plasma inside a region it does not
+	/// fill -- else the mesh's. After a solve.
 	double plasmaCells( GradShafranovSolver const &solver );
 
 	/**

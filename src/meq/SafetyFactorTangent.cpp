@@ -102,14 +102,47 @@ namespace meq
 
 	double plasmaCells( GradShafranovSolver const &solver )
 	{
-		mfem::Mesh const &mesh = *solver.potential().FESpace()->GetMesh();
-		if ( solver.plasmaComponentElements() <= 0 )
-			return plasmaCells( mesh );
+		mfem::GridFunction const &psi = solver.potential();
+		mfem::Mesh const &mesh = *psi.FESpace()->GetMesh();
+		auto weight = [ &mesh ]( int e )
+		{
+			return mesh.GetElementGeometry( e ) == mfem::Geometry::TRIANGLE ? 0.5 : 1.0;
+		};
 		double cells = 0.0;
+		if ( solver.plasmaComponentElements() > 0 )
+		{
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+				if ( solver.elementInPlasma( e ) )
+					cells += weight( e );
+			return cells;
+		}
+		/*
+		 * A FREE EDGE WITH NO SUPPORT: the plasma is Psi > 0 of the solved
+		 * state, the total field's, read at each element's centre -- a
+		 * limited or diverted plasma inside a box it does not fill. Counted on
+		 * the mesh, its knots outrun what the plasma's cells resolve, and the
+		 * rows go nearly dependent (M-QR-15).
+		 */
+		double const boundary = solver.psiBoundary();
+		double const span = solver.psiAxis() - boundary;
+		if ( !solver.boundaryFluxIsAnUnknown() || span == 0.0 )
+			return plasmaCells( mesh );
+		ConductorField const *conductors = solver.conductorField();
+		mfem::IsoparametricTransformation tr;
+		mfem::Vector centre( 2 );
+		psi.HostRead();
 		for ( int e = 0; e < mesh.GetNE(); ++e )
-			if ( solver.elementInPlasma( e ) )
-				cells += mesh.GetElementGeometry( e ) == mfem::Geometry::TRIANGLE ? 0.5 : 1.0;
-		return cells;
+		{
+			mfem::IntegrationPoint const &ip = mfem::Geometries.GetCenter( mesh.GetElementBaseGeometry( e ) );
+			const_cast<mfem::Mesh &>( mesh ).GetElementTransformation( e, &tr );
+			tr.Transform( ip, centre );
+			double value = psi.GetValue( e, ip );
+			if ( conductors )
+				value += conductors->psi( centre( 0 ), centre( 1 ) );
+			if ( ( value - boundary )/span > 0.0 )
+				cells += weight( e );
+		}
+		return cells > 0.0 ? cells : plasmaCells( mesh );
 	}
 
 	double deliveredToroidalFlux( GradShafranovSolver &solver, ToroidalFieldSpline const &field,
@@ -194,19 +227,9 @@ namespace meq
 
 	CriticalPoint SafetyFactorEquilibrium::locatedAxis( Fields const & ) const
 	{
-		// The solver's own finder, which adds the conductors' field where the
-		// solve subtracted it: the axis is the TOTAL field's.
-		// Of the sense psi_ax - psi_bnd says, seeded at the solve's own axis:
-		// a mesh around coils has their extrema too.
-		CriticalPointFinder const finder( solver );
-		AxisSense const sense = solver.psiAxis() > solver.psiBoundary() ? AxisSense::Maximum
-		                                                                : AxisSense::Minimum;
-		CriticalPoint found;
-		if ( solver.axisR() > 0.0 && finder.tryFindCriticalPointFrom( solver.axisR(), solver.axisZ(), sense, found ) )
-			return found;
-		return finder.findAxis( sense );
+		// The total field's, of psi_ax's sense, seeded at the solve's own axis.
+		return solvedAxis( solver );
 	}
-
 	std::vector<double> SafetyFactorEquilibrium::qOverG( Fields const &fields, double psiAxis ) const
 	{
 		CriticalPoint axis = locatedAxis( fields );

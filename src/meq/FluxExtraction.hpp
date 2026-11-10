@@ -185,6 +185,16 @@ namespace meq
 	                            CriticalPoint const &located );
 
 	/**
+	 * THE SOLVED STATE'S MAGNETIC AXIS: the extremum of the total field of the
+	 * sense psi_ax - psi_bnd says, seeded at the solve's own located axis
+	 * (GradShafranovSolver::axisR(), axisZ()) and swept for where there is
+	 * none. An unqualified CriticalPointFinder::findAxis() refuses a machine
+	 * whose coils sit in the mesh -- their field has extrema of its own -- so
+	 * every family of a solved state is rooted here.
+	 */
+	CriticalPoint solvedAxis( GradShafranovSolver const &solver );
+
+	/**
 	 * The volume enclosed by one fitted surface, by Green's theorem on its own
 	 * nodes: V = closed-integral pi R^2 dz, with dz/dtheta pointwise from rho'.
 	 *

@@ -68,6 +68,10 @@ namespace
 		return 0.5*amplitude*kappa*std::exp( kappa*psi )/( std::exp( kappa ) - 1.0 );
 	}
 
+	/// The box's boundary block: zero on Gamma, and with @a limited psi_bnd
+	/// pinned at a limiter point inside it, ( 1.3, 0 ).
+	bool limitedBox = false;
+
 	std::string configuration( std::string const &prefix, std::string const &toroidal,
 	                           int levels, int order, std::string const &surfaces = "" )
 	{
@@ -79,6 +83,7 @@ namespace
 			"PPrimeFile = \"" + meq::test::sourcePath( "examples/q-driven-pprime.dat" ) + "\"\n"
 			+ toroidal + "\n"
 			"[boundary]\nType = \"zero\"\n\n"
+			+ std::string( limitedBox ? "[boundary.limiter]\nR = 1.3\nZ = 0.0\n\n" : "" ) +
 			"[initialguess]\nType = \"bump\"\nAmplitude = 0.3\nCentreR = 1.0\nCentreZ = 0.0\n"
 			"RadiusR = 0.4\nRadiusZ = 0.6\n\n"
 			"[solver]\nNewtonMaxIterations = 60\nNewtonRelativeTolerance = 1.0e-12\n"
@@ -124,13 +129,25 @@ namespace
 				std::ofstream provisional( directory + "/" + target );
 				provisional << "0.0 1.0 0.0\n1.0 1.0 0.0\n";
 			}
-			std::vector<double> const knots = meq::test::knotsOf(
-				directory, configuration( "consistency-" + tag, driven, levels, order ) );
+			/*
+			 * ON THE LIMITED BOX THE KNOTS FOLLOW THE PLASMA, which only the
+			 * loop's opening solve decides (Run::safetyFactorKnots()), so the
+			 * target is the reference's q on a dense family, 0.006 apart in
+			 * Psi_N, and the loop reads it at its knots by the table's Hermite
+			 * spline: an interpolation error of order 1e-8, under the g^2
+			 * errors measured here by four orders.
+			 */
+			std::vector<double> knots;
+			if ( !limitedBox )
+				knots = meq::test::knotsOf( directory, configuration( "consistency-" + tag, driven, levels, order ) );
+			std::string const family = limitedBox
+				? std::string( "FluxSurfaces = true\nFluxSurfaceCount = 160\nFluxInnerCut = 0.002\n"
+				               "FluxOuterCut = 0.95\n" )
+				: meq::test::surfacesAt( knots, 4 );
 			std::shared_ptr<meq::Dataset const> const surfaces = meq::test::forward(
 				directory, "consistency-reference-" + tag,
 				configuration( "consistency-reference-" + tag,
-				               "GGPrimeFile = \"consistency-ggprime.dat\"\n", 2, 3,
-				               meq::test::surfacesAt( knots, 4 ) ) );
+				               "GGPrimeFile = \"consistency-ggprime.dat\"\n", 2, 3, family ) );
 			meq::test::writeTarget( *surfaces, []( double psi ) { return std::sqrt( gSquared( psi ) ); },
 			                        directory + "/" + target );
 
@@ -160,6 +177,8 @@ namespace
 			};
 			meq::ToroidalFieldSpline spline( numbers( "g_squared_knots" ) );
 			spline.setValues( numbers( "g_squared" ) );
+			if ( limitedBox )
+				knots = numbers( "g_squared_knots" );
 			BOOST_TEST_REQUIRE( spline.size() == knots.size() );
 			for ( int k = 0; k <= 2000; ++k )
 			{
@@ -212,3 +231,24 @@ BOOST_AUTO_TEST_CASE( theDeliveredFieldConvergesAtCubicDegree )
 		"at k = 3 the delivered g^2 misses by " << coarse.gSquaredError << " then "
 		<< fine.gSquaredError << ", a factor of " << factor );
 }
+
+/*
+ * AND ON A FREE EDGE: the same diagonal with psi_bnd pinned at a limiter
+ * point inside the box, ( 1.3, 0 ), so psi_bnd is a border of the tangent and
+ * its label moves with it (M-QR-11). The reference the same, limited.
+ */
+BOOST_AUTO_TEST_CASE( theDeliveredFieldConvergesOnALimitedBox )
+{
+	limitedBox = true;
+	Fixture fixture;
+	std::printf( "\n  THE SAME ON THE LIMITED BOX, k = 2 (M-QR-15)\n" );
+	Delivered const coarse = fixture.deliver( 0, 2 );
+	Delivered const fine = fixture.deliver( 1, 2 );
+	limitedBox = false;
+	double const factor = coarse.gSquaredError/fine.gSquaredError;
+	std::printf( "    factor per halving of h, the knots following: %.2f\n", factor );
+	BOOST_TEST( factor > 6.0,
+		"on the limited box the delivered g^2 misses by " << coarse.gSquaredError << " then "
+		<< fine.gSquaredError << ", a factor of " << factor );
+}
+
