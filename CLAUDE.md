@@ -203,7 +203,12 @@ bordered inner Newton stalls on a sharp `gg′` near the axis that continuation
 reaches (→ **[M-QR-8](MEASUREMENTS.md#m-qr-8)**, `TODO`, *The bordered inner
 Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
-(→ **[M-312](MEASUREMENTS.md#m-312)**). Which of its other single cases fail
+(→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven round trips --
+`SafetyFactorSolver`, `QDrivenCurvedBoundary`, `QDrivenScalePin` and
+`DriverAcceptance`'s `theDriverSolvesForTheToroidalField` -- which reach
+`g²` to 2e-6 to 3e-5 against their 20 eps (→
+**[M-QR-10](MEASUREMENTS.md#m-qr-10)**, `TODO`, *The q-driven solve in single
+precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and

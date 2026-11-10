@@ -89,16 +89,19 @@ namespace meq
 				/**
 				 * The extraction's difference step, as a fraction of the
 				 * field: `s max|dpsi~| = step max|psi~|`, central unless
-				 * @ref central is cleared. CENTRAL, AT 1e-5 IN DOUBLE AND 1e-3
+				 * @ref central is cleared. CENTRAL, AT 1e-5 IN DOUBLE AND 1e-4
 				 * IN SINGLE. One-sided at 1e-9 the columns are closer to
 				 * re-solved differences (3.1e-8 against 1.2e-7) for m + 1
 				 * extractions in place of 2m, but on a target with a misfit
 				 * the error's projection through the near-null scale direction
 				 * left the removable residual stalled at 1e-9 to 3e-9, above
 				 * the tolerance, on QDrivenScalePin's base (M-QR-9). In single
-				 * a step under the format's epsilon adds nothing to the field.
+				 * a step under the format's epsilon adds nothing to the field:
+				 * at 1e-4 SafetyFactorSolver's round trip converges in 4
+				 * steps, at 1e-3 its line search finds no decrease and at
+				 * 1e-2 a perturbed family cannot be traced (M-QR-10).
 				 */
-				double step = std::numeric_limits<mfem::real_t>::epsilon() < 1.0e-10 ? 1.0e-5 : 1.0e-3;
+				double step = std::numeric_limits<mfem::real_t>::epsilon() < 1.0e-10 ? 1.0e-5 : 1.0e-4;
 				bool central = true;
 
 				/// The solve, which may throw; solver.solve() when empty.

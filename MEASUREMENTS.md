@@ -26006,3 +26006,39 @@ removable residual by step 0.63, 0.46, 4.4e-2, 5.4e-3, 5.4e-5, 7.7e-9, 1.3e-9,
 Jacobian's error, projected through a conditioning near 1e-5 and multiplied
 by the misfit, moves `J dx` by about that much. The default is central at
 1e-5 in double, 1e-3 in single, from the one interpolant per tangent.
+
+### M-QR-10
+
+**IN SINGLE THE q-DRIVEN LOOP CONVERGES, AND TO 2e-6 TO 3e-5 IN `g²`: ABOVE
+THE 20 eps THE PIN AND ROUND-TRIP TESTS STATE.** `builds/q-refining-fit-single`
+against `install-single` (`sm_75`), host, `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`; the device routes not exercised (the device audit's
+`b8dbc07` and `803a340` were not on main).
+
+The difference step: at 1e-3 of the field `SafetyFactorSolver`'s round trip
+found no decrease after its first step and its accepted point then failed to
+re-solve; at 1e-2 a perturbed family could not be traced; at **1e-4** it
+converges in 4 steps and 9 equilibria (removable 0.96, 5.0e-2, 8.9e-3,
+4.0e-4, 3.0e-5 against a floor near 1e-5). 1e-4 is the single default.
+
+| test | single | double |
+|---|---|---|
+| `SafetyFactorTests`, `ConfigTests` | green | green |
+| `SafetyFactorSolver` round trip, worst `g²` at the knots | **2.3e-6**, red against 1e-7 | 8.0e-15 |
+| tangent Jacobian against re-solved differences | 2.9e-2: the reference cannot resolve it (M-378), not asserted | 1.2e-7 |
+| `SafetyFactorScale` | the scale direction 0.488, 0.489; R0B0, flux, current lift `σ_min` to 3.8e-2/1.5e-1/1.1e-2 (n = 8), 3.6e-2/1.1e-1/1.4e-2 (n = 16) | as M-QR-6 |
+| `QDrivenScalePin` | **R0B0's re-solve 2.7e-5 apart in `g²`**, red against 20 eps = 2.4e-6; the flux pin's re-solve exits 2 | under 1e-6 |
+| `QDrivenCurvedBoundary`, worst `g²` | **6.0e-6**, red against 20 eps | 6.1e-8 |
+| `InnerSolveStall` | red, as in double | red |
+
+The family moves about 1e-5 between neighbouring states in single
+(M-371), `Reconstruct()`'s round-off in `ψ*` (M-379 to M-381), and the q rows
+read it directly: a 1e-5 misfit floor in `q`, which the `g²` errors above sit
+under or near.
+
+`QDrivenConsistency` in single is green: 1.334e-3 then 8.753e-5 at `k = 2`
+(15.3×), 1.116e-3 then 9.611e-5 at `k = 3` (11.6×), misfits 3.6e-6, 1.3e-4,
+1.3e-5, 3.7e-5. `DriverAcceptance`'s `theDriverSolvesForTheToroidalField`
+recovers the closed form to **1.07e-5**, red against 20 eps;
+`theQDrivenRunReportsTheSafetyFactorItReached` reads 6.1e-5 inside the knots'
+cut, green against the averaged-metric floor; the capped run exits 2.

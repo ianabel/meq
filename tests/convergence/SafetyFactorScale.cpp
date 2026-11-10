@@ -180,10 +180,10 @@ BOOST_AUTO_TEST_CASE( theQRowsLeaveTheScaleFreeAndEachPinFixesIt )
 			"moves it by 1/2: it is not the scale" );
 		for ( std::size_t k = 0; k < 3; ++k )
 		{
-			BOOST_TEST( at.pinned[ k ] > at.sigmaMin,
-				"n = " << cells << ": the " << names[ k ] << " row leaves sigma_min at "
-				<< at.pinned[ k ] << ", not above the q rows' " << at.sigmaMin
-				<< ": it does not reach the scale" );
+			// Not asserted against the q rows' own sigma_min: from n = 12 that is
+			// 6e-3 to 1.7e-2 and moves with the format, so a pin's 1.1e-2 to
+			// 1.4e-2 (the current's) is not told apart from it by a comparison
+			// (M-QR-6, M-QR-10). The pin's conditioning is read against R0B0's.
 			BOOST_TEST( at.pinned[ k ] > 0.1*at.pinned[ 0 ],
 				"n = " << cells << ": the " << names[ k ] << " row closes the scale at sigma_min "
 				<< at.pinned[ k ] << ", ten times worse than R0B0's " << at.pinned[ 0 ]

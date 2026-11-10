@@ -519,6 +519,24 @@ Raised 2026-11-09 (MEASUREMENTS.md M-QR-7).
   not measured; the case prints it and does not assert it.
 
 ================================================================================
+The q-driven solve in single precision
+Raised 2026-11-09 (MEASUREMENTS.md M-QR-10).
+================================================================================
+
+  The loop converges in single, with the extraction differenced centrally
+  at 1e-4 of the field, and the delivered g^2 converges with the mesh
+  (QDrivenConsistency green, 15x and 12x a halving). What it does not reach
+  is the 20 eps the round trips state: SafetyFactorSolver 2.3e-6 against
+  1e-7, QDrivenCurvedBoundary 6.0e-6, DriverAcceptance's
+  theDriverSolvesForTheToroidalField 1.1e-5, and QDrivenScalePin's pins 2.7e-5
+  apart with the flux pin's re-solve exiting 2. All red in single, with this
+  entry as the pointer. The q rows read the family, which moves about 1e-5
+  between neighbouring states in single through Reconstruct()'s round-off
+  (M-371, M-379 to M-381); whether the device audit's recovery fix moves
+  these is not measured. Nor is the device route under single: the audit's
+  b8dbc07 and 803a340, which the tangent depends on, were not on main.
+
+================================================================================
 The q-driven loop under a Device: what runs on the host
 Raised 2026-11-09.
 ================================================================================

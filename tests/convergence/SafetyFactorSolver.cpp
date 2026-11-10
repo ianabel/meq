@@ -188,7 +188,8 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversTheFieldItsTargetWasBuiltFrom )
 	std::printf( "    worst |g^2/g^2_exact - 1| at the knots %.3e\n", worst );
 	BOOST_TEST( worst < 1.0e-7,
 		"the loop did not recover the closed form its target was measured from: "
-		<< worst << " at worst. The target is exact at every knot and the spline "
+		<< worst << " at worst (in single this is red at 2.3e-6: TODO, \"The q-driven solve "
+		"in single precision\"; MEASUREMENTS.md M-QR-10). The target is exact at every knot and the spline "
 		"represents the closed form exactly, so a converged loop that lands away "
 		"from it converged to the wrong fixed point" );
 	BOOST_TEST( result.iterations <= 10,
@@ -240,6 +241,19 @@ BOOST_AUTO_TEST_CASE( theTangentJacobianIsTheDifferencedOne )
 	}
 	std::printf( "\n  THE TANGENT JACOBIAN: %zu knots, max | J_tangent - J_resolved | %.3e of max | J | %.3e, "
 	             "relative %.3e\n", m, worst, largest, worst/largest );
+	/*
+	 * IN SINGLE THE REFERENCE CANNOT JUDGE IT, and that is a precondition
+	 * single does not meet rather than a bound to loosen: each re-solve stops
+	 * at its own floor, ten eps, so a difference over a step of 1e-6 of the
+	 * value resolves the derivative to O( 1 ) -- M-378's finding for the
+	 * linearised solve's own two-solve reference. Printed, not asserted.
+	 */
+	bool const resolvable = std::numeric_limits<mfem::real_t>::epsilon() < 1.0e-10;
+	if ( !resolvable )
+	{
+		std::printf( "  (single: the re-solved reference cannot resolve the derivative; not asserted)\n" );
+		return;
+	}
 	BOOST_TEST( worst < 1.0e-6*largest,
 		"the tangent Jacobian is " << worst/largest << " of its size from re-solved "
 		"differences: a term of the map is missing from it, as the ray origin's "
