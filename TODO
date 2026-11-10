@@ -538,20 +538,24 @@ Raised 2026-11-09 (MEASUREMENTS.md M-QR-10).
 
 ================================================================================
 The q-driven loop under a Device: what runs on the host
-Raised 2026-11-09.
+Raised 2026-11-09 (MEASUREMENTS.md M-QR-12).
 ================================================================================
 
-  The loop's new field-sized work is on device routes or composed of them:
-  the tangent fields are mfem::Vector operations, the pin rows the bordered
-  current solve's own row and corner and assembleSourceDerivative(), and
-  their contractions meq::doubleDotKernel(), accumulated in double. What
-  stays on the host, and why: reconstructFields() is DarcyForm::Reconstruct(),
-  upstream's and host-only (CLAUDE.md, the device path); the flux-surface
-  extraction (out of this branch's scope); the axis root's derivative, one
-  point's 2 x 2; and the Gauss-Newton's dense QR and SVD, ( m + 1 ) x m with
-  m at most 128. The device route of doubleDotKernel is compiled in the CUDA
-  build and run by SafetyFactorSolver there; its agreement with the host's
-  is not separately asserted.
+  The loop's field-sized work is on device routes or composed of them: the
+  tangent fields are mfem::Vector operations, psi~ and q~ the solver's kept
+  interpolant (meq::ContinuousInterpolant, on the device under one), the pin
+  rows the bordered current solve's own row and corner and
+  assembleSourceDerivative(), their contractions meq::doubleDotKernel(),
+  accumulated in double. What stays on the host, and why:
+  reconstructFields() is DarcyForm::Reconstruct(), upstream's and host-only
+  (CLAUDE.md, the device path); the flux-surface tracer (out of this
+  branch's scope), which is now most of the loop's time; the axis root's
+  derivative, one point's 2 x 2; the retained linearisation's border rows
+  and Schur complement, a few element supports and an ( N + 4 )^2 dense
+  factorisation; and the Gauss-Newton's dense QR and SVD, ( m + 1 ) x m with
+  m at most 128. Under `debug` on the host fallbacks the loop reproduces the
+  host to the bit on the serial routes and costs 45x to 66x its wall, so
+  DeviceParity runs it at level 0. The cuda arm is CUDA_BUILD_PENDING.
 
 ================================================================================
 The q-driven solve's scale pins: what is not measured

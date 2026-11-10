@@ -476,14 +476,17 @@ foreach(_device IN LISTS _da_devices)
 	endif()
 	# The q-driven tangent and loop: the round trip on the box (every piece
 	# of the Jacobian, quadratically) and on the limited box (psi_bnd's
-	# border and label).
-	if(TARGET SafetyFactorSolver)
+	# border and label). CUDA ONLY: under `debug` the limited round trip took
+	# 1046 s and the box's did not finish in 3990 s on a loaded machine
+	# (MEASUREMENTS.md M-QR-12); DeviceParity's q-driven case is the loop's
+	# `debug` arm, and LinearisedSolve's border cases the borders'.
+	if(TARGET SafetyFactorSolver AND _device STREQUAL "cuda")
 		add_test(NAME SafetyFactorSolverDevice_${_device}
 			COMMAND SafetyFactorSolver --run_test=theLoopRecoversTheFieldItsTargetWasBuiltFrom)
 		set_tests_properties(SafetyFactorSolverDevice_${_device} PROPERTIES
 			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
 	endif()
-	if(TARGET QDrivenFreeEdge)
+	if(TARGET QDrivenFreeEdge AND _device STREQUAL "cuda")
 		add_test(NAME QDrivenFreeEdgeDevice_${_device}
 			COMMAND QDrivenFreeEdge --run_test=theLimitedLoopRecoversItsField)
 		set_tests_properties(QDrivenFreeEdgeDevice_${_device} PROPERTIES

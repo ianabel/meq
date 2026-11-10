@@ -26351,7 +26351,17 @@ ToroidalFlux pin of DeviceParity's case (2.4911634 Wb), `RefinementLevels = 0`,
 Both converge in 6 Gauss-Newton steps, 7 equilibria, 31 inner iterations,
 misfit 4.891e-4 at the knots. Under `debug` the loop is 45x to 66x the host's,
 extraction 609 s against 9.9 s; at level 1 it did not finish in 50 minutes
-against 70 s on the host, so DeviceParity's q-driven case runs on level 0.
+against 70 s on the host, so DeviceParity's q-driven case runs on level 0
+(DeviceParity 2308 s in the suite). The tests' own round trips under `debug`
+on the serial routes: `QDrivenFreeEdge`'s limited loop 1046 s, green;
+`SafetyFactorSolver`'s box loop not finished in 3990 s; both are registered
+for `cuda` only.
+
+**The double suite** after both merges (`ctest -j4`, load 25 to 32 from
+other agents): 156 of 160 green; red are `PlasmaEdgeConvergence`,
+`AnisotropicMirror` and `InnerSolveStall` (each deliberate, CLAUDE.md) and the
+`SafetyFactorSolverDevice_debug` arm, stopped at 3990 s and since made
+cuda-only. 4920 s wall.
 
 **The kept interpolant.** `qOverG()` and the tangent's fields through
 `solver.continuousInterpolant().apply()` in place of the free
