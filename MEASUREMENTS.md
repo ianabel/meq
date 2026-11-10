@@ -26756,3 +26756,36 @@ threshold on round-off -- main's KINSOL loop, 3 or 4 iterations -- is that
 variation crossing a stopping test; the Gauss-Newton here stops on a floor
 two orders below its last step (1.1e-10 against 1e-9).
 
+### M-QR-14
+
+**IN SINGLE, ON TOP OF THE LOCAL REFINEMENT, THE q-DRIVEN ROUND TRIPS STAY
+ABOVE 20 eps, THE CURVED BOUNDARY AND THE FREE EDGE NO LONGER CLOSE, AND THE
+CARD ARM IS NOT REPEATABLE: ONE RUN IN THREE STALLS.** Branch `q-refining-fit`
+after merging `cbf3fcd`, `builds/q-refining-fit-single` against
+`install-single` (MFEM `56796771ac`, local refinement on), `sm_75`, host
+unless named, `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2`, a loaded machine.
+
+| | single, this branch on `cbf3fcd` | M-QR-10 (before) |
+|---|---|---|
+| `SafetyFactorSolver` round trip, worst `g²` | 1.6e-6, red against 1e-7 | 2.3e-6 |
+| its tangent against re-solved differences | 1.1e-2, not asserted (M-378) | 2.9e-2 |
+| `QDrivenScalePin`, R0B0 / ToroidalFlux / current re-solves | `g²` 4.0e-6, 6.5e-7, 3.6e-5 apart; red | 2.7e-5 |
+| `DriverAcceptance` `theDriverSolvesForTheToroidalField` | 1.30e-6, **green** against 20 eps | 1.07e-5 |
+| `QDrivenCurvedBoundary` | **exits 2**: the Jacobian cannot be formed, a perturbed family failing at `Ψ_N = 0.082` ("no crossing ... on the ray"); 28 of 33 equilibria refused | 6.0e-6 |
+| `QDrivenFreeEdge` round trips | **both fail**: limited 19 of 20 trials refused (inner solve does not converge), diverted 30 of 34 (the X-point leaves the mesh) | (new) |
+
+**The card arm, the coordinator's (a).** DeviceParity's q-driven case
+(level 0, ToroidalFlux) under `--device cuda`, back to back: on cuDSS, runs
+1, 2, 4, 5 converge in 5 Gauss-Newton iterations and 6 equilibria (the host's
+count, its removable residual 3.8e-6), runs 3 and 6 stall -- 6 iterations and
+56 equilibria at removable 1.8e-2, and 5 and 46 at 1.4e-1 -- with "no
+sufficient decrease". On PARDISO under `cuda`: runs 1 and 2 equal to the bit
+in all 78 stages, run 3 different from the first solve's first
+`border.column` on, and stalling (7 iterations, 53 equilibria, 3.8e-2), its
+removable residual 0.80 after the first step where the others read 0.47. In
+double the same case repeats its count on cuDSS and is bit-repeatable on
+PARDISO (M-QR-13). So in single something before the first trace solve's
+output is not repeatable on the card even on PARDISO, and the loop's first
+step is sensitive enough to it to change course; neither the stage nor the
+step's sensitivity is identified.
+

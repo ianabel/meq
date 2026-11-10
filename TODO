@@ -520,21 +520,23 @@ Raised 2026-11-09 (MEASUREMENTS.md M-QR-7).
 
 ================================================================================
 The q-driven solve in single precision
-Raised 2026-11-09 (MEASUREMENTS.md M-QR-10).
+Raised 2026-11-09 (MEASUREMENTS.md M-QR-10, M-QR-14).
 ================================================================================
 
-  The loop converges in single, with the extraction differenced centrally
-  at 1e-4 of the field, and the delivered g^2 converges with the mesh
-  (QDrivenConsistency green, 15x and 12x a halving). What it does not reach
-  is the 20 eps the round trips state: SafetyFactorSolver 2.3e-6 against
-  1e-7, QDrivenCurvedBoundary 6.0e-6, DriverAcceptance's
-  theDriverSolvesForTheToroidalField 1.1e-5, and QDrivenScalePin's pins 2.7e-5
-  apart with the flux pin's re-solve exiting 2. All red in single, with this
-  entry as the pointer. The q rows read the family, which moves about 1e-5
-  between neighbouring states in single through Reconstruct()'s round-off
-  (M-371, M-379 to M-381); whether the device audit's recovery fix moves
-  these is not measured. Nor is the device route under single: the audit's
-  b8dbc07 and 803a340, which the tangent depends on, were not on main.
+  Re-measured on the local refinement (M-QR-14). The round trips stay above
+  the 20 eps they state: SafetyFactorSolver 1.6e-6 against 1e-7,
+  QDrivenScalePin's re-solves 4.0e-6 and 3.6e-5 apart in g^2 -- red, this
+  entry the pointer; DriverAcceptance's theDriverSolvesForTheToroidalField is
+  green at 1.3e-6. Worse than before: QDrivenCurvedBoundary exits 2 -- a
+  perturbed family along a tangent, differenced at 1e-4 of the field, cannot
+  trace the surface at Psi_N = 0.082 -- and QDrivenFreeEdge's round trips
+  fail with most trial solves refused. And the card arm is not repeatable in
+  single: DeviceParity's q-driven case stalls in 2 of 6 cuda runs on cuDSS
+  and 1 of 3 on PARDISO, whose stage checksums part at the first solve's
+  first border.column. To find: the first non-repeatable stage before it
+  (MEQ_STAGE_CHECKSUM on a run pair that parts), and why one ulp-scale
+  difference in the first state turns the first Gauss-Newton step from 0.47
+  to 0.80 -- the Jacobian's conditioning is 1e-4 on this case.
 
 ================================================================================
 The q-driven loop under a Device: what runs on the host

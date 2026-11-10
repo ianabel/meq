@@ -203,19 +203,21 @@ bordered inner Newton stalls on a sharp `gg′` near the axis that continuation
 reaches (→ **[M-QR-8](MEASUREMENTS.md#m-qr-8)**, `TODO`, *The bordered inner
 Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
-(→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven round trips --
-`SafetyFactorSolver`, `QDrivenCurvedBoundary`, `QDrivenScalePin` and
-`DriverAcceptance`'s `theDriverSolvesForTheToroidalField` -- which reach
-`g²` to 2e-6 to 3e-5 against their 20 eps (→
-**[M-QR-10](MEASUREMENTS.md#m-qr-10)**, `TODO`, *The q-driven solve in single
+(→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven suites --
+`SafetyFactorSolver` and `QDrivenScalePin`, whose round trips reach `g²` to
+2e-6 to 4e-5 against their 20 eps, and `QDrivenCurvedBoundary` and
+`QDrivenFreeEdge`, whose loops do not close in single (→
+**[M-QR-14](MEASUREMENTS.md#m-qr-14)**, `TODO`, *The q-driven solve in single
 precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
 (`TODO`, the single-precision round). `DeviceParity`'s `q-driven` card arm
-counts 3 or 4 KINSOL iterations by the take, the answer the host's: the third
-iterate against a measured floor that cuDSS moves between runs. A single
+is red in single by the take: about one run in three stalls, on cuDSS and on
+PARDISO alike, from a first solve that is not repeatable on the card
+(→ **[M-QR-14](MEASUREMENTS.md#m-qr-14)**); in double it repeats its outer
+count, cuDSS varying the bits run to run (→ **[M-QR-13](MEASUREMENTS.md#m-qr-13)**). A single
 build reads `FluxSurfaceConvergence`'s
 `thePointErrorDoesNotAccumulateOverManyCircuits` red: its flatness comparison
 is between two closure errors of 1–8ε of the radius, red with the local
