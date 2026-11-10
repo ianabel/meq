@@ -427,6 +427,42 @@ namespace meq
 			std::vector<Knot> knotData;
 	};
 
+	/**
+	 * A SplineProfile CONTINUED BY ITS END PIECES: past either end knot, the
+	 * end interval's own Hermite cubic carried on, written as its Taylor
+	 * polynomial about the end knot (so a point far out reads no cancelling
+	 * Hermite basis), and no table reach reported -- there is no taper, so
+	 * nothing past an end is a choice of MEQ's.
+	 *
+	 * For a function that IS a cubic past its end nodes, where the table is
+	 * then exact everywhere: ToroidalFieldSpline's gg', whose end pieces a
+	 * not-a-knot g^2 extrapolates and an unconfined source reads far outside
+	 * a limiter (M-409). It is a POD profile -- meq::ProfileKind::EndPieceSpline,
+	 * the same expression in SourceView's evaluateProfile() -- so a source
+	 * holding it keeps the device routes.
+	 */
+	class EndPieceSplineProfile : public SplineProfile
+	{
+		public:
+			/// As SplineProfile's: at least two knots, strictly increasing.
+			explicit EndPieceSplineProfile( std::vector<Knot> data );
+
+			double operator()( double psi ) const override;
+			double prime( double psi ) const override;
+			double doublePrime( double psi ) const override;
+
+			/// Nothing: the end pieces are the function, not a continuation.
+			void tableReach( double low, double high, TableReach &out ) const override;
+	};
+
+	/**
+	 * The second and third derivatives of the Hermite cubic on knots @a a and
+	 * @a b at @a b when @a atRight, else at @a a: the end piece's Taylor
+	 * coefficients past that end. meq::SourceView's endPieceCurvature() is
+	 * this, to the operation.
+	 */
+	void endPieceCurvature( Knot const &a, Knot const &b, bool atRight, double &second, double &third );
+
 	/// Write a profile in the format SplineProfile::fromStream() reads.
 	std::ostream & operator<<( std::ostream & os, SplineProfile const & profile );
 

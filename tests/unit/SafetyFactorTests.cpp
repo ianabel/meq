@@ -360,6 +360,18 @@ BOOST_AUTO_TEST_CASE( the_spline_is_a_not_a_knot_cubic_in_the_sources_psi )
 		BOOST_TEST( std::abs( ggPrime->prime( psi ) - ( ( *ggPrime )( psi + h ) - ( *ggPrime )( psi - h ) )/( 2*h ) ) < 1e-6 );
 	}
 
+	// PAST THE END NODES TOO, where the not-a-knot spline extrapolates by its
+	// end pieces and an unconfined source reads gg' (M-409): a table's
+	// flattening continuation there is a different problem.
+	// Against the closed form, to 1e-9: both the spline's formula and the
+	// end piece's Taylor coefficients cancel a little far out (2e-11 and
+	// 1e-10 at Psi = 2).
+	for ( double psi : { -1.0, -0.3, 1.2, 2.0 } )
+		BOOST_TEST( std::abs( ( *ggPrime )( psi ) - 0.5*slope( psi ) ) < 1e-9,
+			"gg' parts from the spline's own end piece at " << psi << ": "
+			<< ( *ggPrime )( psi ) << " against " << 0.5*slope( psi )
+			<< ", the spline's formula " << 0.5*spline( psi, 1 ) );
+
 	double sum = 0.0;
 	for ( std::size_t j = 0; j < spline.size(); ++j )
 		sum += values[ j ]*spline.cardinal( j, 0.4 );

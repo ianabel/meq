@@ -466,6 +466,45 @@ BOOST_AUTO_TEST_CASE( theUniformFastPathIsTakenAndAgreesWithTheSearch )
 	}
 }
 
+BOOST_AUTO_TEST_CASE( theEndPieceSplineIsCarriedOnPastBothEnds )
+{
+	// meq::EndPieceSplineProfile -- ToroidalFieldSpline's gg' -- continues by
+	// its end pieces where SplineProfile tapers flat (M-360), and an
+	// unconfined source reads it there (M-409). On dyadic knots of a
+	// quadratic the Hermite end pieces ARE the quadratic, exactly in float as
+	// well, so the host class and its view are held to the closed form and to
+	// each other on both sides, and a plain SplineProfile is not.
+	auto f = []( double x ) { return 1.0 + 2.0*x - x*x; };
+	auto fPrime = []( double x ) { return 2.0 - 2.0*x; };
+	std::vector<meq::Knot> knots;
+	for ( double x : { 0.0, 0.25, 0.5, 0.75, 1.0 } )
+		knots.push_back( meq::Knot{ x, f( x ), fPrime( x ) } );
+	meq::EndPieceSplineProfile const carried( knots );
+	meq::SplineProfile const tapered( knots );
+
+	meq::ProfileView view{};
+	std::vector<meq::KnotView> table;
+	BOOST_TEST_REQUIRE( meq::makeProfileView( carried, view, table ) );
+	BOOST_TEST( view.kind == static_cast<int>( meq::ProfileKind::EndPieceSpline ) );
+
+	for ( double const x : { -2.0, -1.0, -0.5, -0.125, 0.0, 0.375, 1.0, 1.25, 3.0 } )
+	{
+		BOOST_TEST( std::abs( carried( x ) - f( x ) ) <= 1e-12*( 1.0 + std::abs( f( x ) ) ),
+		            "the end piece is not carried on at " << x );
+		BOOST_TEST( std::abs( carried.prime( x ) - fPrime( x ) ) <= 1e-12*( 1.0 + std::abs( fPrime( x ) ) ) );
+		BOOST_TEST( std::abs( carried.doublePrime( x ) + 2.0 ) <= 1e-11 );
+		BOOST_TEST( agrees( meq::evaluateProfile( view, table.data(), x ), carried( x ) ),
+		            "the view and the class part at " << x );
+		BOOST_TEST( agrees( meq::evaluateProfilePrime( view, table.data(), x ), carried.prime( x ) ) );
+	}
+	BOOST_TEST( std::abs( tapered( -1.0 ) - f( -1.0 ) ) > 0.5,
+	            "a plain table tapers flat past its end, and that is the difference" );
+
+	meq::TableReach reach;
+	carried.tableReach( -5.0, 5.0, reach );
+	BOOST_TEST( reach.relative == 0.0, "the end pieces are the function: nothing to warn of" );
+}
+
 BOOST_AUTO_TEST_CASE( aSourceWithNoPodFormIsRefusedRatherThanApproximated )
 {
 	// THE REFUSAL IS THE SAFETY PROPERTY, so it is asserted rather than

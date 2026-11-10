@@ -645,6 +645,27 @@ Raised 2026-11-09.
   * Not shipped as a test: the forward run alone is minutes.
 
 ================================================================================
+QDrivenConsistency's limited box converges or stalls on round-off
+Raised 2026-11-10 (MEASUREMENTS.md M-409).
+================================================================================
+
+  theDeliveredFieldConvergesOnALimitedBox, level 1 (12 knots, k = 2), in
+  double: main's own gg' scaled by 1 + 3e-14 exits 2 (15 Gauss-Newton
+  iterations, 10 trials refused, the removable residual wandering between
+  3e-8 and 3e-7 against 1e-9); scaled by 1, 1 - 1e-14 or 1 - 3e-14 it
+  converges in 13. Level 0's trajectory moves under 1e-14 too (46 to 92
+  inner iterations, 3 to 5 refused) and converges every time.
+  ToroidalFieldSpline's gg' as an EndPieceSplineProfile (M-409), equal to
+  the spline's to 1e-14 inside [ 0, 1 ], lands on the failing side: exits 2
+  at a removable 1.3e-6, the last refusal "the bordered Newton has stopped
+  moving: 8 steps in a row took less than 1/64 of the Newton step". So the
+  case is red on the branch that carries it. It is the moving support's
+  crawl (*The q-driven loop on a confined limited machine*): which trials an
+  inner solve refuses decides the line search, and an ulp decides which
+  refuse. Not a tolerance to loosen -- the loop's outcome should not turn on
+  an ulp.
+
+================================================================================
 Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
@@ -2135,15 +2156,12 @@ Raised 2026-11-09 (MEASUREMENTS.md M-386; DEVICE-PLAN.md section 9).
   over the points and two copies across the bus per call. What takes it:
 
   * addSourceColumns() with a caller's derivative, and so
-    assembleSourceDerivative(): the q loop's gg' cardinal-direction
-    derivative, one per knot a Jacobian. Its device form is step 3's
-    assembleGGPrimeDerivative() (branch device-linearised, held until
-    q-refining-fit merges). The flux pin's four integrands and the delivered
-    flux are on meq::PsiIntegrand (assemblePsiIntegrandColumn()), G and each
-    cardinal as Hermite SplineProfiles of the spline.
-  * The retained linearisation's S( x ) and S'( x ) t, the source's own F and
-    dF/dpsi passed as lambdas: their device form is the plasma loops'
-    SourceValue and SourceSlope (step 3, the same branch).
+    assembleSourceDerivative(), for an integrand not carried as data. The
+    tree's own callers no longer pass one under a Device: the q loop's gg'
+    direction takes assembleGGPrimeDerivative(), its flux pin
+    assemblePsiIntegrandColumn(), and the retained linearisation's source
+    terms the plasma loops' SourceValue and SourceSlope (M-409). A test or
+    a front end's lambda still does.
   * integrateOverDomain() with a caller's integrand. The delivered flux has
     left it for integratePsiIntegrand(); nothing else in the tree calls it.
   * sourceTableReach() for a source with no POD form.

@@ -371,70 +371,71 @@ int main( int argc, char **argv )
 		// ---- the linearised solve ----
 		mfem::Vector const state( solver.state() );
 		mfem::Vector residual;
-		Timing const hostResidual = timeIt( "evaluateResidual", repeats, [ & ]
-		{
-			solver.evaluateResidual( state, residual );
-			static_cast<void>( residual.HostRead() );
-		} );
-		row( "evaluateResidual (plain NPC)", hostResidual, residualPerCall );
-
-		mfem::Vector column( state.Size() );
-		Timing const sourceLoop = timeIt( "addSourceColumns", repeats, [ & ]
-		{
-			column.HostWrite();
-			for ( int i = 0; i < column.Size(); ++i )
-				column( i ) = 0.0;
-			std::vector<mfem::Vector *> out { &column };
-			solver.addSourceColumns( state, 1,
-				[ &source ]( double radius, double z, double psi, double *g )
-				{
-					g[ 0 ] = source.f( radius, z, psi );
-					return true;
-				}, out );
-		} );
-		row( "addSourceColumns (one pass)", sourceLoop, residualPerCall );
-
-		Timing const lin = timeIt( "linearise", repeats, [ & ] { solver.linearise( state ); } );
-		row( "linearise", lin, residualPerCall );
-
 		mfem::Vector dRdp, dx, applied;
 		std::vector<double> ds;
-		Timing const derivative = timeIt( "assembleSourceDerivative", repeats, [ & ]
+		// The retained linearisation on each route (M-409): the host route is
+		// MFEM's plain operator and the source terms' host loops, the device
+		// route the device integrand's operator and the plasma loops' kernels.
+		for ( bool device : { false, true } )
 		{
-			solver.assembleSourceDerivative( state,
-				[ &source ]( double radius, double z, double psi )
-				{
-					return source.dFdPsi( radius, z, psi )*0.01 + 1.0/radius;
-				}, dRdp );
-		} );
-		row( "assembleSourceDerivative", derivative, residualPerCall );
-
-		Timing const backSolve = timeIt( "solveLinearised0", repeats, [ & ]
-		{
-			solver.solveLinearised( dRdp, { 0.0 }, dx, ds, 0 );
-			static_cast<void>( dx.HostRead() );
-		} );
-		row( "back-solve (passes = 0)", backSolve, residualPerCall );
-
-		Timing const apply = timeIt( "applyRetainedJacobian", repeats, [ & ]
-		{
-			solver.applyRetainedJacobian( dx, applied );
-			static_cast<void>( applied.HostRead() );
-		} );
-		row( "applyRetainedJacobian", apply, residualPerCall );
-
-		for ( int passes : { 1, 2, 4 } )
-		{
-			std::string const name = "tangent passes=" + std::to_string( passes );
-			Timing const tangent = timeIt( name.c_str(), repeats, [ & ]
+			if ( device && !onDevice )
+				continue;
+			solver.setLinearisedDeviceRoute( device );
+			std::string const tag = device ? ", device route" : ", host route";
+			auto label = [ & ]( char const *name ) { return std::string( name ) + tag; };
+			Timing const residualTiming = timeIt( "evaluateResidual", repeats, [ & ]
 			{
-				solver.linearisedTangent( dRdp, {}, nullptr, dx, ds, passes );
+				solver.evaluateResidual( state, residual );
+				static_cast<void>( residual.HostRead() );
+			} );
+			row( label( "Newton residual" ).c_str(), residualTiming, residualPerCall );
+			Timing const lin = timeIt( "linearise", repeats, [ & ] { solver.linearise( state ); } );
+			row( label( "linearise" ).c_str(), lin, residualPerCall );
+			Timing const derivative = timeIt( "assembleSourceDerivative", repeats, [ & ]
+			{
+				solver.assembleSourceDerivative( state,
+					[ &source ]( double radius, double z, double psi )
+					{
+						return source.dFdPsi( radius, z, psi )*0.01 + 1.0/radius;
+					}, dRdp );
+			} );
+			row( "assembleSourceDerivative (a lambda)", derivative, residualPerCall );
+			mfem::Vector hatColumn;
+			meq::SplineProfile const hat( std::vector<meq::Knot>{ { 0.0, 0.0, 0.0 }, { 0.5, 1.0, 0.0 },
+			                                                       { 1.0, 0.0, 0.0 } } );
+			Timing const gg = timeIt( "assembleGGPrimeDerivative", repeats, [ & ]
+			{
+				solver.assembleGGPrimeDerivative( state, hat, hatColumn );
+			} );
+			row( label( "assembleGGPrimeDerivative" ).c_str(), gg, residualPerCall );
+			Timing const backSolve = timeIt( "solveLinearised0", repeats, [ & ]
+			{
+				solver.solveLinearised( dRdp, { 0.0 }, dx, ds, 0 );
 				static_cast<void>( dx.HostRead() );
 			} );
-			row( name.c_str(), tangent, residualPerCall );
-			dx.HostRead();
-			std::printf( "      dpsi_ax %.9e, max|dx| %.9e\n", ds.empty() ? 0.0 : ds[ 0 ], dx.Normlinf() );
+			row( label( "back-solve (passes = 0)" ).c_str(), backSolve, residualPerCall );
+			Timing const apply = timeIt( "applyRetainedJacobian", repeats, [ & ]
+			{
+				solver.applyRetainedJacobian( dx, applied );
+				static_cast<void>( applied.HostRead() );
+			} );
+			row( label( "applyRetainedJacobian" ).c_str(), apply, residualPerCall );
+			for ( int passes : { 1, 4 } )
+			{
+				std::string const name = "tangent passes=" + std::to_string( passes ) + tag;
+				Timing const tangent = timeIt( name.c_str(), repeats, [ & ]
+				{
+					solver.linearisedTangent( dRdp, {}, nullptr, dx, ds, passes );
+					static_cast<void>( dx.HostRead() );
+				} );
+				row( name.c_str(), tangent, residualPerCall );
+				dx.HostRead();
+				std::printf( "      dpsi_ax %.9e, max|dx| %.9e, %d passes kept, %ld device steps so far\n",
+				             ds.empty() ? 0.0 : ds[ 0 ], dx.Normlinf(), solver.linearisedPassesTaken(),
+				             solver.linearisedDeviceTaken() );
+			}
 		}
+		solver.setLinearisedDeviceRoute( true );
 
 		Timing const inverse = timeIt( "linearisedInverseNorm", 1, [ & ]
 		{

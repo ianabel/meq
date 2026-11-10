@@ -2417,6 +2417,37 @@ namespace meq
 			                               mfem::Vector &out );
 
 			/**
+			 * dR/du FOR gg' MOVED ALONG @a direction, gg' + u direction, of a
+			 * NormalisedMHDSource: assembleSourceDerivative() with
+			 * NormalisedMHDSource::ggPrimeDerivative(), `scale direction( Psi )/
+			 * span` inside the plasma and zero outside. On the device under one,
+			 * by the source's own kernel with p' zero and gg' the direction,
+			 * where the source and @a direction have POD forms (a Hermite
+			 * SplineProfile: ToroidalFieldSpline's cardinal directions are);
+			 * the host loop otherwise, through the same function. M-409.
+			 * @throws std::logic_error for another source.
+			 */
+			void assembleGGPrimeDerivative( mfem::Vector const &state, Profile const &direction,
+			                                mfem::Vector &out );
+
+			/**
+			 * WHETHER THE RETAINED LINEARISATION MAY TAKE ITS DEVICE ROUTE under
+			 * a Device that allows one: the device integrand's operator, the
+			 * source terms and assembleGGPrimeDerivative() as the plasma loops'
+			 * kernels, and the essential rows zeroed on the card. On by default;
+			 * off is the host route, kept for the tests that compare the two
+			 * (M-409).
+			 */
+			void setLinearisedDeviceRoute( bool allowed );
+
+			/// Source terms and essential rows the retained linearisation took
+			/// on the device since construction.
+			long linearisedDeviceTaken() const;
+
+			/// The refinement passes the last solveLinearised() kept.
+			int linearisedPassesTaken() const;
+
+			/**
 			 * THE DISCRETE TANGENT, delta x = -J^{-1} ( dR/dp ), AT @a state,
 			 * WITHOUT A BORDER: J the NPC Jacobian of the field residual at
 			 * @a state -- the Newton matrix the solve's next step would use --
@@ -7538,6 +7569,25 @@ namespace meq
 			/// differenced and the source's dF/dpsi along @a t -- and not
 			/// through the factors: what refinement corrects against.
 			void applyRetainedJacobian( mfem::Vector const &t, mfem::Vector &out ) const;
+
+			/// Newton's operator as a step builds it: the device integrand's
+			/// where makeDeviceNPCOperator() takes the source, MFEM's
+			/// otherwise. @a flags must outlive it.
+			std::unique_ptr<mfem::DarcyNPCOperator> newtonOperator( std::vector<int> &flags );
+
+			/// @a out = the source term S( @a state ) (SourceValue) or
+			/// S'( @a state ) @a along (SourceSlope), state-sized: the plasma
+			/// loops' kernel where the retained route allows, addSourceColumns()
+			/// otherwise.
+			void sourceTerm( PlasmaQuantity quantity, mfem::Vector const &state,
+			                 mfem::Vector const *along, mfem::Vector &out ) const;
+
+			/// The held essential trace rows of @a v set to zero, where @a v is.
+			void zeroEssentialRows( mfem::Vector &v ) const;
+
+			bool linearisedDeviceAllowed = true;
+			mutable long linearisedDeviceCount = 0;
+			int linearisedPassesValue = 0;
 
 			/**
 			 * UNDER setTauFollowsReaction(), THE FACE TERM's share of the

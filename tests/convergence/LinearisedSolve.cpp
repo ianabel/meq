@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -37,6 +38,7 @@
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
 #include "convergence/ConvergenceHarness.hpp"
+#include "unit/DeviceKernels.hpp"
 
 /*
  * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE RUNS
@@ -824,4 +826,122 @@ BOOST_AUTO_TEST_CASE( theTangentErrorByRefinementPass, * boost::unit_test::disab
 			std::printf( "\n" );
 			std::fflush( stdout );
 		}
+}
+
+/*
+ * THE RETAINED LINEARISATION'S DEVICE ROUTE IS ITS HOST ROUTE (M-409): a
+ * NormalisedMHDSource, whose POD form lets the retained operator take the
+ * device integrand and the source columns the plasma loops' kernels, solved
+ * on 8 cells at k = 2. The same tangent -- along a gg' direction, the q
+ * loop's derivative -- with the route on and off, and that direction's dR/du
+ * both ways. Under `debug` in double the kernels are the host loops on the
+ * host's arithmetic and the columns agree to the bit; in single, and on the
+ * card, to the format's round-off; the tangents to the round-off of two
+ * operators that sum their elements in different orders.
+ * Needs a Device (MEQ_TEST_DEVICE) and device kernels, and says so where
+ * either is missing.
+ */
+BOOST_AUTO_TEST_CASE( theDeviceRouteIsTheHostRoute, *meq::tests::requiresDeviceKernels() )
+{
+	if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+	{
+		std::printf( "\n  theDeviceRouteIsTheHostRoute: SKIPPED -- no Device is configured; "
+		             "MEQ_TEST_DEVICE=debug or cuda runs it\n" );
+		return;
+	}
+	meq::tests::Rectangle const box = standardBox();
+	mfem::Mesh mesh = meq::tests::makeMesh( box, 8 );
+	double const g0 = 2.20, g1 = 0.55;
+	std::vector<meq::Knot> knots;
+	for ( double x : { 0.0, 1.0 } )
+		knots.push_back( meq::Knot{ x, g1*( g0 + g1*x ), g1*g1 } );
+	meq::NormalisedMHDSource source( std::make_shared<meq::ConstantProfile const>( 0.45 ),
+	                                 std::make_shared<meq::SplineProfile const>( knots ), 0.30, 1.0 );
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setAssemblyMode( meq::GradShafranovSolver::AssemblyMode::Batched );
+	solver.setLocalFactorMode( meq::GradShafranovSolver::LocalFactorMode::Batched );
+	mfem::FunctionCoefficient guess( [ box ]( mfem::Vector const &x )
+	{
+		return 0.30*std::sin( M_PI*( x( 0 ) - box.minRadius )/box.width() )
+		       *std::sin( M_PI*( x( 1 ) - box.zMin )/box.height() );
+	} );
+	mfem::ConstantCoefficient zero( 0.0 );
+	solver.setSource( source, 0.30 );
+	solver.setBoundaryData( zero );
+	solver.setInitialGuess( guess );
+	solver.setNewtonControl( 1.0e-12, 1.0e-14, 60 );
+	solver.solve();
+	mfem::Vector const state( solver.state() );
+	BOOST_TEST_REQUIRE( solver.deviceIntegrandTaken(), "the solve did not take the device integrand, so "
+	                    "there is no device route for the linearisation to follow" );
+
+	// A cardinal-like direction in gg': a hat at Psi = 0.5, as a Hermite spline.
+	meq::SplineProfile const direction( std::vector<meq::Knot>{ { 0.0, 0.0, 0.0 }, { 0.5, 1.0, 0.0 },
+	                                                           { 1.0, 0.0, 0.0 } } );
+	auto tangentBy = [ & ]( bool device, mfem::Vector &column, mfem::Vector &dx, double &dAxis )
+	{
+		solver.setLinearisedDeviceRoute( device );
+		long const before = solver.linearisedDeviceTaken();
+		solver.linearise( state );
+		solver.assembleGGPrimeDerivative( state, direction, column );
+		std::vector<double> ds;
+		solver.linearisedTangent( column, {}, nullptr, dx, ds );
+		dAxis = ds.empty() ? 0.0 : ds.front();
+		static_cast<void>( column.HostRead() );
+		static_cast<void>( dx.HostRead() );
+		return solver.linearisedDeviceTaken() - before;
+	};
+	mfem::Vector hostColumn, deviceColumn, hostDx, deviceDx;
+	double hostAxis = 0.0, deviceAxis = 0.0;
+	long const hostTaken = tangentBy( false, hostColumn, hostDx, hostAxis );
+	long const deviceTaken = tangentBy( true, deviceColumn, deviceDx, deviceAxis );
+	solver.setLinearisedDeviceRoute( true );
+
+	double columnWorst = 0.0, columnScale = 0.0, dxWorst = 0.0, dxScale = 0.0;
+	std::size_t columnDiffer = 0;
+	for ( int i = 0; i < hostColumn.Size(); ++i )
+	{
+		columnDiffer += hostColumn( i ) != deviceColumn( i );
+		columnWorst = std::max( columnWorst, std::abs( double( hostColumn( i ) - deviceColumn( i ) ) ) );
+		columnScale = std::max( columnScale, std::abs( double( hostColumn( i ) ) ) );
+	}
+	for ( int i = 0; i < hostDx.Size(); ++i )
+	{
+		dxWorst = std::max( dxWorst, std::abs( double( hostDx( i ) - deviceDx( i ) ) ) );
+		dxScale = std::max( dxScale, std::abs( double( hostDx( i ) ) ) );
+	}
+	bool const card = mfem::Device::Allows( mfem::Backend::CUDA_MASK | mfem::Backend::HIP_MASK );
+	double const eps = std::numeric_limits<mfem::real_t>::epsilon();
+	std::printf( "\n  the retained route %s: %ld device steps against %ld; dR/du differs at %zu entries, "
+	             "by %.2e of %.3e; the tangent by %.2e of %.3e, d psi_ax %.10g against %.10g; "
+	             "%d refinement passes kept\n",
+	             card ? "on the card" : "under debug", deviceTaken, hostTaken, columnDiffer, columnWorst,
+	             columnScale, dxWorst, dxScale, deviceAxis, hostAxis, solver.linearisedPassesTaken() );
+	BOOST_TEST( hostTaken == 0L, "the host route took the device " << hostTaken << " times" );
+	BOOST_TEST( deviceTaken > 0L, "the device route never ran: linearise() did not take the device "
+	            "integrand's operator, or the plasma loops refused" );
+	/*
+	 * dR/du: the kernel against the host loop. In double under `debug` they
+	 * are one arithmetic and agree to the bit; in single the host evaluates
+	 * ggPrimeDerivative() in double and the kernel in real_t, on radii the
+	 * tables round to real_t (M-322), so the two agree to single's round-off
+	 * on either arm, which is what this asserts there.
+	 */
+#ifdef MFEM_USE_SINGLE
+	BOOST_TEST( columnWorst <= 64.0*eps*columnScale, "dR/du on the device route differs from the "
+	            "host's by " << columnWorst/columnScale << " of its largest entry" );
+#else
+	if ( card )
+		BOOST_TEST( columnWorst <= 64.0*eps*columnScale, "dR/du on the card differs from the host's by "
+		            << columnWorst/columnScale << " of its largest entry" );
+	else
+		BOOST_TEST( columnDiffer == 0u, "under debug the source kernel is the host loop on the host's "
+		            "arithmetic and must agree to the bit; " << columnDiffer << " entries differ" );
+#endif
+	// The tangent: two operators, the device integrand's and MFEM's, whose
+	// element sums run in different orders, through one factorisation each.
+	BOOST_TEST( dxWorst <= std::max( 1.0e-11, 1.0e3*eps )*dxScale, "the device route's tangent differs "
+	            "from the host's by " << dxWorst/dxScale << " of its largest entry" );
+	BOOST_TEST( std::abs( deviceAxis - hostAxis ) <= std::max( 1.0e-11, 1.0e3*eps )*std::abs( hostAxis ),
+	            "d psi_ax is " << deviceAxis << " on the device route against " << hostAxis );
 }

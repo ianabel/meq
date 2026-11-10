@@ -291,8 +291,12 @@ namespace meq
 	                                 DeviceConstants const &constants,
 	                                 mfem::Vector const &state,
 	                                 int potentialStart, mfem::real_t scale,
-	                                 mfem::Vector &out ) const
+	                                 mfem::Vector &out,
+	                                 mfem::Vector const *along,
+	                                 mfem::Array<KnotView> const *knots ) const
 	{
+		if ( along != nullptr && along->Size() != state.Size() )
+			return false;
 		if ( status <= 0 )
 			return false;
 		if ( quantity == PlasmaQuantity::Current
@@ -308,9 +312,15 @@ namespace meq
 		// Device-aware, because UseDevice() is now true: a forall rather than a
 		// host loop, so the zero is written where the scatter will add to it.
 		out = 0.0;
-		return plasmaScatterKernel(
-			view( quantity, source, constants, state, potentialStart, scale ),
-			out.ReadWrite() );
+		PlasmaLoopView inputs = view( quantity, source, constants, state, potentialStart, scale );
+		if ( knots != nullptr )
+			inputs.knots = knots->Read();
+		if ( along != nullptr )
+		{
+			inputs.along = countedDeviceRead( *along, __LINE__ );
+			inputs.hasAlong = 1;
+		}
+		return plasmaScatterKernel( inputs, out.ReadWrite() );
 	}
 
 	bool DevicePlasmaLoops::scatterIntegrand( PsiIntegrandView const &integrand,
@@ -506,6 +516,15 @@ namespace meq
 			return false;
 		countedDeviceRead( source, __LINE__ );
 		return nodalPeakKernel( source, begin, end, best, bestIndex );
+	}
+
+	bool fillEntriesOnDevice( mfem::Vector &v, mfem::Array<int> const &indices,
+	                          mfem::real_t value )
+	{
+		if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return false;
+		countedDeviceRead( indices, __LINE__ );
+		return fillEntriesKernel( v, indices, value );
 	}
 
 	bool copyEntriesOnDevice( mfem::Vector const &source,

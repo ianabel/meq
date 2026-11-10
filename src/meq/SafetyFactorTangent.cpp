@@ -367,11 +367,9 @@ namespace meq
 			directions[ j ] = spline.cardinalGGPrime( j );
 			Profile const &direction = *directions[ j ];
 			mfem::Vector &dRdu = sources[ j ];
-			solver.assembleSourceDerivative( state,
-				[ this, &direction ]( double radius, double z, double psi )
-				{
-					return source.ggPrimeDerivative( radius, z, psi, direction );
-				}, dRdu );
+			// The source's own kernel on a substituted view under a Device;
+			// ggPrimeDerivative() through the host loop otherwise (M-409).
+			solver.assembleGGPrimeDerivative( state, direction, dRdu );
 			std::vector<double> ds;
 			auto checksum = []( char const *stage, mfem::Vector const &v )
 			{

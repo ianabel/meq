@@ -27115,3 +27115,92 @@ With the differenced Jacobian, one run in six stalled (M-406). The cost is
 worktree configure looked for the static SuiteSparse at `../suitesparse`
 beside the worktree. So the module linked MKL shared, and numpy beside it
 moved its bits. Pointed at the install, it is green.
+
+
+
+### M-409
+
+**The retained linearisation on the device.** Its operator is Newton's own,
+built as `buildNpc` builds it (`newtonOperator()`), so its residual and
+gradient take the device integrand; its source terms `S( x )`, `S( x + s t )`
+and `S'( x ) t` are the plasma loops' `SourceValue` and `SourceSlope` kernels;
+the gg' direction's `dR/du` is the source's kernel on a view with `p'` zero
+and gg' the direction (`assembleGGPrimeDerivative()`); the essential trace
+rows are zeroed on the card; and the refinement stops at `10 ε` of the
+answer. `tests/performance/DeviceAudit`, single, RTX 2070 SUPER, k = 2, the
+M-384 source, `OMP_NUM_THREADS=2`, load 2 to 6; best of three, each piece on
+the host route (`setLinearisedDeviceRoute( false )`: MFEM's plain operator,
+the source terms' host loops) and the device route:
+
+| | 2,048 tri | 8,192 tri | 32,768 tri |
+|---|---|---|---|
+| device Newton residual (the solve's) | 2.2 ms | 2.0 ms | 4.5 ms |
+| the retained operator's residual, host / device | 25.2 / 1.5 ms | 142 / 3.8 ms | 535 / 20.5 ms |
+| `linearise()`, host / device | 100 / 51 ms | 453 / 164 ms | 1,436 / 648 ms |
+| `applyRetainedJacobian()`, host / device | 28.0 / 0.77 ms | 149 / 1.3 ms | 487 / 6.6 ms |
+| `assembleGGPrimeDerivative()`, host / device | 1.2 / 0.25 ms | 5.2 / 0.38 ms | 18.4 / 1.0 ms |
+| back-solve, host / device | 1.7 / 1.6 ms | 9.2 / 3.6 ms | 16.8 / 13.7 ms |
+| a tangent, one pass, host / device | 32.8 / 4.2 ms | 172 / 10.8 ms | 737 / 43.5 ms |
+| a tangent, up to four passes, host / device | 125 / 8.9 ms | 544 / 21.4 ms | 2,239 / 89.8 ms |
+
+* **The retained operator's residual is 26 times cheaper on the card at
+  32,768 triangles**, 20.5 ms against 535 ms for MFEM's plain operator, whose
+  integrand is MEQ's host loop (M-384 read that loop at 1.1 s on a loaded
+  machine); a four-pass tangent is 25 times cheaper, the applied Jacobian 74.
+* **What is left in `linearise()`** is the trace solver's factorisation and
+  the border's columns and rows, most of the 648 ms; the plain operator's
+  residual and gradient were the rest of the host route's 1,436.
+* **The refinement stop**: in single it keeps one to three passes of four
+  where the host route kept two to four, and `d psi_ax` moves by at most
+  2e-7 relative between them, under the 3e-6 the two routes differ by.
+* **Against the host route** (`LinearisedSolve`'s `theDeviceRouteIsTheHostRoute`,
+  the `debug` and `cuda` arms of the CUDA build): `dR/du` of a gg' direction
+  agrees to 2e-7 of its largest entry in single, the tangent to 5e-6,
+  `d psi_ax` to 2.6e-7; each arm asserts the device route ran and the host
+  route did not, and skips loudly without a Device or device kernels.
+* **gg' and every cardinal direction are Hermite profiles of the `q` loop's
+  spline**, on knots at its nodes, which reproduce its piecewise quadratic
+  gg' exactly: that is what gives the `q`-driven solve's own Newton steps the
+  device integrand. **Past the end nodes they are carried on by the end
+  pieces** (`EndPieceSplineProfile`, `ProfileKind::EndPieceSpline`), as the
+  not-a-knot spline is, because an unconfined source reads them there:
+  `QDrivenConsistency`'s limited box reads Psi down to about -1. With end
+  knots at -0.5 and 1.5 instead, the table's flattening continuation (M-360)
+  took over below -0.5 and level 0 stalled at a removable 8.4e-3 (main: 3e-10);
+  with end knots out to -4 and 5 the solution read past those too. The end
+  piece form agrees with main's gg' to 1e-14 inside [ 0, 1 ] (2e-12 at Psi =
+  -1, where main's own formula cancels) and level 0 is main's to the digit.
+* **That case's level 1 is decided by round-off** (`TODO`): main's own gg'
+  scaled by 1 + 3e-14 exits 2 (10 trials refused, removable 1.2e-7); by 1,
+  1 - 1e-14 and 1 - 3e-14 it converges in 13 iterations. The end-piece form
+  falls on the failing side (exits 2 at 1.3e-6).
+
+**The suites** (`builds/dl-double`, `install-nocuda`, Python on;
+`builds/dl-single`, `install-single`, `sm_75`):
+
+* **Double, 164 tests**: red are `PlasmaEdgeConvergence`, `InnerSolveStall`,
+  `AnisotropicMirror` -- main's -- and `QDrivenConsistency`'s
+  `theDeliveredFieldConvergesOnALimitedBox` at level 1, the knife edge above.
+  `DeviceParity`, `LinearisedSolve` and `TangentConvergence` (and their
+  `debug` arms), `SafetyFactorSolver`, `QDrivenFreeEdge`, `QDrivenScalePin`,
+  `QDrivenCurvedBoundary` and `SafetyFactorScale` pass. `LinearisedSolve`
+  and `TangentConvergence` print the same digits plain and under `debug`
+  with `MEQ_TEST_SERIAL_ROUTES=1`.
+* **Single, 162 tests**: red are main's deliberate reds (`TODO`, *The
+  q-driven solve in single precision*): `FluxSurfaceConvergence`,
+  `ExtractionContinuity`, `PlasmaEdgeConvergence`, `SafetyFactorSolver`
+  and its `cuda` arm, `QDrivenCurvedBoundary`, `QDrivenFreeEdge` and its
+  `cuda` arm, `QDrivenScalePin`, `QDrivenConsistency`, `InnerSolveStall`,
+  `DriverAcceptance` (`aWarmAdaptiveCycleConvergesOnTheNewtonRung`,
+  `theProfileScaleCrossesEachAdaptiveCycle`), `AnisotropicMirror`.
+  `DeviceParity` and `LinearisedSolve`'s `debug` and `cuda` arms pass.
+* **Two single numbers moved, and both are the noise floor's sample**, not
+  the change: `SafetyFactorSolver`'s round trip reads 3.0e-6 (main 1.6e-6)
+  and `QDrivenScalePin` 6.6e-5 and 2.1e-4 apart (main 4.0e-6 and 3.6e-5).
+  Switching the end-piece gg' back to main's form restores main's numbers
+  and the `10 ε` stop changes nothing. But main's own gg' times
+  `1 + 1e-10 sin( f Psi )` for f = 1e3, 3e3, 7e3, 1.3e4 reads 4.9e-7, 2.4e-6,
+  1.4e-6 and 3.6e-6 on the round trip, and times `1 +- 1e-14` or
+  `1 +- 3e-14` reads 4.2e-6 to 1.1e-4 on the scale pin. In single the loop
+  sits on its noise floor (M-405), and which ulps the double gg' rounds to
+  picks the sample.

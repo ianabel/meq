@@ -416,6 +416,89 @@ namespace meq
 		return intervalAt( findInterval( psi ) ).doublePrime( psi );
 	}
 
+	void endPieceCurvature( Knot const &a, Knot const &b, bool atRight, double &second, double &third )
+	{
+		double const delta = b.psi - a.psi;
+		double const slope = ( b.value - a.value )/delta;
+		if ( atRight )
+			second = ( 2.0*a.derivative + 4.0*b.derivative - 6.0*slope )/delta;
+		else
+			second = ( 6.0*slope - 4.0*a.derivative - 2.0*b.derivative )/delta;
+		third = 6.0*( a.derivative + b.derivative - 2.0*slope )/( delta*delta );
+	}
+
+	EndPieceSplineProfile::EndPieceSplineProfile( std::vector<Knot> data )
+		: SplineProfile( std::move( data ) )
+	{
+	}
+
+	/*
+	 * PAST AN END, the end piece's Taylor polynomial about the end knot:
+	 * f_e + d ( f_e' + d ( c/2 + d j/6 ) ), c and j its curvature and third
+	 * derivative there. Inside, SplineProfile's own interpolant.
+	 */
+	double EndPieceSplineProfile::operator()( double psi ) const
+	{
+		std::vector<Knot> const &k = knots();
+		std::size_t const n = k.size();
+		double second = 0.0, third = 0.0;
+		if ( psi < k[ 0 ].psi )
+		{
+			endPieceCurvature( k[ 0 ], k[ 1 ], false, second, third );
+			double const d = psi - k[ 0 ].psi;
+			return k[ 0 ].value + d*( k[ 0 ].derivative + d*( 0.5*second + d*third/6.0 ) );
+		}
+		if ( psi > k[ n - 1 ].psi )
+		{
+			endPieceCurvature( k[ n - 2 ], k[ n - 1 ], true, second, third );
+			double const d = psi - k[ n - 1 ].psi;
+			return k[ n - 1 ].value + d*( k[ n - 1 ].derivative + d*( 0.5*second + d*third/6.0 ) );
+		}
+		return SplineProfile::operator()( psi );
+	}
+
+	double EndPieceSplineProfile::prime( double psi ) const
+	{
+		std::vector<Knot> const &k = knots();
+		std::size_t const n = k.size();
+		double second = 0.0, third = 0.0;
+		if ( psi < k[ 0 ].psi )
+		{
+			endPieceCurvature( k[ 0 ], k[ 1 ], false, second, third );
+			double const d = psi - k[ 0 ].psi;
+			return k[ 0 ].derivative + d*( second + 0.5*d*third );
+		}
+		if ( psi > k[ n - 1 ].psi )
+		{
+			endPieceCurvature( k[ n - 2 ], k[ n - 1 ], true, second, third );
+			double const d = psi - k[ n - 1 ].psi;
+			return k[ n - 1 ].derivative + d*( second + 0.5*d*third );
+		}
+		return SplineProfile::prime( psi );
+	}
+
+	double EndPieceSplineProfile::doublePrime( double psi ) const
+	{
+		std::vector<Knot> const &k = knots();
+		std::size_t const n = k.size();
+		double second = 0.0, third = 0.0;
+		if ( psi < k[ 0 ].psi )
+		{
+			endPieceCurvature( k[ 0 ], k[ 1 ], false, second, third );
+			return second + ( psi - k[ 0 ].psi )*third;
+		}
+		if ( psi > k[ n - 1 ].psi )
+		{
+			endPieceCurvature( k[ n - 2 ], k[ n - 1 ], true, second, third );
+			return second + ( psi - k[ n - 1 ].psi )*third;
+		}
+		return SplineProfile::doublePrime( psi );
+	}
+
+	void EndPieceSplineProfile::tableReach( double, double, TableReach & ) const
+	{
+	}
+
 	void SplineProfile::tableReach( double low, double high, TableReach &out ) const
 	{
 		double const first = knotData.front().psi;

@@ -44,7 +44,8 @@ namespace meq
 				if ( data.size() < 2 )
 					return false;
 
-				view.kind = static_cast<int>( ProfileKind::Spline );
+				view.kind = static_cast<int>( dynamic_cast<EndPieceSplineProfile const *>( spline ) != nullptr
+				                              ? ProfileKind::EndPieceSpline : ProfileKind::Spline );
 				view.scale = scale;
 				view.constantValue = mfem::real_t( 0 );
 				view.offset = static_cast<int>( knots.size() );
