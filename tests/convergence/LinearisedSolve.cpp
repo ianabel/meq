@@ -447,7 +447,7 @@ namespace
 			// Against the border's own size or the state's: d z_X may be
 			// zero by the mode's symmetry in R.
 			double const apart = std::abs( reference - ds[ i ] )
-			                     /std::max( std::abs( reference ), dx.Normlinf() );
+			                     /std::max( std::abs( reference ), static_cast<double>( dx.Normlinf() ) );
 			worst = std::max( worst, apart );
 			std::printf( "    %-10s %+.10e against %+.10e (%.3e)\n", labels[ i ], ds[ i ], reference, apart );
 		}
