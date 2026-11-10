@@ -410,6 +410,7 @@ namespace meq
 			j[ m*m + k ] = pin.kind == ScalePin::EdgeField
 			               ? spline.cardinal( k, 0.0 )/( pin.value*pin.value )
 			               : derivative.measured[ k ]/pin.value;
+		stageChecksum( "toroidalSystem.jacobian", j );
 		return true;
 	}
 

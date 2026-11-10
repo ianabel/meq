@@ -505,3 +505,74 @@ BOOST_AUTO_TEST_CASE( theLimitedTangentIsTheDifferencedOne ) { tangentAgainstSol
 BOOST_AUTO_TEST_CASE( theDivertedTangentIsTheDifferencedOne ) { tangentAgainstSolves( Edge::Diverted ); }
 BOOST_AUTO_TEST_CASE( theLimitedLoopRecoversItsField ) { roundTrip( Edge::Limited ); }
 BOOST_AUTO_TEST_CASE( theDivertedLoopRecoversItsField ) { roundTrip( Edge::Diverted ); }
+
+/*
+ * THE EVALUATION'S REPEATABILITY, A MEASUREMENT (disabled; run by name): q at
+ * the closed form, then at g^2 1.96 times it, then at the closed form again from
+ * that warm start -- how far the same spline's q moves with the path to it,
+ * which is the floor the loop's rows carry.
+ */
+BOOST_AUTO_TEST_CASE( theEvaluationIsRepeatable, * boost::unit_test::disabled() )
+{
+	for ( Edge edge : { Edge::Limited, Edge::Diverted } )
+	{
+		Machine machine( edge, 9, 2 );
+		meq::ToroidalFieldSpline const exact = machine.splineOf( referenceGSquared );
+		double const factor = 1.96;
+		meq::ToroidalFieldSpline const moved = machine.splineOf(
+			[ factor ]( double psi ) { return factor*referenceGSquared( psi ); } );
+		meq::SafetyFactorEvaluation first, away, again;
+		BOOST_TEST_REQUIRE( machine.equilibrium->evaluate( exact, first ), machine.equilibrium->refusal() );
+		double const axis0 = machine.solver->psiAxis(), boundary0 = machine.solver->psiBoundary();
+		mfem::Vector const state0( machine.solver->state() );
+		std::vector<double> const residuals0 = machine.solver->newtonResiduals();
+		BOOST_TEST_REQUIRE( machine.equilibrium->evaluate( moved, away ), machine.equilibrium->refusal() );
+		BOOST_TEST_REQUIRE( machine.equilibrium->evaluate( exact, again ), machine.equilibrium->refusal() );
+		double worst = 0.0;
+		for ( std::size_t i = 0; i < first.qOverG.size(); ++i )
+			worst = std::max( worst, std::abs( again.qOverG[ i ]/first.qOverG[ i ] - 1.0 ) );
+		mfem::Vector d( machine.solver->state() );
+		d -= state0;
+		std::printf( "  %s: q/g moves %.3e with the path; psi_ax %.3e, psi_bnd %.3e, state %.3e of %.3e\n",
+		             nameOf( edge ), worst, machine.solver->psiAxis() - axis0,
+		             machine.solver->psiBoundary() - boundary0, d.Normlinf(), state0.Normlinf() );
+		std::printf( "    first solve's residuals:" );
+		for ( double r : residuals0 )
+			std::printf( " %.2e", r );
+		std::printf( "\n    again's:" );
+		for ( double r : machine.solver->newtonResiduals() )
+			std::printf( " %.2e", r );
+		std::printf( "\n" );
+	}
+}
+
+/*
+ * THE TANGENT JACOBIAN WRITTEN OUT, A MEASUREMENT (disabled; run by name in
+ * each precision): the limited and diverted boxes at the closed form,
+ * jacobian-<edge>-<precision>.txt, to hold a single build's to a double's.
+ */
+BOOST_AUTO_TEST_CASE( theTangentJacobianWrittenOut, * boost::unit_test::disabled() )
+{
+	bool const single = std::numeric_limits<mfem::real_t>::epsilon() > 1.0e-10;
+	for ( Edge edge : { Edge::Limited, Edge::Diverted } )
+	{
+		Machine machine( edge, 9, 2 );
+		meq::ToroidalFieldSpline const exact = machine.splineOf( referenceGSquared );
+		meq::SafetyFactorEvaluation base;
+		BOOST_TEST_REQUIRE( machine.equilibrium->evaluate( exact, base ), machine.equilibrium->refusal() );
+		meq::SafetyFactorDerivative tangent;
+		BOOST_TEST_REQUIRE( machine.equilibrium->differentiate( exact, tangent ) );
+		std::string const name = std::string( "jacobian-" ) + nameOf( edge ) + ( single ? "-single" : "-double" ) + ".txt";
+		std::FILE *out = std::fopen( name.c_str(), "w" );
+		for ( double v : tangent.qOverG )
+			std::fprintf( out, "%.17g\n", v );
+		for ( double v : base.qOverG )
+			std::fprintf( out, "# %.17g\n", v );
+		for ( double v : machine.equilibrium->axisDerivative() )
+			std::fprintf( out, "a %.17g\n", v );
+		for ( double v : machine.equilibrium->boundaryDerivative() )
+			std::fprintf( out, "b %.17g\n", v );
+		std::fclose( out );
+		std::printf( "  wrote %s\n", name.c_str() );
+	}
+}

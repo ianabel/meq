@@ -26886,3 +26886,77 @@ q_h in another element than the solve converged on (psi_h jumps there by
 every face: 1.8e-15 and 6.2e-16, 0 iterations. The card's route roots the
 same element as the converged solve. Nothing is dropped.
 
+### M-QS-1
+
+**IN SINGLE THE FREE-EDGE Q LOOPS FAIL ON THE JACOBIAN, NOT ON THE AXIS:
+DIFFERENCING A SINGLE EXTRACTION GIVES A JACOBIAN NO BETTER THAN 1e-3 OF ITS SIZE ON A FREE EDGE AND 6e-5 ON THE BOX, AND THE CARD'S STALLS ARE
+THAT NOISE, DRAWN AFRESH EACH RUN, THROUGH AN ILL-CONDITIONED STEP.** Branch
+`q-single` off `e708ca0`; `builds/q-single` (double, `install-nocuda`) and
+`builds/q-single-cuda` (single, `install-single`, `sm_75`);
+`MKL_NUM_THREADS=1`.
+
+**The tracer** (`QDrivenCurvedBoundary`, 15 elements). Its ray solve
+brackets the level between the two traced points either side of the ray,
+linearly in radius with a 5% margin. Measured at a single failure: those points
+sat 0.41 rad apart, both on the level (0.275311). Along the ray between them
+psi was 0.27807 and 0.27641 at the bracket's ends -- both above the level, the
+contour bulging past the chord. Widening the bracket until psi changes sign
+(`ContourTracer::fitByAngle()`) takes single's refused trials from 28 to 3,
+and the loop then stalls at a removable 5.8e-5. **It is withdrawn: it breaks
+double.** Double's loop, which converges in 6 iterations with 10 trials
+refused, then takes a trial at iteration 2 that the tracer used to refuse
+(removable 0.50 accepted, against main's 0.17 after a shorter step). It stalls
+at 2.3e-4 with 12 refused and exits 2. Capping the widening at one fifth each
+way breaks both precisions: double fails to form a Jacobian after 11
+iterations, and single after 2. So **double's loop leans on the tracer's
+refusals as its step-length limit.** A wide trial that extracts is accepted and
+loses the loop's path. A tracer that brackets more robustly needs a trust
+region in the outer loop first. A stop on "the predicted decrease is under the
+merit's noise" was tried with the widening and is withdrawn too: on the
+limited box it declared convergence at `g²` 0.11 from the closed form, a
+converged claim on a wrong Jacobian's prediction.
+
+**The free-edge boxes** (`QDrivenFreeEdge`, 9 cells, `k = 2`, 11 knots).
+Single's tangent Jacobian is held to double's at the closed form:
+
+| step | 1e-4 | 3e-4 | 1e-3 | 3e-3 |
+|---|---|---|---|---|
+| limited | 3.4e-3 | **9.6e-4** | 1.3e-3 | 1.1e-2 |
+| diverted | 8.9e-3 | 2.5e-3 | **2.3e-3** | -- |
+
+The worst rows are the innermost surface's, and the worst columns the outer
+knots'. The tangent itself is good: `dpsi_ax` and `dpsi_bnd` are 2e-6 to 2e-5
+from double's. The evaluation's own q is 1.1e-5 (limited) and 2.0e-5
+(diverted) from double's at the closed form, where the box's is 1.5e-6. It is
+repeatable on a warm path to 1.5e-6 and 5.6e-7. The inner solve is not the
+failure: from g² changed by 1.2x or 1.96x it converges in 5 or 6 Newton steps
+to 2.4e-7. The loop fails because its first step is computed from a Jacobian
+wrong by 1e-3 in a problem conditioned at 6e-5: the trial spline's first
+residual is 172, against 0.17 for a plain scaling of g², and those trials crawl
+and are refused. A Levenberg-Marquardt fallback after a failed search does not
+recover it (4 iterations, 10 of 15 trials refused), and is not kept.
+
+**The card** (DeviceParity's q-driven case, level 0, ToroidalFlux, batched
+assembly, cuDSS, `--device cuda`). The coordinator's hypothesis -- the axis at a
+mesh vertex, its element flipping -- is FALSIFIED. With `NR = NZ = 8` (the axis
+on the z = 0 face row) 1 of 6 runs stalls. With `NR = NZ = 7` (the axis off
+every face) 1 of 6 stalls too. Stage checksums of the system's Jacobian over
+six runs:
+
+* the first iterate is identical in every run;
+* its Jacobian's norm differs from run to run, 280.4623, 280.4586, 280.4523
+  (4e-5) -- the extraction noise above, its draw set by the residual's
+  run-to-run bits;
+* the second iterate is 0.3% apart (`|u|` 19.579, 19.518, 19.615);
+* the stalled runs then sit at a removable 0.087 to 0.14, where a converging
+  run's next step reaches 1.6e-2.
+
+Damping the step at the noise level, Levenberg-Marquardt with
+`lambda = ( 1e-4 sigma_max )^2`, still stalls 1 run in 6, and is not kept. The
+remedy is a Jacobian without the differencing noise:
+`Q-SHAPE-DERIVATIVE-PLAN.md`.
+
+**A warm start's psi_ax label.** A trial the loop refuses leaves the source's
+label at that trial's. The next evaluate() now starts psi_ax at the warm
+state's (`setAxisFluxInitial()`), as it starts psi_bnd.
+

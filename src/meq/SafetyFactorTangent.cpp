@@ -10,6 +10,7 @@
 #include "meq/CriticalPoints.hpp"
 #include "meq/FluxSurfaces.hpp"
 #include "meq/ResidentIterate.hpp"
+#include "meq/StageChecksum.hpp"
 
 namespace meq
 {
@@ -286,6 +287,7 @@ namespace meq
 		warm = solver.state();
 		warmExterior = solver.exteriorCoefficients();
 		warmBoundary = solver.psiBoundary();
+		warmAxis = solver.psiAxis();
 	}
 
 	bool SafetyFactorEquilibrium::evaluate( ToroidalFieldSpline const &spline, SafetyFactorEvaluation &out )
@@ -300,6 +302,11 @@ namespace meq
 				// where it is free -- else a refused trial's would be the start.
 				solver.setInitialState( warm, warmExterior );
 				solver.setBoundaryFluxInitial( warmBoundary );
+				// And psi_ax's label: the source keeps the last solve's, a refused
+				// trial's included, and a start whose label is that trial's is
+				// not the warm state's (M-QS-1).
+				if ( warmAxis != 0.0 )
+					solver.setAxisFluxInitial( warmAxis );
 			}
 			if ( options.solve )
 				options.solve();
@@ -321,6 +328,7 @@ namespace meq
 		warm = solver.state();
 		warmExterior = solver.exteriorCoefficients();
 		warmBoundary = solver.psiBoundary();
+		warmAxis = solver.psiAxis();
 		admitted = warm;
 		admittedValues = spline.values();
 		return true;
@@ -358,7 +366,16 @@ namespace meq
 					return source.ggPrimeDerivative( radius, z, psi, direction );
 				}, dRdu );
 			std::vector<double> ds;
+			auto checksum = []( char const *stage, mfem::Vector const &v )
+			{
+				if ( !stageChecksumWanted() )
+					return;
+				mfem::real_t const *host = v.HostRead();
+				stageChecksum( stage, std::vector<double>( host, host + v.Size() ) );
+			};
+			checksum( "toroidalTangent.source", dRdu );
 			solver.linearisedTangent( dRdu, {}, nullptr, dx[ j ], ds );
+			checksum( "toroidalTangent.state", dx[ j ] );
 			if ( layout.axis >= 0 )
 				dAxis[ j ] = ds[ static_cast<std::size_t>( layout.axis ) ];
 			if ( layout.boundary >= 0 )
@@ -366,6 +383,7 @@ namespace meq
 		}
 		secondsTangents += secondsSince( started );
 		lastAxisDerivative = dAxis;
+		stageChecksum( "toroidalTangent.borders", dAxis );
 		lastBoundaryDerivative = dBoundary;
 
 		Fields const base = solvedFields();

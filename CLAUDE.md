@@ -206,21 +206,23 @@ Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAccept
 (→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven suites --
 `SafetyFactorSolver` and `QDrivenScalePin`, whose round trips reach `g²` to
 2e-6 to 4e-5 against their bounds, the map's own q being 1.5e-6 from
-double's, and `QDrivenCurvedBoundary`, `QDrivenFreeEdge` and
-`QDrivenConsistency`'s limited box (`g²` 0.11 then 0.12 from the closed form,
-not converging), whose loops do not close in single, the tracer and the inner
-solves refusing their trials (→
-**[M-405](MEASUREMENTS.md#m-405)**, `TODO`, *The q-driven solve in single
-precision*). Which of its other single cases fail
+double's, and `QDrivenCurvedBoundary` (the tracer refusing 20 of its 28
+trials), `QDrivenFreeEdge` and `QDrivenConsistency`'s limited box (`g²` 0.11
+then 0.12, not converging), whose loops do not close: the differenced
+Jacobian is no better than 1e-3 of its size on a free edge in single, which
+`Q-SHAPE-DERIVATIVE-PLAN.md` would replace (→
+**[M-405](MEASUREMENTS.md#m-405)**, **[M-QS-1](MEASUREMENTS.md#m-qs-1)**,
+`TODO`, *The q-driven solve in single precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
 (`TODO`, the single-precision round). `DeviceParity`'s `q-driven` card arm
-is red in single by the take: about one run in three stalls, on cuDSS and on
-PARDISO alike, its first residual varying run to run through MFEM's batched
-hybridization assembly, which `AssemblyMode = "serial"` makes repeatable
-(→ **[M-405](MEASUREMENTS.md#m-405)**); in double it repeats its outer
+is red in single by the take: about one run in six stalls, the Jacobian's
+differencing noise drawn afresh each run by the residual's bits from MFEM's
+batched hybridization assembly, which `AssemblyMode = "serial"` makes
+repeatable (→ **[M-405](MEASUREMENTS.md#m-405)**,
+**[M-QS-1](MEASUREMENTS.md#m-qs-1)**); in double it repeats its outer
 count, cuDSS varying the bits run to run (→ **[M-403](MEASUREMENTS.md#m-403)**). A single
 build reads `FluxSurfaceConvergence`'s
 `thePointErrorDoesNotAccumulateOverManyCircuits` red: its flatness comparison
