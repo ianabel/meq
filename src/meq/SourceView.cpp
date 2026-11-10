@@ -175,6 +175,11 @@ namespace meq
 		return true;
 	}
 
+	bool makeProfileView( Profile const &profile, ProfileView &view, std::vector<KnotView> &knots )
+	{
+		return viewOfProfile( profile, view, knots );
+	}
+
 	bool makePlasmaSourceView( Source const &source, SourceView &view,
 	                           std::vector<KnotView> &knots )
 	{

@@ -179,6 +179,10 @@ set(MEQ_CONVERGENCE_TESTS
 	# J^{-1} at a retained linearisation with psi_ax's border -- the bordered
 	# tangent, retained to the bit, and 1/sigma_min from it.
 	LinearisedSolve
+	# The point routes and the integrands as data under a Device (M-386):
+	# each against its host loop. Skips loudly with no Device; the arms below
+	# configure one.
+	DeviceIntegrals
 	# Maschke & Perrin's section 4, the second exact rotating equilibrium. It
 	# solves the SAME equation as the rotating Solov'ev case above, so nothing
 	# about the discretisation is new; what is new is that its (4.7) constrains
@@ -503,6 +507,11 @@ foreach(_device IN LISTS _da_devices)
 			        --run_test=theBlocksAreTheQuadrature,theDeviceRouteIsTheHostRoute,theFieldsAreContinuousAndTakePsihatsMoments)
 		set_tests_properties(ContinuousFieldConvergenceDevice_${_device} PROPERTIES
 			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET DeviceIntegrals)
+		add_test(NAME DeviceIntegralsDevice_${_device} COMMAND DeviceIntegrals)
+		set_tests_properties(DeviceIntegralsDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device}")
 	endif()
 	if(TARGET ExtractionContinuity)
 		add_test(NAME ExtractionContinuityDevice_${_device}

@@ -25856,6 +25856,56 @@ taken in the same session.
   43.3 s against 59.0 s, the continuous fields' 26% gone. What is left
   outside `solve()` is the tracer (M-384).
 
+### M-386
+
+**The delivered integrals on the device: device forms where the integrand is
+data, and the point route where it is a caller's lambda.**
+`tests/performance/DeviceAudit`, single, RTX 2070 SUPER, k = 2, the M-384
+source, `OMP_NUM_THREADS=2`, load 18 to 22 from other agents (a device Newton
+residual 5.7 to 10.7 ms here against 2.6 to 7.3 ms in M-385's session); best
+of three. Each piece on its device form, on the point route (the same
+integrand as a lambda: the potential at every point from a kernel, the lambda
+on the host, the factors scattered back on the device) and on the host loop
+(`setDevicePointRoutes( false )`):
+
+| | 2,048 tri | 8,192 tri | 32,768 tri |
+|---|---|---|---|
+| `Φ`, device form (`integratePsiIntegrand()`) | 0.34 ms | 0.38 ms | 5.9 ms |
+| `Φ`, point route (`integrateOverDomain()`) | 1.1 ms | 4.4 ms | 15.2 ms |
+| `Φ`, host loop | 21 ms | 91 ms | 598 ms |
+| `μ0 I_p`, device form (`deliveredPlasmaCurrent()`) | 0.39 ms | 0.45 ms | 6.7 ms |
+| `μ0 I_p`, host loop | 20 ms | 88 ms | 450 ms |
+| table reach, device form | 0.91 ms | 0.37 ms | 1.4 ms |
+| table reach, host loop | 8.9 ms | 40 ms | 235 ms |
+| a pin-row column, device form (`assemblePsiIntegrandColumn()`) | 0.77 ms | 1.1 ms | 11.1 ms |
+| the same, point route (`assembleSourceDerivative()`) | 2.5 ms | 16.0 ms | 44.0 ms |
+| the same, host loop | 19.7 ms | 92 ms | 549 ms |
+
+* **The point route's host share is its excess over the device form**: 1.7,
+  14.9 and 32.9 ms for a pin-row column, 0.7, 4.0 and 9.3 ms for `Φ` -- the
+  copy of every point's potential down, a serial evaluation of the lambda at
+  each, and the factors back up. It is 2.6 to 14 times the device form and
+  6 to 39 times cheaper than the host loop, whose time is the geometry and the
+  shapes it no longer computes. `TODO`, *What is left on the point route
+  under a Device*.
+* **The device forms agree with their host loops at single's round-off**
+  (`DeviceIntegrals`, the `debug` and `cuda` arms, bound 64 ε): `Φ` to 1e-10
+  to 4e-9, `μ0 I_p` to 4e-8 to 6e-8, the columns to 1.3e-7 to 5.9e-7 of their
+  largest entry; and the columns as data agree with
+  `assembleSourceDerivative()` of the same functions as lambdas to 1e-7 to
+  7e-7, `G` carried as a spline's Hermite knots or as the polynomial alike.
+  Each arm asserts which route ran; the cases skip loudly with no Device or
+  no device kernels.
+* **The delivered flux is now summed per element, in element order, in
+  double**, on both routes (`integratePsiIntegrand()` and
+  `integrateOverDomain()`), so the two differ only where their points do; a
+  single kernel accumulates each element in double before rounding it once.
+* **What the retained linearisation gains from the point route alone**:
+  `addSourceColumns()` at 32,768 triangles, 61 ms against 311 ms for the host
+  loop on `main` in M-385's session. Its device form, and the device integrand's operator that
+  dominates `linearise()` and `applyRetainedJacobian()`, are step 3's
+  (`DEVICE-PLAN.md` section 9).
+
 ### M-QR-1
 
 **THE q-DRIVEN JACOBIAN FROM THE EXACT TANGENT — ONE BORDERED BACK-SOLVE PER

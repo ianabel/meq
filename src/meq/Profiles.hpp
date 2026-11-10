@@ -700,6 +700,20 @@ namespace meq
 	ProfileAbscissa profileAbscissaNamed( std::string const & name );
 	char const * profileAbscissaName( ProfileAbscissa abscissa );
 
+	/**
+	 * THE HERMITE KNOTS OF @a profile AT @a at: its value and slope there,
+	 * which is what a SplineProfile interpolates by. Between consecutive
+	 * points the result reproduces @a profile EXACTLY where it is a cubic
+	 * there, so a profile that is piecewise cubic with its breaks among @a at
+	 * -- gg' of a cubic spline in g^2 is piecewise quadratic -- becomes a
+	 * SplineProfile, which has a device form (makeProfileView()). Past the
+	 * first and last point the SplineProfile continues as tables do (M-360),
+	 * not as @a profile does. MEASUREMENTS.md M-386.
+	 * @throws std::invalid_argument for fewer than two points or points not
+	 *         strictly ascending.
+	 */
+	std::vector<Knot> hermiteKnots( Profile const &profile, std::vector<double> const &at );
+
 }
 
 #endif // MEQ_PROFILES_HPP

@@ -662,6 +662,15 @@ namespace meq
 	 * @return false on anything neither wrapper nor exact production class,
 	 *         exactly as makeSourceView() does, and for the same reason.
 	 */
+	/**
+	 * One profile's POD form, its knots appended to @a knots: what
+	 * makeSourceView() does for p' and gg', for any profile -- the g^2 a
+	 * delivered-flux integrand carries (M-386).
+	 * @return false for a profile with no POD form (only constants, scaled
+	 *         profiles and Hermite splines have one).
+	 */
+	bool makeProfileView( Profile const &profile, ProfileView &view, std::vector<KnotView> &knots );
+
 	bool makePlasmaSourceView( Source const &source, SourceView &view,
 	                           std::vector<KnotView> &knots );
 

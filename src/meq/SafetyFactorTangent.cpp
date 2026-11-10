@@ -1,6 +1,7 @@
 #include "meq/SafetyFactorTangent.hpp"
 
 #include <chrono>
+#include <functional>
 #include <cmath>
 #include <stdexcept>
 
@@ -41,6 +42,54 @@ namespace meq
 				       *( y != nullptr ? static_cast<double>( y[ bBegin + k ] ) : 1.0 );
 			return out;
 		}
+
+		/// A spline function of the source's Psi as a Profile, for
+		/// hermiteKnots(): @a f( psi, derivative ).
+		class SplineFunction : public Profile
+		{
+			public:
+				explicit SplineFunction( std::function<double( double, int )> fIn ) : f( std::move( fIn ) ) {}
+				double operator()( double psi ) const override { return f( psi, 0 ); }
+				double prime( double psi ) const override { return f( psi, 1 ); }
+				double doublePrime( double psi ) const override { return f( psi, 2 ); }
+
+			private:
+				std::function<double( double, int )> f;
+		};
+
+		/*
+		 * A PIECEWISE CUBIC OF THE SPLINE'S AS A SplineProfile, EXACTLY: its
+		 * Hermite knots at 0, the spline's own knots in Psi and 1, between which
+		 * it is a cubic (hermiteKnots()). A SplineProfile has a device form, so
+		 * the integrand it enters is a PsiIntegrand the plasma loops' kernel
+		 * evaluates (GradShafranovSolver::assemblePsiIntegrandColumn(), M-386).
+		 * Past [ 0, 1 ] it continues as a table does; the pins read Psi > 0, and
+		 * Psi > 1 only by a located axis's overshoot.
+		 */
+		std::shared_ptr<Profile const> hermiteOf( ToroidalFieldSpline const &spline,
+		                                          std::function<double( double, int )> f )
+		{
+			std::vector<double> at{ 0.0 };
+			std::vector<double> const &labels = spline.labels();
+			for ( auto label = labels.rbegin(); label != labels.rend(); ++label )
+				at.push_back( 1.0 - *label );
+			at.push_back( 1.0 );
+			return std::make_shared<SplineProfile const>( hermiteKnots( SplineFunction( std::move( f ) ), at ) );
+		}
+
+		std::shared_ptr<Profile const> squareOf( ToroidalFieldSpline const &spline )
+		{
+			return hermiteOf( spline, [ &spline ]( double psi, int d ) { return spline( psi, d ); } );
+		}
+
+		/// `-int f phi_i/R` of @a f, summed over the potential block: `-int f/R`.
+		double columnSum( GradShafranovSolver &solver, mfem::Vector const &state, PsiIntegrand const &f,
+		                  mfem::Vector &column )
+		{
+			solver.assemblePsiIntegrandColumn( state, f, column );
+			return sumInDouble( column, solver.fluxSpace().GetVSize(), nullptr, 0,
+			                    solver.potentialSpace().GetVSize() );
+		}
 	}
 
 	double plasmaCells( mfem::Mesh const &mesh )
@@ -66,24 +115,15 @@ namespace meq
 	double deliveredToroidalFlux( GradShafranovSolver &solver, ToroidalFieldSpline const &field,
 	                              double sign )
 	{
-		double const boundary = solver.psiBoundary();
-		double const span = solver.psiAxis() - boundary;
+		// g( Psi ) = sqrt( G ), G the spline's Hermite form: a PsiIntegrand, on
+		// the device under one.
+		std::shared_ptr<Profile const> const square = squareOf( field );
+		PsiIntegrand f;
+		f.kind = PsiIntegrandKind::Root;
+		f.square = square.get();
 		mfem::Vector const state( solver.state() );
 		mfem::Vector assembled;
-		// -int f phi_i/R over the potential dofs; summed, -int f/R.
-		solver.assembleSourceDerivative( state,
-			[ &field, boundary, span ]( double, double, double psi )
-			{
-				if ( span == 0.0 )
-					return 0.0;
-				double const normalised = ( psi - boundary )/span;
-				if ( !( normalised > 0.0 ) )
-					return 0.0;
-				double const value = field( normalised );
-				return value > 0.0 ? std::sqrt( value ) : 0.0;
-			}, assembled );
-		return -sign*sumInDouble( assembled, solver.fluxSpace().GetVSize(), nullptr, 0,
-		                          solver.potentialSpace().GetVSize() );
+		return -sign*columnSum( solver, state, f, assembled );
 	}
 
 	SafetyFactorEquilibrium::SafetyFactorEquilibrium( GradShafranovSolver &solverIn,
@@ -433,45 +473,32 @@ namespace meq
 			// moves too, and g( 0 ) = R0B0 is not zero there, so the
 			// quadrature's own edge is what this does not carry (TODO, *The
 			// flux pin beside a free plasma edge*).
-			double const boundary = solver.psiBoundary();
-			double const span = psiAxis - boundary;
-			auto inside = [ &spline, boundary, span ]( double psi, double &x, double &g )
-			{
-				x = ( psi - boundary )/span;
-				if ( !( x > 0.0 ) )
-					return false;
-				double const value = spline( x );
-				if ( !( value > 0.0 ) )
-					return false;
-				g = std::sqrt( value );
-				return true;
-			};
+			/*
+			 * THE FOUR INTEGRANDS AS DATA (PsiIntegrandKind): G'/( 2 g span ),
+			 * Psi G'/( 2 g span ) and each cardinal H_j/( 2 g ), G and H_j the
+			 * spline's Hermite forms, so each column is the plasma loops' kernel
+			 * under a Device (assemblePsiIntegrandColumn(), M-386).
+			 */
+			std::shared_ptr<Profile const> const square = squareOf( spline );
+			PsiIntegrand slopeIntegrand;
+			slopeIntegrand.kind = PsiIntegrandKind::SlopeOverRoot;
+			slopeIntegrand.square = square.get();
+			PsiIntegrand psiSlopeIntegrand = slopeIntegrand;
+			psiSlopeIntegrand.kind = PsiIntegrandKind::PsiSlopeOverRoot;
 			mfem::Vector slope, slopeTimesPsi;
-			solver.assembleSourceDerivative( state,
-				[ &spline, &inside, span ]( double, double, double psi )
-				{
-					double x = 0.0, g = 0.0;
-					return inside( psi, x, g ) ? spline( x, 1 )/( 2.0*g*span ) : 0.0;
-				}, slope );
-			solver.assembleSourceDerivative( state,
-				[ &spline, &inside, span ]( double, double, double psi )
-				{
-					double x = 0.0, g = 0.0;
-					return inside( psi, x, g ) ? x*spline( x, 1 )/( 2.0*g*span ) : 0.0;
-				}, slopeTimesPsi );
-			double const againstAxis = -sumInDouble( slopeTimesPsi, potentialStart, nullptr, 0, potentialSize );
-			double const againstBoundary = layout.boundary >= 0
-				? -sumInDouble( slope, potentialStart, nullptr, 0, potentialSize ) - againstAxis : 0.0;
+			double const slopeSum = columnSum( solver, state, slopeIntegrand, slope );
+			double const againstAxis = -columnSum( solver, state, psiSlopeIntegrand, slopeTimesPsi );
+			double const againstBoundary = layout.boundary >= 0 ? -slopeSum - againstAxis : 0.0;
 			for ( std::size_t j = 0; j < m; ++j )
 			{
+				std::shared_ptr<Profile const> const cardinal = hermiteOf( spline,
+					[ &spline, j ]( double psi, int d ) { return spline.cardinal( j, psi, d ); } );
+				PsiIntegrand ratio;
+				ratio.kind = PsiIntegrandKind::RatioOverRoot;
+				ratio.square = square.get();
+				ratio.numerator = cardinal.get();
 				mfem::Vector direct;
-				solver.assembleSourceDerivative( state,
-					[ &spline, &inside, j ]( double, double, double psi )
-					{
-						double x = 0.0, g = 0.0;
-						return inside( psi, x, g ) ? spline.cardinal( j, x )/( 2.0*g ) : 0.0;
-					}, direct );
-				double const valueTerm = -sumInDouble( direct, potentialStart, nullptr, 0, potentialSize );
+				double const valueTerm = -columnSum( solver, state, ratio, direct );
 				double const fieldTerm = -sumInDouble( slope, potentialStart, &dx[ j ], potentialStart,
 				                                       potentialSize );
 				out.measured[ j ] = options.sign*( valueTerm + fieldTerm - dAxis[ j ]*againstAxis
