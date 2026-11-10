@@ -26420,3 +26420,45 @@ cuda-only. 4920 s wall.
 77.3 s), 68.9 s after (50.7 s); misfit 1.394e-10 then 1.393e-10. The
 remaining extraction time is the tracer.
 
+### M-QR-13
+
+**ON THE CARD THE q-DRIVEN LOOP AND ITS TANGENT REPRODUCE THE HOST TO
+ROUND-OFF, AND ITS OUTER COUNT REPEATS; WHAT DOES NOT REPEAT RUN TO RUN IS
+cuDSS.** Branch `q-refining-fit` after merging `a1e930a`,
+`builds/q-refining-fit-cuda` (double, against `../../mfem/install`, CUDA,
+`sm_75`), RTX 2070 SUPER, `MKL_NUM_THREADS=1`, loaded machine.
+
+| | result |
+|---|---|
+| `ResidentIterateTests`' `theDoubleDotIsTheHostSumInDouble` | `doubleDotKernel` against a long double sum of 40,000 terms: 3.0e-12 and 3.1e-13 apart on the card, 3.5e-10 and 2.0e-11 under `debug` (its sequential reduce), against the rigorous bound 3.5e-7 and 4.7e-8 |
+| `LinearisedSolveDevice_cuda` | green; the borders against re-solved differences 2e-15 to 1e-13; `setInitialState()`'s warm start at 1.5e-16 of the cold residual in 0 iterations (1.9e-4 and 4 on the host, unexplained, `TODO`) |
+| `QDrivenFreeEdgeDevice_cuda` | the limited round trip, 5 iterations, `g²` 9.6e-12, 32 s |
+| `SafetyFactorSolverDevice_cuda` | the box round trip, green, 137 s |
+| `DeviceParity` | green, all five cases on cpu, debug and cuda |
+
+**The driver**, DeviceParity's q-driven case (level 0, ToroidalFlux,
+`OMP_NUM_THREADS=1`), serial routes: under `cuda` 6 Gauss-Newton iterations,
+7 equilibria, 31 inner iterations, misfit 4.891e-4, as on the host; `ψ`
+6.3e-13, `B` 2.9e-11, `q` 1.2e-11 from the host's; 22.2 s wall on both. Under
+`debug` on this build, which runs MEQ's kernels where the host-only build runs
+their fallbacks, the loop is 1.1e-12 in `ψ` and 2.1e-11 in `q` from the host,
+not bit-equal, where the plain `flux-surfaces` solve on the same routes is
+equal to the bit (70 of 70 variables): the q loop's kernels -- the point
+routes and the plasma loops of M-386, whose geometry is the coordinate
+field's -- differ from the host loops at round-off, as M-386 records for
+them. On the host-only build `debug` is equal to the bit (M-QR-12).
+
+**Repeatability, the coordinator's (a).** Three back-to-back `cuda` runs on
+the default routes: 6 iterations and 7 equilibria each time, the removable
+residual's history identical to two digits. `MEQ_STAGE_CHECKSUM=1`: the
+toroidal system's input is identical, and the first stage that differs between
+runs is the bordered Newton's first `border.column`, the trace solve's output
+-- equal norms, different bits -- and every stage after it. With
+`TraceSolver = "pardiso"` under `cuda`, all 103 stages of two runs are equal to
+the bit. So the run-to-run variation is **cuDSS**, the driver's default trace
+solver under a Device, not the q loop; whether it is cuDSS's own reductions or
+its pivoting is not measured. An outer count that lands either side of a
+threshold on round-off -- main's KINSOL loop, 3 or 4 iterations -- is that
+variation crossing a stopping test; the Gauss-Newton here stops on a floor
+two orders below its last step (1.1e-10 against 1e-9).
+

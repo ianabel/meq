@@ -225,7 +225,15 @@ namespace
 		std::string psiAxis;
 		std::string psiBoundary;
 		std::string xPoint;
+		/// The Newton iterations of the run's last solve -- "converged in N
+		/// Newton iterations" -- which on a q-driven run is the re-solve at
+		/// the answer, not the outer loop.
 		std::string newton;
+		/// THE q-DRIVEN OUTER LOOP'S WORK, "iterations/equilibria" from its
+		/// summary line, empty where there is no loop. Named apart from
+		/// `newton` because a parse of "converged in" once read the outer
+		/// count as Newton's.
+		std::string outer;
 		/// The family's surface count, empty where no family was written.
 		std::string surfaces;
 
@@ -271,6 +279,18 @@ namespace
 		             || text[ i ] == '+' || text[ i ] == 'e' ) )
 			++i;
 		return text.substr( begin, i - begin );
+	}
+
+	/// The integer printed just before @a marker, or empty.
+	std::string countBefore( std::string const &text, std::string const &marker )
+	{
+		std::size_t const at = text.find( marker );
+		if ( at == std::string::npos )
+			return {};
+		std::size_t begin = at;
+		while ( begin > 0 && std::isdigit( static_cast<unsigned char>( text[ begin - 1 ] ) ) )
+			--begin;
+		return text.substr( begin, at - begin );
 	}
 
 	/// The family's printed line: its surface count, empty where none was written.
@@ -324,6 +344,9 @@ namespace
 		run.psiBoundary = after( text, "psi_bnd = " );
 		run.xPoint = after( text, "at the X-point ( " );
 		run.newton = after( text, "converged in " );
+		std::string const outerIterations = countBefore( text, " Gauss-Newton iterations, " );
+		if ( !outerIterations.empty() )
+			run.outer = outerIterations + "/" + countBefore( text, " equilibria solved" );
 		run.surfaces = familyLine( text );
 		run.configured =
 			text.find( std::string( "Device configuration: " ) + device )
@@ -409,8 +432,8 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 	Case const cases[] = { rectangle, diiid, moving, surfaces, qDriven };
 
 	std::printf( "\n  A DEVICE CHANGES NEITHER THE ANSWER NOR THE WORK\n" );
-	std::printf( "    %-18s %-8s %6s %8s %16s %10s\n",
-	             "case", "device", "exit", "s", "psi_ax", "Newton" );
+	std::printf( "    %-18s %-8s %6s %8s %16s %10s %12s\n",
+	             "case", "device", "exit", "s", "psi_ax", "Newton", "outer/eqs" );
 
 	for ( Case const &which : cases )
 	{
@@ -438,13 +461,15 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 				             "arm is the one it was added for" );
 				continue;
 			}
-			std::printf( "    %-18s %-8s %6d %8.1f %16s %10s\n",
+			std::printf( "    %-18s %-8s %6d %8.1f %16s %10s %12s\n",
 			             which.stem, pair.first, pair.second->status,
 			             pair.second->seconds,
 			             pair.second->psiAxis.empty()
 			                 ? "-" : pair.second->psiAxis.c_str(),
 			             pair.second->newton.empty()
-			                 ? "-" : pair.second->newton.c_str() );
+			                 ? "-" : pair.second->newton.c_str(),
+			             pair.second->outer.empty()
+			                 ? "-" : pair.second->outer.c_str() );
 		}
 		if ( !card.configured )
 			std::printf( "    %-18s %-8s %s\n", which.stem, "cuda",
@@ -566,6 +591,10 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		                + " Newton iterations under a device against "
 		                + host.newton + " on the host -- the answer may be "
 		                  "right and the work is not (MEASUREMENTS.md M-187)" );
+		BOOST_TEST( device.outer == host.outer,
+		            std::string( which.stem ) + ": the q-driven outer loop took "
+		                + device.outer + " (iterations/equilibria) under a device "
+		                  "against " + host.outer + " on the host" );
 
 		/*
 		 * AND THE SAME FOUR AGAINST THE CARD, WHICH IS A DIFFERENT QUESTION
@@ -611,6 +640,10 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		            std::string( which.stem ) + ": " + card.newton
 		                + " Newton iterations under CUDA against "
 		                + host.newton + " on the host" );
+		BOOST_TEST( card.outer == host.outer,
+		            std::string( which.stem ) + ": the q-driven outer loop took "
+		                + card.outer + " (iterations/equilibria) under CUDA "
+		                  "against " + host.outer + " on the host" );
 		BOOST_TEST( card.surfaces == host.surfaces,
 		            std::string( which.stem ) + ": the family has '" + card.surfaces
 		                + "' surfaces under CUDA against '" + host.surfaces
@@ -634,10 +667,11 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		 * recorded in MEASUREMENTS.md rather than paid for on every ctest.
 		 */
 		Run const forced = solve( which, "cuda", true );
-		std::printf( "    %-18s %-8s %6d %8.1f %16s %10s\n", which.stem,
+		std::printf( "    %-18s %-8s %6d %8.1f %16s %10s %12s\n", which.stem,
 		             "cuda+f", forced.status, forced.seconds,
 		             forced.psiAxis.empty() ? "-" : forced.psiAxis.c_str(),
-		             forced.newton.empty() ? "-" : forced.newton.c_str() );
+		             forced.newton.empty() ? "-" : forced.newton.c_str(),
+		             forced.outer.empty() ? "-" : forced.outer.c_str() );
 
 		BOOST_TEST( forced.status == 0,
 		            std::string( which.stem ) + " exits "
@@ -662,5 +696,9 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		            std::string( which.stem ) + ": " + forced.newton
 		                + " Newton iterations with the device routes forced "
 		                  "against " + host.newton + " on the host" );
+		BOOST_TEST( forced.outer == host.outer,
+		            std::string( which.stem ) + ": the q-driven outer loop took "
+		                + forced.outer + " with the device routes forced against "
+		                + host.outer + " on the host" );
 	}
 }

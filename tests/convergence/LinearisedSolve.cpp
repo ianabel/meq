@@ -489,10 +489,12 @@ BOOST_AUTO_TEST_CASE( theInitialStateIsWhereTheSolveStarts )
 	std::printf( "\n  setInitialState(): the first residual %.3e against the cold start's %.3e, %d iterations "
 	             "against %d\n", first, scale, again.newtonIterations(), base->solver->newtonIterations() );
 	/*
-	 * Not at zero: the fresh solver locates its axis afresh and starts its
-	 * labels at setSource()'s, so the first residual is 1.9e-4 of the cold
-	 * start's on the host, in 4 iterations against the cold start's 5. From
-	 * the guess it is the cold start's own.
+	 * Not at zero on the host: the first residual is 1.9e-4 of the cold
+	 * start's, in 4 iterations against the cold start's 5, where on the card
+	 * it is 1.5e-16 in none. Which part of the host's first residual that is
+	 * -- the axis the fresh solver locates afresh is the suspect -- is not
+	 * measured (TODO, *The q-driven loop under a Device*). From the guess it
+	 * is the cold start's own.
 	 */
 	BOOST_TEST( first < 1.0e-2*scale, "a converged state handed to setInitialState() starts at "
 	            << first << ", the cold start's " << scale << ": the solve began from the guess" );

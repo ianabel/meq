@@ -555,7 +555,18 @@ Raised 2026-11-09 (MEASUREMENTS.md M-QR-12).
   factorisation; and the Gauss-Newton's dense QR and SVD, ( m + 1 ) x m with
   m at most 128. Under `debug` on the host fallbacks the loop reproduces the
   host to the bit on the serial routes and costs 45x to 66x its wall, so
-  DeviceParity runs it at level 0. The cuda arm is CUDA_BUILD_PENDING.
+  DeviceParity runs it at level 0. On the card it reproduces the host to
+  round-off and repeats its outer count; its stages vary run to run from the
+  first cuDSS trace solve on, and do not under PARDISO (M-QR-13).
+
+  A WARM START IS CLOSER ON THE CARD THAN ON THE HOST, unexplained: a
+  converged state handed to a fresh solver by setInitialState() starts at
+  1.9e-4 of the cold start's residual on the host and under `debug`, and
+  converges in 4 iterations, but at 1.5e-16 in none under `cuda`
+  (LinearisedSolve's theInitialStateIsWhereTheSolveStarts). The fresh
+  solver's first axis location is the suspect and is not measured; if it is
+  a host-side overwrite of part of the iterate instead, every warm start on
+  the host pays for it.
 
 ================================================================================
 The q-driven solve's scale pins: what is not measured
