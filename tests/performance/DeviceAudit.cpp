@@ -244,7 +244,7 @@ int main( int argc, char **argv )
 		} );
 		row( "buildContinuousFields", continuous, residualPerCall );
 
-		// The interpolant's two halves (M-DA-4): its quadratures, once per set
+		// The interpolant's two halves (M-385): its quadratures, once per set
 		// of spaces, and its application, per extraction, on either route.
 		std::unique_ptr<meq::ContinuousInterpolant> interpolant;
 		Timing const quadratures = timeIt( "interpolantBuild", repeats, [ & ]

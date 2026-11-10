@@ -470,7 +470,7 @@ foreach(_device IN LISTS _da_devices)
 		set_tests_properties(TangentConvergenceDevice_${_device} PROPERTIES
 			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
 	endif()
-	# THE CONTINUOUS FIELDS ON THE DEVICE ROUTE (M-DA-4): the blocks against
+	# THE CONTINUOUS FIELDS ON THE DEVICE ROUTE (M-385): the blocks against
 	# the quadratures, the kernel against the host loop (to the bit under
 	# `debug`; it skips loudly on a build without device kernels), and the
 	# fields' continuity and moments as buildContinuousFields() makes them

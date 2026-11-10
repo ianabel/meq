@@ -45,7 +45,7 @@
  * mesh, so ContinuousInterpolant does the quadratures and the moment solves
  * once and applies the result as matrices, on the device under one: the
  * solver keeps one, and buildContinuousFields() builds one per call
- * (MEASUREMENTS.md M-DA-4).
+ * (MEASUREMENTS.md M-385).
  */
 
 #include <functional>
@@ -138,7 +138,7 @@ namespace meq
 	 * is then three gathered matrix products per field, on the device under
 	 * one (applyLinearBlocksOnDevice()) and on the host otherwise, the same
 	 * loop either way, so `--device debug` reproduces the host to the bit.
-	 * MEASUREMENTS.md M-DA-4.
+	 * MEASUREMENTS.md M-385.
 	 *
 	 * The vertex value is the mean of psi*'s corner values over the elements
 	 * meeting there, folded into one row per vertex whose terms run in element

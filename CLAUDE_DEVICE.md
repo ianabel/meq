@@ -228,7 +228,7 @@ are these:
 * **`meq::ContinuousInterpolant`** is the extraction's continuous pair `ψ̃`,
   `q̃` as a linear map: each entity's moment quadrature done once per set of
   spaces and kept as blocks, applied by one kernel per stage
-  (→ **[M-DA-4](MEASUREMENTS.md#m-da-4)**).
+  (→ **[M-385](MEASUREMENTS.md#m-385)**).
 * **`meq::DeviceConstants`** holds the per-mesh constants.
 * **`Crossings`** and **`StageChecksum`** are the two instruments above, and
   neither is part of the solve.

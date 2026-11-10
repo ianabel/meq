@@ -764,7 +764,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr;-fmad=false")
 		# ContinuousFieldDevice.cpp takes it too: its one kernel is the host
 		# route's loop over meq::LinearBlocks, operation for operation, and its
-		# acceptance under `debug` is equality to the bit (M-DA-4).
+		# acceptance under `debug` is equality to the bit (M-385).
 		# ResidentIterateDevice.cpp shares that flag for that reason: its five
 		# plasma loops, its gather and its ordered dot reproduce host loops
 		# operation for operation, against host-computed radii and weights, so

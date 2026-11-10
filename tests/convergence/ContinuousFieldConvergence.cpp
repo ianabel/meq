@@ -425,7 +425,7 @@ BOOST_AUTO_TEST_CASE( theBlocksAreTheQuadrature )
  * kernel runs on the host's arithmetic and the two agree to the bit; on a
  * card, to its own rounding of the same sums. Needs a Device
  * (MEQ_TEST_DEVICE) and a build with device kernels, and says so where either
- * is missing. MEASUREMENTS.md M-DA-4.
+ * is missing. MEASUREMENTS.md M-385.
  */
 BOOST_AUTO_TEST_CASE( theDeviceRouteIsTheHostRoute, *meq::tests::requiresDeviceKernels() )
 {
