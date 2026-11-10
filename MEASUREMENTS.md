@@ -25912,10 +25912,11 @@ and 2,140, 55.2 and 53.7 off), the per-element route's figures.
 * **On the card the trace is the floor, and it is cuDSS's**: 0.9–3.3ε,
   growing with `n`, against PARDISO's 0.41–0.43ε at every mesh. The card's
   refined `ψ_h` and `ψ*` are therefore 1.8–6× the host's.
-* **`ψ̃` improves only 1.1–1.9×** and is now the noisiest potential the
-  extraction reads, 3× the trace at `k = 2` and 13× at `k = 3` on the host.
-  It is MEQ's own moment interpolant of `ψ*`, `ψ̂` and `q*`, all three at the
-  trace's level now, so the amplification is the interpolant's (`TODO`).
+* **`ψ̃` improves only 1.1–1.9×** at `b0870a1`, 3× the trace at `k = 2` and
+  13× at `k = 3` on the host: MEQ's own moment interpolant of `ψ*`, `ψ̂` and
+  `q*`, all three at the trace's level, so the amplification was the
+  interpolant's. With main's M-385 interpolant, its quadratures in double,
+  it is 1.6–1.8× the trace (d).
 
 **(b) The normalised (NPC) box, `n = 16`, `k = 2`** (σ ×1e-8; off → on):
 
@@ -25953,6 +25954,18 @@ at a fixed point (8.4e-8), which is not understood (`TODO`). On the card at
 `n = 12` the axis still flips between the two elements beside `z = 0` (4 times
 in 21 states), from cuDSS's noisier trace, and the finder's family reads
 1.75e-4 there.
+
+**(d) `ψ̃` on M-385's interpolant** (main `cee0a7b` merged, the same runs
+otherwise; host, ×1e-8 of its largest value, off → on): 25.0 → 7.79, 23.7 →
+7.89, 22.2 → 7.85 and 30.7 → 8.43 at `n` = 12, 16, 32 (`k = 2`) and `k = 3`,
+1.6–1.8× the trace. **Its value at the located axis stays noisy**: 9.8e-7,
+6.5e-7, 2.1e-6 and 3.7e-7 of the span on, against 1.0e-7 – 1.6e-7 at a fixed
+point, so the family labelled by `ψ̃` at the axis reads 2.08e-5, 1.35e-5,
+4.31e-5 and 8.36e-6 on against 1.24e-5, 7.42e-6, 2.48e-5 and 1.91e-5 off,
+while the one at a fixed point reads 2.7e-6 – 5.7e-6. The located point moves
+0.5–1.4 µm between states with the refinement on; that motion times `ψ̃`'s
+gradient at `q_h`'s root, where `ψ̃`'s own stationary point need not be, is
+the candidate, not measured (`TODO`).
 
 **A defect the refinement exposed, in MEQ's extraction.** With the refinement
 on, the host's `n = 12, k = 2` case threw *"no crossing of psi = … on the ray

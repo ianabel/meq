@@ -1171,10 +1171,10 @@ checked bit for bit against the fields MFEM recovers.
 * **What is left in single is the trace, `q_h`'s `L/h`, and `ψ̃`.** On the card
   the linear path's trace is cuDSS's one solve, 0.9–3.3ε against PARDISO's
   0.4ε, growing with `n`, and with the recovery refined it is the card's floor.
-  `ψ̃`, MEQ's own moment interpolant, sits at 3× the trace at `k = 2` and 13×
-  at `k = 3` on the host, now the noisiest potential the extraction reads, so
-  the family labelled by `ψ̃` at the axis moves about as much as before
-  (9.8e-6 to 4.4e-5) while the one labelled by the finder's `ψ_h` falls 25–95×
+  `ψ̃`'s dofs sit at 1.6–1.8× the trace with M-385's interpolant, but its
+  value at the located axis is 3–13× its value at a fixed point, so the family
+  labelled by `ψ̃` at the axis moves about as much as before (8.4e-6 to
+  4.3e-5) while the one labelled by the finder's `ψ_h` falls 30–100×
   (M-LR-1; `TODO`, *Left open by the local refinement*).
 * **Two single-precision assertions passed only on the unrefined recovery's
   noise** (M-LR-4): `ExtensionConvergence`'s *`ψ*` below `ψ_h` on the finest

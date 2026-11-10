@@ -1559,20 +1559,22 @@ places that are not MFEM's local solves.
      costed, and whether cuDSS's own refinement setting reaches it is not
      known.
 
-  2. psi~ IS NOW THE NOISIEST POTENTIAL THE EXTRACTION READS.  Host, single,
-     refinement on: psi~'s sigma is 3x the trace at k = 2 (1.55e-7 against
-     5.2e-8, n = 12 to 32) and 13x at k = 3, where psi* is at 1.1 to 1.2x.
-     psi~ is MEQ's own moment interpolant (ContinuousField.cpp) of psi*,
-     psihat and q*, all three now at the trace's level, so the
-     amplification is in the interpolant: its edge and cell moments, solved
-     in real_t, are the first suspects, not yet measured.  It is what the
-     family labelled by psi~ at the axis (meq::labelledAxis() with no psi_ax
-     unknown) still moves by: 9.8e-6 to 4.4e-5 between neighbouring states,
-     1.4 to 1.7x more than with the refinement off at k = 2 and 2x less at
-     k = 3, while the family labelled by the finder's psi_h falls 25 to 95x
-     to 4.7e-6 to 9.6e-6, and the one at a fixed axis point 2 to 3x to 3.5e-6
-     to 4.0e-6.  psi~'s value at the axis is noisier than at a fixed point
-     (6.2e-7 against 8.4e-8 of the span, n = 16), which is not understood.
+  2. psi~ AT THE LOCATED AXIS IS NOISIER THAN psi~ ANYWHERE ELSE, AND IT
+     LABELS THE FAMILY.  Host, single, refinement on, with M-385's
+     interpolant (quadratures in double): psi~'s dofs are at 1.6 to 1.8x the
+     trace, but its value at the located axis is 3.7e-7 to 2.1e-6 of the
+     span, against 1.0e-7 to 1.6e-7 at a fixed point (n = 12 to 32, k = 2
+     and 3).  That is what the family labelled by psi~ at the axis
+     (meq::labelledAxis() with no psi_ax unknown) moves by: 8.4e-6 to
+     4.3e-5 between neighbouring states, no better than with the refinement
+     off at k = 2, while the family labelled by the finder's psi_h falls 30
+     to 100x to 4.4e-6 to 9.6e-6, and the one at a fixed axis point to 2.7e-6
+     to 5.7e-6 (M-LR-1).  The candidate, not measured: the located point
+     still moves 0.5 to 1.4 micrometres between states, and psi~'s own
+     stationary point need not be q_h's root, so psi~'s gradient there times
+     that motion.  If so, the label wants psi~ at psi~'s own stationary
+     point, or psi_h's value, which is now the quieter of the two; M-371 (d)
+     chose psi~ for accuracy, which single does not change.
 
 
 ================================================================================
