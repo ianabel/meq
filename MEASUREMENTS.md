@@ -26312,3 +26312,51 @@ on a q-driven run that converges (`examples/limited-tokamak.toml` with an
 invented `q` forms its first Jacobian in 0.6 s and then has every trial
 refused, `TODO`); the miss along the `h`-and-knots diagonal on a free edge.
 
+### M-QR-12
+
+**UNDER A DEVICE `setInitialState()` STARTED EVERY SOLVE FROM THE GUESS; FIXED,
+THE q-DRIVEN LOOP UNDER `--device debug` REPRODUCES THE HOST TO THE BIT ON THE
+SERIAL ROUTES.** Branch `q-refining-fit` after merging `b0870a1` and
+`cee0a7b`, `builds/q-refining-fit` (double, against `install-nocuda`, so the
+`debug` arm runs the host fallbacks), `MKL_NUM_THREADS=1`; a loaded machine
+(load 13 to 19, other agents' suites).
+
+**The defect.** `prepare()` copied `setInitialState()`'s iterate into
+`solution` device-aware, leaving it on the device, while `darcyFlux`,
+`potentialGf` and `traceGf` -- `MakeRef`'d into `solution` and written on the
+host by the guess seeding just before -- kept host flags; the trace datum,
+projected through `traceGf`, then put the guess back. LinearisedSolve's X-point
+case on its `debug` arm, `MEQ_TEST_SERIAL_ROUTES=1`: XP-2's pinned solve
+reproduced the host to every printed digit (`ψ_ax` 2.8603984193e-01, `|x|`
+2.4908782833e+01), and the X-point solve handed its state started at a
+residual of 5.5e-1 -- the cold start's -- where its dense corner is singular
+(*The X-point border from a cold start*, `TODO`). Copied on the host and the
+aliases synced, as `solve()` ends: the case is the host's to every printed
+digit on `debug`, the border unknowns to 6e-14 of re-solved differences.
+`theInitialStateIsWhereTheSolveStarts` asserts it on every arm: a converged
+state handed to a fresh solver starts at 1.9e-4 of the cold start's residual
+and takes 4 iterations against 5, on the host and on `debug` alike. The
+q-driven loop's warm starts and the driver's same-mesh restart
+(`Run.cpp`) both go through it.
+
+**cpu against debug, the driver.** `examples/q-driven.toml` with the
+ToroidalFlux pin of DeviceParity's case (2.4911634 Wb), `RefinementLevels = 0`,
+`OMP_NUM_THREADS=1`:
+
+| routes | `debug` against `cpu` | wall, cpu / debug |
+|---|---|---|
+| default (`AssemblyMode`, `TraceAssemblyMode` serial; local factorisation batched under the Device) | `ψ` 1.3e-12, `B` 5.7e-11, flux coefficients 5.3e-11 apart; 23 of 87 variables differ | 28 s / 1254 s |
+| `LocalFactorMode = "serial"` too | **every variable and attribute of the `.nc` and the `_surfaces.nc` equal to the bit** but the configuration's file name | 16 s / 1081 s |
+
+Both converge in 6 Gauss-Newton steps, 7 equilibria, 31 inner iterations,
+misfit 4.891e-4 at the knots. Under `debug` the loop is 45x to 66x the host's,
+extraction 609 s against 9.9 s; at level 1 it did not finish in 50 minutes
+against 70 s on the host, so DeviceParity's q-driven case runs on level 0.
+
+**The kept interpolant.** `qOverG()` and the tangent's fields through
+`solver.continuousInterpolant().apply()` in place of the free
+`buildContinuousFields()` (M-385): `examples/q-driven.toml` as shipped, host,
+`OMP_NUM_THREADS=2`, 95.0 s and 104.6 s wall before (273 extractions 69.5 s,
+77.3 s), 68.9 s after (50.7 s); misfit 1.394e-10 then 1.393e-10. The
+remaining extraction time is the tracer.
+
