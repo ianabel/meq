@@ -225,6 +225,12 @@ are these:
   reproducing its host loop to the bit.
 * **`meq::SourceView`** is the POD form of the source.
 * **`meq::DeviceRows`** is the bordered rows' mirror.
+* **`meq::PsiIntegrand`** is a function of the normalised flux as data: the
+  delivered toroidal flux's integrand and the `q`-driven pin rows' functions
+  of it, integrated and scattered in the plasma loops' kernels. A caller's
+  lambda takes the point route instead -- the potential at every point from
+  a kernel, the lambda on the host -- which is the interim
+  (→ **[M-386](MEASUREMENTS.md#m-386)**, `TODO`).
 * **`meq::ContinuousInterpolant`** is the extraction's continuous pair `ψ̃`,
   `q̃` as a linear map: each entity's moment quadrature done once per set of
   spaces and kept as blocks, applied by one kernel per stage

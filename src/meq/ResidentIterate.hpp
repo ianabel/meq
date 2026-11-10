@@ -7,6 +7,7 @@
 
 #include "mfem.hpp"
 
+#include <cmath>
 #include <vector>
 
 /**
@@ -83,8 +84,98 @@ namespace meq
 		/// Scattered: `-( w W ) dF/dpsi_ax/R phi_j`. `assembleNormalisationColumn()`.
 		AxisColumn = 4,
 		/// @copydoc AxisColumn, against `psi_bnd`.
-		BoundaryColumn = 5
+		BoundaryColumn = 5,
+		/// Scattered: `-( w W ) f( Psi )/R phi_j`, f the loop view's
+		/// PsiIntegrandView: assembleSourceDerivative() of a function of the
+		/// normalised flux with a device form (M-386).
+		PsiIntegrandColumn = 6,
+		/// Per element, TWO extremes: the least and the greatest psi (with
+		/// psi_c) over the element's points inside the plasma.
+		/// sourceTableReach().
+		TableReach = 7
 	};
+
+	/// Which function of `G = g^2` a PsiIntegrandView is.
+	enum class PsiIntegrandKind : int
+	{
+		Root = 0,              ///< g
+		SlopeOverRoot = 1,     ///< G'/( 2 g span )
+		PsiSlopeOverRoot = 2,  ///< Psi G'/( 2 g span )
+		RatioOverRoot = 3      ///< H/( 2 g ), H the numerator profile
+	};
+
+	/**
+	 * A FUNCTION OF THE NORMALISED FLUX THAT A KERNEL CAN EVALUATE: the
+	 * delivered toroidal flux's integrand `g( Psi )` and the three the q-driven
+	 * pin rows differentiate it into, with `G = g^2` carried as a polynomial
+	 * (ascending coefficients, the q loop's fit) or as a profile's knots
+	 * (hermiteKnots(), a spline's). Zero where `Psi <= 0`, where `G <= 0` and
+	 * where the span vanishes, as the host lambdas it replaces are. No default
+	 * member initialisers, for meq::AxisCandidate's reason. M-386.
+	 */
+	struct PsiIntegrandView
+	{
+		int kind;
+		mfem::real_t psiAxis;
+		mfem::real_t psiBoundary;
+		int polynomialCount;
+		mfem::real_t polynomial[ 12 ];
+		ProfileView square;
+		ProfileView numerator;
+	};
+
+	/// The integrand at @a psi, without the 1/R the quadrature carries; the
+	/// same arithmetic on the host and the device.
+	MFEM_HOST_DEVICE inline mfem::real_t psiIntegrand( PsiIntegrandView const &v, KnotView const *knots,
+	                                                   mfem::real_t psi )
+	{
+		mfem::real_t const span = v.psiAxis - v.psiBoundary;
+		if ( span == mfem::real_t( 0 ) )
+			return mfem::real_t( 0 );
+		mfem::real_t const x = ( psi - v.psiBoundary )/span;
+		if ( !( x > mfem::real_t( 0 ) ) )
+			return mfem::real_t( 0 );
+		mfem::real_t value = mfem::real_t( 0 );
+		mfem::real_t slope = mfem::real_t( 0 );
+		if ( v.polynomialCount > 0 )
+		{
+			mfem::real_t power = mfem::real_t( 1 );
+			mfem::real_t lower = mfem::real_t( 1 );
+			for ( int j = 0; j < v.polynomialCount; ++j )
+			{
+				value += v.polynomial[ j ]*power;
+				if ( j > 0 )
+				{
+					slope += mfem::real_t( j )*v.polynomial[ j ]*lower;
+					lower *= x;
+				}
+				power *= x;
+			}
+		}
+		else
+		{
+			value = evaluateProfile( v.square, knots, x );
+			if ( v.kind == static_cast<int>( PsiIntegrandKind::SlopeOverRoot )
+			     || v.kind == static_cast<int>( PsiIntegrandKind::PsiSlopeOverRoot ) )
+				slope = evaluateProfilePrime( v.square, knots, x );
+		}
+		if ( !( value > mfem::real_t( 0 ) ) )
+			return mfem::real_t( 0 );
+		mfem::real_t const g = std::sqrt( value );
+		switch ( v.kind )
+		{
+			case static_cast<int>( PsiIntegrandKind::Root ):
+				return g;
+			case static_cast<int>( PsiIntegrandKind::SlopeOverRoot ):
+				return slope/( mfem::real_t( 2 )*g*span );
+			case static_cast<int>( PsiIntegrandKind::PsiSlopeOverRoot ):
+				return x*slope/( mfem::real_t( 2 )*g*span );
+			case static_cast<int>( PsiIntegrandKind::RatioOverRoot ):
+				return evaluateProfile( v.numerator, knots, x )/( mfem::real_t( 2 )*g );
+			default:
+				return mfem::real_t( 0 );
+		}
+	}
 
 	/**
 	 * Everything one element's thread needs, as plain types and pointers.
@@ -110,6 +201,8 @@ namespace meq
 		mfem::real_t const *weight;
 		/// `elementDofs[ e*dofs + j ]`, the potential-space dof of local `j`.
 		int const *elementDofs;
+		/// PsiIntegrandColumn's function, its knots in `knots`.
+		PsiIntegrandView integrand;
 		mfem::real_t const *state;
 		int potentialStart;
 		int elements;
@@ -173,6 +266,28 @@ namespace meq
 			              mfem::real_t scale, mfem::Vector &out ) const;
 
 			/**
+			 * PsiIntegrandColumn: `-( w W ) f( Psi )/R phi_j` into a state-sized
+			 * @a out, over the plasma's elements with psi_c, @a knots
+			 * @a integrand's own table. Left DEVICE-VALID.
+			 */
+			bool scatterIntegrand( PsiIntegrandView const &integrand,
+			                       mfem::Array<KnotView> const &knots,
+			                       DeviceConstants const &constants,
+			                       mfem::Vector const &state, int potentialStart,
+			                       mfem::Vector &out ) const;
+
+			/**
+			 * `sum_q ( w W ) f( Psi )/R` per element over EVERY element, with
+			 * no psi_c and no plasma flag -- integrateOverDomain()'s domain,
+			 * at whatever rule these tables were prepared for -- each element
+			 * summed in double in rule order and stored once. Left DEVICE-VALID.
+			 */
+			bool integrateIntegrand( PsiIntegrandView const &integrand,
+			                         mfem::Array<KnotView> const &knots,
+			                         mfem::Vector const &potential, int potentialStart,
+			                         mfem::Vector &perElement ) const;
+
+			/**
 			 * The potential at every point of the rule prepare() built, beside
 			 * the point tables themselves: entry `e*pointsPerElement + q`, the
 			 * host loops' order. @a psi is left device-valid, and the tables
@@ -180,6 +295,18 @@ namespace meq
 			 * HostRead(). Summed over the element's dofs in the host's order.
 			 * @return false, having touched nothing, unless prepare() succeeded.
 			 */
+			/**
+			 * `out[ potentialStart + dof_j( e ) ] += factors[ e*Q + q ] phi_j( q )`,
+			 * point by point in rule order, element by element: the
+			 * scatter a host loop over this rule does with a pointwise factor
+			 * it computed itself. @a out keeps what it held and is left
+			 * DEVICE-VALID. What lets a host-evaluated integrand -- a
+			 * std::function nobody can run on a card -- have its element work
+			 * on the device (M-386).
+			 */
+			bool scatterPointFactors( mfem::Vector const &factors, int potentialStart,
+			                          mfem::Vector &out ) const;
+
 			bool pointValues( mfem::Vector const &potential, int potentialStart,
 			                  mfem::Vector &psi, mfem::Vector const *&radiusOut,
 			                  mfem::Vector const *&zOut,
@@ -265,6 +392,18 @@ namespace meq
 	 * The cold state's mask, which keeps the essential trace entries of the
 	 * iterate and nothing else.
 	 */
+	/// @copydoc plasmaElementKernel
+	bool pointScatterKernel( mfem::Vector const &shape, mfem::Array<int> const &elementDofs,
+	                         mfem::Vector const &factors, int elements, int quadPoints, int dofs,
+	                         int potentialStart, mfem::Vector &out );
+
+	/// @copydoc plasmaElementKernel
+	bool domainIntegrandKernel( PsiIntegrandView const &integrand, KnotView const *knots,
+	                            mfem::Vector const &shape, mfem::Array<int> const &elementDofs,
+	                            mfem::Vector const &radius, mfem::Vector const &weight,
+	                            mfem::Vector const &potential, int potentialStart,
+	                            int elements, int quadPoints, int dofs, mfem::Vector &perElement );
+
 	bool copyEntriesOnDevice( mfem::Vector const &source,
 	                          mfem::Array<int> const &indices,
 	                          mfem::Vector &destination );

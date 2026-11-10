@@ -1102,3 +1102,45 @@ BOOST_AUTO_TEST_CASE( a_read_past_a_table_is_reported_with_how_far )
 	BOOST_TEST( throughLabels.below == 0.0 );
 	BOOST_TEST( throughLabels.above == 0.2, boost::test_tools::tolerance( 1.0e-14 ) );
 }
+
+/*
+ * hermiteKnots() TURNS A PIECEWISE CUBIC INTO THE SplineProfile IT IS: value
+ * and slope at the breaks, which Hermite interpolation reproduces exactly
+ * between them -- gg' of a cubic spline in g^2 is the case it is for, a
+ * piecewise quadratic, and its device form follows (M-386).
+ */
+BOOST_AUTO_TEST_CASE( hermiteKnotsReproduceAPiecewiseCubic )
+{
+	// A spline-like piecewise cubic, C2 across its break at 0.4: the second
+	// piece is the first plus 2 ( x - 0.4 )^3.
+	class PiecewiseCubic : public meq::Profile
+	{
+		public:
+			double operator()( double x ) const override
+			{
+				double const d = x < 0.4 ? 0.0 : x - 0.4;
+				return 1.0 + 2.0*x - 3.0*x*x + 0.5*x*x*x + 2.0*d*d*d;
+			}
+			double prime( double x ) const override
+			{
+				double const d = x < 0.4 ? 0.0 : x - 0.4;
+				return 2.0 - 6.0*x + 1.5*x*x + 6.0*d*d;
+			}
+			double doublePrime( double x ) const override
+			{
+				double const d = x < 0.4 ? 0.0 : x - 0.4;
+				return -6.0 + 3.0*x + 12.0*d;
+			}
+	};
+	PiecewiseCubic const exact;
+	meq::SplineProfile const spline( meq::hermiteKnots( exact, { 0.0, 0.25, 0.4, 0.7, 1.0 } ) );
+	double worst = 0.0;
+	for ( int i = 0; i <= 200; ++i )
+	{
+		double const x = i/200.0;
+		worst = std::max( worst, std::abs( spline( x ) - exact( x ) ) );
+	}
+	BOOST_TEST( worst < 1.0e-14, "the Hermite spline misses the piecewise cubic by " << worst );
+	BOOST_CHECK_THROW( meq::hermiteKnots( exact, { 0.5 } ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::hermiteKnots( exact, { 0.5, 0.5 } ), std::invalid_argument );
+}

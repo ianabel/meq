@@ -82,6 +82,10 @@ namespace meq
 					first = -pointWeight*derivative/radius;
 					break;
 				}
+				case static_cast<int>( PlasmaQuantity::PsiIntegrandColumn ):
+					// addSourceColumns(): -weight*g*1.0/radius, g = f( Psi ).
+					first = -pointWeight*psiIntegrand( in.integrand, in.knots, psi )/radius;
+					break;
 				default:
 					break;
 			}
@@ -112,6 +116,32 @@ namespace meq
 
 		// By value: every member is a scalar or a device pointer.
 		PlasmaLoopView const in = inputs;
+		if ( in.quantity == static_cast<int>( PlasmaQuantity::TableReach ) )
+		{
+			/*
+			 * THE EXTREMES, NOT A SUM: sourceTableReach()'s least and greatest
+			 * psi over the points inside the plasma, per element; the host
+			 * takes the extremes of those, which no order can change.
+			 */
+			mfem::forall( in.elements, [ = ] MFEM_HOST_DEVICE ( int e )
+			{
+				mfem::real_t low = std::numeric_limits<mfem::real_t>::infinity();
+				mfem::real_t high = -low;
+				if ( in.flags[ e ] != 0 )
+					for ( int q = 0; q < in.quadPoints; ++q )
+					{
+						int const at = e*in.quadPoints + q;
+						mfem::real_t const psi = psiAt( in, e, q );
+						if ( !insidePlasmaValue( in.source, in.z[ at ], psi ) )
+							continue;
+						low = psi < low ? psi : low;
+						high = psi > high ? psi : high;
+					}
+				first[ e ] = low;
+				second[ e ] = high;
+			} );
+			return true;
+		}
 		mfem::forall( in.elements, [ = ] MFEM_HOST_DEVICE ( int e )
 		{
 			mfem::real_t a = mfem::real_t( 0 );
@@ -242,6 +272,77 @@ namespace meq
 		              mfem::MinReducer<int>{}, true, indexWork );
 		best = peak;
 		bestIndex = first;
+		return true;
+	}
+
+	bool domainIntegrandKernel( PsiIntegrandView const &integrand, KnotView const *knots,
+	                            mfem::Vector const &shape, mfem::Array<int> const &elementDofs,
+	                            mfem::Vector const &radius, mfem::Vector const &weight,
+	                            mfem::Vector const &potential, int potentialStart,
+	                            int elements, int quadPoints, int dofs, mfem::Vector &perElement )
+	{
+		auto const *d_shape = shape.Read();
+		auto const *d_dofs = elementDofs.Read();
+		auto const *d_radius = radius.Read();
+		auto const *d_weight = weight.Read();
+		auto const *d_potential = potential.Read();
+		auto *d_out = perElement.Write();
+		PsiIntegrandView const f = integrand;
+		int const nq = quadPoints;
+		int const nd = dofs;
+		int const start = potentialStart;
+		/*
+		 * ONE THREAD PER ELEMENT, its points in rule order, ACCUMULATED IN
+		 * DOUBLE and rounded once: integrateOverDomain()'s per-element partial,
+		 * which the host sums in element order in double (M-386).
+		 */
+		mfem::forall( elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		{
+			double partial = 0.0;
+			for ( int q = 0; q < nq; ++q )
+			{
+				mfem::real_t psi = mfem::real_t( 0 );
+				for ( int j = 0; j < nd; ++j )
+					psi += d_shape[ q*nd + j ]*d_potential[ start + d_dofs[ e*nd + j ] ];
+				mfem::real_t const r = d_radius[ e*nq + q ];
+				if ( !( r > mfem::real_t( 0 ) ) )
+					continue;
+				partial += static_cast<double>( d_weight[ e*nq + q ] )
+				           *static_cast<double>( psiIntegrand( f, knots, psi )/r );
+			}
+			d_out[ e ] = static_cast<mfem::real_t>( partial );
+		} );
+		return true;
+	}
+
+	bool pointScatterKernel( mfem::Vector const &shape, mfem::Array<int> const &elementDofs,
+	                         mfem::Vector const &factors, int elements, int quadPoints, int dofs,
+	                         int potentialStart, mfem::Vector &out )
+	{
+		auto const *d_shape = shape.Read();
+		auto const *d_dofs = elementDofs.Read();
+		auto const *d_factors = factors.Read();
+		auto *d_out = out.ReadWrite();
+		int const nq = quadPoints;
+		int const nd = dofs;
+		int const start = potentialStart;
+		/*
+		 * ONE THREAD PER ELEMENT, adding into its own dofs point by point in
+		 * rule order: the host loop's sum in the host loop's order, as
+		 * plasmaScatterKernel() does. The potential space is L2, so no two
+		 * threads share a dof.
+		 */
+		mfem::forall( elements, [ = ] MFEM_HOST_DEVICE ( int e )
+		{
+			for ( int q = 0; q < nq; ++q )
+			{
+				mfem::real_t const factor = d_factors[ e*nq + q ];
+				if ( factor == mfem::real_t( 0 ) )
+					continue;
+				for ( int j = 0; j < nd; ++j )
+					d_out[ start + d_dofs[ e*nd + j ] ] += factor*d_shape[ q*nd + j ];
+			}
+		} );
 		return true;
 	}
 
@@ -412,6 +513,19 @@ namespace meq
 
 	bool nodalPeakKernel( mfem::Vector const &, int, int, mfem::real_t &,
 	                      int & )
+	{
+		return false;
+	}
+
+	bool pointScatterKernel( mfem::Vector const &, mfem::Array<int> const &, mfem::Vector const &,
+	                         int, int, int, int, mfem::Vector & )
+	{
+		return false;
+	}
+
+	bool domainIntegrandKernel( PsiIntegrandView const &, KnotView const *, mfem::Vector const &,
+	                            mfem::Array<int> const &, mfem::Vector const &, mfem::Vector const &,
+	                            mfem::Vector const &, int, int, int, int, mfem::Vector & )
 	{
 		return false;
 	}

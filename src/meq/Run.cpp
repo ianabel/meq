@@ -1047,10 +1047,23 @@ meq::Run::Impl::ScaleOfAnswer meq::Run::Impl::scaleOfAnswer() const
 
 double meq::Run::Impl::deliveredToroidalFlux( std::vector<double> const &c ) const
 {
+	/*
+	 * int_plasma g( Psi )/R dA with g^2 the fitted polynomial, as data, so
+	 * that under a Device it is integrated in the kernel
+	 * (GradShafranovSolver::integratePsiIntegrand(), M-386); a fit past twelve
+	 * coefficients keeps the host lambda.
+	 */
+	double const sign = targetSign( *safetyFactorTarget );
+	if ( c.size() <= 12 )
+	{
+		meq::PsiIntegrand f;
+		f.kind = meq::PsiIntegrandKind::Root;
+		f.polynomial = c;
+		return sign*solver->integratePsiIntegrand( f );
+	}
 	double const axis = solver->psiAxis();
 	double const boundary = solver->psiBoundary();
 	double const span = axis - boundary;
-	double const sign = targetSign( *safetyFactorTarget );
 	return sign*solver->integrateOverDomain(
 		[ & ]( double radius, double, double psi )
 		{

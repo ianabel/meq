@@ -2422,7 +2422,8 @@ the continuous fields cost 899 device Newton residuals and a four-pass tangent
    (`GradShafranovSolver::continuousInterpolant()`). The tracer stays on the
    host and reads `ψ̃`, `q̃` downloaded.
 2. **The linearised solve (`linearise()`, `applyRetainedJacobian()`,
-   `addSourceColumns()`).** (a) The retained operator built as `buildNpc`
+   `addSourceColumns()`), held until `q-refining-fit`'s multi-border
+   linearisation is on `main` (branch `device-linearised`, unbuilt).** (a) The retained operator built as `buildNpc`
    builds Newton's, through `makeDeviceNPCOperator()`, so its residual and
    gradient take the device integrand (a plain `mfem::DarcyNPCOperator` runs
    it on the host, 158 device residuals a call). (b) `addSourceColumns()` as a
@@ -2433,13 +2434,19 @@ the continuous fields cost 899 device Newton residuals and a four-pass tangent
    double accumulation, which needs upstream's NPC Jacobian apply (its
    `Jacobian::Mult` aborts today), or stop at `10 ε ‖dx‖`. The
    [M-383](MEASUREMENTS.md#m-383) funnels go when this lands.
-3. **The delivered integrals.** `deliveredPlasmaCurrent()`'s device route
-   exists and never runs: `iterateIsResident()` asks for device-valid AND
-   host-invalid, and after `downloadSolution()` the state is both. The
-   delivered flux becomes a `PlasmaQuantity` of the plasma loops, with a
-   directional twin for the `q`-driven Jacobian, its element partials and
-   their sum in **double** (a float sum over 3e4 elements is near the `q`
-   loop's floor). `sourceTableReach()` is a min and a max of the same loop.
+3. **The delivered integrals: DONE, [M-386](MEASUREMENTS.md#m-386).**
+   `deliveredPlasmaCurrent()` takes the plasma loops' kernel under any Device,
+   not only on a resident iterate; `sourceTableReach()` is the loops'
+   `TableReach` extremes. The delivered flux and the `q`-driven pin rows'
+   integrands are data, `meq::PsiIntegrand` -- `g = sqrt( G )` and the three
+   functions of it the rows differentiate into, `G` a polynomial or a profile's
+   knots (`hermiteKnots()`) -- integrated over the domain by
+   `integratePsiIntegrand()`, each element accumulated in double, or
+   scattered over the plasma by `assemblePsiIntegrandColumn()`. A caller's
+   lambda takes the **point route**, the interim: the potential at every
+   point from a kernel, the lambda on the host, the scatter back on the
+   device (`addSourceColumns()`, `integrateOverDomain()`). `TODO`, *What is
+   left on the point route under a Device*, names what still takes it.
 
 **Acceptance for each:** the `cpu` arm against `--device debug` to the bit in
 double on a build without device kernels; `cuda` within the existing single
