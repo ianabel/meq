@@ -83,7 +83,7 @@ against is `CLAUDE_DECLINED.md`.
   its outputs and its index arrays alike, through `HostRead()`,
   `HostReadWrite()`, `HostWrite()` or `countedHostRead()`, never raw. Every
   device route can refuse: on a documented refusal in a CUDA build, and every
-  time where the seven `*Device.cpp` files are host stubs. The loop it falls
+  time where the eight `*Device.cpp` files are host stubs. The loop it falls
   back to runs under the same Device, so a dof array an MFEM operation read on
   the device is as protected as a vector (`entriesAt()`). **And a column an
   upstream route read on the device through an alias is handed back** with
@@ -206,9 +206,10 @@ invisible to the others. Reach for them in this order.
 
 ## Where the device code lives
 
-**Seven files in `src/meq` are compiled by `nvcc`** — `PointLocatorDevice.cpp`,
+**Eight files in `src/meq` are compiled by `nvcc`** — `PointLocatorDevice.cpp`,
 `SourceViewDevice.cpp`, `DeviceNPCDevice.cpp`, `DeviceQuadratureDevice.cpp`,
-`DeviceRowsDevice.cpp`, `AxisSearchDevice.cpp` and `ResidentIterateDevice.cpp`.
+`DeviceRowsDevice.cpp`, `AxisSearchDevice.cpp`, `ResidentIterateDevice.cpp`
+and `ContinuousFieldDevice.cpp`.
 They hold every `mfem::forall` launch in the tree, because `mfem::forall`
 `static_assert`s under `g++`. CMake reads the architecture out of MFEM's
 `config.mk`. Without CUDA each compiles to a host stub. The non-device halves
@@ -224,6 +225,10 @@ are these:
   reproducing its host loop to the bit.
 * **`meq::SourceView`** is the POD form of the source.
 * **`meq::DeviceRows`** is the bordered rows' mirror.
+* **`meq::ContinuousInterpolant`** is the extraction's continuous pair `ψ̃`,
+  `q̃` as a linear map: each entity's moment quadrature done once per set of
+  spaces and kept as blocks, applied by one kernel per stage
+  (→ **[M-DA-4](MEASUREMENTS.md#m-da-4)**).
 * **`meq::DeviceConstants`** holds the per-mesh constants.
 * **`Crossings`** and **`StageChecksum`** are the two instruments above, and
   neither is part of the solve.

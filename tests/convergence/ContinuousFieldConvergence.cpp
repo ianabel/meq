@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 
@@ -18,6 +19,7 @@
 
 #include "analytic/Soloviev.hpp"
 #include "ConvergenceHarness.hpp"
+#include "unit/DeviceKernels.hpp"
 
 /*
  * psi~ AND q~, THE CONTINUOUS PAIR THE FLUX-SURFACE EXTRACTION ROOTS AND
@@ -35,6 +37,27 @@
  *   4. psi~ converges at psi*'s k+2 and q~ at q*'s k+1, against Solov'ev's
  *      closed form, and is within a small factor of psi*'s own error.
  */
+/*
+ * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE RUNS
+ * (NewtonConvergence.cpp's pattern). Unset, there is none, which is how the
+ * plain ctest runs; set, it is the device arm tests/CMakeLists.txt registers,
+ * where buildContinuousFields() takes ContinuousInterpolant's device route.
+ */
+namespace
+{
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+			if ( requested != nullptr && *requested != '\0' )
+				static mfem::Device device( requested );
+		}
+	};
+}
+
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
+
 namespace
 {
 	using meq::tests::Rectangle;
@@ -339,4 +362,114 @@ BOOST_AUTO_TEST_CASE( theContinuousFieldsKeepTheirSourcesOrder )
 			previousFlux = tildeFlux;
 		}
 	}
+}
+
+/*
+ * 5. THE BLOCKS ARE THE QUADRATURE: ContinuousInterpolant, which does each
+ * entity's quadrature and moment solve once and keeps the result as
+ * matrices, against momentInterpolant() handed psi*, psihat and q* as
+ * callables -- the same rules and moment systems, solved per call. They agree
+ * to the round-off of the two orders of summation; k = 2 on n = 8.
+ */
+BOOST_AUTO_TEST_CASE( theBlocksAreTheQuadrature )
+{
+	SolvedEquilibrium solved( Equilibrium::iterExample2(), meq::tests::standardBox(), 2, 8 );
+	meq::GradShafranovSolver const &solver = solved.theSolver();
+	mfem::GridFunction const &potential = solver.postProcessedPotential();
+	mfem::GridFunction const &flux = solver.postProcessedFlux();
+	mfem::GridFunction const &trace = solver.trace();
+	static_cast<void>( potential.HostRead() );
+	static_cast<void>( flux.HostRead() );
+	static_cast<void>( trace.HostRead() );
+
+	meq::ContinuousInterpolant const interpolant( *potential.FESpace(), *flux.FESpace(), *trace.FESpace() );
+	meq::ContinuousFields const blocks =
+		interpolant.apply( potential, flux, trace, meq::ContinuousInterpolant::Route::Host );
+
+	// The callables' route, as buildContinuousFields() takes it for psi~.
+	mfem::FiniteElementSpace const &traceSpace = *trace.FESpace();
+	mfem::GridFunction quadrature( blocks.potential->FESpace() );
+	meq::momentInterpolant( quadrature,
+		[ & ]( int e, mfem::IntegrationPoint const &ip ) -> double { return potential.GetValue( e, ip ); },
+		[ & ]( int f, mfem::FaceElementTransformations &transform, mfem::IntegrationPoint const &ip ) -> double
+		{
+			if ( transform.Elem2No < 0 )
+				return potential.GetValue( transform.Elem1No, transform.GetElement1IntPoint() );
+			mfem::FiniteElement const *fe = traceSpace.GetFaceElement( f );
+			mfem::Array<int> dofs;
+			traceSpace.GetFaceVDofs( f, dofs );
+			mfem::Vector local;
+			trace.GetSubVector( dofs, local );
+			mfem::Vector shape( fe->GetDof() );
+			fe->CalcShape( ip, shape );
+			return shape*local;
+		} );
+	double worst = 0.0, scale = 0.0;
+	static_cast<void>( quadrature.HostRead() );
+	for ( int i = 0; i < quadrature.Size(); ++i )
+	{
+		worst = worse( worst, std::abs( double( ( *blocks.potential )( i ) - quadrature( i ) ) ) );
+		scale = std::max( scale, std::abs( double( quadrature( i ) ) ) );
+	}
+	std::printf( "\n  psi~ by its blocks against by its quadratures: %.2e of max |psi~| = %.3e\n",
+	             worst/scale, scale );
+	// Two summation orders over moment systems whose conditioning is a few
+	// hundred: 1e3 eps, measured at 3e-14 in double.
+	BOOST_TEST( worst <= 1.0e3*eps*scale, "the blocks differ from the quadratures by " << worst/scale
+	            << " of the field: ContinuousInterpolant's matrices are not momentInterpolant()'s map" );
+}
+
+/*
+ * 6. THE DEVICE ROUTE IS THE HOST ROUTE: the same blocks applied by
+ * applyLinearBlocksOnDevice() and by applyLinearBlocks(). Under `debug` the
+ * kernel runs on the host's arithmetic and the two agree to the bit; on a
+ * card, to its own rounding of the same sums. Needs a Device
+ * (MEQ_TEST_DEVICE) and a build with device kernels, and says so where either
+ * is missing. MEASUREMENTS.md M-DA-4.
+ */
+BOOST_AUTO_TEST_CASE( theDeviceRouteIsTheHostRoute, *meq::tests::requiresDeviceKernels() )
+{
+	if ( !mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+	{
+		std::printf( "\n  theDeviceRouteIsTheHostRoute: SKIPPED -- no Device is configured; "
+		             "MEQ_TEST_DEVICE=debug or cuda runs it\n" );
+		return;
+	}
+	SolvedEquilibrium solved( Equilibrium::iterExample2(), meq::tests::standardBox(), 2, 8 );
+	meq::GradShafranovSolver const &solver = solved.theSolver();
+	mfem::GridFunction const &potential = solver.postProcessedPotential();
+	mfem::GridFunction const &flux = solver.postProcessedFlux();
+	mfem::GridFunction const &trace = solver.trace();
+	meq::ContinuousInterpolant const interpolant( *potential.FESpace(), *flux.FESpace(), *trace.FESpace() );
+	meq::ContinuousFields const host =
+		interpolant.apply( potential, flux, trace, meq::ContinuousInterpolant::Route::Host );
+	BOOST_TEST_REQUIRE( !interpolant.lastRanOnDevice() );
+	meq::ContinuousFields const device =
+		interpolant.apply( potential, flux, trace, meq::ContinuousInterpolant::Route::Device );
+	BOOST_TEST_REQUIRE( interpolant.lastRanOnDevice(), "the device route refused under a configured Device "
+	                    "on a build with device kernels" );
+	double worst = 0.0, scale = 0.0;
+	std::size_t differ = 0;
+	auto compare = [ & ]( mfem::GridFunction const &a, mfem::GridFunction const &b )
+	{
+		mfem::real_t const *x = a.HostRead();
+		mfem::real_t const *y = b.HostRead();
+		for ( int i = 0; i < a.Size(); ++i )
+		{
+			differ += x[ i ] != y[ i ];
+			worst = worse( worst, std::abs( double( x[ i ] - y[ i ] ) ) );
+			scale = std::max( scale, std::abs( double( x[ i ] ) ) );
+		}
+	};
+	compare( *host.potential, *device.potential );
+	compare( *host.flux, *device.flux );
+	bool const card = mfem::Device::Allows( mfem::Backend::CUDA_MASK | mfem::Backend::HIP_MASK );
+	std::printf( "\n  the device route against the host's, %s: %zu entries differ, by at most %.2e of %.3e\n",
+	             card ? "on the card" : "under debug", differ, worst, scale );
+	if ( card )
+		BOOST_TEST( worst <= 64.0*eps*scale, "the kernel differs from the host loop by " << worst/scale
+		            << " of the field, beyond the card's own rounding of the same sums" );
+	else
+		BOOST_TEST( differ == 0u, "under debug the kernel is the host loop on the host's arithmetic and "
+		            "must agree to the bit; " << differ << " entries differ" );
 }
