@@ -109,6 +109,18 @@ namespace
 		}
 	};
 
+	/// g^2 as a profile, for its Hermite knots.
+	class Quadratic : public meq::Profile
+	{
+		public:
+			explicit Quadratic( std::vector<double> c ) : c( std::move( c ) ) {}
+			double operator()( double x ) const override { return c[ 0 ] + x*( c[ 1 ] + x*c[ 2 ] ); }
+			double prime( double x ) const override { return c[ 1 ] + 2.0*x*c[ 2 ]; }
+			double doublePrime( double ) const override { return 2.0*c[ 2 ]; }
+		private:
+			std::vector<double> c;
+	};
+
 	std::vector<int> parseList( char const *text )
 	{
 		std::vector<int> out;
@@ -292,43 +304,69 @@ int main( int argc, char **argv )
 		} );
 		row( "extractFluxSurfaces 24x128", extract, residualPerCall );
 
-		// ---- the delivered scale pins ----
+		// ---- the delivered scale pins (M-DA-5): each on its device form, on
+		// the point route (a lambda, its integrand evaluated on the host at
+		// every point) and on the host loop ----
 		double const axis = solver.psiAxis(), boundary = solver.psiBoundary();
 		double const span = axis - boundary;
+		auto fluxLambda = [ & ]( double radius, double, double psi )
+		{
+			if ( !( radius > 0.0 ) || span == 0.0 )
+				return 0.0;
+			double const x = ( psi - boundary )/span;
+			if ( !( x > 0.0 ) )
+				return 0.0;
+			double const value = g2[ 0 ] + x*( g2[ 1 ] + x*g2[ 2 ] );
+			return value > 0.0 ? std::sqrt( value )/radius : 0.0;
+		};
+		meq::PsiIntegrand fluxData;
+		fluxData.polynomial = g2;
 		double flux = 0.0;
-		Timing const integrate = timeIt( "integrateOverDomain", repeats, [ & ]
+		auto onRoutes = [ & ]( char const *name, std::function<void()> const &device,
+		                       std::function<void()> const &point )
 		{
-			flux = solver.integrateOverDomain(
-				[ & ]( double radius, double, double psi )
-				{
-					if ( !( radius > 0.0 ) || span == 0.0 )
-						return 0.0;
-					double const x = ( psi - boundary )/span;
-					if ( !( x > 0.0 ) )
-						return 0.0;
-					double const value = g2[ 0 ] + x*( g2[ 1 ] + x*g2[ 2 ] );
-					return value > 0.0 ? std::sqrt( value )/radius : 0.0;
-				} );
-		} );
-		row( "integrateOverDomain (Phi)", integrate, residualPerCall );
-
-		long const takenBefore = solver.iterateRoutesTakenOnDevice();
-		long const declinedBefore = solver.iterateRoutesDeclinedOnDevice();
+			std::string const label( name );
+			Timing const d = timeIt( ( label + " device" ).c_str(), repeats, device );
+			row( ( label + ", device form" ).c_str(), d, residualPerCall );
+			if ( point )
+			{
+				Timing const p = timeIt( ( label + " point" ).c_str(), repeats, point );
+				row( ( label + ", point route" ).c_str(), p, residualPerCall );
+			}
+			solver.setDevicePointRoutes( false );
+			Timing const h = timeIt( ( label + " host" ).c_str(), repeats, point ? point : device );
+			solver.setDevicePointRoutes( true );
+			row( ( label + ", host loop" ).c_str(), h, residualPerCall );
+		};
+		onRoutes( "Phi",
+			[ & ] { flux = solver.integratePsiIntegrand( fluxData ); },
+			[ & ] { static_cast<void>( solver.integrateOverDomain( fluxLambda ) ); } );
 		double current = 0.0;
-		Timing const delivered = timeIt( "deliveredPlasmaCurrent", repeats, [ & ]
+		onRoutes( "I_p", [ & ] { current = solver.deliveredPlasmaCurrent(); }, nullptr );
+		onRoutes( "table reach", [ & ] { static_cast<void>( solver.sourceTableReach() ); }, nullptr );
 		{
-			current = solver.deliveredPlasmaCurrent();
-		} );
-		row( "deliveredPlasmaCurrent", delivered, residualPerCall );
-		std::printf( "      device route: %ld taken, %ld declined over %d calls\n",
-		             solver.iterateRoutesTakenOnDevice() - takenBefore,
-		             solver.iterateRoutesDeclinedOnDevice() - declinedBefore, repeats );
-
-		Timing const reach = timeIt( "sourceTableReach", repeats, [ & ]
-		{
-			static_cast<void>( solver.sourceTableReach() );
-		} );
-		row( "sourceTableReach", reach, residualPerCall );
+			mfem::Vector const here( solver.state() );
+			mfem::Vector column;
+			meq::PsiIntegrand slope;
+			Quadratic const square( g2 );
+			slope.kind = meq::PsiIntegrandKind::SlopeOverRoot;
+			meq::SplineProfile const knots( meq::hermiteKnots( square, { 0.0, 0.5, 1.0 } ) );
+			slope.square = &knots;
+			onRoutes( "pin-row column",
+				[ & ] { solver.assemblePsiIntegrandColumn( here, slope, column ); },
+				[ & ]
+				{
+					solver.assembleSourceDerivative( here,
+						[ & ]( double, double, double psi )
+						{
+							double const x = ( psi - boundary )/span;
+							if ( !( x > 0.0 ) )
+								return 0.0;
+							double const value = square( x );
+							return value > 0.0 ? square.prime( x )/( 2.0*std::sqrt( value )*span ) : 0.0;
+						}, column );
+				} );
+		}
 
 		// ---- the linearised solve ----
 		mfem::Vector const state( solver.state() );

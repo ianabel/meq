@@ -8006,7 +8006,194 @@ namespace
 
 	double GradShafranovSolver::deliveredPlasmaCurrent() const
 	{
+		/*
+		 * THE PLASMA LOOPS' KERNEL WHEREVER IT CAN RUN, NOT ONLY ON A RESIDENT
+		 * ITERATE. Inside a Newton step assemblePlasmaCurrent() keeps the gate
+		 * on residency, which decides where the iterate is read; after the
+		 * solve the state is valid on both sides, the gate never opens, and
+		 * the host loop ran on one core. The kernel reproduces that loop and
+		 * the per-element partials are summed here in element order, as there
+		 * (M-DA-5).
+		 */
+		if ( devicePointRoutesAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
+		     && !reactionStabilization )
+		{
+			SourceView view{};
+			mfem::Vector perElement;
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.integrate( PlasmaQuantity::Current, view, npcConstants, solution,
+			                               blockOffsets[ 1 ], perElement, nullptr ) )
+			{
+				++devicePointRoutesCount;
+				countedHostRead( perElement, __LINE__ );
+				static_cast<void>( solution.HostRead() );
+				double total = 0.0;
+				for ( int e = 0; e < perElement.Size(); ++e )
+					total += perElement( e );
+				return total;
+			}
+		}
 		return assemblePlasmaCurrent( solution );
+	}
+
+	void GradShafranovSolver::setDevicePointRoutes( bool allowed )
+	{
+		devicePointRoutesAllowed = allowed;
+	}
+
+	long GradShafranovSolver::devicePointRoutesTaken() const
+	{
+		return devicePointRoutesCount;
+	}
+
+	bool GradShafranovSolver::integrandView( PsiIntegrand const &f, PsiIntegrandView &view,
+	                                         std::vector<KnotView> &knots ) const
+	{
+		view = PsiIntegrandView{};
+		view.kind = static_cast<int>( f.kind );
+		view.psiAxis = static_cast<mfem::real_t>( psiAxis() );
+		view.psiBoundary = static_cast<mfem::real_t>( psiBoundary() );
+		if ( !f.polynomial.empty() )
+		{
+			if ( f.polynomial.size() > 12 )
+				return false;
+			view.polynomialCount = static_cast<int>( f.polynomial.size() );
+			for ( std::size_t j = 0; j < f.polynomial.size(); ++j )
+				view.polynomial[ j ] = static_cast<mfem::real_t>( f.polynomial[ j ] );
+		}
+		else if ( f.square == nullptr || !makeProfileView( *f.square, view.square, knots ) )
+			return false;
+		if ( f.kind == PsiIntegrandKind::RatioOverRoot
+		     && ( f.numerator == nullptr || !makeProfileView( *f.numerator, view.numerator, knots ) ) )
+			return false;
+		if ( knots.empty() )
+			knots.push_back( KnotView{} );
+		return true;
+	}
+
+	double GradShafranovSolver::integratePsiIntegrand( PsiIntegrand const &f ) const
+	{
+		PsiIntegrandView view{};
+		std::vector<KnotView> knots;
+		if ( !integrandView( f, view, knots ) )
+			throw std::invalid_argument( "meq::GradShafranovSolver::integratePsiIntegrand: the integrand "
+			                             "has no POD form (more than twelve coefficients, or a profile "
+			                             "makeProfileView() refuses)" );
+		mfem::FiniteElementSpace const &space = *potentialGf.FESpace();
+		mfem::Mesh &mesh = *space.GetMesh();
+		int const elements = mesh.GetNE();
+
+		// THE DEVICE FORM: the integrand evaluated in the kernel, each element
+		// accumulated in double, on tables at this rule where the map is
+		// affine. M-DA-5.
+		if ( devicePointRoutesAllowed && elements > 0 && mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		{
+			mfem::IsoparametricTransformation first;
+			mesh.GetElementTransformation( 0, &first );
+			mfem::Array<KnotView> table( static_cast<int>( knots.size() ) );
+			for ( std::size_t k = 0; k < knots.size(); ++k )
+				table[ static_cast<int>( k ) ] = knots[ k ];
+			mfem::Vector perElement;
+			if ( first.OrderW() == 0
+			     && domainLoops.prepare( const_cast<mfem::FiniteElementSpace &>( space ), 4, coordinates.get() )
+			     && domainLoops.integrateIntegrand( view, table, potentialGf, 0, perElement ) )
+			{
+				++devicePointRoutesCount;
+				static_cast<void>( potentialGf.HostRead() );
+				countedHostRead( perElement, __LINE__ );
+				double total = 0.0;
+				for ( int e = 0; e < perElement.Size(); ++e )
+					total += perElement( e );
+				return total;
+			}
+		}
+
+		// The host loop, the kernel's arithmetic: psi from zero in local-dof
+		// order, the partial in double, the elements in order.
+		countedHostRead( potentialGf, __LINE__ );
+		double total = 0.0;
+		mfem::IsoparametricTransformation map;
+		mfem::Array<int> dofs;
+		mfem::Vector shape, point( 2 );
+		mfem::real_t const *const values = potentialGf.HostRead();
+		for ( int e = 0; e < elements; ++e )
+		{
+			mfem::FiniteElement const &element = *space.GetFE( e );
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get( element.GetGeomType(), 2*element.GetOrder() + 4 );
+			mesh.GetElementTransformation( e, &map );
+			space.GetElementDofs( e, dofs );
+			shape.SetSize( element.GetDof() );
+			double partial = 0.0;
+			for ( int q = 0; q < rule.GetNPoints(); ++q )
+			{
+				mfem::IntegrationPoint const &ip = rule.IntPoint( q );
+				map.SetIntPoint( &ip );
+				element.CalcShape( ip, shape );
+				map.Transform( ip, point );
+				mfem::real_t psi = mfem::real_t( 0 );
+				for ( int j = 0; j < dofs.Size(); ++j )
+					psi += shape( j )*values[ dofs[ j ] ];
+				mfem::real_t const r = point( 0 );
+				if ( !( r > mfem::real_t( 0 ) ) )
+					continue;
+				mfem::real_t const w = ip.weight*map.Weight();
+				partial += static_cast<double>( w )*static_cast<double>( psiIntegrand( view, knots.data(), psi )/r );
+			}
+			total += partial;
+		}
+		return total;
+	}
+
+	void GradShafranovSolver::assemblePsiIntegrandColumn( mfem::Vector const &state, PsiIntegrand const &f,
+	                                                      mfem::Vector &out )
+	{
+		if ( !prepared || !darcy || !nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::assemblePsiIntegrandColumn: there is no "
+			                        "solve to differentiate at yet" );
+		PsiIntegrandView view{};
+		std::vector<KnotView> knots;
+		if ( !integrandView( f, view, knots ) )
+			throw std::invalid_argument( "meq::GradShafranovSolver::assemblePsiIntegrandColumn: the "
+			                             "integrand has no POD form" );
+		// THE DEVICE FORM: the plasma loops' kernel with the integrand. M-DA-5.
+		if ( devicePointRoutesAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
+		     && !reactionStabilization )
+		{
+			SourceView source{};
+			mfem::Array<KnotView> table( static_cast<int>( knots.size() ) );
+			for ( std::size_t k = 0; k < knots.size(); ++k )
+				table[ static_cast<int>( k ) ] = knots[ k ];
+			if ( plasmaLoopsAvailable( source )
+			     && plasmaLoops.scatterIntegrand( view, table, npcConstants, state, blockOffsets[ 1 ], out ) )
+			{
+				++devicePointRoutesCount;
+				static_cast<void>( state.HostRead() );
+				static_cast<void>( out.HostRead() );
+				return;
+			}
+		}
+		// The host loop, on the same arithmetic, into a column zeroed on the
+		// host whatever its UseDevice() says.
+		out.SetSize( state.Size() );
+		{
+			mfem::real_t *const host = out.HostWrite();
+			std::fill( host, host + out.Size(), mfem::real_t( 0 ) );
+		}
+		std::vector<mfem::Vector *> columns{ &out };
+		addSourceColumns( state, 1,
+			[ &view, &knots ]( double, double, double psi, double *g )
+			{
+				g[ 0 ] = static_cast<double>( psiIntegrand( view, knots.data(), static_cast<mfem::real_t>( psi ) ) );
+				return true;
+			}, columns );
+	}
+
+	bool GradShafranovSolver::pointRouteOpen() const
+	{
+		return devicePointRoutesAllowed && potentialFes
+		       && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
+		       && !reactionStabilization
+		       && plasmaLoops.prepare( *potentialFes, sourceQuadratureExtra, coordinates.get() );
 	}
 
 	double GradShafranovSolver::integrateOverDomain(
@@ -8016,13 +8203,64 @@ namespace
 		mfem::Mesh &mesh = *space.GetMesh();
 		countedHostRead( potentialGf, __LINE__ );
 
+		/*
+		 * ONE PARTIAL PER ELEMENT, SUMMED IN ELEMENT ORDER IN DOUBLE, on both
+		 * routes, so that they differ only where their points do.
+		 *
+		 * THE DEVICE ROUTE TAKES THE POINTS FROM A KERNEL: the potential at
+		 * every point of this rule, 2 p + 4, beside the tables' radius and
+		 * weight, which is the geometry and the shapes the host loop spends
+		 * its time on; the integrand, a std::function, is evaluated here. The
+		 * tables are DevicePlasmaLoops' at two orders above the field's,
+		 * which is this rule where the map is affine (OrderW() zero), and the
+		 * route is refused elsewhere (M-DA-5).
+		 */
+		int const elements = mesh.GetNE();
+		if ( devicePointRoutesAllowed && elements > 0
+		     && mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		{
+			mfem::IsoparametricTransformation first;
+			mesh.GetElementTransformation( 0, &first );
+			mfem::Vector psiAt;
+			mfem::Vector const *radiusAt = nullptr;
+			mfem::Vector const *zAt = nullptr;
+			mfem::Vector const *weightAt = nullptr;
+			int perElement = 0;
+			if ( first.OrderW() == 0
+			     && domainLoops.prepare( const_cast<mfem::FiniteElementSpace &>( space ), 4, coordinates.get() )
+			     && domainLoops.pointValues( potentialGf, 0, psiAt, radiusAt, zAt, weightAt, perElement ) )
+			{
+				++devicePointRoutesCount;
+				static_cast<void>( potentialGf.HostRead() );
+				countedHostRead( psiAt, __LINE__ );
+				mfem::real_t const *const psiHost = psiAt.HostRead();
+				mfem::real_t const *const radiusHost = radiusAt->HostRead();
+				mfem::real_t const *const zHost = zAt->HostRead();
+				mfem::real_t const *const weightHost = weightAt->HostRead();
+				double total = 0.0;
+				for ( int e = 0; e < elements; ++e )
+				{
+					double partial = 0.0;
+					for ( int q = 0; q < perElement; ++q )
+					{
+						std::size_t const at = static_cast<std::size_t>( e )*static_cast<std::size_t>( perElement )
+						                       + static_cast<std::size_t>( q );
+						partial += static_cast<double>( weightHost[ at ] )
+						           *integrand( radiusHost[ at ], zHost[ at ], psiHost[ at ] );
+					}
+					total += partial;
+				}
+				return total;
+			}
+		}
+
 		double total = 0.0;
 		mfem::IsoparametricTransformation map;
 		mfem::DofTransformation doftrans;
 		mfem::Array<int> dofs;
 		mfem::Vector shape, values;
 		mfem::real_t coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		for ( int e = 0; e < elements; ++e )
 		{
 			mfem::FiniteElement const &element = *space.GetFE( e );
 			mfem::IntegrationRule const &rule = mfem::IntRules.Get(
@@ -8031,6 +8269,7 @@ namespace
 			space.GetElementDofs( e, dofs, doftrans );
 			potentialGf.GetSubVector( dofs, values );
 			shape.SetSize( element.GetDof() );
+			double partial = 0.0;
 			for ( int q = 0; q < rule.GetNPoints(); ++q )
 			{
 				mfem::IntegrationPoint const &point = rule.IntPoint( q );
@@ -8038,9 +8277,10 @@ namespace
 				element.CalcShape( point, shape );
 				mfem::Vector here( coordinates, mesh.SpaceDimension() );
 				map.Transform( point, here );
-				total += point.weight*map.Weight()
-				         *integrand( here( 0 ), here( 1 ), shape*values );
+				partial += static_cast<double>( point.weight*map.Weight() )
+				           *integrand( here( 0 ), here( 1 ), shape*values );
 			}
+			total += partial;
 		}
 		return total;
 	}
@@ -9744,6 +9984,77 @@ namespace
 		TableReach out;
 		if ( !prepared || !nonlinearSource )
 			return out;
+
+		// THE DEVICE FORM, where the source has one: the extremes per element
+		// in the kernel, the test insidePlasmaValue(), and the extremes of
+		// those here, which no order can change. M-DA-5.
+		if ( devicePointRoutesAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
+		     && !reactionStabilization )
+		{
+			SourceView view{};
+			mfem::Vector lows, highs;
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.integrate( PlasmaQuantity::TableReach, view, npcConstants, solution,
+			                               blockOffsets[ 1 ], lows, &highs ) )
+			{
+				++devicePointRoutesCount;
+				static_cast<void>( solution.HostRead() );
+				countedHostRead( lows, __LINE__ );
+				countedHostRead( highs, __LINE__ );
+				double low = std::numeric_limits<double>::infinity();
+				double high = -std::numeric_limits<double>::infinity();
+				for ( int e = 0; e < lows.Size(); ++e )
+				{
+					low = std::min( low, static_cast<double>( lows( e ) ) );
+					high = std::max( high, static_cast<double>( highs( e ) ) );
+				}
+				if ( low <= high )
+					nonlinearSource->tableReach( low, high, out );
+				return out;
+			}
+		}
+
+		// THE POINT ROUTE, for a source with no POD form: the points from the
+		// kernel, the test and the extremes here (M-DA-5; TODO, *What is left
+		// on the point route*).
+		if ( pointRouteOpen() )
+		{
+			mfem::Vector psiAt;
+			mfem::Vector const *radiusAt = nullptr;
+			mfem::Vector const *zAt = nullptr;
+			mfem::Vector const *weightAt = nullptr;
+			int perElement = 0;
+			if ( plasmaLoops.pointValues( solution, blockOffsets[ 1 ], psiAt, radiusAt, zAt, weightAt,
+			                              perElement ) )
+			{
+				++devicePointRoutesCount;
+				static_cast<void>( solution.HostRead() );
+				countedHostRead( psiAt, __LINE__ );
+				mfem::real_t const *const psiHost = psiAt.HostRead();
+				mfem::real_t const *const radiusHost = radiusAt->HostRead();
+				mfem::real_t const *const zHost = zAt->HostRead();
+				double low = std::numeric_limits<double>::infinity();
+				double high = -std::numeric_limits<double>::infinity();
+				for ( int e = 0; e < potentialFes->GetNE(); ++e )
+				{
+					if ( !elementInPlasma( e ) )
+						continue;
+					for ( int i = 0; i < perElement; ++i )
+					{
+						int const at = e*perElement + i;
+						double psi = psiHost[ at ];
+						psi += conductorPsiAtQuadrature( e, i );
+						if ( normalisedSource && !normalisedSource->insidePlasma( radiusHost[ at ], zHost[ at ], psi ) )
+							continue;
+						low = std::min( low, psi );
+						high = std::max( high, psi );
+					}
+				}
+				if ( low <= high )
+					nonlinearSource->tableReach( low, high, out );
+				return out;
+			}
+		}
 		countedHostRead( solution, __LINE__ );
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
@@ -11572,10 +11883,85 @@ namespace
 		std::function<bool( double, double, double, double * )> const &derivative,
 		std::vector<mfem::Vector *> const &out, mfem::Vector const *along ) const
 	{
+		/*
+		 * THE DEVICE ROUTE: the potential, and the direction, at every point
+		 * of the source rule from a kernel; the derivative -- a std::function
+		 * -- evaluated here at those points, with psi_c added as the host
+		 * loop adds it; and the scatter of each point's factor back on the
+		 * device, in the host loop's order. What it skips is the host loop's
+		 * Transform, Weight and CalcShape at every point. The columns are
+		 * handed back to the host after it, for their raw readers (M-DA-5).
+		 */
+		if ( pointRouteOpen() )
+		{
+			int const start = blockOffsets[ 1 ];
+			mfem::Vector psiAt, alongAt;
+			mfem::Vector const *radiusAt = nullptr;
+			mfem::Vector const *zAt = nullptr;
+			mfem::Vector const *weightAt = nullptr;
+			int perElement = 0;
+			if ( plasmaLoops.pointValues( state, start, psiAt, radiusAt, zAt, weightAt, perElement )
+			     && ( along == nullptr
+			          || plasmaLoops.pointValues( *along, start, alongAt, radiusAt, zAt, weightAt, perElement ) ) )
+			{
+				++devicePointRoutesCount;
+				static_cast<void>( state.HostRead() );
+				if ( along )
+					static_cast<void>( along->HostRead() );
+				countedHostRead( psiAt, __LINE__ );
+				mfem::real_t const *const psiHost = psiAt.HostRead();
+				mfem::real_t const *const alongHost = along ? alongAt.HostRead() : nullptr;
+				mfem::real_t const *const radiusHost = radiusAt->HostRead();
+				mfem::real_t const *const zHost = zAt->HostRead();
+				mfem::real_t const *const weightHost = weightAt->HostRead();
+				int const elements = potentialFes->GetNE();
+				int const points = elements*perElement;
+				std::vector<mfem::Vector> factors( count );
+				std::vector<mfem::real_t *> factorHost( count );
+				for ( std::size_t k = 0; k < count; ++k )
+				{
+					factors[ k ].SetSize( points );
+					factorHost[ k ] = factors[ k ].HostWrite();
+				}
+				std::vector<double> g( count );
+				for ( int e = 0; e < elements; ++e )
+				{
+					bool const inPlasma = elementInPlasma( e );
+					for ( int i = 0; i < perElement; ++i )
+					{
+						int const at = e*perElement + i;
+						for ( std::size_t k = 0; k < count; ++k )
+							factorHost[ k ][ at ] = mfem::real_t( 0 );
+						if ( !inPlasma )
+							continue;
+						double const radius = radiusHost[ at ];
+						double psi = psiHost[ at ];
+						psi += conductorPsiAtQuadrature( e, i );
+						double const alongPsi = alongHost ? static_cast<double>( alongHost[ at ] ) : 1.0;
+						if ( !derivative( radius, zHost[ at ], psi, g.data() ) )
+							return false;
+						double const weight = weightHost[ at ];
+						for ( std::size_t k = 0; k < count; ++k )
+							if ( g[ k ] != 0.0 )
+								factorHost[ k ][ at ] = static_cast<mfem::real_t>( -weight*g[ k ]*alongPsi/radius );
+					}
+				}
+				bool scattered = true;
+				for ( std::size_t k = 0; k < count && scattered; ++k )
+					scattered = plasmaLoops.scatterPointFactors( factors[ k ], start, *out[ k ] );
+				for ( mfem::Vector *column : out )
+					static_cast<void>( column->HostRead() );
+				if ( scattered )
+					return true;
+				throw std::logic_error( "meq::GradShafranovSolver::addSourceColumns: the device scatter "
+				                        "refused after the points were taken; the tables changed between "
+				                        "two calls" );
+			}
+		}
+
 		countedHostRead( state, __LINE__ );
-		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: the
-		// direction is indexed raw below, as the state is, and the columns are
-		// accumulated into raw. MEASUREMENTS.md M-383.
+		// The host loop: the direction is indexed raw below, as the state is,
+		// and the columns are accumulated into raw (M-383).
 		if ( along )
 			countedHostRead( *along, __LINE__ );
 		for ( mfem::Vector *column : out )

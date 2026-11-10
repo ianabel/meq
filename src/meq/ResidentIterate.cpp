@@ -260,7 +260,8 @@ namespace meq
 	{
 		if ( status <= 0 )
 			return false;
-		bool const two = quantity == PlasmaQuantity::NormalisationCorner;
+		bool const two = quantity == PlasmaQuantity::NormalisationCorner
+		                 || quantity == PlasmaQuantity::TableReach;
 		if ( quantity != PlasmaQuantity::Current && !two )
 			return false;
 		if ( two && second == nullptr )
@@ -295,7 +296,9 @@ namespace meq
 		if ( status <= 0 )
 			return false;
 		if ( quantity == PlasmaQuantity::Current
-		     || quantity == PlasmaQuantity::NormalisationCorner )
+		     || quantity == PlasmaQuantity::NormalisationCorner
+		     || quantity == PlasmaQuantity::TableReach
+		     || quantity == PlasmaQuantity::PsiIntegrandColumn )
 			return false;
 		if ( constants.elementCount != elements )
 			return false;
@@ -308,6 +311,49 @@ namespace meq
 		return plasmaScatterKernel(
 			view( quantity, source, constants, state, potentialStart, scale ),
 			out.ReadWrite() );
+	}
+
+	bool DevicePlasmaLoops::scatterIntegrand( PsiIntegrandView const &integrand,
+	                                          mfem::Array<KnotView> const &knots,
+	                                          DeviceConstants const &constants,
+	                                          mfem::Vector const &state, int potentialStart,
+	                                          mfem::Vector &out ) const
+	{
+		if ( status <= 0 || constants.elementCount != elements )
+			return false;
+		out.SetSize( state.Size() );
+		out.UseDevice( true );
+		out = 0.0;
+		PlasmaLoopView inputs = view( PlasmaQuantity::PsiIntegrandColumn, SourceView{}, constants, state,
+		                              potentialStart, 1.0 );
+		inputs.knots = knots.Read();
+		inputs.integrand = integrand;
+		return plasmaScatterKernel( inputs, out.ReadWrite() );
+	}
+
+	bool DevicePlasmaLoops::integrateIntegrand( PsiIntegrandView const &integrand,
+	                                            mfem::Array<KnotView> const &knots,
+	                                            mfem::Vector const &potential, int potentialStart,
+	                                            mfem::Vector &perElement ) const
+	{
+		if ( status <= 0 )
+			return false;
+		perElement.SetSize( elements );
+		perElement.UseDevice( true );
+		countedDeviceRead( potential, __LINE__ );
+		return domainIntegrandKernel( integrand, knots.Read(), shape, elementDofs, radius, weight,
+		                              potential, potentialStart, elements, quadPoints, dofs, perElement );
+	}
+
+	bool DevicePlasmaLoops::scatterPointFactors( mfem::Vector const &factors, int potentialStart,
+	                                             mfem::Vector &out ) const
+	{
+		if ( status <= 0 )
+			return false;
+		if ( factors.Size() != elements*quadPoints )
+			return false;
+		return pointScatterKernel( shape, elementDofs, factors, elements, quadPoints, dofs,
+		                           potentialStart, out );
 	}
 
 	bool DevicePlasmaLoops::pointValues( mfem::Vector const &potential,

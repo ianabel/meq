@@ -1931,3 +1931,35 @@ Raised 2026-11-01, when the mirror plan was retired.
      current border (CLAUDE_DECLINED.md, "A plasma-current border for the
      mirror").  Closes: the corner assembled, if a mirror ever wants a
      current.
+
+
+================================================================================
+What is left on the point route under a Device
+Raised 2026-11-09 (MEASUREMENTS.md M-DA-5; DEVICE-PLAN.md section 9).
+================================================================================
+
+  The point route is the interim for an integrand that exists only as a
+  caller's std::function, which no kernel can run: the potential at every
+  quadrature point comes from DevicePlasmaLoops::pointValues(), is copied to
+  the host, the function is evaluated there in one serial loop over the
+  points, and the factors go back up for pointScatterKernel(). It skips the
+  host loop's Transform, Weight and CalcShape, and it is still a host loop
+  over the points and two copies across the bus per call. What takes it:
+
+  * addSourceColumns() with a caller's derivative, and so
+    assembleSourceDerivative(): every q-driven pin row on q-refining-fit, and
+    the gg' cardinal-direction derivative. The pin rows' four integrands have
+    a device form now, meq::PsiIntegrand through assemblePsiIntegrandColumn();
+    moving them onto it is the q loop's change. The cardinal direction's is
+    step 3's assembleGGPrimeDerivative() (branch device-linearised, held until
+    q-refining-fit merges).
+  * The retained linearisation's S( x ) and S'( x ) t, the source's own F and
+    dF/dpsi passed as lambdas: their device form is the plasma loops'
+    SourceValue and SourceSlope (step 3, the same branch).
+  * integrateOverDomain() with a caller's integrand. The delivered flux has
+    left it for integratePsiIntegrand(); nothing else in the tree calls it.
+  * sourceTableReach() for a source with no POD form.
+
+  Done when each caller carries its integrand as data, and the point route's
+  counter (devicePointRoutesTaken() less the device forms') reads zero on the
+  shipped examples under --device cuda.
