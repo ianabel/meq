@@ -26841,7 +26841,9 @@ the very first residual is the same in every run and the residual
 batched keys serial one at a time: `AssemblyMode = "serial"` alone makes 3
 runs equal in every stage; `TraceAssemblyMode` or `LocalFactorMode` serial
 alone do not. All three serial: 292 stages equal in 3 runs, and 3 of 3
-converge in 5 iterations. So the varying stage is MFEM's
+converge in 5 iterations. On cuDSS with `AssemblyMode = "serial"` alone, 3
+runs give the same outer count, 5 iterations (6, 6 and 7 equilibria), their
+stages parting from the first cuDSS solve on, as in double (M-QR-13). So the varying stage is MFEM's
 `DarcyHybridization::AssemblyMode::Batched`, whose interior-face `D`
 accumulation goes through `AtomicAdd` (MEQ's note at
 `defaultAssemblyMode()`), an order that changes run to run on the card. On
