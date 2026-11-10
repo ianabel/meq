@@ -665,7 +665,7 @@ namespace meq
 	/**
 	 * One profile's POD form, its knots appended to @a knots: what
 	 * makeSourceView() does for p' and gg', for any profile -- the g^2 a
-	 * delivered-flux integrand carries (M-DA-5).
+	 * delivered-flux integrand carries (M-386).
 	 * @return false for a profile with no POD form (only constants, scaled
 	 *         profiles and Hermite splines have one).
 	 */

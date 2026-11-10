@@ -135,7 +135,7 @@ namespace meq
 	 * profile (`square`, which must have a POD form: hermiteKnots() makes one
 	 * of a piecewise cubic exactly), or one of the three functions of it the
 	 * q-driven pin rows differentiate into. Zero where `Psi <= 0` or `G <= 0`.
-	 * MEASUREMENTS.md M-DA-5.
+	 * MEASUREMENTS.md M-386.
 	 */
 	struct PsiIntegrand
 	{
@@ -4760,7 +4760,7 @@ namespace meq
 			 * sourceTableReach() take the potential at every quadrature point
 			 * from a kernel, evaluate their integrand on the host there, and
 			 * scatter on the device; the host loop's geometry and shapes are
-			 * what they skip (M-DA-5). On by default; off is the host loop,
+			 * what they skip (M-386). On by default; off is the host loop,
 			 * kept for the tests that compare the two.
 			 */
 			void setDevicePointRoutes( bool allowed );

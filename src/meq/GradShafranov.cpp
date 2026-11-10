@@ -8013,7 +8013,7 @@ namespace
 		 * solve the state is valid on both sides, the gate never opens, and
 		 * the host loop ran on one core. The kernel reproduces that loop and
 		 * the per-element partials are summed here in element order, as there
-		 * (M-DA-5).
+		 * (M-386).
 		 */
 		if ( devicePointRoutesAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
 		     && !reactionStabilization )
@@ -8085,7 +8085,7 @@ namespace
 
 		// THE DEVICE FORM: the integrand evaluated in the kernel, each element
 		// accumulated in double, on tables at this rule where the map is
-		// affine. M-DA-5.
+		// affine. M-386.
 		if ( devicePointRoutesAllowed && elements > 0 && mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
 		{
 			mfem::IsoparametricTransformation first;
@@ -8155,7 +8155,7 @@ namespace
 		if ( !integrandView( f, view, knots ) )
 			throw std::invalid_argument( "meq::GradShafranovSolver::assemblePsiIntegrandColumn: the "
 			                             "integrand has no POD form" );
-		// THE DEVICE FORM: the plasma loops' kernel with the integrand. M-DA-5.
+		// THE DEVICE FORM: the plasma loops' kernel with the integrand. M-386.
 		if ( devicePointRoutesAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
 		     && !reactionStabilization )
 		{
@@ -8213,7 +8213,7 @@ namespace
 		 * its time on; the integrand, a std::function, is evaluated here. The
 		 * tables are DevicePlasmaLoops' at two orders above the field's,
 		 * which is this rule where the map is affine (OrderW() zero), and the
-		 * route is refused elsewhere (M-DA-5).
+		 * route is refused elsewhere (M-386).
 		 */
 		int const elements = mesh.GetNE();
 		if ( devicePointRoutesAllowed && elements > 0
@@ -9987,7 +9987,7 @@ namespace
 
 		// THE DEVICE FORM, where the source has one: the extremes per element
 		// in the kernel, the test insidePlasmaValue(), and the extremes of
-		// those here, which no order can change. M-DA-5.
+		// those here, which no order can change. M-386.
 		if ( devicePointRoutesAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK )
 		     && !reactionStabilization )
 		{
@@ -10015,7 +10015,7 @@ namespace
 		}
 
 		// THE POINT ROUTE, for a source with no POD form: the points from the
-		// kernel, the test and the extremes here (M-DA-5; TODO, *What is left
+		// kernel, the test and the extremes here (M-386; TODO, *What is left
 		// on the point route*).
 		if ( pointRouteOpen() )
 		{
@@ -11890,7 +11890,7 @@ namespace
 		 * loop adds it; and the scatter of each point's factor back on the
 		 * device, in the host loop's order. What it skips is the host loop's
 		 * Transform, Weight and CalcShape at every point. The columns are
-		 * handed back to the host after it, for their raw readers (M-DA-5).
+		 * handed back to the host after it, for their raw readers (M-386).
 		 */
 		if ( pointRouteOpen() )
 		{

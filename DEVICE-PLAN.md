@@ -2434,7 +2434,7 @@ the continuous fields cost 899 device Newton residuals and a four-pass tangent
    double accumulation, which needs upstream's NPC Jacobian apply (its
    `Jacobian::Mult` aborts today), or stop at `10 ε ‖dx‖`. The
    [M-383](MEASUREMENTS.md#m-383) funnels go when this lands.
-3. **The delivered integrals: DONE, [M-DA-5](MEASUREMENTS.md#m-da-5).**
+3. **The delivered integrals: DONE, [M-386](MEASUREMENTS.md#m-386).**
    `deliveredPlasmaCurrent()` takes the plasma loops' kernel under any Device,
    not only on a resident iterate; `sourceTableReach()` is the loops'
    `TableReach` extremes. The delivered flux and the `q`-driven pin rows'

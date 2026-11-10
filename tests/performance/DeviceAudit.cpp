@@ -304,7 +304,7 @@ int main( int argc, char **argv )
 		} );
 		row( "extractFluxSurfaces 24x128", extract, residualPerCall );
 
-		// ---- the delivered scale pins (M-DA-5): each on its device form, on
+		// ---- the delivered scale pins (M-386): each on its device form, on
 		// the point route (a lambda, its integrand evaluated on the host at
 		// every point) and on the host loop ----
 		double const axis = solver.psiAxis(), boundary = solver.psiBoundary();

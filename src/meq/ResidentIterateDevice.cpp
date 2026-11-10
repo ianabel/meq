@@ -294,7 +294,7 @@ namespace meq
 		/*
 		 * ONE THREAD PER ELEMENT, its points in rule order, ACCUMULATED IN
 		 * DOUBLE and rounded once: integrateOverDomain()'s per-element partial,
-		 * which the host sums in element order in double (M-DA-5).
+		 * which the host sums in element order in double (M-386).
 		 */
 		mfem::forall( elements, [ = ] MFEM_HOST_DEVICE ( int e )
 		{

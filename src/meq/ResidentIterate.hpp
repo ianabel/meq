@@ -87,7 +87,7 @@ namespace meq
 		BoundaryColumn = 5,
 		/// Scattered: `-( w W ) f( Psi )/R phi_j`, f the loop view's
 		/// PsiIntegrandView: assembleSourceDerivative() of a function of the
-		/// normalised flux with a device form (M-DA-5).
+		/// normalised flux with a device form (M-386).
 		PsiIntegrandColumn = 6,
 		/// Per element, TWO extremes: the least and the greatest psi (with
 		/// psi_c) over the element's points inside the plasma.
@@ -111,7 +111,7 @@ namespace meq
 	 * (ascending coefficients, the q loop's fit) or as a profile's knots
 	 * (hermiteKnots(), a spline's). Zero where `Psi <= 0`, where `G <= 0` and
 	 * where the span vanishes, as the host lambdas it replaces are. No default
-	 * member initialisers, for meq::AxisCandidate's reason. M-DA-5.
+	 * member initialisers, for meq::AxisCandidate's reason. M-386.
 	 */
 	struct PsiIntegrandView
 	{
@@ -302,7 +302,7 @@ namespace meq
 			 * it computed itself. @a out keeps what it held and is left
 			 * DEVICE-VALID. What lets a host-evaluated integrand -- a
 			 * std::function nobody can run on a card -- have its element work
-			 * on the device (M-DA-5).
+			 * on the device (M-386).
 			 */
 			bool scatterPointFactors( mfem::Vector const &factors, int potentialStart,
 			                          mfem::Vector &out ) const;

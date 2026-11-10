@@ -708,7 +708,7 @@ namespace meq
 	 * -- gg' of a cubic spline in g^2 is piecewise quadratic -- becomes a
 	 * SplineProfile, which has a device form (makeProfileView()). Past the
 	 * first and last point the SplineProfile continues as tables do (M-360),
-	 * not as @a profile does. MEASUREMENTS.md M-DA-5.
+	 * not as @a profile does. MEASUREMENTS.md M-386.
 	 * @throws std::invalid_argument for fewer than two points or points not
 	 *         strictly ascending.
 	 */

@@ -179,7 +179,7 @@ set(MEQ_CONVERGENCE_TESTS
 	# J^{-1} at a retained linearisation with psi_ax's border -- the bordered
 	# tangent, retained to the bit, and 1/sigma_min from it.
 	LinearisedSolve
-	# The point routes and the integrands as data under a Device (M-DA-5):
+	# The point routes and the integrands as data under a Device (M-386):
 	# each against its host loop. Skips loudly with no Device; the arms below
 	# configure one.
 	DeviceIntegrals

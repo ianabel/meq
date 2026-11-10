@@ -1107,7 +1107,7 @@ BOOST_AUTO_TEST_CASE( a_read_past_a_table_is_reported_with_how_far )
  * hermiteKnots() TURNS A PIECEWISE CUBIC INTO THE SplineProfile IT IS: value
  * and slope at the breaks, which Hermite interpolation reproduces exactly
  * between them -- gg' of a cubic spline in g^2 is the case it is for, a
- * piecewise quadratic, and its device form follows (M-DA-5).
+ * piecewise quadratic, and its device form follows (M-386).
  */
 BOOST_AUTO_TEST_CASE( hermiteKnotsReproduceAPiecewiseCubic )
 {

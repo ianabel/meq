@@ -1050,7 +1050,7 @@ double meq::Run::Impl::deliveredToroidalFlux( std::vector<double> const &c ) con
 	/*
 	 * int_plasma g( Psi )/R dA with g^2 the fitted polynomial, as data, so
 	 * that under a Device it is integrated in the kernel
-	 * (GradShafranovSolver::integratePsiIntegrand(), M-DA-5); a fit past twelve
+	 * (GradShafranovSolver::integratePsiIntegrand(), M-386); a fit past twelve
 	 * coefficients keeps the host lambda.
 	 */
 	double const sign = targetSign( *safetyFactorTarget );
