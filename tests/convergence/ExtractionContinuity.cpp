@@ -4,11 +4,36 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <utility>
 #include <vector>
 
 #include "ExtractionCrossing.hpp"
+
+/*
+ * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE RUNS
+ * (NewtonConvergence.cpp's pattern; a function-local static, since a
+ * namespace-scope mfem::Device may be constructed before MFEM's own
+ * singleton). Unset, there is none, which is how the plain ctest runs. Set,
+ * it is the device arm tests/CMakeLists.txt registers: the continuous pair psi~ and q~
+ * was zeroed through the device-aware operator= and written on the host, so
+ * under any Device the family was built on zeros (MEASUREMENTS.md M-DA-1).
+ */
+namespace
+{
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+			if ( requested != nullptr && *requested != '\0' )
+				static mfem::Device device( requested );
+		}
+	};
+}
+
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 
 /*
  * THE FLUX-SURFACE GEOMETRY DOES NOT JUMP WHERE A FAMILY NODE CROSSES AN
@@ -168,6 +193,10 @@ BOOST_AUTO_TEST_CASE( theFamilyIsLabelledOnTheFieldItRoots )
 	double const span = std::abs( family.psiAxis - family.psiBoundary );
 	std::printf( "  the family's psi_ax less psi~ at its axis: %.2e of the span; psi_h there differs from "
 	             "psi~ by %.2e\n", ( family.psiAxis - tilde )/span, ( finder - tilde )/span );
+	// Every digit, so that two arms -- the host and MEQ_TEST_DEVICE -- can be
+	// compared to the bit by their output (M-DA-1).
+	std::printf( "  family bits: psi_ax %.17g, V' on the outer surface %.17g\n", family.psiAxis,
+	             family.surfaces.back().vPrime );
 	BOOST_TEST( std::abs( family.psiAxis - tilde ) < 64.0*std::numeric_limits<mfem::real_t>::epsilon()*span,
 		"the family's psi_ax is " << family.psiAxis << " where psi~ at its axis is " << tilde
 		<< " (psi_h there " << finder << "): Psi_N is not zero on the axis of the field its levels are in. "

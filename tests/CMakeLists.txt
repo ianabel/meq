@@ -430,6 +430,57 @@ if(TARGET NewtonConvergence AND MFEM_USE_CUDA)
 		ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=cuda")
 endif()
 
+# THE RETAINED LINEARISATION AND THE FLUX-SURFACE EXTRACTION UNDER A DEVICE.
+# Both read buffers raw that a Device leaves valid only on the card: the
+# extraction's continuous pair was built on the device's zeros (M-DA-1), and
+# the linearised solve's back-solves and refinement residuals were indexed
+# stale (M-DA-2), so under --device cuda the family was missing and the
+# bordered tangent wrong, while --device debug faulted. Each arm runs the cases
+# that assert against a closed form or to the bit, under MEQ_TEST_DEVICE and
+# on MEQ_TEST_SERIAL_ROUTES's bit-exact host routes, so that a run with that
+# variable alone reproduces the debug arm to the bit in double.
+# `debug` needs no GPU and exercises the host fallbacks on a build without
+# device kernels; `cuda` is registered only where MFEM has it. Neither asserts
+# that a kernel ran, so neither needs deviceKernelsBuilt().
+set(_da_devices debug)
+if(MFEM_USE_CUDA)
+	list(APPEND _da_devices cuda)
+endif()
+foreach(_device IN LISTS _da_devices)
+	# theRetainedFactorisationAnswersAsAFreshOneDoes asserts the retained solve
+	# reproduces itself TO THE BIT. Under `cuda` it does not: a direction solved
+	# again after another answers 8e-8 of its largest entry apart in single,
+	# while the first solve after a fresh linearisation answers to the bit --
+	# the solve carries state between calls on the card and not under `debug`
+	# (MEASUREMENTS.md M-DA-2, open). So `debug` runs it and `cuda` does not.
+	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents)
+	if(_device STREQUAL "debug")
+		string(APPEND _linearised_cases ",theRetainedFactorisationAnswersAsAFreshOneDoes")
+	endif()
+	if(TARGET LinearisedSolve)
+		add_test(NAME LinearisedSolveDevice_${_device}
+			COMMAND LinearisedSolve --run_test=${_linearised_cases})
+		set_tests_properties(LinearisedSolveDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET TangentConvergence)
+		add_test(NAME TangentConvergenceDevice_${_device}
+			COMMAND TangentConvergence
+			        --run_test=theTangentInTheAmplitudeIsTheConstantItShouldBe,theTangentConvergesAtTheSolutionsRatesAtDegreeTwo)
+		set_tests_properties(TangentConvergenceDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET ExtractionContinuity)
+		add_test(NAME ExtractionContinuityDevice_${_device}
+			COMMAND ExtractionContinuity
+			        --run_test=theFamilyIsLabelledOnTheFieldItRoots)
+		set_tests_properties(ExtractionContinuityDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+endforeach()
+unset(_da_devices)
+unset(_linearised_cases)
+
 # ---------------------------------------------------------------------------
 # The performance harness. BUILT BUT NOT REGISTERED AS A TEST, deliberately.
 #

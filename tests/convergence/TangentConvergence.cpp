@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -49,6 +50,30 @@
 #include "meq/Source.hpp"
 #include "analytic/SimilarityExponential.hpp"
 #include "convergence/ConvergenceHarness.hpp"
+
+/*
+ * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE RUNS
+ * (NewtonConvergence.cpp's pattern; a function-local static, since a
+ * namespace-scope mfem::Device may be constructed before MFEM's own
+ * singleton). Unset, there is none, which is how the plain ctest runs. Set,
+ * it is the device arm tests/CMakeLists.txt registers: the unbordered retained
+ * path read its refinement residual and the direction it applies raw while
+ * they were device-valid (MEASUREMENTS.md M-DA-2).
+ */
+namespace
+{
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+			if ( requested != nullptr && *requested != '\0' )
+				static mfem::Device device( requested );
+		}
+	};
+}
+
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 
 namespace
 {
@@ -163,6 +188,7 @@ namespace
 		out->solver->setSource( *out->source );
 		out->solver->setBoundaryData( *out->datum );
 		out->solver->setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+		meq::tests::namedRoutesFromEnvironment( *out->solver );
 		out->solver->solve();
 		out->solver->postProcess();
 		return out;
@@ -177,6 +203,10 @@ namespace
 		mfem::Vector dRdp, dx;
 		s.solver->assembleSourceDerivative( s.solver->state(), dFdp, dRdp );
 		s.solver->solveTangent( s.solver->state(), dRdp, datum, dx, passes );
+		// Every digit, so that two arms -- the host and MEQ_TEST_DEVICE --
+		// can be compared to the bit by their output (M-DA-2).
+		std::printf( "  tangent bits: |dx| %.17g\n", dx.Norml2() );
+		dx.HostRead();   // fieldsOf() reads it raw, after the norm's device read
 		return dx;
 	}
 
@@ -192,6 +222,7 @@ namespace
 		mfem::FiniteElementSpace &fluxSpace = s.solver->fluxSpace();
 		mfem::FiniteElementSpace &potentialSpace = s.solver->potentialSpace();
 		Fields out;
+		state.HostRead();   // read raw below
 		out.q.SetSpace( &fluxSpace );
 		out.psi.SetSpace( &potentialSpace );
 		int const fluxSize = fluxSpace.GetVSize();

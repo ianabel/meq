@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
@@ -33,6 +34,31 @@
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
 #include "convergence/ConvergenceHarness.hpp"
+
+/*
+ * MEQ_TEST_DEVICE, WHEN SET, CONFIGURES AN mfem::Device BEFORE ANY CASE RUNS
+ * (NewtonConvergence.cpp's pattern; a function-local static, since a
+ * namespace-scope mfem::Device may be constructed before MFEM's own
+ * singleton). Unset, there is none, which is how the plain ctest runs. Set,
+ * it is the device arm tests/CMakeLists.txt registers: the retained linearisation
+ * read its back-solves and refinement residuals raw while they were
+ * device-valid, and the bordered tangent came out wrong under --device cuda
+ * (MEASUREMENTS.md M-DA-2).
+ */
+namespace
+{
+	struct DeviceFromEnvironment
+	{
+		DeviceFromEnvironment()
+		{
+			char const *const requested = std::getenv( "MEQ_TEST_DEVICE" );
+			if ( requested != nullptr && *requested != '\0' )
+				static mfem::Device device( requested );
+		}
+	};
+}
+
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 
 namespace
 {
@@ -161,6 +187,7 @@ namespace
 		s->solver->setBoundaryData( *s->zero );
 		s->solver->setInitialGuess( *s->guess );
 		s->solver->setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+		meq::tests::namedRoutesFromEnvironment( *s->solver );
 		s->solver->solve();
 		return s;
 	}
@@ -178,6 +205,13 @@ namespace
 		std::vector<double> ds;
 		s.solver->linearisedTangent( dRdp, {}, nullptr, dx, ds, passes );
 		dAxis = ds.front();
+		// Every digit, so that two arms -- the host and MEQ_TEST_DEVICE --
+		// can be compared to the bit by their output (M-DA-2).
+		std::printf( "  tangent bits: d psi_ax %.17g, |dx| %.17g\n", dAxis, dx.Norml2() );
+		// Read raw by the caller: asked for on the host, as any raw reader
+		// must, and after the norm, whose device read protects the host page
+		// under --device debug.
+		dx.HostRead();
 	}
 
 	double rate( double coarse, double fine, double ratio )
@@ -272,6 +306,9 @@ BOOST_AUTO_TEST_CASE( theRetainedFactorisationAnswersAsAFreshOneDoes )
 	s->solver->linearise( s->solver->state() );
 	s->solver->solveLinearised( b1, { 0.3 }, x1Fresh, d1Fresh );
 
+	std::printf( "  retained bits: ds %.17g, |x| %.17g\n", d1.front(), x1.Norml2() );
+	for ( mfem::Vector const *x : { &x1, &x1Again, &x1Fresh } )
+		x->HostRead();   // read raw below, after the norm's device read
 	bool again = d1Again == d1, fresh = d1Fresh == d1;
 	for ( int i = 0; i < size; ++i )
 	{
@@ -466,11 +503,13 @@ BOOST_AUTO_TEST_CASE( theInverseNormEstimateGrowsAsTheOperatorNearsItsFold )
 		solver.setSource( source );
 		solver.setBoundaryData( zero );
 		solver.setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+		meq::tests::namedRoutesFromEnvironment( solver );
 		solver.solve();
 		solver.linearise( solver.state() );
 		double change = 0.0;
 		double const estimate = solver.linearisedInverseNorm( 20, &change );
-		std::printf( "    %10.1e %14.4e %14.4e %12.2e\n", delta, estimate, estimate*delta, change );
+		std::printf( "    %10.1e %14.4e %14.4e %12.2e   bits %.17g\n", delta, estimate, estimate*delta, change,
+		             estimate );
 		if ( delta <= 1.0e-2 )
 			scaled.push_back( estimate*delta );
 	}
@@ -497,6 +536,7 @@ BOOST_AUTO_TEST_CASE( withoutABorderTheRetainedTangentIsSolveTangents )
 	solver.setSource( source );
 	solver.setBoundaryData( zero );
 	solver.setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+	meq::tests::namedRoutesFromEnvironment( solver );
 	solver.solve();
 	mfem::Vector dRdp;
 	solver.assembleSourceDerivative( solver.state(),
@@ -511,7 +551,8 @@ BOOST_AUTO_TEST_CASE( withoutABorderTheRetainedTangentIsSolveTangents )
 	mfem::Vector difference( fresh );
 	difference -= retainedTangent;
 	double const relative = difference.Normlinf()/fresh.Normlinf();
-	std::printf( "\n  no border: the retained tangent against solveTangent(), %.3e relative\n", relative );
+	std::printf( "\n  no border: the retained tangent against solveTangent(), %.3e relative; bits |dx| %.17g\n",
+	             relative, retainedTangent.Norml2() );
 	BOOST_TEST( relative < 1.0e-13, "the retained path's tangent differs from solveTangent()'s by " << relative );
 }
 

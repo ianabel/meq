@@ -46,6 +46,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -151,6 +152,25 @@ namespace tests
 			return width()*height();
 		}
 	};
+
+	/**
+	 * THE BIT-EXACT HOST ROUTES, WHEN MEQ_TEST_SERIAL_ROUTES IS SET: serial
+	 * element assembly and serial trace assembly. The defaults -- threaded
+	 * assembly, batched trace assembly -- re-associate sums differently with
+	 * and without an mfem::Device (5e-15 of psi_h on ExtractionContinuity's
+	 * box), so a run with no Device and a run under MEQ_TEST_DEVICE=debug agree
+	 * to the bit only on these, which is how the device arms are compared with
+	 * the host (CLAUDE_DEVICE.md, "Bit-identity with the host is a test
+	 * instrument"; MEASUREMENTS.md M-DA-1, M-DA-2). Unset, it does nothing.
+	 */
+	inline void namedRoutesFromEnvironment( meq::GradShafranovSolver &solver )
+	{
+		char const *const wanted = std::getenv( "MEQ_TEST_SERIAL_ROUTES" );
+		if ( wanted == nullptr || *wanted == '\0' )
+			return;
+		solver.setAssemblyMode( meq::GradShafranovSolver::AssemblyMode::Serial );
+		solver.setTraceAssemblyMode( meq::GradShafranovSolver::TraceAssemblyMode::Serial );
+	}
 
 	/// The box of examples/manufactured.toml, which encloses the ITER-like
 	/// double-null boundary refs/HDG-GradShafranov.pdf poses its Example 5 on,
