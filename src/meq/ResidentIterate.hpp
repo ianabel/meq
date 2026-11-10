@@ -92,7 +92,15 @@ namespace meq
 		/// Per element, TWO extremes: the least and the greatest psi (with
 		/// psi_c) over the element's points inside the plasma.
 		/// sourceTableReach().
-		TableReach = 7
+		TableReach = 7,
+		/// Scattered: `-( w W ) F t/R phi_j`, `t` the direction's potential at
+		/// the point and 1 without one: addSourceColumns() with `F`, the
+		/// retained linearisation's source term; with a substituted view, its
+		/// derivative along a gg' direction (M-DA-6).
+		SourceValue = 8,
+		/// Scattered: `-( w W ) dF/dpsi t/R phi_j`, addSourceColumns() with
+		/// dF/dpsi along a direction: `S'( psi ) t` in the applied Jacobian.
+		SourceSlope = 9
 	};
 
 	/// Which function of `G = g^2` a PsiIntegrandView is.
@@ -203,6 +211,10 @@ namespace meq
 		int const *elementDofs;
 		/// PsiIntegrandColumn's function, its knots in `knots`.
 		PsiIntegrandView integrand;
+		/// SourceValue's and SourceSlope's direction, in the state's layout and
+		/// read where `state` is, or null.
+		mfem::real_t const *along;
+		int hasAlong;
 		mfem::real_t const *state;
 		int potentialStart;
 		int elements;
@@ -263,7 +275,9 @@ namespace meq
 			bool scatter( PlasmaQuantity quantity, SourceView const &source,
 			              DeviceConstants const &constants,
 			              mfem::Vector const &state, int potentialStart,
-			              mfem::real_t scale, mfem::Vector &out ) const;
+			              mfem::real_t scale, mfem::Vector &out,
+			              mfem::Vector const *along = nullptr,
+			              mfem::Array<KnotView> const *knots = nullptr ) const;
 
 			/**
 			 * PsiIntegrandColumn: `-( w W ) f( Psi )/R phi_j` into a state-sized
@@ -403,6 +417,17 @@ namespace meq
 	                            mfem::Vector const &radius, mfem::Vector const &weight,
 	                            mfem::Vector const &potential, int potentialStart,
 	                            int elements, int quadPoints, int dofs, mfem::Vector &perElement );
+
+	/**
+	 * `v[ indices[ k ] ] = value` for every k, on the device; @a v is left
+	 * device-valid. The essential trace rows of a right-hand side zeroed where
+	 * it lives: the retained linearisation's back-solve (M-DA-6).
+	 */
+	bool fillEntriesOnDevice( mfem::Vector &v, mfem::Array<int> const &indices,
+	                          mfem::real_t value );
+	/// @copydoc plasmaElementKernel
+	bool fillEntriesKernel( mfem::Vector &v, mfem::Array<int> const &indices,
+	                        mfem::real_t value );
 
 	bool copyEntriesOnDevice( mfem::Vector const &source,
 	                          mfem::Array<int> const &indices,

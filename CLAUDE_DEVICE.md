@@ -187,8 +187,16 @@ invisible to the others. Reach for them in this order.
   bit-exact routes `MEQ_TEST_SERIAL_ROUTES` names, so a host run with that
   variable alone reproduces the `debug` arm to the bit in double
   (→ **[M-383](MEASUREMENTS.md#m-383)**). The accuracy pieces of
-  `c4ee278..1e8a3ad` still run on one host core under a Device: `DEVICE-PLAN.md`
-  section 9, costed at **[M-384](MEASUREMENTS.md#m-384)**.
+  `c4ee278..1e8a3ad` ran on one host core under a Device, costed at
+  **[M-384](MEASUREMENTS.md#m-384)**; the linearised solve is on the device
+  since **[M-DA-6](MEASUREMENTS.md#m-da-6)** (`DEVICE-PLAN.md` section 9).
+* **A POD profile must be the function past its ends too**, not only between
+  its knots: an unconfined source reads gg' far outside a limiter. The `q`
+  loop's gg' is an `EndPieceSplineProfile` (`ProfileKind::EndPieceSpline`),
+  carried on by its end pieces as the not-a-knot spline is; a plain
+  `SplineProfile` tapers flat there (M-360) and stalled
+  `QDrivenConsistency`'s limited box at 8e-3
+  (→ **[M-DA-6](MEASUREMENTS.md#m-da-6)**).
 * **`setInitialState()` is the iterate a solve starts from under any Device**,
   and was not: the device-aware copy into `solution` left the state on the
   device while the trace datum, written through `traceGf`'s alias with host

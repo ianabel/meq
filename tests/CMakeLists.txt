@@ -461,7 +461,7 @@ foreach(_device IN LISTS _da_devices)
 	# while the first solve after a fresh linearisation answers to the bit --
 	# the solve carries state between calls on the card and not under `debug`
 	# (MEASUREMENTS.md M-383, open). So `debug` runs it and `cuda` does not.
-	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents,theLimiterBorderIsInTheTangent,theXPointBorderIsInTheTangent,theInitialStateIsWhereTheSolveStarts)
+	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents,theLimiterBorderIsInTheTangent,theXPointBorderIsInTheTangent,theInitialStateIsWhereTheSolveStarts,theDeviceRouteIsTheHostRoute)
 	if(_device STREQUAL "debug")
 		string(APPEND _linearised_cases ",theRetainedFactorisationAnswersAsAFreshOneDoes")
 	endif()

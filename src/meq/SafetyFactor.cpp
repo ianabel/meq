@@ -228,20 +228,33 @@ namespace meq
 		return evaluate( y, m, at, derivative );
 	}
 
+	/*
+	 * gg' AS A HERMITE PROFILE, WHICH IT IS EXACTLY. g^2 is a cubic spline on
+	 * the source's nodes, extrapolated past the end nodes by its end pieces,
+	 * so gg' = ( g^2 )'/2 is a quadratic on every interval between them and
+	 * beyond them: a Hermite cubic on knots at the nodes reproduces it, and an
+	 * EndPieceSplineProfile carries the end pieces on past the end nodes as
+	 * the spline does. That matters: an unconfined source on a limited box
+	 * reads Psi down to about -1 and beyond outside the limiter
+	 * (QDrivenConsistency's limited box), and a table's flattening
+	 * continuation (M-360) there is a different problem, on which that case's
+	 * loop stalled at a removable 8e-3; end knots at Psi = -4 and 5 were read
+	 * past too, and stalled at 1.6e-6 (M-DA-6). What the POD form buys
+	 * (makeProfileView()): the source's gg' and every cardinal direction
+	 * evaluate in the device integrand and the plasma loops' kernels.
+	 */
 	std::shared_ptr<Profile const> ToroidalFieldSpline::ggPrime() const
 	{
-		auto copy = std::make_shared<ToroidalFieldSpline const>( *this );
-		return std::make_shared<SplineGGPrime const>(
-			[ copy ]( double at, int derivative ) { return ( *copy )( at, derivative ); } );
+		SplineGGPrime const exact( [ this ]( double at, int derivative ) { return ( *this )( at, derivative ); } );
+		return std::make_shared<EndPieceSplineProfile const>( hermiteKnots( exact, psi ) );
 	}
 
 	std::shared_ptr<Profile const> ToroidalFieldSpline::cardinalGGPrime( std::size_t j ) const
 	{
 		if ( j >= size() )
 			throw std::out_of_range( "meq::ToroidalFieldSpline::cardinalGGPrime: no such knot" );
-		auto copy = std::make_shared<ToroidalFieldSpline const>( *this );
-		return std::make_shared<SplineGGPrime const>(
-			[ copy, j ]( double at, int derivative ) { return copy->cardinal( j, at, derivative ); } );
+		SplineGGPrime const exact( [ this, j ]( double at, int derivative ) { return cardinal( j, at, derivative ); } );
+		return std::make_shared<EndPieceSplineProfile const>( hermiteKnots( exact, psi ) );
 	}
 
 	bool ToroidalFieldSpline::positive( int samples ) const

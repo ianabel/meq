@@ -2421,19 +2421,19 @@ the continuous fields cost 899 device Newton residuals and a four-pass tangent
    dofs) or the same loop on the host; the solver keeps one interpolant
    (`GradShafranovSolver::continuousInterpolant()`). The tracer stays on the
    host and reads `ψ̃`, `q̃` downloaded.
-2. **The linearised solve (`linearise()`, `applyRetainedJacobian()`,
-   `addSourceColumns()`), held until `q-refining-fit`'s multi-border
-   linearisation is on `main` (branch `device-linearised`, unbuilt).** (a) The retained operator built as `buildNpc`
-   builds Newton's, through `makeDeviceNPCOperator()`, so its residual and
-   gradient take the device integrand (a plain `mfem::DarcyNPCOperator` runs
-   it on the host, 158 device residuals a call). (b) `addSourceColumns()` as a
-   kernel over `SourceView`: `S( x )`, `S( x + s t )` and `S'( x ) t` write
-   disjoint L2 dofs per element. (c) `assembleSourceDerivative()`'s direction
-   as a `KnotView`. (d) In single the refinement passes buy nothing a test
-   can see ([M-384](MEASUREMENTS.md#m-384)); either form the residual with
-   double accumulation, which needs upstream's NPC Jacobian apply (its
-   `Jacobian::Mult` aborts today), or stop at `10 ε ‖dx‖`. The
-   [M-383](MEASUREMENTS.md#m-383) funnels go when this lands.
+2. **The linearised solve: DONE, [M-DA-6](MEASUREMENTS.md#m-da-6).** The
+   retained operator is Newton's own, built as `buildNpc` builds it
+   (`newtonOperator()`, `makeDeviceNPCOperator()`), so its residual and
+   gradient take the device integrand; the source terms `S( x )`,
+   `S( x + s t )` and `S'( x ) t` are the plasma loops' `SourceValue` and
+   `SourceSlope` kernels (`sourceTerm()`); the gg' direction's derivative is
+   the source's kernel on a substituted view (`assembleGGPrimeDerivative()`),
+   with gg' and every cardinal direction a Hermite `EndPieceSplineProfile`
+   of the `q` loop's spline (`ProfileKind::EndPieceSpline`); the
+   essential trace rows are zeroed on the card (`zeroEssentialRows()`); and
+   the refinement stops at `10 ε` of the answer, which in single is after the
+   first correction. The border rows' dots stay on the host, a few entries of
+   the answer each.
 3. **The delivered integrals: DONE, [M-386](MEASUREMENTS.md#m-386).**
    `deliveredPlasmaCurrent()` takes the plasma loops' kernel under any Device,
    not only on a resident iterate; `sourceTableReach()` is the loops'

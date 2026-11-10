@@ -31,7 +31,8 @@ namespace meq
 		                                           mfem::real_t z,
 		                                           mfem::real_t psi,
 		                                           mfem::real_t &first,
-		                                           mfem::real_t &second )
+		                                           mfem::real_t &second,
+		                                           mfem::real_t alongPsi = mfem::real_t( 1 ) )
 		{
 			first = mfem::real_t( 0 );
 			second = mfem::real_t( 0 );
@@ -82,6 +83,14 @@ namespace meq
 					first = -pointWeight*derivative/radius;
 					break;
 				}
+				case static_cast<int>( PlasmaQuantity::SourceValue ):
+					// addSourceColumns(): -weight*g*alongPsi/radius, g = F.
+					first = -pointWeight*sourceF( in.source, in.knots, radius, z, psi )*alongPsi/radius;
+					break;
+				case static_cast<int>( PlasmaQuantity::SourceSlope ):
+					// The same with g = dF/dpsi.
+					first = -pointWeight*sourceDFdPsi( in.source, in.knots, radius, z, psi )*alongPsi/radius;
+					break;
 				case static_cast<int>( PlasmaQuantity::PsiIntegrandColumn ):
 					// addSourceColumns(): -weight*g*1.0/radius, g = f( Psi ).
 					first = -pointWeight*psiIntegrand( in.integrand, in.knots, psi )/radius;
@@ -191,9 +200,19 @@ namespace meq
 				int const at = e*in.quadPoints + q;
 				mfem::real_t const radius = in.radius[ at ];
 				mfem::real_t const psi = psiAt( in, e, q );
+				// The direction at the point as addSourceColumns() forms it:
+				// from zero in local-dof order, no conductor shift.
+				mfem::real_t alongPsi = mfem::real_t( 1 );
+				if ( in.hasAlong )
+				{
+					alongPsi = mfem::real_t( 0 );
+					for ( int j = 0; j < in.dofs; ++j )
+						alongPsi += in.shape[ q*in.dofs + j ]
+						            *in.along[ in.potentialStart + in.elementDofs[ e*in.dofs + j ] ];
+				}
 				mfem::real_t factor = 0, unused = 0;
 				pointFactors( in, in.weight[ at ], radius, in.z[ at ], psi,
-				              factor, unused );
+				              factor, unused, alongPsi );
 				for ( int j = 0; j < in.dofs; ++j )
 					out[ in.potentialStart + in.elementDofs[ e*in.dofs + j ] ] +=
 						factor*in.shape[ q*in.dofs + j ];
@@ -364,6 +383,19 @@ namespace meq
 				for ( int j = 0; j < nd; ++j )
 					d_out[ start + d_dofs[ e*nd + j ] ] += factor*d_shape[ q*nd + j ];
 			}
+		} );
+		return true;
+	}
+
+	bool fillEntriesKernel( mfem::Vector &v, mfem::Array<int> const &indices,
+	                        mfem::real_t value )
+	{
+		auto const *d_indices = indices.Read();
+		auto *d_v = v.ReadWrite();
+		mfem::real_t const fill = value;
+		mfem::forall( indices.Size(), [ = ] MFEM_HOST_DEVICE ( int k )
+		{
+			d_v[ d_indices[ k ] ] = fill;
 		} );
 		return true;
 	}
@@ -553,6 +585,11 @@ namespace meq
 	bool domainIntegrandKernel( PsiIntegrandView const &, KnotView const *, mfem::Vector const &,
 	                            mfem::Array<int> const &, mfem::Vector const &, mfem::Vector const &,
 	                            mfem::Vector const &, int, int, int, int, mfem::Vector & )
+	{
+		return false;
+	}
+
+	bool fillEntriesKernel( mfem::Vector &, mfem::Array<int> const &, mfem::real_t )
 	{
 		return false;
 	}

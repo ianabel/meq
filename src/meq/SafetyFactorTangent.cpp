@@ -352,11 +352,9 @@ namespace meq
 			directions[ j ] = spline.cardinalGGPrime( j );
 			Profile const &direction = *directions[ j ];
 			mfem::Vector &dRdu = sources[ j ];
-			solver.assembleSourceDerivative( state,
-				[ this, &direction ]( double radius, double z, double psi )
-				{
-					return source.ggPrimeDerivative( radius, z, psi, direction );
-				}, dRdu );
+			// The source's own kernel on a substituted view under a Device;
+			// ggPrimeDerivative() through the host loop otherwise (M-DA-6).
+			solver.assembleGGPrimeDerivative( state, direction, dRdu );
 			std::vector<double> ds;
 			solver.linearisedTangent( dRdu, {}, nullptr, dx[ j ], ds );
 			if ( layout.axis >= 0 )

@@ -90,7 +90,8 @@ namespace meq
 	enum class ProfileKind : int
 	{
 		Constant = 0,   ///< meq::ConstantProfile
-		Spline   = 1    ///< meq::SplineProfile, Hermite cubic over KnotView[]
+		Spline   = 1,   ///< meq::SplineProfile, Hermite cubic over KnotView[]
+		EndPieceSpline = 2 ///< meq::EndPieceSplineProfile: the same, continued by its end pieces
 	};
 
 	/**
@@ -345,6 +346,22 @@ namespace meq
 	}
 
 	/// @a view evaluated at @a x. @a knots is the flat array @a view indexes.
+	/// meq::endPieceCurvature(), to the operation: the end piece's second and
+	/// third derivatives at its outer knot.
+	MFEM_HOST_DEVICE inline void endPieceCurvature( KnotView const &a, KnotView const &b, bool atRight,
+	                                                mfem::real_t &second, mfem::real_t &third )
+	{
+		mfem::real_t const delta = b.psi - a.psi;
+		mfem::real_t const slope = ( b.value - a.value )/delta;
+		if ( atRight )
+			second = ( mfem::real_t( 2 )*a.derivative + mfem::real_t( 4 )*b.derivative
+			           - mfem::real_t( 6 )*slope )/delta;
+		else
+			second = ( mfem::real_t( 6 )*slope - mfem::real_t( 4 )*a.derivative
+			           - mfem::real_t( 2 )*b.derivative )/delta;
+		third = mfem::real_t( 6 )*( a.derivative + b.derivative - mfem::real_t( 2 )*slope )/( delta*delta );
+	}
+
 	MFEM_HOST_DEVICE inline mfem::real_t evaluateProfile( ProfileView const &view,
 	                                                      KnotView const *knots,
 	                                                      mfem::real_t x )
@@ -357,6 +374,25 @@ namespace meq
 		// the operation, so the two agree to the bit.
 		mfem::real_t const width = mfem::real_t( tableContinuationWidth )
 		                           *( k[ view.count - 1 ].psi - k[ 0 ].psi );
+		if ( view.kind == static_cast<int>( ProfileKind::EndPieceSpline ) )
+		{
+			mfem::real_t second = 0, third = 0;
+			int const n = view.count;
+			if ( x < k[ 0 ].psi )
+			{
+				endPieceCurvature( k[ 0 ], k[ 1 ], false, second, third );
+				mfem::real_t const d = x - k[ 0 ].psi;
+				return view.scale*( k[ 0 ].value + d*( k[ 0 ].derivative
+				                    + d*( mfem::real_t( 0.5 )*second + d*third/mfem::real_t( 6 ) ) ) );
+			}
+			if ( x > k[ n - 1 ].psi )
+			{
+				endPieceCurvature( k[ n - 2 ], k[ n - 1 ], true, second, third );
+				mfem::real_t const d = x - k[ n - 1 ].psi;
+				return view.scale*( k[ n - 1 ].value + d*( k[ n - 1 ].derivative
+				                    + d*( mfem::real_t( 0.5 )*second + d*third/mfem::real_t( 6 ) ) ) );
+			}
+		}
 		mfem::real_t g = 0, gPrime = 0;
 		if ( x <= k[ 0 ].psi )
 		{
@@ -393,6 +429,23 @@ namespace meq
 		// The continuation's slope outside, as SplineProfile::prime().
 		mfem::real_t const width = mfem::real_t( tableContinuationWidth )
 		                           *( k[ view.count - 1 ].psi - k[ 0 ].psi );
+		if ( view.kind == static_cast<int>( ProfileKind::EndPieceSpline ) )
+		{
+			mfem::real_t second = 0, third = 0;
+			int const n = view.count;
+			if ( x < k[ 0 ].psi )
+			{
+				endPieceCurvature( k[ 0 ], k[ 1 ], false, second, third );
+				mfem::real_t const d = x - k[ 0 ].psi;
+				return view.scale*( k[ 0 ].derivative + d*( second + mfem::real_t( 0.5 )*d*third ) );
+			}
+			if ( x > k[ n - 1 ].psi )
+			{
+				endPieceCurvature( k[ n - 2 ], k[ n - 1 ], true, second, third );
+				mfem::real_t const d = x - k[ n - 1 ].psi;
+				return view.scale*( k[ n - 1 ].derivative + d*( second + mfem::real_t( 0.5 )*d*third ) );
+			}
+		}
 		mfem::real_t g = 0, gPrime = 0;
 		if ( x < k[ 0 ].psi )
 		{

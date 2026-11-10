@@ -12130,9 +12130,128 @@ namespace
 		 * so it outlives nothing it holds. Host: a derivative is a host product.
 		 */
 		++hybridizationGeneration;
-		mfem::DarcyNPCOperator npc( *darcy->GetHybridization(), blockOffsets, darcyRhs );
-		out.SetSize( npc.Height() );
-		npc.Mult( state, out );
+		std::vector<int> flags;
+		std::unique_ptr<mfem::DarcyNPCOperator> const npc = newtonOperator( flags );
+		out.SetSize( npc->Height() );
+		npc->Mult( state, out );
+	}
+
+	std::unique_ptr<mfem::DarcyNPCOperator> GradShafranovSolver::newtonOperator( std::vector<int> &flags )
+	{
+		/*
+		 * buildNpc()'s choice, made the same way: the device integrand's
+		 * operator wherever makeDeviceNPCOperator() takes the source -- under a
+		 * Device, a POD source -- so that a residual here is the one a Newton
+		 * step evaluates, on the card, and its constants are the plasma loops'
+		 * too (plasmaLoopsAvailable()). M-DA-6.
+		 */
+		mfem::DarcyHybridization &hyb = *darcy->GetHybridization();
+		deviceIntegrandInUse = false;
+		if ( linearisedDeviceAllowed && !reactionStabilization )
+		{
+			DeviceIntegrandInputs const inputs = deviceIntegrandInputs( flags );
+			if ( auto device = makeDeviceNPCOperator( hyb, blockOffsets, darcyRhs, inputs, npcConstants ) )
+			{
+				deviceIntegrandInUse = true;
+				return device;
+			}
+		}
+		return std::make_unique<mfem::DarcyNPCOperator>( hyb, blockOffsets, darcyRhs );
+	}
+
+	void GradShafranovSolver::sourceTerm( PlasmaQuantity quantity, mfem::Vector const &state,
+	                                      mfem::Vector const *along, mfem::Vector &out ) const
+	{
+		if ( linearisedDeviceAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		{
+			SourceView view{};
+			if ( plasmaLoopsAvailable( view )
+			     && plasmaLoops.scatter( quantity, view, npcConstants, state, blockOffsets[ 1 ],
+			                             mfem::real_t( 1 ), out, along ) )
+			{
+				++linearisedDeviceCount;
+				return;
+			}
+		}
+		out.SetSize( state.Size() );
+		zeroOnHost( out );
+		std::vector<mfem::Vector *> columns{ &out };
+		Source const &f = *nonlinearSource;
+		bool const slope = quantity == PlasmaQuantity::SourceSlope;
+		addSourceColumns( state, 1,
+			[ &f, slope ]( double radius, double z, double psi, double *g )
+			{
+				g[ 0 ] = slope ? f.dFdPsi( radius, z, psi ) : f.f( radius, z, psi );
+				return true;
+			}, columns, along );
+	}
+
+	void GradShafranovSolver::assembleGGPrimeDerivative( mfem::Vector const &state, Profile const &direction,
+	                                                     mfem::Vector &out )
+	{
+		if ( !prepared || !darcy || !nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleGGPrimeDerivative: there is no "
+			                        "solve to differentiate at yet" );
+		auto const *mhd = dynamic_cast<NormalisedMHDSource const *>( normalisedSource );
+		if ( mhd == nullptr || static_cast<Source const *>( normalisedSource ) != nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleGGPrimeDerivative: gg' is a "
+			                        "NormalisedMHDSource's, and this solver's source is not one" );
+		if ( reactionStabilization || anisotropyValue != nullptr )
+			throw std::logic_error( "meq::GradShafranovSolver::assembleGGPrimeDerivative: refused "
+			                        "beside a reaction-following tau or an anisotropy" );
+
+		/*
+		 * THE DEVICE ROUTE IS THE SOURCE'S OWN KERNEL ON A SUBSTITUTED VIEW:
+		 * p' zero and gg' the direction, so sourceF() is
+		 * scale ( mu0 R^2 0 + direction( Psi ) )/span inside the plasma, which
+		 * is ggPrimeDerivative() to the rounding of the zero term.
+		 */
+		if ( linearisedDeviceAllowed && mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+		{
+			SourceView view{};
+			std::vector<KnotView> knots;
+			ProfileView along{};
+			if ( plasmaLoopsAvailable( view ) && makeProfileView( direction, along, knots ) )
+			{
+				view.pPrime = ProfileView{};
+				view.pPrime.kind = static_cast<int>( ProfileKind::Constant );
+				view.pPrime.scale = mfem::real_t( 1 );
+				view.pPrime.constantValue = mfem::real_t( 0 );
+				view.ggPrime = along;
+				if ( knots.empty() )
+					knots.push_back( KnotView{} );
+				mfem::Array<KnotView> table( static_cast<int>( knots.size() ) );
+				for ( std::size_t k = 0; k < knots.size(); ++k )
+					table[ static_cast<int>( k ) ] = knots[ k ];
+				if ( plasmaLoops.scatter( PlasmaQuantity::SourceValue, view, npcConstants, state,
+				                          blockOffsets[ 1 ], mfem::real_t( 1 ), out, nullptr, &table ) )
+				{
+					++linearisedDeviceCount;
+					static_cast<void>( out.HostRead() );
+					return;
+				}
+			}
+		}
+		assembleSourceDerivative( state,
+			[ mhd, &direction ]( double radius, double z, double psi )
+			{
+				return mhd->ggPrimeDerivative( radius, z, psi, direction );
+			}, out );
+	}
+
+	void GradShafranovSolver::setLinearisedDeviceRoute( bool allowed )
+	{
+		linearisedDeviceAllowed = allowed;
+	}
+
+	long GradShafranovSolver::linearisedDeviceTaken() const
+	{
+		return linearisedDeviceCount;
+	}
+
+	int GradShafranovSolver::linearisedPassesTaken() const
+	{
+		return linearisedPassesValue;
 	}
 
 	void GradShafranovSolver::assembleSourceDerivative(
@@ -12246,6 +12365,12 @@ namespace
 		std::vector<double> corner;
 		std::vector<double> schur;
 		std::vector<int> pivot;
+		/// The device integrand's element flags, which the operator reads;
+		/// whether the operator is the device integrand's, the route the rest
+		/// of the retained path follows; the essential trace rows, absolute.
+		std::vector<int> flags;
+		bool device = false;
+		mfem::Array<int> essential;
 
 		double rowDot( std::size_t i, mfem::Vector const &v ) const
 		{
@@ -12294,19 +12419,28 @@ namespace
 	void GradShafranovSolver::retainedBackSolve( mfem::Vector const &b, mfem::Vector &y ) const
 	{
 		mfem::Vector rhs( b );
-		mfem::Array<int> const &essential = essentialTraceDofs();
-		int const traceStart = blockOffsets[ 2 ];
-		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: a copy
-		// is born valid where its source was, and the zeroing below is raw, as
-		// is the index array an MFEM operation may have read on the device.
-		// The answer is funnelled where it is read. MEASUREMENTS.md M-383.
-		countedHostReadWrite( rhs, __LINE__ );
-		countedHostRead( essential, __LINE__ );
-		for ( int i = 0; i < essential.Size(); ++i )
-			rhs( traceStart + essential[ i ] ) = 0.0;
+		zeroEssentialRows( rhs );
 		y.SetSize( b.Size() );
 		y = 0.0;
 		retained->linear->Mult( rhs, y );
+	}
+
+	void GradShafranovSolver::zeroEssentialRows( mfem::Vector &v ) const
+	{
+		// On the device where the retained route is: a copy is born valid
+		// where its source was, and the rows are a few entries of it (M-DA-6).
+		if ( retained->device && fillEntriesOnDevice( v, retained->essential, mfem::real_t( 0 ) ) )
+		{
+			++linearisedDeviceCount;
+			return;
+		}
+		// The host route: the vector and the index array asked for there, the
+		// latter because an MFEM operation may have read it on the device
+		// (M-383).
+		countedHostReadWrite( v, __LINE__ );
+		countedHostRead( retained->essential, __LINE__ );
+		for ( int i = 0; i < retained->essential.Size(); ++i )
+			v( retained->essential[ i ] ) = 0.0;
 	}
 
 	void GradShafranovSolver::linearise( mfem::Vector const &state )
@@ -12342,8 +12476,15 @@ namespace
 		 * hybridization until the solves below are done -- and nothing after
 		 * them either, which is what the generation enforces.
 		 */
-		held->npc = std::make_unique<mfem::DarcyNPCOperator>( *darcy->GetHybridization(), blockOffsets,
-		                                                       darcyRhs );
+		held->npc = newtonOperator( held->flags );
+		held->device = deviceIntegrandInUse && mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
+		{
+			mfem::Array<int> const &essential = essentialTraceDofs();
+			countedHostRead( essential, __LINE__ );
+			held->essential.SetSize( essential.Size() );
+			for ( int i = 0; i < essential.Size(); ++i )
+				held->essential[ i ] = blockOffsets[ 2 ] + essential[ i ];
+		}
 		mfem::Vector residual( held->npc->Height() );
 		held->npc->Mult( state, residual );
 		held->trace = makeTraceSolver( traceSolverChoice, false, traceSolverStatisticsValue,
@@ -12360,16 +12501,8 @@ namespace
 		 */
 		held->linearAtState = residual;
 		{
-			mfem::Vector source( residual.Size() );
-			zeroOnHost( source );
-			std::vector<mfem::Vector *> columns{ &source };
-			Source const &f = *nonlinearSource;
-			addSourceColumns( state, 1,
-				[ &f ]( double radius, double z, double psi, double *g )
-				{
-					g[ 0 ] = f.f( radius, z, psi );
-					return true;
-				}, columns );
+			mfem::Vector source;
+			sourceTerm( PlasmaQuantity::SourceValue, state, nullptr, source );
 			held->linearAtState -= source;
 		}
 
@@ -12806,27 +12939,13 @@ namespace
 		moved.Add( s, t );
 		mfem::Vector difference( t.Size() );
 		retained->npc->Mult( moved, difference );
-		Source const &f = *nonlinearSource;
 		{
-			mfem::Vector source( t.Size() );
-			zeroOnHost( source );
-			std::vector<mfem::Vector *> columns{ &source };
-			addSourceColumns( moved, 1,
-				[ &f ]( double radius, double z, double psi, double *g )
-				{
-					g[ 0 ] = f.f( radius, z, psi );
-					return true;
-				}, columns );
+			mfem::Vector source;
+			sourceTerm( PlasmaQuantity::SourceValue, moved, nullptr, source );
 			difference -= source;
 		}
 		difference -= retained->linearAtState;
-		std::vector<mfem::Vector *> columns{ &out };
-		addSourceColumns( retained->state, 1,
-			[ &f ]( double radius, double z, double psi, double *g )
-			{
-				g[ 0 ] = f.dFdPsi( radius, z, psi );
-				return true;
-			}, columns, &t );
+		sourceTerm( PlasmaQuantity::SourceSlope, retained->state, &t, out );
 		out.Add( 1.0/s, difference );
 	}
 
@@ -12869,22 +12988,25 @@ namespace
 		 * correcting against its residual, and this does the same for the
 		 * tangent. Until the correction stops falling, at most @a passes.
 		 */
-		mfem::Array<int> const &essential = essentialTraceDofs();
-		int const traceStart = blockOffsets[ 2 ];
+		/*
+		 * AND A STOP AT THE FORMAT'S OWN ROUND-OFF OF THE ANSWER: a correction
+		 * at ten epsilon of the answer is the residual's rounding coming back
+		 * through the factors, formed in real_t as it is, and another pass only
+		 * repeats it. In double that is 2e-15 and the stagnation test below
+		 * usually ends the loop first; in single it ends it after the first
+		 * correction, which is all M-384 measured the passes to buy there.
+		 */
+		double const floorFactor = 10.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() );
 		double previous = std::numeric_limits<double>::infinity();
 		mfem::Vector applied, r, correction;
 		std::vector<double> rg, cds;
+		linearisedPassesValue = 0;
 		for ( int pass = 0; pass < passes; ++pass )
 		{
 			applyRetainedJacobian( dx, applied );
 			r = b;
 			r -= applied;
-			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md
-			// section 9: the residual is zeroed raw on the essential dofs. M-383.
-			countedHostReadWrite( r, __LINE__ );
-			countedHostRead( essential, __LINE__ );
-			for ( int i = 0; i < essential.Size(); ++i )
-				r( traceStart + essential[ i ] ) = 0.0;
+			zeroEssentialRows( r );
 			rg.assign( ds.size(), 0.0 );
 			std::size_t const nb = ds.size();
 			for ( std::size_t j = 0; j < nb; ++j )
@@ -12907,8 +13029,14 @@ namespace
 			dx += correction;
 			for ( std::size_t i = 0; i < ds.size(); ++i )
 				ds[ i ] += cds[ i ];
+			++linearisedPassesValue;
 			previous = size;
 			if ( size == 0.0 )
+				break;
+			double scale = dx.Normlinf();
+			for ( double x : ds )
+				scale = std::max( scale, std::abs( x ) );
+			if ( size <= floorFactor*scale )
 				break;
 		}
 	}
