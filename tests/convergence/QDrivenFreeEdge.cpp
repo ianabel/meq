@@ -45,6 +45,7 @@
 
 #include "mfem.hpp"
 #include "meq/Coils.hpp"
+#include "meq/ConductorField.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Profiles.hpp"
@@ -138,7 +139,13 @@ namespace
 		Edge edge;
 		int order;
 
-		Machine( Edge edgeIn, int cells, int orderIn, meq::ScalePin pin = meq::ScalePin::EdgeField )
+		std::unique_ptr<meq::ConductorField> conductors;
+
+		/// @a withConductor: a filament below the box, taken out of the
+		/// mesh by the conductor split, so that the extraction reads
+		/// psi_p + psi_c and q_p + q_c.
+		Machine( Edge edgeIn, int cells, int orderIn, meq::ScalePin pin = meq::ScalePin::EdgeField,
+		         bool withConductor = false )
 			: edge( edgeIn ), order( orderIn )
 		{
 			meq::tests::Rectangle const box = meq::tests::standardBox();
@@ -171,6 +178,12 @@ namespace
 				meq::tests::namedRoutesFromEnvironment( s );
 			};
 			solver = std::make_unique<GradShafranovSolver>( *mesh, order );
+			if ( withConductor )
+			{
+				conductors = std::make_unique<meq::ConductorField>( 1.0 );
+				conductors->add( meq::CurrentFilament( 1.0, -0.9, 0.2 ) );
+				solver->setConductorField( *conductors );
+			}
 			double const seedR = 1.014, seedZ = -0.504;
 			if ( edge == Edge::Limited )
 				solver->setBoundaryFluxPoint( 1.3, 0.0 );
@@ -475,10 +488,8 @@ namespace
 		if ( system.refusals() > 0 )
 			std::printf( "    the last refusal: %s\n", machine.equilibrium->refusal().c_str() );
 		BOOST_TEST_REQUIRE( result.converged, nameOf( edge ) << ": " << result.status
-			<< ( std::numeric_limits<mfem::real_t>::epsilon() > 1.0e-10
-			     ? " (red in single, deliberately: most trial solves are refused there -- the limited "
-			       "box's inner Newton stalls, the diverted one's X-point leaves the mesh; TODO, \"The "
-			       "q-driven solve in single precision\", MEASUREMENTS.md M-405)" : "" ) );
+			<< " (a Jacobian that misleads the step has its trials refused: the differenced one did in "
+			"single, MEASUREMENTS.md M-406)" );
 
 		double worst = 0.0;
 		for ( std::size_t i = 0; i < result.x.size(); ++i )
@@ -501,6 +512,72 @@ namespace
 	}
 }
 
+namespace
+{
+	/*
+	 * THE SHAPE DERIVATIVE ON A FREE EDGE (M-408): the extraction's
+	 * analytic derivative against central differences of the extraction, the
+	 * labels psi_ax and psi_bnd moving with each tangent, at a ladder of
+	 * steps. In double the best step must come within 1e-8 of the Jacobian's
+	 * size; in single the differences are noise (M-406), printed only.
+	 */
+	void shapeAgainstDifferences( Edge edge, bool withConductor = false )
+	{
+		Machine machine( edge, 9, 2, meq::ScalePin::EdgeField, withConductor );
+		meq::ToroidalFieldSpline const exact = machine.splineOf( referenceGSquared );
+		meq::SafetyFactorEvaluation base;
+		BOOST_TEST_REQUIRE( machine.equilibrium->evaluate( exact, base ), machine.equilibrium->refusal() );
+		meq::SafetyFactorDerivative analytic;
+		BOOST_TEST_REQUIRE( machine.equilibrium->differentiate( exact, analytic ) );
+		double largest = 0.0;
+		for ( double v : analytic.qOverG )
+			largest = std::max( largest, std::abs( v ) );
+		std::printf( "\n  %s%s: THE SHAPE DERIVATIVE AGAINST THE DIFFERENCED EXTRACTION, %d nodes, max | J | %.6e\n",
+		             nameOf( edge ), withConductor ? ", a conductor out of the mesh" : "",
+		             machine.equilibrium->shapeNodes(), largest );
+		double best = std::numeric_limits<double>::infinity();
+		for ( double step : { 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7 } )
+		{
+			meq::SafetyFactorEquilibrium::Options options;
+			std::size_t const knots = meq::toroidalKnotCount( meq::plasmaCells( *machine.mesh ), 2 );
+			meq::ToroidalKnotCut const cut = meq::toroidalKnotCut( knots );
+			options.family.surfaces = cut.surfaces;
+			options.family.innerCut = cut.innerCut;
+			options.family.outerCut = cut.outerCut;
+			options.differenced = true;
+			options.step = step;
+			meq::SafetyFactorEquilibrium differenced( *machine.solver, *machine.source, options );
+			differenced.warmFromSolver();
+			meq::SafetyFactorEvaluation again;
+			BOOST_TEST_REQUIRE( differenced.evaluate( exact, again ), differenced.refusal() );
+			meq::SafetyFactorDerivative reference;
+			if ( !differenced.differentiate( exact, reference ) )
+			{
+				std::printf( "    step %.0e: a perturbed family could not be extracted\n", step );
+				continue;
+			}
+			double apart = 0.0;
+			for ( std::size_t k = 0; k < reference.qOverG.size(); ++k )
+				apart = std::max( apart, std::abs( analytic.qOverG[ k ] - reference.qOverG[ k ] ) );
+			apart /= largest;
+			best = std::min( best, apart );
+			std::printf( "    step %.0e: max | J_shape - J_differenced |/max | J | %.3e\n", step, apart );
+		}
+		std::printf( "    at the best step %.3e\n", best );
+		if ( std::numeric_limits<mfem::real_t>::epsilon() > 1.0e-10 )
+		{
+			std::printf( "  (single: the differences are noise-dominated, M-406; not asserted)\n" );
+			return;
+		}
+		BOOST_TEST( best < 1.0e-8,
+			nameOf( edge ) << ": the shape derivative is " << best << " of the Jacobian's size from the "
+			"differenced extraction at its best step" );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theLimitedShapeDerivativeIsTheDifferencedOne ) { shapeAgainstDifferences( Edge::Limited ); }
+BOOST_AUTO_TEST_CASE( theDivertedShapeDerivativeIsTheDifferencedOne ) { shapeAgainstDifferences( Edge::Diverted ); }
+BOOST_AUTO_TEST_CASE( theShapeDerivativeCarriesTheConductors ) { shapeAgainstDifferences( Edge::Limited, true ); }
 BOOST_AUTO_TEST_CASE( theLimitedTangentIsTheDifferencedOne ) { tangentAgainstSolves( Edge::Limited ); }
 BOOST_AUTO_TEST_CASE( theDivertedTangentIsTheDifferencedOne ) { tangentAgainstSolves( Edge::Diverted ); }
 BOOST_AUTO_TEST_CASE( theLimitedLoopRecoversItsField ) { roundTrip( Edge::Limited ); }

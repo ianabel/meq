@@ -346,6 +346,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/RotatingSource.cpp
 	src/meq/Run.cpp
 	src/meq/SafetyFactor.cpp
+	src/meq/SafetyFactorShape.cpp
 	src/meq/SafetyFactorSolve.cpp
 	src/meq/SafetyFactorTangent.cpp
 	src/meq/Sampler.cpp
@@ -393,6 +394,7 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	# The q-driven system and its least squares are MFEM-free and CI gates
 	# them (SafetyFactor.cpp, SafetyFactorSolve.cpp); what needs a mesh is the
 	# equilibrium solved at a spline and its tangent, here.
+	src/meq/SafetyFactorShape.cpp
 	src/meq/SafetyFactorTangent.cpp
 	src/meq/Sampler.cpp
 	src/meq/SourceView.cpp

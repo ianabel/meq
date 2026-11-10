@@ -252,13 +252,7 @@ namespace meq
 	                                                     CriticalPoint const &axis, double boundary ) const
 	{
 		auto const started = std::chrono::steady_clock::now();
-		ContourTracer tracer( potential, flux );
-		// The conductors' field, constant along every tangent, on top of the
-		// plasma's -- the surfaces are the total field's.
-		tracer.setConductorField( solver.conductorField() );
-		if ( options.gammaHMarker != nullptr )
-			tracer.setBandExtension( BandExtension::TransferLift, *options.gammaHMarker, options.path );
-		FluxSurfaceFamily const family = extractFluxSurfaces( tracer, axis, boundary, options.family );
+		FluxSurfaceFamily const family = extractFamily( potential, flux, axis, boundary );
 		std::vector<double> out;
 		out.reserve( family.surfaces.size() );
 		for ( FluxSurface const &surface : family.surfaces )
@@ -266,6 +260,19 @@ namespace meq
 		secondsExtracting += secondsSince( started );
 		extractionCount += 1;
 		return out;
+	}
+
+	FluxSurfaceFamily SafetyFactorEquilibrium::extractFamily( mfem::GridFunction const &potential,
+	                                                          mfem::GridFunction const &flux,
+	                                                          CriticalPoint const &axis, double boundary ) const
+	{
+		ContourTracer tracer( potential, flux );
+		// The conductors' field, constant along every tangent, on top of the
+		// plasma's -- the surfaces are the total field's.
+		tracer.setConductorField( solver.conductorField() );
+		if ( options.gammaHMarker != nullptr )
+			tracer.setBandExtension( BandExtension::TransferLift, *options.gammaHMarker, options.path );
+		return extractFluxSurfaces( tracer, axis, boundary, options.family );
 	}
 
 	double SafetyFactorEquilibrium::measure( ToroidalFieldSpline const &spline ) const
@@ -432,12 +439,10 @@ namespace meq
 			return false;
 
 		/*
-		 * psi~ AND q~ ARE LINEAR IN THE STATE (ContinuousField.hpp), so the
-		 * perturbed pair is the base's plus s times the tangent's: the
-		 * solver's kept interpolant applied once per tangent and once for the
-		 * base (meq::ContinuousInterpolant, its quadratures done once per
-		 * mesh, on the device under one). The difference is central by default
-		 * (Options::step, M-399).
+		 * psi~ AND q~ ARE LINEAR IN THE STATE (ContinuousField.hpp): the
+		 * solver's kept interpolant applied once for the base and once per
+		 * tangent (meq::ContinuousInterpolant, its quadratures done once per
+		 * mesh, on the device under one).
 		 */
 		auto const building = std::chrono::steady_clock::now();
 		ContinuousFields const baseContinuous =
@@ -445,53 +450,81 @@ namespace meq
 		secondsExtracting += secondsSince( building );
 		CriticalPoint labelled = axis;
 		labelled.psi = psiAxis;
-		std::vector<double> const atBase = options.central ? std::vector<double>()
-			: qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled, psiBoundary );
-		mfem::GridFunction potential( baseContinuous.potential->FESpace() );
-		mfem::GridFunction flux( baseContinuous.flux->FESpace() );
 
-		out.qOverG.assign( m*m, 0.0 );
-		for ( std::size_t j = 0; j < m; ++j )
+		// The axis root's motion along tangent j, in its own element.
+		auto originMotion = [ & ]( Fields const &direction, double &dR, double &dZ )
 		{
-			Fields const direction = along( dx[ j ] );
-			double const size = direction.psiStar->Normlinf();
-			if ( !( size > 0.0 ) )
-				continue;
 			mfem::Vector dq( 2 );
 			direction.flux->GetVectorValue( transformation, at, dq );
-			double const dR = -( gradient( 1, 1 )*dq( 0 ) - gradient( 0, 1 )*dq( 1 ) )/det;
-			double const dZ = -( -gradient( 1, 0 )*dq( 0 ) + gradient( 0, 0 )*dq( 1 ) )/det;
-			double const s = options.step*scale/size;
-			auto moved = [ & ]( double t )
+			dR = -( gradient( 1, 1 )*dq( 0 ) - gradient( 0, 1 )*dq( 1 ) )/det;
+			dZ = -( -gradient( 1, 0 )*dq( 0 ) + gradient( 0, 0 )*dq( 1 ) )/det;
+		};
+
+		out.qOverG.assign( m*m, 0.0 );
+		if ( !options.differenced )
+		{
+			std::vector<double> originR( m, 0.0 ), originZ( m, 0.0 );
+			for ( std::size_t j = 0; j < m; ++j )
+				originMotion( along( dx[ j ] ), originR[ j ], originZ[ j ] );
+			auto const shaping = std::chrono::steady_clock::now();
+			bool const shaped = shapeDerivative( baseContinuous, labelled, psiBoundary, dx, dAxis, dBoundary,
+			                                     originR, originZ, out.qOverG );
+			secondsExtracting += secondsSince( shaping );
+			if ( !shaped )
+				return false;
+		}
+		else
+		{
+			/*
+			 * THE DIFFERENCED EXTRACTION (Options::differenced): the perturbed
+			 * pair is the base's plus s times the tangent's, extracted centrally
+			 * by default (Options::step, M-399).
+			 */
+			std::vector<double> const atBase = options.central ? std::vector<double>()
+				: qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled, psiBoundary );
+			mfem::GridFunction potential( baseContinuous.potential->FESpace() );
+			mfem::GridFunction flux( baseContinuous.flux->FESpace() );
+
+			for ( std::size_t j = 0; j < m; ++j )
 			{
-				CriticalPoint point = axis;
-				point.radius += t*dR;
-				point.z += t*dZ;
-				point.psi = psiAxis + t*dAxis[ j ];
-				return point;
-			};
-			auto const interpolating = std::chrono::steady_clock::now();
-			ContinuousFields const tangent =
-				solver.continuousInterpolant().apply( *direction.psiStar, *direction.qStar, *direction.trace );
-			secondsExtracting += secondsSince( interpolating );
-			auto at = [ & ]( double t )
-			{
-				potential = *baseContinuous.potential;
-				potential.Add( t, *tangent.potential );
-				flux = *baseContinuous.flux;
-				flux.Add( t, *tangent.flux );
-				return qOverG( potential, flux, moved( t ), psiBoundary + t*dBoundary[ j ] );
-			};
-			std::vector<double> const plus = at( s );
-			if ( options.central )
-			{
-				std::vector<double> const minus = at( -s );
-				for ( std::size_t i = 0; i < m; ++i )
-					out.qOverG[ i*m + j ] = ( plus[ i ] - minus[ i ] )/( 2.0*s );
+				Fields const direction = along( dx[ j ] );
+				double const size = direction.psiStar->Normlinf();
+				if ( !( size > 0.0 ) )
+					continue;
+				double dR = 0.0, dZ = 0.0;
+				originMotion( direction, dR, dZ );
+				double const s = options.step*scale/size;
+				auto moved = [ & ]( double t )
+				{
+					CriticalPoint point = axis;
+					point.radius += t*dR;
+					point.z += t*dZ;
+					point.psi = psiAxis + t*dAxis[ j ];
+					return point;
+				};
+				auto const interpolating = std::chrono::steady_clock::now();
+				ContinuousFields const tangent =
+					solver.continuousInterpolant().apply( *direction.psiStar, *direction.qStar, *direction.trace );
+				secondsExtracting += secondsSince( interpolating );
+				auto perturbed = [ & ]( double t )
+				{
+					potential = *baseContinuous.potential;
+					potential.Add( t, *tangent.potential );
+					flux = *baseContinuous.flux;
+					flux.Add( t, *tangent.flux );
+					return qOverG( potential, flux, moved( t ), psiBoundary + t*dBoundary[ j ] );
+				};
+				std::vector<double> const plus = perturbed( s );
+				if ( options.central )
+				{
+					std::vector<double> const minus = perturbed( -s );
+					for ( std::size_t i = 0; i < m; ++i )
+						out.qOverG[ i*m + j ] = ( plus[ i ] - minus[ i ] )/( 2.0*s );
+				}
+				else
+					for ( std::size_t i = 0; i < m; ++i )
+						out.qOverG[ i*m + j ] = ( plus[ i ] - atBase[ i ] )/s;
 			}
-			else
-				for ( std::size_t i = 0; i < m; ++i )
-					out.qOverG[ i*m + j ] = ( plus[ i ] - atBase[ i ] )/s;
 		}
 
 		/*

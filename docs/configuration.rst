@@ -2184,12 +2184,13 @@ squares, the pin exactly. :math:`q` cannot be met at every knot exactly — the
 discrete problem is not exactly consistent — and what is left, the **misfit**,
 falls as the discretisation refines; no :math:`q` condition is dropped. Its
 Jacobian is the **linearised solve's exact tangent**: one back-solve per knot
-on the factorised Newton matrix of the equilibrium, and the flux-surface
-extraction's response along each tangent field. No equilibrium is re-solved to
-form it, so a Gauss-Newton step costs one equilibrium (more if the line search
-backs off) and :math:`2m+1` extractions of an :math:`m`-surface family. **The
-extractions are most of the cost** and grow as :math:`m^2`; a fine mesh is
-measured in minutes. Every solve is warm-started from the last.
+on the factorised Newton matrix of the equilibrium. Then comes the flux-surface
+extraction's derivative along each tangent field. That is the derivative of
+the extraction's own quadrature, each node's ray root and metric moved, and it
+is not a difference. No equilibrium is re-solved and no surface re-traced to
+form it. So a Gauss-Newton step costs one equilibrium (more if the line search
+backs off), :math:`m` back-solves and two extractions of an :math:`m`-surface
+family. Every solve is warm-started from the last.
 
 A relaxed Picard iteration cannot replace the Newton, and that is a theorem
 rather than a preference: the inversion :math:`g = 4\pi^2 q/(V'\langle

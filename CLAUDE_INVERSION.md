@@ -304,13 +304,26 @@ SOLVES** (`meq::SafetyFactorEquilibrium`, `SafetyFactorTangent.hpp`). Knot
 `j`'s column: `dR/du_j` along the knot's cardinal `gg′`
 (`NormalisedMHDSource::ggPrimeDerivative()`), one back-solve at the retained,
 bordered linearisation, then `ψ*`, `q*` and `ψ̂` of the tangent
-(`reconstructFields()`) and the family extracted on `ψ̃ + s δψ̃` — `ψ̃` being
-linear in the state, the solver's kept interpolant (`continuousInterpolant()`) applied once per tangent — labelled `ψ_ax + s δψ_ax`,
-**with the ray origin moved by the axis root's own derivative
-`−(dq_h/dx)⁻¹ δq_h` in its element**, differenced centrally at 1e-5 of the
-field in double and 1e-3 in single. One-sided at 1e-9 is closer to re-solved
-differences and costs `m + 1` extractions in place of `2m`, and stalls on a
-target with a misfit (→ **[M-399](MEASUREMENTS.md#m-399)**). Held fixed, the origin misses the
+(`reconstructFields()`), and their continuous pair `( δψ̃, δq̃ )` — `ψ̃`
+being linear in the state, the solver's kept interpolant
+(`continuousInterpolant()`) applied once per tangent.
+
+**THE EXTRACTION IS DIFFERENTIATED, NOT DIFFERENCED** (`SafetyFactorShape.cpp`).
+The quadrature as implemented is `(1/N) Σ_j a_j/(|u_j·Q| R_j²)` over the rays
+about the located axis. Each node's change comes from its ray root
+`ψ̃(O + a u) = c`, which the label (`ψ_ax`, `ψ_bnd`), `δψ̃` and the origin
+move, and from the metric `u·Q` at the moved node (`δq̃`, `∇q̃`). The ray
+origin moves by the axis root's own derivative, `−(dq_h/dx)⁻¹ δq_h` in its
+element. Each interior node's values are gathered from its element's
+polynomial by `meq::LinearBlocks`, on the device under one, and a band node's
+are sampled and differenced. It is the central difference of the extraction
+to 2e-10 to 6e-9 of its size at the difference's best step, and that
+difference at its default step, 1e-5, is 1.2e-7 to 7e-7 away. So the shape
+derivative is the more accurate, and costs one extraction in place of `2m`
+(→ **[M-408](MEASUREMENTS.md#m-408)**). `Options::differenced` keeps the
+differenced extraction as its test. In single it carries no differencing
+noise, and its gap from double's is `ε/Ψ_N` of the innermost surface times 2 to 9: the
+label's cancellation near the axis. Held fixed, the origin misses the
 extraction's dependence on where its rays start, 1e-5 to 4e-5 of the Jacobian
 and a contraction of 1e-3 a step; re-located on each perturbed field, it can
 take the other element's root where the axis sits on a face and difference the
@@ -320,8 +333,6 @@ columns are re-solved differences to 1.2e-7 and the loop is quadratic
 are linearised as the quadratures they are read with — the current through
 the bordered current solve's own row and corner, the flux through
 `assembleSourceDerivative()` — to 2e-8 and 8e-8 of re-solved differences.
-**The extraction is most of the cost**: `2m + 1` families of `m` surfaces a
-step (`TODO`, *The q-driven Jacobian's cost is the extraction*).
 
 **GAUSS-NEWTON BY QR WITH AN ARMIJO SEARCH, NOT KINSOL**
 (`SafetyFactorSolve.hpp`). The system is overdetermined, so KINSOL's square

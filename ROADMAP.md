@@ -439,9 +439,9 @@ open fixture:
    and `q` alone leave a one-parameter family
    (→ **[M-357](MEASUREMENTS.md#m-357)**) — with `examples/q-driven.toml` as
    the worked example and `theDriverSolvesForTheToroidalField` recovering its
-   closed-form `g`. Every solve is warm-started from the last explicitly; the
-   extraction differenced along each tangent is most of the cost (`TODO`,
-   *The q-driven Jacobian's cost is the extraction*).
+   closed-form `g`. Every solve is warm-started from the last explicitly, and
+   the Jacobian is the extraction's shape derivative, one extraction a step
+   (→ **[M-408](MEASUREMENTS.md#m-408)**).
 
    **What is left is the machine.** On a free edge `ψ_bnd`, the X-point and the
    exterior modes are borders of the tangent, and an unconfined limited and

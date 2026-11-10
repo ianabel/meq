@@ -453,34 +453,6 @@ Cause unknown.
   step.
 
 ================================================================================
-The q-driven Jacobian's cost is the extraction
-Raised 2026-11-09 (MEASUREMENTS.md M-393, M-397).
-================================================================================
-
-  Each Gauss-Newton step of the q-driven loop differences the flux-surface
-  extraction along every knot's tangent field, centrally: 2m + 1 families
-  of m surfaces a step with the residual's own, so the cost grows as m^2 and
-  m as 1/h. One-sided would be m + 2, and stalls on a target with a misfit
-  (M-399). Measured walls: the example (level 1, 19 knots) 60 s, 39 s of
-  them 273 extractions, against 10 s for the fixed-degree loop it replaced;
-  one-sided, 44 s and 168; QDrivenConsistency's level 1 at k = 2,
-  49 s (central, M-397); the study's level 2 at 32 knots, 411 s, 337 s
-  extraction (central, M-393). The device audit reads about 190 s a
-  Jacobian at m = 8 on 32,768 triangles in single on the GPU, against a
-  0.94 s solve: 79% the extractions, 19% the tangents' refinement passes.
-  The tangents themselves are under a tenth here.
-
-  THE LEVER IS THE ANALYTIC SHAPE DERIVATIVE (MANTA-COUPLING.md section 6):
-  a flux-surface average's derivative along a field is the integrand moving
-  plus the surface moving, both closed forms on the surface the base
-  extraction already traced, so one extraction and a quadrature per
-  direction would replace 2m. The differenced extraction stays as its test,
-  as SafetyFactorSolver's theTangentJacobianIsTheDifferencedOne already
-  checks it against re-solved equilibria. The extractions are also
-  independent per direction and could run threaded, once one tracer per
-  thread is cheap (CLAUDE_INVERSION.md, IN-P).
-
-================================================================================
 The bordered inner Newton stalls on a sharp g g' near the axis
 Raised 2026-11-09 (MEASUREMENTS.md M-398). InnerSolveStall is red for it.
 ================================================================================
@@ -520,41 +492,32 @@ Raised 2026-11-09 (MEASUREMENTS.md M-397).
 
 ================================================================================
 The q-driven solve in single precision
-Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404, M-405, M-406, M-407).
+Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404, M-405, M-406, M-407, M-408).
 ================================================================================
 
-  THE LIMITED BOX in single now fails on the inner solve, not on the loop
-  (M-407). The outer search judges the removable residual, which closed
-  double's knife edge. The accepted point then no longer evaluates from the
-  noise probe's warm start, a move of 1% in the last knot: the bordered
-  inner Newton crawls at a field residual of 0.02 to 0.4. That is M-398's
-  globalisation, the next thing to fix for this case.
+  THE JACOBIAN IS THE EXTRACTION'S SHAPE DERIVATIVE (M-408), and with it
+  QDrivenFreeEdge and QDrivenScalePin are green in single. The card's six
+  runs all converge in 5 iterations. Three reds stand, none of them the
+  Jacobian's:
+  * QDrivenConsistency's limited box exits 2 at level 0, on the inner solve.
+    The bordered inner Newton crawls at a field residual of 0.02 to 0.4 from
+    the noise probe's warm start, a move of 1% in the last knot, and the
+    accepted point no longer evaluates (M-407). That is M-398's
+    globalisation, the next thing to fix for this case.
+  * SafetyFactorSolver's round trip, 1.0e-6 against 1e-7, and
+  * QDrivenCurvedBoundary, which converges with no refusal but recovers g^2
+    to 1.5e-5 against 2.4e-6.
+  The last two are the evaluation's own floor: the single map's q is 1.5e-6
+  from double's at the closed form, the curved loop closes at a misfit of
+  2.6e-6 against an exact target, and the recovered g^2 cannot be nearer
+  than that through the conditioning.
 
-  BLOCKED ON THE JACOBIAN (M-406, Q-SHAPE-DERIVATIVE-PLAN.md). Differencing a
-  single-precision extraction leaves the q rows' Jacobian 6e-5 of its size
-  from double's on the box and 1e-3 on the limited and diverted boxes, at the
-  best step. In the free-edge problems, conditioned at 1e-5, that is a first
-  step with a residual 1000 times a plain rescaling's. Their trials are refused
-  and the loops do not close:
-  * QDrivenFreeEdge's round trips;
-  * QDrivenConsistency's limited box, which reaches g^2 to 0.11 at the
-    rows' noise and does not converge with h.
-  The card's run-to-run stalls (DeviceParity's q-driven arm) are the same
-  noise, drawn afresh by the residual's batched-assembly bits: the axis at a
-  mesh vertex is falsified as their cause (M-406). MFEM's batched assembly
-  varying its bits run to run is upstream's (M-405).
-
-  The tracer half is not fixed. QDrivenCurvedBoundary exits 2 in single,
-  ContourTracer::fitByAngle failing to bracket a level where the contour
-  bulges past the chord between two traced points. Widening that bracket
-  closes single's loop but breaks double's (M-406). Double leans on the
-  tracer's refusals as its step-length limit: a wide trial that extracts is
-  accepted and loses the loop's path. The order is a trust region in the
-  outer Gauss-Newton first, then a tracer that brackets robustly.
-  SafetyFactorSolver (1.6e-6 against 1e-7) and QDrivenScalePin are the
-  evaluation's own floor, 1.5e-6 from double's q, through their
-  conditioning: these stay red until the Jacobian and the evaluation improve
-  together.
+  The tracer's bracket: ContourTracer::fitByAngle fails to bracket a level
+  where the contour bulges past the chord between two traced points.
+  Widening it breaks double's curved loop, which leans on the tracer's
+  refusals as its step-length limit (M-406). With the shape derivative the
+  curved loop in single takes no trial the tracer refuses, so neither the
+  widening nor an outer trust region is needed for it now.
 
 ================================================================================
 The q-driven loop under a Device: what runs on the host

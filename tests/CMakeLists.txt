@@ -484,6 +484,15 @@ foreach(_device IN LISTS _da_devices)
 	# 1046 s and the box's did not finish in 3990 s on a loaded machine
 	# (MEASUREMENTS.md M-402); DeviceParity's q-driven case is the loop's
 	# `debug` arm, and LinearisedSolve's border cases the borders'.
+	# THE SHAPE DERIVATIVE'S GATHER (M-408): its kernel against the host loop
+	# in one process, to the bit under `debug`. One evaluation on 8 cells, so
+	# cheap enough for both arms.
+	if(TARGET SafetyFactorSolver)
+		add_test(NAME SafetyFactorShapeDevice_${_device}
+			COMMAND SafetyFactorSolver --run_test=theShapeDerivativesGatherIsTheHostsOnTheDevice)
+		set_tests_properties(SafetyFactorShapeDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
 	if(TARGET SafetyFactorSolver AND _device STREQUAL "cuda")
 		add_test(NAME SafetyFactorSolverDevice_${_device}
 			COMMAND SafetyFactorSolver --run_test=theLoopRecoversTheFieldItsTargetWasBuiltFrom)

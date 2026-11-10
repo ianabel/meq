@@ -26953,8 +26953,7 @@ six runs:
 
 Damping the step at the noise level, Levenberg-Marquardt with
 `lambda = ( 1e-4 sigma_max )^2`, still stalls 1 run in 6, and is not kept. The
-remedy is a Jacobian without the differencing noise:
-`Q-SHAPE-DERIVATIVE-PLAN.md`.
+remedy is a Jacobian without the differencing noise (M-408).
 
 **A warm start's psi_ax label.** A trial the loop refuses leaves the source's
 label at that trial's. The next evaluate() now starts psi_ax at the warm
@@ -27015,3 +27014,104 @@ by 1%), crawls. Its damping falls to 4.9e-4 at a field residual of 0.02 to
 halving lengths). The same crawl refuses double's long trials (2 to 4 a run).
 It is the bordered inner Newton's globalisation (M-398), reached at smaller
 moves in single.
+
+### M-408
+
+**THE q-DRIVEN JACOBIAN IS THE EXTRACTION'S SHAPE DERIVATIVE. IT IS THE
+DIFFERENCED EXTRACTION TO 2e-10 TO 6e-9 OF ITS SIZE IN DOUBLE. IN SINGLE IT
+CLOSES THE FREE-EDGE LOOPS AND THE CARD.** Branch `q-shape` off `b05712c`;
+`builds/q-shape` (double, `install-nocuda`) and `builds/q-shape-cuda` (single,
+`install-single`, `sm_75`); `MKL_NUM_THREADS=1`. `SafetyFactorShape.cpp`
+differentiates the quadrature as implemented, `( 1/N ) sum_j a_j/( | u_j . Q |
+R_j^2 )`. That covers the ray root's motion (from the label, `dpsi~` and the
+origin) and the metric's (from `dq~` and `grad q~`). It gathers each node's
+values from its element's polynomial by `LinearBlocks`.
+
+**Against the differenced extraction**, double, `max | J_shape - J_diff |/max | J |`:
+
+| step | box, 8 cells (1280 nodes) | limited, 9 cells (1408) | diverted | limited + a filament out of the mesh |
+|---|---|---|---|---|
+| 1e-3 | 1.5e-3 | 1.3e-3 | 2.4e-3 | 1.2e-3 |
+| 1e-4 | 5.8e-6 | 1.6e-5 | 2.3e-5 | 1.5e-5 |
+| 1e-5 | 1.2e-7 | 1.4e-7 | 7.3e-7 | 1.3e-7 |
+| 1e-6 | 1.2e-9 | **3.9e-9** | **2.6e-9** | **5.8e-9** |
+| 1e-7 | **2.0e-10** | 7.8e-9 | 1.8e-8 | 8.6e-8 |
+
+The gap falls as the step squared down to the differences' noise. So the
+default differenced Jacobian (step 1e-5) is 1.2e-7 to 7e-7 from the shape
+derivative, and the shape derivative is the more accurate of the two. Against
+re-solved equilibria (`theTangentJacobianIsTheDifferencedOne`) the box's is
+2.2e-9 of its size. Asserted at 1e-8 in `SafetyFactorSolver` and in
+`QDrivenFreeEdge`'s three shape cases. In single the best differenced step is
+4.9e-5 from it (at 1e-4), its noise (M-406).
+
+**Single's shape derivative against double's**, at each precision's own
+closed-form state:
+
+| | knots | `max \|J_s - J_d\|/max \|J\|` | in single's eps | innermost row | outermost row | q apart |
+|---|---|---|---|---|---|---|
+| box | 10 | 3.1e-5 | 261 | 3.1e-5 | 4.5e-6 | 1.5e-6 |
+| limited | 11 | 1.5e-4 | 1256 | 1.5e-4 | 5.1e-6 | 9.9e-6 |
+| diverted | 11 | 1.5e-4 | 1298 | -- | -- | 1.8e-5 |
+
+The rows relative to themselves. The gap is largest on the innermost
+surface, `Psi_N` = 0.0083, and falls outward to 5e-6. Its conditioning is
+`1/Psi_N`. A node's root moves by `( dc - dpsi~ )/( grad psi~ . u )`, and
+there `dc ~ dpsi_ax ~ dpsi~` cancel to the surface's `Psi_N` of themselves
+(M-371's label, now in the derivative). The measured gap is 2 times
+`eps_s/Psi_N` on the box (1.4e-5 at its innermost 0.0083) and about 9 times
+it on the free edges. The differenced
+Jacobian was 4e-5 from double's on the box and 1e-3 on the free edges.
+
+**The gather's device route**, `SafetyFactorShapeDevice_<arm>`: one admitted
+state differentiated on the host twice and then on the device route. On
+`builds/q-shape` the `debug` arm runs the host stub (not on the device): 0.
+On the single CUDA build, `debug` gives 0 and `cuda` gives 0. The kernel is
+`applyLinearBlocksOnDevice()`, the same loop as the host's. The node formula
+after the gather is a host loop over nodes and directions.
+
+**Single's loops** (`ctest -R`, one take, against main's inventory):
+
+| | main | with the shape derivative |
+|---|---|---|
+| `QDrivenFreeEdge` | red | **green** |
+| `QDrivenScalePin` | red | **green** |
+| `QDrivenConsistency`'s M-393 diagonal (k = 2, 3) | green | green, factors 18.8 and 11.6 |
+| `QDrivenConsistency`'s limited box | red (exits 2) | red: exits 2 at level 0, 10 inner refusals, the accepted point no longer evaluating from the noise probe's start |
+| `SafetyFactorSolver`'s round trip | red, 1.6e-6 | red, **1.0e-6** against 1e-7 |
+| `QDrivenCurvedBoundary` | red (exits 2, 28 refusals) | red: **converges**, 5 iterations, 0 refusals, `g²` 1.5e-5 against 2.4e-6 |
+
+The remaining reds are not the Jacobian's:
+
+* The **limited box** is the bordered inner Newton's crawl (M-407, M-398).
+  It is held for the inner globalisation.
+* The **round trips** are the evaluation's own floor. The single map's q at
+  the closed form is 1.5e-6 from double's, and the curved loop closes at a
+  misfit of 2.6e-6 against an exact target. The recovered `g²` cannot be
+  nearer than that through the problem's conditioning.
+
+**The card**, `meq --device cuda` on `examples/q-driven.toml` at level 0
+with the `ToroidalFlux` pin, batched assembly, cuDSS, six runs:
+
+* every run converges in **5 Gauss-Newton iterations**, 6 equilibria, 0
+  refused;
+* each removable history is identical to two digits (`1.0 4.7e-1 1.4e-1
+  1.8e-2 3.3e-4`), with the last at 9e-7 to 4.3e-6 against 7e-5.
+
+With the differenced Jacobian, one run in six stalled (M-406). The cost is
+12 extractions taking 1.3 s, against 2.2 s of tangents and 1.1 s of solves.
+
+**The suites.**
+
+* Single, full ctest, one take: 10 reds against main's 14 (`builds/single`'s
+  last take). `QDrivenFreeEdge`, `QDrivenScalePin`,
+  `QDrivenFreeEdgeDevice_cuda` and `DeviceParity` are gone. None is new, and
+  `SafetyFactorShapeDevice_debug`, `SafetyFactorShapeDevice_cuda` and
+  `DeviceParity` pass.
+* Double, full ctest: main's three reds (`PlasmaEdgeConvergence`,
+  `InnerSolveStall`, `AnisotropicMirror`) and no others.
+
+`PythonDriverParity` read red once in double, for one reason: this branch's
+worktree configure looked for the static SuiteSparse at `../suitesparse`
+beside the worktree. So the module linked MKL shared, and numpy beside it
+moved its bits. Pointed at the install, it is green.
