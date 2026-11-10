@@ -164,7 +164,7 @@ recovery refined, MEQ's default (CLAUDE_DEVICE.md, *The element-local
 recovery and `Reconstruct()` are refined*), `ψ_h` is at the trace's level
 and the order reverses: the finder's family moves 4.4e-6 – 9.6e-6 and
 `ψ̃`'s at the axis 8.4e-6 – 4.3e-5, `ψ̃` being the noisier potential at the
-axis (→ **[M-LR-1](MEASUREMENTS.md#m-lr-1)**). The label stays `ψ̃`'s, on
+axis (→ **[M-387](MEASUREMENTS.md#m-387)**). The label stays `ψ̃`'s, on
 the accuracy half, which single does not change.
 
 **Under `AxisConstraint::NodalMaximum` — the control — they are different and

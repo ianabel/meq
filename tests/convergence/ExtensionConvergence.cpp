@@ -804,7 +804,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialConvergesAtKPlusTwo )
 		// h = 0.106 -- 2.64e-05, 1.94e-05, 3.62e-05 -- and psi* sits on the same
 		// trace error to four figures, so the finest mesh compares two
 		// round-offs: it read psi* below psi_h by 0.8 % only while MFEM's
-		// unrefined recovery added its noise to psi_h (M-LR-4).
+		// unrefined recovery added its noise to psi_h (M-390).
 		std::vector<double> errorsPsi, spacings;
 		for ( Measurement const &p : points )
 		{
@@ -820,7 +820,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialConvergesAtKPlusTwo )
 		if ( compared + 1 < points.size() )
 			BOOST_TEST_MESSAGE( "  *** k = " << order << ": psi* against psi_h compared at h = "
 			                    << points[ compared ].h << ", the finest mesh whose psi_h still "
-			                    "converges at k+1; finer, both are the trace's round-off. M-LR-4" );
+			                    "converges at k+1; finer, both are the trace's round-off. M-390" );
 		BOOST_TEST( points[ compared ].errorPsiStar < points[ compared ].errorPsi,
 		            "k = " << order << ", h = " << points[ compared ].h << ": psi* is "
 		            << points[ compared ].errorPsiStar << " against psi_h's "

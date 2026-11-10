@@ -1637,7 +1637,7 @@ namespace meq
 			 * and every reconstruction. The NPC route -- every Newton solve
 			 * here, the bordered one, the retained linearisation and its
 			 * back-solves -- is not refined; there the fields are Newton state,
-			 * and Newton's last steps refine them. M-LR-1 measures both.
+			 * and Newton's last steps refine them. M-387 measures both.
 			 *
 			 * Off is upstream's route bit for bit. It is a setter for the
 			 * instruments that compare the two (`RecoveryPrecision`,

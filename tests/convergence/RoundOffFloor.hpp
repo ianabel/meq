@@ -1084,7 +1084,7 @@ namespace tests
 	 * the trace's: `psi_h` 1.9e-05 then 3.6e-05 as `h` halves, `q_h` 1.2e-05
 	 * then 5.0e-05. Both passed only while MFEM's unrefined recovery added its
 	 * own noise -- `psi_h` above `psi*` by 0.8 %, `eta` above `|| q - q_h ||`
-	 * by 2.7 -- and failed when the refinement took it away (M-LR-4). Neither
+	 * by 2.7 -- and failed when the refinement took it away (M-390). Neither
 	 * claim is about round-off, so the precondition is moved, not the bound.
 	 *
 	 * **IT IS `#ifdef`'d, AND IN DOUBLE EVERY POINT IS RETURNED**, so a caller

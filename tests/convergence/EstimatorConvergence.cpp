@@ -516,7 +516,7 @@ BOOST_AUTO_TEST_CASE( theEffectivityIndexIsBoundedAndSettles )
 		// h = 0.1 -- 1.65e-05, 1.23e-05, 4.98e-05 -- as the trace's round-off
 		// differentiated, which no residual estimator is built to bound; eta
 		// read above it there only while MFEM's unrefined recovery put its own
-		// noise into eta (M-LR-4). The pair slack is the 0.30 a single pair is
+		// noise into eta (M-390). The pair slack is the 0.30 a single pair is
 		// given elsewhere in the suite.
 		std::vector<double> errorsFlux, spacings;
 		for ( Measurement const &p : points )
@@ -534,7 +534,7 @@ BOOST_AUTO_TEST_CASE( theEffectivityIndexIsBoundedAndSettles )
 				BOOST_TEST_MESSAGE( "  *** k = " << order << ", h = " << points[ i ].h
 				                    << ": SKIPPED the effectivity bounds; L2( q ) no longer falls at "
 				                    "k+1 here, so it is the format's round-off and not a "
-				                    "discretisation error. M-LR-4" );
+				                    "discretisation error. M-390" );
 				continue;
 			}
 			BOOST_TEST( value > 1.0,
@@ -563,7 +563,7 @@ BOOST_AUTO_TEST_CASE( theEffectivityIndexIsBoundedAndSettles )
 				"  *** k = " << order << ": SKIPPED the effectivity DRIFT. A "
 				"ratio of ratios carries the format's round-off twice; the "
 				"index's own bounds above are asserted at every mesh that "
-				"measures the discretisation. M-220, M-LR-4" );
+				"measures the discretisation. M-220, M-390" );
 		else
 		for ( std::size_t i = 2; i < index.size(); ++i )
 		{

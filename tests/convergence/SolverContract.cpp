@@ -1601,7 +1601,7 @@ BOOST_AUTO_TEST_CASE( aPrescribedAxisPointIsRefusedRatherThanDefaulted )
  * DarcyHybridization::SetLocalRefinement(), applied before every
  * FormLinearSystem(): one refinement pass with a double residual on the
  * element-local recovery and a double load on Reconstruct() (MEASUREMENTS.md
- * M-379 to M-381, M-LR-1). On the linear path both reach the answer, so:
+ * M-379 to M-381, M-387). On the linear path both reach the answer, so:
  *
  *   - on and off must DIFFER, in psi_h and in psi*: a pass that did not run
  *     would leave them equal, and a switch that does not take likewise;

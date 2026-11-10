@@ -99,8 +99,8 @@ against is `CLAUDE_DECLINED.md`.
   (`meq::setupLoopMayThread()`). `debug`'s HOST_DEBUG registers every
   allocation, so under `debug` it stays on one thread; `WarmStartTests_cuda`
   is the arm that threads (→ **[M-323](MEASUREMENTS.md#m-323)**).
-* **Single precision builds and runs at parity with double** (83 of 84 in each
-  build, the same deliberate red, single on MKL 2026.2 included, M-303), and its accuracy is qualified **per problem**.
+* **Single precision builds and runs at parity with double**, its reds beyond
+  double's being CLAUDE.md's single list, and its accuracy is qualified **per problem**.
 * **This machine's GPU is an RTX 2070 SUPER** — evidence about correctness,
   never a timing (see the last section).
 
@@ -930,7 +930,7 @@ build, which needs no device.
     (→ **[M-221](MEASUREMENTS.md#m-221)**).
   * `NewtonRelativeTolerance = 1.0e-10` cannot be met. The run stalls at 3.3e-07
     and burns 400 iterations.
-* **Both builds read 83 of 84, the same deliberate red**
+* **At M-303's take both builds read 83 of 84, the same deliberate red**
   → **[M-303](MEASUREMENTS.md#m-303)**; parity was first reached at 62 of 63
   each → **[M-222](MEASUREMENTS.md#m-222)**. MKL 2026.2 and PARDISO's
   refinement cap move single's knife edges both ways
@@ -1134,7 +1134,7 @@ a count of calls: *a format-specific defect is pinned by putting the other forma
 in the same position*. With the fix, single is 0.81× to 0.90× of double per
 Newton step, and 0.69× to 0.81× on setup.
 
-### The element-local recovery and `Reconstruct()` are refined → [M-379](MEASUREMENTS.md#m-379), [M-380](MEASUREMENTS.md#m-380), [M-381](MEASUREMENTS.md#m-381), [M-LR-1](MEASUREMENTS.md#m-lr-1), [M-LR-2](MEASUREMENTS.md#m-lr-2), [M-LR-3](MEASUREMENTS.md#m-lr-3)
+### The element-local recovery and `Reconstruct()` are refined → [M-379](MEASUREMENTS.md#m-379), [M-380](MEASUREMENTS.md#m-380), [M-381](MEASUREMENTS.md#m-381), [M-387](MEASUREMENTS.md#m-387), [M-388](MEASUREMENTS.md#m-388), [M-389](MEASUREMENTS.md#m-389)
 
 M-371's 200× on `ψ_h` and `Reconstruct()`'s 5.5e-7 are both MFEM's, and
 `RecoveryPrecision` separates them with the hybridization's own stored blocks,
@@ -1159,7 +1159,7 @@ checked bit for bit against the fields MFEM recovers.
   `ComputeH()` copies `A` and `D` (set after it, the recovery aborts).
   `Reconstruct()` reads the same flag when it runs, so every `postProcess()`
   and `reconstructAt()` is refined. The setter exists for the instruments.
-* **In single it does what M-379 and M-381 said it would** (M-LR-1, M-LR-2):
+* **In single it does what M-379 and M-381 said it would** (M-387, M-388):
   `ψ_h` at 1.2–1.3× the trace's σ on the host and 1.0–1.1× on the card (from
   176–440×), `ψ*` at 1.1–1.2× and 1.0–1.1× (from 5.4–7.4e-7), `q_h` at the trace
   times `L/h`, which only a quieter trace moves. Upstream's pass agrees with
@@ -1171,7 +1171,7 @@ checked bit for bit against the fields MFEM recovers.
   bordered one, `linearise()`'s retained linearisation and its back-solves,
   and `ReduceRHS()`. There the fields are Newton state and the last Newton
   steps refine them: on the normalised box `ψ_h` is 1.09× the trace with the
-  switch on or off, so **the NPC route shows no floor of its own** (M-LR-1).
+  switch on or off, so **the NPC route shows no floor of its own** (M-387).
   The reconstruction is refined on every path, the NPC one included (`ψ*`
   5.6e-7 to 1.7e-7 there).
 * **What is left in single is the trace, `q_h`'s `L/h`, and `ψ̃`.** On the card
@@ -1181,9 +1181,9 @@ checked bit for bit against the fields MFEM recovers.
   value at the located axis is 3–13× its value at a fixed point, so the family
   labelled by `ψ̃` at the axis moves about as much as before (8.4e-6 to
   4.3e-5) while the one labelled by the finder's `ψ_h` falls 30–100×
-  (M-LR-1; `TODO`, *Left open by the local refinement*).
+  (M-387; `TODO`, *Left open by the local refinement*).
 * **Two single-precision assertions passed only on the unrefined recovery's
-  noise** (M-LR-4): `ExtensionConvergence`'s *`ψ*` below `ψ_h` on the finest
+  noise** (M-390): `ExtensionConvergence`'s *`ψ*` below `ψ_h` on the finest
   mesh* and `EstimatorConvergence`'s *`η` above `‖q − q_h‖`*, both at `k = 2`
   on meshes where `ψ_h` and `q_h` are already the trace's round-off and rise as
   `h` falls. The noise kept `ψ_h` 0.8 % above `ψ*` and inflated `η`. They are
@@ -1194,7 +1194,7 @@ checked bit for bit against the fields MFEM recovers.
 * **The cost is about 2× the recovery and nothing measurable on the
   reconstruction or `FormLinearSystem()`**, on the host and the card's batched
   route, where the reconstruction is itself 2.5× to 50× the recovery, so a
-  few per cent of a linear solve (M-LR-3). It does not argue against the
+  few per cent of a linear solve (M-389). It does not argue against the
   default.
 
 ## This machine's GPU

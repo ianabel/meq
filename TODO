@@ -1539,7 +1539,7 @@ TCV shaped's branch in item 5 each take a suite case red, in single.
 
 
 ================================================================================
-Left open by the local refinement (MEASUREMENTS.md M-LR-1 to M-LR-3)
+Left open by the local refinement (MEASUREMENTS.md M-387 to M-389)
 Raised 2026-11-09. With MFEM's element-local recovery and Reconstruct()
 refined, the single-precision floor of the linear path has moved to two
 places that are not MFEM's local solves.
@@ -1569,7 +1569,7 @@ places that are not MFEM's local solves.
      4.3e-5 between neighbouring states, no better than with the refinement
      off at k = 2, while the family labelled by the finder's psi_h falls 30
      to 100x to 4.4e-6 to 9.6e-6, and the one at a fixed axis point to 2.7e-6
-     to 5.7e-6 (M-LR-1).  The candidate, not measured: the located point
+     to 5.7e-6 (M-387).  The candidate, not measured: the located point
      still moves 0.5 to 1.4 micrometres between states, and psi~'s own
      stationary point need not be q_h's root, so psi~'s gradient there times
      that motion.  If so, the label wants psi~ at psi~'s own stationary
@@ -1582,7 +1582,7 @@ places that are not MFEM's local solves.
      flatness comparison (the normal closure error over 10 circuits under
      twice that over 5) reads 1.15e-7 and 9.96e-7 on, 4.94e-7 and 8.66e-7
      off: 1 to 8 eps of the radius, under the rootedPositionFloor() of
-     8.0e-6 its own first closure assertion carries (M-LR-4).  The file keeps
+     8.0e-6 its own first closure assertion carries (M-390).  The file keeps
      the comparison in single deliberately.  Either that decision stands and
      the case is a single-precision red that moves with any change to psi~'s
      bits, or the comparison takes the floor its neighbour takes.

@@ -25906,7 +25906,7 @@ on the host, the factors scattered back on the device) and on the host loop
   dominates `linearise()` and `applyRetainedJacobian()`, are step 3's
   (`DEVICE-PLAN.md` section 9).
 
-### M-LR-1
+### M-387
 
 **MFEM's local refinement, on against off, single, on the host and on the
 card: the recovery and the reconstruction come to the trace's own noise.**
@@ -25930,7 +25930,7 @@ the host both read no.
 five cases, is the same as main's `builds/single` binary (`1e8a3ad`, MFEM
 `2a50e91443`) prints, and its field σ are M-371's (a) to every digit.
 `RecoveryPrecision`'s host off run is likewise identical to main's, so M-379
-to M-381 stand as published (M-LR-2).
+to M-381 stand as published (M-388).
 
 **(a) The fields, linear box** (σ ×1e-8; off → on; ε = 11.9):
 
@@ -26029,11 +26029,11 @@ noise: off, none did. The end is now pulled back towards its traced radius,
 halving the margin, until it samples; a path that sampled both ends is
 unchanged, and the double suite's extraction tests are unmoved.
 
-### M-LR-2
+### M-388
 
 **Upstream's refinement is M-379's (d′) and M-381's double load: what
 `RecoveryPrecision` reads with the switch on.** Same branch, build and
-settings as M-LR-1; `RecoveryPrecision` (built, not registered) on the four
+settings as M-387; `RecoveryPrecision` (built, not registered) on the four
 linear cases. With the refinement on, method (a) is MFEM's refined recovery
 and `ψ*` the refined reconstruction; MEQ's own methods are still formed from
 `MultInv()` on the stored factors, which the switch does not touch (the
@@ -26074,7 +26074,7 @@ values higher.
   factors are the batched route's own arithmetic, not M-379's. Off on the
   card, (a) reads 40–57× the trace (8.1e-6 at `n = 16`).
 
-### M-LR-3
+### M-389
 
 **What the refinement costs: about 2× the recovery, nothing measurable on the
 reconstruction or the formation, against a reconstruction 2.5× to 50× the
@@ -26114,7 +26114,7 @@ readings each way:
   asks for (read in `darcyhybridization.cpp`, not timed). **So the measured cost does not argue against the default**, in
   either precision.
 
-### M-LR-4
+### M-390
 
 **The suites with the refinement on.** MFEM `meq-integration` `56796771ac`:
 double on the CPU-only `install-nocuda-next`, single on CUDA
@@ -26148,7 +26148,7 @@ list:
 refinement does not reach.** Its continuity case bounds the family's jump
 across a face crossing at `max( 1e-11, 20ε )` = 2.4e-06; the family labelled
 by `ψ̃` at the axis moves 1e-5 between neighbouring states with the
-refinement on or off (M-LR-1 (c), (d)). The first take's 6.1e-07 was a good
+refinement on or off (M-387 (c), (d)). The first take's 6.1e-07 was a good
 draw: at `a1e930a` the same case reads 8.1e-06 on and 1.8e-05 off (the
 latter at another crossing, by a temporary environment override in this
 branch's build, never committed). It stays on the single list.
