@@ -1069,6 +1069,47 @@ namespace tests
 		            << ", floored at round-off on a || q || of " << normFlux << " )" );
 	}
 
+	/**
+	 * Which points of a refinement sequence still measure the DISCRETISATION
+	 * rather than the format: the coarsest, and each finer one whose pair with
+	 * the one before converged at no less than @a expectedPair, up to the first
+	 * that did not -- past it the error is the global solve's round-off, which
+	 * RISES as `h` falls (its condition number grows), and every finer point is
+	 * on the format's side too.
+	 *
+	 * **A COMPARISON OF TWO ERRORS ON THE FORMAT'S SIDE IS A COMPARISON OF TWO
+	 * ROUND-OFFS.** `ExtensionConvergence`'s *psi\* beats psi_h* and
+	 * `EstimatorConvergence`'s effectivity bounds were asserted at every mesh,
+	 * and in single at `k = 2` the finest meshes' `psi_h` and `q_h` errors are
+	 * the trace's: `psi_h` 1.9e-05 then 3.6e-05 as `h` halves, `q_h` 1.2e-05
+	 * then 5.0e-05. Both passed only while MFEM's unrefined recovery added its
+	 * own noise -- `psi_h` above `psi*` by 0.8 %, `eta` above `|| q - q_h ||`
+	 * by 2.7 -- and failed when the refinement took it away (M-LR-4). Neither
+	 * claim is about round-off, so the precondition is moved, not the bound.
+	 *
+	 * **IT IS `#ifdef`'d, AND IN DOUBLE EVERY POINT IS RETURNED**, so a caller
+	 * using it cannot skip an assertion the double build makes today, whatever
+	 * its rates read. See [[aboveTheFormatsFloor]] for the pattern.
+	 */
+	inline std::vector<bool> discretisationPoints( std::vector<double> const &errors,
+	                                                std::vector<double> const &h,
+	                                                double expectedPair )
+	{
+		std::vector<bool> kept( errors.size(), true );
+#ifdef MFEM_USE_SINGLE
+		for ( std::size_t i = 1; i < errors.size(); ++i )
+		{
+			double const observed = std::log( errors[ i - 1 ]/errors[ i ] )
+			                        /std::log( h[ i - 1 ]/h[ i ] );
+			kept[ i ] = kept[ i - 1 ] && observed >= expectedPair;
+		}
+#else
+		(void)h;
+		(void)expectedPair;
+#endif
+		return kept;
+	}
+
 }
 }
 

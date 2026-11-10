@@ -156,10 +156,16 @@ there carries the discretisation's error at the axis (`ψ̃ − ψ_h` is 2.2e-5 
 1.4e-6 of the span, `k = 2`, `n` = 12 to 32), which enters every inner
 surface's `Ψ_N` divided by `Ψ_N`; against a fine reference the family on
 `ψ̃`'s label is the closer at every mesh and degree tried, 6× at `n = 8` and
-32. **Single precision**: `ψ_h` is the noisiest field MEQ holds — the
-element-local recovery from the trace carries about 200× the trace's own
-round-off, growing as `1/h` — and the finder's value moved the families
-18–27× more between neighbouring states than `ψ̃`'s.
+32. **Single precision** was measured with MFEM's element-local recovery
+unrefined, when `ψ_h` was the noisiest field MEQ held — about 200× the
+trace's own round-off, growing as `1/h` — and the finder's value moved the
+families 18–27× more between neighbouring states than `ψ̃`'s. With the
+recovery refined, MEQ's default (CLAUDE_DEVICE.md, *The element-local
+recovery and `Reconstruct()` are refined*), `ψ_h` is at the trace's level
+and the order reverses: the finder's family moves 4.7e-6 – 9.6e-6 and
+`ψ̃`'s at the axis 9.8e-6 – 4.4e-5, `ψ̃` being the noisier potential at the
+axis (→ **[M-LR-1](MEASUREMENTS.md#m-lr-1)**). The label stays `ψ̃`'s, on
+the accuracy half, which single does not change.
 
 **Under `AxisConstraint::NodalMaximum` — the control — they are different and
 must not be reconciled.** `ψ_ax` is then *the largest nodal value*, which makes

@@ -208,11 +208,13 @@ moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
-(`TODO`, the single-precision round). It adds `ExtractionContinuity`'s
-continuity case too, at `max( 1e-11, 20ε )`: the family moves about 1e-5
-between neighbouring states in single, `Reconstruct()`'s round-off in `ψ*`
-carried into `ψ̃` and divided by the innermost `Ψ_N`
-(→ **[M-371](MEASUREMENTS.md#m-371)**). The anisotropic suites are qualified
+(`TODO`, the single-precision round). `DeviceParity`'s `q-driven` card arm
+counts 3 or 4 KINSOL iterations by the take, the answer the host's: the third
+iterate against a measured floor that cuDSS moves between runs
+(→ **[M-LR-4](MEASUREMENTS.md#m-lr-4)**). `ExtractionContinuity` is green in
+single, at `max( 1e-11, 20ε )`, because MFEM's element-local recovery and
+`Reconstruct()` are refined (`GradShafranovSolver::setLocalRefinement()`, on
+by default; CLAUDE_DEVICE.md). The anisotropic suites are qualified
 in single (→ **[M-350](MEASUREMENTS.md#m-350)**). The wall is set by its
 longest tests — `DriverAcceptance` and `DeviceParity` — and FB-T's forty-solve
 cross (M-134) is `disabled()` in `FreeBoundaryCoupling` and run by name: its

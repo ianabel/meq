@@ -1401,6 +1401,7 @@ namespace
 				sol.GetBlock( 1 )( i ) = static_cast<mfem::real_t>( pIn[ static_cast<std::size_t>( i ) ] );
 			mfem::GridFunction ut( totalFlux.FESpace() );
 			darcy.ReconstructTotalFlux( sol, lambda, ut );
+			static_cast<void>( ut.HostRead() );
 			if ( keepFlux )
 				out.totalFluxMethod[ name ] = promote( ut );
 			Reconstructor r( darcy, hyb, ut, enrichedTrace, sol );
@@ -1424,6 +1425,7 @@ namespace
 		{
 			mfem::GridFunction utCheck( totalFlux.FESpace() );
 			darcy.ReconstructTotalFlux( solution, lambda, utCheck );
+			static_cast<void>( utCheck.HostRead() );
 			for ( int i = 0; i < utCheck.Size(); ++i )
 				out.totalFluxDifference = std::max( out.totalFluxDifference,
 					std::abs( static_cast<double>( utCheck( i ) - totalFlux( i ) ) ) );
