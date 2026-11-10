@@ -26705,7 +26705,10 @@ for `cuda` only.
 other agents): 156 of 160 green; red are `PlasmaEdgeConvergence`,
 `AnisotropicMirror` and `InnerSolveStall` (each deliberate, CLAUDE.md) and the
 `SafetyFactorSolverDevice_debug` arm, stopped at 3990 s and since made
-cuda-only. 4920 s wall.
+cuda-only. 4920 s wall. After merging `cbf3fcd` (MFEM `56796771ac`, local
+refinement on), built `--clean-first`, `ctest -j3`: 157 of 160 green, the
+three deliberate reds alone, 2733 s; DeviceParity green with the q-driven
+outer count compared on every arm.
 
 **The kept interpolant.** `qOverG()` and the tangent's fields through
 `solver.continuousInterpolant().apply()` in place of the free
