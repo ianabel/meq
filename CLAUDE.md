@@ -203,27 +203,23 @@ bordered inner Newton stalls on a sharp `gg′` near the axis that continuation
 reaches (→ **[M-398](MEASUREMENTS.md#m-398)**, `TODO`, *The bordered inner
 Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
-(→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven suites --
-`SafetyFactorSolver` and `QDrivenScalePin`, whose round trips reach `g²` to
-2e-6 to 4e-5 against their bounds, the map's own q being 1.5e-6 from
-double's, and `QDrivenCurvedBoundary` (the tracer refusing 20 of its 28
-trials), `QDrivenFreeEdge` and `QDrivenConsistency`'s limited box (the inner
-bordered Newton crawling from a 1% move of the last knot, M-398's), whose
-loops do not close: the differenced Jacobian is no better than 1e-3 of its
-size on a free edge in single, which `Q-SHAPE-DERIVATIVE-PLAN.md` would
-replace (→ **[M-405](MEASUREMENTS.md#m-405)**,
-**[M-QS-1](MEASUREMENTS.md#m-qs-1)**, **[M-QS-2](MEASUREMENTS.md#m-qs-2)**,
+(→ **[M-312](MEASUREMENTS.md#m-312)**), and three q-driven cases.
+`SafetyFactorSolver`'s round trip (1.0e-6 against 1e-7, its `cuda` arm with
+it) and `QDrivenCurvedBoundary` (converged, `g²` 1.5e-5 against 2.4e-6) are
+the evaluation's own floor: the map's q is 1.5e-6 from double's.
+`QDrivenConsistency`'s limited box exits 2 because the bordered inner Newton
+crawls from a 1% move of the last knot, M-398's. None of them is the
+Jacobian's: the shape derivative closes the free-edge loops and the card
+(→ **[M-QS-2](MEASUREMENTS.md#m-qs-2)**, **[M-QS-3](MEASUREMENTS.md#m-qs-3)**,
 `TODO`, *The q-driven solve in single precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
 (`TODO`, the single-precision round). `DeviceParity`'s `q-driven` card arm
-is red in single by the take: about one run in six stalls, the Jacobian's
-differencing noise drawn afresh each run by the residual's bits from MFEM's
-batched hybridization assembly, which `AssemblyMode = "serial"` makes
-repeatable (→ **[M-405](MEASUREMENTS.md#m-405)**,
-**[M-QS-1](MEASUREMENTS.md#m-qs-1)**); in double it repeats its outer
+converges in 5 outer iterations in each of six single runs under batched
+assembly (→ **[M-QS-3](MEASUREMENTS.md#m-qs-3)**);
+in double it repeats its outer
 count, cuDSS varying the bits run to run (→ **[M-403](MEASUREMENTS.md#m-403)**). A single
 build reads `FluxSurfaceConvergence`'s
 `thePointErrorDoesNotAccumulateOverManyCircuits` red: its flatness comparison
