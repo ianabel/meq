@@ -127,6 +127,23 @@ namespace meq
 	/// source. See meq::ExteriorCoilSet.
 	class ExteriorCoilSet;
 	class ConductorField;
+
+	/**
+	 * A FUNCTION OF THE NORMALISED FLUX GIVEN AS DATA, so that it has a device
+	 * form (meq::PsiIntegrandView): `g( Psi ) = sqrt( G )` with `G = g^2` a
+	 * polynomial, ascending (`polynomial`, at most twelve coefficients) or a
+	 * profile (`square`, which must have a POD form: hermiteKnots() makes one
+	 * of a piecewise cubic exactly), or one of the three functions of it the
+	 * q-driven pin rows differentiate into. Zero where `Psi <= 0` or `G <= 0`.
+	 * MEASUREMENTS.md M-DA-5.
+	 */
+	struct PsiIntegrand
+	{
+		PsiIntegrandKind kind = PsiIntegrandKind::Root;
+		std::vector<double> polynomial;
+		Profile const *square = nullptr;
+		Profile const *numerator = nullptr;
+	};
 	class ContinuousInterpolant;
 
 
@@ -4736,6 +4753,41 @@ namespace meq
 			 * deliveredPlasmaCurrent() is: a curved boundary's band is not
 			 * counted.
 			 */
+			/**
+			 * WHETHER THE POINT ROUTES MAY RUN ON THE DEVICE under a Device that
+			 * allows one: addSourceColumns() (and so assembleSourceDerivative()),
+			 * integrateOverDomain(), deliveredPlasmaCurrent() and
+			 * sourceTableReach() take the potential at every quadrature point
+			 * from a kernel, evaluate their integrand on the host there, and
+			 * scatter on the device; the host loop's geometry and shapes are
+			 * what they skip (M-DA-5). On by default; off is the host loop,
+			 * kept for the tests that compare the two.
+			 */
+			void setDevicePointRoutes( bool allowed );
+
+			/**
+			 * `int_Omega_h f( Psi )/R dA`, @a f a PsiIntegrand, by
+			 * integrateOverDomain()'s rule and domain: every element, `psi_h`
+			 * alone, `R > 0`. One partial per element summed in element order
+			 * in double; on the device under one (the per-element partials
+			 * accumulated in double there too), where the map is affine. The
+			 * delivered toroidal flux with `f = g` (Run, M-362).
+			 */
+			double integratePsiIntegrand( PsiIntegrand const &f ) const;
+
+			/**
+			 * assembleSourceDerivative() with `dF/dp = f( Psi )`, @a f a
+			 * PsiIntegrand: `-int f phi_i/R` over the plasma's elements by the
+			 * source rule, psi_c included. On the device under one, by the
+			 * plasma loops' kernel, where the source has a POD form; the host
+			 * loop otherwise. What the q-driven pin rows contract.
+			 */
+			void assemblePsiIntegrandColumn( mfem::Vector const &state, PsiIntegrand const &f,
+			                                 mfem::Vector &out );
+
+			/// How many times a point route ran on the device.
+			long devicePointRoutesTaken() const;
+
 			double integrateOverDomain(
 				std::function<double( double radius, double z, double psi )> const &integrand ) const;
 
@@ -7762,6 +7814,16 @@ namespace meq
 			/// B is built lazily from const assemblies; it is a cache of
 			/// constants of the mesh, not state a solve reads back.
 			mutable DevicePlasmaLoops plasmaLoops;
+			/// The same tables at integrateOverDomain()'s rule, 2 p + 4.
+			mutable DevicePlasmaLoops domainLoops;
+			bool devicePointRoutesAllowed = true;
+			mutable long devicePointRoutesCount = 0;
+			/// The plasma rule's points on the device, if the route is open:
+			/// prepare()d tables and a Device; never under a moving tau.
+			bool pointRouteOpen() const;
+			/// @a f's POD form at the solver's current normalisation.
+			bool integrandView( PsiIntegrand const &f, PsiIntegrandView &view,
+			                    std::vector<KnotView> &knots ) const;
 			/// The per-element partial sums the device route hands back. Members
 			/// so a constraint evaluation does not allocate device memory; safe to
 			/// refresh in place because the KERNEL fills them, through Write(),

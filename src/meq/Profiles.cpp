@@ -961,4 +961,18 @@ namespace meq
 		return "?";
 	}
 
+	std::vector<Knot> hermiteKnots( Profile const &profile, std::vector<double> const &at )
+	{
+		if ( at.size() < 2 )
+			throw std::invalid_argument( "meq::hermiteKnots: at least two points are needed" );
+		for ( std::size_t i = 1; i < at.size(); ++i )
+			if ( !( at[ i ] > at[ i - 1 ] ) )
+				throw std::invalid_argument( "meq::hermiteKnots: the points must be strictly ascending" );
+		std::vector<Knot> knots;
+		knots.reserve( at.size() );
+		for ( double x : at )
+			knots.push_back( Knot{ x, profile( x ), profile.prime( x ) } );
+		return knots;
+	}
+
 }
