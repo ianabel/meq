@@ -572,7 +572,7 @@ tests/       SourceTree.hpp (how a test names a source file), unit/ (Boost.Test)
              (pytest: PythonDriverParity, the module against meq), analytic/
              (closed forms), performance/ (timings, none a ctest:
              TraceSolverScaling, NpcThreadScaling, NewtonStepProfile,
-             InversionScaling).
+             InversionScaling, DeviceAudit).
 tools/       meqpaths.py (the layout, for every tool), plot_equilibrium.py (both NetCDF files; tools/README.md says which
              format goes with which reader), mesh/halfdisc.py (FB-6's gmsh
              geometry; --symmetric meshes z >= 0 and reflects it for
