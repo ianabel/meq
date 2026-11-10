@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "mfem.hpp"
@@ -26,7 +27,11 @@ namespace meq::tests::crossing
 	class Solved
 	{
 		public:
-			Solved( double mix, int n, int order )
+			/// @a configure, when given, is applied to the solver before the
+			/// solve: the precision instruments' device routes and refinement
+			/// switch (RecoveryInstrument.hpp).
+			Solved( double mix, int n, int order,
+			        std::function<void( meq::GradShafranovSolver & )> const &configure = {} )
 				: a( mix ),
 				  mesh( makeMesh( standardBox(), n ) ),
 				  source( [ this ]( mfem::Vector const &x )
@@ -38,6 +43,8 @@ namespace meq::tests::crossing
 			{
 				solver.setSource( source );
 				solver.setBoundaryData( zero );
+				if ( configure )
+					configure( solver );
 				solver.solve();
 				solver.postProcess();
 			}
