@@ -20251,9 +20251,22 @@ namespace
 		if ( !postProcessed )
 			throw std::logic_error( "meq::GradShafranovSolver: the continuous fields psi~ and q~ are "
 			                        "built from psi* and q*, so postProcess() comes first" );
-		ContinuousFields fields = meq::buildContinuousFields( postProcessedGf, enrichedFluxGf, traceGf );
+		ContinuousFields fields = continuousInterpolant().apply( postProcessedGf, enrichedFluxGf, traceGf );
 		continuousPotentialGf = std::move( fields.potential );
 		continuousFluxGf = std::move( fields.flux );
+	}
+
+	ContinuousInterpolant const &GradShafranovSolver::continuousInterpolant() const
+	{
+		if ( !postProcessed )
+			throw std::logic_error( "meq::GradShafranovSolver::continuousInterpolant: psi~ and q~ are "
+			                        "interpolated from psi* and q*, so postProcess() comes first" );
+		mfem::FiniteElementSpace const &potential = *postProcessedGf.FESpace();
+		mfem::FiniteElementSpace const &flux = *enrichedFluxGf.FESpace();
+		mfem::FiniteElementSpace const &trace = *traceGf.FESpace();
+		if ( !continuousInterpolantValue || !continuousInterpolantValue->builtFor( potential, flux, trace ) )
+			continuousInterpolantValue = std::make_shared<ContinuousInterpolant const>( potential, flux, trace );
+		return *continuousInterpolantValue;
 	}
 
 	mfem::GridFunction const &GradShafranovSolver::continuousPotential() const

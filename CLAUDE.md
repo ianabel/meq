@@ -183,7 +183,7 @@ cd builds/double && OMP_NUM_THREADS=4 ctest -j4
 
 **`builds/double` is CPU-only**, against `../../mfem/install-nocuda` (the CUDA
 install's options and commit, less `MFEM_USE_CUDA`/`CUDSS`, PIC, SUNDIALS from
-`../../sundials/install`). Its seven `*Device.cpp` files are host stubs, so its
+`../../sundials/install`). Its eight `*Device.cpp` files are host stubs, so its
 `debug` arms run the **host fallbacks under a Device**, and the device unit
 cases that assert a kernel ran skip loudly (`tests/unit/DeviceKernels.hpp`).
 **`builds/single` is the CUDA build**, `-DMFEM_DIR=$PWD/../mfem/install-single
@@ -596,7 +596,7 @@ docs/        the Sphinx manual for Read the Docs; docs/manual/ is the older
 refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi.
 ```
 
-**SEVEN FILES IN `src/meq` ARE COMPILED BY A DEVICE COMPILER** —
+**EIGHT FILES IN `src/meq` ARE COMPILED BY A DEVICE COMPILER** —
 `*Device.cpp`, holding every `mfem::forall` in the tree, because `mfem::forall`
 `static_assert`s under `g++`. Without CUDA they are host stubs and the build is
 host-only and correct, which is what CI builds.
@@ -635,7 +635,7 @@ and is wrong") belongs in both.
 `meq_core`, `meq config.toml`. **External names keep their author's
 capitalisation** (`cuDSS`, with a `NOLINT` saying so). Enforced by
 `.clang-tidy`'s `readability-identifier-naming` through the `naming` ctests over
-every file in `src/meq` — except, on a CUDA build only, the seven device files,
+every file in `src/meq` — except, on a CUDA build only, the eight device files,
 because clang-tidy cannot read nvcc's flags; on a host build they are checked
 like everything else.
 

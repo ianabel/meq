@@ -2403,23 +2403,24 @@ takes the device solve to one host core breaks this file's acceptance.
 
 **`c4ee278..1e8a3ad` added five pieces that run on one host core under a
 Device**, and two of them gave wrong answers there until the host funnels of
-[M-382](MEASUREMENTS.md#m-da-1) and [M-383](MEASUREMENTS.md#m-da-2). Their
-cost under `--device cuda` is [M-384](MEASUREMENTS.md#m-da-3): on a scaled
+[M-382](MEASUREMENTS.md#m-382) and [M-383](MEASUREMENTS.md#m-383). Their
+cost under `--device cuda` is [M-384](MEASUREMENTS.md#m-384): on a scaled
 `q-driven` run 88% of the wall is outside `solve()`, and on 32,768 triangles
 the continuous fields cost 899 device Newton residuals and a four-pass tangent
 760. Ordered by the wall they save:
 
-1. **The continuous fields `ψ̃`, `q̃` (`ContinuousField.cpp`).** Phase B per
-   mesh: the vertex-to-element table in ascending element order (so the
-   vertex means are the serial sum to the bit), and the edge and cell moment
-   systems as matrices, one per reference element and orientation where the
-   map is affine and one per element where it is curved. Phase C per
-   extraction: three `mfem::forall`s for `ψ̃` and two for `q̃`, each writing
-   only its own entity's dofs, so no atomics. The host takes the same
-   matrices, which is a host win as well (the build is about 150 µs an
-   element) and what makes the two routes comparable to the bit in double.
-   The tracer stays on the host and reads `ψ̃`, `q̃` downloaded, which are
-   smaller than the `ψ*`, `q*` it downloads now.
+1. **The continuous fields `ψ̃`, `q̃` (`ContinuousField.cpp`): DONE,
+   [M-385](MEASUREMENTS.md#m-385).** `meq::ContinuousInterpolant` does each
+   entity's quadrature and moment solve once per set of spaces, in double, and
+   keeps the map as three stages of `meq::LinearBlocks` per field -- one row
+   per vertex (the mean of the meeting elements' corner values, its terms in
+   element order), one block per edge, one per cell, every entity its own
+   matrix so that curved elements and every orientation need nothing
+   special. Each application is one kernel per stage
+   (`ContinuousFieldDevice.cpp`, no atomics, every block writing its own
+   dofs) or the same loop on the host; the solver keeps one interpolant
+   (`GradShafranovSolver::continuousInterpolant()`). The tracer stays on the
+   host and reads `ψ̃`, `q̃` downloaded.
 2. **The linearised solve (`linearise()`, `applyRetainedJacobian()`,
    `addSourceColumns()`).** (a) The retained operator built as `buildNpc`
    builds Newton's, through `makeDeviceNPCOperator()`, so its residual and
@@ -2428,10 +2429,10 @@ the continuous fields cost 899 device Newton residuals and a four-pass tangent
    kernel over `SourceView`: `S( x )`, `S( x + s t )` and `S'( x ) t` write
    disjoint L2 dofs per element. (c) `assembleSourceDerivative()`'s direction
    as a `KnotView`. (d) In single the refinement passes buy nothing a test
-   can see ([M-384](MEASUREMENTS.md#m-da-3)); either form the residual with
+   can see ([M-384](MEASUREMENTS.md#m-384)); either form the residual with
    double accumulation, which needs upstream's NPC Jacobian apply (its
    `Jacobian::Mult` aborts today), or stop at `10 ε ‖dx‖`. The
-   [M-383](MEASUREMENTS.md#m-da-2) funnels go when this lands.
+   [M-383](MEASUREMENTS.md#m-383) funnels go when this lands.
 3. **The delivered integrals.** `deliveredPlasmaCurrent()`'s device route
    exists and never runs: `iterateIsResident()` asks for device-valid AND
    host-invalid, and after `downloadSolution()` the state is both. The

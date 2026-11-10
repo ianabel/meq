@@ -4,7 +4,7 @@
 /*
  * A CASE THAT ASSERTS A KERNEL RAN, ON A BUILD THAT HAS NO KERNELS.
  *
- * MEQ's seven `*Device.cpp` files are host stubs on a build against an MFEM
+ * MEQ's eight `*Device.cpp` files are host stubs on a build against an MFEM
  * without CUDA: each route refuses before it reads anything, and every caller
  * keeps its host loop. `mfem::Device( "debug" )` is still configurable there
  * and still allows `DEVICE_MASK`, so a case that requires a kernel to have run

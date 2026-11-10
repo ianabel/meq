@@ -83,7 +83,7 @@ against is `CLAUDE_DECLINED.md`.
   its outputs and its index arrays alike, through `HostRead()`,
   `HostReadWrite()`, `HostWrite()` or `countedHostRead()`, never raw. Every
   device route can refuse: on a documented refusal in a CUDA build, and every
-  time where the seven `*Device.cpp` files are host stubs. The loop it falls
+  time where the eight `*Device.cpp` files are host stubs. The loop it falls
   back to runs under the same Device, so a dof array an MFEM operation read on
   the device is as protected as a vector (`entriesAt()`). **And a column an
   upstream route read on the device through an alias is handed back** with
@@ -179,14 +179,14 @@ invisible to the others. Reach for them in this order.
   cases that reach the flux-surface extraction and the `q` loop's re-entry,
   and compares the family's surface count beside the four fields: under any
   Device the continuous pair was built on the device's zeros, which every
-  other case was blind to (→ **[M-382](MEASUREMENTS.md#m-da-1)**).
+  other case was blind to (→ **[M-382](MEASUREMENTS.md#m-382)**).
   `LinearisedSolve`, `TangentConvergence` and `ExtractionContinuity` carry
   `debug` and `cuda` arms of their own under `MEQ_TEST_DEVICE`, on the
   bit-exact routes `MEQ_TEST_SERIAL_ROUTES` names, so a host run with that
   variable alone reproduces the `debug` arm to the bit in double
-  (→ **[M-383](MEASUREMENTS.md#m-da-2)**). The accuracy pieces of
+  (→ **[M-383](MEASUREMENTS.md#m-383)**). The accuracy pieces of
   `c4ee278..1e8a3ad` still run on one host core under a Device: `DEVICE-PLAN.md`
-  section 9, costed at **[M-384](MEASUREMENTS.md#m-da-3)**.
+  section 9, costed at **[M-384](MEASUREMENTS.md#m-384)**.
 * **The mirror is `RotatingMirrorDevice`'s, not one of its cases**: the box,
   two labels at points and subtracted filaments, `cpu` against `cuda` on the
   exact `ψ_h` and `q_h` within 1e-12 of their largest values. A tolerance and
@@ -206,9 +206,10 @@ invisible to the others. Reach for them in this order.
 
 ## Where the device code lives
 
-**Seven files in `src/meq` are compiled by `nvcc`** — `PointLocatorDevice.cpp`,
+**Eight files in `src/meq` are compiled by `nvcc`** — `PointLocatorDevice.cpp`,
 `SourceViewDevice.cpp`, `DeviceNPCDevice.cpp`, `DeviceQuadratureDevice.cpp`,
-`DeviceRowsDevice.cpp`, `AxisSearchDevice.cpp` and `ResidentIterateDevice.cpp`.
+`DeviceRowsDevice.cpp`, `AxisSearchDevice.cpp`, `ResidentIterateDevice.cpp`
+and `ContinuousFieldDevice.cpp`.
 They hold every `mfem::forall` launch in the tree, because `mfem::forall`
 `static_assert`s under `g++`. CMake reads the architecture out of MFEM's
 `config.mk`. Without CUDA each compiles to a host stub. The non-device halves
@@ -224,6 +225,10 @@ are these:
   reproducing its host loop to the bit.
 * **`meq::SourceView`** is the POD form of the source.
 * **`meq::DeviceRows`** is the bordered rows' mirror.
+* **`meq::ContinuousInterpolant`** is the extraction's continuous pair `ψ̃`,
+  `q̃` as a linear map: each entity's moment quadrature done once per set of
+  spaces and kept as blocks, applied by one kernel per stage
+  (→ **[M-385](MEASUREMENTS.md#m-385)**).
 * **`meq::DeviceConstants`** holds the per-mesh constants.
 * **`Crossings`** and **`StageChecksum`** are the two instruments above, and
   neither is part of the solve.
