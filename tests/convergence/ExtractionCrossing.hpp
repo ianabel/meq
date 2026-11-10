@@ -43,6 +43,7 @@ namespace meq::tests::crossing
 			{
 				solver.setSource( source );
 				solver.setBoundaryData( zero );
+				namedRoutesFromEnvironment( solver );
 				if ( configure )
 					configure( solver );
 				solver.solve();

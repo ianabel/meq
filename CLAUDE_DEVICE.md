@@ -175,6 +175,18 @@ invisible to the others. Reach for them in this order.
 * It runs a copy of `diverted-tokamak` with `PlasmaSupportSweeps` stripped, so
   that a **moving** support stays covered (M-239). *A device test's cases have to
   exercise every way host state can move, not only every leg.*
+* **It runs `flux-surfaces` and a ToroidalFlux-pinned `q-driven`**, the only
+  cases that reach the flux-surface extraction and the `q` loop's re-entry,
+  and compares the family's surface count beside the four fields: under any
+  Device the continuous pair was built on the device's zeros, which every
+  other case was blind to (→ **[M-382](MEASUREMENTS.md#m-da-1)**).
+  `LinearisedSolve`, `TangentConvergence` and `ExtractionContinuity` carry
+  `debug` and `cuda` arms of their own under `MEQ_TEST_DEVICE`, on the
+  bit-exact routes `MEQ_TEST_SERIAL_ROUTES` names, so a host run with that
+  variable alone reproduces the `debug` arm to the bit in double
+  (→ **[M-383](MEASUREMENTS.md#m-da-2)**). The accuracy pieces of
+  `c4ee278..1e8a3ad` still run on one host core under a Device: `DEVICE-PLAN.md`
+  section 9, costed at **[M-384](MEASUREMENTS.md#m-da-3)**.
 * **The mirror is `RotatingMirrorDevice`'s, not one of its cases**: the box,
   two labels at points and subtracted filaments, `cpu` against `cuda` on the
   exact `ψ_h` and `q_h` within 1e-12 of their largest values. A tolerance and
