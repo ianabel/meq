@@ -432,9 +432,9 @@ endif()
 
 # THE RETAINED LINEARISATION AND THE FLUX-SURFACE EXTRACTION UNDER A DEVICE.
 # Both read buffers raw that a Device leaves valid only on the card: the
-# extraction's continuous pair was built on the device's zeros (M-DA-1), and
+# extraction's continuous pair was built on the device's zeros (M-382), and
 # the linearised solve's back-solves and refinement residuals were indexed
-# stale (M-DA-2), so under --device cuda the family was missing and the
+# stale (M-383), so under --device cuda the family was missing and the
 # bordered tangent wrong, while --device debug faulted. Each arm runs the cases
 # that assert against a closed form or to the bit, under MEQ_TEST_DEVICE and
 # on MEQ_TEST_SERIAL_ROUTES's bit-exact host routes, so that a run with that
@@ -452,7 +452,7 @@ foreach(_device IN LISTS _da_devices)
 	# again after another answers 8e-8 of its largest entry apart in single,
 	# while the first solve after a fresh linearisation answers to the bit --
 	# the solve carries state between calls on the card and not under `debug`
-	# (MEASUREMENTS.md M-DA-2, open). So `debug` runs it and `cuda` does not.
+	# (MEASUREMENTS.md M-383, open). So `debug` runs it and `cuda` does not.
 	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents)
 	if(_device STREQUAL "debug")
 		string(APPEND _linearised_cases ",theRetainedFactorisationAnswersAsAFreshOneDoes")

@@ -25661,7 +25661,7 @@ refined against a double residual (or done in double: the system is ~40 × 40
 and backward stable), and it wants the recovered fields M-379's fix gives.
 Refinement in real_t (3–8%) and equilibration (1.8–3.1× worse) do not help.
 
-### M-DA-1
+### M-382
 
 **Under any `mfem::Device` the flux-surface family was built on zeros.**
 `meq::momentInterpolant()` asked for `out.HostWrite()` and then zeroed `out`
@@ -25704,7 +25704,7 @@ do now, each red without the repair and green with it:
 | `DeviceParity`, `flux-surfaces`, `debug` and `cuda` arms, single | '' against '32' on both | passes |
 | `DeviceParity`, `q-driven` pinned by ToroidalFlux, `cuda` and forced `cuda` | exit 2, no `psi_ax`, no family | exit 0, `psi_ax` 3.457385e-01, 3 KINSOL iterations, 24 surfaces, as the host |
 
-### M-DA-2
+### M-383
 
 **Under `--device cuda` the retained linearisation's tangent was wrong**, and
 under `--device debug` it faulted. `retainedBackSolve()`, the refinement loop
@@ -25761,7 +25761,7 @@ the Schur complement, reads -1.138 under `cuda` and -1.137 under `debug` on
 the CUDA build against -13.560 on the host. Not asserted anywhere, and not
 investigated here.
 
-### M-DA-3
+### M-384
 
 **What the accuracy pieces of `c4ee278..1e8a3ad` cost under `--device cuda`.**
 `tests/performance/DeviceAudit` (branch `device-audit`, not a ctest), single

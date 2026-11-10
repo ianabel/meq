@@ -11575,7 +11575,7 @@ namespace
 		countedHostRead( state, __LINE__ );
 		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: the
 		// direction is indexed raw below, as the state is, and the columns are
-		// accumulated into raw. MEASUREMENTS.md M-DA-2.
+		// accumulated into raw. MEASUREMENTS.md M-383.
 		if ( along )
 			countedHostRead( *along, __LINE__ );
 		for ( mfem::Vector *column : out )
@@ -11793,7 +11793,7 @@ namespace
 		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: a copy
 		// is born valid where its source was, and the zeroing below is raw, as
 		// is the index array an MFEM operation may have read on the device.
-		// The answer is funnelled where it is read. MEASUREMENTS.md M-DA-2.
+		// The answer is funnelled where it is read. MEASUREMENTS.md M-383.
 		countedHostReadWrite( rhs, __LINE__ );
 		countedHostRead( essential, __LINE__ );
 		for ( int i = 0; i < essential.Size(); ++i )
@@ -11879,7 +11879,7 @@ namespace
 		 */
 		int const potentialStart = blockOffsets[ 1 ];
 		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: both
-		// fields below are views of the state's host pointer. M-DA-2.
+		// fields below are views of the state's host pointer. M-383.
 		countedHostRead( state, __LINE__ );
 		mfem::GridFunction potentialField( potentialFes.get(), const_cast<mfem::real_t *>( state.GetData() ) + potentialStart );
 		if ( axisConstraintChoice == AxisConstraint::NodalMaximum )
@@ -11985,7 +11985,7 @@ namespace
 
 		double rowDotColumn = 0.0;
 		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: the
-		// back-solve's answer is read raw. M-DA-2.
+		// back-solve's answer is read raw. M-383.
 		countedHostRead( held->columnSolved, __LINE__ );
 		for ( std::size_t k = 0; k < held->rowIndex.size(); ++k )
 			rowDotColumn += held->rowWeight[ k ]*held->columnSolved( held->rowIndex[ k ] );
@@ -12057,7 +12057,7 @@ namespace
 			return;
 		double rowDotY = 0.0;
 		// INTERIM HOST FUNNEL, until DEVICE-PLAN.md
-		// section 9: the back-solve's answer is read raw. M-DA-2.
+		// section 9: the back-solve's answer is read raw. M-383.
 		countedHostRead( dx, __LINE__ );
 		for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
 			rowDotY += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
@@ -12090,7 +12090,7 @@ namespace
 			r = b;
 			r -= applied;
 			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md
-			// section 9: the residual is zeroed raw on the essential dofs. M-DA-2.
+			// section 9: the residual is zeroed raw on the essential dofs. M-383.
 			countedHostReadWrite( r, __LINE__ );
 			countedHostRead( essential, __LINE__ );
 			for ( int i = 0; i < essential.Size(); ++i )
@@ -12100,7 +12100,7 @@ namespace
 			{
 				r.Add( -ds[ 0 ], retained->column );
 				double rowDotX = 0.0;
-				// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: M-DA-2.
+				// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: M-383.
 				countedHostRead( dx, __LINE__ );
 				for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
 					rowDotX += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
@@ -12152,7 +12152,7 @@ namespace
 			// GridFunction is born UseDevice( true ), so `datum = 0.0` would zero
 			// the device copy and the projection and the raw reads below would
 			// meet a page MFEM believes stale. Zeroed on the host instead, and
-			// the index array asked for there. M-DA-2.
+			// the index array asked for there. M-383.
 			zeroOnHost( datum );
 			datum.ProjectBdrCoefficient( *boundaryDerivative, fittedMarker );
 			countedHostRead( datum, __LINE__ );
@@ -12192,7 +12192,7 @@ namespace
 			before = std::sqrt( before );
 			solveLinearised( v, g, dx, ds );
 			double after = 0.0;
-			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: M-DA-2.
+			// INTERIM HOST FUNNEL, until DEVICE-PLAN.md section 9: M-383.
 			countedHostRead( dx, __LINE__ );
 			v = 0.0;
 			for ( int i = 0; i < potentialSize; ++i )

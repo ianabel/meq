@@ -161,7 +161,7 @@ namespace tests
 	 * box), so a run with no Device and a run under MEQ_TEST_DEVICE=debug agree
 	 * to the bit only on these, which is how the device arms are compared with
 	 * the host (CLAUDE_DEVICE.md, "Bit-identity with the host is a test
-	 * instrument"; MEASUREMENTS.md M-DA-1, M-DA-2). Unset, it does nothing.
+	 * instrument"; MEASUREMENTS.md M-382, M-383). Unset, it does nothing.
 	 */
 	inline void namedRoutesFromEnvironment( meq::GradShafranovSolver &solver )
 	{

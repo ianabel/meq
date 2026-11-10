@@ -43,7 +43,7 @@
  * it is the device arm tests/CMakeLists.txt registers: the retained linearisation
  * read its back-solves and refinement residuals raw while they were
  * device-valid, and the bordered tangent came out wrong under --device cuda
- * (MEASUREMENTS.md M-DA-2).
+ * (MEASUREMENTS.md M-383).
  */
 namespace
 {
@@ -206,7 +206,7 @@ namespace
 		s.solver->linearisedTangent( dRdp, {}, nullptr, dx, ds, passes );
 		dAxis = ds.front();
 		// Every digit, so that two arms -- the host and MEQ_TEST_DEVICE --
-		// can be compared to the bit by their output (M-DA-2).
+		// can be compared to the bit by their output (M-383).
 		std::printf( "  tangent bits: d psi_ax %.17g, |dx| %.17g\n", dAxis, dx.Norml2() );
 		// Read raw by the caller: asked for on the host, as any raw reader
 		// must, and after the norm, whose device read protects the host page

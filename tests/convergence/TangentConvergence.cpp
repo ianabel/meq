@@ -58,7 +58,7 @@
  * singleton). Unset, there is none, which is how the plain ctest runs. Set,
  * it is the device arm tests/CMakeLists.txt registers: the unbordered retained
  * path read its refinement residual and the direction it applies raw while
- * they were device-valid (MEASUREMENTS.md M-DA-2).
+ * they were device-valid (MEASUREMENTS.md M-383).
  */
 namespace
 {
@@ -204,7 +204,7 @@ namespace
 		s.solver->assembleSourceDerivative( s.solver->state(), dFdp, dRdp );
 		s.solver->solveTangent( s.solver->state(), dRdp, datum, dx, passes );
 		// Every digit, so that two arms -- the host and MEQ_TEST_DEVICE --
-		// can be compared to the bit by their output (M-DA-2).
+		// can be compared to the bit by their output (M-383).
 		std::printf( "  tangent bits: |dx| %.17g\n", dx.Norml2() );
 		dx.HostRead();   // fieldsOf() reads it raw, after the norm's device read
 		return dx;

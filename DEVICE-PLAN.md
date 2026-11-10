@@ -2403,8 +2403,8 @@ takes the device solve to one host core breaks this file's acceptance.
 
 **`c4ee278..1e8a3ad` added five pieces that run on one host core under a
 Device**, and two of them gave wrong answers there until the host funnels of
-[M-DA-1](MEASUREMENTS.md#m-da-1) and [M-DA-2](MEASUREMENTS.md#m-da-2). Their
-cost under `--device cuda` is [M-DA-3](MEASUREMENTS.md#m-da-3): on a scaled
+[M-382](MEASUREMENTS.md#m-da-1) and [M-383](MEASUREMENTS.md#m-da-2). Their
+cost under `--device cuda` is [M-384](MEASUREMENTS.md#m-da-3): on a scaled
 `q-driven` run 88% of the wall is outside `solve()`, and on 32,768 triangles
 the continuous fields cost 899 device Newton residuals and a four-pass tangent
 760. Ordered by the wall they save:
@@ -2428,10 +2428,10 @@ the continuous fields cost 899 device Newton residuals and a four-pass tangent
    kernel over `SourceView`: `S( x )`, `S( x + s t )` and `S'( x ) t` write
    disjoint L2 dofs per element. (c) `assembleSourceDerivative()`'s direction
    as a `KnotView`. (d) In single the refinement passes buy nothing a test
-   can see ([M-DA-3](MEASUREMENTS.md#m-da-3)); either form the residual with
+   can see ([M-384](MEASUREMENTS.md#m-da-3)); either form the residual with
    double accumulation, which needs upstream's NPC Jacobian apply (its
    `Jacobian::Mult` aborts today), or stop at `10 ε ‖dx‖`. The
-   [M-DA-2](MEASUREMENTS.md#m-da-2) funnels go when this lands.
+   [M-383](MEASUREMENTS.md#m-da-2) funnels go when this lands.
 3. **The delivered integrals.** `deliveredPlasmaCurrent()`'s device route
    exists and never runs: `iterateIsResident()` asks for device-valid AND
    host-invalid, and after `downloadSolution()` the state is both. The

@@ -28,8 +28,8 @@
  *
  * Under a Device it takes the driver's device defaults (batched assembly and
  * local factorisation, cuDSS under cuda); AUDIT_SERIAL=1 keeps the host's
- * keys and AUDIT_PARDISO=1 keeps PARDISO, the two controls M-DA-2 ran.
- * MEASUREMENTS.md M-DA-3 is what it measured.
+ * keys and AUDIT_PARDISO=1 keeps PARDISO, the two controls M-383 ran.
+ * MEASUREMENTS.md M-384 is what it measured.
  */
 
 #include <algorithm>

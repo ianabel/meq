@@ -365,18 +365,18 @@ namespace
 	 * zeroed through MFEM's device-aware operator= and then written on the
 	 * host, so the next host read copied the device's zeros back: the run
 	 * exited 0 under --device cuda with a warning and no surface file, and
-	 * --device debug faulted in momentInterpolant(). MEASUREMENTS.md M-DA-1.
+	 * --device debug faulted in momentInterpolant(). MEASUREMENTS.md M-382.
 	 * Compared on the family's printed line, which a missing family leaves
 	 * empty.
 	 */
 	Case const surfaces
 		{ "flux-surfaces", false,
-		  "the flux-surface extraction on psi~ and q~ -- M-DA-1's case" };
+		  "the flux-surface extraction on psi~ and q~ -- M-382's case" };
 
 	/*
 	 * AND THE q-DRIVEN OUTER LOOP, which extracts a family at every map
 	 * evaluation, re-enters solve() (M-206), and under the ToroidalFlux pin
-	 * reads the delivered flux at every evaluation. With M-DA-1's defect every
+	 * reads the delivered flux at every evaluation. With M-382's defect every
 	 * evaluation was refused under --device cuda and the run exited 2. Pinned
 	 * by ToroidalFlux rather than the shipped R0B0, so that the delivered
 	 * integral is on the path, at the flux the shipped run delivers.
@@ -388,11 +388,11 @@ namespace
 	 * leaves its host page protected, and the loop then reads `x( i )` raw.
 	 * Under CUDA the host copy stays valid and the read is right, so the card
 	 * arm is green. The q loop is being rewritten on `q-refining-fit`; the
-	 * `debug` arm goes back on with that (MEASUREMENTS.md M-DA-1).
+	 * `debug` arm goes back on with that (MEASUREMENTS.md M-382).
 	 */
 	Case const qDriven
 		{ "q-driven", false,
-		  "the q-driven outer loop on the delivered flux -- M-DA-1's re-entry case", false,
+		  "the q-driven outer loop on the delivered flux -- M-382's re-entry case", false,
 		  { { "R0B0", "ToroidalFlux = 2.4911634\nToroidalFieldGuess = 2.2" } } };
 
 }
@@ -552,7 +552,7 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		            std::string( which.stem ) + ": the family has '" + device.surfaces
 		                + "' surfaces under a device against '" + host.surfaces
 		                + "' on the host. A family missing under a Device is the "
-		                  "continuous pair built wrong there (MEASUREMENTS.md M-DA-1): "
+		                  "continuous pair built wrong there (MEASUREMENTS.md M-382): "
 		                  "momentInterpolant() must write psi~ and q~ through host "
 		                  "access it asked for, never after a device-aware fill" );
 
@@ -611,7 +611,7 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		BOOST_TEST( card.surfaces == host.surfaces,
 		            std::string( which.stem ) + ": the family has '" + card.surfaces
 		                + "' surfaces under CUDA against '" + host.surfaces
-		                + "' on the host (MEASUREMENTS.md M-DA-1)" );
+		                + "' on the host (MEASUREMENTS.md M-382)" );
 
 		/*
 		 * AND A FOURTH ARM, WITH EVERY DEVICE ROUTE FORCED OPEN.

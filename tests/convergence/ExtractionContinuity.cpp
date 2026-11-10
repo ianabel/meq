@@ -18,7 +18,7 @@
  * singleton). Unset, there is none, which is how the plain ctest runs. Set,
  * it is the device arm tests/CMakeLists.txt registers: the continuous pair psi~ and q~
  * was zeroed through the device-aware operator= and written on the host, so
- * under any Device the family was built on zeros (MEASUREMENTS.md M-DA-1).
+ * under any Device the family was built on zeros (MEASUREMENTS.md M-382).
  */
 namespace
 {
@@ -194,7 +194,7 @@ BOOST_AUTO_TEST_CASE( theFamilyIsLabelledOnTheFieldItRoots )
 	std::printf( "  the family's psi_ax less psi~ at its axis: %.2e of the span; psi_h there differs from "
 	             "psi~ by %.2e\n", ( family.psiAxis - tilde )/span, ( finder - tilde )/span );
 	// Every digit, so that two arms -- the host and MEQ_TEST_DEVICE -- can be
-	// compared to the bit by their output (M-DA-1).
+	// compared to the bit by their output (M-382).
 	std::printf( "  family bits: psi_ax %.17g, V' on the outer surface %.17g\n", family.psiAxis,
 	             family.surfaces.back().vPrime );
 	BOOST_TEST( std::abs( family.psiAxis - tilde ) < 64.0*std::numeric_limits<mfem::real_t>::epsilon()*span,
