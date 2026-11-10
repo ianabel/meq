@@ -3,6 +3,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <chrono>
+#include <limits>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -388,8 +389,16 @@ BOOST_AUTO_TEST_CASE( locatingIsLinearInTheNodeCount )
 		return std::chrono::duration<double, std::milli>( stop - start ).count();
 	};
 
-	double const small = time( 65 );
-	double const large = time( 129 );      // four times the nodes
+	// THE MINIMUM OF FIVE INTERLEAVED TIMINGS, NOT ONE OF EACH. On a loaded
+	// machine a single sample is preempted at random -- one take read 9.8 at a
+	// load of 21, and 1 s alone -- and the minimum is the run that was not.
+	double small = std::numeric_limits<double>::infinity();
+	double large = std::numeric_limits<double>::infinity();
+	for ( int take = 0; take < 5; ++take )
+	{
+		small = std::min( small, time( 65 ) );
+		large = std::min( large, time( 129 ) );      // four times the nodes
+	}
 
 	std::printf( "  locating 65x65 %.1f ms, 129x129 %.1f ms, ratio %.2f "
 	             "(4 is linear, 16 is quadratic)\n",
