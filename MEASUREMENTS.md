@@ -26960,3 +26960,58 @@ remedy is a Jacobian without the differencing noise:
 label at that trial's. The next evaluate() now starts psi_ax at the warm
 state's (`setAxisFluxInitial()`), as it starts psi_bnd.
 
+
+### M-QS-2
+
+**THE LIMITED BOX'S KNIFE EDGE IN DOUBLE WAS THE OUTER SEARCH'S MERIT. ON
+`|| r ||^2`, A RIGHT CONSTRAINED STEP NEAR THE ANSWER RAISES IT TO FIRST ORDER.
+JUDGED ON THE PART OF THE RESIDUAL THE STEP CAN REMOVE, EVERY PERTURBATION
+CONVERGES.** Branch `q-single` on `9ae5911`; `builds/q-single` (double) and
+`builds/q-single-cuda` (single); `MKL_NUM_THREADS=1`.
+`QDrivenConsistency`'s `theDeliveredFieldConvergesOnALimitedBox` (k = 2,
+levels 0 and 1). The loop's `SplineGGPrime` is scaled by `1 + s`, through a
+temporary knob that is not committed.
+
+| `s` | level 1 on `\|\| r \|\|^2` | level 1 on the removable part |
+|---|---|---|
+| 0 | converged (ctest) | converged, 12 iterations |
+| +1e-14 | **exits 2**, stall at removable 8.1e-7 | converged, 11 |
+| +3e-14 | converged, 14 | -- |
+| -3e-14 | **exits 2**, stall at 2.8e-6 | converged, 12 |
+| +1e-13 | **exits 2**, stall at 1.8e-7 | converged, 13 |
+| -1e-13 | converged, 14 | converged, 14 |
+
+Level 0 converged in every row, in 10 iterations. `g²` misses the closed form
+by 6.013e-2 then 9.36e-3, a factor 6.42, in every row that converges.
+
+**The mechanism**, read at `s` = +1e-14 on `|| r ||^2`:
+
+* At iteration 7 the step's predicted decrease is 2.3e-10, against a merit of
+  2.3e-8. Its trials deviate from the linear model quadratically in their
+  length: 1.4e-5 at `alpha` = 1, then 2.5e-6, 6e-7 and 1.6e-7. That is the
+  residual's curvature, and the Jacobian is right.
+* At iteration 9 the predicted decrease is **zero**, with the removable part
+  still at 8e-7. The merit RISES linearly in the trial's length, by 6.4e-12 at
+  `alpha` = 1 and 9e-16 at 2.4e-4. So the step is an ascent direction of
+  `|| r ||^2`.
+
+The answer is least squares within a level set of `sum ln g²`, the R0B0 pin
+choosing the level (M-396). It is not the minimum of `|| r ||^2` on the pin's
+surface, so near it that merit has a slope along the step, and its sign is a
+coin toss decided by the trajectory. The merit is now
+`|| Q^T r_free ||^2 + w r_pin^2`, with `Q` an orthonormal basis of `range( J Z )`
+at the iterate. It is zero exactly at the answer, and the step's slope on it
+is `-2 phi`. `SafetyFactorTests`'
+`a_constrained_step_is_judged_on_what_it_can_remove` is the two-unknown
+case: from the minimum of `|| r ||^2` on the pin's line it stalls at the start
+on the old merit and converges on the new one.
+
+**Single** is not closed by it. The limited box at `s` = 0 and +-1e-13 exits 2
+at level 0, after 4 to 6 iterations. The loop measures its noise, floor 5e-4
+against a removable 3e-3. Then the accepted point no longer evaluates: the
+inner bordered Newton, warm from the noise probe's state (the last knot moved
+by 1%), crawls. Its damping falls to 4.9e-4 at a field residual of 0.02 to
+0.4, its trial norms non-monotone in the damping (4.3, 5.5, 237, 0.83 at
+halving lengths). The same crawl refuses double's long trials (2 to 4 a run).
+It is the bordered inner Newton's globalisation (M-398), reached at smaller
+moves in single.

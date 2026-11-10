@@ -568,6 +568,40 @@ BOOST_AUTO_TEST_CASE( gauss_newton_finishes_an_affine_least_squares_in_one_step 
 }
 
 /*
+ * WITH A CONSTRAINT THE SEARCH JUDGES WHAT THE STEP CAN REMOVE, NOT || r ||^2
+ * (M-QS-2). The answer is least squares within a level set of ln u_1 + ln u_2,
+ * and the pin u_1 = 1.5 picks the level. It is not the minimum of || r ||^2 on
+ * the pin's line. Started at that minimum, (1.5, 2.25), every step toward the
+ * answer, u_2 = ( 3 + sqrt 3 )/2, raises || r ||^2. A search on || r ||^2
+ * refuses them all and stalls at the start.
+ */
+BOOST_AUTO_TEST_CASE( a_constrained_step_is_judged_on_what_it_can_remove )
+{
+	Residual residual = []( std::vector<double> const &u, std::vector<double> &r )
+	{
+		r = { u[ 0 ] - 1.0, u[ 1 ] - 2.0, u[ 0 ] + u[ 1 ] - 4.0, u[ 0 ] - 1.5 };
+		return true;
+	};
+	auto jacobian = []( std::vector<double> const &, std::vector<double> &j )
+	{
+		j = { 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0 };
+		return true;
+	};
+	meq::LeastSquaresOptions options;
+	options.tolerance = 1.0e-12;
+	options.constraints = 1;
+	options.level = []( std::vector<double> const &u )
+	{
+		return std::vector<double>{ 1.0/u[ 0 ], 1.0/u[ 1 ] };
+	};
+	meq::LeastSquaresResult const result = meq::solveLeastSquares( { 1.5, 2.25 }, residual, jacobian, options );
+	BOOST_TEST( result.converged, result.status );
+	BOOST_TEST( std::abs( result.x[ 0 ] - 1.5 ) < 1e-12 );
+	BOOST_TEST( std::abs( result.x[ 1 ] - 0.5*( 3.0 + std::sqrt( 3.0 ) ) ) < 1e-10,
+		"u_2 = " << result.x[ 1 ] << ": not least squares within the pin's level set" );
+}
+
+/*
  * A RANK-DEFICIENT JACOBIAN IS REPORTED, NOT STEPPED THROUGH; A THROW ENDS THE
  * LOOP AND IS REPORTED, NOT RETHROWN; A REFUSED TRIAL IS A REJECTED STEP.
  */

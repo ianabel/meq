@@ -147,9 +147,17 @@ namespace meq
 				 * l -- is the same whichever constraint picks the point on it.
 				 */
 				Eigen::VectorXd step;
+				// An orthonormal basis of what the step can remove from the
+				// least-squares rows: range( J ), or range( J Z ) with a
+				// constraint. The search's merit is measured in it, below.
+				Eigen::MatrixXd removableBasis;
 				std::size_t const constraints = options.constraints;
 				if ( constraints == 0 )
-					step = a.colPivHouseholderQr().solve( b );
+				{
+					Eigen::ColPivHouseholderQR<Eigen::MatrixXd> const qr( a );
+					step = qr.solve( b );
+					removableBasis = qr.householderQ()*Eigen::MatrixXd::Identity( rows, qr.rank() );
+				}
 				else
 				{
 					if ( constraints != 1 || !options.level || r.size() <= 1 )
@@ -171,6 +179,7 @@ namespace meq
 					Eigen::Index const rowsFree = rows - 1;
 					Eigen::MatrixXd const az = a.topRows( rowsFree )*z;
 					Eigen::ColPivHouseholderQR<Eigen::MatrixXd> const qr( az );
+					removableBasis = qr.householderQ()*Eigen::MatrixXd::Identity( rowsFree, qr.rank() );
 					Eigen::VectorXd const y0 = qr.solve( b.head( rowsFree ) );
 					Eigen::VectorXd const y1 = qr.solve( -( a.topRows( rowsFree )*l ) );
 					Eigen::RowVectorXd const c = a.row( rows - 1 );
@@ -241,19 +250,36 @@ namespace meq
 						return finish( false, "the accepted point no longer evaluates" );
 				}
 
-				// THE SEARCH: Armijo on || r ||^2, a refusal a rejection. The
-				// slope along the Gauss-Newton step is -2 || J dx ||^2, not
-				// -2 || r ||^2: in least squares r keeps its misfit, and a test
-				// against the whole of it would ask a step for a decrease only a
-				// zero-residual problem can give.
-				// The merit: || r ||^2 with the constraint rows weighted, and the
-				// decrease the linear model predicts for the full step.
+				/*
+				 * THE SEARCH: Armijo, a refusal a rejection, on the part of the
+				 * residual the step can remove -- the rows projected on
+				 * range( J Z ) at x, and the constraint rows weighted:
+				 *
+				 *     phi( u ) = || Q^T r_free( u ) ||^2 + w || r_con( u ) ||^2.
+				 *
+				 * NOT ON || r ||^2, AND THAT IS MEASURED (M-QS-2). With a
+				 * constraint the answer is least squares within a level set
+				 * of `level`, the constraint picking the level (M-396). It is
+				 * not a minimum of || r ||^2 on the constraint's surface, so
+				 * near it a right step can raise || r ||^2 to first order.
+				 * On the limited box at level 1 every trial of such a step
+				 * rose linearly in its length, and the loop stalled at a
+				 * removable 8e-7, on one gg' in three perturbed by 1e-14.
+				 * phi is zero exactly at the answer, and the step takes its
+				 * model to zero, so the step is a descent direction of phi with
+				 * slope -2 phi. Without a constraint Z is the identity, and
+				 * the misfit the step cannot remove leaves the comparison
+				 * along with its noise.
+				 */
 				std::size_t const free = r.size() - options.constraints;
 				auto merit = [ & ]( std::vector<double> const &v )
 				{
-					double sum = 0.0;
-					for ( std::size_t i = 0; i < v.size(); ++i )
-						sum += ( i < free ? 1.0 : constraintWeight )*v[ i ]*v[ i ];
+					Eigen::VectorXd freeRows( static_cast<Eigen::Index>( free ) );
+					for ( std::size_t i = 0; i < free; ++i )
+						freeRows( static_cast<Eigen::Index>( i ) ) = v[ i ];
+					double sum = ( removableBasis.transpose()*freeRows ).squaredNorm();
+					for ( std::size_t i = free; i < v.size(); ++i )
+						sum += constraintWeight*v[ i ]*v[ i ];
 					return sum;
 				};
 				double const f0 = merit( r );

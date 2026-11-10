@@ -520,8 +520,15 @@ Raised 2026-11-09 (MEASUREMENTS.md M-397).
 
 ================================================================================
 The q-driven solve in single precision
-Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404, M-405, M-QS-1).
+Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404, M-405, M-QS-1, M-QS-2).
 ================================================================================
+
+  THE LIMITED BOX in single now fails on the inner solve, not on the loop
+  (M-QS-2). The outer search judges the removable residual, which closed
+  double's knife edge. The accepted point then no longer evaluates from the
+  noise probe's warm start, a move of 1% in the last knot: the bordered
+  inner Newton crawls at a field residual of 0.02 to 0.4. That is M-398's
+  globalisation, the next thing to fix for this case.
 
   BLOCKED ON THE JACOBIAN (M-QS-1, Q-SHAPE-DERIVATIVE-PLAN.md). Differencing a
   single-precision extraction leaves the q rows' Jacobian 6e-5 of its size

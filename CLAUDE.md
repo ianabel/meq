@@ -207,11 +207,12 @@ Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAccept
 `SafetyFactorSolver` and `QDrivenScalePin`, whose round trips reach `g²` to
 2e-6 to 4e-5 against their bounds, the map's own q being 1.5e-6 from
 double's, and `QDrivenCurvedBoundary` (the tracer refusing 20 of its 28
-trials), `QDrivenFreeEdge` and `QDrivenConsistency`'s limited box (`g²` 0.11
-then 0.12, not converging), whose loops do not close: the differenced
-Jacobian is no better than 1e-3 of its size on a free edge in single, which
-`Q-SHAPE-DERIVATIVE-PLAN.md` would replace (→
-**[M-405](MEASUREMENTS.md#m-405)**, **[M-QS-1](MEASUREMENTS.md#m-qs-1)**,
+trials), `QDrivenFreeEdge` and `QDrivenConsistency`'s limited box (the inner
+bordered Newton crawling from a 1% move of the last knot, M-398's), whose
+loops do not close: the differenced Jacobian is no better than 1e-3 of its
+size on a free edge in single, which `Q-SHAPE-DERIVATIVE-PLAN.md` would
+replace (→ **[M-405](MEASUREMENTS.md#m-405)**,
+**[M-QS-1](MEASUREMENTS.md#m-qs-1)**, **[M-QS-2](MEASUREMENTS.md#m-qs-2)**,
 `TODO`, *The q-driven solve in single precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and

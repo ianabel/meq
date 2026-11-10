@@ -327,10 +327,16 @@ step (`TODO`, *The q-driven Jacobian's cost is the extraction*).
 (`SafetyFactorSolve.hpp`). The system is overdetermined, so KINSOL's square
 Newton does not apply. The step is a column-pivoting Householder QR —
 **never the normal equations**, which would square a conditioning that is
-already the problem's weakest number — and a trial is accepted on a sufficient
-decrease of the merit relative to the linear model's prediction: against the
-merit itself the search would ask for what only a zero misfit gives, and
-stalled there. **A refused trial is a rejected step**: a solve that does not
+already the problem's weakest number. A trial is accepted on a sufficient
+decrease of the merit relative to the linear model's prediction. **The merit
+is the part of the residual the step can remove**: the rows projected on
+`range( J Z )` at the iterate, plus the weighted pin row. It is not `‖r‖²`.
+Against `‖r‖²` the search would ask for what only a zero misfit gives. And
+since the answer is least squares within a level set of `Σ ln g²`, not the
+minimum of `‖r‖²` on the pin's surface, a right step near it can raise `‖r‖²`
+to first order. On `QDrivenConsistency`'s limited box that stalled the loop at
+a removable 1e-7 to 3e-6 for three of four `gg′` perturbed by 1e-14 to 1e-13
+(→ **[M-QS-2](MEASUREMENTS.md#m-qs-2)**). **A refused trial is a rejected step**: a solve that does not
 converge, a family that cannot be traced, or a spline with `g² ≤ 0` anywhere on
 [0, 1] — which is refused without a solve — has no value to compare. Nothing
 in the loop throws for a reason it can meet; a throw from a callback ends the

@@ -46,12 +46,17 @@
  *
  * The inner bordered Newton has no globalisation while `psi_ax` is a border
  * unknown, so the outer step length is the only control there is. A trial is
- * accepted when the merit -- `|| r ||^2`, the constraint rows weighted by
- * 1e6 -- falls by at least `c alpha` of what the linear model predicts for the
- * full step (`c` = 1e-4, `alpha` the step fraction): a sufficient decrease,
- * so that the search cannot creep (`HDG-NPC-GLOBALISATION-FROM-MEQ.md`'s
- * recorded mistake). Against the merit itself it would ask for what only a
- * zero misfit can give, and stall at the misfit.
+ * accepted when the merit falls by at least `c alpha` of what the linear
+ * model predicts for the full step (`c` = 1e-4, `alpha` the step fraction): a
+ * sufficient decrease, so that the search cannot creep
+ * (`HDG-NPC-GLOBALISATION-FROM-MEQ.md`'s recorded mistake). The merit is the
+ * part of the residual the step can remove: the rows projected on
+ * `range( J Z )` at the iterate (`Z` the identity without a constraint), plus
+ * the constraint rows weighted by 1e6. The full step takes its model to zero.
+ * `|| r ||^2` is not the merit, for two reasons. Its misfit only a zero
+ * misfit could remove. And with a constraint the answer is not its minimum
+ * on the constraint's surface, so near the answer a right step can raise it
+ * to first order (MEASUREMENTS.md M-QS-2).
  * A trial the residual refuses -- a solve that does not converge, a family
  * that cannot be traced, `g^2 <= 0` -- is a rejected step: there is no value
  * to compare, so nothing is compared.
