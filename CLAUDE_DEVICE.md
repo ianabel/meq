@@ -179,14 +179,14 @@ invisible to the others. Reach for them in this order.
   cases that reach the flux-surface extraction and the `q` loop's re-entry,
   and compares the family's surface count beside the four fields: under any
   Device the continuous pair was built on the device's zeros, which every
-  other case was blind to (→ **[M-382](MEASUREMENTS.md#m-da-1)**).
+  other case was blind to (→ **[M-382](MEASUREMENTS.md#m-382)**).
   `LinearisedSolve`, `TangentConvergence` and `ExtractionContinuity` carry
   `debug` and `cuda` arms of their own under `MEQ_TEST_DEVICE`, on the
   bit-exact routes `MEQ_TEST_SERIAL_ROUTES` names, so a host run with that
   variable alone reproduces the `debug` arm to the bit in double
-  (→ **[M-383](MEASUREMENTS.md#m-da-2)**). The accuracy pieces of
+  (→ **[M-383](MEASUREMENTS.md#m-383)**). The accuracy pieces of
   `c4ee278..1e8a3ad` still run on one host core under a Device: `DEVICE-PLAN.md`
-  section 9, costed at **[M-384](MEASUREMENTS.md#m-da-3)**.
+  section 9, costed at **[M-384](MEASUREMENTS.md#m-384)**.
 * **The mirror is `RotatingMirrorDevice`'s, not one of its cases**: the box,
   two labels at points and subtracted filaments, `cpu` against `cuda` on the
   exact `ψ_h` and `q_h` within 1e-12 of their largest values. A tolerance and
@@ -1128,7 +1128,7 @@ a count of calls: *a format-specific defect is pinned by putting the other forma
 in the same position*. With the fix, single is 0.81× to 0.90× of double per
 Newton step, and 0.69× to 0.81× on setup.
 
-### Why the element-local recovery and `Reconstruct()` are noisy → [M-379](MEASUREMENTS.md#m-rd-1), [M-380](MEASUREMENTS.md#m-rd-2), [M-381](MEASUREMENTS.md#m-rd-3)
+### Why the element-local recovery and `Reconstruct()` are noisy → [M-379](MEASUREMENTS.md#m-379), [M-380](MEASUREMENTS.md#m-380), [M-381](MEASUREMENTS.md#m-381)
 
 M-371's 200× on `ψ_h` and `Reconstruct()`'s 5.5e-7 are both MFEM's, and
 `RecoveryPrecision` separates them with the hybridization's own stored blocks,
