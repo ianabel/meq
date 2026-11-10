@@ -381,6 +381,10 @@ namespace
 	 * by ToroidalFlux rather than the shipped R0B0, so that the delivered
 	 * integral is on the path, at the flux the shipped run delivers.
 	 *
+	 * ON LEVEL 0, because `debug` is the expensive arm: the shipped level 1
+	 * (19 knots) did not finish in 50 minutes under it on a loaded machine,
+	 * against 70 s on the host; level 0's 10 knots exercise the same code.
+	 *
 	 * BOTH ARMS. The `debug` arm was off while the loop's KINSOL residual
 	 * read its iterate raw after a device-aware copy
 	 * (FixedPointResidual::measuredSpreadAt(), M-382); the q loop is now
@@ -391,7 +395,8 @@ namespace
 	Case const qDriven
 		{ "q-driven", false,
 		  "the q-driven outer loop on the delivered flux -- M-382's re-entry case", true,
-		  { { "R0B0", "ToroidalFlux = 2.4911634\nToroidalFieldGuess = 2.2" } } };
+		  { { "R0B0", "ToroidalFlux = 2.4911634\nToroidalFieldGuess = 2.2" },
+		    { "RefinementLevels", "RefinementLevels = 0" } } };
 
 }
 

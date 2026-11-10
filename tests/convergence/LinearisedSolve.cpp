@@ -466,6 +466,40 @@ BOOST_AUTO_TEST_CASE( theLimiterBorderIsInTheTangent ) { bordersAgainstSolves( E
 BOOST_AUTO_TEST_CASE( theXPointBorderIsInTheTangent ) { bordersAgainstSolves( Edge::XPoint, "X-point" ); }
 
 /*
+ * setInitialState()'S ITERATE IS THE ONE THE SOLVE STARTS FROM, on any Device:
+ * a converged state handed to a fresh solver of the same problem starts it
+ * near its answer. Under --device debug it was not -- the copy into the
+ * state went to the device while the trace datum, written through an alias
+ * whose flags still said host, put the guess back -- and every warm start, the
+ * q-driven loop's and a restart's, began from the guess (M-QR-12).
+ */
+BOOST_AUTO_TEST_CASE( theInitialStateIsWhereTheSolveStarts )
+{
+	auto base = solveManufactured( 0.2, 2, 8 );
+	double const scale = base->solver->newtonResiduals().front();
+	meq::GradShafranovSolver again( *base->mesh, 2 );
+	again.setSource( *base->source, base->solver->psiAxis() );
+	again.setBoundaryData( *base->zero );
+	again.setInitialGuess( *base->guess );
+	again.setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+	meq::tests::namedRoutesFromEnvironment( again );
+	again.setInitialState( base->solver->state(), {} );
+	again.solve();
+	double const first = again.newtonResiduals().front();
+	std::printf( "\n  setInitialState(): the first residual %.3e against the cold start's %.3e, %d iterations "
+	             "against %d\n", first, scale, again.newtonIterations(), base->solver->newtonIterations() );
+	/*
+	 * Not at zero: the fresh solver locates its axis afresh and starts its
+	 * labels at setSource()'s, so the first residual is 1.9e-4 of the cold
+	 * start's on the host, in 4 iterations against the cold start's 5. From
+	 * the guess it is the cold start's own.
+	 */
+	BOOST_TEST( first < 1.0e-2*scale, "a converged state handed to setInitialState() starts at "
+	            << first << ", the cold start's " << scale << ": the solve began from the guess" );
+	BOOST_TEST( again.newtonIterations() < base->solver->newtonIterations() );
+}
+
+/*
  * THE FACTORISATION IS RETAINED, AND RETAINED TO THE BIT: a direction solved
  * again after another answers as it did, and as a fresh linearisation of the
  * same state answers. And it is refused once a residual has been evaluated

@@ -7555,7 +7555,22 @@ namespace
 				throw std::invalid_argument( "meq::GradShafranovSolver::prepare: setInitialState() gave "
 					+ std::to_string( initialStateValue.Size() ) + " entries for a state of "
 					+ std::to_string( solution.Size() ) + "; it belongs to another mesh or order" );
-			static_cast<mfem::Vector &>( solution ) = initialStateValue;
+			/*
+			 * ON THE HOST, AND THE ALIASES' FLAGS MADE HONEST. The guess seeding
+			 * above wrote darcyFlux, potentialGf and traceGf -- MakeRef'd into
+			 * `solution` -- on the host, so their flags say host-valid; a
+			 * device-aware copy into `solution` then left the state on the
+			 * device while the trace datum below, written through traceGf's
+			 * stale host flags, put the guess back: under --device debug every
+			 * setInitialState() started from the guess (M-QR-12). As solve()
+			 * ends: the base written, then SyncToBlocks() and each alias synced.
+			 */
+			mfem::real_t const *const from = initialStateValue.HostRead();
+			std::copy( from, from + initialStateValue.Size(), solution.HostWrite() );
+			solution.SyncToBlocks();
+			darcyFlux.SyncMemory( solution.GetBlock( 0 ) );
+			potentialGf.SyncMemory( solution.GetBlock( 1 ) );
+			traceGf.SyncMemory( solution.GetBlock( 2 ) );
 		}
 
 		// The Dirichlet datum lives on the trace, and only on the trace: the flux
