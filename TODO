@@ -2070,12 +2070,12 @@ Raised 2026-11-09 (MEASUREMENTS.md M-386; DEVICE-PLAN.md section 9).
   over the points and two copies across the bus per call. What takes it:
 
   * addSourceColumns() with a caller's derivative, and so
-    assembleSourceDerivative(): every q-driven pin row on q-refining-fit, and
-    the gg' cardinal-direction derivative. The pin rows' four integrands have
-    a device form now, meq::PsiIntegrand through assemblePsiIntegrandColumn();
-    moving them onto it is the q loop's change. The cardinal direction's is
-    step 3's assembleGGPrimeDerivative() (branch device-linearised, held until
-    q-refining-fit merges).
+    assembleSourceDerivative(): the q loop's gg' cardinal-direction
+    derivative, one per knot a Jacobian. Its device form is step 3's
+    assembleGGPrimeDerivative() (branch device-linearised, held until
+    q-refining-fit merges). The flux pin's four integrands and the delivered
+    flux are on meq::PsiIntegrand (assemblePsiIntegrandColumn()), G and each
+    cardinal as Hermite SplineProfiles of the spline.
   * The retained linearisation's S( x ) and S'( x ) t, the source's own F and
     dF/dpsi passed as lambdas: their device form is the plasma loops'
     SourceValue and SourceSlope (step 3, the same branch).
