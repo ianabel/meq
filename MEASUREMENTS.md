@@ -26116,28 +26116,42 @@ readings each way:
 
 ### M-LR-4
 
-**The suites with the refinement on.** `local-refinement` at main `b0870a1`
-merged, MFEM `meq-integration` `56796771ac`: double on the CPU-only
-`install-nocuda-next`, single on CUDA `install-single-next`, both `ctest -j4`
-at `OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, at load 10 to 20 from other agents.
+**The suites with the refinement on.** MFEM `meq-integration` `56796771ac`:
+double on the CPU-only `install-nocuda-next`, single on CUDA
+`install-single-next`, both `ctest -j4` at `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`, at load 10 to 20 from other agents. Two takes: the
+branch at main `b0870a1` merged (the first), and at main `a1e930a` merged,
+with M-385's interpolant and M-386's device integrals (the final).
 
-**Double: 154 of 157**, the deliberate three: `PlasmaEdgeConvergence`,
-`QDrivenConsistency`'s `theDeliveredQConvergesToTheTarget` and
-`AnisotropicMirror`'s `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
+**Double: 154 of 157 at `b0870a1`, 158 of 161 at `a1e930a`**, the
+deliberate three: `PlasmaEdgeConvergence`, `QDrivenConsistency`'s
+`theDeliveredQConvergesToTheTarget` and `AnisotropicMirror`'s
+`theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
 `SolverContract`'s new case reads the refinement moving `ψ_h` by 211, 694 and
 1,196ε of its largest value and `ψ*` by 17, 44 and 68ε at `k` = 1, 2, 3
 (single: 256, 910, 1,260 and 13, 34, 52).
 
-**Single: 145 of 152**, against main's list:
+**Single: 145 of 152 at `b0870a1`, 151 of 157 at `a1e930a`**, against main's
+list:
 
-| test | main | here |
-|---|---|---|
-| `PlasmaEdgeConvergence`, `QDrivenConsistency`, `AnisotropicMirror` | red, deliberate | red, the same cases |
-| `DriverAcceptance` | `aWarmAdaptiveCycleConvergesOnTheNewtonRung`, `theProfileScaleCrossesEachAdaptiveCycle` | the same two |
-| `ExtractionContinuity` | red, the continuity case | **green**: the family moves 6.1e-07 beyond its smooth change across the crossing, against `max( 1e-11, 20ε )` = 2.4e-06; about 1e-5 with the refinement off (M-371) |
-| `ExtensionConvergence` | green | red, then green on a moved precondition, below |
-| `EstimatorConvergence` | green | red, then green on a moved precondition, below |
-| `DeviceParity` | green | red on `q-driven`'s card count, a coin toss, below |
+| test | main | first take | final take |
+|---|---|---|---|
+| `PlasmaEdgeConvergence`, `QDrivenConsistency`, `AnisotropicMirror` | red, deliberate | red, the same cases | red, the same cases |
+| `DriverAcceptance` | `aWarmAdaptiveCycleConvergesOnTheNewtonRung`, `theProfileScaleCrossesEachAdaptiveCycle` | the same two | the same two |
+| `ExtractionContinuity` | red, the continuity case | green, 6.1e-07 | red, 8.1e-06 |
+| `ExtensionConvergence` | green | red; green on a moved precondition, below | green |
+| `EstimatorConvergence` | green | red; green on a moved precondition, below | green |
+| `DeviceParity` | green | red on `q-driven`'s card count, a coin toss, below | green |
+| `FluxSurfaceConvergence` | green | green | red, `thePointErrorDoesNotAccumulateOverManyCircuits`, below |
+
+**`ExtractionContinuity` reads `ψ̃`'s noise at the located axis, which the
+refinement does not reach.** Its continuity case bounds the family's jump
+across a face crossing at `max( 1e-11, 20ε )` = 2.4e-06; the family labelled
+by `ψ̃` at the axis moves 1e-5 between neighbouring states with the
+refinement on or off (M-LR-1 (c), (d)). The first take's 6.1e-07 was a good
+draw: at `a1e930a` the same case reads 8.1e-06 on and 1.8e-05 off (the
+latter at another crossing, by a temporary environment override in this
+branch's build, never committed). It stays on the single list.
 
 **`ExtensionConvergence` and `EstimatorConvergence` passed in single only on
 the unrefined recovery's noise.** `thePostProcessedPotentialConvergesAtKPlusTwo`
@@ -26172,3 +26186,17 @@ runs and off in 0 of 11 (off by a temporary environment override, never
 committed, in this branch's build); the host takes 3. So it is a coin toss in both settings
 whose odds the refinement moves, on the q loop `q-refining-fit` is
 rewriting. The assertion is left as it is.
+
+**`FluxSurfaceConvergence`'s `thePointErrorDoesNotAccumulateOverManyCircuits`
+compares two round-offs in single, and the refinement turned the draw.** It
+traces one `ψ̃` contour over 1, 5 and 10 circuits and requires the normal
+closure error at 10 to be under twice that at 5. In single those are 1–8ε of
+the radius, under the file's own `rootedPositionFloor()` of 8.0e-06 that its
+first closure assertion carries: with the refinement on 3.16e-07, 1.15e-07,
+9.96e-07 (ratio 8.7, red); off 2.07e-07, 4.94e-07, 8.66e-07 (ratio 1.75,
+green), the same binary and override as above. The file's comment keeps the
+flatness comparison in single on purpose ("what the case asserts does not
+move"), so it is left as it is and reported: it is a comparison of two
+round-offs, which `discretisationPoints()`' reasoning would move off the
+floor, and that is the file owner's call.
+

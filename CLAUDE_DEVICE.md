@@ -1189,7 +1189,8 @@ checked bit for bit against the fields MFEM recovers.
   `h` falls. The noise kept `ψ_h` 0.8 % above `ψ*` and inflated `η`. They are
   asserted now where the error still converges at `k+1`
   (`meq::tests::discretisationPoints()`, every mesh in double).
-  `ExtractionContinuity` is green in single for the same reason the other way.
+  `ExtractionContinuity` stays a single-precision red: what it reads is `ψ̃`'s
+  noise at the located axis, which the refinement does not reach.
 * **The cost is about 2× the recovery and nothing measurable on the
   reconstruction or `FormLinearSystem()`**, on the host and the card's batched
   route, where the reconstruction is itself 2.5× to 50× the recovery, so a

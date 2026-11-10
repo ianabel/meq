@@ -1577,6 +1577,17 @@ places that are not MFEM's local solves.
      chose psi~ for accuracy, which single does not change.
 
 
+  3. FluxSurfaceConvergence's thePointErrorDoesNotAccumulateOverManyCircuits
+     IS RED IN SINGLE WITH THE REFINEMENT ON, ON TWO ROUND-OFFS.  Its
+     flatness comparison (the normal closure error over 10 circuits under
+     twice that over 5) reads 1.15e-7 and 9.96e-7 on, 4.94e-7 and 8.66e-7
+     off: 1 to 8 eps of the radius, under the rootedPositionFloor() of
+     8.0e-6 its own first closure assertion carries (M-LR-4).  The file keeps
+     the comparison in single deliberately.  Either that decision stands and
+     the case is a single-precision red that moves with any change to psi~'s
+     bits, or the comparison takes the floor its neighbour takes.
+
+
 ================================================================================
 A CUDA-only build: cuDSS as the only trace solver
 Raised 2026-10-22. After a real GPU-only pathway exists, not before.
