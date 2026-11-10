@@ -2228,14 +2228,43 @@ namespace meq
 				double aHi = bracketHi;
 				double psiLo = 0.0;
 				double psiHi = 0.0;
-				if ( !evaluate( aLo, psiLo, qR, qZ ) || !evaluate( aHi, psiHi, qR, qZ )
+				/*
+				 * AN END OF THE BRACKET CAN LIE BEYOND THE FIELD. The margin is
+				 * 5% of the radius, and a surface nearer Gamma than that -- the
+				 * outer cut's, Psi_N = 0.9, is 1.5 cm inside the box's edge at
+				 * a radius of 0.31 m -- puts the outer end where nothing can be
+				 * sampled. That is not a ray without a crossing, so the end is
+				 * pulled back towards the traced radius it came from, halving
+				 * its margin, until it samples. Only the bisection reaches
+				 * here, after Newton left its bracket or ran out: measured in
+				 * single on the n = 12, k = 2 box at Psi_N = 0.9, the end at
+				 * 0.333 m (R = 1.404) threw where the crossing is at 0.3145.
+				 */
+				auto sampled = [ & ]( double &end, double towards, double &value )
+				{
+					for ( int halving = 0; halving < 40; ++halving )
+					{
+						if ( evaluate( end, value, qR, qZ ) )
+							return true;
+						end = 0.5*( end + towards );
+					}
+					return false;
+				};
+				bool const loSampled =
+					sampled( aLo, std::min( radius[ lo ], radius[ lo + 1 ] ), psiLo );
+				bool const hiSampled =
+					sampled( aHi, std::max( radius[ lo ], radius[ lo + 1 ] ), psiHi );
+				if ( !loSampled || !hiSampled
 				     || ( psiLo - contour.level )*( psiHi - contour.level ) > 0.0 )
 				{
 					std::ostringstream message;
 					message << "ContourTracer::fitByAngle: no crossing of psi = "
 					        << contour.level << " on the ray at theta = " << theta
-					        << " within [ " << bracketLo << ", " << bracketHi
+					        << " within [ " << aLo << ", " << aHi
 					        << " ] taken from the traced curve";
+					if ( !loSampled || !hiSampled )
+						message << " (its " << ( loSampled ? "outer" : "inner" )
+						        << " end samples no field even at the traced radius)";
 					throw std::runtime_error( message.str() );
 				}
 

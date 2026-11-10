@@ -1616,6 +1616,40 @@ namespace meq
 			TraceAssemblyMode traceAssemblyMode() const;
 
 			/**
+			 * **ONE REFINEMENT PASS ON THE ELEMENT-LOCAL RECOVERY AND ON THE
+			 * RECONSTRUCTION, ON BY DEFAULT IN BOTH PRECISIONS, AND NOT A KEY.**
+			 * Upstream's `DarcyHybridization::SetLocalRefinement()`, applied
+			 * in formSystem() before every `FormLinearSystem()`, which is when
+			 * the recovery's copies of `A` and `D` are taken.
+			 *
+			 * MFEM's block-Schur `MultInv()` is not backward stable on the HDG
+			 * local system (11-33 eps at the median element), so in single the
+			 * recovered `psi_h` carried 200-440x the trace's noise, and
+			 * `Reconstruct()` formed its local load in real_t, which set a
+			 * floor of 5.5e-7 on `psi*` (MEASUREMENTS.md M-371, M-379 to
+			 * M-381). The pass forms the local residual in double on the
+			 * blocks as assembled and solves once more on the held factors;
+			 * the reconstruction forms its load in double and refines against
+			 * it. Both run on the per-element and the batched (device) routes.
+			 *
+			 * **WHAT IT DOES NOT REACH**: upstream refines the LINEAR recovery
+			 * (`ComputeSolution()` on a problem with no non-linear integrator)
+			 * and every reconstruction. The NPC route -- every Newton solve
+			 * here, the bordered one, the retained linearisation and its
+			 * back-solves -- is not refined; there the fields are Newton state,
+			 * and Newton's last steps refine them. M-LR-1 measures both.
+			 *
+			 * Off is upstream's route bit for bit. It is a setter for the
+			 * instruments that compare the two (`RecoveryPrecision`,
+			 * `ExtractionNoise`), and takes effect at the next solve, the
+			 * reconstruction included.
+			 */
+			void setLocalRefinement( bool on );
+
+			/// The value setLocalRefinement() last set; true by default.
+			bool localRefinement() const;
+
+			/**
 			 * WHETHER EACH BATCHED PATH WAS ACTUALLY TAKEN, which is a much
 			 * narrower question than whether it was asked for -- every one of
 			 * them falls back silently, and MFEM's own documentation says to
@@ -7669,6 +7703,7 @@ namespace meq
 
 			LocalFactorMode localFactorChoice = LocalFactorMode::Serial;
 			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Batched;
+			bool localRefinementValue = true;
 
 			bool deviceIntegrandInUse = false;
 

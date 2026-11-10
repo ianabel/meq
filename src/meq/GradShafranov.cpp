@@ -7753,6 +7753,13 @@ namespace
 		darcySolution.Update( solution, darcy->GetOffsets() );
 		darcyRhs.Update( rhs, darcy->GetOffsets() );
 
+		// THE LOCAL REFINEMENT, BEFORE EVERY FormLinearSystem(): that is where
+		// ComputeH() copies A and D for the recovery's double residual, and
+		// set after it the recovery aborts. Reconstruct() reads the same flag
+		// when it runs, so postProcess() follows this solve's setting.
+		// setLocalRefinement() has the measurement and what it does not reach.
+		darcy->GetHybridization()->SetLocalRefinement( localRefinementValue );
+
 		darcy->FormLinearSystem( essentialFluxTdofs, darcySolution, darcyRhs, reduced,
 		                         traceX, traceB, true );
 
@@ -11166,6 +11173,17 @@ namespace
 	GradShafranovSolver::traceAssemblyMode() const
 	{
 		return traceAssemblyChoice;
+	}
+
+	void GradShafranovSolver::setLocalRefinement( bool on )
+	{
+		localRefinementValue = on;
+		prepared = false;
+	}
+
+	bool GradShafranovSolver::localRefinement() const
+	{
+		return localRefinementValue;
 	}
 
 	/*

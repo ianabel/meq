@@ -1134,7 +1134,7 @@ a count of calls: *a format-specific defect is pinned by putting the other forma
 in the same position*. With the fix, single is 0.81× to 0.90× of double per
 Newton step, and 0.69× to 0.81× on setup.
 
-### Why the element-local recovery and `Reconstruct()` are noisy → [M-379](MEASUREMENTS.md#m-379), [M-380](MEASUREMENTS.md#m-380), [M-381](MEASUREMENTS.md#m-381)
+### The element-local recovery and `Reconstruct()` are refined → [M-379](MEASUREMENTS.md#m-379), [M-380](MEASUREMENTS.md#m-380), [M-381](MEASUREMENTS.md#m-381), [M-LR-1](MEASUREMENTS.md#m-lr-1), [M-LR-2](MEASUREMENTS.md#m-lr-2), [M-LR-3](MEASUREMENTS.md#m-lr-3)
 
 M-371's 200× on `ψ_h` and `Reconstruct()`'s 5.5e-7 are both MFEM's, and
 `RecoveryPrecision` separates them with the hybridization's own stored blocks,
@@ -1146,14 +1146,56 @@ checked bit for bit against the fields MFEM recovers.
   the same matrix, and **the same in ε in double**. `B A⁻¹ b_u − b_p` does not
   cancel, so a rescaling cannot help: a power-of-two block scaling is
   bit-identical, and Ruiz gains ≤ 1.3×.
-* **The fix is one refinement pass with the residual in double** on the factors
-  already held: `ψ_h` to the trace's own σ, `q_h` to the floor an exact solve of
-  the stored data reaches. Refinement in real_t gets `ψ_h` to 2× the trace.
-* **`q_h`'s floor after that is the trace's noise times `L/h`** (13×, 16×, 34× at
-  `n` = 12, 16, 32): `q` is a derivative of `ψ`. Only a quieter trace moves it.
 * **`Reconstruct()`'s floor is its local load, assembled in real_t.** Its solve
   is backward stable and a double solve buys 1.2–1.3×. The load formed in double
   reaches 1.6e-7, and with refined fields as well 0.48e-7, the trace's level.
+* **Upstream's fix is one refinement pass with the residual in double**, on the
+  factors already held, on the per-element and the batched routes, and the
+  reconstruction's load formed and held in double with one pass against it:
+  `DarcyHybridization::SetLocalRefinement()`, off by default upstream.
+  **MEQ turns it on in both precisions, with no key**:
+  `GradShafranovSolver::setLocalRefinement()` is true by default and is
+  applied in `formSystem()` before every `FormLinearSystem()`, which is where
+  `ComputeH()` copies `A` and `D` (set after it, the recovery aborts).
+  `Reconstruct()` reads the same flag when it runs, so every `postProcess()`
+  and `reconstructAt()` is refined. The setter exists for the instruments.
+* **In single it does what M-379 and M-381 said it would** (M-LR-1, M-LR-2):
+  `ψ_h` at 1.2–1.3× the trace's σ on the host and 1.0–1.1× on the card (from
+  176–440×), `ψ*` at 1.1–1.2× and 1.0–1.1× (from 5.4–7.4e-7), `q_h` at the trace
+  times `L/h`, which only a quieter trace moves. Upstream's pass agrees with
+  `RecoveryPrecision`'s own (d′) to 0.2ε on the host and 3–4ε on the card's
+  batched route, and **off reproduces main's numbers to every printed digit**.
+  In double the switch moves `ψ_h` by 200–1,300ε of its largest value and
+  `ψ*` by 15–70ε (`SolverContract`).
+* **What it does not reach is the NPC route**: every Newton solve, the
+  bordered one, `linearise()`'s retained linearisation and its back-solves,
+  and `ReduceRHS()`. There the fields are Newton state and the last Newton
+  steps refine them: on the normalised box `ψ_h` is 1.09× the trace with the
+  switch on or off, so **the NPC route shows no floor of its own** (M-LR-1).
+  The reconstruction is refined on every path, the NPC one included (`ψ*`
+  5.6e-7 to 1.7e-7 there).
+* **What is left in single is the trace, `q_h`'s `L/h`, and `ψ̃`.** On the card
+  the linear path's trace is cuDSS's one solve, 0.9–3.3ε against PARDISO's
+  0.4ε, growing with `n`, and with the recovery refined it is the card's floor.
+  `ψ̃`'s dofs sit at 1.6–1.8× the trace with M-385's interpolant, but its
+  value at the located axis is 3–13× its value at a fixed point, so the family
+  labelled by `ψ̃` at the axis moves about as much as before (8.4e-6 to
+  4.3e-5) while the one labelled by the finder's `ψ_h` falls 30–100×
+  (M-LR-1; `TODO`, *Left open by the local refinement*).
+* **Two single-precision assertions passed only on the unrefined recovery's
+  noise** (M-LR-4): `ExtensionConvergence`'s *`ψ*` below `ψ_h` on the finest
+  mesh* and `EstimatorConvergence`'s *`η` above `‖q − q_h‖`*, both at `k = 2`
+  on meshes where `ψ_h` and `q_h` are already the trace's round-off and rise as
+  `h` falls. The noise kept `ψ_h` 0.8 % above `ψ*` and inflated `η`. They are
+  asserted now where the error still converges at `k+1`
+  (`meq::tests::discretisationPoints()`, every mesh in double).
+  `ExtractionContinuity` stays a single-precision red: what it reads is `ψ̃`'s
+  noise at the located axis, which the refinement does not reach.
+* **The cost is about 2× the recovery and nothing measurable on the
+  reconstruction or `FormLinearSystem()`**, on the host and the card's batched
+  route, where the reconstruction is itself 2.5× to 50× the recovery, so a
+  few per cent of a linear solve (M-LR-3). It does not argue against the
+  default.
 
 ## This machine's GPU
 

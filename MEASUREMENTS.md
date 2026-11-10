@@ -25905,3 +25905,298 @@ on the host, the factors scattered back on the device) and on the host loop
   loop on `main` in M-385's session. Its device form, and the device integrand's operator that
   dominates `linearise()` and `applyRetainedJacobian()`, are step 3's
   (`DEVICE-PLAN.md` section 9).
+
+### M-LR-1
+
+**MFEM's local refinement, on against off, single, on the host and on the
+card: the recovery and the reconstruction come to the trace's own noise.**
+`local-refinement` off `b0870a1`, `ExtractionNoise` (built, not registered),
+single, MFEM `meq-integration` `56796771ac`
+(`DarcyHybridization::SetLocalRefinement()`), `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`, on a machine at load 10 to 13 from other agents. The
+measure is M-371's: 21 states 1e-5 apart, each its own solve, σ the root mean
+square of the second differences over √6, of each field's largest value, root
+mean square over dofs. `MEQ_LOCAL_REFINEMENT` switches the refinement
+(`GradShafranovSolver::setLocalRefinement()`); the host is MEQ's default
+routes (`LocalFactorMode::Serial`, PARDISO), the card is `MEQ_TEST_DEVICE=cuda`
+with the driver's device routes (`AssemblyMode`, `LocalFactorMode` and
+`TraceAssemblyMode` batched, cuDSS). Every case printed its routes: on the card
+`CanBatchLocalSolve()` and the batched reconstruction (`CanBatchReconstructTotalFlux()`
+and `DarcyForm::CanBatchReconstruction()`) read yes in every case, on and off,
+so the card's numbers are the batched device routes' and not a fallback; on
+the host both read no.
+
+**Off reproduces main.** Every printed figure of the host's off run, on all
+five cases, is the same as main's `builds/single` binary (`1e8a3ad`, MFEM
+`2a50e91443`) prints, and its field σ are M-371's (a) to every digit.
+`RecoveryPrecision`'s host off run is likewise identical to main's, so M-379
+to M-381 stand as published (M-LR-2).
+
+**(a) The fields, linear box** (σ ×1e-8; off → on; ε = 11.9):
+
+| case | | trace `ψ̂` | `ψ_h` | `q_h` | `ψ*` | `ψ̃` |
+|---|---|---|---|---|---|---|
+| `n = 12, k = 2` | host | 4.93 | 867 → **6.54** | 243 → 81.0 | 56.0 → **5.78** | 29.0 → 15.4 |
+| | card | 10.6 → 10.5 | 629 → **11.7** | 253 → 77.8 | 48.5 → **11.2** | 28.3 → 18.2 |
+| `n = 16, k = 2` | host | 5.18 | 1,110 → **6.59** | 318 → 107 | 55.2 → **5.88** | 27.8 → 15.5 |
+| | card | 17.1 → 17.7 | 803 → **18.6** | 345 → 106 | 51.2 → **18.3** | 30.7 → 22.8 |
+| `n = 32, k = 2` | host | 4.90 | 2,150 → **6.17** | 637 → 215 | 53.6 → **5.60** | 26.7 → 15.5 |
+| | card | 39.8 → 36.6 | 1,580 → **37.2** | 689 → 216 | 62.0 → **37.0** | 46.9 → 39.6 |
+| `n = 16, k = 3` | host | 4.74 | 1,780 → **6.10** | 594 → 151 | 73.7 → **5.77** | 71.4 → 62.8 |
+| | card | 19.2 → 19.5 | 1,200 → **20.3** | 604 → 146 | 69.4 → **20.0** | 72.8 → 65.4 |
+
+The trace does not depend on the switch; on the card it differs between the
+two runs because cuDSS is nondeterministic (CLAUDE_DEVICE.md, *cuDSS*). The
+host's batched local routes (`MEQ_TEST_BATCHED=1`, PARDISO) read `ψ_h` 6.36,
+`ψ*` 5.56 at `n = 16` and 6.25, 5.68 at `n = 32` with the refinement on (1,110
+and 2,140, 55.2 and 53.7 off), the per-element route's figures.
+
+* **`ψ_h` comes to 1.2–1.3× the trace on the host and 1.0–1.1× on the card**,
+  from 176–440×: what upstream's reply asked for ("`p` near 1× the trace's
+  noise"), and M-379's (d) row.
+* **`ψ*` comes to 1.1–1.2× the trace on the host and 1.0–1.1× on the card**, from
+  5.4–7.4e-7, 9–13× on the host: "ψ* near the trace's own", M-381's last
+  rows.
+* **`q_h` comes to the trace times `L/h`** (16×, 21×, 44×, 32× on the host),
+  which M-379 measured as all the trace's; 3–4× quieter than off.
+* **On the card the trace is the floor, and it is cuDSS's**: 0.9–3.3ε,
+  growing with `n`, against PARDISO's 0.41–0.43ε at every mesh. The card's
+  refined `ψ_h` and `ψ*` are therefore 1.8–6× the host's.
+* **`ψ̃` improves only 1.1–1.9×** at `b0870a1`, 3× the trace at `k = 2` and
+  13× at `k = 3` on the host: MEQ's own moment interpolant of `ψ*`, `ψ̂` and
+  `q*`, all three at the trace's level, so the amplification was the
+  interpolant's. With main's M-385 interpolant, its quadratures in double,
+  it is 1.6–1.8× the trace (d).
+
+**(b) The normalised (NPC) box, `n = 16`, `k = 2`** (σ ×1e-8; off → on):
+
+| | trace | `ψ_h` | `q_h` | `ψ*` | `ψ̃` | the solve's `ψ_ax`, of the span |
+|---|---|---|---|---|---|---|
+| host | 16.3 | 17.7 → 17.7 | 69.7 → 69.7 | 56.2 → **17.0** | 30.7 → 23.6 | 23.2 |
+| card | 5.02 → 5.10 | 7.27 → 7.36 | 54.1 → 53.3 | 46.5 → **5.86** | 24.3 → 17.7 | 3.8 → 5.6 |
+
+**The NPC route is not refined upstream, and shows no floor of its own**:
+`ψ_h` is 1.09× the trace on the host and 1.4× on the card with the switch on
+or off, bit for bit the same on the host, because the fields are Newton state
+and the last Newton steps refine them (M-371). The reconstruction is refined
+on this path too, and `ψ*` comes to the trace there, 3.3× and 7.9× quieter.
+On the card the normalised trace is 0.43ε: Newton refines cuDSS's solve as
+well, which the linear path's single solve does not.
+
+**(c) The axis and the family, `n = 16`, `k = 2`** (σ of the span for the
+axis values, of each average's value for the families, worst over 12 surfaces
+and six averages; off → on):
+
+| | axis position | finder's `ψ_h` at the axis | `ψ̃` at the axis | family by the finder's `ψ_h` | by `ψ̃` at the axis | `ψ̃` at a fixed point |
+|---|---|---|---|---|---|---|
+| host | 1.6e-5 → 4.8e-7 m | 1.13e-5 → 2.15e-7 | 4.22e-7 → 6.17e-7 | 2.40e-4 → **5.63e-6** | 8.74e-6 → 1.31e-5 | 8.77e-6 → 3.82e-6 |
+| card | 1.6e-5 → 3.6e-7 m | 1.16e-5 → 3.41e-7 | 7.32e-7 → 9.48e-7 | 2.42e-4 → **3.76e-6** | 1.51e-5 → 2.06e-5 | 6.51e-6 → 3.62e-6 |
+
+Over all four linear cases on the host, the family labelled by the finder's
+`ψ_h` falls 25–95× (to 4.7e-6 – 9.6e-6) and the one at a fixed point 2–3×
+(to 3.5e-6 – 4.0e-6); **the one labelled by `ψ̃` at the axis**, which is
+`meq::labelledAxis()`'s label for a solve with no `ψ_ax` unknown, reads 1.98e-5,
+1.31e-5, 4.35e-5 and 9.79e-6 (`n` = 12, 16, 32 at `k = 2`, then `k = 3`)
+against 1.41e-5, 8.74e-6, 2.51e-5 and 2.05e-5 off: 1.4–1.7× more at `k = 2`
+and 2× less at `k = 3`. Its σ is `ψ̃`'s at the axis over the innermost
+surface's `Ψ_N` (6.2e-7/0.05 against 1.3e-5), and `ψ̃` there is noisier than
+at a fixed point (8.4e-8), which is not understood (`TODO`). On the card at
+`n = 12` the axis still flips between the two elements beside `z = 0` (4 times
+in 21 states), from cuDSS's noisier trace, and the finder's family reads
+1.75e-4 there.
+
+**(d) `ψ̃` on M-385's interpolant** (main `cee0a7b` merged, the same runs
+otherwise; host, ×1e-8 of its largest value, off → on): 25.0 → 7.79, 23.7 →
+7.89, 22.2 → 7.85 and 30.7 → 8.43 at `n` = 12, 16, 32 (`k = 2`) and `k = 3`,
+1.6–1.8× the trace. **Its value at the located axis stays noisy**: 9.8e-7,
+6.5e-7, 2.1e-6 and 3.7e-7 of the span on, against 1.0e-7 – 1.6e-7 at a fixed
+point, so the family labelled by `ψ̃` at the axis reads 2.08e-5, 1.35e-5,
+4.31e-5 and 8.36e-6 on against 1.24e-5, 7.42e-6, 2.48e-5 and 1.91e-5 off,
+while the one at a fixed point reads 2.7e-6 – 5.7e-6. The located point moves
+0.5–1.4 µm between states with the refinement on; that motion times `ψ̃`'s
+gradient at `q_h`'s root, where `ψ̃`'s own stationary point need not be, is
+the candidate, not measured (`TODO`).
+
+**A defect the refinement exposed, in MEQ's extraction.** With the refinement
+on, the host's `n = 12, k = 2` case threw *"no crossing of psi = … on the ray
+at theta = 0 within [ 0.298826, 0.333019 ]"* on the outer cut, `Ψ_N = 0.9`.
+`ContourTracer::fitByAngle()`'s bisection fallback takes its bracket from the
+two traced radii widened by 5%, and the outer end, 0.333 m from an axis at
+`R = 1.0708`, is outside the box (`R = 1.404 > 1.4`), where nothing samples;
+the crossing is at 0.3145, inside. Newton reaches the bisection only when it
+leaves its bracket or runs out, so which states throw is a matter of the
+noise: off, none did. The end is now pulled back towards its traced radius,
+halving the margin, until it samples; a path that sampled both ends is
+unchanged, and the double suite's extraction tests are unmoved.
+
+### M-LR-2
+
+**Upstream's refinement is M-379's (d′) and M-381's double load: what
+`RecoveryPrecision` reads with the switch on.** Same branch, build and
+settings as M-LR-1; `RecoveryPrecision` (built, not registered) on the four
+linear cases. With the refinement on, method (a) is MFEM's refined recovery
+and `ψ*` the refined reconstruction; MEQ's own methods are still formed from
+`MultInv()` on the stored factors, which the switch does not touch (the
+copies are taken before factoring), so "a-check" is the unrefined route and
+reads off's (a) to every digit on the host.
+
+**σ of `ψ_h` / `q_h` / `ψ*`, root mean square, ×1e-8, refinement on** (in
+brackets, the same as a multiple of the trace's σ):
+
+| case | host (a) | host (d′) | host (d) | card (a) | card (d′) |
+|---|---|---|---|---|---|
+| `n = 12, k = 2` | 6.54 / 81.0 / 5.78 (1.3 / 16 / 1.2) | 6.39 / 81.0 | 5.37 / 63.7 | 13.8 / 79.0 / 13.3 (1.1 / 6.2 / 1.0) | 13.7 / 79.0 |
+| `n = 16, k = 2` | 6.59 / 107 / 5.88 (1.3 / 21 / 1.1) | 6.46 / 107 | 5.52 / 84.5 | 18.5 / 105 / 18.1 (1.1 / 6.0 / 1.0) | 18.4 / 105 |
+| `n = 32, k = 2` | 6.17 / 215 / 5.60 (1.3 / 44 / 1.1) | 6.03 / 215 | 5.07 / 168 | 57.2 / 216 / 57.0 (1.0 / 3.8 / 1.0) | 57.1 / 216 |
+| `n = 16, k = 3` | 6.10 / 151 / 5.77 (1.3 / 32 / 1.2) | 5.94 / 151 | 4.86 / 113 | 22.9 / 146 / 22.7 (1.0 / 6.6 / 1.0) | 22.9 / 146 |
+
+The card's trace in this run is 1.06–4.73ε (cuDSS, nondeterministic; the
+host's is 0.40–0.43ε), which is why its multiples read lower and its absolute
+values higher.
+
+* **The refined recovery agrees with MEQ's own (d′) to 0.2–0.3ε of `u`'s
+  largest value and 0.0–0.5ε of `p`'s on the host** (worst over states and
+  elements, (d′) rounded to real_t), **and 2.7–4.0ε and 1.0ε on the card's
+  batched route.** (d′) is one pass with the residual in double against
+  MFEM's real_t local right-hand side, which is what upstream builds; (d),
+  against a right-hand side formed in double, is the 1.2–1.3× better in `ψ_h`
+  and `q_h` that M-379 measured and that the real_t right-hand side costs.
+* **`ψ*` reads between M-381's two best rows**: 5.6–5.9e-8 on the host
+  against 4.5–5.0e-8 for refined fields with the load in double and a double
+  solve, and 5.4–5.7e-8 for (a)'s fields with the load in double. Upstream
+  solves in real_t on the double load and refines once, which M-381 put at
+  2.4× for a load *rounded* to real_t; holding it in double recovers all but
+  1.1–1.3× of that.
+* **On the card the study is valid only in its (a) and `ψ*` rows.** The
+  batched factorisation is not the per-element one bit for bit (re-assembled
+  `S` factored differs by 3.7e-5 to 9.4e-5 of an entry, `MultInv()` on the
+  re-formed load by 6e-6 to 4e-5), so the methods formed from the stored
+  factors are the batched route's own arithmetic, not M-379's. Off on the
+  card, (a) reads 40–57× the trace (8.1e-6 at `n = 16`).
+
+### M-LR-3
+
+**What the refinement costs: about 2× the recovery, nothing measurable on the
+reconstruction or the formation, against a reconstruction 2.5× to 50× the
+recovery's size.** `RecoveryPrecision --run_test=cost`, single, the linear
+box at A = 0.30, one solved state per setting, then `RecoverFEMSolution()`,
+`Reconstruct()` and `formSystem()` (the one `FormLinearSystem()`, where the
+copies of `A` and `D` are taken) each re-run nine times, median, the card
+drained around each call; off, on, off, on in one process.
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, **at load 18 to 22 from other agents,
+on an RTX 2070 SUPER: read the ratios, and read the two off readings'
+disagreement (up to 1.5×) as the noise.** ms per call, mean of the two
+readings each way:
+
+| | recovery off → on | reconstruction off → on | `FormLinearSystem()` off → on |
+|---|---|---|---|
+| card, `n = 32, k = 2` | 6.9 → 9.6 (1.38×) | 66 → 76 (1.15×) | 6.7 → 4.7 |
+| card, `n = 64, k = 2` | 16 → 34 (2.08×) | 142 → 143 (1.01×) | 38 → 22 |
+| card, `n = 128, k = 2` | 104 → 133 (1.28×) | 316 → 335 (1.06×) | 109 → 106 |
+| card, `n = 32, k = 3` | 9.4 → 8.5 (0.90×) | 76 → 91 (1.19×) | 9.5 → 7.2 |
+| host, `n = 32, k = 2` | 8.0 → 7.7 (0.96×) | 421 → 406 (0.97×) | 6.1 → 9.1 |
+| host, `n = 64, k = 2` | 28 → 54 (1.92×) | 1,577 → 1,452 (0.92×) | 28 → 21 |
+| host, `n = 128, k = 2` | 76 → 159 (2.08×) | 6,078 → 5,602 (0.92×) | 83 → 91 |
+| host, `n = 32, k = 3` | 8.1 → 18.7 (2.31×) | 666 → 571 (0.86×) | 13 → 13 |
+
+* **The recovery costs up to 2.3× with the pass**, which is upstream's
+  arithmetic: a second back-solve on the held factors and two local
+  products, against one back-solve. The batched route on the card pays
+  1.3× at 32,768 triangles.
+* **The reconstruction's double load and pass are inside the noise**, on
+  both routes, and the copies of `A` and `D` do not show in
+  `FormLinearSystem()`.
+* **Per linear solve the pass is a few per cent**: the recovery runs once per
+  solve and `Reconstruct()` once per `postProcess()`, which on this box is
+  2.5× (card) to 50× (host) the recovery. The NPC route pays nothing but the
+  refined reconstruction: its recovery is not refined, and upstream takes
+  the copies of `A` and `D` only in `ComputeHMode::Linear`, which NPC never
+  asks for (read in `darcyhybridization.cpp`, not timed). **So the measured cost does not argue against the default**, in
+  either precision.
+
+### M-LR-4
+
+**The suites with the refinement on.** MFEM `meq-integration` `56796771ac`:
+double on the CPU-only `install-nocuda-next`, single on CUDA
+`install-single-next`, both `ctest -j4` at `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`, at load 10 to 20 from other agents. Two takes: the
+branch at main `b0870a1` merged (the first), and at main `a1e930a` merged,
+with M-385's interpolant and M-386's device integrals (the final).
+
+**Double: 154 of 157 at `b0870a1`, 158 of 161 at `a1e930a`**, the
+deliberate three: `PlasmaEdgeConvergence`, `QDrivenConsistency`'s
+`theDeliveredQConvergesToTheTarget` and `AnisotropicMirror`'s
+`theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`.
+`SolverContract`'s new case reads the refinement moving `ψ_h` by 211, 694 and
+1,196ε of its largest value and `ψ*` by 17, 44 and 68ε at `k` = 1, 2, 3
+(single: 256, 910, 1,260 and 13, 34, 52).
+
+**Single: 145 of 152 at `b0870a1`, 151 of 157 at `a1e930a`**, against main's
+list:
+
+| test | main | first take | final take |
+|---|---|---|---|
+| `PlasmaEdgeConvergence`, `QDrivenConsistency`, `AnisotropicMirror` | red, deliberate | red, the same cases | red, the same cases |
+| `DriverAcceptance` | `aWarmAdaptiveCycleConvergesOnTheNewtonRung`, `theProfileScaleCrossesEachAdaptiveCycle` | the same two | the same two |
+| `ExtractionContinuity` | red, the continuity case | green, 6.1e-07 | red, 8.1e-06 |
+| `ExtensionConvergence` | green | red; green on a moved precondition, below | green |
+| `EstimatorConvergence` | green | red; green on a moved precondition, below | green |
+| `DeviceParity` | green | red on `q-driven`'s card count, a coin toss, below | green |
+| `FluxSurfaceConvergence` | green | green | red, `thePointErrorDoesNotAccumulateOverManyCircuits`, below |
+
+**`ExtractionContinuity` reads `ψ̃`'s noise at the located axis, which the
+refinement does not reach.** Its continuity case bounds the family's jump
+across a face crossing at `max( 1e-11, 20ε )` = 2.4e-06; the family labelled
+by `ψ̃` at the axis moves 1e-5 between neighbouring states with the
+refinement on or off (M-LR-1 (c), (d)). The first take's 6.1e-07 was a good
+draw: at `a1e930a` the same case reads 8.1e-06 on and 1.8e-05 off (the
+latter at another crossing, by a temporary environment override in this
+branch's build, never committed). It stays on the single list.
+
+**`ExtensionConvergence` and `EstimatorConvergence` passed in single only on
+the unrefined recovery's noise.** `thePostProcessedPotentialConvergesAtKPlusTwo`
+asserts `ψ*` below `ψ_h` on the finest mesh, and at `k = 2` in single that
+mesh is past the format's floor: `ψ_h` reads 2.64e-05, 1.94e-05, 3.62e-05 on
+the last three meshes, rising as the trace's round-off does, with `ψ*` on the
+same error to four figures. Main's binary (MFEM `2a50e91443`, no refinement)
+reads `ψ*` 3.616470e-05 against `ψ_h` 3.644676e-05, a 0.8 % margin that is the
+recovery's own noise; refined, `ψ_h` is 3.616022e-05 against `ψ*`'s
+3.616391e-05. `theEffectivityIndexIsBoundedAndSettles` asserts `η > ‖q − q_h‖`
+on every mesh, and at `k = 2` in single `‖q − q_h‖` reads 1.65e-05, 1.23e-05,
+4.98e-05: the trace's round-off differentiated, which a residual estimator
+does not bound. Main's `η` there was 1.36e-04 (index 2.69) because the noisy
+`ψ_h` inflated it (`η₂` on `ψ_h` 1.3e-03); refined it is 4.06e-05 (index
+0.81). **Neither claim is about round-off, so the precondition moved and not
+the bound**: `meq::tests::discretisationPoints()` keeps the coarsest mesh and
+each finer one whose pair converged at no less than `k+1` less the suite's
+pair slack of 0.30, up to the first that did not; in double it keeps every
+mesh, by `#ifdef`. `ψ*` against `ψ_h` is now compared at `h = 0.106` at
+`k = 2` in single (1.54e-05 against 2.64e-05), the finest mesh in double; the
+effectivity bounds skip `h = 0.05, 0.025` at `k = 2` and all but the coarsest
+mesh at `k = 3` in single, loudly. Both pass with the refinement on and off.
+
+**`DeviceParity`'s `q-driven` card arm counts 3 or 4 KINSOL iterations, by
+the take.** The answer is the host's to every printed digit (`ψ_ax`
+3.457385e-01, 24 surfaces); the count is whether the third iterate's norm
+falls under the outer loop's measured round-off floor, and on the card both
+move between runs, cuDSS being nondeterministic: the third norm from 2.2e-07
+to 7.5e-05, the floor from 2.77e-05 to 2.17e-04. Repeated through the driver
+as the test runs it, the refinement on took a fourth iteration in 4 of 16
+runs and off in 0 of 11 (off by a temporary environment override, never
+committed, in this branch's build); the host takes 3. So it is a coin toss in both settings
+whose odds the refinement moves, on the q loop `q-refining-fit` is
+rewriting. The assertion is left as it is.
+
+**`FluxSurfaceConvergence`'s `thePointErrorDoesNotAccumulateOverManyCircuits`
+compares two round-offs in single, and the refinement turned the draw.** It
+traces one `ψ̃` contour over 1, 5 and 10 circuits and requires the normal
+closure error at 10 to be under twice that at 5. In single those are 1–8ε of
+the radius, under the file's own `rootedPositionFloor()` of 8.0e-06 that its
+first closure assertion carries: with the refinement on 3.16e-07, 1.15e-07,
+9.96e-07 (ratio 8.7, red); off 2.07e-07, 4.94e-07, 8.66e-07 (ratio 1.75,
+green), the same binary and override as above. The file's comment keeps the
+flatness comparison in single on purpose ("what the case asserts does not
+move"), so it is left as it is and reported: it is a comparison of two
+round-offs, which `discretisationPoints()`' reasoning would move off the
+floor, and that is the file owner's call.
+

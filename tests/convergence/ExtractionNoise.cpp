@@ -16,6 +16,7 @@
 #include "meq/Source.hpp"
 
 #include "ExtractionCrossing.hpp"
+#include "RecoveryInstrument.hpp"
 
 /*
  * WHAT CARRIES THE FAMILY'S NOISE, LINK BY LINK -- the instrument behind
@@ -43,7 +44,13 @@
  * is an unknown and labels the family: SafetyFactorSolver's source, gg'
  * linear in Psi with its slope scaled by 1 + j * 1e-5, each state a cold
  * solve. It reads the solve's psi_ax beside the finder's psi_h and psi~ there.
+ *
+ * MEQ_TEST_DEVICE, MEQ_TEST_BATCHED and MEQ_LOCAL_REFINEMENT choose the
+ * device, the batched routes and the local refinement
+ * (RecoveryInstrument.hpp); each case prints the routes it took.
  */
+using meq::tests::recovery::DeviceFromEnvironment;
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 namespace
 {
 	double const centre = 0.30;
@@ -165,7 +172,8 @@ namespace
 
 		// The fixed point first: state 10's located axis.
 		{
-			meq::tests::crossing::Solved s( centre + 10*spacing, n, order );
+			meq::tests::crossing::Solved s( centre + 10*spacing, n, order, meq::tests::recovery::configure );
+			meq::tests::recovery::reportRoutes( s.theSolver() );
 			meq::CriticalPoint const axis = meq::CriticalPointFinder( s.theSolver() ).findAxis();
 			fixedR = axis.radius;
 			fixedZ = axis.z;
@@ -179,7 +187,7 @@ namespace
 
 		for ( int j = 0; j < states; ++j )
 		{
-			meq::tests::crossing::Solved s( centre + j*spacing, n, order );
+			meq::tests::crossing::Solved s( centre + j*spacing, n, order, meq::tests::recovery::configure );
 			meq::GradShafranovSolver const &solver = s.theSolver();
 			psiH.push_back( dofs( solver.potential() ) );
 			psiStar.push_back( dofs( solver.postProcessedPotential() ) );
@@ -300,7 +308,7 @@ BOOST_AUTO_TEST_CASE( accuracy )
 	options.outerCut = 0.90;
 	auto families = [ & ]( int n, int order )
 	{
-		meq::tests::crossing::Solved s( 0.30, n, order );
+		meq::tests::crossing::Solved s( 0.30, n, order, meq::tests::recovery::configure );
 		meq::GradShafranovSolver const &solver = s.theSolver();
 		meq::CriticalPoint const axis = meq::CriticalPointFinder( solver ).findAxis();
 		meq::ContourTracer const continuous( solver, meq::Potential::Continuous );
@@ -362,8 +370,11 @@ BOOST_AUTO_TEST_CASE( normalisedN16k2 )
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );
 		solver.setNewtonControl( 1.0e-12, 1.0e-14, 60 );
+		meq::tests::recovery::configure( solver );
 		solver.solve();
 		solver.postProcess();
+		if ( j == 0 )
+			meq::tests::recovery::reportRoutes( solver );
 
 		psiH.push_back( dofs( solver.potential() ) );
 		psiTilde.push_back( dofs( solver.continuousPotential() ) );
@@ -410,3 +421,4 @@ BOOST_AUTO_TEST_CASE( n16k2 ) { measure( 16, 2 ); }
 BOOST_AUTO_TEST_CASE( n12k2 ) { measure( 12, 2 ); }
 BOOST_AUTO_TEST_CASE( n16k3 ) { measure( 16, 3 ); }
 BOOST_AUTO_TEST_CASE( n32k2 ) { measure( 32, 2 ); }
+

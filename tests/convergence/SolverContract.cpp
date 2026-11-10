@@ -1592,3 +1592,103 @@ BOOST_AUTO_TEST_CASE( aPrescribedAxisPointIsRefusedRatherThanDefaulted )
 	BOOST_CHECK_NO_THROW( solver.setAxisConstraint( A::PrescribedPoint ) );
 	BOOST_CHECK( solver.axisConstraint() == A::PrescribedPoint );
 }
+
+/*
+ * THE LOCAL REFINEMENT TAKES, IS ON BY DEFAULT, AND MOVES THE ANSWER ONLY AT
+ * ROUND-OFF.
+ *
+ * GradShafranovSolver::setLocalRefinement() is upstream's
+ * DarcyHybridization::SetLocalRefinement(), applied before every
+ * FormLinearSystem(): one refinement pass with a double residual on the
+ * element-local recovery and a double load on Reconstruct() (MEASUREMENTS.md
+ * M-379 to M-381, M-LR-1). On the linear path both reach the answer, so:
+ *
+ *   - on and off must DIFFER, in psi_h and in psi*: a pass that did not run
+ *     would leave them equal, and a switch that does not take likewise;
+ *   - they must differ by no more than the unrefined route's own error, a
+ *     few thousand eps of the field at the worst element (M-380), whatever
+ *     the format: a sign error in the pass would move them by the field;
+ *   - and a switch thrown between two solves of one solver must give what a
+ *     solver built with it gives, bit for bit, since it takes effect at the
+ *     next solve, the reconstruction included.
+ */
+BOOST_AUTO_TEST_CASE( theLocalRefinementTakesAndMovesTheAnswerOnlyAtRoundOff )
+{
+	meq::analytic::SolovievEquilibrium const eq = meq::analytic::SolovievEquilibrium::nstx();
+	mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.f( x( 0 ), x( 1 ), 0.0 );
+	} );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+	double const eps = std::numeric_limits<mfem::real_t>::epsilon();
+
+	auto largest = []( mfem::Vector const &v )
+	{
+		double m = 0.0;
+		for ( int i = 0; i < v.Size(); ++i )
+			m = std::max( m, std::abs( static_cast<double>( v( i ) ) ) );
+		return m;
+	};
+	auto apart = []( mfem::Vector const &a, mfem::Vector const &b )
+	{
+		double m = 0.0;
+		for ( int i = 0; i < a.Size(); ++i )
+			m = std::max( m, std::abs( static_cast<double>( a( i ) ) - static_cast<double>( b( i ) ) ) );
+		return m;
+	};
+
+	std::printf( "\n  the local refinement, Solov'ev on the linear path, on against off (of the field, in eps)\n" );
+	for ( int order : { 1, 2, 3 } )
+	{
+		mfem::Mesh mesh = makeMesh( 16 );
+		auto solved = [ & ]( meq::GradShafranovSolver &solver )
+		{
+			solver.setSource( sourceCoeff );
+			solver.setBoundaryData( psiCoeff );
+			solver.solve();
+			solver.postProcess();
+		};
+		meq::GradShafranovSolver on( mesh, order );
+		BOOST_TEST( on.localRefinement(), "the local refinement is on by default" );
+		solved( on );
+		meq::GradShafranovSolver off( mesh, order );
+		off.setLocalRefinement( false );
+		BOOST_TEST( !off.localRefinement() );
+		solved( off );
+
+		mfem::Vector const psiOn( on.potential() ), psiOff( off.potential() );
+		mfem::Vector const starOn( on.postProcessedPotential() ), starOff( off.postProcessedPotential() );
+		psiOn.HostRead();
+		psiOff.HostRead();
+		starOn.HostRead();
+		starOff.HostRead();
+		double const psiApart = apart( psiOn, psiOff )/largest( psiOff )/eps;
+		double const starApart = apart( starOn, starOff )/largest( starOff )/eps;
+		std::printf( "    k = %d: psi_h %.1f, psi* %.1f\n", order, psiApart, starApart );
+
+		BOOST_TEST( psiApart > 0.0, "k = " << order << ": psi_h is the same bits with the local refinement on "
+		                            "and off, so the pass did not run" );
+		BOOST_TEST( starApart > 0.0, "k = " << order << ": psi* is the same bits with the local refinement on "
+		                             "and off, so Reconstruct() did not refine" );
+		BOOST_TEST( psiApart < 1.0e4, "k = " << order << ": the refinement moved psi_h by " << psiApart
+		                              << " eps of its largest value, more than the unrefined route's own error "
+		                              "(M-380): the pass is wrong, not the route" );
+		BOOST_TEST( starApart < 1.0e4, "k = " << order << ": the refinement moved psi* by " << starApart
+		                               << " eps of its largest value, more than its own floor (M-381)" );
+
+		// Thrown between two solves of one solver: the next solve follows it.
+		on.setLocalRefinement( false );
+		on.solve();
+		on.postProcess();
+		mfem::Vector const psiAgain( on.potential() ), starAgain( on.postProcessedPotential() );
+		psiAgain.HostRead();
+		starAgain.HostRead();
+		BOOST_TEST( apart( psiAgain, psiOff ) == 0.0, "k = " << order << ": setLocalRefinement( false ) between "
+		                                              "solves did not reach the next recovery" );
+		BOOST_TEST( apart( starAgain, starOff ) == 0.0, "k = " << order << ": setLocalRefinement( false ) "
+		                                                "between solves did not reach the next reconstruction" );
+	}
+}
