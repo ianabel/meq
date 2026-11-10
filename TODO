@@ -520,33 +520,41 @@ Raised 2026-11-09 (MEASUREMENTS.md M-397).
 
 ================================================================================
 The q-driven solve in single precision
-Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404).
+Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404, M-405, M-406, M-407).
 ================================================================================
 
-  Re-measured on the local refinement (M-404, M-405). Deliberate reds,
-  each with its cause measured:
-  * SafetyFactorSolver's round trip, 1.6e-6 against 1e-7: the map's own q at
-    the closed form is 1.5e-6 from double's, the floor g^2 is read through.
-  * QDrivenScalePin, 4.0e-6 and 3.6e-5 apart: that floor through the
-    weakest pins' conditioning.
-  * QDrivenCurvedBoundary exits 2: 20 of 28 refused trials are
-    ContourTracer::fitByAngle failing to bracket a level on its 15 elements
-    in single -- the tracer's, out of the loop.
-  * QDrivenFreeEdge's round trips: trials refused, the limited box's inner
-    Newton stalling and the diverted box's X-point leaving the mesh.
-  The differenced Jacobian is 6e-5 of its size from double's at the default
-  step, noise-dominated; no step or Richardson does better than about 4e-5.
-  The analytic shape derivative (*The q-driven Jacobian's cost is the
-  extraction*) would take the noise out with the cost.
+  THE LIMITED BOX in single now fails on the inner solve, not on the loop
+  (M-407). The outer search judges the removable residual, which closed
+  double's knife edge. The accepted point then no longer evaluates from the
+  noise probe's warm start, a move of 1% in the last knot: the bordered
+  inner Newton crawls at a field residual of 0.02 to 0.4. That is M-398's
+  globalisation, the next thing to fix for this case.
 
-  ON THE CARD the loop stalls in about one run in three, single only: the
-  residual differs run to run by 3e-11 from MFEM's batched hybridization
-  assembly (DarcyHybridization::AssemblyMode::Batched, AtomicAdd), and the
-  first Gauss-Newton step amplifies it (0.80 against 0.47). AssemblyMode =
-  "serial" makes three runs equal in all 292 stages and all three converge.
-  For upstream: a deterministic accumulation there. For MEQ: why one ulp-scale
-  difference in the first residual turns the first step -- the host from eight
-  nearby starts does not.
+  BLOCKED ON THE JACOBIAN (M-406, Q-SHAPE-DERIVATIVE-PLAN.md). Differencing a
+  single-precision extraction leaves the q rows' Jacobian 6e-5 of its size
+  from double's on the box and 1e-3 on the limited and diverted boxes, at the
+  best step. In the free-edge problems, conditioned at 1e-5, that is a first
+  step with a residual 1000 times a plain rescaling's. Their trials are refused
+  and the loops do not close:
+  * QDrivenFreeEdge's round trips;
+  * QDrivenConsistency's limited box, which reaches g^2 to 0.11 at the
+    rows' noise and does not converge with h.
+  The card's run-to-run stalls (DeviceParity's q-driven arm) are the same
+  noise, drawn afresh by the residual's batched-assembly bits: the axis at a
+  mesh vertex is falsified as their cause (M-406). MFEM's batched assembly
+  varying its bits run to run is upstream's (M-405).
+
+  The tracer half is not fixed. QDrivenCurvedBoundary exits 2 in single,
+  ContourTracer::fitByAngle failing to bracket a level where the contour
+  bulges past the chord between two traced points. Widening that bracket
+  closes single's loop but breaks double's (M-406). Double leans on the
+  tracer's refusals as its step-length limit: a wide trial that extracts is
+  accepted and loses the loop's path. The order is a trust region in the
+  outer Gauss-Newton first, then a tracer that brackets robustly.
+  SafetyFactorSolver (1.6e-6 against 1e-7) and QDrivenScalePin are the
+  evaluation's own floor, 1.5e-6 from double's q, through their
+  conditioning: these stay red until the Jacobian and the evaluation improve
+  together.
 
 ================================================================================
 The q-driven loop under a Device: what runs on the host

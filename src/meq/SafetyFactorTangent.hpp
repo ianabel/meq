@@ -192,6 +192,7 @@ namespace meq
 			mfem::Vector warm;
 			std::vector<double> warmExterior;
 			double warmBoundary = 0.0;
+			double warmAxis = 0.0;
 			mfem::Vector admitted;
 			std::vector<double> admittedValues;
 			std::vector<double> lastAxisDerivative;

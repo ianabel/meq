@@ -26886,3 +26886,132 @@ q_h in another element than the solve converged on (psi_h jumps there by
 every face: 1.8e-15 and 6.2e-16, 0 iterations. The card's route roots the
 same element as the converged solve. Nothing is dropped.
 
+### M-406
+
+**IN SINGLE THE FREE-EDGE Q LOOPS FAIL ON THE JACOBIAN, NOT ON THE AXIS:
+DIFFERENCING A SINGLE EXTRACTION GIVES A JACOBIAN NO BETTER THAN 1e-3 OF ITS SIZE ON A FREE EDGE AND 6e-5 ON THE BOX, AND THE CARD'S STALLS ARE
+THAT NOISE, DRAWN AFRESH EACH RUN, THROUGH AN ILL-CONDITIONED STEP.** Branch
+`q-single` off `e708ca0`; `builds/q-single` (double, `install-nocuda`) and
+`builds/q-single-cuda` (single, `install-single`, `sm_75`);
+`MKL_NUM_THREADS=1`.
+
+**The tracer** (`QDrivenCurvedBoundary`, 15 elements). Its ray solve
+brackets the level between the two traced points either side of the ray,
+linearly in radius with a 5% margin. Measured at a single failure: those points
+sat 0.41 rad apart, both on the level (0.275311). Along the ray between them
+psi was 0.27807 and 0.27641 at the bracket's ends -- both above the level, the
+contour bulging past the chord. Widening the bracket until psi changes sign
+(`ContourTracer::fitByAngle()`) takes single's refused trials from 28 to 3,
+and the loop then stalls at a removable 5.8e-5. **It is withdrawn: it breaks
+double.** Double's loop, which converges in 6 iterations with 10 trials
+refused, then takes a trial at iteration 2 that the tracer used to refuse
+(removable 0.50 accepted, against main's 0.17 after a shorter step). It stalls
+at 2.3e-4 with 12 refused and exits 2. Capping the widening at one fifth each
+way breaks both precisions: double fails to form a Jacobian after 11
+iterations, and single after 2. So **double's loop leans on the tracer's
+refusals as its step-length limit.** A wide trial that extracts is accepted and
+loses the loop's path. A tracer that brackets more robustly needs a trust
+region in the outer loop first. A stop on "the predicted decrease is under the
+merit's noise" was tried with the widening and is withdrawn too: on the
+limited box it declared convergence at `g²` 0.11 from the closed form, a
+converged claim on a wrong Jacobian's prediction.
+
+**The free-edge boxes** (`QDrivenFreeEdge`, 9 cells, `k = 2`, 11 knots).
+Single's tangent Jacobian is held to double's at the closed form:
+
+| step | 1e-4 | 3e-4 | 1e-3 | 3e-3 |
+|---|---|---|---|---|
+| limited | 3.4e-3 | **9.6e-4** | 1.3e-3 | 1.1e-2 |
+| diverted | 8.9e-3 | 2.5e-3 | **2.3e-3** | -- |
+
+The worst rows are the innermost surface's, and the worst columns the outer
+knots'. The tangent itself is good: `dpsi_ax` and `dpsi_bnd` are 2e-6 to 2e-5
+from double's. The evaluation's own q is 1.1e-5 (limited) and 2.0e-5
+(diverted) from double's at the closed form, where the box's is 1.5e-6. It is
+repeatable on a warm path to 1.5e-6 and 5.6e-7. The inner solve is not the
+failure: from g² changed by 1.2x or 1.96x it converges in 5 or 6 Newton steps
+to 2.4e-7. The loop fails because its first step is computed from a Jacobian
+wrong by 1e-3 in a problem conditioned at 6e-5: the trial spline's first
+residual is 172, against 0.17 for a plain scaling of g², and those trials crawl
+and are refused. A Levenberg-Marquardt fallback after a failed search does not
+recover it (4 iterations, 10 of 15 trials refused), and is not kept.
+
+**The card** (DeviceParity's q-driven case, level 0, ToroidalFlux, batched
+assembly, cuDSS, `--device cuda`). The coordinator's hypothesis -- the axis at a
+mesh vertex, its element flipping -- is FALSIFIED. With `NR = NZ = 8` (the axis
+on the z = 0 face row) 1 of 6 runs stalls. With `NR = NZ = 7` (the axis off
+every face) 1 of 6 stalls too. Stage checksums of the system's Jacobian over
+six runs:
+
+* the first iterate is identical in every run;
+* its Jacobian's norm differs from run to run, 280.4623, 280.4586, 280.4523
+  (4e-5) -- the extraction noise above, its draw set by the residual's
+  run-to-run bits;
+* the second iterate is 0.3% apart (`|u|` 19.579, 19.518, 19.615);
+* the stalled runs then sit at a removable 0.087 to 0.14, where a converging
+  run's next step reaches 1.6e-2.
+
+Damping the step at the noise level, Levenberg-Marquardt with
+`lambda = ( 1e-4 sigma_max )^2`, still stalls 1 run in 6, and is not kept. The
+remedy is a Jacobian without the differencing noise:
+`Q-SHAPE-DERIVATIVE-PLAN.md`.
+
+**A warm start's psi_ax label.** A trial the loop refuses leaves the source's
+label at that trial's. The next evaluate() now starts psi_ax at the warm
+state's (`setAxisFluxInitial()`), as it starts psi_bnd.
+
+
+### M-407
+
+**THE LIMITED BOX'S KNIFE EDGE IN DOUBLE WAS THE OUTER SEARCH'S MERIT. ON
+`|| r ||^2`, A RIGHT CONSTRAINED STEP NEAR THE ANSWER RAISES IT TO FIRST ORDER.
+JUDGED ON THE PART OF THE RESIDUAL THE STEP CAN REMOVE, EVERY PERTURBATION
+CONVERGES.** Branch `q-single` on `9ae5911`; `builds/q-single` (double) and
+`builds/q-single-cuda` (single); `MKL_NUM_THREADS=1`.
+`QDrivenConsistency`'s `theDeliveredFieldConvergesOnALimitedBox` (k = 2,
+levels 0 and 1). The loop's `SplineGGPrime` is scaled by `1 + s`, through a
+temporary knob that is not committed.
+
+| `s` | level 1 on `\|\| r \|\|^2` | level 1 on the removable part |
+|---|---|---|
+| 0 | converged (ctest) | converged, 12 iterations |
+| +1e-14 | **exits 2**, stall at removable 8.1e-7 | converged, 11 |
+| +3e-14 | converged, 14 | -- |
+| -3e-14 | **exits 2**, stall at 2.8e-6 | converged, 12 |
+| +1e-13 | **exits 2**, stall at 1.8e-7 | converged, 13 |
+| -1e-13 | converged, 14 | converged, 14 |
+
+Level 0 converged in every row, in 10 iterations. `g²` misses the closed form
+by 6.013e-2 then 9.36e-3, a factor 6.42, in every row that converges.
+
+**The mechanism**, read at `s` = +1e-14 on `|| r ||^2`:
+
+* At iteration 7 the step's predicted decrease is 2.3e-10, against a merit of
+  2.3e-8. Its trials deviate from the linear model quadratically in their
+  length: 1.4e-5 at `alpha` = 1, then 2.5e-6, 6e-7 and 1.6e-7. That is the
+  residual's curvature, and the Jacobian is right.
+* At iteration 9 the predicted decrease is **zero**, with the removable part
+  still at 8e-7. The merit RISES linearly in the trial's length, by 6.4e-12 at
+  `alpha` = 1 and 9e-16 at 2.4e-4. So the step is an ascent direction of
+  `|| r ||^2`.
+
+The answer is least squares within a level set of `sum ln g²`, the R0B0 pin
+choosing the level (M-396). It is not the minimum of `|| r ||^2` on the pin's
+surface, so near it that merit has a slope along the step, and its sign is a
+coin toss decided by the trajectory. The merit is now
+`|| Q^T r_free ||^2 + w r_pin^2`, with `Q` an orthonormal basis of `range( J Z )`
+at the iterate. It is zero exactly at the answer, and the step's slope on it
+is `-2 phi`. `SafetyFactorTests`'
+`a_constrained_step_is_judged_on_what_it_can_remove` is the two-unknown
+case: from the minimum of `|| r ||^2` on the pin's line it stalls at the start
+on the old merit and converges on the new one.
+
+**Single** is not closed by it. The limited box at `s` = 0 and +-1e-13 exits 2
+at level 0, after 4 to 6 iterations. The loop measures its noise, floor 5e-4
+against a removable 3e-3. Then the accepted point no longer evaluates: the
+inner bordered Newton, warm from the noise probe's state (the last knot moved
+by 1%), crawls. Its damping falls to 4.9e-4 at a field residual of 0.02 to
+0.4, its trial norms non-monotone in the damping (4.3, 5.5, 237, 0.83 at
+halving lengths). The same crawl refuses double's long trials (2 to 4 a run).
+It is the bordered inner Newton's globalisation (M-398), reached at smaller
+moves in single.
