@@ -42,7 +42,7 @@
  * can pick the other element's root where the axis sits on a face, and
  * difference the O( h^( k + 1 ) ) jump between them. psi~ and q~ are linear
  * in the state, so the perturbed pair is the base's plus `s` times the
- * tangent's -- m + 1 interpolants -- and the extraction is differenced
+ * tangent's -- the solver's kept interpolant applied m + 1 times (GradShafranovSolver::continuousInterpolant()) -- and the extraction is differenced
  * centrally, 2m extractions; no equilibrium is re-solved (M-365, M-367,
  * M-QR-9). The extractions are most of the cost, and
  * the analytic shape derivative would remove them (TODO, *The q-driven

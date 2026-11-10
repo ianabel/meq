@@ -299,7 +299,7 @@ SOLVES** (`meq::SafetyFactorEquilibrium`, `SafetyFactorTangent.hpp`). Knot
 (`NormalisedMHDSource::ggPrimeDerivative()`), one back-solve at the retained,
 bordered linearisation, then `ψ*`, `q*` and `ψ̂` of the tangent
 (`reconstructFields()`) and the family extracted on `ψ̃ + s δψ̃` — `ψ̃` being
-linear in the state, one interpolant per tangent — labelled `ψ_ax + s δψ_ax`,
+linear in the state, the solver's kept interpolant (`continuousInterpolant()`) applied once per tangent — labelled `ψ_ax + s δψ_ax`,
 **with the ray origin moved by the axis root's own derivative
 `−(dq_h/dx)⁻¹ δq_h` in its element**, differenced centrally at 1e-5 of the
 field in double and 1e-3 in single. One-sided at 1e-9 is closer to re-solved

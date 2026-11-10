@@ -127,6 +127,7 @@ namespace meq
 	/// source. See meq::ExteriorCoilSet.
 	class ExteriorCoilSet;
 	class ConductorField;
+	class ContinuousInterpolant;
 
 
 	/**
@@ -5849,6 +5850,14 @@ namespace meq
 			mfem::GridFunction const &continuousPotential() const;
 			mfem::GridFunction const &continuousFlux() const;
 
+			/// The moment interpolant that builds them, its quadratures done
+			/// once per set of spaces (ContinuousInterpolant): what a caller
+			/// building psi~ and q~ of other fields on the same spaces --
+			/// a tangent's, say -- applies rather than paying the quadratures
+			/// again. Built on first use after postProcess(); rebuilt when the
+			/// spaces change. @throws std::logic_error before postProcess().
+			ContinuousInterpolant const &continuousInterpolant() const;
+
 			/// The normally continuous total flux qhat_h in RT_k, in DarcyForm's
 			/// sign convention because that is the one the constraint equation it
 			/// is projected through is written in. Valid after postProcess().
@@ -7641,6 +7650,9 @@ namespace meq
 			/// of a function of the const solved state.
 			mutable std::unique_ptr<mfem::GridFunction> continuousPotentialGf;
 			mutable std::unique_ptr<mfem::GridFunction> continuousFluxGf;
+			/// Shared rather than unique only so that this header need not see
+			/// the class; it is the solver's alone.
+			mutable std::shared_ptr<ContinuousInterpolant const> continuousInterpolantValue;
 			void buildContinuousFields() const;
 
 			/// The reduced trace system. traceX and traceB alias the trace blocks

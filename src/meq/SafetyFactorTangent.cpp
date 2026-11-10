@@ -178,7 +178,7 @@ namespace meq
 	{
 		auto const started = std::chrono::steady_clock::now();
 		ContinuousFields const continuous =
-			buildContinuousFields( *fields.psiStar, *fields.qStar, *fields.trace );
+			solver.continuousInterpolant().apply( *fields.psiStar, *fields.qStar, *fields.trace );
 		secondsExtracting += secondsSince( started );
 		return qOverG( *continuous.potential, *continuous.flux, axis, solver.psiBoundary() );
 	}
@@ -352,13 +352,15 @@ namespace meq
 
 		/*
 		 * psi~ AND q~ ARE LINEAR IN THE STATE (ContinuousField.hpp), so the
-		 * perturbed pair is the base's plus s times the tangent's: one
-		 * interpolant per tangent and one for the base, m + 1 builds in place of
-		 * 2m. The difference is central by default (Options::step, M-QR-9).
+		 * perturbed pair is the base's plus s times the tangent's: the
+		 * solver's kept interpolant applied once per tangent and once for the
+		 * base (meq::ContinuousInterpolant, its quadratures done once per
+		 * mesh, on the device under one). The difference is central by default
+		 * (Options::step, M-QR-9).
 		 */
 		auto const building = std::chrono::steady_clock::now();
 		ContinuousFields const baseContinuous =
-			buildContinuousFields( *base.psiStar, *base.qStar, *base.trace );
+			solver.continuousInterpolant().apply( *base.psiStar, *base.qStar, *base.trace );
 		secondsExtracting += secondsSince( building );
 		CriticalPoint labelled = axis;
 		labelled.psi = psiAxis;
@@ -389,7 +391,7 @@ namespace meq
 			};
 			auto const interpolating = std::chrono::steady_clock::now();
 			ContinuousFields const tangent =
-				buildContinuousFields( *direction.psiStar, *direction.qStar, *direction.trace );
+				solver.continuousInterpolant().apply( *direction.psiStar, *direction.qStar, *direction.trace );
 			secondsExtracting += secondsSince( interpolating );
 			auto at = [ & ]( double t )
 			{

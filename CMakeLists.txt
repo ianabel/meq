@@ -313,6 +313,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/ConductorStore.cpp
 	src/meq/Config.cpp
 	src/meq/ContinuousField.cpp
+	src/meq/ContinuousFieldDevice.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Crossings.cpp
@@ -365,6 +366,7 @@ set(MEQ_CORE_SOURCES
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/BuildInfo.cpp
 	src/meq/ContinuousField.cpp
+	src/meq/ContinuousFieldDevice.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Crossings.cpp
 	src/meq/DeviceNPCDevice.cpp
@@ -756,9 +758,13 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		set_source_files_properties(
 			src/meq/DeviceRowsDevice.cpp
 			src/meq/ResidentIterateDevice.cpp
+			src/meq/ContinuousFieldDevice.cpp
 			PROPERTIES
 				LANGUAGE CUDA
 				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr;-fmad=false")
+		# ContinuousFieldDevice.cpp takes it too: its one kernel is the host
+		# route's loop over meq::LinearBlocks, operation for operation, and its
+		# acceptance under `debug` is equality to the bit (M-385).
 		# ResidentIterateDevice.cpp shares that flag for that reason: its five
 		# plasma loops, its gather and its ordered dot reproduce host loops
 		# operation for operation, against host-computed radii and weights, so
@@ -794,6 +800,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 				COMPILE_OPTIONS "--expt-extended-lambda;--expt-relaxed-constexpr")
 		list(APPEND MEQ_CORE_SOURCES_DEVICE_LANGUAGE
 			src/meq/AxisSearchDevice.cpp
+			src/meq/ContinuousFieldDevice.cpp
 			src/meq/DeviceNPCDevice.cpp
 			src/meq/DeviceQuadratureDevice.cpp
 			src/meq/DeviceRowsDevice.cpp
@@ -814,7 +821,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 			"meq: ${_meq_device_file_count} sources compile as CUDA, arch ${_meq_cuda_arch}")
 	elseif(MFEM_FOUND AND MFEM_USE_HIP)
 		enable_language(HIP)
-		# THE SAME SEVEN, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
+		# THE SAME EIGHT, AND THE LIST IS SHARED WITH THE CUDA ARM RATHER THAN
 		# RESTATED. This arm carried two of them for as long as there were two,
 		# and a device file added to the CUDA branch did not reach it -- which
 		# is not a slow path but a COMPILE ERROR, mfem::forall's static_assert
@@ -824,6 +831,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		# meq::extensionFdStep() both are.
 		set(MEQ_CORE_SOURCES_DEVICE_LANGUAGE
 			src/meq/AxisSearchDevice.cpp
+			src/meq/ContinuousFieldDevice.cpp
 			src/meq/DeviceNPCDevice.cpp
 			src/meq/DeviceQuadratureDevice.cpp
 			src/meq/DeviceRowsDevice.cpp
@@ -842,6 +850,7 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		set_source_files_properties(
 			src/meq/DeviceRowsDevice.cpp
 			src/meq/ResidentIterateDevice.cpp
+			src/meq/ContinuousFieldDevice.cpp
 			PROPERTIES
 				LANGUAGE HIP
 				COMPILE_OPTIONS "-ffp-contract=off")
