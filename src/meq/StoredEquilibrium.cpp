@@ -175,12 +175,20 @@ namespace meq
 				currents.push_back( value );
 		}
 
-		if ( !file.getAtt( "g_squared_coefficients" ).isNull() )
+		if ( !file.getAtt( "g_squared_knots" ).isNull() && !file.getAtt( "g_squared" ).isNull() )
 		{
-			std::istringstream in( textAttribute( file, "g_squared_coefficients", path ) );
+			std::istringstream labels( textAttribute( file, "g_squared_knots", path ) );
+			std::istringstream values( textAttribute( file, "g_squared", path ) );
 			double value = 0.0;
-			while ( in >> value )
+			while ( labels >> value )
+				gSquaredLabels.push_back( value );
+			while ( values >> value )
 				gSquared.push_back( value );
+			if ( gSquared.size() != gSquaredLabels.size() )
+			{
+				gSquared.clear();
+				gSquaredLabels.clear();
+			}
 		}
 
 		trace = column( file, "trace_coefficients" );

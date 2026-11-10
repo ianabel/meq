@@ -422,30 +422,34 @@ open fixture:
    locates one surface per node. The 34.7× Vandermonde-plus-GEMM figure was NOT
    taken up and is still available: the file is written from the traced nodes
    rather than from a `SurfaceFit`, so there is no Vandermonde in that path.
-4. **The fixed-`q(ψ)` solver** — also item 10, and **the round trip closes**:
-   `meq::SafetyFactor` inverts `q = V′ g ⟨R^{-2}⟩/4π²` (MFEM-free, CI-gated) and
-   `meq::SafetyFactorSolve` closes the loop on KINSOL. From a `g` 40% too large
-   everywhere it recovers the closed form to **2.5e-06** in 6 outer iterations
-   and 20 inner solves. **A damped Picard provably cannot do it** — the relaxed
-   derivative is `1 + ω( G′ − 1 )`, above one for every `ω > 0` when `G′ > 1` —
-   and the Newton is affordable only because the profile is *fitted*, so the
-   Jacobian is a handful of coefficients rather than `nFieldDOF`.
+4. **The fixed-`q(ψ)` solver** — also item 10, and **it is consistent**:
+   `g²` is carried at knots that follow the mesh, `q` is matched at every one
+   with one scale pin, and a Gauss-Newton on the linearised solve's exact
+   tangent solves for them (`meq::SafetyFactor`, MFEM-free and CI-gated;
+   `meq::SafetyFactorTangent`). The delivered `g²` converges to the closed form
+   its target was measured from as the mesh and the knots refine together
+   (→ **[M-393](MEASUREMENTS.md#m-393)**), where the fixed-degree fit it
+   replaces met the target only to the fit's floor
+   (→ **[M-361](MEASUREMENTS.md#m-361)**). **A damped Picard provably cannot
+   do it** — the relaxed derivative is `1 + ω( G′ − 1 )`, above one for every
+   `ω > 0` when `G′ > 1`.
 
-   **And it reaches the solve from a file**: `[source] SafetyFactorFile` with
-   `SafetyFactorDegree` and exactly one scale pin — `R0B0`, `ToroidalFlux` or
-   `PlasmaCurrent`, since `p` and `q` alone leave a one-parameter family
-   (→ **[M-357](MEASUREMENTS.md#m-357)**) — `examples/q-driven.toml` as
-   the worked example, and `theDriverSolvesForTheToroidalField` recovering a
-   closed-form `g` to **5.0e-06** in 12 outer iterations and 43 equilibria.
-   **One solver serves all of them** — only `gg′` changes, so the mesh, the
-   spaces and the forms survive, and each solve is warm-started from the last.
-   The trace solver's symbolic factorisation does not survive: it is built
-   inside each solve and reused only across that solve's Newton steps, one
-   reordering per map evaluation (→ **[M-352](MEASUREMENTS.md#m-352)**).
+   **It reaches the solve from a file**: `[source] SafetyFactorFile` and
+   exactly one scale pin — `R0B0`, `ToroidalFlux` or `PlasmaCurrent`, since `p`
+   and `q` alone leave a one-parameter family
+   (→ **[M-357](MEASUREMENTS.md#m-357)**) — with `examples/q-driven.toml` as
+   the worked example and `theDriverSolvesForTheToroidalField` recovering its
+   closed-form `g`. Every solve is warm-started from the last explicitly; the
+   extraction differenced along each tangent is most of the cost (`TODO`,
+   *The q-driven Jacobian's cost is the extraction*).
 
-   **What is left is the fixture**: it is a rectangle with one closed plasma
-   rather than a machine, and nothing has driven `q` on the limited tokamak,
-   where the support moves and `ψ_bnd` is an unknown.
+   **What is left is the machine.** On a free edge `ψ_bnd`, the X-point and the
+   exterior modes are borders of the tangent, and an unconfined limited and
+   diverted box close round trips quadratically (→
+   **[M-401](MEASUREMENTS.md#m-401)**, `QDrivenFreeEdge`); the flux pin is
+   refused there. A confined limited machine is not yet driven: on
+   `examples/limited-tokamak.toml` with an invented `q` every trial step's
+   inner solve is refused (`TODO`).
 
 **Item 4 is done and is upstream's**, including the two legs MEQ asked for,
 and it is in the library MEQ links ([M-135](MEASUREMENTS.md#m-135)). Item 6 is
@@ -971,10 +975,9 @@ carries the recovered `g^2` coefficients — on this route there is no
 **WHAT IS LEFT IS TWO THINGS, AND THE SECOND WAS FOUND BY CLOSING
 THE INVERSION RATHER THAN BY USING THE CODE.**
 
-**THE FIXTURE.** It is a rectangle with one closed plasma rather than a machine,
-and nothing has yet driven `q` on the limited tokamak, where the support moves
-and `ψ_bnd` is an unknown. Nothing refuses the combination, so this is an
-experiment and not a port. Beside `SafetyFactorFile`, `PlasmaCurrent` is the
+**THE MACHINE.** The free edge is in the tangent and the unconfined boxes close
+(M-401); a confined limited machine, where the support moves inside the loop,
+is not yet driven (`TODO`, *The q-driven loop on a confined limited machine*). Beside `SafetyFactorFile`, `PlasmaCurrent` is the
 outer loop's scale pin and sets no profile-scale border: the border, inside the
 loop, converges to a pressure nobody gave and a `g²` the equilibrium does not
 have (→ **[M-356](MEASUREMENTS.md#m-356)**).

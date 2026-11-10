@@ -155,8 +155,8 @@ namespace meq
 
 		// ONE COPY OF THE GRID. fluxSurfaceLabels() is the same computation
 		// and is public, so a caller that needs the labels BEFORE it has a
-		// family -- meq::ToroidalFieldMap's loop drives the equilibrium by a
-		// quantity indexed on them -- gets exactly what this traces at, and
+		// family -- the q-driven loop places g^2's knots on them
+		// (meq::SafetyFactorEquilibrium) -- gets exactly what this traces at, and
 		// not a second implementation that could drift.
 		std::vector<double> const labels = fluxSurfaceLabels( options );
 
@@ -270,9 +270,20 @@ namespace meq
 	                                       Potential which )
 	{
 		ContourTracer const tracer( solver, which );
-		CriticalPointFinder const finder( solver );
-		CriticalPoint const axis = labelledAxis( solver, tracer, finder.findAxis() );
+		CriticalPoint const axis = labelledAxis( solver, tracer, solvedAxis( solver ) );
 		return extractFluxSurfaces( tracer, axis, solver.psiBoundary(), options );
+	}
+
+	CriticalPoint solvedAxis( GradShafranovSolver const &solver )
+	{
+		CriticalPointFinder const finder( solver );
+		AxisSense const sense = solver.psiAxis() > solver.psiBoundary() ? AxisSense::Maximum
+		                                                                : AxisSense::Minimum;
+		CriticalPoint found;
+		if ( solver.axisR() > 0.0
+		     && finder.tryFindCriticalPointFrom( solver.axisR(), solver.axisZ(), sense, found ) )
+			return found;
+		return finder.findAxis( sense );
 	}
 
 	CriticalPoint labelledAxis( GradShafranovSolver const &solver,

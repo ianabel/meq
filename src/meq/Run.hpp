@@ -106,7 +106,7 @@ namespace meq
 		/// `--trace-refinement-cap`; unset leaves the solver's own default.
 		std::optional<int> traceRefinementCap;
 
-		/// `--q-iteration-cap`; unset leaves meq::OuterNewtonOptions' own.
+		/// `--q-iteration-cap`; unset leaves meq::LeastSquaresOptions' own.
 		std::optional<int> qIterationCap;
 
 		/// `--gf` and `--vtk`: formats beside the .nc, either asking enough.
@@ -206,6 +206,16 @@ namespace meq
 			 *         write phase's warning does.
 			 */
 			std::shared_ptr<Dataset const> fluxSurfaces( std::string const &file );
+
+			/**
+			 * THE q-DRIVEN LOOP'S KNOTS ON THIS RUN'S MESH, `Psi_N` ascending:
+			 * where a [source] SafetyFactorFile is matched
+			 * (meq::toroidalKnotCount(), meq::toroidalKnotCut()), so that a
+			 * caller can measure a target there before it runs. After
+			 * prepare(); on an adaptive run, the first cycle's.
+			 * @throws std::logic_error before prepare().
+			 */
+			std::vector<double> safetyFactorKnots() const;
 
 			/**
 			 * THE FAMILY'S 1-D QUANTITIES AT LABELS rho = sqrt( Psi_N ) OF

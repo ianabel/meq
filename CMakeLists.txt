@@ -347,6 +347,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/Run.cpp
 	src/meq/SafetyFactor.cpp
 	src/meq/SafetyFactorSolve.cpp
+	src/meq/SafetyFactorTangent.cpp
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp
@@ -389,11 +390,10 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/ResidentIterateDevice.cpp
 	# The run: meq's and every front end's, so the solver and the output.
 	src/meq/Run.cpp
-	# The INVERSION is MFEM-free and CI gates it; the outer Newton around it is
-	# KINSOL through mfem::KINSolver and is not. The split is along the
-	# contract: g = 4 pi^2 q/( V' < R^-2 > ) is arithmetic a mesh cannot change,
-	# and the loop that closes it needs a solve per map evaluation.
-	src/meq/SafetyFactorSolve.cpp
+	# The q-driven system and its least squares are MFEM-free and CI gates
+	# them (SafetyFactor.cpp, SafetyFactorSolve.cpp); what needs a mesh is the
+	# equilibrium solved at a spline and its tangent, here.
+	src/meq/SafetyFactorTangent.cpp
 	src/meq/Sampler.cpp
 	src/meq/SourceView.cpp
 	src/meq/SourceViewDevice.cpp

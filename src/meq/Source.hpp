@@ -938,6 +938,17 @@ namespace meq
 			 */
 			void setGGPrime( std::shared_ptr<Profile const> ggPrime );
 
+			/**
+			 * `dF` FOR A CHANGE OF `g g'` BY @a direction AT FIXED psi AND
+			 * LABELS: F is linear in the profile, so this is f() with
+			 * @a direction in its place and no pressure -- zero outside the
+			 * plasma, the current scale and the span's `1/span` as f() has
+			 * them. What the q-driven Jacobian's `dR/du_j` is assembled from,
+			 * @a direction a knot's cardinal `g g'`.
+			 */
+			double ggPrimeDerivative( double radius, double z, double psi,
+			                          Profile const &direction ) const;
+
 		private:
 			std::shared_ptr<Profile const> pPrimeProfile;
 			std::shared_ptr<Profile const> ggPrimeProfile;

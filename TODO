@@ -357,12 +357,10 @@ Part (a) closed the same day.
 ================================================================================
 
   (a) IS DONE. src/meq/Run.cpp sets FluxFamilyOptions::toroidalField from
-  toroidalCoefficients on the driven path, examples/q-driven.toml carries
-  [ output ] FluxSurfaces = true, and the surfaces file now has a
-  safety_factor column plus toroidal_field_driven, g_squared_coefficients and
-  safety_factor_target so a reader can tell a SOLVED g from a supplied one.
-  Measured: the reported q matches the target table to 5.2e-07 over all 24
-  surfaces. DriverAcceptance::theQDrivenRunReportsTheSafetyFactorItReached is
+  the loop's g^2 on the driven path, examples/q-driven.toml carries
+  [ output ] FluxSurfaces = true, and the surfaces file has a safety_factor
+  column plus toroidal_field_driven, g_squared_knots, g_squared and
+  safety_factor_target so a reader can tell a SOLVED g from a supplied one. DriverAcceptance::theQDrivenRunReportsTheSafetyFactorItReached is
   the acceptance, and it shares one run with
   theDriverSolvesForTheToroidalField because the two are halves of one round
   trip and the run is forty seconds.
@@ -406,9 +404,9 @@ Part (a) closed the same day.
   (a) DONE. THE DRIVEN PATH, small. Set options.toroidalField from
       toroidalCoefficients. THE TRAP IS THE ARGUMENT: extractFluxSurfaces calls
       it with the RAW psi -- FluxExtraction.cpp passes `level` -- while the
-      coefficients are against Psi_N, so the lambda has to normalise by
-      ( psi - psi_bnd )/( psi_ax - psi_bnd ) or it silently evaluates the
-      polynomial at the wrong argument and reports a plausible wrong q.
+      spline is against Psi, so the lambda has to normalise by
+      ( psi - psi_bnd )/( psi_ax - psi_bnd ) or it silently evaluates g^2
+      at the wrong argument and reports a plausible wrong q.
       The acceptance writes itself and is a round trip with a KNOWN answer:
       examples/q-driven.toml's recovered safety_factor column against the
       target table the run was given.
@@ -455,30 +453,134 @@ Cause unknown.
   step.
 
 ================================================================================
-The q-driven solve is inconsistent: g^2 is a fixed-degree global fit, so the delivered q misses the target by the fit's floor however fine the mesh
-Raised 2026-11-08 (MEASUREMENTS.md M-361). QDrivenConsistency is red for it.
+The q-driven Jacobian's cost is the extraction
+Raised 2026-11-09 (MEASUREMENTS.md M-393, M-397).
 ================================================================================
 
-  WHAT IS MEASURED. The loop carries g^2 as a polynomial of degree d fitted
-  over the surfaces. On a target whose g^2 is not such a polynomial -- the q
-  of a forward solve with g^2 = 2.2^2 + ( e^( 2 Psi ) - 1 )/( e^2 - 1 ) -- the
-  delivered q misses the target by 1.18e-1 at degree 2 and 1.2e-2 at degree
-  3, the same on three meshes, against a reference good to 1e-7. The miss
-  moves with d and not with h: the solve does not converge to the problem
-  posed as the discretisation refines. At B = 1.5, kappa = 3 there is no
-  degree-2 fixed point at all.
+  Each Gauss-Newton step of the q-driven loop differences the flux-surface
+  extraction along every knot's tangent field, centrally: 2m + 1 families
+  of m surfaces a step with the residual's own, so the cost grows as m^2 and
+  m as 1/h. One-sided would be m + 2, and stalls on a target with a misfit
+  (M-399). Measured walls: the example (level 1, 19 knots) 60 s, 39 s of
+  them 273 extractions, against 10 s for the fixed-degree loop it replaced;
+  one-sided, 44 s and 168; QDrivenConsistency's level 1 at k = 2,
+  49 s (central, M-397); the study's level 2 at 32 knots, 411 s, 337 s
+  extraction (central, M-393). The device audit reads about 190 s a
+  Jacobian at m = 8 on 32,768 triangles in single on the GPU, against a
+  0.94 s solve: 79% the extractions, 19% the tangents' refinement passes.
+  The tangents themselves are under a tenth here.
 
-  THE FIX. Replace the fit with a g^2 that refines with the discretisation,
-  matched to q at every knot of the family, and solve for it by Newton on the
-  linearised solve's EXACT tangent rather than a differenced Jacobian of a
-  handful of coefficients. With q matched pointwise, the scale pin makes the
-  system square on its own, so no q condition gives way at all and the
-  y_d choice (meq::PinnedToroidalFieldMap) goes.
+  THE LEVER IS THE ANALYTIC SHAPE DERIVATIVE (MANTA-COUPLING.md section 6):
+  a flux-surface average's derivative along a field is the integrand moving
+  plus the surface moving, both closed forms on the surface the base
+  extraction already traced, so one extraction and a quadrature per
+  direction would replace 2m. The differenced extraction stays as its test,
+  as SafetyFactorSolver's theTangentJacobianIsTheDifferencedOne already
+  checks it against re-solved equilibria. The extractions are also
+  independent per direction and could run threaded, once one tracer per
+  thread is cheap (CLAUDE_INVERSION.md, IN-P).
 
-  IT DEPENDS ON TWO PIECES NOT YET ON main: the continuous extraction
-  (manta/shape-derivative), so that q's derivative with respect to the field
-  is smooth and exact rather than piecewise across DG faces (M-308b), and the
-  linearised solve (manta/linearised-solve), which supplies the tangent.
+================================================================================
+The bordered inner Newton stalls on a sharp g g' near the axis
+Raised 2026-11-09 (MEASUREMENTS.md M-398). InnerSolveStall is red for it.
+================================================================================
+
+  WHAT IS MEASURED. The q-driven box at level 0, k = 2, g^2 the closed form
+  at the loop's 10 knots; the innermost knot alone raised by 0.3%, which the
+  end cubic carries onto the axis as g g' from 1.16 to 1.94. From the closed
+  form's own equilibrium the warm bordered Newton plateaus for 60 iterations
+  with its residual between 1e-2 and 4e-2, and so does a cold one; four
+  quarter steps of continuation reach the answer in 28. At 1% neither
+  reaches it. On the box with every vertex moved off z = 0 the 0.3% case
+  fails by continuation too.
+
+  WHAT IT IS NOT: the axis on a row of faces, which M-392 suspected. Smooth
+  changes of g g' that move the located axis across the z = 0 row converge
+  in 5 or 6 iterations, on the symmetric mesh as on one moved off it.
+
+  THE q-DRIVEN LOOP MEETS IT AS REFUSED TRIAL STEPS, which its line search
+  absorbs (QDrivenCurvedBoundary refuses 10 of 17), so the loop converges;
+  the defect is the inner solve's, which has no globalisation while psi_ax is
+  a border unknown (CLAUDE_HDGGS.md). Not measured: whether it is a fold of
+  the discrete problem near a peaked axis current, and what a bounded border
+  step (CLAUDE.md's anisotropic crawl names one) does to it.
+
+================================================================================
+The q-driven misfit at the innermost knot
+Raised 2026-11-09 (MEASUREMENTS.md M-397).
+================================================================================
+
+  QDrivenConsistency's misfit at the knots -- the least squares' residual,
+  max |q/q* - 1| -- reads 5.4e-6 at level 0 and 1.4e-4 at level 1 (k = 2),
+  where the delivered g^2 converges 18x. The innermost knot sits a knot
+  spacing from the axis, rho = 1/( m + 1 ), on a surface about one element
+  across at every level, so its q is extracted no better as h falls. Which
+  knot carries the misfit, and whether the misfit falls from level 2 on, is
+  not measured; the case prints it and does not assert it.
+
+================================================================================
+The q-driven solve in single precision
+Raised 2026-11-09 (MEASUREMENTS.md M-400, M-404).
+================================================================================
+
+  Re-measured on the local refinement (M-404, M-405). Deliberate reds,
+  each with its cause measured:
+  * SafetyFactorSolver's round trip, 1.6e-6 against 1e-7: the map's own q at
+    the closed form is 1.5e-6 from double's, the floor g^2 is read through.
+  * QDrivenScalePin, 4.0e-6 and 3.6e-5 apart: that floor through the
+    weakest pins' conditioning.
+  * QDrivenCurvedBoundary exits 2: 20 of 28 refused trials are
+    ContourTracer::fitByAngle failing to bracket a level on its 15 elements
+    in single -- the tracer's, out of the loop.
+  * QDrivenFreeEdge's round trips: trials refused, the limited box's inner
+    Newton stalling and the diverted box's X-point leaving the mesh.
+  The differenced Jacobian is 6e-5 of its size from double's at the default
+  step, noise-dominated; no step or Richardson does better than about 4e-5.
+  The analytic shape derivative (*The q-driven Jacobian's cost is the
+  extraction*) would take the noise out with the cost.
+
+  ON THE CARD the loop stalls in about one run in three, single only: the
+  residual differs run to run by 3e-11 from MFEM's batched hybridization
+  assembly (DarcyHybridization::AssemblyMode::Batched, AtomicAdd), and the
+  first Gauss-Newton step amplifies it (0.80 against 0.47). AssemblyMode =
+  "serial" makes three runs equal in all 292 stages and all three converge.
+  For upstream: a deterministic accumulation there. For MEQ: why one ulp-scale
+  difference in the first residual turns the first step -- the host from eight
+  nearby starts does not.
+
+================================================================================
+The q-driven loop under a Device: what runs on the host
+Raised 2026-11-09 (MEASUREMENTS.md M-402).
+================================================================================
+
+  The loop's field-sized work is on device routes or composed of them: the
+  tangent fields are mfem::Vector operations, psi~ and q~ the solver's kept
+  interpolant (meq::ContinuousInterpolant, on the device under one), the pin
+  rows the bordered current solve's own row and corner and
+  assembleSourceDerivative(), their contractions meq::doubleDotKernel(),
+  accumulated in double. What stays on the host, and why:
+  reconstructFields() is DarcyForm::Reconstruct(), upstream's and host-only
+  (CLAUDE.md, the device path); the flux-surface tracer (out of this
+  branch's scope), which is now most of the loop's time; the axis root's
+  derivative, one point's 2 x 2; the retained linearisation's border rows
+  and Schur complement, a few element supports and an ( N + 4 )^2 dense
+  factorisation; and the Gauss-Newton's dense QR and SVD, ( m + 1 ) x m with
+  m at most 128. Under `debug` on the host fallbacks the loop reproduces the
+  host to the bit on the serial routes and costs 45x to 66x its wall, so
+  DeviceParity runs it at level 0. On the card it reproduces the host to
+  round-off and repeats its outer count; its stages vary run to run from the
+  first cuDSS trace solve on, and do not under PARDISO (M-403).
+
+  A WARM START'S FIRST STEP DEPENDS ON WHICH ELEMENT'S AXIS ROOT IS FOUND
+  (M-405). Nothing is dropped: handed a converged state, a fresh solver's
+  field residual is 1e-16 on the host, under `debug` and on the card. Where
+  the axis sits at a mesh vertex (LinearisedSolve's box on 8 and 10 cells)
+  the host's cold sweep roots q_h in another element than the one the solve
+  converged on, and psi_h jumps by O( h^( k+1 ) ) across those faces, so its
+  axis constraint starts 1.9e-4 (8.0e-5) off; the card's route roots the
+  same element. Off the faces both start at 1e-15. The defect, if it is one,
+  is that a located axis at a vertex has as many psi_h values as elements;
+  a warm start could carry the axis it was solved with.
 
 ================================================================================
 The q-driven solve's scale pins: what is not measured
@@ -486,25 +588,90 @@ Raised 2026-11-07 (MEASUREMENTS.md M-353, M-355 to M-359, M-362).
 ================================================================================
 
   A q-driven run names exactly one of [source] R0B0, ToroidalFlux and
-  PlasmaCurrent, and the outer system drops the fit's highest orthonormal row
-  under every pin (meq::PinnedToroidalFieldMap). Measured in double on the
-  q-driven box and on fixed-d-tcv with a measured q. Open:
+  PlasmaCurrent, met exactly beside the q rows' least squares
+  (meq::SafetyFactorSystem). Measured in double on the q-driven box and on
+  a Miller boundary. Open:
 
-  * A FREE OR LIMITED BOUNDARY. Every pinned run is fixed-boundary, where
-    psi_bnd is zero. On a limited or diverted plasma psi_bnd is a border
-    unknown, the support moves, and ToroidalFlux's row reads psi_ax - psi_bnd
-    of the bordered Newton; none of it is measured, and q-driven runs there
-    are not refused.
+  * A CONFINED FREE EDGE. linearise() carries psi_bnd, the X-point and the
+    exterior modes as borders, and QDrivenFreeEdge holds the tangent to
+    re-solved differences and closes round trips on an unconfined limited
+    and diverted box (M-401). A confined source, as every shipped free-
+    boundary example has, puts the support's edge in the quadrature: see
+    *The q-driven loop on a confined limited machine* and *The flux pin
+    beside a free plasma edge*.
 
-  * AN ANSWER THAT DOES NOT RE-SOLVE. On QDrivenScalePin's box, with a target
-    no quadratic g^2 follows, PlasmaCurrent = 4.379 (17% below the member the
-    case uses) converged in 3 KINSOL iterations and 56 equilibria with 31 of
-    them refused, and the driver's re-solve at the converged coefficients
-    then failed from the last map evaluation's field; the retry rung solved
-    it (exit 0). Whether that member is a hard one or the warm start is the
-    wrong one is not measured. Seen in the mutation run of M-357,
-    runs/q-solve-scale/study/composition-mutation.log, under the unmutated
-    current pin.
+================================================================================
+The flux pin beside a free plasma edge
+Raised 2026-11-09 (MEASUREMENTS.md M-401).
+================================================================================
+
+  [source] ToroidalFlux is refused beside [boundary.limiter] or
+  [boundary.xpoint] (Config, and meq::SafetyFactorEquilibrium). The delivered
+  flux is int_{Psi > 0} g( Psi )/R on the source's quadrature, and
+  g( 0 ) = R0B0 is not zero, so where psi_bnd is free the edge moves and the
+  integral jumps by g/R times a weight as each point crosses it: on the
+  limited box its re-solved difference reads 2.3e2 against the interior
+  linearisation's 1e0, all crossings. The current pin's integrand is the
+  source, smooth across Psi = 0 when unconfined; confined, it has the same
+  jump wherever F( 0 ) != 0, which the bordered current solve meets too.
+
+  THE REFUSAL STANDS UNTIL THE USER DECIDES whether it is acceptable here or
+  the delivered flux must be made differentiable. What differentiable takes:
+
+  * A CUT QUADRATURE AT Gamma_p,h. On each element the edge crosses, the
+    region Psi > 0 integrated exactly for the element's polynomial psi_h --
+    sub-triangulated along the level curve, or by a moment-fitted rule -- so
+    the integral is a smooth function of the dofs and of psi_bnd while the
+    cut moves within an element, and continuous as it crosses a face.
+  * ITS DERIVATIVE: the interior term the row already has, plus the edge
+    term, the line integral of g( 0 )/R ( dpsi - dpsi_b )/| grad psi_h | over
+    the cut, from the same cut geometry. On a diverted edge the numerator and
+    | grad psi | both vanish at the X-point, so the integrand is finite there
+    and wants a rule that does not sample the saddle.
+  * THE SAME CUT FOR THE CONFINED SOURCE, or the pin is smooth on a support
+    the solve still switches element by element; the moving support is what
+    the limited machine's inner solves stall on (M-405).
+  * OR THE FAMILY'S FLUX, Phi = 2 pi int q dpsi, which the loop already
+    extracts: smooth where the family is, up to an edge where q is finite
+    (limited) or log-singular (diverted), the last stretch from an
+    asymptotic form.
+
+================================================================================
+The X-point border from a cold start
+Raised 2026-11-09 (MEASUREMENTS.md M-401).
+================================================================================
+
+  On both manufactured X-point fixtures -- LinearisedSolve's two-lobe mode
+  and QDrivenFreeEdge's divertor filament, each on a fixed box with no
+  exterior coupling -- the bordered Newton's first dense corner is singular
+  from the initial guess ("the bordered Jacobian is singular in ( psi_ax,
+  psi_bnd, a )", every entry finite, rows 0 and 3 nearly parallel), on every
+  lobe shape tried. From XP-2's pinned solve, its saddle re-located to a
+  fixed point, the border converges and its tangent agrees with re-solved
+  differences to 1e-13. Separately, a saddle within about 0.007 of a mesh
+  line makes the X-point's Newton cycle between the two elements' roots
+  (eight cells on both fixtures; nine converge). Neither is diagnosed: the
+  shipped diverted examples start from a stored guess and sweep the support,
+  and are not affected as far as the suite shows.
+
+================================================================================
+The q-driven loop on a confined limited machine
+Raised 2026-11-09.
+================================================================================
+
+  CLOSES ON A REACHABLE TARGET (M-405): examples/limited-tokamak.toml
+  driven by its own forward run's q (profile scale one, 64 surfaces),
+  R0B0 = 2.0, converges in 7 Gauss-Newton iterations to g^2 within 5.5e-7 of
+  the closed form; the failure this entry first recorded was an invented q
+  no R0B0 = 2.0 equilibrium reaches. Open:
+  * 13 of its 21 trial solves are refused: the plain bordered Newton stalls
+    with the support moving inside it, as the forward run without a current
+    border does (183 of 204 steps crawling, on the Picard rung) -- a crawl,
+    the inner solve's defect.
+  * With PlasmaSupportSweeps = 4 the loop's first solve finds no maximum and
+    the run exits 2: the frozen support decided from the stored guess does
+    not hold the opening equilibrium.
+  * Not shipped as a test: the forward run alone is minutes.
 
 ================================================================================
 Anisotropic pressure
@@ -1997,12 +2164,12 @@ Raised 2026-11-09 (MEASUREMENTS.md M-386; DEVICE-PLAN.md section 9).
   over the points and two copies across the bus per call. What takes it:
 
   * addSourceColumns() with a caller's derivative, and so
-    assembleSourceDerivative(): every q-driven pin row on q-refining-fit, and
-    the gg' cardinal-direction derivative. The pin rows' four integrands have
-    a device form now, meq::PsiIntegrand through assemblePsiIntegrandColumn();
-    moving them onto it is the q loop's change. The cardinal direction's is
-    step 3's assembleGGPrimeDerivative() (branch device-linearised, held until
-    q-refining-fit merges).
+    assembleSourceDerivative(): the q loop's gg' cardinal-direction
+    derivative, one per knot a Jacobian. Its device form is step 3's
+    assembleGGPrimeDerivative() (branch device-linearised, held until
+    q-refining-fit merges). The flux pin's four integrands and the delivered
+    flux are on meq::PsiIntegrand (assemblePsiIntegrandColumn()), G and each
+    cardinal as Hermite SplineProfiles of the spline.
   * The retained linearisation's S( x ) and S'( x ) t, the source's own F and
     dF/dpsi passed as lambdas: their device form is the plasma loops'
     SourceValue and SourceSlope (step 3, the same branch).

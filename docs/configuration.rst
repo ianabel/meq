@@ -440,10 +440,6 @@ under a Solov'ev source is an unknown key, not an ignored one.
        than an input. Requires ``Normalised = true`` and **exactly one** of
        ``R0B0``, ``ToroidalFlux`` and ``PlasmaCurrent``. See
        :ref:`configuration-q-driven`.
-   * - ``SafetyFactorDegree``
-     - ``2``
-     - Degree of the :math:`g^2` polynomial the outer loop solves for. Only with
-       ``SafetyFactorFile``.
    * - ``R0B0``
      - —
      - :math:`g = R B_\phi` on the boundary, in T m — the vacuum field the TF
@@ -454,7 +450,8 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - :math:`\Phi_\mathrm{edge}`, the toroidal flux inside the boundary, in
        Wb — VMEC's ``PHIEDGE`` — held as the solved equilibrium's own
        :math:`\int g/R\,\mathrm{d}A`. One of the three scale pins of
-       ``SafetyFactorFile``, and refused without it.
+       ``SafetyFactorFile``, and refused without it, and refused beside
+       ``[boundary.limiter]`` or ``[boundary.xpoint]``.
    * - ``ToroidalFieldGuess``
      - —
      - **Required with** ``SafetyFactorFile`` beside ``ToroidalFlux`` or
@@ -2165,44 +2162,51 @@ solution, and the solution depends on :math:`g`. So the loop is
 
 and its fixed point is an equilibrium whose own :math:`q` is the one asked for.
 
-What it costs
-~~~~~~~~~~~~~
+How it is solved
+~~~~~~~~~~~~~~~~
 
-**Every map evaluation is a whole equilibrium** — one per residual, and
-:math:`2(d+1)` more per Jacobian, which is formed afresh at every outer
-iteration. The shipped example converges in 5 outer iterations and **26
-equilibria** in double. It is affordable only
-because the
-profile is *fitted*: the unknown is the handful of coefficients of
-:math:`g^2 = \sum_j c_j \Psi^j` rather than every degree of freedom of the
-field.
+:math:`g^2` is carried as its **values at a set of flux surfaces, the knots**,
+interpolated by a not-a-knot cubic in the source's :math:`\Psi`, and the run
+solves for them: :math:`q` is matched at every knot, and the scale pin
+(below) is one more condition. The knots **follow the mesh** — about two
+surfaces per element across the minor radius, uniform in
+:math:`\rho = \sqrt{\Psi_N}`, the innermost and outermost one knot spacing from
+the axis and from the edge — so there is no degree or count to choose, and the
+delivered :math:`q` converges to the requested one as ``RefinementLevels`` and
+``PolynomialDegree`` rise. The run prints how many knots it used and over what
+range. Outside the innermost and outermost knot, :math:`g^2` is the end cubic
+continued and the table is not imposed there; that layer is one knot spacing
+wide and shrinks with the mesh. ``[output] FluxSurfaceCount`` is the surfaces
+file's and has nothing to do with the loop.
 
-One solver serves all of them. Only :math:`g\,\mathrm{d}g/\mathrm{d}\Psi`
-changes between steps, so the mesh, the finite element spaces and the assembled
-forms survive, and each solve is warm-started from the previous one's field.
-The trace solver's symbolic factorisation is redone by each solve: it is reused
-across the Newton steps of one solve, not between solves.
+The conditions are solved by **Gauss-Newton**: the :math:`q` rows in least
+squares, the pin exactly. :math:`q` cannot be met at every knot exactly — the
+discrete problem is not exactly consistent — and what is left, the **misfit**,
+falls as the discretisation refines; no :math:`q` condition is dropped. Its
+Jacobian is the **linearised solve's exact tangent**: one back-solve per knot
+on the factorised Newton matrix of the equilibrium, and the flux-surface
+extraction's response along each tangent field. No equilibrium is re-solved to
+form it, so a Gauss-Newton step costs one equilibrium (more if the line search
+backs off) and :math:`2m+1` extractions of an :math:`m`-surface family. **The
+extractions are most of the cost** and grow as :math:`m^2`; a fine mesh is
+measured in minutes. Every solve is warm-started from the last.
 
-A relaxed Picard iteration cannot replace the outer Newton, and that is a
-theorem rather than a preference: :math:`c \leftarrow c + \omega(G(c) - c)` has
-derivative :math:`1 + \omega(G' - 1)` at the fixed point, which exceeds one for
-**every** :math:`\omega > 0` when :math:`G' > 1`. Under-relaxation stabilises a
-map that oscillates and does nothing at all for one that runs away.
+A relaxed Picard iteration cannot replace the Newton, and that is a theorem
+rather than a preference: the inversion :math:`g = 4\pi^2 q/(V'\langle
+R^{-2}\rangle)` iterated with relaxation :math:`\omega` has derivative
+:math:`1 + \omega(G' - 1)` at its fixed point, which exceeds one for **every**
+:math:`\omega > 0` when :math:`G' > 1`.
 
-Two things to get right
-~~~~~~~~~~~~~~~~~~~~~~~
+One thing to get right
+~~~~~~~~~~~~~~~~~~~~~~
 
 **The table is in the source's** :math:`\Psi`, one on the axis — like every
 other profile table in ``examples/``, and unlike the flux-surface family's own
 label, which is zero there. MEQ owns the reflection between them. A table
 written the other way round does **not** fail: it converges, at full order, to
 an equilibrium with its **shear reversed**, which is a configuration a real
-machine can have and which nothing downstream will look at twice.
-
-**The degree is a modelling choice and higher is not better.** A degree the
-surface family does not determine leaves the outer Jacobian rank deficient,
-which MEQ reports — ``did not converge … the outer Jacobian is RANK
-DEFICIENT`` — rather than solving. Two or three is the usual.
+machine can have and which nothing downstream will look at twice. The table
+should cover the knots' range; past its ends it is continued linearly.
 
 .. _configuration-q-driven-scale:
 
@@ -2224,95 +2228,65 @@ the member:
    * - Key
      - What it holds
    * - ``R0B0``
-     - :math:`g` on the boundary, T m: the vacuum toroidal field. The loop
-       opens at this constant :math:`g`, and :math:`g^2`'s constant term is
-       held at its square.
+     - :math:`g` on the boundary, T m: the vacuum toroidal field, read as
+       :math:`g^2` continued to :math:`\Psi = 0`. The loop opens at this
+       constant :math:`g`.
    * - ``ToroidalFlux``
      - :math:`\Phi_\mathrm{edge}`, Wb: the **delivered** toroidal flux,
        :math:`\int_\mathrm{plasma} g(\psi)/R\,\mathrm{d}A` over the solved
        equilibrium with its own :math:`g`, signed as the target :math:`q`. On
        a curved boundary the integral runs over the mesh, so the thin band
        between the mesh and the boundary is not counted, as it is not for
-       :math:`I_p`.
+       :math:`I_p`. **Refused beside a limiter or an X-point**: there
+       :math:`\psi_\mathrm{bnd}` is free, and the integrand,
+       :math:`g(0) \neq 0` at the edge, jumps as the edge moves across the
+       quadrature points, so the delivered flux is not differentiable in the
+       state. Pin ``R0B0`` or ``PlasmaCurrent`` there.
    * - ``PlasmaCurrent``
      - :math:`I_p`, A. The profile scale stays one, so :math:`p` is the
        table's.
 
-**Naming none is refused**, since the problem then has no answer to find — the
-loop would return whichever member the degree of :math:`g^2` happens to
-favour, and on a measured :math:`q` it does not converge at all. **Naming two
-is refused** too: each alone selects the equilibrium.
+**Naming none is refused**, since the problem then has no answer to find, and
+**naming two is refused** too: each alone selects the equilibrium.
 
-Each pin adds one condition to the loop or removes one unknown, so to keep the
-system square **one condition on** :math:`q` **gives way**: the highest moment
-of the fit, the one least able to move the equilibrium, so that :math:`q` is
-matched in every lower moment. It is the same condition under every pin, and
-that is what lets them pose **one** problem: an equilibrium solved under one
-pin is returned by the other two when they are set to the values it reads.
-Where the target's :math:`g^2` is not a polynomial of the degree asked for, the
-choice of condition moves the answer by the fit's misfit — which is one more
-reason the degree is part of the model.
-
-.. warning::
-
-   **This is interim, and the q-driven solve is not yet consistent.**
-   :math:`g^2` is a polynomial of fixed degree fitted over the surfaces, so a
-   target whose :math:`g^2` is not one is met only to the fit's floor, and that
-   floor does not fall as the mesh refines — on a smooth non-polynomial target
-   it is about 12% in :math:`q` at degree 2 and 1.2% at degree 3, the same at
-   every mesh tried. The representation that replaces it refines with the
-   discretisation and matches :math:`q` at every knot, so that the pin alone
-   makes the system square and no condition on :math:`q` gives way. Until
-   then, check the ``safety_factor`` column of the surfaces file against your
-   target, and raise ``SafetyFactorDegree`` while the miss falls with it.
-
-Every q-driven ``<stem>.nc`` reports all three of its answer's own scalars, as
-``edge_toroidal_field``, ``toroidal_flux`` and ``plasma_current``, beside
-``scale_pin``, the key the run was given, the loop's cost,
-``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``, and what its
-answer is worth: ``toroidal_loop_residual``, the residual it stopped at in the
-coefficients of :math:`g^2`, ``toroidal_loop_threshold``, the larger of the
-tolerance and the map's floor that it was judged against, and
-``toroidal_loop_conditioning``, the outer Jacobian's conditioning, by which
-the residual is divided to bound the coefficients' error. The run prints the
-scale as ``its scale:``. The numbers behind these choices are in
-``MEASUREMENTS.md`` (M-355 to M-357, M-361 and M-362) — measure them on your
-own case.
+**The pin is met exactly** and the :math:`q` rows in least squares at each
+level of the scale, so every pin chooses from the same set of answers: an
+equilibrium solved under one pin is returned by the other two when they are
+set to the values it reads. Every q-driven ``<stem>.nc`` reports all three of
+its answer's own scalars, as ``edge_toroidal_field``, ``toroidal_flux`` and
+``plasma_current``, beside ``scale_pin``, the key the run was given, the
+loop's cost, ``toroidal_loop_iterations`` and ``toroidal_loop_equilibria``, and
+what its answer is worth: ``toroidal_loop_misfit``, the largest relative miss
+of :math:`q` at the knots, ``toroidal_loop_residual``, the part of the residual
+a further step could still remove, which convergence is judged on,
+``toroidal_loop_threshold``, the larger of the tolerance and the floor it was
+judged against, and ``toroidal_loop_conditioning``, the Jacobian's
+:math:`\sigma_\mathrm{min}/\sigma_\mathrm{max}`. The run prints the scale as
+``its scale:``. The numbers behind these choices are in ``MEASUREMENTS.md``
+(M-353, M-357, M-361, M-362 and the q-driven solve's own entries) — measure
+them on your own case.
 
 When the loop does not converge
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Converged means the outer residual reached its floor, and nothing else does.**
-The loop is judged on :math:`\lVert G(c) - c\rVert_\infty` — the change one
-Picard step would make to the coefficients of :math:`g^2` — at the coefficients
-it returns, against the larger of its tolerance, ``1e-9``, and **the map's own
-round-off floor**. Every map evaluation is an equilibrium solved only to
-``[solver] NewtonRelativeTolerance`` (floored at ten machine epsilon), so the
-map itself is noisy, and no residual below that noise means anything. MEQ
-derives the floor from that tolerance, carried through the inversion and the
-fit, and the status line reports both:
+**Converged means the part of the residual a further Gauss-Newton step could
+remove has reached its floor, and nothing else does.** Every evaluation is an
+equilibrium solved only to ``[solver] NewtonRelativeTolerance`` (floored at
+ten machine epsilon), so the rows are noisy, and no residual below that noise
+means anything. MEQ derives each row's floor from that tolerance and judges
+the loop against the larger of the floor and a tolerance of ``1e-9``; the
+status line says which. A loop that stops *above* its threshold — a line search
+that cannot decrease the residual — has **not** converged and is reported as
+such. Loosening ``NewtonRelativeTolerance`` raises the floor with it: the loop
+cannot be asked for more than the solves it is made of.
 
-.. code-block:: text
-
-   q-driven outer loop: converged in 4 KINSOL iterations and 30 map evaluations, final norm 2.59575e-05 against a threshold of 0.000382264 -- the larger of the tolerance 1e-09 and the round-off floor 0.000382264; KINSOL stopped with the residual within the threshold
-
-That line is a single-precision build, where the floor dominates; in double it
-is the tolerance. A loop that stops *above* its threshold — on a step too small
-to move the iterate, or a line search that cannot decrease the residual — has
-**not** converged, whatever the nonlinear solver's own flag says, and is
-reported as such. Loosening ``NewtonRelativeTolerance`` raises the floor with
-it: the outer loop cannot be asked for more than the solves it is made of.
-
-**The floor is a model, and MEQ checks it against the map itself.** Where the
-floor rather than the tolerance is what the loop is judged on, the first time
-the residual comes within ten floors MEQ evaluates that point again from two
-other starting fields and takes four standard deviations of the change as a
-floor too, if it is the larger; and a loop that stalls above its floor is
-measured the same way before it is called a failure. The status line then says
-``(four standard deviations of the map's noise, measured)``. A stall above the
-measured noise is still not converged: a real step remained and the line search
-could not take it. In double the tolerance is far above the noise and none of
-this runs.
+**The floor is a model, and MEQ checks it against the rows themselves.**
+Where the floor rather than the tolerance is what the loop is judged on, the
+first time the removable residual comes within ten floors MEQ evaluates that
+point again from two other starting fields and takes four standard deviations
+of the change as a row's floor too, if it is the larger; and a loop that stalls
+above its floor is measured the same way before it is called a failure. In
+double the tolerance is far above the noise and none of this runs.
 
 **The run exits 2 and writes nothing**, whatever the reason the loop stopped —
 a stalled line search, a rank-deficient Jacobian, or the iteration cap:
@@ -2324,28 +2298,28 @@ a stalled line search, a rank-deficient Jacobian, or the iteration cap:
 The run is solving *for* :math:`g`, so without a converged :math:`g` there is no
 equilibrium it owes. The bordered retry rung of :ref:`running-failure` is **not**
 run for this failure: it re-solves one equilibrium at whichever :math:`gg'` the
-loop last tried — a line-search trial or a differencing column — which converges
-perfectly well to the equilibrium of a prescribed field nobody asked for, with a
-:math:`q` that is not the target. The loop already absorbs every failed inner
-solve as a rejected trial, so a different inner globalisation does not move an
-outer failure either. There is no key to accept the last iterate instead. A loop
-that *converges* and whose answer then fails to re-solve is retried as any other
-failed solve is, since the rung's solve is then at the converged :math:`g`.
+loop last tried, which converges perfectly well to the equilibrium of a
+prescribed field nobody asked for, with a :math:`q` that is not the target. The
+loop already absorbs every failed inner solve as a rejected trial step. There
+is no key to accept the last iterate instead. A loop that *converges* and whose
+answer then fails to re-solve is retried as any other failed solve is.
 
-``meq --q-iteration-cap N`` caps the outer Newton at ``N`` iterations, 30 by
-default. Each iteration costs :math:`2(d+1)+1` equilibria, so this bounds the
-run's cost; it cannot change the :math:`g` a converging loop reports, only
-whether it reports one.
+``meq --q-iteration-cap N`` caps the Gauss-Newton at ``N`` iterations, 30 by
+default, which bounds the run's cost; it cannot change the :math:`g` a
+converging loop reports, only whether it reports one.
 
 What the run writes
 ~~~~~~~~~~~~~~~~~~~
 
 The answer is :math:`g`, so it goes into the interchange file: ``<stem>.nc``
-carries ``toroidal_field_driven``, ``g_squared_coefficients`` — ascending in
-:math:`\Psi` — and ``safety_factor_target``, with the scale attributes of
-:ref:`configuration-q-driven-scale`. There is no ``GGPrimeFile`` beside
-the output for a reader to look the field up in, which is why it is recorded
-rather than left to the configuration.
+carries ``toroidal_field_driven``, ``g_squared_knots`` — the knots' labels in
+the family's :math:`\Psi_N`, zero on the axis — and ``g_squared``, :math:`g^2`
+at them, and ``safety_factor_target``, with the scale attributes above. Between
+the knots :math:`g^2` is the not-a-knot cubic in :math:`\Psi = 1 - \Psi_N`.
+There is no ``GGPrimeFile`` beside the output for a reader to look the field
+up in, which is why it is recorded rather than left to the configuration; a
+restart from the file opens the loop at that :math:`g^2`, read at its own
+knots.
 
 **And with** ``[output] FluxSurfaces`` **this is the one route whose surfaces
 file reports** :math:`q` **itself.** Everywhere else a ``meq::Source`` carries
@@ -2353,8 +2327,7 @@ file reports** :math:`q` **itself.** Everywhere else a ``meq::Source`` carries
 :math:`V' g \langle R^{-2}\rangle / 4\pi^2` from and the ``safety_factor``
 column is absent rather than zero — see :doc:`output`. Here the loop solved for
 :math:`g`, so the column is written, and the round trip can be read straight off
-the file: the reported :math:`q` against the table the run was given. On
-``examples/q-driven.toml`` the two agree to **4.5e-07** over all 24 surfaces.
+the file: the reported :math:`q` against the table the run was given.
 
 ``BorderRegularisation``, ``BorderCollinearityRegularisation``
    Levenberg damping on the dense border solve, so a near-singular Schur

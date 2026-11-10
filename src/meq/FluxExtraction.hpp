@@ -106,7 +106,7 @@ namespace meq
 	 * extractFluxSurfaces() traces at -- it is the same code, called from
 	 * there. Exposed because a caller driving the equilibrium BY a
 	 * surface quantity needs the grid before it has a family to read it off:
-	 * meq::ToroidalFieldMap builds `g^2` on these labels every step, and
+	 * meq::SafetyFactorEquilibrium places `g^2`'s knots on these labels, and
 	 * generating them a second time in the caller is how the two would drift
 	 * apart while every column still converged.
 	 *
@@ -183,6 +183,16 @@ namespace meq
 	CriticalPoint labelledAxis( GradShafranovSolver const &solver,
 	                            ContourTracer const &tracer,
 	                            CriticalPoint const &located );
+
+	/**
+	 * THE SOLVED STATE'S MAGNETIC AXIS: the extremum of the total field of the
+	 * sense psi_ax - psi_bnd says, seeded at the solve's own located axis
+	 * (GradShafranovSolver::axisR(), axisZ()) and swept for where there is
+	 * none. An unqualified CriticalPointFinder::findAxis() refuses a machine
+	 * whose coils sit in the mesh -- their field has extrema of its own -- so
+	 * every family of a solved state is rooted here.
+	 */
+	CriticalPoint solvedAxis( GradShafranovSolver const &solver );
 
 	/**
 	 * The volume enclosed by one fitted surface, by Green's theorem on its own

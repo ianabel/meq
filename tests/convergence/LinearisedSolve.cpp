@@ -8,6 +8,9 @@
  *
  *   * the bordered tangent -- dx and d psi_ax -- against a Richardson
  *     difference of two solves converged to round-off;
+ *   * every border in it: psi_bnd pinned at a limiter point, and at the
+ *     two-lobe mode's X-point with ( R_X, z_X ), each border unknown against
+ *     the same difference (M-401);
  *   * the retained factorisation reused across directions, to the bit of a
  *     fresh one, and refused once anything has evaluated a residual since;
  *   * a NORMALISED closed form through the bordered path: a manufactured
@@ -69,10 +72,28 @@ namespace
 	struct Mode
 	{
 		double radiusLow = 0.6, zLow = -0.6, width = 0.8, height = 1.2;
+		/// THE TWO-LOBE MODE, where mu or nu is non-zero: sin( b( z - z_0 ) )
+		/// becomes S( t ) = sin t + mu sin 3t + nu sin 2t, two maxima in z with
+		/// a saddle between them -- an X-point for the border to carry. Zero
+		/// leaves the single mode, expression for expression.
+		double mu = 0.0, nu = 0.0;
 		double a() const { return M_PI/width; }
 		double b() const { return M_PI/height; }
+		bool lobed() const { return mu != 0.0 || nu != 0.0; }
+		double lobes( double z ) const
+		{
+			double const t = b()*( z - zLow );
+			return std::sin( t ) + mu*std::sin( 3.0*t ) + nu*std::sin( 2.0*t );
+		}
+		double lobesSecond( double z ) const
+		{
+			double const t = b()*( z - zLow );
+			return -b()*b()*( std::sin( t ) + 9.0*mu*std::sin( 3.0*t ) + 4.0*nu*std::sin( 2.0*t ) );
+		}
 		double phi( double radius, double z ) const
 		{
+			if ( lobed() )
+				return std::sin( a()*( radius - radiusLow ) )*lobes( z );
 			return std::sin( a()*( radius - radiusLow ) )*std::sin( b()*( z - zLow ) );
 		}
 		void gradPhi( double radius, double z, double &dr, double &dz ) const
@@ -83,6 +104,12 @@ namespace
 		/// -Delta* phi, Delta* = d_RR - ( 1/R ) d_R + d_zz.
 		double g0( double radius, double z ) const
 		{
+			if ( lobed() )
+			{
+				double const sr = std::sin( a()*( radius - radiusLow ) );
+				double const cr = std::cos( a()*( radius - radiusLow ) );
+				return a()*a()*sr*lobes( z ) + ( a()/radius )*cr*lobes( z ) - sr*lobesSecond( z );
+			}
 			double const cr = std::cos( a()*( radius - radiusLow ) );
 			double const sz = std::sin( b()*( z - zLow ) );
 			return ( a()*a() + b()*b() )*phi( radius, z ) + ( a()/radius )*cr*sz;
@@ -172,21 +199,87 @@ namespace
 		double h = 0.0;
 	};
 
-	std::unique_ptr<Solved> solveManufactured( double lambda, int order, int cells )
+	/// Which psi_bnd the solve closes: the box's zero (psi_bnd is not an
+	/// unknown), a limiter point inside the box, or the two-lobe mode's
+	/// X-point.
+	enum class Edge { Fixed, Limiter, XPoint };
+
+	/// The two-lobe mode's saddle, ( R, z ): the sine's peak in R and
+	/// S'( t ) = 0 between the lobes in z, by Newton from t = pi/2.
+	void saddleOf( Mode const &mode, double &radius, double &z )
+	{
+		double t = 0.5*M_PI;
+		for ( int i = 0; i < 50; ++i )
+		{
+			double const d1 = std::cos( t ) + 3.0*mode.mu*std::cos( 3.0*t ) + 2.0*mode.nu*std::cos( 2.0*t );
+			double const d2 = -std::sin( t ) - 9.0*mode.mu*std::sin( 3.0*t ) - 4.0*mode.nu*std::sin( 2.0*t );
+			t -= d1/d2;
+		}
+		radius = mode.radiusLow + 0.5*mode.width;
+		z = mode.zLow + t/mode.b();
+	}
+
+	Mode modeFor( Edge edge )
+	{
+		Mode mode;
+		if ( edge == Edge::XPoint )
+		{
+			mode.mu = 0.4;
+			mode.nu = 0.15;
+		}
+		return mode;
+	}
+
+	std::unique_ptr<Solved> solveManufactured( double lambda, int order, int cells, Edge edge = Edge::Fixed )
 	{
 		auto s = std::make_unique<Solved>();
 		s->mesh = std::make_unique<mfem::Mesh>( meq::tests::makeMesh( standardBox(), cells ) );
 		s->h = standardBox().width()/cells;
-		s->source = std::make_unique<ManufacturedNormalised>( lambda, 0.3, 0.25, 0.9*lambda );
+		Mode const mode = modeFor( edge );
+		double const peak = edge == Edge::XPoint ? 1.1 : 1.0;
+		s->source = std::make_unique<ManufacturedNormalised>( lambda, 0.3, 0.25, 0.9*peak*lambda );
+		s->source->mode = mode;
 		s->zero = std::make_unique<mfem::ConstantCoefficient>( 0.0 );
-		Mode const mode;
 		s->guess = std::make_unique<mfem::FunctionCoefficient>(
 			[ mode, lambda ]( mfem::Vector const &x ) { return 0.9*lambda*mode.phi( x( 0 ), x( 1 ) ); } );
 		s->solver = std::make_unique<meq::GradShafranovSolver>( *s->mesh, order );
-		s->solver->setSource( *s->source, 0.9*lambda );
+		if ( edge == Edge::Limiter )
+			s->solver->setBoundaryFluxPoint( 1.3, 0.0 );
+		if ( edge == Edge::XPoint )
+		{
+			double radius = 0.0, z = 0.0;
+			saddleOf( mode, radius, z );
+			s->solver->setXPointBoundary( radius, z );
+			s->solver->setBoundaryFluxInitial( 0.9*lambda*mode.phi( radius, z ) );
+		}
+		s->solver->setSource( *s->source, 0.9*peak*lambda );
 		s->solver->setBoundaryData( *s->zero );
 		s->solver->setInitialGuess( *s->guess );
 		s->solver->setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+		if ( edge == Edge::XPoint )
+		{
+			/*
+			 * XP-2'S START: psi_bnd pinned at the saddle, then the border from
+			 * there. From the guess itself the bordered Newton's first dense
+			 * corner is singular -- every entry finite, rows 0 and 3 nearly
+			 * parallel -- on every lobe shape tried (TODO, *The X-point
+			 * border from a cold start*); the tangent is the converged
+			 * state's either way.
+			 */
+			double radius = 0.0, z = 0.0;
+			saddleOf( mode, radius, z );
+			meq::GradShafranovSolver pinned( *s->mesh, order );
+			pinned.setBoundaryFluxPoint( radius, z );
+			pinned.setSource( *s->source, 0.9*peak*lambda );
+			pinned.setBoundaryData( *s->zero );
+			pinned.setInitialGuess( *s->guess );
+			pinned.setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+			meq::tests::namedRoutesFromEnvironment( pinned );
+			pinned.solve();
+			s->solver->setInitialState( pinned.state(), {} );
+			s->solver->setBoundaryFluxInitial( pinned.psiBoundary() );
+			s->source->setNormalisation( pinned.psiAxis(), pinned.psiBoundary() );
+		}
 		meq::tests::namedRoutesFromEnvironment( *s->solver );
 		s->solver->solve();
 		return s;
@@ -279,6 +372,141 @@ BOOST_AUTO_TEST_CASE( theBorderedTangentIsADifferenceOfTwoConvergedSolves )
 	BOOST_TEST( relative < 1.0e-8, "the bordered tangent misses the difference by " << relative );
 	BOOST_TEST( axisRelative < 1.0e-8, "d psi_ax misses the difference by " << axisRelative );
 #endif
+}
+
+/*
+ * EVERY BORDER IS IN THE TANGENT: psi_bnd pinned at a limiter point, and at
+ * the two-lobe mode's X-point with ( R_X, z_X ) two more unknowns -- the
+ * bordered Newton's blocks, re-assembled at the state by linearise() -- each
+ * against the Richardson difference of two solves converged to round-off,
+ * the state and every border unknown.
+ */
+namespace
+{
+	void bordersAgainstSolves( Edge edge, char const *name )
+	{
+		double const lambda = 0.2;
+		// Nine cells, not eight: on eight the saddle at R = 1 sits on a mesh
+		// line, where q_h jumps across the face and the X-point's Newton
+		// alternates between the two elements' roots and does not converge.
+		int const order = 2, cells = 9;
+		auto base = solveManufactured( lambda, order, cells, edge );
+		base->solver->linearise( base->solver->state() );
+		meq::GradShafranovSolver::LinearisedBorders const layout = base->solver->linearisedLayout();
+		BOOST_TEST_REQUIRE( layout.axis == 0 );
+		BOOST_TEST_REQUIRE( layout.boundary == 1 );
+		BOOST_TEST_REQUIRE( ( layout.xPoint == 2 ) == ( edge == Edge::XPoint ) );
+		BOOST_TEST( layout.count == ( edge == Edge::XPoint ? 4 : 2 ) );
+		mfem::Vector dRdp, dx;
+		ManufacturedNormalised const *source = base->source.get();
+		base->solver->assembleSourceDerivative( base->solver->state(),
+			[ source ]( double radius, double z, double psi ) { return source->dFdLambda( radius, z, psi ); },
+			dRdp );
+		std::vector<double> ds;
+		base->solver->linearisedTangent( dRdp, {}, nullptr, dx, ds );
+
+		/// The state and the border unknowns, as the solve leaves them.
+		auto at = [ & ]( double by, std::vector<double> &borders )
+		{
+			auto s = solveManufactured( lambda + by, order, cells, edge );
+			borders = { s->solver->psiAxis(), s->solver->psiBoundary() };
+			if ( edge == Edge::XPoint )
+			{
+				borders.push_back( s->solver->xPointR() );
+				borders.push_back( s->solver->xPointZ() );
+			}
+			return mfem::Vector( s->solver->state() );
+		};
+		auto central = [ & ]( double step, std::vector<double> &borders )
+		{
+			std::vector<double> plus, minus;
+			mfem::Vector d = at( step, plus );
+			d -= at( -step, minus );
+			d /= 2.0*step;
+			borders.resize( plus.size() );
+			for ( std::size_t i = 0; i < plus.size(); ++i )
+				borders[ i ] = ( plus[ i ] - minus[ i ] )/( 2.0*step );
+			return d;
+		};
+		double const h = 1.0e-3*lambda;
+		std::vector<double> half, full;
+		mfem::Vector richardson = central( h/2.0, half );
+		richardson *= 4.0;
+		richardson -= central( h, full );
+		richardson /= 3.0;
+		mfem::Vector error( richardson );
+		error -= dx;
+		double const relative = error.Norml2()/dx.Norml2();
+		std::printf( "\n  %s: the bordered tangent against two converged solves, state %.3e relative\n",
+		             name, relative );
+		char const *labels[] = { "d psi_ax", "d psi_bnd", "d R_X", "d z_X" };
+		double worst = 0.0;
+		for ( std::size_t i = 0; i < half.size(); ++i )
+		{
+			double const reference = ( 4.0*half[ i ] - full[ i ] )/3.0;
+			// Against the border's own size or the state's: d z_X may be
+			// zero by the mode's symmetry in R.
+			double const apart = std::abs( reference - ds[ i ] )
+			                     /std::max( std::abs( reference ), static_cast<double>( dx.Normlinf() ) );
+			worst = std::max( worst, apart );
+			std::printf( "    %-10s %+.10e against %+.10e (%.3e)\n", labels[ i ], ds[ i ], reference, apart );
+		}
+		std::fflush( stdout );
+#ifdef MFEM_USE_SINGLE
+		BOOST_TEST_MESSAGE( "  single: a difference of two single solves cannot resolve the tangent to "
+		                    "1e-8; not asserted (measured " << relative << ", borders " << worst << ")" );
+#else
+		BOOST_TEST( relative < 1.0e-8, name << ": the bordered tangent misses the difference by " << relative );
+		BOOST_TEST( worst < 1.0e-8, name << ": a border unknown misses the difference by " << worst );
+#endif
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theLimiterBorderIsInTheTangent ) { bordersAgainstSolves( Edge::Limiter, "limiter point" ); }
+BOOST_AUTO_TEST_CASE( theXPointBorderIsInTheTangent ) { bordersAgainstSolves( Edge::XPoint, "X-point" ); }
+
+/*
+ * setInitialState()'S ITERATE IS THE ONE THE SOLVE STARTS FROM, on any Device:
+ * a converged state handed to a fresh solver of the same problem starts it
+ * near its answer. Under --device debug it was not -- the copy into the
+ * state went to the device while the trace datum, written through an alias
+ * whose flags still said host, put the guess back -- and every warm start, the
+ * q-driven loop's and a restart's, began from the guess (M-402).
+ */
+BOOST_AUTO_TEST_CASE( theInitialStateIsWhereTheSolveStarts )
+{
+	auto base = solveManufactured( 0.2, 2, 8 );
+	double const scale = base->solver->newtonResiduals().front();
+	meq::GradShafranovSolver again( *base->mesh, 2 );
+	again.setSource( *base->source, base->solver->psiAxis() );
+	again.setBoundaryData( *base->zero );
+	again.setInitialGuess( *base->guess );
+	again.setNewtonControl( 1.0e-14, 1.0e-15, 40 );
+	meq::tests::namedRoutesFromEnvironment( again );
+	again.setInitialState( base->solver->state(), {} );
+	again.solve();
+	double const first = again.newtonResiduals().front();
+	std::printf( "  its first step: field %.3e, axis constraint %.3e\n",
+	             again.borderSteps().empty() ? -1.0 : again.borderSteps().front().fieldNorm,
+	             again.borderSteps().empty() ? -1.0 : again.borderSteps().front().axis );
+	std::printf( "\n  setInitialState(): the first residual %.3e against the cold start's %.3e, %d iterations "
+	             "against %d\n", first, scale, again.newtonIterations(), base->solver->newtonIterations() );
+	/*
+	 * NOT AT ZERO ON THE HOST, AND NOTHING IS DROPPED: the field residual of
+	 * the first step is 1.5e-16 on every arm, and psi_ax's label the base's.
+	 * The 1.9e-4 is the axis constraint alone. On eight cells the axis sits
+	 * at a mesh vertex (R = 1, z = 0), the fresh solver's first location is
+	 * a cold sweep, and on the host it roots q_h in another element than the
+	 * converged solve tracked -- psi_h jumps by O( h^( k+1 ) ) across the
+	 * faces there -- so it starts 1.9e-4 off and converges back in 4; the
+	 * card's device route happens to root the same element, 1.5e-16 in none.
+	 * On 7 and 9 cells, the axis off every face, the host starts at 1.8e-15
+	 * and 6.2e-16 in 0 iterations; on 10, a vertex again, 8.0e-5 in 4
+	 * (M-405). From the guess the first residual is the cold start's own.
+	 */
+	BOOST_TEST( first < 1.0e-2*scale, "a converged state handed to setInitialState() starts at "
+	            << first << ", the cold start's " << scale << ": the solve began from the guess" );
+	BOOST_TEST( again.newtonIterations() < base->solver->newtonIterations() );
 }
 
 /*

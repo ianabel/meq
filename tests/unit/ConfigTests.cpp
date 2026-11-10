@@ -2886,7 +2886,6 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	BOOST_TEST( good.getSource().getMHD().safetyFactorFile
 	            == exampleData( "q-driven-q.dat" ) );
 	BOOST_TEST( good.getSource().getMHD().toroidalFieldGuess == 2.2 );
-	BOOST_TEST( good.getSource().getMHD().safetyFactorDegree == 2u );
 	BOOST_TEST( good.getSource().getMHD().ggPrimeFile.empty(),
 		"a q-driven run has no gg' table, and leaving one here would let the "
 		"factory read a profile the loop is about to replace" );
@@ -2927,16 +2926,14 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	              "ToroidalFieldGuess = -1.0\nPlasmaCurrent = 1.0e5\n" ),
 	         "source.ToroidalFieldGuess" );
 
-	// DEGREE ZERO IS A CONSTANT g^2, so gg' is identically zero and no
-	// coefficient the loop moves can change the equilibrium. A degree the
-	// surface family cannot determine is refused at the other end.
-	refuses( mhd( driven + "SafetyFactorDegree = 0\n" ),
+	// SafetyFactorDegree IS REFUSED BY NAME, at every value and on a prescribed
+	// run too: g^2 is carried at knots that follow the mesh, and a degree would
+	// pose the fixed-fit problem that does not converge with it (M-361).
+	for ( char const *value : { "0", "2", "3" } )
+		refuses( mhd( driven + "SafetyFactorDegree = " + value + "\n" ),
+		         "source.SafetyFactorDegree" );
+	refuses( mhd( "GGPrimeFile = \"" + exampleData( "fb-ggprime.dat" ) + "\"\nSafetyFactorDegree = 2\n" ),
 	         "source.SafetyFactorDegree" );
-	refuses( mhd( driven + "SafetyFactorDegree = 9\n" ),
-	         "source.SafetyFactorDegree" );
-
-	Configuration const cubic = parse( mhd( driven + "SafetyFactorDegree = 3\n" ) );
-	BOOST_TEST( cubic.getSource().getMHD().safetyFactorDegree == 3u );
 }
 
 /*
@@ -3036,6 +3033,20 @@ BOOST_AUTO_TEST_CASE( a_q_driven_run_names_exactly_one_scale_pin )
 	// A signed flux is accepted: its sign is the field's.
 	BOOST_TEST( parse( mhd( target + guess + "ToroidalFlux = -0.25\n" ) )
 	                .getSource().getMHD().toroidalFlux == -0.25 );
+
+	// THE FLUX PIN BESIDE A FREE EDGE IS REFUSED -- the delivered flux jumps as
+	// the edge psi_bnd moves crosses the quadrature points -- and the other two
+	// pins are not.
+	{
+		std::string const limiter = "\n[boundary]\nType = \"zero\"\n[boundary.limiter]\nR = 1.0\nZ = 0.0\n";
+		std::string const xpoint = "\n[boundary]\nType = \"zero\"\n[boundary.xpoint]\nR = 1.0\nZ = -1.0\n";
+		BOOST_TEST( message( mhd( target + guess + flux ) + limiter ).first == "boundary.limiter" );
+		BOOST_TEST( message( mhd( target + guess + flux ) + xpoint ).first == "boundary.xpoint" );
+		BOOST_TEST( message( mhd( target + guess + flux ) + limiter ).second.find( "ToroidalFlux" )
+		            != std::string::npos );
+		BOOST_TEST( message( mhd( target + edge ) + limiter ).first == "" );
+		BOOST_TEST( message( mhd( target + guess + current ) + xpoint ).first == "" );
+	}
 
 	// BESIDE A PRESCRIBED FIELD, R0B0 AND ToroidalFlux MEAN NOTHING YET and are
 	// refused; PlasmaCurrent keeps its own meaning there, the profile scale.

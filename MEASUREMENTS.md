@@ -26200,3 +26200,689 @@ move"), so it is left as it is and reported: it is a comparison of two
 round-offs, which `discretisationPoints()`' reasoning would move off the
 floor, and that is the file owner's call.
 
+### M-391
+
+**THE q-DRIVEN JACOBIAN FROM THE EXACT TANGENT — ONE BORDERED BACK-SOLVE PER
+UNKNOWN AND THE EXTRACTION DIFFERENCED ALONG EACH TANGENT FIELD, NO
+EQUILIBRIUM RE-SOLVED — IS THE DERIVATIVE OF THE DISCRETE MAP TO 6e-9 TO
+4e-8 RELATIVE, LESS ONE TERM: THE RAY ORIGIN'S MOTION, 1e-5 TO 4e-5.**
+`tests/convergence/QRefiningStudy.cpp`, `theTangentJacobianIsTheDifferencedOne`
+and `fieldProbe` (disabled, run by name), branch `q-refining-fit` off
+`1e8a3ad`, `builds/q-refining-fit` (double), `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`.
+
+The case is M-361's: the q-driven box (`[0.6, 1.4] × [-0.6, 0.6]`, `8 × 8`
+triangulated), `p′` the example's, `k = 2`; the target the `q` of a forward
+solve with `g² = 2.2² + (e^{2Ψ} − 1)/(e² − 1)` (level 2, `k = 3`) at the
+family's labels. `g²` is carried as its values `u_j` at the `m = 8` surfaces
+(`Ψ_N ∈ [0.05, 0.95]`, uniform in `ρ`) and at the edge, a not-a-knot cubic in
+the source's `Ψ`; `r_i = q_i/q*_i − 1`, `q_i = V′_i⟨R⁻²⟩_i √u_i/4π²`.
+
+The column `j`: `dR/du_j` by `assembleSourceDerivative()` with
+`∂F/∂u_j = ½ φ_j′(Ψ)/span` (`φ_j` the spline's cardinal function),
+`linearisedTangent()` at the retained linearisation (`ψ_ax`'s border, the
+located axis's exact row), then `ψ*`, `q*` of the tangent
+(`reconstructFields()`, study scaffolding beside `reconstructPotential()`) and
+`ψ̂` from its trace block, and the family extracted on `ψ̃ ± s δψ̃` with the
+label `ψ_ax ± s δψ_ax` and the RAY ORIGIN HELD; plus the direct
+`q_i/(2u_i) δ_ij`. Against Richardson of central re-solved differences at
+`h` and `2h` relative:
+
+| | `h` | flat start, level 0 | near the answer, level 0 | flat, level 1 | near, level 1 |
+|---|---|---|---|---|---|
+| reference relocates the axis | 1e-5 | 1.3e-5 | 3.6e-5 | 1.9e-5 | 3.4e-5 |
+| | 1e-7 | 1.3e-5 | 3.6e-5 | 1.9e-5 | 3.4e-5 |
+| reference holds the ray origin | 1e-6 | 3.9e-7 | 8.0e-6 | 9.8e-7 | 1.3e-8 |
+| | 1e-7 | 5.7e-9 | 6.8e-6 | 7.4e-9 | 4.0e-8 |
+
+(max over the matrix of `|J_tangent − J_resolved|`, over `max|J|`: 141 at the
+flat start, 24 near the answer.) The floor that stays with the step is the
+derivative of the extraction's dependence on where its rays start, which the
+tangent Jacobian holds fixed: an `O(h^{k+1})` property of the extraction, not
+of the solve. The one cell at 7e-6 that does not fall (level 0, near the
+answer) is unexplained. The extraction step `s` (1e-4 to 1e-7 of the field)
+moves nothing. Re-solved differences are the hard reference here: at
+`h = 1e-3` they were 5e-3 off, and the state's own difference falls as `h²`
+(4.1e-2, 4.1e-4, 4.1e-6, 4.1e-8 for the innermost node at `h = 1e-2…1e-6`) —
+the map is strongly curved in the inner nodes.
+
+Newton on this Jacobian converges with that floor visible: 4.3e-5, 2.4e-8,
+4.6e-11, 8.0e-14, a contraction of about 1e-3 a step rather than quadratic.
+
+**Cost of one Jacobian** (`m = 8`, central differences, 17 extractions; the
+step's own solve not included): level 0 linearise 0.005 s, 8 tangents 0.09 s,
+8 reconstructions 0.12 s, extractions 3.0 s; level 1 0.02, 0.36, 0.45, 7.4 s.
+**The extraction is 90–95% of it.**
+
+**Reproduce.** `cd builds/<tree>/tests && MKL_NUM_THREADS=1 ./QRefiningStudy
+--run_test=theTangentJacobianIsTheDifferencedOne`, with `QR_RH` the reference
+step and `QR_FIXAXIS=1` for the held ray origin; `--run_test=fieldProbe` with
+`QR_H` for the state-level difference.
+
+### M-392
+
+**THE SQUARE SYSTEM THE TODO PROPOSES — q AT EVERY SURFACE, ONE MORE NODE AT
+THE EDGE, R0B0 HOLDING IT — IS ILL-CONDITIONED: ITS ROOT ON A LEVEL-0 MESH
+IS 5.5% FROM THE CLOSED FORM IN `g²` WHERE THE CLOSED FORM'S OWN q MISSES BY
+1.3e-3, AND NEWTON CRAWLS OR STALLS ON INNER FAILURES.** `QRefiningStudy`'s
+`theMissFallsWithTheKnotsAndTheMesh` (square mode) and `innerProbe`, as
+M-391.
+
+With the cut at `Ψ_N ∈ [0.05, 0.95]` the representation has one more degree
+of freedom than conditions only through the edge node, whose cardinal
+function lives in the layer outside the outermost surface. The near-null
+direction of the pinned system is then a near-uniform shift of `g²` inside
+the cut with the layer bending back to `R0B0` — the scale family (M-353)
+leaking through the one region `q` does not see.
+
+| mesh, `m = 8` | start | outcome | `u/g²_exact − 1` |
+|---|---|---|---|
+| `NZ = 9`, level 0 | flat `g = 2.2` | 8 Newton steps, 8e-14 | +5.4e-2 to +5.8e-2, uniform |
+| `NZ = 9`, level 0 | closed form (`r` 1.5e-3) | no root: 1.5e-3 → 1.7e-3 in 12 steps | — |
+| `NZ = 8` off z = 0 (below), level 0 | closed form (`r` 1.3e-3) | crawls to 5.1e-4 in 11 steps; 51 of 57 rejected trials are inner solves that do not converge | — |
+| same, level 1 | flat | stalls at 6.5e-3 (a minimum of `‖r‖`, not a root) | — |
+
+**The inner solve is the casualty.** From a converged state, the warm
+bordered Newton converges at the closed form's `gg′` times 0.9 to 1.1 (5 or
+6 iterations) and at the spline of the closed form times 0.9 to 1.1, and does
+NOT converge (60 iterations) when the innermost node alone moves by 1%: the
+end cubic extrapolated over `Ψ_N ∈ [0, 0.05]` turns a 1% node change into
+about a 60% change of `gg′` on the axis. A Newton step along the near-null
+direction puts a current sheet in the edge layer the same way.
+
+**The axis on a face was suspected and is falsified** (M-398). On the box at
+`NZ = 8` the axis lies on `z = 0`, a row of faces at every level, and a stalled
+inner solve above changed its located axis's element (73 to 56); but smooth
+changes of `gg′` that carry the axis across that row converge in 5 or 6
+iterations, on that mesh as on one moved off it. What stalls the inner solve
+is a sharp `gg′` near the axis -- the square system's steps and single-knot
+moves put one there -- which M-398 measures.
+
+**And the solve does not warm-start itself.** `solve()` re-seeds from the
+stored initial guess: re-solving an unchanged profile took 4 iterations, and
+0 after `setInitialState( state() )`. The harness warm-starts that way; the
+driver's q loop calls `solve()` alone.
+
+**Reproduce.** `QR_NZ=9 QR_SYMMETRIC=1 QR_VERBOSE=1 QR_MAXLEVEL=0 QR_COUNTS=8
+./QRefiningStudy --run_test=theMissFallsWithTheKnotsAndTheMesh` (add
+`QR_START_EXACT=1`); without `QR_NZ`/`QR_SYMMETRIC` for the moved mesh;
+`--run_test=innerProbe`; `--run_test=warmProbe` with `QR_COLD=1`;
+`--run_test=faceProbe` for the face row.
+
+### M-393
+
+**WITH THE PIN AS A ROW AND NO EDGE NODE — `g²` AT THE SURFACES ONLY, THE
+LAYERS THE END CUBIC CONTINUED, q AT EVERY SURFACE AND `R0B0` ON THE
+CONTINUED EDGE VALUE, SOLVED BY GAUSS–NEWTON ON THE EXACT TANGENT — THE
+DELIVERED `g²` CONVERGES TO THE CLOSED FORM AT `k + 1` AS THE MESH AND THE
+KNOTS REFINE TOGETHER, FROM A START 90% OFF IN q, IN 5 OR 6 STEPS WITH NO
+REFUSED TRIAL.** `QRefiningStudy`'s `theMissFallsWithTheKnotsAndTheMesh` with
+`QR_LS=1`, as M-391, on the box with every vertex moved off `z = 0`
+(M-392), from `g = 2.2` everywhere.
+
+The system is `m + 1` rows (the `m` q rows and `(g²(Ψ=0) − R0B0²)/R0B0²`) in
+`m` unknowns; every q condition is kept and none is dropped; the least-squares
+misfit at the knots is the discrete problem's inconsistency, and it falls with
+the discretisation. `max|g²/g²_exact − 1|` on a 2001-point grid over the cut
+(`Ψ_N ∈ [0.05, 0.95]`; over `[0, 1]` it is within 8% of this in every cell),
+`k = 2`, the reference level 3 at `k = 3`:
+
+| level (`h`) | `m = 8` | `m = 16` | `m = 32` |
+|---|---|---|---|
+| 0 (0.1) | **4.99e-4** | 2.84e-4 | |
+| 1 | 1.84e-4 | **5.20e-5** | 1.94e-5 |
+| 2 | 1.52e-4 | 2.33e-5 | **6.28e-6** |
+
+Bold is the diagonal, `m ∝ 1/h`: 9.6× then 8.3× a halving, rates 3.26 and
+3.05. Along a row or a column alone the error stalls (`m = 8`: 1.8e-4,
+1.5e-4) or falls 3–4×: the mesh and the representation each hold about half
+of it, so neither refines alone. M-361's degree-2 and degree-3 fits read
+1.18e-1 and 1.2e-2 in q on the same case, flat in `h`.
+
+| level, `m` | knot misfit `max|q/q* − 1|` | `q` off the knots | Gauss–Newton steps / solves | wall, of which extraction |
+|---|---|---|---|---|
+| 0, 8 | 1.24e-4 | 2.37e-4 | 5 / 18 | 6.3 s, 4.9 s |
+| 1, 16 | 2.37e-5 | 2.69e-5 | 5 / 18 | 44 s, 35 s |
+| 2, 32 | 1.66e-6 | 8.25e-6 | 6 / 7 | 411 s, 337 s |
+| 2, 16 | 2.69e-6 | 1.06e-5 | 6 / 30 | 176 s, 121 s |
+
+"Off the knots": the delivered state's own family at the `m − 1` midpoint
+labels (in `ρ`), `g` from the spline, against the reference there — so it
+carries the coarse mesh's extraction error as well. The pin row closes to
+1e-11 or better. History on the diagonal: 0.90, 0.37, 0.11, 1.2e-2, 1.7e-4,
+then the misfit.
+
+**`k = 3`**, the diagonal: 1.72e-4 (level 0, `m = 8`), 1.77e-5 (level 1,
+`m = 16`), 9.7×; one pair, so a rate is not claimed.
+
+**A node on the axis**, collocated on `q_ax = g/(R_ax² √det(dq̃/dx))` from the
+continuous fields' axis (`QR_AXISNODE`): the same to two figures (4.93e-4,
+6.85e-5, 2.47e-5 on the diagonal to level 2 at `m = 16`) — the inner layer,
+`Ψ_N < 0.05`, is not where the error is. Its row's tangent derivative agrees
+with re-solved differences as the surfaces' do (M-391's floor).
+
+**Cost.** 2m + 1 extractions of an m-surface family per step, so extraction is
+77–82% of the wall and grows as `m²`. M-361's degree-2 loop took 4 KINSOL
+iterations and 21 equilibria; at about 1.3 s an equilibrium on level 2 that
+is about 27 s against 411 s here.
+
+**Reproduce.** `QR_LS=1 QR_VERBOSE=1 QR_COUNTS=8,16 QR_MAXLEVEL=2
+./QRefiningStudy --run_test=theMissFallsWithTheKnotsAndTheMesh`; the diagonal
+with `QR_DIAGONAL=1 QR_COUNTS=8`; `QR_ORDER=3` for `k = 3`; `QR_AXISNODE=1`.
+
+### M-394
+
+**THE KNOTS: ABOUT TWO PER ELEMENT ACROSS THE MINOR RADIUS, AND THE LAYERS THE
+REQUEST IS NOT IMPOSED ON ONE KNOT SPACING WIDE.** `meq::toroidalKnotCount()`
+and `meq::toroidalKnotCut()`, measured through `QDrivenConsistency` (M-397)
+and the study (M-393).
+
+`m = ceil( 2 sqrt( cells/π ) )`, `cells` the mesh's area in cells (a triangle
+one half): 10, 19 and 37 knots on the q-driven box at levels 0, 1 and 2 —
+the study's diagonal of 8, 16 and 32 knots, 9.6× and 8.3× a halving
+(M-393), is the same rule within a knot. The knots are `ρ_j = j/( m + 1 )`,
+so the layers inside the innermost and outside the outermost, where `g²` is
+the end cubic continued and `q` is not imposed, are one knot spacing and
+shrink as `h`: `Ψ_N ∈ [0.0083, 0.826]` at level 0, `[0.0025, 0.9025]` at
+level 1. **A fixed cut does not converge to the request**: what lies outside
+it is never imposed, and its extrapolation is over a width the refining knots
+make ever more spacings wide — a cubic carried 0.05 in `Ψ_N` past knots 0.011
+apart, an amplification near `(L/Δ)³`; the innermost knot moved by 1% then
+moved `gg′` on the axis by 60% (M-392).
+
+The g² error over the cut on the q-driven box, k = 2, against the study's
+fixed cut `[0.05, 0.95]` (Gauss-Newton, the cut's own error measure):
+
+| level | fixed cut, m = 8·2^level | the rule |
+|---|---|---|
+| 0 | 4.99e-4 | 1.35e-3 (10 knots) |
+| 1 | 5.20e-5 | 7.37e-5 (19 knots) |
+
+The rule's level-0 error is the larger, over the larger range: its cut reaches
+`Ψ_N = 0.0083` and `0.826` where the fixed one stops at 0.05 and 0.95.
+
+### M-395
+
+**THE DRIVER'S q-DRIVEN LOOP DID NOT WARM-START ITS SOLVES.**
+`GradShafranovSolver::solve()` re-seeds from the stored initial guess, not the
+last answer. `examples/q-driven.toml` through the fit's KINSOL loop (`1e8a3ad`
+plus a probe printing `newtonIterations()` per map evaluation), double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`:
+
+| | inner Newton iterations per solve | total over 27 solves | wall |
+|---|---|---|---|
+| as shipped | 5, then 4 at every one -- differencing columns 1e-4 away included | 110 | 10.9 s |
+| `setInitialState( last state )` before each | 5, then mostly 3 | 88 | 10.4 s |
+
+KINSOL's iterations, map evaluations and the answer were unchanged.
+`meq::SafetyFactorEquilibrium` hands every solve the last admitted state:
+the example now takes 32 inner iterations over 7 equilibria. In the study
+harness an unchanged profile re-solved in 4 iterations, and in 0 so started.
+
+**Reproduce.** `runs/q-refining-fit/warm/` (`before.log`, `after.log`); the
+probe was a temporary block in `Run.cpp` behind `MEQ_PROBE_WARM`, not kept.
+
+### M-396
+
+**THE q ROWS LEAVE THE SCALE FREE AND EACH PIN CLOSES IT; MET EXACTLY, THE
+PINS COMPOSE, AND WEIGHTED INTO THE LEAST SQUARES THEY DO NOT.**
+`SafetyFactorScale`, `QDrivenScalePin`, double.
+
+**(a) The scale** (`SafetyFactorScale`, the closed form `g = 2.20 + 0.55Ψ` on
+the standard box, `k = 2`; the `q` rows in `ln u`, relative; each pin row
+relative, unweighted):
+
+| `n` | knots | `q` rows `σ_min` | next | `σ_min/σ_max` | `d ln ψ_ax/d ln g²` along it | `σ_min` with R0B0 | ToroidalFlux | PlasmaCurrent |
+|---|---|---|---|---|---|---|---|---|
+| 8 | 10 | 1.38e-5 | 0.697 | 4.1e-8 | 0.487 | 3.84e-2 | 1.47e-1 | 1.08e-2 |
+| 12 | 14 | 6.17e-3 | 0.647 | 9.6e-6 | 0.488 | 3.49e-2 | 1.27e-1 | 1.12e-2 |
+| 16 | 19 | 9.46e-3 | 0.627 | 8.1e-6 | 0.484 | 3.42e-2 | 1.11e-1 | 1.21e-2 |
+
+The near-null direction is the scale (the continuum's ½); each pin lifts
+`σ_min` above it, the current weakest — a third of R0B0 — and the flux
+strongest; `|pin · v|/|pin|` is 0.015, 0.07 and 0.004. The near-null value
+itself does not fall monotonically with the mesh, so nothing is asserted of
+its size.
+
+**(b) Composition** (`QDrivenScalePin`, level 0, the example's table times
+`1 + 0.2Ψ³`, a misfit of 3.6e-4 at the knots): the base under PlasmaCurrent,
+then each pin set to what it reads.
+
+| pin | `R0B0` read | `ψ` from the base | `g²` from the base |
+|---|---|---|---|
+| weighted 1e3 into the least squares: R0B0 | 2.114649089 | over 1e-6 (red) | 1.57e-6 |
+| weighted: ToroidalFlux | 2.114648043 | over 1e-6 (red) | — |
+| met exactly, least squares in levels of `Σ ln u` | 2.114643916, all three | under 1e-6 | under 1e-6 |
+
+Weighted, the pin row trades against the misfit, differently for each pin.
+
+**Reproduce.** `MKL_NUM_THREADS=1 ./SafetyFactorScale`, `./QDrivenScalePin`.
+
+### M-397
+
+**`QDrivenConsistency`: THE DELIVERED `g²` CONVERGES 18× A HALVING AT k = 2
+AND 11× AT k = 3; THE MISFIT AT THE KNOTS DOES NOT FALL AT k = 2.** Double,
+`OMP_NUM_THREADS=2 MKL_NUM_THREADS=1`, the reference level 2 at `k = 3` read at
+each rung's knots, `R0B0 = 2.2`, the box at `NZ = 8`.
+
+| level, `k` | knots | `max|g²/g²_exact − 1|` on the cut | misfit at the knots | Gauss-Newton steps / equilibria | wall |
+|---|---|---|---|---|---|
+| 0, 2 | 10 | 1.347e-3 | 5.37e-6 | 6 / 7 | 7.0 s |
+| 1, 2 | 19 | 7.374e-5 | 1.37e-4 | 6 / 7 | 48.6 s |
+| 0, 3 | 10 | 1.127e-3 | 6.97e-6 | 6 / 7 | 9.4 s |
+| 1, 3 | 19 | 1.006e-4 | 2.99e-6 | 6 / 7 | 63.8 s |
+
+Removable residual by step at level 1, `k = 2`: 0.97, 0.41, 0.12, 1.6e-2,
+2.8e-4, 7.7e-8, 5.5e-12 — quadratic from 1e-2. The suite case, 2 m 17 s.
+`examples/q-driven.toml` (19 knots, its table at its knots): 6 steps, 7
+equilibria, 32 inner iterations, the closed form recovered, 60 s of which
+the 273 extractions are 39 s and the 19 tangents 4 s.
+
+### M-398
+
+**THE BORDERED INNER NEWTON STALLS ON A SHARP `gg′` NEAR THE AXIS THAT
+CONTINUATION REACHES; THE AXIS ON A FACE ROW DOES NOT STALL IT.**
+`QRefiningStudy`'s `knotProbe` and `faceProbe`, `InnerSolveStall`, double.
+
+**(a) One knot moved** (production knots, level 0, `k = 2`, 10 knots, the
+closed form at them; the innermost knot at `Ψ_N = 0.0083` times a factor):
+
+| factor | `gg′` on the axis | warm | cold | four quarter steps |
+|---|---|---|---|---|
+| 1.000 | 1.156 | | | |
+| 1.001 | 1.417 | 6 | 6 | 19 |
+| 1.003 | 1.939 | **60, no** | **60, no** | 28 (symmetric mesh); no (moved mesh) |
+| 1.010 | 3.765 | 60, no | 60, no | no |
+| 0.990 | −1.452 | 60, no | 60, no | no |
+
+The failing solves plateau: the residual between 1e-2 and 4e-2 for 60
+iterations. `InnerSolveStall` asserts the 1.003 case converges warm within 15
+iterations, its continuation the precondition.
+
+**(b) The face row** (`gg′` times `1 + a( Ψ − ½ )`, warm from the closed form,
+level 0): on the symmetric `NZ = 8` box, `a` = 0.5 to 4 and −0.5 to −2, 5 to
+10 iterations, the axis moving across `z = 0` from element 56 to 73 at
+`a = −2` in 6; the same on `NZ = 9` and on the moved mesh.
+
+**Reproduce.** `QR_SYMMETRIC=1 ./QRefiningStudy --run_test=knotProbe` (and
+without `QR_SYMMETRIC` for the moved mesh), `--run_test=faceProbe` with
+`QR_NZ=9`; `./InnerSolveStall`.
+
+### M-399
+
+**ONE INTERPOLANT PER TANGENT, m + 1 IN PLACE OF 2m; THE EXTRACTION
+DIFFERENCED ONE-SIDED AT 1e-9 IS RE-SOLVED DIFFERENCES TO 3.1e-8 AND HALVES THE
+EXTRACTIONS, AND STALLS ON A TARGET WITH A MISFIT, SO THE DIFFERENCE STAYS
+CENTRAL.** `SafetyFactorSolver`'s
+`theTangentJacobianIsTheDifferencedOne` (8 cells, `k = 2`, 10 knots), double.
+
+`ψ̃` and `q̃` are linear in the state, so the perturbed pair is the base's
+plus `s` times the tangent's: `m + 1` continuous interpolants, and each column
+one extraction against the base family's.
+
+| one-sided step | max \|J_tangent − J_resolved\|/max \|J\| | the round trip's steps |
+|---|---|---|
+| 1e-6 | 2.6e-5 | 6, terminal contraction 1e-3 |
+| 1e-7 | 2.6e-6 | 5 |
+| 1e-9 | **3.1e-8** | 5, quadratic |
+| 1e-11 | 2.7e-6 | 6 |
+| central, 1e-5 (M-391's) | 1.2e-7 | 5 |
+
+Truncation to 1e-9, the tracer's noise below it. The pin rows are unchanged
+(8.2e-8 and 1.9e-8). In single a step under the format's epsilon adds nothing
+to the field, so there the difference is central at 1e-3, unmeasured here.
+
+`examples/q-driven.toml` (19 knots, the tolerance 1e-10): 7 steps, 8
+equilibria, 168 extractions in 30.0 s and a wall of 44 s, against 273 in
+39 s and 60 s central (M-397); load 7 to 9 from other builds, so read the
+ratio.
+
+**And it stalls where the target is not consistent.** `QDrivenScalePin`'s
+base (level 0, 10 knots, a misfit of 3.6e-4, PlasmaCurrent) one-sided: the
+removable residual by step 0.63, 0.46, 4.4e-2, 5.4e-3, 5.4e-5, 7.7e-9, 1.3e-9,
+2.1e-9, 2.7e-9 and no sufficient decrease, above the tolerance 1e-9 (and at
+3e-10 to 9e-10 against 1e-10); central at 1e-5 it converges (M-396). The
+Jacobian's error, projected through a conditioning near 1e-5 and multiplied
+by the misfit, moves `J dx` by about that much. The default is central at
+1e-5 in double, 1e-3 in single, from the one interpolant per tangent.
+
+### M-400
+
+**IN SINGLE THE q-DRIVEN LOOP CONVERGES, AND TO 2e-6 TO 3e-5 IN `g²`: ABOVE
+THE 20 eps THE PIN AND ROUND-TRIP TESTS STATE.** `builds/q-refining-fit-single`
+against `install-single` (`sm_75`), host, `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`; the device routes not exercised (the device audit's
+`b8dbc07` and `803a340` were not on main).
+
+The difference step: at 1e-3 of the field `SafetyFactorSolver`'s round trip
+found no decrease after its first step and its accepted point then failed to
+re-solve; at 1e-2 a perturbed family could not be traced; at **1e-4** it
+converges in 4 steps and 9 equilibria (removable 0.96, 5.0e-2, 8.9e-3,
+4.0e-4, 3.0e-5 against a floor near 1e-5). 1e-4 is the single default.
+
+| test | single | double |
+|---|---|---|
+| `SafetyFactorTests`, `ConfigTests` | green | green |
+| `SafetyFactorSolver` round trip, worst `g²` at the knots | **2.3e-6**, red against 1e-7 | 8.0e-15 |
+| tangent Jacobian against re-solved differences | 2.9e-2: the reference cannot resolve it (M-378), not asserted | 1.2e-7 |
+| `SafetyFactorScale` | the scale direction 0.488, 0.489; R0B0, flux, current lift `σ_min` to 3.8e-2/1.5e-1/1.1e-2 (n = 8), 3.6e-2/1.1e-1/1.4e-2 (n = 16) | as M-396 |
+| `QDrivenScalePin` | **R0B0's re-solve 2.7e-5 apart in `g²`**, red against 20 eps = 2.4e-6; the flux pin's re-solve exits 2 | under 1e-6 |
+| `QDrivenCurvedBoundary`, worst `g²` | **6.0e-6**, red against 20 eps | 6.1e-8 |
+| `InnerSolveStall` | red, as in double | red |
+
+The family moves about 1e-5 between neighbouring states in single
+(M-371), `Reconstruct()`'s round-off in `ψ*` (M-379 to M-381), and the q rows
+read it directly: a 1e-5 misfit floor in `q`, which the `g²` errors above sit
+under or near.
+
+`QDrivenConsistency` in single is green: 1.334e-3 then 8.753e-5 at `k = 2`
+(15.3×), 1.116e-3 then 9.611e-5 at `k = 3` (11.6×), misfits 3.6e-6, 1.3e-4,
+1.3e-5, 3.7e-5. `DriverAcceptance`'s `theDriverSolvesForTheToroidalField`
+recovers the closed form to **1.07e-5**, red against 20 eps;
+`theQDrivenRunReportsTheSafetyFactorItReached` reads 6.1e-5 inside the knots'
+cut, green against the averaged-metric floor; the capped run exits 2.
+
+### M-401
+
+**ON A FREE EDGE THE RETAINED LINEARISATION CARRIES `ψ_bnd`, THE X-POINT AND
+THE EXTERIOR MODES, AND THE q-DRIVEN TANGENT IS RE-SOLVED DIFFERENCES TO
+1e-7 WHERE THE REFERENCE IS DIFFERENTIABLE; THE FLUX PIN IS NOT
+DIFFERENTIABLE THERE.** `tests/convergence/LinearisedSolve.cpp`
+(`theLimiterBorderIsInTheTangent`, `theXPointBorderIsInTheTangent`) and
+`tests/convergence/QDrivenFreeEdge.cpp`, branch `q-refining-fit`,
+`builds/q-refining-fit` (double, host), `OMP_NUM_THREADS=2
+MKL_NUM_THREADS=1`.
+
+`linearise()` assembles the bordered Newton's blocks at the state — `ψ_bnd`'s
+column by `assembleNormalisationColumn()`, its row `−shape(x_b)` on the
+potential dofs at the limiter point, contact or X-point; the X-point
+re-located at the state as a zero of the total `q`, rows `−shape(x_X)` on the
+flux dofs, zero columns, corner `∇q`, `−∇ψ` in `ψ_bnd`'s row; the exterior
+modes' transmission rows, columns and DtN diagonal — and factorises the Schur
+complement `D − B J⁻¹ C` by partial pivoting.
+
+**The borders against Richardson differences of two solves converged to
+round-off** (LinearisedSolve's manufactured normalised source, `λ = 0.2`,
+`k = 2`, 9 cells; the X-point case on a two-lobe mode
+`sin t + 0.4 sin 3t + 0.15 sin 2t`):
+
+| | state | `δψ_ax` | `δψ_bnd` | `δR_X` | `δz_X` |
+|---|---|---|---|---|---|
+| limiter point (1.3, 0) | 5.4e-12 | 1.7e-14 | 7.2e-14 | | |
+| X-point | 4.8e-12 | 5.5e-14 | 4.4e-14 | 5.9e-14 | 1.6e-16 |
+
+**The q-driven tangent** on two unconfined machines on the standard box,
+9 cells, `k = 2`, 11 knots, `g = 2.2 + 0.55 Ψ`: limited at `ψ_h(1.3, 0)`
+(`ψ_ax` 0.4807, `ψ_bnd` 0.2429), and diverted by a divertor filament at
+(1.0, −0.68), current 1.5 (`μ₀ = 1`), less its harmonic Taylor part at the
+box's centre (`ψ_ax` 0.5263, `ψ_bnd` 0.3125, X-point (1.0069, −0.5785)),
+bootstrapped by XP-2's pinned solves (four sweeps to 1e-6 in the saddle's
+position). Against Richardson of central re-solved differences at
+`h = 1e-6 u_j`, judged where a second Richardson at `h/4` agrees to 1e-7 of
+`max|J|`:
+
+| | judged | q rows | the rest | current row | `max|δψ_bnd/δu_j|` |
+|---|---|---|---|---|---|
+| limited | 115 of 121 | 1.4e-7 | 2.6e-5 | 7.0e-10 | 6.2 |
+| diverted | 110 of 121 | 2.1e-7 | 5.8e-6 | 1.9e-10 | 0.71 |
+
+The unjudged entries are the reference's, not the tangent's: on the limited
+box at 9 cells entry (7, 8) reads −5.24023 from the tangent at extraction
+steps 1e-4 to 1e-7 alike, and re-solved −5.23999 at `h = 1e-6`, −5.177 at
+`1e-5` and −5.279 at `1e-4`, `d(2h)` jumping between `1e-5` and `2e-5` — the
+re-solved family re-locates the axis on every field, and on a face it changes
+element (M-391). Over meshes the whole matrix reads 8.2e-6 (8 cells),
+1.2e-7 (7), 2.6e-5 (9), 2.4e-7 (10) unjudged, against 1.2e-7, 1.9e-7, 6.9e-7
+for the same box with `ψ_bnd` fixed at zero; moving the limiter to 1.28 or
+1.32 moves which mesh is clean.
+
+**The flux pin's row is not differentiable on a free edge**: re-solved
+differences of the delivered flux read 2.3e2 on the limited box and 9.6 on
+the diverted one, against interior linearisations of order one — each
+quadrature point crossing the moving edge carries `g(0)/R` times its weight.
+Refused (`TODO`, *The flux pin beside a free plasma edge*).
+
+**The round trips**, R0B0-pinned, target the reference's own `q` at the knots:
+limited from `g` 40% large, 5 iterations, 6 equilibria, removable 9.6e-1,
+5.2e-2, 6.6e-3, 9.2e-5, 2.5e-8, 1.9e-12, `g²` to 9.7e-12; diverted from 20%,
+5 iterations, 4.4e-1, 2.4e-2, 8.1e-4, 8.3e-6, 1.7e-10, 8.0e-13, `g²` to
+2.0e-12 (from 10%: 4 iterations, 8.2e-10). From 40% the diverted loop refuses
+its first three steps as the X-point border leaves the mesh and settles at
+removable 8.8e-10 with misfit 5.1e-5 — another saddle's equilibrium.
+
+**Not measured here**: a confined source (every shipped free-boundary
+example), where the support's edge is in the quadrature; the exterior modes
+on a q-driven run that converges (`examples/limited-tokamak.toml` with an
+invented `q` forms its first Jacobian in 0.6 s and then has every trial
+refused, `TODO`); the miss along the `h`-and-knots diagonal on a free edge.
+
+### M-402
+
+**UNDER A DEVICE `setInitialState()` STARTED EVERY SOLVE FROM THE GUESS; FIXED,
+THE q-DRIVEN LOOP UNDER `--device debug` REPRODUCES THE HOST TO THE BIT ON THE
+SERIAL ROUTES.** Branch `q-refining-fit` after merging `b0870a1` and
+`cee0a7b`, `builds/q-refining-fit` (double, against `install-nocuda`, so the
+`debug` arm runs the host fallbacks), `MKL_NUM_THREADS=1`; a loaded machine
+(load 13 to 19, other agents' suites).
+
+**The defect.** `prepare()` copied `setInitialState()`'s iterate into
+`solution` device-aware, leaving it on the device, while `darcyFlux`,
+`potentialGf` and `traceGf` -- `MakeRef`'d into `solution` and written on the
+host by the guess seeding just before -- kept host flags; the trace datum,
+projected through `traceGf`, then put the guess back. LinearisedSolve's X-point
+case on its `debug` arm, `MEQ_TEST_SERIAL_ROUTES=1`: XP-2's pinned solve
+reproduced the host to every printed digit (`ψ_ax` 2.8603984193e-01, `|x|`
+2.4908782833e+01), and the X-point solve handed its state started at a
+residual of 5.5e-1 -- the cold start's -- where its dense corner is singular
+(*The X-point border from a cold start*, `TODO`). Copied on the host and the
+aliases synced, as `solve()` ends: the case is the host's to every printed
+digit on `debug`, the border unknowns to 6e-14 of re-solved differences.
+`theInitialStateIsWhereTheSolveStarts` asserts it on every arm: a converged
+state handed to a fresh solver starts at 1.9e-4 of the cold start's residual
+and takes 4 iterations against 5, on the host and on `debug` alike. The
+q-driven loop's warm starts and the driver's same-mesh restart
+(`Run.cpp`) both go through it.
+
+**cpu against debug, the driver.** `examples/q-driven.toml` with the
+ToroidalFlux pin of DeviceParity's case (2.4911634 Wb), `RefinementLevels = 0`,
+`OMP_NUM_THREADS=1`:
+
+| routes | `debug` against `cpu` | wall, cpu / debug |
+|---|---|---|
+| default (`AssemblyMode`, `TraceAssemblyMode` serial; local factorisation batched under the Device) | `ψ` 1.3e-12, `B` 5.7e-11, flux coefficients 5.3e-11 apart; 23 of 87 variables differ | 28 s / 1254 s |
+| `LocalFactorMode = "serial"` too | **every variable and attribute of the `.nc` and the `_surfaces.nc` equal to the bit** but the configuration's file name | 16 s / 1081 s |
+
+Both converge in 6 Gauss-Newton steps, 7 equilibria, 31 inner iterations,
+misfit 4.891e-4 at the knots. Under `debug` the loop is 45x to 66x the host's,
+extraction 609 s against 9.9 s; at level 1 it did not finish in 50 minutes
+against 70 s on the host, so DeviceParity's q-driven case runs on level 0
+(DeviceParity 2308 s in the suite). The tests' own round trips under `debug`
+on the serial routes: `QDrivenFreeEdge`'s limited loop 1046 s, green;
+`SafetyFactorSolver`'s box loop not finished in 3990 s; both are registered
+for `cuda` only.
+
+**The double suite** after both merges (`ctest -j4`, load 25 to 32 from
+other agents): 156 of 160 green; red are `PlasmaEdgeConvergence`,
+`AnisotropicMirror` and `InnerSolveStall` (each deliberate, CLAUDE.md) and the
+`SafetyFactorSolverDevice_debug` arm, stopped at 3990 s and since made
+cuda-only. 4920 s wall. After merging `cbf3fcd` (MFEM `56796771ac`, local
+refinement on), built `--clean-first`, `ctest -j3`: 157 of 160 green, the
+three deliberate reds alone, 2733 s; DeviceParity green with the q-driven
+outer count compared on every arm.
+
+**The kept interpolant.** `qOverG()` and the tangent's fields through
+`solver.continuousInterpolant().apply()` in place of the free
+`buildContinuousFields()` (M-385): `examples/q-driven.toml` as shipped, host,
+`OMP_NUM_THREADS=2`, 95.0 s and 104.6 s wall before (273 extractions 69.5 s,
+77.3 s), 68.9 s after (50.7 s); misfit 1.394e-10 then 1.393e-10. The
+remaining extraction time is the tracer.
+
+### M-403
+
+**ON THE CARD THE q-DRIVEN LOOP AND ITS TANGENT REPRODUCE THE HOST TO
+ROUND-OFF, AND ITS OUTER COUNT REPEATS; WHAT DOES NOT REPEAT RUN TO RUN IS
+cuDSS.** Branch `q-refining-fit` after merging `a1e930a`,
+`builds/q-refining-fit-cuda` (double, against `../../mfem/install`, CUDA,
+`sm_75`), RTX 2070 SUPER, `MKL_NUM_THREADS=1`, loaded machine.
+
+| | result |
+|---|---|
+| `ResidentIterateTests`' `theDoubleDotIsTheHostSumInDouble` | `doubleDotKernel` against a long double sum of 40,000 terms: 3.0e-12 and 3.1e-13 apart on the card, 3.5e-10 and 2.0e-11 under `debug` (its sequential reduce), against the rigorous bound 3.5e-7 and 4.7e-8 |
+| `LinearisedSolveDevice_cuda` | green; the borders against re-solved differences 2e-15 to 1e-13; `setInitialState()`'s warm start at 1.5e-16 of the cold residual in 0 iterations (1.9e-4 and 4 on the host, unexplained, `TODO`) |
+| `QDrivenFreeEdgeDevice_cuda` | the limited round trip, 5 iterations, `g²` 9.6e-12, 32 s |
+| `SafetyFactorSolverDevice_cuda` | the box round trip, green, 137 s |
+| `DeviceParity` | green, all five cases on cpu, debug and cuda |
+
+**The driver**, DeviceParity's q-driven case (level 0, ToroidalFlux,
+`OMP_NUM_THREADS=1`), serial routes: under `cuda` 6 Gauss-Newton iterations,
+7 equilibria, 31 inner iterations, misfit 4.891e-4, as on the host; `ψ`
+6.3e-13, `B` 2.9e-11, `q` 1.2e-11 from the host's; 22.2 s wall on both. Under
+`debug` on this build, which runs MEQ's kernels where the host-only build runs
+their fallbacks, the loop is 1.1e-12 in `ψ` and 2.1e-11 in `q` from the host,
+not bit-equal, where the plain `flux-surfaces` solve on the same routes is
+equal to the bit (70 of 70 variables): the q loop's kernels -- the point
+routes and the plasma loops of M-386, whose geometry is the coordinate
+field's -- differ from the host loops at round-off, as M-386 records for
+them. On the host-only build `debug` is equal to the bit (M-402).
+
+**Repeatability, the coordinator's (a).** Three back-to-back `cuda` runs on
+the default routes: 6 iterations and 7 equilibria each time, the removable
+residual's history identical to two digits. `MEQ_STAGE_CHECKSUM=1`: the
+toroidal system's input is identical, and the first stage that differs between
+runs is the bordered Newton's first `border.column`, the trace solve's output
+-- equal norms, different bits -- and every stage after it. With
+`TraceSolver = "pardiso"` under `cuda`, all 103 stages of two runs are equal to
+the bit. So the run-to-run variation is **cuDSS**, the driver's default trace
+solver under a Device, not the q loop; whether it is cuDSS's own reductions or
+its pivoting is not measured. An outer count that lands either side of a
+threshold on round-off -- main's KINSOL loop, 3 or 4 iterations -- is that
+variation crossing a stopping test; the Gauss-Newton here stops on a floor
+two orders below its last step (1.1e-10 against 1e-9).
+
+### M-404
+
+**IN SINGLE, ON TOP OF THE LOCAL REFINEMENT, THE q-DRIVEN ROUND TRIPS STAY
+ABOVE 20 eps, THE CURVED BOUNDARY AND THE FREE EDGE NO LONGER CLOSE, AND THE
+CARD ARM IS NOT REPEATABLE: ONE RUN IN THREE STALLS.** Branch `q-refining-fit`
+after merging `cbf3fcd`, `builds/q-refining-fit-single` against
+`install-single` (MFEM `56796771ac`, local refinement on), `sm_75`, host
+unless named, `MKL_NUM_THREADS=1 OMP_NUM_THREADS=2`, a loaded machine.
+
+| | single, this branch on `cbf3fcd` | M-400 (before) |
+|---|---|---|
+| `SafetyFactorSolver` round trip, worst `g²` | 1.6e-6, red against 1e-7 | 2.3e-6 |
+| its tangent against re-solved differences | 1.1e-2, not asserted (M-378) | 2.9e-2 |
+| `QDrivenScalePin`, R0B0 / ToroidalFlux / current re-solves | `g²` 4.0e-6, 6.5e-7, 3.6e-5 apart; red | 2.7e-5 |
+| `DriverAcceptance` `theDriverSolvesForTheToroidalField` | 1.30e-6, **green** against 20 eps | 1.07e-5 |
+| `QDrivenCurvedBoundary` | **exits 2**: the Jacobian cannot be formed, a perturbed family failing at `Ψ_N = 0.082` ("no crossing ... on the ray"); 28 of 33 equilibria refused | 6.0e-6 |
+| `QDrivenFreeEdge` round trips | **both fail**: limited 19 of 20 trials refused (inner solve does not converge), diverted 30 of 34 (the X-point leaves the mesh) | (new) |
+
+**The card arm, the coordinator's (a).** DeviceParity's q-driven case
+(level 0, ToroidalFlux) under `--device cuda`, back to back: on cuDSS, runs
+1, 2, 4, 5 converge in 5 Gauss-Newton iterations and 6 equilibria (the host's
+count, its removable residual 3.8e-6), runs 3 and 6 stall -- 6 iterations and
+56 equilibria at removable 1.8e-2, and 5 and 46 at 1.4e-1 -- with "no
+sufficient decrease". On PARDISO under `cuda`: runs 1 and 2 equal to the bit
+in all 78 stages, run 3 different from the first solve's first
+`border.column` on, and stalling (7 iterations, 53 equilibria, 3.8e-2), its
+removable residual 0.80 after the first step where the others read 0.47. In
+double the same case repeats its count on cuDSS and is bit-repeatable on
+PARDISO (M-403). So in single something before the first trace solve's
+output is not repeatable on the card even on PARDISO, and the loop's first
+step is sensitive enough to it to change course; neither the stage nor the
+step's sensitivity is identified.
+
+### M-405
+
+**THE SINGLE JACOBIAN IS NOISE-DOMINATED BUT 6e-5 ACCURATE; THE CARD'S
+NON-REPEATABILITY IS MFEM'S BATCHED HYBRIDIZATION ASSEMBLY; THE REAL LIMITED
+MACHINE CLOSES ON A REACHABLE TARGET; A WARM START'S FIRST STEP DEPENDS ON
+WHICH ELEMENT ROOTS THE AXIS.** Branch `q-refining-fit` on `cbf3fcd`,
+`builds/q-refining-fit` (double, `install-nocuda`) and
+`builds/q-refining-fit-single` (`install-single`, `sm_75`),
+`MKL_NUM_THREADS=1`, a loaded machine.
+
+**1. The differenced Jacobian in single** (`SafetyFactorSolver`'s disabled
+`theJacobianByStep`: the box at the closed form, 8 cells, `k = 2`, 10 knots,
+every matrix held to double's at 1e-5, whose own error is 1.2e-7; max
+`|J_single - J_double|` over max `|J|` = 12.1):
+
+| step | 1e-6 | 1e-5 | 1e-4 | 1e-3 | 3e-3 | 1e-2 |
+|---|---|---|---|---|---|---|
+| double | 1.2e-7 | -- | 5.8e-6 | 1.5e-3 | 1.1e-2 | 1.1e-1 |
+| single | 5.5e-3 | 4.7e-4 | **6.0e-5** | 1.5e-3 | 1.1e-2 | 1.1e-1 |
+| single, Richardson on `s` and `2s` | 7.9e-3 | 5.9e-4 | 6.6e-5 | 2.8e-4 | 1.8e-3 | -- |
+
+The noise goes as `1/s` -- `eps_single` of `q` over the step -- and the
+truncation as `s^2.4`; they cross near 2e-4, where the best a central
+difference can do is about 4e-5. So at the single default, 1e-4, the rows are
+noise-dominated (6e-5 against a truncation of 6e-6) but not "mostly noise",
+and no step does better than twice that; Richardson does not help. Repeats on
+the host are bit-equal. The q the map evaluates at the closed form is itself
+1.5e-6 from double's, which is the floor the round trip's 1.6e-6 sits on.
+
+The host single loop is robust: DeviceParity's q-driven case (level 0,
+ToroidalFlux, PARDISO) from eight starts `ToroidalFieldGuess = 2.2 (1 + k 1e-6)`
+converges in 5 iterations and 6 equilibria every time. Its stalls are the
+card's.
+
+| single test | result | cause, measured |
+|---|---|---|
+| `SafetyFactorSolver` round trip | 1.6e-6, red against 1e-7 | the q floor above |
+| `QDrivenScalePin` | 4.0e-6 and 3.6e-5 apart in `g²` | the same floor through the weakest pins' conditioning |
+| `QDrivenCurvedBoundary` | exits 2 | 20 of its 28 refused trials are `ContourTracer::fitByAngle` failing to bracket a level on 15 elements in single; the rest inner stalls. Not the kept interpolant: `buildContinuousFields()` in its place fails identically |
+| `QDrivenFreeEdge` round trips | fail | trials refused: the limited box's inner Newton stalls, the diverted box's X-point leaves the mesh |
+
+**2. The card's non-repeatability, bisected** with `MEQ_STAGE_CHECKSUM=1` and
+new stages `border.residualIn`, `border.residual`, `border.axisColumn`,
+`border.state`, `border.rhs` (single, `--device cuda`, PARDISO): the input to
+the very first residual is the same in every run and the residual
+(`DarcyNPCOperator::Mult`) is not -- a norm 3e-11 apart. Setting the three
+batched keys serial one at a time: `AssemblyMode = "serial"` alone makes 3
+runs equal in every stage; `TraceAssemblyMode` or `LocalFactorMode` serial
+alone do not. All three serial: 292 stages equal in 3 runs, and 3 of 3
+converge in 5 iterations. On cuDSS with `AssemblyMode = "serial"` alone, 3
+runs give the same outer count, 5 iterations (6, 6 and 7 equilibria), their
+stages parting from the first cuDSS solve on, as in double (M-403). So the varying stage is MFEM's
+`DarcyHybridization::AssemblyMode::Batched`, whose interior-face `D`
+accumulation goes through `AtomicAdd` (MEQ's note at
+`defaultAssemblyMode()`), an order that changes run to run on the card. On
+the batched default, 1 run in 3 stalls (2 of 6 on cuDSS, 1 of 3 and 1 of 4 on
+PARDISO); in each the first divergent stage is a residual 3e-11 apart and the
+first Gauss-Newton step reads 0.80 where the others read 0.47.
+
+**3. The real limited machine.** `examples/limited-tokamak.toml` forward
+without `PlasmaCurrent` (profile scale one): the plain bordered Newton stalls
+and the Picard-then-Newton rung converges in 204 iterations, 183 of them
+crawling below 1/64 of the Newton step. Its surfaces file was not written:
+`CriticalPointFinder::findAxis()` unqualified refuses a mesh holding the coils'
+extrema, now `meq::solvedAxis()` (sense from the labels, seeded at the
+solve's own axis) at every family of a solved state. The q-driven run on that
+forward run's own q (64 surfaces, `g² = 4 + 0.1176 Psi³`), R0B0 = 2.0:
+**converged**, 7 Gauss-Newton iterations, 21 equilibria, 13 trial solves
+refused (inner stalls on the moving support, absorbed by the line search),
+removable 1.4e+1, 5.6e-1, 1.2e-1, 6.3e-2, 3.2e-2, 1.1e-3, 2.0e-6, 1.7e-10,
+13 knots, `g²` at the knots within 5.5e-7 of the closed form. The earlier
+"every trial refused" was its target: an invented q no R0B0 = 2.0
+equilibrium reaches. With `PlasmaSupportSweeps = 4` the loop's first solve
+finds no maximum and the run exits 2 (`TODO`).
+
+**The h-and-knots diagonal on a free edge**, `QDrivenConsistency`'s
+`theDeliveredFieldConvergesOnALimitedBox` (the box with `[boundary.limiter]`
+at ( 1.3, 0 ), `k = 2`, target the reference's q on 160 surfaces): level 0,
+6 knots, `g²` 6.0e-2 from the closed form; level 1, 12 knots, 9.4e-3; **6.4
+a halving**. The knots now follow the Psi > 0 region on a free edge
+(`plasmaCells()`), after an opening solve: counted on the box, level 0 put 10
+knots across a plasma half its area, the Jacobian's conditioning fell to
+4e-7 and the loop stalled at a removable 6.9e-7.
+
+**4. The warm start.** `LinearisedSolve`'s
+`theInitialStateIsWhereTheSolveStarts`, the first border step's parts: the
+field residual is 1.5e-16 on the host and under `debug` alike, `psi_ax`'s label
+the base's to 1e-16; the whole 1.9e-4 is the axis constraint. On 8 and 10
+cells the axis is at a mesh vertex ( 1, 0 ) and the host's cold sweep roots
+q_h in another element than the solve converged on (psi_h jumps there by
+`O( h^( k+1 ) )`): 1.9e-4 and 8.0e-5, 4 iterations. On 7 and 9 cells, off
+every face: 1.8e-15 and 6.2e-16, 0 iterations. The card's route roots the
+same element as the converged solve. Nothing is dropped.
+

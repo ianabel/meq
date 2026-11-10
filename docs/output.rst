@@ -843,11 +843,11 @@ the same convention the gridded format uses:
        from a *prescribed* field needs a constant of integration no key
        supplies, and there the variable is **absent rather than zero** —
        because zero is a real machine. Under ``[source] SafetyFactorFile`` the
-       outer Newton solves for the coefficients of :math:`g^2` itself, so the
-       column is written and the run can be checked against the target it was
-       given. The file then also carries ``toroidal_field_driven``,
-       ``g_squared_coefficients`` and ``safety_factor_target``, so a reader can
-       tell a solved :math:`g` from a supplied one.
+       loop solves for :math:`g^2` at its knots itself, so the column is
+       written and the run can be checked against the target it was given.
+       The file then also carries ``toroidal_field_driven``,
+       ``g_squared_knots``, ``g_squared`` and ``safety_factor_target``, so a
+       reader can tell a solved :math:`g` from a supplied one.
    * - ``band(flux)``, ``worst_residual(flux)``, ``transversality(flux)``
      - Per-surface diagnostics: whether any node is band data, the worst
        :math:`|\psi_h - c|` over the surface, and how close a ray came to being

@@ -386,6 +386,59 @@ BOOST_AUTO_TEST_CASE( theFourScattersMatchTheirHostLoopsToTheBit,
 	}
 }
 
+/*
+ * meq::doubleDotKernel(): a stretch of one real_t vector, or its product with
+ * a stretch of another, summed in DOUBLE on the device -- what the q-driven
+ * pin rows contract with (meq::SafetyFactorEquilibrium). mfem::reduce
+ * re-associates -- a tree on the card, the sequential loop under `debug` --
+ * so the sum is held to a long double reference within the rigorous bound
+ * of any order of double additions, ( n - 1 ) eps sum |terms|: 3.5e-7 here,
+ * where accumulating in single would miss by about 1e-3. Measured: 3.0e-12
+ * on the card, 3.5e-10 under `debug`.
+ */
+BOOST_AUTO_TEST_CASE( theDoubleDotIsTheHostSumInDouble,
+                      *meq::tests::requiresDeviceKernels() )
+{
+	deviceOnce();
+	int const size = 50000, aBegin = 13, bBegin = 7, count = 40000;
+	mfem::Vector a( size ), b( size );
+	a.UseDevice( true );
+	b.UseDevice( true );
+	{
+		mfem::real_t *const x = a.HostWrite();
+		mfem::real_t *const y = b.HostWrite();
+		for ( int i = 0; i < size; ++i )
+		{
+			x[ i ] = static_cast<mfem::real_t>( 1.0 + 0.3*std::sin( 0.71*i ) );
+			y[ i ] = static_cast<mfem::real_t>( 0.2*std::cos( 0.13*i ) - 0.05 );
+		}
+	}
+	for ( bool weighted : { false, true } )
+	{
+		long double reference = 0.0L;
+		double magnitude = 0.0;
+		{
+			mfem::real_t const *const x = a.HostRead();
+			mfem::real_t const *const y = b.HostRead();
+			for ( int k = 0; k < count; ++k )
+			{
+				double const term = static_cast<double>( x[ aBegin + k ] )
+				                    *( weighted ? static_cast<double>( y[ bBegin + k ] ) : 1.0 );
+				reference += static_cast<long double>( term );
+				magnitude += std::abs( term );
+			}
+		}
+		double device = 0.0;
+		BOOST_TEST_REQUIRE( meq::doubleDotKernel( a, aBegin, weighted ? &b : nullptr, bBegin, count, device ) );
+		double const apart = std::abs( static_cast<double>( static_cast<long double>( device ) - reference ) );
+		double const bound = static_cast<double>( count - 1 )
+		                     *std::numeric_limits<double>::epsilon()*magnitude;
+		std::printf( "  doubleDotKernel, %s: %.17g against %.17Lg, %.2e apart (bound %.2e)\n",
+		             weighted ? "weighted" : "plain", device, reference, apart, bound );
+		BOOST_TEST( apart <= bound );
+	}
+}
+
 BOOST_AUTO_TEST_CASE( theSmallKernelsAreTheHostLoops,
                       *meq::tests::requiresDeviceKernels() )
 {

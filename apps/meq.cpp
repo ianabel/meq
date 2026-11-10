@@ -89,10 +89,11 @@ namespace
 			"                       perturbed pivot; MFEM's own default is 2. A\n"
 			"                       diagnostic: --profile reports the steps each\n"
 			"                       solve took and the pivots perturbed.\n"
-			"  --q-iteration-cap N  the q-driven outer Newton's KINSOL iteration\n"
-			"                       cap, 30 by default. Each iteration costs\n"
-			"                       2 ( SafetyFactorDegree + 1 ) + 1 whole\n"
-			"                       equilibria, so this bounds the run. It cannot\n"
+			"  --q-iteration-cap N  the q-driven loop's Gauss-Newton iteration\n"
+			"                       cap, 30 by default. Each iteration costs a\n"
+			"                       whole equilibrium or more and 2m + 1 flux-\n"
+			"                       surface extractions, m the knots, so this\n"
+			"                       bounds the run. It cannot\n"
 			"                       change the g a converging loop reports, only\n"
 			"                       whether it reports one: a loop that has not\n"
 			"                       converged within it exits 2. Refused on a run\n"
@@ -377,7 +378,7 @@ int main( int argc, char **argv )
 	bool wantTraceSolverStats = false;
 	// Unset leaves the solver's own default.
 	std::optional<int> traceRefinementCap;
-	// Unset leaves meq::OuterNewtonOptions' own default.
+	// Unset leaves meq::LeastSquaresOptions' own default.
 	std::optional<int> qIterationCap;
 	bool wantGridFunctions = false;
 	bool wantVtk = false;

@@ -175,7 +175,9 @@ invisible to the others. Reach for them in this order.
 * It runs a copy of `diverted-tokamak` with `PlasmaSupportSweeps` stripped, so
   that a **moving** support stays covered (M-239). *A device test's cases have to
   exercise every way host state can move, not only every leg.*
-* **It runs `flux-surfaces` and a ToroidalFlux-pinned `q-driven`**, the only
+* **It runs `flux-surfaces` and a ToroidalFlux-pinned `q-driven`** (level 0,
+  both arms: under `debug` the q loop is 45× the host's, 1254 s against 28 s
+  at level 0, and level 1 did not finish in 50 minutes, M-402), the only
   cases that reach the flux-surface extraction and the `q` loop's re-entry,
   and compares the family's surface count beside the four fields: under any
   Device the continuous pair was built on the device's zeros, which every
@@ -187,6 +189,15 @@ invisible to the others. Reach for them in this order.
   (→ **[M-383](MEASUREMENTS.md#m-383)**). The accuracy pieces of
   `c4ee278..1e8a3ad` still run on one host core under a Device: `DEVICE-PLAN.md`
   section 9, costed at **[M-384](MEASUREMENTS.md#m-384)**.
+* **`setInitialState()` is the iterate a solve starts from under any Device**,
+  and was not: the device-aware copy into `solution` left the state on the
+  device while the trace datum, written through `traceGf`'s alias with host
+  flags from the guess seeding, put the guess back. Every warm start -- the
+  q-driven loop's, a same-mesh restart's -- began from the guess under
+  `debug`, which only an X-point border from the guess (singular) made
+  visible. Copied on the host and the aliases synced, as `solve()` ends;
+  `LinearisedSolve`'s `theInitialStateIsWhereTheSolveStarts` asserts it on
+  every arm (→ **[M-402](MEASUREMENTS.md#m-402)**).
 * **The mirror is `RotatingMirrorDevice`'s, not one of its cases**: the box,
   two labels at points and subtracted filaments, `cpu` against `cuda` on the
   exact `ψ_h` and `q_h` within 1e-12 of their largest values. A tolerance and

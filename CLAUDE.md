@@ -198,19 +198,30 @@ plain `ctest` exercises threaded assembly as it ships. The reds are
 `AnisotropicMirror`'s
 `theDeltaInPsiConvergesTowardsTheFirehoseLimitAsTheBumpDoes`, deliberate while
 `Δ( Ψ )` crawls towards the firehose limit (→ **[M-351](MEASUREMENTS.md#m-351)**,
-`TODO`, *Anisotropic pressure*), and `QDrivenConsistency`, deliberate while
-`g²` is a fixed-degree fit, whose delivered `q` misses its target by the fit's
-floor at every mesh (→ **[M-361](MEASUREMENTS.md#m-361)**, `TODO`, *The q-driven
-solve is inconsistent*); a single build adds `DriverAcceptance`, whose
+`TODO`, *Anisotropic pressure*), and `InnerSolveStall`, deliberate while the
+bordered inner Newton stalls on a sharp `gg′` near the axis that continuation
+reaches (→ **[M-398](MEASUREMENTS.md#m-398)**, `TODO`, *The bordered inner
+Newton stalls on a sharp g g' near the axis*); a single build adds `DriverAcceptance`, whose
 `aWarmAdaptiveCycleConvergesOnTheNewtonRung` names an adaptive crawl
-(→ **[M-312](MEASUREMENTS.md#m-312)**). Which of its other single cases fail
+(→ **[M-312](MEASUREMENTS.md#m-312)**), and the q-driven suites --
+`SafetyFactorSolver` and `QDrivenScalePin`, whose round trips reach `g²` to
+2e-6 to 4e-5 against their bounds, the map's own q being 1.5e-6 from
+double's, and `QDrivenCurvedBoundary`, `QDrivenFreeEdge` and
+`QDrivenConsistency`'s limited box (`g²` 0.11 then 0.12 from the closed form,
+not converging), whose loops do not close in single, the tracer and the inner
+solves refusing their trials (→
+**[M-405](MEASUREMENTS.md#m-405)**, `TODO`, *The q-driven solve in single
+precision*). Which of its other single cases fail
 moves by the take: `theRetryRungClosesAStalledFirstAttempt` (TCV shaped
 reaching another equilibrium at `MKL_NUM_THREADS=1`) in some, and
 `theDriverRefinesOverAnExteriorCoupling` and
 `theProfileScaleCrossesEachAdaptiveCycle` in others, on `cb96cf3` as well
 (`TODO`, the single-precision round). `DeviceParity`'s `q-driven` card arm
-counts 3 or 4 KINSOL iterations by the take, the answer the host's: the third
-iterate against a measured floor that cuDSS moves between runs. A single
+is red in single by the take: about one run in three stalls, on cuDSS and on
+PARDISO alike, its first residual varying run to run through MFEM's batched
+hybridization assembly, which `AssemblyMode = "serial"` makes repeatable
+(→ **[M-405](MEASUREMENTS.md#m-405)**); in double it repeats its outer
+count, cuDSS varying the bits run to run (→ **[M-403](MEASUREMENTS.md#m-403)**). A single
 build reads `FluxSurfaceConvergence`'s
 `thePointErrorDoesNotAccumulateOverManyCircuits` red: its flatness comparison
 is between two closure errors of 1–8ε of the radius, red with the local

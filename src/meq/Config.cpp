@@ -543,6 +543,22 @@ namespace meq
 					"source needs g dg/dPsi either as input or as the output of "
 					"an outer solve for it" );
 
+			/*
+			 * SafetyFactorDegree IS REFUSED BY NAME, on every mhd source. g^2 is
+			 * carried at knots that follow the mesh (meq::toroidalKnotCount()),
+			 * so that the delivered q converges to the request as the
+			 * discretisation refines; a polynomial of fixed degree meets a target
+			 * only to its fit's floor, whatever the mesh (MEASUREMENTS.md M-361),
+			 * and nothing takes the key's place.
+			 */
+			if ( source.has( "SafetyFactorDegree" ) )
+				source.fail( "SafetyFactorDegree",
+					"is not a key: g^2 is carried at knots that follow the mesh, "
+					"about two flux surfaces per element across the minor radius, "
+					"so there is no degree to choose. Delete the key; the delivered "
+					"q converges to SafetyFactorFile's as the mesh and the "
+					"polynomial degree refine" );
+
 			if ( !driven )
 				return;
 
@@ -555,17 +571,6 @@ namespace meq
 					"requires Normalised = true. The target is q( Psi ) against "
 					"the normalised flux, and without the normalisation there is "
 					"no Psi for it to be a function of" );
-
-			parameters.safetyFactorDegree = static_cast<unsigned int>(
-				source.getIntegerOr( "SafetyFactorDegree", 2 ) );
-			if ( parameters.safetyFactorDegree < 1
-			     || parameters.safetyFactorDegree > 8 )
-				source.fail( "SafetyFactorDegree",
-					"must be between 1 and 8. Degree zero makes g^2 a constant, "
-					"so gg' is identically zero and no coefficient the loop "
-					"moves can change the equilibrium; and a degree the surface "
-					"family does not determine leaves the outer Jacobian rank "
-					"deficient, which is reported rather than solved" );
 		}
 
 		/**
@@ -2413,6 +2418,19 @@ namespace meq
 						xpoint.fail( "R", "an X-point pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.xpoint]" );
 				}
 			}
+
+			// THE FLUX PIN NEEDS AN EDGE THAT DOES NOT MOVE. Beside a limiter
+			// or an X-point psi_bnd is an unknown, and the delivered flux
+			// integrates g( 0 ) = R0B0 != 0 up to the edge it moves, so it jumps
+			// as quadrature points cross it (meq::SafetyFactorEquilibrium).
+			if ( auto const *mhd = std::get_if<MHDParameters>( &sourceOptions.parameters );
+			     mhd && mhd->toroidalFlux != 0.0
+			     && ( boundaryOptions.limiter.given || boundaryOptions.limiter.surfaceAttribute > 0
+			          || boundaryOptions.xpoint.given ) )
+				boundary.fail( boundaryOptions.xpoint.given ? "xpoint" : "limiter",
+					"frees psi_bnd, and [source] ToroidalFlux is refused beside a free plasma edge: the "
+					"delivered flux integrates g( 0 ) != 0 up to an edge that moves, so it is not "
+					"differentiable in the state. Pin R0B0 or PlasmaCurrent instead" );
 
 			// [boundary.exterior] -- the exact exterior DtN, FB-5, and what
 			// makes a run FREE boundary.

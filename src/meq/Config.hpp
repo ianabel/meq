@@ -470,17 +470,11 @@ namespace meq
 		// on the strength of key order, and both spellings converge.
 		//
 		// THE TABLE IS IN THE SOURCE'S Psi, one on the axis, like every other
-		// profile table in examples/. meq::ToroidalFieldMap owns the
+		// profile table in examples/. meq::SafetyFactorSystem owns the
 		// reflection to the family's Psi_N; see SafetyFactor.hpp section 2 on
 		// why getting it backwards converges to a reversed shear rather than
 		// failing.
 		std::string safetyFactorFile;
-
-		// SafetyFactorDegree: the degree of the g^2 polynomial the loop
-		// iterates on. The fit is what makes the outer Newton affordable -- the
-		// unknown is d + 1 coefficients rather than nFieldDOF -- and what stops
-		// a noisy inversion near the axis becoming SHAPE in gg'.
-		unsigned int safetyFactorDegree = 2;
 
 		// ToroidalFieldGuess: g = R B_phi to start from, as a constant, so the
 		// loop opens at gg' = 0. Required with SafetyFactorFile beside
@@ -493,10 +487,10 @@ namespace meq
 		// THE SCALE PIN. Equilibria sharing p( Psi_N ) and q( Psi_N ) form a
 		// one-parameter family, so a q-driven run names EXACTLY ONE of R0B0,
 		// ToroidalFlux and PlasmaCurrent to select its member; none, or two,
-		// is refused (meq::PinnedToroidalFieldMap, MEASUREMENTS.md M-355).
+		// is refused (meq::SafetyFactorSystem, MEASUREMENTS.md M-355).
 		//
 		// R0B0: g = R B_phi on the boundary [T m], the vacuum field the TF
-		// coils set, positive; c_0 of the g^2 fit is its square. Zero when
+		// coils set, positive; g^2 continued to the boundary is its square. Zero when
 		// absent. Read only beside SafetyFactorFile.
 		double edgeToroidalField = 0.0;
 		// ToroidalFlux: the toroidal flux inside the boundary, Phi_edge [Wb],

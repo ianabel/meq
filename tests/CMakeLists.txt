@@ -312,13 +312,19 @@ set(MEQ_CONVERGENCE_TESTS
 	# The q-driven loop on a curved fixed boundary, whose outer surfaces lie in
 	# the band: a round trip on a Miller boundary.
 	QDrivenCurvedBoundary
+	# The q-driven loop on a free plasma edge, limited and diverted: psi_bnd and
+	# the X-point as borders of the tangent, against re-solved differences, and
+	# a round trip on each.
+	QDrivenFreeEdge
 	# The q-driven solve's three scale pins, R0B0, ToroidalFlux and
 	# PlasmaCurrent, returning one equilibrium (M-357).
 	QDrivenScalePin
-	# RED, deliberately: the delivered q against a target no fixed-degree g^2
-	# represents, which does not converge with the mesh (TODO, "The q-driven
-	# solve is inconsistent", M-361).
+	# The delivered g^2 converges to the closed form its target was measured
+	# from as the mesh and the knots refine together (M-393).
 	QDrivenConsistency
+	# RED, deliberately: the bordered inner Newton stalls on a sharp g g' near
+	# the axis that continuation reaches (TODO, M-398).
+	InnerSolveStall
 	# ANISOTROPY-PLAN.md's AN-0 to AN-2. At AN-0 it checks only the fixture,
 	# tests/analytic/ManufacturedAnisotropic.hpp, against its own operator and
 	# against tools/anisotropic_equation.py's symbolic closed form; the solves
@@ -371,21 +377,19 @@ if(TARGET SafetyFactorScale)
 	target_link_libraries(SafetyFactorScale PRIVATE Eigen3::Eigen)
 endif()
 
-# WHICH q CONDITION GIVES WAY TO EACH SCALE PIN: a study, BUILT BUT NOT
-# REGISTERED, because its numbers are MEASUREMENTS.md M-355 and M-356,
-# taken once, and the suite asserts the choice through the driver instead
-# (QDrivenScalePin, the composition). About five minutes:
-#     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./SafetyFactorPinStudy
-# It solves, so it needs the solver, as every convergence test does.
+# THE REFINING g^2 STUDY AND ITS PROBES: BUILT BUT NOT REGISTERED. Every case
+# is a measurement taken once (MEASUREMENTS.md M-391 to M-398) and disabled,
+# so as a ctest it would be a module with no case to run; run them by name:
+#     cd builds/<name>/tests && MKL_NUM_THREADS=1 ./QRefiningStudy --run_test=<case>
+# writeTheExampleTarget is examples/q-driven-q.dat's provenance.
 list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
 if(TARGET meq_core AND NOT _solver_index EQUAL -1
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/SafetyFactorPinStudy.cpp")
-	add_executable(SafetyFactorPinStudy "convergence/SafetyFactorPinStudy.cpp")
-	target_include_directories(SafetyFactorPinStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-	target_link_libraries(SafetyFactorPinStudy PRIVATE
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/QRefiningStudy.cpp")
+	add_executable(QRefiningStudy "convergence/QRefiningStudy.cpp")
+	target_include_directories(QRefiningStudy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(QRefiningStudy PRIVATE
 		${MEQ_TEST_CORE}
-		Boost::unit_test_framework
-		Eigen3::Eigen)
+		Boost::unit_test_framework)
 endif()
 
 # THE BORDER FOLD ON THE DEVICE INTEGRAND'S BATCHED ROUTE: PlasmaConnectivity's
@@ -457,7 +461,7 @@ foreach(_device IN LISTS _da_devices)
 	# while the first solve after a fresh linearisation answers to the bit --
 	# the solve carries state between calls on the card and not under `debug`
 	# (MEASUREMENTS.md M-383, open). So `debug` runs it and `cuda` does not.
-	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents)
+	set(_linearised_cases theBorderedTangentConvergesAtDegreeTwo,theInverseNormEstimateGrowsAsTheOperatorNearsItsFold,withoutABorderTheRetainedTangentIsSolveTangents,theLimiterBorderIsInTheTangent,theXPointBorderIsInTheTangent,theInitialStateIsWhereTheSolveStarts)
 	if(_device STREQUAL "debug")
 		string(APPEND _linearised_cases ",theRetainedFactorisationAnswersAsAFreshOneDoes")
 	endif()
@@ -472,6 +476,24 @@ foreach(_device IN LISTS _da_devices)
 			COMMAND TangentConvergence
 			        --run_test=theTangentInTheAmplitudeIsTheConstantItShouldBe,theTangentConvergesAtTheSolutionsRatesAtDegreeTwo)
 		set_tests_properties(TangentConvergenceDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	# The q-driven tangent and loop: the round trip on the box (every piece
+	# of the Jacobian, quadratically) and on the limited box (psi_bnd's
+	# border and label). CUDA ONLY: under `debug` the limited round trip took
+	# 1046 s and the box's did not finish in 3990 s on a loaded machine
+	# (MEASUREMENTS.md M-402); DeviceParity's q-driven case is the loop's
+	# `debug` arm, and LinearisedSolve's border cases the borders'.
+	if(TARGET SafetyFactorSolver AND _device STREQUAL "cuda")
+		add_test(NAME SafetyFactorSolverDevice_${_device}
+			COMMAND SafetyFactorSolver --run_test=theLoopRecoversTheFieldItsTargetWasBuiltFrom)
+		set_tests_properties(SafetyFactorSolverDevice_${_device} PROPERTIES
+			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
+	endif()
+	if(TARGET QDrivenFreeEdge AND _device STREQUAL "cuda")
+		add_test(NAME QDrivenFreeEdgeDevice_${_device}
+			COMMAND QDrivenFreeEdge --run_test=theLimitedLoopRecoversItsField)
+		set_tests_properties(QDrivenFreeEdgeDevice_${_device} PROPERTIES
 			ENVIRONMENT "MKL_NUM_THREADS=1;MEQ_TEST_DEVICE=${_device};MEQ_TEST_SERIAL_ROUTES=1")
 	endif()
 	# THE CONTINUOUS FIELDS ON THE DEVICE ROUTE (M-385): the blocks against

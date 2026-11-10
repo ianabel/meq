@@ -438,6 +438,16 @@ namespace meq
 	bool orderedDotKernel( mfem::Vector const &source,
 	                       mfem::Array<int> const &indices,
 	                       mfem::Vector const &weights, mfem::Vector &out );
+	/**
+	 * `sum_k a( aBegin + k ) b( bBegin + k )`, or `sum_k a( aBegin + k )`
+	 * with @a b null, over @a count entries, ACCUMULATED IN DOUBLE by an
+	 * mfem::reduce on the device: what a quadrature feeding a q-driven pin row
+	 * is contracted with (meq::SafetyFactorEquilibrium). A reduction
+	 * reassociates, so it is not bit-identical to a host loop; no contract
+	 * asks that of it. @copydoc plasmaElementKernel
+	 */
+	bool doubleDotKernel( mfem::Vector const &a, int aBegin, mfem::Vector const *b, int bBegin,
+	                      int count, double &out );
 	/// @copydoc plasmaElementKernel
 	bool copyEntriesKernel( mfem::Vector const &source,
 	                        mfem::Array<int> const &indices,

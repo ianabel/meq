@@ -6,14 +6,19 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <variant>
 #include <vector>
 
+#include "mfem.hpp"
+
 #include "meq/Dataset.hpp"
 #include "meq/Run.hpp"
+
+#include "convergence/QDrivenTarget.hpp"
 
 /*
  * THE q-DRIVEN SOLVE ON A CURVED FIXED BOUNDARY -- the band.
@@ -27,22 +32,22 @@
  *
  * The round trip q-driven.toml makes on its box, made on a Miller boundary:
  * an equilibrium from a closed-form g = 2.20 + 0.55 Psi, its q measured on
- * the same mesh through q = V' g < R^-2 >/4 pi^2, and the q-driven run of
- * that target recovering g^2's three coefficients. The discretisation error
- * is common to both, so what is read is the loop's accuracy.
+ * the same mesh through q = V' g < R^-2 >/4 pi^2 at the q-driven run's own
+ * knots (QDrivenTarget.hpp), and the q-driven run of that target recovering
+ * g^2 there. The discretisation error is common to both, so what is read is
+ * the loop's accuracy.
  *
- * UNDER THE R0B0 PIN, g = 2.20 on the boundary (Psi = 0 there): c_0 is held
- * and the loop solves for c_1 and c_2 with the fit's highest row given way
- * (meq::PinnedToroidalFieldMap). The target being exactly quadratic, every
- * row holds at the answer and the recovered coefficients are the closed
- * form's.
+ * UNDER THE R0B0 PIN, g = 2.20 on the boundary. The target is exact at every
+ * knot and g^2 is quadratic, which the knots' cubic reproduces, so every row
+ * holds at the answer and the recovered values are the closed form's.
  */
 namespace
 {
 	double const g0 = 2.20;
 	double const g1 = 0.55;
 
-	std::string configuration( std::string const &prefix, std::string const &toroidal )
+	std::string configuration( std::string const &prefix, std::string const &toroidal,
+	                           std::string const &surfaces = "FluxSurfaces = true\nFluxSurfaceCount = 24\n" )
 	{
 		return
 			"[mesh]\nRMin = 0.7\nRMax = 2.3\nZMin = -1.9\nZMax = 1.9\nNR = 8\nNZ = 10\n"
@@ -59,7 +64,7 @@ namespace
 			"[solver]\nNewtonMaxIterations = 60\nNewtonRelativeTolerance = 1.0e-12\n"
 			"NewtonAbsoluteTolerance = 1.0e-14\n\n"
 			"[output]\nDirectory = \".\"\nPrefix = \"" + prefix + "\"\nGridNR = 33\nGridNZ = 33\n"
-			"FluxSurfaces = true\nFluxSurfaceCount = 24\n";
+			+ surfaces;
 	}
 
 	std::unique_ptr<meq::Run> run( std::string const &text, std::string const &directory )
@@ -94,98 +99,68 @@ BOOST_AUTO_TEST_CASE( theLoopRecoversItsFieldOnACurvedBoundary )
 		        << 1.0 << " " << g1*( g0 + g1 ) << " " << g1*g1 << "\n";
 	}
 
-	// ---- the reference and its q, on this mesh ------------------------------
+	// ---- the knots, the reference and its q there, on this mesh -------------
 	using Clock = std::chrono::steady_clock;
 	Clock::time_point const started = Clock::now();
-	auto reference = run( configuration( "curved-reference", "GGPrimeFile = \"curved-ggprime.dat\"\n" ),
-	                      directory );
-	BOOST_TEST_REQUIRE( reference->prepare() == meq::Solved );
-	BOOST_TEST_REQUIRE( reference->solve() == meq::Solved );
-	std::shared_ptr<meq::Dataset const> const surfaces =
-		reference->fluxSurfaces( directory + "/curved-reference_surfaces.nc" );
-	std::vector<double> const psiN = variable( *surfaces, "normalised_flux" );
-	std::vector<double> const vPrime = variable( *surfaces, "V_prime" );
-	std::vector<double> const inverseR2 = variable( *surfaces, "inverse_R_squared" );
-
-	// The target in the SOURCE's Psi, one on the axis, ascending, with
-	// centred slopes: q-driven-q.dat's construction.
-	std::vector<double> psi, q;
-	for ( std::size_t i = psiN.size(); i-- > 0; )
 	{
-		double const sourcePsi = 1.0 - psiN[ i ];
-		psi.push_back( sourcePsi );
-		q.push_back( vPrime[ i ]*( g0 + g1*sourcePsi )*inverseR2[ i ]/( 4.0*M_PI*M_PI ) );
+		std::ofstream provisional( directory + "/curved-q.dat" );
+		provisional << "0.0 1.0 0.0\n1.0 1.0 0.0\n";
 	}
-	{
-		std::ofstream target( directory + "/curved-q.dat" );
-		target.precision( 17 );
-		std::size_t const n = psi.size();
-		for ( std::size_t i = 0; i < n; ++i )
-		{
-			std::size_t const a = i == 0 ? 0 : i - 1;
-			std::size_t const b = i + 1 == n ? n - 1 : i + 1;
-			target << psi[ i ] << " " << q[ i ] << " "
-			       << ( q[ b ] - q[ a ] )/( psi[ b ] - psi[ a ] ) << "\n";
-		}
-	}
+	std::string const driven = "SafetyFactorFile = \"curved-q.dat\"\nR0B0 = 2.2\n";
+	std::vector<double> const knots = meq::test::knotsOf( directory, configuration( "curved-driven", driven ) );
+	std::shared_ptr<meq::Dataset const> const surfaces = meq::test::forward(
+		directory, "curved-reference",
+		configuration( "curved-reference", "GGPrimeFile = \"curved-ggprime.dat\"\n",
+		               meq::test::surfacesAt( knots, 4 ) ) );
+	meq::test::writeTarget( *surfaces, []( double psi ) { return g0 + g1*psi; },
+	                        directory + "/curved-q.dat" );
 
 	// ---- the q-driven run of that target ------------------------------------
-	auto driven = run( configuration( "curved-driven",
-		"SafetyFactorFile = \"curved-q.dat\"\nSafetyFactorDegree = 2\n"
-		"R0B0 = 2.2\n" ), directory );
-	BOOST_TEST_REQUIRE( driven->prepare() == meq::Solved );
+	auto drivenRun = run( configuration( "curved-driven", driven ), directory );
+	BOOST_TEST_REQUIRE( drivenRun->prepare() == meq::Solved );
 	Clock::time_point const loop = Clock::now();
-	int const code = driven->solve();
+	int const code = drivenRun->solve();
 	std::printf( "\n  wall: the reference and its target %.1f s, the q-driven solve %.1f s\n",
 	             std::chrono::duration<double>( loop - started ).count(),
 	             std::chrono::duration<double>( Clock::now() - loop ).count() );
 	BOOST_TEST_REQUIRE( code == meq::Solved,
-		"the q-driven run on a curved boundary exits " << code << ": if every map "
+		"the q-driven run on a curved boundary exits " << code << ": if every "
 		"evaluation was refused, its families are traced without the band "
-		"(Run::Impl::extractFamily())" );
-	BOOST_TEST_REQUIRE( driven->writeRestart( directory + "/curved-driven" ) == meq::Solved );
-	meq::DatasetAttribute const *attribute = driven->dataset()->attribute( "g_squared_coefficients" );
-	BOOST_TEST_REQUIRE( attribute != nullptr );
-	std::istringstream in( std::get<std::string>( attribute->value ) );
-	std::vector<double> c;
-	for ( double value = 0.0; in >> value; )
-		c.push_back( value );
-	BOOST_TEST_REQUIRE( c.size() == 3u );
-
-	auto number = [ & ]( char const *name )
+		"(meq::SafetyFactorEquilibrium::Options::gammaHMarker)" );
+	BOOST_TEST_REQUIRE( drivenRun->writeRestart( directory + "/curved-driven" ) == meq::Solved );
+	auto numbers = [ & ]( char const *name )
 	{
-		meq::DatasetAttribute const *a = driven->dataset()->attribute( name );
+		meq::DatasetAttribute const *a = drivenRun->dataset()->attribute( name );
 		BOOST_TEST_REQUIRE( a != nullptr, "no attribute " << name );
-		std::vector<double> const *d = std::get_if<std::vector<double>>( &a->value );
-		BOOST_TEST_REQUIRE( ( d != nullptr && !d->empty() ), "attribute " << name << " is not a number" );
-		return d->front();
+		std::istringstream in( std::get<std::string>( a->value ) );
+		std::vector<double> out;
+		for ( double value = 0.0; in >> value; )
+			out.push_back( value );
+		return out;
 	};
-	double const residual = number( "toroidal_loop_residual" );
-	double const threshold = number( "toroidal_loop_threshold" );
-	double const conditioning = number( "toroidal_loop_conditioning" );
+	std::vector<double> const label = numbers( "g_squared_knots" );
+	std::vector<double> const value = numbers( "g_squared" );
+	BOOST_TEST_REQUIRE( label.size() == knots.size() );
+	BOOST_TEST_REQUIRE( value.size() == knots.size() );
 
-	double const exact[ 3 ] = { g0*g0, 2.0*g0*g1, g1*g1 };
-	std::printf( "\n  q-DRIVEN ON A MILLER BOUNDARY: g^2 = %.12f + %.12f Psi + %.12f Psi^2 "
-	             "against %.4f + %.4f Psi + %.4f Psi^2\n", c[ 0 ], c[ 1 ], c[ 2 ],
-	             exact[ 0 ], exact[ 1 ], exact[ 2 ] );
-	std::printf( "  errors %.2e, %.2e, %.2e; the loop stopped at %.2e against a threshold of %.2e, "
-	             "conditioning %.3e, so threshold/conditioning %.2e\n",
-	             std::abs( c[ 0 ] - exact[ 0 ] ), std::abs( c[ 1 ] - exact[ 1 ] ), std::abs( c[ 2 ] - exact[ 2 ] ),
-	             residual, threshold, conditioning, threshold/conditioning );
-	// WHAT THE LOOP PROMISES, NOT A FIXED FIGURE. It is judged converged when
-	// its residual in g^2's coefficients is under max( tolerance, floor ), and
-	// the coefficients are then within that over the outer Jacobian's
-	// sigma_min/sigma_max (OuterNewtonResult::finalResidual) -- 4.7e-9 in
-	// double, where they land 1.2e-10 away, and about 4e-4 in single, where
-	// they land 3.7e-6 away. The target is exact at every surface the map
-	// inverts at, so nothing else stands between the two. "Solved" alone is
-	// the loop's own threshold and cannot fail; a fixed 1e-4 of c_0 passed a
-	// map biased by 1e-8 that this catches (MEASUREMENTS.md M-372).
-	BOOST_TEST_REQUIRE( conditioning > 0.0 );
-	for ( int k = 0; k < 3; ++k )
-		BOOST_TEST( std::abs( c[ k ] - exact[ k ] ) < threshold/conditioning,
-			"coefficient " << k << " is " << c[ k ] << " against " << exact[ k ] << ", "
-			<< std::abs( c[ k ] - exact[ k ] ) << " away where the loop stopped at " << residual
-			<< " against its threshold " << threshold << " at a conditioning of " << conditioning
-			<< ": the answer is not worth what the loop says it is" );
+	double worst = 0.0;
+	for ( std::size_t i = 0; i < label.size(); ++i )
+	{
+		double const psi = 1.0 - label[ i ];
+		double const exact = ( g0 + g1*psi )*( g0 + g1*psi );
+		worst = std::max( worst, std::abs( value[ i ] - exact )/exact );
+	}
+	std::printf( "  q-DRIVEN ON A MILLER BOUNDARY: %zu knots, worst |g^2/g^2_exact - 1| %.3e\n",
+	             label.size(), worst );
+	// WHAT THE LOOP OWES, NOT A FIGURE IT HAPPENS TO REACH: the target is exact
+	// at every knot and the spline represents the closed form exactly, so
+	// nothing but the loop's own convergence stands between the two. 1e-7 is a
+	// tenth of what MEQ owes, and a map biased by 1e-8 (M-372) is caught at it.
+	// In single the inner solve is good to ten eps, 1.2e-6, and the bound is
+	// 20 eps, the rule QDrivenScalePin states.
+	double const bound = std::max( 1.0e-7,
+		20.0*static_cast<double>( std::numeric_limits<mfem::real_t>::epsilon() ) );
+	BOOST_TEST( worst < bound,
+		"g^2 at the knots is " << worst << " from the closed form at worst, against " << bound
+		<< ": the answer is not the one its target was measured from" );
 }
