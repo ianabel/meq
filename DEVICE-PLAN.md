@@ -2398,3 +2398,49 @@ fallbacks.
 
 **Until then the following `τ` cannot be the box default**: a default that
 takes the device solve to one host core breaks this file's acceptance.
+
+## 9. The accuracy pieces that landed as host code
+
+**`c4ee278..1e8a3ad` added five pieces that run on one host core under a
+Device**, and two of them gave wrong answers there until the host funnels of
+[M-382](MEASUREMENTS.md#m-da-1) and [M-383](MEASUREMENTS.md#m-da-2). Their
+cost under `--device cuda` is [M-384](MEASUREMENTS.md#m-da-3): on a scaled
+`q-driven` run 88% of the wall is outside `solve()`, and on 32,768 triangles
+the continuous fields cost 899 device Newton residuals and a four-pass tangent
+760. Ordered by the wall they save:
+
+1. **The continuous fields `ψ̃`, `q̃` (`ContinuousField.cpp`).** Phase B per
+   mesh: the vertex-to-element table in ascending element order (so the
+   vertex means are the serial sum to the bit), and the edge and cell moment
+   systems as matrices, one per reference element and orientation where the
+   map is affine and one per element where it is curved. Phase C per
+   extraction: three `mfem::forall`s for `ψ̃` and two for `q̃`, each writing
+   only its own entity's dofs, so no atomics. The host takes the same
+   matrices, which is a host win as well (the build is about 150 µs an
+   element) and what makes the two routes comparable to the bit in double.
+   The tracer stays on the host and reads `ψ̃`, `q̃` downloaded, which are
+   smaller than the `ψ*`, `q*` it downloads now.
+2. **The linearised solve (`linearise()`, `applyRetainedJacobian()`,
+   `addSourceColumns()`).** (a) The retained operator built as `buildNpc`
+   builds Newton's, through `makeDeviceNPCOperator()`, so its residual and
+   gradient take the device integrand (a plain `mfem::DarcyNPCOperator` runs
+   it on the host, 158 device residuals a call). (b) `addSourceColumns()` as a
+   kernel over `SourceView`: `S( x )`, `S( x + s t )` and `S'( x ) t` write
+   disjoint L2 dofs per element. (c) `assembleSourceDerivative()`'s direction
+   as a `KnotView`. (d) In single the refinement passes buy nothing a test
+   can see ([M-384](MEASUREMENTS.md#m-da-3)); either form the residual with
+   double accumulation, which needs upstream's NPC Jacobian apply (its
+   `Jacobian::Mult` aborts today), or stop at `10 ε ‖dx‖`. The
+   [M-383](MEASUREMENTS.md#m-da-2) funnels go when this lands.
+3. **The delivered integrals.** `deliveredPlasmaCurrent()`'s device route
+   exists and never runs: `iterateIsResident()` asks for device-valid AND
+   host-invalid, and after `downloadSolution()` the state is both. The
+   delivered flux becomes a `PlasmaQuantity` of the plasma loops, with a
+   directional twin for the `q`-driven Jacobian, its element partials and
+   their sum in **double** (a float sum over 3e4 elements is near the `q`
+   loop's floor). `sourceTableReach()` is a min and a max of the same loop.
+
+**Acceptance for each:** the `cpu` arm against `--device debug` to the bit in
+double on a build without device kernels; `cuda` within the existing single
+bounds; and a case asserting the kernel ran, skipped loudly where
+`deviceKernelsBuilt()` is false.

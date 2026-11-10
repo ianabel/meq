@@ -25660,3 +25660,156 @@ So `Reconstruct()` wants its load accumulated and held in double and its solve
 refined against a double residual (or done in double: the system is ~40 × 40
 and backward stable), and it wants the recovered fields M-379's fix gives.
 Refinement in real_t (3–8%) and equilibration (1.8–3.1× worse) do not help.
+
+### M-382
+
+**Under any `mfem::Device` the flux-surface family was built on zeros.**
+`meq::momentInterpolant()` asked for `out.HostWrite()` and then zeroed `out`
+with `out = 0.0`. A GridFunction is born `UseDevice( true )`, so the zeroing
+ran on the device and left the host copy stale; every value written after it
+went to the host page while the flags vouched for the device's zeros, and the
+next `HostRead()` copied the zeros back. Single, `1e8a3ad`:
+
+| run | `--device cpu` | `--device cuda` | `--device debug` |
+|---|---|---|---|
+| `examples/q-driven.toml` | 25 map evaluations, 0 refused, exit 0 | 5 evaluated, 5 refused, exit 2 | faults in `momentInterpolant()` (double too) |
+| `examples/flux-surfaces.toml` | 32 surfaces written | exit 0, *"psi at the magnetic axis equals psi on the boundary"*, no `_surfaces.nc` | exit 0, no family |
+
+**The repair zeroes through the host pointer it asked for.** Then `cuda`
+against `cpu`, single: `q-driven` converges in both (30 and 25 map
+evaluations, 5 and 4 KINSOL iterations: single's two routes take different
+paths), and pinned by ToroidalFlux 26 and 26, by PlasmaCurrent 33 and 33;
+`flux-surfaces`' family agrees to 3.0e-6 in `V'`, 4.0e-7 in `⟨R⁻²⟩` and
+1.2e-6 in `psi`.
+
+**And one more defect behind it, open.** With the repair, `q-driven` under
+`--device debug` faults in the outer loop's measured floor
+(`FixedPointResidual::measuredSpreadAt()`, SafetyFactorSolve.cpp, M-363):
+by the backtrace and the code, `away = x` reads KINSOL's iterate on the
+device, which leaves its host page protected, and the loop then reads
+`x( i )` raw. Under CUDA the host copy stays valid and the answer is right.
+The q loop is being rewritten on `q-refining-fit`, so `DeviceParity` runs
+`q-driven` on the card arm only until that lands.
+
+**No case could see it**: `DeviceParity`'s three cases write no family and
+re-enter no loop, and no extraction test configures a Device. The tests that
+do now, each red without the repair and green with it:
+
+| test | without the repair | with it |
+|---|---|---|
+| `ExtractionContinuityDevice_debug`, CPU-only double build | memory access violation | passes |
+| `ExtractionContinuityDevice_debug`, single CUDA build | memory access violation | passes |
+| `ExtractionContinuityDevice_cuda` | *"psi at the magnetic axis equals psi on the boundary"* | passes |
+| `DeviceParity`, `flux-surfaces`, `debug` arm, double | the family has '' surfaces against '32' | passes |
+| `DeviceParity`, `flux-surfaces`, `debug` and `cuda` arms, single | '' against '32' on both | passes |
+| `DeviceParity`, `q-driven` pinned by ToroidalFlux, `cuda` and forced `cuda` | exit 2, no `psi_ax`, no family | exit 0, `psi_ax` 3.457385e-01, 3 KINSOL iterations, 24 surfaces, as the host |
+
+### M-383
+
+**Under `--device cuda` the retained linearisation's tangent was wrong**, and
+under `--device debug` it faulted. `retainedBackSolve()`, the refinement loop
+of `solveLinearised()`, `linearise()`'s row, `linearisedInverseNorm()` and
+`addSourceColumns()`'s direction read and wrote vectors raw that MFEM had left
+valid only on the device: a copy born device-valid, the back-solve's answer,
+the refinement residual. `DeviceAudit`, single, `n = 16`, k = 2:
+
+| | `d psi_ax`, 1 / 2 / 4 passes | `‖dx‖∞`, 4 passes | `1/sigma_min` |
+|---|---|---|---|
+| `cpu` | 3.3044978e-02 / 3.3044976e-02 / 3.3044976e-02 | 0.39107 | 84.2 |
+| `cuda`, as it was | 7.044e-02 / 6.476e-02 / 7.604e-02 | 0.11018 | 1483 |
+| `cuda`, the same with PARDISO for cuDSS | -3.04e-02 / 8.61e-02 / -2.06e-02 | 0.74489 | 1483 |
+| `cuda`, every batched key serial | -3.04e-02 / 8.61e-02 / -2.06e-02 | 0.74490 | 1483 |
+| `cuda`, with the funnels | 3.3044960e-02 / 3.3044972e-02 / 3.3044976e-02 | 0.39107 | 84.2 |
+
+**The repair is a host funnel at each raw site**, the access the site needs
+and no copy: `countedHostRead()` before a raw read, `countedHostReadWrite()`
+before a raw write, and the trace datum in `linearisedTangent()` zeroed on
+the host rather than by a GridFunction's device-aware `= 0.0`. That last site
+was missed by `DeviceAudit`, which lifts no datum, and found by the device
+arms below. Each is commented INTERIM: `DEVICE-PLAN.md` section 9 replaces
+them with a device route.
+
+| test | without the funnels | with them |
+|---|---|---|
+| `LinearisedSolveDevice_debug`, CPU-only double build | SIGSEGV in `theRetainedFactorisationAnswersAsAFreshOneDoes` | passes |
+| `LinearisedSolveDevice_debug`, single CUDA build | SIGSEGV, the same case | passes |
+| `LinearisedSolveDevice_cuda` | `1/sigma_min` times `delta` varies 33.6× over `delta` = 1e-2 to 1e-5 (wanted < 1.5) | passes |
+| `TangentConvergenceDevice_debug`, both builds | memory access violation | passes |
+| `TangentConvergenceDevice_cuda` | the constant tangent misses by 2.3e-6 to 3.9e-6; the k = 2 rate 2.53, wanted 2.8 | passes |
+
+**Against the host to the bit in double**, on the CPU-only build: each arm's
+cases print their answers to 17 digits, and with `MEQ_TEST_SERIAL_ROUTES=1`
+(serial element and trace assembly) a run with no Device and the `debug` arm
+print the same digits: 12 lines of `LinearisedSolve`, 8 of
+`TangentConvergence`, 1 of `ExtractionContinuity`. On the default routes they
+differ in the last bits, from the solve on: `psi_h`'s norm 1.505343572928864
+against 1.5053435729288722 on `ExtractionContinuity`'s box, threaded and
+batched assembly associating differently with and without a Device.
+
+**Open.** Under `cuda`, single, the retained solve is not a pure function of
+its right-hand side: `theRetainedFactorisationAnswersAsAFreshOneDoes`' third
+solve (`b1` again, after `b2`) answers 7.9e-4 of 9.7e3 apart from the first,
+`d psi_ax` -1.13779645 against -1.13779696, while the first solve after a
+fresh linearisation reproduces the first to the bit, and `debug` reproduces
+it everywhere. So the card's solve carries something from one call to the
+next; the case runs on the `debug` arm and not the `cuda` one until that is
+found. And in single, under `cuda`, `LinearisedSolve`'s manufactured
+fixture converges with its located axis at ( 0.999327, -0.000412 ) against the
+host's ( 0.999897, 0.000289 ), its state 8e-4 apart in norm. Its rates are
+unaffected; its random-direction `d psi_ax`, which divides a cancellation by
+the Schur complement, reads -1.138 under `cuda` and -1.137 under `debug` on
+the CUDA build against -13.560 on the host. Not asserted anywhere, and not
+investigated here.
+
+### M-384
+
+**What the accuracy pieces of `c4ee278..1e8a3ad` cost under `--device cuda`.**
+`tests/performance/DeviceAudit` (branch `device-audit`, not a ctest), single
+precision, RTX 2070 SUPER, k = 2, a `q-driven`-shaped normalised MHD source
+(`p'` constant, `gg'` linear) on the standard box, `OMP_NUM_THREADS=2`,
+`MKL_NUM_THREADS=1`, on a machine at load 9 to 12 from other agents: **read
+the ratios to the device Newton residual, not the milliseconds.** Best of three.
+
+| piece, per call | 2,048 tri | 8,192 tri | 32,768 tri | × device residual at 32,768 |
+|---|---|---|---|---|
+| device Newton residual | 2.6 ms | 5.6 ms | 5.4 ms | 1 |
+| `buildContinuousFields` | 261 ms | 1,112 ms | 4,864 ms | 899 |
+| the tracer on `ψ̃`, `q̃`, 24 × 128 (pre-existing) | 785 ms | 1,744 ms | 4,525 ms | 836 |
+| `integrateOverDomain`, the delivered `Φ` | 17 ms | 71 ms | 349 ms | 65 |
+| `deliveredPlasmaCurrent` (device route 0 taken, 0 declined) | 15 ms | 62 ms | 342 ms | 63 |
+| `sourceTableReach` | 8 ms | 35 ms | 172 ms | 32 |
+| a plain `DarcyNPCOperator::Mult` (`evaluateResidual`) | 30 ms | 139 ms | 856 ms | 158 |
+| `addSourceColumns`, one pass | 16 ms | 73 ms | 424 ms | 78 |
+| `linearise` | 133 ms | 503 ms | 2,458 ms | 454 |
+| back-solve (`passes = 0`) | 2.1 ms | 6.2 ms | 58 ms | 11 |
+| `applyRetainedJacobian` | 63 ms | 276 ms | 1,370 ms | 253 |
+| `linearisedTangent`, 1 / 2 / 4 passes | 74 / 143 / 241 ms | 366 / 701 / 1,111 ms | 1,778 / 2,905 / 4,116 ms | 329 / 537 / 761 |
+| `linearisedInverseNorm( 20 )` | 5.9 s | 26.9 s | 113 s | 20,831 |
+| `labelledAxis` | < 1 µs | < 1 µs | < 1 µs | 0 |
+
+* **The continuous fields are a serial host loop at about 150 µs an
+  element**, with or without a Device: 1.11 s under `cuda` against 1.25 s on
+  the host at one thread, 8,192 triangles. Under a Device
+  `hostLoopsAreSafe()` keeps them on one core. They move 0.25 MB down at
+  2,048 triangles (`ψ*`, `q*`) and launch nothing.
+* **The linearised path runs MEQ's integrand on the host**: `linearise()`
+  and `applyRetainedJacobian()` build a plain `mfem::DarcyNPCOperator`, not
+  `makeDeviceNPCOperator()`'s. A four-pass tangent at 2,048 triangles moves
+  16.6 MB up and 3.8 MB down and spends 1.9 ms of its 240 ms in kernels (nsys,
+  NVTX ranges).
+* **`deliveredPlasmaCurrent()`'s device route never runs**: its gate asks for
+  a state valid on the device and not on the host, and after
+  `downloadSolution()` it is valid on both.
+* **In single the refinement passes buy nothing a tangent shows**: `d psi_ax`
+  reads 3.3048514e-02, 3.3048537e-02 and 3.3048517e-02 after one, two and
+  four passes at 32,768 triangles, at most 7e-7 apart, while `cuda` and the
+  host differ by 3e-6 at 8,192; passes two to four cost 1.6 to 2.3 times the
+  first.
+* **Through the driver**: `q-driven.toml` at `NR = NZ = 24` (4,608 triangles),
+  ToroidalFlux pin, `cuda`: 66.8 s wall, of which `solve()`'s legs 6.2 s and
+  outside `solve()` 59.0 s (88%). `perf` puts the extraction at 69% of the
+  samples (`buildContinuousFields` 26%, the tracer 45 to 50%),
+  `measureNoiseAt`'s four extra map evaluations at 9.4%,
+  `integrateOverDomain` at 1.9%, `postProcess()` under 1%.
+
+`DEVICE-PLAN.md` section 9 is the plan these rank.

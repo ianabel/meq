@@ -73,6 +73,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "SourceTree.hpp"
@@ -108,10 +109,13 @@ namespace
 		/// `mprotect`s every host page -- and a case added for a defect the
 		/// card arm catches need not buy it. Defaults on.
 		bool debugArm = true;
-		/// A key to REMOVE from the shipped file before running it, or null to
-		/// run the file as shipped. The copy is written into the scratch
-		/// directory; see the moving-support case for why one exists.
-		char const *strip = nullptr;
+		/// Edits to the shipped file before running it, none to run the file
+		/// as shipped: each line starting with an edit's key is REPLACED by its
+		/// text, or removed where the text is empty. The copy is written into
+		/// the scratch directory, its input paths made absolute
+		/// (meq::test::shippedConfig()); see the moving-support case for why
+		/// one exists. An edit whose key is missing throws.
+		std::vector<std::pair<char const *, char const *>> edits = {};
 	};
 
 	/// The file to hand the driver: the shipped one, or a copy in the scratch
@@ -129,7 +133,7 @@ namespace
 	{
 		std::string const relative = "examples/" + std::string( which.stem ) + ".toml";
 		std::string const shipped = meq::test::sourcePath( relative );
-		if ( which.strip == nullptr && !which.meshReady )
+		if ( which.edits.empty() && !which.meshReady )
 			return shipped;
 
 		static std::map<std::string, std::string> prepared;
@@ -138,27 +142,34 @@ namespace
 			return found->second;
 
 		std::string const copy = std::string( scratch() ) + "/" + which.stem
-		                         + ( which.strip ? std::string( "-without-" ) + which.strip
-		                                         : std::string() )
+		                         + ( which.edits.empty() ? std::string()
+		                                                 : std::string( "-edited" ) )
 		                         + ".toml";
 		std::istringstream in( meq::test::shippedConfig( relative ) );
 		std::ostringstream text;
 		std::string line;
 		std::string table;
-		bool removed = false;
+		std::vector<bool> applied( which.edits.size(), false );
 		bool redirected = false;
 		while ( std::getline( in, line ) )
 		{
 			std::size_t const first = line.find_first_not_of( " \t" );
 			if ( first != std::string::npos && line[ first ] == '[' )
 				table = line.substr( first );
-			if ( which.strip != nullptr && first != std::string::npos
-			     && line.compare( first, std::string( which.strip ).size(),
-			                      which.strip ) == 0 )
+			bool edited = false;
+			for ( std::size_t e = 0; e < which.edits.size() && !edited; ++e )
 			{
-				removed = true;
-				continue;
+				std::string const key = which.edits[ e ].first;
+				if ( first != std::string::npos && line.compare( first, key.size(), key ) == 0 )
+				{
+					applied[ e ] = true;
+					edited = true;
+					if ( *which.edits[ e ].second != '\0' )
+						text << which.edits[ e ].second << '\n';
+				}
 			}
+			if ( edited )
+				continue;
 			if ( which.meshReady && table == "[mesh]" && first != std::string::npos
 			     && line.compare( first, 7, "File = " ) == 0 )
 			{
@@ -167,11 +178,12 @@ namespace
 			}
 			text << line << '\n';
 		}
-		if ( which.strip != nullptr && !removed )
-			throw std::runtime_error(
-				shipped + " has no " + which.strip + " line to remove, so this "
-				"case would run the shipped configuration and test nothing it "
-				"was added for" );
+		for ( std::size_t e = 0; e < which.edits.size(); ++e )
+			if ( !applied[ e ] )
+				throw std::runtime_error(
+					shipped + " has no " + which.edits[ e ].first + " line to edit, so "
+					"this case would run the shipped configuration and test nothing "
+					"it was added for" );
 		if ( which.meshReady && !redirected )
 			throw std::runtime_error( shipped + " has no [mesh] File line to redirect" );
 		{
@@ -214,6 +226,8 @@ namespace
 		std::string psiBoundary;
 		std::string xPoint;
 		std::string newton;
+		/// The family's surface count, empty where no family was written.
+		std::string surfaces;
 
 		/// Whether MFEM printed its own device configuration naming this
 		/// backend. **A build carrying CUDA on a machine with no card does not
@@ -259,6 +273,18 @@ namespace
 		return text.substr( begin, i - begin );
 	}
 
+	/// The family's printed line: its surface count, empty where none was written.
+	std::string familyLine( std::string const &text )
+	{
+		std::size_t const at = text.find( " flux surfaces over Psi_N" );
+		if ( at == std::string::npos )
+			return {};
+		std::size_t begin = at;
+		while ( begin > 0 && std::isdigit( static_cast<unsigned char>( text[ begin - 1 ] ) ) )
+			--begin;
+		return text.substr( begin, at - begin );
+	}
+
 	/// @param forced run with `MEQ_AXIS_DEVICE=force`, so every host reader of
 	///        the iterate takes its device route whatever the iterate's flags
 	///        say. See the fourth arm below.
@@ -298,6 +324,7 @@ namespace
 		run.psiBoundary = after( text, "psi_bnd = " );
 		run.xPoint = after( text, "at the X-point ( " );
 		run.newton = after( text, "converged in " );
+		run.surfaces = familyLine( text );
 		run.configured =
 			text.find( std::string( "Device configuration: " ) + device )
 			!= std::string::npos;
@@ -330,7 +357,44 @@ namespace
 	Case const moving
 		{ "diverted-tokamak", false,
 		  "moving, filled plasma support -- M-239's case", false,
-		  "PlasmaSupportSweeps" };
+		  { { "PlasmaSupportSweeps", "" } } };
+
+	/*
+	 * THE FLUX-SURFACE EXTRACTION, WHICH NO CASE ABOVE REACHES: none writes a
+	 * _surfaces.nc. Under any Device the continuous pair psi~ and q~ was
+	 * zeroed through MFEM's device-aware operator= and then written on the
+	 * host, so the next host read copied the device's zeros back: the run
+	 * exited 0 under --device cuda with a warning and no surface file, and
+	 * --device debug faulted in momentInterpolant(). MEASUREMENTS.md M-382.
+	 * Compared on the family's printed line, which a missing family leaves
+	 * empty.
+	 */
+	Case const surfaces
+		{ "flux-surfaces", false,
+		  "the flux-surface extraction on psi~ and q~ -- M-382's case" };
+
+	/*
+	 * AND THE q-DRIVEN OUTER LOOP, which extracts a family at every map
+	 * evaluation, re-enters solve() (M-206), and under the ToroidalFlux pin
+	 * reads the delivered flux at every evaluation. With M-382's defect every
+	 * evaluation was refused under --device cuda and the run exited 2. Pinned
+	 * by ToroidalFlux rather than the shipped R0B0, so that the delivered
+	 * integral is on the path, at the flux the shipped run delivers.
+	 *
+	 * **THE CARD ARM ONLY, FOR NOW, AND THAT IS AN OPEN DEFECT AND NOT A
+	 * CHOICE.** Under `debug` the outer loop faults in
+	 * FixedPointResidual::measuredSpreadAt() (SafetyFactorSolve.cpp, M-363's
+	 * measured floor): `away = x` reads KINSOL's iterate on the device, which
+	 * leaves its host page protected, and the loop then reads `x( i )` raw.
+	 * Under CUDA the host copy stays valid and the read is right, so the card
+	 * arm is green. The q loop is being rewritten on `q-refining-fit`; the
+	 * `debug` arm goes back on with that (MEASUREMENTS.md M-382).
+	 */
+	Case const qDriven
+		{ "q-driven", false,
+		  "the q-driven outer loop on the delivered flux -- M-382's re-entry case", false,
+		  { { "R0B0", "ToroidalFlux = 2.4911634\nToroidalFieldGuess = 2.2" } } };
+
 }
 
 // EVERY NONLINEAR SHIPPED EXAMPLE GIVES THE HOST'S ANSWER AND THE HOST'S WORK
@@ -339,7 +403,7 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 {
 	std::system( ( "mkdir -p " + std::string( scratch() ) ).c_str() );
 
-	Case const cases[] = { rectangle, diiid, moving };
+	Case const cases[] = { rectangle, diiid, moving, surfaces, qDriven };
 
 	std::printf( "\n  A DEVICE CHANGES NEITHER THE ANSWER NOR THE WORK\n" );
 	std::printf( "    %-18s %-8s %6s %8s %16s %10s\n",
@@ -484,6 +548,14 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		            std::string( which.stem ) + ": the X-point is "
 		                + device.xPoint + " against " + host.xPoint );
 
+		BOOST_TEST( device.surfaces == host.surfaces,
+		            std::string( which.stem ) + ": the family has '" + device.surfaces
+		                + "' surfaces under a device against '" + host.surfaces
+		                + "' on the host. A family missing under a Device is the "
+		                  "continuous pair built wrong there (MEASUREMENTS.md M-382): "
+		                  "momentInterpolant() must write psi~ and q~ through host "
+		                  "access it asked for, never after a device-aware fill" );
+
 		// AND THE WORK, which is the half a comparison of answers cannot see:
 		// M-187 agreed on every printed number and did four times as much.
 		BOOST_TEST( device.newton == host.newton,
@@ -536,6 +608,10 @@ BOOST_AUTO_TEST_CASE( aDeviceChangesNeitherTheAnswerNorTheWork )
 		            std::string( which.stem ) + ": " + card.newton
 		                + " Newton iterations under CUDA against "
 		                + host.newton + " on the host" );
+		BOOST_TEST( card.surfaces == host.surfaces,
+		            std::string( which.stem ) + ": the family has '" + card.surfaces
+		                + "' surfaces under CUDA against '" + host.surfaces
+		                + "' on the host (MEASUREMENTS.md M-382)" );
 
 		/*
 		 * AND A FOURTH ARM, WITH EVERY DEVICE ROUTE FORCED OPEN.
