@@ -511,8 +511,32 @@ BOOST_AUTO_TEST_CASE( theEffectivityIndexIsBoundedAndSettles )
 		}
 		std::fflush( stdout );
 
-		for ( double value : index )
+		// ON THE MESHES WHOSE FLUX ERROR STILL MEASURES THE DISCRETISATION,
+		// which in double is every one. In single at k = 2 L2( q ) rises past
+		// h = 0.1 -- 1.65e-05, 1.23e-05, 4.98e-05 -- as the trace's round-off
+		// differentiated, which no residual estimator is built to bound; eta
+		// read above it there only while MFEM's unrefined recovery put its own
+		// noise into eta (M-390). The pair slack is the 0.30 a single pair is
+		// given elsewhere in the suite.
+		std::vector<double> errorsFlux, spacings;
+		for ( Measurement const &p : points )
 		{
+			errorsFlux.push_back( p.errorFlux );
+			spacings.push_back( p.h );
+		}
+		std::vector<bool> const kept =
+			meq::tests::discretisationPoints( errorsFlux, spacings, order + 1.0 - 0.30 );
+		for ( std::size_t i = 0; i < index.size(); ++i )
+		{
+			double const value = index[ i ];
+			if ( !kept[ i ] )
+			{
+				BOOST_TEST_MESSAGE( "  *** k = " << order << ", h = " << points[ i ].h
+				                    << ": SKIPPED the effectivity bounds; L2( q ) no longer falls at "
+				                    "k+1 here, so it is the format's round-off and not a "
+				                    "discretisation error. M-390" );
+				continue;
+			}
 			BOOST_TEST( value > 1.0,
 			            "k = " << order << ": the effectivity index is " << value
 			            << ", so eta is smaller than the error it is supposed to bound" );
@@ -528,16 +552,18 @@ BOOST_AUTO_TEST_CASE( theEffectivityIndexIsBoundedAndSettles )
 		// term of the wrong order looks like, and it is exactly what the printed
 		// eta_5 produces; see theLiteralTraceTermIsItsOwnFloor below.
 		// AND THE DRIFT IS A RATIO OF RATIOS, WITH THE ROUND-OFF IN IT TWICE.
-		// The bounds above are a different question and still run at every
-		// mesh and every degree; this 1.5 per cent band needs both columns
-		// clean to well under a per cent, and in single the finest L2( q ) at
+		// The bounds above are a different question and run at every mesh
+		// that measures the discretisation, at every degree; this 1.5 per
+		// cent band needs both columns clean to well under a per cent, and
+		// in single the finest L2( q ) at
 		// k = 1 -- the cleanest case here -- is 9 per cent contaminated and
 		// the index reads 9.66 against the double build's 10.52. M-220.
 		if ( !meq::tests::driftIsMeasurable() )
 			BOOST_TEST_MESSAGE(
 				"  *** k = " << order << ": SKIPPED the effectivity DRIFT. A "
 				"ratio of ratios carries the format's round-off twice; the "
-				"index's own bounds above are asserted at every mesh. M-220" );
+				"index's own bounds above are asserted at every mesh that "
+				"measures the discretisation. M-220, M-390" );
 		else
 		for ( std::size_t i = 2; i < index.size(); ++i )
 		{

@@ -2,6 +2,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,7 @@
 #include "mfem.hpp"
 
 #include "ExtractionCrossing.hpp"
+#include "RecoveryInstrument.hpp"
 
 /*
  * WHY MFEM'S ELEMENT-LOCAL HDG RECOVERY LOSES PRECISION IN SINGLE -- the
@@ -87,7 +89,21 @@
  * feeds it fields recovered by (d), and forms its load in double: the load
  * is linear in u_t and p_c, so it is G u_t + P p_c with G and P fixed per
  * element, whose columns come from the same real_t code on unit inputs.
+ *
+ * WITH THE LOCAL REFINEMENT ON (GradShafranovSolver::setLocalRefinement(),
+ * MEQ's default; MEQ_LOCAL_REFINEMENT and the device keys are
+ * RecoveryInstrument.hpp's) (a) IS THE REFINED RECOVERY and psi* the refined
+ * reconstruction, so the two bit-for-bit checks on them read the refinement's
+ * own correction instead of zero. MultInv() on the stored factors is still
+ * the unrefined route, and every other method is formed from it as before;
+ * (a) is checked instead against (d'), the one pass MEQ forms here against
+ * MFEM's real_t right-hand side, which is the pass upstream implements.
+ * The `cost` case times the recovery and the reconstruction with the
+ * refinement on and off.
  */
+
+using meq::tests::recovery::DeviceFromEnvironment;
+BOOST_TEST_GLOBAL_FIXTURE( DeviceFromEnvironment );
 
 // ------------------------------------------------------------------------
 // The access idiom. Read only; nothing below writes through these.
@@ -155,6 +171,7 @@ namespace recoveryaccess
 	MEQ_RECOVERY_ROB( SolverEnrichedFlux, mfem::GridFunction Solver::*, &Solver::enrichedFluxGf )
 	MEQ_RECOVERY_ROB( SolverPostProcessed, mfem::GridFunction Solver::*, &Solver::postProcessedGf )
 	MEQ_RECOVERY_ROB( SolverEnrichedTrace, mfem::GridFunction Solver::*, &Solver::enrichedTraceGf )
+	MEQ_RECOVERY_ROB( SolverFormSystem, void ( Solver::* )(), &Solver::formSystem )
 #undef MEQ_RECOVERY_ROB
 }
 #if defined( __GNUC__ ) && !defined( __clang__ )
@@ -524,6 +541,9 @@ namespace
 		double factorADifference = 0.0, factorSDifference = 0.0;
 		double recoveryUDifference = 0.0, recoveryPDifference = 0.0;
 		double reconstructionDifference = 0.0;
+		/// With the refinement on: (a) against (d') rounded to real_t.
+		double refinedUDifference = 0.0, refinedPDifference = 0.0;
+		bool refined = false;
 		// Per-element diagnostics, middle state only.
 		std::map<std::string, std::vector<double>> diagnostics;
 		std::map<std::string, std::vector<double>> reconstructionDiagnostics;
@@ -872,6 +892,13 @@ namespace
 		auto getCt = get( recoveryaccess::GetCtFaceMatrix{} );
 		auto getE = get( recoveryaccess::GetEFaceMatrix{} );
 		auto multInv = get( recoveryaccess::MultInv{} );
+		// Under a Device the batched factorisation leaves these on the card,
+		// and everything below indexes them raw.
+		static_cast<void>( afData.HostRead() );
+		static_cast<void>( afIpiv.HostRead() );
+		static_cast<void>( bfData.HostRead() );
+		static_cast<void>( dfData.HostRead() );
+		static_cast<void>( dfIpiv.HostRead() );
 
 		mfem::FiniteElementSpace &fesU = *darcy.FluxFESpace();
 		mfem::FiniteElementSpace &fesP = *darcy.PotentialFESpace();
@@ -888,6 +915,7 @@ namespace
 		solution.HostRead();
 
 		State out;
+		out.refined = solver.localRefinement();
 		out.trace = promote( lambda );
 		out.buGlobal = promote( bu );
 		out.bpGlobal = promote( bp );
@@ -1095,6 +1123,18 @@ namespace
 			scatter( out.u[ "d2" ], x.uDofs, xd2 );
 			scatter( out.p[ "d2" ], x.pDofs, xd2, static_cast<std::size_t>( x.na ) );
 			scatter( out.u[ "d rounded" ], x.uDofs, xdr );
+			if ( solver.localRefinement() )
+			{
+				std::vector<double> const xd1r = roundedToReal( xd1 );
+				for ( int i = 0; i < x.na; ++i )
+					out.refinedUDifference = std::max( out.refinedUDifference,
+						std::abs( xd1r[ static_cast<std::size_t>( i ) ]
+						          - out.u[ "a" ][ static_cast<std::size_t>( x.uDofs[ i ] ) ] ) );
+				for ( int i = 0; i < x.nd; ++i )
+					out.refinedPDifference = std::max( out.refinedPDifference,
+						std::abs( xd1r[ static_cast<std::size_t>( x.na + i ) ]
+						          - out.p[ "a" ][ static_cast<std::size_t>( x.pDofs[ i ] ) ] ) );
+			}
 			scatter( out.p[ "d rounded" ], x.pDofs, xdr, static_cast<std::size_t>( x.na ) );
 
 			// ---- (e1), (e2): the Schur recovery in real_t on scaled blocks
@@ -1250,6 +1290,10 @@ namespace
 		mfem::GridFunction &enrichedTrace = solver.*get( recoveryaccess::SolverEnrichedTrace{} );
 		mfem::GridFunction &postProcessed = solver.*get( recoveryaccess::SolverPostProcessed{} );
 		mfem::GridFunction &enrichedFlux = solver.*get( recoveryaccess::SolverEnrichedFlux{} );
+		static_cast<void>( totalFlux.HostRead() );
+		static_cast<void>( enrichedTrace.HostRead() );
+		static_cast<void>( postProcessed.HostRead() );
+		static_cast<void>( enrichedFlux.HostRead() );
 		out.psiStar = promote( postProcessed );
 		out.totalFlux = promote( totalFlux );
 		out.enrichedFlux = promote( enrichedFlux );
@@ -1357,6 +1401,7 @@ namespace
 				sol.GetBlock( 1 )( i ) = static_cast<mfem::real_t>( pIn[ static_cast<std::size_t>( i ) ] );
 			mfem::GridFunction ut( totalFlux.FESpace() );
 			darcy.ReconstructTotalFlux( sol, lambda, ut );
+			static_cast<void>( ut.HostRead() );
 			if ( keepFlux )
 				out.totalFluxMethod[ name ] = promote( ut );
 			Reconstructor r( darcy, hyb, ut, enrichedTrace, sol );
@@ -1380,6 +1425,7 @@ namespace
 		{
 			mfem::GridFunction utCheck( totalFlux.FESpace() );
 			darcy.ReconstructTotalFlux( solution, lambda, utCheck );
+			static_cast<void>( utCheck.HostRead() );
 			for ( int i = 0; i < utCheck.Size(); ++i )
 				out.totalFluxDifference = std::max( out.totalFluxDifference,
 					std::abs( static_cast<double>( utCheck( i ) - totalFlux( i ) ) ) );
@@ -1488,7 +1534,8 @@ namespace
 	{
 		Frozen frozen;
 		{
-			meq::tests::crossing::Solved solved( centre + ( states/2 )*spacing, n, order );
+			meq::tests::crossing::Solved solved( centre + ( states/2 )*spacing, n, order,
+			                                     meq::tests::recovery::configure );
 			State const s = readState( solved, false, nullptr );
 			frozen.trace = s.trace;
 			frozen.bu = s.buGlobal;
@@ -1497,14 +1544,17 @@ namespace
 		std::vector<State> series;
 		for ( int j = 0; j < states; ++j )
 		{
-			meq::tests::crossing::Solved solved( centre + j*spacing, n, order );
+			meq::tests::crossing::Solved solved( centre + j*spacing, n, order,
+			                                     meq::tests::recovery::configure );
 			bool const middle = j == states/2;
+			if ( middle )
+				meq::tests::recovery::reportRoutes( solved.theSolver() );
 			series.push_back( readState( solved, middle, &frozen ) );
 		}
 
 		std::printf( "\n  box, n = %d, k = %d, %s (eps = %.3e), %d states %.0e apart in A\n", n, order,
 		             sizeof( mfem::real_t ) == 4 ? "single" : "double", eps, states, spacing );
-		double fa = 0.0, fs = 0.0, ru = 0.0, rp = 0.0, rr = 0.0, rt = 0.0, rl = 0.0;
+		double fa = 0.0, fs = 0.0, ru = 0.0, rp = 0.0, rr = 0.0, rt = 0.0, rl = 0.0, du = 0.0, dp = 0.0;
 		for ( State const &s : series )
 		{
 			fa = std::max( fa, s.factorADifference );
@@ -1514,11 +1564,18 @@ namespace
 			rr = std::max( rr, s.reconstructionDifference );
 			rt = std::max( rt, s.totalFluxDifference );
 			rl = std::max( rl, s.linearisedLoadDifference );
+			du = std::max( du, s.refinedUDifference );
+			dp = std::max( dp, s.refinedPDifference );
 		}
 		std::printf( "    checks, worst over states and elements (0 is bit for bit): re-assembled A factored "
 		             "%.1e, S factored %.1e; MultInv() on the re-formed load u %.1e, p %.1e; Reconstruct()'s "
 		             "local problem psi* %.1e; ReconstructTotalFlux() re-run %.1e; the load as G u_t + P p_c, "
 		             "of its largest entry, %.1e\n", fa, fs, ru, rp, rr, rt, rl );
+		if ( series.front().refined )
+			std::printf( "    the refinement ON: the two checks above read its correction; (a) against (d') "
+			             "rounded to real_t, u %.1e, p %.1e (%.1f, %.1f eps of the largest value)\n", du, dp,
+			             du/eps/normInf( series[ states/2 ].u.at( "a" ) ),
+			             dp/eps/normInf( series[ states/2 ].p.at( "a" ) ) );
 
 		auto column = [ & ]( auto pick )
 		{
@@ -1568,6 +1625,86 @@ namespace
 		printDiagnostics( "the recovery's local system, middle state", mid.diagnostics );
 		printDiagnostics( "Reconstruct()'s local system, middle state", mid.reconstructionDiagnostics );
 
+	}
+}
+
+namespace
+{
+	/// Milliseconds per call, median of @a repeats, the card drained after each.
+	template <typename F>
+	double timed( F &&f, int repeats )
+	{
+		std::vector<double> t;
+		for ( int r = 0; r < repeats; ++r )
+		{
+			MFEM_DEVICE_SYNC;
+			auto const t0 = std::chrono::steady_clock::now();
+			f();
+			MFEM_DEVICE_SYNC;
+			t.push_back( std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count() );
+		}
+		return median( t );
+	}
+
+	struct Cost
+	{
+		double form = 0.0, recover = 0.0, reconstruct = 0.0;
+	};
+
+	/// The recovery (RecoverFEMSolution()), the reconstruction (Reconstruct())
+	/// and the formation that takes the recovery's copies (formSystem(), which
+	/// is FormLinearSystem()), each re-run on one solved state.
+	Cost timeOne( int n, int order, bool on, int repeats )
+	{
+		meq::tests::crossing::Solved solved( centre, n, order, [ on ]( meq::GradShafranovSolver &s )
+		{
+			meq::tests::recovery::configure( s );
+			s.setLocalRefinement( on );
+		} );
+		auto &solver = const_cast<meq::GradShafranovSolver &>( solved.theSolver() );
+		meq::tests::recovery::reportRoutes( solver );
+		mfem::DarcyForm &darcy = *( solver.*get( recoveryaccess::SolverDarcy{} ) );
+		mfem::BlockVector &rhs = solver.*get( recoveryaccess::SolverDarcyRhs{} );
+		mfem::BlockVector &solution = solver.*get( recoveryaccess::SolverDarcySolution{} );
+		mfem::Vector &lambda = solver.*get( recoveryaccess::SolverTraceX{} );
+		mfem::GridFunction ut( solver.*get( recoveryaccess::SolverTotalFlux{} ) );
+		mfem::GridFunction uStar( solver.*get( recoveryaccess::SolverEnrichedFlux{} ) );
+		mfem::GridFunction ps( solver.*get( recoveryaccess::SolverPostProcessed{} ) );
+		mfem::GridFunction pt( solver.*get( recoveryaccess::SolverEnrichedTrace{} ) );
+		mfem::BlockVector scratch( darcy.GetOffsets() );
+		scratch.UseDevice( true );
+		Cost c;
+		c.recover = timed( [ & ] { darcy.RecoverFEMSolution( lambda, rhs, scratch ); }, repeats );
+		c.reconstruct = timed( [ & ] { darcy.Reconstruct( solution, lambda, ut, uStar, ps, pt ); }, repeats );
+		auto formSystem = get( recoveryaccess::SolverFormSystem{} );
+		c.form = timed( [ & ] { ( solver.*formSystem )(); }, repeats );
+		return c;
+	}
+}
+
+/*
+ * THE REFINEMENT'S COST: off, on, off, on, so a drift in the machine shows as
+ * a disagreement between the two readings of one setting.
+ */
+BOOST_AUTO_TEST_CASE( cost )
+{
+	int const repeats = 9;
+	std::printf( "\n  cost of the local refinement, %s, %s, median of %d, ms per call\n",
+	             sizeof( mfem::real_t ) == 4 ? "single" : "double",
+	             meq::tests::recovery::onDevice() ? "device" : "host", repeats );
+	for ( auto [ n, order ] : { std::pair{ 32, 2 }, { 64, 2 }, { 32, 3 }, { 128, 2 } } )
+	{
+		Cost off = timeOne( n, order, false, repeats );
+		Cost on = timeOne( n, order, true, repeats );
+		Cost const off2 = timeOne( n, order, false, repeats );
+		Cost const on2 = timeOne( n, order, true, repeats );
+		std::printf( "    n = %3d, k = %d: recovery off %.3f / %.3f, on %.3f / %.3f (%.2fx); reconstruction off "
+		             "%.3f / %.3f, on %.3f / %.3f (%.2fx); FormLinearSystem() off %.3f / %.3f, on %.3f / %.3f "
+		             "(%.2fx)\n", n, order, off.recover, off2.recover, on.recover, on2.recover,
+		             ( on.recover + on2.recover )/( off.recover + off2.recover ), off.reconstruct, off2.reconstruct,
+		             on.reconstruct, on2.reconstruct,
+		             ( on.reconstruct + on2.reconstruct )/( off.reconstruct + off2.reconstruct ), off.form, off2.form,
+		             on.form, on2.form, ( on.form + on2.form )/( off.form + off2.form ) );
 	}
 }
 

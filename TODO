@@ -1673,6 +1673,56 @@ TCV shaped's branch in item 5 each take a suite case red, in single.
 
 
 ================================================================================
+Left open by the local refinement (MEASUREMENTS.md M-387 to M-389)
+Raised 2026-11-09. With MFEM's element-local recovery and Reconstruct()
+refined, the single-precision floor of the linear path has moved to two
+places that are not MFEM's local solves.
+================================================================================
+
+  1. ON THE CARD THE LINEAR PATH'S TRACE IS cuDSS'S ONE SOLVE, AND IT IS
+     NOISIER THAN PARDISO'S.  ExtractionNoise's box in single: the trace's
+     sigma is 0.9 to 3.3 eps on the card at n = 12 to 32, k = 2 (and 1.6 eps
+     at n = 16, k = 3), against PARDISO's 0.4 eps on the host at every mesh.
+     It grows with n, as a solve's backward error times the condition
+     number would.  With the recovery refined psi_h and psi* sit at 1.0 to
+     1.1 times the trace on the card, so this is now the card's floor on the
+     linear path.  The normalised (NPC) path does not show it: Newton's last
+     steps refine the trace there, 0.4 eps on the card.  What would close it
+     is one refinement step on the linear path's trace solve (a residual of
+     the reduced system and a second cuDSS solve); it has not been tried or
+     costed, and whether cuDSS's own refinement setting reaches it is not
+     known.
+
+  2. psi~ AT THE LOCATED AXIS IS NOISIER THAN psi~ ANYWHERE ELSE, AND IT
+     LABELS THE FAMILY.  Host, single, refinement on, with M-385's
+     interpolant (quadratures in double): psi~'s dofs are at 1.6 to 1.8x the
+     trace, but its value at the located axis is 3.7e-7 to 2.1e-6 of the
+     span, against 1.0e-7 to 1.6e-7 at a fixed point (n = 12 to 32, k = 2
+     and 3).  That is what the family labelled by psi~ at the axis
+     (meq::labelledAxis() with no psi_ax unknown) moves by: 8.4e-6 to
+     4.3e-5 between neighbouring states, no better than with the refinement
+     off at k = 2, while the family labelled by the finder's psi_h falls 30
+     to 100x to 4.4e-6 to 9.6e-6, and the one at a fixed axis point to 2.7e-6
+     to 5.7e-6 (M-387).  The candidate, not measured: the located point
+     still moves 0.5 to 1.4 micrometres between states, and psi~'s own
+     stationary point need not be q_h's root, so psi~'s gradient there times
+     that motion.  If so, the label wants psi~ at psi~'s own stationary
+     point, or psi_h's value, which is now the quieter of the two; M-371 (d)
+     chose psi~ for accuracy, which single does not change.
+
+
+  3. FluxSurfaceConvergence's thePointErrorDoesNotAccumulateOverManyCircuits
+     IS RED IN SINGLE WITH THE REFINEMENT ON, ON TWO ROUND-OFFS.  Its
+     flatness comparison (the normal closure error over 10 circuits under
+     twice that over 5) reads 1.15e-7 and 9.96e-7 on, 4.94e-7 and 8.66e-7
+     off: 1 to 8 eps of the radius, under the rootedPositionFloor() of
+     8.0e-6 its own first closure assertion carries (M-390).  The file keeps
+     the comparison in single deliberately.  Either that decision stands and
+     the case is a single-precision red that moves with any change to psi~'s
+     bits, or the comparison takes the floor its neighbour takes.
+
+
+================================================================================
 A CUDA-only build: cuDSS as the only trace solver
 Raised 2026-10-22. After a real GPU-only pathway exists, not before.
 ================================================================================

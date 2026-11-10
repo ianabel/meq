@@ -798,10 +798,33 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialConvergesAtKPlusTwo )
 		// And it must actually be better than the potential it is built from.
 		// A psi* that merely tracks psi_h has had its extra order lost somewhere,
 		// which a rate alone can miss if both degrade together.
-		BOOST_TEST( points.back().errorPsiStar < points.back().errorPsi,
-		            "k = " << order << ": psi* is " << points.back().errorPsiStar
-		            << " against psi_h's " << points.back().errorPsi
-		            << " -- the post-processing has bought nothing" );
+		//
+		// ON THE FINEST MESH THAT STILL MEASURES THE DISCRETISATION, which in
+		// double is the finest. In single at k = 2 psi_h's error rises past
+		// h = 0.106 -- 2.64e-05, 1.94e-05, 3.62e-05 -- and psi* sits on the same
+		// trace error to four figures, so the finest mesh compares two
+		// round-offs: it read psi* below psi_h by 0.8 % only while MFEM's
+		// unrefined recovery added its noise to psi_h (M-390).
+		std::vector<double> errorsPsi, spacings;
+		for ( Measurement const &p : points )
+		{
+			errorsPsi.push_back( p.errorPsi );
+			spacings.push_back( p.h );
+		}
+		std::vector<bool> const kept =
+			meq::tests::discretisationPoints( errorsPsi, spacings, order + 1.0 - pairSlack );
+		std::size_t compared = 0;
+		for ( std::size_t i = 0; i < kept.size(); ++i )
+			if ( kept[ i ] )
+				compared = i;
+		if ( compared + 1 < points.size() )
+			BOOST_TEST_MESSAGE( "  *** k = " << order << ": psi* against psi_h compared at h = "
+			                    << points[ compared ].h << ", the finest mesh whose psi_h still "
+			                    "converges at k+1; finer, both are the trace's round-off. M-390" );
+		BOOST_TEST( points[ compared ].errorPsiStar < points[ compared ].errorPsi,
+		            "k = " << order << ", h = " << points[ compared ].h << ": psi* is "
+		            << points[ compared ].errorPsiStar << " against psi_h's "
+		            << points[ compared ].errorPsi << " -- the post-processing has bought nothing" );
 	}
 }
 
