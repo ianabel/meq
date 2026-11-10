@@ -699,10 +699,10 @@ namespace meq
 	/**
 	 * Whether this build carries MEQ's device kernels at all.
 	 *
-	 * **True when the seven `*Device.cpp` files were compiled as device
+	 * **True when the eight `*Device.cpp` files were compiled as device
 	 * translation units, false where each is its host stub**, which refuses
 	 * before reading anything and leaves every caller on its host loop. The
-	 * seven share one guard and `CMakeLists.txt` hands them to the device
+	 * eight share one guard and `CMakeLists.txt` hands them to the device
 	 * compiler together, so this one answers for all of them; it is defined
 	 * here, beside `evaluateSourceOnDevice()`, so that the answer comes from a
 	 * file that was actually compiled one way or the other rather than from a

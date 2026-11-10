@@ -25813,3 +25813,45 @@ the ratios to the device Newton residual, not the milliseconds.** Best of three.
   `integrateOverDomain` at 1.9%, `postProcess()` under 1%.
 
 `DEVICE-PLAN.md` section 9 is the plan these rank.
+
+### M-DA-4
+
+**The continuous fields as a kept linear map, applied on the device.**
+`meq::ContinuousInterpolant` does each entity's quadrature and moment solve
+once per set of spaces, in double, and applies the result as blocks: one row
+per vertex, one matrix per edge and per cell. `tests/performance/DeviceAudit`,
+single, RTX 2070 SUPER, k = 2, the M-384 source, `OMP_NUM_THREADS=2`, load 5
+to 12 from other agents; best of three. The baseline is `main` at `b0870a1`,
+taken in the same session.
+
+| | 2,048 tri | 8,192 tri | 32,768 tri |
+|---|---|---|---|
+| `buildContinuousFields`, `main` | 303 ms | 1,210 ms | 4,651 ms |
+| the interpolant's quadratures, once per set of spaces | 355 ms | 1,329 ms | 6,128 ms |
+| its application, host route (one core under a Device) | 0.8 ms | 4.0 ms | 18.5 ms |
+| its application, device route | 1.2 ms | 2.1 ms | 14.1 ms |
+
+* **Per extraction the continuous pair costs 14 ms on the card where it cost
+  4.7 s**, about two device Newton residuals; the quadratures, now in double
+  and once per mesh, cost 1.3 times the old per-call build. The application
+  shares its output spaces with every result, which is most of what it saved
+  over building two H1 spaces per call (35 ms to 14 ms on the card). The
+  solver keeps one interpolant, so the `q`-driven loop pays them once per run.
+  `buildContinuousFields()` still builds one per call, and a caller applying
+  the map to many fields on one solver's spaces applies
+  `GradShafranovSolver::continuousInterpolant()` instead.
+* **`--device debug` reproduces the host to the bit in double** on the CPU-only
+  build, whose `debug` arm takes the host route: `ExtractionContinuityDevice_debug`
+  prints the family's `psi_ax` and outer `V'` to the same 17 digits as a host
+  run under `MEQ_TEST_SERIAL_ROUTES`.
+* **The device route is the host route to the bit**, under `debug` and on the
+  card alike: the kernel is the host loop, compiled with `-fmad=false`
+  (`ContinuousFieldConvergence`'s `theDeviceRouteIsTheHostRoute`, 0 entries
+  of 0 differing). It skips loudly on a build without device kernels.
+* **The blocks are the quadratures**: against `momentInterpolant()` handed
+  the same fields as callables, `ψ̃` agrees to 5.5e-7 of its largest value in
+  single (`theBlocksAreTheQuadrature`, bound 1e3 ε); in double 1.6e-15 to 2.3e-15.
+* **Through the driver**: `q-driven` at `NR = NZ = 24`, ToroidalFlux pin,
+  `cuda`: 50.2 s wall against M-384's 66.8 s, of which outside `solve()`
+  43.3 s against 59.0 s, the continuous fields' 26% gone. What is left
+  outside `solve()` is the tracer (M-384).

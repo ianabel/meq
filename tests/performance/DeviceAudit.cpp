@@ -244,6 +244,32 @@ int main( int argc, char **argv )
 		} );
 		row( "buildContinuousFields", continuous, residualPerCall );
 
+		// The interpolant's two halves (M-DA-4): its quadratures, once per set
+		// of spaces, and its application, per extraction, on either route.
+		std::unique_ptr<meq::ContinuousInterpolant> interpolant;
+		Timing const quadratures = timeIt( "interpolantBuild", repeats, [ & ]
+		{
+			interpolant = std::make_unique<meq::ContinuousInterpolant>( *solver.postProcessedPotential().FESpace(),
+				*solver.postProcessedFlux().FESpace(), *solver.trace().FESpace() );
+		} );
+		row( "  interpolant quadratures", quadratures, residualPerCall );
+		Timing const applyHost = timeIt( "interpolantHost", repeats, [ & ]
+		{
+			static_cast<void>( interpolant->apply( solver.postProcessedPotential(), solver.postProcessedFlux(),
+			                                       solver.trace(), meq::ContinuousInterpolant::Route::Host ) );
+		} );
+		row( "  interpolant apply, host", applyHost, residualPerCall );
+		if ( onDevice )
+		{
+			Timing const applyDevice = timeIt( "interpolantDevice", repeats, [ & ]
+			{
+				static_cast<void>( interpolant->apply( solver.postProcessedPotential(), solver.postProcessedFlux(),
+				                                       solver.trace(), meq::ContinuousInterpolant::Route::Device ) );
+			} );
+			row( "  interpolant apply, device", applyDevice, residualPerCall );
+			std::printf( "      the device route ran: %s\n", interpolant->lastRanOnDevice() ? "yes" : "NO" );
+		}
+
 		meq::ContourTracer const tracer( solver );   // builds and caches psi~, q~ once
 		meq::CriticalPointFinder const finder( solver );
 		meq::CriticalPoint located;
