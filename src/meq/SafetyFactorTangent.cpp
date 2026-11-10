@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "meq/ConductorField.hpp"
 #include "meq/ContinuousField.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/FluxSurfaces.hpp"
@@ -48,6 +49,41 @@ namespace meq
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 			cells += mesh.GetElementGeometry( e ) == mfem::Geometry::TRIANGLE ? 0.5 : 1.0;
 		return cells;
+	}
+
+	double plasmaCells( GradShafranovSolver const &solver )
+	{
+		mfem::Mesh const &mesh = *solver.potential().FESpace()->GetMesh();
+		if ( solver.plasmaComponentElements() <= 0 )
+			return plasmaCells( mesh );
+		double cells = 0.0;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+			if ( solver.elementInPlasma( e ) )
+				cells += mesh.GetElementGeometry( e ) == mfem::Geometry::TRIANGLE ? 0.5 : 1.0;
+		return cells;
+	}
+
+	double deliveredToroidalFlux( GradShafranovSolver &solver, ToroidalFieldSpline const &field,
+	                              double sign )
+	{
+		double const boundary = solver.psiBoundary();
+		double const span = solver.psiAxis() - boundary;
+		mfem::Vector const state( solver.state() );
+		mfem::Vector assembled;
+		// -int f phi_i/R over the potential dofs; summed, -int f/R.
+		solver.assembleSourceDerivative( state,
+			[ &field, boundary, span ]( double, double, double psi )
+			{
+				if ( span == 0.0 )
+					return 0.0;
+				double const normalised = ( psi - boundary )/span;
+				if ( !( normalised > 0.0 ) )
+					return 0.0;
+				double const value = field( normalised );
+				return value > 0.0 ? std::sqrt( value ) : 0.0;
+			}, assembled );
+		return -sign*sumInDouble( assembled, solver.fluxSpace().GetVSize(), nullptr, 0,
+		                          solver.potentialSpace().GetVSize() );
 	}
 
 	SafetyFactorEquilibrium::SafetyFactorEquilibrium( GradShafranovSolver &solverIn,
@@ -103,10 +139,19 @@ namespace meq
 		return f;
 	}
 
-	CriticalPoint SafetyFactorEquilibrium::locatedAxis( Fields const &fields ) const
+	CriticalPoint SafetyFactorEquilibrium::locatedAxis( Fields const & ) const
 	{
-		CriticalPointFinder const finder( *fields.flux, *fields.psi );
-		return finder.findAxis();
+		// The solver's own finder, which adds the conductors' field where the
+		// solve subtracted it: the axis is the TOTAL field's.
+		// Of the sense psi_ax - psi_bnd says, seeded at the solve's own axis:
+		// a mesh around coils has their extrema too.
+		CriticalPointFinder const finder( solver );
+		AxisSense const sense = solver.psiAxis() > solver.psiBoundary() ? AxisSense::Maximum
+		                                                                : AxisSense::Minimum;
+		CriticalPoint found;
+		if ( solver.axisR() > 0.0 && finder.tryFindCriticalPointFrom( solver.axisR(), solver.axisZ(), sense, found ) )
+			return found;
+		return finder.findAxis( sense );
 	}
 
 	std::vector<double> SafetyFactorEquilibrium::qOverG( Fields const &fields, double psiAxis ) const
@@ -122,19 +167,21 @@ namespace meq
 		ContinuousFields const continuous =
 			buildContinuousFields( *fields.psiStar, *fields.qStar, *fields.trace );
 		secondsExtracting += secondsSince( started );
-		return qOverG( *continuous.potential, *continuous.flux, axis );
+		return qOverG( *continuous.potential, *continuous.flux, axis, solver.psiBoundary() );
 	}
 
 	std::vector<double> SafetyFactorEquilibrium::qOverG( mfem::GridFunction const &potential,
 	                                                     mfem::GridFunction const &flux,
-	                                                     CriticalPoint const &axis ) const
+	                                                     CriticalPoint const &axis, double boundary ) const
 	{
 		auto const started = std::chrono::steady_clock::now();
 		ContourTracer tracer( potential, flux );
+		// The conductors' field, constant along every tangent, on top of the
+		// plasma's -- the surfaces are the total field's.
+		tracer.setConductorField( solver.conductorField() );
 		if ( options.gammaHMarker != nullptr )
 			tracer.setBandExtension( BandExtension::TransferLift, *options.gammaHMarker, options.path );
-		FluxSurfaceFamily const family = extractFluxSurfaces( tracer, axis, solver.psiBoundary(),
-		                                                      options.family );
+		FluxSurfaceFamily const family = extractFluxSurfaces( tracer, axis, boundary, options.family );
 		std::vector<double> out;
 		out.reserve( family.surfaces.size() );
 		for ( FluxSurface const &surface : family.surfaces )
@@ -155,19 +202,7 @@ namespace meq
 			case ScalePin::ToroidalFlux:
 				break;
 		}
-		double const boundary = solver.psiBoundary();
-		double const span = solver.psiAxis() - boundary;
-		return options.sign*solver.integrateOverDomain(
-			[ & ]( double radius, double, double psi )
-			{
-				if ( !( radius > 0.0 ) || span == 0.0 )
-					return 0.0;
-				double const normalised = ( psi - boundary )/span;
-				if ( !( normalised > 0.0 ) )
-					return 0.0;
-				double const value = spline( normalised );
-				return value > 0.0 ? std::sqrt( value )/radius : 0.0;
-			} );
+		return deliveredToroidalFlux( solver, spline, options.sign );
 	}
 
 	bool SafetyFactorEquilibrium::evaluate( ToroidalFieldSpline const &spline, SafetyFactorEvaluation &out )
@@ -177,7 +212,12 @@ namespace meq
 		{
 			source.setGGPrime( spline.ggPrime() );
 			if ( warm.Size() > 0 )
-				solver.setInitialState( warm, {} );
+			{
+				// The whole iterate: the field, the exterior modes, and psi_bnd
+				// where it is free -- else a refused trial's would be the start.
+				solver.setInitialState( warm, warmExterior );
+				solver.setBoundaryFluxInitial( warmBoundary );
+			}
 			if ( options.solve )
 				options.solve();
 			else
@@ -188,13 +228,16 @@ namespace meq
 			out.qOverG = qOverG( solvedFields(), solver.psiAxis() );
 			out.measured = measure( spline );
 		}
-		catch ( std::exception const & )
+		catch ( std::exception const &error )
 		{
+			lastRefusal = error.what();
 			secondsSolving += secondsSince( started );
 			admittedValues.clear();
 			return false;
 		}
 		warm = solver.state();
+		warmExterior = solver.exteriorCoefficients();
+		warmBoundary = solver.psiBoundary();
 		admitted = warm;
 		admittedValues = spline.values();
 		return true;
@@ -211,8 +254,15 @@ namespace meq
 		mfem::Vector const state( solver.state() );
 		solver.linearise( state );
 
+		/*
+		 * EVERY BORDER THE SOLVE CARRIES IS IN THE TANGENT: psi_ax always,
+		 * psi_bnd where the plasma edge is free (a limiter, the X-point),
+		 * the X-point's position and the exterior modes. The extraction reads
+		 * the first two as its labels, so both move with the tangent.
+		 */
+		GradShafranovSolver::LinearisedBorders const layout = solver.linearisedLayout();
 		std::vector<mfem::Vector> dx( m ), sources( m );
-		std::vector<double> dAxis( m, 0.0 );
+		std::vector<double> dAxis( m, 0.0 ), dBoundary( m, 0.0 );
 		std::vector<std::shared_ptr<Profile const>> directions( m );
 		for ( std::size_t j = 0; j < m; ++j )
 		{
@@ -226,14 +276,19 @@ namespace meq
 				}, dRdu );
 			std::vector<double> ds;
 			solver.linearisedTangent( dRdu, {}, nullptr, dx[ j ], ds );
-			dAxis[ j ] = ds.empty() ? 0.0 : ds.front();
+			if ( layout.axis >= 0 )
+				dAxis[ j ] = ds[ static_cast<std::size_t>( layout.axis ) ];
+			if ( layout.boundary >= 0 )
+				dBoundary[ j ] = ds[ static_cast<std::size_t>( layout.boundary ) ];
 		}
 		secondsTangents += secondsSince( started );
 		lastAxisDerivative = dAxis;
+		lastBoundaryDerivative = dBoundary;
 
 		Fields const base = solvedFields();
 		double const scale = base.psiStar->Normlinf();
 		double const psiAxis = solver.psiAxis();
+		double const psiBoundary = solver.psiBoundary();
 		CriticalPoint const axis = locatedAxis( base );
 
 		/*
@@ -256,6 +311,21 @@ namespace meq
 		transformation.SetIntPoint( &at );
 		mfem::DenseMatrix gradient;
 		base.flux->GetVectorGradient( transformation, gradient );
+		if ( ConductorField const *conductors = solver.conductorField() )
+		{
+			// The root is the total q's: the conductors' gradient, centrally
+			// differenced as the bordered Newton's X-point corner takes it.
+			double const step = 1.0e-6*std::max( 1.0, std::abs( axis.radius ) );
+			double aR = 0.0, aZ = 0.0, bR = 0.0, bZ = 0.0;
+			conductors->flux( axis.radius + step, axis.z, aR, aZ );
+			conductors->flux( axis.radius - step, axis.z, bR, bZ );
+			gradient( 0, 0 ) += ( aR - bR )/( 2.0*step );
+			gradient( 1, 0 ) += ( aZ - bZ )/( 2.0*step );
+			conductors->flux( axis.radius, axis.z + step, aR, aZ );
+			conductors->flux( axis.radius, axis.z - step, bR, bZ );
+			gradient( 0, 1 ) += ( aR - bR )/( 2.0*step );
+			gradient( 1, 1 ) += ( aZ - bZ )/( 2.0*step );
+		}
 		double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
 		if ( !( std::abs( det ) > 0.0 ) )
 			return false;
@@ -273,7 +343,7 @@ namespace meq
 		CriticalPoint labelled = axis;
 		labelled.psi = psiAxis;
 		std::vector<double> const atBase = options.central ? std::vector<double>()
-			: qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled );
+			: qOverG( *baseContinuous.potential, *baseContinuous.flux, labelled, psiBoundary );
 		mfem::GridFunction potential( baseContinuous.potential->FESpace() );
 		mfem::GridFunction flux( baseContinuous.flux->FESpace() );
 
@@ -307,7 +377,7 @@ namespace meq
 				potential.Add( t, *tangent.potential );
 				flux = *baseContinuous.flux;
 				flux.Add( t, *tangent.flux );
-				return qOverG( potential, flux, moved( t ) );
+				return qOverG( potential, flux, moved( t ), psiBoundary + t*dBoundary[ j ] );
 			};
 			std::vector<double> const plus = at( s );
 			if ( options.central )
@@ -335,7 +405,12 @@ namespace meq
 		if ( options.pin == ScalePin::ToroidalFlux )
 		{
 			// Phi = sign int g( Psi )/R, Psi = ( psi - psi_b )/span:
-			// dPhi = sign int [ phi_j/( 2g ) + g^2'( Psi ) ( dpsi - Psi dpsi_ax )/( 2g span ) ]/R.
+			// dPhi = sign int [ phi_j/( 2g ) + g^2'( Psi ) ( dpsi - dpsi_b
+			//                   - Psi ( dpsi_ax - dpsi_b ) )/( 2g span ) ]/R.
+			// The interior's change: where psi_b is free the edge Psi = 0
+			// moves too, and g( 0 ) = R0B0 is not zero there, so the
+			// quadrature's own edge is what this does not carry (TODO, *The
+			// flux pin beside a free plasma edge*).
 			double const boundary = solver.psiBoundary();
 			double const span = psiAxis - boundary;
 			auto inside = [ &spline, boundary, span ]( double psi, double &x, double &g )
@@ -363,6 +438,8 @@ namespace meq
 					return inside( psi, x, g ) ? x*spline( x, 1 )/( 2.0*g*span ) : 0.0;
 				}, slopeTimesPsi );
 			double const againstAxis = -sumInDouble( slopeTimesPsi, potentialStart, nullptr, 0, potentialSize );
+			double const againstBoundary = layout.boundary >= 0
+				? -sumInDouble( slope, potentialStart, nullptr, 0, potentialSize ) - againstAxis : 0.0;
 			for ( std::size_t j = 0; j < m; ++j )
 			{
 				mfem::Vector direct;
@@ -375,17 +452,18 @@ namespace meq
 				double const valueTerm = -sumInDouble( direct, potentialStart, nullptr, 0, potentialSize );
 				double const fieldTerm = -sumInDouble( slope, potentialStart, &dx[ j ], potentialStart,
 				                                       potentialSize );
-				out.measured[ j ] = options.sign*( valueTerm + fieldTerm - dAxis[ j ]*againstAxis );
+				out.measured[ j ] = options.sign*( valueTerm + fieldTerm - dAxis[ j ]*againstAxis
+				                                   - dBoundary[ j ]*againstBoundary );
 			}
 		}
 		else if ( options.pin == ScalePin::PlasmaCurrent )
 		{
 			mfem::Vector row;
-			double againstAxis = 0.0;
-			solver.plasmaCurrentLinearisation( state, row, againstAxis );
+			double againstAxis = 0.0, againstBoundary = 0.0;
+			solver.plasmaCurrentLinearisation( state, row, againstAxis, &againstBoundary );
 			for ( std::size_t j = 0; j < m; ++j )
 				out.measured[ j ] = sumInDouble( row, potentialStart, &dx[ j ], potentialStart, potentialSize )
-				                    + againstAxis*dAxis[ j ]
+				                    + againstAxis*dAxis[ j ] + againstBoundary*dBoundary[ j ]
 				                    - sumInDouble( sources[ j ], potentialStart, nullptr, 0, potentialSize );
 		}
 		return true;

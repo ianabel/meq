@@ -2436,27 +2436,58 @@ namespace meq
 			 * of its own; solveLinearised() refuses a stale one rather than
 			 * answering from it.
 			 *
-			 * Supported: no border (a Source), or psi_ax alone (a
-			 * NormalisedSource on a fixed boundary). Refused, with the reason:
-			 * psi_bnd an unknown, a prescribed current, the X-point, the
-			 * exterior coupling, an inverse solve, the bordered midplane
-			 * gauge, a reaction-following tau and an anisotropy.
+			 * psi_bnd, WHERE IT IS AN UNKNOWN, IS A SECOND BORDER: its column
+			 * dR/dpsi_bnd by the same element loop, its row -shape( x_b ) on
+			 * the potential dofs with x_b the point the solve pins it at (the
+			 * nearest dof, the limiter point, the contact on the limiter
+			 * curve -- whose movement is second order, the contact being a
+			 * maximum along the curve), corner 1. THE X-POINT is two more,
+			 * re-located at @a state as a zero of the total q: rows
+			 * -shape( x_X ) on the flux dofs, zero columns, corner grad q, and
+			 * -grad psi in psi_bnd's row. THE EXTERIOR MODES are the rest,
+			 * rows exteriorTransmissionRows(), columns
+			 * assembleExteriorColumns(), corner the DtN block. The bordered
+			 * Newton's blocks throughout; linearisedLayout() says which ds is
+			 * which.
+			 *
+			 * Refused, with the reason: a prescribed current, the free
+			 * circuit currents, an inverse solve, the bordered midplane gauge,
+			 * a reaction-following tau and an anisotropy.
 			 */
 			void linearise( mfem::Vector const &state );
 
 			/// Whether a linearisation is held and still valid.
 			bool isLinearised() const;
 
-			/// The border unknowns the held linearisation carries: 0, or 1
-			/// for psi_ax.
+			/// The border unknowns the held linearisation carries.
 			int linearisedBorders() const;
 
+			/// Where each border sits in solveLinearised()'s @a ds: -1 for
+			/// one not carried. The X-point's two are ( R_X, z_X ) from
+			/// xPoint, located at the linearised state at ( xPointR, xPointZ );
+			/// the exterior modes are consecutive from firstMode.
+			struct LinearisedBorders
+			{
+				int axis = -1;
+				int boundary = -1;
+				int xPoint = -1;
+				int firstMode = -1;
+				int count = 0;
+				double xPointR = 0.0;
+				double xPointZ = 0.0;
+			};
+
+			/// The held linearisation's layout; @throws std::logic_error when
+			/// none is held.
+			LinearisedBorders linearisedLayout() const;
+
 			/**
-			 * [ J c ; r d ] [ dx ; ds ] = [ b ; g ] at the held linearisation:
+			 * [ J C ; B D ] [ dx ; ds ] = [ b ; g ] at the held linearisation:
 			 * @a b state-sized (its essential trace rows are ignored, and dx
-			 * is zero there), @a g one entry per border. By the Schur
-			 * complement on the retained J^{-1} c: dx = y - ( J^{-1} c ) ds,
-			 * ds = ( g - r y )/( d - r J^{-1} c ), y = J^{-1} b.
+			 * is zero there), @a g one entry per border (missing entries are
+			 * zero). By the Schur complement on the retained J^{-1} C:
+			 * dx = y - ( J^{-1} C ) ds, ( D - B J^{-1} C ) ds = g - B y,
+			 * y = J^{-1} b.
 			 *
 			 * REFINED, as Newton's iterate is: up to @a passes corrections
 			 * against r = b - J dx - c ds with J APPLIED, not through the
@@ -4754,6 +4785,7 @@ namespace meq
 			 * THE PIECES OF d( deliveredPlasmaCurrent() ) AT @a state: the
 			 * current row, `( w W ) scaledDFdPsi/R phi_j` over the potential
 			 * dofs, and its corner against `psi_ax`, `sum ( w W/R ) dF/dpsi_ax`
+			 * (and, into @a againstBoundary when given, against `psi_bnd`)
 			 * -- the bordered current solve's own, assembleCurrentRow() and
 			 * assembleCurrentNormalisationCorner(), on their device routes
 			 * where the state is resident. A tangent's change of the delivered
@@ -4764,7 +4796,7 @@ namespace meq
 			 * with (meq::SafetyFactorEquilibrium).
 			 */
 			void plasmaCurrentLinearisation( mfem::Vector const &state, mfem::Vector &row,
-			                                 double &againstAxis ) const;
+			                                 double &againstAxis, double *againstBoundary = nullptr ) const;
 
 			/**
 			 * `d( mu0 I_p )/d lambda` ALONG THE SOLUTION MANIFOLD -- how much

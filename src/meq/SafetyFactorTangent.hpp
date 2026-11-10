@@ -4,6 +4,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "mfem.hpp"
@@ -28,10 +29,12 @@
  * Knot `j`'s column: `dR/du_j` is the source's derivative in `g g'` along the
  * knot's cardinal function (NormalisedMHDSource::ggPrimeDerivative()), and
  * GradShafranovSolver::linearisedTangent() returns `[ dx_j ; dpsi_ax,j ]` at
- * the retained, bordered linearisation -- one back-solve. Then `psi*`, `q*`
- * and `psihat` of the tangent (reconstructFields(), linear), and the family
- * extracted on the continuous fields of `x +- s dx_j` with the label
- * `psi_ax +- s dpsi_ax,j` and the ray origin MOVED WITH THE AXIS: the map
+ * the retained, bordered linearisation -- one back-solve -- with `dpsi_bnd,j`,
+ * the X-point and the exterior modes beside it where the edge is free. Then
+ * `psi*`, `q*` and `psihat` of the tangent (reconstructFields(), linear), and
+ * the family extracted on the continuous fields of `x +- s dx_j` with the
+ * labels `psi_ax +- s dpsi_ax,j` and `psi_bnd +- s dpsi_bnd,j` and the ray
+ * origin MOVED WITH THE AXIS: the map
  * roots q_h for its axis, so the origin moves by `-( dq_h/dx )^-1 dq_j` in the
  * axis's own element, the derivative of that root. Holding it fixed misses
  * the extraction's dependence on where its rays start, 1e-5 to 4e-5 of the
@@ -66,6 +69,22 @@ namespace meq
 	/// toroidalKnotCount()'s argument on a fixed boundary, where the plasma
 	/// is the whole of Omega_h.
 	double plasmaCells( mfem::Mesh const &mesh );
+
+	/// The plasma's area in cells where the solver's source is confined to a
+	/// support it has decided (GradShafranovSolver::elementInPlasma()) -- a
+	/// limited or diverted plasma inside a vacuum region -- else the mesh's.
+	double plasmaCells( GradShafranovSolver const &solver );
+
+	/**
+	 * THE DELIVERED TOROIDAL FLUX Phi = sign int_plasma g( Psi )/R dA of the
+	 * solver's state, g^2 the spline @a field and Psi = ( psi - psi_b )/span
+	 * the total flux's label: on the source term's own points, support and
+	 * conductor shift (assembleSourceDerivative()), so it is the quadrature
+	 * the flux pin's row linearises, summed in double. What [source]
+	 * ToroidalFlux pins and the .nc reports.
+	 */
+	double deliveredToroidalFlux( GradShafranovSolver &solver, ToroidalFieldSpline const &field,
+	                              double sign );
 
 	class SafetyFactorEquilibrium
 	{
@@ -132,6 +151,13 @@ namespace meq
 			/// of each tangent -- what says which direction is the scale.
 			std::vector<double> const &axisDerivative() const { return lastAxisDerivative; }
 
+			/// Why the last refused evaluate() was refused: the exception the
+			/// solve or the extraction threw. Empty before any refusal.
+			std::string const &refusal() const { return lastRefusal; }
+
+			/// d psi_bnd/d u_j likewise; zeros where psi_bnd is not free.
+			std::vector<double> const &boundaryDerivative() const { return lastBoundaryDerivative; }
+
 			/// Inner Newton iterations summed over every solve, and the
 			/// seconds spent in solves, tangents and extractions.
 			int innerIterations() const { return newtonIterations; }
@@ -151,16 +177,20 @@ namespace meq
 			std::vector<double> qOverG( Fields const &fields, double psiAxis ) const;
 			std::vector<double> qOverG( Fields const &fields, CriticalPoint const &axis ) const;
 			std::vector<double> qOverG( mfem::GridFunction const &potential, mfem::GridFunction const &flux,
-			                            CriticalPoint const &axis ) const;
+			                            CriticalPoint const &axis, double boundary ) const;
 			CriticalPoint locatedAxis( Fields const &fields ) const;
 
 			GradShafranovSolver &solver;
 			NormalisedMHDSource &source;
 			Options options;
 			mfem::Vector warm;
+			std::vector<double> warmExterior;
+			double warmBoundary = 0.0;
 			mfem::Vector admitted;
 			std::vector<double> admittedValues;
 			std::vector<double> lastAxisDerivative;
+			std::vector<double> lastBoundaryDerivative;
+			std::string lastRefusal;
 			int newtonIterations = 0;
 			double secondsSolving = 0.0;
 			double secondsTangents = 0.0;

@@ -823,7 +823,7 @@ struct meq::Run::Impl
 	/*
 	 * THE DELIVERED TOROIDAL FLUX of the state the solver holds, with g^2 the
 	 * spline @a field: Phi = int_plasma g( Psi )/R dA, the plasma being
-	 * where Psi > 0, over Omega_h (GradShafranovSolver::integrateOverDomain).
+	 * where Psi > 0 on the source's support (meq::deliveredToroidalFlux()).
 	 * g takes the target q's sign, which g^2 cannot carry (SafetyFactor.hpp,
 	 * section 3). What [source] ToroidalFlux pins and the .nc reports: the
 	 * equilibrium's own flux, not the target's (MEASUREMENTS.md M-362).
@@ -1065,21 +1065,7 @@ meq::Run::Impl::ScaleOfAnswer meq::Run::Impl::scaleOfAnswer() const
 
 double meq::Run::Impl::deliveredToroidalFlux( meq::ToroidalFieldSpline const &field ) const
 {
-	double const axis = solver->psiAxis();
-	double const boundary = solver->psiBoundary();
-	double const span = axis - boundary;
-	double const sign = targetSign( *safetyFactorTarget );
-	return sign*solver->integrateOverDomain(
-		[ & ]( double radius, double, double psi )
-		{
-			if ( !( radius > 0.0 ) || span == 0.0 )
-				return 0.0;
-			double const normalised = ( psi - boundary )/span;
-			if ( !( normalised > 0.0 ) )
-				return 0.0;
-			double const value = field( normalised );
-			return value > 0.0 ? std::sqrt( value )/radius : 0.0;
-		} );
+	return meq::deliveredToroidalFlux( *solver, field, targetSign( *safetyFactorTarget ) );
 }
 
 std::vector<meq::Knot> meq::Run::Impl::answerCrossing()
@@ -4028,7 +4014,24 @@ int meq::Run::Impl::solve()
 			 * (MEASUREMENTS.md M-QR-3, M-QR-4). [output] FluxSurfaceCount is
 			 * the surfaces file's and nothing of the loop's.
 			 */
-			std::size_t const knots = meq::toroidalKnotCount( meq::plasmaCells( *solveMesh ), order );
+			/*
+			 * ON A CONFINED PLASMA THE CELLS ARE THE SUPPORT'S, not the mesh's:
+			 * a limited or diverted plasma sits inside a vacuum region the
+			 * knots do not see. With no support decided yet, one opening solve
+			 * at the constant g decides it -- and constant g is the same g^2
+			 * whatever the knots, so that solve is the loop's own start.
+			 */
+			if ( config->getSource().confinesToPlasma() && solver->plasmaComponentElements() <= 0 )
+			{
+				// Or at the carried field, where a previous cycle left one.
+				meq::ToroidalFieldSpline opening( meq::toroidalKnotLabels( 6 ) );
+				opening.setValues( std::vector<double>( 6, toroidalOpening*toroidalOpening ) );
+				toroidalDriven->setGGPrime( toroidalField ? toroidalField->ggPrime() : opening.ggPrime() );
+				solver->solve();
+			}
+			std::size_t const knots = meq::toroidalKnotCount(
+				config->getSource().confinesToPlasma() ? meq::plasmaCells( *solver )
+				                                       : meq::plasmaCells( *solveMesh ), order );
 			meq::ToroidalKnotCut const cut = meq::toroidalKnotCut( knots );
 
 			meq::SafetyFactorEquilibrium::Options equilibriumOptions;
@@ -4165,10 +4168,13 @@ int meq::Run::Impl::solve()
 			std::printf( "  its cost: solves %.1f s, tangents %.1f s, %d extractions %.1f s\n",
 			             equilibrium.solveSeconds(), equilibrium.tangentSeconds(),
 			             equilibrium.extractions(), equilibrium.extractionSeconds() );
+			if ( system.refusals() > 0 )
+				std::printf( "  the last refusal: %s\n", equilibrium.refusal().c_str() );
 
 			if ( !outcome.converged )
 				throw ToroidalLoopFailed(
-					"the outer Newton on the toroidal field did not converge: " + outcome.status );
+					"the outer Newton on the toroidal field did not converge: " + outcome.status
+					+ ( system.refusals() > 0 ? "; the last refusal: " + equilibrium.refusal() : std::string() ) );
 
 			auto answer = std::make_shared<meq::ToroidalFieldSpline>( labels );
 			answer->setValues( outcome.x );

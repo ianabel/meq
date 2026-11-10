@@ -9963,14 +9963,16 @@ namespace
 	}
 
 	void GradShafranovSolver::plasmaCurrentLinearisation( mfem::Vector const &state, mfem::Vector &row,
-	                                                      double &againstAxis ) const
+	                                                      double &againstAxis, double *againstBoundary ) const
 	{
 		if ( !normalisedSource )
 			throw std::logic_error( "meq::GradShafranovSolver::plasmaCurrentLinearisation: the "
 			                        "delivered current is a normalised source's" );
 		assembleCurrentRow( state, row );
-		double againstBoundary = 0.0;
-		assembleCurrentNormalisationCorner( state, againstAxis, againstBoundary );
+		double boundary = 0.0;
+		assembleCurrentNormalisationCorner( state, againstAxis, boundary );
+		if ( againstBoundary )
+			*againstBoundary = boundary;
 	}
 
 	GradShafranovSolver::ExteriorSourceCheck
@@ -11786,16 +11788,48 @@ namespace
 		mfem::Vector state;
 		std::uint64_t generation = 0;
 		int borders = 0;
-		/// psi_ax's column dR/ds, its back-solve J^{-1} c, its row and corner.
-		mfem::Vector column;
-		mfem::Vector columnSolved;
+		LinearisedBorders layout;
+		/// Each border's column dR/ds_j and its back-solve J^{-1} c_j; an
+		/// EMPTY vector is a column that is exactly zero (the X-point's, which
+		/// reaches the field residual only through psi_bnd).
+		std::vector<mfem::Vector> columns;
+		std::vector<mfem::Vector> columnsSolved;
 		/// R( x ) - S( x ) at the state: the residual less its source term,
 		/// the affine part J's apply differences against.
 		mfem::Vector linearAtState;
-		std::vector<int> rowIndex;
-		std::vector<double> rowWeight;
-		double corner = 1.0;
-		double schur = 1.0;
+		/// Each border's row dC_i/dx, on its support.
+		std::vector<std::vector<int>> rowIndex;
+		std::vector<std::vector<double>> rowWeight;
+		/// The corner D = dC/ds, row-major, and the LU factors of the Schur
+		/// complement M = D - B J^{-1} C with its row pivots.
+		std::vector<double> corner;
+		std::vector<double> schur;
+		std::vector<int> pivot;
+
+		double rowDot( std::size_t i, mfem::Vector const &v ) const
+		{
+			double total = 0.0;
+			for ( std::size_t k = 0; k < rowIndex[ i ].size(); ++k )
+				total += rowWeight[ i ][ k ]*v( rowIndex[ i ][ k ] );
+			return total;
+		}
+
+		/// M ds = f by the held factors, in place.
+		void schurSolve( std::vector<double> &f ) const
+		{
+			std::size_t const n = static_cast<std::size_t>( borders );
+			for ( std::size_t i = 0; i < n; ++i )
+				std::swap( f[ i ], f[ static_cast<std::size_t>( pivot[ i ] ) ] );
+			for ( std::size_t i = 0; i < n; ++i )
+				for ( std::size_t k = 0; k < i; ++k )
+					f[ i ] -= schur[ i*n + k ]*f[ k ];
+			for ( std::size_t i = n; i-- > 0; )
+			{
+				for ( std::size_t k = i + 1; k < n; ++k )
+					f[ i ] -= schur[ i*n + k ]*f[ k ];
+				f[ i ] /= schur[ i*n + i ];
+			}
+		}
 	};
 
 	bool GradShafranovSolver::isLinearised() const
@@ -11806,6 +11840,14 @@ namespace
 	int GradShafranovSolver::linearisedBorders() const
 	{
 		return isLinearised() ? retained->borders : 0;
+	}
+
+	GradShafranovSolver::LinearisedBorders GradShafranovSolver::linearisedLayout() const
+	{
+		if ( !isLinearised() )
+			throw std::logic_error( "meq::GradShafranovSolver::linearisedLayout: no valid "
+			                        "linearisation is held" );
+		return retained->layout;
 	}
 
 	void GradShafranovSolver::retainedBackSolve( mfem::Vector const &b, mfem::Vector &y ) const
@@ -11825,13 +11867,20 @@ namespace
 		if ( !prepared || !darcy || !nonlinearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::linearise: there is no solve to "
 			                        "linearise at yet" );
-		if ( exteriorCoupling || reactionStabilization || inverseIsPosed() || anisotropyValue != nullptr
-		     || boundaryFluxIsUnknown || currentIsUnknown || xPointIsAnUnknown()
+		if ( reactionStabilization || inverseIsPosed() || anisotropyValue != nullptr
+		     || currentIsUnknown || !freeCircuitList.empty()
 		     || ( normalisedSource && normalisedSource->readsMidplane() ) )
 			throw std::logic_error( "meq::GradShafranovSolver::linearise: the retained linearisation "
-			                        "carries no border or psi_ax alone; psi_bnd, a prescribed current, "
-			                        "the X-point, the exterior coupling, an inverse solve, the bordered "
-			                        "gauge, a reaction-following tau and an anisotropy are refused" );
+			                        "carries psi_ax, psi_bnd, the X-point and the exterior modes; a "
+			                        "prescribed current, the free circuit currents, an inverse solve, "
+			                        "the bordered gauge, a reaction-following tau and an anisotropy are "
+			                        "refused" );
+		if ( ( boundaryFluxIsUnknown || xPointIsUnknown ) && !normalisedSource )
+			throw std::logic_error( "meq::GradShafranovSolver::linearise: psi_bnd is an unknown only "
+			                        "beside a normalised source" );
+		if ( exteriorCoupling && !transferPath )
+			throw std::logic_error( "meq::GradShafranovSolver::linearise: the exterior coupling has no "
+			                        "transfer path, so its columns have no closed form" );
 		if ( state.Size() != blockOffsets.Last() )
 			throw std::invalid_argument( "meq::GradShafranovSolver::linearise: the state is not this "
 			                             "solver's" );
@@ -11877,131 +11926,405 @@ namespace
 			held->linearAtState -= source;
 		}
 
-		if ( !normalisedSource )
+		/*
+		 * THE BORDER, in the bordered Newton's order: psi_ax, psi_bnd, the
+		 * X-point's ( R_X, z_X ), the exterior modes. Each border j has a
+		 * column c_j = dR/ds_j, a row b_i = dC_i/dx and a corner
+		 * D_ij = dC_i/ds_j, and the system the solves below close is
+		 *
+		 *     [ J  C ] [ dx ]   [ b ]
+		 *     [ B  D ] [ ds ] = [ g ],
+		 *
+		 * by the Schur complement M = D - B J^{-1} C, factorised once here.
+		 */
+		LinearisedBorders &layout = held->layout;
+		int count = 0;
+		if ( normalisedSource )
+			layout.axis = count++;
+		if ( boundaryFluxIsUnknown )
+			layout.boundary = count++;
+		if ( xPointIsUnknown )
+		{
+			layout.xPoint = count;
+			count += 2;
+		}
+		int const nModes = exteriorCoupling ? exteriorCoupling->modeCount() : 0;
+		if ( nModes > 0 )
+		{
+			layout.firstMode = count;
+			count += nModes;
+		}
+		layout.count = count;
+		held->borders = count;
+		if ( count == 0 )
 			return;
+		std::size_t const nb = static_cast<std::size_t>( count );
+		held->columns.assign( nb, mfem::Vector() );
+		held->columnsSolved.assign( nb, mfem::Vector() );
+		held->rowIndex.assign( nb, std::vector<int>() );
+		held->rowWeight.assign( nb, std::vector<double>() );
+		held->corner.assign( nb*nb, 0.0 );
+		auto cornerAt = [ &held, nb ]( int i, int j ) -> double &
+		{
+			return held->corner[ static_cast<std::size_t>( i )*nb + static_cast<std::size_t>( j ) ];
+		};
 
-		/*
-		 * psi_ax's COLUMN, dR/ds, analytic -- the same element loop the
-		 * bordered Newton assembles it with (assembleNormalisationColumn()),
-		 * which reads no residual and so leaves the factorisation alone.
-		 */
-		held->borders = 1;
-		if ( !assembleNormalisationColumn( state, true, held->column ) )
-			throw std::logic_error( "meq::GradShafranovSolver::linearise: the source cannot give "
-			                        "dF/dpsi_ax analytically (normalisationDerivatives())" );
-		retainedBackSolve( held->column, held->columnSolved );
-
-		/*
-		 * AND ITS ROW, dC/dx of C = psi_ax - psi_h( x_ax ), exactly.
-		 */
 		int const potentialStart = blockOffsets[ 1 ];
 		mfem::GridFunction potentialField( potentialFes.get(), const_cast<mfem::real_t *>( state.GetData() ) + potentialStart );
-		if ( axisConstraintChoice == AxisConstraint::NodalMaximum )
-		{
-			double const span = normalisedSource->normalisation() - normalisedSource->boundaryNormalisation();
-			int best = 0;
-			for ( int j = 1; j < potentialField.Size(); ++j )
-				if ( span >= 0.0 ? potentialField( j ) > potentialField( best )
-				                 : potentialField( j ) < potentialField( best ) )
-					best = j;
-			held->rowIndex.push_back( potentialStart + best );
-			held->rowWeight.push_back( -1.0 );
-		}
-		else
-		{
-			bool const located = axisConstraintChoice == AxisConstraint::LocatedAxis;
-			double radius = located ? axisRValue : axisFluxR;
-			double z = located ? axisZValue : axisFluxZ;
-			int element = -1;
-			mfem::IntegrationPoint reference;
-			if ( !locateFieldPoint( radius, z, -1, element, reference ) )
-				throw std::runtime_error( "meq::GradShafranovSolver::linearise: the axis point is not "
-				                          "in the mesh" );
-			mfem::GridFunction fluxField( fluxFes.get(), const_cast<mfem::real_t *>( state.GetData() ) );
-			mfem::IsoparametricTransformation tr;
-			mfem::DenseMatrix gradient( 2, 2 );
-			mfem::Vector value( 2 ), point( 2 );
-			if ( located )
-			{
-				/*
-				 * x_ax RE-LOCATED AT THIS STATE, a zero of q_h by Newton on the
-				 * element's polynomial -- the solve's last location belongs to
-				 * its last iterate, not to the state handed here.
-				 */
-				for ( int iteration = 0; iteration < 30; ++iteration )
-				{
-					mesh.GetElementTransformation( element, &tr );
-					tr.SetIntPoint( &reference );
-					fluxField.GetVectorValue( tr, reference, value );
-					fluxField.GetVectorGradient( tr, gradient );
-					double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
-					if ( det == 0.0 )
-						break;
-					double const dr = ( gradient( 1, 1 )*value( 0 ) - gradient( 0, 1 )*value( 1 ) )/det;
-					double const dz = ( -gradient( 1, 0 )*value( 0 ) + gradient( 0, 0 )*value( 1 ) )/det;
-					radius -= dr;
-					z -= dz;
-					if ( !locateFieldPoint( radius, z, element, element, reference ) )
-						throw std::runtime_error( "meq::GradShafranovSolver::linearise: the magnetic "
-						                          "axis left the mesh while it was re-located" );
-					if ( std::hypot( dr, dz ) < 1.0e-14*( 1.0 + std::hypot( radius, z ) ) )
-						break;
-				}
-			}
-			mesh.GetElementTransformation( element, &tr );
-			tr.SetIntPoint( &reference );
+		mfem::GridFunction fluxField( fluxFes.get(), const_cast<mfem::real_t *>( state.GetData() ) );
 
-			mfem::FiniteElement const &el = *potentialFes->GetFE( element );
-			mfem::Vector shape( el.GetDof() );
-			el.CalcShape( reference, shape );
-			mfem::Array<int> dofs;
-			potentialFes->GetElementDofs( element, dofs );
-			for ( int j = 0; j < dofs.Size(); ++j )
-			{
-				held->rowIndex.push_back( potentialStart + dofs[ j ] );
-				held->rowWeight.push_back( -shape( j ) );
-			}
+		if ( layout.axis >= 0 )
+		{
+			/*
+			 * psi_ax's COLUMN, dR/ds, analytic -- the same element loop the
+			 * bordered Newton assembles it with (assembleNormalisationColumn()),
+			 * which reads no residual and so leaves the factorisation alone.
+			 */
+			std::size_t const at = static_cast<std::size_t>( layout.axis );
+			if ( !assembleNormalisationColumn( state, true, held->columns[ at ] ) )
+				throw std::logic_error( "meq::GradShafranovSolver::linearise: the source cannot give "
+				                        "dF/dpsi_ax analytically (normalisationDerivatives())" );
+			cornerAt( layout.axis, layout.axis ) = 1.0;
 
-			if ( located )
+			/*
+			 * AND ITS ROW, dC/dx of C = psi_ax - psi_h( x_ax ), exactly.
+			 */
+			std::vector<int> &rowIndex = held->rowIndex[ at ];
+			std::vector<double> &rowWeight = held->rowWeight[ at ];
+			if ( axisConstraintChoice == AxisConstraint::NodalMaximum )
 			{
-				/*
-				 * THE POSITION TERM: x_ax solves G( x_ax ) = 0, G the flux
-				 * block's field, so d x_ax/du = -( grad G )^{-1} dG/du, and
-				 * -grad psi_h . d x_ax/du is a^T dG/du with
-				 * a = ( grad G )^{-T} grad psi_h. dG_c/du on the flux dof
-				 * ( c, j ) is the scalar shape n_j at x_ax.
-				 */
-				fluxField.GetVectorGradient( tr, gradient );
-				mfem::Vector psiGradient( 2 );
-				potentialField.GetGradient( tr, psiGradient );
-				double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
-				if ( det != 0.0 )
+				double const span = normalisedSource->normalisation() - normalisedSource->boundaryNormalisation();
+				int best = 0;
+				for ( int j = 1; j < potentialField.Size(); ++j )
+					if ( span >= 0.0 ? potentialField( j ) > potentialField( best )
+					                 : potentialField( j ) < potentialField( best ) )
+						best = j;
+				rowIndex.push_back( potentialStart + best );
+				rowWeight.push_back( -1.0 );
+			}
+			else
+			{
+				bool const located = axisConstraintChoice == AxisConstraint::LocatedAxis;
+				double radius = located ? axisRValue : axisFluxR;
+				double z = located ? axisZValue : axisFluxZ;
+				int element = -1;
+				mfem::IntegrationPoint reference;
+				if ( !locateFieldPoint( radius, z, -1, element, reference ) )
+					throw std::runtime_error( "meq::GradShafranovSolver::linearise: the axis point is not "
+					                          "in the mesh" );
+				mfem::IsoparametricTransformation tr;
+				mfem::DenseMatrix gradient( 2, 2 );
+				mfem::Vector value( 2 ), point( 2 );
+				if ( located )
 				{
-					// a = G^{-T} g: solve G^T a = g.
-					double const a0 = ( gradient( 1, 1 )*psiGradient( 0 ) - gradient( 1, 0 )*psiGradient( 1 ) )/det;
-					double const a1 = ( -gradient( 0, 1 )*psiGradient( 0 ) + gradient( 0, 0 )*psiGradient( 1 ) )/det;
-					mfem::FiniteElement const &fluxEl = *fluxFes->GetFE( element );
-					mfem::Vector fluxShape( fluxEl.GetDof() );
-					fluxEl.CalcShape( reference, fluxShape );
-					mfem::Array<int> vdofs;
-					fluxFes->GetElementVDofs( element, vdofs );
-					int const n = fluxEl.GetDof();
-					for ( int j = 0; j < n; ++j )
+					/*
+					 * x_ax RE-LOCATED AT THIS STATE, a zero of q_h by Newton on the
+					 * element's polynomial -- the solve's last location belongs to
+					 * its last iterate, not to the state handed here.
+					 */
+					for ( int iteration = 0; iteration < 30; ++iteration )
 					{
-						held->rowIndex.push_back( vdofs[ j ] );
-						held->rowWeight.push_back( a0*fluxShape( j ) );
-						held->rowIndex.push_back( vdofs[ n + j ] );
-						held->rowWeight.push_back( a1*fluxShape( j ) );
+						mesh.GetElementTransformation( element, &tr );
+						tr.SetIntPoint( &reference );
+						fluxField.GetVectorValue( tr, reference, value );
+						fluxField.GetVectorGradient( tr, gradient );
+						double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
+						if ( det == 0.0 )
+							break;
+						double const dr = ( gradient( 1, 1 )*value( 0 ) - gradient( 0, 1 )*value( 1 ) )/det;
+						double const dz = ( -gradient( 1, 0 )*value( 0 ) + gradient( 0, 0 )*value( 1 ) )/det;
+						radius -= dr;
+						z -= dz;
+						if ( !locateFieldPoint( radius, z, element, element, reference ) )
+							throw std::runtime_error( "meq::GradShafranovSolver::linearise: the magnetic "
+							                          "axis left the mesh while it was re-located" );
+						if ( std::hypot( dr, dz ) < 1.0e-14*( 1.0 + std::hypot( radius, z ) ) )
+							break;
+					}
+				}
+				mesh.GetElementTransformation( element, &tr );
+				tr.SetIntPoint( &reference );
+
+				mfem::FiniteElement const &el = *potentialFes->GetFE( element );
+				mfem::Vector shape( el.GetDof() );
+				el.CalcShape( reference, shape );
+				mfem::Array<int> dofs;
+				potentialFes->GetElementDofs( element, dofs );
+				for ( int j = 0; j < dofs.Size(); ++j )
+				{
+					rowIndex.push_back( potentialStart + dofs[ j ] );
+					rowWeight.push_back( -shape( j ) );
+				}
+
+				if ( located )
+				{
+					/*
+					 * THE POSITION TERM: x_ax solves G( x_ax ) = 0, G the flux
+					 * block's field, so d x_ax/du = -( grad G )^{-1} dG/du, and
+					 * -grad psi_h . d x_ax/du is a^T dG/du with
+					 * a = ( grad G )^{-T} grad psi_h. dG_c/du on the flux dof
+					 * ( c, j ) is the scalar shape n_j at x_ax.
+					 */
+					fluxField.GetVectorGradient( tr, gradient );
+					mfem::Vector psiGradient( 2 );
+					potentialField.GetGradient( tr, psiGradient );
+					double const det = gradient( 0, 0 )*gradient( 1, 1 ) - gradient( 0, 1 )*gradient( 1, 0 );
+					if ( det != 0.0 )
+					{
+						// a = G^{-T} g: solve G^T a = g.
+						double const a0 = ( gradient( 1, 1 )*psiGradient( 0 ) - gradient( 1, 0 )*psiGradient( 1 ) )/det;
+						double const a1 = ( -gradient( 0, 1 )*psiGradient( 0 ) + gradient( 0, 0 )*psiGradient( 1 ) )/det;
+						mfem::FiniteElement const &fluxEl = *fluxFes->GetFE( element );
+						mfem::Vector fluxShape( fluxEl.GetDof() );
+						fluxEl.CalcShape( reference, fluxShape );
+						mfem::Array<int> vdofs;
+						fluxFes->GetElementVDofs( element, vdofs );
+						int const n = fluxEl.GetDof();
+						for ( int j = 0; j < n; ++j )
+						{
+							rowIndex.push_back( vdofs[ j ] );
+							rowWeight.push_back( a0*fluxShape( j ) );
+							rowIndex.push_back( vdofs[ n + j ] );
+							rowWeight.push_back( a1*fluxShape( j ) );
+						}
 					}
 				}
 			}
 		}
 
-		double rowDotColumn = 0.0;
-		for ( std::size_t k = 0; k < held->rowIndex.size(); ++k )
-			rowDotColumn += held->rowWeight[ k ]*held->columnSolved( held->rowIndex[ k ] );
-		held->corner = 1.0;
-		held->schur = held->corner - rowDotColumn;
+		if ( layout.boundary >= 0 )
+		{
+			/*
+			 * psi_bnd's COLUMN, dR/dpsi_bnd, by the same element loop as
+			 * psi_ax's, and its row, dC/dx of C = psi_bnd - psi_h( x_b ) with
+			 * x_b whatever the solve pins psi_bnd at: the nearest dof, the
+			 * limiter point, the located contact on the limiter curve, or the
+			 * X-point. The corner is exactly 1.
+			 *
+			 * THE CONTACT'S POSITION CARRIES NO TERM, and that is exact to
+			 * first order: x_b maximises psi_h along the limiter curve, so
+			 * psi_h's derivative along the curve vanishes there and moving the
+			 * contact moves C at second order (the envelope theorem). The
+			 * bordered Newton's row is the same shape functions, frozen.
+			 */
+			std::size_t const at = static_cast<std::size_t>( layout.boundary );
+			if ( !assembleNormalisationColumn( state, false, held->columns[ at ] ) )
+				throw std::logic_error( "meq::GradShafranovSolver::linearise: the source cannot give "
+				                        "dF/dpsi_bnd analytically (normalisationDerivatives())" );
+			cornerAt( layout.boundary, layout.boundary ) = 1.0;
+			std::vector<int> &rowIndex = held->rowIndex[ at ];
+			std::vector<double> &rowWeight = held->rowWeight[ at ];
+			int element = -1;
+			mfem::Vector shape;
+			mfem::Array<int> dofs;
+			if ( xPointIsUnknown )
+			{
+				/*
+				 * THE X-POINT, RE-LOCATED AT THIS STATE as the axis is: a zero
+				 * of the total q, q_h plus the conductors', by Newton on the
+				 * element's polynomial from where the solve left ( R_X, z_X ).
+				 * Its rows are q( x_X ) = 0 on the flux dofs, its columns zero,
+				 * its corner grad q there and psi_bnd's row's -grad psi
+				 * (the bordered Newton's XP-3 block, refreshXPoint()).
+				 */
+				double radius = xPointRValue, z = xPointZValue;
+				mfem::IntegrationPoint reference;
+				mfem::IsoparametricTransformation tr;
+				double flux[ 2 ] = { 0.0, 0.0 };
+				double jacobian[ 2 ][ 2 ] = { { 0.0, 0.0 }, { 0.0, 0.0 } };
+				double potentialGradient[ 2 ] = { 0.0, 0.0 };
+				auto evaluate = [ & ]()
+				{
+					if ( !locateFieldPoint( radius, z, element, element, reference ) )
+						throw std::runtime_error( "meq::GradShafranovSolver::linearise: the X-point "
+						                          "is not in the mesh" );
+					mesh.GetElementTransformation( element, &tr );
+					tr.SetIntPoint( &reference );
+					mfem::Vector value( 2 ), psiGradient( 2 );
+					mfem::DenseMatrix gradient( 2, 2 );
+					// The flux block holds -q.
+					fluxField.GetVectorValue( tr, reference, value );
+					fluxField.GetVectorGradient( tr, gradient );
+					potentialField.GetGradient( tr, psiGradient );
+					for ( int i = 0; i < 2; ++i )
+					{
+						flux[ i ] = -value( i );
+						potentialGradient[ i ] = psiGradient( i );
+						for ( int j = 0; j < 2; ++j )
+							jacobian[ i ][ j ] = -gradient( i, j );
+					}
+					if ( conductorFieldSet && radius > 0.0 )
+					{
+						double qR = 0.0, qZ = 0.0, gradR = 0.0, gradZ = 0.0;
+						conductorFieldSet->flux( radius, z, qR, qZ );
+						flux[ 0 ] += qR;
+						flux[ 1 ] += qZ;
+						conductorFieldSet->gradPsi( radius, z, gradR, gradZ );
+						potentialGradient[ 0 ] += gradR;
+						potentialGradient[ 1 ] += gradZ;
+#ifdef MFEM_USE_SINGLE
+						constexpr double relativeStep = 5.0e-3;
+#else
+						constexpr double relativeStep = 1.0e-6;
+#endif
+						double const step = relativeStep*std::max( 1.0, std::abs( radius ) );
+						if ( radius - step > 0.0 )
+						{
+							double aR = 0.0, aZ = 0.0, bR = 0.0, bZ = 0.0;
+							conductorFieldSet->flux( radius + step, z, aR, aZ );
+							conductorFieldSet->flux( radius - step, z, bR, bZ );
+							jacobian[ 0 ][ 0 ] += ( aR - bR )/( 2.0*step );
+							jacobian[ 1 ][ 0 ] += ( aZ - bZ )/( 2.0*step );
+							conductorFieldSet->flux( radius, z + step, aR, aZ );
+							conductorFieldSet->flux( radius, z - step, bR, bZ );
+							jacobian[ 0 ][ 1 ] += ( aR - bR )/( 2.0*step );
+							jacobian[ 1 ][ 1 ] += ( aZ - bZ )/( 2.0*step );
+						}
+					}
+				};
+				for ( int iteration = 0; iteration < 30; ++iteration )
+				{
+					evaluate();
+					double const det = jacobian[ 0 ][ 0 ]*jacobian[ 1 ][ 1 ] - jacobian[ 0 ][ 1 ]*jacobian[ 1 ][ 0 ];
+					if ( det == 0.0 )
+						break;
+					double const dr = ( jacobian[ 1 ][ 1 ]*flux[ 0 ] - jacobian[ 0 ][ 1 ]*flux[ 1 ] )/det;
+					double const dz = ( -jacobian[ 1 ][ 0 ]*flux[ 0 ] + jacobian[ 0 ][ 0 ]*flux[ 1 ] )/det;
+					radius -= dr;
+					z -= dz;
+					if ( std::hypot( dr, dz ) < 1.0e-14*( 1.0 + std::hypot( radius, z ) ) )
+						break;
+				}
+				evaluate();
+				layout.xPointR = radius;
+				layout.xPointZ = z;
+
+				mfem::FiniteElement const &potentialFe = *potentialFes->GetFE( element );
+				shape.SetSize( potentialFe.GetDof() );
+				potentialFe.CalcShape( reference, shape );
+				potentialFes->GetElementDofs( element, dofs );
+
+				mfem::FiniteElement const &fluxFe = *fluxFes->GetFE( element );
+				mfem::Vector fluxShape( fluxFe.GetDof() );
+				fluxFe.CalcShape( reference, fluxShape );
+				mfem::Array<int> vdofs;
+				fluxFes->GetElementVDofs( element, vdofs );
+				int const n = fluxFe.GetDof();
+				for ( int c = 0; c < 2; ++c )
+				{
+					std::size_t const row = static_cast<std::size_t>( layout.xPoint + c );
+					for ( int j = 0; j < n; ++j )
+					{
+						held->rowIndex[ row ].push_back( vdofs[ c*n + j ] );
+						held->rowWeight[ row ].push_back( -fluxShape( j ) );
+					}
+					for ( int d = 0; d < 2; ++d )
+						cornerAt( layout.xPoint + c, layout.xPoint + d ) = jacobian[ c ][ d ];
+					cornerAt( layout.boundary, layout.xPoint + c ) = -potentialGradient[ c ];
+				}
+			}
+			else if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
+			{
+				rowIndex.push_back( potentialStart + nearestPotentialDof( boundaryFluxR, boundaryFluxZ ) );
+				rowWeight.push_back( -1.0 );
+			}
+			else if ( limiterConstraintChoice == LimiterConstraint::ExactPoint )
+				locatePotentialPoint( boundaryFluxR, boundaryFluxZ, element, shape, dofs );
+			else
+			{
+				if ( limiterFaces.empty() )
+					collectLimiterFaces();
+				double radius = 0.0, z = 0.0;
+				locateLimiterContact( state, element, shape, dofs, radius, z );
+				if ( element < 0 )
+					throw std::runtime_error( "meq::GradShafranovSolver::linearise: no contact on the "
+					                          "limiter curve at this state" );
+			}
+			for ( int j = 0; j < dofs.Size() && j < shape.Size(); ++j )
+			{
+				rowIndex.push_back( potentialStart + dofs[ j ] );
+				rowWeight.push_back( -shape( j ) );
+			}
+		}
+
+		if ( nModes > 0 )
+		{
+			/*
+			 * THE EXTERIOR MODES: T_m = row_m . x + blockEntry( m ) a_m + data,
+			 * affine in both, so the rows (exteriorTransmissionRows()), the
+			 * columns (assembleExteriorColumns(), the bordered Newton's cache
+			 * when it holds this mesh's) and the diagonal corner are the
+			 * bordered Newton's, exactly.
+			 */
+			long const sequence = fluxFes->GetMesh()->GetSequence();
+			bool const cached = exteriorColumnCacheCoupling == exteriorCoupling
+			                    && exteriorColumnCacheSequence == sequence
+			                    && exteriorColumnCacheFaceOrder == extensionFaceOrder
+			                    && exteriorColumnCache.size() == static_cast<std::size_t>( nModes )
+			                    && exteriorColumnCache.front().Size() == state.Size();
+			std::vector<mfem::Vector> assembled;
+			if ( !cached && !assembleExteriorColumns( assembled ) )
+				throw std::logic_error( "meq::GradShafranovSolver::linearise: the exterior columns "
+				                        "have no closed form here" );
+			std::vector<mfem::Vector> const &exteriorColumns = cached ? exteriorColumnCache : assembled;
+			std::vector<int> support;
+			std::vector<mfem::Vector> const rows = exteriorTransmissionRows( *exteriorCoupling, &support );
+			for ( int mode = 0; mode < nModes; ++mode )
+			{
+				int const i = layout.firstMode + mode;
+				std::size_t const at = static_cast<std::size_t>( i );
+				mfem::Vector const &column = exteriorColumns[ static_cast<std::size_t>( mode ) ];
+				column.HostRead();
+				held->columns[ at ].SetSize( column.Size() );
+				held->columns[ at ].UseDevice( false );
+				held->columns[ at ] = column;
+				mfem::Vector const &row = rows[ static_cast<std::size_t>( mode ) ];
+				row.HostRead();
+				for ( int k : support )
+				{
+					held->rowIndex[ at ].push_back( k );
+					held->rowWeight[ at ].push_back( row( k ) );
+				}
+				cornerAt( i, i ) = exteriorCoupling->blockEntry( ExteriorDtN::firstMode() + mode );
+			}
+		}
+
+		/*
+		 * THE BACK-SOLVES AND THE SCHUR COMPLEMENT, M = D - B J^{-1} C,
+		 * factorised by partial pivoting. With psi_ax alone this is the
+		 * scalar d - r J^{-1} c the one-border linearisation divided by.
+		 */
+		for ( std::size_t j = 0; j < nb; ++j )
+			if ( held->columns[ j ].Size() > 0 )
+				retainedBackSolve( held->columns[ j ], held->columnsSolved[ j ] );
+		held->schur = held->corner;
+		for ( std::size_t i = 0; i < nb; ++i )
+			for ( std::size_t j = 0; j < nb; ++j )
+				if ( held->columnsSolved[ j ].Size() > 0 )
+					held->schur[ i*nb + j ] -= held->rowDot( i, held->columnsSolved[ j ] );
+		held->pivot.assign( nb, 0 );
+		for ( std::size_t k = 0; k < nb; ++k )
+		{
+			std::size_t best = k;
+			for ( std::size_t i = k + 1; i < nb; ++i )
+				if ( std::abs( held->schur[ i*nb + k ] ) > std::abs( held->schur[ best*nb + k ] ) )
+					best = i;
+			held->pivot[ k ] = static_cast<int>( best );
+			if ( best != k )
+				for ( std::size_t j = 0; j < nb; ++j )
+					std::swap( held->schur[ k*nb + j ], held->schur[ best*nb + j ] );
+			double const diagonal = held->schur[ k*nb + k ];
+			if ( diagonal == 0.0 )
+				throw std::runtime_error( "meq::GradShafranovSolver::linearise: the border's Schur "
+				                          "complement is singular" );
+			for ( std::size_t i = k + 1; i < nb; ++i )
+			{
+				double const factor = held->schur[ i*nb + k ]/diagonal;
+				held->schur[ i*nb + k ] = factor;
+				for ( std::size_t j = k + 1; j < nb; ++j )
+					held->schur[ i*nb + j ] -= factor*held->schur[ k*nb + j ];
+			}
+		}
 	}
 
 	void GradShafranovSolver::applyRetainedJacobian( mfem::Vector const &t, mfem::Vector &out ) const
@@ -12063,15 +12386,17 @@ namespace
 		if ( b.Size() != retained->state.Size() )
 			throw std::invalid_argument( "meq::GradShafranovSolver::solveLinearised: b is not state-sized" );
 		retainedBackSolve( b, dx );
-		ds.assign( static_cast<std::size_t>( retained->borders ), 0.0 );
-		if ( retained->borders == 0 )
+		std::size_t const nb = static_cast<std::size_t>( retained->borders );
+		ds.assign( nb, 0.0 );
+		if ( nb == 0 )
 			return;
-		double rowDotY = 0.0;
-		for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
-			rowDotY += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
-		double const gValue = g.empty() ? 0.0 : g[ 0 ];
-		ds[ 0 ] = ( gValue - rowDotY )/retained->schur;
-		dx.Add( -ds[ 0 ], retained->columnSolved );
+		// f_i = g_i - b_i . y, M ds = f, dx = y - sum_j ds_j J^{-1} c_j.
+		for ( std::size_t i = 0; i < nb; ++i )
+			ds[ i ] = ( i < g.size() ? g[ i ] : 0.0 ) - retained->rowDot( i, dx );
+		retained->schurSolve( ds );
+		for ( std::size_t j = 0; j < nb; ++j )
+			if ( retained->columnsSolved[ j ].Size() > 0 )
+				dx.Add( -ds[ j ], retained->columnsSolved[ j ] );
 	}
 
 	void GradShafranovSolver::solveLinearised( mfem::Vector const &b, std::vector<double> const &g,
@@ -12100,13 +12425,15 @@ namespace
 			for ( int i = 0; i < essential.Size(); ++i )
 				r( traceStart + essential[ i ] ) = 0.0;
 			rg.assign( ds.size(), 0.0 );
-			if ( retained->borders > 0 )
+			std::size_t const nb = ds.size();
+			for ( std::size_t j = 0; j < nb; ++j )
+				if ( retained->columns[ j ].Size() > 0 )
+					r.Add( -ds[ j ], retained->columns[ j ] );
+			for ( std::size_t i = 0; i < nb; ++i )
 			{
-				r.Add( -ds[ 0 ], retained->column );
-				double rowDotX = 0.0;
-				for ( std::size_t k = 0; k < retained->rowIndex.size(); ++k )
-					rowDotX += retained->rowWeight[ k ]*dx( retained->rowIndex[ k ] );
-				rg[ 0 ] = ( g.empty() ? 0.0 : g[ 0 ] ) - rowDotX - retained->corner*ds[ 0 ];
+				rg[ i ] = ( i < g.size() ? g[ i ] : 0.0 ) - retained->rowDot( i, dx );
+				for ( std::size_t j = 0; j < nb; ++j )
+					rg[ i ] -= retained->corner[ i*nb + j ]*ds[ j ];
 			}
 			solveLinearisedOnce( r, rg, correction, cds );
 			double size = correction.Normlinf();
